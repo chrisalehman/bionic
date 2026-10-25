@@ -52,6 +52,12 @@
 #                   (this run states none, so the Known limits arms hold at zero): every deferred sentence stands under
 #                   Known limits and the check passes; the same entry with its Known limits removed fails one line for
 #                   each deferred sentence, and passes when there are none; one planted deferral keeps the omission arm live.
+#   §REL-1.28.0     the 1.28.0 entry, beside the 1.27.0 section: the newest heading reads 1.28.0 and the version pair
+#                   agrees, the entry is dated, names its two ADRs, its Migration paragraph names every row that changed what
+#                   a script may meet, and plugin.json reads 1.28.0, each with a doctored copy. The release check is run on a
+#                   repository holding the real entry and wave 45's real deferred lines: every deferred sentence stands
+#                   under Known limits and the check passes; the same entry with its Known limits removed fails one line
+#                   for each; one planted deferral keeps the omission arm live.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -797,13 +803,12 @@ REL_PLAN="${BIONIC_SCRIPTS_DIR}/.bionic/docs/plans/epic-23-bionic-tech-debt/wave
 # The rows whose Migration bullets name what a script of yours may meet at 1.27.0
 REL_MIG_ROWS="T1 T2 T3 T4 T5 T13 T14"
 
-expect_eq "(n1) the version pair reads the newest heading" "" "$(pair_check "$CL" "$PLUGIN_JSON")"
-expect_eq "(n1) …which is 1.27.0" "1.27.0" "$(/usr/bin/grep -m 1 '^## ' "$CL" | sed -n 's/^## \([0-9.]*\) .*/\1/p')"
-expect_eq "(n2) the entry keeps every rule" "" "$(rel_check "$CL" "$PLUGIN_JSON" 1.27.0 ADR-071 "$REL_MIG_ROWS")"
+printf '{\n  "name": "bionic",\n  "version": "1.27.0"\n}\n' > "$TMP/plugin.1270.json"
+expect_eq "(n2) the entry keeps every rule" "" "$(rel_check "$CL" "$TMP/plugin.1270.json" 1.27.0 ADR-071 "$REL_MIG_ROWS")"
 doctor r27_nomig awk '/^\*\*Migration\.\*\*/ { m = 1 } m && /^### / { m = 0 } m { gsub(/T14/, "Tnn") } { print }'
-expect_contains "(n2) a Migration paragraph that does not name T14: red" "rel: Migration does not name T14" "$(rel_check "$TMP/doctored.r27_nomig" "$PLUGIN_JSON" 1.27.0 ADR-071 "$REL_MIG_ROWS")"
+expect_contains "(n2) a Migration paragraph that does not name T14: red" "rel: Migration does not name T14" "$(rel_check "$TMP/doctored.r27_nomig" "$TMP/plugin.1270.json" 1.27.0 ADR-071 "$REL_MIG_ROWS")"
 doctor r27_noadr sed 's/ADR-071/the fourth record/g'
-expect_contains "(n2) an entry that does not name ADR-071: red" "rel: the entry does not name ADR-071" "$(rel_check "$TMP/doctored.r27_noadr" "$PLUGIN_JSON" 1.27.0 ADR-071 "$REL_MIG_ROWS")"
+expect_contains "(n2) an entry that does not name ADR-071: red" "rel: the entry does not name ADR-071" "$(rel_check "$TMP/doctored.r27_noadr" "$TMP/plugin.1270.json" 1.27.0 ADR-071 "$REL_MIG_ROWS")"
 expect_contains "(n2) a manifest that reads another version: red" "rel: plugin.json does not read 1.27.0" "$(rel_check "$CL" "$TMP/plugin.old.json" 1.27.0 ADR-071 "$REL_MIG_ROWS")"
 
 if [ -r "$REL_PLAN" ]; then
@@ -835,6 +840,60 @@ if [ -r "$REL_PLAN" ]; then
   fi
   # One planted deferral keeps the omission arm live whatever this run states: the same entry, no Known limits.
   R="$TMP/rel-planted"; rel_world "$R" "$TMP/rel.nolimits" 1.27.0 "$REL_PLAN" 'deferred: record/w/planted.md#1 S3 on "a planted title" stated="The planted limit is stated and the entry omits it."'
+  run_check "$R"
+  expect_status "(n5) one deferred sentence planted in the run's plan, the entry without Known limits: the check fails" 1 "$RC"
+  expect_contains "(n5) …naming the planted finding" "omit the deferred sentence of record/w/planted.md#1" "$OUT"
+fi
+
+section "§REL-1.28.0 — the 1.28.0 entry names its rows and its ADRs and carries the run's deferred sentences"
+
+REL_PLAN="${BIONIC_SCRIPTS_DIR}/.bionic/docs/plans/epic-23-bionic-tech-debt/wave-45-whole-run.plan.md"
+# The rows whose Migration bullets name what a script of yours may meet at 1.28.0
+REL_MIG_ROWS="T1 T2 T3 T5 T6 T7 T8 T9 T10 T11 T12 T13 T14 T15 T16 T17 T18 T24 T25 T28 T31 T32 T33"
+# The two ADRs this release records
+REL_ADR_A="ADR-072"
+REL_ADR_B="ADR-073"
+
+expect_eq "(n1) the version pair reads the newest heading" "" "$(pair_check "$CL" "$PLUGIN_JSON")"
+expect_eq "(n1) …which is 1.28.0" "1.28.0" "$(/usr/bin/grep -m 1 '^## ' "$CL" | sed -n 's/^## \([0-9.]*\) .*/\1/p')"
+expect_eq "(n2) the entry keeps every rule" "" "$(rel_check "$CL" "$PLUGIN_JSON" 1.28.0 "$REL_ADR_A" "$REL_MIG_ROWS")$(rel_check "$CL" "$PLUGIN_JSON" 1.28.0 "$REL_ADR_B" "$REL_MIG_ROWS")"
+doctor r28_nomig awk '/^\*\*Migration\.\*\*/ { m = 1 } m && /^### / { m = 0 } m { gsub(/T33/, "Tnn") } { print }'
+expect_contains "(n2) a Migration paragraph that does not name T33: red" "rel: Migration does not name T33" "$(rel_check "$TMP/doctored.r28_nomig" "$PLUGIN_JSON" 1.28.0 "$REL_ADR_A" "$REL_MIG_ROWS")"
+doctor r28_noadr sed "s/$REL_ADR_A/the first record/g"
+expect_contains "(n2) an entry that does not name $REL_ADR_A: red" "rel: the entry does not name $REL_ADR_A" "$(rel_check "$TMP/doctored.r28_noadr" "$PLUGIN_JSON" 1.28.0 "$REL_ADR_A" "$REL_MIG_ROWS")"
+doctor r28_noadr2 sed "s/$REL_ADR_B/the second record/g"
+expect_contains "(n2) an entry that does not name $REL_ADR_B: red" "rel: the entry does not name $REL_ADR_B" "$(rel_check "$TMP/doctored.r28_noadr2" "$PLUGIN_JSON" 1.28.0 "$REL_ADR_B" "$REL_MIG_ROWS")"
+expect_contains "(n2) a manifest that reads another version: red" "rel: plugin.json does not read 1.28.0" "$(rel_check "$CL" "$TMP/plugin.1270.json" 1.28.0 "$REL_ADR_A" "$REL_MIG_ROWS")"
+
+if [ -r "$REL_PLAN" ]; then
+  REL_N="$(plan_deferred "$REL_PLAN" | /usr/bin/grep -c .)"
+  # A plan that states no deferral holds the arms below at zero; one that gains a deferral turns them to the
+  # strict form (the check fails without the Known limits, one line each) with no edit here.
+  if [ "$REL_N" -gt 0 ]; then REL_WANT=1; else REL_WANT=0; fi
+  expect_true "(n0) setup: the count of the run's deferred sentences is read" [ "$REL_N" -ge 0 ]
+  cl_block "$CL" 1.28.0 | awk '/^### / { skip = ($0 == "### The landing numbers") } !skip' > "$TMP/rel28.entry"
+  cl_block "$CL" 1.28.0 | awk '/^### / { skip = ($0 == "### The landing numbers" || $0 == "### Known limits") } !skip' > "$TMP/rel28.nolimits"
+  expect_nonempty "(n0) setup: the entry's Known limits are cut out of a block that exists" "$(cat "$TMP/rel28.nolimits")"
+  R="$TMP/rel28-real"; rel_world "$R" "$TMP/rel28.entry" 1.28.0 "$REL_PLAN"
+  run_check "$R"
+  expect_status "(n3) the real entry, every deferred sentence of the run's plan under Known limits: the check passes" 0 "$RC"
+  if [ "$REL_N" -gt 0 ]; then
+    expect_contains "(n3) …carrying each deferred sentence" "known-limits: 1.28.0 carries the $REL_N deferred sentences" "$OUT"
+  else
+    expect_contains "(n3) …saying the plan states none" "known-limits: 1.28.0 — " "$OUT"
+    expect_contains "(n3) …in those words" "states no deferred sentence" "$OUT"
+  fi
+  R="$TMP/rel28-nolimits"; rel_world "$R" "$TMP/rel28.nolimits" 1.28.0 "$REL_PLAN"
+  run_check "$R"
+  expect_status "(n4) the same entry with its Known limits removed: the check fails only when a sentence is deferred" "$REL_WANT" "$RC"
+  if [ "$REL_N" -gt 0 ]; then
+    expect_eq "(n4) …one line for each deferred sentence" "$REL_N" "$(lines_of "$OUT")"
+    expect_contains "(n4) …naming a finding" "omit the deferred sentence of record/" "$OUT"
+  else
+    expect_contains "(n4) …the plan states none, so none is omitted" "states no deferred sentence" "$OUT"
+  fi
+  # One planted deferral keeps the omission arm live whatever this run states: the same entry, no Known limits.
+  R="$TMP/rel28-planted"; rel_world "$R" "$TMP/rel28.nolimits" 1.28.0 "$REL_PLAN" 'deferred: record/w/planted.md#1 S3 on "a planted title" stated="The planted limit is stated and the entry omits it."'
   run_check "$R"
   expect_status "(n5) one deferred sentence planted in the run's plan, the entry without Known limits: the check fails" 1 "$RC"
   expect_contains "(n5) …naming the planted finding" "omit the deferred sentence of record/w/planted.md#1" "$OUT"

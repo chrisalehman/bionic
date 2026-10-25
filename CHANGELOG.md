@@ -8,6 +8,296 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.28.0 — 2026-10-25
+
+This is the whole run release. The run closes by reading its own measure: it was chartered as the hand-holds measure
+because the 1.26.0 close read `total=2` over a window that ended at the release approval card and took eight hand acts the
+measure never saw or counted (`ideas/bionic-1.28.0-charter.md`). The charter's five objectives are the run's themes:
+every act has a door, one fact has one reading, a landing settles what it proves, the run belongs to the branch and not
+the conversation, and the yardstick sees the whole run. Two rulings outlive it as decisions. A landing computes
+everything it proves and writes it in one act before it publishes, so nothing is settled by hand afterwards, and the
+separate verbs stay as a person's corrections that refuse what the landing settled (D2, ADR-072). Engagement guards a run
+that is still moving, and a delivered run takes its merge record and its continuation marks from any session that names
+it by `--plan` (D5, ADR-073). Around them the tree carries its own record of the run it belongs to (D3), the hand-holds
+window ends at the delivered time and close-out reads it last (D8), every hermetic pin runs over fixtures the verb
+produced and one live row is the close's own reading (D4, D9), and the cards print each requirement's, decision's and
+task's own sentence (D1, D27, D28). The close's value is read by T23 after this entry and is not stated here. This is a
+minor release by the policy above: the settlement, the tree's record, the ruling verb, the cards' own sentences and the
+close's measure are new capability. `canonical_sdlc_version` stays 14.
+
+**Migration.** Rows that changed what a script of yours may meet:
+- T1: the decision skill's reply line ends `· to see <the thing>: <dig-in command>`, the command being `git show <sha>`,
+  `show task <n>` or `show finding <record>#<n>`, and nothing follows it. A brief about no specific thing keeps `Reply 1 or
+  2`.
+- T2: `card.sh step1` prints each requirement's opening paragraph under its row, from the title column, folded at
+  `BIONIC_LINE_WIDTH`. A requirement with no such sentence, or one carrying a backtick, is refused with the title
+  refusals: `REFUSED — requirement <id>: no sentence <where it belongs>` or `… the sentence carries a backtick: <sentence>`,
+  exit 1, empty stdout. The views are refused with the card.
+- T3: `card.sh step2` does the same for a decision's first sentence after its title. The Eval design section refuses, with
+  exit 64 and empty stdout, an Approach cell over 60 columns, one carrying a backtick, and a second approach on one
+  requirement, each naming `Eval design row <REQ> <AC>`. `explain` of a decision prints no detail line when its whole
+  text is its sentence.
+- T24: `card.sh step3` prints each Tasks cell's second sentence under its row and refuses a row with none or with a
+  backtick, naming the row. `card.sh task-cell <id> <cell>…` runs the same check, and `task-add` and `task-set` call it
+  and leave the plan byte for byte unchanged when it refuses.
+- T5: the hand-holds ends line reads `until <minute> (delivered:)`, or `until now: the plan names no delivered: time`. A
+  minute-form end reaches through its :59. `hand_holds_ends` is deleted for `hand_holds_window`, a waiver block heading
+  `AC-<id>: <text>` counts, and a `moved: … to=fixed` line is placed against the first published landing of its row.
+  close-out reads the line after Step 9 and replaces the continuation line it wrote earlier.
+- T6: a landing writes, before it publishes, a `moved: <rec>#<n> to=fixed row=<row> by=landing at=<at> landing=<commit>`
+  line for every finding it settles and the status `discharged` for each criterion whose evidence the same write filled,
+  and appends `ev=settled|row|commit|findings|cells` to the landing record. `finding-move` and `matrix-set status=`
+  refuse a finding or cell a landing settled, naming it. A carry to a landed row is written as that row's fix and closes
+  at once, and a carry to a dropped row closes its ask at once. `land --by-hand` writes its verdicts before the publish.
+- T7: at single rigor `proof-add review <record> --question evidence --reader <critic>` reads the record's first table
+  with columns `AC` and `verdict` and one flush-left `verdict: <VERDICT> — <coverage finding>` line. It writes each
+  auditor cell and the head's `auditor-wave:` line in the same write, and refuses with the plan unchanged a record with
+  no table, an empty verdict, a criterion twice, no `verdict:` line or two, a criterion the matrix lacks, or a `|` in a
+  verdict. `proof-add regression` writes `stack-health: <green|red> head=<40-hex> pass=<n> total=<m>[ owed=<suites>]
+  evidence=<logs>`. `discharge` refuses at single rigor and names the review verb.
+- T8: `decisions rule D<n> '<reply>'` writes `## Δ<k> — D<n> ruled "<reply>" (<who> <date> <clock>): <title>` to the design
+  ledger and closes `decide:D<n>` in one call. `approve D<n>` and the release card's reply reach the same function, the
+  parser reads `D<n> settled by <what> (<who> <date> <clock>): "<reply>"`, and `decisions` is on the main-thread verb list,
+  read-only forms included.
+- T9: `current 7` writes `adrs:` into the plan's frontmatter, `adrs: none` when Step 7 says n/a. `approve plan '<reply>'`
+  writes `approved-by: <name> <ISO-UTC> "<reply>"` under `## SDLC State`, and a second call is refused as recorded once. A
+  delivered plan named by `--plan` takes `step-field 8` and `continuation-fill` from any session, `--plan` anywhere after
+  the step number. A live plan so named, and every other step, still print NOT-ENGAGED from an unengaged session.
+- T10: `known-limits-part <row>` is a new verb, and it refuses an unstated deferral naming `finding-stated`. `matrix-render`
+  adds a row for each criterion the table lacks, in Eval design order, and maps an Eval type in words to a tier: static,
+  unit, hermetic, live and human as T0 to T4. An unmapped type exits 5 naming `<id> (eval type: <words>)`, and exit 4 now
+  means a matrix with no `| AC |` header.
+- T11: a fixed review reads `✅ <q> — <role> at <h8>, covered at this head by T4 at <c8>` on the release card, and the
+  sitrep's `reviews:` count reads the same function. `deliver` lands a live review row whose questions are covered at the
+  head and otherwise refuses naming each `<question> <state>`.
+- T12: a closed ask's register line keeps `answer=`, `answered=` and `event=`, so a waiver answered no reads `event review
+  <q> re-run` and never waits on you. `close.waits-on-you` and the held words count only asks whose `waits` is `user`, and
+  the sitrep skill's `close:` row names only those.
+- T13: `reviews-part` joins the main-thread verb list. It is admitted to the writer whose roster `row=` is the operand when
+  that row is `integrate`, alone in one call, and refused to any other writer with the row named. Step 8 and close-out
+  record the order reviews part, push, `gh pr create`, and a merge-scale run whose part close-out rendered holds with rc 2
+  until the published tip is merged.
+- T14: `spawn-worktree.sh create` writes `tree/v1|path=|plan=|row=|worker=|spawned-by=|at=` to `<tree git-dir>/bionic-tree`,
+  and `ready` and `land --by-hand` read it before the binding. They refuse `plan-mismatch tree-plan= session-plan=`,
+  `plan-closed plan=` and `no-bound-session`. `stopped` finds a tree by its row, and its not-found sentence reads `its tree
+  is not found: <path> …`.
+- T15: `arm` at a scale with no Patrol writes no stamp and prints `poker: no Patrol to arm — a task-scale run has none; no
+  stamp was written`, and session start prints no arm line there. The tick prints `poker: IDLE <k> of <cap> writer slots —
+  FILL names <ids>, every row that is ready` after a FILL that leaves capped slots empty. `fill_cap` reads a person's
+  `writers=` first, then the scale's.
+- T16: a second `approve <name>` at a new head writes a second line beside the first, and one at the same head or with no
+  working head is refused `recorded once at a head`. The release card asks the merge approval again when its head is stale:
+  `Merge into <branch> again at this head: approved at <h8>, …`. `step-field <N> <key>=<value>…` takes many pairs, each key
+  once, checks all before writing any, and an unknown key's refusal names its writer's call or says no verb writes it.
+- T17: the dispatch wall refuses a `Suites:` entry ending `.test.sh` that is not in `tests/`, naming it, unless the same
+  brief's `Files:` names it. `amend --suites=<a,b>` narrows a row's suites. `row-landed --by-hand` takes `--branch` and
+  `--tree`, and the ready event carries both, `-` when absent. A commit whose paths all sit under the tracked docs home is
+  prose to the judge.
+- T18: `task-add` and `task-set` refuse a title over 30 columns where it is typed, in the card's words. `task-add` ends on
+  `task-add — owed: create the task-list entry <step>/<id>: <title>, and recreate the entries after it to keep the order.`
+  A title ends at a period followed by a space and a capital letter, or at the cell's end, so an abbreviation never cuts it.
+  `explain` of a decision reads detail written after its `(D<n>; REQ-…)` group.
+- T25: a card render no longer opens `approve:step<n>` when the plan carries `approved-by:`, when the plan's current step is
+  above the step rendered, or when the tree is a linked tree whose git directory holds `bionic-agent`.
+- T28: the sitrep sheet and both cards cut a task's title through one function, `plan_cut`, by T18's rule, so a title
+  reads the same on every surface.
+- T31: `matrix-set` appends `line/v1|ev=matrix-set|ac=<id>|cells=<status,evidence>|by=<session id or none>|at=<ISO-UTC>` to
+  the landing record. The hand-holds report gains `status-writes=<n>` between `waivers` and `second-regressions` and
+  counts it into `total`, so a script that pins the line meets the extra field.
+- T32: the heading `decisions rule` writes names the ruler: git `user.name` when the reply is the user's typed words, the
+  literal `orchestrator` when the transcript has no such reply or a too short one, and a refusal naming the lack when the
+  transcript cannot be read.
+- T33: the Verify gate demands no per-tier key or auditor verdict of a pending row before the step whose task proves it, at
+  any tier, and the T0-only deferral refusal is deleted. The release approval card marks such a row `owed:<step>` and its
+  acceptance line says `<n> owed by the close`. After it writes `delivered:`, close-out settles each row owed at Step 9
+  whose evaluation names `landing-report --hand-holds`: `discharged` at total 0, else `blocked` with the line quoted, the
+  continuation as evidence. The matrix writers moved from `hooks/session-poker.sh` to `lib/units.sh`.
+
+### A landing settles what it proves (D2, D12, D26, ADR-072)
+
+- T6 (`T6.md`): the landing writes every finding it settles, at its own site and at the same site in other records at the
+  review's head, and every criterion its evidence filled, before it publishes. The corrections stay and refuse what it
+  settled.
+- T7 (`T7.md`): the critic's verdict table reaches the matrix by the review verb, and the regression's health reaches
+  `stack-health:` by the regression verb, so no verdict is copied by hand.
+- T4 (`T4.md`): the replay of the 1.26.0 close is the bed every fix proves itself on. It counts its log by verb and holds a
+  single-rigor fixture.
+
+### The tree describes itself (D3, D21, D25)
+
+- T14 (`T14.md`): a worker's tree carries its own record, so a cleared conversation costs no landing and a tree whose plan
+  differs from the binding is refused with both named.
+- T15 (`T15.md`): whether a scale has a Patrol and how many writers fit are each read from one function.
+
+### Doors for the record (D11, D13, D14, D16, D20)
+
+- T8 (`T8.md`): ruling a decision is one verb.
+- T10 (`T10.md`): the Known limits of this entry are rendered from the deferrals, and the matrix renders every criterion
+  by a tier map kept in one place.
+- T13 (`T13.md`): the integrate row's writer publishes the reviews part first, and the order is pinned.
+- T16 (`T16.md`): a stale approval is asked again, and the Step 8 fields are one call that names the verb for a key it does
+  not hold.
+- T32 (`T32.md`): a ruling names the person only when the reply is theirs. Born of `critic-adversarial.md#3`.
+
+### The close reads its own measure (D4, D5, D8, ADR-073)
+
+- T5 (`T5.md`): the hand-holds window ends at the delivered time, and close-out reads the line last.
+- T9 (`T9.md`): the pointers the walls read are written by the steps that learn them, and a delivered run accepts its last
+  two facts by name from any session.
+- T31 (`T31.md`): a status written by hand after the last build landing is counted. Born of `critic-adversarial.md#1`.
+- T33 (`T33.md`): a criterion is owed at the step whose task proves it, and close-out writes the live hand-holds row from
+  its own last reading. Ruled by Chris on D29 as a gap in the machinery.
+
+### One fact, one reading (D15, D17, D18, D19, D6, D22, D23)
+
+- T11 (`T11.md`): whether a review is covered is read by one function on every surface.
+- T12 (`T12.md`): a closed ask keeps its answer and never waits on you, and the goal measure and the task title are each
+  one function.
+- T17 (`T17.md`): a suite that does not exist is refused at dispatch, the ready event carries its branch and tree, and a
+  docs commit is prose.
+- T25 (`T25.md`): a card render raises no approval the plan already records.
+- T28 (`T28.md`): the title rule has one reader.
+
+### The cards read as concepts (D1, D7, D10, D23, D27, D28)
+
+- T1 (`T1.md`): a decision brief names its thing and carries the dig-in on its reply line.
+- T2 (`T2.md`), T3 (`T3.md`), T24 (`T24.md`): the requirements card, the design card and the plan card each print an item's
+  own sentence under its row and refuse an item that has none.
+- T18 (`T18.md`): a long title is refused where it is typed, `explain` prints the detail, and an abbreviation never cuts a
+  title.
+
+### Fixtures that met the new rules
+
+- T26 (`T26.md`), T27 (`T27.md`), T29 (`T29.md`), T30 (`T30.md`): fixtures and a lint that predated a rule this run landed
+  were re-pinned to it, each born of the whole run's red; no code under `hooks/` or `payload/` changed in T26, T27 or
+  T30.
+
+### The walk, the regression, the critic
+
+- T19 (`walk.md`): the walk. The cards drawn on this run's own files and the replay's close were read as a user would.
+- T20 (`critic-evidence.md`, `critic-adversarial.md`, `critic-structure.md`): the critic's review of the whole, one record
+  for each question.
+
+### The release
+
+- T21 (`T21.md`): this entry, `plugin.json` 1.28.0, the help and version pages rendered by `agents-src/render.sh`,
+  `rendered.sha256` refreshed, and ADR-072 and ADR-073. T22 opens the pull request on the release card's word, and T23 closes
+  the run and reads the hand-holds measure last.
+
+### The landing numbers
+
+`landing-report --rows` at 262147ad77b81ce69cab7a22637796bd8243f286 on 2026-10-25T05:55:04Z:
+
+```
+landings: queue=28 hand=0 git=0 · ready-to-landed median=6.3m p75=9.7m max=32.2m · runs: green=70 red=4 none=0 discarded=4 red-then-green=0 run=261 reused=0 absent=0 · waited median=15s · killed=6
+T2 queue ready=2026-10-24T21:55:02Z landed=2026-10-24T22:03:16Z minutes=8.2 runs=8 waited=73s wait=1.2 prove=7.0 rework=0.0 width=4
+  card.test.sh green promised=14s actual=18s ratio=1.29
+  close-out-3.test.sh green promised=179s actual=185s ratio=1.03
+  sitrep.test.sh green promised=194s actual=213s ratio=1.10
+  notify.test.sh green promised=60s actual=70s ratio=1.17
+  card.test.sh green promised=14s actual=19s ratio=1.36
+  close-out-3.test.sh green promised=169s actual=178s ratio=1.05
+  sitrep.test.sh green promised=162s actual=206s ratio=1.27
+  notify.test.sh green promised=46s actual=69s ratio=1.50
+T4 queue ready=2026-10-24T21:55:14Z landed=2026-10-24T22:11:58Z minutes=16.7 runs=2 waited=455s wait=7.6 prove=9.2 rework=0.0 width=4
+  close-replay.test.sh discarded promised=530s actual=- ratio=-
+  close-replay.test.sh green promised=530s actual=505s ratio=0.95
+T14 queue ready=2026-10-24T21:57:16Z landed=2026-10-24T22:13:06Z minutes=15.8 runs=6 waited=851s wait=14.2 prove=1.0 rework=0.7 width=4
+  worktree.test.sh discarded promised=50s actual=- ratio=-
+  stop-orders.test.sh discarded promised=13s actual=- ratio=-
+  spawn-worktree.test.sh discarded promised=30s actual=- ratio=-
+  worktree.test.sh green promised=42s actual=56s ratio=1.33
+  stop-orders.test.sh green promised=11s actual=17s ratio=1.55
+  spawn-worktree.test.sh green promised=25s actual=34s ratio=1.36
+T3 queue ready=2026-10-24T22:13:59Z landed=2026-10-24T22:14:25Z minutes=0.4 runs=1 waited=10s wait=0.2 prove=0.3 rework=0.0 width=4
+  card.test.sh green promised=12s actual=15s ratio=1.25
+T24 queue ready=2026-10-24T23:04:36Z landed=2026-10-24T23:06:32Z minutes=1.9 runs=2 waited=13s wait=0.2 prove=1.7 rework=0.0 width=2
+  card.test.sh green promised=19s actual=24s ratio=1.26
+  session-poker-5.test.sh green promised=96s actual=103s ratio=1.07
+T25 queue ready=2026-10-24T23:22:02Z landed=2026-10-24T23:23:23Z minutes=1.4 runs=2 waited=12s wait=0.2 prove=1.1 rework=0.0 width=2
+  card.test.sh green promised=25s actual=27s ratio=1.08
+  asks.test.sh green promised=61s actual=68s ratio=1.11
+T6 queue ready=2026-10-24T23:13:28Z landed=2026-10-24T23:37:56Z minutes=24.5 runs=3 waited=14s wait=0.2 prove=9.5 rework=14.7 width=3
+  landing-line-2.test.sh green promised=140s actual=190s ratio=1.36
+  worktree.test.sh green promised=54s actual=81s ratio=1.50
+  close-replay.test.sh green promised=447s actual=568s ratio=1.27
+T7 queue ready=2026-10-25T00:10:16Z landed=2026-10-25T00:12:39Z minutes=2.4 runs=1 waited=14s wait=0.2 prove=2.1 rework=0.0 width=2
+  session-poker-4.test.sh green promised=109s actual=129s ratio=1.18
+T1 queue ready=2026-10-25T00:17:32Z landed=2026-10-25T00:17:46Z minutes=0.2 runs=1 waited=12s wait=0.2 prove=0.0 rework=0.0 width=3
+  decision-skill.test.sh green promised=1s actual=1s ratio=1.00
+T11 queue ready=2026-10-25T00:14:27Z landed=2026-10-25T00:36:10Z minutes=21.7 runs=3 waited=13s wait=0.2 prove=7.7 rework=13.8 width=3
+  release-approval.test.sh green promised=429s actual=460s ratio=1.07
+  session-poker-4.test.sh green promised=129s actual=144s ratio=1.12
+  sitrep.test.sh green promised=211s actual=228s ratio=1.08
+T5 queue ready=2026-10-25T00:17:19Z landed=2026-10-25T00:49:33Z minutes=32.2 runs=3 waited=15s wait=0.2 prove=9.4 rework=22.6 width=3
+  landing-line-1.test.sh green promised=204s actual=347s ratio=1.70
+  close-replay.test.sh green promised=315s actual=563s ratio=1.79
+  close-out-4.test.sh green promised=135s actual=304s ratio=2.25
+T13 queue ready=2026-10-25T00:52:33Z landed=2026-10-25T00:56:15Z minutes=3.7 runs=3 waited=12s wait=0.2 prove=3.5 rework=0.0 width=4
+  bash-walls.test.sh green promised=12s actual=22s ratio=1.83
+  close-out-3.test.sh green promised=110s actual=209s ratio=1.90
+  render.test.sh green promised=8s actual=16s ratio=2.00
+T12 queue ready=2026-10-25T01:10:33Z landed=2026-10-25T01:14:52Z minutes=4.3 runs=3 waited=16s wait=0.3 prove=3.7 rework=0.4 width=3
+  asks.test.sh red promised=71s actual=80s ratio=1.13
+  sitrep-card.test.sh green promised=33s actual=45s ratio=1.36
+  sitrep.test.sh green promised=164s actual=220s ratio=1.34
+T10 queue ready=2026-10-25T01:26:41Z landed=2026-10-25T01:32:56Z minutes=6.2 runs=2 waited=13s wait=0.2 prove=6.0 rework=0.0 width=4
+  landing-line-1.test.sh green promised=234s actual=324s ratio=1.38
+  door-card.test.sh green promised=197s actual=362s ratio=1.84
+T8 queue ready=2026-10-25T01:37:34Z landed=2026-10-25T01:40:21Z minutes=2.8 runs=1 waited=84s wait=1.4 prove=1.4 rework=0.0 width=3
+  asks.test.sh red promised=86s actual=82s ratio=0.95
+T26 queue ready=2026-10-25T01:46:49Z landed=2026-10-25T01:48:27Z minutes=1.6 runs=1 waited=13s wait=0.2 prove=1.4 rework=0.0 width=3
+  asks.test.sh green promised=84s actual=83s ratio=0.99
+T15 queue ready=2026-10-25T01:48:18Z landed=2026-10-25T01:49:38Z minutes=1.3 runs=2 waited=23s wait=0.4 prove=0.9 rework=0.0 width=4
+  session-start.test.sh green promised=19s actual=19s ratio=1.00
+  slots.test.sh green promised=46s actual=56s ratio=1.22
+T9 queue ready=2026-10-25T01:48:20Z landed=2026-10-25T01:57:29Z minutes=9.2 runs=3 waited=219s wait=3.6 prove=5.2 rework=0.2 width=4
+  close-out-3.test.sh green promised=203s actual=281s ratio=1.38
+  close-out-4.test.sh green promised=230s actual=314s ratio=1.37
+  session-poker-5.test.sh green promised=78s actual=112s ratio=1.44
+T18 queue ready=2026-10-25T02:19:25Z landed=2026-10-25T02:21:33Z minutes=2.1 runs=4 waited=16s wait=0.3 prove=1.9 rework=0.0 width=2
+  session-poker-5.test.sh green promised=95s actual=112s ratio=1.18
+  card.test.sh green promised=23s actual=28s ratio=1.22
+  words.test.sh green promised=11s actual=12s ratio=1.09
+  sitrep-card.test.sh green promised=45s actual=44s ratio=0.98
+T17 queue ready=2026-10-25T02:23:33Z landed=2026-10-25T02:31:00Z minutes=7.5 runs=5 waited=15s wait=0.2 prove=7.2 rework=0.0 width=3
+  dispatch-preflight-2.test.sh green promised=39s actual=45s ratio=1.15
+  close-out-3.test.sh green promised=281s actual=298s ratio=1.06
+  session-poker-4.test.sh red promised=140s actual=153s ratio=1.09
+  bash-walls-egd.test.sh green promised=39s actual=40s ratio=1.03
+  render.test.sh green promised=17s actual=18s ratio=1.06
+T27 queue ready=2026-10-25T02:31:01Z landed=2026-10-25T02:32:41Z minutes=1.7 runs=2 waited=15s wait=0.2 prove=1.4 rework=0.0 width=3
+  session-poker-3.test.sh green promised=84s actual=84s ratio=1.00
+  dispatch-preflight-4a.test.sh green promised=76s actual=79s ratio=1.04
+T16 queue ready=2026-10-25T02:47:59Z landed=2026-10-25T02:58:01Z minutes=10.0 runs=3 waited=141s wait=2.4 prove=7.7 rework=0.0 width=4
+  release-approval.test.sh green promised=347s actual=460s ratio=1.33
+  door-landing.test.sh green promised=300s actual=355s ratio=1.18
+  session-poker-4.test.sh red promised=97s actual=157s ratio=1.62
+T28 queue ready=2026-10-25T02:53:42Z landed=2026-10-25T03:00:43Z minutes=7.0 runs=5 waited=274s wait=4.6 prove=2.5 rework=0.0 width=4
+  session-poker-2.test.sh green promised=75s actual=102s ratio=1.36
+  session-poker-4.test.sh green promised=157s actual=145s ratio=0.92
+  sitrep-card.test.sh green promised=36s actual=55s ratio=1.53
+  card.test.sh green promised=23s actual=33s ratio=1.43
+  rehearsal.test.sh green promised=11s actual=16s ratio=1.45
+T29 queue ready=2026-10-25T03:59:30Z landed=2026-10-25T04:05:48Z minutes=6.3 runs=3 waited=15s wait=0.2 prove=6.0 rework=0.0 width=3
+  shell-lint.test.sh green promised=34s actual=38s ratio=1.12
+  door-landing.test.sh green promised=315s actual=362s ratio=1.15
+  landing-line-1.test.sh green promised=272s actual=338s ratio=1.24
+T30 queue ready=2026-10-25T04:04:05Z landed=2026-10-25T04:12:15Z minutes=8.2 runs=3 waited=121s wait=2.0 prove=6.2 rework=0.0 width=3
+  notify.test.sh green promised=66s actual=85s ratio=1.29
+  rehearsal-failed-review.test.sh green promised=360s actual=367s ratio=1.02
+  sitrep.test.sh green promised=234s actual=231s ratio=0.99
+T32 queue ready=2026-10-25T04:22:47Z landed=2026-10-25T04:24:48Z minutes=2.0 runs=1 waited=15s wait=0.2 prove=1.4 rework=0.3 width=3
+  asks.test.sh green promised=86s actual=86s ratio=1.00
+T31 queue ready=2026-10-25T04:36:24Z landed=2026-10-25T04:46:20Z minutes=9.9 runs=2 waited=13s wait=0.2 prove=9.4 rework=0.3 width=4
+  landing-line-1.test.sh green promised=201s actual=329s ratio=1.64
+  close-replay.test.sh green promised=412s actual=566s ratio=1.37
+T33 queue ready=2026-10-25T05:37:12Z landed=2026-10-25T05:46:46Z minutes=9.6 runs=3 waited=17s wait=0.3 prove=8.8 rework=0.5 width=4
+  canonical-sdlc-evidence-gate.test.sh green promised=15s actual=24s ratio=1.60
+  close-out-4.test.sh green promised=172s actual=312s ratio=1.81
+  close-replay.test.sh green promised=443s actual=530s ratio=1.20
+```
+
 ## 1.27.0 — 2026-10-24
 
 This is the sitrep changes what you do next release. The run was chartered as the hand-holds measure and cut to the
