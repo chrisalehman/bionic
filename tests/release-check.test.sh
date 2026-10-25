@@ -665,6 +665,12 @@ flat() { tr '\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g'; }
 has() { local t p; t="$(printf '%s' "$1" | flat)"; p="$(printf '%s' "$2" | flat)"; case "$t" in *"$p"*) return 0 ;; esac; return 1; }
 # plan_deferred — the stated sentence of each `deferred:` line of the bound plan, one per line
 plan_deferred() { sed -n 's/^deferred: .* stated="\(.*\)"[[:space:]]*$/\1/p' "$1"; }
+# plan_deferred_open <plan> — the stated sentences of the deferrals no `moved: <id> to=fixed` line has closed, the ones the
+# check holds the entry to; a plan whose later rows fixed a deferred finding states more sentences than the entry owes
+plan_deferred_open() {
+  awk 'FNR == NR { if ($1 == "moved:" && $3 == "to=fixed") fixed[$2] = 1; next }
+       $1 == "deferred:" && !($2 in fixed) { print }' "$1" "$1" | sed -n 's/^deferred: .* stated="\(.*\)"[[:space:]]*$/\1/p'
+}
 
 # corr_check <file> <plugin.json> <plan> — one `corr:` line per broken rule; no output when all hold
 corr_check() {
@@ -866,7 +872,7 @@ expect_contains "(n2) an entry that does not name $REL_ADR_B: red" "rel: the ent
 expect_contains "(n2) a manifest that reads another version: red" "rel: plugin.json does not read 1.28.0" "$(rel_check "$CL" "$TMP/plugin.1270.json" 1.28.0 "$REL_ADR_A" "$REL_MIG_ROWS")"
 
 if [ -r "$REL_PLAN" ]; then
-  REL_N="$(plan_deferred "$REL_PLAN" | /usr/bin/grep -c .)"
+  REL_N="$(plan_deferred_open "$REL_PLAN" | /usr/bin/grep -c .)"
   # A plan that states no deferral holds the arms below at zero; one that gains a deferral turns them to the
   # strict form (the check fails without the Known limits, one line each) with no edit here.
   if [ "$REL_N" -gt 0 ]; then REL_WANT=1; else REL_WANT=0; fi
