@@ -776,8 +776,8 @@ row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing t
 
 # ---------------------------------------------------------------- does the bound run owe a Patrol stamp?
 
-# tick_patrol_owed <session-id> -> rc 1 only when the bound plan's scale has no Patrol (`scale_cell <scale> patrol`
-# is `no`); rc 0 otherwise.
+# tick_patrol_owed <session-id> -> rc 1 only when the bound plan's scale has no Patrol (`scale_patrol` says `no`); rc 0
+# otherwise. `arm` and the tick both ask it, so a scale with no Patrol is neither armed nor stamped.
 #
 # THE SCALE IS READ THE WAY RESUME READS IT: the plan this session's run resolves to, its frontmatter's `scale:`.
 # `resolve_run` answers once per process and is the selection every later read of the tick takes, so asking it here
@@ -789,9 +789,9 @@ tick_patrol_owed() {  # <session-id>
   root="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)" && [ -n "$root" ] || return 0
   resolve_run "$root" "$1"
   [ -n "${POKER_RUN_PLAN:-}" ] || return 0
-  { declare -F scale_cell >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
-  declare -F scale_cell >/dev/null 2>&1 || return 0
-  [ "$(scale_cell "$(plan_frontmatter_get "$POKER_RUN_PLAN" scale 2>/dev/null)" patrol 2>/dev/null)" != no ]
+  { declare -F scale_patrol >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
+  declare -F scale_patrol >/dev/null 2>&1 || return 0
+  [ "$(scale_patrol "$POKER_RUN_PLAN")" != no ]
 }
 
 # ---------------------------------------------------------------- the decision line
@@ -832,6 +832,13 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
       die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
       die "A Patrol stamp answers for ONE session, so without the key there is nothing to write."
       exit 3
+    fi
+    # A SCALE WITH NO PATROL IS NOT ARMED. The tick stamps only a run that owes a Patrol (`tick_patrol_owed`), and an
+    # `arm` that wrote the stamp anyway would claim a Patrol the scale's profile says nobody runs. Said in one line,
+    # so a caller that was told to re-arm sees why nothing was.
+    if ! tick_patrol_owed "$SESSION_ID"; then
+      say "no Patrol to arm — a $(plan_frontmatter_get "$POKER_RUN_PLAN" scale 2>/dev/null)-scale run has none; no stamp was written"
+      exit 0
     fi
     if ! write_patrol_stamp "$SESSION_ID" arm; then
       die "REFUSED — the Patrol stamp could not be written; this session is NOT armed."
@@ -2210,7 +2217,7 @@ EOF
     # lines read it, and so does the WAITING line below the decision: "nothing ready" is said
     # only when this is empty. A row that is ready and not offered — a full writer budget, a
     # machine HOLD — is not "nothing ready".
-    SCHED_READY_ALL=""; SCHED_IDLE_AT=""; SCHED_IDLE_OWED=""
+    SCHED_READY_ALL=""; SCHED_IDLE_AT=""; SCHED_IDLE_OWED=""; SCHED_IDLE_SLOTS=""
     if [ -n "${SCHED_PLAN:-}" ] && [ "$POKER_RUN_OPEN" != unreadable ]; then
       SCHED_READY_ALL="$(fill_ready_set "$SCHED_PLAN" 99999 0 2>/dev/null | tr '\n' ' ')"
     fi
@@ -2278,8 +2285,9 @@ EOF
     else
       # NO CAP IS NOT A FAULT (wave-28 T9; D15, REQ-2 AC-2.9). Until wave-28 a plan with no
       # `parallel-budget: writers=<n>` took a note here telling Step 0 to write one. No plan owes
-      # the line now, and a probe's number is no cap: with no person's cap the width below is the
-      # gate's alone (`fill_cap` answers nothing, so `fill_gate_width` runs uncapped).
+      # the line now, and a probe's number is no cap: with no person's cap and no cap in the scale's
+      # profile the width below is the gate's alone (`fill_cap` answers nothing, so `fill_gate_width`
+      # runs uncapped).
       # THE HOLDS AND THE LEDGER were printed by `tick_plan_report` above, and `SCHED_HOLDS`
       # still carries the step holds for the no-FILL line below (wave-21 T13).
       SCHED_CAP="$(fill_cap "$SCHED_PLAN")"
@@ -2300,6 +2308,9 @@ EOF
       if [ "${SCHED_GATE_ROOM:-}" = yes ] && [ "$SCHED_GAP" -ge "$SCHED_READY_W" ] \
          && { [ -z "$SCHED_CAP" ] || [ "$SCHED_WIDTH" -lt "$SCHED_CAP" ]; }; then
         case "$SCHED_OWED" in ''|*[!0-9]*) ;; *) SCHED_IDLE_AT="$SCHED_WIDTH"; SCHED_IDLE_OWED=$(( SCHED_OWED + SCHED_GAP )) ;; esac
+        # THE SLOTS THAT STAY EMPTY: with a cap, the room the fill leaves unfilled once every ready row is
+        # named is the cap less the width; the FILL says so below, so the empty slots are not read as a hold.
+        [ -z "$SCHED_CAP" ] || SCHED_IDLE_SLOTS=$(( SCHED_CAP - SCHED_WIDTH ))
       fi
       # A FULL WRITER BUDGET STILL OFFERS THE READ-ONLY ROWS (wave-26 T13; D9): a verify or
       # review row takes no writer slot, and `fill_ready_set` offers it whatever the gap. So
@@ -2356,6 +2367,8 @@ EOF
           # observed 19:00:46Z as `poker: FILL T13` above `decision=QUIET`).
           say "FILL ${SCHED_IDS}"
           SCHED_FILL="$SCHED_IDS"
+          [ "${SCHED_IDLE_SLOTS:-0}" -gt 0 ] \
+            && say "IDLE ${SCHED_IDLE_SLOTS} of ${SCHED_CAP} writer slots — FILL names ${SCHED_IDS}, every row that is ready"
           # THE RANGE AN OFFERED REVIEW READS (wave-26 T32; T14, AC-6.5): one line per offered
           # row that reads `live:head`, naming the difference past the last review proof, from
           # the head this tick already read (UNITS_LIVE_HEAD; no git here). Before the first

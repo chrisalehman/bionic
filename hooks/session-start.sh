@@ -1000,6 +1000,15 @@ fi
 # is printed only when it is exact — whole minutes that divide the hour.
 ss_arm_line() {
   local poker="$HOOK_ROOT/hooks/session-poker.sh" every prompt m
+  # A SCALE WITH NO PATROL HAS NOTHING TO RE-ARM: a session bound to a task-scale run (`scale_patrol`,
+  # lib/scale.sh) is told no arm line, as `arm` writes no stamp there. No bound plan, or a library without
+  # scale.sh, keeps the line.
+  if [ "${BIONIC_RUN_WORD:-}" = bound-open ] && [ -n "${BIONIC_RUN_PLAN:-}" ]; then
+    { declare -F scale_patrol >/dev/null 2>&1 || { [ -r "${BIONIC_LIB:-}/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
+    if declare -F scale_patrol >/dev/null 2>&1 && [ "$(scale_patrol "$BIONIC_RUN_PLAN")" = no ]; then
+      return 0
+    fi
+  fi
   every="every ${SS_INTERVAL_VAL}s"
   case "$SS_INTERVAL_VAL" in
     ''|*[!0-9]*) ;;

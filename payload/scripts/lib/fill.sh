@@ -433,18 +433,27 @@ fill_gate_width() {  # <open> <owed> <ready writers> [<cap>]
   printf '%s' "$((open + k))"
 }
 
-# fill_cap <plan> -> a person's cap on writers, or nothing (D15; ruling A-orch-30). `budget_cap`
-# (lib/run.sh, row T9) answers only from a line a person wrote; until that function exists the
-# plan's `writers=` is read as it always was, so the cap behaves as before and T9 flips this one
-# place. The tick and the stop wall both read the cap here.
+# fill_cap <plan> -> the writer cap that applies to the plan, or nothing: a person's line when one was written
+# (`budget_cap`, lib/run.sh, which answers only from a line whose source is a person's), else the scale's own
+# writers cell (`scale_cell <scale> writers`, lib/scale.sh), which is a number at task scale and `uncapped`, so
+# nothing, at wave and epic. The tick's FILL, the stop wall and the dispatch wall's budget check all read the cap
+# here, so on one plan they count the same room.
 fill_cap() {  # <plan>
-  local c=''
+  local c='' scale
   if declare -F budget_cap >/dev/null 2>&1; then
     c="$(budget_cap "${1:-}" 2>/dev/null)"; c="${c#writers=}"
   elif declare -F budget_field >/dev/null 2>&1 && declare -F plan_budget_line >/dev/null 2>&1; then
     c="$(budget_field "$(plan_budget_line "${1:-}")" writers)"
   fi
   case "$c" in ''|*[!0-9]*) c="" ;; esac
+  if [ -z "$c" ] && declare -F plan_frontmatter_get >/dev/null 2>&1; then
+    declare -F scale_cell >/dev/null 2>&1 || . "$_FILL_LIB_DIR/scale.sh" 2>/dev/null || :
+    if declare -F scale_cell >/dev/null 2>&1; then
+      scale="$(plan_frontmatter_get "${1:-}" scale 2>/dev/null)"
+      c="$(scale_cell "$scale" writers 2>/dev/null)" || c=""
+      case "$c" in ''|*[!0-9]*) c="" ;; esac
+    fi
+  fi
   printf '%s' "$c"
 }
 
