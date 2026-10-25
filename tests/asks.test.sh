@@ -576,51 +576,33 @@ expect_eq "OP-1b …its value the open line's at=" "$AO_AT" \
 # ============================================================
 section "§ROUNDS: an ask opened again after it closed is a new round beside the first, every round kept and listed"
 # ============================================================
-# A decision put again after its ruling is a second round the person stood on; replacing the first round's line with
-# the new open one lost the first round's minutes. Opened, closed and opened again, the register keeps both lines, the
-# second carrying round=2; the closer closes the newest open line; `owed_rounds` lists every round; `owed_list` and every
-# current-state reader still see the key once.
-# FIXTURE FIDELITY: a session store written by owed.sh's own writers, at instants the poker's clock seam fixes.
-# ANTI-VACUITY: RO-0 reads the first round through the same extractor RO-2 and RO-4 read both through.
-# fails-when: lib/owed.sh `owed_open` replaces a closed line instead of appending a round (RO-1, RO-2), writes no
-# round= (RO-1b), `owed_close` closes any line but the newest open one (RO-3b), `owed_rounds` is missing or drops a
-# round (RO-4), `owed_list` lists a key twice (RO-5), or `owed_answer_of` reads an earlier round's answer (RO-6).
-AR="$(cd "$(mktemp -d "$TMPROOT/ar.XXXXXX")" && pwd -P)"; mkdir -p "$AR/.bionic/tmp"
-AR_F="$AR/.bionic/tmp/owed-ar-sid.state"
-ar() { local at="$1"; shift; BIONIC_NOW_EPOCH="$at" as_owed "$AR" ar-sid "$@"; }
-ar_join() { tr '\n' '|' | sed 's/|$//'; }
-ar_lines() { /usr/bin/grep -c "^owed/v1|key=$1|" "$AR_F" 2>/dev/null | tr -d ' '; }  # <key> -> its lines on the store
+# Instants are the clock seam. fails-when: lib/owed.sh owed_open replaces the closed line or writes no round= (RO-1), owed_close closes another line
+# (RO-2), owed_rounds drops a round or a key it does not match (RO-3), owed_list lists a key per round or owed_answer_of
+# reads an earlier round's answer (RO-4).
+AR="$(cd "$(mktemp -d "$TMPROOT/ar.XXXXXX")" && pwd -P)"; mkdir -p "$AR/.bionic/tmp"; AR_F="$AR/.bionic/tmp/owed-ar-sid.state"
+ar() { local at="$1"; shift; BIONIC_NOW_EPOCH="$at" as_owed "$AR" ar-sid "$@"; }   # <epoch or ""> <owed.sh call…>
+ar_key() { /usr/bin/grep '^owed/v1|key=decide:D29|' "$AR_F" 2>/dev/null; }; ar_join() { tr '\n' '|' | sed 's/|$//'; }
 AR_T0=1791243360   # 2026-10-05T23:36:00Z
-ar "$AR_T0" owed_open decide:D29 "reply to D29" "D29 · the first put" >/dev/null
-ar "$AR_T0" owed_answer decide:D29 one >/dev/null
-ar $((AR_T0 + 28560)) owed_close decide:D29 ruled >/dev/null   # 2026-10-06T07:32:00Z
-expect_eq "RO-0 precondition: the first round is one closed line, opened 23:36Z and closed 07:32Z, its answer read back" \
-  "one|1|2026-10-05T23:36:00Z|2026-10-06T07:32:00Z" \
-  "$(ar "" owed_answer_of decide:D29 | cut -f1)|$(ar_lines decide:D29)|$(sed -n 's/^owed\/v1|key=decide:D29|state=closed|.*|opened=\([^|]*\).*/\1/p' "$AR_F")|$(sed -n 's/^owed\/v1|key=decide:D29|state=closed|by=ruled|at=\([^|]*\)|.*/\1/p' "$AR_F")"
-AR_FIRST="$(/usr/bin/grep '^owed/v1|key=decide:D29|' "$AR_F")"
-ar $((AR_T0 + 30000)) owed_open decide:D29 "reply to D29" "D29 · put again" >/dev/null
-expect_eq "RO-1 opened again, the key holds two lines: the first round's closed line kept byte for byte, then the new open one" \
-  "2|$AR_FIRST|open" \
-  "$(ar_lines decide:D29)|$(/usr/bin/grep '^owed/v1|key=decide:D29|' "$AR_F" | head -1)|$(/usr/bin/grep '^owed/v1|key=decide:D29|' "$AR_F" | sed -n '2s/.*|state=\([a-z]*\)|.*/\1/p')"
-expect_contains "RO-1b …the new line carrying round=2" "|round=2" "$(/usr/bin/grep '^owed/v1|key=decide:D29|state=open|' "$AR_F")"
+ar "$AR_T0" owed_open decide:D29 "reply to D29" "D29 · put" >/dev/null; ar "$AR_T0" owed_answer decide:D29 one >/dev/null
+ar $((AR_T0 + 28560)) owed_close decide:D29 ruled >/dev/null   # 07:32:00Z
+AR_FIRST="$(ar_key)"
+expect_eq "RO-0 precondition: one closed line, opened 23:36Z and closed 07:32Z, its answer read back" "one|1|yes" \
+  "$(ar "" owed_answer_of decide:D29 | cut -f1)|$(ar_key | wc -l | tr -d ' ')|$(printf '%s' "$AR_FIRST" | /usr/bin/grep -qF '|at=2026-10-06T07:32:00Z|opened=2026-10-05T23:36:00Z' && echo yes)"
+ar $((AR_T0 + 30000)) owed_open decide:D29 "reply to D29" "D29 · put again" >/dev/null   # 07:56:00Z
 ar $((AR_T0 + 30060)) owed_open decide:D29 "reply to D29" "D29 · put again" >/dev/null
-expect_eq "RO-2 a second open of the open round is idempotent: still two lines" "2" "$(ar_lines decide:D29)"
-ar $((AR_T0 + 31440)) owed_close decide:D29 ruled >/dev/null
-expect_eq "RO-3 the close closes the newest open line: two closed lines, the first unchanged" "2|0|$AR_FIRST" \
-  "$(/usr/bin/grep -c '^owed/v1|key=decide:D29|state=closed|' "$AR_F" | tr -d ' ')|$(/usr/bin/grep -c '^owed/v1|key=decide:D29|state=open|' "$AR_F" | tr -d ' ')|$(/usr/bin/grep '^owed/v1|key=decide:D29|' "$AR_F" | head -1)"
-expect_contains "RO-3b …the second closed line opened at the second round's instant, round=2 kept" \
-  "|by=ruled|at=2026-10-06T08:20:00Z|opened=2026-10-06T07:56:00Z|round=2" "$(/usr/bin/grep '^owed/v1|key=decide:D29|' "$AR_F" | sed -n 2p)"
+expect_eq "RO-1 opened again, twice: the first line kept byte for byte and one new open line, round=2" "2|$AR_FIRST|open|2" \
+  "$(ar_key | wc -l | tr -d ' ')|$(ar_key | head -1)|$(ar_key | sed -n '2s/.*|state=\([a-z]*\)|.*/\1/p')|$(ar_key | sed -n '2s/.*|round=\([0-9]*\).*/\1/p')"
+ar $((AR_T0 + 31440)) owed_close decide:D29 ruled >/dev/null   # 08:20:00Z
+expect_eq "RO-2 the close closes the new round's line and leaves the first as it was" \
+  "$AR_FIRST|owed/v1|key=decide:D29|state=closed|by=ruled|at=2026-10-06T08:20:00Z|opened=2026-10-06T07:56:00Z|round=2" "$(ar_key | ar_join)"
 ar $((AR_T0 + 32000)) owed_open approve:step3 "approval: Step 3 plan" "Do you approve this plan?" >/dev/null
-expect_eq "RO-4 owed_rounds lists every round of the keys it is asked for: key, round, state, opened, closed (- while open)" \
+ar $((AR_T0 + 32000)) owed_open waive:structure "waiver: structure" "waive structure" >/dev/null
+expect_eq "RO-3 owed_rounds lists every round of the keys its pattern matches whole: key, round, state, opened, closed or -" \
   "decide:D29	1	closed	2026-10-05T23:36:00Z	2026-10-06T07:32:00Z|decide:D29	2	closed	2026-10-06T07:56:00Z	2026-10-06T08:20:00Z|approve:step3	1	open	2026-10-06T08:29:20Z	-" \
   "$(ar "" owed_rounds 'decide:D[0-9]+|approve:step[0-9]+' | ar_join)"
-expect_eq "RO-4b …and only those keys" "decide:D29	1	closed	2026-10-05T23:36:00Z	2026-10-06T07:32:00Z|decide:D29	2	closed	2026-10-06T07:56:00Z	2026-10-06T08:20:00Z" \
-  "$(ar "" owed_rounds 'decide:D[0-9]+' | ar_join)"
 ar $((AR_T0 + 32100)) owed_open decide:D29 "reply to D29" "D29 · a third put" >/dev/null
-expect_eq "RO-5 a third round: owed_list shows the key once, the open round, round=3 on its line" "decide:D29|1|3" \
-  "$(ar "" owed_list | cut -f1 | /usr/bin/grep -x decide:D29)|$(ar "" owed_list | cut -f1 | /usr/bin/grep -cx decide:D29 | tr -d ' ')|$(/usr/bin/grep '^owed/v1|key=decide:D29|state=open|' "$AR_F" | sed -n 's/.*|round=\([0-9]*\).*/\1/p')"
-expect_eq "RO-6 the open round has no answer through the call RO-0 read the first round's through, though that closed line keeps it" \
-  "||answer=one" "$(ar "" owed_answer_of decide:D29)|$(/usr/bin/grep -o '|answer=one' "$AR_F" | head -1)"
+expect_eq "RO-4 a third round: owed_list lists the key once, its line round=3, and owed_answer_of reads none (RO-0 read one)" \
+  "1|3|" "$(ar "" owed_list | cut -f1 | /usr/bin/grep -cx decide:D29 | tr -d ' ')|$(ar_key | sed -n '3s/.*|round=\([0-9]*\).*/\1/p')|$(ar "" owed_answer_of decide:D29)"
 
 # ============================================================
 section "§BORN-CLOSES: a born fix's green landing at Step 8 closes the review's waiver; a review still failing keeps it open"
