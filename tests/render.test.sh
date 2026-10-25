@@ -4,8 +4,7 @@
 #
 # WHAT THIS SUITE OWNS. The ARCHIVE arm of `agents-src/render.sh`, and the tree arm's
 # positive control. It does NOT own the passage-identity pins or the hand-edit arm on the
-# tree check — those are tests/docs-pins.test.sh sections 7 and 11, which the same wave's
-# cherry-pick rewrote, and moving them here would be churn with no reader.
+# tree check: the suite that held them is gone, and moving them here would be churn with no reader.
 #
 # WHY THE ARCHIVE ARM EXISTS AT ALL. `--check` reads the sources ON DISK. A render input
 # that is gitignored, untracked or merely unstaged is on disk, so the check renders WITH
@@ -398,5 +397,18 @@ expect_eq "18d …and the scaffold's source block does" "ordered" "$(ot_order "$
 OT_BAD="$TMPROOT/step8-late.md"
 printf 'the integrate row pushes, then runs `reviews-part <row>`, then `gh pr create`\n' > "$OT_BAD"
 expect_eq "18e a text naming the push before reviews-part is not read as ordered" "" "$(ot_order "$OT_BAD" 'reviews-part <row>' 'push' 'gh pr create')"
+
+section "19 — this suite's header names suites that exist"
+# A header that points a reader at a deleted suite sends them to a file that is not there. hd_missing reads the
+# leading comment block of a file and prints each tests/<name>.test.sh it names that is not under <root>/tests.
+hd_missing() {  # <file> <root> -> the missing suite paths, one per line
+  awk '/^#!/ { next } /^#/ { print; next } { exit }' "$1" | grep -o 'tests/[A-Za-z0-9_.-]*\.test\.sh' | sort -u \
+    | while IFS= read -r _hd_p; do [ -f "$2/$_hd_p" ] || printf '%s\n' "$_hd_p"; done
+}
+HD_PLANT="$TMPROOT/hd-plant.sh"
+printf '#!/bin/bash\n# names tests/render.test.sh and tests/nosuch-suite.test.sh\nset -u\n' > "$HD_PLANT"
+expect_eq "19a the reader finds the one missing suite a header names, and not the present one" "tests/nosuch-suite.test.sh" \
+  "$(hd_missing "$HD_PLANT" "$REPO")"
+expect_eq "19b this suite's own header names no suite that is missing" "" "$(hd_missing "$REPO/tests/render.test.sh" "$REPO")"
 
 finish
