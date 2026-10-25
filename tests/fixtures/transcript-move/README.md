@@ -16,11 +16,17 @@ transcripts on 2026-10-07; every value — ids, paths, names and every word of t
 | `peer-queued.jsonl` | another session's message, delivered mid-turn | `queued_command` with `attachment.origin.kind: peer` |
 | `hook-context.jsonl` | a hook's added context | `hook_additional_context` attachment; `isMeta` stop feedback and system reminder; `stop_hook_summary` |
 | `orchestrator.jsonl` | the orchestrator's own text | `type: assistant` |
+| `put.jsonl` | the orchestrator's own Bash call that puts a decision, the mark a short reply is read after | `type: assistant`, a `tool_use` block named `Bash` whose `input.command` holds `decisions put D0 `; the suites substitute the decision's id for `D0` |
 | `compact.jsonl` | a compaction summary | `isCompactSummary: true`, no `origin` |
 | `pasted.jsonl` | a typed prompt whose words are pasted | `origin.kind: human`, the words inside `<pasted_content id="…">` … `</pasted_content id="…">` (the CLI's close carries the id) |
 | `slash-args.jsonl` | a slash command typed WITH arguments | `type: user`, `origin.kind: human`, `turnOrigin: human`; the content is the CLI's wrapper `<command-message>…</command-message><command-name>…</command-name><command-args>…</command-args>`, which counts as typed |
 | `slash-bare.jsonl` | a slash command typed WITHOUT arguments | `type: user`, no `origin`, empty `<command-args>`; refused, as a prompt with no origin is |
 | `sidechain.jsonl` | a dispatched agent's prompt | `isSidechain: true`, no `origin` |
+
+Put line (added at T35): the shape of a live put read from this project's own transcript (CLI 2.1.291): an
+`assistant` entry, `isSidechain: false`, one `tool_use` content block with `name: Bash` and `input` holding
+`command` and `description`; the key set is cut as the others are, and every value is invented. It is no
+decoy and carries none of the decoy words.
 
 Every decoy carries the words `typed.jsonl` carries (`defer the flag wording until the next
 wave, it can wait`), single-spaced, so a reader that counted it would find them.
