@@ -349,8 +349,9 @@ section "§RUNLINE — the run close writes the run's line to the bound plan's l
 #
 # THE OTHER WRITER. floor-run is one (session-poker-4 §RUNLINE); booked.sh's run close is the other: a detached run
 # whose session is bound to a plan appends, after the log's rc line and before `<log>.rc`,
-#   line/v1|ev=run|log=<rel path>|head=<40-hex>|dirty=<n>|rc=<n>|sha256=<log hash>|at=<ISO>
-# to that plan's landing record. Its log lies under the project's .bionic/tmp/runs, so `log=` is the path from the
+#   line/v1|ev=run|log=<rel path>|head=<40-hex>|dirty=<n>|rc=<n>|sha256=<log hash>|starter=<who>|at=<ISO>
+# to that plan's landing record. WHO STARTED IT is the command's own `--starter <tick|orchestrator|person>`, else
+# orchestrator, so the hand-holds count reads a person's run alone. Its log lies under the project's .bionic/tmp/runs, so `log=` is the path from the
 # project root. ONE READER: lib/proof.sh `proof_attested floor` (what `proof-add floor` runs) reads booked's line as
 # it reads floor-run's: the log in place, and a byte copy of it under record/ (the only place proof-add cites from),
 # known by its hash. THE MUTANT: the reader with its hash comparison dropped accepts the log edited after its run.
@@ -387,8 +388,8 @@ RL_SHA="$(rl_sha "${RL_LOG:-$D/none}")"
 expect_regex "BR-1b precondition: the log's hash reads as 64 hex" '^[0-9a-f]{64}$' "$RL_SHA"
 expect_eq "BR-2 AC-6.1 the run close appends exactly one run line to the bound plan's landing record" "1" \
   "$(rl_runs | awk 'END { print NR + 0 }')"
-expect_regex "BR-2b …in the grammar: the log from the project root, T1's head, dirty=0, rc=0, the log's sha256, when" \
-  "^line/v1[|]ev=run[|]log=${RL_LOG#"$RL_WR"/}[|]head=${RL_H}[|]dirty=0[|]rc=0[|]sha256=${RL_SHA}[|]at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\$" \
+expect_regex "BR-2b …in the grammar: the log from the project root, T1's head, dirty=0, rc=0, the log's sha256, the orchestrator as its starter (the command names none), when" \
+  "^line/v1[|]ev=run[|]log=${RL_LOG#"$RL_WR"/}[|]head=${RL_H}[|]dirty=0[|]rc=0[|]sha256=${RL_SHA}[|]starter=orchestrator[|]at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\$" \
   "$(rl_runs | tail -n 1)"
 RL_AT="$(rl_runs | tail -n 1 | tr '|' '\n' | sed -n 's/^at=//p')"
 
@@ -410,6 +411,24 @@ expect_eq "BR-mut1 …and still runs: it accepts the unedited copy as the reader
   "0|$RL_H|$RL_AT $RL_H 0" "$(rl_judge "$RL_MUT/proof.sh" "${RL_RECORD%/*}/booked-floor.log")"
 expect_eq "BR-mut2 MUTANT: a hash mismatch accepted — the edited log passes the mutant, which BR-5 refuses" \
   "0|$RL_H" "$(rl_judge "$RL_MUT/proof.sh" "$RL_LOG" | cut -d'|' -f1-2)"
+
+# WHO STARTED IT: a command carrying `--starter <one of the three>` names it on its run line; any other word reads as
+# the orchestrator. Each run is a detached run of its own, read by its own log.
+rl_starter() {  # <name> <command> -> the starter= its run line carries, once the run has ended
+  local lg
+  bk_caller "$1" "$RL_T" --detach --agent "wx-$1" --suites rl.test.sh -- "$2"
+  bk_wait 10 bk_grep '^booked: started ' "$D/$1.out"
+  lg="$(bk_started "$1" log)"
+  bk_wait 20 test -s "${lg:-$D/none}.rc"
+  bk_kill_group "$BK_PG"
+  rl_runs | /usr/bin/grep -F "|log=${lg#"$RL_WR"/}|" | tail -n 1 | tr '|' '\n' | sed -n 's/^starter=//p'
+}
+expect_eq "BR-6 a command carrying --starter tick: its run line names the tick" "tick" \
+  "$(rl_starter rlt "echo the tick whole run; : regression-run --starter tick; exit 0")"
+expect_eq "BR-6b …--starter person names the person" "person" \
+  "$(rl_starter rlp "echo a person run; : regression-run --starter person --reason why; exit 0")"
+expect_eq "BR-6c …a word that is none of the three reads as the orchestrator" "orchestrator" \
+  "$(rl_starter rlx "echo a stray word; : regression-run --starter someone; exit 0")"
 
 # =====================================================================================
 section "§SIGNALS — a launcher started with HUP, INT and QUIT ignored hands what it launches all three at their defaults (wave-39 T14; D17; AC-10.1)"
