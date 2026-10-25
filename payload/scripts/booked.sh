@@ -6,7 +6,7 @@
 #   bash <plugin-root>/scripts/booked.sh [--agent <name>] [--kill-after <seconds>]
 #                                        [--max-wait <seconds>] [--shell <path>]
 #                                        [--stamp-dir <dir>] [--suites <names>] [--runner]
-#                                        [--detach]
+#                                        [--detach [--no-wait]]
 #                                        -- '<the whole command line, as ONE word>'
 #
 # WHAT IT IS FOR. The Bash wall rewrites a suite-class command into this shim, so every run
@@ -159,6 +159,11 @@
 #   booked: progress <UTC> <suite> <rc|§section>       (stderr, each time the run's last progress line changes)
 #   booked: LOST run=<id> last-written=<UTC>           (stderr, the pid is dead and the run wrote no end)
 #
+# --no-wait: THE CALLER WHO IS NOT THE RUN'S WATCHER. A caller that only starts the run (the tick starting the
+# whole run, which must answer within its own call) passes --no-wait beside --detach: it prints the same one
+# line, `started` or `attached`, and exits 0 at once, leaving the run to `session-poker.sh wait <name>`, the
+# roster's RUNNING line and the run's own log. Without --detach it is usage (exit 2).
+#
 # THE WAIT polls the log every BIONIC_RUN_POLL seconds (1 unless set; a fraction is allowed), copies
 # each new WHOLE line of it to stdout, and exits with the run's code once `<log>.rc` holds it (the
 # log's last line is then `rc=<n>`, which it does not copy): so a caller left alone keeps the foreground contract (the command's
@@ -265,12 +270,12 @@ BOOKED_WAITED_RC=75
 BOOKED_KILLED_RC=124
 
 booked_usage() {
-  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--runner] [--unplaced] [--detach] -- <command>\n' >&2
+  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--runner] [--unplaced] [--detach [--no-wait]] -- <command>\n' >&2
   exit 2
 }
 
 kill_after=""; max_wait=""; sep=0; run_shell=""; stamp_dir=""; suites=""; agent=""; runner=0; unplaced=0
-detach=0; run_log=""
+detach=0; run_log=""; no_wait=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --agent)        [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; agent="$2"; shift 2 ;;
@@ -288,6 +293,7 @@ while [ "$#" -gt 0 ]; do
     --runner)       runner=1; shift ;;
     --unplaced)     unplaced=1; shift ;;
     --detach)       detach=1; shift ;;
+    --no-wait)      no_wait=1; shift ;;
     # THE DETACHED SIDE (internal): the caller of --detach starts this shim again with the log it
     # claimed; nobody types it.
     --run-log)      [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; run_log="$2"; shift 2 ;;
@@ -296,6 +302,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ "$sep" -eq 1 ] && [ "$#" -ge 1 ] || booked_usage
+[ "$no_wait" -eq 0 ] || [ "$detach" -eq 1 ] || booked_usage
 if [ "$#" -gt 1 ]; then
   printf 'booked: %s words after --, and each would be parsed again as shell — pass the command as one word: booked.sh -- '\''<the whole command line>'\''\n' "$#" >&2
   exit 2
@@ -698,6 +705,7 @@ booked_detach() {  # the caller's whole part: attach or claim and start, report,
   if booked_find_live "$runs" "$(booked_run_id)"; then
     id="${BOOKED_CLAIM##*/}"; id="${id%.log}"
     printf 'booked: attached pid=%s log=%s run=%s\n' "$BOOKED_LIVE_PID" "$BOOKED_CLAIM" "$id"
+    [ "$no_wait" -eq 0 ] || exit 0
     booked_follow "$BOOKED_CLAIM" "$BOOKED_LIVE_PID"
   fi
   if ! booked_claim_log "$runs" "$(booked_run_id)"; then
@@ -755,6 +763,7 @@ booked_detach() {  # the caller's whole part: attach or claim and start, report,
   fi
   id="${BOOKED_CLAIM##*/}"; id="${id%.log}"
   printf 'booked: started pid=%s log=%s run=%s\n' "$pid" "$BOOKED_CLAIM" "$id"
+  [ "$no_wait" -eq 0 ] || exit 0
   booked_follow "$BOOKED_CLAIM" "$pid"
 }
 
@@ -782,10 +791,19 @@ booked_run_open() {  # at the start of the tail, in the detached side
 # log's rc line and before `<log>.rc`, one line in the landing record of the plan this session is bound to (lib/run.sh
 # `session_plan`, the engaged marker's `plan=`, as every verb reads the binding; lib/line.sh `line_event`, through
 # `_wt_proofs_put`):
-#   line/v1|ev=run|log=<the log from the project root>|head=<40-hex>|dirty=<n>|rc=<n>|sha256=<log hash>|at=<ISO>
+#   line/v1|ev=run|log=<the log from the project root>|head=<40-hex>|dirty=<n>|rc=<n>|sha256=<log hash>|starter=<who>|at=<ISO>
 # the head and dirty count the stamp read before anything ran, the hash through lib/detect.sh `_detect_sha256`.
+# WHO STARTED IT is the command's own `--starter <tick|orchestrator|person>` when it names one of the three
+# (regression-run's flag, which the tick's whole run carries), else `orchestrator`: a run the shim books is the
+# machine's, and the hand-holds count reads a person's run alone (hooks/poker/line.sh `hand_holds_report`).
 # lib/proof.sh `_proof_floor_match` reads it as it reads floor-run's. A run with no git head, no valid
 # CLAUDE_CODE_SESSION_ID or no bound plan writes nothing (A-T4-5): there is no plan whose proof could cite it.
+booked_starter() {  # -> the run line's starter: the command's --starter when it is one of the three, else orchestrator
+  local v=" $cmd "
+  case "$v" in *" --starter "*) v="${v#* --starter }"; v="${v%%[!a-z]*}" ;; *) v="" ;; esac
+  case "$v" in tick|orchestrator|person) printf '%s' "$v" ;; *) printf 'orchestrator' ;; esac
+}
+
 booked_run_line() {
   local r sid="${CLAUDE_CODE_SESSION_ID:-}" plan sha
   case "$stamp_head" in ''|*[!0-9a-f]*) return 0 ;; esac
@@ -802,7 +820,8 @@ booked_run_line() {
   plan="$(session_plan "$r" "$sid" 2>/dev/null)" || return 0
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
   sha="$(_detect_sha256 "$run_log")" || return 0
-  line_event "$plan" run "log=${run_log#"$r"/}" "head=$stamp_head" "dirty=${stamp_dirty:-0}" "rc=$1" "sha256=$sha" 2>/dev/null
+  line_event "$plan" run "log=${run_log#"$r"/}" "head=$stamp_head" "dirty=${stamp_dirty:-0}" "rc=$1" "sha256=$sha" \
+    "starter=$(booked_starter)" 2>/dev/null
   return 0
 }
 
