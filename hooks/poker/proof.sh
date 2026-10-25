@@ -146,16 +146,6 @@ proof_verdicts() {
   printf '%s\n' "$out"
 }
 
-# proof_run_counts <log> -> `<passed> <total>` from the last `Gating: <n> passed, <m> failed` verdict after the log's last
-# `head=` header, as the floor's own reader takes it (lib/proof.sh, the task-proof attest); nothing when the log has none,
-# for a project's own runner need not print one.
-proof_run_counts() {
-  awk '/^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { seen = 1; v = 0; next }
-    !seen { next }
-    /^Gating: [0-9]+ passed, [0-9]+ failed$/ { p = $2; f = $4; v = 1 }
-    END { if (v) print p, p + f }' "$1" 2>/dev/null
-}
-
   # THE REGRESSION SETTING (wave-31 T27; REQ-12 AC-12.1, AC-12.2; D4). Whether the run runs the
   # regression is a Step-0 setting, written once into the plan's frontmatter as `regression: <v>`,
   # which lib/walls.sh `validate_tests_block` (Step 5), lib/proof.sh `facts_owed` (Step 8) and the
@@ -948,26 +938,15 @@ PF_VERDICTS_LIST
       fi
       mv "$PV_NEW.v" "$PV_NEW"
     fi
-    # THE REGRESSION'S PROOF IS THE STACK'S HEALTH: the head's stack-health: line is written from the proof's head and the
-    # run's pass and total, red with the suites it left owed. It replaces the stub matrix-render writes and a line this
-    # verb wrote before; a declared n/a: or a person's own snapshot is their word and stays (matrix_head_line exit 5), and
-    # a plan with no matrix yet has no head to write (exit 3), the proof standing alone.
+    # THE REGRESSION'S PROOF IS THE STACK'S HEALTH: the head's stack-health: line is the judge's fact rendered by the one
+    # function every writer calls (lib/proof.sh `proof_health_put`), read from the copy that holds the new proof line and
+    # the plan's own landing record. It replaces the stub matrix-render writes and a line a writer rendered before; a
+    # declared n/a: or a person's own snapshot is their word and stays, and a plan with no matrix yet has no head to
+    # write, the proof standing alone.
     PF_SH=""
     if [ "$PF_KIND" = regression ]; then
-      PF_PASS=""; PF_TOTAL=""; _pf_nocount=""
-      while IFS='	' read -r _pf_real _pf_rel; do
-        [ -n "$_pf_real" ] || continue
-        _pf_n="$(proof_run_counts "$_pf_real")"
-        if [ -z "$_pf_n" ]; then _pf_nocount=1; continue; fi
-        PF_PASS=$(( ${PF_PASS:-0} + ${_pf_n%% *} )); PF_TOTAL=$(( ${PF_TOTAL:-0} + ${_pf_n#* } ))
-      done <<PF_COUNT_LIST
-$PF_PAIRS
-PF_COUNT_LIST
-      [ -z "$_pf_nocount" ] || { PF_PASS=""; PF_TOTAL=""; }
-      PF_SH="green"; [ -z "$PF_OWED" ] || PF_SH="red"
-      PF_SH="$PF_SH head=$PF_HEAD${PF_TOTAL:+ pass=$PF_PASS total=$PF_TOTAL}${PF_OWED:+ owed=$PF_OWED} evidence=$PF_REL"
-      _pf_rc=0; matrix_head_line "$PV_NEW" stack-health "$PF_SH" '^(pending$|green head=|red head=)' > "$PV_NEW.v" 2>/dev/null || _pf_rc=$?
-      if [ "$_pf_rc" = 0 ] && [ -s "$PV_NEW.v" ]; then mv "$PV_NEW.v" "$PV_NEW"; else rm -f "$PV_NEW.v"; PF_SH=""; fi
+      proof_health_put "$PV_NEW" "$PV_REPO" "$PV_PLAN" || :
+      PF_SH="$PROOF_HEALTH"
     fi
     # A REVIEW THAT FOLLOWS THE BUILD GOES BACK TO WAITING (wave-26 T14; D10). The active review
     # row reading `live:head` (`units_live_rows`, the kind default included) whose `Files` hold
