@@ -891,9 +891,16 @@ expect_eq "WR-3 AC-6.1 a second whole run at the same green head: refused (exit 
 expect_contains "WR-3b …saying the head has its whole run" "runs once at a head" "$OD_OUT"
 
 printf 'b.test.sh\n' > "$OD/tests/red"; od_git commit -qam 'b breaks'; OD_H="$(od_git rev-parse HEAD)"
+# A head past a whole run is run again: the verb passes every refusal a head-past-the-run once drew and is stopped
+# only by the dirty tree planted here, the refusal that stands just before the runner, so nothing runs and no log
+# is written at H, where the red run below is left as the verb leaves one.
+printf 'dirt\n' >> "$OD/lib/b.sh"
 od_poke regression-run
-expect_eq "FX-1 AC-14.3 a new head H past the one whole run: regression-run refuses a second (exit 1), no second log" "1|1" "$OD_RC|$(od_logs)"
-expect_contains "FX-1b …naming the whole run's head" "${OD_B:0:12} has it" "$OD_OUT"
+od_git checkout -q -- lib/b.sh
+expect_eq "FX-1 a new head H past the one whole run: regression-run is not refused as a second whole run; it reaches the dirty-tree check before the runner (exit 1, no log)" \
+  "1|1" "$OD_RC|$(od_logs)"
+expect_contains "FX-1b …the refusal is the dirty tree's, the last one before the runner" "is dirty (dirty=1)" "$OD_OUT"
+expect_absent "FX-1d …and no refusal names the whole run's head as having the run" "${OD_B:0:12} has it" "$OD_OUT"
 # THE RED RUN THE PLAN'S WHOLE RUN WAS, left at H as the verb leaves one: the runner's own report as the log's body, the
 # run line through the product's writer, and the per-suite facts through the fold.
 OD_PLANT=0
@@ -914,9 +921,13 @@ expect_true "FX-2 the fix commit C with no run of its own is not covered (FX-1b 
     printf 'line/v1|ev=verdict|row=T6|commit=%s|suite=%s|result=green|log=/fixture/T6.log|at=2026-10-12T12:05:00Z\n' "$OD_C" "$od_s"
   done; } >> "$(od_lrec)"
 expect_eq "FX-3 AC-6.2 the fix row green on its own suite and the red one: the head is accepted" "covered" "$(od_state)"
+printf 'dirt\n' >> "$OD/lib/b.sh"
 od_poke regression-run
-expect_eq "FX-4 AC-6.2 …and no second whole run is asked: regression-run at C refuses (exit 1), no log" "1|2" "$OD_RC|$(od_logs)"
-expect_contains "FX-4b …saying the head is proved" "is already proved" "$OD_OUT"
+od_git checkout -q -- lib/b.sh
+expect_eq "FX-4 …and a covered head C is run again: regression-run at C is not refused as proved; it reaches the dirty-tree check before the runner (exit 1, no log)" \
+  "1|2" "$OD_RC|$(od_logs)"
+expect_contains "FX-4b …the refusal is the dirty tree's, the last one before the runner" "is dirty (dirty=1)" "$OD_OUT"
+expect_absent "FX-4c …and no refusal says the head is already proved" "is already proved" "$OD_OUT"
 od_git checkout -q -b row/T7; printf 'three\n' > "$OD/lib/b.sh"; od_git commit -qam 'T7: a second fix'; OD_R="$(od_git rev-parse HEAD)"
 od_git checkout -q wave/01-fixture; od_git merge -q --no-ff -m 'land T7 by hand' row/T7; OD_M="$(od_git rev-parse HEAD)"
 OD_S3="$(od_state)"

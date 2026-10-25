@@ -968,5 +968,61 @@ expect_contains "(ce3b) …naming the landing" "settled by the landing of T1 at 
 ST_MW="$(ll_poker "$ST" matrix-set AC-1.2 task=T1)"; ST_MWRC=$?
 expect_eq "(ce4) matrix-set on a row no landing settled still writes (exit 0)" "0" "$ST_MWRC"
 
+section "§STARTER: a whole run the tick or the orchestrator started is no hand-hold; a person's past the first is one"
+# `regression-run --starter <tick|orchestrator|person>` writes `starter=` on its `ev=run` line. The hand-holds count
+# reads `second-regressions` from those lines: a regression run past the record's first counts only when a person
+# started it, and a regression proof past the first counts as it always has only when its run line names no starter.
+# FIXTURE FIDELITY: the run lines carry the verb's own fields in its order, the proof lines are lib/proof.sh's own
+# `proof_line`, the count is landing-report --hand-holds as session-poker.sh runs it. fails-when: a run the machine
+# started counts, a person's second run is not counted, a person's proved run counts twice, or a proof of a run line
+# with no starter stops counting.
+sr_report() {  # <root> -> the hand-holds counts line of the root's plan
+  ( cd "$1" && CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO/payload" \
+      bash "$BIONIC_HOOKS_DIR/session-poker.sh" landing-report --hand-holds "$(ll_plan "$1")" 2>/dev/null ) | grep '^hand-holds: '
+}
+sr_second() { sr_report "$1" | sed -n 's/.*· second-regressions=\([0-9]*\) ·.*/\1/p'; }   # <root> -> the count alone
+sr_hex() { local i s=""; for i in $(seq "$2"); do s="$s$1"; done; printf '%s' "$s"; }   # <char> <n> -> the char n times
+sr_run() {  # <head char> <minute> [starter] -> one ev=run line of a regression run, in regression-run's field order
+  local h; h="$(sr_hex "$1" 40)"
+  printf 'line/v1|ev=run|log=record/wave-x/regression-run-%s.log|head=%s|dirty=0|rc=0|sha256=%s%s|at=2026-10-20T10:%s:00Z\n' \
+    "$h" "$h" "$(sr_hex e 64)" "${3:+|starter=$3}" "$2"
+}
+sr_proofs() {  # <root> <head char>… -> one regression proof per head, citing that head's run log, under ## SDLC State
+  local p c h add=""; p="$(ll_plan "$1")"; shift
+  for c in "$@"; do
+    h="$(sr_hex "$c" 40)"
+    add="$add$(bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; proof_line regression "$2" 2026-10-20T11:00:00Z "$3"' _ \
+      "$REPO/payload/scripts/lib" "$h" "record/wave-x/regression-run-$h.log")"$'\n'
+  done
+  # through the environment: macOS awk refuses a -v value holding a line break
+  SR_ADD="$add" awk '{ print } /^- T2: / && !d { printf "%s", ENVIRON["SR_ADD"]; d = 1 }' "$p" > "$p.w" && mv "$p.w" "$p"
+}
+
+# (sr1) two runs the tick started, then a person's, then the orchestrator's, then a proof of each.
+SR1="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$SR1")")"
+{ sr_run a 01 tick; sr_run b 02 tick; } > "$(ll_rec "$SR1")"
+expect_contains "(sr0) precondition: the report prints its counts line for the world, second-regressions among them" \
+  "· second-regressions=" "$(sr_report "$SR1")"
+expect_eq "(sr1) two regression runs the tick started: second-regressions=0" "0" "$(sr_second "$SR1")"
+sr_run c 03 person >> "$(ll_rec "$SR1")"
+expect_eq "(sr2) …and a third that a person started, past the first: second-regressions=1" "1" "$(sr_second "$SR1")"
+sr_run d 04 orchestrator >> "$(ll_rec "$SR1")"
+expect_eq "(sr2b) …and a fourth the orchestrator started adds nothing: still 1" "1" "$(sr_second "$SR1")"
+sr_proofs "$SR1" a b c d
+expect_eq "(sr2c-0) precondition: the plan holds the four regression proofs" "4" "$(grep -c '^proved: kind=regression ' "$(ll_plan "$SR1")")"
+expect_eq "(sr2c) …and a proof of each of the four runs adds nothing: the person's run counts once, the machine's proofs none" \
+  "1" "$(sr_second "$SR1")"
+
+# (sr3) the older record: run lines with no starter, each proved; the proof past the first counts as before.
+SR3="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$SR3")")"
+{ sr_run a 01; sr_run b 02; } > "$(ll_rec "$SR3")"
+sr_proofs "$SR3" a b
+expect_eq "(sr3) two runs with no starter, both proved: the proof past the first counts, second-regressions=1" "1" "$(sr_second "$SR3")"
+# (sr4) the same two proofs over run lines the tick started read nothing.
+SR4="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$SR4")")"
+{ sr_run a 01 tick; sr_run b 02 tick; } > "$(ll_rec "$SR4")"
+sr_proofs "$SR4" a b
+expect_eq "(sr4) …and the same two proofs of runs the tick started: second-regressions=0" "0" "$(sr_second "$SR4")"
+
 # ---------------------------------------------------------------------------
 finish

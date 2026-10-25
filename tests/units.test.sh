@@ -1094,14 +1094,14 @@ done <<EOF
 1.21.0 7d5a0f719fbbf106226a41cf93c17f1d0355ee12
 EOF
 
-section "§SECOND — regression-run at a head past the plan's whole run refuses a second whole run, one line, nothing run"
+section "§SECOND — regression-run at a head past the plan's whole run runs it again, and at the head the run read too"
 # ============================================================
 
 # FIXTURE FIDELITY: one real repository on its working branch; the plan bound to a session through the product's own
 # binder; the whole run recorded through the product's own writers (tests/lib/regression-fixture.sh); the verb is
 # session-poker.sh run as that session. The project's regression is a command that writes a marker file, so a run
-# that started leaves proof of it and a refusal leaves none. fails-when: a second whole run starts past the first,
-# or the refusal fires at the head the whole run read.
+# that started leaves proof of it and a refusal leaves none. fails-when: a head past the recorded whole run is
+# refused a run of the declared regression, or the head the whole run read is.
 SEC_SID="5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a"
 SEC_ROOT="$SANDBOX/second"; mkdir -p "$SEC_ROOT"; SEC="$SEC_ROOT/repo"
 SEC_PLAN="$SEC/.bionic/docs/plans/epic-99-fixture/wave-01-second.plan.md"; SEC_REL="record/wave-01-second"
@@ -1134,11 +1134,11 @@ rm -f "$SEC_ROOT/ran"
 printf 'two\n' > "$SEC/a.sh"; sec_git commit -qam 'a fix row lands'; SEC_H1="$(sec_git rev-parse HEAD)"
 SEC_N="$(sec_logs)"
 sec_poke
-expect_eq "SEC-1 the working head is H+1, past the whole run at H: refused (exit 1), nothing ran (no marker), no log written" \
-  "1|no|$SEC_N" "$SEC_RC|$(sec_ran)|$(sec_logs)"
-expect_eq "SEC-1b …in one line, naming the whole run's head and that a fix row's landing proves the head" \
-  "poker: REFUSED — the whole run runs once, and ${SEC_H:0:12} has it ($SEC_REL/regression-run-$SEC_H.log): a red suite is a fix row's, and a fix row's landing proves the head ${SEC_H1:0:12}. Nothing was run." \
-  "$SEC_OUT"
+expect_eq "SEC-1 the working head is H+1, past the whole run at H: the regression runs (exit 0, marker written, one more log)" \
+  "0|yes|$((SEC_N + 1))" "$SEC_RC|$(sec_ran)|$(sec_logs)"
+expect_contains "SEC-1b …and the verb reports the run at H+1, with its log" \
+  "regression-run — head=$SEC_H1 dirty=0 rc=0 evidence=$SEC_REL/regression-run-$SEC_H1.log" "$SEC_OUT"
+expect_absent "SEC-1c …and no refusal names the whole run at H" "runs once" "$SEC_OUT"
 
 
 # ============================================================
