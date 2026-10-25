@@ -32,6 +32,8 @@
 #   §SECOND  regression-run at a head past the plan's whole run refuses a second whole run in one
 #            line with nothing run, and at the head the whole run read it does not refuse
 #   §STEP-FIELD  units_step_field reads the first key line of the block units_step_fields writes
+#   §DEBT    a review-born row inside fix-policy: is exempt from fix-cap:, a promoted or carried one counts;
+#            task-add's cap refusal, its fourth-fix refusal and its count line each go red when removed
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT (AC-1e.2, measure §4.3). Before this library two
 # readers in hooks/canonical-sdlc-evidence-gate.sh took `id`/`rigor`/`status` as awk fields
@@ -1180,6 +1182,180 @@ expect_eq "SF-4 a key the block does not carry: exit 2, nothing printed" "2|" "$
 sf_get "$SF_PLAN" 5 adr
 expect_eq "SF-5 a step with no line: exit 1, nothing printed" "1|" "$SF_RC|$SF_OUT"
 
+
+# ============================================================
+section "§DEBT — the review-born count: exempt under fix-policy: or counted, and the three task-add rules each held by a row a removal turns red"
+# ============================================================
+# A review-born row rated inside fix-policy: is exempt from fix-cap:; one the person promoted from outside it, or one
+# born of a finding in another plan's record directory, counts. `units_born_counted` is the one reader of that test,
+# and the landing line and task-add read it. The rows below pin the reader, the landing line's count, and the three
+# rules task-add holds on a born row: the cap refusal, the fourth fix on one file, and the count its line prints.
+# FIXTURE FIDELITY: planted plans in the shape s34's fixture writes (tests/session-poker.prelude.sh), the born markers
+# in the shapes `task-add --born` writes them, the readings in `proof-add review`'s shape; every task-add is the real
+# verb, run as a session bound to the plan through the product's own binder, against the shipped tree and against a
+# copy of it with one rule removed (hooks/ beside scripts/, the tree's own scripts and library linked in, as
+# session-poker-5's §CHECK mutant is built).
+# fails-when: the reader calls an exempt row counted or a promoted or carried one exempt; the landing line prints one
+# total; the cap refusal, the fourth-fix refusal or the count on task-add's line is removed and no row here goes red.
+DB_SID="6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b"
+DB_ROOT="$SANDBOX/debt"; mkdir -p "$DB_ROOT/home" "$DB_ROOT/config/bionic" "$DB_ROOT/gate" "$DB_ROOT/no-plugins"
+DB_OWN="record/wave-01-debt"; DB_CARRIED="record/wave-00-prior"
+db_plan() {  # <repo> <fix-cap> <tasks rows> <ledger lines> [<frontmatter line>] -> the plan path, bound to DB_SID
+  local f="$1/.bionic/docs/plans/epic-99-fixture/wave-01-debt.plan.md" h
+  mkdir -p "${f%/*}" "$1/.bionic/docs/specs/epic-99-fixture" "$1/.bionic/docs/$DB_OWN" "$1/.bionic/docs/$DB_CARRIED"
+  printf '# requirements\n' > "$1/.bionic/docs/specs/epic-99-fixture/wave-01-debt.requirements.md"
+  printf '# spec\n' > "$1/.bionic/docs/specs/epic-99-fixture/wave-01-debt.spec.md"
+  h="$(git -C "$1" rev-parse HEAD 2>/dev/null)"
+  printf 'reviewed: %s..%s\nquestion: adversarial\nresult: fail\nscope: piece\n\nfindings: 2\nfinding: 1 S2 on lib/c1.sh:1 the first carried defect\nfinding: 2 S2 on lib/c2.sh:1 the second carried defect\nshown: 1 cat lib/c1.sh\nshown: 2 cat lib/c2.sh\n' \
+    "$h" "$h" > "$1/.bionic/docs/$DB_CARRIED/critic.md"
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+    printf 'rigor: double\nfix-cap: %s\n%sscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n' "$2" "${5:+$5
+}"
+    printf 'walk: exempt\ndeploy_target: n/a\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
+    printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\n'
+    printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n'
+    printf 'proved: kind=review head=%s at=2026-10-20T00:00:00Z evidence=%s/critic.md question=adversarial reader=w-adv result=fail scope=piece\n\n' "$h" "$DB_CARRIED"
+    printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-debt.requirements.md\n'
+    printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-debt.spec.md\n'
+    printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-debt.plan.md\n'
+    printf -- '- Step 4: opened\n  worktree: .worktrees/01-debt\n  base-sha: abc1234\n  branch: wave/01-debt\n'
+    printf -- '- T1: landed at record/T1.md\n- T2: dispatched to w-T2\n%s- T5: pending dispatch — .worktrees/01-T5\n\n' "${4:+$4
+}"
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |\n'
+    printf '| T2 | 4 | build | the second build | implementor | — | 30 | REQ-1 | b.sh | 01-T2 | abc1234 | active |\n'
+    printf '%s' "${3:+$3
+}"
+    printf '| T5 | 5 | verify | the floor | test-runner | T1, T2 | 30 | REQ-1 | — | — | — | pending |\n\n'
+  } > "$f"
+  bound_marker "$1" "$DB_SID" "$f" >/dev/null 2>&1 || :
+  printf '%s' "$f"
+}
+db_repo() {  # <label> -> a fresh repository with one commit, engaged by DB_SID
+  local r="$DB_ROOT/$1"
+  rm -rf "$r"; mkdir -p "$r/.bionic/tmp"
+  git -C "$r" init -q; git -C "$r" -c user.email=dana@fixture.test -c user.name="Dana Fixture" commit -q --allow-empty -m init
+  : > "$r/.bionic/tmp/engaged-$DB_SID.state"
+  printf '%s' "$r"
+}
+db_row() { printf '| %s | 4 | build | fix %s | implementor | — | 30 | REQ-1 | %s | — | — | pending |' "$1" "$1" "$2"; }   # <id> <files>
+db_led() { printf -- '- %s: pending dispatch — added by task-add at 2026-10-20T00:00:00Z born: %s' "$1" "$2"; }   # <id> <marker>
+db_poke() {  # <poker> <repo> <id> <files> <born> -> DB_OUT, DB_RC: task-add of a step-4 build row as DB_SID
+  DB_RC=0
+  DB_OUT="$(cd "$2" && env CLAUDE_CODE_SESSION_ID="$DB_SID" HOME="$DB_ROOT/home" CLAUDE_CONFIG_DIR="$DB_ROOT/config" \
+    BIONIC_GATE_DIR="$DB_ROOT/gate" BIONIC_PLUGINS_DIR="$DB_ROOT/no-plugins" \
+    bash "$1" task-add "$3" 4 build "Fix $3. The defect is gone." bionic:implementor '—' 30 REQ-1 "$4" --born "$5" 2>&1)" || DB_RC=$?
+}
+db_lib() { bash -c '. "$1/units.sh" >/dev/null 2>&1 && . "$1/run.sh" >/dev/null 2>&1 || exit 9; shift; "$@"' _ "$REPO_ROOT/payload/scripts/lib" "$@"; }
+
+# ---------- the reader: exempt or counted, per row ----------
+DBR="$(db_repo reader)"
+DB_ROWS="$(db_row T3 lib/x.sh)
+$(db_row T4 lib/y.sh)
+$(db_row T6 lib/z.sh)
+$(db_row T7 lib/w.sh)
+$(db_row T8 lib/v.sh)"
+DB_LEDS="$(db_led T3 'review S2 on')
+$(db_led T4 "review S3 on of=$DB_OWN/rev.md#1 promoted")
+$(db_led T6 "review S2 on of=$DB_CARRIED/critic.md#1")
+$(db_led T7 "review S1 off of=$DB_OWN/rev.md#2")
+$(db_led T8 'regression a.test.sh of=floor')"
+PDR="$(db_plan "$DBR" 2 "$DB_ROWS" "$DB_LEDS")"
+expect_eq "DEBT-1 units_born_counted: the policy's own rows exempt, the promoted and the carried rows counted, the regression-born row absent" \
+  "T3	S2 on	exempt
+T4	S3 on	counted
+T6	S2 on	counted
+T7	S1 off	exempt" "$(db_lib units_born_counted "$PDR")"
+expect_eq "DEBT-1b …and units_born, which the fourth-fix rule reads, still names every review-born row with its Files" \
+  "T3	S2 on	lib/x.sh
+T4	S3 on	lib/y.sh
+T6	S2 on	lib/z.sh
+T7	S1 off	lib/w.sh" "$(db_lib units_born "$PDR")"
+PDR1="$(db_plan "$DBR" 2 "$DB_ROWS" "$DB_LEDS" 'fix-policy: S1')"
+expect_eq "DEBT-2 the policy is the plan's own: at fix-policy: S1 the S2 on row is counted, the S1 off row still exempt" \
+  "T3	S2 on	counted
+T4	S3 on	counted
+T6	S2 on	counted
+T7	S1 off	exempt" "$(db_lib units_born_counted "$PDR1")"
+PDR="$(db_plan "$DBR" 2 "$DB_ROWS" "$DB_LEDS")"
+expect_eq "DEBT-3 the landing line prints the counted rows against the cap, the exempt ones beside" \
+  "review-born rows: 2 of cap 2 (2 exempt)" \
+  "$(bash -c '. "$1/line.sh" >/dev/null 2>&1 || exit 9; _line_review_born "$2"' _ "$REPO_ROOT/payload/scripts/lib" "$PDR")"
+
+# ---------- the three rules on task-add, each against the shipped tree and a copy with it removed ----------
+DB_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+db_cap() {  # <poker> -> green when a counted row past fix-cap: 1 is refused naming the count and its exit
+  local r p
+  r="$(db_repo cap)"
+  p="$(db_plan "$r" 1 "$(db_row T3 lib/c1.sh)" "$(db_led T3 "review S2 on of=$DB_CARRIED/critic.md#1")")"
+  db_poke "$1" "$r" T6 lib/c2.sh "$DB_CARRIED/critic.md#2"
+  case "$DB_RC|$DB_OUT" in
+    "1|"*"task-add refused — review-born rows: 1 of cap 1 are counted (0 exempt under fix-policy: S1,S2-on); this finding goes to the review findings disposition, or the person raises the cap: set fix-cap=2 at the card."*) echo green ;;
+    "0|"*) [ -n "$(/usr/bin/grep '^- T6: ' "$p")" ] && echo "red: admitted" || echo "red: exit 0 with no row" ;;
+    *) echo "red: $DB_RC" ;;
+  esac
+}
+db_file() {  # <poker> -> green when a fourth review-born row on one file is refused
+  local r p
+  r="$(db_repo file)"
+  p="$(db_plan "$r" 9 "$(db_row T3 lib/x.sh)
+$(db_row T4 lib/x.sh)
+$(db_row T6 lib/x.sh)" "$(db_led T3 'review S2 on')
+$(db_led T4 'review S2 on')
+$(db_led T6 'review S2 on')")"
+  db_poke "$1" "$r" T7 lib/x.sh 'review S2 on'
+  case "$DB_RC|$DB_OUT" in
+    "1|"*"task-add refused — a fourth fix on lib/x.sh: T3, T4, T6 already fix it"*) echo green ;;
+    "0|"*) [ -n "$(/usr/bin/grep '^- T7: ' "$p")" ] && echo "red: admitted" || echo "red: exit 0 with no row" ;;
+    *) echo "red: $DB_RC" ;;
+  esac
+}
+db_count() {  # <poker> -> green when task-add's line says the row was exempt, and a counted one its count
+  local r p a b
+  r="$(db_repo count)"
+  p="$(db_plan "$r" 2 "" "")"
+  db_poke "$1" "$r" T6 lib/e.sh 'review S2 on'; a="$DB_RC|$(printf '%s\n' "$DB_OUT" | /usr/bin/grep 'is review-born')"
+  db_poke "$1" "$r" T7 lib/c1.sh "$DB_CARRIED/critic.md#1"; b="$DB_RC|$(printf '%s\n' "$DB_OUT" | /usr/bin/grep 'is review-born')"
+  case "$a" in "0|"*" · exempt under fix-policy: S1,S2-on") : ;; "0|"*) echo "red: no exempt"; return ;; *) echo "red: $a"; return ;; esac
+  case "$b" in "0|"*" · counted 1 of 2") echo green ;; "0|"*) echo "red: no count" ;; *) echo "red: $b" ;; esac
+}
+expect_eq "DEBT-4 the cap: a counted row past fix-cap: 1 is refused, naming the count and its exit" "green" "$(db_cap "$DB_POKER")"
+expect_eq "DEBT-5 the fourth fix on one file is refused" "green" "$(db_file "$DB_POKER")"
+expect_eq "DEBT-6 task-add's line says which count it applied: exempt under the policy, or counted <n> of <cap>" "green" "$(db_count "$DB_POKER")"
+
+db_mutant() {  # <name> <ERE of the line to remove> -> the mutant poker's path; `<name>.n` holds the count removed
+  local m="$DB_ROOT/mut-$1" s
+  # From empty: a link made over an existing link to a directory would land inside the tree it points at.
+  rm -rf "$m"; mkdir -p "$m/hooks" "$m/scripts"
+  for s in "$REPO_ROOT/payload/scripts"/*; do ln -s "$s" "$m/scripts/$(basename "$s")"; done
+  for s in "${BIONIC_HOOKS_DIR}"/*; do
+    case "$(basename "$s")" in session-poker.sh|poker) continue ;; esac
+    ln -s "$s" "$m/hooks/$(basename "$s")"
+  done
+  cp "$DB_POKER" "$m/hooks/session-poker.sh"; cp -R "${BIONIC_HOOKS_DIR}/poker" "$m/hooks/poker"
+  # The line and, for a refusal, the `exit 1` under it become `:`, so the verb goes on past the rule and nothing else changes.
+  awk -v re="$2" 'skip && /^[[:space:]]*exit 1[[:space:]]*$/ { print ":"; skip = 0; next } { skip = 0 }
+    $0 ~ re { print ":"; n++; skip = 1; next } { print } END { print n + 0 > "/dev/stderr" }' \
+    "${BIONIC_HOOKS_DIR}/poker/plan.sh" > "$m/hooks/poker/plan.sh" 2> "$DB_ROOT/mut-$1.n"
+  printf '%s' "$m/hooks/session-poker.sh"
+}
+db_mut_ok() {  # <name> <mutant> -> `1 0 differs` when one line was removed, the copy parses, and it is not the shipped file
+  printf '%s %s %s' "$(cat "$DB_ROOT/mut-$1.n")" "$(bash -n "${2%/session-poker.sh}/poker/plan.sh" >/dev/null 2>&1; echo "$?")" \
+    "$(cmp -s "${2%/session-poker.sh}/poker/plan.sh" "${BIONIC_HOOKS_DIR}/poker/plan.sh" && echo same || echo differs)"
+}
+DBM_CAP="$(db_mutant cap 'die "task-add refused — review-born rows: ')"
+expect_eq "DEBT-7 precondition: the cap mutant removes the one cap refusal, parses, and differs" "1 0 differs" "$(db_mut_ok cap "$DBM_CAP")"
+expect_eq "DEBT-7b with the cap refusal removed, DEBT-4's check goes red: the counted row past the cap is admitted" "red: admitted" "$(db_cap "$DBM_CAP")"
+DBM_FILE="$(db_mutant file 'die "task-add refused — a fourth fix on ')"
+expect_eq "DEBT-8 precondition: the fourth-fix mutant removes the one refusal, parses, and differs" "1 0 differs" "$(db_mut_ok file "$DBM_FILE")"
+expect_eq "DEBT-8b with the fourth-fix refusal removed, DEBT-5's check goes red: the fourth row on lib/x.sh is admitted" "red: admitted" "$(db_file "$DBM_FILE")"
+DBM_COUNT="$(db_mutant count 'say "task-add — [$]TA_ID is review-born ')"
+expect_eq "DEBT-9 precondition: the count mutant removes the one line, parses, and differs" "1 0 differs" "$(db_mut_ok count "$DBM_COUNT")"
+expect_eq "DEBT-9b with the count line removed, DEBT-6's check goes red: the row lands and its line says no count" "red: no exempt" "$(db_count "$DBM_COUNT")"
 
 # ============================================================
 finish
