@@ -400,12 +400,23 @@ walk_register() {  # <repo> <record path> <question> <reader> [old] -> writes th
       for id in reuse one-site single-job open-closed substitution narrow-interface dependency-direction; do
         printf 'check: %s PASS nothing found\n' "$id"; done
     fi
-    printf '\nwhat the reader found\n'; } > "$repo/$rec"
+    printf '\nwhat the reader found\n'
+    # A single-rigor evidence record is read for its verdicts when it registers (the `old` form is the
+    # double-rigor auditor's, which is not): the table names the criterion the walk plan's matrix carries.
+    if [ "$q" = evidence ] && [ "$form" != old ]; then
+      printf '\n| AC | verdict | why |\n|---|---|---|\n| AC-1.1 | CONFIRMED | the walk holds |\n\nverdict: CONFIRMED — the one criterion has a row\n'
+    fi; } > "$repo/$rec"
   WALK_OUT=$(cd "$repo" && env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$SID_A" \
     bash "${BIONIC_HOOKS_DIR}/session-poker.sh" proof-add review "${rec#.bionic/docs/}" \
       --question "$q" --reader "$4" 2>&1); WALK_RC=$?
 }
 WALK_REC=".bionic/docs/record/wave-01-test"
+# The walk's bound plan carries no matrix of its own, and a single-rigor evidence registration writes its
+# verdicts into one: the table is the shape the verb reads (an AC row of five cells, auditor last).
+walk_matrix() {  # <repo> -> the bound plan, given a one-row verification matrix
+  printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1.1 | T2 | pending | — | — |\n' \
+    >> "$1/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+}
 
 # ---- double: the critic dealt adversarial and structure ----
 WALK_PR="$(walk_fill "adversarial, structure" "$WALK_REC/T3-adversarial.md, $WALK_REC/T3-structure.md" none)"
@@ -456,6 +467,7 @@ expect_eq "§scaffold-walk single: the critic dealt evidence, naming its run, is
 expect_eq "§scaffold-walk …its row carries the three records" \
   "$WALK_REC/T3-evidence.md,$WALK_REC/T3-adversarial.md,$WALK_REC/T3-structure.md" \
   "$(roster_field "$(q_row "$REPO")" files)"
+walk_matrix "$REPO"
 walk_start "$REPO" wq-walk3
 for _wq in evidence adversarial structure; do
   walk_register "$REPO" "$WALK_REC/T3-${_wq}.md" "$_wq" wq-walk3
@@ -525,6 +537,7 @@ REPO=$(walk_repo rwalk7 single)
 q_gate "$REPO" walk7 bionic:critic "$(walk_fill_re "evidence, adversarial, structure" "$WALK_TRECS" A)"
 expect_eq "§scaffold-walk single: the critic, Suites: none beside its pytest run, is ADMITTED" "allow" "$GATE_VERDICT"
 expect_eq "§scaffold-walk …its row carries the run" "\`$WALK_RUN\`" "$(roster_field "$(q_row "$REPO")" re_executes)"
+walk_matrix "$REPO"
 walk_start "$REPO" wq-walk7
 for _wq in evidence adversarial structure; do
   walk_register "$REPO" "$WALK_REC/T3-${_wq}.md" "$_wq" wq-walk7

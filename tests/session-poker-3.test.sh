@@ -549,7 +549,11 @@ S57T_CHECKS="$(awk '/^- \*\*[a-z][a-z-]*\*\*/ { s = $0; sub(/^- \*\*/, "", s); s
   "${BIONIC_HOOKS_DIR}/../payload/context/checks-structure.md")"
 for s57q in evidence adversarial structure; do
   { printf 'reviewed: %s..%s\nquestion: %s\nresult: pass\nscope: piece\n' "$S57T_B" "$S57T_C1" "$s57q"
-    [ "$s57q" = structure ] && printf '%s\n' "$S57T_CHECKS"; printf '\nwhat the reader found\n'; } > "$S57T_REC/$s57q.md"
+    [ "$s57q" = structure ] && printf '%s\n' "$S57T_CHECKS"; printf '\nwhat the reader found\n'
+    # A single-rigor evidence record is read for its verdicts when it registers: the table names the
+    # fixture plan's one criterion as its matrix spells it, and the wave's verdict stands on its own line.
+    [ "$s57q" = evidence ] && printf '\n| AC | verdict | why |\n|---|---|---|\n| AC-1.1 | CONFIRMED | the fixture holds |\n\nverdict: CONFIRMED — the one criterion has a row\n'
+    :; } > "$S57T_REC/$s57q.md"
 done
 s34_gate "$R57T"
 expect_eq "57t0b precondition: the task-scale fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
