@@ -36,8 +36,12 @@
 #       (wave-27 T29, T42; D21): as written when the one reader records it, else `./<entry>`
 #       when that is recorded, else nothing it can be spelt as (rc 2)
 #   brief_field <lifted> <kind>        -> one kind's value, bounded as the roster row stores it
-#   brief_validate_fields <lifted> <subagent_type> <root> <sink>
+#   brief_validate_fields <lifted> <subagent_type> <root> <sink> [<suites that exist>]
 #       -> rc 0: no finding · rc 1: at least one
+#       <suites that exist> is the caller's fact, the `*.test.sh` basenames its collector listed under
+#       tests/, space-separated: a `Suites:` entry outside it (and not a file the same brief's `Files:`
+#       names) is refused by name. Absent or empty, no membership is judged: a project with no suite
+#       under tests/ has nothing to be outside of. The wall lists nothing itself.
 #       sets BRIEF_SUITES_ALLOWED and BRIEF_SUITES_SOURCE (`declared` or empty), the two values
 #       the roster row records: the brief's own Suites: set (wave-31 T2, nothing derived)
 #       calls `<sink> finding <fact> <fix> <detail>` once per fault, in the order the dispatch
@@ -1596,7 +1600,7 @@ brief_body_advisories() {
 # brief_validate_fields <lifted> <subagent_type> <root> <sink> — every check the contract
 # fields feed, in the dispatch wall's order. See the header for the rc and the sink calls.
 brief_validate_fields() {
-  local lifted="${1-}" role="${2-}" root="${3-}" sink="${4-}"
+  local lifted="${1-}" role="${2-}" root="${3-}" sink="${4-}" exist="${5-}" missing="" s_name s_file
   local files suites re_executes runs_bad suites_bad suites_dropped runs_dropped suites_commented
   local files_unread files_bad entry fact fix questions no_instrument=""
   local cap capw detail suites_comment found=0
@@ -1830,6 +1834,43 @@ Or, where they are shell suites, spell the *.test.sh path —
 
 Then retry the dispatch."
     found=1; "$sink" finding "Suites: names a file the shell runner cannot run" "use Re-executes:" "$detail"
+  fi
+
+  # ===================================== A Suites: ENTRY IS A SUITE THAT EXISTS, FROM THE CALLER'S SET
+  # `*.test.sh` is a grammar, so `Suites: nosuch.test.sh` lifted onto the row as a budget no file could
+  # fill. The caller hands the names its collector found under tests/ (the fifth argument); an entry
+  # outside them is refused, unless the same brief's Files: names the file, which is a suite the row
+  # creates. Judged on what was handed and nothing else: an unset or empty set judges nothing.
+  if [ -n "$exist" ] && [ -n "$suites" ] && [ "$suites" != none ]; then
+    for s_name in $suites; do
+      case "$s_name" in *.test.sh) ;; *) continue ;; esac
+      case " $exist " in *" $s_name "*) continue ;; esac
+      s_file=0
+      while IFS= read -r entry; do
+        [ "${entry##*/}" = "$s_name" ] && { s_file=1; break; }
+      done <<BRIEF_SUITE_FILES
+$(printf '%s' "$files" | tr ',' '\n')
+BRIEF_SUITE_FILES
+      [ "$s_file" = 1 ] || missing="${missing:+$missing }$s_name"
+    done
+  fi
+  if [ -n "$missing" ]; then
+    s_name="${missing%% *}"
+    if [ "${#s_name}" -le 28 ]; then fact="Suites: ${s_name} is no file in tests/"
+    else fact="Suites: ${s_name:0:27}… is no file in tests/"; fi
+    detail="The Suites: span offered a name that no file under tests/ carries:
+    ${missing}
+
+A suite is a file the runner can run, and the row's budget is only as good as its names: a
+writer given a name with no file runs nothing the wall can match, and the landing proves nothing.
+
+Fix: name a suite that exists —
+    Suites: <name>.test.sh
+or, for a suite this task creates, name its file on the Files: line as well —
+    Files: tests/${s_name}
+
+Then retry the dispatch."
+    found=1; "$sink" finding "$fact" "name a suite that exists" "$detail"
   fi
 
   # ============================================== THE SUITE-ALLOWANCE WALL (AC-20)
