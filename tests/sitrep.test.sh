@@ -1672,18 +1672,18 @@ sr_world names "6 6 12 12"
 sed -i.bak -e 's#^\(| T10 | 4 | build | [^|]*| — | — | \)—#\1lib/t5.sh,lib/t6.sh,lib/t7.sh#' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
 sed -i.bak -e 's/^\(| T11 | .*| 30 | REQ-1 | lib\/t11.sh | — | — | \)pending/\1held/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
 sr_cell T1 "$SR_LONG300"
-sr_cell T13 "Alpha one (the aside). and the rest"
-sr_cell T14 "Beta two: its colon. and the rest"
-sr_cell T15 "Gamma three. and the rest"
+sr_cell T13 "Alpha one (the aside). And the rest"
+sr_cell T14 "Beta two: its colon. And the rest"
+sr_cell T15 "Gamma three. And the rest"
 sr_cell T16 "Delta four · and the rest"
 sr_ev "ev=ready|row=T6|name=w-T6|commit=$SR_C1|branch=wt/02-T6|tree=$SR_REPO/.worktrees/02-T6|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T13:30:00Z"
 sr_ev "ev=verdict|row=T7|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T7.log|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "NM1 a 300-character cell with no delimiter is the whole description, on the one line" "yes|1" \
   "$([ "$(sr_f "$(sr_task T1)" desc)" = "$SR_LONG300" ] && echo yes)|$(sr_lines task | /usr/bin/grep -c '^task: id=T1 ')"
-expect_eq "NM2 the description is the title: it stops at the first \". \", else at the first \" · \", keeping a paren or a colon before it, and the rest of the cell never prints" \
+expect_eq "NM2 the description is the title: a period ends it before a space and a capital, else the first \" · \" does, keeping a paren or a colon before it, and the rest of the cell never prints" \
   "Alpha one (the aside)|Beta two: its colon|Gamma three|Delta four|0" \
-  "$(for t in T13 T14 T15 T16; do sr_f "$(sr_task "$t")" desc; done | sr_join)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'and the rest')"
+  "$(for t in T13 T14 T15 T16; do sr_f "$(sr_task "$t")" desc; done | sr_join)|$(printf '%s\n' "$OUT" | /usr/bin/grep -ci 'and the rest')"
 expect_eq "NM3 the note of each kind: done a time, next on the line, queued behind, building, red, waiting on each of three, waiting on one, held" \
   "T1 landed 3:06 AM|T8 next on the line|T6 queued behind 4/8|T5 building|T7 red|T10 waits on 4/5, 4/6 and 4/7|T9 waits on 4/8|T11 held" \
   "$(for t in T1 T8 T6 T5 T7 T10 T9 T11; do printf '%s %s\n' "$t" "$(sr_f "$(sr_task "$t")" note)"; done | sr_join)"
