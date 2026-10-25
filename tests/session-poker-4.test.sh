@@ -1870,6 +1870,40 @@ expect_contains "WK-12b …named in the refusal" "head: 012345678901234567890123
 poke "$RWK" matrix-set AC-1.3 status=blocked
 poke "$RWK" landing-report --hand-holds --since "$WK_SINCE"
 expect_contains "WK-13 control: a matrix-set status write in the same window is counted (status-writes=1)" "· status-writes=1 ·" "$OUT"
+
+# ---------- AC-8.3: the walk row's landing settles the cells, in deliver's own write ----------
+# A record row has no commit, so it lands through deliver, never ready: a verify row whose artifact is a wave's walk
+# record is registered by the landing itself. The control is the same deliver with the walk test removed in a doctored
+# copy: it lands the row and settles nothing, so the cells read here are the landing's doing.
+WK_DREL="record/wave-02-fixture/walk.md"; mkdir -p "$RWK/.bionic/docs/record/wave-02-fixture"
+awk '{ print } /^\| T5 \| 5 \| verify \|/ { print "| T6 | 5 | verify | the walk | — | T1, T2 | 30 | REQ-1 | .bionic/docs/'"$WK_DREL"' | — | — | pending |" }' \
+  "$PWK" > "$PWK.tmp" && mv "$PWK.tmp" "$PWK"
+wk_task() { s48_row "$PWK" "$1" | awk -F'|' '{ print $NF }'; }   # <row> -> its status cell
+wk_cell() { wk_row "$1" | awk -F'|' '{ gsub(/ /, "", $4); gsub(/ /, "", $5); print $4 " " $5 }'; }   # <AC> -> status evidence
+wk_rec ../wave-02-fixture/walk - - '| AC-1.3 | CONFIRMED | the scorecard read the register |'
+s42_snap "$RWK" "$PWK"; poke "$RWK" deliver T6
+s42_unchanged "WK-14 AC-8.3 deliver of the walk row whose record has no verdict: line" 1 "$PWK"
+expect_contains "WK-14b …the landing refused naming the walk record and the line it lacks" "$WK_DREL" "$OUT"
+expect_contains "WK-14c …(and the line)" "verdict:" "$OUT"
+wk_rec ../wave-02-fixture/walk 'verdict: CONFIRMED — the scorecard read the register' - '| AC-1.3 | CONFIRMED | the scorecard read the register |'
+s42_snap "$RWK" "$PWK"
+rd_mutant nowalk 's/RL_WALK="\$rel"; RL_WALK_REAL="\$real"/:/'
+expect_eq "WK-15-pre the doctored poker differs from the real one in exactly one line (the doctor took)" "1" \
+  "$(diff <(poker_text "$POKER") <(poker_text "$RD_MUT/nowalk/hooks/session-poker.sh") | /usr/bin/grep -c '^>')"
+WK_REAL_POKER="$POKER"; POKER="$RD_MUT/nowalk/hooks/session-poker.sh"
+poke "$RWK" deliver T6
+POKER="$WK_REAL_POKER"
+expect_eq "WK-15 control: with the walk test removed, deliver lands the row (exit 0) and settles nothing: AC-1.3 stays blocked, no walk proof" \
+  "0|landed|blocked record/wave-01-fixture/walk-again.md|0" "$RC|$(wk_task T6)|$(wk_cell AC-1.3)|$(s46_proved "$PWK" | /usr/bin/grep -c "evidence=$WK_DREL\$")"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+cp "$TMPROOT/s42-before" "$PWK"
+poke "$RWK" deliver T6
+expect_eq "WK-16 §WALK AC-8.3 deliver lands the walk row (exit 0) and the plan shows its CONFIRMED row discharged with the record" \
+  "0|landed|discharged $WK_DREL" "$RC|$(wk_task T6)|$(wk_cell AC-1.3)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "WK-16b …in the landing's write: the walk proof, both pointers, and one ev=walk line naming it" \
+  "1|walk-artifact: $WK_DREL|walk-artifact: $WK_DREL|1" \
+  "$(s46_proved "$PWK" | /usr/bin/grep -c "^proved: kind=walk head=$WK_C .* evidence=$WK_DREL\$")|$(wk_step5)|$(wk_head walk-artifact)|$(wk_ev walk | /usr/bin/grep -c "|record=$WK_DREL|discharged=1|")"
 POKE_BOUND="$WK_BOUND_WAS"
 
 finish
