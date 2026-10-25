@@ -1730,6 +1730,12 @@ EOF
   # that does not have five cells. The plan transaction, as every plan verb.
   poker_verb_discharge() {
     plan_verb_open discharge
+    # AT SINGLE RIGOR NO AUDITOR IS SENT: the critic answers the evidence question, and registering its record writes
+    # the auditor cells from its verdict table, so a cell written here would be a verdict nobody gave.
+    if [ "$(plan_frontmatter_get "$PV_PLAN" rigor 2>/dev/null)" = single ]; then
+      die "REFUSED — $PV_PLAN runs at rigor: single, where the critic answers the evidence question and the verdict table of its record writes the auditor cells; register that record: bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question evidence --reader <critic>. The plan is unchanged."
+      exit 1
+    fi
     PV_RC=0
     matrix_row_cells "$PV_PLAN" "$DS_AC" 5=CONFIRMED > "$PV_NEW" 2>/dev/null || PV_RC=$?
     case "$PV_RC" in

@@ -2636,6 +2636,38 @@ matrix_row_cell() {
       if (c == ENVIRON["MX_AC"]) { v = $(n + 1); gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$1"
 }
 
+# THE MATRIX HEAD'S LINES. Between the `## Verification Matrix` heading and its table stand the matrix's own flush-left
+# lines, `stack-health:` first, where matrix-render writes its stub and the gate reads them. One keyed line is written
+# `<key>: <value>`: a line of the key is replaced where it stands, and any second one dropped, so the head holds one;
+# with none, it goes under the `stack-health:` line, else under the heading. <own>, an ERE, names the old values the
+# caller may replace: an old value outside it is a person's word and stays (exit 5, nothing printed). Fences skipped.
+# Exit 3: no matrix section.
+matrix_head_line() {  # <plan> <key> <value> [<own ERE>] -> the whole plan
+  MH_KEY="$2" MH_VAL="$3" MH_OWN="${4:-}" awk '
+    BEGIN { k = ENVIRON["MH_KEY"]; kre = "^[ \t]*" k "[ \t]*:"; line = k ": " ENVIRON["MH_VAL"]; own = ENVIRON["MH_OWN"] }
+    { L[++n] = $0 }
+    END {
+      for (i = 1; i <= n; i++) {
+        x = L[i]
+        if (x ~ /^[ \t]*```/) { fence = !fence; continue }
+        if (fence) continue
+        if (x ~ /^## /) { if (head) break; if (x ~ /^## Verification Matrix/) head = i; continue }
+        if (!head) continue
+        if (x ~ /^[ \t]*\|/) break
+        if (x ~ kre) { if (!at) at = i; else drop[i] = 1 }
+        else if (x ~ /^[ \t]*stack-health[ \t]*:/ && !sh) sh = i
+      }
+      if (!head) exit 3
+      if (at && own != "") { v = L[at]; sub(kre, "", v); gsub(/^[ \t]+|[ \t]+$/, "", v); if (v !~ own) exit 5 }
+      for (i = 1; i <= n; i++) {
+        if (i in drop) continue
+        if (i == at) { print line; continue }
+        print L[i]
+        if (!at && i == (sh ? sh : head)) { if (!sh) print ""; print line }
+      }
+    }' "$1"
+}
+
 # THE AC BLOCK'S KEYS (wave-33 T7). The block is the `<AC>:` line under `## Verification Matrix`, text after the
 # colon allowed (matrix-render writes the criterion there), and the indented lines under it (matrix-render's shape,
 # the one walls.sh `matrix_block` reads); both read the heading through lib/units.sh `units_ac_head_awk` (wave-36 T24). The key's
