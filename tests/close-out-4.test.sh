@@ -292,8 +292,9 @@ section "§LANDS — wave-36 T14 (D13; REQ-7 AC-7.7; C70): close-out lands the r
 # this session's engaged marker, which is also its binding; it is wiped as close-out's last act, so a close-out
 # that refuses midway leaves the session engaged and its plan verbs working. On the delivered plan, a session that
 # re-engaged and bound it (bound-closed) may set cells with `task-set … --reason '<why>'`, which records the reason
-# on the row's step line; without --reason the delivered refusal stands. A session not engaged is refused at the
-# consent boundary (ruling r1791954201-85499).
+# on the row's step line; without --reason the delivered refusal stands. Engagement is the consent boundary for a
+# run still moving; a delivered run accepts its merge record and its continuation marks from any session that names
+# it (§DELIVERED) and nothing else, so task-set from a session not engaged is refused at that boundary.
 # fails-when: a delivered plan reads a row its merge landed as pending; task-set --reason on it is refused; the
 # marker is gone after a refusal midway.
 lands_rows() {  # <project> -> the plan gains T3 (step 8, integrate) and T4 (step 9, close), pending, each with its step line,
@@ -347,7 +348,7 @@ expect_eq "LANDS-5 the engaged marker is gone after run, and its removal is the 
   "$(tmp_file_exists "$PLA" engaged "$LA_SID")|$(printf '%s\n' "$CO_OUT" | tail -1 | /usr/bin/grep -q '^disengaged: ' && echo yes || echo no)"
 # task-set on the delivered plan: the session re-engages and binds it (bound-closed)
 lands_poker "$PLA" "$LA_SID" task-set T3 agent=w-merge --reason 'named the agent after delivery'
-expect_eq "LANDS-6 an unengaged session is refused at the consent boundary: rc 0, the plan unchanged" \
+expect_eq "LANDS-6 task-set is neither of the two facts a delivered run accepts by name: an unengaged session is refused at the consent boundary, rc 0, the plan unchanged" \
   "0|landed|—" "$LP_RC|$(lands_cell "$PLA" T3 11)|$(lands_cell "$PLA" T3 6)"
 expect_contains "LANDS-6b …saying NOT-ENGAGED" "NOT-ENGAGED" "$LP_OUT"
 # the session re-engages and binds its delivered plan by the verb (ruling r1791955629-34788): bound-closed
@@ -1029,5 +1030,91 @@ RO_ENDS="$( ( in_fixture "$RO_P" || exit 9
     BIONIC_GATE_DIR="$HH_GATE" bash "$BIONIC_HOOKS_DIR/session-poker.sh" landing-report --hand-holds "$RO_AFTER" 2>/dev/null ) | grep '^hand-holds window: ')"
 expect_regex "RO-5 the plan's delivered: time is a minute, as close-out writes it" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z$' "$RO_DEL"
 expect_contains "RO-5b …and the report read after the close names it as the window's end" "until $RO_DEL (delivered:)" "$RO_ENDS"
+
+# ============================================================
+section "§DELIVERED — a delivered run accepts its merge record and its continuation marks from any session that names it (REQ-10 AC-10.1; D5)"
+# ============================================================
+# close-out's last act wipes this session's engaged marker, so the two verbs that finish a delivered run, the
+# continuation's marks (`continuation-fill`) and the pull request's merge record (`step-field 8`), are run after the
+# consent boundary is gone. Engagement guards a run still moving; a delivered plan named by `--plan` accepts those two
+# from any session, engaged or not, and nothing else: a live plan named so from an unengaged session is NOT-ENGAGED,
+# and so is any other step of the delivered plan. The bound path (a session that re-bound its delivered plan) takes
+# `step-field 8` too. FIXTURE FIDELITY: the plan close-out itself delivered (`run_close … run`), read where the close
+# left it, carrying the `- Step 4:` line every plan past Step 4 has (a writer's dry commit is judged at current: 4);
+# the verbs are the real poker run in the fixture as a session with no engaged marker.
+# fails-when: either verb prints NOT-ENGAGED on a delivered plan; either writes a live plan from an unengaged session.
+dl_merge() {  # <plan> -> the value of the Step 8 block's merge: line
+  awk '/^- Step 8:/ { b = 1; next } b && /^[^ \t]/ { b = 0 } b && /^[ \t]+merge:/ { sub(/^[ \t]+merge:[ \t]*/, ""); print; exit }' "$1"
+}
+DL_SID="closeout-delivered-sid"
+PDL="$(mk_fixture delivered)"; advance_to "$PDL" 8; gov_step4 "$PDL" "implement: opened 2026-09-14T00:10Z"
+run_close "$PDL" run
+DL_PLAN="$(find "$PDL/.bionic/docs" -name "${PLAN_REL##*/}" -type f 2>/dev/null | head -1)"
+DL_CONT="$(find "$PDL/.bionic/docs" -name continuation.md -type f 2>/dev/null | head -1)"
+expect_eq "DL-0 precondition: close-out delivered the plan (rc 0, a Step 9 delivered: line) and wrote its continuation with the first-decision mark" \
+  "0|yes|yes" \
+  "$CO_RC|$(/usr/bin/grep -qE '^- Step 9: delivered: ' "$DL_PLAN" && echo yes || echo no)|$(/usr/bin/grep -qF '<fill: the first decision, or "none">' "$DL_CONT" && echo yes || echo no)"
+expect_nonempty "DL-0b precondition: the Step 8 block carries the merge: line close-out wrote" "$(dl_merge "$DL_PLAN")"
+lands_poker "$PDL" "$DL_SID" continuation-fill 'the first decision=none' --plan "$DL_PLAN"
+expect_eq "DL-1 continuation-fill --plan <delivered> from an unengaged session writes: rc 0, the mark filled, never NOT-ENGAGED" \
+  "0|no|no" \
+  "$LP_RC|$(/usr/bin/grep -qF '<fill: the first decision' "$DL_CONT" && echo yes || echo no)|$(contains "$LP_OUT" "NOT-ENGAGED")"
+expect_contains "DL-1b …the filled text stands where the mark was" "1. none" "$(cat "$DL_CONT")"
+lands_poker "$PDL" "$DL_SID" step-field 8 'merge=main @ 0123abc (pull request #45)' --plan "$DL_PLAN"
+expect_eq "DL-2 step-field 8 --plan <delivered> from an unengaged session writes the merge record: rc 0, the field replaced, never NOT-ENGAGED" \
+  "0|main @ 0123abc (pull request #45)|no" "$LP_RC|$(dl_merge "$DL_PLAN")|$(contains "$LP_OUT" "NOT-ENGAGED")"
+[ "$LP_RC" = 0 ] || printf '%s\n' "$LP_OUT" | tail -8 | sed 's/^/    | /'
+lands_poker "$PDL" "$DL_SID" step-field 8 --plan "$DL_PLAN" 'worktree-removed=wt/01-x (by the pull request)'
+expect_eq "DL-2b …the --plan operand may stand before the pair too" "0|yes" \
+  "$LP_RC|$(/usr/bin/grep -qF '  worktree-removed: wt/01-x (by the pull request)' "$DL_PLAN" && echo yes || echo no)"
+DL_CK="$(cksum < "$DL_PLAN")"
+lands_poker "$PDL" "$DL_SID" step-field 5 'auditor=CONFIRMED, record/x.md' --plan "$DL_PLAN"
+expect_eq "DL-3 any other step of the delivered plan, unengaged, is NOT-ENGAGED (rc 0) and the plan unchanged" "0|yes|$DL_CK" \
+  "$LP_RC|$(contains "$LP_OUT" "NOT-ENGAGED")|$(cksum < "$DL_PLAN")"
+# a live plan, named the same way from the same unengaged session: the consent boundary stands
+PLV="$(mk_fixture delivered-live)"; advance_to "$PLV" 8
+LV_CK="$(cksum < "$PLV/$PLAN_REL")"
+lands_poker "$PLV" "$DL_SID" step-field 8 'merge=main @ 0123abc' --plan "$PLV/$PLAN_REL"
+expect_eq "DL-4 step-field 8 --plan <live> from an unengaged session prints NOT-ENGAGED (rc 0), the plan unchanged" "0|yes|$LV_CK" \
+  "$LP_RC|$(contains "$LP_OUT" "NOT-ENGAGED")|$(cksum < "$PLV/$PLAN_REL")"
+mkdir -p "$PLV/${CONT_REL%/*}"; printf '# continuation\n\n1. <fill: the first decision, or "none">\n' > "$PLV/$CONT_REL"
+LV_CC="$(cksum < "$PLV/$CONT_REL")"
+lands_poker "$PLV" "$DL_SID" continuation-fill 'the first decision=none' --plan "$PLV/$PLAN_REL"
+expect_eq "DL-5 continuation-fill --plan <live> from an unengaged session prints NOT-ENGAGED (rc 0), the continuation unchanged" "0|yes|$LV_CC" \
+  "$LP_RC|$(contains "$LP_OUT" "NOT-ENGAGED")|$(cksum < "$PLV/$CONT_REL")"
+# the bound path: a session that re-bound its delivered plan writes the merge record with no --plan
+lands_bind "$PDL" "$DL_SID"
+lands_poker "$PDL" "$DL_SID" step-field 8 'merge=main @ 4567def (pull request #45, merged)'
+expect_eq "DL-6 bound to its delivered plan, step-field 8 writes the merge record: rc 0, the field replaced" \
+  "0|main @ 4567def (pull request #45, merged)" "$LP_RC|$(dl_merge "$DL_PLAN")"
+
+# ============================================================
+section "§MARKS — close-out fills every mark it can derive; the continuation keeps only the five a person owns (REQ-10 AC-10.2)"
+# ============================================================
+# The landings, the hand-holds line, the reviews and the governed-by lines are close-out's own readings, rendered in
+# full; what is left marked is what only the next session decides: the first decision, what was ruled at the close,
+# the version, the ideas path and the carry-overs. FIXTURE FIDELITY: a fresh continuation written by `run`.
+# fails-when: a mark close-out could fill reads `<fill:` after it exits, or one of the five is filled for the person.
+mk_marks() { /usr/bin/grep -o '<fill: [^>]*>' "$1" 2>/dev/null | awk '!s[$0]++'; }
+MK_FIVE='<fill: the first decision, or "none">
+<fill: what was ruled at this close, or "none">
+<fill: version>
+<fill: ideas path>
+<fill: carry-overs from this wave>'
+PMK="$(mk_fixture marks)"; advance_to "$PMK" 8
+run_close "$PMK" run
+MK_CONT="$PMK/$CONT_REL"
+expect_eq "MK-1 run exits 0 and the continuation's marks are exactly the five person-owned ones" "0|$MK_FIVE" "$CO_RC|$(mk_marks "$MK_CONT")"
+expect_contains "MK-2 …the card names the same five as owed" "continuation-owed: 5 marks only a person can fill" "$CO_OUT"
+mk_sec() { awk -v h="$2" '/^## / { s = ($0 == h); next } s && NF && !/^```/ { print }' "$1"; }
+expect_eq "MK-3 the four close-out fills are rendered: a landings line, a hand-holds line, the reviews sentence, a governed-by line" \
+  "yes|yes|yes|yes" \
+  "$(mk_sec "$MK_CONT" "## Landings" | /usr/bin/grep -q '^landings' && echo yes || echo no)|$(mk_sec "$MK_CONT" "## Hand-holds" | /usr/bin/grep -q '^hand-holds: ' && echo yes || echo no)|$(/usr/bin/grep -q '^Reviews: .*ADRs: ' "$MK_CONT" && echo yes || echo no)|$(mk_sec "$MK_CONT" "## Governed by" | /usr/bin/grep -q '^governed-by: ' && echo yes || echo no)"
+# the five filled by their verb from a session close-out let go of: the continuation then owes nothing
+for mk_f in 'the first decision=none' 'what was ruled=none' 'version=1.0.0' 'ideas path=docs/ideas.md' 'carry-overs=none'; do
+  lands_poker "$PMK" "$DL_SID" continuation-fill "$mk_f" --plan "$PMK/$PLAN_REL"
+done
+expect_eq "MK-4 the five filled by continuation-fill from an unengaged session: the last call says none left, the file holds no mark" \
+  "0|yes|" "$LP_RC|$(contains "$LP_OUT" "0 fill marks left")|$(mk_marks "$MK_CONT")"
 
 finish
