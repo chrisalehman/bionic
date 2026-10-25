@@ -1235,4 +1235,37 @@ expect_eq "SN-2 a third at the head the newest line names: refused, the plan byt
 expect_contains "SN-2b …recorded once at a head" "recorded once" "$OUT"
 git -C "$RFC" reset -q --hard "$FC_R"
 
+# ============================================================
+section "§OWED-LATER: a row owed at a later step is neither proved nor a decision; the card lists it as owed by the close"
+# ============================================================
+# A criterion is owed at the step whose task proves it, and the card reads a row through the gate's own predicate
+# (walls.sh `matrix_row_deferred`). A pending row whose task is the close row is owed by the close, so the card puts no
+# decision on it and its reply cannot waive it; the acceptance line names it. FIXTURE FIDELITY: FC_GOOD's plan with a
+# close row (step 9) and a third criterion pending under it, as a planner writes them.
+# fails-when: the row owed by the close is put under Decisions or opened as row:<AC>, or the line does not name it, or a
+# row whose task is a Step-4 row is let off the card.
+fc_owed_later() {  # <task value> -> PFC: FC_GOOD with T4 (step 9, close) and a third row (T3, pending) whose task: is <task value>
+  fc_plan "$FC_GOOD"
+  FC_OL_TASK="$1" awk '
+    { print }
+    /^\| T3 \| 8 \| integrate/ { print "| T4 | 9 | close | close-out, continuation.md | orchestrator | — | 10 | REQ-1 | .bionic/docs/record/wave-x/continuation.md | — | — | pending | merge |" }
+    /^\| AC-1\.2 \|/ { print "| AC-1.3 | T3 | pending | — |  |" }
+    END { print "AC-1.3:"; print "  fails-when: the close reads above zero"
+          print "  eval: T3 — `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close → `total=0`"
+          print "  task: " ENVIRON["FC_OL_TASK"]; print "  evidence: pending" }' "$PFC" > "$PFC.ol" && mv -f "$PFC.ol" "$PFC"
+}
+fc_owed_later T4
+fc_page --preview
+expect_contains "OL-1 precondition: the Decisions still put the unrun row AC-1.2" "AC-1.2" "$(fc_under Decisions)"
+expect_absent "OL-1b …and not the row the close owes" "AC-1.3" "$(fc_under Decisions)"
+expect_contains "OL-2 the acceptance line names it owed by the close" "1 owed by the close" "$(fc_acc)"
+expect_contains "OL-2b …and counts the three criteria" "1 of 3 criteria proved" "$(fc_acc)"
+fc_page
+expect_eq "OL-3 the recorded page opens row:AC-1.2 and no row:AC-1.3" "row:AC-1.2|" \
+  "$(fc_keys | /usr/bin/grep '^row:' | paste -sd'|' -)|$(fc_keys | /usr/bin/grep -x 'row:AC-1.3')"
+fc_owed_later T1
+fc_page --preview
+expect_contains "OL-4 control: the same row whose task is the Step-4 row is put under Decisions" "AC-1.3" "$(fc_under Decisions)"
+expect_absent "OL-4b …and the line names nothing owed by the close" "owed by the close" "$(fc_acc)"
+
 finish

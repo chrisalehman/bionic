@@ -159,4 +159,103 @@ Step 5:
 expect_block "continuation 'stack-health: pending' (whole value) → block" \
   "$h5f" 'git commit -m "x"' "placeholder"
 
+# ============================================================
+# Section 9: a criterion is owed at the step whose task proves it
+# ============================================================
+#
+# A matrix row's AC block names, in `task:`, the plan row whose work proves it. The row is owed at
+# that row's step: before it, a pending or blocked row owes neither its per-tier keys nor an
+# auditor's verdict, at any tier; from it on, it is judged as every other row. The literal `task: 9`
+# is the close's step, as before. A row owed at Step 9 is the close's to settle, so the gate never
+# demands it of an open plan; the close's own final act is what it waits for.
+# FIXTURE FIDELITY: the plan builders every matrix section uses, with a `## Tasks` table placed
+# before the matrix; the floor and readings a Step-7+ plan carries come from eg_floor.
+# fails-when: a pending T3 row whose task is a Step-9 row is refused at 6, 7 or 8, or a row whose task
+# is a Step-4 row is let through at 6, or the deferral outlives its owing step.
+
+section "Section 9: a criterion is owed at the step whose task proves it"
+
+ow_tasks="## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | implementor | — | 30m | REQ-1 | a.sh | landed |
+| T7 | 7 | doc | the release | orchestrator | — | 10 | REQ-1 | CHANGELOG.md | pending |
+| T9 | 9 | close | the close | orchestrator | — | 10 | REQ-1 | none | pending |"
+
+# ow_matrix <tier> <task value> -> the first row discharged and confirmed, the second pending with that tier and task:
+ow_matrix() {
+  printf '%s\n' "## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+| AC-2 | $1 | pending | — |  |
+
+AC-1:
+  fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
+  tier-run: bash test.sh — unit suite
+  readback: 332/332 asserted
+AC-2:
+  fails-when: the close reads above zero
+  eval: $1 — \`bash payload/hooks/session-poker.sh landing-report --hand-holds\` at the close reads total=0
+  task: $2
+  evidence: pending"
+}
+# ow_plan <current> <tier> <task value> -> the whole plan at that step, the Tasks table above the matrix
+ow_plan() {
+  local body p
+  case "$1" in
+    5) body="$step5_base" ;; 6) body="$step6_body" ;; 7) body="$v9_step7_body" ;;
+    8) body="$v9_step8_body" ;; 9) body="$v9_step9_body" ;;
+  esac
+  p="$(plan "$1" "$body" "$(ow_matrix "$2" "$3")" | OW_T="$ow_tasks" awk '/^## Verification Matrix/ { print ENVIRON["OW_T"]; print "" } { print }')"
+  if [ "$1" -ge 7 ]; then eg_floor "$p"; else printf '%s\n' "$p"; fi
+}
+ow_home() {  # <current> <tier> <task value> -> a sandbox holding that plan
+  local h; h=$(make_home); write_plan "$h" "$(ow_plan "$@")" > /dev/null; printf '%s' "$h"
+}
+
+for ow_c in 5 6 7 8; do
+  expect_allow "9a-$ow_c a pending T3 row whose task is a Step-9 row owes nothing at current $ow_c" \
+    "$(ow_home "$ow_c" T3 T9)" 'git commit -m "x"'
+done
+expect_allow "9b at current 9, the plan still open, the row is the close's own to settle" \
+  "$(ow_home 9 T3 T9)" 'git commit -m "x"'
+expect_allow "9c the literal task: 9 on a T0 row still defers to the close at current 8" \
+  "$(ow_home 8 T0 9)" 'git commit -m "x"'
+expect_allow "9d the literal task: 9 on a T3 row defers too: the tier says how, the step says when" \
+  "$(ow_home 6 T3 9)" 'git commit -m "x"'
+expect_block "9e a pending T3 row whose task is a Step-4 row still owes its evidence at 6" \
+  "$(ow_home 6 T3 T1)" 'git commit -m "x"' "AC-2 has placeholder evidence"
+expect_allow "9f a row whose task is a Step-7 row owes nothing at 6" \
+  "$(ow_home 6 T3 T7)" 'git commit -m "x"'
+expect_block "9g …and is owed from Step 7 on" \
+  "$(ow_home 7 T3 T7)" 'git commit -m "x"' "AC-2 has placeholder evidence"
+expect_allow "9h a task list is owed at the latest step it names (T1, T9 at 8)" \
+  "$(ow_home 8 T3 "T1, T9")" 'git commit -m "x"'
+
+# The two file-scope readers the judge and the card share with the gate, asked as hooks/poker/judge.sh asks them.
+ow_ask() {  # <plan> <function> [args…] -> what the function prints, then `rc=<n>`
+  bash -c 'L="$1"; shift; . "$L/root.sh" && . "$L/run.sh" && . "$L/units.sh" && . "$L/walls.sh" >/dev/null 2>&1 || exit 9
+    PLAN="$1"; RIGOR="$(plan_frontmatter_get "$1" rigor)"; shift; "$@"; echo "rc=$?"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$@"
+}
+ow_p8="$(write_plan "$(make_home)" "$(ow_plan 8 T3 T9 | awk '
+  /^\| AC-2 \|/ { print; print "| AC-3 | T3 | pending | — |  |"; next }
+  { print }
+  END { print "AC-3:"; print "  fails-when: the build is red"; print "  task: T1"; print "  evidence: pending" }')")"
+expect_eq "9i matrix_unruled at 8 names the row owed at 4 and not the row owed at the close" "AC-3
+rc=0" "$(ow_ask "$ow_p8" matrix_unruled "$ow_p8" 8)"
+expect_eq "9j the owing step of a row id is that row's step, read from the Tasks table" "9|4|7|9|9" \
+  "$(for t in T9 T1 T7 9 'T1, T9'; do ow_ask "$ow_p8" matrix_owing_step "$ow_p8" "  task: $t" | head -1; done | paste -sd'|' -)"
+ow_p9="$(write_plan "$(make_home)" "$(ow_plan 9 T3 T9)")"
+ow_p9d="$(write_plan "$(make_home)" "$(ow_plan 9 T3 T9 | awk '/^Step 9:/ { print "- Step 9: delivered: 2026-10-24T00:00Z wave-01"; skip = 1; next } skip && /^  / { next } { skip = 0; print }')")"
+expect_eq "9k a row owed at 9 is deferred while the plan is open, and owed once the Step-9 line carries delivered:" \
+  "rc=0|rc=1" "$(ow_ask "$ow_p9" matrix_row_deferred "$ow_p9" 9 9 pending | tail -1)|$(ow_ask "$ow_p9d" matrix_row_deferred "$ow_p9d" 9 9 pending | tail -1)"
+expect_eq "9l a discharged row is never deferred, and a pending one is before its step" "rc=1|rc=0" \
+  "$(ow_ask "$ow_p9" matrix_row_deferred "$ow_p9" 9 6 discharged | tail -1)|$(ow_ask "$ow_p9" matrix_row_deferred "$ow_p9" 9 6 pending | tail -1)"
+
 finish

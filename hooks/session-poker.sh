@@ -2637,47 +2637,6 @@ pv_next() {  # <verb> <operand>... -> the call on stderr, one line
   die "next call: $(launch_sync_hand "$@")"
 }
 
-# THE MATRIX ROW'S CELLS (discharge's row edit, wave-30 T14, made the one site at wave-33 T7). Inside
-# `## Verification Matrix`, fences skipped, the first `|` line whose trimmed first cell is the AC id has
-# each named cell (1 AC · 2 tier · 3 status · 4 evidence · 5 auditor) written ` <value> `, every other
-# byte as it was. It does not fold `\|` escapes; a matrix cell holds a path or a token. Exit 3 no row ·
-# 4 the row is not five cells.
-matrix_row_cells() {  # <plan> <AC> <cell n>=<value>... -> the whole plan
-  local plan="$1" ac="$2" set="" kv
-  shift 2
-  for kv in "$@"; do set="${set}${kv%%=*}	${kv#*=}
-"; done
-  MX_AC="$ac" MX_SET="$set" awk '
-    BEGIN {
-      a = ENVIRON["MX_AC"]; m = split(ENVIRON["MX_SET"], s, "\n")
-      for (k = 1; k <= m; k++) if ((t = index(s[k], "\t")) > 0) v[substr(s[k], 1, t - 1) + 1] = " " substr(s[k], t + 1) " "
-    }
-    /^[ \t]*```/ { fence = !fence; print; next }
-    fence { print; next }
-    /^## / { inm = ($0 ~ /^## Verification Matrix/); print; next }
-    inm && !done && /^[ \t]*\|/ {
-      n = split($0, c, "|"); id = c[2]; gsub(/^[ \t]+|[ \t]+$/, "", id)
-      if (id == a) {
-        if (n != 7) { bad = 1; exit }
-        for (j in v) c[j] = v[j]
-        out = c[1]; for (j = 2; j <= n; j++) out = out "|" c[j]
-        print out; done = 1; next
-      }
-    }
-    { print }
-    END { if (bad) exit 4; if (!done) exit 3 }' "$plan"
-}
-
-# matrix_row_cell <plan> <AC> <cell n> -> that cell of the AC's matrix row, trimmed (nothing: no row).
-matrix_row_cell() {
-  MX_AC="$2" awk -F'|' -v n="$3" '
-    /^[ \t]*```/ { fence = !fence; next }
-    fence { next }
-    /^## / { inm = ($0 ~ /^## Verification Matrix/); next }
-    inm && /^[ \t]*\|/ { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c)
-      if (c == ENVIRON["MX_AC"]) { v = $(n + 1); gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$1"
-}
-
 # THE MATRIX HEAD'S LINES. Between the `## Verification Matrix` heading and its table stand the matrix's own flush-left
 # lines, `stack-health:` first, where matrix-render writes its stub and the gate reads them. One keyed line is written
 # `<key>: <value>`: a line of the key is replaced where it stands, and any second one dropped, so the head holds one;
@@ -2706,39 +2665,6 @@ matrix_head_line() {  # <plan> <key> <value> [<own ERE>] -> the whole plan
         if (i == at) { print line; continue }
         print L[i]
         if (!at && i == (sh ? sh : head)) { if (!sh) print ""; print line }
-      }
-    }' "$1"
-}
-
-# THE AC BLOCK'S KEYS (wave-33 T7). The block is the `<AC>:` line under `## Verification Matrix`, text after the
-# colon allowed (matrix-render writes the criterion there), and the indented lines under it (matrix-render's shape,
-# the one walls.sh `matrix_block` reads); both read the heading through lib/units.sh `units_ac_head_awk` (wave-36 T24). The key's
-# first line is replaced where it stands; a key the block lacks goes after its last line. Exit 3 no block.
-matrix_block_key() {  # <plan> <AC> <key> <value> -> the whole plan
-  MB_AC="$2" MB_KEY="$3" MB_VAL="$4" awk "$(units_ac_head_awk)"'
-    BEGIN { a = ENVIRON["MB_AC"]; k = ENVIRON["MB_KEY"] ":"; line = "  " ENVIRON["MB_KEY"] ": " ENVIRON["MB_VAL"] }
-    { L[++nl] = $0 }
-    END {
-      for (i = 1; i <= nl; i++) {
-        x = L[i]
-        if (x ~ /^[ \t]*```/) { fence = !fence; continue }
-        if (fence) continue
-        if (x ~ /^## /) { inm = (x ~ /^## Verification Matrix/); inb = 0; continue }
-        if (!inm) continue
-        y = x; sub(/[ \t]+$/, "", y)
-        if (!found && ac_head(x, a)) { found = i; last = i; inb = 1; continue }
-        if (inb && x ~ /^[ \t]+[^ \t]/) {
-          last = i; sub(/^[ \t]+/, "", y)
-          if (!at && index(y, k) == 1) at = i
-          continue
-        }
-        inb = 0
-      }
-      if (!found) exit 3
-      for (i = 1; i <= nl; i++) {
-        if (i == at) { print line; continue }
-        print L[i]
-        if (!at && i == last) print line
       }
     }' "$1"
 }

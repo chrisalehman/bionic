@@ -2521,21 +2521,26 @@ BRF_EOF
     printf '%s' "$v"
   }
 
-  # rr_rows <plan> -> `<AC>\037<tier>\037<status>\037<auditor>\037<ruled 1|0>` per five-cell matrix row, table order.
-  # THE RULING IS walls.sh's: each row is read by its readers (`matrix_section`, `matrix_block`, `user_confirmed_value`,
-  # `matrix_row_waiver`) and judged by `matrix_row_ruled`, sourced in a subshell as the facts judge sources it, so the
-  # card and the gate cannot answer one row two ways. The auditor cell is printed as `placeholder_cell` folds it, `-`
-  # when it means none, so `—`, `-`, `n/a` and an empty cell read alike. Exit 2 when walls.sh cannot be loaded: the
-  # card never guesses a ruling.
+  # rr_rows <plan> <current> -> `<AC>\037<tier>\037<status>\037<auditor>\037<ruled 1|0|owed:<step>>` per five-cell
+  # matrix row, table order. THE RULING IS walls.sh's: each row is read by its readers (`matrix_section`, `matrix_block`,
+  # `user_confirmed_value`, `matrix_row_waiver`) and judged by `matrix_row_ruled`, sourced in a subshell as the facts
+  # judge sources it, so the card and the gate cannot answer one row two ways. A row the gate defers at <current>
+  # (`matrix_row_deferred`: owed at the later step whose task proves it) is `owed:<step>`, not ruled and not unruled:
+  # nothing has run that could prove it, and the step that runs it writes it. The auditor cell is printed as
+  # `placeholder_cell` folds it, `-` when it means none, so `—`, `-`, `n/a` and an empty cell read alike. Exit 2 when
+  # walls.sh cannot be loaded: the card never guesses a ruling.
   rr_rows() {
     [ -f "$BIONIC_LIB/walls.sh" ] || return 2
-    ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F matrix_row_ruled >/dev/null 2>&1 || exit 2
+    ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F matrix_row_ruled >/dev/null 2>&1 \
+        && declare -F matrix_row_deferred >/dev/null 2>&1 || exit 2
       PLAN="$1"; MATRIX="$(matrix_section)"
       while IFS=$'\037' read -r ac tier status ev aud; do
         [ -n "$ac" ] || continue
         block="$(matrix_block "$ac")"
         waiver=0; matrix_row_waiver "$ev" "$block" && waiver=1
         ruled=0; matrix_row_ruled "$tier" "$status" "$aud" "$(user_confirmed_value "$block")" "$waiver" && ruled=1
+        owe="$(matrix_owing_step "$PLAN" "$block")"
+        [ "$ruled" = 1 ] || ! matrix_row_deferred "$PLAN" "$owe" "$2" "$status" || ruled="owed:$owe"
         aud="$(placeholder_cell "$aud")"
         printf '%s\037%s\037%s\037%s\037%s\n' "$ac" "$tier" "$status" "${aud:--}" "$ruled"
       done <<RR_MATRIX
@@ -2778,8 +2783,8 @@ RR_WAIVES
     # so ruled under an empty-like auditor cell is one the user confirmed; waived when ruled with status waived. Every
     # other row is a decision: a discharged T4 row under an empty-like cell is the user's own check, to confirm
     # (confirm-row) or waive; any other is waived or run, a T4 row's standing finding said in the gate's words.
-    RR_ACT=0; RR_ACP=0; RR_ACY=0; RR_ACW=0; RR_ACU=0; RR_ACA=0; RR_ACR=0; RR_MISS=""
-    if ! RR_ROWS="$(rr_rows "$PV_PLAN")"; then
+    RR_ACT=0; RR_ACP=0; RR_ACY=0; RR_ACW=0; RR_ACU=0; RR_ACA=0; RR_ACR=0; RR_ACC=0; RR_ACL=0; RR_MISS=""
+    if ! RR_ROWS="$(rr_rows "$PV_PLAN" "$PV_CUR")"; then
       die "REFUSED — the release approval card asks walls.sh for each matrix row's ruling, and $BIONIC_LIB/walls.sh cannot be loaded; nothing is written."
       exit 2
     fi
@@ -2792,6 +2797,8 @@ RR_WAIVES
         continue
       fi
       if [ "$ruled" = 1 ] && [ "$st" = waived ]; then RR_ACW=$((RR_ACW + 1)); continue; fi
+      # A ROW OWED AT A LATER STEP IS NO DECISION: the step that proves it writes it, the close for a row owed at 9.
+      case "$ruled" in owed:9) RR_ACC=$((RR_ACC + 1)); continue ;; owed:*) RR_ACL=$((RR_ACL + 1)); continue ;; esac
       RR_MISS="${RR_MISS:+$RR_MISS }$ac"
       if [ "$tier" = T4 ] && [ "$au" = - ] && [ "$st" = discharged ]; then
         RR_ACA=$((RR_ACA + 1))
@@ -2819,6 +2826,8 @@ RR_ROWS_EOF
       [ "$RR_ACU" -eq 0 ] || line="${line:+$line, }$RR_ACU not confirmed by the auditor"
       [ "$RR_ACA" -eq 0 ] || line="${line:+$line, }$RR_ACA awaiting your confirmation"
       [ "$RR_ACR" -eq 0 ] || line="${line:+$line, }$RR_ACR not run"
+      [ "$RR_ACC" -eq 0 ] || line="${line:+$line, }$RR_ACC owed by the close"
+      [ "$RR_ACL" -eq 0 ] || line="${line:+$line, }$RR_ACL owed at a later step"
       if [ -z "$RR_MISS" ]; then RR_TACC="✅"; else RR_TACC="✖️"; fi
       RR_TACC="$RR_TACC acceptance — $RR_ACP of $(rr_plural "$RR_ACT" criterion criteria) proved${line:+; $line}"
     fi
