@@ -731,10 +731,8 @@ expect_contains "RV-1c: …naming the verb it refused" "session-poker.sh confirm
 run_hook "$(mk_payload "$R_RV" "$RV_CMD")"
 expect_status "RV-2: the orchestrator's own confirm-row passes the wall" 0 "$ST"
 expect_absent "RV-2b: …and that arm's line is absent on the same stream RV-1b read" "$RV_ARM" "$ERR"
-# `matrix-retier` rewrites a criterion's tier, eval and evidence cells, so it changes the plan's contract and is the
-# run's, never a writer's. The same arm holds it beside matrix-set.
-RV_RT="bash ${BIONIC_HOOKS_DIR}/session-poker.sh matrix-retier AC-x tier=T2 eval='x'"
-run_hook "$(mk_payload "$R_RV" "$RV_RT" "$ACTOR" "" Bash test-runner)"
+# `matrix-retier` rewrites a criterion's tier, eval and evidence cells: the run's act, held by the same arm.
+RV_RT="bash ${BIONIC_HOOKS_DIR}/session-poker.sh matrix-retier AC-x tier=T2 eval='x'"; run_hook "$(mk_payload "$R_RV" "$RV_RT" "$ACTOR" "" Bash test-runner)"
 expect_status "RV-3: a dispatched agent's matrix-retier is refused" 2 "$ST"
 expect_contains "RV-3b: …with the wall's line" "$RV_ARM" "$ERR"
 expect_contains "RV-3c: …naming the verb it refused" "session-poker.sh matrix-retier" "$ERR"
