@@ -13,6 +13,9 @@
 # line, a forbidden word — each of which must fail. A predicate that a doctored copy passes is not
 # pinning anything, so the doctored half is what proves the shipped half means something.
 #
+# §DIGIN and §REFERENT plant whole briefs and read them through the same extractor: a reply line
+# carries its dig-in command and nothing follows it; the context names the thing it is about.
+#
 # §SHAPE AC-11.1 (its rows 1-2 with §PIN 12-13 are AC-12.4's §LABELS) · §FORMS AC-11.4 · §REPLY
 # AC-11.5 · §PIN AC-11.6 · §SIZE AC-11.7, AC-12.4 · §CORE the core rule's static half (AC-11.2's live
 # half is another row's) · §NUMBER AC-12.1 · §GOAL AC-12.2 · §BATCH AC-12.3 · §ALTITUDE AC-13.1 ·
@@ -51,7 +54,7 @@ HEADING='**D<n> · <what is decided, in a few words>**'
 KINDS='How a rule is enforced|How a shared resource is shared|What a wave builds'
 # The skill's size cap: raised to carry the worked pairs and the put command.
 SIZE_CAP=11000
-REPLY_LINE='Reply 1, 2 or 3 · or matrix, diagram, page'
+REPLY_LINE='Reply 1, 2 or 3 · or matrix, diagram, page · to see <the thing>: `<dig-in command>`'
 LABELS='Goal Options Recommendation Significance'
 
 TMP="$(mktemp -d)"
@@ -110,12 +113,70 @@ altitude_ok() {
   ! grep -qi 'delineate the choices' "$1"
 }
 
+# reply_tail <file> -> the layout's last non-blank line: where a brief ends.
+reply_tail() { layout "$1" | sed '/^[[:space:]]*$/d' | tail -1; }
+
 # reply_last_ok <file> — the layout's last non-blank line is the reply line, byte for byte.
 # Bash string equality, never awk `==`: the line carries a multibyte middle dot.
 reply_last_ok() {
   local last
-  last="$(layout "$1" | sed '/^[[:space:]]*$/d' | tail -1)"
+  last="$(reply_tail "$1")"
   [ "$last" = "$REPLY_LINE" ]
+}
+
+# DIGIN_ERE — a reply line that carries its dig-in: the option numbers and any forms, then one
+# command in backticks after "to see <the thing>:", and the line ends on it.
+DIGIN_ERE='^Reply [0-9][^`]* · to see [^:`]+: `(git show [0-9a-f]{7,40}|show task [0-9]+|show finding [^ `#]+#[0-9]+)`$'
+
+# digin_ok <file> — a brief about a specific thing ends on a reply line carrying its dig-in
+# command, so a line after the reply line, or a reply line without the command, fails. The brief
+# is read the way the shipped shape is: its first text fence, through reply_tail.
+digin_ok() {
+  grep -qE "$DIGIN_ERE" <<<"$(reply_tail "$1")"
+}
+
+# digin_kind <file> -> what the reply line's command shows: commit, task or finding.
+digin_kind() {
+  case "$(reply_tail "$1" | sed -E 's/.*`([^`]+)`$/\1/')" in
+    'git show '*)     echo commit ;;
+    'show task '*)    echo task ;;
+    'show finding '*) echo finding ;;
+  esac
+}
+
+# context_of <file> -> the context paragraph: the non-blank lines between the Goal line and the
+# first option (the Options label, or the first numbered option when the label is elided).
+context_of() {
+  layout "$1" | awk '/^\*\*Goal:\*\*/ { g = 1; next } g && (/^\*\*Options:\*\*/ || /^[0-9]+\. /) { exit } g && NF { print }'
+}
+
+# referent_ok <file> — the context is present and names the kind of thing the dig-in command
+# shows (the commit, the task, the finding): a context that only says "a change you ordered"
+# leaves the reader asking which one.
+referent_ok() {
+  local ctx kind
+  ctx="$(context_of "$1")"; kind="$(digin_kind "$1")"
+  [ -n "$ctx" ] && [ -n "$kind" ] || return 1
+  grep -qiw "$kind" <<<"$ctx"
+}
+
+# context_rule_ok <file> — the skill rules the paragraph between Goal and Options: owed whenever
+# the decision is about a specific thing, never pastes the artifact, and the dig-in is named in
+# its three forms.
+context_rule_ok() {
+  grep -qi 'owed whenever the decision is about a specific thing' "$1" || return 1
+  grep -qi 'never pastes the artifact' "$1" || return 1
+  grep -qF 'git show <sha>' "$1" || return 1
+  grep -qF 'show task <n>' "$1" || return 1
+  grep -qF 'show finding <record>#<n>' "$1"
+}
+
+# altitude_scoped_ok <file> — every line that bars identifiers or research-style detail names the
+# Goal as what it governs, so no line reads as barring them from the whole brief.
+altitude_scoped_ok() {
+  local bad
+  bad="$(grep -iE 'identifiers|files, functions, tables and versions' "$1" | grep -vc 'Goal')"
+  [ "$bad" = 0 ] && grep -qiE 'identifiers|files, functions, tables and versions' "$1"
 }
 
 # reply_rules_ok <file> — the line is last with nothing after it, lists only forms not yet shown
@@ -301,5 +362,80 @@ expect_false "16b: a copy naming climb fails the words pin" words_ok "$TMP/climb
 expect_true "17a: the skill directory holds SKILL.md" test -f "${REPO}/skills/decision/SKILL.md"
 expect_empty "17b: …and nothing that is not markdown (no script, hook or store runs per decision)" \
   "$(find "${REPO}/skills/decision" -type f ! -name '*.md')"
+
+
+# ── a decision brief is read through the same extractor as the shape ─────────
+
+# ACCEPTED_BRIEF — the brief the user accepted, as the ideas file writes it (its third version), the
+# block-quote marks removed. Copied here so the suite owns its fixture; the drift row below reads
+# the ideas file when it is present.
+read -r -d '' ACCEPTED_BRIEF <<'BRIEF'
+**Goal:** Decide whether the last change ships on your word or waits for a review.
+
+The commit that removed the plan argument from the sitrep skill, landed on your ruling this morning, came after the critic's last review. Evidence provenance now requires every commit past a review to carry a review or your waiver, and this one has neither.
+
+1. Waive on your word: the release moves now.
+2. The critic reads it: about ten minutes, nothing of yours; the release waits.
+
+**Recommendation:** Option 1, because a review earns its place only when it can fail in a way nothing already run can, and the suite that pins that text is green. Not 2: it spends a review to confirm a change you dictated.
+
+**Significance:** None beyond this landing. Reversible in minutes.
+
+Reply 1 or 2 · to see the change: `git show 3225216af`
+BRIEF
+
+# plant <name> <text> -> $TMP/<name>.md holding the text in a text fence, the form `layout` reads.
+plant() { printf '```text\n%s\n```\n' "$2" > "$TMP/$1.md"; }
+
+section "§DIGIN — the reply line carries the dig-in command, and nothing follows it"
+
+IDEAS="${REPO}/.bionic/docs/ideas/decision-context.md"
+if [ -f "$IDEAS" ]; then
+  written="$(awk '/^> \*\*Goal:\*\* Decide whether the last change ships/ { on = 1 } on { print } on && /^> Reply 1 or 2/ { exit }' "$IDEAS" | sed -E 's/^> ?//')"
+  expect_eq "DR-0: the embedded accepted text is the ideas file's third version, as written" "$written" "$ACCEPTED_BRIEF"
+fi
+
+plant accepted "$ACCEPTED_BRIEF"
+expect_nonempty "DR-1: the extractor finds the accepted brief's layout" "$(layout "$TMP/accepted.md")"
+expect_nonempty "DR-1b: …and its context paragraph" "$(context_of "$TMP/accepted.md")"
+
+expect_true "DG-1: the accepted brief ends on a reply line carrying its command" digin_ok "$TMP/accepted.md"
+expect_eq "DG-1b: …and the command shows a commit" "commit" "$(digin_kind "$TMP/accepted.md")"
+
+plant bare "${ACCEPTED_BRIEF/ · to see the change: \`git show 3225216af\`/}"
+expect_eq "DG-2a: the command-less copy ends on a bare reply line" "Reply 1 or 2" "$(reply_tail "$TMP/bare.md")"
+expect_false "DG-2b: a brief about a commit whose reply line carries no command is refused" digin_ok "$TMP/bare.md"
+
+plant trailing "$ACCEPTED_BRIEF"$'\n\n''To dig in: `git show 3225216af`'
+expect_eq "DG-3a: the trailing-line copy carries a line after the reply line" 'To dig in: `git show 3225216af`' "$(reply_tail "$TMP/trailing.md")"
+expect_false "DG-3b: a brief with a line after the reply line is refused" digin_ok "$TMP/trailing.md"
+
+plant badcmd "${ACCEPTED_BRIEF/git show 3225216af/see the commit}"
+expect_false "DG-4: a reply line whose tail is no command is refused" digin_ok "$TMP/badcmd.md"
+
+expect_true "DG-5: the skill's own reply line is the shape with the dig-in on it" reply_last_ok "$SKILL"
+expect_true "DG-5b: …and the skill names the dig-in in its three forms" context_rule_ok "$SKILL"
+
+section "§REFERENT — the context names the thing; Altitude governs Goal and Options only"
+
+expect_true "RF-1: the accepted brief's context names its referent, the commit" referent_ok "$TMP/accepted.md"
+
+blind='A change you ordered landed after the critic'"'"'s last review, and the diff you asked for is all there is. The release gate asks every change past a review to carry a review or your waiver. This one has neither.'
+anchor -E "$TMP/accepted.md" '^The commit that removed' 1
+plant blind "$(awk -v b="$blind" '/^The commit that removed/ { print b; next } { print }' <<<"$ACCEPTED_BRIEF")"
+expect_eq "RF-2a: the referent-less copy carries the plant" "$blind" "$(context_of "$TMP/blind.md")"
+expect_true "RF-2b: …and still ends on its dig-in (only the context differs)" digin_ok "$TMP/blind.md"
+expect_false "RF-2c: a brief about a specific diff whose context names no referent is refused" referent_ok "$TMP/blind.md"
+
+expect_true "RF-3: the skill rules the context paragraph" context_rule_ok "$SKILL"
+doctor "$SKILL" "$TMP/no-context-rule.md" '/never pastes the artifact/d'
+expect_false "RF-3a: the rule-dropped copy lost the clause" grep -qi 'never pastes the artifact' "$TMP/no-context-rule.md"
+expect_false "RF-3b: …and fails the context-rule pin" context_rule_ok "$TMP/no-context-rule.md"
+
+expect_true "RF-4: every line barring identifiers names the Goal as what it governs" altitude_scoped_ok "$SKILL"
+{ cat "$SKILL"; echo 'A brief carries no file, function, row, task or version identifiers.'; } > "$TMP/whole-brief.md"
+expect_true "RF-4a: the widened copy carries a line barring identifiers from the whole brief" \
+  grep -q '^A brief carries no file' "$TMP/whole-brief.md"
+expect_false "RF-4b: …and fails the scope pin" altitude_scoped_ok "$TMP/whole-brief.md"
 
 finish
