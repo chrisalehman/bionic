@@ -1563,8 +1563,9 @@ epic_shipped_table() {
 }
 
 # epic_adrs_value -> the raw `adrs:` this wave's sources carry: the spec the plan's `spec:` line names
-# first, the plan's own when the spec has none. Nothing when neither says anything. The spec's `adrs:` is
-# paths joined by ` · `.
+# first, the plan's own when the spec has none, then the plan's Step 7 `adr:` pointer, the line the document
+# step writes and the advance to 7 renders as `adrs:` (a plan advanced before that render carries only it).
+# Nothing when none says anything. The spec's `adrs:` is paths joined by ` · `.
 epic_adrs_value() {
   local specrel specfile adrs
   specrel="$(plan_frontmatter_get "$PLAN" "spec")"
@@ -1573,6 +1574,7 @@ epic_adrs_value() {
   [ -f "$specfile" ] || specfile="$(find "$DROOT/specs" -name "${specrel##*/}" -type f 2>/dev/null | head -1)"
   [ -n "$specfile" ] && adrs="$(plan_frontmatter_get "$specfile" "adrs")" || adrs=""
   [ -n "$adrs" ] || adrs="$(plan_frontmatter_get "$PLAN" "adrs")"
+  [ -n "$adrs" ] || adrs="$(units_step_field "$PLAN" 7 adr 2>/dev/null)" || adrs=""
   printf '%s\n' "$adrs"
 }
 
@@ -1590,9 +1592,10 @@ epic_adrs() {
 }
 
 # epic_adrs_cell -> the ADR cell of the epic row, exit 0: the numbers, or `—` when the sources say, in so
-# many words, that the wave shipped none (`adrs: none`). Exit 1, nothing printed, when no source says
-# either way. "None shipped" and "not recorded" look the same on disk, so only the first is written; the
-# second refuses the row (wave-33 T8; D8, AC-3.3) and the refusal says which line to write.
+# many words, that the wave shipped none (`adrs: none`), or the value as written when it names an ADR by a
+# path with no `adr-<n>` (the record is named, it has no number to give). Exit 1, nothing printed, when no
+# source says either way. "None shipped" and "not recorded" look the same on disk, so only the first is
+# written; the second refuses the row (wave-33 T8; D8, AC-3.3) and the refusal says which line to write.
 epic_adrs_cell() {
   local raw nums word
   raw="$(epic_adrs_value)"
@@ -1600,16 +1603,18 @@ epic_adrs_cell() {
   if [ -n "$nums" ]; then printf '%s' "$nums"; return 0; fi
   word="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
   case "$word" in
-    none|"—"|-|n/a|na) printf '—'; return 0 ;;
+    none|"—"|-|n/a|na|n/a:*) printf '—'; return 0 ;;
+    '') return 1 ;;
   esac
-  return 1
+  printf '%s' "$raw" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/ · /, /g' | tr -d '|\n'
+  return 0
 }
 
 # epic_row_missing -> a sentence naming what the epic row for this wave cannot be written whole without,
 # or nothing. The row is written from the plan and the merge, never marked for the orchestrator.
 epic_row_missing() {
   if ! epic_adrs_cell >/dev/null; then
-    printf 'the wave %s row of %s cannot be written whole: neither the spec nor the plan carries an adrs: line naming the ADRs this wave shipped (adr-<n> paths joined by " · ") — write "adrs: none" in the plan if it shipped none' "$WAVE_NUM" "${EPIC_PLAN##*/}"
+    printf 'the wave %s row of %s cannot be written whole: neither the spec nor the plan carries an adrs: line naming the ADRs this wave shipped (adr-<n> paths joined by " · "), and the Step 7 block of the plan carries no adr: line — write "adrs: none" in the plan if it shipped none' "$WAVE_NUM" "${EPIC_PLAN##*/}"
     return 0
   fi
   if ! git -C "$ROOT" rev-parse --short "$(co_epic_branch)" >/dev/null 2>&1; then
