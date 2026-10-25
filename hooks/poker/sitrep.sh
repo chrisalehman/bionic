@@ -260,7 +260,9 @@ handoff_render() {  # <composed> <section>
 # clock ampm line title` (clock and ampm empty when the parenthesis names none): the one reader of the ledger's
 # headings that the clock readers (`sitrep_ledger_times`, `pages_open`) read through, so no program of the sheet
 # parses a heading beside this one. The who is the parenthesis's words before its first date; a ruling with no `: <title>` after the
-# parenthesis is `(untitled)`. With `puts`, a put is an entry too, `D<n> · put · <who> <date> · <title>`: the line
+# parenthesis is `(untitled)`. A go a person gave is ledgered as `D<n> settled by <what> (<who> <date> [<clock>]): "<reply>"`,
+# the reply after the parenthesis: it is the entry `D<n> · settled "<reply>" · <who> <date> · <what>`, its clock the
+# parenthesis's, so the decision reads ruled and the span from its put is kept. With `puts`, a put is an entry too, `D<n> · put · <who> <date> · <title>`: the line
 # `decisions put` writes, read only by the rounds count, never by the register.
 decisions_list() {  # <ledger> [puts] -> one line per entry: D<n> · "<reply>" · <who> <date> · <title>, in the ledger's order
   awk -v puts="${2:-}" '
@@ -273,7 +275,7 @@ decisions_list() {  # <ledger> [puts] -> one line per entry: D<n> · "<reply>" �
       }
       return ""
     }
-    function entry(s,   n, rest, verb, qual, reply, hasreply, q, i, depth, inq, ch, fin, c, paren, tail, title, who, date, field, after, clock, ap, w) {
+    function entry(s,   n, rest, verb, qual, reply, hasreply, q, i, depth, inq, ch, fin, c, paren, tail, title, who, date, field, after, clock, ap, w, by) {
       if (!match(s, /^D[0-9]+ /)) return
       n = substr(s, 1, RLENGTH - 1); rest = substr(s, RLENGTH + 1)
       verb = lead_verb(rest); qual = ""
@@ -293,6 +295,11 @@ decisions_list() {  # <ledger> [puts] -> one line per entry: D<n> · "<reply>" �
         }
         if (paren == "") return
       } else {
+        by = ""
+        if (verb == "settled" && index(rest, " by ") == 1) {
+          q = index(substr(rest, 5), " ("); if (q == 0) return
+          by = substr(rest, 5, q - 1); rest = substr(rest, q + 4)
+        }
         if (index(rest, " \"") == 1) {
           rest = substr(rest, 3); q = index(rest, "\""); if (q == 0) return
           reply = substr(rest, 1, q - 1); rest = substr(rest, q + 1); hasreply = 1
@@ -310,6 +317,10 @@ decisions_list() {  # <ledger> [puts] -> one line per entry: D<n> · "<reply>" �
         paren = substr(rest, 1, fin - 1); tail = substr(rest, fin + 1)
         if (index(tail, ": ") == 1) title = substr(tail, 3)
         else { title = tail; sub(/^[ \t:,;]+/, "", title) }
+        if (by != "") {
+          if (!hasreply && match(title, /^"[^"]*"[ \t]*$/)) { reply = substr(title, 2, index(substr(title, 2), "\"") - 1); hasreply = 1 }
+          title = by
+        }
       }
       if (!match(paren, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) return
       date = substr(paren, RSTART, RLENGTH); who = substr(paren, 1, RSTART - 1); after = substr(paren, RSTART + RLENGTH)
@@ -2307,13 +2318,30 @@ sitrep_tick_line() {
     done
     return 0
   }
+  # THE LEDGER'S ONE WRITE, for the put and the ruling alike: one entry appended as `## Δ<k> — <heading>`, k one past
+  # the ledger's highest Δ, its body under a blank line when it has one, through a copy swapped in whole, so a reader
+  # never sees half an entry and both writers number alike; the ledger is begun when the run has none. 1, with the
+  # refusal said, when the ledger cannot be written. The clock is the local one every heading of the ledger names.
+  decisions_clock() { date '+%Y-%m-%d %-I:%M %p %Z'; }
+  decisions_append() {  # <plan> <ledger> <root> <heading> [<body>]
+    local plan="$1" led="$2" root="$3" k
+    k="$(sed -n 's/^## Δ\([0-9][0-9]*\).*/\1/p' "$led" 2>/dev/null | sort -n | tail -1)"; k=$(( ${k:--1} + 1 ))
+    mkdir -p "${led%/*}" 2>/dev/null
+    { if [ -f "$led" ]; then cat "$led"; else printf '# Design ledger — %s\n' "$(proof_plan_slug "$plan")"; fi
+      printf '\n## Δ%s — %s\n' "$k" "$4"
+      [ -z "${5:-}" ] || printf '\n%s\n' "$5"
+    } > "$led.new.$$" 2>/dev/null && mv -f "$led.new.$$" "$led" 2>/dev/null && return 0
+    rm -f "$led.new.$$" 2>/dev/null
+    die "REFUSED — ${led#"$root"/} cannot be written; nothing is written."
+    return 1
+  }
   # THE PUT. A decision put during a run is one ledger entry before it is shown, `## Δ<k> — D<n> put (orchestrator
   # <date> <time>): <title>`, Δ one past the ledger's highest, its body the wait line; the ledger is begun when the run
   # has none. It prints the round the put opens and the wait line, which ends the decision's Significance as printed.
   # REFUSED (1), nothing written: a number that is not D<n>, a title that is empty or more than one line, a ledger that
   # is a symlink.
   decisions_put() {  # <plan> <ledger> <D<n>> <title>
-    local plan="$1" led="$2" d="$3" title="$4" wait k at r
+    local plan="$1" led="$2" d="$3" title="$4" wait r
     case "$d" in D[1-9]*) case "${d#D}" in *[!0-9]*) d="" ;; esac ;; *) d="" ;; esac
     if [ -z "$d" ]; then
       die "REFUSED — '$(clean "$3")' is not a decision's number: name it D<n>, as in D7; nothing is written."
@@ -2325,16 +2353,7 @@ sitrep_tick_line() {
       exit 1
     fi
     wait="$(decision_wait "$plan" "$d" "$REPO_REAL")"
-    k="$(sed -n 's/^## Δ\([0-9][0-9]*\).*/\1/p' "$led" 2>/dev/null | sort -n | tail -1)"; k=$(( ${k:--1} + 1 ))
-    at="$(date '+%Y-%m-%d %-I:%M %p %Z')"
-    mkdir -p "${led%/*}" 2>/dev/null
-    { if [ -f "$led" ]; then cat "$led"; else printf '# Design ledger — %s\n' "$(proof_plan_slug "$plan")"; fi
-      printf '\n## Δ%s — %s put (orchestrator %s): %s\n\n%s\n' "$k" "$d" "$at" "$title" "$wait"
-    } > "$led.new.$$" 2>/dev/null && mv -f "$led.new.$$" "$led" 2>/dev/null || {
-      rm -f "$led.new.$$" 2>/dev/null
-      die "REFUSED — ${led#"$REPO_REAL"/} cannot be written; nothing is written."
-      exit 1
-    }
+    decisions_append "$plan" "$led" "$REPO_REAL" "$d put (orchestrator $(decisions_clock)): $title" "$wait" || exit 1
     # THE PUT IS AN ASK ON THE RUN'S REGISTER, in the words the pages owe it in (`pages_owed`), so a decision put and
     # not yet ruled is owed wherever the register is read; the ledger's ruling closes it (`decisions_settle`).
     if declare -F owed_open >/dev/null 2>&1; then
@@ -2346,9 +2365,55 @@ sitrep_tick_line() {
     exit 0
   }
 
+  # THE RULING. However the reply arrives, typed to `decisions rule`, given by `approve D<n>`, or replayed from the
+  # release approval card (whose reply runs `approve`), it is this one function, so a decision ruled anywhere has its
+  # ledger entry and its closed ask. It writes `## Δ<k> — D<n> ruled "<reply>" (<who> <date> <clock>): <title>`, the
+  # heading `decisions_list` reads as an entry, through the put's own numbering (`decisions_append`), the title the
+  # newest put's and none when the decision was never put, the who the project's git user name; then it settles the
+  # register against the ledger, which closes `decide:D<n>`. A double quote in the reply is written as a single one: the
+  # parser ends the reply at the next double quote. 0 ruled, printing `ruled: D<n> · "<reply>" · <title>`; 1 refused,
+  # nothing written (a number that is not D<n>, a reply empty or of more than one line, a ledger that is a symlink, no
+  # git user name); 3 refused, nothing written, the decision's last round already closed by a ruling or a withdrawal.
+  decisions_rule() {  # <plan> <root> <D<n>> <reply>
+    local plan="$1" root="$2" d="$3" reply="$4" led who title st sq
+    case "$d" in D[1-9]*) case "${d#D}" in *[!0-9]*) d="" ;; esac ;; *) d="" ;; esac
+    if [ -z "$d" ]; then
+      die "REFUSED — '$(clean "$3")' is not a decision's number: name it D<n>, as in D7; nothing is written."
+      return 1
+    fi
+    case "$reply" in
+      ''|*$'\n'*|*$'\r'*) die "REFUSED — the reply is the user's words on one line; nothing is written."; return 1 ;;
+    esac
+    sq="'"; reply="${reply//\"/$sq}"
+    led="$(docs_root "$root")/record/$(proof_plan_slug "$plan")/design-ledger.md"
+    if [ -L "$led" ]; then
+      die "REFUSED — ${led#"$root"/} is a symlink; nothing is written."
+      return 1
+    fi
+    st="$(decisions_rounds "$led" | awk -F'\t' -v d="$d" '$1 == d { print $3 }')"
+    case "$st" in
+      ruled|withdrawn)
+        die "REFUSED — $d is already $st: $(decisions_list "$led" | awk -F' · ' -v d="$d" '$1 == d { l = $0 } END { print l }'); put it again to open a new round; nothing is written."
+        return 3 ;;
+    esac
+    who="$(git -C "$root" config user.name 2>/dev/null)"
+    case "$who" in
+      ''|*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*|*'('*|*')'*)
+        die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who ruled; nothing is written."
+        return 1 ;;
+    esac
+    title="$(decisions_list "$led" puts | awk -F' · ' -v d="$d" '$1 == d && $2 == "put" {
+      t = $0; for (i = 0; i < 3; i++) t = substr(t, index(t, " · ") + length(" · ")) } END { print t }')"
+    decisions_append "$plan" "$led" "$root" "$d ruled \"$reply\" ($who $(decisions_clock))${title:+: $title}" || return 1
+    REPO_REAL="$root" decisions_settle "$plan" "$led"
+    printf 'ruled: %s · "%s" · %s\n' "$d" "$reply" "${title:-(untitled)}"
+    return 0
+  }
+
   # THE REGISTER (wave-38 T13; D24, AC-3.4). Read-only. `decisions` is the bound run's ledger through `decisions_list`;
   # `--all` is every run's under the docs root, keyed by wave, with the ADRs (`decisions_all`). Exit 1 in one line
-  # naming the path when the run's ledger is absent; 2 when there is no run to read. `decisions put` is the one writer.
+  # naming the path when the run's ledger is absent; 2 when there is no run to read. `decisions put` and `decisions rule`
+  # are its writers, each one entry (`decisions_append`).
   poker_verb_decisions() {
     REPO="$(project_root "$PWD")"
     REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
@@ -2380,6 +2445,10 @@ sitrep_tick_line() {
     DC_LEDGER="$DC_DOCS/record/$(proof_plan_slug "$DC_PLAN")/design-ledger.md"
     decisions_settle "$DC_PLAN" "$DC_LEDGER"
     [ -z "${DC_PUT:-}" ] || decisions_put "$DC_PLAN" "$DC_LEDGER" "$DC_PUT" "${DC_TITLE:-}"
+    if [ -n "${DC_RULE:-}" ]; then
+      decisions_rule "$DC_PLAN" "$REPO_REAL" "$DC_RULE" "${DC_REPLY:-}" && exit 0
+      exit 1
+    fi
     if [ ! -f "$DC_LEDGER" ] || [ -L "$DC_LEDGER" ]; then
       say "no design ledger at ${DC_LEDGER#"$REPO_REAL"/} — this run has recorded no ruling"
       exit 1
