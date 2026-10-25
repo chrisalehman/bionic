@@ -612,7 +612,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 # THE HAND-HOLD COUNT IS FOLDED FROM THE LINES THE ESCAPE-HATCH VERBS WROTE (wave-35 T12; D17, REQ-8
 # AC-8.1). `landing-report --hand-holds` prints, under the landings line,
 #
-#   hand-holds: total=<n> · by-hand=<n> · stop-runs=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · second-floors=<n> · adoptions=<n> · fixed=<n>
+#   hand-holds: total=<n> · by-hand=<n> · stop-runs=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · status-writes=<n> · second-floors=<n> · adoptions=<n> · fixed=<n>
 #
 # A hand-hold is a use of a verb that steps round the machine. Each kind is counted from the one line its
 # verb wrote, and PROSE IS NEVER READ (D1): a line that says `by-hand` in a plan, a note or the orchestrator's
@@ -633,6 +633,12 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 #                  `waiver: <who> <ISO-UTC> "<words>"` under `## Verification Matrix` (`waive-row`), or the older
 #                  `waiver: <who> <YYYY-MM-DD> "<words>"` a plan may still carry. Fenced text is skipped, as every
 #                  reader of the plan skips it.
+#   status-writes  the landing record's `line/v1|ev=matrix-set|ac=<id>|cells=<status,evidence>|by=<who>|at=<ISO-UTC>|`, one per
+#                  `matrix-set` call that changed the plan, written in the same act as its plan write (hooks/poker/plan.sh
+#                  `poker_verb_matrix_set`). It is counted when its cells name the status, placed by its `at=` like every
+#                  record kind. The landing's settlement (lib/line.sh `line_settle`) writes a cell through `matrix_row_cells`
+#                  and writes no such line, so a status a landing wrote is never one; a call the settled-cell rule refuses,
+#                  or that only restates a cell, writes none. An evidence-only line is a write and no status: not counted.
 #   second-floors  `proved: kind=floor` lines under `## SDLC State` past the first (`proof-add floor`), read through
 #                  lib/proof.sh's `proof_fields`, the one reading of a proof line.
 #   adoptions      the roster row `adopt` files for each agent it adopts (`adopt_write_row`: `source=adopted`,
@@ -694,7 +700,7 @@ _HH_PLACE_AWK='
   BEGIN { HH_S = hh_norm(HH_S); HH_U = (hh_iso(HH_U) && length(HH_U) == 17) ? substr(HH_U, 1, 16) ":59Z" : hh_norm(HH_U) }
 '
 hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] [--until <ISO>] -> the one hand-holds line; rc 0
-  local rec="$1" root="$2" plan="$3" slug led rf hand=0 stp=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0 pl
+  local rec="$1" root="$2" plan="$3" slug led rf hand=0 stp=0 stw=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0 pl
   local since="" until="" u1=0 u2=0 u3=0 u4=0 lands=""
   shift 3
   while [ $# -ge 2 ]; do
@@ -703,11 +709,13 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
   done
   slug="$(proof_plan_slug "$plan")"
   if [ -f "$rec" ] && [ ! -L "$rec" ] && { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }; then
-    read -r hand stp u1 <<< "$(awk -F'|' -v HH_S="$since" -v HH_U="$until" "${_LINE_FIELDS_AWK:-}$_HH_PLACE_AWK"'
+    read -r hand stp stw u1 <<< "$(awk -F'|' -v HH_S="$since" -v HH_U="$until" "${_LINE_FIELDS_AWK:-}$_HH_PLACE_AWK"'
       { ev = line_ev() }
       ev == "published" && line_kv("kind") == "hand" && hh_take(line_kv("at")) { n++ }
       ev == "stop-run" && hh_take(line_kv("at")) { s++ }
-      END { print n + 0, s + 0, HH_UNPLACED + 0 }' "$rec")"
+      # only a line that names the status cell is a status written; an evidence-only one is neither placed nor counted
+      ev == "matrix-set" && index("," line_kv("cells") ",", ",status,") && hh_take(line_kv("at")) { w++ }
+      END { print n + 0, s + 0, w + 0, HH_UNPLACED + 0 }' "$rec")"
     # each row's first landing, `<row>=<at>` words: what a move to fixed is placed against
     lands="$(awk -F'|' "$_LINE_FIELDS_AWK"'
       line_ev() == "published" && line_kv("row") != "" && !(line_kv("row") in f) { f[line_kv("row")] = 1; printf "%s=%s ", line_kv("row"), line_kv("at") }' "$rec")"
@@ -783,8 +791,8 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
         END { print f + 0, w + 0, x + 0, HH_UNPLACED + 0 }' "$plan")"
     fi
   fi
-  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · second-regressions=%d · adoptions=%d · fixed=%d' \
-    $(( hand + stp + dec + lif + amd + hld + ext + wv + fl + ado + fix )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$fl" "$ado" "$fix"
+  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · status-writes=%d · second-regressions=%d · adoptions=%d · fixed=%d' \
+    $(( hand + stp + dec + lif + amd + hld + ext + wv + stw + fl + ado + fix )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$stw" "$fl" "$ado" "$fix"
   if [ -n "$since" ] || [ -n "$until" ]; then printf ' · unplaced=%d' $(( ${u1:-0} + ${u2:-0} + ${u3:-0} + ${u4:-0} )); fi
   printf '\n'
   return 0
