@@ -2806,11 +2806,11 @@ RR_AGAINST_EOF
       esac
     done
 
-    # THE HAND-HOLDS, over the window from the last build landing to this render (line.sh `hand_holds_ends`). The
-    # render's own instant is the end and the replay line's `at=`, so landing-report read after the page over the
-    # same ends prints this same line.
+    # THE HAND-HOLDS, from the last build landing (line.sh `hand_holds_window`'s start) to this render. The render's
+    # own instant is the page's end and the replay line's `at=`: the page counts what was done before it, while
+    # landing-report's window runs on to delivery, so acts after the card are counted there and not here.
     RR_AT="$(iso_now)"
-    IFS=$'\t' read -r RR_HHS _ _ _ <<< "$(hand_holds_ends "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" "$PV_PLAN")"
+    IFS=$'\t' read -r RR_HHS _ _ _ <<< "$(hand_holds_window "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" "$PV_PLAN")"
     [ "${RR_HHS:--}" != - ] || RR_HHS=""
     RR_HH="$(hand_holds_report "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" "$PV_PLAN" ${RR_HHS:+--since "$RR_HHS"} --until "$RR_AT")"
 

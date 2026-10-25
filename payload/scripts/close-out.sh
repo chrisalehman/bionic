@@ -680,17 +680,39 @@ co_regression_runs() {  # -> sets RR_LINE
     *) RR_LINE="$n" ;;
   esac
 }
-# THE HAND-HOLDS, READ BEFORE THE WIPE (wave-35 T12; D17, REQ-8 AC-8.1). `landing-report --hand-holds` folds the
-# uses of the escape-hatch verbs by kind from the lines the verbs wrote (hooks/session-poker.sh `hand_holds_report`
-# owns the rules). Three kinds (amend, hold, extend) are roster lines, and act 3 wipes the rosters before act 5
-# writes the continuation, so `run` reads the line before the wipe into CO_HH_LINE and the card and the
-# continuation both print that one reading. A report that cannot be read is a sentence, not a count.
+# THE HAND-HOLDS, READ LAST. `landing-report --hand-holds` folds the uses of the escape-hatch verbs by kind from the
+# lines the verbs wrote (hooks/poker/line.sh `hand_holds_report` owns the rules), over the window from the last build
+# landing to the plan's `delivered:` time. `run` writes `delivered:` and only then takes its final reading, so every act
+# it performed before it, after the release approval card as much as before, is inside the window; the card prints
+# that reading, and the continuation's line, written earlier, is replaced by it. Three kinds (amend, hold, extend) and
+# the adoptions are roster lines, which act 3 wipes: `co_hh_keep` copies the roster lines aside before the wipe, and
+# every reading after it reads that copy (`BIONIC_HH_ROSTERS`). A report that cannot be read is a sentence, not a count.
 CO_HH_LINE=""
+CO_HH_ROSTERS=""
 co_hand_holds() {  # -> sets CO_HH_LINE
   local out
-  out="$(cd "$ROOT" && bash "$(co_poker)" landing-report --hand-holds "$PLAN" 2>/dev/null | /usr/bin/grep '^hand-holds: ' | head -n 1)" || out=""
+  out="$(cd "$ROOT" && BIONIC_HH_ROSTERS="$CO_HH_ROSTERS" bash "$(co_poker)" landing-report --hand-holds "$PLAN" 2>/dev/null | /usr/bin/grep '^hand-holds: ' | head -n 1)" || out=""
   if [ -n "$out" ]; then CO_HH_LINE="$out"
   else CO_HH_LINE="hand-holds: not read — session-poker.sh landing-report --hand-holds $PLAN could not be read"; fi
+}
+co_hh_keep() {  # -> CO_HH_ROSTERS, a file outside the wiped directory holding every roster line there is now
+  local f
+  CO_HH_ROSTERS="$(mktemp "${TMPDIR:-/tmp}/close-out-rosters.XXXXXX" 2>/dev/null)" || { CO_HH_ROSTERS=""; return 0; }
+  for f in "$TMP_DIR"/roster-*.state; do [ -f "$f" ] && [ ! -L "$f" ] && cat "$f"; done > "$CO_HH_ROSTERS" 2>/dev/null
+  return 0
+}
+# co_hand_holds_last -> the final reading, after `delivered:` is written: CO_HH_LINE, and the continuation's line this
+# run wrote replaced by it. A line the continuation held before this run is a person's or an earlier close's, and stays.
+co_hand_holds_last() {
+  local was="$CO_HH_LINE" tmp
+  co_hand_holds
+  [ -n "${CO_HH_ROSTERS:-}" ] && rm -f "$CO_HH_ROSTERS"
+  [ -n "$was" ] && [ "$was" != "$CO_HH_LINE" ] && [ "$CO_HH_CONT" = "$was" ] && [ -f "$CONT" ] || return 0
+  tmp="$CONT.close-out.$$"
+  CO_WAS="$was" CO_NOW="$CO_HH_LINE" awk '
+    /^## / { sec = ($0 == "## Hand-holds") }
+    sec && !done && $0 == ENVIRON["CO_WAS"] { print ENVIRON["CO_NOW"]; done = 1; next }
+    { print }' "$CONT" > "$tmp" 2>/dev/null && mv -f "$tmp" "$CONT" || rm -f "$tmp"
 }
 # THE SCORECARD, READ BEFORE THE WIPE. `landing-report --scorecard` prints four lines, each against its target (human
 # stops on the autonomous half, agent minutes after the final reply, the widest landing ready→landed, human-wait
@@ -1451,7 +1473,20 @@ co_owed_line() {
   fi
 }
 
+# CO_HH_CONT: the hand-holds line act_continuation wrote into the continuation, empty when it wrote none (the file
+# already held one); the final reading replaces only that line.
+CO_HH_CONT=""
+co_cont_hh_none() {  # -> 0 when the continuation holds no `hand-holds: ` line under its ## Hand-holds heading
+  [ -f "$CONT" ] || return 0
+  ! awk '/^## / { s = ($0 == "## Hand-holds"); next } s && index($0, "hand-holds: ") == 1 { f = 1 } END { exit !f }' "$CONT"
+}
 act_continuation() {
+  local hh_none=no
+  co_cont_hh_none && hh_none=yes
+  act_continuation_write
+  if [ "$hh_none" = yes ] && ! co_cont_hh_none; then CO_HH_CONT="$CO_HH_LINE"; fi
+}
+act_continuation_write() {
   local missing
   CO_CARRIED="$(co_carried)" \
     || _co_refuse "could not read the deferrals this run inherited (card.sh inherited) — no continuation written"
@@ -2478,7 +2513,8 @@ do_run() {
                     say "reviews: $CO_RV_LINE"
   co_orphans run
   co_regression_runs; say "regression-runs: $RR_LINE"
-  co_hand_holds;    say "$CO_HH_LINE"
+  # The roster lines the hand-holds count reads, kept before act_tmp wipes them; the count itself is read last.
+  co_hh_keep
   co_governed;      say "$CO_GOV_LINES"
   # Read before act_tmp wipes the rosters it counts: the continuation's `## Scorecard` prints this reading.
   co_scorecard
@@ -2486,6 +2522,10 @@ do_run() {
                     say "tasks-completed: $TASKS_LINE"
                     say "$(co_debt_card)"
   co_debt_notes
+  # The close's instant, read again here: the continuation, the epic row, the Step 8 and 9 lines and the handoff
+  # carry it, and `delivered:` ends the hand-holds window, so every act above (the merge, the landings, the wipe) is
+  # inside the minute it names or before it.
+  NOW="$(date -u +%Y-%m-%dT%H:%MZ)"
   act_continuation; say "continuation: $CONT_LINE"
                     say "$(co_owed_line)"
   act_epic;         say "epic-row: $EPIC_LINE"
@@ -2498,6 +2538,7 @@ do_run() {
                     say "step8: CLOSED $NOW, attested-by close-out.sh $VERSION"
   gate_dry_run
   write_plan_blocks 9
+  co_hand_holds_last; say "$CO_HH_LINE"
   co_hold_release
   if [ "$PARKED" = yes ]; then
     # A PARKED RUN IS NOT ARCHIVED AND SENDS NO DELIVERY NOTICE: its plan is where the resume reads it (wave-38 T15).

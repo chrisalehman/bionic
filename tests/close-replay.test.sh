@@ -10,6 +10,8 @@
 #            commit on the approved head, the integrate row lands, close-out writes delivered: and counts no
 #            hand-hold; the replay's part
 #            of the log holds no hand landing, hand merge, plan edit, step set back or waiver
+#   §WINDOW  after the close, the hand-holds window ends at the plan's delivered: time, and a decline planted after
+#            the release approval card is counted: the card ends nothing
 #   §VERBS   every refusal the replay met names a verb that writes the cell (deliver, amend, task-set or
 #            step-field), and that verb's call on the cell, then the refused call again, exit 0
 #   §PR      the integrate row's pull request goes through a stand-in gh, the only gh on its PATH, whose log holds
@@ -201,6 +203,38 @@ if [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ]; then
     "$(cr_part | cr_names | cut -d'|' -f2- | cr_held "$CR_VERBS")"
   expect_eq "CL-8b …none a hand landing, a hand merge, a step set back or a waiver, and no hand write of the plan's prose" "" \
     "$(printf '%s\n' "$CL_CMDS" | /usr/bin/grep -E -- '--by-hand|session-poker\.sh current [0-7]( |$)|session-poker\.sh waive |git .*(fetch|merge|update-ref)'; cr_marks 'by hand' | /usr/bin/grep '^\[prose\]')"
+fi
+
+# ============================================================
+section "§WINDOW: after the close, the hand-holds window ends at the plan's delivered: time, and an act after the card counts"
+# ============================================================
+# The window runs from the last build landing to `delivered:`; the release approval card ends nothing. The report read
+# over the delivered plan names that end, and a decline planted a second after the card's replay time is counted.
+# fails-when: the end is the card again, so the ends line names the page and the planted decline is outside.
+# close-out archived the plan outside the project, where no project root names the record, so the report reads a copy
+# put back where the plan stood when close-out read it, and the copy is removed after.
+cr_hh() {  # -> landing-report --hand-holds over the delivered plan, as the replay's verbs run it
+  local p="$CR_ROOT/$DOOR_PLAN_REL" put=""
+  [ -f "$p" ] || { mkdir -p "${p%/*}" && cp "$CR_PLAN" "$p" && put=yes; }
+  door_run "$CR_ROOT" bash "$CR_ROOT/hooks/session-poker.sh" landing-report --hand-holds "$p"
+  [ -z "$put" ] || rm -f "$p"
+  printf '%s\n' "$DOOR_OUT"
+}
+if cr_reached "WINDOW-0"; then
+  CW_DEL="$(awk '/^- Step 9: delivered: / { print $5; exit }' "$CR_PLAN")"
+  CW_CARD="$(cat "$CR_REC"/release-approval-*.md 2>/dev/null | sed -n 's/^release-approval\/v1|plan=.*|at=\([^|]*\)|.*/\1/p' | LC_ALL=C sort | tail -1)"
+  expect_eq "WINDOW-0 precondition: the plan names a delivered: minute and the record a release approval card's time" "yes|yes" \
+    "$(printf '%s' "$CW_DEL" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z$' && echo yes)|$([ -n "$CW_CARD" ] && echo yes)"
+  CW_OUT="$(cr_hh)"
+  expect_contains "WINDOW-1 the ends line names the plan's delivered: time as the window's end" \
+    "until $CW_DEL (delivered:)" "$(printf '%s\n' "$CW_OUT" | grep '^hand-holds window: ')"
+  CW_D0="$(printf '%s\n' "$CW_OUT" | grep '^hand-holds: ' | sed -n 's/.* declines=\([0-9]*\) .*/\1/p')"
+  CW_AFTER="$(date -u -j -v+1S -f '%Y-%m-%dT%H:%M:%SZ' "$CW_CARD" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "$CW_CARD + 1 second" +%Y-%m-%dT%H:%M:%SZ)"
+  cp "$CR_REC/fill-ledger.log" "$WORLD_ROOT/fill-ledger.kept" 2>/dev/null || : > "$WORLD_ROOT/fill-ledger.kept"
+  printf 'fill-ledger/v1|at=%s|session=replay|turn=|current=9|state=decline|ceiling=6|width=|open=|free=|ready=T9|launched=|declined=no room|missed=0|idle=|room=|named=T9\n' "$CW_AFTER" >> "$CR_REC/fill-ledger.log"
+  expect_eq "WINDOW-2 a decline a second after the card is inside the window: the count reads one decline more" \
+    "$(( ${CW_D0:-0} + 1 ))" "$(cr_hh | grep '^hand-holds: ' | sed -n 's/.* declines=\([0-9]*\) .*/\1/p')"
+  cp "$WORLD_ROOT/fill-ledger.kept" "$CR_REC/fill-ledger.log"
 fi
 
 # ============================================================
