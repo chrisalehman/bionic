@@ -2368,13 +2368,19 @@ sitrep_tick_line() {
   # release approval card (whose reply runs `approve`), it is this one function, so a decision ruled anywhere has its
   # ledger entry and its closed ask. It writes `## Δ<k> — D<n> ruled "<reply>" (<who> <date> <clock>): <title>`, the
   # heading `decisions_list` reads as an entry, through the put's own numbering (`decisions_append`), the title the
-  # newest put's and none when the decision was never put, the who the project's git user name; then it settles the
-  # register against the ledger, which closes `decide:D<n>`. A double quote in the reply is written as a single one: the
-  # parser ends the reply at the next double quote. 0 ruled, printing `ruled: D<n> · "<reply>" · <title>`; 1 refused,
-  # nothing written (a number that is not D<n>, a reply empty or of more than one line, a ledger that is a symlink, no
-  # git user name); 3 refused, nothing written, the decision's last round already closed by a ruling or a withdrawal.
+  # newest put's and none when the decision was never put; then it settles the register against the ledger, which closes
+  # `decide:D<n>`. A double quote in the reply is written as a single one: the parser ends the reply at the next double
+  # quote. THE WHO IS THE ONE WHO SAID IT: the reply is asked of lib/said.sh `user_said` in the prompts the user typed in
+  # this run. Found, the user's words: who is the project's git user name. Not found, or found too short to be a quote,
+  # the words are the orchestrator's relaying a decision it was ordered to make: who is `orchestrator`, the way a ruling
+  # written by hand has always read, so the record never says a person decided what they did not. Unable to look (no jq,
+  # no transcript) is refused, for a ruling it cannot attribute is not written. 0 ruled, printing
+  # `ruled: D<n> · "<reply>" · <title>`; 1 refused, nothing written (a number that is not D<n>, a reply empty or of more
+  # than one line, a ledger that is a symlink, said.sh not loadable, the transcript not readable, and for the user's own
+  # words no usable git user name); 3 refused, nothing written, the decision's last round already closed by a ruling or a
+  # withdrawal.
   decisions_rule() {  # <plan> <root> <D<n>> <reply>
-    local plan="$1" root="$2" d="$3" reply="$4" led who title st sq
+    local plan="$1" root="$2" d="$3" reply="$4" led who title st sq said raw
     case "$d" in D[1-9]*) case "${d#D}" in *[!0-9]*) d="" ;; esac ;; *) d="" ;; esac
     if [ -z "$d" ]; then
       die "REFUSED — '$(clean "$3")' is not a decision's number: name it D<n>, as in D7; nothing is written."
@@ -2383,7 +2389,7 @@ sitrep_tick_line() {
     case "$reply" in
       ''|*$'\n'*|*$'\r'*) die "REFUSED — the reply is the user's words on one line; nothing is written."; return 1 ;;
     esac
-    sq="'"; reply="${reply//\"/$sq}"
+    raw="$reply"; sq="'"; reply="${reply//\"/$sq}"
     led="$(docs_root "$root")/record/$(proof_plan_slug "$plan")/design-ledger.md"
     if [ -L "$led" ]; then
       die "REFUSED — ${led#"$root"/} is a symlink; nothing is written."
@@ -2395,10 +2401,27 @@ sitrep_tick_line() {
         die "REFUSED — $d is already $st: $(decisions_list "$led" | awk -F' · ' -v d="$d" '$1 == d { l = $0 } END { print l }'); put it again to open a new round; nothing is written."
         return 3 ;;
     esac
-    who="$(git -C "$root" config user.name 2>/dev/null)"
-    case "$who" in
-      ''|*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*|*'('*|*')'*)
-        die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who ruled; nothing is written."
+    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
+    if ! declare -F user_said >/dev/null 2>&1; then
+      die "REFUSED — who said the reply is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
+      return 1
+    fi
+    user_said "$raw" "$plan"; said=$?
+    case "$said" in
+      0)
+        who="$(git -C "$root" config user.name 2>/dev/null)"
+        case "$who" in
+          ''|*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*|*'('*|*')'*)
+            die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who ruled; nothing is written."
+            return 1 ;;
+        esac ;;
+      1|3) who=orchestrator ;;
+      *)
+        if ! command -v jq >/dev/null 2>&1; then
+          die "REFUSED — jq is absent, so the reply cannot be held to what the user typed and the ruling cannot be told from the orchestrator's; nothing is written."
+        else
+          said_refuse 2 "$(clean "$raw")" "a ruling"
+        fi
         return 1 ;;
     esac
     title="$(decisions_list "$led" puts | awk -F' · ' -v d="$d" '$1 == d && $2 == "put" {

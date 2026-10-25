@@ -526,7 +526,7 @@ _line_release_landed() {
   lands="$(units_record_landings "$2" | cut -f2)"
   while IFS= read -r r; do
     [ -n "$r" ] || continue
-    if printf '%s\n' "$lands" | /usr/bin/grep -qxF "$r"; then printf '%s\n' "$r"; return 0; fi
+    if /usr/bin/grep -qxF "$r" <<< "$lands"; then printf '%s\n' "$r"; return 0; fi
   done <<EOF
 $(_line_release_rows "$1")
 EOF

@@ -41,6 +41,9 @@
 #            the `test-ratio` line and nothing is published; the same piece with fewer test lines lands, beside it.
 #   §RATIO-2 a fixture whose accepted head is already over the cap: the piece that cuts the test lines back under it is
 #            admitted, and the declared check at the landed head prints the ratio.
+#   §DIRTIED a release check planted at the release base that writes a line into the checkout it is handed is
+#            refused `check-dirtied` at the door, and the release-check verb at the head does not say it; with the
+#            door's dirtied arm cut out the piece is still refused, so the row pins the arm.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under the world directory with real commits; the door is
 # the tree under test's spawn-worktree.sh and session-poker.sh, run from the fixture with every variable that names

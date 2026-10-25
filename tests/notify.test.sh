@@ -173,7 +173,7 @@ current: 3
 
 | id | step | kind | task | agent | deps | size | serves | Files | worktree | status | reads |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | REQ-1: the first task. complexity: standard | implementor | — | 30 | REQ-1 | lib/first.sh | — | pending | approval:release |
+| T1 | 4 | build | REQ-1: the first task. It makes the first requirement true. complexity: standard | implementor | — | 30 | REQ-1 | lib/first.sh | — | pending | approval:release |
 
 ## Verification Matrix
 
