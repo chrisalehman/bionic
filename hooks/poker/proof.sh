@@ -351,9 +351,11 @@ proof_run_counts() {
   # no head= when the plan names no branch with a commit), the reply is the user's own words. It
   # goes through the plan transaction every row verb takes (copy, dry commit through the real gate,
   # checksum, swap), beside the approval lines already there — after the last `approved:` or
-  # `approved-by:` line, else after `current:`. An approval is recorded once: a second `approve` of
-  # a name the plan already carries is refused, so the first reply stands, except `release` at a
-  # head its newest line does not name: the release is approved per head.
+  # `approved-by:` line, else after `current:`. An approval is recorded once at a head: a second
+  # `approve` of a name the plan already carries is refused while the working head is the one its
+  # newest line names (lib/proof.sh `proof_approved_head`), so the first reply stands. At any other
+  # head the approval is stale, whatever its name: the user gave it for code the branch has moved
+  # past, so it is given again, a second line beside the first, and the newest is the one read.
   #
   # THE PLAN'S APPROVAL IS ITS OWN LINE. `approve plan '<reply>'` writes, at Step 3 on the user's reply,
   #
@@ -440,8 +442,8 @@ proof_run_counts() {
     case "$AP_HEAD" in *[!0-9a-f]*|'') AP_HEAD="" ;; esac
     if [ -n "$AP_HAVE" ]; then
       AP_WAS="$(proof_approved_head "$PV_PLAN" "$AP_NAME" 2>/dev/null)" || AP_WAS=""
-      if [ "$AP_NAME" != release ] || [ -z "$AP_HEAD" ] || [ "$AP_WAS" = "$AP_HEAD" ]; then
-        die "REFUSED — $PV_PLAN already records this approval: $(clean "$AP_HAVE"). An approval is recorded once; the plan is unchanged."
+      if [ -z "$AP_HEAD" ] || [ "$AP_WAS" = "$AP_HEAD" ]; then
+        die "REFUSED — $PV_PLAN already records this approval: $(clean "$AP_HAVE"). An approval is recorded once at a head, and ${AP_HEAD:+the working head ${AP_HEAD:0:12} is the one its newest line names}${AP_HEAD:-the plan names no working-branch head to give it again at}; the plan is unchanged."
         exit 1
       fi
     fi

@@ -1360,6 +1360,41 @@ vc_follow "NV-3 amend's refusal of a closed contract" "$VC_AREF" "lib/c.sh"
 vc_follow "NV-4 step-field's refusal of a key at the wrong step" "$VC_SREF" "done"
 vc_follow "NV-5 step-field's refusal of a step with no line" "$VC_LREF" "the regression"
 
+# ---------- §TRIPLE: step-field 8 takes the integration's fields in one call; an unknown key names the verb that writes it ----------
+# The Step 8 block above holds all five fields. One call carries merge, worktree-removed and cleanup, each replaced where
+# it stands. A key the step blocks do not hold, but another verb writes, is refused naming that verb's call; a key no
+# verb writes is refused saying so.
+# fails-when: the triple needs three calls; one call writes fewer than three, or moves one; a bad pair beside good ones
+# writes the good ones; a key another verb writes is refused without naming that verb; a key no verb writes names one;
+# the usage line leaves out a field the verb takes.
+vc_s8() { awk '/^- Step 8:/ { f = 1; next } f && /^  [a-z-]+: / { printf "%s%s", (n++ ? "|" : ""), $0; next } f { exit }' "$VC_P"; }
+poke "$VC" step-field 8 merge=def5678 worktree-removed=no cleanup=partial
+expect_eq "TR-1 step-field 8 takes merge, worktree-removed and cleanup in one call (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      step-field 8 said: %s\n' "$OUT"
+expect_eq "TR-1b …and writes all three, each where it stood, the other two as they were" \
+  "  merge: def5678|  worktree-removed: no|  cleanup: partial|  tmp-wiped: yes|  tasks-completed: yes" "$(vc_s8)"
+s42_snap "$VC" "$VC_P"
+poke "$VC" step-field 8 merge=0000000 foo=bar
+s42_unchanged "TR-2 a call with one key no step block holds beside a good one is refused whole" 1 "$VC_P"
+expect_contains "TR-2b …naming that key" "'foo' is not a step field" "$OUT"
+expect_contains "TR-3 …and saying no verb writes it" "no verb writes 'foo'" "$OUT"
+expect_absent "TR-3b …so it names no call" "next call:" "$OUT"
+poke "$VC" step-field 8 approved=yes
+s42_unchanged "TR-4 a key another verb writes (approved:) is refused" 1 "$VC_P"
+expect_contains "TR-4b …naming the verb that writes it" "next call: bash " "$OUT"
+expect_contains "TR-4c …approve, with its operands" "session-poker.sh approve '<name>' '<reply>'" "$OUT"
+poke "$VC" step-field 4 base-sha=abc1234
+s42_unchanged "TR-5 a Step 4 key current writes (base-sha:) is refused" 1 "$VC_P"
+expect_contains "TR-5b …naming current 4" "session-poker.sh current 4" "$OUT"
+poke "$VC" step-field 8 delivered=yes
+s42_unchanged "TR-5c the Step 9 line's key (delivered:) is refused" 1 "$VC_P"
+expect_contains "TR-5d …naming close-out, the script that writes it" "close-out writes it with current: 9 (scripts/close-out.sh)" "$OUT"
+poke "$VC" step-field
+expect_eq "TR-6 step-field with no operands prints its usage (exit 2)" "2" "$RC"
+expect_contains "TR-6b …the usage names the fields it takes, the cleanup and the auditor among them" \
+  "head, cmd, pass, total, output, merge, worktree-removed, adr, share; cleanup, tmp-wiped and tasks-completed (Step 8 only); auditor and walk-artifact (Step 5 only)" "$OUT"
+expect_contains "TR-6c …and that it takes more than one" "step-field <N> <key>=<value>..." "$OUT"
+
 # ---------- §LIVE: deliver on a live:head review row closes it when the judge reads its questions covered ----------
 # FIXTURE FIDELITY: the single-rigor task plan above, its base-sha a commit of this repository so the judge deals it,
 # the readings written by the proof writer (`proof_line`) at the working branch's head. T11 reads

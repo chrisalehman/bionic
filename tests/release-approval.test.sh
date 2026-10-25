@@ -1136,15 +1136,18 @@ fc_record structure structure piece
 fc_record adversarial adversarial piece "$FC_S3"
 
 # ============================================================
-section "§STALE: a release approval the head has moved past is put again on the card, and the reply records a second beside the first"
+section "§STALE: a release approval the head has moved past is put again on the card with the merge beside it, and the reply records both again"
 # ============================================================
 # After a fix lands past the approved head, the advance to 8 refuses on that approval as it refuses on a missing one,
 # and the card is the only place the user approves the release, so the card settles the stale approval as its own
-# decision: it puts the release approval again, naming the head it was given at and what landed since, and the reply
-# writes a second approved: release line at the new head, the first kept. An approval is recorded once per head.
+# decision: it puts the release approval again, naming the head it was given at and what landed since, and the merge
+# approval given at that earlier head beside it, so the pair is given again together; the reply writes a second
+# approved: release line and a second approved: merge line at the new head, the first of each kept. An approval is
+# recorded once per head.
 # fails-when: the card is early on a stale approval; the renewal names neither the earlier head nor the landing; the
-# reply replaces the first line or writes none; current 8 --check stays red after it; a second approval at the same
-# head is admitted; a plan with nothing landed since its approval is offered a renewal.
+# stale merge approval is left off the card; the reply replaces a first line or writes no second one; current 8
+# --check stays red after it; a second approval at the same head is admitted; a plan with nothing landed since its
+# approval is offered a renewal.
 FC_ORD='s/^\(| AC-1\.2 | T1 \)| pending |/\1| discharged |/
 /^| T1 | 4 | build/a\
 | T4 | 5 | test | the regression | implementor | — | 30 | REQ-1 | — | — | — | landed | approval:plan |'
@@ -1177,12 +1180,13 @@ expect_contains "STALE-1b …on the approval alone, naming the head the user app
 fc_page
 expect_eq "STALE-2 the page renders at the new head (exit 0, no refusal, its page written)" \
   "0||release-approval-$FC_X8.md" "$FC_RC|$FC_ERR|$(cd "$FC_REC" && ls release-approval-"$FC_X8"*.md 2>/dev/null)"
-expect_eq "STALE-2b …putting the release approval again, and not the merge it still holds" "approve:release" \
+expect_eq "STALE-2b …putting the release approval again, and the merge approval given at the same earlier head beside it" "approve:release approve:merge" \
   "$(/usr/bin/grep '^release-approval/v1|dec=' "$FC_REC/release-approval-$FC_X8.md" 2>/dev/null \
     | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "key=") == 1) print substr($i, 5) }' | tr '\n' ' ' | sed 's/ $//')"
 FC_DEC="$(fc_under Decisions | fc_flat)"
 expect_contains "STALE-2c …the decision names the head the approval was given at" "approved at $FC_H8" "$FC_DEC"
 expect_contains "STALE-2d …and what landed since" "1 commit landed since (T5)" "$FC_DEC"
+expect_contains "STALE-2f …the merge decision says it is asked again at this head" "Merge into main again at this head: approved at $FC_H8" "$FC_DEC"
 expect_contains "STALE-2e …the person's approval item opened on the ledger" "approve:release" "$(fc_owed)"
 poke "$RFC" reply "$FC_WR"
 expect_eq "STALE-3 reply all recommended replays the renewal (exit 0)" "0" "$RC"
@@ -1191,7 +1195,8 @@ expect_eq "STALE-3b …a second approved: release line at the new head, beside t
   "$(/usr/bin/grep -c '^approved: release ' "$PFC")|$(/usr/bin/grep '^approved: release ' "$PFC" | sed -n 's/.* head=\([0-9a-f]*\) .*/\1/p' | paste -sd'|' -)"
 expect_regex "STALE-3c …the new line with the reply's words" \
   "^approved: release by Dana Fixture [0-9T:Z-]+ head=$FC_X \"$FC_WR\"\$" "$(/usr/bin/grep '^approved: release ' "$PFC" | tail -1)"
-expect_eq "STALE-3d …the merge approval untouched, still one line" "1" "$(/usr/bin/grep -c '^approved: merge ' "$PFC")"
+expect_eq "STALE-3d …and a second approved: merge line at the new head, beside the first" "2|$FC_R|$FC_X" \
+  "$(/usr/bin/grep -c '^approved: merge ' "$PFC")|$(/usr/bin/grep '^approved: merge ' "$PFC" | sed -n 's/.* head=\([0-9a-f]*\) .*/\1/p' | paste -sd'|' -)"
 poke "$RFC" current 8 --check
 expect_eq "STALE-4 …after which current 8 --check is green at the new head" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
@@ -1201,6 +1206,33 @@ expect_eq "STALE-5 a third approval at the head the newest line names: refused, 
   "$RC|$(cmp -s "$TMPROOT/fc-before-again" "$PFC" && echo same || echo changed)"
 expect_contains "STALE-5b …an approval is recorded once at a head" "recorded once" "$OUT"
 rm -f "$FC_REC/landing-proofs.log"
+git -C "$RFC" reset -q --hard "$FC_R"
+
+# ============================================================
+section "§STALE-NAME: an approval of any name the head has moved past is given again at the new head, beside the first"
+# ============================================================
+# Stale is a head: an approval whose recorded head is not the working head is given again by `approve`, whatever its
+# name, and the second line stands beside the first. At the head the newest line names it is refused, as release is.
+# fails-when: a second `approve step4` at a new head is refused as already recorded, or replaces the first line; a
+# second at the head the newest line names is admitted.
+FC_SN_ORD='s/| pending | approval:release, approval:merge, head |/| pending | approval:release, approval:merge, approval:step4, head |/'
+fc_plan "$FC_GOOD" "$FC_SN_ORD"
+fc_sn_heads() { /usr/bin/grep '^approved: step4 ' "$PFC" | sed -n 's/.* head=\([0-9a-f]*\) .*/\1/p' | paste -sd'|' -; }
+poke "$RFC" approve step4 'go ahead'
+expect_eq "SN-0 setup: the first approve step4 is recorded at the head (exit 0)" "0|$FC_R" "$RC|$(fc_sn_heads)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+FC_X="$(s57_commit "$RFC" lib/x.sh 'T5: the fix')"
+poke "$RFC" approve step4 'go ahead again'
+expect_eq "SN-1 approve step4 at a new head is given again (exit 0): a second line at the new head, beside the first" \
+  "0|$FC_R|$FC_X" "$RC|$(fc_sn_heads)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_regex "SN-1b …the new line with the reply's words" \
+  "^approved: step4 by Dana Fixture [0-9T:Z-]+ head=$FC_X \"go ahead again\"\$" "$(/usr/bin/grep '^approved: step4 ' "$PFC" | tail -1)"
+cp "$PFC" "$TMPROOT/fc-before-sn"
+poke "$RFC" approve step4 'and once more'
+expect_eq "SN-2 a third at the head the newest line names: refused, the plan byte-identical" "1|same" \
+  "$RC|$(cmp -s "$TMPROOT/fc-before-sn" "$PFC" && echo same || echo changed)"
+expect_contains "SN-2b …recorded once at a head" "recorded once" "$OUT"
 git -C "$RFC" reset -q --hard "$FC_R"
 
 finish

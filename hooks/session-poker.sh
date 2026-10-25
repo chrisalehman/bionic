@@ -525,7 +525,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--suites=<a,b>] [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract (--suites= narrows its suites, and lands_on= with them): a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh task-set <id>[,<id>...] <col>=<val>... [-- <id>[,<id>...] <col>=<val>...]... [--reason '<why>']   set cells of ## Tasks rows (any header column; Files only on a pending row no roster names, a launched row's Files being amend's), every group in one transaction, the table judged once; reads+=<token> or deps+=<token> appends to what the cell holds, an empty reads cell standing for the default of its kind"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
-  die "  bash ${HOOK_DIR}/session-poker.sh step-field <N> <key>=<value> [--plan <delivered plan>]   write or replace one field of a Step N block: head, cmd, pass, total, output, merge, worktree-removed, adr, share, or walk-artifact (Step 5 only); --plan names a delivered run, whose Step 8 block any session may write"
+  die "  bash ${HOOK_DIR}/session-poker.sh step-field <N> <key>=<value>... [--plan <delivered plan>]   write or replace fields of a Step N block, as many as one call names: head, cmd, pass, total, output, merge, worktree-removed, adr, share; cleanup, tmp-wiped and tasks-completed (Step 8 only); auditor and walk-artifact (Step 5 only); --plan names a delivered run, whose Step 8 block any session may write"
   die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch; --check (5-8) runs the advance's judgment, writes nothing, and exits as the advance would"
   die "  bash ${HOOK_DIR}/session-poker.sh order '<the user's words>'   record the user's order: an order: given line with the time and the words, under the bound plan's ## SDLC State, else in record/orders.log; while it stands tests/run.sh starts no suite"
   die "  bash ${HOOK_DIR}/session-poker.sh order lift   end the open order: an order: lifted line with the time and its words"
@@ -1035,8 +1035,9 @@ case "$VERB" in
     esac
     PV_KEY="$1"; PV_TEXT="$2"
     ;;
-  # THE STEP-FIELD VERB (wave-28 T8; REQ-3 AC-3.5, D17): a step and one `<key>=<value>`. The shapes are the
-  # usage error's (2); the key set, the line break, a step with no line and Step 9 are the verb's own refusals (1).
+  # THE STEP-FIELD VERB: a step and one or more `<key>=<value>`, each key once. The
+  # shapes are the usage error's (2); the key set, the line break, a step with no line and Step 9 are the verb's own
+  # refusals (1).
   # `--plan <plan>` names a delivered run whose Step 8 merge record is written after close-out let go of the session;
   # it may stand anywhere after the step number.
   step-field)
@@ -1049,19 +1050,27 @@ case "$VERB" in
       _pv_ops+=("$1"); shift
     done
     set -- ${_pv_ops[@]+"${_pv_ops[@]}"}
-    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
-      usage "step-field takes <N> <key>=<value>: a step number and one field, then optionally --plan <a delivered plan>."
+    if [ $# -lt 2 ] || [ -z "$1" ]; then
+      usage "step-field takes <N> <key>=<value>...: a step number and its fields, then optionally --plan <a delivered plan>."
     fi
     case "$1" in
       [0-9]|[0-9][ab]) : ;;
       *) usage "step-field: '$(printf '%s' "${1:0:12}" | tr -d '[:cntrl:]')' is not a step number (0-9, 4a)." ;;
     esac
-    case "$2" in
-      [!=]*=*) : ;;
-      *) usage "step-field: '$(printf '%s' "${2:0:24}" | tr -d '[:cntrl:]')' is not <key>=<value>." ;;
-    esac
-    [ -n "${2#*=}" ] || usage "step-field: the value of '$(printf '%s' "${2%%=*}" | cut -c 1-24 | tr -d '[:cntrl:]')' is empty."
-    PV_KEY="$1"; PV_FKEY="${2%%=*}"; PV_FVAL="${2#*=}"
+    PV_KEY="$1"; shift
+    PV_FIELDS=(); _pv_seen=" "
+    for _pv_kv in "$@"; do
+      case "$_pv_kv" in
+        [!=]*=*) : ;;
+        *) usage "step-field: '$(printf '%s' "${_pv_kv:0:24}" | tr -d '[:cntrl:]')' is not <key>=<value>." ;;
+      esac
+      [ -n "${_pv_kv#*=}" ] || usage "step-field: the value of '$(printf '%s' "${_pv_kv%%=*}" | cut -c 1-24 | tr -d '[:cntrl:]')' is empty."
+      case "$_pv_seen" in
+        *" ${_pv_kv%%=*} "*) usage "step-field: '$(printf '%s' "${_pv_kv%%=*}" | cut -c 1-24 | tr -d '[:cntrl:]')' is named twice; a field is written once per call." ;;
+      esac
+      _pv_seen="$_pv_seen${_pv_kv%%=*} "
+      PV_FIELDS+=("$_pv_kv")
+    done
     ;;
   # `current <N> --check` (wave-38 T1; D20, AC-1.3): the flag after the step, for 5 to 8, asks the advance without writing.
   current)

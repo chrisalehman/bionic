@@ -1631,74 +1631,111 @@ EOF
   # integration), cleanup tmp-wiped tasks-completed (the integration's cleanup, Step 8 alone: walls.sh
   # `validate_integrate_step` reads them there and nowhere else, and no other verb writes them), adr (the document
   # step), share (the Step-4 fact), auditor (the Verify gate's verdict, Step 5 alone), walk-artifact (the walk gate's
-  # pointer, Step 5 alone). It takes the plan transaction every row verb
-  # takes (copy, dry commit through the real gate, checksum, swap), so a plan the gate would refuse is not
-  # written. REFUSED (1), the plan unchanged: a key outside the fourteen, a value with a line break, a step with no
-  # line (step-line writes it), a key the step line itself carries (step-line owns that text), and Step 9
-  # (close-out writes that block). The refusals are this verb family die lines, not refuse.sh refusals.
+  # pointer, Step 5 alone). ONE CALL TAKES SEVERAL FIELDS of one step (`merge=… worktree-removed=… cleanup=…`, the
+  # integration's record): every pair is held to the rules below before any is written, and all of them go in through
+  # one `units_step_fields --replace` and one transaction, so a refused pair leaves the others unwritten too. It takes
+  # the plan transaction every row verb takes (copy, dry commit through the real gate, checksum, swap), so a plan the
+  # gate would refuse is not written. REFUSED (1), the plan unchanged: a key outside the fourteen (naming the verb that
+  # writes it, `sf_writer`), a value with a line break, a step with no line (step-line writes it), a key the step line
+  # itself carries (step-line owns that text), and Step 9 (close-out writes that block). The refusals are this verb
+  # family die lines, not refuse.sh refusals.
+  #
+  # THE KEYS OTHER VERBS WRITE. A key a step block does not hold may still be a line of the plan another verb writes;
+  # the refusal names that verb's call, so the line is written by its writer and never by hand into a step block,
+  # where no reader would look for it. A key no verb writes is refused saying so: there is no call to name. The
+  # Step 9 line's `delivered:` is close-out's, a script of its own and no poker verb, so it is named by its path.
+  # sf_writer <key> -> the writer's verb and operands, one per line; nothing when no verb writes the key.
+  sf_writer() {
+    case "$1" in
+      approved) printf '%s\n' approve '<name>' '<reply>' ;;
+      approved-by) printf '%s\n' approve plan '<reply>' ;;
+      proved) printf '%s\n' proof-add '<kind>' '<evidence>' ;;
+      inherited) printf '%s\n' proof-add inherited '<suite>' ;;
+      waived) printf '%s\n' waive '<question>' '<reply>' ;;
+      current) printf '%s\n' current '<N>' ;;
+      worktree|base-sha|branch) printf '%s\n' current 4 ;;
+      delivered) printf '%s\n' close-out ;;
+      *) return 1 ;;
+    esac
+  }
   poker_verb_step_field() {
+    local sf_kv sf_w sf_walk=""
     case "$PV_KEY" in
       9|9a|9b)
         die "REFUSED — the Step 9 block is close-out's to write (scripts/close-out.sh)."
         exit 1 ;;
     esac
-    case "$PV_FKEY" in
-      head|cmd|pass|total|output|merge|worktree-removed|cleanup|tmp-wiped|tasks-completed|adr|share|walk-artifact|auditor) : ;;
-      *)
-        die "REFUSED — '$(clean "${PV_FKEY:0:20}")' is not a step field; the plan is unchanged."
-        die "The fields: head, cmd, pass, total, output, merge, worktree-removed, cleanup, tmp-wiped and tasks-completed (Step 8), adr, share, walk-artifact and auditor (Step 5)."
-        exit 1 ;;
-    esac
-    # THE CLEANUP KEYS are read by the gate from the Step 8 block alone, so they are written there and at no other step.
-    case "$PV_FKEY" in
-      cleanup|tmp-wiped|tasks-completed)
-        if [ "$PV_KEY" != 8 ]; then
-          die "REFUSED — $PV_FKEY is read from the Step 8 block only (the integration's cleanup), not Step $PV_KEY's; the plan is unchanged."
-          pv_next step-field 8 "$PV_FKEY=$PV_FVAL"
-          exit 1
-        fi ;;
-    esac
-    # THE WALK POINTER (wave-33 T7; REQ-4 AC-4.1, D8; A-orch-42). The walk gate reads `walk-artifact:`
-    # from the Step-5 block alone (walls.sh `step5_evidence_block`), so the key is written there and at no
-    # other step; and it refuses a path that climbs out with `..`, so the verb refuses it first.
-    if [ "$PV_FKEY" = walk-artifact ]; then
-      if [ "$PV_KEY" != 5 ]; then
-        die "REFUSED — walk-artifact is read from the Step 5 block only (the walk gate's), not Step $PV_KEY's; the plan is unchanged."
-        pv_next step-field 5 "walk-artifact=$PV_FVAL"
-        exit 1
-      fi
-      case "/$PV_FVAL/" in
-        */../*)
-          die "REFUSED — the walk artifact '$(clean "$PV_FVAL")' has a '..' component, which the walk gate refuses: name it under record/. The plan is unchanged."
+    for sf_kv in "${PV_FIELDS[@]}"; do
+      PV_FKEY="${sf_kv%%=*}"; PV_FVAL="${sf_kv#*=}"
+      case "$PV_FKEY" in
+        head|cmd|pass|total|output|merge|worktree-removed|cleanup|tmp-wiped|tasks-completed|adr|share|walk-artifact|auditor) : ;;
+        *)
+          sf_w="$(sf_writer "$PV_FKEY")" || sf_w=""
+          if [ "$sf_w" = close-out ]; then
+            die "REFUSED — '$(clean "${PV_FKEY:0:20}")' is not a step field: it is the Step 9 line's, and close-out writes it with current: 9 (scripts/close-out.sh); the plan is unchanged."
+          elif [ -n "$sf_w" ]; then
+            die "REFUSED — '$(clean "${PV_FKEY:0:20}")' is not a step field: it is a line of its own, and $(printf '%s' "$sf_w" | head -n 1) writes it; the plan is unchanged."
+            # shellcheck disable=SC2046  # the writer's call is one word per line, none with a blank
+            pv_next $(printf '%s\n' "$sf_w")
+          else
+            die "REFUSED — '$(clean "${PV_FKEY:0:20}")' is not a step field, and no verb writes '$(clean "${PV_FKEY:0:20}")'; the plan is unchanged."
+          fi
+          die "The fields: head, cmd, pass, total, output, merge, worktree-removed, cleanup, tmp-wiped and tasks-completed (Step 8), adr, share, walk-artifact and auditor (Step 5)."
           exit 1 ;;
       esac
-    fi
-    # THE AUDITOR'S VERDICT is read by the Verify gate from the Step 5 block alone (walls.sh `validate_verify_step`), so
-    # the key is written there and at no other step.
-    if [ "$PV_FKEY" = auditor ] && [ "$PV_KEY" != 5 ]; then
-      die "REFUSED — auditor is read from the Step 5 block only (the Verify gate's), not Step $PV_KEY's; the plan is unchanged."
-      pv_next step-field 5 "auditor=$PV_FVAL"
-      exit 1
-    fi
-    case "$PV_FVAL" in
-      *$'\n'*|*$'\r'*)
-        die "REFUSED — a step field is one line, and the value has a line break; the plan is unchanged."
-        exit 1 ;;
-    esac
+      # THE CLEANUP KEYS are read by the gate from the Step 8 block alone, so they are written there and at no other step.
+      case "$PV_FKEY" in
+        cleanup|tmp-wiped|tasks-completed)
+          if [ "$PV_KEY" != 8 ]; then
+            die "REFUSED — $PV_FKEY is read from the Step 8 block only (the integration's cleanup), not Step $PV_KEY's; the plan is unchanged."
+            pv_next step-field 8 "$PV_FKEY=$PV_FVAL"
+            exit 1
+          fi ;;
+      esac
+      # THE WALK POINTER. The walk gate reads `walk-artifact:`
+      # from the Step-5 block alone (walls.sh `step5_evidence_block`), so the key is written there and at no
+      # other step; and it refuses a path that climbs out with `..`, so the verb refuses it first.
+      if [ "$PV_FKEY" = walk-artifact ]; then
+        if [ "$PV_KEY" != 5 ]; then
+          die "REFUSED — walk-artifact is read from the Step 5 block only (the walk gate's), not Step $PV_KEY's; the plan is unchanged."
+          pv_next step-field 5 "walk-artifact=$PV_FVAL"
+          exit 1
+        fi
+        case "/$PV_FVAL/" in
+          */../*)
+            die "REFUSED — the walk artifact '$(clean "$PV_FVAL")' has a '..' component, which the walk gate refuses: name it under record/. The plan is unchanged."
+            exit 1 ;;
+        esac
+        sf_walk="$PV_FVAL"
+      fi
+      # THE AUDITOR'S VERDICT is read by the Verify gate from the Step 5 block alone (walls.sh `validate_verify_step`), so
+      # the key is written there and at no other step.
+      if [ "$PV_FKEY" = auditor ] && [ "$PV_KEY" != 5 ]; then
+        die "REFUSED — auditor is read from the Step 5 block only (the Verify gate's), not Step $PV_KEY's; the plan is unchanged."
+        pv_next step-field 5 "auditor=$PV_FVAL"
+        exit 1
+      fi
+      case "$PV_FVAL" in
+        *$'\n'*|*$'\r'*)
+          die "REFUSED — a step field is one line, and the value of $(clean "$PV_FKEY") has a line break; the plan is unchanged."
+          exit 1 ;;
+      esac
+    done
     # A DELIVERED RUN TAKES ITS MERGE RECORD BY NAME: Step 8 opens a delivered plan `--plan` names from any session,
     # engaged or not; every other step is written through the session's binding, so `--plan` there is refused.
     if [ "$PV_KEY" = 8 ]; then plan_verb_open step-field delivered-ok; else plan_verb_open step-field; fi
+    SF_KEYS="$(printf '%s\n' "${PV_FIELDS[@]}" | sed 's/=.*//' | paste -sd' ' -)"
     if [ -n "${PV_PLAN_ARG:-}" ] && [ "$PV_KEY" != 8 ]; then
       die "REFUSED — --plan names a delivered run, which takes its Step 8 merge record by name and nothing else; Step $PV_KEY is written through this session's binding. The plan is unchanged."
       exit 1
     fi
     PV_RC=0
-    units_step_fields --replace "$PV_PLAN" "$PV_KEY" "$PV_FKEY=$PV_FVAL" > "$PV_NEW" 2>/dev/null || PV_RC=$?
+    units_step_fields --replace "$PV_PLAN" "$PV_KEY" "${PV_FIELDS[@]}" > "$PV_NEW" 2>/dev/null || PV_RC=$?
     case "$PV_RC" in
       0) : ;;
       1) die "REFUSED — the plan has no Step $PV_KEY line; write it first: bash ${HOOK_DIR}/session-poker.sh step-line $PV_KEY '<text>', then step-field again. The plan is unchanged."
          exit 1 ;;
-      5) die "REFUSED — the Step $PV_KEY line itself carries '$PV_FKEY:'; step-line writes that text."
+      5) die "REFUSED — the Step $PV_KEY line itself carries one of $SF_KEYS as its own text; step-line writes that text."
          die "The plan is unchanged."
          exit 1 ;;
       *) die "REFUSED — the field cannot be written (units_step_fields exit $PV_RC); the plan is unchanged."
@@ -1708,9 +1745,9 @@ EOF
     # `walk-artifact: pending` stub that the gate refuses as a placeholder once every row is discharged, and no verb filled
     # it: the fix was a hand edit. The Step 5 block stays the walk gate's one reader; the matrix line, when the plan has
     # one, takes the same value in the same transaction. A matrix with no such line gains none.
-    if [ "$PV_FKEY" = walk-artifact ]; then
+    if [ -n "$sf_walk" ]; then
       PV_RC=0
-      SF_WV="$PV_FVAL" awk '
+      SF_WV="$sf_walk" awk '
         { if ($0 ~ /^[ \t]*```/) fence = !fence }
         /^## / { m = ($0 ~ /^## Verification Matrix/) }
         !fence && m && !done && /^[ \t]*walk-artifact[ \t]*:/ {
@@ -1722,8 +1759,8 @@ EOF
       fi
       mv "$PV_NEW.m" "$PV_NEW"
     fi
-    plan_verb_swap step-field "Step $PV_KEY $PV_FKEY" writer
-    say "step-field — Step $PV_KEY $PV_FKEY: written to $PV_PLAN; dry-committed first."
+    plan_verb_swap step-field "Step $PV_KEY $SF_KEYS" writer
+    say "step-field — Step $PV_KEY $SF_KEYS: written to $PV_PLAN; dry-committed first."
     exit 0
   }
 
@@ -2822,8 +2859,10 @@ RR_DISP_EOF
     # APPROVALS: every name an open row reads, release and merge first, each not yet given. A release approval the head
     # has moved past is put again: the advance to 8 refuses on it as on a missing one, and `card.sh early` settles that
     # refusal as this page's decision (`settles: approve:release`), so the user gives it at the new head, and the reply
-    # writes a second line beside the first. Only the judge says it is stale; the page never judges the heads itself.
-    RR_NAMES=""
+    # writes a second line beside the first. Only the judge says the release is stale. The merge is given with the
+    # release as a pair, so beside a release put again it is put again too when its own newest line names another head
+    # than this one (`proof_approved_head`, the head the approval was given at); a merge given at this head stands.
+    RR_NAMES=""; RR_RELAGAIN=""
     RR_INTO="$(plan_integration_branch "$PV_PLAN")"
     for nm in release merge $(units_approval_names "$PV_PLAN" 2>/dev/null); do
       [ "$nm" != plan ] || continue
@@ -2832,14 +2871,18 @@ RR_DISP_EOF
       RR_NAMES="$RR_NAMES $nm"
       again=""
       if [ -n "$(rr_approved "$PV_PLAN" "$nm")" ]; then
-        [ "$nm" = release ] || continue
-        case $'\n'"$RR_SETTLE"$'\n' in *$'\n'approve:release$'\n'*) : ;; *) continue ;; esac
-        h="$(proof_approved_head "$PV_PLAN" release 2>/dev/null)" || h=""
+        h="$(proof_approved_head "$PV_PLAN" "$nm" 2>/dev/null)" || h=""
+        case "$nm" in
+          release)
+            case $'\n'"$RR_SETTLE"$'\n' in *$'\n'approve:release$'\n'*) RR_RELAGAIN=yes ;; *) continue ;; esac ;;
+          merge) [ -n "$RR_RELAGAIN" ] && [ "$h" != "$RR_HEAD" ] || continue ;;
+          *) continue ;;
+        esac
         again="again at this head${h:+: $(rr_since "$h")}"
       fi
       case "$nm" in
         release) line="Release${RR_REL:+ $RR_REL}${again:+ $again}" ;;
-        merge) line="Merge${RR_INTO:+ into $RR_INTO}" ;;
+        merge) line="Merge${RR_INTO:+ into $RR_INTO}${again:+ $again}" ;;
         *) line="Approval $nm" ;;
       esac
       rr_add approve "approve:$nm" "approve $nm" "-" "-" "$line" approve withhold "$nm" "hold the $nm"
