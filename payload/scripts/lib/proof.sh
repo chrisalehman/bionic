@@ -28,7 +28,7 @@
 
 # THE REGRESSION IS KIND `regression` (wave-38 T8; REQ-9, D6). A line 1.20.0 wrote, `kind=floor`, is read as it:
 # proof_fields normalises the kind through lib/alias.sh, the one map of the old spellings.
-PROOF_KINDS="regression review task check"
+PROOF_KINDS="regression review task check walk"
 # THE MAP IS SOURCED FROM BESIDE THIS FILE, softly: a copy of this file read where alias.sh is not beside it (a suite's
 # doctored copy) reads only the new spellings, and _proof_alias_norm and _proof_alias_born say so by writing no arm.
 if ! declare -F alias_read >/dev/null 2>&1; then
