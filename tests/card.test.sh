@@ -2538,7 +2538,10 @@ section "§UNPROVED: the release card prints the full pass's state at this head,
 # FIXTURE FIDELITY: the run is tests/proof-at-head.test.sh's (`pah_world`, read out of that suite by name with the
 # close-out fixture's builders it stands on, out of tests/close-out.prelude.sh), so the card is drawn over the plan
 # and record the other surfaces print from; the card is the real `release-approval --preview`.
-# ANTI-VACUITY: UP-1 reads the red world and UP-2 the green one through the same extractor.
+# fails-when, too: the card puts no merge-unproved decision over the red world, or puts one over the green; current 8
+# --check passes over the red world before the person's word is written, or refuses after it.
+# ANTI-VACUITY: UP-1 reads the red world and UP-2 the green one through the same extractor; UP-3 reads the decision
+# through up_ask before UP-3g and UP-4 read its absence through it; UP-3b refuses before UP-3f passes on one world.
 up_import() {  # <name> <file> -> the function, defined here, read out of <file>
   local body
   body="$(awk -v n="$1" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$2")"
@@ -2556,16 +2559,47 @@ REPO_ROOT="$REPO"; UNITS_LIB="$REPO/payload/scripts/lib/units.sh"; PAH_LIB="$REP
 PAH_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"; PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"
 export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.invalid GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
 up_line() { printf '%s\n' "$1" | /usr/bin/grep -F "whole suite: " | head -1; }  # <card> -> its whole-suite line
+# up_ask <card> -> the card's merge-unproved decision, its folded lines joined: `<n>. Merge without … · default: none`
+up_ask() {
+  printf '%s\n' "$1" | awk '$0 == "Decisions" { f = 1; next } f && $0 == "" { exit } f' | tr '\n' ' ' | tr -s ' ' \
+    | /usr/bin/grep -oE '[0-9]+\. Merge without a whole run at this head — [^·]+· recommended: wait for the pass · default: none'
+}
+# up_unanswered <plan> -> the plan with no `approved: merge-unproved` line: the person has not given the word yet
+up_unanswered() { /usr/bin/grep -v '^approved: merge-unproved ' "$1" > "$1.n" && mv "$1.n" "$1"; }
 pah_world up-red "notify.test.sh,shell-lint.test.sh" 2
+up_unanswered "$PAH_PLAN"
 bound_marker "$PAH_P" card-up-session "$PAH_PLAN"
 pah_poke "$PAH_P" card-up-session release-approval --preview "$PAH_PLAN"
 expect_eq "UP-1 a whole run red at F, two landings past it greening its reds: the card prints red at F, the two counted, marked not green" \
   "0|✖️ whole suite: red at ${PAH_F:0:8}, 2 landings before this head" "$PAH_RC|$(up_line "$PAH_OUT")"
 expect_absent "UP-1b …and never covered or green" "green" "$(pah_card_state "$PAH_OUT")"
+expect_regex "UP-3 …and the card asks the merge without a pass at this head as its own decision, the state on it, waiting recommended and no default" \
+  "^[0-9]+\. Merge without a whole run at this head — red at ${PAH_F:0:8}, 2 landings before this head · recommended: wait for the pass · default: none\$" \
+  "$(up_ask "$PAH_OUT")"
+pah_poke "$PAH_P" card-up-session current 8 --check
+expect_eq "UP-3b unanswered, current 8 --check refuses (exit 1) on the regression, unproved at this head" "1|1" \
+  "$PAH_RC|$(printf '%s\n' "$PAH_OUT" | /usr/bin/grep -cE "^regression	unproved	red at ${PAH_F:0:8}, 2 landings before this head	")"
+expect_contains "UP-3c …naming the person's exit" \
+  "needs: the user — reply" "$PAH_OUT"
+expect_contains "UP-3d …and the other: the pass at this head" \
+  "on the release card (merge without a whole run at this head), or wait for the pass" "$PAH_OUT"
+pah_poke "$PAH_P" card-up-session approve merge-unproved 'merge it without the pass'
+expect_eq "UP-3e the writer a reply runs records the person's word at the working head (exit 0)" "0|1" \
+  "$PAH_RC|$(/usr/bin/grep -cE "^approved: merge-unproved by [^ ]+ [0-9T:Z-]+ head=$PAH_H \"merge it without the pass\"\$" "$PAH_PLAN")"
+pah_poke "$PAH_P" card-up-session current 8 --check
+expect_eq "UP-3f …after which current 8 --check passes (exit 0)" "0" "$PAH_RC"
+[ "$PAH_RC" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$PAH_OUT" | tail -4)"
+pah_poke "$PAH_P" card-up-session release-approval --preview "$PAH_PLAN"
+expect_eq "UP-3g …and the card still prints red at F, and asks nothing more of it" "✖️ whole suite: red at ${PAH_F:0:8}, 2 landings before this head|" \
+  "$(up_line "$PAH_OUT")|$(up_ask "$PAH_OUT")"
 pah_world up-green "" 0
+up_unanswered "$PAH_PLAN"
 bound_marker "$PAH_P" card-up-session "$PAH_PLAN"
 pah_poke "$PAH_P" card-up-session release-approval --preview "$PAH_PLAN"
 expect_eq "UP-2 a whole run green at the working head: the card prints green at it, marked green" \
   "0|✅ whole suite: green at ${PAH_H:0:8}" "$PAH_RC|$(up_line "$PAH_OUT")"
+expect_eq "UP-4 …and asks no merge without a pass" "" "$(up_ask "$PAH_OUT")"
+pah_poke "$PAH_P" card-up-session current 8 --check
+expect_eq "UP-4b …and current 8 --check passes with no word from the person (exit 0)" "0" "$PAH_RC"
 
 finish
