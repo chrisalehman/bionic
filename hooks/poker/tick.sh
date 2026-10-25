@@ -1123,6 +1123,8 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
             $2 == "note:" { print $3, $4, $5; next }
             $2 == "NOTIFY" && index($0, " started without its checks: ") > 0 { print; next }
             $2 ~ /^(STANDDOWN|held|GONE|GONE\?|DUPLICATE-SESSION|DUPLICATE-START|HELD|LEDGER|LAUNCHED|NOT-RECORDED|RANGE|NOTIFY|SPLIT)$/ { print $2, $3, $4 }
+            # A whole run the tick started, or one it is waiting to start, is news: its head is in the line.
+            $2 == "regression-run" { print $2, $3, $4 }
             # An open check is told once (wave-28 T41; D33): a new one, or one settled, moves the hash.
             $2 == "FINDING" && $6 == "check" { print $2, $3, $6 }
           ' "$TICK_BUF" | LC_ALL=C sort
@@ -2171,6 +2173,83 @@ EOF
     TICK_OCCUPIED="$(printf '%s' "$TICK_OCC_NAMES" | budget_open_writers "$ROSTER_FILE")"
     case "$TICK_OCCUPIED" in ''|*[!0-9]*) TICK_OCCUPIED=0 ;; esac
 
+    # ─────────────────────────────────────── the whole run, started by the tick
+    #
+    # THE TICK STARTS THE WHOLE RUN ITSELF. A head no whole run has run at is not proved green, and the
+    # machine is the one that runs it: neither the tick nor the orchestrator is a hand-hold (the run
+    # line says which with `starter=`). It starts when the plan is past approval and owes a regression,
+    # no row is ready, no writer row is open and no row the regression waits on still writes, and the
+    # working branch's head is not the last regression proof's (no proof counts as another head). A fix
+    # row that lands past a proof is this same case at the next tick: its landing moved the head, so it
+    # has no branch of its own. Nothing starts at a head that already has a whole-run log, nor from a
+    # dirty checkout, which regression-run would refuse.
+    #
+    # THE RUN IS AN OBJECT ON THE ROSTER, `regression@<h8>`. A row of status `run`, which no reader
+    # counts as a live agent, in a read-only role (it holds no writer slot), waived as no agent's
+    # contract (the sweeper never calls it MET or open), with `suites_allowed=run.sh`, so the gate's
+    # whole-run budget admits the runner it starts, alone, once nothing admitted is unfinished. booked.sh
+    # --detach marks the run on it and the tick's RUNNING line reads it. THE OBJECT IS THE GUARD: a live
+    # one starts nothing, and a finished one stands for its head, except one the gate never admitted
+    # (75), which is told and started again, and one LOST, which is started again.
+    #
+    # THE TICK NEVER WAITS: booked.sh --no-wait prints its start line and returns, and the detached side
+    # runs regression-run, then proof-add regression over the log the run wrote (the proof lands as a
+    # hand-typed run's does). The command ends with the run's code when the run wrote a log, 75 when the
+    # gate never admitted it, and 69 when it ran nothing: a stamp of 75 or 69 is no run of the head.
+    tick_regression_start() {
+      local plan="${SCHED_PLAN:-}" head ph wb co docs rel lg h8 name row poker cmd out log
+      [ -n "$plan" ] && [ -f "$plan" ] && [ "${POKER_RUN_OPEN:-}" != unreadable ] || return 0
+      case "${SCHED_STEP:-}" in ''|*[!0-9]*) return 0 ;; esac
+      [ "$SCHED_STEP" -ge 4 ] || return 0
+      [ "$(plan_regression "$plan" 2>/dev/null)" != no ] || return 0
+      case "${SCHED_READY_ALL:-}" in *[!\ ]*) return 0 ;; esac
+      case "${TICK_OCCUPIED:-0}" in 0) : ;; *) return 0 ;; esac
+      [ -z "$(units_floor_holds "$plan" "" 2>/dev/null)" ] || return 0
+      if ! declare -F proof_branch_head >/dev/null 2>&1; then
+        [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
+      fi
+      declare -F proof_branch_head >/dev/null 2>&1 && declare -F proof_checkout >/dev/null 2>&1 || return 0
+      head="$(proof_branch_head "$plan" "$REPO_REAL" 2>/dev/null)" || return 0
+      case "$head" in [0-9a-f]*) : ;; *) return 0 ;; esac
+      ph="$(proof_last "$plan" regression 2>/dev/null)"
+      if [ -n "$ph" ]; then case "$head" in "$ph"*) return 0 ;; esac; fi
+      wb="$(plan_working_branch "$plan" 2>/dev/null)"
+      co="$(proof_checkout "$REPO_REAL" "$wb")" || return 0
+      [ -z "$(_wt_piece_dirt "$co" 2>/dev/null)" ] || return 0
+      docs="$(docs_root "$REPO_REAL" 2>/dev/null)"; [ -n "$docs" ] || return 0
+      rel="record/$(proof_plan_slug "$plan")/regression-run-$head.log"
+      for lg in "$docs/${rel%.log}"*.log; do [ -f "$lg" ] && return 0; done
+      h8="${head:0:8}"; name="regression@$h8"
+      if run_load_row "$(run_row_of "$ROSTER_FILE" "$name")" "$ROSTER_FILE"; then
+        run_read
+        case "$RUN_STATE" in
+          RUNNING) return 0 ;;
+          FINISHED)
+            [ "$RUN_RC" = 75 ] || return 0
+            say "regression-run waiting — the gate has no room for a whole run" ;;
+        esac
+      fi
+      [ ! -L "$ROSTER_FILE" ] && tmp_dir_ok "${ROSTER_FILE%/*}" || return 0
+      [ -f "$ROSTER_FILE" ] || roster_header > "$ROSTER_FILE" 2>/dev/null || return 0
+      row="$(roster_row status=run session="$SESSION_ID" name="$name" agent_id= launched_at="$(iso_now)" \
+        subagent_type=bionic:test-runner model= deliverable= source= duration= progress= claims= cadence= absent= \
+        waiver="a whole run the tick started, not an agent: its log and its proof are its record" \
+        suites_allowed=run.sh suites_source=DECLARED tool_use_id= plan="$plan")" || return 0
+      printf '%s\n' "$row" >> "$ROSTER_FILE" 2>/dev/null || return 0
+      poker="$HOOK_DIR/session-poker.sh"
+      cmd="cd $(printf '%q' "$REPO_REAL") || exit 1; bash $(printf '%q' "$poker") regression-run --starter tick; rc=\$?"
+      cmd="$cmd; if [ -f $(printf '%q' "$docs/$rel") ]; then bash $(printf '%q' "$poker") proof-add regression $(printf '%q' "$rel") || :"
+      cmd="$cmd; elif [ \"\$rc\" -ne 75 ]; then rc=69; fi; exit \"\$rc\""
+      out="$( cd "$REPO_REAL" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$BIONIC_LIB/../booked.sh" \
+        --detach --no-wait --agent "$name" --suites run.sh --stamp-dir "$co" -- "$cmd" 2>&1 </dev/null )"
+      log="$(printf '%s\n' "$out" | sed -nE 's/^booked: (started|attached) pid=[0-9]+ log=(.*) run=[^ ]*$/\2/p' | head -n 1)"
+      if [ -z "$log" ]; then
+        die "WARN — the whole run at ${h8} could not be started detached: $(clean "$(printf '%s' "$out" | head -n 1)")"
+        return 0
+      fi
+      say "regression-run started $name (log $log)"
+    }
+
     # ─────────────────────────────────────── the scheduler, defined once for two callers
     #
     # ONE SITE, TWO ARMS (wave-26 T59; REQ-6 AC-6.6). The gate line, the budget and the
@@ -2428,6 +2507,7 @@ EOF
       fi
       tick_wait_report
       tick_finding_report
+      tick_regression_start
     fi
 
     }
