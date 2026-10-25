@@ -183,7 +183,7 @@ ow_tasks="## Tasks
 | T7 | 7 | doc | the release | orchestrator | — | 10 | REQ-1 | CHANGELOG.md | pending |
 | T9 | 9 | close | the close | orchestrator | — | 10 | REQ-1 | none | pending |"
 
-# ow_matrix <tier> <task value> -> AC-1 discharged and confirmed, AC-2 pending with that tier and task:
+# ow_matrix <tier> <task value> -> the first row discharged and confirmed, the second pending with that tier and task:
 ow_matrix() {
   printf '%s\n' "## Verification Matrix
 

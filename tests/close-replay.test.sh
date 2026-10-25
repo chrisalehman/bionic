@@ -391,7 +391,7 @@ fi
 # ============================================================
 section "§LIVE: the run's live criterion is owed at the close, passes every gate before it pending, and the close writes it"
 # ============================================================
-# The replay's plan carries the live row a planner writes (door.sh DOOR_LIVE_ROW): AC-2.1 at tier T3, its eval the
+# The replay's plan carries the live row a planner writes (door.sh DOOR_LIVE_ROW): a row at tier T3, its eval the
 # hand-holds line at the close, its task the close row T9. The gate defers it until its step, so each advance and the
 # refused close-out pass with it pending; the release approval card lists it owed by the close, never a decision its
 # reply could waive; close-out writes it from its last reading after delivered:, and no matrix-set touches it.

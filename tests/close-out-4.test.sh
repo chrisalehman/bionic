@@ -1129,7 +1129,7 @@ section "§OWED-AT-CLOSE — close-out settles the matrix row its own last readi
 # session binding is owed) and two matrix rows owed at the close; the hand-hold above zero is §READ-ORDER's amend.
 # fails-when: run refuses on the pending row, or the delivered plan reads it pending, or reads it discharged above zero,
 # or a row owed at the close whose eval is another measure is written.
-oc_rows() {  # <project> -> the plan gains T4 (step 9, close), AC-2 (T3, the close's measure) and AC-3 (T0, task: 9, another eval)
+oc_rows() {  # <project> -> the plan gains T4 (step 9, close), a T3 row on the close's measure and a T0 row (task: 9) on another eval
   local plan="$1/$PLAN_REL"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "oc_rows: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
   awk '

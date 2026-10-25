@@ -31,8 +31,8 @@
 #   the sentinel file, and the plan's path under <root>.
 #
 #   DOOR_LIVE_ROW=1, set for a door_world call, gives the plan the one live criterion a planner writes for a run's close:
-#   a close row T9 at step 9, an Eval design row for REQ-2 whose eval is `landing-report --hand-holds` at the close, and
-#   its matrix row AC-2.1 at tier T3, pending. It is owed at the close, which writes it. Unset, the plan is as before.
+#   a close row T9 at step 9, an Eval design row of a second requirement whose eval is `landing-report --hand-holds` at
+#   the close, and its matrix row at tier T3, pending. It is owed at the close, which writes it. Unset, the plan is as before.
 #
 # WHAT THE FIXTURE HOLDS, at its accepted head, committed: hooks/ and payload/scripts/ copied whole from the tree
 # under test, with the payload/hooks link; tests/run.sh and tests/lib/ whole, so the check and the name scan are

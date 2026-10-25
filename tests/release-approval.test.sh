@@ -1244,7 +1244,7 @@ section "§OWED-LATER: a row owed at a later step is neither proved nor a decisi
 # close row (step 9) and a third criterion pending under it, as a planner writes them.
 # fails-when: the row owed by the close is put under Decisions or opened as row:<AC>, or the line does not name it, or a
 # row whose task is a Step-4 row is let off the card.
-fc_owed_later() {  # <task value> -> PFC: FC_GOOD with T4 (step 9, close) and AC-1.3 (T3, pending) whose task: is <task value>
+fc_owed_later() {  # <task value> -> PFC: FC_GOOD with T4 (step 9, close) and a third row (T3, pending) whose task: is <task value>
   fc_plan "$FC_GOOD"
   FC_OL_TASK="$1" awk '
     { print }
