@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for hooks/session-poker.sh — shard 5: §CHECK, §DECISIONS, §ROUNDS, §EARLY-TICK, §ORDER, §QUIET-LANDING,
-# §NOTREADY, §STEP, §TSENTENCE, §CAP, §OWED, §EXEMPT, §APPROVED-BY, §PARTS.
+# §NOTREADY, §STEP, §TSENTENCE, §CAP, §OWED, §EXEMPT, §APPROVED-BY, §PARTS, §RETIER.
 #
 # THE SUITE IS SHARDS (wave-30 T2; design-ledger Δ7, D8). Its governing design, its hermetic
 # posture and its clock discipline are written once, in tests/session-poker.test.sh's header;
@@ -1030,5 +1030,98 @@ expect_eq "PA-9 run from a checkout on main, reviews-part commits on the working
   "0|$PA_T3|$PA_M|$PA_T4" "$RC|$(git -C "$RPA" log -1 --format='%P' "$PA_T4" 2>/dev/null)|$(pa_tip main)|$(git -C "$RPA" rev-parse HEAD)"
 expect_contains "PA-9b …and its part line names the working branch and the checkout holding it" \
   "|ev=integrate|row=T4|part=reviews|commit=$PA_T4|branch=wave/01-fixture|tree=$RPA|at=" "$(pa_ev reviews)"
+
+# ============================================================
+section "§RETIER: matrix-retier raises a criterion's tier in every place it lives and resets the row; a tier at or below the cell's is refused (REQ-3 AC-3.1, AC-3.2)"
+# ============================================================
+# A criterion's tier lives in three places: the matrix table's tier cell, the AC block's `eval: <tier> — <text>` line, and
+# the plan's `## Eval design` row (Eval type and Eval). `matrix-retier <AC> tier=<T> eval=<text>` raises it in all three
+# in one plan transaction and resets the row: status pending, the evidence cell and key back to the render's stubs, the
+# auditor cell cleared, any waiver: line gone, and at T4 the user-confirmed: key the render writes there. The landing
+# record gains its ev=matrix-retier line and the design ledger a `## Δ<k> — retier` heading in the decisions' numbering.
+# A tier at or below the cell's is refused: weakening is the user's, so the refusal says it needs them. The spec is the
+# approved text and is never touched.
+# FIXTURE FIDELITY: s34_plan's plan at current: 4, bound to this session, its typed matrix row and block taken out and an
+# Eval design added in the Step-3 table's shape; matrix-render writes the rows and blocks. The evidence, status and
+# auditor cells are written by matrix-set and discharge; the waiver: line is waive-row's line, planted at the end of
+# its block as landing-line-1 §WINDOW plants it, since waive-row reads the words from a transcript this shard has none
+# of; the ledger's first entry is `decisions put`'s.
+# fails-when: a place keeps the old tier or text; the row keeps its status, evidence, auditor or waiver; the record or
+# the ledger is not written, or the ledger's Δ is not one past the put's; a lower or equal tier writes a byte.
+RT_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RRT="$(make_repo retier)"; ( cd "$RRT" && git commit -q --allow-empty -m init )
+git -C "$RRT" config user.email t@example.com; git -C "$RRT" config user.name "Dana Fixture"
+PRT="$(s34_plan "$RRT" 4)"
+awk '/^\| AC-1\.1 \| T2 \|/ { next } /^AC-1\.1:$/ { skip = 1; next } skip && /^[ \t]/ { next } { skip = 0 }
+  /^## Verification Matrix/ {
+    print "## Eval design\n"
+    print "| Requirement | Approach | Criterion | Eval type | Eval | Fails when |"
+    print "|---|---|---|---|---|---|"
+    print "| REQ-1 | the unit | AC-1.1 | unit | `tests/a.test.sh` | a is wrong |"
+    print "| REQ-1 | the run | AC-1.2 | hermetic | `tests/b.test.sh` | b is wrong |\n" }
+  { print }' "$PRT" > "$PRT.n" && mv "$PRT.n" "$PRT"
+RT_SPEC="$RRT/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+RT_LED="$RRT/.bionic/docs/record/wave-01-fixture/design-ledger.md"
+RT_REC="$RRT/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+rt_row() { awk -F'|' -v a="$1" '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 }
+  m && /^\|/ { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == a) { o = ""; for (i = 3; i < NF; i++) { v = $i; gsub(/^[ \t]+|[ \t]+$/, "", v); o = o (i > 3 ? "|" : "") v }; print o; exit } }' "$PRT"; }   # <AC> -> tier|status|evidence|auditor
+rt_key() { awk -v a="$1:" -v k="$2:" 'index($0, a) == 1 { b = 1; next } b && /^[^ \t]/ { b = 0 } b && /^[ \t]+/ { y = $0; sub(/^[ \t]+/, "", y); if (index(y, k) == 1) { sub(/^[^:]*:[ \t]*/, "", y); print y; n++ } } END { if (!n) print "(none)" }' "$PRT"; }   # <AC> <key> -> the block's values of that key
+rt_eval() { awk -F'|' -v a="$1" '/^## Eval design/ { e = 1; next } /^## / { e = 0 }
+  e && /^\|/ { c = $4; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == a) { t = $5; v = $6; gsub(/^[ \t]+|[ \t]+$/, "", t); gsub(/^[ \t]+|[ \t]+$/, "", v); print t "|" v; exit } }' "$PRT"; }   # <AC> -> Eval type|Eval
+poke "$RRT" matrix-render
+RT_MR="$RC"
+poke "$RRT" matrix-set AC-1.1 evidence=record/wave-01-fixture/ac-1.1.md
+RT_MS="$RC"
+poke "$RRT" discharge AC-1.1
+RT_DS="$RC"
+awk '{ print } /^AC-1\.1:/ { b = 1; next } b && /^[ \t]+evidence:/ { print "  waiver: Dana Fixture 2026-10-25T10:00:00Z \"the unit check is enough\" — a fixture waiver"; b = 0 }' \
+  "$PRT" > "$PRT.n" && mv "$PRT.n" "$PRT"
+poke "$RRT" matrix-set AC-1.1 status=waived
+RT_MW="$RC"
+poke "$RRT" decisions put D1 'the fixture decision'
+RT_DP="$RC"
+expect_eq "RT-0 precondition: the verbs built the world (render, evidence, discharge, waived, put exit 0); AC-1.1 reads T1 in all three places, waived, its evidence and auditor written, its waiver: line there; the ledger's last heading is Δ0" \
+  "0|0|0|0|0|T1|waived|record/wave-01-fixture/ac-1.1.md|CONFIRMED|T1 — \`tests/a.test.sh\`|unit|\`tests/a.test.sh\`|1|0" \
+  "$RT_MR|$RT_MS|$RT_DS|$RT_MW|$RT_DP|$(rt_row AC-1.1)|$(rt_key AC-1.1 eval)|$(rt_eval AC-1.1)|$(rt_key AC-1.1 waiver | /usr/bin/grep -c 'Dana Fixture' | tr -d ' ')|$(sed -n 's/^## Δ\([0-9]*\) .*/\1/p' "$RT_LED" | tail -1)"
+RT_SPEC0="$(cksum < "$RT_SPEC")"
+RT_TEXT='`tests/b.test.sh` drives the hermetic run'
+poke "$RRT" matrix-retier AC-1.1 tier=T2 "eval=$RT_TEXT"
+expect_eq "RT-1 matrix-retier AC-1.1 tier=T2 exits 0, the table's row reads T2, pending, the render's stubs in the evidence and auditor cells" \
+  "0|T2|pending|—|—" "$RC|$(rt_row AC-1.1)"
+[ "$RC" = 0 ] || printf '%s\n' "$OUT" | tail -6 | sed 's/^/    | /'
+expect_eq "RT-1b …the block's eval: line reads the new tier and text, its evidence: is the stub, and it has no waiver: line (its provenance: still read)" \
+  "T2 — $RT_TEXT|pending|(none)|pending" "$(rt_key AC-1.1 eval)|$(rt_key AC-1.1 evidence)|$(rt_key AC-1.1 waiver)|$(rt_key AC-1.1 provenance)"
+expect_eq "RT-1c …the Eval design row reads the type T2 maps to and the new text" "hermetic|$RT_TEXT" "$(rt_eval AC-1.1)"
+expect_eq "RT-1d …the other criterion is as it was" "T2|pending|—|—|hermetic|\`tests/b.test.sh\`" "$(rt_row AC-1.2)|$(rt_eval AC-1.2)"
+expect_regex "RT-1e …the landing record holds the retier line, from the old tier to the new, by this session" \
+  "^line/v1\|ev=matrix-retier\|ac=AC-1\.1\|from=T1\|to=T2\|by=$SID\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T" "$(/usr/bin/grep 'ev=matrix-retier' "$RT_REC" | tail -1)"
+expect_regex "RT-1f …the ledger's next heading is Δ1, one past the put's, naming the retier and the new text" \
+  "^## Δ1 — retier AC-1\.1 T1→T2 \(orchestrator [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{1,2}:[0-9]{2} [AP]M [A-Z]+\): \`tests/b\.test\.sh\` drives the hermetic run$" \
+  "$(/usr/bin/grep '^## Δ' "$RT_LED" | tail -1)"
+expect_eq "RT-1g …and the spec is not touched" "$RT_SPEC0" "$(cksum < "$RT_SPEC")"
+poke "$RRT" matrix-retier AC-1.2 tier=T4 'eval=the person runs it by hand'
+expect_eq "RT-2 a retier to T4 writes the user-confirmed: stub the render writes at T4, beside the evidence: one" \
+  "0|T4|pending|pending|T4 — the person runs it by hand|human" \
+  "$RC|$(rt_row AC-1.2 | cut -d'|' -f1)|$(rt_key AC-1.2 user-confirmed)|$(rt_key AC-1.2 evidence)|$(rt_key AC-1.2 eval)|$(rt_eval AC-1.2 | cut -d'|' -f1)"
+[ "$RC" = 0 ] || printf '%s\n' "$OUT" | tail -6 | sed 's/^/    | /'
+
+RT_P0="$(cat "$PRT")"; RT_L0="$(cat "$RT_LED")"; RT_R0="$(cat "$RT_REC")"
+rt_same() { [ "$RT_P0" = "$(cat "$PRT")" ] && [ "$RT_L0" = "$(cat "$RT_LED")" ] && [ "$RT_R0" = "$(cat "$RT_REC")" ] && echo same || echo changed; }
+poke "$RRT" matrix-retier AC-1.1 tier=T1 'eval=the unit again'
+expect_eq "RT-3 a lower tier is refused (exit 1); the plan, the ledger and the record are byte-identical" "1|same" "$RC|$(rt_same)"
+expect_contains "RT-3b …saying the tier only rises and that a lower tier or a waiver needs the user" \
+  "matrix-retier refused — AC-1.1 is T2; a retier only raises the tier (strengthening is the run's, weakening is the person's: needs: " "$OUT"
+expect_contains "RT-3c …naming the two things the user can give" "— a lower tier or a waiver)" "$OUT"
+poke "$RRT" matrix-retier AC-1.1 tier=T2 'eval=the same tier'
+expect_eq "RT-4 the cell's own tier is refused as well (exit 1), nothing written" "1|same" "$RC|$(rt_same)"
+expect_contains "RT-4b …in the same words" "AC-1.1 is T2; a retier only raises the tier" "$OUT"
+poke "$RRT" matrix-retier AC-9.9 tier=T3 'eval=no such row'
+expect_eq "RT-5 an AC with no matrix row is refused (exit 1), nothing written" "1|same" "$RC|$(rt_same)"
+expect_contains "RT-5b …saying the table has no such row" "the matrix table has no row AC-9.9" "$OUT"
+expect_regex "RT-5c …and naming matrix-render as the next call" 'next call: bash [^ ]+ matrix-render$' "$(printf '%s\n' "$OUT" | /usr/bin/grep 'next call:')"
+poke "$RRT" matrix-retier AC-1.1 tier=T7 'eval=no such tier'
+expect_eq "RT-6 a tier outside T0 to T4 is refused (exit 1), nothing written, naming the five" "1|same|yes" \
+  "$RC|$(rt_same)|$(printf '%s' "$OUT" | /usr/bin/grep -q 'T0 to T4' && echo yes || echo no)"
+POKE_BOUND="$RT_BOUND_WAS"
 
 finish

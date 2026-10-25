@@ -562,6 +562,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: a tier table row for each criterion it lacks, at the tier its eval type maps to (lib/scale.sh), then provenance, fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
   die "  bash ${HOOK_DIR}/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED, nothing after it"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-set <AC-id> [status=<pending|blocked|discharged|waived>] [evidence=<record/...>] [task=<id>[,<id>...]]   write that matrix row's status and evidence cells and its AC block's evidence: and task: keys; never the tier or auditor cell"
+  die "  bash ${HOOK_DIR}/session-poker.sh matrix-retier <AC-id> tier=<T0..T4> eval=<text>   raise that criterion's tier where it lives (the matrix tier cell, its block's eval: line, its ## Eval design row) and reset the row to pending, its evidence, auditor and waiver cleared; a lower or equal tier is the user's"
   die "  bash ${HOOK_DIR}/session-poker.sh ${RA_USAGE}"
   die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the release approval card, all default or all recommended, into approve, waive, waive-row and finding-move with their words"
   die "  bash ${HOOK_DIR}/session-poker.sh waive-row <AC-id> '<the user's words>' '<why>'   waive that matrix row on words the user typed in this session: its block's waiver: line and its status waived"
@@ -917,6 +918,24 @@ case "$VERB" in
       case "$_pv_a" in [!=]*=*) : ;; *) usage "matrix-set: '$_pv_a' is not <key>=<value>." ;; esac
     done
     MS_PAIRS=("$@")
+    ;;
+  # THE TIER'S ONE WRITER. An AC id, as matrix-set takes it, then tier=<T> and eval=<text>, each once; what the
+  # values may be is the verb's own refusal (1).
+  matrix-retier)
+    RT_USAGE="matrix-retier takes <AC>, tier=<T0..T4> and eval=<the criterion's new eval>."
+    [ $# -eq 3 ] && [ -n "$1" ] || usage "$RT_USAGE"
+    case "$1" in
+      *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*)
+        usage "matrix-retier: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not a criterion id: letters, digits, '.', '_' or '-'." ;;
+    esac
+    RT_AC="$1"; RT_TIER=""; RT_EVAL=""; RT_HAS_T=0; RT_HAS_E=0; shift
+    for _pv_a in "$@"; do
+      case "$_pv_a" in
+        tier=*) [ "$RT_HAS_T" = 0 ] || usage "$RT_USAGE"; RT_HAS_T=1; RT_TIER="${_pv_a#tier=}" ;;
+        eval=*) [ "$RT_HAS_E" = 0 ] || usage "$RT_USAGE"; RT_HAS_E=1; RT_EVAL="${_pv_a#eval=}" ;;
+        *) usage "matrix-retier: '$(printf '%s' "${_pv_a:0:24}" | tr -d '[:cntrl:]')' is not tier=<T> or eval=<text>." ;;
+      esac
+    done
     ;;
   # THE ROW WAIVER (wave-33 T7; REQ-4 AC-4.1, D8). Three operands, finding-move's last two: the user's words
   # as typed and why. Whether the words stand in a typed prompt is the verb's own refusal (1).
@@ -3530,6 +3549,7 @@ case "$VERB" in
   matrix-render) poker_verb_matrix_render "$@" ;;
   discharge) poker_verb_discharge "$@" ;;
   matrix-set) poker_verb_matrix_set "$@" ;;
+  matrix-retier) poker_verb_matrix_retier "$@" ;;
   waive-row) poker_verb_waive_row "$@" ;;
   confirm-row) poker_verb_confirm_row "$@" ;;
   tasks-prose) poker_verb_tasks_prose "$@" ;;
