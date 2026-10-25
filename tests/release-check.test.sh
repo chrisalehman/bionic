@@ -55,7 +55,7 @@
 #   §REL-1.28.0     the 1.28.0 entry, beside the 1.27.0 section: the newest heading reads 1.28.0 and the version pair
 #                   agrees, the entry is dated, names its two ADRs, its Migration paragraph names every row that changed what
 #                   a script may meet, and plugin.json reads 1.28.0, each with a doctored copy. The release check is run on a
-#                   repository holding the real entry and wave 45's real deferred lines: every deferred sentence stands
+#                   repository holding the real entry and this run's real deferred lines: every deferred sentence stands
 #                   under Known limits and the check passes; the same entry with its Known limits removed fails one line
 #                   for each; one planted deferral keeps the omission arm live.
 #
