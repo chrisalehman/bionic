@@ -82,3 +82,31 @@ scale_branch_number() {
   ere="$(printf '%s' "$pat" | sed -e 's/[][\.*^$(){}+?|/]/\\&/g' -e 's/<NN>/([0-9]+)/' -e 's/<slug>/.+/')"
   printf '%s\n' "${2:-}" | sed -nE "s/^${ere}\$/\\1/p" | /usr/bin/grep . || return 1
 }
+
+# THE EVAL TYPE'S TIER. The Eval design names each criterion's eval type in words; the matrix table names its
+# tier, and the tier decides the keys its block owes (walls.sh `keys_for_tier`). This is the one map between the
+# two, so the render that writes a missing table row and any reader that asks agree on the tier a type owes.
+# A bare tier (`T2`, any case) is itself: a plan that names the tier in the Eval type cell already said it.
+SCALE_EVAL_TIERS="static=T0 unit=T1 hermetic=T2 live=T3 human=T4"
+
+# scale_tier_awk -> the awk text of `tier_of(type)`: the tier SCALE_EVAL_TIERS gives a type (any case, blanks
+# trimmed), a bare T<n> as itself, else "". Built from the table, so an awk pass reads the map without a copy.
+scale_tier_awk() {
+  local c
+  printf '%s\n' 'function tier_of(t) {' \
+    '  t = tolower(t); gsub(/^[ \t]+|[ \t]+$/, "", t)' \
+    '  if (t ~ /^t[0-9]+$/) return "T" substr(t, 2)'
+  for c in $SCALE_EVAL_TIERS; do
+    printf '  if (t == "%s") return "%s"\n' "${c%%=*}" "${c#*=}"
+  done
+  printf '%s\n' '  return ""' '}'
+}
+
+# tier_of_eval_type <type> -> its tier on stdout, exit 0; nothing and exit 1 for a type the map does not hold.
+# It asks `tier_of`, so the shell's answer and the awk pass's are one rule.
+tier_of_eval_type() {
+  local t
+  t="$(SCALE_TYPE="${1:-}" awk "$(scale_tier_awk)"'BEGIN { print tier_of(ENVIRON["SCALE_TYPE"]) }' </dev/null 2>/dev/null)" || return 1
+  [ -n "$t" ] || return 1
+  printf '%s\n' "$t"
+}
