@@ -638,12 +638,12 @@ cp "$PF" "$TMPROOT/an-plan-before"; cp "$RF_REG" "$TMPROOT/an-reg-before"
 poke "$RF" finding-move "$RF_CR#2" carried T99
 expect_eq "AN-14 finding-move … carried T99, a row the table lacks, is refused (exit 1) and plan and register are byte-identical" "1|same|same" \
   "$RC|$(cmp -s "$TMPROOT/an-plan-before" "$PF" && echo same || echo changed)|$(cmp -s "$TMPROOT/an-reg-before" "$RF_REG" && echo same || echo changed)"
-poke "$RF" finding-move "$RF_CR#2" carried T2
-expect_eq "AN-13 finding-move … carried T2 exits 0" "0" "$RC"
+poke "$RF" finding-move "$RF_CR#2" carried T5
+expect_eq "AN-13 finding-move … carried T5 exits 0" "0" "$RC"
 [ "$RC" = 0 ] || printf '      finding-move said: %s\n' "$OUT"
-expect_eq "AN-13 …the register holds the finding open, answered carry, its event naming the row" "carry|T2 lands|open" \
+expect_eq "AN-13 …the register holds the finding open, answered carry, its event naming the row" "carry|T5 lands|open" \
   "$(OWED_PLAN="$PF" as_owed "$RF" "$SID" owed_answer_of "$RF_FK2" | awk -F'\t' '{ print $1 "|" $3 }')|$(as_register "$RF" "$PF" | tr ' ' '\n' | /usr/bin/grep -qxF "$RF_FK2" && echo open || echo gone)"
-expect_contains "AN-13b …and the plan carries its moved: line naming the row" "moved: $RF_CR#2 to=carried row=T2 by=Dana Fixture at=" "$(cat "$PF")"
+expect_contains "AN-13b …and the plan carries its moved: line naming the row" "moved: $RF_CR#2 to=carried row=T5 by=Dana Fixture at=" "$(cat "$PF")"
 POKE_BOUND="$AS_BOUND_WAS"
 
 # ============================================================
