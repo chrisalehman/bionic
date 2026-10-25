@@ -2095,7 +2095,7 @@ EOF
     done
     RT_KEYS="$(mr_tier_keys)" || RT_KEYS=""
     if [ -z "$RT_WORD" ] || [ -z "$RT_KEYS" ]; then
-      die "REFUSED — the eval type for $RT_TIER is lib/scale.sh SCALE_EVAL_TIERS's and the keys it owes walls.sh keys_for_tier's, and $BIONIC_LIB cannot give them; the plan is unchanged."
+      die "REFUSED — the eval type for $RT_TIER is lib/scale.sh SCALE_EVAL_TIERS's and the keys it owes walls.sh keys_for_tier's, and $BIONIC_LIB cannot give them; the plan is unchanged. needs: <the user> — the libraries at $BIONIC_LIB loadable, then run matrix-retier again."
       exit 2
     fi
     plan_verb_open matrix-retier
@@ -2143,7 +2143,7 @@ EOF
     fi
     case "$PV_RC" in
       0) : ;;
-      4) die "REFUSED — the matrix row $RT_AC does not have five cells, so its tier cell cannot be found; the plan is unchanged."
+      4) die "REFUSED — the matrix row $RT_AC does not have five cells, so its tier cell cannot be found; the plan is unchanged. needs: <the user> — the row restored to five cells, then run matrix-retier again."
          exit 1 ;;
       13) die "REFUSED — the matrix has no $RT_AC: block to hold the eval: line; matrix-render writes it. The plan is unchanged."
           pv_next matrix-render
@@ -2153,7 +2153,7 @@ EOF
           exit 1 ;;
       24) die "REFUSED — the plan's ## Eval design table has no Criterion, Eval type and Eval columns, the Step-3 table's shape the retier writes; give its header those columns, then run matrix-retier again. The plan is unchanged."
           exit 1 ;;
-      *) die "REFUSED — the retier cannot be written (exit $PV_RC); the plan is unchanged."
+      *) die "REFUSED — the retier cannot be written (exit $PV_RC); the plan is unchanged. Run matrix-retier again."
          exit 2 ;;
     esac
     plan_verb_swap matrix-retier "$RT_AC raised $RT_OLD to $RT_TIER" writer
