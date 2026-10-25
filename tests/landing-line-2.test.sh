@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/landing-line-2.test.sh — the landing line, part 2 of 2: §INPUTS through §LAND-RC-HAND, then the landing's
-# settlement: §SAMESITE, §CARRIED, §CELL.
+# settlement: §SAMESITE, §CARRIED, §CELL; the hand-holds count's §STARTER and §RETIER.
 #
 # THE SUITE IS TWO PARTS (wave-39 T35; D1, D13, REQ-3 AC-3.3). One landing-line.test.sh promised more than the suite
 # bar, ten minutes of the gate's promise, so it runs as two suites cut at a section boundary. Its governing header, its
@@ -1023,6 +1023,35 @@ SR4="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$SR4")")"
 { sr_run a 01 tick; sr_run b 02 tick; } > "$(ll_rec "$SR4")"
 sr_proofs "$SR4" a b
 expect_eq "(sr4) …and the same two proofs of runs the tick started: second-regressions=0" "0" "$(sr_second "$SR4")"
+
+section "§RETIER: a retier is the run's own act: its ev=matrix-retier line moves no hand-holds field, while a waiver: line still adds one (REQ-3 AC-3.3)"
+# `matrix-retier` raises a tier, which strengthens the check: it is the orchestrator's act and no hand-hold, so the fold
+# reads its record line as nothing. Weakening stays the user's, and a waiver: line in a block still counts as one.
+# FIXTURE FIDELITY: the world's plan with an Eval design in the Step-3 table's shape and an empty matrix table; matrix-render
+# writes the rows and blocks, matrix-retier writes its own record line, and the count is landing-report --hand-holds as
+# session-poker.sh runs it (sr_report, above). The waiver: line is waive-row's line planted at the end of its block, as
+# landing-line-1 §WINDOW plants it, since waive-row reads the words from a transcript this world has none of.
+# fails-when: the fold counts a retier line in any field, or stops counting a waiver: line.
+RL="$(ll_world)"; RLP="$(ll_plan "$RL")"
+{ printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n'
+  printf '| REQ-1 | the unit | AC-1.1 | unit | `tests/a.test.sh` | a is red |\n| REQ-1 | the unit | AC-1.2 | unit | `tests/a.test.sh` | a is red |\n'
+  printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+} >> "$RLP"
+RL_MR="$(ll_poker "$RL" matrix-render)"; RL_MRRC=$?
+RL_H0="$(sr_report "$RL")"
+expect_eq "(rl0) precondition: matrix-render exits 0 and the report prints its counts line, all zero" \
+  "0|hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0" \
+  "$RL_MRRC|$RL_H0"
+[ "$RL_MRRC" = 0 ] || printf '      render: %s\n' "$RL_MR"
+RL_RT="$(ll_poker "$RL" matrix-retier AC-1.1 tier=T2 'eval=`tests/b.test.sh` drives the hermetic run')"; RL_RTRC=$?
+expect_eq "(rl1) precondition: matrix-retier exits 0 and the record holds its one ev=matrix-retier line" "0|1" \
+  "$RL_RTRC|$(ll_ev "$RL" matrix-retier | /usr/bin/grep -c '|ac=AC-1.1|from=T1|to=T2|' | tr -d ' ')"
+[ "$RL_RTRC" = 0 ] || printf '      retier: %s\n' "$RL_RT"
+expect_eq "(rl2) the retier line moves no field: the counts line reads as before it" "$RL_H0" "$(sr_report "$RL")"
+awk '{ print } /^AC-1\.2:/ { b = 1; next } b && /^[ \t]+evidence:/ { print "  waiver: Dana Fixture 2026-10-20T10:00:00Z \"the unit check is enough\" — a fixture waiver"; b = 0 }' \
+  "$RLP" > "$RLP.n" && mv "$RLP.n" "$RLP"
+expect_contains "(rl3) …while a waiver: line in the same plan adds one: waivers=1, total=1" "hand-holds: total=1 · " "$(sr_report "$RL")"
+expect_contains "(rl3b) …in the waivers field" "· waivers=1 · status-writes=0 ·" "$(sr_report "$RL")"
 
 # ---------------------------------------------------------------------------
 finish
