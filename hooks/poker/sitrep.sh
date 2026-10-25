@@ -679,7 +679,8 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 # row landing`, `the merge`, and any other read another task writes as that task, named by the label its card row
 # prints, its step, a slash and its id without the T, as `queued behind <label>` names one. A task with a red at head
 # is failed (`red`); one waiting on an approval the user owes, or whose status is held, is held, a started one naming
-# each approval it waits on. The description is the task's cell up to its first " (", ": ", ". " or " · ".
+# each approval it waits on. The description is the task's title, lib/plan.sh `plan_task_title`'s, as the plan's card
+# prints it.
 #
 # THE MEASUREMENTS. Sized minutes are the size cells, summed as if the tasks ran one after another, so they are never
 # set against wall clock; the sheet compares only measurements of one unit and leaves every judgment to the model.
@@ -710,21 +711,6 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 SITREP_SHEET_HEAD="sheet/v1 — facts for the model; the user sees the card, never this sheet"
 SITREP_STEP_NAMES="Configure Scope Design Plan Implement Verify Review Document Integrate Close-out"
 
-# _sitrep_name_awk -> the awk source of `task_name(cell)`: the task's cell up to the first of " (", ": ", ". " or " · ",
-# trimmed, a closing "." dropped; a cell that opens on one of them keeps its whole trimmed text, so no task prints
-# nameless. Index-based, so the cut is byte-exact under any locale.
-_sitrep_name_awk() {
-  printf '%s' '
-    function task_name(t,   c, i, k, d, w) {
-      d[1] = " ("; d[2] = ": "; d[3] = ". "; d[4] = " · "
-      w = t; c = length(t) + 1
-      for (k = 1; k <= 4; k++) { i = index(t, d[k]); if (i && i < c) c = i }
-      t = substr(t, 1, c - 1); sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t); sub(/\.$/, "", t)
-      if (t == "") { t = w; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t) }
-      return t
-    }'
-}
-
 # _sitrep_label_awk -> the awk source of `label(id)`: a task is named by the label its row prints on the card, its step,
 # a slash and its id without the T. It reads `at[id]` (the row's index) and `stp[index]` (its step); an id no row carries
 # is named as it stands. Every place that names a task to the user takes its name from here, so no two disagree.
@@ -743,8 +729,6 @@ sitrep_task_label() {
     END { print label(w) }'
 }
 
-# sitrep_task_name <cell> -> the task's name: the cell up to its first " (", ": ", ". " or " · ".
-sitrep_task_name() { printf '%s\n' "$1" | LC_ALL=C awk "$(_sitrep_name_awk)"'{ print task_name($0) }'; }
 
 # sitrep_dur <minutes> -> `<h> h <m> min`, `<h> h` or `<m> min`, to the whole minute
 sitrep_dur() {
@@ -959,19 +943,28 @@ sitrep_record_spans() {
 # closed one when a row not dropped reads it as approval:<id>, it was a step card or a gate act, or it was a waiver,
 # finding, carry, matrix row or held merge in a plan with an integrate row (what each holds while open, `sitrep_holds`).
 # An ask no record can start counts no minute, and the minutes are printed `partial` with how many asks went untimed.
+# Only the minutes an ask waits on the user count (lib/owed.sh `ask_waits_on`, open or closed): one answered so that it
+# waits on an event counts to its answer, and one that never waits on the user (a carry, a delivery) counts none.
 sitrep_waiting() {
-  local plan="$1" root="$2" rows="$3" now="$4" asks="$5" reg="" led out m k
+  local plan="$1" root="$2" rows="$3" now="$4" asks="$5" reg="" led out m k spans waits
   reg="$(owed_register "$root" "$plan" 2>/dev/null)" || reg=""
   led="$(docs_root "$root")/record/$(proof_plan_slug "$plan")/design-ledger.md"
-  out="$( { printf '%s\n' "$asks" | awk -F'\t' 'NF >= 2 && $1 != "" { print "O\t" $1 "\t" $2 }'
+  spans="$(sitrep_record_spans "$plan")"
+  # what each ask no longer open waits on; an open one's is the asks' own fifth field
+  waits="$( { printf '%s\n' "$spans" | cut -f1
+      { [ -n "$reg" ] && [ -f "$reg" ] && [ ! -L "$reg" ] && awk "$_OWED_AWK_FIELD"'
+          index($0, "owed/v1|") == 1 && fld($0, "state") != "open" { print key_of($0) }' "$reg"; } 2>/dev/null
+    } | awk 'NF && !s[$0]++' | while IFS= read -r k; do printf 'W\t%s\t%s\n' "$k" "$(ask_waits_on "$k" "$plan" "$root")"; done)"
+  out="$( { printf '%s\n' "$asks" | awk -F'\t' 'NF >= 2 && $1 != "" { print "O\t" $1 "\t" $2 "\t" $5 }'
       printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { s = tolower($10); gsub(/[ \t]/, "", s); k = $3; gsub(/[ \t]/, "", k)
         if (s == "dropped") next
         if (k == "integrate") print "I"
         n = split($13, t, ","); for (i = 1; i <= n; i++) { x = t[i]; gsub(/^[ \t]+|[ \t]+$/, "", x); sub(/^live:/, "", x); if (index(x, "approval:") == 1) print "A\t" substr(x, 10) } }'
       sitrep_ledger_times "$led" | awk -F'\t' '{ print "D\tdecide:" $1 "\t" $2 "\t" $3 }'
-      sitrep_record_spans "$plan" | awk -F'\t' '{ print "S\t" $1 "\t" $2 "\t" $3 }'
+      printf '%s\n' "$spans" | awk -F'\t' 'NF { print "S\t" $1 "\t" $2 "\t" $3 }'
+      printf '%s\n' "$waits" | awk 'NF'
       { [ -n "$reg" ] && [ -f "$reg" ] && [ ! -L "$reg" ] && awk "$_OWED_AWK_FIELD"'
-          index($0, "owed/v1|") == 1 { print "R\t" key_of($0) "\t" fld($0, "state") "\t" fld($0, "at") "\t" fld($0, "opened") }' "$reg"; } 2>/dev/null
+          index($0, "owed/v1|") == 1 { print "R\t" key_of($0) "\t" fld($0, "state") "\t" fld($0, "at") "\t" fld($0, "opened") "\t" fld($0, "answered") }' "$reg"; } 2>/dev/null
     } | awk -F'\t' -v now="$now" "$_PATROL_ISO_AWK"'
       function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
       function ep(s) { if (s == "" || s == "-") return -1; return iso2epoch(norm(s)) }
@@ -984,11 +977,12 @@ sitrep_waiting() {
         if (k ~ /^decide:D[0-9]+$/) return ("approval:" substr(k, 8)) in rd
         return 0
       }
-      $1 == "O" { open[$2] = $3; want($2); next }
+      $1 == "O" { open[$2] = $3; wt[$2] = $4; want($2); next }
+      $1 == "W" { if (!($2 in wt)) wt[$2] = $3; next }
       $1 == "I" { integ = 1; next }
       $1 == "A" { rd["approval:" $2] = 1; next }
       $1 == "D" { put[$2] = $3; rul[$2] = $4; want($2); next }
-      $1 == "R" { rs[$2] = $3; ra[$2] = $4; ro[$2] = $5; want($2); next }
+      $1 == "R" { rs[$2] = $3; ra[$2] = $4; ro[$2] = $5; rn[$2] = $6; want($2); next }
       $1 == "S" { sp[$2] = $3; se[$2] = $4; next }
       END {
         for (i = 1; i <= nk; i++) {
@@ -1001,6 +995,8 @@ sitrep_waiting() {
           else if (fromrec && ep(se[k]) >= 0) e = ep(se[k])
           else if ((k in rs) && rs[k] == "closed") e = ep(ra[k])
           else if ((k in rul) && rul[k] != "-") e = rul[k] + 0
+          # an ask waiting on an event waited on the user only until its answer, and never without one
+          if ((k in wt) && wt[k] != "user") { x = (k in rn) ? ep(rn[k]) : -1; if (x < 0) continue; if (x < e) e = x }
           if (s < 0) { lost++; continue }
           if (e <= s) continue
           n++; bs[n] = s; be[n] = e; bk[n] = k
@@ -1298,8 +1294,11 @@ sitrep_gather() {
                 if (t != "") { e = iso2epoch(t); if (e >= 0) print "L\t" id "\t" e "\t" h }
               }' "$plan"
             printf '%s\n' "$lq" "$lwait" "$ledges" | awk 'NF'
+            # each title is the one reading lib/plan.sh plan_task_title gives, as the plan card prints it
+            printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { x = $1; gsub(/^[ \t]+|[ \t]+$/, "", x); if (x != "") print x "\t" $4 }' \
+              | while IFS='	' read -r id desc; do printf 'N\t%s\t%s\n' "$id" "$(plan_task_title "$desc")"; done
             printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { print "U\t" $0 }'
-          } | LC_ALL=C awk -F'\t' "$(_sitrep_name_awk)$(_sitrep_label_awk)"'
+          } | LC_ALL=C awk -F'\t' "$(_sitrep_label_awk)"'
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
     function words(r,   t) {   # a read, in words: the step, the user'"'"'s approval, the reviews, the build, the merge
       sub(/^live:/, "", r); t = r; sub(/: .*$/, "", t)
@@ -1326,9 +1325,10 @@ sitrep_gather() {
     }
     function row(i, kind, note,   d) {
       if (id[i] in red && st[i] != "landed") { kind = "s"; note = "red" }
-      d = task_name(tk[i]); if (d == "") d = "-"
+      d = ttl[id[i]]; if (d == "") d = "-"
       printf "R\t%s\t%s\t%s\t%s\t%s\t%s\n", g[i], (stp[i] == "") ? "-" : stp[i], id[i], d, kind, note
     }
+    $1 == "N" { ttl[$2] = $3; next }
     $1 == "X" { red[$2] = 1; next }
     $1 == "A" { appr[$2] = 1; next }
     $1 == "L" { land[$2] = $3; hand[$2] = $4; next }
@@ -1341,7 +1341,7 @@ sitrep_gather() {
     $1 == "E" { ne++; ef[ne] = $2; et[ne] = $3; next }
     $1 == "U" {
       s = tolower(trim($11)); if (s == "dropped") next
-      n++; id[n] = trim($2); stp[n] = trim($3); tk[n] = trim($5); rd[n] = $14; st[n] = s; at[id[n]] = n
+      n++; id[n] = trim($2); stp[n] = trim($3); rd[n] = $14; st[n] = s; at[id[n]] = n
       b = 0
       if (s != "landed") {
         if (id[n] in red) b = 1
@@ -1492,7 +1492,8 @@ SITREP_SIT
   # line prints. Build tasks are scaled by the landed build tasks' own time over their size once 3 or more have
   # landed, else 1×; every other kind sits at face value, as does a task held on an ask that names it.
   if [ "${bn:-0}" -ge 3 ] && [ "${bs:-0}" -gt 0 ]; then ratio="$bo/$bs"; else ratio="1/1"; fi
-  held="$(printf '%s\n' "$SG_ASKS" | awk -F'\t' 'NF >= 2 && $1 != "" { h = $2; gsub(/,| and /, " ", h); m = split(h, w, " "); for (i = 1; i <= m; i++) print w[i] }')"
+  # only an ask that waits on the user holds a task on you: one answered, waiting on an event, scales as any other
+  held="$(printf '%s\n' "$SG_ASKS" | awk -F'\t' 'NF >= 2 && $1 != "" && $5 == "user" { h = $2; gsub(/,| and /, " ", h); m = split(h, w, " "); for (i = 1; i <= m; i++) print w[i] }')"
   launches="$(sitrep_launches "$plan" "$root")"
   wts="$(sitrep_close_weights "$rows" "$now" "$ratio" "$held" "$launches")"
   chain="$(sitrep_chain "$plan" "$rows" "$wts")"; cids="${chain%%$'\t'*}"; cmins="${chain##*$'\t'}"
@@ -1527,11 +1528,11 @@ SITREP_SIT
     chain1="$(sitrep_chain "$plan" "$rows" "$wun")"; cmins1="${chain1##*$'\t'}"
     top1="$cmins1"; atop="$(printf '%s\n' "$wun" | awk -F'\t' '$1 == "A" { print $2 }')"; [ "${atop:-0}" -le "$top1" ] || top1="$atop"
     SG_K_UNSCALED="$(sitrep_clock "$(( (now + top1 * 60 + 30) / 60 * 60 ))" "$now")"
-    # an ask that holds a task the prediction rests on (the chain or the longest-running task), the release or the merge:
-    # the prediction assumes it is answered now
+    # an ask that waits on the user and holds a task the prediction rests on (the chain or the longest-running task), the
+    # release or the merge: the prediction assumes it is answered now
     k="$(printf '%s\n' "$SG_ASKS" | awk -F'\t' -v labs="$(printf '%s' "$clab" | sed 's/ → / /g') $([ -z "$aid" ] || sitrep_task_label "$rows" "$aid")" '
       BEGIN { n = split(labs, l, " "); for (i = 1; i <= n; i++) on[l[i]] = 1 }
-      NF >= 2 && $1 != "" { h = $2; gsub(/,| and /, " ", h); m = split(h, w, " "); hit = 0
+      NF >= 2 && $1 != "" && $5 == "user" { h = $2; gsub(/,| and /, " ", h); m = split(h, w, " "); hit = 0
         for (i = 1; i <= m; i++) if ((w[i] in on) || w[i] == "release" || w[i] == "merge") hit = 1
         if (hit) printf "%s%s", (c++ ? " " : ""), $1 }')"
     # shellcheck disable=SC2086
@@ -1616,9 +1617,8 @@ SITREP_RUNNING
     g=$((g + 1))
     st="$(plan_goal_status "$st")"
     case "$st" in met) m=$((m + 1)) ;; 'not measured') k=$((k + 1)) ;; unreadable) u=$((u + 1)) ;; esac
-    # the status already says a goal is not measured; its measure prints once
-    [ "$rdg" != "not measured" ] || rdg=""
-    if [ -n "$md" ] && [ -n "$rdg" ]; then md="$md — $rdg"; elif [ -z "$md" ]; then md="${rdg:--}"; fi
+    # the measure and what it read, joined by lib/plan.sh's grammar, which the card reads back
+    md="$(plan_goal_measure "$md" "$rdg")"
     SG_GOAL_LINES="${SG_GOAL_LINES}goal: name=$t status=$st measure=$md${fr:+ for=$fr}"$'\n'
   done <<SITREP_GOALS
 $SG_GOALS_READ
@@ -2699,9 +2699,7 @@ sitrep_tick_line() {
     # The saved sheet is the facts; only its asks are read again, from the register alone, so a card is never the cost
     # of a second gather. The goals a reached theme drops asks for are the saved sheet's own met goals.
     SR_SAVED="$(sitrep_saved "$SR_ROOT" "$SR_PLAN")"
-    SR_GOALS_MET="$(awk 'index($0, "goal: name=") == 1 { l = substr($0, 12); i = index(l, " status="); if (!i) next
-      n = substr(l, 1, i - 1); r = substr(l, i + 8); j = index(r, " measure="); if (j) r = substr(r, 1, j - 1)
-      if (r == "met") print "reached\t" n }' "$SR_SAVED")"
+    SR_GOALS_MET="$(plan_goal_sheet "$SR_SAVED" | awk -F'\t' -v met="$(plan_goal_status reached)" '$3 == met { print "reached\t" $2 }')"
     SG_ASKS="$(sitrep_asks "$SR_PLAN" "$SR_ROOT" "$(units_rows "$SR_PLAN" 2>/dev/null)" "$SR_GOALS_MET" "$(sitrep_now)")"
     { awk 'index($0, "ask: ") != 1' "$SR_SAVED"; sitrep_ask_lines; } > "$SR_SHEET"
     SR_RC=0

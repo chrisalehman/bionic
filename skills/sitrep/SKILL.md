@@ -58,7 +58,7 @@ Typed as `/bionic:sitrep`, it reports on this session's bound run and nothing el
    - `grade:` is one letter, A to F.
    - `point:` gives one to three rows of the Assessment, after the purpose.
    - `ask <key>:` answers each ask that waits on the user, once: copy its key from the sheet's `ask:` line, say what is asked, name the label of every task it holds, and end `— recommend <answer>`. Two keys that are one decision share a row: `ask <key>, <key>: …`. Write none for an ask that waits on an event; the counted line carries it. You never choose the card's section for an ask: the sheet says whom it waits on and what it holds, and the card verb places the row.
-   - `close:` is one row: the condition the predicted close depends on, `close.waits-on-you` among it. The card draws the time and its basis, so say only what it depends on, in words.
+   - `close:` is one row: the condition the predicted close depends on, `close.waits-on-you` among it. The asks it names are the ones `close.waits-on-you` names, which wait on you; fold in no ask that waits on an event. The card draws the time and its basis, so say only what it depends on, in words.
 
    The card puts a held ask under Blocked on you, an unheld one under the Assessment, and an ask that waits on an event on its counted line, and Blocked on you is None when nothing is held.
 
