@@ -19,7 +19,7 @@ Typed as `/bionic:decision` with no argument, it puts what was last under discus
 
 **Goal:** <what is being decided, and why it matters now: as short as it can be and still be clear>
 
-<when the options make no sense until the problem is stated: the problem, short and plain>
+<the context: the thing this is about, in one clause, and why the rule bites now. With no specific thing, only when the options make no sense until the problem is stated: the problem, short and plain>
 
 **Options:**
 
@@ -31,7 +31,7 @@ Typed as `/bionic:decision` with no argument, it puts what was last under discus
 
 **Significance:** <the rule it sets for later work, what follows downstream, what compounds, how hard it is to reverse> <during a run, the put's wait line, as printed>
 
-Reply 1, 2 or 3 · or matrix, diagram, page
+Reply 1, 2 or 3 · or matrix, diagram, page · to see <the thing>: `<dig-in command>`
 ```
 
 - The heading numbers and names the decision. `D<n>` counts the decisions of a run in one sequence, in the order asked, and never restarts; with no run open it counts the conversation's. The name is a few plain words saying what is decided, so a reader scanning a transcript knows which decision this is before reading on. The user can answer by the number.
@@ -39,11 +39,25 @@ Reply 1, 2 or 3 · or matrix, diagram, page
 - The reasoning lives inside Recommendation. There is no separate rationale part.
 - Options are a numbered list of two or more, never lettered or bulleted.
 - Recommendation opens on the option number and says why it wins. Then it says why not each other option.
-- The reply line is the last line, and nothing follows it.
+- The reply line is the last line, and nothing follows it. The dig-in command rides on it.
+
+## The context
+
+The paragraph between Goal and Options is the context. It is owed whenever the decision is about a specific thing: a commit, a task, a finding, a measurement.
+
+- It identifies the thing in one clause: what it is, which commit or record, whose ruling it came from.
+- It says in one sentence why the rule bites now.
+- It never pastes the artifact. The reader who wants the artifact types the dig-in command on the reply line and sees it whole.
+
+A decision about no specific thing owes no context, and keeps the paragraph for a problem the options cannot be read without. A brief that makes the reader ask "what change?" has failed before its options are read.
+
+> The commit that removed the plan argument from the sitrep skill, landed on your ruling this morning, came after the critic's last review. Evidence provenance now requires every commit past a review to carry a review or your waiver, and this one has neither.
+>
+> Reply 1 or 2 · to see the change: `git show 3225216af`
 
 ## Altitude
 
-Before any label, reframe the decision at a conceptual level, in plain language, for a reader new to the research.
+Before any label, reframe the Goal and Options at a conceptual level, in plain language, for a reader new to the research. The context paragraph is where the thing is named, and the Altitude rule does not govern it.
 
 1. Name the one thing the options differ on before any structure, as a contrast: whether this, or that. Pitch the brief at the level of abstraction that makes the options differ most.
 2. Cut detail before cutting sentences: concise means fewer facts, not denser ones.
@@ -56,7 +70,7 @@ Before any label, reframe the decision at a conceptual level, in plain language,
 - By default the recommendation favours the most architecturally elegant choice, reasoned from first principles, and names the principle that decides it.
 - Significance names the rule the choice sets for later work.
 
-The failure to avoid is a brief written straight from research: files, functions, tables and versions that bury the one difference.
+The failure to avoid is a Goal or Options written straight from research: files, functions, tables and versions that bury the one difference. The opposite failure is a context that names nothing: "a change you ordered", "the diff you asked for", with no way to tell which.
 
 ## Worked pairs
 
@@ -147,7 +161,13 @@ Significance sets the cap:
 
 ## The reply line
 
-The last line names the option numbers, then the forms still available, as in the shape above. It lists only the forms not yet shown and allowed by the significance. With none left it carries the options alone: `Reply 1 or 2`.
+The last line names the option numbers, then the forms still available, then, when the decision is about a specific thing, one dig-in command the reader can type to see that thing whole, as in the shape above. It lists only the forms not yet shown and allowed by the significance. The dig-in is one of:
+
+- `git show <sha>` for a commit.
+- `show task <n>` for a task.
+- `show finding <record>#<n>` for a finding.
+
+With no form left it carries the options and the dig-in: ``Reply 1 or 2 · to see the change: `git show 3225216af` ``. A decision about no specific thing carries the options alone: `Reply 1 or 2`. Nothing follows the line, the dig-in included.
 
 A reply that names a form gets that form directly, with no form in between. The decision then ends on a fresh reply line.
 
