@@ -5375,7 +5375,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
           return 0
         fi
         case "$_next" in
-          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|budget|regression|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|waive-row|confirm-row|tasks-prose|epic-row|continuation-fill|disposition|reply|order)
+          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|budget|regression|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|waive-row|confirm-row|tasks-prose|epic-row|continuation-fill|disposition|reply|order|reviews-part)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
             _WALL_POKER_CALL="$GIT_ARGV_REST"
             _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"
@@ -5724,6 +5724,27 @@ _bsg_own_deliver() {
   [ $# -eq 1 ] && [ -n "$_BSG_DL_OWN" ] && [ "$_BSG_DL_TARGET" = "$_BSG_DL_OWN" ] || return 1
   while IFS= read -r _l; do [ -z "$_l" ] || _n=$((_n + 1)); done <<< "$(git_argv_expand "$COMMAND")"
   [ "$_n" -eq 1 ]
+}
+
+# _bsg_own_reviews_part — is the matched `session-poker.sh reviews-part` (`_WALL_POKER_ARGS`) the INTEGRATE row's own
+# writer's, on that row, alone in one call? `reviews-part` commits the release entry's reviews on the working branch
+# before the pull request, which only the integrate row's writer does and only for its own row. The own-row reading is
+# `_bsg_own_deliver`'s, so the two cannot drift; what this adds is the row's kind, read from the session's bound plan
+# through the one reader (`units_rows`), so a build row's writer is refused its own row too. Sets `_BSG_RP_KIND` (that
+# row's kind, empty when no plan names it) for the refusal's detail. A session with no bound plan names no kind.
+_BSG_RP_KIND=""
+_bsg_own_reviews_part() {
+  local _alone=1
+  _BSG_RP_KIND=""
+  _bsg_own_deliver && _alone=0
+  [ -n "$_BSG_DL_OWN" ] && [ "$_BSG_DL_OWN" = "$_BSG_DL_TARGET" ] && _bsg_rp_kind
+  [ "$_alone" -eq 0 ] && [ "$_BSG_RP_KIND" = integrate ]
+}
+_bsg_rp_kind() {  # -> _BSG_RP_KIND, the kind of the row `_BSG_DL_OWN` in the session's bound plan
+  local _run _plan
+  _run="$(session_run "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || :
+  case "$_run" in bound-open\ *|bound-closed\ *) _plan="${_run#* }" ;; *) return 0 ;; esac
+  _BSG_RP_KIND="$(units_rows "$_plan" 2>/dev/null | awk -F'\t' -v id="$_BSG_DL_OWN" '$1 == id { print $3; exit }')"
 }
 
 # ─── JURISDICTION BEFORE ROLE (wave-36 T4; D11, AC-5.2; ruled at D6) ────────────────────────
@@ -6215,7 +6236,27 @@ A commit placed outside the project root and outside every tree of its repositor
         if [ "$_WALL_POKER_VERB" = deliver ] && _bsg_own_deliver; then
           return 0
         fi
+        # THE INTEGRATE ROW'S WRITER RENDERS ITS OWN REVIEWS PART: the same own-row admission, and only for a row the
+        # bound plan makes the integrate row. Anything else the verb takes is refused below, naming the row.
+        if [ "$_WALL_POKER_VERB" = reviews-part ] && _bsg_own_reviews_part; then
+          return 0
+        fi
         local _bsg_am_more=""
+        if [ "$_WALL_POKER_VERB" = reviews-part ]; then
+          if [ -z "$_BSG_DL_OWN" ]; then
+            _bsg_am_more="
+\`reviews-part ${_BSG_DL_TARGET:-<none>}\`: no roster row of yours names a plan row, so there is no row of yours to render the part for."
+          elif [ "$_BSG_DL_TARGET" != "$_BSG_DL_OWN" ]; then
+            _bsg_am_more="
+\`reviews-part ${_BSG_DL_TARGET:-<none>}\`: ${_BSG_DL_TARGET:-no row} is not your row (yours is $_BSG_DL_OWN)."
+          elif [ "$_BSG_RP_KIND" != integrate ]; then
+            _bsg_am_more="
+\`reviews-part $_BSG_DL_TARGET\`: $_BSG_DL_TARGET is not the integrate row${_BSG_RP_KIND:+ (it is a $_BSG_RP_KIND row)}."
+          fi
+          _bsg_am_more="${_bsg_am_more}
+The integrate row's writer renders its own part, alone in one call, before its push and pull request:
+    bash <plugin>/hooks/session-poker.sh reviews-part <your row>"
+        fi
         if [ "$_WALL_POKER_VERB" = deliver ]; then
           if [ -n "$_BSG_DL_OWN" ]; then
             _bsg_am_more="

@@ -366,9 +366,16 @@ co_pr_line() {
 }
 # co_into -> how the working branch reaches the integration branch: `merged`, or `to be pulled` while the PR is owed
 co_into() { if co_pr_owed; then printf 'to be pulled'; else printf 'merged'; fi; }
-# co_pr_section -> the continuation's record of the act
+# co_pr_section -> the continuation's record of the act: the integrate row's acts, in the order it does them. The reviews
+# part comes first because the push and the pull request carry the branch's tip, and a part rendered after them is on no
+# branch the pull request names. A plan with no integrate row has no part to render and records the push and the pull
+# request alone.
 co_pr_section() {
-  printf '## Pull request\n\nclose-out merged nothing (the %s scale integrates by pull request). Open it with:\n\n    %s\n' "$CO_SCALE" "$CO_PR_CMD"
+  local row
+  row="$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' '$3 == "integrate" { print $1; exit }')"
+  printf '## Pull request\n\nclose-out merged nothing (the %s scale integrates by pull request). Run these in this order:\n\n' "$CO_SCALE"
+  [ -z "$row" ] || printf '    bash %s reviews-part %s\n' "$(co_poker)" "$row"
+  printf '    git push -u origin %s\n    %s\n' "$WORKING" "$CO_PR_CMD"
 }
 
 # THE CLOSED FORM'S RESUME POINT AND BRANCH LINE (wave-38 T15, AC-4.3; the one writer since wave-38 T37, D23): a
@@ -2500,6 +2507,12 @@ do_run() {
   fi
                     say "preflight: the commit gate allows the plan this run will write"
   co_reviews_prepare run || _co_held "the release entry's reviews cannot be rendered" "$CO_RV_LINE — nothing was done"
+  # THE PART IS PUBLISHED BEFORE THE MERGE READBACK. The branch moves to the part's commit first, so the readback reads the
+  # branch the person is asked to merge: a part that main does not hold is a part the release entry lies about, and a run
+  # whose part close-out itself rendered holds at the readback until that tip is merged. The normal path has the integrate row
+  # publish the part before its merge, so nothing is rendered here and the readback is unmoved.
+  co_reviews_publish || _co_held "the release entry's reviews are not published" "$CO_RV_LINE"
+                    say "reviews: $CO_RV_LINE"
   if [ "$PARKED" = yes ]; then
     MERGE_LINE="$(co_parked_merge_line)"; say "merge: $MERGE_LINE"
     LANDS_LINE="none — parked, no merge lands a row"; say "rows-landed: $LANDS_LINE"
@@ -2509,8 +2522,6 @@ do_run() {
     act_lands "$CO_LANDS"; say "rows-landed: $LANDS_LINE"
     act_worktrees;  say "worktree-removed: $WT_LINE"
   fi
-  co_reviews_publish || _co_held "the release entry's reviews are not published" "$CO_RV_LINE"
-                    say "reviews: $CO_RV_LINE"
   co_orphans run
   co_regression_runs; say "regression-runs: $RR_LINE"
   # The roster lines the hand-holds count reads, kept before act_tmp wipes them; the count itself is read last.
