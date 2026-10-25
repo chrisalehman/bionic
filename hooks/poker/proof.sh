@@ -423,8 +423,26 @@ proof_run_counts() {
       exit 1
     fi
     plan_verb_swap approve "approved: $AP_NAME" writer
+    # AN APPROVAL OF A DECISION IS ITS RULING, written by the one ruling writer (sitrep.sh `decisions_rule`) before the
+    # approval's own close, so a decision approved by name, or on the release approval card whose reply runs this verb,
+    # has its ledger heading and an ask the ruling closed. A decision the ledger already rules keeps that ruling, and
+    # the approval stands beside it.
+    AP_RC=-; AP_RULED=""
+    case "$AP_NAME" in
+      D[1-9]*) case "${AP_NAME#D}" in
+          *[!0-9]*) : ;;
+          *) AP_RULED="$(decisions_rule "$PV_PLAN" "$PV_REPO" "$AP_NAME" "$AP_REPLY" 2>&1)"; AP_RC=$? ;;
+        esac ;;
+    esac
     poker_owed_close "$PV_REPO" "approve:$AP_NAME" "approve"
     say "approve — $AP_NAME: approved: $AP_NAME by $AP_WHO written to $PV_PLAN; dry-committed first."
+    case "$AP_RC" in
+      -) : ;;
+      0) printf '%s\n' "$AP_RULED" ;;
+      3) say "approve — $AP_NAME: the design ledger already rules it; that ruling stands beside the approval." ;;
+      *) die "approve — $AP_NAME is approved on the plan, but its ruling is not in the design ledger: ${AP_RULED#poker: }; rule it with: bash ${HOOK_DIR}/session-poker.sh decisions rule $AP_NAME '<the reply>'."
+         exit 1 ;;
+    esac
     exit 0
   }
 
