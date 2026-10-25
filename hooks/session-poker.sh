@@ -522,7 +522,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh budget writers=<n> '<reply>'   record the user's cap on writers in the plan header (source=user, budget-override:)"
   die "  bash ${HOOK_DIR}/session-poker.sh regression <yes|no> '<reply>'   record the Step-0 regression setting in the plan header (regression:, and regression-override: against the scale default task no, wave yes, epic no)"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite"
-  die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract: a successor row, judged by the dispatch grammar"
+  die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--suites=<a,b>] [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract (--suites= narrows its suites, and lands_on= with them): a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh task-set <id>[,<id>...] <col>=<val>... [-- <id>[,<id>...] <col>=<val>...]... [--reason '<why>']   set cells of ## Tasks rows (any header column; Files only on a pending row no roster names, a launched row's Files being amend's), every group in one transaction, the table judged once; reads+=<token> or deps+=<token> appends to what the cell holds, an empty reads cell standing for the default of its kind"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh step-field <N> <key>=<value>   write or replace one field of a Step N block: head, cmd, pass, total, output, merge, worktree-removed, adr, share, or walk-artifact (Step 5 only)"
@@ -532,7 +532,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>'   record the user's approval <name> as an approved: line under ## SDLC State (the plan's own is approved-by:, written at Step 3)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
   die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
-  die "  bash ${HOOK_DIR}/session-poker.sh row-landed <id> <commit> <at> [--by-hand <who> <why> [--suites <a,b> --green-at <commit> --log <path>]]   the landing's row: status, step line, ledger line, one write; a hand landing's suites, their green commit and log are written to the landing record with it"
+  die "  bash ${HOOK_DIR}/session-poker.sh row-landed <id> <commit> <at> [--by-hand <who> <why> [--suites <a,b> --green-at <commit> --log <path> [--branch <b>] [--tree <t>]]]   the landing's row: status, step line, ledger line, one write; a hand landing's suites, their green commit and log are written to the landing record with it"
   die "  bash ${HOOK_DIR}/session-poker.sh deliver <id>   a record row's own landing: its artifact checked (a review row's registered review too), then row-landed at the working head"
   die "  bash ${HOOK_DIR}/session-poker.sh reviews-part <id>   the integrate row's render, before its push and pull request: the release entry's ### The reviews from the plan's review and waiver lines, committed on the working branch and named in the landing record (never pushed)"
   die "  bash ${HOOK_DIR}/session-poker.sh known-limits-part <id>   the entry row's render (doc or integrate): the release entry's ### Known limits from the plan's deferrals, each its stated sentence, committed on the working branch and named in the landing record (never pushed)"
@@ -803,9 +803,13 @@ case "$VERB" in
       usage "amend takes a name, then --files+/--suites+/--reexec+ additions and --reason."
     fi
     AMEND_NAME="$1"; shift
-    AMEND_FILES=""; AMEND_SUITES=""; AMEND_RUNS=""; AMEND_REASON=""; AMEND_BY=""
+    AMEND_FILES=""; AMEND_SUITES=""; AMEND_NARROW=""; AMEND_RUNS=""; AMEND_REASON=""; AMEND_BY=""
     while [ $# -gt 0 ]; do
       case "$1" in
+        # THE NARROWING IS ONE SET, SPELT --suites=<a,b> (comma-separated, as lands_on= is): the successor row holds
+        # exactly these, and the verb refuses a name the row does not hold, since that would be a widening.
+        --suites=?*) AMEND_NARROW="${AMEND_NARROW}${1#--suites=}"$'\n'; shift ;;
+        --suites=) usage "amend: --suites= takes the suites to keep, comma-separated." ;;
         --files+|--suites+|--reexec+|--reason|--by)
           if [ $# -lt 2 ] || [ -z "$2" ]; then usage "amend: $1 takes a value."; fi
           case "$2" in --*) usage "amend: $1 takes a value, and got the flag $2." ;; esac
@@ -834,8 +838,11 @@ case "$VERB" in
       esac
     done
     [ -n "$AMEND_REASON" ] || usage "amend takes --reason <why>: the roster says why a contract changed."
-    [ -n "$AMEND_FILES$AMEND_SUITES$AMEND_RUNS" ] \
-      || usage "amend changes nothing without --files+, --suites+ or --reexec+."
+    [ -n "$AMEND_FILES$AMEND_SUITES$AMEND_NARROW$AMEND_RUNS" ] \
+      || usage "amend changes nothing without --files+, --suites+, --suites= or --reexec+."
+    [ -z "$AMEND_NARROW" ] || [ -z "$AMEND_SUITES" ] \
+      || usage "amend: --suites= sets the suites and --suites+ adds to them; give one."
+    case ",$(printf '%s' "$AMEND_NARROW" | tr '\n' ','), " in *,none,*) usage "amend: --suites= narrows to suites the row keeps; none is a waiver, not a narrowing." ;; esac
     ;;
   # THE PLAN-ROW VERBS (wave-24 T15; REQ-9, D14). A row verb takes an id and one or more
   # `<column>=<value>` operands; the shape is checked here and the content in the verb, so a
@@ -970,7 +977,7 @@ case "$VERB" in
   # `--suites <a,b> --green-at <commit> --log <path>`, all three or none. The shapes are the
   # usage error's; the values a plan cannot hold are the verb's own refusal.
   row-landed)
-    RL_BY=""; RL_WHY=""; RL_HAND=0; RL_SUITES=""; RL_GREEN=""; RL_VLOG=""
+    RL_BY=""; RL_WHY=""; RL_HAND=0; RL_SUITES=""; RL_GREEN=""; RL_VLOG=""; RL_BRANCH=""; RL_TREE=""
     if [ $# -ge 6 ] && [ "$4" = "--by-hand" ]; then
       RL_HAND=1; RL_BY="$5"; RL_WHY="$6"; RL_HEAD3=("$1" "$2" "$3"); shift 6
       while [ $# -ge 2 ]; do
@@ -978,6 +985,8 @@ case "$VERB" in
           --suites) RL_SUITES="$2" ;;
           --green-at) RL_GREEN="$2" ;;
           --log) RL_VLOG="$2" ;;
+          --branch) RL_BRANCH="$2" ;;
+          --tree) RL_TREE="$2" ;;
           *) break ;;
         esac
         shift 2
@@ -985,6 +994,8 @@ case "$VERB" in
       set -- "${RL_HEAD3[@]}" "$@"
       { [ -z "${RL_SUITES}${RL_GREEN}${RL_VLOG}" ] || { [ -n "$RL_SUITES" ] && [ -n "$RL_GREEN" ] && [ -n "$RL_VLOG" ]; }; } \
         || usage "row-landed --by-hand: the writer's suites are --suites <a,b> --green-at <commit> --log <path>, all three or none."
+      [ -z "${RL_BRANCH}${RL_TREE}" ] || [ -n "$RL_SUITES" ] \
+        || usage "row-landed --by-hand: --branch and --tree fill the ready event, which --suites <a,b> --green-at <commit> --log <path> writes."
     fi
     [ $# -eq 3 ] && [ -n "$1" ] || usage "row-landed takes <id> <40-hex commit> <ISO-UTC> [--by-hand <who> <why> [--suites <a,b> --green-at <commit> --log <path>]]."
     case "$2" in *[!0-9a-f]*|'') usage "row-landed: '$2' is not a 40-hex commit." ;; esac
