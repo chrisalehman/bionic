@@ -712,13 +712,13 @@ expect_eq "PT-4c: with the placeholder test restored, current 6 --check refuses 
 expect_contains "PT-4d: …as a placeholder, which is what PT-1 reads" "placeholder" "$PT_OUT"
 
 # ---------------------------------------------------------------------------
-section "§REFUSED-VERB — a dispatched agent's confirm-row is refused by the wall; the orchestrator's own is not"
+section "§REFUSED-VERB — a dispatched agent's confirm-row and matrix-retier are refused by the wall; the orchestrator's own are not"
 # `confirm-row` records the user's confirmation of a T4 row, so it is the user's act and never an agent's. The
 # dispatch wall refuses every verb on its contract list from a payload carrying an agent id in an armed session;
 # the list gained the verb with no test reading it.
 # Fixture fidelity: the PreToolUse payload of section 7 (top-level `agent_id`, the roster file armed); the
 # orchestrator's call is the same command with no `agent_id`.
-# fails-when: the verb leaves the wall's list and a dispatched agent's call passes; or the control call is refused
+# fails-when: a verb leaves the wall's list and a dispatched agent's call passes; or the control call is refused
 #   by the same arm.
 R_RV="$(mk_repo refusedverb)"
 arm_roster "$R_RV"
@@ -731,6 +731,16 @@ expect_contains "RV-1c: …naming the verb it refused" "session-poker.sh confirm
 run_hook "$(mk_payload "$R_RV" "$RV_CMD")"
 expect_status "RV-2: the orchestrator's own confirm-row passes the wall" 0 "$ST"
 expect_absent "RV-2b: …and that arm's line is absent on the same stream RV-1b read" "$RV_ARM" "$ERR"
+# `matrix-retier` rewrites a criterion's tier, eval and evidence cells, so it changes the plan's contract and is the
+# run's, never a writer's. The same arm holds it beside matrix-set.
+RV_RT="bash ${BIONIC_HOOKS_DIR}/session-poker.sh matrix-retier AC-x tier=T2 eval='x'"
+run_hook "$(mk_payload "$R_RV" "$RV_RT" "$ACTOR" "" Bash test-runner)"
+expect_status "RV-3: a dispatched agent's matrix-retier is refused" 2 "$ST"
+expect_contains "RV-3b: …with the wall's line" "$RV_ARM" "$ERR"
+expect_contains "RV-3c: …naming the verb it refused" "session-poker.sh matrix-retier" "$ERR"
+run_hook "$(mk_payload "$R_RV" "$RV_RT")"
+expect_status "RV-4: the orchestrator's own matrix-retier passes the wall" 0 "$ST"
+expect_absent "RV-4b: …and that arm's line is absent on the same stream RV-3b read" "$RV_ARM" "$ERR"
 
 # ---------------------------------------------------------------------------
 section "§PART — reviews-part is the main thread's and the integrate row's own writer's; any other writer is refused with the row named"

@@ -1419,7 +1419,7 @@ expect_eq "(k3) the part holds each stated sentence, unescaped, in the order reg
 expect_eq "(k4) the part keeps its place before The landing numbers" "### The work|### Known limits|### The landing numbers" "$(kl_heads "$RK")"
 expect_contains "(k5) the older entry's part is untouched" "- an older limit" "$(kl_old "$RK")"
 expect_contains "(k6) the landing record names the commit as the row's render" \
-  "line/v1|ev=doc|row=T3|part=known-limits|commit=$KL_T|branch=wave/x|at=" "$(ll_ev "$RK" doc)"
+  "line/v1|ev=doc|row=T3|part=known-limits|commit=$KL_T|branch=wave/x|tree=$(cd "$RK" && pwd -P)|at=" "$(ll_ev "$RK" doc)"
 expect_eq "(k7) the checkout holding the branch is at the commit" "$KL_T" "$(git -C "$RK" rev-parse HEAD)"
 ww_poke "$RK" known-limits-part T3 >/dev/null; KL_RC=$?
 expect_eq "(k8) a second render finds the part listed: exit 0, no commit" "0|$KL_T" "$KL_RC|$(kl_tip "$RK")"

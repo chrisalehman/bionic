@@ -871,7 +871,7 @@ expect_eq "BP-4 …one bullet per review line of the plan, under the part's head
   "### The reviews|$(/usr/bin/grep -c '^proved: kind=review ' "$PBP/$PLAN_REL")" \
   "$(printf '%s\n' "$BP_PART" | sed -n 1p)|$(printf '%s\n' "$BP_PART" | /usr/bin/grep -c '^- ')"
 expect_contains "BP-5 the landing record names the commit as the integrate row's" \
-  "line/v1|ev=integrate|row=T3|part=reviews|commit=$BP_TIP|branch=wave/01-fixture|at=" \
+  "line/v1|ev=integrate|row=T3|part=reviews|commit=$BP_TIP|branch=wave/01-fixture|tree=$(cd "$PBP-wave" && pwd -P)|at=" \
   "$(/usr/bin/grep '^line/v1|ev=integrate|' "$BP_REC/landing-proofs.log" 2>/dev/null)"
 expect_eq "BP-6 the checkout holding the branch is at the commit" "$BP_TIP" "$(fixture_git "$PBP-wave" rev-parse HEAD)"
 lands_poker "$PBP" "$BP_SID" reviews-part T3
