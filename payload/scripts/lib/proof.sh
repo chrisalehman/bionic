@@ -1556,7 +1556,7 @@ proof_floor_absent() {
 }
 
 # _proof_last_read <plan> <kind> <head|line|owed|evidence> [<question>] -> the one reader behind the two above, and the
-# `owed=` or `evidence=` field of that last line (wave-35 T9), nothing when it carries none. The plan's lines come from lib/run.sh
+# `owed=` or `evidence=` field of that last line, nothing when it carries none. The plan's lines come from lib/run.sh
 # `plan_lines`, the one plan line reader, CR translated (wave-36 T12; D13, AC-7.5): a raw read saw a CR-only plan as
 # one line, so its floor line was absent to the wall and the judge alike (C34).
 _proof_last_read() {
