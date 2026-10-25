@@ -1454,18 +1454,18 @@ HL_F="$HL_F" awk '{ print } /^- T2: active$/ { print "proved: kind=regression he
         print "stack-health: red head=" ENVIRON["HL_F"] " pass=3 total=5 owed=a.test.sh,b.test.sh evidence=record/wave-x/whole.log"; print ""
         print "| AC | tier | status | evidence | auditor |"; print "|---|---|---|---|---|"; print "| AC-1.1 | T2 | pending | — | — |" }' \
   "$HLP" > "$HLP.n" && mv "$HLP.n" "$HLP"
-expect_eq "(h0) precondition: before the landing the rendering is red at F, both suites owed, nothing closed, and the plan's line reads the same" \
+expect_eq "(hl0) precondition: before the landing the rendering is red at F, both suites owed, nothing closed, and the plan's line reads the same" \
   "red head=$HL_F pass=3 total=5 owed=a.test.sh,b.test.sh evidence=record/wave-x/whole.log|stack-health: red head=$HL_F pass=3 total=5 owed=a.test.sh,b.test.sh evidence=record/wave-x/whole.log" \
   "$(hl_lib proof_health_line "$HLP" "$HL")|$(hl_sh "$HLP")"
 ll_launch "$HL" T1 a.test.sh
 ll_verb "$HL" T1
-expect_eq "(h1) T1 lands through ready on a.test.sh, green" "0" "$LL_RC"
+expect_eq "(hl1) T1 lands through ready on a.test.sh, green" "0" "$LL_RC"
 [ "$LL_RC" = 0 ] || printf '      ready said: %s\n' "$LL_OUT" | head -20
-expect_contains "(h1b) …the landing record holds its green verdict for a.test.sh, the close the judge reads" "|suite=a.test.sh|result=green|" \
+expect_contains "(hl1b) …the landing record holds its green verdict for a.test.sh, the close the judge reads" "|suite=a.test.sh|result=green|" \
   "$(ll_ev "$HL" verdict | /usr/bin/grep '|row=T1|')"
-expect_eq "(h2) AC-5.3 after the settlement the plan's stack-health: still reads red at F, owed= drops a.test.sh, closed= names it" \
+expect_eq "(hl2) AC-5.3 after the settlement the plan's stack-health: still reads red at F, owed= drops a.test.sh, closed= names it" \
   "stack-health: red head=$HL_F pass=3 total=5 owed=b.test.sh closed=a.test.sh evidence=record/wave-x/whole.log" "$(hl_sh "$HLP")"
-expect_eq "(h2b) …one stack-health: line, the rendering's own" "1|$(hl_lib proof_health_line "$HLP" "$HL")" \
+expect_eq "(hl2b) …one stack-health: line, the rendering's own" "1|$(hl_lib proof_health_line "$HLP" "$HL")" \
   "$(hl_sh "$HLP" | awk 'END { print NR }')|$(hl_sh "$HLP" | sed 's/^stack-health: //')"
 
 # ---------------------------------------------------------------------------

@@ -1441,8 +1441,8 @@ section "§VERDICTS §DISCHARGE §STACK: the critic's verdicts and the regressio
 # `proof-add review <record> --question evidence` on a `rigor: single` plan writes each named row's auditor cell
 # (CONFIRMED as the bare token, any other verdict as written) and the matrix head's `auditor-wave:` line in the same
 # plan write as its proof line. `discharge` refuses there, naming `proof-add review`; at double it writes as before.
-# `proof-add regression` writes the head's `stack-health:` line from the proof's head, pass and total, red with its
-# numbers when the run left suites owed, and leaves a declared `n/a:` as the plan wrote it.
+# `proof-add regression` writes the head's `stack-health:` line through lib/proof.sh `proof_health_line`, the judge's
+# fact rendered: green only at a pass that left nothing owed, red otherwise, and it leaves a declared `n/a:` as written.
 #
 # FIXTURE FIDELITY. §STEP-FIELD's shape built fresh: a plan bound to this session at Step 5, its working branch in a
 # linked worktree, real commits, the reader's row from the production writer with `questions=` appended, run lines
