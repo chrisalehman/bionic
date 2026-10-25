@@ -42,7 +42,8 @@ PAH_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
 # whole run's head) and PAH_H (the working head). The close-out fixture at Step 8, its regression proof replaced by
 # a whole run at F that left <owed> red, then <landings> landing commits on the working branch, landing k greening
 # the owed suites at the positions k, k + <landings>, …; with landings the integration branch takes the working
-# branch, as the merge before close-out does, and the readings move to the working head.
+# branch, as the merge before close-out does, the readings move to the working head, and the plan carries the
+# person's word to merge with no pass at it (`approved: merge-unproved … head=<H>`), which close-out's judge needs.
 pah_world() {
   local label="$1" owed="$2" n="${3:-0}" p plan w rec k i s su c
   p="$(mk_fixture "$label")" || return 1
@@ -79,7 +80,9 @@ pah_world() {
   PAH_H="$(fixture_git "$p" rev-parse wave/01-fixture)"
   if [ "$n" -gt 0 ]; then
     fixture_git "$p" merge -q --no-ff -m "merge wave" wave/01-fixture >/dev/null 2>&1 || return 1
-    awk -v f="$PAH_F" -v h="$PAH_H" '/^proved: kind=review / { sub("head=" f, "head=" h) } { print }' "$plan" > "$plan.n" \
+    # The landings cover the head and no pass ran at it, so the merge close-out delivers is the person's word at H.
+    awk -v f="$PAH_F" -v h="$PAH_H" '/^proved: kind=review / { sub("head=" f, "head=" h) } { print }
+      /^current: / { print "approved: merge-unproved by fixture 2026-10-04T14:00:00Z head=" h " \"merge it\"" }' "$plan" > "$plan.n" \
       && mv "$plan.n" "$plan"
   fi
   PAH_P="$p"; PAH_PLAN="$plan"

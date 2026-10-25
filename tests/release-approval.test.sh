@@ -137,7 +137,9 @@ fc_plan() {  # <proof lines> [<sed edit>] -> PFC at current: 8, bound to this se
     "$(roster_of "$RFC")" "$(ack_ledger_of "$RFC")"
   bind_marker "$RFC" "$PFC"
 }
-FC_GOOD="$(fc_floor "$FC_C")
+# THE SETTLED RUN: the whole suite ran green at R, the head, so nothing about the merge is the person's to decide;
+# the readings at C reach R by the release text's cover.
+FC_GOOD="$(fc_floor "$FC_R")
 $(fc_reads "$FC_C")"
 
 # THE USER'S WORDS: every reply this suite replays is typed in this session's transcript, whole.
@@ -390,7 +392,7 @@ expect_absent "EARLY-5d …and no CARD-EARLY" "CARD-EARLY" "$OUT"
 { printf 'question: adversarial\nresult: fail\nscope: whole\nreviewed: %s..%s\nfindings: 1\n' "${FC_B:0:10}" "${FC_C:0:10}"
   printf 'finding: 1 S2 on lib/x.sh:1 the value is lost on a second run\nshown: 1 bash lib/x.sh; bash lib/x.sh\n\nwhat the reader found\n'
 } > "$FC_REC/adversarial-fail.md"
-FC_FAILR="$(fc_floor "$FC_C")
+FC_FAILR="$(fc_floor "$FC_R")
 $(fc_reads "$FC_C" | sed '/adversarial-whole\.md/{s/adversarial-whole\.md/adversarial-fail.md/;s/result=pass/result=fail/;}')"
 fc_plan "$FC_FAILR"
 poke "$RFC" current 8 --check
@@ -849,13 +851,13 @@ rm -f "$FC_REC"/release-approval-*.md
 # that decision alone, naming its exit; the reply that merges writes the line at this head, and current 8 passes.
 fc_plan "$(fc_floor "$FC_C")
 $(fc_reads "$FC_C")"
-poke "$RFC" current 8 --check
-FC_J3_PRE="$RC|$OUT"
 fc_page
 FC_J3N="$(fc_table | /usr/bin/grep -F '|key=approve:merge-unproved|' | sed -n 's/^release-approval\/v1|dec=\([0-9]*\)|.*/\1/p')"
+poke "$RFC" current 8 --check
+FC_J3_PRE="$RC|$OUT"
 expect_eq "JUDGE-3 precondition: the head is past the whole run, the card renders (exit 0) and its table holds the decision" \
   "0|yes" "$FC_RC|$([ -n "$FC_J3N" ] && echo yes)"
-expect_contains "JUDGE-3b …current 8 --check refused before any reply, naming the decision's exit" \
+expect_contains "JUDGE-3b …current 8 --check refuses before any reply, naming the decision's exit by its number on the page" \
   "needs: the user — reply ${FC_J3N:-<n>} on the release card (merge without a whole run at this head), or wait for the pass" "$FC_J3_PRE"
 expect_eq "JUDGE-3c …the replay line waits by default and merges as its other choice" \
   "default=-|other=approve merge-unproved|choices=wait/merge" \
@@ -990,13 +992,13 @@ fc_post_plan active "$(fc_post_read adversarial)
 $(fc_post_read structure)
 $(fc_post_read evidence)"
 fc_card early
-expect_eq "POST-2 every piece reading registered at the fix's landing, the rows still active: card.sh early holds, every check green, nothing to settle (exit 0, no output)" \
-  "0||" "$FC_RC|$FC_ERR|$FC_OUT"
+expect_eq "POST-2 every piece reading registered at the fix's landing, the rows still active: card.sh early holds, every check green but the merge the fix landed past the whole run, which the page settles as its own decision (exit 0)" \
+  "0||settles: approve:merge-unproved" "$FC_RC|$FC_ERR|$FC_OUT"
 fc_page
 expect_eq "POST-2b release-approval renders at the fix's landing (exit 0, nothing on stderr, the page written)" \
   "0||release-approval-$FC_P8.md" "$FC_RC|$FC_ERR|$(fc_pages)"
-expect_eq "POST-2c …its decisions are the unrun row and the two approvals, no waiver of any question" \
-  "row:AC-1.2 approve:release approve:merge" \
+expect_eq "POST-2c …its decisions are the unrun row, the two approvals and the merge with no pass at the fix, no waiver of any question" \
+  "row:AC-1.2 approve:release approve:merge approve:merge-unproved" \
   "$(/usr/bin/grep '^release-approval/v1|dec=' "$FC_REC/release-approval-$FC_P8.md" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "key=") == 1) printf "%s%s", (n++ ? " " : ""), substr($i, 5) }')"
 git -C "$RFC" reset -q --hard "$FC_R"
 rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/release-approval-*.md "$FC_REC"/post-*.md

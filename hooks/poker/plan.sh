@@ -3075,6 +3075,21 @@ RR_DISP_EOF
       rr_add approve "approve:$nm" "approve $nm" "-" "-" "$line" approve withhold "$nm" "hold the $nm"
     done
 
+    # THE MERGE WITHOUT A PASS AT THIS HEAD is the person's own decision, put beside the release and the merge while the
+    # whole suite is not green here (lib/proof.sh `proof_whole_text`, the one printer) and no word was given at this
+    # head (`proof_unproved_approved`): the gate at 8 holds the merge on it (`facts_state`'s unproved). Waiting for the
+    # pass is recommended and taking the default records nothing, so only the person's own `merge` writes the line. A
+    # plan that owes no whole run, or holds no proof of one, has no pass to wait for and is asked nothing here.
+    RR_WHOLE="$(proof_whole_text "$PV_PLAN" "$PV_REPO" 2>/dev/null)"
+    case "$RR_WHOLE" in
+      "green at "*|none|'') : ;;
+      *) if [ "$(proof_regression "$PV_PLAN")" != no ] && ! proof_unproved_approved "$PV_PLAN" "$RR_HEAD"; then
+           rr_add unproved approve:merge-unproved "-" "approve merge-unproved" "-" \
+             "Merge without a whole run at this head — $RR_WHOLE" "wait for the pass" "merge without it" \
+             "wait for the pass" "merge without a whole run at this head"
+         fi ;;
+    esac
+
     # AN --against THAT NAMES NOTHING ON THE PAGE is refused before anything is written.
     while IFS= read -r key; do
       [ -n "$key" ] || continue
@@ -3093,7 +3108,7 @@ RR_AGAINST_EOF
     # THE REGRESSION is the full pass's state at the head, drawn from the one printer over the floor judge (lib/proof.sh
     # `proof_whole_text`), never worded here: green only where the whole suite ran green at this head, so a whole run
     # behind the head that later landings covered reads red with the landings since it counted.
-    RR_TREG="$(proof_whole_text "$PV_PLAN" "$PV_REPO" 2>/dev/null)"
+    RR_TREG="$RR_WHOLE"
     case "$RR_TREG" in
       "green at "*) RR_TREG="✅ whole suite: $RR_TREG" ;;
       *) RR_TREG="✖️ whole suite: ${RR_TREG:-none}" ;;
@@ -3170,7 +3185,7 @@ RR_AGAINST_EOF
     for ((num = 0; num < RR_N; num++)); do
       key="${RR_KEY[$num]}"
       case "$key" in
-        approve:*|waive:*) OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_open "$key" "${RR_KIND[$num]}: ${key#*:}" \
+        approve:*|waive:*) OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_open "$key" "${key%%:*}: ${key#*:}" \
           "poker: ${key#*:} is decision $((num + 1)) on the release approval card at $RR_H8" >/dev/null 2>&1 || : ;;
       esac
     done

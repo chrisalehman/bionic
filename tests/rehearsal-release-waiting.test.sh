@@ -51,7 +51,11 @@ expect_eq "RW-1 rehearse reaches the state and prints the sandbox's plan (exit 0
 if [ "$RT_RC" = 0 ]; then
   expect_eq "RW-1b …through the door's landing, the regression run and the release approval card's own verb" \
     "yes|yes|yes" "$([ "$(rt_ran 'spawn-worktree.sh land')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'regression-run')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'release-approval')" -ge 1 ] && echo yes)"
-  rt_sheet_and_card RW "approve:merge approve:release" "approve:merge>8/4 approve:release>8/4" approve:release
+  # The release text landed past the whole run, so the card asks the merge without a pass at this head beside the
+  # release and the merge. No row reads that approval by name, so the sheet's holds reads it as holding nothing,
+  # though the gate at Step 8 holds the merge on it.
+  rt_sheet_and_card RW "approve:merge approve:merge-unproved approve:release" \
+    "approve:merge-unproved>nothing approve:merge>8/4 approve:release>8/4" approve:release
 fi
 
 # ============================================================
