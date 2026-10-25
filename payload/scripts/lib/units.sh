@@ -833,6 +833,29 @@ units_live_rows() {
   _UNITS_EVIDENCE="$*" _UNITS_QUESTION="$q" _UNITS_READER="$r" _units_sched liverows "$plan" ""
 }
 
+# units_live_held <plan> <row id> -> whether a live review row's questions hold at the working branch's head, as the
+# judge reads them (`_units_readings_state`, the review lines of lib/proof.sh `facts_state`): exit 0, nothing printed,
+# when every question the row carries is covered there (a bare `live:head` row carries every question the rigor deals);
+# exit 1 printing one `<question> <state>` line per question that is not, or the one sentence saying why the judge
+# could not be asked; exit 3, nothing printed, when the row reads no `live:head`. A live row is read again after each
+# landing, so it may close only once the judge owes it nothing more at the head.
+units_live_held() {
+  local qs st
+  qs="$(_units_sched questions "${1:-}" "${2:-}" 2>/dev/null)"
+  [ -n "$qs" ] || return 3
+  st="$(_units_readings_state "${1:-}")"
+  [ "$st" != covered ] || return 0
+  case "$st" in
+    review" "*) : ;;
+    *) printf '%s\n' "$st"; return 1 ;;
+  esac
+  printf '%s\n' "$st" | _UNITS_QS="$qs" awk '
+    BEGIN { n = split(ENVIRON["_UNITS_QS"], q, "\n"); for (i = 2; i <= n; i++) if (q[i] != "") want[q[i]] = 1; bare = (n < 2 || q[2] == "") }
+    { m = split($0, e, "; ")
+      for (k = 1; k <= m; k++) { split(e[k], f, " "); if (f[1] == "review" && f[2] != "" && (bare || (f[2] in want)) && !(f[2] in seen)) { seen[f[2]] = 1; o[++c] = f[2] " " f[5] } } }
+    END { for (i = 1; i <= c; i++) print o[i]; exit (c > 0) }'
+}
+
 # A READ AFTER A FIX IS TOLD WHAT MOVED (wave-27 T43; D10; A-orch-48, A-orch-71). Once a question has
 # its `scope=whole` reading, a later read of it covers the fixes that landed past that reading, and
 # the tick names them beside the RANGE line. A row's landing is read from the run's LANDING RECORD,
@@ -1045,7 +1068,8 @@ _units_proof_awk() {
 # `holds` (units_floor_holds) takes the regression row's id, or nothing, in the <step> slot.
 _units_sched() {
   local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows hasreads=0 i fst rst rc
-  if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ] && [ "$mode" != whole ]; then
+  if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ] && [ "$mode" != whole ] \
+     && [ "$mode" != questions ]; then
     case "$step" in ''|*[!0-9]*) return 2 ;; esac
   fi
   out="$(_units_table "$plan")" || return 1
@@ -1858,6 +1882,14 @@ _units_sched_awk() {
       # the start among them by ancestry (T43; review pass 17 F2). A bare row, an unknown id, or no
       # id at all is answered here, as through 1.11.0.
       # THE WHOLE READ OF ONE READ ROW (wave-27 T43): every question it carries has a whole reading.
+      # THE QUESTIONS OF ONE LIVE ROW: `live` then each question it carries, one per line; `live` alone for a bare
+      # `live:head` row; nothing for a row that reads no live:head, or carries a question outside the set.
+      if (mode == "questions") {
+        if (!(want in at) || !rlive[at[want]] || rbadq[at[want]]) exit
+        i = at[want]; print "live"
+        for (k = 1; k <= nq[i]; k++) print rq[i, k]
+        exit
+      }
       if (mode == "whole") {
         if (!(want in at) || !nq[at[want]] || rbadq[at[want]]) exit
         i = at[want]

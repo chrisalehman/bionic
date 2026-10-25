@@ -2811,8 +2811,12 @@ RR_AGAINST_EOF
       esac
     fi
 
-    # THE REVIEWS: each question's newest reading, by the role the rigor deals it.
+    # THE REVIEWS: each question's newest reading, by the role the rigor deals it, covered or failing as the judge
+    # reads it at the head (lib/proof.sh `facts_reviews`, the one reading the situation report's count shares): a
+    # failed reading its fix landings answered reads covered, naming them, and failing stays only while it is
+    # uncovered. A plan the judge cannot deal has no coverage to read, so its lines say the recorded result.
     RR_REVIEWS=""
+    RR_COV="$(facts_reviews "$PV_PLAN" "$RR_HEAD" --landings 2>/dev/null)"
     for q in evidence adversarial structure; do
       role=critic
       [ "$q" != evidence ] || [ "$(plan_frontmatter_get "$PV_PLAN" rigor 2>/dev/null)" != double ] || role=auditor
@@ -2823,9 +2827,18 @@ RR_AGAINST_EOF
       if [ "$h" = "$RR_HEAD" ] || [ "$behind" = 0 ]; then nm="$role at this head"
       elif [ -n "$behind" ]; then nm="$role at ${h:0:8}, $(rr_plural "$behind" commit commits) behind"
       else nm="$role at ${h:0:8}"; fi
-      case "$r" in
-        pass) RR_REVIEWS="${RR_REVIEWS}✅ $q — $nm"$'\n' ;;
-        fail) RR_REVIEWS="${RR_REVIEWS}✖️ $q — $nm, failing"$'\n' ;;
+      IFS=$'\t' read -r _ _ cst clands <<< "$(printf '%s\n' "$RR_COV" | awk -F'\t' -v q="$q" '$1 == q { print; exit }')"
+      case "${clands:--}" in
+        -) clands="" ;;
+        *) clands="$(printf '%s' "$clands" | tr ',' '\n' | awk -F'@' 'NF == 2 { printf "%s%s", (n++ ? ", " : ""), ($1 == "-" ? "" : $1 " at ") substr($2, 1, 8) }')" ;;
+      esac
+      case "${cst:-}:$r" in
+        failing:*) RR_REVIEWS="${RR_REVIEWS}✖️ $q — $nm, failing"$'\n' ;;
+        covered:*) RR_REVIEWS="${RR_REVIEWS}✅ $q — $nm${clands:+, covered at this head by $clands}"$'\n' ;;
+        uncovered:*) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, not covered at this head"$'\n' ;;
+        absent:*) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, a reading still owed at this head"$'\n' ;;
+        :pass) RR_REVIEWS="${RR_REVIEWS}✅ $q — $nm"$'\n' ;;
+        :fail) RR_REVIEWS="${RR_REVIEWS}✖️ $q — $nm, failing"$'\n' ;;
         *) RR_REVIEWS="${RR_REVIEWS}➖ $q — $nm, ${r:-no result}"$'\n' ;;
       esac
     done

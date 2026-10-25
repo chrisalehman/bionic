@@ -3511,8 +3511,9 @@ _card_sitrep_check() {
     }'
 }
 
-# _card_sitrep_load <sheet file> -> SR_RECS; the open asks SR_AKEY, SR_AHOLDS, SR_ATITLE, SR_ABLOCK (yes when the ask
-# waits on the user and its blocks field says yes, never inferred from what it holds) and SR_AWAIT (`user` or
+# _card_sitrep_load <sheet file> -> SR_RECS; the open asks SR_AKEY, SR_AHOLDS, SR_ATITLE, SR_ABLOCK (yes only when the
+# ask's blocks field says yes: the sheet's one function, `sitrep_ask_lines`, already holds an ask that waits on an event
+# to no, so the card decides nothing again from what it holds or waits on) and SR_AWAIT (`user` or
 # `event <what>`); SR_VALS, `V <key> <value>` per measured sheet line (the text before ` — `), the wave, the step
 # numbers, the goal counts by status, each theme's criteria discharged under its name and the counted line;
 # SR_COUNTED, the counted line of the asks that wait on events; SR_NEXT, the next event the run waits on.
@@ -3524,7 +3525,6 @@ _card_sitrep_load() {
   while IFS="$CARD_TAB" read -r k h t b w; do
     [ -n "$k" ] || continue
     SR_AKEY[${#SR_AKEY[@]}]="$k"; SR_AHOLDS[${#SR_AHOLDS[@]}]="$h"; SR_ATITLE[${#SR_ATITLE[@]}]="$t"; SR_AWAIT[${#SR_AWAIT[@]}]="$w"
-    case "$w" in event*) b=no ;; esac
     [ "$b" = yes ] || b=no
     SR_ABLOCK[${#SR_ABLOCK[@]}]="$b"
   done <<< "$(printf '%s\n' "$SR_RECS" | awk -F'\t' '$1 == "A" { print $2 "\t" ($3 == "" ? "nothing" : $3) "\t" ($4 == "" ? $2 : $4) "\t" ($6 == "" ? "-" : $6) "\t" ($7 == "" ? "user" : $7) }')"

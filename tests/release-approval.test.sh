@@ -27,6 +27,7 @@
 # §CONFIRM   confirm-row writes the attributed confirmation; the card offers confirm or waive; reply applies either
 # §BORN      two fix rows born of different questions render the page with no re-read
 # §JUDGE     the Tests line names the floor judge's answer: covered after a later green, the owed suite while none
+# §COVERED   a failed review its fix landing answered reads covered, naming the landing; the sitrep counts as the card
 # §POST      a reader row past the landed release keeps the card early until its piece reading is registered
 # §STEP0     card.sh step0 renders the configuration card and owes its reply
 # §LEGACY    a page written under the card's old name is still replied to, and the alias writes the new page
@@ -832,6 +833,60 @@ expect_contains "JUDGE-2 the control: no landing greened it, the page names a.te
 expect_absent "JUDGE-2b …and does not read covered" "covered" "$(fc_under Tests | fc_flat)"
 git -C "$RFC" reset -q --hard "$FC_R"
 rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/release-approval-*.md
+
+# ============================================================
+section "§COVERED: a failed review its fix landing answered reads covered on the card, naming the landing, and the sitrep counts it as the card does"
+# ============================================================
+# FIXTURE FIDELITY: the adversarial reading at C fails on one S2 finding to fix (its record in the readers' grammar,
+# its proof line by the writer), newer than the passing ones; the fix row T4 is born of that finding (the marker
+# `task-add --born` writes) and landed green at F, the head (its events as the line writes them). The card is the
+# real verb's page and the count is the real sitrep's sheet, over the same plan and head.
+# fails-when: the Reviews line still prints failing after the fix landed, does not name the fix's landing, reads
+# covered before the fix landed; or the sitrep's failed count differs from the card's failing lines, or a sitrep
+# planted back to the raw result agrees with the card.
+printf 'question: adversarial\nresult: fail\nscope: piece\nreviewed: %s..%s\nfindings: 1\nfinding: 1 S2 on lib/x.sh:1 the x writer drops its error\nshown: 1 bash tests/a.test.sh\n\nwhat the reader found\n' \
+  "${FC_B:0:10}" "${FC_C:0:10}" > "$FC_REC/adversarial-fail.md"
+FC_CV_FAIL="$(fc_line review "$FC_C" 2026-10-12T12:30:00Z record/wave-x/adversarial-fail.md adversarial w-read fail piece)"
+cv_reviews() { fc_under Reviews | fc_flat; }
+cv_adv() {  # -> the adversarial line of the Reviews section, unfolded, up to the next line's icon
+  cv_reviews | awk '{ i = index($0, "adversarial — "); if (!i) exit; split(substr($0, i), a, /(✅|✖️|❔|➖)/); sub(/ +$/, "", a[1]); print a[1] }'
+}
+cv_card_failing() { fc_under Reviews | /usr/bin/grep -c '^ *✖️'; }
+cv_sitrep_failed() {  # [<poker>] -> the failed count of the sitrep sheet's reviews line over PFC, as this session
+  ( cd "$RFC" && env CLAUDE_CODE_SESSION_ID="$SID" bash "${1:-$POKER}" sitrep "$PFC" 2>/dev/null ) \
+    | sed -n 's/^reviews: [0-9]* passed, \([0-9]*\) failed, .*/\1/p'
+}
+fc_plan "$FC_GOOD
+$FC_CV_FAIL"
+fc_page --preview
+expect_contains "COVERED-0 precondition: the Reviews section renders the adversarial line" "adversarial — " "$(cv_reviews)"
+expect_contains "COVERED-0b the control: before any fix lands the adversarial line reads failing" "failing" "$(cv_adv)"
+FC_CV0_CARD="$(cv_card_failing)"; FC_CV0_SR="$(cv_sitrep_failed)"
+expect_eq "COVERED-0c …and the card's failing lines and the sitrep's failed count agree: one each" "1|1" "$FC_CV0_CARD|$FC_CV0_SR"
+FC_CV_F="$(s57_commit "$RFC" lib/x.sh 'T4: the fix the adversarial reading asked for')"
+fc_published T4 "$FC_CV_F" > "$FC_REC/landing-proofs.log"
+fc_plan "$FC_GOOD
+$FC_CV_FAIL
+- T4: landed $FC_CV_F 2026-10-12T14:00:00Z born: review S2 on of=record/wave-x/adversarial-fail.md#1"
+awk '{ print } /^\| T2 \|/ {
+  print "| T4 | 4 | build | fix the x error · born: review | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |" }' \
+  "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
+fc_page --preview
+expect_contains "COVERED-1 AC-13.1 the fix landed at the head: the adversarial line reads covered" "covered" "$(cv_adv)"
+expect_absent "COVERED-1b …and no longer failing (COVERED-1 read the same line)" "failing" "$(cv_adv)"
+expect_contains "COVERED-1c …naming the covering landing, its row and commit" "T4 at ${FC_CV_F:0:8}" "$(cv_adv)"
+FC_CV1_CARD="$(cv_card_failing)"; FC_CV1_SR="$(cv_sitrep_failed)"
+expect_eq "COVERED-2 the sitrep's failed count over the same fixture agrees with the card: none failing on either" "0|0" "$FC_CV1_CARD|$FC_CV1_SR"
+# THE PLANT: a copy of the tree whose sitrep is put back to counting the recorded result; it then disagrees with the card.
+FC_CVM="$TMPROOT/cv-mut"; mkdir -p "$FC_CVM/payload"
+cp -R "$BIONIC_HOOKS_DIR" "$FC_CVM/hooks" && cp -R "$BIONIC_HOOKS_DIR/../payload/scripts" "$FC_CVM/payload/scripts"
+sed 's/if \[ "\$jrc" -ne 2 \]; then/if false; then/' "$BIONIC_HOOKS_DIR/poker/sitrep.sh" > "$FC_CVM/hooks/poker/sitrep.sh"
+expect_eq "COVERED-3 the plant changed the copy's sitrep (it reads the one reader today)" "1" \
+  "$(cmp -s "$BIONIC_HOOKS_DIR/poker/sitrep.sh" "$FC_CVM/hooks/poker/sitrep.sh" && echo 0 || echo 1)"
+expect_eq "COVERED-3b …and the planted sitrep counts the fixed review failed while the card reads none: the readers diverge" "0|1" \
+  "$FC_CV1_CARD|$(cv_sitrep_failed "$FC_CVM/hooks/session-poker.sh")"
+git -C "$RFC" reset -q --hard "$FC_R"
+rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/release-approval-*.md "$FC_REC/adversarial-fail.md"
 
 # ============================================================
 section "§POST: a reader row past the landed release keeps the card early until its reading is registered (AC-6.2)"
