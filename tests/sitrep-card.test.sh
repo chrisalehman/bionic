@@ -1134,7 +1134,7 @@ or_plan() {  # <status of the second theme's one criterion> -> the plan, that th
     printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
     printf '| T1 | 4 | build | The release row: 1.27.0. It names the release it cuts · complexity: standard | — | — | — | 30 | REQ-1 | lib/t1.sh | — | — | active | — | — | — |\n'
-    printf '| T2 | 4 | build | The second row. It does the second thing · complexity: standard | — | — | — | 30 | REQ-2 | lib/t2.sh | — | — | pending | — | — | — |\n'
+    printf '| T2 | 4 | build | Fix vs. the old path. It does the second thing · complexity: standard | — | — | — | 30 | REQ-2 | lib/t2.sh | — | — | pending | — | — | — |\n'
     printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
     printf '| AC-1.1 | T2 | discharged | pending | — |\n| AC-1.2 | T2 | pending | pending | — |\n| AC-2.1 | T2 | %s | pending | — |\n' "$1"
     printf '\n## Not Doing\n\n- nothing\n'
@@ -1179,7 +1179,23 @@ expect_eq "OR-0 precondition: the sheet, the sitrep card and the plan's card eac
   "$([ -n "$(or_desc T1)" ] && echo yes)|$([ -n "$(or_goals)" ] && echo yes)|$([ -n "$(or_title T1)" ] && echo yes)"
 expect_eq "OR-1 a title holding a colon is one title on the sheet and on the plan's card" \
   "The release row: 1.27.0|The release row: 1.27.0" "$(or_desc T1)|$(or_title T1)"
-expect_eq "OR-1b …as is a plain one (the extractors read both rows)" "The second row|The second row" "$(or_desc T2)|$(or_title T2)"
+expect_eq "OR-1b …as is one holding an abbreviation, whole on both: a period before a lowercase word ends no title" \
+  "Fix vs. the old path|Fix vs. the old path" "$(or_desc T2)|$(or_title T2)"
+expect_eq "OR-1c …and a title that ends on its period before a capital is cut there on both, the sheet's reading the card's" \
+  "The release row: 1.27.0|The release row: 1.27.0" "$(or_desc T1)|$(or_title T1)"
+# a surface that cuts a title by a rule of its own reads apart from the sheet and the row finds it: the plan's card in a
+# copy whose title reader is the old any-period cut says `Fix vs` while the sheet, still on the one reader, says it whole
+OR_CARDF="$OR_T/payload/scripts/card.sh"; OR_CARD_ORIG="$TMPROOT/or-card.orig"; cp "$OR_CARDF" "$OR_CARD_ORIG"
+sed 's/^    cell) t="\$(plan_task_title "\$t")" ;;$/    cell) t="${t%%. *}" ;;/' "$OR_CARD_ORIG" > "$OR_CARDF"; ! cmp -s "$OR_CARD_ORIG" "$OR_CARDF"; OR_PL=$?
+or_run "$OR_T/hooks"
+expect_eq "OR-1d a plan card planted to cut a title by its own rule reads apart from the sheet: the planted card says Fix vs, the sheet says it whole" \
+  "0|Fix vs|Fix vs. the old path" "$OR_PL|$(or_title T2)|$(or_desc T2)"
+cp "$OR_CARD_ORIG" "$OR_CARDF"
+or_plant 's/^    case "\$t" in \*". "\*) ;; \*) return 1 ;; esac$/    case "$t" in *". "*) PLAN_CUT_REST="${t#*". "}"; PLAN_CUT_HEAD="${t%%". "*}."; return 0 ;; *) return 1 ;; esac/'; OR_PL=$?
+or_run "$OR_T/hooks"
+expect_eq "OR-1e the one reader planted to end a title at any period: the sheet and the plan's card both move with it, still one title" \
+  "0|Fix vs|Fix vs" "$OR_PL|$(or_desc T2)|$(or_title T2)"
+cp "$OR_LIB_ORIG" "$OR_LIBF"; or_run "$BIONIC_HOOKS_DIR"
 
 # the goal's status: the sheet drops the decision of a met goal, and so does the card, whatever the met word reads
 or_plan pending; or_ask; or_run "$BIONIC_HOOKS_DIR"

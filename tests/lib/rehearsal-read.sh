@@ -155,4 +155,43 @@ rt_facts_state() {
     "$(rt_m "$TR_SHEET" tests.suites-run | /usr/bin/grep -qE '^[0-9]+: [0-9]+ green, [0-9]+ red$' && echo yes)|$(rt_m "$TR_SHEET" tests.whole-run | /usr/bin/grep -qE '^(not run yet|green at [0-9a-f]{8}|red at [0-9a-f]{8})$' && echo yes)"
   expect_eq "FA-4 $TR_ST: no task's note counts what it leaves out (FA-1 read the same sheet)" "0" \
     "$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^task: ' | /usr/bin/grep -cE ' note=.* \+[0-9]+$')"
+  rt_bind_state "$TR_ST" "$TR_SHEET"
+}
+
+# rt_bind_state <state> <sheet> -> the card refuses a point that sets a number beside the word of another line. Two
+# swaps are drawn from the sheet itself, each beside its control in the sheet's order. The suite counts, when the
+# sheet's tests.suites-run line (`<n>: <g> green, <r> red`) holds two that differ: `<g> suites green and <r> red`
+# against `<r> suites green and <g> red`. The share and the minutes, which every sheet holds: work.landed's `<p>%` and
+# work.left's `<m> min`, `<p>% landed and <m> min left` against `<m>% landed and <p> min left`, whose <p> no work.left
+# value holds. A wrong card of either kind carries no refused word, so only the card verb's binding stands between it
+# and the person; each arm's counts must differ, or its swap is the same sentence.
+rt_bind_state() {
+  local st="$1" sheet="$2" run g r p m lt j
+  run="$(rt_m "$sheet" tests.suites-run)"
+  g="$(printf '%s\n' "$run" | sed -n 's/^[0-9][0-9]*: \([0-9][0-9]*\) green, [0-9][0-9]* red$/\1/p')"
+  r="$(printf '%s\n' "$run" | sed -n 's/^[0-9][0-9]*: [0-9][0-9]* green, \([0-9][0-9]*\) red$/\1/p')"
+  p="$(rt_m "$sheet" work.landed | sed -n 's/^.*, \([0-9][0-9]*\)%$/\1/p')"
+  lt="$(rt_m "$sheet" work.left)"
+  m="$(printf '%s\n' "$lt" | sed -n 's/^[0-9][0-9]* tasks*, \([0-9][0-9]*\) min$/\1/p')"
+  j="$(rt_judgment "$sheet")"
+  if [ -n "$g" ] && [ -n "$r" ] && [ "$g" != "$r" ]; then
+    rt_bind_point "BD-S $st" "$j" "$g suites green and $r red" "$r suites green and $g red" "$r beside \"green\"" "$g beside \"red\""
+  fi
+  expect_eq "BD-0 $st: the sheet's work.landed share ($p%) is a count of its own: none of work.left's ($lt) holds it, so a trade of the two is a different card" "yes" \
+    "$([ -n "$p" ] && [ -n "$m" ] && [ "$p" != "$m" ] && ! printf '%s\n' "$lt" | /usr/bin/grep -qw "$p" && echo yes)"
+  [ -n "$p" ] && [ -n "$m" ] && [ "$p" != "$m" ] || return 0
+  rt_bind_point "BD-L $st" "$j" "$p% landed and $m min left" "$m% landed and $p min left" "$p beside \"left\""
+}
+# rt_bind_point <label> <judgment> <point in the sheet's order> <the point traded> <fragment of the refusal>... -> the
+# ordered point draws (exit 0) with its words on the card; the traded one is refused (exit 1), stdout empty, naming each
+# fragment
+rt_bind_point() {
+  local lb="$1" j="$2" good="$3" swap="$4" f
+  shift 4
+  rt_poker sitrep card "$RT_PLAN" <<< "$(printf '%s\n' "$j" | sed "s/^point: .*/point: $good./")"
+  expect_eq "$lb-1 the point in the sheet's order draws (exit 0) and the card carries it" "0|1" \
+    "$RT_PRC|$(printf '%s\n' "$RT_OUT" | /usr/bin/grep -c -F "$good")"
+  rt_poker sitrep card "$RT_PLAN" <<< "$(printf '%s\n' "$j" | sed "s/^point: .*/point: $swap./")"
+  expect_eq "$lb-2 the same numbers traded between their words are refused (exit 1) and nothing is drawn" "1|" "$RT_PRC|$RT_OUT"
+  for f in "$@"; do expect_contains "$lb-2b …naming the number beside the word it does not stand by: says $f" "says $f" "$RT_ERR"; done
 }

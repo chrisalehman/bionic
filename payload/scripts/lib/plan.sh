@@ -364,15 +364,34 @@ plan_goal_sheet() {
       print "G\t" fv(b, "name", "status") "\t" fv(b, "status", "measure") "\t" GR_K "\t" GR_N "\t" GR_W "\t" GR_O "\t" GR_MORE }' "$1"
 }
 
-# plan_task_title <Tasks cell> -> the task's title, on stdout: the cell up to its first `. `, else up to its first
-# ` · ` where a tag begins, a closing `.` dropped, trimmed; a cell that would leave nothing keeps its whole trimmed
-# text. The one reading of a title: the cards and the sitrep's sheet both call it, so a task is never named two ways.
+# WHERE A TITLE'S SENTENCE ENDS: at a period followed by a space and an uppercase letter, or by the end of the text.
+# `vs. the` and `e.g. a` are followed by a lowercase word, so an abbreviation never ends one, and the rule keeps no
+# word list. plan_cut <text> sets PLAN_CUT_HEAD (the text through that period) and PLAN_CUT_REST (what follows it) and
+# returns 0 when the text has such a period; otherwise it returns 1 with the whole text in PLAN_CUT_HEAD. The card's
+# awk twin for an untagged decision bullet (card.sh `titlesent`) reads the same rule.
+plan_cut() {
+  local t="${1:-}" head=""
+  PLAN_CUT_HEAD="$t"; PLAN_CUT_REST=""
+  while :; do
+    case "$t" in *". "*) ;; *) return 1 ;; esac
+    head="${head}${t%%". "*}."
+    t="${t#*". "}"
+    case "$t" in
+      ''|[[:upper:]]*) PLAN_CUT_HEAD="$head"; PLAN_CUT_REST="$t"; return 0 ;;
+    esac
+    head="${head} "
+  done
+}
+
+# plan_task_title <Tasks cell> -> the task's title, on stdout: the cell up to the period that ends its first sentence
+# (plan_cut), else up to its first ` · ` where a tag begins, a closing `.` dropped, trimmed; a cell that would leave
+# nothing keeps its whole trimmed text. The one reading of a title: the cards and the sitrep's sheet both call it, so
+# a task is never named two ways.
 plan_task_title() {
   local t="${1:-}" w
-  case "$t" in
-    *". "*) t="${t%%. *}" ;;
-    *" · "*) t="${t%%" · "*}" ;;
-  esac
+  if plan_cut "$t"; then t="$PLAN_CUT_HEAD"
+  else case "$t" in *" · "*) t="${t%%" · "*}" ;; esac
+  fi
   t="${t%.}"
   t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
   if [ -z "$t" ]; then w="${1:-}"; w="${w#"${w%%[![:space:]]*}"}"; t="${w%"${w##*[![:space:]]}"}"; fi

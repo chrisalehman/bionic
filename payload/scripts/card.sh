@@ -714,7 +714,7 @@ function clean(s) { gsub(/`/, "", s); gsub(/\t/, " ", s); return trim(s) }
 # and the artifact path is the depth (steps/1.md: "never a paragraph").
 function firstsent(s) { if (match(s, /\. /)) return substr(s, 1, RSTART); return s }
 # A TITLE\047S sentence ends at a period followed by a space and an uppercase letter or the end of the cell, so
-# `vs. the` and `e.g. a` never end it and no word list is kept; the bash side (_card_cut) reads the same rule. The
+# `vs. the` and `e.g. a` never end it and no word list is kept; the bash side (lib/plan.sh plan_cut) reads the same rule. The
 # concept sentence that follows a title stays firstsent: the text after it may open on a backtick or a bracket.
 function titlesent(s,   r, off, p, c) {
   r = s; off = 0
@@ -1110,7 +1110,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
 # approves, and an ellipsis is the same cut with a mark on it.
 #
 # THE TITLE OF EACH KIND OF ITEM. A Tasks cell: the text before the period that ends its first sentence
-# (a period followed by a space and a capital, `_card_cut`), or all of it when it ends on its one period. A Not Doing item: the text before its first `: `, or all of it. A
+# (a period followed by a space and a capital, lib/plan.sh `plan_task_title`), or all of it when it ends on its one period. A Not Doing item: the text before its first `: `, or all of it. A
 # requirement heading and a decision are titled by their heading, so their text is the title as
 # the parse hands it over.
 #
@@ -1121,36 +1121,10 @@ CARD_TITLE_CAP=30
 # The Eval design's Approach cell is one line on the card, so its cap is a width, in columns (see the eval arm).
 CARD_APPROACH_CAP=60
 
-# WHERE A SENTENCE ENDS: at a period followed by a space and an uppercase letter, or by the end of the text. `vs. the`
-# and `e.g. a` are followed by a lowercase word, so an abbreviation never ends one, and the rule keeps no word list.
-# Sets CARD_CUT_HEAD (the text through that period) and CARD_CUT_REST (what follows it) and returns 0 when the text has
-# such a period; otherwise returns 1 with the whole text in CARD_CUT_HEAD. The awk reader's firstsent reads the same rule.
-_card_cut() {  # <text>
-  local t="${1:-}" head=""
-  CARD_CUT_HEAD="$t"; CARD_CUT_REST=""
-  while :; do
-    case "$t" in *". "*) ;; *) return 1 ;; esac
-    head="${head}${t%%". "*}."
-    t="${t#*". "}"
-    case "$t" in
-      ''|[[:upper:]]*) CARD_CUT_HEAD="$head"; CARD_CUT_REST="$t"; return 0 ;;
-    esac
-    head="${head} "
-  done
-}
-
 _card_title() {  # <cell|item|heading> <text> -> the title, on stdout
-  local t="${2:-}" w
+  local t="${2:-}"
   case "$1" in
-    cell)
-      # The cell up to the period that ends its first sentence, else up to the first ` · ` where a tag begins, a
-      # closing `.` dropped, trimmed; a cell that would leave nothing keeps its whole trimmed text.
-      if _card_cut "$t"; then t="$CARD_CUT_HEAD"
-      else case "$t" in *" · "*) t="${t%%" · "*}" ;; esac
-      fi
-      t="${t%.}"
-      t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
-      if [ -z "$t" ]; then w="${2:-}"; w="${w#"${w%%[![:space:]]*}"}"; t="${w%"${w##*[![:space:]]}"}"; fi ;;
+    cell) t="$(plan_task_title "$t")" ;;
     item)
       case "$t" in *": "*) t="${t%%: *}" ;; esac ;;
   esac
@@ -1159,8 +1133,8 @@ _card_title() {  # <cell|item|heading> <text> -> the title, on stdout
 
 _card_cell_sentence() {  # <Tasks cell> -> its sentence, on stdout, or nothing
   local t="${1:-}"
-  _card_cut "$t" || return 0
-  t=" $CARD_CUT_REST"
+  plan_cut "$t" || return 0
+  t=" $PLAN_CUT_REST"
   case "$t" in *" · "*) t="${t%%" · "*}" ;; esac
   case "$t" in *". "*) t="${t%%". "*}." ;; esac
   t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
