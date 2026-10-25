@@ -763,7 +763,10 @@ RV_CHECK="$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^reviews: ')"
 expect_contains "RV-2 check says run would render the part on the working branch" "run would render" "$RV_CHECK"
 expect_eq "RV-3 …and writes nothing: the branch is where it was" "$RV_H2" "$(rv_tip "$PRV")"
 BIONIC_GATE_DIR="$LAND_GATE" run_close "$PRV" run
-expect_eq "RV-4 run closes the plan (rc 0)" "0" "$CO_RC"
+# The part is published before the merge readback, so the readback reads the branch the part is on. The fixture's release
+# merge predates the part, so main does not hold the published tip and the run holds there (rc 2) until the person merges it.
+expect_eq "RV-4 run publishes the part, then holds at the merge readback: the branch it moved to is not merged (rc 2)" "2|yes" \
+  "$CO_RC|$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -q 'is not reachable from' && echo yes)"
 RV_TIP="$(rv_tip "$PRV")"
 RV_WANT="$(
   printf '### The reviews\n\nRendered from the plan'"'"'s review and waiver lines, in the order they were registered.\n\n'
@@ -777,7 +780,7 @@ RV
   printf -- '- %s review: waived at %.8s by Pat Doe, 2026-10-05T09:30:00Z: "waive — the fix landed at %s"\n\n' "$RV_Q1" "$RV_H2" "$RV_H2"
 )"
 RV_GOT="$(fixture_git "$PRV" show "$RV_TIP:CHANGELOG.md" 2>/dev/null)"
-expect_eq "RV-5 the part on the branch is the plan's review and waiver lines, byte for byte" "$RV_WANT" \
+expect_eq "RV-5 the part published before the readback held is the plan's review and waiver lines, byte for byte" "$RV_WANT" \
   "$(printf '%s\n' "$RV_GOT" | rv_part /dev/stdin 9.9.9)"
 expect_absent "RV-6 …and the hand-written line is gone from it" "a hand-written line the render replaces" \
   "$(printf '%s\n' "$RV_GOT" | rv_part /dev/stdin 9.9.9)"

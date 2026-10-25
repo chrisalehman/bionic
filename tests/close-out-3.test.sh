@@ -646,4 +646,83 @@ run_close "$PREFF" check
 expect_absent "REF-5b A-orch-16 close-out reads the branch through the one reader: a frontmatter key is not refused as none" \
   "names no working-branch" "$CO_OUT"
 
+# ============================================================
+section "§ORDER — the integrate row publishes the reviews part before the push and the pull request (REQ-15 AC-15.2; the integrate row's own part)"
+# ============================================================
+# At pr dealing close-out merges nothing and opens nothing: it records, in the continuation's `## Pull request`, the
+# acts the integrate row does, in the order it does them: `reviews-part <row>`, then the push, then `gh pr create`. The part
+# is first because the push and the pull request carry the branch's tip, and a part rendered after them is on no branch
+# the pull request names.
+# FIXTURE FIDELITY: mk_task_pr_fixture's task-scale plan (integrate cell `pr`), gaining the integrate row a task plan
+# carries at Step 8 (landed, so the rows-landed act has nothing to bind a session for); the continuation is the one the run
+# writes.
+# fails-when: the continuation names the push or `gh pr create` before `reviews-part <row>`, omits the verb, names another
+#   row, or the section stops naming `gh pr create`.
+ord_pos() {  # <file> <needle> -> the 1-based line number of the needle's first line in the `## Pull request` section, or empty
+  awk -v n="$2" '/^## / { s = ($0 == "## Pull request"); next } s && index($0, n) { print NR; exit }' "$1"
+}
+PPO="$(mk_task_pr_fixture order-pr "fix/x")"
+awk '{ print } /^\| T1 \|/ { print "| T3 | 8 | integrate | open the pull request | orchestrator | — | 10 | AC-1 | none | landed |" }' \
+  "$PPO/$PLAN_REL" > "$PPO/$PLAN_REL.o" && mv "$PPO/$PLAN_REL.o" "$PPO/$PLAN_REL"
+expect_contains "ORDER-0 precondition: the plan carries the integrate row the section names" "| T3 | 8 | integrate |" "$(cat "$PPO/$PLAN_REL")"
+run_close "$PPO" run
+expect_eq "ORDER-1 the task-scale run closes" "0" "$CO_RC"
+OR_PART="$(ord_pos "$PPO/$CONT_REL" 'session-poker.sh reviews-part T3')"
+OR_PUSH="$(ord_pos "$PPO/$CONT_REL" 'git push')"
+OR_PR="$(ord_pos "$PPO/$CONT_REL" 'gh pr create --base main --head fix/x')"
+expect_nonempty "ORDER-1b precondition: the section names the part, the push and the pull request (positions $OR_PART $OR_PUSH $OR_PR)" "$OR_PART$OR_PUSH$OR_PR"
+expect_eq "ORDER-2 the continuation records reviews-part <integrate row> first, then the push, then gh pr create" "yes" \
+  "$([ -n "$OR_PART" ] && [ -n "$OR_PUSH" ] && [ -n "$OR_PR" ] && [ "$OR_PART" -lt "$OR_PUSH" ] && [ "$OR_PUSH" -lt "$OR_PR" ] && echo yes || echo no)"
+expect_contains "ORDER-3 the push names the working branch" "git push -u origin fix/x" "$(cat "$PPO/$CONT_REL")"
+# the plan with no integrate row names no verb to run, and still records the push before the pull request
+PPN="$(mk_task_pr_fixture order-pr-norow "fix/x")"
+run_close "$PPN" run
+expect_absent "ORDER-4 a plan with no integrate row names no reviews-part" "reviews-part" "$(cat "$PPN/$CONT_REL")"
+expect_eq "ORDER-4b …and still records the push before gh pr create" "yes" \
+  "$(a="$(ord_pos "$PPN/$CONT_REL" 'git push')"; b="$(ord_pos "$PPN/$CONT_REL" 'gh pr create')"; [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && echo yes || echo no)"
+
+# AT MERGE DEALING close-out merges nothing either: its merge act is a readback that the working branch is reachable from the
+# integration branch, and the person's merge came first. When close-out itself renders the part (no integrate row did), it
+# publishes it BEFORE that readback, so the readback reads the branch the part is on, and holds until that tip is merged.
+# FIXTURE FIDELITY: mk_fixture's wave-scale plan (integrate cell `merge`) at Step 8 with the release entry committed on the
+# working branch and merged into main, as the release row's landing and the person's merge leave it; the part is not yet
+# listed, as a run with no integrate row leaves it.
+# fails-when: the reviews line comes after the merge line; the branch is not at the part's commit when the readback reads it;
+#   the run closes with the part on no branch main holds; or the second run, after the person merges the published tip,
+#   renders a second part.
+ord_fixture() {  # <name> -> a wave-scale project at Step 8 whose release entry has no ### The reviews part, merged into main
+  local p wt
+  p="$(mk_fixture "$1")" && advance_to "$p" 8 || return 1
+  wt="$p-wave"
+  awk '{ print } /^adrs: none$/ && !d { print "release: 9.9.9"; d = 1 }' "$p/$PLAN_REL" > "$p/$PLAN_REL.r" \
+    && mv "$p/$PLAN_REL.r" "$p/$PLAN_REL"
+  printf '# Changelog\n\n## 9.9.9 — 2026-10-22\n\nThe prose a person wrote.\n\n### Known limits\n\n- one limit\n' > "$wt/CHANGELOG.md"
+  fixture_git "$wt" add CHANGELOG.md && fixture_git "$wt" commit -q -m "the release entry" >/dev/null 2>&1 \
+    && fixture_git "$p" merge -q --no-ff -m "merge the release" wave/01-fixture >/dev/null 2>&1 || return 1
+  printf '%s\n' "$p"
+}
+PMO="$(ord_fixture order-merge)"
+plant_facts "$PMO"
+OM_H="$(fixture_git "$PMO" rev-parse --verify -q refs/heads/wave/01-fixture)"
+expect_eq "ORDER-5 precondition: the integration branch holds the working branch's tip, as the person's merge left it" "yes" \
+  "$(fixture_git "$PMO" merge-base --is-ancestor wave/01-fixture main && echo yes || echo no)"
+run_close "$PMO" run
+OM_TIP="$(fixture_git "$PMO" rev-parse --verify -q refs/heads/wave/01-fixture)"
+expect_eq "ORDER-6 close-out published a part: the working branch moved past the tip the person merged" "yes" \
+  "$([ -n "$OM_TIP" ] && [ "$OM_TIP" != "$OM_H" ] && fixture_git "$PMO" log -1 --format=%an "$OM_TIP" | /usr/bin/grep -qx 'bionic close-out' && echo yes || echo no)"
+OM_ACT="$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -c '^merge: ')"
+expect_eq "ORDER-7 …so the readback, read on that branch, held: the run did not close, and its merge act never ran" "yes|0" \
+  "$([ "$CO_RC" -ne 0 ] && echo yes)|$OM_ACT"
+expect_contains "ORDER-7b …saying the working branch is not merged" "is not reachable from" "$CO_OUT"
+expect_contains "ORDER-7c …after the reviews line named the published commit" "reviews: " "$CO_OUT"
+expect_contains "ORDER-7d …which names the commit the branch is at" "$(printf '%.12s' "$OM_TIP")" "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^reviews: ')"
+expect_eq "ORDER-8 main does not hold the part until the published tip is merged" "no" \
+  "$(fixture_git "$PMO" show main:CHANGELOG.md 2>/dev/null | /usr/bin/grep -q '^### The reviews' && echo yes || echo no)"
+fixture_git "$PMO" merge -q --no-ff -m "merge the published part" wave/01-fixture >/dev/null 2>&1
+run_close "$PMO" run
+expect_eq "ORDER-9 after the person merges the published tip, the run closes and finds the part already listed" "0|yes" \
+  "$CO_RC|$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^reviews: ' | /usr/bin/grep -q 'already lists' && echo yes)"
+expect_eq "ORDER-9b …and rendered no second part: the branch is where the first run left it" "$OM_TIP" \
+  "$(fixture_git "$PMO" rev-parse --verify -q refs/heads/wave/01-fixture)"
+
 finish
