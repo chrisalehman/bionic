@@ -2720,7 +2720,14 @@ dp_brief_sink() {  # finding <fact> <fix> <detail> | warn <line>
     warn)    warn "$2" ;;
   esac
 }
-brief_validate_fields "$LIFTED" "$DP_SUBAGENT" "$BIONIC_ROOT" dp_brief_sink || :
+# THE SUITES THAT EXIST ARE THIS COLLECTOR'S FACT, LISTED ONCE. The wall judges a `Suites:` entry against the
+# set it is handed and reaches for no directory (the freeze); a root with no suite under tests/ hands an empty
+# set, which the wall reads as nothing to judge.
+DP_SUITES_EXIST=""
+for _dp_t in "$BIONIC_ROOT"/tests/*.test.sh; do
+  [ -f "$_dp_t" ] && DP_SUITES_EXIST="${DP_SUITES_EXIST:+$DP_SUITES_EXIST }${_dp_t##*/}"
+done
+brief_validate_fields "$LIFTED" "$DP_SUBAGENT" "$BIONIC_ROOT" dp_brief_sink "$DP_SUITES_EXIST" || :
 SUITES_ALLOWED="$BRIEF_SUITES_ALLOWED"
 SUITES_SOURCE="$BRIEF_SUITES_SOURCE"
 

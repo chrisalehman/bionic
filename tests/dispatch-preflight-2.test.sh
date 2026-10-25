@@ -718,4 +718,65 @@ expect_contains "…and the reason the append gave" "Permission denied" "$GATE_V
 expect_status "no roster file was left behind" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
 
+section "§EXISTS — a Suites: entry that names no file under tests/ is refused by the wall, from the set the collector lists"
+#
+# A WELL-FORMED NAME IS NOT A SUITE. `Suites: nosuch.test.sh` passed the lift on its shape alone, was recorded
+# as the writer's budget, and the writer then ran nothing the wall could name. The collector (the hook) lists
+# `tests/*.test.sh` once and hands the wall the set; the wall judges membership from that set and reaches for
+# nothing (the freeze), so a project with no suites under tests/ hands an empty set and the wall stands aside.
+# FIXTURE FIDELITY: the real hook over a real repository whose tests/ holds one suite; the wall alone is
+# driven second, with a root that does not exist, to show the verdict is the set's and the disk's is never asked.
+ex_brief() {  # <Suites: value> [<extra Files: path>] -> BRIEF_FULL with that Suites: line
+  local b="${BRIEF_FULL%Suites: *}Suites: $1"
+  [ -z "${2:-}" ] || b="${b}"$'\n'"Files: $2"
+  printf '%s' "$b"
+}
+EX_REPO=$(make_repo r23ex yes)
+mkdir -p "$EX_REPO/tests"; printf '#!/bin/bash\nexit 0\n' > "$EX_REPO/tests/real.test.sh"
+write_attestation "$EX_REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$EX_REPO" "$(ex_brief real.test.sh)" "w99-ex-real")"
+expect_status "EX-1 a Suites: entry that is a file under tests/ passes" "0" "$GATE_ST"
+expect_absent "EX-1 …and prints no refusal" "dispatch refused" "$GATE_ERR"
+run_gate "$(mk_agent_payload "$SID_A" "$EX_REPO" "$(ex_brief nosuch.test.sh)" "w99-ex-none")"
+expect_eq "EX-2 a well-formed Suites: entry with no file is REFUSED" "deny" "$GATE_VERDICT"
+expect_contains "EX-2 …naming the entry" "nosuch.test.sh" "$GATE_ERR"
+expect_contains "EX-2 …and the label it sits under" "Suites:" "$GATE_ERR"
+run_gate "$(mk_agent_payload "$SID_A" "$EX_REPO" "$(ex_brief tests/nosuch.test.sh)" "w99-ex-path")"
+expect_eq "EX-2b the same entry spelled as a path is refused too" "deny" "$GATE_VERDICT"
+run_gate "$(mk_agent_payload "$SID_A" "$EX_REPO" "$(ex_brief 'real.test.sh, nosuch.test.sh')" "w99-ex-mixed")"
+expect_eq "EX-2c a set holding one real suite and one missing is refused" "deny" "$GATE_VERDICT"
+expect_contains "EX-2c …naming only the missing one" "nosuch.test.sh" "$GATE_ERR"
+expect_absent "EX-2c …and not the real one" "real.test.sh" "$GATE_ERR"
+run_gate "$(mk_agent_payload "$SID_A" "$EX_REPO" "$(ex_brief newone.test.sh tests/newone.test.sh)" "w99-ex-new")"
+expect_status "EX-3 a suite the brief's own Files: creates is a suite the row will hold" "0" "$GATE_ST"
+run_gate "$(mk_agent_payload "$SID_A" "$EX_REPO" "$(ex_brief none)" "w99-ex-waiver")"
+expect_status "EX-3b the waiver none is no entry" "0" "$GATE_ST"
+run_gate "$(mk_agent_payload "$SID_A" "$EX_REPO" "$(ex_brief tests/run.sh)" "w99-ex-runner")"
+expect_status "EX-3c a path-qualified run.sh is the runner, not a suite file the set must hold" "0" "$GATE_ST"
+EX_BARE=$(make_repo r23ex2 yes)
+write_attestation "$EX_BARE" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$EX_BARE" "$(ex_brief nosuch.test.sh)" "w99-ex-bare")"
+expect_status "EX-4 a repository with no suite under tests/ hands an empty set, and the wall stands aside" "0" "$GATE_ST"
+
+# ---- the wall alone: the set it is handed is the whole of its evidence ----
+EX_WALL="$BIONIC_HOOKS_DIR/../payload/scripts/lib/brief.sh"
+ex_wall() {  # <suites value> <set or -> -> one line per finding fact; the root is a directory that is not there
+  bash -c '. "$1" >/dev/null 2>&1 || exit 127
+    sink() { [ "$1" = finding ] && printf "%s\n" "$2"; return 0; }
+    L="$(lift_contract_fields "Files: tests/x.sh
+Suites: $2" implementor)"
+    if [ "$3" = - ]; then brief_validate_fields "$L" implementor /no/such/root sink
+    else brief_validate_fields "$L" implementor /no/such/root sink "$3"; fi
+    echo "rc=$?"' _ "$EX_WALL" "$1" "$2" 2>&1
+}
+expect_contains "EX-5 the wall refuses an entry outside the set it is handed, naming it" "nosuch.test.sh" "$(ex_wall nosuch.test.sh 'a.test.sh b.test.sh')"
+expect_contains "EX-5 …with a finding rc" "rc=1" "$(ex_wall nosuch.test.sh 'a.test.sh b.test.sh')"
+expect_eq "EX-5b an entry inside the set passes, over a root that does not exist" "rc=0" "$(ex_wall b.test.sh 'a.test.sh b.test.sh')"
+expect_eq "EX-5c handed no set, the wall judges no membership" "rc=0" "$(ex_wall nosuch.test.sh -)"
+expect_eq "EX-5d handed an empty set, the wall judges no membership" "rc=0" "$(ex_wall nosuch.test.sh '')"
+EX_BODY="$(awk '/^brief_validate_fields\(\) \{/ { on = 1 } on { print } on && /^}/ { exit }' "$EX_WALL")"
+expect_nonempty "EX-6 precondition: the wall's body is read" "$EX_BODY"
+expect_eq "EX-6 the wall's body reads no file and lists no directory" "0" \
+  "$(printf '%s\n' "$EX_BODY" | /usr/bin/grep -v '^[[:space:]]*#' | /usr/bin/grep -c -E '(^|[^a-z_])(ls|find|stat|cat)[[:space:]]|\[ -[fdrse] ' || true)"
+
 finish

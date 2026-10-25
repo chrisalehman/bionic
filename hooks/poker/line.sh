@@ -278,6 +278,11 @@ row_landed_suites() {
   case "$RL_VLOG" in
     *'|'*|*$'\n'*|*$'\r'*) die "REFUSED — row-landed --by-hand: the --log path holds a | or a line break, which no record line can hold; the plan is unchanged."; exit 1 ;;
   esac
+  # The branch and the tree ride on the same ready line, each a field of its own, so a value that breaks the line is
+  # refused as the log path is.
+  case "${RL_BRANCH-}${RL_TREE-}" in
+    *'|'*|*$'\n'*|*$'\r'*) die "REFUSED — row-landed --by-hand: --branch and --tree each fill a field of the ready line, and a | or a line break cannot be held in one; the plan is unchanged."; exit 1 ;;
+  esac
   if ! g="$(git -C "$PV_REPO" rev-parse --verify -q "${RL_GREEN}^{commit}" 2>/dev/null)" \
      || ! git -C "$PV_REPO" merge-base --is-ancestor "$g" "$RL_COMMIT" 2>/dev/null; then
     die "REFUSED — row-landed --by-hand: --green-at $(clean "$RL_GREEN") is no commit that $RL_COMMIT holds, so the suites' green runs say nothing of the landing; name the row's own head or a commit under it. The plan is unchanged."
@@ -970,7 +975,7 @@ hand_holds_verb() {
         # (the last one before the published line), and its green verdicts, both through the writers `land --by-hand`
         # uses (lib/line.sh `_line_hand_ready`, `_line_hand_verdicts`).
         if [ -n "$RL_SUITES" ]; then
-          if ! _line_hand_ready "$PV_PLAN" "$PV_ID" "$RL_COMMIT" - - "$RL_SUITES" >/dev/null \
+          if ! _line_hand_ready "$PV_PLAN" "$PV_ID" "$RL_COMMIT" "${RL_BRANCH:--}" "${RL_TREE:--}" "$RL_SUITES" >/dev/null \
              || ! _line_hand_verdicts "$PV_PLAN" "$PV_ID" "$RL_GREEN" "$RL_SUITES" "$RL_VLOG"; then
             die "REFUSED — the plan records $PV_ID landed by hand, but the landing record $RL_REC cannot take the suites' ready and verdict lines${LINE_UNWRITTEN:+ (the verdict for $LINE_UNWRITTEN)}; make it writable and run the same row-landed again."
             exit 1
