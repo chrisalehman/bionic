@@ -184,6 +184,19 @@ close's measure are new capability. `canonical_sdlc_version` stays 14.
   `rendered.sha256` refreshed, and ADR-072 and ADR-073. T22 opens the pull request on the release card's word, and T23 closes
   the run and reads the hand-holds measure last.
 
+### Known limits
+
+Rendered from the plan's deferred findings, each its stated sentence, in the order they were registered.
+
+- No test pins that the sitrep's reviews count agrees with the release card on a plan the judge can deal; the two surfaces share one reader and no agreement row.
+- A row proved only at its landing can be red at the settled head where a later row changed its code; the whole regression finds it and a fix row closes it.
+- The hand-holds window starts at the newest build landing, so a fix row landing after the review moves the start past every act before it; the line names the start row but not what fell out.
+- The title rule ends a title only at a period before a capital, so a plan written under the old rule can read a whole cell as its title, and the Step-3 card refuses such a title by length, naming it.
+- A merge approval recorded at an older head is never refused: the Step-8 gate and close-out read the release approval's head alone.
+- The sitrep's reviews count counts each question once as the judge reads it at the head, not each reading, on any plan the judge can deal.
+- close-out's reviews text in the continuation takes each question's last recorded result, not the one coverage reader, so a question a fix row covered can read failed there.
+- Four requirements (REQ-2, REQ-7, REQ-9 and REQ-14) were built, tested and confirmed with no design decision naming them; the gap is in the record of why, not in what was built, and the next spec names a decision per requirement or declares in so many words that none is needed (D30).
+
 ### The landing numbers
 
 `landing-report --rows` at 262147ad77b81ce69cab7a22637796bd8243f286 on 2026-10-25T05:55:04Z:
