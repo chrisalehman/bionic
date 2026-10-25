@@ -559,6 +559,9 @@ P12c=$(make_env 3600s)
 PLAN12cA="$(write_open_plan "$P12c" alpha)"
 PLAN12cB="$(write_open_plan "$P12c" beta)"
 roster_rows "$P12c/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-ZETA"
+# The bound run is wave-scale: this row pins the re-arm sequence for a run that has a Patrol, and a task-scale bound
+# run prints none (§14a pins that one, and the pair).
+sed 's/^scale: task$/scale: wave/' "$PLAN12cA" > "$PLAN12cA.tmp" && mv "$PLAN12cA.tmp" "$PLAN12cA"
 plant_bound "$P12c" "$CUR_SID" "$PLAN12cA"
 S12c_BEFORE=$(snap "$P12c")
 OUT=$(drive "$P12c" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
@@ -693,15 +696,41 @@ has "14a.2 the bound line names the docs-root-relative plan and its current step
 # tells the model to read at that step. The count is still pinned exactly, not loosened to
 # "at least one" — a third line here would be predecessor state this fixture has none of,
 # which is what 14a.3 has always been guarding.
-# THREE SINCE wave-21 T2 (REQ-2, AC-2.1): the third is the arm line every engaged start now
-# prints. Still pinned exactly — a fourth line would be predecessor state this fixture has none
-# of, which is what this row has always guarded.
-eq  "14a.3 exactly three lines — the bound line, its step-file pointer, the arm line; no predecessor state" \
-  "3" "$(printf '%s\n' "$OUT" | grep -c .)"
-has "14a.3c …the third is the arm line" "re-arm: CronList" "$OUT"
+# TWO AGAIN AT TASK SCALE: the fixture's plan is `scale: task`, whose Patrol cell (lib/scale.sh) is `no`, so a
+# bound task-scale run has nothing to re-arm and the hook prints no arm line. Pinned exactly, as before: a third
+# line would be predecessor state this fixture has none of, or the arm line the scale says nobody owes.
+eq  "14a.3 exactly two lines — the bound line and its step-file pointer; no arm line, no predecessor state" \
+  "2" "$(printf '%s\n' "$OUT" | grep -c .)"
+hasnt "14a.3c …and no arm line: a task-scale run has no Patrol to re-arm" "re-arm: CronList" "$OUT"
 has "14a.3b the second line points at the step file for the plan's own current step" \
   "skills/canonical-sdlc/steps/3.md" "$OUT"
 eq  "14a.4 wrote nothing" "$S14_BEFORE" "$(snap "$P14")"
+
+# THE PAIR, so the absence above is the scale's and not the fixture's: the same bound run at `scale: wave` still
+# prints the arm line as the third line.
+P14W=$(make_env 1s)
+PLAN14W="$(write_open_plan "$P14W")"
+sed 's/^scale: task$/scale: wave/' "$PLAN14W" > "$PLAN14W.tmp" && mv "$PLAN14W.tmp" "$PLAN14W"
+plant_bound "$P14W" "$CUR_SID" "$PLAN14W"
+OUT=$(drive "$P14W" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq  "14a.5 the pair: a bound wave-scale run prints three lines" "3" "$(printf '%s\n' "$OUT" | grep -c .)"
+has "14a.5b …the third is the arm line, as before" "re-arm: CronList" "$OUT"
+
+# `arm` AT TASK SCALE WRITES NO STAMP AND SAYS SO IN ONE LINE. The bound task-scale project above is driven through
+# the real poker; the wave-scale project beside it is the positive on the same extractor (the stamp file), so the
+# empty readback is the scale's answer.
+P14_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+arm14() {  # <project> -> stdout+stderr of `arm` for CUR_SID there; rc in ARM14_RC
+  ARM14_OUT="$( cd "$1" && CLAUDE_CODE_SESSION_ID="$CUR_SID" bash "$P14_POKER" arm 2>&1 )"; ARM14_RC=$?
+}
+arm14 "$P14W"
+eq  "14a.6 the pair: arm at wave scale exits 0" "0" "$ARM14_RC"
+eq  "14a.6b …and writes the Patrol stamp" "1" "$(find "$P14W/.bionic/tmp" -name "patrol-$CUR_SID.state" | grep -c .)"
+arm14 "$P14"
+eq  "14a.7 arm at task scale exits 0" "0" "$ARM14_RC"
+eq  "14a.7b …writes no Patrol stamp" "0" "$(find "$P14/.bionic/tmp" -name "patrol-*.state" | grep -c .)"
+has "14a.7c …and says why in one line" "no Patrol" "$ARM14_OUT"
+eq  "14a.7d …that one line" "1" "$(printf '%s\n' "$ARM14_OUT" | grep -c .)"
 
 echo ""
 echo "--- 14b: the same fixture on resume and on compact: the bound line fires on every source ---"

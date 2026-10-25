@@ -16,12 +16,14 @@
 #
 # THE COLUMNS AND THEIR READERS:
 #   patrol      `yes` arms the Patrol at engagement and holds the dispatch wall's arming check;
-#               `no` arms nothing and the check does not apply (hooks/engage.sh,
-#               hooks/dispatch-preflight.sh).
+#               `no` arms nothing and the check does not apply. Read through `scale_patrol <plan>`
+#               below, by arm, the session-start text, the tick, the stop wall, engagement, resume
+#               and handoff, and the dispatch wall.
 #   rigor       the default review rigor. A flag, the intent, the project or the epic may raise
 #               it (skills/canonical-sdlc/SKILL.md, the Step 0 derivation).
 #   writers     the writer cap when no person wrote a `parallel-budget:` line; a person's line
-#               overrides it. `uncapped` caps nothing (hooks/dispatch-preflight.sh, the budget wall).
+#               overrides it. `uncapped` caps nothing. Read by `fill_cap` (lib/fill.sh) alone, which
+#               the tick's FILL, the stop wall and the dispatch wall's budget check all ask.
 #   regression  the Step 0 regression default (payload/scripts/card.sh `regression <scale>`).
 #   branch      the working branch's shape: `any`, or a pattern whose `<NN>` is the run's number
 #               and `<slug>` its name (payload/scripts/close-out.sh, the shape refusal and the
@@ -69,6 +71,18 @@ scale_cell() {
   fi
   row="$(printf '%s\n' "$SCALE_TABLE" | awk -F'|' -v s="$scale" '$1 == s')"
   printf '%s\n' "$row" | awk -F'|' -v n="$n" '{ print $n }'
+}
+
+# scale_patrol <plan> -> `no` when the plan's scale has no Patrol (its patrol cell is `no`), else `yes`; exit 0 either
+# way. A plan with no readable `scale:`, a scale the table does not hold, or no plan reads `yes`: an unreadable scale
+# never silences a Patrol that may be needed. This is the one place a plan's scale is turned into "does it have a
+# Patrol", so every reader that asks the question gets the same answer for the same plan.
+scale_patrol() {  # <plan>
+  local cell
+  declare -F plan_frontmatter_get >/dev/null 2>&1 || { printf 'yes\n'; return 0; }
+  cell="$(scale_cell "$(plan_frontmatter_get "${1:-}" scale 2>/dev/null)" patrol 2>/dev/null)" || cell=yes
+  if [ "$cell" = no ]; then printf 'no\n'; else printf 'yes\n'; fi
+  return 0
 }
 
 # scale_branch_number <scale> <branch> -> what the branch pattern's `<NN>` matched on <branch>,

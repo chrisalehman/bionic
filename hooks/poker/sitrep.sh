@@ -2090,9 +2090,8 @@ sitrep_tick_line() {
       if [ -n "$HO_STAMP" ] && [ -f "$HO_STAMP" ] && [ ! -L "$HO_STAMP" ]; then
         HO_PATROL="armed — stamp $(( ( $(now_epoch) - $(file_mtime "$HO_STAMP") ) / 60 ))m old"
       fi
-      { declare -F scale_cell >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
-      if declare -F scale_cell >/dev/null 2>&1 \
-         && [ "$(scale_cell "$(plan_frontmatter_get "$PV_PLAN" scale 2>/dev/null)" patrol 2>/dev/null)" = no ]; then
+      { declare -F scale_patrol >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
+      if declare -F scale_patrol >/dev/null 2>&1 && [ "$(scale_patrol "$PV_PLAN")" = no ]; then
         HO_PATROL="none — a task-scale run has no Patrol"
       fi
       HO_LEDGER="$(docs_root "$HO_ROOT")/record/$HO_SLUG/design-ledger.md"
@@ -2563,12 +2562,11 @@ sitrep_tick_line() {
       fi
       RS_ENGAGED=now
     fi
-    # THE PATROL IS THE SCALE'S CELL (lib/scale.sh): a scale whose profile has none, the task row, is never armed here,
+    # THE PATROL IS THE SCALE'S (`scale_patrol`, lib/scale.sh): a scale whose profile has none, the task row, is never armed here,
     # and a stamp an unbound engagement armed before this binding is removed. A plan with no `scale:` arms as before.
     RS_PATROL=yes
-    { declare -F scale_cell >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
-    if declare -F scale_cell >/dev/null 2>&1 \
-       && [ "$(scale_cell "$(plan_frontmatter_get "$RS_PLAN" scale 2>/dev/null)" patrol 2>/dev/null)" = no ]; then
+    { declare -F scale_patrol >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
+    if declare -F scale_patrol >/dev/null 2>&1 && [ "$(scale_patrol "$RS_PLAN")" = no ]; then
       RS_PATROL=no
     fi
     rs_step 0 bind "$RS_PLAN"
