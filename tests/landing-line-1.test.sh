@@ -1003,7 +1003,7 @@ ww_poke() {  # <root> <verb> [args…] -> the poker run as the world's session, 
       bash "$BIONIC_HOOKS_DIR/session-poker.sh" "$@" 2>&1 )
 }
 # A matrix whose n-th row carries the n-th waiver line in its block. The blocks are matrix-render's, written from the
-# plan's own `### REQ-1` criteria, so each header is the `AC-1.<n>: <the criterion's text>` shape a real run carries;
+# plan's own requirement bullets, so each header carries its criterion's text after the colon, as a real run's does;
 # the waiver line is waive-row's `  waiver: <who> <time> "<words>" — <why>`, added at the end of its block as
 # waive-row adds a key, at a time the fixture names (the verb stamps its own instant, which no window could place).
 ww_matrix() {  # <root> <waiver value>… -> WW_MR, matrix-render's exit
