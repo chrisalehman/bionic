@@ -41,6 +41,9 @@
 #            the `test-ratio` line and nothing is published; the same piece with fewer test lines lands, beside it.
 #   §RATIO-2 a fixture whose accepted head is already over the cap: the piece that cuts the test lines back under it is
 #            admitted, and the declared check at the landed head prints the ratio.
+#   §DIRTIED a release check planted at the release base that writes a line into the checkout it is handed is
+#            refused `check-dirtied` at the door, and the release-check verb at the head does not say it; with the
+#            door's dirtied arm cut out the piece is still refused, so the row pins the arm.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under the world directory with real commits; the door is
 # the tree under test's spawn-worktree.sh and session-poker.sh, run from the fixture with every variable that names
@@ -697,5 +700,71 @@ expect_contains "(rb1b) …LANDED onto the working branch" "LANDED branch=wt/T1 
 expect_absent "(rb1c) …with no ratio refusal" "tests exceed code" "$DC_OUT"
 dl_check "$DC" "$DC_H0" "$DC_H2"
 expect_contains "(rb2) the declared check at the landed head prints the ratio, the fixture's own again" "test-ratio: $DA_T/$DA_C" "$DOOR_OUT"
+
+# ---------------------------------------------------------------------------------------------------------------
+section "§DIRTIED: a release check that dirties the tree it is handed, planted at the release base, is refused check-dirtied"
+
+# The check runs as the release base holds it, so the dirtying copy is committed on the working branch and the plan's
+# base-sha moved onto it: a copy planted in the piece alone is never the copy that runs. The planted copy keeps the
+# fixture's sentinel line, then writes one line into the checkout it is handed (BIONIC_CHECK_TREE) and passes. The door
+# hands it the piece; the release-check verb hands it the working checkout.
+# fails-when: the door lands the piece; the door refuses it on anything but check-dirtied; the verb's run at the head
+# says no check-dirtied; with the door's dirtied arm cut out the piece is still refused (the row would pin nothing).
+dl_dirty_base() {  # <root> -> the dirtying check committed on the working branch, and the plan's base-sha moved onto it
+  local c="$1/tests/lib/release-check.sh"
+  _door_inside "$1" || return 1
+  { sed -n 1,2p "$c"; cat <<'DIRTY'
+printf 'dirt\n' >> "$BIONIC_CHECK_TREE/CHANGELOG.md"
+exit 0
+DIRTY
+  } > "$c.new" && mv "$c.new" "$c" && dl_commit "$1" "the check writes into the tree it is handed" && dl_judge_at "$1"
+}
+dl_dirty_piece() {  # <root> -> DL_PD: the row T1's tree, one library line committed
+  DL_PD="$(door_piece "$1" T1)" || return 1
+  printf 'door_dirtied() { :; }\n' >> "$DL_PD/payload/scripts/lib/said.sh"
+  dl_commit "$DL_PD" "a library change under the dirtying check"
+}
+read -r DX DX_H0 <<EOF
+$(door_copy "$DW" "$WORLD_ROOT/dirtied")
+EOF
+dl_dirty_base "$DX"; DX_H1="$(dl_head "$DX")"
+expect_eq "(d0) precondition: the dirtying copy is at the working head, and the plan's base-sha names that head" \
+  "1 $DX_H1" "$(git -C "$DX" show "$DX_H1:tests/lib/release-check.sh" 2>/dev/null | /usr/bin/grep -c 'BIONIC_CHECK_TREE/CHANGELOG.md') $(sed -n 's/^base-sha: //p' "$DX/$DOOR_PLAN_REL")"
+dl_dirty_piece "$DX"
+: > "$DOOR_SEEN"
+door_land "$DX" "$DL_PD"
+DX_OUT="$DOOR_OUT"
+expect_eq "(d1) the door: land --by-hand is refused (exit 2) and the working branch does not move" "2 $DX_H1" \
+  "$DOOR_RC $(dl_head "$DX")"
+expect_contains "(d1b) …check-dirtied, by the declared check" "REFUSED reason=check-dirtied why=release-check" "$DX_OUT"
+expect_contains "(d1c) …naming the piece's file it changed" "piece_paths=CHANGELOG.md" "$DX_OUT"
+expect_contains "(d1d) …and the judge, the release base" "judged-by=${DX_H1:0:12}" "$DX_OUT"
+expect_eq "(d2) the plant lands nowhere: the record holds T1's ready line and no published one" "1 0" \
+  "$(dl_record "$DX" | /usr/bin/grep -c '^line/v1|ev=ready|row=T1|') $(dl_record "$DX" | /usr/bin/grep -c '^line/v1|ev=published|row=T1|')"
+expect_eq "(d3) the check ran once, the judge's copy in a landing tree" "1 1" "$(dl_seen_judge "$DX")"
+
+# The same plant with the door's dirtied arm cut out, in a copy of its own: the refusal above is that arm's.
+read -r DY DY_H0 <<EOF
+$(door_copy "$DW" "$WORLD_ROOT/dirtied-mutant")
+EOF
+dl_dirty_base "$DY"; DY_H1="$(dl_head "$DY")"
+dl_dirty_piece "$DY"
+door_run "$DY" env 'DOOR_MUTANT=s|if \[ -n "$left" \]; then|if false; then|' bash "$DL_DRIVER" "$DL_LIBDIR" "$DL_PD" "door fixture"
+expect_eq "(dm) MUTANT the door's dirtied arm cut out: the plant is not refused check-dirtied, and the branch moves" \
+  "0 yes" "$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -c 'reason=check-dirtied') $([ "$(dl_head "$DY")" != "$DY_H1" ] && echo yes)"
+[ "$(dl_head "$DY")" != "$DY_H1" ] || printf '      the mutant said: %s\n' "$DOOR_OUT"
+
+# The verb's own arm: the release-check verb at a head past the base hands the check the working checkout.
+_door_inside "$DX" && printf 'past the base\n' > "$DX/notes.txt" && dl_commit "$DX" "a commit past the release base"
+DX_H2="$(dl_head "$DX")"
+door_run "$DX" bash "$DOOR_POKER" release-check
+DX_LOG="$(cat "$DX/.bionic/docs/record/wave-x/release-check-$DX_H2.log" 2>/dev/null)"
+expect_eq "(d4) the verb: release-check at the working head is refused (exit 1)" "1" "$DOOR_RC"
+expect_contains "(d4b) …check-dirtied, naming the checkout it changed" \
+  "REFUSED — check-dirtied: the declared release-check (bash tests/lib/release-check.sh" "$DOOR_OUT"
+expect_contains "(d4c) …its log says what the check left" "check-dirtied: the check left tracked files changed in $DX" "$DX_LOG"
+expect_contains "(d4d) …and a failing check fact is written at that head" "head=$DX_H2" \
+  "$(/usr/bin/grep '^proved: kind=check ' "$DX/$DOOR_PLAN_REL" | /usr/bin/grep 'result=fail')"
+_door_inside "$DX" && git -C "$DX" checkout -q -- CHANGELOG.md
 
 finish

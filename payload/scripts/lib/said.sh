@@ -3,12 +3,13 @@
 #
 # WHAT IT OWNS. One question: do these words stand in a prompt the user typed in this run?
 #
-#     user_said <text> [<plan>]
+#     user_said <text> [<plan>] [<mark>]
 #                        0  the text, folded, stands in a typed prompt as WHOLE WORDS, and is enough of them
 #                        1  it stands in none as whole words (white space alone says nothing)
 #                        2  no transcript of the sessions read can be found or read; every caller refuses
 #                        3  it stands in one as whole words, but is under SAID_MIN_WORDS words and is no
-#                           whole prompt
+#                           whole prompt; with a <mark>, it is under SAID_MIN_WORDS words and stands in no
+#                           prompt typed after the mark, or the mark stands in no transcript read (below)
 #                        and, beside the status, three variables (it prints nothing):
 #                        SAID_SESSION   on 0, the session whose transcript holds the words; else empty
 #                        SAID_SESSIONS  the sessions whose transcripts were read, space-separated, in order
@@ -63,6 +64,22 @@
 # THE LIMIT OF MECHANICAL PROOF: `defer it` quoted out of `do not defer it at all` is whole words and
 # three of them (`defer it at all`) passes; whether the quote keeps the sentence's meaning is the
 # reader's to judge, from the words= the `moved:` line keeps. The doctrine is to quote the whole sentence.
+#
+# A SHORT QUOTE, AFTER THE MARK (T35; critic-adversarial-3.md#1). A whole prompt says nothing of what
+# it answers: option replies are one digit, so a `1` the user typed for one decision, standing alone, read as
+# their word on every other decision ruled `1` in the run. So a caller that knows which act the words answer
+# names it as the <mark>: text an orchestrator Bash call holds, a plain substring of the `command` of a
+# `tool_use` block in a main-thread `assistant` entry (never `isSidechain`). The mark stands at the LAST such
+# entry across the transcripts read, in the order of the sessions above (a later session is later than every
+# line of an earlier one), so an act made again opens a new window. Under a mark, a quote under SAID_MIN_WORDS
+# words is said (0, its session in SAID_SESSION) only when a prompt typed AFTER that entry holds it as whole
+# words, whole prompt or not, since the mark is what ties the prompt to the act; held only before it, 3; held
+# nowhere, 1; and the mark in no transcript read is 3, SAID_SESSION empty. A quote of enough words keeps the
+# rule above, mark or none. With no mark the rule above is the whole rule. The one caller that names a mark is
+# hooks/poker/sitrep.sh `decisions_rule`, whose mark is the put of the decision it rules, `decisions put D<n> `
+# (the trailing space: D1 is not D13). Read in one jq pass over the sessions' transcripts on standard input,
+# each opened by a line naming its session that the CLI never writes (a JSON array) and closed by a line
+# break, so a line torn at a transcript's end is not joined to the next one's first.
 #
 # THE TRANSCRIPT is the CLI's own record of a session, `<config>/projects/<slug>/<session id>.jsonl`
 # (`<config>` is CLAUDE_CONFIG_DIR, else ~/.claude; the session id is CLAUDE_CODE_SESSION_ID). It is
@@ -230,35 +247,69 @@ SAID_NAMES
   return 1
 }
 
-# _said_in <text> <transcript> -> said, short or none on stdout; exit non-zero when it cannot be read.
-# One streaming pass: each typed prompt is folded, tried whole-word, and the first that is enough ends it.
+# _said_in <text> <mark> [<transcript>] -> with no mark, said, short or none on stdout, read from the transcript;
+# with one, `said<TAB><sid>`, short, none or unmarked, read from the session-opened stream on standard input
+# (user_said); exit non-zero when it cannot be read. With no mark, one streaming pass: each typed prompt is folded,
+# tried whole-word, and the first that is enough ends it. With one, the pass keeps each typed prompt and each mark
+# entry in order, and the rule is tried on them once the stream ends.
 _said_in() {
-  jq -nrR --arg n "${1:-}" --argjson min "$SAID_MIN_WORDS" "$_SAID_FOLD_JQ"'
+  local f
+  [ -z "${3:-}" ] || f="$3"
+  jq -nrR --arg n "${1:-}" --arg mark "${2:-}" --argjson min "$SAID_MIN_WORDS" "$_SAID_FOLD_JQ"'
     def wc: "[\\w\\x27’-]";
     def esc: gsub("(?<c>[\\\\^$.|?*+()\\[\\]{}])"; "\\\(.c)");
     def bounded($w; $p): $p | test("(?<!" + wc + ")" + ($w | esc) + "(?!" + wc + ")");
     def whole: (capture("<command-args>(?<a>[\\s\\S]*?)</command-args>") | .a | fold) // .;
-    def enough($w; $p): ([$w | split(" ")[] | select(test(wc))] | length) >= $min or $w == ($p | whole);
+    def many($w): ([$w | split(" ")[] | select(test(wc))] | length) >= $min;
+    def enough($w; $p): many($w) or $w == ($p | whole);
     def words: if type == "string" then . elif type == "array" then [.[] | objects | select(.type == "text") | .text | strings] | join(" ") else "" end;
     def typed:
       if .type == "user" and .isMeta != true and .isSidechain != true and (.origin.kind? // "") == "human" then .message.content | words
       elif .type == "attachment" and .isSidechain != true and .attachment.type? == "queued_command" and .attachment.isMeta != true and (.attachment.origin.kind? // "") == "human" then .attachment.prompt | words
       else empty end;
+    def unpasted: gsub("<pasted_content[^>]*>[\\s\\S]*?</pasted_content\\b[^>]*>"; " ") | fold;
+    def marks: .type == "assistant" and .isSidechain != true
+      and any(.message.content[]? | objects | select(.type == "tool_use") | .input.command? | strings; contains($mark));
     ($n | fold) as $w
     | if $w == "" then "none"
-      else
-        [label $out | inputs | fromjson? | objects | (try typed catch empty)
-          | gsub("<pasted_content[^>]*>[\\s\\S]*?</pasted_content\\b[^>]*>"; " ") | fold
+      elif $mark == "" then
+        [label $out | inputs | fromjson? | objects | (try typed catch empty) | unpasted
           | select(bounded($w; .)) as $p
           | if enough($w; $p) then ("said", break $out) else "short" end]
         | if index("said") then "said" elif length > 0 then "short" else "none" end
-      end' "$2" 2>/dev/null
+      else
+        reduce (inputs | fromjson?
+          | if type == "array" and length == 2 and .[0] == "said-session" then {sid: .[1]}
+            elif type != "object" then empty
+            else (try (if marks then {m: true} else {p: (typed | unpasted)} end) catch empty) end) as $r
+          ({sid: "", rs: []}; if ($r | has("sid")) then .sid = $r.sid else .rs += [$r + {s: .sid}] end)
+        | .rs as $rs
+        | def held($from): first($rs[$from:][] | select(has("p") and bounded($w; .p))) | "said\t" + .s;
+          if many($w) then held(0) // "none"
+          else ([$rs | to_entries[] | select(.value.m) | .key] | last) as $k
+            | if $k == null then "unmarked"
+              else held($k + 1) // (if any($rs[]; has("p") and bounded($w; .p)) then "short" else "none" end)
+              end
+          end
+      end' ${f:+"$f"} 2>/dev/null
 }
 
-# user_said <text> [<plan>] -> 0, 1, 2 or 3, and SAID_SESSION, SAID_SESSIONS, SAID_TRIED, SAID_REFUSED,
+# _said_stream -> on stdout, for each `<sid> <transcript>` line on standard input, a line naming the session
+# (a JSON array, which the CLI never writes as an entry), the transcript, and a line break.
+_said_stream() {
+  local sid tx
+  while IFS=' ' read -r sid tx; do
+    [ -n "$sid" ] || continue
+    printf '["said-session","%s"]\n' "$sid"
+    cat -- "$tx" || return 1
+    printf '\n'
+  done
+}
+
+# user_said <text> [<plan>] [<mark>] -> 0, 1, 2 or 3, and SAID_SESSION, SAID_SESSIONS, SAID_TRIED, SAID_REFUSED,
 # as above.
 user_said() {
-  local line sid tx out short=0
+  local line sid tx out short=0 mark="${3:-}" txs=""
   SAID_SESSION=""; SAID_SESSIONS=""; SAID_TRIED=""; SAID_REFUSED=""
   command -v jq >/dev/null 2>&1 || return 2
   _said_need_slug || return 2
@@ -274,7 +325,13 @@ user_said() {
       continue
     fi
     tx="$(_said_transcript "$sid" "$_SAID_ROOT")" && [ -r "$tx" ] || continue
-    out="$(_said_in "${1:-}" "$tx")" || continue
+    if [ -n "$mark" ]; then
+      SAID_SESSIONS="${SAID_SESSIONS:+$SAID_SESSIONS }$sid"
+      txs="$txs$sid $tx
+"
+      continue
+    fi
+    out="$(_said_in "${1:-}" "" "$tx")" || continue
     SAID_SESSIONS="${SAID_SESSIONS:+$SAID_SESSIONS }$sid"
     case "$out" in
       said) SAID_SESSION="$sid"; return 0 ;;
@@ -286,6 +343,15 @@ user_said() {
 $_SAID_SIDS
 SAID_SIDS
   [ -n "$SAID_SESSIONS" ] || return 2
+  if [ -n "$mark" ]; then
+    out="$(printf '%s' "$txs" | _said_stream | _said_in "${1:-}" "$mark")" || return 2
+    case "$out" in
+      said$'\t'*) SAID_SESSION="${out#said$'\t'}"; return 0 ;;
+      short|unmarked) return 3 ;;
+      none) return 1 ;;
+      *) return 2 ;;
+    esac
+  fi
   [ "$short" -eq 0 ] || return 3
   return 1
 }

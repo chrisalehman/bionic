@@ -1734,11 +1734,80 @@ matrix_row_waiver() {  # <evidence cell> <AC block> -> 0 when a waiver is record
   grep -qE 'waiver:' <<< "$1" || grep -qE '^[[:space:]]*waiver[[:space:]]*:' <<< "$2"
 }
 
-# The `task:` value out of an AC block (empty when absent). Only the exact value `9` means
-# anything to the matrix: a criterion whose evidence is a Step-9 artifact (see the arm).
+# The `task:` value out of an AC block (empty when absent): the plan row, or rows, whose work
+# proves the criterion, or the literal `9`, the close's step (`matrix_owing_step` reads it).
 matrix_block_task() {  # <AC block> -> the value
   echo "$1" | grep -E '^[[:space:]]*task[[:space:]]*:' | head -1 \
     | sed -E 's/^[[:space:]]*task[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//'
+}
+
+# A CRITERION IS OWED AT THE STEP WHOSE TASK PROVES IT. The tier says how a criterion is proved;
+# the step of the row that proves it says when. `matrix_owing_step` reads that step out of the
+# block's `task:` value: a row id resolves to its row's `step` cell through the one `## Tasks`
+# reader (lib/units.sh `units_rows`, `units_field_v`), a comma list to the latest step among its
+# rows, and the literal `9` stays the close's step. Any other value, or an id the table lacks,
+# owes at no particular step, so the row is judged as every row is.
+matrix_owing_step() {  # <plan> <AC block> -> the step number, or nothing
+  local val id rec s best="" rows
+  val="$(matrix_block_task "$2")"
+  [ -n "$val" ] || return 0
+  if [ "$val" = 9 ]; then printf '9\n'; return 0; fi
+  rows="$(units_rows "$1" 2>/dev/null)" || return 0
+  for id in $(printf '%s' "$val" | tr ',' ' '); do
+    rec="$(awk -F'\t' -v i="$id" '$1 == i { print; exit }' <<< "$rows")"
+    [ -n "$rec" ] || continue
+    units_field_v s "$rec" step
+    s="${s%[ab]}"
+    case "$s" in ''|*[!0-9]*) continue ;; esac
+    [ -n "$best" ] && [ "$s" -le "$best" ] || best="$s"
+  done
+  [ -z "$best" ] || printf '%s\n' "$best"
+}
+
+# matrix_row_deferred <plan> <owing step> <current> <status> -> 0 when the row owes nothing yet.
+# A pending or blocked row whose owing step is later than the current step owes neither its
+# per-tier keys nor an auditor's verdict or ruling: the work that proves it has not run. From its
+# owing step on it is judged as every other row. A row owed at Step 9 is the close's: close-out
+# settles it after it writes `delivered:`, its own final act, so it is demanded only once the
+# Step-9 line carries `delivered:` (lib/run.sh `run_open`, the one reader of that line), never by
+# a commit or by the dry-run close-out takes before it. A step or status that does not read
+# cleanly defers nothing.
+matrix_row_deferred() {
+  local n="${3%[ab]}"
+  case "$4" in pending|blocked) ;; *) return 1 ;; esac
+  case "$2" in ''|*[!0-9]*) return 1 ;; esac
+  case "$n" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$2" -gt "$n" ] && return 0
+  [ "$2" = 9 ] && [ "$n" = 9 ] && run_open "$1"
+}
+
+# matrix_table_rows -> `<AC>\037<tier>\037<status>\037<evidence>\037<auditor>` per five-cell row of
+# `$MATRIX`, trimmed, table order: the header, the separator and a row of another width skipped.
+matrix_table_rows() {
+  awk -F'|' '/^[[:space:]]*\|/ && NF == 7 {
+    for (i = 2; i <= 6; i++) gsub(/^[ \t]+|[ \t]+$/, "", $i)
+    if ($2 == "" || $2 == "AC" || $2 ~ /^[-:]+$/) next
+    printf "%s\037%s\037%s\037%s\037%s\n", $2, $3, $4, $5, $6
+  }' <<< "$MATRIX"
+}
+
+# matrix_close_rows <plan> -> the AC id of each pending or blocked row the close settles, table
+# order: owed at Step 9, and its block's `eval:` names `landing-report --hand-holds`, the measure
+# close-out reads last. close-out writes each such row's cells from that reading.
+matrix_close_rows() {
+  local PLAN="$1" MATRIX ac tier status ev aud block
+  MATRIX="$(matrix_section)"
+  while IFS=$'\037' read -r ac tier status ev aud; do
+    [ -n "$ac" ] || continue
+    case "$status" in pending|blocked) ;; *) continue ;; esac
+    block="$(matrix_block "$ac")"
+    [ "$(matrix_owing_step "$PLAN" "$block")" = 9 ] || continue
+    grep -qE '^[[:space:]]*eval[[:space:]]*:.*landing-report[[:space:]]+--hand-holds' <<< "$block" || continue
+    printf '%s\n' "$ac"
+  done <<MATRIX_ROWS
+$(matrix_table_rows)
+MATRIX_ROWS
+  return 0
 }
 
 # matrix_row_has_verdict <tier> <status> <auditor cell> <user-confirmed value> <waiver 1|0>
@@ -1766,18 +1835,16 @@ matrix_row_ruled() {
   [ "$1" = T4 ] && [ -z "$aud" ] && user_confirmed_attributed "$4"
 }
 
-# matrix_row_owes <step> <tier> <status> <auditor cell> <user-confirmed value> <waiver 1|0> <task 9: 1|0>
+# matrix_row_owes <step> <tier> <status> <auditor cell> <user-confirmed value> <waiver 1|0> <deferred 1|0>
 #   -> prints `verdict` or `ruling` and returns 0 when the row owes one at <step>; returns 1,
-#   printing nothing, when it owes neither. Below Step 6 nothing is owed. A row tagged
-#   `task: 9` and still pending or blocked owes nothing before Step 9: its evidence is a
-#   close-out artifact that does not exist yet, so no auditor can have ruled on it.
-#   The caller asks `matrix_auditor_required` first: at `single` the column is not read.
+#   printing nothing, when it owes neither. Below Step 6 nothing is owed, and nothing is owed by
+#   a row `matrix_row_deferred` defers: the work that proves it has not run, so no auditor can
+#   have ruled on it. The caller asks `matrix_auditor_required` first: at `single` the column is
+#   not read.
 matrix_row_owes() {
   local n="${1%[ab]}"
   [ "$n" -gt 5 ] 2>/dev/null || return 1
-  if [ "$7" = 1 ] && [ "$n" -lt 9 ] && { [ "$3" = pending ] || [ "$3" = blocked ]; }; then
-    return 1
-  fi
+  [ "$7" = 1 ] && return 1
   if [ "$n" -ge 8 ]; then
     matrix_row_ruled "$2" "$3" "$4" "$5" "$6" && return 1
     printf 'ruling'
@@ -1795,7 +1862,7 @@ matrix_row_owes() {
 # cells is the arm's to refuse on a commit, and is skipped here. Needs lib/run.sh and
 # lib/units.sh loaded, as every caller of this file has them.
 matrix_unruled() {
-  local PLAN="$1" MATRIX RIGOR ac tier status ev aud block waiver task9
+  local PLAN="$1" MATRIX RIGOR ac tier status ev aud block waiver defer
   RIGOR="$(plan_frontmatter_get "$1" rigor)"
   matrix_auditor_required || return 0
   MATRIX="$(matrix_section)"
@@ -1803,15 +1870,11 @@ matrix_unruled() {
     [ -n "$ac" ] || continue
     block="$(matrix_block "$ac")"
     waiver=0; matrix_row_waiver "$ev" "$block" && waiver=1
-    task9=0; [ "$(matrix_block_task "$block")" = 9 ] && task9=1
-    matrix_row_owes "$2" "$tier" "$status" "$aud" "$(user_confirmed_value "$block")" "$waiver" "$task9" >/dev/null \
+    defer=0; matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$block")" "$2" "$status" && defer=1
+    matrix_row_owes "$2" "$tier" "$status" "$aud" "$(user_confirmed_value "$block")" "$waiver" "$defer" >/dev/null \
       && printf '%s\n' "$ac"
   done <<MATRIX_ROWS
-$(awk -F'|' '/^[[:space:]]*\|/ && NF == 7 {
-    for (i = 2; i <= 6; i++) gsub(/^[ \t]+|[ \t]+$/, "", $i)
-    if ($2 == "" || $2 == "AC" || $2 ~ /^[-:]+$/) next
-    printf "%s\037%s\037%s\037%s\037%s\n", $2, $3, $4, $5, $6
-  }' <<< "$MATRIX")
+$(matrix_table_rows)
 MATRIX_ROWS
   return 0
 }
@@ -3880,13 +3943,12 @@ Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block �
 # (pending|blocked|discharged|waived) since the relaxation makes it
 # load-bearing.
 #
-# Close-out criteria: a T0 row whose AC block carries `task: 9` keeps that
-# same relaxation ALL THE WAY to current: 9 — both the per-tier keys and the
-# CONFIRMED wall — because its evidence is a Step-9 artifact that does not
-# exist yet. It is two exemptions, not one: the key loop and the CONFIRMED
-# arm are separate branches, and a row exempted from only the first still
-# meets the second at current: 6. At current: 9 the tag stops exempting
-# anything. See the tag's own note inside validate_matrix.
+# A criterion is owed at the step whose task proves it: a pending or blocked
+# row whose AC block's `task:` names a later step than the current one keeps
+# that same relaxation until its step, both the per-tier keys and the
+# auditor arm, at any tier. The literal `task: 9` is the close's step, and a
+# row owed there is settled by close-out after `delivered:`. See
+# `matrix_row_deferred` at file scope.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 
 # Per-tier required evidence keys: `keys_for_tier`, at file scope above `_eg_body` since
@@ -3945,7 +4007,7 @@ matrix_is_placeholder() {
 }
 
 validate_matrix() {
-  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc task_val task9 row_is_waived ev_abs hk hv hf ucv owed
+  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc deferred row_is_waived ev_abs hk hv hf ucv owed
 
   # Set while any row is still pending/blocked at current: 5. The
   # Step-5 validator reads it to keep the `auditor:` pointer optional
@@ -4061,45 +4123,17 @@ validate_matrix() {
         "matrix row '${ac}' cites 'provenance: implementation' — the implementation cannot be the source of its own requirement." \
         "cite the real requirement source (user quote, spec section, ticket, report) for '${ac}', not the implementation itself."
     fi
-    # `task: 9` (B-2, 2026-08-30): a criterion whose only evidence is a Step-9
-    # lifecycle artifact — the close-out report, continuation.md, the ADR the
-    # close-out writes — cannot be discharged at Steps 5..8, because the thing
-    # it would cite does not exist yet. Such a row had only dishonest homes: a
-    # `waiver:` that records the criterion as let go, or a discharged row
-    # citing an artifact nobody had written. The tag is an AC-block line parsed
-    # exactly like `provenance:` above — never a sixth table cell, which the
-    # 7-field row pin a few lines up would refuse on every row.
-    #
-    # It exempts the row from TWO SEPARATE ARMS while current < 9: the per-tier
-    # key loop below, and the CONFIRMED/auditor wall further down. Exempting
-    # only the first leaves the row blocking at current: 6 on an empty auditor
-    # cell, which is the same wall wearing a different refusal.
-    #
-    # T0-ONLY. Every other tier names evidence that exists before Step 9 (a
-    # suite run, a live surface, the user's own word), so `task: 9` there is a
-    # mis-tag rather than a deferral: it blocks at ANY step, naming the tier —
-    # including current: 5, where a pending row is otherwise exempt from
-    # everything and the mis-tag would sit unread until the 5→6 advance.
-    # Only the exact value `9` means anything; `task: 4` is an ordinary
-    # annotation this hook does not read.
+    # A CRITERION IS OWED AT THE STEP WHOSE TASK PROVES IT (`matrix_owing_step`,
+    # `matrix_row_deferred`, at file scope above). Before that step a pending or blocked row
+    # owes nothing: not the per-tier keys below, and not the auditor's verdict or ruling
+    # further down, because the work its evidence comes from has not run. The two are separate
+    # arms and both read `deferred`: a row exempted from only the first would still meet the
+    # second at current: 6. The tier is not asked: it says how a criterion is proved, and the
+    # step says when. A row owed at Step 9 is the close's, and close-out writes its cells after
+    # `delivered:`, so no commit against an open plan demands it.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    task_val=$(matrix_block_task "$block_txt")
-    task9=0
-    if [ "$task_val" = "9" ]; then
-      # A WAIVED row is exempt from the tier refusal (review-a C-2). The tag on
-      # a non-T0 row is a mis-tag, but a waiver has already dissolved that
-      # row's evidence contract — every other per-row demand in this loop
-      # (per-tier keys, the CONFIRMED wall) yields to it, and refusing here
-      # left a waived row with no way out but retiering a criterion nobody
-      # intends to discharge. The unwaived mis-tag still blocks at every step.
-      # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-      if [ "$tier" != "T0" ] && [ "$row_is_waived" = "0" ]; then
-        block_matrix "row ${ac} defers its evidence to close-out" "prove it now, or retier T0" \
-          "matrix row '${ac}' is ${tier} and carries 'task: 9' — only a T0 row defers its evidence to the close-out." \
-          "a ${tier} row's evidence exists before Step 9 — discharge '${ac}' at its own tier, or retier the row to T0 if the criterion really is a close-out obligation."
-      fi
-      task9=1
-    fi
+    deferred=0
+    matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$block_txt")" "$CURRENT" "$status" && deferred=1
     # waived rows (evidence cell or the AC block carries a `waiver:` entry) are
     # exempt from the per-tier evidence requirement.
     if [ "$row_is_waived" = "1" ]; then
@@ -4110,14 +4144,11 @@ validate_matrix() {
       # (the 6..9 prefix check), mirroring the CONFIRMED rule. This is what
       # gives a mid-walk corrective commit an honest home at current: 5.
       UNDISCHARGED=1
-    elif [ "$task9" = "1" ] && [ "${CURRENT%[ab]}" -lt 9 ] 2>/dev/null \
-         && { [ "$status" = "pending" ] || [ "$status" = "blocked" ]; }; then
-      # Close-out row before Step 9 — see the `task: 9` note above. Sits
-      # BELOW the current: 5 arm on purpose: at the Verify gate the existing
-      # relaxation must still set UNDISCHARGED, which keeps the Step-5
-      # `auditor:` pointer optional while any row is undischarged.
-      # A non-numeric CURRENT makes `-lt` fail, so the exemption is
-      # fail-closed on a malformed step.
+    elif [ "$deferred" = "1" ]; then
+      # A row not yet owed (see the note above). BELOW the current: 5 arm on
+      # purpose: at the Verify gate the existing relaxation must still set
+      # UNDISCHARGED, which keeps the Step-5 `auditor:` pointer optional while
+      # any row is undischarged.
       :
     else
       for key in $(keys_for_tier "$tier"); do
@@ -4229,7 +4260,7 @@ validate_matrix() {
     # them at the one thing that is not broken.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     if matrix_auditor_required \
-       && owed=$(matrix_row_owes "$CURRENT" "$tier" "$status" "$aud" "$ucv" "$row_is_waived" "$task9"); then
+       && owed=$(matrix_row_owes "$CURRENT" "$tier" "$status" "$aud" "$ucv" "$row_is_waived" "$deferred"); then
       # THE CELL IS AN EQUALITY, AND THE VERDICT SAYS WHICH FAULT IT IS. An annotated cell
       # (`CONFIRMED (audit-b3b87dc.md)`) refuses, because a reader scanning the column has to be
       # able to compare it and the audit's own path has a key of its own; but it refuses as a
@@ -5303,7 +5334,8 @@ return 0
 # `rule` (a ruling pushed to a writer), `matrix-set`, `waive-row`, `confirm-row` (the user's confirmation of a
 # T4 row, the user's act and never an agent's), `tasks-prose`, `epic-row` and
 # `continuation-fill` (T7's plan verbs), `disposition` (T13's finding ledger) and `reply` (wave-38 T3, the final card's
-# replay into approve, waive, waive-row and finding-move) — `ruling-ack` and `rulings`
+# replay into approve, waive, waive-row and finding-move), `decisions` (a decision put or ruled writes the run's
+# design ledger and its register, and the read goes with the verb; a writer reads neither) — `ruling-ack` and `rulings`
 # are the writer's own reads and are NOT on the list); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
@@ -5375,7 +5407,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
           return 0
         fi
         case "$_next" in
-          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|budget|regression|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|waive-row|confirm-row|tasks-prose|epic-row|continuation-fill|disposition|reply|order)
+          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|budget|regression|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|waive-row|confirm-row|tasks-prose|epic-row|continuation-fill|disposition|reply|order|reviews-part|decisions)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
             _WALL_POKER_CALL="$GIT_ARGV_REST"
             _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"
@@ -5724,6 +5756,27 @@ _bsg_own_deliver() {
   [ $# -eq 1 ] && [ -n "$_BSG_DL_OWN" ] && [ "$_BSG_DL_TARGET" = "$_BSG_DL_OWN" ] || return 1
   while IFS= read -r _l; do [ -z "$_l" ] || _n=$((_n + 1)); done <<< "$(git_argv_expand "$COMMAND")"
   [ "$_n" -eq 1 ]
+}
+
+# _bsg_own_reviews_part — is the matched `session-poker.sh reviews-part` (`_WALL_POKER_ARGS`) the INTEGRATE row's own
+# writer's, on that row, alone in one call? `reviews-part` commits the release entry's reviews on the working branch
+# before the pull request, which only the integrate row's writer does and only for its own row. The own-row reading is
+# `_bsg_own_deliver`'s, so the two cannot drift; what this adds is the row's kind, read from the session's bound plan
+# through the one reader (`units_rows`), so a build row's writer is refused its own row too. Sets `_BSG_RP_KIND` (that
+# row's kind, empty when no plan names it) for the refusal's detail. A session with no bound plan names no kind.
+_BSG_RP_KIND=""
+_bsg_own_reviews_part() {
+  local _alone=1
+  _BSG_RP_KIND=""
+  _bsg_own_deliver && _alone=0
+  [ -n "$_BSG_DL_OWN" ] && [ "$_BSG_DL_OWN" = "$_BSG_DL_TARGET" ] && _bsg_rp_kind
+  [ "$_alone" -eq 0 ] && [ "$_BSG_RP_KIND" = integrate ]
+}
+_bsg_rp_kind() {  # -> _BSG_RP_KIND, the kind of the row `_BSG_DL_OWN` in the session's bound plan
+  local _run _plan
+  _run="$(session_run "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || :
+  case "$_run" in bound-open\ *|bound-closed\ *) _plan="${_run#* }" ;; *) return 0 ;; esac
+  _BSG_RP_KIND="$(units_rows "$_plan" 2>/dev/null | awk -F'\t' -v id="$_BSG_DL_OWN" '$1 == id { print $3; exit }')"
 }
 
 # ─── JURISDICTION BEFORE ROLE (wave-36 T4; D11, AC-5.2; ruled at D6) ────────────────────────
@@ -6215,7 +6268,27 @@ A commit placed outside the project root and outside every tree of its repositor
         if [ "$_WALL_POKER_VERB" = deliver ] && _bsg_own_deliver; then
           return 0
         fi
+        # THE INTEGRATE ROW'S WRITER RENDERS ITS OWN REVIEWS PART: the same own-row admission, and only for a row the
+        # bound plan makes the integrate row. Anything else the verb takes is refused below, naming the row.
+        if [ "$_WALL_POKER_VERB" = reviews-part ] && _bsg_own_reviews_part; then
+          return 0
+        fi
         local _bsg_am_more=""
+        if [ "$_WALL_POKER_VERB" = reviews-part ]; then
+          if [ -z "$_BSG_DL_OWN" ]; then
+            _bsg_am_more="
+\`reviews-part ${_BSG_DL_TARGET:-<none>}\`: no roster row of yours names a plan row, so there is no row of yours to render the part for."
+          elif [ "$_BSG_DL_TARGET" != "$_BSG_DL_OWN" ]; then
+            _bsg_am_more="
+\`reviews-part ${_BSG_DL_TARGET:-<none>}\`: ${_BSG_DL_TARGET:-no row} is not your row (yours is $_BSG_DL_OWN)."
+          elif [ "$_BSG_RP_KIND" != integrate ]; then
+            _bsg_am_more="
+\`reviews-part $_BSG_DL_TARGET\`: $_BSG_DL_TARGET is not the integrate row${_BSG_RP_KIND:+ (it is a $_BSG_RP_KIND row)}."
+          fi
+          _bsg_am_more="${_bsg_am_more}
+The integrate row's writer renders its own part, alone in one call, before its push and pull request:
+    bash <plugin>/hooks/session-poker.sh reviews-part <your row>"
+        fi
         if [ "$_WALL_POKER_VERB" = deliver ]; then
           if [ -n "$_BSG_DL_OWN" ]; then
             _bsg_am_more="

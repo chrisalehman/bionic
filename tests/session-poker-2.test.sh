@@ -271,7 +271,7 @@ expect_contains "37c at current: 7 the release row is filled" "poker: FILL T3" "
 S37_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 R37D="$(make_repo s37-task-add)"; ( cd "$R37D" && git commit -q --allow-empty -m init )
 P37D="$(s34_plan "$R37D" 5)"
-poke "$R37D" task-add T7 7 doc 'Release: match C:\new\table and a\|b for $5' bionic:implementor 'T5' 30 REQ-5 '—'
+poke "$R37D" task-add T7 7 doc 'Keep C:\new\table, a\|b, $5. The release keeps its text as typed.' bionic:implementor 'T5' 30 REQ-5 '—'
 expect_eq "37d task-add of a Step-7 doc row at current: 5 is accepted (exit 0)" "0" "$RC"
 expect_contains "37f …with its - T7: line" "- T7: pending dispatch — added by task-add" "$(cat "$P37D")"
 POKE_BOUND="$S37_BOUND_WAS"

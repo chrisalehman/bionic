@@ -22,6 +22,10 @@
 #                fixed by a landed row); the same projects with a failing reading newest open it (the differential control)
 # §STOP          `decisions put D<n>` opens `decide:D<n>`, the ledger's ruling closes it; a deferral no person ruled
 #                (the reader's rating, carried by the orchestrator's choice) opens `carry:<record>#<n>` at `disposition`
+# §RULE          `decisions rule D<n> '<reply>'` writes `## Δ<k> — D<n> ruled "<reply>" (<who> <date>): <title>`, Δ one past
+#                the ledger's highest, the title the put's, closes `decide:D<n>` in the same act, and refuses a second ruling;
+#                <who> is the git user when the reply stands in a prompt the user typed, `orchestrator` when it does not, and
+#                a transcript that cannot be read refuses the ruling and writes nothing
 # §OPENED        a closed ask keeps its open line's instant as `opened=`, so the minutes it stood open can be counted
 # §BORN-CLOSES   a fix born of a failing review's finding lands by `ready` at Step 8 and its green landing closes
 #                `waive:<question>`, with no step advance; a landing after which the review still derives fail leaves it open
@@ -30,6 +34,12 @@
 #                waits on what its waivers wait on
 # §ANSWER        `owed_answer` stores the answer on the open ask and leaves it open; a re-open keeps it, a fresh open has
 #                none; the landing of the row a finding was carried to closes it; a finding moved fixed closes at once
+# §ONE-BLOCKS    a waiver answered no keeps its answer when it closes and waits on an event, open or closed: the close
+#                line, the held words, the card and the minutes waiting on you never count it
+# §SHARED        `approve D<n>` and a release card reply that approves D<n> rule it through the same writer: a Δ line
+#                and a closed `decide:D<n>` each, the one who said the reply named as `decisions rule` names them
+# §SETTLED       a heading `D<n> settled by … (<who> <date> <clock>): "<reply>"` (a person's go, as a shipped ledger holds one) is an entry with that
+#                clock, so the decision reads ruled and its waiting span is kept
 #
 # FIXTURE FIDELITY. The project is close-out's own (tests/close-out.prelude.sh, read by name): a git project at
 # Step 8 whose newest structure reading fails, as close-out-1's E2E fixture plants it, and the preflight is the one
@@ -397,6 +407,155 @@ expect_contains "ST-3 precondition: the disposition reads the finding deferred" 
 expect_eq "ST-4 …and opens carry:<record>#<n> on the run's register" "carry:record:wave-01-fixture:adv-carry.md:1" \
   "$(as_register "$RF" "$PF")"
 expect_contains "ST-4b …its reply naming the finding" "$RF_CR#1" "$(as_ask "$RF" "$PF" carry:record:wave-01-fixture:adv-carry.md:1 4)"
+
+# ============================================================
+section "§RULE: a ruling is one verb: decisions rule writes the heading the parser reads and closes the ask in the same act"
+# ============================================================
+# fails-when: `decisions rule` writes no heading, one the parser reads as no entry, one numbered other than one past
+# the ledger's highest Δ, one without the put's title; leaves decide:D<n> open; or rules a decision already ruled.
+# ANTI-VACUITY: RU-0 reads decide:D7 open through the same extractor RU-4 reads it closed through.
+as_open() { as_register "$1" "$2" | tr ' ' '\n' | /usr/bin/grep -qxF "$3" && echo open || echo gone; }  # <root> <plan> <key>
+# THE USER'S TYPED WORDS (lib/said.sh): this session's transcript under a config directory of its own, the project's
+# load record beside it, and a prompt typed for each reply the fixture means the user to have given, written as
+# release-approval.test.sh's fc_typed writes them. RU_WHEN is the date-and-clock a heading carries, spelled once.
+RU_CFG="$TMPROOT/ru-cfg"
+RU_PROJ="$RU_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "$AS_LIB" "$RF")"
+mkdir -p "$RU_PROJ" "$RU_CFG/bionic" "$RF/.bionic/tmp"
+printf '80\n' > "$RU_CFG/bionic/share"
+printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$RF" > "$RF/.bionic/tmp/loaded-$SID.state"
+RU_TX="$RU_PROJ/$SID.jsonl"; RU_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
+export CLAUDE_CONFIG_DIR="$RU_CFG"
+# An argument `--put=D<n>` plants, in its place among the prompts, the orchestrator's own Bash call that put D<n>
+# (put.jsonl, the live put's shape), the mark a short reply is read after.
+ru_typed() {  # <prompt | --put=D<n>>... -> the transcript holds each prompt as typed, and each put, in order
+  local t
+  cat "$RU_FX/frame.jsonl" > "$RU_TX"
+  for t in "$@"; do
+    case "$t" in
+      --put=*) jq -c --arg d "${t#--put=}" '.message.content[0].input.command |= sub("decisions put D0 "; "decisions put \($d) ")' \
+                 "$RU_FX/put.jsonl" >> "$RU_TX" ;;
+      *) jq -c --arg t "$t" '.message.content = $t' "$RU_FX/typed.jsonl" >> "$RU_TX" ;;
+    esac
+  done
+}
+RU_WHEN='[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{1,2}:[0-9]{2} [AP]M [A-Za-z+0-9-]+'
+# as_ruler: the register's entry lines `D<n> · "<reply>" · <who> <date> · <title>` cut to the verb, the reply and the ruler.
+as_ruler() { sed -E 's/^(D[0-9]+ · "[^"]*" · )(.*) [0-9]{4}-[0-9]{2}-[0-9]{2}( · .*)?$/\1\2/'; }
+ru_head() { /usr/bin/grep "^## Δ[0-9]* — $1 ruled" "$RF_LED" | tail -1; }  # <D<n>> -> the ledger's newest ruling heading of it
+ru_typed --put=D7 '1'
+poke "$RF" decisions put D7 'which findings reach the user'
+expect_eq "RU-0 precondition: D7 is put (exit 0) and its ask is open on the run's register" "0|open" "$RC|$(as_open "$RF" "$PF" decide:D7)"
+RU_K="$(( $(sed -n 's/^## Δ\([0-9][0-9]*\).*/\1/p' "$RF_LED" | sort -n | tail -1) + 1 ))"
+poke "$RF" decisions rule D7 '1'
+expect_eq "RU-1 decisions rule D7 '1' exits 0 and says what it ruled" "0|ruled: D7 · \"1\" · which findings reach the user" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep '^ruled: ')"
+expect_regex "RU-2 the ledger carries the ruling heading: one past its highest Δ, the reply quoted, the approver and the clock, the put's title" \
+  "^## Δ${RU_K} — D7 ruled \"1\" \\(Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{1,2}:[0-9]{2} [AP]M [A-Za-z+0-9-]+\\): which findings reach the user\$" \
+  "$(/usr/bin/grep '^## Δ[0-9]* — D7 ' "$RF_LED" | tail -1)"
+poke "$RF" decisions
+expect_regex "RU-3 the register's parser reads the heading as the entry it is" \
+  "^D7 · \"1\" · Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} · which findings reach the user\$" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^D7 ')"
+expect_eq "RU-4 …and the ask is closed in the same act, by the ruling (RU-0 read it open)" "gone|yes" \
+  "$(as_open "$RF" "$PF" decide:D7)|$(as_has "$(cat "$RF_REG" 2>/dev/null)" '|key=decide:D7|state=closed|by=ruled|')"
+cp "$RF_LED" "$TMPROOT/ru-led-before"
+poke "$RF" decisions rule D7 '2'
+expect_eq "RU-5 a second ruling of D7 is refused as already ruled (exit 1), naming the ruling, and the ledger is byte-identical" \
+  "1|yes|same" \
+  "$RC|$(as_has "$OUT" 'D7 is already ruled')|$(cmp -s "$TMPROOT/ru-led-before" "$RF_LED" && echo same || echo changed)"
+poke "$RF" decisions rule 7 '1'
+expect_eq "RU-6 a number that is not D<n> is refused (exit 1) and the ledger is byte-identical" "1|same" \
+  "$RC|$(cmp -s "$TMPROOT/ru-led-before" "$RF_LED" && echo same || echo changed)"
+
+# A RULING NAMES WHO RULED. The same writer, the same ledger and the same extractor
+# (ru_head) read the three outcomes: the reply is the user's typed words, it is not, and no transcript can be read.
+# ANTI-VACUITY: RU-7 reads a heading through ru_head that names the git user, so RU-8's `orchestrator` is read through
+# an extractor that returns a heading; RU-11's refusal is lifted by typing the reply into the transcript it removed.
+poke "$RF" decisions put D12 'which tier the carry takes'
+poke "$RF" decisions put D11 'what the card says first'
+ru_typed '1' 'take the first option please'
+poke "$RF" decisions rule D12 'take the first option please'
+expect_eq "RU-7 a reply the transcript holds as the user's typed words: ruled (exit 0), the one who ruled the git user" \
+  "0|1" "$RC|$(ru_head D12 | /usr/bin/grep -cE "^## Δ[0-9]+ — D12 ruled \"take the first option please\" \(Dana Fixture $RU_WHEN\): which tier the carry takes\$")"
+poke "$RF" decisions rule D11 'take the second option please'
+expect_eq "RU-8 a reply the transcript does not hold (RU-7's extractor, the same fixture): ruled (exit 0), the one who ruled orchestrator" \
+  "0|1" "$RC|$(ru_head D11 | /usr/bin/grep -cE "^## Δ[0-9]+ — D11 ruled \"take the second option please\" \(orchestrator $RU_WHEN\): what the card says first\$")"
+expect_eq "RU-8b …and says it ruled, naming the reply as given" 'ruled: D11 · "take the second option please" · what the card says first' \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^ruled: ')"
+poke "$RF" decisions
+expect_eq "RU-9 the parser reads both headings as entries, each with its ruler (RU-3's reader)" \
+  'D11 · "take the second option please" · orchestrator|D12 · "take the first option please" · Dana Fixture' \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^D1[12] · "' | as_ruler | LC_ALL=C sort | paste -sd'|' -)"
+expect_eq "RU-9b …and both asks are closed by their rulings" "gone|gone" "$(as_open "$RF" "$PF" decide:D11)|$(as_open "$RF" "$PF" decide:D12)"
+poke "$RF" decisions put D14 'how many findings a page holds'
+ru_typed '1' 'I would go with 2 then'
+poke "$RF" decisions rule D14 '2'
+expect_eq "RU-10 a reply only a word of a typed sentence (too short to be a quote, not the whole prompt) is not the user's: orchestrator" \
+  "0|1" "$RC|$(ru_head D14 | /usr/bin/grep -cE "^## Δ[0-9]+ — D14 ruled \"2\" \(orchestrator $RU_WHEN\): how many findings a page holds\$")"
+poke "$RF" decisions put D13 'when the page is cut'
+rm -f "$RU_TX"
+cp "$RF_LED" "$TMPROOT/ru-led-before"
+poke "$RF" decisions rule D13 'cut it at five findings'
+expect_eq "RU-11 no transcript to read: refused (exit 1) naming the lack, the ledger byte-identical, decide:D13 still open" \
+  "1|yes|same|open" \
+  "$RC|$(as_has "$OUT" 'transcript cannot be found or read')|$(cmp -s "$TMPROOT/ru-led-before" "$RF_LED" && echo same || echo changed)|$(as_open "$RF" "$PF" decide:D13)"
+ru_typed '1' 'cut it at five findings'
+poke "$RF" decisions rule D13 'cut it at five findings'
+expect_eq "RU-11b …and the same call with the reply typed rules it, the git user (RU-11's refusal was the transcript)" \
+  "0|1|gone" "$RC|$(ru_head D13 | /usr/bin/grep -cE "^## Δ[0-9]+ — D13 ruled \"cut it at five findings\" \(Dana Fixture $RU_WHEN\): when the page is cut\$")|$(as_open "$RF" "$PF" decide:D13)"
+# A SHORT REPLY IS THE PERSON'S ONLY AFTER THE PUT. A reply under three words names the git user only when a prompt
+# typed after the orchestrator's own `decisions put D<n> ` call holds it as whole words; that call is the mark, read in
+# transcript order, and the last one opens the decision's current round. A reply of enough words keeps RU-7's rule.
+# ANTI-VACUITY: RU-13 reads a heading naming the git user through ru_head, so RU-12's, RU-15's to RU-18's `orchestrator`
+# are read through an extractor that returns a heading; each orchestrator row differs from RU-13 in one fact.
+# fails-when: a short reply is credited from a prompt typed before the decision's put (RU-12, RU-17), after another
+# decision's put (RU-15, RU-18), or with no put in any transcript (RU-16); or a prompt after the put holding the reply
+# among other words is not credited (RU-14); or a reply of enough words needs the put (RU-19).
+ru_ruled() {  # <D<n>> <reply> <who> <title> -> 1 when the newest ruling heading of D<n> is exactly that
+  ru_head "$1" | /usr/bin/grep -cE "^## Δ[0-9]+ — $1 ruled \"$2\" \($3 $RU_WHEN\): $4\$"
+}
+poke "$RF" decisions put D21 'which reader the card takes'
+ru_typed '1' --put=D21
+poke "$RF" decisions rule D21 '1'
+expect_eq "RU-12 a digit typed only before the decision's put: ruled (exit 0), the one who ruled orchestrator" \
+  "0|1" "$RC|$(ru_ruled D21 1 orchestrator 'which reader the card takes')"
+poke "$RF" decisions put D22 'which page the card opens on'
+ru_typed --put=D22 '1'
+poke "$RF" decisions rule D22 '1'
+expect_eq "RU-13 the same digit typed after the put (RU-12's fixture, the order swapped): ruled, the git user" \
+  "0|1" "$RC|$(ru_ruled D22 1 'Dana Fixture' 'which page the card opens on')"
+poke "$RF" decisions put D23 'which tier the page takes'
+ru_typed --put=D23 'Option 1'
+poke "$RF" decisions rule D23 '1'
+expect_eq "RU-14 the digit among other words in a prompt after the put, as whole words: ruled, the git user" \
+  "0|1" "$RC|$(ru_ruled D23 1 'Dana Fixture' 'which tier the page takes')"
+poke "$RF" decisions put D24 'how wide the page is'
+poke "$RF" decisions put D25 'how tall the page is'
+ru_typed --put=D24 '1' --put=D25
+poke "$RF" decisions rule D25 '1'
+expect_eq "RU-15 the digit typed after another decision's put, before this one's: ruled, orchestrator (the mark is its own)" \
+  "0|1" "$RC|$(ru_ruled D25 1 orchestrator 'how tall the page is')"
+poke "$RF" decisions put D26 'how the page is titled'
+ru_typed '1'
+poke "$RF" decisions rule D26 '1'
+expect_eq "RU-16 put by the verb but in no transcript, the digit typed: ruled, orchestrator" \
+  "0|1" "$RC|$(ru_ruled D26 1 orchestrator 'how the page is titled')"
+poke "$RF" decisions put D27 'how the page is sorted'
+ru_typed --put=D27 '1' --put=D27
+poke "$RF" decisions rule D27 '1'
+expect_eq "RU-17 the digit typed after a put the decision was put again since: ruled, orchestrator (the last put opens the round)" \
+  "0|1" "$RC|$(ru_ruled D27 1 orchestrator 'how the page is sorted')"
+poke "$RF" decisions put D2 'how the page is cut'
+ru_typed --put=D20 '1'
+poke "$RF" decisions rule D2 '1'
+expect_eq "RU-18 the digit typed after the put of D20, ruled for D2: ruled, orchestrator (D2's mark is not D20's)" \
+  "0|1" "$RC|$(ru_ruled D2 1 orchestrator 'how the page is cut')"
+poke "$RF" decisions put D28 'how the page is read'
+ru_typed 'take the third option please' --put=D28
+poke "$RF" decisions rule D28 'take the third option please'
+expect_eq "RU-19 a reply of enough words typed before the put keeps RU-7's rule: ruled, the git user" \
+  "0|1" "$RC|$(ru_ruled D28 'take the third option please' 'Dana Fixture' 'how the page is read')"
+CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 POKE_BOUND="$AS_BOUND_WAS"
 
 # ============================================================
@@ -599,12 +758,258 @@ cp "$PF" "$TMPROOT/an-plan-before"; cp "$RF_REG" "$TMPROOT/an-reg-before"
 poke "$RF" finding-move "$RF_CR#2" carried T99
 expect_eq "AN-14 finding-move … carried T99, a row the table lacks, is refused (exit 1) and plan and register are byte-identical" "1|same|same" \
   "$RC|$(cmp -s "$TMPROOT/an-plan-before" "$PF" && echo same || echo changed)|$(cmp -s "$TMPROOT/an-reg-before" "$RF_REG" && echo same || echo changed)"
-poke "$RF" finding-move "$RF_CR#2" carried T2
-expect_eq "AN-13 finding-move … carried T2 exits 0" "0" "$RC"
+poke "$RF" finding-move "$RF_CR#2" carried T5
+expect_eq "AN-13 finding-move … carried T5 exits 0" "0" "$RC"
 [ "$RC" = 0 ] || printf '      finding-move said: %s\n' "$OUT"
-expect_eq "AN-13 …the register holds the finding open, answered carry, its event naming the row" "carry|T2 lands|open" \
+expect_eq "AN-13 …the register holds the finding open, answered carry, its event naming the row" "carry|T5 lands|open" \
   "$(OWED_PLAN="$PF" as_owed "$RF" "$SID" owed_answer_of "$RF_FK2" | awk -F'\t' '{ print $1 "|" $3 }')|$(as_register "$RF" "$PF" | tr ' ' '\n' | /usr/bin/grep -qxF "$RF_FK2" && echo open || echo gone)"
-expect_contains "AN-13b …and the plan carries its moved: line naming the row" "moved: $RF_CR#2 to=carried row=T2 by=Dana Fixture at=" "$(cat "$PF")"
+expect_contains "AN-13b …and the plan carries its moved: line naming the row" "moved: $RF_CR#2 to=carried row=T5 by=Dana Fixture at=" "$(cat "$PF")"
 POKE_BOUND="$AS_BOUND_WAS"
 
+# ============================================================
+section "§SWEEP: the Stop that ends a turn closes every open step ask once the plan carries approved-by:"
+# ============================================================
+# A card render opens a step's ask only while the approval is owed (card.test.sh §SETTLED); this is the other half of
+# one fact, one reading: the sweep at the person's turn end closes whatever the cards left open once the plan records
+# the approval, all four steps at once. fails-when: a step ask stays open past the Stop of an approved run, or the
+# sweep closes asks of a plan that is not approved.
+SW_KEYS="approve:step0 approve:step1 approve:step2 approve:step3"
+sw_open() {  # <root> <plan> -> the sweep's own asks the run's register holds open
+  as_register "$1" "$2" | tr ' ' '\n' | /usr/bin/grep '^approve:step' | tr '\n' ' ' | sed 's/ $//'
+}
+sw_plan() {  # <label> <approved 0|1> -> the path of a Step-4 plan, bound, the four step asks open on its register
+  local r p k
+  r="$(make_repo "$1")"; new_roster "$r"
+  p="$(SP_APPROVED_LINE="$([ "$2" = 1 ] && echo 'approved-by: Dana Fixture 2026-10-21T12:00:00Z "approved"')" \
+    s47_plan "$r" 8 "| T1 | 4 | build | a work row | implementor | — | 10 | REQ-x | payload/a.sh | pending | |")"
+  bound_marker "$r" "$SID" "$p"
+  for k in $SW_KEYS; do OWED_PLAN="$p" as_owed "$r" sw-sid owed_open "$k" "approval: $k" "Do you approve?" >/dev/null; done
+  printf '%s' "$p"
+}
+SW_N="$(sw_plan sweepnot 0)"; SW_NR="${SW_N%%/.bionic/*}"
+expect_eq "SW-0 precondition: the four step asks are open on the run's register (the extractor reads them)" \
+  "$SW_KEYS" "$(sw_open "$SW_NR" "$SW_N")"
+s31_stop "$SW_NR" "$(s31_transcript "$SW_NR" "carry on")"
+expect_eq "SW-1 a Stop over a plan with no approved-by: closes none of them" "$SW_KEYS" "$(sw_open "$SW_NR" "$SW_N")"
+SW_Y="$(sw_plan sweepyes 1)"; SW_YR="${SW_Y%%/.bionic/*}"
+expect_eq "SW-2 precondition: the approved plan carries approved-by: and the same four asks are open" \
+  "1|$SW_KEYS" "$(/usr/bin/grep -c '^approved-by:' "$SW_Y")|$(sw_open "$SW_YR" "$SW_Y")"
+s31_stop "$SW_YR" "$(s31_transcript "$SW_YR" "carry on")"
+expect_eq "SW-3 the Stop over a plan carrying approved-by: closes all four at once" "" "$(sw_open "$SW_YR" "$SW_Y")"
+expect_contains "SW-3b …the register recording the sweep as the closer" "|key=approve:step3|state=closed|by=plan approved-by|" \
+  "$(cat "$SW_YR/.bionic/docs/record/wave-01-fixture/asks.state" 2>/dev/null)"
+
+# ============================================================
+section "§ONE-BLOCKS: a waiver answered no waits on an event, open or closed: the close line, the held words, the card and the waste never count it as waiting on you"
+# ============================================================
+# FIXTURE FIDELITY: the register's lines are written by owed.sh's own writers (owed_open, owed_answer, owed_close) on the
+# run's register; only their instants are then set to the fixture's clock, since the writers stamp the machine's. The
+# surfaces are the real verbs over a plan approved at Step 3 whose one open task is the integrate row the waiver holds:
+# `sitrep` for close.waits-on-you, the close's basis (the held words) and waste.waiting-on-you, `sitrep card` for
+# Blocked on you.
+# ANTI-VACUITY: the control world differs in one fact, the waiver unanswered, and every reader counts it there, read
+# through the same extractors.
+# fails-when: lib/owed.sh `owed_close` drops the answer (OB-6), `ask_waits_on` reads a closed waiver answered no as user
+# (OB-7), or hooks/poker/sitrep.sh counts an ask that waits on an event in close.waits-on-you, the held words or the
+# minutes waiting on you (OB-2 to OB-5, OB-8).
+ob_world() {  # <label> -> OB_R, OB_P: an approved plan at Step 8, its integrate row T2 open, nothing on its register
+  OB_R="$TMPROOT/ob-$1"; OB_P="$OB_R/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
+  mkdir -p "${OB_P%/*}" "$OB_R/.bionic/docs/record/wave-02-fx" "$OB_R/.bionic/tmp"; ( cd "$OB_R" && git init -q . )
+  : > "$OB_R/.bionic/docs/record/wave-02-fx/landing-proofs.log"
+  {
+    printf -- '---\nwave: wave-02-fx\nrelease: 9.9.0\nworking-branch: wave/02-fx\nintegration-branch: main\nforecast: 8h\n---\n'
+    printf '# fixture plan\n\n## SDLC State\n\napproved-by: fixture 2026-10-06T16:00:00Z "approved"\ncurrent: 8\n\n- Step 4: implementation opened\n'
+    printf -- '- T1: landed %s 2026-10-06T18:00:00Z — .worktrees/02-T1\n' "$(printf 'c%.0s' $(seq 40))"
+    printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | The first row. It builds the thing · complexity: standard | — | — | — | 30 | REQ-1 | lib/t1.sh | — | — | landed | — | — | — |\n'
+    printf '| T2 | 8 | integrate | The merge row. It merges the wave · complexity: standard | — | — | — | 30 | REQ-1 | lib/t2.sh | — | — | pending | — | — | — |\n'
+    printf '\n## Not Doing\n\n- nothing\n'
+  } > "$OB_P"
+}
+ob_owed() { OWED_ROOT="$OB_R" OWED_SID="$SID" OWED_PLAN="$OB_P" as_owed "$OB_R" "$SID" "$@"; }   # <function> [args] -> on the run's register
+ob_reg() { bash -c '. "$1/run.sh" && . "$1/binding.sh" && . "$1/owed.sh" && owed_register "$2" "$3"' _ "$AS_LIB" "$OB_R" "$OB_P" 2>/dev/null; }
+ob_clock() {  # <field> <ISO> -> that instant field of waive:structure's line set to the fixture's clock
+  local f; f="$(ob_reg)"
+  sed "/|key=waive:structure|/s/|$1=[^|]*/|$1=$2/" "$f" > "$f.t" && mv "$f.t" "$f"
+}
+ob_waiver() {  # <open|closed> <answered: yes|no> -> waive:structure on the register, opened 20:00Z, answered no at 20:00Z, closed 21:00Z
+  ob_owed owed_open waive:structure "waiver: structure" "poker: the structure review failed at the head" >/dev/null
+  ob_clock at 2026-10-06T20:00:00Z
+  if [ "$2" = yes ]; then ob_owed owed_answer waive:structure no "review structure re-run"; ob_clock answered 2026-10-06T20:00:00Z; fi
+  if [ "$1" = closed ]; then ob_owed owed_close waive:structure waive >/dev/null; ob_clock at 2026-10-06T21:00:00Z; ob_clock opened 2026-10-06T20:00:00Z; fi
+}
+ob_verb() {  # <args after the verb…> -> OB_OUT, OB_RC: the sitrep verb in the world, at 22:00Z
+  OB_RC=0
+  OB_OUT="$( cd "$OB_R" && env -u CLAUDE_CODE_SESSION_ID CLAUDE_CODE_SESSION_ID="$SID" BIONIC_NOW_EPOCH=1791324000 TZ=America/Los_Angeles \
+    BIONIC_GATE_DIR="$TMPROOT/ob-gate" BIONIC_PLUGINS_DIR="$TMPROOT/ob-plugins" BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 \
+    BIONIC_PROBE_FREE_PCT=60 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_BUSY_CORES=1.0 \
+    BIONIC_PROBE_BUSY_CORES_5M=1.0 bash "$POKER" sitrep "$@" 2>/dev/null )" || OB_RC=$?
+}
+ob_m() { printf '%s\n' "$OB_OUT" | awk -v k="$1: " 'index($0, k) == 1 { v = substr($0, length(k) + 1); i = index(v, " — "); print (i ? substr(v, 1, i - 1) : v); exit }'; }
+ob_read() {  # -> `<close.waits-on-you>|<held on you: yes|no>|<waste.waiting-on-you>|<Blocked on you lines naming the waiver>`
+  local held card
+  ob_verb "$OB_P"; [ "$OB_RC" = 0 ] || { printf 'sheet rc=%s\n' "$OB_RC"; return; }
+  held=no; printf '%s\n' "$OB_OUT" | /usr/bin/grep -q '^close.predicted: .*a task held on you is unscaled' && held=yes
+  printf '%s|%s|%s|' "$(ob_m close.waits-on-you)" "$held" "$(ob_m waste.waiting-on-you)"
+  ob_verb card "$OB_P" <<'OBJ'
+purpose: The fixture merges its wave; on course.
+call: Rule on the structure review: the merge waits on it.
+grade: B
+point: The build is done and the merge row is next.
+close: It holds once the structure review is answered.
+OBJ
+  [ "$OB_RC" = 0 ] || { printf 'card rc=%s\n' "$OB_RC"; return; }
+  # a row under Blocked on you other than its None row, which names the next event
+  card="$(printf '%s\n' "$OB_OUT" | awk '/^  [A-Z]/ { s = $0; next } s == "  Blocked on you" && /^    • / && !/^    • None/' | /usr/bin/grep -c .)"
+  printf '%s\n' "$card"
+}
+mkdir -p "$TMPROOT/ob-gate/requests" "$TMPROOT/ob-gate/cost" "$TMPROOT/ob-plugins"
+ob_world control; ob_waiver open no
+expect_eq "OB-0 precondition: the waiver is open on the run's register, unanswered, and waits on the user" "waive:structure|user" \
+  "$(as_register "$OB_R" "$OB_P")|$(ob_owed ask_waits_on waive:structure "$OB_P" "$OB_R")"
+expect_eq "OB-1 control: the unanswered waiver holding the merge row waits on you on every reader — the close line names it, the close holds a task on you, two hours wait on you, the card blocks on it" \
+  "yes: waive:structure|yes|120 min: waive:structure|1" "$(ob_read)"
+ob_world open-no; ob_waiver open yes
+expect_eq "OB-2 precondition: the same waiver answered no at its opening waits on its review's next run" "waive:structure|event review structure re-run" \
+  "$(as_register "$OB_R" "$OB_P")|$(ob_owed ask_waits_on waive:structure "$OB_P" "$OB_R")"
+OB_OPEN="$(ob_read)"
+expect_eq "OB-3 answered no, the close line does not name it and the close holds no task on you (OB-1 read both through the same call)" \
+  "no|no" "$(printf '%s' "$OB_OPEN" | cut -d'|' -f1,2)"
+expect_eq "OB-4 …no minute waits on you from its answer on" "0 min" "$(printf '%s' "$OB_OPEN" | cut -d'|' -f3)"
+expect_eq "OB-5 …and the card does not block on it" "0" "$(printf '%s' "$OB_OPEN" | cut -d'|' -f4)"
+ob_world closed-no; ob_waiver closed yes
+expect_contains "OB-6 the closed line keeps the answer it was given" "|key=waive:structure|state=closed|by=waive|" \
+  "$(/usr/bin/grep -F '|answer=no|answered=2026-10-06T20:00:00Z|event=review structure re-run' "$(ob_reg)")"
+expect_eq "OB-7 a closed waiver answered no reads event, as it read open (OB-2 read the same call)" "event review structure re-run" \
+  "$(ob_owed ask_waits_on waive:structure "$OB_P" "$OB_R")"
+OB_CLOSED="$(ob_read)"
+ob_world closed-control; ob_waiver closed no
+OB_CLOSED_C="$(ob_read)"
+expect_eq "OB-8 control: the same waiver closed unanswered counts its hour on you" "60 min: waive:structure" "$(printf '%s' "$OB_CLOSED_C" | cut -d'|' -f3)"
+expect_eq "OB-9 …answered no at its opening it counts no minute, and no reader names it (OB-8 read the minutes through the same call)" \
+  "no|no|0 min|0" "$OB_CLOSED"
+
+
+# ============================================================
+section "§SHARED: a decision ruled at the release card and one approved by name go through the one ruling writer: each leaves its Δ line and a closed ask"
+# ============================================================
+# FIXTURE FIDELITY: the run is release-approval.test.sh's settled Step-8 world, its builders (fc_record, fc_line,
+# fc_floor, fc_reads, fc_plan, fc_typed) read out of that suite by name and its repository made by the same steps; the
+# integrate row also reads approval:D7 and approval:D8, through fc_plan's own edit argument. The decisions are put by
+# `decisions put`, the card is rendered by `release-approval` and answered by `reply`, the words typed in this
+# session's transcript as that suite types them.
+# fails-when: `approve D<n>`, or a card reply that approves D<n>, records the approval and writes no ledger entry, or
+# leaves decide:D<n> open.
+# ANTI-VACUITY: SH-1 reads both asks open through the extractor SH-4 and SH-8 read them closed through.
+RA_TESTS="$(dirname "$0")/release-approval.test.sh"
+for _f in fc_record fc_line fc_floor fc_reads fc_plan fc_typed; do as_import_fn "$_f" "$RA_TESTS" || exit 1; done
+POKE_BOUND=180
+RFC="$(make_repo as-shared)"
+git -C "$RFC" config user.email t@example.com; git -C "$RFC" config user.name "Dana Fixture"
+printf '.bionic\n' > "$RFC/.gitignore"
+mkdir -p "$RFC/tests" "$RFC/lib" "$RFC/.bionic/docs/plans" "$RFC/.bionic/docs/record/wave-x"
+printf '#!/bin/bash\nexit 0\n' > "$RFC/tests/a.test.sh"
+printf 'one\n' > "$RFC/lib/x.sh"; printf '# Changelog\n' > "$RFC/CHANGELOG.md"
+( cd "$RFC" && git add .gitignore tests lib CHANGELOG.md && git commit -qm base && git checkout -q -b wave/01-fixture ) >/dev/null 2>&1
+FC_B="$(git -C "$RFC" rev-parse HEAD)"
+FC_C="$(s57_commit "$RFC" lib/x.sh 'T1: the code change')"
+FC_R="$(s57_commit "$RFC" CHANGELOG.md 'T2: the release text')"
+FC_REC="$RFC/.bionic/docs/record/wave-x"; FC_LIB="$AS_LIB"; PFC="$RFC/.bionic/docs/plans/wave-x.plan.md"
+printf 'generic fixture proof\n' > "$RFC/.bionic/docs/record/generic-evidence.md"
+fc_record evidence evidence piece
+fc_record adversarial adversarial piece 'finding: 1 S3 off lib/x.sh:1 a message could be clearer'
+fc_record structure structure piece
+fc_record adversarial-whole adversarial whole
+fc_record structure-whole structure whole
+fc_plan "$(fc_floor "$FC_C")
+$(fc_reads "$FC_C")" 's/| approval:release, approval:merge, head |$/| approval:release, approval:merge, approval:D7, approval:D8, head |/'
+SH_LED="$FC_REC/design-ledger.md"; SH_REG="$FC_REC/asks.state"
+FC_CFG="$TMPROOT/sh-cfg"
+FC_PROJ="$FC_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "$AS_LIB" "$RFC")"
+mkdir -p "$FC_PROJ" "$FC_CFG/bionic" "$RFC/.bionic/tmp"
+printf '80\n' > "$FC_CFG/bionic/share"
+printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$RFC" > "$RFC/.bionic/tmp/loaded-$SID.state"
+FC_TX="$FC_PROJ/$SID.jsonl"; FC_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
+export CLAUDE_CONFIG_DIR="$FC_CFG"
+# The card's reply is typed after D7's put, as it is live: a reply under three words rules a decision only after its
+# put (§RULE), so the transcript carries the put §RULE's writer plants, ahead of the reply.
+RU_TX="$FC_TX" ru_typed 'option 2 for D8' --put=D7 'all default'
+expect_eq "SH-0 precondition: the open integrate row reads approval:D7 and approval:D8" "D7 D8" \
+  "$(bash -c '. "$1" && units_approval_names "$2"' _ "$UNITS_LIB" "$PFC" 2>/dev/null | /usr/bin/grep '^D' | tr '\n' ' ' | sed 's/ $//')"
+poke "$RFC" decisions put D7 'which findings reach the user'
+poke "$RFC" decisions put D8 'where the card states its purpose'
+expect_eq "SH-1 precondition: both decisions are put and both asks are open" "0|open|open" \
+  "$RC|$(as_open "$RFC" "$PFC" decide:D7)|$(as_open "$RFC" "$PFC" decide:D8)"
+poke "$RFC" approve D8 'option 2 for D8'
+expect_eq "SH-2 approve D8 exits 0" "0" "$RC"
+[ "$RC" = 0 ] || printf '      approve said: %s\n' "$OUT"
+expect_regex "SH-3 approving D8 by name writes its ruling heading, the approval's words its reply, the put's title" \
+  "^## Δ[0-9]+ — D8 ruled \"option 2 for D8\" \\(Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{1,2}:[0-9]{2} [AP]M [A-Za-z+0-9-]+\\): where the card states its purpose\$" \
+  "$(/usr/bin/grep '^## Δ[0-9]* — D8 ruled' "$SH_LED")"
+expect_eq "SH-4 …and closes decide:D8 by the ruling, D7's still open (SH-1 read both open)" "gone|yes|open" \
+  "$(as_open "$RFC" "$PFC" decide:D8)|$(as_has "$(cat "$SH_REG" 2>/dev/null)" '|key=decide:D8|state=closed|by=ruled|')|$(as_open "$RFC" "$PFC" decide:D7)"
+/usr/bin/grep -q '|key=decide:D8|state=closed|by=ruled|' "$SH_REG" 2>/dev/null || printf '      the register: %s\n' "$(/usr/bin/grep -F 'decide:D8' "$SH_REG" 2>/dev/null)"
+poke "$RFC" release-approval
+[ "$RC" = 0 ] || printf '      release-approval said: %s\n' "$OUT"
+SH_PAGE="$(ls -t "$FC_REC"/release-approval-*.md 2>/dev/null | head -1)"
+expect_eq "SH-5 precondition: the card renders (exit 0) and puts D7's approval, the one decision still owed" "0|approve:D7" \
+  "$RC|$(/usr/bin/grep '^release-approval/v1|dec=' "$SH_PAGE" 2>/dev/null | tr '|' '\n' | sed -n 's/^key=//p' | /usr/bin/grep '^approve:D' | tr '\n' ' ' | sed 's/ $//')"
+poke "$RFC" reply 'all default'
+expect_eq "SH-6 reply 'all default' exits 0" "0" "$RC"
+[ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
+expect_regex "SH-7 the card's reply writes D7's ruling heading through the same writer, the reply its words" \
+  "^## Δ[0-9]+ — D7 ruled \"all default\" \\(Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{1,2}:[0-9]{2} [AP]M [A-Za-z+0-9-]+\\): which findings reach the user\$" \
+  "$(/usr/bin/grep '^## Δ[0-9]* — D7 ruled' "$SH_LED")"
+expect_eq "SH-8 …and closes decide:D7 by the ruling (SH-4 read it open)" "gone|yes" \
+  "$(as_open "$RFC" "$PFC" decide:D7)|$(as_has "$(cat "$SH_REG" 2>/dev/null)" '|key=decide:D7|state=closed|by=ruled|')"
+poke "$RFC" decisions
+expect_eq "SH-9 the register's parser reads both rulings as entries" 'D7 · "all default"|D8 · "option 2 for D8"' \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^D[78] · "' | awk -F' · ' '{ print $1 " · " $2 }' | LC_ALL=C sort | paste -sd'|' -)"
+# THE SAME WRITER NAMES WHO RULED. `approve D<n>` carries the reply the orchestrator gives; the card's reply
+# is refused before the writer unless the user typed it (REPLY-8), so only `approve` reaches the other two outcomes.
+# ANTI-VACUITY: SH-3 and SH-7 read headings naming the git user through the extractor SH-10 reads `orchestrator` through.
+sh_head() { /usr/bin/grep "^## Δ[0-9]* — $1 ruled" "$SH_LED" | tail -1; }  # <D<n>> -> the newest ruling heading of it
+SH_WHEN='[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{1,2}:[0-9]{2} [AP]M [A-Za-z+0-9-]+'
+sed -i.bak 's/approval:D8, head |$/approval:D8, approval:D9, approval:D10, head |/' "$PFC" && rm -f "$PFC.bak"
+poke "$RFC" decisions put D9 'which wave takes the carry'
+poke "$RFC" decisions put D10 'whether the card says first'
+poke "$RFC" approve D9 'go with the default for D9'
+expect_eq "SH-10 approve D9 with words the user never typed: exit 0, the heading names orchestrator (SH-3's extractor read the git user)" \
+  "0|1" "$RC|$(sh_head D9 | /usr/bin/grep -cE "^## Δ[0-9]+ — D9 ruled \"go with the default for D9\" \(orchestrator $SH_WHEN\): which wave takes the carry\$")"
+expect_eq "SH-11 …and decide:D9 is closed by that ruling" "gone|yes" \
+  "$(as_open "$RFC" "$PFC" decide:D9)|$(as_has "$(cat "$SH_REG" 2>/dev/null)" '|key=decide:D9|state=closed|by=ruled|')"
+poke "$RFC" decisions
+expect_eq "SH-12 the parser reads the orchestrator's ruling as an entry with that ruler" "D9 · \"go with the default for D9\" · orchestrator" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^D9 · "' | as_ruler)"
+rm -f "$FC_TX"
+cp "$SH_LED" "$TMPROOT/sh-led-before"
+poke "$RFC" approve D10 'go with the default for D10'
+expect_eq "SH-13 approve D10 with no transcript to read: exit 1 naming the lack and the missing ruling, no heading written (the approval itself stands on the plan, and approve:D10 and decide:D10 are one ask)" \
+  "1|yes|yes|same|yes" \
+  "$RC|$(as_has "$OUT" 'transcript cannot be found or read')|$(as_has "$OUT" 'its ruling is not in the design ledger')|$(cmp -s "$TMPROOT/sh-led-before" "$SH_LED" && echo same || echo changed)|$(as_has "$(cat "$PFC")" 'approved: D10 by')"
+CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
+POKE_BOUND="$AS_BOUND_WAS"
+
+# ============================================================
+section "§SETTLED: a heading D<n> settled by … is a ledger entry whose clock is the line's date, so its waiting span is kept"
+# ============================================================
+# FIXTURE FIDELITY: the settled heading is copied verbatim from a shipped design ledger; the put above it is that ledger's
+# put of the same decision, its title cut short. The parser is read by its own functions out of hooks/poker/sitrep.sh, the file the poker sources.
+# fails-when: the heading parses as no entry, or as one with no clock, so the decision reads open and has no span.
+# ANTI-VACUITY: SE-0 reads the put through the same call SE-1 reads the settled heading through.
+SE_L="$TMPROOT/se-ledger.md"
+{ printf '# Design ledger — wave-42-sitrep-owes\n\n'
+  printf '## Δ19 — D6 put (orchestrator 2026-10-21 7:53 PM PDT): your verdict on the sitrep card\n\nwait: nothing moves\n\n'
+  printf '%s\n' "## Δ20 — D6 settled by the go on Δ19's plan (Chris Lehman 2026-10-21 8:12 PM): \"go\""
+} > "$SE_L"
+se() { bash -c '. "$1/poker/sitrep.sh" && shift && "$@"' _ "$BIONIC_HOOKS_DIR" "$@" 2>/dev/null; }
+se_t() { se decisions_list "$SE_L" times | awk -F'\t' -v v="$1" '$2 == v { print $1 "|" $3 "|" $4 " " $5 }'; }
+expect_eq "SE-0 precondition: the put is an entry with its date and clock" "D6|2026-10-21|7:53 PM" "$(se_t put)"
+expect_eq "SE-1 the settled-by heading is an entry, its date and clock the line's" "D6|2026-10-21|8:12 PM" "$(se_t settled)"
+expect_eq "SE-2 …the register reads it: the verb and the reply, the approver and the date, what settled it" \
+  "D6 · settled \"go\" · Chris Lehman 2026-10-21 · the go on Δ19's plan" "$(se decisions_list "$SE_L")"
+expect_eq "SE-3 …its round reads ruled" "D6	1	ruled" "$(se decisions_rounds "$SE_L")"
+expect_eq "SE-4 …and the decision's waiting span is kept: 19 minutes from the put to the settling" "1140" \
+  "$(se sitrep_ledger_times "$SE_L" | awk -F'\t' '$1 == "D6" && $3 != "-" { print $3 - $2 }')"
 finish

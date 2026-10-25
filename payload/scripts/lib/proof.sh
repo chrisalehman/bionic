@@ -1796,13 +1796,13 @@ _proof_floor_judge() {
 # F..<head> is excused or proved and every suite of <owed> (comma-joined) is closed; exit 2 printing the suites still
 # open, comma-joined; exit 1 printing one sentence naming the first commit that is not proved and what it lacks.
 # EXCUSED: its tree is its first parent's; or every path it changed is docs (`_proof_docs_path`, or under the docs
-# root); or every path is in the release set (`_proof_release_path`) and a check passed at it (`proof_check_passes`).
+# root or the tracked docs home); or every path is in the release set (`_proof_release_path`) and a check passed at it (`proof_check_passes`).
 # PROVED: each suite its row's landing names (the row's last `ready` before the `published` event naming the commit;
 # with no such event, the suites the landing verdicts at it name) has a newest record at it that is green. A record is
 # at the commit it ran at, or at the row head a merge commit brought in as its second parent.
 # CLOSED: a red of F has a newest landing verdict (never a stamp, never a whole run) green at a commit after F.
 _proof_past_f() {
-  local plan="$1" tree="$2" from="$3" to="$4" owed="${5:-}" walk rec recs top droot pfx="" files="" c f isdoc isrel
+  local plan="$1" tree="$2" from="$3" to="$4" owed="${5:-}" walk rec recs top droot pfx="" tpfx files="" c f isdoc isrel
   walk="$(git -C "$tree" log --first-parent --reverse --format='W%x09%H%x09%T%x09%P' "$from..$to" 2>/dev/null)" || {
     printf 'git cannot list the commits from %.12s to %.12s' "$from" "$to"; return 1; }
   rec="$(proof_debt_record "$plan" "$tree" 2>/dev/null)" || rec=""
@@ -1811,12 +1811,14 @@ _proof_past_f() {
   top="$(git -C "$tree" rev-parse --show-toplevel 2>/dev/null)"
   ! declare -F docs_root >/dev/null 2>&1 || droot="$(docs_root "$tree" 2>/dev/null)"
   case "${droot:-}" in "$top"/?*) pfx="${droot#"$top"/}"; pfx="${pfx%/}/" ;; esac
+  tpfx="$(_facts_tracked_prefix "$tree")"
   while IFS= read -r f; do
     case "$f" in '') continue ;; $'\001'*) c="${f#?}"; continue ;; esac
     # Each path is asked both questions, as the judge's cover asks them: CHANGELOG.md is docs and in the release set,
     # so it spoils neither a docs commit's excuse nor a release commit's, which its passing check gives.
     isdoc=0; isrel=0
-    if { [ -n "$pfx" ] && [ "${f#"$pfx"}" != "$f" ]; } || _proof_docs_path "$f"; then isdoc=1; fi
+    if { [ -n "$pfx" ] && [ "${f#"$pfx"}" != "$f" ]; } || { [ -n "$tpfx" ] && [ "${f#"$tpfx"}" != "$f" ]; } \
+       || _proof_docs_path "$f"; then isdoc=1; fi
     ! _proof_release_path "$f" || isrel=1
     files="$files${files:+$'\n'}C	$c	$isdoc	$isrel"
   done <<PROOF_PAST_FILES
@@ -2445,7 +2447,7 @@ _proof_docs_path() {
 # A reading is covered to its head. A later commit on the head's first-parent line extends it when it holds, and
 # each commit's basis is one of five words:
 #   prose        every path it touched (a merge as what it brought in, a rename as both its paths) is under the docs
-#                root or on `_proof_docs_path`'s list; a commit that touches nothing is prose too, so a merge whose tree
+#                root or the tracked docs home (`_facts_tracked_prefix`) or on `_proof_docs_path`'s list; a commit that touches nothing is prose too, so a merge whose tree
 #                is its first parent's (one from the integration branch resolved to ours) is prose (wave-38 T2; AC-4.1)
 #   release      every path it touched is in the release set (`_proof_release_path`) and the plan's release check passes
 #                at it (`proof_check_passes`), on every chain; the regression walk reads the same kind (wave-38 T2; D18)
@@ -2465,6 +2467,18 @@ _facts_docs_prefix() {
   [ -n "$tree" ] && declare -F docs_root >/dev/null 2>&1 || return 0
   droot="$(docs_root "$tree" 2>/dev/null)"
   case "$droot" in "$tree"/?*) p="${droot#"$tree"/}"; printf '%s/' "${p%/}" ;; esac
+}
+
+# _facts_tracked_prefix <tree> -> the project's tracked docs home (`docs_tracked`, roots.sh) as a path relative to <tree>
+# with a trailing `/`, or nothing when it is not under <tree>. With roots.sh unloaded the home is `docs/`, its default.
+# A promotion copies a run's records there, so a path under it is prose beside the state home's.
+_facts_tracked_prefix() {
+  local tree="${1:-}" top troot p
+  [ -n "$tree" ] || return 0
+  if ! declare -F docs_tracked >/dev/null 2>&1; then printf 'docs/'; return 0; fi
+  top="$(git -C "$tree" rev-parse --show-toplevel 2>/dev/null)" || return 0
+  troot="$(docs_tracked "$top" 2>/dev/null)"
+  case "$troot" in "$top"/?*) p="${troot#"$top"/}"; printf '%s/' "${p%/}" ;; esac
 }
 
 # _facts_born_landings <plan> <tree> [<proof_fixed lines>] -> `<commit>\t<review|floor>\t<questions>`, one line per
@@ -2559,8 +2573,9 @@ PROOF_BORN
 # <last head>; nothing printed and 1 when <last head> is not on <head>'s history, or git cannot answer: uncovered is
 # the safe direction. Both heads are compared as the commits they resolve to, never as strings (T45; review pass 13 F10).
 _facts_walk() {
-  local tree="$1" pfx="$2" born="${5:-}" q="${6:-}" chk="${7:-}" lh hh files f c="" prose=1 rel=1 rc=0
+  local tree="$1" pfx="$2" born="${5:-}" q="${6:-}" chk="${7:-}" lh hh files f c="" prose=1 rel=1 rc=0 tpfx
   [ -n "$tree" ] || return 1
+  tpfx="$(_facts_tracked_prefix "$tree")"
   lh="$(git -C "$tree" rev-parse --verify -q "$3^{commit}" 2>/dev/null)" || return 1
   hh="$(git -C "$tree" rev-parse --verify -q "$4^{commit}" 2>/dev/null)" || return 1
   [ "$lh" != "$hh" ] || return 0
@@ -2573,7 +2588,7 @@ _facts_walk() {
     esac
     [ "$rel" = 0 ] || _proof_release_path "$f" || rel=0
     [ "$prose" = 1 ] || continue
-    [ "${f#"$pfx"}" != "$f" ] || _proof_docs_path "$f" || prose=0
+    [ "${f#"$pfx"}" != "$f" ] || { [ -n "$tpfx" ] && [ "${f#"$tpfx"}" != "$f" ]; } || _proof_docs_path "$f" || prose=0
   done <<PROOF_DOCS_FILES
 $files
 PROOF_DOCS_FILES
@@ -2647,6 +2662,53 @@ facts_cover() {
   fixed="$(proof_fixed "$plan" "$tree")"
   _facts_walk "$tree" "$(_facts_docs_prefix "$tree")" "$2" "$3" "$(_facts_born_landings "$plan" "$tree" "$fixed")" "${4:-}" \
     "$(proof_check_passes "$plan" "$tree")"
+}
+
+# facts_reviews <plan> <head> [--landings] -> THE ONE READING OF A REVIEW COVERED OR FAILING, one line per review question
+# the rigor deals, in the dealing's order: `<question><TAB><role><TAB><state><TAB><landings>`. <state> is the judge's
+# (`facts_state`) over every line it owes for the question: `failing` when one reads failing, else `absent` when one
+# has no reading, else `uncovered` when a commit past one is not held, else `covered`. Handed --landings, <landings>
+# names, for a covered question whose newest reading is behind <head>, each landing born of a review that the walk
+# holds it by from the question's newest link (`proof_chain_head`) to <head> (`facts_cover`'s `born-review` lines), oldest first, comma-joined as `<row>@<commit>`, the row `-` when no
+# fixed finding names the commit; `-` otherwise. The release card's Reviews lines and the situation report's reviews
+# count both read this, so a fix landing that answers a failed reading reads covered on both, and failing only while
+# a question is uncovered. rc as facts_state's: 0 when every question is covered, 1 when one is not, 2 (its sentence
+# on stderr, nothing printed) when the plan cannot be dealt or <head> is no commit.
+facts_reviews() {
+  local plan="${1:-}" head="${2:-}" want="${3:-}" out rc tree q role st ph fixed lands rows
+  out="$(facts_state "$plan" "$head")"; rc=$?
+  [ "$rc" -ne 2 ] || return 2
+  rows="$(printf '%s\n' "$out" | awk -F'\t' '
+    $1 == "review" { q = $2; if (!(q in st)) { o[++n] = q; role[q] = $3; st[q] = "covered" }
+      s = $5; r = (s == "failing") ? 4 : (s == "absent") ? 3 : (s == "uncovered") ? 2 : 1
+      c = (st[q] == "failing") ? 4 : (st[q] == "absent") ? 3 : (st[q] == "uncovered") ? 2 : 1
+      if (r > c) st[q] = s }
+    END { for (i = 1; i <= n; i++) printf "%s\t%s\t%s\n", o[i], role[o[i]], st[o[i]] }')"
+  if [ "$want" != --landings ]; then
+    printf '%s\n' "$rows" | awk -F'\t' 'NF >= 3 { print $0 "\t-" }'
+    return "$rc"
+  fi
+  tree="$(git -C "$(dirname "$plan")" rev-parse --show-toplevel 2>/dev/null)"
+  head="$(git -C "$tree" rev-parse --verify -q "$head^{commit}" 2>/dev/null)"
+  fixed="$(proof_fixed "$plan" "$tree")"
+  while IFS='	' read -r q role st; do
+    [ -n "$q" ] || continue
+    lands="-"
+    if [ "$st" = covered ]; then
+      ph="$(proof_chain_head "$plan" "$q")"; ph="${ph%% *}"
+      ph="$(git -C "$tree" rev-parse --verify -q "${ph:-none}^{commit}" 2>/dev/null)" || ph=""
+      if [ -n "$ph" ] && [ "$ph" != "$head" ]; then
+        lands="$(facts_cover "$plan" "$ph" "$head" "$q" 2>/dev/null | FIXED="$fixed" awk '
+          BEGIN { n = split(ENVIRON["FIXED"], f, "\n"); for (i = 1; i <= n; i++) { split(f[i], x, "\t"); if (x[3] != "" && !(x[3] in row)) row[x[3]] = x[2] } }
+          $1 == "cover" && $3 == "born-review" { printf "%s%s@%s", (k++ ? "," : ""), (($2 in row) ? row[$2] : "-"), $2 }')"
+        [ -n "$lands" ] || lands="-"
+      fi
+    fi
+    printf '%s\t%s\t%s\t%s\n' "$q" "$role" "$st" "$lands"
+  done <<PROOF_REVIEWS
+$rows
+PROOF_REVIEWS
+  return "$rc"
 }
 
 # proof_door_cover <tree> <from> <candidate> -> THE JUDGE'S BASIS OF A CANDIDATE AT ITS DOOR: `release`, `prose`, or

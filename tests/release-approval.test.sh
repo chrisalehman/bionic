@@ -27,6 +27,7 @@
 # §CONFIRM   confirm-row writes the attributed confirmation; the card offers confirm or waive; reply applies either
 # §BORN      two fix rows born of different questions render the page with no re-read
 # §JUDGE     the Tests line names the floor judge's answer: covered after a later green, the owed suite while none
+# §COVERED   a failed review its fix landing answered reads covered, naming the landing; the sitrep counts as the card
 # §POST      a reader row past the landed release keeps the card early until its piece reading is registered
 # §STEP0     card.sh step0 renders the configuration card and owes its reply
 # §LEGACY    a page written under the card's old name is still replied to, and the alias writes the new page
@@ -834,6 +835,60 @@ git -C "$RFC" reset -q --hard "$FC_R"
 rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/release-approval-*.md
 
 # ============================================================
+section "§COVERED: a failed review its fix landing answered reads covered on the card, naming the landing, and the sitrep counts it as the card does"
+# ============================================================
+# FIXTURE FIDELITY: the adversarial reading at C fails on one S2 finding to fix (its record in the readers' grammar,
+# its proof line by the writer), newer than the passing ones; the fix row T4 is born of that finding (the marker
+# `task-add --born` writes) and landed green at F, the head (its events as the line writes them). The card is the
+# real verb's page and the count is the real sitrep's sheet, over the same plan and head.
+# fails-when: the Reviews line still prints failing after the fix landed, does not name the fix's landing, reads
+# covered before the fix landed; or the sitrep's failed count differs from the card's failing lines, or a sitrep
+# planted back to the raw result agrees with the card.
+printf 'question: adversarial\nresult: fail\nscope: piece\nreviewed: %s..%s\nfindings: 1\nfinding: 1 S2 on lib/x.sh:1 the x writer drops its error\nshown: 1 bash tests/a.test.sh\n\nwhat the reader found\n' \
+  "${FC_B:0:10}" "${FC_C:0:10}" > "$FC_REC/adversarial-fail.md"
+FC_CV_FAIL="$(fc_line review "$FC_C" 2026-10-12T12:30:00Z record/wave-x/adversarial-fail.md adversarial w-read fail piece)"
+cv_reviews() { fc_under Reviews | fc_flat; }
+cv_adv() {  # -> the adversarial line of the Reviews section, unfolded, up to the next line's icon
+  cv_reviews | awk '{ i = index($0, "adversarial — "); if (!i) exit; split(substr($0, i), a, /(✅|✖️|❔|➖)/); sub(/ +$/, "", a[1]); print a[1] }'
+}
+cv_card_failing() { fc_under Reviews | /usr/bin/grep -c '^ *✖️'; }
+cv_sitrep_failed() {  # [<poker>] -> the failed count of the sitrep sheet's reviews line over PFC, as this session
+  ( cd "$RFC" && env CLAUDE_CODE_SESSION_ID="$SID" bash "${1:-$POKER}" sitrep "$PFC" 2>/dev/null ) \
+    | sed -n 's/^reviews: [0-9]* passed, \([0-9]*\) failed, .*/\1/p'
+}
+fc_plan "$FC_GOOD
+$FC_CV_FAIL"
+fc_page --preview
+expect_contains "COVERED-0 precondition: the Reviews section renders the adversarial line" "adversarial — " "$(cv_reviews)"
+expect_contains "COVERED-0b the control: before any fix lands the adversarial line reads failing" "failing" "$(cv_adv)"
+FC_CV0_CARD="$(cv_card_failing)"; FC_CV0_SR="$(cv_sitrep_failed)"
+expect_eq "COVERED-0c …and the card's failing lines and the sitrep's failed count agree: one each" "1|1" "$FC_CV0_CARD|$FC_CV0_SR"
+FC_CV_F="$(s57_commit "$RFC" lib/x.sh 'T4: the fix the adversarial reading asked for')"
+fc_published T4 "$FC_CV_F" > "$FC_REC/landing-proofs.log"
+fc_plan "$FC_GOOD
+$FC_CV_FAIL
+- T4: landed $FC_CV_F 2026-10-12T14:00:00Z born: review S2 on of=record/wave-x/adversarial-fail.md#1"
+awk '{ print } /^\| T2 \|/ {
+  print "| T4 | 4 | build | fix the x error · born: review | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |" }' \
+  "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
+fc_page --preview
+expect_contains "COVERED-1 AC-13.1 the fix landed at the head: the adversarial line reads covered" "covered" "$(cv_adv)"
+expect_absent "COVERED-1b …and no longer failing (COVERED-1 read the same line)" "failing" "$(cv_adv)"
+expect_contains "COVERED-1c …naming the covering landing, its row and commit" "T4 at ${FC_CV_F:0:8}" "$(cv_adv)"
+FC_CV1_CARD="$(cv_card_failing)"; FC_CV1_SR="$(cv_sitrep_failed)"
+expect_eq "COVERED-2 the sitrep's failed count over the same fixture agrees with the card: none failing on either" "0|0" "$FC_CV1_CARD|$FC_CV1_SR"
+# THE PLANT: a copy of the tree whose sitrep is put back to counting the recorded result; it then disagrees with the card.
+FC_CVM="$TMPROOT/cv-mut"; mkdir -p "$FC_CVM/payload"
+cp -R "$BIONIC_HOOKS_DIR" "$FC_CVM/hooks" && cp -R "$BIONIC_HOOKS_DIR/../payload/scripts" "$FC_CVM/payload/scripts"
+sed 's/if \[ "\$jrc" -ne 2 \]; then/if false; then/' "$BIONIC_HOOKS_DIR/poker/sitrep.sh" > "$FC_CVM/hooks/poker/sitrep.sh"
+expect_eq "COVERED-3 the plant changed the copy's sitrep (it reads the one reader today)" "1" \
+  "$(cmp -s "$BIONIC_HOOKS_DIR/poker/sitrep.sh" "$FC_CVM/hooks/poker/sitrep.sh" && echo 0 || echo 1)"
+expect_eq "COVERED-3b …and the planted sitrep counts the fixed review failed while the card reads none: the readers diverge" "0|1" \
+  "$FC_CV1_CARD|$(cv_sitrep_failed "$FC_CVM/hooks/session-poker.sh")"
+git -C "$RFC" reset -q --hard "$FC_R"
+rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/release-approval-*.md "$FC_REC/adversarial-fail.md"
+
+# ============================================================
 section "§POST: a reader row past the landed release keeps the card early until its reading is registered (AC-6.2)"
 # ============================================================
 # fails-when: the card renders while a reader row placed after the landed release has no registered reading; it stays
@@ -891,12 +946,13 @@ git -C "$RFC" reset -q --hard "$FC_R"
 rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/release-approval-*.md "$FC_REC"/post-*.md
 
 # ============================================================
-section "§HANDHOLDS: the card prints the hand-holds line read over the window, from the last build landing to the card"
+section "§HANDHOLDS: the card prints the hand-holds line from the last build landing to the card; the report runs on past it"
 # ============================================================
 # The page carries one line in the counts' shape, `hand-holds: total=… · unplaced=<n>`, read over the window whose
-# start is the newest published landing of a build row and whose end is the page's own replay time. The report read
-# after the page names the same two ends, so `landing-report --hand-holds` prints the same line. fails-when: the
-# page prints the run's total, a hand-hold before the last build landing counted; or the report and the page differ.
+# start is the newest published landing of a build row and whose end is the page's own replay time. The page ends
+# nothing else: `landing-report --hand-holds` reads from the same start to the plan's `delivered:` time, else now, so
+# an act after the card is counted by the report. fails-when: the page prints the run's total, a hand-hold before the
+# last build landing counted; or the report stops at the card.
 # The fixture's landing record holds the build row's queue landing at 10:00; its fill ledger a decline before it and one after.
 fc_plan "$FC_GOOD"
 printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-12T10:00:00Z\n' "$FC_C" > "$FC_REC/landing-proofs.log"
@@ -917,10 +973,14 @@ HH_PAGE="$(hh_page_line)"
 expect_contains "HANDHOLDS-2 the page prints the windowed line: the decline after the last build landing, not the one before it" \
   "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=1 · " "$HH_PAGE"
 expect_regex "HANDHOLDS-2b …in the counts' shape, its last count the lines the window could not place" ' · unplaced=[0-9]+$' "$HH_PAGE"
-expect_eq "HANDHOLDS-3 the page's line equals the report's, read after it over the same ends" "$HH_PAGE" "$(hh_lr)"
-expect_eq "HANDHOLDS-3b …and the report's end is the page's replay time" \
-  "$(/usr/bin/grep '^release-approval/v1|plan=' "$FC_REC/release-approval-$FC_H8.md" | sed 's/.*|at=\([^|]*\)|.*/\1/')" \
-  "$( ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" landing-report --hand-holds "$PFC" ) 2>/dev/null | /usr/bin/grep '^hand-holds window: ' | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z' | tail -1)"
+# a decline a minute after the page's replay time, as the fill ledger writes one
+HH_AT="$(/usr/bin/grep '^release-approval/v1|plan=' "$FC_REC/release-approval-$FC_H8.md" | sed 's/.*|at=\([^|]*\)|.*/\1/')"
+HH_AFTER="$(date -u -j -v+1M -f '%Y-%m-%dT%H:%M:%SZ' "$HH_AT" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "$HH_AT + 1 minute" +%Y-%m-%dT%H:%M:%SZ)"
+printf 'fill-ledger/v1|at=%s|session=fixture|turn=|current=4|state=decline|ceiling=6|width=|open=|free=|ready=T3|launched=|declined=no room|missed=0|idle=|room=|named=T3\n' "$HH_AFTER" >> "$FC_REC/fill-ledger.log"
+expect_eq "HANDHOLDS-3 the report read after the page counts the page's decline and the one planted after the card: the card ends nothing" \
+  "$(printf '%s\n' "$HH_PAGE" | sed 's/total=1 /total=2 /; s/declines=1 /declines=2 /')" "$(hh_lr)"
+expect_eq "HANDHOLDS-3b …and the report's ends line runs to now, printing the start alone and no page time" \
+  "1|0" "$( ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" landing-report --hand-holds "$PFC" ) 2>/dev/null | /usr/bin/grep '^hand-holds window: ' | awk -v at="$HH_AT" '{ print (index($0, "until now: the plan names no delivered: time") > 0) "|" (index($0, at) > 0) }')"
 expect_eq "HANDHOLDS-3c …the page's line stays one entry: it opens once" "1" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c '^hand-holds: ')"
 # WINDOW-2a: waive-row, through the card's reply, writes the matrix waiver with the ISO time, and the window places it.
 HH_T0="$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)"
@@ -1076,15 +1136,18 @@ fc_record structure structure piece
 fc_record adversarial adversarial piece "$FC_S3"
 
 # ============================================================
-section "§STALE: a release approval the head has moved past is put again on the card, and the reply records a second beside the first"
+section "§STALE: a release approval the head has moved past is put again on the card with the merge beside it, and the reply records both again"
 # ============================================================
 # After a fix lands past the approved head, the advance to 8 refuses on that approval as it refuses on a missing one,
 # and the card is the only place the user approves the release, so the card settles the stale approval as its own
-# decision: it puts the release approval again, naming the head it was given at and what landed since, and the reply
-# writes a second approved: release line at the new head, the first kept. An approval is recorded once per head.
+# decision: it puts the release approval again, naming the head it was given at and what landed since, and the merge
+# approval given at that earlier head beside it, so the pair is given again together; the reply writes a second
+# approved: release line and a second approved: merge line at the new head, the first of each kept. An approval is
+# recorded once per head.
 # fails-when: the card is early on a stale approval; the renewal names neither the earlier head nor the landing; the
-# reply replaces the first line or writes none; current 8 --check stays red after it; a second approval at the same
-# head is admitted; a plan with nothing landed since its approval is offered a renewal.
+# stale merge approval is left off the card; the reply replaces a first line or writes no second one; current 8
+# --check stays red after it; a second approval at the same head is admitted; a plan with nothing landed since its
+# approval is offered a renewal.
 FC_ORD='s/^\(| AC-1\.2 | T1 \)| pending |/\1| discharged |/
 /^| T1 | 4 | build/a\
 | T4 | 5 | test | the regression | implementor | — | 30 | REQ-1 | — | — | — | landed | approval:plan |'
@@ -1117,12 +1180,13 @@ expect_contains "STALE-1b …on the approval alone, naming the head the user app
 fc_page
 expect_eq "STALE-2 the page renders at the new head (exit 0, no refusal, its page written)" \
   "0||release-approval-$FC_X8.md" "$FC_RC|$FC_ERR|$(cd "$FC_REC" && ls release-approval-"$FC_X8"*.md 2>/dev/null)"
-expect_eq "STALE-2b …putting the release approval again, and not the merge it still holds" "approve:release" \
+expect_eq "STALE-2b …putting the release approval again, and the merge approval given at the same earlier head beside it" "approve:release approve:merge" \
   "$(/usr/bin/grep '^release-approval/v1|dec=' "$FC_REC/release-approval-$FC_X8.md" 2>/dev/null \
     | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "key=") == 1) print substr($i, 5) }' | tr '\n' ' ' | sed 's/ $//')"
 FC_DEC="$(fc_under Decisions | fc_flat)"
 expect_contains "STALE-2c …the decision names the head the approval was given at" "approved at $FC_H8" "$FC_DEC"
 expect_contains "STALE-2d …and what landed since" "1 commit landed since (T5)" "$FC_DEC"
+expect_contains "STALE-2f …the merge decision says it is asked again at this head" "Merge into main again at this head: approved at $FC_H8" "$FC_DEC"
 expect_contains "STALE-2e …the person's approval item opened on the ledger" "approve:release" "$(fc_owed)"
 poke "$RFC" reply "$FC_WR"
 expect_eq "STALE-3 reply all recommended replays the renewal (exit 0)" "0" "$RC"
@@ -1131,7 +1195,8 @@ expect_eq "STALE-3b …a second approved: release line at the new head, beside t
   "$(/usr/bin/grep -c '^approved: release ' "$PFC")|$(/usr/bin/grep '^approved: release ' "$PFC" | sed -n 's/.* head=\([0-9a-f]*\) .*/\1/p' | paste -sd'|' -)"
 expect_regex "STALE-3c …the new line with the reply's words" \
   "^approved: release by Dana Fixture [0-9T:Z-]+ head=$FC_X \"$FC_WR\"\$" "$(/usr/bin/grep '^approved: release ' "$PFC" | tail -1)"
-expect_eq "STALE-3d …the merge approval untouched, still one line" "1" "$(/usr/bin/grep -c '^approved: merge ' "$PFC")"
+expect_eq "STALE-3d …and a second approved: merge line at the new head, beside the first" "2|$FC_R|$FC_X" \
+  "$(/usr/bin/grep -c '^approved: merge ' "$PFC")|$(/usr/bin/grep '^approved: merge ' "$PFC" | sed -n 's/.* head=\([0-9a-f]*\) .*/\1/p' | paste -sd'|' -)"
 poke "$RFC" current 8 --check
 expect_eq "STALE-4 …after which current 8 --check is green at the new head" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
@@ -1142,5 +1207,65 @@ expect_eq "STALE-5 a third approval at the head the newest line names: refused, 
 expect_contains "STALE-5b …an approval is recorded once at a head" "recorded once" "$OUT"
 rm -f "$FC_REC/landing-proofs.log"
 git -C "$RFC" reset -q --hard "$FC_R"
+
+# ============================================================
+section "§STALE-NAME: an approval of any name the head has moved past is given again at the new head, beside the first"
+# ============================================================
+# Stale is a head: an approval whose recorded head is not the working head is given again by `approve`, whatever its
+# name, and the second line stands beside the first. At the head the newest line names it is refused, as release is.
+# fails-when: a second `approve step4` at a new head is refused as already recorded, or replaces the first line; a
+# second at the head the newest line names is admitted.
+FC_SN_ORD='s/| pending | approval:release, approval:merge, head |/| pending | approval:release, approval:merge, approval:step4, head |/'
+fc_plan "$FC_GOOD" "$FC_SN_ORD"
+fc_sn_heads() { /usr/bin/grep '^approved: step4 ' "$PFC" | sed -n 's/.* head=\([0-9a-f]*\) .*/\1/p' | paste -sd'|' -; }
+poke "$RFC" approve step4 'go ahead'
+expect_eq "SN-0 setup: the first approve step4 is recorded at the head (exit 0)" "0|$FC_R" "$RC|$(fc_sn_heads)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+FC_X="$(s57_commit "$RFC" lib/x.sh 'T5: the fix')"
+poke "$RFC" approve step4 'go ahead again'
+expect_eq "SN-1 approve step4 at a new head is given again (exit 0): a second line at the new head, beside the first" \
+  "0|$FC_R|$FC_X" "$RC|$(fc_sn_heads)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_regex "SN-1b …the new line with the reply's words" \
+  "^approved: step4 by Dana Fixture [0-9T:Z-]+ head=$FC_X \"go ahead again\"\$" "$(/usr/bin/grep '^approved: step4 ' "$PFC" | tail -1)"
+cp "$PFC" "$TMPROOT/fc-before-sn"
+poke "$RFC" approve step4 'and once more'
+expect_eq "SN-2 a third at the head the newest line names: refused, the plan byte-identical" "1|same" \
+  "$RC|$(cmp -s "$TMPROOT/fc-before-sn" "$PFC" && echo same || echo changed)"
+expect_contains "SN-2b …recorded once at a head" "recorded once" "$OUT"
+git -C "$RFC" reset -q --hard "$FC_R"
+
+# ============================================================
+section "§OWED-LATER: a row owed at a later step is neither proved nor a decision; the card lists it as owed by the close"
+# ============================================================
+# A criterion is owed at the step whose task proves it, and the card reads a row through the gate's own predicate
+# (walls.sh `matrix_row_deferred`). A pending row whose task is the close row is owed by the close, so the card puts no
+# decision on it and its reply cannot waive it; the acceptance line names it. FIXTURE FIDELITY: FC_GOOD's plan with a
+# close row (step 9) and a third criterion pending under it, as a planner writes them.
+# fails-when: the row owed by the close is put under Decisions or opened as row:<AC>, or the line does not name it, or a
+# row whose task is a Step-4 row is let off the card.
+fc_owed_later() {  # <task value> -> PFC: FC_GOOD with T4 (step 9, close) and a third row (T3, pending) whose task: is <task value>
+  fc_plan "$FC_GOOD"
+  FC_OL_TASK="$1" awk '
+    { print }
+    /^\| T3 \| 8 \| integrate/ { print "| T4 | 9 | close | close-out, continuation.md | orchestrator | — | 10 | REQ-1 | .bionic/docs/record/wave-x/continuation.md | — | — | pending | merge |" }
+    /^\| AC-1\.2 \|/ { print "| AC-1.3 | T3 | pending | — |  |" }
+    END { print "AC-1.3:"; print "  fails-when: the close reads above zero"
+          print "  eval: T3 — `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close → `total=0`"
+          print "  task: " ENVIRON["FC_OL_TASK"]; print "  evidence: pending" }' "$PFC" > "$PFC.ol" && mv -f "$PFC.ol" "$PFC"
+}
+fc_owed_later T4
+fc_page --preview
+expect_contains "OL-1 precondition: the Decisions still put the unrun row AC-1.2" "AC-1.2" "$(fc_under Decisions)"
+expect_absent "OL-1b …and not the row the close owes" "AC-1.3" "$(fc_under Decisions)"
+expect_contains "OL-2 the acceptance line names it owed by the close" "1 owed by the close" "$(fc_acc)"
+expect_contains "OL-2b …and counts the three criteria" "1 of 3 criteria proved" "$(fc_acc)"
+fc_page
+expect_eq "OL-3 the recorded page opens row:AC-1.2 and no row:AC-1.3" "row:AC-1.2|" \
+  "$(fc_keys | /usr/bin/grep '^row:' | paste -sd'|' -)|$(fc_keys | /usr/bin/grep -x 'row:AC-1.3')"
+fc_owed_later T1
+fc_page --preview
+expect_contains "OL-4 control: the same row whose task is the Step-4 row is put under Decisions" "AC-1.3" "$(fc_under Decisions)"
+expect_absent "OL-4b …and the line names nothing owed by the close" "owed by the close" "$(fc_acc)"
 
 finish

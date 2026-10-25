@@ -733,4 +733,53 @@ expect_status "RV-2: the orchestrator's own confirm-row passes the wall" 0 "$ST"
 expect_absent "RV-2b: …and that arm's line is absent on the same stream RV-1b read" "$RV_ARM" "$ERR"
 
 # ---------------------------------------------------------------------------
+section "§PART — reviews-part is the main thread's and the integrate row's own writer's; any other writer is refused with the row named"
+# `reviews-part <row>` renders the release entry's reviews and commits them on the working branch, so a writer that could
+# run it for another row would publish what that row's own writer never saw. The wall admits the main thread, and the
+# writer whose roster row names the integrate row of the bound plan, running the verb on that row alone in one call; every
+# other dispatched call is refused by the contract arm, naming the row it asked for and the row its roster row names.
+# Fixture fidelity: the section's payloads and roster; the plan is the §RULED plan with the `## Tasks` table the
+# product writes (header and separator as the units reader takes them), bound to the session; the roster rows are the
+# product's writer's (`roster_row_fixture`), each carrying the `row=` the dispatch wall writes.
+# fails-when: the verb leaves the wall's list and a build row's writer runs it; the integrate row's writer is refused for
+#   its own row; or the main thread is refused.
+R_PT="$(mk_repo part)"
+PT_ACTOR_I="at13integrate-1a2b3c4d5e6f7081"
+PT_ACTOR_B="at13build-8f7e6d5c4b3a2910"
+{
+  ru_plan 5 'T1 | discharged | see AC-2 | CONFIRMED'
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T3 | 4 | build | a build row | implementor | — | 10 | AC-1 | none | — | — | active | — |\n'
+  printf '| T9 | 8 | integrate | merge the wave | orchestrator | T3 | 10 | AC-1 | none | — | — | active | — |\n'
+} > "$R_PT/.bionic/docs/plans/active.md"
+bw_bind "$R_PT"
+{
+  roster_header
+  roster_row_fixture "session=$SID" status=confirmed name=w-integrate "agent_id=$PT_ACTOR_I" subagent_type=bionic:implementor row=T9
+  roster_row_fixture "session=$SID" status=confirmed name=w-build "agent_id=$PT_ACTOR_B" subagent_type=bionic:implementor row=T3 tool_use_id=toolu_01FIXTURE2
+} > "$R_PT/.bionic/tmp/roster-$SID.state"
+PT_ARM="a subagent may not change a contract or the plan"
+PT_CMD() { printf 'bash %s/session-poker.sh reviews-part %s' "${BIONIC_HOOKS_DIR}" "$1"; }
+run_hook "$(mk_payload "$R_PT" "$(PT_CMD T9)")"
+expect_status "PART-1: the main thread's reviews-part passes the wall" 0 "$ST"
+expect_absent "PART-1b: …and the contract arm's line is absent on the stream PART-3b reads" "$PT_ARM" "$ERR"
+run_hook "$(mk_payload "$R_PT" "$(PT_CMD T9)" "$PT_ACTOR_I" "" Bash implementor)"
+expect_status "PART-2: the integrate row's own writer runs reviews-part on its own row" 0 "$ST"
+expect_absent "PART-2b: …and the contract arm is silent" "$PT_ARM" "$ERR"
+run_hook "$(mk_payload "$R_PT" "$(PT_CMD T9)" "$PT_ACTOR_B" "" Bash implementor)"
+expect_status "PART-3: a build row's writer is refused the integrate row's reviews-part" 2 "$ST"
+expect_contains "PART-3b: …with the contract arm's line" "$PT_ARM" "$ERR"
+expect_contains "PART-3c: …naming the verb" "session-poker.sh reviews-part" "$ERR"
+expect_contains "PART-3d: …the row it asked for and the row it holds" '`reviews-part T9`: T9 is not your row (yours is T3)' "$ERR"
+run_hook "$(mk_payload "$R_PT" "$(PT_CMD T3)" "$PT_ACTOR_B" "" Bash implementor)"
+expect_status "PART-4: …and its own row too, because its row is not the integrate row" 2 "$ST"
+expect_contains "PART-4b: …naming the row" '`reviews-part T3`: T3 is not the integrate row' "$ERR"
+run_hook "$(mk_payload "$R_PT" "$(PT_CMD T3)" "$PT_ACTOR_I" "" Bash implementor)"
+expect_status "PART-5: the integrate row's writer is refused another row" 2 "$ST"
+expect_contains "PART-5b: …naming the row it asked for and its own" '`reviews-part T3`: T3 is not your row (yours is T9)' "$ERR"
+run_hook "$(mk_payload "$R_PT" "$(PT_CMD T9); $(PT_CMD T3)" "$PT_ACTOR_I" "" Bash implementor)"
+expect_status "PART-6: its own row chained with another in one call is refused" 2 "$ST"
+
+# ---------------------------------------------------------------------------
 finish

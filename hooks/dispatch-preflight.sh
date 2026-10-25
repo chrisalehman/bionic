@@ -251,9 +251,9 @@ if ! declare -F owed_open >/dev/null 2>&1 && [ -r "$BIONIC_LIB/owed.sh" ]; then
   # shellcheck source=/dev/null
   . "$BIONIC_LIB/owed.sh"
 fi
-# THE SCALE PROFILE (wave-38 T16; D25): the arming wall reads the plan's patrol cell, the budget wall
-# its writers cell. Sourced the same way: a library without it leaves both walls as they were.
-if ! declare -F scale_cell >/dev/null 2>&1 && [ -r "$BIONIC_LIB/scale.sh" ]; then
+# THE SCALE PROFILE: the arming wall asks whether the plan's scale has a Patrol. Sourced
+# the same way: a library without it leaves the wall as it was. (The budget wall's cap comes from `fill_cap`.)
+if ! declare -F scale_patrol >/dev/null 2>&1 && [ -r "$BIONIC_LIB/scale.sh" ]; then
   # shellcheck source=/dev/null
   . "$BIONIC_LIB/scale.sh"
 fi
@@ -655,17 +655,14 @@ fi
 STATE_DIR="$BIONIC_ROOT/.bionic/tmp"
 PATROL_STAMP_FILE="$STATE_DIR/patrol-${BIONIC_SID}.state"
 
-# THE SCALE'S CELLS (wave-38 T16; D25, AC-5.1), read once from the bound plan's `scale:` through
-# `scale_cell` (payload/scripts/lib/scale.sh). `DP_PATROL` is the patrol cell: `no` (the task row)
-# means no Patrol is armed at engagement, so this wall does not apply. `DP_SCALE_WRITERS` is the
-# writers cell, the budget wall's cap when no person wrote one. No plan, no `scale:`, or no profile:
-# both stay empty and both walls run as they did before the profile.
-DP_SCALE=""; DP_PATROL=""; DP_SCALE_WRITERS=""
-if [ -n "$PLAN" ] && declare -F scale_cell >/dev/null 2>&1; then
+# THE SCALE, AND WHETHER IT HAS A PATROL, read once from the bound plan through
+# `scale_patrol` (payload/scripts/lib/scale.sh). `DP_PATROL` is `no` for a scale with none (the task row), which
+# arms nothing at engagement, so this wall does not apply. `DP_SCALE` names the scale in the budget wall's
+# refusal. No plan, no `scale:`, or no profile: both stay empty and the wall runs as it did before the profile.
+DP_SCALE=""; DP_PATROL=""
+if [ -n "$PLAN" ] && declare -F scale_patrol >/dev/null 2>&1; then
   DP_SCALE="$(plan_frontmatter_get "$PLAN" scale 2>/dev/null)"
-  DP_PATROL="$(scale_cell "$DP_SCALE" patrol 2>/dev/null)" || DP_PATROL=""
-  DP_SCALE_WRITERS="$(scale_cell "$DP_SCALE" writers 2>/dev/null)" || DP_SCALE_WRITERS=""
-  case "$DP_SCALE_WRITERS" in ''|*[!0-9]*) DP_SCALE_WRITERS="" ;; esac
+  DP_PATROL="$(scale_patrol "$PLAN" 2>/dev/null)" || DP_PATROL=""
 fi
 
 # The poker beside this gate, so a test drives the real one and an installed gate finds its
@@ -1371,17 +1368,18 @@ fi
 # largest tree already there.
 PARALLEL_BUDGET=""
 [ -n "$PLAN" ] && PARALLEL_BUDGET="$(plan_budget_line "$PLAN")"
+# THE CAP IS `fill_cap`'S (lib/fill.sh), the one reader the tick's FILL and the stop wall ask too: a person's
+# line when one was written, else the plan's scale row writers cell (the task row's is 3; wave and epic are
+# `uncapped` and cap nothing). A library without fill.sh keeps the person's line alone.
+{ declare -F fill_cap >/dev/null 2>&1 || { [ -r "${BIONIC_LIB:-}/fill.sh" ] && . "$BIONIC_LIB/fill.sh"; }; } >/dev/null 2>&1
 DP_BUDGET_WRITERS=""
-[ -n "$PLAN" ] && DP_BUDGET_WRITERS="$(budget_cap "$PLAN")"
-DP_BUDGET_WRITERS="${DP_BUDGET_WRITERS#writers=}"
-# THE SCALE'S CAP WHEN NO PERSON WROTE ONE (wave-38 T16; D25, AC-5.1). The plan's scale row may carry
-# a writers cell (the task row's is 3): with no person's line it is the cap, and a person's line
-# still overrides it. `uncapped` (wave, epic) caps nothing, as before.
-DP_BUDGET_SOURCE=person
-if [ -z "$DP_BUDGET_WRITERS" ] && [ -n "$DP_SCALE_WRITERS" ]; then
-  DP_BUDGET_WRITERS="$DP_SCALE_WRITERS"
-  DP_BUDGET_SOURCE=scale
+if [ -n "$PLAN" ]; then
+  if declare -F fill_cap >/dev/null 2>&1; then DP_BUDGET_WRITERS="$(fill_cap "$PLAN")"
+  else DP_BUDGET_WRITERS="$(budget_cap "$PLAN")"; DP_BUDGET_WRITERS="${DP_BUDGET_WRITERS#writers=}"; fi
 fi
+# WHOSE WORD THE CAP IS, for the refusal's sentence only: a person's line, or the scale's own cell.
+DP_BUDGET_SOURCE=person
+[ -n "$DP_BUDGET_WRITERS" ] && [ -z "$(budget_cap "$PLAN")" ] && DP_BUDGET_SOURCE=scale
 
 if [ -n "$DP_BUDGET_WRITERS" ]; then
 
@@ -2722,7 +2720,14 @@ dp_brief_sink() {  # finding <fact> <fix> <detail> | warn <line>
     warn)    warn "$2" ;;
   esac
 }
-brief_validate_fields "$LIFTED" "$DP_SUBAGENT" "$BIONIC_ROOT" dp_brief_sink || :
+# THE SUITES THAT EXIST ARE THIS COLLECTOR'S FACT, LISTED ONCE. The wall judges a `Suites:` entry against the
+# set it is handed and reaches for no directory (the freeze); a root with no suite under tests/ hands an empty
+# set, which the wall reads as nothing to judge.
+DP_SUITES_EXIST=""
+for _dp_t in "$BIONIC_ROOT"/tests/*.test.sh; do
+  [ -f "$_dp_t" ] && DP_SUITES_EXIST="${DP_SUITES_EXIST:+$DP_SUITES_EXIST }${_dp_t##*/}"
+done
+brief_validate_fields "$LIFTED" "$DP_SUBAGENT" "$BIONIC_ROOT" dp_brief_sink "$DP_SUITES_EXIST" || :
 SUITES_ALLOWED="$BRIEF_SUITES_ALLOWED"
 SUITES_SOURCE="$BRIEF_SUITES_SOURCE"
 

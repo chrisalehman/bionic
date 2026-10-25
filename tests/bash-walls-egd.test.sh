@@ -521,4 +521,44 @@ expect_status "JURIS-9f a read-only role's 'true && cd <scratch> && git commit' 
 expect_contains "JURIS-9f …as a moving form naming the cd" "moving-form: \`cd $JUR_S\`" "$ERR"
 rm -f "$JUR_R/.bionic/tmp/roster-$SID.state"
 
+# ---------------------------------------------------------------------------
+section "§PROSE — a commit whose every path is under the tracked docs home is prose to the judge, for every question and the regression"
+# ---------------------------------------------------------------------------
+# A promotion copies a run's records into the project's tracked docs home (`docs/` unless `docs-tracked:` moves
+# it). Those files are prose, but the judge knew only the state home's prefix and a short list, so a commit of
+# `docs/designs/` after a review read `owes`, and the regression walk named it unproved. The cover for every
+# question and the regression's walk now read the tracked home too. FIXTURE FIDELITY: a real repository and a
+# plan file in the shape the judge reads (`## SDLC State` with no readings), the judge's own functions
+# (`facts_cover`, `_proof_past_f`) sourced from the library and run over it.
+PR_R="$SANDBOX/prose"; mkdir -p "$PR_R/.bionic/docs/plans"
+git -C "$PR_R" init -q && git -C "$PR_R" config user.email t@example.com && git -C "$PR_R" config user.name t
+printf 'a\n' > "$PR_R/a.sh"; git -C "$PR_R" add a.sh; git -C "$PR_R" commit -qm base
+PR_BASE="$(git -C "$PR_R" rev-parse HEAD)"
+printf -- '---\ncurrent: 6\n---\n\n## SDLC State\n\n' > "$PR_R/.bionic/docs/plans/p.plan.md"
+pr_commit() {  # <message> <path>... -> the new head; each path gets a line of text
+  local m="$1" f; shift
+  for f in "$@"; do mkdir -p "$PR_R/${f%/*}"; printf 'x %s\n' "$m" >> "$PR_R/$f"; done
+  git -C "$PR_R" add -- "$@" && git -C "$PR_R" commit -qm "$m" && git -C "$PR_R" rev-parse HEAD
+}
+pr_cover() {  # <from> <to> [<question>] -> the judge's basis lines then rc
+  bash -c '. "$1" >/dev/null 2>&1 || exit 127; facts_cover "$2" "$3" "$4" "${5:-}"; echo "rc=$?"' _ "$EG6_LIB" "$PR_R/.bionic/docs/plans/p.plan.md" "$1" "$2" "${3:-}" 2>/dev/null
+}
+pr_past() {  # <from> <to> -> the regression walk's rc
+  bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_past_f "$2" "$3" "$4" "$5" "" >/dev/null; echo "rc=$?"' _ "$EG6_LIB" "$PR_R/.bionic/docs/plans/p.plan.md" "$PR_R" "$1" "$2" </dev/null 2>/dev/null
+}
+PR_DOC="$(pr_commit "a design" docs/designs/d.md)"
+PR_PROM="$(pr_commit "a promotion" docs/adrs/adr-001-a.md docs/designs/e.md docs/requirements/r.md)"
+PR_CODE="$(pr_commit "a payload file beside a doc" payload/y.sh docs/designs/f.md)"
+for q in adversarial structure evidence; do
+  expect_eq "PROSE-1 a commit of a docs/ file is prose on the $q chain" "$(printf 'cover %s prose\nrc=0' "$PR_DOC")" "$(pr_cover "$PR_BASE" "$PR_DOC" "$q")"
+done
+expect_eq "PROSE-1b …and with no question named" "$(printf 'cover %s prose\nrc=0' "$PR_DOC")" "$(pr_cover "$PR_BASE" "$PR_DOC")"
+expect_eq "PROSE-2 a promotion commit of ADRs, a design and a requirement is prose: it owes no run" \
+  "$(printf 'cover %s prose\nrc=0' "$PR_PROM")" "$(pr_cover "$PR_DOC" "$PR_PROM" adversarial)"
+expect_eq "PROSE-3 the regression walk excuses the docs commit" "rc=0" "$(pr_past "$PR_BASE" "$PR_DOC")"
+expect_eq "PROSE-3b …and the promotion commit" "rc=0" "$(pr_past "$PR_DOC" "$PR_PROM")"
+expect_eq "PROSE-4 a payload file beside a doc is still owed: the prose rule asks every path" \
+  "$(printf 'cover %s owes\nrc=1' "$PR_CODE")" "$(pr_cover "$PR_PROM" "$PR_CODE" adversarial)"
+expect_eq "PROSE-4b …and the regression walk names it" "rc=1" "$(pr_past "$PR_PROM" "$PR_CODE")"
+
 finish

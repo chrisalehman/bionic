@@ -10,6 +10,8 @@
 #            commit on the approved head, the integrate row lands, close-out writes delivered: and counts no
 #            hand-hold; the replay's part
 #            of the log holds no hand landing, hand merge, plan edit, step set back or waiver
+#   §WINDOW  after the close, the hand-holds window ends at the plan's delivered: time, and a decline planted after
+#            the release approval card is counted: the card ends nothing
 #   §VERBS   every refusal the replay met names a verb that writes the cell (deliver, amend, task-set or
 #            step-field), and that verb's call on the cell, then the refused call again, exit 0
 #   §PR      the integrate row's pull request goes through a stand-in gh, the only gh on its PATH, whose log holds
@@ -21,9 +23,22 @@
 #   §REAL    the sandbox's config declares tests/lib/release-check.sh, the sandbox's own copy is the one that ran,
 #            and every hand write in the log is one a person, an agent or the harness writes in a real run, and the log
 #            is valid UTF-8 throughout, so every reader reads the whole of it
+#   §SR      the replay plants a second review naming the fix row's site under another question; the fix row's landing
+#            writes it fixed, no finding-move follows the landing, and the close reads zero
+#   §LIVE    the replay's live criterion (door.sh DOOR_LIVE_ROW), owed at the close: every advance and the refused
+#            close-out pass with it pending, the release approval card lists it owed by the close, and close-out writes it
+#            discharged from its last reading, with no matrix-set
+#   §SINGLE  the rehearsal's single-rigor state (`rehearse single-verify`, on door.sh's `door_world_single`) stands at
+#            current: 5 with the build's criterion discharged by the build's landing, the critic's evidence review registered
+#            on its own roster row and its verdicts carried into the auditor cell and the head's auditor-wave: line, its log
+#            naming the verbs that brought it there and no discharge
 #
-# ONE SANDBOX, READ BY EVERY SECTION: `rehearse delivered` builds it once, under WORLD_ROOT; each command it ran is
-# in its rehearsal.log, the replay's own commands after the `# replay:` line.
+# NAMED, NOT COUNTED: the rows reading the replay's part (CL-8, VB-1, VB-2) name each verb the replay runs and each kind
+# of hand write it makes, so a log that lost one of them is red however long it is.
+#
+# ONE SANDBOX, READ BY EVERY SECTION BUT §SINGLE: `rehearse delivered` builds it once, under WORLD_ROOT; each command
+# it ran is in its rehearsal.log, the replay's own commands after the `# replay:` line. §SINGLE builds its own, beside
+# it, in a subshell of its own, so nothing it sets reaches the replay's readers.
 #
 # FIXTURE FIDELITY: the sandbox is tests/lib/door.sh's repository carrying the plugin's hooks and scripts and the
 # release check's closure; every state past the plan's Step-3 prose is a command's. What `rehearse` writes by hand
@@ -35,7 +50,7 @@
 #
 # EXPECTED TIME: about seven minutes when the replay reaches delivered: (the rehearsal to failed-review, two release
 # check verb calls among them, is four and a half; the replay's own release check call is two more), about four and a
-# half when it stops at the fix row's landing.
+# half when it stops at the fix row's landing; §SINGLE's rehearsal, the build and Step 5 alone, about a minute more.
 #
 # Usage: bash tests/close-replay.test.sh
 
@@ -53,7 +68,7 @@ CR_DIR="$WORLD_ROOT/delivered"; CR_ROOT="$CR_DIR/project"; CR_LOG="$CR_DIR/rehea
 CR_REC="$CR_ROOT/.bionic/docs/record/wave-x"
 CR_RC=0; CR_PLAN=""
 if [ "$CR_LOADED" = 1 ]; then
-  CR_PLAN="$(rehearse delivered "$CR_DIR" 2> "$WORLD_ROOT/delivered.err")" || CR_RC=$?
+  CR_PLAN="$(DOOR_LIVE_ROW=1 rehearse delivered "$CR_DIR" 2> "$WORLD_ROOT/delivered.err")" || CR_RC=$?
 else
   CR_RC=127
 fi
@@ -69,6 +84,34 @@ cr_rc() { awk -v l="  (${1}, " 'index($0, l) && match($0, /^  rc=[0-9]+/) { prin
 cr_rcs() { cr_part | sed -n 's/^  rc=\([0-9][0-9]*\)  (\(.*\), [0-9][0-9]* s)$/\1|\2/p'; }
 # cr_marks <tag> -> the text of each `# <tag>: ` line in the replay's part
 cr_marks() { cr_part | awk -v t="# ${1}: " 'index($0, t) == 1 { print substr($0, length(t) + 1) }'; }
+# The verbs the replay runs (rehearsal.sh `_rh_replay`), each named `<tool> <verb>`: the tool the command runs and
+# the first bare word of its arguments. A log missing any of them is a replay that did not run that verb, whatever its
+# length. A refusal's follow is not listed: the replay meets one only when a verb refuses.
+CR_VERBS='session-sweeper.sh ack|session-poker.sh task-add|spawn-worktree.sh create|session-poker.sh launch-sync|spawn-worktree.sh ready|session-poker.sh release-check|session-poker.sh release-approval|session-poker.sh reply|session-poker.sh reviews-part|gh pr create|gh pr merge|session-poker.sh deliver|close-out.sh run'
+# The kinds of hand write the replay makes: the fix writer's launch, its code and report, the user's typed reply.
+CR_HANDS='launch code record typed'
+# cr_names -> for each `$ ` command line on stdin, `<rc>|<tool> <words>`: the tool is the first word naming a script
+# (`*.sh`) or gh, its words every bare lowercase word after it (a path, a hash, a row id or a flag is none), and
+# <rc> the exit on the `  rc=` line that closes the command's block. A command naming no tool prints nothing.
+cr_names() {
+  awk 'function out() { if (nm != "") print rc "|" nm; nm = ""; rc = "" }
+    /^\$ / { out(); t = ""; v = ""
+      for (i = 2; i <= NF; i++) {
+        if (t == "") { if ($i ~ /\.sh$/ || $i ~ /(^|\/)gh$/) { t = $i; sub(/.*\//, "", t) }; continue }
+        if ($i ~ /^[a-z][a-z-]*$/) v = v " " $i
+      }
+      nm = t v; next }
+    /^  rc=[0-9]+  \(/ { if (nm != "") { rc = $1; sub(/^rc=/, "", rc); out() } }
+    END { out() }'
+}
+# cr_held <a|b|...> -> of the names given, `|`-joined in their order, each that a line on stdin is or begins with
+# (the name and a blank): the list again when every one is held
+cr_held() {
+  awk -v w="$1" 'BEGIN { n = split(w, want, "|") } { have[NR] = $0 }
+    END { for (i = 1; i <= n; i++) for (j = 1; j <= NR; j++)
+            if (have[j] == want[i] || index(have[j], want[i] " ") == 1) { printf "%s%s", s, want[i]; s = "|"; break }
+          print "" }'
+}
 # cr_out <label> -> the output the log holds for the command carrying that label (the last such command)
 cr_out() {
   awk -v l="  (${1}, " '
@@ -162,10 +205,62 @@ if [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ]; then
   expect_eq "CL-7 close-out prints its hand-holds line" "yes" "$([ -n "$CL_HH" ] && echo yes)"
   expect_contains "CL-7b …and it counts none" "hand-holds: total=0 " "$CL_HH"
   CL_CMDS="$(cr_part | /usr/bin/grep '^\$ ')"
-  expect_eq "CL-8 the replay's part of the log holds the commands it ran" "yes" \
-    "$([ "$(printf '%s\n' "$CL_CMDS" | /usr/bin/grep -c .)" -ge 10 ] && echo yes)"
+  expect_eq "CL-8 the replay's part of the log holds a command for each verb the replay runs, named" "$CR_VERBS" \
+    "$(cr_part | cr_names | cut -d'|' -f2- | cr_held "$CR_VERBS")"
   expect_eq "CL-8b …none a hand landing, a hand merge, a step set back or a waiver, and no hand write of the plan's prose" "" \
     "$(printf '%s\n' "$CL_CMDS" | /usr/bin/grep -E -- '--by-hand|session-poker\.sh current [0-7]( |$)|session-poker\.sh waive |git .*(fetch|merge|update-ref)'; cr_marks 'by hand' | /usr/bin/grep '^\[prose\]')"
+fi
+
+# ============================================================
+section "§WINDOW: after the close, the hand-holds window ends at the plan's delivered: time, and an act after the card counts"
+# ============================================================
+# The window runs from the last build landing to `delivered:`; the release approval card ends nothing. The report read
+# over the delivered plan names that end, and a decline planted a second after the card's replay time is counted.
+# fails-when: the end is the card again, so the ends line names the page and the planted decline is outside.
+# close-out archived the plan outside the project, where no project root names the record, so the report reads a copy
+# put back where the plan stood when close-out read it, and the copy is removed after.
+cr_hh() {  # -> landing-report --hand-holds over the delivered plan, as the replay's verbs run it
+  local p="$CR_ROOT/$DOOR_PLAN_REL" put=""
+  [ -f "$p" ] || { mkdir -p "${p%/*}" && cp "$CR_PLAN" "$p" && put=yes; }
+  door_run "$CR_ROOT" bash "$CR_ROOT/hooks/session-poker.sh" landing-report --hand-holds "$p"
+  [ -z "$put" ] || rm -f "$p"
+  printf '%s\n' "$DOOR_OUT"
+}
+if cr_reached "WINDOW-0"; then
+  CW_DEL="$(awk '/^- Step 9: delivered: / { print $5; exit }' "$CR_PLAN")"
+  CW_CARD="$(cat "$CR_REC"/release-approval-*.md 2>/dev/null | sed -n 's/^release-approval\/v1|plan=.*|at=\([^|]*\)|.*/\1/p' | LC_ALL=C sort | tail -1)"
+  expect_eq "WINDOW-0 precondition: the plan names a delivered: minute and the record a release approval card's time" "yes|yes" \
+    "$(printf '%s' "$CW_DEL" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z$' && echo yes)|$([ -n "$CW_CARD" ] && echo yes)"
+  CW_OUT="$(cr_hh)"
+  expect_contains "WINDOW-1 the ends line names the plan's delivered: time as the window's end" \
+    "until $CW_DEL (delivered:)" "$(printf '%s\n' "$CW_OUT" | grep '^hand-holds window: ')"
+  CW_D0="$(printf '%s\n' "$CW_OUT" | grep '^hand-holds: ' | sed -n 's/.* declines=\([0-9]*\) .*/\1/p')"
+  CW_AFTER="$(date -u -j -v+1S -f '%Y-%m-%dT%H:%M:%SZ' "$CW_CARD" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "$CW_CARD + 1 second" +%Y-%m-%dT%H:%M:%SZ)"
+  cp "$CR_REC/fill-ledger.log" "$WORLD_ROOT/fill-ledger.kept" 2>/dev/null || : > "$WORLD_ROOT/fill-ledger.kept"
+  printf 'fill-ledger/v1|at=%s|session=replay|turn=|current=9|state=decline|ceiling=6|width=|open=|free=|ready=T9|launched=|declined=no room|missed=0|idle=|room=|named=T9\n' "$CW_AFTER" >> "$CR_REC/fill-ledger.log"
+  expect_eq "WINDOW-2 a decline a second after the card is inside the window: the count reads one decline more" \
+    "$(( ${CW_D0:-0} + 1 ))" "$(cr_hh | grep '^hand-holds: ' | sed -n 's/.* declines=\([0-9]*\) .*/\1/p')"
+  cp "$WORLD_ROOT/fill-ledger.kept" "$CR_REC/fill-ledger.log"
+fi
+
+# ============================================================
+section "§SR: a second record at the fix row's site is settled by the fix row's landing, with no move after it"
+# ============================================================
+# fails-when: the second record names another site, the replay's log shows a finding-move after the fix row's landing,
+# the second finding is not written fixed by the landing, or the close reads above zero.
+if cr_reached "SR-0"; then
+  SR_A="$(/usr/bin/grep '^finding: 1 ' "$CR_REC/w-structure-whole-2.md" 2>/dev/null | awk '{ print $5 }')"
+  SR_B="$(/usr/bin/grep '^finding: 1 ' "$CR_REC/w-adversarial-whole-2.md" 2>/dev/null | awk '{ print $5 }')"
+  expect_eq "SR-1 the replay plants a second review, registered under adversarial, naming the fix row's site" "yes|$SR_A" \
+    "$(/usr/bin/grep -q '^proved: kind=review .*evidence=record/wave-x/w-adversarial-whole-2.md question=adversarial ' "$CR_PLAN" && echo yes)|$SR_B"
+  expect_contains "SR-1b …the site is a line of the library the fix answers" "payload/scripts/lib/said.sh:" "$SR_A"
+  SR_AFTER="$(cr_part | awk '/^\$ / { c = $0; next } /^  rc=[0-9]+  \(the fix row says ready, / { f = 1; next } f && /^  rc=/ { print c }')"
+  expect_contains "SR-2 commands follow the fix row's landing in the replay's log (read beside the moves)" "close-out.sh" "$SR_AFTER"
+  expect_eq "SR-2b …and none of them is a finding-move" "" "$(printf '%s\n' "$SR_AFTER" | /usr/bin/grep 'session-poker\.sh finding-move')"
+  expect_eq "SR-3 the second finding is written fixed by the fix row's landing" "yes" \
+    "$(/usr/bin/grep -q '^moved: record/wave-x/w-adversarial-whole-2\.md#1 to=fixed row=T5 by=landing ' "$CR_PLAN" && echo yes)"
+  expect_contains "SR-4 the close reads zero with the window at delivered:" "hand-holds: total=0 " \
+    "$(cr_out 'close-out, the tail' | /usr/bin/grep '^hand-holds: ')"
 fi
 
 # ============================================================
@@ -175,12 +270,14 @@ section "§VERBS: every refusal the replay met names the verb that writes the ce
 # or the named verb, or the refused call after it, exits non-zero.
 if cr_reached "VB-0"; then
   VB_RCS="$(cr_rcs)"
-  expect_eq "VB-1 the replay's part logs each command's exit" "yes" \
-    "$([ "$(printf '%s\n' "$VB_RCS" | /usr/bin/grep -c '^0|')" -ge 10 ] && echo yes)"
+  expect_eq "VB-1 the replay's part logs an exit 0 for each verb the replay runs, named" "$CR_VERBS" \
+    "$(cr_part | cr_names | sed -n 's/^0|//p' | cr_held "$CR_VERBS")"
   expect_eq "VB-1b …and every non-zero exit is a refusal the replay followed" "" \
     "$(printf '%s\n' "$VB_RCS" | awk -F'|' '$1 != 0 { print $2 }' | while IFS= read -r l; do
         cr_marks refused | /usr/bin/grep -q -F -- "$l · names: " || printf '%s\n' "$l"; done)"
-  expect_eq "VB-2 the replay's marks are read: its hand writes are there" "yes" "$([ -n "$(cr_marks 'by hand')" ] && echo yes)"
+  expect_eq "VB-2 the replay's marks are read: a hand write of each kind the replay makes, named ($CR_HANDS)" \
+    "$(printf '%s' "$CR_HANDS" | tr ' ' '|')" \
+    "$(cr_marks 'by hand' | sed -n 's/^\[\([a-z]*\)\] .*/\1/p' | cr_held "$(printf '%s' "$CR_HANDS" | tr ' ' '|')")"
   expect_eq "VB-2b …and every refusal names a verb of $RH_FOLLOW_VERBS" "" \
     "$(cr_marks refused | while IFS= read -r m; do v="${m##* · names: }"
         case " $RH_FOLLOW_VERBS " in (*" $v "*) : ;; (*) printf '%s\n' "$m" ;; esac; done)"
@@ -289,6 +386,76 @@ if [ -f "$CR_ROOT/.bionic/config.yaml" ] && [ -s "$CR_LOG" ]; then
     "0" "$(/usr/bin/iconv -f UTF-8 -t UTF-8 "$CR_LOG" >/dev/null 2>&1; echo $?)"
 else
   expect_eq "RE-0 the sandbox and its log were built, so this section can be read" "built" "not built"
+fi
+
+# ============================================================
+section "§LIVE: the run's live criterion is owed at the close, passes every gate before it pending, and the close writes it"
+# ============================================================
+# The replay's plan carries the live row a planner writes (door.sh DOOR_LIVE_ROW): a row at tier T3, its eval the
+# hand-holds line at the close, its task the close row T9. The gate defers it until its step, so each advance and the
+# refused close-out pass with it pending; the release approval card lists it owed by the close, never a decision its
+# reply could waive; close-out writes it from its last reading after delivered:, and no matrix-set touches it.
+# fails-when: an advance or the card refuses or waives the pending row, the delivered plan reads it anything but
+# discharged with the continuation as its evidence, or a matrix-set in the log names it.
+if cr_reached "LV-0"; then
+  lv_cells() { awk -F'|' '$2 ~ /^ *AC-2\.1 *$/ { s = $4; e = $5; gsub(/^ +| +$/, "", s); gsub(/^ +| +$/, "", e); print s "|" e }' "$1"; }
+  lv_key() { awk -v k="$2" '/^AC-2\.1:/ { b = 1; next } b && /^[^ \t]/ { b = 0 } b && $0 ~ "^[ \t]+" k ": " { sub("^[ \t]+" k ": ", ""); print; exit }' "$1"; }
+  expect_eq "LV-1 the plan's live row is matrix-render's: its task the close row, its eval the hand-holds line" "T9|yes" \
+    "$(lv_key "$CR_PLAN" task)|$(lv_key "$CR_PLAN" eval | /usr/bin/grep -q 'landing-report --hand-holds' && echo yes)"
+  expect_eq "LV-2 each advance past the Verify gate exits 0 with the row pending" "0|0|0" \
+    "$(cr_rc 'enter Step 6' | tail -1)|$(cr_rc 'enter Step 7' | tail -1)|$(cr_rc 'enter Step 8' | tail -1)"
+  LV_CARD="$(cat "$CR_REC"/release-approval-*.md 2>/dev/null)"
+  expect_eq "LV-3 the release approval card lists it owed by the close, and puts no decision on it" "yes|no" \
+    "$(/usr/bin/grep -q 'owed by the close' <<< "$LV_CARD" && echo yes || echo no)|$(/usr/bin/grep -q 'key=row:AC-2\.1|' <<< "$LV_CARD" && echo yes || echo no)"
+  expect_eq "LV-4 at delivered: the plan reads it discharged, its evidence cell and block key the continuation" \
+    "discharged|record/wave-x/continuation.md|record/wave-x/continuation.md" \
+    "$(lv_cells "$CR_PLAN")|$(lv_key "$CR_PLAN" evidence)"
+  expect_contains "LV-5 …written by close-out from its last reading" "matrix: AC-2.1 discharged" "$(cr_out 'close-out, the tail')"
+  LV_SETS="$(/usr/bin/grep '^\$ .*session-poker.sh matrix-set ' "$CR_LOG")"
+  expect_contains "LV-6 precondition: the log's matrix-set lines are read (the criterion's task on AC-1.1)" "matrix-set AC-1.1" "$LV_SETS"
+  expect_absent "LV-6b …and none names AC-2.1" "AC-2.1" "$LV_SETS"
+fi
+
+# ============================================================
+section "§SINGLE: the single-rigor run reaches the Verify gate with no discharge"
+# ============================================================
+# fails-when: the rehearsal's single-rigor state does not build, its plan is not at rigor: single, it does not stand at
+# current: 5 with the build's criterion discharged, the auditor cell or the head's auditor-wave: line lacks the critic's
+# verdict, the evidence review is registered on any row but the critic's, or its log runs discharge.
+SG_DIR="$WORLD_ROOT/single-verify"; SG_RC=0; SG_PLAN=""
+if [ "$CR_LOADED" = 1 ]; then
+  SG_PLAN="$(rehearse single-verify "$SG_DIR" 2> "$WORLD_ROOT/single-verify.err")" || SG_RC=$?
+else
+  SG_RC=127
+fi
+expect_eq "SG-1 the single-rigor rehearsal reaches its state (rehearse exit 0, its plan printed)" "0|yes" \
+  "$SG_RC|$([ -n "$SG_PLAN" ] && [ -f "$SG_PLAN" ] && echo yes)"
+if [ "$SG_RC" = 0 ] && [ -f "$SG_PLAN" ]; then
+  expect_eq "SG-2 the plan is the single-rigor fixture's: its frontmatter says rigor: single" "single" \
+    "$(awk '/^---$/ { n++; next } n == 1 && /^rigor:/ { sub(/^rigor:[[:space:]]*/, ""); print }' "$SG_PLAN")"
+  expect_eq "SG-3 the run stands at the Verify gate: current: 5, the Step 5 line written" "5|yes" \
+    "$(sed -n 's/^current:[[:space:]]*//p' "$SG_PLAN" | head -1)|$(/usr/bin/grep -q '^- Step 5: ' "$SG_PLAN" && echo yes)"
+  # The matrix row as the table holds it: status and auditor cells, so the auditor cell is read beside a status.
+  expect_eq "SG-4 the build's criterion is discharged by status, and its auditor cell holds the critic's verdict, the bare token" "discharged|CONFIRMED" \
+    "$(awk -F'|' '$2 ~ /^ *AC-1\.1 *$/ { s = $4; a = $6; gsub(/^ +| +$/, "", s); gsub(/^ +| +$/, "", a); print s "|" a }' "$SG_PLAN")"
+  SG_NAMES="$(cr_names < "$SG_DIR/rehearsal.log" | cut -d'|' -f2-)"
+  expect_eq "SG-5 the log names the verbs that brought it there" \
+    "session-poker.sh matrix-render|spawn-worktree.sh ready|session-poker.sh proof-add review|session-poker.sh step-line|session-poker.sh step-field|session-poker.sh current" \
+    "$(printf '%s\n' "$SG_NAMES" | cr_held 'session-poker.sh matrix-render|spawn-worktree.sh ready|session-poker.sh proof-add review|session-poker.sh step-line|session-poker.sh step-field|session-poker.sh current')"
+  expect_eq "SG-5b …and discharge is not among them" "" \
+    "$(printf '%s\n' "$SG_NAMES" | cr_held 'session-poker.sh discharge')"
+  expect_eq "SG-6 the status is the landing's: no matrix-set writes a status (rehearsal.sh holds none), the block's evidence is the landing's log" "0|yes" \
+    "$(/usr/bin/grep -c 'matrix-set.*status=' "$BIONIC_SCRIPTS_DIR/tests/lib/rehearsal.sh")|$(awk '/^AC-1\.1:/ { b = 1; next } b && /^[^ \t]/ { b = 0 } b && /^[ \t]+evidence: record\/wave-x\/line\/T1-rehearsal-row-/ { y = 1 } END { if (y) print "yes" }' "$SG_PLAN")"
+  # The evidence review: one proof line of the question, its reader's roster row the critic's, dealt evidence.
+  SG_READER="$(sed -n 's/^proved: kind=review .* question=evidence reader=\([^ ]*\) .*/\1/p' "$SG_PLAN" | tail -1)"
+  expect_eq "SG-7 the evidence question was read by the critic: its proof line names a reader whose roster row is bionic:critic, dealt evidence" \
+    "w-evidence-whole|bionic:critic|evidence" \
+    "$SG_READER|$(/usr/bin/grep -h "|name=${SG_READER:-none}|" "$SG_DIR"/project/.bionic/tmp/roster-*.state 2>/dev/null | tail -1 | tr '|' '\n' | sed -n 's/^subagent_type=//p;s/^questions=//p' | paste -sd'|' -)"
+  expect_eq "SG-7b …and its wave verdict is the head's auditor-wave: line, above the table" "auditor-wave: CONFIRMED — every requirement has a row|yes" \
+    "$(awk '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 } m && /^\|/ { exit } m && /^auditor-wave:/' "$SG_PLAN")|$(awk '/^## Verification Matrix/ { m = 1; next } m && /^stack-health:/ { s = 1 } m && /^\|/ { exit } END { if (s) print "yes" }' "$SG_PLAN")"
+else
+  printf '    the single-rigor rehearsal stopped; rehearse said:\n'
+  sed 's/^/    | /' "$WORLD_ROOT/single-verify.err" 2>/dev/null | cut -c1-400 | tail -12
 fi
 
 finish

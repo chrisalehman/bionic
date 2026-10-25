@@ -29,6 +29,8 @@
 #   §VERB      the verb draws the card from the sheet the judgment was written from, under 10 minutes old, its asks
 #              read fresh, and settles a decision the ledger ruled first
 #   §SKILL     the skill writes the tags the verb takes and shows only what the verb printed, in one fenced block
+#   §ONE-READER the goal's status, the task's title and the goal's measure are each one function the sheet and the
+#              cards call: a plant in that one reading moves both surfaces together
 #
 # HERMETIC. card.sh is fed fixture sheets in the verb's own `sheet/v1` shape, one of them a sheet the verb saved for
 # a real run, copied whole; the verb runs in one temp repository with a pinned clock and zone, its own gate store and
@@ -1107,5 +1109,112 @@ expect_eq "SK4 a planted paraphrase of the card is found" "Show the card to the 
 sed 's/`call:`/the call tag/g' "$SK_SKILL" > "$TMPROOT/sk-plant.md"
 expect_eq "SK5 a copy with call: left out is found missing it, beside what the shipped text misses (nothing, by SK1)" " call:" \
   "$(comm -13 <(sk_missing "$SK_SKILL" | tr ' ' '\n' | /usr/bin/grep . | sort) <(sk_missing "$TMPROOT/sk-plant.md" | tr ' ' '\n' | /usr/bin/grep . | sort) | sed 's/^/ /' | paste -sd'\0' -)"
+
+# ============================================================
+section "§ONE-READER: the goal's status, the task's title and the goal's measure are each one function the sheet and the cards call"
+# ============================================================
+# FIXTURE FIDELITY: one run of the verbs' own shapes: a wave plan approved at Step 3 whose requirements give it two
+# themes and whose matrix discharges one of the first theme's two criteria and the second theme's one, so the second
+# goal reads met. T1's cell opens on a title with a colon in it, the shape the plan card and the sheet once cut two
+# ways. The surfaces are the real verbs: `sitrep` for the sheet, `sitrep card` for the sitrep card, `card.sh step3`
+# for the plan's card. The plants are a copy of the tree with the one reading of a fact changed: both surfaces must
+# move with it, so a surface that keeps its own copy reads apart from the sheet and the row reddens.
+# ANTI-VACUITY: each plant's sed is proven to change the copy; each fact is read on the shipped tree first through the
+# extractor read after the plant, and the status row's control world, the goal not met, draws the ask the row then
+# finds gone.
+# fails-when: hooks/poker/sitrep.sh cuts a task's title by a rule of its own (OR-1), the card verb or card.sh reads
+# whether a goal is met by a word of its own (OR-3), or card.sh parses the goal's measure by a grammar of its own (OR-5).
+OR_R="$TMPROOT/one-reader"; OR_D="$OR_R/.bionic/docs/record/wave-02-fx"; OR_P="$OR_R/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
+OR_Q="$OR_R/.bionic/docs/specs/epic-01-fx/wave-02-fx.requirements.md"
+mkdir -p "$OR_D" "${OR_P%/*}" "${OR_Q%/*}" "$OR_R/.bionic/tmp"; ( cd "$OR_R" && git init -q . ); : > "$OR_D/landing-proofs.log"
+or_plan() {  # <status of the second theme's one criterion> -> the plan, that theme met when it is discharged
+  {
+    printf -- '---\nwave: wave-02-fx\nrelease: 9.9.0\nscale: wave\nworking-branch: wave/02-fx\nintegration-branch: main\nforecast: 8h\n---\n'
+    printf '# fixture plan\n\n## Goal\n\nThe fixture ships.\n\n## SDLC State\n\napproved-by: fixture 2026-10-06T16:00:00Z "approved"\ncurrent: 4\n\n- Step 4: implementation opened\n'
+    printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | The release row: 1.27.0. It names the release it cuts · complexity: standard | — | — | — | 30 | REQ-1 | lib/t1.sh | — | — | active | — | — | — |\n'
+    printf '| T2 | 4 | build | Fix vs. the old path. It does the second thing · complexity: standard | — | — | — | 30 | REQ-2 | lib/t2.sh | — | — | pending | — | — | — |\n'
+    printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+    printf '| AC-1.1 | T2 | discharged | pending | — |\n| AC-1.2 | T2 | pending | pending | — |\n| AC-2.1 | T2 | %s | pending | — |\n' "$1"
+    printf '\n## Not Doing\n\n- nothing\n'
+  } > "$OR_P"
+}
+{
+  printf -- '---\nscale: wave\n---\n# fixture requirements\n\n## Goal\n\nThe fixture ships.\n'
+  printf '\n## The run closes itself\n\nThe run reaches its card without a person.\n'
+  printf '\n### REQ-1 — one\n\n- AC-1.1 a. Fails when: b.\n- AC-1.2 a. Fails when: b.\n'
+  printf '\n## The pages\n\nThe pages say what the run knows.\n\n### REQ-2 — two\n\n- AC-2.1 a. Fails when: b.\n'
+  printf '\n## Not Doing\n\n- nothing\n'
+} > "$OR_Q"
+or_plan discharged
+OR_REG="$(bash -c '. "$1" && owed_register "$2" "$3"' _ "${REPO}/payload/scripts/lib/owed.sh" "$OR_R" "$OR_P")"
+or_ask() {  # -> the register holding one open ask: the second goal's decision, as the tick opens it on a first miss
+  mkdir -p "${OR_REG%/*}"
+  printf 'owed/v1|key=decide:goal:the-pages|state=open|sent=-|at=2026-10-06T20:00:00Z|title=goal decision: The pages|reply=poker: the goal The pages missed\n' > "$OR_REG"
+}
+OR_J="purpose: The fixture plan ships its rows; on course.
+call: Let 4/1 land.
+grade: C
+point: One task is in flight and nothing is red.
+close: If 4/1 lands first time."
+or_run() {  # <hooks dir> -> OR_SHEET, OR_CARD, OR_STEP3: the three surfaces from the tree whose hooks are given
+  local h="$1"
+  OR_SHEET="$( cd "$OR_R" && env CLAUDE_CODE_SESSION_ID="$SV_SID" BIONIC_NOW_EPOCH="$SV_NOW" BIONIC_GATE_DIR="$SV_GATE" bash "$h/session-poker.sh" sitrep "$OR_P" 2>/dev/null )"
+  OR_CARD="$( cd "$OR_R" && env CLAUDE_CODE_SESSION_ID="$SV_SID" BIONIC_NOW_EPOCH="$SV_NOW" BIONIC_GATE_DIR="$SV_GATE" bash "$h/session-poker.sh" sitrep card "$OR_P" <<< "$OR_J" 2>/dev/null )"
+  OR_STEP3="$(bash "$h/../payload/scripts/card.sh" step3 "$OR_P" 2>/dev/null)"
+}
+or_desc() { printf '%s\n' "$OR_SHEET" | sed -n "s/^task: id=$1 step=[^ ]* state=[^ ]* desc=\(.*\) note=.*/\1/p"; }   # <id> -> the sheet's title of it
+or_title() { printf '%s\n' "$OR_STEP3" | awk -v id="$1" '$1 == id { sub(/^ *[^ ]+ +/, ""); sub(/  +.*$/, ""); print; exit }'; }   # <id> -> the plan card's
+or_goals() { printf '%s\n' "$OR_CARD" | awk '$1 == "Goals" { sub(/^ *Goals +/, ""); print; exit }'; }   # -> the sitrep card's Goals cell
+or_goal_ask() { printf '%s\n' "$OR_SHEET" | /usr/bin/grep -c '^ask: key=decide:goal:the-pages '; printf '%s\n' "$OR_CARD" | /usr/bin/grep -ci 'goal decision: the pages'; }
+OR_T="$TMPROOT/or-mut"; mkdir -p "$OR_T/payload"
+cp -R "$BIONIC_HOOKS_DIR" "$OR_T/hooks" && cp -R "${REPO}/payload/scripts" "$OR_T/payload/scripts"
+OR_LIBF="$OR_T/payload/scripts/lib/plan.sh"; OR_LIB_ORIG="$TMPROOT/or-plan.orig"; cp "$OR_LIBF" "$OR_LIB_ORIG"
+or_plant() { sed "$1" "$OR_LIB_ORIG" > "$OR_LIBF"; ! cmp -s "$OR_LIB_ORIG" "$OR_LIBF"; }   # <sed> -> the copy's lib/plan.sh so edited; rc 1 when it changed nothing
+
+# the task's title: the sheet and the plan's card cut the cell one way
+or_plan discharged; : > "$OR_REG"; or_run "$BIONIC_HOOKS_DIR"
+expect_eq "OR-0 precondition: the sheet, the sitrep card and the plan's card each print, T1's title read on both" "yes|yes|yes" \
+  "$([ -n "$(or_desc T1)" ] && echo yes)|$([ -n "$(or_goals)" ] && echo yes)|$([ -n "$(or_title T1)" ] && echo yes)"
+expect_eq "OR-1 a title holding a colon is one title on the sheet and on the plan's card" \
+  "The release row: 1.27.0|The release row: 1.27.0" "$(or_desc T1)|$(or_title T1)"
+expect_eq "OR-1b …as is one holding an abbreviation, whole on both: a period before a lowercase word ends no title" \
+  "Fix vs. the old path|Fix vs. the old path" "$(or_desc T2)|$(or_title T2)"
+expect_eq "OR-1c …and a title that ends on its period before a capital is cut there on both, the sheet's reading the card's" \
+  "The release row: 1.27.0|The release row: 1.27.0" "$(or_desc T1)|$(or_title T1)"
+# a surface that cuts a title by a rule of its own reads apart from the sheet and the row finds it: the plan's card in a
+# copy whose title reader is the old any-period cut says `Fix vs` while the sheet, still on the one reader, says it whole
+OR_CARDF="$OR_T/payload/scripts/card.sh"; OR_CARD_ORIG="$TMPROOT/or-card.orig"; cp "$OR_CARDF" "$OR_CARD_ORIG"
+sed 's/^    cell) t="\$(plan_task_title "\$t")" ;;$/    cell) t="${t%%. *}" ;;/' "$OR_CARD_ORIG" > "$OR_CARDF"; ! cmp -s "$OR_CARD_ORIG" "$OR_CARDF"; OR_PL=$?
+or_run "$OR_T/hooks"
+expect_eq "OR-1d a plan card planted to cut a title by its own rule reads apart from the sheet: the planted card says Fix vs, the sheet says it whole" \
+  "0|Fix vs|Fix vs. the old path" "$OR_PL|$(or_title T2)|$(or_desc T2)"
+cp "$OR_CARD_ORIG" "$OR_CARDF"
+or_plant 's/^    case "\$t" in \*". "\*) ;; \*) return 1 ;; esac$/    case "$t" in *". "*) PLAN_CUT_REST="${t#*". "}"; PLAN_CUT_HEAD="${t%%". "*}."; return 0 ;; *) return 1 ;; esac/'; OR_PL=$?
+or_run "$OR_T/hooks"
+expect_eq "OR-1e the one reader planted to end a title at any period: the sheet and the plan's card both move with it, still one title" \
+  "0|Fix vs|Fix vs" "$OR_PL|$(or_desc T2)|$(or_title T2)"
+cp "$OR_LIB_ORIG" "$OR_LIBF"; or_run "$BIONIC_HOOKS_DIR"
+
+# the goal's status: the sheet drops the decision of a met goal, and so does the card, whatever the met word reads
+or_plan pending; or_ask; or_run "$BIONIC_HOOKS_DIR"
+expect_eq "OR-2 control: with the second goal not met its decision is an ask on the sheet and drawn on the card" "1|1" "$(or_goal_ask | paste -sd'|' -)"
+or_plan discharged; or_ask; or_run "$BIONIC_HOOKS_DIR"
+expect_eq "OR-2b …met, the sheet owes it not and the card draws it not (OR-2 read both through the same call)" "0|0" "$(or_goal_ask | paste -sd'|' -)"
+or_plant "s/reached) printf 'met\\\\n'/reached) printf 'achieved\\\\n'/"; OR_PL=$?
+or_plan discharged; or_ask; or_run "$OR_T/hooks"
+expect_eq "OR-3 the one status reading planted to call a met goal achieved: the sheet says so, and the card still drops its decision with the sheet" \
+  "0|name=The pages status=achieved|0|0" "$OR_PL|$(printf '%s\n' "$OR_SHEET" | /usr/bin/grep -o 'name=The pages status=achieved')|$(or_goal_ask | paste -sd'|' -)"
+
+# the goal's measure: the sheet's words and the card's counts are one grammar
+: > "$OR_REG"; or_run "$BIONIC_HOOKS_DIR"
+expect_eq "OR-4 precondition: the card's Goals cell carries each theme's counts from the sheet's measure" \
+  "The run closes itself on course, 1 of 2, REQ-1 open · The pages met, 1 of 1" "$(or_goals)"
+or_plant 's/criteria discharged/criteria done/g'; OR_PL=$?
+or_run "$OR_T/hooks"
+expect_eq "OR-5 the one measure grammar planted to say criteria done: the sheet says so, and the card still reads its counts" \
+  "0|1 of 2 criteria done|The run closes itself on course, 1 of 2, REQ-1 open · The pages met, 1 of 1" \
+  "$OR_PL|$(printf '%s\n' "$OR_SHEET" | /usr/bin/grep -o '1 of 2 criteria done' | head -1)|$(or_goals)"
 
 finish

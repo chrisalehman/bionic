@@ -39,8 +39,8 @@ section "§HAND-HOLDS — wave-35 T12 (REQ-8 AC-8.1, D17): the hand-hold count i
 HH_C="$(printf 'd%.0s' $(seq 40))"
 # The report reads from the last build landing, the second build row's at 10:40, so the decline, the lift, the 10:00
 # amend and that row's own hand landing fall before the window, and the date-only matrix waiver's day holds that start, so it is unplaced.
-HH_WANT="hand-holds: total=6 · by-hand=0 · stop-runs=1 · declines=0 · lifts=0 · amends=1 · holds=1 · extensions=1 · waivers=1 · second-regressions=1 · adoptions=0 · fixed=0 · unplaced=1"
-HH_ALL="hand-holds: total=11 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · second-regressions=1 · adoptions=0 · fixed=0 · unplaced=0"
+HH_WANT="hand-holds: total=6 · by-hand=0 · stop-runs=1 · declines=0 · lifts=0 · amends=1 · holds=1 · extensions=1 · waivers=1 · status-writes=0 · second-regressions=1 · adoptions=0 · fixed=0 · unplaced=1"
+HH_ALL="hand-holds: total=11 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · status-writes=0 · second-regressions=1 · adoptions=0 · fixed=0 · unplaced=0"
 # hh_report: hoisted to tests/close-out.prelude.sh (a later part reads it)
 # hh_plant <project> -> one use of every verb, and the prose that must count for nothing
 hh_plant() {
@@ -112,7 +112,7 @@ awk '/^- Step 8:/ { print "- T1: landed by-hand (kind=hand) after waived: eviden
   "$PHP/$PLAN_REL" > "$PHP/plan.b" && mv "$PHP/plan.b" "$PHP/$PLAN_REL"
 HH_PROSE="$(hh_report "$PHP" --hand-holds)"
 expect_eq "HH-4 a run whose only by-hand, stop-run, decline, lift, waiver and approval are prose counts zero in every kind" \
-  "hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · second-regressions=0 · adoptions=0 · fixed=0" \
+  "hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0" \
   "$(printf '%s\n' "$HH_PROSE" | grep '^hand-holds: ')"
 # the card: check prints the line, run prints it after the wipe took the roster, the continuation carries it
 run_close "$PH" check
@@ -376,7 +376,8 @@ DL_REQ="$PDL/.bionic/docs/specs/epic-fx/wave-02-next.requirements.md"; mkdir -p 
 printf '%s\n' '---' 'sdlc-step: 1' 'working-branch: wave/02-next' 'integration-branch: main' 'base-sha: abc1234' '---' '' \
   '# next wave · requirements' '' '## Goal' '' 'Read the debt the predecessor carried.' '' \
   '## Not Doing' '' '- Nothing excluded.' '' '## Requirements and acceptance criteria' '' \
-  '### REQ-1 — the one requirement' '' 'provenance: user 2026-10-13 "carry it"' \
+  '### REQ-1 — the one requirement' '' 'The next run reads the debt its predecessor carried.' '' \
+  'provenance: user 2026-10-13 "carry it"' \
   '- AC-1.1 the criterion. Fails when: it does not hold.' > "$DL_REQ"
 DL_CARD="$(bash "$REPO_ROOT/payload/scripts/card.sh" step1 "$DL_REQ" 2>"$SANDBOX/dl-card.err" 0<&-)"; DL_CRC=$?
 expect_eq "DEBT-LINES-4 AC-7.8 the next run's card.sh step1 over the continuation renders (exit 0, nothing refused)" "0|" \
@@ -644,5 +645,152 @@ awk '
 run_close "$PREFF" check
 expect_absent "REF-5b A-orch-16 close-out reads the branch through the one reader: a frontmatter key is not refused as none" \
   "names no working-branch" "$CO_OUT"
+
+# ============================================================
+section "§ORDER — the integrate row publishes the reviews part before the push and the pull request (REQ-15 AC-15.2; the integrate row's own part)"
+# ============================================================
+# At pr dealing close-out merges nothing and opens nothing: it records, in the continuation's `## Pull request`, the
+# acts the integrate row does, in the order it does them: `reviews-part <row>`, then the push, then `gh pr create`. The part
+# is first because the push and the pull request carry the branch's tip, and a part rendered after them is on no branch
+# the pull request names.
+# FIXTURE FIDELITY: mk_task_pr_fixture's task-scale plan (integrate cell `pr`), gaining the integrate row a task plan
+# carries at Step 8 (landed, so the rows-landed act has nothing to bind a session for); the continuation is the one the run
+# writes.
+# fails-when: the continuation names the push or `gh pr create` before `reviews-part <row>`, omits the verb, names another
+#   row, or the section stops naming `gh pr create`.
+ord_pos() {  # <file> <needle> -> the 1-based line number of the needle's first line in the `## Pull request` section, or empty
+  awk -v n="$2" '/^## / { s = ($0 == "## Pull request"); next } s && index($0, n) { print NR; exit }' "$1"
+}
+PPO="$(mk_task_pr_fixture order-pr "fix/x")"
+awk '{ print } /^\| T1 \|/ { print "| T3 | 8 | integrate | open the pull request | orchestrator | — | 10 | AC-1 | none | landed |" }' \
+  "$PPO/$PLAN_REL" > "$PPO/$PLAN_REL.o" && mv "$PPO/$PLAN_REL.o" "$PPO/$PLAN_REL"
+expect_contains "ORDER-0 precondition: the plan carries the integrate row the section names" "| T3 | 8 | integrate |" "$(cat "$PPO/$PLAN_REL")"
+run_close "$PPO" run
+expect_eq "ORDER-1 the task-scale run closes" "0" "$CO_RC"
+OR_PART="$(ord_pos "$PPO/$CONT_REL" 'session-poker.sh reviews-part T3')"
+OR_PUSH="$(ord_pos "$PPO/$CONT_REL" 'git push')"
+OR_PR="$(ord_pos "$PPO/$CONT_REL" 'gh pr create --base main --head fix/x')"
+expect_nonempty "ORDER-1b precondition: the section names the part, the push and the pull request (positions $OR_PART $OR_PUSH $OR_PR)" "$OR_PART$OR_PUSH$OR_PR"
+expect_eq "ORDER-2 the continuation records reviews-part <integrate row> first, then the push, then gh pr create" "yes" \
+  "$([ -n "$OR_PART" ] && [ -n "$OR_PUSH" ] && [ -n "$OR_PR" ] && [ "$OR_PART" -lt "$OR_PUSH" ] && [ "$OR_PUSH" -lt "$OR_PR" ] && echo yes || echo no)"
+expect_contains "ORDER-3 the push names the working branch" "git push -u origin fix/x" "$(cat "$PPO/$CONT_REL")"
+# the plan with no integrate row names no verb to run, and still records the push before the pull request
+PPN="$(mk_task_pr_fixture order-pr-norow "fix/x")"
+run_close "$PPN" run
+expect_absent "ORDER-4 a plan with no integrate row names no reviews-part" "reviews-part" "$(cat "$PPN/$CONT_REL")"
+expect_eq "ORDER-4b …and still records the push before gh pr create" "yes" \
+  "$(a="$(ord_pos "$PPN/$CONT_REL" 'git push')"; b="$(ord_pos "$PPN/$CONT_REL" 'gh pr create')"; [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && echo yes || echo no)"
+
+# AT MERGE DEALING close-out merges nothing either: its merge act is a readback that the working branch is reachable from the
+# integration branch, and the person's merge came first. When close-out itself renders the part (no integrate row did), it
+# publishes it BEFORE that readback, so the readback reads the branch the part is on, and holds until that tip is merged.
+# FIXTURE FIDELITY: mk_fixture's wave-scale plan (integrate cell `merge`) at Step 8 with the release entry committed on the
+# working branch and merged into main, as the release row's landing and the person's merge leave it; the part is not yet
+# listed, as a run with no integrate row leaves it.
+# fails-when: the reviews line comes after the merge line; the branch is not at the part's commit when the readback reads it;
+#   the run closes with the part on no branch main holds; or the second run, after the person merges the published tip,
+#   renders a second part.
+ord_fixture() {  # <name> -> a wave-scale project at Step 8 whose release entry has no ### The reviews part, merged into main
+  local p wt
+  p="$(mk_fixture "$1")" && advance_to "$p" 8 || return 1
+  wt="$p-wave"
+  awk '{ print } /^adrs: none$/ && !d { print "release: 9.9.9"; d = 1 }' "$p/$PLAN_REL" > "$p/$PLAN_REL.r" \
+    && mv "$p/$PLAN_REL.r" "$p/$PLAN_REL"
+  printf '# Changelog\n\n## 9.9.9 — 2026-10-22\n\nThe prose a person wrote.\n\n### Known limits\n\n- one limit\n' > "$wt/CHANGELOG.md"
+  fixture_git "$wt" add CHANGELOG.md && fixture_git "$wt" commit -q -m "the release entry" >/dev/null 2>&1 \
+    && fixture_git "$p" merge -q --no-ff -m "merge the release" wave/01-fixture >/dev/null 2>&1 || return 1
+  printf '%s\n' "$p"
+}
+PMO="$(ord_fixture order-merge)"
+plant_facts "$PMO"
+OM_H="$(fixture_git "$PMO" rev-parse --verify -q refs/heads/wave/01-fixture)"
+expect_eq "ORDER-5 precondition: the integration branch holds the working branch's tip, as the person's merge left it" "yes" \
+  "$(fixture_git "$PMO" merge-base --is-ancestor wave/01-fixture main && echo yes || echo no)"
+run_close "$PMO" run
+OM_TIP="$(fixture_git "$PMO" rev-parse --verify -q refs/heads/wave/01-fixture)"
+expect_eq "ORDER-6 close-out published a part: the working branch moved past the tip the person merged" "yes" \
+  "$([ -n "$OM_TIP" ] && [ "$OM_TIP" != "$OM_H" ] && fixture_git "$PMO" log -1 --format=%an "$OM_TIP" | /usr/bin/grep -qx 'bionic close-out' && echo yes || echo no)"
+OM_ACT="$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -c '^merge: ')"
+expect_eq "ORDER-7 …so the readback, read on that branch, held: the run did not close, and its merge act never ran" "yes|0" \
+  "$([ "$CO_RC" -ne 0 ] && echo yes)|$OM_ACT"
+expect_contains "ORDER-7b …saying the working branch is not merged" "is not reachable from" "$CO_OUT"
+expect_contains "ORDER-7c …after the reviews line named the published commit" "reviews: " "$CO_OUT"
+expect_contains "ORDER-7d …which names the commit the branch is at" "$(printf '%.12s' "$OM_TIP")" "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^reviews: ')"
+expect_eq "ORDER-8 main does not hold the part until the published tip is merged" "no" \
+  "$(fixture_git "$PMO" show main:CHANGELOG.md 2>/dev/null | /usr/bin/grep -q '^### The reviews' && echo yes || echo no)"
+fixture_git "$PMO" merge -q --no-ff -m "merge the published part" wave/01-fixture >/dev/null 2>&1
+run_close "$PMO" run
+expect_eq "ORDER-9 after the person merges the published tip, the run closes and finds the part already listed" "0|yes" \
+  "$CO_RC|$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^reviews: ' | /usr/bin/grep -q 'already lists' && echo yes)"
+expect_eq "ORDER-9b …and rendered no second part: the branch is where the first run left it" "$OM_TIP" \
+  "$(fixture_git "$PMO" rev-parse --verify -q refs/heads/wave/01-fixture)"
+
+# ============================================================
+section "§ADRS — the Step-7 advance renders adrs: from the Step 7 adr: line, and close-out's epic row reads either (REQ-9 AC-9.1)"
+# ============================================================
+# The document step's pointer is the Step 7 block's `adr:` line (`step-field 7 adr=…`); the epic row reads the plan's
+# `adrs:` frontmatter, which no verb wrote, so a plan with the first and not the second was refused its row. `current 7`
+# renders `adrs:` from the block when the frontmatter has none (`adrs: none` when the block says n/a), and never
+# rewrites one that is there; close-out reads the frontmatter, else the Step 7 `adr:` line. An ADR path with no
+# `adr-<n>` gives no number, so the row carries the path as written. FIXTURE FIDELITY: mk_fixture's plan with its
+# `adrs:` line taken out and its Step 7 line written as `step-line 7` and `step-field 7 adr=` write it; the advance is
+# the real verb, run as a session bound to the plan.
+# fails-when: a plan with `adr:` on its Step 7 line and no `adrs:` makes `epic_row_missing` refuse the row.
+ad_step7() {  # <project> <adr value> -> the plan without adrs:, its Step 7 line a block carrying adr: <value>
+  local plan="$1/$PLAN_REL"
+  case "$1" in "$SANDBOX"/*) : ;; *) echo "ad_step7: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
+  AD_V="$2" awk '
+    NR == 1 { fm = 1 } fm && NR > 1 && /^---$/ { fm = 0 }
+    fm && /^adrs:/ { next }
+    /^- Step 7:/ { print "- Step 7: document: the ADR is written"; print "  adr: " ENVIRON["AD_V"]; next }
+    { print }' "$plan" > "$plan.a" && mv "$plan.a" "$plan"
+}
+ad_adrs() { awk 'NR == 1 { fm = 1; next } fm && /^---$/ { exit } fm && /^adrs:/ { sub(/^adrs:[ \t]*/, ""); print }' "$1"; }
+ad_poke() {  # <project> <sid> <verb> [<arg>...] -> AD_RC, AD_OUT: the real poker verb, in the fixture, as that session
+  local proj="$1" sid="$2"; shift 2
+  ( in_fixture "$proj" || exit 9
+    HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+      CLAUDE_CODE_SESSION_ID="$sid" bash "$BIONIC_HOOKS_DIR/session-poker.sh" "$@" ) > "$SANDBOX/ad-poker" 2>&1
+  AD_RC=$?; AD_OUT="$(cat "$SANDBOX/ad-poker")"
+}
+ad_bind() { ( in_fixture "$1" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$1" "$2" "$1/$PLAN_REL" ); }
+AD_ADR="adrs/epic-fx/adr-061-the-pointer.md"
+# close-out reads either: the plan carries the Step 7 adr: line and no adrs:
+PAD="$(mk_fixture adrs-either)"; ad_step7 "$PAD" "$AD_ADR"; advance_to "$PAD" 8
+expect_eq "AD-0 precondition: the plan carries no adrs: line, and its Step 7 block the adr: line" "|yes" \
+  "$(ad_adrs "$PAD/$PLAN_REL")|$(/usr/bin/grep -qxF "  adr: $AD_ADR" "$PAD/$PLAN_REL" && echo yes || echo no)"
+run_close "$PAD" run
+expect_eq "AD-1 close-out reads the Step 7 adr: line: run exits 0 and the epic row's ADR cell names its number" "0|061" "$CO_RC|$(adr_cell "$PAD")"
+[ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | /usr/bin/grep -i 'adrs\|refuse' | head -4 | sed 's/^/    | /'
+# the advance renders the line, from a session bound to the plan
+AD_SID="closeout-adrs-sid"
+PAV="$(mk_fixture adrs-advance)"; ad_step7 "$PAV" "$AD_ADR"; advance_to "$PAV" 6; ad_bind "$PAV" "$AD_SID"
+ad_poke "$PAV" "$AD_SID" current 7
+expect_eq "AD-2 current 7 renders adrs: from the Step 7 adr: line: rc 0, current: 7, the frontmatter names the ADR" \
+  "0|7|$AD_ADR" "$AD_RC|$(sed -n 's/^current: //p' "$PAV/$PLAN_REL")|$(ad_adrs "$PAV/$PLAN_REL")"
+[ "$AD_RC" = 0 ] || printf '%s\n' "$AD_OUT" | tail -6 | sed 's/^/    | /'
+expect_contains "AD-2b …and says what it rendered" "adrs: $AD_ADR" "$AD_OUT"
+advance_to "$PAV" 8
+run_close "$PAV" run
+expect_eq "AD-3 the rendered line closes the run: rc 0 and the epic row names 061" "0|061" "$CO_RC|$(adr_cell "$PAV")"
+# an ADR named by a path with no adr-<n>: the line is rendered, and the row carries the path
+PAP="$(mk_fixture adrs-path)"; ad_step7 "$PAP" "record/wave-01-fixture/adr.md"; advance_to "$PAP" 6; ad_bind "$PAP" "$AD_SID"
+ad_poke "$PAP" "$AD_SID" current 7
+expect_eq "AD-4 a path with no adr-<n> is rendered as written" "0|record/wave-01-fixture/adr.md" "$AD_RC|$(ad_adrs "$PAP/$PLAN_REL")"
+advance_to "$PAP" 8
+run_close "$PAP" run
+expect_eq "AD-5 …and the epic row is written, its ADR cell the path, never refused" "0|record/wave-01-fixture/adr.md" "$CO_RC|$(adr_cell "$PAP")"
+# a Step 7 that says n/a renders adrs: none; an adrs: line already there is never rewritten
+PAN="$(mk_fixture adrs-na)"; advance_to "$PAN" 6; ad_bind "$PAN" "$AD_SID"
+awk 'NR == 1 { fm = 1 } fm && NR > 1 && /^---$/ { fm = 0 } fm && /^adrs:/ { next }
+  /^- Step 7:/ { print "- Step 7: document: no ADR"; print "  n/a: no ADR owed by a fixture"; next } { print }' \
+  "$PAN/$PLAN_REL" > "$PAN/plan.tmp" && mv "$PAN/plan.tmp" "$PAN/$PLAN_REL"
+ad_poke "$PAN" "$AD_SID" current 7
+expect_eq "AD-6 a Step 7 line that says n/a renders adrs: none" "0|none" "$AD_RC|$(ad_adrs "$PAN/$PLAN_REL")"
+[ "$AD_RC" = 0 ] || printf '%s\n' "$AD_OUT" | tail -6 | sed 's/^/    | /'
+PAK="$(mk_fixture adrs-kept)"; ad_step7 "$PAK" "$AD_ADR"; advance_to "$PAK" 6; ad_bind "$PAK" "$AD_SID"
+set_plan_keys "$PAK" "-" "adrs: adrs/epic-fx/adr-060-written-by-hand.md"
+ad_poke "$PAK" "$AD_SID" current 7
+expect_eq "AD-7 an adrs: line the plan carries is kept as written" "0|adrs/epic-fx/adr-060-written-by-hand.md" "$AD_RC|$(ad_adrs "$PAK/$PLAN_REL")"
 
 finish

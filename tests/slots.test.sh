@@ -28,6 +28,10 @@
 #   §SHELL       `--shell <path>` runs the command the way the harness runs a Bash call
 #                (`<path> -c "eval '<cmd>'"`), so its output, diagnostics and exit code are
 #                the harness's own; the stamp's `cmd=` stays the command as given (T7).
+#   §ROOM        how many writers fit is one arithmetic: at task scale, with no person's cap, the
+#                tick's FILL, the stop wall and the dispatch wall each stop at the scale's three; a
+#                person's line overrides it in all three; and a FILL over slots it cannot fill names
+#                the idle ones.
 #
 # REMOVED AT T12, with the place count, the take loop and the wait they pinned (lib/slots.sh's
 # slots_take, slots_take_all, slots_release, slots_count and the knobs BIONIC_SLOTS_*): §BOOK's
@@ -799,6 +803,154 @@ expect_nonempty "H3.2 a stamp was written" "$H3_LINE"
 expect_regex "H3.3 the stamp's cmd= is the ORIGINAL command, not the shell form" \
   "\\|rc=5\\|.*\\|cmd=echo 'it''s'; exit 5\$" "$H3_LINE"
 expect_absent "H3.4 …with no trace of the shell or the eval in it" "eval" "$H3_LINE"
+
+# ═══════════════════════════════════════════════════════════════════ §ROOM
+section "ROOM — the tick's FILL, the stop wall and the dispatch wall agree on how many writers fit"
+
+# FIXTURE FIDELITY (declared). Each surface is the REAL one, driven through its own suite's builders, which two
+# preludes define under the same names (make_repo, cleanup), so each runs in a child bash of its own and prints
+# `key=value` lines this section reads back: the tick and the stop hook over tests/session-poker.prelude.sh's
+# repository, plan and roster; the dispatch wall over tests/dispatch-preflight.prelude.sh's. The plan is a real
+# plan file at `scale: task` with no `parallel-budget:` line (so the only cap is the scale's own cell), five ready
+# build rows, and N roster rows open. The machine is pinned roomy (64 cores), so the gate never ends a fill and
+# the cap is the only thing that does. ANTI-VACUITY: every absence (no row named, no refusal) sits beside the row
+# that names or refuses on the same extractor in the same fixture one writer earlier; the last row of each
+# surface pair moves with a person's line.
+ROOM_TESTS="$REPO_ROOT/tests"
+newrow room
+cat > "$ROW/ts.sh" <<'ROOM_TS_EOF'
+set -uo pipefail
+T="$1"
+. "$T/lib/resolve-roots.sh"
+. "$T/lib/assert.sh"
+. "$T/lib/bound-marker.sh"
+. "$T/lib/roster-row.sh"
+. "$T/lib/swept-marker.sh"
+. "$T/lib/live-answer.sh"
+POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+S46_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
+S31_STOP_HOOK="${BIONIC_HOOKS_DIR}/stop.sh"
+. "$T/session-poker.prelude.sh"
+export BIONIC_PROBE_CORES=64
+room_plan() {  # <repo> <scale> <budget or -> <ready rows> -> the plan, at `current: 4`, approved
+  local repo="$1" scale="$2" budget="$3" n="$4" i=0
+  local f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  mkdir -p "$(dirname "$f")"
+  {
+    printf -- '---\ngoverning-skill: superpowers:writing-plans\nscale: %s\n' "$scale"
+    [ "$budget" = - ] || printf 'parallel-budget: %s\n' "$budget"
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n%s\n\n- Step 4: in progress\n\n' "$SP_APPROVED_LINE"
+    printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    while [ "$i" -lt "$n" ]; do
+      i=$((i + 1))
+      printf '| T%s | 4 | build | row %s | implementor | — | 10 | REQ-x | payload/f%s.sh | pending | |\n' "$i" "$i" "$i"
+    done
+  } > "$f"
+  touch "$f"
+}
+room_case() {  # <label> <scale> <budget or -> <open writers> <ready rows>
+  local label="$1" r k=0 names="" tr
+  r="$(make_repo "$label")"; new_roster "$r"
+  room_plan "$r" "$2" "$3" "$5"
+  while [ "$k" -lt "$4" ]; do k=$((k + 1)); add_row "$r" name="W-$k" status=confirmed; names="$names W-$k:running"; done
+  [ "$4" -gt 0 ] && plant_answer "$TMPROOT/$label.ans.jsonl" fresh $names
+  forget_digest "$r"
+  poke "$r" tick
+  printf '%s.fill=%s\n' "$label" "$(printf '%s\n' "$OUT" | /usr/bin/grep -m1 '^poker: FILL T' | sed 's/^poker: FILL //')"
+  printf '%s.nofill=%s\n' "$label" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: no FILL')"
+  printf '%s.idle=%s\n' "$label" "$(printf '%s\n' "$OUT" | /usr/bin/grep -m1 '^poker: IDLE ' | sed 's/^poker: //')"
+  tr="$(s31_transcript "$r" "go on")"
+  s31_stop "$r" "$tr"
+  case "$(s31_reason)" in
+    *"ready with room:"*) printf '%s.stop=refused\n' "$label" ;;
+    *) printf '%s.stop=allowed\n' "$label" ;;
+  esac
+}
+CAP3="writers=3 suites=2 worktrees=8 test_jobs=8 source=user"
+CAP5="writers=5 suites=2 worktrees=8 test_jobs=8 source=user"
+room_case two task - 2 5
+room_case three task - 3 5
+room_case person task "$CAP5" 3 5
+room_case wavecap wave "$CAP3" 2 5
+room_case idle1 task - 0 1
+room_case idle2 task - 0 2
+room_case full task - 0 5
+room_case waveidle wave "$CAP3" 0 1
+ROOM_TS_EOF
+cat > "$ROW/w.sh" <<'ROOM_W_EOF'
+set -uo pipefail
+T="$1"
+. "$T/lib/resolve-roots.sh"
+. "$T/lib/assert.sh"
+. "$T/lib/bound-marker.sh"
+. "$T/lib/roster-row.sh"
+. "$T/lib/live-answer.sh"
+. "$T/lib/swept-marker.sh"
+. "$T/dispatch-preflight.prelude.sh"
+room_wall_repo() {  # <name> <open writers> <budget line or ""> -> a task-scale repo with that many writers open
+  local r p k=0
+  r="$(make_repo "$1" yes)"
+  write_attestation "$r" "$SID_A"
+  p="$r/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  sed 's/^scale: wave$/scale: task/' "$p" > "$p.tmp" && mv "$p.tmp" "$p"
+  rm -f "$r/.bionic/tmp/patrol-$SID_A.state"
+  while [ "$k" -lt "$2" ]; do k=$((k + 1)); s22_roster_row "$r" "$SID_A" "W-$k"; done
+  [ -z "$3" ] || s22_set_budget "$r" "$3"
+  printf '%s' "$r"
+}
+NONE="$SANDBOX/.none.jsonl"; mk_transcript "$NONE" none
+room_wall() {  # <label> <repo> -> the verdict, and whether the refusal names the scale's cap
+  run_gate "$(mk_agent_payload "$SID_A" "$2" "$BRIEF_FULL" "W-NEW" "claude-sonnet-5" "$NONE" "implementor")"
+  printf '%s.wall=%s\n' "$1" "$GATE_VERDICT"
+  case "$GATE_VERR" in
+    *"writers: budget=3 open=3 with-this-dispatch=4"*) printf '%s.cap=3\n' "$1" ;;
+    *) printf '%s.cap=\n' "$1" ;;
+  esac
+}
+room_wall two "$(room_wall_repo room-two 2 "")"
+room_wall three "$(room_wall_repo room-three 3 "")"
+room_wall person "$(room_wall_repo room-person 3 "writers=5 source=user")"
+ROOM_W_EOF
+( cd "$ROW" && env -u GIT_CEILING_DIRECTORIES bash ts.sh "$ROOM_TESTS" > ts.out 2> ts.err ); ROOM_TS_RC=$?
+( cd "$ROW" && env -u GIT_CEILING_DIRECTORIES bash w.sh "$ROOM_TESTS" > w.out 2> w.err ); ROOM_W_RC=$?
+room_get() {  # <file> <key> -> that key's value
+  sed -n "s/^$2=//p" "$ROW/$1" | head -1
+}
+expect_status "ROOM.0a the tick and stop children ran to the end" 0 "$ROOM_TS_RC"
+expect_status "ROOM.0b the dispatch wall child ran to the end" 0 "$ROOM_W_RC"
+expect_eq "ROOM.0c precondition: the stop hook's reading is real, a refusal is seen with two writers open" refused "$(room_get ts.out two.stop)"
+
+# (1) TWO WRITERS OPEN AT TASK SCALE, NO PERSON'S LINE: one slot is left of the scale's three. The FILL names one
+# row of the five ready, the stop wall refuses the turn for a row with room, and the dispatch wall admits the third.
+expect_eq "ROOM.1 two open at task scale: the FILL names ONE row of five ready" "T1" "$(room_get ts.out two.fill)"
+expect_eq "ROOM.1b …the stop wall refuses for room" refused "$(room_get ts.out two.stop)"
+expect_eq "ROOM.1c …the dispatch wall admits the third writer" allow "$(room_get w.out two.wall)"
+
+# (2) THREE OPEN: no slot is left. The FILL names no row (the line "no FILL" is its positive), the stop wall lets
+# the turn end, and the dispatch wall refuses the fourth, at the scale's cap.
+expect_eq "ROOM.2 three open at task scale: the FILL names no row" "" "$(room_get ts.out three.fill)"
+expect_eq "ROOM.2b …and says so, in one no-FILL line" 1 "$(room_get ts.out three.nofill)"
+expect_eq "ROOM.2c …the stop wall does not refuse for room" allowed "$(room_get ts.out three.stop)"
+expect_eq "ROOM.2d …the dispatch wall refuses the fourth writer" deny "$(room_get w.out three.wall)"
+expect_eq "ROOM.2e …at the scale's cap of three" 3 "$(room_get w.out three.cap)"
+
+# (3) A PERSON'S LINE OVERRIDES THE SCALE'S CELL IN ALL THREE: the same three open under writers=5 leave two slots.
+expect_eq "ROOM.3 a person's writers=5 with three open: the FILL names two rows" "T1 T2" "$(room_get ts.out person.fill)"
+expect_eq "ROOM.3b …the stop wall refuses for room" refused "$(room_get ts.out person.stop)"
+expect_eq "ROOM.3c …the dispatch wall admits the fourth" allow "$(room_get w.out person.wall)"
+expect_eq "ROOM.3d a person's writers=3 at wave scale with two open: the FILL names one row, as the task cell does" \
+  "T1" "$(room_get ts.out wavecap.fill)"
+
+# (4) THE IDLE SLOTS ARE NAMED. A FILL that cannot fill the room says how many writer slots stay idle: one ready
+# row of three slots, two idle; two rows, one idle; five rows fill all three and name none.
+expect_eq "ROOM.4 one row ready over three slots: the FILL names it" "T1" "$(room_get ts.out idle1.fill)"
+expect_eq "ROOM.4b …and names the two idle slots" "IDLE 2 of 3 writer slots — FILL names T1, every row that is ready" "$(room_get ts.out idle1.idle)"
+expect_eq "ROOM.4c two rows ready: one slot idle" "IDLE 1 of 3 writer slots — FILL names T1 T2, every row that is ready" "$(room_get ts.out idle2.idle)"
+expect_eq "ROOM.4d five rows over three slots: the FILL names three (the cap is not exceeded)" "T1 T2 T3" "$(room_get ts.out full.fill)"
+expect_eq "ROOM.4e …and no slot is idle" "" "$(room_get ts.out full.idle)"
+expect_eq "ROOM.4f a person's cap at wave scale reads the same: one row ready over three slots, two idle" \
+  "IDLE 2 of 3 writer slots — FILL names T1, every row that is ready" "$(room_get ts.out waveidle.idle)"
 
 # ═══════════════════════════════════════════════════════════════════ §KILL
 finish

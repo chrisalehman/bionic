@@ -50,6 +50,7 @@
 #     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #     bash card.sh inherited-debt <requirements file>  (its open debt: lines, which inherited withholds; close-out's)
 #     bash card.sh early <plan>                         (the CARD-EARLY line, or what the release approval card settles)
+#     bash card.sh task-cell <id> <cell> [<id> <cell>]...  (a Tasks cell judged by the Step-3 card's title cap and sentence rule; task-add's and task-set's)
 #     bash card.sh release                 < facts      (the release approval card, from the facts its verb gathers)
 #     bash card.sh sitrep <sheet>          < judgment   (the sitrep card, from the sheet and the model's judgment)
 #     bash card.sh sitrep-check <sheet>    < card       (the sitrep card's check alone, over a card drawn elsewhere)
@@ -110,7 +111,7 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 CARD_SCALE="wave"
 
 _card_usage() {  # <message>
-  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step0|step1|step2|step3> <artifact>, or card.sh <inherited|inherited-debt> <requirements file>, or card.sh release with its facts on stdin, or card.sh <sitrep|sitrep-check> <sheet file> with the judgment or the card on stdin, or card.sh fold with its lines on stdin\n' \
+  printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step0|step1|step2|step3> <artifact>, or card.sh <inherited|inherited-debt> <requirements file>, or card.sh task-cell <id> <cell> [<id> <cell>]..., or card.sh release with its facts on stdin, or card.sh <sitrep|sitrep-check> <sheet file> with the judgment or the card on stdin, or card.sh fold with its lines on stdin\n' \
     "${1:-no row kind}" >&2
   exit 64
 }
@@ -148,13 +149,17 @@ _card_spec() {  # <kind> -> 0 and the spec globals, or 1 for an unknown kind
       CARD_SECTION="Requirements"
       # THE ROW IS THE ID, THE TITLE AND THE CRITERIA COUNT ON ONE LINE. The title is at most 30
       # characters, so its column is 30 wide and `ACs n` trails it; a hand-fed row with a longer
-      # title folds inside the column, as every folding cell does. The provenance and the
-      # criteria are the requirement's `explain`, never the card's.
-      CARD_FMT_1='    %-7s %-30s  ACs %s'; CARD_NF_1=3; CARD_FOLD_1=1 ;;
+      # title folds inside the column, as every folding cell does. The fourth cell is the
+      # requirement's sentence, drawn under the row (`_card_sentence_line`). The provenance and
+      # the criteria are the requirement's `explain`, never the card's.
+      CARD_FMT_1='    %-7s %-30s  ACs %s'; CARD_NF_1=3; CARD_FOLD_1=1
+      _card_sentence_line ;;
     decision)
       CARD_SECTION="Decisions"
       CARD_HDRCOLS="2:serves 3:ADR"
-      CARD_FMT_1='    %-4s %-30s %-14s %s';            CARD_NF_1=4; CARD_FOLD_1=1 ;;
+      # The fifth cell is the decision's sentence, drawn under the row as a requirement's is.
+      CARD_FMT_1='    %-4s %-30s %-14s %s';            CARD_NF_1=4; CARD_FOLD_1=1
+      _card_sentence_line ;;
     ownership)
       CARD_SECTION="Ownership"
       # `surfaces ` moves out of the literal and into the folding cell's value
@@ -174,10 +179,31 @@ _card_spec() {  # <kind> -> 0 and the spec globals, or 1 for an unknown kind
     task)
       CARD_SECTION="Tasks"
       CARD_HDRCOLS="2:serves 3:kind 4:depends 5:agent"
-      CARD_FMT_1='    %-5s %-30s %-12s %-9s %-12s %s';  CARD_NF_1=6; CARD_FOLD_1=1 ;;
+      # The seventh cell is the task's sentence, drawn under the row as a requirement's is.
+      CARD_FMT_1='    %-5s %-30s %-12s %-9s %-12s %s';  CARD_NF_1=6; CARD_FOLD_1=1
+      _card_sentence_line ;;
     *) return 1 ;;
   esac
   return 0
+}
+
+# THE SENTENCE LINE, ONE PIECE FOR EVERY ROW KIND WHOSE ITEM OPENS ON A PLAIN SENTENCE. The row
+# stays exactly as its kind draws it, and the cell after the row's own cells is the item's sentence,
+# printed on the line under the row: it starts where the title column starts, so it reads as indented
+# past the id, and it runs to the card's right edge and folds there, every continuation line at the
+# same indent. Nothing prints under a trailing column on the row's OWN lines; the sentence line is not
+# one of them. A row that hands no sentence (a hand-fed row of the row's own cells only) draws its one
+# line and nothing under it: `_card_render_batch` never prints a second line that would be blank.
+# Call it from a kind's `_card_spec` arm after CARD_FMT_1 and CARD_FOLD_1 are set.
+_card_sentence_line() {  # -> the kind's second line is the item's sentence
+  local i=0 ind=0
+  _card_parse "$CARD_FMT_1"
+  while [ "$i" -le "$CARD_FOLD_1" ]; do
+    _bionic_cols_into "${CARD_LIT[$i]}"; ind=$(( ind + BIONIC_COLS ))
+    [ "$i" -lt "$CARD_FOLD_1" ] && ind=$(( ind + ${CARD_W[$i]:-0} ))
+    i=$(( i + 1 ))
+  done
+  CARD_LINES=2; CARD_FMT_2="$(_card_spaces "$ind")%s"; CARD_NF_2=1; CARD_FOLD_2=0
 }
 
 # ── PARSING A FORMAT ─────────────────────────────────────────────────────────
@@ -687,53 +713,78 @@ function clean(s) { gsub(/`/, "", s); gsub(/\t/, " ", s); return trim(s) }
 # design bullet each carry their whole story; the card carries the opening of it
 # and the artifact path is the depth (steps/1.md: "never a paragraph").
 function firstsent(s) { if (match(s, /\. /)) return substr(s, 1, RSTART); return s }
+# A TITLE\047S sentence ends at a period followed by a space and an uppercase letter or the end of the cell, so
+# `vs. the` and `e.g. a` never end it and no word list is kept; the bash side (lib/plan.sh plan_cut) reads the same rule. The
+# concept sentence that follows a title stays firstsent: the text after it may open on a backtick or a bracket.
+function titlesent(s,   r, off, p, c) {
+  r = s; off = 0
+  while (match(r, /\. /)) {
+    p = RSTART; c = substr(r, p + 2, 1)
+    if (c == "" || c ~ /[[:upper:]]/) return substr(s, 1, off + p)
+    off += p + 1; r = substr(r, p + 2)
+  }
+  return s
+}
 function cells(line, arr,   n, i) {
   gsub(/\\\|/, "\001", line)
   sub(/^[ \t]*\|/, "", line); sub(/\|[ \t]*$/, "", line)
   n = split(line, arr, "|")
-  for (i = 1; i <= n; i++) { gsub(/\001/, "|", arr[i]); arr[i] = clean(arr[i]) }
+  for (i = 1; i <= n; i++) { gsub(/\001/, "|", arr[i]); craw[i] = trim(arr[i]); arr[i] = clean(arr[i]) }
   return n
 }
 function err(m) { if (ERRMSG == "") ERRMSG = m }
 function flush_nd() { if (ndbuf != "") { print "ND" OFS clean(ndbuf); ndbuf = "" } }
 function crit_close() { if (rcur != "") { rcrit = rcrit (rcrit == "" ? "" : "\037") rcur; rcur = "" } }
-# A requirement is three cells on the card (id, title, criteria count); its provenance and criteria
-# travel beside it for `explain`. The heading text is the title as written: the card measures it.
+# A requirement is three cells on the card row (id, title, criteria count) and its sentence, the fourth
+# cell, on the line under it; its provenance and criteria travel beside it for `explain`. The heading text
+# is the title as written: the card measures it. The sentence keeps its backticks, because a backtick is
+# what the card refuses in it, and a cell cleaned of them could no longer be refused.
 function flush_req() {
   if (rid == "") return
   crit_close()
   if (rprov == "") { err("REQ-" rid " has no provenance: line"); rid = ""; return }
-  print "RROW" OFS "REQ-" rid OFS rtext OFS racs
+  print "RROW" OFS "REQ-" rid OFS rtext OFS racs OFS rsent
   print "RDET" OFS "REQ-" rid OFS rprov OFS rcrit
-  rid = ""; rtext = ""; rprov = ""; racs = 0; rcrit = ""; rcur = ""
+  rid = ""; rtext = ""; rprov = ""; racs = 0; rcrit = ""; rcur = ""; rsent = ""; rsentdone = 0
 }
 # THE TITLE OF A DECISION IS ITS LEADING BOLD SPAN, `**D<n> — <title>**` (a bold span without the label
-# is the title as it stands); a bullet with no bold span opens on its first sentence. The rest of the
-# bullet, up to the (D<n>; REQ-...) group, is the detail `explain` prints.
-function flush_dec(   line, id, serves, title, detail) {
+# is the title as it stands); a bullet with no bold span opens on its first sentence, which is its title.
+# The first sentence after the title is the decision\047s concept, the row\047s fifth cell, drawn under the
+# row; the rest of the bullet is the detail `explain` prints, written before the (D<n>; REQ-...) group or after
+# it: a spec writes the group beside the title and the detail behind it, so the group is lifted out of the
+# bullet and the text on both sides is read as one. The sentence keeps its backticks, because a backtick is
+# what the card refuses in it.
+function decl_splice(line,   before, after) {
+  match(line, /\(D[0-9]+;[^)]*\)/)
+  before = trim(substr(line, 1, RSTART - 1)); after = trim(substr(line, RSTART + RLENGTH))
+  if (after == "") return before
+  if (after ~ /^[.,;:]/) return before after
+  return before " " after
+}
+function flush_dec(   line, id, serves, title, detail, sent) {
   if (dbuf == "") return
   line = dbuf; dbuf = ""
   if (match(line, /\(D[0-9]+;[^)]*\)/)) {
     id = substr(line, RSTART + 1, RLENGTH - 2)
     serves = id; sub(/^D[0-9]+;[ \t]*/, "", serves)
     sub(/;.*$/, "", id)
-    line = substr(line, 1, RSTART - 1)
-    line = trim(line)
+    line = decl_splice(line)
     if (match(line, /^\*\*[^*]+\*\*/)) {
       title = substr(line, 3, RLENGTH - 4)
       detail = substr(line, RLENGTH + 1)
     } else {
       gsub(/\*\*/, "", line)
-      title = firstsent(clean(line)); detail = clean(line)
+      title = titlesent(line); detail = substr(line, length(title) + 1)
     }
     gsub(/\*\*/, "", detail)
     title = clean(title)
     sub(/^D[0-9]+[ \t]*(—|--|-|:)[ \t]*/, "", title)
     sub(/\.$/, "", title)
-    detail = clean(detail)
+    gsub(/\t/, " ", detail); detail = trim(detail)
     while (detail ~ /^(\.|:|—|--)/) { sub(/^(\.|:|—|--)[ \t]*/, "", detail) }
-    print "DROW" OFS id OFS title OFS clean(serves)
-    print "DDET" OFS id OFS detail
+    sent = firstsent(detail); detail = substr(detail, length(sent) + 1)
+    print "DROW" OFS id OFS title OFS clean(serves) OFS trim(sent)
+    print "DDET" OFS id OFS clean(detail)
     return
   }
   # AN UNTAGGED BULLET IS THE ARTIFACT\047S DEFECT: the section parses one shape, and a bullet out of it
@@ -813,7 +864,7 @@ fm == 1 {
     sec = "reqs"; sub2 = ""; sub(/^REQ-/, "", h)
     rid = h; sub(/[ \t].*$/, "", rid)
     rtext = h; sub(/^[^ \t]+[ \t]*/, "", rtext); sub(/^— */, "", rtext)
-    rtext = clean(rtext); rprov = ""; racs = 0; rcrit = ""; rcur = ""
+    rtext = clean(rtext); rprov = ""; racs = 0; rcrit = ""; rcur = ""; rsent = ""; rsentdone = 0
   }
   else if (h ~ /Component boundaries/) sub2 = "dec"
   else if (h ~ /Ownership table/) { sub2 = "own"; orow = 0 }
@@ -860,11 +911,15 @@ sec == "nd" {
   else if (trim($0) == "") flush_nd()
   next
 }
+# THE SENTENCE IS THE FIRST PARAGRAPH UNDER THE HEADING, BEFORE `provenance:`: its source lines join
+# with one space, and the blank line, the provenance line or a criterion ends it. A paragraph that
+# comes after the provenance line does not open the requirement, so it is not taken for one.
 sec == "reqs" && rid != "" {
-  if (/^provenance:/) rprov = clean(substr($0, 12))
-  else if (/^- AC-/) { crit_close(); racs++; rcur = clean(substr($0, 3)) }
-  else if (trim($0) == "") crit_close()
+  if (/^provenance:/) { rprov = clean(substr($0, 12)); rsentdone = 1 }
+  else if (/^- AC-/) { crit_close(); racs++; rcur = clean(substr($0, 3)); rsentdone = 1 }
+  else if (trim($0) == "") { crit_close(); if (rsent != "") rsentdone = 1 }
   else if (rcur != "") rcur = rcur " " trim($0)
+  else if (rsentdone != 1) { sline = $0; gsub(/\t/, " ", sline); rsent = rsent (rsent == "" ? "" : " ") trim(sline) }
   next
 }
 sec == "tasks" && /^[ \t]*\|/ {
@@ -876,11 +931,19 @@ sec == "tasks" && /^[ \t]*\|/ {
   n = cells($0, c)
   if (n < 6) next
   # THE WHOLE CELL TRAVELS WITH THE ROW: the card takes its title from it, and `show task` prints it.
+  # The cell travels raw too, last, because the sentence after the title is refused for a backtick
+  # the cleaned cell no longer carries.
   sv = (servc <= n) ? c[servc] : ""
   if (sv !~ /[A-Za-z0-9]/) sv = ""
-  print "TROW" OFS c[1] OFS c[4] OFS c[3] OFS c[6] OFS c[5] OFS sv
+  tr = craw[4]; gsub(/\t/, " ", tr)
+  print "TROW" OFS c[1] OFS c[4] OFS c[3] OFS c[6] OFS c[5] OFS sv OFS tr
   next
 }
+# THE APPROACH CELL IS THE REQUIREMENT\047S PROOF IN ONE PLAIN LINE, the same on every row of the requirement:
+# the card prints it once per requirement, so a second approach on a later row would never reach the card, and
+# a backticked token is an identifier where the cell is the proof said in plain words. Both are refused here,
+# naming the row by its requirement and criterion; the width is measured in columns by the loader, which owns
+# the width library, from the first row of each requirement (`EAPP`).
 sec == "eval" && /^[ \t]*\|/ {
   erow++
   if (erow <= 2) next
@@ -888,6 +951,12 @@ sec == "eval" && /^[ \t]*\|/ {
   if (n < 4) next
   r = c[1]
   ncrit++; crow[ncrit] = r OFS c[3] OFS c[4] OFS c[5] OFS c[6]
+  if (verb == "step2") {
+    erowid = c[3]; sub(/[ \t].*$/, "", erowid); erowid = "Eval design row " r " " erowid
+    if (craw[2] ~ /`/) err(erowid ": the Approach cell carries a backtick: " craw[2])
+    else if ((r in eapp) && eapp[r] != c[2]) err(erowid ": a second approach for " r ": " c[2] " (the first: " eapp[r] ")")
+    if (!(r in eapp)) print "EAPP" OFS erowid OFS c[2]
+  }
   if (!(r in eapp)) { eapp[r] = c[2]; enum++; eord[enum] = r }
   ecnt[r, c[4]]++
   tot[c[4]]++
@@ -969,7 +1038,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   WCARD_ND=(); WCARD_RROW=(); WCARD_DROW=(); WCARD_OROW=(); WCARD_EROW=(); WCARD_TROW=()
   WCARD_RDET=(); WCARD_DDET=()
   WCARD_ADRK=(); WCARD_ADRV=()
-  local out line key rest k v
+  local out line key rest k v wide=""
   out="$(awk -v verb="$1" "$_CARD_AWK" "$2" 2>/dev/null)" || {
     WCARD_ERR="the artifact could not be parsed"; return 1; }
   while IFS= read -r line; do
@@ -999,10 +1068,18 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
       OROW) WCARD_OROW[${#WCARD_OROW[@]}]="$rest" ;;
       EROW) WCARD_EROW[${#WCARD_EROW[@]}]="$rest" ;;
       TROW) WCARD_TROW[${#WCARD_TROW[@]}]="$rest" ;;
+      EAPP) [ -n "$wide" ] || {
+              _bionic_cols_into "${rest#*"$CARD_TAB"}"
+              [ "$BIONIC_COLS" -le "$CARD_APPROACH_CAP" ] \
+                || wide="${rest%%"$CARD_TAB"*}: the Approach cell is ${BIONIC_COLS} columns, the cap is ${CARD_APPROACH_CAP}: ${rest#*"$CARD_TAB"}"
+            } ;;
       ADR)  WCARD_ADRK[${#WCARD_ADRK[@]}]="${rest%%"$CARD_TAB"*}"
             WCARD_ADRV[${#WCARD_ADRV[@]}]="${rest#*"$CARD_TAB"}" ;;
     esac
   done < <(printf '%s\n' "$out")
+  # AN APPROACH OVER THE CAP IS THE ARTIFACT'S DEFECT, refused as the parse's own are; a parse error the awk
+  # found was returned above, so it is the one named when the spec carries both.
+  [ -z "$wide" ] || { WCARD_ERR="$wide"; return 1; }
   # THE WRITERS ARE A PERSON'S CAP, READ BY FIELD (wave-28 T9; D15): `budget_cap` (lib/run.sh)
   # answers from a `parallel-budget:` line whose `source=` is `user` or `override`, one whole
   # `writers=` field. The card's own awk used to cut the first SUBSTRING `writers=`, so
@@ -1032,23 +1109,35 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
 # over the cap is REFUSED, never cut: a cut title is a different sentence that the person then
 # approves, and an ellipsis is the same cut with a mark on it.
 #
-# THE TITLE OF EACH KIND OF ITEM. A Tasks cell: the text before its first `. `, or all of it when
-# it ends on its one period. A Not Doing item: the text before its first `: `, or all of it. A
+# THE TITLE OF EACH KIND OF ITEM. A Tasks cell: the text before the period that ends its first sentence
+# (a period followed by a space and a capital, lib/plan.sh `plan_task_title`), or all of it when it ends on its one period. A Not Doing item: the text before its first `: `, or all of it. A
 # requirement heading and a decision are titled by their heading, so their text is the title as
 # the parse hands it over.
+#
+# A TASKS CELL'S SENTENCE is what follows its title's period, through its own: the cell's next
+# sentence end, or its first ` · `, where a tag (` · complexity:`, ` · born:`) begins, or the cell's end. A
+# cell that is its title alone, or its title and a tag, has none.
 CARD_TITLE_CAP=30
+# The Eval design's Approach cell is one line on the card, so its cap is a width, in columns (see the eval arm).
+CARD_APPROACH_CAP=60
 
 _card_title() {  # <cell|item|heading> <text> -> the title, on stdout
   local t="${2:-}"
   case "$1" in
-    cell)
-      case "$t" in
-        *". "*) t="${t%%. *}" ;;
-        *.)     t="${t%.}" ;;
-      esac ;;
+    cell) t="$(plan_task_title "$t")" ;;
     item)
       case "$t" in *": "*) t="${t%%: *}" ;; esac ;;
   esac
+  printf '%s' "$t"
+}
+
+_card_cell_sentence() {  # <Tasks cell> -> its sentence, on stdout, or nothing
+  local t="${1:-}"
+  plan_cut "$t" || return 0
+  t=" $PLAN_CUT_REST"
+  case "$t" in *" · "*) t="${t%%" · "*}" ;; esac
+  case "$t" in *". "*) t="${t%%". "*}." ;; esac
+  t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
   printf '%s' "$t"
 }
 
@@ -1064,6 +1153,7 @@ _card_title_refusals() {  # <step1|step2|step3> — sets CARD_TITLE_BAD to one R
       for row in ${WCARD_RROW[@]+"${WCARD_RROW[@]}"}; do
         _card_split "$row"
         _card_title_check requirement "${CARD_CELLS[0]}" "${CARD_CELLS[1]:-}"
+        _card_sentence_check requirement "${CARD_CELLS[0]}" "${CARD_CELLS[3]:-}" "before its provenance: line"
       done
       for row in ${WCARD_ND[@]+"${WCARD_ND[@]}"}; do
         i=$(( i + 1 ))
@@ -1073,11 +1163,13 @@ _card_title_refusals() {  # <step1|step2|step3> — sets CARD_TITLE_BAD to one R
       for row in ${WCARD_DROW[@]+"${WCARD_DROW[@]}"}; do
         _card_split "$row"
         _card_title_check decision "${CARD_CELLS[0]}" "${CARD_CELLS[1]:-}"
+        _card_sentence_check decision "${CARD_CELLS[0]}" "${CARD_CELLS[3]:-}" "after its title"
       done ;;
     step3)
       for row in ${WCARD_TROW[@]+"${WCARD_TROW[@]}"}; do
         _card_split "$row"
         _card_title_check task "${CARD_CELLS[0]}" "$(_card_title cell "${CARD_CELLS[1]:-}")"
+        _card_sentence_check task "${CARD_CELLS[0]}" "$(_card_cell_sentence "${CARD_CELLS[6]:-}")" "after its title"
       done ;;
   esac
 }
@@ -1086,6 +1178,18 @@ _card_title_check() {  # <kind> <id> <title> — appends the REFUSED line to CAR
   _bionic_cols_into "$3"
   [ "$BIONIC_COLS" -gt "$CARD_TITLE_CAP" ] || return 0
   CARD_TITLE_BAD="${CARD_TITLE_BAD}REFUSED — $1 $2: title is ${BIONIC_COLS} characters, the cap is ${CARD_TITLE_CAP}: $3"$'\n'
+}
+
+# THE SENTENCE RULE, IN THE TITLE'S CHANNEL. An item that opens on a plain sentence is refused when
+# it has none, or when the sentence carries a backtick: a backticked token is an identifier, and the
+# sentence is the item said in plain words. The refusal names the item and, for a backtick, prints
+# the sentence whole; the sentence is never cut or cleaned to make it pass.
+_card_sentence_check() {  # <kind> <id> <sentence> <where the sentence belongs> — appends the REFUSED line to CARD_TITLE_BAD
+  case "$3" in
+    '')    CARD_TITLE_BAD="${CARD_TITLE_BAD}REFUSED — $1 $2: no sentence $4"$'\n' ;;
+    *'`'*) CARD_TITLE_BAD="${CARD_TITLE_BAD}REFUSED — $1 $2: the sentence carries a backtick: $3"$'\n' ;;
+  esac
+  return 0
 }
 
 # THE REFUSAL IS EXIT 1 WITH NOTHING ON STDOUT: the artifact parsed, and what it says is not a card.
@@ -1961,7 +2065,8 @@ _card_step2() {  # <artifact path>
   CARD_ROWS=()
   local r
   for r in ${WCARD_DROW[@]+"${WCARD_DROW[@]}"}; do
-    CARD_ROWS[${#CARD_ROWS[@]}]="${r}${CARD_TAB}$(_card_adr_for "${r%%"$CARD_TAB"*}")"
+    _card_split "$r"
+    CARD_ROWS[${#CARD_ROWS[@]}]="${CARD_CELLS[0]}${CARD_TAB}${CARD_CELLS[1]:-}${CARD_TAB}${CARD_CELLS[2]:-}${CARD_TAB}$(_card_adr_for "${CARD_CELLS[0]}")${CARD_TAB}${CARD_CELLS[3]:-}"
   done
   _card_render_batch decision
   printf '\n'
@@ -2091,7 +2196,7 @@ _card_step2_explain() {  # <D-id or number>
     for row in ${WCARD_DDET[@]+"${WCARD_DDET[@]}"}; do
       _card_split "$row"
       [ "${CARD_CELLS[0]}" = "$key" ] || continue
-      _card_fold_at 4 "${CARD_CELLS[1]:-}"
+      [ -z "${CARD_CELLS[1]:-}" ] || _card_fold_at 4 "${CARD_CELLS[1]}"
     done
     _card_labelled 4 serves "$serves" 12
     _card_labelled 4 adr "$(_card_adr_for "$key")" 12
@@ -2134,14 +2239,15 @@ _card_step3() {  # <citation path> <artifact path as given>
 }
 
 # THE TASK ROWS: the title alone, `serves` in a column of its own, and the depends cell with each
-# run of three or more consecutive ids folded to a range. The whole cell is `show task`'s.
+# run of three or more consecutive ids folded to a range; the task's sentence goes under the row.
+# The whole cell is `show task`'s.
 _card_task_rows() {  # sets CARD_ROWS[] from WCARD_TROW[]
   local row serves
   CARD_ROWS=()
   for row in ${WCARD_TROW[@]+"${WCARD_TROW[@]}"}; do
     _card_split "$row"
     serves="${CARD_CELLS[5]:-}"; [ -n "$serves" ] || serves="—"
-    CARD_ROWS[${#CARD_ROWS[@]}]="${CARD_CELLS[0]}${CARD_TAB}$(_card_title cell "${CARD_CELLS[1]:-}")${CARD_TAB}${serves}${CARD_TAB}${CARD_CELLS[2]:-}${CARD_TAB}$(_card_range "${CARD_CELLS[3]:-}")${CARD_TAB}${CARD_CELLS[4]:-}"
+    CARD_ROWS[${#CARD_ROWS[@]}]="${CARD_CELLS[0]}${CARD_TAB}$(_card_title cell "${CARD_CELLS[1]:-}")${CARD_TAB}${serves}${CARD_TAB}${CARD_CELLS[2]:-}${CARD_TAB}$(_card_range "${CARD_CELLS[3]:-}")${CARD_TAB}${CARD_CELLS[4]:-}${CARD_TAB}$(_card_cell_sentence "${CARD_CELLS[6]:-}")"
   done
 }
 
@@ -2208,6 +2314,17 @@ _card_rigor_line() {  # <rigor word, as the plan carries it> -> the Verification
   rigor_print "$1" 2>/dev/null || printf "review rigor: '%s' is no level (single or double)" "$1"
 }
 
+# A SECOND LINE WITH NO CELL AND NO LABEL WOULD PRINT AS A BLANK LINE, and a blank line inside a
+# section reads as the section's end; so it is not drawn. A labelled second line (`reuses`) is
+# never blank and draws as it always did.
+_card_line2_blank() {  # reads _card_b[] and CARD_FMT_2 -> 0 when the row's second line would be blank
+  local c lit
+  for c in ${_card_b[@]+"${_card_b[@]}"}; do [ -z "$c" ] || return 1; done
+  _card_parse "$CARD_FMT_2"
+  lit="${CARD_LIT[*]-}${CARD_TAIL}"
+  [ -z "${lit//[[:space:]]/}" ]
+}
+
 # ── ONE BATCH, RENDERED ──────────────────────────────────────────────────────
 #
 # EVERY ROW IS READ BEFORE ANY ROW IS RENDERED (AC-9.5). A batch's per-column
@@ -2233,7 +2350,7 @@ _card_render_batch() {  # <kind> — renders CARD_ROWS[], already set
       while [ "$_i" -lt "$CARD_NF_2" ]; do
         _card_b[$_i]="${CARD_CELLS[$(( CARD_NF_1 + _i ))]:-}"; _i=$(( _i + 1 ))
       done
-      _card_emit "$CARD_FMT_2" "$CARD_FOLD_2" "2" "${_card_b[@]}"
+      _card_line2_blank || _card_emit "$CARD_FMT_2" "$CARD_FOLD_2" "2" "${_card_b[@]}"
     fi
   done
   return 0
@@ -2270,6 +2387,30 @@ _card_stem() {  # <path> -> the name without `.<kind>.md`: wave-01-x.plan.md -> 
   printf '%s' "${b%.*}"
 }
 
+# WHETHER THE APPROVAL IS ALREADY RECORDED. A card is a question only while its answer is owed: a step
+# below the plan's `current:` was answered to get past it, and `approved-by:` is the person's answer to the
+# plan, which the Stop's sweep takes for every step. A dispatched writer checking its exit asks nobody
+# anything, so a render under a writer's name owes nothing either. The writer is told where the renderer
+# stands, as the gate tells it: the `bionic-agent` marker in the git directory of the linked tree it runs
+# in. The artifact's directory is not asked, because a bound plan resolves under the project's root and a
+# writer's tree never holds it. The agent name in the environment is not asked either: a suite run through
+# the runner inherits it, and a fixture's card would then open nothing for any writer who ran that suite.
+# A render that reopened any of these put "Blocked on you" on the sitrep for an answer already given.
+_card_writer() {  # -> 0 when the working tree is a linked tree marked with a dispatched writer's name
+  local out common gitdir
+  out="$(git rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" || return 1
+  { IFS= read -r common; IFS= read -r gitdir; } <<< "$out"
+  [ -n "$gitdir" ] && [ "$gitdir" != "$common" ] && [ -s "$gitdir/bionic-agent" ]
+}
+_card_settled() {  # <step> <plan> -> 0 when the step's approval is recorded or the renderer is a writer
+  local step
+  _card_writer && return 0
+  fill_current_forget
+  fill_plan_approved "$2" && return 0
+  step="$(fill_step_token "$2")"
+  [ -n "$step" ] && [ "$1" -lt "$step" ] 2>/dev/null
+}
+
 _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
   local n="$1" sid="${CLAUDE_CODE_SESSION_ID:-}" art root plan m q t
   [ -n "$sid" ] && [ -n "${2:-}" ] || return 0
@@ -2283,6 +2424,7 @@ _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
   if [ "$art" != "$plan" ]; then
     case "$n" in 1|2) [ "$(_card_stem "$art")" = "$(_card_stem "$plan")" ] || return 0 ;; *) return 0 ;; esac
   fi
+  _card_settled "$n" "$plan" && return 0
   declare -F owed_open >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/owed.sh" 2>/dev/null || return 0
   case "$n" in
     0) q="$CARD_Q_STEP0"; t="approval: Step 0 configuration" ;;
@@ -2863,13 +3005,8 @@ _card_sitrep_sheet() {
       print "R\t" k "\t" v; next }
     index($0, "step: ") == 1 { rec("S", "step", "n name state tasks"); next }
     index($0, "task: ") == 1 { rec("T", "task", "id step state desc note"); next }
-    index($0, "ask: ") == 1 { rec("A", "ask", "key holds title raised blocks waits"); next }
-    index($0, "goal: ") == 1 { b = " " substr($0, 7); m = fv(b, "measure", "for"); k = ""; n = ""; w = ""; o = ""; mo = ""
-      if (match(m, /^[0-9]+ of [0-9]+ criteria discharged/)) {
-        split(substr(m, 1, RLENGTH), h, " "); k = h[1]; n = h[3]; r = substr(m, RLENGTH + 1)
-        if (match(r, /^, [0-9]+ waived/)) w = substr(r, 3, RLENGTH - 9)
-        if (sub(/^.* — open: /, "", r)) { o = r; if (match(o, / and [0-9]+ more$/)) { mo = substr(o, RSTART + 5, RLENGTH - 10); o = substr(o, 1, RSTART - 1) } } }
-      print "G\t" fv(b, "name", "status") "\t" fv(b, "status", "measure") "\t" k "\t" n "\t" w "\t" o "\t" mo; next }' "$1"
+    index($0, "ask: ") == 1 { rec("A", "ask", "key holds title raised blocks waits"); next }' "$1"
+  plan_goal_sheet "$1"
 }
 
 # _card_sitrep_fact <key> -> the sheet's value for a run. or close. key in SR_RECS, `-` when it has none
@@ -3386,8 +3523,9 @@ _card_sitrep_check() {
     }'
 }
 
-# _card_sitrep_load <sheet file> -> SR_RECS; the open asks SR_AKEY, SR_AHOLDS, SR_ATITLE, SR_ABLOCK (yes when the ask
-# waits on the user and its blocks field says yes, never inferred from what it holds) and SR_AWAIT (`user` or
+# _card_sitrep_load <sheet file> -> SR_RECS; the open asks SR_AKEY, SR_AHOLDS, SR_ATITLE, SR_ABLOCK (yes only when the
+# ask's blocks field says yes: the sheet's one function, `sitrep_ask_lines`, already holds an ask that waits on an event
+# to no, so the card decides nothing again from what it holds or waits on) and SR_AWAIT (`user` or
 # `event <what>`); SR_VALS, `V <key> <value>` per measured sheet line (the text before ` — `), the wave, the step
 # numbers, the goal counts by status, each theme's criteria discharged under its name and the counted line;
 # SR_COUNTED, the counted line of the asks that wait on events; SR_NEXT, the next event the run waits on.
@@ -3399,7 +3537,6 @@ _card_sitrep_load() {
   while IFS="$CARD_TAB" read -r k h t b w; do
     [ -n "$k" ] || continue
     SR_AKEY[${#SR_AKEY[@]}]="$k"; SR_AHOLDS[${#SR_AHOLDS[@]}]="$h"; SR_ATITLE[${#SR_ATITLE[@]}]="$t"; SR_AWAIT[${#SR_AWAIT[@]}]="$w"
-    case "$w" in event*) b=no ;; esac
     [ "$b" = yes ] || b=no
     SR_ABLOCK[${#SR_ABLOCK[@]}]="$b"
   done <<< "$(printf '%s\n' "$SR_RECS" | awk -F'\t' '$1 == "A" { print $2 "\t" ($3 == "" ? "nothing" : $3) "\t" ($4 == "" ? $2 : $4) "\t" ($6 == "" ? "-" : $6) "\t" ($7 == "" ? "user" : $7) }')"
@@ -3432,12 +3569,13 @@ _card_sitrep_load() {
       print "V\tsteps\t" st
       if (counted != "") print "V\tasks\t" counted }' "$1")"
   # the goals: the counts by status the word goals names, and each theme's criteria discharged under its own name
-  SR_VALS="$SR_VALS"$'\n'"$(printf '%s\n' "$SR_RECS" | awk -F'\t' '
+  # the word a met goal reads and the measure's words are lib/plan.sh's, never a copy here
+  SR_VALS="$SR_VALS"$'\n'"$(printf '%s\n' "$SR_RECS" | awk -F'\t' -v met="$(plan_goal_status reached)" "$_PLAN_GOAL_MEASURE_AWK"'
     $1 == "G" { if (!($3 in gc)) go[++ng] = $3; gc[$3]++; gt++
-      if ($4 != "") print "V\tgoal." $2 "\t" $4 " of " $5 " criteria discharged" ($6 != "" ? ", " $6 " waived" : "") ($8 != "" ? ", " $8 " more open" : "") }
+      if ($4 != "") print "V\tgoal." $2 "\t" goal_measure($4, $5, $6) ($8 != "" ? ", " $8 " more open" : "") }
     END {
-      s = (gc["met"] + 0) " of " (gt + 0) " met"; b = ""
-      for (i = 1; i <= ng; i++) if (go[i] != "met") b = b (b == "" ? "" : ", ") gc[go[i]] " " go[i]
+      s = (gc[met] + 0) " of " (gt + 0) " " met; b = ""
+      for (i = 1; i <= ng; i++) if (go[i] != met) b = b (b == "" ? "" : ", ") gc[go[i]] " " go[i]
       print "V\tgoals\t" s (b == "" ? "" : ", " b) }')"
 }
 
@@ -3513,6 +3651,19 @@ case "$1" in
       case "$_card_k" in ''|*[!0-9]*) _card_k=0 ;; esac
       _card_hang "$_card_k" "$_card_l"
     done
+    exit 0 ;;
+  task-cell)
+    # A TASKS CELL, JUDGED BY THE STEP-3 CARD'S OWN TITLE CAP AND SENTENCE RULE where a verb writes it
+    # (task-add, task-set): the refusal is the card's, word for word, every refused cell named in it, exit 1.
+    [ "$#" -ge 3 ] && [ $(( ($# - 1) % 2 )) -eq 0 ] || _card_usage "task-cell takes <id> <cell> pairs (got $(( $# - 1 )) arguments)"
+    shift
+    CARD_TITLE_BAD=""
+    while [ "$#" -ge 2 ]; do
+      _card_title_check task "$1" "$(_card_title cell "$2")"
+      _card_sentence_check task "$1" "$(_card_cell_sentence "$2")" "after its title"
+      shift 2
+    done
+    [ -z "$CARD_TITLE_BAD" ] || { printf '%s' "$CARD_TITLE_BAD" >&2; exit 1; }
     exit 0 ;;
   release)
     # The release approval card, drawn from the facts the release-approval verb gathers, on stdin.

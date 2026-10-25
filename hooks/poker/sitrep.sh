@@ -260,7 +260,9 @@ handoff_render() {  # <composed> <section>
 # clock ampm line title` (clock and ampm empty when the parenthesis names none): the one reader of the ledger's
 # headings that the clock readers (`sitrep_ledger_times`, `pages_open`) read through, so no program of the sheet
 # parses a heading beside this one. The who is the parenthesis's words before its first date; a ruling with no `: <title>` after the
-# parenthesis is `(untitled)`. With `puts`, a put is an entry too, `D<n> · put · <who> <date> · <title>`: the line
+# parenthesis is `(untitled)`. A go a person gave is ledgered as `D<n> settled by <what> (<who> <date> [<clock>]): "<reply>"`,
+# the reply after the parenthesis: it is the entry `D<n> · settled "<reply>" · <who> <date> · <what>`, its clock the
+# parenthesis's, so the decision reads ruled and the span from its put is kept. With `puts`, a put is an entry too, `D<n> · put · <who> <date> · <title>`: the line
 # `decisions put` writes, read only by the rounds count, never by the register.
 decisions_list() {  # <ledger> [puts] -> one line per entry: D<n> · "<reply>" · <who> <date> · <title>, in the ledger's order
   awk -v puts="${2:-}" '
@@ -273,7 +275,7 @@ decisions_list() {  # <ledger> [puts] -> one line per entry: D<n> · "<reply>" �
       }
       return ""
     }
-    function entry(s,   n, rest, verb, qual, reply, hasreply, q, i, depth, inq, ch, fin, c, paren, tail, title, who, date, field, after, clock, ap, w) {
+    function entry(s,   n, rest, verb, qual, reply, hasreply, q, i, depth, inq, ch, fin, c, paren, tail, title, who, date, field, after, clock, ap, w, by) {
       if (!match(s, /^D[0-9]+ /)) return
       n = substr(s, 1, RLENGTH - 1); rest = substr(s, RLENGTH + 1)
       verb = lead_verb(rest); qual = ""
@@ -293,6 +295,11 @@ decisions_list() {  # <ledger> [puts] -> one line per entry: D<n> · "<reply>" �
         }
         if (paren == "") return
       } else {
+        by = ""
+        if (verb == "settled" && index(rest, " by ") == 1) {
+          q = index(substr(rest, 5), " ("); if (q == 0) return
+          by = substr(rest, 5, q - 1); rest = substr(rest, q + 4)
+        }
         if (index(rest, " \"") == 1) {
           rest = substr(rest, 3); q = index(rest, "\""); if (q == 0) return
           reply = substr(rest, 1, q - 1); rest = substr(rest, q + 1); hasreply = 1
@@ -310,6 +317,10 @@ decisions_list() {  # <ledger> [puts] -> one line per entry: D<n> · "<reply>" �
         paren = substr(rest, 1, fin - 1); tail = substr(rest, fin + 1)
         if (index(tail, ": ") == 1) title = substr(tail, 3)
         else { title = tail; sub(/^[ \t:,;]+/, "", title) }
+        if (by != "") {
+          if (!hasreply && match(title, /^"[^"]*"[ \t]*$/)) { reply = substr(title, 2, index(substr(title, 2), "\"") - 1); hasreply = 1 }
+          title = by
+        }
       }
       if (!match(paren, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) return
       date = substr(paren, RSTART, RLENGTH); who = substr(paren, 1, RSTART - 1); after = substr(paren, RSTART + RLENGTH)
@@ -679,7 +690,8 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 # row landing`, `the merge`, and any other read another task writes as that task, named by the label its card row
 # prints, its step, a slash and its id without the T, as `queued behind <label>` names one. A task with a red at head
 # is failed (`red`); one waiting on an approval the user owes, or whose status is held, is held, a started one naming
-# each approval it waits on. The description is the task's cell up to its first " (", ": ", ". " or " · ".
+# each approval it waits on. The description is the task's title, lib/plan.sh `plan_task_title`'s, as the plan's card
+# prints it.
 #
 # THE MEASUREMENTS. Sized minutes are the size cells, summed as if the tasks ran one after another, so they are never
 # set against wall clock; the sheet compares only measurements of one unit and leaves every judgment to the model.
@@ -710,21 +722,6 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 SITREP_SHEET_HEAD="sheet/v1 — facts for the model; the user sees the card, never this sheet"
 SITREP_STEP_NAMES="Configure Scope Design Plan Implement Verify Review Document Integrate Close-out"
 
-# _sitrep_name_awk -> the awk source of `task_name(cell)`: the task's cell up to the first of " (", ": ", ". " or " · ",
-# trimmed, a closing "." dropped; a cell that opens on one of them keeps its whole trimmed text, so no task prints
-# nameless. Index-based, so the cut is byte-exact under any locale.
-_sitrep_name_awk() {
-  printf '%s' '
-    function task_name(t,   c, i, k, d, w) {
-      d[1] = " ("; d[2] = ": "; d[3] = ". "; d[4] = " · "
-      w = t; c = length(t) + 1
-      for (k = 1; k <= 4; k++) { i = index(t, d[k]); if (i && i < c) c = i }
-      t = substr(t, 1, c - 1); sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t); sub(/\.$/, "", t)
-      if (t == "") { t = w; sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t) }
-      return t
-    }'
-}
-
 # _sitrep_label_awk -> the awk source of `label(id)`: a task is named by the label its row prints on the card, its step,
 # a slash and its id without the T. It reads `at[id]` (the row's index) and `stp[index]` (its step); an id no row carries
 # is named as it stands. Every place that names a task to the user takes its name from here, so no two disagree.
@@ -743,8 +740,6 @@ sitrep_task_label() {
     END { print label(w) }'
 }
 
-# sitrep_task_name <cell> -> the task's name: the cell up to its first " (", ": ", ". " or " · ".
-sitrep_task_name() { printf '%s\n' "$1" | LC_ALL=C awk "$(_sitrep_name_awk)"'{ print task_name($0) }'; }
 
 # sitrep_dur <minutes> -> `<h> h <m> min`, `<h> h` or `<m> min`, to the whole minute
 sitrep_dur() {
@@ -959,19 +954,28 @@ sitrep_record_spans() {
 # closed one when a row not dropped reads it as approval:<id>, it was a step card or a gate act, or it was a waiver,
 # finding, carry, matrix row or held merge in a plan with an integrate row (what each holds while open, `sitrep_holds`).
 # An ask no record can start counts no minute, and the minutes are printed `partial` with how many asks went untimed.
+# Only the minutes an ask waits on the user count (lib/owed.sh `ask_waits_on`, open or closed): one answered so that it
+# waits on an event counts to its answer, and one that never waits on the user (a carry, a delivery) counts none.
 sitrep_waiting() {
-  local plan="$1" root="$2" rows="$3" now="$4" asks="$5" reg="" led out m k
+  local plan="$1" root="$2" rows="$3" now="$4" asks="$5" reg="" led out m k spans waits
   reg="$(owed_register "$root" "$plan" 2>/dev/null)" || reg=""
   led="$(docs_root "$root")/record/$(proof_plan_slug "$plan")/design-ledger.md"
-  out="$( { printf '%s\n' "$asks" | awk -F'\t' 'NF >= 2 && $1 != "" { print "O\t" $1 "\t" $2 }'
+  spans="$(sitrep_record_spans "$plan")"
+  # what each ask no longer open waits on; an open one's is the asks' own fifth field
+  waits="$( { printf '%s\n' "$spans" | cut -f1
+      { [ -n "$reg" ] && [ -f "$reg" ] && [ ! -L "$reg" ] && awk "$_OWED_AWK_FIELD"'
+          index($0, "owed/v1|") == 1 && fld($0, "state") != "open" { print key_of($0) }' "$reg"; } 2>/dev/null
+    } | awk 'NF && !s[$0]++' | while IFS= read -r k; do printf 'W\t%s\t%s\n' "$k" "$(ask_waits_on "$k" "$plan" "$root")"; done)"
+  out="$( { printf '%s\n' "$asks" | awk -F'\t' 'NF >= 2 && $1 != "" { print "O\t" $1 "\t" $2 "\t" $5 }'
       printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { s = tolower($10); gsub(/[ \t]/, "", s); k = $3; gsub(/[ \t]/, "", k)
         if (s == "dropped") next
         if (k == "integrate") print "I"
         n = split($13, t, ","); for (i = 1; i <= n; i++) { x = t[i]; gsub(/^[ \t]+|[ \t]+$/, "", x); sub(/^live:/, "", x); if (index(x, "approval:") == 1) print "A\t" substr(x, 10) } }'
       sitrep_ledger_times "$led" | awk -F'\t' '{ print "D\tdecide:" $1 "\t" $2 "\t" $3 }'
-      sitrep_record_spans "$plan" | awk -F'\t' '{ print "S\t" $1 "\t" $2 "\t" $3 }'
+      printf '%s\n' "$spans" | awk -F'\t' 'NF { print "S\t" $1 "\t" $2 "\t" $3 }'
+      printf '%s\n' "$waits" | awk 'NF'
       { [ -n "$reg" ] && [ -f "$reg" ] && [ ! -L "$reg" ] && awk "$_OWED_AWK_FIELD"'
-          index($0, "owed/v1|") == 1 { print "R\t" key_of($0) "\t" fld($0, "state") "\t" fld($0, "at") "\t" fld($0, "opened") }' "$reg"; } 2>/dev/null
+          index($0, "owed/v1|") == 1 { print "R\t" key_of($0) "\t" fld($0, "state") "\t" fld($0, "at") "\t" fld($0, "opened") "\t" fld($0, "answered") }' "$reg"; } 2>/dev/null
     } | awk -F'\t' -v now="$now" "$_PATROL_ISO_AWK"'
       function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
       function ep(s) { if (s == "" || s == "-") return -1; return iso2epoch(norm(s)) }
@@ -984,11 +988,12 @@ sitrep_waiting() {
         if (k ~ /^decide:D[0-9]+$/) return ("approval:" substr(k, 8)) in rd
         return 0
       }
-      $1 == "O" { open[$2] = $3; want($2); next }
+      $1 == "O" { open[$2] = $3; wt[$2] = $4; want($2); next }
+      $1 == "W" { if (!($2 in wt)) wt[$2] = $3; next }
       $1 == "I" { integ = 1; next }
       $1 == "A" { rd["approval:" $2] = 1; next }
       $1 == "D" { put[$2] = $3; rul[$2] = $4; want($2); next }
-      $1 == "R" { rs[$2] = $3; ra[$2] = $4; ro[$2] = $5; want($2); next }
+      $1 == "R" { rs[$2] = $3; ra[$2] = $4; ro[$2] = $5; rn[$2] = $6; want($2); next }
       $1 == "S" { sp[$2] = $3; se[$2] = $4; next }
       END {
         for (i = 1; i <= nk; i++) {
@@ -1001,6 +1006,8 @@ sitrep_waiting() {
           else if (fromrec && ep(se[k]) >= 0) e = ep(se[k])
           else if ((k in rs) && rs[k] == "closed") e = ep(ra[k])
           else if ((k in rul) && rul[k] != "-") e = rul[k] + 0
+          # an ask waiting on an event waited on the user only until its answer, and never without one
+          if ((k in wt) && wt[k] != "user") { x = (k in rn) ? ep(rn[k]) : -1; if (x < 0) continue; if (x < e) e = x }
           if (s < 0) { lost++; continue }
           if (e <= s) continue
           n++; bs[n] = s; be[n] = e; bk[n] = k
@@ -1298,8 +1305,11 @@ sitrep_gather() {
                 if (t != "") { e = iso2epoch(t); if (e >= 0) print "L\t" id "\t" e "\t" h }
               }' "$plan"
             printf '%s\n' "$lq" "$lwait" "$ledges" | awk 'NF'
+            # each title is the one reading lib/plan.sh plan_task_title gives, as the plan card prints it
+            printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { x = $1; gsub(/^[ \t]+|[ \t]+$/, "", x); if (x != "") print x "\t" $4 }' \
+              | while IFS='	' read -r id desc; do printf 'N\t%s\t%s\n' "$id" "$(plan_task_title "$desc")"; done
             printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { print "U\t" $0 }'
-          } | LC_ALL=C awk -F'\t' "$(_sitrep_name_awk)$(_sitrep_label_awk)"'
+          } | LC_ALL=C awk -F'\t' "$(_sitrep_label_awk)"'
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
     function words(r,   t) {   # a read, in words: the step, the user'"'"'s approval, the reviews, the build, the merge
       sub(/^live:/, "", r); t = r; sub(/: .*$/, "", t)
@@ -1326,9 +1336,10 @@ sitrep_gather() {
     }
     function row(i, kind, note,   d) {
       if (id[i] in red && st[i] != "landed") { kind = "s"; note = "red" }
-      d = task_name(tk[i]); if (d == "") d = "-"
+      d = ttl[id[i]]; if (d == "") d = "-"
       printf "R\t%s\t%s\t%s\t%s\t%s\t%s\n", g[i], (stp[i] == "") ? "-" : stp[i], id[i], d, kind, note
     }
+    $1 == "N" { ttl[$2] = $3; next }
     $1 == "X" { red[$2] = 1; next }
     $1 == "A" { appr[$2] = 1; next }
     $1 == "L" { land[$2] = $3; hand[$2] = $4; next }
@@ -1341,7 +1352,7 @@ sitrep_gather() {
     $1 == "E" { ne++; ef[ne] = $2; et[ne] = $3; next }
     $1 == "U" {
       s = tolower(trim($11)); if (s == "dropped") next
-      n++; id[n] = trim($2); stp[n] = trim($3); tk[n] = trim($5); rd[n] = $14; st[n] = s; at[id[n]] = n
+      n++; id[n] = trim($2); stp[n] = trim($3); rd[n] = $14; st[n] = s; at[id[n]] = n
       b = 0
       if (s != "landed") {
         if (id[n] in red) b = 1
@@ -1492,7 +1503,8 @@ SITREP_SIT
   # line prints. Build tasks are scaled by the landed build tasks' own time over their size once 3 or more have
   # landed, else 1×; every other kind sits at face value, as does a task held on an ask that names it.
   if [ "${bn:-0}" -ge 3 ] && [ "${bs:-0}" -gt 0 ]; then ratio="$bo/$bs"; else ratio="1/1"; fi
-  held="$(printf '%s\n' "$SG_ASKS" | awk -F'\t' 'NF >= 2 && $1 != "" { h = $2; gsub(/,| and /, " ", h); m = split(h, w, " "); for (i = 1; i <= m; i++) print w[i] }')"
+  # only an ask that waits on the user holds a task on you: one answered, waiting on an event, scales as any other
+  held="$(printf '%s\n' "$SG_ASKS" | awk -F'\t' 'NF >= 2 && $1 != "" && $5 == "user" { h = $2; gsub(/,| and /, " ", h); m = split(h, w, " "); for (i = 1; i <= m; i++) print w[i] }')"
   launches="$(sitrep_launches "$plan" "$root")"
   wts="$(sitrep_close_weights "$rows" "$now" "$ratio" "$held" "$launches")"
   chain="$(sitrep_chain "$plan" "$rows" "$wts")"; cids="${chain%%$'\t'*}"; cmins="${chain##*$'\t'}"
@@ -1527,11 +1539,11 @@ SITREP_SIT
     chain1="$(sitrep_chain "$plan" "$rows" "$wun")"; cmins1="${chain1##*$'\t'}"
     top1="$cmins1"; atop="$(printf '%s\n' "$wun" | awk -F'\t' '$1 == "A" { print $2 }')"; [ "${atop:-0}" -le "$top1" ] || top1="$atop"
     SG_K_UNSCALED="$(sitrep_clock "$(( (now + top1 * 60 + 30) / 60 * 60 ))" "$now")"
-    # an ask that holds a task the prediction rests on (the chain or the longest-running task), the release or the merge:
-    # the prediction assumes it is answered now
+    # an ask that waits on the user and holds a task the prediction rests on (the chain or the longest-running task), the
+    # release or the merge: the prediction assumes it is answered now
     k="$(printf '%s\n' "$SG_ASKS" | awk -F'\t' -v labs="$(printf '%s' "$clab" | sed 's/ → / /g') $([ -z "$aid" ] || sitrep_task_label "$rows" "$aid")" '
       BEGIN { n = split(labs, l, " "); for (i = 1; i <= n; i++) on[l[i]] = 1 }
-      NF >= 2 && $1 != "" { h = $2; gsub(/,| and /, " ", h); m = split(h, w, " "); hit = 0
+      NF >= 2 && $1 != "" && $5 == "user" { h = $2; gsub(/,| and /, " ", h); m = split(h, w, " "); hit = 0
         for (i = 1; i <= m; i++) if ((w[i] in on) || w[i] == "release" || w[i] == "merge") hit = 1
         if (hit) printf "%s%s", (c++ ? " " : ""), $1 }')"
     # shellcheck disable=SC2086
@@ -1543,14 +1555,27 @@ SITREP_SIT
   [ "$mode" = sheet ] || return 0
 
   # ---- correctness and waste
-  local k rv q sc res at ev nf passed=0 failed=0 running=0 open idle_min rg rr rn rd rk g m st t md rdg fr u sn sg sr nsu
+  local k rv q sc res at ev nf passed=0 failed=0 running=0 jhead jv jrc open idle_min rg rr rn rd rk g m st t md rdg fr u sn sg sr nsu
   rv="$(sitrep_reviews "$plan" "$root")"
   SG_REVIEWS=""
-  # a review is counted once per question and scope, by its latest result: a pass a later fail supersedes is no pass
-  read -r passed failed <<< "$(printf '%s\n' "$rv" | awk -F'\t' '
-    function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
-    NF >= 6 { k = $1 SUBSEP $2; a = norm($4); if (!(k in r) || a == "-" || t[k] == "-" || a >= t[k]) { r[k] = $3; t[k] = a } }
-    END { for (k in r) { if (r[k] == "pass" || r[k] == "flag") p++; else if (r[k] == "fail") f++ }; print p + 0, f + 0 }')"
+  # THE COUNT IS THE JUDGE'S, as the release card's Reviews lines are: each question the rigor deals, failed only while
+  # lib/proof.sh `facts_reviews` reads it failing at the working branch's head, so a failed reading its fix landing
+  # answered counts passed here exactly when the card reads it covered. A question nobody has read is not counted.
+  # A plan the judge cannot deal (no rigor and scale, no base, no head) has no coverage to read: there each question
+  # and scope counts once by its latest recorded result, a pass a later fail supersedes being no pass.
+  jhead="$(proof_branch_head "$plan" "$root" 2>/dev/null)" || jhead=""
+  jv=""; jrc=2
+  if [ -n "$jhead" ] && declare -F facts_reviews >/dev/null 2>&1; then jv="$(facts_reviews "$plan" "$jhead" 2>/dev/null)"; jrc=$?; fi
+  if [ "$jrc" -ne 2 ]; then
+    SG_T_REVIEWS_WHAT="the reviews, each question once as the judge reads it at the head"
+    read -r passed failed <<< "$(printf '%s\n' "$jv" | awk -F'\t' 'NF >= 3 && $3 != "absent" { if ($3 == "failing") f++; else p++ } END { print p + 0, f + 0 }')"
+  else
+    SG_T_REVIEWS_WHAT="the reviews, each question and scope once by its latest result"
+    read -r passed failed <<< "$(printf '%s\n' "$rv" | awk -F'\t' '
+      function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
+      NF >= 6 { k = $1 SUBSEP $2; a = norm($4); if (!(k in r) || a == "-" || t[k] == "-" || a >= t[k]) { r[k] = $3; t[k] = a } }
+      END { for (k in r) { if (r[k] == "pass" || r[k] == "flag") p++; else if (r[k] == "fail") f++ }; print p + 0, f + 0 }')"
+  fi
   while IFS='	' read -r q sc res at ev nf; do
     [ -n "$q" ] || continue
     k="$(iso_epoch "$at" 2>/dev/null)"
@@ -1603,9 +1628,8 @@ SITREP_RUNNING
     g=$((g + 1))
     st="$(plan_goal_status "$st")"
     case "$st" in met) m=$((m + 1)) ;; 'not measured') k=$((k + 1)) ;; unreadable) u=$((u + 1)) ;; esac
-    # the status already says a goal is not measured; its measure prints once
-    [ "$rdg" != "not measured" ] || rdg=""
-    if [ -n "$md" ] && [ -n "$rdg" ]; then md="$md — $rdg"; elif [ -z "$md" ]; then md="${rdg:--}"; fi
+    # the measure and what it read, joined by lib/plan.sh's grammar, which the card reads back
+    md="$(plan_goal_measure "$md" "$rdg")"
     SG_GOAL_LINES="${SG_GOAL_LINES}goal: name=$t status=$st measure=$md${fr:+ for=$fr}"$'\n'
   done <<SITREP_GOALS
 $SG_GOALS_READ
@@ -1661,7 +1685,7 @@ sitrep_sheet() {
   sitrep_m tests.suites-run "$SG_T_RUN" "the suites run this wave, each by its last run" "count run: count green, count red" "source: the landing record's verdicts"
   sitrep_m tests.suites-total "$SG_T_TOTAL" "the suites in the project" "count" "source: the project's tests/*.test.sh, every suite tests/run.sh runs"
   sitrep_m tests.whole-run "$SG_T_WHOLE" "the whole regression" "not run (and why), or green or red at a commit" "source: the plan's regression: and its proof"
-  sitrep_m reviews "$SG_T_REVIEWS" "the reviews, each question and scope once by its latest result" "count passed, failed, running" "source: the review proofs and the review tasks in flight"
+  sitrep_m reviews "$SG_T_REVIEWS" "${SG_T_REVIEWS_WHAT:-the reviews, each question and scope once by its latest result}" "count passed, failed, running" "source: the review proofs and the review tasks in flight"
   sitrep_m findings.open "$SG_T_FINDINGS" "the review findings not yet closed" "count" "source: the review records"
   sitrep_m waste.dropped "$SG_W_DROPPED" "the tasks dropped, as work.dropped" "count, sized minutes" "source: the rows with status dropped"
   sitrep_m waste.runs-discarded "$SG_X_RUNS" "the suite runs thrown away" "count of all suite runs" "source: the landing record and the gate"
@@ -2066,9 +2090,8 @@ sitrep_tick_line() {
       if [ -n "$HO_STAMP" ] && [ -f "$HO_STAMP" ] && [ ! -L "$HO_STAMP" ]; then
         HO_PATROL="armed — stamp $(( ( $(now_epoch) - $(file_mtime "$HO_STAMP") ) / 60 ))m old"
       fi
-      { declare -F scale_cell >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
-      if declare -F scale_cell >/dev/null 2>&1 \
-         && [ "$(scale_cell "$(plan_frontmatter_get "$PV_PLAN" scale 2>/dev/null)" patrol 2>/dev/null)" = no ]; then
+      { declare -F scale_patrol >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
+      if declare -F scale_patrol >/dev/null 2>&1 && [ "$(scale_patrol "$PV_PLAN")" = no ]; then
         HO_PATROL="none — a task-scale run has no Patrol"
       fi
       HO_LEDGER="$(docs_root "$HO_ROOT")/record/$HO_SLUG/design-ledger.md"
@@ -2294,13 +2317,30 @@ sitrep_tick_line() {
     done
     return 0
   }
+  # THE LEDGER'S ONE WRITE, for the put and the ruling alike: one entry appended as `## Δ<k> — <heading>`, k one past
+  # the ledger's highest Δ, its body under a blank line when it has one, through a copy swapped in whole, so a reader
+  # never sees half an entry and both writers number alike; the ledger is begun when the run has none. 1, with the
+  # refusal said, when the ledger cannot be written. The clock is the local one every heading of the ledger names.
+  decisions_clock() { date '+%Y-%m-%d %-I:%M %p %Z'; }
+  decisions_append() {  # <plan> <ledger> <root> <heading> [<body>]
+    local plan="$1" led="$2" root="$3" k
+    k="$(sed -n 's/^## Δ\([0-9][0-9]*\).*/\1/p' "$led" 2>/dev/null | sort -n | tail -1)"; k=$(( ${k:--1} + 1 ))
+    mkdir -p "${led%/*}" 2>/dev/null
+    { if [ -f "$led" ]; then cat "$led"; else printf '# Design ledger — %s\n' "$(proof_plan_slug "$plan")"; fi
+      printf '\n## Δ%s — %s\n' "$k" "$4"
+      [ -z "${5:-}" ] || printf '\n%s\n' "$5"
+    } > "$led.new.$$" 2>/dev/null && mv -f "$led.new.$$" "$led" 2>/dev/null && return 0
+    rm -f "$led.new.$$" 2>/dev/null
+    die "REFUSED — ${led#"$root"/} cannot be written; nothing is written."
+    return 1
+  }
   # THE PUT. A decision put during a run is one ledger entry before it is shown, `## Δ<k> — D<n> put (orchestrator
   # <date> <time>): <title>`, Δ one past the ledger's highest, its body the wait line; the ledger is begun when the run
   # has none. It prints the round the put opens and the wait line, which ends the decision's Significance as printed.
   # REFUSED (1), nothing written: a number that is not D<n>, a title that is empty or more than one line, a ledger that
   # is a symlink.
   decisions_put() {  # <plan> <ledger> <D<n>> <title>
-    local plan="$1" led="$2" d="$3" title="$4" wait k at r
+    local plan="$1" led="$2" d="$3" title="$4" wait r
     case "$d" in D[1-9]*) case "${d#D}" in *[!0-9]*) d="" ;; esac ;; *) d="" ;; esac
     if [ -z "$d" ]; then
       die "REFUSED — '$(clean "$3")' is not a decision's number: name it D<n>, as in D7; nothing is written."
@@ -2312,16 +2352,7 @@ sitrep_tick_line() {
       exit 1
     fi
     wait="$(decision_wait "$plan" "$d" "$REPO_REAL")"
-    k="$(sed -n 's/^## Δ\([0-9][0-9]*\).*/\1/p' "$led" 2>/dev/null | sort -n | tail -1)"; k=$(( ${k:--1} + 1 ))
-    at="$(date '+%Y-%m-%d %-I:%M %p %Z')"
-    mkdir -p "${led%/*}" 2>/dev/null
-    { if [ -f "$led" ]; then cat "$led"; else printf '# Design ledger — %s\n' "$(proof_plan_slug "$plan")"; fi
-      printf '\n## Δ%s — %s put (orchestrator %s): %s\n\n%s\n' "$k" "$d" "$at" "$title" "$wait"
-    } > "$led.new.$$" 2>/dev/null && mv -f "$led.new.$$" "$led" 2>/dev/null || {
-      rm -f "$led.new.$$" 2>/dev/null
-      die "REFUSED — ${led#"$REPO_REAL"/} cannot be written; nothing is written."
-      exit 1
-    }
+    decisions_append "$plan" "$led" "$REPO_REAL" "$d put (orchestrator $(decisions_clock)): $title" "$wait" || exit 1
     # THE PUT IS AN ASK ON THE RUN'S REGISTER, in the words the pages owe it in (`pages_owed`), so a decision put and
     # not yet ruled is owed wherever the register is read; the ledger's ruling closes it (`decisions_settle`).
     if declare -F owed_open >/dev/null 2>&1; then
@@ -2333,9 +2364,80 @@ sitrep_tick_line() {
     exit 0
   }
 
+  # THE RULING. However the reply arrives, typed to `decisions rule`, given by `approve D<n>`, or replayed from the
+  # release approval card (whose reply runs `approve`), it is this one function, so a decision ruled anywhere has its
+  # ledger entry and its closed ask. It writes `## Δ<k> — D<n> ruled "<reply>" (<who> <date> <clock>): <title>`, the
+  # heading `decisions_list` reads as an entry, through the put's own numbering (`decisions_append`), the title the
+  # newest put's and none when the decision was never put; then it settles the register against the ledger, which closes
+  # `decide:D<n>`. A double quote in the reply is written as a single one: the parser ends the reply at the next double
+  # quote. THE WHO IS THE ONE WHO SAID IT: the reply is asked of lib/said.sh `user_said` in the prompts the user typed in
+  # this run, a reply under three words only in a prompt typed after the orchestrator's own put of this decision (the mark
+  # `decisions put D<n> `, its newest round: a digit typed for another decision is not this one's). Found, the user's
+  # words: who is the project's git user name. Not found, or found too short to be a quote,
+  # the words are the orchestrator's relaying a decision it was ordered to make: who is `orchestrator`, the way a ruling
+  # written by hand has always read, so the record never says a person decided what they did not. Unable to look (no jq,
+  # no transcript) is refused, for a ruling it cannot attribute is not written. 0 ruled, printing
+  # `ruled: D<n> · "<reply>" · <title>`; 1 refused, nothing written (a number that is not D<n>, a reply empty or of more
+  # than one line, a ledger that is a symlink, said.sh not loadable, the transcript not readable, and for the user's own
+  # words no usable git user name); 3 refused, nothing written, the decision's last round already closed by a ruling or a
+  # withdrawal.
+  decisions_rule() {  # <plan> <root> <D<n>> <reply>
+    local plan="$1" root="$2" d="$3" reply="$4" led who title st sq said raw
+    case "$d" in D[1-9]*) case "${d#D}" in *[!0-9]*) d="" ;; esac ;; *) d="" ;; esac
+    if [ -z "$d" ]; then
+      die "REFUSED — '$(clean "$3")' is not a decision's number: name it D<n>, as in D7; nothing is written."
+      return 1
+    fi
+    case "$reply" in
+      ''|*$'\n'*|*$'\r'*) die "REFUSED — the reply is the user's words on one line; nothing is written."; return 1 ;;
+    esac
+    raw="$reply"; sq="'"; reply="${reply//\"/$sq}"
+    led="$(docs_root "$root")/record/$(proof_plan_slug "$plan")/design-ledger.md"
+    if [ -L "$led" ]; then
+      die "REFUSED — ${led#"$root"/} is a symlink; nothing is written."
+      return 1
+    fi
+    st="$(decisions_rounds "$led" | awk -F'\t' -v d="$d" '$1 == d { print $3 }')"
+    case "$st" in
+      ruled|withdrawn)
+        die "REFUSED — $d is already $st: $(decisions_list "$led" | awk -F' · ' -v d="$d" '$1 == d { l = $0 } END { print l }'); put it again to open a new round; nothing is written."
+        return 3 ;;
+    esac
+    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
+    if ! declare -F user_said >/dev/null 2>&1; then
+      die "REFUSED — who said the reply is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
+      return 1
+    fi
+    user_said "$raw" "$plan" "decisions put $d "; said=$?
+    case "$said" in
+      0)
+        who="$(git -C "$root" config user.name 2>/dev/null)"
+        case "$who" in
+          ''|*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*|*'('*|*')'*)
+            die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who ruled; nothing is written."
+            return 1 ;;
+        esac ;;
+      1|3) who=orchestrator ;;
+      *)
+        if ! command -v jq >/dev/null 2>&1; then
+          die "REFUSED — jq is absent, so the reply cannot be held to what the user typed and the ruling cannot be told from the orchestrator's; nothing is written."
+        else
+          said_refuse 2 "$(clean "$raw")" "a ruling"
+        fi
+        return 1 ;;
+    esac
+    title="$(decisions_list "$led" puts | awk -F' · ' -v d="$d" '$1 == d && $2 == "put" {
+      t = $0; for (i = 0; i < 3; i++) t = substr(t, index(t, " · ") + length(" · ")) } END { print t }')"
+    decisions_append "$plan" "$led" "$root" "$d ruled \"$reply\" ($who $(decisions_clock))${title:+: $title}" || return 1
+    REPO_REAL="$root" decisions_settle "$plan" "$led"
+    printf 'ruled: %s · "%s" · %s\n' "$d" "$reply" "${title:-(untitled)}"
+    return 0
+  }
+
   # THE REGISTER (wave-38 T13; D24, AC-3.4). Read-only. `decisions` is the bound run's ledger through `decisions_list`;
   # `--all` is every run's under the docs root, keyed by wave, with the ADRs (`decisions_all`). Exit 1 in one line
-  # naming the path when the run's ledger is absent; 2 when there is no run to read. `decisions put` is the one writer.
+  # naming the path when the run's ledger is absent; 2 when there is no run to read. `decisions put` and `decisions rule`
+  # are its writers, each one entry (`decisions_append`).
   poker_verb_decisions() {
     REPO="$(project_root "$PWD")"
     REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
@@ -2367,6 +2469,10 @@ sitrep_tick_line() {
     DC_LEDGER="$DC_DOCS/record/$(proof_plan_slug "$DC_PLAN")/design-ledger.md"
     decisions_settle "$DC_PLAN" "$DC_LEDGER"
     [ -z "${DC_PUT:-}" ] || decisions_put "$DC_PLAN" "$DC_LEDGER" "$DC_PUT" "${DC_TITLE:-}"
+    if [ -n "${DC_RULE:-}" ]; then
+      decisions_rule "$DC_PLAN" "$REPO_REAL" "$DC_RULE" "${DC_REPLY:-}" && exit 0
+      exit 1
+    fi
     if [ ! -f "$DC_LEDGER" ] || [ -L "$DC_LEDGER" ]; then
       say "no design ledger at ${DC_LEDGER#"$REPO_REAL"/} — this run has recorded no ruling"
       exit 1
@@ -2481,12 +2587,11 @@ sitrep_tick_line() {
       fi
       RS_ENGAGED=now
     fi
-    # THE PATROL IS THE SCALE'S CELL (lib/scale.sh): a scale whose profile has none, the task row, is never armed here,
+    # THE PATROL IS THE SCALE'S (`scale_patrol`, lib/scale.sh): a scale whose profile has none, the task row, is never armed here,
     # and a stamp an unbound engagement armed before this binding is removed. A plan with no `scale:` arms as before.
     RS_PATROL=yes
-    { declare -F scale_cell >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
-    if declare -F scale_cell >/dev/null 2>&1 \
-       && [ "$(scale_cell "$(plan_frontmatter_get "$RS_PLAN" scale 2>/dev/null)" patrol 2>/dev/null)" = no ]; then
+    { declare -F scale_patrol >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
+    if declare -F scale_patrol >/dev/null 2>&1 && [ "$(scale_patrol "$RS_PLAN")" = no ]; then
       RS_PATROL=no
     fi
     rs_step 0 bind "$RS_PLAN"
@@ -2686,9 +2791,7 @@ sitrep_tick_line() {
     # The saved sheet is the facts; only its asks are read again, from the register alone, so a card is never the cost
     # of a second gather. The goals a reached theme drops asks for are the saved sheet's own met goals.
     SR_SAVED="$(sitrep_saved "$SR_ROOT" "$SR_PLAN")"
-    SR_GOALS_MET="$(awk 'index($0, "goal: name=") == 1 { l = substr($0, 12); i = index(l, " status="); if (!i) next
-      n = substr(l, 1, i - 1); r = substr(l, i + 8); j = index(r, " measure="); if (j) r = substr(r, 1, j - 1)
-      if (r == "met") print "reached\t" n }' "$SR_SAVED")"
+    SR_GOALS_MET="$(plan_goal_sheet "$SR_SAVED" | awk -F'\t' -v met="$(plan_goal_status reached)" '$3 == met { print "reached\t" $2 }')"
     SG_ASKS="$(sitrep_asks "$SR_PLAN" "$SR_ROOT" "$(units_rows "$SR_PLAN" 2>/dev/null)" "$SR_GOALS_MET" "$(sitrep_now)")"
     { awk 'index($0, "ask: ") != 1' "$SR_SAVED"; sitrep_ask_lines; } > "$SR_SHEET"
     SR_RC=0

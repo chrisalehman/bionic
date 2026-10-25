@@ -233,10 +233,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "engage"; fi
 . "$BIONIC_LIB/binding.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/patrol.sh"   # patrol_live_session_ids — the sweeper's liveness (T13)
-# THE SCALE PROFILE (wave-38 T16; D25): the arm below asks the bound plan's patrol cell. NOT in
-# `BIONIC_LIB_WANT`, and sourced only when readable, as dispatch-preflight sources owed.sh: a
+# THE SCALE PROFILE: the arm below asks whether the bound plan's scale has a Patrol.
+# NOT in `BIONIC_LIB_WANT`, and sourced only when readable, as dispatch-preflight sources owed.sh: a
 # library without it arms exactly as before.
-if ! declare -F scale_cell >/dev/null 2>&1 && [ -r "$BIONIC_LIB/scale.sh" ]; then
+if ! declare -F scale_patrol >/dev/null 2>&1 && [ -r "$BIONIC_LIB/scale.sh" ]; then
   # shellcheck source=/dev/null
   . "$BIONIC_LIB/scale.sh"
 fi
@@ -480,14 +480,14 @@ ENGAGE_HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 ENGAGE_POKER="$ENGAGE_HOOK_DIR/session-poker.sh"
 [ -f "$ENGAGE_POKER" ] || ENGAGE_POKER="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/session-poker.sh"
 
-# THE PATROL IS THE SCALE'S CELL (wave-38 T16; D25, AC-5.1). A bound plan whose scale's patrol cell
-# (payload/scripts/lib/scale.sh) reads `no` — the task row — arms nothing: a task-scale run has no
-# Patrol, and the dispatch wall reads the same cell before it asks for a stamp. No bound plan, a plan
-# with no `scale:`, or no profile to ask: the arm runs as before.
+# THE PATROL IS THE SCALE'S. A bound plan whose scale has no Patrol
+# (`scale_patrol`, payload/scripts/lib/scale.sh, says `no`) — the task row — arms nothing: a task-scale
+# run has no Patrol, and the dispatch wall asks the same function before it asks for a stamp. No bound
+# plan, a plan with no `scale:`, or no profile to ask: the arm runs as before.
 ENGAGE_PATROL=yes
 ENGAGE_BOUND_PLAN="$(session_plan "$REPO" "$SID" 2>/dev/null)" || ENGAGE_BOUND_PLAN=""
-if [ -n "$ENGAGE_BOUND_PLAN" ] && [ "$ENGAGE_BOUND_PLAN" != none ] && declare -F scale_cell >/dev/null 2>&1; then
-  ENGAGE_PATROL="$(scale_cell "$(plan_frontmatter_get "$ENGAGE_BOUND_PLAN" scale)" patrol 2>/dev/null)" || ENGAGE_PATROL=yes
+if [ -n "$ENGAGE_BOUND_PLAN" ] && [ "$ENGAGE_BOUND_PLAN" != none ] && declare -F scale_patrol >/dev/null 2>&1; then
+  ENGAGE_PATROL="$(scale_patrol "$ENGAGE_BOUND_PLAN" 2>/dev/null)" || ENGAGE_PATROL=yes
 fi
 
 if [ "$ENGAGE_PATROL" = no ]; then

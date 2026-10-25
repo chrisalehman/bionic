@@ -16,12 +16,14 @@
 #
 # THE COLUMNS AND THEIR READERS:
 #   patrol      `yes` arms the Patrol at engagement and holds the dispatch wall's arming check;
-#               `no` arms nothing and the check does not apply (hooks/engage.sh,
-#               hooks/dispatch-preflight.sh).
+#               `no` arms nothing and the check does not apply. Read through `scale_patrol <plan>`
+#               below, by arm, the session-start text, the tick, the stop wall, engagement, resume
+#               and handoff, and the dispatch wall.
 #   rigor       the default review rigor. A flag, the intent, the project or the epic may raise
 #               it (skills/canonical-sdlc/SKILL.md, the Step 0 derivation).
 #   writers     the writer cap when no person wrote a `parallel-budget:` line; a person's line
-#               overrides it. `uncapped` caps nothing (hooks/dispatch-preflight.sh, the budget wall).
+#               overrides it. `uncapped` caps nothing. Read by `fill_cap` (lib/fill.sh) alone, which
+#               the tick's FILL, the stop wall and the dispatch wall's budget check all ask.
 #   regression  the Step 0 regression default (payload/scripts/card.sh `regression <scale>`).
 #   branch      the working branch's shape: `any`, or a pattern whose `<NN>` is the run's number
 #               and `<slug>` its name (payload/scripts/close-out.sh, the shape refusal and the
@@ -71,6 +73,18 @@ scale_cell() {
   printf '%s\n' "$row" | awk -F'|' -v n="$n" '{ print $n }'
 }
 
+# scale_patrol <plan> -> `no` when the plan's scale has no Patrol (its patrol cell is `no`), else `yes`; exit 0 either
+# way. A plan with no readable `scale:`, a scale the table does not hold, or no plan reads `yes`: an unreadable scale
+# never silences a Patrol that may be needed. This is the one place a plan's scale is turned into "does it have a
+# Patrol", so every reader that asks the question gets the same answer for the same plan.
+scale_patrol() {  # <plan>
+  local cell
+  declare -F plan_frontmatter_get >/dev/null 2>&1 || { printf 'yes\n'; return 0; }
+  cell="$(scale_cell "$(plan_frontmatter_get "${1:-}" scale 2>/dev/null)" patrol 2>/dev/null)" || cell=yes
+  if [ "$cell" = no ]; then printf 'no\n'; else printf 'yes\n'; fi
+  return 0
+}
+
 # scale_branch_number <scale> <branch> -> what the branch pattern's `<NN>` matched on <branch>,
 # exit 0; nothing and exit 0 when the cell is `any`; nothing and exit 1 when <branch> does not
 # have the cell's shape or <scale> is no scale. The pattern is the cell itself: `<NN>` reads
@@ -81,4 +95,32 @@ scale_branch_number() {
   [ "$pat" != any ] || return 0
   ere="$(printf '%s' "$pat" | sed -e 's/[][\.*^$(){}+?|/]/\\&/g' -e 's/<NN>/([0-9]+)/' -e 's/<slug>/.+/')"
   printf '%s\n' "${2:-}" | sed -nE "s/^${ere}\$/\\1/p" | /usr/bin/grep . || return 1
+}
+
+# THE EVAL TYPE'S TIER. The Eval design names each criterion's eval type in words; the matrix table names its
+# tier, and the tier decides the keys its block owes (walls.sh `keys_for_tier`). This is the one map between the
+# two, so the render that writes a missing table row and any reader that asks agree on the tier a type owes.
+# A bare tier (`T2`, any case) is itself: a plan that names the tier in the Eval type cell already said it.
+SCALE_EVAL_TIERS="static=T0 unit=T1 hermetic=T2 live=T3 human=T4"
+
+# scale_tier_awk -> the awk text of `tier_of(type)`: the tier SCALE_EVAL_TIERS gives a type (any case, blanks
+# trimmed), a bare T<n> as itself, else "". Built from the table, so an awk pass reads the map without a copy.
+scale_tier_awk() {
+  local c
+  printf '%s\n' 'function tier_of(t) {' \
+    '  t = tolower(t); gsub(/^[ \t]+|[ \t]+$/, "", t)' \
+    '  if (t ~ /^t[0-9]+$/) return "T" substr(t, 2)'
+  for c in $SCALE_EVAL_TIERS; do
+    printf '  if (t == "%s") return "%s"\n' "${c%%=*}" "${c#*=}"
+  done
+  printf '%s\n' '  return ""' '}'
+}
+
+# tier_of_eval_type <type> -> its tier on stdout, exit 0; nothing and exit 1 for a type the map does not hold.
+# It asks `tier_of`, so the shell's answer and the awk pass's are one rule.
+tier_of_eval_type() {
+  local t
+  t="$(SCALE_TYPE="${1:-}" awk "$(scale_tier_awk)"'BEGIN { print tier_of(ENVIRON["SCALE_TYPE"]) }' </dev/null 2>/dev/null)" || return 1
+  [ -n "$t" ] || return 1
+  printf '%s\n' "$t"
 }

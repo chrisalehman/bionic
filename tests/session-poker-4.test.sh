@@ -1129,6 +1129,80 @@ expect_eq "HS-5b a --green-at the landing does not hold is refused (exit 1) and 
 expect_contains "HS-5c …naming the commit" "${HS_NOT:0:12}" "$OUT"
 
 # ============================================================
+section "§EVENT: a hand landing's ready event carries the branch and the tree it is given, and reads - when it is given neither"
+# ============================================================
+# `row-landed --by-hand … --suites … --green-at … --log …` writes the row's `ready` event, which has fields for the
+# branch and the tree the row was built on and wrote the literal `-` in both. `--branch <b>` and `--tree <t>` fill them.
+# They describe the ready event, which only `--suites` writes, so they are refused without it; a value no record line
+# can hold is refused too. This section lands the third row of §HAND-SUITES's fixture, which its HS-5 left unlanded.
+HS_PRE="$(hs_rec | wc -l | tr -d ' ')"
+poke "$HS" row-landed T3 "$HS_M3" "$HS_AT" --by-hand "Dana Fixture" "landed on the report" --branch wt/T3 --tree "$HS/.worktrees/T3"
+expect_eq "EV-1 --branch and --tree without --suites are refused (exit 2, a usage error) and write nothing" "2|$HS_PRE" "$RC|$(hs_rec | wc -l | tr -d ' ')"
+poke "$HS" row-landed T3 "$HS_M3" "$HS_AT" --by-hand "Dana Fixture" "landed on the report" --suites units.test.sh --green-at "$HS_R" --log "$HS/T3-green.log" --branch 'wt|T3' --tree "$HS/.worktrees/T3"
+expect_eq "EV-1b a branch holding a | is refused (exit 1) and writes nothing" "1|$HS_PRE" "$RC|$(hs_rec | wc -l | tr -d ' ')"
+poke "$HS" row-landed T3 "$HS_M3" "$HS_AT" --by-hand "Dana Fixture" "landed on the report" --suites units.test.sh --green-at "$HS_R" --log "$HS/T3-green.log" --branch wt/T3 --tree "$HS/.worktrees/T3"
+expect_eq "EV-2 a hand landing given the suites, the branch and the tree exits 0" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_contains "EV-2b …and its ready event carries both" "|commit=$HS_M3|branch=wt/T3|tree=$HS/.worktrees/T3|suites=units.test.sh|" \
+  "$(hs_rec | /usr/bin/grep '^line/v1|ev=ready|row=T3|')"
+expect_contains "EV-3 control: the landing given neither (T1, above) still reads - for both" "|commit=$HS_M1|branch=-|tree=-|suites=session-poker-4.test.sh,units.test.sh|" \
+  "$(hs_rec | /usr/bin/grep '^line/v1|ev=ready|row=T1|')"
+
+# ============================================================
+section "§AMEND-NARROW: amend --suites= narrows a live contract's suites and its lands_on= with them; the collector hands the wall the suites that exist"
+# ============================================================
+# `amend` was a union, old members first, never a narrowing. `--suites=<a,b>` sets the row's suite set to exactly those,
+# each of which the row already holds (a name it does not hold widens, and `--suites+` is the verb for that), and
+# `lands_on=` keeps only the suites still in the set: a row that lands on a suite it may not run is a contract the
+# dispatch wall refuses. A narrowing that would leave the row landing on nothing is refused, and `--suites=` with
+# `--suites+` is two instructions on one set. The wall's membership arm is handed the suites under tests/ here too.
+AN="$(make_repo amend-narrow)"; new_roster "$AN"
+s30_row "$AN" suites_allowed="a.test.sh b.test.sh c.test.sh" lands_on=a.test.sh,b.test.sh
+poke "$AN" amend w1 --suites=a.test.sh,b.test.sh --reason 'c is not run by this row'
+expect_eq "AN-1 narrowing to a subset exits 0" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "AN-1b …the successor row holds exactly the narrower set" "a.test.sh b.test.sh" "$(s30_field "$(s30_last "$AN")" suites_allowed)"
+expect_eq "AN-1c …and lands_on= is the same, both its suites still in the set" "a.test.sh,b.test.sh" "$(s30_field "$(s30_last "$AN")" lands_on)"
+poke "$AN" amend w1 --suites=a.test.sh --reason 'b is not run either'
+expect_eq "AN-2 narrowing again exits 0, with the set and lands_on= both cut to a" "0|a.test.sh|a.test.sh" \
+  "$RC|$(s30_field "$(s30_last "$AN")" suites_allowed)|$(s30_field "$(s30_last "$AN")" lands_on)"
+AN_ROWS="$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN")")"
+poke "$AN" amend w1 --suites=d.test.sh --reason 'a name the row never held'
+expect_eq "AN-3 a --suites= naming a suite the row does not hold is refused (exit 1) and writes nothing" "1|$AN_ROWS" \
+  "$RC|$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN")")"
+expect_contains "AN-3b …naming it and the verb that widens" "d.test.sh" "$OUT"
+expect_contains "AN-3c …and --suites+" "--suites+" "$OUT"
+poke "$AN" amend w1 --suites=a.test.sh --suites+ b.test.sh --reason 'both at once'
+expect_eq "AN-4 --suites= beside --suites+ is a usage error (exit 2) and writes nothing" "2|$AN_ROWS" \
+  "$RC|$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN")")"
+poke "$AN" amend w1 --suites+ b.test.sh --reason 'b again'
+expect_eq "AN-5 a widening still works (exit 0), the set old members first" "0|a.test.sh b.test.sh" \
+  "$RC|$(s30_field "$(s30_last "$AN")" suites_allowed)"
+expect_eq "AN-5b …and lands_on= is not widened with it" "a.test.sh" "$(s30_field "$(s30_last "$AN")" lands_on)"
+AN2="$(make_repo amend-narrow-lands)"; new_roster "$AN2"
+s30_row "$AN2" suites_allowed="a.test.sh b.test.sh" lands_on=b.test.sh
+AN2_ROWS="$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN2")")"
+poke "$AN2" amend w1 --suites=a.test.sh --reason 'drop b'
+expect_eq "AN-6 a narrowing that drops every suite the row lands on is refused (exit 1) and writes nothing" "1|$AN2_ROWS" \
+  "$RC|$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN2")")"
+expect_contains "AN-6b …naming the suite it would orphan" "b.test.sh" "$OUT"
+poke "$AN2" amend w1 --suites=a.test.sh,b.test.sh --reason 'the same set'
+expect_eq "AN-7 a --suites= that names the set the row already holds changes nothing, and is refused (exit 1)" "1|$AN2_ROWS" \
+  "$RC|$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN2")")"
+# THE COLLECTOR: amend hands the wall the suites under tests/, so an added name with no file is refused here as at a dispatch.
+AN3="$(make_repo amend-exists)"; new_roster "$AN3"
+mkdir -p "$AN3/tests"; printf '#!/bin/bash\nexit 0\n' > "$AN3/tests/real.test.sh"
+s30_row "$AN3" suites_allowed="a.test.sh"
+poke "$AN3" amend w1 --suites+ real.test.sh --reason 'a suite that exists'
+expect_eq "AN-8 --suites+ naming a file under tests/ is admitted (exit 0)" "0|a.test.sh real.test.sh" \
+  "$RC|$(s30_field "$(s30_last "$AN3")" suites_allowed)"
+AN3_ROWS="$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN3")")"
+poke "$AN3" amend w1 --suites+ nosuch.test.sh --reason 'a suite with no file'
+expect_eq "AN-8b --suites+ naming no file under tests/ is refused (exit 1) and writes nothing" "1|$AN3_ROWS" \
+  "$RC|$(/usr/bin/grep -c '|name=w1|' "$(roster_of "$AN3")")"
+expect_contains "AN-8c …naming the entry" "nosuch.test.sh" "$OUT"
+
+# ============================================================
 section "§REVIEW-FILES §DELIVER-CELL §FILES-UNHELD §STEP8-KEYS §NAMES-A-VERB: each verb a close meets writes its cell, or names the verb that does"
 # ============================================================
 # A close met four verbs that sent it in a circle: a review row's Files held one record for three questions, deliver
@@ -1186,24 +1260,24 @@ s20_ack "$VC" w-T3 2026-10-22T11:00:00Z
 
 # ---------- §REVIEW-FILES: a review row's Files are its questions' records, its artifact the first ----------
 VC_THREE="$VC_REC/critic-evidence.md, $VC_REC/critic-adversarial.md, $VC_REC/critic-structure.md"
-poke "$VC" task-add T6 6 review "the critic's review" critic — 30 REQ-1 — head
+poke "$VC" task-add T6 6 review "the critic's review. The critic reads the run once." critic — 30 REQ-1 — head
 expect_eq "RF-0 setup: task-add of a review row on the single-rigor plan exits 0" "0" "$RC"
 expect_eq "RF-1 AC-9.1 the row's Files hold one record per question the rigor deals, evidence, adversarial, structure" \
   "$VC_THREE" "$(vc_cell T6 9)"
 expect_eq "RF-1b …and its artifact cell names the first, the record deliver takes" "$VC_REC/critic-evidence.md" "$(vc_cell T6 12)"
 s42_snap "$VC" "$VC_P"
-poke "$VC" task-add T7 6 review "a review on one record" critic — 30 REQ-1 "$VC_REC/critic.md" head
+poke "$VC" task-add T7 6 review "a review on one record. The critic writes one record." critic — 30 REQ-1 "$VC_REC/critic.md" head
 s42_unchanged "RF-2 a review row written with one record for three questions" 1 "$VC_P"
 expect_contains "RF-2b …and the refusal names the rendered list" "$VC_THREE" "$OUT"
-poke "$VC" task-add T7 6 review "a review on its three records" critic — 30 REQ-1 "$VC_THREE" head
+poke "$VC" task-add T7 6 review "a review on its three records. The critic writes three records." critic — 30 REQ-1 "$VC_THREE" head
 expect_eq "RF-3 control: a review row whose Files name its three records goes in as written, its artifact the first" \
   "0|$VC_THREE|$VC_REC/critic-evidence.md" "$RC|$(vc_cell T7 9)|$(vc_cell T7 12)"
 VC_OWN="$VC_REC/T10-evidence.md, $VC_REC/T10-adversarial.md, $VC_REC/T10-structure.md"
-poke "$VC" task-add T10 6 review "a review on its own three records" critic — 30 REQ-1 "$VC_OWN" head
+poke "$VC" task-add T10 6 review "A review on its own records. The critic writes its own three records." critic — 30 REQ-1 "$VC_OWN" head
 expect_eq "RF-3b a review row whose Files already name one record of its own per question keeps those names verbatim, its artifact the first" \
   "0|$VC_OWN|$VC_REC/T10-evidence.md" "$RC|$(vc_cell T10 9)|$(vc_cell T10 12)"
 expect_absent "RF-3c …and no rendered critic-<q>.md name is added beside them" "critic-" "$(vc_cell T10 9)"
-poke "$VC" task-add T8 5 verify "the floor" test-runner — 30 REQ-1 —
+poke "$VC" task-add T8 5 verify "the floor. The regression runs once." test-runner — 30 REQ-1 —
 expect_eq "RF-4 control: a verify row keeps the reader-row rule, one record named for the row, and no artifact cell written" \
   "0|$VC_REC/T8.md|—" "$RC|$(vc_cell T8 9)|$(vc_cell T8 12)"
 
@@ -1217,7 +1291,7 @@ poke "$VC" deliver T6
 expect_eq "DC-1 AC-9.2 deliver lands the review row from its artifact cell (exit 0), the row landed" "0|landed" "$RC|$(vc_cell T6 10)"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "DC-1b …naming the artifact it read" "artifact $VC_REC/critic-evidence.md present" "$OUT"
-poke "$VC" task-add T9 6 review "a second review" critic — 30 REQ-1 — head
+poke "$VC" task-add T9 6 review "a second review. The critic reads the run again." critic — 30 REQ-1 — head
 poke "$VC" task-set T9 artifact=—
 s42_snap "$VC" "$VC_P"
 poke "$VC" deliver T9
@@ -1285,5 +1359,235 @@ vc_follow "NV-2 task-set's refusal of a held row's Files" "$VC_TREF" "lib/b2.sh"
 vc_follow "NV-3 amend's refusal of a closed contract" "$VC_AREF" "lib/c.sh"
 vc_follow "NV-4 step-field's refusal of a key at the wrong step" "$VC_SREF" "done"
 vc_follow "NV-5 step-field's refusal of a step with no line" "$VC_LREF" "the regression"
+
+# ---------- §TRIPLE: step-field 8 takes the integration's fields in one call; an unknown key names the verb that writes it ----------
+# The Step 8 block above holds all five fields. One call carries merge, worktree-removed and cleanup, each replaced where
+# it stands. A key the step blocks do not hold, but another verb writes, is refused naming that verb's call; a key no
+# verb writes is refused saying so.
+# fails-when: the triple needs three calls; one call writes fewer than three, or moves one; a bad pair beside good ones
+# writes the good ones; a key another verb writes is refused without naming that verb; a key no verb writes names one;
+# the usage line leaves out a field the verb takes.
+vc_s8() { awk '/^- Step 8:/ { f = 1; next } f && /^  [a-z-]+: / { printf "%s%s", (n++ ? "|" : ""), $0; next } f { exit }' "$VC_P"; }
+poke "$VC" step-field 8 merge=def5678 worktree-removed=no cleanup=partial
+expect_eq "TR-1 step-field 8 takes merge, worktree-removed and cleanup in one call (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      step-field 8 said: %s\n' "$OUT"
+expect_eq "TR-1b …and writes all three, each where it stood, the other two as they were" \
+  "  merge: def5678|  worktree-removed: no|  cleanup: partial|  tmp-wiped: yes|  tasks-completed: yes" "$(vc_s8)"
+s42_snap "$VC" "$VC_P"
+poke "$VC" step-field 8 merge=0000000 foo=bar
+s42_unchanged "TR-2 a call with one key no step block holds beside a good one is refused whole" 1 "$VC_P"
+expect_contains "TR-2b …naming that key" "'foo' is not a step field" "$OUT"
+expect_contains "TR-3 …and saying no verb writes it" "no verb writes 'foo'" "$OUT"
+expect_absent "TR-3b …so it names no call" "next call:" "$OUT"
+poke "$VC" step-field 8 approved=yes
+s42_unchanged "TR-4 a key another verb writes (approved:) is refused" 1 "$VC_P"
+expect_contains "TR-4b …naming the verb that writes it" "next call: bash " "$OUT"
+expect_contains "TR-4c …approve, with its operands" "session-poker.sh approve '<name>' '<reply>'" "$OUT"
+poke "$VC" step-field 4 base-sha=abc1234
+s42_unchanged "TR-5 a Step 4 key current writes (base-sha:) is refused" 1 "$VC_P"
+expect_contains "TR-5b …naming current 4" "session-poker.sh current 4" "$OUT"
+poke "$VC" step-field 8 delivered=yes
+s42_unchanged "TR-5c the Step 9 line's key (delivered:) is refused" 1 "$VC_P"
+expect_contains "TR-5d …naming close-out, the script that writes it" "close-out writes it with current: 9 (scripts/close-out.sh)" "$OUT"
+poke "$VC" step-field
+expect_eq "TR-6 step-field with no operands prints its usage (exit 2)" "2" "$RC"
+expect_contains "TR-6b …the usage names the fields it takes, the cleanup and the auditor among them" \
+  "head, cmd, pass, total, output, merge, worktree-removed, adr, share; cleanup, tmp-wiped and tasks-completed (Step 8 only); auditor and walk-artifact (Step 5 only)" "$OUT"
+expect_contains "TR-6c …and that it takes more than one" "step-field <N> <key>=<value>..." "$OUT"
+
+# ---------- §LIVE: deliver on a live:head review row closes it when the judge reads its questions covered ----------
+# FIXTURE FIDELITY: the single-rigor task plan above, its base-sha a commit of this repository so the judge deals it,
+# the readings written by the proof writer (`proof_line`) at the working branch's head. T11 reads
+# live:head:adversarial, T12 live:head:structure; a code commit past the readings leaves structure uncovered.
+# fails-when: deliver refuses a live row whose every question is covered at the head, or lands one whose question
+# a commit past its reading leaves uncovered, or refuses without naming that question.
+LV="$(make_repo live-deliver)"; ( cd "$LV" && git commit -q --allow-empty -m base && git branch -M main ) >/dev/null 2>&1
+git -C "$LV" config user.name "Dana Fixture"
+LV_BASE="$(git -C "$LV" rev-parse main)"
+LV_RD="record/wave-01-fixture"
+LV_P="$(vc_plan "$LV" \
+  "| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | lib/a.sh | landed | — | — |" \
+  "| T11 | 6 | review | the adversarial review | critic | — | 30 | REQ-1 | .bionic/docs/$LV_RD/live-adversarial.md | active | live:head:adversarial | .bionic/docs/$LV_RD/live-adversarial.md |" \
+  "| T12 | 6 | review | the structure review | critic | — | 30 | REQ-1 | .bionic/docs/$LV_RD/live-structure.md | active | live:head:structure | .bionic/docs/$LV_RD/live-structure.md |")"
+sed -i.bak "s/base-sha: abc1234/base-sha: $LV_BASE/" "$LV_P" && rm -f "$LV_P.bak"
+( cd "$LV" && git add -f "$LV_P" && git commit -qm base-sha ) >/dev/null 2>&1
+LV_H="$(git -C "$LV" rev-parse main)"
+for lv_q in evidence adversarial structure; do
+  printf 'question: %s\nresult: pass\nscope: piece\nreviewed: %s..%s\nfindings: 0\n' "$lv_q" "${LV_BASE:0:10}" "${LV_H:0:10}" > "$LV/.bionic/docs/$LV_RD/live-$lv_q.md"
+  LV_PL="$(bash -c '. "$1" && proof_line review "$2" 2026-10-22T12:00:00Z "$3" "$4" w-crit pass piece' _ "$S46_LIB" "$LV_H" "$LV_RD/live-$lv_q.md" "$lv_q")"
+  LV_PL="$LV_PL" awk '{ print } /^current: / && !p { print ENVIRON["LV_PL"]; p = 1 }' "$LV_P" > "$LV_P.tmp" && mv "$LV_P.tmp" "$LV_P"
+done
+lv_cell() { s48_row "$LV_P" "$1" | cut -d'|' -f10; }
+expect_eq "LIVE-0 precondition: the judge deals the plan and reads every review question covered at the head" "covered" \
+  "$(cd "$LV" && bash -c '. "$1/units.sh"; . "$1/proof.sh"; _units_readings_state "$2"' _ "$(dirname "$S46_LIB")" "$LV_P" 2>/dev/null)"
+poke "$LV" deliver T11
+expect_eq "LIVE-1 AC-14.1 deliver on the live:head:adversarial row, its question covered at the head: exit 0, the row landed" \
+  "0|landed" "$RC|$(lv_cell T11)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+LV_X="$(s57_commit "$LV" lib/x.sh 'a code change past every reading')"
+s42_snap "$LV" "$LV_P"
+poke "$LV" deliver T12
+s42_unchanged "LIVE-2 the control: a code commit past the structure reading, deliver on the live:head:structure row" 2 "$LV_P"
+expect_contains "LIVE-2b …the refusal names the uncovered question" "structure" "$OUT"
+expect_contains "LIVE-2c …and says it is not covered at the head" "uncovered" "$OUT"
+expect_eq "LIVE-2d …and the row is still active" "active" "$(lv_cell T12)"
+
+# ============================================================
+section "§VERDICTS §DISCHARGE §STACK: the critic's verdicts and the regression's health reach the matrix by their verbs"
+# ============================================================
+# At single rigor the critic holds the evidence question, so its record is where the row verdicts and the wave verdict
+# are learned. The record's grammar: a markdown table whose header names the columns AC and verdict (other columns
+# allowed), one row per criterion, and one flush-left `verdict: <VERDICT>[ — <coverage finding>]` line for the wave.
+# `proof-add review <record> --question evidence` on a `rigor: single` plan writes each named row's auditor cell
+# (CONFIRMED as the bare token, any other verdict as written) and the matrix head's `auditor-wave:` line in the same
+# plan write as its proof line. `discharge` refuses there, naming `proof-add review`; at double it writes as before.
+# `proof-add regression` writes the head's `stack-health:` line from the proof's head, pass and total, red with its
+# numbers when the run left suites owed, and leaves a declared `n/a:` as the plan wrote it.
+#
+# FIXTURE FIDELITY. §STEP-FIELD's shape built fresh: a plan bound to this session at Step 5, its working branch in a
+# linked worktree, real commits, the reader's row from the production writer with `questions=` appended, run lines
+# through the product's writer (regression_fixture). The matrix head's stub is the one matrix-render writes, rendered
+# here by the verb from the plan's Eval design; every write after it goes through a real verb.
+VT_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RVT="$(make_repo verdicts)"; ( cd "$RVT" && git commit -q --allow-empty -m init )
+git -C "$RVT" config user.name "Dana Fixture"
+VT_B="$(git -C "$RVT" rev-parse HEAD)"
+PVT="$(s42_plan "$RVT" 5 "  worktree: .worktrees/01-fixture
+  base-sha: ${VT_B:0:8}
+  branch: wave/01-fixture")"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PVT" > "$PVT.tmp" && mv "$PVT.tmp" "$PVT"
+s42_builds_landed "$PVT"
+# Three criteria, each with a matrix row at T2 and an Eval design row naming it; matrix-render fills the blocks and the head.
+awk '/^## Verification Matrix/ {
+       print "## Eval design\n"
+       print "| Requirement | Criterion | Approach | Eval | Fails when |"
+       print "|---|---|---|---|---|"
+       print "| REQ-1 | AC-1.1 | hermetic | `tests/a.test.sh` | a is wrong |"
+       print "| REQ-1 | AC-1.2 | hermetic | `tests/b.test.sh` | b is wrong |"
+       print "| REQ-1 | AC-1.3 | hermetic | `tests/c.test.sh` | c is wrong |\n" }
+     { print }
+     /^\| AC-1\.1 \| T2 \|/ { print "| AC-1.2 | T2 | pending | — | — |"; print "| AC-1.3 | T2 | pending | — | — |" }' \
+  "$PVT" > "$PVT.tmp" && mv "$PVT.tmp" "$PVT"
+vt_rigor() { sed "s/^rigor: .*/rigor: $1/" "$PVT" > "$PVT.tmp" && mv "$PVT.tmp" "$PVT"; }
+vt_rigor single
+( cd "$RVT" && git add -f "$PVT" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$RVT/.worktrees/01-fixture" "$VT_B" ) >/dev/null 2>&1
+VT_WT="$RVT/.worktrees/01-fixture"; VT_DIR="$RVT/.bionic/docs/record/wave-01-fixture"; mkdir -p "$VT_DIR"
+VT_A="$(s57_commit "$VT_WT" lib/a.sh A)"
+VT_RECS="ev-double ev-single ev-again ev-notable ev-noverdict ev-twice ev-stray ev-empty"
+VT_FILES=""; for n in $VT_RECS; do VT_FILES="${VT_FILES:+$VT_FILES,}.bionic/docs/record/wave-01-fixture/$n.md"; done
+new_roster "$RVT"
+printf '%s|questions=evidence\n' "$(roster_row_fixture session="$SID" name=vt-crit agent_id=a-vt-crit \
+  subagent_type=bionic:critic files="$VT_FILES")" >> "$(roster_of "$RVT")"
+vt_cell() {  # <AC> -> its matrix row's auditor cell, trimmed
+  awk -F'|' -v a="$1" '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 }
+    m && /^\|/ { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == a) { v = $6; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$PVT"
+}
+vt_cells() { printf '%s|%s|%s' "$(vt_cell AC-1.1)" "$(vt_cell AC-1.2)" "$(vt_cell AC-1.3)"; }
+vt_head() {  # <key> -> the matrix head's <key>: lines, whole, `;`-joined
+  awk -v k="$1" '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 } m && index($0, k ":") == 1' "$PVT" | paste -sd';' -
+}
+vt_order() {  # -> the matrix section's head lines and its table header, in file order, by key
+  awk '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 } !m { next }
+    /^stack-health:/ { o = o "stack-health," } /^auditor-wave:/ { o = o "auditor-wave," } /^\| AC \|/ { o = o "table"; exit }
+    END { print o }' "$PVT"
+}
+vt_rec() {  # <name> <verdict: line or -> [<table row>...] -> an evidence reading over base..A
+  local f="$VT_DIR/$1.md" v="$2" r; shift 2
+  { printf '# evidence\n\nreviewed: %s..%s\nquestion: evidence\nresult: flag\nscope: whole\n\n## Row verdicts\n\n' "${VT_B:0:10}" "$VT_A"
+    if [ "$#" -gt 0 ]; then printf '| AC | verdict | why |\n|---|---|---|\n'; for r in "$@"; do printf '%s\n' "$r"; done; fi
+    [ "$v" = - ] || printf '\n%s\n' "$v"
+    printf '\nwhat the critic found\n'; } > "$f"
+}
+vt_add() { poke "$RVT" proof-add review "record/wave-01-fixture/$1.md" --question evidence --reader vt-crit; }
+VT_ROWS=('| AC-1.1 | CONFIRMED | the row reddens without the change |' '| AC-1.2 | REFUTED | the fixture cannot reach the failure |'
+  '| AC-1.3 | UNVERIFIABLE | the record is missing |')
+
+poke "$RVT" matrix-render
+expect_eq "VT-0 setup: matrix-render renders the three blocks and the head's stub (exit 0)" "0|stack-health: pending" "$RC|$(vt_head stack-health)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "VT-0b precondition: every auditor cell is empty, and the head has no auditor-wave: line" "—|—|—|" "$(vt_cells)|$(vt_head auditor-wave)"
+
+# ---------- §VERDICTS: the critic's table and wave verdict reach the auditor cells and the head ----------
+vt_rigor double
+vt_rec ev-double 'verdict: REFUTED — AC-1.2 is refuted' "${VT_ROWS[@]}"
+vt_add ev-double
+expect_eq "VT-1 control: at double rigor the same record registers (exit 0) and leaves the auditor cells as they were" "0|—|—|—" "$RC|$(vt_cells)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "VT-1b …and writes no auditor-wave: line (the head's stack-health: still read: the extractor is not empty)" "|stack-health: pending" \
+  "$(vt_head auditor-wave)|$(vt_head stack-health)"
+vt_rigor single
+vt_rec ev-single 'verdict: REFUTED — AC-1.2 is refuted' "${VT_ROWS[@]}"
+vt_add ev-single
+expect_eq "VT-2 §VERDICTS AC-6.1 at single rigor the critic's evidence record registers (exit 0) and its verdicts reach the auditor cells" \
+  "0|CONFIRMED|REFUTED|UNVERIFIABLE" "$RC|$(vt_cells)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "VT-2b …and the head carries the wave verdict on its auditor-wave: line" "auditor-wave: REFUTED — AC-1.2 is refuted" "$(vt_head auditor-wave)"
+expect_eq "VT-2c …beside stack-health:, above the table" "stack-health,auditor-wave,table" "$(vt_order)"
+expect_eq "VT-2d …in the same plan write as the proof line" "1" \
+  "$(s46_proved "$PVT" | /usr/bin/grep -c "^proved: kind=review head=$VT_A .* evidence=record/wave-01-fixture/ev-single.md question=evidence ")"
+expect_eq "VT-3 a CONFIRMED row needs no discharge: its table row reads the bare token, written by the review's registration" \
+  "| AC-1.1 | T2 | pending | — | CONFIRMED |" "$(/usr/bin/grep -E '^\| AC-1\.1 \|' "$PVT")"
+# A later reading replaces both: a row's verdict is the newest reading's, the head keeps one auditor-wave: line.
+vt_rec ev-again 'verdict: CONFIRMED — every requirement has a row' '| AC-1.1 | CONFIRMED | — |' '| AC-1.2 | CONFIRMED | refixed |'
+vt_add ev-again
+expect_eq "VT-4 a second reading rewrites the rows it names and leaves the row it does not name as it was (exit 0)" \
+  "0|CONFIRMED|CONFIRMED|UNVERIFIABLE" "$RC|$(vt_cells)"
+expect_eq "VT-4b …and the head holds one auditor-wave: line, the newest" "auditor-wave: CONFIRMED — every requirement has a row" "$(vt_head auditor-wave)"
+# What the record must carry at single rigor: each refusal leaves the plan byte-identical.
+vt_rec ev-notable 'verdict: CONFIRMED — fine'
+s42_snap "$RVT" "$PVT"; vt_add ev-notable
+s42_unchanged "VT-5 a single-rigor evidence record with no AC | verdict table" 1 "$PVT"
+expect_contains "VT-5b …named in the refusal" "the columns AC and verdict" "$OUT"
+vt_rec ev-noverdict - '| AC-1.1 | CONFIRMED | — |'
+vt_add ev-noverdict
+s42_unchanged "VT-6 a single-rigor evidence record with the table and no verdict: line" 1 "$PVT"
+expect_contains "VT-6b …named in the refusal" "verdict:" "$OUT"
+vt_rec ev-twice 'verdict: CONFIRMED — one' '| AC-1.1 | CONFIRMED | — |'; printf 'verdict: REFUTED — two\n' >> "$VT_DIR/ev-twice.md"
+vt_add ev-twice
+s42_unchanged "VT-7 a record giving the wave verdict twice" 1 "$PVT"
+vt_rec ev-stray 'verdict: CONFIRMED — fine' '| AC-1.1 | CONFIRMED | — |' '| AC-9.9 | CONFIRMED | — |'
+vt_add ev-stray
+s42_unchanged "VT-8 a row verdict for a criterion the matrix has no row for" 1 "$PVT"
+expect_contains "VT-8b …naming it" "AC-9.9" "$OUT"
+vt_rec ev-empty 'verdict: CONFIRMED — fine' '| AC-1.1 |  | — |'
+vt_add ev-empty
+s42_unchanged "VT-9 a row whose verdict cell is empty" 1 "$PVT"
+
+# ---------- §DISCHARGE: discharge refuses at single rigor and writes at double ----------
+s42_snap "$RVT" "$PVT"
+poke "$RVT" discharge AC-1.3
+s42_unchanged "VT-10 §DISCHARGE AC-6.2 discharge on a single-rigor plan" 1 "$PVT"
+expect_contains "VT-10b …naming proof-add review" "proof-add review" "$OUT"
+vt_rigor double
+poke "$RVT" discharge AC-1.3
+expect_eq "VT-11 …on a double-rigor plan it writes the cell as before (exit 0)" "0|CONFIRMED" "$RC|$(vt_cell AC-1.3)"
+vt_rigor single
+
+# ---------- §STACK: the recorded regression proof writes stack-health: over the rendered stub ----------
+vt_sh_line() {  # <green|red> <head> <pass> <total> <evidence> [<owed>] -> the line the proof writes
+  printf 'stack-health: %s head=%s pass=%s total=%s%s evidence=%s' "$1" "$2" "$3" "$4" "${6:+ owed=$6}" "$5"
+}
+VT_C="$(s57_commit "$VT_WT" lib/b.sh C)"
+printf 'Gating: 2 passed, 1 failed\nFailed:\n    - c.test.sh\n' | regression_fixture "$PVT" "$VT_DIR/whole-red.log" "$VT_C" 0 1
+poke "$RVT" proof-add regression record/wave-01-fixture/whole-red.log
+expect_eq "VT-12 §STACK AC-7.1 a red regression proof (exit 0) writes stack-health: red with its head, pass and total, over the stub" \
+  "0|$(vt_sh_line red "$VT_C" 2 3 record/wave-01-fixture/whole-red.log c.test.sh)" "$RC|$(vt_head stack-health)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+VT_D="$(s57_commit "$VT_WT" lib/c.sh D)"
+printf 'Gating: 3 passed, 0 failed\n' | regression_fixture "$PVT" "$VT_DIR/whole-green.log" "$VT_D" 0 0
+poke "$RVT" proof-add regression record/wave-01-fixture/whole-green.log
+expect_eq "VT-13 a green regression proof (exit 0) replaces the line it wrote: one stack-health: line, green with its numbers" \
+  "0|$(vt_sh_line green "$VT_D" 3 3 record/wave-01-fixture/whole-green.log)" "$RC|$(vt_head stack-health)"
+expect_eq "VT-13b …still above the table, auditor-wave: beside it" "stack-health,auditor-wave,table" "$(vt_order)"
+# A declared n/a: is the plan's word that stack health does not apply, so a proof leaves it as written.
+sed 's/^stack-health: .*/stack-health: n\/a: no long-running serve/' "$PVT" > "$PVT.tmp" && mv "$PVT.tmp" "$PVT"
+VT_E="$(s57_commit "$VT_WT" lib/d.sh E)"
+printf 'Gating: 3 passed, 0 failed\n' | regression_fixture "$PVT" "$VT_DIR/whole-na.log" "$VT_E" 0 0
+poke "$RVT" proof-add regression record/wave-01-fixture/whole-na.log
+expect_eq "VT-14 a declared stack-health: n/a: is left as the plan wrote it (the proof registers, exit 0)" \
+  "0|stack-health: n/a: no long-running serve|1" \
+  "$RC|$(vt_head stack-health)|$(s46_proved "$PVT" | /usr/bin/grep -c "^proved: kind=regression head=$VT_E ")"
+POKE_BOUND="$VT_BOUND_WAS"
 
 finish

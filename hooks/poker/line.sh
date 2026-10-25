@@ -1,14 +1,18 @@
 # shellcheck shell=bash
 # hooks/poker/line.sh — the landing line: a row lands itself, its evidence, the run's numbers and hand-holds
-# (row-landed, deliver, reviews-part, release-note).
+# (row-landed, deliver, reviews-part, known-limits-part, release-note).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
 
 # landing_evidence <plan in> <plan out> <row> <commit> <landing record> <docs root> <plan slug> -> prints the number of
-# cells written; <plan out> holds the plan with them (and is left alone when none). rc 1 when the pass cannot run.
+# cells written; <plan out> holds the plan with them (and is left alone when none), and <plan out>.cells the criteria
+# whose block took a log, space-separated, for the landing's settlement. rc 1 when the pass cannot run.
+# A suite is named in an eval by its file name or by its path under tests/, where a bare Lands-on name runs, so a log
+# is keyed by both.
 landing_evidence() {
   local in="$1" out="$2" row="$3" commit="$4" rec="$5" droot="$6" slug="$7" logs n side="$2.count"
+  rm -f "$out.cells"
   { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
   logs="$( [ -f "$rec" ] && awk -F'|' -v row="$row" -v c="$commit" -v root="$droot/" "${_LINE_FIELDS_AWK:-}"'
     { e = line_ev() }
@@ -21,13 +25,23 @@ landing_evidence() {
       s = line_kv("suite"); k = line_kv("from") SUBSEP s SUBSEP line_kv("reads")
       if (s != "" && line_kv("reads") != "" && (k in gl) && index(gl[k], root) == 1) last[s] = substr(gl[k], length(root) + 1)
     }
-    END { for (s in last) printf "%s\t%s\n", s, last[s] }' "$rec" 2>/dev/null )"
+    END { for (s in last) { printf "%s\t%s\n", s, last[s]; if (index(s, "/") == 0) printf "tests/%s\t%s\n", s, last[s] } }' "$rec" 2>/dev/null )"
   if [ -z "$logs" ]; then printf '0'; return 0; fi
   LE_TASKS="$(serves_tasks "$in")" LE_ROW="$row" LE_LOGS="$logs" LE_SLUG="$slug" LE_COUNT="$side" \
-    awk "$SERVES_AWK$LE_AWK" "$in" > "$out.le" 2>/dev/null || { rm -f "$out.le" "$side"; return 1; }
+    awk "$(units_ac_head_awk)$SERVES_AWK$LE_AWK" "$in" > "$out.le" 2>/dev/null || { rm -f "$out.le" "$side"; return 1; }
   n="$(cat "$side" 2>/dev/null)"; rm -f "$side"
   case "$n" in ''|*[!0-9]*) rm -f "$out.le"; return 1 ;; esac
-  if [ "$n" -gt 0 ]; then mv -f "$out.le" "$out"; else rm -f "$out.le"; fi
+  if [ "$n" -gt 0 ]; then
+    # The criteria whose block took a log: the pass replaces lines in place, so a line that differs is an evidence line.
+    awk "$(units_ac_head_awk)"'
+      NR == FNR { a[FNR] = $0; next }
+      /^## / { inm = ($0 ~ /^## Verification Matrix/); cur = ""; next }
+      inm && /^[^ \t|]/ { cur = ac_any($0); next }
+      cur != "" && $0 != a[FNR] && !(cur in s) { s[cur] = 1; printf "%s%s", sep, cur; sep = " " }' "$in" "$out.le" > "$out.cells" 2>/dev/null
+    mv -f "$out.le" "$out"
+  else
+    rm -f "$out.le"
+  fi
   printf '%s' "$n"
 }
 # ---------------------------------------------------------------- a record row lands itself
@@ -58,8 +72,9 @@ row_writer() {  # <roster> <plan> <row> <agent cell>
 #   - the row is in `## Tasks`, `pending` or `active`;
 #   - it has no tree of its own and its Files write nothing the head carries (`units_writes_head`):
 #     a row with a tree lands through `ready`, from that tree;
-#   - it is not a live review row (`units_live_rows`): `proof-add` returns that row to `pending` at
-#     each reading and the next landing makes it ready again, so landing it would end its passes;
+#   - a live review row (`units_live_rows`) lands only when the judge reads every question it carries covered at
+#     the working head (lib/units.sh `units_live_held`, over lib/proof.sh `facts_state`): until then a landing
+#     past its reading owes it another pass, and the refusal names each question that is not covered;
 #   - its artifact: the ledger line's `artifact` cell, else the row's own `## Tasks` artifact cell (a
 #     task-scale plan carries no ledger), else the one record under `<docs-root>/record/` its Files
 #     name (a `.progress.md` and `assumptions.md` are bookkeeping, not the artifact). The file exists,
@@ -70,7 +85,7 @@ row_writer() {  # <roster> <plan> <row> <agent cell>
 #   - the working head reads as a commit;
 #   - no ruling for the row's writer is unread.
 deliver_check() {
-  local row kind files wt status art docs drel abs real rel e n=0 cands="" hasl=0 lverb=ledger-set call fix wb head sid roster rulings
+  local row kind files wt status art docs drel abs real rel e n=0 cands="" hasl=0 lverb=ledger-set call fix wb head sid roster rulings live lrc
   call="bash $HOOK_DIR/session-poker.sh"
   if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
      || ! declare -F proof_branch_head >/dev/null 2>&1; then
@@ -99,8 +114,11 @@ deliver_check() {
     exit 2
   fi
   if [ -n "$(units_live_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v id="$PV_ID" '$1 == id')" ]; then
-    die "REFUSED — $PV_ID is a live review row (it reads live:head): proof-add returns it to pending at each review and the next landing makes it ready again, so deliver does not land it. The plan is unchanged."
-    exit 2
+    live="$(units_live_held "$PV_PLAN" "$PV_ID")"; lrc=$?
+    if [ "$lrc" -ne 0 ]; then
+      die "REFUSED — $PV_ID is a live review row (it reads live:head), and it lands only once the judge reads every question it carries covered at the working head; not covered there: $(printf '%s\n' "$live" | awk 'NF { printf "%s%s", (n++ ? ", " : ""), $0 }'). Register the review at the head (proof-add review), then deliver again. The plan is unchanged."
+      exit 2
+    fi
   fi
   docs="$(docs_root "$PV_REPO")"; docs="$(cd "$docs" 2>/dev/null && pwd -P)"
   drel=""; case "$docs" in "$PV_REPO"/*) drel="${docs#"$PV_REPO"/}" ;; esac
@@ -259,6 +277,11 @@ row_landed_suites() {
   fi
   case "$RL_VLOG" in
     *'|'*|*$'\n'*|*$'\r'*) die "REFUSED — row-landed --by-hand: the --log path holds a | or a line break, which no record line can hold; the plan is unchanged."; exit 1 ;;
+  esac
+  # The branch and the tree ride on the same ready line, each a field of its own, so a value that breaks the line is
+  # refused as the log path is.
+  case "${RL_BRANCH-}${RL_TREE-}" in
+    *'|'*|*$'\n'*|*$'\r'*) die "REFUSED — row-landed --by-hand: --branch and --tree each fill a field of the ready line, and a | or a line break cannot be held in one; the plan is unchanged."; exit 1 ;;
   esac
   if ! g="$(git -C "$PV_REPO" rev-parse --verify -q "${RL_GREEN}^{commit}" 2>/dev/null)" \
      || ! git -C "$PV_REPO" merge-base --is-ancestor "$g" "$RL_COMMIT" 2>/dev/null; then
@@ -589,7 +612,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 # THE HAND-HOLD COUNT IS FOLDED FROM THE LINES THE ESCAPE-HATCH VERBS WROTE (wave-35 T12; D17, REQ-8
 # AC-8.1). `landing-report --hand-holds` prints, under the landings line,
 #
-#   hand-holds: total=<n> · by-hand=<n> · stop-runs=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · second-floors=<n> · adoptions=<n> · fixed=<n>
+#   hand-holds: total=<n> · by-hand=<n> · stop-runs=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · status-writes=<n> · second-floors=<n> · adoptions=<n> · fixed=<n>
 #
 # A hand-hold is a use of a verb that steps round the machine. Each kind is counted from the one line its
 # verb wrote, and PROSE IS NEVER READ (D1): a line that says `by-hand` in a plan, a note or the orchestrator's
@@ -610,6 +633,14 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 #                  `waiver: <who> <ISO-UTC> "<words>"` under `## Verification Matrix` (`waive-row`), or the older
 #                  `waiver: <who> <YYYY-MM-DD> "<words>"` a plan may still carry. Fenced text is skipped, as every
 #                  reader of the plan skips it.
+#   status-writes  the landing record's `line/v1|ev=matrix-set|ac=<id>|cells=<status,evidence,task>|by=<who>|at=<ISO-UTC>|`, one per
+#                  `matrix-set` call that changed the plan, written in the same act as its plan write (hooks/poker/plan.sh
+#                  `poker_verb_matrix_set`). It is counted when its cells name the status or the task, placed by its `at=`
+#                  like every record kind. A task write counts: the task: key is what defers a pending row to its
+#                  task's step, so writing it by hand moves the row off every gate. The landing's settlement (lib/line.sh
+#                  `line_settle`) writes a cell through `matrix_row_cells` and writes no such line, so a status a landing
+#                  wrote is never one; a call the settled-cell rule refuses, or that only restates a key, writes none. An
+#                  evidence-only line is a write and no status: not counted.
 #   second-floors  `proved: kind=floor` lines under `## SDLC State` past the first (`proof-add floor`), read through
 #                  lib/proof.sh's `proof_fields`, the one reading of a proof line.
 #   adoptions      the roster row `adopt` files for each agent it adopts (`adopt_write_row`: `source=adopted`,
@@ -618,15 +649,25 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 #                  the line the verb wrote. A verb act: never counted as by-hand.
 #   fixed          the plan's `moved: <record>#<n> to=fixed row=<T> …` line under `## SDLC State` (`finding-move …
 #                  fixed`, wave-36 T8), one per line (wave-36 T14; AC-7.6). A verb act: never counted as by-hand.
+#                  A move is placed by its time against the landing of the row it names, the row's first `published`
+#                  event: typed at or before that landing it is the landing's own business and outside the count,
+#                  typed after it a hand marked the fix, inside. A move naming a row with no landing is unplaced.
+#                  A move the landing itself wrote (`by=landing`, lib/line.sh `line_settle`) is its settlement, never a hand.
 #
 # THE WINDOW. `--since <ISO>` and `--until <ISO>` count a hand-hold only when its own line's time is after the start
 # and at or before the end; either end may be absent, and absent is open. Each source is placed by the time its writer
 # put on it: the landing record's `at=`, the fill ledger's `at=`, the leading ISO of a roster `amended=`, `held=` or
 # `extended=` value, the ISO on a `waived:` line, a `moved:` or regression proof line's `at=`, and the matrix waiver's
-# time. A waiver of the date form is placed when its whole day falls on one side of each end. A line that cannot be
+# time. An end written to the minute (`<date>T<hh>:<mm>Z`, the shape close-out writes `delivered:` in) reaches through
+# that minute's last second, so an act in the minute an end names is inside it. A waiver of the date form is placed
+# when its whole day falls on one side of each end. A line that cannot be
 # placed (an adoption row carries no time of the adopt; a date form a window end falls inside) is not counted, and with
 # either end set the line ends ` · unplaced=<n>`, so a windowed count never hides what it left out. With no end set
 # every line counts and the line keeps its open shape, so a run with no window reads as it always has.
+#
+# THE ROSTERS, KEPT. Three kinds and the adoptions are roster lines, and close-out wipes the rosters before its last
+# read of this line. `BIONIC_HH_ROSTERS=<file>` names a file holding the roster lines to read in place of the
+# rosters in the project's tmp directory: close-out keeps them there before the wipe and reads them back after it.
 #
 # READ-ONLY and FAIL-SOFT: an absent source counts zero. It decides nothing; nothing reads it but close-out's card and
 # continuation, the release approval page and the goal that names landing-report (and a person).
@@ -635,7 +676,8 @@ _HH_PLACE_AWK='
   function hh_day(t) { return t ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ }
   function hh_norm(t) { return (hh_iso(t) && length(t) == 17) ? substr(t, 1, 16) ":00Z" : t }
   function hh_first(s,   n, w, i) { n = split(s, w, /[ \t]+/); for (i = 1; i <= n; i++) if (hh_iso(w[i]) || hh_day(w[i])) return w[i]; return "" }
-  function hh_at(s,   n, w, i) { n = split(s, w, /[ \t|]+/); for (i = 1; i <= n; i++) if (index(w[i], "at=") == 1) return substr(w[i], 4); return "" }
+  function hh_kv(s, k,   n, w, i) { n = split(s, w, /[ \t|]+/); for (i = 1; i <= n; i++) if (index(w[i], k "=") == 1) return substr(w[i], length(k) + 2); return "" }
+  function hh_at(s) { return hh_kv(s, "at") }
   # 1 inside the window, 0 outside it, -1 not placeable; HH_S and HH_U are the ends, empty when open
   function hh_place(t,   a, b) {
     if (HH_S == "" && HH_U == "") return 1
@@ -648,11 +690,20 @@ _HH_PLACE_AWK='
     return -1
   }
   function hh_take(t,   p) { p = hh_place(t); if (p < 0) HH_UNPLACED++; return p > 0 }
-  BEGIN { HH_S = hh_norm(HH_S); HH_U = hh_norm(HH_U) }
+  # a line placed against a landing l as well: inside only when inside the window and after l; with no landing to
+  # place it against it cannot be placed. With the window open every line counts, as hh_place says.
+  function hh_after(t, l,   p) {
+    p = hh_place(t)
+    if ((HH_S == "" && HH_U == "") || p <= 0) return p
+    if (!hh_iso(l)) return -1
+    return (hh_norm(t) > hh_norm(l)) ? 1 : 0
+  }
+  function hh_take_after(t, l,   p) { p = hh_after(t, l); if (p < 0) HH_UNPLACED++; return p > 0 }
+  BEGIN { HH_S = hh_norm(HH_S); HH_U = (hh_iso(HH_U) && length(HH_U) == 17) ? substr(HH_U, 1, 16) ":59Z" : hh_norm(HH_U) }
 '
 hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] [--until <ISO>] -> the one hand-holds line; rc 0
-  local rec="$1" root="$2" plan="$3" slug led rf hand=0 stp=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0 pl
-  local since="" until="" u1=0 u2=0 u3=0 u4=0
+  local rec="$1" root="$2" plan="$3" slug led rf hand=0 stp=0 stw=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0 pl
+  local since="" until="" u1=0 u2=0 u3=0 u4=0 lands=""
   shift 3
   while [ $# -ge 2 ]; do
     case "$1" in --since) since="$2" ;; --until) until="$2" ;; esac
@@ -660,11 +711,16 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
   done
   slug="$(proof_plan_slug "$plan")"
   if [ -f "$rec" ] && [ ! -L "$rec" ] && { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }; then
-    read -r hand stp u1 <<< "$(awk -F'|' -v HH_S="$since" -v HH_U="$until" "${_LINE_FIELDS_AWK:-}$_HH_PLACE_AWK"'
+    read -r hand stp stw u1 <<< "$(awk -F'|' -v HH_S="$since" -v HH_U="$until" "${_LINE_FIELDS_AWK:-}$_HH_PLACE_AWK"'
       { ev = line_ev() }
       ev == "published" && line_kv("kind") == "hand" && hh_take(line_kv("at")) { n++ }
       ev == "stop-run" && hh_take(line_kv("at")) { s++ }
-      END { print n + 0, s + 0, HH_UNPLACED + 0 }' "$rec")"
+      # only a line that names the status cell or the task key is a write the gate reads; an evidence-only one is neither placed nor counted
+      ev == "matrix-set" && (index("," line_kv("cells") ",", ",status,") || index("," line_kv("cells") ",", ",task,")) && hh_take(line_kv("at")) { w++ }
+      END { print n + 0, s + 0, w + 0, HH_UNPLACED + 0 }' "$rec")"
+    # each row's first landing, `<row>=<at>` words: what a move to fixed is placed against
+    lands="$(awk -F'|' "$_LINE_FIELDS_AWK"'
+      line_ev() == "published" && line_kv("row") != "" && !(line_kv("row") in f) { f[line_kv("row")] = 1; printf "%s=%s ", line_kv("row"), line_kv("at") }' "$rec")"
   fi
   led="$(fill_ledger_path "$root" "$plan" 2>/dev/null)" || led=""
   if [ -n "$led" ] && [ -f "$led" ] && [ ! -L "$led" ]; then
@@ -676,9 +732,11 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
       }
       END { print d + 0, l + 0, HH_UNPLACED + 0 }' "$led")"
   fi
-  read -r amd hld ext ado u3 <<< "$(for rf in "$root/.bionic/tmp"/roster-*.state; do
-      [ -f "$rf" ] && [ ! -L "$rf" ] && cat "$rf"
-    done 2>/dev/null | awk -F'|' -v want="/$slug.plan.md" -v HH_S="$since" -v HH_U="$until" "$_HH_PLACE_AWK"'
+  read -r amd hld ext ado u3 <<< "$(if [ -n "${BIONIC_HH_ROSTERS:-}" ]; then
+      [ -f "$BIONIC_HH_ROSTERS" ] && [ ! -L "$BIONIC_HH_ROSTERS" ] && cat "$BIONIC_HH_ROSTERS"
+    else
+      for rf in "$root/.bionic/tmp"/roster-*.state; do [ -f "$rf" ] && [ ! -L "$rf" ] && cat "$rf"; done
+    fi 2>/dev/null | awk -F'|' -v want="/$slug.plan.md" -v HH_S="$since" -v HH_U="$until" "$_HH_PLACE_AWK"'
       index($0, "roster-state/") == 1 {
         name = ""; plan = ""; a = ""; h = ""; x = ""; id = ""; src = ""; af = ""
         for (i = 2; i <= NF; i++) {
@@ -707,8 +765,10 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
         print na + 0, nh + 0, nx + 0, nd + 0, HH_UNPLACED + 0 }')"
   if [ -f "$plan" ] && [ ! -L "$plan" ]; then
     if ! declare -F proof_awk >/dev/null 2>&1 && [ -f "$BIONIC_LIB/proof.sh" ]; then . "$BIONIC_LIB/proof.sh"; fi
-    if declare -F proof_awk >/dev/null 2>&1; then
-      read -r fl wv fix u4 <<< "$(awk -v HH_S="$since" -v HH_U="$until" "$(proof_awk)$_HH_PLACE_AWK"'
+    if ! declare -F units_ac_head_awk >/dev/null 2>&1 && [ -f "$BIONIC_LIB/units.sh" ]; then . "$BIONIC_LIB/units.sh"; fi
+    if declare -F proof_awk >/dev/null 2>&1 && declare -F units_ac_head_awk >/dev/null 2>&1; then
+      read -r fl wv fix u4 <<< "$(HH_LANDS="$lands" awk -v HH_S="$since" -v HH_U="$until" "$(proof_awk)$(units_ac_head_awk)$_HH_PLACE_AWK"'
+        BEGIN { n = split(ENVIRON["HH_LANDS"], lw, " "); for (i = 1; i <= n; i++) { k = index(lw[i], "="); if (k > 1) LAND[substr(lw[i], 1, k - 1)] = substr(lw[i], k + 1) } }
         /^[ \t]*```/ { fence = !fence; next }
         fence { next }
         /^##[ \t]/ { sec = ($0 ~ /^##[ \t]+SDLC State/) ? "sdlc" : (($0 ~ /^##[ \t]+Verification Matrix/) ? "mx" : ""); inb = 0; next }
@@ -716,11 +776,12 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
           # the first regression proof is the floor itself; each one past it is a hand-hold
           if (proof_fields($0) && PROOF_KIND == "regression") { if (++r > 1 && hh_take(hh_at($0))) f++ }
           else if ($0 ~ /^waived:[ \t]+question=/) { q = index($0, "\""); if (hh_take(hh_first(q ? substr($0, 1, q - 1) : $0))) w++ }
-          else if ($0 ~ /^moved:[ \t]+[^ \t]+[ \t]+to=fixed([ \t]|$)/) { if (hh_take(hh_at($0))) x++ }
+          else if ($0 ~ /^moved:[ \t]+[^ \t]+[ \t]+to=fixed([ \t]|$)/ && hh_kv($0, "by") != "landing") { if (hh_take_after(hh_at($0), LAND[hh_kv($0, "row")])) x++ }
           next
         }
         sec == "mx" {
-          if ($0 ~ /^AC-[^ \t]*:[ \t]*$/) { inb = 1; next }
+          # the heading of a block, through the one matcher: bare, or carrying the text of its criterion (matrix-render)
+          if (ac_any($0) != "") { inb = 1; next }
           if (inb && $0 ~ /^[ \t]+[^ \t]/) {
             if ($0 ~ /^[ \t]+waiver:[ \t]+[^"]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9](T[0-9][0-9]:[0-9][0-9](:[0-9][0-9])?Z)?[ \t]+"/) {
               q = index($0, "\""); if (hh_take(hh_first(substr($0, 1, q - 1)))) w++
@@ -732,41 +793,40 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
         END { print f + 0, w + 0, x + 0, HH_UNPLACED + 0 }' "$plan")"
     fi
   fi
-  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · second-regressions=%d · adoptions=%d · fixed=%d' \
-    $(( hand + stp + dec + lif + amd + hld + ext + wv + fl + ado + fix )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$fl" "$ado" "$fix"
+  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · status-writes=%d · second-regressions=%d · adoptions=%d · fixed=%d' \
+    $(( hand + stp + dec + lif + amd + hld + ext + wv + stw + fl + ado + fix )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$stw" "$fl" "$ado" "$fix"
   if [ -n "$since" ] || [ -n "$until" ]; then printf ' · unplaced=%d' $(( ${u1:-0} + ${u2:-0} + ${u3:-0} + ${u4:-0} )); fi
   printf '\n'
   return 0
 }
 
-# THE WINDOW'S ENDS, FROM RECORDS. The measure runs from the last build landing to the release approval card: the start
-# is the newest `ev=published` of a row whose kind is build in the plan's table, the end the newest release approval
-# page's replay `at=` (a page under the card's old stem `$RR_OLD_VERB` reads too). A page no later than the start was
-# rendered for an earlier build, so it ends nothing.
-# hand_holds_ends <landing record> <project root> <plan> -> `<since|-><TAB><row|-><TAB><until|-><TAB><page|none|stale>`
-hand_holds_ends() {
-  local rec="$1" root="$2" plan="$3" builds s="-" row="-" u="-" st=none recdir f
+# THE WINDOW'S ENDS, FROM RECORDS. The measure runs from the last build landing to delivery: the start is the newest
+# `ev=published` of a row whose kind is build in the plan's table, the end the plan's Step-9 `delivered:` time once the
+# run reads closed (sitrep.sh `sitrep_delivered_at`), else now. A release approval page ends nothing: what is done
+# after the card, close-out's own acts among them, is inside the window. An end of whole minutes is printed as the
+# minute, the shape close-out writes, so the window reaches through it (_HH_PLACE_AWK).
+# hand_holds_window <landing record> <project root> <plan> -> `<since|-><TAB><row|-><TAB><until|-><TAB><delivered|now>`
+hand_holds_window() {
+  local rec="$1" root="$2" plan="$3" builds s="-" row="-" u="-" st=now e
   builds="$(units_rows "$plan" 2>/dev/null | awk -F'\t' '$3 == "build" { printf "%s ", $1 }')"
   if [ -n "$builds" ] && [ -f "$rec" ] && [ ! -L "$rec" ] && { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }; then
     read -r s row <<< "$(awk -F'|' -v B=" $builds" "${_LINE_FIELDS_AWK:-}$_HH_PLACE_AWK"'
       line_ev() == "published" && index(B, " " line_kv("row") " ") { a = hh_norm(line_kv("at")); if (hh_iso(a) && a > m) { m = a; r = line_kv("row") } }
       END { if (m != "") print m, r; else print "-", "-" }' "$rec")"
   fi
-  recdir="$(docs_root "$root")/record/$(proof_plan_slug "$plan")"
-  u="$(for f in "$recdir"/release-approval-*.md ${RR_OLD_VERB:+"$recdir/$RR_OLD_VERB"-*.md}; do
-      [ -f "$f" ] && [ ! -L "$f" ] && cat "$f"
-    done 2>/dev/null | awk -v OLD="${RR_OLD_VERB:-release-approval}/v1|plan=" "$_HH_PLACE_AWK"'
-      index($0, "release-approval/v1|plan=") == 1 || index($0, OLD) == 1 { a = hh_norm(hh_at($0)); if (hh_iso(a) && a > m) m = a }
-      END { print (m != "") ? m : "-" }')"
-  if [ "$u" != - ]; then
-    if [ "$s" = - ] || [[ "$u" > "$s" ]]; then st=page; else st=stale; u="-"; fi
+  if declare -F sitrep_delivered_at >/dev/null 2>&1 && declare -F epoch_iso >/dev/null 2>&1; then
+    e="$(sitrep_delivered_at "$plan" 2>/dev/null)"
+    if [ -n "$e" ] && u="$(epoch_iso "$e")" && [ -n "$u" ]; then
+      st=delivered
+      case "$u" in *:00Z) u="${u%:00Z}Z" ;; esac
+    else u="-"; fi
   fi
   printf '%s\t%s\t%s\t%s\n' "${s:--}" "${row:--}" "${u:--}" "$st"
 }
 
 # hand_holds_verb <landing record> <project root> <plan> <since> <until> -> `landing-report --hand-holds`'s two lines:
 # the counts over the window, then the ends that bound it. With neither end named the ends are read from records
-# (hand_holds_ends); with no page the window runs to now and says the card has not rendered, printing no end it has not
+# (hand_holds_window); before the run is delivered the window runs to now and says so, printing no end it has not
 # read from a record.
 hand_holds_verb() {
   local rec="$1" root="$2" plan="$3" since="$4" until="$5" e s row u st sw uw
@@ -775,18 +835,14 @@ hand_holds_verb() {
     printf 'hand-holds window: since %s · until %s\n' "${since:-the first line}" "${until:-now}"
     return 0
   fi
-  e="$(hand_holds_ends "$rec" "$root" "$plan")"
+  e="$(hand_holds_window "$rec" "$root" "$plan")"
   IFS=$'\t' read -r s row u st <<< "$e"
   [ "$s" != - ] || s=""
   [ "$u" != - ] || u=""
   if [ -n "$s" ] || [ -n "$u" ]; then hand_holds_report "$rec" "$root" "$plan" ${s:+--since "$s"} ${u:+--until "$u"}
   else hand_holds_report "$rec" "$root" "$plan"; fi
   if [ -n "$s" ]; then sw="since $s (the last build landing, $row)"; else sw="since the first line (no build row has landed)"; fi
-  case "$st" in
-    page) uw="until $u (the release approval card)" ;;
-    stale) uw="until now: the card has not rendered since the last build landing" ;;
-    *) uw="until now: the card has not rendered" ;;
-  esac
+  if [ "$st" = delivered ]; then uw="until $u (delivered:)"; else uw="until now: the plan names no delivered: time"; fi
   printf 'hand-holds window: %s · %s\n' "$sw" "$uw"
   return 0
 }
@@ -885,7 +941,8 @@ hand_holds_verb() {
     fi
     # THE EVIDENCE CELLS (wave-31 T22; REQ-15 AC-15.1 to AC-15.3, D15): the criteria this row serves gain the log of
     # the suite their eval names, read off the landing record's verdicts for this row and commit (`landing_evidence`).
-    # A hand landing's verdicts are written after this, with its published line, so it writes none here. Same copy, same dry commit, same swap.
+    # A hand landing's verdicts are keyed by the commit the person says they were green at, not this landing's, so it
+    # writes none here. Same copy, same dry commit, same swap.
     RL_SLUG="$(proof_plan_slug "$PV_PLAN")"
     RL_N="$(landing_evidence "$PV_NEW" "$PV_NEW.2" "$PV_ID" "$RL_COMMIT" "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" \
       "$(docs_root "$PV_REPO")" "$RL_SLUG")" || {
@@ -893,8 +950,24 @@ hand_holds_verb() {
       exit 1
     }
     [ ! -f "$PV_NEW.2" ] || mv -f "$PV_NEW.2" "$PV_NEW"
+    RL_CELLS="$(cat "$PV_NEW.2.cells" 2>/dev/null)"; rm -f "$PV_NEW.2.cells"
+    # THE SETTLEMENT (lib/line.sh `line_settle`): what the landing proves goes into the same copy, so the row, its
+    # evidence, the findings it answers and the status cells its evidence fills are one write.
+    if ! { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
+       || ! declare -F line_settle >/dev/null 2>&1; then
+      die "REFUSED — the landing's settlement (lib/line.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+      exit 2
+    fi
+    LINE_SID="${LINE_SID:-${CLAUDE_CODE_SESSION_ID:-}}"
+    if ! line_settle "$PV_PLAN" "$PV_ID" "$RL_COMMIT" "$PV_NEW" "$RL_AT" "$RL_CELLS"; then
+      die "REFUSED — what the landing of $PV_ID settles cannot be written into the plan's copy; the plan is unchanged."
+      exit 1
+    fi
     plan_verb_swap row-landed "$PV_ID landed at $RL_COMMIT" writer
     say "row-landed — $PV_ID landed at $RL_COMMIT: status, step line and ledger line written to $PV_PLAN in one write; dry-committed first."
+    line_settled "$PV_PLAN" "$PV_REPO" "$PV_ID" "$RL_COMMIT"
+    [ -z "$LINE_SETTLED_F" ] || say "row-landed — $PV_ID settled the findings $LINE_SETTLED_F: fixed by its landing, their asks closed."
+    [ -z "$LINE_SETTLED_C" ] || say "row-landed — $PV_ID settled the matrix status of $LINE_SETTLED_C: discharged by its landing."
     # A HAND LANDING IS RECORDED (wave-39 T10; D14, AC-6.2). The landing record gains the line the line's own hand
     # landing writes (lib/line.sh `line_publish`, field for field), at the landing's instant, so landing-report's
     # Landings list the row and `--hand-holds` counts it; a hand-marked landing used to reach the plan alone. Once:
@@ -912,7 +985,7 @@ hand_holds_verb() {
         # (the last one before the published line), and its green verdicts, both through the writers `land --by-hand`
         # uses (lib/line.sh `_line_hand_ready`, `_line_hand_verdicts`).
         if [ -n "$RL_SUITES" ]; then
-          if ! _line_hand_ready "$PV_PLAN" "$PV_ID" "$RL_COMMIT" - - "$RL_SUITES" >/dev/null \
+          if ! _line_hand_ready "$PV_PLAN" "$PV_ID" "$RL_COMMIT" "${RL_BRANCH:--}" "${RL_TREE:--}" "$RL_SUITES" >/dev/null \
              || ! _line_hand_verdicts "$PV_PLAN" "$PV_ID" "$RL_GREEN" "$RL_SUITES" "$RL_VLOG"; then
             die "REFUSED — the plan records $PV_ID landed by hand, but the landing record $RL_REC cannot take the suites' ready and verdict lines${LINE_UNWRITTEN:+ (the verdict for $LINE_UNWRITTEN)}; make it writable and run the same row-landed again."
             exit 1
@@ -1011,6 +1084,130 @@ poker_verb_reviews_part() {
     exit 1
   fi
   say "reviews-part — $LINE_RV_N review and waiver lines rendered under ### The reviews of the $LINE_RV_VER entry, committed ${LINE_RV_COMMIT:0:12} on $wb; open the pull request from it."
+  exit 0
+}
+
+# ---------------------------------------------------------------- the release entry's Known limits, from the deferrals
+#
+# THE ENTRY'S KNOWN LIMITS ARE THE RUN'S DEFERRALS. `known-limits-part <row>` renders the release entry's
+# `### Known limits` from the plan alone: one bullet per open deferral (lib/proof.sh `proof_findings_owed` rating it
+# `defer`), its stated sentence (`deferral_sentence`, unescaped), in the order the plan wrote them. That is the
+# release check's own reading of the deferrals (tests/lib/release-check.sh `lim_check`), so every sentence the check
+# looks for stands in the part it scans. The part replaces the entry's own (its heading to the next heading; a doubled
+# heading is one part), else goes in before `### The landing numbers`, else at the entry's end, and nothing else in
+# the file changes. It is committed on the working branch under the line's author through the reviews part's commit
+# path (lib/line.sh `line_reviews_checkout`, `line_reviews_commit`, `line_reviews_move`), so it is on the branch the
+# check judges, and the landing record gains `ev=<row kind>|row=<row>|part=known-limits|commit=<c>|branch=<working>`.
+# The rows that render it are the entry's own, the doc row that writes it and the integrate row that carries it, while
+# pending or active. A deferral with no sentence is refused, naming the verb that states it: the check refuses a part
+# without it. Nothing owed, or the part already as rendered: nothing is made, exit 0. The branch moves on this machine
+# alone; it leaves it by the person's push. Nothing records a stated assumption, so the deferrals are the whole part.
+KL_UNSTATED=""
+known_limits_part() {  # <plan> -> the part, heading to its closing blank line; nothing when no deferral is owed.
+  # rc 1, KL_UNSTATED naming it, at the first open deferral that states no sentence.
+  local plan="$1" id s r p t st n=0 body=""
+  KL_UNSTATED=""
+  while read -r id s r p t; do
+    [ "$p" = defer ] || continue
+    st="$(deferral_sentence "$plan" "$id")" || st=""
+    if [ -z "$st" ] || [ "$st" = - ]; then KL_UNSTATED="$id"; return 1; fi
+    body="${body}- ${st}"$'\n'; n=$((n + 1))
+  done < <(proof_findings_owed "$plan" 2>/dev/null)
+  [ "$n" -gt 0 ] || return 0
+  printf '### Known limits\n\n%s\n\n%s\n' \
+    "Rendered from the plan's deferred findings, each its stated sentence, in the order they were registered." "$body"
+}
+known_limits_entry() {  # <changelog> <version> <part file> -> the changelog with the entry's Known limits rendered
+  awk -v v="## $2 " -v pf="$3" '
+    function put(   l) { if (last != "") print ""; while ((getline l < pf) > 0) print l; close(pf); done = 1; last = "" }
+    /^## / { if (inb && !done) put(); inb = (index($0, v) == 1); inp = 0 }
+    /^### / {
+      t = $0; sub(/[[:space:]]+$/, "", t); inp = 0
+      if (inb && t == "### Known limits") { if (!done) put(); inp = 1; next }
+      if (inb && !done && t == "### The landing numbers") put()
+    }
+    inp { next }
+    { print; last = $0 }
+    END { if (inb && !done) put() }' "$1"
+}
+poker_verb_known_limits_part() {
+  local row kind status wb head ver tmp why n call="bash $HOOK_DIR/session-poker.sh"
+  if ! plan_verb_id_ok "$PV_ID"; then
+    die "REFUSED — '$(clean "$PV_ID")' is not one row id; nothing was rendered."
+    exit 1
+  fi
+  plan_verb_open known-limits-part
+  if ! { declare -F line_reviews_commit >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
+     || ! declare -F line_reviews_commit >/dev/null 2>&1 || ! _line_load_proof || ! declare -F proof_findings_owed >/dev/null 2>&1; then
+    die "REFUSED — the renderer (lib/line.sh) or the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was rendered."
+    exit 2
+  fi
+  row="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v id="$PV_ID" '$1 == id { print; exit }')"
+  if [ -z "$row" ]; then
+    die "REFUSED — the ## Tasks table of $PV_PLAN carries no row $PV_ID; nothing was rendered."
+    exit 2
+  fi
+  kind="$(units_field "$row" kind)"; status="$(units_field "$row" status)"
+  case "$kind" in
+    doc|integrate) : ;;
+    *) die "REFUSED — $PV_ID is a $(clean "$kind") row, and the entry's Known limits are rendered by the row that writes the entry or carries it (doc or integrate); nothing was rendered."
+       exit 2 ;;
+  esac
+  case "$status" in
+    pending|active) : ;;
+    *) die "REFUSED — $PV_ID reads $(clean "$status"), and the part is rendered before its row lands; nothing was rendered."; exit 2 ;;
+  esac
+  ver="$(plan_frontmatter_get "$PV_PLAN" release)"
+  if [ -z "$ver" ]; then
+    say "known-limits-part — nothing to render: the plan names no release:."
+    exit 0
+  fi
+  wb="$(plan_working_branch "$PV_PLAN")"
+  head="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || head=""
+  if [ -z "$head" ]; then
+    die "REFUSED — the plan's working-branch ${wb:-(none named)} names no commit in $PV_REPO; nothing was rendered."
+    exit 2
+  fi
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/known-limits-part.XXXXXX")" || { die "REFUSED — no temporary directory; nothing was rendered."; exit 2; }
+  if ! known_limits_part "$PV_PLAN" > "$tmp/part"; then
+    rm -rf "$tmp"
+    die "REFUSED — $(clean "$KL_UNSTATED") is deferred with no stated sentence, and the release check refuses a deferral with none: state it, $call finding-stated $(clean "$KL_UNSTATED") '<sentence>', then render again. Nothing was rendered."
+    exit 2
+  fi
+  n="$(/usr/bin/grep -c '^- ' "$tmp/part" | tr -d ' ')"
+  if [ "${n:-0}" -eq 0 ]; then
+    rm -rf "$tmp"; say "known-limits-part — nothing to render: the plan owes no deferral."
+    exit 0
+  fi
+  if ! git -C "$PV_REPO" show "${head}:CHANGELOG.md" > "$tmp/old" 2>/dev/null || ! /usr/bin/grep -q "^## ${ver} " "$tmp/old"; then
+    rm -rf "$tmp"
+    die "REFUSED — CHANGELOG.md on $wb holds no ## $ver entry for the plan's $n deferred sentences; write the entry, then render. Nothing was rendered."
+    exit 2
+  fi
+  known_limits_entry "$tmp/old" "$ver" "$tmp/part" > "$tmp/new"
+  if cmp -s "$tmp/old" "$tmp/new"; then
+    rm -rf "$tmp"
+    say "known-limits-part — the $ver entry's ### Known limits on $wb already lists the plan's $n deferred sentences; nothing was made."
+    exit 0
+  fi
+  why="$(line_reviews_checkout "$PV_REPO" "$wb")"
+  if [ -n "$why" ]; then
+    rm -rf "$tmp"; die "REFUSED — $why; nothing was rendered."; exit 2
+  fi
+  if ! line_reviews_commit "$PV_REPO" "$head" "$tmp/new" "$REVIEWS_PART_AUTHOR" "$REVIEWS_PART_EMAIL" \
+       "line: the $ver entry's Known limits, rendered from the plan's deferrals"; then
+    rm -rf "$tmp"; die "REFUSED — on $wb: $LINE_RV_SAID; nothing was rendered."; exit 2
+  fi
+  rm -rf "$tmp"
+  if ! line_reviews_move "$PV_REPO" "$wb" "$LINE_RV_COMMIT" "$head" "known-limits-part: $PV_ID"; then
+    die "REFUSED — $wb could not be moved from ${head:0:12} to ${LINE_RV_COMMIT:0:12}; nothing was published."
+    exit 2
+  fi
+  if ! line_event "$PV_PLAN" "$kind" "row=$PV_ID" part=known-limits "commit=$LINE_RV_COMMIT" "branch=$wb"; then
+    die "REFUSED — $wb moved to ${LINE_RV_COMMIT:0:12}, and the landing record could not be written: append ev=$kind|row=$PV_ID|part=known-limits|commit=$LINE_RV_COMMIT|branch=$wb to $(line_record "$PV_PLAN" 2>/dev/null || printf 'the record')."
+    exit 1
+  fi
+  say "known-limits-part — $n deferred sentences rendered under ### Known limits of the $ver entry, committed ${LINE_RV_COMMIT:0:12} on $wb."
   exit 0
 }
 

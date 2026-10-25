@@ -833,6 +833,29 @@ units_live_rows() {
   _UNITS_EVIDENCE="$*" _UNITS_QUESTION="$q" _UNITS_READER="$r" _units_sched liverows "$plan" ""
 }
 
+# units_live_held <plan> <row id> -> whether a live review row's questions hold at the working branch's head, as the
+# judge reads them (`_units_readings_state`, the review lines of lib/proof.sh `facts_state`): exit 0, nothing printed,
+# when every question the row carries is covered there (a bare `live:head` row carries every question the rigor deals);
+# exit 1 printing one `<question> <state>` line per question that is not, or the one sentence saying why the judge
+# could not be asked; exit 3, nothing printed, when the row reads no `live:head`. A live row is read again after each
+# landing, so it may close only once the judge owes it nothing more at the head.
+units_live_held() {
+  local qs st
+  qs="$(_units_sched questions "${1:-}" "${2:-}" 2>/dev/null)"
+  [ -n "$qs" ] || return 3
+  st="$(_units_readings_state "${1:-}")"
+  [ "$st" != covered ] || return 0
+  case "$st" in
+    review" "*) : ;;
+    *) printf '%s\n' "$st"; return 1 ;;
+  esac
+  printf '%s\n' "$st" | _UNITS_QS="$qs" awk '
+    BEGIN { n = split(ENVIRON["_UNITS_QS"], q, "\n"); for (i = 2; i <= n; i++) if (q[i] != "") want[q[i]] = 1; bare = (n < 2 || q[2] == "") }
+    { m = split($0, e, "; ")
+      for (k = 1; k <= m; k++) { split(e[k], f, " "); if (f[1] == "review" && f[2] != "" && (bare || (f[2] in want)) && !(f[2] in seen)) { seen[f[2]] = 1; o[++c] = f[2] " " f[5] } } }
+    END { for (i = 1; i <= c; i++) print o[i]; exit (c > 0) }'
+}
+
 # A READ AFTER A FIX IS TOLD WHAT MOVED (wave-27 T43; D10; A-orch-48, A-orch-71). Once a question has
 # its `scope=whole` reading, a later read of it covers the fixes that landed past that reading, and
 # the tick names them beside the RANGE line. A row's landing is read from the run's LANDING RECORD,
@@ -873,6 +896,20 @@ units_rows_in_range() {
 # a prefix of. The tick prints the MOVED list only when this prints nothing.
 units_unrecorded() { _units_landed unrecorded "${1:-}" "" "${2:-}"; }
 
+# units_record_landings <record> -> `<line number><TAB><row><TAB><commit, lower case, or nothing>` for each landing line
+# of the landing record, in record order: a `published` event (`commit=`) and the older `landed:` header (`merge=`),
+# whose blank-split fields are read as the event's are. THE ONE READING OF A LANDING IN THE RECORD: the readiness
+# rows (`_units_landed`), the publish order (`_units_publish_order`) and the numbers re-renderer's release row
+# (lib/line.sh `_line_release_landed`) all ask it, so "after the release" is one order. The fields are read by
+# lib/line.sh's reader of a record line, loaded through lib/proof.sh. Nothing, rc 0, for no record or no reader.
+units_record_landings() {
+  [ -f "${1:-}" ] && declare -F _proof_fields >/dev/null 2>&1 && _proof_fields || return 0
+  awk -F'|' "$_LINE_FIELDS_AWK"'
+    { sub(/\r$/, "") }
+    /^landed:[ \t]/ { gsub(/[ \t]+/, "|"); if (line_kv("row") != "") print NR "\t" line_kv("row") "\t" tolower(line_kv("merge")); next }
+    line_ev() == "published" && line_kv("row") != "" { print NR "\t" line_kv("row") "\t" tolower(line_kv("commit")) }' "$1" 2>/dev/null
+}
+
 # _units_landed <landings|inrange> <plan> <range> <record> — the one program behind the two verbs:
 # the rows (`units_rows`), the record's header lines, the plan's matrix, then stdin's merges.
 _units_landed() {
@@ -880,7 +917,7 @@ _units_landed() {
   rows="$(units_rows "$plan" 2>/dev/null)" || return 1
   {
     printf '\034rows\n'; printf '%s\n' "$rows"
-    printf '\034rec\n'; [ -f "$rec" ] && awk '{ sub(/\r$/, ""); print }' "$rec" 2>/dev/null
+    printf '\034rec\n'; units_record_landings "$rec"
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); print }' "$plan" 2>/dev/null
     printf '\034in\n'; [ "$mode" = landings ] || cat
   } | awk -F'\t' -v mode="$mode" '
@@ -891,21 +928,8 @@ _units_landed() {
     $0 == "\034in" { part = 4; next }
     part == 1 { if ($1 == "") next; n++; id[n] = $1; knd[n] = $3; srv[n] = $8; st[n] = $10; at[$1] = n; next }
     part == 2 {
-      r = ""; m = ""
-      if ($0 ~ /^line\/v1\|ev=published\|/) {
-        # A published event is a landing at its commit: `row-landed --by-hand` records a hand landing with it alone.
-        nf = split($0, f, "|")
-        for (k = 3; k <= nf; k++) {
-          if (f[k] ~ /^row=/) r = substr(f[k], 5)
-          else if (f[k] ~ /^commit=/) m = tolower(substr(f[k], 8))
-        }
-      } else if ($0 ~ /^landed:[ \t]/) {
-        nf = split($0, f, /[ \t]+/)
-        for (k = 2; k <= nf; k++) {
-          if (f[k] ~ /^row=/) r = substr(f[k], 5)
-          else if (f[k] ~ /^merge=/) m = tolower(substr(f[k], 7))
-        }
-      } else next
+      # A published event is a landing at its commit: `row-landed --by-hand` records a hand landing with it alone.
+      r = $2; m = $3
       if (!(r in at)) next
       lm[r] = (m ~ /^[0-9a-f]+$/ && length(m) >= 7 && length(m) <= 40) ? m : "-"
       if (lm[r] != "-") rm[lm[r]] = 1
@@ -1045,7 +1069,8 @@ _units_proof_awk() {
 # `holds` (units_floor_holds) takes the regression row's id, or nothing, in the <step> slot.
 _units_sched() {
   local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows hasreads=0 i fst rst rc
-  if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ] && [ "$mode" != whole ]; then
+  if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ] && [ "$mode" != whole ] \
+     && [ "$mode" != questions ]; then
     case "$step" in ''|*[!0-9]*) return 2 ;; esac
   fi
   out="$(_units_table "$plan")" || return 1
@@ -1287,12 +1312,9 @@ _units_publish_order() {
   printf '%s\n' "${2:-}" | awk -F'\t' '$3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && $10 == "landed" { f = 1 } END { exit !f }' || return 0
   declare -F proof_debt_record >/dev/null 2>&1 || return 0
   rec="$(proof_debt_record "$plan" 2>/dev/null)" && [ -f "$rec" ] || return 0
-  awk '
-    { sub(/\r$/, ""); r = "" }
-    /^line\/v1\|ev=published\|/ { m = split($0, f, "|"); for (k = 3; k <= m; k++) if (f[k] ~ /^row=/) r = substr(f[k], 5) }
-    /^landed:[ \t]/ { m = split($0, f, /[ \t]+/); for (k = 2; k <= m; k++) if (f[k] ~ /^row=/) r = substr(f[k], 5) }
-    r != "" { pos[r] = NR }
-    END { for (r in pos) printf "%s%s=%d", (c++ ? " " : ""), r, pos[r] }' "$rec" 2>/dev/null
+  units_record_landings "$rec" | awk -F'\t' '
+    { pos[$2] = $1 }
+    END { for (r in pos) printf "%s%s=%d", (c++ ? " " : ""), r, pos[r] }'
 }
 
 # _units_post_awk -> the awk functions `after(a, b)`, `later(w, r)` and `post_reader(j, r)`, over the row arrays `n`,
@@ -1858,6 +1880,14 @@ _units_sched_awk() {
       # the start among them by ancestry (T43; review pass 17 F2). A bare row, an unknown id, or no
       # id at all is answered here, as through 1.11.0.
       # THE WHOLE READ OF ONE READ ROW (wave-27 T43): every question it carries has a whole reading.
+      # THE QUESTIONS OF ONE LIVE ROW: `live` then each question it carries, one per line; `live` alone for a bare
+      # `live:head` row; nothing for a row that reads no live:head, or carries a question outside the set.
+      if (mode == "questions") {
+        if (!(want in at) || !rlive[at[want]] || rbadq[at[want]]) exit
+        i = at[want]; print "live"
+        for (k = 1; k <= nq[i]; k++) print rq[i, k]
+        exit
+      }
       if (mode == "whole") {
         if (!(want in at) || !nq[at[want]] || rbadq[at[want]]) exit
         i = at[want]
@@ -3187,6 +3217,33 @@ units_step_fields() {
     }' "$plan"
 }
 
+# units_step_field <plan> <N> <key> -> the value of the block's first `key:` line, blanks trimmed, read from the
+#   block `units_step_fields` writes: the step line itself when its text opens with `key:`, else the indented lines
+#   under it, fences skipped, the first `- Step N:` line of `## SDLC State`. The first line wins, as the gate reads it.
+#   Exit 0 printed · 1 no `Step N:` line in `## SDLC State` · 2 the block carries no such key.
+units_step_field() {
+  local plan="${1:-}" n="${2:-}" key="${3:-}"
+  [ -n "$plan" ] && [ -f "$plan" ] && [ -n "$n" ] && [ -n "$key" ] || return 1
+  UF_N="$n" UF_KEY="$key" awk '
+    function val(s) { sub("^[ \t]*" kq "[ \t]*:[ \t]*", "", s); sub(/[ \t]+$/, "", s); print s; got = 1; exit }
+    BEGIN {
+      pat = "^[ \t]*-?[ \t]*Step[ \t]+" ENVIRON["UF_N"] "[ \t]*:"
+      kq = ENVIRON["UF_KEY"]; gsub(/[][\\.^$*+?(){}|]/, "\\\\&", kq)
+    }
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[ \t]/ { if (sdlc == 1) sdlc = 2; if (!seen && $0 ~ /^##[ \t]+SDLC State([ \t].*)?$/) { sdlc = 1; seen = 1 }; next }
+    sdlc != 1 { next }
+    !at {
+      if (match($0, pat)) { at = 1; rest = substr($0, RLENGTH + 1); if (rest ~ ("^[ \t]*" kq "[ \t]*:")) val(rest) }
+      next
+    }
+    /^[ \t]*$/ { next }
+    /^[^ \t]/ || /^[ \t]*-?[ \t]*Step[ \t]+[0-9]+[ab]?[ \t]*:/ { exit }
+    $0 ~ ("^[ \t]*" kq "[ \t]*:") { val($0) }
+    END { if (got) exit 0; exit (at ? 2 : 1) }' "$plan"
+}
+
 # units_chain <writer ceiling> — the longest chain of dependent work and the widest the plan can
 # run (wave-26 T3, REQ-7). Pure over stdin; it reads no plan, so the card hands it the nodes and
 # the edges it already holds:
@@ -3411,10 +3468,16 @@ units_fix_cap() {
 #   `awk "$(units_ac_head_awk)"'...'`. A list bullet (`-`, `*`, `+` and spaces) is stripped from a COPY first, so
 #   `- AC-1:` reads as `AC-1:`; an INDENTED line is no heading, and the colon after the id is why `AC-1` never
 #   begins the `AC-11:` block. Nothing is required after the colon. Pure, silent, and defined at source time.
+#   `ac_any(line)` is the same heading read for any id: the id it heads, or nothing, for a reader that walks every
+#   block (the hand-holds count's waiver arm) rather than asking for one.
 units_ac_head_awk() {
   printf '%s\n' 'function ac_head(line, ac) {' \
     '  sub(/^[-*+][[:space:]]+/, "", line)' \
     '  return index(line, ac ":") == 1' \
+    '}' \
+    'function ac_any(line) {' \
+    '  sub(/^[-*+][[:space:]]+/, "", line)' \
+    '  return match(line, /^AC-[^ \t:]+:/) ? substr(line, 1, RLENGTH - 1) : ""' \
     '}'
 }
 
@@ -3436,4 +3499,84 @@ units_render_units() {
       for (k = 1; k <= nu; k++) printf "unit\t%s\t%s\n", src[k], dst[k]
       if (manifest != "") printf "manifest\t%s\n", manifest
     }' "$1" 2>/dev/null
+}
+
+# ── THE MATRIX WRITERS ─────────────────────────────────────────────────────────
+#
+# The one cell writer and the one block-key writer of `## Verification Matrix`, here so that every
+# caller that loads this library writes a matrix row the same way: the plan verbs, the landing's
+# settlement (lib/line.sh) and close-out.
+
+# THE MATRIX ROW'S CELLS, the one writer of a row's cells. Inside
+# `## Verification Matrix`, fences skipped, the first `|` line whose trimmed first cell is the AC id has
+# each named cell (1 AC · 2 tier · 3 status · 4 evidence · 5 auditor) written ` <value> `, every other
+# byte as it was. It does not fold `\|` escapes; a matrix cell holds a path or a token. Exit 3 no row ·
+# 4 the row is not five cells.
+matrix_row_cells() {  # <plan> <AC> <cell n>=<value>... -> the whole plan
+  local plan="$1" ac="$2" set="" kv
+  shift 2
+  for kv in "$@"; do set="${set}${kv%%=*}	${kv#*=}
+"; done
+  MX_AC="$ac" MX_SET="$set" awk '
+    BEGIN {
+      a = ENVIRON["MX_AC"]; m = split(ENVIRON["MX_SET"], s, "\n")
+      for (k = 1; k <= m; k++) if ((t = index(s[k], "\t")) > 0) v[substr(s[k], 1, t - 1) + 1] = " " substr(s[k], t + 1) " "
+    }
+    /^[ \t]*```/ { fence = !fence; print; next }
+    fence { print; next }
+    /^## / { inm = ($0 ~ /^## Verification Matrix/); print; next }
+    inm && !done && /^[ \t]*\|/ {
+      n = split($0, c, "|"); id = c[2]; gsub(/^[ \t]+|[ \t]+$/, "", id)
+      if (id == a) {
+        if (n != 7) { bad = 1; exit }
+        for (j in v) c[j] = v[j]
+        out = c[1]; for (j = 2; j <= n; j++) out = out "|" c[j]
+        print out; done = 1; next
+      }
+    }
+    { print }
+    END { if (bad) exit 4; if (!done) exit 3 }' "$plan"
+}
+
+# matrix_row_cell <plan> <AC> <cell n> -> that cell of the AC's matrix row, trimmed (nothing: no row).
+matrix_row_cell() {
+  MX_AC="$2" awk -F'|' -v n="$3" '
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^## / { inm = ($0 ~ /^## Verification Matrix/); next }
+    inm && /^[ \t]*\|/ { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c)
+      if (c == ENVIRON["MX_AC"]) { v = $(n + 1); gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$1"
+}
+
+# THE AC BLOCK'S KEYS. The block is the `<AC>:` line under `## Verification Matrix`, text after the
+# colon allowed (matrix-render writes the criterion there), and the indented lines under it (matrix-render's shape,
+# the one walls.sh `matrix_block` reads); both read the heading through `units_ac_head_awk`, above. The key's
+# first line is replaced where it stands; a key the block lacks goes after its last line. Exit 3 no block.
+matrix_block_key() {  # <plan> <AC> <key> <value> -> the whole plan
+  MB_AC="$2" MB_KEY="$3" MB_VAL="$4" awk "$(units_ac_head_awk)"'
+    BEGIN { a = ENVIRON["MB_AC"]; k = ENVIRON["MB_KEY"] ":"; line = "  " ENVIRON["MB_KEY"] ": " ENVIRON["MB_VAL"] }
+    { L[++nl] = $0 }
+    END {
+      for (i = 1; i <= nl; i++) {
+        x = L[i]
+        if (x ~ /^[ \t]*```/) { fence = !fence; continue }
+        if (fence) continue
+        if (x ~ /^## /) { inm = (x ~ /^## Verification Matrix/); inb = 0; continue }
+        if (!inm) continue
+        y = x; sub(/[ \t]+$/, "", y)
+        if (!found && ac_head(x, a)) { found = i; last = i; inb = 1; continue }
+        if (inb && x ~ /^[ \t]+[^ \t]/) {
+          last = i; sub(/^[ \t]+/, "", y)
+          if (!at && index(y, k) == 1) at = i
+          continue
+        }
+        inb = 0
+      }
+      if (!found) exit 3
+      for (i = 1; i <= nl; i++) {
+        if (i == at) { print line; continue }
+        print L[i]
+        if (!at && i == last) print line
+      }
+    }' "$1"
 }

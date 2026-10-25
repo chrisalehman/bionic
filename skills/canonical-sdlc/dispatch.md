@@ -115,7 +115,7 @@ Files: <every path the task may create or edit>  # a reviewer lists its records 
 Suites: none  # *.test.sh names or a path-qualified run.sh; other runners: Re-executes:; a reviewer dealt evidence names 1 to 3 runs across both labels
 Re-executes: `<cmd>`
 Questions: <q>[, <q>]  # reviewer roles only
-Row: <id>  # the plan row a writer runs
+Row: <id>  # the plan row a writer runs; the integrate row runs reviews-part <id>, push, gh pr create
 Lands-on: <suite>[, <suite>] | none <reason>  # what ready proves, within Suites:
 Lands-red: <suite> until <ext:slug | approval:name>  # optional
 Red-evidence: <path under record/>  # with Lands-red:
