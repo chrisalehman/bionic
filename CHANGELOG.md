@@ -184,6 +184,18 @@ close's measure are new capability. `canonical_sdlc_version` stays 14.
   `rendered.sha256` refreshed, and ADR-072 and ADR-073. T22 opens the pull request on the release card's word, and T23 closes
   the run and reads the hand-holds measure last.
 
+### The reviews
+
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- evidence review, whole: fail at cf173c49 by w45-T20, 2026-10-25T03:54:43Z (`critic-evidence.md`)
+- adversarial review, whole: fail at cf173c49 by w45-T20, 2026-10-25T03:54:47Z (`critic-adversarial.md`)
+- structure review, whole: flag at cf173c49 by w45-T20, 2026-10-25T03:54:50Z (`critic-structure.md`)
+- adversarial review, whole: flag at cf173c49 by w45-T20, 2026-10-25T04:02:15Z (`critic-adversarial-2.md`)
+- evidence review, piece: flag at dedf0327 by w45-T34, 2026-10-25T06:36:19Z (`critic-evidence-2.md`)
+- adversarial review, piece: fail at dedf0327 by w45-T34, 2026-10-25T06:36:22Z (`critic-adversarial-3.md`)
+- structure review, piece: flag at dedf0327 by w45-T34, 2026-10-25T06:36:25Z (`critic-structure-2.md`)
+
 ### Known limits
 
 Rendered from the plan's deferred findings, each its stated sentence, in the order they were registered.
