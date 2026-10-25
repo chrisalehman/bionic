@@ -1441,8 +1441,8 @@ section "§VERDICTS §DISCHARGE §STACK: the critic's verdicts and the regressio
 # `proof-add review <record> --question evidence` on a `rigor: single` plan writes each named row's auditor cell
 # (CONFIRMED as the bare token, any other verdict as written) and the matrix head's `auditor-wave:` line in the same
 # plan write as its proof line. `discharge` refuses there, naming `proof-add review`; at double it writes as before.
-# `proof-add regression` writes the head's `stack-health:` line from the proof's head, pass and total, red with its
-# numbers when the run left suites owed, and leaves a declared `n/a:` as the plan wrote it.
+# `proof-add regression` writes the head's `stack-health:` line through lib/proof.sh `proof_health_line`, the judge's
+# fact rendered: green only at a pass that left nothing owed, red otherwise, and it leaves a declared `n/a:` as written.
 #
 # FIXTURE FIDELITY. §STEP-FIELD's shape built fresh: a plan bound to this session at Step 5, its working branch in a
 # linked worktree, real commits, the reader's row from the production writer with `questions=` appended, run lines
@@ -1564,15 +1564,25 @@ poke "$RVT" discharge AC-1.3
 expect_eq "VT-11 …on a double-rigor plan it writes the cell as before (exit 0)" "0|CONFIRMED" "$RC|$(vt_cell AC-1.3)"
 vt_rigor single
 
-# ---------- §STACK: the recorded regression proof writes stack-health: over the rendered stub ----------
-vt_sh_line() {  # <green|red> <head> <pass> <total> <evidence> [<owed>] -> the line the proof writes
-  printf 'stack-health: %s head=%s pass=%s total=%s%s evidence=%s' "$1" "$2" "$3" "$4" "${6:+ owed=$6}" "$5"
+# ---------- §STACK: the health line is the judge's rendering, written by one function ----------
+# The grammar: `green head=<F>` only when the whole run at F left nothing owed; otherwise `red head=<F> … owed=<the
+# suites still owed> [closed=<the suites later green landings closed>]`. A landing never turns the line green: green
+# means the full pass ran green at that head, so a red pass whose suites were all closed still reads red, owed= empty.
+vt_sh_line() {  # <green|red> <head> <pass> <total> <evidence> [<owed>] [<closed>] -> the line the function renders
+  local o=""; [ "$1" = green ] || o=" owed=${6:-}${7:+ closed=$7}"
+  printf 'stack-health: %s head=%s pass=%s total=%s%s evidence=%s' "$1" "$2" "$3" "$4" "$o" "$5"
 }
+vt_health() {  # -> lib/proof.sh proof_health_line on the fixture plan, as `stack-health: <value>`
+  printf 'stack-health: %s' "$(bash -c '. "$1/roots.sh" >/dev/null 2>&1; . "$1/proof.sh" >/dev/null 2>&1 && proof_health_line "$2" "$3"' \
+    _ "${S46_LIB%/*}" "$PVT" "$RVT")"
+}
+expect_eq "VT-12a §STACK AC-5.2 a plan with no regression proof renders pending" "stack-health: pending" "$(vt_health)"
 VT_C="$(s57_commit "$VT_WT" lib/b.sh C)"
 printf 'Gating: 2 passed, 1 failed\nFailed:\n    - c.test.sh\n' | regression_fixture "$PVT" "$VT_DIR/whole-red.log" "$VT_C" 0 1
 poke "$RVT" proof-add regression record/wave-01-fixture/whole-red.log
-expect_eq "VT-12 §STACK AC-7.1 a red regression proof (exit 0) writes stack-health: red with its head, pass and total, over the stub" \
+expect_eq "VT-12 §STACK AC-7.1 a red regression proof (exit 0) writes stack-health: red, its pass having left c.test.sh owed, with its head, pass and total, over the stub" \
   "0|$(vt_sh_line red "$VT_C" 2 3 record/wave-01-fixture/whole-red.log c.test.sh)" "$RC|$(vt_head stack-health)"
+expect_eq "VT-12b …the line proof-add wrote is the function's rendering" "$(vt_head stack-health)" "$(vt_health)"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 VT_D="$(s57_commit "$VT_WT" lib/c.sh D)"
 printf 'Gating: 3 passed, 0 failed\n' | regression_fixture "$PVT" "$VT_DIR/whole-green.log" "$VT_D" 0 0
@@ -1588,6 +1598,21 @@ poke "$RVT" proof-add regression record/wave-01-fixture/whole-na.log
 expect_eq "VT-14 a declared stack-health: n/a: is left as the plan wrote it (the proof registers, exit 0)" \
   "0|stack-health: n/a: no long-running serve|1" \
   "$RC|$(vt_head stack-health)|$(s46_proved "$PVT" | /usr/bin/grep -c "^proved: kind=regression head=$VT_E ")"
+expect_eq "VT-15 AC-5.2 the function renders green at the head of a pass that left nothing owed" \
+  "$(vt_sh_line green "$VT_E" 3 3 record/wave-01-fixture/whole-na.log)" "$(vt_health)"
+# A red pass at G owing c.test.sh, then a landing H whose run greens c.test.sh: the judge covers H, the line stays red.
+VT_G="$(s57_commit "$VT_WT" lib/e.sh G)"
+printf 'Gating: 2 passed, 1 failed\nFailed:\n    - c.test.sh\n' | regression_fixture "$PVT" "$VT_DIR/whole-red2.log" "$VT_G" 0 1
+poke "$RVT" proof-add regression record/wave-01-fixture/whole-red2.log
+expect_eq "VT-16 a red proof at G (exit 0): before any landing the function renders red, c.test.sh owed and nothing closed" \
+  "0|$(vt_sh_line red "$VT_G" 2 3 record/wave-01-fixture/whole-red2.log c.test.sh)" "$RC|$(vt_health)"
+VT_H="$(s57_commit "$VT_WT" lib/f.sh H)"
+bash -c '. "$1/line.sh" >/dev/null 2>&1 && line_event "$2" verdict row=T2 "commit=$3" suite=c.test.sh result=green log=-' \
+  _ "${S46_LIB%/*}" "$PVT" "$VT_H"
+expect_eq "VT-17 precondition: the judge covers H, the landing's green having closed the suite G owed" "covered" \
+  "$(bash -c '. "$1/roots.sh" >/dev/null 2>&1; . "$1/proof.sh" >/dev/null 2>&1 && proof_state "$2" "$3"' _ "${S46_LIB%/*}" "$PVT" "$RVT" | cut -f1)"
+expect_eq "VT-17b AC-5.2 …and the function still renders red at G, owed= empty and closed= naming the suite the landing closed" \
+  "$(vt_sh_line red "$VT_G" 2 3 record/wave-01-fixture/whole-red2.log "" c.test.sh)" "$(vt_health)"
 POKE_BOUND="$VT_BOUND_WAS"
 
 finish

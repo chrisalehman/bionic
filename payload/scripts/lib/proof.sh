@@ -129,6 +129,16 @@ proof_floor_owed() {
     END { if (o != "" && last !~ /^rc=0[ \t\r]*$/) print o }' "${1:-/dev/null}" 2>/dev/null
 }
 
+# proof_run_counts <log> -> `<passed> <total>` from the last `Gating: <n> passed, <m> failed` verdict after the log's last
+# `head=` header, as the floor's own reader takes it (the task-proof attest); nothing when the log has none,
+# for a project's own runner need not print one.
+proof_run_counts() {
+  awk '/^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { seen = 1; v = 0; next }
+    !seen { next }
+    /^Gating: [0-9]+ passed, [0-9]+ failed$/ { p = $2; f = $4; v = 1 }
+    END { if (v) print p, p + f }' "$1" 2>/dev/null
+}
+
 # proof_inherited_lines <plan> -> each `inherited: <suite> base=<sha> head=<sha> …` line of the plan's unfenced
 # `## SDLC State`, whole and as written, one per line (wave-35 T9; D8, AC-1.6): THE ONE READER of the inherited-debt
 # lines, written by `session-poker.sh proof-add inherited <suite>` once the suite ran red at the base. The judge
@@ -1521,8 +1531,8 @@ proof_floor_absent() {
   printf '%s' 'no regression proof on this plan yet'
 }
 
-# _proof_last_read <plan> <kind> <head|line|owed> [<question>] -> the one reader behind the two above, and the
-# `owed=` field of that last line (wave-35 T9), nothing when it carries none. The plan's lines come from lib/run.sh
+# _proof_last_read <plan> <kind> <head|line|owed|evidence> [<question>] -> the one reader behind the two above, and the
+# `owed=` or `evidence=` field of that last line, nothing when it carries none. The plan's lines come from lib/run.sh
 # `plan_lines`, the one plan line reader, CR translated (wave-36 T12; D13, AC-7.5): a raw read saw a CR-only plan as
 # one line, so its floor line was absent to the wall and the judge alike (C34).
 _proof_last_read() {
@@ -1536,8 +1546,9 @@ _proof_last_read() {
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && proof_fields($0) && PROOF_KIND == k && (q == "" || PROOF_QUESTION == q) { last = PROOF_HEAD; lastline = $0; lastowed = PROOF_OWED }
-    END { if (last != "") { if (what == "line") print lastline; else if (what == "owed") { if (lastowed != "") print lastowed } else print last } }'
+    insdlc && proof_fields($0) && PROOF_KIND == k && (q == "" || PROOF_QUESTION == q) { last = PROOF_HEAD; lastline = $0; lastowed = PROOF_OWED; lastev = PROOF_EVIDENCE }
+    END { if (last != "") { if (what == "line") print lastline; else if (what == "owed") { if (lastowed != "") print lastowed }
+      else if (what == "evidence") { if (lastev != "") print lastev } else print last } }'
 }
 
 # proof_add_line <plan> <line> -> the plan with <line> placed inside `## SDLC State`: after the
@@ -1768,7 +1779,7 @@ _proof_floor_judge() {
   if [ -n "$owed" ]; then printf 'owed\t%s\n' "$owed"; else printf 'covered\n'; fi
 }
 
-# _proof_past_f <plan> <tree> <F> <head> <owed> -> exit 0, printing nothing, when every commit on the first-parent line
+# _proof_past_f <plan> <tree> <F> <head> <owed> [<only>] -> exit 0, printing nothing, when every commit on the first-parent line
 # F..<head> is excused or proved and every suite of <owed> (comma-joined) is closed; exit 2 printing the suites still
 # open, comma-joined; exit 1 printing one sentence naming the first commit that is not proved and what it lacks.
 # EXCUSED: its tree is its first parent's; or every path it changed is docs (`_proof_docs_path`, or under the docs
@@ -1777,12 +1788,16 @@ _proof_floor_judge() {
 # with no such event, the suites the landing verdicts at it name) has a newest record at it that is green. A record is
 # at the commit it ran at, or at the row head a merge commit brought in as its second parent.
 # CLOSED: a red of F has a newest landing verdict (never a stamp, never a whole run) green at a commit after F.
+# With <only> `closes` the commits are not judged: exit 0 or 2 says only which suites of <owed> are still open, the one
+# reading of the closes the judge and the health line share (`proof_health_line`).
 _proof_past_f() {
-  local plan="$1" tree="$2" from="$3" to="$4" owed="${5:-}" walk rec recs top droot pfx="" tpfx files="" c f isdoc isrel
+  local plan="$1" tree="$2" from="$3" to="$4" owed="${5:-}" only="${6:-}" walk rec recs top droot pfx="" tpfx files="" c f isdoc isrel
   walk="$(git -C "$tree" log --first-parent --reverse --format='W%x09%H%x09%T%x09%P' "$from..$to" 2>/dev/null)" || {
     printf 'git cannot list the commits from %.12s to %.12s' "$from" "$to"; return 1; }
   rec="$(proof_debt_record "$plan" "$tree" 2>/dev/null)" || rec=""
   recs="$(_proof_records "$tree" "$rec")"
+  # The closes alone ask nothing of the paths or the checks: each commit's proof is skipped below.
+  [ "$only" != closes ] || { printf '%s\n%s\n' "$walk" "$recs" | _proof_past_f_awk closes "$owed"; return $?; }
   _proof_roots_load
   top="$(git -C "$tree" rev-parse --show-toplevel 2>/dev/null)"
   ! declare -F docs_root >/dev/null 2>&1 || droot="$(docs_root "$tree" 2>/dev/null)"
@@ -1801,7 +1816,13 @@ _proof_past_f() {
 $(git -C "$tree" log --no-renames --first-parent -m --name-only --format='%x01%H' "$from..$to" 2>/dev/null)
 PROOF_PAST_FILES
   printf '%s\n%s\n%s\n%s\n' "$walk" "$recs" "$files" "$(proof_check_passes "$plan" "$tree" | sed '/^$/d; s/^/K	/')" \
-    | PROOF_OWED_SET="$owed" awk -F'\t' '
+    | _proof_past_f_awk all "$owed"
+}
+
+# _proof_past_f_awk <all|closes> <owed> -> the fold `_proof_past_f` judges its walk, records, paths and checks with, on
+# stdin; at `closes` each commit's proof is skipped and only the closes of <owed> are read, as the health line asks.
+_proof_past_f_awk() {
+  PROOF_ONLY="$1" PROOF_OWED_SET="$2" awk -F'\t' '
     $1 == "W" { n++; wc[n] = $2; wt[n] = $3; np = split($4, p, " "); wp[n] = p[1]; wq[n] = (np > 1 ? p[2] : ""); tof[$2] = $3; next }
     $1 == "K" { chk[$2] = 1; next }
     $1 == "O" { if ($3 != "" && index($3, "—") != 1) orow[$2] = $3; if ($4 != "" && $4 != "-") osu[$2] = $4; next }
@@ -1815,7 +1836,7 @@ PROOF_PAST_FILES
     function at(c, q, s,   r) { r = ""; if ((c SUBSEP s) in rat) { r = rres[c, s]; w = rat[c, s] }
       if (q != "" && (q SUBSEP s) in rat && (r == "" || rat[q, s] >= w)) r = rres[q, s]; return r }
     END {
-      for (i = 1; i <= n; i++) {
+      for (i = 1; i <= n && ENVIRON["PROOF_ONLY"] != "closes"; i++) {
         c = wc[i]
         if (!(c in touched) || !(c in nondoc)) continue
         if (!(c in notrel) && (c in chk)) continue
@@ -1843,6 +1864,72 @@ PROOF_PAST_FILES
       }
       if (open != "") { printf "%s", open; exit 2 }
     }'
+}
+
+# proof_health_line <plan> <tree> [<record plan>] -> the matrix head's `stack-health:` value, one line, exit 0: the judge's
+# fact about the plan's last regression proof, rendered, so every writer of the line writes the same words.
+#   pending                                                     the plan has no regression proof
+#   green head=<F>[ pass=<n> total=<m>] evidence=<logs>          the whole run at F left nothing owed
+#   red head=<F>[ pass=<n> total=<m>] owed=<open>[ closed=<closed>] evidence=<logs>   otherwise
+# GREEN MEANS THE FULL PASS RAN GREEN AT THAT HEAD: a landing that greens a suite F left red closes it (`closed=`, the
+# judge's own closes, `_proof_past_f` at `closes`) and drops it from `owed=`, which may end empty, and the line stays red.
+# The owed set is the proof line's own, inherited debt included, since the pass at F was not green with it. pass= and
+# total= are summed over the proof's logs (`proof_run_counts`) and dropped when any log carries no `Gating:` count. The
+# closes are read from F to the working branch's head; a head git cannot place after F closes nothing. <record plan> is
+# the plan whose landing record and working branch are read, for a <plan> that is the copy a verb writes (default <plan>).
+proof_health_line() {
+  local plan="${1:-}" tree="${2:-}" rplan="${3:-${1:-}}" f fc owed ev docs log n pass=0 total=0 counted=1 open="" closed="" c rc
+  f="$(proof_last "$plan" regression)"
+  [ -n "$f" ] || { printf 'pending\n'; return 0; }
+  owed="$(_proof_last_read "$plan" regression owed)"
+  ev="$(_proof_last_read "$plan" regression evidence)"
+  _proof_roots_load
+  ! declare -F docs_root >/dev/null 2>&1 || docs="$(docs_root "$tree" 2>/dev/null)"
+  while IFS= read -r log; do
+    [ -n "$log" ] || continue
+    case "$log" in /*) : ;; *) log="${docs:-.}/$log" ;; esac
+    n="$(proof_run_counts "$log")"
+    if [ -z "$n" ]; then counted=0; continue; fi
+    pass=$(( pass + ${n%% *} )); total=$(( total + ${n#* } ))
+  done <<PROOF_HEALTH_LOGS
+$(printf '%s\n' "$ev" | tr ',' '\n')
+PROOF_HEALTH_LOGS
+  [ -n "$ev" ] || counted=0
+  n=""; [ "$counted" = 0 ] || n=" pass=$pass total=$total"
+  if [ -z "$owed" ]; then printf 'green head=%s%s evidence=%s\n' "$f" "$n" "$ev"; return 0; fi
+  open="$owed"
+  fc="$(git -C "$tree" rev-parse --verify -q "${f}^{commit}" 2>/dev/null)" || fc=""
+  c="$(proof_branch_head "$rplan" "$tree" 2>/dev/null)" || c=""
+  if [ -n "$fc" ] && [ -n "$c" ] && [ "$fc" != "$c" ] && git -C "$tree" merge-base --is-ancestor "$fc" "$c" 2>/dev/null; then
+    rc=0; open="$(_proof_past_f "$rplan" "$tree" "$fc" "$c" "$owed" closes)" || rc=$?
+    case "$rc" in 0) open="" ;; 2) : ;; *) open="$owed" ;; esac
+  fi
+  closed="$(PROOF_O=",$open," awk -F, '{ for (i = 1; i <= NF; i++) if ($i != "" && !index(ENVIRON["PROOF_O"], "," $i ",")) o = o (o == "" ? "" : ",") $i; print o }' <<PROOF_HEALTH_OWED
+$owed
+PROOF_HEALTH_OWED
+)"
+  printf 'red head=%s%s owed=%s%s evidence=%s\n' "$f" "$n" "$open" "${closed:+ closed=$closed}" "$ev"
+}
+
+# proof_health_put <copy> <tree> [<record plan>] -> exit 0 with the matrix head's `stack-health:` line of <copy> rewritten
+# to `proof_health_line`, PROOF_HEALTH naming the value written; exit 1, <copy> unchanged, when the write fails.
+# THE ONE WRITE OF THE LINE, for proof-add and the landing's settlement alike, through the matrix head's own writer
+# (hooks/session-poker.sh `matrix_head_line`). Left as it stands, PROOF_HEALTH empty and exit 0: a plan with no
+# regression proof (the stub stays), a writer process with no matrix head writer, a plan with no matrix (exit 3), and a
+# value no rendering wrote, a declared `n/a:` or a person's own snapshot (exit 5), which is their word.
+proof_health_put() {
+  local copy="${1:-}" v rc=0
+  PROOF_HEALTH=""
+  declare -F matrix_head_line >/dev/null 2>&1 || return 0
+  v="$(proof_health_line "$copy" "${2:-}" "${3:-$copy}")"
+  [ -n "$v" ] && [ "$v" != pending ] || return 0
+  matrix_head_line "$copy" stack-health "$v" '^(pending$|green head=|red head=)' > "$copy.health" 2>/dev/null || rc=$?
+  case "$rc" in
+    0) if [ -s "$copy.health" ] && mv -f "$copy.health" "$copy"; then PROOF_HEALTH="$v"; return 0; fi ;;
+    3|5) rm -f "$copy.health"; return 0 ;;
+  esac
+  rm -f "$copy.health"
+  return 1
 }
 
 # proof_owed_suites <plan> <tree> [<head>] -> `*` when <head> (default: the working branch's ref, `proof_branch_head`)

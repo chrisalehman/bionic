@@ -886,7 +886,8 @@ _line_moves() {
 }
 # line_settle <plan> <row> <commit> <copy> <at> [<criteria>] -> 0 with <copy> settled; 1 when it cannot be written.
 # <plan> is read for what the row answers, <copy> is the copy the plan write swaps in, <criteria> the AC ids whose
-# evidence that write filled, space-separated. Sets LINE_SETTLED_F (findings) and LINE_SETTLED_C (cells), space-separated.
+# evidence that write filled, space-separated. Sets LINE_SETTLED_F (findings) and LINE_SETTLED_C (cells), space-separated,
+# and rewrites the matrix head's stack-health: line (lib/proof.sh `proof_health_put`).
 line_settle() {
   local plan="$1" row="$2" com="$3" copy="$4" at="$5" acs="${6:-}" root docs own sites osites moves id ac st
   LINE_SETTLED_F=""; LINE_SETTLED_C=""
@@ -925,6 +926,9 @@ line_settle() {
       LINE_SETTLED_C="${LINE_SETTLED_C}${ac} "
     done
   fi
+  # The health line is the judge's rendering, rewritten here in the same copy: this landing's verdicts are already in
+  # the record, so a suite the regression left red that it greened moves from owed= to closed=, and the line stays red.
+  proof_health_put "$copy" "$root" "$plan" || return 1
   LINE_SETTLED_F="${LINE_SETTLED_F% }"; LINE_SETTLED_C="${LINE_SETTLED_C% }"
   return 0
 }
