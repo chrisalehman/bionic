@@ -1732,6 +1732,35 @@ proof_branch_head() {
   git -C "${2:-.}" rev-parse --verify -q "refs/heads/${wb}^{commit}" 2>/dev/null
 }
 
+# proof_whole_text <plan> <tree> -> the full pass's state at the working head, one line: `green at <F8>` when the
+# working head (`proof_branch_head`) is F, the last regression proof's head, and the judge (`proof_state`) reads it
+# covered there; `red at <F8>, <n> landings before this head` otherwise, n the first-parent commits from F to the
+# working head (`1 landing` for one); `red at <F8>, not in this head's history` when F is not behind the working head
+# or either cannot be read; `none` when the plan holds no regression proof.
+# THE ONE PRINTER OF THE FULL PASS: the release card, the scorecard and close-out's continuation print this line and
+# compute nothing of their own, so no two of them can disagree over one run. GREEN MEANS THE FULL SUITE RAN GREEN AT
+# THIS HEAD: a head past F that later landings' own suites cover is covered to the judge and still red here, since
+# no full pass ran at it. Red is the safe direction: every question this cannot answer answers it.
+proof_whole_text() {
+  local plan="$1" tree="$2" f fc c n
+  f="$(proof_last "$plan" regression 2>/dev/null)"
+  [ -n "$f" ] || { printf 'none\n'; return 0; }
+  c="$(proof_branch_head "$plan" "$tree" 2>/dev/null)" || c=""
+  fc="$(git -C "$tree" rev-parse --verify -q "${f}^{commit}" 2>/dev/null)" || fc=""
+  n=""
+  if [ -n "$c" ] && [ -n "$fc" ] && git -C "$tree" merge-base --is-ancestor "$fc" "$c" 2>/dev/null; then
+    if [ "$fc" = "$c" ]; then
+      case "$(proof_state "$plan" "$tree" 2>/dev/null)" in covered*) printf 'green at %.8s\n' "$f"; return 0 ;; esac
+    fi
+    n="$(git -C "$tree" rev-list --first-parent --count "$fc..$c" 2>/dev/null)" || n=""
+  fi
+  case "$n" in
+    1) printf 'red at %.8s, 1 landing before this head\n' "$f" ;;
+    ''|*[!0-9]*) printf "red at %.8s, not in this head's history\n" "$f" ;;
+    *) printf 'red at %.8s, %s landings before this head\n' "$f" "$n" ;;
+  esac
+}
+
 # _proof_floor_judge <plan> <tree> <head> -> the floor's state at <head>, one line: `covered`, `owed<TAB><suites>`
 # or `uncovered<TAB><reason>` (wave-35 T9; D8, D9, AC-1.3 to AC-1.6). THE JUDGE, which proof_state and facts_state
 # both ask. The plan's last `kind=regression` proof names F and the suites its whole run left red (`owed=`); a suite

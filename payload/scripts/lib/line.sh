@@ -1482,16 +1482,19 @@ LINE_DEBT_ROWS
   printf 'debt: burned %s, touched %s\n' "${1:-0}" "${2:-0}"
 }
 # THE REVIEW-BORN COUNT (wave-30 T21; REQ-2 AC-2.3, D4): `review-born rows: <N> of cap <M>`, N the plan's
-# `## SDLC State` lines carrying `born: review` (lib/units.sh `units_born`, the one place the count reads),
-# M its fix-cap: rendered (`units_fix_cap`; the rigor: level's default when the field is absent). Printed
-# after the debt line, so the owed line stays last. Nothing when the plan has neither field nor level.
+# review-born rows that count against the cap (lib/units.sh `units_born_counted`, the one place the count reads),
+# followed by ` (<E> exempt)`, E those exempt under the plan's fix-policy:, and M its fix-cap: rendered
+# (`units_fix_cap`; the rigor: level's default when the field is absent). Printed after the debt line, so the
+# owed line stays last. Nothing when the plan has neither field nor level, or when its rows cannot be counted.
 _line_review_born() {  # <plan>
-  local cap n
+  local cap rows
   _line_load_run && _wt_units_load || return 0
-  declare -F units_fix_cap >/dev/null 2>&1 || return 0
+  declare -F units_fix_cap >/dev/null 2>&1 && declare -F units_born_counted >/dev/null 2>&1 || return 0
   cap="$(units_fix_cap "${1:-}")" && [ -n "$cap" ] || return 0
-  n="$(units_born "$1" 2>/dev/null | awk 'NF { n++ } END { print n + 0 }')"
-  printf 'review-born rows: %s of cap %s\n' "$n" "$cap"
+  rows="$(units_born_counted "$1" 2>/dev/null)" || return 0
+  printf '%s\n' "$rows" | awk -F'\t' -v cap="$cap" '
+    $3 == "counted" { c++ } $3 == "exempt" { e++ }
+    END { printf "review-born rows: %d of cap %s (%d exempt)\n", c, cap, e }'
 }
 # A LANDING NEVER WAITS IN SILENCE (wave-38 T31; D21, D22; A-orch-43): every WAITING line is followed by
 # `waiting: <reason>`, what held the row when its time ran out. The WAITING line itself is unchanged.

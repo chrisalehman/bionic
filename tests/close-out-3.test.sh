@@ -793,4 +793,28 @@ set_plan_keys "$PAK" "-" "adrs: adrs/epic-fx/adr-060-written-by-hand.md"
 ad_poke "$PAK" "$AD_SID" current 7
 expect_eq "AD-7 an adrs: line the plan carries is kept as written" "0|adrs/epic-fx/adr-060-written-by-hand.md" "$AD_RC|$(ad_adrs "$PAK/$PLAN_REL")"
 
+# ============================================================
+section "§REG: the continuation's regression line prints the full pass's state at this head from the one printer"
+# ============================================================
+# fails-when: the continuation reads the proof line alone, so over a whole run red at F whose reds two later landings
+# greened it says the whole run holds, or green, or leaves the landings since it uncounted.
+# FIXTURE FIDELITY: the run is tests/proof-at-head.test.sh's (`pah_world`, read out of that suite by name), laid on
+# this suite's own fixture; the continuation is the one `close-out.sh run` writes.
+# ANTI-VACUITY: REG-1 reads the line before REG-2 reads its state through the extractor REG-1 proved non-empty.
+REG_MISSING=""
+for _f in pah_world pah_cont_state; do
+  _b="$(awk -v n="$_f" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$(dirname "$0")/proof-at-head.test.sh")"
+  if [ -n "$_b" ]; then eval "$_b"; else REG_MISSING="$REG_MISSING $_f"; fi
+done
+expect_eq "REG-0 the builders were read out of tests/proof-at-head.test.sh" "" "$REG_MISSING"
+PAH_LIB="$REPO_ROOT/payload/scripts/lib"
+pah_world reg-red "notify.test.sh,rehearsal-failed-review.test.sh,shell-lint.test.sh,sitrep.test.sh" 2
+run_close_as reg-close "$PAH_P" run
+expect_eq "REG-1 close-out delivers over the run (exit 0), its continuation holding a regression line" "0|1" \
+  "$CO_RC|$(/usr/bin/grep -c 'the regression: ' "$PAH_P/$CONT_REL" 2>/dev/null)"
+expect_eq "REG-2 …which prints the whole suite red at the whole run's head, the two landings since counted, then the proof's instant and log" \
+  "red at ${PAH_F:0:8}, 2 landings before this head|yes" \
+  "$(pah_cont_state "$PAH_P/$CONT_REL")|$(/usr/bin/grep -qF "the regression: whole suite red at ${PAH_F:0:8}, 2 landings before this head (proved 2026-10-04T12:00:00Z, record/wave-01-fixture/regression-run-$PAH_F.log)" "$PAH_P/$CONT_REL" && echo yes)"
+expect_absent "REG-3 …and never says the whole run holds" "holds at" "$(/usr/bin/grep -F 'the regression: ' "$PAH_P/$CONT_REL")"
+
 finish

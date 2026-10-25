@@ -1507,7 +1507,7 @@ REL_FACTS="$(
   rel_fact handholds 'hand-holds: 0 nudges'
   rel_fact ratio 'test-ratio: 1/2'
   rel_fact acceptance '✖️ acceptance — 1 of 2 criteria proved; 1 not run'
-  rel_fact regression '✅ regression — whole run green at this head'
+  rel_fact regression '✅ whole suite: green at abcdef12'
   rel_fact review '✅ evidence — auditor at abcdef12'
   rel_fact findings 1 0 0 1 ''
   rel_fact finding C S3 'a message could be clearer'
@@ -1530,7 +1530,7 @@ test-ratio: 1/2
 
 Tests
 ✖️ acceptance — 1 of 2 criteria proved; 1 not run
-✅ regression — whole run green at this head
+✅ whole suite: green at abcdef12
 
 Reviews
 ✅ evidence — auditor at abcdef12
@@ -2529,5 +2529,43 @@ st_render "${CARD_SANDBOX}/st-f-writer" step3 "$(st_plan "$ST_F")"
 expect_eq "SETTLED-5c the same render from the writer's tree (bionic-agent in its git directory) opens nothing" "0|" "$ST_RC|$(st_open "$ST_F")"
 ST_RC=0; ( cd "$ST_F" && CLAUDE_CODE_SESSION_ID="$ST_SID" bash "$CARD_SH" step3 "$(st_plan "$ST_F")" >/dev/null 2>&1 0<&- ) || ST_RC=$?
 expect_eq "SETTLED-5d …and the orchestrator's own render of the same plan opens it after all" "0|approve:step3" "$ST_RC|$(st_open "$ST_F")"
+
+# ============================================================
+section "§UNPROVED: the release card prints the full pass's state at this head, green only where the whole suite ran green here"
+# ============================================================
+# fails-when: the card prints green, or covered, over a whole run behind the head whose reds later landings greened;
+# the landings since the run go uncounted; or a whole run green at the head reads anything but green at it.
+# FIXTURE FIDELITY: the run is tests/proof-at-head.test.sh's (`pah_world`, read out of that suite by name with the
+# close-out fixture's builders it stands on, out of tests/close-out.prelude.sh), so the card is drawn over the plan
+# and record the other surfaces print from; the card is the real `release-approval --preview`.
+# ANTI-VACUITY: UP-1 reads the red world and UP-2 the green one through the same extractor.
+up_import() {  # <name> <file> -> the function, defined here, read out of <file>
+  local body
+  body="$(awk -v n="$1" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$2")"
+  [ -n "$body" ] || { echo "up_import: no $1 in $2" >&2; return 1; }
+  eval "$body"
+}
+UP_MISSING=""
+for _f in in_fixture fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture advance_to; do
+  up_import "$_f" "$(dirname "$0")/close-out.prelude.sh" || UP_MISSING="$UP_MISSING $_f"
+done
+for _f in pah_world pah_poke pah_card_state; do up_import "$_f" "$(dirname "$0")/proof-at-head.test.sh" || UP_MISSING="$UP_MISSING $_f"; done
+expect_eq "UP-0 the builders were all read out of their suites" "" "$UP_MISSING"
+SANDBOX="$CARD_SANDBOX/up"; mkdir -p "$SANDBOX"; SB_HOME="$SANDBOX/home"; mkdir -p "$SB_HOME/.claude"
+REPO_ROOT="$REPO"; UNITS_LIB="$REPO/payload/scripts/lib/units.sh"; PAH_LIB="$REPO/payload/scripts/lib"
+PAH_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"; PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"
+export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.invalid GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
+up_line() { printf '%s\n' "$1" | /usr/bin/grep -F "whole suite: " | head -1; }  # <card> -> its whole-suite line
+pah_world up-red "notify.test.sh,shell-lint.test.sh" 2
+bound_marker "$PAH_P" card-up-session "$PAH_PLAN"
+pah_poke "$PAH_P" card-up-session release-approval --preview "$PAH_PLAN"
+expect_eq "UP-1 a whole run red at F, two landings past it greening its reds: the card prints red at F, the two counted, marked not green" \
+  "0|✖️ whole suite: red at ${PAH_F:0:8}, 2 landings before this head" "$PAH_RC|$(up_line "$PAH_OUT")"
+expect_absent "UP-1b …and never covered or green" "green" "$(pah_card_state "$PAH_OUT")"
+pah_world up-green "" 0
+bound_marker "$PAH_P" card-up-session "$PAH_PLAN"
+pah_poke "$PAH_P" card-up-session release-approval --preview "$PAH_PLAN"
+expect_eq "UP-2 a whole run green at the working head: the card prints green at it, marked green" \
+  "0|✅ whole suite: green at ${PAH_H:0:8}" "$PAH_RC|$(up_line "$PAH_OUT")"
 
 finish
