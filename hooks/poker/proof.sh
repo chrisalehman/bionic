@@ -140,7 +140,7 @@ proof_verdicts() {
     E$'\t'twice$'\t'*) printf 'the evidence record %s gives %s twice in its row-verdict table; give each criterion one verdict' "$1" "${out##*$'\t'}"; return 1 ;;
     E$'\t'norows*) printf 'the evidence record %s has a verdict table, its header naming AC and verdict, with no row; give one row per criterion' "$1"; return 1 ;;
     E$'\t'nowave*) printf 'the evidence record %s carries no verdict: line; write the wave verdict on one flush-left line, verdict: <VERDICT> — <coverage finding>' "$1"; return 1 ;;
-    E$'\t'wavetwice$'\t'*) printf 'the evidence record %s gives %s verdict: lines; the wave has one verdict, so keep the line the reader meant' "$1" "${out##*$'\t'}"; return 1 ;;
+    E$'\t'wavetwice$'\t'*) printf 'the evidence record %s gives %s verdict: lines; the wave has one verdict, so keep the line the reviewer meant' "$1" "${out##*$'\t'}"; return 1 ;;
     E*|'') printf 'the evidence record %s cannot be read for its verdicts' "$1"; return 1 ;;
   esac
   printf '%s\n' "$out"
