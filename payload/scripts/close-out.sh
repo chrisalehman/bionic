@@ -39,6 +39,12 @@
 # has to fix. A script that wrote a Step-8 block the commit wall then refused would have
 # automated the exact failure this task exists to end.
 #
+# A ROW THE CLOSE ITSELF PROVES IS NOT OWED TO THE DRY-RUN. A matrix row owed at Step 9 is
+# judged by the gate only once the Step-9 line carries `delivered:` (lib/walls.sh
+# `matrix_row_deferred`), and the row whose eval is the hand-holds line is written by this script
+# after that line, from its last reading (`co_matrix_settle`). The pre-flight and the dry-run judge
+# the plan at current 8, before either, and owe it nothing.
+#
 # THE DRY-RUN ARMS ITS OWN ENGAGEMENT, for its own synthetic session id, and takes it
 # away again. It has to: act 3 wipes this session's own keyed state under `.bionic/tmp/`
 # (Chris 2026-09-14 — the tmp directory is disposable after close; a LIVE neighbour's
@@ -720,6 +726,44 @@ co_hand_holds_last() {
     /^## / { sec = ($0 == "## Hand-holds") }
     sec && !done && $0 == ENVIRON["CO_WAS"] { print ENVIRON["CO_NOW"]; done = 1; next }
     { print }' "$CONT" > "$tmp" 2>/dev/null && mv -f "$tmp" "$CONT" || rm -f "$tmp"
+}
+# THE CLOSE WRITES THE ROW ITS LAST READING PROVES. A criterion is owed at the step whose task proves it, and the act
+# that produces the proof writes its cell. The rows owed at Step 9 whose eval names `landing-report --hand-holds`
+# (lib/walls.sh `matrix_close_rows`, the gate's own readers, asked in a subshell as the facts judge asks them) are
+# proved by the line `co_hand_holds_last` reads after `delivered:`, so they are written here, in the same act and
+# before the archive move: status discharged when the line reads total=0, else blocked; the evidence the continuation,
+# where the line is kept, with the line quoted after it when the row is blocked. One plan write through the matrix's
+# one cell writer (`matrix_row_cells`) and its one block-key writer (`matrix_block_key`). A blocked row, or a write
+# that cannot be made, is a line of the report and never a refusal: the run is delivered already.
+CO_MX_LINES=""
+co_matrix_settle() {  # -> CO_MX_LINES, one `matrix: <AC> <status>` line per row written
+  local acs ac st ev tmp ok=yes
+  CO_MX_LINES=""
+  [ -f "${CO_LIB}/walls.sh" ] || return 0
+  acs="$( . "${CO_LIB}/walls.sh" >/dev/null 2>&1 && declare -F matrix_close_rows >/dev/null 2>&1 || exit 0
+          matrix_close_rows "$PLAN" )"
+  [ -n "$acs" ] || return 0
+  if /usr/bin/grep -qE '^hand-holds: total=0( |$)' <<< "$CO_HH_LINE"; then st=discharged; ev="$CONT_REL"
+  else st=blocked; ev="$CONT_REL — $CO_HH_LINE"; fi
+  tmp="$PLAN.close-out.mx.$$"
+  cp "$PLAN" "$tmp" 2>/dev/null || ok=no
+  for ac in $acs; do
+    [ "$ok" = yes ] || break
+    matrix_row_cells "$tmp" "$ac" "3=$st" "4=$CONT_REL" > "$tmp.2" 2>/dev/null && mv -f "$tmp.2" "$tmp" || ok=no
+    [ "$ok" = yes ] && { matrix_block_key "$tmp" "$ac" evidence "$ev" > "$tmp.2" 2>/dev/null && mv -f "$tmp.2" "$tmp" || ok=no; }
+  done
+  if [ "$ok" = yes ] && mv -f "$tmp" "$PLAN" 2>/dev/null; then
+    for ac in $acs; do
+      if [ "$st" = discharged ]; then CO_MX_LINES="${CO_MX_LINES:+$CO_MX_LINES$'\n'}matrix: $ac discharged, evidence $CONT_REL"
+      else CO_MX_LINES="${CO_MX_LINES:+$CO_MX_LINES$'\n'}matrix: $ac blocked — $CO_HH_LINE"; fi
+    done
+  else
+    rm -f "$tmp" "$tmp.2"
+    for ac in $acs; do
+      CO_MX_LINES="${CO_MX_LINES:+$CO_MX_LINES$'\n'}matrix: $ac not written — the plan could not be rewritten; the line it owes is $CO_HH_LINE"
+    done
+  fi
+  return 0
 }
 # THE SCORECARD, READ BEFORE THE WIPE. `landing-report --scorecard` prints four lines, each against its target (human
 # stops on the autonomous half, agent minutes after the final reply, the widest landing ready→landed, human-wait
@@ -2555,6 +2599,7 @@ do_run() {
   gate_dry_run
   write_plan_blocks 9
   co_hand_holds_last; say "$CO_HH_LINE"
+  co_matrix_settle; [ -z "$CO_MX_LINES" ] || say "$CO_MX_LINES"
   co_hold_release
   if [ "$PARKED" = yes ]; then
     # A PARKED RUN IS NOT ARCHIVED AND SENDS NO DELIVERY NOTICE: its plan is where the resume reads it (wave-38 T15).

@@ -30,6 +30,10 @@
 #   DOOR_VERSION, DOOR_NAME, DOOR_SEEN, DOOR_PLAN_REL: the release the plan names, the one entry in the names list,
 #   the sentinel file, and the plan's path under <root>.
 #
+#   DOOR_LIVE_ROW=1, set for a door_world call, gives the plan the one live criterion a planner writes for a run's close:
+#   a close row T9 at step 9, an Eval design row for REQ-2 whose eval is `landing-report --hand-holds` at the close, and
+#   its matrix row AC-2.1 at tier T3, pending. It is owed at the close, which writes it. Unset, the plan is as before.
+#
 # WHAT THE FIXTURE HOLDS, at its accepted head, committed: hooks/ and payload/scripts/ copied whole from the tree
 # under test, with the payload/hooks link; tests/run.sh and tests/lib/ whole, so the check and the name scan are
 # the copies a relative `bash tests/lib/release-check.sh` opens there; CHANGELOG.md as the tree under test's HEAD
@@ -122,6 +126,17 @@ _door_world() (
     'tests/lib/*.sh payload/scripts/lib/*.sh hooks/session-poker.sh hooks/poker/*.sh' > "$root/.bionic/config.yaml"
   plan="$root/$DOOR_PLAN_REL"
   mkdir -p "${plan%/*}"
+  local live_step="" live_row="" live_eval="" live_ac=""
+  if [ "${DOOR_LIVE_ROW:-}" = 1 ]; then
+    live_step='
+- T9: pending dispatch — the close'
+    live_row='
+| T9 | 9 | close | the close. The run reads its own measure last. | orchestrator | — | | 10 | REQ-2 | .bionic/docs/record/wave-x/continuation.md | | | pending |'
+    live_eval='
+| REQ-2 | the close reads its measure | AC-2.1 | live | `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close → `total=0` | the close reads above zero |'
+    live_ac='
+| AC-2.1 | T3 | pending | — | — |'
+  fi
   cat > "$plan" <<PLAN
 ---
 working-branch: wave/x
@@ -139,20 +154,20 @@ current: 4
 approved-by: fixture 2026-10-04T00:00Z "approved"
 - Step 4: started
 - T1: active
-- T2: active
+- T2: active$live_step
 
 ## Tasks
 
 | id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | T1 | 4 | build | a library change | dw-T1 | — | | 10 | REQ-1 | payload/scripts/lib/said.sh | .worktrees/T1 | | active |
-| T2 | 4 | doc | the release $DOOR_VERSION | dw-T2 | — | | 10 | REQ-1 | CHANGELOG.md, payload/.claude-plugin/plugin.json | .worktrees/T2 | | active |
+| T2 | 4 | doc | the release $DOOR_VERSION | dw-T2 | — | | 10 | REQ-1 | CHANGELOG.md, payload/.claude-plugin/plugin.json | .worktrees/T2 | | active |$live_row
 
 ## Eval design
 
 | Requirement | Approach | Criterion | Eval type | Eval | Fails when |
 |---|---|---|---|---|---|
-| REQ-1 | fixture run | AC-1.1 | hermetic | \`tests/run.sh\` | the whole run is red |
+| REQ-1 | fixture run | AC-1.1 | hermetic | \`tests/run.sh\` | the whole run is red |$live_eval
 
 ## Verification Matrix
 
@@ -160,7 +175,7 @@ stack-health: n/a: no long-running serve
 
 | AC | tier | status | evidence | auditor |
 |---|---|---|---|---|
-| AC-1.1 | T1 | pending | — | — |
+| AC-1.1 | T1 | pending | — | — |$live_ac
 PLAN
   bound_marker "$root" "$WORLD_SID" "$plan" || exit 1
   printf '%s %s\n' "$root" "$head"
