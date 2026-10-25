@@ -425,16 +425,24 @@ printf '80\n' > "$RU_CFG/bionic/share"
 printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$RF" > "$RF/.bionic/tmp/loaded-$SID.state"
 RU_TX="$RU_PROJ/$SID.jsonl"; RU_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
 export CLAUDE_CONFIG_DIR="$RU_CFG"
-ru_typed() {  # <prompt>... -> the transcript holds each as a prompt the user typed
+# An argument `--put=D<n>` plants, in its place among the prompts, the orchestrator's own Bash call that put D<n>
+# (put.jsonl, the live put's shape), the mark a short reply is read after.
+ru_typed() {  # <prompt | --put=D<n>>... -> the transcript holds each prompt as typed, and each put, in order
   local t
   cat "$RU_FX/frame.jsonl" > "$RU_TX"
-  for t in "$@"; do jq -c --arg t "$t" '.message.content = $t' "$RU_FX/typed.jsonl" >> "$RU_TX"; done
+  for t in "$@"; do
+    case "$t" in
+      --put=*) jq -c --arg d "${t#--put=}" '.message.content[0].input.command |= sub("decisions put D0 "; "decisions put \($d) ")' \
+                 "$RU_FX/put.jsonl" >> "$RU_TX" ;;
+      *) jq -c --arg t "$t" '.message.content = $t' "$RU_FX/typed.jsonl" >> "$RU_TX" ;;
+    esac
+  done
 }
 RU_WHEN='[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{1,2}:[0-9]{2} [AP]M [A-Za-z+0-9-]+'
 # as_ruler: the register's entry lines `D<n> · "<reply>" · <who> <date> · <title>` cut to the verb, the reply and the ruler.
 as_ruler() { sed -E 's/^(D[0-9]+ · "[^"]*" · )(.*) [0-9]{4}-[0-9]{2}-[0-9]{2}( · .*)?$/\1\2/'; }
 ru_head() { /usr/bin/grep "^## Δ[0-9]* — $1 ruled" "$RF_LED" | tail -1; }  # <D<n>> -> the ledger's newest ruling heading of it
-ru_typed '1'
+ru_typed --put=D7 '1'
 poke "$RF" decisions put D7 'which findings reach the user'
 expect_eq "RU-0 precondition: D7 is put (exit 0) and its ask is open on the run's register" "0|open" "$RC|$(as_open "$RF" "$PF" decide:D7)"
 RU_K="$(( $(sed -n 's/^## Δ\([0-9][0-9]*\).*/\1/p' "$RF_LED" | sort -n | tail -1) + 1 ))"
@@ -495,6 +503,58 @@ ru_typed '1' 'cut it at five findings'
 poke "$RF" decisions rule D13 'cut it at five findings'
 expect_eq "RU-11b …and the same call with the reply typed rules it, the git user (RU-11's refusal was the transcript)" \
   "0|1|gone" "$RC|$(ru_head D13 | /usr/bin/grep -cE "^## Δ[0-9]+ — D13 ruled \"cut it at five findings\" \(Dana Fixture $RU_WHEN\): when the page is cut\$")|$(as_open "$RF" "$PF" decide:D13)"
+# A SHORT REPLY IS THE PERSON'S ONLY AFTER THE PUT. A reply under three words names the git user only when a prompt
+# typed after the orchestrator's own `decisions put D<n> ` call holds it as whole words; that call is the mark, read in
+# transcript order, and the last one opens the decision's current round. A reply of enough words keeps RU-7's rule.
+# ANTI-VACUITY: RU-13 reads a heading naming the git user through ru_head, so RU-12's, RU-15's to RU-18's `orchestrator`
+# are read through an extractor that returns a heading; each orchestrator row differs from RU-13 in one fact.
+# fails-when: a short reply is credited from a prompt typed before the decision's put (RU-12, RU-17), after another
+# decision's put (RU-15, RU-18), or with no put in any transcript (RU-16); or a prompt after the put holding the reply
+# among other words is not credited (RU-14); or a reply of enough words needs the put (RU-19).
+ru_ruled() {  # <D<n>> <reply> <who> <title> -> 1 when the newest ruling heading of D<n> is exactly that
+  ru_head "$1" | /usr/bin/grep -cE "^## Δ[0-9]+ — $1 ruled \"$2\" \($3 $RU_WHEN\): $4\$"
+}
+poke "$RF" decisions put D21 'which reader the card takes'
+ru_typed '1' --put=D21
+poke "$RF" decisions rule D21 '1'
+expect_eq "RU-12 a digit typed only before the decision's put: ruled (exit 0), the one who ruled orchestrator" \
+  "0|1" "$RC|$(ru_ruled D21 1 orchestrator 'which reader the card takes')"
+poke "$RF" decisions put D22 'which page the card opens on'
+ru_typed --put=D22 '1'
+poke "$RF" decisions rule D22 '1'
+expect_eq "RU-13 the same digit typed after the put (RU-12's fixture, the order swapped): ruled, the git user" \
+  "0|1" "$RC|$(ru_ruled D22 1 'Dana Fixture' 'which page the card opens on')"
+poke "$RF" decisions put D23 'which tier the page takes'
+ru_typed --put=D23 'Option 1'
+poke "$RF" decisions rule D23 '1'
+expect_eq "RU-14 the digit among other words in a prompt after the put, as whole words: ruled, the git user" \
+  "0|1" "$RC|$(ru_ruled D23 1 'Dana Fixture' 'which tier the page takes')"
+poke "$RF" decisions put D24 'how wide the page is'
+poke "$RF" decisions put D25 'how tall the page is'
+ru_typed --put=D24 '1' --put=D25
+poke "$RF" decisions rule D25 '1'
+expect_eq "RU-15 the digit typed after another decision's put, before this one's: ruled, orchestrator (the mark is its own)" \
+  "0|1" "$RC|$(ru_ruled D25 1 orchestrator 'how tall the page is')"
+poke "$RF" decisions put D26 'how the page is titled'
+ru_typed '1'
+poke "$RF" decisions rule D26 '1'
+expect_eq "RU-16 put by the verb but in no transcript, the digit typed: ruled, orchestrator" \
+  "0|1" "$RC|$(ru_ruled D26 1 orchestrator 'how the page is titled')"
+poke "$RF" decisions put D27 'how the page is sorted'
+ru_typed --put=D27 '1' --put=D27
+poke "$RF" decisions rule D27 '1'
+expect_eq "RU-17 the digit typed after a put the decision was put again since: ruled, orchestrator (the last put opens the round)" \
+  "0|1" "$RC|$(ru_ruled D27 1 orchestrator 'how the page is sorted')"
+poke "$RF" decisions put D2 'how the page is cut'
+ru_typed --put=D20 '1'
+poke "$RF" decisions rule D2 '1'
+expect_eq "RU-18 the digit typed after the put of D20, ruled for D2: ruled, orchestrator (D2's mark is not D20's)" \
+  "0|1" "$RC|$(ru_ruled D2 1 orchestrator 'how the page is cut')"
+poke "$RF" decisions put D28 'how the page is read'
+ru_typed 'take the third option please' --put=D28
+poke "$RF" decisions rule D28 'take the third option please'
+expect_eq "RU-19 a reply of enough words typed before the put keeps RU-7's rule: ruled, the git user" \
+  "0|1" "$RC|$(ru_ruled D28 'take the third option please' 'Dana Fixture' 'how the page is read')"
 CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 POKE_BOUND="$AS_BOUND_WAS"
 
@@ -872,7 +932,9 @@ printf '80\n' > "$FC_CFG/bionic/share"
 printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$RFC" > "$RFC/.bionic/tmp/loaded-$SID.state"
 FC_TX="$FC_PROJ/$SID.jsonl"; FC_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
 export CLAUDE_CONFIG_DIR="$FC_CFG"
-fc_typed 'option 2 for D8' 'all default'
+# The card's reply is typed after D7's put, as it is live: a reply under three words rules a decision only after its
+# put (§RULE), so the transcript carries the put §RULE's writer plants, ahead of the reply.
+RU_TX="$FC_TX" ru_typed 'option 2 for D8' --put=D7 'all default'
 expect_eq "SH-0 precondition: the open integrate row reads approval:D7 and approval:D8" "D7 D8" \
   "$(bash -c '. "$1" && units_approval_names "$2"' _ "$UNITS_LIB" "$PFC" 2>/dev/null | /usr/bin/grep '^D' | tr '\n' ' ' | sed 's/ $//')"
 poke "$RFC" decisions put D7 'which findings reach the user'

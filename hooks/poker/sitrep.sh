@@ -2371,7 +2371,9 @@ sitrep_tick_line() {
   # newest put's and none when the decision was never put; then it settles the register against the ledger, which closes
   # `decide:D<n>`. A double quote in the reply is written as a single one: the parser ends the reply at the next double
   # quote. THE WHO IS THE ONE WHO SAID IT: the reply is asked of lib/said.sh `user_said` in the prompts the user typed in
-  # this run. Found, the user's words: who is the project's git user name. Not found, or found too short to be a quote,
+  # this run, a reply under three words only in a prompt typed after the orchestrator's own put of this decision (the mark
+  # `decisions put D<n> `, its newest round: a digit typed for another decision is not this one's). Found, the user's
+  # words: who is the project's git user name. Not found, or found too short to be a quote,
   # the words are the orchestrator's relaying a decision it was ordered to make: who is `orchestrator`, the way a ruling
   # written by hand has always read, so the record never says a person decided what they did not. Unable to look (no jq,
   # no transcript) is refused, for a ruling it cannot attribute is not written. 0 ruled, printing
@@ -2406,7 +2408,7 @@ sitrep_tick_line() {
       die "REFUSED — who said the reply is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
       return 1
     fi
-    user_said "$raw" "$plan"; said=$?
+    user_said "$raw" "$plan" "decisions put $d "; said=$?
     case "$said" in
       0)
         who="$(git -C "$root" config user.name 2>/dev/null)"
