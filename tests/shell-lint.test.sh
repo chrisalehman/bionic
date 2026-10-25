@@ -55,6 +55,7 @@
 #   §HEREDOC             the two heredoc shapes: a paren-less arm in an unquoted body, a lone `)` in a body.
 #   §BP                  no writer is piped into a reader that quits early where the status is read.
 #   §BP-PIN              a writer of more than 64 KB into the fixed form returns 0 under pipefail.
+#   §EXIT                every refusal names its exit, and those that do not burn down from a ceiling per file.
 #   §CENSUS-COMPLETE-1   a section with no census line, a suite with no heading and a suite with no line are refused.
 #   §CENSUS-COMPLETE-2   a verdict outside the five words, and a rule line marked as a cull, are refused.
 #   §CENSUS-COMPLETE-3   the census covers every suite and every section of the real tests tree.
@@ -1300,6 +1301,268 @@ expect_eq "observe_claims_live finds a listed process in a listing larger than t
   "$(pin_scan "$LIB_DIR/observe.sh")"
 expect_eq "…and with the quitting scan restored in a scratch copy the same call returns 141" "141" \
   "$(pin_scan "$BP3/payload/scripts/lib/observe.sh")"
+
+# ============================================================
+section "EXIT — every refusal names its exit, and the ones that do not burn down from a ceiling per file"
+# ============================================================
+#
+# fails-when: a hook or payload script gains a refusal that names neither a verb nor a person and the file's
+# count rises past its line in tests/lib/refusal-exits.ceiling; a file's count falls and its ceiling line is
+# not lowered to match; or one of the three walls named below loses the exit it names.
+#
+# WHY IT EXISTS. A refusal whose only way out is a person's word stops the run on them, and one that says what
+# is wrong without saying what to run costs a guess per retry. Rewriting every old text at once is days of
+# work, most of it on refusals that never fire, so the old ones are counted, per file, and the count only
+# falls: a new refusal ships with its exit, and a file whose count drops writes its new number.
+#
+# THE ROSTER: every *.sh under hooks/ and payload/scripts/.
+#
+# WHAT IS A SITE. A `die "`, `block "` or `refuse ` call whose logical line (continuation lines and an open
+# double-quoted string joined) carries `REFUSED`, `refused —` or `refused --`. Whole-line comments and heredoc
+# bodies are not read, and a usage line (`die "  bash …"`, `die "Usage…"`) is not a site.
+# WHAT EXCUSES ONE:
+#   a refuse call   by its shape: its fix argument is the exit, and lib/refuse.sh refuses an empty one
+#   a die or block  its text, or the next non-blank line when that line calls pv_next (which prints the
+#                   call as `next call:`), names an exit: `session-poker.sh <verb>`, `card.sh <verb>`,
+#                   `spawn-worktree.sh`, `close-out.sh`, `Fix:`, `next call:`, `run again:`, `needs: `,
+#                   `set fix-cap`, `decisions rule`, a hyphenated verb of EXIT_VERBS as a whole word, or a
+#                   one-word verb of EXIT_WORDS followed by its argument (`<`, `'`, `$`, a backquote, a
+#                   digit or a flag). The refusing verb's own name in `<verb> refused —` or in a
+#                   `REFUSED — <verb>:` lead is the refusal's subject, not its exit, and is not read.
+# EXIT_VERBS: confirm-row continuation-fill epic-row fill-report finding-move finding-stated
+#   known-limits-part landing-report launch-sync ledger-add ledger-set matrix-render matrix-retier matrix-set
+#   proof-add regression-run release-approval release-check release-note reviews-part row-landed ruling-ack
+#   step-field step-line stop-run task-add task-set task-split tasks-prose waive-row
+# EXIT_WORDS: adopt amend approve bind deliver discharge extend reply ready resume waive
+# Every other site is UNEXCUSED and counted against its file's ceiling.
+#
+# THE CEILING FILE, tests/lib/refusal-exits.ceiling: `<path> <count> # <reason or date>`, one line per file
+# with unexcused sites. A file it does not name has ceiling 0. A line with no count, no reason after a space,
+# a hash and a space, or a path named twice is refused by line.
+EXIT_VERBS="confirm-row continuation-fill epic-row fill-report finding-move finding-stated known-limits-part
+  landing-report launch-sync ledger-add ledger-set matrix-render matrix-retier matrix-set proof-add regression-run
+  release-approval release-check release-note reviews-part row-landed ruling-ack step-field step-line stop-run
+  task-add task-set task-split tasks-prose waive-row"
+EXIT_WORDS="adopt amend approve bind deliver discharge extend reply ready resume waive"
+EXIT_AWK="$TMP/exit.awk"
+cat > "$EXIT_AWK" <<'EXIT_AWK_EOF'
+# REFUSALS AND THEIR EXITS. Run once per file with -v VERBS=<hyphenated verbs> -v WORDS=<one-word verbs>, the
+# file's path relative to the root as its one argument. Prints
+#   X<TAB><path>:<line><TAB><the site's first 80 columns>   a site that names no exit
+#   E<TAB><path>:<line>                                      a site that names one
+function dq_open(s,   n, i, c, q) {  # does s end inside a double-quoted string
+  n = length(s); q = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (q == "'") { if (c == "'") q = ""; continue }
+    if (q == "\"") { if (c == "\\") i++; else if (c == "\"") q = ""; continue }
+    if (c == "\\") { i++; continue }
+    if (c == "#" && (i == 1 || substr(s, i - 1, 1) ~ /[ \t;]/)) break
+    if (c == "'" || c == "\"") q = c
+  }
+  return q == "\""
+}
+function names_exit(s,   t, n, i) {
+  t = s
+  gsub(/[A-Za-z0-9_.-]+ refused (—|--)/, "", t)
+  gsub(/REFUSED (—|--) [a-z][a-z-]*( --[a-z-]+)*:/, "REFUSED —", t)
+  if (t ~ /session-poker\.sh [a-z]/ || t ~ /card\.sh [a-z]/ || index(t, "spawn-worktree.sh") || index(t, "close-out.sh")) return 1
+  if (index(t, "Fix:") || index(t, "next call:") || index(t, "run again:") || index(t, "needs: ")) return 1
+  if (index(t, "set fix-cap") || index(t, "decisions rule")) return 1
+  n = split(VERBS, V, /[ \t\n]+/)
+  for (i = 1; i <= n; i++) if (V[i] != "" && match(t, "(^|[^A-Za-z0-9_-])" V[i] "([^A-Za-z0-9_-]|$)")) return 1
+  n = split(WORDS, W, /[ \t\n]+/)
+  for (i = 1; i <= n; i++) if (W[i] != "" && match(t, "(^|[^A-Za-z0-9_-])" W[i] " [-<'$`0-9]")) return 1
+  return 0
+}
+{ P[++nl] = $0 }
+END {
+  hd = ""
+  for (ln = 1; ln <= nl; ln++) {
+    s = P[ln]
+    if (hd != "") { t = s; sub(/^\t+/, "", t); if (t == hd) hd = ""; continue }
+    if (s ~ /^[ \t]*#/) continue
+    start = ln; end = ln
+    while (end < nl && end - start < 40 && (s ~ /\\$/ || dq_open(s))) {
+      if (s ~ /\\$/) s = substr(s, 1, length(s) - 1)
+      end++; s = s " " P[end]
+    }
+    if (dq_open(s) && end - start >= 40) { end = start; s = P[start] }   # a quote that never closes: the one line
+    ln = end
+    if (match(s, /<<-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*/) && substr(s, RSTART - 1, 1) != "<" && substr(s, RSTART + 2, 1) != "<") {
+      d = substr(s, RSTART, RLENGTH); sub(/^<<-?[ \t]*['"]?/, "", d); hd = d
+    }
+    if (s !~ /REFUSED/ && s !~ /refused (—|--)/) continue
+    if (match(s, /(^|[;&|({ \t])refuse[ \t]+[a-z"$]/)) { print "E\t" FILENAME ":" start; continue }
+    if (!match(s, /(^|[;&|({ \t])(die|block)[ \t]+"/)) continue
+    site = substr(s, RSTART); sub(/^[;&|({ \t]/, "", site)
+    if (site ~ /^die[ \t]+"( +bash|Usage)/) continue
+    nxt = ""
+    for (k = end + 1; k <= nl; k++) if (P[k] !~ /^[ \t]*$/) { nxt = P[k]; break }
+    if (names_exit(site) || nxt ~ /^[ \t]*pv_next[ \t]/) { print "E\t" FILENAME ":" start; continue }
+    site = substr(site, 1, 80); sub(/[\200-\377]+$/, "", site)   # never end on half a character
+    printf "X\t%s:%d\t%s\n", FILENAME, start, site
+  }
+}
+EXIT_AWK_EOF
+# THE JUDGE. The sweep's rows on stdin, -v CEIL=<ceiling file> -v NAME=<the name the lower line says>. Prints
+#   F<TAB><ceiling line number><TAB><what is wrong>     a ceiling line refused
+#   O<TAB><path><TAB><count> over ceiling <n>          a file above its ceiling, then each of its sites:
+#   S<TAB><path>:<line><TAB><text>
+#   L<TAB>lower <NAME>: <path> <count>                 a file below its ceiling, with the number to write
+EXIT_JUDGE_AWK="$TMP/exit-judge.awk"
+cat > "$EXIT_JUDGE_AWK" <<'EXIT_JUDGE_EOF'
+BEGIN {
+  FS = "\t"
+  while ((getline l < CEIL) > 0) {
+    no++
+    if (l ~ /^[ \t]*(#|$)/) continue
+    k = index(l, " # "); reason = ""; entry = l
+    if (k > 0) { entry = substr(l, 1, k - 1); reason = substr(l, k + 3) }
+    gsub(/^[ \t]+|[ \t]+$/, "", reason)
+    n = split(entry, f, /[ \t]+/)
+    if (n != 2 || f[2] !~ /^[0-9]+$/) { printf "F\t%d\tnot <path> <count>\n", no; continue }
+    if (reason == "") { printf "F\t%d\tno reason after a space, a hash and a space\n", no; continue }
+    if (f[1] in C) { printf "F\t%d\t%s is named twice\n", no, f[1]; continue }
+    C[f[1]] = f[2] + 0
+  }
+}
+$1 == "X" { p = $2; sub(/:[0-9]+$/, "", p); N[p]++; SITES[p] = SITES[p] "S\t" $2 "\t" $3 "\n" }
+END {
+  for (p in N) {
+    c = (p in C) ? C[p] : 0
+    if (N[p] > c) { printf "O\t%s\t%d over ceiling %d: give the new site its exit (a verb, needs: <person> — <why>, or a pv_next line)\n", p, N[p], c; printf "%s", SITES[p] }
+  }
+  for (p in C) if ((p in N ? N[p] : 0) < C[p]) printf "L\tlower %s: %s %d\n", NAME, p, (p in N ? N[p] : 0)
+}
+EXIT_JUDGE_EOF
+EXIT_CEIL="$TESTS_DIR/lib/refusal-exits.ceiling"
+
+# exit_sweep <root> <relative path>... -> the X and E rows of each file
+exit_sweep() {
+  local root="$1" f
+  shift
+  ( cd "$root" || exit 1
+    for f in "$@"; do LC_ALL=C awk -v VERBS="$(tr '\n' ' ' <<< "$EXIT_VERBS")" -v WORDS="$EXIT_WORDS" -f "$EXIT_AWK" "$f"; done )
+}
+# exit_judge <sweep rows> <ceiling file> -> the F, O, S and L rows, sorted
+exit_judge() {
+  printf '%s\n' "$1" | LC_ALL=C awk -v CEIL="$2" -v NAME="tests/lib/refusal-exits.ceiling" -f "$EXIT_JUDGE_AWK" | LC_ALL=C sort
+}
+# exit_sites <sweep rows> -> the sorted path:line of each unexcused site
+exit_sites() { printf '%s\n' "$1" | LC_ALL=C awk -F'\t' '$1 == "X" { print $2 }' | LC_ALL=C sort; }
+# exit_count <sweep rows> <path> -> how many unexcused sites the file holds
+exit_count() { printf '%s\n' "$1" | LC_ALL=C awk -F'\t' -v p="$2" '$1 == "X" && index($2, p ":") == 1 { n++ } END { print n + 0 }'; }
+
+EXIT_ROSTER="$(cd "$REPO" && find hooks payload/scripts -name '*.sh' -type f 2>/dev/null | LC_ALL=C sort)"
+expect_eq "the sweep found shell files to read, under hooks/poker and payload/scripts/lib" "yes" \
+  "$(LC_ALL=C grep -q '^hooks/poker/' <<< "$EXIT_ROSTER" && LC_ALL=C grep -q '^payload/scripts/lib/' <<< "$EXIT_ROSTER" && echo yes || echo no)"
+# shellcheck disable=SC2086  # one path per line, none with blanks
+EXIT_REAL="$(exit_sweep "$REPO" $EXIT_ROSTER)"
+expect_eq "…and found refusals in them, both excused and not, so it read their text" "yes yes" \
+  "$(printf '%s\n' "$EXIT_REAL" | LC_ALL=C awk -F'\t' '$1 == "E" { e = 1 } $1 == "X" { x = 1 } END { print (e ? "yes" : "no"), (x ? "yes" : "no") }')"
+expect_eq "the ceiling file exists" "yes" "$([ -f "$EXIT_CEIL" ] && echo yes || echo no)"
+
+# EXIT-1: the real tree against its ceiling. No file is above it, none below, and no line of it is refused.
+expect_eq "EXIT-1 every rostered file's unexcused refusals are at its ceiling: none above, none below" "" \
+  "$(exit_judge "$EXIT_REAL" "$EXIT_CEIL")"
+EXIT_NONE="$(exit_judge "$EXIT_REAL" /dev/null)"
+expect_contains "…and against an empty ceiling the same sweep names a file over and its site, so the ceiling is what holds it" \
+  "S	hooks/poker/plan.sh:" "$EXIT_NONE"
+EXIT_PCOUNT="$(exit_count "$EXIT_REAL" hooks/poker/plan.sh)"
+expect_contains "…naming its count over ceiling 0" "O	hooks/poker/plan.sh	$EXIT_PCOUNT over ceiling 0" "$EXIT_NONE"
+LC_ALL=C awk '$1 == "hooks/poker/plan.sh" { $2 = $2 + 1 } { print }' "$EXIT_CEIL" > "$TMP/exit-raised.ceiling"
+expect_eq "…and a ceiling raised by one for a file is refused, naming the number to write" \
+  "L	lower tests/lib/refusal-exits.ceiling: hooks/poker/plan.sh $EXIT_PCOUNT" \
+  "$(exit_judge "$EXIT_REAL" "$TMP/exit-raised.ceiling")"
+
+# EXIT-2: planted sites, read by the same instrument in the same call as their controls.
+EX2="$TMP/exit2"
+mkdir -p "$EX2/hooks" "$EX2/payload/scripts/lib"
+cat > "$EX2/hooks/plant.sh" <<'EOF'
+#!/bin/bash
+die "REFUSED — x"  # MARK-N1 no exit
+die "task-add refused — the cap is full; the plan is unchanged."  # MARK-N2 the verb's own name is no exit
+block "REFUSED — the fact" "fix" "the detail"  # MARK-N3 a block has no fix by shape
+die "REFUSED — a text
+  that runs on to a second line with no exit"  # MARK-N4 named at its first line
+die "REFUSED — y; the plan is unchanged."  # MARK-C1 its next line prints the call
+pv_next task-add T1 'a title'
+die "REFUSED — z; needs: Chris — why"  # MARK-C2 a person's exit
+refuse exit2 commit "REFUSED — w" "fix it" "the detail"  # MARK-C3 a refuse call's fix is the exit
+die "REFUSED — run it as: session-poker.sh matrix-set AC-1 status=discharged"  # MARK-C4 a script verb
+die "REFUSED — a text that runs on
+  to its exit: matrix-render writes it."  # MARK-C5 the exit on the joined line
+# die "REFUSED — in a comment"  MARK-C6
+cat <<'DOC'
+die "REFUSED — heredoc text"  MARK-C7
+DOC
+die "  bash x.sh REFUSED usage"  # MARK-C8 a usage line
+die "REFUSED — the reply is the user's: reply <n> waive"  # MARK-C9 a one-word verb with its argument
+die "REFUSED — the reply's item is not a number"  # MARK-N5 the same word as a noun is no exit
+EOF
+printf '%s\n' '#!/bin/bash' 'die "REFUSED — nothing to run"  # MARK-L1' > "$EX2/payload/scripts/lib/plant-lib.sh"
+EX2_ROSTER="hooks/plant.sh
+payload/scripts/lib/plant-lib.sh"
+# shellcheck disable=SC2086
+EX2_OUT="$(exit_sweep "$EX2" $EX2_ROSTER)"
+ex2_at() { printf '%s:%s\n' "$1" "$(mark_line "$EX2/$1" "$2")"; }
+expect_eq "EXIT-2 the sites named are the planted ones with no exit and no others, so every control in the same call passes" \
+  "$(printf '%s\n' "$(ex2_at hooks/plant.sh MARK-N1)" "$(ex2_at hooks/plant.sh MARK-N2)" "$(ex2_at hooks/plant.sh MARK-N3)" \
+       "hooks/plant.sh:$(( $(mark_line "$EX2/hooks/plant.sh" MARK-N4) - 1 ))" "$(ex2_at hooks/plant.sh MARK-N5)" \
+       "$(ex2_at payload/scripts/lib/plant-lib.sh MARK-L1)" | LC_ALL=C sort)" \
+  "$(exit_sites "$EX2_OUT")"
+expect_eq "…the controls with an exit are read as sites that name one: the pv_next line, needs:, the refuse call, the script verb, the joined line, the verb word" \
+  "$(printf '%s\n' "$(ex2_at hooks/plant.sh MARK-C1)" "$(ex2_at hooks/plant.sh MARK-C2)" "$(ex2_at hooks/plant.sh MARK-C3)" \
+       "$(ex2_at hooks/plant.sh MARK-C4)" "hooks/plant.sh:$(( $(mark_line "$EX2/hooks/plant.sh" MARK-C5) - 1 ))" \
+       "$(ex2_at hooks/plant.sh MARK-C9)" | LC_ALL=C sort)" \
+  "$(printf '%s\n' "$EX2_OUT" | LC_ALL=C awk -F'\t' '$1 == "E" { print $2 }' | LC_ALL=C sort)"
+expect_contains "…a site is named with its text" "$(ex2_at hooks/plant.sh MARK-N1)	die \"REFUSED — x\"" "$EX2_OUT"
+printf '%s\n' '# a comment' '' 'hooks/plant.sh 5 # the planted ones' 'payload/scripts/lib/plant-lib.sh 1 # 2026-10-25' > "$EX2/at.ceiling"
+expect_eq "…at the ceiling the judge prints nothing" "" "$(exit_judge "$EX2_OUT" "$EX2/at.ceiling")"
+printf '%s\n' 'hooks/plant.sh 4 # one fewer' 'payload/scripts/lib/plant-lib.sh 1 # 2026-10-25' > "$EX2/under.ceiling"
+expect_contains "…one site over the ceiling names the file, its count and the ceiling" "O	hooks/plant.sh	5 over ceiling 4" \
+  "$(exit_judge "$EX2_OUT" "$EX2/under.ceiling")"
+expect_contains "…and each of its sites by path, line and text" "S	$(ex2_at hooks/plant.sh MARK-N2)	die \"task-add refused" \
+  "$(exit_judge "$EX2_OUT" "$EX2/under.ceiling")"
+printf '%s\n' 'hooks/plant.sh 6 # one more' 'payload/scripts/lib/plant-lib.sh 1 # 2026-10-25' 'hooks/gone.sh 2 # a file since deleted' > "$EX2/over.ceiling"
+expect_eq "…a ceiling above the count names each file to lower and the number to write, a file with none at 0" \
+  "L	lower tests/lib/refusal-exits.ceiling: hooks/gone.sh 0
+L	lower tests/lib/refusal-exits.ceiling: hooks/plant.sh 5" "$(exit_judge "$EX2_OUT" "$EX2/over.ceiling")"
+expect_contains "…a file the ceiling does not name has ceiling 0" "O	payload/scripts/lib/plant-lib.sh	1 over ceiling 0" \
+  "$(exit_judge "$EX2_OUT" /dev/null)"
+printf '%s\n' 'hooks/plant.sh 5' 'hooks/plant.sh many # a reason' 'hooks/plant.sh 5 # once' 'hooks/plant.sh 5 # twice' \
+  'payload/scripts/lib/plant-lib.sh 1 # 2026-10-25' > "$EX2/bad.ceiling"
+expect_eq "…a ceiling line with no reason, no count, or a path named twice is refused by line, and the rest still judged" \
+  "F	1	no reason after a space, a hash and a space
+F	2	not <path> <count>
+F	4	hooks/plant.sh is named twice" "$(exit_judge "$EX2_OUT" "$EX2/bad.ceiling")"
+
+# EXIT-3: the three walls that stopped a run on its person's word each name their exit, and none is in the sweep.
+EXIT_CAP_LN="$(LC_ALL=C grep -nF 'die "task-add refused — review-born rows:' "$REPO/hooks/poker/plan.sh" | head -1 | cut -d: -f1)"
+expect_eq "EXIT-3a the cap refusal in hooks/poker/plan.sh is found, and names the cap's own exit" "yes" \
+  "$([ -n "$EXIT_CAP_LN" ] && sed -n "${EXIT_CAP_LN}p" "$REPO/hooks/poker/plan.sh" | LC_ALL=C grep -qF 'set fix-cap=' && echo yes || echo no)"
+expect_absent "…and the sweep does not count it" "hooks/poker/plan.sh:${EXIT_CAP_LN:-none}	" "$EXIT_REAL"
+expect_contains "…while the same line read with its exit cut out is named" "hooks/poker/plan.sh:1" \
+  "$(mkdir -p "$TMP/exit3/hooks/poker"; sed -n "${EXIT_CAP_LN:-1}p" "$REPO/hooks/poker/plan.sh" | sed 's/set fix-cap=[^ ]*//' > "$TMP/exit3/hooks/poker/plan.sh"
+     exit_sites "$(exit_sweep "$TMP/exit3" hooks/poker/plan.sh)")"
+EXIT_WALLS="$REPO/payload/scripts/lib/walls.sh"
+EXIT_LIVE="$(LC_ALL=C awk '/^matrix_live_row_exit\(\)/ { on = 1 } on { print } on && /^}/ { exit }' "$EXIT_WALLS")"
+expect_contains "EXIT-3b the Verify gate's live-row exit in payload/scripts/lib/walls.sh names matrix-set for a row the walk proved" \
+  'session-poker.sh matrix-set $1 status=discharged' "$EXIT_LIVE"
+expect_contains "…matrix-retier for a row whose eval cannot fire" 'session-poker.sh matrix-retier $1 tier=' "$EXIT_LIVE"
+expect_contains "…and the user's waiver otherwise" 'needs: the user — a waiver' "$EXIT_LIVE"
+expect_eq "…and the live row's three evidence refusals each carry it" "3" \
+  "$(LC_ALL=C grep -cF '"${live_exit:-' "$EXIT_WALLS")"
+# The release card's row decision is the reply surface for a waiver, so its exit is named by the wall that sends
+# the run there: both auditor refusals' detail, three lines from the call, names the user and the card's reply.
+EXIT_AUD="$(LC_ALL=C awk -v want='needs: the user — a waiver at the release card: reply <n> waive' '
+  index($0, "block_matrix \"the auditor has not confirmed ${ac}\"") { n++; at[n] = NR }
+  { L[NR] = $0 }
+  END { for (i = 1; i <= n; i++) { f = 0; for (k = at[i]; k <= at[i] + 2; k++) if (index(L[k], want)) f = 1; h += f }
+        print n + 0, h + 0 }' "$EXIT_WALLS")"
+expect_eq "EXIT-3c the gate's two auditor refusals the release card settles each name the user's waiver and the card's reply" \
+  "2 2" "$EXIT_AUD"
 
 # ── the census ───────────────────────────────────────────────────────────────
 # tests/CENSUS.md holds one record line per section of every suite under tests/, under a heading per

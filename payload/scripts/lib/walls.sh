@@ -1781,6 +1781,16 @@ matrix_row_deferred() {
   [ "$2" = 9 ] && [ "$n" = 9 ] && run_open "$1"
 }
 
+# THE LIVE ROW'S EXITS. A pending or blocked row the owing-step rule no longer defers meets the evidence
+# refusals below for the key it lacks, and those refusals say which of three acts settles it: a row the walk
+# proved is written discharged with its record, a row whose eval cannot fire its fails-when is retiered up
+# with a new eval, and any other row is the user's to waive. The first two are verbs an agent runs; the third
+# is a person's word, said as such, so the refusal never leaves its reader to guess whose move it is.
+# [WALL: tests/shell-lint.test.sh]
+matrix_live_row_exit() {  # <AC> -> the repair prose of a live row's evidence refusal
+  printf '%s' "the row is live past the step that owes it: if the walk proved it, run session-poker.sh matrix-set $1 status=discharged evidence=<its record>; if its eval cannot fire, run session-poker.sh matrix-retier $1 tier=<higher> eval='<the new eval>'; otherwise needs: the user — a waiver, in their words: session-poker.sh waive-row $1 '<their words>' '<why>'."
+}
+
 # matrix_table_rows -> `<AC>\037<tier>\037<status>\037<evidence>\037<auditor>` per five-cell row of
 # `$MATRIX`, trimmed, table order: the header, the separator and a row of another width skipped.
 matrix_table_rows() {
@@ -4007,7 +4017,7 @@ matrix_is_placeholder() {
 }
 
 validate_matrix() {
-  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc deferred row_is_waived ev_abs hk hv hf ucv owed
+  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc deferred row_is_waived ev_abs hk hv hf ucv owed live_exit
 
   # Set while any row is still pending/blocked at current: 5. The
   # Step-5 validator reads it to keep the `auditor:` pointer optional
@@ -4151,23 +4161,26 @@ validate_matrix() {
       # any row is undischarged.
       :
     else
+      # A pending or blocked row reaching this loop is owed now; its evidence refusals name its exits.
+      live_exit=""
+      case "$status" in pending|blocked) live_exit="$(matrix_live_row_exit "$ac")" ;; esac
       for key in $(keys_for_tier "$tier"); do
         if ! grep -qE "^[[:space:]]*${key}[[:space:]]*:" <<< "$block_txt"; then
           block_matrix "row ${ac} has no ${key} evidence" "record it, or waive the row" \
             "matrix row '${ac}' (${tier}) is missing evidence key '${key}' in its AC block." \
-            "add '${key}: <evidence>' to the '${ac}:' block, or waive the row via the Waiver Protocol."
+            "${live_exit:-add '${key}: <evidence>' to the '${ac}:' block, or waive the row via the Waiver Protocol.}"
         fi
         val=$(echo "$block_txt" | grep -E "^[[:space:]]*${key}[[:space:]]*:" | head -1 \
               | sed -E "s/^[[:space:]]*${key}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
         if [ -z "$val" ]; then
           block_matrix "${ac}'s ${key} evidence is blank" "record it, or waive the row" \
             "matrix row '${ac}' (${tier}) evidence key '${key}' is empty." \
-            "record the evidence for '${key}' in the '${ac}:' block, or waive the row."
+            "${live_exit:-record the evidence for '${key}' in the '${ac}:' block, or waive the row.}"
         fi
         if matrix_is_placeholder "$val" && ! user_confirmed_pending "$key" "$val"; then
           block_matrix "${ac} has placeholder ${key} evidence" "record what actually ran" \
             "matrix row '${ac}' (${tier}) evidence key '${key}' is a placeholder (\"${val}\")." \
-            "replace '${key}' with the real evidence before committing."
+            "${live_exit:-replace '${key}' with the real evidence before committing.}"
         fi
         # live-tier (T3/T4) fields cannot be self-written n/a — that is a
         # downgrade, which is a user decision via the Waiver Protocol.
@@ -4287,11 +4300,11 @@ validate_matrix() {
       if [ "$owed" = verdict ]; then
         block_matrix "the auditor has not confirmed ${ac}" "get the auditor's verdict on it" \
           "matrix row '${ac}' has no auditor verdict: the cell is '${aud:-empty}', not CONFIRMED, REFUTED or UNVERIFIABLE, at step ${CURRENT}." \
-          "from Step 6 the independent auditor gives every non-waived row a verdict; a REFUTED or UNVERIFIABLE row is ruled at the merge advance, on the release approval card. Record the auditor's verdict, or waive the row."
+          "from Step 6 the independent auditor gives every non-waived row a verdict; a REFUTED or UNVERIFIABLE row is ruled at the merge advance, on the release approval card. Record the auditor's verdict, or else needs: the user — a waiver at the release card: reply <n> waive, <n> being the decision the card gives ${ac}."
       fi
       block_matrix "the auditor has not confirmed ${ac}" "get the auditor to confirm it" \
         "matrix row '${ac}' auditor verdict is '${aud:-empty}', not CONFIRMED, at step ${CURRENT}." \
-        "from Step 8 every row is ruled: the independent auditor CONFIRMS it, the row is waived (the release approval card puts it), or a T4 row carries its user's attributed confirmation."
+        "from Step 8 every row is ruled: the independent auditor CONFIRMS it, the row is waived (the release approval card puts it), or a T4 row carries its user's attributed confirmation. Short of a CONFIRMED verdict, needs: the user — a waiver at the release card: reply <n> waive, <n> being the decision the card gives ${ac}."
     fi
   done <<< "$rows"
 
