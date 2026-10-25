@@ -541,7 +541,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a review: the review proof with the question, reviewer, result and scope"
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure|all> '<reply>'   record the user's waiver of that question, or of all three, at the working head, one waived: line each under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; record its log and a kind=check proof line, result=fail on a non-zero exit"
-  die "  bash ${HOOK_DIR}/session-poker.sh regression-run   run the regression in the working branch's checkout, .bionic/config.yaml's regression-command: command, else tests/run.sh whole (held to the full-run rules); write its log, opening head=<40-hex> dirty=<n> and closing rc=<n>, for proof-add regression to cite"
+  die "  bash ${HOOK_DIR}/session-poker.sh regression-run [--starter tick|orchestrator|person] [--reason '<why>']   run the regression in the working branch's checkout, .bionic/config.yaml's regression-command: command, else tests/run.sh whole (held to the full-run rules); write its log, opening head=<40-hex> dirty=<n> and closing rc=<n>, for proof-add regression to cite; --starter names who started it, written as starter= on its run line (orchestrator by default), and person needs --reason"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-stated <record>#<n> '<sentence>'   store the one changelog sentence of a deferred finding on its deferred: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session, as a moved: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, landed before the review or after it, as a moved: to=fixed line under ## SDLC State"
@@ -1255,11 +1255,10 @@ $1"; shift ;;
   release-check)
     [ $# -eq 0 ] || usage "release-check takes no arguments: it runs from the nearest tag reachable from the plan's integration-branch that is a proper ancestor of the working head (else its base-sha) to that head."
     ;;
-  # NO OPERAND (wave-28 T75; D36): the command is the project's `floor:`, else its tests/run.sh (wave-35 T10), and the
-  # head is the working one.
-  regression-run)
-    [ $# -eq 0 ] || usage "regression-run takes no arguments: it runs .bionic/config.yaml's regression-command: command, else tests/run.sh, at the working branch's head."
-    ;;
+  # NO OPERAND: the command is the project's regression-command:, else its tests/run.sh, and the head is the working
+  # one. Its flags, --starter and --reason, are the verb's own to read and refuse (hooks/poker/proof.sh
+  # poker_verb_regression_run), so they pass through.
+  regression-run) : ;;
   # ONE OPTIONAL FLAG (wave-26 T32; D4): `--wait` waits for another writer's lock, which only the
   # launch recorder's detached call can afford; the tick and the turn-end wall leave a held lock
   # to its holder.
