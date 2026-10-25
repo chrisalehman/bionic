@@ -491,13 +491,23 @@ walk_said() {  # <record docs-relative> -> what the registration settled, one li
         die "REFUSED — the project has no usable git user name (git config user.name) to record as the approver; the plan is unchanged."
         exit 1
       fi
-      AP_LINE="approved-by: $AP_WHO $(date -u +%Y-%m-%dT%H:%M:%SZ) \"$AP_REPLY\""
+      # ONE INSTANT FOR THE PLAN AND THE REGISTER. The approved-by: instant is where the run's autonomous half starts,
+      # and the step cards' asks are answered by this reply, so they close at that same instant: a step card left open
+      # until a later card or the Stop closed it would read as a stop the run made after its approval.
+      AP_AT="$(owed_now 2>/dev/null)" || AP_AT=""
+      [ -n "$AP_AT" ] || AP_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      AP_LINE="approved-by: $AP_WHO $AP_AT \"$AP_REPLY\""
       if ! ap_place "$AP_LINE" "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
         die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State to write the approval beside; the plan is unchanged."
         exit 1
       fi
       plan_verb_swap approve "approved-by:" writer
       poker_owed_close "$PV_REPO" "approve:plan" "approve"
+      if declare -F owed_close >/dev/null 2>&1; then
+        for AP_K in approve:step0 approve:step1 approve:step2 approve:step3; do
+          OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_close "$AP_K" "approve plan" "$AP_AT" >/dev/null 2>&1
+        done
+      fi
       say "approve — plan: $AP_LINE written to $PV_PLAN; dry-committed first. The commit gate reads it from Step 4."
       exit 0
     fi

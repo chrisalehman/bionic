@@ -1773,6 +1773,52 @@ expect_eq "SCO3 a mutant bar of 25 moves the scorecard's target" \
   "widest landing ready→landed: T1 20.0 min · target < 25" "$(printf '%s\n' "$SR_MUT_SC" | /usr/bin/grep '^widest landing ')"
 
 # ============================================================
+section "§ROUNDS: the scorecard's stops and wait are the register's rounds put after the plan's approval, every round counted"
+# ============================================================
+# A stop is a step card, release card or decision round opened after approved-by:, open or closed, whoever closed it;
+# the wait sums those rounds' at= less opened= (now for an open one); `approve plan` closes the Step-3 card's ask at its
+# own instant. Built with the verbs at the clock seam; the two cards' asks opened through lib/owed.sh as their openers do.
+# fails-when: the numbers come from approved: lines or release pages, a re-put counts once, or a round before the
+# approval counts (RD-1); an open round counts no wait (RD-2); the approval leaves the Step-3 ask open (RD-0).
+SR_RLIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+sr_r_open() {  # <epoch> <key> -> the ask opened on this world's register at that instant, as its card opens it
+  BIONIC_NOW_EPOCH="$1" OWED_ROOT="$SR_REPO" OWED_SID="$SID" OWED_PLAN="$SR_PLAN" \
+    bash -c '. "$1/run.sh" && . "$1/owed.sh" && owed_open "$2" "approval: $2" "Reply approved."' _ "$SR_RLIB" "$2"
+}
+sr_r_put() { SR_AT="$1" sr_poke decisions put "$2" "the decision $2" >/dev/null 2>&1; }   # <epoch> <D<n>>
+sr_r_rule() {  # <epoch> <D<n>> -> a person's ruling heading on the ledger, which `decisions` settles at <epoch>
+  local led="$SR_DIR/design-ledger.md" k
+  k="$(sed -n 's/^## Δ\([0-9][0-9]*\).*/\1/p' "$led" 2>/dev/null | sort -n | tail -1)"; k=$(( ${k:--1} + 1 ))
+  printf '\n## Δ%s — %s ruled "1" (Dana Fixture 2026-10-06): the decision %s\n' "$k" "$2" "$2" >> "$led"
+  SR_AT="$1" sr_poke decisions >/dev/null 2>&1
+}
+sr_r_card() {  # <epoch> -> the scorecard's two human lines at that instant, joined
+  SR_AT="$1" sr_poke landing-report --scorecard "$SR_PLAN" 2>/dev/null | /usr/bin/grep -E '^human( stops|-wait)' | sr_join
+}
+sr_r_want() { printf 'human stops (autonomous half): %s · target 1|human-wait minutes: %s · no target (the user'"'"'s)' "$1" "$2"; }
+SR_APPROVED=none sr_world rounds "6 6 12 12"   # approved below, at SR_E0, 2026-10-06T10:00:00Z
+sed 's/^wave: wave-02-fx$/canonical_sdlc_version: 14\
+&/' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+git -C "$SR_REPO" config user.name "Dana Fixture"; sr_bind; SR_REG_R="$(sr_reg)"
+sr_r_open $((SR_E0 - 10800)) approve:step3
+sr_r_put $((SR_E0 - 7200)) D9; sr_r_rule $((SR_E0 - 5400)) D9; sr_r_put $((SR_E0 - 3600)) D9; sr_r_rule $((SR_E0 - 1800)) D9   # before
+SR_AT=$SR_E0 sr_poke approve plan 'approved' >/dev/null 2>&1
+expect_eq "RD-0 precondition: approve plan wrote approved-by: at 10:00Z and closed the Step-3 card's ask at that instant" \
+  "approved-by: Dana Fixture 2026-10-06T10:00:00Z|2026-10-06T10:00:00Z" \
+  "$(/usr/bin/grep -o '^approved-by: Dana Fixture [^ ]*' "$SR_PLAN")|$(sed -n 's/^owed\/v1|key=approve:step3|state=closed|by=[^|]*|at=\([^|]*\)|.*/\1/p' "$SR_REG_R")"
+sr_r_put $((SR_E0 + 600)) D1;    sr_r_rule $((SR_E0 + 1200)) D1     # 10 min
+sr_r_put $((SR_E0 + 3600)) D2;   sr_r_rule $((SR_E0 + 5400)) D2     # 30 min
+sr_r_put $((SR_E0 + 7200)) D2;   sr_r_rule $((SR_E0 + 8100)) D2     # 15 min, the same decision put again
+sr_r_put $((SR_E0 + 48960)) D3;  sr_r_rule $((SR_E0 + 77520)) D3    # 23:36Z to 07:32Z, 476 min
+sr_r_open $((SR_E0 + 79200)) approve:release
+SR_AT=$((SR_E0 + 79500)) sr_poke approve release '1' >/dev/null 2>&1   # 5 min
+expect_eq "RD-1 two rounds of D9 before the approval count none; after it four decision rounds and the release card: 5 stops, 10 + 30 + 15 + 476 + 5 minutes" \
+  "2|2|0|$(sr_r_want 5 536)" \
+  "$(/usr/bin/grep -c '^owed/v1|key=decide:D9|state=closed|' "$SR_REG_R" | tr -d ' ')|$(/usr/bin/grep -c '^owed/v1|key=decide:D2|state=closed|' "$SR_REG_R" | tr -d ' ')|$(/usr/bin/grep -c '|state=open|' "$SR_REG_R" | tr -d ' ')|$(sr_r_card $((SR_E0 + 82800)))"
+sr_r_put $((SR_E0 + 81000)) D4
+expect_eq "RD-2 a round still open is a stop, its wait running to now" "$(sr_r_want 6 566)" "$(sr_r_card $((SR_E0 + 82800)))"
+
+# ============================================================
 section "§WAIT: a decision's wait line names everything that waits on it: a row not landed or dropped that reads it, the release its newest approval page lists it on, the merge an open held-merge ask names it in"
 # ============================================================
 # FIXTURE FIDELITY: the world's plan bound by the bind verb, the put through the real `decisions put`, the held merge

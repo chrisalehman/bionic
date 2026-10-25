@@ -577,45 +577,45 @@ decisions_all() {
 # then the sheet's pace, correctness and waste at close, `pace: …`, `correctness: …` and `waste: …`, each said from the
 # sheet's measurements, read through `sitrep_gather` (computed there, once). Every number is read from the record,
 # and one the record cannot compute is `unverified`, never a literal:
-#   human stops     the plan's `approved: <name> by <who> <ISO> "<reply>"` lines under ## SDLC State (`approve`, the
-#                   final card's replay) dated after its `approved-by:` instant, where the autonomous half starts; one
-#                   stop per reply: in time order, a new stop when the reply's words differ from the line before or
-#                   SCORECARD_STOP_GAP seconds passed (one replay writes release and merge a second apart).
-#                   unverified when approved-by: names no instant.
+#   human stops     the run's register of asks (lib/owed.sh `owed_rounds`, every round kept): the rounds of the step
+#                   cards (`approve:step<n>`), the release card (`approve:release`) and the decisions (`decide:D<n>`)
+#                   opened after the plan's `approved-by:` instant, where the autonomous half starts, open or closed and
+#                   whoever closed them: a round put after the plan card is a stop, since the run stood on it. The
+#                   approval verb closes the Step-3 card's ask at that instant, so the register and the plan agree on
+#                   where the half starts. unverified when approved-by: names no instant or the run has no register.
 #   agent minutes   the launches of this plan on the rosters after the `approved: merge` line's instant
 #                   (`handoff_dispatches_since`, the dispatch wall's intended rows; AC-1.5's fact): minutes from that
 #                   reply to the last such launch, rounded up, 0 when none. unverified with no `approved: merge` line or
 #                   no launch of this plan on any roster.
 #   widest landing  `landing_report`'s rows: the queue landing with the largest `minutes=`, as printed. unverified when
 #                   no landing is measured.
-#   human-wait      the release approval records (release-approval-*.md beside the run's records, and the pages an
-#                   older run wrote under the old stem or as final-card-*.md): each page's `at=` on its
-#                   `release-approval/v1|plan=` (or the old tags')
-#                   line to its `replied: at=`, summed and rounded. unverified with no record, or a record with no reply.
+#   human-wait      the same rounds: each closed round's `at=` less its `opened=`, an open one's now less its
+#                   `opened=`, summed and rounded to whole minutes. unverified when the stops are, or a closed round
+#                   counted holds no `opened=` to time it by.
 # READ-ONLY. The rosters live in .bionic/tmp, which close-out's act 3 wipes, so close-out reads this before the wipe.
-# Set in hooks/session-poker.sh, before any part loads: SCORECARD_STOP_GAP.
 scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
-  local plan="$1" root="$2" recdir appr stops merge_at agent="unverified" widest wait
-  recdir="$(docs_root "$root")/record/$(proof_plan_slug "$plan")"
-  # the plan's start instant and approvals, one line each: `S <epoch>` then `A <epoch> <name> <reply>` per approved: line
-  appr="$(awk "$_PATROL_ISO_AWK"'
-    function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
-    function inst(l,   n, t, i, e) { n = split(l, t, /[ \t]+/); for (i = 1; i <= n; i++) { e = iso2epoch(norm(t[i])); if (e >= 0) return e } return -1 }
+  local plan="$1" root="$2" start reg rounds stops="unverified" wait="unverified" merge_at agent="unverified" widest
+  start="$(sitrep_approved_at "$plan")"
+  reg="$(owed_register "$root" "$plan" 2>/dev/null)" || reg=""
+  if [ -n "$start" ] && [ -n "$reg" ] && [ -f "$reg" ] && [ ! -L "$reg" ]; then
+    rounds="$(owed_rounds 'approve:step[0-9]+|approve:release|decide:D[0-9]+' "$plan" "$root" | awk -F'\t' \
+      -v s="$start" -v now="$(sitrep_now)" "$_PATROL_ISO_AWK"'
+      function norm(x) { if (length(x) == 17 && substr(x, 17, 1) == "Z") return substr(x, 1, 16) ":00Z"; return x }
+      function ep(x) { return (x == "" || x == "-") ? -1 : iso2epoch(norm(x)) }
+      { o = ep($4); e = ($3 == "open") ? now + 0 : ep($5) }
+      o < 0 { if (e > s) { c++; untimed = 1 } next }
+      o > s { c++; if (e >= o) t += e - o; else untimed = 1 }
+      END { printf "%d\t%s\n", c, untimed ? "unverified" : sprintf("%d", t / 60 + 0.5) }')"
+    stops="${rounds%%	*}"; wait="${rounds#*	}"
+  fi
+  # the plan's `approved: merge` instant, where the agent minutes after the final reply start
+  merge_at="$(awk "$_PATROL_ISO_AWK"'
+    function norm(x) { if (length(x) == 17 && substr(x, 17, 1) == "Z") return substr(x, 1, 16) ":00Z"; return x }
     /^[ \t]*```/ { fence = !fence; next }
     fence { next }
     /^##[ \t]/ { s = ($0 ~ /^##[ \t]+SDLC State/); next }
-    !s { next }
-    /^approved-by:/ && !seen { seen = 1; print "S\t" inst($0); next }
-    /^[ \t]*-?[ \t]*approved:[ \t]/ {
-      e = inst($0); if (e < 0) next
-      l = $0; sub(/^[ \t]*-?[ \t]*approved:[ \t]*/, "", l); split(l, w, /[ \t]+/)
-      q = index($0, "\""); print "A\t" e "\t" w[1] "\t" (q ? substr($0, q) : "")
-    }' "$plan" 2>/dev/null)"
-  stops="$(printf '%s\n' "$appr" | sort -t "$(printf '\t')" -k1,1r -k2,2n | awk -F'\t' -v gap="$SCORECARD_STOP_GAP" '
-    $1 == "S" { start = $2; next }
-    $1 == "A" && start != "" && start >= 0 && $2 > start { if (pe == "" || $4 != pw || $2 - pe > gap) c++; pe = $2; pw = $4 }
-    END { if (start == "" || start < 0) print "unverified"; else print c + 0 }')"
-  merge_at="$(printf '%s\n' "$appr" | awk -F'\t' '$1 == "A" && $3 == "merge" { print $2; exit }')"
+    s && /^[ \t]*-?[ \t]*approved:[ \t]+merge[ \t]/ {
+      n = split($0, t, /[ \t]+/); for (i = 1; i <= n; i++) { e = iso2epoch(norm(t[i])); if (e >= 0) { print e; exit } } }' "$plan" 2>/dev/null)"
   if [ -n "$merge_at" ] && [ -n "$(handoff_dispatches_since "$plan" "$root/.bionic/tmp" "")" ]; then
     agent="$(handoff_dispatches_since "$plan" "$root/.bionic/tmp" "" | awk -F'\t' -v m="$merge_at" "$_PATROL_ISO_AWK"'
       { e = iso2epoch($2); if (e > m && e - m > d) d = e - m }
@@ -624,15 +624,6 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
   widest="$(landing_report "$(_wt_proofs_path "$root" "$plan")" "$root" yes 2>/dev/null | awk '
     NR > 1 && $2 == "queue" { for (i = 3; i <= NF; i++) if (index($i, "minutes=") == 1) { m = substr($i, 9); if (m != "-" && (b == "" || m + 0 > b + 0)) { b = m; r = $1 } } }
     END { if (b != "") print r " " b " min" }')"
-  wait="$(for f in "$recdir"/release-approval-*.md "$recdir/$RR_OLD_VERB"-*.md "$recdir"/final-card-*.md; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done | awk -v OLD="$RR_OLD_VERB/v1|plan=" "$_PATROL_ISO_AWK"'
-    { file = $0; a = ""; r = ""
-      while ((getline l < file) > 0) {
-        if (index(l, "release-approval/v1|plan=") == 1 || index(l, OLD) == 1 || index(l, "final-card/v1|plan=") == 1) { n = split(l, p, "|"); for (i = 2; i <= n; i++) if (index(p[i], "at=") == 1) a = substr(p[i], 4) }
-        else if (index(l, "replied: at=") == 1) { r = substr(l, 13); sub(/ .*/, "", r) }
-      }
-      close(file); cards++; ea = iso2epoch(a); er = iso2epoch(r)
-      if (ea < 0 || er < 0 || er < ea) bad = 1; else sum += er - ea }
-    END { if (!cards || bad) print "unverified"; else printf "%d\n", int(sum / 60 + 0.5) }')"
   sitrep_gather "$plan" "$root" sheet 2>/dev/null
   printf 'human stops (autonomous half): %s · target 1\n' "${stops:-unverified}"
   printf 'agent minutes after the final reply: %s · target 0\n' "$agent"

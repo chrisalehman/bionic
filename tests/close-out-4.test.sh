@@ -582,16 +582,16 @@ run_close "$PTE" run
 section "§SCORECARD — wave-38 T15 (D26): the continuation prints four lines, each against its target, and the sitrep sheet's pace, correctness and waste"
 # ============================================================
 # Under `## Scorecard`, fenced, exactly:
-#   human stops (autonomous half): <n> · target 1           approved: lines after the plan's approved-by:, one per reply
+#   human stops (autonomous half): <n> · target 1           the register's rounds put after the plan's approved-by:
 #   agent minutes after the final reply: <n> · target 0     roster launches of this plan after the approved: merge line
 #   widest landing ready→landed: <row> <m> min · target < 15   landing-report --rows, the largest minutes=; 15 is LINE_LANDING_BAR (wave-39 T9)
-#   human-wait minutes: <n> · no target (the user's)        the final-card records, render to reply
+#   human-wait minutes: <n> · no target (the user's)        those rounds, each opened= to its at=
 # then the sitrep sheet's pace, correctness and waste at close, `pace: …`, `correctness: …` and `waste: …`. A number the
 # record cannot compute is `unverified`.
 # `landing-report --scorecard <plan>` prints the same lines; close-out reads them before the tmp wipe (the roster).
 # fails-when: a line is missing, carries a number the record does not hold, or prints a literal where it is unverified.
 sc_section() { awk '/^## / { s = ($0 == "## Scorecard"); next } s && NF && !/^```/ { print }' "$1"; }
-sc_plant() {  # <project> -> two queue landings (30 and 42 min), three approvals in two replies, two launches, one final card
+sc_plant() {  # <project> -> two queue landings (30 and 42 min), three approvals in two replies, two launches, one release card round
   local p="$1" plan="$1/$PLAN_REL" rec="$1/.bionic/docs/record/wave-01-fixture"
   case "$p" in "$SANDBOX"/*) : ;; *) echo "sc_plant: refusing outside the sandbox: '$p'" >&2; return 1 ;; esac
   mkdir -p "$rec"
@@ -610,9 +610,14 @@ sc_plant() {  # <project> -> two queue landings (30 and 42 min), three approvals
     roster_row_fixture status=intended name=w-late agent_id= launched_at=2026-10-06T12:05:01Z plan="$plan"
     roster_row_fixture status=intended name=w-other agent_id= launched_at=2026-10-06T13:00:00Z plan="/elsewhere/wave-99-other.plan.md"
   } >> "$p/.bionic/tmp/roster-fixture.state"
-  printf '%s\n' '**Final card · wave-01-fixture at abcdef12**' '' '## Replay' '' \
-    "final-card/v1|plan=$plan|head=$LAND_C|at=2026-10-06T11:48:01Z|options=1" \
-    'replied: at=2026-10-06T12:00:01Z option=1 words="1"' > "$rec/final-card-abcdef12.md"
+  # the release card's ask on the run's register, opened when the card rendered and closed by its reply, through
+  # lib/owed.sh's own writers for the plan: the fixture binds no session for the verbs that open and close it
+  local e
+  for e in 1791287281 1791288001; do   # 2026-10-06T11:48:01Z, 2026-10-06T12:00:01Z
+    BIONIC_NOW_EPOCH="$e" OWED_ROOT="$p" OWED_SID=score-sid OWED_PLAN="$plan" \
+      bash -c '. "$1/run.sh" && . "$1/owed.sh" && if [ "$2" = 1791287281 ]; then owed_open approve:release "approval: release" "approve release"; else owed_close approve:release "release approval reply"; fi' \
+      _ "$REPO_ROOT/payload/scripts/lib" "$e"
+  done
 }
 SC_TAIL='human-wait minutes: 12 · no target (the user'"'"'s)'
 PSC="$(mk_fixture scorecard1)"; advance_to "$PSC" 8
@@ -626,20 +631,11 @@ expect_eq "SC-2 D26 the section is the verb's seven lines, read before the wipe 
   "$SC_VERB" "$(sc_section "$PSC/$CONT_REL")"
 expect_eq "SC-4 …the heading sits before the Resume instruction" "yes" \
   "$(awk '/^## Scorecard$/ { a = NR } /^## Resume instruction/ { b = NR } END { print (a && b > a) ? "yes" : "no" }' "$PSC/$CONT_REL")"
-# the wait is read from the card's record under each name it has had: the release approval stem and tag, the old stem and
-# tag a run wrote before the rename, and the final card's
+# the wait is read off the register: the release card's one round, opened 11:48:01Z and closed 12:00:01Z
 sc_wait() { printf '%s\n' "$1" | /usr/bin/grep '^human-wait minutes: '; }
-expect_eq "SC-5 precondition: the final-card record gives the 12-minute wait" "$SC_TAIL" "$(sc_wait "$SC_VERB")"
-SC_OLDW="review"
-for sc_stem in release-approval "${SC_OLDW}-results"; do
-  PSW="$(mk_fixture "scorecard-$sc_stem")"; advance_to "$PSW" 8
-  sc_plant "$PSW"
-  SC_REC="$PSW/.bionic/docs/record/wave-01-fixture"
-  sed -e "s#^final-card/v1|#${sc_stem}/v1|#" "$SC_REC/final-card-abcdef12.md" > "$SC_REC/${sc_stem}-abcdef12.md"
-  rm -f "$SC_REC/final-card-abcdef12.md"
-  expect_eq "SC-5b the record named $sc_stem-<head8>.md with the $sc_stem/v1 tag gives the same wait" "$SC_TAIL" \
-    "$(sc_wait "$(BIONIC_GATE_DIR="$LAND_GATE" hh_report "$PSW" --scorecard)")"
-done
+expect_eq "SC-5 the release card's round on the register gives the 12-minute wait" "$SC_TAIL" "$(sc_wait "$SC_VERB")"
+expect_eq "SC-5b …and the one stop, the round put after the plan's approval" "human stops (autonomous half): 1 · target 1" \
+  "$(printf '%s\n' "$SC_VERB" | /usr/bin/grep '^human stops ')"
 # a record that cannot compute a number prints unverified on that line, never a literal
 PSU="$(mk_fixture scorecard2)"; advance_to "$PSU" 8
 BIONIC_GATE_DIR="$LAND_GATE" run_close "$PSU" run
