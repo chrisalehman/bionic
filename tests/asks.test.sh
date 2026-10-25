@@ -23,7 +23,9 @@
 # §STOP          `decisions put D<n>` opens `decide:D<n>`, the ledger's ruling closes it; a deferral no person ruled
 #                (the reader's rating, carried by the orchestrator's choice) opens `carry:<record>#<n>` at `disposition`
 # §RULE          `decisions rule D<n> '<reply>'` writes `## Δ<k> — D<n> ruled "<reply>" (<who> <date>): <title>`, Δ one past
-#                the ledger's highest, the title the put's, closes `decide:D<n>` in the same act, and refuses a second ruling
+#                the ledger's highest, the title the put's, closes `decide:D<n>` in the same act, and refuses a second ruling;
+#                <who> is the git user when the reply stands in a prompt the user typed, `orchestrator` when it does not, and
+#                a transcript that cannot be read refuses the ruling and writes nothing
 # §OPENED        a closed ask keeps its open line's instant as `opened=`, so the minutes it stood open can be counted
 # §BORN-CLOSES   a fix born of a failing review's finding lands by `ready` at Step 8 and its green landing closes
 #                `waive:<question>`, with no step advance; a landing after which the review still derives fail leaves it open
@@ -35,7 +37,7 @@
 # §ONE-BLOCKS    a waiver answered no keeps its answer when it closes and waits on an event, open or closed: the close
 #                line, the held words, the card and the minutes waiting on you never count it
 # §SHARED        `approve D<n>` and a release card reply that approves D<n> rule it through the same writer: a Δ line
-#                and a closed `decide:D<n>` each
+#                and a closed `decide:D<n>` each, the one who said the reply named as `decisions rule` names them
 # §SETTLED       a heading `D<n> settled by … (<who> <date> <clock>): "<reply>"` (a person's go, as a shipped ledger holds one) is an entry with that
 #                clock, so the decision reads ruled and its waiting span is kept
 #
@@ -413,6 +415,26 @@ section "§RULE: a ruling is one verb: decisions rule writes the heading the par
 # the ledger's highest Δ, one without the put's title; leaves decide:D<n> open; or rules a decision already ruled.
 # ANTI-VACUITY: RU-0 reads decide:D7 open through the same extractor RU-4 reads it closed through.
 as_open() { as_register "$1" "$2" | tr ' ' '\n' | /usr/bin/grep -qxF "$3" && echo open || echo gone; }  # <root> <plan> <key>
+# THE USER'S TYPED WORDS (lib/said.sh): this session's transcript under a config directory of its own, the project's
+# load record beside it, and a prompt typed for each reply the fixture means the user to have given, written as
+# release-approval.test.sh's fc_typed writes them. RU_WHEN is the date-and-clock a heading carries, spelled once.
+RU_CFG="$TMPROOT/ru-cfg"
+RU_PROJ="$RU_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "$AS_LIB" "$RF")"
+mkdir -p "$RU_PROJ" "$RU_CFG/bionic" "$RF/.bionic/tmp"
+printf '80\n' > "$RU_CFG/bionic/share"
+printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$RF" > "$RF/.bionic/tmp/loaded-$SID.state"
+RU_TX="$RU_PROJ/$SID.jsonl"; RU_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
+export CLAUDE_CONFIG_DIR="$RU_CFG"
+ru_typed() {  # <prompt>... -> the transcript holds each as a prompt the user typed
+  local t
+  cat "$RU_FX/frame.jsonl" > "$RU_TX"
+  for t in "$@"; do jq -c --arg t "$t" '.message.content = $t' "$RU_FX/typed.jsonl" >> "$RU_TX"; done
+}
+RU_WHEN='[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{1,2}:[0-9]{2} [AP]M [A-Za-z+0-9-]+'
+# as_ruler: the register's entry lines `D<n> · "<reply>" · <who> <date> · <title>` cut to the verb, the reply and the ruler.
+as_ruler() { sed -E 's/^(D[0-9]+ · "[^"]*" · )(.*) [0-9]{4}-[0-9]{2}-[0-9]{2}( · .*)?$/\1\2/'; }
+ru_head() { /usr/bin/grep "^## Δ[0-9]* — $1 ruled" "$RF_LED" | tail -1; }  # <D<n>> -> the ledger's newest ruling heading of it
+ru_typed '1'
 poke "$RF" decisions put D7 'which findings reach the user'
 expect_eq "RU-0 precondition: D7 is put (exit 0) and its ask is open on the run's register" "0|open" "$RC|$(as_open "$RF" "$PF" decide:D7)"
 RU_K="$(( $(sed -n 's/^## Δ\([0-9][0-9]*\).*/\1/p' "$RF_LED" | sort -n | tail -1) + 1 ))"
@@ -436,6 +458,44 @@ expect_eq "RU-5 a second ruling of D7 is refused as already ruled (exit 1), nami
 poke "$RF" decisions rule 7 '1'
 expect_eq "RU-6 a number that is not D<n> is refused (exit 1) and the ledger is byte-identical" "1|same" \
   "$RC|$(cmp -s "$TMPROOT/ru-led-before" "$RF_LED" && echo same || echo changed)"
+
+# A RULING NAMES WHO RULED. The same writer, the same ledger and the same extractor
+# (ru_head) read the three outcomes: the reply is the user's typed words, it is not, and no transcript can be read.
+# ANTI-VACUITY: RU-7 reads a heading through ru_head that names the git user, so RU-8's `orchestrator` is read through
+# an extractor that returns a heading; RU-11's refusal is lifted by typing the reply into the transcript it removed.
+poke "$RF" decisions put D12 'which tier the carry takes'
+poke "$RF" decisions put D11 'what the card says first'
+ru_typed '1' 'take the first option please'
+poke "$RF" decisions rule D12 'take the first option please'
+expect_eq "RU-7 a reply the transcript holds as the user's typed words: ruled (exit 0), the one who ruled the git user" \
+  "0|1" "$RC|$(ru_head D12 | /usr/bin/grep -cE "^## Δ[0-9]+ — D12 ruled \"take the first option please\" \(Dana Fixture $RU_WHEN\): which tier the carry takes\$")"
+poke "$RF" decisions rule D11 'take the second option please'
+expect_eq "RU-8 a reply the transcript does not hold (RU-7's extractor, the same fixture): ruled (exit 0), the one who ruled orchestrator" \
+  "0|1" "$RC|$(ru_head D11 | /usr/bin/grep -cE "^## Δ[0-9]+ — D11 ruled \"take the second option please\" \(orchestrator $RU_WHEN\): what the card says first\$")"
+expect_eq "RU-8b …and says it ruled, naming the reply as given" 'ruled: D11 · "take the second option please" · what the card says first' \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^ruled: ')"
+poke "$RF" decisions
+expect_eq "RU-9 the parser reads both headings as entries, each with its ruler (RU-3's reader)" \
+  'D11 · "take the second option please" · orchestrator|D12 · "take the first option please" · Dana Fixture' \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^D1[12] · "' | as_ruler | LC_ALL=C sort | paste -sd'|' -)"
+expect_eq "RU-9b …and both asks are closed by their rulings" "gone|gone" "$(as_open "$RF" "$PF" decide:D11)|$(as_open "$RF" "$PF" decide:D12)"
+poke "$RF" decisions put D14 'how many findings a page holds'
+ru_typed '1' 'I would go with 2 then'
+poke "$RF" decisions rule D14 '2'
+expect_eq "RU-10 a reply only a word of a typed sentence (too short to be a quote, not the whole prompt) is not the user's: orchestrator" \
+  "0|1" "$RC|$(ru_head D14 | /usr/bin/grep -cE "^## Δ[0-9]+ — D14 ruled \"2\" \(orchestrator $RU_WHEN\): how many findings a page holds\$")"
+poke "$RF" decisions put D13 'when the page is cut'
+rm -f "$RU_TX"
+cp "$RF_LED" "$TMPROOT/ru-led-before"
+poke "$RF" decisions rule D13 'cut it at five findings'
+expect_eq "RU-11 no transcript to read: refused (exit 1) naming the lack, the ledger byte-identical, decide:D13 still open" \
+  "1|yes|same|open" \
+  "$RC|$(as_has "$OUT" 'transcript cannot be found or read')|$(cmp -s "$TMPROOT/ru-led-before" "$RF_LED" && echo same || echo changed)|$(as_open "$RF" "$PF" decide:D13)"
+ru_typed '1' 'cut it at five findings'
+poke "$RF" decisions rule D13 'cut it at five findings'
+expect_eq "RU-11b …and the same call with the reply typed rules it, the git user (RU-11's refusal was the transcript)" \
+  "0|1|gone" "$RC|$(ru_head D13 | /usr/bin/grep -cE "^## Δ[0-9]+ — D13 ruled \"cut it at five findings\" \(Dana Fixture $RU_WHEN\): when the page is cut\$")|$(as_open "$RF" "$PF" decide:D13)"
+CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 POKE_BOUND="$AS_BOUND_WAS"
 
 # ============================================================
@@ -844,6 +904,28 @@ expect_eq "SH-8 …and closes decide:D7 by the ruling (SH-4 read it open)" "gone
 poke "$RFC" decisions
 expect_eq "SH-9 the register's parser reads both rulings as entries" 'D7 · "all default"|D8 · "option 2 for D8"' \
   "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^D[78] · "' | awk -F' · ' '{ print $1 " · " $2 }' | LC_ALL=C sort | paste -sd'|' -)"
+# THE SAME WRITER NAMES WHO RULED. `approve D<n>` carries the reply the orchestrator gives; the card's reply
+# is refused before the writer unless the user typed it (REPLY-8), so only `approve` reaches the other two outcomes.
+# ANTI-VACUITY: SH-3 and SH-7 read headings naming the git user through the extractor SH-10 reads `orchestrator` through.
+sh_head() { /usr/bin/grep "^## Δ[0-9]* — $1 ruled" "$SH_LED" | tail -1; }  # <D<n>> -> the newest ruling heading of it
+SH_WHEN='[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{1,2}:[0-9]{2} [AP]M [A-Za-z+0-9-]+'
+sed -i.bak 's/approval:D8, head |$/approval:D8, approval:D9, approval:D10, head |/' "$PFC" && rm -f "$PFC.bak"
+poke "$RFC" decisions put D9 'which wave takes the carry'
+poke "$RFC" decisions put D10 'whether the card says first'
+poke "$RFC" approve D9 'go with the default for D9'
+expect_eq "SH-10 approve D9 with words the user never typed: exit 0, the heading names orchestrator (SH-3's extractor read the git user)" \
+  "0|1" "$RC|$(sh_head D9 | /usr/bin/grep -cE "^## Δ[0-9]+ — D9 ruled \"go with the default for D9\" \(orchestrator $SH_WHEN\): which wave takes the carry\$")"
+expect_eq "SH-11 …and decide:D9 is closed by that ruling" "gone|yes" \
+  "$(as_open "$RFC" "$PFC" decide:D9)|$(as_has "$(cat "$SH_REG" 2>/dev/null)" '|key=decide:D9|state=closed|by=ruled|')"
+poke "$RFC" decisions
+expect_eq "SH-12 the parser reads the orchestrator's ruling as an entry with that ruler" "D9 · \"go with the default for D9\" · orchestrator" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^D9 · "' | as_ruler)"
+rm -f "$FC_TX"
+cp "$SH_LED" "$TMPROOT/sh-led-before"
+poke "$RFC" approve D10 'go with the default for D10'
+expect_eq "SH-13 approve D10 with no transcript to read: exit 1 naming the lack and the missing ruling, no heading written (the approval itself stands on the plan, and approve:D10 and decide:D10 are one ask)" \
+  "1|yes|yes|same|yes" \
+  "$RC|$(as_has "$OUT" 'transcript cannot be found or read')|$(as_has "$OUT" 'its ruling is not in the design ledger')|$(cmp -s "$TMPROOT/sh-led-before" "$SH_LED" && echo same || echo changed)|$(as_has "$(cat "$PFC")" 'approved: D10 by')"
 CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 POKE_BOUND="$AS_BOUND_WAS"
 
