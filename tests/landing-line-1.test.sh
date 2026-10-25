@@ -1162,6 +1162,13 @@ ww_sdlc "$RW7" "moved: record/wave-x/rev.md#1 to=fixed row=T2 by=Dana at=2026-10
 expect_contains "MOVED-2 …and the move before the landing alone, inside the same window, reads fixed=0 and nothing unplaced" \
   "fixed=0 · unplaced=0" "$(ww_hh "$RW7" --since 2026-10-20T09:00:00Z --until 2026-10-20T14:00:00Z)"
 
+RW9="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RW9")")"
+ww_pub T2 queue 2026-10-20T12:00:00Z > "$(ll_rec "$RW9")"
+ww_sdlc "$RW9" "moved: record/wave-x/rev.md#2 to=fixed row=T2 by=Dana at=2026-10-20T12:01:00Z" \
+  "moved: record/wave-x/rev.md#4 to=fixed row=T2 by=landing at=2026-10-20T12:02:00Z landing=$WW_C"
+expect_contains "MOVED-3 a move the landing wrote (by=landing) is its settlement: beside a hand move after the landing, fixed=1" \
+  "fixed=1 · unplaced=0" "$(ww_hh "$RW9" --since 2026-10-20T09:00:00Z --until 2026-10-20T14:00:00Z)"
+
 # ---------------------------------------------------------------------------
 section "§ORDER: the reader rule and the numbers re-renderer read one publish order"
 # Whether a row was written after the release is publish order: lib/units.sh `_units_publish_order` places each landed

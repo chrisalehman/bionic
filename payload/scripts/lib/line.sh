@@ -762,11 +762,20 @@ _line_load_owed() {
   [ -r "$_LINE_LIB_DIR/owed.sh" ] && . "$_LINE_LIB_DIR/owed.sh" 2>/dev/null
   declare -F owed_close >/dev/null 2>&1
 }
+# The records a landed row answers: those its born marker names, and those of every finding a landing of it settled
+# (`line_settled`'s `ev=settled` lines), once each.
+_line_answered_records() {  # <plan> <row>
+  local rec
+  { _line_born_records "$1" "$2"
+    rec="$(line_record "$1")" && [ -f "$rec" ] && awk -F'|' -v r="$2" "$_LINE_FIELDS_AWK"'
+      line_ev() == "settled" && line_kv("row") == r { n = split(line_kv("findings"), a, ","); for (i = 1; i <= n; i++) { sub(/#[0-9]+$/, "", a[i]); print a[i] } }' "$rec"
+  } | awk 'NF && !s[$0]++'
+}
 # The questions a born row's records were read for are those of the plan's review proof lines naming one of them;
 # each that the judge no longer finds failing has its ask closed, by the landing.
 _line_born_close() {  # <plan> <root> <row>
   local recs qs judged q
-  recs="$(_line_born_records "$1" "$3")" && [ -n "$recs" ] || return 0
+  recs="$(_line_answered_records "$1" "$3")" && [ -n "$recs" ] || return 0
   _line_load_proof || return 0
   qs="$(LINE_RECS="$recs" awk "$(proof_awk)"'
     BEGIN { n = split(ENVIRON["LINE_RECS"], a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") want[a[i]] = 1 }
@@ -796,6 +805,153 @@ _line_carried_close() {  # <plan> <root> <row>
     OWED_ROOT="$2" OWED_PLAN="$1" OWED_SID="${LINE_SID:-line}" owed_close "$k" "landing ${3}" >/dev/null 2>&1
   done
   return 0
+}
+
+# ---------------------------------------------------------------------------- the landing's settlement
+# A LANDING SETTLES EVERYTHING IT PROVES IN ONE ACT, so nothing it proves is settled by hand afterwards. Its plan write
+# (`session-poker.sh row-landed`, which every landing runs) hands its copy of the plan to `line_settle` before the copy
+# is swapped in, and the copy gains, in that one transaction:
+#   · a `moved: <record>#<n> to=fixed row=<row> by=landing at=<at> landing=<commit>` line for each finding carried to
+#     the row (`finding-move … carried <row>`) and for each finding any registered review names at the site of a
+#     finding the row answers (born of it, moved fixed to it, or carried to it); `proof_fixed` then reads each fixed
+#     once the row's verdicts are green, as it reads a person's move;
+#   · the matrix table's status `discharged` for each criterion whose block `evidence:` the same write filled
+#     (`landing_evidence`), unless the cell reads `waived`: a waiver is the person's word and no landing overwrites it.
+# Once the copy is in, `line_settled` closes each settled finding's ask on the register, closes the asks answered
+# carry to the row's landing, and appends `ev=settled` to the landing record naming the row, the commit, the findings
+# and the cells, the one fact the correcting verbs read (`line_settled_by`): `finding-move` and `matrix-set` refuse a
+# cell a landing settled, naming that landing.
+#
+# THE SAME SITE IS A LINE AT EACH REVIEW'S OWN HEAD. A finding names `<path>:<line>` at the head its review read; two
+# reviews read at different heads name one line at different numbers. A site is carried from the answered finding's
+# head to the other review's head through git's diff of the path between them: a line inside a changed hunk has no
+# counterpart, so it joins nothing, and a line outside one moves by the hunks above it. Without both heads in the
+# repository nothing is joined.
+_line_site_map() {  # <root> <path> <line> <from head> <to head> -> the line's number at <to head>; 1 when it has none
+  [ "$4" = "$5" ] && { printf '%s' "$3"; return 0; }
+  git -C "$1" cat-file -e "$4^{commit}" 2>/dev/null && git -C "$1" cat-file -e "$5^{commit}" 2>/dev/null || return 1
+  git -C "$1" diff -U0 --no-color "$4" "$5" -- "$2" 2>/dev/null | awk -v L="$3" '
+    /^@@ / {
+      split($2, o, ","); split($3, w, ",")
+      a = substr(o[1], 2) + 0; b = (2 in o) ? o[2] + 0 : 1; d = (2 in w) ? w[2] + 0 : 1
+      if (b > 0 && L >= a && L <= a + b - 1) { gone = 1; exit }
+      if ((b > 0 && L >= a + b) || (b == 0 && L > a)) off += d - b
+    }
+    END { if (gone) exit 1; print L + off }'
+}
+_line_review_sites() {  # <plan> <docs root> -> `<record>#<n> TAB <path> TAB <line> TAB <head>` per finding with a site, every registered review
+  local ev h
+  _line_load_proof || return 0
+  for ev in $(awk "$(proof_awk)"'
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+      insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE != "" && !(PROOF_EVIDENCE in s) { s[PROOF_EVIDENCE] = 1; print PROOF_EVIDENCE }' "$1" 2>/dev/null); do
+    [ -f "$2/$ev" ] || continue
+    h="$(awk '/^reviewed:[ \t]/ { v = $2; sub(/^.*\.\./, "", v); print v; exit }' "$2/$ev")"
+    proof_findings "$2/$ev" 2>/dev/null | awk -F'\t' -v ev="$ev" -v h="$h" '
+      $1 ~ /^[0-9]+$/ && $4 ~ /:[0-9]+$/ { p = $4; sub(/:[0-9]+$/, "", p); l = substr($4, length(p) + 2); print ev "#" $1 "\t" p "\t" l "\t" h }'
+  done
+}
+# _line_same_site <root> <answered sites> <moves> -> each finding on stdin (`<record>#<n> TAB <path> TAB <line> TAB
+# <head>`) at one of the answered sites, carried to its own head; a finding a person moved to defer or fixed is left:
+# their ruling stands.
+_line_same_site() {
+  local id p l h op ol oh mv
+  while IFS='	' read -r id p l h; do
+    [ -n "$id" ] || continue
+    mv="$(printf '%s\n' "$3" | awk -F'\t' -v i="$id" '$1 == i { print $2; exit }')"
+    if [ "$mv" = defer ] || [ "$mv" = fixed ]; then continue; fi
+    while IFS='	' read -r op ol oh; do
+      [ -n "$op" ] && [ "$op" = "$p" ] || continue
+      if [ "$(_line_site_map "$1" "$op" "$ol" "$oh" "$h")" = "$l" ]; then printf '%s\n' "$id"; break; fi
+    done <<LINE_OWN_SITES
+$2
+LINE_OWN_SITES
+  done
+}
+# _line_moves <plan> -> `<record>#<n> TAB <to> TAB <row>` per finding: its newest `moved:` line, a carry among them
+_line_moves() {
+  awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
+    insdlc && /^moved:[ \t]/ {
+      split($0, f, /[ \t]+/); id = f[2]; to = f[3]; sub(/^to=/, "", to); r = ""
+      if (f[4] ~ /^row=/) r = substr(f[4], 5)
+      if (!(id in last)) ord[++n] = id
+      last[id] = to "\t" r
+    }
+    END { for (i = 1; i <= n; i++) print ord[i] "\t" last[ord[i]] }' "$1" 2>/dev/null
+}
+# line_settle <plan> <row> <commit> <copy> <at> [<criteria>] -> 0 with <copy> settled; 1 when it cannot be written.
+# <plan> is read for what the row answers, <copy> is the copy the plan write swaps in, <criteria> the AC ids whose
+# evidence that write filled, space-separated. Sets LINE_SETTLED_F (findings) and LINE_SETTLED_C (cells), space-separated.
+line_settle() {
+  local plan="$1" row="$2" com="$3" copy="$4" at="$5" acs="${6:-}" root docs own sites osites moves id ac st
+  LINE_SETTLED_F=""; LINE_SETTLED_C=""
+  root="$(_line_root "$plan")" || return 0
+  _line_load_proof || return 0
+  _proof_roots_load; docs="$(docs_root "$root" 2>/dev/null)"
+  moves="$(_line_moves "$copy")"
+  _wt_units_load >/dev/null 2>&1
+  # What the row answers: born of it, moved fixed to it, carried to it.
+  own="$( { units_born_findings "$copy" 2>/dev/null | awk -F'\t' -v r="$row" '$1 == r { print $3 }'
+            printf '%s\n' "$moves" | awk -F'\t' -v r="$row" '($2 == "fixed" || $2 == "carried") && $3 == r { print $1 }'; } | awk 'NF && !s[$0]++')"
+  if [ -n "$own" ] && [ -n "$docs" ]; then
+    sites="$(_line_review_sites "$copy" "$docs")"
+    osites="$(printf '%s\n' "$sites" | LINE_OWN="$own" awk -F'\t' '
+      BEGIN { n = split(ENVIRON["LINE_OWN"], a, "\n"); for (i = 1; i <= n; i++) own[a[i]] = 1 }
+      ($1 in own) { print $2 "\t" $3 "\t" $4 }')"
+    LINE_SETTLED_F="$(
+      printf '%s\n' "$moves" | awk -F'\t' -v r="$row" '$2 == "carried" && $3 == r { print $1 }'
+      printf '%s\n' "$sites" | LINE_OWN="$own" awk -F'\t' '
+        BEGIN { n = split(ENVIRON["LINE_OWN"], a, "\n"); for (i = 1; i <= n; i++) own[a[i]] = 1 }
+        $1 != "" && !($1 in own)' | _line_same_site "$root" "$osites" "$moves"
+    )"
+    LINE_SETTLED_F="$(printf '%s\n' "$LINE_SETTLED_F" | awk 'NF && !s[$0]++' | tr '\n' ' ')"
+    for id in $LINE_SETTLED_F; do
+      proof_add_line "$copy" "moved: $id to=fixed row=$row by=landing at=$at landing=$com" > "$copy.st" 2>/dev/null && [ -s "$copy.st" ] \
+        || { rm -f "$copy.st"; return 1; }
+      mv -f "$copy.st" "$copy"
+    done
+  fi
+  if declare -F matrix_row_cells >/dev/null 2>&1; then
+    for ac in $acs; do
+      st="$(matrix_row_cell "$copy" "$ac" 3)"
+      case "$st" in ''|waived|discharged) continue ;; esac
+      matrix_row_cells "$copy" "$ac" 3=discharged > "$copy.st" 2>/dev/null || { rm -f "$copy.st"; return 1; }
+      mv -f "$copy.st" "$copy"
+      LINE_SETTLED_C="${LINE_SETTLED_C}${ac} "
+    done
+  fi
+  LINE_SETTLED_F="${LINE_SETTLED_F% }"; LINE_SETTLED_C="${LINE_SETTLED_C% }"
+  return 0
+}
+# line_settled <plan> <root> <row> <commit> -> always 0: the register and the record half of `line_settle`, once the
+# copy it settled is the plan.
+line_settled() {
+  local plan="$1" root="$2" row="$3" com="$4" id k
+  if [ -n "$LINE_SETTLED_F" ] && _line_load_owed && declare -F finding_owed_key >/dev/null 2>&1; then
+    for id in $LINE_SETTLED_F; do
+      k="$(finding_owed_key "$id")"
+      OWED_ROOT="$root" OWED_PLAN="$plan" OWED_SID="${LINE_SID:-line}" owed_close "$k" "landing ${row}" >/dev/null 2>&1
+      OWED_ROOT="$root" OWED_PLAN="$plan" OWED_SID="${LINE_SID:-line}" owed_close "carry:${k#finding:}" "landing ${row}" >/dev/null 2>&1
+    done
+  fi
+  _line_carried_close "$plan" "$root" "$row"
+  [ -z "${LINE_SETTLED_F}${LINE_SETTLED_C}" ] \
+    || line_event "$plan" settled "row=${row}" "commit=${com}" "findings=$(printf '%s' "$LINE_SETTLED_F" | tr ' ' ',')" \
+         "cells=$(printf '%s' "$LINE_SETTLED_C" | tr ' ' ',')" >/dev/null
+  return 0
+}
+# line_settled_by <plan> <findings|cells> <id> -> `<row> <commit>` of the newest landing that settled <id>; 1 when none did
+line_settled_by() {
+  local rec
+  rec="$(line_record "$1")" && [ -f "$rec" ] || return 1
+  awk -F'|' -v k="$2" -v id="$3" "$_LINE_FIELDS_AWK"'
+    line_ev() == "settled" { n = split(line_kv(k), a, ","); for (i = 1; i <= n; i++) if (a[i] == id) w = line_kv("row") " " line_kv("commit") }
+    END { if (w == "") exit 1; print w }' "$rec"
 }
 
 line_publish() {  # <plan> <row> -> 0 published · 3 rebuild · 4 held · 5 moved · 6 guard · 2 refused · 75 lock
@@ -888,10 +1044,9 @@ EOF
   # 10. THE ROSTER MARK (T6): `landed=<40-hex> landed_at=<ISO-UTC>` on the row's roster line.
   _line_roster_mark "$plan" "$root" "$row" "$cand" "$at"
   _line_lock_drop "$lk"
-  # 11. THE REVIEW A BORN ROW ANSWERS, asked again once the row reads landed (`_line_born_close`), outside the lock:
-  # the judge reads git and the record, and no publish waits on it. The findings carried to this row close with it.
+  # 11. THE REVIEWS THE ROW ANSWERS, asked again once the row reads landed (`_line_born_close`), outside the lock:
+  # the judge reads git and the record, and no publish waits on it. The findings the plan write settled closed with it.
   _line_born_close "$plan" "$root" "$row"
-  _line_carried_close "$plan" "$root" "$row"
   LINE_PUBLISHED="$cand"; LINE_CHECKOUT="$co"
   return 0
 }
@@ -960,7 +1115,7 @@ _line_bound_to() {  # <root> <sid> <plan>
 # own: when it ends, published or not, its entry holds nothing.
 # THE WRITER'S VERDICTS, IN THE PERSON'S WORDS. A hand landing runs nothing, so what it records of the
 # row's suites is what the person says of the writer's run: the suites, the commit they were green at
-# (a commit the row's head holds) and the log that shows it. Once published, each is one green verdict
+# (a commit the row's head holds) and the log that shows it. Before the publish, each is one green verdict
 # for the row keyed by that commit, written by the line's one verdict writer, its log that source. All
 # three or none: with none the landing records the row alone, as before.
 line_land_by_hand() {  # <tree> <root> <sid> <why> [<suites> <green-at> <log>] -> LANDED | REFUSED
@@ -987,8 +1142,8 @@ line_land_by_hand() {  # <tree> <root> <sid> <why> [<suites> <green-at> <log>] -
 # one shape and the floor's judge (lib/proof.sh `_proof_past_f`) proves either. `_line_hand_ready` writes the row's
 # `ready` event, naming the suites (`none` when the person named none), and sets LINE_ME, the carrier a publish locks
 # by. `_line_hand_verdicts` writes one green verdict per suite, keyed by the commit they were green at, the log that
-# source; a suite it cannot write is left in LINE_UNWRITTEN. The ready event goes before the published line the
-# judge reads the row's suites from, the verdicts anywhere after it.
+# source; a suite it cannot write is left in LINE_UNWRITTEN. Both go before the published line: the judge reads the
+# row's suites from the ready event, and the publish's reading of the reviews the row answers reads the verdicts.
 _line_hand_ready() {  # <plan> <row> <commit> <branch> <tree> <suites | empty> -> 0 written
   _line_me
   line_event "$1" ready "row=$2" "name=-" "commit=$3" "branch=$4" "tree=$5" "suites=${6:-none}" debt=- "carrier=${LINE_ME}"
@@ -1022,6 +1177,12 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
   [ -n "$by" ] || by="$(git -C "$root" var GIT_AUTHOR_IDENT 2>/dev/null | sed 's/ <.*//')"
   by="${by//|/}"; [ -n "$by" ] || by="-"
   _line_hand_ready "$plan" "$row" "$head" "$branch" "$wt" "$suites" >/dev/null || { _wt_refuse "record-unwritable why=proofs-unwritable path=${rec} branch=${branch}"; return 2; }
+  # The person's verdicts go in before the publish, as `row-landed --by-hand` writes them: the publish's own reading of
+  # the reviews the row answers (`_line_born_close`) judges the row by them, so a born row's landing closes its ask.
+  if [ -n "$suites" ]; then
+    _line_hand_verdicts "$plan" "$row" "$g" "$suites" "$vlog" \
+      || { _wt_refuse "verdicts-unwritten row=${row} path=${rec} — the verdict for ${LINE_UNWRITTEN} at ${g} is not recorded, so nothing is published; make the record writable, land again"; return 2; }
+  fi
   LINE_KIND=hand; LINE_BY="$by"; LINE_WHY="$why"; LINE_SID="$sid"
   n="${BIONIC_LINE_HAND_WAIT:-900}"; case "$n" in ''|*[!0-9]*) n=900 ;; esac
   lt=""; lb=""; i=0; rc=3
@@ -1062,11 +1223,7 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
   done
   [ -z "$lt" ] || landing_tree_free "$lt"
   [ "$rc" = 0 ] || return 2
-  if [ -n "$suites" ]; then
-    _line_hand_verdicts "$plan" "$row" "$g" "$suites" "$vlog" \
-      || { _wt_refuse "verdicts-unwritten row=${row} path=${rec} — published ${LINE_PUBLISHED}; the verdict for ${LINE_UNWRITTEN} at ${g} is not recorded"; return 2; }
-    printf 'verdicts: %s green at %s, from %s\n' "$suites" "$g" "$vlog"
-  fi
+  [ -z "$suites" ] || printf 'verdicts: %s green at %s, from %s\n' "$suites" "$g" "$vlog"
   _wt_hand_remove "$wt" "$root" "$branch" "$onto" "${LINE_CHECKOUT:-<none>}" "$LINE_PUBLISHED" "$rec" || return $?
   # What is owed, when the row has an agent on this session's roster (T6): its task, then its stop.
   [ -z "$LINE_MARKED" ] || _line_owed "$row" "$LINE_PUBLISHED" "$LINE_MARKED"

@@ -246,6 +246,13 @@ FIXEOF
 }
 nt_plan() { printf '%s/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md' "$1"; }
 nt_req()  { printf '%s/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md' "$1"; }
+# nt_current <repo> <step> -> the fixture plan at that step. A card opens its step's ask only while that step is the
+# plan's current one, so a card is rendered through nt_card_at, at the step it draws, and the plan goes back to the
+# fixture's own step 3, the one the approve verb's commit gate reads a line for.
+nt_current() { sed "s/^current: [0-9]*\$/current: $2/" "$(nt_plan "$1")" > "$TMPROOT/plan.cur" && mv "$TMPROOT/plan.cur" "$(nt_plan "$1")"; }
+nt_card_at() {  # <repo> <step> <verb> <artifact> -> nt_card at that step, the plan restored after
+  nt_current "$1" "$2"; nt_card "$1" "$3" "$4"; nt_current "$1" 3
+}
 nt_spec() { printf '%s/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md' "$1"; }
 
 # ============================================================
@@ -256,7 +263,7 @@ channel_on "$CLAUDE_CONFIG_DIR"
 RO="$(nt_run nt-once)"
 : > "$NT_CALLS"
 
-nt_card "$RO" step1 "$(nt_req "$RO")"
+nt_card_at "$RO" 1 step1 "$(nt_req "$RO")"
 expect_eq "N1 the Step-1 card renders (exit 0)" "0" "$NT_RC"
 N_LIST="$(nt_owed "$RO" owed_list)"
 expect_nonempty "N1b the store reader answers: the card opened an item (the extractor works)" "$N_LIST"
@@ -279,7 +286,7 @@ expect_contains "N2g …where the Stop stamped the item it sent" "|key=approve:s
 
 nt_stop "$RO"
 expect_eq "N3 AC-2.2 a later turn on the same unresolved block sends nothing" "1" "$(nt_calls)"
-nt_card "$RO" step1 "$(nt_req "$RO")"
+nt_card_at "$RO" 1 step1 "$(nt_req "$RO")"
 nt_stop "$RO"
 expect_eq "N3a …nor does the same card rendered again (the open is idempotent per key)" "1" "$(nt_calls)"
 nt_stop "$RO" Stop true
@@ -303,7 +310,7 @@ N_KEYS="$(nt_owed "$RO" owed_list | cut -f1)"
 expect_contains "N5a …the store still lists the card's open item (the reader works here)" "approve:step1" "$N_KEYS"
 expect_absent "N5b …and the approval's item is closed by the verb that answered it" "approve:release" "$N_KEYS"
 
-nt_card "$RO" step2 "$(nt_spec "$RO")"
+nt_card_at "$RO" 2 step2 "$(nt_spec "$RO")"
 expect_eq "N6 the Step-2 card renders (exit 0)" "0" "$NT_RC"
 N_KEYS="$(nt_owed "$RO" owed_list | cut -f1)"
 expect_contains "N6a …it opens approve:step2" "approve:step2" "$N_KEYS"
@@ -330,9 +337,9 @@ expect_absent "N8d …and approve:step2 with it" "approve:step2" "$N_KEYS"
 RO2="$(nt_run nt-other)"
 mkdir -p "$RO2/.bionic/docs/specs/epic-98-other"
 cp "$(nt_req "$RO2")" "$RO2/.bionic/docs/specs/epic-98-other/wave-02-other.requirements.md"
-nt_card "$RO2" step1 "$RO2/.bionic/docs/specs/epic-98-other/wave-02-other.requirements.md"
+nt_card_at "$RO2" 1 step1 "$RO2/.bionic/docs/specs/epic-98-other/wave-02-other.requirements.md"
 expect_eq "N9 another run's card renders (exit 0)" "0" "$NT_RC"
-nt_card "$RO2" step1 "$(nt_req "$RO2")"
+nt_card_at "$RO2" 1 step1 "$(nt_req "$RO2")"
 expect_eq "N9a …and opens nothing: the only item is this run's own card's" "approve:step1" \
   "$(nt_owed "$RO2" owed_list | cut -f1 | tr '\n' ' ' | sed 's/ $//')"
 

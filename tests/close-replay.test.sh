@@ -23,9 +23,12 @@
 #   §REAL    the sandbox's config declares tests/lib/release-check.sh, the sandbox's own copy is the one that ran,
 #            and every hand write in the log is one a person, an agent or the harness writes in a real run, and the log
 #            is valid UTF-8 throughout, so every reader reads the whole of it
+#   §SR      the replay plants a second review naming the fix row's site under another question; the fix row's landing
+#            writes it fixed, no finding-move follows the landing, and the close reads zero
 #   §SINGLE  the rehearsal's single-rigor state (`rehearse single-verify`, on door.sh's `door_world_single`) stands at
-#            current: 5 with the build's criterion discharged and its auditor cell empty, its log naming the verbs that
-#            brought it there and no discharge: the bed a single-rigor review's verdicts are carried on
+#            current: 5 with the build's criterion discharged by the build's landing, the critic's evidence review registered
+#            on its own roster row and its verdicts carried into the auditor cell and the head's auditor-wave: line, its log
+#            naming the verbs that brought it there and no discharge
 #
 # NAMED, NOT COUNTED: the rows reading the replay's part (CL-8, VB-1, VB-2) name each verb the replay runs and each kind
 # of hand write it makes, so a log that lost one of them is red however long it is.
@@ -238,6 +241,26 @@ if cr_reached "WINDOW-0"; then
 fi
 
 # ============================================================
+section "§SR: a second record at the fix row's site is settled by the fix row's landing, with no move after it"
+# ============================================================
+# fails-when: the second record names another site, the replay's log shows a finding-move after the fix row's landing,
+# the second finding is not written fixed by the landing, or the close reads above zero.
+if cr_reached "SR-0"; then
+  SR_A="$(/usr/bin/grep '^finding: 1 ' "$CR_REC/w-structure-whole-2.md" 2>/dev/null | awk '{ print $5 }')"
+  SR_B="$(/usr/bin/grep '^finding: 1 ' "$CR_REC/w-adversarial-whole-2.md" 2>/dev/null | awk '{ print $5 }')"
+  expect_eq "SR-1 the replay plants a second review, registered under adversarial, naming the fix row's site" "yes|$SR_A" \
+    "$(/usr/bin/grep -q '^proved: kind=review .*evidence=record/wave-x/w-adversarial-whole-2.md question=adversarial ' "$CR_PLAN" && echo yes)|$SR_B"
+  expect_contains "SR-1b …the site is a line of the library the fix answers" "payload/scripts/lib/said.sh:" "$SR_A"
+  SR_AFTER="$(cr_part | awk '/^\$ / { c = $0; next } /^  rc=[0-9]+  \(the fix row says ready, / { f = 1; next } f && /^  rc=/ { print c }')"
+  expect_contains "SR-2 commands follow the fix row's landing in the replay's log (read beside the moves)" "close-out.sh" "$SR_AFTER"
+  expect_eq "SR-2b …and none of them is a finding-move" "" "$(printf '%s\n' "$SR_AFTER" | /usr/bin/grep 'session-poker\.sh finding-move')"
+  expect_eq "SR-3 the second finding is written fixed by the fix row's landing" "yes" \
+    "$(/usr/bin/grep -q '^moved: record/wave-x/w-adversarial-whole-2\.md#1 to=fixed row=T5 by=landing ' "$CR_PLAN" && echo yes)"
+  expect_contains "SR-4 the close reads zero with the window at delivered:" "hand-holds: total=0 " \
+    "$(cr_out 'close-out, the tail' | /usr/bin/grep '^hand-holds: ')"
+fi
+
+# ============================================================
 section "§VERBS: every refusal the replay met names the verb that writes the cell, and that verb then writes it"
 # ============================================================
 # fails-when: a refusal names no verb of deliver, amend, task-set and step-field, a refused call is left unfollowed,
@@ -366,7 +389,8 @@ fi
 section "§SINGLE: the single-rigor run reaches the Verify gate with no discharge"
 # ============================================================
 # fails-when: the rehearsal's single-rigor state does not build, its plan is not at rigor: single, it does not stand at
-# current: 5 with the build's criterion discharged, the auditor cell holds a verdict, or its log runs discharge.
+# current: 5 with the build's criterion discharged, the auditor cell or the head's auditor-wave: line lacks the critic's
+# verdict, the evidence review is registered on any row but the critic's, or its log runs discharge.
 SG_DIR="$WORLD_ROOT/single-verify"; SG_RC=0; SG_PLAN=""
 if [ "$CR_LOADED" = 1 ]; then
   SG_PLAN="$(rehearse single-verify "$SG_DIR" 2> "$WORLD_ROOT/single-verify.err")" || SG_RC=$?
@@ -380,15 +404,24 @@ if [ "$SG_RC" = 0 ] && [ -f "$SG_PLAN" ]; then
     "$(awk '/^---$/ { n++; next } n == 1 && /^rigor:/ { sub(/^rigor:[[:space:]]*/, ""); print }' "$SG_PLAN")"
   expect_eq "SG-3 the run stands at the Verify gate: current: 5, the Step 5 line written" "5|yes" \
     "$(sed -n 's/^current:[[:space:]]*//p' "$SG_PLAN" | head -1)|$(/usr/bin/grep -q '^- Step 5: ' "$SG_PLAN" && echo yes)"
-  # The matrix row as the table holds it: status and auditor cells, so the empty auditor is read beside a status.
-  expect_eq "SG-4 the build's criterion is discharged by status, and its auditor cell is still empty (—)" "discharged|—" \
+  # The matrix row as the table holds it: status and auditor cells, so the auditor cell is read beside a status.
+  expect_eq "SG-4 the build's criterion is discharged by status, and its auditor cell holds the critic's verdict, the bare token" "discharged|CONFIRMED" \
     "$(awk -F'|' '$2 ~ /^ *AC-1\.1 *$/ { s = $4; a = $6; gsub(/^ +| +$/, "", s); gsub(/^ +| +$/, "", a); print s "|" a }' "$SG_PLAN")"
   SG_NAMES="$(cr_names < "$SG_DIR/rehearsal.log" | cut -d'|' -f2-)"
   expect_eq "SG-5 the log names the verbs that brought it there" \
-    "session-poker.sh matrix-render|session-poker.sh matrix-set|session-poker.sh step-line|session-poker.sh step-field|session-poker.sh current" \
-    "$(printf '%s\n' "$SG_NAMES" | cr_held 'session-poker.sh matrix-render|session-poker.sh matrix-set|session-poker.sh step-line|session-poker.sh step-field|session-poker.sh current')"
+    "session-poker.sh matrix-render|spawn-worktree.sh ready|session-poker.sh proof-add review|session-poker.sh step-line|session-poker.sh step-field|session-poker.sh current" \
+    "$(printf '%s\n' "$SG_NAMES" | cr_held 'session-poker.sh matrix-render|spawn-worktree.sh ready|session-poker.sh proof-add review|session-poker.sh step-line|session-poker.sh step-field|session-poker.sh current')"
   expect_eq "SG-5b …and discharge is not among them" "" \
     "$(printf '%s\n' "$SG_NAMES" | cr_held 'session-poker.sh discharge')"
+  expect_eq "SG-6 the status is the landing's: no matrix-set writes a status (rehearsal.sh holds none), the block's evidence is the landing's log" "0|yes" \
+    "$(/usr/bin/grep -c 'matrix-set.*status=' "$BIONIC_SCRIPTS_DIR/tests/lib/rehearsal.sh")|$(awk '/^AC-1\.1:/ { b = 1; next } b && /^[^ \t]/ { b = 0 } b && /^[ \t]+evidence: record\/wave-x\/line\/T1-rehearsal-row-/ { y = 1 } END { if (y) print "yes" }' "$SG_PLAN")"
+  # The evidence review: one proof line of the question, its reader's roster row the critic's, dealt evidence.
+  SG_READER="$(sed -n 's/^proved: kind=review .* question=evidence reader=\([^ ]*\) .*/\1/p' "$SG_PLAN" | tail -1)"
+  expect_eq "SG-7 the evidence question was read by the critic: its proof line names a reader whose roster row is bionic:critic, dealt evidence" \
+    "w-evidence-whole|bionic:critic|evidence" \
+    "$SG_READER|$(/usr/bin/grep -h "|name=${SG_READER:-none}|" "$SG_DIR"/project/.bionic/tmp/roster-*.state 2>/dev/null | tail -1 | tr '|' '\n' | sed -n 's/^subagent_type=//p;s/^questions=//p' | paste -sd'|' -)"
+  expect_eq "SG-7b …and its wave verdict is the head's auditor-wave: line, above the table" "auditor-wave: CONFIRMED — every requirement has a row|yes" \
+    "$(awk '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 } m && /^\|/ { exit } m && /^auditor-wave:/' "$SG_PLAN")|$(awk '/^## Verification Matrix/ { m = 1; next } m && /^stack-health:/ { s = 1 } m && /^\|/ { exit } END { if (s) print "yes" }' "$SG_PLAN")"
 else
   printf '    the single-rigor rehearsal stopped; rehearse said:\n'
   sed 's/^/    | /' "$WORLD_ROOT/single-verify.err" 2>/dev/null | cut -c1-400 | tail -12
