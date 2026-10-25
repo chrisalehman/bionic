@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for hooks/session-poker.sh — shard 5: §CHECK, §DECISIONS, §ROUNDS, §EARLY-TICK, §ORDER, §QUIET-LANDING,
-# §NOTREADY, §STEP, §TSENTENCE, §CAP, §OWED, §EXEMPT.
+# §NOTREADY, §STEP, §TSENTENCE, §CAP, §OWED, §EXEMPT, §APPROVED-BY, §PARTS.
 #
 # THE SUITE IS SHARDS (wave-30 T2; design-ledger Δ7, D8). Its governing design, its hermetic
 # posture and its clock discipline are written once, in tests/session-poker.test.sh's header;
@@ -942,5 +942,93 @@ poke "$RAB" approve plan 'approved'
 expect_eq "AB-3 a second approve plan is refused (exit 1) and the plan is unchanged" "1|yes" "$RC|$([ "$AB_BEFORE" = "$(cat "$PAB")" ] && echo yes || echo no)"
 expect_contains "AB-3b …as recorded once" "recorded once" "$OUT"
 POKE_BOUND="$AB_BOUND_WAS"
+
+# ============================================================
+section "§PARTS: the release-entry parts render in the checkout they run from: a row's tree commits on its own branch and the working branch stays put, the working branch's checkout moves it, and the part line names the tree (REQ-12 AC-12.1, AC-12.2)"
+# ============================================================
+# `known-limits-part <row>` and `reviews-part <row>` read CHANGELOG.md at the HEAD of the checkout they run from, render
+# the part into that checkout and commit it on that checkout's branch, so a row's tree can render the part its own
+# landing carries. Only the checkout holding the plan's working branch moves that branch. A checkout on main can take
+# no commit of its own, so from there the part goes to the working branch as before. The landing record's part line
+# names the tree that took the commit.
+# FIXTURE FIDELITY: s34_plan's plan, bound to this session, with the working branch and the release in its frontmatter
+# as Step 0 writes them; the doc and integrate rows are the table's own shape; the deferral is lib/proof.sh
+# `proof_finding_lines`' line and its sentence the `finding-stated` verb's; the waiver is `proof_waiver_line`'s, the
+# line `waive` writes. The row's tree is a linked worktree on its own branch cut at the working branch, as
+# `spawn-worktree.sh create` makes it; the entry is a plain commit on the working branch.
+# fails-when: a verb run from the row's tree commits on the working branch or moves it, leaves the tree's branch or its
+# working tree without the part, changes the commit message, or writes no tree= on the part line; the working branch's
+# checkout no longer moves its branch; a checkout on main commits on main.
+PA_V=9.9.9
+PA_S1='The one limit the run defers, stated.'
+PA_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+pa_lib() { bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 9; shift; "$@"' _ "$PA_LIB" "$@"; }   # <fn> [args…]
+pa_tip() { git -C "$RPA" rev-parse --verify -q "refs/heads/$1"; }   # <branch>
+pa_ev() { find "$RPA/.bionic" -name landing-proofs.log -exec cat {} + 2>/dev/null | /usr/bin/grep "|part=$1|" | tail -1; }   # <part>
+pa_has() { /usr/bin/grep -c "^$2" "$1/CHANGELOG.md" 2>/dev/null | tr -d ' '; }   # <checkout> <line start> -> the count in its working tree
+RPA="$(make_repo parts)"; RPA="$(cd "$RPA" && pwd -P)"
+git -C "$RPA" config user.email t@example.com; git -C "$RPA" config user.name "Dana Fixture"
+printf '# Changelog\n\n## %s — 2026-10-25\n\n### The work\n\n- one change\n\n### The landing numbers\n\nthe numbers\n' "$PA_V" > "$RPA/CHANGELOG.md"
+( cd "$RPA" && git add CHANGELOG.md && git commit -qm "the entry" && git branch -M main && git checkout -qb wave/01-fixture ) >/dev/null 2>&1
+PPA="$(s34_plan "$RPA" 4)"
+awk -v v="$PA_V" 'NR == 1 { print; print "working-branch: wave/01-fixture"; print "release: " v; next }
+  { print }
+  /^\| T5 \|/ { print "| T3 | 7 | doc | the entry. The release entry is written. | orchestrator | — | 10 | REQ-1 | CHANGELOG.md | — | — | pending |"
+               print "| T4 | 8 | integrate | the pull request. The run reaches main. | orchestrator | — | 10 | REQ-1 | — | — | — | pending |" }' \
+  "$PPA" > "$PPA.n" && mv "$PPA.n" "$PPA"
+PA_H="$(pa_tip wave/01-fixture)"
+PA_ADD="$(printf '%s\n%s' "$(pa_lib proof_finding_lines record/wave-01-fixture/critic.md "$(printf '1\tS3\ton\t-\tdefer\t-\tthe one title')")" \
+  "$(pa_lib proof_waiver_line adversarial "$PA_H" 'Dana Fixture' 2026-10-25T10:00:00Z 'go on')")"
+PA_ADD="$PA_ADD" awk '{ print } /^- T2: / && !d { print ENVIRON["PA_ADD"]; d = 1 }' "$PPA" > "$PPA.n" && mv "$PPA.n" "$PPA"
+poke "$RPA" finding-stated record/wave-01-fixture/critic.md#1 "$PA_S1"
+PA_STATED="$RC"
+git -C "$RPA" worktree add -q -b wt/01-T3 "$TMPROOT/parts-T3" wave/01-fixture >/dev/null 2>&1
+PA_WT="$(cd "$TMPROOT/parts-T3" && pwd -P)"
+expect_eq "PA-0 precondition: the plan's working branch is wave/01-fixture, the sentence is stated, the waiver is a line of its own, the row's tree is on wt/01-T3 at the working branch's head" \
+  "wave/01-fixture|0|1|wt/01-T3|$PA_H" \
+  "$(pa_lib plan_working_branch "$PPA")|$PA_STATED|$(/usr/bin/grep -c '^waived: question=adversarial ' "$PPA" | tr -d ' ')|$(git -C "$PA_WT" symbolic-ref --short -q HEAD)|$(git -C "$PA_WT" rev-parse HEAD)"
+
+poke "$PA_WT" known-limits-part T3
+PA_T1="$(pa_tip wt/01-T3)"
+expect_eq "PA-1 known-limits-part run from the row's tree commits on the tree's branch: exit 0, the line's author, on the tree's head, the message as before" \
+  "0|bionic line|$PA_H|line: the $PA_V entry's Known limits, rendered from the plan's deferrals" \
+  "$RC|$(git -C "$RPA" log -1 --format='%an|%P|%s' "$PA_T1" 2>/dev/null)"
+[ "$RC" = 0 ] || printf '%s\n' "$OUT" | tail -6 | sed 's/^/    | /'
+expect_eq "PA-1b …rendered into the tree: its HEAD is the commit, its CHANGELOG.md holds the sentence and is clean" \
+  "$PA_T1|1|" "$(git -C "$PA_WT" rev-parse HEAD)|$(pa_has "$PA_WT" "- $PA_S1")|$(git -C "$PA_WT" status --porcelain -- CHANGELOG.md)"
+expect_eq "PA-2 …and the working branch is where it was, its checkout without the part" \
+  "$PA_H|$PA_H|0" "$(pa_tip wave/01-fixture)|$(git -C "$RPA" rev-parse HEAD)|$(pa_has "$RPA" "- $PA_S1")"
+expect_contains "PA-3 the part line names the commit, the tree's branch and the tree" \
+  "|ev=doc|row=T3|part=known-limits|commit=$PA_T1|branch=wt/01-T3|tree=$PA_WT|at=" "$(pa_ev known-limits)"
+
+poke "$PA_WT" reviews-part T4
+PA_T2="$(pa_tip wt/01-T3)"
+expect_eq "PA-4 reviews-part run from the row's tree commits on the tree's branch: exit 0, the line's author, on the tree's head, the message as before" \
+  "0|bionic line|$PA_T1|line: the $PA_V entry's reviews, rendered from the plan before the pull request" \
+  "$RC|$(git -C "$RPA" log -1 --format='%an|%P|%s' "$PA_T2" 2>/dev/null)"
+[ "$RC" = 0 ] || printf '%s\n' "$OUT" | tail -6 | sed 's/^/    | /'
+expect_eq "PA-4b …rendered into the tree: its HEAD is the commit and its CHANGELOG.md holds the part" \
+  "$PA_T2|1" "$(git -C "$PA_WT" rev-parse HEAD)|$(pa_has "$PA_WT" '### The reviews')"
+expect_eq "PA-5 …and the working branch is where it was" "$PA_H|0" "$(pa_tip wave/01-fixture)|$(pa_has "$RPA" '### The reviews')"
+expect_contains "PA-6 the part line names the commit, the tree's branch and the tree" \
+  "|ev=integrate|row=T4|part=reviews|commit=$PA_T2|branch=wt/01-T3|tree=$PA_WT|at=" "$(pa_ev reviews)"
+
+poke "$RPA" known-limits-part T3
+PA_T3="$(pa_tip wave/01-fixture)"
+expect_eq "PA-7 run from the checkout holding the working branch, known-limits-part moves that branch: exit 0, a commit on its old head" \
+  "0|bionic line|$PA_H" "$RC|$(git -C "$RPA" log -1 --format='%an|%P' "$PA_T3" 2>/dev/null)"
+expect_eq "PA-7b …by a fast-forward of that checkout, which holds the sentence; the row's branch is untouched" \
+  "$PA_T3|1|$PA_T2" "$(git -C "$RPA" rev-parse HEAD)|$(pa_has "$RPA" "- $PA_S1")|$(pa_tip wt/01-T3)"
+expect_contains "PA-8 …and its part line names the working branch and its checkout" \
+  "|ev=doc|row=T3|part=known-limits|commit=$PA_T3|branch=wave/01-fixture|tree=$RPA|at=" "$(pa_ev known-limits)"
+
+git -C "$RPA" worktree add -q "$TMPROOT/parts-main" main >/dev/null 2>&1
+PA_M="$(pa_tip main)"
+poke "$TMPROOT/parts-main" reviews-part T4
+PA_T4="$(pa_tip wave/01-fixture)"
+expect_eq "PA-9 run from a checkout on main, reviews-part commits on the working branch as before, main unmoved" \
+  "0|$PA_T3|$PA_M|$PA_T4" "$RC|$(git -C "$RPA" log -1 --format='%P' "$PA_T4" 2>/dev/null)|$(pa_tip main)|$(git -C "$RPA" rev-parse HEAD)"
+expect_contains "PA-9b …and its part line names the working branch and the checkout holding it" \
+  "|ev=integrate|row=T4|part=reviews|commit=$PA_T4|branch=wave/01-fixture|tree=$RPA|at=" "$(pa_ev reviews)"
 
 finish
