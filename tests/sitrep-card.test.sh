@@ -1127,7 +1127,7 @@ section "§ONE-READER: the goal's status, the task's title and the goal's measur
 OR_R="$TMPROOT/one-reader"; OR_D="$OR_R/.bionic/docs/record/wave-02-fx"; OR_P="$OR_R/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
 OR_Q="$OR_R/.bionic/docs/specs/epic-01-fx/wave-02-fx.requirements.md"
 mkdir -p "$OR_D" "${OR_P%/*}" "${OR_Q%/*}" "$OR_R/.bionic/tmp"; ( cd "$OR_R" && git init -q . ); : > "$OR_D/landing-proofs.log"
-or_plan() {  # <AC-2.1 status> -> the plan, its second theme met when AC-2.1 is discharged
+or_plan() {  # <status of the second theme's one criterion> -> the plan, that theme met when it is discharged
   {
     printf -- '---\nwave: wave-02-fx\nrelease: 9.9.0\nscale: wave\nworking-branch: wave/02-fx\nintegration-branch: main\nforecast: 8h\n---\n'
     printf '# fixture plan\n\n## Goal\n\nThe fixture ships.\n\n## SDLC State\n\napproved-by: fixture 2026-10-06T16:00:00Z "approved"\ncurrent: 4\n\n- Step 4: implementation opened\n'
