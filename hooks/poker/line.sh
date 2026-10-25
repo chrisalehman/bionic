@@ -640,7 +640,9 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 #                  task's step, so writing it by hand moves the row off every gate. The landing's settlement (lib/line.sh
 #                  `line_settle`) writes a cell through `matrix_row_cells` and writes no such line, so a status a landing
 #                  wrote is never one; a call the settled-cell rule refuses, or that only restates a key, writes none. An
-#                  evidence-only line is a write and no status: not counted.
+#                  evidence-only line is a write and no status: not counted. A `line/v1|ev=matrix-retier|…` line
+#                  (`matrix-retier`) raises a tier and resets the row: strengthening is the run's act, so it is counted
+#                  in no field; weakening stays a person's, a waiver: line among the waivers.
 #   second-regressions  a whole run a person started, past the first. The tick and the orchestrator start the whole
 #                  run as the machine does, so only a person's start is a hand-hold: the landing record's regression
 #                  run lines (`ev=run`, a log under `regression-run-`, or `kind=regression`) past the record's first
@@ -726,6 +728,8 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
       ev == "stop-run" && hh_take(line_kv("at")) { s++ }
       # only a line that names the status cell or the task key is a write the gate reads; an evidence-only one is neither placed nor counted
       ev == "matrix-set" && (index("," line_kv("cells") ",", ",status,") || index("," line_kv("cells") ",", ",task,")) && hh_take(line_kv("at")) { w++ }
+      # a retier raises the check of a criterion, an act of the run and never a hand-hold: its line is read as nothing, on purpose
+      ev == "matrix-retier" { next }
       END { print n + 0, s + 0, w + 0, p + 0, HH_UNPLACED + 0 }' "$rec")"
     # the logs whose run line names its starter, ` <log> ` words: a proof citing one is counted by its run line
     started="$(awk -F'|' "$_LINE_FIELDS_AWK"'
