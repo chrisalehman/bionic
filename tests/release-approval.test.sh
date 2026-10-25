@@ -946,12 +946,13 @@ git -C "$RFC" reset -q --hard "$FC_R"
 rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/release-approval-*.md "$FC_REC"/post-*.md
 
 # ============================================================
-section "§HANDHOLDS: the card prints the hand-holds line read over the window, from the last build landing to the card"
+section "§HANDHOLDS: the card prints the hand-holds line from the last build landing to the card; the report runs on past it"
 # ============================================================
 # The page carries one line in the counts' shape, `hand-holds: total=… · unplaced=<n>`, read over the window whose
-# start is the newest published landing of a build row and whose end is the page's own replay time. The report read
-# after the page names the same two ends, so `landing-report --hand-holds` prints the same line. fails-when: the
-# page prints the run's total, a hand-hold before the last build landing counted; or the report and the page differ.
+# start is the newest published landing of a build row and whose end is the page's own replay time. The page ends
+# nothing else: `landing-report --hand-holds` reads from the same start to the plan's `delivered:` time, else now, so
+# an act after the card is counted by the report. fails-when: the page prints the run's total, a hand-hold before the
+# last build landing counted; or the report stops at the card.
 # The fixture's landing record holds the build row's queue landing at 10:00; its fill ledger a decline before it and one after.
 fc_plan "$FC_GOOD"
 printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-12T10:00:00Z\n' "$FC_C" > "$FC_REC/landing-proofs.log"
@@ -972,10 +973,14 @@ HH_PAGE="$(hh_page_line)"
 expect_contains "HANDHOLDS-2 the page prints the windowed line: the decline after the last build landing, not the one before it" \
   "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=1 · " "$HH_PAGE"
 expect_regex "HANDHOLDS-2b …in the counts' shape, its last count the lines the window could not place" ' · unplaced=[0-9]+$' "$HH_PAGE"
-expect_eq "HANDHOLDS-3 the page's line equals the report's, read after it over the same ends" "$HH_PAGE" "$(hh_lr)"
-expect_eq "HANDHOLDS-3b …and the report's end is the page's replay time" \
-  "$(/usr/bin/grep '^release-approval/v1|plan=' "$FC_REC/release-approval-$FC_H8.md" | sed 's/.*|at=\([^|]*\)|.*/\1/')" \
-  "$( ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" landing-report --hand-holds "$PFC" ) 2>/dev/null | /usr/bin/grep '^hand-holds window: ' | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z' | tail -1)"
+# a decline a minute after the page's replay time, as the fill ledger writes one
+HH_AT="$(/usr/bin/grep '^release-approval/v1|plan=' "$FC_REC/release-approval-$FC_H8.md" | sed 's/.*|at=\([^|]*\)|.*/\1/')"
+HH_AFTER="$(date -u -j -v+1M -f '%Y-%m-%dT%H:%M:%SZ' "$HH_AT" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "$HH_AT + 1 minute" +%Y-%m-%dT%H:%M:%SZ)"
+printf 'fill-ledger/v1|at=%s|session=fixture|turn=|current=4|state=decline|ceiling=6|width=|open=|free=|ready=T3|launched=|declined=no room|missed=0|idle=|room=|named=T3\n' "$HH_AFTER" >> "$FC_REC/fill-ledger.log"
+expect_eq "HANDHOLDS-3 the report read after the page counts the page's decline and the one planted after the card: the card ends nothing" \
+  "$(printf '%s\n' "$HH_PAGE" | sed 's/total=1 /total=2 /; s/declines=1 /declines=2 /')" "$(hh_lr)"
+expect_eq "HANDHOLDS-3b …and the report's ends line runs to now, printing the start alone and no page time" \
+  "1|0" "$( ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" landing-report --hand-holds "$PFC" ) 2>/dev/null | /usr/bin/grep '^hand-holds window: ' | awk -v at="$HH_AT" '{ print (index($0, "until now: the plan names no delivered: time") > 0) "|" (index($0, at) > 0) }')"
 expect_eq "HANDHOLDS-3c …the page's line stays one entry: it opens once" "1" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c '^hand-holds: ')"
 # WINDOW-2a: waive-row, through the card's reply, writes the matrix waiver with the ISO time, and the window places it.
 HH_T0="$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)"

@@ -67,9 +67,9 @@ plan_integration_branch() {  # <plan>
 #   landing-report   the measure's `median under <n>m` (or `<n> min`) over the queue landings, the one-file ones
 #                    alone when the measure says one-file; reached below the target, missed at or above it. A goal
 #                    whose words say hand-holds reads the hand-holds window instead (hooks/poker/line.sh
-#                    `hand_holds_ends`, `hand_holds_report`): the total from the last build landing to the release
-#                    approval card, or to now before the card has rendered, against the measure's count (`zero` is
-#                    0); reached at or under it, missed over it. A count only grows, so a miss before the card stands.
+#                    `hand_holds_window`, `hand_holds_report`): the total from the last build landing to the plan's
+#                    `delivered:` time, or to now before the run is delivered, against the measure's count (`zero` is
+#                    0); reached at or under it, missed over it. A count only grows, so a miss before delivery stands.
 #   run log          the newest whole-run proof line's log and its `Wall: <n>s`, against `under <n> min`.
 #   record/<f>.md    a reader-test record beside the run's landing record (else under the docs root): its first
 #                    `verdict:` or `result:` line, pass (or passed, reached) reached, fail (or failed, missed) missed.
@@ -357,25 +357,21 @@ plan_goals_read() {
         # the count the measure names, its first number, `zero`, `none` or `no` read as 0
         tgt="$(printf '%s\n' "$m" | awk '{ s = tolower($0) } s ~ /^(zero|none|no)([^a-z]|$)/ { print 0; exit } match(s, /[0-9]+/) { print substr(s, RSTART, RLENGTH) + 0; exit }')"
         if [ -z "$tgt" ]; then rd="the measure names no target count"
-        elif ! declare -F hand_holds_ends >/dev/null 2>&1 || ! declare -F hand_holds_report >/dev/null 2>&1; then rd="the hand-holds count is not loaded"
+        elif ! declare -F hand_holds_window >/dev/null 2>&1 || ! declare -F hand_holds_report >/dev/null 2>&1; then rd="the hand-holds count is not loaded"
         else
           h="$(project_root "${plan%/*}" 2>/dev/null)"
           # read into a variable first: a here-string of the call would run it under the tab IFS, and its own read
           # of the landing record splits on blanks
-          v="$(hand_holds_ends "$rec" "$h" "$plan")"
+          v="$(hand_holds_window "$rec" "$h" "$plan")"
           IFS='	' read -r hs hrow hu hst <<< "$v"
           [ "$hs" != - ] || hs=""
-          [ "$hst" = page ] || hu=""
+          [ "$hst" = delivered ] || hu=""
           v="$(hand_holds_report "$rec" "$h" "$plan" ${hs:+--since "$hs"} ${hu:+--until "$hu"} | awk '{ for (i = 1; i <= NF; i++) if (index($i, "total=") == 1) { print substr($i, 7) + 0; exit } }')"
           if [ -z "$v" ]; then rd="the hand-holds report printed no total"
           else
             st="$(awk -v a="$v" -v b="$tgt" 'BEGIN { print (a + 0 <= b + 0) ? "reached" : "missed" }')"
             rd="$v hand-hold$([ "$v" = 1 ] || echo s) from $([ -n "$hs" ] && echo "the last build landing ($hrow)" || echo "the first line")"
-            case "$hst" in
-              page) rd="$rd to the release approval card" ;;
-              stale) rd="$rd to now: the card has not rendered since the last build landing" ;;
-              *) rd="$rd to now: the card has not rendered" ;;
-            esac
+            if [ "$hst" = delivered ]; then rd="$rd to delivery ($hu)"; else rd="$rd to now: the run is not delivered"; fi
           fi
         fi ;;
       *landing-report*)

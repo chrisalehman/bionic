@@ -1322,16 +1322,16 @@ expect_eq "RG2-1 the requirements file the Step-1 line names is read: three them
   "$(sr_goal_st)|$(sr_goals_sum)"
 
 # ============================================================
-section "§REQ-GOALS-3: a hand-holds goal read from the landing report counts the window from the last build landing to the card, against its target"
+section "§REQ-GOALS-3: a hand-holds goal read from the landing report counts the window from the last build landing to delivery, against its target"
 # ============================================================
 # fails-when: the median reader answers, or it is not measured.
-SR_GOALS="hand-holds · zero from the last landing to the release approval card (landing-report)" sr_world rg3 "6 6 12 12"
+SR_GOALS="hand-holds · zero from the last landing to delivery (landing-report)" sr_world rg3 "6 6 12 12"
 sr_run "$SR_PLAN"
 expect_eq "RG3-1 no hand-hold since the last build landing: the zero target is met" "hand-holds=met" "$(sr_goal_st)"
 sr_ev "ev=stop-run|row=T8|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
-expect_eq "RG3-2 one stop-run after the last build landing: not met, the reading the window's count before the card has rendered" \
-  "hand-holds=not met|zero from the last landing to the release approval card — 1 hand-hold from the last build landing (T4) to now: the card has not rendered" \
+expect_eq "RG3-2 one stop-run after the last build landing: not met, the reading the window's count before the run is delivered" \
+  "hand-holds=not met|zero from the last landing to delivery — 1 hand-hold from the last build landing (T4) to now: the run is not delivered" \
   "$(sr_goal_st)|$(sr_goal_m hand-holds)"
 
 # sr_goal_put <goal text, \n for a line break> -> this world's plan carries a `## Goal` section before its SDLC State.

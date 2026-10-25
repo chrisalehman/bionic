@@ -990,4 +990,41 @@ expect_eq "TL-4 the mutant runs: its first line is ok as before" "gate: ok again
 expect_contains "TL-5 …and its second reads WOULD REFUSE, the split the fix closes" "gate: WOULD REFUSE the plan run would write" \
   "$(/usr/bin/grep -m1 '^gate: .*run would write' "$SANDBOX/tl-mut.out")"
 
+# ============================================================
+section "§READ-ORDER — close-out reads the hand-holds line last, over the window to its own delivered: time"
+# ============================================================
+# close-out writes `delivered:` and wipes its rosters before its last read of the hand-holds line, so what it does is
+# inside the window and a release approval card ends nothing. The roster kinds are kept aside before the wipe and read
+# back. The fixture: T1 landed (the start), a release approval page, then an amend on the roster and a decline in the
+# fill ledger, both after the page. fails-when: the line is read before delivered: (the card ends it, and both acts
+# are outside), or after the wipe with nothing kept (the amend is lost).
+RO_P="$(mk_fixture read-order)"; advance_to "$RO_P" 8
+RO_PLAN="$RO_P/$PLAN_REL"; RO_REC="$RO_P/.bionic/docs/record/wave-01-fixture"; mkdir -p "$RO_REC"
+ro_ago() { date -u -v-"$1"M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "-$1 minutes" +%Y-%m-%dT%H:%M:%SZ; }   # <minutes> -> that long ago
+RO_C="$(printf 'e%.0s' $(seq 40))"
+printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=%s\n' "$RO_C" "$(ro_ago 20)" > "$RO_REC/landing-proofs.log"
+printf '# page\n\n## Replay\n\nrelease-approval/v1|plan=%s|head=%s|at=%s|decisions=1\n' "$RO_PLAN" "$RO_C" "$(ro_ago 10)" > "$RO_REC/release-approval-eeeeeeee.md"
+printf 'fill-ledger/v1|at=%s|session=fixture|turn=|current=8|state=decline|ceiling=6|width=|open=|free=|ready=T3|launched=|declined=no room|missed=0|idle=|room=|named=T3\n' "$(ro_ago 5)" > "$RO_REC/fill-ledger.log"
+roster_row_fixture status=identified name=w-ro agent_id=ro plan="$RO_PLAN" amended="$(ro_ago 5) widen the files" >> "$RO_P/.bionic/tmp/roster-fixture.state"
+expect_contains "RO-0 precondition: before close-out a window opening before both acts reads them, the roster read" \
+  "declines=1 · lifts=0 · amends=1 " "$(hh_report "$RO_P" --hand-holds --since "$(ro_ago 15)" | grep '^hand-holds: ')"
+run_close "$RO_P" run
+RO_LINE="$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')"
+expect_eq "RO-1 run exits 0 and its wipe took the roster" "0/0" "$CO_RC/$(tmp_entries "$RO_P")"
+[ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | tail -15 | sed 's/^/    | /'
+expect_contains "RO-2 the card's line counts the decline and the amend after the card: read last, the roster kept" \
+  "hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=1 · lifts=0 · amends=1 " "$RO_LINE"
+expect_eq "RO-3 …and the card prints it after its step8 line: it is read once Steps 8 and 9 are written" "yes" \
+  "$(printf '%s\n' "$CO_OUT" | awk '/^step8: / { a = NR } /^hand-holds: / { b = NR } END { print (a && b > a) ? "yes" : "no" }')"
+expect_eq "RO-4 …and the continuation carries that same final line" "$RO_LINE" \
+  "$(awk '/^## / { s = ($0 == "## Hand-holds"); next } s && /^hand-holds: / { print; exit }' "$RO_P/$CONT_REL")"
+# the plan where the close left it (the archive may have moved it)
+RO_AFTER="$(find "$RO_P/.bionic/docs" -name "${PLAN_REL##*/}" -type f 2>/dev/null | head -1)"
+RO_DEL="$(awk '/^- Step 9: delivered: / { print $5; exit }' "$RO_AFTER" 2>/dev/null)"
+RO_ENDS="$( ( in_fixture "$RO_P" || exit 9
+  HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+    BIONIC_GATE_DIR="$HH_GATE" bash "$BIONIC_HOOKS_DIR/session-poker.sh" landing-report --hand-holds "$RO_AFTER" 2>/dev/null ) | grep '^hand-holds window: ')"
+expect_regex "RO-5 the plan's delivered: time is a minute, as close-out writes it" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z$' "$RO_DEL"
+expect_contains "RO-5b …and the report read after the close names it as the window's end" "until $RO_DEL (delivered:)" "$RO_ENDS"
+
 finish

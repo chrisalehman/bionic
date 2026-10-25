@@ -517,17 +517,26 @@ _line_cover() {  # <plan> <row> <root> <accepted head> <candidate>
 # row itself carries its own numbers), no `release:` in the plan, or an entry with no numbers block: nothing is made.
 # Sets LINE_NUMBERS (the commit, or empty) and, on a refusal, LINE_NUMBERS_SAID (the renderer's words).
 LINE_NUMBERS_AUTHOR="bionic line"; LINE_NUMBERS_EMAIL="line@bionic.invalid"
-_line_numbers() {  # <plan> <record> <root> <row> <candidate> -> 0 made or nothing to make · 1 refused
-  local plan="$1" rec="$2" root="$3" row="$4" cand="$5" r landed="" ver tmp now on note mode blob tree c jt rn nrc
-  LINE_NUMBERS=""; LINE_NUMBERS_SAID=""
-  _line_release_row "$plan" "$row" && return 0
+# _line_release_landed <plan> <record> -> the first release row, in table order, the record holds a landing of: read
+# through lib/units.sh `units_record_landings`, the reading the reader rule's publish order asks, so the two agree on
+# whether the release has landed; nothing when none has.
+_line_release_landed() {
+  local r lands
+  _wt_units_load || return 0
+  lands="$(units_record_landings "$2" | cut -f2)"
   while IFS= read -r r; do
     [ -n "$r" ] || continue
-    awk -F'|' -v r="$r" "$_LINE_FIELDS_AWK"'line_ev() == "published" && line_kv("row") == r { f = 1 } END { exit !f }' \
-      "$rec" 2>/dev/null && { landed="$r"; break; }
+    if printf '%s\n' "$lands" | /usr/bin/grep -qxF "$r"; then printf '%s\n' "$r"; return 0; fi
   done <<EOF
-$(_line_release_rows "$plan")
+$(_line_release_rows "$1")
 EOF
+  return 0
+}
+_line_numbers() {  # <plan> <record> <root> <row> <candidate> -> 0 made or nothing to make · 1 refused
+  local plan="$1" rec="$2" root="$3" row="$4" cand="$5" landed="" ver tmp now on note mode blob tree c jt rn nrc
+  LINE_NUMBERS=""; LINE_NUMBERS_SAID=""
+  _line_release_row "$plan" "$row" && return 0
+  landed="$(_line_release_landed "$plan" "$rec")"
   [ -n "$landed" ] || return 0
   _line_load_run || { LINE_NUMBERS_SAID="the run library ($_LINE_LIB_DIR/run.sh) cannot be loaded to read the release"; return 1; }
   ver="$(plan_frontmatter_get "$plan" release)"

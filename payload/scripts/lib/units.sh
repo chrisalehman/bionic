@@ -896,6 +896,20 @@ units_rows_in_range() {
 # a prefix of. The tick prints the MOVED list only when this prints nothing.
 units_unrecorded() { _units_landed unrecorded "${1:-}" "" "${2:-}"; }
 
+# units_record_landings <record> -> `<line number><TAB><row><TAB><commit, lower case, or nothing>` for each landing line
+# of the landing record, in record order: a `published` event (`commit=`) and the older `landed:` header (`merge=`),
+# whose blank-split fields are read as the event's are. THE ONE READING OF A LANDING IN THE RECORD: the readiness
+# rows (`_units_landed`), the publish order (`_units_publish_order`) and the numbers re-renderer's release row
+# (lib/line.sh `_line_release_landed`) all ask it, so "after the release" is one order. The fields are read by
+# lib/line.sh's reader of a record line, loaded through lib/proof.sh. Nothing, rc 0, for no record or no reader.
+units_record_landings() {
+  [ -f "${1:-}" ] && declare -F _proof_fields >/dev/null 2>&1 && _proof_fields || return 0
+  awk -F'|' "$_LINE_FIELDS_AWK"'
+    { sub(/\r$/, "") }
+    /^landed:[ \t]/ { gsub(/[ \t]+/, "|"); if (line_kv("row") != "") print NR "\t" line_kv("row") "\t" tolower(line_kv("merge")); next }
+    line_ev() == "published" && line_kv("row") != "" { print NR "\t" line_kv("row") "\t" tolower(line_kv("commit")) }' "$1" 2>/dev/null
+}
+
 # _units_landed <landings|inrange> <plan> <range> <record> — the one program behind the two verbs:
 # the rows (`units_rows`), the record's header lines, the plan's matrix, then stdin's merges.
 _units_landed() {
@@ -903,7 +917,7 @@ _units_landed() {
   rows="$(units_rows "$plan" 2>/dev/null)" || return 1
   {
     printf '\034rows\n'; printf '%s\n' "$rows"
-    printf '\034rec\n'; [ -f "$rec" ] && awk '{ sub(/\r$/, ""); print }' "$rec" 2>/dev/null
+    printf '\034rec\n'; units_record_landings "$rec"
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); print }' "$plan" 2>/dev/null
     printf '\034in\n'; [ "$mode" = landings ] || cat
   } | awk -F'\t' -v mode="$mode" '
@@ -914,21 +928,8 @@ _units_landed() {
     $0 == "\034in" { part = 4; next }
     part == 1 { if ($1 == "") next; n++; id[n] = $1; knd[n] = $3; srv[n] = $8; st[n] = $10; at[$1] = n; next }
     part == 2 {
-      r = ""; m = ""
-      if ($0 ~ /^line\/v1\|ev=published\|/) {
-        # A published event is a landing at its commit: `row-landed --by-hand` records a hand landing with it alone.
-        nf = split($0, f, "|")
-        for (k = 3; k <= nf; k++) {
-          if (f[k] ~ /^row=/) r = substr(f[k], 5)
-          else if (f[k] ~ /^commit=/) m = tolower(substr(f[k], 8))
-        }
-      } else if ($0 ~ /^landed:[ \t]/) {
-        nf = split($0, f, /[ \t]+/)
-        for (k = 2; k <= nf; k++) {
-          if (f[k] ~ /^row=/) r = substr(f[k], 5)
-          else if (f[k] ~ /^merge=/) m = tolower(substr(f[k], 7))
-        }
-      } else next
+      # A published event is a landing at its commit: `row-landed --by-hand` records a hand landing with it alone.
+      r = $2; m = $3
       if (!(r in at)) next
       lm[r] = (m ~ /^[0-9a-f]+$/ && length(m) >= 7 && length(m) <= 40) ? m : "-"
       if (lm[r] != "-") rm[lm[r]] = 1
@@ -1311,12 +1312,9 @@ _units_publish_order() {
   printf '%s\n' "${2:-}" | awk -F'\t' '$3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && $10 == "landed" { f = 1 } END { exit !f }' || return 0
   declare -F proof_debt_record >/dev/null 2>&1 || return 0
   rec="$(proof_debt_record "$plan" 2>/dev/null)" && [ -f "$rec" ] || return 0
-  awk '
-    { sub(/\r$/, ""); r = "" }
-    /^line\/v1\|ev=published\|/ { m = split($0, f, "|"); for (k = 3; k <= m; k++) if (f[k] ~ /^row=/) r = substr(f[k], 5) }
-    /^landed:[ \t]/ { m = split($0, f, /[ \t]+/); for (k = 2; k <= m; k++) if (f[k] ~ /^row=/) r = substr(f[k], 5) }
-    r != "" { pos[r] = NR }
-    END { for (r in pos) printf "%s%s=%d", (c++ ? " " : ""), r, pos[r] }' "$rec" 2>/dev/null
+  units_record_landings "$rec" | awk -F'\t' '
+    { pos[$2] = $1 }
+    END { for (r in pos) printf "%s%s=%d", (c++ ? " " : ""), r, pos[r] }'
 }
 
 # _units_post_awk -> the awk functions `after(a, b)`, `later(w, r)` and `post_reader(j, r)`, over the row arrays `n`,
@@ -3443,10 +3441,16 @@ units_fix_cap() {
 #   `awk "$(units_ac_head_awk)"'...'`. A list bullet (`-`, `*`, `+` and spaces) is stripped from a COPY first, so
 #   `- AC-1:` reads as `AC-1:`; an INDENTED line is no heading, and the colon after the id is why `AC-1` never
 #   begins the `AC-11:` block. Nothing is required after the colon. Pure, silent, and defined at source time.
+#   `ac_any(line)` is the same heading read for any id: the id it heads, or nothing, for a reader that walks every
+#   block (the hand-holds count's waiver arm) rather than asking for one.
 units_ac_head_awk() {
   printf '%s\n' 'function ac_head(line, ac) {' \
     '  sub(/^[-*+][[:space:]]+/, "", line)' \
     '  return index(line, ac ":") == 1' \
+    '}' \
+    'function ac_any(line) {' \
+    '  sub(/^[-*+][[:space:]]+/, "", line)' \
+    '  return match(line, /^AC-[^ \t:]+:/) ? substr(line, 1, RLENGTH - 1) : ""' \
     '}'
 }
 

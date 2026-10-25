@@ -636,15 +636,25 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 #                  the line the verb wrote. A verb act: never counted as by-hand.
 #   fixed          the plan's `moved: <record>#<n> to=fixed row=<T> …` line under `## SDLC State` (`finding-move …
 #                  fixed`, wave-36 T8), one per line (wave-36 T14; AC-7.6). A verb act: never counted as by-hand.
+#                  A move is placed by its time against the landing of the row it names, the row's first `published`
+#                  event: typed at or before that landing it is the landing's own business and outside the count,
+#                  typed after it a hand marked the fix, inside. A move naming a row with no landing is unplaced.
+#                  A move the landing itself wrote (`by=landing`, lib/line.sh `line_settle`) is its settlement, never a hand.
 #
 # THE WINDOW. `--since <ISO>` and `--until <ISO>` count a hand-hold only when its own line's time is after the start
 # and at or before the end; either end may be absent, and absent is open. Each source is placed by the time its writer
 # put on it: the landing record's `at=`, the fill ledger's `at=`, the leading ISO of a roster `amended=`, `held=` or
 # `extended=` value, the ISO on a `waived:` line, a `moved:` or regression proof line's `at=`, and the matrix waiver's
-# time. A waiver of the date form is placed when its whole day falls on one side of each end. A line that cannot be
+# time. An end written to the minute (`<date>T<hh>:<mm>Z`, the shape close-out writes `delivered:` in) reaches through
+# that minute's last second, so an act in the minute an end names is inside it. A waiver of the date form is placed
+# when its whole day falls on one side of each end. A line that cannot be
 # placed (an adoption row carries no time of the adopt; a date form a window end falls inside) is not counted, and with
 # either end set the line ends ` · unplaced=<n>`, so a windowed count never hides what it left out. With no end set
 # every line counts and the line keeps its open shape, so a run with no window reads as it always has.
+#
+# THE ROSTERS, KEPT. Three kinds and the adoptions are roster lines, and close-out wipes the rosters before its last
+# read of this line. `BIONIC_HH_ROSTERS=<file>` names a file holding the roster lines to read in place of the
+# rosters in the project's tmp directory: close-out keeps them there before the wipe and reads them back after it.
 #
 # READ-ONLY and FAIL-SOFT: an absent source counts zero. It decides nothing; nothing reads it but close-out's card and
 # continuation, the release approval page and the goal that names landing-report (and a person).
@@ -653,7 +663,8 @@ _HH_PLACE_AWK='
   function hh_day(t) { return t ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ }
   function hh_norm(t) { return (hh_iso(t) && length(t) == 17) ? substr(t, 1, 16) ":00Z" : t }
   function hh_first(s,   n, w, i) { n = split(s, w, /[ \t]+/); for (i = 1; i <= n; i++) if (hh_iso(w[i]) || hh_day(w[i])) return w[i]; return "" }
-  function hh_at(s,   n, w, i) { n = split(s, w, /[ \t|]+/); for (i = 1; i <= n; i++) if (index(w[i], "at=") == 1) return substr(w[i], 4); return "" }
+  function hh_kv(s, k,   n, w, i) { n = split(s, w, /[ \t|]+/); for (i = 1; i <= n; i++) if (index(w[i], k "=") == 1) return substr(w[i], length(k) + 2); return "" }
+  function hh_at(s) { return hh_kv(s, "at") }
   # 1 inside the window, 0 outside it, -1 not placeable; HH_S and HH_U are the ends, empty when open
   function hh_place(t,   a, b) {
     if (HH_S == "" && HH_U == "") return 1
@@ -666,11 +677,20 @@ _HH_PLACE_AWK='
     return -1
   }
   function hh_take(t,   p) { p = hh_place(t); if (p < 0) HH_UNPLACED++; return p > 0 }
-  BEGIN { HH_S = hh_norm(HH_S); HH_U = hh_norm(HH_U) }
+  # a line placed against a landing l as well: inside only when inside the window and after l; with no landing to
+  # place it against it cannot be placed. With the window open every line counts, as hh_place says.
+  function hh_after(t, l,   p) {
+    p = hh_place(t)
+    if ((HH_S == "" && HH_U == "") || p <= 0) return p
+    if (!hh_iso(l)) return -1
+    return (hh_norm(t) > hh_norm(l)) ? 1 : 0
+  }
+  function hh_take_after(t, l,   p) { p = hh_after(t, l); if (p < 0) HH_UNPLACED++; return p > 0 }
+  BEGIN { HH_S = hh_norm(HH_S); HH_U = (hh_iso(HH_U) && length(HH_U) == 17) ? substr(HH_U, 1, 16) ":59Z" : hh_norm(HH_U) }
 '
 hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] [--until <ISO>] -> the one hand-holds line; rc 0
   local rec="$1" root="$2" plan="$3" slug led rf hand=0 stp=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0 pl
-  local since="" until="" u1=0 u2=0 u3=0 u4=0
+  local since="" until="" u1=0 u2=0 u3=0 u4=0 lands=""
   shift 3
   while [ $# -ge 2 ]; do
     case "$1" in --since) since="$2" ;; --until) until="$2" ;; esac
@@ -683,6 +703,9 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
       ev == "published" && line_kv("kind") == "hand" && hh_take(line_kv("at")) { n++ }
       ev == "stop-run" && hh_take(line_kv("at")) { s++ }
       END { print n + 0, s + 0, HH_UNPLACED + 0 }' "$rec")"
+    # each row's first landing, `<row>=<at>` words: what a move to fixed is placed against
+    lands="$(awk -F'|' "$_LINE_FIELDS_AWK"'
+      line_ev() == "published" && line_kv("row") != "" && !(line_kv("row") in f) { f[line_kv("row")] = 1; printf "%s=%s ", line_kv("row"), line_kv("at") }' "$rec")"
   fi
   led="$(fill_ledger_path "$root" "$plan" 2>/dev/null)" || led=""
   if [ -n "$led" ] && [ -f "$led" ] && [ ! -L "$led" ]; then
@@ -694,9 +717,11 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
       }
       END { print d + 0, l + 0, HH_UNPLACED + 0 }' "$led")"
   fi
-  read -r amd hld ext ado u3 <<< "$(for rf in "$root/.bionic/tmp"/roster-*.state; do
-      [ -f "$rf" ] && [ ! -L "$rf" ] && cat "$rf"
-    done 2>/dev/null | awk -F'|' -v want="/$slug.plan.md" -v HH_S="$since" -v HH_U="$until" "$_HH_PLACE_AWK"'
+  read -r amd hld ext ado u3 <<< "$(if [ -n "${BIONIC_HH_ROSTERS:-}" ]; then
+      [ -f "$BIONIC_HH_ROSTERS" ] && [ ! -L "$BIONIC_HH_ROSTERS" ] && cat "$BIONIC_HH_ROSTERS"
+    else
+      for rf in "$root/.bionic/tmp"/roster-*.state; do [ -f "$rf" ] && [ ! -L "$rf" ] && cat "$rf"; done
+    fi 2>/dev/null | awk -F'|' -v want="/$slug.plan.md" -v HH_S="$since" -v HH_U="$until" "$_HH_PLACE_AWK"'
       index($0, "roster-state/") == 1 {
         name = ""; plan = ""; a = ""; h = ""; x = ""; id = ""; src = ""; af = ""
         for (i = 2; i <= NF; i++) {
@@ -725,8 +750,10 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
         print na + 0, nh + 0, nx + 0, nd + 0, HH_UNPLACED + 0 }')"
   if [ -f "$plan" ] && [ ! -L "$plan" ]; then
     if ! declare -F proof_awk >/dev/null 2>&1 && [ -f "$BIONIC_LIB/proof.sh" ]; then . "$BIONIC_LIB/proof.sh"; fi
-    if declare -F proof_awk >/dev/null 2>&1; then
-      read -r fl wv fix u4 <<< "$(awk -v HH_S="$since" -v HH_U="$until" "$(proof_awk)$_HH_PLACE_AWK"'
+    if ! declare -F units_ac_head_awk >/dev/null 2>&1 && [ -f "$BIONIC_LIB/units.sh" ]; then . "$BIONIC_LIB/units.sh"; fi
+    if declare -F proof_awk >/dev/null 2>&1 && declare -F units_ac_head_awk >/dev/null 2>&1; then
+      read -r fl wv fix u4 <<< "$(HH_LANDS="$lands" awk -v HH_S="$since" -v HH_U="$until" "$(proof_awk)$(units_ac_head_awk)$_HH_PLACE_AWK"'
+        BEGIN { n = split(ENVIRON["HH_LANDS"], lw, " "); for (i = 1; i <= n; i++) { k = index(lw[i], "="); if (k > 1) LAND[substr(lw[i], 1, k - 1)] = substr(lw[i], k + 1) } }
         /^[ \t]*```/ { fence = !fence; next }
         fence { next }
         /^##[ \t]/ { sec = ($0 ~ /^##[ \t]+SDLC State/) ? "sdlc" : (($0 ~ /^##[ \t]+Verification Matrix/) ? "mx" : ""); inb = 0; next }
@@ -734,11 +761,12 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
           # the first regression proof is the floor itself; each one past it is a hand-hold
           if (proof_fields($0) && PROOF_KIND == "regression") { if (++r > 1 && hh_take(hh_at($0))) f++ }
           else if ($0 ~ /^waived:[ \t]+question=/) { q = index($0, "\""); if (hh_take(hh_first(q ? substr($0, 1, q - 1) : $0))) w++ }
-          else if ($0 ~ /^moved:[ \t]+[^ \t]+[ \t]+to=fixed([ \t]|$)/) { if (hh_take(hh_at($0))) x++ }
+          else if ($0 ~ /^moved:[ \t]+[^ \t]+[ \t]+to=fixed([ \t]|$)/ && hh_kv($0, "by") != "landing") { if (hh_take_after(hh_at($0), LAND[hh_kv($0, "row")])) x++ }
           next
         }
         sec == "mx" {
-          if ($0 ~ /^AC-[^ \t]*:[ \t]*$/) { inb = 1; next }
+          # the heading of a block, through the one matcher: bare, or carrying the text of its criterion (matrix-render)
+          if (ac_any($0) != "") { inb = 1; next }
           if (inb && $0 ~ /^[ \t]+[^ \t]/) {
             if ($0 ~ /^[ \t]+waiver:[ \t]+[^"]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9](T[0-9][0-9]:[0-9][0-9](:[0-9][0-9])?Z)?[ \t]+"/) {
               q = index($0, "\""); if (hh_take(hh_first(substr($0, 1, q - 1)))) w++
@@ -757,34 +785,33 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
   return 0
 }
 
-# THE WINDOW'S ENDS, FROM RECORDS. The measure runs from the last build landing to the release approval card: the start
-# is the newest `ev=published` of a row whose kind is build in the plan's table, the end the newest release approval
-# page's replay `at=` (a page under the card's old stem `$RR_OLD_VERB` reads too). A page no later than the start was
-# rendered for an earlier build, so it ends nothing.
-# hand_holds_ends <landing record> <project root> <plan> -> `<since|-><TAB><row|-><TAB><until|-><TAB><page|none|stale>`
-hand_holds_ends() {
-  local rec="$1" root="$2" plan="$3" builds s="-" row="-" u="-" st=none recdir f
+# THE WINDOW'S ENDS, FROM RECORDS. The measure runs from the last build landing to delivery: the start is the newest
+# `ev=published` of a row whose kind is build in the plan's table, the end the plan's Step-9 `delivered:` time once the
+# run reads closed (sitrep.sh `sitrep_delivered_at`), else now. A release approval page ends nothing: what is done
+# after the card, close-out's own acts among them, is inside the window. An end of whole minutes is printed as the
+# minute, the shape close-out writes, so the window reaches through it (_HH_PLACE_AWK).
+# hand_holds_window <landing record> <project root> <plan> -> `<since|-><TAB><row|-><TAB><until|-><TAB><delivered|now>`
+hand_holds_window() {
+  local rec="$1" root="$2" plan="$3" builds s="-" row="-" u="-" st=now e
   builds="$(units_rows "$plan" 2>/dev/null | awk -F'\t' '$3 == "build" { printf "%s ", $1 }')"
   if [ -n "$builds" ] && [ -f "$rec" ] && [ ! -L "$rec" ] && { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }; then
     read -r s row <<< "$(awk -F'|' -v B=" $builds" "${_LINE_FIELDS_AWK:-}$_HH_PLACE_AWK"'
       line_ev() == "published" && index(B, " " line_kv("row") " ") { a = hh_norm(line_kv("at")); if (hh_iso(a) && a > m) { m = a; r = line_kv("row") } }
       END { if (m != "") print m, r; else print "-", "-" }' "$rec")"
   fi
-  recdir="$(docs_root "$root")/record/$(proof_plan_slug "$plan")"
-  u="$(for f in "$recdir"/release-approval-*.md ${RR_OLD_VERB:+"$recdir/$RR_OLD_VERB"-*.md}; do
-      [ -f "$f" ] && [ ! -L "$f" ] && cat "$f"
-    done 2>/dev/null | awk -v OLD="${RR_OLD_VERB:-release-approval}/v1|plan=" "$_HH_PLACE_AWK"'
-      index($0, "release-approval/v1|plan=") == 1 || index($0, OLD) == 1 { a = hh_norm(hh_at($0)); if (hh_iso(a) && a > m) m = a }
-      END { print (m != "") ? m : "-" }')"
-  if [ "$u" != - ]; then
-    if [ "$s" = - ] || [[ "$u" > "$s" ]]; then st=page; else st=stale; u="-"; fi
+  if declare -F sitrep_delivered_at >/dev/null 2>&1 && declare -F epoch_iso >/dev/null 2>&1; then
+    e="$(sitrep_delivered_at "$plan" 2>/dev/null)"
+    if [ -n "$e" ] && u="$(epoch_iso "$e")" && [ -n "$u" ]; then
+      st=delivered
+      case "$u" in *:00Z) u="${u%:00Z}Z" ;; esac
+    else u="-"; fi
   fi
   printf '%s\t%s\t%s\t%s\n' "${s:--}" "${row:--}" "${u:--}" "$st"
 }
 
 # hand_holds_verb <landing record> <project root> <plan> <since> <until> -> `landing-report --hand-holds`'s two lines:
 # the counts over the window, then the ends that bound it. With neither end named the ends are read from records
-# (hand_holds_ends); with no page the window runs to now and says the card has not rendered, printing no end it has not
+# (hand_holds_window); before the run is delivered the window runs to now and says so, printing no end it has not
 # read from a record.
 hand_holds_verb() {
   local rec="$1" root="$2" plan="$3" since="$4" until="$5" e s row u st sw uw
@@ -793,18 +820,14 @@ hand_holds_verb() {
     printf 'hand-holds window: since %s · until %s\n' "${since:-the first line}" "${until:-now}"
     return 0
   fi
-  e="$(hand_holds_ends "$rec" "$root" "$plan")"
+  e="$(hand_holds_window "$rec" "$root" "$plan")"
   IFS=$'\t' read -r s row u st <<< "$e"
   [ "$s" != - ] || s=""
   [ "$u" != - ] || u=""
   if [ -n "$s" ] || [ -n "$u" ]; then hand_holds_report "$rec" "$root" "$plan" ${s:+--since "$s"} ${u:+--until "$u"}
   else hand_holds_report "$rec" "$root" "$plan"; fi
   if [ -n "$s" ]; then sw="since $s (the last build landing, $row)"; else sw="since the first line (no build row has landed)"; fi
-  case "$st" in
-    page) uw="until $u (the release approval card)" ;;
-    stale) uw="until now: the card has not rendered since the last build landing" ;;
-    *) uw="until now: the card has not rendered" ;;
-  esac
+  if [ "$st" = delivered ]; then uw="until $u (delivered:)"; else uw="until now: the plan names no delivered: time"; fi
   printf 'hand-holds window: %s · %s\n' "$sw" "$uw"
   return 0
 }
