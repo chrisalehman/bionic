@@ -2064,12 +2064,12 @@ EOF
     case "$RT_TIER" in
       T[0-4]) : ;;
       *)
-        die "REFUSED — '$(clean "$RT_TIER")' is no tier: name one of T0 to T4, above the cell's own. The plan is unchanged."
+        die "REFUSED — '$(clean "$RT_TIER")' is no tier: run matrix-retier again with tier= one of T0 to T4, above the cell's own. The plan is unchanged."
         exit 1 ;;
     esac
     RT_EVAL="$(printf '%s' "$RT_EVAL" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
     if [ -z "$RT_EVAL" ] || ! plan_verb_value_ok "$RT_EVAL"; then
-      die "REFUSED — eval= is the criterion's new eval on one line, with no |, tab or line break, which neither its block nor its Eval design cell can hold; the plan is unchanged."
+      die "REFUSED — eval= is the criterion's new eval on one line, with no |, tab or line break, which neither its block nor its Eval design cell can hold; run matrix-retier again with such a text. The plan is unchanged."
       exit 1
     fi
     RT_WORD=""
@@ -2091,7 +2091,7 @@ EOF
     case "$RT_OLD" in
       T[0-4]) : ;;
       *)
-        die "REFUSED — the tier cell of $RT_AC reads '$(clean "$RT_OLD")', no tier of T0 to T4, so a raise from it cannot be judged; the plan is unchanged."
+        die "REFUSED — the tier cell of $RT_AC reads '$(clean "$RT_OLD")', no tier of T0 to T4, so a raise from it cannot be judged; the cell is the plan's Step-3 text: write its tier there, then run matrix-retier again. The plan is unchanged."
         exit 1 ;;
     esac
     if [ "${RT_TIER#T}" -le "${RT_OLD#T}" ]; then
@@ -2100,7 +2100,7 @@ EOF
     fi
     RT_LED="$(docs_root "$PV_REPO")/record/$(proof_plan_slug "$PV_PLAN")/design-ledger.md"
     if [ -L "$RT_LED" ]; then
-      die "REFUSED — ${RT_LED#"$PV_REPO"/} is a symlink, and the retier's ledger entry is written there; the plan is unchanged."
+      die "REFUSED — ${RT_LED#"$PV_REPO"/} is a symlink, and the retier's ledger entry is written there; put the ledger file itself in its place, then run matrix-retier again. The plan is unchanged."
       exit 1
     fi
     PV_RC=0
@@ -2134,7 +2134,7 @@ EOF
       23) die "REFUSED — the plan's ## Eval design has no row for $RT_AC, and its Eval type and Eval are where the tier is read at Step 3; add the criterion's row there, then retier it. The plan is unchanged."
           pv_next matrix-retier "$RT_AC" "tier=$RT_TIER" "eval=$RT_EVAL"
           exit 1 ;;
-      24) die "REFUSED — the plan's ## Eval design table has no Criterion, Eval type and Eval columns, the Step-3 table's shape the retier writes; the plan is unchanged."
+      24) die "REFUSED — the plan's ## Eval design table has no Criterion, Eval type and Eval columns, the Step-3 table's shape the retier writes; give its header those columns, then run matrix-retier again. The plan is unchanged."
           exit 1 ;;
       *) die "REFUSED — the retier cannot be written (exit $PV_RC); the plan is unchanged."
          exit 2 ;;
