@@ -1806,7 +1806,7 @@ WK_ROWS=('| AC-1.1 | CONFIRMED | the card printed whole |' '| AC-1.2 | CONFIRMED
 poke "$RWK" matrix-render
 expect_eq "WK-0 setup: matrix-render renders the head with the walk stub (exit 0)" "0|walk-artifact: pending" "$RC|$(wk_head walk-artifact)"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
-# AC-1.1 settled by T2's landing, as line_settle writes it: cells and block key, and the settled line.
+# The first fixture criterion settled by a landing, as line_settle writes it: cells and block key, and the settled line.
 WK_SET_LOG="record/wave-01-fixture/T2-a.test.sh.log"; printf 'head=%s rc=0\n' "$WK_A" > "$RWK/.bionic/docs/$WK_SET_LOG"
 bash -c '. "$1/units.sh" >/dev/null 2>&1 && matrix_row_cells "$2" AC-1.1 "3=discharged" "4=$3" > "$2.c" && matrix_block_key "$2.c" AC-1.1 evidence "$3" > "$2" && rm -f "$2.c"' \
   _ "${S46_LIB%/*}" "$PWK" "$WK_SET_LOG"
@@ -1818,7 +1818,7 @@ expect_eq "WK-0b precondition: AC-1.1 reads the landing's discharge and the reco
   "$WK_ROW11|$(wk_ev settled | /usr/bin/grep -c '|cells=AC-1.1|')|$(wk_row AC-1.2 | cut -d'|' -f4 | tr -d ' ')|$(wk_row AC-1.3 | cut -d'|' -f4 | tr -d ' ')"
 WK_SINCE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; sleep 1
 
-# ---------- AC-8.1: the walk record is read by the critic's reader ----------
+# ---------- the walk record is read by the critic's reader ----------
 wk_rec walk-notable 'verdict: CONFIRMED — the cards read the judge' -
 s42_snap "$RWK" "$PWK"; wk_add walk-notable
 s42_unchanged "WK-1 §WALK AC-8.1 a walk record with no AC | verdict table (prose sections only, wave 45's shape)" 1 "$PWK"
@@ -1828,7 +1828,7 @@ wk_add walk-noverdict
 s42_unchanged "WK-2 AC-8.1 a walk record with the table and no verdict: line" 1 "$PWK"
 expect_contains "WK-2b …refused naming the verdict: line" "verdict:" "$OUT"
 
-# ---------- AC-8.2: one write settles the confirmed cells no landing settled ----------
+# ---------- one write settles the confirmed cells no landing settled ----------
 wk_rec walk 'verdict: REFUTED — AC-1.3 is refuted' - "${WK_ROWS[@]}"
 wk_add walk
 expect_eq "WK-3 §WALK AC-8.1 AC-8.2 the record with the table and one verdict: line registers (exit 0)" "0" "$RC"
@@ -1871,7 +1871,7 @@ poke "$RWK" matrix-set AC-1.3 status=blocked
 poke "$RWK" landing-report --hand-holds --since "$WK_SINCE"
 expect_contains "WK-13 control: a matrix-set status write in the same window is counted (status-writes=1)" "· status-writes=1 ·" "$OUT"
 
-# ---------- AC-8.3: the walk row's landing settles the cells, in deliver's own write ----------
+# ---------- the walk row's landing settles the cells, in deliver's own write ----------
 # A record row has no commit, so it lands through deliver, never ready: a verify row whose artifact is a wave's walk
 # record is registered by the landing itself. The control is the same deliver with the walk test removed in a doctored
 # copy: it lands the row and settles nothing, so the cells read here are the landing's doing.
