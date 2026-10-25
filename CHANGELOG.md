@@ -196,6 +196,9 @@ Rendered from the plan's deferred findings, each its stated sentence, in the ord
 - The sitrep's reviews count counts each question once as the judge reads it at the head, not each reading, on any plan the judge can deal.
 - close-out's reviews text in the continuation takes each question's last recorded result, not the one coverage reader, so a question a fix row covered can read failed there.
 - Four requirements (REQ-2, REQ-7, REQ-9 and REQ-14) were built, tested and confirmed with no design decision naming them; the gap is in the record of why, not in what was built, and the next spec names a decision per requirement or declares in so many words that none is needed (D30).
+- In this release's own run the close may write its hand-holds criterion blocked rather than discharged: the orchestrator's finding moves and roster amends after the last build landing are counted, as the measure intends, and the close reads what it finds.
+- A finding moved to fixed by a landing is read as fixed at that landing's head, and the move itself is a hand act inside the window the landing opened, so a run that moves a finding after its last build landing counts the move.
+- A pending criterion owed at Step 9 whose evaluation is not the hand-holds line passes every gate pending, is not written by close-out and is not demanded once delivered: is written, while the release card still reports it owed by the close; only the hand-holds criterion is settled by the close.
 
 ### The landing numbers
 
