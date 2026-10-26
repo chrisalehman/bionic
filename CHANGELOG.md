@@ -175,10 +175,10 @@ Rendered from the plan's deferred findings, each its stated sentence, in the ord
 
 ### The landing numbers
 
-`landing-report --rows` at 5a08f601b5aca8cdf332c0ca1581bcbcdf3ab851 on 2026-10-26T05:40:17Z:
+`landing-report --rows` at 1df303f2f7aac6be97e77186262ed36654c93be4 on 2026-10-26T13:05:48Z:
 
 ```
-landings: queue=24 hand=0 git=0 · ready-to-landed median=3.5m p75=9.0m max=34.8m · runs: green=62 red=3 none=0 discarded=4 red-then-green=0 run=179 reused=0 absent=0 · waited median=17s · killed=5
+landings: queue=25 hand=0 git=0 · ready-to-landed median=3.4m p75=8.6m max=34.8m · runs: green=66 red=3 none=0 discarded=4 red-then-green=0 run=187 reused=0 absent=0 · waited median=16s · killed=5
 T8 queue ready=2026-10-25T20:29:20Z landed=2026-10-25T20:32:52Z minutes=3.5 runs=3 waited=18s wait=0.3 prove=3.2 rework=0.0 width=2
   canonical-sdlc-evidence-gate-2.test.sh green promised=55s actual=60s ratio=1.09
   units.test.sh green promised=16s actual=22s ratio=1.38
@@ -272,6 +272,8 @@ T29 queue ready=2026-10-26T04:52:09Z landed=2026-10-26T04:56:34Z minutes=4.4 run
   canonical-sdlc-evidence-gate.test.sh green promised=25s actual=28s ratio=1.12
   canonical-sdlc-evidence-gate-2.test.sh green promised=38s actual=58s ratio=1.53
   close-out-3.test.sh green promised=217s actual=252s ratio=1.16
+T19 queue ready=2026-10-26T05:44:13Z landed=2026-10-26T05:45:24Z minutes=1.2 runs=1 waited=11s wait=0.2 prove=1.0 rework=0.0 width=4
+  release-check.test.sh green promised=54s actual=59s ratio=1.09
 ```
 
 ## 1.28.0 — 2026-10-25
