@@ -36,6 +36,7 @@
 #   §TERM      AC-6.2  (wave-38 T5) a waiter killed with TERM hands its request back; the row's
 #                      next ask resumes its number and asked=. Mutation: the trap removed ends it
 #                      rc=gone and files a fresh number (N.12, SIGKILL, unchanged)
+#   §WHOLE-HOLDER the tick's whole run (regression@<h8>, budget run.sh) is admitted alone, and waits while a landing runs
 #
 # HERMETIC. Everything runs in the model world (tests/lib/world.sh): a planted machine, a
 # planted clock moved by world_tick, a gate store and a CLAUDE_CONFIG_DIR under the world's
@@ -842,6 +843,49 @@ expect_eq "TM.5 the mutant without the trap runs: its holder is admitted and its
 expect_eq "TM.6 …killed with TERM its request still names the dead asker" "asker||" "$TR_BACK"
 expect_eq "TM.7 …so the next ask ends it rc=gone and takes a fresh number — the trap is the rule" \
   "3|1000|gone" "$TR_NEXT"
+reap
+
+section "§WHOLE-HOLDER — the tick's whole run, held by regression@<h8> with budget run.sh, is admitted alone when nothing is unfinished and waits while a landing runs"
+# The tick starts the regression as the roster object `regression@<h8>`, a row whose one suite is
+# run.sh, and the runner it starts asks the gate kind whole, as booked.sh spells the name
+# (`regression_<h8>`). FIXTURE FIDELITY: a real repository holding this session's roster, the rows
+# from the production writer (roster_row_fixture); the askers are real processes asking from inside
+# it, so the budget is read where the gate reads it. fails-when: the budget does not read the row by
+# the name booked.sh spells, a whole run is admitted beside another run, or a whole run passes a
+# landing that is still running.
+fresh whole-holder
+world_machine 8 8192 30 0.5
+world_cost h 30
+world_cost k 30
+WH_P="$D/proj"; mkdir -p "$WH_P/.bionic/tmp"; git -C "$WH_P" init -q
+{ roster_header
+  roster_row_fixture session="$WORLD_SID" status=run name=regression@0123abcd agent_id= subagent_type=bionic:test-runner \
+    suites_allowed=run.sh suites_source=DECLARED waiver="a whole run the tick started"
+  roster_row_fixture session="$WORLD_SID" status=run name=regression@89abcdef agent_id= subagent_type=bionic:test-runner \
+    suites_allowed=a.test.sh suites_source=DECLARED waiver="a whole run the tick started"
+} > "$WH_P/.bionic/tmp/roster-$WORLD_SID.state"
+WH_HERE="$(pwd -P)"; cd "$WH_P" || exit 1
+AGENT=regression_0123abcd HOLD=1 ask_bg wh1 whole tests/run.sh 0; wait_for 20 has wh1.rc
+expect_eq "WH.1 nothing unfinished: regression@<h8>'s whole ask under budget run.sh is admitted (rc|kind)" \
+  "0|whole" "$(rc_of wh1)|$(field "$(id_of wh1)" kind)"
+expect_eq "WH.2 …alone: a work ask beside it waits, and its request is filed (rc|filed)" "75|yes" \
+  "$(ask_fg wx work h 0 | tail -n 1)|$(asked_by wx && echo yes || echo no)"
+release wh1
+HOLD=1 ask_bg wl landing k 0; wait_for 20 has wl.rc
+expect_eq "WH.3-pre a landing is admitted and still running" "0" "$(rc_of wl)"
+AGENT=regression_0123abcd ask_fg wh2 whole tests/run.sh 0 >/dev/null
+expect_eq "WH.3 while the landing runs the whole ask is not admitted: it waits its turn, its request filed kind whole (rc|kind)" \
+  "75|whole" "$(rc_of wh2)|$(field "$(newest_req)" kind)"
+expect_absent "WH.3b …a wait for room, not the budget's refusal" "not on regression_0123abcd's budget" "$(cat "$D/wh2.err" 2>/dev/null)"
+release wl
+AGENT=regression_0123abcd ask_fg wh3 whole tests/run.sh 0 >/dev/null
+expect_eq "WH.4 the landing ended: the same whole ask is admitted" "0" "$(rc_of wh3)"
+( . "$GATE_LIB" 2>/dev/null; gate_end "$(id_of wh3)" 0 ) >/dev/null 2>&1
+AGENT=regression_89abcdef ask_fg wb whole tests/run.sh 0 >/dev/null
+expect_eq "WH.5 control: an object whose budget does not name run.sh is refused its whole run (75)" "75" "$(rc_of wb)"
+expect_contains "WH.5b …by the budget, naming the object as booked.sh spells it" \
+  "a whole run is not on regression_89abcdef's budget" "$(cat "$D/wb.err" 2>/dev/null)"
+cd "$WH_HERE" || exit 1
 reap
 
 # ── §ROBUST ──────────────────────────────────────────────────────────────────

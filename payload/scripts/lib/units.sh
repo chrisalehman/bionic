@@ -49,6 +49,9 @@
 #                              not written (wave-20 REQ-5, AC-5.3). `task-add` is its caller.
 #   units_born <plan>          `<id>\t<S<n> <reach>>\t<Files>` per review-born row, read off its
 #                              `- <id>:` line's ` born: review` marker (wave-30 T21, AC-10.2).
+#   units_born_counted <plan>  `<id>\t<S<n> <reach>>\t<exempt|counted>` per review-born row: the
+#                              fix-cap: test, the one place the cap's count reads.
+#   units_fix_policy <plan>    the plan's fix-policy:, the default when the field is absent.
 #   units_born_findings <plan> `<id>\t<status>\t<record>#<n>` per finding a born row names on that
 #                              marker's ` of=` list (wave-33 T13; REQ-5, D6).
 #   units_born_marks <plan>    `<id>\t<review|floor>\t<rating or suite>` per born row, read off its
@@ -3349,9 +3352,22 @@ units_chain() {
 # task cell's ` · born: review` is for a person reading the table; a hand edit of the cell counts
 # nothing. The line is found as the gate finds it (`_units_ledger`): fences skipped, the first
 # `- <id>:` line of the section per id. The Files cell is the row's own (`units_rows`), empty for a
-# line whose row the table does not carry. Readers: the poker's `task-add --born` (the cap and the
-# fourth fix on one component) and the landing line's `review-born rows:`.
+# line whose row the table does not carry. Reader: the poker's `task-add --born` (the fourth fix on
+# one component); the cap's count is `units_born_counted` below, read off the same scan.
+# REGISTRY_FILES: the files every test row must touch (space-separated paths, relative to the repo root). A registry
+# is edited by every row of its kind, so the per-file cap of `task-add --born` counts no fixer of a path named here,
+# and shell-lint's census arm reads its census file from this list, which keeps the rule in this one place.
+REGISTRY_FILES="tests/CENSUS.md"
+
 units_born() {
+  local out
+  out="$(_units_born_scan "${1:-}")" || return 1
+  [ -z "$out" ] || printf '%s\n' "$out" | awk -F'\t' -v OFS='\t' '{ print $1, $2, $3 }'
+}
+
+# _units_born_scan <plan> -> units_born's lines with a fourth column, the marker's words after the rating (the
+#   ` of=` list and ` promoted` that `task-add --born` writes), so the count and the Files readers share one scan.
+_units_born_scan() {
   local plan="${1:-}" rows
   [ -n "$plan" ] && [ -r "$plan" ] || return 1
   rows="$(units_rows "$plan" 2>/dev/null)" || rows=""
@@ -3375,8 +3391,62 @@ units_born() {
       seen[k] = 1
       if (!match(l, / born: review S[0-9]+ (on|off)( |$)/)) next
       r = substr(l, RSTART + 14, RLENGTH - 14); sub(/ $/, "", r)
-      printf "%s\t%s\t%s\n", k, r, files[k]
+      t = substr(l, RSTART + RLENGTH); gsub(/\t/, " ", t)
+      printf "%s\t%s\t%s\t%s\n", k, r, files[k], t
     }'
+}
+
+# units_fix_policy <plan> -> the plan's `fix-policy:` read verbatim, or FIX_POLICY_DEFAULT (lib/run.sh) when no
+#   `fix-policy:` line is written at all; a field written empty stays empty, and so covers nothing. rc 1 when
+#   lib/run.sh is not loaded beside this file. Readers: `task-add --born` and `units_born_counted`.
+units_fix_policy() {
+  local plan="${1:-}" pol
+  declare -F plan_frontmatter_get >/dev/null 2>&1 && declare -F fix_policy_covers >/dev/null 2>&1 || return 1
+  pol="$(plan_frontmatter_get "$plan" fix-policy)"
+  if [ -z "$pol" ] && ! grep -qE '^[[:space:]]*fix-policy[[:space:]]*:' "$plan" 2>/dev/null; then
+    pol="$FIX_POLICY_DEFAULT"
+  fi
+  printf '%s' "$pol"
+}
+
+# units_born_class <plan> <policy> <S<n> <reach>> <marker words> -> `exempt` or `counted`, the fix-cap: test of one
+#   review-born row. A DEFECT THE PLAN'S OWN REVIEW MAY RAISE UNASKED IS ITS OWN TO FIX, so it is exempt: a rating
+#   inside <policy>, every finding its ` of=` list names read from this plan's own record directory
+#   (`record/<plan slug>/`, the slug as lib/proof.sh `proof_plan_slug` takes it). Counted: a row marked
+#   ` promoted` (the person moved its finding to fix from outside the policy), a rating outside the policy, or a
+#   finding carried in from another plan's record. With lib/run.sh not loaded the policy cannot be asked, and the
+#   row is counted, as every review-born row once was.
+units_born_class() {
+  local plan="${1:-}" pol="${2:-}" rating="${3:-}" words=" ${4:-} " own ids id
+  case "$words" in *" promoted "*) echo counted; return 0 ;; esac
+  if ! declare -F fix_policy_covers >/dev/null 2>&1 || ! fix_policy_covers "$pol" "${rating% *}" "${rating#* }"; then
+    echo counted; return 0
+  fi
+  own="${plan##*/}"; own="record/${own%.plan.md}/"
+  ids=""
+  case "$words" in *" of="*) ids="${words#* of=}"; ids="${ids%% *}" ;; esac
+  for id in $(printf '%s' "$ids" | tr ',' ' '); do
+    case "${id%#*}" in "$own"*) : ;; *) echo counted; return 0 ;; esac
+  done
+  echo exempt
+}
+
+# units_born_counted <plan> -> `<id>\t<S<n> <reach>>\t<exempt|counted>`, one line per row `units_born` names, in its
+#   order (`units_born_class` per row, the plan's policy read once). Nothing, exit 0, when there is none; exit 1 when
+#   the plan cannot be read or its policy cannot be (lib/run.sh not loaded). THE CAP COUNTS THE `counted` LINES:
+#   `task-add --born` refuses a counted row at fix-cap:, and the landing line prints both figures.
+units_born_counted() {
+  local plan="${1:-}" pol out id r words
+  out="$(_units_born_scan "$plan")" || return 1
+  pol="$(units_fix_policy "$plan")" || return 1
+  [ -n "$out" ] || return 0
+  # Re-joined on \037: a tab is IFS white space to `read`, so an empty Files cell would shift the words left.
+  while IFS=$'\037' read -r id r words; do
+    [ -n "$id" ] || continue
+    printf '%s\t%s\t%s\n' "$id" "$r" "$(units_born_class "$plan" "$pol" "$r" "$words")"
+  done <<UNITS_BORN_COUNTED
+$(printf '%s\n' "$out" | awk -F'\t' '{ printf "%s\037%s\037%s\n", $1, $2, $4 }')
+UNITS_BORN_COUNTED
 }
 
 # units_born_findings <plan> -> `<id>\t<status>\t<record>#<n>`, one line per finding a review-born row names

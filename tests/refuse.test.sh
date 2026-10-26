@@ -3,29 +3,16 @@
 # renderer, and the channel table it renders by (epic-22 wave-01 task 11, REQ-E1;
 # AC-E1.3 and AC-E1.5; ADR-002).
 #
-# WHAT IT OWNS. Three questions no static pin can answer, each driven through a REAL
-# call site — a scratch hook that sources the shipped library and calls `refuse` — so
-# nothing here is measuring a test-only re-implementation of the renderer:
-#
-#   §1  the channel table is DATA, ten fields per mode, and its cells are the ones
-#       record/wave-01-plugin-only/e1-measurement.md measured — including the cells
-#       that say `unverified`, which are the point rather than a gap.
-#   §2  AC-E1.3. In each refusal mode the user stream is one line in the criterion's
-#       own shape, and a malformed refusal (a seven-word fix, a two-line fact, an
-#       unknown mode) is refused loudly at the call site instead of truncated.
-#   §3  AC-E1.5. `BIONIC_WALL_VERBOSE=1` puts `detail` on the user stream, in every
-#       mode, and its absence keeps it off the modes that have somewhere else to put it.
-#   §4  the model stream's shape per mode: `deny` carries `detail` in
-#       `permissionDecisionReason`, `block` in `reason`, and `exit2` carries the verdict
-#       and the detail on the one wire it has for both readers, so what the model reads
-#       there is what the reader reads (ADR-030).
-#   §5  the fail-closed properties. `refuse` exits and never returns to a call site
-#       that could then wave the action through, and every path out of it — including
-#       every authoring error — leaves a non-zero status or a blocking JSON verdict.
-#   §6  ADR-030, with `BIONIC_WALL_VERBOSE` UNSET — the state a real refusal runs in and
-#       the one no other detail assertion in this tree is taken in: an `exit2` wall's
-#       computed detail reaches the reader, at most twelve lines of it plus a `+N more`.
+# WHAT IT OWNS. Questions no static pin can answer, each driven through a REAL call site: a
+# scratch hook that sources the shipped library and calls `refuse`.
+#   §1  the channel table is DATA, its cells the measurement's, `unverified` ones included.
+#   §2  the user stream is one line in the criterion's shape; a malformed refusal is refused loudly.
+#   §3  BIONIC_WALL_VERBOSE=1 puts `detail` on the user stream in every mode.
+#   §4  the model stream's shape per mode, and what `exit2` carries on its one wire.
+#   §5  fail-closed: `refuse` exits, and no path out of it waves the action past.
+#   §6  with the knob UNSET an exit2 wall's detail reaches the reader, at most twelve lines.
 #   §T47  a refusal never loses its own line to a long value.
+#   §NEEDS  a refusal that needs a person is an event on the bound plan's landing record.
 #
 # THE SHAPES ARE ASSERTED LITERALLY, NOT READ BACK OUT OF THE TABLE. §2's exit2 rows say
 # what the stream IS — a verdict line, then the detail behind it — as a literal
@@ -33,22 +20,14 @@
 # library what to expect and then checks the library did it agrees with itself for any
 # value of the cell, which is the one thing these rows exist to make impossible.
 #
-# THE CELL HAS MOVED TWICE, AND BOTH TIMES THESE ROWS WENT RED AND WERE EDITED ON PURPOSE.
-# Task 12 flipped it to `no` under ruling D-1 ("a refusal is a sentence with a pointer",
-# 2026-09-07) and task 13 re-authored them; epic-23 wave-16 T4 flipped it back to `yes`
-# under ADR-030 ("a refusal prints what it knows", 2026-09-19) and re-authored them again.
-# A pin that had read the cell would have gone green through both.
+# THE CELL HAS MOVED TWICE and these rows were re-authored each time: a pin that had read the
+# cell would have gone green through both.
 #
-# EVERY ASSERTION HAS A MUTANT. Each section drives a scratch copy of refuse.sh with
-# exactly one guard removed and requires the copy to fail where the shipped file
-# passes. The mutants are built with `anchor` first, so a refactor that renames the
-# guarded line makes the mutation fail loudly rather than silently mutate nothing and
-# leave the arm passing over an unmutated file.
+# EVERY ASSERTION HAS A MUTANT where a scratch copy of refuse.sh with one guard removed must fail;
+# each is built after an `anchor`, so a renamed guard fails loudly instead of mutating nothing.
 #
-# HERMETIC. A mktemp sandbox, no HOME writes, no network, no plugin registry read.
-# The scratch hook sources the library by absolute path rather than through the
-# loader block: the loader's own behaviour is tests/loader.test.sh's, and reaching
-# refuse.sh through `BIONIC_LIB_WANT` is task 13's edit to 21 hooks, not this file's.
+# HERMETIC. A mktemp sandbox, no HOME writes, no network. The scratch hook sources the library by
+# absolute path, not through the loader block, whose behaviour is tests/loader.test.sh's.
 #
 # Usage: bash tests/refuse.test.sh
 
@@ -129,13 +108,9 @@ FX_DETAIL='The wall reads the plan brief'"'"'s `Suites:` line and nothing else.
 A path-qualified "run.sh" token counts; a bare name does not.
 Widen the budget with a C:\task brief, then re-dispatch.'
 
-# THE SEVEN-WORD ARMS GET THEIR OWN, SHORT FACT, and this is a finding rather than a
-# convenience. With FX_FACT the seven-word fix pushes the whole line to 103 columns,
-# so the LINE budget fires first and the word budget is never reached — the mutant
-# that removes the word guard still gets refused, by the other guard, and the arm
-# reads green while proving nothing. Two guards that overlap on a fixture leave the
-# narrower one unmeasured. This fact keeps the line at 86 columns so the word count
-# is the only thing that can refuse it.
+# THE SEVEN-WORD ARMS GET A SHORT FACT: with FX_FACT the line is 103 columns and the line budget
+# fires before the word budget, so the word guard's mutant would still be refused and prove nothing.
+# This fact keeps the line at 86 columns, so the word count is the only thing that can refuse it.
 FX_FACT_SHORT="the run arm has no budget"
 FX_FIX_7="add it to the Suites budget line"
 
@@ -161,10 +136,7 @@ cp "$LIB_DIR/width.sh" "$MUT_DIR/width.sh"
 # real mutation result.
 MUT_PATH=""
 mutant() {
-  # SEPARATE STATEMENTS, and not one `local` with four assignments: `local a=1 b=$a`
-  # creates every name as an unset local FIRST and then assigns, so `$name` in the
-  # fourth word expands to the unset local and `set -u` kills the function — silently,
-  # inside a command substitution, leaving an empty path the arms below then source.
+  # SEPARATE STATEMENTS: `local a=1 b=$a` expands `$a` unset and `set -u` kills the function silently.
   local name="$1" expr="$2"
   local dst="$MUT_DIR/$name.sh"
   sed -E "$expr" "$LIB" > "$dst"
@@ -887,5 +859,32 @@ expect_true "T47-i2 the first-line mutant parses" bash -n "$M_FIRST"
 DRV_STRICT=""; drive "$M_FIRST" exit2 "$FX_VERB" "$T47_ONE" "$FX_FIX" "$FX_DETAIL"; DRV_STRICT=1
 expect_regex "T47-i3 MUTANT without the fact in the detail the line is still cut (the mutant runs)" "$USER_LINE_RE" "$DRV_ERR_1"
 expect_absent "T47-i4 MUTANT …but the whole fact is nowhere on the wire (the first-line rows discriminate)" "$T47_ONE" "$DRV_ERR"
+
+section "§NEEDS — a refusal that needs a person is an event on the landing record"
+# fails-when: a `needs: ` fix under a bound plan appends nothing or not the one line carrying the verb;
+# any other fix, a `needs:` in the fact or detail alone, or an unbound session appends or creates a record.
+NEEDS_FIX="needs: the user — a waiver"
+needs_root() {  # <name> <marker body>: a git root holding a plan, and a marker for sid `s`
+  eval "$1=\"\$(cd \"\$(mktemp -d \"\$SANDBOX/n.XXXXXX\")\" && pwd -P)\""
+  local r="${!1}"; mkdir -p "$r/.bionic/tmp" "$r/.bionic/docs/plans/e"; (cd "$r" && git init -q)
+  echo "# plan" > "$r/.bionic/docs/plans/e/w.plan.md"; printf '%s\n' "${2//@/$r}" > "$r/.bionic/tmp/engaged-s.state"
+}
+needs_root NB "plan=@/.bionic/docs/plans/e/w.plan.md"; needs_root NZ "plan=none"
+NREC="$NB/.bionic/docs/record/w/landing-proofs.log"
+needs_drive() { export BIONIC_ROOT="$1" BIONIC_SID="$2"; shift 2; drive "$LIB" exit2 "$FX_VERB" "$@"; unset BIONIC_ROOT BIONIC_SID; }
+needs_n() { if [ -f "$NREC" ]; then wc -l < "$NREC" | tr -d ' '; else echo 0; fi; }
+needs_drive "$NB" s "$FX_FACT" "$NEEDS_FIX" ""
+expect_eq "NEEDS-1 a needs fix under a bound plan appends one line" "1" "$(needs_n)"
+expect_regex "NEEDS-2 …in the event's shape, carrying the verb" \
+  "^line/v1\|ev=refusal\|needs=person\|wall=$FX_VERB\|at=[0-9]{4}-[0-9-]{5}T[0-9:]{8}Z$" "$(cat "$NREC")"
+expect_status "NEEDS-3 …and the refusal still exits 2" "2" "$DRV_RC"
+expect_eq "NEEDS-4 …with the one user line, the fix as given" "bionic: $FX_VERB refused — $FX_FACT ($NEEDS_FIX)" "$DRV_ERR"
+needs_drive "$NB" s "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
+needs_drive "$NB" s "needs: the user — $FX_FACT_SHORT" "$FX_FIX" "needs: the user — a waiver"
+expect_eq "NEEDS-5 a fix without the prefix, or the prefix in the fact or detail alone, appends nothing" "1" "$(needs_n)"
+needs_drive "$NZ" s "$FX_FACT" "$NEEDS_FIX" ""
+needs_drive "$NZ" ghost "$FX_FACT" "$NEEDS_FIX" ""
+expect_status "NEEDS-6 plan=none and no marker: the refusal exits 2 as ever" "2" "$DRV_RC"
+expect_false "NEEDS-7 …and no record is created" test -e "$NZ/.bionic/docs/record"
 
 finish

@@ -191,6 +191,12 @@ DELIVER_FILES
       die "REFUSED — the artifact $(clean "$art") of $PV_ID is not under record/ of the docs root ($docs/record/), and a record row delivers a record; the plan is unchanged."
       exit 2 ;;
   esac
+  # THE WALK ROW'S RECORD IS SETTLED BY ITS LANDING: a verify row whose artifact is a run's walk record,
+  # record/<run>/walk.md, is registered by walk_register in the landing's own write, so its confirmed cells need no
+  # status write after it. RL_WALK names the record from the docs root, RL_WALK_REAL its real path.
+  if [ "$kind" = verify ]; then
+    case "$rel" in record/*/walk.md) case "${rel#record/}" in */*/*) : ;; *) RL_WALK="$rel"; RL_WALK_REAL="$real" ;; esac ;; esac
+  fi
   if [ "$kind" = review ]; then
     if [ -z "$(awk -v rec="$rel" "$(proof_awk)"'
         /^[[:space:]]*```/ { fence = !fence; next }
@@ -612,7 +618,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 # THE HAND-HOLD COUNT IS FOLDED FROM THE LINES THE ESCAPE-HATCH VERBS WROTE (wave-35 T12; D17, REQ-8
 # AC-8.1). `landing-report --hand-holds` prints, under the landings line,
 #
-#   hand-holds: total=<n> · by-hand=<n> · stop-runs=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · status-writes=<n> · second-floors=<n> · adoptions=<n> · fixed=<n>
+#   hand-holds: total=<n> · by-hand=<n> · stop-runs=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · status-writes=<n> · second-regressions=<n> · adoptions=<n> · fixed=<n> · needs-you=<n>
 #
 # A hand-hold is a use of a verb that steps round the machine. Each kind is counted from the one line its
 # verb wrote, and PROSE IS NEVER READ (D1): a line that says `by-hand` in a plan, a note or the orchestrator's
@@ -640,9 +646,16 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 #                  task's step, so writing it by hand moves the row off every gate. The landing's settlement (lib/line.sh
 #                  `line_settle`) writes a cell through `matrix_row_cells` and writes no such line, so a status a landing
 #                  wrote is never one; a call the settled-cell rule refuses, or that only restates a key, writes none. An
-#                  evidence-only line is a write and no status: not counted.
-#   second-floors  `proved: kind=floor` lines under `## SDLC State` past the first (`proof-add floor`), read through
-#                  lib/proof.sh's `proof_fields`, the one reading of a proof line.
+#                  evidence-only line is a write and no status: not counted. A `line/v1|ev=matrix-retier|…` line
+#                  (`matrix-retier`) raises a tier and resets the row: strengthening is the run's act, so it is counted
+#                  in no field; weakening stays a person's, a waiver: line among the waivers.
+#   second-regressions  a whole run a person started, past the first. The tick and the orchestrator start the whole
+#                  run as the machine does, so only a person's start is a hand-hold: the landing record's regression
+#                  run lines (`ev=run`, a log under `regression-run-`, or `kind=regression`) past the record's first
+#                  whose `starter=person` (`regression-run --starter person`), each placed by its `at=`. A run line
+#                  older than `starter=` names no starter, and its run is counted as it was before the field: by its
+#                  `proved: kind=regression` line under `## SDLC State` past the first (lib/proof.sh `proof_fields`),
+#                  unless that proof cites a log whose run line names a starter, which the run lines count.
 #   adoptions      the roster row `adopt` files for each agent it adopts (`adopt_write_row`: `source=adopted`,
 #                  `adopted_from=<sid>`), DISTINCT (agent_id, adopted_from) over the run's rosters, as the amends are
 #                  (wave-36 T14; D13, AC-7.6). Its printed `poker-adopt/v1|…` report is kept in no file, so the row is
@@ -653,6 +666,9 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 #                  event: typed at or before that landing it is the landing's own business and outside the count,
 #                  typed after it a hand marked the fix, inside. A move naming a row with no landing is unplaced.
 #                  A move the landing itself wrote (`by=landing`, lib/line.sh `line_settle`) is its settlement, never a hand.
+#   needs-you      the landing record's `line/v1|ev=refusal|needs=person|…`, a refusal that named a person as its exit, from
+#                  the one line refuse() wrote, placed by its `at=`. A refusal the person had to answer is a hand-hold; a refusal
+#                  that named another exit (`needs=` anything else) is the machine's own and counts nothing. It is printed last.
 #
 # THE WINDOW. `--since <ISO>` and `--until <ISO>` count a hand-hold only when its own line's time is after the start
 # and at or before the end; either end may be absent, and absent is open. Each source is placed by the time its writer
@@ -703,7 +719,7 @@ _HH_PLACE_AWK='
 '
 hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] [--until <ISO>] -> the one hand-holds line; rc 0
   local rec="$1" root="$2" plan="$3" slug led rf hand=0 stp=0 stw=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0 pl
-  local since="" until="" u1=0 u2=0 u3=0 u4=0 lands=""
+  local ney=0 since="" until="" u1=0 u2=0 u3=0 u4=0 lands="" prs=0 started=""
   shift 3
   while [ $# -ge 2 ]; do
     case "$1" in --since) since="$2" ;; --until) until="$2" ;; esac
@@ -711,13 +727,24 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
   done
   slug="$(proof_plan_slug "$plan")"
   if [ -f "$rec" ] && [ ! -L "$rec" ] && { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }; then
-    read -r hand stp stw u1 <<< "$(awk -F'|' -v HH_S="$since" -v HH_U="$until" "${_LINE_FIELDS_AWK:-}$_HH_PLACE_AWK"'
+    read -r hand stp stw prs ney u1 <<< "$(awk -F'|' -v HH_S="$since" -v HH_U="$until" "${_LINE_FIELDS_AWK:-}$_HH_PLACE_AWK"'
       { ev = line_ev() }
       ev == "published" && line_kv("kind") == "hand" && hh_take(line_kv("at")) { n++ }
+      # a whole run past the first is a hand-hold only when a person started it
+      ev == "run" && (line_kv("kind") == "regression" || index(line_kv("log"), "regression-run-")) {
+        if (++r > 1 && line_kv("starter") == "person" && hh_take(line_kv("at"))) p++
+      }
       ev == "stop-run" && hh_take(line_kv("at")) { s++ }
       # only a line that names the status cell or the task key is a write the gate reads; an evidence-only one is neither placed nor counted
       ev == "matrix-set" && (index("," line_kv("cells") ",", ",status,") || index("," line_kv("cells") ",", ",task,")) && hh_take(line_kv("at")) { w++ }
-      END { print n + 0, s + 0, w + 0, HH_UNPLACED + 0 }' "$rec")"
+      # a refusal that named a person as its exit is one the person had to answer
+      ev == "refusal" && line_kv("needs") == "person" && hh_take(line_kv("at")) { e++ }
+      # a retier raises the check of a criterion, an act of the run and never a hand-hold: its line is read as nothing, on purpose
+      ev == "matrix-retier" { next }
+      END { print n + 0, s + 0, w + 0, p + 0, e + 0, HH_UNPLACED + 0 }' "$rec")"
+    # the logs whose run line names its starter, ` <log> ` words: a proof citing one is counted by its run line
+    started="$(awk -F'|' "$_LINE_FIELDS_AWK"'
+      line_ev() == "run" && line_kv("starter") != "" && line_kv("log") != "" { printf " %s ", line_kv("log") }' "$rec")"
     # each row's first landing, `<row>=<at>` words: what a move to fixed is placed against
     lands="$(awk -F'|' "$_LINE_FIELDS_AWK"'
       line_ev() == "published" && line_kv("row") != "" && !(line_kv("row") in f) { f[line_kv("row")] = 1; printf "%s=%s ", line_kv("row"), line_kv("at") }' "$rec")"
@@ -767,14 +794,16 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
     if ! declare -F proof_awk >/dev/null 2>&1 && [ -f "$BIONIC_LIB/proof.sh" ]; then . "$BIONIC_LIB/proof.sh"; fi
     if ! declare -F units_ac_head_awk >/dev/null 2>&1 && [ -f "$BIONIC_LIB/units.sh" ]; then . "$BIONIC_LIB/units.sh"; fi
     if declare -F proof_awk >/dev/null 2>&1 && declare -F units_ac_head_awk >/dev/null 2>&1; then
-      read -r fl wv fix u4 <<< "$(HH_LANDS="$lands" awk -v HH_S="$since" -v HH_U="$until" "$(proof_awk)$(units_ac_head_awk)$_HH_PLACE_AWK"'
+      read -r fl wv fix u4 <<< "$(HH_LANDS="$lands" HH_STARTED="$started" awk -v HH_S="$since" -v HH_U="$until" "$(proof_awk)$(units_ac_head_awk)$_HH_PLACE_AWK"'
         BEGIN { n = split(ENVIRON["HH_LANDS"], lw, " "); for (i = 1; i <= n; i++) { k = index(lw[i], "="); if (k > 1) LAND[substr(lw[i], 1, k - 1)] = substr(lw[i], k + 1) } }
+        # a proof whose evidence names a log the record holds a starter for: that run line is the count
+        function hh_started(ev,   m, e, i) { m = split(ev, e, ","); for (i = 1; i <= m; i++) if (e[i] != "" && index(ENVIRON["HH_STARTED"], " " e[i] " ")) return 1; return 0 }
         /^[ \t]*```/ { fence = !fence; next }
         fence { next }
         /^##[ \t]/ { sec = ($0 ~ /^##[ \t]+SDLC State/) ? "sdlc" : (($0 ~ /^##[ \t]+Verification Matrix/) ? "mx" : ""); inb = 0; next }
         sec == "sdlc" {
-          # the first regression proof is the floor itself; each one past it is a hand-hold
-          if (proof_fields($0) && PROOF_KIND == "regression") { if (++r > 1 && hh_take(hh_at($0))) f++ }
+          # the first regression proof is the floor itself; each one past it whose run names no starter is a hand-hold
+          if (proof_fields($0) && PROOF_KIND == "regression") { if (++r > 1 && !hh_started(PROOF_EVIDENCE) && hh_take(hh_at($0))) f++ }
           else if ($0 ~ /^waived:[ \t]+question=/) { q = index($0, "\""); if (hh_take(hh_first(q ? substr($0, 1, q - 1) : $0))) w++ }
           else if ($0 ~ /^moved:[ \t]+[^ \t]+[ \t]+to=fixed([ \t]|$)/ && hh_kv($0, "by") != "landing") { if (hh_take_after(hh_at($0), LAND[hh_kv($0, "row")])) x++ }
           next
@@ -793,8 +822,9 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
         END { print f + 0, w + 0, x + 0, HH_UNPLACED + 0 }' "$plan")"
     fi
   fi
-  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · status-writes=%d · second-regressions=%d · adoptions=%d · fixed=%d' \
-    $(( hand + stp + dec + lif + amd + hld + ext + wv + stw + fl + ado + fix )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$stw" "$fl" "$ado" "$fix"
+  fl=$(( ${fl:-0} + ${prs:-0} ))
+  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · status-writes=%d · second-regressions=%d · adoptions=%d · fixed=%d · needs-you=%d' \
+    $(( hand + stp + dec + lif + amd + hld + ext + wv + stw + fl + ado + fix + ney )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$stw" "$fl" "$ado" "$fix" "$ney"
   if [ -n "$since" ] || [ -n "$until" ]; then printf ' · unplaced=%d' $(( ${u1:-0} + ${u2:-0} + ${u3:-0} + ${u4:-0} )); fi
   printf '\n'
   return 0
@@ -882,6 +912,7 @@ hand_holds_verb() {
       exit 1
     fi
     plan_verb_open row-landed
+    RL_WALK=""; RL_WALK_REAL=""
     [ "$VERB" != deliver ] || deliver_check
     RL_JUDGED=""
     if [ "$RL_HAND" -eq 1 ]; then row_landed_suites; row_landed_scan; fi
@@ -963,8 +994,16 @@ hand_holds_verb() {
       die "REFUSED — what the landing of $PV_ID settles cannot be written into the plan's copy; the plan is unchanged."
       exit 1
     fi
+    # THE WALK, SETTLED IN THE SAME COPY: its proof line, the cells it confirms and its pointer go in with the row's
+    # landing, and a record that does not register refuses the landing whole.
+    if [ -n "$RL_WALK" ] && ! walk_register "$PV_PLAN" "$PV_NEW" "$RL_WALK_REAL" "$RL_WALK" "$RL_COMMIT" "$PV_REPO"; then
+      die "REFUSED — $PV_ID delivers the walk record $RL_WALK, and it lands only with the record's verdicts settled: $(clean_whole "$WALK_WHY"); fix the record, then bash $HOOK_DIR/session-poker.sh deliver $PV_ID. The plan is unchanged."
+      exit 1
+    fi
     plan_verb_swap row-landed "$PV_ID landed at $RL_COMMIT" writer
+    [ -z "$RL_WALK" ] || walk_recorded "$PV_PLAN" "$RL_WALK"
     say "row-landed — $PV_ID landed at $RL_COMMIT: status, step line and ledger line written to $PV_PLAN in one write; dry-committed first."
+    [ -z "$RL_WALK" ] || say "row-landed — $PV_ID registered its walk at ${WALK_HEAD:0:12}: $(walk_said "$RL_WALK")"
     line_settled "$PV_PLAN" "$PV_REPO" "$PV_ID" "$RL_COMMIT"
     [ -z "$LINE_SETTLED_F" ] || say "row-landed — $PV_ID settled the findings $LINE_SETTLED_F: fixed by its landing, their asks closed."
     [ -z "$LINE_SETTLED_C" ] || say "row-landed — $PV_ID settled the matrix status of $LINE_SETTLED_C: discharged by its landing."
@@ -1008,17 +1047,65 @@ hand_holds_verb() {
 #
 # THE INTEGRATE ROW RENDERS THE ENTRY'S REVIEWS PART BEFORE IT OPENS ITS PULL REQUEST. `reviews-part <row>` renders the
 # release entry's `### The reviews` part from the plan (lib/line.sh `line_reviews_state`, close-out's renderer too) and
-# commits it on the working branch under the line's author, so the branch the pull request is opened from carries it,
-# and the merge brings it to the integration branch. Its last lines are the release reply's waivers, so in the release
+# commits it under the line's author where `part_target` says, the working branch when run from its checkout, so the
+# branch the pull request is opened from carries it, and the merge brings it to the integration branch. Its last lines are the release reply's waivers, so in the release
 # order it refuses until `approved: release` is written: a part rendered before the reply would miss them. The judge
 # holds the commit covered by the release check and the approval at its parent while it is the fresh render (lib/proof.sh
 # `proof_part_base`), so nothing is approved or checked again. The landing record gains
-# `ev=integrate|row=<row>|part=reviews|commit=<c>|branch=<working>`, so the branch holds no commit the record does not
+# `ev=integrate|row=<row>|part=reviews|commit=<c>|branch=<b>|tree=<t>`, so no branch holds a commit the record does not
 # name. Nothing to render, or the part already listed: nothing is made, exit 0. The branch moves on this machine alone;
 # it leaves it by the person's push. `deliver` refuses the integrate row while the part would still render.
 REVIEWS_PART_AUTHOR="bionic line"; REVIEWS_PART_EMAIL="line@bionic.invalid"
+
+# THE PARTS RENDER IN THE CHECKOUT THE VERB RUNS FROM. A row's tree renders the part its own landing carries, so the
+# working branch takes it by that landing and never twice. `part_target <plan> <root>` sets PT_TREE (the checkout that
+# takes the commit, absolute), PT_BRANCH and PT_HEAD (the commit read and rendered on). The checkout's own top level,
+# a linked worktree included, on a branch of its own takes the part on that branch at its HEAD; the plan's working
+# branch moves only when that checkout holds it. A checkout on no branch, or on a protected one, can take no commit of
+# its own, so the part goes to the working branch as it always did: in the checkout holding it, else by the ref alone
+# in <root>. PT_HEAD empty, PT_SAID saying why, when there is no commit to read.
+PT_TREE=""; PT_BRANCH=""; PT_HEAD=""; PT_SAID=""
+part_target() {
+  local plan="$1" root="$2" top br wb co
+  PT_TREE=""; PT_BRANCH=""; PT_HEAD=""; PT_SAID=""
+  wb="$(plan_working_branch "$plan")"
+  top="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)" && top="$(cd "$top" 2>/dev/null && pwd -P)" || top=""
+  br=""; [ -z "$top" ] || br="$(git -C "$top" symbolic-ref --short -q HEAD 2>/dev/null)" || br=""
+  if [ -n "$br" ] && [ "$br" != "$wb" ] && { _wt_branch_protected "$br"; [ $? -eq 1 ]; }; then
+    PT_TREE="$top"; PT_BRANCH="$br"
+    PT_HEAD="$(git -C "$top" rev-parse --verify -q HEAD 2>/dev/null)" || PT_HEAD=""
+    [ -n "$PT_HEAD" ] || PT_SAID="$br in $top names no commit"
+    return 0
+  fi
+  PT_BRANCH="$wb"
+  PT_HEAD="$(proof_branch_head "$plan" "$root")" || PT_HEAD=""
+  [ -n "$PT_HEAD" ] || PT_SAID="the plan's working-branch ${wb:-(none named)} names no commit in $root"
+  co="$(worktree_checkout_of "$root" "$wb")" && PT_TREE="$co" || PT_TREE="$root"
+}
+# part_land <ev> <part> <message> <reflog words> <tmp dir holding new> -> the rendered file committed on PT_BRANCH at
+# PT_HEAD, the branch moved in the checkout holding it, and the landing record naming the commit, branch and tree.
+# <tmp dir> is removed. Every refusal exits, nothing moved before the move refuses.
+part_land() {
+  local why
+  why="$(line_reviews_checkout "$PT_TREE" "$PT_BRANCH")"
+  if [ -n "$why" ]; then
+    rm -rf "$5"; die "REFUSED — $why; nothing was rendered."; exit 2
+  fi
+  if ! line_reviews_commit "$PT_TREE" "$PT_HEAD" "$5/new" "$REVIEWS_PART_AUTHOR" "$REVIEWS_PART_EMAIL" "$3"; then
+    rm -rf "$5"; die "REFUSED — on $PT_BRANCH: $LINE_RV_SAID; nothing was rendered."; exit 2
+  fi
+  rm -rf "$5"
+  if ! line_reviews_move "$PT_TREE" "$PT_BRANCH" "$LINE_RV_COMMIT" "$PT_HEAD" "$4"; then
+    die "REFUSED — $PT_BRANCH could not be moved from ${PT_HEAD:0:12} to ${LINE_RV_COMMIT:0:12}; nothing was published."
+    exit 2
+  fi
+  if ! line_event "$PV_PLAN" "$1" "row=$PV_ID" "part=$2" "commit=$LINE_RV_COMMIT" "branch=$PT_BRANCH" "tree=$PT_TREE"; then
+    die "REFUSED — $PT_BRANCH moved to ${LINE_RV_COMMIT:0:12}, and the landing record could not be written: append ev=$1|row=$PV_ID|part=$2|commit=$LINE_RV_COMMIT|branch=$PT_BRANCH|tree=$PT_TREE to $(line_record "$PV_PLAN" 2>/dev/null || printf 'the record')."
+    exit 1
+  fi
+}
 poker_verb_reviews_part() {
-  local row kind status wb head ah tmp why call="bash $HOOK_DIR/session-poker.sh"
+  local row kind status head ah tmp call="bash $HOOK_DIR/session-poker.sh"
   if ! plan_verb_id_ok "$PV_ID"; then
     die "REFUSED — '$(clean "$PV_ID")' is not one row id; nothing was rendered."
     exit 1
@@ -1050,40 +1137,24 @@ poker_verb_reviews_part() {
       exit 2
     fi
   fi
-  wb="$(plan_working_branch "$PV_PLAN")"
-  head="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || head=""
+  part_target "$PV_PLAN" "$PV_REPO"; head="$PT_HEAD"
   if [ -z "$head" ]; then
-    die "REFUSED — the plan's working-branch ${wb:-(none named)} names no commit in $PV_REPO; nothing was rendered."
+    die "REFUSED — $PT_SAID; nothing was rendered."
     exit 2
   fi
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/reviews-part.XXXXXX")" || { die "REFUSED — no temporary directory; nothing was rendered."; exit 2; }
-  if ! line_reviews_state "$PV_PLAN" "$PV_REPO" "$head" "$wb" "$tmp/new"; then
+  if ! line_reviews_state "$PV_PLAN" "$PT_TREE" "$head" "$PT_BRANCH" "$tmp/new"; then
     rm -rf "$tmp"; die "REFUSED — the part cannot be rendered: $LINE_RV_SAID. Nothing was rendered."; exit 2
   fi
   case "$LINE_RV_STATE" in
     none) rm -rf "$tmp"; say "reviews-part — nothing to render: $LINE_RV_SAID."; exit 0 ;;
     listed) rm -rf "$tmp"
-      say "reviews-part — the $LINE_RV_VER entry's ### The reviews on $wb already lists the plan's $LINE_RV_N review and waiver lines; nothing was made."
+      say "reviews-part — the $LINE_RV_VER entry's ### The reviews on $PT_BRANCH already lists the plan's $LINE_RV_N review and waiver lines; nothing was made."
       exit 0 ;;
   esac
-  why="$(line_reviews_checkout "$PV_REPO" "$wb")"
-  if [ -n "$why" ]; then
-    rm -rf "$tmp"; die "REFUSED — $why; nothing was rendered."; exit 2
-  fi
-  if ! line_reviews_commit "$PV_REPO" "$head" "$tmp/new" "$REVIEWS_PART_AUTHOR" "$REVIEWS_PART_EMAIL" \
-       "line: the $LINE_RV_VER entry's reviews, rendered from the plan before the pull request"; then
-    rm -rf "$tmp"; die "REFUSED — on $wb: $LINE_RV_SAID; nothing was rendered."; exit 2
-  fi
-  rm -rf "$tmp"
-  if ! line_reviews_move "$PV_REPO" "$wb" "$LINE_RV_COMMIT" "$head" "reviews-part: $PV_ID"; then
-    die "REFUSED — $wb could not be moved from ${head:0:12} to ${LINE_RV_COMMIT:0:12}; nothing was published."
-    exit 2
-  fi
-  if ! line_event "$PV_PLAN" integrate "row=$PV_ID" part=reviews "commit=$LINE_RV_COMMIT" "branch=$wb"; then
-    die "REFUSED — $wb moved to ${LINE_RV_COMMIT:0:12}, and the landing record could not be written: append ev=integrate|row=$PV_ID|part=reviews|commit=$LINE_RV_COMMIT|branch=$wb to $(line_record "$PV_PLAN" 2>/dev/null || printf 'the record')."
-    exit 1
-  fi
-  say "reviews-part — $LINE_RV_N review and waiver lines rendered under ### The reviews of the $LINE_RV_VER entry, committed ${LINE_RV_COMMIT:0:12} on $wb; open the pull request from it."
+  part_land integrate reviews "line: the $LINE_RV_VER entry's reviews, rendered from the plan before the pull request" \
+    "reviews-part: $PV_ID" "$tmp"
+  say "reviews-part — $LINE_RV_N review and waiver lines rendered under ### The reviews of the $LINE_RV_VER entry, committed ${LINE_RV_COMMIT:0:12} on $PT_BRANCH in $PT_TREE; open the pull request from the working branch once it carries it."
   exit 0
 }
 
@@ -1095,9 +1166,10 @@ poker_verb_reviews_part() {
 # release check's own reading of the deferrals (tests/lib/release-check.sh `lim_check`), so every sentence the check
 # looks for stands in the part it scans. The part replaces the entry's own (its heading to the next heading; a doubled
 # heading is one part), else goes in before `### The landing numbers`, else at the entry's end, and nothing else in
-# the file changes. It is committed on the working branch under the line's author through the reviews part's commit
-# path (lib/line.sh `line_reviews_checkout`, `line_reviews_commit`, `line_reviews_move`), so it is on the branch the
-# check judges, and the landing record gains `ev=<row kind>|row=<row>|part=known-limits|commit=<c>|branch=<working>`.
+# the file changes. It is committed under the line's author through the reviews part's commit path (`part_target`,
+# `part_land`): in a row's tree on its branch, which its landing carries to the working branch the check judges, or on
+# the working branch from its checkout, and the landing record gains
+# `ev=<row kind>|row=<row>|part=known-limits|commit=<c>|branch=<b>|tree=<t>`.
 # The rows that render it are the entry's own, the doc row that writes it and the integrate row that carries it, while
 # pending or active. A deferral with no sentence is refused, naming the verb that states it: the check refuses a part
 # without it. Nothing owed, or the part already as rendered: nothing is made, exit 0. The branch moves on this machine
@@ -1131,7 +1203,7 @@ known_limits_entry() {  # <changelog> <version> <part file> -> the changelog wit
     END { if (inb && !done) put() }' "$1"
 }
 poker_verb_known_limits_part() {
-  local row kind status wb head ver tmp why n call="bash $HOOK_DIR/session-poker.sh"
+  local row kind status head ver tmp n call="bash $HOOK_DIR/session-poker.sh"
   if ! plan_verb_id_ok "$PV_ID"; then
     die "REFUSED — '$(clean "$PV_ID")' is not one row id; nothing was rendered."
     exit 1
@@ -1162,10 +1234,9 @@ poker_verb_known_limits_part() {
     say "known-limits-part — nothing to render: the plan names no release:."
     exit 0
   fi
-  wb="$(plan_working_branch "$PV_PLAN")"
-  head="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || head=""
+  part_target "$PV_PLAN" "$PV_REPO"; head="$PT_HEAD"
   if [ -z "$head" ]; then
-    die "REFUSED — the plan's working-branch ${wb:-(none named)} names no commit in $PV_REPO; nothing was rendered."
+    die "REFUSED — $PT_SAID; nothing was rendered."
     exit 2
   fi
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/known-limits-part.XXXXXX")" || { die "REFUSED — no temporary directory; nothing was rendered."; exit 2; }
@@ -1179,35 +1250,20 @@ poker_verb_known_limits_part() {
     rm -rf "$tmp"; say "known-limits-part — nothing to render: the plan owes no deferral."
     exit 0
   fi
-  if ! git -C "$PV_REPO" show "${head}:CHANGELOG.md" > "$tmp/old" 2>/dev/null || ! /usr/bin/grep -q "^## ${ver} " "$tmp/old"; then
+  if ! git -C "$PT_TREE" show "${head}:CHANGELOG.md" > "$tmp/old" 2>/dev/null || ! /usr/bin/grep -q "^## ${ver} " "$tmp/old"; then
     rm -rf "$tmp"
-    die "REFUSED — CHANGELOG.md on $wb holds no ## $ver entry for the plan's $n deferred sentences; write the entry, then render. Nothing was rendered."
+    die "REFUSED — CHANGELOG.md on $PT_BRANCH holds no ## $ver entry for the plan's $n deferred sentences; write the entry, then render. Nothing was rendered."
     exit 2
   fi
   known_limits_entry "$tmp/old" "$ver" "$tmp/part" > "$tmp/new"
   if cmp -s "$tmp/old" "$tmp/new"; then
     rm -rf "$tmp"
-    say "known-limits-part — the $ver entry's ### Known limits on $wb already lists the plan's $n deferred sentences; nothing was made."
+    say "known-limits-part — the $ver entry's ### Known limits on $PT_BRANCH already lists the plan's $n deferred sentences; nothing was made."
     exit 0
   fi
-  why="$(line_reviews_checkout "$PV_REPO" "$wb")"
-  if [ -n "$why" ]; then
-    rm -rf "$tmp"; die "REFUSED — $why; nothing was rendered."; exit 2
-  fi
-  if ! line_reviews_commit "$PV_REPO" "$head" "$tmp/new" "$REVIEWS_PART_AUTHOR" "$REVIEWS_PART_EMAIL" \
-       "line: the $ver entry's Known limits, rendered from the plan's deferrals"; then
-    rm -rf "$tmp"; die "REFUSED — on $wb: $LINE_RV_SAID; nothing was rendered."; exit 2
-  fi
-  rm -rf "$tmp"
-  if ! line_reviews_move "$PV_REPO" "$wb" "$LINE_RV_COMMIT" "$head" "known-limits-part: $PV_ID"; then
-    die "REFUSED — $wb could not be moved from ${head:0:12} to ${LINE_RV_COMMIT:0:12}; nothing was published."
-    exit 2
-  fi
-  if ! line_event "$PV_PLAN" "$kind" "row=$PV_ID" part=known-limits "commit=$LINE_RV_COMMIT" "branch=$wb"; then
-    die "REFUSED — $wb moved to ${LINE_RV_COMMIT:0:12}, and the landing record could not be written: append ev=$kind|row=$PV_ID|part=known-limits|commit=$LINE_RV_COMMIT|branch=$wb to $(line_record "$PV_PLAN" 2>/dev/null || printf 'the record')."
-    exit 1
-  fi
-  say "known-limits-part — $n deferred sentences rendered under ### Known limits of the $ver entry, committed ${LINE_RV_COMMIT:0:12} on $wb."
+  part_land "$kind" known-limits "line: the $ver entry's Known limits, rendered from the plan's deferrals" \
+    "known-limits-part: $PV_ID" "$tmp"
+  say "known-limits-part — $n deferred sentences rendered under ### Known limits of the $ver entry, committed ${LINE_RV_COMMIT:0:12} on $PT_BRANCH in $PT_TREE."
   exit 0
 }
 

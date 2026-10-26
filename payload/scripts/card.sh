@@ -2619,8 +2619,9 @@ _card_fmt_is() {
 # DEFAULTS: a matrix row the auditor has not confirmed (waived with the user's words, `waive-row`), a T4 row whose
 # user has not yet confirmed its check, its block's confirmation still a placeholder (confirmed, `confirm-row`, or
 # waived), and a question whose newest reading fails (`waive <q>`). A placeholder of any other key is early: it is
-# evidence that was never recorded. Anything else the check prints is early: a missing or red whole run (the
-# regression is run before review and is never waived), a missing proof, another refused dry commit, an uncovered or
+# evidence that was never recorded. The judge's unproved regression, a head the landings past the whole run cover
+# with no pass at it, is the page's own decision too (`approve:merge-unproved`). Anything else the check prints is
+# early: a missing or red whole run (the regression is run before review and is never waived), a missing proof, another refused dry commit, an uncovered or
 # absent reading, a declared check or debt not held, a judge that could not deal the plan. The dry commit stops at
 # its first refusal, so a check names one wall at a time; the judge at 8 runs no dry commit and names every fact it
 # finds, and the rows are read from the matrix, so the page puts each of them whichever refusal the dry commit
@@ -2667,6 +2668,9 @@ _card_settles() {
           review)
             [ "${_cs_f[4]:-}" = failing ] || return 1
             CF_SETTLE="${CF_SETTLE}waive:${_cs_f[1]}"$'\n' ;;
+          regression)
+            [ "${_cs_f[1]:-}" = unproved ] || return 1
+            CF_SETTLE="${CF_SETTLE}approve:merge-unproved"$'\n' ;;
           *) return 1 ;;
         esac ;;
     esac
@@ -2688,6 +2692,8 @@ CF_CHECKED
 #   check       <path>                           (one per file of the declared release check the release changes)
 #   aside       <an item of the user's outside the run>
 #   decision    <kind> <key> <default|other> <subject> <default label> <other label> <default phrase> <other phrase>
+#               (kind `unproved`, the merge without a pass at this head, draws its default as none: taking it records
+#               nothing)
 #   reply       <the word a reply names the first decision's other choice by>
 #   goal        <status> <mark> <name> <reading> <evidence>
 #   handholds | ratio | acceptance | regression | review   <the line, as the verb words it>
@@ -2899,6 +2905,12 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
   else
     for ((i = 0; i < RL_N; i++)); do
       if [ "${RL_DPICK[$i]}" = default ]; then lab="${RL_DLAB[$i]}"; else lab="${RL_OLAB[$i]}"; fi
+      # THE MERGE WITHOUT A PASS has no default that acts: taking it records nothing, so the line says none, and its
+      # subject already carries the whole suite's state after its own dash.
+      if [ "${RL_DKIND[$i]}" = unproved ]; then
+        _card_hang 3 "$((i + 1)). ${RL_DSUBJ[$i]} · recommended: $lab · default: none"
+        continue
+      fi
       _card_hang 3 "$((i + 1)). ${RL_DSUBJ[$i]} — recommended: $lab · default: ${RL_DLAB[$i]}"
     done
   fi

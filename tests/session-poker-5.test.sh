@@ -1,11 +1,9 @@
 #!/bin/bash
 # Tests for hooks/session-poker.sh — shard 5: §CHECK, §DECISIONS, §ROUNDS, §EARLY-TICK, §ORDER, §QUIET-LANDING,
-# §NOTREADY, §STEP, §TSENTENCE, §CAP, §OWED.
+# §NOTREADY, §STEP, §TSENTENCE, §CAP, §OWED, §EXEMPT, §REGISTRY, §APPROVED-BY, §PARTS, §RETIER.
 #
-# THE SUITE IS SHARDS (wave-30 T2; design-ledger Δ7, D8). Its governing design, its hermetic
-# posture and its clock discipline are written once, in tests/session-poker.test.sh's header;
-# the sandbox, the pins and the shared fixture builders are tests/session-poker.prelude.sh,
-# sourced below after the framework and the POKER seam. This shard builds every fixture it reads.
+# THE SUITE IS SHARDS. Its design, hermetic posture and clock discipline are
+# in tests/session-poker.test.sh's header; the sandbox and shared fixture builders are tests/session-poker.prelude.sh.
 #
 # Usage: bash tests/session-poker-5.test.sh
 
@@ -33,11 +31,8 @@ S31_STOP_HOOK="${BIONIC_HOOKS_DIR}/stop.sh"
 # ============================================================
 section "§CHECK: current <N> --check runs what current <N> runs before it writes, writes nothing, and exits as the advance would (wave-38 T1; REQ-1 AC-1.3; D20)"
 # ============================================================
-# There was no dry form of the step move: close-out's `check` was the only one, so an orchestrator
-# learned whether `current 7` would be admitted by running it. `current <N> --check` (N in 5..8) runs
-# the advance's own path up to and excluding the swap — the same dry commit through the real gate,
-# the same `cur7_judge <N>` — prints `current <N> --check: would advance` or `… would refuse` above
-# the refusal text, and writes nothing. The agreement is structural: one function both paths call.
+# `current <N> --check` (N in 5..8) runs the advance's own path up to the swap, through the real gate and the same
+# `cur7_judge <N>`, prints `would advance` or `would refuse` above the refusal text, and writes nothing.
 # FIXTURE FIDELITY: §CUR7's world (session-poker-4): a real repository on `wave/01-fixture` with two
 # suites and lib/x.sh, base B and a code commit C; a double wave plan the real gate admits at Steps 5
 # through 7, bound to this session; every fact in the production writer's shape (`proof_line`,
@@ -213,9 +208,9 @@ POKE_BOUND="$CK_BOUND_WAS"
 section "§DECISIONS: decisions [--all] reads the design ledgers' register entries; the recap prints this run's settled set; doctrine re-puts a settled decision only as reopening D<n> (wave-38 T13; REQ-3 AC-3.4; D24)"
 # =====================================================# Every ruling is a `## Δn — Dn ruled "<reply>" (<who> <date>): <title>` heading in record/<wave>/design-ledger.md, or
 # a `- Dn ruled …` bullet under a Δ (the Step-1 rulings folded in, as this wave's Δ21 holds them); `re-ruled` and
-# `withdrawn` are register entries too. `decisions` lists this run's, `D<n> · "<reply>" · <who> <date> · <title>`, in
-# the ledger's order; `--all` lists every record/*/design-ledger.md under the docs root, each line keyed by its wave,
-# waves in slug order, a ledger with no entry in the grammar named once, and every ADR keyed by its frontmatter wave.
+# `withdrawn` are register entries too. `decisions` lists this run's, `D<n> · "<reply>" · <who> <date> · <title>`, in the
+# ledger's order; `--all` lists every record/*/design-ledger.md under the docs root keyed by wave in slug order, a ledger
+# with no entry in the grammar named once, and every ADR keyed by its frontmatter wave.
 # The resume recap's settled: lines come from the same parser (handoff-file §RESUME RS6). FIXTURE FIDELITY: a real
 # repository, §CHECK's plan shape bound to this session; ledgers in the grammar this wave's own ledger is written in,
 # with the lines a register must not read (a heading with no ruling, a body line, a fenced example).
@@ -505,13 +500,9 @@ rm -rf "$BIONIC_GATE_DIR/leases"
 # ============================================================
 section "§QUIET-LANDING: the quiet check reads the row's live landing carrier and the gate's open request for its agent before the mtimes (wave-39 T22; REQ-16 AC-16.1; D21)"
 # ============================================================
-# A writer blocked in a foreground `ready --within 1790` touches neither its progress file nor its transcript
-# for up to 30 minutes, so the tick's two NOTIFY arms (past the declared duration; quieter than the cadence)
-# named a working row every tick (three nights of it). Both arms now ask first whether the row's landing carrier
-# lives (an entry of lib/line.sh's fold, present while the `carrier=` pid of its `ev=ready` lives, whose name is
-# the row's) or whether the gate holds an open request for the row's agent; either makes the row ACTIVE, never
-# NOTIFY. Only then the mtimes. A row with no carrier, no request and nothing written past its cadence is quiet,
-# and a dead silent row still NOTIFYs.
+# A writer blocked in a foreground `ready --within 1790` touches neither its progress file nor its transcript for up to
+# 30 minutes, so both NOTIFY arms ask first whether the row's landing carrier lives or the gate holds an open request
+# for the row's agent; either makes the row ACTIVE. Only then the mtimes: a dead silent row still NOTIFYs.
 # FIXTURE FIDELITY: a real repository with a wave plan the tick reads, the roster row in the writer's shape (name,
 # progress and cadence), the carrier a sleeping process whose pid and start time the record's `ev=ready` names as
 # lib/line.sh writes them (`line_event`, `_line_me`), the request one the gate's own `gate_ask` files and whose
@@ -829,6 +820,92 @@ expect_eq "OWED-2 a born row (CAP-3d's T8) ends on the same line, its title with
 poke "$RCP" task-add T11 7 doc "${CP_T31}. Over the cap." bionic:implementor 'T5' 30 REQ-1 '—'
 expect_eq "OWED-3 a refused task-add says nothing is owed" "1|0" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'owed:')"
 POKE_BOUND="$CP_BOUND_WAS"
+# ============================================================
+section "§EXEMPT: a review-born row inside fix-policy: is exempt from fix-cap:, a promoted or carried one counts, and task-add says which count it applied"
+# ============================================================
+# A defect the wave made, the wave fixes, so the cap counts only the rows a review adds beyond them: a row rated inside
+# fix-policy: (default S1,S2-on) lands however many there are; a finding the person moved to fix from outside it, and a
+# finding carried in from another plan's record directory, count against fix-cap:.
+# FIXTURE FIDELITY: s34's plan at current: 4 with `fix-cap: 2` in its frontmatter, as Step 3 writes the field; two
+# readings registered in the shape `proof-add review` writes, their records holding findings in the reader's shape, one
+# record this plan's own and one another plan's; the person's moves to fix planted as `finding-move` writes them; every
+# row is the real verb's.
+# fails-when: a third row inside the policy is refused at fix-cap: 2; a promoted or a carried row lands uncounted; a
+# third counted row lands; the refusal names neither the counted and exempt figures nor its exit; the line task-add
+# prints names the wrong count, or none.
+EX_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+REX="$(make_repo exempt)"; ( cd "$REX" && git commit -q --allow-empty -m init )
+PEX="$(s34_plan "$REX" 4)"; EX_H="$(git -C "$REX" rev-parse HEAD)"
+EX_OWN="record/wave-01-fixture/rev.md"; EX_CARRIED="record/wave-00-prior/critic.md"
+mkdir -p "$REX/.bionic/docs/record/wave-01-fixture" "$REX/.bionic/docs/record/wave-00-prior"
+printf 'reviewed: %s..%s\nquestion: structure\nresult: fail\nscope: piece\n\nfindings: 3\nfinding: 1 S3 on lib/p1.sh:1 the first promoted defect\nfinding: 2 S3 on lib/p2.sh:1 the second promoted defect\nfinding: 3 S3 on lib/p3.sh:1 the third promoted defect\nshown: 1 cat lib/p1.sh\nshown: 2 cat lib/p2.sh\nshown: 3 cat lib/p3.sh\n' \
+  "$EX_H" "$EX_H" > "$REX/.bionic/docs/$EX_OWN"
+printf 'reviewed: %s..%s\nquestion: adversarial\nresult: fail\nscope: piece\n\nfindings: 1\nfinding: 1 S2 on lib/c1.sh:1 the carried defect\nshown: 1 cat lib/c1.sh\n' \
+  "$EX_H" "$EX_H" > "$REX/.bionic/docs/$EX_CARRIED"
+EX_H="$EX_H" EX_OWN="$EX_OWN" EX_CARRIED="$EX_CARRIED" awk '
+  { print }
+  /^rigor: / && !fm { fm = 1; print "fix-cap: 2" }
+  /^approved-by: / && !st {
+    st = 1
+    print "proved: kind=review head=" ENVIRON["EX_H"] " at=2026-10-20T00:00:00Z evidence=" ENVIRON["EX_OWN"] " question=structure reader=w-rev result=fail scope=piece"
+    print "proved: kind=review head=" ENVIRON["EX_H"] " at=2026-10-20T00:00:00Z evidence=" ENVIRON["EX_CARRIED"] " question=adversarial reader=w-adv result=fail scope=piece"
+    for (i = 1; i <= 3; i++) print "moved: " ENVIRON["EX_OWN"] "#" i " to=fix by=Dana at=2026-10-20T01:00:00Z words=\"fix it in this wave\" why=\"the user ruled it\""
+  }' "$PEX" > "$PEX.n" && mv "$PEX.n" "$PEX"
+ex_add() {  # <id> <files> <born> -> OUT, RC: task-add of a step-4 build row born of <born>
+  poke "$REX" task-add "$1" 4 build "Fix $1. The defect is gone." bionic:implementor '—' 30 REQ-1 "$2" --born "$3"
+}
+ex_born_line() { printf '%s\n' "$OUT" | /usr/bin/grep 'is review-born' || :; }
+ex_mark() { /usr/bin/grep "^- $1: " "$PEX" | sed -n 's/.* born: /born: /p'; }
+expect_eq "EX-0 precondition: the plan reads fix-cap: 2 and no fix-policy: (the default, S1,S2-on), and both findings are read" \
+  "2||3|1" "$(sed -n 's/^fix-cap: //p' "$PEX")|$(sed -n 's/^fix-policy: //p' "$PEX")|$(/usr/bin/grep -c '^finding: ' "$REX/.bionic/docs/$EX_OWN")|$(/usr/bin/grep -c '^finding: ' "$REX/.bionic/docs/$EX_CARRIED")"
+
+# Inside the policy, the review's own defects land however many there are.
+ex_add T6 lib/e6.sh 'review S2 on'
+expect_eq "EX-1 the first row born review S2 on lands (exit 0)" "0" "$RC"
+expect_contains "EX-1b …and says it was exempt under the policy (AC-1.3)" " · exempt under fix-policy: S1,S2-on" "$(ex_born_line)"
+ex_add T7 lib/e7.sh 'review S2 on'
+expect_eq "EX-2 the second lands (exit 0)" "0" "$RC"
+ex_add T8 lib/e8.sh 'review S2 on'
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "EX-3 the third born review S2 on row lands at fix-cap: 2 (exit 0): inside fix-policy: it is exempt (AC-1.1)" "0" "$RC"
+EX_LINE="$(ex_born_line)"
+expect_contains "EX-3b …its line ends exempt under fix-policy: S1,S2-on (AC-1.3)" " · exempt under fix-policy: S1,S2-on" "$EX_LINE"
+expect_absent "EX-3c …and names no count of the cap for an exempt row (AC-1.3)" "of cap" "$EX_LINE"
+expect_eq "EX-3d …its ledger marker is the plain rating" "born: review S2 on" "$(ex_mark T8)"
+
+# A carried finding and a promoted one count; the third counted row is refused.
+ex_add T9 lib/c1.sh "$EX_CARRIED#1"
+expect_eq "EX-4 a finding carried from another plan's record lands, counted (exit 0)" "0" "$RC"
+expect_contains "EX-4b …its line ends counted 1 of 2 (AC-1.3)" " · counted 1 of 2" "$(ex_born_line)"
+expect_eq "EX-4c …its marker names the carried record, as task-add has always written it" "born: review S2 on of=$EX_CARRIED#1" "$(ex_mark T9)"
+ex_add T10 lib/p1.sh "$EX_OWN#1"
+expect_eq "EX-5 a finding rated S3 on that the person moved to fix lands, counted (exit 0)" "0" "$RC"
+expect_contains "EX-5b …its line ends counted 2 of 2 (AC-1.3)" " · counted 2 of 2" "$(ex_born_line)"
+expect_eq "EX-5c …its marker says it was promoted" "born: review S3 on of=$EX_OWN#1 promoted" "$(ex_mark T10)"
+EX_BEFORE="$(cat "$PEX")"
+ex_add T11 lib/p2.sh "$EX_OWN#2"
+expect_eq "EX-6 a third counted row, promoted from S3 on, is refused at fix-cap: 2 (exit 1) (AC-1.2)" "1" "$RC"
+expect_contains "EX-6b …the refusal names the counted and exempt figures and its exit" \
+  "task-add refused — review-born rows: 2 of cap 2 are counted (3 exempt under fix-policy: S1,S2-on); this finding goes to the review findings disposition, or the person raises the cap: set fix-cap=3 at the card." "$OUT"
+expect_eq "EX-6c …and the plan is unchanged" "$EX_BEFORE" "$(cat "$PEX")"
+ex_add T11 lib/e11.sh 'review S1 off'
+expect_eq "EX-7 control: with the cap full, a row born review S1 off still lands (exit 0): S1 is inside the policy at either reach" "0" "$RC"
+expect_contains "EX-7b …exempt" " · exempt under fix-policy: S1,S2-on" "$(ex_born_line)"
+POKE_BOUND="$EX_BOUND_WAS"
+
+# ============================================================
+section "§REGISTRY: the per-file cap does not count a file every test row must touch, and still counts any other"
+# ============================================================
+# fails-when: a fourth review-born row touching tests/CENSUS.md is refused as a fourth fix on it, or a fourth row on an
+# ordinary shared path is admitted, or its refusal names another path.
+RG_WAS="$POKE_BOUND"; POKE_BOUND=180
+for RG_I in 1 2 3; do ex_add T2$RG_I "tests/CENSUS.md,lib/r$RG_I.sh,lib/shared.sh" 'review S2 on'; done
+ex_add T24 "tests/CENSUS.md,lib/r4.sh" 'review S2 on'
+expect_eq "RG-1 a fourth born row touching tests/CENSUS.md, three rows already fixing it, is admitted (exit 0)" "0" "$RC"
+ex_add T25 "tests/CENSUS.md,lib/shared.sh" 'review S2 on'
+expect_eq "RG-2 control: a fourth on lib/shared.sh, three rows already fixing it, is refused (exit 1)" "1" "$RC"
+expect_contains "RG-2b …naming lib/shared.sh and the three rows" "a fourth fix on lib/shared.sh: T21, T22, T23 already fix it" "$OUT"
+POKE_BOUND="$RG_WAS"
 
 # ============================================================
 section "§APPROVED-BY: approve plan '<reply>' writes the approved-by: line the walls read, with the user's words, once (REQ-9 AC-9.2)"
@@ -870,5 +947,181 @@ poke "$RAB" approve plan 'approved'
 expect_eq "AB-3 a second approve plan is refused (exit 1) and the plan is unchanged" "1|yes" "$RC|$([ "$AB_BEFORE" = "$(cat "$PAB")" ] && echo yes || echo no)"
 expect_contains "AB-3b …as recorded once" "recorded once" "$OUT"
 POKE_BOUND="$AB_BOUND_WAS"
+
+# ============================================================
+section "§PARTS: the release-entry parts render in the checkout they run from: a row's tree commits on its own branch and the working branch stays put, the working branch's checkout moves it, and the part line names the tree (REQ-12 AC-12.1, AC-12.2)"
+# ============================================================
+# `known-limits-part <row>` and `reviews-part <row>` render the part into the checkout they run from and commit it on that
+# checkout's branch; only the checkout holding the working branch moves it, a checkout on main commits on the working
+# branch as before, and the part line names the tree that took the commit.
+# FIXTURE FIDELITY: s34_plan's plan, bound to this session, with the working branch and the release in its frontmatter
+# as Step 0 writes them; the doc and integrate rows are the table's own shape; the deferral is lib/proof.sh
+# `proof_finding_lines`' line and its sentence the `finding-stated` verb's; the waiver is `proof_waiver_line`'s, the
+# line `waive` writes. The row's tree is a linked worktree on its own branch cut at the working branch, as
+# `spawn-worktree.sh create` makes it; the entry is a plain commit on the working branch.
+# fails-when: a verb run from the row's tree commits on the working branch or moves it, leaves the tree's branch or its
+# working tree without the part, changes the commit message, or writes no tree= on the part line; the working branch's
+# checkout no longer moves its branch; a checkout on main commits on main.
+PA_V=9.9.9
+PA_S1='The one limit the run defers, stated.'
+PA_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
+pa_lib() { bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 9; shift; "$@"' _ "$PA_LIB" "$@"; }   # <fn> [args…]
+pa_tip() { git -C "$RPA" rev-parse --verify -q "refs/heads/$1"; }   # <branch>
+pa_ev() { find "$RPA/.bionic" -name landing-proofs.log -exec cat {} + 2>/dev/null | /usr/bin/grep "|part=$1|" | tail -1; }   # <part>
+pa_has() { /usr/bin/grep -c "^$2" "$1/CHANGELOG.md" 2>/dev/null | tr -d ' '; }   # <checkout> <line start> -> the count in its working tree
+RPA="$(make_repo parts)"; RPA="$(cd "$RPA" && pwd -P)"
+git -C "$RPA" config user.email t@example.com; git -C "$RPA" config user.name "Dana Fixture"
+printf '# Changelog\n\n## %s — 2026-10-25\n\n### The work\n\n- one change\n\n### The landing numbers\n\nthe numbers\n' "$PA_V" > "$RPA/CHANGELOG.md"
+( cd "$RPA" && git add CHANGELOG.md && git commit -qm "the entry" && git branch -M main && git checkout -qb wave/01-fixture ) >/dev/null 2>&1
+PPA="$(s34_plan "$RPA" 4)"
+awk -v v="$PA_V" 'NR == 1 { print; print "working-branch: wave/01-fixture"; print "release: " v; next }
+  { print }
+  /^\| T5 \|/ { print "| T3 | 7 | doc | the entry. The release entry is written. | orchestrator | — | 10 | REQ-1 | CHANGELOG.md | — | — | pending |"
+               print "| T4 | 8 | integrate | the pull request. The run reaches main. | orchestrator | — | 10 | REQ-1 | — | — | — | pending |" }' \
+  "$PPA" > "$PPA.n" && mv "$PPA.n" "$PPA"
+PA_H="$(pa_tip wave/01-fixture)"
+PA_ADD="$(printf '%s\n%s' "$(pa_lib proof_finding_lines record/wave-01-fixture/critic.md "$(printf '1\tS3\ton\t-\tdefer\t-\tthe one title')")" \
+  "$(pa_lib proof_waiver_line adversarial "$PA_H" 'Dana Fixture' 2026-10-25T10:00:00Z 'go on')")"
+PA_ADD="$PA_ADD" awk '{ print } /^- T2: / && !d { print ENVIRON["PA_ADD"]; d = 1 }' "$PPA" > "$PPA.n" && mv "$PPA.n" "$PPA"
+poke "$RPA" finding-stated record/wave-01-fixture/critic.md#1 "$PA_S1"
+PA_STATED="$RC"
+git -C "$RPA" worktree add -q -b wt/01-T3 "$TMPROOT/parts-T3" wave/01-fixture >/dev/null 2>&1
+PA_WT="$(cd "$TMPROOT/parts-T3" && pwd -P)"
+expect_eq "PA-0 precondition: the plan's working branch is wave/01-fixture, the sentence is stated, the waiver is a line of its own, the row's tree is on wt/01-T3 at the working branch's head" \
+  "wave/01-fixture|0|1|wt/01-T3|$PA_H" \
+  "$(pa_lib plan_working_branch "$PPA")|$PA_STATED|$(/usr/bin/grep -c '^waived: question=adversarial ' "$PPA" | tr -d ' ')|$(git -C "$PA_WT" symbolic-ref --short -q HEAD)|$(git -C "$PA_WT" rev-parse HEAD)"
+
+poke "$PA_WT" known-limits-part T3
+PA_T1="$(pa_tip wt/01-T3)"
+expect_eq "PA-1 known-limits-part run from the row's tree commits on the tree's branch: exit 0, the line's author, on the tree's head, the message as before" \
+  "0|bionic line|$PA_H|line: the $PA_V entry's Known limits, rendered from the plan's deferrals" \
+  "$RC|$(git -C "$RPA" log -1 --format='%an|%P|%s' "$PA_T1" 2>/dev/null)"
+[ "$RC" = 0 ] || printf '%s\n' "$OUT" | tail -6 | sed 's/^/    | /'
+expect_eq "PA-1b …rendered into the tree: its HEAD is the commit, its CHANGELOG.md holds the sentence and is clean" \
+  "$PA_T1|1|" "$(git -C "$PA_WT" rev-parse HEAD)|$(pa_has "$PA_WT" "- $PA_S1")|$(git -C "$PA_WT" status --porcelain -- CHANGELOG.md)"
+expect_eq "PA-2 …and the working branch is where it was, its checkout without the part" \
+  "$PA_H|$PA_H|0" "$(pa_tip wave/01-fixture)|$(git -C "$RPA" rev-parse HEAD)|$(pa_has "$RPA" "- $PA_S1")"
+expect_contains "PA-3 the part line names the commit, the tree's branch and the tree" \
+  "|ev=doc|row=T3|part=known-limits|commit=$PA_T1|branch=wt/01-T3|tree=$PA_WT|at=" "$(pa_ev known-limits)"
+
+poke "$PA_WT" reviews-part T4
+PA_T2="$(pa_tip wt/01-T3)"
+expect_eq "PA-4 reviews-part run from the row's tree commits on the tree's branch: exit 0, the line's author, on the tree's head, the message as before" \
+  "0|bionic line|$PA_T1|line: the $PA_V entry's reviews, rendered from the plan before the pull request" \
+  "$RC|$(git -C "$RPA" log -1 --format='%an|%P|%s' "$PA_T2" 2>/dev/null)"
+[ "$RC" = 0 ] || printf '%s\n' "$OUT" | tail -6 | sed 's/^/    | /'
+expect_eq "PA-4b …rendered into the tree: its HEAD is the commit and its CHANGELOG.md holds the part" \
+  "$PA_T2|1" "$(git -C "$PA_WT" rev-parse HEAD)|$(pa_has "$PA_WT" '### The reviews')"
+expect_eq "PA-5 …and the working branch is where it was" "$PA_H|0" "$(pa_tip wave/01-fixture)|$(pa_has "$RPA" '### The reviews')"
+expect_contains "PA-6 the part line names the commit, the tree's branch and the tree" \
+  "|ev=integrate|row=T4|part=reviews|commit=$PA_T2|branch=wt/01-T3|tree=$PA_WT|at=" "$(pa_ev reviews)"
+
+poke "$RPA" known-limits-part T3
+PA_T3="$(pa_tip wave/01-fixture)"
+expect_eq "PA-7 run from the checkout holding the working branch, known-limits-part moves that branch: exit 0, a commit on its old head" \
+  "0|bionic line|$PA_H" "$RC|$(git -C "$RPA" log -1 --format='%an|%P' "$PA_T3" 2>/dev/null)"
+expect_eq "PA-7b …by a fast-forward of that checkout, which holds the sentence; the row's branch is untouched" \
+  "$PA_T3|1|$PA_T2" "$(git -C "$RPA" rev-parse HEAD)|$(pa_has "$RPA" "- $PA_S1")|$(pa_tip wt/01-T3)"
+expect_contains "PA-8 …and its part line names the working branch and its checkout" \
+  "|ev=doc|row=T3|part=known-limits|commit=$PA_T3|branch=wave/01-fixture|tree=$RPA|at=" "$(pa_ev known-limits)"
+
+git -C "$RPA" worktree add -q "$TMPROOT/parts-main" main >/dev/null 2>&1
+PA_M="$(pa_tip main)"
+poke "$TMPROOT/parts-main" reviews-part T4
+PA_T4="$(pa_tip wave/01-fixture)"
+expect_eq "PA-9 run from a checkout on main, reviews-part commits on the working branch as before, main unmoved" \
+  "0|$PA_T3|$PA_M|$PA_T4" "$RC|$(git -C "$RPA" log -1 --format='%P' "$PA_T4" 2>/dev/null)|$(pa_tip main)|$(git -C "$RPA" rev-parse HEAD)"
+expect_contains "PA-9b …and its part line names the working branch and the checkout holding it" \
+  "|ev=integrate|row=T4|part=reviews|commit=$PA_T4|branch=wave/01-fixture|tree=$RPA|at=" "$(pa_ev reviews)"
+
+# ============================================================
+section "§RETIER: matrix-retier raises a criterion's tier in every place it lives and resets the row; a tier at or below the cell's is refused (REQ-3 AC-3.1, AC-3.2)"
+# ============================================================
+# A criterion's tier lives in the matrix tier cell, the AC block's `eval:` line and the plan's `## Eval design` row.
+# `matrix-retier <AC> tier=<T> eval=<text>` raises all three in one transaction and resets the row (status, evidence,
+# auditor, waiver, and at T4 the user-confirmed: key), writes ev=matrix-retier and a `## Δ<k> — retier` heading. A tier
+# at or below the cell's is refused as the user's call; the spec is never touched.
+# FIXTURE FIDELITY: s34_plan's plan at current: 4, bound to this session, its typed matrix row and block taken out and an
+# Eval design added in the Step-3 table's shape; matrix-render writes the rows and blocks. The evidence, status and
+# auditor cells are written by matrix-set and discharge; the waiver: line is waive-row's line, planted at the end of
+# its block as landing-line-1 §WINDOW plants it, since waive-row reads the words from a transcript this shard has none
+# of; the ledger's first entry is `decisions put`'s.
+# fails-when: a place keeps the old tier or text; the row keeps its status, evidence, auditor or waiver; the record or
+# the ledger is not written, or the ledger's Δ is not one past the put's; a lower or equal tier writes a byte.
+RT_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RRT="$(make_repo retier)"; ( cd "$RRT" && git commit -q --allow-empty -m init )
+git -C "$RRT" config user.email t@example.com; git -C "$RRT" config user.name "Dana Fixture"
+PRT="$(s34_plan "$RRT" 4)"
+awk '/^\| AC-1\.1 \| T2 \|/ { next } /^AC-1\.1:$/ { skip = 1; next } skip && /^[ \t]/ { next } { skip = 0 }
+  /^## Verification Matrix/ {
+    print "## Eval design\n"
+    print "| Requirement | Approach | Criterion | Eval type | Eval | Fails when |"
+    print "|---|---|---|---|---|---|"
+    print "| REQ-1 | the unit | AC-1.1 | unit | `tests/a.test.sh` | a is wrong |"
+    print "| REQ-1 | the run | AC-1.2 | hermetic | `tests/b.test.sh` | b is wrong |\n" }
+  { print }' "$PRT" > "$PRT.n" && mv "$PRT.n" "$PRT"
+RT_SPEC="$RRT/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
+RT_LED="$RRT/.bionic/docs/record/wave-01-fixture/design-ledger.md"
+RT_REC="$RRT/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+rt_row() { awk -F'|' -v a="$1" '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 }
+  m && /^\|/ { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == a) { o = ""; for (i = 3; i < NF; i++) { v = $i; gsub(/^[ \t]+|[ \t]+$/, "", v); o = o (i > 3 ? "|" : "") v }; print o; exit } }' "$PRT"; }   # <AC> -> tier|status|evidence|auditor
+rt_key() { awk -v a="$1:" -v k="$2:" 'index($0, a) == 1 { b = 1; next } b && /^[^ \t]/ { b = 0 } b && /^[ \t]+/ { y = $0; sub(/^[ \t]+/, "", y); if (index(y, k) == 1) { sub(/^[^:]*:[ \t]*/, "", y); print y; n++ } } END { if (!n) print "(none)" }' "$PRT"; }   # <AC> <key> -> the block's values of that key
+rt_eval() { awk -F'|' -v a="$1" '/^## Eval design/ { e = 1; next } /^## / { e = 0 }
+  e && /^\|/ { c = $4; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == a) { t = $5; v = $6; gsub(/^[ \t]+|[ \t]+$/, "", t); gsub(/^[ \t]+|[ \t]+$/, "", v); print t "|" v; exit } }' "$PRT"; }   # <AC> -> Eval type|Eval
+poke "$RRT" matrix-render
+RT_MR="$RC"
+poke "$RRT" matrix-set AC-1.1 evidence=record/wave-01-fixture/ac-1.1.md
+RT_MS="$RC"
+poke "$RRT" discharge AC-1.1
+RT_DS="$RC"
+awk '{ print } /^AC-1\.1:/ { b = 1; next } b && /^[ \t]+evidence:/ { print "  waiver: Dana Fixture 2026-10-25T10:00:00Z \"the unit check is enough\" — a fixture waiver"; b = 0 }' \
+  "$PRT" > "$PRT.n" && mv "$PRT.n" "$PRT"
+poke "$RRT" matrix-set AC-1.1 status=waived
+RT_MW="$RC"
+poke "$RRT" decisions put D1 'the fixture decision'
+RT_DP="$RC"
+expect_eq "RT-0 precondition: the verbs built the world (render, evidence, discharge, waived, put exit 0); AC-1.1 reads T1 in all three places, waived, its evidence and auditor written, its waiver: line there; the ledger's last heading is Δ0" \
+  "0|0|0|0|0|T1|waived|record/wave-01-fixture/ac-1.1.md|CONFIRMED|T1 — \`tests/a.test.sh\`|unit|\`tests/a.test.sh\`|1|0" \
+  "$RT_MR|$RT_MS|$RT_DS|$RT_MW|$RT_DP|$(rt_row AC-1.1)|$(rt_key AC-1.1 eval)|$(rt_eval AC-1.1)|$(rt_key AC-1.1 waiver | /usr/bin/grep -c 'Dana Fixture' | tr -d ' ')|$(sed -n 's/^## Δ\([0-9]*\) .*/\1/p' "$RT_LED" | tail -1)"
+RT_SPEC0="$(cksum < "$RT_SPEC")"
+RT_TEXT='`tests/b.test.sh` drives the hermetic run'
+poke "$RRT" matrix-retier AC-1.1 tier=T2 "eval=$RT_TEXT"
+expect_eq "RT-1 matrix-retier AC-1.1 tier=T2 exits 0, the table's row reads T2, pending, the render's stubs in the evidence and auditor cells" \
+  "0|T2|pending|—|—" "$RC|$(rt_row AC-1.1)"
+[ "$RC" = 0 ] || printf '%s\n' "$OUT" | tail -6 | sed 's/^/    | /'
+expect_eq "RT-1b …the block's eval: line reads the new tier and text, its evidence: is the stub, and it has no waiver: line (its provenance: still read)" \
+  "T2 — $RT_TEXT|pending|(none)|pending" "$(rt_key AC-1.1 eval)|$(rt_key AC-1.1 evidence)|$(rt_key AC-1.1 waiver)|$(rt_key AC-1.1 provenance)"
+expect_eq "RT-1c …the Eval design row reads the type T2 maps to and the new text" "hermetic|$RT_TEXT" "$(rt_eval AC-1.1)"
+expect_eq "RT-1d …the other criterion is as it was" "T2|pending|—|—|hermetic|\`tests/b.test.sh\`" "$(rt_row AC-1.2)|$(rt_eval AC-1.2)"
+expect_regex "RT-1e …the landing record holds the retier line, from the old tier to the new, by this session" \
+  "^line/v1\|ev=matrix-retier\|ac=AC-1\.1\|from=T1\|to=T2\|by=$SID\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T" "$(/usr/bin/grep 'ev=matrix-retier' "$RT_REC" | tail -1)"
+expect_regex "RT-1f …the ledger's next heading is Δ1, one past the put's, naming the retier and the new text" \
+  "^## Δ1 — retier AC-1\.1 T1→T2 \(orchestrator [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{1,2}:[0-9]{2} [AP]M [A-Z]+\): \`tests/b\.test\.sh\` drives the hermetic run$" \
+  "$(/usr/bin/grep '^## Δ' "$RT_LED" | tail -1)"
+expect_eq "RT-1g …and the spec is not touched" "$RT_SPEC0" "$(cksum < "$RT_SPEC")"
+poke "$RRT" matrix-retier AC-1.2 tier=T4 'eval=the person runs it by hand'
+expect_eq "RT-2 a retier to T4 writes the user-confirmed: stub the render writes at T4, beside the evidence: one" \
+  "0|T4|pending|pending|T4 — the person runs it by hand|human" \
+  "$RC|$(rt_row AC-1.2 | cut -d'|' -f1)|$(rt_key AC-1.2 user-confirmed)|$(rt_key AC-1.2 evidence)|$(rt_key AC-1.2 eval)|$(rt_eval AC-1.2 | cut -d'|' -f1)"
+[ "$RC" = 0 ] || printf '%s\n' "$OUT" | tail -6 | sed 's/^/    | /'
+
+RT_P0="$(cat "$PRT")"; RT_L0="$(cat "$RT_LED")"; RT_R0="$(cat "$RT_REC")"
+rt_same() { [ "$RT_P0" = "$(cat "$PRT")" ] && [ "$RT_L0" = "$(cat "$RT_LED")" ] && [ "$RT_R0" = "$(cat "$RT_REC")" ] && echo same || echo changed; }
+poke "$RRT" matrix-retier AC-1.1 tier=T1 'eval=the unit again'
+expect_eq "RT-3 a lower tier is refused (exit 1); the plan, the ledger and the record are byte-identical" "1|same" "$RC|$(rt_same)"
+expect_contains "RT-3b …saying the tier only rises and that a lower tier or a waiver needs the user" \
+  "matrix-retier refused — AC-1.1 is T2; a retier only raises the tier (strengthening is the run's, weakening is the person's: needs: " "$OUT"
+expect_contains "RT-3c …naming the two things the user can give" "— a lower tier or a waiver)" "$OUT"
+poke "$RRT" matrix-retier AC-1.1 tier=T2 'eval=the same tier'
+expect_eq "RT-4 the cell's own tier is refused as well (exit 1), nothing written" "1|same" "$RC|$(rt_same)"
+expect_contains "RT-4b …in the same words" "AC-1.1 is T2; a retier only raises the tier" "$OUT"
+poke "$RRT" matrix-retier AC-9.9 tier=T3 'eval=no such row'
+expect_eq "RT-5 an AC with no matrix row is refused (exit 1), nothing written" "1|same" "$RC|$(rt_same)"
+expect_contains "RT-5b …saying the table has no such row" "the matrix table has no row AC-9.9" "$OUT"
+expect_regex "RT-5c …and naming matrix-render as the next call" 'next call: bash [^ ]+ matrix-render$' "$(printf '%s\n' "$OUT" | /usr/bin/grep 'next call:')"
+poke "$RRT" matrix-retier AC-1.1 tier=T7 'eval=no such tier'
+expect_eq "RT-6 a tier outside T0 to T4 is refused (exit 1), nothing written, naming the five" "1|same|yes" \
+  "$RC|$(rt_same)|$(printf '%s' "$OUT" | /usr/bin/grep -q 'T0 to T4' && echo yes || echo no)"
+POKE_BOUND="$RT_BOUND_WAS"
 
 finish

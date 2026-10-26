@@ -583,26 +583,19 @@ expect_block "32m2 no rigor key at current 5, no auditor: pointer → block (fai
   "$h32m2" 'git commit -m "x"' "requires 'auditor:"
 
 # ============================================================
-# Section 33: a waiver outranks the `task: 9` tier refusal (review-a C-2)
+# Section 33: a row owed at the close owes nothing before it
 # ============================================================
 #
-# The `task: 9` tag (Section 17r) is T0-only: on any other tier it is a
-# mis-tag, and the refusal fires at every step. That check sat ABOVE the
-# `waiver:` exemption in the row loop, so a row an author had WAIVED — the
-# criterion let go, its evidence contract dissolved — still met the tier
-# refusal, and the only way past it was to retier a row nobody intends to
-# discharge. A waiver outranks every other per-row demand in this loop (the
-# per-tier keys, the CONFIRMED wall); it outranks this one too.
-#
-# The waiver test is the loop's existing one — a `waiver:` token in the
-# evidence cell or a `waiver:` line in the AC block — so "waived" means the
-# same thing here as it does for the per-tier keys three lines below.
+# A criterion is owed at the step whose task proves it, and `task: 9` names the close. An
+# unwaived pending row carrying it owes neither its per-tier keys nor a verdict at an earlier
+# step, so the commit is allowed (33b). Delete the owing-step comparison from the deferral
+# predicate and the same row is live: it meets the per-tier key refusals (33b-rev). A waiver
+# still outranks the per-tier keys, in either spelling (33a, 33c), and sits below the
+# provenance arm (33d).
 
-section "Section 33: a waiver outranks the task: 9 tier refusal"
+section "Section 33: a row owed at the close owes nothing before it"
 
-# A T1 row (not T0, so the tag is a mis-tag) carrying `task: 9`, WAIVED via
-# the evidence cell. AC-1 is an ordinary discharged row so the matrix is
-# otherwise complete and each verdict below is the waived row's doing.
+# The first row is an ordinary discharged row, so each verdict below is the second row's doing.
 m33_waived="## Verification Matrix
 
 stack-health: n/a: no long-running serve
@@ -625,38 +618,40 @@ AC-2:
 # The same row with the waiver taken away: pending, no token anywhere.
 m33_unwaived="${m33_waived/| AC-2 | T1 | waived | waiver: dana 2026-08-30 criterion dropped | waived |/| AC-2 | T1 | pending | see AC-2 |  |}"
 
-# The waiver in the AC BLOCK rather than the evidence cell — the loop's other
-# spelling of the same fact.
+# The waiver in the AC BLOCK rather than the evidence cell.
 m33_waived_block="${m33_waived/| AC-2 | T1 | waived | waiver: dana 2026-08-30 criterion dropped | waived |/| AC-2 | T1 | waived | dropped, see block | waived |}"
 m33_waived_block="${m33_waived_block/  task: 9/  task: 9
   waiver: dana 2026-08-30 criterion dropped}"
 
-# 33a — waived T1 row carrying task: 9 → commits.
 h33a=$(make_home)
 write_plan "$h33a" "$(plan 6 "$step6_body" "$m33_waived")" > /dev/null
-expect_allow "33a waived T1 row carrying 'task: 9' at current 6 → allow (waiver outranks)" \
+expect_allow "33a waived T1 row carrying 'task: 9' at current 6 → allow" \
   "$h33a" 'git commit -m "x"'
 
-# 33b — the same row UNWAIVED still blocks on the mis-tag, so 33a is the
-# waiver's doing and not the tier refusal having been deleted.
 h33b=$(make_home)
 write_plan "$h33b" "$(plan 6 "$step6_body" "$m33_unwaived")" > /dev/null
+expect_allow "33b unwaived pending T1 row carrying 'task: 9' at current 6 → allow (owed at the close, deferred)" \
+  "$h33b" 'git commit -m "x"'
+# The reverted rule: a copy of the shipped layout whose deferral predicate never defers.
+h33r_dir=$(mktemp -d); cleanup_dirs+=("$h33r_dir")
+cp -R "$h30g_dir/hooks" "$h30g_dir/scripts" "$h33r_dir/"
+cp "$_h30g_cand/walls.sh" "$h33r_dir/scripts/lib/walls.sh.real"
+sed 's#^matrix_row_deferred() {#matrix_row_deferred() { return 1;#' "$h33r_dir/scripts/lib/walls.sh.real" > "$h33r_dir/scripts/lib/walls.sh"
+expect_true "33b-rev meta: the reverted copy differs from the real library (mutation landed)" \
+  test -n "$(diff "$h33r_dir/scripts/lib/walls.sh.real" "$h33r_dir/scripts/lib/walls.sh")"
+rm -f "$h33r_dir/scripts/lib/walls.sh.real"
+_real_hook="$HOOK"; HOOK="$h33r_dir/hooks/loose-gate.sh"
+expect_block "33b-rev the same home against a gate whose deferral never defers → block, on the verdict it owes" \
+  "$h33b" 'git commit -m "x"' "the auditor has not confirmed AC-2"
+HOOK="$_real_hook"
 
-# 33c — the block-line spelling of the waiver reads the same way.
 h33c=$(make_home)
 write_plan "$h33c" "$(plan 6 "$step6_body" "$m33_waived_block")" > /dev/null
 expect_allow "33c the waiver as an AC-block line (not the evidence cell) → allow too" \
   "$h33c" 'git commit -m "x"'
 
-# 33d — scope control: the waiver exempts the row from the TIER refusal, not
-# from the loop's unconditional arms. The same waived row with a circular
-# `provenance: implementation` still blocks — the provenance arm sits above
-# both, deliberately, and this fix did not move it.
-# Anchored on 'task: 9' alone (never a path-bearing line): the pattern half
-# of a bash ${var/pattern/replacement} substitution ends at its own FIRST '/',
-# so a pattern spanning the 'evidence: record/generic-evidence.md' line above
-# would truncate there and garble both halves — this fixture proved that the
-# hard way and moved the anchor to a slash-free line instead.
+# Anchored on 'task: 9' alone: the pattern half of a ${var/pattern/replacement} ends at its
+# own first '/', so an anchor spanning a path-bearing line would truncate and garble both halves.
 m33_waived_prov="${m33_waived/  task: 9/  task: 9
   provenance: implementation}"
 h33d=$(make_home)
@@ -806,12 +801,10 @@ rmdir "$h34d/.bionic/tmp/engaged-$EG_SID.state"
 # ============================================================
 section "§ORDER-VERB, §WHOLE-RUN, §FIX-ROW, §APPROVED-HEAD — build, regression, review, release, approval, merge, through the verbs"
 # ============================================================
-# FIXTURE FIDELITY: one real repository on its working branch; tests/run.sh is a fixture runner printing the real
-# runner's verdict lines (each suite green unless tests/red names it); the plan bound to this session;
-# hooks/session-poker.sh run as that session. The floor proof and the landing lines are written in their writers'
-# shapes (lib/proof.sh proof_floor_line, lib/line.sh's events); the judge reads text whatever wrote it.
-# fails-when: a regression runs beside an open build row or twice at one head, a fixed red asks a second whole run,
-# or current 8 passes at a head the user did not approve.
+# FIXTURE FIDELITY: one real repository; tests/run.sh is a fixture runner printing the real runner's verdict lines (a suite
+# is green unless tests/red names it); the plan is bound to this session and hooks/session-poker.sh runs as it. The proofs
+# and landing lines are written in their writers' shapes; the judge reads text whatever wrote it. fails-when: a regression
+# runs beside an open build row or twice at one head, a fixed red asks a second whole run, or current 8 passes at a head the user did not approve.
 OD_SID="6e7f8091-2a3b-4c4d-9e0f-1a2b3c4d5e6f"; OD_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
 OD_ROOT="$(mktemp -d)"; cleanup_dirs+=("$OD_ROOT"); OD="$(cd "$OD_ROOT" && pwd -P)/repo"
 OD_RL="record/wave-01-fixture"; OD_REC="$OD/.bionic/docs/$OD_RL"; OD_PLAN="$OD/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
@@ -891,11 +884,15 @@ expect_eq "WR-3 AC-6.1 a second whole run at the same green head: refused (exit 
 expect_contains "WR-3b …saying the head has its whole run" "runs once at a head" "$OD_OUT"
 
 printf 'b.test.sh\n' > "$OD/tests/red"; od_git commit -qam 'b breaks'; OD_H="$(od_git rev-parse HEAD)"
+# A head past a whole run is run again: the verb is stopped only by the dirty tree planted here, the last refusal before the runner.
+printf 'dirt\n' >> "$OD/lib/b.sh"
 od_poke regression-run
-expect_eq "FX-1 AC-14.3 a new head H past the one whole run: regression-run refuses a second (exit 1), no second log" "1|1" "$OD_RC|$(od_logs)"
-expect_contains "FX-1b …naming the whole run's head" "${OD_B:0:12} has it" "$OD_OUT"
-# THE RED RUN THE PLAN'S WHOLE RUN WAS, left at H as the verb leaves one: the runner's own report as the log's body, the
-# run line through the product's writer, and the per-suite facts through the fold.
+od_git checkout -q -- lib/b.sh
+expect_eq "FX-1 a new head H past the one whole run: regression-run is not refused as a second whole run; it reaches the dirty-tree check before the runner (exit 1, no log)" \
+  "1|1" "$OD_RC|$(od_logs)"
+expect_contains "FX-1b …the refusal is the dirty tree's, the last one before the runner" "is dirty (dirty=1)" "$OD_OUT"
+expect_absent "FX-1d …and no refusal names the whole run's head as having the run" "${OD_B:0:12} has it" "$OD_OUT"
+# THE RED RUN THE PLAN'S WHOLE RUN WAS, left at H as the verb leaves one: the runner's report as the log's body, the run line and the per-suite facts through the product's writers.
 OD_PLANT=0
 (cd "$OD" && { bash tests/run.sh 2>&1 || :; }) | regression_fixture "$OD_PLAN" "$OD_REC/regression-run-$OD_H.log" "$OD_H" 0 1 || OD_PLANT=$?
 bash -c '. "$1/proof.sh" && proof_regression_fold "$2" "$3" "$4" "$5" "$6"' _ "$OD_LIB" "$OD_PLAN" "$OD" "$OD_H" \
@@ -914,9 +911,13 @@ expect_true "FX-2 the fix commit C with no run of its own is not covered (FX-1b 
     printf 'line/v1|ev=verdict|row=T6|commit=%s|suite=%s|result=green|log=/fixture/T6.log|at=2026-10-12T12:05:00Z\n' "$OD_C" "$od_s"
   done; } >> "$(od_lrec)"
 expect_eq "FX-3 AC-6.2 the fix row green on its own suite and the red one: the head is accepted" "covered" "$(od_state)"
+printf 'dirt\n' >> "$OD/lib/b.sh"
 od_poke regression-run
-expect_eq "FX-4 AC-6.2 …and no second whole run is asked: regression-run at C refuses (exit 1), no log" "1|2" "$OD_RC|$(od_logs)"
-expect_contains "FX-4b …saying the head is proved" "is already proved" "$OD_OUT"
+od_git checkout -q -- lib/b.sh
+expect_eq "FX-4 …and a covered head C is run again: regression-run at C is not refused as proved; it reaches the dirty-tree check before the runner (exit 1, no log)" \
+  "1|2" "$OD_RC|$(od_logs)"
+expect_contains "FX-4b …the refusal is the dirty tree's, the last one before the runner" "is dirty (dirty=1)" "$OD_OUT"
+expect_absent "FX-4c …and no refusal says the head is already proved" "is already proved" "$OD_OUT"
 od_git checkout -q -b row/T7; printf 'three\n' > "$OD/lib/b.sh"; od_git commit -qam 'T7: a second fix'; OD_R="$(od_git rev-parse HEAD)"
 od_git checkout -q wave/01-fixture; od_git merge -q --no-ff -m 'land T7 by hand' row/T7; OD_M="$(od_git rev-parse HEAD)"
 OD_S3="$(od_state)"
@@ -955,7 +956,13 @@ od_s8 "$(od_appr "$OD_A")"
 expect_eq "AH-0 precondition: the plan is in the order, the regression row named" "T2" \
   "$(bash -c '. "$1/units.sh" && units_order "$2"' _ "$OD_LIB" "$OD_PLAN" 2>/dev/null || :)"
 od_poke current 8 --check
-expect_eq "AH-1 AC-7.2 approved head A, the working head A, the whole run at H with C fixed on its suites: passes" "0" "$OD_RC"
+expect_eq "AH-1 approved head A, the working head A, the whole run at H with C fixed on its suites: refused as regression unproved, naming both exits" "1|yes" \
+  "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'regression.*unproved' && printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'reply .* on the release card' && echo yes || echo no)"
+od_mu() { printf 'approved: merge-unproved by chris 2026-10-26T00:00:00Z head=%s "merge"' "$1"; }  # the merge approval, at the head it names
+od_s8 "$(od_appr "$OD_A")"$'\n'"$(od_mu "$OD_A")"; od_poke current 8 --check
+expect_eq "AH-1b …and with the person's merge-unproved word at head A beside it: passes" "0" "$OD_RC"
+od_s8 "$(od_appr "$OD_A")"$'\n'"$(od_mu "$OD_C")"; od_poke current 8 --check
+expect_eq "AH-1c …the same word naming a head that is not A leaves it refused" "1" "$OD_RC"
 od_s8 "$(od_appr "$OD_C")"
 od_poke current 8 --check
 expect_eq "AH-2 AC-7.2 approved head C, the working head A: current 8 --check refuses (exit 1)" "1" "$OD_RC"
@@ -968,8 +975,7 @@ od_poke current 8 --check
 expect_eq "AH-4 no approved: release line: refused (exit 1), naming the verb that writes it" "1|yes" \
   "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "approve release" && echo yes || echo no)"
 
-# A WHOLE RUN AT AN ANCESTOR IS CITED THROUGH proof-add AS THE JUDGE JUDGES IT: the red run at H, then the fix row
-# green at C, the hand landing green by its row head, and the release docs. The verb accepts the log at the head A
+# A WHOLE RUN AT AN ANCESTOR IS CITED THROUGH proof-add AS THE JUDGE JUDGES IT: the verb accepts the log at the head A
 # where the judge says covered, and a later commit no run proves is refused by that commit, not by "a whole run".
 od_plan 5 '' "$(od_rows landed landed pending)"
 od_poke proof-add regression "$OD_RL/regression-run-$OD_H.log"

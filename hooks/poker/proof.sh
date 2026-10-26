@@ -146,14 +146,98 @@ proof_verdicts() {
   printf '%s\n' "$out"
 }
 
-# proof_run_counts <log> -> `<passed> <total>` from the last `Gating: <n> passed, <m> failed` verdict after the log's last
-# `head=` header, as the floor's own reader takes it (lib/proof.sh, the task-proof attest); nothing when the log has none,
-# for a project's own runner need not print one.
-proof_run_counts() {
-  awk '/^head=([0-9a-f]+|none) dirty=([0-9]+|none)$/ { seen = 1; v = 0; next }
-    !seen { next }
-    /^Gating: [0-9]+ passed, [0-9]+ failed$/ { p = $2; f = $4; v = 1 }
-    END { if (v) print p, p + f }' "$1" 2>/dev/null
+# THE WALK'S HEAD. A walk reads cards at one head; a record that names it on a flush-left `head: <sha>` line, outside
+# fences, is held to it, and the head must be a commit on the working branch's history, as a review's range end is.
+# A record that names none read the working head, which is the head the proof names.
+# walk_head <record> <repository> <working head> -> the 40-hex head; exit 1 printing the refusal's sentence.
+walk_head() {
+  local h hh
+  h="$(awk '/^[ \t]*```/ { f = !f; next } !f && /^head:[ \t]/ { sub(/^head:[ \t]+/, ""); sub(/[ \t].*$/, ""); print; exit }' "$1" 2>/dev/null)"
+  if [ -z "$h" ]; then printf '%s' "$3"; return 0; fi
+  hh=""
+  case "$h" in *[!0-9a-fA-F]*) : ;; ?????*) hh="$(git -C "$2" rev-parse --verify -q "$h^{commit}" 2>/dev/null)" ;; esac
+  if [ -z "$hh" ] || ! git -C "$2" merge-base --is-ancestor "$hh" "$3" 2>/dev/null; then
+    printf 'the walk record %s says head: %s, which is no commit on the working branch (at %s); write the head the walk read, or no head: line for the working head' \
+      "$1" "$h" "${3:0:12}"
+    return 1
+  fi
+  printf '%s' "$hh"
+}
+
+# THE WALK SETTLES WHAT IT CONFIRMS. Over the plan copy <copy>, for each row of the walk's verdict table (proof_verdicts
+# output on stdin): a CONFIRMED row whose status no landing settled (lib/line.sh `line_settled_by`, read from <plan>'s
+# landing record) gets status `discharged`, and <evidence> in its evidence cell and its block's `evidence:` key; a row
+# a landing settled is the landing's and keeps what it wrote; any other verdict leaves its row as it stands. Every
+# criterion the table names must have a matrix row and a block, or nothing is written.
+# walk_settle <plan> <copy> <evidence> < verdicts -> sets WALK_DONE, WALK_LANDED and WALK_LEFT (space-joined ids) and
+# WALK_WAVE; exit 1 with the refusal's sentence in WALK_WHY, the copy then partly written and to be dropped. It runs in
+# the caller's shell, never a command substitution, so the ids it sets reach the caller.
+walk_settle() {
+  local plan="$1" copy="$2" ev="$3" ac v rc
+  WALK_DONE=""; WALK_LANDED=""; WALK_LEFT=""; WALK_WAVE=""; WALK_WHY=""
+  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
+    && declare -F line_settled_by >/dev/null 2>&1 \
+    || { WALK_WHY="the landing record library (lib/line.sh) cannot be loaded from $BIONIC_LIB, so which rows a landing settled cannot be read"; return 1; }
+  while IFS='	' read -r ac v; do
+    [ -n "$ac" ] || continue
+    if [ "$ac" = wave ]; then WALK_WAVE="$v"; continue; fi
+    if [ -z "$(matrix_row_cell "$copy" "$ac" 1)" ]; then
+      WALK_WHY="the walk record gives a verdict for $ac, and the matrix table has no row $ac; give verdicts for the criteria as the matrix spells them"
+      return 1
+    fi
+    if [ "$v" != CONFIRMED ]; then WALK_LEFT="${WALK_LEFT:+$WALK_LEFT }$ac"; continue; fi
+    if line_settled_by "$plan" cells "$ac" >/dev/null 2>&1; then WALK_LANDED="${WALK_LANDED:+$WALK_LANDED }$ac"; continue; fi
+    rc=0; matrix_row_cells "$copy" "$ac" "3=discharged" "4=$ev" > "$copy.ws" 2>/dev/null || rc=$?
+    [ "$rc" -eq 0 ] && mv -f "$copy.ws" "$copy" \
+      || { rm -f "$copy.ws"; WALK_WHY="the matrix row $ac cannot be written (exit $rc: a row of five cells is needed)"; return 1; }
+    rc=0; matrix_block_key "$copy" "$ac" evidence "$ev" > "$copy.ws" 2>/dev/null || rc=$?
+    [ "$rc" -eq 0 ] && mv -f "$copy.ws" "$copy" \
+      || { rm -f "$copy.ws"; WALK_WHY="the matrix has no $ac: block to hold its evidence: key (exit $rc); run matrix-render first"; return 1; }
+    WALK_DONE="${WALK_DONE:+$WALK_DONE }$ac"
+  done
+  return 0
+}
+
+# THE WALK'S REGISTRATION, one act over a plan copy: the record read as the critic's (proof_verdicts), its head
+# (walk_head), its `proved: kind=walk` line, the cells it confirms (walk_settle) and the pointer (plan.sh
+# walk_pointer_put). proof-add walk runs it alone; deliver runs it at the walk row's landing, in the landing's own write,
+# so the row lands with its cells settled or does not land.
+# walk_register <plan> <copy> <record real path> <record docs-relative> <working head> <repository> -> 0 with the copy
+# written and WALK_HEAD, WALK_N and walk_settle's ids set; 1 with the refusal's sentence in WALK_WHY, the copy to be
+# dropped.
+walk_register() {
+  local plan="$1" copy="$2" real="$3" rel="$4" v rc=0
+  WALK_WHY=""; WALK_HEAD=""; WALK_N=0
+  if ! v="$(proof_verdicts "$real")"; then
+    WALK_WHY="$v; a walk record carries the critic's shape, a | AC | verdict | why | table and one verdict: line"
+    return 1
+  fi
+  if ! WALK_HEAD="$(walk_head "$real" "$6" "$5")"; then WALK_WHY="$WALK_HEAD"; WALK_HEAD=""; return 1; fi
+  if ! proof_add_line "$copy" "$(proof_line walk "$WALK_HEAD" "$(iso_now)" "$rel")" > "$copy.wr" 2>/dev/null \
+     || [ ! -s "$copy.wr" ] || ! mv -f "$copy.wr" "$copy"; then
+    rm -f "$copy.wr"; WALK_WHY="the plan carries no ## SDLC State section to hold the walk's proof line"; return 1
+  fi
+  walk_settle "$plan" "$copy" "$rel" <<< "$v" || return 1
+  walk_pointer_put "$copy" "$rel" || rc=$?
+  case "$rc" in
+    0) : ;;
+    1) WALK_WHY="the plan has no Step 5 line to hold walk-artifact:; write it with step-line 5 '<text>'"; return 1 ;;
+    *) WALK_WHY="walk-artifact: cannot be written into the Step 5 block (exit $rc)"; return 1 ;;
+  esac
+  WALK_N="$(printf '%s\n' $WALK_DONE | awk 'NF { n++ } END { print n + 0 }')"
+  return 0
+}
+# THE WALK'S ACT IS RECORDED, AND IS NO HAND-HOLD: one `ev=walk` line in the landing record naming the record and how
+# many rows it discharged, appended once the plan write is in. The hand-holds fold counts `ev=matrix-set` as a status
+# write and reads this line as nothing: the walk's verdicts are a reader's, registered as the critic's are.
+walk_recorded() {  # <plan> <record docs-relative>
+  { declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
+    && line_event "$1" walk "record=$2" "discharged=${WALK_N:-0}" >/dev/null 2>&1 \
+    || say "the plan is written, but the ev=walk line could not be appended to the landing record."
+}
+walk_said() {  # <record docs-relative> -> what the registration settled, one line
+  printf 'the walk discharged %s (%s); settled by a landing, kept: %s; left as they stood: %s; walk-artifact: %s; verdict: %s' \
+    "${WALK_DONE:-no row}" "${WALK_N:-0}" "${WALK_LANDED:-none}" "${WALK_LEFT:-none}" "$1" "$WALK_WAVE"
 }
 
   # THE REGRESSION SETTING (wave-31 T27; REQ-12 AC-12.1, AC-12.2; D4). Whether the run runs the
@@ -407,13 +491,23 @@ proof_run_counts() {
         die "REFUSED — the project has no usable git user name (git config user.name) to record as the approver; the plan is unchanged."
         exit 1
       fi
-      AP_LINE="approved-by: $AP_WHO $(date -u +%Y-%m-%dT%H:%M:%SZ) \"$AP_REPLY\""
+      # ONE INSTANT FOR THE PLAN AND THE REGISTER. The approved-by: instant is where the run's autonomous half starts,
+      # and the step cards' asks are answered by this reply, so they close at that same instant: a step card left open
+      # until a later card or the Stop closed it would read as a stop the run made after its approval.
+      AP_AT="$(owed_now 2>/dev/null)" || AP_AT=""
+      [ -n "$AP_AT" ] || AP_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      AP_LINE="approved-by: $AP_WHO $AP_AT \"$AP_REPLY\""
       if ! ap_place "$AP_LINE" "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
         die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State to write the approval beside; the plan is unchanged."
         exit 1
       fi
       plan_verb_swap approve "approved-by:" writer
       poker_owed_close "$PV_REPO" "approve:plan" "approve"
+      if declare -F owed_close >/dev/null 2>&1; then
+        for AP_K in approve:step0 approve:step1 approve:step2 approve:step3; do
+          OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_close "$AP_K" "approve plan" "$AP_AT" >/dev/null 2>&1
+        done
+      fi
       say "approve — plan: $AP_LINE written to $PV_PLAN; dry-committed first. The commit gate reads it from Step 4."
       exit 0
     fi
@@ -422,6 +516,9 @@ proof_run_counts() {
     # `approval:<name>` or `live:approval:<name>` (units.sh `units_approval_names`), are the only
     # names an approval can satisfy. Exact match, case included, as readiness keys it.
     AP_READ="$(units_approval_names "$PV_PLAN" | /usr/bin/grep -v '^plan$' | tr '\n' ' ' | sed 's/ $//')"
+    # THE MERGE WITHOUT A PASS is the answer to the release card's ask, so it is a name only where there is a release
+    # to approve: `release` is the name an open integrate row behind the release doc row derives, whatever its cell reads.
+    case " $AP_READ " in *" release "*) AP_READ="$AP_READ merge-unproved" ;; esac
     case " $AP_READ " in
       *" $AP_NAME "*) : ;;
       *)
@@ -582,7 +679,7 @@ command: %s
       exit 0
     fi
     if ! proof_kind_ok "$PF_KIND"; then
-      die "REFUSED — '$(clean "$PF_KIND")' is not a proof kind: name regression, review or task (or proof-add inherited <suite>). The plan is unchanged."
+      die "REFUSED — '$(clean "$PF_KIND")' is not a proof kind: name regression, review, task or walk (or proof-add inherited <suite>). The plan is unchanged."
       exit 1
     fi
     # A CHECK FACT IS WRITTEN BY THE VERB THAT RAN THE CHECK (wave-27 T16; D12): a log handed in
@@ -813,6 +910,20 @@ PF_OTHER_LIST
         die "REFUSED — working-branch $(clean "$PF_WB") names no commit in $PV_REPO, so its head cannot be read; name a branch that exists under ## SDLC State and run proof-add again. The plan is unchanged."
         exit 1 ;;
     esac
+    # A WALK IS REGISTERED WHOLE BY walk_register, the one act deliver also runs at the walk row's landing: its verdicts
+    # read as the critic's, its proof line, the cells it confirms and its pointer, in this one plan write.
+    if [ "$PF_KIND" = walk ]; then
+      cp "$PV_PLAN" "$PV_NEW"
+      if ! walk_register "$PV_PLAN" "$PV_NEW" "$PF_REAL" "$PF_REL" "$PF_HEAD" "$PV_REPO"; then
+        die "REFUSED — $(clean_whole "$WALK_WHY"), then proof-add walk again. The plan is unchanged."
+        exit 1
+      fi
+      plan_verb_swap proof-add "the walk proof at $WALK_HEAD" writer
+      walk_recorded "$PV_PLAN" "$PF_REL"
+      say "proof-add — kind=walk head=$WALK_HEAD evidence=$PF_REL: written to $PV_PLAN; dry-committed first."
+      say "proof-add — $(walk_said "$PF_REL")"
+      exit 0
+    fi
     # THE HEAD IS THE ONE THE EVIDENCE READ (wave-26 T14; review 7 F1). The working head only
     # bounds it: a run's log must have read exactly that head on a clean tree, a review a commit
     # on its history, and the proof names what the evidence attests (lib/proof.sh
@@ -948,26 +1059,15 @@ PF_VERDICTS_LIST
       fi
       mv "$PV_NEW.v" "$PV_NEW"
     fi
-    # THE REGRESSION'S PROOF IS THE STACK'S HEALTH: the head's stack-health: line is written from the proof's head and the
-    # run's pass and total, red with the suites it left owed. It replaces the stub matrix-render writes and a line this
-    # verb wrote before; a declared n/a: or a person's own snapshot is their word and stays (matrix_head_line exit 5), and
-    # a plan with no matrix yet has no head to write (exit 3), the proof standing alone.
+    # THE REGRESSION'S PROOF IS THE STACK'S HEALTH: the head's stack-health: line is the judge's fact rendered by the one
+    # function every writer calls (lib/proof.sh `proof_health_put`), read from the copy that holds the new proof line and
+    # the plan's own landing record. It replaces the stub matrix-render writes and a line a writer rendered before; a
+    # declared n/a: or a person's own snapshot is their word and stays, and a plan with no matrix yet has no head to
+    # write, the proof standing alone.
     PF_SH=""
     if [ "$PF_KIND" = regression ]; then
-      PF_PASS=""; PF_TOTAL=""; _pf_nocount=""
-      while IFS='	' read -r _pf_real _pf_rel; do
-        [ -n "$_pf_real" ] || continue
-        _pf_n="$(proof_run_counts "$_pf_real")"
-        if [ -z "$_pf_n" ]; then _pf_nocount=1; continue; fi
-        PF_PASS=$(( ${PF_PASS:-0} + ${_pf_n%% *} )); PF_TOTAL=$(( ${PF_TOTAL:-0} + ${_pf_n#* } ))
-      done <<PF_COUNT_LIST
-$PF_PAIRS
-PF_COUNT_LIST
-      [ -z "$_pf_nocount" ] || { PF_PASS=""; PF_TOTAL=""; }
-      PF_SH="green"; [ -z "$PF_OWED" ] || PF_SH="red"
-      PF_SH="$PF_SH head=$PF_HEAD${PF_TOTAL:+ pass=$PF_PASS total=$PF_TOTAL}${PF_OWED:+ owed=$PF_OWED} evidence=$PF_REL"
-      _pf_rc=0; matrix_head_line "$PV_NEW" stack-health "$PF_SH" '^(pending$|green head=|red head=)' > "$PV_NEW.v" 2>/dev/null || _pf_rc=$?
-      if [ "$_pf_rc" = 0 ] && [ -s "$PV_NEW.v" ]; then mv "$PV_NEW.v" "$PV_NEW"; else rm -f "$PV_NEW.v"; PF_SH=""; fi
+      proof_health_put "$PV_NEW" "$PV_REPO" "$PV_PLAN" || :
+      PF_SH="$PROOF_HEALTH"
     fi
     # A REVIEW THAT FOLLOWS THE BUILD GOES BACK TO WAITING (wave-26 T14; D10). The active review
     # row reading `live:head` (`units_live_rows`, the kind default included) whose `Files` hold
@@ -1605,11 +1705,40 @@ DSP_READINGS
   # admitted (exit 75, no verdict) ran nothing and writes no log. With neither key nor runner it refuses, naming the
   # other way: run the regression and cite its log. A config carrying `floor-attestation:`, a key removed in wave-36
   # (T35), is refused first, naming it (lib/proof.sh `proof_floor_retired`).
-  # THE ONE PATH A RUNNER IS GIVEN THE WHOLE RUN BY, asked before anything runs: `regression: no` refuses it
-  # (`plan_regression`); a row the regression waits on that still writes the head refuses it (`units_floor_holds`); a
-  # covered head refuses it (`proof_state`); and a head that already has a whole-run log refuses it. The bash wall's
-  # full-tree refusal names this verb as the whole run's path (lib/walls.sh).
+  # THE ONE PATH A RUNNER IS GIVEN THE WHOLE RUN BY, asked before anything runs, and three rules refuse it:
+  # `regression: no` (`plan_regression`); a row the regression waits on that still writes the head
+  # (`units_floor_holds`); and a head that already has a whole-run log. A head is green only where the whole run ran
+  # green, so a head past the last run, however its landings proved it, is run again: nothing reads a later head as
+  # proved here. The bash wall's full-tree refusal names this verb as the whole run's path (lib/walls.sh).
+  # WHO STARTED IT is written on the run line as `starter=`: the tick or the orchestrator (the default) is the machine,
+  # and a person is a hand-hold, so `--starter person` carries the person's `--reason`, kept on the same line; the
+  # hand-holds count reads it (hooks/poker/line.sh `hand_holds_report`).
   poker_verb_regression_run() {
+    FR_STARTER=orchestrator; FR_REASON="";
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --starter) [ $# -ge 2 ] || usage "regression-run --starter takes one of tick, orchestrator or person."
+          FR_STARTER="$2"; shift 2 ;;
+        --reason) [ $# -ge 2 ] || usage "regression-run --reason takes the person's reason, in quotes."
+          FR_REASON="$2"; shift 2 ;;
+        *) usage "regression-run takes only --starter <tick|orchestrator|person> and, with person, --reason '<why>': it runs .bionic/config.yaml's regression-command: command, else tests/run.sh, at the working branch's head." ;;
+      esac
+    done
+    case "$FR_STARTER" in
+      tick|orchestrator|person) : ;;
+      *) die "REFUSED — --starter $(clean "$FR_STARTER") is none of the three starters: tick, orchestrator or person. Nothing was run."
+         exit 1 ;;
+    esac
+    # The reason rides on one landing-record field, so it holds no field separator and no line break.
+    case "$FR_REASON" in
+      *'|'*|*$'\n'*|*$'\r'*)
+        die "REFUSED — --reason holds a '|' or a line break, and the run line keeps it as one field; say it on one line without '|'. Nothing was run."
+        exit 1 ;;
+    esac
+    if [ "$FR_STARTER" = person ] && [ -z "${FR_REASON//[[:space:]]/}" ]; then
+      die "REFUSED — --starter person needs --reason '<why>': a person's whole run is a hand-hold, and its reason is kept on its run line. Nothing was run."
+      exit 1
+    fi
     FR_ROOT="$(project_root "$PWD")"
     # THE COMMAND'S KEY IS regression-command: and no other (wave-39 T18; REQ-13 AC-13.1, D2): the old key is refused, naming it
     # (lib/alias.sh `alias_gone_text config`), even beside the new one, never read past.
@@ -1657,34 +1786,18 @@ DSP_READINGS
         die "REFUSED — rows the regression waits on still write tracked files: $FR_OPEN; the whole run comes once, after the last of them lands, or it proves a head that does not survive their landing. Nothing was run."
         exit 1
       fi
-      # RULE 3. A proved head owes no run.
-      FR_STATE="$(proof_state "$PV_PLAN" "$PV_REPO" 2>/dev/null)"
-      case "$FR_STATE" in
-        covered*)
-          die "REFUSED — the working head ${FR_HEAD:0:12} is already proved: the plan's regression covers it ($(clean "$(proof_last_line "$PV_PLAN" regression)")); a change landed after it is proved by the suites its row names. Nothing was run."
-          exit 1 ;;
-      esac
-      # ONE WHOLE RUN AT A HEAD. A log of tests/run.sh at this head refuses another: a red is a fix row's, its own
-      # suites plus the red one, and no second whole run is asked.
+      # RULE 3. ONE WHOLE RUN AT A HEAD. A log of tests/run.sh at this head refuses another: a red is a fix row's, its
+      # own suites plus the red one, and the next whole run is at the head its landing makes.
       for _fr_l in "$FR_DOCS/record/$FR_WAVE/regression-run-$FR_HEAD"*.log; do
         [ -f "$_fr_l" ] && [ "$(sed -n 2p "$_fr_l" 2>/dev/null)" = "command: tests/run.sh" ] || continue
         die "REFUSED — the whole run runs once at a head, and ${FR_HEAD:0:12} has it: ${_fr_l#"$FR_DOCS"/}. A red suite is a fix row's: its own suites plus the red one, green at a later head. Nothing was run."
         exit 1
       done
     fi
-    # THE WHOLE RUN COMES ONCE, AND A HEAD PAST IT IS A FIX ROW'S TO PROVE. Whatever the regression is (tests/run.sh or
-    # the declared command), a record that already holds a whole run at a commit behind the working head refuses another
-    # before anything runs: a red suite is closed by the landing of the fix row that runs it, never by a second
-    # run, so a second run would only move the head the plan proves. A run at this very head is not behind it, and a
-    # run on a history that does not hold this head proves nothing here.
-    if FR_PAST="$(proof_whole_run_behind "$PV_PLAN" "$PV_REPO" "$FR_CO" "$FR_HEAD")"; then
-      die "REFUSED — the whole run runs once, and ${FR_PAST:0:12} has it (${FR_PAST#*$'\t'}): a red suite is a fix row's, and a fix row's landing proves the head ${FR_HEAD:0:12}. Nothing was run."
-      exit 1
-    fi
     FR_DIRT="$(_wt_piece_dirt "$FR_CO")"
     FR_DIRTY="$(printf '%s' "$FR_DIRT" | awk 'END { print NR + 0 }')"
     # A DIRTY TREE IS REFUSED BEFORE THE RUN, NOT LOGGED AFTER IT (wave-35 T32; D20, A-orch-32). The log of a dirty
-    # whole run counted as the first whole run (rule 4) while proof-add floor refuses it, so the re-run its own message
+    # whole run counted as the head's whole run (rule 3) while proof-add floor refuses it, so the re-run its own message
     # asked for was refused as a second whole run and the one allowed run was spent on nothing. The after-the-run
     # comparison below stays: it guards a run that dirtied a clean tree.
     if [ -n "$FR_WHOLE" ] && [ "$FR_DIRTY" -ne 0 ]; then
@@ -1747,7 +1860,8 @@ DSP_READINGS
     FR_SHA="$(_proof_sha256 "$FR_LOG")" || FR_SHA=""
     declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
     if [ -z "$FR_SHA" ] || ! declare -F line_event >/dev/null 2>&1 \
-       || ! line_event "$PV_PLAN" run "log=$FR_REL" "head=$FR_HEAD" "dirty=$FR_DIRTY" "rc=$FR_RC" "sha256=$FR_SHA" 2>/dev/null; then
+       || ! line_event "$PV_PLAN" run "log=$FR_REL" "head=$FR_HEAD" "dirty=$FR_DIRTY" "rc=$FR_RC" "sha256=$FR_SHA" \
+              "starter=$FR_STARTER" ${FR_REASON:+"reason=$FR_REASON"} 2>/dev/null; then
       die "regression-run — the run line for $FR_REL could not be written to the plan's landing record$([ -n "$FR_SHA" ] || printf ' (no sha256 tool answered)'), so proof-add regression will refuse this log as no recorded run."
     fi
     # THE REGRESSION'S FACTS (wave-39 T24; D9; ADR-061): a clean whole run folds into one verdict per suite at its head,

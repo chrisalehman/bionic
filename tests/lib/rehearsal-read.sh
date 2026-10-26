@@ -152,7 +152,7 @@ rt_facts_state() {
   expect_eq "FA-2b $TR_ST: pace states two shares of one unit, the work landed and the forecast time used" "yes|yes" \
     "$(rt_m "$TR_SHEET" pace.work-landed | /usr/bin/grep -qE '^[0-9]+%$' && echo yes)|$(rt_m "$TR_SHEET" pace.time-used | /usr/bin/grep -qE '^[0-9]+%$' && echo yes)"
   expect_eq "FA-3 $TR_ST: correctness names the suites run by their last run and the whole run" "yes|yes" \
-    "$(rt_m "$TR_SHEET" tests.suites-run | /usr/bin/grep -qE '^[0-9]+: [0-9]+ green, [0-9]+ red$' && echo yes)|$(rt_m "$TR_SHEET" tests.whole-run | /usr/bin/grep -qE '^(not run yet|green at [0-9a-f]{8}|red at [0-9a-f]{8})$' && echo yes)"
+    "$(rt_m "$TR_SHEET" tests.suites-run | /usr/bin/grep -qE '^[0-9]+: [0-9]+ green, [0-9]+ red$' && echo yes)|$(rt_m "$TR_SHEET" tests.whole-run | /usr/bin/grep -qE "^(not run yet|green at [0-9a-f]{8}|red at [0-9a-f]{8}(, (1 landing|([02-9]|[1-9][0-9]+) landings) before this head|, not in this head's history)?)\$" && echo yes)"
   expect_eq "FA-4 $TR_ST: no task's note counts what it leaves out (FA-1 read the same sheet)" "0" \
     "$(printf '%s\n' "$TR_SHEET" | /usr/bin/grep '^task: ' | /usr/bin/grep -cE ' note=.* \+[0-9]+$')"
   rt_bind_state "$TR_ST" "$TR_SHEET"

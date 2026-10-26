@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/landing-line-2.test.sh — the landing line, part 2 of 2: §INPUTS through §LAND-RC-HAND, then the landing's
-# settlement: §SAMESITE, §CARRIED, §CELL.
+# settlement: §SAMESITE, §CARRIED, §CELL; the hand-holds count's §STARTER and §RETIER.
 #
 # THE SUITE IS TWO PARTS (wave-39 T35; D1, D13, REQ-3 AC-3.3). One landing-line.test.sh promised more than the suite
 # bar, ten minutes of the gate's promise, so it runs as two suites cut at a section boundary. Its governing header, its
@@ -967,6 +967,101 @@ expect_eq "(ce3) matrix-set on the status cell the landing settled is refused (e
 expect_contains "(ce3b) …naming the landing" "settled by the landing of T1 at ${ST_C}" "$ST_MS"
 ST_MW="$(ll_poker "$ST" matrix-set AC-1.2 task=T1)"; ST_MWRC=$?
 expect_eq "(ce4) matrix-set on a row no landing settled still writes (exit 0)" "0" "$ST_MWRC"
+
+section "§STARTER: a whole run the tick or the orchestrator started is no hand-hold; a person's past the first is one"
+# `regression-run --starter <tick|orchestrator|person>` writes `starter=` on its `ev=run` line; a run past the record's first counts as
+# second-regressions only when a person started it, a proof past the first only when its run line names no starter. FIXTURE FIDELITY:
+# the run lines carry the verb's own fields in its order, the proof lines are lib/proof.sh's `proof_line`. fails-when: a run the machine
+# started counts, a person's second run is not counted, a person's proved run counts twice, or a proof of a starter-less run stops counting.
+sr_report() {  # <root> [flags…] -> the hand-holds counts line of the root's plan
+  ( cd "$1" && CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO/payload" \
+      bash "$BIONIC_HOOKS_DIR/session-poker.sh" landing-report --hand-holds "${@:2}" "$(ll_plan "$1")" 2>/dev/null ) | grep '^hand-holds: '
+}
+sr_second() { sr_report "$1" | sed -n 's/.*· second-regressions=\([0-9]*\) ·.*/\1/p'; }   # <root> -> the count alone
+sr_hex() { local i s=""; for i in $(seq "$2"); do s="$s$1"; done; printf '%s' "$s"; }   # <char> <n> -> the char n times
+sr_run() {  # <head char> <minute> [starter] -> one ev=run line of a regression run, in regression-run's field order
+  local h; h="$(sr_hex "$1" 40)"
+  printf 'line/v1|ev=run|log=record/wave-x/regression-run-%s.log|head=%s|dirty=0|rc=0|sha256=%s%s|at=2026-10-20T10:%s:00Z\n' \
+    "$h" "$h" "$(sr_hex e 64)" "${3:+|starter=$3}" "$2"
+}
+sr_proofs() {  # <root> <head char>… -> one regression proof per head, citing that head's run log, under ## SDLC State
+  local p c h add=""; p="$(ll_plan "$1")"; shift
+  for c in "$@"; do
+    h="$(sr_hex "$c" 40)"
+    add="$add$(bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; proof_line regression "$2" 2026-10-20T11:00:00Z "$3"' _ \
+      "$REPO/payload/scripts/lib" "$h" "record/wave-x/regression-run-$h.log")"$'\n'
+  done
+  # through the environment: macOS awk refuses a -v value holding a line break
+  SR_ADD="$add" awk '{ print } /^- T2: / && !d { printf "%s", ENVIRON["SR_ADD"]; d = 1 }' "$p" > "$p.w" && mv "$p.w" "$p"
+}
+
+# (sr1) two runs the tick started, then a person's, then the orchestrator's, then a proof of each.
+SR1="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$SR1")")"
+{ sr_run a 01 tick; sr_run b 02 tick; } > "$(ll_rec "$SR1")"
+expect_contains "(sr0) precondition: the report prints its counts line for the world, second-regressions among them" \
+  "· second-regressions=" "$(sr_report "$SR1")"
+expect_eq "(sr1) two regression runs the tick started: second-regressions=0" "0" "$(sr_second "$SR1")"
+sr_run c 03 person >> "$(ll_rec "$SR1")"
+expect_eq "(sr2) …and a third that a person started, past the first: second-regressions=1" "1" "$(sr_second "$SR1")"
+sr_run d 04 orchestrator >> "$(ll_rec "$SR1")"
+expect_eq "(sr2b) …and a fourth the orchestrator started adds nothing: still 1" "1" "$(sr_second "$SR1")"
+sr_proofs "$SR1" a b c d
+expect_eq "(sr2c-0) precondition: the plan holds the four regression proofs" "4" "$(grep -c '^proved: kind=regression ' "$(ll_plan "$SR1")")"
+expect_eq "(sr2c) …and a proof of each of the four runs adds nothing: the person's run counts once, the machine's proofs none" \
+  "1" "$(sr_second "$SR1")"
+
+# (sr3) the older record: run lines with no starter, each proved; the proof past the first counts as before.
+SR3="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$SR3")")"
+{ sr_run a 01; sr_run b 02; } > "$(ll_rec "$SR3")"
+sr_proofs "$SR3" a b
+expect_eq "(sr3) two runs with no starter, both proved: the proof past the first counts, second-regressions=1" "1" "$(sr_second "$SR3")"
+# (sr4) the same two proofs over run lines the tick started read nothing.
+SR4="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$SR4")")"
+{ sr_run a 01 tick; sr_run b 02 tick; } > "$(ll_rec "$SR4")"
+sr_proofs "$SR4" a b
+expect_eq "(sr4) …and the same two proofs of runs the tick started: second-regressions=0" "0" "$(sr_second "$SR4")"
+
+section "§RETIER: a retier is the run's own act: its ev=matrix-retier line moves no hand-holds field, while a waiver: line still adds one (REQ-3 AC-3.3)"
+# `matrix-retier` raises a tier, which strengthens the check: the orchestrator's act and no hand-hold, so the fold reads its line as
+# nothing; a waiver: line in a block (weakening, a person's) still counts. FIXTURE FIDELITY: the world's plan with an Eval design
+# and an empty matrix table, matrix-render and matrix-retier writing their own lines, the waiver: line planted as landing-line-1 §WINDOW does.
+# fails-when: the fold counts a retier line in any field, or stops counting a waiver: line.
+RL="$(ll_world)"; RLP="$(ll_plan "$RL")"
+{ printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n'
+  printf '| REQ-1 | the unit | AC-1.1 | unit | `tests/a.test.sh` | a is red |\n| REQ-1 | the unit | AC-1.2 | unit | `tests/a.test.sh` | a is red |\n'
+  printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+} >> "$RLP"
+RL_MR="$(ll_poker "$RL" matrix-render)"; RL_MRRC=$?
+RL_H0="$(sr_report "$RL")"
+expect_eq "(rl0) precondition: matrix-render exits 0 and the report prints its counts line, all zero" \
+  "0|hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0" \
+  "$RL_MRRC|$RL_H0"
+[ "$RL_MRRC" = 0 ] || printf '      render: %s\n' "$RL_MR"
+RL_RT="$(ll_poker "$RL" matrix-retier AC-1.1 tier=T2 'eval=`tests/b.test.sh` drives the hermetic run')"; RL_RTRC=$?
+expect_eq "(rl1) precondition: matrix-retier exits 0 and the record holds its one ev=matrix-retier line" "0|1" \
+  "$RL_RTRC|$(ll_ev "$RL" matrix-retier | /usr/bin/grep -c '|ac=AC-1.1|from=T1|to=T2|' | tr -d ' ')"
+[ "$RL_RTRC" = 0 ] || printf '      retier: %s\n' "$RL_RT"
+expect_eq "(rl2) the retier line moves no field: the counts line reads as before it" "$RL_H0" "$(sr_report "$RL")"
+awk '{ print } /^AC-1\.2:/ { b = 1; next } b && /^[ \t]+evidence:/ { print "  waiver: Dana Fixture 2026-10-20T10:00:00Z \"the unit check is enough\" — a fixture waiver"; b = 0 }' \
+  "$RLP" > "$RLP.n" && mv "$RLP.n" "$RLP"
+expect_contains "(rl3) …while a waiver: line in the same plan adds one: waivers=1, total=1" "hand-holds: total=1 · " "$(sr_report "$RL")"
+expect_contains "(rl3b) …in the waivers field" "· waivers=1 · status-writes=0 ·" "$(sr_report "$RL")"
+
+section "§NEEDS-YOU: a refusal that named a person as its exit is a hand-hold: needs-you joins total, and the header names the fields the printf prints (AC-2.4)"
+# fails-when: a needs=person refusal in the window reads needs-you=0 or total=0, one of another needs= or outside the window counts, or the header's fields drift from the printf's.
+ny() {  # <needs> <at> -> `total=<n> needs-you=<n>` of a world whose record holds that one refusal, over a window of two hours
+  local r; r="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$r")")"
+  printf 'line/v1|ev=refusal|needs=%s|wall=x|at=%s\n' "$1" "$2" > "$(ll_rec "$r")"
+  sr_report "$r" --since 2026-10-20T10:00:00Z --until 2026-10-20T12:00:00Z | sed 's/^hand-holds: \(total=[0-9]*\) .* \(needs-you=[0-9]*\) .*/\1 \2/'
+}
+expect_eq "(ny1) needs=person inside the window: needs-you=1, total=1" "total=1 needs-you=1" "$(ny person 2026-10-20T11:00:00Z)"
+expect_eq "(ny2) …needs=other counts nothing" "total=0 needs-you=0" "$(ny other 2026-10-20T11:00:00Z)"
+expect_eq "(ny3) …and needs=person before the window's start counts nothing" "total=0 needs-you=0" "$(ny person 2026-10-20T09:00:00Z)"
+NY_SRC="$REPO/hooks/poker/line.sh"; NY_HDR="$(sed -n '/^#   hand-holds: total=<n>/,/^# THE WINDOW/p' "$NY_SRC")"
+NY_PF="$(/usr/bin/grep -m1 "printf 'hand-holds: total=" "$NY_SRC" | /usr/bin/grep -o '[a-z-]*=%d' | sed 's/=%d//' | tr '\n' ' ')"
+expect_contains "(ny4-0) precondition: the printf's fields are read, needs-you last among them" "adoptions fixed needs-you " "$NY_PF"
+expect_eq "(ny4) the header's example line and its per-kind rows name the fields the printf prints, in its order" "$NY_PF|$NY_PF" \
+  "$(printf '%s\n' "$NY_HDR" | sed -n 1p | /usr/bin/grep -o '[a-z-]*=<n>' | sed 's/=<n>//' | tr '\n' ' ')|total $(printf '%s\n' "$NY_HDR" | /usr/bin/grep -o '^#   [a-z][a-z-]*  ' | tr -d '# ' | sed 's/$/ /' | tr -d '\n')"
 
 # ---------------------------------------------------------------------------
 finish

@@ -577,45 +577,45 @@ decisions_all() {
 # then the sheet's pace, correctness and waste at close, `pace: …`, `correctness: …` and `waste: …`, each said from the
 # sheet's measurements, read through `sitrep_gather` (computed there, once). Every number is read from the record,
 # and one the record cannot compute is `unverified`, never a literal:
-#   human stops     the plan's `approved: <name> by <who> <ISO> "<reply>"` lines under ## SDLC State (`approve`, the
-#                   final card's replay) dated after its `approved-by:` instant, where the autonomous half starts; one
-#                   stop per reply: in time order, a new stop when the reply's words differ from the line before or
-#                   SCORECARD_STOP_GAP seconds passed (one replay writes release and merge a second apart).
-#                   unverified when approved-by: names no instant.
+#   human stops     the run's register of asks (lib/owed.sh `owed_rounds`, every round kept): the rounds of the step
+#                   cards (`approve:step<n>`), the release card (`approve:release`) and the decisions (`decide:D<n>`)
+#                   opened after the plan's `approved-by:` instant, where the autonomous half starts, open or closed and
+#                   whoever closed them: a round put after the plan card is a stop, since the run stood on it. The
+#                   approval verb closes the Step-3 card's ask at that instant, so the register and the plan agree on
+#                   where the half starts. unverified when approved-by: names no instant or the run has no register.
 #   agent minutes   the launches of this plan on the rosters after the `approved: merge` line's instant
 #                   (`handoff_dispatches_since`, the dispatch wall's intended rows; AC-1.5's fact): minutes from that
 #                   reply to the last such launch, rounded up, 0 when none. unverified with no `approved: merge` line or
 #                   no launch of this plan on any roster.
 #   widest landing  `landing_report`'s rows: the queue landing with the largest `minutes=`, as printed. unverified when
 #                   no landing is measured.
-#   human-wait      the release approval records (release-approval-*.md beside the run's records, and the pages an
-#                   older run wrote under the old stem or as final-card-*.md): each page's `at=` on its
-#                   `release-approval/v1|plan=` (or the old tags')
-#                   line to its `replied: at=`, summed and rounded. unverified with no record, or a record with no reply.
+#   human-wait      the same rounds: each closed round's `at=` less its `opened=`, an open one's now less its
+#                   `opened=`, summed and rounded to whole minutes. unverified when the stops are, or a closed round
+#                   counted holds no `opened=` to time it by.
 # READ-ONLY. The rosters live in .bionic/tmp, which close-out's act 3 wipes, so close-out reads this before the wipe.
-# Set in hooks/session-poker.sh, before any part loads: SCORECARD_STOP_GAP.
 scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
-  local plan="$1" root="$2" recdir appr stops merge_at agent="unverified" widest wait
-  recdir="$(docs_root "$root")/record/$(proof_plan_slug "$plan")"
-  # the plan's start instant and approvals, one line each: `S <epoch>` then `A <epoch> <name> <reply>` per approved: line
-  appr="$(awk "$_PATROL_ISO_AWK"'
-    function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
-    function inst(l,   n, t, i, e) { n = split(l, t, /[ \t]+/); for (i = 1; i <= n; i++) { e = iso2epoch(norm(t[i])); if (e >= 0) return e } return -1 }
+  local plan="$1" root="$2" start reg rounds stops="unverified" wait="unverified" merge_at agent="unverified" widest
+  start="$(sitrep_approved_at "$plan")"
+  reg="$(owed_register "$root" "$plan" 2>/dev/null)" || reg=""
+  if [ -n "$start" ] && [ -n "$reg" ] && [ -f "$reg" ] && [ ! -L "$reg" ]; then
+    rounds="$(owed_rounds 'approve:step[0-9]+|approve:release|decide:D[0-9]+' "$plan" "$root" | awk -F'\t' \
+      -v s="$start" -v now="$(sitrep_now)" "$_PATROL_ISO_AWK"'
+      function norm(x) { if (length(x) == 17 && substr(x, 17, 1) == "Z") return substr(x, 1, 16) ":00Z"; return x }
+      function ep(x) { return (x == "" || x == "-") ? -1 : iso2epoch(norm(x)) }
+      { o = ep($4); e = ($3 == "open") ? now + 0 : ep($5) }
+      o < 0 { if (e > s) { c++; untimed = 1 } next }
+      o > s { c++; if (e >= o) t += e - o; else untimed = 1 }
+      END { printf "%d\t%s\n", c, untimed ? "unverified" : sprintf("%d", t / 60 + 0.5) }')"
+    stops="${rounds%%	*}"; wait="${rounds#*	}"
+  fi
+  # the plan's `approved: merge` instant, where the agent minutes after the final reply start
+  merge_at="$(awk "$_PATROL_ISO_AWK"'
+    function norm(x) { if (length(x) == 17 && substr(x, 17, 1) == "Z") return substr(x, 1, 16) ":00Z"; return x }
     /^[ \t]*```/ { fence = !fence; next }
     fence { next }
     /^##[ \t]/ { s = ($0 ~ /^##[ \t]+SDLC State/); next }
-    !s { next }
-    /^approved-by:/ && !seen { seen = 1; print "S\t" inst($0); next }
-    /^[ \t]*-?[ \t]*approved:[ \t]/ {
-      e = inst($0); if (e < 0) next
-      l = $0; sub(/^[ \t]*-?[ \t]*approved:[ \t]*/, "", l); split(l, w, /[ \t]+/)
-      q = index($0, "\""); print "A\t" e "\t" w[1] "\t" (q ? substr($0, q) : "")
-    }' "$plan" 2>/dev/null)"
-  stops="$(printf '%s\n' "$appr" | sort -t "$(printf '\t')" -k1,1r -k2,2n | awk -F'\t' -v gap="$SCORECARD_STOP_GAP" '
-    $1 == "S" { start = $2; next }
-    $1 == "A" && start != "" && start >= 0 && $2 > start { if (pe == "" || $4 != pw || $2 - pe > gap) c++; pe = $2; pw = $4 }
-    END { if (start == "" || start < 0) print "unverified"; else print c + 0 }')"
-  merge_at="$(printf '%s\n' "$appr" | awk -F'\t' '$1 == "A" && $3 == "merge" { print $2; exit }')"
+    s && /^[ \t]*-?[ \t]*approved:[ \t]+merge[ \t]/ {
+      n = split($0, t, /[ \t]+/); for (i = 1; i <= n; i++) { e = iso2epoch(norm(t[i])); if (e >= 0) { print e; exit } } }' "$plan" 2>/dev/null)"
   if [ -n "$merge_at" ] && [ -n "$(handoff_dispatches_since "$plan" "$root/.bionic/tmp" "")" ]; then
     agent="$(handoff_dispatches_since "$plan" "$root/.bionic/tmp" "" | awk -F'\t' -v m="$merge_at" "$_PATROL_ISO_AWK"'
       { e = iso2epoch($2); if (e > m && e - m > d) d = e - m }
@@ -624,15 +624,6 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
   widest="$(landing_report "$(_wt_proofs_path "$root" "$plan")" "$root" yes 2>/dev/null | awk '
     NR > 1 && $2 == "queue" { for (i = 3; i <= NF; i++) if (index($i, "minutes=") == 1) { m = substr($i, 9); if (m != "-" && (b == "" || m + 0 > b + 0)) { b = m; r = $1 } } }
     END { if (b != "") print r " " b " min" }')"
-  wait="$(for f in "$recdir"/release-approval-*.md "$recdir/$RR_OLD_VERB"-*.md "$recdir"/final-card-*.md; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done | awk -v OLD="$RR_OLD_VERB/v1|plan=" "$_PATROL_ISO_AWK"'
-    { file = $0; a = ""; r = ""
-      while ((getline l < file) > 0) {
-        if (index(l, "release-approval/v1|plan=") == 1 || index(l, OLD) == 1 || index(l, "final-card/v1|plan=") == 1) { n = split(l, p, "|"); for (i = 2; i <= n; i++) if (index(p[i], "at=") == 1) a = substr(p[i], 4) }
-        else if (index(l, "replied: at=") == 1) { r = substr(l, 13); sub(/ .*/, "", r) }
-      }
-      close(file); cards++; ea = iso2epoch(a); er = iso2epoch(r)
-      if (ea < 0 || er < 0 || er < ea) bad = 1; else sum += er - ea }
-    END { if (!cards || bad) print "unverified"; else printf "%d\n", int(sum / 60 + 0.5) }')"
   sitrep_gather "$plan" "$root" sheet 2>/dev/null
   printf 'human stops (autonomous half): %s · target 1\n' "${stops:-unverified}"
   printf 'agent minutes after the final reply: %s · target 0\n' "$agent"
@@ -1071,7 +1062,7 @@ sitrep_reds() {
 # sitrep_suites <landing record> -> `<suites><TAB><green><TAB><red>`: every suite the line ran for a row, by its last run,
 # green or red. A `standing` event is the line's own red run of the suite at the head; a discarded run, or one that
 # ran nothing, is no verdict on it. A suite named by a path is the suite its file name is. The whole run's verdicts
-# (`kind=regression`) are no row's and are read by `sitrep_whole`.
+# (`kind=regression`) are no row's: the whole run is stated by lib/proof.sh `proof_whole_text`.
 sitrep_suites() {
   [ -f "$1" ] && [ ! -L "$1" ] || { printf '0\t0\t0\n'; return 0; }
   { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
@@ -1082,31 +1073,6 @@ sitrep_suites() {
     ev == "standing" { r = "red" }
     ev == "verdict" || ev == "standing" { st = line_kv("suite"); sub(/.*\//, "", st); if (st != "") last[st] = r }
     END { for (st in last) { n++; if (last[st] == "green") g++; else rd++ }; printf "%d\t%d\t%d\n", n, g, rd }' "$1"
-}
-
-# sitrep_whole <plan> <landing record> -> the whole run in words: `not run (regression: no, Step 0)` when the plan owes
-# none; else the newer of the plan's last whole-run proof line (green at its head) and the record's last whole-run head
-# (red when a suite's last verdict at it is red, else green), `green at <head8>` or `red at <head8>`; else `not run yet`.
-sitrep_whole() {
-  local plan="$1" rec="$2" line ph pa
-  if declare -F plan_regression >/dev/null 2>&1 && [ "$(plan_regression "$plan" 2>/dev/null)" = no ]; then
-    printf 'not run (regression: no, Step 0)\n'; return 0
-  fi
-  declare -F proof_last_line >/dev/null 2>&1 && line="$(proof_last_line "$plan" regression 2>/dev/null)"
-  ph="$(printf '%s\n' "${line:-}" | tr ' ' '\n' | sed -n 's/^head=//p' | head -1)"
-  pa="$(printf '%s\n' "${line:-}" | tr ' ' '\n' | sed -n 's/^at=//p' | head -1)"
-  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
-  { [ -f "$rec" ] && [ ! -L "$rec" ] && cat "$rec"; } 2>/dev/null | awk -F'|' -v ph="$ph" -v pa="$pa" "${_LINE_FIELDS_AWK:-}"'
-    function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
-    line_ev() == "verdict" && line_kv("kind") == "regression" && line_kv("commit") != "" {
-      c = line_kv("commit"); r = line_kv("result"); if (r != "green" && r != "red") next
-      if (c != h) { h = c; delete w }
-      w[line_kv("suite")] = r; at = norm(line_kv("at"))
-    }
-    END {
-      if (h != "" && (ph == "" || at > norm(pa))) { s = "green"; for (k in w) if (w[k] == "red") s = "red"; print s " at " substr(h, 1, 8); exit }
-      if (ph != "") { print "green at " substr(ph, 1, 8); exit }
-      print "not run yet" }'
 }
 
 # sitrep_test_ratio <plan> <root> -> `<tests> <code> <head>`: the two counts of shell lines the plan's newest release
@@ -1599,7 +1565,14 @@ SITREP_RUNNING
   SG_T_RUN="${sn:-0}: ${sg:-0} green, ${sr:-0} red"
   nsu="$(for k in "$root"/tests/*.test.sh; do [ -f "$k" ] && printf '%s\n' "$k"; done | awk 'END { print NR }')"
   SG_T_TOTAL="$nsu"; [ "$nsu" -gt 0 ] || SG_T_TOTAL="-"
-  SG_T_WHOLE="$(sitrep_whole "$plan" "$rec")"
+  # THE WHOLE RUN is the full pass's state at the head, from the one printer the release card and the continuation
+  # draw too (lib/proof.sh `proof_whole_text`); a plan that owes no whole run says so, and no proof is not run yet.
+  if [ "$(plan_regression "$plan" 2>/dev/null)" = no ]; then SG_T_WHOLE="not run (regression: no, Step 0)"
+  else
+    { declare -F proof_whole_text >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } >/dev/null 2>&1
+    SG_T_WHOLE="$(proof_whole_text "$plan" "$root" 2>/dev/null)"
+    case "$SG_T_WHOLE" in none) SG_T_WHOLE="not run yet" ;; '') SG_T_WHOLE="unverified" ;; esac
+  fi
   idle_min="$(cd "$root" 2>/dev/null && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" fill-report "$plan" 2>/dev/null | sed -n 's/^idle minutes: \([0-9][0-9]*\)$/\1/p' | head -n 1)"
   # the landing report's run counts; a run killed at the gate (rc over 128) is a discarded run
   case "$lr1" in

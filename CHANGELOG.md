@@ -8,6 +8,295 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.29.0 — 2026-10-25
+
+This is the asks-nothing release: the run reaches its release card without a hand on it. It was chartered from wave 45's
+close, which read `whole run green at cf173c49` over a whole run that exited 1, and whose scorecard read 1 stop and 27
+minutes where the ledger held 4 stops and about 514 (`ideas/bionic-1.29.0-charter.md`). The charter's three themes are
+the run's: a refusal whose only exit is the person's word is a defect, every proof is read at the head by one reader,
+and wave 45's carried test debt closes with a test each. One ruling outlives it as a decision. A head is green only
+where the full pass ran green at it; a whole run behind the head plus the landings since is `covered`, which every
+reader prints as red at this head, and the merge there is the person's word on the release card (D4, ADR-074). Around it
+the fix cap holds at four and exempts the wave's own in-policy defects (D1, D8, D9), refusals ratchet toward naming
+their exit and a refusal that needs the person is counted as `needs-you` (D2, D10, D11), raising a criterion's tier is
+the orchestrator's verb (D12), the tick starts the whole run itself and two of the three refusals that guarded it go
+(D5, D16), the health line and every proof surface render one judge (D6, D14), the asks register is the clock (D7, D15),
+the walk is a proof kind its landing settles (D13), and the release-entry parts render in the tree they run from (D17).
+The close's value is read by T21 after this entry and is not stated here. T31's landing, the last build landing, opened
+the hand-holds window the close reads, and the run's one counted hand, the close row's task key written after an
+earlier landing (A-orch.30), sits before it by the measure's rule; the write stays in the landing record (D19). This is
+a minor release by the policy above: the merge rule, the ask on the card, the tick-started pass, the register as the
+clock and the walk as a proof kind are new capability. `canonical_sdlc_version` stays 14.
+
+**Migration.** Rows that changed what a script of yours may meet:
+- T1: `task-add --born` ends its born line `· exempt under fix-policy: <policy>` or `· counted <n> of <cap>`, and the
+  old `review-born rows: N of cap M` clause and its `(AC-10.2)` tag are gone. A row whose rating is inside `fix-policy:`
+  asks no cap. A row promoted from outside the policy is written `born: review S<n> <reach> of=<ids> promoted` and
+  counts. The cap refusal reads `review-born rows: <n> of cap <M> are counted` and names `set fix-cap=<n+1>`, and the
+  landing line prints `review-born rows: <counted> of cap <M> (<exempt> exempt)`.
+- T2: the per-file cap skips a path named in `REGISTRY_FILES` (`tests/CENSUS.md`), so a fourth test row touching the
+  census is no longer refused as a fourth fix.
+- T3: `refuse()` with a fix opening `needs: ` appends `line/v1|ev=refusal|needs=person|wall=<verb>|at=<ISO>` to the
+  bound plan's landing record. With no plan bound nothing is logged, and the refusal's streams and exit are unchanged.
+- T4: the Verify gate's missing, blank and placeholder evidence refusals of a pending or blocked row name three exits in
+  their Fix: line, `session-poker.sh matrix-set <AC> status=discharged`, `session-poker.sh matrix-retier <AC> tier=` and
+  `needs: the user — a waiver`. Both "the auditor has not confirmed <AC>" refusals name `needs: the user — a waiver at
+  the release card: reply <n> waive`. Their facts are unchanged. `tests/lib/refusal-exits.ceiling` is new, and
+  shell-lint §EXIT refuses a file whose unexcused count rises above its ceiling, naming the site, or falls below it,
+  naming the number to write.
+- T5: the hand-holds line ends `· needs-you=<n>`, after `fixed=`, and the count joins `total=`. A script that pins the
+  line meets the extra field.
+- T6: `matrix-retier <AC> tier=<T> eval=<text>` is a new verb. It refuses a tier at or below the cell's, rewrites the
+  tier cell, the block's `eval:` line and the Eval design row in one write, resets the row to pending, appends
+  `ev=matrix-retier|ac=|from=|to=` and writes `## Δ<k> — retier <AC> <old>→<T> (orchestrator <clock>): <text>` to the
+  design ledger. The hand-holds line ignores the event.
+- T7: `stack-health:` reads `green head=<F> pass=<n> total=<m> evidence=<logs>` only at a pass that owed nothing, and
+  otherwise `red head=<F> pass=<n> total=<m> owed=<open>[ closed=<closed>] evidence=<logs>`. A red line always carries
+  `owed=`, empty once landings close every owed suite. Every landing's settlement rewrites the line.
+- T8: `regression-run` takes `--starter <tick|orchestrator|person>`, `orchestrator` by default, and `--reason`; `person`
+  without a reason, a fourth starter and a reason holding `|` or a line break are refused before anything runs. The run
+  line carries `starter=` and `reason=`. The refusals "is already proved" and "the whole run runs once, and <h> has it"
+  are gone, with `proof_whole_run_behind`. `second-regressions` counts a run past the first only when its starter is
+  `person`.
+- T9: the release card prints `✅ whole suite: green at <h8>` or `✖️ whole suite: red at <h8>, <n> landings before this
+  head` (`1 landing` for one), `red at <h8>, not in this head's history` when the landings cannot be counted, and `✖️
+  whole suite: none` with no proof. The sitrep prints `whole run <text>` and `not run yet`, and the continuation writes
+  `the regression: whole suite <state> (proved <at>, <evidence>)`. `sitrep_whole` and `co_regression_text` are deleted
+  for `proof_whole_text`.
+- T10: the release card puts `approve:merge-unproved` when the whole suite is not green at the working head, drawn `<n>.
+  Merge without a whole run at this head — <state> · recommended: wait for the pass · default: none`. `reply <n> merge`
+  writes `approved: merge-unproved by <who> <ISO> head=<h40> "<reply>"`. `facts_state` gains
+  `regression<TAB>unproved<TAB><state><TAB>needs: the user — reply <n> on the release card (merge without a whole run at
+  this head), or wait for the pass`, and `current 7`, `current 8` and close-out refuse on it until the pass runs at the
+  head or the word is there.
+- T11: `proof-add walk <record>` is a new kind. It reads the record with the critic's reader, writes `proved: kind=walk
+  head=<h40> at=<ISO> evidence=<record>`, discharges each CONFIRMED row no landing settled, writes `walk-artifact:` and
+  appends `line/v1|ev=walk|record=|discharged=<n>|at=`. `deliver` of a verify row whose artifact is the walk record runs
+  the same act.
+- T12: the asks register keeps every round: opening a closed key appends a line with `round=<n+1>`. `owed_rounds` lists
+  the rounds. The scorecard's human stops are the rounds of `approve:step<n>`, `approve:release` and `decide:D<n>`
+  opened after the plan's `approved-by:` instant, and its wait is their sum. `approve plan` closes `approve:step0` to
+  `approve:step3` at the instant it writes.
+- T13: the tick prints `poker: regression-run started regression@<h8> (log <path>)` when it starts the whole run, and
+  `poker: regression-run waiting — the gate has no room for a whole run` when the gate cannot admit it. The roster gains
+  a `regression@<h8>` row of status `run`. `booked.sh` takes `--no-wait` with `--detach` only, exit 2 otherwise, and
+  every detached run line carries `starter=`.
+- T16: `known-limits-part` and `reviews-part` render and commit CHANGELOG.md in the checkout they run from, and move the
+  working branch only from its own checkout. The part line carries `branch=<branch>|tree=<checkout>`.
+- T22: `matrix-retier` is refused to a dispatched writer as `matrix-set` is, and its three refusals that named no exit
+  now name one.
+- T23: `approve merge-unproved` is admitted where the plan's rows read `release`, and refused, as before, on a plan with
+  no integrate row.
+- T28: the refusal for an unloadable landing record names "the landing record library".
+- T29: the Step-5 walk gate's AC-identifier refusal yields to a walk registered by `proof-add walk`, and its fix reads
+  `…, or register the record with session-poker.sh proof-add walk <record> when it is the walk's verdict table`.
+- T31: `matrix-render` writes a criterion's `task:` key as the one close row serving its requirement when the
+  criterion's eval names `landing-report --hand-holds` and several rows serve it, and as the one step-9 row when no
+  serving row is of kind close. Several close rows, or none, still read `pending`, and one serving row is unchanged.
+  `serves_tasks` prints each row's step and kind beside its id and serves.
+
+### Refusals and the cap (D1, D2, D8, D9, D10, D11, D12)
+
+- T1 (`T1-report.md`): the cap counts only the rows a review adds beyond the wave's own in-policy defects, and
+  `task-add` says which count it applied.
+- T2 (`T2-report.md`): the registry files every test row must touch live in one constant the cap and the census test
+  both read.
+- T3 (`T3-report.md`): a refusal that needs a person is an event on the landing record.
+- T4 (`T4-report.md`): a new refusal cannot ship without an exit, and the old ones burn down from a per-file ceiling;
+  the three walls that stopped wave 45 name theirs.
+- T5 (`T5-report.md`): a refusal the person had to answer is a hand-hold, counted in the total.
+- T6 (`T6-report.md`): raising a criterion's tier is one verb that rewrites every place the tier lives.
+
+### Proved at the head, one reader (D4, D5, D6, D7, D13, D14, D15, D16, ADR-074)
+
+- T7 (`T7-report.md`): the health line is a rendering of the judge, rewritten by every writer through one function.
+- T8 (`T8-report.md`): a full pass is refused only at a head that already has one, and the run line names who started
+  it.
+- T9 (`T9-report.md`): the card, the scorecard and the continuation print the full pass's state from one printer.
+- T10 (`T10-report.md`): the merge without a pass at the head is an ask on the card, and the judge passes it at that
+  head alone.
+- T11 (`T11-report.md`): the walk's verdicts are registered like the critic's, and its landing settles the cells they
+  confirm.
+- T12 (`T12-report.md`): stops and waiting are read from the asks register, every round kept.
+- T13 (`T13-report.md`): the tick starts the whole run when nothing is ready or running and the head has moved.
+
+### The record and its debt (D3, D17, D18)
+
+- T14 (`T14-report.md`): the evidence gate's Section 33 pins the owing-step rule, and 33b is red when the rule is
+  reverted.
+- T15 (`T15-report.md`): close-out-4's OC-1 is red by its own fixture when the dry run does not refuse.
+- T16 (`T16-report.md`): the release-entry parts render in the tree they run from, so this entry's Known limits were
+  rendered in its own row's tree.
+
+### Fixtures that met the new rules
+
+- T22 (`T22-report.md`), T23 (`T23-report.md`), T24 (`T24-report.md`): the pins T6 and T16 left, the approval name the
+  merge ask reads, and the evidence gate's AH-1, each moved to the rules this run landed.
+- T25 (`T25-report.md`), T26 (`T26-report.md`), T27 (`T27-report.md`), T28 (`T28-report.md`): the six suites the first
+  whole run left red, each a pin or fixture of a rule this run changed, were re-pinned to it; no code under `hooks/` or
+  `payload/` changed in T24 to T27.
+- T29 (`T29-report.md`): the walk gate reads the walk, so the record D13 requires stands at Step 5. Born of
+  `critic-evidence.md#4` and `critic-adversarial.md#8`.
+- T31 (`T31-report.md`): the render gives the criterion the close proves its close row as `task:`, so the close's live
+  row is no longer read as live at Step 6 for want of an owner; red first on one test row. Born of the ruling D19, not
+  of a finding.
+
+### The walk, the regression, the critic
+
+- T17 (`walk.md`): the walk at 837ddc39. The release card, the sitrep, the scorecard and close-out's check were read
+  over this run and over wave 45's record; the new readers print red at cf173c49 and 7 stops and 594 minutes there,
+  where wave 45's continuation said green, 1 and 27. Its landing discharged three criteria with no status write after
+  it.
+- The regression: five whole runs. The orchestrator started the first at 402980ec, which left six suites red, 121 of
+  127, for T25 to T28. The tick started the others at 837ddc39, 5a08f601, 31da41f7 and 6b7563af, and each ran 127 of 127
+  green (`regression-run-402980ec….log`, `regression-run-837ddc39….log`, `regression-run-5a08f601….log`,
+  `regression-run-31da41f7….log`, `regression-run-6b7563af….log`).
+- T18 (`critic-evidence.md`, `critic-adversarial.md`, `critic-structure.md`): the critic's review of the whole at
+  837ddc39, one record for each question. T30 (`critic-evidence-2.md`, `critic-adversarial-2.md`,
+  `critic-structure-2.md`): a fresh critic's read of the fix piece at 5a08f601. T33 (`critic-evidence-3.md`,
+  `critic-adversarial-3.md`, `critic-structure-3.md`): a fresh critic's read of the render-fix piece at 6b7563af.
+
+### The release
+
+- T19 (`T19.md`): this entry, `plugin.json` 1.29.0, the help and version pages rendered by `agents-src/render.sh`,
+  `rendered.sha256` refreshed, and ADR-074. T34 (`T34.md`): this entry again, brought to the head that ships with the
+  render fix and the passes since. T20 opens the pull request, and T21 closes the run and reads the hand-holds
+  measure last.
+
+### The reviews
+
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- adversarial review, whole: flag at 837ddc39 by w46-T18, 2026-10-26T04:21:32Z (`critic-adversarial.md`)
+- structure review, whole: flag at 837ddc39 by w46-T18, 2026-10-26T04:21:41Z (`critic-structure.md`)
+- evidence review, whole: fail at 837ddc39 by w46-T18, 2026-10-26T04:24:15Z (`critic-evidence.md`)
+- evidence review, piece: pass at 5a08f601 by w46-T30, 2026-10-26T05:08:05Z (`critic-evidence-2.md`)
+- adversarial review, piece: flag at 5a08f601 by w46-T30, 2026-10-26T05:08:15Z (`critic-adversarial-2.md`)
+- structure review, piece: flag at 5a08f601 by w46-T30, 2026-10-26T05:08:25Z (`critic-structure-2.md`)
+- evidence review, piece: flag at 6b7563af by w46-T33, 2026-10-26T13:49:47Z (`critic-evidence-3.md`)
+- adversarial review, piece: flag at 6b7563af by w46-T33, 2026-10-26T13:49:52Z (`critic-adversarial-3.md`)
+- structure review, piece: flag at 6b7563af by w46-T33, 2026-10-26T13:49:56Z (`critic-structure-3.md`)
+
+### Known limits
+
+Rendered from the plan's deferred findings, each its stated sentence, in the order they were registered.
+
+- The tick starts the whole run only while no row is ready, so the walk and critic rows, ready at the last build landing, can read a head no pass ran at; the orchestrator starts the run there.
+- Advancing to Step 7 is held to the merge-unproved rule placed at Step 8, so a run whose pass is behind its head needs a second whole run or the person's word on a release card that does not yet exist at Step 7.
+- The release card asks the merge without a pass on a plan with no integrate row, where approve refuses the reply that answers it.
+- The skill text in operational-rules.md and steps/5.md still says regression-run refuses a proved head and that a second whole run never happens, which D4 and D16 made false.
+- The situation report's waiting-on-you minutes read only the newest round of a re-put key, although the register now keeps every round.
+- The stack-health line and the release card disagree about green at a head whose whole run's only reds are inherited debt.
+
+### The landing numbers
+
+`landing-report --rows` at b9399de36ca2e574e03d949d470ec4e4bb382f13 on 2026-10-26T13:57:50Z:
+
+```
+landings: queue=27 hand=0 git=0 · ready-to-landed median=3.4m p75=7.6m max=34.8m · runs: green=67 red=3 none=0 discarded=4 red-then-green=0 run=191 reused=0 absent=0 · waited median=16s · killed=5
+T8 queue ready=2026-10-25T20:29:20Z landed=2026-10-25T20:32:52Z minutes=3.5 runs=3 waited=18s wait=0.3 prove=3.2 rework=0.0 width=2
+  canonical-sdlc-evidence-gate-2.test.sh green promised=55s actual=60s ratio=1.09
+  units.test.sh green promised=16s actual=22s ratio=1.38
+  landing-line-2.test.sh green promised=190s actual=170s ratio=0.89
+T7 queue ready=2026-10-25T20:37:01Z landed=2026-10-25T20:42:56Z minutes=5.9 runs=2 waited=15s wait=0.2 prove=5.7 rework=0.0 width=3
+  session-poker-4.test.sh green promised=142s actual=151s ratio=1.06
+  landing-line-1.test.sh green promised=336s actual=339s ratio=1.01
+T9 queue ready=2026-10-25T20:48:10Z landed=2026-10-25T20:53:24Z minutes=5.2 runs=4 waited=14s wait=0.2 prove=5.0 rework=0.0 width=4
+  card.test.sh green promised=19s actual=40s ratio=2.11
+  sitrep.test.sh green promised=123s actual=228s ratio=1.85
+  close-out-3.test.sh green promised=141s actual=298s ratio=2.11
+  proof-at-head.test.sh green promised=25s actual=28s ratio=1.12
+T1 queue ready=2026-10-25T20:59:41Z landed=2026-10-25T21:02:35Z minutes=2.9 runs=2 waited=29s wait=0.5 prove=2.4 rework=0.0 width=3
+  session-poker-5.test.sh green promised=118s actual=116s ratio=0.98
+  units.test.sh green promised=30s actual=27s ratio=0.90
+T16 queue ready=2026-10-25T21:04:09Z landed=2026-10-25T21:06:31Z minutes=2.4 runs=1 waited=13s wait=0.2 prove=1.8 rework=0.4 width=4
+  session-poker-5.test.sh green promised=63s actual=106s ratio=1.68
+T4 queue ready=2026-10-25T21:18:41Z landed=2026-10-25T21:21:55Z minutes=3.2 runs=2 waited=51s wait=0.8 prove=1.2 rework=1.1 width=4
+  shell-lint.test.sh red promised=33s actual=36s ratio=1.09
+  shell-lint.test.sh green promised=37s actual=37s ratio=1.00
+T6 queue ready=2026-10-25T21:35:55Z landed=2026-10-25T21:39:06Z minutes=3.2 runs=2 waited=16s wait=0.3 prove=2.9 rework=0.0 width=4
+  session-poker-5.test.sh green promised=103s actual=125s ratio=1.21
+  landing-line-2.test.sh green promised=158s actual=175s ratio=1.11
+T13 queue ready=2026-10-25T22:00:00Z landed=2026-10-25T22:02:47Z minutes=2.8 runs=2 waited=16s wait=0.3 prove=2.5 rework=0.0 width=4
+  session-poker-4.test.sh green promised=153s actual=151s ratio=0.99
+  gate.test.sh green promised=36s actual=47s ratio=1.31
+T11 queue ready=2026-10-25T22:34:13Z landed=2026-10-25T22:37:35Z minutes=3.4 runs=2 waited=17s wait=0.3 prove=2.8 rework=0.3 width=3
+  session-poker-4.test.sh green promised=150s actual=168s ratio=1.12
+  spawn-worktree.test.sh green promised=27s actual=54s ratio=2.00
+T12 queue ready=2026-10-25T23:24:37Z landed=2026-10-25T23:48:23Z minutes=23.8 runs=6 waited=792s wait=13.2 prove=10.6 rework=0.0 width=3
+  sitrep.test.sh green promised=184s actual=265s ratio=1.44
+  asks.test.sh green promised=91s actual=126s ratio=1.38
+  close-out-3.test.sh green promised=179s actual=330s ratio=1.84
+  sitrep.test.sh green promised=265s actual=247s ratio=0.93
+  asks.test.sh green promised=126s actual=122s ratio=0.97
+  close-out-3.test.sh green promised=336s actual=303s ratio=0.90
+T22 queue ready=2026-10-25T23:42:34Z landed=2026-10-26T00:01:46Z minutes=19.2 runs=11 waited=452s wait=7.5 prove=11.7 rework=0.0 width=4
+  landing-line-1.test.sh discarded promised=339s actual=- ratio=-
+  close-out-4.test.sh discarded promised=324s actual=- ratio=-
+  bash-walls.test.sh green promised=22s actual=27s ratio=1.23
+  landing-line-1.test.sh green promised=339s actual=337s ratio=0.99
+  close-out-4.test.sh green promised=302s actual=329s ratio=1.09
+  bash-walls.test.sh green promised=20s actual=30s ratio=1.50
+  shell-lint.test.sh green promised=35s actual=43s ratio=1.23
+  landing-line-1.test.sh green promised=337s actual=333s ratio=0.99
+  close-out-4.test.sh green promised=329s actual=324s ratio=0.98
+  bash-walls.test.sh green promised=30s actual=28s ratio=0.93
+  shell-lint.test.sh green promised=43s actual=40s ratio=0.93
+T3 queue ready=2026-10-26T00:08:04Z landed=2026-10-26T00:10:33Z minutes=2.5 runs=1 waited=144s wait=2.4 prove=0.1 rework=0.0 width=4
+  refuse.test.sh green promised=4s actual=4s ratio=1.00
+T10 queue ready=2026-10-25T23:46:56Z landed=2026-10-26T00:21:42Z minutes=34.8 runs=9 waited=938s wait=15.6 prove=19.1 rework=0.0 width=3
+  card.test.sh green promised=35s actual=44s ratio=1.26
+  release-approval.test.sh discarded promised=419s actual=- ratio=-
+  rehearsal-release-waiting.test.sh discarded promised=303s actual=- ratio=-
+  card.test.sh green promised=44s actual=44s ratio=1.00
+  release-approval.test.sh green promised=444s actual=491s ratio=1.11
+  rehearsal-release-waiting.test.sh green promised=321s actual=390s ratio=1.21
+  card.test.sh green promised=41s actual=49s ratio=1.20
+  release-approval.test.sh green promised=383s actual=560s ratio=1.46
+  rehearsal-release-waiting.test.sh green promised=337s actual=411s ratio=1.22
+T2 queue ready=2026-10-26T00:31:24Z landed=2026-10-26T00:33:54Z minutes=2.5 runs=2 waited=17s wait=0.3 prove=2.1 rework=0.1 width=3
+  shell-lint.test.sh green promised=33s actual=39s ratio=1.18
+  session-poker-5.test.sh green promised=121s actual=126s ratio=1.04
+T14 queue ready=2026-10-26T00:43:21Z landed=2026-10-26T00:45:32Z minutes=2.2 runs=1 waited=73s wait=1.2 prove=1.0 rework=0.0 width=3
+  canonical-sdlc-evidence-gate-2.test.sh red promised=58s actual=57s ratio=0.98
+T5 queue ready=2026-10-26T00:53:06Z landed=2026-10-26T01:03:14Z minutes=10.1 runs=4 waited=15s wait=0.2 prove=9.9 rework=0.0 width=4
+  landing-line-2.test.sh green promised=126s actual=210s ratio=1.67
+  landing-line-1.test.sh green promised=216s actual=383s ratio=1.77
+  close-out-3.test.sh green promised=191s actual=350s ratio=1.83
+  close-out-4.test.sh green promised=329s actual=342s ratio=1.04
+T24 queue ready=2026-10-26T01:09:07Z landed=2026-10-26T01:10:21Z minutes=1.2 runs=1 waited=15s wait=0.2 prove=1.0 rework=0.0 width=3
+  canonical-sdlc-evidence-gate-2.test.sh green promised=58s actual=58s ratio=1.00
+T23 queue ready=2026-10-26T01:24:51Z landed=2026-10-26T01:33:25Z minutes=8.6 runs=2 waited=15s wait=0.2 prove=8.3 rework=0.0 width=3
+  release-approval.test.sh green promised=515s actual=498s ratio=0.97
+  card.test.sh green promised=46s actual=43s ratio=0.93
+T15 queue ready=2026-10-26T01:43:28Z landed=2026-10-26T01:53:49Z minutes=10.3 runs=1 waited=314s wait=5.2 prove=5.0 rework=0.1 width=4
+  close-out-4.test.sh red promised=169s actual=297s ratio=1.76
+T26 queue ready=2026-10-26T02:44:47Z landed=2026-10-26T02:47:55Z minutes=3.1 runs=2 waited=14s wait=0.2 prove=2.9 rework=0.0 width=2
+  session-poker-4.test.sh green promised=164s actual=173s ratio=1.05
+  asks.test.sh green promised=87s actual=110s ratio=1.26
+T28 queue ready=2026-10-26T02:51:01Z landed=2026-10-26T02:51:31Z minutes=0.5 runs=2 waited=14s wait=0.2 prove=0.3 rework=0.0 width=3
+  words.test.sh green promised=12s actual=12s ratio=1.00
+  regression-rename.test.sh green promised=14s actual=16s ratio=1.14
+T27 queue ready=2026-10-26T02:54:30Z landed=2026-10-26T03:01:06Z minutes=6.6 runs=1 waited=12s wait=0.2 prove=6.4 rework=0.0 width=3
+  door-card.test.sh green promised=330s actual=383s ratio=1.16
+T25 queue ready=2026-10-26T03:32:48Z landed=2026-10-26T03:51:26Z minutes=18.6 runs=3 waited=144s wait=2.4 prove=16.2 rework=0.0 width=4
+  rehearsal-failed-review.test.sh green promised=321s actual=393s ratio=1.22
+  close-replay.test.sh green promised=450s actual=580s ratio=1.29
+  rehearsal-release-waiting.test.sh green promised=374s actual=378s ratio=1.01
+T29 queue ready=2026-10-26T04:52:09Z landed=2026-10-26T04:56:34Z minutes=4.4 runs=3 waited=11s wait=0.2 prove=4.2 rework=0.0 width=4
+  canonical-sdlc-evidence-gate.test.sh green promised=25s actual=28s ratio=1.12
+  canonical-sdlc-evidence-gate-2.test.sh green promised=38s actual=58s ratio=1.53
+  close-out-3.test.sh green promised=217s actual=252s ratio=1.16
+T19 queue ready=2026-10-26T05:44:13Z landed=2026-10-26T05:45:24Z minutes=1.2 runs=1 waited=11s wait=0.2 prove=1.0 rework=0.0 width=4
+  release-check.test.sh green promised=54s actual=59s ratio=1.09
+T31 queue ready=2026-10-26T13:00:18Z landed=2026-10-26T13:05:56Z minutes=5.6 runs=3 waited=14s wait=0.2 prove=5.4 rework=0.0 width=4
+  session-poker-4.test.sh green promised=173s actual=180s ratio=1.04
+  landing-line-1.test.sh green promised=228s actual=323s ratio=1.42
+  landing-line-2.test.sh green promised=121s actual=180s ratio=1.49
+T34 queue ready=2026-10-26T13:53:11Z landed=2026-10-26T13:54:23Z minutes=1.2 runs=1 waited=11s wait=0.2 prove=1.0 rework=0.0 width=4
+  release-check.test.sh green promised=65s actual=60s ratio=0.92
+```
+
 ## 1.28.0 — 2026-10-25
 
 This is the whole run release. The run closes by reading its own measure: it was chartered as the hand-holds measure

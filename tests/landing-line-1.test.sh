@@ -1035,7 +1035,7 @@ RW1="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RW1")")"
 ww_pub T1 hand 2026-10-20T10:00:00Z > "$(ll_rec "$RW1")"
 ww_dec 2026-10-20T12:00:00Z decline > "$(dirname "$(ll_rec "$RW1")")/fill-ledger.log"
 expect_eq "WINDOW-1 a hand landing before the window and a decline inside it read declines=1 by-hand=0" \
-  "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=1 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · unplaced=0" \
+  "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=1 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" \
   "$(ww_hh "$RW1" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
 expect_contains "WINDOW-1a …and a window that opens before the landing counts it: the record is read, the window moved it" \
   "hand-holds: total=2 · by-hand=1 · stop-runs=0 · declines=1 " "$(ww_hh "$RW1" --since 2026-10-20T09:00:00Z --until 2026-10-20T13:00:00Z)"
@@ -1075,10 +1075,10 @@ expect_eq "WINDOW-1c-1 precondition: matrix-render wrote the three blocks, every
 expect_eq "WINDOW-1c-0 precondition: the plan holds the four regression proofs, three waived: and three moved: lines" "4/3/3" \
   "$(grep -c '^proved: kind=regression ' "$WW_PL")/$(grep -c '^waived: question=' "$WW_PL")/$(grep -c '^moved: ' "$WW_PL")"
 expect_eq "WINDOW-1c a wide window reads three of every kind, the regressions past the first, and the adoption it cannot place" \
-  "hand-holds: total=33 · by-hand=3 · stop-runs=3 · declines=3 · lifts=3 · amends=3 · holds=3 · extensions=3 · waivers=6 · status-writes=0 · second-regressions=3 · adoptions=0 · fixed=3 · unplaced=1" \
+  "hand-holds: total=33 · by-hand=3 · stop-runs=3 · declines=3 · lifts=3 · amends=3 · holds=3 · extensions=3 · waivers=6 · status-writes=0 · second-regressions=3 · adoptions=0 · fixed=3 · needs-you=0 · unplaced=1" \
   "$(ww_hh "$RW2" --since 2026-10-20T08:00:00Z --until 2026-10-20T16:00:00Z)"
 expect_eq "WINDOW-1d …and the window 11:00 to 13:00 reads one of each, every source filtered by its own time" \
-  "hand-holds: total=11 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=1 · holds=1 · extensions=1 · waivers=2 · status-writes=0 · second-regressions=1 · adoptions=0 · fixed=1 · unplaced=1" \
+  "hand-holds: total=11 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=1 · holds=1 · extensions=1 · waivers=2 · status-writes=0 · second-regressions=1 · adoptions=0 · fixed=1 · needs-you=0 · unplaced=1" \
   "$(ww_hh "$RW2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
 
 # (w2) the matrix waiver's two forms. The ISO form is placed by its time; the date form counts with no end, and
@@ -1090,11 +1090,11 @@ ww_matrix "$RW3" 'Dana Fixture 2026-10-20T12:30:00Z "waive the row" — inside' 
 expect_eq "WINDOW-2-0 precondition: matrix-render wrote the four blocks with their criterion's text, each block one waiver" "0|4|4" \
   "$WW_MR|$(grep -cE '^AC-1\.[0-9]+: .' "$(ll_plan "$RW3")")|$(grep -c '^  waiver: ' "$(ll_plan "$RW3")")"
 expect_contains "WINDOW-2 a waiver at a time inside the window counts, the one after it does not, the day before is placed outside, the day the start falls in is unplaced" \
-  "waivers=1 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · unplaced=1" "$(ww_hh "$RW3" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
+  "waivers=1 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=1" "$(ww_hh "$RW3" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
 expect_contains "WINDOW-2b …and with no end, every form counts, the date-only ones too" \
-  "waivers=4 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · unplaced=0" "$(ww_hh "$RW3" --since 2026-01-01T00:00:00Z)"
+  "waivers=4 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" "$(ww_hh "$RW3" --since 2026-01-01T00:00:00Z)"
 expect_eq "WINDOW-2c …and with no window at all (no build landing, no page), both forms count and nothing is unplaced" \
-  "hand-holds: total=4 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=4 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0" \
+  "hand-holds: total=4 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=4 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0" \
   "$(ww_hh "$RW3")"
 
 # (w3) the ends from records. The start is the last build row's landing; the end is the plan's `delivered:` time, and
@@ -1137,7 +1137,7 @@ ww_matrix "$RW5" 'Dana Fixture 2026-10-20T12:00:00Z "waive the row" — one' 'Da
 expect_eq "WAIVERS-0 precondition: matrix-render exited 0 and wrote four texted headers, no bare one, and four waivers" "0|4|0|4" \
   "$WW_MR|$(grep -cE '^AC-1\.[0-9]+: .' "$(ll_plan "$RW5")")|$(grep -cE '^AC-1\.[0-9]+:[[:space:]]*$' "$(ll_plan "$RW5")")|$(grep -c '^  waiver: ' "$(ll_plan "$RW5")")"
 expect_eq "WAIVERS-1 the four waivers under rendered headers read waivers=4 over a window that holds them" \
-  "hand-holds: total=4 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=4 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · unplaced=0" \
+  "hand-holds: total=4 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=4 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" \
   "$(ww_hh "$RW5" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
 
 # ---------------------------------------------------------------------------
@@ -1154,20 +1154,20 @@ ww_sdlc "$RW6" "moved: record/wave-x/rev.md#2 to=fixed row=T2 by=Dana at=2026-10
 expect_eq "MOVED-0 precondition: the plan holds the three moves and the record T2's one landing" "3|1" \
   "$(grep -c '^moved: ' "$(ll_plan "$RW6")")|$(grep -c '|ev=published|row=T2|' "$(ll_rec "$RW6")")"
 expect_eq "MOVED-1 the move a minute after T2 landed counts, the one a minute before does not, the one naming a row never landed is unplaced" \
-  "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=1 · unplaced=1" \
+  "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=1 · needs-you=0 · unplaced=1" \
   "$(ww_hh "$RW6" --since 2026-10-20T09:00:00Z --until 2026-10-20T14:00:00Z)"
 RW7="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RW7")")"
 ww_pub T2 queue 2026-10-20T12:00:00Z > "$(ll_rec "$RW7")"
 ww_sdlc "$RW7" "moved: record/wave-x/rev.md#1 to=fixed row=T2 by=Dana at=2026-10-20T11:59:00Z"
 expect_contains "MOVED-2 …and the move before the landing alone, inside the same window, reads fixed=0 and nothing unplaced" \
-  "fixed=0 · unplaced=0" "$(ww_hh "$RW7" --since 2026-10-20T09:00:00Z --until 2026-10-20T14:00:00Z)"
+  "fixed=0 · needs-you=0 · unplaced=0" "$(ww_hh "$RW7" --since 2026-10-20T09:00:00Z --until 2026-10-20T14:00:00Z)"
 
 RW9="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RW9")")"
 ww_pub T2 queue 2026-10-20T12:00:00Z > "$(ll_rec "$RW9")"
 ww_sdlc "$RW9" "moved: record/wave-x/rev.md#2 to=fixed row=T2 by=Dana at=2026-10-20T12:01:00Z" \
   "moved: record/wave-x/rev.md#4 to=fixed row=T2 by=landing at=2026-10-20T12:02:00Z landing=$WW_C"
 expect_contains "MOVED-3 a move the landing wrote (by=landing) is its settlement: beside a hand move after the landing, fixed=1" \
-  "fixed=1 · unplaced=0" "$(ww_hh "$RW9" --since 2026-10-20T09:00:00Z --until 2026-10-20T14:00:00Z)"
+  "fixed=1 · needs-you=0 · unplaced=0" "$(ww_hh "$RW9" --since 2026-10-20T09:00:00Z --until 2026-10-20T14:00:00Z)"
 
 # ---------------------------------------------------------------------------
 section "§STATUS: a matrix status written by hand is counted, placed by the time its verb wrote on it"
@@ -1192,7 +1192,7 @@ expect_regex "STATUS-1a …naming the criterion, the cell it wrote, who wrote it
   "$(grep '^line/v1|ev=matrix-set|' "$(ll_rec "$RS1")" | head -n 1)"
 SS_WIDE="--since 2020-01-01T00:00:00Z --until 2100-01-01T00:00:00Z"
 expect_eq "STATUS-2 the count reads the status the verb wrote: status-writes=1, in the total, beside the other kinds" \
-  "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=1 · second-regressions=0 · adoptions=0 · fixed=0 · unplaced=0" \
+  "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=1 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" \
   "$(ww_hh "$RS1" $SS_WIDE)"
 ww_poke "$RS1" matrix-set AC-1.1 status=discharged >/dev/null; SS_RC2=$?
 expect_eq "STATUS-3 the same call again restates the cell: it exits 0 and writes no second line" "0|1" "$SS_RC2|$(ss_ms "$RS1")"
@@ -1214,11 +1214,11 @@ ss_line() { printf 'line/v1|ev=matrix-set|ac=%s|cells=%s|by=fixture|at=%s\n' "$1
   ss_line AC-1.3 status 2026-10-20T10:59:00Z; ss_line AC-1.4 status 2026-10-20T13:01:00Z
   ss_line AC-1.5 evidence 2026-10-20T12:10:00Z; } > "$(ll_rec "$RS2")"
 expect_eq "STATUS-6 two status lines inside the window count; one before it, one after it and an evidence-only one inside do not, and none is unplaced" \
-  "hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=2 · second-regressions=0 · adoptions=0 · fixed=0 · unplaced=0" \
+  "hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=2 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" \
   "$(ww_hh "$RS2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
 ss_line AC-1.6 status not-a-time >> "$(ll_rec "$RS2")"
 expect_contains "STATUS-6a a status line whose time cannot be placed is not counted and says so in unplaced=" \
-  "status-writes=2 · second-regressions=0 · adoptions=0 · fixed=0 · unplaced=1" "$(ww_hh "$RS2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
+  "status-writes=2 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=1" "$(ww_hh "$RS2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
 expect_contains "STATUS-6b …and with no window at all every status line counts, the evidence-only one still not" "status-writes=5 · second-regressions=0" "$(ww_hh "$RS2")"
 
 # (s3) a task write is counted. `task=` is the key that defers a pending row to its task's step (`matrix_owing_step`), so a
@@ -1238,7 +1238,7 @@ RS3="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RS3")")"
 { ss_line AC-1.1 task 2026-10-20T12:00:00Z; ss_line AC-1.2 evidence 2026-10-20T12:10:00Z
   ss_line AC-1.3 status,task 2026-10-20T12:30:00Z; ss_line AC-1.4 task 2026-10-20T10:59:00Z; } > "$(ll_rec "$RS3")"
 expect_eq "STATUS-9 a task line inside the window counts, a status,task line too; an evidence-only line inside it and a task line before it do not" \
-  "hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=2 · second-regressions=0 · adoptions=0 · fixed=0 · unplaced=0" \
+  "hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=2 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" \
   "$(ww_hh "$RS3" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
 
 # ---------------------------------------------------------------------------
@@ -1419,7 +1419,7 @@ expect_eq "(k3) the part holds each stated sentence, unescaped, in the order reg
 expect_eq "(k4) the part keeps its place before The landing numbers" "### The work|### Known limits|### The landing numbers" "$(kl_heads "$RK")"
 expect_contains "(k5) the older entry's part is untouched" "- an older limit" "$(kl_old "$RK")"
 expect_contains "(k6) the landing record names the commit as the row's render" \
-  "line/v1|ev=doc|row=T3|part=known-limits|commit=$KL_T|branch=wave/x|at=" "$(ll_ev "$RK" doc)"
+  "line/v1|ev=doc|row=T3|part=known-limits|commit=$KL_T|branch=wave/x|tree=$(cd "$RK" && pwd -P)|at=" "$(ll_ev "$RK" doc)"
 expect_eq "(k7) the checkout holding the branch is at the commit" "$KL_T" "$(git -C "$RK" rev-parse HEAD)"
 ww_poke "$RK" known-limits-part T3 >/dev/null; KL_RC=$?
 expect_eq "(k8) a second render finds the part listed: exit 0, no commit" "0|$KL_T" "$KL_RC|$(kl_tip "$RK")"
@@ -1438,6 +1438,35 @@ ww_sdlc "$RK" "$(kl_lib proof_finding_lines record/wave-x/critic.md "$(printf '4
 KL_OUT="$(ww_poke "$RK" known-limits-part T3)"; KL_RC=$?
 expect_eq "(k11) a deferral with no stated sentence is refused, the branch unmoved" "1|$KL_T" "$([ "$KL_RC" -ne 0 ] && echo 1)|$(kl_tip "$RK")"
 expect_contains "(k11b) …naming the finding and the verb that states it" "finding-stated record/wave-x/critic.md#4" "$KL_OUT"
+
+# ---------------------------------------------------------------------------
+section "§HEALTH: a landing's settlement rewrites the plan's stack-health: through the one rendering, and it stays red"
+# fails-when: the settlement skips the rewrite, so owed= still names a suite a landing greened; or a landing turns it green.
+# THE WORLD. The working branch's head F carries a whole run's proof that left a.test.sh and b.test.sh red, and the
+# matrix head's stack-health: as proof-add wrote it. T1 lands on a.test.sh through ready, its run green.
+hl_lib() { ( . "$REPO/payload/scripts/lib/roots.sh" >/dev/null 2>&1; . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1 && "$@" ) 2>/dev/null; }
+hl_sh() { awk '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 } m && index($0, "stack-health:") == 1' "$1"; }   # <plan>
+HL="$(ll_world)"; HLP="$(ll_plan "$HL")"; HL_F="$(ll_head "$HL")"
+mkdir -p "$HL/.bionic/docs/record/wave-x"
+printf 'head=%s dirty=0\nGating: 3 passed, 2 failed\nFailed:\n    - a.test.sh\n    - b.test.sh\nrc=1\n' "$HL_F" > "$HL/.bionic/docs/record/wave-x/whole.log"
+HL_F="$HL_F" awk '{ print } /^- T2: active$/ { print "proved: kind=regression head=" ENVIRON["HL_F"] " at=2026-10-04T01:00:00Z evidence=record/wave-x/whole.log owed=a.test.sh,b.test.sh run=2026-10-04T00:50:00Z head=" ENVIRON["HL_F"] " rc=1" }
+  END { print ""; print "## Verification Matrix"; print ""
+        print "stack-health: red head=" ENVIRON["HL_F"] " pass=3 total=5 owed=a.test.sh,b.test.sh evidence=record/wave-x/whole.log"; print ""
+        print "| AC | tier | status | evidence | auditor |"; print "|---|---|---|---|---|"; print "| AC-1.1 | T2 | pending | — | — |" }' \
+  "$HLP" > "$HLP.n" && mv "$HLP.n" "$HLP"
+expect_eq "(hl0) precondition: before the landing the rendering is red at F, both suites owed, nothing closed, and the plan's line reads the same" \
+  "red head=$HL_F pass=3 total=5 owed=a.test.sh,b.test.sh evidence=record/wave-x/whole.log|stack-health: red head=$HL_F pass=3 total=5 owed=a.test.sh,b.test.sh evidence=record/wave-x/whole.log" \
+  "$(hl_lib proof_health_line "$HLP" "$HL")|$(hl_sh "$HLP")"
+ll_launch "$HL" T1 a.test.sh
+ll_verb "$HL" T1
+expect_eq "(hl1) T1 lands through ready on a.test.sh, green" "0" "$LL_RC"
+[ "$LL_RC" = 0 ] || printf '      ready said: %s\n' "$LL_OUT" | head -20
+expect_contains "(hl1b) …the landing record holds its green verdict for a.test.sh, the close the judge reads" "|suite=a.test.sh|result=green|" \
+  "$(ll_ev "$HL" verdict | /usr/bin/grep '|row=T1|')"
+expect_eq "(hl2) AC-5.3 after the settlement the plan's stack-health: still reads red at F, owed= drops a.test.sh, closed= names it" \
+  "stack-health: red head=$HL_F pass=3 total=5 owed=b.test.sh closed=a.test.sh evidence=record/wave-x/whole.log" "$(hl_sh "$HLP")"
+expect_eq "(hl2b) …one stack-health: line, the rendering's own" "1|$(hl_lib proof_health_line "$HLP" "$HL")" \
+  "$(hl_sh "$HLP" | awk 'END { print NR }')|$(hl_sh "$HLP" | sed 's/^stack-health: //')"
 
 # ---------------------------------------------------------------------------
 finish

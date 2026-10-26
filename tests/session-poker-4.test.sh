@@ -1,15 +1,13 @@
 #!/bin/bash
 # Tests for hooks/session-poker.sh — shard 4 of 4: §SEV to the end.
 #
-# THE SUITE IS FOUR SHARDS (wave-30 T2; design-ledger Δ7, D8). Its governing design, its
-# hermetic posture and its clock discipline are written once, in tests/session-poker.test.sh's
-# header; the sandbox, the pins and the shared fixture builders are
+# THE SUITE IS FOUR SHARDS. Its governing design, hermetic posture and clock discipline are written once, in
+# tests/session-poker.test.sh's header; the sandbox, the pins and the shared fixture builders are
 # tests/session-poker.prelude.sh, sourced below after the framework and the POKER seam.
 #
-# SPLIT WHERE NO FIXTURE CROSSES. §SEV builds the repository nine later sections read:
-# §RC-DEFER, §CHECK-GONE, §MOVE, §REPORT-RTL, §REPORT-KEY, §PASS-KEY, §PASS-MOVED, §MOVE-PASTED and
-# §FINAL-RATING. The sections between them export the config and home directories the
-# next ones run under, so this shard keeps them all, in order, to the end.
+# SPLIT WHERE NO FIXTURE CROSSES. §SEV builds the repository nine later sections read (§RC-DEFER, §CHECK-GONE, §MOVE,
+# §REPORT-RTL, §REPORT-KEY, §PASS-KEY, §PASS-MOVED, §MOVE-PASTED, §FINAL-RATING); the sections between export the
+# config and home directories the next run under, so this shard keeps them all, in order.
 #
 # Usage: bash tests/session-poker-4.test.sh
 
@@ -50,22 +48,15 @@ S46_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
 section "§SEV §FACT-rate §FACT-table §FACT-derive §FACT-shown §FACT-old §CUR8-sev: a reading pushed the severity scale carries each finding's severity and reach, and the tool derives the priority and the verdict (wave-28 T15; REQ-8 AC-8.1, AC-8.3, AC-8.4, AC-8.5, AC-8.6, AC-8.8; D19)"
 # ============================================================
 #
-# When the reader's roster row carries `severity` in `pushed=` (the context files the recorder
-# pushed at start), `proof-add review <record> --question <q> --reader <name>` requires the
-# record's `findings: <n>`, that many `finding: <n> <S1-S4> <on|off> <path>:<line>|- <title>`
-# lines, and for each finding the table sends to fix a `<path>:<line>` with a `shown: <n> <command>`
-# line. A READER'S RATING IS FINAL (wave-31 T32; D6, REQ-6): an `unsure: <n> <what>` line is an
-# ordinary line of the record, read by nothing, so it neither shows a fix nor owes a check. The
-# result is derived (a finding to fix gives fail, any other finding flag, none pass) and a `result:`
-# that differs is refused, as is a written `priority:` the table does not give. Registration writes
-# `deferred:` for each finding the table defers inside `## SDLC State`, after the proof line, and no
-# `check:` line. A reader with no `severity` push registers as 1.12.0 did.
+# With `severity` in the reader row's `pushed=`, `proof-add review <record> --question <q> --reader <name>` requires
+# `findings: <n>`, that many `finding: <n> <S1-S4> <on|off> <path>:<line>|- <title>` lines, and a `<path>:<line>` with
+# a `shown: <n> <command>` line for each finding the table sends to fix. A READER'S RATING IS FINAL: an `unsure:` line
+# is read by nothing. The result is derived (a fix gives fail, any other finding flag, none pass); a differing
+# `result:` or a `priority:` the table does not give is refused. Registration writes `deferred:` per deferred finding
+# after the proof line, and no `check:` line. A reader with no `severity` push registers as 1.12.0 did.
 #
-# FIXTURE FIDELITY. §56's shape: a plan bound to this session, its working branch checked out in a
-# linked worktree, real commits, and roster rows from the production writer (`roster_row_fixture`)
-# with `questions=` and `pushed=` appended by hand. `pushed=` is the Interfaces table's key, which
-# row T16 teaches the recorder to write; the verb reads it off the line by key, as it reads
-# `questions=` (A-orch-9).
+# FIXTURE FIDELITY. §56's shape: a bound plan, its working branch in a linked worktree, real commits, roster rows from
+# the production writer with `questions=` and `pushed=` appended, read off the line by key.
 SEV_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 SEV_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
 RSEV="$(make_repo sev-fact)"; ( cd "$RSEV" && git commit -q --allow-empty -m init )
@@ -343,9 +334,8 @@ sev_fact() {  # <kind> <question> <scope>
     _ "$SEV_LIB" "$1" "$SEV_C1" "record/wave-01-fixture/planted-$2-$3.md" "$2" "$3")"
 }
 sev_cur() { sed "s/^current: .*/current: $1/" "$PSEV" > "$PSEV.tmp" && mv "$PSEV.tmp" "$PSEV"; }
-# The advance to 8 asks a ruling of every matrix row, and a row with no auditor verdict is unruled. A person rules it by
-# the auditor's CONFIRMED in its cell (a waiver or a T4 row's attributed confirmation are the other two ways); the
-# fixture's rows carry none, so the steps that expect the advance to be admitted rule them first.
+# The advance to 8 asks a ruling of every matrix row; the fixture's rows carry none, so the steps that expect it admitted
+# rule them first, by the auditor's CONFIRMED in each cell (a waiver or an attributed confirmation also rule a row).
 sp4_rule_rows() {  # <plan> -> every matrix row's auditor cell reads CONFIRMED
   sed -E '/^\| AC-/ s/[|][^|]*[|]$/| CONFIRMED |/' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
 }
@@ -361,12 +351,10 @@ poke "$RSEV" current 8
 s42_unchanged "SEV-cur §CUR8-sev AC-8.5 the newest adversarial fact holds a finding to fix: current 8" 1 "$PSEV"
 expect_contains "SEV-cur2 …naming that reading failing" \
   "$(printf 'review\tadversarial\tbionic:critic\tpiece\tfailing\trecord/wave-01-fixture/c-fix.md')" "$OUT"
-# ---------- §ASK-WAIVE (T35; AC-2.2): a failing question is the person's to waive, and opens one item ----------
-# A failing reading leaves the person the call: fix it or waive the question. Its registration opens
-# `waive:<question>`, the key the waive verb closes (proof-add); a refusal on it keeps that one item; a
-# second refusal opens nothing new; the waive verb closes it; a refusal after the waiver is taken back
-# opens it again; and once the question holds again (a passing reading over the fix), current 8 closes
-# what is left.
+# ---------- §ASK-WAIVE: a failing question is the person's to waive, and opens one item ----------
+# A failing reading's registration opens `waive:<question>`, the key the waive verb closes. A refusal keeps its one open
+# round and a second opens nothing; the waive verb closes it; a refusal after the waiver is taken back opens a new round;
+# once a passing reading holds the question, current 8 closes what is left. The sections above left closed rounds.
 sev_owed() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && owed_list' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
 sev_store() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && cat "$(owed_file)"' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
 SEV_WKEYS="$(sev_owed | cut -f1)"
@@ -375,16 +363,15 @@ expect_contains "AW-1 T35 AC-2.2 the refusal on a failing question opens waive:<
 expect_absent "AW-1a …and none for the questions that hold (same reader)" "waive:evidence" "$SEV_WKEYS"
 expect_contains "AW-1b …the item the first failing reading's registration opened, which the refusal keeps" \
   "proof-add: the adversarial review record/wave-01-fixture/" "$(sev_owed | awk -F'\t' '$1 == "waive:adversarial" { print $4 }')"
-poke "$RSEV" current 8
-expect_eq "AW-2 a second refusal on the same failing question opens nothing new" "1|1" \
-  "$RC|$(sev_store | /usr/bin/grep -c '|key=waive:adversarial|')"
+SEV_AW="$(sev_store | /usr/bin/grep "|key=waive:adversarial|")"; poke "$RSEV" current 8
+expect_eq "AW-2 a second refusal on the same failing question opens nothing new: one open round, the key's rounds unchanged" "1|1|same" \
+  "$RC|$(sev_store | /usr/bin/grep -c '|key=waive:adversarial|state=open|')|$([ "$(sev_store | /usr/bin/grep '|key=waive:adversarial|')" = "$SEV_AW" ] && echo same)"
 cp "$PSEV" "$TMPROOT/sev-before-waive.md"
 poke "$RSEV" waive adversarial 'I waive the adversarial reading for now'
 expect_eq "AW-3 the waive verb records the user's reply (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "AW-3a …and closes the item it answers" "|key=waive:adversarial|state=closed|by=waive|" "$(sev_store)"
-# THE MUTANT (wave-34 T5; REQ-4 AC-4.5): the opener doctored to open nothing, in a copy of the plugin (hooks/ beside
-# scripts/, so the copy's loader finds the copy's library), turns AW-4 red: the same refusal opens no item.
+# The opener doctored to open nothing, in a plugin copy whose loader finds its own library, turns AW-4 red.
 cp "$TMPROOT/sev-before-waive.md" "$PSEV"
 AWM="$TMPROOT/aw-mutant"; mkdir -p "$AWM/hooks"
 cp -R "$BIONIC_HOOKS_DIR/." "$AWM/hooks/"; cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$AWM/scripts"
@@ -432,16 +419,14 @@ POKE_BOUND="$SEV_BOUND_WAS"
 section "§DEBT-PARSE §DEBT-LEDGER §DEBT-ADVISORY (the verb half): a debt: line is a flag-class finding the reader names by kind and concept, and the run's ledger holds one line per item (wave-30 T22; REQ-11 AC-11.1, AC-11.2, AC-11.3; D2, P2; A-orch-8)"
 # ============================================================
 #
-# severity.md (T4) writes the line `debt: <kind> <concept> <path>:<line>[, <path>:<line>…]`, flush
-# left, beside the `finding:` lines and not counted in `findings:`. lib/proof.sh `proof_findings` reads
-# it as a row of its own, `debt<TAB><kind><TAB><concept><TAB><sites><TAB>burn`, which the derived result
-# reads as flag-class; a debt line carrying a severity or a reach word, or a kind outside the debt
-# table, is refused, naming the line. `session-poker.sh debt` keeps `record/<run>/debt.md`: a header,
-# then `concept | kind | sites | raised-by <record> | touches N | <burned <row>|—>` per item.
+# severity.md writes `debt: <kind> <concept> <path>:<line>[, <path>:<line>…]` flush left beside the `finding:` lines,
+# uncounted in `findings:`. lib/proof.sh `proof_findings` reads it as `debt<TAB><kind><TAB><concept><TAB><sites>
+# <TAB>burn`, flag-class; one carrying a severity or reach word, or a kind outside the debt table, is refused, naming
+# the line. `session-poker.sh debt` keeps `record/<run>/debt.md`: a header, then `concept | kind | sites | raised-by
+# <record> | touches N | <burned <row>|—>` per item.
 #
-# FIXTURE FIDELITY. The parser rows run the library §SEV runs (`SEV_LIB`) against the shipped
-# structure checks file (`SEV_CK`); the ledger rows run the real verb in §SEV's bound repository and
-# read the ledger file it wrote.
+# FIXTURE FIDELITY. The parser rows run §SEV's library (`SEV_LIB`) on the shipped structure checks file (`SEV_CK`); the
+# ledger rows run the real verb in §SEV's bound repository and read the ledger it wrote.
 dbt_read() {  # <lib> <record> -> proof_reading's answer and exit, the scale pushed (adversarial)
   bash -c '. "$1"; proof_reading "$2" adversarial "" 1; echo " rc=$?"' _ "$1" "$2" 2>/dev/null
 }
@@ -580,11 +565,9 @@ expect_eq "DEBT-A7 debt adopt with no continuation is a usage error (exit 2)" "2
 rm -f "$DBT_LEDGER"
 
 # ---------- §DEBT (wave-36 T13; D13, REQ-7 AC-7.2, AC-7.3, AC-7.8; C24, C25, A-orch-1, A-orch-2) ----------
-# `debt add` reads any record carrying grammar-true `debt:` lines, a `reviewed:` line no longer required:
-# a writer's or the orchestrator's `assumptions.md` hole line reaches debt.md by verb, never by hand
-# (AC-7.2). Each line it would write is held to the one debt-line grammar, lib/debt.sh `debt_line_ok`,
-# before anything is written. `debt adopt` with no plan named and no plan bound refuses naming `bind`
-# and writes nothing: it never takes the newest plan by mtime, a closed predecessor's (AC-7.3).
+# `debt add` reads any record carrying grammar-true `debt:` lines, no `reviewed:` line required, so an `assumptions.md`
+# hole line reaches debt.md by verb, never by hand; each line is held to lib/debt.sh `debt_line_ok` before any write.
+# `debt adopt` with no plan named or bound refuses naming `bind` and writes nothing, never taking the newest by mtime.
 # fails-when: a hole line never reaches debt.md; the unbound adopt writes the predecessor's ledger.
 DBT_ASM="$SEV_DIR/assumptions.md"
 printf '%s\n' "# assumptions — wave-01-fixture" "" \
@@ -636,12 +619,10 @@ expect_eq "DEBT-U2 control: the same adopt naming the plan writes that plan's le
 section "§LINE-TELL: the tick tells each standing red and each stalled entry once, with its logs (wave-28 T5; REQ-9 AC-9.2, AC-9.3; D8)"
 # ============================================================
 #
-# `ready` appends `standing` when a red also fails at the accepted head (the branch's, not a row's)
-# and `stalled` when an entry's runs twice gave no verdict. The tick reads both off the bound plan's
-# landing record and prints each as a note, once: a second tick over the same record says nothing of
-# them, and a new event is told by the next tick.
-# FIXTURE FIDELITY: §60's repository and bound plan (s60_world); the events are PLANTED in the
-# Interfaces table's `line/v1` shape, which lib/line.sh writes.
+# `ready` appends `standing` when a red also fails at the accepted head (the branch's, not a row's) and `stalled` when
+# an entry's runs twice gave no verdict. The tick prints each off the bound plan's landing record as a note, once; a
+# new event is told by the next tick. FIXTURE FIDELITY: §60's repository and bound plan (s60_world); the events are
+# PLANTED in the Interfaces table's `line/v1` shape, which lib/line.sh writes.
 LT_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 s60_world lt-tell @A whole
 LT_H1="$(printf 'a%.0s' $(seq 40))"; LT_H2="$(printf 'b%.0s' $(seq 40))"
@@ -660,13 +641,11 @@ POKE_BOUND="$LT_BOUND_WAS"
 section "§RC-DEFER §RC-STATED §RC-PARSE: a deferral is held to its debts, the stated sentence and the release check's list of them (wave-28 T17; REQ-8 AC-8.7; D21)"
 # ============================================================
 #
-# `finding-stated <record>#<n> '<sentence>'` stores a deferred finding's one changelog sentence on its
-# `deferred:` line, as ` stated="<sentence>"`, the last field, through the plan transaction. `release-check`
-# prints `deferral <record>#<n>: stated` when the working head's CHANGELOG.md holds the sentence (white
-# space folded, so a wrapped line matches), else `unstated`, and its exit is the check's own. The rows
-# run on §SEV's fixture, whose plan holds deferrals the real verb registered, in its working branch's
-# worktree, which is where release-check reads the changelog. One deferral's sentence is made of the
-# words the plan's own parsers read, and every row after it runs with that line in the plan (§RC-PARSE).
+# `finding-stated <record>#<n> '<sentence>'` stores a deferred finding's changelog sentence on its `deferred:` line as
+# the last field ` stated="<sentence>"`, through the plan transaction. `release-check` prints `deferral <record>#<n>:
+# stated` when the working head's CHANGELOG.md holds the sentence (white space folded), else `unstated`, its exit the
+# check's own. The rows run on §SEV's fixture in its working branch's worktree, where release-check reads the changelog.
+# One deferral's sentence is made of the words the plan's own parsers read, and every row after it keeps it (§RC-PARSE).
 RD_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RD_ID1="record/wave-01-fixture/t-S2-off.md#1"
 RD_ID2="record/wave-01-fixture/t-S3-on.md#1"
@@ -882,9 +861,9 @@ poke "$RVG" proof-add review record/wave-01-fixture/past-waiver.md --question ad
 expect_eq "VG-2b AC-20.2 a reading of A..C registers on the waiver at A, with no reading before it (exit 0)" "0|1" \
   "$RC|$(s46_proved "$PVG" | /usr/bin/grep -c "^proved: kind=review head=$VG_C .* evidence=record/wave-01-fixture/past-waiver.md question=adversarial ")"
 
-# ---------- §CUR7-COVERED: an approval and a waiver at an earlier head hold over the prose landed after them ----------
-# The plan is put in the order (a whole-run row at Step 5, a release row at 7, an open integrate row reading the
-# release); the user approves the release at C2 and waives the readings there, then two prose commits land.
+# ---------- §CUR7-COVERED: prose landed past the whole run is covered, not green ----------
+# The plan holds a whole-run row, a release row and an open integrate row reading the release; the user approves the
+# release at C2 and waives there, then two prose commits land: covered, not green, until the person's word or a new pass.
 VG_C2="$(s57_commit "$VG_WT" lib/b.sh C2)"
 printf 'Gating: 3 passed, 0 failed\n' | regression_fixture "$PVG" "$VG_DIR/whole-c2.log" "$VG_C2" 0 0
 poke "$RVG" proof-add regression record/wave-01-fixture/whole-c2.log
@@ -898,13 +877,17 @@ expect_eq "VG-5 the plan is in the order, and the user approves the release at C
   "$RC|$(bash -c '. "$1/units.sh" && units_order "$2"' _ "${S46_LIB%/*}" "$PVG")|$(bash -c '. "$1" && proof_approved_head "$2" release' _ "$S46_LIB" "$PVG")"
 s57_commit "$VG_WT" .bionic/docs/record/wave-01-fixture/notes.md P1 >/dev/null
 s57_commit "$VG_WT" README.md P2 >/dev/null
-# The Step 7 gate asks for a whole matrix this fixture does not model, so the judge is asked at the plan's Step 7
-# through `current 8 --check`, which asks the facts and the approved head at the working head.
+# The fixture models no whole matrix, so the judge is asked at Step 7 through `current 8 --check`, at the working head.
 sed 's/^current: .*/current: 7/' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
 sp4_rule_rows "$PVG"
 poke "$RVG" current 8 --check
-expect_eq "VG-5b AC-20.5 the approval and the waivers at C2, two prose commits after: current 8 is admitted" "0" "$RC"
-[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "VG-5b AC-20.5 the approval and the waivers at C2, two prose commits after: covered, not green, refused as regression unproved, naming the reply" "1|yes" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -q 'regression.*unproved' && printf '%s\n' "$OUT" | /usr/bin/grep -q 'reply .* on the release card' && echo yes || echo no)"
+printf '%s\n' "$OUT" | /usr/bin/grep -q 'regression.*unproved' || printf '      the verb said: %s\n' "$OUT"; vg_mu() { awk -v h="$1" '/^approved: merge-unproved /{ next } { print } /^current: / && h { print "approved: merge-unproved by chris 2026-10-26T00:00:00Z head=" h " \"merge\"" }' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"; }
+vg_mu "$(git -C "$VG_WT" rev-parse HEAD)"; poke "$RVG" current 8 --check
+expect_eq "VG-5c …and with the person's merge-unproved word at the working head under ## SDLC State: admitted" "0" "$RC"
+vg_mu "$VG_C2"; poke "$RVG" current 8 --check
+expect_eq "VG-5d …the same word at C2's head, not the working head, leaves it refused" "1" "$RC"; vg_mu ""
 s57_commit "$VG_WT" lib/b.sh C3 >/dev/null
 poke "$RVG" current 8 --check
 
@@ -1435,19 +1418,15 @@ expect_eq "LIVE-2d …and the row is still active" "active" "$(lv_cell T12)"
 # ============================================================
 section "§VERDICTS §DISCHARGE §STACK: the critic's verdicts and the regression's health reach the matrix by their verbs"
 # ============================================================
-# At single rigor the critic holds the evidence question, so its record is where the row verdicts and the wave verdict
-# are learned. The record's grammar: a markdown table whose header names the columns AC and verdict (other columns
-# allowed), one row per criterion, and one flush-left `verdict: <VERDICT>[ — <coverage finding>]` line for the wave.
-# `proof-add review <record> --question evidence` on a `rigor: single` plan writes each named row's auditor cell
-# (CONFIRMED as the bare token, any other verdict as written) and the matrix head's `auditor-wave:` line in the same
-# plan write as its proof line. `discharge` refuses there, naming `proof-add review`; at double it writes as before.
-# `proof-add regression` writes the head's `stack-health:` line from the proof's head, pass and total, red with its
-# numbers when the run left suites owed, and leaves a declared `n/a:` as the plan wrote it.
-#
-# FIXTURE FIDELITY. §STEP-FIELD's shape built fresh: a plan bound to this session at Step 5, its working branch in a
-# linked worktree, real commits, the reader's row from the production writer with `questions=` appended, run lines
-# through the product's writer (regression_fixture). The matrix head's stub is the one matrix-render writes, rendered
-# here by the verb from the plan's Eval design; every write after it goes through a real verb.
+# At single rigor the critic holds the evidence question. Its record: a markdown table naming the columns AC and
+# verdict, one row per criterion, and one flush-left `verdict: <VERDICT>[ — <coverage finding>]` line for the wave.
+# `proof-add review <record> --question evidence` at `rigor: single` writes each named row's auditor cell (CONFIRMED
+# bare, other verdicts as written) and the head's `auditor-wave:` line in its proof line's plan write. `discharge`
+# refuses there, naming `proof-add review`; at double it writes as before. `proof-add regression` writes the head's
+# `stack-health:` through lib/proof.sh `proof_health_line`: green only at a pass that left nothing owed; a declared
+# `n/a:` stays.
+# FIXTURE FIDELITY. §STEP-FIELD's shape at Step 5: the reader's row from the production writer with `questions=`, run
+# lines from regression_fixture, the head's stub rendered by matrix-render; every later write goes through a real verb.
 VT_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RVT="$(make_repo verdicts)"; ( cd "$RVT" && git commit -q --allow-empty -m init )
 git -C "$RVT" config user.name "Dana Fixture"
@@ -1564,15 +1543,25 @@ poke "$RVT" discharge AC-1.3
 expect_eq "VT-11 …on a double-rigor plan it writes the cell as before (exit 0)" "0|CONFIRMED" "$RC|$(vt_cell AC-1.3)"
 vt_rigor single
 
-# ---------- §STACK: the recorded regression proof writes stack-health: over the rendered stub ----------
-vt_sh_line() {  # <green|red> <head> <pass> <total> <evidence> [<owed>] -> the line the proof writes
-  printf 'stack-health: %s head=%s pass=%s total=%s%s evidence=%s' "$1" "$2" "$3" "$4" "${6:+ owed=$6}" "$5"
+# ---------- §STACK: the health line is the judge's rendering, written by one function ----------
+# The grammar: `green head=<F>` only when the whole run at F left nothing owed; otherwise `red head=<F> … owed=<the
+# suites still owed> [closed=<the suites later green landings closed>]`. A landing never turns the line green: green
+# means the full pass ran green at that head, so a red pass whose suites were all closed still reads red, owed= empty.
+vt_sh_line() {  # <green|red> <head> <pass> <total> <evidence> [<owed>] [<closed>] -> the line the function renders
+  local o=""; [ "$1" = green ] || o=" owed=${6:-}${7:+ closed=$7}"
+  printf 'stack-health: %s head=%s pass=%s total=%s%s evidence=%s' "$1" "$2" "$3" "$4" "$o" "$5"
 }
+vt_health() {  # -> lib/proof.sh proof_health_line on the fixture plan, as `stack-health: <value>`
+  printf 'stack-health: %s' "$(bash -c '. "$1/roots.sh" >/dev/null 2>&1; . "$1/proof.sh" >/dev/null 2>&1 && proof_health_line "$2" "$3"' \
+    _ "${S46_LIB%/*}" "$PVT" "$RVT")"
+}
+expect_eq "VT-12a §STACK AC-5.2 a plan with no regression proof renders pending" "stack-health: pending" "$(vt_health)"
 VT_C="$(s57_commit "$VT_WT" lib/b.sh C)"
 printf 'Gating: 2 passed, 1 failed\nFailed:\n    - c.test.sh\n' | regression_fixture "$PVT" "$VT_DIR/whole-red.log" "$VT_C" 0 1
 poke "$RVT" proof-add regression record/wave-01-fixture/whole-red.log
-expect_eq "VT-12 §STACK AC-7.1 a red regression proof (exit 0) writes stack-health: red with its head, pass and total, over the stub" \
+expect_eq "VT-12 §STACK AC-7.1 a red regression proof (exit 0) writes stack-health: red, its pass having left c.test.sh owed, with its head, pass and total, over the stub" \
   "0|$(vt_sh_line red "$VT_C" 2 3 record/wave-01-fixture/whole-red.log c.test.sh)" "$RC|$(vt_head stack-health)"
+expect_eq "VT-12b …the line proof-add wrote is the function's rendering" "$(vt_head stack-health)" "$(vt_health)"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 VT_D="$(s57_commit "$VT_WT" lib/c.sh D)"
 printf 'Gating: 3 passed, 0 failed\n' | regression_fixture "$PVT" "$VT_DIR/whole-green.log" "$VT_D" 0 0
@@ -1588,6 +1577,333 @@ poke "$RVT" proof-add regression record/wave-01-fixture/whole-na.log
 expect_eq "VT-14 a declared stack-health: n/a: is left as the plan wrote it (the proof registers, exit 0)" \
   "0|stack-health: n/a: no long-running serve|1" \
   "$RC|$(vt_head stack-health)|$(s46_proved "$PVT" | /usr/bin/grep -c "^proved: kind=regression head=$VT_E ")"
+expect_eq "VT-15 AC-5.2 the function renders green at the head of a pass that left nothing owed" \
+  "$(vt_sh_line green "$VT_E" 3 3 record/wave-01-fixture/whole-na.log)" "$(vt_health)"
+# A red pass at G owing c.test.sh, then a landing H whose run greens c.test.sh: the judge covers H, the line stays red.
+VT_G="$(s57_commit "$VT_WT" lib/e.sh G)"
+printf 'Gating: 2 passed, 1 failed\nFailed:\n    - c.test.sh\n' | regression_fixture "$PVT" "$VT_DIR/whole-red2.log" "$VT_G" 0 1
+poke "$RVT" proof-add regression record/wave-01-fixture/whole-red2.log
+expect_eq "VT-16 a red proof at G (exit 0): before any landing the function renders red, c.test.sh owed and nothing closed" \
+  "0|$(vt_sh_line red "$VT_G" 2 3 record/wave-01-fixture/whole-red2.log c.test.sh)" "$RC|$(vt_health)"
+VT_H="$(s57_commit "$VT_WT" lib/f.sh H)"
+bash -c '. "$1/line.sh" >/dev/null 2>&1 && line_event "$2" verdict row=T2 "commit=$3" suite=c.test.sh result=green log=-' \
+  _ "${S46_LIB%/*}" "$PVT" "$VT_H"
+expect_eq "VT-17 precondition: the judge covers H, the landing's green having closed the suite G owed" "covered" \
+  "$(bash -c '. "$1/roots.sh" >/dev/null 2>&1; . "$1/proof.sh" >/dev/null 2>&1 && proof_state "$2" "$3"' _ "${S46_LIB%/*}" "$PVT" "$RVT" | cut -f1)"
+expect_eq "VT-17b AC-5.2 …and the function still renders red at G, owed= empty and closed= naming the suite the landing closed" \
+  "$(vt_sh_line red "$VT_G" 2 3 record/wave-01-fixture/whole-red2.log "" c.test.sh)" "$(vt_health)"
 POKE_BOUND="$VT_BOUND_WAS"
+
+# ============================================================
+section "§STARTER: the tick starts the whole run itself when nothing is ready, no writer is open and the head is past the last regression proof"
+# ============================================================
+# The tick starts `regression-run --starter tick` detached through booked.sh as roster object `regression@<h8>`, whose
+# one suite is run.sh, never waiting; the proof lands through proof-add regression. A landing past it moves the head, so
+# the next tick starts again. A live object guards against a second start; a run the gate did not admit (75) is told as
+# waiting and started again.
+# FIXTURE FIDELITY: §VERDICTS's shape at Step 4, with a regression proof at an older head from proof-add over a run line
+# from regression_fixture. The runner is the worktree's committed tests/run.sh stub: it holds while a hold file stands,
+# exits 75 with no verdict while a full file stands, else reports a green whole run. Everything else is real, and the
+# writer row is mkrow's, closed by the real ack.
+# fails-when: the quiet condition inverted; the head compared to anything but the last regression proof's; proof-add
+# dropped from the detached call; a live object not stopping a second start; a 75 not told and not started again.
+ST_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RST="$(make_repo starter)"; ( cd "$RST" && git commit -q --allow-empty -m init )
+git -C "$RST" config user.name "Dana Fixture"
+ST_CTL="$TMPROOT/starter-ctl"; mkdir -p "$ST_CTL"
+mkdir -p "$RST/tests"
+cat > "$RST/tests/run.sh" <<RUNNER
+#!/bin/bash
+# The fixture's whole run: holds while the hold file stands, exits 75 with no verdict while the full file stands.
+i=0; while [ -e "$ST_CTL/hold" ] && [ "\$i" -lt 600 ]; do i=\$((i + 1)); sleep 0.1; done
+[ ! -e "$ST_CTL/full" ] || exit 75
+printf 'Gating: 1 passed, 0 failed\n'
+RUNNER
+( cd "$RST" && git add tests/run.sh && git commit -qm runner ) >/dev/null 2>&1
+ST_B="$(git -C "$RST" rev-parse HEAD)"
+PST="$(s42_plan "$RST" 4 "  worktree: .worktrees/01-fixture
+  base-sha: ${ST_B:0:8}
+  branch: wave/01-fixture")"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PST" > "$PST.tmp" && mv "$PST.tmp" "$PST"
+( cd "$RST" && git add -f "$PST" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$RST/.worktrees/01-fixture" "$ST_B" ) >/dev/null 2>&1
+ST_WT="$RST/.worktrees/01-fixture"; ST_DIR="$RST/.bionic/docs/record/wave-01-fixture"; mkdir -p "$ST_DIR"
+ST_H0="$(s57_commit "$ST_WT" lib/a.sh H0)"
+printf 'Gating: 1 passed, 0 failed\n' | regression_fixture "$PST" "$ST_DIR/whole-h0.log" "$ST_H0" 0 0
+poke "$RST" proof-add regression record/wave-01-fixture/whole-h0.log
+expect_eq "ST-0 precondition: the plan holds a regression proof at H0 (proof-add exit 0)" "0|$ST_H0" "$RC|$(s46_last "$PST" regression)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+ST_H1="$(s57_commit "$ST_WT" lib/a.sh H1)"
+new_roster "$RST"
+add_row "$RST" name=w-T2 agent_id=a-w-T2 subagent_type=implementor launched_at="$(iso_ago 60)" \
+  deliverable="$RST/record/T2.md" duration=60m
+st_started() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: regression-run started ' ; }
+st_waiting() { printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: regression-run waiting — the gate has no room for a whole run$'; }
+st_objects() { /usr/bin/grep -F "|name=regression@$1|" "$(roster_of "$RST")" 2>/dev/null; }
+st_log() { printf '%s/.bionic/tmp/runs/regression_%s-run.sh%s.log' "$(cd "$RST" && pwd -P)" "$1" "${2:-}"; }   # <h8> [-<n>]
+st_starts() { st_objects "$1" | tr '|' '\n' | /usr/bin/grep '^run_log=' | sort -u | awk 'END { print NR + 0 }'; }   # <h8> -> its distinct runs
+st_until() {  # <seconds> <command>… -> rc 0 once the command holds, 1 when the time runs out
+  local n=$(( $1 * 10 )); shift
+  while [ "$n" -gt 0 ]; do "$@" && return 0; n=$((n - 1)); sleep 0.1; done
+  return 1
+}
+st_ended() { [ -s "$1.rc" ]; }
+st_rec() { bash -c '. "$1/payload/scripts/lib/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "$BIONIC_SCRIPTS_DIR" "$PST"; }
+st_runline() { /usr/bin/grep -F "|ev=run|log=$1|" "$(st_rec)" 2>/dev/null | tail -n 1; }   # <log from its root> -> its run line
+: > "$ST_CTL/hold"
+
+# Each tick below but one forgets the last digest, so it prints in full and a line it did not print is a
+# line it did not say. The one that keeps it (ST-6) is the tick whose only news is the start itself.
+# The control: T2 still writes (its row active, its writer open on the roster), so nothing starts.
+forget_digest "$RST"; poke "$RST" tick
+expect_nonempty "ST-1-pre the control tick printed its decision line (the extractor reads real output)" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker-tick/v1|')"
+expect_eq "ST-1 AC-6.1 control: with a writer row running, the tick starts nothing and the roster holds no object" \
+  "|" "$(st_started)|$(st_objects "${ST_H1:0:8}")"
+
+# Quiet: every row landed, the writer closed by its ack, the head past the proof.
+s42_builds_landed "$PST"
+awk '/^\| T5 \| 5 \| verify \|/ { sub(/\| pending \|$/, "| landed |") } { print }' "$PST" > "$PST.tmp" && mv "$PST.tmp" "$PST"
+ack_rows "$RST" w-T2
+forget_digest "$RST"; poke "$RST" tick
+expect_contains "ST-2 AC-6.1 nothing ready, no writer open, the head past the proof: the tick starts regression-run as regression@<h8>" \
+  "poker: regression-run started regression@${ST_H1:0:8} (log $(st_log "${ST_H1:0:8}"))" "$(st_started)"
+[ -n "$(st_started)" ] || printf '      the tick said: %s\n' "$OUT"
+expect_contains "ST-2b …and the roster holds the object: a run row, its one suite run.sh, a read-only role, waived as no agent" \
+  "|status=run|" "$(st_objects "${ST_H1:0:8}" | head -n 1)"
+expect_contains "ST-2c …whose budget is run.sh, so the gate's whole-run budget admits it" "|suites_allowed=run.sh|" \
+  "$(st_objects "${ST_H1:0:8}" | head -n 1)"
+expect_true "ST-2d …and booked.sh marks the run on it (run_pid=)" st_until 20 eval 'st_objects "${ST_H1:0:8}" | /usr/bin/grep -q "|run_pid="'
+expect_true "ST-2e …and the tick did not wait on it: the run is still held by the runner when the tick has returned" \
+  test ! -e "$(st_log "${ST_H1:0:8}").rc"
+
+# The guard: a live object for this head means the next tick starts nothing beside it.
+forget_digest "$RST"; poke "$RST" tick
+expect_nonempty "ST-3-pre the guard tick names the live run (the extractor reads real output)" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep "^poker: RUNNING regression@${ST_H1:0:8} run=")"
+expect_eq "ST-3 a live regression@<h8> object: the next tick starts nothing, and the roster still names one run" \
+  "|1" "$(st_started)|$(st_starts "${ST_H1:0:8}")"
+rm -f "$ST_CTL/hold"
+expect_true "ST-4-pre the detached run ends once the runner is let go" st_until 60 st_ended "$(st_log "${ST_H1:0:8}")"
+expect_eq "ST-4 AC-6.3 the started run leaves its proof in the plan through proof-add: proved: kind=regression head=<H1>" "1" \
+  "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=regression head=$ST_H1 ")"
+[ "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=regression head=$ST_H1 ")" = 1 ] || sed -n '1,40p' "$(st_log "${ST_H1:0:8}")"
+expect_contains "ST-4b …from a run whose run line names the tick as its starter" "|starter=tick|" \
+  "$(st_runline "record/wave-01-fixture/regression-run-$ST_H1.log")"
+expect_contains "ST-4c …and booked.sh's own run line for the detached run carries the command's --starter too" "|starter=tick|" \
+  "$(st_runline ".bionic/tmp/runs/regression_${ST_H1:0:8}-run.sh.log")"
+forget_digest "$RST"; poke "$RST" tick
+expect_nonempty "ST-5-pre the tick at the proved head printed its decision line" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker-tick/v1|')"
+expect_eq "ST-5 control: the head is the last proof's, so nothing starts" "" "$(st_started)"
+
+# A fix row lands past the proof: the head moved, so the next tick starts again there. The runner is full
+# first, so the run ends 75 with no verdict, and the tick after it says so and starts it again.
+: > "$ST_CTL/full"
+ST_H2="$(s57_commit "$ST_WT" lib/b.sh H2)"
+poke "$RST" tick
+expect_contains "ST-6 AC-6.2 a landing past the proof: the next tick starts again at the new head" \
+  "poker: regression-run started regression@${ST_H2:0:8} " "$(st_started)"
+expect_true "ST-6b …its run ends 75, the gate's word that nothing ran" st_until 60 st_ended "$(st_log "${ST_H2:0:8}")"
+expect_eq "ST-6c …read off its log's end" "75" "$(cat "$(st_log "${ST_H2:0:8}").rc" 2>/dev/null)"
+rm -f "$ST_CTL/full"
+forget_digest "$RST"; poke "$RST" tick
+expect_eq "ST-7 the tick after a 75 says the gate had no room, once" "1" "$(st_waiting)"
+expect_contains "ST-7b …and starts the run again at the same head, as a second attempt" \
+  "poker: regression-run started regression@${ST_H2:0:8} (log $(st_log "${ST_H2:0:8}" -2))" "$(st_started)"
+ST_LOG2="$(st_started | sed -n 's/^.*(log \(.*\))$/\1/p')"
+expect_true "ST-7c …which ends" st_until 60 st_ended "${ST_LOG2:-$TMPROOT/none}"
+expect_eq "ST-7d …with its proof at the new head" "1" "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=regression head=$ST_H2 ")"
+POKE_BOUND="$ST_BOUND_WAS"
+
+
+# ============================================================
+section "§WALK: the walk's verdicts settle the cells they confirm, through proof-add walk, never a status write"
+# ============================================================
+# The walk record carries the critic's shape, read by proof_verdicts. `proof-add walk <record>` writes, in one plan
+# write, status `discharged` and the record as evidence (cell and block key) for each CONFIRMED row no landing settled,
+# every other row as it stands, both `walk-artifact:` pointers and a `proved: kind=walk` line. It appends one `ev=walk`
+# line to the landing record, never `ev=matrix-set`, so the hand-holds fold counts no status write.
+# FIXTURE FIDELITY. §VERDICTS' shape with `walk: required`, so the head carries the gate's stub. The landing-settled row
+# is written as `line_settle` leaves it, its `ev=settled` line through the product's line_event.
+WK_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RWK="$(make_repo walk)"; ( cd "$RWK" && git commit -q --allow-empty -m init )
+git -C "$RWK" config user.name "Dana Fixture"
+WK_B="$(git -C "$RWK" rev-parse HEAD)"
+PWK="$(s42_plan "$RWK" 5 "  worktree: .worktrees/01-fixture
+  base-sha: ${WK_B:0:8}
+  branch: wave/01-fixture")"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PWK" > "$PWK.tmp" && mv "$PWK.tmp" "$PWK"
+s42_builds_landed "$PWK"
+awk '/^## Verification Matrix/ {
+       print "## Eval design\n"
+       print "| Requirement | Criterion | Approach | Eval | Fails when |"
+       print "|---|---|---|---|---|"
+       print "| REQ-1 | AC-1.1 | hermetic | `tests/a.test.sh` | a is wrong |"
+       print "| REQ-1 | AC-1.2 | hermetic | `tests/b.test.sh` | b is wrong |"
+       print "| REQ-1 | AC-1.3 | hermetic | `tests/c.test.sh` | c is wrong |\n" }
+     { print }
+     /^\| AC-1\.1 \| T2 \|/ { print "| AC-1.2 | T2 | pending | — | — |"; print "| AC-1.3 | T2 | pending | — | — |" }' \
+  "$PWK" > "$PWK.tmp" && mv "$PWK.tmp" "$PWK"
+sed -e 's/^rigor: .*/rigor: single/' -e 's/^walk: .*/walk: required/' "$PWK" > "$PWK.tmp" && mv "$PWK.tmp" "$PWK"
+( cd "$RWK" && git add -f "$PWK" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$RWK/.worktrees/01-fixture" "$WK_B" ) >/dev/null 2>&1
+WK_WT="$RWK/.worktrees/01-fixture"; WK_DIR="$RWK/.bionic/docs/record/wave-01-fixture"; mkdir -p "$WK_DIR"
+WK_A="$(s57_commit "$WK_WT" lib/a.sh A)"
+WK_C="$(s57_commit "$WK_WT" lib/c.sh C)"
+wk_row() { /usr/bin/grep -E "^\| $1 \|" "$PWK"; }   # <AC> -> its matrix table row, whole
+wk_key() {  # <AC> <key> -> the AC block's <key>: value
+  awk -v a="$1:" -v k="$2" '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 } !m { next }
+    index($0, a) == 1 { b = 1; next } b && /^[^ \t]/ { b = 0 }
+    b { t = $0; sub(/^[ \t]+/, "", t); if (index(t, k ":") == 1) { sub(/^[^:]*:[ \t]*/, "", t); print t; exit } }' "$PWK"
+}
+wk_head() { awk -v k="$1" '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 } m && index($0, k ":") == 1' "$PWK" | paste -sd';' -; }
+wk_step5() {  # -> the Step 5 block's walk-artifact: lines, trimmed, `;`-joined
+  awk '/^- Step 5:/ { s = 1; next } s && /^- / { s = 0 } s && /^[ \t]+walk-artifact:/ { t = $0; sub(/^[ \t]+/, "", t); print t }' "$PWK" | paste -sd';' -
+}
+wk_recfile() { bash -c '. "$1/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "${S46_LIB%/*}" "$PWK"; }
+wk_ev() { /usr/bin/grep -F "|ev=$1|" "$(wk_recfile)" 2>/dev/null; }   # <ev> -> its lines in the landing record
+wk_rec() {  # <name> <verdict: line or -> [<head: line or ->] [<table row>...] -> a walk record
+  local f="$WK_DIR/$1.md" v="$2" h="$3" r; shift 3
+  { printf '# walk\n\nwalker: wk-walker\n'; [ "$h" = - ] || printf '%s\n' "$h"
+    printf '\n## 1. The cards\n\nIt printed whole with rc 0.\n\n## Verdicts\n\n'
+    if [ "$#" -gt 0 ]; then printf '| AC | verdict | why |\n|---|---|---|\n'; for r in "$@"; do printf '%s\n' "$r"; done; fi
+    [ "$v" = - ] || printf '\n%s\n' "$v"
+    printf '\nwhat the walk found\n'; } > "$f"
+}
+wk_add() { poke "$RWK" proof-add walk "record/wave-01-fixture/$1.md"; }
+WK_ROWS=('| AC-1.1 | CONFIRMED | the card printed whole |' '| AC-1.2 | CONFIRMED | the continuation read the judge |'
+  '| AC-1.3 | REFUTED | the scorecard read the ledger |')
+
+poke "$RWK" matrix-render
+expect_eq "WK-0 setup: matrix-render renders the head with the walk stub (exit 0)" "0|walk-artifact: pending" "$RC|$(wk_head walk-artifact)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+# The first fixture criterion settled by a landing, as line_settle writes it: cells and block key, and the settled line.
+WK_SET_LOG="record/wave-01-fixture/T2-a.test.sh.log"; printf 'head=%s rc=0\n' "$WK_A" > "$RWK/.bionic/docs/$WK_SET_LOG"
+bash -c '. "$1/units.sh" >/dev/null 2>&1 && matrix_row_cells "$2" AC-1.1 "3=discharged" "4=$3" > "$2.c" && matrix_block_key "$2.c" AC-1.1 evidence "$3" > "$2" && rm -f "$2.c"' \
+  _ "${S46_LIB%/*}" "$PWK" "$WK_SET_LOG"
+bash -c '. "$1/line.sh" >/dev/null 2>&1 && line_event "$2" settled row=T2 "commit=$3" findings= cells=AC-1.1' _ "${S46_LIB%/*}" "$PWK" "$WK_A"
+( cd "$RWK" && git add -f "$PWK" && git commit -qm settled ) >/dev/null 2>&1
+WK_ROW11="$(wk_row AC-1.1)"; WK_ROW13="$(wk_row AC-1.3)"
+expect_eq "WK-0b precondition: AC-1.1 reads the landing's discharge and the record names it settled; AC-1.2 and AC-1.3 pending" \
+  "| AC-1.1 | T2 | discharged | $WK_SET_LOG | — ||1|pending|pending" \
+  "$WK_ROW11|$(wk_ev settled | /usr/bin/grep -c '|cells=AC-1.1|')|$(wk_row AC-1.2 | cut -d'|' -f4 | tr -d ' ')|$(wk_row AC-1.3 | cut -d'|' -f4 | tr -d ' ')"
+WK_SINCE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; sleep 1
+
+# ---------- the walk record is read by the critic's reader ----------
+wk_rec walk-notable 'verdict: CONFIRMED — the cards read the judge' -
+s42_snap "$RWK" "$PWK"; wk_add walk-notable
+s42_unchanged "WK-1 §WALK AC-8.1 a walk record with no AC | verdict table (prose sections only, wave 45's shape)" 1 "$PWK"
+expect_contains "WK-1b …refused naming the shape it needs" "the columns AC and verdict" "$OUT"
+wk_rec walk-noverdict - - "${WK_ROWS[@]}"
+wk_add walk-noverdict
+s42_unchanged "WK-2 AC-8.1 a walk record with the table and no verdict: line" 1 "$PWK"
+expect_contains "WK-2b …refused naming the verdict: line" "verdict:" "$OUT"
+
+# ---------- one write settles the confirmed cells no landing settled ----------
+wk_rec walk 'verdict: REFUTED — AC-1.3 is refuted' - "${WK_ROWS[@]}"
+wk_add walk
+expect_eq "WK-3 §WALK AC-8.1 AC-8.2 the record with the table and one verdict: line registers (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "WK-4 AC-8.2 the pending CONFIRMED row reads discharged with the walk record as its evidence, cell and block key" \
+  "| AC-1.2 | T2 | discharged | record/wave-01-fixture/walk.md | — ||record/wave-01-fixture/walk.md" \
+  "$(wk_row AC-1.2)|$(wk_key AC-1.2 evidence)"
+expect_eq "WK-5 AC-8.2 the landing-settled CONFIRMED row is the landing's: its row and its evidence key as the landing wrote them" \
+  "$WK_ROW11|$WK_SET_LOG" "$(wk_row AC-1.1)|$(wk_key AC-1.1 evidence)"
+expect_eq "WK-6 AC-8.2 the REFUTED row stays as it stood, pending" "$WK_ROW13" "$(wk_row AC-1.3)"
+expect_contains "WK-6b …(the extractor reads it: its status cell)" "| pending |" "$(wk_row AC-1.3)"
+expect_eq "WK-7 AC-8.2 the walk-artifact: pointer is written in both places: the Step 5 block and the matrix head" \
+  "walk-artifact: record/wave-01-fixture/walk.md|walk-artifact: record/wave-01-fixture/walk.md" "$(wk_step5)|$(wk_head walk-artifact)"
+expect_eq "WK-8 AC-8.2 one proved: kind=walk line at the working head, naming the record" "1" \
+  "$(s46_proved "$PWK" | /usr/bin/grep -c "^proved: kind=walk head=$WK_C at=[0-9TZ:-]* evidence=record/wave-01-fixture/walk.md$")"
+[ "$(s46_proved "$PWK" | /usr/bin/grep -c '^proved: kind=walk ')" = 1 ] || s46_proved "$PWK" | sed 's/^/      /'
+expect_eq "WK-9 AC-8.2 the landing record gains one ev=walk line, naming the record and the one row it discharged" "1" \
+  "$(wk_ev walk | /usr/bin/grep -c '|record=record/wave-01-fixture/walk.md|discharged=1|at=')"
+expect_eq "WK-9b …and no ev=matrix-set line" "0" "$(wk_ev matrix-set | awk 'END { print NR }')"
+poke "$RWK" landing-report --hand-holds --since "$WK_SINCE"
+expect_contains "WK-10 AC-8.2 the hand-holds fold over the walk's window reads no status write" "· status-writes=0 ·" "$OUT"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+
+# A second walk naming its head on a head: line: the proof names that head; the row the first walk discharged is not a
+# landing's, so a CONFIRMED verdict writes it again with the new record.
+wk_rec walk-again 'verdict: CONFIRMED — every card read the judge' "head: $WK_A" \
+  '| AC-1.2 | CONFIRMED | again |' '| AC-1.3 | CONFIRMED | refixed |'
+wk_add walk-again
+expect_eq "WK-11 a walk record's head: line is the head its proof names (exit 0)" "0|1" \
+  "$RC|$(s46_proved "$PWK" | /usr/bin/grep -c "^proved: kind=walk head=$WK_A .* evidence=record/wave-01-fixture/walk-again.md$")"
+expect_eq "WK-11b …and its CONFIRMED rows read discharged with it as their evidence" \
+  "discharged record/wave-01-fixture/walk-again.md|discharged record/wave-01-fixture/walk-again.md" \
+  "$(wk_row AC-1.2 | awk -F'|' '{ gsub(/ /, "", $4); gsub(/ /, "", $5); print $4 " " $5 }')|$(wk_row AC-1.3 | awk -F'|' '{ gsub(/ /, "", $4); gsub(/ /, "", $5); print $4 " " $5 }')"
+wk_rec walk-nohead 'verdict: CONFIRMED — fine' "head: 0123456789012345678901234567890123456789" '| AC-1.2 | CONFIRMED | — |'
+s42_snap "$RWK" "$PWK"; wk_add walk-nohead
+s42_unchanged "WK-12 a head: line naming no commit of the working branch" 1 "$PWK"
+expect_contains "WK-12b …named in the refusal" "head: 0123456789012345678901234567890123456789" "$OUT"
+# The control: a hand status write in the same window is counted, so the fold read above counts the walk's window.
+poke "$RWK" matrix-set AC-1.3 status=blocked
+poke "$RWK" landing-report --hand-holds --since "$WK_SINCE"
+expect_contains "WK-13 control: a matrix-set status write in the same window is counted (status-writes=1)" "· status-writes=1 ·" "$OUT"
+
+# ---------- the walk row's landing settles the cells, in deliver's own write ----------
+# A record row has no commit, so it lands through deliver, never ready: a verify row whose artifact is a wave's walk
+# record is registered by the landing itself. The control is the same deliver with the walk test removed in a doctored
+# copy: it lands the row and settles nothing, so the cells read here are the landing's doing.
+WK_DREL="record/wave-02-fixture/walk.md"; mkdir -p "$RWK/.bionic/docs/record/wave-02-fixture"
+awk '{ print } /^\| T5 \| 5 \| verify \|/ { print "| T6 | 5 | verify | the walk | — | T1, T2 | 30 | REQ-1 | .bionic/docs/'"$WK_DREL"' | — | — | pending |" }' \
+  "$PWK" > "$PWK.tmp" && mv "$PWK.tmp" "$PWK"
+wk_task() { s48_row "$PWK" "$1" | awk -F'|' '{ print $NF }'; }   # <row> -> its status cell
+wk_cell() { wk_row "$1" | awk -F'|' '{ gsub(/ /, "", $4); gsub(/ /, "", $5); print $4 " " $5 }'; }   # <AC> -> status evidence
+wk_rec ../wave-02-fixture/walk - - '| AC-1.3 | CONFIRMED | the scorecard read the register |'
+s42_snap "$RWK" "$PWK"; poke "$RWK" deliver T6
+s42_unchanged "WK-14 AC-8.3 deliver of the walk row whose record has no verdict: line" 1 "$PWK"
+expect_contains "WK-14b …the landing refused naming the walk record and the line it lacks" "$WK_DREL" "$OUT"
+expect_contains "WK-14c …(and the line)" "verdict:" "$OUT"
+wk_rec ../wave-02-fixture/walk 'verdict: CONFIRMED — the scorecard read the register' - '| AC-1.3 | CONFIRMED | the scorecard read the register |'
+s42_snap "$RWK" "$PWK"
+rd_mutant nowalk 's/RL_WALK="\$rel"; RL_WALK_REAL="\$real"/:/'
+expect_eq "WK-15-pre the doctored poker differs from the real one in exactly one line (the doctor took)" "1" \
+  "$(diff <(poker_text "$POKER") <(poker_text "$RD_MUT/nowalk/hooks/session-poker.sh") | /usr/bin/grep -c '^>')"
+WK_REAL_POKER="$POKER"; POKER="$RD_MUT/nowalk/hooks/session-poker.sh"
+poke "$RWK" deliver T6
+POKER="$WK_REAL_POKER"
+expect_eq "WK-15 control: with the walk test removed, deliver lands the row (exit 0) and settles nothing: AC-1.3 stays blocked, no walk proof" \
+  "0|landed|blocked record/wave-01-fixture/walk-again.md|0" "$RC|$(wk_task T6)|$(wk_cell AC-1.3)|$(s46_proved "$PWK" | /usr/bin/grep -c "evidence=$WK_DREL\$")"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+cp "$TMPROOT/s42-before" "$PWK"
+poke "$RWK" deliver T6
+expect_eq "WK-16 §WALK AC-8.3 deliver lands the walk row (exit 0) and the plan shows its CONFIRMED row discharged with the record" \
+  "0|landed|discharged $WK_DREL" "$RC|$(wk_task T6)|$(wk_cell AC-1.3)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "WK-16b …in the landing's write: the walk proof, both pointers, and one ev=walk line naming it" \
+  "1|walk-artifact: $WK_DREL|walk-artifact: $WK_DREL|1" \
+  "$(s46_proved "$PWK" | /usr/bin/grep -c "^proved: kind=walk head=$WK_C .* evidence=$WK_DREL\$")|$(wk_step5)|$(wk_head walk-artifact)|$(wk_ev walk | /usr/bin/grep -c "|record=$WK_DREL|discharged=1|")"
+POKE_BOUND="$WK_BOUND_WAS"
+
+section "§CLOSE-TASK: matrix-render names the close row as the task: of the criterion the close proves"
+# ============================================================
+# One serving row is the task. Several read pending, unless the eval names `landing-report --hand-holds`, the measure
+# the close reads last: then the one serving close row is. The plan is s42_plan's, rendered by the real verb.
+RCT="$(make_repo close-task)"; ( cd "$RCT" && git commit -q --allow-empty -m init )
+PCT="$(s42_plan "$RCT" 4)"
+ct_row() { printf '| %s | %s | %s | row %s | implementor | — | 30 | %s | %s.sh | — | — | pending |\n' "$1" "$2" "$3" "$1" "$4" "$1"; }
+CT_ROWS="$(ct_row T1 4 build REQ-1; ct_row T2 6 review REQ-1; ct_row T3 9 close REQ-1; ct_row T4 4 build AC-2.1)" awk '
+  /^\| T[125] \|/ { if (!d) print ENVIRON["CT_ROWS"]; d = 1; next }
+  /^## Verification Matrix/ { print "## Eval design\n\n| Requirement | Criterion | Approach | Eval | Fails when |\n|---|---|---|---|---|"
+    print "| REQ-1 | AC-1.1 | hermetic | `session-poker.sh landing-report --hand-holds <plan>` | a status was written by hand |"
+    print "| REQ-1 | AC-1.2 | hermetic | `tests/b.test.sh` | b is wrong |\n| REQ-2 | AC-2.1 | hermetic | `tests/c.test.sh` | c is wrong |\n" }
+  { print } /^\| AC-1\.1 \| T2 \|/ { print "| AC-1.2 | T2 | pending | — | — |\n| AC-2.1 | T2 | pending | — | — |" }' "$PCT" > "$PCT.tmp" && mv "$PCT.tmp" "$PCT"
+cp "$PCT" "$TMPROOT/ct-before"
+ct_task() {  # <AC> -> its block's task: value
+  awk -v a="$1:" '/^## Verification Matrix/ { m = 1 } m && index($0, a) == 1 { b = 1; next } b && /^[^ \t]/ { b = 0 }
+    b && /^[ \t]+task:/ { sub(/^[ \t]+task:[ \t]*/, ""); print; exit }' "$PCT"
+}
+poke "$RCT" matrix-render
+expect_eq "CT-1 §CLOSE-TASK matrix-render (exit 0) names the close row the task of the criterion whose eval is the hand-holds measure" \
+  "0|T3" "$RC|$(ct_task AC-1.1)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "CT-2 …and pending for its sibling, served by the same three rows, whose eval is not" "pending" "$(ct_task AC-1.2)"
+expect_eq "CT-3 …and the one row serving a criterion stays its task" "T4" "$(ct_task AC-2.1)"
+CT_ROWS="$(ct_row T6 9 close REQ-1)" awk '{ print } /^\| T4 \|/ { print ENVIRON["CT_ROWS"] }' "$TMPROOT/ct-before" > "$PCT"
+poke "$RCT" matrix-render
+expect_eq "CT-4 control: with two close rows serving, the hand-holds criterion reads pending, the single-row one T4 (exit 0)" \
+  "0|pending|T4" "$RC|$(ct_task AC-1.1)|$(ct_task AC-2.1)"
 
 finish

@@ -19,28 +19,17 @@ set -uo pipefail
 # ============================================================
 section "§HAND-HOLDS — wave-35 T12 (REQ-8 AC-8.1, D17): the hand-hold count is folded from the lines the escape-hatch verbs wrote"
 # ============================================================
-# `landing-report --hand-holds <plan>` adds one line to the report: the uses of the escape-hatch verbs, by kind,
-# each counted from the line its verb wrote and from nothing else. A prose line saying `by-hand` counts nothing.
-# close-out prints that line on its card and writes it into the continuation under `## Hand-holds`; it reads it
-# BEFORE the tmp wipe, because three kinds (amend, hold, extend) live on the roster and act 3 wipes the roster.
-#
-# THE SOURCES, each in the shape its writer prints (the fixture plants the shape, the roster through the one
-# production row writer, the plan's proof lines through lib/proof.sh's own line builders):
-#   by-hand        landing record      line/v1|ev=published|…|kind=hand|…            (lib/line.sh)
-#   stop-runs      landing record      line/v1|ev=stop-run|…                         (session-poker.sh stop-run; wave-36 T11, D8)
-#   declines/lifts fill ledger         fill-ledger/v1|…|state=decline| and |state=lift|   (the verbs; the Stop hook writes ok and hold)
-#   amends         roster              distinct (name, amended=<value>) of the run's plan
-#   holds          roster              distinct (name, held=<value>)
-#   extensions     roster              distinct (name, extended=<value>)
-#   waivers        plan                `waived: question=…` under ## SDLC State, and an AC block's `waiver: <who> <date> "<words>"`
-#   second-floors  plan                `proved: kind=regression` lines past the first
-# A roster row is re-written on every status change and copies `amended=`/`held=`, so a row counts once per value.
+# close-out prints the `landing-report --hand-holds` line on its card and writes it into the continuation under `## Hand-holds`,
+# reading it BEFORE the tmp wipe, because amends, holds and extensions live on the roster that act 3 wipes. Each kind is counted
+# from the line its verb wrote, the fixture plants each in its writer's shape (the roster through the one row writer, the
+# plan's proof lines through lib/proof.sh), and a prose line saying `by-hand` counts nothing. A roster row is re-written on every
+# status change and copies `amended=`/`held=`, so a row counts once per value.
 # HH_GATE: hoisted to tests/close-out.prelude.sh (a later part reads it)
 HH_C="$(printf 'd%.0s' $(seq 40))"
 # The report reads from the last build landing, the second build row's at 10:40, so the decline, the lift, the 10:00
 # amend and that row's own hand landing fall before the window, and the date-only matrix waiver's day holds that start, so it is unplaced.
-HH_WANT="hand-holds: total=6 · by-hand=0 · stop-runs=1 · declines=0 · lifts=0 · amends=1 · holds=1 · extensions=1 · waivers=1 · status-writes=0 · second-regressions=1 · adoptions=0 · fixed=0 · unplaced=1"
-HH_ALL="hand-holds: total=11 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · status-writes=0 · second-regressions=1 · adoptions=0 · fixed=0 · unplaced=0"
+HH_WANT="hand-holds: total=6 · by-hand=0 · stop-runs=1 · declines=0 · lifts=0 · amends=1 · holds=1 · extensions=1 · waivers=1 · status-writes=0 · second-regressions=1 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=1"
+HH_ALL="hand-holds: total=11 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · status-writes=0 · second-regressions=1 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0"
 # hh_report: hoisted to tests/close-out.prelude.sh (a later part reads it)
 # hh_plant <project> -> one use of every verb, and the prose that must count for nothing
 hh_plant() {
@@ -112,7 +101,7 @@ awk '/^- Step 8:/ { print "- T1: landed by-hand (kind=hand) after waived: eviden
   "$PHP/$PLAN_REL" > "$PHP/plan.b" && mv "$PHP/plan.b" "$PHP/$PLAN_REL"
 HH_PROSE="$(hh_report "$PHP" --hand-holds)"
 expect_eq "HH-4 a run whose only by-hand, stop-run, decline, lift, waiver and approval are prose counts zero in every kind" \
-  "hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0" \
+  "hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0" \
   "$(printf '%s\n' "$HH_PROSE" | grep '^hand-holds: ')"
 # the card: check prints the line, run prints it after the wipe took the roster, the continuation carries it
 run_close "$PH" check
@@ -792,5 +781,29 @@ PAK="$(mk_fixture adrs-kept)"; ad_step7 "$PAK" "$AD_ADR"; advance_to "$PAK" 6; a
 set_plan_keys "$PAK" "-" "adrs: adrs/epic-fx/adr-060-written-by-hand.md"
 ad_poke "$PAK" "$AD_SID" current 7
 expect_eq "AD-7 an adrs: line the plan carries is kept as written" "0|adrs/epic-fx/adr-060-written-by-hand.md" "$AD_RC|$(ad_adrs "$PAK/$PLAN_REL")"
+
+# ============================================================
+section "§REG: the continuation's regression line prints the full pass's state at this head from the one printer"
+# ============================================================
+# fails-when: the continuation reads the proof line alone, so over a whole run red at F whose reds two later landings
+# greened it says the whole run holds, or green, or leaves the landings since it uncounted.
+# FIXTURE FIDELITY: the run is tests/proof-at-head.test.sh's (`pah_world`, read out of that suite by name), laid on
+# this suite's own fixture; the continuation is the one `close-out.sh run` writes.
+# ANTI-VACUITY: REG-1 reads the line before REG-2 reads its state through the extractor REG-1 proved non-empty.
+REG_MISSING=""
+for _f in pah_world pah_cont_state; do
+  _b="$(awk -v n="$_f" 'index($0, n "() {") == 1 { p = 1 } p { print } p && /^}/ { exit }' "$(dirname "$0")/proof-at-head.test.sh")"
+  if [ -n "$_b" ]; then eval "$_b"; else REG_MISSING="$REG_MISSING $_f"; fi
+done
+expect_eq "REG-0 the builders were read out of tests/proof-at-head.test.sh" "" "$REG_MISSING"
+PAH_LIB="$REPO_ROOT/payload/scripts/lib"
+pah_world reg-red "notify.test.sh,rehearsal-failed-review.test.sh,shell-lint.test.sh,sitrep.test.sh" 2
+run_close_as reg-close "$PAH_P" run
+expect_eq "REG-1 close-out delivers over the run (exit 0), its continuation holding a regression line" "0|1" \
+  "$CO_RC|$(/usr/bin/grep -c 'the regression: ' "$PAH_P/$CONT_REL" 2>/dev/null)"
+expect_eq "REG-2 …which prints the whole suite red at the whole run's head, the two landings since counted, then the proof's instant and log" \
+  "red at ${PAH_F:0:8}, 2 landings before this head|yes" \
+  "$(pah_cont_state "$PAH_P/$CONT_REL")|$(/usr/bin/grep -qF "the regression: whole suite red at ${PAH_F:0:8}, 2 landings before this head (proved 2026-10-04T12:00:00Z, record/wave-01-fixture/regression-run-$PAH_F.log)" "$PAH_P/$CONT_REL" && echo yes)"
+expect_absent "REG-3 …and never says the whole run holds" "holds at" "$(/usr/bin/grep -F 'the regression: ' "$PAH_P/$CONT_REL")"
 
 finish

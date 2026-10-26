@@ -1781,6 +1781,16 @@ matrix_row_deferred() {
   [ "$2" = 9 ] && [ "$n" = 9 ] && run_open "$1"
 }
 
+# THE LIVE ROW'S EXITS. A pending or blocked row the owing-step rule no longer defers meets the evidence
+# refusals below for the key it lacks, and those refusals say which of three acts settles it: a row the walk
+# proved is written discharged with its record, a row whose eval cannot fire its fails-when is retiered up
+# with a new eval, and any other row is the user's to waive. The first two are verbs an agent runs; the third
+# is a person's word, said as such, so the refusal never leaves its reader to guess whose move it is.
+# [WALL: tests/shell-lint.test.sh]
+matrix_live_row_exit() {  # <AC> -> the repair prose of a live row's evidence refusal
+  printf '%s' "the row is live past the step that owes it: if the walk proved it, run session-poker.sh matrix-set $1 status=discharged evidence=<its record>; if its eval cannot fire, run session-poker.sh matrix-retier $1 tier=<higher> eval='<the new eval>'; otherwise needs: the user — a waiver, in their words: session-poker.sh waive-row $1 '<their words>' '<why>'."
+}
+
 # matrix_table_rows -> `<AC>\037<tier>\037<status>\037<evidence>\037<auditor>` per five-cell row of
 # `$MATRIX`, trimmed, table order: the header, the separator and a row of another width skipped.
 matrix_table_rows() {
@@ -4007,7 +4017,7 @@ matrix_is_placeholder() {
 }
 
 validate_matrix() {
-  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc deferred row_is_waived ev_abs hk hv hf ucv owed
+  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc deferred row_is_waived ev_abs hk hv hf ucv owed live_exit
 
   # Set while any row is still pending/blocked at current: 5. The
   # Step-5 validator reads it to keep the `auditor:` pointer optional
@@ -4151,23 +4161,26 @@ validate_matrix() {
       # any row is undischarged.
       :
     else
+      # A pending or blocked row reaching this loop is owed now; its evidence refusals name its exits.
+      live_exit=""
+      case "$status" in pending|blocked) live_exit="$(matrix_live_row_exit "$ac")" ;; esac
       for key in $(keys_for_tier "$tier"); do
         if ! grep -qE "^[[:space:]]*${key}[[:space:]]*:" <<< "$block_txt"; then
           block_matrix "row ${ac} has no ${key} evidence" "record it, or waive the row" \
             "matrix row '${ac}' (${tier}) is missing evidence key '${key}' in its AC block." \
-            "add '${key}: <evidence>' to the '${ac}:' block, or waive the row via the Waiver Protocol."
+            "${live_exit:-add '${key}: <evidence>' to the '${ac}:' block, or waive the row via the Waiver Protocol.}"
         fi
         val=$(echo "$block_txt" | grep -E "^[[:space:]]*${key}[[:space:]]*:" | head -1 \
               | sed -E "s/^[[:space:]]*${key}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
         if [ -z "$val" ]; then
           block_matrix "${ac}'s ${key} evidence is blank" "record it, or waive the row" \
             "matrix row '${ac}' (${tier}) evidence key '${key}' is empty." \
-            "record the evidence for '${key}' in the '${ac}:' block, or waive the row."
+            "${live_exit:-record the evidence for '${key}' in the '${ac}:' block, or waive the row.}"
         fi
         if matrix_is_placeholder "$val" && ! user_confirmed_pending "$key" "$val"; then
           block_matrix "${ac} has placeholder ${key} evidence" "record what actually ran" \
             "matrix row '${ac}' (${tier}) evidence key '${key}' is a placeholder (\"${val}\")." \
-            "replace '${key}' with the real evidence before committing."
+            "${live_exit:-replace '${key}' with the real evidence before committing.}"
         fi
         # live-tier (T3/T4) fields cannot be self-written n/a — that is a
         # downgrade, which is a user decision via the Waiver Protocol.
@@ -4287,11 +4300,11 @@ validate_matrix() {
       if [ "$owed" = verdict ]; then
         block_matrix "the auditor has not confirmed ${ac}" "get the auditor's verdict on it" \
           "matrix row '${ac}' has no auditor verdict: the cell is '${aud:-empty}', not CONFIRMED, REFUTED or UNVERIFIABLE, at step ${CURRENT}." \
-          "from Step 6 the independent auditor gives every non-waived row a verdict; a REFUTED or UNVERIFIABLE row is ruled at the merge advance, on the release approval card. Record the auditor's verdict, or waive the row."
+          "from Step 6 the independent auditor gives every non-waived row a verdict; a REFUTED or UNVERIFIABLE row is ruled at the merge advance, on the release approval card. Record the auditor's verdict, or else needs: the user — a waiver at the release card: reply <n> waive, <n> being the decision the card gives ${ac}."
       fi
       block_matrix "the auditor has not confirmed ${ac}" "get the auditor to confirm it" \
         "matrix row '${ac}' auditor verdict is '${aud:-empty}', not CONFIRMED, at step ${CURRENT}." \
-        "from Step 8 every row is ruled: the independent auditor CONFIRMS it, the row is waived (the release approval card puts it), or a T4 row carries its user's attributed confirmation."
+        "from Step 8 every row is ruled: the independent auditor CONFIRMS it, the row is waived (the release approval card puts it), or a T4 row carries its user's attributed confirmation. Short of a CONFIRMED verdict, needs: the user — a waiver at the release card: reply <n> waive, <n> being the decision the card gives ${ac}."
     fi
   done <<< "$rows"
 
@@ -4374,6 +4387,19 @@ resolve_walk_path() {  # $1 = raw walk-artifact value
   esac
 }
 
+# walk_registered <raw walk-artifact value> <its resolved path> -> 0 when the section holds a flush-left
+# `proved: kind=walk` line whose evidence= names that artifact, compared as written and as resolved, so a
+# `record/<f>` spelling and an absolute one meet. proof-add walk writes that line only after it parsed the
+# record's verdict table, so the line is what makes the artifact a registered walk rather than narration.
+walk_registered() {
+  local ev
+  while IFS= read -r ev; do
+    [ -n "$ev" ] || continue
+    if [ "$ev" = "$1" ] || [ "$(resolve_walk_path "$ev")" = "$2" ]; then return 0; fi
+  done <<< "$(printf '%s\n' "$SECTION" | sed -nE 's/^proved: kind=walk .*[[:space:]]evidence=([^[:space:]]+).*$/\1/p')"
+  return 1
+}
+
 # The arm itself. Fires at current: 5..9 (the Verify gate and, as a durable
 # prefix condition — plan assumption A5 — every step after it, so the artifact
 # cannot be deleted once Verify is behind you). Trigger: at least one matrix row
@@ -4441,15 +4467,17 @@ validate_walk_artifact() {
       "write real narration into the walk artifact before discharging any matrix row — an empty file is not a walk."
   fi
 
-  # The walk narrates a running surface; it never checklists acceptance
-  # criteria. An AC identifier in the artifact is the tell that it was written
-  # with the criteria in hand, which is exactly the power the walk is meant to
-  # have. This grep is the whole enforcement.
+  # The walk narrates a running surface without the criteria in hand, so an AC
+  # identifier in narration is the tell that it checklists them. The one
+  # exception is a registered walk: a verdict table proof-add walk parsed and
+  # recorded as `proved: kind=walk` naming this artifact, whose identifiers are
+  # its verdicts. Invariant: the artifact carries no AC identifier unless such a
+  # line names it; a line naming another record registers nothing here.
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  if grep -qE 'AC-[0-9]' "$abs" 2>/dev/null; then
+  if grep -qE 'AC-[0-9]' "$abs" 2>/dev/null && ! walk_registered "$raw" "$abs"; then
     block_matrix "the walk narration names acceptance criteria" "drop the criteria names" \
       "the walk gate: walk artifact ${abs} names acceptance criteria (matched 'AC-<n>')." \
-      "rewrite the walk as narration of what was driven and what came back, with no AC identifiers — the walk is written without reading the criteria."
+      "rewrite the walk as narration of what was driven and what came back, with no AC identifiers — the walk is written without reading the criteria, or register the record with session-poker.sh proof-add walk <record> when it is the walk's verdict table."
   fi
   return 0
 }
@@ -5331,7 +5359,8 @@ return 0
 # wave-30 T15, D11, the plan's ## Handoff; `task-split` — wave-30 T17, D14d-3, a row rewritten as its children;
 # `regression` — wave-31 T27, D4, A-orch-40, the plan's Step-0 regression setting; and, wave-33 T15 (D10),
 # `deliver` (a record row's own last act: admitted only for the caller's own plan row, by arm A),
-# `rule` (a ruling pushed to a writer), `matrix-set`, `waive-row`, `confirm-row` (the user's confirmation of a
+# `rule` (a ruling pushed to a writer), `matrix-set`, `matrix-retier` (a criterion's tier raised, which rewrites its
+# eval and evidence cells), `waive-row`, `confirm-row` (the user's confirmation of a
 # T4 row, the user's act and never an agent's), `tasks-prose`, `epic-row` and
 # `continuation-fill` (T7's plan verbs), `disposition` (T13's finding ledger) and `reply` (wave-38 T3, the final card's
 # replay into approve, waive, waive-row and finding-move), `decisions` (a decision put or ruled writes the run's
@@ -5407,7 +5436,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
           return 0
         fi
         case "$_next" in
-          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|budget|regression|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|waive-row|confirm-row|tasks-prose|epic-row|continuation-fill|disposition|reply|order|reviews-part|decisions)
+          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|budget|regression|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|matrix-retier|waive-row|confirm-row|tasks-prose|epic-row|continuation-fill|disposition|reply|order|reviews-part|decisions)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
             _WALL_POKER_CALL="$GIT_ARGV_REST"
             _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"

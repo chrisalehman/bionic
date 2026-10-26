@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # hooks/poker/plan.sh — the plan verbs: the contract grammar, the matrix and the rows of the plan (budget,
 # amend, task-add, task-set, ledger-add, ledger-set, step-line, step-field, matrix-render, discharge,
-# matrix-set, tasks-prose, epic-row, continuation-fill, brief, task-split, release-approval, reply).
+# matrix-set, matrix-retier, tasks-prose, epic-row, continuation-fill, brief, task-split, release-approval, reply).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
@@ -492,6 +492,49 @@ matrix_block_has() {
     inb && /^[ \t]+[^ \t]/ { sub(/^[ \t]+/, "", y); if (index(y, k) == 1) { hit = 1; exit } next }
     { inb = 0 }
     END { exit !hit }' "$1"
+}
+
+# matrix_block_drop <plan> <AC> <key> -> the whole plan with every line of that key in the AC block removed, every
+# other byte as it was; the block is read as matrix_block_has reads it. Exit 3: no block.
+matrix_block_drop() {
+  MB_AC="$2" MB_KEY="$3" awk "$(units_ac_head_awk)"'
+    BEGIN { a = ENVIRON["MB_AC"]; k = ENVIRON["MB_KEY"] ":" }
+    /^[ \t]*```/ { fence = !fence; print; next }
+    fence { print; next }
+    /^## / { inm = ($0 ~ /^## Verification Matrix/); inb = 0; print; next }
+    !inm { print; next }
+    ac_head($0, a) { inb = 1; found = 1; print; next }
+    inb && /^[ \t]+[^ \t]/ { y = $0; sub(/^[ \t]+/, "", y); if (index(y, k) != 1) print; next }
+    { inb = 0; print }
+    END { if (!found) exit 3 }' "$1"
+}
+
+# matrix_eval_row <plan> <AC> <eval type> <eval> -> the whole plan with the criterion's `## Eval design` row's Eval type
+# and Eval cells written ` <value> `, every other byte as it was. The columns are named by the table's header row, as
+# SERVES_AWK eval_row reads them, and the row is the first whose Criterion cell is the AC id, the one that reader
+# keeps; an escaped `\|` inside a cell stays one cell. Exit 3: no row for the criterion; 4: no such columns.
+matrix_eval_row() {
+  ME_AC="$2" ME_TYPE="$3" ME_EVAL="$4" awk '
+    function trim(v) { gsub(/^[ \t]+|[ \t]+$/, "", v); return v }
+    /^[ \t]*```/ { fence = !fence; print; next }
+    fence { print; next }
+    /^## / { inev = ($0 ~ /^## Eval design[ \t]*$/); print; next }
+    inev && !done && /^[ \t]*\|/ && $0 !~ /^[ \t]*\|[-|: \t]*$/ {
+      line = $0; gsub(/\\\|/, "\001", line); n = split(line, c, "|")
+      if (!hdr) {
+        hdr = 1
+        for (j = 2; j < n; j++) { h = tolower(trim(c[j])); if (h == "criterion") cc = j; else if (h == "eval type") ct = j; else if (h == "eval") ce = j }
+        if (!cc || !ct || !ce) { bad = 1; exit }
+        print; next
+      }
+      if (trim(c[cc]) == ENVIRON["ME_AC"]) {
+        c[ct] = " " ENVIRON["ME_TYPE"] " "; c[ce] = " " ENVIRON["ME_EVAL"] " "
+        out = c[1]; for (j = 2; j <= n; j++) out = out "|" c[j]
+        gsub(/\001/, "\\|", out); print out; done = 1; next
+      }
+    }
+    { print }
+    END { if (bad) exit 4; if (!done) exit 3 }' "$1"
 }
 
 # THE FILES BESIDE THE PLAN (wave-33 T7; REQ-3 AC-3.3, D8). `epic-row` and `continuation-fill` write the
@@ -1176,10 +1219,13 @@ EOF
 
     # A ROW REVIEW MADE UNASKED (wave-30 T21; REQ-10 AC-10.1, AC-10.2; D4, Δ3). Three guards, whatever the
     # policy says, each a refusal with the plan byte-identical: (1) the rating is inside the plan's
-    # fix-policy:, read verbatim (lib/run.sh `fix_policy_covers`; S1,S2-on when absent); (2) the row is
+    # fix-policy:, read verbatim (lib/run.sh `fix_policy_covers`; S1,S2-on when absent); (2) a counted row is
     # under fix-cap: (lib/units.sh `units_fix_cap`, the level's default when absent), counted off the
-    # ledger lines' born: markers (`units_born`, the one place the count reads); (3) no Files path outside
-    # the record already carries three review-born rows: the fourth fix on one component stops the run.
+    # ledger lines' born: markers (`units_born_counted`, the one place the count reads): a row inside the
+    # policy whose findings are this plan's own is the review's own defect and exempt, while a promoted or a
+    # carried one counts, so the cap bounds only the scope a review adds; (3) no Files path outside
+    # the record or the registry files (lib/units.sh REGISTRY_FILES) already carries three review-born rows: the
+    # fourth fix on one component stops the run.
     # In-diff is the orchestrator's judgment and "never re-read" the proof's; neither is this verb's.
     # THE FINDINGS A ROW ANSWERS (wave-33 T13; REQ-5, D6): each is a finding of a reading the plan registered,
     # read from its record (`finding_read`); the row's rating is the gravest of them, the lowest S and then on
@@ -1188,11 +1234,8 @@ EOF
     # (`finding_read`'s FR_P, a `moved:` line) is fix, and `disposition` tells the orchestrator to born a row of
     # it, so the policy guard holds each finding to the policy OR to the person's move, the first that is
     # neither refused with the remedy. The marker keeps the reader's rating, never re-rated.
-    TA_BORN_MARK=""; TA_OFF=""; TA_OFF_RATING=""
-    TA_POL="$(plan_frontmatter_get "$TA_PLAN" fix-policy)"
-    if [ -z "$TA_POL" ] && ! grep -qE '^[[:space:]]*fix-policy[[:space:]]*:' "$TA_PLAN" 2>/dev/null; then
-      TA_POL="$FIX_POLICY_DEFAULT"
-    fi
+    TA_BORN_MARK=""; TA_OFF=""; TA_OFF_RATING=""; TA_CLASS=""; TA_COUNT_SAID=""
+    TA_POL="$(units_fix_policy "$TA_PLAN")" || TA_POL=""
     # A FINDING THE PERSON MOVED TO DEFER IS BORN NO ROW (wave-36 T8; REQ-4 AC-4.5, D10): its newest move
     # (lib/proof.sh `proof_move_line`) is the person's last word, whatever its reader's rating, so an S2 on the
     # fix-policy admits is refused as an S3 off is, naming the move, before the policy is asked.
@@ -1218,6 +1261,10 @@ EOF
         die "task-add refused — born: $TA_OFF_RATING is outside fix-policy: $TA_POL; the plan is unchanged; the finding goes to the review findings disposition (AC-10.3). To fix $(clean "$TA_OFF") anyway: disposition $(clean "$TA_OFF") fix '<their words>' '<why>', then task-add again."
         exit 1
       fi
+      # A gravest rating outside the policy got here only by the person's move to fix: the marker says so, and
+      # the row counts against fix-cap: whatever the policy later becomes.
+      TA_RATING="${TA_BORN#review }"
+      fix_policy_covers "$TA_POL" "${TA_RATING% *}" "${TA_RATING#* }" || TA_BORN_MARK="$TA_BORN_MARK promoted"
     fi
     TA_CELL_TASK="$TA_TASK"
     if [ -n "$TA_BORN" ]; then
@@ -1226,19 +1273,30 @@ EOF
         die "task-add refused — born: $TA_BORN is outside fix-policy: $TA_POL; the plan is unchanged; the finding goes to the review findings disposition (AC-10.3)."
         exit 1
       fi
-      if ! TA_CAP="$(units_fix_cap "$TA_PLAN")"; then
-        die "task-add refused — born: $TA_BORN has no cap to count against: fix-cap: '$(plan_frontmatter_get "$TA_PLAN" fix-cap)' is no count, or the plan names no rigor: to default it from; the plan is unchanged."
+      if ! TA_COUNTED="$(units_born_counted "$TA_PLAN")"; then
+        die "task-add refused — the review-born rows of $TA_PLAN cannot be counted against fix-cap: (lib/run.sh, which reads fix-policy:, is not loaded); the plan is unchanged. Run /bionic:doctor to see which library answered."
         exit 1
+      fi
+      TA_NCOUNT="$(printf '%s\n' "$TA_COUNTED" | awk -F'\t' '$3 == "counted" { n++ } END { print n + 0 }')"
+      TA_NEXEMPT="$(printf '%s\n' "$TA_COUNTED" | awk -F'\t' '$3 == "exempt" { n++ } END { print n + 0 }')"
+      TA_CLASS="$(units_born_class "$TA_PLAN" "$TA_POL" "$TA_RATING" "${TA_BORN_MARK# }")"
+      TA_COUNT_SAID="exempt under fix-policy: $TA_POL"
+      if [ "$TA_CLASS" = counted ]; then
+        if ! TA_CAP="$(units_fix_cap "$TA_PLAN")"; then
+          die "task-add refused — born: $TA_BORN has no cap to count against: fix-cap: '$(plan_frontmatter_get "$TA_PLAN" fix-cap)' is no count, or the plan names no rigor: to default it from; the plan is unchanged."
+          exit 1
+        fi
+        if [ "$TA_NCOUNT" -ge "$TA_CAP" ]; then
+          die "task-add refused — review-born rows: $TA_NCOUNT of cap $TA_CAP are counted ($TA_NEXEMPT exempt under fix-policy: $TA_POL); this finding goes to the review findings disposition, or the person raises the cap: set fix-cap=$((TA_NCOUNT + 1)) at the card."
+          exit 1
+        fi
+        TA_COUNT_SAID="counted $((TA_NCOUNT + 1)) of $TA_CAP"
       fi
       TA_BORN_ROWS="$(units_born "$TA_PLAN")"
-      TA_NBORN="$(printf '%s' "$TA_BORN_ROWS" | awk 'NF { n++ } END { print n + 0 }')"
-      if [ "$TA_NBORN" -ge "$TA_CAP" ]; then
-        die "task-add refused — review-born rows: $TA_NBORN of cap $TA_CAP; this finding goes to the review findings disposition (AC-10.3)."
-        exit 1
-      fi
       while IFS= read -r TA_PATH; do
         [ -n "$TA_PATH" ] || continue
         case "$TA_PATH" in .bionic/*|record/*) continue ;; esac
+        case " $REGISTRY_FILES " in *" $TA_PATH "*) continue ;; esac
         TA_FIXERS="$(printf '%s\n' "$TA_BORN_ROWS" | while IFS=$'\t' read -r TA_BID _ TA_BFILES; do
             [ -n "$TA_BID" ] || continue
             _units_split_tokens "$TA_BFILES" | grep -Fx -- "$TA_PATH" >/dev/null && printf '%s\n' "$TA_BID"
@@ -1291,7 +1349,7 @@ EOF
     say "task-add — $TA_ID added to $TA_PLAN: the row and its - $TA_ID: line; validated and dry-committed first."
     [ -z "$TA_ART" ] || say "task-add — $TA_ID is a $TA_KIND row: its Files carry its record artifact, $TA_ART."
     [ -z "$TA_REV_ART" ] || say "task-add — $TA_ID is a review row: its Files carry one record per question the rigor deals${TA_ART_CELL:+, its artifact cell the first, $TA_ART_CELL}."
-    [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN): review-born rows: $((TA_NBORN + 1)) of cap $TA_CAP; say so in the review findings disposition (AC-10.2)."
+    [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN); say so in the review findings disposition · $TA_COUNT_SAID"
     [ -z "$TA_BORN_SUITE" ] || say "task-add — $TA_ID is regression-born ($TA_BORN_SUITE), backed by of=$TA_BORN_OF: its landing holds every review's cover (D9), and it counts against no fix-cap."
     # A ROW NOW ANSWERS EACH FINDING IT NAMES, so the person owes no ruling on it: its owed item closes.
     for TA_BID in $(printf '%s' "$TA_BORN_IDS" | tr ',' ' '); do
@@ -1658,6 +1716,29 @@ EOF
       *) return 1 ;;
     esac
   }
+  # THE WALK POINTER'S ONE WRITER. The walk gate reads `walk-artifact:` from the Step-5 block alone (walls.sh
+  # `step5_evidence_block`); the matrix head's `walk-artifact:` line, when the plan has one, takes the same value in the
+  # same write, so the gate never meets the stub matrix-render left beside a filled block. A matrix with no such line
+  # gains none. step-field, proof-add walk and the walk row's landing write the pointer through this function, so neither
+  # half of it can be written without the other.
+  # walk_pointer_put <plan copy> <path> -> the copy rewritten in place; exit 1 no Step 5 line, 5 the Step 5 line itself
+  # carries walk-artifact (step-line owns that text), any other exit the copy could not be written. The copy is unchanged
+  # on every non-zero exit.
+  walk_pointer_put() {
+    local rc=0
+    units_step_fields --replace "$1" 5 "walk-artifact=$2" > "$1.wp" 2>/dev/null || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      WP_V="$2" awk '
+        { if ($0 ~ /^[ \t]*```/) fence = !fence }
+        /^## / { m = ($0 ~ /^## Verification Matrix/) }
+        !fence && m && !done && /^[ \t]*walk-artifact[ \t]*:/ {
+          ind = $0; sub(/[^ \t].*$/, "", ind); print ind "walk-artifact: " ENVIRON["WP_V"]; done = 1; next }
+        { print }' "$1.wp" > "$1.wp2" 2>/dev/null || rc=2
+    fi
+    [ "$rc" -ne 0 ] || mv -f "$1.wp2" "$1" || rc=2
+    rm -f "$1.wp" "$1.wp2"
+    return "$rc"
+  }
   poker_verb_step_field() {
     local sf_kv sf_w sf_walk=""
     case "$PV_KEY" in
@@ -1747,17 +1828,11 @@ EOF
     # one, takes the same value in the same transaction. A matrix with no such line gains none.
     if [ -n "$sf_walk" ]; then
       PV_RC=0
-      SF_WV="$sf_walk" awk '
-        { if ($0 ~ /^[ \t]*```/) fence = !fence }
-        /^## / { m = ($0 ~ /^## Verification Matrix/) }
-        !fence && m && !done && /^[ \t]*walk-artifact[ \t]*:/ {
-          ind = $0; sub(/[^ \t].*$/, "", ind); print ind "walk-artifact: " ENVIRON["SF_WV"]; done = 1; next }
-        { print }' "$PV_NEW" > "$PV_NEW.m" 2>/dev/null || PV_RC=$?
+      walk_pointer_put "$PV_NEW" "$sf_walk" || PV_RC=$?
       if [ "$PV_RC" -ne 0 ]; then
-        die "REFUSED — the matrix walk-artifact: line cannot be written (awk exit $PV_RC); the plan is unchanged."
+        die "REFUSED — the matrix walk-artifact: line cannot be written (exit $PV_RC); the plan is unchanged."
         exit 1
       fi
-      mv "$PV_NEW.m" "$PV_NEW"
     fi
     plan_verb_swap step-field "Step $PV_KEY $SF_KEYS" writer
     say "step-field — Step $PV_KEY $SF_KEYS: written to $PV_PLAN; dry-committed first."
@@ -1989,6 +2064,110 @@ EOF
         || say "matrix-set — $MS_AC: the plan is written, but its line in the landing record could not be, so the hand-holds count will miss this write."
     fi
     say "matrix-set — $MS_AC: ${MS_PAIRS[*]} written to $PV_PLAN; dry-committed first."
+    exit 0
+  }
+
+  # THE TIER'S ONE WRITER. A criterion's tier lives in three places: the matrix table's tier cell, its AC block's
+  # `eval: <tier> — <text>` line, and its `## Eval design` row (Eval type, the word lib/scale.sh SCALE_EVAL_TIERS maps
+  # to the tier, and Eval). `matrix-retier <AC> tier=<T> eval=<text>` rewrites all three in one plan transaction, so no
+  # reader ever sees two tiers for one criterion, and resets the row: the old evidence proved a weaker check, so the
+  # status is pending, the evidence cell and key the render's stubs, the auditor cell cleared, any waiver: line
+  # removed (a waiver of the weaker check waives nothing of the stronger), and the keys the new tier owes that the
+  # block lacks are added as matrix-render adds them (user-confirmed: at T4). The spec is the approved text and is
+  # not touched: the ledger's `## Δ<k> — retier` heading, numbered as decisions_append numbers every entry, is where
+  # the change is read, and the landing record's ev=matrix-retier line is the act, which the hand-holds fold reads as
+  # nothing. ONLY UPWARD: strengthening a check is the run's; a lower or equal tier, or a waiver, is the person's.
+  # REFUSED (1), nothing written: a tier outside T0 to T4, an eval with a |, a tab or a line break, an AC with no row,
+  # a tier at or below the cell's, no Eval design row for the criterion, no block, a ledger that is a symlink.
+  poker_verb_matrix_retier() {
+    case "$RT_TIER" in
+      T[0-4]) : ;;
+      *)
+        die "REFUSED — '$(clean "$RT_TIER")' is no tier: run matrix-retier again with tier= one of T0 to T4, above the cell's own. The plan is unchanged."
+        exit 1 ;;
+    esac
+    RT_EVAL="$(printf '%s' "$RT_EVAL" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    if [ -z "$RT_EVAL" ] || ! plan_verb_value_ok "$RT_EVAL"; then
+      die "REFUSED — eval= is the criterion's new eval on one line, with no |, tab or line break, which neither its block nor its Eval design cell can hold; run matrix-retier again with such a text. The plan is unchanged."
+      exit 1
+    fi
+    RT_WORD=""
+    for _pv_c in ${SCALE_EVAL_TIERS:-}; do
+      [ "${_pv_c#*=}" != "$RT_TIER" ] || { RT_WORD="${_pv_c%%=*}"; break; }
+    done
+    RT_KEYS="$(mr_tier_keys)" || RT_KEYS=""
+    if [ -z "$RT_WORD" ] || [ -z "$RT_KEYS" ]; then
+      die "REFUSED — the eval type for $RT_TIER is lib/scale.sh SCALE_EVAL_TIERS's and the keys it owes walls.sh keys_for_tier's, and $BIONIC_LIB cannot give them; the plan is unchanged. needs: <the user> — the libraries at $BIONIC_LIB loadable, then run matrix-retier again."
+      exit 2
+    fi
+    plan_verb_open matrix-retier
+    RT_OLD="$(matrix_row_cell "$PV_PLAN" "$RT_AC" 2)"
+    if [ -z "$(matrix_row_cell "$PV_PLAN" "$RT_AC" 1)" ]; then
+      die "REFUSED — the matrix table has no row $RT_AC; matrix-render writes each criterion's row from the ## Eval design. The plan is unchanged."
+      pv_next matrix-render
+      exit 1
+    fi
+    case "$RT_OLD" in
+      T[0-4]) : ;;
+      *)
+        die "REFUSED — the tier cell of $RT_AC reads '$(clean "$RT_OLD")', no tier of T0 to T4, so a raise from it cannot be judged; the cell is the plan's Step-3 text: write its tier there, then run matrix-retier again. The plan is unchanged."
+        exit 1 ;;
+    esac
+    if [ "${RT_TIER#T}" -le "${RT_OLD#T}" ]; then
+      die "matrix-retier refused — $RT_AC is $RT_OLD; a retier only raises the tier (strengthening is the run's, weakening is the person's: needs: <the user> — a lower tier or a waiver)"
+      exit 1
+    fi
+    RT_LED="$(docs_root "$PV_REPO")/record/$(proof_plan_slug "$PV_PLAN")/design-ledger.md"
+    if [ -L "$RT_LED" ]; then
+      die "REFUSED — ${RT_LED#"$PV_REPO"/} is a symlink, and the retier's ledger entry is written there; put the ledger file itself in its place, then run matrix-retier again. The plan is unchanged."
+      exit 1
+    fi
+    PV_RC=0
+    matrix_row_cells "$PV_PLAN" "$RT_AC" "2=$RT_TIER" 3=pending 4=— 5=— > "$PV_NEW" 2>/dev/null || PV_RC=$?
+    if [ "$PV_RC" -eq 0 ]; then
+      matrix_eval_row "$PV_NEW" "$RT_AC" "$RT_WORD" "$RT_EVAL" > "$PV_NEW.2" 2>/dev/null || PV_RC=$((20 + $?))
+      [ "$PV_RC" -ne 0 ] || mv -f "$PV_NEW.2" "$PV_NEW"
+    fi
+    for _pv_kv in "eval=$RT_TIER — $RT_EVAL" evidence=pending; do
+      [ "$PV_RC" -eq 0 ] || break
+      matrix_block_key "$PV_NEW" "$RT_AC" "${_pv_kv%%=*}" "${_pv_kv#*=}" > "$PV_NEW.2" 2>/dev/null || PV_RC=$((10 + $?))
+      [ "$PV_RC" -ne 0 ] || mv -f "$PV_NEW.2" "$PV_NEW"
+    done
+    for _pv_k in $(printf '%s\n' "$RT_KEYS" | awk -F'\t' -v t="$RT_TIER" '$1 == t { print $2 }'); do
+      [ "$PV_RC" -eq 0 ] || break
+      matrix_block_has "$PV_NEW" "$RT_AC" "$_pv_k" && continue
+      matrix_block_key "$PV_NEW" "$RT_AC" "$_pv_k" pending > "$PV_NEW.2" 2>/dev/null || PV_RC=$((10 + $?))
+      [ "$PV_RC" -ne 0 ] || mv -f "$PV_NEW.2" "$PV_NEW"
+    done
+    if [ "$PV_RC" -eq 0 ]; then
+      matrix_block_drop "$PV_NEW" "$RT_AC" waiver > "$PV_NEW.2" 2>/dev/null || PV_RC=$((10 + $?))
+      [ "$PV_RC" -ne 0 ] || mv -f "$PV_NEW.2" "$PV_NEW"
+    fi
+    case "$PV_RC" in
+      0) : ;;
+      4) die "REFUSED — the matrix row $RT_AC does not have five cells, so its tier cell cannot be found; the plan is unchanged. needs: <the user> — the row restored to five cells, then run matrix-retier again."
+         exit 1 ;;
+      13) die "REFUSED — the matrix has no $RT_AC: block to hold the eval: line; matrix-render writes it. The plan is unchanged."
+          pv_next matrix-render
+          exit 1 ;;
+      23) die "REFUSED — the plan's ## Eval design has no row for $RT_AC, and its Eval type and Eval are where the tier is read at Step 3; add the criterion's row there, then retier it. The plan is unchanged."
+          pv_next matrix-retier "$RT_AC" "tier=$RT_TIER" "eval=$RT_EVAL"
+          exit 1 ;;
+      24) die "REFUSED — the plan's ## Eval design table has no Criterion, Eval type and Eval columns, the Step-3 table's shape the retier writes; give its header those columns, then run matrix-retier again. The plan is unchanged."
+          exit 1 ;;
+      *) die "REFUSED — the retier cannot be written (exit $PV_RC); the plan is unchanged. Run matrix-retier again."
+         exit 2 ;;
+    esac
+    plan_verb_swap matrix-retier "$RT_AC raised $RT_OLD to $RT_TIER" writer
+    # THE ACT AND ITS READING, after the plan write is in: plan_verb_swap exits before here when the plan already read
+    # so, and every refusal above exits earlier still, so neither line is written for a call that changed nothing.
+    _pv_sid="$(session_id 2>/dev/null)" || _pv_sid=""
+    { declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
+      && line_event "$PV_PLAN" matrix-retier "ac=$RT_AC" "from=$RT_OLD" "to=$RT_TIER" "by=${_pv_sid:-none}" >/dev/null 2>&1 \
+      || say "matrix-retier — $RT_AC: the plan is written, but its line in the landing record could not be."
+    decisions_append "$PV_PLAN" "$RT_LED" "$PV_REPO" "retier ${RT_AC} ${RT_OLD}→${RT_TIER} (orchestrator $(decisions_clock)): $RT_EVAL" 2>/dev/null \
+      || say "matrix-retier — $RT_AC: the plan is written, but ${RT_LED#"$PV_REPO"/} could not take its Δ entry; write it with decisions."
+    say "matrix-retier — $RT_AC raised $RT_OLD to $RT_TIER in its tier cell, its eval: line and its ## Eval design row; the row reads pending, its evidence, auditor and waiver cleared. Written to $PV_PLAN; dry-committed first."
     exit 0
   }
 
@@ -2915,6 +3094,21 @@ RR_DISP_EOF
       rr_add approve "approve:$nm" "approve $nm" "-" "-" "$line" approve withhold "$nm" "hold the $nm"
     done
 
+    # THE MERGE WITHOUT A PASS AT THIS HEAD is the person's own decision, put beside the release and the merge while the
+    # whole suite did not run green here and no word was given at this head, by the rule the gate at 8 holds the merge
+    # on (lib/proof.sh `proof_merge_unproved`, `facts_state`'s unproved). Waiting for the pass is recommended and taking
+    # the default records nothing, so only the person's own `merge` writes the line. A plan that owes no whole run, or
+    # holds no proof of one, has no pass to wait for and is asked nothing here.
+    RR_WHOLE="$(proof_whole_text "$PV_PLAN" "$PV_REPO" 2>/dev/null)"
+    case "$RR_WHOLE" in
+      none|'') : ;;
+      *) if [ "$(proof_regression "$PV_PLAN")" != no ] && line="$(proof_merge_unproved "$PV_PLAN" "$PV_REPO" "$RR_HEAD" 2>/dev/null)"; then
+           rr_add unproved approve:merge-unproved "-" "approve merge-unproved" "-" \
+             "Merge without a whole run at this head — $line" "wait for the pass" "merge without it" \
+             "wait for the pass" "merge without a whole run at this head"
+         fi ;;
+    esac
+
     # AN --against THAT NAMES NOTHING ON THE PAGE is refused before anything is written.
     while IFS= read -r key; do
       [ -n "$key" ] || continue
@@ -2930,30 +3124,14 @@ RR_AGAINST_EOF
     RR_GOALS="$(plan_goals_read "$PV_PLAN" "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" \
       "$(landing_report "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" yes 2>/dev/null)")"
 
-    # THE REGRESSION is the floor judge's answer at the head (`proof_state`), never the whole run's own
-    # red list, which a later green landing does not shorten.
-    line="$(proof_last_line "$PV_PLAN" regression 2>/dev/null)"
-    if [ -z "$line" ]; then
-      RR_TREG="✖️ regression — no whole run on record"
-    else
-      h="$(rr_proof_field "$line" head)"; r="$(rr_proof_field "$line" owed)"
-      ev="$(rr_proof_field "$line" evidence)"
-      st="$(awk '/^Gating: [0-9]+ passed, [0-9]+ failed$/ { p = $2; f = $4 } END { if (p != "") print p, f }' "$(docs_root "$PV_REPO")/$ev" 2>/dev/null)"
-      jv="$(proof_state "$PV_PLAN" "$PV_REPO" 2>/dev/null | awk 'NR == 1')"
-      case "$jv" in
-        covered"	"*)
-          if [ "$h" = "$RR_HEAD" ]; then
-            RR_TREG="✅ regression — whole run green at this head"
-            [ -z "$st" ] || RR_TREG="$RR_TREG, ${st%% *} of $(( ${st%% *} + ${st##* } )) suites"
-          else
-            RR_TREG="✅ regression — covered at this head by the whole run at ${h:0:8} and the landings since"
-            [ -z "$r" ] || RR_TREG="$RR_TREG, which greened its $(rr_plural "$(printf '%s' "$r" | tr ',' '\n' | /usr/bin/grep -c .)" "failing suite" "failing suites")"
-          fi ;;
-        owed"	"*) RR_TREG="✖️ regression — still owed at this head: $(printf '%s' "${jv#owed	}" | sed 's/,/, /g')" ;;
-        uncovered"	"*) RR_TREG="✖️ regression — not covered at this head: ${jv#uncovered	}" ;;
-        *) RR_TREG="✖️ regression — not covered at this head" ;;
-      esac
-    fi
+    # THE REGRESSION is the full pass's state at the head, drawn from the one printer over the floor judge (lib/proof.sh
+    # `proof_whole_text`), never worded here: green only where the whole suite ran green at this head, so a whole run
+    # behind the head that later landings covered reads red with the landings since it counted.
+    RR_TREG="$RR_WHOLE"
+    case "$RR_TREG" in
+      "green at "*) RR_TREG="✅ whole suite: $RR_TREG" ;;
+      *) RR_TREG="✖️ whole suite: ${RR_TREG:-none}" ;;
+    esac
 
     # THE REVIEWS: each question's newest reading, by the role the rigor deals it, covered or failing as the judge
     # reads it at the head (lib/proof.sh `facts_reviews`, the one reading the situation report's count shares): a
@@ -3026,7 +3204,7 @@ RR_AGAINST_EOF
     for ((num = 0; num < RR_N; num++)); do
       key="${RR_KEY[$num]}"
       case "$key" in
-        approve:*|waive:*) OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_open "$key" "${RR_KIND[$num]}: ${key#*:}" \
+        approve:*|waive:*) OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_open "$key" "${key%%:*}: ${key#*:}" \
           "poker: ${key#*:} is decision $((num + 1)) on the release approval card at $RR_H8" >/dev/null 2>&1 || : ;;
       esac
     done

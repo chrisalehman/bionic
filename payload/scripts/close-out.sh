@@ -1402,25 +1402,6 @@ co_task_count() {
   units_rows "$PLAN" 2>/dev/null | awk -F'\t' '$3 == "build" && $10 != "dropped" { n++ } END { print n + 0 }'
 }
 
-# co_regression_text -> the regression's result, from the floor's proof line (`proved: kind=floor`),
-# in the word the doctrine uses. A plan that says `regression: no` owed none.
-co_regression_text() {
-  local line h at ev
-  if [ "$(proof_regression "$PLAN")" = no ]; then
-    printf 'the regression was not owed (regression: no)'
-    return 0
-  fi
-  line="$(proof_last_line "$PLAN" regression)"
-  if [ -z "$line" ]; then
-    printf 'the regression: no proof is recorded in the plan'
-    return 0
-  fi
-  h="$(printf '%s\n' "$line" | sed -n 's/.* head=\([0-9a-f]*\).*/\1/p')"
-  at="$(printf '%s\n' "$line" | sed -n 's/.* at=\([^ ]*\).*/\1/p')"
-  ev="$(printf '%s\n' "$line" | sed -n 's/.* evidence=\([^ ]*\).*/\1/p')"
-  printf 'the regression: the whole run holds at %s (proved %s, %s)' "${h:0:12}" "${at:-?}" "${ev:-no record}"
-}
-
 # co_reviews_text -> `Reviews: <question> <scope> <result> (<reader>); …. ADRs: <cell>.`, one entry per
 # question and scope in the order the plan first records them, each with the result of its LAST line.
 co_reviews_text() {
@@ -1456,11 +1437,26 @@ co_patrol_sentence() {
 }
 
 continuation_template() {
-  local sha tasks regress reviews patrol inherited head resume ws
+  local sha tasks regress reviews patrol inherited head resume ws line at ev whole_text
   sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
   inherited="$(co_inherited_section)"
   tasks="$(co_task_count)"
-  regress="$(co_regression_text)"
+  # THE REGRESSION is the full pass's state at the working head, from the one printer the release card and the
+  # scorecard draw too (lib/proof.sh `proof_whole_text`), then the proof's instant and log; it is never read off the
+  # proof line alone, whose head says nothing of the landings since. A plan that says `regression: no` owed none.
+  if [ "$(proof_regression "$PLAN")" = no ]; then
+    regress='the regression was not owed (regression: no)'
+  else
+    line="$(proof_last_line "$PLAN" regression)"
+    if [ -z "$line" ]; then
+      regress='the regression: no proof is recorded in the plan'
+    else
+      at="$(printf '%s\n' "$line" | sed -n 's/.* at=\([^ ]*\).*/\1/p')"
+      ev="$(printf '%s\n' "$line" | sed -n 's/.* evidence=\([^ ]*\).*/\1/p')"
+      whole_text="$(proof_whole_text "$PLAN" "$ROOT")"
+      regress="$(printf 'the regression: whole suite %s (proved %s, %s)' "${whole_text:-unverified}" "${at:-?}" "${ev:-no record}")"
+    fi
+  fi
   reviews="$(co_reviews_text)"
   patrol="$(co_patrol_sentence)"
   # A PARKED RUN SAYS SO IN ITS HEADER (wave-38 T15; AC-4.3): parked, where the work is, and why; nothing was merged.
@@ -2246,6 +2242,10 @@ facts_judge() {
     *) FACTS_RC=1
        FACTS_LINES="$(printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"')"
        FACTS_WHY="the facts the run owes do not all hold at the working head $FACTS_HEAD (facts_state); record each with proof-add, or have the user waive a question"
+       # A MERGE NO WHOLE RUN PROVED AT THIS HEAD carries its own exit on the judge's line: the person's word on the
+       # release card, or the pass. Neither is a proof-add or a waiver, so the sentence names it.
+       ah="$(printf '%s\n' "$FACTS_LINES" | awk -F'\t' '$1 == "regression" && $2 == "unproved" { print $4; exit }')"
+       [ -z "$ah" ] || FACTS_WHY="$FACTS_WHY; the whole suite has not run at this head: $ah"
        FACTS_SAYS="$(co_facts_says "$FACTS_LINES")" ;;
   esac
   return 0
@@ -2256,7 +2256,7 @@ facts_judge() {
 co_facts_says() {
   printf '%s\n' "$1" | awk -F'\t' '
     NF == 0 { next }
-    { st = ""; for (i = 2; i <= NF; i++) if ($i ~ /^(uncovered|owed|failing|absent)$/) { st = $i; break }
+    { st = ""; for (i = 2; i <= NF; i++) if ($i ~ /^(uncovered|owed|failing|absent|unproved)$/) { st = $i; break }
       if ($1 == "review") w = "the " $2 " review"; else if ($1 == "regression") w = "the regression"
       else if ($1 == "check") w = "the release check"; else if ($1 == "debt") w = $2; else w = "a proof the run owes"
       if (w in seen) next
@@ -2265,6 +2265,7 @@ co_facts_says() {
       if ($1 == "debt") s = w " is still red"
       else if (st == "failing") s = w " failed"
       else if (st == "owed") s = w " has red suites"
+      else if (st == "unproved") s = "the merge waits on your word: the whole suite has not run at this head"
       else s = w " has not run at this head" }
     END { if (n == 0) s = "the run\047s proofs do not all hold"; else if (n > 1) s = s ", and " (n - 1) " more"; print s }'
 }

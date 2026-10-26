@@ -1,10 +1,8 @@
 #!/bin/bash
 # tests/close-out-4.test.sh — payload/scripts/close-out.sh, part 4 of 4: sections §INHERITED-CONT through §ASKS-NOTHING.
 #
-# THE SUITE IS FOUR PARTS (wave-39 T6; D1, D13, REQ-3 AC-3.1). One close-out.test.sh promised more than the
-# suite bar, ten minutes of the gate's promise, so it runs as four suites cut at section boundaries. Its
-# governing design, its sandbox, and the fixture builders and helpers every part shares are in
-# tests/close-out.prelude.sh, sourced below after the framework.
+# THE SUITE IS FOUR PARTS: one close-out.test.sh outran the suite bar, so it runs as
+# four suites cut at section boundaries. Its design, sandbox, fixture builders and helpers are in tests/close-out.prelude.sh.
 #
 # Usage: bash tests/close-out-4.test.sh
 
@@ -20,11 +18,9 @@ set -uo pipefail
 section "§INHERITED-CONT — wave-35 T10 (REQ-1 AC-1.6, A-orch-18): the continuation carries every inherited: line under its own heading; a plan with none prints none"
 # ============================================================
 # `proof-add inherited <suite>` writes `inherited: <suite> base=<sha> head=<sha> at=<ISO> evidence=<log>` under
-# `## SDLC State` (T9): debt the run inherited, red at its base and at its floor. AC-1.6 says it is carried into the
-# continuation, so close-out lists every such line under `## Inherited debt`, beside the hand-holds, as written. A
-# line inside a fence is prose, not a line the verb wrote, and is not carried.
-# FIXTURE FIDELITY: mk_fixture at Step 8; the lines are placed by lib/proof.sh `proof_add_line`, the placer the verb
-# calls, in the verb's own shape.
+# `## SDLC State` (T9): debt the run inherited, red at its base and at its floor. Close-out lists every such line under
+# `## Inherited debt`, beside the hand-holds, as written; a line inside a fence is prose and is not carried.
+# FIXTURE FIDELITY: mk_fixture at Step 8; lines placed by lib/proof.sh `proof_add_line`, the verb's own placer.
 # fails-when: an inherited: line is missing from the continuation, or a plan with none gets the heading.
 inh_line() {  # <suite> <sha> -> the line proof-add inherited writes
   printf 'inherited: %s base=%s head=%s at=2026-10-12T04:00:00Z evidence=record/wave-01-fixture/inherited-%s-%.12s.log' "$1" "$2" "$2" "$1" "$2"
@@ -220,8 +216,8 @@ awk -v m="$HK_MOVED" '
   /^## Tasks/ { print "```"; print "moved: record/wave-01-fixture/rev.md#2 to=fixed row=T2 by=Someone at=2026-10-06T14:10:00Z"; print "```"; print ""; print; next }
   /^- Step 8:/ { print "- T1: the reviewer said rev.md#3 was moved: to=fixed by hand, says this prose"; print; next }
   { print }' "$HK_PLAN" > "$HK_PLAN.k" && mv "$HK_PLAN.k" "$HK_PLAN"
-HK_WANT="hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=1 · fixed=1"
-expect_eq "HK-1 AC-7.6 one adoption (re-written once, another run's not counted) and one to=fixed move read adoptions=1 · fixed=1 · by-hand=0, in the total" \
+HK_WANT="hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=1 · fixed=1 · needs-you=0"
+expect_eq "HK-1 AC-7.6 one adoption (re-written once, another run's not counted) and one to=fixed move read adoptions=1 · fixed=1 · needs-you=0 · by-hand=0, in the total" \
   "$HK_WANT" "$(hh_report "$HK_P" --hand-holds | grep '^hand-holds: ')"
 run_close "$HK_P" check
 expect_eq "HK-2 …and close-out's card prints the same line" "$HK_WANT" "$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')"
@@ -582,16 +578,16 @@ run_close "$PTE" run
 section "§SCORECARD — wave-38 T15 (D26): the continuation prints four lines, each against its target, and the sitrep sheet's pace, correctness and waste"
 # ============================================================
 # Under `## Scorecard`, fenced, exactly:
-#   human stops (autonomous half): <n> · target 1           approved: lines after the plan's approved-by:, one per reply
+#   human stops (autonomous half): <n> · target 1           the register's rounds put after the plan's approved-by:
 #   agent minutes after the final reply: <n> · target 0     roster launches of this plan after the approved: merge line
 #   widest landing ready→landed: <row> <m> min · target < 15   landing-report --rows, the largest minutes=; 15 is LINE_LANDING_BAR (wave-39 T9)
-#   human-wait minutes: <n> · no target (the user's)        the final-card records, render to reply
+#   human-wait minutes: <n> · no target (the user's)        those rounds, each opened= to its at=
 # then the sitrep sheet's pace, correctness and waste at close, `pace: …`, `correctness: …` and `waste: …`. A number the
 # record cannot compute is `unverified`.
 # `landing-report --scorecard <plan>` prints the same lines; close-out reads them before the tmp wipe (the roster).
 # fails-when: a line is missing, carries a number the record does not hold, or prints a literal where it is unverified.
 sc_section() { awk '/^## / { s = ($0 == "## Scorecard"); next } s && NF && !/^```/ { print }' "$1"; }
-sc_plant() {  # <project> -> two queue landings (30 and 42 min), three approvals in two replies, two launches, one final card
+sc_plant() {  # <project> -> two queue landings (30 and 42 min), three approvals in two replies, two launches, one release card round
   local p="$1" plan="$1/$PLAN_REL" rec="$1/.bionic/docs/record/wave-01-fixture"
   case "$p" in "$SANDBOX"/*) : ;; *) echo "sc_plant: refusing outside the sandbox: '$p'" >&2; return 1 ;; esac
   mkdir -p "$rec"
@@ -610,9 +606,14 @@ sc_plant() {  # <project> -> two queue landings (30 and 42 min), three approvals
     roster_row_fixture status=intended name=w-late agent_id= launched_at=2026-10-06T12:05:01Z plan="$plan"
     roster_row_fixture status=intended name=w-other agent_id= launched_at=2026-10-06T13:00:00Z plan="/elsewhere/wave-99-other.plan.md"
   } >> "$p/.bionic/tmp/roster-fixture.state"
-  printf '%s\n' '**Final card · wave-01-fixture at abcdef12**' '' '## Replay' '' \
-    "final-card/v1|plan=$plan|head=$LAND_C|at=2026-10-06T11:48:01Z|options=1" \
-    'replied: at=2026-10-06T12:00:01Z option=1 words="1"' > "$rec/final-card-abcdef12.md"
+  # the release card's ask on the run's register, opened when the card rendered and closed by its reply, through
+  # lib/owed.sh's own writers for the plan: the fixture binds no session for the verbs that open and close it
+  local e
+  for e in 1791287281 1791288001; do   # 2026-10-06T11:48:01Z, 2026-10-06T12:00:01Z
+    BIONIC_NOW_EPOCH="$e" OWED_ROOT="$p" OWED_SID=score-sid OWED_PLAN="$plan" \
+      bash -c '. "$1/run.sh" && . "$1/owed.sh" && if [ "$2" = 1791287281 ]; then owed_open approve:release "approval: release" "approve release"; else owed_close approve:release "release approval reply"; fi' \
+      _ "$REPO_ROOT/payload/scripts/lib" "$e"
+  done
 }
 SC_TAIL='human-wait minutes: 12 · no target (the user'"'"'s)'
 PSC="$(mk_fixture scorecard1)"; advance_to "$PSC" 8
@@ -626,20 +627,11 @@ expect_eq "SC-2 D26 the section is the verb's seven lines, read before the wipe 
   "$SC_VERB" "$(sc_section "$PSC/$CONT_REL")"
 expect_eq "SC-4 …the heading sits before the Resume instruction" "yes" \
   "$(awk '/^## Scorecard$/ { a = NR } /^## Resume instruction/ { b = NR } END { print (a && b > a) ? "yes" : "no" }' "$PSC/$CONT_REL")"
-# the wait is read from the card's record under each name it has had: the release approval stem and tag, the old stem and
-# tag a run wrote before the rename, and the final card's
+# the wait is read off the register: the release card's one round, opened 11:48:01Z and closed 12:00:01Z
 sc_wait() { printf '%s\n' "$1" | /usr/bin/grep '^human-wait minutes: '; }
-expect_eq "SC-5 precondition: the final-card record gives the 12-minute wait" "$SC_TAIL" "$(sc_wait "$SC_VERB")"
-SC_OLDW="review"
-for sc_stem in release-approval "${SC_OLDW}-results"; do
-  PSW="$(mk_fixture "scorecard-$sc_stem")"; advance_to "$PSW" 8
-  sc_plant "$PSW"
-  SC_REC="$PSW/.bionic/docs/record/wave-01-fixture"
-  sed -e "s#^final-card/v1|#${sc_stem}/v1|#" "$SC_REC/final-card-abcdef12.md" > "$SC_REC/${sc_stem}-abcdef12.md"
-  rm -f "$SC_REC/final-card-abcdef12.md"
-  expect_eq "SC-5b the record named $sc_stem-<head8>.md with the $sc_stem/v1 tag gives the same wait" "$SC_TAIL" \
-    "$(sc_wait "$(BIONIC_GATE_DIR="$LAND_GATE" hh_report "$PSW" --scorecard)")"
-done
+expect_eq "SC-5 the release card's round on the register gives the 12-minute wait" "$SC_TAIL" "$(sc_wait "$SC_VERB")"
+expect_eq "SC-5b …and the one stop, the round put after the plan's approval" "human stops (autonomous half): 1 · target 1" \
+  "$(printf '%s\n' "$SC_VERB" | /usr/bin/grep '^human stops ')"
 # a record that cannot compute a number prints unverified on that line, never a literal
 PSU="$(mk_fixture scorecard2)"; advance_to "$PSU" 8
 BIONIC_GATE_DIR="$LAND_GATE" run_close "$PSU" run
@@ -871,7 +863,7 @@ expect_eq "BP-4 …one bullet per review line of the plan, under the part's head
   "### The reviews|$(/usr/bin/grep -c '^proved: kind=review ' "$PBP/$PLAN_REL")" \
   "$(printf '%s\n' "$BP_PART" | sed -n 1p)|$(printf '%s\n' "$BP_PART" | /usr/bin/grep -c '^- ')"
 expect_contains "BP-5 the landing record names the commit as the integrate row's" \
-  "line/v1|ev=integrate|row=T3|part=reviews|commit=$BP_TIP|branch=wave/01-fixture|at=" \
+  "line/v1|ev=integrate|row=T3|part=reviews|commit=$BP_TIP|branch=wave/01-fixture|tree=$(cd "$PBP-wave" && pwd -P)|at=" \
   "$(/usr/bin/grep '^line/v1|ev=integrate|' "$BP_REC/landing-proofs.log" 2>/dev/null)"
 expect_eq "BP-6 the checkout holding the branch is at the commit" "$BP_TIP" "$(fixture_git "$PBP-wave" rev-parse HEAD)"
 lands_poker "$PBP" "$BP_SID" reviews-part T3
@@ -1120,15 +1112,11 @@ expect_eq "MK-4 the five filled by continuation-fill from an unengaged session: 
 # ============================================================
 section "§OWED-AT-CLOSE — close-out settles the matrix row its own last reading proves, and the gate before the flip does not refuse on it"
 # ============================================================
-# A criterion is owed at the step whose task proves it. A row whose `task:` is the close row (step 9) and whose eval
-# names `landing-report --hand-holds` is proved by the line close-out reads last, after `delivered:`. So the gate the
-# pre-flight and the dry-run ask at current 8 owes it nothing, and close-out writes it in the same act as that last
-# reading, before the archive move: status discharged when the line reads total=0, else blocked with the line quoted,
-# its evidence the continuation path. A blocked row is reported, never a refusal: the run still delivers.
-# FIXTURE FIDELITY: mk_fixture at Step 8, its plan gaining what a planner writes, a close row (step 9, landed, so no
-# session binding is owed) and two matrix rows owed at the close; the hand-hold above zero is §READ-ORDER's amend.
-# fails-when: run refuses on the pending row, or the delivered plan reads it pending, or reads it discharged above zero,
-# or a row owed at the close whose eval is another measure is written.
+# A row owed at the close (step 9) whose eval names `landing-report --hand-holds` is proved by the line close-out reads last,
+# after `delivered:`, so the pre-flight and the dry-run at current 8 owe it nothing; close-out writes it in the act that
+# reads that line: discharged at total=0, else blocked with the line quoted, evidence the continuation path. Blocked is
+# reported, never a refusal. FIXTURE: mk_fixture at Step 8 plus a landed close row T4 and two rows owed at the close.
+# fails-when: the run refuses on the pending row (OC-1; OC-1c shows the refusal live with the deferral off), or the delivered plan reads it pending or discharged above zero, or a row on another eval is written.
 oc_rows() {  # <project> -> the plan gains T4 (step 9, close), a T3 row on the close's measure and a T0 row (task: 9) on another eval
   local plan="$1/$PLAN_REL"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "oc_rows: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
@@ -1155,6 +1143,14 @@ OC_CONT="record/wave-01-fixture/continuation.md"
 POC="$(mk_fixture owed-close)"; advance_to "$POC" 8; oc_rows "$POC"
 expect_eq "OC-0 precondition: the fixture carries the close row and both rows pending" "pending|—|pending|—|9" \
   "$(oc_cells "$POC/$PLAN_REL" AC-2)|$(oc_cells "$POC/$PLAN_REL" AC-3)|$(awk -F'|' '$2 ~ /^ T4 $/ { s = $3; gsub(/ /, "", s); print s }' "$POC/$PLAN_REL")"
+# OC-1c: the deferral is what keeps OC-1 green. A copy of the plugin whose deferral never defers, run on the same plan, must refuse on the live row.
+OC_REV="$SANDBOX/oc-rev"; mkdir -p "$OC_REV" && cp -RL "$REPO_ROOT/payload" "$OC_REV/payload"; OC_W="$REPO_ROOT/payload/scripts/lib/walls.sh"
+sed '/^matrix_row_deferred() {/,/^}/ s/^  local n="\${3%\[ab\]}"$/&; return 1/' "$OC_W" > "$OC_REV/payload/scripts/lib/walls.sh"
+expect_eq "OC-1c0 the copy's deferral differs from the plugin's in one line" "1" "$(diff "$OC_W" "$OC_REV/payload/scripts/lib/walls.sh" | grep -c '^>')"
+PRV="$(mk_fixture owed-close-rev)"; advance_to "$PRV" 8; oc_rows "$PRV"
+OC_R="$REPO_ROOT"; OC_S="$SCRIPT"; REPO_ROOT="$OC_REV"; SCRIPT="$OC_REV/payload/scripts/close-out.sh"; run_close "$PRV" run; REPO_ROOT="$OC_R"; SCRIPT="$OC_S"
+expect_ne "OC-1c the run on that copy refuses" "0" "$CO_RC"
+expect_contains "OC-1d …on the live row, in the gate's words" "the row is live past the step that owes it" "$CO_OUT"
 run_close "$POC" run
 OC_LINE="$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')"
 expect_eq "OC-1 run exits 0: the pre-flight and the dry-run before the flip do not refuse on the row the close owes" "0" "$CO_RC"
