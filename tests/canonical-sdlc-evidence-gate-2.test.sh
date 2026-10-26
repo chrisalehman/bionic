@@ -583,26 +583,19 @@ expect_block "32m2 no rigor key at current 5, no auditor: pointer → block (fai
   "$h32m2" 'git commit -m "x"' "requires 'auditor:"
 
 # ============================================================
-# Section 33: a waiver outranks the `task: 9` tier refusal (review-a C-2)
+# Section 33: a row owed at the close owes nothing before it
 # ============================================================
 #
-# The `task: 9` tag (Section 17r) is T0-only: on any other tier it is a
-# mis-tag, and the refusal fires at every step. That check sat ABOVE the
-# `waiver:` exemption in the row loop, so a row an author had WAIVED — the
-# criterion let go, its evidence contract dissolved — still met the tier
-# refusal, and the only way past it was to retier a row nobody intends to
-# discharge. A waiver outranks every other per-row demand in this loop (the
-# per-tier keys, the CONFIRMED wall); it outranks this one too.
-#
-# The waiver test is the loop's existing one — a `waiver:` token in the
-# evidence cell or a `waiver:` line in the AC block — so "waived" means the
-# same thing here as it does for the per-tier keys three lines below.
+# A criterion is owed at the step whose task proves it, and `task: 9` names the close. An
+# unwaived pending row carrying it owes neither its per-tier keys nor a verdict at an earlier
+# step, so the commit is allowed (33b). Delete the owing-step comparison from the deferral
+# predicate and the same row is live: it meets the per-tier key refusals (33b-rev). A waiver
+# still outranks the per-tier keys, in either spelling (33a, 33c), and sits below the
+# provenance arm (33d).
 
-section "Section 33: a waiver outranks the task: 9 tier refusal"
+section "Section 33: a row owed at the close owes nothing before it"
 
-# A T1 row (not T0, so the tag is a mis-tag) carrying `task: 9`, WAIVED via
-# the evidence cell. AC-1 is an ordinary discharged row so the matrix is
-# otherwise complete and each verdict below is the waived row's doing.
+# The first row is an ordinary discharged row, so each verdict below is the second row's doing.
 m33_waived="## Verification Matrix
 
 stack-health: n/a: no long-running serve
@@ -625,38 +618,40 @@ AC-2:
 # The same row with the waiver taken away: pending, no token anywhere.
 m33_unwaived="${m33_waived/| AC-2 | T1 | waived | waiver: dana 2026-08-30 criterion dropped | waived |/| AC-2 | T1 | pending | see AC-2 |  |}"
 
-# The waiver in the AC BLOCK rather than the evidence cell — the loop's other
-# spelling of the same fact.
+# The waiver in the AC BLOCK rather than the evidence cell.
 m33_waived_block="${m33_waived/| AC-2 | T1 | waived | waiver: dana 2026-08-30 criterion dropped | waived |/| AC-2 | T1 | waived | dropped, see block | waived |}"
 m33_waived_block="${m33_waived_block/  task: 9/  task: 9
   waiver: dana 2026-08-30 criterion dropped}"
 
-# 33a — waived T1 row carrying task: 9 → commits.
 h33a=$(make_home)
 write_plan "$h33a" "$(plan 6 "$step6_body" "$m33_waived")" > /dev/null
-expect_allow "33a waived T1 row carrying 'task: 9' at current 6 → allow (waiver outranks)" \
+expect_allow "33a waived T1 row carrying 'task: 9' at current 6 → allow" \
   "$h33a" 'git commit -m "x"'
 
-# 33b — the same row UNWAIVED still blocks on the mis-tag, so 33a is the
-# waiver's doing and not the tier refusal having been deleted.
 h33b=$(make_home)
 write_plan "$h33b" "$(plan 6 "$step6_body" "$m33_unwaived")" > /dev/null
+expect_allow "33b unwaived pending T1 row carrying 'task: 9' at current 6 → allow (owed at the close, deferred)" \
+  "$h33b" 'git commit -m "x"'
+# The reverted rule: a copy of the shipped layout whose deferral predicate never defers.
+h33r_dir=$(mktemp -d); cleanup_dirs+=("$h33r_dir")
+cp -R "$h30g_dir/hooks" "$h30g_dir/scripts" "$h33r_dir/"
+cp "$_h30g_cand/walls.sh" "$h33r_dir/scripts/lib/walls.sh.real"
+sed 's#^matrix_row_deferred() {#matrix_row_deferred() { return 1;#' "$h33r_dir/scripts/lib/walls.sh.real" > "$h33r_dir/scripts/lib/walls.sh"
+expect_true "33b-rev meta: the reverted copy differs from the real library (mutation landed)" \
+  test -n "$(diff "$h33r_dir/scripts/lib/walls.sh.real" "$h33r_dir/scripts/lib/walls.sh")"
+rm -f "$h33r_dir/scripts/lib/walls.sh.real"
+_real_hook="$HOOK"; HOOK="$h33r_dir/hooks/loose-gate.sh"
+expect_block "33b-rev the same home against a gate whose deferral never defers → block, on the verdict it owes" \
+  "$h33b" 'git commit -m "x"' "the auditor has not confirmed AC-2"
+HOOK="$_real_hook"
 
-# 33c — the block-line spelling of the waiver reads the same way.
 h33c=$(make_home)
 write_plan "$h33c" "$(plan 6 "$step6_body" "$m33_waived_block")" > /dev/null
 expect_allow "33c the waiver as an AC-block line (not the evidence cell) → allow too" \
   "$h33c" 'git commit -m "x"'
 
-# 33d — scope control: the waiver exempts the row from the TIER refusal, not
-# from the loop's unconditional arms. The same waived row with a circular
-# `provenance: implementation` still blocks — the provenance arm sits above
-# both, deliberately, and this fix did not move it.
-# Anchored on 'task: 9' alone (never a path-bearing line): the pattern half
-# of a bash ${var/pattern/replacement} substitution ends at its own FIRST '/',
-# so a pattern spanning the 'evidence: record/generic-evidence.md' line above
-# would truncate there and garble both halves — this fixture proved that the
-# hard way and moved the anchor to a slash-free line instead.
+# Anchored on 'task: 9' alone: the pattern half of a ${var/pattern/replacement} ends at its
+# own first '/', so an anchor spanning a path-bearing line would truncate and garble both halves.
 m33_waived_prov="${m33_waived/  task: 9/  task: 9
   provenance: implementation}"
 h33d=$(make_home)
