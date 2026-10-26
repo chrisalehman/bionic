@@ -15,31 +15,6 @@
 # reply, typed by the user, `all default`, `all recommended` or the decisions by number, is replayed by `reply` into
 # approve, waive, waive-row, confirm-row and finding-move with the user's words.
 #
-# §NAME      the card is named release-approval everywhere; the old verb is an alias that says so once
-# §SHAPE     the prototype's sections in order, plain text, no record path, no quotation, the title, the record
-# §TRIGGERS  a carried S3 stays under Findings; a criterion miss and a recommendation against the default decide
-# §NO-WAIVER no surface offers waiving the regression: an absent or red whole run is early
-# §EARLY     each of the three facts refuses the render in its own words; the tick says the same line as advice
-# §PREVIEW   --preview renders an early run's page and writes nothing; its Bottom line owes a decision only once ready
-# §AGREE     the decisions are exactly the owed items, the unproved rows and the findings recommended against
-# §REGISTER  a waiver another session of the run raised is a decision on the card, and the reply closes it for that session
-# §REPLY     all default and all recommended replay into their verbs; anything else writes nothing
-# §T4        a T4 row through the gate's predicate: confirmed by you is proved; pending or a standing finding decides
-# §CONFIRM   confirm-row writes the attributed confirmation; the card offers confirm or waive; reply applies either
-# §BORN      two fix rows born of different questions render the page with no re-read
-# §JUDGE     the Tests line prints the full pass's state at this head; while it is not green the merge without a
-#            pass is a decision, reply writes its approval at the head, and current 8 passes only after it
-# §COVERED   a failed review its fix landing answered reads covered, naming the landing; the sitrep counts as the card
-# §POST      a reader row past the landed release keeps the card early until its piece reading is registered
-# §STEP0     card.sh step0 renders the configuration card and owes its reply
-# §LEGACY    a page written under the card's old name is still replied to, and the alias writes the new page
-# §HANDHOLDS the page prints the hand-holds line over the window, the line the report reads over the same ends
-# §RATIO     the page prints the release check's test-ratio line once, read from the log of the newest check proof
-# §CHECK-CHANGED the Bottom line says when the release changes a file of the declared release check's closure
-# §CARRY     a finding the run carries by its own choice is an ask on the run's register; the page records it, decisions
-#            or none, and the reply closes it
-# §STALE     an approval the head has moved past is put again on the card, and the reply writes a second line beside it
-#
 # FIXTURE FIDELITY. A real repository on `wave/01-fixture`, base B, a code commit C, then the release text's commit
 # R touching CHANGELOG.md alone; a double wave plan the real gate admits at Steps 6 to 8, bound to this session,
 # every proof line in its production writer's shape (`proof_line`, `proof_floor_line`), and five reading records in
@@ -874,6 +849,30 @@ s57_commit "$RFC" README.md 'prose past the approval' >/dev/null
 poke "$RFC" current 8 --check
 expect_eq "JUDGE-3k the head moves past it by prose: the release still holds, the merge-unproved line is stale, and current 8 --check refuses on the regression again" "1|1" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -cE '^regression	unproved	')"
 git -C "$RFC" reset -q --hard "$FC_R"
+fc_typed "$FC_WD" "$FC_WR"
+rm -f "$FC_REC"/release-approval-*.md
+
+# ============================================================
+section "§UNPROVED-ASK: the merge without a pass is an answer where an open integrate row waits on the release"
+# ============================================================
+# fails-when: approve, or the card's reply, writes no merge-unproved line on a plan whose integrate row reads no approval:merge; or writes one where no open integrate row stands.
+fc_ua() {  # [<integrate row's status>] -> PFC: the red world, the integrate row reading no approval but its own release
+  fc_plan "$(fc_floor "$FC_C")
+$(fc_reads "$FC_C")" "s/| pending | approval:release, approval:merge, head |\$/| ${1:-pending} | head |/"
+}
+fc_ua; poke "$RFC" approve merge-unproved 'words'
+expect_eq "UA-1 approve merge-unproved writes the line (exit 0) where the integrate row is open and no row reads approval:merge" "0|1" "$RC|$(/usr/bin/grep -c '^approved: merge-unproved ' "$PFC")"
+fc_ua; fc_page
+FC_UAN="$(fc_table | /usr/bin/grep -F '|key=approve:merge-unproved|' | sed -n 's/^release-approval\/v1|dec=\([0-9]*\)|.*/\1/p')"
+FC_UAM="${FC_UAN:-0} merge, rest default"; fc_typed "$FC_UAM"
+poke "$RFC" reply "$FC_UAM"
+expect_eq "UA-2 …and so does reply on the card's decision (exit 0)" "0|1" "$RC|$(/usr/bin/grep -c '^approved: merge-unproved ' "$PFC")"
+for FC_UAS in dropped landed; do
+  fc_ua "$FC_UAS"
+  poke "$RFC" approve merge-unproved 'words'
+  expect_eq "UA-3 …refused with the integrate row $FC_UAS, the plan unchanged" "1|0" "$RC|$(/usr/bin/grep -c '^approved: merge-unproved ' "$PFC")"
+  expect_contains "UA-3b …naming what the rows read, in the refusal's words ($FC_UAS)" "reads approval:merge-unproved, so recording it would satisfy nothing; the rows read: (no named approval)" "$OUT"
+done
 fc_typed "$FC_WD" "$FC_WR"
 rm -f "$FC_REC"/release-approval-*.md
 
