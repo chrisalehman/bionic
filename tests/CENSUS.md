@@ -1068,6 +1068,7 @@ refuse.test.sh | §4 | keep | payload/scripts/lib/refuse.sh: the JSON escaper le
 refuse.test.sh | §5 | keep | payload/scripts/lib/refuse.sh refuse: an authoring-error arm returns instead of exiting 2, so FELL-THROUGH prints and the wall waves the action past (5b, 5c) | none (searched 'FELL-THROUGH' in tests/)
 refuse.test.sh | §6 | keep | payload/scripts/lib/refuse.sh refuse: `_refuse_fold_detail "$detail"` made a plain printf, so a thirty-line exit2 detail prints whole with no +18 more (6e-6i, 6w) | none (searched '_refuse_fold_detail' and '+18 more' in tests/)
 refuse.test.sh | §T47 | keep | payload/scripts/lib/refuse.sh refuse: an over-wide fact cut by bytes instead of columns, so a UTF-8 fact's printed line ends in half a character (T47-d4) or the fact is lost from the detail (T47-b5) | none (searched 'T47' and 'bionic_cols' with refuse in tests/)
+refuse.test.sh | §NEEDS | keep | payload/scripts/lib/refuse.sh _refuse_log_need: the call deleted or the `needs: ` test dropped, so a person's exit under a bound plan leaves no refusal event on the landing record (NEEDS-1, NEEDS-2), or widened to any fix, or to a `needs:` in the fact or detail, or past an unbound session, so a record is appended or created (NEEDS-5, NEEDS-7) | none (searched 'ev=refusal' and 'needs=person' in tests/)
 
 ## regression-rename.test.sh
 
