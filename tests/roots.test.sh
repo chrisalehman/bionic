@@ -576,4 +576,49 @@ promote plan .bionic/docs/plans/epic-99/wave-03-tidy.plan.md
 expect_status "promote plan: refused, exit 1" 1 "$?"
 expect_eq "…and the tracked home is as it was" "$BEFORE" "$(tracked_list)"
 
+# ============================================================
+section "PROMOTE-TREE — promote writes where it runs"
+# ============================================================
+#
+# The record lives in the state home, which a linked worktree shares through its .bionic link;
+# the copy belongs to the checkout the verb runs in. The source is read against the state home
+# and the target is written under the running checkout's top level.
+
+mkdir -p "$PR/.worktrees"
+printf 'fixture\n' > "$PR/README"
+git -C "$PR" add README
+git -C "$PR" -c user.name=t -c user.email=t@t commit -q -m fixture
+git -C "$PR" worktree add -q "$PR/.worktrees/wt-1" -b wt-1
+ln -s "$PR/.bionic" "$PR/.worktrees/wt-1/.bionic"
+WT="$(cd "$PR/.worktrees/wt-1" && pwd -P)"
+printf '# ADR-008 — Two doors\n' > "$PRD/adrs/epic-99/adr-008-two-doors.md"
+promote_in() { local d="$1"; shift; ( cd "$d" && bash "$PLANT/hooks/session-poker.sh" promote "$@" ) >"$SANDBOX/.promote.out" 2>&1; }
+
+# Fails when the verb resolves its target through the state home, so the copy lands in the main
+# checkout and the worktree holds none.
+promote_in "$WT" adr .bionic/docs/adrs/epic-99/adr-008-two-doors.md
+expect_status "AC-4.1: promote from the worktree exits 0" 0 "$?"
+expect_eq "AC-4.1: the copy is in the worktree's tracked home, byte for byte" "yes" \
+  "$(cmp -s "$PRD/adrs/epic-99/adr-008-two-doors.md" "$WT/docs/adrs/adr-008-two-doors.md" && echo yes || echo no)"
+expect_eq "AC-4.1: …and the main checkout's tracked home holds nothing of it" "no" \
+  "$([ -e "$PR/docs/adrs/adr-008-two-doors.md" ] && echo yes || echo no)"
+# Fails when the success line names no tree, so a reader cannot tell where the copy went.
+expect_eq "AC-4.1: the success line names the worktree" "yes" \
+  "$(contains "$(cat "$SANDBOX/.promote.out")" "in $WT.")"
+
+# Fails when a docs-root-relative source is read against the worktree's top and refused as no file.
+promote_in "$WT" adr adrs/epic-99/adr-008-two-doors.md
+expect_status "AC-4.3: a docs-root-relative source from the worktree exits 0" 0 "$?"
+expect_eq "AC-4.3: …and the copy still holds the record" "yes" \
+  "$(cmp -s "$PRD/adrs/epic-99/adr-008-two-doors.md" "$WT/docs/adrs/adr-008-two-doors.md" && echo yes || echo no)"
+
+# Fails when the main-checkout promotion is refused or lands elsewhere.
+promote_in "$PR" adr .bionic/docs/adrs/epic-99/adr-008-two-doors.md
+expect_status "AC-4.2: promote from the main checkout exits 0" 0 "$?"
+expect_eq "AC-4.2: …and the copy lands in the main checkout's tracked home" "yes" \
+  "$(cmp -s "$PRD/adrs/epic-99/adr-008-two-doors.md" "$PR/docs/adrs/adr-008-two-doors.md" && echo yes || echo no)"
+# Fails when the success line gains a tree clause where the running checkout is the state home.
+expect_eq "AC-4.2: …and its success line has no tree clause" "no" \
+  "$(contains "$(cat "$SANDBOX/.promote.out")" " in $PR.")"
+
 finish

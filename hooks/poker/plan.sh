@@ -3492,16 +3492,21 @@ RP_TABLE
   # home under its kind with a stable name (lib/roots.sh `promote_target`, which owns the destination and every
   # refusal). It reads no plan and writes none: a promotion is a copy of a record the project keeps, so the
   # project root of the working directory is its only operand beside the two it is given. The source is an
-  # absolute path, else project-root-relative, else docs-root-relative. A second promotion of the same record
-  # lands at the same path and replaces it, so an amended record is promoted again by the same call.
+  # absolute path, else project-root-relative, else docs-root-relative, all read against the state home, which a
+  # linked worktree shares. The copy is written under the top level of the checkout the verb runs in, the way a
+  # part renders there, so a promotion run from a row's tree lands in that tree and never in the main checkout.
+  # A second promotion of the same record lands at the same path and replaces it, so an amended record is
+  # promoted again by the same call.
   # REFUSED (1), nothing copied: no such file, or anything promote_target refuses. REFUSED (2): no project root.
   poker_verb_promote() {
-    local root src to err
+    local root top src to err
     root="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
     if [ -z "$root" ]; then
       die "REFUSED — cannot resolve the project root from the working directory. Nothing was copied."
       exit 2
     fi
+    top="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)" && top="$(cd "$top" 2>/dev/null && pwd -P)" || top=""
+    [ -n "$top" ] || top="$root"
     case "$PR_ARG" in
       /*) src="$PR_ARG" ;;
       *) if [ -f "$root/$PR_ARG" ]; then src="$root/$PR_ARG"; else src="$(docs_root "$root")/$PR_ARG"; fi ;;
@@ -3512,14 +3517,14 @@ RP_TABLE
     fi
     src="$(cd "${src%/*}" 2>/dev/null && pwd -P)/${src##*/}"
     err="$(mktemp "${TMPDIR:-/tmp}/bionic-promote.XXXXXX")" || err=/dev/null
-    if ! to="$(promote_target "$root" "$PR_KIND" "$src" 2>"$err")"; then
+    if ! to="$(promote_target "$top" "$PR_KIND" "$src" 2>"$err")"; then
       die "REFUSED — $(sed 's/^promote: //' "$err" 2>/dev/null). Nothing was copied."
       rm -f "$err"
       exit 1
     fi
     rm -f "$err"
     if [ -f "$to" ] && cmp -s "$src" "$to"; then
-      say "promote — ${to#"$root"/} already holds ${src#"$root"/}; nothing changed."
+      say "promote — ${to#"$top"/} already holds ${src#"$root"/}; nothing changed.$([ "$top" = "$root" ] || printf ' The tree is %s.' "$top")"
       exit 0
     fi
     if ! { mkdir -p "${to%/*}" && cp "$src" "$to.promote.$$" && mv -f "$to.promote.$$" "$to"; }; then
@@ -3527,6 +3532,10 @@ RP_TABLE
       die "REFUSED — cannot write $to. Nothing was copied."
       exit 2
     fi
-    say "promote — ${src#"$root"/} is promoted to ${to#"$root"/}."
+    if [ "$top" = "$root" ]; then
+      say "promote — ${src#"$root"/} is promoted to ${to#"$root"/}."
+    else
+      say "promote — ${src#"$root"/} is promoted to ${to#"$top"/} in $top."
+    fi
     exit 0
   }
