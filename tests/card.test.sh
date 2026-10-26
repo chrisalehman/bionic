@@ -2561,8 +2561,7 @@ export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.invalid GIT_COMM
 up_line() { printf '%s\n' "$1" | /usr/bin/grep -F "whole suite: " | head -1; }  # <card> -> its whole-suite line
 # up_ask <card> -> the card's merge-unproved decision, its folded lines joined: `<n>. Merge without … · default: none`
 up_ask() {
-  printf '%s\n' "$1" | awk '$0 == "Decisions" { f = 1; next } f && $0 == "" { exit } f' | tr '\n' ' ' | tr -s ' ' \
-    | /usr/bin/grep -oE '[0-9]+\. Merge without a whole run at this head — [^·]+· recommended: wait for the pass · default: none'
+  printf '%s\n' "$1" | awk '$0 == "Decisions" { f = 1; next } f && $0 == "" { exit } f' | tr '\n' ' ' | tr -s ' ' | /usr/bin/grep -oE '[0-9]+\. Merge without a whole run at this head — [^·]+· recommended: wait for the pass · default: none'
 }
 # up_unanswered <plan> -> the plan with no `approved: merge-unproved` line: the person has not given the word yet
 up_unanswered() { /usr/bin/grep -v '^approved: merge-unproved ' "$1" > "$1.n" && mv "$1.n" "$1"; }
@@ -2573,28 +2572,20 @@ pah_poke "$PAH_P" card-up-session release-approval --preview "$PAH_PLAN"
 expect_eq "UP-1 a whole run red at F, two landings past it greening its reds: the card prints red at F, the two counted, marked not green" \
   "0|✖️ whole suite: red at ${PAH_F:0:8}, 2 landings before this head" "$PAH_RC|$(up_line "$PAH_OUT")"
 expect_absent "UP-1b …and never covered or green" "green" "$(pah_card_state "$PAH_OUT")"
-expect_regex "UP-3 …and the card asks the merge without a pass at this head as its own decision, the state on it, waiting recommended and no default" \
-  "^[0-9]+\. Merge without a whole run at this head — red at ${PAH_F:0:8}, 2 landings before this head · recommended: wait for the pass · default: none\$" \
-  "$(up_ask "$PAH_OUT")"
+expect_regex "UP-3 …and the card asks the merge without a pass at this head as its own decision, the state on it, waiting recommended and no default" "^[0-9]+\. Merge without a whole run at this head — red at ${PAH_F:0:8}, 2 landings before this head · recommended: wait for the pass · default: none\$" "$(up_ask "$PAH_OUT")"
 pah_poke "$PAH_P" card-up-session current 8 --check
-expect_eq "UP-3b unanswered, current 8 --check refuses (exit 1) on the regression, unproved at this head" "1|1" \
-  "$PAH_RC|$(printf '%s\n' "$PAH_OUT" | /usr/bin/grep -cE "^regression	unproved	red at ${PAH_F:0:8}, 2 landings before this head	")"
-expect_contains "UP-3c …naming the person's exit" \
-  "needs: the user — reply" "$PAH_OUT"
-expect_contains "UP-3d …and the other: the pass at this head" \
-  "on the release card (merge without a whole run at this head), or wait for the pass" "$PAH_OUT"
+expect_eq "UP-3b unanswered, current 8 --check refuses (exit 1) on the regression, unproved at this head" "1|1" "$PAH_RC|$(printf '%s\n' "$PAH_OUT" | /usr/bin/grep -cE "^regression	unproved	red at ${PAH_F:0:8}, 2 landings before this head	")"
+expect_contains "UP-3c …naming the person's exit" "needs: the user — reply" "$PAH_OUT"
+expect_contains "UP-3d …and the other: the pass at this head" "on the release card (merge without a whole run at this head), or wait for the pass" "$PAH_OUT"
 # The close-out fixture's plan carries no Step 4 block, so no plan verb can write to it; the person's word is planted
 # in the approve writer's own line, under ## SDLC State. release-approval.test.sh §JUDGE drives reply and that writer.
-awk -v h="$PAH_H" '{ print } /^current: / { print "approved: merge-unproved by Fixture 2026-10-04T15:00:00Z head=" h " \"merge it without the pass\"" }' \
-  "$PAH_PLAN" > "$PAH_PLAN.n" && mv "$PAH_PLAN.n" "$PAH_PLAN"
-expect_eq "UP-3e the person's word, given at the working head, is the plan's newest merge-unproved line" "$PAH_H" \
-  "$(bash -c '. "$1/proof.sh" && proof_approved_head "$2" merge-unproved' _ "$PAH_LIB" "$PAH_PLAN" 2>/dev/null)"
+awk -v h="$PAH_H" '{ print } /^current: / { print "approved: merge-unproved by Fixture 2026-10-04T15:00:00Z head=" h " \"merge it without the pass\"" }' "$PAH_PLAN" > "$PAH_PLAN.n" && mv "$PAH_PLAN.n" "$PAH_PLAN"
+expect_eq "UP-3e the person's word, given at the working head, is the plan's newest merge-unproved line" "$PAH_H" "$(bash -c '. "$1/proof.sh" && proof_approved_head "$2" merge-unproved' _ "$PAH_LIB" "$PAH_PLAN" 2>/dev/null)"
 pah_poke "$PAH_P" card-up-session current 8 --check
 expect_eq "UP-3f …after which current 8 --check passes (exit 0)" "0" "$PAH_RC"
 [ "$PAH_RC" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$PAH_OUT" | tail -4)"
 pah_poke "$PAH_P" card-up-session release-approval --preview "$PAH_PLAN"
-expect_eq "UP-3g …and the card still prints red at F, and asks nothing more of it" "✖️ whole suite: red at ${PAH_F:0:8}, 2 landings before this head|" \
-  "$(up_line "$PAH_OUT")|$(up_ask "$PAH_OUT")"
+expect_eq "UP-3g …and the card still prints red at F, and asks nothing more of it" "✖️ whole suite: red at ${PAH_F:0:8}, 2 landings before this head|" "$(up_line "$PAH_OUT")|$(up_ask "$PAH_OUT")"
 pah_world up-green "" 0
 up_unanswered "$PAH_PLAN"
 bound_marker "$PAH_P" card-up-session "$PAH_PLAN"

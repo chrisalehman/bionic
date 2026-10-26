@@ -54,8 +54,7 @@ if [ "$RT_RC" = 0 ]; then
   # The release text landed past the whole run, so the card asks the merge without a pass at this head beside the
   # release and the merge. No row reads that approval by name, so the sheet's holds reads it as holding nothing,
   # though the gate at Step 8 holds the merge on it.
-  rt_sheet_and_card RW "approve:merge approve:merge-unproved approve:release" \
-    "approve:merge-unproved>nothing approve:merge>8/4 approve:release>8/4" approve:release
+  rt_sheet_and_card RW "approve:merge approve:merge-unproved approve:release" "approve:merge-unproved>nothing approve:merge>8/4 approve:release>8/4" approve:release
 fi
 
 # ============================================================
@@ -87,11 +86,9 @@ if [ -f "$RT_PLAN" ]; then
   RT_F="$(bash -c '. "$1/proof.sh" && proof_last "$2" regression' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$RT_PLAN" 2>/dev/null)"
   RT_H="$(bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_branch_head "$2" "$3"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$RT_PLAN" "$RT_ROOT" 2>/dev/null)"
   RT_N="$(git -C "$RT_ROOT" rev-list --first-parent --count "$RT_F..$RT_H" 2>/dev/null)"
-  expect_eq "FA-6b precondition: the release text landed past the whole run, so the working head is not the run's" \
-    "yes|yes" "$([ -n "$RT_F" ] && [ -n "$RT_H" ] && [ "$RT_F" != "$RT_H" ] && echo yes)|$([ "${RT_N:-0}" -gt 0 ] && echo yes)"
+  expect_eq "FA-6b precondition: the release text landed past the whole run, so the working head is not the run's" "yes|yes" "$([ -n "$RT_F" ] && [ -n "$RT_H" ] && [ "$RT_F" != "$RT_H" ] && echo yes)|$([ "${RT_N:-0}" -gt 0 ] && echo yes)"
   RT_L="landings"; [ "${RT_N:-}" != 1 ] || RT_L="landing"
-  expect_eq "FA-6c …so the whole run the regression row ran reads red at its head, the landings since counted" \
-    "red at ${RT_F:0:8}, ${RT_N:-?} $RT_L before this head" "$(rt_m "$RT_OUT" tests.whole-run)"
+  expect_eq "FA-6c …so the whole run the regression row ran reads red at its head, the landings since counted" "red at ${RT_F:0:8}, ${RT_N:-?} $RT_L before this head" "$(rt_m "$RT_OUT" tests.whole-run)"
 fi
 
 finish
