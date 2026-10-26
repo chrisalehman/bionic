@@ -177,7 +177,7 @@ walk_settle() {
   WALK_DONE=""; WALK_LANDED=""; WALK_LEFT=""; WALK_WAVE=""; WALK_WHY=""
   { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
     && declare -F line_settled_by >/dev/null 2>&1 \
-    || { WALK_WHY="the landing record reader (lib/line.sh) cannot be loaded from $BIONIC_LIB, so which rows a landing settled cannot be read"; return 1; }
+    || { WALK_WHY="the landing record library (lib/line.sh) cannot be loaded from $BIONIC_LIB, so which rows a landing settled cannot be read"; return 1; }
   while IFS='	' read -r ac v; do
     [ -n "$ac" ] || continue
     if [ "$ac" = wave ]; then WALK_WAVE="$v"; continue; fi
