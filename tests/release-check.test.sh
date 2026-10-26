@@ -52,12 +52,11 @@
 #                   (this run states none, so the Known limits arms hold at zero): every deferred sentence stands under
 #                   Known limits and the check passes; the same entry with its Known limits removed fails one line for
 #                   each deferred sentence, and passes when there are none; one planted deferral keeps the omission arm live.
-#   §REL-1.28.0     the 1.28.0 entry, beside the 1.27.0 section: the newest heading reads 1.28.0 and the version pair
-#                   agrees, the entry is dated, names its two ADRs, its Migration paragraph names every row that changed what
-#                   a script may meet, and plugin.json reads 1.28.0, each with a doctored copy. The release check is run on a
-#                   repository holding the real entry and this run's real deferred lines: every deferred sentence stands
-#                   under Known limits and the check passes; the same entry with its Known limits removed fails one line
-#                   for each; one planted deferral keeps the omission arm live.
+#   §REL-1.28.0     the 1.28.0 entry: its block's own heading reads 1.28.0, the version pair agrees at the newest heading,
+#                   the entry is dated, names its two ADRs and every row that changed what a script may meet, each with a
+#                   doctored copy, against a pinned 1.28.0 manifest. The release check is run on a repository holding the
+#                   real entry and this run's real deferred lines: every deferred sentence stands under Known limits and it
+#                   passes; with its Known limits removed it fails one line for each; one planted deferral keeps that arm live.
 #
 # FIXTURE FIDELITY: every repository is a real `git init` under a mktemp directory with real
 # commits; nothing is a mock of git. The list file lives outside every checkout and holds one
@@ -861,14 +860,15 @@ REL_ADR_A="ADR-072"
 REL_ADR_B="ADR-073"
 
 expect_eq "(n1) the version pair reads the newest heading" "" "$(pair_check "$CL" "$PLUGIN_JSON")"
-expect_eq "(n1) …which is 1.28.0" "1.28.0" "$(/usr/bin/grep -m 1 '^## ' "$CL" | sed -n 's/^## \([0-9.]*\) .*/\1/p')"
-expect_eq "(n2) the entry keeps every rule" "" "$(rel_check "$CL" "$PLUGIN_JSON" 1.28.0 "$REL_ADR_A" "$REL_MIG_ROWS")$(rel_check "$CL" "$PLUGIN_JSON" 1.28.0 "$REL_ADR_B" "$REL_MIG_ROWS")"
+expect_eq "(n1) …the 1.28.0 block's own heading reads 1.28.0" "1.28.0" "$(cl_block "$CL" 1.28.0 | head -1 | sed -n 's/^## \([0-9.]*\) .*/\1/p')"
+printf '{\n  "name": "bionic",\n  "version": "1.28.0"\n}\n' > "$TMP/plugin.1280.json"
+expect_eq "(n2) the entry keeps every rule" "" "$(rel_check "$CL" "$TMP/plugin.1280.json" 1.28.0 "$REL_ADR_A" "$REL_MIG_ROWS")$(rel_check "$CL" "$TMP/plugin.1280.json" 1.28.0 "$REL_ADR_B" "$REL_MIG_ROWS")"
 doctor r28_nomig awk '/^\*\*Migration\.\*\*/ { m = 1 } m && /^### / { m = 0 } m { gsub(/T33/, "Tnn") } { print }'
-expect_contains "(n2) a Migration paragraph that does not name T33: red" "rel: Migration does not name T33" "$(rel_check "$TMP/doctored.r28_nomig" "$PLUGIN_JSON" 1.28.0 "$REL_ADR_A" "$REL_MIG_ROWS")"
+expect_contains "(n2) a Migration paragraph that does not name T33: red" "rel: Migration does not name T33" "$(rel_check "$TMP/doctored.r28_nomig" "$TMP/plugin.1280.json" 1.28.0 "$REL_ADR_A" "$REL_MIG_ROWS")"
 doctor r28_noadr sed "s/$REL_ADR_A/the first record/g"
-expect_contains "(n2) an entry that does not name $REL_ADR_A: red" "rel: the entry does not name $REL_ADR_A" "$(rel_check "$TMP/doctored.r28_noadr" "$PLUGIN_JSON" 1.28.0 "$REL_ADR_A" "$REL_MIG_ROWS")"
+expect_contains "(n2) an entry that does not name $REL_ADR_A: red" "rel: the entry does not name $REL_ADR_A" "$(rel_check "$TMP/doctored.r28_noadr" "$TMP/plugin.1280.json" 1.28.0 "$REL_ADR_A" "$REL_MIG_ROWS")"
 doctor r28_noadr2 sed "s/$REL_ADR_B/the second record/g"
-expect_contains "(n2) an entry that does not name $REL_ADR_B: red" "rel: the entry does not name $REL_ADR_B" "$(rel_check "$TMP/doctored.r28_noadr2" "$PLUGIN_JSON" 1.28.0 "$REL_ADR_B" "$REL_MIG_ROWS")"
+expect_contains "(n2) an entry that does not name $REL_ADR_B: red" "rel: the entry does not name $REL_ADR_B" "$(rel_check "$TMP/doctored.r28_noadr2" "$TMP/plugin.1280.json" 1.28.0 "$REL_ADR_B" "$REL_MIG_ROWS")"
 expect_contains "(n2) a manifest that reads another version: red" "rel: plugin.json does not read 1.28.0" "$(rel_check "$CL" "$TMP/plugin.1270.json" 1.28.0 "$REL_ADR_A" "$REL_MIG_ROWS")"
 
 if [ -r "$REL_PLAN" ]; then
