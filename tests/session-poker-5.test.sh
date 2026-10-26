@@ -1,11 +1,9 @@
 #!/bin/bash
 # Tests for hooks/session-poker.sh — shard 5: §CHECK, §DECISIONS, §ROUNDS, §EARLY-TICK, §ORDER, §QUIET-LANDING,
-# §NOTREADY, §STEP, §TSENTENCE, §CAP, §OWED, §EXEMPT, §APPROVED-BY, §PARTS, §RETIER.
+# §NOTREADY, §STEP, §TSENTENCE, §CAP, §OWED, §EXEMPT, §REGISTRY, §APPROVED-BY, §PARTS, §RETIER.
 #
-# THE SUITE IS SHARDS (wave-30 T2; design-ledger Δ7, D8). Its governing design, its hermetic
-# posture and its clock discipline are written once, in tests/session-poker.test.sh's header;
-# the sandbox, the pins and the shared fixture builders are tests/session-poker.prelude.sh,
-# sourced below after the framework and the POKER seam. This shard builds every fixture it reads.
+# THE SUITE IS SHARDS (wave-30 T2; design-ledger Δ7, D8). Its design, hermetic posture and clock discipline are
+# in tests/session-poker.test.sh's header; the sandbox and shared fixture builders are tests/session-poker.prelude.sh.
 #
 # Usage: bash tests/session-poker-5.test.sh
 
@@ -33,11 +31,8 @@ S31_STOP_HOOK="${BIONIC_HOOKS_DIR}/stop.sh"
 # ============================================================
 section "§CHECK: current <N> --check runs what current <N> runs before it writes, writes nothing, and exits as the advance would (wave-38 T1; REQ-1 AC-1.3; D20)"
 # ============================================================
-# There was no dry form of the step move: close-out's `check` was the only one, so an orchestrator
-# learned whether `current 7` would be admitted by running it. `current <N> --check` (N in 5..8) runs
-# the advance's own path up to and excluding the swap — the same dry commit through the real gate,
-# the same `cur7_judge <N>` — prints `current <N> --check: would advance` or `… would refuse` above
-# the refusal text, and writes nothing. The agreement is structural: one function both paths call.
+# `current <N> --check` (N in 5..8) runs the advance's own path up to the swap, through the real gate and the same
+# `cur7_judge <N>`, prints `would advance` or `would refuse` above the refusal text, and writes nothing.
 # FIXTURE FIDELITY: §CUR7's world (session-poker-4): a real repository on `wave/01-fixture` with two
 # suites and lib/x.sh, base B and a code commit C; a double wave plan the real gate admits at Steps 5
 # through 7, bound to this session; every fact in the production writer's shape (`proof_line`,
@@ -213,9 +208,9 @@ POKE_BOUND="$CK_BOUND_WAS"
 section "§DECISIONS: decisions [--all] reads the design ledgers' register entries; the recap prints this run's settled set; doctrine re-puts a settled decision only as reopening D<n> (wave-38 T13; REQ-3 AC-3.4; D24)"
 # =====================================================# Every ruling is a `## Δn — Dn ruled "<reply>" (<who> <date>): <title>` heading in record/<wave>/design-ledger.md, or
 # a `- Dn ruled …` bullet under a Δ (the Step-1 rulings folded in, as this wave's Δ21 holds them); `re-ruled` and
-# `withdrawn` are register entries too. `decisions` lists this run's, `D<n> · "<reply>" · <who> <date> · <title>`, in
-# the ledger's order; `--all` lists every record/*/design-ledger.md under the docs root, each line keyed by its wave,
-# waves in slug order, a ledger with no entry in the grammar named once, and every ADR keyed by its frontmatter wave.
+# `withdrawn` are register entries too. `decisions` lists this run's, `D<n> · "<reply>" · <who> <date> · <title>`, in the
+# ledger's order; `--all` lists every record/*/design-ledger.md under the docs root keyed by wave in slug order, a ledger
+# with no entry in the grammar named once, and every ADR keyed by its frontmatter wave.
 # The resume recap's settled: lines come from the same parser (handoff-file §RESUME RS6). FIXTURE FIDELITY: a real
 # repository, §CHECK's plan shape bound to this session; ledgers in the grammar this wave's own ledger is written in,
 # with the lines a register must not read (a heading with no ruling, a body line, a fenced example).
@@ -505,13 +500,9 @@ rm -rf "$BIONIC_GATE_DIR/leases"
 # ============================================================
 section "§QUIET-LANDING: the quiet check reads the row's live landing carrier and the gate's open request for its agent before the mtimes (wave-39 T22; REQ-16 AC-16.1; D21)"
 # ============================================================
-# A writer blocked in a foreground `ready --within 1790` touches neither its progress file nor its transcript
-# for up to 30 minutes, so the tick's two NOTIFY arms (past the declared duration; quieter than the cadence)
-# named a working row every tick (three nights of it). Both arms now ask first whether the row's landing carrier
-# lives (an entry of lib/line.sh's fold, present while the `carrier=` pid of its `ev=ready` lives, whose name is
-# the row's) or whether the gate holds an open request for the row's agent; either makes the row ACTIVE, never
-# NOTIFY. Only then the mtimes. A row with no carrier, no request and nothing written past its cadence is quiet,
-# and a dead silent row still NOTIFYs.
+# A writer blocked in a foreground `ready --within 1790` touches neither its progress file nor its transcript for up to
+# 30 minutes, so both NOTIFY arms ask first whether the row's landing carrier lives or the gate holds an open request
+# for the row's agent; either makes the row ACTIVE. Only then the mtimes: a dead silent row still NOTIFYs.
 # FIXTURE FIDELITY: a real repository with a wave plan the tick reads, the roster row in the writer's shape (name,
 # progress and cadence), the carrier a sleeping process whose pid and start time the record's `ev=ready` names as
 # lib/line.sh writes them (`line_event`, `_line_me`), the request one the gate's own `gate_ask` files and whose
@@ -832,9 +823,9 @@ POKE_BOUND="$CP_BOUND_WAS"
 # ============================================================
 section "§EXEMPT: a review-born row inside fix-policy: is exempt from fix-cap:, a promoted or carried one counts, and task-add says which count it applied"
 # ============================================================
-# A defect the wave made, the wave fixes, so the cap counts only the rows a review adds beyond them. A row rated inside
-# fix-policy: (here the default, S1,S2-on) lands however many the review raised; a finding the person moved to fix from
-# outside the policy, and a finding carried in from another plan's record directory, count against fix-cap:.
+# A defect the wave made, the wave fixes, so the cap counts only the rows a review adds beyond them: a row rated inside
+# fix-policy: (default S1,S2-on) lands however many there are; a finding the person moved to fix from outside it, and a
+# finding carried in from another plan's record directory, count against fix-cap:.
 # FIXTURE FIDELITY: s34's plan at current: 4 with `fix-cap: 2` in its frontmatter, as Step 3 writes the field; two
 # readings registered in the shape `proof-add review` writes, their records holding findings in the reader's shape, one
 # record this plan's own and one another plan's; the person's moves to fix planted as `finding-move` writes them; every
@@ -903,6 +894,20 @@ expect_contains "EX-7b …exempt" " · exempt under fix-policy: S1,S2-on" "$(ex_
 POKE_BOUND="$EX_BOUND_WAS"
 
 # ============================================================
+section "§REGISTRY: the per-file cap does not count a file every test row must touch, and still counts any other"
+# ============================================================
+# fails-when: a fourth review-born row touching tests/CENSUS.md is refused as a fourth fix on it, or a fourth row on an
+# ordinary shared path is admitted, or its refusal names another path.
+RG_WAS="$POKE_BOUND"; POKE_BOUND=180
+for RG_I in 1 2 3; do ex_add T2$RG_I "tests/CENSUS.md,lib/r$RG_I.sh,lib/shared.sh" 'review S2 on'; done
+ex_add T24 "tests/CENSUS.md,lib/r4.sh" 'review S2 on'
+expect_eq "RG-1 a fourth born row touching tests/CENSUS.md, three rows already fixing it, is admitted (exit 0)" "0" "$RC"
+ex_add T25 "tests/CENSUS.md,lib/shared.sh" 'review S2 on'
+expect_eq "RG-2 control: a fourth on lib/shared.sh, three rows already fixing it, is refused (exit 1)" "1" "$RC"
+expect_contains "RG-2b …naming lib/shared.sh and the three rows" "a fourth fix on lib/shared.sh: T21, T22, T23 already fix it" "$OUT"
+POKE_BOUND="$RG_WAS"
+
+# ============================================================
 section "§APPROVED-BY: approve plan '<reply>' writes the approved-by: line the walls read, with the user's words, once (REQ-9 AC-9.2)"
 # ============================================================
 # The plan's approval is the `approved-by: <user> <ISO-UTC> "<reply>"` line under `## SDLC State` that the commit gate
@@ -946,11 +951,9 @@ POKE_BOUND="$AB_BOUND_WAS"
 # ============================================================
 section "§PARTS: the release-entry parts render in the checkout they run from: a row's tree commits on its own branch and the working branch stays put, the working branch's checkout moves it, and the part line names the tree (REQ-12 AC-12.1, AC-12.2)"
 # ============================================================
-# `known-limits-part <row>` and `reviews-part <row>` read CHANGELOG.md at the HEAD of the checkout they run from, render
-# the part into that checkout and commit it on that checkout's branch, so a row's tree can render the part its own
-# landing carries. Only the checkout holding the plan's working branch moves that branch. A checkout on main can take
-# no commit of its own, so from there the part goes to the working branch as before. The landing record's part line
-# names the tree that took the commit.
+# `known-limits-part <row>` and `reviews-part <row>` render the part into the checkout they run from and commit it on that
+# checkout's branch; only the checkout holding the working branch moves it, a checkout on main commits on the working
+# branch as before, and the part line names the tree that took the commit.
 # FIXTURE FIDELITY: s34_plan's plan, bound to this session, with the working branch and the release in its frontmatter
 # as Step 0 writes them; the doc and integrate rows are the table's own shape; the deferral is lib/proof.sh
 # `proof_finding_lines`' line and its sentence the `finding-stated` verb's; the waiver is `proof_waiver_line`'s, the
@@ -1034,13 +1037,10 @@ expect_contains "PA-9b …and its part line names the working branch and the che
 # ============================================================
 section "§RETIER: matrix-retier raises a criterion's tier in every place it lives and resets the row; a tier at or below the cell's is refused (REQ-3 AC-3.1, AC-3.2)"
 # ============================================================
-# A criterion's tier lives in three places: the matrix table's tier cell, the AC block's `eval: <tier> — <text>` line, and
-# the plan's `## Eval design` row (Eval type and Eval). `matrix-retier <AC> tier=<T> eval=<text>` raises it in all three
-# in one plan transaction and resets the row: status pending, the evidence cell and key back to the render's stubs, the
-# auditor cell cleared, any waiver: line gone, and at T4 the user-confirmed: key the render writes there. The landing
-# record gains its ev=matrix-retier line and the design ledger a `## Δ<k> — retier` heading in the decisions' numbering.
-# A tier at or below the cell's is refused: weakening is the user's, so the refusal says it needs them. The spec is the
-# approved text and is never touched.
+# A criterion's tier lives in the matrix tier cell, the AC block's `eval:` line and the plan's `## Eval design` row.
+# `matrix-retier <AC> tier=<T> eval=<text>` raises all three in one transaction and resets the row (status, evidence,
+# auditor, waiver, and at T4 the user-confirmed: key), writes ev=matrix-retier and a `## Δ<k> — retier` heading. A tier
+# at or below the cell's is refused as the user's call; the spec is never touched.
 # FIXTURE FIDELITY: s34_plan's plan at current: 4, bound to this session, its typed matrix row and block taken out and an
 # Eval design added in the Step-3 table's shape; matrix-render writes the rows and blocks. The evidence, status and
 # auditor cells are written by matrix-set and discharge; the waiver: line is waive-row's line, planted at the end of

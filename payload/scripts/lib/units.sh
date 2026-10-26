@@ -3354,6 +3354,11 @@ units_chain() {
 # `- <id>:` line of the section per id. The Files cell is the row's own (`units_rows`), empty for a
 # line whose row the table does not carry. Reader: the poker's `task-add --born` (the fourth fix on
 # one component); the cap's count is `units_born_counted` below, read off the same scan.
+# REGISTRY_FILES: the files every test row must touch (space-separated paths, relative to the repo root). A registry
+# is edited by every row of its kind, so the per-file cap of `task-add --born` counts no fixer of a path named here,
+# and shell-lint's census arm reads its census file from this list, which keeps the rule in this one place.
+REGISTRY_FILES="tests/CENSUS.md"
+
 units_born() {
   local out
   out="$(_units_born_scan "${1:-}")" || return 1

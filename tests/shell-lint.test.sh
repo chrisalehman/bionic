@@ -1565,12 +1565,11 @@ expect_eq "EXIT-3c the gate's two auditor refusals the release card settles each
   "2 2" "$EXIT_AUD"
 
 # ── the census ───────────────────────────────────────────────────────────────
-# tests/CENSUS.md holds one record line per section of every suite under tests/, under a heading per
-# suite, in the shape tests/RUBRIC.md §4 sets. This sweep refuses a tests tree the census does not
-# cover. A `section` call is found by the rubric's own section-list command, extracted from the
-# rubric and run here, so there is one key rule and no second copy of it. A call inside a heredoc
-# body is fixture text, written into a scratch suite, and is not a section.
-CENSUS_MD="$TESTS_DIR/CENSUS.md"
+# The census file holds one record line per section of every suite under tests/, under a heading per suite, in the
+# shape tests/RUBRIC.md §4 sets; this sweep refuses a tree it does not cover. A `section` call is found by the rubric's
+# own section-list command, extracted from the rubric and run here. A call inside a heredoc body is fixture text.
+census_registry() { sed -n 's/^REGISTRY_FILES="\([^" ]*\).*$/\1/p' "$1" | head -1; }   # <units.sh> -> the first registry file
+CENSUS_MD="$REPO/$(census_registry "$REPO/payload/scripts/lib/units.sh")"
 CENSUS_RUBRIC="$TESTS_DIR/RUBRIC.md"
 CENSUS_PROG="$TMP/census-prog.awk"
 cat > "$TMP/census-extract.awk" <<'CENSUS_EXTRACT_EOF'
@@ -1747,15 +1746,16 @@ expect_contains "the sweep reads the real tree: it finds this suite's own sectio
   "shell-lint.test.sh	section	CENSUS-COMPLETE-3" "$CC3_CALLS"
 expect_eq "the census file is there, with a heading for this suite" "yes" \
   "$(/usr/bin/grep -q '^## shell-lint.test.sh$' "$CENSUS_MD" 2>/dev/null && echo yes)"
+expect_eq "the census path comes from the registry constant: the product's names tests/CENSUS.md, a scratch copy's another file" \
+  "$TESTS_DIR/CENSUS.md|tests/OTHER.md" "$CENSUS_MD|$(census_registry <(echo 'REGISTRY_FILES="tests/OTHER.md"'))"
 expect_eq "the real tests tree is covered by tests/CENSUS.md: no refusal" "" "$(census_refusals "$TESTS_DIR" "$CENSUS_MD")"
 
 
 # ── the cut ──────────────────────────────────────────────────────────────────
-# The census is also the cut: a section whose verdict is a cull is deleted from its suite, and a section the census
-# keeps stays. A key's calls in its suite must number its keep lines, so a culled section still called and a kept
-# one gone are both refused, by suite and key. `## Culled` lists the cull as `<suite> §<key> — <verdict>`, the
-# verdict after the last ` — ` because a key may hold one. A line there whose verdict is keep, or whose key carries a
-# `rule:` record (a door refusal, a lint or a check pin), culls what the rubric never lets go.
+# The census is also the cut: a section whose verdict is a cull is deleted from its suite, a section it keeps stays, and
+# a key's calls in its suite must number its keep lines, so a culled section still called and a kept one gone are both
+# refused. `## Culled` lists the cull as `<suite> §<key> — <verdict>`, the verdict after the last ` — `. A line there
+# whose verdict is keep, or whose key carries a `rule:` record, culls what the rubric never lets go.
 # census_cull_refusals <tests dir> <census file> -> one line per refusal, none when the tree is cut as the census says:
 #   culled section present: a key with a cull line still called more often than it has keep lines
 #   kept section absent: a key with more keep lines than calls in its suite

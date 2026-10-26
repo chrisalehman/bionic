@@ -1224,7 +1224,8 @@ EOF
     # ledger lines' born: markers (`units_born_counted`, the one place the count reads): a row inside the
     # policy whose findings are this plan's own is the review's own defect and exempt, while a promoted or a
     # carried one counts, so the cap bounds only the scope a review adds; (3) no Files path outside
-    # the record already carries three review-born rows: the fourth fix on one component stops the run.
+    # the record or the registry files (lib/units.sh REGISTRY_FILES) already carries three review-born rows: the
+    # fourth fix on one component stops the run.
     # In-diff is the orchestrator's judgment and "never re-read" the proof's; neither is this verb's.
     # THE FINDINGS A ROW ANSWERS (wave-33 T13; REQ-5, D6): each is a finding of a reading the plan registered,
     # read from its record (`finding_read`); the row's rating is the gravest of them, the lowest S and then on
@@ -1295,6 +1296,7 @@ EOF
       while IFS= read -r TA_PATH; do
         [ -n "$TA_PATH" ] || continue
         case "$TA_PATH" in .bionic/*|record/*) continue ;; esac
+        case " $REGISTRY_FILES " in *" $TA_PATH "*) continue ;; esac
         TA_FIXERS="$(printf '%s\n' "$TA_BORN_ROWS" | while IFS=$'\t' read -r TA_BID _ TA_BFILES; do
             [ -n "$TA_BID" ] || continue
             _units_split_tokens "$TA_BFILES" | grep -Fx -- "$TA_PATH" >/dev/null && printf '%s\n' "$TA_BID"
