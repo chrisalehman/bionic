@@ -151,6 +151,17 @@ new capability. `canonical_sdlc_version` stays 14.
   `rendered.sha256` refreshed, and ADR-074. T20 opens the pull request, and T21 closes the run and reads the hand-holds
   measure last.
 
+### Known limits
+
+Rendered from the plan's deferred findings, each its stated sentence, in the order they were registered.
+
+- The tick starts the whole run only while no row is ready, so the walk and critic rows, ready at the last build landing, can read a head no pass ran at; the orchestrator starts the run there.
+- Advancing to Step 7 is held to the merge-unproved rule placed at Step 8, so a run whose pass is behind its head needs a second whole run or the person's word on a release card that does not yet exist at Step 7.
+- The release card asks the merge without a pass on a plan with no integrate row, where approve refuses the reply that answers it.
+- The skill text in operational-rules.md and steps/5.md still says regression-run refuses a proved head and that a second whole run never happens, which D4 and D16 made false.
+- The situation report's waiting-on-you minutes read only the newest round of a re-put key, although the register now keeps every round.
+- The stack-health line and the release card disagree about green at a head whose whole run's only reds are inherited debt.
+
 ### The landing numbers
 
 `landing-report --rows` at 5a08f601b5aca8cdf332c0ca1581bcbcdf3ab851 on 2026-10-26T05:40:17Z:
