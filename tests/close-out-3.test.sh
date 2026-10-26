@@ -19,28 +19,17 @@ set -uo pipefail
 # ============================================================
 section "§HAND-HOLDS — wave-35 T12 (REQ-8 AC-8.1, D17): the hand-hold count is folded from the lines the escape-hatch verbs wrote"
 # ============================================================
-# `landing-report --hand-holds <plan>` adds one line to the report: the uses of the escape-hatch verbs, by kind,
-# each counted from the line its verb wrote and from nothing else. A prose line saying `by-hand` counts nothing.
-# close-out prints that line on its card and writes it into the continuation under `## Hand-holds`; it reads it
-# BEFORE the tmp wipe, because three kinds (amend, hold, extend) live on the roster and act 3 wipes the roster.
-#
-# THE SOURCES, each in the shape its writer prints (the fixture plants the shape, the roster through the one
-# production row writer, the plan's proof lines through lib/proof.sh's own line builders):
-#   by-hand        landing record      line/v1|ev=published|…|kind=hand|…            (lib/line.sh)
-#   stop-runs      landing record      line/v1|ev=stop-run|…                         (session-poker.sh stop-run; wave-36 T11, D8)
-#   declines/lifts fill ledger         fill-ledger/v1|…|state=decline| and |state=lift|   (the verbs; the Stop hook writes ok and hold)
-#   amends         roster              distinct (name, amended=<value>) of the run's plan
-#   holds          roster              distinct (name, held=<value>)
-#   extensions     roster              distinct (name, extended=<value>)
-#   waivers        plan                `waived: question=…` under ## SDLC State, and an AC block's `waiver: <who> <date> "<words>"`
-#   second-floors  plan                `proved: kind=regression` lines past the first
-# A roster row is re-written on every status change and copies `amended=`/`held=`, so a row counts once per value.
+# close-out prints the `landing-report --hand-holds` line on its card and writes it into the continuation under `## Hand-holds`,
+# reading it BEFORE the tmp wipe, because amends, holds and extensions live on the roster that act 3 wipes. Each kind is counted
+# from the line its verb wrote, the fixture plants each in its writer's shape (the roster through the one row writer, the
+# plan's proof lines through lib/proof.sh), and a prose line saying `by-hand` counts nothing. A roster row is re-written on every
+# status change and copies `amended=`/`held=`, so a row counts once per value.
 # HH_GATE: hoisted to tests/close-out.prelude.sh (a later part reads it)
 HH_C="$(printf 'd%.0s' $(seq 40))"
 # The report reads from the last build landing, the second build row's at 10:40, so the decline, the lift, the 10:00
 # amend and that row's own hand landing fall before the window, and the date-only matrix waiver's day holds that start, so it is unplaced.
-HH_WANT="hand-holds: total=6 · by-hand=0 · stop-runs=1 · declines=0 · lifts=0 · amends=1 · holds=1 · extensions=1 · waivers=1 · status-writes=0 · second-regressions=1 · adoptions=0 · fixed=0 · unplaced=1"
-HH_ALL="hand-holds: total=11 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · status-writes=0 · second-regressions=1 · adoptions=0 · fixed=0 · unplaced=0"
+HH_WANT="hand-holds: total=6 · by-hand=0 · stop-runs=1 · declines=0 · lifts=0 · amends=1 · holds=1 · extensions=1 · waivers=1 · status-writes=0 · second-regressions=1 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=1"
+HH_ALL="hand-holds: total=11 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=2 · holds=1 · extensions=1 · waivers=2 · status-writes=0 · second-regressions=1 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0"
 # hh_report: hoisted to tests/close-out.prelude.sh (a later part reads it)
 # hh_plant <project> -> one use of every verb, and the prose that must count for nothing
 hh_plant() {
@@ -112,7 +101,7 @@ awk '/^- Step 8:/ { print "- T1: landed by-hand (kind=hand) after waived: eviden
   "$PHP/$PLAN_REL" > "$PHP/plan.b" && mv "$PHP/plan.b" "$PHP/$PLAN_REL"
 HH_PROSE="$(hh_report "$PHP" --hand-holds)"
 expect_eq "HH-4 a run whose only by-hand, stop-run, decline, lift, waiver and approval are prose counts zero in every kind" \
-  "hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0" \
+  "hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0" \
   "$(printf '%s\n' "$HH_PROSE" | grep '^hand-holds: ')"
 # the card: check prints the line, run prints it after the wipe took the roster, the continuation carries it
 run_close "$PH" check

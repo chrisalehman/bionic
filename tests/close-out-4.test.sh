@@ -220,8 +220,8 @@ awk -v m="$HK_MOVED" '
   /^## Tasks/ { print "```"; print "moved: record/wave-01-fixture/rev.md#2 to=fixed row=T2 by=Someone at=2026-10-06T14:10:00Z"; print "```"; print ""; print; next }
   /^- Step 8:/ { print "- T1: the reviewer said rev.md#3 was moved: to=fixed by hand, says this prose"; print; next }
   { print }' "$HK_PLAN" > "$HK_PLAN.k" && mv "$HK_PLAN.k" "$HK_PLAN"
-HK_WANT="hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=1 · fixed=1"
-expect_eq "HK-1 AC-7.6 one adoption (re-written once, another run's not counted) and one to=fixed move read adoptions=1 · fixed=1 · by-hand=0, in the total" \
+HK_WANT="hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=1 · fixed=1 · needs-you=0"
+expect_eq "HK-1 AC-7.6 one adoption (re-written once, another run's not counted) and one to=fixed move read adoptions=1 · fixed=1 · needs-you=0 · by-hand=0, in the total" \
   "$HK_WANT" "$(hh_report "$HK_P" --hand-holds | grep '^hand-holds: ')"
 run_close "$HK_P" check
 expect_eq "HK-2 …and close-out's card prints the same line" "$HK_WANT" "$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')"

@@ -618,7 +618,7 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 # THE HAND-HOLD COUNT IS FOLDED FROM THE LINES THE ESCAPE-HATCH VERBS WROTE (wave-35 T12; D17, REQ-8
 # AC-8.1). `landing-report --hand-holds` prints, under the landings line,
 #
-#   hand-holds: total=<n> · by-hand=<n> · stop-runs=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · status-writes=<n> · second-regressions=<n> · adoptions=<n> · fixed=<n>
+#   hand-holds: total=<n> · by-hand=<n> · stop-runs=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · status-writes=<n> · second-regressions=<n> · adoptions=<n> · fixed=<n> · needs-you=<n>
 #
 # A hand-hold is a use of a verb that steps round the machine. Each kind is counted from the one line its
 # verb wrote, and PROSE IS NEVER READ (D1): a line that says `by-hand` in a plan, a note or the orchestrator's
@@ -666,6 +666,9 @@ landing_report() {  # <record> <project root> <rows yes|no> -> the line [and row
 #                  event: typed at or before that landing it is the landing's own business and outside the count,
 #                  typed after it a hand marked the fix, inside. A move naming a row with no landing is unplaced.
 #                  A move the landing itself wrote (`by=landing`, lib/line.sh `line_settle`) is its settlement, never a hand.
+#   needs-you      the landing record's `line/v1|ev=refusal|needs=person|…`, a refusal that named a person as its exit, from
+#                  the one line refuse() wrote, placed by its `at=`. A refusal the person had to answer is a hand-hold; a refusal
+#                  that named another exit (`needs=` anything else) is the machine's own and counts nothing. It is printed last.
 #
 # THE WINDOW. `--since <ISO>` and `--until <ISO>` count a hand-hold only when its own line's time is after the start
 # and at or before the end; either end may be absent, and absent is open. Each source is placed by the time its writer
@@ -716,7 +719,7 @@ _HH_PLACE_AWK='
 '
 hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] [--until <ISO>] -> the one hand-holds line; rc 0
   local rec="$1" root="$2" plan="$3" slug led rf hand=0 stp=0 stw=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0 pl
-  local since="" until="" u1=0 u2=0 u3=0 u4=0 lands="" prs=0 started=""
+  local ney=0 since="" until="" u1=0 u2=0 u3=0 u4=0 lands="" prs=0 started=""
   shift 3
   while [ $# -ge 2 ]; do
     case "$1" in --since) since="$2" ;; --until) until="$2" ;; esac
@@ -724,7 +727,7 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
   done
   slug="$(proof_plan_slug "$plan")"
   if [ -f "$rec" ] && [ ! -L "$rec" ] && { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }; then
-    read -r hand stp stw prs u1 <<< "$(awk -F'|' -v HH_S="$since" -v HH_U="$until" "${_LINE_FIELDS_AWK:-}$_HH_PLACE_AWK"'
+    read -r hand stp stw prs ney u1 <<< "$(awk -F'|' -v HH_S="$since" -v HH_U="$until" "${_LINE_FIELDS_AWK:-}$_HH_PLACE_AWK"'
       { ev = line_ev() }
       ev == "published" && line_kv("kind") == "hand" && hh_take(line_kv("at")) { n++ }
       # a whole run past the first is a hand-hold only when a person started it
@@ -734,9 +737,11 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
       ev == "stop-run" && hh_take(line_kv("at")) { s++ }
       # only a line that names the status cell or the task key is a write the gate reads; an evidence-only one is neither placed nor counted
       ev == "matrix-set" && (index("," line_kv("cells") ",", ",status,") || index("," line_kv("cells") ",", ",task,")) && hh_take(line_kv("at")) { w++ }
+      # a refusal that named a person as its exit is one the person had to answer
+      ev == "refusal" && line_kv("needs") == "person" && hh_take(line_kv("at")) { e++ }
       # a retier raises the check of a criterion, an act of the run and never a hand-hold: its line is read as nothing, on purpose
       ev == "matrix-retier" { next }
-      END { print n + 0, s + 0, w + 0, p + 0, HH_UNPLACED + 0 }' "$rec")"
+      END { print n + 0, s + 0, w + 0, p + 0, e + 0, HH_UNPLACED + 0 }' "$rec")"
     # the logs whose run line names its starter, ` <log> ` words: a proof citing one is counted by its run line
     started="$(awk -F'|' "$_LINE_FIELDS_AWK"'
       line_ev() == "run" && line_kv("starter") != "" && line_kv("log") != "" { printf " %s ", line_kv("log") }' "$rec")"
@@ -818,8 +823,8 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
     fi
   fi
   fl=$(( ${fl:-0} + ${prs:-0} ))
-  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · status-writes=%d · second-regressions=%d · adoptions=%d · fixed=%d' \
-    $(( hand + stp + dec + lif + amd + hld + ext + wv + stw + fl + ado + fix )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$stw" "$fl" "$ado" "$fix"
+  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · status-writes=%d · second-regressions=%d · adoptions=%d · fixed=%d · needs-you=%d' \
+    $(( hand + stp + dec + lif + amd + hld + ext + wv + stw + fl + ado + fix + ney )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$stw" "$fl" "$ado" "$fix" "$ney"
   if [ -n "$since" ] || [ -n "$until" ]; then printf ' · unplaced=%d' $(( ${u1:-0} + ${u2:-0} + ${u3:-0} + ${u4:-0} )); fi
   printf '\n'
   return 0

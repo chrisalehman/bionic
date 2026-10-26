@@ -969,16 +969,13 @@ ST_MW="$(ll_poker "$ST" matrix-set AC-1.2 task=T1)"; ST_MWRC=$?
 expect_eq "(ce4) matrix-set on a row no landing settled still writes (exit 0)" "0" "$ST_MWRC"
 
 section "§STARTER: a whole run the tick or the orchestrator started is no hand-hold; a person's past the first is one"
-# `regression-run --starter <tick|orchestrator|person>` writes `starter=` on its `ev=run` line. The hand-holds count
-# reads `second-regressions` from those lines: a regression run past the record's first counts only when a person
-# started it, and a regression proof past the first counts as it always has only when its run line names no starter.
-# FIXTURE FIDELITY: the run lines carry the verb's own fields in its order, the proof lines are lib/proof.sh's own
-# `proof_line`, the count is landing-report --hand-holds as session-poker.sh runs it. fails-when: a run the machine
-# started counts, a person's second run is not counted, a person's proved run counts twice, or a proof of a run line
-# with no starter stops counting.
-sr_report() {  # <root> -> the hand-holds counts line of the root's plan
+# `regression-run --starter <tick|orchestrator|person>` writes `starter=` on its `ev=run` line; a run past the record's first counts as
+# second-regressions only when a person started it, a proof past the first only when its run line names no starter. FIXTURE FIDELITY:
+# the run lines carry the verb's own fields in its order, the proof lines are lib/proof.sh's `proof_line`. fails-when: a run the machine
+# started counts, a person's second run is not counted, a person's proved run counts twice, or a proof of a starter-less run stops counting.
+sr_report() {  # <root> [flags…] -> the hand-holds counts line of the root's plan
   ( cd "$1" && CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO/payload" \
-      bash "$BIONIC_HOOKS_DIR/session-poker.sh" landing-report --hand-holds "$(ll_plan "$1")" 2>/dev/null ) | grep '^hand-holds: '
+      bash "$BIONIC_HOOKS_DIR/session-poker.sh" landing-report --hand-holds "${@:2}" "$(ll_plan "$1")" 2>/dev/null ) | grep '^hand-holds: '
 }
 sr_second() { sr_report "$1" | sed -n 's/.*· second-regressions=\([0-9]*\) ·.*/\1/p'; }   # <root> -> the count alone
 sr_hex() { local i s=""; for i in $(seq "$2"); do s="$s$1"; done; printf '%s' "$s"; }   # <char> <n> -> the char n times
@@ -1025,12 +1022,9 @@ sr_proofs "$SR4" a b
 expect_eq "(sr4) …and the same two proofs of runs the tick started: second-regressions=0" "0" "$(sr_second "$SR4")"
 
 section "§RETIER: a retier is the run's own act: its ev=matrix-retier line moves no hand-holds field, while a waiver: line still adds one (REQ-3 AC-3.3)"
-# `matrix-retier` raises a tier, which strengthens the check: it is the orchestrator's act and no hand-hold, so the fold
-# reads its record line as nothing. Weakening stays the user's, and a waiver: line in a block still counts as one.
-# FIXTURE FIDELITY: the world's plan with an Eval design in the Step-3 table's shape and an empty matrix table; matrix-render
-# writes the rows and blocks, matrix-retier writes its own record line, and the count is landing-report --hand-holds as
-# session-poker.sh runs it (sr_report, above). The waiver: line is waive-row's line planted at the end of its block, as
-# landing-line-1 §WINDOW plants it, since waive-row reads the words from a transcript this world has none of.
+# `matrix-retier` raises a tier, which strengthens the check: the orchestrator's act and no hand-hold, so the fold reads its line as
+# nothing; a waiver: line in a block (weakening, a person's) still counts. FIXTURE FIDELITY: the world's plan with an Eval design
+# and an empty matrix table, matrix-render and matrix-retier writing their own lines, the waiver: line planted as landing-line-1 §WINDOW does.
 # fails-when: the fold counts a retier line in any field, or stops counting a waiver: line.
 RL="$(ll_world)"; RLP="$(ll_plan "$RL")"
 { printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n'
@@ -1040,7 +1034,7 @@ RL="$(ll_world)"; RLP="$(ll_plan "$RL")"
 RL_MR="$(ll_poker "$RL" matrix-render)"; RL_MRRC=$?
 RL_H0="$(sr_report "$RL")"
 expect_eq "(rl0) precondition: matrix-render exits 0 and the report prints its counts line, all zero" \
-  "0|hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0" \
+  "0|hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0" \
   "$RL_MRRC|$RL_H0"
 [ "$RL_MRRC" = 0 ] || printf '      render: %s\n' "$RL_MR"
 RL_RT="$(ll_poker "$RL" matrix-retier AC-1.1 tier=T2 'eval=`tests/b.test.sh` drives the hermetic run')"; RL_RTRC=$?
@@ -1052,6 +1046,22 @@ awk '{ print } /^AC-1\.2:/ { b = 1; next } b && /^[ \t]+evidence:/ { print "  wa
   "$RLP" > "$RLP.n" && mv "$RLP.n" "$RLP"
 expect_contains "(rl3) …while a waiver: line in the same plan adds one: waivers=1, total=1" "hand-holds: total=1 · " "$(sr_report "$RL")"
 expect_contains "(rl3b) …in the waivers field" "· waivers=1 · status-writes=0 ·" "$(sr_report "$RL")"
+
+section "§NEEDS-YOU: a refusal that named a person as its exit is a hand-hold: needs-you joins total, and the header names the fields the printf prints (AC-2.4)"
+# fails-when: a needs=person refusal in the window reads needs-you=0 or total=0, one of another needs= or outside the window counts, or the header's fields drift from the printf's.
+ny() {  # <needs> <at> -> `total=<n> needs-you=<n>` of a world whose record holds that one refusal, over a window of two hours
+  local r; r="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$r")")"
+  printf 'line/v1|ev=refusal|needs=%s|wall=x|at=%s\n' "$1" "$2" > "$(ll_rec "$r")"
+  sr_report "$r" --since 2026-10-20T10:00:00Z --until 2026-10-20T12:00:00Z | sed 's/^hand-holds: \(total=[0-9]*\) .* \(needs-you=[0-9]*\) .*/\1 \2/'
+}
+expect_eq "(ny1) needs=person inside the window: needs-you=1, total=1" "total=1 needs-you=1" "$(ny person 2026-10-20T11:00:00Z)"
+expect_eq "(ny2) …needs=other counts nothing" "total=0 needs-you=0" "$(ny other 2026-10-20T11:00:00Z)"
+expect_eq "(ny3) …and needs=person before the window's start counts nothing" "total=0 needs-you=0" "$(ny person 2026-10-20T09:00:00Z)"
+NY_SRC="$REPO/hooks/poker/line.sh"; NY_HDR="$(sed -n '/^#   hand-holds: total=<n>/,/^# THE WINDOW/p' "$NY_SRC")"
+NY_PF="$(/usr/bin/grep -m1 "printf 'hand-holds: total=" "$NY_SRC" | /usr/bin/grep -o '[a-z-]*=%d' | sed 's/=%d//' | tr '\n' ' ')"
+expect_contains "(ny4-0) precondition: the printf's fields are read, needs-you last among them" "adoptions fixed needs-you " "$NY_PF"
+expect_eq "(ny4) the header's example line and its per-kind rows name the fields the printf prints, in its order" "$NY_PF|$NY_PF" \
+  "$(printf '%s\n' "$NY_HDR" | sed -n 1p | /usr/bin/grep -o '[a-z-]*=<n>' | sed 's/=<n>//' | tr '\n' ' ')|total $(printf '%s\n' "$NY_HDR" | /usr/bin/grep -o '^#   [a-z][a-z-]*  ' | tr -d '# ' | sed 's/$/ /' | tr -d '\n')"
 
 # ---------------------------------------------------------------------------
 finish
