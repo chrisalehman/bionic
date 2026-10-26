@@ -24,10 +24,9 @@
 #                      rendered there and the user's reply approves it, the integrate row renders the release entry's
 #                      reviews part on the working branch and opens the pull request through gh, the person merges
 #                      it, the integrate row delivers its record, and close-out runs.
-#     failed-review    the release-waiting run, then the user's reply "all recommended", Step 8, a whole structure
-#                      review registered failing, the working branch merged into main as the pull request lands
-#                      it, and close-out refused on the failing review: the register holds waive:structure and
-#                      hold:merge.
+#     failed-review    the release-waiting run, the user's reply (recommended, and the merge without a whole run at
+#                      the release head), Step 8, a whole structure review failing, the branch merged into main, and
+#                      close-out refused on the review: the register holds waive:structure and hold:merge.
 #     release-waiting  the release order (the release row at step 7, a regression row, an integrate row reading both
 #                      approvals), the build landed through ready, the matrix discharged by its landing, Steps 5 to 7 with the regression, its row
 #                      delivered, five passing reviews and the release check, the release landed, and the release
@@ -61,17 +60,14 @@
 # tests/lib/roster-row.sh), as the dispatch wall writes it when the reviewer is launched; the sweeper's own `ack`
 # closes it.
 #
-# A STAND-IN `gh` (delivered alone). The pull request is an outward act, so the integrate row's `gh` is a stand-in
-# put first on the PATH of the commands that call it, every directory holding another `gh` left off that PATH: it
-# appends each call's arguments to <dir>/bin/gh.log, answers `pr create` with a placeholder address, and for `pr
-# merge` moves the pull request's base to its head, as the hosting service's merge and the person's pull bring it
-# home; the sandbox has no remote to merge on.
+# A STAND-IN `gh` (delivered alone). The pull request is an outward act, so the integrate row's `gh` is a stand-in, the
+# only `gh` on the PATH of the commands that call it: it logs each call's arguments to <dir>/bin/gh.log, answers `pr
+# create` with a placeholder address, and for `pr merge` moves the base to the head, as the merge and the pull would.
 #
-# FROM THE COMMAND LINE nothing is removed: <dir> keeps the sandbox, its gate store, its config and the log. <dir>
-# must lie outside the plugin tree that runs it, because `door_run` strips that tree's paths from every command's
-# environment. Read a kept sandbox as its session: from <dir>/<state>/project, with CLAUDE_CODE_SESSION_ID set to
-# 11111111-2222-4333-8444-555555555555 (WORLD_SID), BIONIC_GATE_DIR to <dir>/gate and CLAUDE_CONFIG_DIR to
-# <dir>/<state>/config.
+# FROM THE COMMAND LINE nothing is removed: <dir>, outside the plugin tree (`door_run` strips that tree's paths from every
+# command's environment), keeps the sandbox, its gate store, its config and the log. Read it as its session: from
+# <dir>/<state>/project, with CLAUDE_CODE_SESSION_ID=11111111-2222-4333-8444-555555555555 (WORLD_SID),
+# BIONIC_GATE_DIR=<dir>/gate and CLAUDE_CONFIG_DIR=<dir>/<state>/config.
 #
 # bash 3.2 (ADR-001).
 
@@ -146,6 +142,17 @@ _rh_typed() {
     || printf 'root=%s\nstarted=2026-10-01T00:00:00Z\ncwd=%s\n' "$RH_ROOT/hooks" "$RH_ROOT" \
       > "$RH_ROOT/.bionic/tmp/loaded-$WORLD_SID.state" || return 1
   _rh_hand typed "the user typed '$1' (the session's transcript, and its start record)"
+}
+
+# _rh_reply <label> -> the user's reply to the newest release card at the working head, typed, then replayed: all as
+# recommended, but a merge without a whole run at this head, where a landing past the pass makes the card ask it, taken.
+_rh_reply() {
+  local n w='all recommended'
+  # shellcheck disable=SC2012  # page names are release-approval-<hex>[-<n>].md, no blank or line break in any
+  n="$(sed -n 's/^release-approval\/v1|dec=\([0-9][0-9]*\)|key=approve:merge-unproved|.*/\1/p' \
+    "$(ls -t "$RH_REC"/release-approval-"$(_rh_head | cut -c1-8)"*.md 2>/dev/null | head -1)" 2>/dev/null | head -1)"
+  [ -z "$n" ] || w="$n merge, rest recommended"
+  _rh_typed "$w" && _rh_poker "$1" reply "$w"
 }
 
 # _rh_land <row> -> the row's tree landed by hand through the sandbox's door
@@ -375,8 +382,7 @@ _rh_replay() {
   _rh_do "the sweeper acks the fix row's writer" bash "$RH_ROOT/hooks/session-sweeper.sh" ack w-T5 || return 1
   _rh_poker "the release check at the fix's head" release-check || return 1
   _rh_poker "the release approval card at the fix's head" release-approval "$RH_PLAN" || return 1
-  _rh_typed 'all recommended' || return 1
-  _rh_poker "the user's reply to the card at the fix's head" reply 'all recommended' || return 1
+  _rh_reply "the user's reply to the card at the fix's head" || return 1
   # The part goes on the branch before the pull request opens, so the merge carries it to main.
   _rh_poker "the integrate row renders the entry's reviews part" reviews-part T4 || return 1
   _rh_gh "$dir" || { echo "rehearse $RH_STATE: the stand-in gh could not be written in $dir/bin" >&2; return 1; }
@@ -459,8 +465,7 @@ EOF
       _rh_release_card || return 1 ;;
     failed-review|delivered)
       _rh_release_card || return 1
-      _rh_typed 'all recommended' || return 1
-      _rh_poker "the user's reply to the card" reply 'all recommended' || return 1
+      _rh_reply "the user's reply to the card" || return 1
       _rh_poker "enter Step 8" current 8 || return 1
       _rh_review w-structure-whole-2 structure whole "$RH_BASE" "$(_rh_head)" fail || return 1
       # The integrate row's merge, as the pull request's merge lands it: main moves to the working head.

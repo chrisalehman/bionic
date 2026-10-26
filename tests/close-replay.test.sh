@@ -3,23 +3,20 @@
 # failing at Step 8, close-out refused on it) carried through the verbs alone to close-out's `delivered:`
 # (tests/lib/rehearsal.sh `rehearse delivered`), in a sandbox whose project declares its real release check.
 #
-#   §CLOSE   the replay reaches delivered:: the fix row born of the review's finding lands through ready, the
-#            review's waiver ask closes without a waiver, the release lands (the line re-renders the release
-#            numbers on the fix's landing and the release check holds at that head), the user's reply approves the
-#            head, the integrate row renders the entry's reviews part before its pull request, so main holds that
-#            commit on the approved head, the integrate row lands, close-out writes delivered: and counts no
-#            hand-hold; the replay's part
-#            of the log holds no hand landing, hand merge, plan edit, step set back or waiver
+#   §CLOSE   the replay reaches delivered:: the fix row born of the finding lands through ready, the waiver ask closes
+#            without a waiver, the release lands (its numbers re-rendered on the fix's landing, the check held there),
+#            the user's reply approves that head and its merge without a whole run, the integrate row renders the
+#            reviews part before its pull request (main holds it on the approved head) and lands, close-out writes
+#            delivered: with no hand-hold; the replay's log holds no hand landing or merge, plan edit, step set back or waiver
 #   §WINDOW  after the close, the hand-holds window ends at the plan's delivered: time, and a decline planted after
 #            the release approval card is counted: the card ends nothing
 #   §VERBS   every refusal the replay met names a verb that writes the cell (deliver, amend, task-set or
 #            step-field), and that verb's call on the cell, then the refused call again, exit 0
 #   §PR      the integrate row's pull request goes through a stand-in gh, the only gh on its PATH, whose log holds
 #            `pr create --base main --head wave/x`
-#   §ENTRY   after close-out, the release entry's reviews part, at the working branch's final head and on main after
-#            the person's merge, names the review the run failed and fixed as the plan registered it, and every commit
-#            on the branch after the fix's landing is one the landing record names, as a published event or the event
-#            that wrote the part, the integrate row's
+#   §ENTRY   after close-out, the release entry's reviews part, at the branch's final head and on main after the merge,
+#            names the review the run failed and fixed as registered, and every commit after the fix's landing is one
+#            the landing record names: a published event or the integrate row's event that wrote the part
 #   §REAL    the sandbox's config declares tests/lib/release-check.sh, the sandbox's own copy is the one that ran,
 #            and every hand write in the log is one a person, an agent or the harness writes in a real run, and the log
 #            is valid UTF-8 throughout, so every reader reads the whole of it
@@ -28,10 +25,9 @@
 #   §LIVE    the replay's live criterion (door.sh DOOR_LIVE_ROW), owed at the close: every advance and the refused
 #            close-out pass with it pending, the release approval card lists it owed by the close, and close-out writes it
 #            discharged from its last reading, with no matrix-set
-#   §SINGLE  the rehearsal's single-rigor state (`rehearse single-verify`, on door.sh's `door_world_single`) stands at
-#            current: 5 with the build's criterion discharged by the build's landing, the critic's evidence review registered
-#            on its own roster row and its verdicts carried into the auditor cell and the head's auditor-wave: line, its log
-#            naming the verbs that brought it there and no discharge
+#   §SINGLE  `rehearse single-verify` (door.sh `door_world_single`) stands at current: 5, the build's criterion discharged
+#            by its landing, the critic's evidence review on its own roster row carried into the auditor cell and the
+#            head's auditor-wave: line; its log names the verbs that brought it there and no discharge
 #
 # NAMED, NOT COUNTED: the rows reading the replay's part (CL-8, VB-1, VB-2) name each verb the replay runs and each kind
 # of hand write it makes, so a log that lost one of them is red however long it is.
@@ -48,9 +44,8 @@
 # read (no refusal, no hand-hold command, no foreign kind) stands beside a non-empty read through the same extractor
 # in the same section.
 #
-# EXPECTED TIME: about seven minutes when the replay reaches delivered: (the rehearsal to failed-review, two release
-# check verb calls among them, is four and a half; the replay's own release check call is two more), about four and a
-# half when it stops at the fix row's landing; §SINGLE's rehearsal, the build and Step 5 alone, about a minute more.
+# EXPECTED TIME: about seven minutes when the replay reaches delivered: (four and a half to failed-review, two more for
+# the replay's release check), four and a half when it stops at the fix's landing; §SINGLE about a minute more.
 #
 # Usage: bash tests/close-replay.test.sh
 
@@ -197,8 +192,8 @@ if [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ]; then
     "$(awk -F'|' '$2 == "ev=published" && $3 == "row=T5" && /\|numbers=[0-9a-f]{40}\|/ { f = 1 } END { if (f) print "yes" }' "$CR_REC/landing-proofs.log" 2>/dev/null)"
   expect_eq "CL-4b …and main holds the reviews part's commit, on the head the release check held (a kind=check line there, not result=fail)" "yes|yes|no" \
     "$([ -n "$CL_PART" ] && [ "$CL_PART" = "$CL_MAIN" ] && echo yes)|$([ -n "$CL_REL" ] && /usr/bin/grep -q "^proved: kind=check head=$CL_REL " "$CR_PLAN" && echo yes)|$(/usr/bin/grep "^proved: kind=check head=${CL_REL:-none} " "$CR_PLAN" | tail -1 | /usr/bin/grep -q 'result=fail' && echo yes || echo no)"
-  expect_eq "CL-5 the user's reply approves that head: reply exit 0, the newest approved: release names it" "0|$CL_REL" \
-    "$(cr_rc "the user's reply to the card at the fix's head" | tail -1)|$(/usr/bin/grep '^approved: release ' "$CR_PLAN" | tail -1 | sed -n 's/.* head=\([0-9a-f]*\) .*/\1/p')"
+  expect_eq "CL-5 the user's reply approves that head: reply exit 0, the newest approved: release and approved: merge-unproved (the fix landed past the whole run) name it" "0|$CL_REL|$CL_REL" \
+    "$(cr_rc "the user's reply to the card at the fix's head" | tail -1)|$(for k in release merge-unproved; do /usr/bin/grep "^approved: $k " "$CR_PLAN" | tail -1 | sed -n 's/.* head=\([0-9a-f]*\) .*/\1/p'; done | paste -sd'|' -)"
   expect_eq "CL-6 the integrate row lands and close-out runs (exit 0)" "landed|0" \
     "$(awk -F'|' '$2 ~ /^ *T4 *$/ { s = $(NF - 1); gsub(/ /, "", s); print s }' "$CR_PLAN")|$(cr_rc 'close-out, the tail' | tail -1)"
   CL_HH="$(cr_out 'close-out, the tail' | /usr/bin/grep '^hand-holds: ')"
