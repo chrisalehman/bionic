@@ -173,6 +173,9 @@ Rendered from the plan's review and waiver lines, in the order they were registe
 - evidence review, piece: pass at 5a08f601 by w46-T30, 2026-10-26T05:08:05Z (`critic-evidence-2.md`)
 - adversarial review, piece: flag at 5a08f601 by w46-T30, 2026-10-26T05:08:15Z (`critic-adversarial-2.md`)
 - structure review, piece: flag at 5a08f601 by w46-T30, 2026-10-26T05:08:25Z (`critic-structure-2.md`)
+- evidence review, piece: flag at 6b7563af by w46-T33, 2026-10-26T13:49:47Z (`critic-evidence-3.md`)
+- adversarial review, piece: flag at 6b7563af by w46-T33, 2026-10-26T13:49:52Z (`critic-adversarial-3.md`)
+- structure review, piece: flag at 6b7563af by w46-T33, 2026-10-26T13:49:56Z (`critic-structure-3.md`)
 
 ### Known limits
 
