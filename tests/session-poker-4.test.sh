@@ -1,15 +1,13 @@
 #!/bin/bash
 # Tests for hooks/session-poker.sh — shard 4 of 4: §SEV to the end.
 #
-# THE SUITE IS FOUR SHARDS (wave-30 T2; design-ledger Δ7, D8). Its governing design, its
-# hermetic posture and its clock discipline are written once, in tests/session-poker.test.sh's
-# header; the sandbox, the pins and the shared fixture builders are
+# THE SUITE IS FOUR SHARDS. Its governing design, hermetic posture and clock discipline are written once, in
+# tests/session-poker.test.sh's header; the sandbox, the pins and the shared fixture builders are
 # tests/session-poker.prelude.sh, sourced below after the framework and the POKER seam.
 #
-# SPLIT WHERE NO FIXTURE CROSSES. §SEV builds the repository nine later sections read:
-# §RC-DEFER, §CHECK-GONE, §MOVE, §REPORT-RTL, §REPORT-KEY, §PASS-KEY, §PASS-MOVED, §MOVE-PASTED and
-# §FINAL-RATING. The sections between them export the config and home directories the
-# next ones run under, so this shard keeps them all, in order, to the end.
+# SPLIT WHERE NO FIXTURE CROSSES. §SEV builds the repository nine later sections read (§RC-DEFER, §CHECK-GONE, §MOVE,
+# §REPORT-RTL, §REPORT-KEY, §PASS-KEY, §PASS-MOVED, §MOVE-PASTED, §FINAL-RATING); the sections between export the
+# config and home directories the next run under, so this shard keeps them all, in order.
 #
 # Usage: bash tests/session-poker-4.test.sh
 
@@ -50,22 +48,15 @@ S46_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
 section "§SEV §FACT-rate §FACT-table §FACT-derive §FACT-shown §FACT-old §CUR8-sev: a reading pushed the severity scale carries each finding's severity and reach, and the tool derives the priority and the verdict (wave-28 T15; REQ-8 AC-8.1, AC-8.3, AC-8.4, AC-8.5, AC-8.6, AC-8.8; D19)"
 # ============================================================
 #
-# When the reader's roster row carries `severity` in `pushed=` (the context files the recorder
-# pushed at start), `proof-add review <record> --question <q> --reader <name>` requires the
-# record's `findings: <n>`, that many `finding: <n> <S1-S4> <on|off> <path>:<line>|- <title>`
-# lines, and for each finding the table sends to fix a `<path>:<line>` with a `shown: <n> <command>`
-# line. A READER'S RATING IS FINAL (wave-31 T32; D6, REQ-6): an `unsure: <n> <what>` line is an
-# ordinary line of the record, read by nothing, so it neither shows a fix nor owes a check. The
-# result is derived (a finding to fix gives fail, any other finding flag, none pass) and a `result:`
-# that differs is refused, as is a written `priority:` the table does not give. Registration writes
-# `deferred:` for each finding the table defers inside `## SDLC State`, after the proof line, and no
-# `check:` line. A reader with no `severity` push registers as 1.12.0 did.
+# With `severity` in the reader row's `pushed=`, `proof-add review <record> --question <q> --reader <name>` requires
+# `findings: <n>`, that many `finding: <n> <S1-S4> <on|off> <path>:<line>|- <title>` lines, and a `<path>:<line>` with
+# a `shown: <n> <command>` line for each finding the table sends to fix. A READER'S RATING IS FINAL: an `unsure:` line
+# is read by nothing. The result is derived (a fix gives fail, any other finding flag, none pass); a differing
+# `result:` or a `priority:` the table does not give is refused. Registration writes `deferred:` per deferred finding
+# after the proof line, and no `check:` line. A reader with no `severity` push registers as 1.12.0 did.
 #
-# FIXTURE FIDELITY. §56's shape: a plan bound to this session, its working branch checked out in a
-# linked worktree, real commits, and roster rows from the production writer (`roster_row_fixture`)
-# with `questions=` and `pushed=` appended by hand. `pushed=` is the Interfaces table's key, which
-# row T16 teaches the recorder to write; the verb reads it off the line by key, as it reads
-# `questions=` (A-orch-9).
+# FIXTURE FIDELITY. §56's shape: a bound plan, its working branch in a linked worktree, real commits, roster rows from
+# the production writer with `questions=` and `pushed=` appended, read off the line by key.
 SEV_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 SEV_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
 RSEV="$(make_repo sev-fact)"; ( cd "$RSEV" && git commit -q --allow-empty -m init )
@@ -428,16 +419,14 @@ POKE_BOUND="$SEV_BOUND_WAS"
 section "§DEBT-PARSE §DEBT-LEDGER §DEBT-ADVISORY (the verb half): a debt: line is a flag-class finding the reader names by kind and concept, and the run's ledger holds one line per item (wave-30 T22; REQ-11 AC-11.1, AC-11.2, AC-11.3; D2, P2; A-orch-8)"
 # ============================================================
 #
-# severity.md (T4) writes the line `debt: <kind> <concept> <path>:<line>[, <path>:<line>…]`, flush
-# left, beside the `finding:` lines and not counted in `findings:`. lib/proof.sh `proof_findings` reads
-# it as a row of its own, `debt<TAB><kind><TAB><concept><TAB><sites><TAB>burn`, which the derived result
-# reads as flag-class; a debt line carrying a severity or a reach word, or a kind outside the debt
-# table, is refused, naming the line. `session-poker.sh debt` keeps `record/<run>/debt.md`: a header,
-# then `concept | kind | sites | raised-by <record> | touches N | <burned <row>|—>` per item.
+# severity.md writes `debt: <kind> <concept> <path>:<line>[, <path>:<line>…]` flush left beside the `finding:` lines,
+# uncounted in `findings:`. lib/proof.sh `proof_findings` reads it as `debt<TAB><kind><TAB><concept><TAB><sites>
+# <TAB>burn`, flag-class; one carrying a severity or reach word, or a kind outside the debt table, is refused, naming
+# the line. `session-poker.sh debt` keeps `record/<run>/debt.md`: a header, then `concept | kind | sites | raised-by
+# <record> | touches N | <burned <row>|—>` per item.
 #
-# FIXTURE FIDELITY. The parser rows run the library §SEV runs (`SEV_LIB`) against the shipped
-# structure checks file (`SEV_CK`); the ledger rows run the real verb in §SEV's bound repository and
-# read the ledger file it wrote.
+# FIXTURE FIDELITY. The parser rows run §SEV's library (`SEV_LIB`) on the shipped structure checks file (`SEV_CK`); the
+# ledger rows run the real verb in §SEV's bound repository and read the ledger it wrote.
 dbt_read() {  # <lib> <record> -> proof_reading's answer and exit, the scale pushed (adversarial)
   bash -c '. "$1"; proof_reading "$2" adversarial "" 1; echo " rc=$?"' _ "$1" "$2" 2>/dev/null
 }
@@ -576,11 +565,9 @@ expect_eq "DEBT-A7 debt adopt with no continuation is a usage error (exit 2)" "2
 rm -f "$DBT_LEDGER"
 
 # ---------- §DEBT (wave-36 T13; D13, REQ-7 AC-7.2, AC-7.3, AC-7.8; C24, C25, A-orch-1, A-orch-2) ----------
-# `debt add` reads any record carrying grammar-true `debt:` lines, a `reviewed:` line no longer required:
-# a writer's or the orchestrator's `assumptions.md` hole line reaches debt.md by verb, never by hand
-# (AC-7.2). Each line it would write is held to the one debt-line grammar, lib/debt.sh `debt_line_ok`,
-# before anything is written. `debt adopt` with no plan named and no plan bound refuses naming `bind`
-# and writes nothing: it never takes the newest plan by mtime, a closed predecessor's (AC-7.3).
+# `debt add` reads any record carrying grammar-true `debt:` lines, no `reviewed:` line required, so an `assumptions.md`
+# hole line reaches debt.md by verb, never by hand; each line is held to lib/debt.sh `debt_line_ok` before any write.
+# `debt adopt` with no plan named or bound refuses naming `bind` and writes nothing, never taking the newest by mtime.
 # fails-when: a hole line never reaches debt.md; the unbound adopt writes the predecessor's ledger.
 DBT_ASM="$SEV_DIR/assumptions.md"
 printf '%s\n' "# assumptions — wave-01-fixture" "" \
@@ -632,12 +619,10 @@ expect_eq "DEBT-U2 control: the same adopt naming the plan writes that plan's le
 section "§LINE-TELL: the tick tells each standing red and each stalled entry once, with its logs (wave-28 T5; REQ-9 AC-9.2, AC-9.3; D8)"
 # ============================================================
 #
-# `ready` appends `standing` when a red also fails at the accepted head (the branch's, not a row's)
-# and `stalled` when an entry's runs twice gave no verdict. The tick reads both off the bound plan's
-# landing record and prints each as a note, once: a second tick over the same record says nothing of
-# them, and a new event is told by the next tick.
-# FIXTURE FIDELITY: §60's repository and bound plan (s60_world); the events are PLANTED in the
-# Interfaces table's `line/v1` shape, which lib/line.sh writes.
+# `ready` appends `standing` when a red also fails at the accepted head (the branch's, not a row's) and `stalled` when
+# an entry's runs twice gave no verdict. The tick prints each off the bound plan's landing record as a note, once; a
+# new event is told by the next tick. FIXTURE FIDELITY: §60's repository and bound plan (s60_world); the events are
+# PLANTED in the Interfaces table's `line/v1` shape, which lib/line.sh writes.
 LT_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 s60_world lt-tell @A whole
 LT_H1="$(printf 'a%.0s' $(seq 40))"; LT_H2="$(printf 'b%.0s' $(seq 40))"
@@ -656,13 +641,11 @@ POKE_BOUND="$LT_BOUND_WAS"
 section "§RC-DEFER §RC-STATED §RC-PARSE: a deferral is held to its debts, the stated sentence and the release check's list of them (wave-28 T17; REQ-8 AC-8.7; D21)"
 # ============================================================
 #
-# `finding-stated <record>#<n> '<sentence>'` stores a deferred finding's one changelog sentence on its
-# `deferred:` line, as ` stated="<sentence>"`, the last field, through the plan transaction. `release-check`
-# prints `deferral <record>#<n>: stated` when the working head's CHANGELOG.md holds the sentence (white
-# space folded, so a wrapped line matches), else `unstated`, and its exit is the check's own. The rows
-# run on §SEV's fixture, whose plan holds deferrals the real verb registered, in its working branch's
-# worktree, which is where release-check reads the changelog. One deferral's sentence is made of the
-# words the plan's own parsers read, and every row after it runs with that line in the plan (§RC-PARSE).
+# `finding-stated <record>#<n> '<sentence>'` stores a deferred finding's changelog sentence on its `deferred:` line as
+# the last field ` stated="<sentence>"`, through the plan transaction. `release-check` prints `deferral <record>#<n>:
+# stated` when the working head's CHANGELOG.md holds the sentence (white space folded), else `unstated`, its exit the
+# check's own. The rows run on §SEV's fixture in its working branch's worktree, where release-check reads the changelog.
+# One deferral's sentence is made of the words the plan's own parsers read, and every row after it keeps it (§RC-PARSE).
 RD_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RD_ID1="record/wave-01-fixture/t-S2-off.md#1"
 RD_ID2="record/wave-01-fixture/t-S3-on.md#1"
@@ -1435,19 +1418,15 @@ expect_eq "LIVE-2d …and the row is still active" "active" "$(lv_cell T12)"
 # ============================================================
 section "§VERDICTS §DISCHARGE §STACK: the critic's verdicts and the regression's health reach the matrix by their verbs"
 # ============================================================
-# At single rigor the critic holds the evidence question, so its record is where the row verdicts and the wave verdict
-# are learned. The record's grammar: a markdown table whose header names the columns AC and verdict (other columns
-# allowed), one row per criterion, and one flush-left `verdict: <VERDICT>[ — <coverage finding>]` line for the wave.
-# `proof-add review <record> --question evidence` on a `rigor: single` plan writes each named row's auditor cell
-# (CONFIRMED as the bare token, any other verdict as written) and the matrix head's `auditor-wave:` line in the same
-# plan write as its proof line. `discharge` refuses there, naming `proof-add review`; at double it writes as before.
-# `proof-add regression` writes the head's `stack-health:` line through lib/proof.sh `proof_health_line`, the judge's
-# fact rendered: green only at a pass that left nothing owed, red otherwise, and it leaves a declared `n/a:` as written.
-#
-# FIXTURE FIDELITY. §STEP-FIELD's shape built fresh: a plan bound to this session at Step 5, its working branch in a
-# linked worktree, real commits, the reader's row from the production writer with `questions=` appended, run lines
-# through the product's writer (regression_fixture). The matrix head's stub is the one matrix-render writes, rendered
-# here by the verb from the plan's Eval design; every write after it goes through a real verb.
+# At single rigor the critic holds the evidence question. Its record: a markdown table naming the columns AC and
+# verdict, one row per criterion, and one flush-left `verdict: <VERDICT>[ — <coverage finding>]` line for the wave.
+# `proof-add review <record> --question evidence` at `rigor: single` writes each named row's auditor cell (CONFIRMED
+# bare, other verdicts as written) and the head's `auditor-wave:` line in its proof line's plan write. `discharge`
+# refuses there, naming `proof-add review`; at double it writes as before. `proof-add regression` writes the head's
+# `stack-health:` through lib/proof.sh `proof_health_line`: green only at a pass that left nothing owed; a declared
+# `n/a:` stays.
+# FIXTURE FIDELITY. §STEP-FIELD's shape at Step 5: the reader's row from the production writer with `questions=`, run
+# lines from regression_fixture, the head's stub rendered by matrix-render; every later write goes through a real verb.
 VT_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RVT="$(make_repo verdicts)"; ( cd "$RVT" && git commit -q --allow-empty -m init )
 git -C "$RVT" config user.name "Dana Fixture"
@@ -1618,20 +1597,16 @@ POKE_BOUND="$VT_BOUND_WAS"
 # ============================================================
 section "§STARTER: the tick starts the whole run itself when nothing is ready, no writer is open and the head is past the last regression proof"
 # ============================================================
-# The tick starts `regression-run --starter tick` detached through booked.sh as the roster object
-# `regression@<h8>`, whose one suite is run.sh, and never waits on it; the run's proof lands through
-# proof-add regression. A landing past that proof moves the head, so the next tick starts again there. A
-# live object is the guard: the next tick starts nothing beside it. A run the gate did not admit (75) is
-# told as waiting and started again.
-# FIXTURE FIDELITY: §VERDICTS's shape built fresh: a plan bound to this session at Step 4, its working
-# branch in a linked worktree, real commits, a regression proof at an older head written by proof-add over
-# a run line from the product's writer (regression_fixture). The runner is the worktree's own committed
-# tests/run.sh, a stub that holds while a hold file stands, exits 75 with no verdict while a full file
-# stands, and otherwise reports a green whole run; everything else is the real tick, booked.sh,
-# regression-run and proof-add. The writer row is the production writer's (mkrow), closed by the real ack.
-# fails-when: the quiet condition is inverted (a writer row open still starts, or a quiet roster does not);
-# the head comparison reads anything but the last regression proof's head; the detached call drops
-# proof-add; a live object does not stop a second start; a 75 is not told and not started again.
+# The tick starts `regression-run --starter tick` detached through booked.sh as roster object `regression@<h8>`, whose
+# one suite is run.sh, never waiting; the proof lands through proof-add regression. A landing past it moves the head, so
+# the next tick starts again. A live object guards against a second start; a run the gate did not admit (75) is told as
+# waiting and started again.
+# FIXTURE FIDELITY: §VERDICTS's shape at Step 4, with a regression proof at an older head from proof-add over a run line
+# from regression_fixture. The runner is the worktree's committed tests/run.sh stub: it holds while a hold file stands,
+# exits 75 with no verdict while a full file stands, else reports a green whole run. Everything else is real, and the
+# writer row is mkrow's, closed by the real ack.
+# fails-when: the quiet condition inverted; the head compared to anything but the last regression proof's; proof-add
+# dropped from the detached call; a live object not stopping a second start; a 75 not told and not started again.
 ST_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RST="$(make_repo starter)"; ( cd "$RST" && git commit -q --allow-empty -m init )
 git -C "$RST" config user.name "Dana Fixture"
@@ -1744,16 +1719,12 @@ POKE_BOUND="$ST_BOUND_WAS"
 # ============================================================
 section "§WALK: the walk's verdicts settle the cells they confirm, through proof-add walk, never a status write"
 # ============================================================
-# The walk record carries the critic's shape: a `| AC | verdict | why |` table and one flush-left `verdict:` line, read
-# by proof_verdicts. `proof-add walk <record>` writes, in one plan write: status `discharged` and the record as evidence
-# (cell and block key) for each CONFIRMED row no landing settled; every other row as it stands; the Step-5 block's and
-# the matrix head's `walk-artifact:`; a `proved: kind=walk` line. It appends one `ev=walk` line to the landing record,
-# never `ev=matrix-set`, so the hand-holds fold counts no status write.
-#
-# FIXTURE FIDELITY. §VERDICTS' shape built fresh: a plan bound to this session at Step 5, its working branch in a linked
-# worktree, real commits, the matrix rendered by matrix-render from the plan's Eval design with `walk: required`, so the
-# head carries the stub the gate reads. The one landing-settled row is written as `line_settle` leaves it: its cells
-# discharged with the landing's log, and the landing record's `ev=settled` line through the product's line_event.
+# The walk record carries the critic's shape, read by proof_verdicts. `proof-add walk <record>` writes, in one plan
+# write, status `discharged` and the record as evidence (cell and block key) for each CONFIRMED row no landing settled,
+# every other row as it stands, both `walk-artifact:` pointers and a `proved: kind=walk` line. It appends one `ev=walk`
+# line to the landing record, never `ev=matrix-set`, so the hand-holds fold counts no status write.
+# FIXTURE FIDELITY. §VERDICTS' shape with `walk: required`, so the head carries the gate's stub. The landing-settled row
+# is written as `line_settle` leaves it, its `ev=settled` line through the product's line_event.
 WK_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RWK="$(make_repo walk)"; ( cd "$RWK" && git commit -q --allow-empty -m init )
 git -C "$RWK" config user.name "Dana Fixture"
@@ -1905,5 +1876,34 @@ expect_eq "WK-16b …in the landing's write: the walk proof, both pointers, and 
   "1|walk-artifact: $WK_DREL|walk-artifact: $WK_DREL|1" \
   "$(s46_proved "$PWK" | /usr/bin/grep -c "^proved: kind=walk head=$WK_C .* evidence=$WK_DREL\$")|$(wk_step5)|$(wk_head walk-artifact)|$(wk_ev walk | /usr/bin/grep -c "|record=$WK_DREL|discharged=1|")"
 POKE_BOUND="$WK_BOUND_WAS"
+
+section "§CLOSE-TASK: matrix-render names the close row as the task: of the criterion the close proves"
+# ============================================================
+# One serving row is the task. Several read pending, unless the eval names `landing-report --hand-holds`, the measure
+# the close reads last: then the one serving close row is. The plan is s42_plan's, rendered by the real verb.
+RCT="$(make_repo close-task)"; ( cd "$RCT" && git commit -q --allow-empty -m init )
+PCT="$(s42_plan "$RCT" 4)"
+ct_row() { printf '| %s | %s | %s | row %s | implementor | — | 30 | %s | %s.sh | — | — | pending |\n' "$1" "$2" "$3" "$1" "$4" "$1"; }
+CT_ROWS="$(ct_row T1 4 build REQ-1; ct_row T2 6 review REQ-1; ct_row T3 9 close REQ-1; ct_row T4 4 build AC-2.1)" awk '
+  /^\| T[125] \|/ { if (!d) print ENVIRON["CT_ROWS"]; d = 1; next }
+  /^## Verification Matrix/ { print "## Eval design\n\n| Requirement | Criterion | Approach | Eval | Fails when |\n|---|---|---|---|---|"
+    print "| REQ-1 | AC-1.1 | hermetic | `session-poker.sh landing-report --hand-holds <plan>` | a status was written by hand |"
+    print "| REQ-1 | AC-1.2 | hermetic | `tests/b.test.sh` | b is wrong |\n| REQ-2 | AC-2.1 | hermetic | `tests/c.test.sh` | c is wrong |\n" }
+  { print } /^\| AC-1\.1 \| T2 \|/ { print "| AC-1.2 | T2 | pending | — | — |\n| AC-2.1 | T2 | pending | — | — |" }' "$PCT" > "$PCT.tmp" && mv "$PCT.tmp" "$PCT"
+cp "$PCT" "$TMPROOT/ct-before"
+ct_task() {  # <AC> -> its block's task: value
+  awk -v a="$1:" '/^## Verification Matrix/ { m = 1 } m && index($0, a) == 1 { b = 1; next } b && /^[^ \t]/ { b = 0 }
+    b && /^[ \t]+task:/ { sub(/^[ \t]+task:[ \t]*/, ""); print; exit }' "$PCT"
+}
+poke "$RCT" matrix-render
+expect_eq "CT-1 §CLOSE-TASK matrix-render (exit 0) names the close row the task of the criterion whose eval is the hand-holds measure" \
+  "0|T3" "$RC|$(ct_task AC-1.1)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "CT-2 …and pending for its sibling, served by the same three rows, whose eval is not" "pending" "$(ct_task AC-1.2)"
+expect_eq "CT-3 …and the one row serving a criterion stays its task" "T4" "$(ct_task AC-2.1)"
+CT_ROWS="$(ct_row T6 9 close REQ-1)" awk '{ print } /^\| T4 \|/ { print ENVIRON["CT_ROWS"] }' "$TMPROOT/ct-before" > "$PCT"
+poke "$RCT" matrix-render
+expect_eq "CT-4 control: with two close rows serving, the hand-holds criterion reads pending, the single-row one T4 (exit 0)" \
+  "0|pending|T4" "$RC|$(ct_task AC-1.1)|$(ct_task AC-2.1)"
 
 finish
