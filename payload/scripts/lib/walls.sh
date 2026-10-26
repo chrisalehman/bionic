@@ -4387,6 +4387,19 @@ resolve_walk_path() {  # $1 = raw walk-artifact value
   esac
 }
 
+# walk_registered <raw walk-artifact value> <its resolved path> -> 0 when the section holds a flush-left
+# `proved: kind=walk` line whose evidence= names that artifact, compared as written and as resolved, so a
+# `record/<f>` spelling and an absolute one meet. proof-add walk writes that line only after it parsed the
+# record's verdict table, so the line is what makes the artifact a registered walk rather than narration.
+walk_registered() {
+  local ev
+  while IFS= read -r ev; do
+    [ -n "$ev" ] || continue
+    if [ "$ev" = "$1" ] || [ "$(resolve_walk_path "$ev")" = "$2" ]; then return 0; fi
+  done <<< "$(printf '%s\n' "$SECTION" | sed -nE 's/^proved: kind=walk .*[[:space:]]evidence=([^[:space:]]+).*$/\1/p')"
+  return 1
+}
+
 # The arm itself. Fires at current: 5..9 (the Verify gate and, as a durable
 # prefix condition — plan assumption A5 — every step after it, so the artifact
 # cannot be deleted once Verify is behind you). Trigger: at least one matrix row
@@ -4454,15 +4467,17 @@ validate_walk_artifact() {
       "write real narration into the walk artifact before discharging any matrix row — an empty file is not a walk."
   fi
 
-  # The walk narrates a running surface; it never checklists acceptance
-  # criteria. An AC identifier in the artifact is the tell that it was written
-  # with the criteria in hand, which is exactly the power the walk is meant to
-  # have. This grep is the whole enforcement.
+  # The walk narrates a running surface without the criteria in hand, so an AC
+  # identifier in narration is the tell that it checklists them. The one
+  # exception is a registered walk: a verdict table proof-add walk parsed and
+  # recorded as `proved: kind=walk` naming this artifact, whose identifiers are
+  # its verdicts. Invariant: the artifact carries no AC identifier unless such a
+  # line names it; a line naming another record registers nothing here.
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  if grep -qE 'AC-[0-9]' "$abs" 2>/dev/null; then
+  if grep -qE 'AC-[0-9]' "$abs" 2>/dev/null && ! walk_registered "$raw" "$abs"; then
     block_matrix "the walk narration names acceptance criteria" "drop the criteria names" \
       "the walk gate: walk artifact ${abs} names acceptance criteria (matched 'AC-<n>')." \
-      "rewrite the walk as narration of what was driven and what came back, with no AC identifiers — the walk is written without reading the criteria."
+      "rewrite the walk as narration of what was driven and what came back, with no AC identifiers — the walk is written without reading the criteria, or register the record with session-poker.sh proof-add walk <record> when it is the walk's verdict table."
   fi
   return 0
 }
