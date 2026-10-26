@@ -801,12 +801,10 @@ rmdir "$h34d/.bionic/tmp/engaged-$EG_SID.state"
 # ============================================================
 section "§ORDER-VERB, §WHOLE-RUN, §FIX-ROW, §APPROVED-HEAD — build, regression, review, release, approval, merge, through the verbs"
 # ============================================================
-# FIXTURE FIDELITY: one real repository on its working branch; tests/run.sh is a fixture runner printing the real
-# runner's verdict lines (each suite green unless tests/red names it); the plan bound to this session;
-# hooks/session-poker.sh run as that session. The floor proof and the landing lines are written in their writers'
-# shapes (lib/proof.sh proof_floor_line, lib/line.sh's events); the judge reads text whatever wrote it.
-# fails-when: a regression runs beside an open build row or twice at one head, a fixed red asks a second whole run,
-# or current 8 passes at a head the user did not approve.
+# FIXTURE FIDELITY: one real repository; tests/run.sh is a fixture runner printing the real runner's verdict lines (a suite
+# is green unless tests/red names it); the plan is bound to this session and hooks/session-poker.sh runs as it. The proofs
+# and landing lines are written in their writers' shapes; the judge reads text whatever wrote it. fails-when: a regression
+# runs beside an open build row or twice at one head, a fixed red asks a second whole run, or current 8 passes at a head the user did not approve.
 OD_SID="6e7f8091-2a3b-4c4d-9e0f-1a2b3c4d5e6f"; OD_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
 OD_ROOT="$(mktemp -d)"; cleanup_dirs+=("$OD_ROOT"); OD="$(cd "$OD_ROOT" && pwd -P)/repo"
 OD_RL="record/wave-01-fixture"; OD_REC="$OD/.bionic/docs/$OD_RL"; OD_PLAN="$OD/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
@@ -886,9 +884,7 @@ expect_eq "WR-3 AC-6.1 a second whole run at the same green head: refused (exit 
 expect_contains "WR-3b …saying the head has its whole run" "runs once at a head" "$OD_OUT"
 
 printf 'b.test.sh\n' > "$OD/tests/red"; od_git commit -qam 'b breaks'; OD_H="$(od_git rev-parse HEAD)"
-# A head past a whole run is run again: the verb passes every refusal a head-past-the-run once drew and is stopped
-# only by the dirty tree planted here, the refusal that stands just before the runner, so nothing runs and no log
-# is written at H, where the red run below is left as the verb leaves one.
+# A head past a whole run is run again: the verb is stopped only by the dirty tree planted here, the last refusal before the runner.
 printf 'dirt\n' >> "$OD/lib/b.sh"
 od_poke regression-run
 od_git checkout -q -- lib/b.sh
@@ -896,8 +892,7 @@ expect_eq "FX-1 a new head H past the one whole run: regression-run is not refus
   "1|1" "$OD_RC|$(od_logs)"
 expect_contains "FX-1b …the refusal is the dirty tree's, the last one before the runner" "is dirty (dirty=1)" "$OD_OUT"
 expect_absent "FX-1d …and no refusal names the whole run's head as having the run" "${OD_B:0:12} has it" "$OD_OUT"
-# THE RED RUN THE PLAN'S WHOLE RUN WAS, left at H as the verb leaves one: the runner's own report as the log's body, the
-# run line through the product's writer, and the per-suite facts through the fold.
+# THE RED RUN THE PLAN'S WHOLE RUN WAS, left at H as the verb leaves one: the runner's report as the log's body, the run line and the per-suite facts through the product's writers.
 OD_PLANT=0
 (cd "$OD" && { bash tests/run.sh 2>&1 || :; }) | regression_fixture "$OD_PLAN" "$OD_REC/regression-run-$OD_H.log" "$OD_H" 0 1 || OD_PLANT=$?
 bash -c '. "$1/proof.sh" && proof_regression_fold "$2" "$3" "$4" "$5" "$6"' _ "$OD_LIB" "$OD_PLAN" "$OD" "$OD_H" \
@@ -961,7 +956,13 @@ od_s8 "$(od_appr "$OD_A")"
 expect_eq "AH-0 precondition: the plan is in the order, the regression row named" "T2" \
   "$(bash -c '. "$1/units.sh" && units_order "$2"' _ "$OD_LIB" "$OD_PLAN" 2>/dev/null || :)"
 od_poke current 8 --check
-expect_eq "AH-1 AC-7.2 approved head A, the working head A, the whole run at H with C fixed on its suites: passes" "0" "$OD_RC"
+expect_eq "AH-1 approved head A, the working head A, the whole run at H with C fixed on its suites: refused as regression unproved, naming both exits" "1|yes" \
+  "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'regression.*unproved' && printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'reply .* on the release card' && echo yes || echo no)"
+od_mu() { printf 'approved: merge-unproved by chris 2026-10-26T00:00:00Z head=%s "merge"' "$1"; }  # the merge approval, at the head it names
+od_s8 "$(od_appr "$OD_A")"$'\n'"$(od_mu "$OD_A")"; od_poke current 8 --check
+expect_eq "AH-1b …and with the person's merge-unproved word at head A beside it: passes" "0" "$OD_RC"
+od_s8 "$(od_appr "$OD_A")"$'\n'"$(od_mu "$OD_C")"; od_poke current 8 --check
+expect_eq "AH-1c …the same word naming a head that is not A leaves it refused" "1" "$OD_RC"
 od_s8 "$(od_appr "$OD_C")"
 od_poke current 8 --check
 expect_eq "AH-2 AC-7.2 approved head C, the working head A: current 8 --check refuses (exit 1)" "1" "$OD_RC"
@@ -974,8 +975,7 @@ od_poke current 8 --check
 expect_eq "AH-4 no approved: release line: refused (exit 1), naming the verb that writes it" "1|yes" \
   "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "approve release" && echo yes || echo no)"
 
-# A WHOLE RUN AT AN ANCESTOR IS CITED THROUGH proof-add AS THE JUDGE JUDGES IT: the red run at H, then the fix row
-# green at C, the hand landing green by its row head, and the release docs. The verb accepts the log at the head A
+# A WHOLE RUN AT AN ANCESTOR IS CITED THROUGH proof-add AS THE JUDGE JUDGES IT: the verb accepts the log at the head A
 # where the judge says covered, and a later commit no run proves is refused by that commit, not by "a whole run".
 od_plan 5 '' "$(od_rows landed landed pending)"
 od_poke proof-add regression "$OD_RL/regression-run-$OD_H.log"
