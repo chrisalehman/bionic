@@ -343,9 +343,8 @@ sev_fact() {  # <kind> <question> <scope>
     _ "$SEV_LIB" "$1" "$SEV_C1" "record/wave-01-fixture/planted-$2-$3.md" "$2" "$3")"
 }
 sev_cur() { sed "s/^current: .*/current: $1/" "$PSEV" > "$PSEV.tmp" && mv "$PSEV.tmp" "$PSEV"; }
-# The advance to 8 asks a ruling of every matrix row, and a row with no auditor verdict is unruled. A person rules it by
-# the auditor's CONFIRMED in its cell (a waiver or a T4 row's attributed confirmation are the other two ways); the
-# fixture's rows carry none, so the steps that expect the advance to be admitted rule them first.
+# The advance to 8 asks a ruling of every matrix row; the fixture's rows carry none, so the steps that expect it admitted
+# rule them first, by the auditor's CONFIRMED in each cell (a waiver or an attributed confirmation also rule a row).
 sp4_rule_rows() {  # <plan> -> every matrix row's auditor cell reads CONFIRMED
   sed -E '/^\| AC-/ s/[|][^|]*[|]$/| CONFIRMED |/' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
 }
@@ -361,12 +360,10 @@ poke "$RSEV" current 8
 s42_unchanged "SEV-cur §CUR8-sev AC-8.5 the newest adversarial fact holds a finding to fix: current 8" 1 "$PSEV"
 expect_contains "SEV-cur2 …naming that reading failing" \
   "$(printf 'review\tadversarial\tbionic:critic\tpiece\tfailing\trecord/wave-01-fixture/c-fix.md')" "$OUT"
-# ---------- §ASK-WAIVE (T35; AC-2.2): a failing question is the person's to waive, and opens one item ----------
-# A failing reading leaves the person the call: fix it or waive the question. Its registration opens
-# `waive:<question>`, the key the waive verb closes (proof-add); a refusal on it keeps that one item; a
-# second refusal opens nothing new; the waive verb closes it; a refusal after the waiver is taken back
-# opens it again; and once the question holds again (a passing reading over the fix), current 8 closes
-# what is left.
+# ---------- §ASK-WAIVE: a failing question is the person's to waive, and opens one item ----------
+# A failing reading's registration opens `waive:<question>`, the key the waive verb closes. A refusal keeps its one open
+# round and a second opens nothing; the waive verb closes it; a refusal after the waiver is taken back opens a new round;
+# once a passing reading holds the question, current 8 closes what is left. The sections above left closed rounds.
 sev_owed() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && owed_list' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
 sev_store() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && cat "$(owed_file)"' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
 SEV_WKEYS="$(sev_owed | cut -f1)"
@@ -375,16 +372,15 @@ expect_contains "AW-1 T35 AC-2.2 the refusal on a failing question opens waive:<
 expect_absent "AW-1a …and none for the questions that hold (same reader)" "waive:evidence" "$SEV_WKEYS"
 expect_contains "AW-1b …the item the first failing reading's registration opened, which the refusal keeps" \
   "proof-add: the adversarial review record/wave-01-fixture/" "$(sev_owed | awk -F'\t' '$1 == "waive:adversarial" { print $4 }')"
-poke "$RSEV" current 8
-expect_eq "AW-2 a second refusal on the same failing question opens nothing new" "1|1" \
-  "$RC|$(sev_store | /usr/bin/grep -c '|key=waive:adversarial|')"
+SEV_AW="$(sev_store | /usr/bin/grep "|key=waive:adversarial|")"; poke "$RSEV" current 8
+expect_eq "AW-2 a second refusal on the same failing question opens nothing new: one open round, the key's rounds unchanged" "1|1|same" \
+  "$RC|$(sev_store | /usr/bin/grep -c '|key=waive:adversarial|state=open|')|$([ "$(sev_store | /usr/bin/grep '|key=waive:adversarial|')" = "$SEV_AW" ] && echo same)"
 cp "$PSEV" "$TMPROOT/sev-before-waive.md"
 poke "$RSEV" waive adversarial 'I waive the adversarial reading for now'
 expect_eq "AW-3 the waive verb records the user's reply (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "AW-3a …and closes the item it answers" "|key=waive:adversarial|state=closed|by=waive|" "$(sev_store)"
-# THE MUTANT (wave-34 T5; REQ-4 AC-4.5): the opener doctored to open nothing, in a copy of the plugin (hooks/ beside
-# scripts/, so the copy's loader finds the copy's library), turns AW-4 red: the same refusal opens no item.
+# The opener doctored to open nothing, in a plugin copy whose loader finds its own library, turns AW-4 red.
 cp "$TMPROOT/sev-before-waive.md" "$PSEV"
 AWM="$TMPROOT/aw-mutant"; mkdir -p "$AWM/hooks"
 cp -R "$BIONIC_HOOKS_DIR/." "$AWM/hooks/"; cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$AWM/scripts"
@@ -882,9 +878,9 @@ poke "$RVG" proof-add review record/wave-01-fixture/past-waiver.md --question ad
 expect_eq "VG-2b AC-20.2 a reading of A..C registers on the waiver at A, with no reading before it (exit 0)" "0|1" \
   "$RC|$(s46_proved "$PVG" | /usr/bin/grep -c "^proved: kind=review head=$VG_C .* evidence=record/wave-01-fixture/past-waiver.md question=adversarial ")"
 
-# ---------- §CUR7-COVERED: an approval and a waiver at an earlier head hold over the prose landed after them ----------
-# The plan is put in the order (a whole-run row at Step 5, a release row at 7, an open integrate row reading the
-# release); the user approves the release at C2 and waives the readings there, then two prose commits land.
+# ---------- §CUR7-COVERED: prose landed past the whole run is covered, not green ----------
+# The plan holds a whole-run row, a release row and an open integrate row reading the release; the user approves the
+# release at C2 and waives there, then two prose commits land: covered, not green, until the person's word or a new pass.
 VG_C2="$(s57_commit "$VG_WT" lib/b.sh C2)"
 printf 'Gating: 3 passed, 0 failed\n' | regression_fixture "$PVG" "$VG_DIR/whole-c2.log" "$VG_C2" 0 0
 poke "$RVG" proof-add regression record/wave-01-fixture/whole-c2.log
@@ -898,13 +894,17 @@ expect_eq "VG-5 the plan is in the order, and the user approves the release at C
   "$RC|$(bash -c '. "$1/units.sh" && units_order "$2"' _ "${S46_LIB%/*}" "$PVG")|$(bash -c '. "$1" && proof_approved_head "$2" release' _ "$S46_LIB" "$PVG")"
 s57_commit "$VG_WT" .bionic/docs/record/wave-01-fixture/notes.md P1 >/dev/null
 s57_commit "$VG_WT" README.md P2 >/dev/null
-# The Step 7 gate asks for a whole matrix this fixture does not model, so the judge is asked at the plan's Step 7
-# through `current 8 --check`, which asks the facts and the approved head at the working head.
+# The fixture models no whole matrix, so the judge is asked at Step 7 through `current 8 --check`, at the working head.
 sed 's/^current: .*/current: 7/' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
 sp4_rule_rows "$PVG"
 poke "$RVG" current 8 --check
-expect_eq "VG-5b AC-20.5 the approval and the waivers at C2, two prose commits after: current 8 is admitted" "0" "$RC"
-[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "VG-5b AC-20.5 the approval and the waivers at C2, two prose commits after: covered, not green, refused as regression unproved, naming the reply" "1|yes" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -q 'regression.*unproved' && printf '%s\n' "$OUT" | /usr/bin/grep -q 'reply .* on the release card' && echo yes || echo no)"
+printf '%s\n' "$OUT" | /usr/bin/grep -q 'regression.*unproved' || printf '      the verb said: %s\n' "$OUT"; vg_mu() { awk -v h="$1" '/^approved: merge-unproved /{ next } { print } /^current: / && h { print "approved: merge-unproved by chris 2026-10-26T00:00:00Z head=" h " \"merge\"" }' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"; }
+vg_mu "$(git -C "$VG_WT" rev-parse HEAD)"; poke "$RVG" current 8 --check
+expect_eq "VG-5c …and with the person's merge-unproved word at the working head under ## SDLC State: admitted" "0" "$RC"
+vg_mu "$VG_C2"; poke "$RVG" current 8 --check
+expect_eq "VG-5d …the same word at C2's head, not the working head, leaves it refused" "1" "$RC"; vg_mu ""
 s57_commit "$VG_WT" lib/b.sh C3 >/dev/null
 poke "$RVG" current 8 --check
 
