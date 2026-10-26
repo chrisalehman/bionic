@@ -1222,6 +1222,7 @@ roots.test.sh | §2b | keep | payload/hooks/stop-check.sh: `DOCS_ROOT="$(docs_ro
 roots.test.sh | §2c | keep | payload/hooks/canonical-sdlc-governing-skill.sh: the scaffold writes $PROJECT/.bionic/docs/{specs,plans,adrs,incidents} by literal, so the configured alt/ tree is never created | none (searched 'docs-root' in tests/canonical-sdlc-governing-skill.test.sh)
 roots.test.sh | §2d | keep | payload/scripts/doctor.sh: the active-run row searches .bionic/docs instead of docs_root, so it names the decoy | none (searched 'docs-root' in tests/doctor*.test.sh)
 roots.test.sh | §3 | keep | payload/hooks/session-poker.sh promote: a plan promoted instead of refused with exit 1 | none (searched 'promote' in tests/)
+roots.test.sh | §PROMOTE-TREE | keep | hooks/poker/plan.sh poker_verb_promote: the target handed the state home instead of the running checkout's top level, so a promotion run from a linked worktree lands in the main checkout and the worktree holds nothing (AC-4.1, AC-4.3 go red) | none (searched 'promote' and 'worktree add' in tests/; the §3 arms run from the main checkout only)
 
 ## roster.test.sh
 
