@@ -1,10 +1,8 @@
 #!/bin/bash
 # tests/close-out-4.test.sh — payload/scripts/close-out.sh, part 4 of 4: sections §INHERITED-CONT through §ASKS-NOTHING.
 #
-# THE SUITE IS FOUR PARTS (wave-39 T6; D1, D13, REQ-3 AC-3.1). One close-out.test.sh promised more than the
-# suite bar, ten minutes of the gate's promise, so it runs as four suites cut at section boundaries. Its
-# governing design, its sandbox, and the fixture builders and helpers every part shares are in
-# tests/close-out.prelude.sh, sourced below after the framework.
+# THE SUITE IS FOUR PARTS (wave-39 T6; D1, D13, REQ-3 AC-3.1): one close-out.test.sh outran the suite bar, so it runs as
+# four suites cut at section boundaries. Its design, sandbox, fixture builders and helpers are in tests/close-out.prelude.sh.
 #
 # Usage: bash tests/close-out-4.test.sh
 
@@ -20,11 +18,9 @@ set -uo pipefail
 section "§INHERITED-CONT — wave-35 T10 (REQ-1 AC-1.6, A-orch-18): the continuation carries every inherited: line under its own heading; a plan with none prints none"
 # ============================================================
 # `proof-add inherited <suite>` writes `inherited: <suite> base=<sha> head=<sha> at=<ISO> evidence=<log>` under
-# `## SDLC State` (T9): debt the run inherited, red at its base and at its floor. AC-1.6 says it is carried into the
-# continuation, so close-out lists every such line under `## Inherited debt`, beside the hand-holds, as written. A
-# line inside a fence is prose, not a line the verb wrote, and is not carried.
-# FIXTURE FIDELITY: mk_fixture at Step 8; the lines are placed by lib/proof.sh `proof_add_line`, the placer the verb
-# calls, in the verb's own shape.
+# `## SDLC State` (T9): debt the run inherited, red at its base and at its floor. Close-out lists every such line under
+# `## Inherited debt`, beside the hand-holds, as written; a line inside a fence is prose and is not carried.
+# FIXTURE FIDELITY: mk_fixture at Step 8; lines placed by lib/proof.sh `proof_add_line`, the verb's own placer.
 # fails-when: an inherited: line is missing from the continuation, or a plan with none gets the heading.
 inh_line() {  # <suite> <sha> -> the line proof-add inherited writes
   printf 'inherited: %s base=%s head=%s at=2026-10-12T04:00:00Z evidence=record/wave-01-fixture/inherited-%s-%.12s.log' "$1" "$2" "$2" "$1" "$2"
@@ -1116,15 +1112,11 @@ expect_eq "MK-4 the five filled by continuation-fill from an unengaged session: 
 # ============================================================
 section "§OWED-AT-CLOSE — close-out settles the matrix row its own last reading proves, and the gate before the flip does not refuse on it"
 # ============================================================
-# A criterion is owed at the step whose task proves it. A row whose `task:` is the close row (step 9) and whose eval
-# names `landing-report --hand-holds` is proved by the line close-out reads last, after `delivered:`. So the gate the
-# pre-flight and the dry-run ask at current 8 owes it nothing, and close-out writes it in the same act as that last
-# reading, before the archive move: status discharged when the line reads total=0, else blocked with the line quoted,
-# its evidence the continuation path. A blocked row is reported, never a refusal: the run still delivers.
-# FIXTURE FIDELITY: mk_fixture at Step 8, its plan gaining what a planner writes, a close row (step 9, landed, so no
-# session binding is owed) and two matrix rows owed at the close; the hand-hold above zero is §READ-ORDER's amend.
-# fails-when: run refuses on the pending row, or the delivered plan reads it pending, or reads it discharged above zero,
-# or a row owed at the close whose eval is another measure is written.
+# A row owed at the close (step 9) whose eval names `landing-report --hand-holds` is proved by the line close-out reads last,
+# after `delivered:`, so the pre-flight and the dry-run at current 8 owe it nothing; close-out writes it in the act that
+# reads that line: discharged at total=0, else blocked with the line quoted, evidence the continuation path. Blocked is
+# reported, never a refusal. FIXTURE: mk_fixture at Step 8 plus a landed close row T4 and two rows owed at the close.
+# fails-when: the run refuses on the pending row (OC-1; OC-1c shows the refusal live with the deferral off), or the delivered plan reads it pending or discharged above zero, or a row on another eval is written.
 oc_rows() {  # <project> -> the plan gains T4 (step 9, close), a T3 row on the close's measure and a T0 row (task: 9) on another eval
   local plan="$1/$PLAN_REL"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "oc_rows: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
@@ -1151,6 +1143,14 @@ OC_CONT="record/wave-01-fixture/continuation.md"
 POC="$(mk_fixture owed-close)"; advance_to "$POC" 8; oc_rows "$POC"
 expect_eq "OC-0 precondition: the fixture carries the close row and both rows pending" "pending|—|pending|—|9" \
   "$(oc_cells "$POC/$PLAN_REL" AC-2)|$(oc_cells "$POC/$PLAN_REL" AC-3)|$(awk -F'|' '$2 ~ /^ T4 $/ { s = $3; gsub(/ /, "", s); print s }' "$POC/$PLAN_REL")"
+# OC-1c: the deferral is what keeps OC-1 green. A copy of the plugin whose deferral never defers, run on the same plan, must refuse on the live row.
+OC_REV="$SANDBOX/oc-rev"; mkdir -p "$OC_REV" && cp -RL "$REPO_ROOT/payload" "$OC_REV/payload"; OC_W="$REPO_ROOT/payload/scripts/lib/walls.sh"
+sed '/^matrix_row_deferred() {/,/^}/ s/^  local n="\${3%\[ab\]}"$/&; return 1/' "$OC_W" > "$OC_REV/payload/scripts/lib/walls.sh"
+expect_eq "OC-1c0 the copy's deferral differs from the plugin's in one line" "1" "$(diff "$OC_W" "$OC_REV/payload/scripts/lib/walls.sh" | grep -c '^>')"
+PRV="$(mk_fixture owed-close-rev)"; advance_to "$PRV" 8; oc_rows "$PRV"
+OC_R="$REPO_ROOT"; OC_S="$SCRIPT"; REPO_ROOT="$OC_REV"; SCRIPT="$OC_REV/payload/scripts/close-out.sh"; run_close "$PRV" run; REPO_ROOT="$OC_R"; SCRIPT="$OC_S"
+expect_ne "OC-1c the run on that copy refuses" "0" "$CO_RC"
+expect_contains "OC-1d …on the live row, in the gate's words" "the row is live past the step that owes it" "$CO_OUT"
 run_close "$POC" run
 OC_LINE="$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')"
 expect_eq "OC-1 run exits 0: the pre-flight and the dry-run before the flip do not refuse on the row the close owes" "0" "$CO_RC"
