@@ -2242,6 +2242,10 @@ facts_judge() {
     *) FACTS_RC=1
        FACTS_LINES="$(printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"')"
        FACTS_WHY="the facts the run owes do not all hold at the working head $FACTS_HEAD (facts_state); record each with proof-add, or have the user waive a question"
+       # A MERGE NO WHOLE RUN PROVED AT THIS HEAD carries its own exit on the judge's line: the person's word on the
+       # release card, or the pass. Neither is a proof-add or a waiver, so the sentence names it.
+       ah="$(printf '%s\n' "$FACTS_LINES" | awk -F'\t' '$1 == "regression" && $2 == "unproved" { print $4; exit }')"
+       [ -z "$ah" ] || FACTS_WHY="$FACTS_WHY; the whole suite has not run at this head: $ah"
        FACTS_SAYS="$(co_facts_says "$FACTS_LINES")" ;;
   esac
   return 0
@@ -2252,7 +2256,7 @@ facts_judge() {
 co_facts_says() {
   printf '%s\n' "$1" | awk -F'\t' '
     NF == 0 { next }
-    { st = ""; for (i = 2; i <= NF; i++) if ($i ~ /^(uncovered|owed|failing|absent)$/) { st = $i; break }
+    { st = ""; for (i = 2; i <= NF; i++) if ($i ~ /^(uncovered|owed|failing|absent|unproved)$/) { st = $i; break }
       if ($1 == "review") w = "the " $2 " review"; else if ($1 == "regression") w = "the regression"
       else if ($1 == "check") w = "the release check"; else if ($1 == "debt") w = $2; else w = "a proof the run owes"
       if (w in seen) next
@@ -2261,6 +2265,7 @@ co_facts_says() {
       if ($1 == "debt") s = w " is still red"
       else if (st == "failing") s = w " failed"
       else if (st == "owed") s = w " has red suites"
+      else if (st == "unproved") s = "the merge waits on your word: the whole suite has not run at this head"
       else s = w " has not run at this head" }
     END { if (n == 0) s = "the run\047s proofs do not all hold"; else if (n > 1) s = s ", and " (n - 1) " more"; print s }'
 }

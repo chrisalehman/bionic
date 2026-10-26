@@ -1732,11 +1732,11 @@ proof_branch_head() {
   git -C "${2:-.}" rev-parse --verify -q "refs/heads/${wb}^{commit}" 2>/dev/null
 }
 
-# proof_whole_text <plan> <tree> -> the full pass's state at the working head, one line: `green at <F8>` when the
-# working head (`proof_branch_head`) is F, the last regression proof's head, and the judge (`proof_state`) reads it
-# covered there; `red at <F8>, <n> landings before this head` otherwise, n the first-parent commits from F to the
-# working head (`1 landing` for one); `red at <F8>, not in this head's history` when F is not behind the working head
-# or either cannot be read; `none` when the plan holds no regression proof.
+# proof_whole_text <plan> <tree> [<head>] -> the full pass's state at <head>, the working head (`proof_branch_head`)
+# when none is handed in, one line: `green at <F8>` when <head> is F, the last regression proof's head, and the judge
+# (`_proof_floor_judge`, proof_state's) reads it covered there; `red at <F8>, <n> landings before this head` otherwise, n the first-parent
+# commits from F to <head> (`1 landing` for one); `red at <F8>, not in this head's history` when F is not behind
+# <head> or either cannot be read; `none` when the plan holds no regression proof.
 # THE ONE PRINTER OF THE FULL PASS: the release card, the scorecard and close-out's continuation print this line and
 # compute nothing of their own, so no two of them can disagree over one run. GREEN MEANS THE FULL SUITE RAN GREEN AT
 # THIS HEAD: a head past F that later landings' own suites cover is covered to the judge and still red here, since
@@ -1745,12 +1745,13 @@ proof_whole_text() {
   local plan="$1" tree="$2" f fc c n
   f="$(proof_last "$plan" regression 2>/dev/null)"
   [ -n "$f" ] || { printf 'none\n'; return 0; }
-  c="$(proof_branch_head "$plan" "$tree" 2>/dev/null)" || c=""
+  if [ -n "${3:-}" ]; then c="$(git -C "$tree" rev-parse --verify -q "${3}^{commit}" 2>/dev/null)" || c=""
+  else c="$(proof_branch_head "$plan" "$tree" 2>/dev/null)" || c=""; fi
   fc="$(git -C "$tree" rev-parse --verify -q "${f}^{commit}" 2>/dev/null)" || fc=""
   n=""
   if [ -n "$c" ] && [ -n "$fc" ] && git -C "$tree" merge-base --is-ancestor "$fc" "$c" 2>/dev/null; then
     if [ "$fc" = "$c" ]; then
-      case "$(proof_state "$plan" "$tree" 2>/dev/null)" in covered*) printf 'green at %.8s\n' "$f"; return 0 ;; esac
+      case "$(_proof_floor_judge "$plan" "$tree" "$c" 2>/dev/null)" in covered*) printf 'green at %.8s\n' "$f"; return 0 ;; esac
     fi
     n="$(git -C "$tree" rev-list --first-parent --count "$fc..$c" 2>/dev/null)" || n=""
   fi
@@ -1759,6 +1760,49 @@ proof_whole_text() {
     ''|*[!0-9]*) printf "red at %.8s, not in this head's history\n" "$f" ;;
     *) printf 'red at %.8s, %s landings before this head\n' "$f" "$n" ;;
   esac
+}
+
+# proof_unproved_approved <plan> <head> -> 0 when the plan's newest `approved: merge-unproved` line names <head>, the
+# 40-hex commit; 1 otherwise. THE PERSON'S WORD IS GIVEN AT A HEAD: a line at any other head is stale, so a head the
+# branch moved to is asked again, as a release approval the head moved past is.
+proof_unproved_approved() {
+  local h
+  h="$(proof_approved_head "${1:-}" merge-unproved 2>/dev/null)" || return 1
+  [ -n "${2:-}" ] && [ "$h" = "$2" ]
+}
+
+# proof_merge_unproved <plan> <tree> <head> -> the whole suite's state at <head> (`proof_whole_text`) and exit 0 when a
+# merge at <head> needs the person's word: no pass ran green at it and no word was given at it. Exit 1, nothing
+# printed, when the pass ran green there or the word was given there. A <head> that is the release entry's reviews part
+# rendered fresh on its parent is judged at that parent (`proof_part_base`): the part is written after the pass and the
+# word, from the lines they left, so it asks neither again. THE ONE RULE the release card's ask and the judge's
+# unproved state share, so the card asks exactly what the gate holds the merge on.
+proof_merge_unproved() {
+  local plan="$1" tree="$2" head="$3" at
+  at="$(proof_part_base "$plan" "$tree" "$head")"
+  proof_unproved_approved "$plan" "$head" && return 1
+  [ "$at" = "$head" ] || ! proof_unproved_approved "$plan" "$at" || return 1
+  case "$(proof_whole_text "$plan" "$tree" "$at")" in "green at "*) return 1 ;; esac
+  proof_whole_text "$plan" "$tree" "$head"
+}
+
+# proof_unproved_needs <plan> <tree> <head> -> the exit of a merge the whole suite has not run at, one line:
+# `needs: the user — reply <n> on the release card (merge without a whole run at this head), or wait for the pass`,
+# <n> the decision number the newest release card rendered at <head> gives `approve:merge-unproved` (its replay table,
+# `release-approval/v1|dec=<n>|key=…`), or `<n>` while no card at that head holds it.
+proof_unproved_needs() {
+  local plan="$1" tree="$2" head="$3" dir n=""
+  _proof_roots_load
+  if declare -F docs_root >/dev/null 2>&1 && dir="$(docs_root "$tree" 2>/dev/null)/record/$(proof_plan_slug "$plan" 2>/dev/null)" \
+     && [ -d "$dir" ]; then
+    # shellcheck disable=SC2012  # page names are release-approval-<hex>[-<n>].md, no blank or line break in any
+    n="$(ls -t "$dir"/release-approval-"${head:0:8}"*.md 2>/dev/null | while IFS= read -r f; do
+      /usr/bin/grep -q "^release-approval/v1|plan=.*|head=$head|" "$f" 2>/dev/null || continue
+      sed -n 's/^release-approval\/v1|dec=\([0-9][0-9]*\)|key=approve:merge-unproved|.*/\1/p' "$f" 2>/dev/null | head -1
+      break
+    done)"
+  fi
+  printf 'needs: the user — reply %s on the release card (merge without a whole run at this head), or wait for the pass\n' "${n:-<n>}"
 }
 
 # _proof_floor_judge <plan> <tree> <head> -> the floor's state at <head>, one line: `covered`, `owed<TAB><suites>`
@@ -2222,6 +2266,9 @@ proof_debts_open() {
 #                              walk cannot prove, and what it lacks (wave-35 T9)
 #     owed<TAB><suites>        the regression only: a suite its whole run left red has no later green landing
 #                              yet, comma-joined file names (wave-35 T9; D8, AC-1.3)
+#     unproved<TAB><state><TAB><exit>
+#                              the regression only: the landings past the whole run cover <head>, no pass ran
+#                              at it and the person gave no word at it; the whole suite's state and the exit
 #     failing<TAB><evidence>   the question's newest fact is result=fail, and no waiver is newer
 #     absent                   no fact of that kind, and no waiver
 #
@@ -2264,7 +2311,10 @@ proof_debts_open() {
 # THE REGRESSION is the floor judge's answer at <head> (`_proof_floor_judge`, proof_state's judge; wave-31 T25,
 # D3; wave-35 T9, D8): covered; owed with the reds of its whole run still open; or uncovered from its proof's
 # head to <head>, with the reason that names the first commit past it no recorded run proves. With no
-# regression proof it is absent. <head> is the caller's, read from the working branch's ref
+# regression proof it is absent. Covered holds only where the whole suite ran green at <head> or the person gave
+# their word at it (`proof_merge_unproved`); past F otherwise it is
+#     unproved<TAB><the whole suite's state, proof_whole_text's><TAB><its exit, proof_unproved_needs's>
+# the merge-without-a-pass the release card asks. <head> is the caller's, read from the working branch's ref
 # (`proof_branch_head`), never a checkout's (A-orch-45).
 # An owed line this judge has no rule for answers absent (the safe direction).
 # A FINDING RE-RATED BY A MOVE (wave-28 T42; D34): a reading's result is the one its findings give at
@@ -2274,7 +2324,7 @@ proof_debts_open() {
 # (the freeze, .claude/rules/hook-authoring.md).
 facts_state() {
   local plan="${1:-}" head="${2:-}" d rigor scale owed tree droot="" pfx chains fact kind q role scope st rc=0
-  local x pt pr ph pe wt wr we wh cb fixed="" born="" chk="" walked="|"
+  local x pt pr ph pe wt wr we wh cb ws fixed="" born="" chk="" walked="|"
   [ -f "$plan" ] || { printf 'facts_state: %s is not a plan file\n' "$plan" >&2; return 2; }
   d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
   if ! declare -F plan_frontmatter_get >/dev/null 2>&1; then
@@ -2349,8 +2399,15 @@ review	"*) fixed="$(proof_fixed "$plan" "$tree")"; born="$(_facts_born_landings 
         else
           x="$(proof_last "$plan" regression)"
           st="$(_proof_floor_judge "$plan" "$tree" "$head" 2>/dev/null | awk 'NR == 1')"
+          # GREEN MEANS THE WHOLE SUITE RAN HERE: a head the landings since the whole run cover, with no pass at it,
+          # holds only on the person's word given at this head (`approved: merge-unproved … head=<head>`), and is
+          # unproved until then, naming that word and the pass as its two exits. A red the whole run left open is no
+          # such head: the word never waives a suite.
+          if [ "$st" = covered ] && ws="$(proof_merge_unproved "$plan" "$tree" "$head")"; then
+            st="unproved	$ws	$(proof_unproved_needs "$plan" "$tree" "$head")"
+          fi
           case "$st" in
-            covered|owed"	"?*) : ;;
+            covered|owed"	"?*|unproved"	"?*) : ;;
             uncovered"	"?*) st="uncovered	$x..$head	${st#uncovered	}" ;;
             *) st="uncovered	$x..$head" ;;
           esac

@@ -516,6 +516,9 @@ walk_said() {  # <record docs-relative> -> what the registration settled, one li
     # `approval:<name>` or `live:approval:<name>` (units.sh `units_approval_names`), are the only
     # names an approval can satisfy. Exact match, case included, as readiness keys it.
     AP_READ="$(units_approval_names "$PV_PLAN" | /usr/bin/grep -v '^plan$' | tr '\n' ' ' | sed 's/ $//')"
+    # THE MERGE WITHOUT A PASS qualifies the merge a row reads: `facts_state` holds that merge on it while the whole
+    # suite has not run at the head, and the release card puts it, so it is a name only where a row reads the merge.
+    case " $AP_READ " in *" merge "*) AP_READ="$AP_READ merge-unproved" ;; esac
     case " $AP_READ " in
       *" $AP_NAME "*) : ;;
       *)
