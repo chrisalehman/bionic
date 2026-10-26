@@ -2715,9 +2715,10 @@ $SAID_REFUSED
 SAID_REFUSE
 }
 
-# serves_tasks <plan> -> `<id><TAB><serves>` for each `## Tasks` row (lib/units.sh units_rows, the table's one reader).
+# serves_tasks <plan> -> `<id><TAB><serves><TAB><step><TAB><kind>` for each `## Tasks` row (lib/units.sh units_rows,
+# the table's one reader).
 serves_tasks() {
-  units_rows "$1" 2>/dev/null | awk -F'\t' '$1 != "" { print $1 "\t" $8 }'
+  units_rows "$1" 2>/dev/null | awk -F'\t' '$1 != "" { print $1 "\t" $8 "\t" $2 "\t" $3 }'
 }
 
 # A cell value the plan can hold: no pipe, tab or line break (AC-9.2). 0 when it can.
@@ -3128,7 +3129,7 @@ function serves_load(spec,    n0, i, tl, tv, ns, sv, s) {
   n0 = split(spec, tl, "\n"); nt = 0
   for (i = 1; i <= n0; i++) {
     split(tl[i], tv, "\t"); if (tv[1] == "") continue
-    nt++; tid[nt] = tv[1]; ns = split(tv[2], sv, /[ ,;]+/)
+    nt++; tid[nt] = tv[1]; tstep[nt] = tv[3]; tkind[nt] = tv[4]; ns = split(tv[2], sv, /[ ,;]+/)
     for (s = 1; s <= ns; s++) if (sv[s] != "") serves[nt, sv[s]] = 1
   }
 }
@@ -3181,11 +3182,24 @@ function readreq(f,    l, h, a, fz) {
   close(f)
 }
 function actext(cr) { return (cr in fact) ? fact[cr] : ((cr in pact) ? pact[cr] : "") }
-function taskof(cr,    t, n, id) {
-  n = 0
-  for (t = 1; t <= nt; t++)
-    if (serves_hit(t, cr)) { n++; id = tid[t] }
-  return (n == 1) ? id : "pending"
+# taskof(cr) -> the row a criterion\047s `task:` names. One serving row is it; several leave it pending, since no row
+# among them is the criterion\047s by the table alone. The exception is the criterion the close proves, its eval naming
+# `landing-report --hand-holds` (walls.sh matrix_close_rows reads it by that eval): the owing-step rule reads this key,
+# so a pending key there holds the close\047s own row live until a hand writes it, and that write is a status write the
+# measure counts. Among its serving rows it takes the one of kind close, else the one at step 9 when no row is of
+# kind close; none or several leave it pending, never a guess.
+function taskof(cr,    t, n, id, nk, ik, ns, is) {
+  n = 0; nk = 0; ns = 0
+  for (t = 1; t <= nt; t++) {
+    if (!serves_hit(t, cr)) continue
+    n++; id = tid[t]
+    if (tkind[t] == "close") { nk++; ik = tid[t] }
+    if (tstep[t] + 0 == 9) { ns++; is = tid[t] }
+  }
+  if (n == 1) return id
+  if (n == 0 || eev[cr] !~ /landing-report[ \t]+--hand-holds/) return "pending"
+  if (nk) return (nk == 1) ? ik : "pending"
+  return (ns == 1) ? is : "pending"
 }
 # PROVENANCE IS THE REQUIREMENT\047S (wave-35 T8; REQ-6 AC-6.4; D15): the requirements file the plan names (fprov),
 # else the plan\047s own `### REQ-<n>` line (prov), else pending; the Eval design\047s Approach is never a provenance.
