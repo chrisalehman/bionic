@@ -151,6 +151,17 @@ new capability. `canonical_sdlc_version` stays 14.
   `rendered.sha256` refreshed, and ADR-074. T20 opens the pull request, and T21 closes the run and reads the hand-holds
   measure last.
 
+### The reviews
+
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- adversarial review, whole: flag at 837ddc39 by w46-T18, 2026-10-26T04:21:32Z (`critic-adversarial.md`)
+- structure review, whole: flag at 837ddc39 by w46-T18, 2026-10-26T04:21:41Z (`critic-structure.md`)
+- evidence review, whole: fail at 837ddc39 by w46-T18, 2026-10-26T04:24:15Z (`critic-evidence.md`)
+- evidence review, piece: pass at 5a08f601 by w46-T30, 2026-10-26T05:08:05Z (`critic-evidence-2.md`)
+- adversarial review, piece: flag at 5a08f601 by w46-T30, 2026-10-26T05:08:15Z (`critic-adversarial-2.md`)
+- structure review, piece: flag at 5a08f601 by w46-T30, 2026-10-26T05:08:25Z (`critic-structure-2.md`)
+
 ### Known limits
 
 Rendered from the plan's deferred findings, each its stated sentence, in the order they were registered.
