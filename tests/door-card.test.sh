@@ -2,28 +2,26 @@
 # Tests for the release approval card at the end of a run the verbs carried there: the door fixture (tests/lib/door.sh)
 # is walked from its authored plan to the end state by the run's own verbs, and the card is rendered on what they left.
 #
-#   §CLOSE         the fixture's plan is put in the release order (the release row moved to step 7, a regression row at
-#                  step 5, an integrate row reading the release and merge approvals), the build row lands by hand, the
-#                  matrix is rendered and discharged, Steps 5, 6 and 7 are entered with the regression run and recorded,
-#                  five readings registered by their readers and the declared check run, and the release row lands by
-#                  hand with the release. At that head every fact holds and no `approved: release` line is written, so
-#                  `current 6` and `current 7` would advance and `current 8` refuses on the release approval alone; the
-#                  card exits 0, writes its page, and its replay table puts `approve:release` and `approve:merge`.
+#   §CLOSE         the plan is put in the release order (a regression row at step 5, an integrate row reading both
+#                  approvals), the build row lands by hand, the matrix is discharged, Steps 5 to 7 are entered with the
+#                  regression run, five readings and the check recorded, and the release row lands by hand with the
+#                  release and the whole run again at that head, as a delivered run ends. Every fact holds and no
+#                  `approved: release` line is written, so `current 8` refuses on that approval alone; the card exits 0
+#                  and its replay table puts `approve:release` and `approve:merge` only, the pass being at the head.
 #   §CLOSE-MUTANT  the same end state under copies of the tree under test. Unchanged, the copy renders the card. With
 #                  the card's `approve:release` settle deleted, the card is early. With the judge's refusal reworded in
-#                  the one place it is spelled, the judge prints the new words and the card still renders. The refusal's
-#                  text is spelled once, in hooks/poker/judge.sh, and read by payload/scripts/card.sh.
+#                  the one place it is spelled, the judge prints the new words and the card still renders.
 #   §GROW          criteria the matrix table lacks, their eval types in words, gain their rows at the mapped tier from
 #                  matrix-render, before their blocks; an empty table renders whole; an unknown type is refused.
 #
 # FIXTURE FIDELITY: the repository is door_world's, a real `git init` with the check's closure, the real changelog and a
 # plan whose Step-3 state the library authors. Every later change to the plan is a verb's: task-set, task-add,
 # matrix-render, matrix-set, discharge, step-line, step-field, current, proof-add and the hand door's row line. This
-# file never writes the plan, save §GROW's Eval design rows, which no verb writes. What it writes are the records the run's actors write: a one-row suite in the build
-# row's commit, the matrix row's evidence, the walk and audit records, five reading records in the readers' grammar
-# (the structure reading answering every id the shipped checks file names), and each reader's roster row through the
-# production writer (`roster_row`), closed by the sweeper's own `ack`. SYNTHESIZED: the readers' names and the words
-# of their records.
+# file never writes the plan, save §GROW's Eval design rows, which no verb writes. What it writes are the records the
+# run's actors write: a one-row suite in the build row's commit, the matrix row's evidence, the walk and audit records,
+# five reading records in the readers' grammar (the structure reading answering every id the shipped checks file names),
+# and each reader's roster row through the production writer (`roster_row`), closed by the sweeper's own `ack`.
+# SYNTHESIZED: the readers' names and the words of their records.
 #
 # ANTI-VACUITY: with no fixture built the suite stops before its first section, having asserted nothing, which finish
 # fails. Every absence is read beside a presence through the same reader in the same fixture; every mutant first proves
@@ -142,6 +140,8 @@ dc_verb "(c22) current 7" current 7
 DC_P2="$(door_piece "$DC" T2)" && door_release "$DC" "$DC_P2" >/dev/null && door_land "$DC" "$DC_P2"
 printf 'dc: land T2 -> rc %s\n' "$DOOR_RC"
 expect_eq "(c23) the release row lands by hand with the release" "0" "$DOOR_RC"
+dc_verb "(c23a) the whole run again, at the release head a delivered run ends on" regression-run
+dc_verb "(c23b) proof-add records that pass, so the card asks no merge without one" proof-add regression "record/wave-x/regression-run-$(dc_head "$DC").log"
 dc_verb "(c24) release-check at the release head" release-check
 DC_H="$(dc_head "$DC")"; DC_H8="${DC_H:0:8}"
 echo "dc: the walk took $((SECONDS - DC_T0)) s and ended at $DC_H"
@@ -199,8 +199,8 @@ expect_eq "(m0) an unchanged copy of the tree renders the card on a copy of the 
 
 DCM1="$WORLD_ROOT/tree-unsettled"; dcm_tree "$DCM1"
 # The cut replaces the settle statement with a no-op instead of deleting its line: the settle is the whole body of an
-# if, and an emptied body leaves a card.sh that does not parse, so the mutant would fail on syntax, not on the
-# missing settle.
+# if, and an emptied body leaves a card.sh that does not parse, so the mutant would fail on syntax, not on the missing
+# settle.
 sed -i.orig 's/^\( *\).*approve:release"\$.*$/\1:/' "$DCM1/payload/scripts/card.sh"
 expect_eq "(m1a) the mutant deleted the approve:release settle from its card" "yes" \
   "$(cmp -s "$DCM1/payload/scripts/card.sh" "$DCM1/payload/scripts/card.sh.orig" && echo no || echo yes)"
