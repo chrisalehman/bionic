@@ -2,7 +2,7 @@
 # Tests for hooks/session-poker.sh — shard 5: §CHECK, §DECISIONS, §ROUNDS, §EARLY-TICK, §ORDER, §QUIET-LANDING,
 # §NOTREADY, §STEP, §TSENTENCE, §CAP, §OWED, §EXEMPT, §REGISTRY, §APPROVED-BY, §PARTS, §RETIER.
 #
-# THE SUITE IS SHARDS (wave-30 T2; design-ledger Δ7, D8). Its design, hermetic posture and clock discipline are
+# THE SUITE IS SHARDS. Its design, hermetic posture and clock discipline are
 # in tests/session-poker.test.sh's header; the sandbox and shared fixture builders are tests/session-poker.prelude.sh.
 #
 # Usage: bash tests/session-poker-5.test.sh
