@@ -342,9 +342,9 @@ expect_eq "AS-1 no production code line spells an old token (hits: $(printf '%s'
   "$(printf '%s' "$AS_HITS" | /usr/bin/grep -c . | tr -d ' ')"
 AS_MUT="$TMPROOT/as-mut"; mkdir -p "$AS_MUT"
 cp "$SP_SH" "$AS_MUT/session-poker.sh"; cp "$PROOF_SH" "$AS_MUT/proof.sh"
-# One `  regression-run)` arm: the parse case's. The exec arm is a one-line call into the proof record's part.
-anchor -E "$AS_MUT/session-poker.sh" '^  regression-run\)$' 1
-awk '/^  regression-run\)$/ && !d { print "  floor-run) : ;;"; d = 1 } { print }' "$AS_MUT/session-poker.sh" > "$AS_MUT/sp.tmp" && mv "$AS_MUT/sp.tmp" "$AS_MUT/session-poker.sh"
+# One `  regression-run) : ;;` arm: the parse case's. The exec arm is a one-line call into the proof record's part.
+anchor -E "$AS_MUT/session-poker.sh" '^  regression-run\) : ;;$' 1
+awk '/^  regression-run\) : ;;$/ && !d { print "  floor-run) : ;;"; d = 1 } { print }' "$AS_MUT/session-poker.sh" > "$AS_MUT/sp.tmp" && mv "$AS_MUT/sp.tmp" "$AS_MUT/session-poker.sh"
 expect_true "AS-2 precondition: the planted poker still parses" bash -n "$AS_MUT/session-poker.sh"
 anchor "$AS_MUT/proof.sh" 'PROOF_KIND == "regression" || PROOF_KIND == "task"' 1
 sed 's/PROOF_KIND == "regression" || PROOF_KIND == "task"/PROOF_KIND == "floor" || PROOF_KIND == "regression" || PROOF_KIND == "task"/' "$AS_MUT/proof.sh" > "$AS_MUT/p.tmp" && mv "$AS_MUT/p.tmp" "$AS_MUT/proof.sh"
