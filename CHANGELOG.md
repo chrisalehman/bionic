@@ -22,9 +22,11 @@ their exit and a refusal that needs the person is counted as `needs-you` (D2, D1
 the orchestrator's verb (D12), the tick starts the whole run itself and two of the three refusals that guarded it go
 (D5, D16), the health line and every proof surface render one judge (D6, D14), the asks register is the clock (D7, D15),
 the walk is a proof kind its landing settles (D13), and the release-entry parts render in the tree they run from (D17).
-The close's value is read by T21 after this entry and is not stated here. This is a minor release by the policy above:
-the merge rule, the ask on the card, the tick-started pass, the register as the clock and the walk as a proof kind are
-new capability. `canonical_sdlc_version` stays 14.
+The close's value is read by T21 after this entry and is not stated here. T31's landing, the last build landing, opened
+the hand-holds window the close reads, and the run's one counted hand, the close row's task key written after an
+earlier landing (A-orch.30), sits before it by the measure's rule; the write stays in the landing record (D19). This is
+a minor release by the policy above: the merge rule, the ask on the card, the tick-started pass, the register as the
+clock and the walk as a proof kind are new capability. `canonical_sdlc_version` stays 14.
 
 **Migration.** Rows that changed what a script of yours may meet:
 - T1: `task-add --born` ends its born line `· exempt under fix-policy: <policy>` or `· counted <n> of <cap>`, and the
@@ -88,6 +90,10 @@ new capability. `canonical_sdlc_version` stays 14.
 - T28: the refusal for an unloadable landing record names "the landing record library".
 - T29: the Step-5 walk gate's AC-identifier refusal yields to a walk registered by `proof-add walk`, and its fix reads
   `…, or register the record with session-poker.sh proof-add walk <record> when it is the walk's verdict table`.
+- T31: `matrix-render` writes a criterion's `task:` key as the one close row serving its requirement when the
+  criterion's eval names `landing-report --hand-holds` and several rows serve it, and as the one step-9 row when no
+  serving row is of kind close. Several close rows, or none, still read `pending`, and one serving row is unchanged.
+  `serves_tasks` prints each row's step and kind beside its id and serves.
 
 ### Refusals and the cap (D1, D2, D8, D9, D10, D11, D12)
 
@@ -131,6 +137,9 @@ new capability. `canonical_sdlc_version` stays 14.
   `payload/` changed in T24 to T27.
 - T29 (`T29-report.md`): the walk gate reads the walk, so the record D13 requires stands at Step 5. Born of
   `critic-evidence.md#4` and `critic-adversarial.md#8`.
+- T31 (`T31-report.md`): the render gives the criterion the close proves its close row as `task:`, so the close's live
+  row is no longer read as live at Step 6 for want of an owner; red first on one test row. Born of the ruling D19, not
+  of a finding.
 
 ### The walk, the regression, the critic
 
@@ -138,17 +147,20 @@ new capability. `canonical_sdlc_version` stays 14.
   over this run and over wave 45's record; the new readers print red at cf173c49 and 7 stops and 594 minutes there,
   where wave 45's continuation said green, 1 and 27. Its landing discharged three criteria with no status write after
   it.
-- The regression: three whole runs. The orchestrator started the first at 402980ec, which left six suites red, 121 of
-  127, for T25 to T28. The tick started the second at 837ddc39 and the third at 5a08f601, and each ran 127 of 127 green
-  (`regression-run-837ddc39….log`, `regression-run-5a08f601….log`).
+- The regression: five whole runs. The orchestrator started the first at 402980ec, which left six suites red, 121 of
+  127, for T25 to T28. The tick started the others at 837ddc39, 5a08f601, 31da41f7 and 6b7563af, and each ran 127 of 127
+  green (`regression-run-402980ec….log`, `regression-run-837ddc39….log`, `regression-run-5a08f601….log`,
+  `regression-run-31da41f7….log`, `regression-run-6b7563af….log`).
 - T18 (`critic-evidence.md`, `critic-adversarial.md`, `critic-structure.md`): the critic's review of the whole at
   837ddc39, one record for each question. T30 (`critic-evidence-2.md`, `critic-adversarial-2.md`,
-  `critic-structure-2.md`): a fresh critic's read of the fix piece at 5a08f601.
+  `critic-structure-2.md`): a fresh critic's read of the fix piece at 5a08f601. T33 (`critic-evidence-3.md`,
+  `critic-adversarial-3.md`, `critic-structure-3.md`): a fresh critic's read of the render-fix piece at 6b7563af.
 
 ### The release
 
 - T19 (`T19.md`): this entry, `plugin.json` 1.29.0, the help and version pages rendered by `agents-src/render.sh`,
-  `rendered.sha256` refreshed, and ADR-074. T20 opens the pull request, and T21 closes the run and reads the hand-holds
+  `rendered.sha256` refreshed, and ADR-074. T34 (`T34.md`): this entry again, brought to the head that ships with the
+  render fix and the passes since. T20 opens the pull request, and T21 closes the run and reads the hand-holds
   measure last.
 
 ### The reviews
