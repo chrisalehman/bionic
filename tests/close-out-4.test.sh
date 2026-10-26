@@ -1,7 +1,7 @@
 #!/bin/bash
 # tests/close-out-4.test.sh — payload/scripts/close-out.sh, part 4 of 4: sections §INHERITED-CONT through §ASKS-NOTHING.
 #
-# THE SUITE IS FOUR PARTS (wave-39 T6; D1, D13, REQ-3 AC-3.1): one close-out.test.sh outran the suite bar, so it runs as
+# THE SUITE IS FOUR PARTS: one close-out.test.sh outran the suite bar, so it runs as
 # four suites cut at section boundaries. Its design, sandbox, fixture builders and helpers are in tests/close-out.prelude.sh.
 #
 # Usage: bash tests/close-out-4.test.sh
