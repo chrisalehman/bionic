@@ -2213,6 +2213,8 @@ EOF
       case "$head" in [0-9a-f]*) : ;; *) return 0 ;; esac
       ph="$(proof_last "$plan" regression 2>/dev/null)"
       if [ -n "$ph" ]; then case "$head" in "$ph"*) return 0 ;; esac; fi
+      # A head the last full pass still proves (nothing since moved code) is no head to run again: the printer is the one reader.
+      case "$(proof_whole_text "$plan" "$REPO_REAL" "$head" 2>/dev/null)" in "green at "*) return 0 ;; esac
       wb="$(plan_working_branch "$plan" 2>/dev/null)"
       co="$(proof_checkout "$REPO_REAL" "$wb")" || return 0
       [ -z "$(_wt_piece_dirt "$co" 2>/dev/null)" ] || return 0

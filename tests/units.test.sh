@@ -1054,7 +1054,7 @@ proved() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; _line_proved "$2" a.test
 expect_eq "a verdict at a commit proves its suite at that commit" "$(printf '%s\nrc=0' "$JH1")" "$(proved "$JH1")"
 expect_eq "…and a reads key in its place is refused" "rc=1" "$(proved "reads=$(printf '%064d' 7)")"
 
-# A release row's commit is excused by the check that passed at it: the check suite and the promoted ADRs are its own files.
+# A release row's commit is excused by its check and its readers green at it: the check suite and the promoted ADRs are its own files.
 RR="$SANDBOX/release-repo"
 git init -q "$RR" && git -C "$RR" config user.email t@example.com && git -C "$RR" config user.name t
 printf 'a\n' > "$RR/a.sh"; git -C "$RR" add a.sh; git -C "$RR" commit -qm base; RB="$(git -C "$RR" rev-parse HEAD)"
@@ -1063,8 +1063,9 @@ for f in CHANGELOG.md payload/.claude-plugin/plugin.json payload/commands/help.m
   tests/release-check.test.sh docs/adrs/adr-001-a.md; do printf 'x\n' > "$RR/$f"; done
 git -C "$RR" add -A; git -C "$RR" commit -qm release; RH="$(git -C "$RR" rev-parse HEAD)"
 printf -- '---\ncurrent: 7\n---\n\n## SDLC State\n\nproved: kind=check head=%s at=2026-01-01T00:00:00Z evidence=check.log\n' "$RH" > "$RR/plan.md"
+bash -c '. "$1" && . "$2" || exit 1; for s in $(_proof_release_readers); do line_event "$3" verdict row=T8 "commit=$4" "suite=$s" result=green log=- admitted=- width=-; done' _ "$LINE_LIB" "$PROOF_LIB" "$RR/plan.md" "$RH"
 cover() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; facts_cover "$2" "$3" "$4"; echo "rc=$?"' _ "$PROOF_LIB" "$RR/plan.md" "$RB" "$RH"; }
-expect_eq "a release commit with the check suite and a promoted ADR, a check passing at it: release" "$(printf 'cover %s release\nrc=0' "$RH")" "$(cover)"
+expect_eq "a release commit with the check suite and a promoted ADR, a check and its readers green at it: release" "$(printf 'cover %s release\nrc=0' "$RH")" "$(cover)"
 
 section "§WALK — the regression walk excuses a real release merge whose check passed, as the judge's cover reads it"
 # ============================================================

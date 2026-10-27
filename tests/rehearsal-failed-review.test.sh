@@ -49,8 +49,8 @@ rt_state failed-review
 expect_eq "FR-1 rehearse reaches the state and prints the sandbox's plan (exit 0)" "0|yes" \
   "$RT_RC|$([ -f "$RT_PLAN" ] && echo yes)"
 if [ "$RT_RC" = 0 ]; then
-  expect_eq "FR-1b …through the door's landing, a failing review registered by its verb, close-out refused, and the reply's merge without a whole run at the release head (a landing past the pass)" \
-    "yes|yes|yes|yes" "$([ "$(rt_ran 'spawn-worktree.sh land')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'proof-add review')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'close-out.sh')" -ge 1 ] && echo yes)|$(/usr/bin/grep -q "^approved: merge-unproved by .* head=$(git -C "$RT_ROOT" rev-parse refs/heads/wave/x) " "$RT_PLAN" && echo yes)"
+  expect_eq "FR-1b …through the door's landing, a failing review registered by its verb, close-out refused, and the reply's release approval at the release head with no merge without a whole run (the landing past the pass moved no code)" \
+    "yes|yes|yes|yes|0" "$([ "$(rt_ran 'spawn-worktree.sh land')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'proof-add review')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'close-out.sh')" -ge 1 ] && echo yes)|$(/usr/bin/grep -q "^approved: release by .* head=$(git -C "$RT_ROOT" rev-parse refs/heads/wave/x) " "$RT_PLAN" && echo yes)|$(/usr/bin/grep -c "^approved: merge-unproved " "$RT_PLAN")"
   rt_sheet_and_card FR "hold:merge waive:structure" "hold:merge>8/4 waive:structure>8/4" waive:structure
 fi
 

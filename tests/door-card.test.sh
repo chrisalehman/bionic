@@ -20,7 +20,8 @@
 # file never writes the plan, save §GROW's Eval design rows, which no verb writes. What it writes are the records the
 # run's actors write: a one-row suite in the build row's commit, the matrix row's evidence, the walk and audit records,
 # five reading records in the readers' grammar (the structure reading answering every id the shipped checks file names),
-# and each reader's roster row through the production writer (`roster_row`), closed by the sweeper's own `ack`.
+# and each reader's roster row through the production writer (`roster_row`), closed by the sweeper's own `ack`; and the
+# release's five readers green at its head through lib/line.sh's writer, as its row's ready over them records them.
 # SYNTHESIZED: the readers' names and the words of their records.
 #
 # ANTI-VACUITY: with no fixture built the suite stops before its first section, having asserted nothing, which finish
@@ -140,6 +141,7 @@ dc_verb "(c22) current 7" current 7
 DC_P2="$(door_piece "$DC" T2)" && door_release "$DC" "$DC_P2" >/dev/null && door_land "$DC" "$DC_P2"
 printf 'dc: land T2 -> rc %s\n' "$DOOR_RC"
 expect_eq "(c23) the release row lands by hand with the release" "0" "$DOOR_RC"
+door_readers "$DC" "$(dc_head "$DC")"
 dc_verb "(c23a) the whole run again, at the release head a delivered run ends on" regression-run
 dc_verb "(c23b) proof-add records that pass, so the card asks no merge without one" proof-add regression "record/wave-x/regression-run-$(dc_head "$DC").log"
 dc_verb "(c24) release-check at the release head" release-check

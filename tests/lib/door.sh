@@ -24,6 +24,9 @@
 #                                  (stdout and stderr) and DOOR_RC.
 #   door_land <root> <tree> [why]  lands <tree> by hand through the tree under test's door, as door_run runs it:
 #                                  `spawn-worktree.sh land <tree> --by-hand --reason <why>`. Sets DOOR_OUT and DOOR_RC.
+#   door_readers <root> <commit>   writes a green verdict for each reader of the release set (lib/proof.sh
+#                                  `_proof_release_readers`) at <commit> through lib/line.sh's writer, as the release
+#                                  row's ready over them records them: the fixture holds none of those suites.
 #   door_seen                      prints the sentinel file's lines, one per run of the fixture's check:
 #                                  `pwd=<physical cwd> script=<physical path of the script that ran>`.
 #
@@ -240,6 +243,11 @@ door_run() {  # <root> <cmd> [args] -> DOOR_OUT, DOOR_RC
 
 door_land() {  # <root> <tree> -> DOOR_OUT, DOOR_RC: the tree landed by hand through the door
   door_run "$1" bash "$DOOR_SPAWN" land "$2" --by-hand --reason "${3:-door fixture}"
+}
+
+door_readers() {  # <root> <commit>
+  bash -c '. "$1/line.sh" && . "$1/proof.sh" || exit 1; for s in $(_proof_release_readers); do line_event "$2" verdict row=T2 "commit=$3" "suite=$s" result=green log=- admitted=- width=- || exit 1; done' \
+    _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$1/$DOOR_PLAN_REL" "$2"
 }
 
 door_seen() { cat "$DOOR_SEEN" 2>/dev/null; }

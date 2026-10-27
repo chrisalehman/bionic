@@ -17,7 +17,8 @@
 # FIXTURE FIDELITY: live tier, read-only. The merges are this repository's own commits, read through a scratch
 # repository under the world directory whose object store borrows this repository's (an alternates file); nothing
 # is written here. SYNTHESIZED: the plan, a scratch file whose `## SDLC State` holds one passing check line per
-# merge present, in the shape the release-check verb writes, and the one absent hash of the skip row.
+# merge present, in the shape the release-check verb writes, its readers' green verdicts in the landing record as
+# lib/line.sh writes them, and the one absent hash of the skip row.
 #
 # ANTI-VACUITY: each mutant row first proves the copy differs from proof.sh by exactly its one arm and that the copy
 # still sources and runs; the mutant's own reading is an exact `cover <merge> owes` line, never an absence.
@@ -57,6 +58,10 @@ DC_PLAN="$DC_R/plan.md"
 $DC_MERGES
 EOF
 } > "$DC_PLAN"
+# A release merge is release with its readers green at it: one green verdict per reader at each merge present.
+while read -r v m; do dc_present "$m" || continue; bash -c '. "$1/line.sh" && . "$1/proof.sh" || exit 1; for s in $(_proof_release_readers); do line_event "$2" verdict row=T8 "commit=$3" "suite=$s" result=green log=- admitted=- width=-; done' _ "${DC_PROOF%/*}" "$DC_PLAN" "$m" </dev/null; done <<EOF
+$DC_MERGES
+EOF
 echo "door-cover: reading $DC_OBJ through $DC_R; $(/usr/bin/grep -c '^proved: kind=check' "$DC_PLAN") of 3 merges present"
 
 # dc_cover <proof.sh> <merge> -> the judge's cover of the merge alone, as the judge reads it, then `rc=<n>`.
@@ -97,10 +102,11 @@ expect_contains "(r0b) …the skip printing the whole hash" "the merge $DC_ABSEN
 # ---------------------------------------------------------------------------------------------------------------
 section "§MUTANT: a release set missing an arm the real merges need turns their cover to owes"
 
-# dc_mutant <name> <sed> -> the path of a copy of proof.sh with the sed applied; nothing when the sed changed nothing.
+# dc_mutant <name> <sed> -> the path of a copy of proof.sh with the sed applied, beside the libraries it loads; nothing
+# when the sed changed nothing.
 dc_mutant() {
-  local out="$WORLD_ROOT/proof-$1.sh"
-  sed "$2" "$DC_PROOF" > "$out" && ! cmp -s "$DC_PROOF" "$out" && printf '%s' "$out"
+  local out="$WORLD_ROOT/lib-$1/proof.sh"
+  cp -R "${DC_PROOF%/*}" "${out%/*}" && sed "$2" "$DC_PROOF" > "$out" && ! cmp -s "$DC_PROOF" "$out" && printf '%s' "$out"
 }
 # dc_changed <copy> -> the number of lines the copy adds against proof.sh: one for a one-arm mutant.
 # diff exits 1 on a difference, which pipefail would hand on, so the count is the answer and the status is 0.

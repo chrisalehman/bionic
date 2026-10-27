@@ -861,9 +861,11 @@ poke "$RVG" proof-add review record/wave-01-fixture/past-waiver.md --question ad
 expect_eq "VG-2b AC-20.2 a reading of A..C registers on the waiver at A, with no reading before it (exit 0)" "0|1" \
   "$RC|$(s46_proved "$PVG" | /usr/bin/grep -c "^proved: kind=review head=$VG_C .* evidence=record/wave-01-fixture/past-waiver.md question=adversarial ")"
 
-# ---------- §CUR7-COVERED: prose landed past the whole run is covered, not green ----------
+# ---------- §CUR7-COVERED: prose landed past the whole run is green, code landed past it is unproved ----------
 # The plan holds a whole-run row, a release row and an open integrate row reading the release; the user approves the
-# release at C2 and waives there, then two prose commits land: covered, not green, until the person's word or a new pass.
+# release at C2 and waives there, then two prose commits land: green, admitted with no word. A code commit after them
+# is unproved until the person's word at that head. fails-when: prose past the run reads unproved; code past it reads
+# green; a word at another head admits it.
 VG_C2="$(s57_commit "$VG_WT" lib/b.sh C2)"
 printf 'Gating: 3 passed, 0 failed\n' | regression_fixture "$PVG" "$VG_DIR/whole-c2.log" "$VG_C2" 0 0
 poke "$RVG" proof-add regression record/wave-01-fixture/whole-c2.log
@@ -881,14 +883,23 @@ s57_commit "$VG_WT" README.md P2 >/dev/null
 sed 's/^current: .*/current: 7/' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
 sp4_rule_rows "$PVG"
 poke "$RVG" current 8 --check
-expect_eq "VG-5b AC-20.5 the approval and the waivers at C2, two prose commits after: covered, not green, refused as regression unproved, naming the reply" "1|yes" \
-  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -q 'regression.*unproved' && printf '%s\n' "$OUT" | /usr/bin/grep -q 'reply .* on the release card' && echo yes || echo no)"
-printf '%s\n' "$OUT" | /usr/bin/grep -q 'regression.*unproved' || printf '      the verb said: %s\n' "$OUT"; vg_mu() { awk -v h="$1" '/^approved: merge-unproved /{ next } { print } /^current: / && h { print "approved: merge-unproved by chris 2026-10-26T00:00:00Z head=" h " \"merge\"" }' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"; }
-vg_mu "$(git -C "$VG_WT" rev-parse HEAD)"; poke "$RVG" current 8 --check
-expect_eq "VG-5c …and with the person's merge-unproved word at the working head under ## SDLC State: admitted" "0" "$RC"
+expect_eq "VG-5b AC-20.5 the approval and the waivers at C2, two prose commits after: green by content, admitted with no word (exit 0, no merge-unproved line)" "0|yes|0" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -q 'would advance' && echo yes)|$(/usr/bin/grep -c '^approved: merge-unproved ' "$PVG")"
+expect_absent "VG-5b2 …and the judge reads no regression unproved there" "unproved" "$OUT"
+vg_mu() { awk -v h="$1" '/^approved: merge-unproved /{ next } { print } /^current: / && h { print "approved: merge-unproved by chris 2026-10-26T00:00:00Z head=" h " \"merge\"" }' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"; }
+vg_unproved() { printf '%s\n' "$OUT" | /usr/bin/grep -c 'regression.*unproved'; }
+# C3, code, lands green on its suite; the release is approved again at C3, as code past an approval is refused by it.
+VG_C3="$(s57_commit "$VG_WT" lib/b.sh C3)"
+{ printf 'line/v1|ev=ready|row=T10|suites=a.test.sh|at=2026-10-04T14:00:00Z\n'; printf 'line/v1|ev=verdict|row=T10|commit=%s|suite=a.test.sh|result=green|log=/fixture/T10.log|at=2026-10-04T14:05:00Z\n' "$VG_C3"
+  printf 'line/v1|ev=published|row=T10|commit=%s|kind=land|by=w-T10|why=landed|at=2026-10-04T14:10:00Z\n' "$VG_C3"; } >> "$VG_DIR/landing-proofs.log"
+poke "$RVG" approve release 'ship C3'
+expect_eq "VG-5c precondition: the user approves the release at the code head C3 (exit 0)" "0|$VG_C3" "$RC|$(bash -c '. "$1" && proof_approved_head "$2" release' _ "$S46_LIB" "$PVG")"
+poke "$RVG" current 8 --check
+expect_eq "VG-5c a code commit C3 past them, landed green on its own suite: covered, not green, refused as regression unproved, naming the reply" "1|1|1" "$RC|$(vg_unproved)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'reply .* on the release card')"
 vg_mu "$VG_C2"; poke "$RVG" current 8 --check
-expect_eq "VG-5d …the same word at C2's head, not the working head, leaves it refused" "1" "$RC"; vg_mu ""
-s57_commit "$VG_WT" lib/b.sh C3 >/dev/null
+expect_eq "VG-5d …the person's word at C2's head, not the working head, leaves the regression unproved" "1|1" "$RC|$(vg_unproved)"
+vg_mu "$(git -C "$VG_WT" rev-parse HEAD)"; poke "$RVG" current 8 --check
+expect_eq "VG-5e …and the word at the working head under ## SDLC State holds it: no regression line unproved (VG-5d read the same extractor)" "0" "$(vg_unproved)"
+vg_mu ""; /usr/bin/grep -v '|row=T10|' "$VG_DIR/landing-proofs.log" > "$VG_DIR/landing-proofs.log.n" && mv "$VG_DIR/landing-proofs.log.n" "$VG_DIR/landing-proofs.log"
 poke "$RVG" current 8 --check
 
 # ---------- §DISPOSITION: a finding the whole run fixed says so, not that a landing did ----------
@@ -1625,8 +1636,7 @@ PST="$(s42_plan "$RST" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${ST_B:0:8}
   branch: wave/01-fixture")"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PST" > "$PST.tmp" && mv "$PST.tmp" "$PST"
-( cd "$RST" && git add -f "$PST" && git commit -qm wb \
-  && git worktree add -q -b wave/01-fixture "$RST/.worktrees/01-fixture" "$ST_B" ) >/dev/null 2>&1
+( cd "$RST" && git add -f "$PST" && git commit -qm wb && git worktree add -q -b wave/01-fixture "$RST/.worktrees/01-fixture" "$ST_B" ) >/dev/null 2>&1
 ST_WT="$RST/.worktrees/01-fixture"; ST_DIR="$RST/.bionic/docs/record/wave-01-fixture"; mkdir -p "$ST_DIR"
 ST_H0="$(s57_commit "$ST_WT" lib/a.sh H0)"
 printf 'Gating: 1 passed, 0 failed\n' | regression_fixture "$PST" "$ST_DIR/whole-h0.log" "$ST_H0" 0 0
@@ -1635,8 +1645,7 @@ expect_eq "ST-0 precondition: the plan holds a regression proof at H0 (proof-add
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 ST_H1="$(s57_commit "$ST_WT" lib/a.sh H1)"
 new_roster "$RST"
-add_row "$RST" name=w-T2 agent_id=a-w-T2 subagent_type=implementor launched_at="$(iso_ago 60)" \
-  deliverable="$RST/record/T2.md" duration=60m
+add_row "$RST" name=w-T2 agent_id=a-w-T2 subagent_type=implementor launched_at="$(iso_ago 60)" deliverable="$RST/record/T2.md" duration=60m
 st_started() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: regression-run started ' ; }
 st_waiting() { printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: regression-run waiting — the gate has no room for a whole run$'; }
 st_objects() { /usr/bin/grep -F "|name=regression@$1|" "$(roster_of "$RST")" 2>/dev/null; }
@@ -1656,10 +1665,8 @@ st_runline() { /usr/bin/grep -F "|ev=run|log=$1|" "$(st_rec)" 2>/dev/null | tail
 # line it did not say. The one that keeps it (ST-6) is the tick whose only news is the start itself.
 # The control: T2 still writes (its row active, its writer open on the roster), so nothing starts.
 forget_digest "$RST"; poke "$RST" tick
-expect_nonempty "ST-1-pre the control tick printed its decision line (the extractor reads real output)" \
-  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker-tick/v1|')"
-expect_eq "ST-1 AC-6.1 control: with a writer row running, the tick starts nothing and the roster holds no object" \
-  "|" "$(st_started)|$(st_objects "${ST_H1:0:8}")"
+expect_nonempty "ST-1-pre the control tick printed its decision line (the extractor reads real output)" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker-tick/v1|')"
+expect_eq "ST-1 AC-6.1 control: with a writer row running, the tick starts nothing and the roster holds no object" "|" "$(st_started)|$(st_objects "${ST_H1:0:8}")"
 
 # Quiet: every row landed, the writer closed by its ack, the head past the proof.
 s42_builds_landed "$PST"
@@ -1669,47 +1676,45 @@ forget_digest "$RST"; poke "$RST" tick
 expect_contains "ST-2 AC-6.1 nothing ready, no writer open, the head past the proof: the tick starts regression-run as regression@<h8>" \
   "poker: regression-run started regression@${ST_H1:0:8} (log $(st_log "${ST_H1:0:8}"))" "$(st_started)"
 [ -n "$(st_started)" ] || printf '      the tick said: %s\n' "$OUT"
-expect_contains "ST-2b …and the roster holds the object: a run row, its one suite run.sh, a read-only role, waived as no agent" \
-  "|status=run|" "$(st_objects "${ST_H1:0:8}" | head -n 1)"
-expect_contains "ST-2c …whose budget is run.sh, so the gate's whole-run budget admits it" "|suites_allowed=run.sh|" \
-  "$(st_objects "${ST_H1:0:8}" | head -n 1)"
+expect_contains "ST-2b …and the roster holds the object: a run row, its one suite run.sh, a read-only role, waived as no agent" "|status=run|" "$(st_objects "${ST_H1:0:8}" | head -n 1)"
+expect_contains "ST-2c …whose budget is run.sh, so the gate's whole-run budget admits it" "|suites_allowed=run.sh|" "$(st_objects "${ST_H1:0:8}" | head -n 1)"
 expect_true "ST-2d …and booked.sh marks the run on it (run_pid=)" st_until 20 eval 'st_objects "${ST_H1:0:8}" | /usr/bin/grep -q "|run_pid="'
-expect_true "ST-2e …and the tick did not wait on it: the run is still held by the runner when the tick has returned" \
-  test ! -e "$(st_log "${ST_H1:0:8}").rc"
+expect_true "ST-2e …and the tick did not wait on it: the run is still held by the runner when the tick has returned" test ! -e "$(st_log "${ST_H1:0:8}").rc"
 
 # The guard: a live object for this head means the next tick starts nothing beside it.
 forget_digest "$RST"; poke "$RST" tick
-expect_nonempty "ST-3-pre the guard tick names the live run (the extractor reads real output)" \
-  "$(printf '%s\n' "$OUT" | /usr/bin/grep "^poker: RUNNING regression@${ST_H1:0:8} run=")"
-expect_eq "ST-3 a live regression@<h8> object: the next tick starts nothing, and the roster still names one run" \
-  "|1" "$(st_started)|$(st_starts "${ST_H1:0:8}")"
+expect_nonempty "ST-3-pre the guard tick names the live run (the extractor reads real output)" "$(printf '%s\n' "$OUT" | /usr/bin/grep "^poker: RUNNING regression@${ST_H1:0:8} run=")"
+expect_eq "ST-3 a live regression@<h8> object: the next tick starts nothing, and the roster still names one run" "|1" "$(st_started)|$(st_starts "${ST_H1:0:8}")"
 rm -f "$ST_CTL/hold"
 expect_true "ST-4-pre the detached run ends once the runner is let go" st_until 60 st_ended "$(st_log "${ST_H1:0:8}")"
 expect_eq "ST-4 AC-6.3 the started run leaves its proof in the plan through proof-add: proved: kind=regression head=<H1>" "1" \
   "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=regression head=$ST_H1 ")"
 [ "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=regression head=$ST_H1 ")" = 1 ] || sed -n '1,40p' "$(st_log "${ST_H1:0:8}")"
-expect_contains "ST-4b …from a run whose run line names the tick as its starter" "|starter=tick|" \
-  "$(st_runline "record/wave-01-fixture/regression-run-$ST_H1.log")"
-expect_contains "ST-4c …and booked.sh's own run line for the detached run carries the command's --starter too" "|starter=tick|" \
-  "$(st_runline ".bionic/tmp/runs/regression_${ST_H1:0:8}-run.sh.log")"
+expect_contains "ST-4b …from a run whose run line names the tick as its starter" "|starter=tick|" "$(st_runline "record/wave-01-fixture/regression-run-$ST_H1.log")"
+expect_contains "ST-4c …and booked.sh's own run line for the detached run carries the command's --starter too" "|starter=tick|" "$(st_runline ".bionic/tmp/runs/regression_${ST_H1:0:8}-run.sh.log")"
 forget_digest "$RST"; poke "$RST" tick
 expect_nonempty "ST-5-pre the tick at the proved head printed its decision line" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker-tick/v1|')"
 expect_eq "ST-5 control: the head is the last proof's, so nothing starts" "" "$(st_started)"
+# Green is content: a docs commit past the green whole run is the pass's head, so the tick starts nothing at it.
+ST_HD="$(s57_commit "$ST_WT" README.md D1)"; forget_digest "$RST"; poke "$RST" tick
+expect_nonempty "ST-5b-pre the tick at the docs head printed its decision line" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker-tick/v1|')"
+expect_eq "ST-5b AC-1.4 one docs commit past the green run: the printer reads green at it, and the tick starts no run and no object" \
+  "green at ${ST_H1:0:8}, 1 landing since moved no code||" \
+  "$(bash -c '. "$1/payload/scripts/lib/roots.sh" && . "$1/payload/scripts/lib/proof.sh" && proof_whole_text "$2" "$3"' _ "$BIONIC_SCRIPTS_DIR" "$PST" "$RST")|$(st_started)|$(st_objects "${ST_HD:0:8}")"
 
-# A fix row lands past the proof: the head moved, so the next tick starts again there. The runner is full
-# first, so the run ends 75 with no verdict, and the tick after it says so and starts it again.
+# A fix row lands code past the proof, the docs commit and all: the head reads red, so the next tick starts again
+# there, which is what held the start above. The runner is full first, so the run ends 75 with no verdict, and the
+# tick after it says so and starts it again.
 : > "$ST_CTL/full"
 ST_H2="$(s57_commit "$ST_WT" lib/b.sh H2)"
 poke "$RST" tick
-expect_contains "ST-6 AC-6.2 a landing past the proof: the next tick starts again at the new head" \
-  "poker: regression-run started regression@${ST_H2:0:8} " "$(st_started)"
+expect_contains "ST-6 AC-6.2 a landing past the proof: the next tick starts again at the new head" "poker: regression-run started regression@${ST_H2:0:8} " "$(st_started)"
 expect_true "ST-6b …its run ends 75, the gate's word that nothing ran" st_until 60 st_ended "$(st_log "${ST_H2:0:8}")"
 expect_eq "ST-6c …read off its log's end" "75" "$(cat "$(st_log "${ST_H2:0:8}").rc" 2>/dev/null)"
 rm -f "$ST_CTL/full"
 forget_digest "$RST"; poke "$RST" tick
 expect_eq "ST-7 the tick after a 75 says the gate had no room, once" "1" "$(st_waiting)"
-expect_contains "ST-7b …and starts the run again at the same head, as a second attempt" \
-  "poker: regression-run started regression@${ST_H2:0:8} (log $(st_log "${ST_H2:0:8}" -2))" "$(st_started)"
+expect_contains "ST-7b …and starts the run again at the same head, as a second attempt" "poker: regression-run started regression@${ST_H2:0:8} (log $(st_log "${ST_H2:0:8}" -2))" "$(st_started)"
 ST_LOG2="$(st_started | sed -n 's/^.*(log \(.*\))$/\1/p')"
 expect_true "ST-7c …which ends" st_until 60 st_ended "${ST_LOG2:-$TMPROOT/none}"
 expect_eq "ST-7d …with its proof at the new head" "1" "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=regression head=$ST_H2 ")"
