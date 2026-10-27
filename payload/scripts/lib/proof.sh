@@ -202,15 +202,17 @@ proof_waiver_line() {
 
 # ---------- THE RELEASE'S COVER ----------
 #
-# A release-set commit (`_proof_release_path`) is covered by a passing release check at its head (`proof_check_passes`),
-# for every question and the regression. The regression is never waived and never run a second time.
+# A release-set commit (`_proof_release_path`) is covered by a passing release check at its head and its readers
+# (`_proof_release_readers`) green there (`_proof_release_proved`), for every question and the regression. The check
+# runs no suite, and the set holds files suites read, so the check alone proves nothing a suite would.
 
 # _proof_release_path <path> -> 0 when <path> (relative to the repository root) is in THE RELEASE SET: the release
 # row's own files, exactly CHANGELOG.md, payload/.claude-plugin/plugin.json, payload/commands/*.md,
 # payload/integrity/rendered.sha256, the check suite tests/release-check.test.sh, and the promoted records
 # docs/adrs/*.md. A folder's files are one level deep: a deeper path is not in it. THIS CASE IS THE ONE LIST. A commit
-# whose every path is in it is covered by a passing release check at its head (`proof_check_passes`): the review
-# walk's `release` basis (`_facts_basis`) reads it. One path outside it and the commit owes.
+# whose every path is in it is covered by a passing release check and its readers green at its head
+# (`_proof_release_proved`): the review walk's `release` basis (`_facts_basis`) reads it. One path outside it and the
+# commit owes.
 _proof_release_path() {
   case "$1" in
     CHANGELOG.md|payload/.claude-plugin/plugin.json|payload/integrity/rendered.sha256|tests/release-check.test.sh) return 0 ;;
@@ -236,6 +238,30 @@ proof_check_passes() {
         printf '%s\t%s\n' "$c" "$r"
       done \
     | awk -F'\t' '{ if (!($1 in r)) k[++n] = $1; r[$1] = $2 } END { for (i = 1; i <= n; i++) if (r[k[i]] == "pass") print k[i] }'
+}
+
+# _proof_release_readers -> THE SET'S READERS, the suites that read the release set, one per line, beside the one list
+# so a path that gains a reader names it here. release-check.test.sh is in the set itself; shell-lint.test.sh holds
+# every suite, that one among them, to its header and the census; render.test.sh reads rendered.sha256 and the command
+# pages; commands.test.sh reads the generated version page; words.test.sh reads the command pages.
+_proof_release_readers() {
+  printf '%s\n' release-check.test.sh shell-lint.test.sh render.test.sh commands.test.sh words.test.sh
+}
+
+# _proof_release_proved <plan> <tree> -> the commits of `proof_check_passes`, in its order, at which every reader
+# (`_proof_release_readers`) is green in the plan's landing record: its newest `ev=verdict` at the commit, a landing's
+# or the whole run's, reads `result=green`. A commit with one reader absent or red there is not printed, so its
+# release-set change is not read as proved by a check that ran no suite.
+_proof_release_proved() {
+  local chk rec
+  chk="$(proof_check_passes "${1:-}" "${2:-}")"
+  [ -n "$chk" ] && rec="$(proof_debt_record "$1" "$2" 2>/dev/null)" && [ -f "$rec" ] && _proof_fields || return 0
+  { printf '%s\n\034\n' "$chk"; _proof_release_readers; printf '\034\n'; cat "$rec"; } | awk -F'|' "$_LINE_FIELDS_AWK"'
+    $0 == SUBSEP { part++; next }
+    part == 0 { k[++n] = $0; next }
+    part == 1 { rd[++m] = $0; next }
+    line_ev() == "verdict" { v[line_kv("commit"), line_kv("suite")] = line_kv("result") }
+    END { for (i = 1; i <= n; i++) { ok = 1; for (j = 1; j <= m; j++) if (v[k[i], rd[j]] != "green") ok = 0; if (ok) print k[i] } }'
 }
 
 # proof_reading <record> <question> [<checks file>] -> `<result> <scope> <from>` read from a reading
@@ -1777,7 +1803,7 @@ proof_whole_text() {
 }
 
 # _proof_moved_no_code <plan> <tree> <F> <head> <n> -> 0 when the judge reads F covered and the judge's cover walk
-# (`_facts_walk`, with the born landings and the release checks `facts_cover` hands it, no question) gives each of the
+# (`_facts_walk`, with the born landings and the proved release heads `facts_cover` hands it, no question) gives each of the
 # <n> first-parent commits from <F> to <head> the basis `prose` or `release`; 1 otherwise. A walk that answers for
 # fewer commits than <n>, or cannot answer, is no proof that nothing moved, so it reads 1.
 _proof_moved_no_code() {
@@ -1785,7 +1811,7 @@ _proof_moved_no_code() {
   case "$(_proof_floor_judge "$plan" "$tree" "$fc" 2>/dev/null)" in covered*) : ;; *) return 1 ;; esac
   _proof_roots_load
   walk="$(_facts_walk "$tree" "$(_facts_docs_prefix "$tree")" "$fc" "$c" \
-    "$(_facts_born_landings "$plan" "$tree" "$(proof_fixed "$plan" "$tree")")" "" "$(proof_check_passes "$plan" "$tree")")"
+    "$(_facts_born_landings "$plan" "$tree" "$(proof_fixed "$plan" "$tree")")" "" "$(_proof_release_proved "$plan" "$tree")")"
   [ -n "$walk" ] || return 1
   printf '%s\n' "$walk" | awk -v n="$n" '
     $1 != "cover" || ($3 != "prose" && $3 != "release") { bad = 1 }
@@ -2425,7 +2451,7 @@ review	"*)
   # findings' green landings among them.
   case "$owed" in review"	"*|*"
 review	"*) fixed="$(proof_fixed "$plan" "$tree")"; born="$(_facts_born_landings "$plan" "$tree" "$fixed")"
-                   chk="$(proof_check_passes "$plan" "$tree")" ;; esac
+                   chk="$(_proof_release_proved "$plan" "$tree")" ;; esac
   while IFS= read -r fact; do
     [ -n "$fact" ] || continue
     case "$fact" in
@@ -2636,8 +2662,9 @@ _proof_docs_path() {
 #   prose        every path it touched (a merge as what it brought in, a rename as both its paths) is under the docs
 #                root or the tracked docs home (`_facts_tracked_prefix`) or on `_proof_docs_path`'s list; a commit that touches nothing is prose too, so a merge whose tree
 #                is its first parent's (one from the integration branch resolved to ours) is prose (wave-38 T2; AC-4.1)
-#   release      every path it touched is in the release set (`_proof_release_path`) and the plan's release check passes
-#                at it (`proof_check_passes`), on every chain; the regression walk reads the same kind (wave-38 T2; D18)
+#   release      every path it touched is in the release set (`_proof_release_path`), the plan's release check passes at
+#                it and its readers are green there (`_proof_release_proved`), on every chain; the regression walk reads
+#                the same kind
 #   born-review  the landing record names it as the landing of a row whose `- T<n>:` line carries ` born: review …
 #                of=<record>#<n>`, or `proof_fixed` names it as a fix row's green landing, AND one of those records is
 #                the evidence of a registered reading: a review's fixes are inside the review, so it holds on every
@@ -2733,7 +2760,7 @@ _facts_born_landings() {
 
 # _facts_basis <commit> <prose: 0 or not> <born landings> [<question>] [<release: 1 when every path is in the set>]
 # [<release heads>] -> prints `cover <commit> <basis>`; 1 when it owes. A release-set commit is `release` when it is one
-# of the heads a release check passes at (`proof_check_passes`, full commits). A born landing names its commit in full or by a prefix of at least seven hex digits. A floor-born landing holds
+# of the heads handed in (`_proof_release_proved`, full commits). A born landing names its commit in full or by a prefix of at least seven hex digits. A floor-born landing holds
 # on every chain, and so does a review-born one whose asker list is non-empty, whatever <question> asks (wave-39 D7,
 # ADR-062: a review's fixes are inside the review); one with an empty list owes everywhere (the provenance guard).
 _facts_basis() {
@@ -2848,7 +2875,7 @@ facts_cover() {
   _proof_roots_load
   fixed="$(proof_fixed "$plan" "$tree")"
   _facts_walk "$tree" "$(_facts_docs_prefix "$tree")" "$2" "$3" "$(_facts_born_landings "$plan" "$tree" "$fixed")" "${4:-}" \
-    "$(proof_check_passes "$plan" "$tree")"
+    "$(_proof_release_proved "$plan" "$tree")"
 }
 
 # facts_reviews <plan> <head> [--landings] -> THE ONE READING OF A REVIEW COVERED OR FAILING, one line per review question

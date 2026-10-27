@@ -287,6 +287,7 @@ _rh_release_card() {
     || { echo "rehearse $RH_STATE: the release commit in .worktrees/T2 failed" >&2; return 1; }
   _rh_hand code "the release $DOOR_VERSION: its changelog entry (release-note's numbers) and plugin.json, committed in .worktrees/T2"
   _rh_land T2 || return 1
+  door_readers "$RH_ROOT" "$(_rh_head)" || return 1; _rh_hand record "the release's five readers green at its head, as its ready over them records them"
   _rh_poker "the release check at the release head" release-check || return 1
   _rh_poker "the release approval card" release-approval "$RH_PLAN"
 }

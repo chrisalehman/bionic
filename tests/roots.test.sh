@@ -612,6 +612,11 @@ promote_in "$WT" adr adrs/epic-99/adr-008-two-doors.md
 expect_status "AC-4.3: a docs-root-relative source from the worktree exits 0" 0 "$?"
 expect_eq "AC-4.3: …and the copy still holds the record" "yes" \
   "$(cmp -s "$PRD/adrs/epic-99/adr-008-two-doors.md" "$WT/docs/adrs/adr-008-two-doors.md" && echo yes || echo no)"
+# Fails when the source is read against the running checkout's top: a worktree with no .bionic link has no record there.
+git -C "$PR" worktree add -q "$PR/.worktrees/wt-2" -b wt-2; WT2="$(cd "$PR/.worktrees/wt-2" && pwd -P)"
+promote_in "$WT2" adr adrs/epic-99/adr-008-two-doors.md; WT2_RC=$?
+expect_eq "AC-4.3: from a worktree with no .bionic link: exit 0, the copy under its tracked home, none in main" "0|yes|no" \
+  "$WT2_RC|$(cmp -s "$PRD/adrs/epic-99/adr-008-two-doors.md" "$WT2/docs/adrs/adr-008-two-doors.md" && echo yes || echo no)|$([ -e "$PR/docs/adrs/adr-008-two-doors.md" ] && echo yes || echo no)"
 
 # Fails when the main-checkout promotion is refused or lands elsewhere.
 promote_in "$PR" adr .bionic/docs/adrs/epic-99/adr-008-two-doors.md

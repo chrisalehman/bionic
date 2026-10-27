@@ -200,7 +200,13 @@ pah_world past-release "" 0
 P4_F="$PAH_F"; pah_past CHANGELOG.md,payload/.claude-plugin/plugin.json
 expect_eq "ONE-17 (AC-1.2) one release-set commit past F with no check recorded at it: red, the landing counted" "red at ${P4_F:0:8}, 1 landing before this head" "$(pah_whole)"
 bash -c '. "$1/proof.sh" && proof_add_line "$2" "$(proof_line check "$3" 2026-10-04T15:00:00Z record/wave-01-fixture/release-check.log)"' _ "$PAH_LIB" "$PAH_PLAN" "$PAH_H" > "$PAH_PLAN.n" && mv "$PAH_PLAN.n" "$PAH_PLAN"
-expect_eq "ONE-18 (AC-1.2) …the same commit with a passing release check recorded at it: green at F" "green at ${P4_F:0:8}, 1 landing since moved no code" "$(pah_whole)"
+expect_eq "ONE-17a precondition: the release set's readers are the five suites that read it" "release-check.test.sh shell-lint.test.sh render.test.sh commands.test.sh words.test.sh" "$(bash -c '. "$1/proof.sh" && _proof_release_readers' _ "$PAH_LIB" 2>/dev/null | paste -sd' ' -)"
+pah_read() { bash -c '. "$1/line.sh" || exit 1; p="$2" c="$3"; shift 3; for s; do line_event "$p" verdict row=T8 "commit=$c" "suite=$s" result=green log=- admitted=- width=-; done' _ "$PAH_LIB" "$PAH_PLAN" "$PAH_H" "$@"; }  # <suite>... -> a green verdict each at PAH_H
+pah_read release-check.test.sh shell-lint.test.sh render.test.sh commands.test.sh
+# fails-when: a reader is not asked, so the release commit with its check and one reader unproved reads green.
+expect_eq "ONE-17b (AC-1.2) …with its check passing and four of its readers green, words.test.sh unproved: still red" "red at ${P4_F:0:8}, 1 landing before this head" "$(pah_whole)"
+pah_read words.test.sh
+expect_eq "ONE-18 (AC-1.2) …the same commit with its release check passing and its five readers green at it: green at F" "green at ${P4_F:0:8}, 1 landing since moved no code" "$(pah_whole)"
 # fails-when: a commit that moved code past F is read as prose, so the head reads green with no pass at it.
 pah_world past-code "" 0
 P5="$PAH_P"; P5_F="$PAH_F"; pah_past payload/scripts/x.sh
@@ -210,6 +216,9 @@ pah_poke "$P5" pah-code-card release-approval --preview "$PAH_PLAN"
 expect_contains "ONE-19a …and its card asks the merge without a pass, the red state on the ask" "Merge without a whole run at this head — red at ${P5_F:0:8}, 1 landing before this head" "$(printf '%s\n' "$PAH_OUT" | tr '\n' ' ' | tr -s ' ')"
 pah_past README.md
 expect_eq "ONE-19b …and a docs commit after it leaves it red, the two landings counted" "red at ${P5_F:0:8}, 2 landings before this head" "$(pah_whole)"
+# fails-when: the judge's cover at F is not asked, so a red whole run with one docs commit past it reads green.
+pah_world past-red "$PAH_OWED" 0; P6_F="$PAH_F"; pah_past README.md
+expect_eq "ONE-19c (REQ-1) a red whole run at F and one docs-only commit past it: red, the landing counted" "red at ${P6_F:0:8}, 1 landing before this head" "$(pah_whole)"
 # THE MUTANT: `_facts_basis` reads every commit `owes`. fails-when: the printer greens past F on any other basis.
 PAH_MUTLIB="$SANDBOX/mut-lib"; cp -R "$PAH_LIB" "$PAH_MUTLIB"
 printf '%s\n' "_facts_basis() { printf 'cover %s owes\\n' \"\$1\"; return 1; }" >> "$PAH_MUTLIB/proof.sh"
