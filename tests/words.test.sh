@@ -87,11 +87,9 @@ WORDS_ALLOW_EOF
 words_surfaces() {
   (
     cd "$1" || exit 1
-    ls skills/canonical-sdlc/*.md skills/canonical-sdlc/steps/*.md skills/handoff/*.md skills/sitrep/*.md \
-      payload/commands/*.md agents/*.md agents-src/blocks/*.md \
-      agents-src/templates/*.tmpl agents-src/templates/commands/*.tmpl \
-      agents-src/templates/skills/canonical-sdlc/*.tmpl agents-src/templates/skills/canonical-sdlc/steps/*.tmpl \
-      agents-src/templates/context/*.tmpl payload/context/*.md \
+    ls skills/canonical-sdlc/*.md skills/canonical-sdlc/steps/*.md skills/handoff/*.md skills/sitrep/*.md payload/commands/*.md agents/*.md agents-src/blocks/*.md \
+      agents-src/templates/*.tmpl agents-src/templates/commands/*.tmpl agents-src/templates/skills/canonical-sdlc/*.tmpl \
+      agents-src/templates/skills/canonical-sdlc/steps/*.tmpl agents-src/templates/context/*.tmpl payload/context/*.md \
       payload/scripts/lib/plan.sh payload/scripts/lib/proof.sh payload/scripts/lib/walls.sh payload/scripts/lib/units.sh \
       hooks/dispatch-preflight.sh hooks/session-poker.sh hooks/poker/*.sh payload/scripts/card.sh 2>/dev/null
   )
@@ -170,8 +168,7 @@ section "§TEXTS: no review-sense reading or reader, and no \"no reader for\", o
 SURF="$(words_surfaces "$REPO")"
 for cls in 'skills/canonical-sdlc/' 'skills/handoff/' 'skills/sitrep/' 'payload/commands/' 'agents/' 'agents-src/blocks/' \
   'agents-src/templates/' 'agents-src/templates/context/' 'payload/context/' 'hooks/poker/' 'hooks/poker/sitrep.sh' \
-  'hooks/session-poker.sh' 'payload/scripts/card.sh' 'hooks/dispatch-preflight.sh' \
-  'payload/scripts/lib/plan.sh' 'payload/scripts/lib/proof.sh' 'payload/scripts/lib/walls.sh' 'payload/scripts/lib/units.sh'; do
+  'hooks/session-poker.sh' 'payload/scripts/card.sh' 'hooks/dispatch-preflight.sh' 'payload/scripts/lib/plan.sh' 'payload/scripts/lib/proof.sh' 'payload/scripts/lib/walls.sh' 'payload/scripts/lib/units.sh'; do
   expect_nonempty "the surfaces include $cls" "$(printf '%s\n' "$SURF" | /usr/bin/grep -F "$cls" | head -1)"
 done
 EMPTY=""
@@ -283,16 +280,13 @@ wr_row() { printf '| %s | %s | build | %s · complexity: standard | — | — | 
   printf 'goals: owed · the user says what they owe (record/owed-test.md)\n---\n# fixture plan\n\n## SDLC State\n\n'
   printf 'approved-by: fixture 2026-10-06T16:00:00Z "approved"\ncurrent: 4\n\n- Step 4: implementation opened\n'
   printf -- '- T1: landed %s 2026-10-06T18:00:00Z — .worktrees/02-T1\n' "$(printf 'c%.0s' $(seq 40))"
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
-  printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-  wr_row T1 4 "The first row" — landed
-  wr_row T2 4 "The second row" — active
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+  wr_row T1 4 "The first row" — landed; wr_row T2 4 "The second row" — active
   wr_row T3 8 "Merge it" "approval:release" pending
   printf '\n## Not Doing\n\n- nothing\n'
 } > "$WR_P"
 WR_REG="$(bash -c '. "$1" && owed_register "$2" "$3"' _ "$REPO/payload/scripts/lib/owed.sh" "$WR_R" "$WR_P")"
-mkdir -p "${WR_REG%/*}"
-printf 'owed/v1|key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T3 — approval:release\n' > "$WR_REG"
+mkdir -p "${WR_REG%/*}" && printf 'owed/v1|key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T3 — approval:release\n' > "$WR_REG"
 bound_marker "$WR_R" "$WR_SID" "$WR_P"
 wr_poke() {  # <args after the poker…> [stdin from the caller] -> the verb's stdout; its exit code in WR_RC
   WR_RC=0
@@ -311,11 +305,9 @@ point: One task is in flight and nothing is red.
 ask approve:release: The release approval, which holds 8/3 — recommend approve once 4/2 lands
 close: if 4/2 lands first time.
 WR_JUDGMENT_EOF
-expect_eq "RD1 the sitrep card is drawn (exit 0) and holds the open approval under Blocked on you" "0|1" \
-  "$WR_RC|$(/usr/bin/grep -c '^    • The release approval, which holds 8/3' "$TMP/rendered/card.txt")"
+expect_eq "RD1 the sitrep card is drawn (exit 0) and holds the open approval under Blocked on you" "0|1" "$WR_RC|$(/usr/bin/grep -c '^    • The release approval, which holds 8/3' "$TMP/rendered/card.txt")"
 wr_poke sitrep --line "$WR_P" > "$TMP/rendered/line.txt"
-expect_eq "RD2 the Patrol line is drawn (exit 0): one line, the approval owed" "0|1|1" \
-  "$WR_RC|$(/usr/bin/grep -c . "$TMP/rendered/line.txt")|$(/usr/bin/grep -c ' tasks · owed: 1 on you · 0 on events · close ' "$TMP/rendered/line.txt")"
+expect_eq "RD2 the Patrol line is drawn (exit 0): one line, the approval owed" "0|1|1" "$WR_RC|$(/usr/bin/grep -c . "$TMP/rendered/line.txt")|$(/usr/bin/grep -c ' tasks · owed: 1 on you · 0 on events · close ' "$TMP/rendered/line.txt")"
 wr_poke handoff > /dev/null <<'WR_HANDOFF_EOF'
 Summary
 - Doing: the fixture run.
@@ -325,15 +317,13 @@ Summary
 WR_HANDOFF_EOF
 WR_HF="$(ls "$WR_R/.bionic/docs/record/handoffs/"*.md 2>/dev/null | head -1)"
 awk 'NR > 1 && $0 == "" { exit } NR > 1 { print }' "$WR_HF" > "$TMP/rendered/head.txt" 2>/dev/null
-expect_eq "RD3 the handoff head is drawn (exit 0): the title, the run line, Blocked on you: yes and the approval's line" "0|1|1|1" \
-  "$WR_RC|$(/usr/bin/grep -c ' tasks · owed: 1 on you · 0 on events · close ' "$TMP/rendered/head.txt")|$(/usr/bin/grep -cx 'Blocked on you: yes' "$TMP/rendered/head.txt")|$(/usr/bin/grep -c '^- approval: release — holds ' "$TMP/rendered/head.txt")"
+expect_eq "RD3 the handoff head is drawn (exit 0): the title, the run line, Blocked on you: yes and the approval's line" "0|1|1|1" "$WR_RC|$(/usr/bin/grep -c ' tasks · owed: 1 on you · 0 on events · close ' "$TMP/rendered/head.txt")|$(/usr/bin/grep -cx 'Blocked on you: yes' "$TMP/rendered/head.txt")|$(/usr/bin/grep -c '^- approval: release — holds ' "$TMP/rendered/head.txt")"
 for wr_s in card line head; do
   expect_nonempty "$wr_s: the lint reads the rendered text (the extractor reads the real output)" "$(words_text "$TMP/rendered/$wr_s.txt")"
   expect_empty "$wr_s: no refused word on it" "$(words_hits "$TMP/rendered/$wr_s.txt" "rendered/$wr_s.txt")"
   cp "$TMP/rendered/$wr_s.txt" "$TMP/rendered/$wr_s.plant.txt"
   printf '%s\n' '    • PLANT no reader for the goal' >> "$TMP/rendered/$wr_s.plant.txt"
-  expect_contains "$wr_s: a planted \"no reader for\" on it is refused" "PLANT no reader for" \
-    "$(words_hits "$TMP/rendered/$wr_s.plant.txt" "rendered/$wr_s.txt")"
+  expect_contains "$wr_s: a planted \"no reader for\" on it is refused" "PLANT no reader for" "$(words_hits "$TMP/rendered/$wr_s.plant.txt" "rendered/$wr_s.txt")"
 done
 
 
@@ -347,27 +337,31 @@ section "§BIND: over the same fixture run, a judgment that sets 1 green and 3 r
 WR_REC="$WR_R/.bionic/docs/record/wave-02-fx/landing-proofs.log"
 mkdir -p "${WR_REC%/*}"
 for wr_k in "a green" "b green" "c green" "d red"; do
-  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=%s.test.sh|result=%s|log=/rec/%s.log|at=2026-10-06T18:00:00Z\n' \
-    "$(printf 'c%.0s' $(seq 40))" "${wr_k%% *}" "${wr_k##* }" "${wr_k%% *}" >> "$WR_REC"
+  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=%s.test.sh|result=%s|log=/rec/%s.log|at=2026-10-06T18:00:00Z\n' "$(printf 'c%.0s' $(seq 40))" "${wr_k%% *}" "${wr_k##* }" "${wr_k%% *}" >> "$WR_REC"
 done
 wr_poke sitrep "$WR_P" > "$TMP/wr-sheet"
 expect_eq "BN0 precondition: the sheet holds 3 green and 1 red on one line" "1" "$(/usr/bin/grep -c '^tests.suites-run: 4: 3 green, 1 red ' "$TMP/wr-sheet")"
 wr_bind() {  # <the point> -> the card verb's stdout over the sheet; WR_RC, and stderr in $TMP/wr.err
-  wr_poke sitrep card "$WR_P" <<WR_BIND_EOF
-purpose: the first row lands and the release goes out; on course.
-call: Approve the release once 4/2 lands.
-grade: C
-point: $1
-ask approve:release: The release approval, which holds 8/3 — recommend approve once 4/2 lands
-close: if 4/2 lands first time.
-WR_BIND_EOF
+  wr_poke sitrep card "$WR_P" <<< "$(printf '%s\n' 'purpose: the first row lands and the release goes out; on course.' 'call: Approve the release once 4/2 lands.' 'grade: C' "point: $1" 'ask approve:release: The release approval, which holds 8/3 — recommend approve once 4/2 lands' 'close: if 4/2 lands first time.')"
 }
 wr_bind "3 suites green and 1 red." > "$TMP/rendered/bind-ok.txt"
-expect_eq "BN1 control: the point in the sheet's order draws (exit 0) with its numbers on the card" "0|1" \
-  "$WR_RC|$(/usr/bin/grep -c '3 suites green and 1 red' "$TMP/rendered/bind-ok.txt")"
+expect_eq "BN1 control: the point in the sheet's order draws (exit 0) with its numbers on the card" "0|1" "$WR_RC|$(/usr/bin/grep -c '3 suites green and 1 red' "$TMP/rendered/bind-ok.txt")"
 wr_bind "1 suite green and 3 red." > "$TMP/rendered/bind-swap.txt"
 expect_eq "BN2 the swap is refused (exit 1) and nothing is drawn" "1|0" "$WR_RC|$(/usr/bin/grep -c . "$TMP/rendered/bind-swap.txt")"
 expect_contains "BN2b …naming each number beside the word it does not stand by" 'says 1 beside "green"' "$(cat "$TMP/wr.err")"
 expect_contains "BN2c …and the other" 'says 3 beside "red"' "$(cat "$TMP/wr.err")"
+
+# ── §REGRESSION-ONCE ─────────────────────────────────────────────────────────
+section "§REGRESSION-ONCE: the regression paragraph of operational-rules.md and of steps/5.md states the shipped rule"
+# fails-when: a file lacks the paragraph, still holds the removed rule's sentence, or lacks the shipped rule's; each absence
+# is read beside a presence on the same paragraph.
+RO_A="$(/usr/bin/grep -F '**The regression, once' "$REPO/skills/canonical-sdlc/operational-rules.md")"
+RO_B="$(/usr/bin/grep -F '**The regression, once' "$REPO/skills/canonical-sdlc/steps/5.md")"
+expect_nonempty "AC-3.1 precondition: operational-rules.md holds the regression paragraph" "$RO_A"
+expect_contains "AC-3.1 the paragraph says a whole run at a later head is the normal path" "later head" "$RO_A"
+for ro_w in "on a proved head" "never a second run"; do expect_absent "AC-3.1 the paragraph no longer says \"$ro_w\"" "$ro_w" "$RO_A"; done
+expect_nonempty "AC-3.2 precondition: steps/5.md holds the regression paragraph" "$RO_B"
+expect_contains "AC-3.2 the paragraph says a head whose landings moved no code needs no run" "moved no code" "$RO_B"
+for ro_w in "with no second run" "no second run"; do expect_absent "AC-3.2 the paragraph no longer says \"$ro_w\"" "$ro_w" "$RO_B"; done
 
 finish
