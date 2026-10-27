@@ -175,4 +175,101 @@ expect_eq "ONE-9 the copy ran: close-out delivers (exit 0) and its continuation'
 expect_regex "ONE-10 …and the check over the card, the scorecard and that continuation reads split" '^split: ' \
   "$(pah_one "$(pah_card_state "$P1_CARD")" "$(pah_score_state "$P1_SCORE")" "$(pah_cont_state "$P2/$CONT_REL")")"
 
+
+# THE PAST-F ARMS: a green whole run at F, then commits past it on the working branch. Green is content: a head whose
+# every commit since F moved no code, by the judge's own cover basis (prose or release), reads green and names F;
+# one commit that moved code keeps the red line, F and the landings since counted.
+# pah_past <spec>... -> PAH_H: one commit on the working branch past the world `pah_world` built for each <spec>, the
+# paths it touches comma-joined, then the integration branch takes the working branch, as the merge before close-out.
+pah_past() {
+  local spec f
+  for spec in "$@"; do
+    for f in ${spec//,/ }; do
+      mkdir -p "$(dirname "$PAH_P-wave/$f")"; printf 'past F: %s\n' "$spec" >> "$PAH_P-wave/$f"
+      fixture_git "$PAH_P-wave" add "$f" || return 1
+    done
+    fixture_git "$PAH_P-wave" commit -qm "past F: $spec" || return 1
+  done
+  PAH_H="$(fixture_git "$PAH_P" rev-parse wave/01-fixture)"
+  fixture_git "$PAH_P" merge -q --no-ff -m "merge wave" wave/01-fixture >/dev/null 2>&1
+}
+# pah_whole [<lib dir>] -> the printer's line at the working head, from the real lib or from <lib dir>'s copy.
+pah_whole() {
+  bash -c '. "$1/roots.sh" && . "$1/proof.sh" && proof_whole_text "$2" "$3"' _ "${1:-$PAH_LIB}" "$PAH_PLAN" "$PAH_P" 2>/dev/null
+}
+# pah_check <commit> -> the plan carries a passing release check at <commit>, the line `release-check` writes.
+pah_check() {
+  bash -c '. "$1/proof.sh" || exit 1
+    proof_add_line "$2" "$(proof_line check "$3" 2026-10-04T15:00:00Z record/wave-01-fixture/release-check.log)"' \
+    _ "$PAH_LIB" "$PAH_PLAN" "$1" > "$PAH_PLAN.n" && mv "$PAH_PLAN.n" "$PAH_PLAN"
+}
+
+# fails-when: the printer reads green only at F itself, so a head two docs-only commits past a green whole run reads
+# red, the card asks the merge without a pass and close-out refuses for the regression; or one surface words its own.
+pah_world past-docs "" 0
+P3="$PAH_P"; P3_F="$PAH_F"
+expect_eq "ONE-11 precondition: a green whole run at the working head reads green at it" "green at ${P3_F:0:8}" "$(pah_whole)"
+pah_past README.md docs/notes.md
+P3_PLAN="$PAH_PLAN"; P3_H="$PAH_H"
+expect_eq "ONE-12 precondition: the head is two first-parent commits past F, each prose by the judge's walk" \
+  "2|cover prose|cover prose" \
+  "$(fixture_git "$P3" rev-list --first-parent --count "$P3_F..$P3_H")|$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" && facts_cover "$2" "$3" "$4"' _ "$PAH_LIB" "$P3_PLAN" "$P3_F" "$P3_H" 2>/dev/null | awk '{ printf "%s%s %s", (NR > 1 ? "|" : ""), $1, $3 }')"
+P3_WANT="green at ${P3_F:0:8}, 2 landings since moved no code"
+expect_eq "ONE-13 (AC-1.1) two docs-only commits past a green whole run: the state reads green at F, the landings since counted" \
+  "$P3_WANT" "$(pah_whole)"
+( in_fixture "$P3" || exit 1; bound_marker "$P3" pah-past-card "$P3_PLAN" )
+pah_poke "$P3" pah-past-card release-approval --preview "$P3_PLAN"
+P3_CARD="$PAH_OUT"
+pah_poke "$P3" pah-past-card landing-report --scorecard "$P3_PLAN"
+P3_SCORE="$PAH_OUT"
+run_close_as pah-past-close "$P3" run
+expect_eq "ONE-14 …close-out delivers at that head with no word from the person (exit 0, no merge-unproved line)" "0|0" \
+  "$CO_RC|$(/usr/bin/grep -c '^approved: merge-unproved ' "$P3_PLAN")"
+[ "$CO_RC" = 0 ] || printf '      close-out said: %s\n' "$(printf '%s\n' "$CO_OUT" | tail -3)"
+expect_eq "ONE-15 …and the card, the scorecard and the continuation print that one state" "one: $P3_WANT" \
+  "$(pah_one "$(pah_card_state "$P3_CARD")" "$(pah_score_state "$P3_SCORE")" "$(pah_cont_state "$P3/$CONT_REL")")"
+expect_eq "ONE-16 …the card marks it green" "✅ whole suite: $P3_WANT" \
+  "$(printf '%s\n' "$P3_CARD" | /usr/bin/grep -F "whole suite: " | head -1)"
+expect_absent "ONE-16b …and asks no merge without a pass, on the card whose whole-suite line was read above" \
+  "Merge without a whole run at this head" "$P3_CARD"
+
+# fails-when: a release-set commit past F is read green without its check, or red with a passing check at it.
+pah_world past-release "" 0
+P4="$PAH_P"; P4_F="$PAH_F"
+pah_past CHANGELOG.md,payload/.claude-plugin/plugin.json
+P4_H="$PAH_H"
+expect_eq "ONE-17 (AC-1.2) one release-set commit past F with no check recorded at it: red, the landing counted" \
+  "red at ${P4_F:0:8}, 1 landing before this head" "$(pah_whole)"
+pah_check "$P4_H"
+expect_eq "ONE-18 (AC-1.2) …the same commit with a passing release check recorded at it: green at F" \
+  "green at ${P4_F:0:8}, 1 landing since moved no code" "$(pah_whole)"
+
+# fails-when: a commit that moved code past F is read as prose, so the head reads green with no pass at it.
+pah_world past-code "" 0
+P5="$PAH_P"; P5_F="$PAH_F"
+pah_past payload/scripts/x.sh
+expect_eq "ONE-19 (AC-1.3) one code commit past F: red at F, one landing before this head" \
+  "red at ${P5_F:0:8}, 1 landing before this head" "$(pah_whole)"
+( in_fixture "$P5" || exit 1; bound_marker "$P5" pah-code-card "$PAH_PLAN" )
+pah_poke "$P5" pah-code-card release-approval --preview "$PAH_PLAN"
+expect_contains "ONE-19a …and its card asks the merge without a pass, the red state on the ask" \
+  "Merge without a whole run at this head — red at ${P5_F:0:8}, 1 landing before this head" "$(printf '%s\n' "$PAH_OUT" | tr '\n' ' ' | tr -s ' ')"
+pah_past README.md
+expect_eq "ONE-19b …and a docs commit after it leaves it red, the two landings counted" \
+  "red at ${P5_F:0:8}, 2 landings before this head" "$(pah_whole)"
+
+# THE MUTANT: the docs head of ONE-13 with the judge's basis (`_facts_basis`) made to read every commit `owes`. fails-when: the printer
+# turns green past F on anything but the walk's basis (position, or a basis of its own), so the mutant still reads green.
+PAH_MUTLIB="$SANDBOX/mut-lib"
+cp -R "$PAH_LIB" "$PAH_MUTLIB"
+cat >> "$PAH_MUTLIB/proof.sh" <<'PAH_MUT_EOF'
+_facts_basis() { printf 'cover %s owes\n' "$1"; return 1; }
+PAH_MUT_EOF
+PAH_P="$P3"; PAH_PLAN="$P3_PLAN"
+expect_eq "ONE-20 precondition: the mutant runs, its walk reading each docs commit owes" "cover owes|cover owes" \
+  "$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" && facts_cover "$2" "$3" "$4"' _ "$PAH_MUTLIB" "$P3_PLAN" "$P3_F" "$P3_H" 2>"$SANDBOX/mut.err" | awk '{ printf "%s%s %s", (NR > 1 ? "|" : ""), $1, $3 }')"
+[ ! -s "$SANDBOX/mut.err" ] || printf '      the mutant said: %s\n' "$(head -3 "$SANDBOX/mut.err")"
+expect_eq "ONE-21 …and under it the docs head reads red, so the walk's basis is what turned it green" \
+  "red at ${P3_F:0:8}, 2 landings before this head" "$(pah_whole "$PAH_MUTLIB")"
+
 finish

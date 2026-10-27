@@ -1734,13 +1734,19 @@ proof_branch_head() {
 
 # proof_whole_text <plan> <tree> [<head>] -> the full pass's state at <head>, the working head (`proof_branch_head`)
 # when none is handed in, one line: `green at <F8>` when <head> is F, the last regression proof's head, and the judge
-# (`_proof_floor_judge`, proof_state's) reads it covered there; `red at <F8>, <n> landings before this head` otherwise, n the first-parent
-# commits from F to <head> (`1 landing` for one); `red at <F8>, not in this head's history` when F is not behind
-# <head> or either cannot be read; `none` when the plan holds no regression proof.
+# (`_proof_floor_judge`, proof_state's) reads it covered there; `green at <F8>, <n> landings since moved no code` when
+# the judge reads F covered and every commit on the first-parent line from F to <head> moved no code by the judge's own
+# cover basis (`_facts_walk`: `prose` or `release`); `red at <F8>, <n> landings before this head` otherwise, n the
+# first-parent commits from F to <head> (`1 landing` for one, on either line); `red at <F8>, not in this head's
+# history` when F is not behind <head> or either cannot be read; `none` when the plan holds no regression proof.
 # THE ONE PRINTER OF THE FULL PASS: the release card, the scorecard and close-out's continuation print this line and
-# compute nothing of their own, so no two of them can disagree over one run. GREEN MEANS THE FULL SUITE RAN GREEN AT
-# THIS HEAD: a head past F that later landings' own suites cover is covered to the judge and still red here, since
-# no full pass ran at it. Red is the safe direction: every question this cannot answer answers it.
+# compute nothing of their own, so no two of them can disagree over one run. GREEN IS CONTENT, NOT POSITION: a full
+# pass at F proves every head whose commits since F changed only docs, or only the release set with its check passing
+# at each, because nothing a suite runs differs from F. A commit past F that moved code keeps the head red, even where
+# the landings' own suites cover it to the judge, since no full pass ran over that code; a born row's landing is red
+# here too unless its content alone is prose or release. The basis is the walk's, asked here and never re-derived, so
+# this line and the judge's cover cannot disagree. Red is the safe direction: every question this cannot answer
+# answers it.
 proof_whole_text() {
   local plan="$1" tree="$2" f fc c n
   f="$(proof_last "$plan" regression 2>/dev/null)"
@@ -1754,12 +1760,37 @@ proof_whole_text() {
       case "$(_proof_floor_judge "$plan" "$tree" "$c" 2>/dev/null)" in covered*) printf 'green at %.8s\n' "$f"; return 0 ;; esac
     fi
     n="$(git -C "$tree" rev-list --first-parent --count "$fc..$c" 2>/dev/null)" || n=""
+    case "$n" in
+      ''|*[!0-9]*|0) : ;;
+      *) if _proof_moved_no_code "$plan" "$tree" "$fc" "$c" "$n"; then
+           if [ "$n" = 1 ]; then printf 'green at %.8s, 1 landing since moved no code\n' "$f"
+           else printf 'green at %.8s, %s landings since moved no code\n' "$f" "$n"; fi
+           return 0
+         fi ;;
+    esac
   fi
   case "$n" in
     1) printf 'red at %.8s, 1 landing before this head\n' "$f" ;;
     ''|*[!0-9]*) printf "red at %.8s, not in this head's history\n" "$f" ;;
     *) printf 'red at %.8s, %s landings before this head\n' "$f" "$n" ;;
   esac
+}
+
+# _proof_moved_no_code <plan> <tree> <F> <head> <n> -> 0 when the judge reads F covered and the judge's cover walk
+# (`_facts_walk`, with the born landings and the release checks `facts_cover` hands it, no question) gives each of the
+# <n> first-parent commits from <F> to <head> the basis `prose` or `release`; 1 otherwise. A walk that answers for
+# fewer commits than <n>, or cannot answer, is no proof that nothing moved, so it reads 1.
+_proof_moved_no_code() {
+  local plan="$1" tree="$2" fc="$3" c="$4" n="$5" walk
+  case "$(_proof_floor_judge "$plan" "$tree" "$fc" 2>/dev/null)" in covered*) : ;; *) return 1 ;; esac
+  _proof_roots_load
+  walk="$(_facts_walk "$tree" "$(_facts_docs_prefix "$tree")" "$fc" "$c" \
+    "$(_facts_born_landings "$plan" "$tree" "$(proof_fixed "$plan" "$tree")")" "" "$(proof_check_passes "$plan" "$tree")")"
+  [ -n "$walk" ] || return 1
+  printf '%s\n' "$walk" | awk -v n="$n" '
+    $1 != "cover" || ($3 != "prose" && $3 != "release") { bad = 1 }
+    { k++ }
+    END { exit (bad || k != n) }'
 }
 
 # proof_unproved_approved <plan> <head> -> 0 when the plan's newest `approved: merge-unproved` line names <head>, the
