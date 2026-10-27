@@ -103,6 +103,13 @@ renamed, two paragraphs corrected and one verb's target moved. There is no new v
   that read the release set (D7), so its landing records the greens the judge reads. T9 opens the pull request and
   writes the reviews, and T10 closes the run.
 
+### Known limits
+
+Rendered from the plan's deferred findings, each its stated sentence, in the order they were registered.
+
+- A release row landed by hand never reads release: its reader verdicts are written inside the row, not at the merge the judge asks, so such a head reads red on the full pass and pays a whole run or the merge-unproved word.
+- A commit that touches CHANGELOG.md alone reads prose with no suite asked, though release-check.test.sh reads the real CHANGELOG.md; the version pair and the release card cover the likely breaks, and an edit to a released entry pinned text escapes until the next whole run.
+
 ### The landing numbers
 
 `landing-report --rows` at d328d73d26f5e2a8a79db4ff5197ae8130bac4fc on 2026-10-27T15:50:06Z:
