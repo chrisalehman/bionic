@@ -2664,7 +2664,7 @@ _proof_docs_path() {
 #                is its first parent's (one from the integration branch resolved to ours) is prose (wave-38 T2; AC-4.1)
 #   release      every path it touched is in the release set (`_proof_release_path`), the plan's release check passes at
 #                it and its readers are green there (`_proof_release_proved`), on every chain; the regression walk reads
-#                the same kind (wave-38 T2; D18)
+#                the same kind
 #   born-review  the landing record names it as the landing of a row whose `- T<n>:` line carries ` born: review …
 #                of=<record>#<n>`, or `proof_fixed` names it as a fix row's green landing, AND one of those records is
 #                the evidence of a registered reading: a review's fixes are inside the review, so it holds on every
