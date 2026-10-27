@@ -103,6 +103,16 @@ renamed, two paragraphs corrected and one verb's target moved. There is no new v
   that read the release set (D7), so its landing records the greens the judge reads. T9 opens the pull request and
   writes the reviews, and T10 closes the run.
 
+### The reviews
+
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- adversarial review, whole: fail at 1db103fd by w47-T7, 2026-10-27T03:29:43Z (`critic-adversarial.md`)
+- structure review, whole: flag at 1db103fd by w47-T7, 2026-10-27T03:29:44Z (`critic-structure.md`)
+- evidence review, whole: flag at 1db103fd by w47-T7, 2026-10-27T03:30:18Z (`critic-evidence.md`)
+- adversarial review, piece: flag at d328d73d by w47-T7, 2026-10-27T15:45:38Z (`critic-adversarial-2.md`)
+- evidence review, piece: pass at d328d73d by w47-T7, 2026-10-27T15:45:43Z (`critic-evidence-2.md`)
+
 ### Known limits
 
 Rendered from the plan's deferred findings, each its stated sentence, in the order they were registered.
