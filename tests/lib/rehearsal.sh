@@ -24,8 +24,9 @@
 #                      rendered there and the user's reply approves it, the integrate row renders the release entry's
 #                      reviews part on the working branch and opens the pull request through gh, the person merges
 #                      it, the integrate row delivers its record, and close-out runs.
-#     failed-review    the release-waiting run, the user's reply (recommended, and the merge without a whole run at
-#                      the release head), Step 8, a whole structure review failing, the branch merged into main, and
+#     failed-review    the release-waiting run, the user's reply (all recommended: the release landing past the
+#                      pass is a release commit with its check passing, so the head reads green and the card asks no
+#                      merge without a pass; the reply records the release approval), Step 8, a whole structure review failing, the branch merged into main, and
 #                      close-out refused on the review: the register holds waive:structure and hold:merge.
 #     release-waiting  the release order (the release row at step 7, a regression row, an integrate row reading both
 #                      approvals), the build landed through ready, the matrix discharged by its landing, Steps 5 to 7 with the regression, its row
@@ -145,7 +146,8 @@ _rh_typed() {
 }
 
 # _rh_reply <label> -> the user's reply to the newest release card at the working head, typed, then replayed: all as
-# recommended, but a merge without a whole run at this head, where a landing past the pass makes the card ask it, taken.
+# recommended. The release landing past the pass is a release commit with its check passing, so the head reads green and
+# the card asks no merge without a pass; the reply records the release approval.
 _rh_reply() {
   local n w='all recommended'
   # shellcheck disable=SC2012  # page names are release-approval-<hex>[-<n>].md, no blank or line break in any
