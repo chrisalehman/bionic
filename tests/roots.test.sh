@@ -18,6 +18,7 @@
 #   §2c  the governing-skill hook scaffolds under docs-root:.
 #   §2d  doctor's active-run row reads the same root.
 #   §3   the promote verb copies a durable record into the tracked home.
+#   §PROMOTE-TREE  promote writes under the checkout the verb runs in, not the main one.
 #
 # ONE CONFIG CHANGE MOVES EVERY CONSUMER (§2b to §2d). A fixture project sets `docs-root: alt`;
 # lib/run.sh's plan search, doctor's active-run row, hooks/stop-check.sh's contracted

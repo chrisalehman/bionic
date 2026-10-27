@@ -172,6 +172,12 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
     [ -z "$out" ] || printf '%s\n' "$out" >&2
     exit 1
   fi
+  # THE EXIT IS THE STEP'S: facts_state knows no step, so its unproved regression line carries the release card's reply.
+  # At 7 no card can exist yet, so the line is printed again with the one printer's exit for 7; every other line stays.
+  if [ "$step" = 7 ]; then
+    out="$(printf '%s\n' "$out" | awk -F'\t' -v OFS='\t' -v x="$(proof_unproved_needs "$PV_PLAN" "$PV_REPO" "$PV_HEAD8" 7)" \
+      '$1 == "regression" && $2 == "unproved" && NF == 4 { $4 = x } { print }')"
+  fi
   die "REFUSED — current: $step is admitted only when every fact the run owes holds at the working head $PV_HEAD8, and these do not (facts_state):"
   # THE BASIS UNDER THE LINE (wave-37 T8; D8, AC-4.1): a `review <q> … uncovered <a>..<b>` line is a judge's "no"
   # with no why; under it go the `cover <sha> <basis>` lines for that range and question, and the line ends with

@@ -1793,6 +1793,16 @@ DSP_READINGS
         die "REFUSED — the whole run runs once at a head, and ${FR_HEAD:0:12} has it: ${_fr_l#"$FR_DOCS"/}. A red suite is a fix row's: its own suites plus the red one, green at a later head. Nothing was run."
         exit 1
       done
+      # A head the last full pass still proves is not run again: nothing a suite runs differs from the pass, so a run here
+      # proves what is proved, and the next whole run is at the head a landing of code makes. The printer is the one reader.
+      FR_GREEN="$(proof_whole_text "$PV_PLAN" "$FR_CO" "$FR_HEAD" 2>/dev/null)"
+      case "$FR_GREEN" in
+        "green at "*", "*)
+          FR_PASS="record/$FR_WAVE/regression-run-$(proof_last "$PV_PLAN" regression 2>/dev/null).log"
+          for _fr_l in "$FR_DOCS/${FR_PASS%.log}"*.log; do [ -f "$_fr_l" ] && { FR_PASS="${_fr_l#"$FR_DOCS"/}"; break; }; done
+          die "REFUSED — the full pass already proves ${FR_HEAD:0:12}: $(clean "$FR_GREEN"), its log $FR_PASS. A pass runs where code lands, and the next whole run is at the head a landing of code makes: land it with spawn-worktree.sh ready. Nothing was run and no log was written."
+          exit 1 ;;
+      esac
     fi
     FR_DIRT="$(_wt_piece_dirt "$FR_CO")"
     FR_DIRTY="$(printf '%s' "$FR_DIRT" | awk 'END { print NR + 0 }')"

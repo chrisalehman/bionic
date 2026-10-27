@@ -1817,12 +1817,19 @@ proof_merge_unproved() {
   proof_whole_text "$plan" "$tree" "$head"
 }
 
-# proof_unproved_needs <plan> <tree> <head> -> the exit of a merge the whole suite has not run at, one line:
+# proof_unproved_needs <plan> <tree> <head> [<step>] -> the exit of a merge the whole suite has not run at, one line.
+# THE EXIT IS THE STEP'S: at step 7 no release card can exist yet, so the exit is the pass:
+# `needs: the pass — wait for it (the tick starts it once no row is ready), or start it: session-poker.sh regression-run`.
+# At step 8, or with no step, it is the card's reply:
 # `needs: the user — reply <n> on the release card (merge without a whole run at this head), or wait for the pass`,
 # <n> the decision number the newest release card rendered at <head> gives `approve:merge-unproved` (its replay table,
 # `release-approval/v1|dec=<n>|key=…`), or `<n>` while no card at that head holds it.
 proof_unproved_needs() {
-  local plan="$1" tree="$2" head="$3" dir n=""
+  local plan="$1" tree="$2" head="$3" step="${4:-}" dir n=""
+  if [ "$step" = 7 ]; then
+    printf 'needs: the pass — wait for it (the tick starts it once no row is ready), or start it: session-poker.sh regression-run\n'
+    return 0
+  fi
   _proof_roots_load
   if declare -F docs_root >/dev/null 2>&1 && dir="$(docs_root "$tree" 2>/dev/null)/record/$(proof_plan_slug "$plan" 2>/dev/null)" \
      && [ -d "$dir" ]; then
