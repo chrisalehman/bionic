@@ -861,9 +861,11 @@ poke "$RVG" proof-add review record/wave-01-fixture/past-waiver.md --question ad
 expect_eq "VG-2b AC-20.2 a reading of A..C registers on the waiver at A, with no reading before it (exit 0)" "0|1" \
   "$RC|$(s46_proved "$PVG" | /usr/bin/grep -c "^proved: kind=review head=$VG_C .* evidence=record/wave-01-fixture/past-waiver.md question=adversarial ")"
 
-# ---------- §CUR7-COVERED: prose landed past the whole run is covered, not green ----------
+# ---------- §CUR7-COVERED: prose landed past the whole run is green, code landed past it is unproved ----------
 # The plan holds a whole-run row, a release row and an open integrate row reading the release; the user approves the
-# release at C2 and waives there, then two prose commits land: covered, not green, until the person's word or a new pass.
+# release at C2 and waives there, then two prose commits land: green, admitted with no word. A code commit after them
+# is unproved until the person's word at that head. fails-when: prose past the run reads unproved; code past it reads
+# green; a word at another head admits it.
 VG_C2="$(s57_commit "$VG_WT" lib/b.sh C2)"
 printf 'Gating: 3 passed, 0 failed\n' | regression_fixture "$PVG" "$VG_DIR/whole-c2.log" "$VG_C2" 0 0
 poke "$RVG" proof-add regression record/wave-01-fixture/whole-c2.log
@@ -881,14 +883,23 @@ s57_commit "$VG_WT" README.md P2 >/dev/null
 sed 's/^current: .*/current: 7/' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
 sp4_rule_rows "$PVG"
 poke "$RVG" current 8 --check
-expect_eq "VG-5b AC-20.5 the approval and the waivers at C2, two prose commits after: covered, not green, refused as regression unproved, naming the reply" "1|yes" \
-  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -q 'regression.*unproved' && printf '%s\n' "$OUT" | /usr/bin/grep -q 'reply .* on the release card' && echo yes || echo no)"
-printf '%s\n' "$OUT" | /usr/bin/grep -q 'regression.*unproved' || printf '      the verb said: %s\n' "$OUT"; vg_mu() { awk -v h="$1" '/^approved: merge-unproved /{ next } { print } /^current: / && h { print "approved: merge-unproved by chris 2026-10-26T00:00:00Z head=" h " \"merge\"" }' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"; }
-vg_mu "$(git -C "$VG_WT" rev-parse HEAD)"; poke "$RVG" current 8 --check
-expect_eq "VG-5c …and with the person's merge-unproved word at the working head under ## SDLC State: admitted" "0" "$RC"
+expect_eq "VG-5b AC-20.5 the approval and the waivers at C2, two prose commits after: green by content, admitted with no word (exit 0, no merge-unproved line)" "0|yes|0" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -q 'would advance' && echo yes)|$(/usr/bin/grep -c '^approved: merge-unproved ' "$PVG")"
+expect_absent "VG-5b2 …and the judge reads no regression unproved there" "unproved" "$OUT"
+vg_mu() { awk -v h="$1" '/^approved: merge-unproved /{ next } { print } /^current: / && h { print "approved: merge-unproved by chris 2026-10-26T00:00:00Z head=" h " \"merge\"" }' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"; }
+vg_unproved() { printf '%s\n' "$OUT" | /usr/bin/grep -c 'regression.*unproved'; }
+# C3, code, lands green on its suite; the release is approved again at C3, as code past an approval is refused by it.
+VG_C3="$(s57_commit "$VG_WT" lib/b.sh C3)"
+{ printf 'line/v1|ev=ready|row=T10|suites=a.test.sh|at=2026-10-04T14:00:00Z\n'; printf 'line/v1|ev=verdict|row=T10|commit=%s|suite=a.test.sh|result=green|log=/fixture/T10.log|at=2026-10-04T14:05:00Z\n' "$VG_C3"
+  printf 'line/v1|ev=published|row=T10|commit=%s|kind=land|by=w-T10|why=landed|at=2026-10-04T14:10:00Z\n' "$VG_C3"; } >> "$VG_DIR/landing-proofs.log"
+poke "$RVG" approve release 'ship C3'
+expect_eq "VG-5c precondition: the user approves the release at the code head C3 (exit 0)" "0|$VG_C3" "$RC|$(bash -c '. "$1" && proof_approved_head "$2" release' _ "$S46_LIB" "$PVG")"
+poke "$RVG" current 8 --check
+expect_eq "VG-5c a code commit C3 past them, landed green on its own suite: covered, not green, refused as regression unproved, naming the reply" "1|1|1" "$RC|$(vg_unproved)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'reply .* on the release card')"
 vg_mu "$VG_C2"; poke "$RVG" current 8 --check
-expect_eq "VG-5d …the same word at C2's head, not the working head, leaves it refused" "1" "$RC"; vg_mu ""
-s57_commit "$VG_WT" lib/b.sh C3 >/dev/null
+expect_eq "VG-5d …the person's word at C2's head, not the working head, leaves the regression unproved" "1|1" "$RC|$(vg_unproved)"
+vg_mu "$(git -C "$VG_WT" rev-parse HEAD)"; poke "$RVG" current 8 --check
+expect_eq "VG-5e …and the word at the working head under ## SDLC State holds it: no regression line unproved (VG-5d read the same extractor)" "0" "$(vg_unproved)"
+vg_mu ""; /usr/bin/grep -v '|row=T10|' "$VG_DIR/landing-proofs.log" > "$VG_DIR/landing-proofs.log.n" && mv "$VG_DIR/landing-proofs.log.n" "$VG_DIR/landing-proofs.log"
 poke "$RVG" current 8 --check
 
 # ---------- §DISPOSITION: a finding the whole run fixed says so, not that a landing did ----------
