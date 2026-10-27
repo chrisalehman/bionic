@@ -75,8 +75,7 @@ write_plan "$h29a" "$(ship_plan none "$ship_delivered")" > /dev/null
 # 29b — `delivered:` missing → block. The terminal state is not optional.
 h29b=$(make_home)
 write_plan "$h29b" "$(ship_plan none "  note: wrapped it up")" > /dev/null
-expect_block "29b Step 9 without delivered: → block naming the key" \
-  "$h29b" 'git commit -m "x"' "delivered"
+expect_block "29b Step 9 without delivered: → block naming the key" "$h29b" 'git commit -m "x"' "delivered"
 
 # 29c — a named live surface: delivered + the full trio → allow.
 h29c=$(make_home)
@@ -87,8 +86,7 @@ $ship_trio")" > /dev/null
 # named target owes.
 h29d=$(make_home)
 write_plan "$h29d" "$(ship_plan local-harness "$ship_delivered")" > /dev/null
-expect_block "29d Step 9, deploy_target named, trio missing → block" \
-  "$h29d" 'git commit -m "x"' "deployed"
+expect_block "29d Step 9, deploy_target named, trio missing → block" "$h29d" 'git commit -m "x"' "deployed"
 
 # 29e — `deploy_target: n/a` is not a named surface (AC-3's default value), so
 # the trio is not owed.
@@ -123,15 +121,13 @@ h29f=$(make_home)
 write_plan "$h29f" "$(ship_plan none "  deploy: shipped to prod at 14:02
   verified-at: https://app.example/health
   monitor: one cycle clean")" > /dev/null
-expect_block "29f Step 9 in the retired v13 shape → block on delivered" \
-  "$h29f" 'git commit -m "x"' "delivered"
+expect_block "29f Step 9 in the retired v13 shape → block on delivered" "$h29f" 'git commit -m "x"' "delivered"
 
 # 29g — `n/a:` was v13's escape at deploy_target: none. Under v14 there is
 # nothing to escape: the run still has to name what it delivered.
 h29g=$(make_home)
 write_plan "$h29g" "$(ship_plan none "  n/a: nothing to deploy")" > /dev/null
-expect_block "29g Step 9 with the retired 'n/a:' escape → block on delivered" \
-  "$h29g" 'git commit -m "x"' "delivered"
+expect_block "29g Step 9 with the retired 'n/a:' escape → block on delivered" "$h29g" 'git commit -m "x"' "delivered"
 
 # 29h — a run with no named target that deployed something anyway and said so
 # is recording MORE than it owes, which is never a reason to refuse a commit.
@@ -197,36 +193,31 @@ GOOD_CONFIRM='chris 2026-08-18 read the rendered wall in his own client and conf
 # verdict, no waiver → allow.
 h30a=$(make_home)
 write_plan "$h30a" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 "" "$GOOD_CONFIRM")")")" > /dev/null
-expect_allow "30a T4 + attributed user-confirmed + empty auditor cell at current 8 → allow (ruled by the user)" \
-  "$h30a" 'git commit -m "x"'
+expect_allow "30a T4 + attributed user-confirmed + empty auditor cell at current 8 → allow (ruled by the user)" "$h30a" 'git commit -m "x"'
 
 # 30b — an agent-shaped claim: no attributed human, no date. Still refused.
 h30b=$(make_home)
 write_plan "$h30b" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" \
   "$(t4_matrix T4 "" "confirmed by the implementor agent after the re-render")")")" > /dev/null
-expect_block "30b T4 + agent-shaped user-confirmed → block (no attributed user)" \
-  "$h30b" 'git commit -m "x"' "CONFIRMED"
+expect_block "30b T4 + agent-shaped user-confirmed → block (no attributed user)" "$h30b" 'git commit -m "x"' "CONFIRMED"
 
 # 30c — a date with nobody attached is not an attribution either.
 h30c=$(make_home)
 write_plan "$h30c" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" \
   "$(t4_matrix T4 "" "2026-08-18 the wall renders as specified")")")" > /dev/null
-expect_block "30c T4 + dated but unattributed user-confirmed → block" \
-  "$h30c" 'git commit -m "x"' "CONFIRMED"
+expect_block "30c T4 + dated but unattributed user-confirmed → block" "$h30c" 'git commit -m "x"' "CONFIRMED"
 
 # 30d — the exemption is T4-scoped. A T3 row cannot buy its way past the
 # auditor by writing a user's name into its block: T3's evidence is a live
 # reading an auditor CAN re-take independently, so the verdict still stands.
 h30d=$(make_home)
 write_plan "$h30d" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T3 "" "$GOOD_CONFIRM")")")" > /dev/null
-expect_block "30d T3 + well-formed user-confirmed → block (exemption is T4-only)" \
-  "$h30d" 'git commit -m "x"' "CONFIRMED"
+expect_block "30d T3 + well-formed user-confirmed → block (exemption is T4-only)" "$h30d" 'git commit -m "x"' "CONFIRMED"
 
 # 30e — no regression: a T4 row an auditor DID confirm still passes.
 h30e=$(make_home)
 write_plan "$h30e" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 CONFIRMED "$GOOD_CONFIRM")")")" > /dev/null
-expect_allow "30e T4 + CONFIRMED auditor cell → allow (unchanged)" \
-  "$h30e" 'git commit -m "x"'
+expect_allow "30e T4 + CONFIRMED auditor cell → allow (unchanged)" "$h30e" 'git commit -m "x"'
 
 # 30f — pinned scope boundary: the form check lives in the post-Verify arm
 # only. At current: 5 the row is still being discharged and the contract there
@@ -237,8 +228,7 @@ expect_allow "30e T4 + CONFIRMED auditor cell → allow (unchanged)" \
 h30f=$(make_home)
 write_plan "$h30f" "$(wave_plan 5 "$step5_base" \
   "$(t4_matrix T4 CONFIRMED "confirmed by the implementor agent")")" > /dev/null
-expect_allow "30f impostor at current: 5 → allow (form check is post-Verify only)" \
-  "$h30f" 'git commit -m "x"'
+expect_allow "30f impostor at current: 5 → allow (form check is post-Verify only)" "$h30f" 'git commit -m "x"'
 
 # 30h — THE REFUTATION ARM (critic C-1, W5). The exemption above replaces the
 # WAIVER FORM a user-confirmed row used to be paid in; it does not replace the
@@ -254,16 +244,14 @@ expect_allow "30f impostor at current: 5 → allow (form check is post-Verify on
 # not the fix.
 h30h=$(make_home)
 write_plan "$h30h" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 REFUTED "$GOOD_CONFIRM")")")" > /dev/null
-expect_block "30h T4 + well-formed user-confirmed + auditor REFUTED → block" \
-  "$h30h" 'git commit -m "x"' "REFUTED"
+expect_block "30h T4 + well-formed user-confirmed + auditor REFUTED → block" "$h30h" 'git commit -m "x"' "REFUTED"
 
 # 30i — UNVERIFIABLE is the auditor's other positive finding: it says the
 # evidence could not be checked, which is not the same as nobody having looked.
 # Same arm, same reason.
 h30i=$(make_home)
 write_plan "$h30i" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 UNVERIFIABLE "$GOOD_CONFIRM")")")" > /dev/null
-expect_block "30i T4 + well-formed user-confirmed + auditor UNVERIFIABLE → block" \
-  "$h30i" 'git commit -m "x"' "UNVERIFIABLE"
+expect_block "30i T4 + well-formed user-confirmed + auditor UNVERIFIABLE → block" "$h30i" 'git commit -m "x"' "UNVERIFIABLE"
 
 # 30m — the step-6 half of the move. At current: 6 the arm asks for a verdict, not a ruling: the impostor of
 # 30b and the standing finding of 30h each carry a `user-confirmed:` line, which is a T4 row's verdict, so the
@@ -271,12 +259,10 @@ expect_block "30i T4 + well-formed user-confirmed + auditor UNVERIFIABLE → blo
 h30m=$(make_home)
 write_plan "$h30m" "$(wave_plan 6 "$step6_body" \
   "$(t4_matrix T4 "" "confirmed by the implementor agent after the re-render")")" > /dev/null
-expect_allow "30m T4 + agent-shaped user-confirmed at current 6 → allow (a verdict; the ruling is step 8's)" \
-  "$h30m" 'git commit -m "x"'
+expect_allow "30m T4 + agent-shaped user-confirmed at current 6 → allow (a verdict; the ruling is step 8's)" "$h30m" 'git commit -m "x"'
 h30m2=$(make_home)
 write_plan "$h30m2" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 REFUTED "$GOOD_CONFIRM")")" > /dev/null
-expect_allow "30m2 T4 + well-formed user-confirmed + auditor REFUTED at current 6 → allow" \
-  "$h30m2" 'git commit -m "x"'
+expect_allow "30m2 T4 + well-formed user-confirmed + auditor REFUTED at current 6 → allow" "$h30m2" 'git commit -m "x"'
 
 # (30j — an arm asserting the refusal SENTENCE ("does not overturn") on the same
 # fixture 30h already blocks on — deleted at epic-18 W1: its only failure mode
@@ -348,13 +334,11 @@ _real_hook="$HOOK"
 HOOK="$DOCTORED_HOOK"
 # T4-scoping is a separate predicate from the form, so the T3 row must STILL
 # block against the doctored hook — the tier arm is not what was loosened.
-expect_block "30g meta: the T3 row still blocks under the loosened form (tier scope is a separate arm)" \
-  "$h30d" 'git commit -m "x"' "CONFIRMED"
+expect_block "30g meta: the T3 row still blocks under the loosened form (tier scope is a separate arm)" "$h30d" 'git commit -m "x"' "CONFIRMED"
 HOOK="$_real_hook"
 
 # Restore-proof: the real hook still refuses the impostor after the detour.
-expect_block "30g meta: the real hook still refuses the impostor after the mutation proof" \
-  "$h30b" 'git commit -m "x"' "CONFIRMED"
+expect_block "30g meta: the real hook still refuses the impostor after the mutation proof" "$h30b" 'git commit -m "x"' "CONFIRMED"
 
 # ============================================================
 # Section 31: a refusal on a call that also writes the plan (B-6)
@@ -376,8 +360,7 @@ cmd31a=$(printf 'python3 - <<%s\nopen("%s","a").write("\\nAC-2:\\n  tier-run: x\
 
 # 31a — the same refusal still names the row it refused (the note is an extra
 # line, not a replacement).
-expect_block "31a the split line does not displace the original refusal" \
-  "$h31a" "$cmd31a" "AC-2"
+expect_block "31a the split line does not displace the original refusal" "$h31a" "$cmd31a" "AC-2"
 
 # 31b — the project-relative spelling of the same path (what an agent actually
 # types) is matched too.
@@ -400,8 +383,7 @@ fi
 # plan but has nothing to refuse is still allowed silently.
 h31d=$(make_home)
 p31d=$(write_plan "$h31d" "$(plan 6 "$step6_body" "$matrix_complete")")
-expect_allow "31d naming the plan in an otherwise-clean commit → allow, silent" \
-  "$h31d" "python3 -c \"open('$p31d','a')\" && git commit -m \"x\""
+expect_allow "31d naming the plan in an otherwise-clean commit → allow, silent" "$h31d" "python3 -c \"open('$p31d','a')\" && git commit -m \"x\""
 
 # ============================================================
 # Section 32: the auditor wall is rigor-keyed (B-10 / R-11)
@@ -495,8 +477,7 @@ step5_noaud="  cmd: bash test.sh
 # 7/8/9 step bodies are Section 17r's, which their own validators pin already.
 h32a=$(make_home)
 write_plan "$h32a" "$(plan_rigor single 6 "$step6_body" "$m32_empty_aud")" > /dev/null
-expect_allow "32a rigor single, rows discharged, auditor cells empty, current 6 → allow" \
-  "$h32a" 'git commit -m "x"'
+expect_allow "32a rigor single, rows discharged, auditor cells empty, current 6 → allow" "$h32a" 'git commit -m "x"'
 
 h32b=$(make_home)
 write_plan "$h32b" "$(eg_floor "$(plan_rigor single 7 "$v9_step7_body" "$m32_empty_aud")")" > /dev/null
@@ -508,23 +489,20 @@ expect_allow "32c same at current 8 → allow" "$h32c" 'git commit -m "x"'
 
 h32d=$(make_home)
 write_plan "$h32d" "$(eg_floor "$(plan_rigor single 9 "$v9_step9_body" "$m32_empty_aud")")" > /dev/null
-expect_allow "32d same at current 9 → allow (B-10's own repro step)" \
-  "$h32d" 'git commit -m "x"'
+expect_allow "32d same at current 9 → allow (B-10's own repro step)" "$h32d" 'git commit -m "x"'
 
 # 32e — the Step-5 `auditor:` pointer is the same wall one step earlier: it is
 # demanded once no row is pending. At single there is no auditor to point at.
 h32e=$(make_home)
 write_plan "$h32e" "$(plan_rigor single 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
-expect_allow "32e rigor single, all rows discharged, no Step-5 auditor: pointer → allow" \
-  "$h32e" 'git commit -m "x"'
+expect_allow "32e rigor single, all rows discharged, no Step-5 auditor: pointer → allow" "$h32e" 'git commit -m "x"'
 
 # 32f — the task-ledger mirror (AC-26, second half) is gone with the task ledger (wave-31 T24;
 # D2): its `done` row at single, and 32k's row raised to double by its own cell, were the
 # retired table at `current: T2`. That plan meets the numeric refusal now.
 h32f=$(make_home)
 write_plan "$h32f" "$(eg_pf_plan T2 task single false "- T2: fixed enum check, bash suite 12/12" "$(eg_pf_row T1 — landed)" "$(eg_pf_row T2 — active)")" > /dev/null
-expect_block "32f 32f's and 32k's task plan at current: T2 → refused as not numeric" \
-  "$h32f" 'git commit -m "x"' "current: T2 is not numeric"
+expect_block "32f 32f's and 32k's task plan at current: T2 → refused as not numeric" "$h32f" 'git commit -m "x"' "current: T2 is not numeric"
 
 # 32n — the column is not READ at single, not merely tolerated when empty: a
 # standing REFUTED verdict passes too. Pinned deliberately (it is the sharpest
@@ -946,11 +924,11 @@ od_reads() {  # the five readings a double wave plan is dealt, at A
   done
 }
 od_appr() { printf 'approved: release by Dana Fixture 2026-10-12T14:00:00Z head=%s "Ship it."' "$1"; }
-od_s8() {  # <approval line> -> the plan at current: 8, every row but integrate landed
+od_s8() {  # <approval line> -> the plan at current: ${OD_S:-8}, every row but integrate landed
   local st
   st="$(printf -- '- Step 5: verified, %s/audit.md\n  auditor: CONFIRMED, %s/audit.md\n- Step 6: review at %s/review.md\n' "$OD_RL" "$OD_RL" "$OD_RL")"
   st="$st"$'\n'"$(printf -- '- Step 7: documented at %s/docs.md\n  n/a: no decision this run' "$OD_RL")"$'\n'"$OD_FL"$'\n'"$(od_reads)"
-  od_plan 8 "${1:+$1$'\n'}$st" "$(od_rows landed landed landed)"$'\n'"$(od_row T6 5 build 'the fix' implementor lib/b.sh landed 'approval:plan')"$'\n'
+  od_plan "${OD_S:-8}" "${1:+$1$'\n'}$st" "$(od_rows landed landed landed)"$'\n'"$(od_row T6 5 build 'the fix' implementor lib/b.sh landed 'approval:plan')"$'\n'
 }
 od_s8 "$(od_appr "$OD_A")"
 expect_eq "AH-0 precondition: the plan is in the order, the regression row named" "T2" \
@@ -963,6 +941,23 @@ od_s8 "$(od_appr "$OD_A")"$'\n'"$(od_mu "$OD_A")"; od_poke current 8 --check
 expect_eq "AH-1b …and with the person's merge-unproved word at head A beside it: passes" "0" "$OD_RC"
 od_s8 "$(od_appr "$OD_A")"$'\n'"$(od_mu "$OD_C")"; od_poke current 8 --check
 expect_eq "AH-1c …the same word naming a head that is not A leaves it refused" "1" "$OD_RC"
+# §EXIT7: the unproved exit is the step's. At 7 no release card can exist yet, so the exit is the pass; at 8 it is the card's reply, and a
+# docs head past the whole run is admitted at 7. fails-when: current 7 over an unproved head names a reply or a release card, current 8
+# stops naming the reply, or a docs commit past the run draws a refusal at 7.
+OD_N7='needs: the pass — wait for it (the tick starts it once no row is ready), or start it: session-poker.sh regression-run'
+od_x7() { OD_FL="$2" OD_S=$(($1 - 1)) od_s8 "$(od_appr "$OD_A")"; od_poke current "$1" --check; }  # <step> <floor line> -> the plan one step before it, asked for <step>
+od_rg() { printf '%s\n' "$OD_OUT" | /usr/bin/grep 'regression.*unproved' | awk -F'\t' '{ print $NF }'; }
+od_x7 7 "$OD_FL"
+expect_eq "X7-1 AC-2.1 current 7 over the unproved head A: refused, the exit is the pass and names no reply and no release card" "1|$OD_N7|0" \
+  "$OD_RC|$(od_rg)|$(od_rg | /usr/bin/grep -ciE 'reply|release card' || :)"
+od_x7 8 "$OD_FL"
+expect_eq "X7-2 AC-2.2 current 8 at the same head: refused, the exit is the card's reply, as before" \
+  "1|needs: the user — reply <n> on the release card (merge without a whole run at this head), or wait for the pass" "$OD_RC|$(od_rg)"
+printf 'notes\n' >> "$OD/README.md"; od_git commit -qam 'a docs commit past the pass'
+od_x7 7 "$(bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-12T11:30:00Z "$3"' _ "$OD_LIB" "$OD_A" "$OD_RL/regression-run-$OD_H.log")"
+expect_eq "X7-3 AC-2.3 the pass at A and one docs commit past it: current 7 admitted (exit 0), no regression unproved" "0|" "$OD_RC|$(od_rg)"
+od_git reset -q --hard "$OD_A"
+
 od_s8 "$(od_appr "$OD_C")"
 od_poke current 8 --check
 expect_eq "AH-2 AC-7.2 approved head C, the working head A: current 8 --check refuses (exit 1)" "1" "$OD_RC"
