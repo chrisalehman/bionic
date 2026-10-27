@@ -974,26 +974,24 @@ expect_eq "SU2 a whole run proved at a head this repository does not hold: red a
   "red at bbbbbbbb, not in this head's history" "$(sr_m tests.whole-run)"
 awk 'NR > 1 && /^---$/ && !d { print "regression: no"; d = 1 } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
-expect_eq "SU3 a plan that owes no whole run says so, beside the suites it ran" \
-  "3: 2 green, 1 red|not run (regression: no, Step 0)" \
-  "$(sr_m tests.suites-run)|$(sr_m tests.whole-run)"
+expect_eq "SU3 a plan that owes no whole run says so, beside the suites it ran" "3: 2 green, 1 red|not run (regression: no, Step 0)" "$(sr_m tests.suites-run)|$(sr_m tests.whole-run)"
 
 section "§WHOLE: the whole run reads green only at the head it ran at with nothing owed; anywhere else it is red, the landings since it counted"
 # ============================================================
-# fails-when: a proof line reads green whatever its owed= says, or at a head the working head has moved past; or the
-# landings since the whole run go uncounted, or a count of one says landings.
+# fails-when: a proof line reads green whatever its owed= says; or a head past it reads red with only docs landed (WH3, WH4)
+# or green with a code path landed (WH5); or the landings since the whole run go uncounted, or a count of one says landings.
 # FIXTURE FIDELITY: the world's tree committed and the working branch set on it, so the whole run's head is a commit
 # here; the proof line is the one `proof-add regression` writes (lib/proof.sh `proof_floor_line`); each later commit
 # is a commit on the working branch.
-# ANTI-VACUITY: WH1 reads green and WH2 red through the same measurement on the same world, one planted owed= apart.
+# ANTI-VACUITY: WH1 reads green and WH2 red through the same measurement on the same world, one planted owed= apart; WH5 is
+# the mutant of WH3 and WH4, one code commit apart, so the green arms read content and not position.
 sr_proof() {  # <head> [<owed suites>] -> the plan's regression proof replaced by one at <head> that left <owed> red
   local l
-  l="$(bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-06T15:00:00Z "record/wave-02-fx/regression-run-$2.log" "${3:-}"' \
-    _ "$SR_PROOF_LIB" "$1" "${2:-}")"
+  l="$(bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-06T15:00:00Z "record/wave-02-fx/regression-run-$2.log" "${3:-}"' _ "$SR_PROOF_LIB" "$1" "${2:-}")"
   awk -v l="$l" '/^proved: kind=regression / { next } { print } /^current: 4$/ { print l }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 }
 sr_commit() {  # <file> -> one more commit on the working branch, the branch moved to it; prints nothing
-  printf 'x\n' >> "$SR_REPO/$1"
+  mkdir -p "$(dirname "$SR_REPO/$1")"; printf 'x\n' >> "$SR_REPO/$1"
   ( cd "$SR_REPO" && git add -A >/dev/null 2>&1 && git -c user.email=t@t -c user.name=t commit -qm "$1" >/dev/null 2>&1 )
   git -C "$SR_REPO" branch -f wave/02-fx HEAD >/dev/null 2>&1
 }
@@ -1006,16 +1004,16 @@ sr_run "$SR_PLAN"
 expect_eq "WH1 a whole run at the working head with nothing owed: green at that head" "green at ${SR_F:0:8}" "$(sr_m tests.whole-run)"
 sr_proof "$SR_F" b.test.sh
 sr_run "$SR_PLAN"
-expect_eq "WH2 the same whole run with a suite owed: red at the working head, no landing since" "red at ${SR_F:0:8}, 0 landings before this head" \
-  "$(sr_m tests.whole-run)"
+expect_eq "WH2 the same whole run with a suite owed: red at the working head, no landing since" "red at ${SR_F:0:8}, 0 landings before this head" "$(sr_m tests.whole-run)"
 sr_proof "$SR_F"
-sr_commit lib/b.sh
+sr_commit README.md
 sr_run "$SR_PLAN"
-expect_eq "WH3 the green whole run with one landing past it: red at the whole run's head, one landing before this head" \
-  "red at ${SR_F:0:8}, 1 landing before this head" "$(sr_m tests.whole-run)"
-sr_commit lib/c.sh
+expect_eq "WH3 the green whole run with one docs landing past it: green at the whole run's head, one landing since moved no code" "green at ${SR_F:0:8}, 1 landing since moved no code" "$(sr_m tests.whole-run)"
+sr_commit CHANGELOG.md
 sr_run "$SR_PLAN"
-expect_eq "WH4 …and with two: two landings" "red at ${SR_F:0:8}, 2 landings before this head" "$(sr_m tests.whole-run)"
+expect_eq "WH4 …and with two: two landings since" "green at ${SR_F:0:8}, 2 landings since moved no code" "$(sr_m tests.whole-run)"
+sr_commit payload/x.sh; sr_run "$SR_PLAN"
+expect_eq "WH5 …and a third that moved a code path: red at the whole run's head, three landings before this head" "red at ${SR_F:0:8}, 3 landings before this head" "$(sr_m tests.whole-run)"
 
 section "§COUNTS: a count agrees in number with what it counts — one task, two tasks; the sheet never says 1 tests"
 # ============================================================
