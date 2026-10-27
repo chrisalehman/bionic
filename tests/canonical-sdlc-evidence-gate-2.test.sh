@@ -855,21 +855,26 @@ expect_contains "WR-1b …naming the open row" "T1 (step 4, pending)" "$OD_OUT"
 od_plan 5 '' "$(od_rows landed pending pending)"
 od_poke regression-run
 expect_eq "WR-2 AC-6.1 every build row landed: one whole run at the head (exit 0, one log)" "0|1" "$OD_RC|$(od_logs)"
-expect_eq "WR-2b …recording one verdict per suite at that commit" "2" \
-  "$(/usr/bin/grep -c "^line/v1|ev=verdict|row=regression|commit=$OD_B|" "$(od_lrec)" 2>/dev/null || :)"
+expect_eq "WR-2b …recording one verdict per suite at that commit" "2" "$(/usr/bin/grep -c "^line/v1|ev=verdict|row=regression|commit=$OD_B|" "$(od_lrec)" 2>/dev/null || :)"
 od_poke regression-run
 expect_eq "WR-3 AC-6.1 a second whole run at the same green head: refused (exit 1), no second log" "1|1" "$OD_RC|$(od_logs)"
 expect_contains "WR-3b …saying the head has its whole run" "runs once at a head" "$OD_OUT"
+od_poke proof-add regression "$OD_RL/regression-run-$OD_B.log"; printf 'notes\n' > "$OD/README.md"; od_git add README.md; od_git commit -qm 'docs only'
+od_poke regression-run
+expect_eq "WR-3c AC-1.4 one docs commit past the green whole run: refused (exit 1), no log written for the head" "1|1" "$OD_RC|$(od_logs)"
+expect_contains "WR-3d …naming the pass at B, its log, and that nothing since moved code" "green at ${OD_B:0:8}, 1 landing since moved no code" "$OD_OUT"
+expect_contains "WR-3e …and the full pass's log" "$OD_RL/regression-run-$OD_B.log" "$OD_OUT"
+expect_contains "WR-3f …and the exit that lands code" "spawn-worktree.sh ready" "$OD_OUT"
 
 printf 'b.test.sh\n' > "$OD/tests/red"; od_git commit -qam 'b breaks'; OD_H="$(od_git rev-parse HEAD)"
 # A head past a whole run is run again: the verb is stopped only by the dirty tree planted here, the last refusal before the runner.
 printf 'dirt\n' >> "$OD/lib/b.sh"
 od_poke regression-run
 od_git checkout -q -- lib/b.sh
-expect_eq "FX-1 a new head H past the one whole run: regression-run is not refused as a second whole run; it reaches the dirty-tree check before the runner (exit 1, no log)" \
-  "1|1" "$OD_RC|$(od_logs)"
+expect_eq "FX-1 a new head H past the one whole run: regression-run is not refused as a second whole run; it reaches the dirty-tree check before the runner (exit 1, no log)" "1|1" "$OD_RC|$(od_logs)"
 expect_contains "FX-1b …the refusal is the dirty tree's, the last one before the runner" "is dirty (dirty=1)" "$OD_OUT"
 expect_absent "FX-1d …and no refusal names the whole run's head as having the run" "${OD_B:0:12} has it" "$OD_OUT"
+expect_absent "FX-1e …nor the green pass: the code commit past B put the head out of its reach (the mutant of WR-3c)" "moved no code" "$OD_OUT"
 # THE RED RUN THE PLAN'S WHOLE RUN WAS, left at H as the verb leaves one: the runner's report as the log's body, the run line and the per-suite facts through the product's writers.
 OD_PLANT=0
 (cd "$OD" && { bash tests/run.sh 2>&1 || :; }) | regression_fixture "$OD_PLAN" "$OD_REC/regression-run-$OD_H.log" "$OD_H" 0 1 || OD_PLANT=$?

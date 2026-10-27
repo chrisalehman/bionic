@@ -1636,8 +1636,7 @@ PST="$(s42_plan "$RST" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${ST_B:0:8}
   branch: wave/01-fixture")"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PST" > "$PST.tmp" && mv "$PST.tmp" "$PST"
-( cd "$RST" && git add -f "$PST" && git commit -qm wb \
-  && git worktree add -q -b wave/01-fixture "$RST/.worktrees/01-fixture" "$ST_B" ) >/dev/null 2>&1
+( cd "$RST" && git add -f "$PST" && git commit -qm wb && git worktree add -q -b wave/01-fixture "$RST/.worktrees/01-fixture" "$ST_B" ) >/dev/null 2>&1
 ST_WT="$RST/.worktrees/01-fixture"; ST_DIR="$RST/.bionic/docs/record/wave-01-fixture"; mkdir -p "$ST_DIR"
 ST_H0="$(s57_commit "$ST_WT" lib/a.sh H0)"
 printf 'Gating: 1 passed, 0 failed\n' | regression_fixture "$PST" "$ST_DIR/whole-h0.log" "$ST_H0" 0 0
@@ -1646,8 +1645,7 @@ expect_eq "ST-0 precondition: the plan holds a regression proof at H0 (proof-add
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 ST_H1="$(s57_commit "$ST_WT" lib/a.sh H1)"
 new_roster "$RST"
-add_row "$RST" name=w-T2 agent_id=a-w-T2 subagent_type=implementor launched_at="$(iso_ago 60)" \
-  deliverable="$RST/record/T2.md" duration=60m
+add_row "$RST" name=w-T2 agent_id=a-w-T2 subagent_type=implementor launched_at="$(iso_ago 60)" deliverable="$RST/record/T2.md" duration=60m
 st_started() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: regression-run started ' ; }
 st_waiting() { printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: regression-run waiting — the gate has no room for a whole run$'; }
 st_objects() { /usr/bin/grep -F "|name=regression@$1|" "$(roster_of "$RST")" 2>/dev/null; }
@@ -1667,10 +1665,8 @@ st_runline() { /usr/bin/grep -F "|ev=run|log=$1|" "$(st_rec)" 2>/dev/null | tail
 # line it did not say. The one that keeps it (ST-6) is the tick whose only news is the start itself.
 # The control: T2 still writes (its row active, its writer open on the roster), so nothing starts.
 forget_digest "$RST"; poke "$RST" tick
-expect_nonempty "ST-1-pre the control tick printed its decision line (the extractor reads real output)" \
-  "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker-tick/v1|')"
-expect_eq "ST-1 AC-6.1 control: with a writer row running, the tick starts nothing and the roster holds no object" \
-  "|" "$(st_started)|$(st_objects "${ST_H1:0:8}")"
+expect_nonempty "ST-1-pre the control tick printed its decision line (the extractor reads real output)" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker-tick/v1|')"
+expect_eq "ST-1 AC-6.1 control: with a writer row running, the tick starts nothing and the roster holds no object" "|" "$(st_started)|$(st_objects "${ST_H1:0:8}")"
 
 # Quiet: every row landed, the writer closed by its ack, the head past the proof.
 s42_builds_landed "$PST"
@@ -1680,47 +1676,45 @@ forget_digest "$RST"; poke "$RST" tick
 expect_contains "ST-2 AC-6.1 nothing ready, no writer open, the head past the proof: the tick starts regression-run as regression@<h8>" \
   "poker: regression-run started regression@${ST_H1:0:8} (log $(st_log "${ST_H1:0:8}"))" "$(st_started)"
 [ -n "$(st_started)" ] || printf '      the tick said: %s\n' "$OUT"
-expect_contains "ST-2b …and the roster holds the object: a run row, its one suite run.sh, a read-only role, waived as no agent" \
-  "|status=run|" "$(st_objects "${ST_H1:0:8}" | head -n 1)"
-expect_contains "ST-2c …whose budget is run.sh, so the gate's whole-run budget admits it" "|suites_allowed=run.sh|" \
-  "$(st_objects "${ST_H1:0:8}" | head -n 1)"
+expect_contains "ST-2b …and the roster holds the object: a run row, its one suite run.sh, a read-only role, waived as no agent" "|status=run|" "$(st_objects "${ST_H1:0:8}" | head -n 1)"
+expect_contains "ST-2c …whose budget is run.sh, so the gate's whole-run budget admits it" "|suites_allowed=run.sh|" "$(st_objects "${ST_H1:0:8}" | head -n 1)"
 expect_true "ST-2d …and booked.sh marks the run on it (run_pid=)" st_until 20 eval 'st_objects "${ST_H1:0:8}" | /usr/bin/grep -q "|run_pid="'
-expect_true "ST-2e …and the tick did not wait on it: the run is still held by the runner when the tick has returned" \
-  test ! -e "$(st_log "${ST_H1:0:8}").rc"
+expect_true "ST-2e …and the tick did not wait on it: the run is still held by the runner when the tick has returned" test ! -e "$(st_log "${ST_H1:0:8}").rc"
 
 # The guard: a live object for this head means the next tick starts nothing beside it.
 forget_digest "$RST"; poke "$RST" tick
-expect_nonempty "ST-3-pre the guard tick names the live run (the extractor reads real output)" \
-  "$(printf '%s\n' "$OUT" | /usr/bin/grep "^poker: RUNNING regression@${ST_H1:0:8} run=")"
-expect_eq "ST-3 a live regression@<h8> object: the next tick starts nothing, and the roster still names one run" \
-  "|1" "$(st_started)|$(st_starts "${ST_H1:0:8}")"
+expect_nonempty "ST-3-pre the guard tick names the live run (the extractor reads real output)" "$(printf '%s\n' "$OUT" | /usr/bin/grep "^poker: RUNNING regression@${ST_H1:0:8} run=")"
+expect_eq "ST-3 a live regression@<h8> object: the next tick starts nothing, and the roster still names one run" "|1" "$(st_started)|$(st_starts "${ST_H1:0:8}")"
 rm -f "$ST_CTL/hold"
 expect_true "ST-4-pre the detached run ends once the runner is let go" st_until 60 st_ended "$(st_log "${ST_H1:0:8}")"
 expect_eq "ST-4 AC-6.3 the started run leaves its proof in the plan through proof-add: proved: kind=regression head=<H1>" "1" \
   "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=regression head=$ST_H1 ")"
 [ "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=regression head=$ST_H1 ")" = 1 ] || sed -n '1,40p' "$(st_log "${ST_H1:0:8}")"
-expect_contains "ST-4b …from a run whose run line names the tick as its starter" "|starter=tick|" \
-  "$(st_runline "record/wave-01-fixture/regression-run-$ST_H1.log")"
-expect_contains "ST-4c …and booked.sh's own run line for the detached run carries the command's --starter too" "|starter=tick|" \
-  "$(st_runline ".bionic/tmp/runs/regression_${ST_H1:0:8}-run.sh.log")"
+expect_contains "ST-4b …from a run whose run line names the tick as its starter" "|starter=tick|" "$(st_runline "record/wave-01-fixture/regression-run-$ST_H1.log")"
+expect_contains "ST-4c …and booked.sh's own run line for the detached run carries the command's --starter too" "|starter=tick|" "$(st_runline ".bionic/tmp/runs/regression_${ST_H1:0:8}-run.sh.log")"
 forget_digest "$RST"; poke "$RST" tick
 expect_nonempty "ST-5-pre the tick at the proved head printed its decision line" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker-tick/v1|')"
 expect_eq "ST-5 control: the head is the last proof's, so nothing starts" "" "$(st_started)"
+# Green is content: a docs commit past the green whole run is the pass's head, so the tick starts nothing at it.
+ST_HD="$(s57_commit "$ST_WT" README.md D1)"; forget_digest "$RST"; poke "$RST" tick
+expect_nonempty "ST-5b-pre the tick at the docs head printed its decision line" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker-tick/v1|')"
+expect_eq "ST-5b AC-1.4 one docs commit past the green run: the printer reads green at it, and the tick starts no run and no object" \
+  "green at ${ST_H1:0:8}, 1 landing since moved no code||" \
+  "$(bash -c '. "$1/payload/scripts/lib/roots.sh" && . "$1/payload/scripts/lib/proof.sh" && proof_whole_text "$2" "$3"' _ "$BIONIC_SCRIPTS_DIR" "$PST" "$RST")|$(st_started)|$(st_objects "${ST_HD:0:8}")"
 
-# A fix row lands past the proof: the head moved, so the next tick starts again there. The runner is full
-# first, so the run ends 75 with no verdict, and the tick after it says so and starts it again.
+# A fix row lands code past the proof, the docs commit and all: the head reads red, so the next tick starts again
+# there, which is what held the start above. The runner is full first, so the run ends 75 with no verdict, and the
+# tick after it says so and starts it again.
 : > "$ST_CTL/full"
 ST_H2="$(s57_commit "$ST_WT" lib/b.sh H2)"
 poke "$RST" tick
-expect_contains "ST-6 AC-6.2 a landing past the proof: the next tick starts again at the new head" \
-  "poker: regression-run started regression@${ST_H2:0:8} " "$(st_started)"
+expect_contains "ST-6 AC-6.2 a landing past the proof: the next tick starts again at the new head" "poker: regression-run started regression@${ST_H2:0:8} " "$(st_started)"
 expect_true "ST-6b …its run ends 75, the gate's word that nothing ran" st_until 60 st_ended "$(st_log "${ST_H2:0:8}")"
 expect_eq "ST-6c …read off its log's end" "75" "$(cat "$(st_log "${ST_H2:0:8}").rc" 2>/dev/null)"
 rm -f "$ST_CTL/full"
 forget_digest "$RST"; poke "$RST" tick
 expect_eq "ST-7 the tick after a 75 says the gate had no room, once" "1" "$(st_waiting)"
-expect_contains "ST-7b …and starts the run again at the same head, as a second attempt" \
-  "poker: regression-run started regression@${ST_H2:0:8} (log $(st_log "${ST_H2:0:8}" -2))" "$(st_started)"
+expect_contains "ST-7b …and starts the run again at the same head, as a second attempt" "poker: regression-run started regression@${ST_H2:0:8} (log $(st_log "${ST_H2:0:8}" -2))" "$(st_started)"
 ST_LOG2="$(st_started | sed -n 's/^.*(log \(.*\))$/\1/p')"
 expect_true "ST-7c …which ends" st_until 60 st_ended "${ST_LOG2:-$TMPROOT/none}"
 expect_eq "ST-7d …with its proof at the new head" "1" "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=regression head=$ST_H2 ")"
