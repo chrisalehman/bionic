@@ -112,6 +112,7 @@ Rendered from the plan's review and waiver lines, in the order they were registe
 - evidence review, whole: flag at 1db103fd by w47-T7, 2026-10-27T03:30:18Z (`critic-evidence.md`)
 - adversarial review, piece: flag at d328d73d by w47-T7, 2026-10-27T15:45:38Z (`critic-adversarial-2.md`)
 - evidence review, piece: pass at d328d73d by w47-T7, 2026-10-27T15:45:43Z (`critic-evidence-2.md`)
+- evidence review, piece: pass at d328d73d by w47-T7, 2026-10-27T16:02:49Z (`critic-evidence-2.md`)
 
 ### Known limits
 
