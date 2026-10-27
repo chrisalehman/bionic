@@ -8,6 +8,142 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.29.1 — 2026-10-27
+
+This is the one-pass release: the four small fixes of the 1.30.0 charter's Phase 0, so that no run pays five whole
+passes for one (`ideas/bionic-1.30.0-charter.md`). 1.29.0 ran five whole runs of 127 suites where one or two carried
+information, and three of them were started because a changelog or a test arm landed. The charter's two themes are the
+run's: proof is sized to what landed, and the verb and the text say what shipped. One ruling outlives it as a decision.
+A whole run proves the tree it ran on, and a landing that moved no code is proved by the pass before it. A head whose
+commits since the pass are all prose, or release-set commits with the release check passing and the five suites that
+read the release set green at them, reads `green at <F8>, <n> landings since moved no code`, and the card, the judges,
+the tick and the run verb ask no second pass for it (D3, D7, ADR-075, amending ADR-074's reading of "ran here"). D7
+reopened D3 on the critic's one S2 finding and was ruled by Chris Lehman. Around it the Step-7 refusal names the pass
+and the verb that starts it (D4), the two regression paragraphs state the shipped rule (D5), and `promote` writes its
+copy in the checkout it runs from (D6). This is a patch release by the policy above: the pass is sized, the exit
+renamed, two paragraphs corrected and one verb's target moved. There is no new verb and no new kind.
+`canonical_sdlc_version` stays 14.
+
+**Migration.** Rows that changed what a script of yours may meet:
+- T1: past a green pass whose landings since moved no code, the full pass's state prints `green at <F8>, <n> landings
+  since moved no code` (`1 landing since moved no code` for one), where it printed `red at <F8>, <n> landings before
+  this head`. The release card's `whole suite:` line, the sitrep's `whole run` and the continuation carry it. At F the
+  line is still `green at <F8>`, and a head past a code commit keeps the red line byte for byte.
+- T2: at such a head the tick starts no whole run and prints no `regression-run started` line. `regression-run` refuses
+  there with exit 1, runs nothing and writes no log: `poker: REFUSED — the full pass already proves <h12>: green at
+  <F8>, <n> landings since moved no code, its log <log>. A pass runs where code lands, and the next whole run is at the
+  head a landing of code makes: land it with spawn-worktree.sh ready. Nothing was run and no log was written.`
+- T3: the Step-7 refusal on an unproved head carries `needs: the pass — wait for it (the tick starts it once no row is
+  ready), or start it: session-poker.sh regression-run` where it named the card's reply. `proof_unproved_needs` takes
+  an optional fourth argument, the step. With `8` or none it prints the card's reply as before.
+- T4: `promote` run from a linked worktree writes the tracked copy under that worktree and nothing under the main
+  checkout, and its line ends `is promoted to <to> in <tree>.` The already-holds line adds `The tree is <tree>.` From
+  the main checkout both lines are unchanged.
+- T12: a release-set commit reads `release` only when its check passes at it and release-check, shell-lint, render,
+  commands and words each have a green `ev=verdict` at that exact commit in the landing record. A release row whose
+  Lands-on does not name the five reads red past the pass and pays a whole run or the merge-unproved word.
+  `_proof_release_readers` and `_proof_release_proved` are new.
+
+### Proof sized to what landed (D3, D4, D7, ADR-075)
+
+- T1 (`T1-report.md`): the full pass's state reads green past F when every landing since moved no code by the judge's
+  own walk, and the one printer carries it to every surface.
+- T2 (`T2-report.md`): the tick and the run verb read that printer, so neither starts a whole run that a landing of no
+  code does not need.
+- T3 (`T3-report.md`): the Step-7 refusal names the pass and the verb that starts it, and the Step-8 refusal the card's
+  reply, through one printer of the exit.
+- T12 (`T12-report.md`): a release-set commit is release only with its readers green at it, so a release landing that
+  changed what a suite reads cannot read green on the check alone. Born of `critic-adversarial.md#1` under D7, it
+  carries the two evidence arms that closed `critic-evidence.md#1` and `#2`.
+
+### The verb and the text say what shipped (D5, D6)
+
+- T4 (`T4-report.md`): `promote` reads its source where the record lives and writes its copy in the checkout it runs
+  from, so ADR-075's tracked copy was written in this release row's own tree.
+- T5 (`T5-report.md`): the regression paragraphs of operational-rules.md and steps/5.md state the rule that shipped,
+  the step file through its template and the renderer.
+
+### Fixtures that met the new rules
+
+- T1 (`T1-report.md`): session-poker-4's §CUR7-COVERED, the two rehearsal suites, the shared whole-run reader FA-3 and
+  release-approval's red world pinned a prose or release landing past the pass as red. Each was rewritten to the new
+  rule, red first and then green.
+- T11 (`T11-report.md`): sitrep.test.sh WH3 and WH4 pinned the old red line, and their landings held only the run's
+  record files because the fixture wrote into a missing directory. They now commit README.md and CHANGELOG.md and read
+  green, and WH5 pins the red line at a code landing. Born of the first whole run's red.
+- T12 (`T12-report.md`): door-cover, units, door-card and the rehearsal laid a check at a release commit and no
+  readers. Each now lays the five greens, in the suite or through `door_readers`.
+
+### The walk, the regression, the critic
+
+- T6 (`walk.md`): the walk at 5e90ae1e, its parts 4 and 5 driven at 1db103fd once that pass was green. A docs head past
+  F read green on the card, the printer and the tick's guard, the card asked no merge, and `regression-run` refused
+  naming the pass. A code head read red, drew the merge ask and started the tick's run. Ten criteria are CONFIRMED.
+  AC-2.1 and AC-2.2 are UNVERIFIABLE, because the two exit lines were read from the printer and no `current` refusal
+  carrying them could be driven on a scratch commit, so the walk's verdict is UNVERIFIABLE.
+- The regression: three whole runs, each started by the orchestrator. The first, at 5e90ae1e, the last build landing,
+  ran 126 of 127 and was red on sitrep.test.sh WH3 and WH4, which pinned the old line; T11 was born of it. The second,
+  at 1db103fd after T11, a test landing and so a code landing by the cover basis, ran 127 of 127 green. The third, at
+  d328d73d after T12, ran 127 of 127 green (`regression-run-5e90ae1e….log`, `regression-run-1db103fd….log`,
+  `regression-run-d328d73d….log`).
+- T7 (`critic-evidence.md`, `critic-adversarial.md`, `critic-structure.md`): the critic's read of the whole at
+  1db103fd. Adversarial failed on one S2: the full pass read green over a release-set landing that changed files suites
+  read, tests/release-check.test.sh, the command pages and the integrity manifest among them, with only the release
+  check at it. D7 reopened D3 on it, and Chris Lehman ruled the second shape, release reads with its readers, which T12
+  built. The same record rated an S4 on the Step-7 exit's "wait for it" at task scale, where nothing starts the tick.
+  Evidence flagged two S4 holes, AC-4.3's arm unable to fail and REQ-1's passed-at-F condition unpinned, and T12's two
+  arms closed both. Structure raised no finding and carried three debt lines. The critic re-read T12 as a piece at
+  d328d73d (`critic-evidence-2.md`, `critic-adversarial-2.md`). Evidence passed, with both mutants re-run and the wave
+  verdict CONFIRMED. Adversarial flagged two S3 findings, deferred and stated as this entry's Known limits.
+
+### The release
+
+- T8 (`T8.md`): this entry, `plugin.json` 1.29.1, the help and version pages rendered by `agents-src/render.sh`,
+  `rendered.sha256` refreshed, and ADR-075, promoted into docs/adrs from this row's tree. It lands on the five suites
+  that read the release set (D7), so its landing records the greens the judge reads. T9 opens the pull request and
+  writes the reviews, and T10 closes the run.
+
+### The landing numbers
+
+`landing-report --rows` at d328d73d26f5e2a8a79db4ff5197ae8130bac4fc on 2026-10-27T15:50:06Z:
+
+```
+landings: queue=7 hand=0 git=0 · ready-to-landed median=3.5m p75=8.0m max=32.2m · runs: green=25 red=1 none=0 discarded=0 red-then-green=0 run=74 reused=0 absent=0 · waited median=11s · killed=0
+T4 queue ready=2026-10-26T23:42:18Z landed=2026-10-26T23:42:38Z minutes=0.3 runs=1 waited=11s wait=0.2 prove=0.1 rework=0.0 width=4
+  roots.test.sh green promised=9s actual=8s ratio=0.89
+T1 queue ready=2026-10-27T00:52:29Z landed=2026-10-27T01:24:42Z minutes=32.2 runs=4 waited=928s wait=15.5 prove=16.8 rework=0.0 width=4
+  proof-at-head.test.sh green promised=20s actual=39s ratio=1.95
+  release-approval.test.sh green promised=308s actual=502s ratio=1.63
+  proof-at-head.test.sh green promised=39s actual=38s ratio=0.97
+  release-approval.test.sh green promised=524s actual=502s ratio=0.96
+T3 queue ready=2026-10-27T01:34:03Z landed=2026-10-27T01:35:57Z minutes=1.9 runs=2 waited=50s wait=0.8 prove=1.1 rework=0.0 width=3
+  canonical-sdlc-evidence-gate-2.test.sh green promised=61s actual=63s ratio=1.03
+  shell-lint.test.sh red promised=28s actual=39s ratio=1.39
+T2 queue ready=2026-10-27T01:44:44Z landed=2026-10-27T01:48:13Z minutes=3.5 runs=4 waited=9s wait=0.1 prove=3.0 rework=0.3 width=4
+  proof-at-head.test.sh green promised=30s actual=48s ratio=1.60
+  session-poker-4.test.sh green promised=97s actual=177s ratio=1.82
+  canonical-sdlc-evidence-gate-2.test.sh green promised=40s actual=72s ratio=1.80
+  shell-lint.test.sh green promised=19s actual=42s ratio=2.21
+T5 queue ready=2026-10-27T01:55:25Z landed=2026-10-27T01:56:12Z minutes=0.8 runs=3 waited=9s wait=0.1 prove=0.6 rework=0.0 width=4
+  words.test.sh green promised=10s actual=11s ratio=1.10
+  render.test.sh green promised=12s actual=16s ratio=1.33
+  shell-lint.test.sh green promised=42s actual=37s ratio=0.88
+T11 queue ready=2026-10-27T02:39:02Z landed=2026-10-27T02:42:36Z minutes=3.6 runs=1 waited=10s wait=0.2 prove=3.4 rework=0.0 width=4
+  sitrep.test.sh green promised=204s actual=204s ratio=1.00
+T12 queue ready=2026-10-27T14:53:58Z landed=2026-10-27T15:06:20Z minutes=12.4 runs=11 waited=12s wait=0.2 prove=11.5 rework=0.7 width=4
+  proof-at-head.test.sh green promised=37s actual=47s ratio=1.27
+  roots.test.sh green promised=9s actual=11s ratio=1.22
+  shell-lint.test.sh green promised=27s actual=41s ratio=1.52
+  door-cover.test.sh green promised=3s actual=4s ratio=1.33
+  door-landing.test.sh green promised=264s actual=410s ratio=1.55
+  close-replay.test.sh green promised=523s actual=677s ratio=1.29
+  units.test.sh green promised=27s actual=32s ratio=1.19
+  release-approval.test.sh green promised=502s actual=595s ratio=1.19
+  canonical-sdlc-evidence-gate-2.test.sh green promised=72s actual=72s ratio=1.00
+  door-card.test.sh green promised=392s actual=444s ratio=1.13
+  sitrep-card.test.sh green promised=55s actual=48s ratio=0.87
+```
+
 ## 1.29.0 — 2026-10-25
 
 This is the asks-nothing release: the run reaches its release card without a hand on it. It was chartered from wave 45's
