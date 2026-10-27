@@ -7,11 +7,11 @@
 # reaches Decisions only when it names a criterion that is not proved or when the orchestrator recommends against
 # the policy's default (`--against <key>`); every other finding is one sentence under Findings, its severity code
 # first, grouped fixed / awaiting your decision / carried. The regression is never waived: a head with no green
-# whole run is early. A whole run behind the head that the landings since cover is not green here either, so merging
-# without a pass at this head is the person's own decision (`approve:merge-unproved`). The page refuses to render, `CARD-EARLY — <reason>` on stderr and exit 1, while
-# a reader row is open, an owed reading is unregistered at the head, or `current <N> --check` is red for N = 6, 7
-# or 8 (`card.sh early`, the one owner of the three facts); `--preview` renders it anyway and records nothing. The
-# verb gathers the facts and `card.sh release` draws the page at the shared width. One
+# whole run is early. A whole run behind the head is green only when nothing since moved code; otherwise merging
+# without a pass at this head is the person's own decision (`approve:merge-unproved`). The page refuses to render,
+# `CARD-EARLY — <reason>` on stderr and exit 1, while a reader row is open, an owed reading is unregistered at the head,
+# or `current <N> --check` is red for N = 6, 7 or 8 (`card.sh early`); `--preview` renders it anyway and records
+# nothing. The verb gathers the facts and `card.sh release` draws the page at the shared width. One
 # reply, typed by the user, `all default`, `all recommended` or the decisions by number, is replayed by `reply` into
 # approve, waive, waive-row, confirm-row and finding-move with the user's words.
 #
@@ -815,43 +815,28 @@ expect_absent "JUDGE-2b …names no suite" "a.test.sh" "$(fc_under Tests | fc_fl
 expect_absent "JUDGE-2c …and does not read covered" "covered" "$(fc_under Tests | fc_flat)"
 expect_contains "JUDGE-2d …and the card carries the merge-unproved decision" ". Merge without a whole run at this head — red at ${FC_C:0:8}, 1 landing before this head" "$(fc_unproved)"
 rm -f "$FC_REC"/release-approval-*.md
-# JUDGE-4: the whole run at R, one docs commit past it. Green is content: the head moved no code since the pass, so the
-# Tests line reads green at R, the card asks no merge without a pass, and the reply's defaults admit current 8.
-# fails-when: the printer reads green only at the pass's own head, so the card asks the merge at a docs head and the
-# defaults leave current 8 refusing on the regression.
+# JUDGE-4: the whole run at R, one docs commit past it, so the head moved no code since the pass. fails-when: the printer
+# reads green only at the pass's own head, so the card asks the merge at a docs head and the defaults leave current 8 refusing.
+fc_mu() { bash -c '. "$1/roots.sh"; . "$1/proof.sh"; proof_merge_unproved "$2" "$3" "$4"; echo "rc=$?"' _ "$FC_LIB" "$PFC" "$RFC" "$1" 2>/dev/null | paste -sd'|' -; }  # <head> -> its line, then rc=
 fc_plan "$FC_GOOD"
 FC_J4="$(s57_commit "$RFC" README.md 'prose past the whole run')"
-fc_page
-FC_J4T="$(/usr/bin/grep '^release-approval/v1|dec=' "$FC_REC/release-approval-${FC_J4:0:8}.md" 2>/dev/null)"
-expect_eq "JUDGE-4 precondition: one docs commit past the whole run, the card renders (exit 0) and its table holds the release approval" \
-  "0|yes" "$FC_RC|$(fc_has "$FC_J4T" '|key=approve:release|')"
-expect_contains "JUDGE-4b the Tests line reads green at the whole run's head, the landing since counted" \
-  "whole suite: green at ${FC_R:0:8}, 1 landing since moved no code" "$(fc_under Tests | fc_flat)"
+fc_page; FC_J4T="$(/usr/bin/grep '^release-approval/v1|dec=' "$FC_REC/release-approval-${FC_J4:0:8}.md" 2>/dev/null)"
+expect_eq "JUDGE-4 precondition: one docs commit past the whole run, the card renders (exit 0) and its table holds the release approval" "0|yes" "$FC_RC|$(fc_has "$FC_J4T" '|key=approve:release|')"
+expect_contains "JUDGE-4b the Tests line reads green at the whole run's head, the landing since counted" "whole suite: green at ${FC_R:0:8}, 1 landing since moved no code" "$(fc_under Tests | fc_flat)"
 expect_absent "JUDGE-4c …and the table that holds the release approval carries no merge-unproved decision" "key=approve:merge-unproved" "$FC_J4T"
-fc_mu() {  # <head> -> proof_merge_unproved's line at <head> over PFC, then `rc=<its exit>`, joined by `|`
-  bash -c '. "$1/roots.sh"; . "$1/proof.sh"; proof_merge_unproved "$2" "$3" "$4"; echo "rc=$?"' _ "$FC_LIB" "$PFC" "$RFC" "$1" 2>/dev/null | paste -sd'|' -
-}
-FC_J4M="$(fc_mu "$FC_J4")"
-fc_plan "$(fc_floor "$FC_B")
+FC_J4M="$(fc_mu "$FC_J4")"; fc_plan "$(fc_floor "$FC_B")
 $(fc_reads "$FC_C")"
-expect_eq "JUDGE-4d …proof_merge_unproved exits 1 at that head, printing nothing; over a whole run at B it asks at the code head C" \
-  "rc=1|red at ${FC_B:0:8}, 1 landing before this head|rc=0" "$FC_J4M|$(fc_mu "$FC_C")"
-fc_plan "$FC_GOOD"
-fc_page
-FC_J4D="all default"; fc_typed "$FC_J4D"
-poke "$RFC" reply "$FC_J4D"
-FC_J4_REPLY="$RC"
+expect_eq "JUDGE-4d …proof_merge_unproved exits 1 at that head, printing nothing; over a whole run at B it asks at the code head C" "rc=1|red at ${FC_B:0:8}, 1 landing before this head|rc=0" "$FC_J4M|$(fc_mu "$FC_C")"
+fc_plan "$FC_GOOD"; fc_page; fc_typed "$FC_WD"
+poke "$RFC" reply "$FC_WD"; FC_J4_REPLY="$RC"
 poke "$RFC" current 8 --check
-expect_eq "JUDGE-4e …the reply that takes every default replays (exit 0), writing no merge-unproved line, and current 8 --check is admitted (exit 0)" \
-  "0||0" "$FC_J4_REPLY|$(/usr/bin/grep '^approved: merge-unproved ' "$PFC")|$RC"
+expect_eq "JUDGE-4e …the reply that takes every default replays (exit 0), writing no merge-unproved line, and current 8 --check is admitted (exit 0)" "0||0" "$FC_J4_REPLY|$(/usr/bin/grep '^approved: merge-unproved ' "$PFC")|$RC"
 [ "$RC" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$OUT" | tail -4)"
-git -C "$RFC" reset -q --hard "$FC_R"
-fc_typed "$FC_WD" "$FC_WR"
-rm -f "$FC_REC"/release-approval-*.md
-# JUDGE-3: the whole run at B, then T1's code at C, landed with its suite green, and the release text at R: covered
-# to the judge, red at the head, since code landed past the pass. The card renders (not early: the gate's one refusal
-# is the card's own decision), the reply that waits leaves current 8 refusing on that decision alone, naming its
-# exit; the reply that merges writes the line at this head, and current 8 passes.
+git -C "$RFC" reset -q --hard "$FC_R"; fc_typed "$FC_WD" "$FC_WR"; rm -f "$FC_REC"/release-approval-*.md
+# JUDGE-3: the whole run at B, T1's code at C landed green on its suite, the release text at R: covered to the judge,
+# red at the head. The card renders (not early: the gate's one refusal is the card's own decision), the reply that waits
+# leaves current 8 refusing on that decision alone, naming its exit; the reply that merges writes the line at this
+# head, and current 8 passes.
 fc_published T1 "$FC_C" > "$FC_REC/landing-proofs.log"
 fc_plan "$(fc_floor "$FC_B")
 $(fc_reads "$FC_C")"
