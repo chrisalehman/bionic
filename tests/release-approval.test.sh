@@ -829,7 +829,7 @@ expect_absent "JUDGE-4c …and the table that holds the release approval carries
 FC_WD_GREEN=no; [ -z "$(fc_has "$FC_J4T" '|key=approve:merge-unproved|')" ] || FC_WD_GREEN=yes   # the green row of §WORD's table
 FC_J4M="$(fc_mu "$FC_J4")"; fc_plan "$(fc_floor "$FC_B")
 $(fc_reads "$FC_C")"
-expect_eq "JUDGE-4d …proof_merge_ask exits 1 at that head, printing nothing; over a whole run at B it asks at the code head C" "rc=1|red at ${FC_B:0:8}, 1 landing before this head|rc=0" "$FC_J4M|$(fc_mu "$FC_C")"
+expect_eq "JUDGE-4d …proof_merge_ask exits 1 at that head, printing nothing; over a whole run at B it asks at the code head C, naming the commit no run proved" "rc=1|red at ${FC_B:0:8}, 1 landing before this head; commit ${FC_C:0:12} (no landing row) is not proved: no run of its row's suites is recorded at it|rc=0" "$FC_J4M|$(fc_mu "$FC_C")"
 fc_plan "$FC_GOOD"; fc_page; fc_typed "$FC_WD"
 poke "$RFC" reply "$FC_WD"; FC_J4_REPLY="$RC"
 poke "$RFC" current 8 --check; FC_WN_GREEN="$RC"
