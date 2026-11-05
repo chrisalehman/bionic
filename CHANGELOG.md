@@ -172,6 +172,13 @@ that culled by the rubric, not by suspending the cap or thinning the proof (D15)
   the amendment. It lands on release-check, render, commands and shell-lint. T11 opens the pull request and writes the
   reviews, and T12 closes the run.
 
+### Known limits
+
+Rendered from the plan's deferred findings, each its stated sentence, in the order they were registered.
+
+- The dispatch wall that refuses Lands-on: none over a non-prose file reads prose by the project prose list alone, while the floor judge also excuses the docs root and the tracked docs home, so a row whose Files name a docs path or a docs-relative record path is refused at dispatch where the judge would excuse it at the floor; spell such a path from the project root (.bionic/docs/record/...) until the wall calls the judge predicate, chartered for 1.30.0.
+- The dispatch wall that refuses Lands-on: none over a non-prose file reads prose by the project prose list alone, while the floor judge also excuses the docs root and the tracked docs home, so a row whose Files name a docs path or a docs-relative record path is refused at dispatch where the judge would excuse it at the floor; spell such a path from the project root (.bionic/docs/record/...) until the wall calls the judge predicate, chartered for 1.30.0.
+
 ### The landing numbers
 
 `landing-report --rows` at 227313af4d1d4b782601ff4c642022c1c4b727c5 on 2026-11-05T08:13:05Z:
