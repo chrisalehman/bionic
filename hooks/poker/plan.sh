@@ -64,23 +64,74 @@ BFB_STANDING
   return 1
 }
 
-# poker_review_records <plan> <repo> -> the records a review row's Files name, comma-joined: one
-# `<record dir>/critic-<q>.md` per question the plan's rigor and scale deal (lib/proof.sh `facts_owed`), in the dealing's
-# order, a question dealt a piece and a whole read named once, since its reader writes one record for it. Nothing and
-# rc 1 when the plan's rigor or scale deals no question, and the caller keeps the one-record rule of a reader row.
+# poker_review_records <plan> <repo> [<questions>] -> the records a review row's Files name, comma-joined: one
+# `<record dir>/critic-<q>.md` per question the row owes, in the dealing's order, a question dealt a piece and a whole
+# read named once, since its reader writes one record for it. The questions a row owes are the ones it declares
+# (<questions>, comma-joined, from `task-add --questions`) and, with none declared, the rigor's full deal (lib/proof.sh
+# `facts_owed`). Nothing and rc 1 when the plan's rigor or scale deals no question and none is declared, and the
+# caller keeps the one-record rule of a reader row.
 poker_review_records() {
-  local plan="$1" repo="$2" qs dir q out=""
-  if ! declare -F facts_owed >/dev/null 2>&1; then
-    [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" >/dev/null 2>&1
+  local plan="$1" repo="$2" decl="${3:-}" qs dir q out=""
+  if [ -n "$decl" ]; then
+    qs="${decl//,/ }"
+  else
+    if ! declare -F facts_owed >/dev/null 2>&1; then
+      [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" >/dev/null 2>&1
+    fi
+    declare -F facts_owed >/dev/null 2>&1 || return 1
+    qs="$(facts_owed "$(plan_frontmatter_get "$plan" rigor)" "$(plan_frontmatter_get "$plan" scale)" 2>/dev/null \
+      | awk -F'\t' '$1 == "review" && !seen[$2]++ { print $2 }')"
   fi
-  declare -F facts_owed >/dev/null 2>&1 || return 1
-  qs="$(facts_owed "$(plan_frontmatter_get "$plan" rigor)" "$(plan_frontmatter_get "$plan" scale)" 2>/dev/null \
-    | awk -F'\t' '$1 == "review" && !seen[$2]++ { print $2 }')"
   [ -n "$qs" ] || return 1
   dir="$(docs_root "$repo")/record/$(proof_plan_slug "$plan")"
   case "$dir" in "$repo"/*) dir="${dir#"$repo"/}" ;; esac
   for q in $qs; do out="${out:+$out, }$dir/critic-$q.md"; done
   printf '%s\n' "$out"
+}
+
+# poker_questions_dealt <plan> <questions> -> rc 0 when the declared questions (comma-joined) are one reader's at the
+# plan's rigor and scale, else rc 1 with PQD_SAID the reason. A review row is one reader's: at double the auditor
+# holds `evidence` and the critic the other two, so a declaration across them has no reader, and the reason names the
+# deal. At single the critic holds all three, so any subset is one reader's. Set: PQD_SAID.
+poker_questions_dealt() {
+  local plan="$1" decl="$2" rigor scale lvl owed role q deal fix="" r qs first="" mixed=""
+  PQD_SAID=""
+  if ! declare -F facts_owed >/dev/null 2>&1; then
+    [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" >/dev/null 2>&1
+  fi
+  rigor="$(plan_frontmatter_get "$plan" rigor)"; scale="$(plan_frontmatter_get "$plan" scale)"
+  lvl="$(rigor_level "$rigor" 2>/dev/null)" || lvl="${rigor:-none}"
+  if ! declare -F facts_owed >/dev/null 2>&1 || ! owed="$(facts_owed "$rigor" "$scale" 2>/dev/null)" || [ -z "$owed" ]; then
+    PQD_SAID="the plan's rigor (${rigor:-none}) and scale (${scale:-none}) deal no question, so there is none to declare"
+    return 1
+  fi
+  # THE DEAL, one reader a line, `<role>:<its questions>` in the dealing's order; the piece read is the one that
+  # writes the record.
+  deal="$(printf '%s\n' "$owed" | awk -F'\t' '$1 == "review" && $4 == "piece" {
+    r = $3; sub(/^bionic:/, "", r)
+    if (!(r in a)) ord[++k] = r
+    a[r] = a[r] (a[r] == "" ? "" : ",") $2 }
+    END { for (i = 1; i <= k; i++) print ord[i] ":" a[ord[i]] }')"
+  for q in ${decl//,/ }; do
+    role="$(printf '%s\n' "$deal" | awk -F: -v q="$q" '{ n = split($2, w, ","); for (i = 1; i <= n; i++) if (w[i] == q) { print $1; exit } }')"
+    if [ -z "$role" ]; then
+      PQD_SAID="$q is dealt to no role at $lvl rigor, scale ${scale:-none}"
+      return 1
+    fi
+    [ -n "$first" ] || first="$role"
+    [ "$role" = "$first" ] || mixed=1
+  done
+  if [ -n "$mixed" ]; then
+    while IFS=: read -r r qs; do
+      [ -n "$r" ] || continue
+      fix="${fix:+$fix, }${qs//,/ and } the $r's"
+    done <<EOF
+$deal
+EOF
+    PQD_SAID="${decl//,/ and } are dealt to different roles at $lvl rigor ($fix), and a review row is one role's"
+    return 1
+  fi
+  return 0
 }
 
 # poker_files_cell <id> <kind> <agent> <Files cell> <repo> <plan> -> PFC_OUT (the cell to write) and PFC_ART (the
@@ -1197,7 +1248,13 @@ EOF
     # A cell naming some records but fewer than the questions is refused with the rendered list. The first record the
     # cell names is the one deliver takes, written to the row's artifact cell below when the table has one.
     TA_REV_ART=""
-    if [ "$TA_KIND" = review ] && TA_REVIEW="$(poker_review_records "$TA_PLAN" "$REPO_REAL")"; then
+    # A DECLARED QUESTION IS ONE A READER IS DEALT (`--questions`): judged before the records are rendered, so a row no
+    # single reader could answer is refused in the deal's words with the plan unchanged.
+    if [ -n "$TA_QUESTIONS" ] && ! poker_questions_dealt "$TA_PLAN" "$TA_QUESTIONS"; then
+      die "REFUSED — $TA_ID declares --questions $TA_QUESTIONS, which is not dealt: $PQD_SAID. Run task-add again with the questions one role holds. The plan is unchanged."
+      exit 1
+    fi
+    if [ "$TA_KIND" = review ] && TA_REVIEW="$(poker_review_records "$TA_PLAN" "$REPO_REAL" "$TA_QUESTIONS")"; then
       TA_HAVE="$(printf '%s\n' "$TA_FILES" | tr ',' '\n' | awk '
         { gsub(/`/, ""); sub(/^[ \t]+/, ""); sub(/[ \t]+$/, "") }
         index($0, "record/") && /\.md$/ { n = split($0, p, "/"); b = p[n]; if (b !~ /\.progress\.md$/ && b != "assumptions.md" && !seen[$0]++) print $0 }')"
@@ -1205,10 +1262,12 @@ EOF
         case "$TA_FILES" in ''|'—'|'-') TA_FILES="$TA_REVIEW" ;; *) TA_FILES="$TA_FILES, $TA_REVIEW" ;; esac
         TA_REV_ART="${TA_REVIEW%%,*}"
       else
+        TA_QOWES="the plan's rigor deals"
+        [ -z "$TA_QUESTIONS" ] || TA_QOWES="it declares (${TA_QUESTIONS//,/, })"
         TA_NHAVE="$(printf '%s\n' "$TA_HAVE" | awk 'NF' | wc -l | tr -d ' ')"
         TA_NWANT="$(printf '%s' "$TA_REVIEW" | tr ',' '\n' | awk 'NF' | wc -l | tr -d ' ')"
         if [ "$TA_NHAVE" -lt "$TA_NWANT" ]; then
-          die "REFUSED — $TA_ID is a review row, whose Files name one record per question the plan's rigor deals: $TA_NWANT, and its Files name $TA_NHAVE; its Files are: $TA_REVIEW (give that list as the Files operand, or name a record of your own for each question, or — to have the list written). The plan is unchanged."
+          die "REFUSED — $TA_ID is a review row, whose Files name one record per question $TA_QOWES:$TA_NWANT, and its Files name $TA_NHAVE; its Files are: $TA_REVIEW (give that list as the Files operand, or name a record of your own for each question, or — to have the list written). The plan is unchanged."
           exit 1
         fi
         TA_REV_ART="$(printf '%s\n' "$TA_HAVE" | sed -n 1p)"
@@ -1321,6 +1380,8 @@ EOF
       TA_BORN_OF="$BFB_OF"; TA_CELL_TASK="$TA_TASK · born: regression"
     fi
 
+    # THE DECLARATION RIDES THE TASK CELL beside the born tag, in its style, where `units_questions` lifts it.
+    [ -z "$TA_QUESTIONS" ] || TA_CELL_TASK="$TA_CELL_TASK · questions: $TA_QUESTIONS"
     pv_task_cells_or_refuse "$TA_ID" "$TA_CELL_TASK"
     if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_CELL_TASK" "$TA_AGENT" \
          "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" "${TA_BORN:+$TA_BORN$TA_BORN_MARK}${TA_BORN_SUITE:+regression $TA_BORN_SUITE of=$TA_BORN_OF}" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then

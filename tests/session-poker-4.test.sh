@@ -1275,6 +1275,82 @@ poke "$VC" task-add T8 5 verify "the floor. The regression runs once." test-runn
 expect_eq "RF-4 control: a verify row keeps the reader-row rule, one record named for the row, and no artifact cell written" \
   "0|$VC_REC/T8.md|—" "$RC|$(vc_cell T8 9)|$(vc_cell T8 12)"
 
+# ---------- §REVIEW-FILES, questions declared on the row: `task-add --questions` (the records owed are the declared ones) ----------
+# A re-read of fewer questions than the rigor deals declares them where the row is written. FIXTURE: the same plan at
+# `rigor: double`, where the auditor holds `evidence` and the critic `adversarial` and `structure`; the one at single
+# (VC) is the control that a critic holds all three. Every refusal leaves the plan byte-identical.
+VD="$(make_repo verb-double)"; ( cd "$VD" && git commit -q --allow-empty -m init && git branch -M main ) >/dev/null 2>&1
+git -C "$VD" config user.name "Dana Fixture"
+VD_P="$(vc_plan "$VD" '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | lib/a.sh | landed | — | — |')"
+sed -e 's/^rigor: .*/rigor: double/' "$VD_P" > "$VD_P.tmp" && mv "$VD_P.tmp" "$VD_P"
+( cd "$VD" && git add -f "$VD_P" && git commit -qm "rigor double" ) >/dev/null 2>&1
+new_roster "$VD"
+VD_REC=".bionic/docs/record/wave-01-fixture"
+vd_cell() { s48_row "$VD_P" "$1" | cut -d'|' -f"$2"; }  # <row> <4 task | 9 Files | 12 artifact>
+expect_eq "RF-5 setup: the double plan reads rigor: double" "rigor: double" "$(/usr/bin/grep -m1 '^rigor:' "$VD_P")"
+poke "$VD" task-add T9 6 review "the auditor's re-read. The auditor reads the evidence once." w01-audit — 30 REQ-1 "$VD_REC/auditor-evidence.md" --questions evidence
+expect_eq "RF-5 AC-5.1 task-add --questions evidence at double with one record is admitted (exit 0)" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_contains "RF-5b …and the task cell carries questions: evidence" " · questions: evidence" "$(vd_cell T9 4)"
+expect_eq "RF-5c …its Files keep the one record, and its artifact cell names it" "$VD_REC/auditor-evidence.md|$VD_REC/auditor-evidence.md" \
+  "$(vd_cell T9 9)|$(vd_cell T9 12)"
+VD_UNITS="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh"
+expect_eq "RF-5d the units reader lifts the declaration off the row's record" "evidence" \
+  "$(bash -c '. "$1" && units_questions "$(units_rows "$2" | awk -F"\t" "\$1 == \"T9\"")"' _ "$VD_UNITS" "$VD_P")"
+poke "$VD" task-add T11 6 review "the auditor's re-read. The auditor reads the evidence once." w01-audit — 30 REQ-1 — --questions evidence
+expect_eq "RF-5e a declared row whose Files name no record is given the one record it owes" "0|$VD_REC/critic-evidence.md" "$RC|$(vd_cell T11 9)"
+expect_eq "RF-5f …and the units reader reads no declaration off a row that declares none (T1), beside the positive above" "evidence|" \
+  "$(bash -c '. "$1" && units_questions "$(units_rows "$2" | awk -F"\t" "\$1 == \"T9\"")"; printf "|"; units_questions "$(units_rows "$2" | awk -F"\t" "\$1 == \"T1\"")"' _ "$VD_UNITS" "$VD_P")"
+
+VD_TWO="$VD_REC/critic-adversarial.md, $VD_REC/critic-structure.md"
+poke "$VD" task-add T12 6 review "the critic's code read. The critic reads the code once." critic — 30 REQ-1 "$VD_TWO" --questions adversarial,structure
+expect_eq "RF-6 AC-5.2 --questions adversarial,structure with two records is admitted, the cell carrying both" "0|1" \
+  "$RC|$(printf '%s' "$(vd_cell T12 4)" | /usr/bin/grep -c ' · questions: adversarial,structure')"
+s42_snap "$VD" "$VD_P"
+poke "$VD" task-add T13 6 review "the critic's code read. The critic reads the code once." critic — 30 REQ-1 "$VD_REC/critic.md" --questions adversarial,structure
+s42_unchanged "RF-6b …with one record it is refused" 1 "$VD_P"
+expect_contains "RF-6c …the refusal naming both questions' records" "$VD_TWO" "$OUT"
+poke "$VD" task-add T13 6 review "the critic's code read. The critic reads the code once." critic — 30 REQ-1 — --questions adversarial,structure
+expect_eq "RF-6d control: the same row with no Files is given one record per declared question, no more" "0|$VD_TWO" "$RC|$(vd_cell T13 9)"
+poke "$VD" task-add T14 6 review "the critic's whole read. The critic reads the run once." critic — 30 REQ-1 —
+VD_THREE="$VD_REC/critic-evidence.md, $VD_REC/critic-adversarial.md, $VD_REC/critic-structure.md"
+expect_eq "RF-7 RF-1 holds: with no operand the rigor's full deal is owed, three records" "0|$VD_THREE" "$RC|$(vd_cell T14 9)"
+expect_eq "RF-7b …and the cell carries no declaration" "0" "$(printf '%s' "$(vd_cell T14 4)" | /usr/bin/grep -c 'questions:')"
+
+s42_snap "$VD" "$VD_P"
+poke "$VD" task-add T15 6 review "a mixed read. A reader reads it." critic — 30 REQ-1 "$VD_REC/critic-evidence.md, $VD_REC/critic-adversarial.md" --questions evidence,adversarial
+s42_unchanged "RF-8 AC-5.2 --questions evidence,adversarial at double (the auditor's and the critic's) is refused as not dealt to one role" 1 "$VD_P"
+expect_contains "RF-8b …naming the auditor's question" "evidence the auditor's" "$OUT"
+expect_contains "RF-8c …and the critic's" "adversarial and structure the critic's" "$OUT"
+poke "$VD" task-add T15 6 review "the audit. The auditor reads it." w01-audit — 30 REQ-1 "$VD_REC/auditor-evidence.md, $VD_REC/auditor-adversarial.md" --questions evidence,adversarial
+expect_eq "RF-8d …whichever agent the row names" "1" "$RC"
+
+poke "$VC" task-add T20 6 review "a single-rigor re-read. The critic reads one question." critic — 30 REQ-1 "$VC_REC/critic-adversarial.md" --questions adversarial
+expect_eq "RF-9 at single the critic holds all three, so one declared question is admitted" "0|1" \
+  "$RC|$(printf '%s' "$(vc_cell T20 4)" | /usr/bin/grep -c ' · questions: adversarial$')"
+poke "$VC" task-add T21 6 review "a single-rigor re-read. The critic reads two questions." critic — 30 REQ-1 — --questions structure,evidence
+expect_eq "RF-9b …and a subset is declared in the dealing's order, evidence first" "0|$VC_REC/critic-evidence.md, $VC_REC/critic-structure.md" "$RC|$(vc_cell T21 9)"
+
+s42_snap "$VD" "$VD_P"
+poke "$VD" task-add T16 5 verify "the floor. The regression runs once." test-runner — 30 REQ-1 — --questions evidence
+s42_unchanged "RF-10 --questions on a row that is not a review row is the usage error" 2 "$VD_P"
+expect_contains "RF-10a …in the verb's own words, naming the row's kind" "T16 is a verify row" "$OUT"
+poke "$VD" task-add T16 6 review "the audit. The auditor reads it." w01-audit — 30 REQ-1 — --questions style
+s42_unchanged "RF-10b a question outside the three is the usage error" 2 "$VD_P"
+expect_contains "RF-10b2 …naming the word" "names 'style', which is no question" "$OUT"
+poke "$VD" task-add T16 6 review "the audit. The auditor reads it." w01-audit — 30 REQ-1 — --questions evidence,evidence
+s42_unchanged "RF-10c a question named twice is the usage error" 2 "$VD_P"
+expect_contains "RF-10c2 …naming it" "names evidence twice" "$OUT"
+poke "$VD" task-add T16 6 review "the audit. The auditor reads it." w01-audit — 30 REQ-1 — --questions
+s42_unchanged "RF-10d --questions with no value is the usage error" 2 "$VD_P"
+expect_contains "RF-10d2 …saying it takes a value" "--questions takes a value" "$OUT"
+poke "$VD" task-add T16 6 review "the audit. The auditor reads it." w01-audit — 30 REQ-1 — --questions evidence --born 'review S3 off'
+s42_unchanged "RF-10e --questions then --born both parse: the rating is judged against the plan's fix-policy, not as an operand count" 1 "$VD_P"
+expect_contains "RF-10e2 …by the policy" "fix-policy" "$OUT"
+poke "$VD" task-add T16 6 review "the audit. The auditor reads it." w01-audit — 30 REQ-1 — --born 'review S3 off' --questions evidence
+s42_unchanged "RF-10f …and --born then --questions" 1 "$VD_P"
+expect_contains "RF-10f2 …by the policy" "fix-policy" "$OUT"
+
 # ---------- §DELIVER-CELL: with no ledger, deliver lands the row its artifact cell names ----------
 printf 'question: evidence\nresult: pass\nscope: piece\n' > "$VC/$VC_REC/critic-evidence.md"
 VC_HEAD="$(git -C "$VC" rev-parse main)"

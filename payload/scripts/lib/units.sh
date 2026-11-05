@@ -10,6 +10,8 @@
 #                              id·step·kind·task·agent·deps·size·serves·Files·status·worktree·
 #                              base·reads, in TABLE order. Exit 1 and silent when the plan
 #                              carries no `## Tasks` table.
+#   units_questions <record>   the questions a review row declares, comma-joined, off its task cell's
+#                              ` · questions:` tag; nothing when it declares none.
 #   units_ready <plan> <step> [<roster> [<ack ledger> [<session id>]]]
 #                              the ids of rows whose status is `pending` and whose every read
 #                              is satisfied, whatever their step (wave-26 T2, D1: what a row
@@ -392,6 +394,23 @@ units_field() {  # <record> <column name> -> the cell, empty if absent; rc 1 on 
   printf '%s' "$_uf_v"
 }
 
+
+# units_questions <record> -> the questions a review row declares, comma-joined in the dealing's order, lifted off the
+# `task` cell's ` · questions: <q,…>` tag; nothing, and exit 0, when the cell carries none. The tag is written beside
+# ` · born:` by `task-add --questions` and ends at the next ` · ` or the cell's end. Pure parameter expansion, as
+# `units_field` is, so a caller asking it of every row of a table pays no process. It reads the words and judges none:
+# a caller holds them to the questions its role is dealt.
+units_questions() {  # <units_rows record> -> the declared questions, or nothing
+  local _uq_t
+  units_field_v _uq_t "${1:-}" task || return 1
+  case "$_uq_t" in
+    *" · questions: "*)
+      _uq_t="${_uq_t#*" · questions: "}"; _uq_t="${_uq_t%%" · "*}"
+      _uq_t="${_uq_t%%[!a-z,]*}"; _uq_t="${_uq_t%,}"
+      printf '%s' "$_uq_t" ;;
+  esac
+  return 0
+}
 
 # units_rows <plan> -> id·step·kind·task·agent·deps·size·serves·Files·status·worktree·base·reads,
 #                      tab-separated, one line per row, in TABLE order. Exit 1 when there is

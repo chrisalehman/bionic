@@ -2493,6 +2493,19 @@ case "$DP_SUBAGENT" in
         dp_not_checked "the Questions: dealing" "a plan rigor and scale that facts_owed deals"
       fi
     fi
+    # A ROW THAT DECLARES ITS QUESTIONS IS HELD TO THEM. The bound row's task cell may carry a `questions:` tag
+    # (`task-add --questions`, read by `units_questions`): a re-read of fewer questions than the role's full deal. The
+    # brief is then compared to that set in place of the role's full deal, and the set compared is the one recorded as
+    # `questions=`. Only a declaration the role is dealt takes the place: one outside the role's deal falls to the
+    # deal, so a brief cannot reach a question the rigor gave the other reader by naming it on a row.
+    _q_decl=""
+    if [ -n "$_q_dealt" ] && [ -n "$DP_BOUND_REC" ] && declare -F units_questions >/dev/null 2>&1; then
+      _q_decl="$(units_questions "$DP_BOUND_REC")"
+      for _q_q in ${_q_decl//,/ }; do
+        case ",${_q_dealt}," in *",${_q_q},"*) : ;; *) _q_decl="" ;; esac
+      done
+      if [ -n "$_q_decl" ]; then _q_dealt="$_q_decl"; fi
+    fi
     # THE LEVEL AS PRINTED (wave-28 T44; AC-16.2): a detail names the plan's rigor by its new word
     # with its meaning, lib/run.sh `rigor_print`; a word that is no level is quoted as written.
     _q_level="$(rigor_print "$_q_rigor" 2>/dev/null)" || _q_level="rigor ${_q_rigor:-none}"
@@ -2584,11 +2597,16 @@ Fix: add this line to the brief, on a line of its own —
 
 Then retry the dispatch."
     elif [ -n "$_q_set" ] && [ -n "$_q_dealable" ] && [ "$_q_set" != "$_q_dealt" ]; then
-      dp_finding "${_q_short} rigor deals ${_q_role}: ${_q_dealt}" "use that set" \
-        "The Questions: line names a set the plan's rigor does not deal this reviewer:
+      _q_title="${_q_short} rigor deals ${_q_role}: ${_q_dealt}"; _q_ofwhom="the plan's rigor"; _q_basis="${_q_level}, scale ${_q_scale}"
+      if [ -n "$_q_decl" ]; then
+        _q_title="row ${DP_BOUND_ROW} declares ${_q_role}: ${_q_dealt}"; _q_ofwhom="the bound row"
+        _q_basis="declared on row ${DP_BOUND_ROW} by task-add --questions, inside what ${_q_level} deals ${_q_role}"
+      fi
+      dp_finding "$_q_title" "use that set" \
+        "The Questions: line names a set ${_q_ofwhom} does not deal this reviewer:
     Role:  ${DP_SUBAGENT}
     Given: ${_q_set//,/, }
-    Dealt: ${_q_dealt//,/, } (${_q_level}, scale ${_q_scale})
+    Dealt: ${_q_dealt//,/, } (${_q_basis})
 
 Each question is read by the one role the rigor deals it to:
 ${_q_holders}
