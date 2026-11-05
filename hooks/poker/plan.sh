@@ -1946,14 +1946,17 @@ EOF
   # criterion, in the shape the gate reads — its `AC-<n>:` line carrying the criterion's text from its `- AC-<n>`
   # bullet, `provenance:` (the requirement's `provenance:` line under its `### REQ-<n>` heading in the requirements
   # file the plan names, else in the plan, else `pending`; never the Approach: wave-35 T8, AC-6.4), `fails-when:`
-  # and `eval:` (`<tier> — <Eval>`) from the table,
+  # and `eval:` (`<tier> — <Eval>`) from the table, `serves:` straight after `provenance:` (the REQ ids the Eval design
+  # row's Requirement cell names; no line when it names none, so a later render whose cell names one writes it),
   # `task:` (the one `## Tasks` row whose serves cell names the criterion or its requirement, else `pending`), then
   # `evidence:` (and `user-confirmed:` at T4), the keys walls.sh `keys_for_tier` names for the tier the matrix
   # table gives the criterion, each `pending`. The matrix head gains `stack-health: pending`, and `walk-artifact: pending` unless the
   # plan is `walk: exempt`, where it has none. `pending` is the stub token (Δ12a): the gate refuses it wherever it
   # judges evidence and reads nothing of it before Step 5.
   #
-  # ADDITIVE, SO IT CAN BE RUN AGAIN. A block that exists gains only the keys it lacks, after its last line; a key
+  # ADDITIVE, SO IT CAN BE RUN AGAIN. A block that exists gains only the keys it lacks, after its last line, but
+  # `serves:`, which stands straight after `provenance:` where the block holds one, so a plan rendered before the key
+  # gains it where a new block carries it; a key
   # that is there is never rewritten, whatever it says. The one line it prints counts the three outcomes: new
   # blocks, keys added (to existing blocks and the matrix head), and blocks left as they were. When there is nothing
   # to add it writes nothing. It takes the transaction every plan verb takes (copy, dry commit, checksum, swap).
@@ -2952,6 +2955,7 @@ RR_MATRIX
     # carries its opener as a fifth field the page does not draw, so the row is cut to its four before it is sent
     [ -z "$RR_GOALS" ] || printf '%s\n' "$RR_GOALS" | while IFS= read -r l; do
       [ -n "$l" ] || continue
+      [ "${l%%	*}" != mapping ] || continue
       case "$(plan_goal_status "${l%%	*}")" in
         met) m="$SITREP_MARK_WITHIN" ;;
         'not met') m="$SITREP_MARK_OVER" ;;
@@ -3227,6 +3231,17 @@ RR_AGAINST_EOF
     # GOALS: each goal the plan declares, read by lib/plan.sh `plan_goals_read`, the reader the sitrep reads too.
     RR_GOALS="$(plan_goals_read "$PV_PLAN" "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" \
       "$(landing_report "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" yes 2>/dev/null)")"
+    # A MATRIX ROW NO THEME CAN READ refuses the page, preview or not, before anything is written: a row with no
+    # serves: and no dotted id is in no theme's count, so the Goals block would print a theme short, `0 of N reached`
+    # over criteria discharged. matrix-render writes serves: from the Eval design, and the page then reads them.
+    RR_UNMAPPED="$(printf '%s\n' "$RR_GOALS" | awk -F'\t' '$1 == "mapping" && index($2, "not mapped: ") == 1 {
+      n = split($3, a, " "); s = ""; for (i = 1; i <= n && i <= 5; i++) s = s (i > 1 ? ", " : "") a[i]
+      if (n > 5) s = s " and " (n - 5) " more"
+      print n "\t" s; exit }')"
+    if [ -n "$RR_UNMAPPED" ]; then
+      die "release-approval refused — ${RR_UNMAPPED%%	*} matrix rows map to no requirement (no serves: and no dotted id): run session-poker.sh matrix-render to write serves: (${RR_UNMAPPED#*	})"
+      exit 1
+    fi
 
     # THE REGRESSION is the full pass's state at the head, drawn from the one printer over the floor judge (lib/proof.sh
     # `proof_whole_text`), never worded here: green only where the whole suite ran green at this head, so a whole run

@@ -560,7 +560,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one ev=stop-run goes to the bound run's landing record"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
   die "  bash ${HOOK_DIR}/session-poker.sh anchors check|index [<root>] [--at <commit>]   check: MOVED <suite>:<line> for each anchor whose text is not on exactly one line where it points (exit 1), nothing and exit 0 when every anchor holds; index: <file> TAB <suite>[,<suite>] per anchored file. <root> defaults to the current tree, --at reads a commit"
-  die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: a tier table row for each criterion it lacks, at the tier its eval type maps to (lib/scale.sh), then provenance, fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
+  die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: a tier table row for each criterion it lacks, at the tier its eval type maps to (lib/scale.sh), then provenance, serves (the Eval design row's requirement), fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
   die "  bash ${HOOK_DIR}/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED, nothing after it"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-set <AC-id> [status=<pending|blocked|discharged|waived>] [evidence=<record/...>] [task=<id>[,<id>...]]   write that matrix row's status and evidence cells and its AC block's evidence: and task: keys; never the tier or auditor cell"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-retier <AC-id> tier=<T0..T4> eval=<text>   raise that criterion's tier where it lives (the matrix tier cell, its block's eval: line, its ## Eval design row) and reset the row to pending, its evidence, auditor and waiver cleared; a lower or equal tier is the user's"
@@ -3227,6 +3227,13 @@ function taskof(cr,    t, n, id, nk, ik, ns, is) {
   if (nk) return (nk == 1) ? ik : "pending"
   return (ns == 1) ? is : "pending"
 }
+# reqs(cell) -> the REQ ids a Requirement cell names, comma-joined in its order; "" when it names none. A criterion
+# serves one requirement, and a cell naming several is carried whole so the theme reading can say it read the first.
+function reqs(cell,    o) {
+  o = ""
+  while (match(cell, /REQ-[0-9A-Za-z]+/)) { o = o ((o == "") ? "" : ", ") substr(cell, RSTART, RLENGTH); cell = substr(cell, RSTART + RLENGTH) }
+  return o
+}
 # PROVENANCE IS THE REQUIREMENT\047S (wave-35 T8; REQ-6 AC-6.4; D15): the requirements file the plan names (fprov),
 # else the plan\047s own `### REQ-<n>` line (prov), else pending; the Eval design\047s Approach is never a provenance.
 function val(cr, k,    r) {
@@ -3234,6 +3241,7 @@ function val(cr, k,    r) {
   if (k == "fails-when") return (efw[cr] != "") ? efw[cr] : "pending"
   if (k == "eval") return tier[cr] " — " ((eev[cr] != "") ? eev[cr] : "pending")
   if (k == "task") return taskof(cr)
+  if (k == "serves") return reqs(ereq[cr])
   return "pending"
 }
 function wptr(l,   v) {  # a Step-5 line naming a real walk-artifact: value: not empty, not the stub token
@@ -3299,7 +3307,7 @@ END {
       continue
     }
     if (cur != "" && line ~ /^[ \t]+[^ \t]/) {
-      bend[cur] = i; k = line; sub(/^[ \t]+/, "", k); sub(/[ \t]*:.*$/, "", k); has[cur, k] = 1
+      bend[cur] = i; k = line; sub(/^[ \t]+/, "", k); sub(/[ \t]*:.*$/, "", k); if (!((cur, k) in has)) kat[cur, k] = i; has[cur, k] = 1
     }
   }
   if (!sawev || ne == 0) { printf "noeval\t\n" > cf; exit 3 }
@@ -3328,17 +3336,23 @@ END {
   if (walk != "exempt" && !haswa && !haptr) { heads = heads "walk-artifact: pending\n"; added++ }
   if (heads != "") { if (hassh) ins[hassh] = ins[hassh] heads; else ins[mhead] = ins[mhead] "\n" heads }
   for (e = 1; e <= ne; e++) {
-    cr = ec[e]; owed = "provenance fails-when eval task evidence"
+    cr = ec[e]; owed = "provenance serves fails-when eval task evidence"
     nw = split(keys[tier[cr]], tk, " ")
     for (w = 1; w <= nw; w++) if (tk[w] != "evidence") owed = owed " " tk[w]
     no = split(owed, ok, " ")
     if (cr in bstart) {
       got = 0
-      for (w = 1; w <= no; w++) if (!((cr, ok[w]) in has)) { ins[bend[cr]] = ins[bend[cr]] "  " ok[w] ": " val(cr, ok[w]) "\n"; added++; got++ }
+      for (w = 1; w <= no; w++) {
+        if ((cr, ok[w]) in has) continue
+        v = val(cr, ok[w]); if (ok[w] == "serves" && v == "") continue
+        # serves: stands straight after provenance: where the block holds it; every other key after the block\047s last line
+        at = (ok[w] == "serves" && ((cr, "provenance") in kat)) ? kat[cr, "provenance"] : bend[cr]
+        ins[at] = ins[at] "  " ok[w] ": " v "\n"; added++; got++
+      }
       if (!got) same++
     } else {
       nb = nb cr ":" ((actext(cr) != "") ? " " actext(cr) : "") "\n"
-      for (w = 1; w <= no; w++) nb = nb "  " ok[w] ": " val(cr, ok[w]) "\n"
+      for (w = 1; w <= no; w++) { v = val(cr, ok[w]); if (ok[w] != "serves" || v != "") nb = nb "  " ok[w] ": " v "\n" }
       written++
     }
   }
