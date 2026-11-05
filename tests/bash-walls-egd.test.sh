@@ -584,10 +584,10 @@ printf 'prose: CONTEXT.md, scripts/perf/\n' > "$PR_R/.bionic/config.yaml"
 PC_FLOOR="$(bash -c '. "$1" && proof_floor_line "$2" 2026-10-12T11:00:00Z record/w/floor.log ""' _ "$EG6_LIB" "$PC_BASE" 2>/dev/null)"
 { printf -- '---\nrigor: single\nscale: task\ncurrent: 6\n---\n\n## SDLC State\n\nworking-branch: wave/01-prose\n'
   printf -- '- Step 4: dispatched\n  base-sha: %s\n%s\n' "$PC_BASE" "$PC_FLOOR"; } > "$PR_R/.bionic/docs/plans/p.plan.md"
-pc_floor() {  # <head> -> the regression line `current 8 --check` prints, the judge's facts_state at <head>, its range dropped
+pc_floor() {  # <head> -> the regression line `current 8 --check` prints, the judge's facts_state at <head>, its exit dropped
   git -C "$PR_R" update-ref refs/heads/wave/01-prose "$1"
   bash -c '. "$1" >/dev/null 2>&1 || exit 127; facts_state "$2" "$3"' _ "$EG6_LIB" "$PR_R/.bionic/docs/plans/p.plan.md" "$1" 2>/dev/null \
-    | awk -F'\t' '$1 == "regression" { print $2 (NF > 3 ? "\t" $4 : "") }'
+    | awk -F'\t' '$1 == "regression" { print $2 (NF > 2 ? "\t" $3 : "") }'
 }
 PC_CONF="$(pr_commit "the project's own prose" CONTEXT.md scripts/perf/README.md)"
 for q in adversarial structure evidence; do
@@ -602,7 +602,7 @@ PC_NEAR="$(pr_commit "a path beside the listed ones" scripts/perfx.sh)"
 expect_eq "PROSE-CONFIG-3 a path the list does not hold is code with the config present: scripts/perf/ is a directory, not a stem" \
   "$(printf 'cover %s owes\nrc=1' "$PC_NEAR")" "$(pr_cover "$PC_CONF" "$PC_NEAR" adversarial)"
 expect_eq "PROSE-CONFIG-3b …and the floor line names it unproved" \
-  "uncovered	commit ${PC_NEAR:0:12} (no landing row) is not proved: no run of its row's suites is recorded at it" "$(pc_floor "$PC_NEAR")"
+  "unproved	red at ${PC_BASE:0:8}, 2 landings before this head; commit ${PC_NEAR:0:12} (no landing row) is not proved: no run of its row's suites is recorded at it" "$(pc_floor "$PC_NEAR")"
 PC_BUILT="$(pr_commit "the release text beside the config" CHANGELOG.md)"
 expect_eq "PROSE-CONFIG-4 the built-in list stands beside the prose: entries" \
   "$(printf 'cover %s prose\nrc=0' "$PC_BUILT")" "$(pr_cover "$PC_NEAR" "$PC_BUILT" adversarial)"
