@@ -1831,7 +1831,8 @@ proof_unproved_approved() {
 # proof_merge_ask <plan> <tree> <head> -> whether a merge at <head> is the person's to take on their word, read from the
 # floor judge at <head> (`_proof_floor_judge`) and the whole suite's state (`proof_whole_text`). Exit 0, printing the
 # whole suite's state at <head>, when the judge reads the floor covered or uncovered, no pass ran green at it and no word
-# was given at it. Exit 1, nothing printed, when the pass ran green there or the word was given there. Exit 2, printing
+# was given at it; over an uncovered floor the judge's reason follows it (`<state>; commit <c> (row <id>) is not proved:
+# …`), so the person reads which landing no run proved before giving the word, as the refusal names it. Exit 1, nothing printed, when the pass ran green there or the word was given there. Exit 2, printing
 # the suites still owed, when the judge reads the floor owed. A <head> that is the release entry's reviews part rendered
 # fresh on its parent is judged at that parent (`proof_part_base`): the part is written after the pass and the word, from
 # the lines they left, so it asks neither again. THE WORD ACCEPTS ABSENCE: covered (every landing proved by its own
@@ -1850,7 +1851,10 @@ proof_merge_ask() {
   proof_unproved_approved "$plan" "$head" && return 1
   [ "$at" = "$head" ] || ! proof_unproved_approved "$plan" "$at" || return 1
   case "$(proof_whole_text "$plan" "$tree" "$at")" in "green at "*) return 1 ;; esac
-  proof_whole_text "$plan" "$tree" "$head"
+  case "$st" in
+    uncovered"	"?*) printf '%s; %s\n' "$(proof_whole_text "$plan" "$tree" "$head")" "${st#uncovered	}" ;;
+    *) proof_whole_text "$plan" "$tree" "$head" ;;
+  esac
 }
 
 # proof_owed_needs <suites> -> the exit of a floor the whole run left red, one line: a fix row whose suites include

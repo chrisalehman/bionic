@@ -900,6 +900,7 @@ FC_WD_UNC=no; [ -z "$FC_WDN" ] || FC_WD_UNC=yes
 expect_eq "WORD-1a …and the number its table gives the decision is the one the judge's exit reads (proof_merge_decision)" "${FC_WDN:-none}" \
   "$(bash -c '. "$1/roots.sh"; . "$1/proof.sh"; proof_merge_decision "$2" "$3" "$4"' _ "$FC_LIB" "$PFC" "$RFC" "$FC_R" 2>/dev/null)"
 expect_contains "WORD-1b …drawn on the page with the head's state" ". Merge without a whole run at this head — red at ${FC_B:0:8}, 2 landings before this head" "$(fc_unproved)"
+expect_contains "WORD-1b2 …and naming the commit no run proved, as the judge's refusal does" "; commit ${FC_C:0:12} (no landing row) is not proved: " "$(fc_unproved)"
 FC_WDM="${FC_WDN:-0} merge, rest default"; fc_typed "$FC_WDM"
 poke "$RFC" reply "$FC_WDM"
 expect_regex "WORD-1c reply ${FC_WDM} replays (exit 0), writing the word at the head with the user's words" "^0\|approved: merge-unproved by Dana Fixture [0-9T:Z-]+ head=$FC_R \"$FC_WDM\"\$" "$RC|$(/usr/bin/grep '^approved: merge-unproved ' "$PFC")"
