@@ -1,21 +1,8 @@
-# tests/release-approval.prelude.sh — THE HALF OF THE RELEASE APPROVAL CARD'S SUITE BOTH PARTS SHARE.
-#
-# Sourced by tests/release-approval.test.sh and tests/release-approval-2.test.sh, after resolve-roots.sh and assert.sh.
-# It is not a suite: the runner launches `*.test.sh` only. It sits beside the parts rather than under tests/lib/ so the
-# reads index follows it from each part's `source` line, one hop, and an edit to it is answered with both parts.
-#
-# WHY TWO PARTS. One release-approval.test.sh promised 610 s and more on the gate, past the suite bar (lib/line.sh
-# LINE_SUITE_BAR, ten minutes of promise), so no writer's `ready --within` could hold it. It is cut at a section
-# boundary: part 2 holds the sections on the merge without a whole run at the head (the Tests line's full-pass state,
-# the word the person gives, who may give it, and a failed review its fix covered), every one whole and in its order;
-# part 1 holds every other section.
-#
-# WHAT IT HOLDS. The repository and plan world both parts build their pages in, the user's words, and every helper a
-# section of either part calls: the old file's own lines, whole, plus `fc_published`, which a part-1 section defined
-# and part 2 calls (left behind as a one-line pointer there). tests/asks.test.sh reads six of these helpers out of this
-# file by name.
-#
-# WHAT IT NEVER HOLDS. A fixture one section builds and a later one reads: each part starts from this world as built.
+# tests/release-approval.prelude.sh — the world and the helpers both parts of the release approval card's suite share.
+# Sourced by tests/release-approval.test.sh and tests/release-approval-2.test.sh after resolve-roots.sh and assert.sh; not
+# a suite. One file promised more than the suite bar (lib/line.sh LINE_SUITE_BAR), so it is cut at a section boundary.
+# It holds the world and every helper above the old file's first section, plus `fc_published`, never a fixture one
+# section builds for a later one; tests/asks.test.sh reads six of these helpers by name.
 #
 # THE SUITE (the old file's own header, whole):
 # tests/release-approval.test.sh — THE RELEASE APPROVAL CARD: hooks/session-poker.sh `release-approval` and `reply`, and

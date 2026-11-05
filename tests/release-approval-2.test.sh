@@ -1,13 +1,6 @@
 #!/bin/bash
 # tests/release-approval-2.test.sh — THE RELEASE APPROVAL CARD, part 2 of 2: the merge without a whole run at the head.
-# The Tests line prints the full pass's state, the card draws the person's word on exactly the floors the gate honours it
-# on, the word is an answer only where an open integrate row waits on the release, and a failed review its fix landing
-# answered reads covered.
-#
-# THE SUITE IS TWO PARTS. One release-approval.test.sh promised more than the suite bar, ten minutes of the gate's
-# promise, so it runs as two suites cut at a section boundary. The governing header, the world and the helpers both
-# parts share are in tests/release-approval.prelude.sh, sourced below after the framework; each part starts from that
-# world as built.
+# Its header, world and helpers are tests/release-approval.prelude.sh's; it starts from that world as built.
 #
 # Usage: bash tests/release-approval-2.test.sh
 
@@ -115,12 +108,9 @@ rm -f "$FC_REC"/release-approval-*.md
 # ============================================================
 section "§WORD: the word accepts absence: the card draws the merge decision on exactly the floors the gate honours the word on, covered or uncovered, never owed"
 # ============================================================
-# fails-when: the card offers the word at an uncovered head and current 8 --check refuses after the reply writes it;
-# the card offers it over an owed floor, or the owed refusal names a reply; or, on any of covered, uncovered, owed and
-# green, the card's draw and the gate's honour of a recorded word differ. The gate HONOURS the word where the word is
-# what admits: current 8 --check refuses without it and is admitted with it. The worlds are §JUDGE's: the whole run at
-# B, T1's code at C, the release text at R, the head; uncovered with no landing recorded for C. The covered, green and
-# owed card readings are §JUDGE's own (JUDGE-3, JUDGE-4, JUDGE-2), carried into the table, never measured twice.
+# fails-when: the card offers the word where current 8 --check will not honour it, or withholds it where it will; or the
+# owed refusal names a reply. The gate HONOURS the word when it refuses without it and admits with it. The covered, green
+# and owed card readings are §JUDGE's (JUDGE-3, JUDGE-4, JUDGE-2), carried; uncovered is its world with no landing for C.
 fc_judged() { bash -c '. "$1/roots.sh"; . "$1/proof.sh"; _proof_floor_judge "$2" "$3" "$4" | cut -f1' _ "$FC_LIB" "$PFC" "$RFC" "$FC_R" 2>/dev/null; }
 fc_regline() { printf '%s\n' "$OUT" | /usr/bin/grep -E '^regression	'; }  # the gate's regression line, as current 8 --check printed it
 # (1) An uncovered head, the card's decision, the reply that merges, the gate admitting.
@@ -129,10 +119,8 @@ fc_plan "$(fc_floor "$FC_B")
 $(fc_reads "$FC_C")"
 expect_eq "WORD-0 precondition: with no run recorded for T1's code commit, the judge reads the head uncovered" "uncovered" "$(fc_judged)"
 fc_page
-FC_WDN="$(fc_table | /usr/bin/grep -F '|key=approve:merge-unproved|' | sed -n 's/^release-approval\/v1|dec=\([0-9]*\)|.*/\1/p')"
-expect_eq "WORD-1 at an uncovered head the card renders (exit 0) and its table holds the merge without a whole run" "0|yes" "$FC_RC|$([ -n "$FC_WDN" ] && echo yes)"
-[ "$FC_RC" = 0 ] || printf '      the card said: %s\n' "$FC_ERR"
-FC_WD_UNC=no; [ -z "$FC_WDN" ] || FC_WD_UNC=yes
+FC_WDN="$(fc_table | /usr/bin/grep -F '|key=approve:merge-unproved|' | sed -n 's/^release-approval\/v1|dec=\([0-9]*\)|.*/\1/p')"; FC_WD_UNC=no; [ -z "$FC_WDN" ] || FC_WD_UNC=yes
+expect_eq "WORD-1 at an uncovered head the card renders (exit 0) and its table holds the merge without a whole run" "0|yes" "$FC_RC|$FC_WD_UNC"
 expect_eq "WORD-1a …and the number its table gives the decision is the one the judge's exit reads (proof_merge_decision)" "${FC_WDN:-none}" \
   "$(bash -c '. "$1/roots.sh"; . "$1/proof.sh"; proof_merge_decision "$2" "$3" "$4"' _ "$FC_LIB" "$PFC" "$RFC" "$FC_R" 2>/dev/null)"
 expect_contains "WORD-1b …drawn on the page with the head's state" ". Merge without a whole run at this head — red at ${FC_B:0:8}, 2 landings before this head" "$(fc_unproved)"
@@ -142,7 +130,6 @@ poke "$RFC" reply "$FC_WDM"
 expect_regex "WORD-1c reply ${FC_WDM} replays (exit 0), writing the word at the head with the user's words" "^0\|approved: merge-unproved by Dana Fixture [0-9T:Z-]+ head=$FC_R \"$FC_WDM\"\$" "$RC|$(/usr/bin/grep '^approved: merge-unproved ' "$PFC")"
 poke "$RFC" current 8 --check; FC_WY_UNC="$RC"
 expect_eq "WORD-1d …and current 8 --check is admitted (exit 0) over the uncovered floor" "0" "$RC"
-[ "$RC" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$OUT" | tail -4)"
 /usr/bin/grep -v '^approved: merge-unproved ' "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
 poke "$RFC" current 8 --check; FC_WN_UNC="$RC"
 expect_eq "WORD-1e …the word taken out, the release approval kept: refused (exit 1) on the regression unproved, so the word is what admits" "1|unproved" "$RC|$(fc_regline | cut -f2)"
@@ -160,19 +147,14 @@ poke "$RFC" approve merge-unproved 'merge it'
 poke "$RFC" current 8 --check; FC_WY_OWED="$RC"
 expect_eq "WORD-2h the word recorded at the head over the owed floor: still refused (exit 1) on the regression owed" "1|owed|1" "$RC|$(fc_regline | cut -f2)|$(/usr/bin/grep -c '^approved: merge-unproved ' "$PFC")"
 # (3) The states table, each row the card's draw beside the gate's exits without and with the word.
-fc_wrow() {  # <state> <draw> <exit without the word> <exit with it, or - where the word is moot> -> one table cell
-  local h=no; [ "$3" = 0 ] || [ "$4" != 0 ] || h=yes
-  printf '%s:draw=%s:honour=%s ' "$1" "$2" "$h"
-}
+fc_wrow() { local h=no; [ "$3" = 0 ] || [ "$4" != 0 ] || h=yes; printf '%s:draw=%s:honour=%s ' "$1" "$2" "$h"; }  # <state> <draw> <exit without the word> <with it, or -> -> one cell
 FC_WT="$(fc_wrow covered "$FC_WD_COV" "$FC_WN_COV" "$FC_WY_COV")$(fc_wrow uncovered "$FC_WD_UNC" "$FC_WN_UNC" "$FC_WY_UNC")$(fc_wrow owed "$FC_WD_OWED" "$FC_WN_OWED" "$FC_WY_OWED")$(fc_wrow green "$FC_WD_GREEN" "$FC_WN_GREEN" -)"
 expect_eq "WORD-3 the table: the word drawn and honoured on covered and uncovered, neither on owed, needed on green by neither" \
   "covered:draw=yes:honour=yes uncovered:draw=yes:honour=yes owed:draw=no:honour=no green:draw=no:honour=no " "$FC_WT"
 expect_eq "WORD-3b …each row read from its exits: covered and uncovered refused without the word and admitted with it, owed refused with it, green admitted without it" \
   "1/0|1/0|1/1|0" "$FC_WN_COV/$FC_WY_COV|$FC_WN_UNC/$FC_WY_UNC|$FC_WN_OWED/$FC_WY_OWED|$FC_WN_GREEN"
-expect_eq "WORD-3c one predicate: the ask is defined in lib/proof.sh and called by the card" "1|1" \
-  "$(/usr/bin/grep -c '^proof_merge_ask()' "$FC_LIB/proof.sh")|$([ "$(/usr/bin/grep -c 'proof_merge_ask ' "$BIONIC_HOOKS_DIR/poker/plan.sh")" -ge 1 ] && echo 1)"
-expect_eq "WORD-3d …and the old predicate is gone from both" "0|0" \
-  "$(/usr/bin/grep -c 'proof_merge_unproved' "$FC_LIB/proof.sh")|$(/usr/bin/grep -c 'proof_merge_unproved' "$BIONIC_HOOKS_DIR/poker/plan.sh")"
+expect_eq "WORD-3c one predicate: the ask defined in lib/proof.sh and called by the card; the old one gone from both" "1|1|0" \
+  "$(/usr/bin/grep -c '^proof_merge_ask()' "$FC_LIB/proof.sh")|$(/usr/bin/grep -c 'proof_merge_ask "$PV_PLAN"' "$BIONIC_HOOKS_DIR/poker/plan.sh")|$(cat "$FC_LIB/proof.sh" "$BIONIC_HOOKS_DIR/poker/plan.sh" | /usr/bin/grep -c proof_merge_unproved)"
 # §JUDGE's world as it was left: T1's landing recorded, the head R.
 fc_published T1 "$FC_C" > "$FC_REC/landing-proofs.log"; rm -f "$FC_REC"/release-approval-*.md
 fc_typed "$FC_WD" "$FC_WR"

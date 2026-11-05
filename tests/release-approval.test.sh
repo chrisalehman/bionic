@@ -1,10 +1,6 @@
 #!/bin/bash
-# tests/release-approval.test.sh — THE RELEASE APPROVAL CARD, part 1 of 2: hooks/session-poker.sh `release-approval` and
-# `reply`, and payload/scripts/card.sh `early`, every section but the merge without a whole run at the head.
-#
-# THE SUITE IS TWO PARTS. One file promised more than the suite bar, ten minutes of the gate's promise, so it runs as two
-# suites cut at a section boundary; part 2 is tests/release-approval-2.test.sh. The governing header, the world and the
-# helpers both parts share are in tests/release-approval.prelude.sh, sourced below after the framework.
+# tests/release-approval.test.sh — THE RELEASE APPROVAL CARD, part 1 of 2: every section but the merge without a whole run
+# at the head (part 2). Its header, world and helpers are tests/release-approval.prelude.sh's.
 #
 # Usage: bash tests/release-approval.test.sh
 
@@ -635,9 +631,7 @@ git -C "$RFC" reset -q --hard "$FC_R"
 rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/release-approval-*.md
 fc_record structure structure piece
 
-# ============================================================
-# The merge without a whole run at the head (the Tests line's state, the word, who may give it, a failed review its fix
-# covered) is part 2: tests/release-approval-2.test.sh. The words typed as that part leaves them:
+# The merge without a whole run at the head is tests/release-approval-2.test.sh; the words as its sections leave them:
 fc_typed "$FC_WD" "$FC_WR"
 
 # ============================================================
