@@ -8,6 +8,250 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.29.2 — 2026-11-05
+
+This is the reads-true release: the six defects and one feature gap a user project reported against 1.29.1 after its epic 23
+wave 9 (`ideas/bionic-1.29.2-bugfix-report-20261103.md`). Each defect was two readers of one fact that disagreed, and
+each is fixed by moving the fact to the one place its readers already share (D4). The release card's Goals read the
+requirement a criterion serves from the matrix, where `matrix-render` writes it (D8, D9). A landing whose row names no
+suite owes none, and a row that names none must touch only prose (D10, D11). The project names its prose in its config,
+and the floor judge, the review walk and the dispatch wall read one list (D2, D12). A criterion keyed to a doc row waits
+for the row's landing (D7), a review row declares the questions it owes (D6), and the born-regression marker reads the
+red the run recorded (D13). One ruling outlives the run as a decision. The person's merge word covers a head where proof
+is absent, covered or uncovered by content, and never a suite the whole run left red. The card draws it and the gate
+honours it through one function, and the floor judge reads the open reds before the head's own coverage (D5, ADR-076,
+amending ADR-074's sentence that the word never passes an owed or uncovered suite). This is a patch release by the
+policy above: six repairs within the design, and one config key, `prose:`, the gap the report named (D2). There is no
+new verb kind, and `canonical_sdlc_version` stays 14. The release check's cap on test lines was paid by a census pass
+that culled by the rubric, not by suspending the cap or thinning the proof (D15).
+
+**Migration.** Rows that changed a printed line or a wall a script of yours may meet:
+- T1: a `prose:` line in `.bionic/config.yaml`, a comma list of exact paths or `dir/` prefixes, is read beside the
+  built-in prose list. A commit that touches only those paths owes no suite and no review. With no `prose:` line the
+  list reads as before. An entry holding `*`, `?` or `[` also matches as a case pattern (A-T1.1).
+- T2: a queue landing whose ready line recorded `suites=none` reads as a landing with no suite, as a hand landing did.
+  The floor judge says `no run of its row's suites is recorded at it` where it said `none has no run recorded at it`.
+  The dispatch wall refuses a brief with `Lands-on: none` whose Files name a path the prose list does not hold:
+  `bionic: dispatch refused — Lands-on: none, not prose: <path> (add suites or prose:)`, with the full sentence first in
+  the detail (A-T2.1).
+- T3: over an uncovered floor the regression line reads `unproved`, then `<whole suite's state>; <the judge's reason>`,
+  naming the commit no run proved, where it read `uncovered <range>` and the reason (A-T3.10). The owed line gains a
+  third field, `needs: the pass — a fix row for <suites>, then the pass (session-poker.sh regression-run)`, and the
+  card's Tests line appends the same text (A-T3.3). `proof_merge_ask` is new: it exits 0 on a covered or uncovered
+  floor and 2 on an owed one, printing the owed suites (A-T3.1). release-approval.test.sh is split: §JUDGE, §WORD,
+  §UNPROVED-ASK and §COVERED run in release-approval-2.test.sh over tests/release-approval.prelude.sh, and a suite that
+  imported the release-approval builders reads them from the prelude (A-T3.11, A-T3.13).
+- T4: `matrix-render` writes `serves: REQ-<n>` into each AC block from the Eval design's Requirement cell, after
+  `provenance:`, and back-fills it into blocks that lack it; a present key is never rewritten (A-T4.1, A-T4.3). The
+  release card refuses while any matrix row maps to no requirement, under `--preview` too: `poker: release-approval
+  refused — <n> matrix rows map to no requirement (no serves: and no dotted id): run session-poker.sh matrix-render to
+  write serves: (<rows>)`. A plan rendered before 1.29.2 with flat or bare ids meets it until `matrix-render` runs. The
+  situation report prints `not mapped: <n> rows carry no serves: and no dotted id`, or `mapped by id: <n> rows carry no
+  serves:` when it falls back to dotted ids.
+- T5: a criterion keyed to task rows is deferred while its owing step equals the current step and a named row is
+  neither landed nor dropped. The advance into the row's step and the commits that land the row are admitted with the
+  criterion pending; it is demanded once every named row has landed, and at the advance out of the step. Owing step 9
+  is excluded, so the close's own rule stands (A-T5.1). `matrix_row_deferred` takes a fifth argument, read from the new
+  `matrix_owing_open`.
+- T6: `task-add <id> 6 review … --questions q,q` declares the questions a review row owes and writes ` · questions:
+  q,q` into its task cell; the records owed and the dispatch wall's dealt set read it. A repeated or unknown question is
+  a usage error, exit 2, and a mix of the two roles' questions at double rigor is refused (A-T6.1, A-T6.2). Without the
+  operand the rigor's full deal stands.
+- T7: `task-add … --born regression:<suite>` is admitted on the red verdict a whole run recorded, before any
+  proof-add, and writes `of=run@<12-hex>` on the row's state-block line (A-T7.4). Where nothing backs it and a red
+  run's log with `dirty=0` is on disk, the refusal names the line to run: `task-add refused — born: regression <suite>
+  names no red the machine recorded; proof-add the red run's log first: bash <hooks>/session-poker.sh proof-add
+  regression <log>; the plan is unchanged.` (A-T7.1).
+- T15: at a head past a floor proof whose owed suites no later landing ran green, the regression reads `owed` where it
+  read `uncovered`, whatever the commits past the floor, and also where the whole run's head is not in the branch's
+  history. The card draws no merge decision there, and `proof_merge_ask` exits 2 (A-T15.2, A-T15.3).
+- T13: seven test sections are culled by the census rubric: card.test.sh §Section 3, §Section 4 and §ABBR;
+  sitrep-card.test.sh §PURPOSE, §REASONS and §SKILL; units.test.sh §5. tests/CENSUS.md records each with its kind. card
+  §Section 4's `over_budget` helper moved beside `cols()`, since later sections read it (A-T13.3).
+
+### Goals read what is authored (REQ-1: D8, D9)
+
+- T4 (A-T4.1 to A-T4.8): `serves:` is written by the render from the Eval design, and one mapper, `_plan_ac_req` in
+  lib/plan.sh, is spliced into both theme readers, so the release card and the situation report group the matrix by the
+  requirement each row serves. A dotted id is the fallback, said once. A row that maps to nothing is named, and the
+  card refuses to print `Goals — 0 of N reached` over it. The report's `0 of 6` over 30 of 36 CONFIRMED cannot print.
+
+### No suite named none, and the project names its prose (REQ-2, REQ-7: D2, D10, D11, D12)
+
+- T1 (A-T1.1 to A-T1.5): `lib/prose.sh` owns the built-in paths and the project's `prose:` entries, `prose_list` and
+  `prose_path`. The floor judge and the review walk read them beside the docs root and the tracked docs home.
+- T2 (A-T2.1 to A-T2.4): the landing-record fold maps a ready line's `none` to no suite once, for hand and queue
+  landings alike, and the hand-only arm is gone. The dispatch wall refuses `Lands-on: none` over non-prose Files by
+  `prose_path`. The critic found the wall does not read the judge's whole predicate, which also excuses the docs root
+  and the tracked docs home (finding 2, below).
+
+### The merge word is honoured (REQ-3: D5, ADR-076)
+
+- T3 (A-T3.1 to A-T3.13): `proof_merge_ask` is the one function the card's draw and the gate's honour read. On an
+  uncovered floor its line names the commit no run proved, so the person reads what they accept before they give the
+  word. release-approval-2.test.sh §WORD pins the states table, so each state of the floor reads the same exits at the
+  card and at the gate. T3 burned the carried debt item merge-unproved-decision-number into
+  `proof_merge_decision`.
+- T15 (A-T15.1 to A-T15.6): born of the critic's S2 finding. The floor judge dropped the open reds in two uncovered
+  arms, so a red floor followed by one unproved landing read uncovered and the word waived a known red. The judge now
+  asks the past-F walk for its closes first and judges the commits only when no red is open. release-approval-2.test.sh
+  §OWED-FIRST pins it, red at the base first.
+- ADR-076 records the rule and amends ADR-074's Status line.
+
+### The doc row's criterion waits (REQ-4: D7)
+
+- T5 (A-T5.1 to A-T5.4): `matrix_owing_open` says whether a row a criterion names is still open, and the deferral reads
+  it at its three call sites, `matrix_unruled`, the gate's matrix loop and `rr_rows`, not the five the spec named. T5
+  burned the carried debt item matrix-table-rows: `rr_rows` reads the table through `matrix_table_rows`.
+
+### Records per reader (REQ-5: D6)
+
+- T6 (A-T6.1 to A-T6.7): a review row's declared questions are the records it owes and the set the dispatch wall
+  deals, read through the new `units_questions`. The wall honours a declaration only inside what the rigor deals the
+  dispatched role, so a wrong-role dispatch cannot reach the other role's question.
+
+### The red's order is said (REQ-6: D13)
+
+- T7 (A-T7.1 to A-T7.5): `born_floor_backing` gains its third backing, the red verdict at a commit on the working
+  branch, and `born_red_log` names the log a refusal sends the user to. steps/5.md, through its template, says in the
+  paragraph on the red that the log is proof-added before the fix row's `task-add`. Three unpinned clauses left the
+  paragraph to keep its size; the `advisory-exceeded:` sentence stays in operational-rules.md (A-T7.3).
+
+### No new second reader, and the consolidation force (REQ-8: D3, D14, D15)
+
+- D3 was ruled "2": no new standing rule, and REQ-8 holds it, measured by the critic's structure read.
+- D14 was ruled "1", read as consolidation in its many forms. The standing force is chartered for 1.30.0 in
+  `ideas/consolidation-force.md`, and this run burned the two carried items its rows already edited: T3
+  merge-unproved-decision-number and T5 matrix-table-rows.
+- D15 was ruled "2". T13 (A-T13.1 to A-T13.7) culled seven sections by the rubric, 184 net shell test lines, each
+  catcher of a kept section proved by a mutation probe on a scratch clone. It fell short of the row's round target of
+  400; the measured need was 68 lines (A-orch.11, A-orch.12). The rubric yielded nothing in the other seven suites read.
+- The structure read raised two debt lines: prose-predicate (the wall's and the judge's prose tests) and
+  role-question-deal (`poker_questions_dealt` beside the wall's derivation). By its count the ledger stands at 14:
+  fourteen in, two burned, two raised. AC-8.2 and AC-8.3 are the close's to read.
+
+### Fixtures that met the new rules
+
+- T14 (A-T14.1 to A-T14.3): born of the first whole run's red. bash-walls-egd §PROSE-CONFIG-3b now reads the unproved
+  floor line the card asks the word on, `pc_floor` keeping the third field. dispatch-preflight-4b LO5 stays an
+  admission case with prose-only Files, since the refusal over a non-prose path is dispatch-preflight-5 §LANDS-NONE's.
+  Four lines changed, net zero.
+- T15 (A-T15.5): session-poker-3 57c and session-poker-5 CK-8r2-b re-pinned to the unproved line. Their fixtures'
+  floors owe no suite, so the owed-first judge leaves them unproved, every assertion kept.
+- T3 (A-T3.5, A-T3.11, A-T3.13): the split moved four census lines under a release-approval-2.test.sh heading;
+  asks.test.sh §SHARED reads its six builders from the prelude. JUDGE-2b and JUDGE-2d were inverted, and JUDGE-2e pins
+  the merge decision absent.
+- T4 (A-T4.8, A-T4.9): release-approval.test.sh part 1 gained §GOALS-REFUSE, and tests/lib/plan-fixture.sh a `bare`
+  variant, the report's reproduction.
+- T5 (A-T5.2, A-T5.3): canonical-sdlc-evidence-gate's 9g was inverted, and the old 9h and 9i are 9m and 9n.
+- T13 (A-T13.7): the seven culls, each recorded in tests/CENSUS.md with its kind.
+
+### The walk, the regression, the critic
+
+- T8 (`walk.md`): the walk at 999c8e6cd drove the report's six reproductions and the feature gap over scratch fixtures.
+  21 of 21 criteria are CONFIRMED, verdict CONFIRMED. The plan verbs the wall refuses a dispatched agent were run by the
+  orchestrator from prepared scripts (A-orch.16). That the wall screens the typed text and not the verb reached is
+  carried to the continuation.
+- The regression: one whole run (D1), at 999c8e6cd after the last build landing, ran 124 of 128 and was red on four
+  suites by one assertion each: bash-walls-egd, dispatch-preflight-4b, session-poker-3 and session-poker-5
+  (`regression-run-999c8e6cd….log`). T14 was born of it for the first two. The other two were the critic's S2 finding,
+  and T15 closed them. The later whole run, at 227313af4 after T15, was started (A-orch.22) and had not finished when
+  this entry was written, so its result is not stated here.
+- T9 (`critic-evidence.md`, `critic-adversarial.md`, `critic-structure.md`): the critic's read of the whole at
+  999c8e6cd. Adversarial failed on one S2: the merge word waived a suite the whole run left red once a later landing was
+  unproved. T15 fixed it, and T16 re-reads T15 as a piece. Finding 2, S3 on: the dispatch wall reads a path the judge
+  excuses as prose as code, and refuses the row. It is put as D16, fix now or defer, and was not ruled when this entry
+  was written. Finding 3 is an S4 note on a stale comment in card.test.sh. Evidence failed: 18 criteria CONFIRMED,
+  AC-2.3 and AC-8.1 REFUTED on finding 2, AC-7.1 and AC-7.3 UNVERIFIABLE until T14 landed, and AC-8.2 and AC-8.3 owed
+  at the close; its wave verdict REFUTED on the S2. Structure flagged, with no finding and the two debt lines above.
+
+### The release
+
+- T10 (`T10.md`): this entry, `plugin.json` 1.29.2, the help and version pages rendered by `agents-src/render.sh`,
+  `rendered.sha256` refreshed, and ADR-076, promoted into docs/adrs from this row's tree, with ADR-074's Status naming
+  the amendment. It lands on release-check, render, commands and shell-lint. T11 opens the pull request and writes the
+  reviews, and T12 closes the run.
+
+### The landing numbers
+
+`landing-report --rows` at 227313af4d1d4b782601ff4c642022c1c4b727c5 on 2026-11-05T08:13:05Z:
+
+```
+landings: queue=10 hand=0 git=0 · ready-to-landed median=6.4m p75=12.2m max=103.8m · runs: green=59 red=2 none=0 discarded=1 red-then-green=0 run=111 reused=0 absent=0 · waited median=54s · killed=5
+T1 queue ready=2026-11-05T04:03:04Z landed=2026-11-05T04:03:52Z minutes=0.8 runs=2 waited=9s wait=0.1 prove=0.7 rework=0.0 width=3
+  bash-walls-egd.test.sh green promised=37s actual=38s ratio=1.03
+  shell-lint.test.sh green promised=38s actual=38s ratio=1.00
+T2 queue ready=2026-11-05T04:21:46Z landed=2026-11-05T04:23:15Z minutes=1.5 runs=3 waited=9s wait=0.1 prove=1.3 rework=0.0 width=2
+  canonical-sdlc-evidence-gate-2.test.sh green promised=64s actual=75s ratio=1.17
+  dispatch-preflight-5.test.sh green promised=32s actual=36s ratio=1.12
+  shell-lint.test.sh green promised=38s actual=40s ratio=1.05
+T6 queue ready=2026-11-05T04:52:19Z landed=2026-11-05T05:03:37Z minutes=11.3 runs=4 waited=473s wait=7.9 prove=3.2 rework=0.2 width=4
+  session-poker-4.test.sh discarded promised=132s actual=- ratio=-
+  session-poker-4.test.sh green promised=149s actual=194s ratio=1.30
+  dispatch-preflight-5.test.sh green promised=35s actual=49s ratio=1.40
+  shell-lint.test.sh green promised=33s actual=42s ratio=1.27
+T7 queue ready=2026-11-05T05:23:31Z landed=2026-11-05T05:36:01Z minutes=12.5 runs=8 waited=359s wait=6.0 prove=6.5 rework=0.0 width=3
+  session-poker-4.test.sh green promised=198s actual=192s ratio=0.97
+  words.test.sh green promised=13s actual=13s ratio=1.00
+  render.test.sh green promised=17s actual=18s ratio=1.06
+  shell-lint.test.sh green promised=45s actual=39s ratio=0.87
+  session-poker-4.test.sh green promised=167s actual=197s ratio=1.18
+  words.test.sh green promised=13s actual=12s ratio=0.92
+  render.test.sh green promised=18s actual=18s ratio=1.00
+  shell-lint.test.sh green promised=41s actual=41s ratio=1.00
+T5 queue ready=2026-11-05T05:48:41Z landed=2026-11-05T05:50:44Z minutes=2.0 runs=2 waited=83s wait=1.4 prove=0.7 rework=0.0 width=2
+  canonical-sdlc-evidence-gate.test.sh green promised=34s actual=35s ratio=1.03
+  shell-lint.test.sh green promised=36s actual=39s ratio=1.08
+T13 queue ready=2026-11-05T06:11:38Z landed=2026-11-05T06:16:15Z minutes=4.6 runs=11 waited=24s wait=0.4 prove=4.2 rework=0.0 width=3
+  card.test.sh green promised=42s actual=45s ratio=1.07
+  units.test.sh green promised=27s actual=32s ratio=1.19
+  stop.test.sh green promised=22s actual=39s ratio=1.77
+  stop-orders.test.sh green promised=17s actual=18s ratio=1.06
+  canonical-sdlc-governing-skill.test.sh green promised=32s actual=34s ratio=1.06
+  principles-item.test.sh green promised=97s actual=75s ratio=0.77
+  slots.test.sh green promised=68s actual=66s ratio=0.97
+  sitrep-card.test.sh green promised=48s actual=48s ratio=1.00
+  session-poker-5.test.sh green promised=126s actual=127s ratio=1.01
+  runner-roster.test.sh green promised=24s actual=23s ratio=0.96
+  shell-lint.test.sh green promised=39s actual=40s ratio=1.03
+T3 queue ready=2026-11-05T04:49:38Z landed=2026-11-05T06:25:55Z minutes=96.3 runs=15 waited=3081s wait=51.4 prove=43.4 rework=1.5 width=4
+  release-approval.test.sh green promised=531s actual=591s ratio=1.11
+  canonical-sdlc-evidence-gate-2.test.sh red promised=57s actual=77s ratio=1.35
+  shell-lint.test.sh green promised=29s actual=41s ratio=1.41
+  release-approval.test.sh red promised=535s actual=610s ratio=1.14
+  canonical-sdlc-evidence-gate-2.test.sh green promised=60s actual=74s ratio=1.23
+  shell-lint.test.sh green promised=42s actual=42s ratio=1.00
+  release-approval.test.sh green promised=363s actual=471s ratio=1.30
+  canonical-sdlc-evidence-gate-2.test.sh green promised=64s actual=74s ratio=1.16
+  shell-lint.test.sh green promised=29s actual=42s ratio=1.45
+  release-approval.test.sh green promised=434s actual=468s ratio=1.08
+  canonical-sdlc-evidence-gate-2.test.sh green promised=78s actual=76s ratio=0.97
+  shell-lint.test.sh green promised=43s actual=39s ratio=0.91
+  release-approval.test.sh green promised=388s actual=460s ratio=1.19
+  canonical-sdlc-evidence-gate-2.test.sh green promised=54s actual=71s ratio=1.31
+  shell-lint.test.sh green promised=35s actual=40s ratio=1.14
+T4 queue ready=2026-11-05T04:59:44Z landed=2026-11-05T06:43:30Z minutes=103.8 runs=8 waited=4224s wait=70.4 prove=17.8 rework=15.5 width=4
+  session-poker-4.test.sh green promised=183s actual=215s ratio=1.17
+  sitrep.test.sh green promised=234s actual=259s ratio=1.11
+  release-approval.test.sh green promised=599s actual=580s ratio=0.97
+  shell-lint.test.sh green promised=42s actual=45s ratio=1.07
+  session-poker-4.test.sh green promised=99s actual=218s ratio=2.20
+  sitrep.test.sh green promised=122s actual=253s ratio=2.07
+  release-approval.test.sh green promised=408s actual=488s ratio=1.20
+  shell-lint.test.sh green promised=31s actual=42s ratio=1.35
+T14 queue ready=2026-11-05T07:35:47Z landed=2026-11-05T07:38:58Z minutes=3.2 runs=3 waited=11s wait=0.2 prove=3.0 rework=0.0 width=4
+  bash-walls-egd.test.sh green promised=39s actual=41s ratio=1.05
+  dispatch-preflight-4b.test.sh green promised=121s actual=180s ratio=1.49
+  shell-lint.test.sh green promised=42s actual=40s ratio=0.95
+T15 queue ready=2026-11-05T07:57:17Z landed=2026-11-05T08:05:33Z minutes=8.3 runs=6 waited=11s wait=0.2 prove=8.1 rework=0.0 width=4
+  release-approval-2.test.sh green promised=80s actual=154s ratio=1.93
+  session-poker-3.test.sh green promised=51s actual=93s ratio=1.82
+  session-poker-5.test.sh green promised=102s actual=155s ratio=1.52
+  release-approval.test.sh green promised=488s actual=484s ratio=0.99
+  canonical-sdlc-evidence-gate-2.test.sh green promised=71s actual=80s ratio=1.13
+  shell-lint.test.sh green promised=40s actual=38s ratio=0.95
+```
+
 ## 1.29.1 — 2026-10-27
 
 This is the one-pass release: the four small fixes of the 1.30.0 charter's Phase 0, so that no run pays five whole
