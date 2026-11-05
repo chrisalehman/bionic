@@ -1,6 +1,7 @@
 #!/bin/bash
 # Tests for hooks/dispatch-preflight.sh — THE START GATE. The fifth shard: §AGREE and §PROTOTYPE
 # (wave-38 T21; REQ-13 AC-13.1, AC-13.2; design ledger Δ9, D16).
+# §QUESTIONS holds the other half: a row's declared questions are the set a reader's brief is compared to.
 #
 # A STEP-2 PROTOTYPE THE WALL ADMITS. steps/2.md sanctions a prototype at Step 2, before the plan
 # carries `approved-by:`, and until 1.21.0 the wall refused every writer role there and named no
@@ -490,5 +491,59 @@ expect_eq "LN.3 AC-2.3 Files all on the built-in list (CHANGELOG.md): admitted w
 ln_gate ln4 'CHANGELOG.md, scripts/perf/README.md' 'prose: docs/'
 expect_eq "LN.4 a second Files path off the list (a prose: entry that does not hold it): refused" "deny" "$GATE_VERDICT"
 expect_contains "LN.4b …naming that path, not the first one" "Files name scripts/perf/README.md, which is not prose" "$GATE_VERR"
+
+section "§QUESTIONS — a row's declared questions are the set the wall compares a reader's brief to (AC-5.3)"
+# ============================================================================
+#
+# A review row declares the questions it owes with `task-add --questions`, which writes ` · questions: <q,…>` into its
+# task cell. The wall reaches the row by the brief's `Row:`, lifts the tag with `units_questions`, and compares the
+# brief's `Questions:` to that set in place of the role's full deal; a row with no tag is held to the full deal as ever.
+# A declaration the role is not dealt does not take the deal's place.
+# FIXTURES: make_repo's approved, bound plan at `rigor: double`, `scale: wave`, with a one-row `## Tasks` table whose
+# task cell carries the tag the case names (SYNTHESIZED in the shape task-add writes, which session-poker-4.test.sh
+# §REVIEW-FILES drives through the verb); the brief names the row by `Row:` and carries one record per question.
+# fails-when: a brief equal to the row's declaration is refused for not naming the role's full deal, a brief naming the
+# full deal is admitted over a row declaring less, a declaration outside the role's deal is honoured, or an untagged
+# row stops demanding the full deal.
+qn_gate() {  # <repo tag> <task cell> <role> <Questions: set, comma-joined> -> GATE_*, QN_ROW
+  local n files="" i
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 6 | review | %s | reader | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' "$2" \
+    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  n=$(( $(printf '%s' "$4" | tr -cd ',' | wc -c) + 1 )); files=".bionic/docs/record/wq-$1.md"
+  for ((i = 2; i <= n; i++)); do files="$files, .bionic/docs/record/wq-$1-$i.md"; done
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(printf 'Your task: read the change for the questions below.\nExpected artifact: .bionic/docs/record/wq-%s.md\nExpected duration: ~30 minutes.\nSuites: tests/widget.test.sh\nRow: T23\nQuestions: %s\nFiles: %s' "$1" "${4//,/, }" "$files")" "wq-$1" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" "$3")"
+  QN_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+}
+qn_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
+
+qn_gate qn1 'the audit. The auditor reads it. · questions: evidence' bionic:auditor evidence
+expect_eq "QN.1 AC-5.3 over a row tagged questions: evidence at double, an auditor brief Questions: evidence is admitted" "allow" "$GATE_VERDICT"
+expect_eq "QN.1b …and the row records the set compared" "evidence" "$(roster_field "$QN_ROW" questions)"
+
+qn_gate qn2 'the audit. The auditor reads it. · questions: evidence' bionic:auditor evidence,adversarial
+expect_eq "QN.2 AC-5.3 …a brief naming evidence, adversarial over that row is refused" "deny" "$GATE_VERDICT"
+expect_contains "QN.2b …its line names the set the row declares" "dispatch refused — row T23 declares auditor: evidence" "$(qn_first)"
+expect_contains "QN.2c …and the detail the dealt set, evidence alone" "Dealt: evidence" "$GATE_VERR"
+
+qn_gate qn3 'the critic read. The critic reads the code. · questions: adversarial' bionic:critic adversarial
+expect_eq "QN.3 AC-5.3 over a row tagged questions: adversarial, the critic's brief Questions: adversarial is admitted (the role's full deal is adversarial, structure)" \
+  "allow|adversarial" "$GATE_VERDICT|$(roster_field "$QN_ROW" questions)"
+
+qn_gate qn4 'the critic read. The critic reads the code. · questions: adversarial' bionic:critic adversarial,structure
+expect_eq "QN.4 AC-5.3 …and the brief naming the critic's full deal over that row is refused" "deny" "$GATE_VERDICT"
+expect_contains "QN.4b …its line names the row and its set" "dispatch refused — row T23 declares critic: adversarial" "$(qn_first)"
+expect_contains "QN.4c …and the detail says where the set was declared" "declared on row T23 by task-add --questions" "$GATE_VERR"
+expect_contains "QN.4d …and the line to write is the declared set" "    Questions: adversarial" "$GATE_VERR"
+
+qn_gate qn5 'the critic read. The critic reads the code.' bionic:critic adversarial
+expect_eq "QN.5 AC-5.3 over an untagged row the role's full deal is demanded: the critic's adversarial alone is refused" "deny" "$GATE_VERDICT"
+expect_contains "QN.5b …naming the full deal" "double rigor deals critic: adversarial,structure" "$(qn_first)"
+qn_gate qn5c 'the critic read. The critic reads the code.' bionic:critic adversarial,structure
+expect_eq "QN.5c control: the full deal over the untagged row is admitted" "allow|adversarial,structure" "$GATE_VERDICT|$(roster_field "$QN_ROW" questions)"
+
+qn_gate qn6 'the audit. The auditor reads it. · questions: adversarial' bionic:auditor adversarial
+expect_eq "QN.6 a declaration the role is not dealt (adversarial is the critic's at double) does not take the deal's place: the auditor is refused" "deny" "$GATE_VERDICT"
+expect_contains "QN.6b …held to what the rigor deals the auditor" "double rigor deals auditor: evidence" "$(qn_first)"
 
 finish
