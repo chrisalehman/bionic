@@ -567,6 +567,10 @@ expect_eq "PROSE-5 with no prose: line a CHANGELOG.md commit is prose: the built
   "$(printf 'cover %s prose\nrc=0' "$PR_LOG")" "$(pr_cover "$PR_CODE" "$PR_LOG" adversarial)"
 expect_eq "PROSE-5b …and a payload/scripts/lib/x.sh commit is code: it owes" \
   "$(printf 'cover %s owes\nrc=1' "$PR_LIB")" "$(pr_cover "$PR_LOG" "$PR_LIB" adversarial)"
+# The list is the whole answer: it holds the docs root and the tracked docs home as dir/ entries, so no walk keeps a prefix arm of its own.
+PR_LIST="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; prose_list "$2"' _ "${EG6_LIB%/*}/prose.sh" "$PR_R" 2>/dev/null)"
+expect_eq "PROSE-6 prose_list prints the docs root as a dir/ entry" "1" "$(printf '%s\n' "$PR_LIST" | /usr/bin/grep -cx '\.bionic/docs/')"
+expect_eq "PROSE-6b …and the tracked docs home as another" "1" "$(printf '%s\n' "$PR_LIST" | /usr/bin/grep -cx 'docs/')"
 
 # ---------------------------------------------------------------------------
 section "§PROSE-CONFIG — a path the project lists under prose: in .bionic/config.yaml is prose at the floor and on every review chain"

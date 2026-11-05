@@ -492,6 +492,12 @@ ln_gate ln4 'CHANGELOG.md, scripts/perf/README.md' 'prose: docs/'
 expect_eq "LN.4 a second Files path off the list (a prose: entry that does not hold it): refused" "deny" "$GATE_VERDICT"
 expect_contains "LN.4b …naming that path, not the first one" "Files name scripts/perf/README.md, which is not prose" "$GATE_VERR"
 
+# The wall asks the same list the judge does, which holds the tracked docs home and the docs root as dir/ entries (D11).
+ln_gate ln5 docs/adrs/adr-999-x.md ''
+expect_eq "LN.5 a Files path under the tracked docs home (docs/adrs/…): admitted, as the judge excuses its commit" "allow" "$GATE_VERDICT"
+ln_gate ln6 notes-home/records/x.md 'docs-root: notes-home'
+expect_eq "LN.6 a Files path under a docs-root: set off the default: admitted" "allow" "$GATE_VERDICT"
+
 section "§QUESTIONS — a row's declared questions are the set the wall compares a reader's brief to (AC-5.3)"
 # ============================================================================
 #
