@@ -1117,7 +1117,7 @@ _proof_records() {
     (ev = line_ev()) != "" {
       r = line_kv("row")
       if (ev == "ready") { if (r != "") su[r] = keys(line_kv("suites")) }
-      else if (ev == "published") { c = line_kv("commit"); x = (r in su) ? su[r] : "-"; if (line_kv("kind") == "hand" && x == "none") x = "-"; if (c != "") out("O\t" c "\t" r "\t" x) }
+      else if (ev == "published") { c = line_kv("commit"); x = (r in su) ? su[r] : "-"; if (x == "none") x = "-"; if (c != "") out("O\t" c "\t" r "\t" x) }
       else if (ev == "verdict") {
         c = line_kv("commit"); s = key(line_kv("suite")); v = line_kv("result")
         if (c != "" && s != "" && (v == "green" || v == "red")) { out("R\t" line_kv("at") "\t" c "\t" s "\t" v "\t" (line_kv("kind") == "regression" ? "regression" : "verdict")); if (v == "red") { vc[nl] = c; vs[nl] = s } }
