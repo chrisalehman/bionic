@@ -133,8 +133,9 @@ that culled by the rubric, not by suspending the cap or thinning the proof (D15)
   catcher of a kept section proved by a mutation probe on a scratch clone. It fell short of the row's round target of
   400; the measured need was 68 lines (A-orch.11, A-orch.12). The rubric yielded nothing in the other seven suites read.
 - The structure read raised two debt lines: prose-predicate (the wall's and the judge's prose tests) and
-  role-question-deal (`poker_questions_dealt` beside the wall's derivation). T18 burned prose-predicate, so the
-  ledger stands at 13: fourteen in, three burned, two raised. AC-8.2 and AC-8.3 are the close's to read.
+  role-question-deal (`poker_questions_dealt` beside the wall's derivation), and the adversarial re-read a third,
+  open-reds-past-f. T18 burned prose-predicate, so the ledger stands at 14: fourteen in, three raised, three burned.
+  AC-8.2 holds at that count; AC-8.3 asks for 13 and is the close's to read.
 
 ### Fixtures that met the new rules
 
@@ -162,7 +163,8 @@ that culled by the rubric, not by suspending the cap or thinning the proof (D15)
   suites by one assertion each: bash-walls-egd, dispatch-preflight-4b, session-poker-3 and session-poker-5
   (`regression-run-999c8e6cd….log`). T14 was born of it for the first two. The other two were the critic's S2 finding,
   and T15 closed them. The second whole run, at 227313af4 after T15, ran 128 of 128 green
-  (`regression-run-227313af4….log`).
+  (`regression-run-227313af4….log`), and the run at the release head 19242438d, after T18 and this entry, the same
+  (`regression-run-19242438d….log`).
 - T9 (`critic-evidence.md`, `critic-adversarial.md`, `critic-structure.md`): the critic's read of the whole at
   999c8e6cd. Adversarial failed on one S2: the merge word waived a suite the whole run left red once a later landing was
   unproved. T15 fixed it, and T16 re-reads T15 as a piece. Finding 2, S3 on: the dispatch wall reads a path the judge
