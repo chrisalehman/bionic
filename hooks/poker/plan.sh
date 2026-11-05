@@ -3197,17 +3197,23 @@ RR_DISP_EOF
     done
 
     # THE MERGE WITHOUT A PASS AT THIS HEAD is the person's own decision, put beside the release and the merge while the
-    # whole suite did not run green here and no word was given at this head, by the rule the gate at 8 holds the merge
-    # on (lib/proof.sh `proof_merge_unproved`, `facts_state`'s unproved). Waiting for the pass is recommended and taking
-    # the default records nothing, so only the person's own `merge` writes the line. A plan that owes no whole run, or
-    # holds no proof of one, has no pass to wait for and is asked nothing here.
+    # whole suite did not run green here and no word was given at this head, by the one rule the gate at 8 honours the
+    # word on (lib/proof.sh `proof_merge_ask`, `facts_state`'s unproved): a floor covered or uncovered, never owed.
+    # Waiting for the pass is recommended and taking the default records nothing, so only the person's own `merge`
+    # writes the line. A floor the whole run left red draws no decision: the Tests line names its suites and their exit.
+    # A plan that owes no whole run, or holds no proof of one, has no pass to wait for and is asked nothing here.
     RR_WHOLE="$(proof_whole_text "$PV_PLAN" "$PV_REPO" 2>/dev/null)"
+    RR_REDS=""
     case "$RR_WHOLE" in
       none|'') : ;;
-      *) if [ "$(proof_regression "$PV_PLAN")" != no ] && line="$(proof_merge_unproved "$PV_PLAN" "$PV_REPO" "$RR_HEAD" 2>/dev/null)"; then
-           rr_add unproved approve:merge-unproved "-" "approve merge-unproved" "-" \
-             "Merge without a whole run at this head — $line" "wait for the pass" "merge without it" \
-             "wait for the pass" "merge without a whole run at this head"
+      *) if [ "$(proof_regression "$PV_PLAN")" != no ]; then
+           line="$(proof_merge_ask "$PV_PLAN" "$PV_REPO" "$RR_HEAD" 2>/dev/null)"
+           case $? in
+             0) rr_add unproved approve:merge-unproved "-" "approve merge-unproved" "-" \
+                  "Merge without a whole run at this head — $line" "wait for the pass" "merge without it" \
+                  "wait for the pass" "merge without a whole run at this head" ;;
+             2) RR_REDS="$line" ;;
+           esac
          fi ;;
     esac
 
@@ -3245,6 +3251,7 @@ RR_AGAINST_EOF
       "green at "*) RR_TREG="✅ whole suite: $RR_TREG" ;;
       *) RR_TREG="✖️ whole suite: ${RR_TREG:-none}" ;;
     esac
+    [ -z "$RR_REDS" ] || RR_TREG="$RR_TREG · $(proof_owed_needs "$RR_REDS")"
 
     # THE REVIEWS: each question's newest reading, by the role the rigor deals it, covered or failing as the judge
     # reads it at the head (lib/proof.sh `facts_reviews`, the one reading the situation report's count shares): a
