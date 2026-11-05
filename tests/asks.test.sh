@@ -926,14 +926,14 @@ expect_eq "OB-9 …answered no at its opening it counts no minute, and no reader
 section "§SHARED: a decision ruled at the release card and one approved by name go through the one ruling writer: each leaves its Δ line and a closed ask"
 # ============================================================
 # FIXTURE FIDELITY: the run is release-approval.test.sh's settled Step-8 world, its builders (fc_record, fc_line,
-# fc_floor, fc_reads, fc_plan, fc_typed) read out of that suite by name and its repository made by the same steps; the
+# fc_floor, fc_reads, fc_plan, fc_typed) read out of its prelude by name and its repository made by the same steps; the
 # integrate row also reads approval:D7 and approval:D8, through fc_plan's own edit argument. The decisions are put by
 # `decisions put`, the card is rendered by `release-approval` and answered by `reply`, the words typed in this
 # session's transcript as that suite types them.
 # fails-when: `approve D<n>`, or a card reply that approves D<n>, records the approval and writes no ledger entry, or
 # leaves decide:D<n> open.
 # ANTI-VACUITY: SH-1 reads both asks open through the extractor SH-4 and SH-8 read them closed through.
-RA_TESTS="$(dirname "$0")/release-approval.test.sh"
+RA_TESTS="$(dirname "$0")/release-approval.prelude.sh"
 for _f in fc_record fc_line fc_floor fc_reads fc_plan fc_typed; do as_import_fn "$_f" "$RA_TESTS" || exit 1; done
 POKE_BOUND=180
 RFC="$(make_repo as-shared)"
