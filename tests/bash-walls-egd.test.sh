@@ -537,7 +537,7 @@ PR_BASE="$(git -C "$PR_R" rev-parse HEAD)"
 printf -- '---\ncurrent: 6\n---\n\n## SDLC State\n\n' > "$PR_R/.bionic/docs/plans/p.plan.md"
 pr_commit() {  # <message> <path>... -> the new head; each path gets a line of text
   local m="$1" f; shift
-  for f in "$@"; do mkdir -p "$PR_R/${f%/*}"; printf 'x %s\n' "$m" >> "$PR_R/$f"; done
+  for f in "$@"; do case "$f" in */*) mkdir -p "$PR_R/${f%/*}" ;; esac; printf 'x %s\n' "$m" >> "$PR_R/$f"; done
   git -C "$PR_R" add -- "$@" && git -C "$PR_R" commit -qm "$m" && git -C "$PR_R" rev-parse HEAD
 }
 pr_cover() {  # <from> <to> [<question>] -> the judge's basis lines then rc
@@ -560,5 +560,57 @@ expect_eq "PROSE-3b …and the promotion commit" "rc=0" "$(pr_past "$PR_DOC" "$P
 expect_eq "PROSE-4 a payload file beside a doc is still owed: the prose rule asks every path" \
   "$(printf 'cover %s owes\nrc=1' "$PR_CODE")" "$(pr_cover "$PR_PROM" "$PR_CODE" adversarial)"
 expect_eq "PROSE-4b …and the regression walk names it" "rc=1" "$(pr_past "$PR_PROM" "$PR_CODE")"
+# The built-in list stands with no `prose:` line: this repository has no .bionic/config.yaml.
+PR_LOG="$(pr_commit "the release text" CHANGELOG.md)"
+PR_LIB="$(pr_commit "a library file" payload/scripts/lib/x.sh)"
+expect_eq "PROSE-5 with no prose: line a CHANGELOG.md commit is prose: the built-in list stands" \
+  "$(printf 'cover %s prose\nrc=0' "$PR_LOG")" "$(pr_cover "$PR_CODE" "$PR_LOG" adversarial)"
+expect_eq "PROSE-5b …and a payload/scripts/lib/x.sh commit is code: it owes" \
+  "$(printf 'cover %s owes\nrc=1' "$PR_LIB")" "$(pr_cover "$PR_LOG" "$PR_LIB" adversarial)"
+
+# ---------------------------------------------------------------------------
+section "§PROSE-CONFIG — a path the project lists under prose: in .bionic/config.yaml is prose at the floor and on every review chain"
+# ---------------------------------------------------------------------------
+# A project names its own prose with `prose:`, a comma list of exact paths or `dir/` prefixes, read beside the
+# built-in list by lib/prose.sh. One list feeds the review cover, the regression walk and the floor line that
+# `current 8 --check` prints (`facts_state`'s regression line), so a configured path reads prose at all three or
+# at none. FIXTURE FIDELITY: §PROSE's helpers over a second real repository on a working branch, its config in the
+# shape config_value reads, a floor proof line written by the library's own writer at the base.
+PR_R="$SANDBOX/prose-config"; mkdir -p "$PR_R/.bionic/docs/plans"   # §PROSE's helpers read $PR_R when called
+git -C "$PR_R" init -q && git -C "$PR_R" config user.email t@example.com && git -C "$PR_R" config user.name t
+printf 'a\n' > "$PR_R/a.sh"; git -C "$PR_R" add a.sh; git -C "$PR_R" commit -qm base; git -C "$PR_R" checkout -qb wave/01-prose
+PC_BASE="$(git -C "$PR_R" rev-parse HEAD)"
+printf 'prose: CONTEXT.md, scripts/perf/\n' > "$PR_R/.bionic/config.yaml"
+PC_FLOOR="$(bash -c '. "$1" && proof_floor_line "$2" 2026-10-12T11:00:00Z record/w/floor.log ""' _ "$EG6_LIB" "$PC_BASE" 2>/dev/null)"
+{ printf -- '---\nrigor: single\nscale: task\ncurrent: 6\n---\n\n## SDLC State\n\nworking-branch: wave/01-prose\n'
+  printf -- '- Step 4: dispatched\n  base-sha: %s\n%s\n' "$PC_BASE" "$PC_FLOOR"; } > "$PR_R/.bionic/docs/plans/p.plan.md"
+pc_floor() {  # <head> -> the regression line `current 8 --check` prints, the judge's facts_state at <head>, its range dropped
+  git -C "$PR_R" update-ref refs/heads/wave/01-prose "$1"
+  bash -c '. "$1" >/dev/null 2>&1 || exit 127; facts_state "$2" "$3"' _ "$EG6_LIB" "$PR_R/.bionic/docs/plans/p.plan.md" "$1" 2>/dev/null \
+    | awk -F'\t' '$1 == "regression" { print $2 (NF > 3 ? "\t" $4 : "") }'
+}
+PC_CONF="$(pr_commit "the project's own prose" CONTEXT.md scripts/perf/README.md)"
+for q in adversarial structure evidence; do
+  expect_eq "PROSE-CONFIG-1 a commit of CONTEXT.md and scripts/perf/README.md, both under prose:, is prose on the $q chain" \
+    "$(printf 'cover %s prose\nrc=0' "$PC_CONF")" "$(pr_cover "$PC_BASE" "$PC_CONF" "$q")"
+done
+expect_eq "PROSE-CONFIG-1b …and with no question named" "$(printf 'cover %s prose\nrc=0' "$PC_CONF")" "$(pr_cover "$PC_BASE" "$PC_CONF")"
+expect_eq "PROSE-CONFIG-2 the regression walk excuses it" "rc=0" "$(pr_past "$PC_BASE" "$PC_CONF")"
+expect_eq "PROSE-CONFIG-2b …and the floor line current 8 --check prints reads covered past it, owing no suite" \
+  "covered" "$(pc_floor "$PC_CONF")"
+PC_NEAR="$(pr_commit "a path beside the listed ones" scripts/perfx.sh)"
+expect_eq "PROSE-CONFIG-3 a path the list does not hold is code with the config present: scripts/perf/ is a directory, not a stem" \
+  "$(printf 'cover %s owes\nrc=1' "$PC_NEAR")" "$(pr_cover "$PC_CONF" "$PC_NEAR" adversarial)"
+expect_eq "PROSE-CONFIG-3b …and the floor line names it unproved" \
+  "uncovered	commit ${PC_NEAR:0:12} (no landing row) is not proved: no run of its row's suites is recorded at it" "$(pc_floor "$PC_NEAR")"
+PC_BUILT="$(pr_commit "the release text beside the config" CHANGELOG.md)"
+expect_eq "PROSE-CONFIG-4 the built-in list stands beside the prose: entries" \
+  "$(printf 'cover %s prose\nrc=0' "$PC_BUILT")" "$(pr_cover "$PC_NEAR" "$PC_BUILT" adversarial)"
+# The list has one home: the predicate is defined once, in the library, and the old private predicate is gone.
+PC_LIB="${EG6_LIB%/*}"
+expect_eq "PROSE-CONFIG-5 the old predicate _proof_docs_path is named nowhere in lib/proof.sh" \
+  "0" "$(/usr/bin/grep -c '_proof_docs_path' "$PC_LIB/proof.sh")"
+expect_eq "PROSE-CONFIG-5b prose_path is defined in lib/prose.sh, and in no other library or hook" \
+  "$PC_LIB/prose.sh" "$(/usr/bin/grep -lE '^prose_path\(\)' "$PC_LIB"/*.sh "${BIONIC_HOOKS_DIR}"/*.sh "${BIONIC_HOOKS_DIR}"/poker/*.sh 2>/dev/null)"
 
 finish
