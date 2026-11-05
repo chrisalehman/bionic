@@ -887,7 +887,7 @@ section "§WORD: the word accepts absence: the card draws the merge decision on 
 # owed card readings are §JUDGE's own (JUDGE-3, JUDGE-4, JUDGE-2), carried into the table, never measured twice.
 fc_judged() { bash -c '. "$1/roots.sh"; . "$1/proof.sh"; _proof_floor_judge "$2" "$3" "$4" | cut -f1' _ "$FC_LIB" "$PFC" "$RFC" "$FC_R" 2>/dev/null; }
 fc_regline() { printf '%s\n' "$OUT" | /usr/bin/grep -E '^regression	'; }  # the gate's regression line, as current 8 --check printed it
-# (1) AC-3.1: an uncovered head, the card's decision, the reply that merges, the gate admitting.
+# (1) An uncovered head, the card's decision, the reply that merges, the gate admitting.
 rm -f "$FC_REC/landing-proofs.log"
 fc_plan "$(fc_floor "$FC_B")
 $(fc_reads "$FC_C")"
@@ -910,7 +910,7 @@ expect_eq "WORD-1d …and current 8 --check is admitted (exit 0) over the uncove
 poke "$RFC" current 8 --check; FC_WN_UNC="$RC"
 expect_eq "WORD-1e …the word taken out, the release approval kept: refused (exit 1) on the regression unproved, so the word is what admits" "1|unproved" "$RC|$(fc_regline | cut -f2)"
 fc_typed "$FC_WD" "$FC_WR"; rm -f "$FC_REC"/release-approval-*.md
-# (2) AC-3.2: an owed head; the card's side is JUDGE-2's (the owed suite and its exit on the Tests line, no decision).
+# (2) An owed head; the card's side is JUDGE-2's (the owed suite and its exit on the Tests line, no decision).
 fc_plan "$(fc_floor "$FC_C" a.test.sh)
 $(fc_reads "$FC_C")"
 expect_eq "WORD-2 precondition: the whole run at C left a.test.sh red and nothing greened it since: the judge reads the head owed" "owed" "$(fc_judged)"
@@ -922,7 +922,7 @@ expect_absent "WORD-2g …and names no reply" "reply" "$(fc_regline)"
 poke "$RFC" approve merge-unproved 'merge it'
 poke "$RFC" current 8 --check; FC_WY_OWED="$RC"
 expect_eq "WORD-2h the word recorded at the head over the owed floor: still refused (exit 1) on the regression owed" "1|owed|1" "$RC|$(fc_regline | cut -f2)|$(/usr/bin/grep -c '^approved: merge-unproved ' "$PFC")"
-# (3) AC-3.3: the states table, each row the card's draw beside the gate's exits without and with the word.
+# (3) The states table, each row the card's draw beside the gate's exits without and with the word.
 fc_wrow() {  # <state> <draw> <exit without the word> <exit with it, or - where the word is moot> -> one table cell
   local h=no; [ "$3" = 0 ] || [ "$4" != 0 ] || h=yes
   printf '%s:draw=%s:honour=%s ' "$1" "$2" "$h"

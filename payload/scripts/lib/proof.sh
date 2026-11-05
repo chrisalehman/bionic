@@ -2406,7 +2406,7 @@ proof_debts_open() {
 # the person gave their word at it (`proof_merge_ask`); past F otherwise it is
 #     unproved<TAB><the whole suite's state, proof_whole_text's><TAB><its exit, proof_unproved_needs's>
 # the merge-without-a-pass the release card asks. An owed floor is owed<TAB><suites><TAB><its exit, proof_owed_needs's>.
-# <head> is the caller's, read from the working branch's ref (`proof_branch_head`), never a checkout's (A-orch-45).
+# <head> is the caller's, read from the working branch's ref (`proof_branch_head`), never a checkout's.
 # An owed line this judge has no rule for answers absent (the safe direction).
 # A FINDING RE-RATED BY A MOVE (wave-28 T42; D34): a reading's result is the one its findings give at
 # their effective ratings (`_proof_reading_result`). No check holds the step: a reader's rating is
