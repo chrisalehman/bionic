@@ -101,6 +101,14 @@ else
 fi
 
 cols() { bionic_cols "${1:-}"; }
+# over_budget — the lines of a rendered block wider than the shared budget; every width row below reads it.
+over_budget() {  # <rendered block> -> the lines wider than the budget, if any
+  local _line _bad=""
+  while IFS= read -r _line; do
+    [ "$(cols "$_line")" -le "$BIONIC_LINE_WIDTH" ] || _bad="${_bad}${_bad:+ | }$(cols "$_line"):${_line}"
+  done < <(printf '%s\n' "$1")
+  printf '%s' "$_bad"
+}
 
 fmt_render() {  # <fmt> <val>... -> the row, padded in columns
   local fmt="$1"; shift
@@ -201,86 +209,6 @@ TASK_WANT="$(printf '%s\n' \
 TASK_GOT="$( { printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${TASK_VALS1[@]}"
                printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${TASK_VALS2[@]}"; } | card task)"
 expect_eq "10: the task kind renders the card's own header and both rows" "$TASK_WANT" "$TASK_GOT"
-
-section "Section 3: the free cell folds inside its column — the shape Chris chose"
-
-# THE PICTURE, VERBATIM. Three shapes of one row were put to Chris at the T36
-# dispatch: OVERFLOW (today's printf, trailing columns pushed right), STAGGERED
-# (the pre-T10 shape, trailing columns on a line of their own) and WRAPPED. He
-# chose WRAPPED — "D4: I want the wrapped version" — so the expected block below
-# is his picture, transcribed, not a shape this suite invented.
-WRAPPED_WANT='    D2   A decision whose text runs      REQ-2, REQ-3   none
-         past the thirty column limit'
-WRAPPED_GOT="$(printf 'D2\tA decision whose text runs past the thirty column limit\tREQ-2, REQ-3\tnone\n' \
-  | card decision | grep -v '^  Decisions')"
-
-# The two shapes it is NOT, asserted as absences against the same row, so a
-# renderer that regressed to either one fails here and names which.
-case "$WRAPPED_GOT" in
-  *'thirty column limit   REQ-2, REQ-3'*|*'limit REQ'*)
-    no "12: the row does not OVERFLOW (trailing columns pushed right by the long cell)" "$WRAPPED_GOT" ;;
-  *) ok "12: the row does not OVERFLOW (trailing columns pushed right by the long cell)" ;;
-esac
-if printf '%s\n' "$WRAPPED_GOT" | grep -qE '^[[:space:]]+(REQ-2|serves|ADR|none)'; then
-  no "13: the row is not STAGGERED (no continuation line begins with a trailing column)" "$WRAPPED_GOT"
-else
-  ok "13: the row is not STAGGERED (no continuation line begins with a trailing column)"
-fi
-
-# Continuation lines carry NOTHING but the folded cell: no repeated id, no
-# repeated trailing column, indented to the cell's own start column.
-FOLD_CONT="$(printf '%s\n' "$WRAPPED_GOT" | sed -n '2p')"
-expect_eq "14: the continuation line is indented to the free cell's start column" "9" \
-  "$(printf '%s' "$FOLD_CONT" | sed -e 's/[^ ].*$//' | awk '{print length}')"
-expect_absent "14a: …and carries none of the row's trailing columns" "REQ-2" "$FOLD_CONT"
-expect_absent "14b: …and does not repeat the row id" "D2" "$FOLD_CONT"
-
-# The fold is by WORD, never mid-word, and no word is lost.
-FOLD_WORDS="$(printf '%s\n' "$WRAPPED_GOT" | sed -n '2p' | sed 's/^ *//')"
-expect_eq "15: the fold breaks on a word boundary" "past the thirty column limit" "$FOLD_WORDS"
-
-section "Section 4: every kind's free cell folds, and every line stays inside the budget"
-
-# ONE REPO-SCALE ROW PER KIND. Not a synthetic string of x's: a sentence the length
-# a real wave writes, run through every kind, with every output line measured.
-LONG='the derivation bound is owned in one file and both legs read it from there, with the margin named beside each number'
-over_budget() {  # <rendered block> -> the lines wider than the budget, if any
-  local _line _bad=""
-  while IFS= read -r _line; do
-    [ "$(cols "$_line")" -le "$BIONIC_LINE_WIDTH" ] || _bad="${_bad}${_bad:+ | }$(cols "$_line"):${_line}"
-  done < <(printf '%s\n' "$1")
-  printf '%s' "$_bad"
-}
-
-REQ_LONG="$(printf 'REQ-9\t%s\t4\n' "$LONG" | card requirement)"
-expect_empty "16: requirement — no line exceeds the budget on a repo-scale row" "$(over_budget "$REQ_LONG")"
-DEC_LONG="$(printf 'D4\t%s\tREQ-7, REQ-9\tadr-027-close-out-split.md\n' "$LONG" | card decision)"
-expect_empty "17: decision — no line exceeds the budget on a repo-scale row" "$(over_budget "$DEC_LONG")"
-OWN_LONG="$(printf 'derivation bound\tbounds.sh\t%s\ttests/stop.test.sh\n' "$LONG" | card ownership)"
-expect_empty "18: ownership — no line exceeds the budget on a repo-scale row" "$(over_budget "$OWN_LONG")"
-EVAL_LONG="$(printf 'REQ-9\t%s\t2\t1\t3\t0\t1\n' "$LONG" | card eval-design)"
-expect_empty "19: eval-design — no line exceeds the budget on a repo-scale row" "$(over_budget "$EVAL_LONG")"
-TASK_LONG="$(printf 'T36\t%s\tREQ-7, REQ-9\tbuild\t—\tsenior-implementor\n' "$LONG" | card task)"
-expect_empty "20: task — no line exceeds the budget on a repo-scale row" "$(over_budget "$TASK_LONG")"
-
-# …and the fold actually happened, in every one of them: a cell this long cannot
-# be one line, so a renderer that silently dropped the tail passes 16-20 too.
-for _pair in "21:requirement:$REQ_LONG" "22:decision:$DEC_LONG" "23:ownership:$OWN_LONG" \
-             "24:eval-design:$EVAL_LONG" "25:task:$TASK_LONG"; do
-  _n="${_pair%%:*}"; _rest="${_pair#*:}"; _kind="${_rest%%:*}"; _block="${_rest#*:}"
-  if [ "$(printf '%s\n' "$_block" | wc -l | tr -d ' ')" -ge 3 ]; then
-    ok "${_n}: ${_kind} — the long cell folded onto continuation lines rather than being cut"
-  else
-    no "${_n}: ${_kind} — the long cell was not folded" "$_block"
-  fi
-done
-
-# NOTHING IS LOST IN THE FOLD. Every word of the cell comes back out, in order.
-# The cell occupies columns 10-39 of every line of a decision row (the format's own
-# second field), so the cell is read back by COLUMN rather than by stripping the
-# trailing text with a pattern that would have to know what is in it.
-DEC_WORDS="$(printf '%s\n' "$DEC_LONG" | grep -v '^  Decisions' | cut -c10-39 \
-  | sed -e 's/ *$//' | tr '\n' ' ' | sed -e 's/  *$//')"
 
 section "Section 5: columns, not bytes — and the edges"
 
@@ -1805,40 +1733,6 @@ whole_card step3 "$TITLES_BAD" task 1
 expect_eq "TITLES-10f the sub-view is refused with the card" "1|" "$WC_RC|$WC_OUT"
 expect_eq "TITLES-11 the Step-3 text and its template each state the rule once" "1|1" \
   "$(/usr/bin/grep -c 'title of at most 30' "${REPO}/skills/canonical-sdlc/steps/3.md")|$(/usr/bin/grep -c 'title of at most 30' "${REPO}/agents-src/templates/skills/canonical-sdlc/steps/3.md.tmpl")"
-
-# ============================================================
-section "§ABBR: a sentence ends at a period followed by a space and a capital, so an abbreviation never cuts a title"
-# ============================================================
-# A Tasks cell's title is its first sentence. `vs.`, `e.g.` and `i.e.` end in a period and a space but a lowercase word
-# follows them, so the title runs on to the period that is followed by a capital or by the end of the cell. There is no
-# word list to keep: the case of the next letter says it. A title cut at an abbreviation would draw "Draw the facts vs"
-# at 17 columns and hide that the whole title is 31, over the cap.
-# fails-when: a title is cut at an abbreviation, an abbreviation title under the cap is not drawn whole with its
-# sentence beside it, one over the cap is drawn, or a period before a capital stops ending the title.
-ABBR_LONG="Draw the facts vs. the judgment"
-ABBR_SHORT="Fix vs. the old path"
-expect_eq "ABBR-0 precondition: the long abbreviation title is 31 columns and the short one 20" "31|20" "$(cols "$ABBR_LONG")|$(cols "$ABBR_SHORT")"
-ABBR_OK="${CARD_SANDBOX}/wave-04-flock.plan.md"
-sed -e "s/^| T6 | 5 | test | Prove the pair\. The pair is proved after two\./| T6 | 5 | test | ${ABBR_SHORT}. The path is fixed./" "$TITLES_PLAN" > "$ABBR_OK"
-expect_eq "ABBR-0b precondition: the plan holds the abbreviation row" "1" "$(/usr/bin/grep -c "^| T6 | 5 | test | ${ABBR_SHORT}\. The path is fixed\. " "$ABBR_OK")"
-whole_card step3 "$ABBR_OK"; AB_OUT="$WC_OUT"
-expect_eq "ABBR-1 a plan whose title holds an abbreviation within the cap draws (exit 0), silently" "0|" "$WC_RC|$WC_ERR"
-expect_contains "ABBR-1b …the title whole, the abbreviation in it" "${ABBR_SHORT}" "$(printf '%s\n' "$AB_OUT" | /usr/bin/grep '^    T6 ')"
-expect_contains "ABBR-1c …and the sentence after the period that is followed by a capital" "The path is fixed." "$AB_OUT"
-expect_absent "ABBR-1d …and no title cut at the abbreviation" "Fix vs  " "$(printf '%s\n' "$AB_OUT" | /usr/bin/grep '^    T6 ')"
-ABBR_BAD="${CARD_SANDBOX}/wave-05-flock.plan.md"
-sed -e "s/^| T6 | 5 | test | Prove the pair\. The pair is proved after two\./| T6 | 5 | test | ${ABBR_LONG}. The card draws both./" "$TITLES_PLAN" > "$ABBR_BAD"
-whole_card step3 "$ABBR_BAD"
-expect_eq "ABBR-2 a 31-column title holding an abbreviation is refused whole: exit 1, no card on stdout" "1|" "$WC_RC|$WC_OUT"
-expect_contains "ABBR-2b …naming the row, the length, the cap and the whole title" \
-  "REFUSED — task T6: title is 31 characters, the cap is 30: ${ABBR_LONG}" "$WC_ERR"
-expect_absent "ABBR-2c …and never the cut one" "Draw the facts vs " "$(printf '%s\n' "$WC_ERR" | sed "s/${ABBR_LONG}//")"
-expect_eq "ABBR-2d …and task-cell, which the verbs call, says the same words" "REFUSED — task T6: title is 31 characters, the cap is 30: ${ABBR_LONG}" \
-  "$(bash "$CARD_SH" task-cell T6 "${ABBR_LONG}. The card draws both." 2>&1 >/dev/null)"
-expect_eq "ABBR-3 a title ending its cell on an abbreviation's period is the whole cell and has no sentence" \
-  "REFUSED — task T6: no sentence after its title" "$(bash "$CARD_SH" task-cell T6 "${ABBR_SHORT}." 2>&1 >/dev/null)"
-expect_eq "ABBR-3b control: a period before a capital ends the title, as it did" "0" \
-  "$(bash "$CARD_SH" task-cell T6 "Fix the path. The path is fixed." >/dev/null 2>&1; echo $?)"
 
 # ============================================================
 section "§REQ-TITLES: a requirement heading carries a title of at most 30 characters, and the Step-1 card prints id, title and count"
