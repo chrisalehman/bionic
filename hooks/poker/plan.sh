@@ -35,14 +35,16 @@ poker_brief_sink() {  # finding <fact> <fix> <detail> | warn <line>
   esac
 }
 
-# born_floor_backing <plan> <repo> <suite> -> BFB_OF (`floor` or `standing@<12-hex>`) and rc 0 when a red the machine
-# recorded backs a floor-born marker for <suite>; rc 1 otherwise, BFB_OWED and BFB_BRANCH set for the refusal's words
-# (wave-36 T42; D9, design-ledger Δ8, born of critic-adversarial #1). THE TWO FACTS, asked in this order: (a) the
-# plan's newest floor proof owes the suite (lib/proof.sh `_proof_last_read` floor owed, the reader `proof-add
-# inherited` asks), or (b) the run's landing record (`proof_debt_record`) holds an `ev=standing` event for the suite
-# whose head is a commit on the working branch's ref (`proof_branch_head`), the newest such event first. A marker the
-# judge holds every chain by is no declaration. No library gives a standing event a reader; this is the one awk, over
-# the file, and it reads the fields as lib/line.sh's fold does (`fv`, a suite by its file name).
+# born_floor_backing <plan> <repo> <suite> -> BFB_OF (`regression`, `standing@<12-hex>` or `run@<12-hex>`) and rc 0 when a
+# red the machine recorded backs a floor-born marker for <suite>; rc 1 otherwise, BFB_OWED and BFB_BRANCH set for the
+# refusal's words. THE THREE FACTS, asked in this order: (a) the plan's newest regression proof owes the suite (lib/proof.sh
+# `_proof_last_read` regression owed, the reader `proof-add inherited` asks), (b) the run's landing record
+# (`proof_debt_record`) holds an `ev=standing` event for the suite whose head is a commit on the working branch's ref
+# (`proof_branch_head`), the newest such event first, or (c) it holds the `ev=verdict row=regression result=red` line a
+# whole run left for the suite at such a commit, which `regression-run` writes before any proof-add: a run the machine
+# recorded red backs the marker before its log is cited. A marker the judge holds every chain by is no declaration. No
+# library gives these events a reader; `_bfb_newest` is the one awk, over the file, and it reads the fields as lib/line.sh's
+# fold does (`fv`, a suite by its file name).
 # Set in hooks/session-poker.sh, before any part loads: BFB_OF, BFB_OWED, BFB_BRANCH.
 born_floor_backing() {
   local plan="$1" repo="$2" suite="$3" rec bh h
@@ -51,16 +53,51 @@ born_floor_backing() {
   rec="$(proof_debt_record "$plan" "$repo" 2>/dev/null)" && [ -f "$rec" ] || return 1
   bh="$(proof_branch_head "$plan" "$repo")" || return 1
   { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  h="$(_bfb_newest "$rec" "$repo" "$bh" "$suite" standing head)" && { BFB_OF="standing@${h:0:12}"; return 0; }
+  h="$(_bfb_newest "$rec" "$repo" "$bh" "$suite" verdict commit)" && { BFB_OF="run@${h:0:12}"; return 0; }
+  return 1
+}
+
+# _bfb_newest <record> <repo> <branch head> <suite> <ev> <field> -> the newest commit named by <field> of an <ev> line for
+# <suite> that is an ancestor of the branch head, and rc 0; rc 1 and nothing when no line names one. A verdict counts only
+# as the regression's own and red; the newest line is the last in the file.
+_bfb_newest() {
+  local rec="$1" repo="$2" bh="$3" suite="$4" ev="$5" field="$6" h
   while IFS= read -r h; do
     [ -n "$h" ] || continue
     h="$(git -C "$repo" rev-parse --verify -q "${h}^{commit}" 2>/dev/null)" || continue
     git -C "$repo" merge-base --is-ancestor "$h" "$bh" 2>/dev/null || continue
-    BFB_OF="standing@${h:0:12}"; return 0
-  done <<BFB_STANDING
-$(awk -F'|' -v want="$suite" "${_LINE_FIELDS_AWK:-}"'
-    line_ev() == "standing" { s = line_kv("suite"); sub(/.*\//, "", s); if (s == want && line_kv("head") != "") h[++n] = line_kv("head") }
+    printf '%s' "$h"; return 0
+  done <<BFB_EVENTS
+$(awk -F'|' -v want="$suite" -v ev="$ev" -v fld="$field" "${_LINE_FIELDS_AWK:-}"'
+    line_ev() == ev && (ev != "verdict" || (line_kv("row") == "regression" && line_kv("result") == "red")) {
+      s = line_kv("suite"); sub(/.*\//, "", s); if (s == want && line_kv(fld) != "") h[++n] = line_kv(fld) }
     END { for (i = n; i >= 1; i--) print h[i] }' "$rec" 2>/dev/null)
-BFB_STANDING
+BFB_EVENTS
+  return 1
+}
+
+# born_red_log <plan> <repo> -> BFB_LOG, the docs-root-relative path of the newest `regression-run-*.log` in the plan's
+# record directory whose header reads a clean head (`dirty=0`) that is a commit on the working branch and whose last line
+# is a non-zero `rc=`, the red a proof-add of it would record; rc 1 and BFB_LOG empty when none stands. The two ends of
+# the log are `_proof_floor_ends`, the reader proof-add's own grammar uses.
+born_red_log() {
+  local plan="$1" repo="$2" rec dir bh f ends hdr last sha
+  BFB_LOG=""
+  rec="$(proof_debt_record "$plan" "$repo" 2>/dev/null)" || return 1
+  dir="$(dirname "$rec")"; [ -d "$dir" ] || return 1
+  bh="$(proof_branch_head "$plan" "$repo")" || return 1
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    ends="$(_proof_floor_ends "$f")"; hdr="${ends%%$'\n'*}"; last="${ends#*$'\n'}"
+    case "$hdr" in *\ 0) ;; *) continue ;; esac
+    case "$last" in rc=0|rc=) continue ;; rc=[0-9]*) ;; *) continue ;; esac
+    sha="${hdr%% *}"
+    git -C "$repo" merge-base --is-ancestor "$sha" "$bh" 2>/dev/null || continue
+    BFB_LOG="record/$(basename "$dir")/${f##*/}"; return 0
+  done <<BFB_LOGS
+$(ls -t "$dir"/regression-run-*.log 2>/dev/null)
+BFB_LOGS
   return 1
 }
 
@@ -1369,12 +1406,16 @@ $(_units_split_tokens "$TA_FILES")
 EOF
       TA_CELL_TASK="$TA_TASK · born: review"
     fi
-    # A FLOOR-BORN MARKER NAMES ITS RED (wave-36 T42; D9, Δ8): the marker is admitted only with a red the machine
-    # recorded behind it (`born_floor_backing`), and it records which, ` of=floor` or ` of=standing@<12-hex>`.
+    # A FLOOR-BORN MARKER NAMES ITS RED: the marker is admitted only with a red the machine recorded behind it
+    # (`born_floor_backing`), and it records which, ` of=regression`, ` of=standing@<12-hex>` or ` of=run@<12-hex>`.
     TA_BORN_OF=""
     if [ -n "$TA_BORN_SUITE" ]; then
       if ! born_floor_backing "$TA_PLAN" "$REPO_REAL" "$TA_BORN_SUITE"; then
-        die "task-add refused — born: regression $TA_BORN_SUITE names no red the machine recorded; it is admitted when the plan's regression proof owes $TA_BORN_SUITE (it owes ${BFB_OWED:-nothing}; proof-add regression, from a whole run that left it red) or when the landing record holds a standing event for $TA_BORN_SUITE at a commit on ${BFB_BRANCH:-the working branch}; the plan is unchanged."
+        if born_red_log "$TA_PLAN" "$REPO_REAL"; then
+          die "task-add refused — born: regression $TA_BORN_SUITE names no red the machine recorded; proof-add the red run's log first: bash ${HOOK_DIR}/session-poker.sh proof-add regression $BFB_LOG; the plan is unchanged."
+        else
+          die "task-add refused — born: regression $TA_BORN_SUITE names no red the machine recorded; it is admitted when the plan's regression proof owes $TA_BORN_SUITE (it owes ${BFB_OWED:-nothing}; proof-add regression, from a whole run that left it red) or when the landing record holds a standing event or a red verdict for $TA_BORN_SUITE at a commit on ${BFB_BRANCH:-the working branch}; the plan is unchanged."
+        fi
         exit 1
       fi
       TA_BORN_OF="$BFB_OF"; TA_CELL_TASK="$TA_TASK · born: regression"

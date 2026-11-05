@@ -1987,4 +1987,34 @@ poke "$RCT" matrix-render
 expect_eq "CT-4 control: with two close rows serving, the hand-holds criterion reads pending, the single-row one T4 (exit 0)" \
   "0|pending|T4" "$RC|$(ct_task AC-1.1)|$(ct_task AC-2.1)"
 
+# ============================================================
+section "§BORN-RED: a floor-born marker is admitted on the red verdict a whole run recorded, and the refusal names the log to record"
+# fails-when: the verdict backing is dropped (BR-1), a green or off-branch verdict backs it (BR-2), or the refusal misnames the log (BR-3 to BR-5).
+# FIXTURE FIDELITY: §GONE-BORN's plan and branch with no proof line, verdict lines as proof_regression_fold writes them, logs as _proof_floor_log reads.
+BR_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RBR="$(make_repo born-red)"; ( cd "$RBR" && git commit -q --allow-empty -m init ); BR_C1="$(git -C "$RBR" rev-parse HEAD)"
+BR_TREE="$(git -C "$RBR" rev-parse "${BR_C1}^{tree}")"; BR_C2="$(git -C "$RBR" commit-tree "$BR_TREE" -p "$BR_C1" -m second)"
+BR_OFF="$(git -C "$RBR" commit-tree "$BR_TREE" -m off-branch)"; git -C "$RBR" update-ref refs/heads/wave/01-fixture "$BR_C2"
+PBR="$(s42_plan "$RBR" 4 $'  worktree: .worktrees/01-fixture\n  base-sha: abc1234\n  branch: wave/01-fixture\n  working-branch: wave/01-fixture')"
+( cd "$RBR" && git add -f "$PBR" && git commit -qm plan ) >/dev/null 2>&1; BR_DIR="$RBR/.bionic/docs/record/wave-01-fixture"; mkdir -p "$BR_DIR"
+br_verdict() { printf 'line/v1|ev=verdict|row=regression|commit=%s|suite=%s|result=%s|log=-|admitted=-|width=-|kind=regression|at=2026-11-04T10:00:00Z\n' "$1" "$2" "$3" >> "$BR_DIR/landing-proofs.log"; }
+br_log() { printf 'head=%s dirty=%s\nGating: 1 passed, 1 failed\nrc=%s\n' "$1" "$2" "$3" > "$BR_DIR/regression-run-$1.log"; touch -t "$4" "$BR_DIR/regression-run-$1.log"; }  # <sha> <dirty> <rc> <mtime>
+br_add() { poke "$RBR" task-add "$1" 4 build 'fix the red. The red suite turns green.' bionic:implementor '—' 30 REQ-5 "lib/$1.sh" --born "regression:$2"; }
+br_verdict "$BR_C1" a.test.sh red; br_add T6 a.test.sh
+expect_eq "BR-1 a red verdict at a branch commit and no proof line: task-add --born regression:a.test.sh exits 0, the marker reading the run" "0|1" \
+  "$RC|$(/usr/bin/grep "^- T6:" "$PBR" | /usr/bin/grep -c "born: regression a.test.sh of=run@${BR_C1:0:12}")"
+br_verdict "$BR_C1" b.test.sh green; br_add T7 b.test.sh; BR_RC=$RC
+br_verdict "$BR_OFF" c.test.sh red; br_add T7 c.test.sh
+expect_eq "BR-2 a green verdict, and a red one at a commit off the branch, back nothing (exit 1 each)" "1|1" "$BR_RC|$RC"
+br_log "$BR_C1" 0 0 202611040900; br_log "$BR_C2" 1 1 202611040910; br_log "$BR_OFF" 0 1 202611040920; br_add T7 d.test.sh
+expect_eq "BR-3 no verdict and only a green, a dirty and an off-branch log: refused in today's words, naming no log" "1|1|0" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'it owes nothing')|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'proof-add regression record/')"
+br_log "$BR_C1" 0 1 202611040930; br_add T7 d.test.sh
+expect_contains "BR-4 a red log on the branch: the refusal names the proof-add line with it" \
+  "proof-add the red run's log first: bash ${BIONIC_HOOKS_DIR}/session-poker.sh proof-add regression record/wave-01-fixture/regression-run-${BR_C1}.log" "$OUT"
+br_log "$BR_C2" 0 2 202611041000; br_add T7 d.test.sh
+expect_eq "BR-5 two red logs on the branch: the newer is named, the older not" "1|0" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -c "regression-run-${BR_C2}.log")|$(printf '%s\n' "$OUT" | /usr/bin/grep -c "regression-run-${BR_C1}.log")"
+POKE_BOUND="$BR_BOUND_WAS"
+
 finish
