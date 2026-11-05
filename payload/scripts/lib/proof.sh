@@ -1977,7 +1977,7 @@ _proof_floor_judge() {
 # With <only> `closes` the commits are not judged: exit 0 or 2 says only which suites of <owed> are still open, the one
 # reading of the closes the judge and the health line share (`proof_health_line`).
 _proof_past_f() {
-  local plan="$1" tree="$2" from="$3" to="$4" owed="${5:-}" only="${6:-}" walk rec recs top droot pfx="" tpfx plist files="" c f isdoc isrel
+  local plan="$1" tree="$2" from="$3" to="$4" owed="${5:-}" only="${6:-}" walk rec recs plist files="" c f isdoc isrel
   walk="$(git -C "$tree" log --first-parent --reverse --format='W%x09%H%x09%T%x09%P' "$from..$to" 2>/dev/null)" || {
     printf 'git cannot list the commits from %.12s to %.12s' "$from" "$to"; return 1; }
   rec="$(proof_debt_record "$plan" "$tree" 2>/dev/null)" || rec=""
@@ -1985,11 +1985,7 @@ _proof_past_f() {
   # The closes alone ask nothing of the paths or the checks: each commit's proof is skipped below.
   [ "$only" != closes ] || { printf '%s\n%s\n' "$walk" "$recs" | _proof_past_f_awk closes "$owed"; return $?; }
   _proof_roots_load
-  top="$(git -C "$tree" rev-parse --show-toplevel 2>/dev/null)"
-  ! declare -F docs_root >/dev/null 2>&1 || droot="$(docs_root "$tree" 2>/dev/null)"
-  case "${droot:-}" in "$top"/?*) pfx="${droot#"$top"/}"; pfx="${pfx%/}/" ;; esac
-  tpfx="$(_facts_tracked_prefix "$tree")"
-  # The prose list is read once for the walk, as the prefixes are, and asked per path with no fork.
+  # The prose list, the docs homes among its entries, is read once for the walk and asked per path with no fork.
   _proof_prose_load
   plist="$(prose_list "$tree" 2>/dev/null)"
   while IFS= read -r f; do
@@ -1997,8 +1993,7 @@ _proof_past_f() {
     # Each path is asked both questions, as the judge's cover asks them: CHANGELOG.md is docs and in the release set,
     # so it spoils neither a docs commit's excuse nor a release commit's, which its passing check gives.
     isdoc=0; isrel=0
-    if { [ -n "$pfx" ] && [ "${f#"$pfx"}" != "$f" ]; } || { [ -n "$tpfx" ] && [ "${f#"$tpfx"}" != "$f" ]; } \
-       || prose_path "$f" "$plist"; then isdoc=1; fi
+    ! prose_path "$f" "$plist" || isdoc=1
     ! _proof_release_path "$f" || isrel=1
     files="$files${files:+$'\n'}C	$c	$isdoc	$isrel"
   done <<PROOF_PAST_FILES
@@ -2704,8 +2699,8 @@ PROOF_LATER
 #
 # A reading is covered to its head. A later commit on the head's first-parent line extends it when it holds, and
 # each commit's basis is one of five words:
-#   prose        every path it touched (a merge as what it brought in, a rename as both its paths) is under the docs
-#                root or the tracked docs home (`_facts_tracked_prefix`) or on the prose list (lib/prose.sh `prose_path`); a commit that touches nothing is prose too, so a merge whose tree
+#   prose        every path it touched (a merge as what it brought in, a rename as both its paths) is on the prose list
+#                (lib/prose.sh `prose_path`, whose entries hold the docs root and the tracked docs home); a commit that touches nothing is prose too, so a merge whose tree
 #                is its first parent's (one from the integration branch resolved to ours) is prose (wave-38 T2; AC-4.1)
 #   release      every path it touched is in the release set (`_proof_release_path`), the plan's release check passes at
 #                it and its readers are green there (`_proof_release_proved`), on every chain; the regression walk reads
@@ -2720,24 +2715,12 @@ PROOF_LATER
 # below decides it, and `facts_state` asks the same walk, so the line and the verdict never disagree.
 
 # _facts_docs_prefix <tree> -> the docs root as a path relative to <tree> with a trailing `/`, or nothing when it is
-# not under <tree> (or roots.sh is not loaded): the prefix the walk reads as prose.
+# not under <tree> (or roots.sh is not loaded): an argument the walk no longer reads, kept so its callers keep their signature.
 _facts_docs_prefix() {
   local tree="${1:-}" droot p
   [ -n "$tree" ] && declare -F docs_root >/dev/null 2>&1 || return 0
   droot="$(docs_root "$tree" 2>/dev/null)"
   case "$droot" in "$tree"/?*) p="${droot#"$tree"/}"; printf '%s/' "${p%/}" ;; esac
-}
-
-# _facts_tracked_prefix <tree> -> the project's tracked docs home (`docs_tracked`, roots.sh) as a path relative to <tree>
-# with a trailing `/`, or nothing when it is not under <tree>. With roots.sh unloaded the home is `docs/`, its default.
-# A promotion copies a run's records there, so a path under it is prose beside the state home's.
-_facts_tracked_prefix() {
-  local tree="${1:-}" top troot p
-  [ -n "$tree" ] || return 0
-  if ! declare -F docs_tracked >/dev/null 2>&1; then printf 'docs/'; return 0; fi
-  top="$(git -C "$tree" rev-parse --show-toplevel 2>/dev/null)" || return 0
-  troot="$(docs_tracked "$top" 2>/dev/null)"
-  case "$troot" in "$top"/?*) p="${troot#"$top"/}"; printf '%s/' "${p%/}" ;; esac
 }
 
 # _facts_born_landings <plan> <tree> [<proof_fixed lines>] -> `<commit>\t<review|floor>\t<questions>`, one line per
@@ -2827,14 +2810,13 @@ PROOF_BORN
   [ "$b" != owes ]
 }
 
-# _facts_walk <tree> <docs prefix> <last head> <head> [<born landings>] [<question>] [<release heads>] -> one `_facts_basis` line per
+# _facts_walk <tree> <docs prefix, unread> <last head> <head> [<born landings>] [<question>] [<release heads>] -> one `_facts_basis` line per
 # commit past <last head> on <head>'s first-parent line, oldest first, on <question>'s chain; 0 when none owes. Nothing printed and 0 when <head> is
 # <last head>; nothing printed and 1 when <last head> is not on <head>'s history, or git cannot answer: uncovered is
 # the safe direction. Both heads are compared as the commits they resolve to, never as strings (T45; review pass 13 F10).
 _facts_walk() {
-  local tree="$1" pfx="$2" born="${5:-}" q="${6:-}" chk="${7:-}" lh hh files f c="" prose=1 rel=1 rc=0 tpfx plist
+  local tree="$1" born="${5:-}" q="${6:-}" chk="${7:-}" lh hh files f c="" prose=1 rel=1 rc=0 plist
   [ -n "$tree" ] || return 1
-  tpfx="$(_facts_tracked_prefix "$tree")"
   _proof_prose_load
   plist="$(prose_list "$tree" 2>/dev/null)"
   lh="$(git -C "$tree" rev-parse --verify -q "$3^{commit}" 2>/dev/null)" || return 1
@@ -2849,7 +2831,7 @@ _facts_walk() {
     esac
     [ "$rel" = 0 ] || _proof_release_path "$f" || rel=0
     [ "$prose" = 1 ] || continue
-    [ "${f#"$pfx"}" != "$f" ] || { [ -n "$tpfx" ] && [ "${f#"$tpfx"}" != "$f" ]; } || prose_path "$f" "$plist" || prose=0
+    prose_path "$f" "$plist" || prose=0
   done <<PROOF_DOCS_FILES
 $files
 PROOF_DOCS_FILES
