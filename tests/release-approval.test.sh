@@ -811,13 +811,14 @@ fc_plan "$(fc_floor "$FC_C" a.test.sh)
 $(fc_reads "$FC_C")"
 fc_page --preview
 expect_contains "JUDGE-2 the control: no landing greened it, the page reads red at the run's head, one landing since" "whole suite: red at ${FC_C:0:8}, 1 landing before this head" "$(fc_under Tests | fc_flat)"
-expect_absent "JUDGE-2b …names no suite" "a.test.sh" "$(fc_under Tests | fc_flat)"
+expect_contains "JUDGE-2b …names the suite the whole run left red, and its exit" "needs: the pass — a fix row for a.test.sh, then the pass" "$(fc_under Tests | fc_flat)"
 expect_absent "JUDGE-2c …and does not read covered" "covered" "$(fc_under Tests | fc_flat)"
-expect_contains "JUDGE-2d …and the card carries the merge-unproved decision" ". Merge without a whole run at this head — red at ${FC_C:0:8}, 1 landing before this head" "$(fc_unproved)"
+expect_contains "JUDGE-2d …and the card puts its decisions, the release among them" "Release 1.0.0" "$(fc_under Decisions | fc_flat)"
+expect_eq "JUDGE-2e …but no merge without a whole run: the word never waives a suite the whole run left red" "" "$(fc_unproved)"
 rm -f "$FC_REC"/release-approval-*.md
 # JUDGE-4: the whole run at R, one docs commit past it, so the head moved no code since the pass. fails-when: the printer
 # reads green only at the pass's own head, so the card asks the merge at a docs head and the defaults leave current 8 refusing.
-fc_mu() { bash -c '. "$1/roots.sh"; . "$1/proof.sh"; proof_merge_unproved "$2" "$3" "$4"; echo "rc=$?"' _ "$FC_LIB" "$PFC" "$RFC" "$1" 2>/dev/null | paste -sd'|' -; }  # <head> -> its line, then rc=
+fc_mu() { bash -c '. "$1/roots.sh"; . "$1/proof.sh"; proof_merge_ask "$2" "$3" "$4"; echo "rc=$?"' _ "$FC_LIB" "$PFC" "$RFC" "$1" 2>/dev/null | paste -sd'|' -; }  # <head> -> its line, then rc=
 fc_plan "$FC_GOOD"
 FC_J4="$(s57_commit "$RFC" README.md 'prose past the whole run')"
 fc_page; FC_J4T="$(/usr/bin/grep '^release-approval/v1|dec=' "$FC_REC/release-approval-${FC_J4:0:8}.md" 2>/dev/null)"
@@ -826,7 +827,7 @@ expect_contains "JUDGE-4b the Tests line reads green at the whole run's head, th
 expect_absent "JUDGE-4c …and the table that holds the release approval carries no merge-unproved decision" "key=approve:merge-unproved" "$FC_J4T"
 FC_J4M="$(fc_mu "$FC_J4")"; fc_plan "$(fc_floor "$FC_B")
 $(fc_reads "$FC_C")"
-expect_eq "JUDGE-4d …proof_merge_unproved exits 1 at that head, printing nothing; over a whole run at B it asks at the code head C" "rc=1|red at ${FC_B:0:8}, 1 landing before this head|rc=0" "$FC_J4M|$(fc_mu "$FC_C")"
+expect_eq "JUDGE-4d …proof_merge_ask exits 1 at that head, printing nothing; over a whole run at B it asks at the code head C" "rc=1|red at ${FC_B:0:8}, 1 landing before this head|rc=0" "$FC_J4M|$(fc_mu "$FC_C")"
 fc_plan "$FC_GOOD"; fc_page; fc_typed "$FC_WD"
 poke "$RFC" reply "$FC_WD"; FC_J4_REPLY="$RC"
 poke "$RFC" current 8 --check
@@ -871,6 +872,85 @@ expect_eq "JUDGE-3k the head moves past it by prose: the release still holds, th
 git -C "$RFC" reset -q --hard "$FC_R"
 fc_typed "$FC_WD" "$FC_WR"
 rm -f "$FC_REC"/release-approval-*.md
+
+# ============================================================
+section "§WORD: the word accepts absence: the card draws the merge decision on exactly the floors the gate honours the word on, covered or uncovered, never owed"
+# ============================================================
+# fails-when: the card offers the word at an uncovered head and current 8 --check refuses after the reply writes it;
+# the card offers it over an owed floor, or the owed refusal names a reply; or, on any of covered, uncovered, owed and
+# green, the card's draw and the gate's honour of a recorded word differ. The gate HONOURS the word where the word is
+# what admits: current 8 --check refuses without it and is admitted with it. The worlds are §JUDGE's: the whole run at
+# B, T1's code at C, the release text at R, the head; covered with T1's landing recorded green, uncovered with none.
+fc_word_plan() {  # <state> -> PFC and the landing log for one floor state at the head R
+  rm -f "$FC_REC/landing-proofs.log"
+  case "$1" in
+    covered) fc_published T1 "$FC_C" > "$FC_REC/landing-proofs.log"; fc_plan "$(fc_floor "$FC_B")
+$(fc_reads "$FC_C")" ;;
+    uncovered) fc_plan "$(fc_floor "$FC_B")
+$(fc_reads "$FC_C")" ;;
+    owed) fc_plan "$(fc_floor "$FC_C" a.test.sh)
+$(fc_reads "$FC_C")" ;;
+    green) fc_plan "$FC_GOOD" ;;
+  esac
+}
+fc_judged() { bash -c '. "$1/roots.sh"; . "$1/proof.sh"; _proof_floor_judge "$2" "$3" "$4" | cut -f1' _ "$FC_LIB" "$PFC" "$RFC" "$FC_R" 2>/dev/null; }
+fc_regline() { printf '%s\n' "$OUT" | /usr/bin/grep -E '^regression	'; }  # the gate's regression line, as current 8 --check printed it
+# (1) AC-3.1: an uncovered head, the card's decision, the reply that merges, the gate admitting.
+fc_word_plan uncovered
+expect_eq "WORD-0 precondition: with no run recorded for T1's code commit, the judge reads the head uncovered" "uncovered" "$(fc_judged)"
+fc_page
+FC_WDN="$(fc_table | /usr/bin/grep -F '|key=approve:merge-unproved|' | sed -n 's/^release-approval\/v1|dec=\([0-9]*\)|.*/\1/p')"
+expect_eq "WORD-1 at an uncovered head the card renders (exit 0) and its table holds the merge without a whole run" "0|yes" "$FC_RC|$([ -n "$FC_WDN" ] && echo yes)"
+[ "$FC_RC" = 0 ] || printf '      the card said: %s\n' "$FC_ERR"
+expect_eq "WORD-1a …and the number its table gives the decision is the one the judge's exit reads (proof_merge_decision)" "${FC_WDN:-none}" \
+  "$(bash -c '. "$1/roots.sh"; . "$1/proof.sh"; proof_merge_decision "$2" "$3" "$4"' _ "$FC_LIB" "$PFC" "$RFC" "$FC_R" 2>/dev/null)"
+expect_contains "WORD-1b …drawn on the page with the head's state" ". Merge without a whole run at this head — red at ${FC_B:0:8}, 2 landings before this head" "$(fc_unproved)"
+FC_WDM="${FC_WDN:-0} merge, rest default"; fc_typed "$FC_WDM"
+poke "$RFC" reply "$FC_WDM"
+expect_regex "WORD-1c reply ${FC_WDM} replays (exit 0), writing the word at the head with the user's words" "^0\|approved: merge-unproved by Dana Fixture [0-9T:Z-]+ head=$FC_R \"$FC_WDM\"\$" "$RC|$(/usr/bin/grep '^approved: merge-unproved ' "$PFC")"
+poke "$RFC" current 8 --check
+expect_eq "WORD-1d …and current 8 --check is admitted (exit 0) over the uncovered floor" "0" "$RC"
+[ "$RC" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$OUT" | tail -4)"
+fc_typed "$FC_WD" "$FC_WR"; rm -f "$FC_REC"/release-approval-*.md
+# (2) AC-3.2: an owed head, no decision, the owed suite and its exit on the Tests line, the refusal naming the pass.
+fc_word_plan owed
+expect_eq "WORD-2 precondition: the whole run at C left a.test.sh red and nothing greened it since: the judge reads the head owed" "owed" "$(fc_judged)"
+fc_page --preview
+expect_contains "WORD-2b over the owed floor the card renders its decisions, the release among them" "Release 1.0.0" "$(fc_under Decisions | fc_flat)"
+expect_eq "WORD-2c …and draws no merge without a whole run" "" "$(fc_unproved)"
+expect_contains "WORD-2d …its Tests line names the owed suite and its exit, a fix row, then the pass" "needs: the pass — a fix row for a.test.sh, then the pass" "$(fc_under Tests | fc_flat)"
+poke "$RFC" approve release 'ship it'
+poke "$RFC" current 8 --check
+expect_eq "WORD-2e with the release approved at the head, current 8 --check refuses (exit 1) on the regression owed" "1|owed" "$RC|$(fc_regline | cut -f2)"
+expect_contains "WORD-2f …the refusal names the pass as the exit" "needs: the pass" "$(fc_regline)"
+expect_absent "WORD-2g …and names no reply" "reply" "$(fc_regline)"
+rm -f "$FC_REC"/release-approval-*.md
+# (3) AC-3.3: the states table, the card's draw beside the gate's honour, on one fixture per state.
+FC_WT=""
+for FC_WS in covered uncovered owed green; do
+  fc_word_plan "$FC_WS"
+  FC_WJ="$(fc_judged)"; [ "$FC_WS" != green ] || FC_WJ="green:$FC_WJ"
+  fc_page --preview
+  FC_WDRAW=no; [ -z "$(fc_unproved)" ] || FC_WDRAW=yes
+  [ -n "$(fc_under Decisions | /usr/bin/grep -F 'Release 1.0.0')" ] || FC_WDRAW="no page"
+  poke "$RFC" approve release 'ship it'
+  poke "$RFC" current 8 --check; FC_WNO="$RC"
+  poke "$RFC" approve merge-unproved 'merge it'
+  poke "$RFC" current 8 --check; FC_WYES="$RC"
+  FC_WHON=no; [ "$FC_WNO" = 0 ] || [ "$FC_WYES" != 0 ] || FC_WHON=yes
+  FC_WT="$FC_WT$FC_WS:$FC_WJ:draw=$FC_WDRAW:honour=$FC_WHON:without=$FC_WNO:with=$FC_WYES "
+  expect_eq "WORD-3 $FC_WS: the card's draw equals the gate's honour of the recorded word" "$FC_WDRAW" "$FC_WHON"
+  rm -f "$FC_REC"/release-approval-*.md
+done
+expect_eq "WORD-3b the table: the word drawn and honoured on covered and uncovered, neither on owed, no word needed on green" \
+  "covered:covered:draw=yes:honour=yes:without=1:with=0 uncovered:uncovered:draw=yes:honour=yes:without=1:with=0 owed:owed:draw=no:honour=no:without=1:with=1 green:green:covered:draw=no:honour=no:without=0:with=0 " "$FC_WT"
+expect_eq "WORD-3c one predicate: the ask is defined in lib/proof.sh and called by the card" "1|1" \
+  "$(/usr/bin/grep -c '^proof_merge_ask()' "$FC_LIB/proof.sh")|$([ "$(/usr/bin/grep -c 'proof_merge_ask ' "$BIONIC_HOOKS_DIR/poker/plan.sh")" -ge 1 ] && echo 1)"
+expect_eq "WORD-3d …and the old predicate is gone from both" "0|0" \
+  "$(/usr/bin/grep -c 'proof_merge_unproved' "$FC_LIB/proof.sh")|$(/usr/bin/grep -c 'proof_merge_unproved' "$BIONIC_HOOKS_DIR/poker/plan.sh")"
+# §JUDGE's world as it was left: T1's landing recorded, the head R.
+fc_published T1 "$FC_C" > "$FC_REC/landing-proofs.log"; rm -f "$FC_REC"/release-approval-*.md
+fc_typed "$FC_WD" "$FC_WR"
 
 # ============================================================
 section "§UNPROVED-ASK: the merge without a pass is an answer where an open integrate row waits on the release"

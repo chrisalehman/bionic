@@ -1828,19 +1828,55 @@ proof_unproved_approved() {
   [ -n "${2:-}" ] && [ "$h" = "$2" ]
 }
 
-# proof_merge_unproved <plan> <tree> <head> -> the whole suite's state at <head> (`proof_whole_text`) and exit 0 when a
-# merge at <head> needs the person's word: no pass ran green at it and no word was given at it. Exit 1, nothing
-# printed, when the pass ran green there or the word was given there. A <head> that is the release entry's reviews part
-# rendered fresh on its parent is judged at that parent (`proof_part_base`): the part is written after the pass and the
-# word, from the lines they left, so it asks neither again. THE ONE RULE the release card's ask and the judge's
-# unproved state share, so the card asks exactly what the gate holds the merge on.
-proof_merge_unproved() {
-  local plan="$1" tree="$2" head="$3" at
+# proof_merge_ask <plan> <tree> <head> -> whether a merge at <head> is the person's to take on their word, read from the
+# floor judge at <head> (`_proof_floor_judge`) and the whole suite's state (`proof_whole_text`). Exit 0, printing the
+# whole suite's state at <head>, when the judge reads the floor covered or uncovered, no pass ran green at it and no word
+# was given at it. Exit 1, nothing printed, when the pass ran green there or the word was given there. Exit 2, printing
+# the suites still owed, when the judge reads the floor owed. A <head> that is the release entry's reviews part rendered
+# fresh on its parent is judged at that parent (`proof_part_base`): the part is written after the pass and the word, from
+# the lines they left, so it asks neither again. THE WORD ACCEPTS ABSENCE: covered (every landing proved by its own
+# suites) and uncovered (a landing no run proved, or a head the run cannot reach) are proof missing, which the person may
+# merge over; owed is a red the whole run reported, which no word waives. THE ONE RULE the release card's draw and the
+# judge's regression exit both call, so the card asks the word on exactly the heads the gate honours it on.
+proof_merge_ask() {
+  local plan="$1" tree="$2" head="$3" at st
+  st="$(_proof_floor_judge "$plan" "$tree" "$head" 2>/dev/null | awk 'NR == 1')"
+  case "$st" in
+    covered|uncovered"	"*) : ;;
+    owed"	"?*) printf '%s\n' "${st#owed	}"; return 2 ;;
+    *) return 1 ;;
+  esac
   at="$(proof_part_base "$plan" "$tree" "$head")"
   proof_unproved_approved "$plan" "$head" && return 1
   [ "$at" = "$head" ] || ! proof_unproved_approved "$plan" "$at" || return 1
   case "$(proof_whole_text "$plan" "$tree" "$at")" in "green at "*) return 1 ;; esac
   proof_whole_text "$plan" "$tree" "$head"
+}
+
+# proof_owed_needs <suites> -> the exit of a floor the whole run left red, one line: a fix row whose suites include
+# <suites>, landed green, then the pass. No word of the person's is an exit here, so none is named.
+proof_owed_needs() {
+  printf 'needs: the pass — a fix row for %s, then the pass (session-poker.sh regression-run)\n' "${1:-the red suites}"
+}
+
+# proof_merge_decision <plan> <tree> <head> -> the decision number the newest release card rendered at <head> gives
+# `approve:merge-unproved` (its replay table, `release-approval/v1|dec=<n>|key=…`), exit 0; nothing, exit 1, while no
+# card whose header names <head> holds that key. THE ONE READING of the card's number for the merge word: the judge's
+# exit names it, and a reply typed for the card replays it.
+proof_merge_decision() {
+  local plan="$1" tree="$2" head="$3" dir n
+  _proof_roots_load
+  declare -F docs_root >/dev/null 2>&1 && [ -n "$head" ] || return 1
+  dir="$(docs_root "$tree" 2>/dev/null)/record/$(proof_plan_slug "$plan" 2>/dev/null)"
+  [ -d "$dir" ] || return 1
+  # shellcheck disable=SC2012  # page names are release-approval-<hex>[-<n>].md, no blank or line break in any
+  n="$(ls -t "$dir"/release-approval-"${head:0:8}"*.md 2>/dev/null | while IFS= read -r f; do
+    /usr/bin/grep -q "^release-approval/v1|plan=.*|head=$head|" "$f" 2>/dev/null || continue
+    sed -n 's/^release-approval\/v1|dec=\([0-9][0-9]*\)|key=approve:merge-unproved|.*/\1/p' "$f" 2>/dev/null | head -1
+    break
+  done)"
+  [ -n "$n" ] || return 1
+  printf '%s\n' "$n"
 }
 
 # proof_unproved_needs <plan> <tree> <head> [<step>] -> the exit of a merge the whole suite has not run at, one line.
@@ -1851,21 +1887,12 @@ proof_merge_unproved() {
 # <n> the decision number the newest release card rendered at <head> gives `approve:merge-unproved` (its replay table,
 # `release-approval/v1|dec=<n>|key=…`), or `<n>` while no card at that head holds it.
 proof_unproved_needs() {
-  local plan="$1" tree="$2" head="$3" step="${4:-}" dir n=""
+  local plan="$1" tree="$2" head="$3" step="${4:-}" n
   if [ "$step" = 7 ]; then
     printf 'needs: the pass — wait for it (the tick starts it once no row is ready), or start it: session-poker.sh regression-run\n'
     return 0
   fi
-  _proof_roots_load
-  if declare -F docs_root >/dev/null 2>&1 && dir="$(docs_root "$tree" 2>/dev/null)/record/$(proof_plan_slug "$plan" 2>/dev/null)" \
-     && [ -d "$dir" ]; then
-    # shellcheck disable=SC2012  # page names are release-approval-<hex>[-<n>].md, no blank or line break in any
-    n="$(ls -t "$dir"/release-approval-"${head:0:8}"*.md 2>/dev/null | while IFS= read -r f; do
-      /usr/bin/grep -q "^release-approval/v1|plan=.*|head=$head|" "$f" 2>/dev/null || continue
-      sed -n 's/^release-approval\/v1|dec=\([0-9][0-9]*\)|key=approve:merge-unproved|.*/\1/p' "$f" 2>/dev/null | head -1
-      break
-    done)"
-  fi
+  n="$(proof_merge_decision "$plan" "$tree" "$head")" || n=""
   printf 'needs: the user — reply %s on the release card (merge without a whole run at this head), or wait for the pass\n' "${n:-<n>}"
 }
 
@@ -2375,11 +2402,11 @@ proof_debts_open() {
 # THE REGRESSION is the floor judge's answer at <head> (`_proof_floor_judge`, proof_state's judge; wave-31 T25,
 # D3; wave-35 T9, D8): covered; owed with the reds of its whole run still open; or uncovered from its proof's
 # head to <head>, with the reason that names the first commit past it no recorded run proves. With no
-# regression proof it is absent. Covered holds only where the whole suite ran green at <head> or the person gave
-# their word at it (`proof_merge_unproved`); past F otherwise it is
+# regression proof it is absent. A covered or uncovered floor holds only where the whole suite ran green at <head> or
+# the person gave their word at it (`proof_merge_ask`); past F otherwise it is
 #     unproved<TAB><the whole suite's state, proof_whole_text's><TAB><its exit, proof_unproved_needs's>
-# the merge-without-a-pass the release card asks. <head> is the caller's, read from the working branch's ref
-# (`proof_branch_head`), never a checkout's (A-orch-45).
+# the merge-without-a-pass the release card asks. An owed floor is owed<TAB><suites><TAB><its exit, proof_owed_needs's>.
+# <head> is the caller's, read from the working branch's ref (`proof_branch_head`), never a checkout's (A-orch-45).
 # An owed line this judge has no rule for answers absent (the safe direction).
 # A FINDING RE-RATED BY A MOVE (wave-28 T42; D34): a reading's result is the one its findings give at
 # their effective ratings (`_proof_reading_result`). No check holds the step: a reader's rating is
@@ -2463,13 +2490,20 @@ review	"*) fixed="$(proof_fixed "$plan" "$tree")"; born="$(_facts_born_landings 
         else
           x="$(proof_last "$plan" regression)"
           st="$(_proof_floor_judge "$plan" "$tree" "$head" 2>/dev/null | awk 'NR == 1')"
-          # GREEN MEANS THE WHOLE SUITE RAN HERE: a head the landings since the whole run cover, with no pass at it,
-          # holds only on the person's word given at this head (`approved: merge-unproved … head=<head>`), and is
-          # unproved until then, naming that word and the pass as its two exits. A red the whole run left open is no
-          # such head: the word never waives a suite.
-          if [ "$st" = covered ] && ws="$(proof_merge_unproved "$plan" "$tree" "$head")"; then
-            st="unproved	$ws	$(proof_unproved_needs "$plan" "$tree" "$head")"
-          fi
+          # GREEN MEANS THE WHOLE SUITE RAN HERE: a head with no pass at it, covered by its landings or uncovered by
+          # a landing no run proved, holds only on the person's word given at this head (`approved: merge-unproved …
+          # head=<head>`), and is unproved until then, naming that word and the pass as its two exits; the card asks
+          # that word by the same rule (`proof_merge_ask`). A red the whole run left open is no such head: the word
+          # never waives a suite, and the owed line names the pass as its one exit.
+          case "$st" in
+            covered|uncovered"	"*)
+              ws="$(proof_merge_ask "$plan" "$tree" "$head")"
+              case $? in
+                0) st="unproved	$ws	$(proof_unproved_needs "$plan" "$tree" "$head")" ;;
+                1) st=covered ;;
+              esac ;;
+            owed"	"?*) st="$st	$(proof_owed_needs "${st#owed	}")" ;;
+          esac
           case "$st" in
             covered|owed"	"?*|unproved"	"?*) : ;;
             uncovered"	"?*) st="uncovered	$x..$head	${st#uncovered	}" ;;
