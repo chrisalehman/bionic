@@ -114,7 +114,7 @@ TOOL_NAME=$(_jq '.tool_name')
 # brings `cmd-class.sh` (wave-20 T4; REQ-7, D7) in itself for CMD_RUN_NORM_AWK, the one run
 # normaliser its lift pastes in, so this hook names only brief.sh and lets that source do
 # the pulling.
-BIONIC_LIB_WANT="context.sh fold.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh brief.sh"
+BIONIC_LIB_WANT="context.sh fold.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh brief.sh prose.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -240,6 +240,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 # variables, so sourcing them costs a parse and nothing else.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/brief.sh"
+# THE PROSE LIST (lib/prose.sh): the one answer to "is this path prose", asked for a row that lands on no suite. It defines
+# functions only and brings roots.sh's config reader in itself when its caller has not.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/prose.sh"
 # THE MODEL-FACING ADVISORY'S EMITTER (wave-24 T14, A-orch-20): `_fold_emit_context` is the one
 # builder of `hookSpecificOutput.additionalContext`, the farm-out nudge's. Functions only.
 # shellcheck source=/dev/null
@@ -3013,6 +3017,27 @@ Fix: say why no suite proves this row, on the same line —
     Lands-on: none <reason>
 
 Then retry the dispatch."
+fi
+# A ROW THAT LANDS ON NO SUITE IS PROVED BY THE WHOLE RUN AT ITS COMMIT ALONE, so every path its Files: names must be one no
+# suite reads: the prose list (lib/prose.sh, the list the judge reads) holds it. The list is read once and asked per path with
+# no fork; the first path it does not hold ends the check and is named. `none` and `—` as the Files: value are no files.
+if [ "$DP_LANDS_ON" = none ] && [ -n "$C_FILES" ] && declare -F prose_path >/dev/null 2>&1; then
+  _ln_list="$(prose_list "$BIONIC_ROOT" 2>/dev/null)"
+  for _ln_p in ${C_FILES//,/ }; do
+    case "$_ln_p" in none|—) continue ;; esac
+    prose_path "$_ln_p" "$_ln_list" && continue
+    # The line holds 100 columns: the fixed words and the fix leave the path 23, the whole sentence rides in the detail.
+    dp_finding "Lands-on: none, not prose: $(bionic_trunc "$_ln_p" 23)" "add suites or prose:" \
+      "Lands-on: none on a row whose Files name ${_ln_p}, which is not prose: only a whole run at its commit proves it; name the suites that read it in Lands-on:, or list it under prose: in .bionic/config.yaml
+    Given: Lands-on: none ${_lo_reason}
+    Files: ${C_FILES}
+
+The prose list holds the record and the notes no suite executes. A path outside it is read by a suite or runs as code, so
+the row must land on the suites that read it.
+
+Then retry the dispatch."
+    break
+  done
 fi
 # A COMMAND ON LANDS-ON (wave-39 T20; D20, AC-14.3) is one entry the lift encoded (lib/suite.sh `lands_cmd`): it is
 # held to the brief's Re-executes: runs, each a backticked command as the lift stored it, never to Suites:. One

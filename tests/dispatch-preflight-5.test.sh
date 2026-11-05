@@ -449,4 +449,46 @@ expect_eq "WN.2 AC-20.4 Deliverable-waiver: none is no waiver: the row carries t
 expect_contains "WN.2b …the sweeper judges the row" "w99-wn" "$WN_VERDICT"
 expect_absent "WN.2c AC-20.4 …and reports no conflict" "waiver disregarded" "$WN_VERDICT"
 
+section "§LANDS-NONE — Lands-on: none is admitted only for Files the prose list holds (AC-2.3)"
+# ============================================================================
+#
+# A row that lands on no suite is proved by the whole run at its commit alone, which only a path no suite reads can wait
+# for. The wall asks the prose list (lib/prose.sh, the one the judge reads) of every path the brief's Files: names, once per
+# dispatch, and refuses the first that is not on it, naming it; the fix is to name the suites that read it or to list it
+# under prose: in .bionic/config.yaml.
+# FIXTURES: make_repo's approved, bound plan with a `## Tasks` row T23, BRIEF_FULL's contract with Files: and Lands-on: lines
+# (SYNTHESIZED); a `prose:` line written to the fixture's .bionic/config.yaml where the case names one.
+ln_gate() {  # <repo tag> <Files value> <prose: line or ''> -> GATE_*, LN_ROW
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the notes | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' \
+    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  [ -z "$3" ] || printf '%s\n' "$3" > "$REPO/.bionic/config.yaml"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(printf '%s\nFiles: %s\nLands-on: none the row'"'"'s Files are prose' "$BRIEF_FULL" "$2")" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
+  LN_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+}
+ln_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
+LN_FACT="Lands-on: none on a row whose Files name scripts/perf/README.md, which is not prose"
+
+ln_gate ln1 scripts/perf/README.md ''
+expect_eq "LN.1 AC-2.3 Lands-on: none on a row whose Files name scripts/perf/README.md, not on the prose list: refused" "deny" "$GATE_VERDICT"
+expect_contains "LN.1b …its line names the path whole and the exit" "dispatch refused — Lands-on: none, not prose: scripts/perf/README.md (add suites or prose:)" "$(ln_first)"
+expect_contains "LN.1c …the whole fact names the path and that it is not prose" "$LN_FACT" "$GATE_VERR"
+expect_contains "LN.1d …and says why: only a whole run at its commit proves it" "only a whole run at its commit proves it" "$GATE_VERR"
+expect_contains "LN.1e …and both exits: the suites that read it, or the prose: entry in the config" \
+  "name the suites that read it in Lands-on:, or list it under prose: in .bionic/config.yaml" "$GATE_VERR"
+expect_eq "LN.1f …its first line at most 100 columns" "ok" \
+  "$([ "$(bionic_cols "$(ln_first)")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$(ln_first)")")"
+expect_eq "LN.1g …and no row is written" "" "$LN_ROW"
+
+ln_gate ln2 scripts/perf/README.md 'prose: scripts/perf/'
+expect_eq "LN.2 AC-2.3 the same brief with prose: scripts/perf/ in the fixture's config: admitted" "allow" "$GATE_VERDICT"
+expect_eq "LN.2b …the row carries lands_on=none" "none" "$(roster_field "$LN_ROW" lands_on)"
+
+ln_gate ln3 CHANGELOG.md ''
+expect_eq "LN.3 AC-2.3 Files all on the built-in list (CHANGELOG.md): admitted with no prose: entry" "allow" "$GATE_VERDICT"
+
+ln_gate ln4 'CHANGELOG.md, scripts/perf/README.md' 'prose: docs/'
+expect_eq "LN.4 a second Files path off the list (a prose: entry that does not hold it): refused" "deny" "$GATE_VERDICT"
+expect_contains "LN.4b …naming that path, not the first one" "Files name scripts/perf/README.md, which is not prose" "$GATE_VERR"
+
 finish
