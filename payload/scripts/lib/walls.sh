@@ -1764,10 +1764,26 @@ matrix_owing_step() {  # <plan> <AC block> -> the step number, or nothing
   [ -z "$best" ] || printf '%s\n' "$best"
 }
 
-# matrix_row_deferred <plan> <owing step> <current> <status> -> 0 when the row owes nothing yet.
+# matrix_owing_open <plan> <AC block> -> `yes` when any row the block's `task:` names is neither
+# landed nor dropped: the work that proves the criterion is still under way. A `task:` naming no
+# row prints nothing. The status is read through the same `units_rows` the owing step is.
+matrix_owing_open() {
+  local id rec s rows
+  rows="$(units_rows "$1" 2>/dev/null)" || return 0
+  for id in $(matrix_block_task "$2" | tr ',' ' '); do
+    rec="$(awk -F'\t' -v i="$id" '$1 == i { print; exit }' <<< "$rows")"
+    [ -n "$rec" ] || continue
+    units_field_v s "$rec" status
+    case "$s" in landed|dropped) ;; *) printf 'yes\n'; return 0 ;; esac
+  done
+}
+
+# matrix_row_deferred <plan> <owing step> <current> <status> [<open>] -> 0 when the row owes nothing yet.
 # A pending or blocked row whose owing step is later than the current step owes neither its
-# per-tier keys nor an auditor's verdict or ruling: the work that proves it has not run. From its
-# owing step on it is judged as every other row. A row owed at Step 9 is the close's: close-out
+# per-tier keys nor an auditor's verdict or ruling: the work that proves it has not run. At its
+# owing step it is deferred too while a row its task names is still open (`matrix_owing_open`
+# says `yes`), so the criterion is demanded once that row has landed, or been dropped and so asks
+# to be re-keyed or waived. Past that it is judged as every other row. A row owed at Step 9 is the close's: close-out
 # settles it after it writes `delivered:`, its own final act, so it is demanded only once the
 # Step-9 line carries `delivered:` (lib/run.sh `run_open`, the one reader of that line), never by
 # a commit or by the dry-run close-out takes before it. A step or status that does not read
@@ -1778,6 +1794,7 @@ matrix_row_deferred() {
   case "$2" in ''|*[!0-9]*) return 1 ;; esac
   case "$n" in ''|*[!0-9]*) return 1 ;; esac
   [ "$2" -gt "$n" ] && return 0
+  [ "$2" = "$n" ] && [ "$2" != 9 ] && [ "${5:-}" = yes ] && return 0
   [ "$2" = 9 ] && [ "$n" = 9 ] && run_open "$1"
 }
 
@@ -1880,7 +1897,7 @@ matrix_unruled() {
     [ -n "$ac" ] || continue
     block="$(matrix_block "$ac")"
     waiver=0; matrix_row_waiver "$ev" "$block" && waiver=1
-    defer=0; matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$block")" "$2" "$status" && defer=1
+    defer=0; matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$block")" "$2" "$status" "$(matrix_owing_open "$PLAN" "$block")" && defer=1
     matrix_row_owes "$2" "$tier" "$status" "$aud" "$(user_confirmed_value "$block")" "$waiver" "$defer" >/dev/null \
       && printf '%s\n' "$ac"
   done <<MATRIX_ROWS
@@ -4143,7 +4160,7 @@ validate_matrix() {
     # `delivered:`, so no commit against an open plan demands it.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     deferred=0
-    matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$block_txt")" "$CURRENT" "$status" && deferred=1
+    matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$block_txt")" "$CURRENT" "$status" "$(matrix_owing_open "$PLAN" "$block_txt")" && deferred=1
     # waived rows (evidence cell or the AC block carries a `waiver:` entry) are
     # exempt from the per-tier evidence requirement.
     if [ "$row_is_waived" = "1" ]; then

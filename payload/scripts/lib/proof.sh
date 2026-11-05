@@ -1117,7 +1117,7 @@ _proof_records() {
     (ev = line_ev()) != "" {
       r = line_kv("row")
       if (ev == "ready") { if (r != "") su[r] = keys(line_kv("suites")) }
-      else if (ev == "published") { c = line_kv("commit"); x = (r in su) ? su[r] : "-"; if (line_kv("kind") == "hand" && x == "none") x = "-"; if (c != "") out("O\t" c "\t" r "\t" x) }
+      else if (ev == "published") { c = line_kv("commit"); x = (r in su) ? su[r] : "-"; if (x == "none") x = "-"; if (c != "") out("O\t" c "\t" r "\t" x) }
       else if (ev == "verdict") {
         c = line_kv("commit"); s = key(line_kv("suite")); v = line_kv("result")
         if (c != "" && s != "" && (v == "green" || v == "red")) { out("R\t" line_kv("at") "\t" c "\t" s "\t" v "\t" (line_kv("kind") == "regression" ? "regression" : "verdict")); if (v == "red") { vc[nl] = c; vs[nl] = s } }
@@ -1698,6 +1698,17 @@ _proof_roots_load() {
   return 0
 }
 
+# _proof_prose_load -> lib/prose.sh sourced beside this file unless its predicate is loaded: the prose list has one
+# home, which the floor's walk and the cover walk read here and the dispatch wall reads too.
+_proof_prose_load() {
+  local d
+  declare -F prose_path >/dev/null 2>&1 && declare -F prose_list >/dev/null 2>&1 && return 0
+  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+  # shellcheck source=/dev/null
+  . "$d/prose.sh" >/dev/null 2>&1
+  return 0
+}
+
 # proof_state <plan> <tree> -> whether the plan's last regression proof stands at the working head, one
 # line (wave-31 T25; REQ-4 AC-4.1, REQ-13 AC-13.4; D3; A-orch-23; wave-35 T9: D8, AC-1.3):
 #
@@ -1919,7 +1930,7 @@ _proof_floor_judge() {
 # _proof_past_f <plan> <tree> <F> <head> <owed> [<only>] -> exit 0, printing nothing, when every commit on the first-parent line
 # F..<head> is excused or proved and every suite of <owed> (comma-joined) is closed; exit 2 printing the suites still
 # open, comma-joined; exit 1 printing one sentence naming the first commit that is not proved and what it lacks.
-# EXCUSED: its tree is its first parent's; or every path it changed is docs (`_proof_docs_path`, or under the docs
+# EXCUSED: its tree is its first parent's; or every path it changed is docs (on the prose list, lib/prose.sh, or under the docs
 # root or the tracked docs home); or every path is in the release set (`_proof_release_path`) and a check passed at it (`proof_check_passes`).
 # PROVED: each suite its row's landing names (the row's last `ready` before the `published` event naming the commit;
 # with no such event, the suites the landing verdicts at it name) has a newest record at it that is green. A record is
@@ -1928,7 +1939,7 @@ _proof_floor_judge() {
 # With <only> `closes` the commits are not judged: exit 0 or 2 says only which suites of <owed> are still open, the one
 # reading of the closes the judge and the health line share (`proof_health_line`).
 _proof_past_f() {
-  local plan="$1" tree="$2" from="$3" to="$4" owed="${5:-}" only="${6:-}" walk rec recs top droot pfx="" tpfx files="" c f isdoc isrel
+  local plan="$1" tree="$2" from="$3" to="$4" owed="${5:-}" only="${6:-}" walk rec recs top droot pfx="" tpfx plist files="" c f isdoc isrel
   walk="$(git -C "$tree" log --first-parent --reverse --format='W%x09%H%x09%T%x09%P' "$from..$to" 2>/dev/null)" || {
     printf 'git cannot list the commits from %.12s to %.12s' "$from" "$to"; return 1; }
   rec="$(proof_debt_record "$plan" "$tree" 2>/dev/null)" || rec=""
@@ -1940,13 +1951,16 @@ _proof_past_f() {
   ! declare -F docs_root >/dev/null 2>&1 || droot="$(docs_root "$tree" 2>/dev/null)"
   case "${droot:-}" in "$top"/?*) pfx="${droot#"$top"/}"; pfx="${pfx%/}/" ;; esac
   tpfx="$(_facts_tracked_prefix "$tree")"
+  # The prose list is read once for the walk, as the prefixes are, and asked per path with no fork.
+  _proof_prose_load
+  plist="$(prose_list "$tree" 2>/dev/null)"
   while IFS= read -r f; do
     case "$f" in '') continue ;; $'\001'*) c="${f#?}"; continue ;; esac
     # Each path is asked both questions, as the judge's cover asks them: CHANGELOG.md is docs and in the release set,
     # so it spoils neither a docs commit's excuse nor a release commit's, which its passing check gives.
     isdoc=0; isrel=0
     if { [ -n "$pfx" ] && [ "${f#"$pfx"}" != "$f" ]; } || { [ -n "$tpfx" ] && [ "${f#"$tpfx"}" != "$f" ]; } \
-       || _proof_docs_path "$f"; then isdoc=1; fi
+       || prose_path "$f" "$plist"; then isdoc=1; fi
     ! _proof_release_path "$f" || isrel=1
     files="$files${files:+$'\n'}C	$c	$isdoc	$isrel"
   done <<PROOF_PAST_FILES
@@ -2357,10 +2371,10 @@ proof_debts_open() {
 # held, and it exits 2, for every dealing owes a reading. <head> must resolve to a commit, or it exits
 # 2, and each line's head is compared with the commit it resolves to, never as a string (F10). The
 # chain holds at <head> when its newest link is no failing reading and that link's head is
-# <head>, or every commit past it holds by the one cover rule (wave-36 T7; D9, D2; the COVER block below
-# `_proof_docs_path`): its paths are all prose (the docs root, or the files `_proof_docs_path` lists; wave-30
-# T6, D12), or every path is in the release set and a release check passes at it (wave-38 T2; D18), or it is the
-# landing of a row born of a registered reading's finding (wave-39 D7: any question's) or of the floor's red. Any other commit owes, whatever its row was declared to be; `facts_cover` prints each commit's basis. A waiver covers its
+# <head>, or every commit past it holds by the one cover rule (the COVER block below
+# `facts_state`): its paths are all prose (the docs root, or a path on the prose list, lib/prose.sh), or every
+# path is in the release set and a release check passes at it, or it is the landing of a row born of a
+# registered reading's finding (any question's) or of the floor's red. Any other commit owes, whatever its row was declared to be; `facts_cover` prints each commit's basis. A waiver covers its
 # question up to its own head.
 # Every line of the question counts, failing ones included: a later reading may start at a failing
 # reading's head, so the chain is not rebuilt by skipping them, and only the newest decides failing.
@@ -2641,26 +2655,12 @@ PROOF_LATER
   printf 'absent'
 }
 
-# _proof_docs_path <path> -> 0 when <path> (relative to the repository root) is a documentation file
-# whose landing owes no reading (wave-30 T6; design-ledger Δ12, D12; A-orch-309): CHANGELOG.md,
-# README.md, CLAUDE.md, anything under .bionic/, anything under .claude/rules/ and the runner's timing table
-# tests/timing.tsv (wave-35 T9; AC-1.5: the floor's walk reads the same list, so a commit of these alone
-# inherits its parent's standing there too). THIS CASE IS THE ONE LIST. It is never skills/ or agents/ prose, which agents execute, and never a payload/ file; a
-# README or CHANGELOG deeper than the root is not in it either. Nothing else under tests/ is in it: tests/run.sh
-# and tests/lib/ are code the suites execute (wave-36 T7; AC-3.5), so a commit of them owes a reading.
-_proof_docs_path() {
-  case "$1" in
-    CHANGELOG.md|README.md|CLAUDE.md|.bionic/*|.claude/rules/*|tests/timing.tsv) return 0 ;;
-  esac
-  return 1
-}
-
 # ---------- COVER: HOW FAR A READING REACHES PAST ITS HEAD (wave-36 T7; REQ-3 AC-3.2, AC-3.3, AC-3.5; D9, D2, D3) ----------
 #
 # A reading is covered to its head. A later commit on the head's first-parent line extends it when it holds, and
 # each commit's basis is one of five words:
 #   prose        every path it touched (a merge as what it brought in, a rename as both its paths) is under the docs
-#                root or the tracked docs home (`_facts_tracked_prefix`) or on `_proof_docs_path`'s list; a commit that touches nothing is prose too, so a merge whose tree
+#                root or the tracked docs home (`_facts_tracked_prefix`) or on the prose list (lib/prose.sh `prose_path`); a commit that touches nothing is prose too, so a merge whose tree
 #                is its first parent's (one from the integration branch resolved to ours) is prose (wave-38 T2; AC-4.1)
 #   release      every path it touched is in the release set (`_proof_release_path`), the plan's release check passes at
 #                it and its readers are green there (`_proof_release_proved`), on every chain; the regression walk reads
@@ -2787,9 +2787,11 @@ PROOF_BORN
 # <last head>; nothing printed and 1 when <last head> is not on <head>'s history, or git cannot answer: uncovered is
 # the safe direction. Both heads are compared as the commits they resolve to, never as strings (T45; review pass 13 F10).
 _facts_walk() {
-  local tree="$1" pfx="$2" born="${5:-}" q="${6:-}" chk="${7:-}" lh hh files f c="" prose=1 rel=1 rc=0 tpfx
+  local tree="$1" pfx="$2" born="${5:-}" q="${6:-}" chk="${7:-}" lh hh files f c="" prose=1 rel=1 rc=0 tpfx plist
   [ -n "$tree" ] || return 1
   tpfx="$(_facts_tracked_prefix "$tree")"
+  _proof_prose_load
+  plist="$(prose_list "$tree" 2>/dev/null)"
   lh="$(git -C "$tree" rev-parse --verify -q "$3^{commit}" 2>/dev/null)" || return 1
   hh="$(git -C "$tree" rev-parse --verify -q "$4^{commit}" 2>/dev/null)" || return 1
   [ "$lh" != "$hh" ] || return 0
@@ -2802,7 +2804,7 @@ _facts_walk() {
     esac
     [ "$rel" = 0 ] || _proof_release_path "$f" || rel=0
     [ "$prose" = 1 ] || continue
-    [ "${f#"$pfx"}" != "$f" ] || { [ -n "$tpfx" ] && [ "${f#"$tpfx"}" != "$f" ]; } || _proof_docs_path "$f" || prose=0
+    [ "${f#"$pfx"}" != "$f" ] || { [ -n "$tpfx" ] && [ "${f#"$tpfx"}" != "$f" ]; } || prose_path "$f" "$plist" || prose=0
   done <<PROOF_DOCS_FILES
 $files
 PROOF_DOCS_FILES

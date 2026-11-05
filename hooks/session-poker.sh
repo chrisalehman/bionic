@@ -521,7 +521,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh rulings <writer>   each ruling of that writer: recorded, pushed=, and unread or shown= (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh budget writers=<n> '<reply>'   record the user's cap on writers in the plan header (source=user, budget-override:)"
   die "  bash ${HOOK_DIR}/session-poker.sh regression <yes|no> '<reply>'   record the Step-0 regression setting in the plan header (regression:, and regression-override: against the scale default task no, wave yes, epic no)"
-  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --questions <q>[,<q>] on a review row declares the questions it owes (evidence, adversarial, structure, one role's), so its records and its dispatch are those and not the rigor's full deal; --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--suites=<a,b>] [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract (--suites= narrows its suites, and lands_on= with them): a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh task-set <id>[,<id>...] <col>=<val>... [-- <id>[,<id>...] <col>=<val>...]... [--reason '<why>']   set cells of ## Tasks rows (any header column; Files only on a pending row no roster names, a launched row's Files being amend's), every group in one transaction, the table judged once; reads+=<token> or deps+=<token> appends to what the cell holds, an empty reads cell standing for the default of its kind"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
@@ -754,7 +754,14 @@ case "$VERB" in
   # event for it at a commit on the working branch (`born_floor_backing`), and writes ` born: floor <suite> of=floor`
   # or ` of=standing@<12-hex>` to say which; with neither it is refused naming both facts.
   task-add)
-    TA_BORN=""; TA_BORN_IDS=""; TA_BORN_SUITE=""
+    TA_BORN=""; TA_BORN_IDS=""; TA_BORN_SUITE=""; TA_QUESTIONS=""
+    # `--questions <q>[,<q>]` declares the questions a review row owes, written into its task cell. It is read from
+    # the tail of the operands on either side of `--born`, so the two flags go in either order; its words are judged
+    # for shape below, and whether each is dealt the row's role is the verb's refusal (1).
+    case "${*: -1}" in --questions) usage "task-add: --questions takes a value: the questions the review row owes, evidence, adversarial or structure, comma-separated." ;; esac
+    if [ $# -ge 2 ] && [ "${*: -2:1}" = "--questions" ]; then
+      TA_QUESTIONS="${*: -1}"; set -- "${@:1:$(($# - 2))}"
+    fi
     case "${*: -1}" in --born) usage "task-add: --born takes a value: the findings the row answers, <record>#<n>[,<record>#<n>…], 'review S<n> <on|off>', the reviewer's rating, or regression:<suite>, the suite whose regression red the row fixes." ;; esac
     if [ $# -ge 2 ] && [ "${*: -2:1}" = "--born" ]; then
       TA_BORN="${*: -1}"
@@ -785,8 +792,27 @@ case "$VERB" in
       esac
       set -- "${@:1:$(($# - 2))}"
     fi
+    if [ -z "$TA_QUESTIONS" ] && [ $# -ge 2 ] && [ "${*: -2:1}" = "--questions" ]; then
+      TA_QUESTIONS="${*: -1}"; set -- "${@:1:$(($# - 2))}"
+    fi
     if [ $# -ne 9 ] && [ $# -ne 10 ]; then
-      usage "task-add takes nine arguments and an optional tenth: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] (write — for none), then optionally --born <record>#<n>[,…], --born 'review S<n> <on|off>' or --born regression:<suite>."
+      usage "task-add takes nine arguments and an optional tenth: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] (write — for none), then optionally --born <record>#<n>[,…], --born 'review S<n> <on|off>' or --born regression:<suite>, and --questions <q>[,<q>] on a review row."
+    fi
+    if [ -n "$TA_QUESTIONS" ]; then
+      [ "$3" = review ] || usage "task-add: --questions declares the questions of a review row, and $1 is a $3 row."
+      TA_QSEEN=""
+      for TA_QW in $(printf '%s' "$TA_QUESTIONS" | tr ',' ' '); do
+        case " evidence adversarial structure " in *" $TA_QW "*) : ;; *) usage "task-add: --questions '$TA_QUESTIONS' names '$TA_QW', which is no question; write evidence, adversarial or structure, comma-separated." ;; esac
+        case " $TA_QSEEN " in *" $TA_QW "*) usage "task-add: --questions '$TA_QUESTIONS' names $TA_QW twice; write each question once." ;; esac
+        TA_QSEEN="$TA_QSEEN $TA_QW"
+      done
+      case "$TA_QUESTIONS" in *[!a-z,]*|,*|*,|*,,*) usage "task-add: --questions '$TA_QUESTIONS' is no list of questions; write evidence, adversarial or structure, comma-separated, with no space." ;; esac
+      # THE DECLARATION IS KEPT IN THE DEALING'S ORDER, so the cell, the records and the dispatch wall's comparison
+      # read one spelling whichever order the author typed.
+      TA_QUESTIONS=""
+      for TA_QW in evidence adversarial structure; do
+        case " $TA_QSEEN " in *" $TA_QW "*) TA_QUESTIONS="${TA_QUESTIONS:+$TA_QUESTIONS,}$TA_QW" ;; esac
+      done
     fi
     TA_ID="$1"; TA_STEP="$2"; TA_KIND="$3"; TA_TASK="$4"; TA_AGENT="$5"
     TA_DEPS="$6"; TA_SIZE="$7"; TA_SERVES="$8"; TA_FILES="$9"; TA_READS="${10:-}"
