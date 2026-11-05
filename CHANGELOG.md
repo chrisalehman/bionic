@@ -152,11 +152,11 @@ that culled by the rubric, not by suspending the cap or thinning the proof (D15)
   21 of 21 criteria are CONFIRMED, verdict CONFIRMED. The plan verbs the wall refuses a dispatched agent were run by the
   orchestrator from prepared scripts (A-orch.16). That the wall screens the typed text and not the verb reached is
   carried to the continuation.
-- The regression: one whole run (D1), at 999c8e6cd after the last build landing, ran 124 of 128 and was red on four
+- The regression: the first whole run (D1), at 999c8e6cd after the last build landing, ran 124 of 128 and was red on four
   suites by one assertion each: bash-walls-egd, dispatch-preflight-4b, session-poker-3 and session-poker-5
   (`regression-run-999c8e6cd….log`). T14 was born of it for the first two. The other two were the critic's S2 finding,
-  and T15 closed them. The later whole run, at 227313af4 after T15, was started (A-orch.22) and had not finished when
-  this entry was written, so its result is not stated here.
+  and T15 closed them. The second whole run, at 227313af4 after T15, ran 128 of 128 green
+  (`regression-run-227313af4….log`).
 - T9 (`critic-evidence.md`, `critic-adversarial.md`, `critic-structure.md`): the critic's read of the whole at
   999c8e6cd. Adversarial failed on one S2: the merge word waived a suite the whole run left red once a later landing was
   unproved. T15 fixed it, and T16 re-reads T15 as a piece. Finding 2, S3 on: the dispatch wall reads a path the judge
