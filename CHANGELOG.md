@@ -80,6 +80,12 @@ that culled by the rubric, not by suspending the cap or thinning the proof (D15)
 
 - T1 (A-T1.1 to A-T1.5): `lib/prose.sh` owns the built-in paths and the project's `prose:` entries, `prose_list` and
   `prose_path`. The floor judge and the review walk read them beside the docs root and the tracked docs home.
+- T18 (A-T18.1 to A-T18.6): born of the critic's S3 finding, D16 ruled fix. `prose_list` prints the docs root and the
+  tracked docs home as `dir/` entries after the built-in paths, so `prose_path` alone is the predicate the floor
+  judge, the past-F walk and the dispatch wall ask; the two prefix arms in `proof.sh` are gone, and
+  `_facts_tracked_prefix` with them. dispatch-preflight-5 §LANDS-NONE LN.5 and LN.6 and bash-walls-egd §PROSE-6 pin
+  a `docs/adrs/` path and a path under `docs-root:` admitted at dispatch, red first. A docs-relative record path stays
+  refused at both sites, as it always was at the judge.
 - T2 (A-T2.1 to A-T2.4): the landing-record fold maps a ready line's `none` to no suite once, for hand and queue
   landings alike, and the hand-only arm is gone. The dispatch wall refuses `Lands-on: none` over non-prose Files by
   `prose_path`. The critic found the wall does not read the judge's whole predicate, which also excuses the docs root
@@ -127,8 +133,8 @@ that culled by the rubric, not by suspending the cap or thinning the proof (D15)
   catcher of a kept section proved by a mutation probe on a scratch clone. It fell short of the row's round target of
   400; the measured need was 68 lines (A-orch.11, A-orch.12). The rubric yielded nothing in the other seven suites read.
 - The structure read raised two debt lines: prose-predicate (the wall's and the judge's prose tests) and
-  role-question-deal (`poker_questions_dealt` beside the wall's derivation). By its count the ledger stands at 14:
-  fourteen in, two burned, two raised. AC-8.2 and AC-8.3 are the close's to read.
+  role-question-deal (`poker_questions_dealt` beside the wall's derivation). T18 burned prose-predicate, so the
+  ledger stands at 13: fourteen in, three burned, two raised. AC-8.2 and AC-8.3 are the close's to read.
 
 ### Fixtures that met the new rules
 
@@ -160,8 +166,8 @@ that culled by the rubric, not by suspending the cap or thinning the proof (D15)
 - T9 (`critic-evidence.md`, `critic-adversarial.md`, `critic-structure.md`): the critic's read of the whole at
   999c8e6cd. Adversarial failed on one S2: the merge word waived a suite the whole run left red once a later landing was
   unproved. T15 fixed it, and T16 re-reads T15 as a piece. Finding 2, S3 on: the dispatch wall reads a path the judge
-  excuses as prose as code, and refuses the row. It is put as D16, fix now or defer, and was not ruled when this entry
-  was written. Finding 3 is an S4 note on a stale comment in card.test.sh. Evidence failed: 18 criteria CONFIRMED,
+  excuses as prose as code, and refuses the row. It was put as D16, fix now or defer, and ruled fix: T18 is its row,
+  and T19 re-reads T18 for evidence. Finding 3 is an S4 note on a stale comment in card.test.sh. Evidence failed: 18 criteria CONFIRMED,
   AC-2.3 and AC-8.1 REFUTED on finding 2, AC-7.1 and AC-7.3 UNVERIFIABLE until T14 landed, and AC-8.2 and AC-8.3 owed
   at the close; its wave verdict REFUTED on the S2. Structure flagged, with no finding and the two debt lines above.
 
@@ -174,10 +180,7 @@ that culled by the rubric, not by suspending the cap or thinning the proof (D15)
 
 ### Known limits
 
-Rendered from the plan's deferred findings, each its stated sentence, in the order they were registered.
-
-- The dispatch wall that refuses Lands-on: none over a non-prose file reads prose by the project prose list alone, while the floor judge also excuses the docs root and the tracked docs home, so a row whose Files name a docs path or a docs-relative record path is refused at dispatch where the judge would excuse it at the floor; spell such a path from the project root (.bionic/docs/record/...) until the wall calls the judge predicate, chartered for 1.30.0.
-- The dispatch wall that refuses Lands-on: none over a non-prose file reads prose by the project prose list alone, while the floor judge also excuses the docs root and the tracked docs home, so a row whose Files name a docs path or a docs-relative record path is refused at dispatch where the judge would excuse it at the floor; spell such a path from the project root (.bionic/docs/record/...) until the wall calls the judge predicate, chartered for 1.30.0.
+None. The first pass's one deferred finding, the dispatch wall and the floor judge disagreeing on what is prose, was moved to fix on D16 and fixed by T18.
 
 ### The landing numbers
 
