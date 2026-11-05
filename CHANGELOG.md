@@ -180,6 +180,19 @@ that culled by the rubric, not by suspending the cap or thinning the proof (D15)
   the amendment. It lands on release-check, render, commands and shell-lint. T11 opens the pull request and writes the
   reviews, and T12 closes the run.
 
+### The reviews
+
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- adversarial review, whole: fail at 999c8e6c by w48-T9, 2026-11-05T07:37:17Z (`critic-adversarial.md`)
+- structure review, whole: flag at 999c8e6c by w48-T9, 2026-11-05T07:37:23Z (`critic-structure.md`)
+- evidence review, whole: fail at 999c8e6c by w48-T9, 2026-11-05T07:38:02Z (`critic-evidence.md`)
+- evidence review, piece: pass at 227313af by w48-T16, 2026-11-05T08:46:24Z (`critic-evidence-2.md`)
+- adversarial review, piece: flag at 227313af by w48-T16, 2026-11-05T08:46:28Z (`critic-adversarial-2.md`)
+- structure review, piece: flag at 227313af by w48-T17, 2026-11-05T08:53:16Z (`critic-structure-2.md`)
+- evidence review, piece: flag at 047c014e by w48-T19, 2026-11-05T16:13:14Z (`critic-evidence-3.md`)
+- evidence review, piece: flag at 047c014e by w48-T19, 2026-11-05T16:14:33Z (`critic-evidence-3.md`)
+
 ### Known limits
 
 None. The first pass's one deferred finding, the dispatch wall and the floor judge disagreeing on what is prose, was moved to fix on D16 and fixed by T18.
