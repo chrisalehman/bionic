@@ -20,6 +20,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/regression-fixture.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 
 # THE SEAM, exactly as tests/session-poker.test.sh offers it, for RED evidence against a
 # mutated copy without ever touching the shipped file:
@@ -1910,5 +1911,31 @@ CT_ROWS="$(ct_row T6 9 close REQ-1)" awk '{ print } /^\| T4 \|/ { print ENVIRON[
 poke "$RCT" matrix-render
 expect_eq "CT-4 control: with two close rows serving, the hand-holds criterion reads pending, the single-row one T4 (exit 0)" \
   "0|pending|T4" "$RC|$(ct_task AC-1.1)|$(ct_task AC-2.1)"
+
+# ============================================================
+section "§SERVES: matrix-render writes each block's serves: from its Eval design row's Requirement cell, after provenance:, and a block rendered before the key gains it"
+# ============================================================
+# fails-when: serves: is not written, names another row's requirement, stands anywhere but straight after provenance:,
+# or a block rendered before the key does not gain it. s42_plan's plan with lib/plan-fixture.sh's flat themes, rendered
+# by the real verb with no block at all, then with every serves: line taken out.
+RSV="$(make_repo serves)"; ( cd "$RSV" && git commit -q --allow-empty -m init ); PSV="$(s42_plan "$RSV" 4)"
+plan_fixture_themes "$PSV" flat; awk '/^AC-[0-9]/ { b = 1 } !b' "$PSV" > "$PSV.t" && mv "$PSV.t" "$PSV"
+sv_keys() { awk -v a="$1:" 'index($0, a) == 1 { b = 1; next } /^[^ \t]/ { b = 0 } b { k = $1; sub(/:$/, "", k); o = o (o ? "," : "") k } END { print o }' "$PSV"; }
+sv_all() { for a in AC-168 AC-169 AC-170; do printf '%s\n' "$(awk -v a="$a:" 'index($0, a) == 1 { b = 1; next } /^[^ \t]/ { b = 0 } b && $1 == "serves:" { sub(/^ *serves: /, ""); print }' "$PSV")"; done | paste -sd'|' -; }
+sv_strip() { /usr/bin/grep -v '^  serves: ' "$PSV" | sed "${1:-}" > "$PSV.t" && mv "$PSV.t" "$PSV"; }   # [<sed edit>]
+SV_K="provenance,serves,fails-when,eval,task,evidence"
+expect_eq "SV-0 precondition: the matrix holds the three rows and no block" "3||" "$(/usr/bin/grep -c '^| AC-1[67][0-9] | T2 |' "$PSV")|$(sv_keys AC-168)|$(sv_keys AC-170)"
+poke "$RSV" matrix-render
+expect_eq "SV-1 matrix-render (exit 0) writes each new block's serves: as its Eval design row's cell, straight after provenance:" \
+  "0|REQ-1|REQ-1|REQ-2|$SV_K|$SV_K" "$RC|$(sv_all)|$(sv_keys AC-168)|$(sv_keys AC-170)"
+sv_strip
+expect_eq "SV-3 precondition: with the serves: lines taken out, the blocks stand as a plan rendered before the key" "provenance,fails-when,eval,task,evidence|||" "$(sv_keys AC-169)|$(sv_all)"
+poke "$RSV" matrix-render
+expect_eq "SV-4 the next render (exit 0) gives every block its serves:, straight after provenance:" "0|REQ-1|REQ-1|REQ-2|$SV_K" "$RC|$(sv_all)|$(sv_keys AC-169)"
+sv_strip 's/^| REQ-2 | x | AC-170 |/| — | x | AC-170 |/'; poke "$RSV" matrix-render
+expect_eq "SV-5 a row whose Requirement cell names no requirement gains no serves: while the rows beside it gain theirs (exit 0)" \
+  "0|REQ-1|REQ-1||provenance,fails-when,eval,task,evidence" "$RC|$(sv_all)|$(sv_keys AC-170)"
+sv_strip 's/^| REQ-1 | x | AC-169 |/| REQ-1, REQ-2 | x | AC-169 |/'; poke "$RSV" matrix-render
+expect_eq "SV-6 a cell naming two requirements is written whole, in its order, for the theme reading to say it read the first (exit 0)" "0|REQ-1|REQ-1, REQ-2|" "$RC|$(sv_all)"
 
 finish

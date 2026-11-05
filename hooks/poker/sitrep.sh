@@ -649,6 +649,8 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #   tests.suites-run · tests.suites-total · tests.whole-run · reviews · findings.open
 #   waste.dropped · waste.runs-discarded · waste.ready-unstarted · waste.waiting-on-you
 #   goal: name=<goal> status=<met|on course|not measured|not met|unreadable> measure=<what measures it — what it read, or -> for=<the theme's opening sentence>
+#   mapped by id: <n> rows carry no serves: · read as the first: <n> rows serve several requirements ·
+#   not mapped: <n> rows carry no serves: and no dotted id      each once, after the goals, as lib/plan.sh's theme reading says it
 #   ask: key=<kind:id> holds=<what waits on it, or nothing> title=<title> raised=<clock or -> blocks=<yes|no> waits=<user|event <what>>
 #   review: question=<q> scope=<piece|whole> result=<pass|flag|fail|running> at=<clock or -> open-findings=<n> record=<path or ->
 #
@@ -1591,11 +1593,13 @@ SITREP_RUNNING
   SG_WASTE="dropped $SG_W_DROPPED; $SG_X_RUNS suite runs discarded; $SG_X_IDLE ready and unstarted; $SG_X_WAIT waiting on you"
   # the goals, each status the one function's
   SG_GOAL="$(plan_goal_paragraph "$plan")"
-  SG_GOAL_LINES=""; g=0; m=0; k=0; u=0
+  SG_GOAL_LINES=""; SG_GOAL_MAP=""; g=0; m=0; k=0; u=0
   # split by hand: a goal with no measure has an empty field, which a tab-split read would close up
   while IFS= read -r st; do
     t="${st#*	}"; md="${t#*	}"; rdg="${md#*	}"; st="${st%%	*}"; t="${t%%	*}"; md="${md%%	*}"
     [ -n "$t" ] || continue
+    # how the theme reading mapped the matrix rows is no goal: its line is printed as read, after the goals
+    if [ "$st" = mapping ]; then SG_GOAL_MAP="${SG_GOAL_MAP}${t}"$'\n'; continue; fi
     # a theme's row ends in its opener, a fifth tab-separated field; a measured goal's has none
     fr=""; case "$rdg" in *'	'*) fr="${rdg#*	}"; rdg="${rdg%%	*}" ;; esac
     g=$((g + 1))
@@ -1607,6 +1611,7 @@ SITREP_RUNNING
   done <<SITREP_GOALS
 $SG_GOALS_READ
 SITREP_GOALS
+  SG_GOAL_LINES="${SG_GOAL_LINES}${SG_GOAL_MAP}"
   return 0
 }
 
