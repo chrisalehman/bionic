@@ -2825,15 +2825,11 @@ BRF_EOF
         waiver=0; matrix_row_waiver "$ev" "$block" && waiver=1
         ruled=0; matrix_row_ruled "$tier" "$status" "$aud" "$(user_confirmed_value "$block")" "$waiver" && ruled=1
         owe="$(matrix_owing_step "$PLAN" "$block")"
-        [ "$ruled" = 1 ] || ! matrix_row_deferred "$PLAN" "$owe" "$2" "$status" || ruled="owed:$owe"
+        [ "$ruled" = 1 ] || ! matrix_row_deferred "$PLAN" "$owe" "$2" "$status" "$(matrix_owing_open "$PLAN" "$block")" || ruled="owed:$owe"
         aud="$(placeholder_cell "$aud")"
         printf '%s\037%s\037%s\037%s\037%s\n' "$ac" "$tier" "$status" "${aud:--}" "$ruled"
       done <<RR_MATRIX
-$(awk -F'|' '/^[[:space:]]*\|/ && NF == 7 {
-    for (i = 2; i <= 6; i++) gsub(/^[ \t]+|[ \t]+$/, "", $i)
-    if ($2 == "" || $2 == "AC" || $2 ~ /^[-:]+$/) next
-    printf "%s\037%s\037%s\037%s\037%s\n", $2, $3, $4, $5, $6
-  }' <<< "$MATRIX")
+$(matrix_table_rows)
 RR_MATRIX
     )
   }

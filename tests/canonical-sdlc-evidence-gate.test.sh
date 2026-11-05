@@ -211,9 +211,19 @@ expect_block "9e a pending T3 row whose task is a Step-4 row still owes its evid
   "$(ow_home 6 T3 T1)" 'git commit -m "x"' "AC-2 has placeholder evidence"
 expect_allow "9f a row whose task is a Step-7 row owes nothing at 6" \
   "$(ow_home 6 T3 T7)" 'git commit -m "x"'
-expect_block "9g …and is owed from Step 7 on" \
-  "$(ow_home 7 T3 T7)" 'git commit -m "x"' "AC-2 has placeholder evidence"
-expect_allow "9h a task list is owed at the latest step it names (T1, T9 at 8)" \
+ow_adv() { OW_RC=0; eg_head_repo "$1"; sed -i.bak -e "s/reader=w-read result=pass scope=piece/reader=bionic:critic result=pass scope=whole/" -e "1s/^---\$/---\nbase-sha: $EG_HEAD/" -e "s/^current: .*/current: $(($2 - 1))\nworking-branch: $(git -C "$1" branch --show-current)/" "$1/.bionic/docs/plans/active.md"; eg_autobind "$1"; OW_OUT="$(cd "$1" && HOME="$1" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" current "$2" --check 2>&1)" || OW_RC=$?; }
+ow_t7() { local ow_tasks="${ow_tasks//CHANGELOG.md | pending/CHANGELOG.md | $2}"; ow_home 7 T3 T7; }
+ow_adv "$(ow_home 7 T3 T7)" 7
+expect_eq "9g the advance into the step that owes a row whose task is open is admitted" 0 "$OW_RC"
+expect_allow "9h a commit at the owing step with the task row pending owes nothing" \
+  "$(ow_home 7 T3 T7)" 'git commit -m "x"'
+for ow_s in landed dropped; do
+  expect_block "9i-$ow_s once the task row is $ow_s the commit is refused" \
+    "$(ow_t7 x $ow_s)" 'git commit -m "x"' "AC-2 has placeholder evidence"
+  ow_adv "$(ow_t7 x $ow_s)" 8
+  expect_contains "9i-$ow_s-adv …and so is the advance, naming AC-2 and its exits" "confirmed AC-2 (rule it: the auditor confirms it, the row is waived," "$OW_OUT"
+done
+expect_allow "9m a task list is owed at the latest step it names (T1, T9 at 8)" \
   "$(ow_home 8 T3 "T1, T9")" 'git commit -m "x"'
 
 # The two file-scope readers the judge and the card share with the gate, asked as hooks/poker/judge.sh asks them.
@@ -225,7 +235,7 @@ ow_p8="$(write_plan "$(make_home)" "$(ow_plan 8 T3 T9 | awk '
   /^\| AC-2 \|/ { print; print "| AC-3 | T3 | pending | — |  |"; next }
   { print }
   END { print "AC-3:"; print "  fails-when: the build is red"; print "  task: T1"; print "  evidence: pending" }')")"
-expect_eq "9i matrix_unruled at 8 names the row owed at 4 and not the row owed at the close" "AC-3
+expect_eq "9n matrix_unruled at 8 names the row owed at 4 and not the row owed at the close" "AC-3
 rc=0" "$(ow_ask "$ow_p8" matrix_unruled "$ow_p8" 8)"
 expect_eq "9j the owing step of a row id is that row's step, read from the Tasks table" "9|4|7|9|9" \
   "$(for t in T9 T1 T7 9 'T1, T9'; do ow_ask "$ow_p8" matrix_owing_step "$ow_p8" "  task: $t" | head -1; done | paste -sd'|' -)"
