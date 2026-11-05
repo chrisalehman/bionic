@@ -1918,44 +1918,51 @@ proof_unproved_needs() {
 # each commit on the first-parent line after F is excused (its tree is its parent's, it changed docs only, or it is a
 # release-set commit with a passing check) or is a landing whose row's suites are green at it, and each red F left
 # is closed by a later green landing verdict of that suite; no second whole run is owed. A verdict is keyed by the
-# commit it ran at, or by the row head a merge brought in. BOTH CALLERS ASK
+# commit it ran at, or by the row head a merge brought in. THE REDS ARE READ FIRST: a red still open answers owed
+# whatever the commits past F hold, since the person's word covers a missing proof and never a known red; where no
+# close can be placed (F or the head is no commit, or F is not behind the head) every red stays open. Only a floor
+# with no open red asks the commits, and reads covered or uncovered. BOTH CALLERS ASK
 # `proof_floor_absent` FIRST and answer an absent floor themselves, so the judge never sees a plan with no floor
 # line; the call it made here never decided (wave-36 T12; C35). Should one reach it, the empty head is no commit
 # and the answer is uncovered, the safe direction.
 # _proof_floor_base <plan> <tree> -> 0 with _PF_H, the last regression proof's head as a commit, and _PF_OWED, the
-# suites that proof's whole run left red less the plan's inherited debt; 1, both empty, when that head is no commit here. THE ONE READING OF F the judge
+# suites that proof's whole run left red less the plan's inherited debt; 1, _PF_H empty, when that head is no commit here,
+# _PF_OWED read all the same: the reds are the proof line's own, readable with no git. THE ONE READING OF F the judge
 # and the owed set share (wave-39 T24).
 _proof_floor_base() {
   local plan="$1" tree="$2" h inh
-  _PF_H=""; _PF_OWED=""
-  h="$(proof_last "$plan" regression)"
-  _PF_H="$(git -C "$tree" rev-parse --verify -q "${h}^{commit}" 2>/dev/null)" || { _PF_H=""; return 1; }
+  _PF_H=""
   _PF_OWED="$(_proof_last_read "$plan" regression owed)"
   inh="$(proof_inherited "$plan")"
   [ -z "$_PF_OWED" ] || [ -z "$inh" ] || _PF_OWED="$(PROOF_I=",$inh," awk -F, '{ for (i = 1; i <= NF; i++) if ($i != "" && !index(ENVIRON["PROOF_I"], "," $i ",")) o = o (o == "" ? "" : ",") $i; print o }' <<PROOF_OWED_IN
 $_PF_OWED
 PROOF_OWED_IN
 )"
+  h="$(proof_last "$plan" regression)"
+  _PF_H="$(git -C "$tree" rev-parse --verify -q "${h}^{commit}" 2>/dev/null)" || { _PF_H=""; return 1; }
   return 0
 }
 
 _proof_floor_judge() {
-  local plan="$1" tree="$2" c="$3" h owed
-  _proof_floor_base "$plan" "$tree" || { printf 'uncovered\tthe proved head is not a commit here\n'; return 0; }
+  local plan="$1" tree="$2" c="$3" h owed open why based=1 behind=0
+  _proof_floor_base "$plan" "$tree" || based=0
   h="$_PF_H"; owed="$_PF_OWED"
-  c="$(git -C "$tree" rev-parse --verify -q "${c}^{commit}" 2>/dev/null)" \
-    || { printf 'uncovered\tthe head %s is not a commit here\n' "$3"; return 0; }
-  if [ "$h" != "$c" ]; then
-    git -C "$tree" merge-base --is-ancestor "$h" "$c" 2>/dev/null \
-      || { printf 'uncovered\tthe last whole run read %.12s, which is not in the history of %.12s\n' "$h" "$c"; return 0; }
-    owed="$(_proof_past_f "$plan" "$tree" "$h" "$c" "$owed")"
-    case $? in
-      0) owed="" ;;
-      2) : ;;
-      *) [ -n "$owed" ] || owed="the commits since ${h:0:12} cannot be read"; printf 'uncovered\t%s\n' "$owed"; return 0 ;;
-    esac
+  c="$(git -C "$tree" rev-parse --verify -q "${c}^{commit}" 2>/dev/null)" || c=""
+  [ "$based" = 0 ] || [ -z "$c" ] || [ "$h" = "$c" ] || ! git -C "$tree" merge-base --is-ancestor "$h" "$c" 2>/dev/null || behind=1
+  # Only the closes are asked here, never the commits: a commit no run proved must not hide a red still open. A walk
+  # git cannot list closes nothing, so every red stays open.
+  if [ -n "$owed" ] && [ "$behind" = 1 ]; then
+    open="$(_proof_past_f "$plan" "$tree" "$h" "$c" "$owed" closes)"
+    case $? in 0) owed="" ;; 2) owed="$open" ;; esac
   fi
-  if [ -n "$owed" ]; then printf 'owed\t%s\n' "$owed"; else printf 'covered\n'; fi
+  [ -z "$owed" ] || { printf 'owed\t%s\n' "$owed"; return 0; }
+  [ "$based" = 1 ] || { printf 'uncovered\tthe proved head is not a commit here\n'; return 0; }
+  [ -n "$c" ] || { printf 'uncovered\tthe head %s is not a commit here\n' "$3"; return 0; }
+  [ "$h" != "$c" ] || { printf 'covered\n'; return 0; }
+  [ "$behind" = 1 ] \
+    || { printf 'uncovered\tthe last whole run read %.12s, which is not in the history of %.12s\n' "$h" "$c"; return 0; }
+  why="$(_proof_past_f "$plan" "$tree" "$h" "$c" "")" && { printf 'covered\n'; return 0; }
+  printf 'uncovered\t%s\n' "${why:-the commits since ${h:0:12} cannot be read}"
 }
 
 # _proof_past_f <plan> <tree> <F> <head> <owed> [<only>] -> exit 0, printing nothing, when every commit on the first-parent line
