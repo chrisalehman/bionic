@@ -155,6 +155,30 @@ expect_eq "WORD-3b …each row read from its exits: covered and uncovered refuse
   "1/0|1/0|1/1|0" "$FC_WN_COV/$FC_WY_COV|$FC_WN_UNC/$FC_WY_UNC|$FC_WN_OWED/$FC_WY_OWED|$FC_WN_GREEN"
 expect_eq "WORD-3c one predicate: the ask defined in lib/proof.sh and called by the card; the old one gone from both" "1|1|0" \
   "$(/usr/bin/grep -c '^proof_merge_ask()' "$FC_LIB/proof.sh")|$(/usr/bin/grep -c 'proof_merge_ask "$PV_PLAN"' "$BIONIC_HOOKS_DIR/poker/plan.sh")|$(cat "$FC_LIB/proof.sh" "$BIONIC_HOOKS_DIR/poker/plan.sh" | /usr/bin/grep -c proof_merge_unproved)"
+
+# ============================================================
+section "§OWED-FIRST: the red the whole run left outranks a commit no run proved: the floor reads owed, the word drawn and honoured nowhere"
+# ============================================================
+# fails-when: past a floor whose owed suite no landing greened, a code commit no run proved turns the judge uncovered, so
+# the card draws the word and the gate honours it over a known red; or the same where the floor is not in the head's history.
+fc_fj() { bash -c '. "$1/roots.sh"; . "$1/proof.sh"; _proof_floor_judge "$2" "$3" "$4"' _ "$FC_LIB" "$PFC" "$RFC" "$FC_R" 2>/dev/null; }
+fc_plan "$(fc_floor "$FC_B" a.test.sh)
+$(fc_reads "$FC_C")"
+expect_eq "OF-1 a whole run at B left a.test.sh red and T1's code at C has no run: the judge reads the head owed, naming the suite" "owed	a.test.sh" "$(fc_fj)"
+expect_eq "OF-1b …proof_merge_ask exits 2 there, printing the owed suite and no merge line" "a.test.sh|rc=2" "$(fc_mu "$FC_R")"
+fc_page --preview
+expect_eq "OF-2 the card puts the release decision and no merge without a whole run, as JUDGE-2 at an owed head" "yes|" "$(fc_has "$(fc_under Decisions | fc_flat)" 'Release 1.0.0')|$(fc_unproved)"
+poke "$RFC" approve release 'ship it'; poke "$RFC" approve merge-unproved 'merge it'
+poke "$RFC" current 8 --check
+expect_eq "OF-3 the word recorded at the head: current 8 --check refuses (exit 1) on the regression owed, never covered" "1|owed|1" "$RC|$(fc_regline | cut -f2)|$(/usr/bin/grep -c '^approved: merge-unproved ' "$PFC")"
+expect_contains "OF-3b …naming the pass or a fix row as the exit" "needs: the pass — a fix row for a.test.sh, then the pass" "$(fc_regline)"
+expect_absent "OF-3c …and no reply" "reply" "$(fc_regline)"
+FC_OFX="$(git -C "$RFC" commit-tree -p "$FC_B" -m 'a whole run off the head line' "$FC_C^{tree}")"
+fc_plan "$(fc_floor "$FC_OFX" a.test.sh)
+$(fc_reads "$FC_C")"
+expect_eq "OF-4 a floor not in the head's history keeps its red: the judge reads owed, and the ask draws nothing" "owed	a.test.sh|a.test.sh|rc=2" "$(fc_fj)|$(fc_mu "$FC_R")"
+rm -f "$FC_REC"/release-approval-*.md
+
 # §JUDGE's world as it was left: T1's landing recorded, the head R.
 fc_published T1 "$FC_C" > "$FC_REC/landing-proofs.log"; rm -f "$FC_REC"/release-approval-*.md
 fc_typed "$FC_WD" "$FC_WR"

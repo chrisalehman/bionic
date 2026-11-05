@@ -398,10 +398,10 @@ s57_reset; s57_floor "$S57_C4"
 for s57q in evidence adversarial structure; do s57_fact "$s57q" "$S57_C2" pass piece; done
 s57_fact adversarial "$S57_C2" pass whole; s57_fact structure "$S57_C2" pass whole
 s57_state "$P57" "$S57_C3"
-# C3 is an older head than the floor proof's (C4), so the floor is uncovered from its proof's head (T45; review pass
-# 13 F3), with the judge's reason after the range (wave-35 T9); every reading line is covered.
+# C3 is an older head than the floor proof's (C4), and that floor owes no suite, so it is uncovered and, with no pass
+# and no word at C3, reads unproved: the whole suite's state, then the judge's reason. Every reading line is covered.
 expect_eq "57c §JUDGE a docs-only tail: past the last head only the docs root changed, so every reading line is covered" \
-  "$(s57_all "uncovered	${S57_C4}..${S57_C3}" covered covered covered covered covered)" \
+  "$(s57_all "unproved	red at ${S57_C4:0:8}, not in this head's history; the last whole run read ${S57_C4:0:12}, which is not in the history of ${S57_C3:0:12}" covered covered covered covered covered)" \
   "$(printf '%s\n' "$S57_OUT" | awk -F'\t' -v OFS='\t' '$1 == "regression" { NF = 3 } { print }')"
 expect_eq "57c2 …rc 1, for the floor alone" "1" "$S57_RC"
 s57_state "$P57" "$S57_C4"

@@ -152,7 +152,8 @@ expect_contains "CK-8r-c …the advance opened the waiver item the judge owes, i
   "waive:adversarial" "$( ( cd "$RCK" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && cat "$(owed_file)"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" ) 2>/dev/null)"
 ck_case "CK-8r2 current 8 from 7, the floor one commit behind the head" 8 7 1 "$(ck_floor "$CK_B")
 $(ck_reads "$CK_C")"
-expect_contains "CK-8r2-b …refused by the judge, naming the range no run proves" "${CK_B}..${CK_C}" "$CK_OUT"
+expect_contains "CK-8r2-b …refused by the judge, naming the commit no run proves (the floor owes no suite: unproved, never owed)" \
+  "$(printf 'regression\tunproved\tred at %.8s, 1 landing before this head; commit %.12s (no landing row) is not proved: ' "$CK_B" "$CK_C")" "$CK_OUT"
 
 # ---------- the flag's grammar: after the step, for 5..8 only ----------
 ck_plan 6 "$CK_GOOD"; cp "$PCK" "$TMPROOT/ck-before"
