@@ -364,4 +364,20 @@ expect_nonempty "AC-3.2 precondition: steps/5.md holds the regression paragraph"
 expect_contains "AC-3.2 the paragraph says a head whose landings moved no code needs no run" "moved no code" "$RO_B"
 for ro_w in "with no second run" "no second run"; do expect_absent "AC-3.2 the paragraph no longer says \"$ro_w\"" "$ro_w" "$RO_B"; done
 
+# ── §RED-ORDER ───────────────────────────────────────────────────────────────
+section "§RED-ORDER: the red sentence of steps/5.md and of its template says to record the run before the row is added"
+# fails-when: the page or its template lacks the paragraph holding the red sentence, or that paragraph lacks the order
+# (proof-add regression <log> before --born regression:<suite>), or carries the banned noun; each absence is read beside a
+# presence on the same paragraph.
+for ro_f in "$REPO/skills/canonical-sdlc/steps/5.md" "$REPO/agents-src/templates/skills/canonical-sdlc/steps/5.md.tmpl"; do
+  ro_n="${ro_f#"$REPO"/}"
+  RO_P="$(/usr/bin/grep -F 'A red suite is a fix row' "$ro_f")"
+  RO_S="$(printf '%s\n' "$RO_P" | awk '{ t = substr($0, index($0, "A red suite is a fix row")); n = index(t, ". "); print n ? substr(t, 1, n) : t }')"
+  expect_nonempty "AC-6.1 precondition: $ro_n holds the paragraph with the red sentence" "$RO_P"
+  expect_contains "AC-6.1 $ro_n: the red sentence says to record the run with proof-add regression <log>" "proof-add regression <log>" "$RO_S"
+  expect_contains "AC-6.1 $ro_n: …then to add the row with --born regression:<suite>" "--born regression:<suite>" "$RO_S"
+  expect_eq "AC-6.1 $ro_n: …in that order" "1" "$(printf '%s\n' "$RO_S" | awk '{ a = index($0, "proof-add regression <log>"); b = index($0, "--born regression:<suite>"); print (a > 0 && b > a) ? 1 : 0 }')"
+  expect_absent "AC-6.1 $ro_n: the paragraph holds no \"reader\"" "reader" "$RO_P"
+done
+
 finish

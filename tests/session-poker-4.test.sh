@@ -1987,4 +1987,67 @@ poke "$RCT" matrix-render
 expect_eq "CT-4 control: with two close rows serving, the hand-holds criterion reads pending, the single-row one T4 (exit 0)" \
   "0|pending|T4" "$RC|$(ct_task AC-1.1)|$(ct_task AC-2.1)"
 
+# ============================================================
+section "§BORN-RED: a floor-born marker is admitted on the red verdict a whole run recorded, and the refusal names the log to record"
+# ============================================================
+# fails-when: born_floor_backing drops the verdict backing (BR-1 refused), or reads a green verdict or one at a commit off
+# the working branch as a red (BR-2, BR-3 admitted); or the refusal stops naming the newest red log on the branch (BR-5,
+# BR-6), names one that is green, dirty or off the branch (BR-4), or loses its old words when no log stands (BR-4).
+# FIXTURE FIDELITY: tests/regression-rename.test.sh §GONE-BORN's repository and plan (a bound plan, its working branch, no
+# proof line), with a landing record holding the verdict lines `regression-run` writes (lib/proof.sh
+# `proof_regression_fold`) and logs shaped as `_proof_floor_log` reads them: `head=<40-hex> dirty=<n>` first, `rc=<n>` last.
+BR_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RBR="$(make_repo born-red)"; ( cd "$RBR" && git commit -q --allow-empty -m init )
+BR_C1="$(git -C "$RBR" rev-parse HEAD)"
+BR_TREE="$(git -C "$RBR" rev-parse "${BR_C1}^{tree}")"
+BR_C2="$(git -C "$RBR" commit-tree "$BR_TREE" -p "$BR_C1" -m second)"
+BR_OFF="$(git -C "$RBR" commit-tree "$BR_TREE" -m off-branch)"
+git -C "$RBR" update-ref refs/heads/wave/01-fixture "$BR_C2"
+PBR="$(s42_plan "$RBR" 4 "  worktree: .worktrees/01-fixture
+  base-sha: abc1234
+  branch: wave/01-fixture
+  working-branch: wave/01-fixture")"
+( cd "$RBR" && git add -f "$PBR" && git commit -qm plan ) >/dev/null 2>&1
+BR_DIR="$RBR/.bionic/docs/record/wave-01-fixture"; mkdir -p "$BR_DIR"
+BR_REC="$BR_DIR/landing-proofs.log"
+br_verdict() { printf 'line/v1|ev=verdict|row=regression|commit=%s|suite=%s|result=%s|log=record/wave-01-fixture/regression-run-%s.log|admitted=-|width=-|kind=regression|at=2026-11-04T10:00:00Z\n' "$1" "$2" "$3" "$1" >> "$BR_REC"; }
+br_log() {  # <sha> <dirty> <rc> <mtime stamp> -> a regression-run log in the record
+  printf 'head=%s dirty=%s\ncommand: tests/run.sh\nGating: 1 passed, 1 failed\nrc=%s\n' "$1" "$2" "$3" > "$BR_DIR/regression-run-$1.log"
+  touch -t "$4" "$BR_DIR/regression-run-$1.log"
+}
+br_cell() { /usr/bin/grep "^- $1:" "$PBR"; }   # the row's line in the state block, where the marker rides
+br_add() { poke "$RBR" task-add "$1" 4 build 'fix the red. The red suite turns green.' bionic:implementor '—' 30 REQ-5 "lib/$1.sh" --born "regression:$2"; }
+: > "$BR_REC"
+br_verdict "$BR_C1" a.test.sh red
+br_add T6 a.test.sh
+expect_eq "BR-1 a red verdict at a commit on the working branch, and no proof line: task-add --born regression:a.test.sh exits 0" "0" "$RC"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_contains "BR-1b …and the marker on the row's state line reads the run, its first twelve hex" "born: regression a.test.sh of=run@${BR_C1:0:12}" "$(br_cell T6)"
+br_verdict "$BR_C1" b.test.sh green
+br_add T7 b.test.sh
+expect_eq "BR-2 a green verdict for b.test.sh backs nothing: refused (exit 1), naming the missing red" "1|1" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'names no red the machine recorded' | tr -d ' ')"
+br_verdict "$BR_OFF" c.test.sh red
+br_add T7 c.test.sh
+expect_eq "BR-3 a red verdict at a commit off the working branch backs nothing: refused (exit 1), unlike BR-1's" "1" "$RC"
+# a log that is green, dirty or off the branch is not the red to record; with none standing the old words stay
+br_log "$BR_C1" 0 0 202611040900
+br_log "$BR_C2" 1 1 202611040910
+br_log "$BR_OFF" 0 1 202611040920
+br_add T7 d.test.sh
+expect_eq "BR-4 no verdict and only a green, a dirty and an off-branch log on disk: refused (exit 1)" "1" "$RC"
+expect_contains "BR-4b …in today's words" "it owes nothing" "$OUT"
+expect_absent "BR-4c …naming no log to record" "proof-add regression record/" "$OUT"
+rm -f "$BR_DIR/regression-run-$BR_C1.log"; br_log "$BR_C1" 0 1 202611040930
+br_add T7 d.test.sh
+expect_eq "BR-5 a red log on the branch, no verdict: refused (exit 1), naming the proof-add line with that log" "1|1" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c "session-poker.sh proof-add regression record/wave-01-fixture/regression-run-${BR_C1}.log")"
+expect_contains "BR-5b …and the sentence that sends the run there" "proof-add the red run's log first" "$OUT"
+rm -f "$BR_DIR/regression-run-$BR_C2.log"; br_log "$BR_C2" 0 2 202611041000
+br_add T7 d.test.sh
+expect_eq "BR-6 two red logs on the branch: the newer one is named, the older is not" "1|0" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c "regression-run-${BR_C1}.log")"
+expect_contains "BR-6b …(the newer, by name)" "record/wave-01-fixture/regression-run-${BR_C2}.log" "$OUT"
+POKE_BOUND="$BR_BOUND_WAS"
+
 finish
