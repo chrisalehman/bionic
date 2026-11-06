@@ -364,4 +364,13 @@ expect_nonempty "AC-3.2 precondition: steps/5.md holds the regression paragraph"
 expect_contains "AC-3.2 the paragraph says a head whose landings moved no code needs no run" "moved no code" "$RO_B"
 for ro_w in "with no second run" "no second run"; do expect_absent "AC-3.2 the paragraph no longer says \"$ro_w\"" "$ro_w" "$RO_B"; done
 
+# ── §RED-ORDER ───────────────────────────────────────────────────────────────
+section "§RED-ORDER: the red sentence of steps/5.md and of its template says to record the run before the row is added"
+for ro_f in "$REPO/skills/canonical-sdlc/steps/5.md" "$REPO/agents-src/templates/skills/canonical-sdlc/steps/5.md.tmpl"; do
+  RO_P="$(/usr/bin/grep -F 'A red suite is a fix row' "$ro_f")"
+  RO_S="$(printf '%s\n' "$RO_P" | awk '{ t = substr($0, index($0, "A red suite is a fix row")); n = index(t, ". "); print n ? substr(t, 1, n) : t }')"
+  expect_eq "AC-6.1 ${ro_f##*/}: it says proof-add regression <log>, then --born regression:<suite>; the paragraph holds no \"reader\"" "1|0" \
+    "$(printf '%s\n' "$RO_S" | awk '{ a = index($0, "proof-add regression <log>"); b = index($0, "--born regression:<suite>"); print (a > 0 && b > a) ? 1 : 0 }')|$(printf '%s\n' "$RO_P" | /usr/bin/grep -c reader)"
+done
+
 finish

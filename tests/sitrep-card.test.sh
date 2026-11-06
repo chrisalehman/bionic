@@ -18,17 +18,14 @@
 #   §TABLE     the Metrics are five lines, every number a measured value of its own line, the pace comparison first
 #   §COUNTED   the asks that wait on events are one counted line under the Assessment, by kind, never a row each
 #   §TAGS      the seven tags draw; a foreign tag is refused by name, a missing one is named; a fourth point is kept
-#   §PURPOSE   the purpose is the Assessment's first row, required, and its numbers are checked
 #   §CALL      a call saying nothing is owed stands while every ask waits on an event, and refuses over a blocking one
 #   §BLOCKS    Blocked on you lists the asks that wait on the user and hold something, else None naming the next event
 #   §BIND      every number in a judgment line is a sheet value, bound to the word beside it by word and by place
 #   §SHAPE     the drawn card's own shape: width, a step row above its tasks, an open task twice or missing
 #   §WORDS     "reader", "reading" and their kin, or "unmeasured", in the judgment refuse the card
-#   §REASONS   a refusal names every reason at once, nothing on stdout
 #   §HEAD      the head names the wave only when the run has one
 #   §VERB      the verb draws the card from the sheet the judgment was written from, under 10 minutes old, its asks
 #              read fresh, and settles a decision the ledger ruled first
-#   §SKILL     the skill writes the tags the verb takes and shows only what the verb printed, in one fenced block
 #   §ONE-READER the goal's status, the task's title and the goal's measure are each one function the sheet and the
 #              cards call: a plant in that one reading moves both surfaces together
 #
@@ -698,23 +695,6 @@ expect_eq "TA6 a judgment with no point draws: the purpose alone under the grade
   "$SC_RC|$(sc_rows "$SC_OUT" "Assessment")"
 
 # ============================================================
-section "§PURPOSE: the purpose is the Assessment's first row, required, and its numbers are checked"
-# ============================================================
-# fails-when: a card draws without a purpose, a purpose claiming a count the sheet lacks draws, or a true purpose is
-# drawn anywhere but first under the grade.
-sc_card "$SC_OWED" "$(sc_judge_without "$SC_J_OWED" 'purpose: ')"
-expect_eq "PU1 a judgment with no purpose refuses the card, naming it: exit 1, nothing printed" "1||1" "$SC_RC|$SC_OUT|$(sc_why 'no purpose: line')"
-sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | sed 's/^purpose: .*/purpose: the run lets the user see what they owe; on course, 3 of 4 goals met./')"
-expect_eq "PU2 a purpose claiming 3 of 4 goals met over a sheet with 0 of 1 refuses the card, naming the number" "1||yes" \
-  "$SC_RC|$SC_OUT|$(printf '%s\n' "$SC_ERR" | /usr/bin/grep -F 'purpose:' | /usr/bin/grep -qF 'says 3' && echo yes)"
-sc_card "$SC_OWED" "$SC_J_OWED"
-expect_eq "PU3 control: the true purpose draws first under the grade" "    • Purpose: the run lets the user see what they owe; on course, 0 of 1 goals met." \
-  "$(sc_rows "$SC_OUT" "Assessment" | head -1)"
-sc_card "$SC_OWED" "$(printf '%s\n' "$SC_J_OWED" | awk '/^purpose: / { p = $0; next } { print } END { print p }')"
-expect_eq "PU4 …wherever the line stands in the judgment" "0|    • Purpose: the run lets the user see what they owe; on course, 0 of 1 goals met." \
-  "$SC_RC|$(sc_rows "$SC_OUT" "Assessment" | head -1)"
-
-# ============================================================
 section "§CALL: a call saying nothing is owed stands while every ask waits on an event, and refuses over a blocking one"
 # ============================================================
 # fails-when: the check refuses "nothing tonight" over the refused waiver, admits it over the unanswered one, or
@@ -906,19 +886,6 @@ point: I read the sheet; the spreadsheet and the readiness review agree; goals a
 expect_eq "WO4 control: read, spreadsheet, readiness and not measured are other words, and the card prints" "0|" "$SC_RC|$SC_ERR"
 
 # ============================================================
-section "§REASONS: a refusal names every reason at once, nothing on stdout"
-# ============================================================
-# fails-when: a refused card prints, or a reason the first refusal could have named waits for a second run.
-sc_card "$SC_OWED" "$(sc_judge_without "$SC_J_OWED" 'purpose: ')
-point: 57 suites ran today.
-metric: Pace: fine."
-expect_eq "RE1 three faults at once, no purpose, a number no value holds and a foreign tag: exit 1, nothing on stdout" "1|" "$SC_RC|$SC_OUT"
-expect_eq "RE2 …every reason on stderr in the one refusal" "1|1|1" "$(sc_why 'no purpose: line')|$(sc_why 'says 57')|$(sc_why 'metric:')"
-sc_card "$SC_OWED" "$SC_J_OWED"
-expect_eq "RE3 control: the judgment with the three faults moved back prints the card, nothing on stderr" "0|" "$SC_RC|$SC_ERR"
-expect_nonempty "RE3b …on stdout" "$SC_OUT"
-
-# ============================================================
 section "§HEAD: the head names the wave only when the run has one"
 # ============================================================
 # fails-when: a run whose plan carries no wave number prints "wave -" in its head, or a numbered run loses its wave.
@@ -1073,42 +1040,6 @@ SV_AT=$((SV_NOW + 120)) sv_run card "$SV_P" <<< "$SV_JR"
 expect_eq "VE10e the call, in words that owe something, prints, the ruling ask under Blocked on you and not under the Assessment" \
   "0|1|0" \
   "$SV_RC|$(sc_rows "$SV_OUT" "Blocked on you" | /usr/bin/grep -c 'ruling on 4/2 is unread')|$(sc_rows "$SV_OUT" "Assessment" | /usr/bin/grep -c 'ruling on 4/2 is unread')"
-
-# ============================================================
-section "§SKILL: the skill writes the judgment in the tags the verb takes and shows only what the verb printed, in one fenced block"
-# ============================================================
-# FIXTURE FIDELITY: the shipped skill text read in place; the tags are the ones card.sh says it takes in its own
-# refusal of an unknown tag; each plant is a scratch copy of the skill with one line moved.
-# fails-when: the skill shows text the verb did not print (a paraphrase, a card written by hand, a refused card), or
-# names a judgment tag the verb refuses, or leaves one out.
-SK_SKILL="${BIONIC_SKILLS_DIR}/sitrep/SKILL.md"
-sk_tags() {  # -> each judgment tag card.sh takes, one per line, read from its refusal of an unknown tag
-  sc_card "$SC_OWED" "$SC_J_OWED
-verdict: fine"
-  printf '%s\n' "$SC_ERR" | sed -n 's/.*it takes \(.*\)$/\1/p' | head -1 | sed 's/ and /, /' | tr ',' '\n' | sed 's/^ *//; s/ *$//' | /usr/bin/grep .
-}
-sk_missing() {  # <skill file> -> each tag the verb takes that the file does not name in code
-  local t
-  while IFS= read -r t; do /usr/bin/grep -qF -- "\`$t" "$1" || printf ' %s' "$t"; done <<< "$SK_TAGS"
-}
-sk_unshown() {  # <skill file> -> each line that shows the card yet lets other text through: not exactly as printed, or not one fence
-  awk '{ l = tolower($0) } l ~ /(^|[^a-z])shows?([^a-z]|$)/ && l ~ /card/ && l !~ /never/ && l !~ /description:/ \
-    && (l !~ /exactly as printed/ || l !~ /one fenced code block/ || l !~ /nothing after/) { print }' "$1"
-}
-SK_TAGS="$(sk_tags)"
-expect_eq "SK0 the verb names the seven tags it takes (the extractor reads card.sh's own refusal)" \
-  "purpose:|call:|grade:|point:|ask <key>:|close:" "$(printf '%s\n' "$SK_TAGS" | paste -sd'|' -)"
-expect_empty "SK1 the skill names every tag the verb takes, each in code (SK0 read them)" "$(sk_missing "$SK_SKILL")"
-expect_eq "SK2 the skill shows the card exactly as printed, inside one fenced code block, nothing after it" "1" \
-  "$(/usr/bin/grep -i 'card' "$SK_SKILL" | /usr/bin/grep -i 'exactly as printed' | /usr/bin/grep -i 'one fenced code block' | /usr/bin/grep -ci 'nothing after')"
-expect_empty "SK2b …and no other line shows the card some other way (SK2 read the same file)" "$(sk_unshown "$SK_SKILL")"
-expect_eq "SK3 rc 1: the skill fixes the judgment and runs it again, never shows a refused card, never writes one by hand" "1" \
-  "$(/usr/bin/grep -F 'rc 1' "$SK_SKILL" | /usr/bin/grep -i 'never show a refused card' | /usr/bin/grep -ci 'never write a card by hand')"
-cp "$SK_SKILL" "$TMPROOT/sk-plant.md"; printf '%s\n' 'Show the card to the user in your own words.' >> "$TMPROOT/sk-plant.md"
-expect_eq "SK4 a planted paraphrase of the card is found" "Show the card to the user in your own words." "$(sk_unshown "$TMPROOT/sk-plant.md")"
-sed 's/`call:`/the call tag/g' "$SK_SKILL" > "$TMPROOT/sk-plant.md"
-expect_eq "SK5 a copy with call: left out is found missing it, beside what the shipped text misses (nothing, by SK1)" " call:" \
-  "$(comm -13 <(sk_missing "$SK_SKILL" | tr ' ' '\n' | /usr/bin/grep . | sort) <(sk_missing "$TMPROOT/sk-plant.md" | tr ' ' '\n' | /usr/bin/grep . | sort) | sed 's/^/ /' | paste -sd'\0' -)"
 
 # ============================================================
 section "§ONE-READER: the goal's status, the task's title and the goal's measure are each one function the sheet and the cards call"

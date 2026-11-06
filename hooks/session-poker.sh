@@ -521,7 +521,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh rulings <writer>   each ruling of that writer: recorded, pushed=, and unread or shown= (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh budget writers=<n> '<reply>'   record the user's cap on writers in the plan header (source=user, budget-override:)"
   die "  bash ${HOOK_DIR}/session-poker.sh regression <yes|no> '<reply>'   record the Step-0 regression setting in the plan header (regression:, and regression-override: against the scale default task no, wave yes, epic no)"
-  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --questions <q>[,<q>] on a review row declares the questions it owes (evidence, adversarial, structure, one role's), so its records and its dispatch are those and not the rigor's full deal; --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--suites=<a,b>] [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract (--suites= narrows its suites, and lands_on= with them): a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh task-set <id>[,<id>...] <col>=<val>... [-- <id>[,<id>...] <col>=<val>...]... [--reason '<why>']   set cells of ## Tasks rows (any header column; Files only on a pending row no roster names, a launched row's Files being amend's), every group in one transaction, the table judged once; reads+=<token> or deps+=<token> appends to what the cell holds, an empty reads cell standing for the default of its kind"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
@@ -560,7 +560,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one ev=stop-run goes to the bound run's landing record"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
   die "  bash ${HOOK_DIR}/session-poker.sh anchors check|index [<root>] [--at <commit>]   check: MOVED <suite>:<line> for each anchor whose text is not on exactly one line where it points (exit 1), nothing and exit 0 when every anchor holds; index: <file> TAB <suite>[,<suite>] per anchored file. <root> defaults to the current tree, --at reads a commit"
-  die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: a tier table row for each criterion it lacks, at the tier its eval type maps to (lib/scale.sh), then provenance, fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
+  die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: a tier table row for each criterion it lacks, at the tier its eval type maps to (lib/scale.sh), then provenance, serves (the Eval design row's requirement), fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
   die "  bash ${HOOK_DIR}/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED, nothing after it"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-set <AC-id> [status=<pending|blocked|discharged|waived>] [evidence=<record/...>] [task=<id>[,<id>...]]   write that matrix row's status and evidence cells and its AC block's evidence: and task: keys; never the tier or auditor cell"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-retier <AC-id> tier=<T0..T4> eval=<text>   raise that criterion's tier where it lives (the matrix tier cell, its block's eval: line, its ## Eval design row) and reset the row to pending, its evidence, auditor and waiver cleared; a lower or equal tier is the user's"
@@ -754,7 +754,14 @@ case "$VERB" in
   # event for it at a commit on the working branch (`born_floor_backing`), and writes ` born: floor <suite> of=floor`
   # or ` of=standing@<12-hex>` to say which; with neither it is refused naming both facts.
   task-add)
-    TA_BORN=""; TA_BORN_IDS=""; TA_BORN_SUITE=""
+    TA_BORN=""; TA_BORN_IDS=""; TA_BORN_SUITE=""; TA_QUESTIONS=""
+    # `--questions <q>[,<q>]` declares the questions a review row owes, written into its task cell. It is read from
+    # the tail of the operands on either side of `--born`, so the two flags go in either order; its words are judged
+    # for shape below, and whether each is dealt the row's role is the verb's refusal (1).
+    case "${*: -1}" in --questions) usage "task-add: --questions takes a value: the questions the review row owes, evidence, adversarial or structure, comma-separated." ;; esac
+    if [ $# -ge 2 ] && [ "${*: -2:1}" = "--questions" ]; then
+      TA_QUESTIONS="${*: -1}"; set -- "${@:1:$(($# - 2))}"
+    fi
     case "${*: -1}" in --born) usage "task-add: --born takes a value: the findings the row answers, <record>#<n>[,<record>#<n>…], 'review S<n> <on|off>', the reviewer's rating, or regression:<suite>, the suite whose regression red the row fixes." ;; esac
     if [ $# -ge 2 ] && [ "${*: -2:1}" = "--born" ]; then
       TA_BORN="${*: -1}"
@@ -785,8 +792,27 @@ case "$VERB" in
       esac
       set -- "${@:1:$(($# - 2))}"
     fi
+    if [ -z "$TA_QUESTIONS" ] && [ $# -ge 2 ] && [ "${*: -2:1}" = "--questions" ]; then
+      TA_QUESTIONS="${*: -1}"; set -- "${@:1:$(($# - 2))}"
+    fi
     if [ $# -ne 9 ] && [ $# -ne 10 ]; then
-      usage "task-add takes nine arguments and an optional tenth: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] (write — for none), then optionally --born <record>#<n>[,…], --born 'review S<n> <on|off>' or --born regression:<suite>."
+      usage "task-add takes nine arguments and an optional tenth: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] (write — for none), then optionally --born <record>#<n>[,…], --born 'review S<n> <on|off>' or --born regression:<suite>, and --questions <q>[,<q>] on a review row."
+    fi
+    if [ -n "$TA_QUESTIONS" ]; then
+      [ "$3" = review ] || usage "task-add: --questions declares the questions of a review row, and $1 is a $3 row."
+      TA_QSEEN=""
+      for TA_QW in $(printf '%s' "$TA_QUESTIONS" | tr ',' ' '); do
+        case " evidence adversarial structure " in *" $TA_QW "*) : ;; *) usage "task-add: --questions '$TA_QUESTIONS' names '$TA_QW', which is no question; write evidence, adversarial or structure, comma-separated." ;; esac
+        case " $TA_QSEEN " in *" $TA_QW "*) usage "task-add: --questions '$TA_QUESTIONS' names $TA_QW twice; write each question once." ;; esac
+        TA_QSEEN="$TA_QSEEN $TA_QW"
+      done
+      case "$TA_QUESTIONS" in *[!a-z,]*|,*|*,|*,,*) usage "task-add: --questions '$TA_QUESTIONS' is no list of questions; write evidence, adversarial or structure, comma-separated, with no space." ;; esac
+      # THE DECLARATION IS KEPT IN THE DEALING'S ORDER, so the cell, the records and the dispatch wall's comparison
+      # read one spelling whichever order the author typed.
+      TA_QUESTIONS=""
+      for TA_QW in evidence adversarial structure; do
+        case " $TA_QSEEN " in *" $TA_QW "*) TA_QUESTIONS="${TA_QUESTIONS:+$TA_QUESTIONS,}$TA_QW" ;; esac
+      done
     fi
     TA_ID="$1"; TA_STEP="$2"; TA_KIND="$3"; TA_TASK="$4"; TA_AGENT="$5"
     TA_DEPS="$6"; TA_SIZE="$7"; TA_SERVES="$8"; TA_FILES="$9"; TA_READS="${10:-}"
@@ -3201,6 +3227,13 @@ function taskof(cr,    t, n, id, nk, ik, ns, is) {
   if (nk) return (nk == 1) ? ik : "pending"
   return (ns == 1) ? is : "pending"
 }
+# reqs(cell) -> the REQ ids a Requirement cell names, comma-joined in its order; "" when it names none. A criterion
+# serves one requirement, and a cell naming several is carried whole so the theme reading can say it read the first.
+function reqs(cell,    o) {
+  o = ""
+  while (match(cell, /REQ-[0-9A-Za-z]+/)) { o = o ((o == "") ? "" : ", ") substr(cell, RSTART, RLENGTH); cell = substr(cell, RSTART + RLENGTH) }
+  return o
+}
 # PROVENANCE IS THE REQUIREMENT\047S (wave-35 T8; REQ-6 AC-6.4; D15): the requirements file the plan names (fprov),
 # else the plan\047s own `### REQ-<n>` line (prov), else pending; the Eval design\047s Approach is never a provenance.
 function val(cr, k,    r) {
@@ -3208,6 +3241,7 @@ function val(cr, k,    r) {
   if (k == "fails-when") return (efw[cr] != "") ? efw[cr] : "pending"
   if (k == "eval") return tier[cr] " — " ((eev[cr] != "") ? eev[cr] : "pending")
   if (k == "task") return taskof(cr)
+  if (k == "serves") return reqs(ereq[cr])
   return "pending"
 }
 function wptr(l,   v) {  # a Step-5 line naming a real walk-artifact: value: not empty, not the stub token
@@ -3273,7 +3307,7 @@ END {
       continue
     }
     if (cur != "" && line ~ /^[ \t]+[^ \t]/) {
-      bend[cur] = i; k = line; sub(/^[ \t]+/, "", k); sub(/[ \t]*:.*$/, "", k); has[cur, k] = 1
+      bend[cur] = i; k = line; sub(/^[ \t]+/, "", k); sub(/[ \t]*:.*$/, "", k); if (!((cur, k) in has)) kat[cur, k] = i; has[cur, k] = 1
     }
   }
   if (!sawev || ne == 0) { printf "noeval\t\n" > cf; exit 3 }
@@ -3302,17 +3336,23 @@ END {
   if (walk != "exempt" && !haswa && !haptr) { heads = heads "walk-artifact: pending\n"; added++ }
   if (heads != "") { if (hassh) ins[hassh] = ins[hassh] heads; else ins[mhead] = ins[mhead] "\n" heads }
   for (e = 1; e <= ne; e++) {
-    cr = ec[e]; owed = "provenance fails-when eval task evidence"
+    cr = ec[e]; owed = "provenance serves fails-when eval task evidence"
     nw = split(keys[tier[cr]], tk, " ")
     for (w = 1; w <= nw; w++) if (tk[w] != "evidence") owed = owed " " tk[w]
     no = split(owed, ok, " ")
     if (cr in bstart) {
       got = 0
-      for (w = 1; w <= no; w++) if (!((cr, ok[w]) in has)) { ins[bend[cr]] = ins[bend[cr]] "  " ok[w] ": " val(cr, ok[w]) "\n"; added++; got++ }
+      for (w = 1; w <= no; w++) {
+        if ((cr, ok[w]) in has) continue
+        v = val(cr, ok[w]); if (ok[w] == "serves" && v == "") continue
+        # serves: stands straight after provenance: where the block holds it; every other key after the block\047s last line
+        at = (ok[w] == "serves" && ((cr, "provenance") in kat)) ? kat[cr, "provenance"] : bend[cr]
+        ins[at] = ins[at] "  " ok[w] ": " v "\n"; added++; got++
+      }
       if (!got) same++
     } else {
       nb = nb cr ":" ((actext(cr) != "") ? " " actext(cr) : "") "\n"
-      for (w = 1; w <= no; w++) nb = nb "  " ok[w] ": " val(cr, ok[w]) "\n"
+      for (w = 1; w <= no; w++) { v = val(cr, ok[w]); if (ok[w] != "serves" || v != "") nb = nb "  " ok[w] ": " v "\n" }
       written++
     }
   }

@@ -154,20 +154,47 @@ _plan_first_sentence() {
   printf '%s\n' "${1:-}" | awk 'NF { if (match($0, /\. /)) print substr($0, 1, RSTART); else print; exit }'
 }
 
-# _plan_matrix_acs <plan> -> `M<TAB><AC id><TAB><status, lower case>` per row of the plan's `## Verification Matrix`
-# table, the status column found by the header's own name; fenced lines are not read.
+# _plan_matrix_acs <plan> -> `M<TAB><AC id><TAB><status, lower case><TAB><serves>` per row of the plan's
+# `## Verification Matrix` table, the status column found by the header's own name, the serves the value of the first
+# `serves:` line of the row's AC block (the heading read by lib/units.sh `units_ac_head_awk`, the indented lines under
+# it), empty when the block has none or there is no block; fenced lines are not read.
 _plan_matrix_acs() {
-  _run_lines "${1:-}" | awk -F'|' '
+  declare -F units_ac_head_awk >/dev/null 2>&1 || { [ -r "${BASH_SOURCE[0]%/*}/units.sh" ] && . "${BASH_SOURCE[0]%/*}/units.sh"; } >/dev/null 2>&1
+  _run_lines "${1:-}" | awk -F'|' "$(units_ac_head_awk)"'
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
-    /^## / { m = ($0 ~ /^## Verification Matrix/); col = 0; next }
-    m && /^\|[ \t]*AC[ \t]*\|/ { for (i = 2; i < NF; i++) { c = $i; gsub(/^[ \t]+|[ \t]+$/, "", c); if (tolower(c) == "status") col = i }; next }
-    m && col && /^\|[ \t]*AC-/ { a = $2; s = $col; gsub(/^[ \t]+|[ \t]+$/, "", a); gsub(/^[ \t]+|[ \t]+$/, "", s); print "M\t" a "\t" tolower(s) }'
+    /^## / { m = ($0 ~ /^## Verification Matrix/); col = 0; cur = ""; next }
+    !m { next }
+    /^\|[ \t]*AC[ \t]*\|/ { for (i = 2; i < NF; i++) { c = $i; gsub(/^[ \t]+|[ \t]+$/, "", c); if (tolower(c) == "status") col = i }; next }
+    col && /^\|[ \t]*AC-/ { a = $2; s = $col; gsub(/^[ \t]+|[ \t]+$/, "", a); gsub(/^[ \t]+|[ \t]+$/, "", s); n++; id[n] = a; st[n] = tolower(s); next }
+    /^[^ \t]/ { cur = ac_any($0); next }
+    cur != "" && /^[ \t]+serves[ \t]*:/ && !(cur in sv) { v = $0; sub(/^[ \t]+serves[ \t]*:[ \t]*/, "", v); sub(/[ \t]+$/, "", v); sv[cur] = v }
+    END { for (i = 1; i <= n; i++) print "M\t" id[i] "\t" st[i] "\t" sv[id[i]] }'
 }
+
+# THE ONE MAPPER OF A MATRIX ROW TO ITS REQUIREMENT. `_plan_ac_req(id, serves)` returns the requirement a row serves,
+# the word after `REQ-`: the first REQ id of its block's `serves:` value, which matrix-render writes from the Eval
+# design's Requirement cell; else the <req> of a dotted id `AC-<req>.<n>`; else "". A bare `AC-<n>` maps to nothing:
+# its number counts criteria, it names no requirement, and read as one it lands a criterion under another theme.
+# PAR_BY says how the row was mapped, `serves`, `id` or ""; PAR_MANY is 1 when serves: names several requirements.
+# Both theme readers call it, so a row is never mapped two ways.
+_PLAN_AC_REQ_AWK='
+  function _plan_ac_req(id, sv,    r) {
+    PAR_BY = ""; PAR_MANY = 0
+    if (match(sv, /REQ-[A-Za-z0-9]+/)) {
+      r = substr(sv, RSTART + 4, RLENGTH - 4); PAR_BY = "serves"
+      if (substr(sv, RSTART + RLENGTH) ~ /REQ-[A-Za-z0-9]/) PAR_MANY = 1
+      return r
+    }
+    r = id
+    if (sub(/^AC-/, "", r) && index(r, ".")) { sub(/\.[^.]*$/, "", r); if (r != "") { PAR_BY = "id"; return r } }
+    return ""
+  }'
 
 # _plan_task_theme <plan> -> the one theme a task-scale plan reads, `the run<TAB><REQ ids><TAB><opener>`: the REQs are the
 # `### REQ-` headings of the plan's requirements file (else of the plan itself) that have at least one matrix row, in the
-# document's order; a plan whose documents hold no REQ heading reads the REQs its matrix rows name. The opener is the
+# document's order; a plan whose documents hold no REQ heading reads the REQs its matrix rows name. A row names its REQ
+# through `_plan_ac_req`, so a row that maps to none is in no theme. The opener is the
 # first sentence of the plan's own `## Goal`. Nothing when the matrix holds no row of any such REQ.
 _plan_task_theme() {
   local plan="$1" q ids heads goal
@@ -180,7 +207,7 @@ _plan_task_theme() {
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^### REQ-/ { id = substr($0, 9); if (match(id, /^[A-Za-z0-9]+/)) print "R\t" substr(id, 1, RLENGTH) }')"
-  ids="$({ printf '%s\n' "$heads"; _plan_matrix_acs "$plan" | awk -F'\t' '{ r = $2; sub(/^AC-/, "", r); sub(/\.[^.]*$/, "", r); print "M\t" r }'; } | awk -F'\t' '
+  ids="$({ printf '%s\n' "$heads"; _plan_matrix_acs "$plan" | awk -F'\t' "$_PLAN_AC_REQ_AWK"'{ r = _plan_ac_req($2, $4); if (r != "") print "M\t" r }'; } | awk -F'\t' '
     $1 == "R" { if (!($2 in rs)) { rs[$2] = 1; ro[++rn] = $2 }; next }
     $1 == "M" { if (!($2 in ms)) { ms[$2] = 1; mo[++mn] = $2 } }
     END { if (rn) { for (i = 1; i <= rn; i++) if (ro[i] in ms) printf "%s%s", (c++ ? " " : ""), ro[i] }
@@ -225,18 +252,28 @@ plan_themes() {
 
 # _plan_theme_reads <plan> -> one plan_goals_read row per theme, `<state><TAB><theme><TAB><measure><TAB><reading>` and, when
 # the theme has an opener, `<TAB><opener>`. The state is unmeasured, reached, pending (nothing discharged yet), oncourse
-# (pending with at least one criterion discharged) or overdue (open at step 6 or later).
+# (pending with at least one criterion discharged) or overdue (open at step 6 or later). Each matrix row is counted
+# under the theme `_plan_ac_req` maps it to. After the themes, one `mapping<TAB><line>[<TAB><ids>]` row per way a row
+# was read short of its serves:, each said once: `mapped by id: <n> rows carry no serves:` when a dotted id mapped any,
+# `read as the first: <n> rows serve several requirements` when a serves: named more than one, and
+# `not mapped: <n> rows carry no serves: and no dotted id`, its ids space-separated after it, when any row maps to
+# nothing: such a row is in no theme's count, so a theme it serves reads short and the reading says why. A task plan
+# reads its matrix even when no theme is found, since its one theme is the matrix's own.
 _plan_theme_reads() {
   local plan="$1" themes cur
   themes="$(plan_themes "$plan")"
-  [ -n "$themes" ] || return 0
+  [ -n "$themes" ] || [ "$(plan_scale "$plan")" = task ] || return 0
   cur=""; declare -F _fill_current_field >/dev/null 2>&1 && { fill_current_forget; cur="$(_fill_current_field "$plan")"; }
   { printf '%s\n' "$themes" | awk -F'\t' 'NF { print "T\t" $1 "\t" $2 "\t" $3 }'
     # the matrix table's rows, each AC with its status cell
     _plan_matrix_acs "$plan"
-  } | awk -F'\t' -v cur="$cur" "$_PLAN_GOAL_MEASURE_AWK"'
+  } | awk -F'\t' -v cur="$cur" "$_PLAN_GOAL_MEASURE_AWK$_PLAN_AC_REQ_AWK"'
     $1 == "T" { n++; nm[n] = $2; fr[n] = $4; k[n] = split($3, r, " "); for (i = 1; i <= k[n]; i++) { own[r[i]] = n; rq[n, i] = r[i] }; next }
-    $1 == "M" { req = $2; sub(/^AC-/, "", req); sub(/\.[^.]*$/, "", req); t = own[req]; if (!t) next
+    $1 == "M" { req = _plan_ac_req($2, $4)
+      if (PAR_MANY) many++
+      if (PAR_BY == "id") byid++
+      else if (PAR_BY == "") { unm++; un = un (un == "" ? "" : " ") $2; next }
+      t = own[req]; if (!t) next
       tot[t]++
       if ($3 == "discharged") d[t]++; else if ($3 == "waived") w[t]++; else { p[t]++; op[t, req] = 1 } }
     END {
@@ -249,6 +286,9 @@ _plan_theme_reads() {
         o = ""; c = 0
         for (i = 1; i <= k[t]; i++) if ((t, rq[t, i]) in op) { c++; if (c <= 2) o = o (c > 1 ? ", " : "") "REQ-" rq[t, i] }
         print ((step != "" && step + 0 >= 6) ? "overdue" : (d[t] ? "oncourse" : "pending")) "\t" nm[t] "\t" m "\t" goal_open(o, c - 2) f }
+      if (byid) print "mapping\tmapped by id: " byid " rows carry no serves:"
+      if (many) print "mapping\tread as the first: " many " rows serve several requirements"
+      if (unm) print "mapping\tnot mapped: " unm " rows carry no serves: and no dotted id\t" un
     }'
 }
 

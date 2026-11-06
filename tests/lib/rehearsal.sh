@@ -147,12 +147,12 @@ _rh_typed() {
 
 # _rh_reply <label> -> the user's reply to the newest release card at the working head, typed, then replayed: all as
 # recommended. The release landing past the pass is a release commit with its check passing, so the head reads green and
-# the card asks no merge without a pass; the reply records the release approval.
+# the card asks no merge without a pass; the reply records the release approval. Where the card does put the merge
+# without a pass, its number is the one the judge's exit names (lib/proof.sh `proof_merge_decision`), and the reply merges.
 _rh_reply() {
   local n w='all recommended'
-  # shellcheck disable=SC2012  # page names are release-approval-<hex>[-<n>].md, no blank or line break in any
-  n="$(sed -n 's/^release-approval\/v1|dec=\([0-9][0-9]*\)|key=approve:merge-unproved|.*/\1/p' \
-    "$(ls -t "$RH_REC"/release-approval-"$(_rh_head | cut -c1-8)"*.md 2>/dev/null | head -1)" 2>/dev/null | head -1)"
+  n="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" && proof_merge_decision "$2" "$3" "$4"' _ \
+    "$RH_ROOT/payload/scripts/lib" "$RH_PLAN" "$RH_ROOT" "$(_rh_head)" 2>/dev/null)" || n=""
   [ -z "$n" ] || w="$n merge, rest recommended"
   _rh_typed "$w" && _rh_poker "$1" reply "$w"
 }

@@ -114,7 +114,7 @@ TOOL_NAME=$(_jq '.tool_name')
 # brings `cmd-class.sh` (wave-20 T4; REQ-7, D7) in itself for CMD_RUN_NORM_AWK, the one run
 # normaliser its lift pastes in, so this hook names only brief.sh and lets that source do
 # the pulling.
-BIONIC_LIB_WANT="context.sh fold.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh brief.sh"
+BIONIC_LIB_WANT="context.sh fold.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh brief.sh prose.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -240,6 +240,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 # variables, so sourcing them costs a parse and nothing else.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/brief.sh"
+# THE PROSE LIST (lib/prose.sh): the one answer to "is this path prose", asked for a row that lands on no suite. It defines
+# functions only and brings roots.sh's config reader in itself when its caller has not.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/prose.sh"
 # THE MODEL-FACING ADVISORY'S EMITTER (wave-24 T14, A-orch-20): `_fold_emit_context` is the one
 # builder of `hookSpecificOutput.additionalContext`, the farm-out nudge's. Functions only.
 # shellcheck source=/dev/null
@@ -2489,6 +2493,19 @@ case "$DP_SUBAGENT" in
         dp_not_checked "the Questions: dealing" "a plan rigor and scale that facts_owed deals"
       fi
     fi
+    # A ROW THAT DECLARES ITS QUESTIONS IS HELD TO THEM. The bound row's task cell may carry a `questions:` tag
+    # (`task-add --questions`, read by `units_questions`): a re-read of fewer questions than the role's full deal. The
+    # brief is then compared to that set in place of the role's full deal, and the set compared is the one recorded as
+    # `questions=`. Only a declaration the role is dealt takes the place: one outside the role's deal falls to the
+    # deal, so a brief cannot reach a question the rigor gave the other reader by naming it on a row.
+    _q_decl=""
+    if [ -n "$_q_dealt" ] && [ -n "$DP_BOUND_REC" ] && declare -F units_questions >/dev/null 2>&1; then
+      _q_decl="$(units_questions "$DP_BOUND_REC")"
+      for _q_q in ${_q_decl//,/ }; do
+        case ",${_q_dealt}," in *",${_q_q},"*) : ;; *) _q_decl="" ;; esac
+      done
+      if [ -n "$_q_decl" ]; then _q_dealt="$_q_decl"; fi
+    fi
     # THE LEVEL AS PRINTED (wave-28 T44; AC-16.2): a detail names the plan's rigor by its new word
     # with its meaning, lib/run.sh `rigor_print`; a word that is no level is quoted as written.
     _q_level="$(rigor_print "$_q_rigor" 2>/dev/null)" || _q_level="rigor ${_q_rigor:-none}"
@@ -2580,11 +2597,16 @@ Fix: add this line to the brief, on a line of its own —
 
 Then retry the dispatch."
     elif [ -n "$_q_set" ] && [ -n "$_q_dealable" ] && [ "$_q_set" != "$_q_dealt" ]; then
-      dp_finding "${_q_short} rigor deals ${_q_role}: ${_q_dealt}" "use that set" \
-        "The Questions: line names a set the plan's rigor does not deal this reviewer:
+      _q_title="${_q_short} rigor deals ${_q_role}: ${_q_dealt}"; _q_ofwhom="the plan's rigor"; _q_basis="${_q_level}, scale ${_q_scale}"
+      if [ -n "$_q_decl" ]; then
+        _q_title="row ${DP_BOUND_ROW} declares ${_q_role}: ${_q_dealt}"; _q_ofwhom="the bound row"
+        _q_basis="declared on row ${DP_BOUND_ROW} by task-add --questions, inside what ${_q_level} deals ${_q_role}"
+      fi
+      dp_finding "$_q_title" "use that set" \
+        "The Questions: line names a set ${_q_ofwhom} does not deal this reviewer:
     Role:  ${DP_SUBAGENT}
     Given: ${_q_set//,/, }
-    Dealt: ${_q_dealt//,/, } (${_q_level}, scale ${_q_scale})
+    Dealt: ${_q_dealt//,/, } (${_q_basis})
 
 Each question is read by the one role the rigor deals it to:
 ${_q_holders}
@@ -3013,6 +3035,27 @@ Fix: say why no suite proves this row, on the same line —
     Lands-on: none <reason>
 
 Then retry the dispatch."
+fi
+# A ROW THAT LANDS ON NO SUITE IS PROVED BY THE WHOLE RUN AT ITS COMMIT ALONE, so every path its Files: names must be one no
+# suite reads: the prose list (lib/prose.sh, the list the judge reads) holds it. The list is read once and asked per path with
+# no fork; the first path it does not hold ends the check and is named. `none` and `—` as the Files: value are no files.
+if [ "$DP_LANDS_ON" = none ] && [ -n "$C_FILES" ] && declare -F prose_path >/dev/null 2>&1; then
+  _ln_list="$(prose_list "$BIONIC_ROOT" 2>/dev/null)"
+  for _ln_p in ${C_FILES//,/ }; do
+    case "$_ln_p" in none|—) continue ;; esac
+    prose_path "$_ln_p" "$_ln_list" && continue
+    # The line holds 100 columns: the fixed words and the fix leave the path 23, the whole sentence rides in the detail.
+    dp_finding "Lands-on: none, not prose: $(bionic_trunc "$_ln_p" 23)" "add suites or prose:" \
+      "Lands-on: none on a row whose Files name ${_ln_p}, which is not prose: only a whole run at its commit proves it; name the suites that read it in Lands-on:, or list it under prose: in .bionic/config.yaml
+    Given: Lands-on: none ${_lo_reason}
+    Files: ${C_FILES}
+
+The prose list holds the record and the notes no suite executes. A path outside it is read by a suite or runs as code, so
+the row must land on the suites that read it.
+
+Then retry the dispatch."
+    break
+  done
 fi
 # A COMMAND ON LANDS-ON (wave-39 T20; D20, AC-14.3) is one entry the lift encoded (lib/suite.sh `lands_cmd`): it is
 # held to the brief's Re-executes: runs, each a backticked command as the lift stored it, never to Suites:. One

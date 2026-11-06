@@ -1,6 +1,7 @@
 #!/bin/bash
 # Tests for hooks/dispatch-preflight.sh — THE START GATE. The fifth shard: §AGREE and §PROTOTYPE
 # (wave-38 T21; REQ-13 AC-13.1, AC-13.2; design ledger Δ9, D16).
+# §QUESTIONS holds the other half: a row's declared questions are the set a reader's brief is compared to.
 #
 # A STEP-2 PROTOTYPE THE WALL ADMITS. steps/2.md sanctions a prototype at Step 2, before the plan
 # carries `approved-by:`, and until 1.21.0 the wall refused every writer role there and named no
@@ -448,5 +449,107 @@ expect_eq "WN.2 AC-20.4 Deliverable-waiver: none is no waiver: the row carries t
   "allow|.bionic/docs/record/w99-widget.txt|" "$GATE_VERDICT|$(roster_field "$WN_ROW" deliverable)|$(roster_field "$WN_ROW" waiver)"
 expect_contains "WN.2b …the sweeper judges the row" "w99-wn" "$WN_VERDICT"
 expect_absent "WN.2c AC-20.4 …and reports no conflict" "waiver disregarded" "$WN_VERDICT"
+
+section "§LANDS-NONE — Lands-on: none is admitted only for Files the prose list holds (AC-2.3)"
+# ============================================================================
+#
+# A row that lands on no suite is proved by the whole run at its commit alone, which only a path no suite reads can wait
+# for. The wall asks the prose list (lib/prose.sh, the one the judge reads) of every path the brief's Files: names, once per
+# dispatch, and refuses the first that is not on it, naming it; the fix is to name the suites that read it or to list it
+# under prose: in .bionic/config.yaml.
+# FIXTURES: make_repo's approved, bound plan with a `## Tasks` row T23, BRIEF_FULL's contract with Files: and Lands-on: lines
+# (SYNTHESIZED); a `prose:` line written to the fixture's .bionic/config.yaml where the case names one.
+ln_gate() {  # <repo tag> <Files value> <prose: line or ''> -> GATE_*, LN_ROW
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the notes | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' \
+    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  [ -z "$3" ] || printf '%s\n' "$3" > "$REPO/.bionic/config.yaml"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(printf '%s\nFiles: %s\nLands-on: none the row'"'"'s Files are prose' "$BRIEF_FULL" "$2")" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
+  LN_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+}
+ln_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
+LN_FACT="Lands-on: none on a row whose Files name scripts/perf/README.md, which is not prose"
+
+ln_gate ln1 scripts/perf/README.md ''
+expect_eq "LN.1 AC-2.3 Lands-on: none on a row whose Files name scripts/perf/README.md, not on the prose list: refused" "deny" "$GATE_VERDICT"
+expect_contains "LN.1b …its line names the path whole and the exit" "dispatch refused — Lands-on: none, not prose: scripts/perf/README.md (add suites or prose:)" "$(ln_first)"
+expect_contains "LN.1c …the whole fact names the path and that it is not prose" "$LN_FACT" "$GATE_VERR"
+expect_contains "LN.1d …and says why: only a whole run at its commit proves it" "only a whole run at its commit proves it" "$GATE_VERR"
+expect_contains "LN.1e …and both exits: the suites that read it, or the prose: entry in the config" \
+  "name the suites that read it in Lands-on:, or list it under prose: in .bionic/config.yaml" "$GATE_VERR"
+expect_eq "LN.1f …its first line at most 100 columns" "ok" \
+  "$([ "$(bionic_cols "$(ln_first)")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$(ln_first)")")"
+expect_eq "LN.1g …and no row is written" "" "$LN_ROW"
+
+ln_gate ln2 scripts/perf/README.md 'prose: scripts/perf/'
+expect_eq "LN.2 AC-2.3 the same brief with prose: scripts/perf/ in the fixture's config: admitted" "allow" "$GATE_VERDICT"
+expect_eq "LN.2b …the row carries lands_on=none" "none" "$(roster_field "$LN_ROW" lands_on)"
+
+ln_gate ln3 CHANGELOG.md ''
+expect_eq "LN.3 AC-2.3 Files all on the built-in list (CHANGELOG.md): admitted with no prose: entry" "allow" "$GATE_VERDICT"
+
+ln_gate ln4 'CHANGELOG.md, scripts/perf/README.md' 'prose: docs/'
+expect_eq "LN.4 a second Files path off the list (a prose: entry that does not hold it): refused" "deny" "$GATE_VERDICT"
+expect_contains "LN.4b …naming that path, not the first one" "Files name scripts/perf/README.md, which is not prose" "$GATE_VERR"
+
+# The wall asks the same list the judge does, which holds the tracked docs home and the docs root as dir/ entries (D11).
+ln_gate ln5 docs/adrs/adr-999-x.md ''
+expect_eq "LN.5 a Files path under the tracked docs home (docs/adrs/…): admitted, as the judge excuses its commit" "allow" "$GATE_VERDICT"
+ln_gate ln6 notes-home/records/x.md 'docs-root: notes-home'
+expect_eq "LN.6 a Files path under a docs-root: set off the default: admitted" "allow" "$GATE_VERDICT"
+
+section "§QUESTIONS — a row's declared questions are the set the wall compares a reader's brief to (AC-5.3)"
+# ============================================================================
+#
+# A review row declares the questions it owes with `task-add --questions`, which writes ` · questions: <q,…>` into its
+# task cell. The wall reaches the row by the brief's `Row:`, lifts the tag with `units_questions`, and compares the
+# brief's `Questions:` to that set in place of the role's full deal; a row with no tag is held to the full deal as ever.
+# A declaration the role is not dealt does not take the deal's place.
+# FIXTURES: make_repo's approved, bound plan at `rigor: double`, `scale: wave`, with a one-row `## Tasks` table whose
+# task cell carries the tag the case names (SYNTHESIZED in the shape task-add writes, which session-poker-4.test.sh
+# §REVIEW-FILES drives through the verb); the brief names the row by `Row:` and carries one record per question.
+# fails-when: a brief equal to the row's declaration is refused for not naming the role's full deal, a brief naming the
+# full deal is admitted over a row declaring less, a declaration outside the role's deal is honoured, or an untagged
+# row stops demanding the full deal.
+qn_gate() {  # <repo tag> <task cell> <role> <Questions: set, comma-joined> -> GATE_*, QN_ROW
+  local n files="" i
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 6 | review | %s | reader | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' "$2" \
+    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  n=$(( $(printf '%s' "$4" | tr -cd ',' | wc -c) + 1 )); files=".bionic/docs/record/wq-$1.md"
+  for ((i = 2; i <= n; i++)); do files="$files, .bionic/docs/record/wq-$1-$i.md"; done
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(printf 'Your task: read the change for the questions below.\nExpected artifact: .bionic/docs/record/wq-%s.md\nExpected duration: ~30 minutes.\nSuites: tests/widget.test.sh\nRow: T23\nQuestions: %s\nFiles: %s' "$1" "${4//,/, }" "$files")" "wq-$1" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" "$3")"
+  QN_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+}
+qn_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
+
+qn_gate qn1 'the audit. The auditor reads it. · questions: evidence' bionic:auditor evidence
+expect_eq "QN.1 AC-5.3 over a row tagged questions: evidence at double, an auditor brief Questions: evidence is admitted" "allow" "$GATE_VERDICT"
+expect_eq "QN.1b …and the row records the set compared" "evidence" "$(roster_field "$QN_ROW" questions)"
+
+qn_gate qn2 'the audit. The auditor reads it. · questions: evidence' bionic:auditor evidence,adversarial
+expect_eq "QN.2 AC-5.3 …a brief naming evidence, adversarial over that row is refused" "deny" "$GATE_VERDICT"
+expect_contains "QN.2b …its line names the set the row declares" "dispatch refused — row T23 declares auditor: evidence" "$(qn_first)"
+expect_contains "QN.2c …and the detail the dealt set, evidence alone" "Dealt: evidence" "$GATE_VERR"
+
+qn_gate qn3 'the critic read. The critic reads the code. · questions: adversarial' bionic:critic adversarial
+expect_eq "QN.3 AC-5.3 over a row tagged questions: adversarial, the critic's brief Questions: adversarial is admitted (the role's full deal is adversarial, structure)" \
+  "allow|adversarial" "$GATE_VERDICT|$(roster_field "$QN_ROW" questions)"
+
+qn_gate qn4 'the critic read. The critic reads the code. · questions: adversarial' bionic:critic adversarial,structure
+expect_eq "QN.4 AC-5.3 …and the brief naming the critic's full deal over that row is refused" "deny" "$GATE_VERDICT"
+expect_contains "QN.4b …its line names the row and its set" "dispatch refused — row T23 declares critic: adversarial" "$(qn_first)"
+expect_contains "QN.4c …and the detail says where the set was declared" "declared on row T23 by task-add --questions" "$GATE_VERR"
+expect_contains "QN.4d …and the line to write is the declared set" "    Questions: adversarial" "$GATE_VERR"
+
+qn_gate qn5 'the critic read. The critic reads the code.' bionic:critic adversarial
+expect_eq "QN.5 AC-5.3 over an untagged row the role's full deal is demanded: the critic's adversarial alone is refused" "deny" "$GATE_VERDICT"
+expect_contains "QN.5b …naming the full deal" "double rigor deals critic: adversarial,structure" "$(qn_first)"
+qn_gate qn5c 'the critic read. The critic reads the code.' bionic:critic adversarial,structure
+expect_eq "QN.5c control: the full deal over the untagged row is admitted" "allow|adversarial,structure" "$GATE_VERDICT|$(roster_field "$QN_ROW" questions)"
+
+qn_gate qn6 'the audit. The auditor reads it. · questions: adversarial' bionic:auditor adversarial
+expect_eq "QN.6 a declaration the role is not dealt (adversarial is the critic's at double) does not take the deal's place: the auditor is refused" "deny" "$GATE_VERDICT"
+expect_contains "QN.6b …held to what the rigor deals the auditor" "double rigor deals auditor: evidence" "$(qn_first)"
 
 finish

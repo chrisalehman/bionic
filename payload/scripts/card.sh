@@ -2619,8 +2619,9 @@ _card_fmt_is() {
 # DEFAULTS: a matrix row the auditor has not confirmed (waived with the user's words, `waive-row`), a T4 row whose
 # user has not yet confirmed its check, its block's confirmation still a placeholder (confirmed, `confirm-row`, or
 # waived), and a question whose newest reading fails (`waive <q>`). A placeholder of any other key is early: it is
-# evidence that was never recorded. The judge's unproved regression, a head the landings past the whole run cover
-# with no pass at it, is the page's own decision too (`approve:merge-unproved`). Anything else the check prints is
+# evidence that was never recorded. The judge's unproved regression, a head with no pass at it whose floor its
+# landings cover or no run reaches, is the page's own decision too (`approve:merge-unproved`, lib/proof.sh
+# `proof_merge_ask`); an owed floor is no decision and stays early. Anything else the check prints is
 # early: a missing or red whole run (the regression is run before review and is never waived), a missing proof, another refused dry commit, an uncovered or
 # absent reading, a declared check or debt not held, a judge that could not deal the plan. The dry commit stops at
 # its first refusal, so a check names one wall at a time; the judge at 8 runs no dry commit and names every fact it

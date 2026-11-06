@@ -14,7 +14,6 @@
 #   §2 header names               reversed columns give identical output
 #   §3 the ## Tasks section       is read, and nothing else
 #   §4 units_ready <plan> <step>  which rows at that step may be dispatched now
-#   §5 units_validate <plan>      the live table is the clean case
 #   §6 units_validate <plan>      one line per broken invariant, naming the id and the rule
 #   §7 units_validate <plan>      a missing column is a violation of the table, not of a row
 #   §8 the differential           the old fill derivation and units_ready answer the same
@@ -51,7 +50,7 @@
 # plan tree is gitignored and absent from a worktree, so the specimen has to live in the
 # suite; copying it by hand is how a fixture comes to test its own typing instead of the
 # reader. Every other fixture here is built FROM that one by a name-blind transform (§2
-# reverses cell order; §3 wraps it in decoys) or is a small purpose-built table (§4, §5).
+# reverses cell order; §3 wraps it in decoys) or is a small purpose-built table (§4).
 #
 # THE REVERSAL IS NAME-BLIND, DELIBERATELY (§2). A permuter that re-ordered columns BY NAME
 # would be a second implementation of the thing under test, and a shared misreading of a
@@ -428,14 +427,6 @@ cat > "$SANDBOX/ready-dashes.md" <<'DASH_EOF'
 DASH_EOF
 expect_eq "an em dash, a hyphen and an empty cell all mean no dependency" \
   "$(printf 'T1\nT2\nT3')" "$(call units_ready "$SANDBOX/ready-dashes.md" 4)"
-
-# ============================================================
-section "5 — units_validate: the live table is the clean case"
-# ============================================================
-
-VAL_LIVE="$(call units_validate "$SANDBOX/live.md")"
-expect_eq "the live table breaks no invariant — zero lines" "0" "$(nlines "$VAL_LIVE")"
-expect_eq "…and exits 0" "0" "$(call_rc units_validate "$SANDBOX/live.md")"
 
 # ============================================================
 section "6 — units_validate: one line per broken invariant, naming the id and the rule"

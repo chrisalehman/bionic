@@ -916,6 +916,38 @@ expect_true "HL-3 a hand landing whose ready says none, with no verdict recorded
 printf 'line/v1|ev=verdict|row=T8|commit=%s|suite=b.test.sh|result=green|log=/fixture/T8.log|at=2026-10-12T12:32:00Z\n' "$OD_R2" >> "$(od_lrec)"
 expect_eq "HL-4 …and covered once the verdicts the row recorded name a green suite at the row head" "covered" "$(od_state)"
 
+section "§HL — a ready line's none is no suite at every landing kind, so a hand and a queue landing of one row read alike"
+# ============================================================
+# A queue ready writes `suites=none` for a row that lands on no suite, and so does a hand ready. The landing-record fold maps
+# that none to no suite once, for both kinds; read as a suite name for the queue kind alone, it printed `none has no run
+# recorded at it` for a commit the verdicts could prove. FIXTURES: the repository above; the lines are written in the
+# writers' shapes (`ev=ready … suites=none`, `ev=published … kind=hand|queue`); the judge is proof_state, the one reader.
+# fails-when: the fold keeps none as a suite for a queue landing, so the queue's judge line names none and the hand's does not.
+hl_judge() { bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && proof_state "$2" "$3"' _ "$OD_LIB" "$OD_PLAN" "$OD" 2>/dev/null | tr '\t' ' '; }
+hl_land() {  # <hand|queue> -> the record holds T9's ready (suites=none) and one published line of that kind at M3
+  /usr/bin/grep -v '^line/v1|ev=published|row=T9|' "$OD_ROOT/hl-record" > "$(od_lrec)"
+  printf 'line/v1|ev=published|row=T9|commit=%s|kind=%s|by=Fixture|at=2026-10-12T12:41:00Z\n' "$OD_M3" "$1" >> "$(od_lrec)"
+}
+od_git checkout -q -b row/T9; printf 'nine\n' > "$OD/lib/b.sh"; od_git commit -qam 'T9: a fourth fix'; OD_R3="$(od_git rev-parse HEAD)"
+od_git checkout -q wave/01-fixture; od_git merge -q --no-ff -m 'land T9' row/T9; OD_M3="$(od_git rev-parse HEAD)"
+printf 'line/v1|ev=ready|row=T9|commit=%s|suites=none|at=2026-10-12T12:40:00Z\n' "$OD_R3" >> "$(od_lrec)"
+cp "$(od_lrec)" "$OD_ROOT/hl-record"
+hl_land hand; HL_HAND="$(hl_judge)"
+hl_land queue; HL_QUEUE="$(hl_judge)"
+expect_contains "HL-5 precondition: a hand landing recording none is judged by the verdicts, and none are recorded at it" "no run of its row's suites is recorded at it" "$HL_HAND"
+expect_eq "HL-5b AC-2.2 a hand landing and a queue landing of the same row at the same commit print the same judge line" "$HL_HAND" "$HL_QUEUE"
+expect_absent "HL-5c AC-2.1 …and the queue's line does not name none as a suite" "none has no run recorded at it" "$HL_QUEUE"
+hl_s8() {  # the plan at current 8, approved at the working head, every row but integrate landed, T9's landing in the record
+  od_plan 8 "$(printf 'approved: release by Dana Fixture 2026-10-12T14:00:00Z head=%s "Ship it."' "$OD_M3")"$'\n'"$(printf -- '- Step 5: verified, %s/audit.md\n  auditor: CONFIRMED, %s/audit.md\n- Step 6: review at %s/review.md\n- Step 7: documented at %s/docs.md\n  n/a: no decision this run' "$OD_RL" "$OD_RL" "$OD_RL" "$OD_RL")"$'\n'"$OD_FL" \
+    "$(od_rows landed landed landed)"
+  od_poke current 8 --check
+}
+hl_s8
+expect_contains "HL-5d precondition: current 8 --check prints the landing's line, the commit unproved (HL-5e reads the same output)" "(row T9) is not proved: " "$OD_OUT"
+expect_absent "HL-5e AC-2.1 …and prints no none as a suite that has no run recorded" "none has no run recorded at it" "$OD_OUT"
+printf 'line/v1|ev=verdict|row=T9|commit=%s|suite=b.test.sh|result=green|log=/fixture/T9.log|at=2026-10-12T12:42:00Z\n' "$OD_R3" >> "$(od_lrec)"
+expect_eq "HL-6 AC-2.1 a queue landing whose ready recorded none reads covered once a green verdict stands at the row head" "covered" "$(od_state)"
+
 printf '# fixture\n' > "$OD/README.md"; od_git add README.md; od_git commit -qm 'T4: the release'; OD_A="$(od_git rev-parse HEAD)"
 od_reads() {  # the five readings a double wave plan is dealt, at A
   local q

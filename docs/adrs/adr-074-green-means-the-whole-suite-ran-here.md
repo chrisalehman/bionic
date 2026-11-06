@@ -26,6 +26,8 @@ created: 2026-10-25
 
 **Proposed** (Step 7, 2026-10-25). On Chris Lehman's ruling D4 (wave-46 design-ledger Δ7, 2026-10-25 12:43 PM PDT: "1"), the design frame. D14 (merge unproved is an ask) and D16 (two refusals go, one stays) were defaulted at the design step and approved with the Step-2 card (Δ15). D5 (the tick starts the pass) was ruled "provisionally, option 1" with the orchestrator allowed to start it too (Δ14). It extends ADR-070 and ADR-072 and replaces neither. It narrows what ADR-054's `covered` admits at the merge and leaves that floor rule as it is.
 
+Amended by ADR-076 (2026-11-05): the word covers absence of proof at a head, covered or uncovered by content, and never a suite the whole run left red
+
 ## Context
 
 Wave 45 (1.28.0) closed on a false green. Its continuation read `whole run green at cf173c49`, and the proof line at cf173c49 records a run that exited 1, 122 of 126, owing four suites. The judge read that whole run, behind the head, plus the suites of the landings since, as `covered`. `regression-run` refused a fresh pass at the merge head as already proved on the same reading. The continuation's own reader printed green for any proof line. So the gates, the card and the continuation each computed their own truth about one pass, and the merge went ahead on the person's waiver of the final regression.

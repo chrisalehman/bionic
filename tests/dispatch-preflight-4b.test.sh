@@ -333,7 +333,7 @@ t7_gate lo4 'Lands-on: none'
 expect_eq "LO4 Lands-on: none with no reason is refused" "deny" "$GATE_VERDICT"
 expect_contains "LO4b …the line says it gives no reason" "Lands-on: none gives no reason" "$(t7_first)"
 expect_eq "LO4c …its first line at most 100 columns" "ok" "$(t7_cols_ok)"
-t7_gate lo5 'Lands-on: none — the row edits only prose no suite reads'
+t7_gate lo5 '' '' '' "$(adv_brief 'Lands-on: none — the row edits only prose no suite reads' | sed 's#^Files: .*#Files: .bionic/docs/record/w99-widget.txt#')"  # prose-only Files: the none a non-prose path is refused is dispatch-preflight-5 §LANDS-NONE
 expect_eq "LO5 Lands-on: none with a reason is admitted, the row carrying lands_on=none" \
   "allow|none" "$GATE_VERDICT|$(roster_field "$T7_ROW" lands_on)"
 

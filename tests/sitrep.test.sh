@@ -37,6 +37,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 
 POKER="${SITREP_POKER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-poker.sh}"
 
@@ -1522,6 +1523,41 @@ expect_eq "GA6 …and the release card's rows carry the same counts under the sa
   "$(printf '%s\n' "$SR_GC_CARD_OUT" | sed -n 's/^[^ ]* Identity — //p')|$(printf '%s\n' "$SR_GC_CARD_OUT" | sed -n 's/^[^ ]* Cleanup — //p')"
 expect_eq "GA7 the on-course theme is not a goal reached: the card counts none of the three" "Goals — 0 of 3 reached" \
   "$(printf '%s\n' "$SR_GC_CARD_OUT" | /usr/bin/grep '^Goals')"
+
+# ============================================================
+section "§GOALS-SERVES: a theme is measured by the rows that serve it, serves: first, a dotted id second and said once, never a bare number"
+# ============================================================
+# fails-when: a flat-id plan with serves: reads 0 of 0 or, at task scale, no goal; the dotted fallback is silent; a bare
+# id counts under the requirement its number names; unmapped rows print no line. The world's plan is lib/plan-fixture.sh's
+# (hook-valid, so the render's dry commit admits it) with its themes; serves: is written by the real matrix-render.
+sr_sw() { SR_SCALE="$2" sr_world "$1" "6 6 12 12"; plan_fixture "$SR_PLAN" "$2" >/dev/null; plan_fixture_themes "$SR_PLAN" "${@:3}"; sr_run "$SR_PLAN"; }   # <label> <scale> <variant> <statuses…>
+sr_render() { sr_bind; sr_poke matrix-render >/dev/null 2>&1; SR_MR_RC=$?; sr_run "$SR_PLAN"; }
+sr_n() { sr_lines "$1" | /usr/bin/grep -c .; }
+SR_NM='not mapped: 3 rows carry no serves: and no dotted id'; SR_T2='The gate admits the work'
+sr_sw gs-flat wave flat discharged discharged pending
+expect_eq "GS-0 a flat-id wave plan with no serves: prints the not-mapped line once, and refuses nothing (exit 0)" "$SR_NM|1|0" "$(sr_lines 'not mapped')|$(sr_n 'not mapped')|$RC"
+sr_render
+expect_eq "GS-1 serves: written by matrix-render (exit 0): the theme its two flat rows serve is met, the other open, no mapping line" \
+  "0|The card reads true=met|$SR_T2=not measured|2 of 2 criteria discharged — none open|0 of 1 criteria discharged — open: REQ-2|0|0" \
+  "$SR_MR_RC|$(sr_goal_st)|$(sr_goal_m 'The card reads true')|$(sr_goal_m "$SR_T2")|$(sr_n 'not mapped')|$(sr_n 'mapped by id')"
+sr_sw gs-task task flat discharged discharged discharged; sr_render
+expect_eq "GS-2 at task scale the same flat rows, serves: written, read the one theme: the run, met, 3 of 3" \
+  "0|goal: name=the run status=met measure=3 of 3 criteria discharged — none open for=One plan a fixture writes, at either scale, in the one ledger shape." "$SR_MR_RC|$(sr_lines goal)"
+sr_sw gs-dotted wave dotted discharged discharged pending
+expect_eq "GS-3 a dotted plan with no serves: reads both themes by its ids and says once that it mapped by id" \
+  "The card reads true=met|$SR_T2=not measured|2 of 2 criteria discharged — none open|mapped by id: 3 rows carry no serves:|1|0" \
+  "$(sr_goal_st)|$(sr_goal_m 'The card reads true')|$(sr_lines 'mapped by id')|$(sr_n 'mapped by id')|$(sr_n 'not mapped')"
+awk '{ print } /^AC-1\.1:$/ { print "  serves: REQ-1, REQ-2" }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"; sr_run "$SR_PLAN"
+expect_eq "GS-5 a serves: naming two requirements is read as its first and the reading says so once; the other rows still map by id" \
+  "read as the first: 1 rows serve several requirements|mapped by id: 2 rows carry no serves:|The card reads true=met|$SR_T2=not measured" \
+  "$(sr_lines 'read as the first')|$(sr_lines 'mapped by id')|$(sr_goal_st)"
+sr_sw gs-bare wave bare pending discharged pending
+expect_eq "GS-4 a bare AC-2 under REQ-1, discharged, is not counted under REQ-2: that theme reads nothing, and the three rows are not mapped" \
+  "The card reads true=not measured|$SR_T2=not measured|0 of 0 criteria discharged — the matrix holds none of its criteria|$SR_NM" \
+  "$(sr_goal_st)|$(sr_goal_m "$SR_T2")|$(sr_lines 'not mapped')"
+sr_render
+expect_eq "GS-4b control: the same plan with serves: written counts AC-2 under REQ-1, its own theme on course" \
+  "0|The card reads true=on course|$SR_T2=not measured|1 of 2 criteria discharged — open: REQ-1" "$SR_MR_RC|$(sr_goal_st)|$(sr_goal_m 'The card reads true')"
 
 # ============================================================
 section "§GOAL-MISS: the first landing that misses a goal makes the tick open decide:goal:<theme> on the run's register, once; it is an ask on the sheet until the goal reads met"

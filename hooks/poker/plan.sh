@@ -35,14 +35,16 @@ poker_brief_sink() {  # finding <fact> <fix> <detail> | warn <line>
   esac
 }
 
-# born_floor_backing <plan> <repo> <suite> -> BFB_OF (`floor` or `standing@<12-hex>`) and rc 0 when a red the machine
-# recorded backs a floor-born marker for <suite>; rc 1 otherwise, BFB_OWED and BFB_BRANCH set for the refusal's words
-# (wave-36 T42; D9, design-ledger Δ8, born of critic-adversarial #1). THE TWO FACTS, asked in this order: (a) the
-# plan's newest floor proof owes the suite (lib/proof.sh `_proof_last_read` floor owed, the reader `proof-add
-# inherited` asks), or (b) the run's landing record (`proof_debt_record`) holds an `ev=standing` event for the suite
-# whose head is a commit on the working branch's ref (`proof_branch_head`), the newest such event first. A marker the
-# judge holds every chain by is no declaration. No library gives a standing event a reader; this is the one awk, over
-# the file, and it reads the fields as lib/line.sh's fold does (`fv`, a suite by its file name).
+# born_floor_backing <plan> <repo> <suite> -> BFB_OF (`regression`, `standing@<12-hex>` or `run@<12-hex>`) and rc 0 when a
+# red the machine recorded backs a floor-born marker for <suite>; rc 1 otherwise, BFB_OWED and BFB_BRANCH set for the
+# refusal's words. THE THREE FACTS, asked in this order: (a) the plan's newest regression proof owes the suite (lib/proof.sh
+# `_proof_last_read` regression owed, the reader `proof-add inherited` asks), (b) the run's landing record
+# (`proof_debt_record`) holds an `ev=standing` event for the suite whose head is a commit on the working branch's ref
+# (`proof_branch_head`), the newest such event first, or (c) it holds the `ev=verdict row=regression result=red` line a
+# whole run left for the suite at such a commit, which `regression-run` writes before any proof-add: a run the machine
+# recorded red backs the marker before its log is cited. A marker the judge holds every chain by is no declaration. No
+# library gives these events a reader; `_bfb_newest` is the one awk, over the file, and it reads the fields as lib/line.sh's
+# fold does (`fv`, a suite by its file name).
 # Set in hooks/session-poker.sh, before any part loads: BFB_OF, BFB_OWED, BFB_BRANCH.
 born_floor_backing() {
   local plan="$1" repo="$2" suite="$3" rec bh h
@@ -51,36 +53,122 @@ born_floor_backing() {
   rec="$(proof_debt_record "$plan" "$repo" 2>/dev/null)" && [ -f "$rec" ] || return 1
   bh="$(proof_branch_head "$plan" "$repo")" || return 1
   { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  h="$(_bfb_newest "$rec" "$repo" "$bh" "$suite" standing head)" && { BFB_OF="standing@${h:0:12}"; return 0; }
+  h="$(_bfb_newest "$rec" "$repo" "$bh" "$suite" verdict commit)" && { BFB_OF="run@${h:0:12}"; return 0; }
+  return 1
+}
+
+# _bfb_newest <record> <repo> <branch head> <suite> <ev> <field> -> the newest commit named by <field> of an <ev> line for
+# <suite> that is an ancestor of the branch head, and rc 0; rc 1 and nothing when no line names one. A verdict counts only
+# as the regression's own and red; the newest line is the last in the file.
+_bfb_newest() {
+  local rec="$1" repo="$2" bh="$3" suite="$4" ev="$5" field="$6" h
   while IFS= read -r h; do
     [ -n "$h" ] || continue
     h="$(git -C "$repo" rev-parse --verify -q "${h}^{commit}" 2>/dev/null)" || continue
     git -C "$repo" merge-base --is-ancestor "$h" "$bh" 2>/dev/null || continue
-    BFB_OF="standing@${h:0:12}"; return 0
-  done <<BFB_STANDING
-$(awk -F'|' -v want="$suite" "${_LINE_FIELDS_AWK:-}"'
-    line_ev() == "standing" { s = line_kv("suite"); sub(/.*\//, "", s); if (s == want && line_kv("head") != "") h[++n] = line_kv("head") }
+    printf '%s' "$h"; return 0
+  done <<BFB_EVENTS
+$(awk -F'|' -v want="$suite" -v ev="$ev" -v fld="$field" "${_LINE_FIELDS_AWK:-}"'
+    line_ev() == ev && (ev != "verdict" || (line_kv("row") == "regression" && line_kv("result") == "red")) {
+      s = line_kv("suite"); sub(/.*\//, "", s); if (s == want && line_kv(fld) != "") h[++n] = line_kv(fld) }
     END { for (i = n; i >= 1; i--) print h[i] }' "$rec" 2>/dev/null)
-BFB_STANDING
+BFB_EVENTS
   return 1
 }
 
-# poker_review_records <plan> <repo> -> the records a review row's Files name, comma-joined: one
-# `<record dir>/critic-<q>.md` per question the plan's rigor and scale deal (lib/proof.sh `facts_owed`), in the dealing's
-# order, a question dealt a piece and a whole read named once, since its reader writes one record for it. Nothing and
-# rc 1 when the plan's rigor or scale deals no question, and the caller keeps the one-record rule of a reader row.
+# born_red_log <plan> <repo> -> BFB_LOG, the docs-root-relative path of the newest `regression-run-*.log` in the plan's
+# record directory whose header reads a clean head (`dirty=0`) that is a commit on the working branch and whose last line
+# is a non-zero `rc=`, the red a proof-add of it would record; rc 1 and BFB_LOG empty when none stands. The two ends of
+# the log are `_proof_floor_ends`, the reader proof-add's own grammar uses.
+born_red_log() {
+  local plan="$1" repo="$2" rec dir bh f ends hdr last sha
+  BFB_LOG=""
+  rec="$(proof_debt_record "$plan" "$repo" 2>/dev/null)" || return 1
+  dir="$(dirname "$rec")"; [ -d "$dir" ] || return 1
+  bh="$(proof_branch_head "$plan" "$repo")" || return 1
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    ends="$(_proof_floor_ends "$f")"; hdr="${ends%%$'\n'*}"; last="${ends#*$'\n'}"
+    case "$hdr" in *\ 0) ;; *) continue ;; esac
+    case "$last" in rc=0|rc=) continue ;; rc=[0-9]*) ;; *) continue ;; esac
+    sha="${hdr%% *}"
+    git -C "$repo" merge-base --is-ancestor "$sha" "$bh" 2>/dev/null || continue
+    BFB_LOG="record/$(basename "$dir")/${f##*/}"; return 0
+  done <<BFB_LOGS
+$(ls -t "$dir"/regression-run-*.log 2>/dev/null)
+BFB_LOGS
+  return 1
+}
+
+# poker_review_records <plan> <repo> [<questions>] -> the records a review row's Files name, comma-joined: one
+# `<record dir>/critic-<q>.md` per question the row owes, in the dealing's order, a question dealt a piece and a whole
+# read named once, since its reader writes one record for it. The questions a row owes are the ones it declares
+# (<questions>, comma-joined, from `task-add --questions`) and, with none declared, the rigor's full deal (lib/proof.sh
+# `facts_owed`). Nothing and rc 1 when the plan's rigor or scale deals no question and none is declared, and the
+# caller keeps the one-record rule of a reader row.
 poker_review_records() {
-  local plan="$1" repo="$2" qs dir q out=""
-  if ! declare -F facts_owed >/dev/null 2>&1; then
-    [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" >/dev/null 2>&1
+  local plan="$1" repo="$2" decl="${3:-}" qs dir q out=""
+  if [ -n "$decl" ]; then
+    qs="${decl//,/ }"
+  else
+    if ! declare -F facts_owed >/dev/null 2>&1; then
+      [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" >/dev/null 2>&1
+    fi
+    declare -F facts_owed >/dev/null 2>&1 || return 1
+    qs="$(facts_owed "$(plan_frontmatter_get "$plan" rigor)" "$(plan_frontmatter_get "$plan" scale)" 2>/dev/null \
+      | awk -F'\t' '$1 == "review" && !seen[$2]++ { print $2 }')"
   fi
-  declare -F facts_owed >/dev/null 2>&1 || return 1
-  qs="$(facts_owed "$(plan_frontmatter_get "$plan" rigor)" "$(plan_frontmatter_get "$plan" scale)" 2>/dev/null \
-    | awk -F'\t' '$1 == "review" && !seen[$2]++ { print $2 }')"
   [ -n "$qs" ] || return 1
   dir="$(docs_root "$repo")/record/$(proof_plan_slug "$plan")"
   case "$dir" in "$repo"/*) dir="${dir#"$repo"/}" ;; esac
   for q in $qs; do out="${out:+$out, }$dir/critic-$q.md"; done
   printf '%s\n' "$out"
+}
+
+# poker_questions_dealt <plan> <questions> -> rc 0 when the declared questions (comma-joined) are one reader's at the
+# plan's rigor and scale, else rc 1 with PQD_SAID the reason. A review row is one reader's: at double the auditor
+# holds `evidence` and the critic the other two, so a declaration across them has no reader, and the reason names the
+# deal. At single the critic holds all three, so any subset is one reader's. Set: PQD_SAID.
+poker_questions_dealt() {
+  local plan="$1" decl="$2" rigor scale lvl owed role q deal fix="" r qs first="" mixed=""
+  PQD_SAID=""
+  if ! declare -F facts_owed >/dev/null 2>&1; then
+    [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" >/dev/null 2>&1
+  fi
+  rigor="$(plan_frontmatter_get "$plan" rigor)"; scale="$(plan_frontmatter_get "$plan" scale)"
+  lvl="$(rigor_level "$rigor" 2>/dev/null)" || lvl="${rigor:-none}"
+  if ! declare -F facts_owed >/dev/null 2>&1 || ! owed="$(facts_owed "$rigor" "$scale" 2>/dev/null)" || [ -z "$owed" ]; then
+    PQD_SAID="the plan's rigor (${rigor:-none}) and scale (${scale:-none}) deal no question, so there is none to declare"
+    return 1
+  fi
+  # THE DEAL, one reader a line, `<role>:<its questions>` in the dealing's order; the piece read is the one that
+  # writes the record.
+  deal="$(printf '%s\n' "$owed" | awk -F'\t' '$1 == "review" && $4 == "piece" {
+    r = $3; sub(/^bionic:/, "", r)
+    if (!(r in a)) ord[++k] = r
+    a[r] = a[r] (a[r] == "" ? "" : ",") $2 }
+    END { for (i = 1; i <= k; i++) print ord[i] ":" a[ord[i]] }')"
+  for q in ${decl//,/ }; do
+    role="$(printf '%s\n' "$deal" | awk -F: -v q="$q" '{ n = split($2, w, ","); for (i = 1; i <= n; i++) if (w[i] == q) { print $1; exit } }')"
+    if [ -z "$role" ]; then
+      PQD_SAID="$q is dealt to no role at $lvl rigor, scale ${scale:-none}"
+      return 1
+    fi
+    [ -n "$first" ] || first="$role"
+    [ "$role" = "$first" ] || mixed=1
+  done
+  if [ -n "$mixed" ]; then
+    while IFS=: read -r r qs; do
+      [ -n "$r" ] || continue
+      fix="${fix:+$fix, }${qs//,/ and } the $r's"
+    done <<EOF
+$deal
+EOF
+    PQD_SAID="${decl//,/ and } are dealt to different roles at $lvl rigor ($fix), and a review row is one role's"
+    return 1
+  fi
+  return 0
 }
 
 # poker_files_cell <id> <kind> <agent> <Files cell> <repo> <plan> -> PFC_OUT (the cell to write) and PFC_ART (the
@@ -1197,7 +1285,13 @@ EOF
     # A cell naming some records but fewer than the questions is refused with the rendered list. The first record the
     # cell names is the one deliver takes, written to the row's artifact cell below when the table has one.
     TA_REV_ART=""
-    if [ "$TA_KIND" = review ] && TA_REVIEW="$(poker_review_records "$TA_PLAN" "$REPO_REAL")"; then
+    # A DECLARED QUESTION IS ONE A READER IS DEALT (`--questions`): judged before the records are rendered, so a row no
+    # single reader could answer is refused in the deal's words with the plan unchanged.
+    if [ -n "$TA_QUESTIONS" ] && ! poker_questions_dealt "$TA_PLAN" "$TA_QUESTIONS"; then
+      die "REFUSED — $TA_ID declares --questions $TA_QUESTIONS, which is not dealt: $PQD_SAID. Run task-add again with the questions one role holds. The plan is unchanged."
+      exit 1
+    fi
+    if [ "$TA_KIND" = review ] && TA_REVIEW="$(poker_review_records "$TA_PLAN" "$REPO_REAL" "$TA_QUESTIONS")"; then
       TA_HAVE="$(printf '%s\n' "$TA_FILES" | tr ',' '\n' | awk '
         { gsub(/`/, ""); sub(/^[ \t]+/, ""); sub(/[ \t]+$/, "") }
         index($0, "record/") && /\.md$/ { n = split($0, p, "/"); b = p[n]; if (b !~ /\.progress\.md$/ && b != "assumptions.md" && !seen[$0]++) print $0 }')"
@@ -1205,10 +1299,12 @@ EOF
         case "$TA_FILES" in ''|'—'|'-') TA_FILES="$TA_REVIEW" ;; *) TA_FILES="$TA_FILES, $TA_REVIEW" ;; esac
         TA_REV_ART="${TA_REVIEW%%,*}"
       else
+        TA_QOWES="the plan's rigor deals"
+        [ -z "$TA_QUESTIONS" ] || TA_QOWES="it declares (${TA_QUESTIONS//,/, })"
         TA_NHAVE="$(printf '%s\n' "$TA_HAVE" | awk 'NF' | wc -l | tr -d ' ')"
         TA_NWANT="$(printf '%s' "$TA_REVIEW" | tr ',' '\n' | awk 'NF' | wc -l | tr -d ' ')"
         if [ "$TA_NHAVE" -lt "$TA_NWANT" ]; then
-          die "REFUSED — $TA_ID is a review row, whose Files name one record per question the plan's rigor deals: $TA_NWANT, and its Files name $TA_NHAVE; its Files are: $TA_REVIEW (give that list as the Files operand, or name a record of your own for each question, or — to have the list written). The plan is unchanged."
+          die "REFUSED — $TA_ID is a review row, whose Files name one record per question $TA_QOWES:$TA_NWANT, and its Files name $TA_NHAVE; its Files are: $TA_REVIEW (give that list as the Files operand, or name a record of your own for each question, or — to have the list written). The plan is unchanged."
           exit 1
         fi
         TA_REV_ART="$(printf '%s\n' "$TA_HAVE" | sed -n 1p)"
@@ -1310,17 +1406,23 @@ $(_units_split_tokens "$TA_FILES")
 EOF
       TA_CELL_TASK="$TA_TASK · born: review"
     fi
-    # A FLOOR-BORN MARKER NAMES ITS RED (wave-36 T42; D9, Δ8): the marker is admitted only with a red the machine
-    # recorded behind it (`born_floor_backing`), and it records which, ` of=floor` or ` of=standing@<12-hex>`.
+    # A FLOOR-BORN MARKER NAMES ITS RED: the marker is admitted only with a red the machine recorded behind it
+    # (`born_floor_backing`), and it records which, ` of=regression`, ` of=standing@<12-hex>` or ` of=run@<12-hex>`.
     TA_BORN_OF=""
     if [ -n "$TA_BORN_SUITE" ]; then
       if ! born_floor_backing "$TA_PLAN" "$REPO_REAL" "$TA_BORN_SUITE"; then
-        die "task-add refused — born: regression $TA_BORN_SUITE names no red the machine recorded; it is admitted when the plan's regression proof owes $TA_BORN_SUITE (it owes ${BFB_OWED:-nothing}; proof-add regression, from a whole run that left it red) or when the landing record holds a standing event for $TA_BORN_SUITE at a commit on ${BFB_BRANCH:-the working branch}; the plan is unchanged."
+        if born_red_log "$TA_PLAN" "$REPO_REAL"; then
+          die "task-add refused — born: regression $TA_BORN_SUITE names no red the machine recorded; proof-add the red run's log first: bash ${HOOK_DIR}/session-poker.sh proof-add regression $BFB_LOG; the plan is unchanged."
+        else
+          die "task-add refused — born: regression $TA_BORN_SUITE names no red the machine recorded; it is admitted when the plan's regression proof owes $TA_BORN_SUITE (it owes ${BFB_OWED:-nothing}; proof-add regression, from a whole run that left it red) or when the landing record holds a standing event or a red verdict for $TA_BORN_SUITE at a commit on ${BFB_BRANCH:-the working branch}; the plan is unchanged."
+        fi
         exit 1
       fi
       TA_BORN_OF="$BFB_OF"; TA_CELL_TASK="$TA_TASK · born: regression"
     fi
 
+    # THE DECLARATION RIDES THE TASK CELL beside the born tag, in its style, where `units_questions` lifts it.
+    [ -z "$TA_QUESTIONS" ] || TA_CELL_TASK="$TA_CELL_TASK · questions: $TA_QUESTIONS"
     pv_task_cells_or_refuse "$TA_ID" "$TA_CELL_TASK"
     if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_CELL_TASK" "$TA_AGENT" \
          "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" "${TA_BORN:+$TA_BORN$TA_BORN_MARK}${TA_BORN_SUITE:+regression $TA_BORN_SUITE of=$TA_BORN_OF}" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
@@ -1844,14 +1946,17 @@ EOF
   # criterion, in the shape the gate reads — its `AC-<n>:` line carrying the criterion's text from its `- AC-<n>`
   # bullet, `provenance:` (the requirement's `provenance:` line under its `### REQ-<n>` heading in the requirements
   # file the plan names, else in the plan, else `pending`; never the Approach: wave-35 T8, AC-6.4), `fails-when:`
-  # and `eval:` (`<tier> — <Eval>`) from the table,
+  # and `eval:` (`<tier> — <Eval>`) from the table, `serves:` straight after `provenance:` (the REQ ids the Eval design
+  # row's Requirement cell names; no line when it names none, so a later render whose cell names one writes it),
   # `task:` (the one `## Tasks` row whose serves cell names the criterion or its requirement, else `pending`), then
   # `evidence:` (and `user-confirmed:` at T4), the keys walls.sh `keys_for_tier` names for the tier the matrix
   # table gives the criterion, each `pending`. The matrix head gains `stack-health: pending`, and `walk-artifact: pending` unless the
   # plan is `walk: exempt`, where it has none. `pending` is the stub token (Δ12a): the gate refuses it wherever it
   # judges evidence and reads nothing of it before Step 5.
   #
-  # ADDITIVE, SO IT CAN BE RUN AGAIN. A block that exists gains only the keys it lacks, after its last line; a key
+  # ADDITIVE, SO IT CAN BE RUN AGAIN. A block that exists gains only the keys it lacks, after its last line, but
+  # `serves:`, which stands straight after `provenance:` where the block holds one, so a plan rendered before the key
+  # gains it where a new block carries it; a key
   # that is there is never rewritten, whatever it says. The one line it prints counts the three outcomes: new
   # blocks, keys added (to existing blocks and the matrix head), and blocks left as they were. When there is nothing
   # to add it writes nothing. It takes the transaction every plan verb takes (copy, dry commit, checksum, swap).
@@ -2723,15 +2828,11 @@ BRF_EOF
         waiver=0; matrix_row_waiver "$ev" "$block" && waiver=1
         ruled=0; matrix_row_ruled "$tier" "$status" "$aud" "$(user_confirmed_value "$block")" "$waiver" && ruled=1
         owe="$(matrix_owing_step "$PLAN" "$block")"
-        [ "$ruled" = 1 ] || ! matrix_row_deferred "$PLAN" "$owe" "$2" "$status" || ruled="owed:$owe"
+        [ "$ruled" = 1 ] || ! matrix_row_deferred "$PLAN" "$owe" "$2" "$status" "$(matrix_owing_open "$PLAN" "$block")" || ruled="owed:$owe"
         aud="$(placeholder_cell "$aud")"
         printf '%s\037%s\037%s\037%s\037%s\n' "$ac" "$tier" "$status" "${aud:--}" "$ruled"
       done <<RR_MATRIX
-$(awk -F'|' '/^[[:space:]]*\|/ && NF == 7 {
-    for (i = 2; i <= 6; i++) gsub(/^[ \t]+|[ \t]+$/, "", $i)
-    if ($2 == "" || $2 == "AC" || $2 ~ /^[-:]+$/) next
-    printf "%s\037%s\037%s\037%s\037%s\n", $2, $3, $4, $5, $6
-  }' <<< "$MATRIX")
+$(matrix_table_rows)
 RR_MATRIX
     )
   }
@@ -2854,6 +2955,7 @@ RR_MATRIX
     # carries its opener as a fifth field the page does not draw, so the row is cut to its four before it is sent
     [ -z "$RR_GOALS" ] || printf '%s\n' "$RR_GOALS" | while IFS= read -r l; do
       [ -n "$l" ] || continue
+      [ "${l%%	*}" != mapping ] || continue
       case "$(plan_goal_status "${l%%	*}")" in
         met) m="$SITREP_MARK_WITHIN" ;;
         'not met') m="$SITREP_MARK_OVER" ;;
@@ -3095,17 +3197,23 @@ RR_DISP_EOF
     done
 
     # THE MERGE WITHOUT A PASS AT THIS HEAD is the person's own decision, put beside the release and the merge while the
-    # whole suite did not run green here and no word was given at this head, by the rule the gate at 8 holds the merge
-    # on (lib/proof.sh `proof_merge_unproved`, `facts_state`'s unproved). Waiting for the pass is recommended and taking
-    # the default records nothing, so only the person's own `merge` writes the line. A plan that owes no whole run, or
-    # holds no proof of one, has no pass to wait for and is asked nothing here.
+    # whole suite did not run green here and no word was given at this head, by the one rule the gate at 8 honours the
+    # word on (lib/proof.sh `proof_merge_ask`, `facts_state`'s unproved): a floor covered or uncovered, never owed.
+    # Waiting for the pass is recommended and taking the default records nothing, so only the person's own `merge`
+    # writes the line. A floor the whole run left red draws no decision: the Tests line names its suites and their exit.
+    # A plan that owes no whole run, or holds no proof of one, has no pass to wait for and is asked nothing here.
     RR_WHOLE="$(proof_whole_text "$PV_PLAN" "$PV_REPO" 2>/dev/null)"
+    RR_REDS=""
     case "$RR_WHOLE" in
       none|'') : ;;
-      *) if [ "$(proof_regression "$PV_PLAN")" != no ] && line="$(proof_merge_unproved "$PV_PLAN" "$PV_REPO" "$RR_HEAD" 2>/dev/null)"; then
-           rr_add unproved approve:merge-unproved "-" "approve merge-unproved" "-" \
-             "Merge without a whole run at this head — $line" "wait for the pass" "merge without it" \
-             "wait for the pass" "merge without a whole run at this head"
+      *) if [ "$(proof_regression "$PV_PLAN")" != no ]; then
+           line="$(proof_merge_ask "$PV_PLAN" "$PV_REPO" "$RR_HEAD" 2>/dev/null)"
+           case $? in
+             0) rr_add unproved approve:merge-unproved "-" "approve merge-unproved" "-" \
+                  "Merge without a whole run at this head — $line" "wait for the pass" "merge without it" \
+                  "wait for the pass" "merge without a whole run at this head" ;;
+             2) RR_REDS="$line" ;;
+           esac
          fi ;;
     esac
 
@@ -3123,6 +3231,17 @@ RR_AGAINST_EOF
     # GOALS: each goal the plan declares, read by lib/plan.sh `plan_goals_read`, the reader the sitrep reads too.
     RR_GOALS="$(plan_goals_read "$PV_PLAN" "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" \
       "$(landing_report "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" yes 2>/dev/null)")"
+    # A MATRIX ROW NO THEME CAN READ refuses the page, preview or not, before anything is written: a row with no
+    # serves: and no dotted id is in no theme's count, so the Goals block would print a theme short, `0 of N reached`
+    # over criteria discharged. matrix-render writes serves: from the Eval design, and the page then reads them.
+    RR_UNMAPPED="$(printf '%s\n' "$RR_GOALS" | awk -F'\t' '$1 == "mapping" && index($2, "not mapped: ") == 1 {
+      n = split($3, a, " "); s = ""; for (i = 1; i <= n && i <= 5; i++) s = s (i > 1 ? ", " : "") a[i]
+      if (n > 5) s = s " and " (n - 5) " more"
+      print n "\t" s; exit }')"
+    if [ -n "$RR_UNMAPPED" ]; then
+      die "release-approval refused — ${RR_UNMAPPED%%	*} matrix rows map to no requirement (no serves: and no dotted id): run session-poker.sh matrix-render to write serves: (${RR_UNMAPPED#*	})"
+      exit 1
+    fi
 
     # THE REGRESSION is the full pass's state at the head, drawn from the one printer over the floor judge (lib/proof.sh
     # `proof_whole_text`), never worded here: green only where the whole suite ran green at this head, so a whole run
@@ -3132,6 +3251,7 @@ RR_AGAINST_EOF
       "green at "*) RR_TREG="✅ whole suite: $RR_TREG" ;;
       *) RR_TREG="✖️ whole suite: ${RR_TREG:-none}" ;;
     esac
+    [ -z "$RR_REDS" ] || RR_TREG="$RR_TREG · $(proof_owed_needs "$RR_REDS")"
 
     # THE REVIEWS: each question's newest reading, by the role the rigor deals it, covered or failing as the judge
     # reads it at the head (lib/proof.sh `facts_reviews`, the one reading the situation report's count shares): a
