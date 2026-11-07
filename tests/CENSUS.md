@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 119 · sections: 1093 · keep: 899 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 119 · sections: 1094 · keep: 900 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1092 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1092 - 22 - 8 = 1062.
 
@@ -117,6 +117,7 @@ booked.test.sh | §DETACH-CEILING | keep | payload/scripts/booked.sh --detach: t
 booked.test.sh | §WALL | duplicate | hooks/bash-walls.sh: the suite wrap drops --detach or gains --max-wait (WL.1, WL.2); booked.sh's detach dropped (WL.3 to WL.5) | farm-out-reminder.test.sh §1 (unverified), booked.test.sh §DETACH
 booked.test.sh | §RUNLINE | keep | payload/scripts/booked.sh: the run close's line/v1 ev=run append deleted, so the bound plan's landing record holds no run line (BR-2, BR-3); or booked_starter reading no --starter from the command, so the line names no starter or the wrong one (BR-2b, BR-6 to BR-6c) | none (searched 'ev=run' in tests/; lib/regression-fixture.sh plants the line by hand)
 booked.test.sh | §SIGNALS | keep | payload/scripts/booked.sh --detach: the perl reset of HUP, INT and QUIT before exec dropped, so a command launched under an ignoring parent sees none of them (SG-1) | none (searched 'trap "" HUP' in tests/; lib/name-scan.sh only resets for itself)
+booked.test.sh | §CLASS | keep | payload/scripts/booked.sh: the class dropped from booked_ask's gate_ask line, so a wrapped browser run leaves a request with no class= and the suite prior as its promise (CL.1); or a class other than browser and compile let through, so it asks (CL.3) | none (searched '\-\-class' in tests/; gate.test.sh drives gate_ask itself and the wall's wrap text is background-suite-guard.test.sh's)
 
 ## canonical-sdlc-evidence-gate-2.test.sh
 
