@@ -307,7 +307,7 @@ NV_OUT=""; NV_RC=0
 nv_drive() {  # [runner args...] — the scratch runner on the planted load, old ceiling NV_MAXW (1 s); NV_OUT, NV_RC
   NV_OUT="$( cd "$NV" && env -u BIONIC_GATE_DIR -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT -u BIONIC_TEST_JOBS_CEILING \
       "${RW_PIN[@]}" NV_MARKS="$NV_MARKS" NV_LOAD="$NV_LOAD" BIONIC_GATE_DIR="$TMPROOT/novoid-gate" BIONIC_GATE_POLL=0.1 \
-      BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES=0 BIONIC_PROBE_TOTAL_MB=8192 \
+      BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES="${NV_BUSY:-0}" BIONIC_PROBE_TOTAL_MB=8192 \
       BIONIC_LOAD_NOW_FILE="$NV_LOAD" BIONIC_SETTLE_MAX_WAIT="${NV_MAXW:-1}" \
       BIONIC_PRESSURE_RING="$TMPROOT/novoid-ring" BIONIC_NOW_EPOCH="$NOW" \
       BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
@@ -368,5 +368,14 @@ expect_eq "NV.13 BIONIC_QUIET=1 is read by nobody: the command runs at once, the
   "$NV_RC $([ -f "$NV_BKD/envq.ran" ] && echo yes || echo no)"
 expect_absent "NV.14 …and nothing says void (NV.13 is the positive on the same drive)" "void" "$NV_OUT"
 expect_eq "NV.15 …asking the gate as work, never for the whole machine" "work" "$(nv_kinds)"
+
+section "§GRANT a whole run starts no more jobs than the gate promised it (AC-3.3)"
+# The scratch runner above, at busy 2.0, share 92 and reserve 1 on 8 cores: the room free at admission is 4,
+# under the share's width of 6, and the run's width is read from its own admitted request.
+rw_share 92; printf '1\n' > "$RW_HOME/bionic/reserve"; rm -rf "$TMPROOT/novoid-gate"; printf '0\n' > "$NV_LOAD"
+NV_BUSY=2.0 nv_drive
+expect_eq "GR.1 the whole run is promised the free room, 4, and runs 4 jobs wide, not the width (rc|promise|width)" "0|0:4:0|width 4" \
+  "$NV_RC|$(sed -n 's/^promise=//p' "$TMPROOT/novoid-gate"/requests/[0-9]* 2>/dev/null)|$(printf '%s\n' "$NV_OUT" | grep -o 'width [0-9]*')"
+printf '0\n' > "$RW_HOME/bionic/reserve"; rw_share 100
 
 finish

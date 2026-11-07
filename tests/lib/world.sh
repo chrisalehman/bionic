@@ -173,9 +173,18 @@ world_cost() {
   pk="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/gate.sh" 2>/dev/null && _gate_project )"
   [ -n "$pk" ] || { _world_refuse world_cost "no project key: payload/scripts/lib/gate.sh did not load"; return 1; }
   mkdir -p "$BIONIC_GATE_DIR/cost" || return 1
-  f="$BIONIC_GATE_DIR/cost/${pk}%${key}"
+  f="$BIONIC_GATE_DIR/cost/${pk}%${key}"; _WORLD_COST_F="$f"
   printf '%s:%s\n' "$secs" "$(_res_now)" >> "$f"
   tail -n 3 "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+}
+
+# world_cost_cores <key> <seconds> <cores>... — one line per <cores>, `<seconds>:<epoch>::<cores>`, the
+# four-field line gate_end writes with its load unknown, kept by world_cost's rule.
+world_cost_cores() {
+  local key="${1:-}" secs="${2:-}" c
+  shift 2 2>/dev/null || { _world_refuse world_cost_cores "takes <key> <seconds> <cores>..."; return 2; }
+  for c in "$@"; do world_cost "$key" "$secs" || return
+    sed '$ s/$/::'"$c"'/' "$_WORLD_COST_F" > "$_WORLD_COST_F.tmp" && mv "$_WORLD_COST_F.tmp" "$_WORLD_COST_F"; done
 }
 
 # world_suite <name> <green|red|none|kill> — writes `tests/<name>.test.sh` under the CURRENT
