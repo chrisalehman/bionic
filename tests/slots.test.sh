@@ -58,6 +58,10 @@
 #     the shim and the gate interact, and a real reading would make them depend on what the
 #     machine is doing. The readers of the real machine are tests/resources.test.sh's to
 #     assert, not this suite's.
+#   * The share and the reserve are REAL files, `bionic/share` (92) and `bionic/reserve` (1), under a
+#     CLAUDE_CONFIG_DIR of this suite's own in its scratch root, as tests/gate.test.sh plants its
+#     own, and every booked call here reads that directory. The person's own settings never reach
+#     a row: the room each row's arithmetic fills is the share of 92 on 8 cores less 1.
 #   * Holder pids are REAL processes: a booked command that is still running, a planted
 #     request held by a live `sleep`, or a pid taken from a process that has exited. Nothing
 #     fakes liveness.
@@ -118,11 +122,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The configuration every booked call reads its share and reserve from: planted, so no row's room
+# depends on what the person running the suite has set.
+mkdir -p "$TMPROOT/home/bionic"
+printf '92\n' > "$TMPROOT/home/bionic/share"
+printf '1\n' > "$TMPROOT/home/bionic/reserve"
+
 # ── fixture helpers ──────────────────────────────────────────────────────────
 
-# The gate's environment every booked call here gets: an idle processor and a low memory
-# reading, so an ask is decided by what this row has admitted and nothing else.
-GE=(-u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT BIONIC_GATE_POLL=0.1 BIONIC_PROBE_USED_PCT=10
+# The gate's environment every booked call here gets: the planted share and reserve, an idle
+# processor and a low memory reading, so an ask is decided by what this row has admitted and
+# nothing else.
+GE=(-u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT CLAUDE_CONFIG_DIR="$TMPROOT/home" BIONIC_GATE_POLL=0.1 BIONIC_PROBE_USED_PCT=10
   BIONIC_PROBE_BUSY_CORES=0 BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=8192)
 
 newrow() {  # <name> — a fresh row directory, store and load file; resets the knobs
@@ -215,9 +226,9 @@ expect_eq "B1.5 the command reads the shim's stdin, not /dev/null" "piped-in" \
   "$(printf 'piped-in\n' | bk -- cat 2>/dev/null)"
 
 # B2. A second run asks while the first holds the gate's only room: it waits, says so, and runs
-# once the first ends. Every command is promised 1.61 cores, so the room is the
-# live processor's: the share of 92 on 8 cores less the reserve of 1 is 6.36, and nothing is
-# admitted past it, a lone ask included. At 4.0 busy cores the first ask fits (4.0 + 1.61) and the
+# once the first ends. Every command is promised 1.61 cores, so the room is the live processor's:
+# the share of 92 and the reserve of 1 are this suite's own planted files, so on 8 cores it is
+# 6.36, and nothing is admitted past it, a lone ask included. At 4.0 busy cores the first ask fits (4.0 + 1.61) and the
 # second does not (4.0 + 1.61 + 1.61); it waits until the first ends.
 newrow b2
 BUSY=4
