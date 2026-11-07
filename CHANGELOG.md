@@ -166,6 +166,21 @@ prints: 102091 test lines against 102206 of code at the head, 115 to spare.
   Proposed, with ADR-051's and ADR-060's Status naming the amendment. It lands on release-check, render, commands and
   shell-lint. T13 writes the reviews and merges, and T14 closes the run.
 
+### The reviews
+
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- adversarial review, whole: fail at 68ef6f33 by w49-T11, 2026-11-07T05:17:45Z (`critic-adversarial.md`)
+- structure review, whole: flag at 68ef6f33 by w49-T11, 2026-11-07T05:17:46Z (`critic-structure.md`)
+- evidence review, whole: fail at 68ef6f33 by w49-T10, 2026-11-07T06:08:47Z (`auditor-evidence.md`)
+- evidence review, piece: pass at dd9b12e1 by w49-T10, 2026-11-07T06:22:47Z (`auditor-evidence-2.md`)
+- adversarial review, piece: fail at dd9b12e1 by w49-T21, 2026-11-07T06:49:28Z (`critic-adversarial-2.md`)
+- structure review, piece: flag at dd9b12e1 by w49-T21, 2026-11-07T06:49:30Z (`critic-structure-2.md`)
+- evidence review, piece: fail at 1c3ada20 by w49-T23, 2026-11-07T07:23:10Z (`auditor-evidence-3.md`)
+- adversarial review, piece: flag at f87acbfc by w49-T24, 2026-11-07T08:33:03Z (`critic-adversarial-3.md`)
+- structure review, piece: flag at f87acbfc by w49-T24, 2026-11-07T08:33:04Z (`critic-structure-3.md`)
+- evidence review: waived at f87acbfc by Dana Fixture, 2026-11-07T15:53:03Z: "all recommended"
+
 ### Known limits
 
 Rendered from the plan's deferred findings, each its stated sentence, in the order they were registered.
