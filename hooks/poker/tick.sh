@@ -4,6 +4,12 @@
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
+#
+# THE RUN STANDS A WRITER DOWN WHEN IT HAS OVERCOMMITTED THE MACHINE (`tick_load_standdown`). When the gate line
+# reads a five-minute busy load over the share's line (`_gate_share_cores`) and gives no room, the tick orders the
+# newest live writer whose row has not landed to stop, at most one a tick, through the stop order a MET row takes,
+# and returns its row to pending with its tree kept, so FILL offers it again once the room opens. A held row is
+# left to its hold, and no gate request is ended by it: an admitted run finishes and writes its own cost.
 
 # ---------------------------------------------------------------- the Patrol stamp
 
@@ -299,7 +305,7 @@ sched_plan_current() {  # <plan path> -> the current: value (digits only, sub-st
 gate_report() {  # <project root> <session id> -> sets SCHED_GATE_ROOM/SCHED_OWED, says one line
   local st rm used share keys
   sched_budget_read "$1" "${2:-}"
-  SCHED_GATE_ROOM=no; SCHED_OVER=no
+  SCHED_GATE_ROOM=no; SCHED_OVER=no; SCHED_GATE_LOAD=""
   SCHED_OWED="$(sched_owed)"
   if ! declare -F gate_room >/dev/null 2>&1 || ! declare -F fill_gate_width >/dev/null 2>&1; then
     say "gate unreadable — lib/gate.sh did not load, so no row is offered"
@@ -308,7 +314,7 @@ gate_report() {  # <project root> <session id> -> sets SCHED_GATE_ROOM/SCHED_OWE
   st="$(gate_state 2>/dev/null)"
   rm="$(gate_room --owed "$SCHED_OWED" 2>/dev/null)"
   share="$(space_field "$st" share)"; used="$(space_field "$st" used)"
-  SCHED_GATE_ROOM="$(space_field "$rm" room)"
+  SCHED_GATE_ROOM="$(space_field "$rm" room)"; SCHED_GATE_LOAD="$(space_field "$rm" load)"
   say "gate share=${share:--} used=${used:--}% load=$(space_field "$rm" load) of $(space_field "$rm" cores) promised=$(space_field "$rm" promised) admitted=$(space_field "$st" admitted) waiting=$(space_field "$st" waiting) room=${SCHED_GATE_ROOM:-no} widths: $(gate_widths)"
   case "$used$share" in *[!0-9]*|'') return 0 ;; esac
   [ "$used" -gt "$share" ] || return 0
@@ -1200,7 +1206,7 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
     # unchanged tick writes none: the stop wall reads its stand-down set off this tick's orders,
     # and a turn told only "unchanged" must not be refused for a STANDDOWN it was never shown.
     # The answer the last turn gave stands until a fact moves.
-    SD_ORDER_NAMES=""
+    SD_ORDER_NAMES=""; SD_LOAD_NAME=""
     tick_write_orders() {
       local n out
       for n in $SD_ORDER_NAMES; do
@@ -1977,6 +1983,14 @@ EOF
     # the same as NONE: the arm defers rather than guesses, naming nothing, ordering nothing,
     # acking nothing, and saying once that the next tick's fresh ListAgents will decide.
     TICK_ACKED_NOW="|"
+    # A HOLD ANSWERS A STAND-DOWN while the fingerprint it recorded is the one computed now; a changed
+    # fingerprint voids it with nothing written. One copy for both reasons a row is stood down: met, or load.
+    tick_hold_stands() {  # <roster row> -> 0 while its hold stands
+      local held
+      held="$(line_field "$1" held)"
+      [ -n "$held" ] && [ "${held##* fp=}" != "$held" ] \
+        && [ "${held##* fp=}" = "$(hold_fingerprint "$1" "$REPO_REAL" "$TICK_TR")" ]
+    }
     if [ -n "$STANDDOWN_NAMES" ] || [ -n "$DUP_START_NAMES" ] || [ -n "$GONE_CANDIDATE_NAMES" ]; then
       # THE ALREADY-WARMED PARSE, or one read of our own — never a second parse of a
       # transcript this tick has already read. `live_agents` memoizes per process on the
@@ -2021,8 +2035,7 @@ EOF
               SD_ROW="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
                 | grep -F "|name=${SD_NAME}|" | tail -1)"
               SD_HELD="$(line_field "$SD_ROW" held)"
-              if [ -n "$SD_HELD" ] && [ "${SD_HELD##* fp=}" != "$SD_HELD" ] \
-                 && [ "${SD_HELD##* fp=}" = "$(hold_fingerprint "$SD_ROW" "$REPO_REAL" "$TICK_TR")" ]; then
+              if tick_hold_stands "$SD_ROW"; then
                 SD_HELD_REST="${SD_HELD#* }"
                 say "held ${SD_NAME} since ${SD_HELD%% *} — ${SD_HELD_REST% fp=*}"
                 continue
@@ -2514,6 +2527,48 @@ EOF
 
     }
     tick_plan_memoised tick_schedule
+    tick_load_standdown
+    }
+
+    # THE DIAL-DOWN (the file header states the rule). It reads the gate line `gate_report` already built,
+    # never a second reading, and compares against `_gate_share_cores`, the gate's one site of the line. A
+    # live writer is an open roster row of a writer role (`budget_open_writers`, the occupancy's own count)
+    # that no fresh panel shows gone, acked by nothing this tick, with no landing mark, whose name is the
+    # agent of an `active` row. The row is returned to pending before the order is written, by the plan's
+    # own verb in a child as launch-sync runs, so a refused write orders no stop: a stopped agent whose
+    # row stayed active would never be offered again. The tree and base cells are kept; the agent cell is
+    # cleared, as a review row returned on its proof is, and its next launch fills it.
+    tick_load_standdown() {
+      local b5 lim id name row la best="" best_id="" best_la="" out open
+      [ "${SCHED_GATE_ROOM:-}" = no ] && declare -F _gate_share_cores >/dev/null 2>&1 || return 0
+      [ -n "${SCHED_PLAN:-}" ] && [ -f "$SCHED_PLAN" ] && [ "$POKER_RUN_OPEN" != unreadable ] || return 0
+      b5="${SCHED_GATE_LOAD#*/}"
+      case "$b5" in ''|.*|*.|*[!0-9.]*|*.*.*) return 0 ;; esac
+      lim="$(_gate_share_cores)"
+      b5="$(awk -v b="$b5" -v l="$lim" 'BEGIN { if (b + 0 <= l + 0) exit 1; printf "%.1f", b }')" || return 0
+      open="|$(printf '%s' "$OPEN_NAMES" | tr '\n' '|')"
+      while IFS="$(printf '\t')" read -r id name; do
+        case "$open" in *"|${name}|"*) [ -n "$name" ] ;; *) false ;; esac || continue
+        case "$TICK_ACKED_NOW" in *"|${name}|"*) continue ;; esac
+        if [ "${SD_PANEL_KNOWN:-0}" -eq 1 ]; then case "$SD_PANEL" in *"|${name}|"*) ;; *) continue ;; esac; fi
+        [ "$(printf '%s\n' "$name" | budget_open_writers "$ROSTER_FILE")" = 1 ] || continue
+        ! roster_landed "$ROSTER_FILE" "$name" >/dev/null 2>&1 || continue
+        row="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null | grep -F "|name=${name}|" | tail -1)"
+        ! tick_hold_stands "$row" || continue
+        la="$(line_field "$row" launched_at)"
+        if [ -z "$best" ] || [ "$la" \> "$best_la" ]; then best="$name"; best_id="$id"; best_la="$la"; fi
+      done <<EOF
+$(units_rows "$SCHED_PLAN" 2>/dev/null | awk -F'\t' '$10 == "active" && $5 != "" { print $1 "\t" $5 }')
+EOF
+      [ -n "$best" ] || return 0
+      if ! out="$( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" \
+             task-set "$best_id" status=pending agent=— 2>&1 )"; then
+        say "no STANDDOWN ${best} — load ${b5} over ${lim}, and its row ${best_id} could NOT be returned to pending, so no stop is ordered: $(clean "$(printf '%s' "$out" | head -1)")"
+        return 0
+      fi
+      say "STANDDOWN ${best} — load ${b5} over ${lim}; its row ${best_id} is pending again with its tree kept, so TaskStop it (the order is written) and FILL offers the row when the room opens"
+      SD_LOAD_NAME="$best"
+      SD_ORDER_NAMES="${SD_ORDER_NAMES}${SD_ORDER_NAMES:+ }${best}"
     }
 
     # "No roster" and "empty roster" are different facts, and only the latter may DISARM
@@ -2768,6 +2823,8 @@ EOF
     # whenever the two differ.
     if [ "$TICK_DECISION" = FILL ]; then
       tick_fill_sentence
+    elif [ "$TICK_DECISION" = STANDDOWN ] && [ -n "$SD_LOAD_NAME" ]; then
+      say "STANDDOWN — ${SD_ORDER_NAMES}: each line above says why; TaskStop each."
     elif [ "$TICK_DECISION" = STANDDOWN ]; then
       say "STANDDOWN — ${SD_ORDER_NAMES} met and still on the panel; TaskStop each, or hold it."
     elif [ "$OPEN_ROSTER" -eq 0 ]; then
