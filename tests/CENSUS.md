@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 119 · sections: 1090 · keep: 896 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 119 · sections: 1093 · keep: 899 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1092 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1092 - 22 - 8 = 1062.
 
@@ -651,6 +651,8 @@ gate.test.sh | §NUMBER | keep | payload/scripts/lib/gate.sh gate_ask: the resum
 gate.test.sh | §RESUME-KIND | keep | payload/scripts/lib/gate.sh gate_ask: the `[ "$_R_kind" = "$1" ]` test on resume deleted, so a work ask resumes the cleared whole request (N.12j, N.12s) | none (searched 'rc=gone' and '_R_kind' in tests/)
 gate.test.sh | §TERM | keep | payload/scripts/lib/gate.sh gate_ask: the `trap '_GATE_TERMED=1' TERM` line deleted, so a TERMed waiter's next ask ends it rc=gone and takes a fresh number (TM.3, TM.7) | none (searched '_GATE_TERMED' in tests/)
 gate.test.sh | §WHOLE-HOLDER | keep | payload/scripts/lib/gate.sh _gate_budget_read: the row matched by its written name alone, not as booked.sh spells it, so regression@<h8> asking as regression_<h8> holds no budget and the control is admitted (WH.5, WH.5b); or _gate_head admitting a whole ask while a landing is unfinished (WH.3), or a work ask beside an admitted whole run (WH.2) | none (searched 'regression@' and 'whole tests/run.sh' in tests/: session-poker-4 §STARTER drives the tick, whose fixture runner asks no gate)
+gate.test.sh | §COST | keep | payload/scripts/lib/gate.sh gate_end: `times` read inside `$( )` or the fourth field dropped, so the booked loop's cost line holds no cores of at least 0.5 (CO.1); or _gate_cost_cores taking the largest or the mean, so kept cores 5.8, 6.0 and 13.0 promise 13.0 or 8.27 and not 6.0 (CO.2); or the cap or the floor dropped, so 400 s over 10 s on 8 cores writes 40 and 0.01 s writes 0 (CO.3) | none (searched '_gate_cost_cores' and 'PLANT_CPU' in tests/)
+gate.test.sh | §CLASS | keep | payload/scripts/lib/gate.sh _gate_cores_for: the free-room prior replaced by gate_width, so a browser or whole ask at busy 2.0 is promised 6 and not 4 (CL.1); or --class unread, so the browser ask is promised the suite cost and the work ask beside it is admitted (CL.2) | none (searched '--class' and 'class=' in tests/: background-suite-guard.test.sh reads the wall's wrap text, not the gate's promise)
 
 ## git-argv.test.sh
 
@@ -1300,6 +1302,7 @@ runner-width.test.sh | §Section 5 | keep | tests/run.sh: the fallback when pres
 runner-width.test.sh | §Section 6 | keep | tests/run.sh: the width taken from a literal 8 instead of gate_width, so share 92 on 8 cores prints JOBS=8 not 7 (6b); also the runner's width read without the default reserve, so share 92 with no reserve file prints JOBS=7 not 6 and share 50 JOBS=4 not 3 (6i); 6c, the JOBS=8 absence, is culled as covered by 6b and 6a | none (searched 'gate_width' with '\-\-dry-run' in tests/; gate.test.sh drives gate_width alone)
 runner-width.test.sh | §NO-VOID nothing passes or fails by the clock | keep | payload/scripts/booked.sh: the unknown-option arm made to pass an option through, so `--quiet` runs the command instead of usage exit 2 (NV.11) | none (searched 'booked: usage' in tests/)
 runner-width.test.sh | §NO-RETRY a suite red once stays red in the log, run once (wave-35 T2; D11, AC-2.4) | duplicate | tests/run.sh: a red suite's verdict, its Gating count or its Failed: entry misreported | interpreter-pin.test.sh §5 stderr-strict
+runner-width.test.sh | §GRANT a whole run starts no more jobs than the gate promised it (AC-3.3) | keep | tests/run.sh: the width after the grant read from gate_width and not from the admitted promise, so the whole run at busy 2.0, share 92 and reserve 1 runs 6 jobs and not 4 (GR.1) | none (searched 'promise=' in tests/runner-width.test.sh tests/run.test.sh tests/runner-roster.test.sh)
 
 ## scale-profile.test.sh
 

@@ -38,6 +38,9 @@
 #                      next ask resumes its number and asked=. Mutation: the trap removed ends it
 #                      rc=gone and files a fresh number (N.12, SIGKILL, unchanged)
 #   §WHOLE-HOLDER the tick's whole run (regression@<h8>, budget run.sh) is admitted alone, and waits while a landing runs
+#   §COST      AC-3.1  a booked run's cores ride its cost line's fourth field, capped at the machine and floored
+#                      at 0.1; kept cores promise the key's next ask by the rule its seconds use, three fields the prior
+#   §CLASS     AC-2.1  a browser or whole ask on a fresh key is promised the room free; a work ask waits beside it
 #
 # HERMETIC. Everything runs in the model world (tests/lib/world.sh): a planted machine, a
 # planted clock moved by world_tick, a gate store and a CLAUDE_CONFIG_DIR under the world's
@@ -130,6 +133,7 @@ expect_regex "PR.0 resources.sh's reader names one suite's cost in cores, a posi
 #   ENDFIRST=1 once admitted, gate_end <id> 0 before running CHILD (the admission is over)
 #   WORK=<sh>  once admitted, run <sh> as a child before holding (processor time for `times`)
 #   PLANT_CPU=<s>  the children's processor time `times` reports at gate_end is <s> seconds
+#   CLASS=<c>  ask with --class <c>
 #   AGENT=<a>  ask as agent <a> (the who's second half) instead of <name>, so two askers share a who
 #   LIVE=1     after a 75, stay alive, polling nothing, until <dir>/<name>.go
 # Its own pid is written first, to <name>.pid.
@@ -139,7 +143,7 @@ printf '%s\n' "$$" > "$d/$n.pid"
 export BIONIC_GATE_AGENT="${AGENT:-$n}"
 . "$GATE_LIB" 2>/dev/null
 [ -z "${BUSY_FILE:-}" ] || _res_busy_cores() { cat "$BUSY_FILE"; }   # BUSY_FILE=<f>: a load that can fall under a waiter
-id="$(gate_ask "$kind" "$key" --within "$within" 2>"$d/$n.err")"; rc=$?
+id="$(gate_ask "$kind" "$key" --within "$within" ${CLASS:+--class "$CLASS"} 2>"$d/$n.err")"; rc=$?
 printf '%s\n' "$id" > "$d/$n.id"
 printf '%s\n' "$rc" > "$d/$n.rc.tmp" && mv "$d/$n.rc.tmp" "$d/$n.rc"
 if [ "$rc" != 0 ]; then
@@ -914,11 +918,41 @@ expect_contains "WH.5b …by the budget, naming the object as booked.sh spells i
 cd "$WH_HERE" || exit 1
 reap
 
-# ── §ROBUST ──────────────────────────────────────────────────────────────────
-# THE PROMISE IS ROBUST TO ONE CONTENDED RUN (wave-38 T31; D21; A-orch-43). The gate promised a suite
-# the LARGEST of its kept durations, so one run of close-out.test.sh under three-builder contention
-# (1775 s, beside 760 and 669) set its promise past `ready --within 1700`, and no ready could ever
-# start it. With three kept durations the promise is the largest at or below twice their median; with
-# fewer, the largest. The durations are planted in the key's own cost file (`costf`, the project key
-# the gate's own), newest last, as gate_end writes them.
+# ── §COST ───────────────────────────────────────────────────────────────────
+# A RUN'S CORES RIDE ITS COST LINE. gate_end reads `times` in the holder's own shell and writes
+# <seconds>:<epoch>:<load>:<cores>, the children's processor seconds over the wall seconds, capped at the
+# machine and floored at 0.1; the next ask for the key is promised the kept cores by the rule its seconds
+# use, and a key whose lines carry none its prior. The booked run moves the planted clock one second
+# itself, so its wall seconds are exact and its processor time is the loop's.
+section "§COST — a run's cores ride its cost line, and the next ask is promised them (AC-3.1 to AC-3.5)"
+fresh cost; world_machine 8 8192 30 0; CO_D="$D/proj"; mkdir -p "$CO_D"
+CO_CMD='i=0; while [ $i -lt 400000 ]; do i=$((i+1)); done; printf "1001\n" > "$BIONIC_NOW_FILE.t" && mv "$BIONIC_NOW_FILE.t" "$BIONIC_NOW_FILE"'
+( cd "$CO_D" && bash "$REPO_ROOT/payload/scripts/booked.sh" --suites cpu.test.sh -- "$CO_CMD" ) >/dev/null 2>&1
+expect_true "CO.1 booked.sh over a loop of about a processor-second, one second long, writes a fourth field of at least 0.5 ($(cat "$(costf cpu.test.sh "$CO_D")" 2>/dev/null))" \
+  awk -F: 'END { exit !(NR == 1 && NF == 4 && $1 == 1 && $4 + 0 >= 0.5) }' "$(costf cpu.test.sh "$CO_D")"
+world_cost_cores k 30 5.8 6.0 13.0
+printf '30:1000:1\n30:1001:1\n30:1002:1\n' > "$(costf old)"
+expect_eq "CO.2 kept cores 5.8, 6.0 and 13.0 promise 6.0, the largest at or under twice their median; three-field lines promise the prior, their seconds read" \
+  "0:6.0:30 0:$PROMISE:30" "$( . "$GATE_LIB" 2>/dev/null; echo "$(gate_promise k) $(gate_promise old)" )"
+world_clock 1000; for co in 400:p1 0.01:p2; do PLANT_CPU="${co%:*}" HOLD=1 ask_bg "${co#*:}" work "${co#*:}" 0; wait_for 20 has "${co#*:}.rc"; world_tick 10; release "${co#*:}"; done
+expect_eq "CO.3 a planted 400 s of processor over 10 s on 8 cores writes 8, the machine; 0.01 s writes 0.1, the floor" \
+  "10:1010:0:8 10:1020:0:0.1" "$(cat "$(costf p1)") $(cat "$(costf p2)")"
+reap
+
+# ── §CLASS ───────────────────────────────────────────────────────────────────
+# A BROWSER OR COMPILE RUN, OR A WHOLE ONE, IS PROMISED THE ROOM FREE AT ADMISSION until its key has a
+# measurement: max(1, floor(share cores - busy - faded)), 6.36 at share 92 and reserve 1 on 8 cores.
+section "§CLASS — a browser run is promised the free room, and a work ask waits beside it (AC-2.1, AC-2.2, AC-3.3)"
+fresh class; printf '92\n' > "$CLAUDE_CONFIG_DIR/bionic/share"; printf '1\n' > "$CLAUDE_CONFIG_DIR/bionic/reserve"
+world_machine 8 8192 30 2.0
+CLASS=browser ask_fg cb1 work pw 0 >/dev/null; ask_fg cw1 whole tests/run.sh 0 >/dev/null
+expect_eq "CL.1 at busy 2.0, nothing admitted, a browser ask on a fresh key and a whole ask are promised the free room, 4 (rc|class|promise ×2)" \
+  "0|browser|0:4:0 0|0:4:0" "$(rc_of cb1)|$(field "$(id_of cb1)" class)|$(field "$(id_of cb1)" promise) $(rc_of cw1)|$(field "$(id_of cw1)" promise)"
+world_machine 8 8192 30 0; world_tick 120
+CLASS=browser HOLD=1 ask_bg cb2 work pw 0; wait_for 20 has cb2.rc
+expect_eq "CL.2 at busy 0 the browser ask is promised the width, 6, and a work ask beside it waits (rc|promise|work rc)" \
+  "0|0:6:0|75" "$(rc_of cb2)|$(field "$(id_of cb2)" promise)|$(ask_fg cw2 work k 0 | tail -n 1)"
+printf '0\n' > "$CLAUDE_CONFIG_DIR/bionic/reserve"
+reap
+
 finish
