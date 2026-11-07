@@ -1101,6 +1101,12 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         if (v == "tree") return script_start(a[1])
         LAST_TARGET = ""; LAST_PATH = ""
       }
+      # A WEB TOOL names its class from its own word and the word after it, bare, behind the
+      # prefix dropped above, or as a package manager bin (`pnpm playwright test`). The `build`
+      # class below is not among them: `npm run build` and `make` stay what they were.
+      wt = webtool(n0, a1)
+      if (wt == "" && (n0 == "pnpm" || n0 == "yarn")) wt = webtool(a1, a2)
+      if (wt != "") return wt
       if (n0 == "pytest") return "suite"
       # `jest` NAMED, the runner the seed and D1 are about. Bare, or behind the `npx`
       # prefix dropped above — both are one run of one project s tests.
@@ -1128,6 +1134,19 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       if (n0 == "brew") return (a1 == "install" ? "install" : "none")
       if (n0 == "docker") return (a1 == "build" ? "build" : "none")
       return "none"
+    }
+
+    # WHAT A WEB TOOL COSTS IS SET BY WHAT IT STARTS: a browser run drives a whole browser and
+    # a compile run a whole toolchain, so each carries its own class for the gate to promise
+    # its measured cost; `vitest` is a suite like `jest`. A word that is none of these answers
+    # empty, so the caller falls through to the arms below.
+    function webtool(t, w) {
+      if (t == "playwright") return (w == "test" ? "browser" : "")
+      if (t == "cypress") return (w == "run" ? "browser" : "")
+      if (t == "lighthouse") return "browser"
+      if (t == "next") return (w == "dev" || w == "build" || w == "start" ? "compile" : "")
+      if (t == "vitest") return "suite"
+      return ""
     }
 
     # EVERY SUITE-CLASS SEGMENT NAMES SOMETHING NOW (REQ-1 AC-1.5). A reading that answered
@@ -2880,7 +2899,7 @@ $(cmd_suite_targets "${1-}" "${2-}")
   return 1
 }
 
-cmd_class() {  # <command> -> suite|bootstrap|install|build|none, by priority
+cmd_class() {  # <command> -> suite|bootstrap|install|build|browser|compile|none, by priority
   # FIVE FORKS LESS THAN IT USED TO COST (epic-23 wave-14 REQ-4; research R3 §3
   # measured 6.4 ms of `classify_tier1`'s 13.1 on this function alone). The reading
   # is unchanged — the SAME lines from the SAME awk, still by priority and not by
@@ -2917,9 +2936,9 @@ cmd_class() {  # <command> -> suite|bootstrap|install|build|none, by priority
 # CMD_CLASS_PICKED. It assigns rather than prints, so a caller holding the lines already
 # pays no fork for the pick (walls.sh `_wall_class_read`, wave-26 T39/T40).
 CMD_CLASS_PICKED=""
-cmd_class_pick() {  # <class lines> -> sets CMD_CLASS_PICKED to suite|bootstrap|install|build|none
+cmd_class_pick() {  # <class lines> -> sets CMD_CLASS_PICKED to suite|bootstrap|install|build|browser|compile|none
   local lines=$'\n'"${1-}"$'\n' c
-  for c in suite bootstrap install build; do
+  for c in suite bootstrap install build browser compile; do
     case "$lines" in
       *$'\n'"$c"$'\t'*|*$'\n'"$c"$'\n'*) CMD_CLASS_PICKED="$c"; return 0 ;;
     esac

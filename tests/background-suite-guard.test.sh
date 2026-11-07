@@ -638,4 +638,12 @@ expect_empty "B12f …silently" "$OUT$ERR"
 # that THIS arm's fact never speaks — the refusal that does reach the user is farm-out's.
 guarded "$R1" 'bash tests/run.sh &' ""
 
+section "B-CLASS — a browser run is wrapped with its class, and refused backgrounded"
+guarded "$R1" 'npx playwright test e2e/x.spec.ts'
+expect_eq "BC1 a foreground browser run is ALLOWED" "0" "$ST"
+expect_contains "BC1 …wrapped by the shim" "booked.sh" "$WRAP"
+expect_contains "BC1 …carrying its class" "--class browser" "$WRAP"
+guarded "$R1" 'npx playwright test e2e/x.spec.ts &'
+expect_eq "BC2 a backgrounded browser run is REFUSED" "2" "$ST"
+
 finish
