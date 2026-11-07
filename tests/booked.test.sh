@@ -21,6 +21,7 @@
 #            reader reads it.
 #   §SIGNALS  a launcher started with HUP, INT and QUIT ignored hands what it launches all three at their
 #            defaults.
+#   §CLASS  a browser or compile run is asked as work with its class on the request; a bad class asks nothing.
 #
 # The gate (gate.test.sh, slots.test.sh) owns the foreground shim; nothing here re-proves it.
 #
@@ -288,16 +289,16 @@ section "§DETACH-CEILING — a detached run the gate has not admitted within th
 # log (stderr is the log in the detached side), `rc=75` on the log's last line, `75` in `<log>.rc`,
 # `run_rc=75` on the roster row. The caller follows the log, copies the line and exits 75.
 #
-# FIXTURE FIDELITY. gate.test.sh's held gate (B.7): the share is 80 on 8 cores (6.4), the machine
-# reads 6.0 busy cores, a REAL background process holds an admission of one core, and the request the
-# detached run makes would add one more (wave-33 T1; Δ10: a command is promised one core and no
-# memory, so the room is the live load's). The machine and clock are SYNTHESIZED (the world's pins);
+# FIXTURE FIDELITY. gate.test.sh's held gate (B.7): the share is 80 on 8 cores (6.4, less the reserve
+# of 1: 5.4), the machine reads 3.0 busy cores, a REAL background process holds an admission of one suite's
+# prior (1.61), and the request the detached run makes would add another (3.0 + 1.61 + 1.61 > 5.4; a lone
+# request is no longer admitted past the room, so the holder must fit: 3.0 + 1.61 <= 5.4). The machine and clock are SYNTHESIZED (the world's pins);
 # the holder, the shim, the perl detach and the roster write are real. The share is pinned here
 # because the default moved.
 CE_HOME="$D/ce-home"; mkdir -p "$CE_HOME/bionic"; printf '80\n' > "$CE_HOME/bionic/share"
 CE_CFG_WAS="${CLAUDE_CONFIG_DIR:-}"; export CLAUDE_CONFIG_DIR="$CE_HOME"
 export BIONIC_GATE_DIR="$D/ce-gate"
-world_machine 8 8192 60 6.0
+world_machine 8 8192 60 3.0
 world_clock 1000
 cat > "$D/ce-holder.sh" <<'CEHOLD'
 d="$1"
@@ -312,7 +313,7 @@ CEHOLD
 bash "$D/ce-holder.sh" "$D" "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/gate.sh" >/dev/null 2>&1 &
 CE_HOLDER=$!
 bk_wait 10 bk_has "$D/ce-holder.rc"
-expect_eq "DC.0 precondition: the holder is admitted, so the run below finds no room (6.0 + 1 > 6.4)" "0" \
+expect_eq "DC.0 precondition: the holder is admitted, so the run below finds no room (3.0 + 1.61 fits 5.4, and 3.0 + 1.61 + 1.61 does not)" "0" \
   "$(cat "$D/ce-holder.rc" 2>/dev/null)"
 export BIONIC_SETTLE_MAX_WAIT=3
 CE_CMD="touch '$D/ce.ran'"
@@ -518,5 +519,22 @@ expect_true "(fixture) the scratch runner is a byte copy of the shipped one and 
   bash -c 'cmp -s "$1" "$2" && bash -n "$3"' _ "$REPO/tests/run.sh" "$SGR/tests/run.sh" "$SGR/tests/sg.test.sh"
 sg_drive run bash -c "cd '$SGR' && exec env -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT BIONIC_GATE_DIR='$D/sg-gate' BIONIC_GATE_POLL=0.1 BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES=0 BIONIC_PROBE_CORES=8 BIONIC_PROBE_TOTAL_MB=8192 BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 BIONIC_PRESSURE_RING='$D/sg-ring' BIONIC_TEST_JOBS_CEILING=2 bash tests/run.sh"
 expect_eq "SG-2 AC-10.1 tests/run.sh started with the three ignored: the suite it runs sees HUP, INT and QUIT" "$SG_ALL" "$SG_SAW"
+
+# =====================================================================================
+section "§CLASS — a browser or compile run is asked as work with its class on the request, and a bad class asks nothing"
+# =====================================================================================
+# The wall wraps such a run as `booked.sh --class <c> --suites <key> -- <cmd>`; the request carries class=<c> and the room
+# free as its promise. A store per case; the machine reads no busy cores, so the room is the whole width.
+cl_run() { CL_GD="$D/cl-$1"; rm -rf "$CL_GD"; shift; ( cd "$T1" && BIONIC_GATE_DIR="$CL_GD" bash "$BOOKED" --agent wx-T1 --suites cl.test.sh "$@" -- true ) > "$CL_GD.out" 2>&1; CL_RC=$?; }
+cl_req() { cat "$CL_GD"/requests/[0-9]* 2>/dev/null | grep -E '^(class|promise)=' | tr '\n' ' '; }
+world_machine 8 8192 10 0
+cl_run on --class browser
+expect_eq "CL.1 --class browser leaves a request reading class=browser, promised the room free" "class=browser promise=0:$( . "$REPO/payload/scripts/lib/gate.sh" && gate_width ):0 " "$(cl_req)"
+cl_run off
+expect_eq "CL.2 without --class the same request carries no class line and the suite prior" "promise=0:$( . "$REPO/payload/scripts/lib/resources.sh" && _res_suite_cores ):0 " "$(cl_req)"
+cl_run bad --class build
+expect_eq "CL.3 --class build exits 2 and asks nothing: no request in the store" "2 0" "$CL_RC $(ls "$CL_GD"/requests 2>/dev/null | wc -l | tr -d ' ')"
+expect_true "CL.3b …and its usage line names the option" grep -q 'usage:.*--class' "$CL_GD.out"
+world_machine 8 8192 10 0.5
 
 finish

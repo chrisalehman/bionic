@@ -5,7 +5,7 @@
 #
 #   bash <plugin-root>/scripts/booked.sh [--agent <name>] [--kill-after <seconds>]
 #                                        [--max-wait <seconds>] [--shell <path>]
-#                                        [--stamp-dir <dir>] [--suites <names>] [--runner]
+#                                        [--stamp-dir <dir>] [--suites <names>] [--class browser|compile] [--runner]
 #                                        [--detach [--no-wait]]
 #                                        -- '<the whole command line, as ONE word>'
 #
@@ -133,6 +133,8 @@
 # `BIONIC_QUIET=1`, its whole-machine timing check with a settle wait, a void and two retries, are
 # gone. `--quiet` is an option the shim does not know (usage, 2), and nothing reads BIONIC_QUIET.
 # A command that passes or fails by the clock is a defect in the command, not a reading to excuse.
+# A browser or compile run is still `work`, carried with its class so the gate promises it the free
+# room until its own runs have measured it; it is owed its measured cost, never a quiet machine.
 #
 # --kill-after <s>: once MORE than <s> seconds have passed since the shim started, the command's
 # whole process group is killed, one line says it is over the short limit and belongs in a
@@ -270,11 +272,11 @@ BOOKED_WAITED_RC=75
 BOOKED_KILLED_RC=124
 
 booked_usage() {
-  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--runner] [--unplaced] [--detach [--no-wait]] -- <command>\n' >&2
+  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--class browser|compile] [--runner] [--unplaced] [--detach [--no-wait]] -- <command>\n' >&2
   exit 2
 }
 
-kill_after=""; max_wait=""; sep=0; run_shell=""; stamp_dir=""; suites=""; agent=""; runner=0; unplaced=0
+kill_after=""; max_wait=""; sep=0; run_shell=""; stamp_dir=""; suites=""; cls=""; agent=""; runner=0; unplaced=0
 detach=0; run_log=""; no_wait=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -290,6 +292,8 @@ while [ "$#" -gt 0 ]; do
     --stamp-dir=*)  stamp_dir="${1#--stamp-dir=}"; [ -n "$stamp_dir" ] || booked_usage; shift ;;
     --suites)       [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; suites="$2"; shift 2 ;;
     --suites=*)     suites="${1#--suites=}"; [ -n "$suites" ] || booked_usage; shift ;;
+    --class)        [ "$#" -ge 2 ] && [ -n "$2" ] || booked_usage; cls="$2"; shift 2 ;;
+    --class=*)      cls="${1#--class=}"; [ -n "$cls" ] || booked_usage; shift ;;
     --runner)       runner=1; shift ;;
     --unplaced)     unplaced=1; shift ;;
     --detach)       detach=1; shift ;;
@@ -302,6 +306,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ "$sep" -eq 1 ] && [ "$#" -ge 1 ] || booked_usage
+case "$cls" in ''|browser|compile) ;; *) booked_usage ;; esac
 [ "$no_wait" -eq 0 ] || [ "$detach" -eq 1 ] || booked_usage
 if [ "$#" -gt 1 ]; then
   printf 'booked: %s words after --, and each would be parsed again as shell — pass the command as one word: booked.sh -- '\''<the whole command line>'\''\n' "$#" >&2
@@ -528,11 +533,11 @@ booked_ask() {
   # Asked from the stamp's tree (THE TREE THE ASK NAMES), in this shell, then straight back.
   if [ -n "$BOOKED_ASK_DIR" ] && cd "$BOOKED_ASK_DIR" 2>/dev/null; then moved=1; fi
   if [ -n "$BOOKED_IDF" ]; then
-    gate_ask "$1" "$BOOKED_KEY" ${BOOKED_WITHIN:+--within "$BOOKED_WITHIN"} > "$BOOKED_IDF"; rc=$?
+    gate_ask "$1" "$BOOKED_KEY" ${BOOKED_WITHIN:+--within "$BOOKED_WITHIN"} ${cls:+--class "$cls"} > "$BOOKED_IDF"; rc=$?
     { read -r BOOKED_ID < "$BOOKED_IDF"; } 2>/dev/null
     rm -f "$BOOKED_IDF"; BOOKED_IDF=""
   else
-    BOOKED_ID="$(gate_ask "$1" "$BOOKED_KEY" ${BOOKED_WITHIN:+--within "$BOOKED_WITHIN"})"; rc=$?
+    BOOKED_ID="$(gate_ask "$1" "$BOOKED_KEY" ${BOOKED_WITHIN:+--within "$BOOKED_WITHIN"} ${cls:+--class "$cls"})"; rc=$?
   fi
   [ "$moved" -eq 0 ] || cd "$here" 2>/dev/null
   case "$rc" in
@@ -721,6 +726,7 @@ booked_detach() {  # the caller's whole part: attach or claim and start, report,
   [ -z "$run_shell" ] || child+=(--shell "$run_shell")
   [ -z "$stamp_dir" ] || child+=(--stamp-dir "$stamp_dir")
   [ -z "$suites" ] || child+=(--suites "$suites")
+  [ -z "$cls" ] || child+=(--class "$cls")
   [ "$runner" -eq 0 ] || child+=(--runner)
   [ "$unplaced" -eq 0 ] || child+=(--unplaced)
   child+=(-- "$cmd")
