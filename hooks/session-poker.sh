@@ -3217,10 +3217,10 @@ function readreq(f,    l, h, a, fz) {
 }
 function actext(cr) { return (cr in fact) ? fact[cr] : ((cr in pact) ? pact[cr] : "") }
 # taskof(cr) -> the row a criterion\047s `task:` names. One serving row is it; several leave it pending, since no row
-# among them is the criterion\047s by the table alone. The exception is the criterion the close proves, its eval naming
-# `landing-report --hand-holds` (walls.sh matrix_close_rows reads it by that eval): the owing-step rule reads this key,
-# so a pending key there holds the close\047s own row live until a hand writes it, and that write is a status write the
-# measure counts. Among its serving rows it takes the one of kind close, else the one at step 9 when no row is of
+# among them is the criterion\047s by the table alone. The exception is the criterion the close proves, one closeacs
+# holds: walls.sh matrix_close_eval alone names it, so this pass matches no eval text and the task: cell and
+# matrix_close_rows read one answer. The owing-step rule reads this key, so a pending key there holds the close\047s own
+# row live until a hand writes it, and that write is a status write the measure counts. Among its serving rows it takes the one of kind close, else the one at step 9 when no row is of
 # kind close; none or several leave it pending, never a guess.
 function taskof(cr,    t, n, id, nk, ik, ns, is) {
   n = 0; nk = 0; ns = 0
@@ -3231,7 +3231,7 @@ function taskof(cr,    t, n, id, nk, ik, ns, is) {
     if (tstep[t] + 0 == 9) { ns++; is = tid[t] }
   }
   if (n == 1) return id
-  if (n == 0 || eev[cr] !~ /landing-report[ \t]+--hand-holds/) return "pending"
+  if (n == 0 || !(cr in isclose)) return "pending"
   if (nk) return (nk == 1) ? ik : "pending"
   return (ns == 1) ? is : "pending"
 }
@@ -3260,6 +3260,7 @@ BEGIN {
   nk = split(ENVIRON["MR_KEYS"], kl, "\n")
   for (i = 1; i <= nk; i++) { split(kl[i], kv, "\t"); if (kv[1] != "") keys[kv[1]] = kv[2] }
   serves_load(ENVIRON["MR_TASKS"])
+  ncl = split(closeacs, cl, "\n"); for (i = 1; i <= ncl; i++) if (cl[i] != "") isclose[cl[i]] = 1
   walk = tolower(ENVIRON["MR_WALK"]); cf = ENVIRON["MR_COUNT"]
   readreq(ENVIRON["MR_REQFILE"])
 }

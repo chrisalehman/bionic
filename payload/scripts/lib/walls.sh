@@ -1818,9 +1818,14 @@ matrix_table_rows() {
   }' <<< "$MATRIX"
 }
 
+# matrix_close_eval <eval text> -> 0 when the eval names `landing-report --hand-holds`, the measure
+# close-out reads last. The one test of which criterion the close proves: matrix_close_rows and the
+# task: cell matrix-render writes both ask it, so no eval reads as the close's to one and not the other.
+matrix_close_eval() { grep -qE 'landing-report[[:space:]]+--hand-holds' <<< "$1"; }
+
 # matrix_close_rows <plan> -> the AC id of each pending or blocked row the close settles, table
-# order: owed at Step 9, and its block's `eval:` names `landing-report --hand-holds`, the measure
-# close-out reads last. close-out writes each such row's cells from that reading.
+# order: owed at Step 9, and its block's `eval:` is the close's measure (matrix_close_eval).
+# close-out writes each such row's cells from that reading.
 matrix_close_rows() {
   local PLAN="$1" MATRIX ac tier status ev aud block
   MATRIX="$(matrix_section)"
@@ -1829,7 +1834,7 @@ matrix_close_rows() {
     case "$status" in pending|blocked) ;; *) continue ;; esac
     block="$(matrix_block "$ac")"
     [ "$(matrix_owing_step "$PLAN" "$block")" = 9 ] || continue
-    grep -qE '^[[:space:]]*eval[[:space:]]*:.*landing-report[[:space:]]+--hand-holds' <<< "$block" || continue
+    matrix_close_eval "$(grep -E '^[[:space:]]*eval[[:space:]]*:' <<< "$block")" || continue
     printf '%s\n' "$ac"
   done <<MATRIX_ROWS
 $(matrix_table_rows)

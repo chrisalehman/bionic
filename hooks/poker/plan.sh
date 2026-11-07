@@ -702,6 +702,19 @@ mr_tier_keys() {
     for _mr_t in T0 T1 T2 T3 T4; do printf '%s\t%s\n' "$_mr_t" "$(keys_for_tier "$_mr_t")"; done )
 }
 
+# mr_close_acs <plan> -> the criteria the close proves, one per line: each `## Eval design` row (eval_row, fences
+# skipped as MR_AWK skips them) whose eval walls.sh `matrix_close_eval` names. The question is that function's alone,
+# asked in a subshell as mr_tier_keys asks it, so the task: cell and walls.sh matrix_close_rows read one answer. The
+# render has loaded walls.sh for its keys first; a predicate it cannot ask names no criterion, which leaves the task
+# pending, never a guess.
+mr_close_acs() {
+  awk "$SERVES_AWK"' { sub(/\r$/, "") } /^[ \t]*```/ { f = !f; next } f { next }
+    /^## / { inev = ($0 ~ /^## Eval design[ \t]*$/); evh = 0; next } inev && /^[ \t]*\|/ { eval_row($0) }
+    END { for (i = 1; i <= ne; i++) printf "%s\037%s\n", ec[i], eev[ec[i]] }' "$1" |
+  ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1
+    while IFS=$'\037' read -r _mr_c _mr_e; do matrix_close_eval "$_mr_e" 2>/dev/null && printf '%s\n' "$_mr_c"; done; exit 0 )
+}
+
 # SERVES_AWK / serves_tasks — THE ONE READ OF "WHICH CRITERIA A ROW SERVES" (wave-31 T22; REQ-15 AC-15.1, D15,
 # A-orch-51). A row serves a criterion when its `serves` cell names the criterion's AC id or the REQ id in the
 # Eval design's Requirement column; that two-way read is `serves_hit`, and two verbs call it, never a second reader:
@@ -747,8 +760,9 @@ mr_requirements_file() {
 # MR_AWK — matrix-render's one pass over the plan (wave-30 T14; D9). ENVIRON: MR_KEYS (mr_tier_keys), MR_TASKS
 # (`<id><TAB><serves>` per ## Tasks row), MR_WALK (the frontmatter walk: value), MR_REQFILE (the requirements file the
 # plan names, mr_requirements_file; empty when none), MR_COUNT (the side file: on success
-# `<blocks written><TAB><keys added><TAB><blocks unchanged>`, on a refusal `<why><TAB><ids>`). Prints the rendered
-# plan; exits 3 no Eval design criteria, 4 no matrix table, 5 a criterion with no matrix row, 6 a tier with no keys.
+# `<blocks written><TAB><keys added><TAB><blocks unchanged>`, on a refusal `<why><TAB><ids>`); -v closeacs, the
+# criteria the close proves (mr_close_acs), newline-joined. Prints the rendered plan; exits 3 no Eval design criteria,
+# 4 no matrix table, 5 a criterion with no matrix row, 6 a tier with no keys.
 # The reads follow the gate's: fences skipped, a table cell trimmed, an AC block a flush-left `AC-<id>:` (a list
 # bullet tolerated) and the indented lines under it until the next flush-left line (walls.sh `matrix_block`).
 # Set in hooks/session-poker.sh, before any part loads: MR_AWK.
@@ -1970,10 +1984,11 @@ EOF
       exit 2
     fi
     MR_TASKS="$(serves_tasks "$PV_PLAN")"
+    MR_CLOSE="$(mr_close_acs "$PV_PLAN")"
     PV_RC=0
     MR_KEYS="$MR_KEYS" MR_TASKS="$MR_TASKS" MR_WALK="$(plan_frontmatter_get "$PV_PLAN" walk)" MR_COUNT="$PV_NEW.2" \
       MR_REQFILE="$(mr_requirements_file "$PV_PLAN" "$PV_REPO")" \
-      awk "$SERVES_AWK$MR_AWK" "$PV_PLAN" > "$PV_NEW" 2>/dev/null || PV_RC=$?
+      awk -v closeacs="$MR_CLOSE" "$SERVES_AWK$MR_AWK" "$PV_PLAN" > "$PV_NEW" 2>/dev/null || PV_RC=$?
     MR_WHY="$(cut -f2 "$PV_NEW.2" 2>/dev/null)"
     case "$PV_RC" in
       0) : ;;
