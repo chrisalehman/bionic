@@ -117,6 +117,17 @@ case_is build 'cargo build'
 case_is build 'go build ./...'
 case_is build 'docker build .'
 
+# A browser or compile run is booked as work with its class; `build` stays unwrapped.
+case_is browser 'npx playwright test e2e/x.spec.ts'
+case_is browser 'playwright test'
+case_is browser 'pnpm playwright test'
+case_is browser 'cypress run'
+case_is browser 'npx lighthouse http://localhost:3000'
+case_is compile 'next dev'
+case_is compile 'npx next build'
+case_is compile 'next start'
+case_is suite 'npx vitest run'
+
 case_is install 'npm install'
 case_is install 'pnpm add left-pad'
 case_is install 'pip3 install requests'

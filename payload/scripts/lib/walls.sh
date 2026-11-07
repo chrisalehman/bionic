@@ -5205,7 +5205,9 @@ classify_tier1() {  # $1=command text → sets CLASS ROLE, rc 0 on match
   local c
   if [ "$1" = "${CMD-}" ]; then _wall_class_read "$1"; c="$_WALL_CLASS"
   else c=$(cmd_class "$1"); fi
-  [ "$c" = "none" ] && return 1
+  # A BROWSER OR COMPILE RUN IS BOOKED, NOT FARMED OUT: the suite guard wraps it, and this wall's
+  # redirect stays what it was for a command that read `none`.
+  case "$c" in none|browser|compile) return 1 ;; esac
   CLASS="$c"; ROLE=$(role_for_class "$c")
   return 0
 }
@@ -5506,7 +5508,8 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
 #
 # NO --quiet (wave-35 T2; D11, AC-2.1): the wrap never asks the shim for the whole machine. Neither
 # `BIONIC_QUIET=1` in a suite segment's prefix nor a `# runner: solo` line in a suite file is read:
-# nothing passes or fails by the clock, so no suite is owed a quiet machine.
+# nothing passes or fails by the clock, so no suite is owed a quiet machine, and a browser or compile
+# run is owed its measured cost, which the shim carries as its class.
 #
 # --stamp-dir: WHERE THE SUITE RUNS, when a `cd` moves it (wave-26 T56, final review B1). The shim
 # stands in the payload's cwd, so without it `cd <tree> || exit 1; bash tests/x` from the main
@@ -5694,6 +5697,13 @@ wall_booked_argv() {
 # pass as typed.
 _BSG_WRAP_TEXT=""; _BSG_WRAP_WHY=""
 WALL_SHORT_KILL_AFTER=""
+_BSG_CLASS_ARGS=()
+# _bsg_booked_class <class> — rc 0 when a command of this class is wrapped in the shim and so
+# met by the backgrounded refusal: a suite, and the browser and compile runs the gate must cost.
+_bsg_booked_class() {
+  case "$1" in suite|browser|compile) return 0 ;; esac
+  return 1
+}
 # _bsg_agent — sets _BSG_AGENT to the name the gate's request records for this call (T12): the
 # roster row's `name=`, which the budget arm read into _BUDGET_ROW_NAME when it ran, else the
 # payload's `agent_id` (bionic_jq's cached field); empty on the main thread. No roster read here.
@@ -5721,7 +5731,7 @@ _bsg_wrap_text() {
     [ -r "$BIONIC_LIB/cmd-class.sh" ] || return 1
     wall_libs background-suite-guard cmd-class.sh || return 1
     _wall_class_read "$COMMAND"; _cls="$_WALL_CLASS"
-    [ "$_cls" = suite ] || return 1
+    _bsg_booked_class "$_cls" || return 1
     _BSG_WRAP_WHY=background
     ! cmd_backgrounded "$COMMAND" || return 1
     _BSG_WRAP_WHY=""
@@ -5732,13 +5742,24 @@ _bsg_wrap_text() {
   # ONE TARGETS READING (T61): the shim's --suites.
   _BSG_TARGETS="$(printf '%s' "$COMMAND" | _cmd_class_awk targets)"
   _bsg_suites
+  # A BROWSER OR COMPILE RUN NAMES NO FILE: its key is its own text, the first 60 characters as
+  # the shim reads a command it cannot name, in the one-word alphabet a suite name keeps. The
+  # shim is told the class beside it, and that is all the gate needs to promise its cost.
+  _BSG_CLASS_ARGS=()
+  case "$_WALL_CLASS" in
+    browser|compile)
+      [ "$_WALL_CLASS_TEXT" = "$COMMAND" ] || return 1
+      _w="${_c//[$'\n\r\t|']/ }"; _w="${_w:0:60}"
+      case "$_w" in *'$'*|*'`'*) _BSG_SUITES='?' ;; *) _BSG_SUITES="${_w//[!A-Za-z0-9._+-]/_}" ;; esac
+      _BSG_CLASS_ARGS=(--class "$_WALL_CLASS") ;;
+  esac
   set --
   _bsg_agent
   [ -z "$_BSG_AGENT" ] || set -- --agent "$_BSG_AGENT"
   if [ -n "$_k" ]; then set -- "$@" --kill-after "$_k"; else set -- "$@" --detach; fi
   [ -z "$_BSG_STAMP_DIR" ] || set -- "$@" --stamp-dir "$_BSG_STAMP_DIR"
   [ "$_BSG_UNPLACED" != 1 ] || set -- "$@" --unplaced
-  set -- "$@" --suites "$_BSG_SUITES"
+  set -- "$@" ${_BSG_CLASS_ARGS[@]+"${_BSG_CLASS_ARGS[@]}"} --suites "$_BSG_SUITES"
   [ "$_BSG_RUNNER" != 1 ] || set -- "$@" --runner
   wall_booked_argv "$COMMAND" ${1+"$@"} || { _BSG_WRAP_WHY=noshim; return 1; }
   for _w in "${WALL_BOOKED_ARGV[@]}"; do
@@ -6412,7 +6433,7 @@ _BSG_CLAIM_CWD="$(bionic_jq .cwd)"; [ -n "$_BSG_CLAIM_CWD" ] || _BSG_CLAIM_CWD="
 # no command is rewritten to name its agent, since the CLI checks permission rules against a hook's
 # rewrite. The suite it starts asks the gate, which names the agent by the tree it runs in (lib/gate.sh
 # THE PLACE) and holds the budget there.
-if [ "$_WALL_CLASS" != "suite" ]; then
+if ! _bsg_booked_class "$_WALL_CLASS"; then
   [ -n "$ACTOR" ] || return 0
   case "$COMMAND" in *sh[[:space:]]*|*/*) : ;; *) return 0 ;; esac
   [ -n "$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT" "$_BSG_CLAIM_CWD")" ] || return 0
@@ -7034,7 +7055,7 @@ done <<< "$_CLAIMS"
 # A command that is no suite and claims no run reaches the gate through whatever it starts, so it is
 # neither repaired nor booked (both are a suite's), and nothing rewrites it: the gate's ask names the
 # agent by its tree (lib/gate.sh THE PLACE).
-if [ "$_WALL_CLASS" != "suite" ] && [ "$_BSG_RUNS" = 0 ]; then
+if ! _bsg_booked_class "$_WALL_CLASS" && [ "$_BSG_RUNS" = 0 ]; then
   return 0
 fi
 
