@@ -166,6 +166,15 @@ prints: 102091 test lines against 102206 of code at the head, 115 to spare.
   Proposed, with ADR-051's and ADR-060's Status naming the amendment. It lands on release-check, render, commands and
   shell-lint. T13 writes the reviews and merges, and T14 closes the run.
 
+### Known limits
+
+Rendered from the plan's deferred findings, each its stated sentence, in the order they were registered.
+
+- A browser or compile run typed with a `cd <tree> || exit 1;` prefix is keyed by the first 60 characters of the whole command, so the heavy commands of one tree share one cost line and a fresh tree starts at the prior; type the command bare, or expect the free-room prior in a new tree.
+- The promise fades linearly over 60 seconds while the 1-minute load average rises exponentially, so a fresh admission is under-counted by up to 37 percent through its second minute; the gate may admit one suite more than the law intends beside a fresh heavy run.
+- The dial-down stands down the newest unlanded writer by launch time and does not read the gate store, so a stopped writer whose detached run or waiting ask lives on frees little load within the five-minute window, and a tick still over the line stands down another.
+- A browser or compile run typed on the orchestrator thread is booked and followed in the foreground, where a suite of the same length is refused and farmed out; the heaviest class the wall knows is the one that stays on the thread.
+
 ### The landing numbers
 
 `landing-report --rows` at dd9b12e1883354b73b57fe21b859ef74349d55f2 on 2026-11-07T06:24:01Z:
