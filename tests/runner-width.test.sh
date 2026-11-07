@@ -306,7 +306,7 @@ printf '#!/bin/bash\necho run >> "$NV_MARKS/plain.runs"\nexit 0\n' > "$NV/tests/
 NV_OUT=""; NV_RC=0
 nv_drive() {  # [runner args...] — the scratch runner on the planted load, old ceiling NV_MAXW (1 s); NV_OUT, NV_RC
   NV_OUT="$( cd "$NV" && env -u BIONIC_GATE_DIR -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT -u BIONIC_TEST_JOBS_CEILING \
-      "${RW_PIN[@]}" NV_MARKS="$NV_MARKS" NV_LOAD="$NV_LOAD" BIONIC_GATE_DIR="$TMPROOT/novoid-gate" BIONIC_GATE_POLL=0.1 \
+      "${RW_PIN[@]}" NV_MARKS="$NV_MARKS" NV_LOAD="$NV_LOAD" BIONIC_GATE_DIR="$TMPROOT/novoid-gate" BIONIC_GATE_POLL="${NV_POLL:-0.1}" \
       BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES="${NV_BUSY:-0}" BIONIC_PROBE_TOTAL_MB=8192 \
       BIONIC_LOAD_NOW_FILE="$NV_LOAD" BIONIC_SETTLE_MAX_WAIT="${NV_MAXW:-1}" \
       BIONIC_PRESSURE_RING="$TMPROOT/novoid-ring" BIONIC_NOW_EPOCH="$NOW" \
@@ -377,5 +377,27 @@ NV_BUSY=2.0 nv_drive
 expect_eq "GR.1 the whole run is promised the free room, 4, and runs 4 jobs wide, not the width (rc|promise|width)" "0|0:4:0|width 4" \
   "$NV_RC|$(sed -n 's/^promise=//p' "$TMPROOT/novoid-gate"/requests/[0-9]* 2>/dev/null)|$(printf '%s\n' "$NV_OUT" | grep -o 'width [0-9]*')"
 printf '0\n' > "$RW_HOME/bionic/reserve"; rw_share 100
+# THE ASK IS THE HOLDER'S OWN. The gate's cpu0= baseline is the asking shell's `times`, so a runner that asks inside `$( )`
+# leaves out what it had reaped before it asked. A planted timing table gives the longest-first order, read just before
+# the ask, a floor of processor seconds measured here; another process holds the gate until the run's request is filed.
+NV_TT="$NV/tests/timing.tsv"; NV_TP='BEGIN { while ((getline row < tbl) > 0) { split(row, f, "\t"); if (f[1] != "" && f[2] ~ /^[0-9]+$/) sec[f[1]] = f[2] } }'
+awk 'BEGIN { for (i = 0; i < 200000; i++) printf "x%d.test.sh\t%d\n", i, i % 90 }' > "$NV_TT"
+times > "$TMPROOT/tt0"; for i in 1 2; do LC_ALL=C awk -F'\t' -v tbl="$NV_TT" "$NV_TP" < /dev/null; done; times > "$TMPROOT/tt1"
+rm -rf "$TMPROOT/novoid-gate"
+env "${RW_PIN[@]}" BIONIC_GATE_DIR="$TMPROOT/novoid-gate" BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES=0 BIONIC_PROBE_TOTAL_MB=8192 \
+    BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 bash -c '. "$1/payload/scripts/lib/gate.sh"
+  id="$(gate_ask work blocker)"; i=0
+  while [ ! -e "$BIONIC_GATE_DIR/requests/$((id + 1))" ] && [ "$i" -lt 300 ]; do sleep 0.1; i=$((i + 1)); done
+  sleep 0.5; gate_end "$id" 0' _ "$BIONIC_SCRIPTS_DIR" >/dev/null 2>&1 & NV_BLK=$!
+NV_POLL=0.3 nv_drive; wait "$NV_BLK"
+NV_REQ="$(grep -l '^kind=whole$' "$TMPROOT/novoid-gate"/requests/[0-9]* 2>/dev/null | head -n 1)"; nv_req() { sed -n "s/^$1=//p" "$NV_REQ" 2>/dev/null | tail -n 1; }
+expect_eq "GR.2 the whole run waited behind the planted holder, then ran green (rc|waited)" "0|yes" \
+  "$NV_RC|$(printf '%s\n' "$NV_OUT" | grep -q 'waits for its turn and room' && echo yes)"
+expect_regex "GR.3-pre the extractor reads the run's request: its admitted= is a clock reading" '^[0-9]+$' "$(nv_req admitted)"
+# cpu0= is written to two decimals, so it may round 0.005 under the seconds it counts.
+expect_eq "GR.3 its cpu0= is at least the floor the runner reaped before it asked" "yes" \
+  "$(cat "$TMPROOT/tt0" "$TMPROOT/tt1" | awk -v c="$(nv_req cpu0)" 'FNR % 2 == 0 { gsub(",", "."); gsub(/[ms]/, " "); t[NR] = $1 * 60 + $2 + $3 * 60 + $4 }
+     END { b = t[4] - t[2]; print (c != "" && c + 0.005 >= b) ? "yes" : "no: cpu0=" c " floor=" b }')"
+rm -f "$NV_TT"
 
 finish

@@ -163,11 +163,19 @@ _gate_load() {  # rc 0 once lib/gate.sh is loaded
 # ends 75 only so (lib/gate.sh THE BUDGET), and the suite or run is not started: _GATE_REFUSAL holds
 # the budget's own line for the report. Any other failure to ask runs unadmitted, as before.
 _GATE_REFUSAL=""
+#
+# It asks in this shell, the id read back through a file: the gate's cpu0= baseline and gate_end read this shell's
+# `times`, so an ask inside `$( )` would leave out what this shell had reaped. `$( )` only when no file can be made.
 _gate_ask_for() {
-  local _rc
+  local _rc _f
   _GATE_ID=""; _GATE_OWN=0; _GATE_REFUSAL=""
   _gate_load || return 0
-  _GATE_ID="$(gate_ask "$1" "$2")"; _rc=$?
+  if _f="$(mktemp "${TMPDIR:-/tmp}/gate-id.XXXXXX" 2>/dev/null)"; then
+    gate_ask "$1" "$2" > "$_f"; _rc=$?
+    { read -r _GATE_ID < "$_f"; } 2>/dev/null; rm -f "$_f"
+  else
+    _GATE_ID="$(gate_ask "$1" "$2")"; _rc=$?
+  fi
   if [ "$_rc" -eq 75 ]; then
     _GATE_ID=""
     _GATE_REFUSAL="$(gate_budget "$1" "$2")"
