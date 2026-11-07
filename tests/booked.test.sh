@@ -526,12 +526,12 @@ section "§CLASS — a browser or compile run is asked as work with its class on
 # The wall wraps such a run as `booked.sh --class <c> --suites <key> -- <cmd>`; the request carries class=<c> and the room
 # free as its promise. A store per case; the machine reads no busy cores, so the room is the whole width.
 cl_run() { CL_GD="$D/cl-$1"; rm -rf "$CL_GD"; shift; ( cd "$T1" && BIONIC_GATE_DIR="$CL_GD" bash "$BOOKED" --agent wx-T1 --suites cl.test.sh "$@" -- true ) > "$CL_GD.out" 2>&1; CL_RC=$?; }
-cl_req() { cat "$CL_GD"/requests/[0-9]* 2>/dev/null | sed -n "s/^\(class\|promise\)=/\1 /p" | tr '\n' ' '; }
+cl_req() { cat "$CL_GD"/requests/[0-9]* 2>/dev/null | grep -E '^(class|promise)=' | tr '\n' ' '; }
 world_machine 8 8192 10 0
 cl_run on --class browser
-expect_eq "CL.1 --class browser leaves a request reading class=browser, promised the room free" "class browser promise 0:$( . "$REPO/payload/scripts/lib/gate.sh" && gate_width ):0 " "$(cl_req)"
+expect_eq "CL.1 --class browser leaves a request reading class=browser, promised the room free" "class=browser promise=0:$( . "$REPO/payload/scripts/lib/gate.sh" && gate_width ):0 " "$(cl_req)"
 cl_run off
-expect_eq "CL.2 without --class the same request carries no class line and the suite prior" "promise 0:$( . "$REPO/payload/scripts/lib/resources.sh" && _res_suite_cores ):0 " "$(cl_req)"
+expect_eq "CL.2 without --class the same request carries no class line and the suite prior" "promise=0:$( . "$REPO/payload/scripts/lib/resources.sh" && _res_suite_cores ):0 " "$(cl_req)"
 cl_run bad --class build
 expect_eq "CL.3 --class build exits 2 and asks nothing: no request in the store" "2 0" "$CL_RC $(ls "$CL_GD"/requests 2>/dev/null | wc -l | tr -d ' ')"
 expect_true "CL.3b …and its usage line names the option" grep -q 'usage:.*--class' "$CL_GD.out"
