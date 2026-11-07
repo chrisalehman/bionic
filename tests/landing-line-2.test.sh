@@ -14,7 +14,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/landing-line.prelude.sh"
 
-ll_carrier_env   # the same environment part 1 sets where the carrier section begins (tests/landing-line.prelude.sh)
+ll_carrier_env; printf '0\n' > "$CLAUDE_CONFIG_DIR/bionic/reserve"   # part 1's carrier environment (tests/landing-line.prelude.sh); the rows read the share's room whole
 
 # ---------------------------------------------------------------------------
 section "§INPUTS: the poll and --within read as numbers (read-structure-p12 #7, read-adversarial-p12 #4)"
@@ -599,44 +599,44 @@ LL_GATE_WAS="$BIONIC_GATE_DIR"
 section "§ASK: the drain asks the gate before each pass and starts exactly its answer, asking again as each run ends (wave-38 T6; D21, REQ-6 AC-6.1; ADR-060)"
 #
 # The planted machine of T5's worked table (record/wave-38-one-stop/T5-gate.md): 8 cores at share 92, room
-# 7.36 cores, each run promised resources.sh's measured suite cost. At load 2 the sums are 3.61 3.61 4.83
-# 6.44, and 8.05 refuses a fifth: the answer is 4. At load 6, 7.61 > 7.36 refuses even one, so the oldest
-# landing with nothing open is answered 1 (the floor), and 0 while its own run is open.
+# 7.36 cores, each run promised resources.sh's measured suite cost, the admitted runs counted beside the load.
+# At load 2 the sums are 3.61 5.22 6.83, and 8.44 refuses a fourth: the answer is 3. At load 5, 6.61 fits
+# one and 8.22 refuses a second, so the landing is answered 1, and 0 while its own run is open.
 printf '92\n' > "$CLAUDE_CONFIG_DIR/bionic/share"
 world_machine 8 8192 30 2.0
 export BIONIC_GATE_DIR="$WORLD_ROOT/gate-k"
 expect_eq "(k0) the promise read is the measured suite cost: 1.61 cores a run" "1.61" "$(_res_suite_cores)"
-expect_eq "(k0) …and at load 2 the gate answers a landing with nothing open 4" "4" "$(ll_width_ask k-probe)"
+expect_eq "(k0) …and at load 2 the gate answers a landing with nothing open 3" "3" "$(ll_width_ask k-probe)"
 RK="$(ll_ask_world k p1 p2 p3 p4 p5 p6)"
 ll_verb_bg "$RK" T1 "$WORLD_ROOT/k.out"; K_BG=$!
-expect_true "(k1-pre) four runs started" ll_wait_started k 4
-expect_false "(k1) no fifth ask is filed in the 2 s after" wait_for 2 ll_filed_over 4
-expect_eq "(k1) the drain started exactly the answer: four landing requests, four admitted, none waiting in the gate's queue" "4 4 0" "$(ll_reqs)"
-expect_eq "(k1) …four suites running, p5 and p6 not started" "4 0 0" "$(ll_started k) $(ll_lines "$LL_SIG/k-p5.runs") $(ll_lines "$LL_SIG/k-p6.runs")"
-expect_eq "(k1) …each request names the row's landing and is promised the measured cost" "4 $(_res_suite_cores)" "$(ll_req_tags)"
+expect_true "(k1-pre) three runs started" ll_wait_started k 3
+expect_false "(k1) no fourth ask is filed in the 2 s after" wait_for 2 ll_filed_over 3
+expect_eq "(k1) the drain started exactly the answer: three landing requests, three admitted, none waiting in the gate's queue" "3 3 0" "$(ll_reqs)"
+expect_eq "(k1) …three suites running, p5 and p6 not started" "3 0 0" "$(ll_started k) $(ll_lines "$LL_SIG/k-p5.runs") $(ll_lines "$LL_SIG/k-p6.runs")"
+expect_eq "(k1) …each request names the row's landing and is promised the measured cost" "3 $(_res_suite_cores)" "$(ll_req_tags)"
 K_KEY="$(ll_open_landing)"
-expect_eq "(k1) …and the gate answers the landing 0 more while its four run" "0" "$(ll_width_ask "$K_KEY")"
-world_tick 50
+expect_eq "(k1) …and the gate answers the landing 0 more while its three run" "0" "$(ll_width_ask "$K_KEY")"
+world_tick 30
 touch "$LL_SIG/k-p1.go"
 expect_true "(k2-pre) a fifth run started once p1 ended" ll_wait_started k 5
 expect_false "(k2) no sixth ask is filed in the 2 s after" wait_for 2 ll_filed_over 5
-expect_eq "(k2) asked again as p1 ended, the gate answered 1 and the drain started one: five filed, four admitted, none waiting" "5 4 0" "$(ll_reqs)"
+expect_eq "(k2) asked again as p1 ended, half a minute on, the gate answered 2 and the drain started two: five filed, four admitted, none waiting" "5 4 0" "$(ll_reqs)"
 expect_eq "(k2) …p5 started, p6 not" "1 0" "$(ll_lines "$LL_SIG/k-p5.runs") $(ll_lines "$LL_SIG/k-p6.runs")"
 touch "$LL_SIG/k-p2.go" "$LL_SIG/k-p3.go" "$LL_SIG/k-p4.go" "$LL_SIG/k-p5.go" "$LL_SIG/k-p6.go"
 ll_wait_file "$WORLD_ROOT/k.out.rc" 600 || ll_kill_bg "$K_BG"
 KK="$(ll_last_cand "$RK" T1)"
 expect_eq "(k3) the row lands: exit 0, the branch at its candidate" "0 $KK" "$(cat "$WORLD_ROOT/k.out.rc" 2>/dev/null) $(ll_head "$RK")"
-expect_eq "(k3) …six verdicts, each width=4: the width the gate gave the landing" \
-  "p1.test.sh:green:4 p2.test.sh:green:4 p3.test.sh:green:4 p4.test.sh:green:4 p5.test.sh:green:4 p6.test.sh:green:4" "$(ll_widths "$RK" "$KK")"
+expect_eq "(k3) …six verdicts, each with the width its pass was given (runs live plus the answer): 3, then 4 as p1 ended, then 3" \
+  "p1.test.sh:green:3 p2.test.sh:green:3 p3.test.sh:green:3 p4.test.sh:green:4 p5.test.sh:green:4 p6.test.sh:green:3" "$(ll_widths "$RK" "$KK")"
 expect_eq "(k3) …and six landing requests in all, one per run: the drain never filed an ask past the answer" "6 0 0" "$(ll_reqs)"
-world_machine 8 8192 30 6.0
+world_machine 8 8192 30 5.0
 export BIONIC_GATE_DIR="$WORLD_ROOT/gate-k6"
-expect_eq "(k4-pre) at load 6 the gate answers a landing with nothing open 1 (0 by the rule, 1 by the floor)" "1" "$(ll_width_ask k6-probe)"
+expect_eq "(k4-pre) at load 5 the gate answers a landing with nothing open 1, by the rule" "1" "$(ll_width_ask k6-probe)"
 RK6="$(ll_ask_world k6 q1 q2)"
 ll_verb_bg "$RK6" T1 "$WORLD_ROOT/k6.out"; K6_BG=$!
 expect_true "(k4-pre) one run started" ll_wait_started k6 1
 expect_false "(k4) no second ask is filed in the 2 s after" wait_for 2 ll_filed_over 1
-expect_eq "(k4) at load 6 the drain started one: one request, admitted, none waiting; q2 not started" "1 1 0 0" "$(ll_reqs) $(ll_lines "$LL_SIG/k6-q2.runs")"
+expect_eq "(k4) at load 5 the drain started one: one request, admitted, none waiting; q2 not started" "1 1 0 0" "$(ll_reqs) $(ll_lines "$LL_SIG/k6-q2.runs")"
 expect_eq "(k4) …the gate answers the landing 0 while its run is open" "0" "$(ll_width_ask "$(ll_open_landing)")"
 touch "$LL_SIG/k6-q1.go"
 expect_true "(k5-pre) q2 started once q1 ended" ll_wait_started k6 2
@@ -651,26 +651,26 @@ export BIONIC_GATE_DIR="$WORLD_ROOT/gate-km"
 RKM="$(ll_ask_world km m1 m2 m3 m4 m5 m6)"
 anchor fn payload/scripts/lib/line.sh 'gate_width_ask "$1"' _line_width_ask 'echo 9'
 LL_MUTANT="$ANCHOR_SED" LL_MUTANT_FN=_line_width_ask ll_drive "$RKM" T1 "$WORLD_ROOT/km.out"; KM_BG=$!
-ll_wait_started km 4
-wait_for 5 ll_filed_over 4
+ll_wait_started km 3
+wait_for 5 ll_filed_over 3
 KM_REQS="$(ll_reqs)"
-expect_eq "(k6m-pre) the mutant ran: the gate admitted four, as on the shipped drain" "4" "$(ll_started km)"
+expect_eq "(k6m-pre) the mutant ran: the gate admitted three, as on the shipped drain" "3" "$(ll_started km)"
 expect_true "(k6m) MUTANT the drain sizes itself: more asks filed than the gate's answer, the rest waiting in its queue (the rows can fail; got $KM_REQS)" \
-  test "${KM_REQS%% *}" -gt 4
+  test "${KM_REQS%% *}" -gt 3
 touch "$LL_SIG"/km-m1.go "$LL_SIG"/km-m2.go "$LL_SIG"/km-m3.go "$LL_SIG"/km-m4.go "$LL_SIG"/km-m5.go "$LL_SIG"/km-m6.go
 ll_wait_file "$WORLD_ROOT/km.out.rc" 600 || ll_kill_bg "$KM_BG"
 
 # ---------------------------------------------------------------------------
 section "§ADMITTED: every verdict line carries admitted=<epoch> after log=, the gate's admission instant for its run (wave-38 T6; REQ-6 AC-6.4)"
 #
-# From §ASK's landing: p1 to p4 were admitted at one instant, the clock then moved 50 s, and p1's verdict
-# was written after that; p5 was admitted after it. The epoch on each verdict is its run's admission,
+# From §ASK's landing: p1 to p3 were admitted at one instant, the clock then moved 30 s, and p1's verdict
+# was written after that; p4 and p5 were admitted after it. The epoch on each verdict is its run's admission,
 # read from the gate, never the time the verdict was written.
 export BIONIC_GATE_DIR="$WORLD_ROOT/gate-k"
 K_T0="$(ll_req_admitted p1.test.sh)"
 expect_true "(ad0-pre) the gate recorded p1's admission instant" test -n "$K_T0"
-expect_eq "(ad2) …p1 to p4 carry the instant before the clock moved, p5 the one after" \
-  "p1.test.sh:${K_T0} p2.test.sh:${K_T0} p3.test.sh:${K_T0} p4.test.sh:${K_T0} p5.test.sh:$((K_T0 + 50))" \
+expect_eq "(ad2) …p1 to p3 carry the instant before the clock moved, p4 and p5 the one after" \
+  "p1.test.sh:${K_T0} p2.test.sh:${K_T0} p3.test.sh:${K_T0} p4.test.sh:$((K_T0 + 30)) p5.test.sh:$((K_T0 + 30))" \
   "$(ll_admitted "$RK" "$KK" | cut -d' ' -f1-5)"
 expect_eq "(ad3) …each the gate's own admitted= for that run" \
   "$(for s in p1 p2 p3 p4 p5 p6; do printf '%s.test.sh:%s ' "$s" "$(ll_req_admitted "$s.test.sh")"; done | sed 's/ $//')" "$(ll_admitted "$RK" "$KK")"
