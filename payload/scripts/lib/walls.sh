@@ -5721,7 +5721,7 @@ _bsg_agent() {
   _BSG_AGENT="${_BUDGET_ROW_NAME:-$_id}"
 }
 _bsg_wrap_text() {
-  local _c _w _k="${WALL_SHORT_KILL_AFTER:-}"
+  local _c _w _kre _k="${WALL_SHORT_KILL_AFTER:-}"
   _BSG_WRAP_TEXT=""; _BSG_WRAP_WHY=""
   _c="${COMMAND#"${COMMAND%%[![:space:]]*}"}"
   case "$_c" in
@@ -5750,11 +5750,19 @@ _bsg_wrap_text() {
   # A BROWSER OR COMPILE RUN NAMES NO FILE: its key is its own text, the first 60 characters as
   # the shim reads a command it cannot name, in the one-word alphabet a suite name keeps. The
   # shim is told the class beside it, and that is all the gate needs to promise its cost.
+  # THE KEY IS THE COMMAND, NEVER THE PLACE IT RAN FROM: one leading change of directory
+  # (`cd <dir>` closed by `||` ...`;`, `&&` or `;`, the dir bare or quoted, the segments the
+  # placement reader reads as a move) is dropped before the 60 characters are taken, so one
+  # command's measurements reach every tree it runs in and a tree's path is never part of a key.
+  # The reader prints a place, not the text after it, so the prefix is cut here by pattern.
   _BSG_CLASS_ARGS=()
   case "$_WALL_CLASS" in
     browser|compile)
       [ "$_WALL_CLASS_TEXT" = "$COMMAND" ] || return 1
-      _w="${_c//[$'\n\r\t|']/ }"; _w="${_w:0:60}"
+      _w="$_c"
+      _kre='^cd[[:space:]]+("[^"]*"|'"'"'[^'"'"']*'"'"'|[^[:space:];&|"'"'"']+)[[:space:]]*(\|\|[^;&|]*;|&&|;)[[:space:]]*(.+)$'
+      if [[ "$_w" =~ $_kre ]]; then _w="${BASH_REMATCH[3]}"; fi
+      _w="${_w//[$'\n\r\t|']/ }"; _w="${_w:0:60}"
       case "$_w" in *'$'*|*'`'*) _BSG_SUITES='?' ;; *) _BSG_SUITES="${_w//[!A-Za-z0-9._+-]/_}" ;; esac
       _BSG_CLASS_ARGS=(--class "$_WALL_CLASS") ;;
   esac
