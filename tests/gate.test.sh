@@ -577,12 +577,16 @@ reap
 # A PROMISE FADES INTO THE LOAD: runs admitted at load 0 count whole, five sixths 10 s on, nothing a minute on.
 section "§ROOM — a promise fades into the load, read alike by the room and an ask (AC-4.1 to AC-4.3)"
 fresh room; world_machine 8 8192 30 0; for n in r1 r2 r3; do HOLD=1 ask_bg "$n" work k 0; wait_for 20 has "$n.rc"; done
-room() { ( . "$GATE_LIB" 2>/dev/null; gate_room "$@" 2>&1 ) | sed -n 's/^room=\([a-z]*\) .* promised=\([^ ]*\) .*/promised=\2 room=\1/p'; }
+room() { ( . "$GATE_LIB" 2>/dev/null; [ -z "${BUSY_FILE:-}" ] || _res_busy_cores() { cat "$BUSY_FILE"; }; gate_room "$@" 2>&1 ) | sed -n 's/^room=\([a-z]*\) .* promised=\([^ ]*\) .*/promised=\2 room=\1/p'; }
 world_machine 8 8192 30 2.95; world_clock 1120
 expect_eq "RM.1 three admitted ($(rc_of r1)$(rc_of r2)$(rc_of r3)) 120 s ago at $PROMISE, busy 2.95 of 6.4: the load carries them" "promised=0 room=yes" "$(room)"
 world_clock 1010; expect_true "RM.2 …admitted 10 s ago, five sixths of $(pr 3), about 4.0, which closes the room ($(room))" awk -v l="$(room)" 'BEGIN { split(l, a, /[= ]/); exit !(a[2] >= 3.9 && a[2] <= 4.1 && a[4] == "no") }'
 rm_margin() { world_machine 8 8192 30 "$1"; printf '%s|%s' "$(room --owed 1 | sed 's/.*room=//')" "$(ask_fg "$2" work k 0)"; }   # <busy> <asker> -> room|rc
 expect_eq "RM.3 a newcomer at the margin: gate_room --owed 1 and the ask agree, busy 0.8 no and waits, 0.7 yes and admitted" "no|75 yes|0" "$(rm_margin 0.8 r4) $(rm_margin 0.7 r5)"
+fresh roomu; world_machine 8 8192 30 0; for n in u1 u2 u3; do HOLD=1 ask_bg "$n" work k 0; wait_for 20 has "$n.rc"; done; world_clock 1030
+printf '1.0\n' > "$D/ub"; expect_true "RM.4 control: three admitted 30 s ago at $PROMISE, busy 1.0: half faded, about 2.4 of $(pr 3) ($(BUSY_FILE="$D/ub" room))" \
+  awk -v l="$(BUSY_FILE="$D/ub" room)" 'BEGIN { split(l, a, /[= ]/); exit !(a[2] >= 2.3 && a[2] <= 2.5) }'
+printf -- '-\n' > "$D/ub"; expect_eq "RM.5 the same three, the busy reading unreadable: every promise counts whole, $(pr 3)" "promised=$(pr 3) room=no" "$(BUSY_FILE="$D/ub" room)"
 
 # NOTHING ADMITTED IS NO EXCEPTION: three asks wait at load 16 on 4 cores at share 80 (3.2); it falls to 1.0, room for one.
 section "§LONE — the limit holds with nothing admitted, and the order goes first when the load falls (AC-5.2, AC-5.4)"
@@ -944,6 +948,9 @@ printf '92\n' > "$CLAUDE_CONFIG_DIR/bionic/share"; printf '1\n' > "$CLAUDE_CONFI
 ask_fg c5a work hv 0 >/dev/null; ask_fg c5b work m3 0 >/dev/null; world_machine 8 8192 30 2.0; ask_fg c5c work hv 0 >/dev/null
 expect_eq "CO.5 kept 7.5 past share 92 reserve 1 (6.36) is admitted on the room free, 6 at busy 0 and 4 at busy 2.0; kept 3.0 promises 3.0 (rc|promise)" \
   "0|0:6:30 0|0:4:30 0|0:3.0:30" "$(for a in c5a c5c c5b; do printf '%s|%s ' "$(rc_of $a)" "$(field "$(id_of $a)" promise)"; done | sed 's/ $//')"
+world_machine 8 8192 30 0; sv() { ( set -u; . "$GATE_LIB" 2>/dev/null; gate_promise hv; [ -z "${1:-}" ] || echo "$1" >&2 ) 2>"$D/pr.err"; }   # a caller that never scanned
+expect_eq "CO.5b gate_promise under set -u on kept 7.5 prints the bounded promise and nothing on stderr (promise|stderr)" "0:6:30|" "$(sv)|$(cat "$D/pr.err")"
+expect_eq "CO.5c …and the stderr read is not vacuous: a planted line reads back (promise|stderr)" "0:6:30|planted" "$(sv planted)|$(cat "$D/pr.err")"
 world_machine 8 8192 30 0.5; HOLD=1 ask_bg c6h work hv 99999; wait_for 5 has c6h.rc; world_tick 120
 expect_eq "CO.6 a light key asked behind it while it holds, its promise a minute old, is admitted (heavy|light rc)" "0|0" "$(rc_of c6h)|$(ask_fg c6l work lt 0 | tail -n 1)"
 reap
