@@ -52,10 +52,14 @@ NOW=1700000000
 # also keeps the gate store an ordinary run asks under this suite's root) and a planted 8-core
 # probe. Sections 1-5 plant share 100, whose room on 8 cores is 8, the ceiling they were written
 # against; Section 6 plants the machine's own default, 92.
+# The room is the share's cores less the reserve (one core, absent a reserve file). Every case but
+# Section 6's last pins the ceiling arithmetic or the fallback, so the home plants reserve 0 and
+# those numbers read the share whole; that case removes the file and reads the default.
 RW_HOME="$TMPROOT/home"
 mkdir -p "$RW_HOME/bionic"
 rw_share() { printf '%s\n' "$1" > "$RW_HOME/bionic/share"; }
 rw_share 100
+printf '0\n' > "$RW_HOME/bionic/reserve"
 RW_PIN=(CLAUDE_CONFIG_DIR="$RW_HOME" BIONIC_PROBE_CORES=8)
 
 # ring_of <path> <epoch> <sample>... — rewrite a ring with one line per sample, all at <epoch>
@@ -232,8 +236,8 @@ expect_contains "5 a valid ceiling of 3 is still honoured (not replaced by 8)" "
 echo
 section "Section 6: the width is the share's room, read through the gate's one formula (wave-32 T2; D1)"
 #
-# THE CLAIM. A run's width is gate_width (payload/scripts/lib/gate.sh): floor(share × cores ÷ 100),
-# 7 at share 92 on 8 cores. The runner keeps no number of its own; BIONIC_TEST_JOBS_CEILING is a
+# THE CLAIM. A run's width is gate_width (payload/scripts/lib/gate.sh): floor(share × cores ÷ 100 less
+# the reserve), 7 at share 92 on 8 cores with reserve 0 and 6 under the default reserve of 1. The runner keeps no number of its own; BIONIC_TEST_JOBS_CEILING is a
 # cap UNDER the width, never above it; the pressure rung still narrows a strained machine. The
 # expected width is read from the library under the same pins, so the runner and the gate are held
 # to one formula rather than to a literal both could drift from.
@@ -247,7 +251,6 @@ expect_eq "6a the formula's width at share 92 on 8 cores is 7 (the readback is r
 ring_of "$RING_W" "$NOW" "$S_CLEAR" "$S_CLEAR"
 dry_run "$RING_W" "$S_CLEAR"
 expect_contains "6b no ceiling named: a clear ring runs at the formula's width" "JOBS=$RW_W92" "$DRY_OUT"
-expect_absent "6c …not the old literal default of 8" "JOBS=8" "$DRY_OUT"
 ring_of "$RING_W" "$NOW" "$S_CLEAR" "$S_CLEAR"
 dry_run "$RING_W" "$S_CLEAR" 8
 expect_contains "6d a ceiling above the width is a cap, not a raise: ceiling 8 at share 92 is the width" \
@@ -264,6 +267,16 @@ expect_contains "6g …and the runner follows the share: JOBS=4" "JOBS=$RW_W50" 
 ring_of "$RING_W" "$NOW" "$S_CLEAR" "$S_CLEAR"
 dry_run "$RING_W" "$S_CLEAR" "eight"
 expect_contains "6h a garbage ceiling falls back to the width, not to 8" "JOBS=$RW_W50" "$DRY_OUT"
+# The default reserve: no reserve file, so one core is the person's and the runner's width is one lower.
+rm -f "$RW_HOME/bionic/reserve"
+rw_jobs() { sed -n 's/^\(JOBS=[0-9]*\)$/\1/p' <<<"$DRY_OUT"; }
+ring_of "$RING_W" "$NOW" "$S_CLEAR" "$S_CLEAR"
+rw_share 92; dry_run "$RING_W" "$S_CLEAR"; RW_R92="$(rw_jobs)"
+ring_of "$RING_W" "$NOW" "$S_CLEAR" "$S_CLEAR"
+rw_share 50; dry_run "$RING_W" "$S_CLEAR"; RW_R50="$(rw_jobs)"
+expect_eq "6i the default reserve of 1 comes off the runner's width: share 92 -> JOBS=6, share 50 -> JOBS=3" \
+  "JOBS=6 JOBS=3" "$RW_R92 $RW_R50"
+printf '0\n' > "$RW_HOME/bionic/reserve"
 rw_share 100
 
 echo
