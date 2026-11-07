@@ -24,6 +24,7 @@
 #   §9  the fill refusal's headline names only the rows the turn left out
 #   §GAP     one width fact and one refusal: the wall asks the gate as the tick does, and names
 #            every unanswered row once
+#   §LOAD    over the line, the tick stands down the newest unlanded writer, one a tick
 #   §UB      unbound means no run: two plans, two sessions, the real Stop per session
 #   §WAIT    a row waits by a dependency, a read of a ruling or an order; the refusal names the
 #            three, and a waiting row is not ready, so the turn ends
@@ -592,7 +593,7 @@ expect_contains "9m: …while the reason names every row" "T106" "$(reason_of)"
 # THE WIDTH IS THE GATE'S (wave-28 T13; D14, AC-2.8). 9h's fixture, nothing launched, under a
 # five-minute load over the share: the gate gives no room, so the wall owes no row and its
 # ledger records the hold. 9h above is the same fixture with room, and refuses. 8.0 busy cores of the
-# fixture's 8 is over the gate's width at any share below 100 (92 x 8 / 100 = 7.36; wave-31 T36, A-T36-4).
+# fixture's 8 is over the gate's width at any share below 100 (92 x 8 / 100 less the reserve of 1 = 6.36).
 S9_DG="$(s9_fixture)"
 S9_TXG="$(mktemp)"; s9_transcript "$S9_TXG"
 BIONIC_PROBE_BUSY_CORES_5M=8.0 s7_fire "$S9_DG" "$S9_TXG"
@@ -616,10 +617,11 @@ section "GAP: one width fact and one refusal — the wall asks the gate as the t
 # ready row in one line the user reads. The model's copy adds the rows comma-joined in one dispatch
 # line and the three forms that make a row wait: a dependency, a read of a ruling, an order.
 #
-# THE READING IS PINNED for the tick and the wall alike: 8 cores at the default share 92 (7.36
-# cores of room; HOME is a fresh directory, so no share file is read). The first row is asked with
-# nothing owed and each row offered owes one promise more, so a busy reading of 7.0 leaves room for
-# exactly one writer (7 <= 7.36 < 7 + the suite cost, wave-38 T5), and 8.0 for none.
+# THE READING IS PINNED for the tick and the wall alike: 8 cores at the default share 92 less the
+# default reserve of one core (6.36 cores of room; HOME is a fresh directory, so no share or reserve
+# file is read). The first row is asked with nothing owed and each row offered owes one promise more,
+# so a busy reading of 6.0 leaves room for exactly one writer (6 <= 6.36 < 6 + the suite cost of
+# 1.61), and 8.0 for none.
 # The plan is one the commit gate admits (its version line and a Step-4 block), so a plan verb's dry
 # commit, which GAP3 runs, judges the cells it writes and not the fixture.
 gap_fixture() {  # -> project dir; three pending writer rows T13 T14 T15 reading their kind's default, an empty roster
@@ -664,12 +666,12 @@ expect_eq "GAP1d the tick's no-room turn passes at stop" "" "$(printf '%s' "$STO
 # GAP2: ROOM FOR ONE, THREE READY. The tick on the reading offers one row; the wall refuses once,
 # naming all three.
 GAP_D2="$(gap_fixture)"
-GAP_T2="$(gap_tick "$GAP_D2" 7.0)"
+GAP_T2="$(gap_tick "$GAP_D2" 6.0)"
 expect_contains "GAP2a precondition: the tick on this reading offers exactly one row" \
   "poker: FILL T13" "$GAP_T2"
 expect_absent "GAP2a2 …and only one" "poker: FILL T13 T14" "$GAP_T2"
 GAP_X2="$(mktemp)"; s7_transcript "$GAP_X2" "$GAP_T2"
-BIONIC_PROBE_BUSY_CORES=7.0 BIONIC_PROBE_BUSY_CORES_5M=7.0 s7_fire "$GAP_D2" "$GAP_X2"
+BIONIC_PROBE_BUSY_CORES=6.0 BIONIC_PROBE_BUSY_CORES_5M=6.0 s7_fire "$GAP_D2" "$GAP_X2"
 expect_contains "GAP2b meta: the wall's ledger counts one free slot on the same reading" "|free=1|" "$(gap_led "$GAP_D2" | tail -1)"
 expect_eq "GAP2c the turn is refused" "block" "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
 GAP_LINE="$(s9_headline)"
@@ -698,7 +700,7 @@ expect_contains "GAP3b the read is appended after the kind's default reads, whic
 expect_contains "GAP3c …on every row the command named" "| pending | approval:plan, approval:D3 |" "$(grep -F '| T15 |' "$GAP_P2")"
 GAP_X3="$(mktemp)"
 jq -nc '{type:"user",uuid:"u-gap3",isSidechain:false,timestamp:"2026-09-19T00:01:00Z",message:{role:"user",content:"carry on"}}' > "$GAP_X3"
-BIONIC_PROBE_BUSY_CORES=7.0 BIONIC_PROBE_BUSY_CORES_5M=7.0 s7_fire "$GAP_D2" "$GAP_X3"
+BIONIC_PROBE_BUSY_CORES=6.0 BIONIC_PROBE_BUSY_CORES_5M=6.0 s7_fire "$GAP_D2" "$GAP_X3"
 expect_contains "GAP3d meta: the wall read the next turn, its ledger line is that turn's" "|turn=u-gap3|" "$(gap_led "$GAP_D2" | tail -1)"
 expect_contains "GAP3e …and no row ready" "|ready=|" "$(gap_led "$GAP_D2" | tail -1)"
 expect_eq "GAP3f the rows wait on the ruling: the turn passes" "" \
@@ -707,7 +709,7 @@ expect_eq "GAP3f the rows wait on the ruling: the turn passes" "" \
 # GAP4: A WAITING REQUEST ALONE LEAVES ROOM (wave-38 T5; D21, ADR-060). The gate's room reads its
 # admitted runs and the owed count, never its queue: a landing run waiting at the gate used to answer
 # room=no and close FILL for every writer. Planted: a store holding one landing request that waits,
-# held by a live process, on the quiet reading (1.0 busy of 7.36). The tick counts it waiting and
+# held by a live process, on the quiet reading (1.0 busy of 6.36). The tick counts it waiting and
 # still offers FILL. The holder is this suite's own shell, live for the whole case and never a sleep
 # (shell-lint's clock census), as gate.test.sh's held requests are.
 GAP4_GATE="$(cd "$(mktemp -d)" && pwd -P)/gate"; mkdir -p "$GAP4_GATE/requests" "$GAP4_GATE/cost"
@@ -733,6 +735,48 @@ GAP4_TAB="$( . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/gate.sh" && export BIONI
 expect_contains "GAP4d a gate read under a tab IFS counts the request waiting: its holder lives" "waiting=1" "$GAP4_TAB"
 expect_eq "GAP4e …and leaves it open" "open" \
   "$(grep -q '^ended=' "$GAP4_GATE/requests/1" 2>/dev/null && echo ended || { [ -s "$GAP4_GATE/requests/1" ] && echo open; })"
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "LOAD: over the line with no room, the tick stands down the newest writer whose row has not landed, one a tick; its row is pending and FILL offers it when the room opens; an admitted run is never ended"
+
+# A RUN THAT HAS OVERCOMMITTED THE MACHINE DIALS ITSELF DOWN. gap_fixture's plan with its first rows
+# active under wl-<id>, launched a minute apart, on 8 cores at a busy reading of 14 over both windows
+# (the line is 6.36), the gate holding one admitted run of this live shell. The stood-down agent is then
+# closed as `stopped` closes a stopped one, and the next tick, at a busy reading of 1, offers its row.
+load_fixture() {  # <active rows> -> project dir; the first <n> of T13 T14 T15 active and rostered
+  local d p n=0 id
+  d="$(gap_fixture)"; p="$d/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
+  for id in T13 T14 T15; do
+    n=$((n + 1)); [ "$n" -le "$1" ] || break
+    awk -v id="$id" '$2 == id { sub(/[|] implementor [|]/, "| wl-" id " |"); sub(/[|] pending [|]/, "| active |") } { print }' "$p" > "$p.t" && mv "$p.t" "$p"
+    roster_row_fixture session="$SID" name="wl-$id" agent_id="a-wl-$id" launched_at="2026-11-01T00:0${n}:00Z" \
+      subagent_type=bionic:senior-implementor deliverable="never-$id.md" plan="$p" >> "$d/.bionic/tmp/roster-$SID.state"
+  done
+  printf '%s' "$d"
+}
+LOAD_GATE="$(cd "$(mktemp -d)" && pwd -P)/gate"; mkdir -p "$LOAD_GATE/requests" "$LOAD_GATE/cost"
+printf 'key=a.test.sh\nkind=landing\nwho=%s:wx-T1\ntree=/\nasked=1000\nholder=%s:%s\nadmitted=1000\npromise=0:1.61:60\n' \
+  "$SID" "$GAP4_HOLDER" "$GAP4_START" > "$LOAD_GATE/requests/1"
+LOAD_D="$(load_fixture 2)"
+LOAD_T="$(BIONIC_GATE_DIR="$LOAD_GATE" gap_tick "$LOAD_D" 14)"
+expect_contains "LOAD1 meta: the gate line reads the machine over the line with no room" "load=14/14 of 8" "$LOAD_T"
+expect_contains "LOAD1a the newest writer is stood down for the load" "poker: STANDDOWN wl-T14 — load 14.0 over 6.36" "$LOAD_T"
+expect_eq "LOAD1b …and no other row" "1" "$(printf '%s\n' "$LOAD_T" | grep -c '^poker: STANDDOWN wl-')"
+expect_contains "LOAD1c its stop order is written" "|target=wl-T14" "$(cat "$LOAD_D/.bionic/tmp/stop-orders-$SID.state" 2>/dev/null)"
+expect_absent "LOAD1d …and the older writer has none" "|target=wl-T13" "$(cat "$LOAD_D/.bionic/tmp/stop-orders-$SID.state" 2>/dev/null)"
+LOAD_P="$LOAD_D/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
+expect_contains "LOAD1e the stood-down row is pending again" "| pending |" "$(grep -F '| T14 |' "$LOAD_P")"
+expect_contains "LOAD1f …and the older writer's row is still active" "| active |" "$(grep -F '| T13 |' "$LOAD_P")"
+expect_eq "LOAD1g the admitted run is not ended by the stand-down" "open" \
+  "$(grep -q '^ended=' "$LOAD_GATE/requests/1" 2>/dev/null && echo ended || { grep -q '^admitted=' "$LOAD_GATE/requests/1" && echo open; })"
+( cd "$LOAD_D" && CLAUDE_CODE_SESSION_ID="$SID" bash "$BIONIC_HOOKS_DIR/session-sweeper.sh" ack wl-T14 --by human --reason abandoned >/dev/null 2>&1 )
+LOAD_T2="$(BIONIC_GATE_DIR="$LOAD_GATE" gap_tick "$LOAD_D" 1)"
+expect_contains "LOAD2 once the room opens the next tick offers the stood-down row" " T14" "$(printf '%s\n' "$LOAD_T2" | grep '^poker: FILL ')"
+expect_absent "LOAD2b …and stands nothing down" "poker: STANDDOWN wl-" "$LOAD_T2"
+LOAD_D3="$(load_fixture 3)"
+LOAD_T3="$(BIONIC_GATE_DIR="$LOAD_GATE" gap_tick "$LOAD_D3" 14)"
+expect_contains "LOAD3 three writers over the line: the newest is stood down" "poker: STANDDOWN wl-T15 — load 14.0 over 6.36" "$LOAD_T3"
+expect_eq "LOAD3b …and only one on one tick" "1" "$(printf '%s\n' "$LOAD_T3" | grep -c '^poker: STANDDOWN wl-')"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "UB: unbound means no run — two plans, two sessions, the real Stop per session (wave-23-fixit-1810, REQ-1, AC-1.1/AC-1.2)"
