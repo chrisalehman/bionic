@@ -1229,6 +1229,8 @@ sitrep_gather() {
   local plan="$1" root="$2" mode="$3" now rec rows reds red_rows lr lr1 approvals appr_at dlv_at cur lq lwait ledges
   local sit ty gl lab desc kind note id stp state landed=0 total=0 last_id="" last_at="" proj
   now="$(sitrep_now)"
+  # read on every path below, set only when the record exists; from bash 4.4 a bare local is unset under set -u
+  lq=""
   rec="$(_wt_proofs_path "$root" "$plan")"
   rows="$(units_rows "$plan" 2>/dev/null)"
   reds="$(sitrep_reds "$rec")"

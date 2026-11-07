@@ -177,7 +177,7 @@ sr_prev() {
 }
 sr_run() {  # <args after the verb…> -> OUT (stdout), ERR (stderr), RC; the world's plan is named last by the caller
   ( cd "$SR_REPO" && exec env CLAUDE_CODE_SESSION_ID="${SR_SID:-$SID}" BIONIC_NOW_EPOCH="${SR_AT:-$SR_NOW}" BIONIC_GATE_DIR="$SR_GATE" \
-      bash "$POKER" sitrep "$@" ) > "$TMPROOT/sr.out" 2> "$TMPROOT/sr.err"
+      "${SR_BASH:-bash}" "$POKER" sitrep "$@" ) > "$TMPROOT/sr.out" 2> "$TMPROOT/sr.err"
   RC=$?
   OUT="$(cat "$TMPROOT/sr.out")"; ERR="$(cat "$TMPROOT/sr.err")"
 }
@@ -1195,6 +1195,9 @@ expect_eq "L2 two asks open: owed counts them, the same asks the sheet lists" "4
 SR_FORECAST= sr_world line-none none
 sr_run --line "$SR_PLAN"
 expect_eq "L3 no landing: the close is the chain at 1×" "0 of 17 tasks · owed: 0 on you · 0 on events · close 5:30 PM" "$OUT"
+section "§UNBOUND: --line over a run with no landing record prints its line and nothing on stderr"
+rm -f "$SR_REC"; sr_b=bash; for sr_c in /opt/homebrew/bin/bash /usr/local/bin/bash; do [ -x "$sr_c" ] && { sr_b="$sr_c"; break; }; done; SR_BASH="$sr_b" sr_run --line "$SR_PLAN"
+expect_eq "UB1 no record, under the newest bash here (older bash sets a bare local empty): exit 0, stderr empty, the line L3 read" "0||0 of 17 tasks · owed: 0 on you · 0 on events · close 5:30 PM" "$RC|$ERR|$OUT"
 
 # ============================================================
 section "§ARGS: the verb's operands"
@@ -1207,8 +1210,6 @@ expect_eq "A2 a named plan that is no file is refused (2), naming it" \
   "2|1" "$RC|$(printf '%s\n' "$ERR" | /usr/bin/grep -c 'no plan file at')"
 sr_run bottom-line 'schedule holds (line 3)' "$SR_PLAN"
 expect_eq "A3 a word the verb does not know is the usage error (2), said as unknown" "2|1" "$RC|$(printf '%s\n' "$ERR" | /usr/bin/grep -c 'unknown')"
-sr_run --line "$SR_PLAN"
-expect_eq "A4 …while --line and the plan alone print (0)" "0" "$RC"
 
 # ============================================================
 section "§SURFACES: the tick prints \`poker: sitrep <the --line output>\` on every tick that decides, byte for byte"
