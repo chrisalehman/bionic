@@ -174,6 +174,7 @@ Rendered from the plan's deferred findings, each its stated sentence, in the ord
 - The promise fades linearly over 60 seconds while the 1-minute load average rises exponentially, so a fresh admission is under-counted by up to 37 percent through its second minute; the gate may admit one suite more than the law intends beside a fresh heavy run.
 - The dial-down stands down the newest unlanded writer by launch time and does not read the gate store, so a stopped writer whose detached run or waiting ask lives on frees little load within the five-minute window, and a tick still over the line stands down another.
 - A browser or compile run typed on the orchestrator thread is booked and followed in the foreground, where a suite of the same length is refused and farmed out; the heaviest class the wall knows is the one that stays on the thread.
+- The slots suite plants its machine but reads the host's own share and reserve files, so on a host whose share is 82 or lower, or whose reserve is 1.76 or more, its B2 row's first shim is never admitted and the suite hangs the whole run; plant CLAUDE_CONFIG_DIR in the suite, or run it on a default share and reserve until then.
 
 ### The landing numbers
 
