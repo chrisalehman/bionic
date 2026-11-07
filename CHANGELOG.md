@@ -178,10 +178,10 @@ Rendered from the plan's deferred findings, each its stated sentence, in the ord
 
 ### The landing numbers
 
-`landing-report --rows` at f86f965faea9084025744c92eb02a97f4536a2ea on 2026-11-07T07:28:00Z:
+`landing-report --rows` at 67508196c4f911816248a4973d29dc3a7b486dd6 on 2026-11-07T16:00:07Z:
 
 ```
-landings: queue=15 hand=5 git=0 · ready-to-landed median=1.4m p75=2.9m max=9.8m · runs: green=42 red=0 none=0 discarded=0 red-then-green=0 run=100 reused=0 absent=0 · waited median=11s · killed=2
+landings: queue=16 hand=6 git=0 · ready-to-landed median=2.0m p75=3.5m max=9.8m · runs: green=44 red=0 none=0 discarded=0 red-then-green=0 run=106 reused=0 absent=0 · waited median=12s · killed=3
 T1 queue ready=2026-11-07T02:37:05Z landed=2026-11-07T02:37:51Z minutes=0.8 runs=2 waited=9s wait=0.1 prove=0.6 rework=0.0 width=4
   gate.test.sh green promised=44s actual=25s ratio=0.57
   shell-lint.test.sh green promised=33s actual=37s ratio=1.12
@@ -240,6 +240,12 @@ T12 queue ready=2026-11-07T07:14:27Z landed=2026-11-07T07:15:43Z minutes=1.3 run
   commands.test.sh green promised=2s actual=2s ratio=1.00
   shell-lint.test.sh green promised=36s actual=38s ratio=1.06
 T23 hand ready=- landed=2026-11-07T07:24:11Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T22 queue ready=2026-11-07T07:22:36Z landed=2026-11-07T07:28:08Z minutes=5.5 runs=4 waited=12s wait=0.2 prove=5.3 rework=0.0 width=3
+  landing-line-1.test.sh green promised=261s actual=320s ratio=1.23
+  runner-width.test.sh green promised=12s actual=13s ratio=1.08
+  run.test.sh green promised=2s actual=4s ratio=2.00
+  shell-lint.test.sh green promised=32s actual=37s ratio=1.16
+T24 hand ready=- landed=2026-11-07T08:34:01Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
 ```
 
 ## 1.29.2 — 2026-11-05
