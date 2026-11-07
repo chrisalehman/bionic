@@ -148,10 +148,10 @@
 #   memory    the live reading: _res_used_pct (while anything admitted is unfinished, the
 #             larger of it and idle plus the admitted requests' memory promises, which this
 #             gate makes 0) at most the share. Over the share it admits nothing.
-#   processor the larger of _res_busy_cores and the admitted processor promises, plus the
-#             newcomer's, at most share × cores ÷ 100 less the reserve (`_gate_share_cores`) — or nothing
-#             admitted is unfinished. An empty or unreadable busy reading counts as 0: the
-#             promises alone decide.
+#   processor _res_busy_cores plus the admitted processor promises the load does not carry yet
+#             (`_gate_faded`) plus the newcomer's, at most share × cores ÷ 100 less the reserve
+#             (`_gate_share_cores`), whether or not anything is admitted. An empty or unreadable
+#             busy reading counts as 0 and every promise whole: the promises alone decide.
 #   promise   (wave-33 T1; D4 as amended, Δ10; AC-8.1) the gate does not forecast from history:
 #             a request promises 0 memory and the cores its kind declares (`_gate_cores_for`):
 #             a command that declares no width, work or landing, the measured cost of one
@@ -168,7 +168,8 @@
 #             A run of zero seconds has no measured time and writes none.
 #   room      (wave-28 T13; D14, the owner's "Option 2") another writer may start only while
 #             `_res_busy_cores` and `_res_busy_cores_5m`, each plus the processor promises of
-#             admitted, unfinished requests and <owed> times the suite cost (`_gate_cores_for
+#             admitted, unfinished requests the load does not carry yet (`_gate_faded`, the
+#             processor rule's one sum) and <owed> times the suite cost (`_gate_cores_for
 #             work`, what a writer not yet showing will be promised), are at most share × cores
 #             ÷ 100 less the reserve; and `_res_used_pct` is at most the share. It reads admitted runs and the
 #             owed count, never the queue (wave-38 T5; D21, ADR-060): a landing's runner waiting
@@ -717,6 +718,23 @@ gate_usage() {
     }'
 }
 
+# _gate_faded <now> <busy> — after a scan: the admitted runs' processor promises as the load does not
+# carry them yet. The 1-minute load average takes in a run over about its window, so each promise
+# counts max(0, 1 - (now - admitted) / 60) of its cores: whole when admitted, nothing a minute on,
+# when the load holds it. A running run is so counted once, never in the load and its promise both.
+# While <busy> is not a number, or <now> or an admission time is unreadable, a promise counts whole:
+# the promises alone decide. THE ONE SITE of that sum: admission, the room and the width ask read it.
+_gate_faded() {
+  printf '%s' "$_G_PROM" | awk -F: -v now="$1" -v busy="$2" '
+    function num(v) { return v ~ /^[0-9]+(\.[0-9]+)?$/ }
+    NF >= 3 {
+      w = 1
+      if (num(busy) && num(now) && num($NF)) { w = 1 - (now - $NF) / 60; if (w > 1) w = 1; if (w < 0) w = 0 }
+      s += $2 * w
+    }
+    END { printf "%.10g", s + 0 }'
+}
+
 # _gate_decide <id> — under the lock: rc 0 when this call admitted <id>.
 _gate_decide() {
   local f="$_GD/requests/$1" reading p now busy
@@ -733,17 +751,15 @@ _gate_decide() {
   if [ "$_G_UNF" -gt 0 ]; then
     [ "$reading" -ge 0 ] || return 1
   fi
-  printf '%s' "$_G_PROM" | awk -F: -v r="$reading" -v u="$(gate_usage "$reading")" -v share="$(gate_share)" \
-      -v lim="$(_gate_share_cores)" -v busy="$busy" -v unf="$_G_UNF" -v p="$p" "$_GATE_FITS_AWK"'
-    NF >= 2 { sc += $2 }
-    END {
+  now="$(_res_now)"
+  awk -v r="$reading" -v u="$(gate_usage "$reading")" -v share="$(gate_share)" -v lim="$(_gate_share_cores)" \
+      -v busy="$busy" -v f="$(_gate_faded "$now" "$busy")" -v p="$p" "$_GATE_FITS_AWK"'
+    BEGIN {
       split(p, n, ":")
       if (r >= 0 && !fits(u, share)) exit 1    # memory, the live reading: the hard limit
-      b = busy + 0; if (sc > b) b = sc         # processor, the soft limit
-      if (unf > 0 && b + n[2] > lim) exit 1
+      if (busy + f + n[2] > lim) exit 1        # processor, the soft limit, with or without company
       exit 0
     }' || return 1
-  now="$(_res_now)"
   printf 'admitted=%s\npromise=%s\n' "$now" "$p" >> "$f"
   case "$busy" in ''|.|*.*.*|*[!0-9.]*) : ;; *) printf 'load=%s\n' "$busy" >> "$f" ;; esac
   return 0
@@ -1285,21 +1301,20 @@ gate_state() {
 }
 
 # _gate_room_line <reading> <owed> — after a scan: the room line, rc 0 when there is room.
-# The loads print as read (-1 when empty); `promised` is the admitted runs' processor
-# promises plus <owed> times the cores a writer not yet showing will be promised,
+# The loads print as read (-1 when empty); `promised` is the admitted runs' promises the load
+# does not carry yet (`_gate_faded`) plus <owed> times the cores a writer not yet showing will be promised,
 # `_gate_cores_for work` (wave-33 T1; Δ10; wave-38 T5: the suite cost, whatever is on record).
 # `waiting` is printed and decides nothing (wave-38 T5; D21): the room is the admitted runs'.
 _gate_room_line() {
   local b1 b5 most
   b1="$(_res_busy_cores 2>/dev/null)"; b5="$(_res_busy_cores_5m 2>/dev/null)"
   most="$(_gate_cores_for work)"
-  printf '%s' "$_G_PROM" | awk -F: -v r="$1" -v owed="$2" -v b1="${b1:--1}" -v b5="${b5:--1}" \
+  awk -v r="$1" -v owed="$2" -v b1="${b1:--1}" -v b5="${b5:--1}" -v f="$(_gate_faded "$(_res_now)" "$b1")" \
       -v most="$most" -v share="$(gate_share)" -v lim="$(_gate_share_cores)" -v cores="$(_res_cores)" \
       -v unf="$_G_UNF" -v wait="$_G_WAIT" -v used="$(gate_usage "$1")" "$_GATE_FITS_AWK"'
     function known(v) { return v ~ /^[0-9]+(\.[0-9]+)?$/ }
-    NF >= 3 { pc += $2 }
-    END {
-      prom = pc + owed * most
+    BEGIN {
+      prom = f + owed * most
       quiet = (unf == 0 && owed == 0)
       room = 1
       if (!known(b1) || !known(b5) || r < 0) { if (!quiet) room = 0 }
@@ -1527,16 +1542,14 @@ gate_landing_close() {
 #          or not, is answered 0 until the older finishes (D22: landings one at a time at full
 #          width; work fills what is left; wave-38 T30: "until it finishes" now spans its gaps).
 #   count  the admission rule (`_gate_decide`'s) applied in sequence, no arithmetic of its own:
-#          s starts at the processor promises of the admitted runs plus PROMISE for each waiting
-#          landing request (the order serves those before any new landing ask); a run counts
-#          while max(_res_busy_cores, s) + PROMISE ≤ share × cores ÷ 100, and each one counted
-#          adds PROMISE to s. PROMISE is `_gate_cores_for landing`, the suite cost, above 0, so the
+#          s starts at the admitted runs' promises the load does not carry yet (`_gate_faded`)
+#          plus PROMISE for each waiting landing request (the order serves those before any new
+#          landing ask); a run counts while _res_busy_cores + s + PROMISE is at most the share's
+#          cores less the reserve, and each one counted adds PROMISE to s. PROMISE is `_gate_cores_for landing`, the suite cost, above 0, so the
 #          room ends the count and no number caps it, whatever the machine. Nothing counts
 #          while a whole run is admitted, or while the memory reading is over the share or unknown.
-#   floor  the oldest landing with nothing of its own open is answered at least 1, so a landing
-#          always progresses (the gate admits a run whatever the load while nothing is admitted).
-#          One with a run of its own open is answered the count alone, so no runner of it is
-#          started only to wait in the queue (A-T5-2).
+#   limit  the count is the whole answer, 0 included: the oldest landing waits like any request
+#          while the load is over the line, and is served first when it falls (the order rule).
 # The answer reads the store as it is: a runner started and not yet asking is not in it, so the
 # caller asks again once the runners it started have asked.
 # rc 2: not one argument, a key that is not a landing key (`_gate_landing_ok`), or a store that
@@ -1568,16 +1581,17 @@ gate_width_older() {
 # _gate_width <landing> — THE WIDTH ASK's one reading: "<answer> <older landing, or ->", rc 0; rc 2 the
 # store, rc 1 the lock.
 _gate_width() {
-  local land="$1" reading
+  local land="$1" reading busy
   _gate_store || return 2
   _gate_lock || { echo "gate: the lock could not be had" >&2; return 1; }
   reading="$(_gate_reading)"
   _gate_scan
   _gate_idle "$reading"
   _gate_unlock
-  { printf '%s' "$_G_PROM"; printf '%s' "$_G_LAND"; printf '%s' "$_G_LEASE"; } | awk -v land="$land" \
+  busy="$(_res_busy_cores 2>/dev/null)"
+  { printf '%s' "$_G_LAND"; printf '%s' "$_G_LEASE"; } | awk -v land="$land" \
       -v p="$(_gate_cores_for landing)" -v r="$reading" -v u="$(gate_usage "$reading")" \
-      -v share="$(gate_share)" -v lim="$(_gate_share_cores)" -v busy="$(_res_busy_cores 2>/dev/null)" \
+      -v share="$(gate_share)" -v lim="$(_gate_share_cores)" -v busy="$busy" -v f="$(_gate_faded "$(_res_now)" "$busy")" \
       -v whole="$_G_WHOLE" -v lwait="$_G_LWAIT" "$_GATE_FITS_AWK"'
     function older(a, b) {
       if (T[a] != T[b]) return T[a] < T[b]
@@ -1590,9 +1604,7 @@ _gate_width() {
       if (!(k in A) || a < A[k] || (a == A[k] && i < I[k])) { A[k] = a; I[k] = i }
       next
     }
-    NF == 1 { split($1, f, ":"); sc += f[2] }
     END {
-      own = (land in A)
       # The active landings and their age: a held lease by (first, 0, seq); one with no lease by
       # (its earliest open request, 1, its id).
       for (k in A) { act[k] = 1; T[k] = A[k]; C[k] = 1; Q[k] = I[k] }
@@ -1607,10 +1619,9 @@ _gate_width() {
       if (ol != "") { print 0, ol; exit }
       n = 0; p += 0
       if (!whole && r >= 0 && fits(u, share) && p > 0) {
-        s = sc + lwait * p; b0 = busy + 0
-        while (1) { b = b0; if (s > b) b = s; if (b + p > lim) break; n++; s += p }
+        s = f + lwait * p
+        while (busy + s + p <= lim) { n++; s += p }
       }
-      if (n == 0 && !own) n = 1
       print n, "-"
     }'
 }
