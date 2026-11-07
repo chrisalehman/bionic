@@ -3448,7 +3448,7 @@ case "$VERB" in
   # copy and a rename so a reader never sees half a number. It is the machine's and not a run's: no session key,
   # roster or engagement is read, and nothing but those files is written. Both values are judged before either is
   # written. REFUSED: a share that is not a whole number from 1 to 100 (leading zeros read as decimal) exits 1; a
-  # reserve that is not a decimal at most the cores exits 2; a file that cannot be written exits 1; whichever
+  # reserve that `gate_reserve_ok`, the reader's own rule, refuses exits 2; a file that cannot be written exits 1; whichever
   # it is, both files are as they were. The contract-verb arm of the bash wall lists `share`, so a subagent may
   # call no form of it.
   share)
@@ -3475,14 +3475,9 @@ case "$VERB" in
         exit 1
       fi
     fi
-    if [ "$SH_RSET" = yes ]; then
-      case "$SH_RES" in ''|.*|*.|*[!0-9.]*|*.*.*) SH_BAD=yes ;; *) SH_BAD=no ;; esac
-      if [ "$SH_BAD" = no ] && [ "${#SH_RES}" -le 9 ] \
-         && awk -v v="$SH_RES" -v c="$(_res_cores)" 'BEGIN { exit !(v + 0 <= c + 0) }'; then :; else SH_BAD=yes; fi
-      if [ "$SH_BAD" = yes ]; then
-        die "REFUSED — reserve $(printf '%q' "${SH_RES:0:20}") is not a decimal from 0 to the machine's cores ($(_res_cores)); usage: share [<1-100>] [reserve=<cores>]; nothing was changed."
-        exit 2
-      fi
+    if [ "$SH_RSET" = yes ] && ! gate_reserve_ok "$SH_RES"; then
+      die "REFUSED — reserve $(printf '%q' "${SH_RES:0:20}") is not a decimal from 0 to the machine's cores ($(_res_cores)); usage: share [<1-100>] [reserve=<cores>]; nothing was changed."
+      exit 2
     fi
     mkdir -p "$SH_DIR" 2>/dev/null || { die "REFUSED — the share file could not be written; the share is unchanged."; exit 1; }
     for SH_W in "share:$SH_SET:${SH_N:-}" "reserve:$SH_RSET:$SH_RES"; do

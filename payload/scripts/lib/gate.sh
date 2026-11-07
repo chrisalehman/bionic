@@ -24,6 +24,7 @@
 #                  class=<browser|compile>, the class the ask named (--class), which sets its prior
 #                  then, once admitted, admitted=<epoch> promise=<mem pct>:<cores>:<seconds>
 #                  and load=<busy cores>, the 1-minute reading it was admitted on (wave-39 T8; D11),
+#                  and cpu0=<seconds>, the processor seconds the asking shell had reaped by then,
 #                  and once ended, ended=<epoch> rc=<n> (rc=137 when the gate found it killed;
 #                  rc=gone when its holder died before it was admitted, written at its who's next
 #                  ask for the key), and by=<sid> why=<reason> when stop-run ended it (D8).
@@ -156,19 +157,19 @@
 #             (`_gate_share_cores`), whether or not anything is admitted. An empty or unreadable
 #             busy reading counts as 0 and every promise whole: the promises alone decide.
 #   promise   a request promises 0 memory and the cores `_gate_cores_for` gives it: the key's
-#             measured cores where a kept cost line carries them (`_gate_cost_cores`), else a prior.
-#             A whole run, and a browser or compile run whose key has none, is promised the room free
-#             at admission, max(1, floor(share cores - busy - faded)); every other request one suite's
-#             measured cost, resources.sh's `_res_suite_cores`. Live load is the backstop: the readings
-#             above. The seconds are the key's recorded duration (`_gate_seconds`), scaled by the load
-#             now over the load each run was admitted under, which the landing's time limit reads
-#             (line.sh `_line_time_for`), 0 with none. While the memory reading is unknown (-1) a
+#             measured cores where a kept cost line carries them (`_gate_cost_cores`), but never more
+#             than the room free at admission, max(1, floor(share cores - busy - faded)); else a prior.
+#             A whole run, and a browser or compile run whose key has none, is promised that room;
+#             every other request one suite's measured cost, resources.sh's `_res_suite_cores`. Live
+#             load is the backstop: the readings above. The seconds are the key's recorded duration
+#             (`_gate_seconds`), scaled by the load now over the load each run was admitted under,
+#             which the landing's time limit reads (line.sh `_line_time_for`), 0 with none. While the memory reading is unknown (-1) a
 #             command is admitted only when nothing admitted is unfinished. A whole request admitted
 #             is admitted alone.
 #   duration  at gate_end: the seconds from admitted to ended and the cores the run used, one line
 #             in the key's keyed file, <seconds>:<epoch>:<load>:<cores>: the request's load=, empty
 #             when it has none, and the children's processor seconds from `times` in the holder's own
-#             shell over the wall seconds, between 0.1 and the machine's cores.
+#             shell, less its cpu0= baseline, over the wall seconds, between 0.1 and the machine's cores.
 #             A run of zero seconds has no measured time and writes none.
 #   room      (wave-28 T13; D14, the owner's "Option 2") another writer may start only while
 #             `_res_busy_cores` and `_res_busy_cores_5m`, each plus the processor promises of
@@ -255,18 +256,26 @@ gate_share() {
   printf '%s\n' "$v"
 }
 
-# gate_reserve — the cores the person keeps for themselves, read beside the share: the first
-# word of the first line of bionic/reserve, a non-negative decimal no larger than the cores this
-# process may use. Anything else, the file absent among it, is 1: a machine that has a person at
-# it never gives them every core.
-gate_reserve() {
-  local v='' c
-  { read -r v < "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/reserve"; } 2>/dev/null
-  v="${v%%[[:space:]]*}"
-  case "$v" in ''|.*|*.|*[!0-9.]*|*.*.*) v=1 ;; esac
+# gate_reserve_ok <value> — rc 0 when <value> may be a reserve: a non-negative decimal of at most nine
+# characters, no larger than the cores this process may use. THE ONE SITE of that rule: gate_reserve
+# reads a refused file as 1, and the share verb refuses to write one, so the two cannot disagree.
+gate_reserve_ok() {
+  local c
+  case "${1:-}" in ''|.*|*.|*[!0-9.]*|*.*.*|??????????*) return 1 ;; esac
   c="$(_res_cores)"
   _res_is_uint "$c" && [ "$c" -ge 1 ] || c=1
-  awk -v v="$v" -v c="$c" 'BEGIN { if (v + 0 > c) v = 1; printf "%.10g\n", v + 0 }'
+  awk -v v="$1" -v c="$c" 'BEGIN { exit !(v + 0 <= c + 0) }'
+}
+
+# gate_reserve — the cores the person keeps for themselves, read beside the share: the first
+# word of the first line of bionic/reserve, as `gate_reserve_ok` admits it. Anything else, the file
+# absent among it, is 1: a machine that has a person at it never gives them every core.
+gate_reserve() {
+  local v=''
+  { read -r v < "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/reserve"; } 2>/dev/null
+  v="${v%%[[:space:]]*}"
+  gate_reserve_ok "$v" || v=1
+  awk -v v="$v" 'BEGIN { printf "%.10g\n", v + 0 }'
 }
 
 # _gate_share_cores — the processor room the share allows: share × cores ÷ 100 less the reserve,
@@ -350,7 +359,7 @@ _gate_ancestor() {
 _gate_read() {  # <file> — sets _R_<field> from its lines (a later line wins); rc 1 unreadable
   local l
   _R_key='' _R_kind='' _R_who='' _R_tree='' _R_asked='' _R_holder='' _R_admitted=''
-  _R_promise='' _R_ended='' _R_rc='' _R_landing='' _R_within='' _R_record='' _R_left='' _R_load='' _R_class=''
+  _R_promise='' _R_ended='' _R_rc='' _R_landing='' _R_within='' _R_record='' _R_left='' _R_load='' _R_class='' _R_cpu0=''
   [ -r "$1" ] || return 1
   while IFS= read -r l || [ -n "$l" ]; do
     case "$l" in
@@ -370,6 +379,7 @@ _gate_read() {  # <file> — sets _R_<field> from its lines (a later line wins);
       left=*) _R_left="${l#left=}" ;;
       load=*) _R_load="${l#load=}" ;;
       class=*) _R_class="${l#class=}" ;;
+      cpu0=*) _R_cpu0="${l#cpu0=}" ;;
     esac
   done < "$1"
 }
@@ -452,37 +462,43 @@ _gate_cost_file() {  # <key> <project> -> its cost file, cost/<project>%<key>
 # THE ONE SITE of the promise: the key's measured cores (`_gate_cost_cores`) where a kept line carries
 # them, else a prior. A whole run, and a browser or compile run whose key has no measurement, sizes its
 # own width, so it is promised the room free now, max(1, floor(`_gate_share_cores` - busy - faded)), and
-# leaves the rest. A whole run's measurement is never read: it ran at the width it was given, so it
-# measured its grant and not its need, and reading it would only ever narrow the next. Every other
+# leaves the rest. A measured key is promised no more than that same room, printed as its line wrote it
+# when under it: a measurement past the share would otherwise never fit and, at the head of the order,
+# would hold every request behind it; the load reading then carries what the promise left out. A whole
+# run's measurement is never read: it ran at the width it was given, so it measured its grant and not
+# its need, and reading it would only ever narrow the next. Every other
 # request is promised one suite's measured cost, resources.sh's `_res_suite_cores`, and so is the room's
 # owed writer (`_gate_cores_for work`), so the promise and the room cannot disagree. <busy> and <faded>
 # are the reading admission took; a caller that has none has them read here.
 _gate_cores_for() {
   local c='' b f
   [ "${1:-work}" = whole ] || [ -z "${3:-}" ] || c="$(_gate_cost_cores "$3" "$4")"
-  if [ -n "$c" ]; then printf '%s\n' "$c"; return 0; fi
-  case "${1:-work}:${2:-}" in
+  [ -n "$c" ] || case "${1:-work}:${2:-}" in
     whole:*|*:browser|*:compile) ;;
     *) _res_suite_cores; return ;;
   esac
   if [ "$#" -ge 6 ]; then b="$5" f="$6"; else b="$(_res_busy_cores 2>/dev/null)"; f="$(_gate_faded "$(_res_now)" "$b")"; fi
-  awk -v l="$(_gate_share_cores)" -v b="$b" -v f="$f" 'BEGIN { x = int(l - b - f); if (x < 1) x = 1; print x }'
+  awk -v l="$(_gate_share_cores)" -v b="$b" -v f="$f" -v c="$c" \
+    'BEGIN { x = int(l - b - f); if (x < 1) x = 1; if (c != "" && c + 0 <= x) print c; else print x }'
 }
 
+# THE ROBUST PICK, one text both readers of a cost file include, as `$_GATE_FITS_AWK` is shared:
+# pick(a, n) sorts a[1..n] and returns, with three or more, the largest at or under twice their median,
+# with fewer the largest, 0 with none. The seconds and the cores are picked by it alike.
+_GATE_PICK_AWK='
+function sortv(a, n,   i, j, x) { for (i = 2; i <= n; i++) { x = a[i]; for (j = i - 1; j >= 1 && a[j] > x; j--) a[j + 1] = a[j]; a[j + 1] = x } }
+function median(a, n) { return (n % 2 ? a[(n + 1) / 2] : (a[n / 2] + a[n / 2 + 1]) / 2) }
+function pick(a, n,   k, m) { if (n < 1) return 0; sortv(a, n); k = n; if (n >= 3) { m = median(a, n); while (k > 1 && a[k] > 2 * m) k-- }; return a[k] }
+'
+
 # _gate_cost_cores <key> <project> -> the cores the key's kept runs measured, the fourth field of its
-# cost lines, picked by the rule `_gate_seconds` picks seconds by (with three or more, the largest at or
-# under twice their median; with fewer, the largest) and printed as the line wrote it; nothing when no
-# kept line carries one. The keyed file only: an unkeyed 1.15.0 line holds its epoch in that place.
+# cost lines, picked by the robust pick and printed as the line wrote it; nothing when no kept line
+# carries one. The keyed file only: an unkeyed 1.15.0 line holds its epoch in that place.
 _gate_cost_cores() {
-  awk -F: '
+  awk -F: "$_GATE_PICK_AWK"'
     NF >= 4 && $4 ~ /^[0-9]+(\.[0-9]+)?$/ { n++; v[n] = $4 + 0; t[n] = $4 }
-    END {
-      if (n == 0) exit
-      for (i = 2; i <= n; i++) { x = v[i]; y = t[i]; for (j = i - 1; j >= 1 && v[j] > x; j--) { v[j + 1] = v[j]; t[j + 1] = t[j] }; v[j + 1] = x; t[j + 1] = y }
-      k = n
-      if (n >= 3) { m = (n % 2 ? v[(n + 1) / 2] : (v[n / 2] + v[n / 2 + 1]) / 2); while (k > 1 && v[k] > 2 * m) k-- }
-      print t[k]
-    }' "$(_gate_cost_file "$1" "$2")" 2>/dev/null
+    END { if (n == 0) exit; p = pick(v, n); for (i = 1; i <= n; i++) if (t[i] + 0 == p) { print t[i]; exit } }' \
+    "$(_gate_cost_file "$1" "$2")" 2>/dev/null
 }
 
 # _gate_seconds <key> <project> -> the key's promised duration in whole seconds, read from its kept
@@ -505,10 +521,8 @@ _gate_seconds() {  # <key> <project> [<load now>]
   [ -s "$f" ] || { f="$_GD/cost/${1//\//%}"; keyed=0; }
   [ -s "$f" ] || { echo 0; return 0; }
   if [ "$#" -ge 3 ]; then now="$3"; else now="$(_res_busy_cores 2>/dev/null)"; fi
-  awk -F: -v keyed="$keyed" -v now="$now" '
+  awk -F: -v keyed="$keyed" -v now="$now" "$_GATE_PICK_AWK"'
     function num(s) { return s ~ /^[0-9]+(\.[0-9]+)?$/ }
-    function sortv(a, n,   i, j, x) { for (i = 2; i <= n; i++) { x = a[i]; for (j = i - 1; j >= 1 && a[j] > x; j--) a[j + 1] = a[j]; a[j + 1] = x } }
-    function median(a, n) { return (n % 2 ? a[(n + 1) / 2] : (a[n / 2] + a[n / 2 + 1]) / 2) }
     { n++
       if (keyed) { v[n] = $1 + 0; if (NF >= 3 && num($3)) { ld[n] = $3 + 0; nl++ } }
       else v[n] = (NF >= 3 ? $3 : $1) + 0 }
@@ -525,13 +539,7 @@ _gate_seconds() {  # <key> <project> [<load now>]
         c = int(m); if (c < m) c++
         printf "%d\n", c; exit
       }
-      sortv(v, n)
-      m = (n > 0 ? v[n] : 0)
-      if (n >= 3) {
-        med = median(v, n)
-        for (i = n; i >= 1; i--) if (v[i] <= 2 * med) { m = v[i]; break }
-      }
-      printf "%d\n", m
+      printf "%d\n", pick(v, n)
     }' "$f" 2>/dev/null
 }
 
@@ -1235,6 +1243,8 @@ gate_ask() {
         id="$_GATE_ID"
       fi
       _gate_decide "$id"; rc=$?
+      # THE BASELINE: what this shell has reaped so far, its own polls among it, is not the run's.
+      if [ "$rc" -eq 0 ]; then _gate_cpu; printf 'cpu0=%s\n' "$_G_CPU" >> "$_GD/requests/$id"; fi
       _gate_unlock
       if [ "$rc" -eq 0 ]; then
         if [ "$_GATE_TERMED" = 1 ]; then _gate_term_end "$id" 1; return 143; fi
@@ -1258,6 +1268,14 @@ gate_ask() {
     sleep "$poll"
     if [ "$_GATE_TERMED" = 1 ]; then _gate_term_end "$id" 0; return 143; fi
   done
+}
+
+# _gate_cpu — under the lock, in the calling shell and never inside `$( )`: _G_CPU, the children's user
+# and system seconds that shell has reaped, the second line of `times`, to two decimals.
+_gate_cpu() {
+  times > "$_GD/lock/times" 2>/dev/null
+  _G_CPU="$(awk 'NR == 2 { for (i = 1; i <= 2; i++) { x = $i; gsub(",", ".", x); split(x, a, "m"); sub(/s$/, "", a[2]); cpu += a[1] * 60 + a[2] } }
+    END { printf "%.2f\n", cpu }' "$_GD/lock/times" 2>/dev/null)"
 }
 
 # gate_end runs in the holder's own shell, called directly and never inside `$( )`: the `times` it
@@ -1304,15 +1322,14 @@ gate_end() {
   # kept, the seconds for the landing's time limit and the cores for the key's next promise. A run of
   # zero seconds has no measured time and writes none. The load is the request's load=, the reading it
   # was admitted under, written empty when it has none so the cores keep their place. The cores are the
-  # children's user and system seconds, the second line of `times`, over the wall seconds, capped at
-  # the machine's cores and floored at 0.1, to two decimals.
+  # children's seconds (`_gate_cpu`) less the request's cpu0=, what the asking shell had reaped when
+  # admitted (none when absent), over the wall seconds, capped at the machine's cores and floored at
+  # 0.1, to two decimals.
   if [ "$secs" -gt 0 ]; then
     case "$_R_load" in ''|.|*.*.*|*[!0-9.]*) ld='' ;; *) ld="$_R_load" ;; esac
-    times > "$_GD/lock/times" 2>/dev/null
-    cores="$(awk -v s="$secs" -v c="$(_res_cores)" '
-      NR == 2 { for (i = 1; i <= 2; i++) { x = $i; gsub(",", ".", x); split(x, a, "m"); sub(/s$/, "", a[2]); cpu += a[1] * 60 + a[2] } }
-      END { k = cpu / s; if (c + 0 >= 1 && k > c + 0) k = c + 0; if (k < 0.1) k = 0.1; printf "%g\n", int(k * 100 + 0.5) / 100 }' \
-      "$_GD/lock/times" 2>/dev/null)"
+    _gate_cpu
+    cores="$(awk -v u="$_G_CPU" -v u0="$_R_cpu0" -v s="$secs" -v c="$(_res_cores)" \
+      'BEGIN { k = (u - u0) / s; if (c + 0 >= 1 && k > c + 0) k = c + 0; if (k < 0.1) k = 0.1; printf "%g\n", int(k * 100 + 0.5) / 100 }')"
     { cat "$cf" 2>/dev/null
       printf '%s:%s:%s:%s\n' "$secs" "$now" "$ld" "$cores"
     } | tail -n 3 > "$_GD/cost/.new.$id" && mv "$_GD/cost/.new.$id" "$cf"

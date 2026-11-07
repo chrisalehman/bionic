@@ -508,9 +508,8 @@ expect_eq "SS.2 reserve=2 writes 2 and the next print reads it (room 5.36)" \
 ss_verb reserve=9 >/dev/null; SS_RC=$?
 expect_eq "SS.3 reserve=9 on 8 cores exits 2 and leaves the file as it was" \
   "2|2" "$SS_RC|$(sed -n 1p "$SS_CFG/bionic/reserve")"
-ss_res() { ( . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/resources.sh"; . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/gate.sh"
-  printf '%s\n' "$1" > "$SS_CFG/bionic/reserve"; ss_verb reserve="$1" >/dev/null; printf '%s|' "$?"; CLAUDE_CONFIG_DIR="$SS_CFG" gate_reserve ) 2>/dev/null; }
-expect_eq "SS.4 the verb and the gate judge a reserve alike: ten characters refused by both (2, read 1), 2.5 taken by both" \
+ss_res() { printf '%s\n' "$1" > "$SS_CFG/bionic/reserve"; ss_verb reserve="$1" >/dev/null; echo "$?|$(ss_verb | sed -n 's/.* reserve=\([^ ]*\) .*/\1/p')"; }
+expect_eq "SS.4 the verb and gate_reserve (its print) judge a reserve alike: ten characters refused by both (2, read 1), 2.5 taken by both" \
   "2|1 0|2.5" "$(ss_res 0000000002) $(ss_res 2.5)"
 # ============================================================
 section "Section 41: the quiet Patrol, tick side — prompt, band, hold, digest, version (wave-24 T7; REQ-4 AC-4.1–4.6, 4.9, 4.11; D1, D4, D5; ADR-041)"
