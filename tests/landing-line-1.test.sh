@@ -608,6 +608,30 @@ expect_eq "(g4) n1's verdict carries the gate's first answer as its width; one w
 world_machine 8 8192 40 0.5
 
 # ---------------------------------------------------------------------------
+section "§HOLDER: the landing runner asks the gate in its own shell, so the run's baseline holds what that shell had reaped"
+#
+# gate_ask writes cpu0= from `times` in the shell that runs it and gate_end subtracts it from the same shell's count, so an
+# ask inside `$( )` baselines only the subshell's children: what the runner reaped before (a planted burn here) and the
+# subshell's own scans are charged to the run. Another process holds the gate until the runner's request is filed.
+HD="$WORLD_ROOT/holder"; mkdir -p "$HD"
+(
+  export BIONIC_GATE_DIR="$HD/gate" BIONIC_GATE_POLL=0.3; _line_load_gate || exit 1
+  bash -c '. "$1/payload/scripts/lib/gate.sh"; id="$(gate_ask whole blocker)"; i=0
+    while [ ! -e "$BIONIC_GATE_DIR/requests/$((id + 1))" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+    sleep 0.5; gate_end "$id" 0' _ "$REPO" >/dev/null 2>&1 &
+  wait_ticks 50 0.1 grep -q '^admitted=' "$HD/gate/requests/1"
+  awk 'BEGIN { for (i = 0; i < 1.5e7; i++) x += i }'; times > "$HD/t0"
+  _line_runner a.test.sh 30 "$HD/notree" "$HD/log" "$HD/res" $$ 2> "$HD/err"; wait
+)
+HID="$(sed -n 's/^admitted=//p' "$HD/res" 2>/dev/null)"; hd_req() { sed -n "s/^$1=//p" "$HD/gate/requests/$HID" 2>/dev/null | tail -n 1; }
+expect_contains "(h0) the runner's ask waited behind the planted holder" "waits for its turn and room" "$(cat "$HD/err" 2>/dev/null)"
+expect_regex "(h1-pre) the extractor reads the runner's request: its admitted= is a clock reading" '^[0-9]+$' "$(hd_req admitted)"
+# cpu0= is written to two decimals, so it may round 0.005 under the seconds it counts.
+expect_eq "(h1) its cpu0= is at least the children seconds the asking shell had reaped before it asked" "yes" \
+  "$(awk -v c="$(hd_req cpu0)" 'NR == 2 { gsub(",", "."); gsub(/[ms]/, " "); b = $1 * 60 + $2 + $3 * 60 + $4 }
+     END { print (c != "" && c + 0.005 >= b) ? "yes" : "no: cpu0=" c " before=" b }' "$HD/t0")"
+
+# ---------------------------------------------------------------------------
 section "§PROOF: the tool makes the proof; no stamp is read (AC-1.2)"
 #
 # A stamp is what 1.12.0's land judged: a line in the tree's `bionic-stamps`. Each world plants one
