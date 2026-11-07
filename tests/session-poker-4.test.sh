@@ -1977,16 +1977,23 @@ ct_task() {  # <AC> -> its block's task: value
   awk -v a="$1:" '/^## Verification Matrix/ { m = 1 } m && index($0, a) == 1 { b = 1; next } b && /^[^ \t]/ { b = 0 }
     b && /^[ \t]+task:/ { sub(/^[ \t]+task:[ \t]*/, ""); print; exit }' "$PCT"
 }
+ct_close() { ( L="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"; . "$L/root.sh"; . "$L/run.sh"; . "$L/units.sh"; . "$L/walls.sh"; matrix_close_rows "$PCT" ); }
 poke "$RCT" matrix-render
 expect_eq "CT-1 §CLOSE-TASK matrix-render (exit 0) names the close row the task of the criterion whose eval is the hand-holds measure" \
   "0|T3" "$RC|$(ct_task AC-1.1)"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "CT-1b …and lib/walls.sh matrix_close_rows lists that criterion, the one the close settles" "AC-1.1" "$(ct_close)"
 expect_eq "CT-2 …and pending for its sibling, served by the same three rows, whose eval is not" "pending" "$(ct_task AC-1.2)"
 expect_eq "CT-3 …and the one row serving a criterion stays its task" "T4" "$(ct_task AC-2.1)"
 CT_ROWS="$(ct_row T6 9 close REQ-1)" awk '{ print } /^\| T4 \|/ { print ENVIRON["CT_ROWS"] }' "$TMPROOT/ct-before" > "$PCT"
 poke "$RCT" matrix-render
 expect_eq "CT-4 control: with two close rows serving, the hand-holds criterion reads pending, the single-row one T4 (exit 0)" \
   "0|pending|T4" "$RC|$(ct_task AC-1.1)|$(ct_task AC-2.1)"
+# One predicate decides the close's criterion: a form feed between the eval's words is the close's to the task: cell
+# and to lib/walls.sh matrix_close_rows alike, or neither. The two read one answer, so they cannot disagree.
+sed $'s/landing-report --hand-holds/landing-report\f--hand-holds/' "$TMPROOT/ct-before" > "$PCT"; poke "$RCT" matrix-render
+expect_eq "CT-5 agreement: a form-fed eval names the close row as task: and matrix_close_rows lists it (exit 0)" "0|T3|AC-1.1" \
+  "$RC|$(ct_task AC-1.1)|$(ct_close)"
 
 # ============================================================
 section "§SERVES: matrix-render writes each block's serves: from its Eval design row's Requirement cell, after provenance:, and a block rendered before the key gains it"
