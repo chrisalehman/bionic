@@ -52,10 +52,14 @@ NOW=1700000000
 # also keeps the gate store an ordinary run asks under this suite's root) and a planted 8-core
 # probe. Sections 1-5 plant share 100, whose room on 8 cores is 8, the ceiling they were written
 # against; Section 6 plants the machine's own default, 92.
+# The room is the share's cores less the reserve (one core, absent a reserve file). Every case but
+# Section 6's last pins the ceiling arithmetic or the fallback, so the home plants reserve 0 and
+# those numbers read the share whole; that case removes the file and reads the default.
 RW_HOME="$TMPROOT/home"
 mkdir -p "$RW_HOME/bionic"
 rw_share() { printf '%s\n' "$1" > "$RW_HOME/bionic/share"; }
 rw_share 100
+printf '0\n' > "$RW_HOME/bionic/reserve"
 RW_PIN=(CLAUDE_CONFIG_DIR="$RW_HOME" BIONIC_PROBE_CORES=8)
 
 # ring_of <path> <epoch> <sample>... — rewrite a ring with one line per sample, all at <epoch>
@@ -232,8 +236,8 @@ expect_contains "5 a valid ceiling of 3 is still honoured (not replaced by 8)" "
 echo
 section "Section 6: the width is the share's room, read through the gate's one formula (wave-32 T2; D1)"
 #
-# THE CLAIM. A run's width is gate_width (payload/scripts/lib/gate.sh): floor(share × cores ÷ 100),
-# 7 at share 92 on 8 cores. The runner keeps no number of its own; BIONIC_TEST_JOBS_CEILING is a
+# THE CLAIM. A run's width is gate_width (payload/scripts/lib/gate.sh): floor(share × cores ÷ 100 less
+# the reserve), 7 at share 92 on 8 cores with reserve 0 and 6 under the default reserve of 1. The runner keeps no number of its own; BIONIC_TEST_JOBS_CEILING is a
 # cap UNDER the width, never above it; the pressure rung still narrows a strained machine. The
 # expected width is read from the library under the same pins, so the runner and the gate are held
 # to one formula rather than to a literal both could drift from.
@@ -247,7 +251,6 @@ expect_eq "6a the formula's width at share 92 on 8 cores is 7 (the readback is r
 ring_of "$RING_W" "$NOW" "$S_CLEAR" "$S_CLEAR"
 dry_run "$RING_W" "$S_CLEAR"
 expect_contains "6b no ceiling named: a clear ring runs at the formula's width" "JOBS=$RW_W92" "$DRY_OUT"
-expect_absent "6c …not the old literal default of 8" "JOBS=8" "$DRY_OUT"
 ring_of "$RING_W" "$NOW" "$S_CLEAR" "$S_CLEAR"
 dry_run "$RING_W" "$S_CLEAR" 8
 expect_contains "6d a ceiling above the width is a cap, not a raise: ceiling 8 at share 92 is the width" \
@@ -264,6 +267,16 @@ expect_contains "6g …and the runner follows the share: JOBS=4" "JOBS=$RW_W50" 
 ring_of "$RING_W" "$NOW" "$S_CLEAR" "$S_CLEAR"
 dry_run "$RING_W" "$S_CLEAR" "eight"
 expect_contains "6h a garbage ceiling falls back to the width, not to 8" "JOBS=$RW_W50" "$DRY_OUT"
+# The default reserve: no reserve file, so one core is the person's and the runner's width is one lower.
+rm -f "$RW_HOME/bionic/reserve"
+rw_jobs() { sed -n 's/^\(JOBS=[0-9]*\)$/\1/p' <<<"$DRY_OUT"; }
+ring_of "$RING_W" "$NOW" "$S_CLEAR" "$S_CLEAR"
+rw_share 92; dry_run "$RING_W" "$S_CLEAR"; RW_R92="$(rw_jobs)"
+ring_of "$RING_W" "$NOW" "$S_CLEAR" "$S_CLEAR"
+rw_share 50; dry_run "$RING_W" "$S_CLEAR"; RW_R50="$(rw_jobs)"
+expect_eq "6i the default reserve of 1 comes off the runner's width: share 92 -> JOBS=6, share 50 -> JOBS=3" \
+  "JOBS=6 JOBS=3" "$RW_R92 $RW_R50"
+printf '0\n' > "$RW_HOME/bionic/reserve"
 rw_share 100
 
 echo
@@ -293,8 +306,8 @@ printf '#!/bin/bash\necho run >> "$NV_MARKS/plain.runs"\nexit 0\n' > "$NV/tests/
 NV_OUT=""; NV_RC=0
 nv_drive() {  # [runner args...] — the scratch runner on the planted load, old ceiling NV_MAXW (1 s); NV_OUT, NV_RC
   NV_OUT="$( cd "$NV" && env -u BIONIC_GATE_DIR -u BIONIC_GATE_ADMIT -u BIONIC_GATE_AGENT -u BIONIC_TEST_JOBS_CEILING \
-      "${RW_PIN[@]}" NV_MARKS="$NV_MARKS" NV_LOAD="$NV_LOAD" BIONIC_GATE_DIR="$TMPROOT/novoid-gate" BIONIC_GATE_POLL=0.1 \
-      BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES=0 BIONIC_PROBE_TOTAL_MB=8192 \
+      "${RW_PIN[@]}" NV_MARKS="$NV_MARKS" NV_LOAD="$NV_LOAD" BIONIC_GATE_DIR="$TMPROOT/novoid-gate" BIONIC_GATE_POLL="${NV_POLL:-0.1}" \
+      BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES="${NV_BUSY:-0}" BIONIC_PROBE_TOTAL_MB=8192 \
       BIONIC_LOAD_NOW_FILE="$NV_LOAD" BIONIC_SETTLE_MAX_WAIT="${NV_MAXW:-1}" \
       BIONIC_PRESSURE_RING="$TMPROOT/novoid-ring" BIONIC_NOW_EPOCH="$NOW" \
       BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 \
@@ -355,5 +368,36 @@ expect_eq "NV.13 BIONIC_QUIET=1 is read by nobody: the command runs at once, the
   "$NV_RC $([ -f "$NV_BKD/envq.ran" ] && echo yes || echo no)"
 expect_absent "NV.14 …and nothing says void (NV.13 is the positive on the same drive)" "void" "$NV_OUT"
 expect_eq "NV.15 …asking the gate as work, never for the whole machine" "work" "$(nv_kinds)"
+
+section "§GRANT a whole run starts no more jobs than the gate promised it (AC-3.3)"
+# The scratch runner above, at busy 2.0, share 92 and reserve 1 on 8 cores: the room free at admission is 4,
+# under the share's width of 6, and the run's width is read from its own admitted request.
+rw_share 92; printf '1\n' > "$RW_HOME/bionic/reserve"; rm -rf "$TMPROOT/novoid-gate"; printf '0\n' > "$NV_LOAD"
+NV_BUSY=2.0 nv_drive
+expect_eq "GR.1 the whole run is promised the free room, 4, and runs 4 jobs wide, not the width (rc|promise|width)" "0|0:4:0|width 4" \
+  "$NV_RC|$(sed -n 's/^promise=//p' "$TMPROOT/novoid-gate"/requests/[0-9]* 2>/dev/null)|$(printf '%s\n' "$NV_OUT" | grep -o 'width [0-9]*')"
+printf '0\n' > "$RW_HOME/bionic/reserve"; rw_share 100
+# THE ASK IS THE HOLDER'S OWN. The gate's cpu0= baseline is the asking shell's `times`, so a runner that asks inside `$( )`
+# leaves out what it had reaped before it asked. A planted timing table gives the longest-first order, read just before
+# the ask, a floor of processor seconds measured here; another process holds the gate until the run's request is filed.
+NV_TT="$NV/tests/timing.tsv"; NV_TP='BEGIN { while ((getline row < tbl) > 0) { split(row, f, "\t"); if (f[1] != "" && f[2] ~ /^[0-9]+$/) sec[f[1]] = f[2] } }'
+awk 'BEGIN { for (i = 0; i < 200000; i++) printf "x%d.test.sh\t%d\n", i, i % 90 }' > "$NV_TT"
+times > "$TMPROOT/tt0"; for i in 1 2; do LC_ALL=C awk -F'\t' -v tbl="$NV_TT" "$NV_TP" < /dev/null; done; times > "$TMPROOT/tt1"
+rm -rf "$TMPROOT/novoid-gate"
+env "${RW_PIN[@]}" BIONIC_GATE_DIR="$TMPROOT/novoid-gate" BIONIC_PROBE_USED_PCT=10 BIONIC_PROBE_BUSY_CORES=0 BIONIC_PROBE_TOTAL_MB=8192 \
+    BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1 bash -c '. "$1/payload/scripts/lib/gate.sh"
+  id="$(gate_ask work blocker)"; i=0
+  while [ ! -e "$BIONIC_GATE_DIR/requests/$((id + 1))" ] && [ "$i" -lt 300 ]; do sleep 0.1; i=$((i + 1)); done
+  sleep 0.5; gate_end "$id" 0' _ "$BIONIC_SCRIPTS_DIR" >/dev/null 2>&1 & NV_BLK=$!
+NV_POLL=0.3 nv_drive; wait "$NV_BLK"
+NV_REQ="$(grep -l '^kind=whole$' "$TMPROOT/novoid-gate"/requests/[0-9]* 2>/dev/null | head -n 1)"; nv_req() { sed -n "s/^$1=//p" "$NV_REQ" 2>/dev/null | tail -n 1; }
+expect_eq "GR.2 the whole run waited behind the planted holder, then ran green (rc|waited)" "0|yes" \
+  "$NV_RC|$(printf '%s\n' "$NV_OUT" | grep -q 'waits for its turn and room' && echo yes)"
+expect_regex "GR.3-pre the extractor reads the run's request: its admitted= is a clock reading" '^[0-9]+$' "$(nv_req admitted)"
+# cpu0= is written to two decimals, so it may round 0.005 under the seconds it counts.
+expect_eq "GR.3 its cpu0= is at least the floor the runner reaped before it asked" "yes" \
+  "$(cat "$TMPROOT/tt0" "$TMPROOT/tt1" | awk -v c="$(nv_req cpu0)" 'FNR % 2 == 0 { gsub(",", "."); gsub(/[ms]/, " "); t[NR] = $1 * 60 + $2 + $3 * 60 + $4 }
+     END { b = t[4] - t[2]; print (c != "" && c + 0.005 >= b) ? "yes" : "no: cpu0=" c " floor=" b }')"
+rm -f "$NV_TT"
 
 finish

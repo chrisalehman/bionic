@@ -480,22 +480,22 @@ or_lease or:w01:LA 1020:3; or_lease or:w01:LB 1010:2; or_lease or:w01:LC 1000:1
 # The widths are a gate reading, as the load is: they move no digest, so each tick below forgets it to print in full.
 expect_eq "OR-7 precondition: the gate's writer opened three lease files" "3" "$(ls "$BIONIC_GATE_DIR/leases/" | /usr/bin/grep -c '\.lease$' | tr -d ' ')"
 OR_N="$(or_ask or:w01:LC)"
-expect_eq "OR-7b precondition: the gate answers the oldest, LC, 3 by hand (8 cores at share 80 is 6.4; a load of 1.0 and 1.61 a run: 2.61, 3.22 and 4.83 fit, 6.44 does not) and the younger LB 0" \
-  "3|0" "$OR_N|$(or_ask or:w01:LB)"
+expect_eq "OR-7b precondition: the gate answers the oldest, LC, 2 by hand (8 cores at share 80 less the default reserve of 1 is 5.4; a load of 1.0 plus 1.61 a run: 2.61 and 4.22 fit, 5.83 does not) and the younger LB 0" \
+  "2|0" "$OR_N|$(or_ask or:w01:LB)"
 forget_digest "$ROR"; poke_pressure "$ROR" 8192 1.0 tick
 expect_eq "OR-8 AC-6.5 the gate line prints each open landing in age order with the gate's answer: the oldest its width, the others 0" \
-  "or:w01:LC=3,or:w01:LB=0,or:w01:LA=0" "$(or_gate)"
-expect_regex "OR-8b …on the one gate line, after room=" '^poker: gate share=.* room=(yes|no) widths: or:w01:LC=3,' "$(s47_lines gate)"
+  "or:w01:LC=2,or:w01:LB=0,or:w01:LA=0" "$(or_gate)"
+expect_regex "OR-8b …on the one gate line, after room=" '^poker: gate share=.* room=(yes|no) widths: or:w01:LC=2,' "$(s47_lines gate)"
 # A gate read under a tab IFS (bash runs a here-string's command substitution under a builtin's temporary IFS)
 # compares each carrier's start as any other read does, so the three leases stay held and LC keeps its width.
 OR_TAB="$( . "$OR_LIB/gate.sh" && IFS='	' read -r w <<< "$(gate_width_ask or:w01:LC)" && printf '%s' "$w" )"
 expect_eq "OR-8c a gate read under a tab IFS answers LC its width and keeps all three leases" \
-  "3|3" "$OR_TAB|$(ls "$BIONIC_GATE_DIR/leases/" | /usr/bin/grep -c '\.lease$' | tr -d ' ')"
+  "2|3" "$OR_TAB|$(ls "$BIONIC_GATE_DIR/leases/" | /usr/bin/grep -c '\.lease$' | tr -d ' ')"
 # LC's carrier leaves it WAITING: the lease is kept but orders no one, so LB is the oldest the gate answers.
 bash -c '. "$1/gate.sh" && gate_landing_leave "$2" "$3"' _ "$OR_LIB" or:w01:LC "$$"
 forget_digest "$ROR"; poke_pressure "$ROR" 8192 1.0 tick
 expect_eq "OR-9 a lease left WAITING drops off the line, and the next oldest, LB, is answered its width" \
-  "or:w01:LB=3,or:w01:LA=0" "$(or_gate)"
+  "or:w01:LB=2,or:w01:LA=0" "$(or_gate)"
 rm -rf "$BIONIC_GATE_DIR/leases"
 
 # ============================================================

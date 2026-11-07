@@ -163,11 +163,19 @@ _gate_load() {  # rc 0 once lib/gate.sh is loaded
 # ends 75 only so (lib/gate.sh THE BUDGET), and the suite or run is not started: _GATE_REFUSAL holds
 # the budget's own line for the report. Any other failure to ask runs unadmitted, as before.
 _GATE_REFUSAL=""
+#
+# It asks in this shell, the id read back through a file: the gate's cpu0= baseline and gate_end read this shell's
+# `times`, so an ask inside `$( )` would leave out what this shell had reaped. `$( )` only when no file can be made.
 _gate_ask_for() {
-  local _rc
+  local _rc _f
   _GATE_ID=""; _GATE_OWN=0; _GATE_REFUSAL=""
   _gate_load || return 0
-  _GATE_ID="$(gate_ask "$1" "$2")"; _rc=$?
+  if _f="$(mktemp "${TMPDIR:-/tmp}/gate-id.XXXXXX" 2>/dev/null)"; then
+    gate_ask "$1" "$2" > "$_f"; _rc=$?
+    { read -r _GATE_ID < "$_f"; } 2>/dev/null; rm -f "$_f"
+  else
+    _GATE_ID="$(gate_ask "$1" "$2")"; _rc=$?
+  fi
   if [ "$_rc" -eq 75 ]; then
     _GATE_ID=""
     _GATE_REFUSAL="$(gate_budget "$1" "$2")"
@@ -542,8 +550,9 @@ if ! declare -F pressure_level >/dev/null 2>&1; then
   echo "tests/run.sh: no width oracle — payload/scripts/lib/resources.sh did not load, so pressure_level is not defined. Nothing was run." >&2
   exit 2
 fi
-# _runner_width [sample] — sets JOBS (and _WIDTH, _ceiling): with `sample`, takes one reading into
-# the ring first, then reads the rung over the ring against the ceiling. The one width read and
+# _runner_width [sample] [<promised>] — sets JOBS (and _WIDTH, _ceiling): with `sample`, takes one
+# reading into the ring first, then reads the rung over the ring against the ceiling, the width
+# lowered to <promised> cores when the run's admission promised fewer. The one width read and
 # the one sample site in this runner.
 #
 # THE WIDTH IS THE SHARE'S ROOM (wave-32 T2; D1, ADR-051). The rung reads against the gate's own
@@ -566,6 +575,7 @@ _runner_width() {
   _WIDTH=8
   if _gate_load && declare -F gate_width >/dev/null 2>&1; then _WIDTH="$(gate_width)"; fi
   case "$_WIDTH" in ''|*[!0-9]*|0) _WIDTH=8 ;; esac
+  if _res_is_uint "${2:-}" && [ "$2" -ge 1 ] && [ "$2" -lt "$_WIDTH" ]; then _WIDTH="$2"; fi
   _ceiling="${BIONIC_TEST_JOBS_CEILING:-$_WIDTH}"
   if _res_is_uint "$_ceiling" && [ "$_ceiling" -gt "$_WIDTH" ]; then _ceiling="$_WIDTH"; fi
   JOBS="$(pressure_level "$_ceiling")"
@@ -871,7 +881,8 @@ run() {  # run <label> <cmd...>   — gating
     _label "$label"
     start="$(date +%s)"
     # Asked per suite here too (T12), in a subshell: its `$$` is this runner's, which stays
-    # alive for the suite, and its `times` hold that suite's children only, for gate_end.
+    # alive for the suite, and its `times` hold that suite's children only, which gate_end
+    # writes as the cost line's fourth field, the cores the gate learns for the suite.
     ( _gate_ask_for work "$label" \
         || { printf '%s\n' "$_GATE_REFUSAL" | tee "$TMP/${label}.budget" >"$TMP/${label}.out"; exit 75; }
       [ -z "$_GATE_ID" ] || export BIONIC_GATE_ADMIT="$_GATE_ID"
@@ -950,11 +961,17 @@ if [ "$SERIAL" -eq 0 ]; then
   fi
   # THE WIDTH AFTER THE GRANT (wave-33 T5; D4, AC-8.3): a whole run sizes its workers now, from a
   # fresh sample, once the machine is its own (_runner_width, above). --only read it at the top.
-  [ "$ONLY" -eq 1 ] || _runner_width sample
+  # The cores its own admission promised (promise=<mem>:<cores>:<seconds>) are the ceiling, so the
+  # run never starts more jobs than the gate gave it room for; a run believed under another's
+  # admission holds no grant of its own and reads the width.
+  _run_promised=""
+  [ "$_RUN_GATE_OWN" -ne 1 ] || _run_promised="$(sed -n 's/^promise=[^:]*:\([0-9]*\).*/\1/p' "$(gate_dir)/requests/$_RUN_GATE_ID" 2>/dev/null | tail -n 1)"
+  [ "$ONLY" -eq 1 ] || _runner_width sample "$_run_promised"
   [ -s "$LAUNCH" ] && xargs -P "$JOBS" -n1 bash "$SELF" --one <"$LAUNCH"
   # THE RUN'S ADMISSION ENDS HERE (T2), once the batch is done, with 0 when every suite it
   # launched left a 0 and 1 otherwise. The end is this shell's: it is the holder, and its `times`
-  # hold the whole run's children, which is the cost the gate learns for `tests/run.sh`.
+  # hold the whole run's children, which gate_end writes as the cost line's fourth field; the gate
+  # keeps it but promises a whole run the room free, since the run measured the width it was given.
   _RUN_T1="$(date +%s)"
   if [ "$_RUN_GATE_OWN" -eq 1 ]; then
     _run_rc=0

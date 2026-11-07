@@ -2575,9 +2575,17 @@ _line_holds() {  # <root> <commit> <suite> -> 0 when <commit> is a commit holdin
 # (BIONIC_GATE_RECORD, wave-38 T31: the gate ends a handed-back request once that record shows the row
 # finished), and once admitted it files
 # the gate's own admission instant for the run (`at=`), which the verdict carries as admitted= (AC-6.4).
+# The ask is made in this shell and its id read back through a file: the gate's baseline (cpu0=) and gate_end both read
+# this shell's `times`, so an ask inside `$( )` would leave out what this shell had reaped and charge the subshell's own
+# polls to the run. Only when no file can be made is it asked in `$( )`.
 _line_runner() {  # <suite> <within | empty> <landing tree> <log> <result file> <carrier pid> [<landing key>] [<record>]
-  local id rc p c
-  id="$(BIONIC_GATE_LANDING="${7:-}" BIONIC_GATE_RECORD="${8:-}" gate_ask landing "$(_line_gate_key "$1")" ${2:+--within "$2"})"; rc=$?
+  local id="" rc p c f
+  if f="$(mktemp "${TMPDIR:-/tmp}/line-id.XXXXXX" 2>/dev/null)"; then
+    BIONIC_GATE_LANDING="${7:-}" BIONIC_GATE_RECORD="${8:-}" gate_ask landing "$(_line_gate_key "$1")" ${2:+--within "$2"} > "$f"; rc=$?
+    { read -r id < "$f"; } 2>/dev/null; rm -f "$f"
+  else
+    id="$(BIONIC_GATE_LANDING="${7:-}" BIONIC_GATE_RECORD="${8:-}" gate_ask landing "$(_line_gate_key "$1")" ${2:+--within "$2"})"; rc=$?
+  fi
   [ "$rc" -eq 0 ] || { printf 'gate=%s\n' "$rc" > "$5"; return 0; }
   printf 'admitted=%s\nat=%s\npromised=%s\n' "$id" "$(_line_admitted_at "$id")" "$(_line_req_seconds "$id" promised)" > "$5"
   # From the start of the suite to its end, this shell's stderr is closed to the carrier: a suite ended

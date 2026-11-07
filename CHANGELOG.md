@@ -8,6 +8,264 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 1.30.0 — 2026-11-06
+
+This is the what-a-run-costs release: the gate controls the machine's capacity by what each run costs, and never by how
+many agents are running. It answers GitHub issue #51, in which a user project's wave drove an 8-core machine to a
+1-minute load of 17 to 34 for eleven minutes, and the three defects and the three findings of the issue's comment, each
+by one rule of the control law (D2, ADR-077). The wall now books every command that drives a browser or compiles the app
+(D4, D8). A booked run promises the cores its own past runs measured, a class prior until it has any, and a run already
+in the measured load is counted once, by its promise fading into the reading (D3, D5, D9, D13). The processor limit
+binds with nothing admitted, the oldest waiter goes first when the load falls, the person keeps a reserve core, and the
+run stands its newest unlanded writer down when the 5-minute load stays over the share (D6, D7, D12). The principle is
+the person's, in their words: "the system needs to be able to detect when resources are getting over-taxed, and
+self-regulate", with constants as ceilings and feedback as the safety. ADR-077 records the rulings D2 to D13 and amends
+ADR-051's "a `whole` admission runs alone" (a browser or compile run is alone by arithmetic, not by kind, and is owed
+its measured cost), ADR-060's "the per-run core promise is the measured suite cost" (a prior now) and wave-33 D4's "no
+cores are read from recorded runs" (cores are; memory is not). Every run now also owes one act of consolidation, or a
+stated none (D1, D10). This is a minor release by the policy above: new capability, the booked browser and compile
+classes, measured cores on the cost line, a reserve for the person and the dial-down. It adds one shim option,
+`--class`, one file, `bionic/reserve`, and one field on the cost line that every older reader ignores. There is no new
+verb kind, and `canonical_sdlc_version` stays 14. The release check's cap on test lines held, with the headroom it
+prints: 102091 test lines against 102206 of code at the head, 115 to spare.
+
+**Migration.** Rows that changed a printed line, a wall or a default a script of yours may meet:
+- T1: the reserve defaults to one core, so the share's cores are the share less one on every machine: 6.36 where 7.36
+  was, at share 92 on 8 cores. `bionic/reserve`, beside the share file, sets it; a value that is not a non-negative
+  number no larger than the machine's cores reads as 1. A script that read 7.36 of room reads 6.36 (A-T1.1 to A-T1.3).
+- T6: `session-poker.sh share reserve=<cores>` sets the reserve, and the bare `share` prints one line,
+  `share=<n> reserve=<c> cores=<n> room=<r>`, where it printed the lone number. A bad reserve exits 2 with one line and
+  writes nothing, `reserve=9` on 8 cores included (A-T6.1 to A-T6.3).
+- T4: `playwright test`, `cypress run` and `lighthouse` classify as browser, and `next dev`, `next build` and `next
+  start` as compile, bare or behind a package runner. Typed into Bash they are now wrapped into the booking shim, with
+  `--class`, and wait at the gate as a suite does; `vitest` joins the suite class beside `jest`. A command the wall
+  refused or wrapped before keeps that reading. The key of a heavy command is its first 60 characters (A-T4.1 to
+  A-T4.5).
+- T5: `booked.sh` takes `--class browser|compile`, forwarded on a detached run's argv; any other word is a usage error,
+  exit 2, before any ask (A-T5.1, A-T5.2).
+- T2: a lone request is no longer admitted past the processor line. A run on a machine whose load is over the share's
+  cores waits where it used to start, and the width ask answers 0 on load, where it floored at 1. A promise fades
+  linearly over the 60-second load window at admission, at the room and at the width ask alike, and the room line's
+  `promised=` no longer adds a running run's promise to the load that already holds it (A-T2.1, A-T2.7).
+- T3: the cost line gains a fourth field, the cores the run measured, `<seconds>:<epoch>:<load>:<cores>`, with the load
+  written empty when unknown. A key's next ask is promised those cores by the robust rule the seconds use. A whole run,
+  and a browser or compile run before its key has a measurement, is promised the room free at admission,
+  max(1, floor(lim − busy − faded)), and no longer the width; the test runner's jobs are capped by its own admitted
+  promise (A-T3.1, A-T3.2, A-T3.6, A-T3.7).
+- T7: the Patrol's tick, when the 5-minute load exceeds the share's cores and the room is closed, orders STANDDOWN of
+  the newest live writer whose row is not landed, one per tick, with `load <5m> over <cores>` on its line, and leaves
+  the row pending for the next offer. An admitted run is never ended for load (A-T7.3 to A-T7.8).
+- T8: `session-poker.sh sitrep --line` with no plan bound prints its line and nothing on stderr (A-T8.1).
+- T16: the test runner's width follows the reserve: 6 jobs at share 92 on 8 cores, where it was 7 (A-T16.1, A-T16.2).
+- T17: a measured promise is bounded by the same free room and is never less than one core, so a key measured past the
+  line is still admitted; the gate's own polls are not charged to the run, a baseline `times` read at admission being
+  subtracted at the end. A hand-written reserve file value of ten characters or more now reads as 1 (A-T17.1, A-T17.4).
+- T18, T19 and T5's DC.0: fixtures that assumed the lone admission are re-pinned (below); no product line moved.
+- T20: a caller under `set -u` that reads `gate_promise` for a measured key before any scan prints nothing on stderr and
+  reads an empty promise list as a sum of 0 (A-T20.2).
+
+### Theme 1 — every heavy command is booked (REQ-1, REQ-2: D4, D8, D13)
+
+- T4 (A-T4.1 to A-T4.6): `cmd-class.sh` is the one place the classes are named, and the wall wraps suite, browser and
+  compile. The farm-out wall treats browser and compile as it treated none, so booking is the only change on the
+  orchestrator's thread (A-T4.3). `build` stays unwrapped.
+- T5 (A-T5.1 to A-T5.6): the shim carries the class to the gate, and a request for a browser or compile run is filed
+  `kind=work` with `class=` on it. D4 was ruled "2": no new kind, `whole` stays the test runner's, and AC-2.1 was amended
+  with attribution.
+- D13 was ruled "2" at Step 4, on the finding that with the lone admission gone a full-width promise waits for an idle
+  machine (busy at most 0.36 cores at share 92, reserve 1, 8 cores; A-T2.6). The prior of a whole run, and of a browser
+  or compile run before its first measurement, is the room free at admission, and the runner sizes its jobs from it.
+
+### Theme 2 — a run is charged what it costs (REQ-3, REQ-4: D3, D5, D9)
+
+- T3 (A-T3.1 to A-T3.9): `gate_end` reads the children's processor time with `times` in the holder's own shell and
+  writes the cores as the cost line's fourth field, capped at the machine's cores and floored at 0.1. This reverses
+  wave-33 D4 for cores, on D3's rider that the solution be simple: one builtin and one field. AC-3.2's plant was
+  corrected with attribution (A-T3.1): 5.8, 6.0 and 13.0 promise 6.0, which is neither the largest nor the mean.
+- T2 (A-T2.1 to A-T2.11): `_gate_faded` is the one function that weights a promise by max(0, 1 − age/60), read at
+  admission, at the room and at the width ask; an unknown busy reading counts every promise whole.
+- T17 (A-T17.1 to A-T17.10): born of the critic's two S2 findings. The measured promise is bounded by the free room, and
+  the baseline `times` is written under the admission's own lock and subtracted at the end: a 2-second idle run after a
+  14-second wait now writes 0.1 cores, not 1.93. T17 also burned the reserve-rule and robust-pick debt items (below).
+
+### Theme 3 — the machine's load holds the line (REQ-5, REQ-6, REQ-9: D6, D7, D12)
+
+- T1 and T6 (A-T1.1 to A-T1.4, A-T6.1 to A-T6.5): `_gate_share_cores` is the one site that reads the share and takes the
+  reserve from it, so admission, the room, the width ask, `gate_width` and the `share` verb all leave it.
+- T2: D12 removed the lone guard from the processor refusal. The oldest waiter is admitted first once the load falls,
+  and the landing queue's order is unchanged (AC-5.4). AC-5.3 was corrected with attribution (A-orch.18): an unknown
+  memory reading keeps today's rule, and an unknown busy reading counts every promise whole.
+- T7 (A-T7.1 to A-T7.9): the dial-down. D7 was ruled "2": hold, then stand the newest unlanded writer down, one per tick,
+  never end an admitted run. The sustained signal is the 5-minute load, the one the gate already reads (AC-9.1,
+  corrected with attribution). The overshoot while the average lags a stop (A-T7.9) is bounded at the default 20-minute
+  Patrol interval.
+
+### Theme 4 — one reader per fact, standing (REQ-7, REQ-8: D1, D10, D11)
+
+- D1 was ruled "1": the consolidation force is a standing requirement, and `steps/9.md` now says so. Every run owes one
+  act of consolidation, or a stated none, read from the debt ledger (`burned T<n>` by a row of the run) and, failing
+  that, from the continuation's `consolidation: none found — <reason>` line.
+- This run's acts: T3 reworded the two stale cost comments in tests/run.sh to name the fourth field, which the code now
+  writes. T15 (A-T15.1 to A-T15.7) burned close-criterion-eval: `matrix_close_eval` is the one test of the close's
+  criterion: the matrix render hands its set to its awk and `taskof` tests membership, where each kept its own regex. T17 burned reserve-rule
+  (`gate_reserve_ok`, one predicate the verb calls) and robust-pick (`_GATE_PICK_AWK`, one awk the two readers include).
+  The ledger holds the 14 items adopted and 4 raised by the structure read, 3 burned, 15 open.
+- T8 (A-T8.1): the status line's variable is initialised beside its siblings. The defect is bash-version dependent: macOS
+  `/bin/bash` 3.2 sets a bare `local` to empty, so the suite never saw it; bash 4.4 and later leave it unset under
+  `set -u`. The case runs under the newest bash it finds.
+
+### Fixtures that met the new rules
+
+- T2, T7 and T16 (A-T2.5, A-T2.7, A-T2.9, A-T7.1, A-T16.1): the blast of the reserve default (reserve-blast.log, A-orch.14)
+  named landing-line-2, stop and runner-width. Each is re-pinned at the reserve default or plants a reserve of 0 where it
+  reads absolute room: landing-line-2's width numbers moved with the aligned count, stop's busy readings went from 7.0 to
+  6.0, and runner-width gained case 6i for the default.
+- T2: H.4 and WA.3 are inverted in place; H.8 is kept under the corrected AC-5.3 (A-orch.33). Fixtures that leaned on the
+  lone admission, §TWO, §NUMBER, §RESUME-KIND, §TERM and §WHOLE-HOLDER among them, are re-planted at a load that leaves
+  room for exactly one run.
+- T5 (A-T5.4, A-T5.6; A-orch.22): booked.test.sh §DETACH-CEILING's DC.0 held its holder at 6.0 busy cores, which the lone
+  admission had admitted; it reads 3.0 now.
+- T18 (A-T18.1; A-orch.25): slots.test.sh §RUN B2 planted 7.0 busy cores, and with the lone admission gone its first shim
+  waited with no ceiling, for 28 minutes on the whole run. It reads 4.0 now: the first fits under 6.36, the second does not.
+- T19 (A-T19.1): session-poker-5.test.sh §ORDER expected the oldest landing answered 3 at share 80 on 8 cores. Two rulings
+  together moved it to 2, neither alone: the reserve line of 5.4, and the summed count (1.0 + 3 × 1.61 = 5.83 against 5.4).
+  Younger landings still answer 0, so no defect; the section's shape holds.
+- T20 (A-T20.1 to A-T20.3): RM.4 and RM.5 pin AC-5.3's unknown-busy clause, red first on a scratch mutant with `num(busy)`
+  dropped from `_gate_faded`; CO.5b and CO.5c pin the `set -u` reader, red first at the head.
+- AC-3.2's plant, AC-5.3, AC-2.1 and AC-3.3 were corrected with attribution in the requirements, the spec and the plan
+  (A-T3.1 and A-orch.20; A-orch.18; A-orch.19).
+
+### The walk, the regression, the critic
+
+- T9 (`walk.md`): the walk at 68ef6f335 drove the issue's three defects, its proposed fix and its comment's three findings
+  over scratch fixtures and planted stores. 26 of 26 criteria are CONFIRMED, verdict CONFIRMED. The two drives the wall
+  refuses a dispatched agent, the `share` verb and a fixture whole run, were run by the orchestrator from the walk's own
+  prepared script.
+- The regression: the one whole run, at 68ef6f335 after the last build landing, ran 126 of 128 and was red on two suites
+  (`regression-run-68ef6f3350834e887d6cd212c975a114348aabfa.log`). slots.test.sh was killed by the orchestrator after a
+  28-minute hang on a fixture that encoded the lone admission (A-orch.25), and session-poker-5.test.sh was red on §ORDER.
+  T18 and T19 were born of it and closed both suites. The later commits, T17, T19, T18 and T20, are covered by their rows' own
+  suites. A second whole run at the release head is the orchestrator's, after this row lands.
+- T11 (`critic-adversarial.md`, `critic-structure.md`): the critic's read of the whole at 68ef6f335. Adversarial failed on
+  seven findings. #1 and #2, both S2, are fixed by T17: a measured key over the share's line was never admitted and held
+  every other request, and the gate's own polls were charged to the run. #3 to #6, S3, are deferred, each a Known limit
+  below. #7, S4, is noted: the `share` verb's header claims both files are as they were on a refused write, but a
+  failed reserve write after the share write leaves the share changed. Structure flagged, with no finding and four debt
+  lines: reserve-rule and robust-pick, which T17 burned, and class-vocabulary, two lines over six sites, which is carried
+  with the ledger. AC-7.3, which fails when a `debt:` line has two sites both landed in the wave, read unproved as
+  written and is left to the person at the card.
+- T10 (`auditor-evidence.md`, `auditor-evidence-2.md`): the auditor's evidence at 68ef6f335 failed, with 25 of 30 rows
+  CONFIRMED, AC-5.3 REFUTED because the corrected criterion's unknown-busy clause had no test, and the four static rows
+  pending by design. Its wave verdict is CONFIRMED: every requirement reaches a decision and a criterion. T20 pinned the
+  clause, RM.5 red first on a mutant, and the auditor's re-read of that one row at dd9b12e18 passes, AC-5.3 CONFIRMED.
+
+### The release
+
+- T12 (`T12.md`): this entry, `plugin.json` 1.30.0, the help and version pages and `steps/9.md` rendered by
+  `agents-src/render.sh`, `rendered.sha256` refreshed, and ADR-077, promoted into docs/adrs from this row's tree as
+  Proposed, with ADR-051's and ADR-060's Status naming the amendment. It lands on release-check, render, commands and
+  shell-lint. T13 writes the reviews and merges, and T14 closes the run.
+
+### The reviews
+
+Rendered from the plan's review and waiver lines, in the order they were registered.
+
+- adversarial review, whole: fail at 68ef6f33 by w49-T11, 2026-11-07T05:17:45Z (`critic-adversarial.md`)
+- structure review, whole: flag at 68ef6f33 by w49-T11, 2026-11-07T05:17:46Z (`critic-structure.md`)
+- evidence review, whole: fail at 68ef6f33 by w49-T10, 2026-11-07T06:08:47Z (`auditor-evidence.md`)
+- evidence review, piece: pass at dd9b12e1 by w49-T10, 2026-11-07T06:22:47Z (`auditor-evidence-2.md`)
+- adversarial review, piece: fail at dd9b12e1 by w49-T21, 2026-11-07T06:49:28Z (`critic-adversarial-2.md`)
+- structure review, piece: flag at dd9b12e1 by w49-T21, 2026-11-07T06:49:30Z (`critic-structure-2.md`)
+- evidence review, piece: fail at 1c3ada20 by w49-T23, 2026-11-07T07:23:10Z (`auditor-evidence-3.md`)
+- adversarial review, piece: flag at f87acbfc by w49-T24, 2026-11-07T08:33:03Z (`critic-adversarial-3.md`)
+- structure review, piece: flag at f87acbfc by w49-T24, 2026-11-07T08:33:04Z (`critic-structure-3.md`)
+- evidence review: waived at f87acbfc by Dana Fixture, 2026-11-07T15:53:03Z: "all recommended"
+
+### Known limits
+
+Rendered from the plan's deferred findings, each its stated sentence, in the order they were registered.
+
+- A browser or compile run typed with a `cd <tree> || exit 1;` prefix is keyed by the first 60 characters of the whole command, so the heavy commands of one tree share one cost line and a fresh tree starts at the prior; type the command bare, or expect the free-room prior in a new tree.
+- The promise fades linearly over 60 seconds while the 1-minute load average rises exponentially, so a fresh admission is under-counted by up to 37 percent through its second minute; the gate may admit one suite more than the law intends beside a fresh heavy run.
+- The dial-down stands down the newest unlanded writer by launch time and does not read the gate store, so a stopped writer whose detached run or waiting ask lives on frees little load within the five-minute window, and a tick still over the line stands down another.
+- A browser or compile run typed on the orchestrator thread is booked and followed in the foreground, where a suite of the same length is refused and farmed out; the heaviest class the wall knows is the one that stays on the thread.
+- The slots suite plants its machine but reads the host's own share and reserve files, so on a host whose share is 82 or lower, or whose reserve is 1.76 or more, its B2 row's first shim is never admitted and the suite hangs the whole run; plant CLAUDE_CONFIG_DIR in the suite, or run it on a default share and reserve until then.
+
+### The landing numbers
+
+`landing-report --rows` at 9b55f229c9285aac7800b40ba1dc0d5a9aca9bbe on 2026-11-07T16:19:22Z:
+
+```
+landings: queue=17 hand=6 git=0 · ready-to-landed median=1.4m p75=3.0m max=9.8m · runs: green=46 red=0 none=0 discarded=0 red-then-green=0 run=110 reused=0 absent=0 · waited median=12s · killed=3
+T1 queue ready=2026-11-07T02:37:05Z landed=2026-11-07T02:37:51Z minutes=0.8 runs=2 waited=9s wait=0.1 prove=0.6 rework=0.0 width=4
+  gate.test.sh green promised=44s actual=25s ratio=0.57
+  shell-lint.test.sh green promised=33s actual=37s ratio=1.12
+T4 queue ready=2026-11-07T02:37:12Z landed=2026-11-07T02:38:38Z minutes=1.4 runs=3 waited=47s wait=0.8 prove=0.7 rework=0.0 width=4
+  cmd-class.test.sh green promised=6s actual=8s ratio=1.33
+  background-suite-guard.test.sh green promised=31s actual=23s ratio=0.74
+  shell-lint.test.sh green promised=33s actual=37s ratio=1.12
+T6 queue ready=2026-11-07T02:46:38Z landed=2026-11-07T02:52:53Z minutes=6.2 runs=2 waited=245s wait=4.1 prove=2.2 rework=0.0 width=2
+  session-poker-2.test.sh green promised=102s actual=92s ratio=0.90
+  shell-lint.test.sh green promised=39s actual=37s ratio=0.95
+T8 queue ready=2026-11-07T02:47:49Z landed=2026-11-07T02:57:36Z minutes=9.8 runs=2 waited=356s wait=5.9 prove=3.9 rework=0.0 width=2
+  sitrep.test.sh green promised=225s actual=230s ratio=1.02
+  shell-lint.test.sh green promised=39s actual=39s ratio=1.00
+T16 queue ready=2026-11-07T03:04:14Z landed=2026-11-07T03:05:04Z minutes=0.8 runs=2 waited=11s wait=0.2 prove=0.7 rework=0.0 width=2
+  runner-width.test.sh green promised=8s actual=10s ratio=1.25
+  shell-lint.test.sh green promised=30s actual=39s ratio=1.30
+T7 queue ready=2026-11-07T03:10:40Z landed=2026-11-07T03:11:33Z minutes=0.9 runs=2 waited=8s wait=0.1 prove=0.8 rework=0.0 width=2
+  stop.test.sh green promised=37s actual=44s ratio=1.19
+  shell-lint.test.sh green promised=39s actual=38s ratio=0.97
+T15 queue ready=2026-11-07T03:20:37Z landed=2026-11-07T03:25:39Z minutes=5.0 runs=3 waited=10s wait=0.2 prove=4.9 rework=0.0 width=3
+  close-out-4.test.sh green promised=211s actual=291s ratio=1.38
+  session-poker-4.test.sh green promised=109s actual=204s ratio=1.87
+  shell-lint.test.sh green promised=20s actual=39s ratio=1.95
+T2 queue ready=2026-11-07T03:23:53Z landed=2026-11-07T03:26:26Z minutes=2.5 runs=2 waited=115s wait=1.9 prove=0.6 rework=0.0 width=3
+  gate.test.sh green promised=50s actual=28s ratio=0.56
+  shell-lint.test.sh green promised=39s actual=37s ratio=0.95
+T3 queue ready=2026-11-07T04:39:36Z landed=2026-11-07T04:40:53Z minutes=1.3 runs=3 waited=11s wait=0.2 prove=0.8 rework=0.3 width=3
+  gate.test.sh green promised=25s actual=31s ratio=1.24
+  runner-width.test.sh green promised=8s actual=10s ratio=1.25
+  shell-lint.test.sh green promised=30s actual=35s ratio=1.17
+T5 queue ready=2026-11-07T04:52:12Z landed=2026-11-07T04:55:04Z minutes=2.9 runs=2 waited=132s wait=2.2 prove=0.7 rework=0.0 width=2
+  booked.test.sh green promised=27s actual=28s ratio=1.04
+  shell-lint.test.sh green promised=36s actual=39s ratio=1.08
+T9 hand ready=- landed=2026-11-07T05:22:07Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T11 hand ready=- landed=2026-11-07T05:22:07Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T19 queue ready=2026-11-07T05:56:07Z landed=2026-11-07T05:59:06Z minutes=3.0 runs=2 waited=12s wait=0.2 prove=2.8 rework=0.0 width=1
+  session-poker-5.test.sh green promised=130s actual=129s ratio=0.99
+  shell-lint.test.sh green promised=35s actual=37s ratio=1.06
+T17 queue ready=2026-11-07T05:59:02Z landed=2026-11-07T06:01:44Z minutes=2.7 runs=4 waited=15s wait=0.2 prove=2.5 rework=0.0 width=2
+  gate.test.sh green promised=55s actual=56s ratio=1.02
+  session-poker-2.test.sh green promised=85s actual=89s ratio=1.05
+  runner-width.test.sh green promised=10s actual=10s ratio=1.00
+  shell-lint.test.sh green promised=35s actual=39s ratio=1.11
+T18 queue ready=2026-11-07T06:08:13Z landed=2026-11-07T06:09:18Z minutes=1.1 runs=2 waited=9s wait=0.1 prove=0.9 rework=0.0 width=2
+  slots.test.sh green promised=43s actual=55s ratio=1.28
+  shell-lint.test.sh green promised=29s actual=37s ratio=1.28
+T20 queue ready=2026-11-07T06:18:39Z landed=2026-11-07T06:19:36Z minutes=0.9 runs=3 waited=9s wait=0.1 prove=0.8 rework=0.0 width=3
+  gate.test.sh green promised=58s actual=33s ratio=0.57
+  runner-width.test.sh green promised=7s actual=10s ratio=1.43
+  shell-lint.test.sh green promised=34s actual=36s ratio=1.06
+T10 hand ready=- landed=2026-11-07T06:23:13Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T21 hand ready=- landed=2026-11-07T06:50:50Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T12 queue ready=2026-11-07T07:14:27Z landed=2026-11-07T07:15:43Z minutes=1.3 runs=4 waited=11s wait=0.2 prove=1.1 rework=0.0 width=2
+  release-check.test.sh green promised=61s actual=64s ratio=1.05
+  render.test.sh green promised=15s actual=16s ratio=1.07
+  commands.test.sh green promised=2s actual=2s ratio=1.00
+  shell-lint.test.sh green promised=36s actual=38s ratio=1.06
+T23 hand ready=- landed=2026-11-07T07:24:11Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T22 queue ready=2026-11-07T07:22:36Z landed=2026-11-07T07:28:08Z minutes=5.5 runs=4 waited=12s wait=0.2 prove=5.3 rework=0.0 width=3
+  landing-line-1.test.sh green promised=261s actual=320s ratio=1.23
+  runner-width.test.sh green promised=12s actual=13s ratio=1.08
+  run.test.sh green promised=2s actual=4s ratio=2.00
+  shell-lint.test.sh green promised=32s actual=37s ratio=1.16
+T24 hand ready=- landed=2026-11-07T08:34:01Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T25 queue ready=2026-11-07T15:59:23Z landed=2026-11-07T16:00:16Z minutes=0.9 runs=2 waited=14s wait=0.2 prove=0.7 rework=0.0 width=2
+  background-suite-guard.test.sh green promised=21s actual=27s ratio=1.29
+  shell-lint.test.sh green promised=37s actual=39s ratio=1.05
+```
+
 ## 1.29.2 — 2026-11-05
 
 This is the reads-true release: the six defects and one feature gap a user project reported against 1.29.1 after its epic 23

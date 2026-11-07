@@ -21,8 +21,10 @@
 #                  and with it within=<seconds>, the row's window (its lease's span, else the ask's
 #                  --within), and record=<path>, its landing record (BIONIC_GATE_RECORD) (wave-38 T31)
 #                  handed back (holder=-), left=<epoch>, when (wave-38 T31)
+#                  class=<browser|compile>, the class the ask named (--class), which sets its prior
 #                  then, once admitted, admitted=<epoch> promise=<mem pct>:<cores>:<seconds>
 #                  and load=<busy cores>, the 1-minute reading it was admitted on (wave-39 T8; D11),
+#                  and cpu0=<seconds>, the processor seconds the asking shell had reaped by then,
 #                  and once ended, ended=<epoch> rc=<n> (rc=137 when the gate found it killed;
 #                  rc=gone when its holder died before it was admitted, written at its who's next
 #                  ask for the key), and by=<sid> why=<reason> when stop-run ended it (D8).
@@ -33,7 +35,9 @@
 #                  the key's recent DURATIONS, the only history the gate keeps (wave-33 T1; D4 as
 #                  amended, Δ10; AC-8.6): at most three lines, newest last, <seconds>:<epoch>, and
 #                  since wave-39 T8 (D11) <seconds>:<epoch>:<load>, the load its run was admitted under,
-#                  which `_gate_seconds` scales the promise by (a line with no load scales by 1). A
+#                  which `_gate_seconds` scales the promise by (a line with no load scales by 1), and
+#                  now <seconds>:<epoch>:<load>:<cores>, the cores the run measured (`gate_end`; the
+#                  load empty when unknown), which `_gate_cost_cores` reads and older readers ignore. A
 #                  `/` in the key is written `%` in the file's name. <project> is the asking
 #                  checkout's project key (`_gate_project`), so two projects' runs of one command
 #                  keep separate durations. A file with no project key, which 1.15.0 and before
@@ -52,7 +56,7 @@
 #
 # THE VERBS.
 #
-#   gate_ask <kind> <key> [--within <seconds>]   rc 0, the request id on stdout: admitted.
+#   gate_ask <kind> <key> [--within <seconds>] [--class <browser|compile>]   rc 0, the request id on stdout: admitted.
 #                  rc 75 at once, nothing filed: the asking agent's budget refuses the key (THE
 #                  BUDGET; its line on stderr). rc 75: the time ran out; the request is kept with its turn, nothing ran, and
 #                  its holder is cleared (holder=-), so it is nobody's and passed over until the
@@ -62,12 +66,12 @@
 #                  usage error or a store that cannot be written. It polls every
 #                  ${BIONIC_GATE_POLL:-2} seconds and gives up before --within runs out;
 #                  without --within it waits until admitted.
-#   gate_end <id> <rc>       the run is over: writes ended= and rc=, and records its seconds.
+#   gate_end <id> <rc>       the run is over: writes ended= and rc=, and records its seconds and cores.
 #                  rc 2 on a request never admitted: a caller that never asked cannot end it.
 #   gate_end <id> <rc> --by <sid> [--why <reason>]
 #                  (wave-36 T11; D8) stop-run's end, accepted whether or not the request was
 #                  admitted: writes ended= rc= by= why= and records no seconds
-#   gate_state               share=<n> used=<n> admitted=<n> waiting=<n> landing-waiting=<n> load=<1m>/<5m> promised=<cores>
+#   gate_state               share=<n> reserve=<n> used=<n> admitted=<n> waiting=<n> landing-waiting=<n> load=<1m>/<5m> promised=<cores>
 #   gate_room [--owed <n>]   rc 0 while another writer may start, rc 1 otherwise, one line:
 #                            room=<yes|no> load=<1m>/<5m> cores=<n> promised=<cores> waiting=<n>
 #                            (waiting is printed, and decides nothing: wave-38 T5, D21)
@@ -91,8 +95,10 @@
 #                            THE RULES, "open"), in the order given, and is rc 0 when it printed any.
 #                            One read of the store answers every name, and it takes no lock.
 #   gate_share               the machine's share, 1 to 100 (absent or unreadable: 92)
-#   gate_width               the workers the share has room for: floor(share × cores ÷ 100), at least 1
-#                            (7 at share 92 on 8 cores); the width a whole run of tests/run.sh takes
+#   gate_reserve             the cores the person keeps from the share, 0 up to the machine's cores
+#                            (absent or unreadable: 1)
+#   gate_width               the workers the share has room for: floor(share × cores ÷ 100 − reserve), at least 1
+#                            (6 at share 92 and reserve 1 on 8 cores); the budget and the runner's dry run read it
 #   gate_promise <key>       the promise for a work request for <key> asked from here,
 #                            <mem>:<cores>:<seconds>, loading the store itself (see promise)
 #   gate_list                one line per request: <id> <waiting|admitted|ended|killed|gone> …
@@ -146,29 +152,31 @@
 #   memory    the live reading: _res_used_pct (while anything admitted is unfinished, the
 #             larger of it and idle plus the admitted requests' memory promises, which this
 #             gate makes 0) at most the share. Over the share it admits nothing.
-#   processor the larger of _res_busy_cores and the admitted processor promises, plus the
-#             newcomer's, at most share × cores ÷ 100 (`_gate_share_cores`) — or nothing
-#             admitted is unfinished. An empty or unreadable busy reading counts as 0: the
-#             promises alone decide.
-#   promise   (wave-33 T1; D4 as amended, Δ10; AC-8.1) the gate does not forecast from history:
-#             a request promises 0 memory and the cores its kind declares (`_gate_cores_for`):
-#             a command that declares no width, work or landing, the measured cost of one
-#             suite, resources.sh's `_res_suite_cores` (wave-38 T5; D21, ADR-060: 1.61 where
-#             one core was promised before, so the gate stops admitting more suites than the
-#             machine carries); a whole run the width it takes, gate_width. Live load is the backstop: the readings above. The
-#             seconds are the key's recorded duration (`_gate_seconds`), scaled by the load now over the
-#             load each run was admitted under (wave-39 T8; D11), which the landing's
-#             time limit reads (line.sh `_line_time_for`), 0 with none. While the memory
-#             reading is unknown (-1) a command is admitted only when nothing admitted is
-#             unfinished. A whole request admitted is admitted alone.
-#   duration  at gate_end: the seconds from admitted to ended, one line in the key's keyed file,
-#             with the request's load= after them (wave-39 T8; D11).
+#   processor _res_busy_cores plus the admitted processor promises the load does not carry yet
+#             (`_gate_faded`) plus the newcomer's, at most share × cores ÷ 100 less the reserve
+#             (`_gate_share_cores`), whether or not anything is admitted. An empty or unreadable
+#             busy reading counts as 0 and every promise whole: the promises alone decide.
+#   promise   a request promises 0 memory and the cores `_gate_cores_for` gives it: the key's
+#             measured cores where a kept cost line carries them (`_gate_cost_cores`), but never more
+#             than the room free at admission, max(1, floor(share cores - busy - faded)); else a prior.
+#             A whole run, and a browser or compile run whose key has none, is promised that room;
+#             every other request one suite's measured cost, resources.sh's `_res_suite_cores`. Live
+#             load is the backstop: the readings above. The seconds are the key's recorded duration
+#             (`_gate_seconds`), scaled by the load now over the load each run was admitted under,
+#             which the landing's time limit reads (line.sh `_line_time_for`), 0 with none. While the memory reading is unknown (-1) a
+#             command is admitted only when nothing admitted is unfinished. A whole request admitted
+#             is admitted alone.
+#   duration  at gate_end: the seconds from admitted to ended and the cores the run used, one line
+#             in the key's keyed file, <seconds>:<epoch>:<load>:<cores>: the request's load=, empty
+#             when it has none, and the children's processor seconds from `times` in the holder's own
+#             shell, less its cpu0= baseline, over the wall seconds, between 0.1 and the machine's cores.
 #             A run of zero seconds has no measured time and writes none.
 #   room      (wave-28 T13; D14, the owner's "Option 2") another writer may start only while
 #             `_res_busy_cores` and `_res_busy_cores_5m`, each plus the processor promises of
-#             admitted, unfinished requests and <owed> times the suite cost (`_gate_cores_for
+#             admitted, unfinished requests the load does not carry yet (`_gate_faded`, the
+#             processor rule's one sum) and <owed> times the suite cost (`_gate_cores_for
 #             work`, what a writer not yet showing will be promised), are at most share × cores
-#             ÷ 100; and `_res_used_pct` is at most the share. It reads admitted runs and the
+#             ÷ 100 less the reserve; and `_res_used_pct` is at most the share. It reads admitted runs and the
 #             owed count, never the queue (wave-38 T5; D21, ADR-060): a landing's runner waiting
 #             at the gate used to answer room=no and close FILL for every writer.
 #             <owed> is the caller's count of writers not yet showing: live writers that have
@@ -193,7 +201,7 @@
 #             is where an agent's budget holds: see THE BUDGET, above `gate_budget`.
 #
 # No figure sized to a machine appears here: memory is a percentage, processor a share of the
-# cores this process may use (`_res_cores`), and a command is promised what one suite costs.
+# cores this process may use (`_res_cores`), and a command is promised what it measured, or a prior.
 #
 # BASH 3.2. No associative arrays, no `$BASHPID`, no `flock`.
 #
@@ -248,21 +256,44 @@ gate_share() {
   printf '%s\n' "$v"
 }
 
-# _gate_share_cores — the processor room the share allows: share × cores ÷ 100, unfloored (7.36
-# at share 92 on 8 cores), the cores being those this process may use (`_res_cores`). THE ONE
-# SITE of that product (wave-33 T1; debt share-room): gate_width floors it, and the admission
-# test (`_gate_decide`) and the room (`_gate_room_line`) compare against it as it is, so the
-# three cannot drift apart.
+# gate_reserve_ok <value> — rc 0 when <value> may be a reserve: a non-negative decimal of at most nine
+# characters, no larger than the cores this process may use. THE ONE SITE of that rule: gate_reserve
+# reads a refused file as 1, and the share verb refuses to write one, so the two cannot disagree.
+gate_reserve_ok() {
+  local c
+  case "${1:-}" in ''|.*|*.|*[!0-9.]*|*.*.*|??????????*) return 1 ;; esac
+  c="$(_res_cores)"
+  _res_is_uint "$c" && [ "$c" -ge 1 ] || c=1
+  awk -v v="$1" -v c="$c" 'BEGIN { exit !(v + 0 <= c + 0) }'
+}
+
+# gate_reserve — the cores the person keeps for themselves, read beside the share: the first
+# word of the first line of bionic/reserve, as `gate_reserve_ok` admits it. Anything else, the file
+# absent among it, is 1: a machine that has a person at it never gives them every core.
+gate_reserve() {
+  local v=''
+  { read -r v < "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/reserve"; } 2>/dev/null
+  v="${v%%[[:space:]]*}"
+  gate_reserve_ok "$v" || v=1
+  awk -v v="$v" 'BEGIN { printf "%.10g\n", v + 0 }'
+}
+
+# _gate_share_cores — the processor room the share allows: share × cores ÷ 100 less the reserve,
+# never under 1 and otherwise unfloored (6.36 at share 92 and reserve 1 on 8 cores), the cores
+# being those this process may use (`_res_cores`). THE ONE SITE of that product: gate_width
+# floors it, and the admission test (`_gate_decide`) and the room (`_gate_room_line`) compare
+# against it as it is, so they cannot drift apart and none keeps a formula of its own.
 _gate_share_cores() {
   local c
   c="$(_res_cores)"
   _res_is_uint "$c" && [ "$c" -ge 1 ] || c=1
-  awk -v s="$(gate_share)" -v c="$c" 'BEGIN { printf "%.10g", s * c / 100 }'
+  awk -v s="$(gate_share)" -v c="$c" -v r="$(gate_reserve)" \
+    'BEGIN { x = s * c / 100 - r; if (x < 1) x = 1; printf "%.10g", x }'
 }
 
 # gate_width — the share's room as a whole number of workers: `_gate_share_cores` floored, at
-# least 1. A whole run, admitted alone, sizes its workers from this one formula (wave-32 T2,
-# D1), so no runner keeps a width of its own.
+# least 1. The budget and the runner's dry run read it; a whole run is promised the room free at
+# its admission (`_gate_cores_for`) and sizes its workers from that promise.
 gate_width() {
   awk -v l="$(_gate_share_cores)" 'BEGIN { w = int(l); if (w < 1) w = 1; print w }'
 }
@@ -328,7 +359,7 @@ _gate_ancestor() {
 _gate_read() {  # <file> — sets _R_<field> from its lines (a later line wins); rc 1 unreadable
   local l
   _R_key='' _R_kind='' _R_who='' _R_tree='' _R_asked='' _R_holder='' _R_admitted=''
-  _R_promise='' _R_ended='' _R_rc='' _R_landing='' _R_within='' _R_record='' _R_left='' _R_load=''
+  _R_promise='' _R_ended='' _R_rc='' _R_landing='' _R_within='' _R_record='' _R_left='' _R_load='' _R_class='' _R_cpu0=''
   [ -r "$1" ] || return 1
   while IFS= read -r l || [ -n "$l" ]; do
     case "$l" in
@@ -347,6 +378,8 @@ _gate_read() {  # <file> — sets _R_<field> from its lines (a later line wins);
       record=*) _R_record="${l#record=}" ;;
       left=*) _R_left="${l#left=}" ;;
       load=*) _R_load="${l#load=}" ;;
+      class=*) _R_class="${l#class=}" ;;
+      cpu0=*) _R_cpu0="${l#cpu0=}" ;;
     esac
   done < "$1"
 }
@@ -425,17 +458,47 @@ _gate_cost_file() {  # <key> <project> -> its cost file, cost/<project>%<key>
   printf '%s/cost/%s%%%s\n' "$_GD" "$2" "${1//\//%}"
 }
 
-# _gate_cores_for <kind> — the cores a request of <kind> is promised (wave-33 T1; D4 as amended,
-# Δ10; AC-8.1). THE ONE SITE of the assumption: a command that declares no width (work, landing)
-# takes what one suite costs, resources.sh's measured `_res_suite_cores` (wave-38 T5; D21,
-# ADR-060; one core before); a whole run takes the width it runs at, gate_width. Nothing recorded moves it:
-# the gate does not forecast from history, and live load is its backstop. The room's owed writer
-# is charged `_gate_cores_for work`, so the promise and the room cannot disagree.
+# _gate_cores_for <kind> [<class>] [<key> <project>] [<busy> <faded>] — the cores a request is promised.
+# THE ONE SITE of the promise: the key's measured cores (`_gate_cost_cores`) where a kept line carries
+# them, else a prior. A whole run, and a browser or compile run whose key has no measurement, sizes its
+# own width, so it is promised the room free now, max(1, floor(`_gate_share_cores` - busy - faded)), and
+# leaves the rest. A measured key is promised no more than that same room, printed as its line wrote it
+# when under it: a measurement past the share would otherwise never fit and, at the head of the order,
+# would hold every request behind it; the load reading then carries what the promise left out. A whole
+# run's measurement is never read: it ran at the width it was given, so it measured its grant and not
+# its need, and reading it would only ever narrow the next. Every other
+# request is promised one suite's measured cost, resources.sh's `_res_suite_cores`, and so is the room's
+# owed writer (`_gate_cores_for work`), so the promise and the room cannot disagree. <busy> and <faded>
+# are the reading admission took; a caller that has none has them read here.
 _gate_cores_for() {
-  case "${1:-work}" in
-    whole) gate_width ;;
-    *)     _res_suite_cores ;;
+  local c='' b f
+  [ "${1:-work}" = whole ] || [ -z "${3:-}" ] || c="$(_gate_cost_cores "$3" "$4")"
+  [ -n "$c" ] || case "${1:-work}:${2:-}" in
+    whole:*|*:browser|*:compile) ;;
+    *) _res_suite_cores; return ;;
   esac
+  if [ "$#" -ge 6 ]; then b="$5" f="$6"; else b="$(_res_busy_cores 2>/dev/null)"; f="$(_gate_faded "$(_res_now)" "$b")"; fi
+  awk -v l="$(_gate_share_cores)" -v b="$b" -v f="$f" -v c="$c" \
+    'BEGIN { x = int(l - b - f); if (x < 1) x = 1; if (c != "" && c + 0 <= x) print c; else print x }'
+}
+
+# THE ROBUST PICK, one text both readers of a cost file include, as `$_GATE_FITS_AWK` is shared:
+# pick(a, n) sorts a[1..n] and returns, with three or more, the largest at or under twice their median,
+# with fewer the largest, 0 with none. The seconds and the cores are picked by it alike.
+_GATE_PICK_AWK='
+function sortv(a, n,   i, j, x) { for (i = 2; i <= n; i++) { x = a[i]; for (j = i - 1; j >= 1 && a[j] > x; j--) a[j + 1] = a[j]; a[j + 1] = x } }
+function median(a, n) { return (n % 2 ? a[(n + 1) / 2] : (a[n / 2] + a[n / 2 + 1]) / 2) }
+function pick(a, n,   k, m) { if (n < 1) return 0; sortv(a, n); k = n; if (n >= 3) { m = median(a, n); while (k > 1 && a[k] > 2 * m) k-- }; return a[k] }
+'
+
+# _gate_cost_cores <key> <project> -> the cores the key's kept runs measured, the fourth field of its
+# cost lines, picked by the robust pick and printed as the line wrote it; nothing when no kept line
+# carries one. The keyed file only: an unkeyed 1.15.0 line holds its epoch in that place.
+_gate_cost_cores() {
+  awk -F: "$_GATE_PICK_AWK"'
+    NF >= 4 && $4 ~ /^[0-9]+(\.[0-9]+)?$/ { n++; v[n] = $4 + 0; t[n] = $4 }
+    END { if (n == 0) exit; p = pick(v, n); for (i = 1; i <= n; i++) if (t[i] + 0 == p) { print t[i]; exit } }' \
+    "$(_gate_cost_file "$1" "$2")" 2>/dev/null
 }
 
 # _gate_seconds <key> <project> -> the key's promised duration in whole seconds, read from its kept
@@ -458,10 +521,8 @@ _gate_seconds() {  # <key> <project> [<load now>]
   [ -s "$f" ] || { f="$_GD/cost/${1//\//%}"; keyed=0; }
   [ -s "$f" ] || { echo 0; return 0; }
   if [ "$#" -ge 3 ]; then now="$3"; else now="$(_res_busy_cores 2>/dev/null)"; fi
-  awk -F: -v keyed="$keyed" -v now="$now" '
+  awk -F: -v keyed="$keyed" -v now="$now" "$_GATE_PICK_AWK"'
     function num(s) { return s ~ /^[0-9]+(\.[0-9]+)?$/ }
-    function sortv(a, n,   i, j, x) { for (i = 2; i <= n; i++) { x = a[i]; for (j = i - 1; j >= 1 && a[j] > x; j--) a[j + 1] = a[j]; a[j + 1] = x } }
-    function median(a, n) { return (n % 2 ? a[(n + 1) / 2] : (a[n / 2] + a[n / 2 + 1]) / 2) }
     { n++
       if (keyed) { v[n] = $1 + 0; if (NF >= 3 && num($3)) { ld[n] = $3 + 0; nl++ } }
       else v[n] = (NF >= 3 ? $3 : $1) + 0 }
@@ -478,32 +539,28 @@ _gate_seconds() {  # <key> <project> [<load now>]
         c = int(m); if (c < m) c++
         printf "%d\n", c; exit
       }
-      sortv(v, n)
-      m = (n > 0 ? v[n] : 0)
-      if (n >= 3) {
-        med = median(v, n)
-        for (i = n; i >= 1; i--) if (v[i] <= 2 * med) { m = v[i]; break }
-      }
-      printf "%d\n", m
+      printf "%d\n", pick(v, n)
     }' "$f" 2>/dev/null
 }
 
-# _gate_promise <key> [<tree>] [<kind>] -> <mem>:<cores>:<seconds>: 0 memory, the cores <kind>
-# declares (default work: one), and <key>'s recorded seconds in <tree>'s project (default: here).
-# gate_promise <key> — the public reader the ownership table names (wave-28 T13; pass 12): the
-# same answer for a work request asked from here, with the store loaded first so a caller
-# outside the lock can ask.
+# _gate_promise <key> [<tree>] [<kind>] [<class>] [<busy> <faded>] -> <mem>:<cores>:<seconds>: 0
+# memory, the cores `_gate_cores_for` promises (default work), and <key>'s recorded seconds in <tree>'s
+# project (default: here), scaled by <busy> when it is given and by the gate's own reading when not.
+# gate_promise <key> — the public reader: the same answer for a work request asked from here, with the
+# store loaded first so a caller outside the lock can ask.
 gate_promise() {
   [ -n "${1:-}" ] || { echo "gate: usage: gate_promise <key>" >&2; return 2; }
   _gate_store || return 2
   _gate_promise "$1"
 }
 
-_gate_promise() {  # <key> [<tree>] [<kind>] [<load now>] — the load now as `_gate_seconds` reads it when not given
-  if [ "$#" -ge 4 ]; then
-    printf '0:%s:%s\n' "$(_gate_cores_for "${3:-work}")" "$(_gate_seconds "$1" "$(_gate_project "${2:-}")" "$4")"
+_gate_promise() {
+  local pk
+  pk="$(_gate_project "${2:-}")"
+  if [ "$#" -ge 6 ]; then
+    printf '0:%s:%s\n' "$(_gate_cores_for "${3:-work}" "$4" "$1" "$pk" "$5" "$6")" "$(_gate_seconds "$1" "$pk" "$5")"
   else
-    printf '0:%s:%s\n' "$(_gate_cores_for "${3:-work}")" "$(_gate_seconds "$1" "$(_gate_project "${2:-}")")"
+    printf '0:%s:%s\n' "$(_gate_cores_for "${3:-work}" "${4:-}" "$1" "$pk")" "$(_gate_seconds "$1" "$pk")"
   fi
 }
 
@@ -700,9 +757,27 @@ gate_usage() {
     }'
 }
 
+# _gate_faded <now> <busy> — after a scan: the admitted runs' processor promises as the load does not
+# carry them yet. The 1-minute load average takes in a run over about its window, so each promise
+# counts max(0, 1 - (now - admitted) / 60) of its cores: whole when admitted, nothing a minute on,
+# when the load holds it. A running run is so counted once, never in the load and its promise both.
+# While <busy> is not a number, or <now> or an admission time is unreadable, a promise counts whole:
+# the promises alone decide. THE ONE SITE of that sum: admission, the room and the width ask read it.
+# A caller that has not scanned has no list: an unset one is an empty one, so it reads a sum of 0.
+_gate_faded() {
+  printf '%s' "${_G_PROM:-}" | awk -F: -v now="$1" -v busy="$2" '
+    function num(v) { return v ~ /^[0-9]+(\.[0-9]+)?$/ }
+    NF >= 3 {
+      w = 1
+      if (num(busy) && num(now) && num($NF)) { w = 1 - (now - $NF) / 60; if (w > 1) w = 1; if (w < 0) w = 0 }
+      s += $2 * w
+    }
+    END { printf "%.10g", s + 0 }'
+}
+
 # _gate_decide <id> — under the lock: rc 0 when this call admitted <id>.
 _gate_decide() {
-  local f="$_GD/requests/$1" reading p now busy
+  local f="$_GD/requests/$1" reading p now busy fd
   reading="$(_gate_reading)"
   _gate_scan
   _gate_idle "$reading"
@@ -711,28 +786,28 @@ _gate_decide() {
   _gate_read "$f" || return 1
   # ONE READING OF THE LOAD (wave-39 T8; D11): the processor's busy cores decide the admission, scale the
   # promise's seconds, and are recorded as the run's load= for its cost line.
+  # The promise is sized on that same reading and the same faded sum the test below reads.
   busy="$(_res_busy_cores 2>/dev/null)"
-  p="$(_gate_promise "$_R_key" "$_R_tree" "$_R_kind" "$busy")"
+  now="$(_res_now)"
+  fd="$(_gate_faded "$now" "$busy")"
+  p="$(_gate_promise "$_R_key" "$_R_tree" "$_R_kind" "$_R_class" "$busy" "$fd")"
   if [ "$_G_UNF" -gt 0 ]; then
     [ "$reading" -ge 0 ] || return 1
   fi
-  printf '%s' "$_G_PROM" | awk -F: -v r="$reading" -v u="$(gate_usage "$reading")" -v share="$(gate_share)" \
-      -v lim="$(_gate_share_cores)" -v busy="$busy" -v unf="$_G_UNF" -v p="$p" "$_GATE_FITS_AWK"'
-    NF >= 2 { sc += $2 }
-    END {
+  awk -v r="$reading" -v u="$(gate_usage "$reading")" -v share="$(gate_share)" -v lim="$(_gate_share_cores)" \
+      -v busy="$busy" -v f="$fd" -v p="$p" "$_GATE_FITS_AWK"'
+    BEGIN {
       split(p, n, ":")
       if (r >= 0 && !fits(u, share)) exit 1    # memory, the live reading: the hard limit
-      b = busy + 0; if (sc > b) b = sc         # processor, the soft limit
-      if (unf > 0 && b + n[2] > lim) exit 1
+      if (busy + f + n[2] > lim) exit 1        # processor, the soft limit, with or without company
       exit 0
     }' || return 1
-  now="$(_res_now)"
   printf 'admitted=%s\npromise=%s\n' "$now" "$p" >> "$f"
   case "$busy" in ''|.|*.*.*|*[!0-9.]*) : ;; *) printf 'load=%s\n' "$busy" >> "$f" ;; esac
   return 0
 }
 
-# _gate_enter <kind> <key> <who> [<landing>] [<within>] [<record>] — under the lock: sets _GATE_ID to the request this
+# _gate_enter <kind> <key> <who> [<landing>] [<within>] [<record>] [<class>] — under the lock: sets _GATE_ID to the request this
 # ask holds. One by the same who for the same key AND kind, with no admitted line, whose holder was
 # cleared (holder=-, a 75 or a TERM handed it back) and whose landing= is <landing> (none for none:
 # wave-38 T5, so one row's ask never inherits another row's turn) is resumed, its holder
@@ -814,6 +889,7 @@ _gate_enter() {
     [ -z "${4:-}" ] || printf 'landing=%s\n' "$4"
     [ -z "$w" ] || printf 'within=%s\n' "$w"
     [ -z "${4:-}" ] || [ -z "${6:-}" ] || printf 'record=%s\n' "$6"
+    [ -z "${7:-}" ] || printf 'class=%s\n' "$7"
   } > "$_GD/requests/$_GATE_ID"
 }
 
@@ -1119,20 +1195,22 @@ _gate_landing_ok() {
 
 gate_ask() {
   local kind="${1:-}" key="${2:-}" within='' poll="${BIONIC_GATE_POLL:-2}" start now
-  local who='' id='' noted=0 rc land='' rec=''
+  local who='' id='' noted=0 rc land='' rec='' class=''
   if [ "$#" -lt 2 ]; then
-    echo "gate: usage: gate_ask <landing|work|whole> <key> [--within <seconds>]" >&2
+    echo "gate: usage: gate_ask <landing|work|whole> <key> [--within <seconds>] [--class <browser|compile>]" >&2
     return 2
   fi
   shift 2
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --within) within="${2:-}"; shift 2 2>/dev/null || shift ;;
+      --class) class="${2:-}"; shift 2 2>/dev/null || shift ;;
       *) echo "gate: gate_ask: unknown option $1" >&2; return 2 ;;
     esac
   done
   case "$kind" in landing|work|whole) ;; *) echo "gate: kind is landing, work or whole, not '$kind'" >&2; return 2 ;; esac
   case "$within" in *[!0-9]*) echo "gate: --within takes whole seconds, not '$within'" >&2; return 2 ;; esac
+  case "$class" in ''|browser|compile) ;; *) echo "gate: --class is browser or compile, not '${class:0:20}'" >&2; return 2 ;; esac
   key="${key//$'\n'/ }"
   [ -n "$key" ] || { echo "gate: gate_ask needs a command key" >&2; return 2; }
   _gate_store || return 2
@@ -1161,11 +1239,13 @@ gate_ask() {
   while :; do
     if _gate_lock; then
       if [ -z "$id" ]; then
-        _gate_enter "$kind" "$key" "$who" "$land" "$within" "$rec"
+        _gate_enter "$kind" "$key" "$who" "$land" "$within" "$rec" "$class"
         if [ "$_GATE_LINEAGE" = 1 ]; then _gate_unlock; _gate_term_disarm; printf '%s\n' "$_GATE_ID"; return 0; fi
         id="$_GATE_ID"
       fi
       _gate_decide "$id"; rc=$?
+      # THE BASELINE: what this shell has reaped so far, its own polls among it, is not the run's.
+      if [ "$rc" -eq 0 ]; then _gate_cpu; printf 'cpu0=%s\n' "$_G_CPU" >> "$_GD/requests/$id"; fi
       _gate_unlock
       if [ "$rc" -eq 0 ]; then
         if [ "$_GATE_TERMED" = 1 ]; then _gate_term_end "$id" 1; return 143; fi
@@ -1191,8 +1271,18 @@ gate_ask() {
   done
 }
 
+# _gate_cpu — under the lock, in the calling shell and never inside `$( )`: _G_CPU, the children's user
+# and system seconds that shell has reaped, the second line of `times`, to two decimals.
+_gate_cpu() {
+  times > "$_GD/lock/times" 2>/dev/null
+  _G_CPU="$(awk 'NR == 2 { for (i = 1; i <= 2; i++) { x = $i; gsub(",", ".", x); split(x, a, "m"); sub(/s$/, "", a[2]); cpu += a[1] * 60 + a[2] } }
+    END { printf "%.2f\n", cpu }' "$_GD/lock/times" 2>/dev/null)"
+}
+
+# gate_end runs in the holder's own shell, called directly and never inside `$( )`: the `times` it
+# reads is that shell's reaped children, the run, and a subshell has reaped none of them.
 gate_end() {
-  local id="${1:-}" rc="${2:-}" f now secs reading cf ld i=0 by='' why='-'
+  local id="${1:-}" rc="${2:-}" f now secs reading cf ld cores i=0 by='' why='-'
   case "$id" in ''|*[!0-9]*) echo "gate: usage: gate_end <id> <rc> [--by <sid> [--why <reason>]]" >&2; return 2 ;; esac
   case "$rc" in ''|*[!0-9]*) echo "gate: usage: gate_end <id> <rc> [--by <sid> [--why <reason>]]" >&2; return 2 ;; esac
   shift 2
@@ -1229,14 +1319,20 @@ gate_end() {
     secs=$((now - _R_admitted)); [ "$secs" -ge 0 ] || secs=0
     printf 'ended=%s\nrc=%s\n' "$now" "$rc" >> "$f"
   fi
-  # THE ONE THING LEARNED (wave-33 T1; D4 as amended, Δ10; AC-8.6): the run's seconds, in the
-  # key's keyed file, newest last, three kept, for the landing's time limit. A run of zero
-  # seconds (wave-32 T1; D5) has no measured time and writes none. The line carries the load the run was
-  # admitted under (wave-39 T8; D11), `:<load>`, when its request recorded one (`_gate_decide`'s load=).
+  # WHAT A RUN LEAVES: its seconds and its cores, one line in the key's keyed file, newest last, three
+  # kept, the seconds for the landing's time limit and the cores for the key's next promise. A run of
+  # zero seconds has no measured time and writes none. The load is the request's load=, the reading it
+  # was admitted under, written empty when it has none so the cores keep their place. The cores are the
+  # children's seconds (`_gate_cpu`) less the request's cpu0=, what the asking shell had reaped when
+  # admitted (none when absent), over the wall seconds, capped at the machine's cores and floored at
+  # 0.1, to two decimals.
   if [ "$secs" -gt 0 ]; then
-    case "$_R_load" in ''|.|*.*.*|*[!0-9.]*) ld='' ;; *) ld=":$_R_load" ;; esac
+    case "$_R_load" in ''|.|*.*.*|*[!0-9.]*) ld='' ;; *) ld="$_R_load" ;; esac
+    _gate_cpu
+    cores="$(awk -v u="$_G_CPU" -v u0="$_R_cpu0" -v s="$secs" -v c="$(_res_cores)" \
+      'BEGIN { k = (u - u0) / s; if (c + 0 >= 1 && k > c + 0) k = c + 0; if (k < 0.1) k = 0.1; printf "%g\n", int(k * 100 + 0.5) / 100 }')"
     { cat "$cf" 2>/dev/null
-      printf '%s:%s%s\n' "$secs" "$now" "$ld"
+      printf '%s:%s:%s:%s\n' "$secs" "$now" "$ld" "$cores"
     } | tail -n 3 > "$_GD/cost/.new.$id" && mv "$_GD/cost/.new.$id" "$cf"
   fi
   reading="$(_gate_reading)"
@@ -1263,26 +1359,25 @@ gate_state() {
   room="$(_gate_room_line "$reading" 0)"
   load="${room#* load=}"; load="${load%% *}"
   promised="${room#* promised=}"; promised="${promised%% *}"
-  printf 'share=%s used=%s admitted=%s waiting=%s landing-waiting=%s load=%s promised=%s\n' \
-    "$share" "$used" "$_G_UNF" "$_G_WAIT" "$_G_LWAIT" "$load" "$promised"
+  printf 'share=%s reserve=%s used=%s admitted=%s waiting=%s landing-waiting=%s load=%s promised=%s\n' \
+    "$share" "$(gate_reserve)" "$used" "$_G_UNF" "$_G_WAIT" "$_G_LWAIT" "$load" "$promised"
 }
 
 # _gate_room_line <reading> <owed> — after a scan: the room line, rc 0 when there is room.
-# The loads print as read (-1 when empty); `promised` is the admitted runs' processor
-# promises plus <owed> times the cores a writer not yet showing will be promised,
+# The loads print as read (-1 when empty); `promised` is the admitted runs' promises the load
+# does not carry yet (`_gate_faded`) plus <owed> times the cores a writer not yet showing will be promised,
 # `_gate_cores_for work` (wave-33 T1; Δ10; wave-38 T5: the suite cost, whatever is on record).
 # `waiting` is printed and decides nothing (wave-38 T5; D21): the room is the admitted runs'.
 _gate_room_line() {
   local b1 b5 most
   b1="$(_res_busy_cores 2>/dev/null)"; b5="$(_res_busy_cores_5m 2>/dev/null)"
   most="$(_gate_cores_for work)"
-  printf '%s' "$_G_PROM" | awk -F: -v r="$1" -v owed="$2" -v b1="${b1:--1}" -v b5="${b5:--1}" \
+  awk -v r="$1" -v owed="$2" -v b1="${b1:--1}" -v b5="${b5:--1}" -v f="$(_gate_faded "$(_res_now)" "$b1")" \
       -v most="$most" -v share="$(gate_share)" -v lim="$(_gate_share_cores)" -v cores="$(_res_cores)" \
       -v unf="$_G_UNF" -v wait="$_G_WAIT" -v used="$(gate_usage "$1")" "$_GATE_FITS_AWK"'
     function known(v) { return v ~ /^[0-9]+(\.[0-9]+)?$/ }
-    NF >= 3 { pc += $2 }
-    END {
-      prom = pc + owed * most
+    BEGIN {
+      prom = f + owed * most
       quiet = (unf == 0 && owed == 0)
       room = 1
       if (!known(b1) || !known(b5) || r < 0) { if (!quiet) room = 0 }
@@ -1510,16 +1605,14 @@ gate_landing_close() {
 #          or not, is answered 0 until the older finishes (D22: landings one at a time at full
 #          width; work fills what is left; wave-38 T30: "until it finishes" now spans its gaps).
 #   count  the admission rule (`_gate_decide`'s) applied in sequence, no arithmetic of its own:
-#          s starts at the processor promises of the admitted runs plus PROMISE for each waiting
-#          landing request (the order serves those before any new landing ask); a run counts
-#          while max(_res_busy_cores, s) + PROMISE ≤ share × cores ÷ 100, and each one counted
-#          adds PROMISE to s. PROMISE is `_gate_cores_for landing`, the suite cost, above 0, so the
+#          s starts at the admitted runs' promises the load does not carry yet (`_gate_faded`)
+#          plus PROMISE for each waiting landing request (the order serves those before any new
+#          landing ask); a run counts while _res_busy_cores + s + PROMISE is at most the share's
+#          cores less the reserve, and each one counted adds PROMISE to s. PROMISE is `_gate_cores_for landing`, the suite cost, above 0, so the
 #          room ends the count and no number caps it, whatever the machine. Nothing counts
 #          while a whole run is admitted, or while the memory reading is over the share or unknown.
-#   floor  the oldest landing with nothing of its own open is answered at least 1, so a landing
-#          always progresses (the gate admits a run whatever the load while nothing is admitted).
-#          One with a run of its own open is answered the count alone, so no runner of it is
-#          started only to wait in the queue (A-T5-2).
+#   limit  the count is the whole answer, 0 included: the oldest landing waits like any request
+#          while the load is over the line, and is served first when it falls (the order rule).
 # The answer reads the store as it is: a runner started and not yet asking is not in it, so the
 # caller asks again once the runners it started have asked.
 # rc 2: not one argument, a key that is not a landing key (`_gate_landing_ok`), or a store that
@@ -1551,16 +1644,17 @@ gate_width_older() {
 # _gate_width <landing> — THE WIDTH ASK's one reading: "<answer> <older landing, or ->", rc 0; rc 2 the
 # store, rc 1 the lock.
 _gate_width() {
-  local land="$1" reading
+  local land="$1" reading busy
   _gate_store || return 2
   _gate_lock || { echo "gate: the lock could not be had" >&2; return 1; }
   reading="$(_gate_reading)"
   _gate_scan
   _gate_idle "$reading"
   _gate_unlock
-  { printf '%s' "$_G_PROM"; printf '%s' "$_G_LAND"; printf '%s' "$_G_LEASE"; } | awk -v land="$land" \
+  busy="$(_res_busy_cores 2>/dev/null)"
+  { printf '%s' "$_G_LAND"; printf '%s' "$_G_LEASE"; } | awk -v land="$land" \
       -v p="$(_gate_cores_for landing)" -v r="$reading" -v u="$(gate_usage "$reading")" \
-      -v share="$(gate_share)" -v lim="$(_gate_share_cores)" -v busy="$(_res_busy_cores 2>/dev/null)" \
+      -v share="$(gate_share)" -v lim="$(_gate_share_cores)" -v busy="$busy" -v f="$(_gate_faded "$(_res_now)" "$busy")" \
       -v whole="$_G_WHOLE" -v lwait="$_G_LWAIT" "$_GATE_FITS_AWK"'
     function older(a, b) {
       if (T[a] != T[b]) return T[a] < T[b]
@@ -1573,9 +1667,7 @@ _gate_width() {
       if (!(k in A) || a < A[k] || (a == A[k] && i < I[k])) { A[k] = a; I[k] = i }
       next
     }
-    NF == 1 { split($1, f, ":"); sc += f[2] }
     END {
-      own = (land in A)
       # The active landings and their age: a held lease by (first, 0, seq); one with no lease by
       # (its earliest open request, 1, its id).
       for (k in A) { act[k] = 1; T[k] = A[k]; C[k] = 1; Q[k] = I[k] }
@@ -1590,10 +1682,9 @@ _gate_width() {
       if (ol != "") { print 0, ol; exit }
       n = 0; p += 0
       if (!whole && r >= 0 && fits(u, share) && p > 0) {
-        s = sc + lwait * p; b0 = busy + 0
-        while (1) { b = b0; if (s > b) b = s; if (b + p > lim) break; n++; s += p }
+        s = f + lwait * p
+        while (busy + s + p <= lim) { n++; s += p }
       }
-      if (n == 0 && !own) n = 1
       print n, "-"
     }'
 }
