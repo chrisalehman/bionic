@@ -105,6 +105,8 @@ export GATE_LIB="$GATE"
 PROMISE="$( . "$REPO_ROOT/payload/scripts/lib/resources.sh" 2>/dev/null; _res_suite_cores 2>/dev/null )"
 pr() { awk -v p="${PROMISE:-0}" -v n="$1" 'BEGIN { printf "%g", p * n }'; }
 mkdir -p "$CLAUDE_CONFIG_DIR/bionic"
+# Rows that read the share's room whole run with no reserve; the rows that read the reserve set their own.
+printf '0\n' > "$CLAUDE_CONFIG_DIR/bionic/reserve"
 
 if [ -r "$GATE" ] && bash -n "$GATE" 2>/dev/null; then
   ok "subject present and parses: payload/scripts/lib/gate.sh"
@@ -259,6 +261,17 @@ expect_eq "S.9 the same ask at share 80 is admitted (55 + 10 ≤ 80)" "0" "$(cd 
 expect_eq "S.10 the store defaults to \$CLAUDE_CONFIG_DIR/bionic/gate" "$CLAUDE_CONFIG_DIR/bionic/gate" \
   "$( unset BIONIC_GATE_DIR; . "$GATE_LIB" 2>/dev/null; gate_dir )"
 
+# The reserve: one core is the person's. The room is share × cores ÷ 100 less it (absent: 1), never under 1.
+shr() {  # <share> <reserve|-> — the room over planted files; - leaves no reserve file
+  printf '%s\n' "$1" > "$CLAUDE_CONFIG_DIR/bionic/share"; rm -f "$CLAUDE_CONFIG_DIR/bionic/reserve"
+  [ "$2" = - ] || printf '%s\n' "$2" > "$CLAUDE_CONFIG_DIR/bionic/reserve"
+  ( . "$GATE_LIB" 2>/dev/null; _gate_share_cores )
+}
+expect_eq "S.19 share 92, reserve 1, 8 cores: 6.36 (7.36 less the person's core)" "6.36" "$(shr 92 1)"
+expect_eq "S.20 no reserve file reads the same: the default is 1" "6.36" "$(shr 92 -)"
+expect_regex "S.21 gate_state carries reserve=1 after share=" '^share=92 reserve=1 ' "$(shr 92 1 >/dev/null; . "$GATE_LIB" 2>/dev/null; gate_state)"
+expect_eq "S.22 reserve 0 leaves the whole share: 7.36" "7.36" "$(shr 92 0)"
+
 # The verb (T10, D16): `session-poker.sh share <n>` writes the file the gate reads. The verb runs under
 # the world's own CLAUDE_CONFIG_DIR and a HOME that holds nothing; the gate's asks follow what it wrote.
 share_verb() {  # <args...> -> the verb's output; BIONIC_CLAUDE_HOME stays as the caller set it
@@ -302,6 +315,8 @@ expect_eq "WD.3 share 50 on 8 cores: 4 workers" "4" "$(gw_of 50 8)"
 expect_eq "WD.4 share 1 on 8 cores: floored at 1, never 0" "1" "$(gw_of 1 8)"
 expect_eq "WD.5 the cores are read, not assumed: share 92 on 64 cores is 58" "58" "$(gw_of 92 64)"
 expect_eq "WD.6 an unreadable share is the default's room: 92 on 8 cores, 7" "7" "$(gw_of bogus 8)"
+expect_eq "WD.7 share 92, reserve 1, 8 cores: 6 workers (6.36, floored)" "6" \
+  "$(printf '1\n' > "$CLAUDE_CONFIG_DIR/bionic/reserve"; gw_of 92 8; printf '0\n' > "$CLAUDE_CONFIG_DIR/bionic/reserve")"
 
 # ── §WIDTH-ASK ───────────────────────────────────────────────────────────────
 # THE GATE ANSWERS A LANDING'S WIDTH (wave-38 T5; D21, D22; AC-6.1; ADR-060). `gate_width_ask

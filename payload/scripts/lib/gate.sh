@@ -67,7 +67,7 @@
 #   gate_end <id> <rc> --by <sid> [--why <reason>]
 #                  (wave-36 T11; D8) stop-run's end, accepted whether or not the request was
 #                  admitted: writes ended= rc= by= why= and records no seconds
-#   gate_state               share=<n> used=<n> admitted=<n> waiting=<n> landing-waiting=<n> load=<1m>/<5m> promised=<cores>
+#   gate_state               share=<n> reserve=<n> used=<n> admitted=<n> waiting=<n> landing-waiting=<n> load=<1m>/<5m> promised=<cores>
 #   gate_room [--owed <n>]   rc 0 while another writer may start, rc 1 otherwise, one line:
 #                            room=<yes|no> load=<1m>/<5m> cores=<n> promised=<cores> waiting=<n>
 #                            (waiting is printed, and decides nothing: wave-38 T5, D21)
@@ -91,8 +91,10 @@
 #                            THE RULES, "open"), in the order given, and is rc 0 when it printed any.
 #                            One read of the store answers every name, and it takes no lock.
 #   gate_share               the machine's share, 1 to 100 (absent or unreadable: 92)
-#   gate_width               the workers the share has room for: floor(share × cores ÷ 100), at least 1
-#                            (7 at share 92 on 8 cores); the width a whole run of tests/run.sh takes
+#   gate_reserve             the cores the person keeps from the share, 0 up to the machine's cores
+#                            (absent or unreadable: 1)
+#   gate_width               the workers the share has room for: floor(share × cores ÷ 100 − reserve), at least 1
+#                            (6 at share 92 and reserve 1 on 8 cores); the width a whole run of tests/run.sh takes
 #   gate_promise <key>       the promise for a work request for <key> asked from here,
 #                            <mem>:<cores>:<seconds>, loading the store itself (see promise)
 #   gate_list                one line per request: <id> <waiting|admitted|ended|killed|gone> …
@@ -147,7 +149,7 @@
 #             larger of it and idle plus the admitted requests' memory promises, which this
 #             gate makes 0) at most the share. Over the share it admits nothing.
 #   processor the larger of _res_busy_cores and the admitted processor promises, plus the
-#             newcomer's, at most share × cores ÷ 100 (`_gate_share_cores`) — or nothing
+#             newcomer's, at most share × cores ÷ 100 less the reserve (`_gate_share_cores`) — or nothing
 #             admitted is unfinished. An empty or unreadable busy reading counts as 0: the
 #             promises alone decide.
 #   promise   (wave-33 T1; D4 as amended, Δ10; AC-8.1) the gate does not forecast from history:
@@ -168,7 +170,7 @@
 #             `_res_busy_cores` and `_res_busy_cores_5m`, each plus the processor promises of
 #             admitted, unfinished requests and <owed> times the suite cost (`_gate_cores_for
 #             work`, what a writer not yet showing will be promised), are at most share × cores
-#             ÷ 100; and `_res_used_pct` is at most the share. It reads admitted runs and the
+#             ÷ 100 less the reserve; and `_res_used_pct` is at most the share. It reads admitted runs and the
 #             owed count, never the queue (wave-38 T5; D21, ADR-060): a landing's runner waiting
 #             at the gate used to answer room=no and close FILL for every writer.
 #             <owed> is the caller's count of writers not yet showing: live writers that have
@@ -248,16 +250,31 @@ gate_share() {
   printf '%s\n' "$v"
 }
 
-# _gate_share_cores — the processor room the share allows: share × cores ÷ 100, unfloored (7.36
-# at share 92 on 8 cores), the cores being those this process may use (`_res_cores`). THE ONE
-# SITE of that product (wave-33 T1; debt share-room): gate_width floors it, and the admission
-# test (`_gate_decide`) and the room (`_gate_room_line`) compare against it as it is, so the
-# three cannot drift apart.
+# gate_reserve — the cores the person keeps for themselves, read beside the share: the first
+# word of the first line of bionic/reserve, a non-negative decimal no larger than the cores this
+# process may use. Anything else, the file absent among it, is 1: a machine that has a person at
+# it never gives them every core.
+gate_reserve() {
+  local v='' c
+  { read -r v < "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/reserve"; } 2>/dev/null
+  v="${v%%[[:space:]]*}"
+  case "$v" in ''|.*|*.|*[!0-9.]*|*.*.*) v=1 ;; esac
+  c="$(_res_cores)"
+  _res_is_uint "$c" && [ "$c" -ge 1 ] || c=1
+  awk -v v="$v" -v c="$c" 'BEGIN { if (v + 0 > c) v = 1; printf "%.10g\n", v + 0 }'
+}
+
+# _gate_share_cores — the processor room the share allows: share × cores ÷ 100 less the reserve,
+# never under 1 and otherwise unfloored (6.36 at share 92 and reserve 1 on 8 cores), the cores
+# being those this process may use (`_res_cores`). THE ONE SITE of that product: gate_width
+# floors it, and the admission test (`_gate_decide`) and the room (`_gate_room_line`) compare
+# against it as it is, so they cannot drift apart and none keeps a formula of its own.
 _gate_share_cores() {
   local c
   c="$(_res_cores)"
   _res_is_uint "$c" && [ "$c" -ge 1 ] || c=1
-  awk -v s="$(gate_share)" -v c="$c" 'BEGIN { printf "%.10g", s * c / 100 }'
+  awk -v s="$(gate_share)" -v c="$c" -v r="$(gate_reserve)" \
+    'BEGIN { x = s * c / 100 - r; if (x < 1) x = 1; printf "%.10g", x }'
 }
 
 # gate_width — the share's room as a whole number of workers: `_gate_share_cores` floored, at
@@ -1263,8 +1280,8 @@ gate_state() {
   room="$(_gate_room_line "$reading" 0)"
   load="${room#* load=}"; load="${load%% *}"
   promised="${room#* promised=}"; promised="${promised%% *}"
-  printf 'share=%s used=%s admitted=%s waiting=%s landing-waiting=%s load=%s promised=%s\n' \
-    "$share" "$used" "$_G_UNF" "$_G_WAIT" "$_G_LWAIT" "$load" "$promised"
+  printf 'share=%s reserve=%s used=%s admitted=%s waiting=%s landing-waiting=%s load=%s promised=%s\n' \
+    "$share" "$(gate_reserve)" "$used" "$_G_UNF" "$_G_WAIT" "$_G_LWAIT" "$load" "$promised"
 }
 
 # _gate_room_line <reading> <owed> — after a scan: the room line, rc 0 when there is room.
