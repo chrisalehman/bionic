@@ -643,6 +643,11 @@ guarded "$R1" 'npx playwright test e2e/x.spec.ts'
 expect_eq "BC1 a foreground browser run is ALLOWED" "0" "$ST"
 expect_contains "BC1 …wrapped by the shim" "booked.sh" "$WRAP"
 expect_contains "BC1 …carrying its class" "--class browser" "$WRAP"
+expect_contains "BC1 …keyed by the command itself" "--suites npx_playwright_test_e2e_x.spec.ts -- " "$WRAP"
+guarded "$R1" 'cd /tmp/x || exit 1; npx playwright test e2e/a.spec.ts'
+expect_contains "BC3 a leading cd is not part of the key" "--suites npx_playwright_test_e2e_a.spec.ts -- " "$WRAP"
+guarded "$R1" 'cd /tmp/y && npx playwright test e2e/a.spec.ts'
+expect_contains "BC3 …and another tree running the one command keys the same word" "--suites npx_playwright_test_e2e_a.spec.ts -- " "$WRAP"
 guarded "$R1" 'npx playwright test e2e/x.spec.ts &'
 expect_eq "BC2 a backgrounded browser run is REFUSED" "2" "$ST"
 
