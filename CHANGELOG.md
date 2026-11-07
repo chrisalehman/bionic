@@ -178,10 +178,10 @@ Rendered from the plan's deferred findings, each its stated sentence, in the ord
 
 ### The landing numbers
 
-`landing-report --rows` at 67508196c4f911816248a4973d29dc3a7b486dd6 on 2026-11-07T16:00:07Z:
+`landing-report --rows` at 9b55f229c9285aac7800b40ba1dc0d5a9aca9bbe on 2026-11-07T16:19:22Z:
 
 ```
-landings: queue=16 hand=6 git=0 · ready-to-landed median=2.0m p75=3.5m max=9.8m · runs: green=44 red=0 none=0 discarded=0 red-then-green=0 run=106 reused=0 absent=0 · waited median=12s · killed=3
+landings: queue=17 hand=6 git=0 · ready-to-landed median=1.4m p75=3.0m max=9.8m · runs: green=46 red=0 none=0 discarded=0 red-then-green=0 run=110 reused=0 absent=0 · waited median=12s · killed=3
 T1 queue ready=2026-11-07T02:37:05Z landed=2026-11-07T02:37:51Z minutes=0.8 runs=2 waited=9s wait=0.1 prove=0.6 rework=0.0 width=4
   gate.test.sh green promised=44s actual=25s ratio=0.57
   shell-lint.test.sh green promised=33s actual=37s ratio=1.12
@@ -246,6 +246,9 @@ T22 queue ready=2026-11-07T07:22:36Z landed=2026-11-07T07:28:08Z minutes=5.5 run
   run.test.sh green promised=2s actual=4s ratio=2.00
   shell-lint.test.sh green promised=32s actual=37s ratio=1.16
 T24 hand ready=- landed=2026-11-07T08:34:01Z minutes=- runs=0 waited=- wait=- prove=- rework=- width=-
+T25 queue ready=2026-11-07T15:59:23Z landed=2026-11-07T16:00:16Z minutes=0.9 runs=2 waited=14s wait=0.2 prove=0.7 rework=0.0 width=2
+  background-suite-guard.test.sh green promised=21s actual=27s ratio=1.29
+  shell-lint.test.sh green promised=37s actual=39s ratio=1.05
 ```
 
 ## 1.29.2 — 2026-11-05
