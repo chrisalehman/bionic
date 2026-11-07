@@ -215,11 +215,12 @@ expect_eq "B1.5 the command reads the shim's stdin, not /dev/null" "piped-in" \
   "$(printf 'piped-in\n' | bk -- cat 2>/dev/null)"
 
 # B2. A second run asks while the first holds the gate's only room: it waits, says so, and runs
-# once the first ends. Every command is promised one core (wave-33 T1; Δ10), so the room is the
-# live processor's: 7.0 busy cores of the 7.36 the share of 92 allows on 8 (7.0 + 1 > 7.36). The
-# first ask, nothing admitted, is admitted; the second waits.
+# once the first ends. Every command is promised 1.61 cores, so the room is the
+# live processor's: the share of 92 on 8 cores less the reserve of 1 is 6.36, and nothing is
+# admitted past it, a lone ask included. At 4.0 busy cores the first ask fits (4.0 + 1.61) and the
+# second does not (4.0 + 1.61 + 1.61); it waits until the first ends.
 newrow b2
-BUSY=7
+BUSY=4
 bk -- "$(gate a)" > "$ROW/a.out" 2>&1 & BG="$BG $!"; B2_A=$!
 wait_file "$ROW/a.started"
 bk -- "touch $ROW/c.started" > "$ROW/c.out" 2>&1 & BG="$BG $!"; B2_C=$!
