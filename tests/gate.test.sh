@@ -38,9 +38,9 @@
 #                      next ask resumes its number and asked=. Mutation: the trap removed ends it
 #                      rc=gone and files a fresh number (N.12, SIGKILL, unchanged)
 #   §WHOLE-HOLDER the tick's whole run (regression@<h8>, budget run.sh) is admitted alone, and waits while a landing runs
-#   §COST      AC-3.1  a booked run's cores ride its cost line's fourth field, capped at the machine and floored
+#   §COST              a booked run's cores ride its cost line's fourth field, capped at the machine and floored
 #                      at 0.1; kept cores promise the key's next ask by the rule its seconds use, three fields the prior
-#   §CLASS     AC-2.1  a browser or whole ask on a fresh key is promised the room free; a work ask waits beside it
+#   §CLASS             a browser or whole ask on a fresh key is promised the room free; a work ask waits beside it
 #
 # HERMETIC. Everything runs in the model world (tests/lib/world.sh): a planted machine, a
 # planted clock moved by world_tick, a gate store and a CLAUDE_CONFIG_DIR under the world's
