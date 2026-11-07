@@ -132,7 +132,7 @@ expect_regex "PR.0 resources.sh's reader names one suite's cost in cores, a posi
 #   CHILD_ADMIT=<v>  the child's BIONIC_GATE_ADMIT is <v> instead of <id>; `-` leaves it unset
 #   ENDFIRST=1 once admitted, gate_end <id> 0 before running CHILD (the admission is over)
 #   WORK=<sh>  once admitted, run <sh> as a child before holding (processor time for `times`)
-#   PLANT_CPU=<s>  the children's processor time `times` reports at gate_end is <s> seconds
+#   PLANT_CPU=[<a>:]<s>  the children's processor time `times` reports at gate_end is <s> seconds (<a> at the ask)
 #   CLASS=<c>  ask with --class <c>
 #   AGENT=<a>  ask as agent <a> (the who's second half) instead of <name>, so two askers share a who
 #   LIVE=1     after a 75, stay alive, polling nothing, until <dir>/<name>.go
@@ -143,6 +143,7 @@ printf '%s\n' "$$" > "$d/$n.pid"
 export BIONIC_GATE_AGENT="${AGENT:-$n}"
 . "$GATE_LIB" 2>/dev/null
 [ -z "${BUSY_FILE:-}" ] || _res_busy_cores() { cat "$BUSY_FILE"; }   # BUSY_FILE=<f>: a load that can fall under a waiter
+case "${PLANT_CPU:-}" in *:*) times() { printf '0m0.00s 0m0.00s\n0m%ss 0m0.00s\n' "${PLANT_CPU%%:*}"; } ;; esac
 id="$(gate_ask "$kind" "$key" --within "$within" ${CLASS:+--class "$CLASS"} 2>"$d/$n.err")"; rc=$?
 printf '%s\n' "$id" > "$d/$n.id"
 printf '%s\n' "$rc" > "$d/$n.rc.tmp" && mv "$d/$n.rc.tmp" "$d/$n.rc"
@@ -159,7 +160,7 @@ if [ -n "${CHILD:-}" ]; then
     bash "$0" "$d" "$kid" "$kind" "$key" 0 )
 fi
 [ -z "${WORK:-}" ] || bash -c "$WORK"
-[ -z "${PLANT_CPU:-}" ] || times() { printf '0m0.00s 0m0.00s\n0m%ss 0m0.00s\n' "$PLANT_CPU"; }
+[ -z "${PLANT_CPU:-}" ] || times() { printf '0m0.00s 0m0.00s\n0m%ss 0m0.00s\n' "${PLANT_CPU#*:}"; }
 [ "${HOLD:-0}" = 1 ] || exit 0
 i=0
 while [ ! -f "$d/$n.go" ] && [ "$i" -lt 1200 ]; do i=$((i + 1)); sleep 0.05; done
@@ -937,6 +938,14 @@ expect_eq "CO.2 kept cores 5.8, 6.0 and 13.0 promise 6.0, the largest at or unde
 world_clock 1000; for co in 400:p1 0.01:p2; do PLANT_CPU="${co%:*}" HOLD=1 ask_bg "${co#*:}" work "${co#*:}" 0; wait_for 20 has "${co#*:}.rc"; world_tick 10; release "${co#*:}"; done
 expect_eq "CO.3 a planted 400 s of processor over 10 s on 8 cores writes 8, the machine; 0.01 s writes 0.1, the floor" \
   "10:1010:0:8 10:1020:0:0.1" "$(cat "$(costf p1)") $(cat "$(costf p2)")"
+PLANT_CPU=30:40 HOLD=1 ask_bg p3 work p3 0; wait_for 20 has p3.rc; world_tick 10; release p3
+expect_eq "CO.4 30 s at the ask and 40 s at the end over 10 s writes 1: the polls before admission are not the run's" "10:1030:0:1" "$(cat "$(costf p3)")"
+printf '92\n' > "$CLAUDE_CONFIG_DIR/bionic/share"; printf '1\n' > "$CLAUDE_CONFIG_DIR/bionic/reserve"; world_cost_cores hv 30 7.5 7.5 7.5; world_cost_cores m3 30 3.0 3.0 3.0
+ask_fg c5a work hv 0 >/dev/null; ask_fg c5b work m3 0 >/dev/null; world_machine 8 8192 30 2.0; ask_fg c5c work hv 0 >/dev/null
+expect_eq "CO.5 kept 7.5 past share 92 reserve 1 (6.36) is admitted on the room free, 6 at busy 0 and 4 at busy 2.0; kept 3.0 promises 3.0 (rc|promise)" \
+  "0|0:6:30 0|0:4:30 0|0:3.0:30" "$(for a in c5a c5c c5b; do printf '%s|%s ' "$(rc_of $a)" "$(field "$(id_of $a)" promise)"; done | sed 's/ $//')"
+world_machine 8 8192 30 0.5; HOLD=1 ask_bg c6h work hv 99999; wait_for 5 has c6h.rc; world_tick 120
+expect_eq "CO.6 a light key asked behind it while it holds, its promise a minute old, is admitted (heavy|light rc)" "0|0" "$(rc_of c6h)|$(ask_fg c6l work lt 0 | tail -n 1)"
 reap
 
 # ── §CLASS ───────────────────────────────────────────────────────────────────
