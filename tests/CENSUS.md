@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 119 · sections: 1087 · keep: 893 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 119 · sections: 1088 · keep: 894 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1092 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1092 - 22 - 8 = 1062.
 
@@ -1322,6 +1322,7 @@ session-poker-2.test.sh | §Section 37 | keep | payload/scripts/lib/units.sh: th
 session-poker-2.test.sh | §Section 38 | keep | hooks/session-poker.sh tick: the poker: HELD line for an ext:-held row deleted, so ("38a AC-3.3 the ext:-held row prints its HELD line") goes red | none (searched 'poker: HELD' in tests/)
 session-poker-2.test.sh | §Section 39 | keep | hooks/session-poker.sh tick: the LEDGER print of units_findings deleted, so ("39a AC-4.2 a landed row with no line ticks a LEDGER line") goes red | none (searched 'poker: LEDGER' in tests/)
 session-poker-2.test.sh | §Section 40 | keep | hooks/session-poker.sh tick: the no-roster QUIET exit placed above the HELD and LEDGER prints, so the first tick of a run prints neither; (40a) goes red while §Section 38 and §Section 39, which hold rosters, stay green | none (searched 'poker: HELD' in tests/)
+session-poker-2.test.sh | §SHARE | keep | hooks/session-poker.sh share: the print left at the bare share, or the reserve operand's bound on the machine's cores deleted, so (SS.1) reads `92` and (SS.3) exits 1 with 9 on 8 cores; the reserve write dropped, so (SS.2) finds no file | none (searched 'poker.sh share' and 'reserve=' in tests/; gate.test.sh S.11-S.18 drive the share operand only and read the gate's own functions for the reserve)
 session-poker-2.test.sh | §Section 41 | keep | hooks/session-poker.sh tick: the held row's fingerprint comparison deleted, so a held agent whose launch changed is still held; ("41d-… AC-4.4 after the change the row is stood down again") goes red | none (searched 'held=' and 'fp=' in tests/; roster.test.sh and landing-line-1 read held= as a field only)
 
 ## session-poker-3.test.sh

@@ -30,7 +30,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh floor-run   run the project's regression (its floor: command, else tests/run.sh, whole, held to the full-run rules) in the working checkout and log it for proof-add floor (writes a log under record/, never the plan)
 #     bash <plugin-root>/hooks/session-poker.sh finding-stated <record>#<n> '<sentence>'   store a deferred finding's one changelog sentence on its deferred: line (writes the plan)
-#     bash <plugin-root>/hooks/session-poker.sh share [<n>]   print the machine's share of its own resources, or set it to <n>, 1 to 100 (the set writes the user-level share file)
+#     bash <plugin-root>/hooks/session-poker.sh share [<n>] [reserve=<cores>]   print the machine's share, the reserve the person keeps, the cores and the room, or set the share to <n>, 1 to 100, and the reserve to <cores> (the set writes the user-level files)
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>'   move a finding across the line on words the user typed in this session (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, whatever its ancestry (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
@@ -506,7 +506,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh patrol --explain   why the Patrol clock dies and the acts that revive it: the explanation the stop hook's one-line refusal leaves out (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
   die "  bash ${HOOK_DIR}/session-poker.sh interval-default   this script's built-in default interval, in seconds (ignores config)"
-  die "  bash ${HOOK_DIR}/session-poker.sh share [<n>]   print the machine's share, 1 to 100 (92 when none is set); with <n>, set it: one integer in the user-level share file the gate reads"
+  die "  bash ${HOOK_DIR}/session-poker.sh share [<n>] [reserve=<cores>]   print the machine's share (92 when none is set), the cores the person keeps (1 when none is set), the cores and the room; with <n> or reserve=<cores>, set it in the user-level file the gate reads"
   die "  bash ${HOOK_DIR}/session-poker.sh window     the instant this session's roster begins, UTC ISO-8601 (empty when it cannot be dated)"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt      every open row a PREDECESSOR session left on this project's rosters"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt --report-only   the same rows, with the adoption itself not taken (writes nothing)"
@@ -1320,12 +1320,20 @@ $1"; shift ;;
   patrol)
     { [ $# -eq 1 ] && [ "$1" = --explain ]; } || usage "patrol takes one flag: --explain."
     ;;
-  # THE MACHINE'S SHARE (wave-28 T10; REQ-2 AC-2.1, D16). No operand prints it; one operand sets it. The
-  # value's own shape is the verb's refusal (1); a second operand is the usage error.
+  # THE MACHINE'S SHARE. No operand prints it; a share and `reserve=<cores>`
+  # set theirs, together or one at a time. A value's own shape is the verb's refusal; a third operand, or the
+  # same one twice, is the usage error.
   share)
-    [ $# -le 1 ] || usage "share takes at most one argument: the share to set, 1 to 100."
-    SH_SET=no; SH_ARG=""
-    if [ $# -eq 1 ]; then SH_SET=yes; SH_ARG="$1"; fi
+    [ $# -le 2 ] || usage "share takes at most two arguments: the share to set, 1 to 100, and reserve=<cores>."
+    SH_SET=no; SH_ARG=""; SH_RSET=no; SH_RES=""
+    for SH_A in "$@"; do
+      case "$SH_A" in
+        reserve=*) [ "$SH_RSET" = no ] || usage "share takes reserve=<cores> once."
+                   SH_RSET=yes; SH_RES="${SH_A#reserve=}" ;;
+        *) [ "$SH_SET" = no ] || usage "share takes one share, 1 to 100."
+           SH_SET=yes; SH_ARG="$SH_A" ;;
+      esac
+    done
     ;;
   # ONE OPTIONAL OPERAND (wave-20 REQ-5, AC-5.6): the plan whose ledger to read. Without it, the
   # session's own run — the one every other verb here resolves.
@@ -3430,43 +3438,65 @@ case "$VERB" in
     exit 0
     ;;
 
-  # THE MACHINE'S SHARE (wave-28 T10; REQ-2 AC-2.1, D16). The share is one integer, 1 to 100, in
-  # `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share`; with no file the gate's share is 92. Printing it asks
-  # `gate_share`, the one reader, so what this prints is what the gate decides on. Setting it writes that
-  # file by the SAME path expression `gate_share` reads (not `claude_home`, which BIONIC_CLAUDE_HOME moves),
-  # through a staged copy and a rename so a reader never sees half a number. It is the machine's and not a
-  # run's: no session key, roster or engagement is read, and nothing but the file is written. REFUSED (1):
-  # a value that is not a whole number from 1 to 100 (leading zeros read as decimal), or a file that cannot be
-  # written; either way the share is as it was. The contract-verb arm of the bash wall lists `share`, so a
-  # subagent may call neither form.
+  # THE MACHINE'S SHARE. The share is one integer, 1 to 100, in
+  # `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share`; with no file the gate's share is 92. The reserve is the
+  # cores the person keeps, a decimal from 0 to the machine's cores, in `bionic/reserve` beside it; with no file
+  # it is 1. Printing asks the gate's own readers (`gate_share`, `gate_reserve`, `_res_cores`, `_gate_share_cores`),
+  # so what this prints is what the gate decides on and no arithmetic is kept here. Setting writes each file by
+  # the SAME path expression the gate reads (not `claude_home`, which BIONIC_CLAUDE_HOME moves), through a staged
+  # copy and a rename so a reader never sees half a number. It is the machine's and not a run's: no session key,
+  # roster or engagement is read, and nothing but those files is written. Both values are judged before either is
+  # written. REFUSED: a share that is not a whole number from 1 to 100 (leading zeros read as decimal) exits 1; a
+  # reserve that is not a decimal at most the cores exits 2; a file that cannot be written exits 1; whichever
+  # it is, both files are as they were. The contract-verb arm of the bash wall lists `share`, so a subagent may
+  # call no form of it.
   share)
-    SH_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/share"
-    if [ "$SH_SET" = no ]; then
-      if ! declare -F gate_share >/dev/null 2>&1; then
+    SH_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic"
+    if [ "$SH_SET" = no ] || [ "$SH_RSET" = yes ]; then
+      if ! declare -F _gate_share_cores >/dev/null 2>&1; then
         die "REFUSED — lib/gate.sh did not load, so the share cannot be read."
         exit 3
       fi
-      gate_share
+    fi
+    if [ "$SH_SET" = no ] && [ "$SH_RSET" = no ]; then
+      printf 'share=%s reserve=%s cores=%s room=%s\n' \
+        "$(gate_share)" "$(gate_reserve)" "$(_res_cores)" "$(_gate_share_cores)"
       exit 0
     fi
-    case "$SH_ARG" in
-      ''|*[!0-9]*) SH_BAD=yes ;;
-      *) if [ "${#SH_ARG}" -gt 9 ]; then SH_BAD=yes
-         else SH_N=$((10#$SH_ARG)); if [ "$SH_N" -ge 1 ] && [ "$SH_N" -le 100 ]; then SH_BAD=no; else SH_BAD=yes; fi; fi ;;
-    esac
-    if [ "$SH_BAD" = yes ]; then
-      die "REFUSED — share $(printf '%q' "${SH_ARG:0:20}") is not a whole number from 1 to 100; the share is unchanged."
-      exit 1
+    if [ "$SH_SET" = yes ]; then
+      case "$SH_ARG" in
+        ''|*[!0-9]*) SH_BAD=yes ;;
+        *) if [ "${#SH_ARG}" -gt 9 ]; then SH_BAD=yes
+           else SH_N=$((10#$SH_ARG)); if [ "$SH_N" -ge 1 ] && [ "$SH_N" -le 100 ]; then SH_BAD=no; else SH_BAD=yes; fi; fi ;;
+      esac
+      if [ "$SH_BAD" = yes ]; then
+        die "REFUSED — share $(printf '%q' "${SH_ARG:0:20}") is not a whole number from 1 to 100; the share is unchanged."
+        exit 1
+      fi
     fi
-    SH_TMP="${SH_FILE}.tmp.$$"
-    if mkdir -p "${SH_FILE%/*}" 2>/dev/null && printf '%s\n' "$SH_N" > "$SH_TMP" 2>/dev/null \
-       && mv -f "$SH_TMP" "$SH_FILE" 2>/dev/null; then
-      say "share set to $SH_N"
-      exit 0
+    if [ "$SH_RSET" = yes ]; then
+      case "$SH_RES" in ''|.*|*.|*[!0-9.]*|*.*.*) SH_BAD=yes ;; *) SH_BAD=no ;; esac
+      if [ "$SH_BAD" = no ] && [ "${#SH_RES}" -le 9 ] \
+         && awk -v v="$SH_RES" -v c="$(_res_cores)" 'BEGIN { exit !(v + 0 <= c + 0) }'; then :; else SH_BAD=yes; fi
+      if [ "$SH_BAD" = yes ]; then
+        die "REFUSED — reserve $(printf '%q' "${SH_RES:0:20}") is not a decimal from 0 to the machine's cores ($(_res_cores)); usage: share [<1-100>] [reserve=<cores>]; nothing was changed."
+        exit 2
+      fi
     fi
-    rm -f "$SH_TMP" 2>/dev/null
-    die "REFUSED — the share file could not be written; the share is unchanged."
-    exit 1
+    mkdir -p "$SH_DIR" 2>/dev/null || { die "REFUSED — the share file could not be written; the share is unchanged."; exit 1; }
+    for SH_W in "share:$SH_SET:${SH_N:-}" "reserve:$SH_RSET:$SH_RES"; do
+      IFS=: read -r SH_NAME SH_DO SH_VAL <<< "$SH_W"
+      [ "$SH_DO" = yes ] || continue
+      SH_TMP="$SH_DIR/$SH_NAME.tmp.$$"
+      if printf '%s\n' "$SH_VAL" > "$SH_TMP" 2>/dev/null && mv -f "$SH_TMP" "$SH_DIR/$SH_NAME" 2>/dev/null; then
+        say "$SH_NAME set to $SH_VAL"
+      else
+        rm -f "$SH_TMP" 2>/dev/null
+        die "REFUSED — the $SH_NAME file could not be written; the $SH_NAME is unchanged."
+        exit 1
+      fi
+    done
+    exit 0
     ;;
 
   # THE DEFAULT, WITHOUT THE CONFIG — added for hooks/dispatch-preflight.sh's arming wall
