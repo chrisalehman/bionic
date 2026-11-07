@@ -763,8 +763,9 @@ gate_usage() {
 # when the load holds it. A running run is so counted once, never in the load and its promise both.
 # While <busy> is not a number, or <now> or an admission time is unreadable, a promise counts whole:
 # the promises alone decide. THE ONE SITE of that sum: admission, the room and the width ask read it.
+# A caller that has not scanned has no list: an unset one is an empty one, so it reads a sum of 0.
 _gate_faded() {
-  printf '%s' "$_G_PROM" | awk -F: -v now="$1" -v busy="$2" '
+  printf '%s' "${_G_PROM:-}" | awk -F: -v now="$1" -v busy="$2" '
     function num(v) { return v ~ /^[0-9]+(\.[0-9]+)?$/ }
     NF >= 3 {
       w = 1
