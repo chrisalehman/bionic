@@ -201,7 +201,7 @@ reader_q_asks() {  # <plan> -> each ask still open: no reply on it, and no appro
 # through lib/plan-read.sh, the plan's one parser; reviews still answers the log's half alone, and its
 # comment names the half the plan holds.
 reader_identity finding ref
-reader_identity debt concept
+reader_identity debt concept kind
 reader_identity admitted id
 reader_identity dispatch row name
 reader_identity verdict row commit suite

@@ -29,6 +29,8 @@
 #   §CELLS   a row's suites and lands-on go to the task's own section, or to the gaps list when it has none.
 #   §STEPS   a Step follows the Step above it and a proof or waiver the line above it in its block, whatever
 #            their instants, so the step is the old current: and closure; a Step held (pending) is a gap.
+#   §PARKED  a Step 9 line that carries no delivered: (a parked plan's note) is no step: named, not written,
+#            so the step stays the plan's current:; close-out's own parked delivery is step 9.
 #
 # FIXTURE FIDELITY. The plan is a real file in a scratch docs tree, in the shape version-14 plans hold.
 
@@ -375,4 +377,14 @@ expect_contains "a Step line held (pending) is no step reached: named, not writt
 expect_eq "Steps stand in their numbers' order, wherever an instant sorts" "0 1 2 3 8 9 " "$(translate "$U" events | sed -n 's/^run\/v1|ev=step|n=\([0-9]*\)|.*/\1/p' | tr '\n' ' ')"
 expect_contains "a Step with no instant keeps none, and its place makes none" "run/v1|ev=step|n=2|at=" "$(translate "$U" events | grep -x 'run/v1|ev=step|n=2|at=')"
 expect_contains "and its instant is still a gap" "gap/v1|ev=step|n=2|field=at|why=absent" "$(translate "$U" gaps)"
+section "PARKED"
+# The note `step-line 9` writes on a parked plan, under a Step 8 line close-out has not yet replaced: read as a step,
+# it would close the run before close-out does.
+K="$D/plans/epic-x/wave-7-parked.plan.md"; k8='- Step 8: integrate: opened 2026-11-01T11:00Z'
+printf '%s\n' '## SDLC State' 'current: 8' '- Step 7: documented at 2026-11-01T10:00Z' "$k8" '- Step 9: parked on wave/7-parked — waits on a hand test' > "$K"
+expect_eq "a parked plan's Step 9 note is no delivery: the step is its current:" "n=8 state=open" "$(bash "$RS" "$K" step | paste -sd' ' -)"
+expect_contains "the note is named on the gaps list, not written" "gap/v1|ev=step|n=9|field=ev|why=undelivered" "$(translate "$K" gaps)"
+printf '%s\n' '## SDLC State' 'current: 9' '- Step 7: documented at 2026-11-01T10:00Z' "$k8" \
+  '- Step 9: delivered: parked on wave/7-parked @ abc1234 — waits on a hand test (2026-11-01T12:00Z wave-7-parked)' > "$K"
+expect_eq "close-out's own parked line is the delivery" "n=9 state=delivered" "$(bash "$RS" "$K" step | paste -sd' ' -)"
 finish

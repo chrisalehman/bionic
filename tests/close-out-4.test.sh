@@ -1180,4 +1180,22 @@ expect_eq "OC-6 the delivered plan reads AC-2 blocked, its evidence cell the con
 expect_eq "OC-6b …its block's evidence: key the continuation path with the line quoted" "$OC_CONT — $OB_LINE" "$(oc_ev "$OB_P" AC-2)"
 expect_contains "OC-6c …and the card says it is blocked, naming the line" "matrix: AC-2 blocked — $OB_LINE" "$CO_OUT"
 
+# ============================================================
+section "§PARKED-NOTE — close-out takes its step and its closure from the reader: a parked plan's Step 9 note closes nothing"
+# ============================================================
+# `step-line 9` writes a note on a parked plan (PK-12), under the Step 8 line the run already carries. close-out reads
+# its step and whether the run is delivered from the reader, so a note read there as step 9 would make close-out say
+# `already closed` and leave the parked run open for good. FIXTURE FIDELITY: §PARKED's park_fixture, its Step 8 line
+# the one an advanced run carries, the note in step-line 9's words.
+# fails-when: close-out reads the note as the delivery and closes nothing.
+PPT="$(park_fixture parked5 wake)"
+awk -v w="parked on wave/01-fixture — $PK_WHY" '/^- Step 8: \(pending\)$/ { print "- Step 8: integrate: opened 2026-09-14T00:20Z"; print "- Step 9: " w; next } { print }' \
+  "$PPT/$PLAN_REL" > "$PPT/pk.tmp" && mv "$PPT/pk.tmp" "$PPT/$PLAN_REL"
+expect_eq "PN-0 precondition: the plan carries the Step 8 line and the note, and the reader reads step 8" "1|1|n=8" \
+  "$(/usr/bin/grep -c '^- Step 8: integrate: ' "$PPT/$PLAN_REL")|$(/usr/bin/grep -c '^- Step 9: parked on ' "$PPT/$PLAN_REL")|$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$PPT/$PLAN_REL" step | head -1)"
+run_close "$PPT" run
+expect_eq "PN-1 run closes the parked plan (rc 0), not already closed" "0|no" "$CO_RC|$(contains "$CO_OUT" "already closed")"
+expect_eq "PN-2 …its one Step 9 line is close-out's delivery, the note replaced" "1|yes" \
+  "$(/usr/bin/grep -c '^- Step 9: ' "$PPT/$PLAN_REL")|$(contains "$(/usr/bin/grep '^- Step 9: ' "$PPT/$PLAN_REL")" "- Step 9: delivered: parked on wave/01-fixture @ ")"
+
 finish

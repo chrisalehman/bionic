@@ -75,6 +75,15 @@ EOF
 expect_eq "a whole and a piece reading at one head are two facts, the later piece replacing the earlier" "whole/pass piece/fail " \
   "$(ask reviews "$H" | awk -F'|' '{ for (i = 2; i <= NF; i++) { if ($i ~ /^scope=/) s = substr($i, 7); if ($i ~ /^result=/) r = substr($i, 8) } printf "%s/%s ", s, r }')"
 
+# fails-when: a debt is identified by its concept alone, so two debts of one concept and two kinds, both open in the
+# ledger, are one fact and the continuation carries one of them; a burned line closes the debt of its own kind.
+W=debtkind; mkdir -p "$D/plans/epic-x" "$D/record/debtkind"; printf '# debtkind\n' > "$D/plans/epic-x/debtkind.plan.md"
+printf '%s\n' 'cv | duplicate | a.sh:1 | raised-by r.md | touches 1 | —' 'cv | unpinned-pair | b.sh:2 | raised-by r.md | touches 2 | —' > "$D/record/debtkind/debt.md"
+dkinds() { ask debts | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^kind=/) printf "%s ", substr($i, 6) }'; }
+expect_eq "two open debts of one concept and two kinds are two facts" "duplicate unpinned-pair " "$(dkinds)"
+printf '%s\n' 'cv | duplicate | a.sh:1 | raised-by r.md | touches 1 | burned T9' 'cv | unpinned-pair | b.sh:2 | raised-by r.md | touches 2 | —' > "$D/record/debtkind/debt.md"
+expect_eq "a burned line closes the debt of its own kind, and the other stays open" "unpinned-pair " "$(dkinds)"
+
 section "NAME"
 QS=("step" "approved step3" "approved release" "green $H" "green $G" "proof $H" "proof $H regression" "landed" "asks")
 answers() { local q; for q in "${QS[@]}"; do W=$1; out="$(ask $q)"; printf '%s rc=%s %s\n' "$q" "$?" "$out"; done; }

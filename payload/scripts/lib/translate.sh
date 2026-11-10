@@ -145,6 +145,9 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
       n = substr($0, 8, index($0, ":") - 8); text = substr($0, index($0, ":") + 2); at = ""
       # A Step held "(pending)" is a step not reached when the line was written: no fact, so no step.
       if (trim(text) == "(pending)") { whole("step", "n=" n, "pending"); next }
+      # Step 9 is reached only by its delivery, which close-out writes on that line; a note there on a parked plan, written
+      # before close-out runs, delivers nothing, and read as a step it would close the run that close-out has not closed.
+      if (n == "9" && !index(text, "delivered:")) { whole("step", "n=9", "undelivered"); undelivered = 1; next }
       # An approval is written at-then-by or by-then-at, and both are read; the words follow either.
       if (match(text, /(approved|configured) at [^ ]+ (by|via) /)) {
         ap = substr(text, RSTART, RLENGTH); split(ap, w, " "); at = w[3]; rest = substr(text, RSTART + RLENGTH)
@@ -164,7 +167,7 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
     /^deferred: / { kv(substr($0, 11)); split(HEAD, w, " "); begin("finding", "ref", w[1]); put("severity", w[2]); put("to", "deferred")
       put("title", quoted(HEAD)); for (i = 1; i <= NP; i++) put(PK[i], PV[i]); lack("by"); f = w[1]; sub(/#.*/, "", f); if (rev[f] != "") after(rev[f]); emit(""); next }
     /^order: / { split(substr($0, 8), w, " "); begin("order", "act", w[1]); put("said", quoted($0)); emit(w[2]); next }
-    END { if (cur != "" && !(cur in steps)) { begin("step", "n", cur); inblock("steps"); emit("") } }'
+    END { if (cur != "" && !(cur in steps) && !(cur == "9" && undelivered)) { begin("step", "n", cur); inblock("steps"); emit("") } }'
 }
 
 translate_source _translate_ledger
