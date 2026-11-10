@@ -11,7 +11,7 @@
 #        head`, a close-out copy printing green splits them; then a green run at F with docs, release and code past it
 # §LOG   a review reading, a regression proof and an approval the run's log alone holds are read by the judge and the
 #        proof readers, which ask the reader; a proof written between two reads in one process is read by the second
-# §KEEP  the kept fold is served from the user's own mode-700 directory, never from one others can write or a link
+# §KEEP  the kept fold is served from the user's own mode-700 directory, never from one others can write or a link; a fold that failed is kept nowhere
 # §IFS   under a tab as the caller's only separator the fold's key still covers the log, and a rating and a verdict read
 #        as they do under the default
 #
@@ -266,13 +266,18 @@ expect_eq "LOG-5 a proof written between two reads in one process is read by the
     printf "%s|%s" "$a" "$(proof_last "$2" regression)"' _ "$PAH_LIB" "$PL_PLAN" "$PL_REC/run.log")"
 
 section "§KEEP: the kept fold is served only from a directory this user alone can write, and its files are bounded"
-# fails-when: a fold planted under the right key is served from a directory others can write or through a link, the user's own fold is not served to a second process, or a file per plan is kept for ever.
+# fails-when: a fold planted under the right key is served from a directory others can write or through a link, the user's own fold is not served to a second process, or a file per plan is kept for ever, or a failed fold, or a kept file pruned between two reads, is kept as the run's facts.
 pk() { TMPDIR="$PK/$1" bash -c '. "$1/proof.sh" && proof_approved_head "$2" release' _ "$PAH_LIB" "$PL_PLAN"; }  # <dir> -> a fresh process's `release` approval head, TMPDIR $PK/<dir>
 PK="$SANDBOX/keep"; PK_D="bionic-facts-$(id -u)"; mkdir -p "$PK/ok" "$PK/open/$PK_D" "$PK/away" "$PK/link" "$PK/full/$PK_D"; pk ok; PK_F="$(ls "$PK/ok/$PK_D")"; printf 'run/v1|ev=approval|key=release|by=intruder|head=%s|said=x|at=2026-10-04T14:00:00Z\n' "$PL_H" >> "$PK/ok/$PK_D/$PK_F"
 cp "$PK/ok/$PK_D/$PK_F" "$PK/open/$PK_D/"; chmod 777 "$PK/open/$PK_D"; cp -R "$PK/ok/$PK_D" "$PK/away/"; ln -s "$PK/away/$PK_D" "$PK/link/$PK_D"; for i in $(seq 40); do : > "$PK/full/$PK_D/$i"; done; touch -t 202601010000 "$PK/full/$PK_D"/*; chmod 700 "$PK/full/$PK_D"; pk full
 expect_eq "KEEP-1 the user's own kept fold (mode 700) is served to a second process, the approval planted in it read" "drwx------|$PL_H" "$(ls -ld "$PK/ok/$PK_D" | cut -c1-10)|$(pk ok)"
 expect_eq "KEEP-2 the same file is served neither from a directory others can write nor through a link to the user's own, each left as planted" "||1|1" "$(pk open)|$(pk link)|$(grep -c intruder "$PK/open/$PK_D/$PK_F")|$(grep -c intruder "$PK/away/$PK_D/$PK_F")"
 expect_eq "KEEP-3 a fold written beside forty older files leaves the sixteen newest, its own the newest" "16|$PK_F" "$(ls "$PK/full/$PK_D" | wc -l | tr -d ' ')|$(ls -t "$PK/full/$PK_D" | head -1)"
+pf() { rm -rf "$PK/f"; mkdir -p "$PK/f"; TMPDIR="$PK/f" bash -c '. "$1/proof.sh" && _proof_reader_load || exit 1; fn="$5" pp="$3" px="$4"; eval "$(declare -f $fn | sed 1s/$fn/pf_real/)"; eval "$fn() { printf \"\$pp\"; return \$px; }"; _proof_facts "$2" > "$TMPDIR/o" 2> "$TMPDIR/e"; rc=$?; eval "$fn() { pf_real \"\$@\"; }"
+  printf "%s|%s|%s|%s|%s|%s" $rc "$(wc -l < "$TMPDIR/o")" "${_PROOF_FACTS_KEY:+key}" "$(ls "$TMPDIR"/bionic-facts-* | wc -l)" "$(grep -cF "$2" "$TMPDIR/e")" "$(proof_last "$2" regression)" | tr -d " "' _ "$PAH_LIB" "$PL_PLAN" "$2" "$3" "$1"; }  # <reader function stood in> <what it prints> <its exit> -> exit|lines served|key|files kept|stderr lines naming the plan|the next ask's newest regression head
+PL_R=0000000000000000000000000000000000000001; expect_eq "KEEP-4 a fold that fails, short or empty or with a stage of its pipeline killed, is an error naming the plan, is kept nowhere, and the next ask folds the whole" "2|0||0|1|$PL_R~2|0||0|1|$PL_R~2|0||0|1|$PL_R" "$(pf reader_facts 'run/v1|ev=x\n' 1)~$(pf reader_facts '' 1)~$(pf reader_events 'run/v1|ev=x\n' 128)"
+expect_eq "KEEP-5 an empty fold that succeeds is a run with no fact, and is kept" "0|0|key|1|0|" "$(pf reader_facts '' 0)"
+pk race; expect_eq "KEEP-6 a kept file pruned after its first read is served whole, never as an empty fold" "$PL_R" "$(TMPDIR="$PK/race" bash -c '. "$1/proof.sh" || exit 1; for c in head sed cat; do eval "$c() { command $c \"\$@\"; rm -f \"\$TMPDIR\"/bionic-facts-*/*; }"; done; proof_last "$2" regression' _ "$PAH_LIB" "$PL_PLAN")"
 
 section "§IFS: the library splits its own lists, whatever separators its caller set"
 # fails-when: the fold's key splits its lists of libraries and homes on the caller's IFS, so under a tab it covers the

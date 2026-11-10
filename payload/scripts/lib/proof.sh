@@ -1521,10 +1521,11 @@ _PROOF_FACTS_KEY=""; _PROOF_FACTS=""
 # write leaves the newest _PROOF_FACTS_KEEP files, so the fold of a plan that is gone, a suite's, is not kept for ever.
 _PROOF_FACTS_KEEP=16
 
-_proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one `run/v1` line each, in fact order
-  local plan="${1:-}" lib log="" dir="" f stamp key cdir cache="" tmp IFS=$' \t\n'
+_proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one `run/v1` line each, in fact order; exit 2 with one line on stderr when the fold fails
+  local plan="${1:-}" lib log="" dir="" f stamp key cdir cache="" tmp got rc=0 IFS=$' \t\n'
   local -a deps
-  [ -f "$plan" ] && _proof_reader_load || return 0
+  [ -f "$plan" ] || return 0
+  _proof_reader_load || { printf '_proof_facts: the reader cannot be loaded, so the facts of %s are not read\n' "$plan" >&2; return 2; }
   lib="$_READER_LIB_DIR"
   log="$(reader_log "$plan" 2>/dev/null)" && dir="${log%/*}"
   # The key covers every file the fold depends on, or no fold is served or kept under it: a file cksum cannot read
@@ -1539,15 +1540,25 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   if [ -n "$stamp" ] && [ -O "$cdir" ] && [ -n "$(find "$cdir" -prune -type d ! -perm -020 ! -perm -002 2>/dev/null)" ]; then
     cache="$cdir/$(printf '%s' "$plan" | cksum | tr -c '0-9\n' '-')"
   fi
-  if [ -n "$cache" ] && [ -f "$cache" ] && [ "$(head -1 "$cache" 2>/dev/null)" = "$key" ]; then
-    _PROOF_FACTS="$(sed 1d "$cache")"
+  # The kept file is read once, key and body together: another process prunes the directory, and a file gone between
+  # two reads would be an empty body under a good key.
+  if [ -n "$cache" ] && [ -f "$cache" ] && got="$(cat "$cache" 2>/dev/null)" && [ "${got%%$'\n'*}" = "$key" ]; then
+    _PROOF_FACTS="${got#"$key"}"; _PROOF_FACTS="${_PROOF_FACTS#$'\n'}"
   elif [ -n "$dir" ]; then
-    _PROOF_FACTS="$(reader_facts "$plan")"
+    # pipefail: the reader folds a pipe, and a stage killed in it would leave a short fold that exits 0.
+    _PROOF_FACTS="$(set -o pipefail; reader_facts "$plan")" || rc=$?
   else
     # A plan the reader cannot join to a record has no log: its homes are its events, translated as the reader would.
     # shellcheck source=/dev/null
     declare -F translate >/dev/null 2>&1 || . "$lib/translate.sh" >/dev/null 2>&1
-    _PROOF_FACTS="$( reader_events() { translate "$1" events; }; reader_facts "$plan" )"
+    _PROOF_FACTS="$( set -o pipefail; reader_events() { translate "$1" events; }; reader_facts "$plan" )" || rc=$?
+  fi
+  # A fold that failed (a process refused under memory pressure) is short or empty: kept, it would answer every later
+  # ask that the run has no proof. It is an error to whoever asked, and nothing is kept, in this shell or on disk.
+  if [ "$rc" -ne 0 ]; then
+    _PROOF_FACTS_KEY=""; _PROOF_FACTS=""
+    printf '_proof_facts: the reader exited %s folding the facts of %s; nothing is kept\n' "$rc" "$plan" >&2
+    return 2
   fi
   [ -z "$_PROOF_FACTS" ] || _PROOF_FACTS="$_PROOF_FACTS"$'\n'
   _PROOF_FACTS_KEY="${stamp:+$key}"
@@ -1560,7 +1571,7 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
 
 _proof_ask() {  # <plan> <reader question's function> [args] -> its answer and exit, over the facts _proof_facts keeps
   local plan="$1" facts; shift
-  facts="$(_proof_facts "$plan")"
+  facts="$(_proof_facts "$plan")" || return
   _proof_reader_load || return 1
   ( reader_facts() { printf '%s' "$facts"; }; "$@" )
 }
