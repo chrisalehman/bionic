@@ -30,25 +30,36 @@ deferral_line() {  # <plan> <record>#<n> -> the first deferred: line of ## SDLC 
     insdlc && !found && /^deferred:[ \t]/ { split($0, f, /[ \t]+/); if (f[2] == id) { found = 1; line = $0 } }
     END { if (found) print line; exit (found ? 0 : 1) }' "$1"
 }
+# review_readings <plan> -> `<record><TAB><question><TAB><head>` per record a standing review proof names as its
+# evidence, in the order the run first registered it, the question and head of its newest proof: the reader's
+# `reviews` answer (payload/scripts/reader.sh), asked once per call, so a run whose review proofs its log alone
+# holds is read as one whose plan holds them. The waivers that answer lists are no reading, and are left out.
+# Prints nothing when the reader cannot be loaded or refuses the plan.
+review_readings() {
+  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } || return 0
+  ( . "$BIONIC_LIB/reader.sh" >/dev/null 2>&1 && reader_main "$1" reviews ) 2>/dev/null | awk -F'|' "$_LINE_FIELDS_AWK"'
+    line_kv("ev") == "proof" && line_kv("question") != "" && (e = line_kv("evidence")) != "" {
+      if (!(e in q)) o[++n] = e
+      q[e] = line_kv("question"); h[e] = line_kv("head")
+    }
+    END { for (i = 1; i <= n; i++) printf "%s\t%s\t%s\n", o[i], q[o[i]], h[o[i]] }'
+}
+
 # waive_owed_findings <plan> <repo> <question> -> always 0, prints nothing: the waiver of a question is the person's
 # answer to every finding of its readings ("fix it, defer it, or waive <question>", `disposition`), so it closes each
-# open `finding:<record>#<n>` item of every reading the plan registers under that question (wave-34 T5; REQ-4 AC-4.2,
-# D14). The readings are `disposition`'s own: `proved: kind=review` lines under ## SDLC State naming the question.
+# open `finding:<record>#<n>` item of every reading the run registers under that question. The readings are
+# `disposition`'s own, `review_readings`.
 waive_owed_findings() {
-  local ev pre key
-  declare -F owed_list >/dev/null 2>&1 && declare -F proof_awk >/dev/null 2>&1 || return 0
-  while IFS= read -r ev; do
-    [ -n "$ev" ] || continue
+  local ev q pre key
+  declare -F owed_list >/dev/null 2>&1 || return 0
+  while IFS='	' read -r ev q _; do
+    [ -n "$ev" ] && [ "$q" = "$3" ] || continue
     pre="$(finding_owed_key "$ev#")"
     for key in $(OWED_ROOT="$2" owed_list 2>/dev/null | cut -f1); do
       case "${key#"$pre"}" in "$key"|''|*[!0-9]*) continue ;; esac
       poker_owed_close "$2" "$key" "waive"
     done
-  done <<< "$(awk -v q="$3" "$(proof_awk)"'
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION == q && PROOF_EVIDENCE != "" { print PROOF_EVIDENCE }' "$1" | sort -u)"
+  done <<< "$(review_readings "$1")"
   return 0
 }
 
@@ -71,6 +82,8 @@ carry_owed_key() {
   printf 'carry:%s' "${k#finding:}"
 }
 
+# The sentence is read from the deferred: line it was written to, not from the run's finding fact: that fact is the
+# finding's newest word, and a move written after the deferral replaces it without carrying the sentence.
 deferral_sentence() {  # <plan> <record>#<n> -> the stated sentence, unescaped (nothing when none); exit 1: no deferred: line
   local l
   l="$(deferral_line "$1" "$2")" || return 1
@@ -1301,12 +1314,7 @@ PF_VERDICTS_LIST
     if [ -z "$FM_ROW" ]; then FM_WORDS="$(said_fold "$FM_RAW")"; FM_WHY="$(deferral_fold "$FM_WHY_RAW")"; fi
     plan_verb_open finding-move
     FM_REC="${FM_ID%#*}"; FM_N="${FM_ID##*#}"
-    if ! awk -v ev="$FM_REC" '
-      /^[[:space:]]*```/ { fence = !fence; next }
-      fence { next }
-      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-      insdlc && /^proved:[ \t]/ { m = split($0, f, /[ \t]+/); for (i = 2; i <= m; i++) if (f[i] == "evidence=" ev) hit = 1 }
-      END { exit !hit }' "$PV_PLAN"; then
+    if ! review_readings "$PV_PLAN" | awk -F'\t' -v ev="$FM_REC" '$1 == ev { hit = 1 } END { exit !hit }'; then
       die "REFUSED — $(clean "$FM_REC") is no review registered under ## SDLC State (no proved: line names it as its evidence), and only a registered finding is moved; the plan is unchanged."
       exit 1
     fi
@@ -1469,15 +1477,7 @@ FM_FINDING
     DSP_FIXED="$(proof_fixed "$PV_PLAN" "$PV_REPO")"
     DSP_REC="$(proof_debt_record "$PV_PLAN" "$PV_REPO")" || DSP_REC=""
     DSP_BORN="$(units_born_findings "$PV_PLAN" 2>/dev/null)" || DSP_BORN=""
-    DSP_READS="$(awk "$(proof_awk)"'
-      /^[[:space:]]*```/ { fence = !fence; next }
-      fence { next }
-      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-      insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && PROOF_EVIDENCE != "" {
-        if (!(PROOF_EVIDENCE in q)) ord[++n] = PROOF_EVIDENCE
-        q[PROOF_EVIDENCE] = PROOF_QUESTION; h[PROOF_EVIDENCE] = PROOF_HEAD
-      }
-      END { for (i = 1; i <= n; i++) printf "%s\t%s\t%s\n", ord[i], q[ord[i]], h[ord[i]] }' "$PV_PLAN")"
+    DSP_READS="$(review_readings "$PV_PLAN")"
     DSP_NF=0; DSP_NR=0; DSP_NP=0
     while IFS='	' read -r DSP_EV DSP_Q DSP_H; do
       [ -n "$DSP_EV" ] || continue
