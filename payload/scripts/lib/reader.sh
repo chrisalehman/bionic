@@ -296,10 +296,16 @@ reader_q_status() {  # <plan> <row> -> state= of the row, then its dispatch cont
 
 reader_question ready yes reader_q_ready
 reader_q_ready() {  # <plan> <row> [dep…] -> 0 when the row has not landed, no dispatch of it stands, and each dep has landed
-  # A row's deps are its Tasks cell, so the caller names them until the plan is read here.
+  # A row's deps are its Tasks cell, read through the plan's one parser when the caller names none; a row
+  # the plan lacks is then never ready. Deps a caller names are used as given.
   _reader_needs ready '<row> [dep…]' "${2:-}" || return 2
-  local plan="$1" row="$2"; shift 2
-  reader_facts "$plan" | awk -F'|' -v r="$row" -v deps="$*" "$_READER_AWK"'
+  local plan="$1" row="$2" deps cells; shift 2
+  deps="$*"
+  if [ -z "$deps" ]; then
+    cells="$(plan_read_row "$plan" Tasks id "$row")" || return 1
+    deps="$(printf '%s\n' "$cells" | awk '/^deps=/ { n = split(substr($0, 6), d, /[, ]+/); for (i = 1; i <= n; i++) if (d[i] ~ /^[A-Za-z0-9]/) printf "%s ", d[i] }')"
+  fi
+  reader_facts "$plan" | awk -F'|' -v r="$row" -v deps="$deps" "$_READER_AWK"'
     ev() == "published" { landed[line_kv("row")] = 1 }
     ev() == "dispatch" && line_kv("row") == r { held = 1 }
     END { if ((r in landed) || held) exit 1; n = split(deps, d, " "); for (i = 1; i <= n; i++) if (!(d[i] in landed)) exit 1 }'
@@ -313,4 +319,48 @@ reader_q_handoff() {  # <plan> -> the latest handoff: path= and at=
 reader_question verdicts list reader_q_verdicts
 reader_q_verdicts() {  # <plan> [row] -> each suite's verdict standing, of <row> when named
   _reader_of "$1" verdict row "${2:-}"
+}
+
+# THE PLAN'S AUTHORED PARTS. lib/plan-read.sh is their one parser; the four questions below only ask it,
+# so the plan's text is still never read in this file. A plan and its run are joined by the plan's own
+# name (`reader_log`), so no header key is followed to find either: `header` prints such a key as words.
+# A row answers its authored cells alone, in either shape of the Tasks table: state is the log's.
+# shellcheck source=/dev/null
+. "$_READER_LIB_DIR/plan-read.sh"
+
+reader_question header value reader_q_header
+reader_q_header() {  # <plan> [key] -> key=value per header key, or the one named; 1 when it is absent
+  plan_read_header "$1" "${2:-}"
+}
+
+reader_question row value reader_q_row
+reader_q_row() {  # <plan> <id> -> the row's nine authored cells as key=value, in their order; 1 no such row
+  _reader_needs row '<id>' "${2:-}" || return 2
+  local cells
+  cells="$(plan_read_row "$1" Tasks id "$2")" || return 1
+  printf '%s\n' "$cells" | awk -v want="id step kind task deps size serves files artifact" '
+    { e = index($0, "="); v[substr($0, 1, e - 1)] = substr($0, e + 1) }
+    END { n = split(want, w, " "); for (i = 1; i <= n; i++) print w[i] "=" v[w[i]] }'
+}
+
+reader_question criterion value reader_q_criterion
+reader_q_criterion() {  # <plan> <id> -> its Eval design row as key=value, one per column; 1 no such criterion
+  _reader_needs criterion '<id>' "${2:-}" || return 2
+  plan_read_row "$1" 'Eval design' Criterion "$2"
+}
+
+# A criterion's proof names it by `ac=`, so two criteria proved at one head by one kind are two facts, not
+# one replacing the other. This later entry for the type is the one the fold reads.
+reader_identity proof kind head question ac
+reader_question cell value reader_q_cell
+reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>, or state=pending; 1 not in the plan
+  _reader_needs cell '<criterion>' "${2:-}" || return 2
+  plan_read_row "$1" 'Eval design' Criterion "$2" >/dev/null || return 1
+  # Discharged only by a standing event that names the criterion: an approval by its key, a waiver or a
+  # proof by `ac=`; a proof that failed (rc other than 0, or result=fail) discharges nothing.
+  reader_facts "$1" | awk -F'|' -v c="$2" "$_READER_AWK"'
+    ev() == "approval" && line_kv("key") == c { by = "approval" }
+    ev() == "waiver" && line_kv("ac") == c { by = "waiver" }
+    ev() == "proof" && line_kv("ac") == c && line_kv("rc") ~ /^0?$/ && line_kv("result") != "fail" { by = "proof" }
+    END { print "state=" (by == "" ? "pending" : "discharged"); if (by != "") print "by=" by }'
 }

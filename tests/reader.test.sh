@@ -11,6 +11,12 @@
 #   §UNKNOWN  an unlisted question exits 2 and prints the list.
 #   §REST     the twelve log-side questions each answer a planted log in their form, honour the fold, and
 #             answer the same with each line's fields moved.
+#   §HEADER     the plan's header keys, its body never read as one, in both shapes of a plan.
+#   §ROW        a Tasks row is its nine authored cells, named by the table's header in both shapes.
+#   §CRITERION  a criterion is its Eval design row, an escaped bar kept as a bar.
+#   §CELL       a criterion is discharged only by a standing proof, waiver or approval naming it.
+#   §JOIN       a plan's log is found by its name; a header key pointing elsewhere is only words.
+#   §READY      ready reads a row's deps from its Tasks cell when the caller names none.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
 
@@ -136,5 +142,109 @@ awk -F'|' -v OFS='|' '{ f = $2; for (i = 2; i < NF; i++) $i = $(i + 1); $NF = f;
 expect_eq "the twelve answer the same with each line's fields moved" "$got" "$(W=restmoved; rest)"
 ask status 2>/dev/null; expect_status "status with no row exits 2" 2 "$?"
 ask ready 2>/dev/null; expect_status "ready with no row exits 2" 2 "$?"
+
+# Both shapes hold the same authored words with the Tasks columns in other places, so a cell read by
+# its place answers one shape wrongly. The older shape also carries the machine's cells and sections.
+EVAL='| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+| REQ-7 | planted | AC-7.1 | unit | `cell` \| `row` | none |
+| REQ-7 | planted | AC-7.2 | unit | e2 | f2 |
+| REQ-7 | planted | AC-7.3 | unit | e3 | f3 |
+| REQ-7 | planted | AC-7.4 | unit | e4 | f4 |
+| REQ-7 | planted | AC-7.5 | unit | e5 | f5 |'
+mkdir -p "$D/plans/epic-x" "$D/record/old" "$D/record/new"; : > "$D/record/old/run.log"
+cat > "$D/plans/epic-x/old.plan.md" <<EOF
+---
+sdlc-step: 4
+rigor: double
+log: record/new/run.log
+scale-recommendation: "one wave: one plan"
+---
+
+## Eval design
+
+$EVAL
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads | suites | lands-on | artifact |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | Read the plan. | w-T1 | — | 120 | REQ-7 | a.sh, b.sh | .worktrees/T1 | 7aff3fc3 | active | approval:plan | r.test.sh | r.test.sh | out/T1.md |
+
+## Verification Matrix
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-7.4 | T1 | discharged | — | — |
+EOF
+cat > "$D/plans/epic-x/new.plan.md" <<EOF
+---
+rigor: single
+scale-recommendation: 'one wave'
+---
+
+## Goal
+
+release: none, said in prose.
+
+## Eval design
+
+$EVAL
+
+## Tasks
+
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | Read the plan. | — | 120 | REQ-7 | a.sh, b.sh | out/T1.md |
+| T2 | 4 | build | Ask the log. | T1 | 60 | REQ-4 | c.sh | out/T2.md |
+| T3 | 4 | build | Wait on two. | T1, T9 | 30 | REQ-4 | d.sh | out/T3.md |
+EOF
+both() { local a; W=old; a="$(ask "$@")"; expect_nonempty "$* answers in the older shape" "$a"; W=new; expect_eq "$* reads the same in both shapes" "$a" "$(ask "$@")"; }
+flat() { ask "$@" | tr '\n' ' ' | sed 's/ $//'; }
+
+section "HEADER"
+W=old; expect_eq "a header key, its quotes dropped" "scale-recommendation=one wave: one plan" "$(ask header scale-recommendation)"
+expect_eq "every header key in its order" "sdlc-step rigor log scale-recommendation" "$(ask header | cut -d= -f1 | tr '\n' ' ' | sed 's/ $//')"
+W=new; expect_eq "the newer header, its quotes dropped" "rigor=single scale-recommendation=one wave" "$(flat header)"
+ask header sdlc-step; expect_status "a key the header lacks answers no" 1 "$?"
+
+section "ROW"
+W=new; expect_eq "a row is its nine authored cells" \
+  "id=T2 step=4 kind=build task=Ask the log. deps=T1 size=60 serves=REQ-4 files=c.sh artifact=out/T2.md" "$(flat row T2)"
+both row T1
+ask row T9; expect_status "a row the table lacks answers no" 1 "$?"
+ask row; expect_status "row with no id is refused" 2 "$?"
+
+section "CRITERION"
+W=old; expect_eq "a criterion is its Eval design row, an escaped bar read as a bar" \
+  "requirement=REQ-7 approach=planted criterion=AC-7.1 eval-type=unit eval=\`cell\` | \`row\` fails-when=none" "$(flat criterion AC-7.1)"
+both criterion AC-7.4
+ask criterion AC-9.9; expect_status "a criterion the Eval design lacks answers no" 1 "$?"
+
+section "CELL"
+W=new; cat > "$D/record/new/run.log" <<EOF
+run/v1|ev=proof|kind=eval|head=$H|ac=AC-7.1|rc=0|at=2026-11-01T00:00:01Z
+run/v1|ev=cancel|of=proof|kind=eval|head=$H|ac=AC-7.1|at=2026-11-01T00:00:02Z
+run/v1|ev=finding|ref=AC-7.1|severity=S2|at=2026-11-01T00:00:03Z
+run/v1|ev=approval|key=AC-7.2|by=me|at=2026-11-01T00:00:04Z
+run/v1|ev=proof|kind=eval|head=$H|ac=AC-7.4|rc=0|at=2026-11-01T00:00:05Z
+run/v1|ev=proof|kind=eval|head=$H|ac=AC-7.3|rc=1|at=2026-11-01T00:00:06Z
+run/v1|ev=waiver|ac=AC-7.5|head=$H|by=me|why=w|at=2026-11-01T00:00:07Z
+run/v1|ev=proof|kind=eval|head=$H|ac=AC-9.9|rc=0|at=2026-11-01T00:00:08Z
+EOF
+cells() { local c; for c in 1 2 3 4 5; do printf '%s; ' "$(flat cell "AC-7.$c")"; done; }
+expect_eq "discharged only with a standing proof, waiver or approval naming the criterion" \
+  "state=pending; state=discharged by=approval; state=pending; state=discharged by=proof; state=discharged by=waiver; " "$(cells)"
+ask cell AC-9.9; expect_status "a criterion the plan lacks has no cell" 1 "$?"
+ask cell; expect_status "cell with no criterion is refused" 2 "$?"
+
+section "JOIN"
+W=new; expect_eq "a plan with no pointer key reads its log by name" "state=discharged by=proof" "$(flat cell AC-7.4)"
+W=old; expect_eq "a pointer key in the header is never followed" "log=record/new/run.log state=pending" "$(flat header log) $(flat cell AC-7.4)"
+
+section "READY"
+W=new; printf 'run/v1|ev=published|row=T1|commit=c1|kind=queue|at=2026-11-01T00:00:09Z\n' >> "$D/record/new/run.log"
+readies() { local r; for r in "$@"; do ask ready $r; printf '%s=%s ' "${r// /+}" "$?"; done; }
+expect_eq "ready reads the deps cell, and deps a caller names stand as given" "T2=0 T3=1 T3+T1=0 T1=1 T7=1 " "$(readies T2 T3 'T3 T1' T1 T7)"
 
 finish
