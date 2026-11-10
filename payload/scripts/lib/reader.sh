@@ -109,6 +109,9 @@ reader_facts() {  # <plan> -> one line per standing fact, in the order the facts
       id = named
       if (named in idk) { m = split(idk[named], ik, ","); for (i = 1; i < m; i++) id = id SUBSEP ik[i] "=" f[ik[i]] }
       else id = id SUBSEP body
+      # two review records are two readings, even of one question at one head and scope; a later run of a check
+      # or a regression at a head still replaces the earlier one
+      if (named == "proof" && f["kind"] == "review") id = id SUBSEP "evidence=" f["evidence"]
       if (t == "cancel") { delete live[id]; next }
       if ((id in live) && fact[id] == body) next
       live[id] = 1; fact[id] = body; type[id] = t; stamp[id] = f["at"]; place[id] = ++seq

@@ -235,10 +235,22 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
   # its state and what its evidence and auditor cells hold, so that is all its event carries: the head, the
   # kind, the author and the instant are gaps. A pending or blocked row is no event. A criterion that a
   # `proved:` or `waived:` line of the SDLC State names by `ac=` is that line's fact, with the head and the
-  # instant the row lacks; the row then writes nothing of that type, so one fact is never read as two.
+  # instant the row lacks; the row then writes nothing of that type, so one fact is never read as two. A
+  # waived row whose criterion's block below the table holds an indented `waiver: <who> <day or instant>
+  # "<words>"` line takes its author, instant and words from it, as the block writes them.
   { _translate_section "$1" "SDLC State" | awk '/^(proved|waived): / && match($0, / ac=[^ ]+/) { print "S", $1, substr($0, RSTART + 4, RLENGTH - 4) }'
+    _translate_section "$1" "Verification Matrix" | awk '
+      { l = $0; sub(/^[-*+][ \t]+/, "", l) }
+      match(l, /^AC-[^ \t:]+:/) { ac = substr(l, 1, RLENGTH - 1); next }
+      !/^[ \t]/ { ac = ""; next }
+      ac != "" && match($0, /^[ \t]+waiver:[ \t]+[^"]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9](T[0-9][0-9]:[0-9][0-9](:[0-9][0-9])?Z)?[ \t]+"/) {
+        s = substr($0, index($0, "waiver:") + 7); q = index(s, "\""); h = substr(s, 1, q - 1); n = split(h, w, /[ \t]+/)
+        at = w[n]; if (at == "") at = w[n - 1]; by = substr(h, 1, index(h, at) - 1); sub(/^[ \t]+/, "", by); sub(/[ \t]+$/, "", by)
+        r = substr(s, q + 1); said = (index(r, "\"") ? substr(r, 1, index(r, "\"") - 1) : "")
+        printf "W\036%s\036%s\036%s\036%s\n", ac, by, at, said }'
     _translate_section "$1" "Verification Matrix"; } | awk -F'|' "$_TRANSLATE_AWK"'
     /^S / { split($0, w, " "); stated[(w[2] == "proved:" ? "proof" : "waiver") SUBSEP w[3]] = 1; next }
+    /^W\036/ { split($0, w, "\036"); if (!(w[2] in wat)) { wby[w[2]] = w[3]; wat[w[2]] = w[4]; wsaid[w[2]] = w[5] }; next }
     !/^\|/ { if (nh) done = 1; next }
     done { next }
     !nh { for (i = 2; i < NF; i++) { k = tolower(trim($i)); gsub(/[ \t]+/, "-", k); col[k] = i }; nh = 1; next }
@@ -249,6 +261,7 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
       begin(t, "ac", ac)
       for (j = split("evidence auditor", w, " "); j > 0; j--) c[w[j]] = ((w[j] in col) && !none($(col[w[j]]))) ? trim($(col[w[j]])) : ""
       put("evidence", c["evidence"]); put("auditor", c["auditor"])
+      if (t == "waiver" && (ac in wat)) { put("by", wby[ac]); put("said", wsaid[ac]); lack("head"); emit(wat[ac]); next }
       if (t == "proof") lack("kind"); else lack("by")
       lack("head"); emit("")
     }'
@@ -315,24 +328,32 @@ _translate_landed_rows() {  # <plan> -> the rows the landing record holds a land
 
 translate_source _translate_landing
 _translate_landing() {  # <plan> -> the landing record: ruled lines renamed, the old landing forms read, the rest named
-  # A stop-run is an act taken by hand, so it is a hand event with what= its kind. close-out is the
+  # A stop-run, a status or task written into the matrix (matrix-set) and a refusal are acts taken by
+  # hand, so each is a hand event with what= its kind and the line's own fields. close-out is the
   # Step 9 line the plan already gives, so it is not written again and what it holds beyond the step is
-  # named. A stamp/v1 line is a copy of a run line, dropped with no gap. Any other kind no ruled type
-  # carries is named whole.
+  # named. A stamp/v1 line is a copy of a run line, dropped with no gap, and so is a landed: header that
+  # copies a published line of its row and commit: the line is the landing, and it carries the kind.
+  # Any other kind no ruled type carries is named whole.
   local f
   f="$(_translate_record "$1" landing-proofs.log)" || return 0
   [ -n "${LOG_TYPES:-}" ] || . "$_TRANSLATE_LIB_DIR/log.sh" || return 0
   awk -v types="$LOG_TYPES" "$_TRANSLATE_AWK"'
+    function word(s, k,   n, w, i) { n = split(s, w, " "); for (i = 1; i <= n; i++) if (index(w[i], k "=") == 1) return substr(w[i], length(k) + 2); return "" }
+    FNR == NR { if (index($0, "line/v1|ev=published|") == 1) { split("", g); n = split($0, w, "|")
+        for (i = 2; i <= n; i++) g[substr(w[i], 1, index(w[i], "=") - 1)] = substr(w[i], index(w[i], "=") + 1)
+        lined[g["row"] SUBSEP g["commit"]] = 1 }
+      next }
     /^line\/v1\|ev=/ { t = substr($0, 12); t = substr(t, 1, index(t "|", "|") - 1); s = substr($0, 13 + length(t))
-      if (t == "stop-run") carry("hand", "what=stop-run|" s, "|")
+      if (t == "stop-run" || t == "matrix-set" || t == "refusal") carry("hand", "what=" t "|" s, "|")
       else if (t == "close-out") { n = split(s, w, "|")
         for (i = 1; i <= n; i++) if (w[i] !~ /^at=/) printf "g\t\tgap/v1|ev=step|n=9|field=%s|why=unruled\n", substr(w[i], 1, index(w[i], "=") - 1) }
       else if (index(types, " " t " ")) carry(t, s, "|")
       else { split(s, w, "|"); whole(t, w[1], "unruled") }
       next }
-    /^landed: / { s = substr($0, 9); sub(/ merge=/, " commit=", s); carry("published", s, " "); next }
+    /^landed: / { s = substr($0, 9); if ((word(s, "row") SUBSEP word(s, "merge")) in lined) next
+      sub(/ merge=/, " commit=", s); carry("published", s, " "); next }
     /^debt: / { carry("admitted", substr($0, 7), " "); next }
-    /^void: / { carry("void", substr($0, 7), " ") }' "$f"
+    /^void: / { carry("void", substr($0, 7), " ") }' "$f" "$f"
 }
 
 translate_source _translate_asks
