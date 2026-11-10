@@ -1,0 +1,10 @@
+wave-46-asks-nothing.hands.unplaced=4 roster adoption rows, lost when the run's tmp was wiped; the cards print unplaced=4 at both heads
+wave-49-what-a-run-costs.hands.unplaced=1 at f87acbfc and 3 at fcbb975f, the same loss
+wave-46-asks-nothing.hands.killed=the gate store's killed count on each landing line, pruned with the store
+wave-49-what-a-run-costs.hands.killed=the gate store's killed count on each landing line, pruned with the store
+all.dispatch=the rosters were the only record of a launch; neither run holds a line for one
+all.card.behind=commits behind the head and the reviews' coverage need the repository at the named heads
+all.card.check-files=the files the release changed in the release check need the repository and the check's file list
+all.card.rendered=the render time is the card's local time and its wording belongs to the rendering
+all.run.logs=188 of 271 run logs the verdict lines cite at wave 46, and 108 of 158 at wave 49, are gone with the tmp
+wave-49-mid.asks.fields=the open ask is the closed register row set open again at the cut; its sent and title fields were never in the record

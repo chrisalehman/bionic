@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 123 · sections: 1110 · keep: 916 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 124 · sections: 1111 · keep: 917 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1092 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1092 - 22 - 8 = 1062.
 
@@ -1232,6 +1232,10 @@ render.test.sh | §Section 15 | vacuous | 15i and 15j run the suite's own rt_las
 render.test.sh | §Section 17 | keep | agents-src/templates/implementor.md.tmpl: the COMMENT-RULE block marker deleted and the pages rendered again, so --check stays green and "17d: …between the block's own markers" goes red for agents/implementor.md | none (searched 'COMMENT-RULE' in tests/; setup.test.sh reads the rule in the installed principles file only)
 render.test.sh | §19 | keep | rule: lint — tests/render.test.sh's own header names a suite that is not under tests/, so 19b names it; also: 19a runs the suite's own hd_missing on a planted file | none (searched 'hd_missing' in tests/)
 render.test.sh | §Section 18 | keep | agents-src/templates and agents-src/blocks/brief-scaffold.md: reviews-part <row> named after the push or gh pr create, or dropped, in the Step-8 text or the scaffold, so a rendered file lacks it or differs from its source (18a to 18d) | none (searched 'reviews-part' and 'ot_order' in tests/; close-out-3.test.sh §ORDER reads the continuation)
+
+## replay-bed.test.sh
+
+replay-bed.test.sh | §TRACKED | keep | rule: lint — a fixture left untracked or deleted from tests/fixtures/replay, so the plan, landing record, card file and gaps rows go red; the bed or the scrub made to name the project's record store, so the store row goes red; an entry of the private list planted in a fixture, so tests/lib/name-scan.sh refuses it and the scan row goes red | none (searched 'fixtures/replay' and 'name-scan.sh' in tests/; release-check.test.sh plants entries in its own scratch repositories, not in the tracked fixtures)
 
 ## resources.test.sh
 
