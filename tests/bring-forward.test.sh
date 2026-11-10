@@ -31,8 +31,7 @@
 #   §CELLS   a row's suites and lands-on go to the task's own section, or to the gaps list when it has none.
 #   §STEPS   a Step follows the Step above it and a proof or waiver the line above it in its block, whatever
 #            their instants, so the step is the old current: and closure; a Step held (pending) is a gap.
-#   §PARKED  a Step 9 line that carries no delivered: (a parked plan's note) is no step: named, not written,
-#            so the step stays the plan's current:; close-out's own parked delivery is step 9.
+#   §PARKED  a Step 9 line with no delivered: (a parked plan's note) is a gap, not a step; close-out's parked delivery is.
 #
 # FIXTURE FIDELITY. The plan is a real file in a scratch docs tree, in the shape version-14 plans hold.
 
@@ -166,7 +165,6 @@ proved: kind=unit head=$H ac=AC-5 at=2026-11-01T06:00:00Z evidence=record/wave-8
 inherited: a.test.sh base=$C head=$H at=2026-11-01T07:00:00Z evidence=record/wave-8-matrix/i.log
 EOF
 MEV="$(translate "$M" events)"; MG="$(translate "$M" gaps)"
-# a caller that reads tab fields (the release card reads the hand-holds window so) calls the translation with a tab IFS
 expect_eq "the translation reads every source whatever IFS its caller holds" "$MEV" "$(IFS=$'\t'; translate "$M" events)"
 askm() { bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$M" "$@" | tr '\n' ' ' | sed 's/ $//'; }
 acof() { printf '%s\n' "$MEV" | grep -F "|ac=$1|" | grep -v '^run/v1|ev=hand|'; }
@@ -179,8 +177,7 @@ expect_eq "a waived row takes its author, instant and words from its block's wai
   "run/v1|ev=waiver|ac=AC-2|evidence=record/wave-8-matrix/w.md|auditor=REFUTED|by=Ann Person|said=not run here|at=2026-11-01T08:00:00Z" "$(acof AC-2)"
 expect_eq "the proof carries its evidence and auditor cells and nothing else" "run/v1|ev=proof|ac=AC-1|evidence=record/wave-8-matrix/a.log|auditor=CONFIRMED|at=" "$(acof AC-1)"
 expect_absent "a pending row writes no proof and no waiver" "ac=AC-3|" "$(acof AC-3)"
-# a waiver line a person wrote in a criterion block is a hand act counted from its own line, whatever the row reads;
-# only the status cell makes a waiver the judge honours, so the pending row above stays pending
+# a block waiver: line is a hand act whatever its row reads; only the status cell makes a waiver, so AC-3 stays pending
 expect_contains "a waiver line in a pending row's block is a hand act, its day as written" \
   "run/v1|ev=hand|ac=AC-3|what=waive-row|by=Bo Person|said=later, by hand|at=2026-11-01" "$MEV"
 expect_contains "…and so is a waived row's own block line" "run/v1|ev=hand|ac=AC-2|what=waive-row|by=Ann Person|said=not run here|at=2026-11-01T08:00:00Z" "$MEV"
@@ -429,8 +426,7 @@ expect_eq "Steps stand in their numbers' order, wherever an instant sorts" "0 1 
 expect_contains "a Step with no instant keeps none, and its place makes none" "run/v1|ev=step|n=2|at=" "$(translate "$U" events | grep -x 'run/v1|ev=step|n=2|at=')"
 expect_contains "and its instant is still a gap" "gap/v1|ev=step|n=2|field=at|why=absent" "$(translate "$U" gaps)"
 section "PARKED"
-# The note `step-line 9` writes on a parked plan, under a Step 8 line close-out has not yet replaced: read as a step,
-# it would close the run before close-out does.
+# The note step-line 9 writes on a parked plan, read as a step, would close the run before close-out does.
 K="$D/plans/epic-x/wave-7-parked.plan.md"; k8='- Step 8: integrate: opened 2026-11-01T11:00Z'
 printf '%s\n' '## SDLC State' 'current: 8' '- Step 7: documented at 2026-11-01T10:00Z' "$k8" '- Step 9: parked on wave/7-parked — waits on a hand test' > "$K"
 expect_eq "a parked plan's Step 9 note is no delivery: the step is its current:" "n=8 state=open" "$(bash "$RS" "$K" step | paste -sd' ' -)"

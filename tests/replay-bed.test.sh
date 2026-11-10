@@ -14,8 +14,7 @@
 #             and a step card asks again for an approval a cancel appended to the run's log retracted.
 #   §OPEN     run_open asks the reader's step of a run with a log, whatever its plan's prose says; a run with
 #             none is judged from its plan, so each closed fixture run reads closed and the cut run open.
-#   §FOLLOWS-CONTINUATION  close-out's check, over the second closed fixture run reopened at Step 8 with a run log, reads a
-#             debt the log alone holds into the card's debt line and the continuation's Deferrals.
+#   §FOLLOWS-CONTINUATION  close-out's check reads a debt only the run's log holds into its debt line and Deferrals.
 #
 # A CARD'S INSTANT. The reader answers a run as it stands, so a card's world holds as its run log the reader's
 # own translation of the fixture up to the card's instant, in the translation's order: a line with no instant
@@ -252,9 +251,7 @@ expect_eq "with no log, current: 9 and no delivery is open, and a delivered: Ste
 expect_eq "the closed fixture runs read closed and the cut run open" "1 1 0" "$(opened "$P49") $(opened "$(ls "$X"/wave-46-asks-nothing/plans/*/*.plan.md)") $(opened "$(ls "$X"/wave-49-mid/plans/*/*.plan.md)")"
 
 section "FOLLOWS-CONTINUATION"
-# The continuation follows the log: the second closed fixture run, its Step 9 line taken out and its current: 8, given a run log that
-# is its own translation, and then the same log with one debt only the log holds. close-out's check reads the step, the
-# debts it carries and their count from the reader, so the planted debt moves the debt line and joins the Deferrals.
+# The second closed fixture run reopened at Step 8, its log its own translation, then that log and a debt only the log holds.
 CW="$WORLD_ROOT/close"; CB="$CW/.bio""nic"; mkdir -p "$CB/tmp"; cp -R "$X/wave-49-what-a-run-costs" "$CB/docs"; git -C "$CW" init -q
 CP="$(ls "$CB"/docs/plans/*/*.plan.md)"; CR="$CB/docs/record/$(basename "$CP" .plan.md)"
 printf 'archive-root: %s\n' "$(sed -n 's/^archive-root: *//p' "$CP" | head -1)" > "$CB/config.yaml"

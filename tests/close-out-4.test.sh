@@ -1183,14 +1183,10 @@ expect_contains "OC-6c …and the card says it is blocked, naming the line" "mat
 # ============================================================
 section "§PARKED-NOTE — close-out takes its step and its closure from the reader: a parked plan's Step 9 note closes nothing"
 # ============================================================
-# `step-line 9` writes a note on a parked plan (PK-12), under the Step 8 line the run already carries. close-out reads
-# its step and whether the run is delivered from the reader, so a note read there as step 9 would make close-out say
-# `already closed` and leave the parked run open for good. FIXTURE FIDELITY: §PARKED's park_fixture, its Step 8 line
-# the one an advanced run carries, the note in step-line 9's words.
-# fails-when: close-out reads the note as the delivery and closes nothing.
+# FIXTURE FIDELITY: §PARKED's park_fixture, an advanced run's Step 8 line, the note in the words step-line 9 writes (PK-12).
+# fails-when: close-out reads the note as the delivery, says already closed, and the parked run never closes.
 PPT="$(park_fixture parked5 wake)"
-awk -v w="parked on wave/01-fixture — $PK_WHY" '/^- Step 8: \(pending\)$/ { print "- Step 8: integrate: opened 2026-09-14T00:20Z"; print "- Step 9: " w; next } { print }' \
-  "$PPT/$PLAN_REL" > "$PPT/pk.tmp" && mv "$PPT/pk.tmp" "$PPT/$PLAN_REL"
+awk -v w="parked on wave/01-fixture — $PK_WHY" '/^- Step 8: \(pending\)$/ { print "- Step 8: integrate: opened 2026-09-14T00:20Z"; print "- Step 9: " w; next } { print }' "$PPT/$PLAN_REL" > "$PPT/pk.tmp" && mv "$PPT/pk.tmp" "$PPT/$PLAN_REL"
 expect_eq "PN-0 precondition: the plan carries the Step 8 line and the note, and the reader reads step 8" "1|1|n=8" \
   "$(/usr/bin/grep -c '^- Step 8: integrate: ' "$PPT/$PLAN_REL")|$(/usr/bin/grep -c '^- Step 9: parked on ' "$PPT/$PLAN_REL")|$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$PPT/$PLAN_REL" step | head -1)"
 run_close "$PPT" run
