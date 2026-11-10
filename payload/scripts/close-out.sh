@@ -18,7 +18,7 @@
 # deletes, then asks `rev-parse` whether the branch is gone. The wipe counts what is left.
 # The continuation and the epic row look for what they would write before writing it. The
 # whole SCRIPT is idempotent by the same rule at a larger grain: a run the reader reads
-# delivered is closed, and a second `run` says `already closed` and touches nothing (AC-4.4).
+# delivered is closed, and a second `run` says `already closed` and touches nothing.
 # The delivery is the `delivered:` this script writes on the Step 9 line, read by the reader
 # every other surface asks, so there is no second notion of "closed" to drift.
 #
