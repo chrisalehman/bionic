@@ -17,6 +17,7 @@
 #   §OPEN     run_open asks the reader's step of a run with a log, whatever its plan's prose says; a run with
 #             none is judged from its plan, so each closed fixture run reads closed and the cut run open.
 #   §FOLLOWS-CONTINUATION  close-out's check reads a debt only the run's log holds into its debt line and Deferrals.
+#   §AGREE    in each card's world the release card's Reviews lines and the sheet's reviews line count alike.
 #
 # A CARD'S INSTANT. The reader answers a run as it stands, so a card's world holds as its run log the reader's
 # own translation of the fixture up to the card's instant, in the translation's order: a line with no instant
@@ -135,7 +136,7 @@ page() {  # <page file> -> its replay table as key=value: each decision by its k
   sed -n -e 's/^carried: \(.*\)/card.carried.\1=yes/p' -e 's/^release-approval\/v1|dec=[0-9]*|key=\([^|]*\)|/card.decision.\1=/p' "$1" 2>/dev/null; }
 born() { sed -n 's/^run\/v1|ev=born|row=\([^|]*\)|.*/\1/p' | tr '\n' ' '; }  # stdin's events -> the rows born
 render() {  # <world> <plan> [arg…] -> the card rendered as the bound session, the page its record holds, as key=value
-  ( cd "$1" && CLAUDE_CODE_SESSION_ID=$PS bash "$R/hooks/session-poker.sh" release-approval "${@:3}" "$2" ) >/dev/null 2>"$1.err"
+  ( cd "$1" && CLAUDE_CODE_SESSION_ID=$PS bash "$R/hooks/session-poker.sh" release-approval "${@:3}" "$2" ) >"$1.out" 2>"$1.err"
   page "${2%/plans/*}/record/$(basename "$2" .plan.md)/$(basename "$1").md"
 }
 for x in "$X"/release-approval-*.facts; do
@@ -234,6 +235,10 @@ expect_contains "the sheet over the logged run names the run" "run.name: wave-49
 expect_eq "its step is the log's, Step 9 retracted, not the plan's current:" "run.step: 8" "$(printf '%s\n' "$sheet" | grep '^run.step: ')"
 expect_contains "a decision only the log puts is an ask" "ask: key=decide:D90 " "$sheet"
 expect_contains "a review only the log holds is a review line" "review: question=evidence scope=whole result=pass " "$(printf '%s\n' "$sheet" | grep 'record=record/x/log-only.md')"
+sheeted() { ( cd "$SW" && TZ=America/Los_Angeles BIONIC_NOW_EPOCH=1794300000 bash "$R/hooks/session-poker.sh" sitrep "$SP" 2>/dev/null ) | grep '^clock\.approved: '; }
+expect_regex "the sheet's Step-3 approval is the log's" '^clock\.approved: [0-9]' "$(sheeted)"
+printf 'run/v1|ev=cancel|of=approval|key=step3|at=2026-11-08T00:03Z\n' >> "$SL"
+expect_regex "…and a cancel the log appends takes it off the sheet, though the plan's approved-by: stands" '^clock\.approved: - ' "$(sheeted)"
 # The tick follows it too: in the same run, now with a log, a fact the log alone holds changes the tick's fill line.
 # Each tick forgets the last one's digest, which would otherwise print only that nothing changed.
 FL="$FB/docs/record/wave-49-what-a-run-costs/run.log"; events "$FP" > "$FW/run.log"; mv "$FW/run.log" "$FL"
@@ -242,6 +247,9 @@ nofill() { rm -f "$FB"/tmp/tick-digest-*; ( cd "$FW" && CLAUDE_CODE_SESSION_ID=$
 expect_regex "the tick over the logged run fills nothing, every row landed" '^poker: no FILL — width=' "$(nofill)"
 sed '/^approved-by: /d' "$FP" > "$FP.t" && mv "$FP.t" "$FP"
 expect_regex "an approval only the log holds is the run's Step-3 approval to the tick" '^poker: no FILL — width=' "$(nofill)"
+printf 'run/v1|ev=cancel|of=approval|key=step3|at=2026-11-09T00:00:00Z\n' >> "$FL"
+expect_contains "a cancel the log appends makes the tick's Step-3 approval pending again" "Step-3 approval pending" "$(nofill)"
+grep '|ev=approval|key=step3|' "$FL" | sed 's/|at=[^|]*$/|at=2026-11-09T00:00:01Z/' >> "$FL"
 printf 'run/v1|ev=order|act=given|said=hold the run|at=2026-11-10T00:00:00Z\n' >> "$FL"
 expect_eq "an order only the log holds holds the tick's fill" \
   'poker: no FILL — an order of the user stands: given 2026-11-10T00:00:00Z "hold the run"; order lift ends it' "$(nofill)"
@@ -280,6 +288,9 @@ printf 'run/v1|ev=approval|key=release|by=fixture|head=%s|said=approve|at=%s\n' 
 G="$(render "${PD:-/nonexistent}" "${PP:-/nonexistent}")"
 expect_contains "…and with the approval appended, it still renders its carries" "card.carried." "$G"
 expect_absent "…but no longer puts the release" "card.decision.approve:release=" "$G"
+printf 'run/v1|ev=cancel|of=approval|key=release|at=%s\n' "${PA:-}" >> "${PP%/plans/*}/record/$(basename "${PP:-x}" .plan.md)/run.log"
+expect_contains "…and with that approval cancelled in the log, it puts the release again" "card.decision.approve:release=" \
+  "$(render "${PD:-/nonexistent}" "${PP:-/nonexistent}")"
 section "OPEN"
 opened() { ( . "$RD/lib/run.sh" && run_open "$1" ); echo $?; }
 plant() {  # <wave> <current:> <Step 9 line> [log line…] -> the plan's path; its run log holds the lines given
@@ -317,5 +328,13 @@ expect_eq "a debt the log alone holds is counted on the card's debt line" "debt:
 expect_contains "…and the continuation would carry it under ## Deferrals" " follow_x" "$(printf '%s\n' "$C1" | grep -m1 '^continuation: ')"
 expect_contains "the log without it carries the run's own deferrals there" "under ## Deferrals: record/" "$(printf '%s\n' "$C0" | grep -m1 '^continuation: ')"
 expect_absent "…and not that debt" " follow_x" "$(printf '%s\n' "$C0" | grep -m1 '^continuation: ')"
+
+section "AGREE"
+for d in "$WORLD_ROOT"/pages/release-approval-*/; do d="${d%/}"; n="${d##*/}"; p="$(ls "$d"/.bio*/docs/plans/*/*.plan.md)"
+  c="$(awk '$0 == "Reviews" { r = 1; next } r && !NF { exit } r && !/^ / { if (index($0, "✅") == 1) p++; else f++ } END { printf "%d passed, %d failed", p, f }' "$d.out")"
+  s="$( ( cd "$d" && bash "$R/hooks/session-poker.sh" sitrep "$p" 2>/dev/null ) | sed -n 's/^reviews: \([0-9]* passed, [0-9]* failed\), .*/\1/p')"
+  expect_regex "$n: the sheet prints its reviews line" '^[0-9]+ passed, [0-9]+ failed$' "$s"
+  expect_eq "$n: the card's Reviews lines count as the sheet's reviews line does" "$s" "$c"
+done
 
 finish
