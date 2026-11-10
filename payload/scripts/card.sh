@@ -984,7 +984,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   WCARD_ADRK=(); WCARD_ADRV=()
   local out line key rest k v wide=""
   # THE HEADER IS THE READER-OWNED PARSER'S (lib/plan-read.sh `plan_read_header`), one read of every key: what the
-  # artifact points at, its scale, rigor and walk. The scale goes to the parse, which owes an Eval design at wave scale.
+  # artifact points at, its scale, rigor and walk. The scale goes to the parse, which owes an Eval design unless it is task.
   while IFS= read -r line; do
     k="${line%%=*}"; v="${line#*=}"
     case "$k" in
