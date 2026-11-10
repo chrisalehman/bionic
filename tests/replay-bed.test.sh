@@ -180,6 +180,17 @@ for r in T23:evidence T24:adversarial,structure; do id=${r%%:*}; q=${r#*:}
   expect_regex "$id: its range starts at that proof's head" "^Reviewed range: $h\\.\\." "$(grep '^Reviewed range' "$f")"
   expect_eq "$id: its Questions are the row's" "Questions: ${q//,/, }" "$(grep '^Questions:' "$f")"
 done
+# The tick follows it too: in the same run, now with a log, a fact the log alone holds changes the tick's fill line.
+# Each tick forgets the last one's digest, which would otherwise print only that nothing changed.
+FL="$FB/docs/record/wave-49-what-a-run-costs/run.log"; events "$FP" > "$FW/run.log"; mv "$FW/run.log" "$FL"
+nofill() { rm -f "$FB"/tmp/tick-digest-*; ( cd "$FW" && CLAUDE_CODE_SESSION_ID=$FS bash "$R/hooks/session-poker.sh" tick 2>&1 ) | grep -m1 '^poker: no FILL — '; }
+( cd "$FW" && CLAUDE_CODE_SESSION_ID=$FS bash "$R/hooks/session-poker.sh" arm ) >/dev/null 2>&1
+expect_regex "the tick over the logged run fills nothing, every row landed" '^poker: no FILL — width=' "$(nofill)"
+sed '/^approved-by: /d' "$FP" > "$FP.t" && mv "$FP.t" "$FP"
+expect_regex "an approval only the log holds is the run's Step-3 approval to the tick" '^poker: no FILL — width=' "$(nofill)"
+printf 'run/v1|ev=order|act=given|said=hold the run|at=2026-11-10T00:00:00Z\n' >> "$FL"
+expect_eq "an order only the log holds holds the tick's fill" \
+  'poker: no FILL — an order of the user stands: given 2026-11-10T00:00:00Z "hold the run"; order lift ends it' "$(nofill)"
 # The step card follows the reader: a render opens the step's approval on the run's register only while the log holds
 # no approval of it, so a cancel appended to the log reopens it though the plan's own approved-by: line still stands.
 CW="$WORLD_ROOT/card"; CS=fe11a5e0-0000-4000-8000-000000000002; CP="$CW/.bio""nic/docs/plans/e/wave-98-cancel.plan.md"
