@@ -19,6 +19,11 @@ agent-context-guard.test.sh | §G7 | duplicate | hooks/agent-context-guard.sh: t
 agent-context-guard.test.sh | §G8 | keep | hooks/agent-context-guard.sh: the `[ "$BIONIC_ENGAGED" = 1 ]` or-exit-0 line deleted, so an unengaged armed session's nested dispatch is refused (G8.1, G8.2) | none (searched 'agent-context-guard' and 'unengage' in tests/)
 agent-context-guard.test.sh | §G9 | duplicate | payload/scripts/lib/walls.sh wall_background_suite_guard: the agent_id, roster or engagement predicate deleted, or the off-budget refusal dropped (G9.1-G9.4); the booking wrap rows are the compound's | background-suite-guard.test.sh §B6 (unverified), background-suite-guard.test.sh §B4 (unverified)
 
+## alive.test.sh
+
+alive.test.sh | §ONE | keep | payload/scripts/lib/alive.sh alive_session: the start comparison dropped (kill -0 alone), so a pid that answers with another start reads alive and the Patrol's live set holds it (ONE.2-ONE.4); alive_agent's session gate dropped, so a dead session's running teammate reads alive (ONE.7) | none (searched 'procStart' and 'alive_session' in tests/)
+alive.test.sh | §CLEAR | keep | payload/scripts/lib/alive.sh alive_session: the record read dropped, so a cleared conversation's predecessor reads dead while its process runs and the Patrol's dead set names it (CLEAR.3-CLEAR.5) | none (searched 'alive_note' and 'predecessor' in tests/)
+
 ## archive.test.sh
 
 archive.test.sh | §0 | duplicate | payload/scripts/lib/archive.sh: the file does not parse or loses archive_run, so every later call_archive fails | archive.test.sh §1
