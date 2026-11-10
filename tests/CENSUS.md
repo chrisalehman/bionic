@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 120 · sections: 1096 · keep: 902 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 120 · sections: 1098 · keep: 904 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1092 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1092 - 22 - 8 = 1062.
 
@@ -69,6 +69,7 @@ background-suite-guard.test.sh | §B10 | duplicate | payload/scripts/lib/context
 background-suite-guard.test.sh | §B11 | duplicate | payload/scripts/lib/refuse.sh: exit2's detail_to_user cell made no, so the recorded set and its detail leave the default stream (B11e1, B11e3); b11_line is defined and never called, so the four guarded calls above B11e assert nothing, and the "On the budget:" absence on the verdict line pins wording | refuse.test.sh §1, background-suite-guard.test.sh §B1
 background-suite-guard.test.sh | §B12 | keep | payload/scripts/lib/cmd-class.sh cmd_backgrounded: the quote-aware scan dropped, so an & inside quotes reads as backgrounding and the on-budget foreground suite is refused (B12f); B12a and B12b are refused by the budget arm whatever ARM 1 does | none (searched 'cmd_backgrounded' and 'a & b' in tests/)
 background-suite-guard.test.sh | §B-CLASS | keep | payload/scripts/lib/walls.sh _bsg_wrap_text: the browser and compile classes left out of the wrapped set, so a browser run passes as typed with no `--class` (BC1) and a backgrounded one is admitted (BC2); the leading-cd strip dropped from the key, so a cd prefix fills the 60 characters and two trees running one command key apart (BC3) | none (searched 'class browser' and 'playwright' in tests/)
+background-suite-guard.test.sh | §B-THREAD | keep | payload/scripts/lib/walls.sh classify_tier1: the heavy classes passed again (`none|browser|compile`), so a browser or compile run on the orchestrator's thread is wrapped and booked instead of denied with the farm-out words (BT1, BT2); the engagement guard bypassed, so a session with no run engaged is refused (BT3) | none (searched 'playwright' and 'next build' in tests/; farm-out-reminder.test.sh drives suites only)
 
 ## bash-walls-egd.test.sh
 
@@ -265,6 +266,7 @@ cmd-class.test.sh | §C5 | duplicate | payload/scripts/lib/walls.sh: the per-wal
 cmd-class.test.sh | §C6 | keep | rule: lint — a hook in payload/hooks/ gains a `$(dirname "$0")/` source, or a WANT or per-wall table basename, that resolves nowhere or outside the checkout, so the sweep's SRC_BAD names it | none (searched 'SRC_LITERALS' and 'lexnorm' in tests/)
 cmd-class.test.sh | §C6 — the session never invoked the skill: neither hook is there (AC-6, AC-20) | duplicate | hooks/bash-walls.sh:231 the engagement guard deleted, so farm-out denies and audits an unengaged suite command and the compound refuses an unengaged push; payload/scripts/lib/run.sh:860 the symlink refusal deleted, so a linked marker engages | bash-walls.test.sh §1, canonical-sdlc-evidence-gate-2.test.sh §Section 34
 cmd-class.test.sh | §C7 | keep | payload/scripts/lib/cmd-class.sh cmd_suite_targets: a chain answers its first suite only, so `bash tests/a.test.sh && bash tests/b.test.sh` names a.test.sh alone; (targets [bash tests/a.test.sh && …]) goes red while cross-gate-agreement-2.test.sh S13.3's single-suite round trip stays green | none (searched 'cmd_suite_targets' in tests/)
+cmd-class.test.sh | §TABLE | keep | payload/scripts/lib/cmd-class.sh CMD_HEAVY_TABLE: a heavy class name spelled again in gate.sh, walls.sh or booked.sh (TB2), or a table row the classifier no longer answers for (TB3) | none (searched 'HEAVY-CLASS-TABLE' and 'cmd_class_heavy' in tests/)
 
 ## command-relay.test.sh
 

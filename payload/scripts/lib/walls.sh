@@ -5210,9 +5210,10 @@ classify_tier1() {  # $1=command text → sets CLASS ROLE, rc 0 on match
   local c
   if [ "$1" = "${CMD-}" ]; then _wall_class_read "$1"; c="$_WALL_CLASS"
   else c=$(cmd_class "$1"); fi
-  # A BROWSER OR COMPILE RUN IS BOOKED, NOT FARMED OUT: the suite guard wraps it, and this wall's
-  # redirect stays what it was for a command that read `none`.
-  case "$c" in none|browser|compile) return 1 ;; esac
+  # A HEAVY RUN LEAVES THE THREAD AS A SUITE DOES: only a command that read `none` is passed here.
+  # The refusal books nothing, because the fold discards a staged wrap when a wall blocks; the same
+  # command from a dispatched agent never reaches this wall and is wrapped by the suite guard.
+  case "$c" in none) return 1 ;; esac
   CLASS="$c"; ROLE=$(role_for_class "$c")
   return 0
 }
@@ -5706,8 +5707,8 @@ _BSG_CLASS_ARGS=()
 # _bsg_booked_class <class> — rc 0 when a command of this class is wrapped in the shim and so
 # met by the backgrounded refusal: a suite, and the browser and compile runs the gate must cost.
 _bsg_booked_class() {
-  case "$1" in suite|browser|compile) return 0 ;; esac
-  return 1
+  [ "$1" != suite ] || return 0
+  cmd_class_heavy "$1"
 }
 # _bsg_agent — sets _BSG_AGENT to the name the gate's request records for this call (T12): the
 # roster row's `name=`, which the budget arm read into _BUDGET_ROW_NAME when it ran, else the
@@ -5756,16 +5757,15 @@ _bsg_wrap_text() {
   # command's measurements reach every tree it runs in and a tree's path is never part of a key.
   # The reader prints a place, not the text after it, so the prefix is cut here by pattern.
   _BSG_CLASS_ARGS=()
-  case "$_WALL_CLASS" in
-    browser|compile)
-      [ "$_WALL_CLASS_TEXT" = "$COMMAND" ] || return 1
-      _w="$_c"
-      _kre='^cd[[:space:]]+("[^"]*"|'"'"'[^'"'"']*'"'"'|[^[:space:];&|"'"'"']+)[[:space:]]*(\|\|[^;&|]*;|&&|;)[[:space:]]*(.+)$'
-      if [[ "$_w" =~ $_kre ]]; then _w="${BASH_REMATCH[3]}"; fi
-      _w="${_w//[$'\n\r\t|']/ }"; _w="${_w:0:60}"
-      case "$_w" in *'$'*|*'`'*) _BSG_SUITES='?' ;; *) _BSG_SUITES="${_w//[!A-Za-z0-9._+-]/_}" ;; esac
-      _BSG_CLASS_ARGS=(--class "$_WALL_CLASS") ;;
-  esac
+  if cmd_class_heavy "$_WALL_CLASS"; then
+    [ "$_WALL_CLASS_TEXT" = "$COMMAND" ] || return 1
+    _w="$_c"
+    _kre='^cd[[:space:]]+("[^"]*"|'"'"'[^'"'"']*'"'"'|[^[:space:];&|"'"'"']+)[[:space:]]*(\|\|[^;&|]*;|&&|;)[[:space:]]*(.+)$'
+    if [[ "$_w" =~ $_kre ]]; then _w="${BASH_REMATCH[3]}"; fi
+    _w="${_w//[$'\n\r\t|']/ }"; _w="${_w:0:60}"
+    case "$_w" in *'$'*|*'`'*) _BSG_SUITES='?' ;; *) _BSG_SUITES="${_w//[!A-Za-z0-9._+-]/_}" ;; esac
+    _BSG_CLASS_ARGS=(--class "$_WALL_CLASS")
+  fi
   set --
   _bsg_agent
   [ -z "$_BSG_AGENT" ] || set -- --agent "$_BSG_AGENT"

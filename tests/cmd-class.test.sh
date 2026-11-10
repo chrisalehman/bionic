@@ -630,4 +630,34 @@ for fileless in 'pytest' 'npm test' 'go test ./...' 'make test' 'make check' 'ca
 done
 
 
+section "TABLE — the heavy class names are spelled in the classifier's table and nowhere else"
+# A second spelling is a class the gate, the wall and the shim can disagree about. The table sits between its two
+# markers in cmd-class.sh; comments and the playwright/dependency prose of setup, doctor and deps are not class sites.
+TB_BEGIN=$(/usr/bin/grep -n '^# HEAVY-CLASS-TABLE-BEGIN' "$LIB" | cut -d: -f1)
+TB_END=$(/usr/bin/grep -n '^# HEAVY-CLASS-TABLE-END' "$LIB" | cut -d: -f1)
+expect_true "TB1 the table is marked in the classifier" test -n "$TB_BEGIN" -a -n "$TB_END"
+TB_SPELLED=$(/usr/bin/grep -rnwE --include='*.sh' 'browser|compile' "$REPO_ROOT/hooks" "$REPO_ROOT/payload" \
+  | awk -F: -v lib="$LIB" -v b="${TB_BEGIN:-0}" -v e="${TB_END:-0}" '
+      $1 ~ /\/(setup|doctor|deps)\.sh$/ { next }
+      { f = $1; n = $2; line = $0; sub(/^[^:]*:[^:]*:/, "", line) }
+      line ~ /^[ \t]*#/ { next }
+      f == lib && n >= b && n <= e { next }
+      { print f ":" n }')
+expect_empty "TB2 no site outside the table spells a heavy class" "$TB_SPELLED"
+expect_true "TB2 control: the table itself spells them" test "$(/usr/bin/grep -cwE 'browser|compile' "$LIB")" -gt 0
+# Every class a web tool can emit is one the table names: the producer reads the table's rows.
+TB_BAD=""; TB_ROWS=0
+while read -r tb_c tb_t tb_w; do
+  [ -n "$tb_c" ] || continue
+  TB_ROWS=$((TB_ROWS + 1))
+  [ "$tb_w" != "*" ] || tb_w=x
+  [ "$(class_of "$tb_t $tb_w")" = "$tb_c" ] || TB_BAD="$TB_BAD $tb_t/$tb_w"
+  expect_true "TB3 cmd_class_heavy accepts '$tb_c'" bash -c '. "$1" && cmd_class_heavy "$2"' _ "$LIB" "$tb_c"
+done <<EOF2
+$(bash -c '. "$1" && printf "%s\n" "$CMD_HEAVY_TABLE"' _ "$LIB")
+EOF2
+expect_true "TB3 the table has rows to check" test "$TB_ROWS" -ge 4
+expect_empty "TB3 every table row is what the classifier answers for it" "$TB_BAD"
+expect_true "TB3 …and 'build' is not heavy" bash -c '. "$1" && ! cmd_class_heavy build && ! cmd_class_heavy ""' _ "$LIB"
+
 finish

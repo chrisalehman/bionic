@@ -272,7 +272,7 @@ BOOKED_WAITED_RC=75
 BOOKED_KILLED_RC=124
 
 booked_usage() {
-  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--class browser|compile] [--runner] [--unplaced] [--detach [--no-wait]] -- <command>\n' >&2
+  printf 'booked: usage: bash booked.sh [--agent <name>] [--kill-after <seconds>] [--max-wait <seconds>] [--shell <path>] [--stamp-dir <dir>] [--suites <names>] [--class <heavy class>] [--runner] [--unplaced] [--detach [--no-wait]] -- <command>\n' >&2
   exit 2
 }
 
@@ -306,7 +306,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ "$sep" -eq 1 ] && [ "$#" -ge 1 ] || booked_usage
-case "$cls" in ''|browser|compile) ;; *) booked_usage ;; esac
+[ -z "$cls" ] || _gate_class_heavy "$cls" || booked_usage
 [ "$no_wait" -eq 0 ] || [ "$detach" -eq 1 ] || booked_usage
 if [ "$#" -gt 1 ]; then
   printf 'booked: %s words after --, and each would be parsed again as shell — pass the command as one word: booked.sh -- '\''<the whole command line>'\''\n' "$#" >&2

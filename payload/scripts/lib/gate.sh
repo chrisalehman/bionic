@@ -56,7 +56,7 @@
 #
 # THE VERBS.
 #
-#   gate_ask <kind> <key> [--within <seconds>] [--class <browser|compile>]   rc 0, the request id on stdout: admitted.
+#   gate_ask <kind> <key> [--within <seconds>] [--class <heavy class>]   rc 0, the request id on stdout: admitted.
 #                  rc 75 at once, nothing filed: the asking agent's budget refuses the key (THE
 #                  BUDGET; its line on stderr). rc 75: the time ran out; the request is kept with its turn, nothing ran, and
 #                  its holder is cleared (holder=-), so it is nobody's and passed over until the
@@ -458,6 +458,19 @@ _gate_cost_file() {  # <key> <project> -> its cost file, cost/<project>%<key>
   printf '%s/cost/%s%%%s\n' "$_GD" "$2" "${1//\//%}"
 }
 
+# _gate_class_heavy <class> — rc 0 when the class is one of the classifier's heavy classes. The names
+# live in one table (lib/cmd-class.sh), loaded here only when a class is actually named, so an
+# ask with no class pays nothing for it.
+_gate_class_heavy() {
+  [ -n "${1:-}" ] || return 1
+  declare -F cmd_class_heavy >/dev/null 2>&1 || {
+    [ -r "$_GATE_LIB_DIR/cmd-class.sh" ] || return 1
+    # shellcheck disable=SC1091
+    . "$_GATE_LIB_DIR/cmd-class.sh" 2>/dev/null || return 1
+  }
+  cmd_class_heavy "$1"
+}
+
 # _gate_cores_for <kind> [<class>] [<key> <project>] [<busy> <faded>] — the cores a request is promised.
 # THE ONE SITE of the promise: the key's measured cores (`_gate_cost_cores`) where a kept line carries
 # them, else a prior. A whole run, and a browser or compile run whose key has no measurement, sizes its
@@ -473,10 +486,7 @@ _gate_cost_file() {  # <key> <project> -> its cost file, cost/<project>%<key>
 _gate_cores_for() {
   local c='' b f
   [ "${1:-work}" = whole ] || [ -z "${3:-}" ] || c="$(_gate_cost_cores "$3" "$4")"
-  [ -n "$c" ] || case "${1:-work}:${2:-}" in
-    whole:*|*:browser|*:compile) ;;
-    *) _res_suite_cores; return ;;
-  esac
+  [ -n "$c" ] || [ "${1:-work}" = whole ] || _gate_class_heavy "${2:-}" || { _res_suite_cores; return; }
   if [ "$#" -ge 6 ]; then b="$5" f="$6"; else b="$(_res_busy_cores 2>/dev/null)"; f="$(_gate_faded "$(_res_now)" "$b")"; fi
   awk -v l="$(_gate_share_cores)" -v b="$b" -v f="$f" -v c="$c" \
     'BEGIN { x = int(l - b - f); if (x < 1) x = 1; if (c != "" && c + 0 <= x) print c; else print x }'
@@ -1197,7 +1207,7 @@ gate_ask() {
   local kind="${1:-}" key="${2:-}" within='' poll="${BIONIC_GATE_POLL:-2}" start now
   local who='' id='' noted=0 rc land='' rec='' class=''
   if [ "$#" -lt 2 ]; then
-    echo "gate: usage: gate_ask <landing|work|whole> <key> [--within <seconds>] [--class <browser|compile>]" >&2
+    echo "gate: usage: gate_ask <landing|work|whole> <key> [--within <seconds>] [--class <heavy class>]" >&2
     return 2
   fi
   shift 2
@@ -1210,7 +1220,7 @@ gate_ask() {
   done
   case "$kind" in landing|work|whole) ;; *) echo "gate: kind is landing, work or whole, not '$kind'" >&2; return 2 ;; esac
   case "$within" in *[!0-9]*) echo "gate: --within takes whole seconds, not '$within'" >&2; return 2 ;; esac
-  case "$class" in ''|browser|compile) ;; *) echo "gate: --class is browser or compile, not '${class:0:20}'" >&2; return 2 ;; esac
+  [ -z "$class" ] || _gate_class_heavy "$class" || { echo "gate: --class is not a heavy class: '${class:0:20}'" >&2; return 2; }
   key="${key//$'\n'/ }"
   [ -n "$key" ] || { echo "gate: gate_ask needs a command key" >&2; return 2; }
   _gate_store || return 2
