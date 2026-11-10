@@ -88,7 +88,7 @@
 # now marks retired — is ignored even though it carries `id`, `deps` and `status` cells that
 # a name-keyed reader would otherwise be happy to take. tests/units.test.sh's `decoys.md`
 # fixture is what holds that, and it keeps the old heading literal for the purpose. The
-# section ends at the next `##` heading or at the first line that is not a table row.
+# section ends at the next heading or at the first line that is not a table row.
 #
 # ONE PARSE, THREE VERBS. `units_ready` and `units_validate` are functions of `units_rows`'
 # output and never touch the file themselves, so the three answers cannot disagree about
@@ -135,24 +135,13 @@
 # are the three optional slots) even when a column is absent, because a record
 # whose width depended on the table's shape would put every caller back to counting cells.
 #
-# A CELL MAY CONTAIN A PIPE, AND MARKDOWN SPELLS IT `\|` (critic Issue 1, A-84). The
-# earlier claim here — that no cell ever holds one, so there is nothing to unescape — was
-# true of the raw byte and false of the table: `\|` is the one escape GFM defines for a
-# table cell, it is a raw `|` to `split()`, and it opens an extra field that reads every
-# later cell one slot early. This wave's own plan carries one in T23's `task` cell, and
-# with it in place `units_ready` could schedule nothing at Step 5 while `units_validate`
-# reported two violations against cells that were correct — a silent shift, because a
-# shifted row is still a row. So `_units_read` folds `\|` to SUBSEP before the split and
-# restores a LITERAL `|` in `trim`, which is what the cell means. SUBSEP (`\034`) is the
-# sentinel because it is the one byte awk itself reserves for "not text", no plan file can
-# carry it through a markdown table, and it needs no regex quoting on either side.
+# A CELL MAY CONTAIN A PIPE, AND MARKDOWN SPELLS IT `\|`: the one escape GFM defines for a table cell, a raw
+# `|` to `split()`, which would open an extra field and read every later cell one slot early, a silent
+# shift, because a shifted row is still a row. The parser reads it as a literal `|` in the cell.
 #
-# LINE ENDINGS ARE NORMALISED HERE, NOT AT THE CALLER (T8). Two of the callers read plans
-# a human may have written on another machine, and one of them — the evidence gate — is
-# pinned on CR-only (classic-Mac) input by tests/canonical-sdlc-evidence-gate.test.sh
-# 19j-cr1/19j-cr2: a CR-only file collapses to ONE awk record, so a parser that did not
-# translate would find no table and say so silently. The translation is a pass of its own
-# because a record split on `\n` cannot re-split itself.
+# LINE ENDINGS ARE THE PARSER'S, NOT THE CALLER'S. Plans are written on other machines, and the evidence
+# gate is pinned on CR-only input by tests/canonical-sdlc-evidence-gate.test.sh 19j-cr1/19j-cr2: a CR-only
+# file is ONE awk record, so lib/plan-read.sh splits a lone CR into a line before any table is looked for.
 #
 # ── THE ONE PARSE ────────────────────────────────────────────────────────────
 #
@@ -160,109 +149,48 @@
 #                       then one TSV row per data row, in table order.
 #                       Exit 1 and silent when there is no `## Tasks` table.
 #
-# Rows are buffered and printed at END because the control line has to come first and the
-# missing-column set is not known until the header has been read.
+# THE TABLE IS READ BY lib/plan-read.sh `plan_read_table`, the one parser of a plan's authored parts, and
+# only mapped here: each cell taken by its header name into this library's thirteen fixed slots, the first
+# of two columns of one name answering. Where the table is (fences, the heading, the header line, the
+# separator, a lone CR) and how a cell reads (`\|` a bar, a tab a space) are that parser's rules, so the
+# reader and the fill cannot read one table two ways. A raw `|` that widens a row is its `over` mark.
+_units_plan_read() {
+  local d
+  declare -F plan_read_table >/dev/null 2>&1 && return 0
+  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+  # shellcheck source=/dev/null
+  [ -n "$d" ] && [ -f "$d/plan-read.sh" ] && . "$d/plan-read.sh" >/dev/null 2>&1
+  return 0
+}
+_units_plan_read
 _units_read() {
-  [ -n "${1:-}" ] && [ -f "$1" ] || return 1
-  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1" | awk '
-    # esc() FOLDS THE ESCAPE, trim() RESTORES IT, and every cell reaches the caller through
-    # trim() — the header scan, the id test and the ten field reads alike — so there is no
-    # path on which a SUBSEP survives into the TSV.
-    function esc(v)  { gsub(/\\[|]/, SUBSEP, v); return v }
-    function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); gsub(SUBSEP, "|", v); return v }
-
+  [ -n "${1:-}" ] && [ -f "$1" ] && declare -F plan_read_table >/dev/null 2>&1 || return 1
+  plan_read_table "$1" Tasks id 2>/dev/null | awk -F'\t' '
     BEGIN {
-      # The contract order. `disp` is the spelling a violation names; `want` is the
-      # lower-cased text a header cell is matched against.
-      disp[1] = "id";    disp[2] = "step";   disp[3] = "kind";   disp[4] = "task"
-      disp[5] = "agent"; disp[6] = "deps";   disp[7] = "size";   disp[8] = "serves"
-      disp[9] = "Files"; disp[10] = "status"; disp[11] = "worktree"; disp[12] = "base"
-      disp[13] = "reads"
-      # SLOTS 14 AND 15 ARE KNOWN, NOT CARRIED (wave-38 T19; REQ-11 AC-11.3; L7): `suites` and `lands-on` are optional
-      # columns the control line names when the header has them, so `units_has_column` and `task-set` know them, and
-      # `brief` reads their cells by header name (`poker_brief_cell`). The record stays thirteen fields wide.
-      disp[14] = "suites"; disp[15] = "lands-on"
+      # The contract order. `disp` is the spelling a violation names; `want` the header name it answers to.
+      split("id step kind task agent deps size serves Files status worktree base reads suites lands-on", disp, " ")
       for (k = 1; k <= 15; k++) want[k] = tolower(disp[k])
-      state = 0   # 0 before the section · 1 in it, header not yet seen · 2 in the table · 3 done
     }
-
-    # THE FENCE TOGGLE RUNS FIRST, so a heading or a table inside a code block is prose.
-    /^[ \t]*```/ { fence = !fence; next }
-    fence { next }
-
-    state == 3 { next }
-
-    # A heading closes whatever we were in. The FIRST `## Tasks` is the section; a later one
-    # is not reached, because reading its predecessor put us in state 3.
-    /^[ \t]*#/ {
-      if (state == 2 || state == 1) { state = 3; next }
-      if ($0 ~ /^##[ \t]+[Tt]asks([ \t].*)?$/) state = 1
-      next
+    $1 == "#" && $2 == "head" { for (i = 3; i <= NF; i++) has[$i] = 1; hdrn = NF - 2; found = 1; next }
+    $1 == "#" && $2 == "over" { over = (over == "" ? "" : over " ") $3 "=" $4; next }
+    {
+      split("", c)
+      for (i = 1; i <= NF; i++) { e = index($i, "="); k = substr($i, 1, e - 1); if (!(k in c)) c[k] = substr($i, e + 1) }
+      line = c["id"]
+      for (k = 2; k <= 13; k++) line = line "\t" c[want[k]]
+      row[++nr] = line
     }
-
-    # Looking for the header row: the first table row inside the section carrying an `id`
-    # cell. Anything else in the section (a sentence, a blank line) is skipped.
-    state == 1 {
-      if ($0 !~ /^[ \t]*\|/) next
-      n = split(esc($0), c, "|")
-      for (i = 1; i <= n; i++) {
-        t = tolower(trim(c[i]))
-        if (t == "") continue
-        for (k = 1; k <= 15; k++) if (t == want[k] && col[k] == 0) col[k] = i
-      }
-      if (col[1] == 0) next          # no `id` cell — not the header row
-      found = 1
-      hdrn = n                       # the header field count, for the raw-pipe rule below
-      state = 2
-      next
-    }
-
-    # The rows. The table ends at the first line that is not a table row.
-    state == 2 {
-      if ($0 !~ /^[ \t]*\|/) { state = 3; next }
-      n = split(esc($0), c, "|")
-      id = trim(c[col[1]])
-      # The |---|---| separator, and any row whose id cell is empty or punctuation.
-      if (id == "" || id ~ /^[-: ]+$/) next
-      # A RAW `|` INSIDE A CELL, which `esc()` has NOT folded (only `\|` is folded), is an
-      # ordinary separator to split() and opens a field the header does not have. The row
-      # is still emitted — every caller wants the cells it can get — but the id is recorded
-      # here so `units_validate` can say the one thing a reader can act on instead of the
-      # three misleading ones the shift produces. Reported as the field count less the
-      # trailing empty field, both sides the same way, so the two numbers compare.
-      if (hdrn > 0 && n > hdrn) over = (over == "" ? "" : over " ") id "=" (n - 1)
-      line = ""
-      for (k = 1; k <= 13; k++) {
-        f = (col[k] > 0 && col[k] <= n) ? trim(c[col[k]]) : ""
-        line = (k == 1) ? f : line "\t" f
-      }
-      nr++
-      row[nr] = line
-      next
-    }
-
     END {
       if (!found) exit 1
-      missing = ""
-      # THE LOOP STOPS AT 10, NOT 13: slots 11 (`worktree`), 12 (`base`) and 13 (`reads`) are optional,
-      # and an absent optional column is not a fault to report.
-      for (k = 1; k <= 10; k++) if (col[k] == 0) missing = (missing == "") ? disp[k] : missing " " disp[k]
-      # FIELD 4 NAMES WHAT THE HEADER CARRIES — every contract column present, including
-      # the optional `worktree`, which field 1 deliberately cannot report (field 1 lists
-      # what is MISSING, and an absent optional column is not missing). `units_has_column`
-      # is its one reader, and the evidence gate worktree lead-in is why it exists: an
-      # absent `worktree` column reads every row cell empty, which is indistinguishable
-      # from "no row names this tree" to `units_rows` alone (wave-16 REQ-3, AC-3.2).
-      # NO APOSTROPHE ON ANY LINE INSIDE THIS awk PROGRAM: it is single-quoted, and one
-      # would close the quote and hand the rest of the parser to bash.
-      for (k = 1; k <= 15; k++) if (col[k] > 0) present = (present == "") ? disp[k] : present " " disp[k]
-      # THE CONTROL LINE IS TAB-SEPARATED: <missing columns> · <header width> · <id=width …>
-      # · <columns present>. `units_rows` drops this line whole, so no caller outside this
-      # file sees it; `units_validate` reads fields 2-3 and `units_has_column` field 4.
-      printf "# %s\t%d\t%s\t%s\n", missing, hdrn - 1, over, present
+      # SLOTS 11 TO 13 (`worktree`, `base`, `reads`) ARE OPTIONAL and 14 and 15 (`suites`, `lands-on`) known,
+      # not carried: an absent one is no fault, so the missing list stops at 10.
+      for (k = 1; k <= 10; k++) if (!(want[k] in has)) missing = (missing == "") ? disp[k] : missing " " disp[k]
+      for (k = 1; k <= 15; k++) if (want[k] in has) present = (present == "") ? disp[k] : present " " disp[k]
+      # THE CONTROL LINE IS TAB-SEPARATED: <missing columns> · <header width> · <id=width …> · <columns present>.
+      # `units_rows` drops it whole; `units_validate` reads fields 2-3 and `units_has_column` field 4.
+      printf "# %s\t%d\t%s\t%s\n", missing, hdrn, over, present
       for (i = 1; i <= nr; i++) print row[i]
-    }
-  '
+    }'
 }
 
 # _units_table <plan> -> `_units_read`'s output and status for <plan>: from the memo when
@@ -274,6 +202,20 @@ _units_table() {
     return "$_UNITS_MEMO_RC"
   fi
   _units_read "${1:-}"
+}
+
+# _units_waits <plan> -> lib/plan-read.sh `plan_read_waits` for <plan>, the rows each read names: read once
+# per memoised command, kept in `_UNITS_MEMO_WAITS`' file (its first line the plan) for every later question
+# of the command, subshells included, as the regression state is kept; read now outside a memo.
+_units_waits() {
+  local plan="${1:-}" f="${_UNITS_MEMO_WAITS:-}" out
+  if [ -n "$f" ] && [ -f "$f" ] && awk -v p="$plan" 'NR == 1 { if ($0 != p) exit 1; next } { print }' "$f" 2>/dev/null; then
+    return 0
+  fi
+  declare -F plan_read_waits >/dev/null 2>&1 || return 1
+  out="$(plan_read_waits "$plan")" || return 1
+  if [ -n "$f" ] && [ "${_UNITS_MEMO_PLAN:-}" = "$plan" ]; then printf '%s\n%s\n' "$plan" "$out" > "$f" 2>/dev/null; fi
+  printf '%s\n' "$out"
 }
 
 # units_memoised <plan> <command> [args…] -> runs the command; every verb it reaches answers
@@ -297,7 +239,9 @@ _units_table() {
 # the first time a question inside the command needs `proof_state` and read by every later one,
 # subshells included; it is removed when the command returns. A command that never needs the
 # state never writes it. A caller that already names one (the tick, for its whole run) keeps it,
-# and removes it itself.
+# and removes it itself. The rows each read names are the command's the same way (`_UNITS_MEMO_WAITS`,
+# written by the first question that needs them, `_units_waits`), so a command asking no scheduling
+# question pays no read of them.
 units_memoised() {  # <plan> <command> [args...]
   if [ -n "${_UNITS_MEMO_PLAN:-}" ] && [ "$_UNITS_MEMO_PLAN" = "${1:-}" ]; then
     shift
@@ -305,6 +249,7 @@ units_memoised() {  # <plan> <command> [args...]
     return
   fi
   local _UNITS_MEMO_PLAN="" _UNITS_MEMO_OUT="" _UNITS_MEMO_RC=1 _UNITS_MEMO_FLOOR="${_UNITS_MEMO_FLOOR:-}" own="" rc
+  local _UNITS_MEMO_WAITS="${TMPDIR:-/tmp}/bionic-units-waits-$$-${RANDOM}${RANDOM}"
   _UNITS_MEMO_OUT="$(_units_read "${1:-}")"; _UNITS_MEMO_RC=$?
   _UNITS_MEMO_PLAN="${1:-}"
   if [ -z "$_UNITS_MEMO_FLOOR" ]; then
@@ -313,6 +258,7 @@ units_memoised() {  # <plan> <command> [args...]
   shift
   "$@"; rc=$?
   [ -z "$own" ] || [ ! -e "$_UNITS_MEMO_FLOOR" ] || rm -f "$_UNITS_MEMO_FLOOR"
+  [ ! -e "$_UNITS_MEMO_WAITS" ] || rm -f "$_UNITS_MEMO_WAITS"
   return "$rc"
 }
 
@@ -1090,7 +1036,7 @@ _units_proof_awk() {
 # `covered`. The tick computes it once (session-poker.sh `sched_facts_state`); unset, it waits.
 # `holds` (units_floor_holds) takes the regression row's id, or nothing, in the <step> slot.
 _units_sched() {
-  local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows hasreads=0 i fst rst rc
+  local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows hasreads=0 i fst rst rc wts
   if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ] && [ "$mode" != whole ] \
      && [ "$mode" != questions ]; then
     case "$step" in ''|*[!0-9]*) return 2 ;; esac
@@ -1113,25 +1059,30 @@ _units_sched() {
   # program runs again with it, after the regression state if that was asked first.
   # EITHER MAY BE ASKED FIRST (wave-36 T28): a live row past its reading asks the readings before the floor is
   # judged, so each state is asked once, in the order the program asks for them, and never twice.
+  # THE ROWS EACH READ NAMES are lib/plan-read.sh's (`_units_waits`). A plan whose rows cannot be turned into
+  # waits schedules nothing: no writer known is not no writer.
+  wts=""
+  case "$mode" in ready|held|waiting|edges|holds) wts="$(_units_waits "$plan")" || return 1 ;; esac
   fst="$(_units_floor_kept "$plan")"; rst="${UNITS_READINGS_STATE:-}"
-  _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst" "$rst"; rc=$?
+  _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst" "$rst" "$wts"; rc=$?
   for i in 1 2; do
     if [ "$rc" -eq 3 ] && [ -z "$fst" ]; then fst="$(_units_floor_state "$plan")"
     elif [ "$rc" -eq 4 ] && [ -z "$rst" ]; then rst="$(_units_readings_state "$plan")"
     else break
     fi
-    _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst" "$rst"; rc=$?
+    _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst" "$rst" "$wts"; rc=$?
   done
   return "$rc"
 }
 
-# _units_sched_run <mode> <plan> <step> <hasreads> <rows> <regression state> [<readings state>] -> the program's
-# answer and its status: 3, with nothing printed, when the answer needs a regression state not handed in; 4
-# when it needs the readings' state (wave-35 T9).
+# _units_sched_run <mode> <plan> <step> <hasreads> <rows> <regression state> <readings state> <waits> -> the
+# program's answer and its status: 3, with nothing printed, when the answer needs a regression state not
+# handed in; 4 when it needs the readings' state (wave-35 T9).
 _units_sched_run() {
   {
     printf '\034rows\n'; printf '%s\n' "$5"
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$2" 2>/dev/null
+    printf '\034waits\n'; printf '%s\n' "${8:-}"
   } | _UNITS_FLOOR_ST="$6" _UNITS_READ_ST="${7:-}" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" -v hasreads="$4" \
       -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" -v evid="${_UNITS_EVIDENCE:-}" \
       -v liveq="${_UNITS_QUESTION:-}" -v pq="${PROOF_QUESTIONS:-}" -v regno="$(_units_regno "$2")" \
@@ -1432,10 +1383,16 @@ _units_sched_awk() {
   printf '%s' '
     $0 == SUBSEP "rows" { part = 1; next }
     $0 == SUBSEP "plan" { part = 2; next }
+    $0 == SUBSEP "waits" { part = 3; next }
     part == 1 {
       if ($1 == "") next
       n++; id[n] = $1; stp[n] = $2; knd[n] = $3; agt[n] = $5; dep[n] = $6; fil[n] = $9; st[n] = $10; rd[n] = $13
       at[$1] = n
+      next
+    }
+    # THE WAITS (lib/plan-read.sh plan_read_waits): `<id> row <row> <reads>`, the rows each read names.
+    part == 3 {
+      if ($2 == "row") { m = split($4, a, ","); for (k = 1; k <= m; k++) wr[$1, a[k]] = wr[$1, a[k]] " " $3 }
       next
     }
     # THE PLAN TEXT: the step, and the approval and proof lines inside `## SDLC State`, fences skipped.
@@ -1541,24 +1498,23 @@ _units_sched_awk() {
       if (mk) { for (q = 1; q <= ngm; q++) if (overlap(fe[gmj[q], gmk[q]], t)) { nc++; cj[nc] = gmj[q]; ck[nc] = gmk[q] } }
       else    { for (q = 1; q <= ngl; q++) if (overlap(fe[glj[q], glk[q]], t)) { nc++; cj[nc] = glj[q]; ck[nc] = glk[q] } }
     }
-    # open_writers(t) -> the open rows writing the path t, ascending, in ow[1..now]; worked out
-    # once per path and kept, since the answer does not depend on who asks.
-    function open_writers(t,   c, j, s, x) {
-      if (!(t in owc)) {
-        entries(t, 0); s = ""
-        for (c = 1; c <= nc; c++) x[cj[c]] = 1
-        for (j = 1; j <= n; j++) if (j in x) s = s " " j
-        owc[t] = s
+    # cand(i, t) -> the rows read t of row i names, whatever their state, ascending, in cw[1..ncw]: the
+    # lines of lib/plan-read.sh plan_read_waits, the one place a read is turned into rows. Which of them
+    # still hold the read is the state of each, judged below.
+    function cand(i, t,   m, w, k, j, y) {
+      ncw = 0; m = split(wr[id[i], t], w, " ")
+      for (k = 1; k <= m; k++) {
+        if (!(w[k] in at)) continue
+        j = at[w[k]]
+        for (y = ncw; y > 0 && cw[y] > j; y--) cw[y + 1] = cw[y]
+        cw[y + 1] = j; ncw++
       }
-      now = split(owc[t], ow, " ")
     }
     function addtok(i, t) {
       t = trim(t)
       '"$_UNITS_READS_NORM"'
       if (t == "" || t !~ /[A-Za-z0-9]/) return
       ntk[i]++; tk[i, ntk[i]] = t
-      if (t == "head") rhead[i] = 1
-      if (t == "record") rrec[i] = 1
       if (t == "live:head") rlive[i] = 1
       else if (substr(t, 1, 10) == "live:head:") { rlive[i] = 1; addq(i, substr(t, 11)) }
     }
@@ -1605,15 +1561,16 @@ _units_sched_awk() {
     # open (none has landed it). Anything else names no artifact and is never satisfied (review 5
     # F4: `live:foo`, `live:ext:ci`, `live:T9` fell into the path arm and read as ready). `head`
     # is live_head below.
-    function live_sat(i, a,   j, lw, ow) {
+    function live_sat(i, a, t,   c, j, lw, ow) {
       if (a == "head" || substr(a, 1, 5) == "head:") return live_head(i)
       if (a == "record") return 1
       if (substr(a, 1, 6) == "proof:") return (substr(a, 7) in proved)
       if (substr(a, 1, 9) == "approval:") return apprmet(substr(a, 10))
       if (a !~ /[\/.*?]/ || a ~ /[ \t:!]/) return 0
-      lw = 0; ow = 0
-      for (j = 1; j <= n; j++) {
-        if (j == i || st[j] == "dropped" || !writes(j, a)) continue
+      lw = 0; ow = 0; cand(i, t)
+      for (c = 1; c <= ncw; c++) {
+        j = cw[c]
+        if (j == i || st[j] == "dropped") continue
         if (st[j] == "landed") lw = 1; else if (isopen(j)) ow = 1
       }
       return (lw || !ow)
@@ -1727,21 +1684,23 @@ _units_sched_awk() {
 
     # judge(i, t) -> 1 when row i read t is satisfied; otherwise 0, with the rows named as its
     # writers in wj[1..nw] (those still open, plus a task-id row in any unsatisfied state), and
-    # for a live read that waits on no row, why in lwhy.
-    function judge(i, t,   j, a, q) {
+    # for a live read that waits on no row, why in lwhy. WHICH ROWS A READ NAMES is cand(), never
+    # decided here; what is judged here is whether each still holds it, and what no row writes.
+    function judge(i, t,   c, j, a) {
       nw = 0; lwhy = ""
       if (t ~ extre) return 0
       if (substr(t, 1, 9) == "approval:") return apprmet(substr(t, 10))
-      if (substr(t, 1, 5) == "live:") return live_sat(i, substr(t, 6))
+      if (substr(t, 1, 5) == "live:") return live_sat(i, substr(t, 6), t)
+      cand(i, t)
       # A PROOF IS SETTLED ONLY WHEN NOTHING OPEN WILL WRITE A NEWER ONE (T35 F2): a second regression row
       # added after the regression was proved makes that line stale, so the open writers are asked
       # first and the line counts only when there are none.
       if (substr(t, 1, 6) == "proof:") {
         a = substr(t, 7)
-        for (j = 1; j <= n; j++) {
+        for (c = 1; c <= ncw; c++) {
+          j = cw[c]
           if (j == i || !isopen(j)) continue
-          if ((a == "regression" && (knd[j] == "verify" || knd[j] == "test")) || (a == "review" && knd[j] == "review"))
-            if (!(st[j] == "pending" && rlive[j] && live_idle(j))) wj[++nw] = j
+          if (!(st[j] == "pending" && rlive[j] && live_idle(j))) wj[++nw] = j
         }
         # THE REVIEW IS MET BY THE JUDGE, NOT BY A LINE (wave-27 T14; D3, D4). A `proved: kind=review`
         # line was enough here, a `result=fail` reading among them (A-orch-40). Now the read is met
@@ -1788,32 +1747,17 @@ _units_sched_awk() {
         }
         return (nw == 0 && (a in proved))
       }
-      # A ROW THAT READS THE SETTLED head STILL WRITES IT FOR A ROW AT A LATER STEP (T35 F1). The
-      # exception A-T2.4 made is kept between equals and toward earlier steps — the walk does not
-      # wait for the release — but a test, doc or build row at Step 4 that reads head and writes
-      # code holds the Step-5 regression. `record` takes the same rule over record paths.
-      if (t == "head" || t == "record") {
-        for (j = 1; j <= n; j++) {
-          if (j == i || !isopen(j)) continue
-          q = (t == "head") ? rhead[j] : rrec[j]
-          if ((t == "head" ? code[j] : docs[j]) && (!q || stp[j] + 0 < stp[i] + 0)) wj[++nw] = j
-        }
-        return (nw == 0)
-      }
-      if (t == "merge") {
-        for (j = 1; j <= n; j++) if (j != i && isopen(j) && knd[j] == "integrate") wj[++nw] = j
-        return (nw == 0)
-      }
+      # A ROW ID waits until that row lands or is dropped, whatever other state it is in, itself
+      # included: a row that reads its own id waits for ever, and the validator names the cycle.
       if (t in at) {
-        j = at[t]
-        if (st[j] == satisfied || st[j] == "dropped") return 1
-        wj[++nw] = j
-        return 0
+        for (c = 1; c <= ncw; c++) if (st[cw[c]] != satisfied && st[cw[c]] != "dropped") wj[++nw] = cw[c]
+        return (nw == 0)
       }
-      if (t ~ /^T[0-9]+$/) return 0
-      if (t ~ /[\/.*?]/ && t !~ /[ \t:!]/) {
-        open_writers(t)
-        for (q = 1; q <= now; q++) if (ow[q] != i) wj[++nw] = ow[q]
+      # head, record, merge AND A PATH wait on each open row the read names (a row reading the settled
+      # head at the same step or later is not one, T35 F1: plan_read_waits decides that); one that has
+      # landed or been dropped holds nothing.
+      if (t == "head" || t == "record" || t == "merge" || (t ~ /[\/.*?]/ && t !~ /[ \t:!]/)) {
+        for (c = 1; c <= ncw; c++) if (cw[c] != i && isopen(cw[c])) wj[++nw] = cw[c]
         return (nw == 0)
       }
       return 0
@@ -1867,7 +1811,7 @@ _units_sched_awk() {
       for (i = 1; i <= n; i++) if (knd[i] == "doc" && stp[i] ~ /^[0-9]+$/ && stp[i] + 0 >= 7 && st[i] != "dropped") hasrel = 1
       for (i = 1; i <= n; i++) {
         # THE FILES CELL: path entries only (a bare word or a dash declares nothing), the mark
-        # taken off and remembered; code[] and docs[] say which side of the record it writes.
+        # taken off and remembered for the unmergeable hold; code[] says the row writes the tracked tree.
         m = split(fil[i], a, ",")
         for (k = 1; k <= m; k++) {
           e = trim(a[k]); sub(/^\.\//, "", e)
@@ -1875,7 +1819,6 @@ _units_sched_awk() {
           mark = (substr(e, length(e)) == "!")
           if (mark) e = substr(e, 1, length(e) - 1)
           nfe[i]++; fe[i, nfe[i]] = e; bg[i, nfe[i]] = mark; nbg += mark
-          if (in_docs(e)) docs[i] = 1
           if (isopen(i)) ixadd(i, nfe[i])
         }
         code[i] = writes_head(fil[i])
