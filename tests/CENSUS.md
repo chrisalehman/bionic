@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 120 · sections: 1098 · keep: 904 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 121 · sections: 1102 · keep: 908 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1092 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1092 - 22 - 8 = 1062.
 
@@ -1079,6 +1079,13 @@ rc-item-2.test.sh | §wave-27 T75 | keep | payload/scripts/setup.sh: the retired
 rc-item-2.test.sh | §wave-27 T75: bionic's claude() block clears the name it defines (A-orch-185) | duplicate | payload/scripts/lib/env.sh rc_default: the unalias line dropped or changed, so the function line errors under an alias; rc_get reads an earlier or swapped body as written | rc-item-1.test.sh §env.sh: the roster, the literals and the default, rc-item-2.test.sh §wave-27 T77
 rc-item-2.test.sh | §wave-27 T77 | keep | payload/scripts/lib/env.sh rc_set: the line guarding a changed block deleted, so a block holding a user's line is rewritten and the line lost ("T77 rc_set (old-u-below): refused with its own reason" reads 0) | none (searched 'rc_state' and 'a changed block is never written' in tests/)
 rc-item-2.test.sh | §wave-27 T78 | keep | payload/scripts/remove.sh _rm_rc_unset: the line guarding a changed claude() block deleted, so remove strips a block holding a user's line (rc=5 becomes 0, the rc changes) | none (searched '_rm_rc_unset' and 'never stripped' in tests/)
+
+## reader.test.sh
+
+reader.test.sh | §FOLD | keep | payload/scripts/lib/reader.sh reader_facts: the `at=` exclusion dropped with the identity entries ignored, so a repeated landing counts twice; the identity entries ignored, so the earlier proof still answers beside the later and the cancel misses its approval; the cancel arm made a no-op, so the cancelled approval answers yes | none (searched 'reader_facts', 'ev=cancel' and 'reader.sh' in tests/)
+reader.test.sh | §NAME | keep | payload/scripts/lib/reader.sh: a field read by place (`$2` for the event, `$NF` for the instant) or a fact printed in its writer's field order, so an answer over the log with each line's fields moved differs | none (searched 'reader.sh' and 'run/v1' in tests/; log.test.sh reads one written line back by name, not a fold)
+reader.test.sh | §FORM | keep | payload/scripts/lib/reader.sh reader_q_step: Step 9 not read as delivered, or the abandon line not read, so `state=` stays open; the value or list form printing a line not `key=value` or not `run/v1|ev=`; reader_main: the yes form's stdout drop deleted together with a yes question that prints (the drop alone deleted stays green: the yes questions print nothing) | none (searched 'state=delivered' and 'reader.sh' in tests/)
+reader.test.sh | §UNKNOWN | keep | payload/scripts/lib/reader.sh reader_main: the refusal made exit 0 or 1, or the list not printed with it, so an unlisted question is not refused with the list | none (searched 'reader.sh' and 'unknown question' in tests/)
 
 ## refuse.test.sh
 
