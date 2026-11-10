@@ -9,9 +9,8 @@
 #              authored cells alone are admitted.
 #   §KEYS      each header key the version-15 header has no place for is refused on a version-15 plan, the
 #              refusal naming it; the same key on a version-14 plan is admitted.
-#
-# A later section of this suite is the commit gate's: it judges the same plans at the commit, so it reuses
-# `page` and `write_plan` below and appends its own section after §KEYS.
+#   §GATE      the commit gate (hooks/bash-walls.sh) asks the run's facts for the step's evidence: a commit at
+#              Step 6 whose log holds no review event is refused, and admitted once the log holds one per question.
 #
 # FIXTURE FIDELITY. Each plan is a real file in a scratch git repository with an engaged session, written
 # through hooks/canonical-sdlc-governing-skill.sh as the Write tool would post it. Every plan carries the
@@ -111,5 +110,34 @@ for k in $gone; do
   write_plan "$(printf '%s\n' "$MACHINE" | page 14 "$k: 2026-11-10")"
   expect_status "a version-14 header with $k: is admitted" 0 "$HOOK_EXIT"
 done
+
+# A run with a log is read from the log alone, so the plan below holds no proved: line and the planted log holds
+# the run's step and, in the admitted twin, its readings: the gate admits on the facts the reader answers.
+section "GATE"
+git -C "$R" -c user.name=f -c user.email=f@x.invalid -c core.hooksPath=/dev/null commit -q --allow-empty -m base
+H="$(git -C "$R" rev-parse HEAD)"; GL="$R/.bionic/docs/record/wave-01-x/run.log"
+mkdir -p "${GL%/*}"; printf 'proof\n' > "$R/.bionic/docs/record/generic-evidence.md"
+{ printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
+  printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n\n## SDLC State\n\ncurrent: 6\n'
+  printf 'approved-by: f 2026-11-01T00:00Z "approved"\n- Step 5: floor green, record/floor.log\n\n## Verification Matrix\n\n'
+  printf 'stack-health: n/a: no serve\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+  printf '| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\nAC-1:\n  fails-when: a planted defect\n  evidence: record/generic-evidence.md\n'
+} > "$R/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md"
+printf 'plan=%s\n' "$R/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" > "$R/.bionic/tmp/engaged-$SID.state"
+gate() {  # -> GATE_EXIT, and GATE_SAID: the gate's words on a commit from the repository
+  local in
+  in="$(jq -n --arg s "$SID" --arg c "$R" '{session_id: $s, cwd: $c, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "git commit -m x"}}')"
+  GATE_SAID="$(HOME="$HOME_DIR" CLAUDE_PROJECT_DIR= CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 bash "$BIONIC_HOOKS_DIR/bash-walls.sh" <<< "$in" 2>&1 >/dev/null)"
+  GATE_EXIT=$?
+}
+printf 'run/v1|ev=step|n=6|by=f|at=2026-11-01T00:00:01Z\n' > "$GL"
+gate
+expect_status "a commit at step 6 with no review event in the log is refused" 2 "$GATE_EXIT"
+expect_contains "the refusal names the unanswered reading" "evidence: no review, and no waiver" "$GATE_SAID"
+for q in evidence adversarial structure; do
+  printf 'run/v1|ev=proof|evidence=record/%s.md|head=%s|kind=review|question=%s|reader=r|result=pass|scope=piece|at=2026-11-01T00:00:02Z\n' "$q" "$H" "$q" >> "$GL"
+done
+gate
+expect_status "the same commit with a review event of each question is admitted" 0 "$GATE_EXIT"
 
 finish
