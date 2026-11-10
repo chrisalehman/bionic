@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tests for hooks/dispatch-preflight.sh — THE START GATE. One shard of four, in two parts: part 2 of 2, §T72 … §FILES.
+# Tests for hooks/dispatch-preflight.sh — THE START GATE. One shard of four, in two parts: part 2 of 2, §LANDS-ON … §RECORDER.
 #
 # The suite's header (what it governs, how it stays hermetic) is in tests/dispatch-preflight.test.sh; the
 # fixtures and their fidelity notes are in tests/dispatch-preflight.prelude.sh; what the two parts of this shard
@@ -8,8 +8,8 @@
 # THIS SHARD IS TWO PARTS (wave-39 T37; D1, D13, REQ-3 AC-3.3). One dispatch-preflight-4.test.sh promised more
 # than a landing window holds, so it runs as two suites cut at a section boundary:
 #
-#   dispatch-preflight-4a.test.sh   S10h … §LR
-#   dispatch-preflight-4b.test.sh   §T72 … §FILES
+#   dispatch-preflight-4a.test.sh   S10h … §AC-E1.3
+#   dispatch-preflight-4b.test.sh   §LANDS-ON … §RECORDER
 #
 # Each is a gating suite by location and each passes alone.
 #
@@ -30,247 +30,6 @@ set -uo pipefail
 
 # ============================================================================
 
-section "§T72 — a reader's suites are its Suites: tokens, and a record is a regular file (wave-27 T72; review pass 49 B1, S1, S2)"
-# THE ROLE DECIDES (B1). T49 and T57 each closed the states of a reader's `Suites:` line they
-# listed, and review pass 49 found the one neither listed: a line that is all comment. The
-# shipped scaffold's line with `none` removed and its comment kept IS that line, and the reader
-# was given the writer's derivation (eight suites beside its run) or refused for the missing
-# impact command. Each reader below is driven at the real wall WITH a stale impact-command: line
-# whose stub would answer eight suites and WITHOUT one (wave-31 T2: nothing reads the line now);
-# a writer with the same lines is the control.
-T72_REC=.bionic/docs/record/w
-T72_SCAF="$(scaffold_raw_line "$DISPATCH_FILE" Suites)"
-T72_CMT="Suites:${T72_SCAF#Suites: none}"
-T72_HASH="Suites: #"
-T72_RUN="Re-executes: ${RL_BT}pytest tests/unit${RL_BT}"
-expect_eq "T72 …and with none removed it is a label, a comment and no token" "Suites:  # " "${T72_CMT:0:11}"
-t72_impact() {  # <repo> -> an impact command that answers eight suites for any path
-  mkdir -p "$1/.bionic"
-  printf 'for s in a b c d e f g h; do printf "%%s.test.sh\\t%%s\\n" "$s" "$1"; done\n' > "$1/t72-impact.sh"
-  printf 'impact-command: bash %s/t72-impact.sh\n' "$1" > "$1/.bionic/config.yaml"
-}
-t72_repo() {  # <role key: aud|crit|rev|wr> <on|off> -> the repo that role is dispatched in
-  local repo
-  case "$1" in
-    rev) repo=$(q_unbound "rt72-$1-$2") ;;
-    *)   repo=$(make_repo "rt72-$1-$2" yes); write_attestation "$repo" "$SID_A"
-         [ "$1" = crit ] && q_rigor "$repo" single ;;
-  esac
-  [ "$2" = on ] && t72_impact "$repo"
-  printf '%s' "$repo"
-}
-t72_brief() {  # <role key> <tag> <suites line> [<runs line>] -> that role's brief
-  local q f
-  case "$1" in
-    crit) q='evidence, adversarial, structure'; f="$T72_REC/$2-e.md, $T72_REC/$2-a.md, $T72_REC/$2-s.md" ;;
-    wr)   q=''; f='lib/a.sh' ;;
-    *)    q=evidence; f="$T72_REC/$2-e.md" ;;
-  esac
-  printf 'Your task: re-run the evidence.\nExpected artifact: %s/%s-e.md\nExpected duration: ~30 minutes.\n' "$T72_REC" "$2"
-  [ -n "$q" ] && printf 'Questions: %s\n' "$q"
-  printf 'Files: %s\n%s' "$f" "$3"
-  [ -n "${4:-}" ] && printf '\n%s' "$4"
-  return 0
-}
-t72_gate() {  # <repo> <tag> <role> <brief> -> R: allow:<suites_allowed>|<suites_source>|<re_executes>, or deny:<first line>
-  local row
-  q_gate "$1" "t72-$2" "$3" "$4"
-  if [ "$GATE_VERDICT" = allow ]; then
-    row=$(/usr/bin/grep -F "|name=wq-t72-$2|" "$(roster_path "$1" "$SID_A")" | head -1)
-    R="allow:$(roster_field "$row" suites_allowed)|$(roster_field "$row" suites_source)|$(roster_field "$row" re_executes)"
-  else R="deny:$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -m1 'bionic: dispatch refused')"; fi
-}
-T72_N=0
-for T72_IMP in on off; do
-  for T72_K in "aud bionic:auditor auditor" "crit bionic:critic critic"; do
-    set -- $T72_K; T72_KEY=$1; T72_ROLE=$2; T72_WORD=$3
-    T72_R=$(t72_repo "$T72_KEY" "$T72_IMP")
-    for T72_L in cmt hash; do
-      case "$T72_L" in cmt) T72_LINE="$T72_CMT"; T72_SAY="the scaffold line with none removed" ;;
-                       *)   T72_LINE="$T72_HASH"; T72_SAY="Suites: #" ;; esac
-      T72_N=$((T72_N + 1))
-      t72_gate "$T72_R" "$T72_N" "$T72_ROLE" "$(t72_brief "$T72_KEY" "r$T72_N" "$T72_LINE" "$T72_RUN")"
-      expect_eq "T72-B1 $T72_ROLE, impact command $T72_IMP, $T72_SAY and one run: admitted, Suites: none, the one run" \
-        "allow:none|declared|${RL_BT}pytest tests/unit${RL_BT}" "$R"
-      T72_N=$((T72_N + 1))
-      t72_gate "$T72_R" "$T72_N" "$T72_ROLE" "$(t72_brief "$T72_KEY" "r$T72_N" "$T72_LINE")"
-      expect_contains "T72-B1 $T72_ROLE, impact command $T72_IMP, $T72_SAY and no run: refused, nothing to re-execute" \
-        "the $T72_WORD declares nothing to re-execute" "$R"
-      expect_contains "T72-B1 …the reason the wall hands back names it" "declares nothing to re-execute" "$GATE_REASON"
-      expect_absent "T72-B1 …and no second fault: never the Files-alone refusal" "names no suite" "$GATE_REASON"
-      # the lines a brief may hold beside it, through the same library the wall reads
-      BV=$(brief_verdict "$T72_ROLE" "$T72_R" "$(t72_brief "$T72_KEY" "v$T72_N" "$T72_LINE" 'Re-executes: none')")
-      expect_contains "T72-B1 …and its set is the waiver, nothing derived" "suites=none" "$BV"
-      BV=$(brief_verdict "$T72_ROLE" "$T72_R" "$(t72_brief "$T72_KEY" "v$T72_N" "$T72_LINE" \
-        "Re-executes: ${RL_BT}pytest a${RL_BT}, ${RL_BT}pytest b${RL_BT}, ${RL_BT}pytest c${RL_BT}, ${RL_BT}pytest d${RL_BT}")")
-    done
-    BV=$(brief_verdict "$T72_ROLE" "$T72_R" "$(t72_brief "$T72_KEY" "v$T72_N" 'Suites: a.test.sh  # note' \
-      "Re-executes: ${RL_BT}pytest a${RL_BT}, ${RL_BT}pytest b${RL_BT}, ${RL_BT}pytest c${RL_BT}")")
-  done
-  # a writer is untouched: its Files: alone is refused, a stale impact-command: line or not
-  T72_R=$(t72_repo wr "$T72_IMP")
-  for T72_L in cmt hash; do
-    case "$T72_L" in cmt) T72_LINE="$T72_CMT"; T72_SAY="the scaffold line with none removed" ;;
-                     *)   T72_LINE="$T72_HASH"; T72_SAY="Suites: #" ;; esac
-    T72_N=$((T72_N + 1))
-    t72_gate "$T72_R" "$T72_N" bionic:implementor "$(t72_brief wr "r$T72_N" "$T72_LINE" "$T72_RUN")"
-    expect_contains "T72-B1 a writer, impact command $T72_IMP, $T72_SAY: refused for Files: alone, as the base does" \
-      "Files: alone names no suite" "$R"
-  done
-done
-
-# A RECORD IS A REGULAR FILE, OR A PATH NOT THERE YET (S1). ONE row: for every shape the wall's
-# count of the path beside the fact verb's answer for it once it exists, red on any disagreement.
-# The shapes are review pass 49's (its d5 and d6 tables) and the four of the plan's S1 that a
-# test can make: a directory named without its slash, a symlink, a FIFO, a path under a directory
-# of mode 000. A device needs root to make under record/, and a name holding a comma is two
-# Files: entries before the wall sees it, so neither is a row here.
-T72_D=$(walk_repo rt72-diff double)
-T72_OUT="$SANDBOX/t72-outside"; mkdir -p "$T72_OUT/sub"
-T72_LNK="$SANDBOX/t72-link"; ln -s "$SANDBOX" "$T72_LNK"
-T72_DR="$T72_D/$T72_REC"
-mkdir -p "$T72_DR/dirx" "$T72_DR/locked" "$T72_D/.bionic/tmp/scr"
-ln -s "$T72_OUT" "$T72_DR/out"; ln -s "$T72_DR" "$T72_D/.bionic/tmp/scr/in"; ln -s "$T72_OUT/sub" "$T72_DR/lout"
-t72_record() {  # <file> -> a reading record the verb takes, for the differential repo
-  printf 'reviewed: %s..%s\nquestion: evidence\nresult: pass\nscope: piece\n\nfound\n' \
-    "$(git -C "$T72_D" rev-list --max-parents=0 HEAD)" "$(git -C "$T72_D" rev-parse HEAD)" > "$1"
-}
-t72_record "$T72_DR/sl-target.md"; ln -s "$T72_DR/sl-target.md" "$T72_DR/sl.md"
-t72_record "$T72_DR/hard-src.md"; ln "$T72_DR/hard-src.md" "$T72_DR/hard.md"
-mkfifo "$T72_DR/ff"
-t72_record "$T72_DR/locked/p-locked.md"; chmod 000 "$T72_DR/locked"
-T72_AB="$T72_D"; T72_AL="$T72_LNK${T72_D#"$SANDBOX"}"
-T72_DIFF=""; T72_SEEN=0; T72_TOOK=0
-while IFS='|' read -r T72_TAG T72_P; do
-  [ -n "$T72_TAG" ] || continue
-  T72_P="${T72_P//@R@/$T72_AB}"; T72_P="${T72_P//@L@/$T72_AL}"
-  T72_BR="Your task: read.
-Expected artifact: .bionic/tmp/scr/out.md
-Expected duration: 30 minutes.
-Files: %s
-Suites: tests/a.test.sh
-Questions: evidence"
-  t72_gate "$T72_D" "d-$T72_TAG" bionic:auditor "$(printf "$T72_BR" "$T72_P")"
-  case "$R" in
-    allow:*) T72_WALL=1; T72_READER="wq-t72-d-$T72_TAG" ;;
-    *'dealt 1 question, names 0 records'*) T72_WALL=0
-      t72_gate "$T72_D" "v-$T72_TAG" bionic:auditor "$(printf "$T72_BR" "$T72_REC/zz-$T72_TAG.md, $T72_P")"
-      T72_READER="wq-t72-v-$T72_TAG" ;;
-    *) T72_WALL="?"; T72_READER="" ;;
-  esac
-  T72_VERB="?"
-  if [ -n "$T72_READER" ] && [ "${R%%:*}" = allow ]; then
-    walk_start "$T72_D" "$T72_READER"
-    case "$T72_P" in /*) T72_K="$T72_P" ;; *) T72_K="$T72_D/$T72_P" ;; esac
-    # the path exists when the verb reads it: a missing file is written where the kernel puts
-    # it, and also where a logical cd places it, so the answer is the placing's and not the content's
-    if [ ! -e "$T72_K" ] && [ ! -L "$T72_K" ] && [ "${T72_K%/}" = "$T72_K" ]; then
-      mkdir -p "$(dirname "$T72_K")" 2>/dev/null && t72_record "$T72_K" 2>/dev/null
-      T72_LOG="$(cd "$(dirname "$T72_K")" 2>/dev/null && pwd -P)" && [ -d "$T72_LOG" ] \
-        && [ ! -e "$T72_LOG/$(basename "$T72_K")" ] && t72_record "$T72_LOG/$(basename "$T72_K")" 2>/dev/null
-    fi
-    if (cd "$T72_D" && env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$SID_A" bash "${BIONIC_HOOKS_DIR}/session-poker.sh" \
-          proof-add review "$T72_K" --question evidence --reader "$T72_READER" >/dev/null 2>&1); then T72_VERB=1; else T72_VERB=0; fi
-  fi
-  T72_SEEN=$((T72_SEEN + 1)); [ "$T72_VERB" = 1 ] && T72_TOOK=$((T72_TOOK + 1))
-  printf '  T72-S1 shape %-10s wall=%s verb=%s  %s\n' "$T72_TAG" "$T72_WALL" "$T72_VERB" "$T72_P"
-  [ "$T72_WALL" = "$T72_VERB" ] || T72_DIFF="$T72_DIFF $T72_TAG(wall=$T72_WALL,verb=$T72_VERB)"
-done <<T72_SHAPES
-plain|$T72_REC/p-plain.md
-abs|@R@/$T72_REC/p-abs.md
-abslink|@L@/$T72_REC/p-abslink.md
-outlink|$T72_REC/out/p-out.md
-outlinkA|@R@/$T72_REC/out/p-outA.md
-inlink|.bionic/tmp/scr/in/p-in.md
-inlinkL|@L@/.bionic/tmp/scr/in/p-inL.md
-dotdotin|$T72_REC/../w/p-dd.md
-dotdotout|$T72_REC/../../plans/p-ddo.md
-newpar|$T72_REC/newdir/p-new.md
-newparL|@L@/$T72_REC/newdir2/deeper/p-newL.md
-slash|$T72_REC/dirx/
-dirnoslash|$T72_REC/dirx
-quote|$T72_REC/it's.md
-dotslash|./$T72_REC/p-ds.md
-dblslash|@R@/.bionic//docs/./record/w/p-dbl.md
-nopedotdot|$T72_REC/nope/../p-nope.md
-loutdotdot|$T72_REC/lout/../p-lout.md
-symfile|$T72_REC/sl.md
-hardlink|$T72_REC/hard.md
-case|.bionic/docs/RECORD/w/p-case.md
-docsrel|record/w/p-docsrel.md
-locked|$T72_REC/locked/p-locked.md
-tilde|~/p-tilde.md
-fifo|$T72_REC/ff
-T72_SHAPES
-chmod 755 "$T72_DR/locked"
-expect_eq "T72-S1 the differential ran every shape" "25" "$T72_SEEN"
-expect_eq "T72-S1 …the verb took fourteen of them, so both answers are in the table" "14" "$T72_TOOK"
-expect_eq "T72-S1 for every shape the wall counts a record exactly when the fact verb takes it" "" "$T72_DIFF"
-
-# THE COST OF PLACING (S2): linear in a path's length, and a path over 1,024 bytes is no record.
-t72_len() {  # <bytes> -> a path under the record root of exactly that many bytes, its directories missing
-  local p="$T72_REC/n" n
-  while [ "$(( ${#p} + 5 ))" -le "$1" ]; do p="$p/a"; done
-  p="$p.md"; n=$(( $1 - ${#p} )); while [ "$n" -gt 0 ]; do p="${p%.md}x.md"; n=$((n - 1)); done
-  printf '%s' "$p"
-}
-T72_R=$(make_repo rt72-len yes); write_attestation "$T72_R" "$SID_A"
-T72_P1024=$(t72_len 1024); T72_P1025=$(t72_len 1025)
-expect_eq "T72-S2 precondition: the two paths are 1,024 and 1,025 bytes" "1024 1025" \
-  "$(printf '%s' "$T72_P1024" | wc -c | tr -d ' ') $(printf '%s' "$T72_P1025" | wc -c | tr -d ' ')"
-t72_gate "$T72_R" len1024 bionic:auditor "$(t72_brief aud x 'Suites: tests/a.test.sh' | sed "s|^Files: .*|Files: $T72_P1024|; s|^Expected artifact: .*|Expected artifact: .bionic/tmp/scr/out.md|")"
-expect_contains "T72-S2 a record path of 1,024 bytes is a record" "allow:" "$R"
-t72_gate "$T72_R" len1025 bionic:auditor "$(t72_brief aud x 'Suites: tests/a.test.sh' | sed "s|^Files: .*|Files: $T72_P1025|; s|^Expected artifact: .*|Expected artifact: .bionic/tmp/scr/out.md|")"
-expect_contains "T72-S2 a record path of 1,025 bytes is no record" "dealt 1 question, names 0 records" "$R"
-# twenty paths of 2,500 missing segments: a reader's dispatch within one second of a writer's
-# same line, under /bin/bash 3.2 (the best of two each, so one busy moment is not the verdict)
-T72_DEEP=""; for T72_I in $(seq 1 2500); do T72_DEEP="${T72_DEEP}a/"; done
-T72_F20=""; for T72_I in $(seq 1 20); do T72_F20="${T72_F20:+$T72_F20, }$T72_REC/c$T72_I/${T72_DEEP}x.md"; done
-T72_BEST_W=999999; T72_BEST_A=999999
-for T72_I in 1 2; do
-  for T72_K in "w bionic:implementor" "a bionic:auditor"; do
-    set -- $T72_K
-    PATH="/bin:$PATH" GATE_HIRES=1 q_gate "$T72_R" "t72-cost$1$T72_I" "$2" "Your task: read.
-Expected artifact: .bionic/tmp/scr/out.md
-Expected duration: 30 minutes.
-Files: $T72_F20
-Suites: tests/a.test.sh
-Questions: evidence"
-    [ "$1" = w ] && T72_WV="$GATE_VERDICT"
-    if [ "$1" = w ]; then [ "${GATE_TIME_CS:-999999}" -lt "$T72_BEST_W" ] && T72_BEST_W="$GATE_TIME_CS"
-    else [ "${GATE_TIME_CS:-999999}" -lt "$T72_BEST_A" ] && T72_BEST_A="$GATE_TIME_CS"; fi
-  done
-done
-expect_eq "T72-S2 the writer's dispatch with twenty deep paths is admitted (the control runs)" "allow" "$T72_WV"
-printf '  T72-S2 best of two: writer %s cs, reader %s cs\n' "$T72_BEST_W" "$T72_BEST_A"
-expect_eq "T72-S2 twenty paths of 2,500 missing segments cost a reader at most one second over a writer" "ok" \
-  "$([ "$T72_BEST_A" -le $((T72_BEST_W + 100)) ] && echo ok || echo "reader ${T72_BEST_A} cs, writer ${T72_BEST_W} cs")"
-# the placing alone, under /bin/bash 3.2: twenty paths of 1,000 bytes cost what twenty short ones do
-T72_PLACE=$(/usr/bin/sed -n '/^    _dp_rec_place() {/,/^    }/p' "$GATE")
-expect_contains "T72-S2 precondition: the placing is lifted out of the wall" "_dp_rec_place() {" "$T72_PLACE"
-T72_COST=$(/bin/bash -c '
-  eval "$1"; BIONIC_ROOT="$2"
-  cs() { python3 -c "import time; print(int(time.time()*100))"; }
-  long="'"$T72_REC"'/n"; while [ "${#long}" -lt 990 ]; do long="$long/a"; done
-  t0=$(cs); for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do _dp_rec_place "$long/x$i.md" >/dev/null; done; t1=$(cs)
-  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do _dp_rec_place "'"$T72_REC"'/s$i/x.md" >/dev/null; done; t2=$(cs)
-  printf "%s %s %s" "$(_dp_rec_place "'"$T72_REC"'/s1/x.md")" "$((t1 - t0))" "$((t2 - t1))"
-' _ "$T72_PLACE" "$T72_R" 2>&1)
-expect_contains "T72-S2 the lifted placing runs and places a short path" "$T72_REC/s1/x.md" "$T72_COST"
-set -- $T72_COST
-expect_eq "T72-S2 placing twenty 1,000-byte paths costs at most half a second over twenty short ones" "ok" \
-  "$([ "${2:-999999}" -le $(( ${3:-0} + 50 )) ] && echo ok || echo "long ${2:-?} cs, short ${3:-?} cs")"
-
-# TWO SENTENCES (S3, S4) say what the code does.
-BV=$(brief_detail bionic:auditor "$BRIEF_NOCONF" "Questions: evidence
-Suites: tests/a.test.sh, tests/b.test.sh, tests/c.test.sh, tests/d.test.sh")
-expect_absent "T72-S4 …never \"a shell operator\", which a redirection is and a quoted ; is not" "a shell operator" "$BV"
-T72_S3=$(/usr/bin/grep -n "AN ABSOLUTE PATH IS PLACED AS THE FACT VERB PLACES IT" -A3 "$GATE")
-expect_contains "T72-S3 the placing's comment is found in the wall" "PLACES IT" "$T72_S3"
-expect_absent "T72-S3 …never that the verb reads with cd -P" 'with `cd -P`' "$T72_S3"
-
-# ============================================================================
-
 section "§LANDS-ON — a writer binding a row names the suites it lands on (wave-28 T7; REQ-1 AC-1.4, D4)"
 # =====================================================================
 # ============================================================================
@@ -278,13 +37,10 @@ section "§LANDS-ON — a writer binding a row names the suites it lands on (wav
 # A brief carries `Lands-on: <suite>[, <suite>]` or `Lands-on: none <reason>` on a line of its own.
 # The wall writes it on the launch row as `lands_on=`, a bare suite as `<name>.test.sh` and a path-qualified
 # one at its declared path (wave-34 T27; the spelling lib/line.sh `_line_suites` decodes, so ready runs
-# that file), and refuses: a writer brief that binds a
-# row of the bound plan and carries no line (ruling A-orch-73: a dispatch binding no row is owed
-# none; A-orch-71: whatever version wrote the plan); `none` with no reason; a suite outside the set
-# the checks derived. FIXTURES: adv_brief's writer contract (Suites: tests/widget.test.sh), on
+# that file). The plan verb renders the line from the row, so the wall records it as the one reader reads
+# it and judges no shape of it. FIXTURES: adv_brief's writer contract (Suites: tests/widget.test.sh), on
 # make_repo's approved, bound plan with a `## Tasks` table holding T23 and A2. SYNTHESIZED.
-# fails-when: a bound writer with no line, a reasonless none, or an outside suite is admitted; a
-# well-formed line is refused or not written in the one spelling; an unbound writer is refused.
+# fails-when: a well-formed line is refused or not written in the one spelling; an unbound writer is refused.
 t7_gate() {  # <repo tag> <body lines> [<name>] [<subagent_type>] [<brief>] -> GATE_*, T7_ROW
   REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
   printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the widget | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n| A2 | 4 | build | another | implementor | — | 30 | REQ-1 | b.sh | — | — | pending | — |\n' \
@@ -294,13 +50,6 @@ t7_gate() {  # <repo tag> <body lines> [<name>] [<subagent_type>] [<brief>] -> G
 }
 t7_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
 t7_cols_ok() { [ "$(bionic_cols "$(t7_first)")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$(t7_first)")"; }
-
-t7_gate lo1 'Scope constraint: touch only payload/scripts/lib/widget.sh.'
-expect_eq "LO1 a writer named w99-T23 (row T23's by the name match) with no Lands-on: line is refused" "deny" "$GATE_VERDICT"
-expect_contains "LO1c …the detail gives the line to add" "    Lands-on: <suite>[, <suite>]" "$GATE_VERR"
-expect_contains "LO1d …and the none form with its reason" "    Lands-on: none <reason>" "$GATE_VERR"
-expect_eq "LO1e …its first line is at most 100 columns" "ok" "$(t7_cols_ok)"
-expect_eq "LO1f …and no row is written" "" "$T7_ROW"
 
 t7_gate lo2 'Lands-on: widget'
 expect_eq "LO2 Lands-on: widget, a suite of the row's set named bare, is admitted" "allow" "$GATE_VERDICT"
@@ -314,25 +63,6 @@ expect_eq "LO2t Lands-on: tests/widget.test.sh with a trailing comment is admitt
 t7_gate lo2p 'Lands-on: scripts/deploy/__tests__/widget.test.sh'
 expect_eq "LO2p Lands-on: scripts/deploy/__tests__/widget.test.sh, in Suites: by its file name, is admitted, written at its path" \
   "allow|scripts/deploy/__tests__/widget.test.sh" "$GATE_VERDICT|$(roster_field "$T7_ROW" lands_on)"
-t7_gate lo2x 'Lands-on: ../widget.test.sh'
-expect_eq "LO2x Lands-on: ../widget.test.sh, a path out of the tree, is refused" "deny" "$GATE_VERDICT"
-expect_contains "LO2x2 …naming it" "Lands-on: ../widget" "$(t7_first)"
-expect_contains "LO2x3 …as no suite of the set" "is outside Suites:" "$(t7_first)"
-
-LO3_S="a-suite-name-of-sixty-characters-long-enough-to-wrap.test.sh"
-t7_gate lo3 "Lands-on: widget.test.sh, ${LO3_S}"
-expect_eq "LO3 a Lands-on: naming a suite outside the row's set is refused" "deny" "$GATE_VERDICT"
-expect_contains "LO3b …the line names the suite, cut to fit" "Lands-on: a-suite-name" "$(t7_first)"
-expect_eq "LO3d …its first line at most 100 columns with a sixty-character name" "ok" "$(t7_cols_ok)"
-expect_contains "LO3e …the detail names the set it may name from" "Suites: widget.test.sh" "$GATE_VERR"
-expect_eq "LO3f …and no row is written" "" "$T7_ROW"
-t7_gate lo3r 'Lands-on: run.sh'
-expect_contains "LO3r the full-suite runner is no suite of the line: refused as outside the set" "Lands-on: run.sh is outside Suites:" "$(t7_first)"
-
-t7_gate lo4 'Lands-on: none'
-expect_eq "LO4 Lands-on: none with no reason is refused" "deny" "$GATE_VERDICT"
-expect_contains "LO4b …the line says it gives no reason" "Lands-on: none gives no reason" "$(t7_first)"
-expect_eq "LO4c …its first line at most 100 columns" "ok" "$(t7_cols_ok)"
 t7_gate lo5 '' '' '' "$(adv_brief 'Lands-on: none — the row edits only prose no suite reads' | sed 's#^Files: .*#Files: .bionic/docs/record/w99-widget.txt#')"  # prose-only Files: the none a non-prose path is refused is dispatch-preflight-5 §LANDS-NONE
 expect_eq "LO5 Lands-on: none with a reason is admitted, the row carrying lands_on=none" \
   "allow|none" "$GATE_VERDICT|$(roster_field "$T7_ROW" lands_on)"
@@ -345,9 +75,6 @@ t7_gate lo7 'Scope constraint: read only.' w99-T23 bionic:researcher \
   "$(adv_brief 'Scope constraint: read only.' | sed '/^Files:/d; s#^Suites: .*#Suites: none#')"
 expect_eq "LO7 a read-only role bound to T23 by its name, with no Lands-on:, is admitted" "allow" "$GATE_VERDICT"
 expect_contains "LO7b …its row is written" "subagent_type=bionic:researcher" "$T7_ROW"
-t7_gate lo8 'Lands-on: <suite>[, <suite>]'
-expect_eq "LO8 the scaffold slot pasted unfilled declares nothing: the bound writer is refused for no line" \
-  "deny" "$GATE_VERDICT"
 
 # ============================================================================
 
@@ -362,8 +89,6 @@ Lands-on: widget' w-misc
 expect_eq "RL1 an agent named w-misc (no row's name) briefed Row: T23 with its Lands-on: is admitted" "allow" "$GATE_VERDICT"
 expect_eq "RL1b …the row carries row=T23" "T23" "$(roster_field "$T7_ROW" row)"
 expect_eq "RL1c …and lands_on=widget.test.sh" "widget.test.sh" "$(roster_field "$T7_ROW" lands_on)"
-t7_gate rl1n 'Row: T23' w-misc
-expect_eq "RL1n Row: T23 binds an agent no name match would: with no Lands-on: it is refused" "deny" "$GATE_VERDICT"
 t7_gate rl2 'Row: T99
 Lands-on: widget' w-A2
 expect_eq "RL2 Row: T99, no row of the bound plan, is refused" "deny" "$GATE_VERDICT"

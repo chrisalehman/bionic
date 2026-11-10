@@ -110,10 +110,8 @@ TOOL_NAME=$(_jq '.tool_name')
 # payload/scripts/lib/loader.sh. FAIL CLOSED: a wall that cannot read its library cannot
 # say a dispatch is safe, so it refuses it; the refusal names /bionic:doctor, and the Bash
 # wall still admits the four repair commands.
-# `brief.sh` (wave-20 T6; REQ-4, Δ10) is the contract grammar this wall and `amend` share; it
-# brings `cmd-class.sh` (wave-20 T4; REQ-7, D7) in itself for CMD_RUN_NORM_AWK, the one run
-# normaliser its lift pastes in, so this hook names only brief.sh and lets that source do
-# the pulling.
+# `brief.sh` is the one reader of a dispatch's contract lines; it brings `cmd-class.sh` and
+# `suite.sh` in itself, so this hook names only brief.sh and lets that source do the pulling.
 BIONIC_LIB_WANT="context.sh fold.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh brief.sh prose.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
@@ -233,11 +231,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "dispatch-preflight"; f
 # A second split in this hook is the exact defect REQ-1e removed from the evidence gate.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/units.sh"
-# THE CONTRACT GRAMMAR IS A LIBRARY (wave-20 T6; REQ-4, D4, Δ10). lib/brief.sh holds the lift,
-# the value filter, the run caps and every check the Files:/Suites:/Re-executes: fields feed;
-# it brings in cmd-class.sh itself for CMD_RUN_NORM_AWK (wave-20 T4), the run normaliser the
-# lift's `collapse()` shares with the writer-side budget arm. Both only define functions and
-# variables, so sourcing them costs a parse and nothing else.
+# THE CONTRACT'S ONE READER IS A LIBRARY: lib/brief.sh holds the value filter, `brief_contract` and the
+# brief file's check. It only defines functions and variables, so sourcing it costs a parse.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/brief.sh"
 # THE PROSE LIST (lib/prose.sh): the one answer to "is this path prose", asked for a row that lands on no suite. It defines
@@ -483,7 +478,7 @@ attested() {
 # declared beside the brief-shape arms because they were the only callers; wave-14 REQ-8
 # made the state arms callers too, so the declaration moves to the top of the range it
 # serves. The SPENDING point has not moved up with it: `dp_refuse_findings` is defined
-# beside the scaffold it renders and called once, below the last arm and above the journal.
+# below the last arm and called once there, above the journal.
 #
 # WHAT IS ABOVE IT, AND STAYS ABOVE IT. The attestation arm (the combined preflight, next
 # section) refuses where it stands, first and alone. A repo that cannot be written, or a
@@ -494,7 +489,6 @@ attested() {
 # the same kind of reason and are not refusals at all.
 DP_FINDING_N=0
 DP_FAULT_LINES=""
-DP_NOTCHECKED=""
 DP_FIRST_FACT=""
 DP_FIRST_FIX=""
 DP_FIRST_DETAIL=""
@@ -531,22 +525,6 @@ Approval and the writer budget are read out of it, so neither can be measured. I
 closed and not gone, so no other plan is read in its place.
 Fix: restore read access (chmod u+r on the plan, u+rx on its folder), then dispatch."
 fi
-
-# dp_not_checked <arm> <what it needs> — record that an arm could not be evaluated (AC-8.2).
-#
-# AN ARM WHOSE INPUT IS ANOTHER ARM'S PRODUCT CANNOT ANSWER, and the failure this records is
-# the arm going QUIET about it: the author fixes every fault named, dispatches again, and
-# meets a refusal from a wall that was standing there the whole time unable to speak. The
-# line says which wall and what it is waiting for, so a second refusal is expected rather
-# than a surprise. Its shape is the one the budget wall's per-field reading already uses.
-#
-# THESE LINES RIDE THE SEVERAL-FAULT WIRE ONLY (A-T6.1). A one-fault refusal keeps its arm's
-# own detail byte-identical — wave-13 pins that verbatim — and an author holding one fault
-# gets the dependent arm's verdict on the very next attempt anyway.
-dp_not_checked() {  # <arm> <what it needs>
-  DP_NOTCHECKED="${DP_NOTCHECKED}not checked: $1, needs $2
-"
-}
 
 # ==================================================== THE COMBINED PREFLIGHT
 # (epic-16 wave-02, R5/AC-4; a field report §3.)
@@ -946,12 +924,14 @@ pushed to it at start.
 
 Then retry the dispatch." ;;
 esac
-# THE BRIEF IS THE FILE THE PROMPT NAMES, WHEN IT NAMES ONE. `brief_named` reads the prompt's first line
-# for a `briefs/<name>.md` path and `brief_file_read` (lib/brief.sh) reads that file and its render mark.
-# A rendered file that is there is the text every reader below reads in place of the prompt: the label
-# lift, the `Kind:` line and the body advisories. So with one brief file the prompt's prose decides
-# neither the verdict nor the roster's contract. A prompt that names no file is read as it always was;
-# THE BRIEF FILE'S CHECK, the last arm, refuses such a prompt when it binds a plan row.
+# THE CONTRACT IS THE BRIEF FILE THE PROMPT NAMES, WHEN IT NAMES ONE. `brief_named` reads the prompt's first
+# line for a `briefs/<name>.md` path and `brief_file_read` (lib/brief.sh) reads that file and its render mark.
+# A prompt that names a file is read no further: the file's lines are the contract, so its prose decides
+# neither the verdict nor the roster row, and a named file that cannot be read is no contract at all.
+# THE BRIEF FILE'S CHECK, the last arm, refuses a dispatch that binds a plan row and names no file. A
+# dispatch that binds none (a researcher, a test-runner, a prototype) writes its contract lines in its
+# prompt. Either text is read once, here, by the one reader `brief_contract`, and every arm below reads
+# its fields out of DP_CONTRACT.
 DP_PROMPT=$(_jq '.tool_input.prompt')
 DP_BRIEF_SRC="$DP_PROMPT"
 DP_BRIEF_PATH=""; DP_BRIEF_STATE=""
@@ -960,11 +940,12 @@ if declare -F brief_file_read >/dev/null 2>&1; then
   if [ -n "$DP_BRIEF_PATH" ]; then
     brief_file_read "$BIONIC_ROOT" "$DP_BRIEF_PATH"
     DP_BRIEF_STATE="$BRIEF_FILE_STATE"
-    [ -z "$BRIEF_FILE_TEXT" ] || DP_BRIEF_SRC="$BRIEF_FILE_TEXT"
+    DP_BRIEF_SRC="$BRIEF_FILE_TEXT"
   fi
 else
   DP_BRIEF_STATE=unreadable
 fi
+DP_CONTRACT="$(brief_contract "$DP_BRIEF_SRC")"
 # A PROTOTYPE IS ADMITTED BEFORE APPROVAL, CONFINED (wave-38 T21; REQ-13 AC-13.2, D16). A brief whose
 # `Kind:` line is `prototype` answers a design question with a throwaway: it writes only under the docs
 # root's record/ and inside the tree its `Throwaway tree:` line names, and owns no plan row. What the wall
@@ -972,22 +953,8 @@ fi
 # brief for an approval, and THE PROTOTYPE'S CONFINEMENT (below the containment wall) judges its Files:,
 # its tree and its row whether the plan is approved or not. Its kind is one of DP_PREAPPROVAL_KINDS, the
 # set `--admitted-before-approval` prints.
-# dp_brief_label <label> -> the value of the brief's first `<label>:` line outside a code fence, its
-# blanks and one pair of backticks taken off; the label is matched without regard to case.
-dp_brief_label() {
-  printf '%s\n' "$DP_BRIEF_SRC" | awk -v lab="$1" '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    {
-      l = $0; sub(/^[[:space:]]*/, "", l)
-      if (tolower(substr(l, 1, length(lab) + 1)) != tolower(lab) ":") next
-      v = substr(l, length(lab) + 2); gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
-      if (v ~ /^`[^`]*`$/) v = substr(v, 2, length(v) - 2)
-      print v; exit
-    }'
-}
 DP_PROTOTYPE=""
-_dp_kind="$(dp_brief_label Kind | tr '[:upper:]' '[:lower:]')"
+_dp_kind="$(brief_field "$DP_CONTRACT" kind | tr '[:upper:]' '[:lower:]')"
 case " $DP_PREAPPROVAL_KINDS " in *" ${_dp_kind:-none} "*) DP_PROTOTYPE=1 ;; esac
 if ! role_is_readonly "$DP_SUBAGENT" && [ -z "$DP_PROTOTYPE" ] && [ -n "$PLAN" ]; then
   # `approved-by:` IS READ BY THE FILL'S OWN READER (wave-26 T5; review 10 F2): `fill_plan_approved`
@@ -1076,12 +1043,6 @@ fi
 # rows it matched but no remedy row (wave-28 T58; the reader below carries the rule).
 # `approval:plan` is the arm above.
 DP_ROW_NAME=$(_jq '.tool_input.name')
-# The brief is lifted here, the one place the label is read: the lift needs only the role and the
-# brief, and a `Row:` is a field of it. The role goes in with the brief (wave-20 T4; REQ-7, Δ3, Δ9): it
-# decides the run cap, which `brief_validate_fields` reads off the same role below. Nothing else goes
-# in: the Files: reader reads an item by its own text, and this hook lists no directory for it
-# (wave-27 T42, A-orch-46).
-LIFTED=$(lift_contract_fields "$DP_BRIEF_SRC" "$DP_SUBAGENT")
 # DP_MINE_AWK: the awk function `mine(id)`, 1 when the dispatch name `nm` is row <id>'s. Only the
 # reader below calls it.
 DP_MINE_AWK='
@@ -1104,7 +1065,7 @@ DP_MINE_AWK='
 # and nothing binds it, neither the line nor the name.
 dp_row_reader() {
   local rows=""
-  DP_ROW="$(brief_field "$LIFTED" row)"; DP_NAME_ROWS=""; DP_NAME_ROW=""; DP_NAME_AMBIG=""; DP_BOUND_REC=""
+  DP_ROW="$(brief_field "$DP_CONTRACT" row)"; DP_NAME_ROWS=""; DP_NAME_ROW=""; DP_NAME_AMBIG=""; DP_BOUND_REC=""
   if [ -n "$DP_PROTOTYPE" ]; then DP_BOUND_ROW=""; return 0; fi
   if [ -n "$PLAN" ] && { [ -n "$DP_ROW_NAME" ] || [ -n "$DP_ROW" ]; }; then
     rows="$(units_rows "$PLAN" 2>/dev/null)"
@@ -1703,11 +1664,6 @@ fi
 
 warn() { printf 'dispatch-preflight: WARN %s\n' "$1" >&2; }
 
-# THE VALUE FILTER AND THE LIFT LIVE IN payload/scripts/lib/brief.sh (wave-20 T6; REQ-4, D4,
-# Δ10): `sanitize`, which keeps a `|` or a newline from forging a row segment, and
-# `lift_contract_fields`, which reads the brief's labelled fields, with the run caps beside it.
-# This file calls both; `amend` and `task-add` call the same two.
-
 # ---------- D-5 pruning ----------
 #
 # A session is live by lib/alive.sh's one rule: its process is running with the start its
@@ -1852,47 +1808,20 @@ agent is gone, frees the name — a landing marker alone does not."
   fi
 fi
 
-# THE BRIEF IS LIFTED ABOVE, at the row reader (wave-28 T55): `LIFTED` is read from here on.
-field_of() {  # <kind>
-  printf '%s\n' "$LIFTED" | grep -m1 "^$1=" | cut -d= -f2-
-}
-# The count-cap WARN (T19, A-orch-19.1): `suite_names()`/`paths()` print these as ordinary
-# LIFTED lines rather than to awk's own stderr (see the comment beside them) — surfaced here,
-# unsanitized, through the same `warn()` every other loud-but-passing condition in this file
-# uses. Read before anything below narrows `$LIFTED` to a single field.
-C_SUITES_CAPWARN=$(field_of suites_capwarn)
-[ -n "$C_SUITES_CAPWARN" ] && warn "$C_SUITES_CAPWARN"
-C_FILES_CAPWARN=$(field_of files_capwarn)
-[ -n "$C_FILES_CAPWARN" ] && warn "$C_FILES_CAPWARN"
-# THE RUNS CAP IS NOT ON THIS LIST (T5, REQ-8, D12). Until this wave a fourth declared run
-# came through here as `re_executes_capwarn=` — the same warn-and-admit shape as the two
-# caps above — so a brief that named four runs was DISPATCHED with three of them on the
-# roster and no line telling the author the fourth was silently cut. `SUITES_MAX`/`FILES_MAX`
-# bound a ROW FIELD's width, which is a storage limit nobody chose to hit; `RUNS_MAX` bounds
-# the DECLARATION itself (`marked_runs()`'s own comment, two screens up), which the author
-# chose and can fix at dispatch. `re_executes_dropped=`, read by
-# `brief_validate_fields` beside the dropped suite, carries this fact to a refusal instead.
-C_DELIVERABLE=$(sanitize "$(field_of deliverable)" 300)
-# Never both: the extractor prints ONE of these two, so a non-empty list here means
-# `deliverable=` is empty and the ambiguity wall below owns the dispatch.
-C_DELIVERABLE_CANDIDATES=$(sanitize "$(field_of deliverable_ambiguous)" 900)
-C_DURATION=$(sanitize "$(field_of duration)" 80)
-C_PROGRESS=$(sanitize "$(field_of progress)" 300)
-C_CADENCE=$(sanitize "$(field_of cadence)" 80)
-C_CLAIMS=$(sanitize "$(field_of claims)" 300)
-C_WAIVER=$(sanitize "$(field_of waiver)" 300)
+# THE CONTRACT'S FIELDS, read once out of DP_CONTRACT, each bounded as the roster row stores it.
+C_DELIVERABLE=$(sanitize "$(brief_field "$DP_CONTRACT" deliverable)" 300)
+C_DURATION=$(sanitize "$(brief_field "$DP_CONTRACT" duration)" 80)
+C_PROGRESS=$(sanitize "$(brief_field "$DP_CONTRACT" progress)" 300)
+C_CADENCE=$(sanitize "$(brief_field "$DP_CONTRACT" cadence)" 80)
+C_CLAIMS=$(sanitize "$(brief_field "$DP_CONTRACT" claims)" 300)
+C_WAIVER=$(sanitize "$(brief_field "$DP_CONTRACT" waiver)" 300)
 # `Deliverable-waiver: none` waives nothing: the word answers the scaffold's line, it gives no reason, so the row
 # carries no waiver and a declared artifact beside it is no contradiction for the sweeper to report.
 case "$(printf '%s' "$C_WAIVER" | tr '[:upper:]' '[:lower:]')" in none|none.) C_WAIVER="" ;; esac
-C_DONE=$(sanitize "$(field_of done)" 300)   # the Done marker (wave-24 T9, D3); on the row only when declared
-# THE THREE INSTRUMENT FIELDS, READ THROUGH THE GRAMMAR (wave-20 T6; REQ-4, D4, Δ10).
-# `brief_field` (payload/scripts/lib/brief.sh) bounds each kind as the roster row stores it —
-# the three are list-valued and never cut — so the scaffold marks and the row below hold
-# exactly the values `brief_validate_fields` judges. The lift's fault fields (a refused token,
-# a dropped suite or run, a commented span) are the library's to read now; nothing here does.
-C_FILES=$(brief_field "$LIFTED" files)
-C_SUITES=$(brief_field "$LIFTED" suites)
-C_RE_EXECUTES=$(brief_field "$LIFTED" re_executes)
+C_DONE=$(sanitize "$(brief_field "$DP_CONTRACT" done)" 300)   # the Done marker; on the row only when declared
+C_FILES=$(brief_field "$DP_CONTRACT" files)
+C_SUITES=$(brief_field "$DP_CONTRACT" suites)
+C_RE_EXECUTES=$(brief_field "$DP_CONTRACT" re_executes)
 # THE RENDERED TWINS (wave-36 T6; D12, AC-6.3; C68). A template under agents-src/ is never edited alone:
 # render.sh rewrites its output and the checksum manifest from it, so a row whose Files named the template and
 # not those was refused at its stop for the files its own render wrote. The relation is render.sh's, so it is
@@ -1948,7 +1877,7 @@ fi
 # inference retired the fill machinery (fill_name / slotfree_ancestor) and the
 # `inferred` / `templated` / `progress_templated` awk outputs with the guesser they
 # served (plan assumption 48, Step-6 critic N-1). A templated deliverable is not a
-# concrete path, so it lifts nothing and the absent-deliverable wall refuses it — the
+# concrete path, so it reads as nothing and the absent-deliverable wall refuses it — the
 # author is told at dispatch to name it exactly.
 C_SOURCE=""
 if [ -n "$C_DELIVERABLE" ]; then
@@ -1998,17 +1927,12 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 # plan, the transcript — so a list that set its verdict beside theirs would be reporting
 # facts it had just been told not to trust. That is a dependency, not a category.
 #
-# AN ARM WHOSE INPUT IS ANOTHER ARM'S PRODUCT says so instead of guessing: `dp_not_checked`
-# (above) puts `not checked: <arm>, needs <what>` on the same wire, so a second refusal is
-# announced rather than sprung (AC-8.2). The containment arm and the ambiguity arm are the
-# one pair that can never appear together, and that is by construction rather than by
-# ordering: the extractor emits `deliverable=` XOR `deliverable_ambiguous=`.
 #
 # ONE FINDING RENDERS AS ONE REFUSAL in its arm's own words — the fact, the fix and the
 # detail it already wrote — on `deny`, the same wire as several (wave-19 T4, REQ-7, D8).
 #
-# SEVERAL FINDINGS KEEP THE FIRST ARM'S USER LINE and put one line per remaining fault, the
-# not-checked lines and the marked scaffold in `detail`, and that split is forced rather
+# SEVERAL FINDINGS KEEP THE FIRST ARM'S USER LINE and put one line per remaining fault and a
+# pointer in `detail`, and that split is forced rather
 # than chosen. AC-E1.3 gives the line one fact (100 columns) and one fix (six words, 40
 # columns), and the widest arm here already spends 99 of the 100 — so a line that also
 # carried a count, or named the other faults, would be REFUSED BY THE RENDERER as
@@ -2032,7 +1956,7 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 # MODEL fixes by re-writing its brief, so every one goes to the model verbatim on the
 # reason field, and the user stream carries the one line. What still differs by count is
 # the reason's SHAPE: a lone finding keeps its arm's own detail byte for byte, several
-# carry the fault lines and the marked scaffold.
+# carry the fault lines.
 #
 # THE THREE ENVIRONMENT SITES STAY ON `exit2`, and their audience is why: the loader
 # fail-open (a raw `exit 2` at the top of this file, before `refuse` is even loaded), the
@@ -2048,183 +1972,20 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 # and this call still must sit above the journal, because a refused dispatch that exits 0
 # is exactly the shape that would otherwise be recorded as a launch.
 
-# dp_scaffold_marked — the shipped brief scaffold, verbatim, with every label line whose
-# field THIS brief left empty suffixed " <ADD>" and every label it already carries left
-# exactly as `dispatch.md` wrote it (design ledger D3, D11). Read from the RENDERED
-# dispatch.md at refusal time, never transcribed here, with the identical awk
-# tests/dispatch-preflight-3.test.sh's §scaffold-verbatim uses to pull the same block out of
-# the same `### Scaffold` fence — so the wire tracks the shipped scaffold's own drift
-# instead of a second copy of it. The five labels read the same parsed fields the walls
-# above already computed; no brief text is re-scanned.
-dp_scaffold_marked() {
-  local file="${HOOK_DIR}/../skills/canonical-sdlc/dispatch.md" line label
-  [ -r "$file" ] || return 0
-  while IFS= read -r line; do
-    label="${line%%:*}"
-    case "$label" in
-      # A MARK IS WHAT THIS BRIEF LACKS, NOT WHAT IT OMITS (wave-14 REQ-6, D8). Three of
-      # these labels are halves of a pair, and the scaffold's own comments say so: `Files:`
-      # is "writers; a read-only brief omits this and keeps Suites: none" (wave-21 T7 reworded
-      # it from "omit for a read-only brief", which read as "omit the instrument"),
-      # `Deliverable-waiver:` is "only for a report returned by message". Marking each one purely because its own field came back empty
-      # told a read-only author to declare files it will not touch and an artifact-bearing
-      # author to waive the artifact it just declared — an instruction that, followed, makes
-      # the dispatch worse. Each pair is now marked only when NEITHER half is satisfied,
-      # which is exactly the condition of the wall that refuses it: the suite-allowance wall
-      # asks `-z "$C_FILES" && -z "$C_SUITES"`, the absent-deliverable wall asks
-      # `-z "$C_DELIVERABLE" && -z "$C_WAIVER"`.
-      #
-      # KEYED ON THE LIFTED FIELDS, NEVER ON A LITERAL LINE (A-T2.1 read the other way; R2
-      # Q7). A brief whose `Expected artifact:` span names two paths HAS the label and still
-      # needs it — the extractor emits candidates and leaves `C_DELIVERABLE` empty — so the
-      # question the mark asks is what the walls above already computed, not what the text
-      # spelled. `Suites:` keeps the plain rule: this gate is where a brief learns to name its set.
-      "Expected duration")  [ -n "$C_DURATION" ]    || line="${line} <ADD>" ;;
-      # A LABEL WHOSE SPAN WAS READ AND REJECTED IS NOT AN ABSENT LABEL (critic Issue 3,
-      # wave-14 T26, pre-existing at 0fe69ed). Several candidates leaves C_DELIVERABLE
-      # empty on the SAME contract as zero candidates, but the two are not the same fault
-      # — the ambiguity arm above already refused this brief, and marking the line <ADD>
-      # here would tell the author to add a line they already wrote.
-      "Expected artifact")  [ -n "$C_DELIVERABLE" ] || [ -n "$C_WAIVER" ] || \
-                             [ -n "$C_DELIVERABLE_CANDIDATES" ] || line="${line} <ADD>" ;;
-      # THE INSTRUMENT LABELS ARE A TRIPLE NOW, NOT A PAIR (epic-23 wave-16, REQ-1 AC-1.8).
-      # `Re-executes:` satisfies the suite-allowance wall on its own, so the same rule the
-      # `Files:`/`Suites:` pair has followed since wave-14 extends to all three: each is
-      # marked only when NONE of the three is satisfied, which is again exactly the condition
-      # of the wall that refuses the brief. Marking `Files:` beside a declared set of runs
-      # would tell a jest author to name shell files they will not touch — the same wrong
-      # instruction D8 removed, arriving by a new route.
-      "Files")               [ -n "$C_FILES" ]       || [ -n "$C_SUITES" ] || \
-                             [ -n "$C_RE_EXECUTES" ] || line="${line} <ADD>" ;;
-      "Suites")              [ -n "$C_SUITES" ]      || [ -n "$C_RE_EXECUTES" ] || \
-                             line="${line} <ADD>" ;;
-      "Re-executes")         [ -n "$C_RE_EXECUTES" ] || [ -n "$C_SUITES" ] || \
-                             [ -n "$C_FILES" ]       || line="${line} <ADD>" ;;
-      "Deliverable-waiver")  [ -n "$C_WAIVER" ]      || [ -n "$C_DELIVERABLE" ] || line="${line} <ADD>" ;;
-      # AN OPTIONAL LINE IS NEVER MARKED (wave-21 T7; REQ-7 AC-7.2, D7). `Subprocess claim:`
-      # is declared iff the task backgrounds a watcher — a CI wait, `gh run watch` — so its
-      # absence is the ordinary case and no wall reads it as a fault (the roster's absence
-      # list leaves it off for the same reason). Named here, rather than left to fall
-      # through, so the next label added to this case cannot sweep it in by a default arm.
-      "Subprocess claim")    ;;
-    esac
-    printf '%s\n' "$line"
-  done < <(/usr/bin/awk '
-    /^### Scaffold/            { inb = 1; next }
-    inb && /^```/              { fence++; if (fence == 2) exit; next }
-    inb && fence == 1          { print }
-  ' "$file")
-}
-
-# dp_refuse_findings — emit the whole list as ONE refusal and exit, or return having done
-# nothing at all. Called once, after the last brief-shape arm; `refuse` owns the exit, so a
-# caller cannot fall through it into the journal with findings outstanding. ONE finding and
-# SEVERAL both refuse on `deny` — exit 0 with the verdict on stdout, the verdict being the
-# block — so the exit status never depends on the fault count (wave-19 T4, REQ-7). ONE
-# carries its arm's own detail; SEVERAL carry the fault lines and the marked scaffold
-# (see the channel note above).
-#
-# THE SEVERAL-FAULT WIRE IS ONE LINE PER FAULT, THE NOT-CHECKED LINES, THE MARKED SCAFFOLD
-# AND A POINTER — NO RATIONALE (D3, D11, wave-14 REQ-8). The shape wave-13 retired repeated
-# a `<detail>` paragraph per fault; a reader with three faults got three lectures before a
-# single fix. Each `dp_finding` call above still carries its `<detail>` argument — that text
-# stays in the source as the documentation of WHY each arm fires, and `refuse`'s
-# single-fault path still emits it unchanged — but it is not collected here.
-#
-# WHAT WAVE-14 ADDS IS THE FAULT LINES, and they are the reason this wire exists at all.
-# Until now the several-fault wire named NO fault except through the scaffold's `<ADD>`
-# markers, which can say "this brief has no Files: line" and cannot say "the Patrol is not
-# armed" or "the writer budget is full" — and those are precisely the arms REQ-8 pooled.
-# One line each, `<fact> (<fix>)`, the same two fields the user line is built from.
-#
-# THE ARITHMETIC OF AC-8.3, WRITTEN OUT, because the cap in the suite is a formula and a
-# reader who cannot rebuild it will widen it instead. One refusal line + one blank + seven
-# scaffold lines + one blank + one pointer is wave-13's ten (`wc -l` on the model's reason,
-# which counts newlines, so eleven rendered lines read as ten). The first fault IS the
-# refusal line and costs nothing. Every fault after it costs one line; so does every
-# not-checked line. There is deliberately NO blank between the fault block and the
-# scaffold: a separator there would cost a line the budget does not have, and the two
-# blocks are already told apart by the scaffold's own labels.
-#
-# THE PROMPT-ONLY LINE (wave-20 T7, REQ-9 AC-9.3). Every lift above reads
-# `tool_input.prompt` and nothing else, so a prompt that says "read the brief at <path>" is
-# refused for lines that sit, complete, in a file this wall never opens (triage-B D1,
-# driven) — and the scaffold printed below told that author to add lines they had already
-# written. One line beside the scaffold says why, which grows the fixed part of the wire by
-# exactly one (tests/dispatch-preflight-3.test.sh §combined and §three-arms carry the sum).
-# The single-fault no-deliverable detail carries the same constant, and the shared
-# brief-scaffold block (agents-src/blocks/brief-scaffold.md) says the same in its header.
-DP_PROMPT_ONLY="The wall reads the prompt text only. A brief file the prompt points at is not read, so copy its scaffold lines into the prompt."
-# A dispatch that binds a plan row, or names a brief file, is read from that file, and its lines are
-# changed by rendering it again: the same one line says so, so the wire never tells it to copy them.
-if [ -n "$DP_BRIEF_PATH" ] || [ -n "$DP_BOUND_REC" ]; then
-  DP_PROMPT_ONLY="The wall reads the brief file named on the prompt's first line. Change its lines in the plan and render it again."
-fi
-#
-# A BRIEF THAT LACKS NO LINE IS SHOWN NO SCAFFOLD (wave-24 T13, D10, AC-6.7). The scaffold is
-# there to say which lines to add, and its `<ADD>` marks are that answer. When it carries no
-# mark the brief already has every line, the faults are state (a full budget, a name in flight),
-# and nine blank template lines under them sent the author looking for a brief fault that does
-# not exist. So the scaffold and the prompt-only line ride only beside a mark.
+# dp_refuse_findings — emit the whole list as ONE refusal and exit, or return having done nothing at all.
+# Called once, after the last arm; `refuse` owns the exit, so a caller cannot fall through it into the
+# journal with findings outstanding. ONE finding and SEVERAL both refuse on `deny`, so the exit status never
+# depends on the fault count. ONE carries its arm's own detail; SEVERAL carry one `<fact> (<fix>)` line per
+# fault after the first, which the user line already names, and a pointer: no rationale per fault, since
+# a reader with three faults should meet three fixes, not three lectures.
 dp_refuse_findings() {
   [ "$DP_FINDING_N" -gt 0 ] || return 0
   if [ "$DP_FINDING_N" -eq 1 ]; then
     refuse deny dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" "$DP_FIRST_DETAIL"
   fi
-  local _scaffold
-  _scaffold="$(dp_scaffold_marked)"
-  case "$_scaffold" in
-    *' <ADD>'*) _scaffold="${_scaffold}
-${DP_PROMPT_ONLY}
-
-" ;;
-    *) _scaffold="" ;;
-  esac
-  # `DP_FAULT_LINES` and `DP_NOTCHECKED` each end in their own newline when non-empty and
-  # are empty strings otherwise, so this interpolation adds no blank line when either is
-  # absent — a two-fault brief with nothing unchecked renders exactly one extra line.
   refuse deny dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" \
-    "${DP_FAULT_LINES}${DP_NOTCHECKED}${_scaffold}See skills/canonical-sdlc/dispatch.md §Dispatch for why each line is required."
+    "${DP_FAULT_LINES}See skills/canonical-sdlc/dispatch.md §Dispatch for why each line is required."
 }
-
-# ======================================================= THE AMBIGUITY WALL
-# (Step-6 R6 critic R6-1; plan assumption 71, completing assumption 48.)
-#
-# A deliverable label whose span names more than one path has not declared a contract —
-# it has offered candidates. R1 resolved that by position (first path, first sentence),
-# which is the guess assumption 48 forbids wearing a declaration's clothes: the row said
-# `source=declared` whichever file the heuristic landed on, so no reader downstream could
-# tell a stated fact from a picked one, and the extra paths in a deliverable sentence are
-# usually the files the agent was told to READ. The landing check then stats a path the
-# agent never touched, the verdict comes back UNMET, and hooks/landing-gate.sh orders the
-# agent to write it — which for "read the auditor report first, then produce yours"
-# means overwriting the audit.
-#
-# So ambiguity is fatal at the one moment it is cheap to fix: dispatch, where the author
-# is still holding the brief. The refusal names every candidate rather than ranking them,
-# because ranking is the thing being withdrawn.
-#
-# IT SITS ABOVE THE CONTAINMENT WALL and is not conditioned on the waiver. Above,
-# because with several candidates there is no single path to resolve and contain. Not
-# waived, because the waiver excuses declaring nothing durable — a brief that names two
-# artifacts under a canonical label has declared something, unreadably, and only its
-# author knows which one is the contract.
-if [ -n "$C_DELIVERABLE_CANDIDATES" ]; then
-  _dp_detail="The label's span offers these candidates:
-$(printf '%s\n' "$C_DELIVERABLE_CANDIDATES" | tr ',' '\n' | sed '/^$/d; s/^/    /')
-
-A deliverable is the ONE durable artifact this agent is contracted to produce, and
-the wall never picks among candidates — whichever it chose would be recorded as a
-declared fact, and the landing check would order this agent to write it.
-
-Fix: name exactly one deliverable path in the label —
-    Expected artifact: .bionic/docs/record/my-task-notes.md
-  References and inputs the agent should READ go outside the label's span: on their
-  own line, under Read first: or Scope constraint:, or after a blank line.
-
-Then retry the dispatch."
-  dp_finding "the deliverable label names several paths" "name exactly one deliverable" "$_dp_detail"
-fi
 
 # ========================================================= THE CONTAINMENT WALL
 # (Step-6 review S-2.)
@@ -2340,7 +2101,7 @@ the plan is approved.
 
 Then retry the dispatch."
   fi
-  tree_line="$(dp_brief_label 'Throwaway tree')"
+  tree_line="$(brief_field "$DP_CONTRACT" tree)"
   if [ -n "$tree_line" ]; then
     tree="$(resolve_in_repo "$tree_line")"
     { declare -F worktree_marker >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/worktree.sh" ] && . "$BIONIC_LIB/worktree.sh"; }; } >/dev/null 2>&1
@@ -2369,7 +2130,7 @@ Then retry the dispatch."
     dr="$(docs_root "$BIONIC_ROOT" 2>/dev/null)"; [ -n "$dr" ] && rec_root="$dr/record"
   fi
   rec_root="$(resolve_in_repo "$rec_root")"
-  files="$(brief_field "$LIFTED" files)"
+  files="$(brief_field "$DP_CONTRACT" files)"
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     abs="$(resolve_in_repo "$p")"; why=""
@@ -2428,11 +2189,11 @@ Then retry the dispatch."
 #
 # THE WAIVER IS THE ESCAPE, and it is deliberately IN THE BRIEF rather than an
 # environment variable or a flag: a waiver written into the dispatch text is
-# lifted by the same extractor as every other contract field, lands in the roster
+# read by the same reader as every other contract field, lands in the roster
 # row beside the absence it excuses, and is echoed on stderr as it passes. There
 # is no way to take it that leaves no record — which is the property that makes
 # refusing safe to live with. A waiver with no reason is not a waiver (the
-# extractor prints nothing for an empty span), so the escape always costs a
+# reader prints nothing for an empty value), so the escape always costs a
 # sentence.
 #
 # THIS SITS ABOVE the symlink and prune housekeeping on purpose. A hostile or
@@ -2440,555 +2201,77 @@ Then retry the dispatch."
 # journal step bail early — the same reasoning §8 applies to the attestation
 # path, read here in the refuse direction.
 if [ -z "$C_DELIVERABLE" ] && [ -z "$C_WAIVER" ]; then
-  if [ -n "$C_DELIVERABLE_CANDIDATES" ]; then
-    # THE AMBIGUITY ARM ALREADY REFUSED THIS BRIEF (critic Issue 3, wave-14 T26;
-    # pre-existing at 0fe69ed — both arms already called `dp_finding` there). A label
-    # offering several candidates leaves C_DELIVERABLE empty on purpose, because the
-    # ambiguity arm above never guesses among them — and this arm's own "nothing was
-    # declared" fact would then contradict the one already on the wire: "the deliverable
-    # label names several paths" and "this brief names no deliverable" cannot both be
-    # true. D3's own rule applies to this pair too: an arm whose input is another arm's
-    # product says so instead of guessing.
-    dp_not_checked "deliverable" "one path"
-  else
-    _dp_detail="An agent with nothing durable to produce cannot be checked on: there is no
+  _dp_detail="An agent with nothing durable to produce cannot be checked on: there is no
 path to stat when it reports done, and nothing left behind if it dies quietly.
 
-Fix: declare a durable artifact path with a canonical label —
+Fix: declare one durable artifact path, on a line of its own —
     Expected artifact: .bionic/docs/record/my-task-notes.md
-  Any of these labels lifts one: Expected artifact(s), Deliverable(s), Artifact(s).
-  Name a concrete path — the wall never guesses one from prose, and a <slot> is not a name.
-  ${DP_PROMPT_ONLY}
+  The value is one path; the wall never guesses one from prose, and a <slot> is not a name.
+  A dispatch that binds a plan row carries it in its rendered brief file: fill the row and render again.
 
 Or waive it — the reason is recorded on the session roster either way:
     Deliverable-waiver: <why this dispatch produces nothing durable>
 
 Then retry the dispatch."
-    dp_finding "this brief names no deliverable" "add an Expected artifact: line" "$_dp_detail"
-  fi
+  dp_finding "this brief names no deliverable" "add an Expected artifact: line" "$_dp_detail"
 fi
 
-# ======================================== A READER'S QUESTIONS (wave-27 T15; REQ-5, REQ-1, D5)
-#
-# A READER IS DISPATCHED FOR ITS QUESTIONS. `bionic:auditor` and `bionic:critic` answer the
-# reading questions `evidence`, `adversarial` and `structure`, and
-# the plan's rigor deals each question to one of them (`facts_owed`, lib/proof.sh). A reader's
-# brief names its own on a `Questions: <q>[, <q>]` line, which `lift_contract_fields` reads as a
-# set. This arm refuses a reader brief with no such line, a word outside the three, and a set
-# that is not exactly what the bound plan's rigor deals that role — so the role a question was
-# dealt to is the role that reads it, and a rigor that deals a role nothing dispatches it for
-# nothing. The admitted set goes on the row as `questions=`, and execution-recorder.sh pushes
-# that set's checks files at agent start.
-#
-# A PREDICATE OVER WHAT IT IS HANDED (the freeze, .claude/rules/hook-authoring.md). Rigor and
-# scale are the bound plan's frontmatter, from the plan this hook already reads; `facts_owed` is a
-# pure function of the two. No git, no roster. With no bound plan the line is still required and
-# the dealing is not checked; a bound plan whose rigor or scale deals nothing says `not checked`.
-#
-# EVERY OTHER ROLE IS UNTOUCHED: the line is not required, and if present it is neither judged
-# nor recorded, so nothing is pushed to that agent.
-#
+# ==================================================== A READER'S QUESTIONS
+# `bionic:auditor` and `bionic:critic` are dispatched for their questions, and the set goes on the row as
+# `questions=`, which execution-recorder.sh pushes the checks files of at agent start. The set is the
+# contract's: the plan verb deals a review row its questions and renders them into its brief file, so the
+# wall records them and deals nothing itself. Every other role's line is neither recorded nor pushed.
 DP_QUESTIONS=""
 case "$DP_SUBAGENT" in
-  bionic:auditor|bionic:critic)
-    _q_set="$(brief_field "$LIFTED" questions)"
-    _q_bad="$(brief_field "$LIFTED" questions_bad)"
-    _q_dup="$(brief_field "$LIFTED" questions_dup)"
-    _q_rigor=""; _q_scale=""; _q_owed=""; _q_dealt=""; _q_dealable=""; _q_admitted=""
-    if [ -n "$PLAN" ]; then
-      if ! declare -F facts_owed >/dev/null 2>&1 && [ -r "${BIONIC_LIB:-}/proof.sh" ]; then
-        # shellcheck source=/dev/null
-        . "$BIONIC_LIB/proof.sh"
-      fi
-      _q_rigor="$(plan_frontmatter_get "$PLAN" rigor)"
-      _q_scale="$(plan_frontmatter_get "$PLAN" scale)"
-      if declare -F facts_owed >/dev/null 2>&1 && _q_owed="$(facts_owed "$_q_rigor" "$_q_scale")"; then
-        _q_dealable=1
-        _q_dealt="$(printf '%s\n' "$_q_owed" | awk -F'\t' -v r="$DP_SUBAGENT" \
-          '$1 == "review" && $3 == r && $4 == "piece" { printf "%s%s", (n++ ? "," : ""), $2 }')"
-      else
-        dp_not_checked "the Questions: dealing" "a plan rigor and scale that facts_owed deals"
-      fi
-    fi
-    # A ROW THAT DECLARES ITS QUESTIONS IS HELD TO THEM. The bound row's task cell may carry a `questions:` tag
-    # (`task-add --questions`, read by `units_questions`): a re-read of fewer questions than the role's full deal. The
-    # brief is then compared to that set in place of the role's full deal, and the set compared is the one recorded as
-    # `questions=`. Only a declaration the role is dealt takes the place: one outside the role's deal falls to the
-    # deal, so a brief cannot reach a question the rigor gave the other reader by naming it on a row.
-    _q_decl=""
-    if [ -n "$_q_dealt" ] && [ -n "$DP_BOUND_REC" ] && declare -F units_questions >/dev/null 2>&1; then
-      _q_decl="$(units_questions "$DP_BOUND_REC")"
-      for _q_q in ${_q_decl//,/ }; do
-        case ",${_q_dealt}," in *",${_q_q},"*) : ;; *) _q_decl="" ;; esac
-      done
-      if [ -n "$_q_decl" ]; then _q_dealt="$_q_decl"; fi
-    fi
-    # THE LEVEL AS PRINTED (wave-28 T44; AC-16.2): a detail names the plan's rigor by its new word
-    # with its meaning, lib/run.sh `rigor_print`; a word that is no level is quoted as written.
-    _q_level="$(rigor_print "$_q_rigor" 2>/dev/null)" || _q_level="rigor ${_q_rigor:-none}"
-    # THE FIRST LINE NAMES THE LEVEL IN THE ANNOUNCEMENT'S FORM, `<level> rigor`, with the role's
-    # short name, and keeps the set the user acts on (A-orch-17): the printed form and the role as
-    # typed do not fit a 100-column line beside the set, so they ride the detail.
-    _q_short="$(rigor_level "$_q_rigor" 2>/dev/null)" || _q_short="${_q_rigor:-no}"
-    _q_role="${DP_SUBAGENT#bionic:}"
-    # The holder of each question, one line apiece, for the refusal details.
-    _q_holders=""
-    for _q_q in evidence adversarial structure; do
-      _q_h="$(printf '%s\n' "$_q_owed" | awk -F'\t' -v q="$_q_q" \
-        '$1 == "review" && $2 == q && $4 == "piece" { print $3; exit }')"
-      [ -n "$_q_h" ] && _q_holders="${_q_holders}    ${_q_q} is dealt to ${_q_h}
-"
-    done
-    _q_fixline="Questions: <q>[, <q>]"
-    [ -n "$_q_dealt" ] && _q_fixline="Questions: ${_q_dealt//,/, }"
-    # THE LABEL IS GIVEN ONCE (wave-27 T49; review pass 24). Two lines, even with the same set,
-    # are refused naming both, since the second would otherwise be dropped in silence.
-    if [ -n "$_q_dup" ]; then
-      # THE TRUE COUNT (wave-27 T57; review pass 35 N2): the field is cut at a whole number, so
-      # the count is the raw line's, and a list cut short says how many more it left out.
-      read -r -a _q_arr <<< "$_q_dup"
-      read -r -a _q_all <<< "$(printf '%s\n' "$LIFTED" | sed -n 's/^questions_dup=//p' | head -1)"
-      _q_n=${#_q_all[@]}; _q_k=${#_q_arr[@]}; _q_nums=""
-      [ "$_q_n" -ge "$_q_k" ] || _q_n=$_q_k
-      for _q_i in "${!_q_arr[@]}"; do
-        if [ "$_q_i" -eq 0 ]; then _q_nums="${_q_arr[0]}"
-        elif [ "$_q_k" -eq "$_q_n" ] && [ "$_q_i" -eq $((_q_k - 1)) ]; then _q_nums="${_q_nums} and ${_q_arr[$_q_i]}"
-        else _q_nums="${_q_nums}, ${_q_arr[$_q_i]}"; fi
-      done
-      [ "$_q_k" -lt "$_q_n" ] && _q_nums="${_q_nums} and $((_q_n - _q_k)) more"
-      dp_finding "${DP_SUBAGENT} has ${_q_n} Questions: lines" "keep one Questions: line" \
-        "The brief carries the Questions: label more than once, on lines ${_q_nums}:
-    Role: ${DP_SUBAGENT}
-
-A reviewer's questions are one set, read off one line. A second line is not merged into the
-first and not ignored, so the brief is refused rather than guessed at. A line inside a
-fenced block is an example, and does not count.
-
-Fix: keep one line, on a line of its own —
-    ${_q_fixline}
-
-Then retry the dispatch."
-    fi
-    if [ -n "$_q_bad" ]; then
-      dp_finding "unknown question: $(bionic_trunc "${_q_bad%% *}" 16)" "use evidence/adversarial/structure" \
-        "The Questions: line names a word that is not a review question:
-    ${_q_bad}
-
-A reviewer answers one or more of three questions: evidence, adversarial and structure. Its
-checks are pushed to it at start by name, so a word outside the three is a question no
-reviewer is held to.
-
-Fix: name only the three questions, on a line of its own —
-    ${_q_fixline}
-
-Then retry the dispatch."
-    fi
-    if [ -n "$_q_dealable" ] && [ -z "$_q_dealt" ]; then
-      dp_finding "${_q_short} rigor deals ${_q_role}: nothing" "dispatch its holder" \
-        "The plan's rigor deals this reviewer no question, so there is nothing to dispatch it for:
-    Role:  ${DP_SUBAGENT}
-    Given: ${_q_set:-(no Questions: line)}
-    Dealt: nothing at ${_q_level}, scale ${_q_scale}
-
-Each question is read by the one role the rigor deals it to:
-${_q_holders}
-Fix: dispatch the role that holds the question, with its own Questions: line.
-
-Then retry the dispatch."
-    elif [ -z "$_q_set" ] && [ -z "$_q_bad" ]; then
-      _q_why="With no bound plan the dealing is not checked: name the questions this reviewer answers,
-from evidence, adversarial and structure."
-      [ -n "$PLAN" ] && _q_why="The bound plan's rigor (${_q_rigor:-none}) and scale (${_q_scale:-none}) deal nothing, so the
-dealing is not checked: name the questions this reviewer answers, from evidence,
-adversarial and structure."
-      [ -n "$_q_dealt" ] && _q_why="The plan deals this role the set below at ${_q_level}, and its checks are
-pushed to it at start from that line."
-      dp_finding "${DP_SUBAGENT} names no Questions: line" "add the Questions: line" \
-        "A reviewer is dispatched for its questions, and this brief names none:
-    Role: ${DP_SUBAGENT}
-
-${_q_why}
-
-Fix: add this line to the brief, on a line of its own —
-    ${_q_fixline}
-
-Then retry the dispatch."
-    elif [ -n "$_q_set" ] && [ -n "$_q_dealable" ] && [ "$_q_set" != "$_q_dealt" ]; then
-      _q_title="${_q_short} rigor deals ${_q_role}: ${_q_dealt}"; _q_ofwhom="the plan's rigor"; _q_basis="${_q_level}, scale ${_q_scale}"
-      if [ -n "$_q_decl" ]; then
-        _q_title="row ${DP_BOUND_ROW} declares ${_q_role}: ${_q_dealt}"; _q_ofwhom="the bound row"
-        _q_basis="declared on row ${DP_BOUND_ROW} by task-add --questions, inside what ${_q_level} deals ${_q_role}"
-      fi
-      dp_finding "$_q_title" "use that set" \
-        "The Questions: line names a set ${_q_ofwhom} does not deal this reviewer:
-    Role:  ${DP_SUBAGENT}
-    Given: ${_q_set//,/, }
-    Dealt: ${_q_dealt//,/, } (${_q_basis})
-
-Each question is read by the one role the rigor deals it to:
-${_q_holders}
-Fix: write the dealt set, on a line of its own —
-    ${_q_fixline}
-
-Then retry the dispatch."
-    else
-      DP_QUESTIONS="$_q_set"; _q_admitted=1
-    fi
-    # A READER NAMES A RECORD FOR EACH QUESTION IT IS DEALT (wave-27 T49, A-orch-83; review pass 28
-    # B1). It writes one record per question, and `proof-add review` takes a record only if it is
-    # the reader's own roster row `deliverable=` or one of its `files=`. A critic dealt two
-    # questions with one Expected artifact: and no Files: was admitted here and then could not
-    # register its second reading. So the DISTINCT paths of the artifact and the Files: line
-    # (a quoted path as its stripped form, a leading ./ aside) must number at least the questions.
-    # The count needs no dealing, so it holds with no bound plan too. It is judged once the set
-    # itself is admitted, so a brief with a wrong set is told that first and not twice. The row is
-    # unchanged.
-    #
-    # A RECORD IS A PATH UNDER THE RECORD ROOT (wave-27 T57; review pass 35 N1). Counting distinct
-    # strings admitted a brief whose second "record" was a scratch file, a directory, a path
-    # outside the tree or the artifact spelled again (`x/../a.md`, `//`), each of which the fact
-    # verb refuses. So a path counts only when it sits under `<docs-root>/record/` (lib/roots.sh
-    # `docs_root`, the one the fact verb resolves, loaded through run.sh) after `.`, `..` and
-    # doubled slashes are resolved, a relative path read from the project root; it
-    # does not end in `/`; and it is compared in that resolved form. Any other path may stay on
-    # Files: (a scratch file) and is not a record.
-    #
-    # AN ABSOLUTE PATH IS PLACED AS THE FACT VERB PLACES IT (A-orch-101). `proof-add review` reads a
-    # record's directory with a logical `cd` and then `pwd -P`, so `..` is folded in the text before
-    # the physical read, and the reader exam's `/var/…/s1/.bionic/docs/record/…` is its project's
-    # `/private/var/…` record. Here a path's longest existing directory is read the same way and
-    # the rest stays text, and the record root the same way, so the wall and the verb give one
-    # answer for one path: a symlinked directory that lands outside the root is no record, and a
-    # record directory the reader has not made yet still is. ONE RULE FOR EVERY PATH (the A-T57.11
-    # ruling): a relative path is anchored at the project root first and then placed the same way,
-    # so a link under record/ that leads out of it is no record whichever way the path is spelt.
-    #
-    # LINEAR IN THE PATH (wave-27 T72; review pass 49 S2). The walk goes forward from `/` and stops
-    # at the first segment that is not a directory, since no longer prefix can be one, so a missing
-    # segment costs nothing: walking back from the end cost a test and a copy per missing segment,
-    # and twenty paths of 2,500 took a reader's dispatch to 17 s, past this hook's then-15 s
-    # registration. A directory the wall cannot enter places nothing, and the path is no record.
-    _dp_rec_place() {  # <path> -> the path anchored at the root, its longest existing directory physical
-      local p="$1" d="" rest seg phys
-      case "$p" in /*) : ;; *) p="$BIONIC_ROOT/$p" ;; esac
-      rest="${p#/}"
-      while :; do
-        case "$rest" in */*) seg="${rest%%/*}" ;; *) break ;; esac
-        [ -d "$d/$seg" ] || break
-        d="$d/$seg"; rest="${rest#*/}"
-      done
-      phys="$(cd "${d:-/}" 2>/dev/null && pwd -P)" || return 1
-      printf '%s\n' "${phys%/}/$rest"
-    }
-    # A RECORD IS A REGULAR FILE, OR A PATH NOT THERE YET (wave-27 T72; review pass 49 S1). The verb
-    # takes only a regular file that is not a link, so a path that exists at dispatch as a
-    # directory named without its slash, a symlink, a FIFO or a device is no record, and neither is
-    # a path over 1,024 bytes, measured as bytes. A path that does not exist yet still is one.
-    _dp_rec_candidate() {  # <path> -> its placing when it may be a record, nothing when it is not
-      local p="$1" a LC_ALL=C
-      [ "${#p}" -le 1024 ] || return 0
-      case "$p" in /*) a="$p" ;; *) a="$BIONIC_ROOT/$p" ;; esac
-      [ -L "$a" ] && return 0
-      [ -e "$a" ] && [ ! -f "$a" ] && return 0
-      _dp_rec_place "$p"
-    }
-    if [ -n "${_q_admitted:-}" ]; then
-      _q_nq="$(printf '%s' "$_q_set" | awk -F, '{ print NF }')"
-      _q_rroot="$BIONIC_ROOT/.bionic/docs/record"
-      if declare -F docs_root >/dev/null 2>&1; then
-        _q_dr="$(docs_root "$BIONIC_ROOT" 2>/dev/null)"; [ -n "$_q_dr" ] && _q_rroot="$_q_dr/record"
-      fi
-      _q_nr="$(printf '%s\n%s\n' "$(brief_field "$LIFTED" deliverable)" "$(brief_field "$LIFTED" files | tr ',' '\n')" \
-        | while IFS= read -r _q_p; do [ -n "$_q_p" ] && _dp_rec_candidate "$_q_p"; done \
-        | awk -v root="$BIONIC_ROOT" -v rr="$(_dp_rec_place "$_q_rroot")" '
-          function resolve(p,   n, i, seg, out, k, dir) {
-            if (p !~ /^\//) p = root "/" p
-            dir = (p ~ /\/(\.\.?)?$/)
-            n = split(p, seg, "/"); k = 0
-            for (i = 1; i <= n; i++) {
-              if (seg[i] == "" || seg[i] == ".") continue
-              if (seg[i] == "..") { if (k > 0) k--; continue }
-              out[++k] = seg[i]
-            }
-            p = ""; for (i = 1; i <= k; i++) p = p "/" out[i]
-            return (p == "" ? "/" : p) (dir ? "/" : "")
-          }
-          BEGIN { if (rr != "") rr = resolve(rr) }
-          $0 == "" || rr == "" { next }
-          { r = resolve($0) }
-          r ~ /\/$/ || index(r, rr "/") != 1 { next }
-          !seen[r]++ { n++ }
-          END { print n + 0 }')"
-      if [ "$_q_nr" -lt "$_q_nq" ]; then
-        _q_pl="s"; [ "$_q_nr" -eq 1 ] && _q_pl=""
-        _q_ql="s"; [ "$_q_nq" -eq 1 ] && _q_ql=""
-        dp_finding "dealt ${_q_nq} question${_q_ql}, names ${_q_nr} record${_q_pl}" "one Files: record per question" \
-          "A reviewer writes one record per question it is dealt, and this brief names fewer records:
-    Role:      ${DP_SUBAGENT}
-    Questions: ${_q_set//,/, }
-    Records:   ${_q_nr} (each path under ${_q_rroot#"$BIONIC_ROOT"/}/, the Expected artifact: and the Files: line, counted once)
-
-The fact verb (proof-add review) takes a record only from the reviewer's own roster row: its
-deliverable= or one of its files=. A record the brief never named is one the reviewer cannot
-register, and amend cannot add it once the reviewer has closed.
-
-Fix: list one record per question under Files:, the Expected artifact: among them —
-    Files: path/one.md, path/two.md
-
-Then retry the dispatch."
-      fi
-    fi
-    ;;
+  bionic:auditor|bionic:critic) DP_QUESTIONS="$(brief_field "$DP_CONTRACT" questions)" ;;
 esac
 
-# ============================== THE CONTRACT GRAMMAR'S CHECKS (wave-20 T6; REQ-4, D4, Δ10)
-#
-# ONE GRAMMAR, THREE DOORS. The arms that judge Files:, Suites: and Re-executes: — a literal
-# declaration, the run cap, the dropped suite, the missing instrument, the auditor's waiver —
-# and the suite set the row records, live in payload/scripts/lib/brief.sh's
-# `brief_validate_fields`, which `session-poker.sh amend` and `task-add` call too. An amended
-# contract is held to exactly a fresh dispatch's standard (Δ10); a copy of these arms here
-# would be the three-readers defect REQ-10 removed, in a new place.
-#
-# NOTHING MOVED IN BEHAVIOUR. The library reports each fault to the sink in the order these
-# arms ran, and the sink is `dp_finding`, so the pool, its first-fault line and every detail
-# are what they were. Its loud-but-passing line goes through this file's `warn()`.
-dp_brief_sink() {  # finding <fact> <fix> <detail> | warn <line>
-  case "$1" in
-    finding) dp_finding "$2" "$3" "$4" ;;
-    warn)    warn "$2" ;;
-  esac
-}
-# THE SUITES THAT EXIST ARE THIS COLLECTOR'S FACT, LISTED ONCE. The wall judges a `Suites:` entry against the
-# set it is handed and reaches for no directory (the freeze); a root with no suite under tests/ hands an empty
-# set, which the wall reads as nothing to judge.
-DP_SUITES_EXIST=""
-for _dp_t in "$BIONIC_ROOT"/tests/*.test.sh; do
-  [ -f "$_dp_t" ] && DP_SUITES_EXIST="${DP_SUITES_EXIST:+$DP_SUITES_EXIST }${_dp_t##*/}"
-done
-brief_validate_fields "$LIFTED" "$DP_SUBAGENT" "$BIONIC_ROOT" dp_brief_sink "$DP_SUITES_EXIST" || :
-SUITES_ALLOWED="$BRIEF_SUITES_ALLOWED"
-SUITES_SOURCE="$BRIEF_SUITES_SOURCE"
+# ============================================================== THE SUITE BUDGET
+# A brief declares the closed set of suites its agent may run, `Suites: <name>.test.sh[, …]` or the
+# waiver `Suites: none`; the row records it as `suites_allowed=` for the writer-side guard to hold the
+# agent to. `Files:` is the task's scope and names no suite; `Re-executes:` declares runs that are not
+# shell suites. A brief with none of the three gives the guard no budget, which is the prose two writers
+# once read as "the whole tree", so it is refused. A reader's set is its Suites: tokens or `none`: it
+# edits no tracked file, so it is never refused for naming no suite.
+SUITES_ALLOWED=""; SUITES_SOURCE=""
+case "$DP_SUBAGENT" in
+  bionic:auditor|auditor|bionic:critic|critic) SUITES_ALLOWED="${C_SUITES:-none}"; SUITES_SOURCE=declared ;;
+  *) [ -z "$C_SUITES" ] || { SUITES_ALLOWED="$C_SUITES"; SUITES_SOURCE=declared; } ;;
+esac
+if [ -z "$C_FILES" ] && [ -z "$C_SUITES" ] && [ -z "$C_RE_EXECUTES" ] && [ -z "$SUITES_ALLOWED" ]; then
+  dp_finding "this brief declares no Files: and no Suites:" "declare Suites:" \
+    "An agent with no declared instrument runs whatever it decides to run, and the budget binds
+only when it is on the roster row.
 
-# ============================================== A DECLARED DEBT (wave-27 T31; REQ-14, D23)
-#
-# A ROW MAY LAND RED BY DESIGN, ON ONE SUITE, UNTIL ONE NAMED BLOCKER CLEARS. A brief declares it
-# on two lines of their own, `Lands-red: <suite> until <ext:slug | approval:name>` and
-# `Red-evidence: <path under record/>`, and this arm is the declaration's ONE WRITER: it records
-# both on the row as `lands_red=` and `red_evidence=`, `amend` refuses to add either, and `land`
-# honours a red last run of exactly that suite only on a row that carries them (lib/worktree.sh).
-# It refuses a declaration with no evidence line, a suite outside the set this row may run (the
-# set the contract checks above derived, so it sits below them), and a token of any other shape.
-# A PREDICATE OVER WHAT IT IS HANDED: the lift, the suite set and the bound plan's `## Tasks` (read
-# by units.sh, as the approval and regression walls above read it); no git, no roster.
-#
-# AND (wave-27 T67; review pass 46 B4, S1, S4, N1, N2, N3): one declaration per brief; one suite
-# FILE, `<name>.test.sh`, never the full-suite runner however it is spelled; an `approval:<name>`
-# token only when a row of the bound plan reads it (the names `approve` accepts) and no integrate row
-# waits on it, for a debt must clear before integration; and evidence that is a file under the run's
-# record root, placed as the fact verb places a record.
-DP_LANDS_RED=""; DP_RED_EVIDENCE=""
-_lr_line="$(brief_field "$LIFTED" lands_red)"
-if [ -n "$_lr_line" ]; then
-  _lr_ev="$(brief_field "$LIFTED" red_evidence)"
-  read -r _lr_suite _lr_until _lr_tok _lr_more <<DP_LR
-$_lr_line
-DP_LR
-  _lr_suite="${_lr_suite##*/}"; _lr_ap=""
-  _lr_n="$(brief_field "$LIFTED" lands_red_n)"
-  if [ -n "$_lr_n" ]; then
-    dp_finding "the brief has ${_lr_n} Lands-red: lines" "keep one Lands-red: line" \
-      "A row lands red on ONE suite until ONE blocker clears, and this brief declares ${_lr_n}:
-    First: Lands-red: ${_lr_line}
-
-Only one line could be honoured, and which one would be a guess, so none is.
-
-Fix: keep one Lands-red: line; plan a second red as a row of its own.
+Fix: name the closed set of suites this task may run, on a line of its own —
+    Suites: one.test.sh, two.test.sh
+  For tests that are not shell suites, name each command in backticks —
+    Re-executes: \`pytest tests/unit\`
+  Or waive the budget for a brief that runs no suite at all —
+    Suites: none
+  A dispatch that binds a plan row carries these in its rendered brief file: fill the row and render again.
 
 Then retry the dispatch."
-  fi
-  _lr_runner=""
-  for _lr_w in $_lr_line; do
-    [ "$_lr_w" = until ] && break
-    [ "${_lr_w##*/}" = run.sh ] && _lr_runner=1
-  done
-  if [ -n "$_lr_runner" ]; then
-    dp_finding "Lands-red: names the full-suite runner" "name one <name>.test.sh" \
-      "The Lands-red: line names run.sh, and the full-suite runner is never a declared red:
-    Given: Lands-red: ${_lr_line}
-
-Its run speaks for every suite at once, so one declaration would land the whole regression red.
-A row may land red on one suite file only.
-
-Fix: name the one suite that is red by design —
-    Lands-red: <name>.test.sh until <token>
-
-Then retry the dispatch."
-  elif case "$_lr_suite" in ?*.test.sh) false ;; *) true ;; esac; then
-    dp_finding "Lands-red: names no <name>.test.sh" "name one <name>.test.sh" \
-      "The Lands-red: line names no suite file:
-    Given: Lands-red: ${_lr_line}
-
-A row may land red on one suite FILE, <name>.test.sh, and nothing else.
-
-Fix: write the line as —
-    Lands-red: <name>.test.sh until <token>
-
-Then retry the dispatch."
-  fi
-  _lr_tok_ok=""
-  if [ "$_lr_until" = until ] && [ -n "$_lr_tok" ] && [ -z "$_lr_more" ]; then
-    _lr_ext_re="$(_units_ext_re)"; _lr_ap_re='^approval:[A-Za-z0-9][A-Za-z0-9._-]*$'
-    if [[ "$_lr_tok" =~ $_lr_ext_re ]] || [[ "$_lr_tok" =~ $_lr_ap_re ]]; then
-      _lr_tok_ok=1
-    fi
-  fi
-  # AN APPROVAL A DEBT CAN WAIT FOR (wave-27 T67; review pass 46 S4, N1). `approve` records only a
-  # name an open row reads (units.sh `units_approval_names`), so a name no row reads can never clear;
-  # and an approval an integrate row reads comes after the judgment the debt must clear before.
-  case "$_lr_tok_ok:$_lr_tok" in
-    1:approval:?*)
-      _lr_ap="${_lr_tok#approval:}"
-      _lr_names="$( { [ -n "$PLAN" ] && units_approval_names "$PLAN"; } 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
-      _lr_integ="$( { [ -n "$PLAN" ] && units_rows "$PLAN"; } 2>/dev/null | awk -F'\t' -v n="$_lr_ap" '
-        $3 == "integrate" { m = split($13, a, ","); for (k = 1; k <= m; k++) { t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t); sub(/^live:/, "", t); if (t == "approval:" n) { print $1; exit } } }')"
-      if [ -n "$_lr_integ" ]; then
-        _lr_tok_ok=""
-        dp_finding "approval:$(bionic_trunc "$_lr_ap" 18) is read at integration" "pick an earlier token" \
-          "The Lands-red: line waits on an approval the integrate row reads:
-    Given:     Lands-red: ${_lr_line}
-    Integrate: ${_lr_integ} reads approval:${_lr_ap}
-
-A declared debt must be cleared before integration is admitted, and this approval
-comes after the step a debt must clear before: the debt could be covered only after the
-judgment it must precede.
-
-Fix: wait on an approval a row before integration reads, or on an ext:<slug> token.
-
-Then retry the dispatch."
-      elif case " $_lr_names " in *" $_lr_ap "*) false ;; *) true ;; esac; then
-        _lr_tok_ok=""
-        dp_finding "approval:$(bionic_trunc "$_lr_ap" 25) is read by no row" "name one a row reads" \
-          "The Lands-red: line waits on an approval no row of the bound plan reads:
-    Given:     Lands-red: ${_lr_line}
-    Rows read: ${_lr_names:-(no named approval)}
-
-session-poker.sh approve records only a name a row reads, so this one could never be recorded
-and the debt could never clear.
-
-Fix: name one of the approvals the rows read, or add a row that reads this one.
-
-Then retry the dispatch."
-      fi ;;
-  esac
-  # A line naming the runner is told that, once: its suite and token are not judged besides.
-  if [ -z "$_lr_tok_ok" ] && [ -z "${_lr_ap:-}" ] && [ -z "$_lr_runner" ]; then
-    dp_finding "Lands-red: names no blocker token" "use ext:<slug> or approval:<name>" \
-      "The Lands-red: line does not read <suite> until <token>, its token one of two forms:
-    Given: Lands-red: ${_lr_line}
-
-A declared red lands until ONE named blocker clears, and the judge can only tell when a
-token of these two forms has cleared:
-    ext:<slug>        an external blocker, as the ## Tasks reads cells write it
-    approval:<name>   the user's act, written by session-poker.sh approve <name>
-
-Fix: write the line as —
-    Lands-red: ${_lr_suite:-<suite>} until approval:<name>
-
-Then retry the dispatch."
-  fi
-  if [ -z "$_lr_ev" ]; then
-    dp_finding "Lands-red: with no Red-evidence: line" "add the Red-evidence: line" \
-      "The brief declares a suite that lands red, and names no evidence of why:
-    Given: Lands-red: ${_lr_line}
-
-A red is honoured at land only beside an evidence file under record/ that names the head it
-was red at (a line head: <40-hex>), so the row can say why it is red by design.
-
-Fix: add this line to the brief, on a line of its own —
-    Red-evidence: <path under record/>
-
-Then retry the dispatch."
-  fi
-  _lr_in=""
-  case "$_lr_suite" in ''|*[[:space:]]*) : ;; *) case " $SUITES_ALLOWED " in *" $_lr_suite "*) _lr_in=1 ;; esac ;; esac
-  if [ -z "$_lr_in" ] && [ -z "$_lr_runner" ]; then
-    # The name rides in the fact, cut to what the 100-column line leaves it (wave-27 T67; review pass
-    # 46 S1): `bionic: dispatch refused — `, the fixed words and ` (<fix>)` take 85.
-    dp_finding "Lands-red: $(bionic_trunc "${_lr_suite:-<none>}" 15) is outside Suites:" "name a suite the row runs" \
-      "A row may land red only on a suite it runs, and this one's suite set does not hold it:
-    Given:  Lands-red: ${_lr_line}
-    Suites: ${SUITES_ALLOWED:-(none)}
-
-Fix: name one of the row's own suites on the Lands-red: line, or add the suite to the brief's
-Suites: or Files: line so the row runs it.
-
-Then retry the dispatch."
-  fi
-  # THE EVIDENCE IS A FILE UNDER THE RUN'S RECORD ROOT (wave-27 T67; review pass 46 N3), placed as
-  # the fact verb places a record: a `record/…` path from the docs root, any other relative path from
-  # the project root, an absolute one as given; the longest existing directory read physically, the
-  # rest in the text with `.` and `..` resolved; the record root read the same way.
-  _lr_ev_ok=""
-  if [ -n "$_lr_ev" ]; then
-    _lr_docs="$BIONIC_ROOT/.bionic/docs"
-    if declare -F docs_root >/dev/null 2>&1; then
-      _lr_d="$(docs_root "$BIONIC_ROOT" 2>/dev/null)"; [ -n "$_lr_d" ] && _lr_docs="$_lr_d"
-    fi
-    _lr_place() {  # <absolute path> -> its longest existing directory physical, the rest resolved in the text
-      local p="$1" d rest phys
-      d="${p%/*}"; rest="${p##*/}"
-      while [ -n "$d" ] && [ ! -d "$d" ]; do rest="${d##*/}/$rest"; d="${d%/*}"; done
-      phys="$(cd "${d:-/}" 2>/dev/null && pwd -P)" && p="${phys%/}/$rest"
-      printf '%s\n' "$p" | awk '{ n = split($0, s, "/"); k = 0
-        for (i = 1; i <= n; i++) { if (s[i] == "" || s[i] == ".") continue; if (s[i] == "..") { if (k > 0) k--; continue } o[++k] = s[i] }
-        p = ""; for (i = 1; i <= k; i++) p = p "/" o[i]; print (p == "" ? "/" : p) }'
-    }
-    case "$_lr_ev" in
-      /*) _lr_abs="$_lr_ev" ;;
-      record/*) _lr_abs="$_lr_docs/$_lr_ev" ;;
-      *) _lr_abs="$BIONIC_ROOT/${_lr_ev#./}" ;;
-    esac
-    _lr_rr="$(_lr_place "$_lr_docs/record/x")"; _lr_rr="${_lr_rr%/x}"
-    case "$_lr_ev" in */) _lr_at="" ;; *) _lr_at="$(_lr_place "$_lr_abs")" ;; esac
-    case "$_lr_at" in "$_lr_rr"/?*) _lr_ev_ok=1 ;; esac
-    if [ -z "$_lr_ev_ok" ]; then
-      dp_finding "Red-evidence: is not under record/" "put the file under record/" \
-        "The Red-evidence: path is not a file under the run's record root:
-    Given:   Red-evidence: ${_lr_ev}
-    Read as: ${_lr_at:-(a directory)}
-    Root:    ${_lr_rr}/
-
-The evidence is the run's record of why the row is red at its head, so it lives where the run's
-records live, read as the fact verb reads one: a record/... path from the docs root, any other
-relative path from the project root, an absolute one as given.
-
-Fix: write the evidence under record/ and name it there —
-    Red-evidence: record/<wave>/<row>-red.md
-
-Then retry the dispatch."
-    fi
-  fi
-  if [ -n "$_lr_tok_ok" ] && [ -n "$_lr_ev" ] && [ -n "$_lr_ev_ok" ] && [ -n "$_lr_in" ] && [ -z "$_lr_n" ] \
-     && [ -z "$_lr_runner" ] && case "$_lr_suite" in ?*.test.sh) true ;; *) false ;; esac; then
-    DP_LANDS_RED="$_lr_suite until $_lr_tok"; DP_RED_EVIDENCE="$_lr_ev"
-  fi
 fi
 
-# ================================ THE ROW AND THE SUITES IT LANDS ON (wave-28 T7; REQ-1, REQ-3, D4, D17)
+# ============================================================== A DECLARED DEBT
+# A row may land red by design on one suite until one named blocker clears. The plan verb renders the
+# declaration from the run's admitted debts into the row's brief file, `Lands-red: <suite> until <token>`
+# beside `Red-evidence: <path>`, and the row records both, the pair or neither: `land` honours a red last
+# run of that suite only on a row that carries them (lib/worktree.sh).
+DP_LANDS_RED="$(brief_field "$DP_CONTRACT" lands_red)"; DP_RED_EVIDENCE="$(brief_field "$DP_CONTRACT" red_evidence)"
+[ -n "$DP_LANDS_RED" ] && [ -n "$DP_RED_EVIDENCE" ] || { DP_LANDS_RED=""; DP_RED_EVIDENCE=""; }
+
+# ================================ THE ROW AND THE SUITES IT LANDS ON
 #
 # A BRIEF NAMES ITS ROW AND THE SUITES THAT ROW LANDS ON. `Row: <id>` binds the dispatch to a row of
 # the bound plan; the launch record, the fill, the stop wall, the landing, the approval arm and the
-# full-run regression read it first and the name match after (a `Row:` that contradicts the name's row is
-# refused below). `Lands-on: <suite>[, <suite>]` names the suites `ready`
-# runs, exactly those; `Lands-on: none <reason>` names none, and says why. The lift writes both in one
-# spelling (brief.sh); this arm is their one writer onto the row and refuses: a writer that binds a row
-# and carries no Lands-on: line; `none` with no reason; a suite outside the set the checks above
-# derived (`SUITES_ALLOWED`, the set a declared red is held to); and a Row: naming no row of the plan.
-# A dispatch that binds no row (no Row: label, and a name that is no row id) has no row to land, so
-# it owes no Lands-on: line.
-DP_LANDS_ON="$(brief_field "$LIFTED" lands_on)"
-_lo_reason="$(brief_field "$LIFTED" lands_on_reason)"; _lo_bad="$(brief_field "$LIFTED" lands_on_bad)"
+# full-run regression read it first and the name match after. `Lands-on: <suite>[, <suite>]` names the
+# suites `ready` runs, exactly those; `Lands-on: none <reason>` names none. The plan verb renders both
+# from the row, so this arm records them and refuses only what the plan can contradict: a Row: naming
+# no row of the plan, a Row: the name's row contradicts, and `none` on a row whose Files are not prose.
+DP_LANDS_ON="$(brief_field "$DP_CONTRACT" lands_on)"
+_lo_reason="$(brief_field "$DP_CONTRACT" lands_on_reason)"
 _lo_ids=""
 [ -n "$PLAN" ] && [ -f "$PLAN" ] && _lo_ids="$(units_rows "$PLAN" 2>/dev/null | awk -F'\t' '$1 != "" { print $1 }')"
 # Membership by a whole line, read in the shell: a quitting `grep -q` fed from a pipe is the idiom
@@ -3026,33 +2309,6 @@ name matches, or drop Row: and let the name bind.
 
 Then retry the dispatch."
 fi
-_lo_binds=""
-[ -z "$DP_BOUND_ROW" ] || _lo_binds=1
-if [ -z "$DP_LANDS_ON" ] && [ -z "$_lo_bad" ] && [ -n "$_lo_binds" ] && ! role_is_readonly "$DP_SUBAGENT"; then
-  dp_finding "the brief has no Lands-on: line" "add Lands-on: <suites> or none <why>" \
-    "A writer's row lands on the suites its brief names, and this brief names none:
-    Dispatch: ${DP_ROW_NAME:-<unnamed>}${DP_ROW:+ (Row: ${DP_ROW})}
-    Suites:   ${SUITES_ALLOWED:-(none)}
-
-ready runs exactly the suites the row's launch line names, so a row with none cannot land.
-
-Fix: add a line of its own naming the suites this row lands on, from its suite set —
-    Lands-on: <suite>[, <suite>]
-  or, for a row no suite proves —
-    Lands-on: none <reason>
-
-Then retry the dispatch."
-fi
-if [ "$DP_LANDS_ON" = none ] && [ -z "$_lo_reason" ]; then
-  dp_finding "Lands-on: none gives no reason" "write the reason after none" \
-    "A row may land on no suite only with a reason the reader can check:
-    Given: Lands-on: none
-
-Fix: say why no suite proves this row, on the same line —
-    Lands-on: none <reason>
-
-Then retry the dispatch."
-fi
 # A ROW THAT LANDS ON NO SUITE IS PROVED BY THE WHOLE RUN AT ITS COMMIT ALONE, so every path its Files: names must be one no
 # suite reads: the prose list (lib/prose.sh, the list the judge reads) holds it. The list is read once and asked per path with
 # no fork; the first path it does not hold ends the check and is named. `none` and `—` as the Files: value are no files.
@@ -3074,52 +2330,8 @@ Then retry the dispatch."
     break
   done
 fi
-# A COMMAND ON LANDS-ON (wave-39 T20; D20, AC-14.3) is one entry the lift encoded (lib/suite.sh `lands_cmd`): it is
-# held to the brief's Re-executes: runs, each a backticked command as the lift stored it, never to Suites:. One
-# the brief does not declare is refused, named; ready runs a declared one and judges it by its exit code.
-_lo_out=""; _lo_cmd=""
-if [ -n "$_lo_bad" ]; then
-  _lo_out="${_lo_bad%% *}"
-elif [ -n "$DP_LANDS_ON" ] && [ "$DP_LANDS_ON" != none ]; then
-  for _lo_s in ${DP_LANDS_ON//,/ }; do
-    if _lo_c="$(bionic_lands_cmd "$_lo_s")"; then
-      case " $C_RE_EXECUTES " in *" \`${_lo_c}\` "*) continue ;; esac
-      _lo_cmd="$_lo_c"; break
-    fi
-    case " $SUITES_ALLOWED " in *" ${_lo_s##*/} "*) : ;; *) _lo_out="$_lo_s"; break ;; esac
-  done
-fi
-if [ -n "$_lo_cmd" ]; then
-  # The command rides in the fact, cut to 20 columns: the fixed words and the fix take 79.
-  dp_finding "Lands-on: \`$(bionic_trunc "$_lo_cmd" 20)\` is not under Re-executes:" "declare it" \
-    "A row lands on a command only when its brief declares that command as one of its runs:
-    Given:       Lands-on: $(bionic_lands_show "$DP_LANDS_ON")
-    Re-executes: ${C_RE_EXECUTES:-(none)}
 
-ready runs a Lands-on: command in the landing tree and judges it by its exit code, so it is one of the
-runs the row may make.
-
-Fix: declare the command on the brief's Re-executes: line, spelled as on Lands-on: —
-    Re-executes: \`${_lo_cmd}\`
-  or name only suites of the row's own set on Lands-on:.
-
-Then retry the dispatch."
-fi
-if [ -n "$_lo_out" ]; then
-  # The name rides in the fact, cut as the declared red's is: the fixed words and the fix take 84.
-  dp_finding "Lands-on: $(bionic_trunc "$_lo_out" 15) is outside Suites:" "name a suite the row runs" \
-    "A row lands only on suites it runs, and this one's suite set does not hold this one:
-    Given:  Lands-on: ${DP_LANDS_ON:+$(bionic_lands_show "$DP_LANDS_ON") }${_lo_bad}
-    Suites: ${SUITES_ALLOWED:-(none)}
-
-Fix: name only suites of the row's own set, each as <name>.test.sh or tests/<name>.test.sh, or add
-the suite to the brief's Suites: or Files: line so the row runs it.
-
-Then retry the dispatch."
-fi
-
-
-# ================== THE ROW'S LIVE WRITER KEEPS ITS TREE (wave-35 T7; REQ-5 AC-5.4, D14)
+# ================== THE ROW'S LIVE WRITER KEEPS ITS TREE
 #
 # The re-mark below the journal rewrites the marker of the tree a row's earlier launch recorded, for this
 # dispatch's name. Done while that tree's writer is still running, it hands one tree to two writers, and
@@ -3218,9 +2430,10 @@ fi
 # first line names that file. Three things are checked of it: the prompt names one; its mark says it was
 # rendered for this row and this name; and the sum of the file now is the sum its mark records, so a file
 # edited after its render is refused. A prompt that names a brief file is held to the same three whether
-# or not it binds a row: its text is the contract read above. A dispatch that binds no plan row and names
-# no file (a researcher, a test-runner, a prototype) is judged as it always was. The fix is always the
-# render, never an edit. The admitted file's path and sum go on the roster row. It is the last arm, so
+# or not it binds a row: its text is the contract read above. A file whose contract lines still hold a
+# slot the render left for the orchestrator (`<ORCHESTRATOR: …>`) is no contract yet. A dispatch that binds
+# no plan row and names no file (a researcher, a test-runner, a prototype) is read from its prompt. The fix
+# is always the render, never an edit. The admitted file's path and sum go on the roster row. It is the last arm, so
 # a dispatch refused for a fact the render cannot change (an approval it waits on, a live writer) names
 # that fact first.
 DP_BRIEF_REL=""; DP_BRIEF_SUM=""
@@ -3257,6 +2470,10 @@ dispatch has its own file, so the record keeps what each agent was given."
         elif [ -n "$DP_BOUND_ROW" ] && [ "$BRIEF_FILE_ROW" != "$DP_BOUND_ROW" ]; then
           _bf_fact="the brief file is row $(bionic_trunc "$BRIEF_FILE_ROW" 8)'s, not row $(bionic_trunc "$DP_BOUND_ROW" 8)'s"
           _bf_why="Its mark names row ${BRIEF_FILE_ROW}; this dispatch binds row ${DP_BOUND_ROW}."
+        elif case "${BRIEF_FILE_TEXT%%$'\n## The row'*}" in *'<ORCHESTRATOR:'*) true ;; *) false ;; esac; then
+          _bf_fact="the brief file has a slot left for the orchestrator"; _bf_fix="fill the row, render again"
+          _bf_why="A contract line above its ## The row heading still reads <ORCHESTRATOR: ...>: the row lacks a cell
+the render needs, so the file is not a contract yet."
         else
           DP_BRIEF_REL="$BRIEF_FILE_REL"; DP_BRIEF_SUM="$BRIEF_FILE_SUM"
         fi ;;
@@ -3297,31 +2514,15 @@ fi
 # exits 0, which is exactly the status the ledger below would otherwise read as a launch.
 dp_refuse_findings
 
-# ============================= THE BRIEF BODY ADVISORY (wave-24 T14; REQ-8, D13)
+# ============================================================ WHAT AN ADMITTED DISPATCH IS TOLD
 #
-# A dispatch that reached this line is allowed, so what follows is only ever said, never decided.
-# `brief_body_advisories` (payload/scripts/lib/brief.sh) reads the PROSE the contract grammar
-# never sees for the two shapes that meet a wall minutes later — a `bash tests/x.test.sh` the
-# row does not budget, and an edit of a path outside `Files:` — and each finding goes out on
-# the model's channel, ending in the `amend` line that would declare it. Placed below the spend
-# so a refused dispatch carries only its refusal, and above the ledger so the advice precedes the
-# journalled launch; nothing it does can change the exit status (AC-8.4).
-#
-# THE CHANNEL IS THE MODEL'S (A-orch-20): `hookSpecificOutput.additionalContext` on stdout, exit 0.
-# An advisory the model never reads is silence, and AC-8.1/8.3 fail on silence; stderr from a
-# passing PreToolUse reaches nobody the author is, and is not on refuse.sh's measured channel
-# table at all. That table scores `additionalContext` model:no, but it was a headless stream-json
-# measurement. Observed live in the interactive orchestrator session (2026-10-03): walls.sh's
-# farm-out tier-1 nudge, which rides this same field, arrived as "PreToolUse:Bash hook additional
-# context: farm-out checkpoint ...", so the channel does reach the model there.
-#
-# THE EMITTER IS THE FARM-OUT NUDGE'S, NOT A SECOND ONE: `_fold_emit_context` (lib/fold.sh) builds
-# the object through `jq`, so no JSON is escaped by hand here. This is the only stdout this path
-# prints (a refusal exited above, and nothing below writes to it), so it is one object by
-# construction. With no `jq` the lines fall back to `warn`, as fold.sh does for its own nudge.
-# The poker path goes in as ONE shell word (wave-24 T29, critic I2): the amend line prints it
-# verbatim, and a plugin root with a space split in two when pasted.
-_dp_adv_all=$(brief_body_advisories "$DP_BRIEF_SRC" "$AGENT_NAME" "$C_FILES" "$SUITES_ALLOWED" "$C_RE_EXECUTES" "$(refuse_shell_word "$HOOK_DIR/session-poker.sh")")
+# A dispatch that reached this line is allowed, so what follows is only ever said, never decided: the
+# debt its Files touch and the rendered twins its Files gained. It goes out on the model's channel,
+# `hookSpecificOutput.additionalContext` on stdout with exit 0, which reaches the orchestrator's model in
+# the interactive session. Placed below the spend so a refused dispatch carries only its refusal, and
+# above the ledger so the words precede the journalled launch. The emitter is lib/fold.sh
+# `_fold_emit_context`, which builds the object through `jq`; with no `jq` the lines fall back to `warn`.
+_dp_adv_all=""
 # THE DEBT ARM (wave-30 T22; D2, P2, AC-11.3). Debt is burned by the next row whose Files touch its
 # concept, so an allowed brief whose `Files:` covers a site of an unburned item of the run's ledger
 # (lib/proof.sh `proof_debt_hits`: the path, a directory above it, or a glob over it) carries the item,

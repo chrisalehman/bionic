@@ -327,7 +327,7 @@ section "§PATH: a landing runs a Lands-on suite where it lives, not only under 
 # with "No such file". THE DECLARED PATH IS THE ONE RUN (wave-34 T27; critic S2): the lift keeps a
 # path-qualified entry as declared, so a same-named tests/<name> never stands in for it (pa4, pa5).
 PA_ON="$( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" 2>/dev/null
-  brief_field "$(lift_contract_fields 'Lands-on: scripts/deploy/__tests__/x.test.sh')" lands_on)"
+  brief_field "$(brief_contract 'Lands-on: scripts/deploy/__tests__/x.test.sh')" lands_on)"
 expect_eq "(pa0) precondition: the lift keeps the path-qualified Lands-on: line as declared (the positive on that extractor)" \
   "scripts/deploy/__tests__/x.test.sh" "$PA_ON"
 world_cost x.test.sh 5 0.5 5

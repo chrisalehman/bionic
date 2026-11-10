@@ -685,8 +685,5 @@ lo_gate lo1 'Lands-on: widget'
 expect_eq "LO-1 one suite on Lands-on, within Suites, is admitted though another suite reads the Files" \
   "allow|widget.test.sh" "$GATE_VERDICT|$(roster_field "$LO_ROW" lands_on)"
 expect_absent "LO-1b …and nothing asks for the other reader" "reader.test.sh" "$GATE_ERR"
-lo_gate lo2 'Lands-on: reader'
-expect_eq "LO-2 control: a Lands-on suite outside Suites is refused on the same tree" "deny" "$GATE_VERDICT"
-expect_contains "LO-2b …for being outside Suites" "is outside Suites:" "$GATE_ERR"
 
 finish

@@ -474,7 +474,7 @@ s8f_fixture() {  # <files= value> -> a project whose delivered tree touched only
   mkdir -p "$d/.bionic/docs/record"; echo done > "$d/.bionic/docs/record/s8f.md"
   printf '%s' "$d"
 }
-S8F_FILES=$(bash -c '. "$1" || exit 9; brief_field "$(lift_contract_fields "$2" bionic:implementor)" files' _ \
+S8F_FILES=$(bash -c '. "$1" || exit 9; brief_field "$(brief_contract "$2")" files' _ \
   "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" 'Files: "lib/a.sh"')
 expect_eq "8f precondition: the reader records Files: \"lib/a.sh\" as lib/a.sh" "lib/a.sh" "$S8F_FILES"
 D=$(s8f_fixture '"lib/a.sh"')

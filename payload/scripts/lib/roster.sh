@@ -114,9 +114,7 @@
 # declared, the suite basenames it may run, whether that set was DECLARED by the brief (a row
 # 1.14.0 wrote may still say DERIVED, from the map deleted at wave-31), and — for a repository whose tests are
 # not shell suites at all — the author-marked commands the brief declared it will re-run,
-# marks kept, space-joined, capped per brief since T4 (wave-20, REQ-7) — three suite runs for
-# a reader of the evidence question, DP_SUITES_MAX for every other (dp_runs_cap in lib/brief.sh;
-# hooks/dispatch-preflight.sh lifts them from the brief text under `Re-executes:`).
+# marks kept, space-joined, as lib/brief.sh `brief_contract` reads them from the brief's `Re-executes:` line.
 # `re_executes=` is the LAST of the four and TRAILS them,
 # so a row written before the field existed reproduces byte for byte through this writer. They are present-if-passed rather than always-emitted so that the captured
 # rows in `tests/fixtures/roster-row.captured` — real rows written before this task

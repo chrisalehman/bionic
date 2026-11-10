@@ -17,6 +17,9 @@
 #            the roster contract.
 #   §SUM     a file edited after its render, or marked before sums existed, is refused; a roster row that
 #            carries no brief path or sum is not refused by amend or hold.
+#   §LIFT    the library carries one reader and no lift; a row dispatch's roster contract is its brief file's
+#            as that reader reads it, and a label typed only in the prompt's prose changes nothing; amend,
+#            hold and extend keep the row's brief path and sum.
 #
 # FIXTURE FIDELITY. The session-poker prelude's sandbox (an engaged, bound session in a scratch repository),
 # a version-14 Tasks table, real commits on the working branch for the proof heads, and a planted run log the
@@ -200,5 +203,45 @@ poke "$NR" amend w1 --files+ lib/z.sh --reason 'one more file'
 expect_eq "S5 amend on such a row is not refused" "0" "$(rc_said)"
 poke "$NR" hold w1 "kept on purpose"
 expect_eq "S6 hold on such a row is not refused" "0" "$(rc_said)"
+
+section "§LIFT: the brief file is a row dispatch's contract, and no prose is lifted"
+BLIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/brief.sh"
+expect_eq "L1 the library keeps the one reader and the file check, and defines no lift, grammar or advisory" \
+  "brief_contract brief_file_read" "$(bash -c '. "$1" >/dev/null 2>&1 || exit 9
+  for f in lift_contract_fields _brief_lift_awk brief_validate_fields brief_body_advisories brief_files_entry brief_contract brief_file_read; do
+    declare -F "$f"; done | tr "\n" " " | sed "s/ $//"' _ "$BLIB")"
+poke "$NR" brief N1 w01-N1
+wall w01-N1 bionic:implementor "$NB"
+NCONTRACT="$WROW"
+BC="$(bash -c '. "$1" >/dev/null 2>&1; brief_contract "$(cat "$2")"' _ "$BLIB" "$NR/$NB")"
+expect_contains "L2 setup: the one reader reads the file's Files" "files=lib/n.sh,tests/n.test.sh" "$BC"
+for k in files deliverable duration row lands_on; do
+  expect_contains "L2 the roster's ${k}= is the brief file's, as the one reader reads it" \
+    "|${k}=$(printf '%s\n' "$BC" | sed -n "s/^${k}=//p" | head -1)|" "|$WROW"
+done
+expect_contains "L2b …and its suites are the file's Suites:" "|suites_allowed=n.test.sh|" "|$WROW"
+wall w01-N1 bionic:implementor "$NB
+Deliverable-waiver: a report by message
+Done marker: .bionic/docs/record/wave-01-fixture/done.md
+Lands-red: n.test.sh until ext:ci
+Red-evidence: record/wave-01-fixture/N1-red.md
+Re-executes: \`make check\`
+Questions: evidence
+Subprocess claim: \`gh run watch\`"
+expect_eq "L3 a label typed only in the prompt's prose changes neither the verdict" "allow" "$(said_as allow)"
+expect_eq "L3b …nor the roster contract, row for row" "$NCONTRACT" "$WROW"
+expect_contains "L3c setup: the contract read is the file's (beside L3b, the same reader)" "|row=N1|" "|$WROW"
+NBS="$(printf '%s' "$WROW" | tr '|' '\n' | sed -n 's/^brief_sum=//p')"
+new_roster "$NR"; s30_row "$NR" row=N1 lands_on=n.test.sh "brief=$NB" "brief_sum=$NBS" "deliverable=$NR/n-done.md" "$(said "$NR" w1)"
+expect_contains "L4 setup: the row carries the brief's path and sum" "|brief=$NB|brief_sum=$NBS" "$(s30_last "$NR")"
+poke "$NR" amend w1 --files+ lib/z.sh --reason 'one more file'
+expect_eq "L4b amend writes its row (exit 0)" "0" "$(rc_said)"
+expect_contains "L4c …and the amended row keeps the brief's path and sum" "|brief=$NB|brief_sum=$NBS" "$(s30_last "$NR")"
+poke "$NR" hold w1 "kept on purpose"
+expect_eq "L5 hold writes its row (exit 0)" "0" "$(rc_said)"
+expect_contains "L5b …and the held row keeps them" "|brief=$NB|brief_sum=$NBS" "$(s30_last "$NR")"
+poke "$NR" extend w1 "more to do"
+expect_eq "L6 extend writes its row (exit 0)" "0" "$(rc_said)"
+expect_contains "L6b …and the extended row keeps them" "|brief=$NB|brief_sum=$NBS" "$(s30_last "$NR")"
 
 finish
