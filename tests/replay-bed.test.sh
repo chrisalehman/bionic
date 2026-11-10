@@ -8,6 +8,8 @@
 #             store, and the private-name scan passes over the fixtures.
 #   §CARDS    for each card, the reader's answers at the card's instant equal its expected file less the gaps
 #             list; the cut run is read as it stands, beside the hand-written lines.
+#   §PAGES    the release card rendered in each card's world equals the replay table that card printed, less the
+#             gaps list.
 #   §CATCH    a copy of the reader with the replace rule taken out, then the cancel rule, disagrees with a card.
 #   §COVER    every question of the closed list is asked and none is refused, and every event type has a line.
 #   §FOLLOWS  a review row's rendered brief starts its range at the reader's last review proof of its questions,
@@ -124,6 +126,46 @@ for e in $WORLDS; do n=${e%%:*}; w=${e#*:}; p=${w#*:}; w=${w%%:*}
   expect_empty "$n: every answer equals its expected fact" "$(printf '%s\n' "$D" | grep "^$n ")"
 done
 
+section "PAGES"
+# A card's world is its fixture cut to the instant as the scrub cuts a run (log, pages, born rows, landed cells, state
+# lines), on this project's objects at the card's head (every fixture head is a commit here). A file the record lost
+# is a stand-in: the advances ask only that it exists.
+PS=fe11a5e0-0000-4000-8000-0000000000a1; . "$(dirname "$0")/lib/bound-marker.sh"
+page() {  # <page file> -> its replay table as key=value: each decision by its key, each carry by its finding
+  sed -n -e 's/^carried: \(.*\)/card.carried.\1=yes/p' -e 's/^release-approval\/v1|dec=[0-9]*|key=\([^|]*\)|/card.decision.\1=/p' "$1" 2>/dev/null; }
+born() { sed -n 's/^run\/v1|ev=born|row=\([^|]*\)|.*/\1/p' | tr '\n' ' '; }  # stdin's events -> the rows born
+render() {  # <world> <plan> [arg…] -> the card rendered as the bound session, the page its record holds, as key=value
+  ( cd "$1" && CLAUDE_CODE_SESSION_ID=$PS bash "$R/hooks/session-poker.sh" release-approval "${@:3}" "$2" ) >/dev/null 2>"$1.err"
+  page "${2%/plans/*}/record/$(basename "$2" .plan.md)/$(basename "$1").md"
+}
+for x in "$X"/release-approval-*.facts; do
+  n="${x##*/}"; n="${n%.facts}"; w="$(cd "$X" && ls -d */record/*/"$n.md" | cut -d/ -f1)"
+  at="$(sed -n 's/^card\.at=//p' "$x")"; h="$(sed -n 's/^card\.head=//p' "$x")"; d="$WORLD_ROOT/pages/release-approval-${h:0:8}"
+  mkdir -p "$d/.bio""nic"; cp -R "$X/$w" "$d/.bio""nic/docs"; p="$(ls "$d"/.bio*/docs/plans/*/*.plan.md)"; c="${p%/plans/*}/record/$(basename "$p" .plan.md)"
+  for f in "$c"/release-approval-*.md; do [ "$(sed -n 's/^release-approval\/v1|plan=.*|at=\([^|]*\)|.*/\1/p' "$f")" \< "$at" ] || rm -f "$f"; done
+  events "$(ls "$X/$w"/plans/*/*.plan.md)" | cut_at "$at" > "$d.log"; mv "$d.log" "$c/run.log"
+  o=" $(born < "$c/run.log") "
+  awk -F'|' -v l=" $(ask "$p" landed | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | tr '\n' ' ') " -v a="$at" -v o="$o" -v g=" $(events "$(ls "$X/$w"/plans/*/*.plan.md)" | born) " '
+    /^## /{ t = ($0 == "## Tasks"); u = ($0 == "## SDLC State"); s = 0 }
+    u && /^(proved|waived|approved|moved): |^- T[0-9]+: landed / && match($0, /20[0-9-]+T[0-9:]+Z/) && substr($0, RSTART, RLENGTH) > a { next } t && !s && /^\| id \|/ { for (i = 2; i < NF; i++) if ($i ~ /^ *status *$/) s = i }
+    t && s && $2 ~ /^ T[0-9]/ { r = $2; gsub(/ /, "", r); if (index(g, " " r " ") && !index(o, " " r " ")) next
+      if ($s ~ /^ *landed *$/ && !index(l, " " r " ")) $s = " pending " }
+    { print }' OFS='|' "$p" > "$d.plan"; mv "$d.plan" "$p"
+  expect_true "$n: its head is a commit of this repository" $GIT cat-file -e "$h^{commit}"
+  b="$(sed -n 's/^working-branch: //p' "$p" | head -1)"
+  ( cd "$d" && git init -q && echo "$($GIT rev-parse --path-format=absolute --git-common-dir)/objects" > .git/objects/info/alternates \
+    && git update-ref "refs/heads/$b" "$h" && git symbolic-ref HEAD "refs/heads/$b" && git reset -q --hard "$h" )
+  for f in $(grep -ohE '(record|specs)/[A-Za-z0-9._/-]+\.(log|md|txt)' "$p" | sort -u); do f="${p%/plans/*}/$f"
+    [ -e "$f" ] || { mkdir -p "${f%/*}"; echo "a stand-in for a file the record lost" > "$f"; }; done
+  bound_marker "$d" "$PS" "$p" >/dev/null 2>&1
+  a=""; for k in $(page "$X/$w/record/${c##*/}/$n.md" | sed -n 's/^card\.decision\.\([^=]*\)=.*|pick=other|.*/\1/p'); do a="$a --against $k"; done
+  W="$(page "$X/$w/record/${c##*/}/$n.md" | less "$n" "$w")"; expect_nonempty "$n: the card printed a replay table" "$W"
+  G="$(render "$d" "$p" $a | less "$n" "$w")"
+  expect_eq "$n: the card rendered at its instant equals the card printed, less the gaps" "$W" "$G"
+  [ "$W" = "$G" ] || sed 's/^/      render said: /' "$d.err"
+  [ "$n" != release-approval-31da41f7 ] || { PG="$G"; PD="$d"; PP="$p"; PH="$h"; PA="$at"; }
+done
+
 section "CATCH"
 for m in 'replace:s/if \(\(id in live\) && fact\[id\] == body\) next/if (id in live) next/' \
          'cancel:s/if \(t == "cancel"\) \{ delete live\[id\]; next \}/if (t == "cancel") next/'; do
@@ -232,6 +274,12 @@ expect_contains "…and prints the queue landing's row" "T1 queue ready=2026-11-
 NN="$(note release-note --at "$NC" --on 2026-11-01T00:05:00Z)"
 expect_contains "the note at an instant renders the landing the log holds before it" "landings: queue=1 hand=0 git=0" "$NN"
 expect_eq "…and not the one after it" "0" "$(printf '%s\n' "$NN" | grep -c '^T2 ')"
+# The release card follows the log: an approval of the release appended to it alone ends the release's decision.
+expect_contains "the release card at 31da41f7 puts the release" "card.decision.approve:release=" "${PG:-}"
+printf 'run/v1|ev=approval|key=release|by=fixture|head=%s|said=approve|at=%s\n' "${PH:-}" "${PA:-}" >> "${PP%/plans/*}/record/$(basename "${PP:-x}" .plan.md)/run.log"
+G="$(render "${PD:-/nonexistent}" "${PP:-/nonexistent}")"
+expect_contains "…and with the approval appended, it still renders its carries" "card.carried." "$G"
+expect_absent "…but no longer puts the release" "card.decision.approve:release=" "$G"
 section "OPEN"
 opened() { ( . "$RD/lib/run.sh" && run_open "$1" ); echo $?; }
 plant() {  # <wave> <current:> <Step 9 line> [log line…] -> the plan's path; its run log holds the lines given

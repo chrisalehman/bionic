@@ -78,6 +78,9 @@ payload/context/working-principles.md agents-src/templates/context/working-princ
 payload/context/working-principles.md agents-src/templates/context/working-principles.md.tmpl|the reader may act on it|whoever reads the answer, not a review
 hooks/dispatch-preflight.sh|a reason the reader can check|whoever reads the plan row, not a review
 hooks/poker/tick.sh|the panel reading is|a reading of the agent panel, a measurement, not a review
+hooks/session-poker.sh|Lands-red from the reader;|the program that answers from the run's log, not a review
+hooks/poker/line.sh|the reader (lib/reader.sh) cannot be loaded|the program that answers from the run's log, named by its file, not a review
+payload/scripts/lib/proof.sh|line_kv("reader")|the proof line's reader= field, read by its name
 skills/sitrep/SKILL.md|never "reading" or "reader"|names the refused words, to refuse them
 payload/scripts/card.sh|(readers?|readings?|unmeasured)|the judgment check's pattern of the refused words
 WORDS_ALLOW_EOF
@@ -129,12 +132,12 @@ words_text() {
 
 # words_refused — reads "<tag><TAB><text>" lines and prints "<tag> <text>" for each text carrying a
 # refused word. A placeholder is read as one: `${q:-a reading}` keeps its default, and `$NAME`
-# cannot be the word.
+# cannot be the word; nor can a program's file name (`reader.sh`), bare or as a path component.
 words_refused() {
   awk '{
     c = index($0, "\t"); tag = substr($0, 1, c - 1); t = substr($0, c + 1)
     l = t; gsub(/\$\{[A-Za-z_][A-Za-z0-9_]*\}/, "$V", l); gsub(/\$\{[A-Za-z_][A-Za-z0-9_]*[:#%\/+=?-]+/, "$V ", l)
-    gsub(/\$[A-Za-z_][A-Za-z0-9_]*/, "$V", l); l = tolower(l)
+    gsub(/\$[A-Za-z_][A-Za-z0-9_]*/, "$V", l); l = tolower(l); gsub(/readers?\.sh/, "$V", l)
     if (l ~ /(^|[^a-z0-9_-])readers?([^a-z0-9_=-]|$)/ || l ~ /(^|[^a-z0-9_-])readings([^a-z0-9_=-]|$)/ \
       || l ~ /(^|[^a-z0-9_])(a|an|the|its|their|each|every|this|that|one|no|any|your|whose)( [a-z$-]+)? reading([^a-z0-9_-]|$)/) print tag " " t
   }'
@@ -186,6 +189,8 @@ $SURF
 WORDS_SURF_EOF
 HITS="$(printf '%s' "$HITS" | /usr/bin/grep -v '^$')"
 expect_empty "no surface carries a refused word" "$HITS"
+expect_eq "a program's file name is no word: a line naming reader.sh passes, the bare word beside it is refused" "t2 the reader said so" \
+  "$(printf 't1\t. "$lib/reader.sh" && x=lib/reader.sh\nt2\tthe reader said so\n' | words_refused)"
 
 # ── §PLANT ───────────────────────────────────────────────────────────────────
 section "§PLANT: a planted \"reader\" on every surface and every agents-src source goes red"
