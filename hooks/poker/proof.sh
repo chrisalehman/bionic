@@ -1809,7 +1809,7 @@ DSP_READINGS
         if [ -n "$WRA_LOG" ]; then
           die "REFUSED — the whole run runs once at a head, and ${FR_HEAD:0:12} has it: $WRA_LOG. A red suite is a fix row's: its own suites plus the red one, green at a later head. Nothing was run."
         else
-          die "REFUSED — a whole run is running in the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) now: the gate holds an open whole request for it (gate_list names it), and it proves this head when it ends. Nothing was run."
+          die "REFUSED — a whole run is running in the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) now: the gate holds an open whole request for it (gate_list names it), and its log is this head's whole run once it ends. Nothing was run; if it ends 75, the gate never admitted it: run regression-run again then."
         fi
         exit 1
       fi
