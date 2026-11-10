@@ -177,7 +177,7 @@ expect_eq "a waived row takes its author, instant and words from its block's wai
   "run/v1|ev=waiver|ac=AC-2|evidence=record/wave-8-matrix/w.md|auditor=REFUTED|by=Ann Person|said=not run here|at=2026-11-01T08:00:00Z" "$(acof AC-2)"
 expect_eq "the proof carries its evidence and auditor cells and nothing else" "run/v1|ev=proof|ac=AC-1|evidence=record/wave-8-matrix/a.log|auditor=CONFIRMED|at=" "$(acof AC-1)"
 expect_absent "a pending row writes no proof and no waiver" "ac=AC-3|" "$(acof AC-3)"
-# a block waiver: line is a hand act whatever its row reads; only the status cell makes a waiver, so AC-3 stays pending
+# a block waiver: line is a hand act whatever its row reads; only the status cell makes a waiver, so the pending row stays pending
 expect_contains "a waiver line in a pending row's block is a hand act, its day as written" \
   "run/v1|ev=hand|ac=AC-3|what=waive-row|by=Bo Person|said=later, by hand|at=2026-11-01" "$MEV"
 expect_contains "…and so is a waived row's own block line" "run/v1|ev=hand|ac=AC-2|what=waive-row|by=Ann Person|said=not run here|at=2026-11-01T08:00:00Z" "$MEV"
