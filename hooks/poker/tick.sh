@@ -484,8 +484,8 @@ tick_owed_goals() {  # <plan> <landing record> -> always 0; one line said per go
   declare -F owed_open >/dev/null 2>&1 && declare -F plan_goals_read >/dev/null 2>&1 || return 0
   f="$(OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_file 2>/dev/null)" || return 0
   # the suites a standing debt declares red: the reader's debts admitted on a red verdict, each with an id, none voided
-  reds=" $(tick_ask reader_q_debts | awk -F'|' '$2 == "ev=admitted" { id = ""; s = ""
-      for (i = 3; i <= NF; i++) { if (index($i, "id=") == 1) id = substr($i, 4); else if (index($i, "suite=") == 1) s = substr($i, 7) }
+  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  reds=" $(tick_ask reader_q_debts | awk -F'|' "${_LINE_FIELDS_AWK:-}"'line_kv("ev") == "admitted" { id = line_kv("id"); s = line_kv("suite")
       sub(/.*\//, "", s); if (id != "" && s != "") print s }' | tr '\n' ' ') "
   while IFS='	' read -r st t m rd; do
     k="decide:goal:$(plan_goal_slug "$t")"
