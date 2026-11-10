@@ -289,7 +289,7 @@ t7_gate() {  # <repo tag> <body lines> [<name>] [<subagent_type>] [<brief>] -> G
   REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
   printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the widget | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n| A2 | 4 | build | another | implementor | — | 30 | REQ-1 | b.sh | — | — | pending | — |\n' \
     >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "${5:-$(adv_brief "$2")}" "${3:-w99-T23}" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" "${4:-implementor}")"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" - "${3:-w99-T23}" "${5:-$(adv_brief "$2")}")" "${3:-w99-T23}" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" "${4:-implementor}")"
   T7_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 }
 t7_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
@@ -405,7 +405,7 @@ t55_gate() {  # <tag> <name> <body lines> [<extra row ids, space-separated>] -> 
 "; done
   printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | the widget | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n| T2 | 4 | build | another | implementor | — | 30 | REQ-1 | b.sh | — | — | pending | — |\n| T9 | 7 | doc | the release | implementor | — | 20 | REQ-1 | CHANGELOG.md | — | — | pending | approval:release |\n%s' "$_ids" \
     >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(adv_brief "$3")" "$2" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" - "$2" "$(adv_brief "$3")")" "$2" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
   T7_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 }
 OR_WAIT="row T9 waits for approval:release"

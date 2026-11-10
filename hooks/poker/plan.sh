@@ -2615,8 +2615,14 @@ EOF
       exit 1
     fi
     BRF_OUT="$BRF_RECDIR/briefs/$BRF_NAME.md"
-    BRF_MARK="<!-- brief: rendered from row $BRF_ID for $BRF_NAME; render it again to change it, never edit it -->"
-    if [ -e "$BRF_OUT" ] && [ "$(head -1 "$BRF_OUT" 2>/dev/null)" != "$BRF_MARK" ]; then
+    if ! poker_brief_load || ! declare -F brief_mark >/dev/null 2>&1; then
+      die "REFUSED — the brief's mark (lib/brief.sh) cannot be loaded from $BIONIC_LIB. Nothing was written. Fix: reinstall the plugin, then run again: bash ${HOOK_DIR}/session-poker.sh brief $BRF_ID $BRF_NAME"
+      exit 2
+    fi
+    # THE MARK NAMES THE ROW AND THE NAME; its sum is of the file as rendered now, so a file this verb wrote is
+    # known by the mark's opening words whatever its sum was.
+    BRF_MARKED="<!-- brief: rendered from row $BRF_ID for $BRF_NAME;"
+    if [ -e "$BRF_OUT" ] && case "$(head -1 "$BRF_OUT" 2>/dev/null)" in "$BRF_MARKED"*) false ;; *) true ;; esac; then
       die "REFUSED — ${BRF_OUT#"$PV_REPO"/} was not rendered by this verb for row $BRF_ID: it is part of the run's record and is kept as written. Render the row under the name its agent is dispatched as: bash ${HOOK_DIR}/session-poker.sh brief $BRF_ID <name>. Nothing was written."
       exit 1
     fi
@@ -2726,7 +2732,7 @@ $BRF_PINNED"; fi
     BRF_PROG="$(poker_brief_record_entry "$BRF_FILES" progress "$BRF_ID")"
     [ -n "$BRF_PROG" ] || BRF_PROG="$BRF_RECREL/$BRF_ID.progress.md"
     {
-      printf '%s\n' "$BRF_MARK"
+      printf '<!-- brief -->\n'
       while IFS= read -r BRF_L; do
         case "$BRF_L" in
           "Expected duration")
@@ -2773,6 +2779,14 @@ BRF_EOF
       die "REFUSED — the brief for $BRF_ID would name session-poker.sh $BRF_UNKNOWN, which the verb listing does not hold; correct the plan's section for $BRF_ID. Nothing was written. Then run again: bash ${HOOK_DIR}/session-poker.sh brief $BRF_ID $BRF_NAME"
       exit 1
     fi
+    # THE SUM IS OF EVERY LINE BELOW THE MARK, which takes its place on the first line last.
+    BRF_SUMV="$(brief_sum "$BRF_BODY")" || BRF_SUMV=""
+    if [ -z "$BRF_SUMV" ] || ! { brief_mark "$BRF_ID" "$BRF_NAME" "$BRF_SUMV"; printf '\n'; tail -n +2 "$BRF_BODY"; } > "$BRF_BODY.m" 2>/dev/null; then
+      rm -f "$BRF_BODY" "$BRF_BODY.m"
+      die "REFUSED — the brief's sum cannot be taken (neither shasum nor sha256sum answers). Nothing was written. Install one, then run again: bash ${HOOK_DIR}/session-poker.sh brief $BRF_ID $BRF_NAME"
+      exit 2
+    fi
+    mv -f "$BRF_BODY.m" "$BRF_BODY"
     mkdir -p "${BRF_OUT%/*}" 2>/dev/null
     if ! mv -f "$BRF_BODY" "$BRF_OUT" 2>/dev/null; then
       rm -f "$BRF_BODY"
