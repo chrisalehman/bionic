@@ -431,6 +431,28 @@ expect_eq "B5c after the successor row, the declared run is admitted" "0" "$ST"
 guarded "$R5C" 'npx jest'
 expect_eq "B5c …and an undeclared run is still refused" "2" "$ST"
 
+section "B5d — a declared run is read as the typed one is: a leading cd or VAR= still matches"
+# Each declaration sits on its own row so a pass cannot come from the bare spelling beside it.
+R5D=$(mk_repo b5d)
+dispatched "$R5D" "$ACTOR" name=w-b5d suites_allowed=none suites_source=declared files= \
+  're_executes=`cd /abs/tree && yarn test a.test.js`'
+guarded "$R5D" 'cd /abs/tree && yarn test a.test.js'
+expect_eq "B5d a declared leading cd is matched when typed" "0" "$ST"
+guarded "$R5D" 'yarn test b.test.js'
+expect_eq "B5d …and a run no brief declared is still refused" "2" "$ST"
+R5E=$(mk_repo b5e)
+dispatched "$R5E" "$ACTOR" name=w-b5e suites_allowed=none suites_source=declared files= \
+  're_executes=`CI=true yarn test a.test.js`'
+guarded "$R5E" 'CI=true yarn test a.test.js'
+expect_eq "B5d a declared VAR= prefix is matched when typed" "0" "$ST"
+R5F=$(mk_repo b5f)
+dispatched "$R5F" "$ACTOR" name=w-b5f suites_allowed=none suites_source=declared files= \
+  're_executes=`yarn test a.test.js`'
+guarded "$R5F" 'cd /treeB && yarn test a.test.js'
+expect_eq "B5d a bare declaration admits the run typed after a cd" "0" "$ST"
+guarded "$R5F" 'CI=true yarn test a.test.js 2>&1 | tee log'
+expect_eq "B5d …and typed with a VAR= prefix and a tee" "0" "$ST"
+
 section "B6 — scope: the arm is the AGENT's, and the session must be engaged"
 # A main-thread payload has no top-level agent_id (t1-probe-report.md §3). The
 # orchestrator's own thread is hooks/farm-out-reminder.sh's, which answers the same
@@ -648,6 +670,8 @@ guarded "$R1" 'cd /tmp/x || exit 1; npx playwright test e2e/a.spec.ts'
 expect_contains "BC3 a leading cd is not part of the key" "--suites npx_playwright_test_e2e_a.spec.ts -- " "$WRAP"
 guarded "$R1" 'cd /tmp/y && npx playwright test e2e/a.spec.ts'
 expect_contains "BC3 …and another tree running the one command keys the same word" "--suites npx_playwright_test_e2e_a.spec.ts -- " "$WRAP"
+guarded "$R1" 'cd /tmp/y && npx next build'
+expect_contains "BC3 …and a different heavy command from one tree keys its own word" "--suites npx_next_build -- " "$WRAP"
 guarded "$R1" 'npx playwright test e2e/x.spec.ts &'
 expect_eq "BC2 a backgrounded browser run is REFUSED" "2" "$ST"
 

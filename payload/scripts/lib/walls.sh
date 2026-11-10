@@ -6076,7 +6076,7 @@ _bsg_own_amend() {
 
 # _bsg_budget_read — THE AGENT'S BUDGET, OFF ITS ROSTER ROW (moved out of the budget arm by wave-33
 # T36; D7, AC-6.2). The budget arm's read: sets the caller's BUDGET_STATED, SUITES_ALLOWED,
-# RE_EXECUTES (decoded and normalised), _BUDGET_ROW and _BUDGET_ROW_NAME; rc 1 when roster.sh will not
+# RE_EXECUTES (decoded), _BUDGET_ROW and _BUDGET_ROW_NAME; rc 1 when roster.sh will not
 # load, which the caller answers by allowing, as the arm always did. Defined ahead of the wall: a
 # function written inside the wall's body is defined only when the wall's run reaches it.
 _bsg_budget_read() {
@@ -6156,15 +6156,8 @@ if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; the
   # while decoding in both places would turn a literal `%7C` in a command into a pipe.
   RE_EXECUTES="${RE_EXECUTES//\%7C/|}"
   RE_EXECUTES="${RE_EXECUTES//\%25/%}"
-  # AND NORMALISED, AT THE SAME ONE DECODE (wave-20 T4; REQ-7, D7). The claim side builds
-  # its run with `cmdnorm_run` (payload/scripts/lib/cmd-class.sh, loaded above ARM 1), which
-  # takes trailing redirections, `| tee` and `|| true` off; the declared side goes through
-  # the same rule here, once per hook call, so `_run_is_declared` compares two readings of
-  # one rule and never a raw declaration against a normalised claim. For a row the lift
-  # wrote this is the identity — the lift refuses a redirection in a declaration and runs
-  # the same rule before it stores one — and `cmd_runs_norm` skips its fork when the field
-  # holds nothing the rule could act on.
-  RE_EXECUTES=$(cmd_runs_norm "$RE_EXECUTES")
+  # LEFT RAW HERE ON PURPOSE: the refusal prints the declaration as the author wrote it, and
+  # the compare set is built from it where the typed claims are read (`_declared_runs`).
 fi
 [ -n "$SUITES_ALLOWED" ] || BUDGET_STATED=no
 }
@@ -6714,6 +6707,36 @@ _budget_wire_fact() {
   printf '%s%s' "$label" "$(_budget_wire_list "$allowed" "$room")"
 }
 
+# THE DECLARED SIDE IS READ BY THE CLAIMS READER, the reader that built the typed side. A
+# declaration may lead with `cd <dir> &&` or a `VAR=value`, and the typed command has those taken
+# off before it is compared; trailing-normalising alone left the two sides spelled
+# differently. Each marked token becomes the run(s) the reader claims from it, marks kept and
+# space-joined. A token the reader claims nothing from is kept as its trailing-normalised
+# text, which is how it compared before. A field with nothing the reader could strip (no
+# `cd`, `=`, `;`, redirection or run of blanks) is returned as it stands and costs no fork.
+_declared_runs() {  # <re_executes field, decoded> -> the compare set
+  local _rest="${1-}" _bt='`' _tok _out="" _cl _k _t _r _any
+  case "$_rest" in
+    *'>'*|*'|'*|*'&'*|*';'*|*'='*|*'cd '*|*'  '*|*$'\t'*|*$'\n'*|*$'\r'*) : ;;
+    *) printf '%s' "$_rest"; return 0 ;;
+  esac
+  while :; do
+    case "$_rest" in *"$_bt"*) : ;; *) break ;; esac
+    _rest="${_rest#*"$_bt"}"
+    case "$_rest" in *"$_bt"*) : ;; *) break ;; esac
+    _tok="${_rest%%"$_bt"*}"
+    _rest="${_rest#*"$_bt"}"
+    _any=""
+    _cl=$(cmd_suite_claims "$_tok" "$BIONIC_ROOT" "$_BSG_CLAIM_CWD")
+    while IFS=$'\t' read -r _k _t _r; do
+      [ -n "$_r" ] || continue
+      _any=1; _out="${_out:+$_out }$_bt$_r$_bt"
+    done <<< "$_cl"
+    [ -n "$_any" ] || _out="${_out:+$_out }$_bt$(cmd_run_norm "$_tok")$_bt"
+  done
+  printf '%s' "$_out"
+}
+
 # _run_is_declared <run> <the row's re_executes= field, DECODED> -> 0 when the row declared
 # EXACTLY this run (REQ-1 AC-1.5).
 #
@@ -6918,6 +6941,7 @@ _BSG_SET_CMP="$SUITES_ALLOWED"
 case "$_BSG_SET_CMP" in
   *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*) ! cmd_case_blind "$BIONIC_ROOT" || _BSG_SET_CMP="$(printf '%s' "$_BSG_SET_CMP" | tr 'A-Z' 'a-z')" ;;
 esac
+local _RUNS_CMP; _RUNS_CMP=$(_declared_runs "$RE_EXECUTES")
 _BSG_RUNS=0
 while IFS=$'\t' read -r _kind _target _run; do
   [ -n "$_kind" ] || continue
@@ -7017,7 +7041,7 @@ Several suites go in one call: tests/run.sh --only a.test.sh b.test.sh"
   # spellings of one statement (AC-1.2) and an arm honouring only one of them would refuse
   # at run time what the dispatch wall let through. It does NOT admit the full tree: that
   # arm ran above it, for the reason written there.
-  if _run_is_declared "$_run" "$RE_EXECUTES"; then continue; fi
+  if _run_is_declared "$_run" "$_RUNS_CMP"; then continue; fi
 
   # A WRAPPER'S INNER RUN, DECLARED, IS ADMITTED (wave-39 T21; D19, REQ-15 AC-15.1). A `run` claim read
   # inside a script carries the run the script holds as its target, beside the command as typed. When
@@ -7025,7 +7049,7 @@ Several suites go in one call: tests/run.sh --only a.test.sh b.test.sh"
   # and the wrapper that launches it is no different from the run typed bare. Nothing else changes: an
   # undeclared inner run falls through to the refusal below, which names the script and the run, and
   # the full tree was judged above.
-  if [ "$_kind" = "run" ] && _run_is_declared "$_target" "$RE_EXECUTES"; then continue; fi
+  if [ "$_kind" = "run" ] && _run_is_declared "$_target" "$_RUNS_CMP"; then continue; fi
 
   # A RUN READ INSIDE A SCRIPT names the script and the run (wave-31 T11): the claim's run is the
   # command as typed, its target the run the script holds.
