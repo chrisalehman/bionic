@@ -1042,8 +1042,10 @@ expect_eq "(rl1) precondition: matrix-retier exits 0 and the record holds its on
   "$RL_RTRC|$(ll_ev "$RL" matrix-retier | /usr/bin/grep -c '|ac=AC-1.1|from=T1|to=T2|' | tr -d ' ')"
 [ "$RL_RTRC" = 0 ] || printf '      retier: %s\n' "$RL_RT"
 expect_eq "(rl2) the retier line moves no field: the counts line reads as before it" "$RL_H0" "$(sr_report "$RL")"
-awk '{ print } /^AC-1\.2:/ { b = 1; next } b && /^[ \t]+evidence:/ { print "  waiver: Dana Fixture 2026-10-20T10:00:00Z \"the unit check is enough\" — a fixture waiver"; b = 0 }' \
+# waive-row writes the block's waiver: line and the row's status waived in one act, so the fixture writes both.
+awk '/^\| AC-1\.2 \|/ { sub(/\| pending \|/, "| waived |") } { print } /^AC-1\.2:/ { b = 1; next } b && /^[ \t]+evidence:/ { print "  waiver: Dana Fixture 2026-10-20T10:00:00Z \"the unit check is enough\" — a fixture waiver"; b = 0 }' \
   "$RLP" > "$RLP.n" && mv "$RLP.n" "$RLP"
+expect_eq "(rl3-pre) the row reads waived, as waive-row leaves it" 1 "$(/usr/bin/grep -c '^| AC-1\.2 |.*| waived |' "$RLP")"
 expect_contains "(rl3) …while a waiver: line in the same plan adds one: waivers=1, total=1" "hand-holds: total=1 · " "$(sr_report "$RL")"
 expect_contains "(rl3b) …in the waivers field" "· waivers=1 · status-writes=0 ·" "$(sr_report "$RL")"
 

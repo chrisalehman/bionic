@@ -590,66 +590,58 @@ _line_numbers() {  # <plan> <record> <root> <row> <candidate> -> 0 made or nothi
   LINE_NUMBERS="$c"
 }
 
-# THE RELEASE ENTRY'S REVIEWS PART, RENDERED FROM THE PLAN. The entry's `### The reviews` part names every review the run
-# registered and every waiver the user gave, so it is the machine's, as the numbers are: one fixed first line, then one
-# bullet per `proved: kind=review` line and per `waived:` line of the plan's unfenced `## SDLC State`, in the order the
-# verbs wrote them. It replaces the entry's own part (its heading to the next heading; a doubled heading is one part), or
-# goes in before the entry's `### Known limits` or `### The landing numbers`, whichever comes first, else at the entry's
-# end. Two verbs write it through these functions, so the two cannot render it differently: the integrate row's
-# `reviews-part`, before the pull request opens, so the merge carries the part to the integration branch, and close-out,
-# for a run whose part no earlier verb wrote. The judge holds a commit of the part covered by what holds at its parent
-# only while it is byte-equal to this render (lib/proof.sh `proof_part_base`), so the render must stay deterministic:
-# the plan's lines and the entry alone decide it.
+# THE RELEASE ENTRY'S REVIEWS PART, RENDERED FROM THE READER. The entry's `### The reviews` part names every review the
+# run registered and every waiver the user gave, so it is the machine's, as the numbers are: one fixed first line, then
+# one bullet per review proof of a question and per waiver of a question the reader holds (its `reviews` answer), in
+# the order the reader holds them. It replaces the entry's own part (its heading to the next heading; a doubled
+# heading is one part), or goes in before the entry's `### Known limits` or `### The landing numbers`, whichever comes
+# first, else at the entry's end. Two verbs write it through these functions, so the two cannot render it
+# differently: the integrate row's `reviews-part`, before the pull request opens, so the merge carries the part to the
+# integration branch, and close-out, for a run whose part no earlier verb wrote. The judge holds a commit of the part
+# covered by what holds at its parent only while it is byte-equal to this render (lib/proof.sh `proof_part_base`), so
+# the render must stay deterministic: the run's facts and the entry alone decide it.
 line_reviews_part() {  # <plan> -> the rendered part, heading to its closing blank line; nothing when it lists nothing
   _line_load_proof || return 1
-  awk "$(proof_awk)"'
+  _proof_ask "$1" reader_q_reviews "$1" | awk -F'|' "$(proof_fact_awk)"'
     function base(p,   n, e) { n = split(p, e, "/"); return e[n] }
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    !insdlc { next }
-    proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
-      at = ""; if (match($0, /[ \t]at=[^ \t]+/)) at = substr($0, RSTART + 4, RLENGTH - 4)
+    proof_fact() && PROOF_KIND == "review" && PROOF_QUESTION != "" {
+      at = line_kv("at")
       b[++n] = sprintf("- %s review%s: %s at %s by %s%s%s", PROOF_QUESTION, (PROOF_SCOPE != "" ? ", " PROOF_SCOPE : ""),
         PROOF_RESULT, substr(PROOF_HEAD, 1, 8), PROOF_READER, (at != "" ? ", " at : ""),
         (PROOF_EVIDENCE != "" ? " (`" base(PROOF_EVIDENCE) "`)" : ""))
       next
     }
-    /^waived:[ \t]/ {
-      m = split($0, w, /[ \t]+/); q = ""; h = ""
-      for (i = 2; i <= m && w[i] != "by"; i++) {
-        if (w[i] ~ /^question=/) q = substr(w[i], 10)
-        else if (w[i] ~ /^head=/) h = substr(w[i], 6)
-      }
-      k = index($0, " by "); if (q == "" || !k) next
-      r = substr($0, k + 4); k = index(r, "\"")
-      if (k) { who = substr(r, 1, k - 1); words = substr(r, k) } else { who = r; words = "" }
-      sub(/[ \t]+$/, "", who); at = who; sub(/.*[ \t]/, "", at)
-      if (at ~ /^[0-9][0-9][0-9][0-9]-/ && length(at) < length(who)) { who = substr(who, 1, length(who) - length(at)); sub(/[ \t]+$/, "", who) }
-      else at = ""
-      b[++n] = sprintf("- %s review: waived at %s by %s%s%s", q, substr(h, 1, 8), who, (at != "" ? ", " at : ""),
-        (words != "" ? ": " words : ""))
+    ev() == "waiver" && line_kv("question") != "" {
+      at = line_kv("at"); said = line_kv("said")
+      b[++n] = sprintf("- %s review: waived at %s by %s%s%s", line_kv("question"), substr(line_kv("head"), 1, 8), line_kv("by"),
+        (at != "" ? ", " at : ""), (said != "" ? ": \"" said "\"" : ""))
     }
     END {
       if (!n) exit
       print "### The reviews"; print ""
+      # the first line is kept word for word: a part already committed stays byte-equal to its render
       print "Rendered from the plan'"'"'s review and waiver lines, in the order they were registered."; print ""
       for (i = 1; i <= n; i++) print b[i]
       print ""
-    }' "$1"
+    }'
 }
-line_reviews_entry() {  # <changelog> <version> <part file> -> the changelog with the entry's part rendered
-  awk -v v="## $2 " -v pf="$3" '
+# line_entry_part <changelog> <version> <part file> <heading> [<heading>…] -> the changelog with the entry's part
+# rendered: the part replaces the entry's own <heading> part (to the next heading; a doubled heading is one part), or
+# goes in before the first of the headings named after it, else at the entry's end. Nothing else in the file changes.
+# Every part of a release entry the machine renders is placed by this one rule.
+line_entry_part() {
+  local cl="$1" v="$2" pf="$3" h="$4"; shift 4
+  awk -v v="## $v " -v pf="$pf" -v h="### $h" -v before="$(printf '|### %s' "$@")|" '
     function put(   l) { if (last != "") print ""; while ((getline l < pf) > 0) print l; close(pf); done = 1; last = "" }
     /^## / { if (inb && !done) put(); inb = (index($0, v) == 1); inp = 0 }
     /^### / {
       t = $0; sub(/[[:space:]]+$/, "", t); inp = 0
-      if (inb && t == "### The reviews") { if (!done) put(); inp = 1; next }
-      if (inb && !done && (t == "### Known limits" || t == "### The landing numbers")) put()
+      if (inb && t == h) { if (!done) put(); inp = 1; next }
+      if (inb && !done && index(before, "|" t "|")) put()
     }
     inp { next }
     { print; last = $0 }
-    END { if (inb && !done) put() }' "$1"
+    END { if (inb && !done) put() }' "$cl"
 }
 # line_reviews_state <plan> <root> <commit> <name> <out file> -> what the render would do to <commit>'s CHANGELOG.md
 # (<name> is what the words call the commit, a branch or a head): LINE_RV_STATE `none` (nothing to render, the reason in
@@ -674,7 +666,7 @@ line_reviews_state() {
   fi
   LINE_RV_N="$(/usr/bin/grep -c '^- ' "$tmp/part" | tr -d ' ')"
   [ "${LINE_RV_N:-0}" -gt 0 ] || { rm -rf "$tmp"; LINE_RV_N=0; LINE_RV_SAID="the plan registers no review and no waiver"; return 0; }
-  line_reviews_entry "$tmp/old" "$LINE_RV_VER" "$tmp/part" > "$out"
+  line_entry_part "$tmp/old" "$LINE_RV_VER" "$tmp/part" 'The reviews' 'Known limits' 'The landing numbers' > "$out"
   if cmp -s "$tmp/old" "$out"; then LINE_RV_STATE=listed; else LINE_RV_STATE=renders; fi
   rm -rf "$tmp"
 }

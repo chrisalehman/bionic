@@ -126,3 +126,4 @@ verdicts.T8.green=3
 verdicts.T9.green=4
 verdicts.regression.green=502
 verdicts.regression.red=6
+hands.matrix-set=3
