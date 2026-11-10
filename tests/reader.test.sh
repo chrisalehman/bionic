@@ -22,6 +22,10 @@
 #   §JOIN-15    a nine-cell row's waits are its deps and what its kind and step imply.
 #   §SECTION    a task's own section is the heading whose first word is its id, read to the next heading.
 #   §PLACES     a plan at each place the run walk admits reads its record; any other place is refused.
+#   §TABLE      a fenced table is prose, the heading reads in either case and may go on, the header line is the
+#               one naming the key column, and a lone CR ends a line.
+#   §WAITS      each row a read names carries the reads naming it; a row reading its own id waits on itself, and
+#               one reading live:head still writes the settled head.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
 
@@ -342,4 +346,53 @@ for pl in notes/w.plan.md plans/a/b/w.plan.md; do
   expect_status "$pl: no place the walk admits, refused" 2 "$?"
 done
 
+
+section "TABLE"
+# Each plan's real Tasks row T1 is `real`; a decoy where the old walk would look is `decoy`.
+TH='| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|'
+TR='| T1 | 4 | build | real | — | 30 | R | a.sh | out/T1.md |'
+tp() { printf '%s\n' "$2" > "$D/plans/epic-x/$1.plan.md"; }
+tp tfence "## Goal
+\`\`\`
+## Tasks
+$TH
+| T1 | 4 | build | decoy | — | 30 | R | z.sh | out/T1.md |
+\`\`\`
+## Tasks
+$TH
+$TR"
+tp tsuffix "## Tasks (amended)
+
+$TH
+$TR"
+tp tlower "## tasks
+
+$TH
+$TR"
+tp tnote "## Tasks
+
+| note | here |
+|---|---|
+$TH
+$TR"
+printf '## Tasks\r\r%s\r%s\r' "$(printf '%s' "$TH" | tr '\n' '\r')" "$TR" > "$D/plans/epic-x/tcr.plan.md"
+expect_eq "a fenced table is prose, the heading reads in either case and may go on, the header names id, a lone CR ends a line" \
+  "tfence=real tsuffix=real tlower=real tnote=real tcr=real " \
+  "$(for W in tfence tsuffix tlower tnote tcr; do printf '%s=%s ' $W "$(ask row T1 | sed -n 's/^task=//p')"; done)"
+
+section "WAITS"
+# The rows each read names carry the read: a row reading its own id waits on itself, and a row reading
+# live:head writes the settled head for a row that reads it.
+cat > "$D/plans/epic-x/wr.plan.md" <<'EOF2'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| C1 | 4 | build | t | — | — | 30 | R | src/c.sh | — | — | pending | approval:plan, C1, head |
+| C2 | 4 | build | t | — | — | 30 | R | src/d.sh | — | — | pending | live:head |
+| C3 | 4 | build | t | — | — | 30 | R | record/C3.md | — | — | pending | approval:plan, src/c.sh, C1 |
+EOF2
+rw() { ( . "${READER%/reader.sh}/lib/reader.sh" && plan_read_waits "$D/plans/epic-x/wr.plan.md" ) | awk -F'\t' '$2 == "row" { printf "%s>%s<%s ", $1, $3, $4 }'; }
+expect_eq "each row a read names, with the reads that name it" "C1>C1<C1 C1>C2<head C3>C1<src/c.sh,C1 " "$(rw)"
 finish

@@ -33,6 +33,8 @@
 #   §STEP-FIELD  units_step_field reads the first key line of the block units_step_fields writes
 #   §DEBT    a review-born row inside fix-policy: is exempt from fix-cap:, a promoted or carried one counts;
 #            task-add's cap refusal, its fourth-fix refusal and its count line each go red when removed
+#   §ASK     a row edited by hand reads as lib/plan-read.sh's row reads it; a floor row whose review proof stands at
+#            an older head is ready only when the judge reads the reviews covered
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT (AC-1e.2, measure §4.3). Before this library two
 # readers in hooks/canonical-sdlc-evidence-gate.sh took `id`/`rigor`/`status` as awk fields
@@ -1348,6 +1350,38 @@ expect_eq "DEBT-8b with the fourth-fix refusal removed, DEBT-5's check goes red:
 DBM_COUNT="$(db_mutant count 'say "task-add — [$]TA_ID is review-born ')"
 expect_eq "DEBT-9 precondition: the count mutant removes the one line, parses, and differs" "1 0 differs" "$(db_mut_ok count "$DBM_COUNT")"
 expect_eq "DEBT-9b with the count line removed, DEBT-6's check goes red: the row lands and its line says no count" "red: no exempt" "$(db_count "$DBM_COUNT")"
+
+# ============================================================
+section "§ASK — the units readers ask the plan's one parser: a row edited by hand reads as the reader's row, and a proof wait still asks the judge"
+# ============================================================
+#
+# A ROW EDITED BY HAND. A later edit changes only T2: its deps cell becomes T1, and a tab pasted from an editor
+# stays in its task cell. A record split on that tab reads every later cell one slot late, so deps answered the
+# agent; read through lib/plan-read.sh, the cell is the one the reader's `row` reads.
+AK_P="$SANDBOX/ask.plan.md"
+ak_plan() {  # <T2 task cell> <T2 deps cell>
+  printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status |\n|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | one | a1 | — | 30m | R | a.sh | pending |\n| T2 | 4 | build | %s | a2 | %s | 30m | R | b.sh | pending |\n' "$1" "$2"
+}
+ak_t2() { call units_rows "$AK_P" | awk -F'\t' '$1 == "T2"'; }
+ak_plan two — > "$AK_P"
+expect_eq "ASK-1 before the edit, units_field T2 deps reads no dependency" "—" "$(call units_field "$(ak_t2)" deps)"
+ak_plan "$(printf 'two\tpasted')" T1 > "$AK_P"
+expect_eq "ASK-2 after the edit, units_field T2 deps answers the edit, as the reader's row reads it" "T1 T1" \
+  "$(call units_field "$(ak_t2)" deps) $(bash -c '. "$1" && plan_read_row "$2" Tasks id T2' _ "${LIB%/*}/plan-read.sh" "$AK_P" | sed -n 's/^deps=//p')"
+#
+# A PROOF WAIT ASKS THE JUDGE. The floor row reads proof:review by its kind default; the review proof stands at
+# an older head, and the rows the reads name have landed. Ready only when the judge reads the reviews covered.
+AK_J="$SANDBOX/ask-judge.plan.md"
+{ printf -- '---\ncurrent: 6\n---\n\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | b | — | — | 30m | R | src/a.sh | landed | approval:plan |\n'
+  printf '| T2 | 6 | review | r | — | — | 30m | R | .bionic/docs/record/w/r.md | landed | approval:plan, src/a.sh |\n'
+  printf '| T3 | 6 | test | the floor | — | — | 30m | R | .bionic/docs/record/w/f.md | pending | |\n\n## SDLC State\n\ncurrent: 6\napproved-by: me\n'
+  printf 'proved: kind=review head=%s at=2026-10-20T00:00:00Z question=adversarial result=pass scope=piece\n' "$(printf 'a%.0s' {1..40})"
+} > "$AK_J"
+ak_ready() { ( export UNITS_READINGS_STATE="$1"; call units_ready "$AK_J" 6 ); }
+expect_eq "ASK-3 the floor row with the reviews covered at the head is ready; past the proof at an older head it is not" "T3|" \
+  "$(ak_ready covered)|$(ak_ready 'review adversarial critic piece uncovered')"
 
 # ============================================================
 finish
