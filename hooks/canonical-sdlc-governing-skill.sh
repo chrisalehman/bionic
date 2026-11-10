@@ -182,7 +182,7 @@ physicalize() {  # $1=absolute path (need not exist) → folded, ancestors resol
 # say a Write or Edit is safe, so it refuses it; the refusal names /bionic:doctor, and the
 # Bash wall still admits the four repair commands. On PostToolUse the write has already
 # happened and exit 2 only shows the refusal to the model.
-BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh binding.sh units.sh"
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh binding.sh plan-read.sh units.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -292,6 +292,11 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "canonical-sdlc-governi
 # line-ending translation it is written in terms of.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/binding.sh"
+# THE ONE PARSER OF A PLAN'S AUTHORED PARTS, its header, its headings and its tables: every read
+# this hook makes of the artifact it judges is a call into it, so the wall and the reader cannot
+# read one plan two ways.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/plan-read.sh"
 # THE ONE READER OF `## Tasks` (REQ-1e, spec §2 D3). The Step-3 wall below runs its
 # `units_validate` and prints the violation lines back; nothing here parses the table.
 # shellcheck source=/dev/null
@@ -981,13 +986,34 @@ Fix: prepend:
   refuse exit2 write "this artifact has no frontmatter block" "prepend a frontmatter block" "$_gs_detail"
 fi
 
+# THE ARTIFACT AS THE PARSER READS IT. The parser reads a path, and the text judged here is the
+# posted body or the Edit applied, which no file holds yet: so it is written once to a temporary
+# file, removed on every way out, and every read below is of that one copy. The header is read
+# once; `yaml_get` and `gs_has_key` answer from that reading with no further process.
+GS_PAGE="$(mktemp "${TMPDIR:-/tmp}/bionic-page.XXXXXX")" || GS_PAGE=""
+[ -n "$GS_PAGE" ] || refuse exit2 write "this artifact could not be read" "retry the write" \
+  "canonical-sdlc artifact '$BASENAME': no temporary file could be made to read it through the plan parser.
+Path: $FILE_PATH"
+trap 'rm -f "$GS_PAGE"' EXIT
+printf '%s\n' "$CONTENT" > "$GS_PAGE"
+GS_HEADER="$(plan_read_header "$GS_PAGE")" || GS_HEADER=""
+
+# yaml_get <key> -> the header's value for <key>, empty when it is absent.
+yaml_get() {
+  local l
+  while IFS= read -r l; do
+    case "$l" in "$1="*) printf '%s\n' "${l#*=}"; return 0 ;; esac
+  done <<GS_HEADER_LINES
+$GS_HEADER
+GS_HEADER_LINES
+  return 0
+}
+# gs_has_key <key> -> 0 when the header holds <key>, its value empty or not.
+gs_has_key() { case $'\n'"$GS_HEADER" in *$'\n'"$1="*) return 0 ;; esac; return 1; }
+
 # Enforce presence of the governing-skill field with a non-empty value.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-GOVERNING=$(echo "$FRONTMATTER" \
-            | grep -E '^[[:space:]]*governing-skill[[:space:]]*:' \
-            | head -1 \
-            | sed -E 's/^[[:space:]]*governing-skill[[:space:]]*:[[:space:]]*//' \
-            | sed -E 's/[[:space:]]+$//')
+GOVERNING=$(yaml_get governing-skill)
 
 if [ -z "$GOVERNING" ]; then
   _gs_detail="canonical-sdlc artifact '$BASENAME' is missing a 'governing-skill:' frontmatter field.
@@ -1005,21 +1031,19 @@ fi
 # `canonical_sdlc_version`, which Step 0 stamps on every canonical-sdlc
 # artifact and is therefore the correct run marker.
 
-yaml_get() {
-  echo "$FRONTMATTER" \
-    | grep -E "^[[:space:]]*${1}[[:space:]]*:" \
-    | head -1 \
-    | sed -E "s/^[[:space:]]*${1}[[:space:]]*:[[:space:]]*//" \
-    | sed -E 's/[[:space:]]+$//'
-}
-
 SDLC_VERSION=$(yaml_get canonical_sdlc_version)
 
 # SUPPORTED_SDLC_VERSION is bound once, near the top of the file (before the
-# missing-frontmatter hint that also quotes it). There is no version dispatch below this
-# line and no path that reaches `exit 0` without passing the whole contract.
+# missing-frontmatter hint that also quotes it). No path reaches `exit 0` without passing the
+# whole contract of the version it declares.
+#
+# A PLAN MAY ALSO BE AT 15, the shape that holds only what a person wrote: it is read in both
+# shapes until a version-14 plan is refused where it is written, and is held below to what
+# version 15 has no place for. Every other artifact is at the supported version alone.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-if [ "$SDLC_VERSION" != "$SUPPORTED_SDLC_VERSION" ]; then
+GS_V15=0
+case "$BASENAME:$SDLC_VERSION" in *.plan.md:15) GS_V15=1 ;; esac
+if [ "$SDLC_VERSION" != "$SUPPORTED_SDLC_VERSION" ] && [ "$GS_V15" -eq 0 ]; then
   _gs_detail="canonical-sdlc artifact '$BASENAME' declares canonical_sdlc_version: '$SDLC_VERSION'.
 Path: $FILE_PATH
 Fix: set 'canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION}' — the only supported version."
@@ -1080,7 +1104,6 @@ esac
 # value outside its vocabulary, the empty fix-policy: included (a set naming no rating). The fix
 # names the vocabulary as one comma-joined word, the field's own syntax: refuse.sh allows six words.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-gs_has_key() { grep -qE "^[[:space:]]*${1}[[:space:]]*:" <<< "$FRONTMATTER"; }
 if gs_has_key review-cadence; then
   RCAD=$(yaml_get review-cadence)
   review_cadence_level "$RCAD" >/dev/null || block "that review-cadence is not once" "use once" \
@@ -1316,7 +1339,7 @@ REQUIRED_DISCRIMINATORS=("surface_type" "language" "has_ui" "multi_agent" "deplo
 
 MISSING=()
 for flag in "${REQUIRED_OPT_IN[@]}" "${REQUIRED_DISCRIMINATORS[@]}"; do
-  if ! grep -qE "^[[:space:]]*${flag}[[:space:]]*:" <<< "$FRONTMATTER"; then
+  if ! gs_has_key "$flag"; then
     MISSING+=("$flag")
   fi
 done
@@ -1324,7 +1347,7 @@ done
 # `model_plan` (the Step-0 model-tier decision) is checked as a separate
 # conditional grep — NOT an array element — to stay safe under `set -u` with
 # bash 3.2's empty-array expansion behaviour.
-if ! grep -qE "^[[:space:]]*model_plan[[:space:]]*:" <<< "$FRONTMATTER"; then
+if ! gs_has_key model_plan; then
   MISSING+=("model_plan")
 fi
 
@@ -1352,14 +1375,18 @@ fi
 # continuation*.md and scale: task plans (they carry a ## Tasks ledger, not a
 # matrix) are out of scope — the matrix is a wave/epic plan-body artifact
 # that exists starting at Step 3 (Plan) approval.
+#
+# A VERSION-15 PLAN IS NONE OF THIS ARM'S: it holds no matrix and its Tasks rows are the nine
+# authored cells, so the arm below it holds it to that shape instead.
 case "$BASENAME" in
   *.plan.md)
     SDLC_STEP=$(yaml_get sdlc-step)
+    [ "$GS_V15" -eq 1 ] && SDLC_STEP=""
     case "$SDLC_STEP" in
       ''|*[!0-9]*) ;;  # non-numeric or empty sdlc-step → not in scope
       *)
         if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null && [ "$SCALE" != "task" ]; then
-          if ! grep -qE '^## Verification Matrix' <<< "$CONTENT"; then
+          if ! plan_read_heading "$GS_PAGE" "Verification Matrix" >/dev/null; then
             _gs_detail="canonical-sdlc plan '$BASENAME' (sdlc-step ${SDLC_STEP}) is missing a '## Verification Matrix' section.
 Path: $FILE_PATH
 Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix') and lock it at Step 3 approval."
@@ -1408,13 +1435,12 @@ Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix
           # tool will fail on that input by itself, and a wall that refused it first
           # would be asserting a fault nobody committed (ADR-028).
           #
-          # A TEMP FILE, because the verbs are functions of a PATH: one plan, one copy,
-          # removed on both paths out.
+          # THE VERBS READ THE ONE COPY the parser reads, `$GS_PAGE`, since they are functions
+          # of a path.
           if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null && [ "$SCALE" != "task" ] && [ -n "$CONTENT" ] \
              && { [ "$TOOL" != "Edit" ] || [ "$EDIT_APPLIED" -eq 1 ]; }; then
-            _gs_units_tmp="$(mktemp "${TMPDIR:-/tmp}/bionic-units.XXXXXX")" || _gs_units_tmp=""
+            _gs_units_tmp="$GS_PAGE"
             if [ -n "$_gs_units_tmp" ]; then
-              printf '%s\n' "$CONTENT" > "$_gs_units_tmp"
               # THE BRING-FORWARD SUMMARY COMES FIRST (wave-16 REQ-3, AC-3.1; spec D8).
               # A plan whose frontmatter says version 14 and whose body is pre-14 used to
               # meet this wall for its table, the evidence gate for `requirements:`, the
@@ -1451,7 +1477,6 @@ Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix
               else
                 _gs_units_bad=""
               fi
-              rm -f "$_gs_units_tmp"
               if [ "$_gs_bf_fired" -eq 1 ]; then
                 _gs_detail="canonical-sdlc plan '$BASENAME' declares canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION} and its body does not match it:
 ${_gs_bf}
@@ -1473,6 +1498,24 @@ Fix: repair each row named above; the columns are id | step | kind | task | agen
     esac
     ;;
 esac
+
+# ---------- a version-15 plan holds only what a person wrote ----------
+# [WALL: tests/plan-page.test.sh]
+#
+# The parser names each part version 15 has no place for (`plan_read_faults`): a verification
+# matrix, a state or a handoff section by its heading's line, a Tasks cell outside the nine
+# authored ones by the table header's line, a header key the reader does not answer from by its
+# name. All are listed in one refusal, so one repair answers it. An Edit the hook could not apply
+# is not judged, as the Tasks arm above does not judge one: the tool refuses that input itself.
+if [ "$GS_V15" -eq 1 ] && { [ "$TOOL" != "Edit" ] || [ "$EDIT_APPLIED" -eq 1 ]; }; then
+  if GS_FAULTS="$(plan_read_faults "$GS_PAGE")"; then
+    refuse exit2 write "this plan holds what version 15 does not" "remove each part named" \
+      "canonical-sdlc plan '$BASENAME' declares canonical_sdlc_version: 15, and version 15 has no place for:
+${GS_FAULTS}
+Path: $FILE_PATH
+Fix: remove each part named; the run's state is the log's, and the reader answers it."
+  fi
+fi
 
 # ---------- design wall: the three-way rule (wave-02 AC-2/AC-3/AC-4) ----------
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
@@ -1540,38 +1583,12 @@ A wave- or epic-scale spec must satisfy one of three:
   (c) frontmatter 'design-waived: <user> <date> <reason>' — a user-only move."
       }
 
-      # `## Design` must be flush left and must be the whole heading word:
-      # `## Design — v2` is the section, `## Designer notes` is not. The matrix
-      # gate's bare prefix match would accept both; the trailing-boundary
-      # requirement costs nothing and is the difference between a wall and a
-      # word search. `[[:space:]]` covers a CRLF target's trailing \r.
-      DESIGN_HEADING='^## Design([[:space:]]|$)'
-
-      # Fence-aware on BOTH read paths, matching the evidence-gate hook, whose
-      # `## SDLC State` reads all skip ``` fenced blocks for the same reason: a
-      # spec that EXPLAINS this contract will show `## Design` as an example,
-      # and an example is documentation, not a section. Stripping fences before
-      # the grep keeps one heading regex for both paths rather than a second
-      # rendering of it inside awk.
-      strip_fences() {  # a document on stdin → the same document, fences dropped
-        awk '
-          /^[[:space:]]*```/ { fence = !fence; next }
-          fence { next }
-          { print }
-        '
-      }
-
-      # The pointer target is read off disk, so it needs the same normalization
-      # `$CONTENT` got at the top of this hook. `normalize_newlines` is
-      # payload/scripts/lib/run.sh's now (epic-23 wave-12-fixit-171, REQ-8, spec D6),
-      # sourced at :288, and with no argument it reads STDIN — which is exactly the shape
-      # this arm used to define a nested twin for, and the reason the three copies were
-      # never compared: they differed in SHAPE, not in body. The template this arm follows
-      # was copied for its path half and not its read half: CRLF survives a line-anchored
-      # grep (`[[:space:]]` eats the trailing \r), but a CR-only document arrives as ONE
-      # record, so no `## Design` is ever at a line start and a legitimate target
-      # false-BLOCKs. CRLF coverage does not catch this class — see
-      # `.claude/rules/hook-authoring.md`, and c14 for the case that does.
+      # `## Design` is a section only as the plan parser names one (`plan_read_heading`): flush
+      # left, the whole heading word, so `## Design — v2` is the section and `## Designer notes` is
+      # not, and never inside a fenced block, since a spec that EXPLAINS this contract shows the
+      # heading as an example. The pointer target is read off disk by the same function, which
+      # translates its line ends first: a CR-only target is one record until it does, and a
+      # legitimate target false-BLOCKs (c14).
       # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 
       DESIGN_POINTER=$(yaml_get design)
@@ -1580,7 +1597,7 @@ A wave- or epic-scale spec must satisfy one of three:
       # rather than yaml_get so that a bare `design-waived:` — a malformed
       # waiver, but unmistakably a user's waiver — still counts as present.
       DESIGN_WAIVED=0
-      if grep -qE '^[[:space:]]*design-waived[[:space:]]*:' <<< "$FRONTMATTER"; then
+      if gs_has_key design-waived; then
         DESIGN_WAIVED=1
       fi
 
@@ -1616,10 +1633,10 @@ A wave- or epic-scale spec must satisfy one of three:
         if [ ! -f "$DESIGN_ABS" ]; then
           block_design "design: '$DESIGN_POINTER' names no file (resolved to $DESIGN_ABS)."
         fi
-        if ! normalize_newlines < "$DESIGN_ABS" 2>/dev/null | strip_fences | grep -qE "$DESIGN_HEADING"; then
+        if ! plan_read_heading "$DESIGN_ABS" Design >/dev/null 2>&1; then
           block_design "design: '$DESIGN_POINTER' resolves to $DESIGN_ABS, which carries no flush-left '## Design' section."
         fi
-      elif ! echo "$CONTENT" | strip_fences | grep -qE "$DESIGN_HEADING"; then
+      elif ! plan_read_heading "$GS_PAGE" Design >/dev/null; then
         block_design "no design. It carries no '## Design' section, no 'design:' pointer and no waiver."
       fi
     fi
@@ -1730,7 +1747,7 @@ case "$BASENAME" in
   *.plan.md|*.spec.md|*.requirements.md)
     if [ "$TOOL" = "Write" ] && { [ "$SCALE" = "wave" ] || [ "$SCALE" = "epic" ]; }; then
 
-      # Fence-aware, matching the design wall's strip_fences rationale immediately above:
+      # Fence-aware, for the reason the design wall above reads its heading through the parser:
       # an artifact that EXPLAINS this contract (this very hook's own doc comment, or the
       # skill text) may show `## Goal` inside a fenced example, and an example is
       # documentation, not the artifact's own first section. CONTENT already carries the

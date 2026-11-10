@@ -6,6 +6,8 @@
 #
 #   plan_read_table <plan> <heading> [key]           -> the header's names, then each row, then each row too wide
 #   plan_read_dropped <plan>                         -> the id of each Tasks row whose status cell is dropped
+#   plan_read_heading <plan> <name>[|<name>...]      -> the line of each `## <name>` heading outside a fence
+#   plan_read_faults <plan>                          -> each part a version-15 plan has no place for, its line named
 #
 # A plan is the words a person wrote: its header and its tables. Everything that is the run's state is
 # the log's, read by lib/reader.sh, so nothing here reads a state cell for an answer or follows a header
@@ -72,7 +74,12 @@ _plan_read_lines() { awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"; }
 # on each row after it, its cells in r[1..rn]. It reads to the end of its input and sets `stop` where it is
 # done, never exiting early: its input is a pipe, and a writer cut short fails the pipeline under pipefail.
 # NO APOSTROPHE inside it: it is single-quoted.
-_PLAN_READ_TABLE='
+# A section is named by its heading the one way: `## ` and the name, its first letter in either case, going on
+# only after a blank, so `## Design — v2` is the Design section and `## Designer notes` is not. `sec` is the name.
+_PLAN_READ_NAMED='
+    function cap(s) { return tolower(substr(s, 1, 1)) substr(s, 2) }
+    function named(h,   l) { l = length(sec); return (cap(substr(h, 1, l)) == cap(sec) && (length(h) == l || substr(h, l + 1, 1) ~ /[ \t]/)) }'
+_PLAN_READ_TABLE="$_PLAN_READ_NAMED"'
     function cells(line, out,   n, i) {
       gsub(/\\[|]/, "\001", line); sub(/^[ \t]*[|]/, "", line); sub(/[|][ \t]*$/, "", line)
       n = split(line, out, "|")
@@ -81,8 +88,6 @@ _PLAN_READ_TABLE='
     }
     function name(i,   k) { k = tolower(head[i]); gsub(/[ \t]+/, "-", k); return k }
     function line(   i, o, v) { o = ""; for (i = 1; i <= nh; i++) { v = r[i]; gsub(/\t/, " ", v); o = o (i > 1 ? "\t" : "") name(i) "=" v }; return o }
-    function cap(s) { return tolower(substr(s, 1, 1)) substr(s, 2) }
-    function named(h,   l) { l = length(sec); return (cap(substr(h, 1, l)) == cap(sec) && (length(h) == l || substr(h, l + 1, 1) ~ /[ \t]/)) }
     { sub(/\r$/, "") }
     stop { next }
     /^[ \t]*```/ { fence = !fence; next }
@@ -241,4 +246,54 @@ plan_read_section() {
     /^[ \t]*$/ { if (n) blank++; next }
     { for (; blank > 0; blank--) print ""; print; n++ }
     END { exit !(key == "" ? found : got) }' "$1"
+}
+
+# plan_read_heading <plan> <name>[|<name>...] -> `<line><TAB><name>` for each `## ` heading one of the names names, by
+# the rule above, in file order; a heading inside a fenced block is an example and is not one. 1 when there is none,
+# 2 when the plan is not a file. Lines are counted after a lone CR has ended one, so a CR-only plan names the line its
+# reader sees.
+plan_read_heading() {
+  [ -f "${1:-}" ] || return 2
+  [ -n "${2:-}" ] || return 1
+  _plan_read_lines "$1" | awk -v names="$2" "$_PLAN_READ_NAMED"'
+    BEGIN { n = split(names, want, "|") }
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[ \t]/ { h = $0; sub(/^##[ \t]+/, "", h); sub(/[ \t]+$/, "", h)
+      for (i = 1; i <= n; i++) { sec = want[i]; if (named(h)) { print NR "\t" sec; found = 1; break } } }
+    END { exit !found }'
+}
+
+# WHAT A VERSION-15 PLAN HOLDS is what a person wrote: its header, Goal, Problem, Design, Eval design, Tasks and a
+# section per task. The machine's sections are gone to the log (the verification matrix, the state and the handoff), a
+# Tasks row is its nine authored cells, and a header key stays only if the reader answers from it. The keys below were
+# the run's own state written into its header (an abandon, a clean-up, the regression runs, the current step and its
+# approvals), which the log carries now; the list is this one place, so a key the version-15 header loses is added here.
+PLAN_READ_GONE_KEYS="abandoned cleaned current approved-by regression-runs"
+PLAN_READ_GONE_SECTIONS="Verification Matrix|SDLC State|Handoff"
+PLAN_READ_NINE="id step kind task deps size serves files artifact"
+
+# plan_read_faults <plan> -> at version 15, one line per part of the plan that version has no place for, each naming
+# where it is: `line <n>: ## <name>` per machine section, `line <n>: the Tasks table holds the cell <name>` per cell
+# outside the nine (the header's line), `header key <key>:` per key the reader does not answer from. A plan at any other
+# version has none here: both shapes are read until a version-14 plan is refused where it is written. 0 with faults,
+# 1 with none, 2 when the plan is not a file.
+plan_read_faults() {
+  [ -f "${1:-}" ] || return 2
+  local v secs cells keys
+  v="$(plan_read_header "$1" canonical_sdlc_version)" || return 1
+  [ "${v#*=}" = 15 ] || return 1
+  secs="$(plan_read_heading "$1" "$PLAN_READ_GONE_SECTIONS" | awk -F'\t' '{
+    print "line " $1 ": ## " $2 " — a version-15 plan holds no verification matrix, state or handoff section" }')" || :
+  cells="$(_plan_read_lines "$1" | awk -v sec=Tasks -v key=id -v nine=" $PLAN_READ_NINE " '
+    function start(   i) {
+      for (i = 1; i <= nh; i++) if (index(nine, " " name(i) " ") == 0)
+        print "line " NR ": the Tasks table holds the cell " name(i) " — a version-15 row is its nine authored cells"
+      stop = 1
+    }
+    function row() { }'"$_PLAN_READ_TABLE")" || :
+  keys="$(plan_read_header "$1" | awk -F= -v gone=" $PLAN_READ_GONE_KEYS " 'index(gone, " " $1 " ") {
+    print "header key " $1 ": — the log holds this fact now, and the reader answers from no such key" }')" || :
+  [ -n "$secs$cells$keys" ] || return 1
+  local l; for l in "$secs" "$cells" "$keys"; do [ -z "$l" ] || printf '%s\n' "$l"; done
 }
