@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 125 · sections: 1121 · keep: 927 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 125 · sections: 1124 · keep: 930 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1092 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1092 - 22 - 8 = 1062.
 
@@ -131,6 +131,9 @@ booked.test.sh | §CLASS | keep | payload/scripts/booked.sh: the class dropped f
 bring-forward.test.sh | §GAPS | keep | payload/scripts/lib/translate.sh: an absent field filled instead of left out and named (an instant made for a Step with none, a commit for a hand landing), or a value holding a bar written, so a value has no source or the gaps list misses it; a plan source dropped, so the event count falls | none (searched 'translate', 'gap/v1' and 'bring-forward' in tests/)
 bring-forward.test.sh | §SHAPE | keep | payload/scripts/lib/translate.sh: a line built with a type off the appender's list, a field key it refuses, or no closing `at=`, so log_append refuses it or the line has no instant | none (searched 'log_append' and 'translate' in tests/; log.test.sh drives the appender with its own fields)
 bring-forward.test.sh | §READER | keep | payload/scripts/lib/reader.sh reader_events: the translation not taken when the run has no run.log, so a version-14 plan answers nothing; taken beside a log, so a run with a log reads facts twice; payload/scripts/lib/translate.sh: lines left in the plan's order instead of their instants', so the earlier failing proof replaces the later passing one and green answers no | none (searched 'reader_events' and 'run.log' in tests/; reader.test.sh plants a log on every plan)
+bring-forward.test.sh | §MATRIX | keep | payload/scripts/lib/translate.sh _translate_matrix: the Verification Matrix not read, so cell answers pending for a discharged or waived row; a row's cells counted by place or a head, kind or instant made for a proof, so a value has no source; a pending row written, or an empty evidence cell dropping the row instead of naming the gap | none (searched 'translate.sh' and 'translate "' in tests/: only this suite reads the translation; the other suites that name the Verification Matrix drive lib/proof.sh's readers, and reader.test.sh §CELL plants a log)
+bring-forward.test.sh | §ONE-FACT | keep | payload/scripts/lib/translate.sh _translate_matrix: the stated criterion not skipped, so a criterion a proved: line and a matrix row both name is two proofs, the row's replacing nothing and counting twice | none (searched 'translate.sh' and 'translate "' in tests/: only this suite reads the translation)
+bring-forward.test.sh | §UNREAD | keep | payload/scripts/lib/translate.sh _translate_abandon, _translate_inherited: abandoned: not read, so step answers open for an abandoned run, or its author made up; an inherited: line written as a type that does not carry it, or dropped without a gap | none (searched 'translate.sh' and 'translate "' in tests/: only this suite reads the translation; reader.test.sh §REST plants an abandon line in a log, and the suites naming inherited: drive lib/proof.sh)
 
 ## canonical-sdlc-evidence-gate-2.test.sh
 
