@@ -419,7 +419,9 @@ section "§SINGLE: the single-rigor run reaches the Verify gate with no discharg
 # verdict, the evidence review is registered on any row but the critic's, or its log runs discharge.
 SG_DIR="$WORLD_ROOT/single-verify"; SG_RC=0; SG_PLAN=""
 if [ "$CR_LOADED" = 1 ]; then
-  SG_PLAN="$(rehearse single-verify "$SG_DIR" 2> "$WORLD_ROOT/single-verify.err")" || SG_RC=$?
+  # The host is planted busy (load 14 on 8 cores): a rehearsed landing's verdict never turns on the machine's load.
+  SG_PLAN="$(BIONIC_PROBE_CORES=8 BIONIC_PROBE_BUSY_CORES=14 BIONIC_PROBE_BUSY_CORES_5M=14 \
+    rehearse single-verify "$SG_DIR" 2> "$WORLD_ROOT/single-verify.err")" || SG_RC=$?
 else
   SG_RC=127
 fi
