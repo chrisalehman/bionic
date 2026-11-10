@@ -2543,7 +2543,9 @@ row_copy_args() {  # <row> <session id> [drop-done] -> sets ROW_COPY_ARGS
   done
   # `row=` and `lands_on=` too (wave-28 T7; D4, D17): the row a dispatch binds and the suites it
   # lands on are its contract, read off its latest row, so an amended, held or extended row keeps them.
-  for k in row lands_on; do
+  # So are `brief=` and `brief_sum=`, the rendered file the dispatch was given and its sum: the latest row
+  # is the one every reader asks, and a copy that dropped them would say the agent was given no file.
+  for k in row lands_on brief brief_sum; do
     row_has_key "$row" "$k" && ROW_COPY_ARGS+=("$k=$(line_field "$row" "$k")")
   done
   # `pushed=` too (wave-28 T15; A-orch-9): what a reader was pushed at start decides how its record
@@ -3148,7 +3150,7 @@ SCHED_HOLDS=""
 TICK_CARRIERS=""; TICK_CARRIERS_READ=no
 TICK_QUIET_MTIME=""; TICK_QUIET_CHANNEL=""; TICK_QUIET_AGE=""; TICK_QUIET_CAD=""
 # the plan verbs
-POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
+POKER_BRIEF_WORDS=""
 BFB_OF=""; BFB_OWED=""; BFB_BRANCH=""
 PFC_OUT=""; PFC_ART=""
 SERVES_AWK='

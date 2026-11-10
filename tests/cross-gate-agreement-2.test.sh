@@ -236,7 +236,7 @@ section "S13 — the suite budget: the brief's own set, one row writer, one alph
 #   payload/scripts/lib/brief.sh        RECORDS it, the brief's `Suites:` tokens as basenames
 #   payload/scripts/lib/walls.sh        ENFORCES it, against basenames read out of a command
 #
-# What is pinned here is the SEAM: the grammar's own lift, driven over a `Suites:` line in
+# What is pinned here is the SEAM: the contract's one reader, driven over a `Suites:` line in
 # every spelling a brief uses, answering in the alphabet the guard compares in.
 
 S13_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
@@ -249,8 +249,8 @@ S13_ROSTER_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/roster.sh"
 [ -r "$S13_ROSTER_LIB" ] || S13_ROSTER_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/roster.sh"
 S13_CMDCLASS="$BIONIC_HOOKS_DIR/../payload/scripts/lib/cmd-class.sh"
 [ -r "$S13_CMDCLASS" ] || S13_CMDCLASS="$BIONIC_HOOKS_DIR/../scripts/lib/cmd-class.sh"
-# THE CONTRACT GRAMMAR (wave-20 T6; REQ-4, Δ10): the dispatch wall, `amend` and `task-add` all
-# record the set `brief_validate_fields` builds, so that is the file this pin drives.
+# THE CONTRACT'S ONE READER: the dispatch wall, `amend` and `task-add` all record the set
+# `brief_contract` reads, so that is the file this pin drives.
 S13_HOOK="$BIONIC_HOOKS_DIR/../payload/scripts/lib/brief.sh"
 [ -r "$S13_HOOK" ] || S13_HOOK="$BIONIC_HOOKS_DIR/../scripts/lib/brief.sh"
 expect_eq "S13.2 the library this section reads is present" "yes" \
@@ -258,31 +258,26 @@ expect_eq "S13.2 the library this section reads is present" "yes" \
 
 # --- §S13.2 the set the row records is the brief's own tokens, as basenames ---
 #
-# Driven through the grammar the dispatch wall calls, over one `Suites:` line carrying the
+# Driven through the reader the dispatch wall calls, over one `Suites:` line carrying the
 # three spellings a brief uses for a suite (path-relative, `./`-prefixed, absolute). The set
-# `brief_validate_fields` hands the row writer is the lift's, once each, as basenames.
-s13_set() {  # <Suites: span> -> "<BRIEF_SUITES_ALLOWED>|<BRIEF_SUITES_SOURCE>"
-  bash -c '
-    . "$1" || exit 9
-    sink() { :; }
-    brief_validate_fields "$(lift_contract_fields "Suites: $2" implementor)" implementor "$3" sink >/dev/null 2>&1
-    printf "%s|%s" "${BRIEF_SUITES_ALLOWED-}" "${BRIEF_SUITES_SOURCE-}"
-  ' _ "$S13_HOOK" "$1" "$SANDBOX" 2>/dev/null
+# the row writer is handed is the reader's, once each, as basenames.
+s13_set() {  # <Suites: span> -> the suites= value the reader records
+  bash -c '. "$1" || exit 9; brief_field "$(brief_contract "Suites: $2")" suites' _ "$S13_HOOK" "$1" 2>/dev/null
 }
 S13_GOT="$(s13_set "tests/cmd-class.test.sh, ./tests/walls.test.sh, $REPO_ROOT/tests/brief-x.test.sh, tests/cmd-class.test.sh")"
-expect_eq "S13.2 the recorded set is the brief's tokens as basenames, once each, declared" \
-  "cmd-class.test.sh walls.test.sh brief-x.test.sh|declared" "$S13_GOT"
-S13_SET="${S13_GOT%%|*}"
+expect_eq "S13.2 the recorded set is the brief's tokens as basenames, once each" \
+  "cmd-class.test.sh walls.test.sh brief-x.test.sh" "$S13_GOT"
+S13_SET="$S13_GOT"
 expect_eq "S13.2 …carrying no path, no tab and no duplicate" "0" \
   "$(printf '%s\n' "$S13_SET" | tr ' ' '\n' | awk '/\// || /\t/ { n++ } END { print n + 0 }')"
 # THE MUTATION: a different Suites: line lands a different set, so the row above is the brief's
 # answer and not a constant.
 expect_eq "S13.2 …and a different Suites: line records a different set" \
-  "gamma.test.sh|declared" "$(s13_set "tests/gamma.test.sh")"
+  "gamma.test.sh" "$(s13_set "tests/gamma.test.sh")"
 
 # --- §S13.3 the guard compares in that same alphabet ---
 #
-# `cmd_suite_targets` is the reader on the enforcement side. Every basename the grammar
+# `cmd_suite_targets` is the reader on the enforcement side. Every basename the reader
 # just recorded must be a name it can produce too, from the command a writer would type —
 # otherwise a suite on the budget is refused by the wall that granted it.
 S13_TARGETS_OK=0
@@ -513,21 +508,17 @@ section "S13b — one run normaliser on both sides of the row (wave-20 T4; REQ-7
 # ============================================================
 #
 # THE SAME SEAM AS S13, FOR THE OTHER BUDGET FIELD. `re_executes=` is WRITTEN by the
-# dispatch lift (`lift_contract_fields`, its `collapse()`) and COMPARED by the budget arm to
+# contract's one reader (`brief_contract`, through `cmdnorm_run`) and COMPARED by the budget arm to
 # the run the claim reader built (payload/scripts/lib/cmd-class.sh, LAST_RUN). Each side has
 # its own suite and each can pass while the two spell one run two ways — which is exactly how
 # `npx jest x 2>&1 | tee log` came to be refused for the run its brief declared (triage-B
-# B1). Pinned here: the lift, run with the library it loads, stores the run the claim reader
-# reads off every redirected spelling of it.
-#
-# THE LIFT IS A LIBRARY NOW (wave-20 T6; REQ-4, Δ10), so this section sources
-# payload/scripts/lib/brief.sh — the one file every contract door calls — where it used to
-# lift the function's text out of hooks/dispatch-preflight.sh between two anchors. Sourcing
-# it alone also proves it brings in cmd-class.sh for itself: nothing else is loaded here.
+# B1). Pinned here: the reader, run with the library it loads, stores the run the claim reader
+# reads off every redirected spelling of it. This section sources payload/scripts/lib/brief.sh
+# alone, which also proves it brings in cmd-class.sh for itself: nothing else is loaded here.
 S13B_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/brief.sh"
 [ -r "$S13B_LIB" ] || S13B_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/brief.sh"
-s13b_lift_runs() {  # <brief text> -> the lifted re_executes= value
-  bash -c '. "$1" || exit 1; lift_contract_fields "$2" | sed -n "s/^re_executes=//p"' \
+s13b_lift_runs() {  # <brief text> -> the re_executes= value the reader records
+  bash -c '. "$1" || exit 1; brief_contract "$2" | sed -n "s/^re_executes=//p"' \
     _ "$S13B_LIB" "$1" 2>&1
 }
 s13b_claim_run() {  # <command> -> the first claim's run column

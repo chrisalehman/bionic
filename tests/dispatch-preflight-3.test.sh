@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for hooks/dispatch-preflight.sh — THE START GATE. One shard of four:
-# §combined … §two-deliverables.
+# §combined-deny … §T22-name-in-flight.
 #
 # The suite's header (what it governs, how it stays hermetic) is in
 # tests/dispatch-preflight.test.sh; the fixtures and their fidelity notes are in
@@ -39,513 +39,42 @@ set -uo pipefail
 . "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/dispatch-preflight.prelude.sh"
 
-section "§combined — one refusal, every brief-shape fault (wave-12 T2, D3, AC-1.1/AC-1.2)"
-# ============================================================================
-#
-# THE INCIDENT THIS SECTION IS BUILT FROM. On 2026-09-13 six dispatch attempts were spent
-# spawning one researcher: the gate exited at the FIRST failing brief-shape arm, so each
-# attempt taught the author exactly one fault and the next attempt found the next one. The
-# faults were all in the brief — the one artifact the author was holding — and all readable
-# in a single pass.
-#
-# WHAT CHANGED (spec D3, principle P-A). The five BRIEF-SHAPE arms — A11 several paths,
-# A12 outside the repo, A13 no deliverable, A14 no Files:/Suites:, A16 Files: naming
-# no suite — no longer refuse where they stand. Each appends its finding (fact, fix
-# and its own verbatim `Fix:` block) to a list, and ONE `refuse exit2` after the last of
-# them emits the list in file order and exits 2 once. The STATE arms are untouched: a
-# missing attestation, an unarmed Patrol, an unapproved plan, a worktree cwd, a full
-# budget and a second full-tree dispatch each still exit where they stand, because none of
-# them is a defect in the brief and none is fixed by reading the next one.
-#
-# fails-when: a three-fault brief is refused for fewer than three faults, or refused more
-# than once, or the second attempt — written from the first refusal's own `Fix:` examples —
-# is refused for a fault the first refusal never named.
 
-REPO=$(make_repo rcomb yes)
-# A BUDGETED PLAN (ADR-035). Since epic-23 wave-20 T2 a keyless live plan adds its own
-# `not checked: budget` line to the wire, and this arm's line cap counts the scaffold's walls,
-# not the budget's; a real plan carries the key, so the fixture does too.
-s22_set_budget "$REPO" "writers=99 suites=99 worktrees=99 test_jobs=4 source=user"
-write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "combobot")"
-
-# THE CHANNEL IS THE VERDICT, NOT THE STATUS (wave-12 T17). A combined refusal exits 0 and
-# blocks with a PreToolUse deny verdict, so this arm reads `$GATE_VERDICT` — the driver's
-# reading of both wires — where it used to read exit 2. §combined-deny below is where that
-# channel is pinned in full; here it only has to be a REFUSAL for the counts to mean anything.
-expect_eq "§combined a brief with three shape faults is REFUSED" "deny" "$GATE_VERDICT"
-
-# ONE REFUSAL, NOT THREE. `refuse` exits, so a second refusal object cannot be emitted by
-# the same process — but a wall that printed its findings as it went would show three
-# `bionic: ` lines, and a wall that kept exiting at the first arm would show one line and
-# one finding. The count of refusal lines and the count of findings are therefore both
-# read, and they are different numbers on purpose.
-expect_eq "§combined …exactly once: one refusal line reaches the user" "1" \
-  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -c '^bionic: ' || true)"
-expect_eq "§combined …and the detail carries one refusal, not three stacked" "1" \
-  "$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -c '^bionic: dispatch refused' || true)"
-
-# THE USER LINE IS THE FIRST ARM'S OWN, and the detail says how many there are. AC-E1.3
-# gives the line one fact and one six-word fix, and the widest arm here already spends 99
-# of its 100 columns — so a line that also carried a count would be refused by the
-# renderer as malformed. The count lives one line into the detail instead, where there is
-# room for it and for every fault behind it.
-# THE MARKED SCAFFOLD REPLACES THE OLD RATIONALE (T2, D3/D11). No fault-count header
-# sentence, no per-fault `── N.` heading, no `Fix:` block — the several-fault wire is the
-# scaffold read live out of the shipped dispatch.md, each label the brief left empty
-# suffixed ` <ADD>`, closed by one pointer line. Every string compared against below is
-# read out of $DISPATCH_FILE at run time, never transcribed, so this stays true when the
-# scaffold's own wording next changes.
-expect_absent "§combined …no fault-count header sentence" "SHAPE FAULTS" "$GATE_VERR"
-expect_absent "§combined …no per-fault '── N.' heading" "── " "$GATE_VERR"
-expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
-# RAISED 8 -> 10 (T17, R6 finding 3): the scaffold gained two lines (`Progress artifact:`,
-# `Cadence:`), and dp_scaffold_marked reproduces every scaffold line verbatim — marked or
-# not — so the wire grows by exactly as many lines as the scaffold does. Not a widened
-# tolerance; the cap tracks the scaffold's own line count by construction.
-#
-# RAISED 10 -> 13 (wave-14 T6, REQ-8/AC-8.3, A-T6.2), and by a formula rather than a
-# feeling. Ten is still the fixed part — one refusal line, a blank, seven scaffold lines, a
-# blank, the pointer. On top of it this brief buys three lines and no more, though WHICH
-# three moved at T26 (critic Issue 3): the ambiguity fault IS the refusal line and costs
-# nothing; "this brief declares no Files: and no Suites:" is the second fault and costs one
-# line; and two `not checked:` lines now ride the wire instead of one — `deliverable, needs
-# one path` (the absent-deliverable arm recognising the ambiguity arm's own candidates,
-# rather than repeating the fault) and `one-regression, needs a suite set` (unchanged). The
-# general form is still 10 + (faults - 1) + not-checked lines, and the total is unchanged
-# at 13 because a line only moved from the fault column to the not-checked column.
-# §three-arms holds the criterion's own case — three faults, nothing unchecked, twelve —
-# where this arm holds the canonical brief. Widening either without moving a fault count is
-# the mistake to catch.
-#
-# RAISED 13 -> 14 (wave-15 T5, REQ-5, A-T5.2), and by the same formula. The floor-once wall
-# is a SECOND arm keyed on `run.sh` in the suite set, so a brief that produces no
-# set leaves two walls unable to answer rather than one, and AC-8.2's rule is that each of
-# them says so. The fault count did not move — the third `not checked:` line is a new wall
-# declaring itself, which is the growth this cap is meant to permit.
-#
-# RAISED 14 -> 15 (epic-23 wave-16, REQ-1 AC-1.8, A-T2.7), by the cap's oldest clause: it
-# "tracks the scaffold's own line count by construction", and the scaffold gained the
-# `Re-executes:` line. The FIXED part is now eleven — one refusal line, a blank, EIGHT
-# scaffold lines, a blank, the pointer — and the variable part is unmoved at one extra
-# fault plus three not-checked lines. No fault and no wall was added by that change.
-#
-# RAISED 15 -> 16 (wave-20 T7, REQ-9 AC-9.3), in the FIXED part: the wire now carries one
-# line saying the wall reads the prompt text only, beside the scaffold it tells the author to
-# copy. The fixed part is twelve; the variable part is unmoved.
-#
-# RAISED 16 -> 17 (wave-21 T7, REQ-7 AC-7.2), by the oldest clause again: the scaffold gained
-# the optional `Subprocess claim:` line, which `dp_scaffold_marked` reproduces like every
-# other. The FIXED part is thirteen — one refusal line, a blank, NINE scaffold lines, the
-# prompt-only line, a blank, the pointer — and the variable part is unmoved. The meta row
-# below holds the scaffold at nine lines, so the next line added to it moves this cap on
-# purpose rather than by surprise.
-#
-# RAISED 17 -> 18 (wave-24 T9, REQ-4 AC-4.8, A-T9.12), by that clause: the scaffold gained the
-# optional `Done marker:` line. The FIXED part is fourteen — one refusal line, a blank, TEN
-# scaffold lines, the prompt-only line, a blank, the pointer — and the variable part is unmoved.
-#
-# LOWERED 18 -> 17 (wave-26 T5, REQ-3 D6): the one-regression and floor-once arms became ONE
-# full-run arm, so a brief with no suite set leaves one wall unable to answer, not two. The
-# variable part is one extra fault plus two not-checked lines; the fixed part is unmoved.
-# RAISED 17 -> 18 (wave-27 T17, D5): the scaffold gained the readers' `Questions:` line; the FIXED part is fifteen, ELEVEN scaffold lines.
-# RAISED 18 -> 20 (wave-27 T31, D23): the scaffold gained `Lands-red:` and `Red-evidence:`; the FIXED part is seventeen, THIRTEEN scaffold lines.
-# RAISED 20 -> 22 (wave-28 T58, repairing the pin after T7/T22): the scaffold gained `Row:` and `Lands-on:`; the FIXED part is nineteen, FIFTEEN scaffold lines.
-expect_status "§combined …the wire is at most 22 lines (19 + 1 extra fault + 2 not-checked)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 22 ] && echo 0 || echo 1)"
-# AND THE FULL-RUN WALL'S LINE IS NAMED — a cap without saying which line fills it is a
-# widened tolerance, which is the mistake the comment above warns about.
-
-# EACH LABEL, MARKED BY WHETHER THIS BRIEF CARRIES IT — not by which wall fired. The
-# absent Files: and the absent Deliverable-waiver: lines earn ` <ADD>`; the present
-# Expected duration: line is left exactly as shipped. The ambiguous Expected artifact:
-# line does NOT earn one (T26, critic Issue 3) — the label was read and rejected as
-# ambiguous, which is not the same fault as an empty label, and the wire's own
-# `not checked: deliverable, needs one path` line (below) says so instead.
-COMB_ART_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact")"
-COMB_FILES_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Files")"
-COMB_DURATION_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Expected duration")"
-COMB_WAIVER_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Deliverable-waiver")"
-expect_absent "§combined …the still-ambiguous Expected artifact: line is NOT marked <ADD>" \
-  "${COMB_ART_LINE} <ADD>" "$GATE_VERR"
-expect_contains "§combined …the absent Files: line is marked <ADD>" \
-  "${COMB_FILES_LINE} <ADD>" "$GATE_VERR"
-expect_contains "§combined …the absent Deliverable-waiver: line is marked <ADD>" \
-  "${COMB_WAIVER_LINE} <ADD>" "$GATE_VERR"
-expect_contains "§combined …the present Expected duration: line is left exactly as shipped" \
-  "$COMB_DURATION_LINE" "$GATE_VERR"
-expect_absent "§combined …and carries no <ADD> of its own" \
-  "${COMB_DURATION_LINE} <ADD>" "$GATE_VERR"
-
-# AND NOTHING WAS LAUNCHED. A refused dispatch is not a launch, however many faults it had.
-expect_status "§combined …and journals no roster row" "0" \
-  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
-
-# ---- the second attempt, written from the first refusal's own examples ----
-#
-# THE WHOLE POINT, AND THE ONLY ARM THAT CAN CARRY IT. Three facts in one message are worth
-# nothing if acting on all three still leaves a fault the message never mentioned. The
-# examples are read back OUT of the stderr rather than typed here, so this stays true when
-# the wording is next edited.
-COMB_ART=$(fix_example "$GATE_VERR")
-COMB_SUITES=$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -m1 -E '^Suites:' \
-  | sed -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*<ADD>[[:space:]]*$//' -e 's/[[:space:]]*$//')
-expect_status "§combined the refusal really recommended an artifact path" "0" \
-  "$([ -n "$COMB_ART" ] && echo 0 || echo 1)"
-expect_status "§combined …and a Suites: line" "0" \
-  "$([ -n "$COMB_SUITES" ] && echo 0 || echo 1)"
-expect_absent "§combined …neither carrying a slot the walls themselves refuse" "<" "$COMB_ART"
-
-REPO=$(make_repo rcomb2 yes)
-write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: review the wave.
-Expected artifact: $COMB_ART
-Expected duration: 20 minutes
-$COMB_SUITES" "combobot2")"
-expect_status "§combined attempt 2, following every scaffold-line example, PASSES" "0" "$GATE_ST"
-expect_status "§combined …with the recommended path as the contract" \
-  "$COMB_ART" "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" deliverable)"
-
-# ---- the discriminator: declaring one field discharges that field's PAIR, and nothing else ----
-#
-# Without this arm a wall that printed the scaffold with every line marked unconditionally
-# would pass every assertion above.
-#
-# RENARROWED BY WAVE-14 T26 (critic Issue 3). This arm used to declare `Suites:` against
-# $BRIEF_THREE_FAULTS and check that the Files:/Suites: pair lost its <ADD> while the
-# Expected artifact:/Deliverable-waiver: pair — still unresolved by an AMBIGUOUS label —
-# kept theirs, on a deny wire the ambiguity finding and a separately-firing "this brief
-# names no deliverable" finding kept alive together. That second finding is exactly critic
-# Issue 3's contradiction (fixed above: an ambiguous label is one fault, not two), so
-# $BRIEF_THREE_FAULTS with `Suites:` added now carries the ambiguity fault ALONE — the
-# single-fault shape, with no scaffold on it at all (§combined a two-fault
-# brief... below reads that exact fixture). What this arm can still discriminate is
-# narrower and cleaner: a GENUINELY absent (non-ambiguous) deliverable is a real,
-# independent fault from "no Files: and no Suites:" — declaring `Suites:` discharges only
-# the second and leaves the first exactly where it was.
-REPO=$(make_repo rcomb3 yes)
-write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: review the wave.
-Expected duration: 20 minutes
-Suites: tests/widget.test.sh" "combobot3")"
-expect_eq "§combined declaring Suites: discharges the Files:/Suites: fault, leaving the other" \
-  "deny" "$GATE_VERDICT"
-expect_contains "§combined …the surviving fault is the genuinely absent deliverable" \
-  "this brief names no deliverable" "$GATE_ERR"
-expect_absent "§combined …and the Files:/Suites: fault is really gone, not merely unmarked" \
-  "Files:" "$GATE_ERR$GATE_REASON"
-
-# ---- and a ONE-fault brief is refused in its arm's own words, as it always was ----
-#
-# AC-1.3 from the other side: collecting must not re-word the single-fault refusal every
-# other section in this file reads. One finding renders as one finding — the arm's own fact,
-# its own fix, its own detail — and the user line is the one the E1.3 table pins.
-REPO=$(make_repo rcomb4 yes)
-write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
-Expected duration: ~15 minutes.
-Suites: tests/widget.test.sh" "combobot4")"
-expect_eq "§combined …and renders exactly one Fix: block" "1" \
-  "$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -c '^Fix: ' || true)"
-
-# ============================================================================
-
-section "§scaffold-marks — the scaffold marks what the brief LACKS, not what it omits (wave-14 REQ-6, D8)"
-# ============================================================================
-#
-# WHAT A MARK MEANS. `dp_scaffold_marked` reproduces the shipped scaffold and suffixes
-# ` <ADD>` to the lines this brief still needs. Until wave-14 it asked only "did this brief
-# spell this label", which is A-T2.1's literal-presence rule — and three of the scaffold's
-# labels are not standalone requirements at all. The scaffold says so itself: `Files:` is
-# "writers; a read-only brief omits this and keeps Suites: none" (wave-21 T7's wording),
-# `Deliverable-waiver:` is "only for a report returned by message". So a read-only brief that had correctly declared `Suites:` was told to add
-# files it will not touch, and a brief that had declared its artifact was told to waive it —
-# an instruction that, followed, would make the dispatch worse. Two of the three items on
-# wave-13's walk.
-#
-# THE RULE (D8). `Files:` is marked only when `C_FILES` and `C_SUITES` are BOTH empty — the
-# suite-allowance wall's own condition, so the mark appears exactly when that wall fires.
-# `Expected artifact:` and `Deliverable-waiver:` are each marked only when `C_DELIVERABLE`
-# and `C_WAIVER` are both empty — the absent-deliverable wall's own condition, and the pair
-# is symmetric because either one satisfies the contract.
-#
-# KEYED ON THE LIFTED FIELDS, NEVER ON LITERAL LINE PRESENCE (R2 Q7). `BRIEF_THREE_FAULTS`
-# below carries an `Expected artifact:` line whose span names two paths: the extractor emits
-# candidates and leaves `C_DELIVERABLE` empty, so the brief HAS the label and still needs it.
-# A rule keyed on the label's presence would unmark it and take (c) — and §combined's own
-# pin — red.
-#
-# EVERY EXPECTED STRING IS READ OUT OF THE SHIPPED dispatch.md at run time, never
-# transcribed, exactly as §combined does it.
-
-SM_ART_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact")"
-SM_FILES_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Files")"
-SM_SUITES_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Suites")"
-SM_WAIVER_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Deliverable-waiver")"
-
-# (a) AC-6.1 — A READ-ONLY BRIEF DECLARES ITS INSTRUMENT THE OTHER WAY. `Suites: none` is
-# the read-only waiver, so `Files:`/`Suites:` are satisfied and must not be marked.
-#
-# RENARROWED BY WAVE-14 T26 (critic Issue 3). This fixture used to pair an ambiguous
-# deliverable label with an empty one for a two-fault deny — the exact duplicate-counting
-# bug Issue 3 names (see the §combined rewrite above for the full reasoning). With that
-# collapsed to one fault, and `Suites: none` discharging the OTHER pooled arm this file has
-# (no independent third arm can fire alongside a satisfied Files:/Suites: pair and a
-# deliverable-field fault — every other brief-shape arm reads the same field), this brief
-# is down to its single-fault shape, where `dp_scaffold_marked` never renders
-# at all. What still discriminates: the refusal names ONLY the deliverable fault, and
-# never so much as mentions Files:/Suites: — proving the pair was read as
-# satisfied rather than merely unmarked on a wire this fixture can no longer reach.
-REPO=$(make_repo rsm-readonly yes)
-write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: review the wave.
-Expected duration: 20 minutes
-Suites: none" "smbot1")"
-expect_eq "§scaffold-marks (a) the read-only brief refuses on its own single-arm wire" \
-  "deny" "$GATE_VERDICT"
-expect_contains "§scaffold-marks (a) …naming the absent deliverable" \
-  "this brief names no deliverable" "$GATE_ERR"
-expect_absent "§scaffold-marks (a) …and never mentioning Files: — Suites: none satisfied it" \
-  "Files:" "$GATE_ERR$GATE_REASON"
-expect_absent "§scaffold-marks (a) …nor Suites: — it was declared, not missing" \
-  "names no suite" "$GATE_ERR$GATE_REASON"
-
-# (b) AC-6.2 — A DECLARED ARTIFACT SATISFIES THE WAIVER'S HALF OF THE PAIR. The deliverable
-# resolves outside the repo and the brief declares no instrument: two faults, and a
-# `C_DELIVERABLE` that is non-empty. Nothing here needs a waiver.
-REPO=$(make_repo rsm-artifact yes)
-write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
-Expected artifact: ../../../../../../etc/hosts
-Expected duration: ~15 minutes." "smbot2")"
-expect_status "§scaffold-marks (b) the artifact-bearing brief refuses on the several-fault wire" "0" \
-  "$([ -n "$GATE_DENY" ] && echo 0 || echo 1)"
-expect_absent "§scaffold-marks (b) …and the Deliverable-waiver: line is NOT marked beside a declared artifact" \
-  "${SM_WAIVER_LINE} <ADD>" "$GATE_VERR"
-expect_contains "§scaffold-marks (b) …the Deliverable-waiver: line is still rendered, as shipped" \
-  "$SM_WAIVER_LINE" "$GATE_VERR"
-expect_absent "§scaffold-marks (b) …nor is the declared Expected artifact: line marked" \
-  "${SM_ART_LINE} <ADD>" "$GATE_VERR"
-expect_contains "§scaffold-marks (b) …while the absent Files: line IS marked (no instrument either way)" \
-  "${SM_FILES_LINE} <ADD>" "$GATE_VERR"
-
-# (c) AC-6.2, THE OTHER DIRECTION. A declared waiver satisfies the artifact's half of the
-# same pair: the brief reports by message, so `Expected artifact:` is not something it
-# lacks. Its two faults are the ambiguous label and the missing instrument — the
-# absent-deliverable wall is waived, which is what the waiver is for.
-REPO=$(make_repo rsm-waiver yes)
-write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: review the wave.
-Expected artifact: compare .bionic/docs/record/a-notes.md against .bionic/docs/record/b-notes.md
-Deliverable-waiver: nothing durable — this dispatch reports by message
-Expected duration: 20 minutes" "smbot3")"
-expect_status "§scaffold-marks (c) the waived brief refuses on the several-fault wire" "0" \
-  "$([ -n "$GATE_DENY" ] && echo 0 || echo 1)"
-expect_absent "§scaffold-marks (c) …and the Expected artifact: line is NOT marked beside a declared waiver" \
-  "${SM_ART_LINE} <ADD>" "$GATE_VERR"
-expect_absent "§scaffold-marks (c) …nor is the declared Deliverable-waiver: line marked" \
-  "${SM_WAIVER_LINE} <ADD>" "$GATE_VERR"
-expect_contains "§scaffold-marks (c) …while the absent Files: line IS marked" \
-  "${SM_FILES_LINE} <ADD>" "$GATE_VERR"
-
-# (d) AC-6.3 — NEITHER INSTRUMENT DECLARED, BOTH THOSE LINES MARKED. `BRIEF_THREE_FAULTS`
-# is §combined's own fixture: `Files:`/`Suites:` are both absent (marked), and
-# `Deliverable-waiver:` is absent too (marked). `Expected artifact:` is NOT marked (T26,
-# critic Issue 3) — the label was read and rejected as ambiguous, which `dp_scaffold_marked`
-# now treats as a populated-but-unresolved label rather than an empty one; the wire's
-# `not checked: deliverable, needs one path` line (§combined above) is where that reads.
-REPO=$(make_repo rsm-both yes)
-write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "smbot4")"
-expect_status "§scaffold-marks (d) the three-fault brief refuses on the several-fault wire" "0" \
-  "$([ -n "$GATE_DENY" ] && echo 0 || echo 1)"
-expect_absent "§scaffold-marks (d) the still-ambiguous Expected artifact: line is NOT marked" \
-  "${SM_ART_LINE} <ADD>" "$GATE_VERR"
-expect_contains "§scaffold-marks (d) both absent -> the Deliverable-waiver: line is marked" \
-  "${SM_WAIVER_LINE} <ADD>" "$GATE_VERR"
-expect_contains "§scaffold-marks (d) neither instrument -> the Files: line is marked" \
-  "${SM_FILES_LINE} <ADD>" "$GATE_VERR"
-expect_contains "§scaffold-marks (d) neither instrument -> the Suites: line is marked" \
-  "${SM_SUITES_LINE} <ADD>" "$GATE_VERR"
-
-# (e)/(f) AC-7.2 (wave-21 T7; REQ-7, D7) — THE OPTIONAL LINE IS NEVER MARKED. The scaffold
-# carries `Subprocess claim:` for a task that backgrounds a watcher (a CI wait, `gh run
-# watch`); a task that backgrounds nothing omits it, and that is the ordinary case, so its
-# absence is never a fault and never an `<ADD>`. (f) reads (d)'s several-fault wire above —
-# the brief carries no claim, and every instrument line on that wire IS marked, so an
-# unmarked claim line there is the rule, not an accident of a wire that marks nothing. (e)
-# is the admit direction: the canonical brief, which carries no claim, passes.
-#
-# fails-when: the claim line is marked `<ADD>`, missing from the wire, or a brief without
-# it is refused.
-SM_CLAIM_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Subprocess claim")"
-expect_contains "§scaffold-marks (f) the several-fault wire renders the optional claim line, as shipped" \
-  "${SM_CLAIM_LINE:-<no Subprocess claim: line in the scaffold>}" "$GATE_VERR"
-expect_absent "§scaffold-marks (f) …and never marks it, though the brief carries no claim" \
-  "${SM_CLAIM_LINE:-<no Subprocess claim: line in the scaffold>} <ADD>" "$GATE_VERR"
-
-REPO=$(make_repo rsm-noclaim yes)
-write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "smbot5")"
-expect_eq "§scaffold-marks (e) a brief with no Subprocess claim: line is ADMITTED" \
-  "allow" "$GATE_VERDICT"
-expect_absent "§scaffold-marks (e) …and its absence is not an absence finding" \
-  "claims" "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" absent)"
-# ============================================================================
-
-section "§combined-deny — the combined refusal reaches the MODEL (wave-12 T17, AC-1.1)"
-# ============================================================================
-#
-# WHAT T2 LEFT OPEN (its finding A-T2.2; ruling A-orch-10, 2026-09-13). The five brief-shape
-# arms already collect into ONE refusal — and it went out on `exit2`, where refuse.sh's
-# channel table ships `detail_to_user=no` under ruling D-1 AND there is only one wire: what
-# the user stream carries is what the model's synthetic tool_result carries. So the author
-# read one sentence and THE MODEL READ THE SAME ONE SENTENCE. The findings list existed and
-# no dispatching model ever saw it, which is the six-attempt loop of 2026-09-13 still
-# running behind a better-built wall.
-#
-# WHAT THIS PINS. The combined refusal goes out on `deny`: a PreToolUse verdict on STDOUT
-# whose `permissionDecisionReason` the same measurement proved reaches the model verbatim
-# (`model_only=yes`), with exit 0 because the JSON is the block rather than the status. D-1
-# is NOT reversed — the human still gets exactly one line on stderr — and the knob is not
-# involved anywhere below: these arms run with BIONIC_WALL_VERBOSE unset, which is the state
-# a real dispatch runs in.
-#
-# THE ARM THAT CARRIES THE CLAIM is the last one: attempt two is written from the examples
-# read back out of the MODEL'S OWN WIRE, `permissionDecisionReason`, and must dispatch. Three
-# facts on a channel the model reads are worth nothing if acting on all three still leaves a
-# fault the message never named.
-#
-# fails-when: the three-fault brief exits 2; or its stdout is not one parseable deny verdict;
-# or the reason names fewer than three facts or carries fewer than three `Fix:` blocks; or
-# the human's one line grows a detail behind it; or the single-fault brief leaves on a
-# different wire (wave-19 T4, REQ-7, D8 — until then this clause read the other way).
-
+section "§combined-deny — every fault one refusal on the deny wire, the first its line and the rest one line each"
+# The pool refuses once for every fault its arms found, on `deny`: exit 0, one verdict on stdout, one line on the
+# user stream. A lone fault keeps its arm's own detail; several put each fault after the first on a line of its
+# own, `<fact> (<fix>)`, and a pointer. A state fault rides the same wire. FIXTURES: make_repo's approved, bound,
+# armed session; s21_stamp_path's stamp removed for the unarmed Patrol. SYNTHESIZED.
+# fails-when: a refusal exits non-zero, prints a second line or object, journals a row, drops a fault from the
+# several-fault detail, or a lone fault loses its own Fix: block.
 expect_empty "§combined-deny the verbose knob is UNSET for every arm here" "${BIONIC_WALL_VERBOSE:-}"
-
-REPO=$(make_repo rcombdeny yes)
-write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "denybot")"
-
-expect_status "§combined-deny a three-fault brief exits 0 — the verdict is the block" \
-  "0" "$GATE_ST"
-expect_eq "§combined-deny …and the verdict is a deny, not an allow" "deny" "$GATE_VERDICT"
-expect_eq "§combined-deny …stdout is ONE object and nothing else" "1" \
-  "$(printf '%s\n' "$GATE_OUT" | /usr/bin/grep -c . || true)"
-expect_eq "§combined-deny …naming the PreToolUse event it answers" "PreToolUse" \
-  "$(printf '%s' "$GATE_OUT" | jq -r '.hookSpecificOutput.hookEventName' 2>/dev/null || echo PARSE-FAILED)"
-expect_eq "§combined-deny …with permissionDecision=deny" "deny" \
-  "$(printf '%s' "$GATE_OUT" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null || echo PARSE-FAILED)"
-
-# THE REASON IS THE MODEL'S WIRE. Every assertion below reads `$GATE_REASON`, which the
-# driver parsed out of the JSON with `jq` — so an escaper that broke on the findings list's
-# newlines reads EMPTY here rather than passing on a grep of the raw bytes.
-# NO RATIONALE ON THE MODEL'S WIRE EITHER (T2, D3/D11) — the marked scaffold replaces it,
-# read live out of $DISPATCH_FILE, the same way §combined checks GATE_VERR.
-expect_absent "§combined-deny …no fault-count header sentence" "SHAPE FAULTS" "$GATE_REASON"
-expect_absent "§combined-deny …no per-fault '── N.' heading" "── " "$GATE_REASON"
-expect_absent "§combined-deny …no Fix: block" "Fix: " "$GATE_REASON"
-expect_absent "§combined-deny …the still-ambiguous Expected artifact: line is NOT marked <ADD>" \
-  "${COMB_ART_LINE} <ADD>" "$GATE_REASON"
-expect_contains "§combined-deny …the absent Files: line is marked <ADD>" \
-  "${COMB_FILES_LINE} <ADD>" "$GATE_REASON"
-expect_contains "§combined-deny …the present Expected duration: line is left exactly as shipped" \
-  "$COMB_DURATION_LINE" "$GATE_REASON"
-
-# AND THE HUMAN IS STILL INTERRUPTED BY ONE SENTENCE (ruling D-1). The split is the whole
-# reason this channel was chosen over flipping `detail_to_user`: the model reads everything,
-# the reader reads one line, and neither is a setting.
-expect_eq "§combined-deny the user stream carries exactly one refusal line" "1" \
-  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -c '^bionic: ' || true)"
-expect_absent "§combined-deny …with no findings list behind it" "Fix: " "$GATE_ERR"
-expect_absent "§combined-deny …and no count header either" "SHAPE FAULTS" "$GATE_ERR"
-
-# NOTHING WAS LAUNCHED. A deny exits 0, which is the one status a wall must never let mean
-# "allowed" by accident: the roster is where that would show.
-expect_status "§combined-deny …and journals no roster row" "0" \
-  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
-
-# ---- the discriminator, INVERTED: a ONE-fault brief takes the same deny wire ----
-#
-# CHANGED, WITH ATTRIBUTION (wave-19 T4, REQ-7, D8). This arm used to pin the opposite: that
-# a single fault stayed on exit2 with an empty stdout, so a change moving every refusal to
-# `deny` would red here. Two statuses for one kind of refusal was the defect REQ-7 names —
-# a fixture's status depended on how many faults its ENVIRONMENT added (A-T4.8). What the
-# arm still protects is the single fault's own SHAPE: its arm's line, unchanged, on the
-# user stream, and its arm's own detail — not the pooled list — on the model's wire.
-REPO=$(make_repo rcombdeny2 yes)
-write_attestation "$REPO" "$SID_A"
+CD_TWO='Your task: review the wave.
+Expected duration: 20 minutes'
+REPO=$(make_repo rcombdeny yes); write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$CD_TWO" "denybot")"
+expect_eq "§combined-deny a two-fault brief is denied, exit 0, one object on stdout" "deny|0|1" \
+  "$GATE_VERDICT|$GATE_ST|$(printf '%s\n' "$GATE_OUT" | /usr/bin/grep -c . || true)"
+expect_eq "§combined-deny …one refusal line on the user stream" "1" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -c '^bionic: ' || true)"
+expect_contains "§combined-deny …the first fault is its line" "names no deliverable" "$GATE_ERR"
+expect_contains "§combined-deny …the second rides the detail as one line" "declares no Files: and no Suites: (declare Suites:)" "$GATE_REASON"
+expect_absent "§combined-deny …no lecture per fault (beside the second fault's line)" "Fix: " "$GATE_REASON"
+expect_status "§combined-deny …and journals no roster row" "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+REPO=$(make_repo rcombdeny2 yes); write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
 Expected duration: ~15 minutes.
 Suites: tests/widget.test.sh" "denybot2")"
-expect_eq "§combined-deny a single-fault brief refuses on the same deny wire" "deny" "$GATE_VERDICT"
-expect_status "§combined-deny …exiting 0, the verdict being the block" "0" "$GATE_ST"
-expect_eq "§combined-deny …stdout is ONE verdict and nothing else" "1" \
-  "$(printf '%s\n' "$GATE_OUT" | /usr/bin/grep -c . || true)"
-expect_absent "§combined-deny …carrying its arm's own detail, not the pooled scaffold" \
-  "See skills/canonical-sdlc/dispatch.md §Dispatch" "$GATE_REASON"
-
-# ---- and a LONE refusal is not on the JSON channel either, whatever arm it came from ----
-#
-# CHANGED, WITH ATTRIBUTION (wave-14 T6, REQ-8/D3, A-T6.4). This arm used to drive
-# `BRIEF_THREE_FAULTS` with the Patrol unarmed and assert exit2, on wave-12's reading that
-# the channel tracks "a list of BRIEF faults" and a state fault is a different kind of
-# thing. REQ-8 overturns that reading: the arming wall now pools with the rest, so that
-# fixture carries FOUR faults and the several-fault wire is where all four belong — the
-# whole point being that the model reads them in one pass. What the arm was really
-# protecting is that a LONE fault keeps its arm's own sentence, its own `exit2` and an empty
-# stdout, and that claim is stronger when the lone fault is a STATE one, so that is what it
-# drives now: a clean brief whose only defect is the unarmed Patrol. Since wave-19 T4
-# (REQ-7, D8) that lone fault's WIRE is the deny verdict too; its sentence is still its own.
-REPO=$(make_repo rcombdeny3 yes)
-write_attestation "$REPO" "$SID_A"
-rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
+expect_eq "§combined-deny a single-fault brief refuses on the same wire" "deny|0" "$GATE_VERDICT|$GATE_ST"
+expect_contains "§combined-deny …carrying its arm's own Fix: block" "Fix: declare one durable artifact path" "$GATE_REASON"
+REPO=$(make_repo rcombdeny3 yes); write_attestation "$REPO" "$SID_A"; rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "denybot3")"
-expect_eq "§combined-deny a LONE state fault (the unarmed Patrol) takes the deny wire too" \
-  "deny" "$GATE_VERDICT"
-expect_eq "§combined-deny …and prints ONE verdict on stdout" "1" \
-  "$(printf '%s\n' "$GATE_OUT" | /usr/bin/grep -c . || true)"
-expect_contains "§combined-deny …refusing for the state, in the arming wall's own words" \
-  "Patrol" "$GATE_ERR$GATE_VERR"
-
-# THE PAIRED CONTROL, and it is the half REQ-8 added: the SAME unarmed Patrol beside brief
-# faults is one refusal on the model's wire, naming both kinds. Without this row the arm
-# above reads as "state refusals never reach the deny channel", which is what stopped being
-# true.
-REPO=$(make_repo rcombdeny3b yes)
-write_attestation "$REPO" "$SID_A"
-rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "denybot3b")"
-expect_eq "§combined-deny the same state fault BESIDE brief faults refuses once, on deny" \
-  "deny" "$GATE_VERDICT"
-expect_eq "§combined-deny …with exactly one refusal line on the user stream" "1" \
-  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -c '^bionic: ' || true)"
-
-# ---- the claim: attempt two, written from the MODEL'S wire, dispatches ----
-REPO=$(make_repo rcombdeny4 yes)
-write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "denybot4")"
-DENY_ART=$(fix_example "$GATE_REASON")
-DENY_SUITES=$(printf '%s\n' "$GATE_REASON" | /usr/bin/grep -m1 -E '^Suites:' \
-  | sed -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*<ADD>[[:space:]]*$//' -e 's/[[:space:]]*$//')
-expect_status "§combined-deny the reason really recommended an artifact path" "0" \
-  "$([ -n "$DENY_ART" ] && echo 0 || echo 1)"
-expect_status "§combined-deny …and a Suites: line" "0" \
-  "$([ -n "$DENY_SUITES" ] && echo 0 || echo 1)"
-expect_absent "§combined-deny …neither carrying a slot the walls themselves refuse" "<" "$DENY_ART"
-
-REPO=$(make_repo rcombdeny5 yes)
-write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: review the wave.
-Expected artifact: $DENY_ART
-Expected duration: 20 minutes
-$DENY_SUITES" "denybot5")"
-expect_eq "§combined-deny attempt 2, from the reason alone, is ALLOWED" "allow" "$GATE_VERDICT"
-expect_status "§combined-deny …and the recommended path is the contract on the row" \
-  "$DENY_ART" "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" deliverable)"
-
-
-# ============================================================================
+expect_eq "§combined-deny a lone state fault (the unarmed Patrol) takes the deny wire too" "deny|1" \
+  "$GATE_VERDICT|$(printf '%s\n' "$GATE_OUT" | /usr/bin/grep -c . || true)"
+expect_contains "§combined-deny …refusing for the state, in the arming wall's own words" "Patrol" "$GATE_ERR$GATE_VERR"
+REPO=$(make_repo rcombdeny3b yes); write_attestation "$REPO" "$SID_A"; rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$CD_TWO" "denybot3b")"
+expect_eq "§combined-deny the state fault beside brief faults refuses once" "deny|1" \
+  "$GATE_VERDICT|$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -c '^bionic: ' || true)"
+expect_contains "§combined-deny …the brief's faults ride its detail" "names no deliverable" "$GATE_REASON"
 
 section "§scaffold-verbatim — the shipped brief scaffold dispatches as written (AC-2.2)"
 # ============================================================================
@@ -565,8 +94,7 @@ section "§scaffold-verbatim — the shipped brief scaffold dispatches as writte
 
 SCAFFOLD_FILE="$DISPATCH_FILE"
 
-# scaffold_block is defined earlier in this file (beside fix_example, ~line 2440), shared
-# with §combined/§combined-deny — not redefined here. Both it and scaffold_fill below read
+# scaffold_block is defined in tests/dispatch-preflight.prelude.sh. Both it and scaffold_fill below read
 # the file named by $SCAFFOLD_FILE, reassigned for the SKILL.md second pass further down.
 
 scaffold_fill() {  # <suites|files> -> the scaffold as a brief, placeholders filled

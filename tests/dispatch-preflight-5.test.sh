@@ -376,13 +376,12 @@ section "§LANDS-CMD — Lands-on: may name a backticked command its Re-executes
 # `Lands-on:` names one of them in backticks. The lift writes the command as ONE lands_on= entry: backticks around
 # its text with `%`, blank, tab, `,`, `|`, `/`, `*`, `?` and `[` percent-encoded (lib/suite.sh `lands_cmd`), so
 # every lands_on= reader (a comma or blank split, the roster's `|` fold, a `${s##*/}` file-name cut) keeps it
-# whole, and `bionic_lands_cmd` gives the command back. The outside-Suites: arm admits it against the brief's
-# Re-executes: runs. A command Re-executes: does not declare is refused, naming it.
+# whole, and `bionic_lands_cmd` gives the command back.
 # FIXTURES: make_repo's approved, bound plan with a `## Tasks` row T23; its tree holds lib/widget.sh, read by
 # tests/widget.test.sh. The brief is BRIEF_FULL's contract with Files:,
 # Suites:, Re-executes: and Lands-on: lines. SYNTHESIZED.
-# fails-when: a declared command on Lands-on: is refused, an undeclared one is admitted, or the row's
-# lands_on= does not give the declared command back byte for byte.
+# fails-when: a declared command on Lands-on: is refused, or the row's lands_on= does not give the declared
+# command back byte for byte.
 lc_gate() {  # <repo tag> <Lands-on line> [<Re-executes line>] -> GATE_*, LC_ROW
   REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
   printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the widget | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' \
@@ -395,12 +394,11 @@ lc_gate() {  # <repo tag> <Lands-on line> [<Re-executes line>] -> GATE_*, LC_ROW
     "$BRIEF_FULL" "${3-Re-executes: \`npx jest --testPathPatterns 'w(a|b)'\`}" "$2")")" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
   LC_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 }
-lc_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
 LC_CMD="npx jest --testPathPatterns 'w(a|b)'"
 LC_TOK="\`npx%20jest%20--testPathPatterns%20'w(a%7Cb)'\`"
 
 LC_LIFT="$( . "$DP5_LIB/brief.sh" 2>/dev/null
-  brief_field "$(lift_contract_fields "Lands-on: widget, \`$LC_CMD\`, tests/x.test.sh")" lands_on)"
+  brief_field "$(brief_contract "Lands-on: widget, \`$LC_CMD\`, tests/x.test.sh")" lands_on)"
 expect_eq "LC.0 the lift writes a backticked command as one encoded entry, in its place among the suites" \
   "widget.test.sh,${LC_TOK},tests/x.test.sh" "$LC_LIFT"
 expect_eq "LC.0b …which lib/suite.sh gives back as the command, and which is no suite name" \
@@ -414,22 +412,6 @@ expect_eq "LC.1b …the row carries the command as its one encoded entry" \
   "widget.test.sh,${LC_TOK}" "$(roster_field "$LC_ROW" lands_on)"
 expect_eq "LC.1c …which gives back the declared command byte for byte, its pipe kept" \
   "$LC_CMD" "$( . "$DP5_LIB/suite.sh"; bionic_lands_cmd "$(roster_field "$LC_ROW" lands_on | cut -d, -f2)")"
-
-lc_gate lc3 'Lands-on: widget, `npx jest other`'
-expect_eq "LC.3 AC-14.3 a Lands-on: naming a command Re-executes: does not declare is refused" "deny" "$GATE_VERDICT"
-expect_contains "LC.3b …its line names the command" 'Lands-on: `npx jest other`' "$(lc_first)"
-expect_contains "LC.3c …as not declared under Re-executes:" "is not under Re-executes:" "$(lc_first)"
-expect_eq "LC.3d …its first line at most 100 columns" "ok" \
-  "$([ "$(bionic_cols "$(lc_first)")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$(lc_first)")")"
-expect_contains "LC.3e …the detail names the runs it may name from" "Re-executes: \`$LC_CMD\`" "$GATE_VERR"
-expect_eq "LC.3f …and no row is written" "" "$LC_ROW"
-
-lc_gate lc4 "Lands-on: widget, \`$LC_CMD\`" 'Scope constraint: no runs declared.'
-expect_eq "LC.4 a backticked command with no Re-executes: line at all is refused the same way" "deny" "$GATE_VERDICT"
-expect_contains "LC.4b …naming it" "is not under Re-executes:" "$(lc_first)"
-expect_eq "LC.4c …its first line at most 100 columns with a 39-character command" "ok" \
-  "$([ "$(bionic_cols "$(lc_first)")" -le 100 ] && echo ok || echo "wide:$(bionic_cols "$(lc_first)")")"
-expect_contains "LC.4d …the command cut in the line, its start kept" 'Lands-on: `npx jest --testPath' "$(lc_first)"
 
 section "§WAIVER-NONE — \`Deliverable-waiver: none\` is no waiver, so a declared artifact is no conflict"
 # A brief that waives nothing may still carry the scaffold's `Deliverable-waiver:` line with the word `none`. Read as a
@@ -497,59 +479,5 @@ ln_gate ln5 docs/adrs/adr-999-x.md ''
 expect_eq "LN.5 a Files path under the tracked docs home (docs/adrs/…): admitted, as the judge excuses its commit" "allow" "$GATE_VERDICT"
 ln_gate ln6 notes-home/records/x.md 'docs-root: notes-home'
 expect_eq "LN.6 a Files path under a docs-root: set off the default: admitted" "allow" "$GATE_VERDICT"
-
-section "§QUESTIONS — a row's declared questions are the set the wall compares a reader's brief to (AC-5.3)"
-# ============================================================================
-#
-# A review row declares the questions it owes with `task-add --questions`, which writes ` · questions: <q,…>` into its
-# task cell. The wall reaches the row by the brief's `Row:`, lifts the tag with `units_questions`, and compares the
-# brief's `Questions:` to that set in place of the role's full deal; a row with no tag is held to the full deal as ever.
-# A declaration the role is not dealt does not take the deal's place.
-# FIXTURES: make_repo's approved, bound plan at `rigor: double`, `scale: wave`, with a one-row `## Tasks` table whose
-# task cell carries the tag the case names (SYNTHESIZED in the shape task-add writes, which session-poker-4.test.sh
-# §REVIEW-FILES drives through the verb); the brief names the row by `Row:` and carries one record per question.
-# fails-when: a brief equal to the row's declaration is refused for not naming the role's full deal, a brief naming the
-# full deal is admitted over a row declaring less, a declaration outside the role's deal is honoured, or an untagged
-# row stops demanding the full deal.
-qn_gate() {  # <repo tag> <task cell> <role> <Questions: set, comma-joined> -> GATE_*, QN_ROW
-  local n files="" i
-  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 6 | review | %s | reader | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' "$2" \
-    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-  n=$(( $(printf '%s' "$4" | tr -cd ',' | wc -c) + 1 )); files=".bionic/docs/record/wq-$1.md"
-  for ((i = 2; i <= n; i++)); do files="$files, .bionic/docs/record/wq-$1-$i.md"; done
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T23 "wq-$1" "$(printf 'Your task: read the change for the questions below.\nExpected artifact: .bionic/docs/record/wq-%s.md\nExpected duration: ~30 minutes.\nSuites: tests/widget.test.sh\nRow: T23\nQuestions: %s\nFiles: %s' "$1" "${4//,/, }" "$files")")" "wq-$1" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" "$3")"
-  QN_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
-}
-qn_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
-
-qn_gate qn1 'the audit. The auditor reads it. · questions: evidence' bionic:auditor evidence
-expect_eq "QN.1 AC-5.3 over a row tagged questions: evidence at double, an auditor brief Questions: evidence is admitted" "allow" "$GATE_VERDICT"
-expect_eq "QN.1b …and the row records the set compared" "evidence" "$(roster_field "$QN_ROW" questions)"
-
-qn_gate qn2 'the audit. The auditor reads it. · questions: evidence' bionic:auditor evidence,adversarial
-expect_eq "QN.2 AC-5.3 …a brief naming evidence, adversarial over that row is refused" "deny" "$GATE_VERDICT"
-expect_contains "QN.2b …its line names the set the row declares" "dispatch refused — row T23 declares auditor: evidence" "$(qn_first)"
-expect_contains "QN.2c …and the detail the dealt set, evidence alone" "Dealt: evidence" "$GATE_VERR"
-
-qn_gate qn3 'the critic read. The critic reads the code. · questions: adversarial' bionic:critic adversarial
-expect_eq "QN.3 AC-5.3 over a row tagged questions: adversarial, the critic's brief Questions: adversarial is admitted (the role's full deal is adversarial, structure)" \
-  "allow|adversarial" "$GATE_VERDICT|$(roster_field "$QN_ROW" questions)"
-
-qn_gate qn4 'the critic read. The critic reads the code. · questions: adversarial' bionic:critic adversarial,structure
-expect_eq "QN.4 AC-5.3 …and the brief naming the critic's full deal over that row is refused" "deny" "$GATE_VERDICT"
-expect_contains "QN.4b …its line names the row and its set" "dispatch refused — row T23 declares critic: adversarial" "$(qn_first)"
-expect_contains "QN.4c …and the detail says where the set was declared" "declared on row T23 by task-add --questions" "$GATE_VERR"
-expect_contains "QN.4d …and the line to write is the declared set" "    Questions: adversarial" "$GATE_VERR"
-
-qn_gate qn5 'the critic read. The critic reads the code.' bionic:critic adversarial
-expect_eq "QN.5 AC-5.3 over an untagged row the role's full deal is demanded: the critic's adversarial alone is refused" "deny" "$GATE_VERDICT"
-expect_contains "QN.5b …naming the full deal" "double rigor deals critic: adversarial,structure" "$(qn_first)"
-qn_gate qn5c 'the critic read. The critic reads the code.' bionic:critic adversarial,structure
-expect_eq "QN.5c control: the full deal over the untagged row is admitted" "allow|adversarial,structure" "$GATE_VERDICT|$(roster_field "$QN_ROW" questions)"
-
-qn_gate qn6 'the audit. The auditor reads it. · questions: adversarial' bionic:auditor adversarial
-expect_eq "QN.6 a declaration the role is not dealt (adversarial is the critic's at double) does not take the deal's place: the auditor is refused" "deny" "$GATE_VERDICT"
-expect_contains "QN.6b …held to what the rigor deals the auditor" "double rigor deals auditor: evidence" "$(qn_first)"
 
 finish

@@ -6,33 +6,48 @@
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
 
-# ---------------------------------------------------------------- the contract grammar
+# ---------------------------------------------------------------- the contract's reader
 #
-# THE DISPATCH WALL'S GRAMMAR, AT THIS FILE'S TWO DOORS (wave-20 T9; spec D4, ledger Δ10).
-# `amend` widens a live contract and `task-add` writes a Files cell a brief is later built
-# from; both hand what they were given to payload/scripts/lib/brief.sh's
-# `brief_validate_fields`, so a contract that enters here is held to exactly a fresh
-# dispatch's standard. Loaded on first use, never at the top: the tick runs every Patrol
-# interval and needs none of it.
+# `amend` widens a live contract and `task-add` writes a Files cell a brief is later rendered from; both
+# read what they were given with payload/scripts/lib/brief.sh's `brief_contract`, the one reader of a
+# brief's lines, so a value is recorded exactly as a dispatch carrying it would record it. Loaded on first
+# use, never at the top: the tick runs every Patrol interval and needs none of it.
 poker_brief_load() {
-  declare -F brief_validate_fields >/dev/null 2>&1 && return 0
+  declare -F brief_contract >/dev/null 2>&1 && return 0
   [ -f "$BIONIC_LIB/brief.sh" ] || return 1
   # shellcheck source=/dev/null
   . "$BIONIC_LIB/brief.sh"
-  declare -F brief_validate_fields >/dev/null 2>&1
+  declare -F brief_contract >/dev/null 2>&1
 }
 
-# The sink `brief_validate_fields` calls: a finding is collected — its fact alone, and its
-# fact, fix and detail as the words a refusal prints — and a loud pass is a note.
-# Set in hooks/session-poker.sh, before any part loads: POKER_BRIEF_FACTS, POKER_BRIEF_WORDS.
-poker_brief_sink() {  # finding <fact> <fix> <detail> | warn <line>
-  case "$1" in
-    finding)
-      POKER_BRIEF_FACTS="${POKER_BRIEF_FACTS}$2"$'\n'
-      POKER_BRIEF_WORDS="${POKER_BRIEF_WORDS}  $2 — $3"$'\n'"$(printf '%s\n' "$4" | sed 's/^/    /')"$'\n\n'
-      ;;
-    warn) note "$2" ;;
-  esac
+# poker_additions_judged <files lines> <suites lines> <runs lines> <root> <held suites> <files held> -> rc 0, or
+# rc 1 with POKER_BRIEF_WORDS one line per addition no contract could carry: a Files value the reader reads no
+# path from, a suite that is no `<name>.test.sh`, a suite no file under <root>/tests carries (unless the row
+# holds it, or its Files name it), and a run the reader keeps nothing of. Each is named as it was typed.
+# Set in hooks/session-poker.sh, before any part loads: POKER_BRIEF_WORDS.
+poker_additions_judged() {
+  local fl="$1" sl="$2" rl="$3" root="$4" held="$5" fh="$6" v t listed
+  POKER_BRIEF_WORDS=""
+  while IFS= read -r v; do
+    [ -n "$v" ] || continue
+    [ -n "$(brief_field "$(brief_contract "Files: $v")" files)" ] \
+      || POKER_BRIEF_WORDS="${POKER_BRIEF_WORDS}  Files: $(clean "$v") — not a path"$'\n'
+  done <<< "$fl"
+  listed="$(poker_suites_listed "$root" "$held")"
+  for t in $(printf '%s' "$sl" | tr '\n,' '  '); do
+    if [ -z "$(brief_field "$(brief_contract "Suites: $t")" suites)" ]; then
+      POKER_BRIEF_WORDS="${POKER_BRIEF_WORDS}  Suites: $(clean "$t") — not a <name>.test.sh suite"$'\n'
+    elif [ -n "$listed" ] && case " $listed " in *" ${t##*/} "*) false ;; *) true ;; esac \
+         && case ",$fh," in *"/${t##*/},"*|*",${t##*/},"*) false ;; *) true ;; esac; then
+      POKER_BRIEF_WORDS="${POKER_BRIEF_WORDS}  Suites: $(clean "$t") — no file in tests/ carries it"$'\n'
+    fi
+  done
+  while IFS= read -r v; do
+    [ -n "$v" ] || continue
+    [ -n "$(brief_field "$(brief_contract "Re-executes: \`$v\`")" re_executes)" ] \
+      || POKER_BRIEF_WORDS="${POKER_BRIEF_WORDS}  Re-executes: $(clean "$v") — not a run"$'\n'
+  done <<< "$rl"
+  [ -z "$POKER_BRIEF_WORDS" ]
 }
 
 # born_floor_backing <plan> <repo> <suite> -> BFB_OF (`regression`, `standing@<12-hex>` or `run@<12-hex>`) and rc 0 when a
@@ -175,13 +190,12 @@ EOF
 # record artifact a reader row gained, or empty); returns 0, or 1 / 2 with the refusal printed. THE ONE JUDGE OF A
 # ROW'S FILES CELL (wave-36 T41; REQ-7 AC-7.1, AC-10.2; D13): `task-add` writes a row's cell and `task-set files=`
 # corrects a pending row's, and both are held to it. A reader row (verify, test, review) whose cell names no record
-# gains <record dir>/<id>.md, the artifact `brief` gives it; the cell is then read as the dispatch wall will read it
-# (`lift_contract_fields` and `brief_validate_fields`), a cell the lift reads as no path being refused now in the
-# grammar's words. `—`, `-` and empty declare nothing to judge. ONE FACT IS THE BRIEF'S, NOT THE CELL'S: a `Files:`
-# line alone names no suite, and here that is a note, the row going in.
+# gains <record dir>/<id>.md, the artifact `brief` gives it; each entry of the cell is then read as the dispatch
+# wall reads the brief's `Files:` line (`brief_contract`), and an entry it reads no path from is refused now, named.
+# `—`, `-` and empty declare nothing to judge.
 # Set in hooks/session-poker.sh, before any part loads: PFC_OUT, PFC_ART.
 poker_files_cell() {
-  local id="$1" kind="$2" agent="$3" files="$4" repo="$5" plan="$6" fact cell_facts=""
+  local id="$1" kind="$2" files="$4" repo="$5" plan="$6"
   PFC_OUT="$files"; PFC_ART=""
   if poker_reader_kind "$kind" && [ -z "$(poker_brief_record_entry "$files" artifact "$id")" ]; then
     PFC_ART="$(docs_root "$repo")/record/$(proof_plan_slug "$plan")/$id.md"
@@ -192,24 +206,11 @@ poker_files_cell() {
     ''|'—'|'-') return 0 ;;
   esac
   if ! poker_brief_load; then
-    die "REFUSED — the contract grammar (lib/brief.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+    die "REFUSED — the contract reader (lib/brief.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
     return 2
   fi
-  POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
-  brief_validate_fields "$(lift_contract_fields "Files: $PFC_OUT" "$agent")" \
-    "$agent" "$repo" poker_brief_sink || :
-  while IFS= read -r fact; do
-    [ -n "$fact" ] || continue
-    case "$fact" in
-      'Files: alone names no suite')
-        note "$fact — a dispatch of $id will need a Suites: or Re-executes: line" ;;
-      *) cell_facts="${cell_facts}${fact}"$'\n' ;;
-    esac
-  done <<EOF
-$POKER_BRIEF_FACTS
-EOF
-  if [ -n "$cell_facts" ]; then
-    die "REFUSED — a dispatch of $id with Files: $PFC_OUT would be refused by the dispatch grammar; the plan is unchanged:"
+  if ! poker_additions_judged "$(printf '%s' "$PFC_OUT" | tr ',' '\n')" "" "" "$repo" "" ""; then
+    die "REFUSED — a dispatch of $id with Files: $PFC_OUT would carry an entry that is no path; the plan is unchanged:"
     printf '%s' "$POKER_BRIEF_WORDS" >&2
     return 1
   fi
@@ -246,8 +247,7 @@ poker_marked_runs() {  # <runs, marked> -> one run per line
 # ---- BEGIN the brief rendered from its row (wave-33 T9; REQ-4 AC-4.4; D8) ----
 # `brief <row>` writes the dispatch brief a plan row can carry, so the orchestrator writes only the judgment the
 # row cannot. THE SCAFFOLD'S LABELS ARE THE SHIPPED ONES, read out of skills/canonical-sdlc/dispatch.md's
-# `### Scaffold` fence with the extractor hooks/dispatch-preflight.sh `dp_scaffold_marked` reads the same fence
-# with, never a second list: a label the verb fills from the row is written, every other label is named on the
+# `### Scaffold` fence, never a second list: a label the verb fills from the row is written, every other label is named on the
 # verb's own line as the orchestrator's. THE RULES, each the row's own cell or a function of it:
 #   Expected duration   the row's size, in minutes
 #   Expected artifact   the dispatch ledger's artifact cell for the row; else the first Files entry under record/
@@ -264,8 +264,8 @@ poker_marked_runs() {  # <runs, marked> -> one run per line
 #                       code, the slot marked for the orchestrator, never none; `Suites: none` and
 #                       `Lands-on: none <reason>` only for a row that writes no code
 #   Row                 the row's id
-# The file starts with the scaffold lines, so no prose after them is a label's first hit (lib/brief.sh reads the
-# first hit of an unpinned label). A re-render keeps everything from `## Judgment` on: that section is the
+# The file starts with the scaffold lines, so no prose after them is a label's first hit (lib/brief.sh
+# `brief_contract` reads a label's first line). A re-render keeps everything from `## Judgment` on: that section is the
 # orchestrator's, and the verb never writes anything into it but the two marked slots of a first render.
 
 # poker_brief_cell <plan> <section heading> <row id> <header> -> that cell of the row, trimmed; rc 1 when the
@@ -394,18 +394,11 @@ poker_reader_kind() { case "$1" in verify|test|review) return 0 ;; esac; return 
 # `amend <agent id>` for an id no named row carries: see the verb. The row is the budget wall's
 # alone. Its name is the id, so it shadows no other name's latest row; `status=unplaced` is no
 # status a reader of live rows counts; the waiver keeps the verdict from judging a deliverable
-# nobody owes. The additions are judged by the dispatch grammar, as every amend's are. The set is
+# nobody owes. The additions are judged as every amend's are (`poker_additions_judged`). The set is
 # the union of the id's current one and the additions.
-# A READER IS HELD TO THREE (wave-27 T74; review pass 53 B1). The role is the one the agent's start
-# recorded: the `role=` of the id's last `start-unchecked/v1|event=start|` line, the line the tick's
-# NOTIFY is built from. A reader there (auditor, critic, reviewer: `dp_is_reader`) is judged with
-# its role and `Questions: evidence`, so the dispatch wall's own count in brief.sh holds it to three
-# in total, suites and runs together: the door cannot know which candidate launch was the agent's,
-# so it takes the strict side. A start that recorded no role is judged with none, as before.
-# THE SUITES THAT EXIST, LISTED ONCE PER CALL: the `*.test.sh` basenames under <root>/tests, space-separated, which the
-# dispatch wall's membership arm is handed (lib/brief.sh `brief_validate_fields`, fifth argument). The wall reaches for
-# no directory; this door, like the dispatch hook, is a collector. A root with no suite hands nothing, and the wall
-# then judges no membership.
+# THE SUITES THAT EXIST, LISTED ONCE PER CALL: the `*.test.sh` basenames under <root>/tests, space-separated, an added
+# suite's name is held to. This listing is the one the plan verbs make; a root with no suite lists nothing, and then
+# no membership is judged.
 # THE ROW'S OWN OLD MEMBERS COUNT AS EXISTING (<held>, when the listing found any suite): they were admitted at its
 # dispatch, and a suite since renamed or deleted must not block an amend that adds a file or a run.
 poker_suites_listed() {  # <root> [<held suites>] -> the names on stdout
@@ -418,8 +411,7 @@ poker_suites_listed() {  # <root> [<held suites>] -> the names on stdout
 }
 
 amend_unplaced() {  # <agent id> <the last row carrying it, or empty> -> the verb's exit status
-  local aid="$1" prior="$2" tr sub old_sa="" old_runs="" decl lift rc=0 sa new_runs r row pick
-  local role="" span us
+  local aid="$1" prior="$2" tr sub old_sa="" old_runs="" decl add sa new_runs r row pick
   case "$aid" in
     ''|*[!A-Za-z0-9._@-]*)
       die "REFUSED — no row is named $(clean "$aid"), and it is not an agent id; nothing was written."
@@ -446,7 +438,7 @@ amend_unplaced() {  # <agent id> <the last row carrying it, or empty> -> the ver
     return 1
   fi
   if ! poker_brief_load; then
-    die "REFUSED — the contract grammar (lib/brief.sh) cannot be loaded from $BIONIC_LIB; nothing was written."
+    die "REFUSED — the contract reader (lib/brief.sh) cannot be loaded from $BIONIC_LIB; nothing was written."
     return 2
   fi
   if [ -n "$prior" ]; then
@@ -455,34 +447,23 @@ amend_unplaced() {  # <agent id> <the last row carrying it, or empty> -> the ver
   fi
   [ "$old_sa" = none ] && old_sa=""
   decl="$(poker_union ' ' "$old_sa" "$(printf '%s' "$AMEND_SUITES" | tr '\n,' '  ')")"
-  us="$(grep -F 'start-unchecked/v1|event=start|' "$ROSTER_FILE" 2>/dev/null | grep -F "|agent_id=${aid}|" | tail -1)"
-  [ -n "$us" ] && role="$(clean "$(line_field "$us" role)")"
-  span="$(poker_brief_span "" "$decl" "$old_runs" "$AMEND_RUNS")"
-  dp_is_reader "$role" && span="${span}"$'\n'"Questions: evidence"
-  lift="$(lift_contract_fields "$span" "$role")"
-  POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
-  brief_validate_fields "$lift" "$role" "$REPO_REAL" poker_brief_sink "$(poker_suites_listed "$REPO_REAL" "$old_sa")" || rc=$?
-  if [ "$rc" -ne 0 ]; then
-    die "REFUSED — a dispatch carrying these additions for $aid would be refused; nothing was written:"
+  if ! poker_additions_judged "" "$AMEND_SUITES" "$AMEND_RUNS" "$REPO_REAL" "$old_sa" ""; then
+    die "REFUSED — no contract could carry these additions for $aid; nothing was written:"
     printf '%s' "$POKER_BRIEF_WORDS" >&2
-    case "$POKER_BRIEF_FACTS" in
-      *-run\ cap*) dp_is_reader "$role" \
-        && die "A reviewer its start did not place is held to three in all: stop it and dispatch it again." \
-        && die "($aid started as $role; the NOTIFY line asks the same.)" ;;
-    esac
     return 1
   fi
-  sa="${BRIEF_SUITES_ALLOWED:-$old_sa}"
+  add="$(brief_contract "$(poker_brief_span "" "$decl" "" "$AMEND_RUNS")")"
+  sa="$(brief_field "$add" suites)"; [ -n "$sa" ] || sa="$old_sa"
   new_runs="$old_runs"
   while IFS= read -r r; do
     [ -n "$r" ] || continue
     grep -qxF -- "$r" <<< "$(poker_marked_runs "$old_runs")" && continue
     new_runs="${new_runs:+$new_runs }\`${r}\`"
   done <<EOF
-$(poker_marked_runs "$(brief_field "$lift" re_executes)")
+$(poker_marked_runs "$(brief_field "$add" re_executes)")
 EOF
   if [ "$sa" = "$old_sa" ] && [ "$new_runs" = "$old_runs" ]; then
-    die "REFUSED — this amend changes nothing: every addition is already on the set recorded for $aid, or is not a suite or run the dispatch grammar reads. Nothing was written."
+    die "REFUSED — this amend changes nothing: every addition is already on the set recorded for $aid, or is not a suite or run the contract reader records. Nothing was written."
     return 1
   fi
   row="$(roster_row status=unplaced "session=$SESSION_ID" "name=$aid" "agent_id=$aid" \
@@ -968,14 +949,11 @@ pv_roster_live_name() {
   # function whether the wall will read the row just written (D3) before it says so.
   # `amended=<iso> <reason>` records when and why; `session=` who.
   #
-  # THE MERGED FIELDS ARE JUDGED BY THE DISPATCH WALL'S GRAMMAR (Δ10). The verb builds the
-  # span a brief carrying the merged contract would hold — `Files:`, `Suites:`,
-  # `Re-executes:` — and hands it to `brief_validate_fields` with the row's own role and its
-  # `questions=` as a `Questions:` line, so the three-run cap binds a reader holding the
-  # `evidence` question here as it does at dispatch (`dp_reads_evidence`, lib/brief.sh). The old
-  # set plus the added suites is the budget, as the brief named it. A row 1.14.0's map DERIVED is
-  # read the same way: nothing re-derives it (the map is deleted, wave-31 T23, REQ-4 AC-4.2), and
-  # it keeps its `suites_source=` label.
+  # THE ADDITIONS ARE READ AS A BRIEF'S LINES ARE. Each is judged by `poker_additions_judged`, and the
+  # merged set is read back through `brief_contract`, the one reader of a brief's `Files:`, `Suites:` and
+  # `Re-executes:` lines, so the row records what a dispatch carrying the merged contract would. The old
+  # set plus the added suites is the budget. A row whose set an older release derived keeps its
+  # `suites_source=` label: nothing re-derives it.
   #
   # THE TARGET is a name, or an agent id (wave-27 T38): an id a named row carries amends that
   # row; an id no row carries, of an agent of this session, is recorded by `amend_unplaced`.
@@ -1060,7 +1038,7 @@ pv_roster_live_name() {
       exit 1
     fi
     if ! poker_brief_load; then
-      die "REFUSED — the contract grammar (lib/brief.sh) cannot be loaded from $BIONIC_LIB; nothing was written."
+      die "REFUSED — the contract reader (lib/brief.sh) cannot be loaded from $BIONIC_LIB; nothing was written."
       exit 2
     fi
 
@@ -1071,23 +1049,21 @@ pv_roster_live_name() {
     AM_OLD_RUNS=""
     row_has_key "$AM_ROW" re_executes && AM_OLD_RUNS="$(clean "$(line_field "$AM_ROW" re_executes)" re_executes)"
 
-    # THE ADDITIONS AS THE GRAMMAR READS THEM, alone: what each flag contributes once lifted.
-    # The Files: reader is the dispatch wall's (wave-27 T29, T42; REQ-12, D21), so
-    # `--files+ CONTEXT.md` is the path a dispatch would have recorded.
-    # EACH --files+ VALUE ON ITS OWN (wave-27 T34; review pass 19 should-fix 2, A-orch-70), as the
-    # dispatch wall reads one line: joined into one Files: line, a ` #` note in one value hid every
-    # later one. A value the reader records nothing from goes to the grammar as typed, below.
-    AM_ADD="$(lift_contract_fields "$(poker_brief_span "" "$AMEND_SUITES" "" "$AMEND_RUNS")" "$AM_ROLE")"
-    AM_ADD_FILES=""; AM_TYPED=""
+    # THE ADDITIONS, EACH JUDGED ALONE, then read as a brief's lines: each `--files+` value on its own, as the
+    # wall reads one line, so a ` #` note in one value hides no later one.
+    if ! poker_additions_judged "$AMEND_FILES" "$AMEND_SUITES" "$AMEND_RUNS" "$REPO_REAL" "$AM_OLD_SA" \
+         "$(poker_union , "$AM_OLD_FILES" "$(printf '%s' "$AMEND_FILES" | tr '\n' ',')")"; then
+      die "REFUSED — no contract could carry $AMEND_NAME's additions; nothing was written:"
+      printf '%s' "$POKER_BRIEF_WORDS" >&2
+      exit 1
+    fi
+    AM_ADD="$(brief_contract "$(poker_brief_span "" "" "" "$AMEND_RUNS")")"
+    AM_ADD_FILES=""
     while IFS= read -r AM_F; do
       [ -n "$AM_F" ] || continue
-      AM_FL="$(brief_field "$(lift_contract_fields "Files: $AM_F" "$AM_ROLE")" files)"
-      AM_ADD_FILES="$(poker_union , "$AM_ADD_FILES" "$AM_FL")"
-      if [ -n "$AM_FL" ]; then AM_TYPED="${AM_TYPED}$(printf '%s' "$AM_FL" | tr ',' '\n')"$'\n'
-      else AM_TYPED="${AM_TYPED}${AM_F}"$'\n'; fi
+      AM_ADD_FILES="$(poker_union , "$AM_ADD_FILES" "$(brief_field "$(brief_contract "Files: $AM_F")" files)")"
     done <<< "$AMEND_FILES"
     AM_NEW_FILES="$(poker_union , "$AM_OLD_FILES" "$AM_ADD_FILES")"
-    AM_Q="$(line_field "$AM_ROW" questions)"
 
     # THE BUDGET IS THE OLD SET PLUS THE ADDED SUITES, carried into the span as declared, whatever
     # the row's label. `none` is a waiver, and it yields to the first suite actually added.
@@ -1126,21 +1102,10 @@ pv_roster_live_name() {
                   AM_DECL="${AM_DECL% }" ;;
     esac
 
-    # The additions go into the span as typed, beside the merged set, so an entry the reader
-    # does not read as a path reaches the grammar and is refused by name, never dropped.
-    AM_SPAN="$(poker_brief_span "$(printf '%s' "$AM_NEW_FILES" | tr ',' '\n')"$'\n'"$AM_TYPED" "$AM_DECL" "$AM_OLD_RUNS" "$AMEND_RUNS")"
-    # THE ROW'S QUESTIONS GO WITH IT (wave-27 T34; T15's report item 1, A-orch-73), so a reader
-    # holding `evidence` meets the cap a dispatch of it would.
-    [ -n "$AM_Q" ] && AM_SPAN="${AM_SPAN}"$'\n'"Questions: ${AM_Q//,/, }"
-    AM_LIFT="$(lift_contract_fields "$AM_SPAN" "$AM_ROLE")"
-    POKER_BRIEF_FACTS=""; POKER_BRIEF_WORDS=""
-    AM_RC=0
-    brief_validate_fields "$AM_LIFT" "$AM_ROLE" "$REPO_REAL" poker_brief_sink "$(poker_suites_listed "$REPO_REAL" "$AM_OLD_SA")" || AM_RC=$?
-    AM_SA="$BRIEF_SUITES_ALLOWED"; AM_SRC="$BRIEF_SUITES_SOURCE"
-    if [ "$AM_RC" -ne 0 ]; then
-      die "REFUSED — a dispatch carrying $AMEND_NAME's amended contract would be refused; nothing was written:"
-      printf '%s' "$POKER_BRIEF_WORDS" >&2
-      exit 1
+    AM_SA=""; AM_SRC=""
+    if [ -n "$AM_DECL" ]; then
+      AM_SA="$(brief_field "$(brief_contract "Suites: $AM_DECL")" suites)"
+      [ -z "$AM_SA" ] || AM_SRC=declared
     fi
 
     # A waiver that nothing replaced stays the waiver.
@@ -1158,7 +1123,7 @@ EOF
 
     if [ "$AM_NEW_FILES" = "$AM_OLD_FILES" ] && [ "$AM_SA" = "$AM_OLD_SA" ] \
        && [ "$AM_NEW_RUNS" = "$AM_OLD_RUNS" ]; then
-      die "REFUSED — this amend changes nothing: every addition is already on $AMEND_NAME's row, or is not a path, suite or run the dispatch grammar reads. Nothing was written."
+      die "REFUSED — this amend changes nothing: every addition is already on $AMEND_NAME's row, or is not a path, suite or run the contract reader records. Nothing was written."
       exit 1
     fi
 

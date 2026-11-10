@@ -1008,7 +1008,7 @@ expect_eq "BP-4 a path two suites pin is one entry, marked by both" \
   "Files: lib/d.sh, tests/pinned.test.sh, tests/shared.test.sh
 tests/fixtures/x  # (pinned by pinned.test.sh, shared.test.sh)
 tests/fixtures/y  # (pinned by pinned.test.sh)" "$(bp_files T4)"
-BP_LIFT="$(bash -c '. "$1" && lift_contract_fields "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" "$(cat "$BP_REC/T1.md")" 2>&1)"
+BP_LIFT="$(bash -c '. "$1" && brief_contract "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" "$(cat "$BP_REC/T1.md")" 2>&1)"
 expect_contains "BP-5 the dispatch wall's reader lifts the pins as paths of the brief, no marker read as one" \
   "files=lib/a.sh,tests/pinned.test.sh,tests/fixtures/x,tests/fixtures/y" "$(printf '%s\n' "$BP_LIFT" | /usr/bin/grep '^files=')"
 expect_absent "BP-5b …and refuses no entry of the Files span" "files_bad" "$BP_LIFT"

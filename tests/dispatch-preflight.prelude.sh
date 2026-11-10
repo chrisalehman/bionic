@@ -35,12 +35,6 @@ scaffold_block() {
   ' "$1"
 }
 
-# scaffold_raw_line <file> <label> -> that label's own line, verbatim, out of the shipped
-# scaffold — what a marked line looks like before its ` <ADD>` suffix, if any.
-scaffold_raw_line() {
-  scaffold_block "$1" | /usr/bin/grep -m1 -E "^${2}:"
-}
-
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/dispatch-preflight-test.XXXXXX")" && pwd)"
 BG_PIDS=""
 cleanup() {
@@ -651,41 +645,6 @@ write_legacy_attestation() {
 # HOISTED FROM THE SECTIONS (wave-30 T1). Read by sections in more than one shard.
 # ======================================================================================
 
-# ---- from S18: fix_example ----
-# TWO SHAPES, since T2 (D3, D11). A single-fault refusal (containment, absent, ambiguous) still
-# carries the OLD indented Fix: block, unchanged — on the deny reason since wave-19 T4. A several-fault refusal (`deny`: ambiguous,
-# combined) now carries the MARKED SCAFFOLD instead — its own `Expected artifact:` line is a
-# placeholder with an embedded `e.g. …` example, not a recommendation typed for this brief, so
-# the nested `<wave>`/`<name>` placeholders are filled the same way §scaffold-verbatim's own
-# `scaffold_fill()` fills them, and any trailing ` <ADD>` this brief earned is stripped.
-fix_example() {  # <stderr-or-reason> -> the artifact path the wall's own text recommends
-  local line ex
-  line=$(printf '%s\n' "$1" | grep -m1 -E '^[[:space:]]+Expected artifact: ')
-  if [ -n "$line" ]; then
-    printf '%s\n' "$line" | sed -e 's/^[[:space:]]*Expected artifact: //' -e 's/[[:space:]]*$//'
-    return
-  fi
-  line=$(printf '%s\n' "$1" | grep -m1 -E '^Expected artifact: ')
-  [ -n "$line" ] || return 0
-  ex=$(printf '%s\n' "$line" \
-    | sed -e 's/^Expected artifact: .*e\.g\. //' -e 's/>[[:space:]]*<ADD>[[:space:]]*$//' -e 's/>[[:space:]]*$//')
-  ex="${ex//<wave>/w99}"
-  ex="${ex//<name>/scaffold-note}"
-  printf '%s\n' "$ex"
-}
-
-# ---- from S18: BRIEF_THREE_FAULTS ----
-# THE THREE-FAULT BRIEF (wave-12 T2, spec D3, AC-1.1/AC-1.2). One brief that trips three
-# brief-shape arms at once: the deliverable label offers two candidates (A11), which leaves
-# `deliverable=` empty with no waiver behind it (A13), and no instrument is declared at all
-# (A14). It is the shape Chris met on 2026-09-13 — six dispatches to spawn one researcher,
-# because the gate exited at the first fault every time — and the §combined section below
-# reads the whole refusal. It is defined in S18 because the self-consistency loop there is the
-# first thing that drives it.
-BRIEF_THREE_FAULTS='Your task: review the wave.
-Expected artifact: compare .bionic/docs/record/a-notes.md against .bionic/docs/record/b-notes.md
-Expected duration: 20 minutes'
-
 # ---- from S21: s21_stamp_path, s21_backdate, s21_iso, s21_idle_tr, s21_busy_tr, s21_stale_payload ----
 s21_stamp_path() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "$2"; }
 
@@ -809,30 +768,6 @@ s22_fake_tree() {
   printf 'gitdir: %s/.git/worktrees/%s\n' "$1" "$2" > "$1/.worktrees/$2/.git"
 }
 
-# ---- from S27: s27_impact, BRIEF_FILES ----
-# s27_impact <repo> <suite>... — writes an impact command into <repo> that answers with
-# exactly the named suites, in the `suite<TAB>reason:file` shape S12 published, and points
-# .bionic/config.yaml at it. The stub ECHOES ITS ARGUMENTS into a side file, so the test
-# can prove the declared paths reached it rather than assuming they did.
-s27_impact() {
-  local repo="$1"; shift
-  mkdir -p "$repo/.bionic"
-  {
-    printf '#!/bin/bash\n'
-    printf 'printf "%%s\\n" "$@" > "$(dirname "$0")/impact-args.txt"\n'
-    local _s
-    for _s in "$@"; do printf 'printf "%%s\\tpath-ref:fixture\\n" %s\n' "$_s"; done
-  } > "$repo/.bionic/impact-stub.sh"
-  chmod +x "$repo/.bionic/impact-stub.sh"
-  printf 'impact-command: bash %s/.bionic/impact-stub.sh\n' "$repo" > "$repo/.bionic/config.yaml"
-}
-
-BRIEF_FILES='Canonical-sdlc Step 4, task 4/13 of epic-99 wave-01; build · double · wave.
-Your task: build the widget.
-Expected artifact: .bionic/docs/record/w99-files.md
-Expected duration: ~20 minutes.
-Files: payload/scripts/lib/widget.sh, hooks/widget-guard.sh'
-
 # ---- from S28: PF_LIB_DIR, PF_FULL_BRIEF, pf_repo, pf_commit, pf_plan_path, pf_row, PF_FRONT_EXTRA, PF_STATE_EXTRA, pf_plan, pf_state, pf_line ----
 PF_LIB_DIR="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
 [ -r "$PF_LIB_DIR/proof.sh" ] || PF_LIB_DIR="${BIONIC_HOOKS_DIR}/../scripts/lib"
@@ -907,12 +842,3 @@ pf_state() {
 }
 pf_line() { printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: '; }
 
-# ---- from §runs-lift: RL_BT, RL_JEST, RL_PYTEST, RL_GO, RL_NPM ----
-# THE MARK, HELD IN A VARIABLE. A backtick inside a double-quoted string here would be a
-# command substitution, and a backtick pair inside a double-quoted ASSERTION NAME is the
-# fault cross-gate §B pins against tree-wide. Every run below is built from this.
-RL_BT='`'
-RL_JEST="${RL_BT}npx jest --testPathPatterns 'x'${RL_BT}"
-RL_PYTEST="${RL_BT}pytest tests/unit${RL_BT}"
-RL_GO="${RL_BT}go test ./...${RL_BT}"
-RL_NPM="${RL_BT}npm test${RL_BT}"
