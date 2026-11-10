@@ -12,10 +12,18 @@
 # instant is kept as written (to the minute, the day, or in local time): rewriting it to seconds would
 # add precision the home never had.
 #
-# ORDER. Lines are sorted by their instant read as UTC. A line whose instant is not a UTC time takes
-# the place of the line of its own type before it in the same home (so Steps 4 to 7, which carry no
-# time, stay between Step 3 and Step 8), and with none before it goes after every timed line. The sort
-# is stable, so lines at one place keep their order in the home.
+# ORDER. Lines are sorted by their instant read as UTC. A line the plan states to follow another fact
+# stands at its own instant only when that instant is a UTC time no earlier than the fact's place, and
+# otherwise at the fact's place. Two blocks of the SDLC State are written in order, so a line follows
+# the one above it in its block (the first follows the run's start): the Step lines, because a run's
+# step is a sequence and not an instant; and the proved: and waived: lines, because each is appended to
+# the block's end (lib/proof.sh proof_add_line), so a proof registered late with its run's earlier
+# instant is still the newer fact. A deferral follows its review's proof, under which it is written.
+# An instant orders a line only against lines that follow no such fact, and against other homes. Any
+# other line whose instant is not a UTC time takes the place of the line of its own type before it in
+# the same home, and with none before it goes after every timed line. The place is only the sort key:
+# the line keeps the instant it holds, and an absent one stays a gap. The sort is stable, so lines at
+# one place keep their order in the home.
 #
 # THE SOURCES. Each home is one function, registered by `translate_source <function>`; it takes the
 # plan and prints records for the entry point to sort: `e<TAB><sort key><TAB><run/v1 line>` per event
@@ -76,10 +84,17 @@ function put(k, v) {
   if (index(v, "|")) { gap(k, "bar"); return }
   SEEN[k] = v; L = L "|" k "=" v
 }
-function slot(t, at,   key) { key = ukey(at); if (key == "") key = (t in LAST) ? LAST[t] : "~"; LAST[t] = key; return key }
+function after(place) { AFTER = place; FOLLOWS = 1 }
+function inblock(b) { BLOCK = b; after(PREV[b]) }
+function slot(t, at,   key) {
+  key = ukey(at)
+  if (FOLLOWS) { if (key < AFTER) key = AFTER } else if (key == "") key = (t in LAST) ? LAST[t] : "~"
+  if (BLOCK != "") PREV[BLOCK] = key
+  BLOCK = ""; FOLLOWS = 0; LAST[t] = key; return key
+}
 function emit(at,   i) {
   if (at == "") lack("at")
-  printf "e\t%s\t%s|at=%s\n", (PLACE != "" ? PLACE : slot(T, at)), L, at; PLACE = ""
+  printf "e\t%s\t%s|at=%s\n", slot(T, at), L, at
   for (i = 1; i <= NG; i++) printf "g\t\t%s\n", G[i]
 }
 function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
@@ -124,10 +139,12 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
     /^approved-by: / { byline("x by " substr($0, 14)); begin("approval", "key", "step3"); put("by", BY); put("said", SAID); emit(AT); next }
     /^approved: / { byline(substr($0, 11)); begin("approval", "key", trim(PRE)); put("by", BY); kv(MID)
       for (i = 1; i <= NP; i++) put(PK[i], PV[i]); put("said", SAID); emit(AT); next }
-    /^waived: / { byline(substr($0, 9)); kv(PRE); begin("waiver", PK[1], PV[1])
+    /^waived: / { byline(substr($0, 9)); kv(PRE); begin("waiver", PK[1], PV[1]); inblock("proofs")
       for (i = 2; i <= NP; i++) put(PK[i], PV[i]); put("by", BY); put("said", SAID); emit(AT); next }
     /^- Step [0-9]+: / {
       n = substr($0, 8, index($0, ":") - 8); text = substr($0, index($0, ":") + 2); at = ""
+      # A Step held "(pending)" is a step not reached when the line was written: no fact, so no step.
+      if (trim(text) == "(pending)") { whole("step", "n=" n, "pending"); next }
       # An approval is written at-then-by or by-then-at, and both are read; the words follow either.
       if (match(text, /(approved|configured) at [^ ]+ (by|via) /)) {
         ap = substr(text, RSTART, RLENGTH); split(ap, w, " "); at = w[3]; rest = substr(text, RSTART + RLENGTH)
@@ -137,17 +154,17 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
       }
       if (at != "" && n + 0 <= 2) { begin("approval", "key", "step" n); put("by", by); put("said", quoted(rest)); emit(at) }
       if (at == "") at = inst(text)
-      begin("step", "n", n); emit(at); steps[n] = 1; next
+      begin("step", "n", n); inblock("steps"); emit(at); steps[n] = 1; next
     }
     /^- session: / { split(substr($0, 12), w, " "); begin("bind", "session", w[1]); put("by", w[5]); emit(w[3]); next }
-    /^proved: / { kv(substr($0, 9)); begin("proof", PK[1], PV[1]); at = ""
+    /^proved: / { kv(substr($0, 9)); begin("proof", PK[1], PV[1]); inblock("proofs"); at = ""
       for (i = 2; i <= NP; i++) if (PK[i] == "at") at = PV[i]; else put(PK[i], PV[i]); emit(at); next }
     /^moved: / { kv(substr($0, 8)); begin("finding", "ref", HEAD); at = ""
       for (i = 1; i <= NP; i++) if (PK[i] == "at") at = PV[i]; else put(PK[i], PV[i]); emit(at); next }
     /^deferred: / { kv(substr($0, 11)); split(HEAD, w, " "); begin("finding", "ref", w[1]); put("severity", w[2]); put("to", "deferred")
-      put("title", quoted(HEAD)); for (i = 1; i <= NP; i++) put(PK[i], PV[i]); lack("by"); f = w[1]; sub(/#.*/, "", f); PLACE = rev[f]; emit(""); next }
+      put("title", quoted(HEAD)); for (i = 1; i <= NP; i++) put(PK[i], PV[i]); lack("by"); f = w[1]; sub(/#.*/, "", f); if (rev[f] != "") after(rev[f]); emit(""); next }
     /^order: / { split(substr($0, 8), w, " "); begin("order", "act", w[1]); put("said", quoted($0)); emit(w[2]); next }
-    END { if (cur != "" && !(cur in steps)) { begin("step", "n", cur); emit("") } }'
+    END { if (cur != "" && !(cur in steps)) { begin("step", "n", cur); inblock("steps"); emit("") } }'
 }
 
 translate_source _translate_ledger

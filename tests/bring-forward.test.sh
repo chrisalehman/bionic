@@ -27,6 +27,8 @@
 #   §WAITS   a wait on a row is that row's id in deps; one the kind implies is dropped; any other is a gap.
 #   §DROPPED a dropped row is a gap of the translation, and after the act it is not ready and waits on it are met.
 #   §CELLS   a row's suites and lands-on go to the task's own section, or to the gaps list when it has none.
+#   §STEPS   a Step follows the Step above it and a proof or waiver the line above it in its block, whatever
+#            their instants, so the step is the old current: and closure; a Step held (pending) is a gap.
 #
 # FIXTURE FIDELITY. The plan is a real file in a scratch docs tree, in the shape version-14 plans hold.
 
@@ -69,8 +71,8 @@ approved: release by Ann Person 2026-11-01T15:53:06Z head=$H "all recommended"
 - T1: landed $C 2026-11-01T02:37:51Z — .worktrees/9-T1
 - T2: landed-by-hand: orchestrator 2026-11-01T05:22:07Z "record-only row" judged-by=35d5 — .worktrees/9-T2
 - T3: pending dispatch — added by task-add at 2026-11-01T05:22:50Z born: review S2 on of=record/wave-9-old/critic.md#1
-proved: kind=regression head=$H at=2026-11-01T06:00:00Z evidence=record/wave-9-old/r2.log run=2026-11-01T05:59:00Z head=$H rc=0
 proved: kind=regression head=$H at=2026-11-01T05:00:00Z evidence=record/wave-9-old/r1.log rc=1
+proved: kind=regression head=$H at=2026-11-01T06:00:00Z evidence=record/wave-9-old/r2.log run=2026-11-01T05:59:00Z head=$H rc=0
 moved: record/wave-9-old/critic.md#1 to=fixed row=T3 by=Ann Person at=2026-11-01T06:02:42Z
 deferred: record/wave-9-old/critic.md#2 S3 on "a key one" stated="the cd || exit prefix"
 waived: question=evidence head=$H by Ann Person 2026-11-01T15:53:03Z "all recommended"
@@ -358,4 +360,19 @@ expect_contains "a wait on a dropped row is met, and named" "gap/v1|ev=row|row=T
 section "CELLS"
 expect_eq "a row's suites and lands-on go to the task's own section" "One's own words. suites: a.test.sh lands-on: a.test.sh" "$(sed -n '/^### T1$/,/^## /p' "$W" | grep -v '^#' | grep . | paste -sd' ' -)"
 for f in suites lands-on; do expect_contains "a row with no section of its own has its $f on the gaps list" "gap/v1|ev=row|row=T2|field=$f|why=unruled" "$OUT"; done
+
+section "STEPS"
+U="$D/plans/epic-x/wave-6-untimed.plan.md"; B="$D/plans/epic-x/wave-5-back.plan.md"; s9='- Step 9: delivered: 2026-11-01T13:34Z'
+printf '%s\n' '## SDLC State' 'current: 9' '- Step 0: configured at 2026-11-01T00:2xZ via Ann "go"' '- Step 1: r.md; approved by Ann 2026-11-01 "go"' \
+  '- Step 2: s.md' '- Step 3: p.md; approved at 2026-11-01T02:25Z by Ann "go"' '- Step 8: CLOSED 2026-11-01T13:34Z' "$s9" > "$U"
+printf '%s\n' '## SDLC State' 'current: 9' '- Step 7: documented at 2026-11-01T13:40Z' '- Step 8: CLOSED 2026-11-01T13:34Z' "$s9" > "$B"
+A="$D/plans/epic-x/wave-4-held.plan.md"; printf '%s\n' '---' 'abandoned: 2026-11-02 held' '---' '## SDLC State' 'current: 3' '- Step 3: p.md' '- Step 4: (pending)' '- Step 9: (pending)' > "$A"
+for x in "$U:n=9 state=delivered" "$B:n=9 state=delivered" "$A:n=3 state=abandoned"; do p="${x%%:*}"
+  expect_eq "${p##*/}: the step is the plan's current: and its closure" "${x#*:}" "$(bash "$RS" "$p" step | paste -sd' ' -)"; done
+printf '%s\n' '## SDLC State' "waived: question=evidence head=$H by Ann 2026-11-01T15:53:03Z \"go\"" "proved: kind=review head=$H at=2026-10-04T00:00:00Z evidence=r.md question=evidence" > "$B.late"
+expect_eq "a proof registered after a waiver stands after it, though its instant is earlier" "waiver proof " "$(translate "$B.late" events | sed -nE 's/^run\/v1\|ev=(waiver|proof)\|.*/\1/p' | tr '\n' ' ')"
+expect_contains "a Step line held (pending) is no step reached: named, not written" "gap/v1|ev=step|n=9|field=ev|why=pending" "$(translate "$A" gaps)"
+expect_eq "Steps stand in their numbers' order, wherever an instant sorts" "0 1 2 3 8 9 " "$(translate "$U" events | sed -n 's/^run\/v1|ev=step|n=\([0-9]*\)|.*/\1/p' | tr '\n' ' ')"
+expect_contains "a Step with no instant keeps none, and its place makes none" "run/v1|ev=step|n=2|at=" "$(translate "$U" events | grep -x 'run/v1|ev=step|n=2|at=')"
+expect_contains "and its instant is still a gap" "gap/v1|ev=step|n=2|field=at|why=absent" "$(translate "$U" gaps)"
 finish
