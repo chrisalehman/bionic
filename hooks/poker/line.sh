@@ -445,7 +445,7 @@ row_landed_scan() {
 # A request counts when its `tree=` is the project or under it and it was asked at or after the record's
 # first `line/v1` event. Times are the events' own `at=`, never a message's.
 #
-# UNMEASURED (wave-28 T62). A run whose landings no line recorded (a version-14 record with `landed:` lines and no
+# UNMEASURED. A run whose landings no line recorded (a version-14 record with `landed:` lines and no
 # `line/v1` event, a run open across the upgrade) prints the one line `landings: unmeasured — the landing record
 # holds no line/v1 events`, and no row.
 #
