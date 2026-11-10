@@ -1084,6 +1084,8 @@ proof-at-head.test.sh | §ONE | keep | payload/scripts/lib/proof.sh proof_whole_
 
 proof-at-head.test.sh | §LOG | keep | payload/scripts/lib/proof.sh facts_state: the review chains read off the plan's SDLC State text instead of the reader's reviews answer, so a reading the run's log alone holds reads absent (LOG-3); _proof_last_read or proof_approved_head reading the plan text, so a regression proof or an approval only the log holds reads nothing (LOG-4); _proof_facts serving a kept fold after a file it read changed, so a proof written between two reads in one process is not seen (LOG-5) | none (searched 'run.log' and 'ev=proof' in tests/; reader.test.sh §REST reads the reader's reviews question alone, not the judge over it)
 
+proof-at-head.test.sh | §KEEP | keep | payload/scripts/lib/proof.sh _proof_facts: the kept fold read from a cache directory group or other can write, so an approval planted under the right key stands (KEEP-2), or through a link to another directory (KEEP-3); the fold not kept in the user's own mode-700 directory, or not served from it to a second process (KEEP-1); no bound on the kept files, so a file per plan stays for ever (KEEP-4) | none (searched 'bionic-facts' and '_proof_facts' in tests/: §LOG reads the fold within one process, never its directory)
+
 ## protect-database.test.sh
 
 protect-database.test.sh | §Section 1 | keep | payload/scripts/lib/walls.sh protect-database: the DROP pattern made case-sensitive, so the lowercase form of the table statement is allowed ("lowercase drop table") | none (searched 'DROP' rows in tests/; bash-walls.test.sh §2 drives the uppercase form only)

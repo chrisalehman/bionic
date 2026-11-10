@@ -1513,9 +1513,15 @@ _proof_reader_load() {  # -> 0 once lib/reader.sh, beside this file, is loaded
 _PROOF_FACTS_LIBS="reader.sh translate.sh plan-read.sh log.sh line.sh"
 _PROOF_FACTS_HOMES="run.log landing-proofs.log asks.state fill-ledger.log design-ledger.md debt.md"
 _PROOF_FACTS_KEY=""; _PROOF_FACTS=""
+# The kept file is a cache and never evidence, yet what it holds is served as the run's proofs and approvals, under a
+# key anyone who reads the repository can compute. So it is read and written only in a directory this user owns
+# (`[ -O ]`), that is a directory and no link and that neither group nor other can write (one `find`, which follows no
+# link it is handed); anywhere else, or where find cannot answer, the fold is made again and nothing is kept. Each
+# write leaves the newest _PROOF_FACTS_KEEP files, so the fold of a plan that is gone, a suite's, is not kept for ever.
+_PROOF_FACTS_KEEP=16
 
 _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one `run/v1` line each, in fact order
-  local plan="${1:-}" lib log="" dir="" f stamp key cdir cache tmp
+  local plan="${1:-}" lib log="" dir="" f stamp key cdir cache="" tmp
   [ -f "$plan" ] && _proof_reader_load || return 0
   lib="$_READER_LIB_DIR"
   log="$(reader_log "$plan" 2>/dev/null)" && dir="${log%/*}"
@@ -1524,8 +1530,11 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   key="$plan $stamp"
   if [ "$_PROOF_FACTS_KEY" = "$key" ]; then printf '%s' "$_PROOF_FACTS"; return 0; fi
   cdir="${TMPDIR:-/tmp}/bionic-facts-$(id -u 2>/dev/null)"
-  cache="$cdir/$(printf '%s' "$plan" | cksum | tr -c '0-9\n' '-')"
-  if [ -f "$cache" ] && [ "$(head -1 "$cache" 2>/dev/null)" = "$key" ]; then
+  [ -d "$cdir" ] || mkdir -p -m 700 "$cdir" 2>/dev/null
+  if [ -O "$cdir" ] && [ -n "$(find "$cdir" -prune -type d ! -perm -020 ! -perm -002 2>/dev/null)" ]; then
+    cache="$cdir/$(printf '%s' "$plan" | cksum | tr -c '0-9\n' '-')"
+  fi
+  if [ -n "$cache" ] && [ -f "$cache" ] && [ "$(head -1 "$cache" 2>/dev/null)" = "$key" ]; then
     _PROOF_FACTS="$(sed 1d "$cache")"
   elif [ -n "$dir" ]; then
     _PROOF_FACTS="$(reader_facts "$plan")"
@@ -1537,8 +1546,9 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   fi
   [ -z "$_PROOF_FACTS" ] || _PROOF_FACTS="$_PROOF_FACTS"$'\n'
   _PROOF_FACTS_KEY="$key"
-  if mkdir -p -m 700 "$cdir" 2>/dev/null && tmp="$(mktemp "$cdir/.facts.XXXXXX" 2>/dev/null)"; then
+  if [ -n "$cache" ] && tmp="$(mktemp "$cdir/.facts.XXXXXX" 2>/dev/null)"; then
     { printf '%s\n' "$key"; printf '%s' "$_PROOF_FACTS"; } > "$tmp" && mv -f "$tmp" "$cache" 2>/dev/null || rm -f "$tmp"
+    ls -t "$cdir" 2>/dev/null | sed "1,${_PROOF_FACTS_KEEP}d" | while IFS= read -r f; do rm -f "$cdir/$f"; done
   fi
   printf '%s' "$_PROOF_FACTS"
 }
