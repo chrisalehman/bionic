@@ -66,7 +66,14 @@ reader_log() {  # <plan> -> the path of its run log; 2 when the plan is not plan
 reader_events() {  # <plan> -> the run's lines, in the order they were written
   local log
   log="$(reader_log "$1")" || return 2
-  [ ! -f "$log" ] || cat "$log"
+  if [ -f "$log" ]; then cat "$log"; return; fi
+  # A run with no log keeps its state in the version-14 homes, so those are read as events instead;
+  # a run with a log is read from the log alone, so no fact is ever counted from both.
+  if ! declare -F translate >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$_READER_LIB_DIR/translate.sh" || return 2
+  fi
+  translate "$1" events
 }
 
 reader_facts() {  # <plan> -> one line per standing fact, in the order the facts were last set
