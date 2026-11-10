@@ -128,7 +128,8 @@ _translate_form() {  # <events|gaps> -> stdin's source records in that form: eve
 }
 
 _translate_section() {  # <plan> <heading> -> the lines under `## <heading>`, to the next `## `
-  awk -v h="## $2" '$0 == h { on = 1; next } /^## / { on = 0 } on' "$1"
+  # Fenced text is an example, never a fact, as every reader of the plan holds it.
+  awk -v h="## $2" '/^[ \t]*```/ { f = !f; next } f { next } $0 == h { on = 1; next } /^## / { on = 0 } on' "$1"
 }
 
 translate_source _translate_state

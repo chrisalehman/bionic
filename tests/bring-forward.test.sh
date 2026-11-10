@@ -133,6 +133,11 @@ Q="$D/plans/epic-x/wave-7-by.plan.md"; printf '%s\n' '## SDLC State' '- Step 1: 
 expect_contains "an approval written by then instant is read" "|ev=approval|key=step1|by=Ann Person|said=go|at=2026-11-01T01:21Z" "$QEV"
 expect_eq "an untimed deferral stands at its review's proof, not beside a later finding, and its instant is a gap" "c.md c.md#2~ o.md c.md#1 " \
   "$(printf '%s\n' "$QEV" | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^(ref|evidence)=/) printf "%s%s ", substr($i, index($i, "=") + 1), ($NF == "at=" ? "~" : "") }')"
+QF="$D/plans/epic-x/wave-7-fence.plan.md"; printf '%s\n' '## SDLC State' "proved: kind=review head=$H at=2026-11-01T02:00:00Z evidence=k.md" '```' \
+  "proved: kind=review head=$H at=2026-11-01T03:00:00Z evidence=fenced.md" 'moved: fenced.md#1 to=fixed at=2026-11-01T04:00:00Z' '```' > "$QF"
+QFE="$(translate "$QF" events)"
+expect_contains "a proof outside a fence is read" "|ev=proof|kind=review|head=$H|evidence=k.md|" "$QFE"
+expect_absent "a fenced proof and a fenced move are examples: no event" "fenced.md" "$QFE"
 M="$D/plans/epic-x/wave-8-matrix.plan.md"
 cat > "$M" <<EOF
 ---
