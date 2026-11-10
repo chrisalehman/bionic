@@ -23,9 +23,10 @@
 # with `begin(type, id key, id value)`, adds fields with `put(key, value)` (an empty value becomes a
 # gap), names a field its home never holds with `lack(key)`, and ends with `emit(instant)`; the helpers
 # are _TRANSLATE_AWK; a line whose home already holds it in the log's shape is passed whole with
-# `carry(type, fields, separator)`. The plan's homes come first, then the record's (the landing record,
-# the asks register, the fill ledger); another file adds its homes the same way once it is sourced
-# after this one.
+# `carry(type, fields, separator)`. The plan's homes come first (the SDLC State and its dispatch ledger,
+# the Tasks rows, the Handoff, the Verification Matrix, the header's abandoned:, the inherited: lines, a
+# dropped row), then the record's (the landing record, the asks register, the fill ledger, the design
+# ledger, the debt ledger); another file adds its homes the same way once it is sourced after this one.
 #
 # bash 3.2 (ADR-001).
 
@@ -233,6 +234,16 @@ translate_source _translate_inherited
 _translate_inherited() {  # <plan> -> each `inherited: <suite> base= head= …` line of the SDLC State, named a gap
   # No ruled event type carries a suite and its base field for field, so the line is not written as one.
   _translate_section "$1" "SDLC State" | awk '/^inherited:[ \t]+[^ \t|]/ { split($0, w, " "); printf "g\t\tgap/v1|ev=inherited|suite=%s|field=ev|why=unruled\n", w[2] }'
+}
+
+translate_source _translate_dropped
+_translate_dropped() {  # <plan> -> each Tasks row whose status is dropped, named whole on the gaps list
+  # A dropped row is the plan's word that its work is no longer owed. No ruled event says that of a row:
+  # a cancel retracts a fact the log holds, and a row is authored, never logged; so the status is named,
+  # not written. Until a type carries it, only the plan's own cell tells a dropped row from a pending one.
+  plan_read_rows "$1" Tasks 2>/dev/null | awk -F'\t' '{ split("", c)
+    for (i = 1; i <= NF; i++) c[substr($i, 1, index($i, "=") - 1)] = substr($i, index($i, "=") + 1)
+    if (c["status"] == "dropped") printf "g\t\tgap/v1|ev=dropped|row=%s|field=ev|why=unruled\n", c["id"] }'
 }
 
 # THE RECORD'S HOMES sit in the plan's record directory, `<docs>/record/<wave>/`, joined to the plan by

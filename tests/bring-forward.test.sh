@@ -19,6 +19,13 @@
 #            plan holds as landed and the record lacks is still landed.
 #   §DECISIONS  a design ledger's put and ruled headings are decision rounds; any other heading is a gap.
 #   §DEBTS      a debt ledger's lines are debts, burned= its row when burned; a line of another form is a gap.
+#   §ACT     payload/scripts/bring-forward.sh <plan>: the plan keeps no state, matrix or handoff section, its
+#            rows the nine authored cells, and the reader's step, read from the log it wrote, is the old current:.
+#   §TWICE   a second act changes no byte of the plan or the log.
+#   §KEPT    the old plan and record are kept beside the new, byte for byte.
+#   §WAITS   a wait on a row is that row's id in deps; one the kind implies is dropped; any other is a gap.
+#   §DROPPED a dropped row is a gap of the translation, and after the act it is not ready and waits on it are met.
+#   §CELLS   a row's suites and lands-on go to the task's own section, or to the gaps list when it has none.
 #
 # FIXTURE FIDELITY. The plan is a real file in a scratch docs tree, in the shape version-14 plans hold.
 
@@ -276,4 +283,70 @@ expect_contains "the value scan reads the ledgers' values" "2026-11-01 5:49 PM P
 expect_empty "every value written is found in a ledger" "$(printf '%s\n' "$vals" | while IFS= read -r v; do grep -qF -- "$v" "$R7"/* || printf '%s\n' "$v"; done)"
 expect_eq "the appender took every ledger line" "$(printf '%s\n' "$EV7" | wc -l)" "$(wc -l < "$D/shape7.log")"
 expect_empty "no line read from a ledger is refused by the appender" "$bad"
+
+# THE ACT runs on sandbox copies of the three bed runs and on a SYNTHESIZED run holding the waits, a dropped
+# row and a task's own section; never on a tracked file.
+SB="$(mktemp -d)"; BF="${BIONIC_SCRIPTS_DIR}/payload/scripts/bring-forward.sh"; RS="${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh"
+for r in $W6 $W9 wave-49-mid; do cp -R "$BED/$r" "$SB/$r"; done
+RUNS="$W6:$W6 $W9:$W9 wave-49-mid:$W9"; at() { printf '%s/%s/plans/epic-23-bionic-tech-debt/%s.plan.md' "$1" "${2%%:*}" "${2#*:}"; }
+machine() { grep -cE '^## (SDLC State|Verification Matrix|Handoff) *$' "$1"; }
+
+section "ACT"
+for r in $RUNS; do p="$(at "$SB" "$r")"; cur="$(sed -n 's/^current: *//p' "$p")"; pre="$(machine "$p")"
+  bash "$BF" "$p" > "$SB/${r%%:*}.out"; expect_status "${r%%:*}: the act exits 0" 0 "$?"
+  expect_eq "${r%%:*}: the reader's step is the old current: ($cur)" "n=$cur" "$(bash "$RS" "$p" step | grep '^n=')"
+  expect_eq "${r%%:*}: the state, matrix and handoff sections the plan held are gone" "held 0" "$([ "$pre" -ge 3 ] && echo held) $(machine "$p")"
+  expect_eq "${r%%:*}: each Tasks row holds the nine authored cells" "id step kind task deps size serves files artifact" "$(plan_read_rows "$p" Tasks | awk -F'\t' '{ for (i = 1; i <= NF; i++) printf "%s%s", (i > 1 ? " " : ""), substr($i, 1, index($i, "=") - 1); print "" }' | sort -u)"
+done
+
+section "TWICE"
+for r in $RUNS; do p="$(at "$SB" "$r")"; l="$SB/${r%%:*}/record/${r#*:}/run.log"; sum="$(cksum < "$p") $(cksum < "$l")"
+  expect_nonempty "${r%%:*}: the act wrote the run's log" "$(grep '^run/v1|ev=step|' "$l")"
+  expect_eq "${r%%:*}: a second act changes no byte of the plan or the log, and prints the same" "$sum $(cat "$SB/${r%%:*}.out")" "$(bash "$BF" "$p" | { o="$(cat)"; printf '%s %s %s' "$(cksum < "$p")" "$(cksum < "$l")" "$o"; })"
+done
+
+section "KEPT"
+for r in $RUNS; do k="$(sed -n 's/^kept=//p' "$SB/${r%%:*}.out")"; o="$(at "$BED" "$r")"
+  expect_nonempty "${r%%:*}: the act prints where it kept the old plan and record" "$k"
+  expect_eq "${r%%:*}: the kept plan is the old one byte for byte, the new one is not" "differ" "$(cmp -s "$k/${r#*:}.plan.md" "$o" && ! cmp -s "$(at "$SB" "$r")" "$o" && echo differ)"
+  expect_empty "${r%%:*}: the kept record is the old one byte for byte" "$(diff -r "$k/record" "$BED/${r%%:*}/record/${r#*:}" 2>&1)"
+done
+W="$SB/docs/plans/epic-x/wave-7-act.plan.md"; mkdir -p "${W%/*}"; c="| — | — |"
+cat > "$W" <<EOF
+---
+canonical_sdlc_version: 14
+---
+## Tasks
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads | suites | lands-on | artifact |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | One. | — | — | 30 | REQ-1 | a.sh, record/wave-7-act/T1.md $c landed | approval:plan | a.test.sh | a.test.sh | record/wave-7-act/T1.md |
+| T2 | 4 | build | Two. | — | — | 30 | REQ-1 | b.sh $c pending | approval:plan, record/wave-7-act/T1.md, approval:D3 | b.test.sh | b.test.sh | — |
+| T3 | 4 | build | Three. | — | — | 30 | REQ-1 | c.sh $c dropped | — | — | — | — |
+| T4 | 4 | build | Four. | — | T3 | 30 | REQ-1 | d.sh $c pending | — | — | — | — |
+
+### T1
+One's own words.
+
+## SDLC State
+current: 4
+approved-by: Ann Person 2026-11-01T02:25:48Z "go"
+EOF
+OUT="$(bash "$BF" "$W")"; askw() { bash "$RS" "$W" "$@"; }; KW="$(printf '%s\n' "$OUT" | sed -n 's/^kept=//p')/wave-7-act.plan.md"
+
+section "WAITS"
+expect_eq "a row that read another row's record has that row's id in deps" "deps=T1" "$(askw row T2 | grep '^deps=')"
+expect_eq "a wait the kind implies is in no cell: the old plan held it, the new holds none" "2 0" "$(grep -c 'approval:plan' "$KW") $(grep -c 'approval:plan' "$W")"
+expect_contains "an approval other than the plan's is on the gaps list" "gap/v1|ev=row|row=T2|field=approval:D3|why=unruled" "$OUT"
+expect_eq "and in no cell" "1 0" "$(grep -c 'approval:D3' "$KW") $(grep -c 'approval:D3' "$W")"
+expect_eq "the header names version 15" "canonical_sdlc_version=15" "$(askw header canonical_sdlc_version)"
+
+section "DROPPED"
+expect_contains "a dropped row is named on the translation's gaps list: no ruled type carries it" "gap/v1|ev=dropped|row=T3|field=ev|why=unruled" "$(translate "$KW" gaps)"
+expect_eq "after the act the ready rows are the open ones, the dropped row not among them" "ready=T2 T4" "$(askw stop | grep '^ready=')"
+askw ready T3; expect_status "a dropped row is not ready" 1 "$?"
+expect_contains "a wait on a dropped row is met, and named" "gap/v1|ev=row|row=T4|field=T3|why=dropped" "$OUT"
+
+section "CELLS"
+expect_eq "a row's suites and lands-on go to the task's own section" "One's own words. suites: a.test.sh lands-on: a.test.sh" "$(sed -n '/^### T1$/,/^## /p' "$W" | grep -v '^#' | grep . | paste -sd' ' -)"
+for f in suites lands-on; do expect_contains "a row with no section of its own has its $f on the gaps list" "gap/v1|ev=row|row=T2|field=$f|why=unruled" "$OUT"; done
 finish
