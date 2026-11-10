@@ -2069,3 +2069,70 @@ Then retry the dispatch."
 
   return "$found"
 }
+
+# ---------- THE BRIEF FILE A DISPATCH NAMES ---------------------------------------------------------
+#
+# A brief is one file per dispatch, written by `session-poker.sh brief <row> <name>`. Its first line is
+# the render's mark: the row and the name it was rendered for, and the sha256 of every line after the
+# mark. The mark is the only place that sum lives before the dispatch, so an edit made after the render
+# is read as a sum that differs, and the fix is always the same one: render again.
+#
+# The verb writes the mark (`brief_mark`) and the dispatch wall reads it back (`brief_file_read`), so
+# the two cannot spell it two ways. A mark with no sum was written before the sum existed; such a file
+# is rendered again, never trusted.
+#
+# THE PROMPT NAMES THE FILE ON ITS FIRST LINE, the whole line a path ending in `briefs/<name>.md`, with
+# an optional `brief:` label and one pair of backticks. One fixed place, read by position: a path named
+# further down is prose.
+
+brief_sum() {  # <file> -> the sha256 of its lines after the first, 64 hex; rc 1 when no tool answers
+  local s=""
+  if command -v shasum >/dev/null 2>&1; then s="$(tail -n +2 "$1" 2>/dev/null | shasum -a 256 2>/dev/null)"
+  elif command -v sha256sum >/dev/null 2>&1; then s="$(tail -n +2 "$1" 2>/dev/null | sha256sum 2>/dev/null)"
+  fi
+  s="${s%% *}"
+  case "$s" in *[!0-9a-f]*|'') return 1 ;; esac
+  [ "${#s}" -eq 64 ] || return 1
+  printf '%s' "$s"
+}
+
+brief_mark() {  # <row> <name> <sum> -> the first line of a rendered brief
+  printf '<!-- brief: rendered from row %s for %s; sum %s; render it again to change it, never edit it -->' "$1" "$2" "$3"
+}
+
+brief_named() {  # <prompt> -> the brief path its first non-blank line names, else nothing (rc 1)
+  local l
+  l="$(printf '%s\n' "$1" | awk 'NF { print; exit }')"
+  l="${l#"${l%%[![:space:]]*}"}"; l="${l%"${l##*[![:space:]]}"}"
+  case "$(printf '%s' "${l%%:*}" | tr '[:upper:]' '[:lower:]')" in
+    brief|'brief file') l="${l#*:}"; l="${l#"${l%%[![:space:]]*}"}" ;;
+  esac
+  case "$l" in '`'*'`') l="${l#\`}"; l="${l%\`}" ;; esac
+  case "$l" in *[[:space:]\`]*|'') return 1 ;; esac
+  case "$l" in briefs/*.md|*/briefs/*.md) printf '%s' "$l" ;; *) return 1 ;; esac
+}
+
+# brief_file_read <root> <path as the prompt names it> -> sets, for the dispatch wall to judge:
+#   BRIEF_FILE_STATE  ok | outside (not a plain file under <root>) | absent | unrendered (no mark) |
+#                     unsummed (a mark with no sum) | edited (the sum differs) | unsummable (no tool)
+#   BRIEF_FILE_REL    the path from <root>      BRIEF_FILE_ROW, BRIEF_FILE_NAME  what the mark names
+#   BRIEF_FILE_SUM    the file's own sum        BRIEF_FILE_TEXT  its text, once the file is read
+brief_file_read() {
+  local root="$1" p="$2" f l1 rest declared
+  BRIEF_FILE_STATE=""; BRIEF_FILE_REL=""; BRIEF_FILE_ROW=""; BRIEF_FILE_NAME=""; BRIEF_FILE_SUM=""; BRIEF_FILE_TEXT=""
+  case "$p" in /*) f="$p" ;; *) f="$root/$p" ;; esac
+  case "/$f/" in */../*|*/./*) BRIEF_FILE_STATE=outside; return 0 ;; esac
+  case "$f" in "$root"/*) BRIEF_FILE_REL="${f#"$root"/}" ;; *) BRIEF_FILE_STATE=outside; return 0 ;; esac
+  if [ -L "$f" ]; then BRIEF_FILE_STATE=outside; return 0; fi
+  if [ ! -f "$f" ] || [ ! -r "$f" ]; then BRIEF_FILE_STATE=absent; return 0; fi
+  BRIEF_FILE_TEXT="$(< "$f")"
+  l1="${BRIEF_FILE_TEXT%%$'\n'*}"
+  case "$l1" in '<!-- brief: rendered from row '*' for '*';'*) ;; *) BRIEF_FILE_STATE=unrendered; return 0 ;; esac
+  rest="${l1#'<!-- brief: rendered from row '}"
+  BRIEF_FILE_ROW="${rest%% *}"
+  rest="${rest#* for }"; BRIEF_FILE_NAME="${rest%%;*}"
+  case "$l1" in *'; sum '*) declared="${l1#*; sum }"; declared="${declared%%;*}" ;; *) BRIEF_FILE_STATE=unsummed; return 0 ;; esac
+  BRIEF_FILE_SUM="$(brief_sum "$f")" || { BRIEF_FILE_STATE=unsummable; return 0; }
+  if [ "$BRIEF_FILE_SUM" != "$declared" ]; then BRIEF_FILE_STATE=edited; return 0; fi
+  BRIEF_FILE_STATE=ok
+}

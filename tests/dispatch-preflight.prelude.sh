@@ -225,6 +225,25 @@ mk_agent_payload() {
       tool_use_id:"toolu_018jyjgop7KMxP6yKtoAWWtB"}'
 }
 
+# as_brief <repo> <row> <name> <brief text> -> the prompt of a dispatch that binds <row>: the path of the
+# brief rendered for <row> and <name>, holding <brief text>. SYNTHESIZED: the text is the case's own, not
+# the brief verb's render, under the mark and sum lib/brief.sh writes (`brief_mark`, `brief_sum`), so the
+# wall reads its contract from the file as it reads a rendered one's. A <row> of `-` is the row the wall
+# binds: the text's unfenced `Row:`, else the first plan row the name is (`<prefix>-<id>`, or the id).
+as_brief() {
+  local rel=".bionic/docs/record/wave-01-test/briefs/$3.md" row="$2"
+  if [ "$row" = - ]; then
+    row="$(printf '%s\n' "$4" | awk '/^[[:space:]]*```/ { f = !f; next } !f && /^Row:[[:space:]]/ { print $2; exit }')"
+    [ -n "$row" ] || row="$(awk -F'|' -v nm="$3" 'NF > 3 { id = $2; gsub(/[ \t]/, "", id)
+      if (id != "" && id != "id" && id !~ /^-+$/ && (nm == id || substr(nm, length(nm) - length(id)) == "-" id)) { print id; exit } }' \
+      "$1/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" 2>/dev/null)"
+  fi
+  mkdir -p "$1/${rel%/*}" && printf '<!-- brief -->\n%s\n' "$4" > "$1/$rel.b" \
+    && ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/brief.sh" >/dev/null 2>&1 && s="$(brief_sum "$1/$rel.b")" \
+         && { brief_mark "$row" "$3" "$s"; printf '\n'; tail -n +2 "$1/$rel.b"; } > "$1/$rel" ) && rm -f "$1/$rel.b"
+  printf '%s' "$rel"
+}
+
 mk_bash_payload() {  # <sid> <cwd>  — an irrelevant tool, for the A7 hoist tests
   jq -n --arg s "$1" --arg c "$2" \
     '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,

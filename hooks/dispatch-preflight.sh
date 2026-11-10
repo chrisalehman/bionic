@@ -946,6 +946,25 @@ pushed to it at start.
 
 Then retry the dispatch." ;;
 esac
+# THE BRIEF IS THE FILE THE PROMPT NAMES, WHEN IT NAMES ONE. `brief_named` reads the prompt's first line
+# for a `briefs/<name>.md` path and `brief_file_read` (lib/brief.sh) reads that file and its render mark.
+# A rendered file that is there is the text every reader below reads in place of the prompt: the label
+# lift, the `Kind:` line and the body advisories. So with one brief file the prompt's prose decides
+# neither the verdict nor the roster's contract. A prompt that names no file is read as it always was;
+# THE BRIEF FILE'S CHECK, the last arm, refuses such a prompt when it binds a plan row.
+DP_PROMPT=$(_jq '.tool_input.prompt')
+DP_BRIEF_SRC="$DP_PROMPT"
+DP_BRIEF_PATH=""; DP_BRIEF_STATE=""
+if declare -F brief_file_read >/dev/null 2>&1; then
+  DP_BRIEF_PATH="$(brief_named "$DP_PROMPT")" || DP_BRIEF_PATH=""
+  if [ -n "$DP_BRIEF_PATH" ]; then
+    brief_file_read "$BIONIC_ROOT" "$DP_BRIEF_PATH"
+    DP_BRIEF_STATE="$BRIEF_FILE_STATE"
+    [ -z "$BRIEF_FILE_TEXT" ] || DP_BRIEF_SRC="$BRIEF_FILE_TEXT"
+  fi
+else
+  DP_BRIEF_STATE=unreadable
+fi
 # A PROTOTYPE IS ADMITTED BEFORE APPROVAL, CONFINED (wave-38 T21; REQ-13 AC-13.2, D16). A brief whose
 # `Kind:` line is `prototype` answers a design question with a throwaway: it writes only under the docs
 # root's record/ and inside the tree its `Throwaway tree:` line names, and owns no plan row. What the wall
@@ -956,7 +975,7 @@ esac
 # dp_brief_label <label> -> the value of the brief's first `<label>:` line outside a code fence, its
 # blanks and one pair of backticks taken off; the label is matched without regard to case.
 dp_brief_label() {
-  printf '%s\n' "$(_jq '.tool_input.prompt')" | awk -v lab="$1" '
+  printf '%s\n' "$DP_BRIEF_SRC" | awk -v lab="$1" '
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     {
@@ -1062,7 +1081,7 @@ DP_ROW_NAME=$(_jq '.tool_input.name')
 # decides the run cap, which `brief_validate_fields` reads off the same role below. Nothing else goes
 # in: the Files: reader reads an item by its own text, and this hook lists no directory for it
 # (wave-27 T42, A-orch-46).
-LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')" "$DP_SUBAGENT")
+LIFTED=$(lift_contract_fields "$DP_BRIEF_SRC" "$DP_SUBAGENT")
 # DP_MINE_AWK: the awk function `mine(id)`, 1 when the dispatch name `nm` is row <id>'s. Only the
 # reader below calls it.
 DP_MINE_AWK='
@@ -2136,6 +2155,11 @@ dp_scaffold_marked() {
 # The single-fault no-deliverable detail carries the same constant, and the shared
 # brief-scaffold block (agents-src/blocks/brief-scaffold.md) says the same in its header.
 DP_PROMPT_ONLY="The wall reads the prompt text only. A brief file the prompt points at is not read, so copy its scaffold lines into the prompt."
+# A dispatch that binds a plan row, or names a brief file, is read from that file, and its lines are
+# changed by rendering it again: the same one line says so, so the wire never tells it to copy them.
+if [ -n "$DP_BRIEF_PATH" ] || [ -n "$DP_BOUND_REC" ]; then
+  DP_PROMPT_ONLY="The wall reads the brief file named on the prompt's first line. Change its lines in the plan and render it again."
+fi
 #
 # A BRIEF THAT LACKS NO LINE IS SHOWN NO SCAFFOLD (wave-24 T13, D10, AC-6.7). The scaffold is
 # there to say which lines to add, and its `<ADD>` marks are that answer. When it carries no
@@ -3189,6 +3213,71 @@ finish. A writer of a session that is gone is taken over with session-poker.sh a
 session's files are older than the poker interval, session-poker.sh sweep removes them, and the row is free."
 fi
 
+# ======================================================= THE BRIEF FILE'S CHECK
+# A dispatch that binds a plan row is given the brief the brief verb rendered for it, and the prompt's
+# first line names that file. Three things are checked of it: the prompt names one; its mark says it was
+# rendered for this row and this name; and the sum of the file now is the sum its mark records, so a file
+# edited after its render is refused. A prompt that names a brief file is held to the same three whether
+# or not it binds a row: its text is the contract read above. A dispatch that binds no plan row and names
+# no file (a researcher, a test-runner, a prototype) is judged as it always was. The fix is always the
+# render, never an edit. The admitted file's path and sum go on the roster row. It is the last arm, so
+# a dispatch refused for a fact the render cannot change (an approval it waits on, a live writer) names
+# that fact first.
+DP_BRIEF_REL=""; DP_BRIEF_SUM=""
+if [ -z "$DP_PROTOTYPE" ] && { [ -n "$DP_BRIEF_PATH" ] || [ -n "$DP_BOUND_REC" ] || [ "$DP_BRIEF_STATE" = unreadable ]; }; then
+  _bf_row="${DP_BOUND_ROW:-${BRIEF_FILE_ROW:-<row>}}"
+  _bf_render="bash $(refuse_shell_word "$HOOK_DIR/session-poker.sh") brief ${_bf_row} ${DP_ROW_NAME:-<name>}"
+  _bf_fact=""; _bf_fix="run the brief verb"; _bf_why=""
+  if [ "$DP_BRIEF_STATE" = unreadable ]; then
+    _bf_fact="the brief check lib/brief.sh cannot be loaded"; _bf_fix="reinstall the plugin"
+    _bf_why="The library this hook loaded has no brief_file_read, so no brief file can be read or summed."
+  elif [ -z "$DP_BRIEF_PATH" ]; then
+    _bf_fact="the prompt names no brief file of row $(bionic_trunc "$_bf_row" 11)"
+    _bf_why="The prompt's first line is not a briefs/<name>.md path. A dispatch that binds a plan row is
+given the file the brief verb rendered for it, and the wall reads that file, never the prompt's prose."
+  else
+    case "$DP_BRIEF_STATE" in
+      outside)    _bf_fact="the brief file is outside this project"
+                  _bf_why="The path leaves the project root, or is a symbolic link." ;;
+      absent)     _bf_fact="the brief file the prompt names is not there"
+                  _bf_why="No readable file is at that path under the project root." ;;
+      unrendered) _bf_fact="the brief file carries no render mark"
+                  _bf_why="Its first line is not the render's mark, so nothing says which row and name it is for." ;;
+      unsummed)   _bf_fact="the brief file's mark carries no sum"
+                  _bf_why="It was rendered before the render wrote a sum, so an edit since cannot be told apart." ;;
+      unsummable) _bf_fact="the brief file's sum cannot be taken"; _bf_fix="install shasum or sha256sum"
+                  _bf_why="Neither shasum nor sha256sum answered, so the file cannot be held to its render." ;;
+      edited)     _bf_fact="the brief file was edited after its render"
+                  _bf_why="The sum of the file now differs from the sum its mark records." ;;
+      ok)
+        if [ "$BRIEF_FILE_NAME" != "$DP_ROW_NAME" ]; then
+          _bf_fact="the brief file is for $(bionic_trunc "$BRIEF_FILE_NAME" 15), not this name"
+          _bf_why="Its mark names the dispatch ${BRIEF_FILE_NAME}; this one is named ${DP_ROW_NAME:-<unnamed>}. Each
+dispatch has its own file, so the record keeps what each agent was given."
+        elif [ -n "$DP_BOUND_ROW" ] && [ "$BRIEF_FILE_ROW" != "$DP_BOUND_ROW" ]; then
+          _bf_fact="the brief file is row $(bionic_trunc "$BRIEF_FILE_ROW" 8)'s, not row $(bionic_trunc "$DP_BOUND_ROW" 8)'s"
+          _bf_why="Its mark names row ${BRIEF_FILE_ROW}; this dispatch binds row ${DP_BOUND_ROW}."
+        else
+          DP_BRIEF_REL="$BRIEF_FILE_REL"; DP_BRIEF_SUM="$BRIEF_FILE_SUM"
+        fi ;;
+    esac
+  fi
+  if [ -n "$_bf_fact" ]; then
+    dp_finding "$_bf_fact" "$_bf_fix" \
+      "    Dispatch:   ${DP_ROW_NAME:-<unnamed>}${DP_BOUND_ROW:+ (row ${DP_BOUND_ROW})}
+    Brief file: ${DP_BRIEF_PATH:-<none on the first line of the prompt>}
+
+${_bf_why}
+
+Fix: render the brief for this dispatch; it writes briefs/${DP_ROW_NAME:-<name>}.md and prints its path:
+       ${_bf_render}
+     Put that path alone on the prompt's first line, and dispatch under the name it was rendered for.
+     A brief is changed by editing the plan's section for the row and rendering again, never by hand.
+
+Then retry the dispatch."
+  fi
+fi
+
 # ================================================ THE ONE REFUSAL, FOR EVERY FAULT
 #
 # THE LAST ARM THAT CAN FIND A FAULT IS ABOVE THIS LINE, and everything below is the
@@ -3232,7 +3321,7 @@ dp_refuse_findings
 # construction. With no `jq` the lines fall back to `warn`, as fold.sh does for its own nudge.
 # The poker path goes in as ONE shell word (wave-24 T29, critic I2): the amend line prints it
 # verbatim, and a plugin root with a space split in two when pasted.
-_dp_adv_all=$(brief_body_advisories "$(_jq '.tool_input.prompt')" "$AGENT_NAME" "$C_FILES" "$SUITES_ALLOWED" "$C_RE_EXECUTES" "$(refuse_shell_word "$HOOK_DIR/session-poker.sh")")
+_dp_adv_all=$(brief_body_advisories "$DP_BRIEF_SRC" "$AGENT_NAME" "$C_FILES" "$SUITES_ALLOWED" "$C_RE_EXECUTES" "$(refuse_shell_word "$HOOK_DIR/session-poker.sh")")
 # THE DEBT ARM (wave-30 T22; D2, P2, AC-11.3). Debt is burned by the next row whose Files touch its
 # concept, so an allowed brief whose `Files:` covers a site of an unburned item of the run's ledger
 # (lib/proof.sh `proof_debt_hits`: the path, a directory above it, or a glob over it) carries the item,
@@ -3440,7 +3529,9 @@ ROW=$(roster_row \
   ${DP_LANDS_RED:+"lands_red=${DP_LANDS_RED}"} \
   ${DP_RED_EVIDENCE:+"red_evidence=${DP_RED_EVIDENCE}"} \
   ${DP_ROW:+"row=${DP_ROW}"} \
-  ${DP_LANDS_ON:+"lands_on=${DP_LANDS_ON}"}) || ROW=""
+  ${DP_LANDS_ON:+"lands_on=${DP_LANDS_ON}"} \
+  ${DP_BRIEF_REL:+"brief=${DP_BRIEF_REL}"} \
+  ${DP_BRIEF_SUM:+"brief_sum=${DP_BRIEF_SUM}"}) || ROW=""
 
 # THE ROW IS BUILT AND THE ROSTER IS WRITTEN LAST, and a launch the roster cannot carry is refused
 # (wave-28 T70). `roster_row` refuses a field name no reader knows rather than writing it, so an

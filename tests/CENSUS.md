@@ -138,6 +138,9 @@ booked.test.sh | §CLASS | keep | payload/scripts/booked.sh: the class dropped f
 ## brief-file.test.sh
 
 brief-file.test.sh | §RENDER | keep | hooks/poker/plan.sh poker_verb_brief: the review range not read from the reader's last review proof of the row's questions (R1), the Questions or the admitted red not rendered (R2, R4), the task's section not read for the judgment or its suites: line left in it (R3), an absent section left silent (R6), the verb listing not checked (R8), a typed contract label let through (R9), a file it did not render rewritten (R5) or a name of another row taken (R10) | none (searched 'brief T' and 'briefs/' in tests/; session-poker-4.test.sh §BRIEF-PINS reads only the Files line)
+brief-file.test.sh | §NAMES | keep | hooks/dispatch-preflight.sh THE BRIEF FILE'S CHECK: a row dispatch whose prompt names no brief file admitted (N2), the refusal not naming the render (N2b), a file rendered for another name admitted (N3), a rendered file's path or sum left off the roster row (N1b, N1c), or a read-only dispatch with no row asked for a file (N4) | none (searched 'brief_file_read\|briefs/' in tests/; the dispatch-preflight shards name a file through as_brief and assert the contract it carries, never the check)
+brief-file.test.sh | §PROSE | keep | hooks/dispatch-preflight.sh: the label lift, Kind: or the advisories reading the prompt in place of the named file, so prose naming other suites changes the verdict or the roster contract (P1, P2) | none (searched 'DP_BRIEF_SRC\|tool_input.prompt' in tests/)
+brief-file.test.sh | §SUM | keep | payload/scripts/lib/brief.sh brief_file_read and hooks/poker/plan.sh's mark: a file edited after its render admitted (S1), a render not admitted (S2), a mark with no sum admitted (S3), or amend or hold refusing a roster row that carries no brief path or sum (S5, S6) | none (searched 'brief_sum\|brief=' in tests/)
 
 ## bring-forward.test.sh
 

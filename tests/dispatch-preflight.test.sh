@@ -647,7 +647,7 @@ section "§WHOLE-RUN-ADMITTED — the dispatch wall holds no whole-run rule: reg
 REPO=$(pf_repo rwr1)
 write_attestation "$REPO" "$SID_A"
 pf_plan "$REPO" "" "$(pf_row T1 4 active 'lib/two.sh')" "$(pf_row T12 5 pending .bionic/docs/record/w99-floor.txt test T1)"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$PF_FULL_BRIEF" "w99-T12")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T12 w99-T12 "$PF_FULL_BRIEF")" "w99-T12")"
 expect_eq "WA.1 AC-7.3 a whole run with a build row open is ADMITTED by the dispatch wall" "allow" "$GATE_VERDICT"
 expect_status "WA.1 …and journalled" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
 expect_contains "WA.1 …its row holds run.sh (the run a second dispatch follows)" "run.sh" \
@@ -670,7 +670,7 @@ lo_gate() {  # <repo tag> <Lands-on line> -> GATE_*, LO_ROW
   printf '#!/bin/bash\nbash "$REPO/payload/scripts/lib/widget.sh"\n' > "$REPO/tests/widget.test.sh"
   printf '#!/bin/bash\ngrep -c widget "$REPO/payload/scripts/lib/widget.sh"\n' > "$REPO/tests/reader.test.sh"
   git -C "$REPO" add payload tests >/dev/null 2>&1 && git -C "$REPO" commit -qm "suites that read the widget" >/dev/null 2>&1
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Canonical-sdlc Step 4, task 4/9 of epic-99 wave-01; build · double · wave.
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T23 w99-T23 "Canonical-sdlc Step 4, task 4/9 of epic-99 wave-01; build · double · wave.
 Your task: implement the widget behind the existing seam.
 $2
 Expected artifact: .bionic/docs/record/w99-widget.txt
@@ -678,7 +678,7 @@ Exit condition: the artifact exists and the paired suite is green.
 Expected duration: ~25 minutes.
 Progress artifact: .bionic/tmp/w99-widget.progress
 Files: payload/scripts/lib/widget.sh
-Suites: tests/widget.test.sh" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
+Suites: tests/widget.test.sh")" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
   LO_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 }
 lo_gate lo1 'Lands-on: widget'

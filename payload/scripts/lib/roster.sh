@@ -310,7 +310,7 @@ roster_pipe_unescape() {  # <stored value> -> the value as its author typed it
 # tests/session-poker-4.test.sh §LIST reads the `case "$key"` of `roster_row` below and goes red on
 # a key in neither set, so a new field is classified the day it is added.
 ROSTER_LIST_FIELDS="files suites_allowed lands_on re_executes questions claims"
-ROSTER_SCALAR_FIELDS="status session name agent_id launched_at subagent_type model deliverable source duration progress cadence absent waiver suites_source teammate_id adopted_from amended extended held done reason tool_use_id plan lands_red red_evidence pushed row landed landed_at run_pid run_log run_head run_cmd run_started_at run_rc run_ended_at"
+ROSTER_SCALAR_FIELDS="status session name agent_id launched_at subagent_type model deliverable source duration progress cadence absent waiver suites_source teammate_id adopted_from amended extended held done reason tool_use_id plan lands_red red_evidence pushed row landed landed_at run_pid run_log run_head run_cmd run_started_at run_rc run_ended_at brief brief_sum"
 
 roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or a bare word
   local status="" session="" name="" agent_id="" launched_at="" subagent_type=""
@@ -324,7 +324,7 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   local has_teammate_id=0 has_adopted_from=0 has_amended=0 has_extended=0
   local has_reason=0
   local has_held=0 has_done=0 has_questions=0 has_lands_red=0 has_red_evidence=0 has_pushed=0
-  local has_row=0 has_lands_on=0
+  local has_row=0 has_lands_on=0 brief="" brief_sum="" has_brief=0 has_brief_sum=0
   local has_files=0 has_suites_allowed=0 has_suites_source=0 has_re_executes=0
   local arg key val out
 
@@ -377,6 +377,8 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
       pushed)        pushed="$val";       has_pushed=1 ;;
       row)           row="$val";          has_row=1 ;;
       lands_on)      lands_on="$val";     has_lands_on=1 ;;
+      brief)         brief="$val";        has_brief=1 ;;
+      brief_sum)     brief_sum="$val";    has_brief_sum=1 ;;
       landed)        landed="$val";       has_landed=1 ;;
       landed_at)     landed_at="$val";    has_landed_at=1 ;;
       run_pid)        run_pid="$val";        has_run_pid=1 ;;
@@ -418,6 +420,8 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   if [ "$has_pushed" -eq 1 ]; then out="$out|pushed=$pushed"; fi
   if [ "$has_row" -eq 1 ]; then      out="$out|row=$row"; fi
   if [ "$has_lands_on" -eq 1 ]; then out="$out|lands_on=$lands_on"; fi
+  if [ "$has_brief" -eq 1 ]; then    out="$out|brief=$brief"; fi
+  if [ "$has_brief_sum" -eq 1 ]; then out="$out|brief_sum=$brief_sum"; fi
   if [ "$has_run_pid" -eq 1 ]; then        out="$out|run_pid=$run_pid"; fi
   if [ "$has_run_log" -eq 1 ]; then        out="$out|run_log=$run_log"; fi
   if [ "$has_run_head" -eq 1 ]; then       out="$out|run_head=$run_head"; fi

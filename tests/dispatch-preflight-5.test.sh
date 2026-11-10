@@ -391,8 +391,8 @@ lc_gate() {  # <repo tag> <Lands-on line> [<Re-executes line>] -> GATE_*, LC_ROW
   printf 'the widget\n' > "$REPO/payload/scripts/lib/widget.sh"
   printf '#!/bin/bash\nbash "$REPO/payload/scripts/lib/widget.sh"\n' > "$REPO/tests/widget.test.sh"
   git -C "$REPO" add payload tests >/dev/null 2>&1 && git -C "$REPO" commit -qm "a suite that reads the widget" >/dev/null 2>&1
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(printf '%s\nFiles: payload/scripts/lib/widget.sh\n%s\n%s' \
-    "$BRIEF_FULL" "${3-Re-executes: \`npx jest --testPathPatterns 'w(a|b)'\`}" "$2")" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T23 w99-T23 "$(printf '%s\nFiles: payload/scripts/lib/widget.sh\n%s\n%s' \
+    "$BRIEF_FULL" "${3-Re-executes: \`npx jest --testPathPatterns 'w(a|b)'\`}" "$2")")" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
   LC_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 }
 lc_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
@@ -464,7 +464,7 @@ ln_gate() {  # <repo tag> <Files value> <prose: line or ''> -> GATE_*, LN_ROW
   printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the notes | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' \
     >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
   [ -z "$3" ] || printf '%s\n' "$3" > "$REPO/.bionic/config.yaml"
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(printf '%s\nFiles: %s\nLands-on: none the row'"'"'s Files are prose' "$BRIEF_FULL" "$2")" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T23 w99-T23 "$(printf '%s\nFiles: %s\nLands-on: none the row'"'"'s Files are prose' "$BRIEF_FULL" "$2")")" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
   LN_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 }
 ln_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
@@ -518,7 +518,7 @@ qn_gate() {  # <repo tag> <task cell> <role> <Questions: set, comma-joined> -> G
     >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
   n=$(( $(printf '%s' "$4" | tr -cd ',' | wc -c) + 1 )); files=".bionic/docs/record/wq-$1.md"
   for ((i = 2; i <= n; i++)); do files="$files, .bionic/docs/record/wq-$1-$i.md"; done
-  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(printf 'Your task: read the change for the questions below.\nExpected artifact: .bionic/docs/record/wq-%s.md\nExpected duration: ~30 minutes.\nSuites: tests/widget.test.sh\nRow: T23\nQuestions: %s\nFiles: %s' "$1" "${4//,/, }" "$files")" "wq-$1" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" "$3")"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T23 "wq-$1" "$(printf 'Your task: read the change for the questions below.\nExpected artifact: .bionic/docs/record/wq-%s.md\nExpected duration: ~30 minutes.\nSuites: tests/widget.test.sh\nRow: T23\nQuestions: %s\nFiles: %s' "$1" "${4//,/, }" "$files")")" "wq-$1" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" "$3")"
   QN_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 }
 qn_first() { printf '%s\n' "$GATE_ERR" | grep -m1 'bionic: dispatch refused'; }
