@@ -111,8 +111,8 @@ EGD_MUT="$SANDBOX/derive-mutant"
 mkdir -p "$EGD_MUT/hooks"
 cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$EGD_MUT/scripts"
 cp "$HOOK" "$EGD_MUT/hooks/bash-walls.sh"
-EGD_NEEDLE='r[PROOF_QUESTION] = ((ev SUBSEP PROOF_RESULT) in D) ? D[ev SUBSEP PROOF_RESULT] : PROOF_RESULT;'
-anchor file payload/scripts/lib/walls.sh 'r[PROOF_QUESTION] = ((ev SUBSEP PROOF_RESULT) in D) ? D[ev SUBSEP PROOF_RESULT] : PROOF_RESULT;'
+EGD_NEEDLE='r[PROOF_QUESTION] = ((pe SUBSEP PROOF_RESULT) in D) ? D[pe SUBSEP PROOF_RESULT] : PROOF_RESULT;'
+anchor file payload/scripts/lib/walls.sh 'r[PROOF_QUESTION] = ((pe SUBSEP PROOF_RESULT) in D) ? D[pe SUBSEP PROOF_RESULT] : PROOF_RESULT;'
 EGD_N="$EGD_NEEDLE" awk 'BEGIN { n = ENVIRON["EGD_N"] } { i = index($0, n); if (i) $0 = substr($0, 1, i - 1) "r[PROOF_QUESTION] = PROOF_RESULT;" substr($0, i + length(n)); print }' \
   "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh" > "$EGD_MUT/scripts/lib/walls.sh"
 expect_eq "EGD-mut0 the mutant library differs from the shipped one in one line" "1" \
