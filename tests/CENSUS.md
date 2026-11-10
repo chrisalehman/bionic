@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 125 · sections: 1120 · keep: 926 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 125 · sections: 1121 · keep: 927 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1092 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1092 - 22 - 8 = 1062.
 
@@ -937,6 +937,7 @@ one-reader.test.sh | §PLANWRITERS | keep | payload/scripts/one-reader-check.sh:
 one-reader.test.sh | §WRITERS | keep | payload/scripts/one-reader-check.sh: writers keyed by file instead of function, so two functions of one file appending `born` are one writer, or the enclosing-function track lost, so `published`'s line_publish and poker_verb_row_landed are not paired | none (searched 'one-reader-check' and 'shared_types' in tests/)
 one-reader.test.sh | §REFUSALS | keep | payload/scripts/one-reader-check.sh: the hook set no longer read from hooks/hooks.json, or the primitive regex lost `deny`, so a refusal planted in a registered hook is not listed | none (searched 'one-reader-check' and 'hook_refusals' in tests/)
 one-reader.test.sh | §REPORT | keep | payload/scripts/one-reader-check.sh: the closing `exit 0` made the finding count, so a report with findings exits non-zero; a count line renamed or reordered; the loader marker read after the comment skip, so no copy is listed | none (searched 'one-reader-check' and 'loader_copies' in tests/)
+one-reader.test.sh | §READINGS | keep | payload/scripts/readings.sh: the session-poker verb count read from the first `case "$VERB" in` block instead of the last two, so a verb arm added in a scratch commit does not move the count; reading 1 left as the proxy grep so it differs from the check's own parsers=; reading 7 counting the plan's marks instead of the reader's born events, so a record read through its translation differs; the record defaulted instead of named | none (searched 'readings.sh' and 'r2_session_poker_verbs' in tests/)
 
 ## patrol-duties-gate.test.sh
 

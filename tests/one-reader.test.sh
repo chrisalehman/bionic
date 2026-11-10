@@ -9,6 +9,8 @@
 #   §WRITERS      two functions appending one event type are listed as a pair; so is `published` today.
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted.
 #   §REPORT       the check exits 0 with findings and ends on the five count lines, in their order.
+#   §READINGS     readings.sh prints the release's readings at a revision from git objects; reading 1 is the
+#                 check's own count over that tree, reading 7 the born events the reader lists for the record.
 #
 # FIXTURE FIDELITY. Every run reads a scratch copy of this checkout's hooks/ and payload/scripts/;
 # the plants are real files in that copy.
@@ -68,5 +70,36 @@ expect_eq "it ends on the five count lines, in order" "parsers plan_writers shar
 expect_contains "a pasted loader copy is listed" "$(printf 'loader\thooks/bash-walls.sh\t')" "$AFTER"
 expect_absent "the loader's own library is not a copy" "$(printf 'loader\tpayload/scripts/lib/loader.sh')" "$AFTER"
 bash "$CHECK" "$S/no-such" >/dev/null 2>&1; expect_status "a root that is not a checkout exits 2" 2 "$?"
+
+# §READINGS runs from the checkout; a scratch commit on a shared clone moves a count without touching it.
+READ="${BIONIC_SCRIPTS_DIR}/payload/scripts/readings.sh"; F="${BIONIC_SCRIPTS_DIR}/tests/fixtures/replay"
+at() { ( cd "$1" && shift && bash "$READ" "$@" 2>&1 ); }
+born() { ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/reader.sh"; reader_facts "$1" ) | grep -c '^run/v1|ev=born|'; }
+OLD=7a9633486; R30="$(at "$BIONIC_SCRIPTS_DIR" $OLD)"
+mkdir "$S/old"; git -C "$BIONIC_SCRIPTS_DIR" archive $OLD hooks payload/scripts | tar -x -C "$S/old"
+git clone -q --shared --no-checkout "$BIONIC_SCRIPTS_DIR" "$S/repo"; G="git -C $S/repo"; $G read-tree $OLD
+BLOB="$($G show $OLD:hooks/session-poker.sh | awk '{print} /^case "\$VERB" in/ {print "  zzscratch) ;;"}' | $G hash-object -w --stdin)"
+$G update-index --cacheinfo "100755,$BLOB,hooks/session-poker.sh"
+SCR="$($G -c user.name=t -c user.email=t@t commit-tree "$($G write-tree)" -p $OLD -m scratch)"
+RW="$F/wave-46-asks-nothing"; R46="$(at "$BIONIC_SCRIPTS_DIR" $OLD "$RW/record/wave-46-asks-nothing")"
+R49="$(at "$BIONIC_SCRIPTS_DIR" $OLD "$F/wave-49-what-a-run-costs/record/wave-49-what-a-run-costs")"
+BORN="$(born "$RW/plans/epic-23-bionic-tech-debt/wave-46-asks-nothing.plan.md")"
+
+section "READINGS"
+expect_contains "the verbs are 68" "r2_session_poker_verbs=68" "$R30"
+expect_contains "11 hook scripts are registered, 9 over 30 percent in-file" "r3_registered_hook_scripts=11 r3_over_30pct_in_file=9" "$R30"
+expect_contains "15 loader copies" "r3_loader_copies=15" "$R30"
+expect_contains "101513 shell lines outside tests" "r4_shell_outside_tests_lines=101513" "$R30"
+expect_contains "102161 test lines" "r5_tests_lines=102161" "$R30"
+expect_regex "reading 1 is a count" "^r1_parsers=[1-9][0-9]*$" "$R30"
+expect_eq "reading 1 is the check's own count over the same tree" "$(count "$(bash "$CHECK" "$S/old")" parsers)" "$(count "$R30" r1_parsers)"
+expect_contains "a scratch commit adding one verb arm moves the verbs to 69" "r2_session_poker_verbs=69" "$(at "$S/repo" "$SCR")"
+expect_contains "no record, none read: the output says so" "record=none" "$R30"
+expect_absent "no record, no reading 7" "r7_" "$R30"
+expect_contains "the output names the record it read" "record=$RW/record/wave-46-asks-nothing" "$R46"
+expect_regex "a record's born events are not zero" "^[1-9][0-9]*$" "$BORN"
+expect_eq "reading 7 is the born events the reader lists for the run" "$BORN" "$(count "$R46" r7_born_events)"
+expect_ne "reading 7 moves with the record passed" "$(count "$R46" r7_born_events)" "$(count "$R49" r7_born_events)"
+expect_status "a record that is not a directory exits 2" 2 "$(at "$BIONIC_SCRIPTS_DIR" $OLD "$S/none" >/dev/null; echo $?)"
 
 finish
