@@ -49,7 +49,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh decisions [--all]   the register (D24): this run's rulings from record/<wave>/design-ledger.md, or every run's with the ADRs (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh decisions put D<n> '<what is decided>'   a decision put: one ledger line, and the wait line it prints
 #     bash <plugin-root>/hooks/session-poker.sh decisions rule D<n> '<reply>'   a decision ruled on the user's reply: its ledger heading and its ask closed, in one act
-#     bash <plugin-root>/hooks/session-poker.sh brief <row>   render the row's dispatch brief into record/<wave>/briefs/<row>.md: the scaffold from the row, the head, the orchestrator's sections marked (writes that file, never the plan)
+#     bash <plugin-root>/hooks/session-poker.sh brief <row> [<name>]   render the dispatch brief into record/<wave>/briefs/<name>.md from the row, its plan section and the reader (writes that file, never the plan)
 #     bash <plugin-root>/hooks/session-poker.sh task-split <id> -- <child spec>…   rewrite one pending row as two or more children, each <id>:<task>:<size>:<Files>, its waiters re-pointed (writes the plan)
 #
 # `<plugin-root>` IS A PLACEHOLDER, NOT A SPELLING TO PASTE (epic-17 W5, spec AC-5). These
@@ -577,7 +577,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh decisions [--all]   the bound run's rulings, D<n> · \"<reply>\" · <who> <date> · <title>, from record/<wave>/design-ledger.md; --all: every run's, keyed by wave, with the ADRs (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh decisions put D<n> '<what is decided>'   during a run, write the decision's put line to record/<wave>/design-ledger.md and print its wait line: what an hour's wait moves, from the tasks that read approval:D<n> and the longest chain"
   die "  bash ${HOOK_DIR}/session-poker.sh decisions rule D<n> '<reply>'   during a run, on the user's reply, write the ruling heading ## Δ<k> — D<n> ruled \"<reply>\" (<who> <date>): <title> to record/<wave>/design-ledger.md and close the decision's ask; approve D<n> and a release approval card's reply rule through the same writer; a decision already ruled is refused"
-  die "  bash ${HOOK_DIR}/session-poker.sh brief <row>   render that plan row's dispatch brief into record/<wave>/briefs/<row>.md: the scaffold fields from the row and the shipped scaffold, the working head, and ## Judgment marked for what only the orchestrator writes; a second call keeps what is written under ## Judgment"
+  die "  bash ${HOOK_DIR}/session-poker.sh brief <row> [<name>]   render the dispatch brief of that plan row into record/<wave>/briefs/<name>.md (<name> the agent's, else the fill's for the row): the scaffold from the row, the judgment from the task's own section of the plan, the review range, Questions and Lands-red from the reader; it never rewrites a brief it did not render, and never changes the plan"
   die "  bash ${HOOK_DIR}/session-poker.sh task-split <id> -- <child spec>…   rewrite one pending row as its children, each <id>:<task>:<size>:<Files>: the parent dropped with split-into, its Files partitioned, every row that waited on it waiting on a child, one validated transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh debt add <record> [<plan>]   write one record/<run>/debt.md line per debt: line of the record (a review's, a writer's, an assumptions.md hole line), each concept and kind once"
   die "  bash ${HOOK_DIR}/session-poker.sh debt touched <concept> [<plan>]   add one to the touches of each unburned item of <concept> (the dispatch wall's call)"
@@ -1502,11 +1502,11 @@ $1"; shift ;;
       DC_RULE="$2"; DC_REPLY="$3"
     elif [ $# -ne 0 ]; then usage "decisions takes --all, put D<n> '<what is decided>', or rule D<n> '<reply>'."; fi
     ;;
-  # THE BRIEF, RENDERED FROM ITS ROW (wave-33 T9; REQ-4 AC-4.4, D8). The one operand is the plan row's id; the
-  # id's own shape, and whether the plan has the row, are the verb's refusal (1).
+  # THE BRIEF, RENDERED WHOLE. The plan row's id, then the name its agent is dispatched under (the fill's name for
+  # the row when left out); the id's shape, the name's, and whether the plan has the row are the verb's refusal (1).
   brief)
-    { [ $# -eq 1 ] && [ -n "$1" ]; } || usage "brief takes exactly one argument: the plan row's id, as in: brief T2."
-    BRF_ID="$1"
+    { [ $# -ge 1 ] && [ $# -le 2 ] && [ -n "$1" ]; } || usage "brief takes the plan row's id and, optionally, the name its agent is dispatched under, as in: brief T2 w01-T2."
+    BRF_ID="$1"; BRF_NAME="${2:-}"
     ;;
   # THE SPLIT (wave-30 T17; D14d-3, design-ledger Δ11). The row, `--`, then two or more child specs
   # `<id>:<task>:<size>:<Files>`: the id before the first colon, the Files after the last, the size

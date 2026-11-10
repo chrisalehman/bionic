@@ -46,7 +46,8 @@ _bf_dir="$(cd "$_bf_dir" && pwd -P)" || exit 2
 _bf_plan() {  # <plan> <deps file|-> <gaps out> <dropped ids> -> the plan's text brought forward
   # Read twice: the first pass learns the Tasks table's columns, each row's suites and lands-on and which
   # rows have a section of their own; the second writes. A cell keeps its text as written, `\|` included.
-  awk -v depf="$2" -v gapf="$3" -v drop=" $4 " -v nine="id step kind task deps size serves files artifact" '
+  # A task's own section is found by plan-read.sh's one heading rule, so the act writes where the brief reads.
+  awk -v depf="$2" -v gapf="$3" -v drop=" $4 " -v nine="id step kind task deps size serves files artifact" "$_PLAN_READ_SECTION"'
     function cells(line, out,   n, i) {
       gsub(/\\[|]/, "\001", line); sub(/^[ \t]*[|]/, "", line); sub(/[|][ \t]*$/, "", line)
       n = split(line, out, "|"); for (i = 1; i <= n; i++) gsub(/^[ \t]+|[ \t]+$/, "", out[i])
@@ -55,7 +56,6 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> <dropped ids> -> the plan's text
     function unesc(s,   o, i) { o = ""; while ((i = index(s, "\001"))) { o = o substr(s, 1, i - 1) "\\|"; s = substr(s, i + 1) }; return o s }
     function name(s) { s = tolower(s); gsub(/[ \t]+/, "-", s); return s }
     function none(s) { gsub(/—|–|-/, "", s); return s == "" }
-    function heading(s) { sub(/^#+[ \t]+/, "", s); sub(/[ \t].*$/, "", s); sub(/[:.,]+$/, "", s); return s }
     function place(   k) { if (ins == "") return
       for (k = 1; k <= 2; k++) if (!none(cell[ins, w2[k]])) print w2[k] ": " unesc(cell[ins, w2[k]])
       for (k = 0; k < blanks; k++) print ""; ins = ""; blanks = 0 }
@@ -76,7 +76,7 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> <dropped ids> -> the plan's text
     }
     FNR == 1 && $0 == "---" { head = 1; print; next }
     head { if ($0 == "---") head = 0; else if ($0 ~ /^canonical_sdlc_version:[ \t]*["\047]?14["\047]?[ \t]*$/) $0 = "canonical_sdlc_version: 15"; print; next }
-    /^#/ { place() }
+    /^#+[ \t]/ { place() }
     /^## / { skip = (sec == "SDLC State" || sec == "Verification Matrix" || sec == "Handoff") }
     skip { next }
     /^#+[ \t]/ && !isnine && (heading($0) in row) && !index(drop, " " heading($0) " ") { print; ins = heading($0); next }

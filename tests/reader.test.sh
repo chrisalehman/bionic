@@ -19,6 +19,7 @@
 #   §READY      ready reads a row's deps from its Tasks cell when the caller names none.
 #   §JOIN-14    a version-14 row's waits are its reads cell: ready, stop's ready rows, holds, status.
 #   §JOIN-15    a nine-cell row's waits are its deps and what its kind and step imply.
+#   §SECTION    a task's own section is the heading whose first word is its id, read to the next heading.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
 
@@ -298,5 +299,18 @@ section "JOIN-15"
 W=w15; expect_eq "a nine-cell row waits on its deps and what its kind and step imply, and no approval holds it" \
   "B1=0 B2=1 B3=1 B4=1 ; ready=B1; waive:F1>B4 ; Z9=1" "$(joined B1 B2 B3 B4)"
 land B1; expect_eq "a test row at Step 6 waits for the code writers before it" "B1=1 B2=0 B3=1 B4=1 ; ready=B2" "$(joined B1 B2 B3 B4 | cut -d';' -f1-2)"
+
+section "SECTION"
+SP="$D/plans/epic-x/sec.plan.md"
+printf '%s\n' '## Tasks' '' '| id | task |' '|---|---|' '| T1 | one |' '' '## T1 — the first' '' 'Research to read: a.md' '' \
+  'suites: a.test.sh, b.test.sh' '' '### T10: not the first' "T10's words." '## T2' > "$SP"
+sect() { ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/plan-read.sh" && plan_read_section "$SP" "$@" ); }
+expect_eq "a section is the body under the heading whose first word is the id, to the next heading" \
+  "Research to read: a.md||suites: a.test.sh, b.test.sh|" "$(sect T1 | tr '\n' '|')"
+expect_eq "the first word is the whole id, its trailing colon dropped" "T10's words." "$(sect T10)"
+expect_eq "a key line of the section answers its value" "a.test.sh, b.test.sh" "$(sect T1 suites)"
+sect T2 >/dev/null; expect_status "a heading with no body is a section" 0 "$?"
+sect T1 artifact >/dev/null; expect_status "a key the section lacks answers no" 1 "$?"
+sect T3 >/dev/null; expect_status "a row with no heading of its own has no section" 1 "$?"
 
 finish

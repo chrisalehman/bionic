@@ -301,6 +301,12 @@ poker_brief_labels() {
   ' "$file"
 }
 
+# poker_verbs_listed -> the verbs this script's usage lists, one per line: the listing every verb a rendered brief
+# names is held to, read from the usage itself so a verb added or retired moves both at once.
+poker_verbs_listed() {
+  ( usage ) 2>&1 | sed -n 's/.*session-poker\.sh \([a-z][a-z0-9-]*\).*/\1/p'
+}
+
 # poker_brief_none <cell> -> 0 when a table cell says nothing: empty, or a dash.
 poker_brief_none() {
   case "$1" in ''|'—'|'-'|'–') return 0 ;; esac
@@ -2545,30 +2551,37 @@ EOF
     exit 0
   }
 
-  # THE BRIEF, RENDERED FROM ITS ROW (wave-33 T9; REQ-4 AC-4.4, D8). The rules are written above the helpers
-  # (`poker_brief_cell`). It reads the bound plan and writes one file under record/<wave>/briefs/, so it takes
-  # no plan transaction: the plan is never changed. REFUSED (1), nothing written: an id that is no row id, a
-  # plan with no ## Tasks table, a row the table does not have (the refusal names the rows and a corrected
-  # call), a row the table carries twice. REFUSED (2): the shipped scaffold or lib/proof.sh cannot be read.
-  # A row the table fills badly is not a refusal: its slot is written as `<ORCHESTRATOR: …>`, which the dispatch
-  # wall reads as an unfilled slot and marks, so a brief typed over it is the only way past.
+  # THE BRIEF, RENDERED WHOLE. One file per dispatch, record/<wave>/briefs/<name>.md, where <name> is the agent's
+  # name (given, else the one the fill hands this row on this session's roster). Everything in it is rendered: the
+  # scaffold from the row's cells, the judgment from the task's own section of the plan (plan-read.sh's
+  # `plan_read_section`), and the review range, Questions and Lands-red from the reader. Nothing is typed into the
+  # file, so a judgment the plan lacks is said in words, never left blank, and the way to supply it is to write the
+  # section and render again. The plan is never changed. REFUSED (1), nothing written: an id that is no row id, a plan
+  # with no Tasks table, a row the table lacks or carries twice, a name that is not this row's, a file of that name
+  # this verb did not render (the run's record keeps it as written), a section typing a contract label (the contract
+  # is rendered, and a typed Re-executes: is a declared command the wall may not match), a review row whose declared
+  # questions are not one reader's, and a file naming a session-poker verb the listing lacks. REFUSED (2): the
+  # shipped scaffold, the plan parser or a scratch file cannot be had.
   poker_verb_brief() {
     plan_verb_open brief
     if ! plan_verb_id_ok "$BRF_ID"; then
       die "REFUSED — '$(clean "$BRF_ID")' is not one row id: an id is one token of letters, digits, '.', '_' or '-', beginning with a letter or a digit. Nothing was written."
       exit 1
     fi
-    BRF_ROWS="$(units_rows "$PV_PLAN" 2>/dev/null)" || BRF_ROWS=""
+    if ! declare -F plan_read_section >/dev/null 2>&1 && ! . "$BIONIC_LIB/plan-read.sh" 2>/dev/null; then
+      die "REFUSED — the plan parser (lib/plan-read.sh) cannot be loaded from $BIONIC_LIB. Nothing was written. Fix: reinstall the plugin, then run again: bash ${HOOK_DIR}/session-poker.sh brief $BRF_ID"
+      exit 2
+    fi
+    BRF_ROWS="$(plan_read_rows "$PV_PLAN" Tasks 2>/dev/null)" || BRF_ROWS=""
     if [ -z "$BRF_ROWS" ]; then
       die "REFUSED — $PV_PLAN carries no ## Tasks table with a row, so there is nothing to render. Nothing was written."
       exit 1
     fi
-    BRF_ROW="$(printf '%s\n' "$BRF_ROWS" | awk -F'\t' -v id="$BRF_ID" '$1 == id')"
-    BRF_N=0; [ -z "$BRF_ROW" ] || BRF_N="$(printf '%s\n' "$BRF_ROW" | wc -l | tr -d ' ')"
+    BRF_N="$(printf '%s\n' "$BRF_ROWS" | awk -F'\t' -v k="id=$BRF_ID" '$1 == k' | wc -l | tr -d ' ')"
     if [ "$BRF_N" -ne 1 ]; then
-      BRF_IDS="$(printf '%s\n' "$BRF_ROWS" | awk -F'\t' '{ printf "%s%s", (n++ ? ", " : ""), $1 }')"
-      BRF_EG="$(printf '%s\n' "$BRF_ROWS" | awk -F'\t' '$10 == "pending" { print $1; exit }')"
-      [ -n "$BRF_EG" ] || BRF_EG="$(printf '%s\n' "$BRF_ROWS" | awk -F'\t' 'NR == 1 { print $1 }')"
+      BRF_IDS="$(printf '%s\n' "$BRF_ROWS" | awk -F'\t' '{ sub(/^id=/, "", $1); printf "%s%s", (n++ ? ", " : ""), $1 }')"
+      BRF_EG="$(printf '%s\n' "$BRF_ROWS" | awk -F'\t' '{ for (i = 2; i <= NF; i++) if ($i == "status=pending") { sub(/^id=/, "", $1); print $1; exit } }')"
+      [ -n "$BRF_EG" ] || BRF_EG="$(printf '%s\n' "$BRF_ROWS" | awk -F'\t' 'NR == 1 { sub(/^id=/, "", $1); print $1 }')"
       if [ "$BRF_N" -eq 0 ]; then
         die "REFUSED — the plan has no row $(clean "$BRF_ID"). Its rows: $BRF_IDS. Write: bash ${HOOK_DIR}/session-poker.sh brief $BRF_EG. Nothing was written."
       else
@@ -2581,35 +2594,60 @@ EOF
       die "REFUSED — the shipped scaffold cannot be read (${HOOK_DIR}/../skills/canonical-sdlc/dispatch.md, its ### Scaffold fence); a brief is rendered from it, never from a copy. Nothing was written."
       exit 2
     fi
-    BRF_TASK="$(units_field "$BRF_ROW" task)"
-    BRF_KIND="$(units_field "$BRF_ROW" kind)"
-    BRF_STEP="$(units_field "$BRF_ROW" step)"
-    BRF_SIZE="$(units_field "$BRF_ROW" size)"
-    BRF_FILES="$(units_field "$BRF_ROW" Files)"
-    BRF_STATUS="$(units_field "$BRF_ROW" status)"
-    BRF_SERVES="$(units_field "$BRF_ROW" serves)"
-    BRF_DEPS="$(units_field "$BRF_ROW" deps)"
+    # THE CELLS ARE NAMED BY THE TABLE'S HEADER, so a version-14 row (its state cells, suites and lands-on among them)
+    # and a nine-cell row read through the same parser; a cell the table lacks is empty.
+    BRF_CELLS="$(plan_read_row "$PV_PLAN" Tasks id "$BRF_ID")"
+    brf_cell() { printf '%s\n' "$BRF_CELLS" | awk -v k="$1=" 'index($0, k) == 1 { print substr($0, length(k) + 1); exit }'; }
+    BRF_TASK="$(brf_cell task)"; BRF_KIND="$(brf_cell kind)"; BRF_STEP="$(brf_cell step)"; BRF_SIZE="$(brf_cell size)"
+    BRF_FILES="$(brf_cell files)"; BRF_STATUS="$(brf_cell status)"; BRF_SERVES="$(brf_cell serves)"; BRF_DEPS="$(brf_cell deps)"
     BRF_WAVE="$(proof_plan_slug "$PV_PLAN")"
     BRF_DOCS="$(docs_root "$PV_REPO")"
     BRF_RECDIR="$BRF_DOCS/record/$BRF_WAVE"
     case "$BRF_RECDIR" in "$PV_REPO"/*) BRF_RECREL="${BRF_RECDIR#"$PV_REPO"/}" ;; *) BRF_RECREL="$BRF_RECDIR" ;; esac
-    BRF_OUT="$BRF_RECDIR/briefs/$BRF_ID.md"
+    BRF_READER="$BIONIC_LIB/../reader.sh"
+    { [ -n "${_LINE_FIELDS_AWK:-}" ] || . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
 
-    # THE ARTIFACT (wave-37 T6; REQ-7 AC-7.1; D10): the row's own `artifact` Tasks cell, the ledger's cell for the
-    # row, the Files entry named for the row, the first record entry, then the record the task names. One path or nothing.
+    # THE NAME IS THE DISPATCH'S: a re-dispatch gets its own file beside the first, so the record keeps what each
+    # agent was given. It must be a name the dispatch wall binds to this row (the id, or the id behind a prefix).
+    [ -n "${BRF_NAME:-}" ] || BRF_NAME="$(fill_name "$PV_REPO/.bionic/tmp/roster-$(session_id).state" "$BRF_ID")"
+    if ! plan_verb_id_ok "$BRF_NAME" || ! fill_row_launched "$BRF_ID" "$BRF_NAME"; then
+      die "REFUSED — '$(clean "$BRF_NAME")' is not a name of row $BRF_ID: the dispatch wall binds a name to the row it ends with (the id, or <prefix>-$BRF_ID, with -r<n> for a re-dispatch). Nothing was written. Run again: bash ${HOOK_DIR}/session-poker.sh brief $BRF_ID <prefix>-$BRF_ID"
+      exit 1
+    fi
+    BRF_OUT="$BRF_RECDIR/briefs/$BRF_NAME.md"
+    BRF_MARK="<!-- brief: rendered from row $BRF_ID for $BRF_NAME; render it again to change it, never edit it -->"
+    if [ -e "$BRF_OUT" ] && [ "$(head -1 "$BRF_OUT" 2>/dev/null)" != "$BRF_MARK" ]; then
+      die "REFUSED — ${BRF_OUT#"$PV_REPO"/} was not rendered by this verb for row $BRF_ID: it is part of the run's record and is kept as written. Render the row under the name its agent is dispatched as: bash ${HOOK_DIR}/session-poker.sh brief $BRF_ID <name>. Nothing was written."
+      exit 1
+    fi
+
+    # THE TASK'S OWN SECTION: its suites: and lands-on: lines are the row's cells where the table has none, and every
+    # other line is the judgment. A contract label typed there would give the agent a second answer to the rendered one.
+    BRF_SEC="$(plan_read_section "$PV_PLAN" "$BRF_ID")" && BRF_HASSEC=1 || BRF_HASSEC=""
+    BRF_JUDG="$(printf '%s\n' "$BRF_SEC" | awk '!/^(suites|lands-on):/' | awk 'NF { n++ } n')"
+    BRF_TYPED="$(printf '%s\n' "$BRF_JUDG" | awk -v labs="$(printf '%s\n' "$BRF_LABELS" | tr '\n' '|')" '
+      BEGIN { n = split(labs, L, "|"); for (i = 1; i <= n; i++) if (L[i] != "") lab[tolower(L[i])] = L[i] }
+      { s = $0; sub(/^[ \t]*/, "", s); e = index(s, ":"); if (e > 1 && (tolower(substr(s, 1, e - 1)) in lab)) { print substr(s, 1, e); exit } }')"
+    if [ -n "$BRF_TYPED" ]; then
+      die "REFUSED — the plan's section for $BRF_ID types the contract label $BRF_TYPED, and a brief's contract is rendered, never typed: take the line out of the section (suites: and lands-on: are the section's own keys; widen a live dispatch with amend <name>). Nothing was written. Then run again: bash ${HOOK_DIR}/session-poker.sh brief $BRF_ID $BRF_NAME"
+      exit 1
+    fi
+
+    # THE ARTIFACT: the row's own `artifact` cell, the ledger's cell for the row, the Files entry named for the row, the
+    # first record entry, then the record the task names. One path or nothing.
     BRF_ART=""
-    BRF_ACELL="$(poker_brief_cell "$PV_PLAN" Tasks "$BRF_ID" artifact)" || BRF_ACELL=""
+    BRF_ACELL="$(brf_cell artifact)"
     if ! poker_brief_none "$BRF_ACELL"; then
       case "$BRF_ACELL" in *[[:space:],]*) : ;; *) BRF_ART="$BRF_ACELL" ;; esac
     fi
-    BRF_LEDGER="$(poker_brief_cell "$PV_PLAN" "Dispatch ledger" "$BRF_ID" artifact)" || BRF_LEDGER=""
+    BRF_LEDGER="$(plan_read_row "$PV_PLAN" "Dispatch ledger" id "$BRF_ID" 2>/dev/null | sed -n 's/^artifact=//p')"
     if [ -z "$BRF_ART" ] && ! poker_brief_none "$BRF_LEDGER"; then
       case "$BRF_LEDGER" in *[[:space:],]*) : ;; *) BRF_ART="$BRF_LEDGER" ;; esac
     fi
     [ -n "$BRF_ART" ] || BRF_ART="$(poker_brief_record_entry "$BRF_FILES" artifact "$BRF_ID")"
     [ -n "$BRF_ART" ] || BRF_ART="$(poker_brief_task_record "$BRF_TASK")"
-    # A READER ROW'S ARTIFACT IS ITS RECORD (wave-35 T8; REQ-6 AC-6.1; D15): a verify, test or review row that
-    # names none writes <record dir>/<row>.md, the progress artifact's convention, and its Files line carries it.
+    # A READER ROW'S ARTIFACT IS ITS RECORD: a verify, test or review row that names none writes <record dir>/<row>.md,
+    # the progress artifact's convention, and its Files line carries it.
     BRF_FILES_LINE="$BRF_FILES"
     if [ -z "$BRF_ART" ] && poker_reader_kind "$BRF_KIND"; then
       BRF_ART="$BRF_RECREL/$BRF_ID.md"
@@ -2625,11 +2663,13 @@ EOF
       if [ -n "$BRF_SHA" ]; then BRF_HEAD="$BRF_SHA ($(clean "$BRF_WB"))"; else BRF_HEAD="(no branch $(clean "$BRF_WB") in this repository)"; fi
     fi
 
-    # THE SUITES AND WHAT THE ROW LANDS ON: its own cells when it has them, else its Files' *.test.sh entries, in
-    # order; else, for a row that writes code, the slot: `none` is a waiver nobody chose for it.
-    BRF_SUITES="$(poker_brief_cell "$PV_PLAN" Tasks "$BRF_ID" suites)" || BRF_SUITES=""
+    # THE SUITES AND WHAT THE ROW LANDS ON: its own cells, else its section's lines, else its Files' *.test.sh entries,
+    # in order; else, for a row that writes code, the slot: `none` is a waiver nobody chose for it.
+    BRF_SUITES="$(brf_cell suites)"
+    poker_brief_none "$BRF_SUITES" && BRF_SUITES="$(plan_read_section "$PV_PLAN" "$BRF_ID" suites)"
+    BRF_LANDS="$(brf_cell lands-on)"
+    poker_brief_none "$BRF_LANDS" && BRF_LANDS="$(plan_read_section "$PV_PLAN" "$BRF_ID" lands-on)"
     BRF_SUITE_SLOT=""
-    BRF_LANDS="$(poker_brief_cell "$PV_PLAN" Tasks "$BRF_ID" lands-on)" || BRF_LANDS=""
     poker_brief_none "$BRF_SUITES" && BRF_SUITES="$(poker_brief_suites "$BRF_FILES")"
     if units_writes_head "$BRF_FILES"; then
       # A ROW THAT WRITES CODE NAMES ITS SUITES: `none` is a waiver nobody chose, so the slot is the orchestrator's to
@@ -2653,55 +2693,94 @@ EOF
 $BRF_PINNED"; fi
     fi
 
-    # THE SCAFFOLD, in the shipped order. A label the verb has no value for is the orchestrator's: it is named, not written.
-    BRF_SLOT="<ORCHESTRATOR: the row has none; write it>"
+    # A REVIEW ROW'S QUESTIONS are the ones its task declares, held to the rigor's deal by the one reading of it that
+    # task-add uses; its range starts, per question, at the head of the last review proof the reader holds for it (the
+    # chain a review continues), else at the run's base, and ends at the working head.
+    BRF_QS=""; BRF_QLINE=""; BRF_RANGE=""
+    if [ "$BRF_KIND" = review ]; then
+      BRF_QS="$(units_questions "$(printf '%s\t%s\t%s\t%s' "$BRF_ID" "$BRF_STEP" "$BRF_KIND" "$BRF_TASK")")"
+      if [ -n "$BRF_QS" ] && ! poker_questions_dealt "$PV_PLAN" "$BRF_QS"; then
+        die "REFUSED — row $BRF_ID declares the questions $BRF_QS, which are not dealt: $PQD_SAID. Nothing was written. Fix: make the row's questions one reader's, then run again: bash ${HOOK_DIR}/session-poker.sh brief $BRF_ID $BRF_NAME"
+        exit 1
+      fi
+      BRF_QLINE="${BRF_QS//,/, }"
+      BRF_BASE="$(bash "$BRF_READER" "$PV_PLAN" header base-sha 2>/dev/null | sed -n 's/^base-sha=//p')"
+      BRF_RANGE="$(bash "$BRF_READER" "$PV_PLAN" reviews 2>/dev/null | awk -F'|' -v qs=",$BRF_QS," -v base="${BRF_BASE:-(no review proof and no base-sha)}" \
+        -v end="${BRF_SHA:-$BRF_HEAD}" "$_LINE_FIELDS_AWK"'
+        $1 == "run/v1" && line_kv("ev") == "proof" && index(qs, "," line_kv("question") ",") { last[line_kv("question")] = line_kv("head") }
+        END {
+          n = split(substr(qs, 2, length(qs) - 2), q, ",")
+          for (i = 1; i <= n; i++) { a[i] = (q[i] in last) ? last[q[i]] : base; if (a[i] != a[1]) mixed = 1 }
+          if (!mixed) print "Reviewed range: " a[1] ".." end
+          else for (i = 1; i <= n; i++) print "Reviewed range (" q[i] "): " a[i] ".." end
+        }')"
+    fi
+    # A RED THE ROW MAY LAND WITH is a red admitted for it that the reader still holds open; the evidence is the
+    # writer's to write, at a path the brief names.
+    BRF_RED="$(bash "$BRF_READER" "$PV_PLAN" debts 2>/dev/null | awk -F'|' -v r="$BRF_ID" "$_LINE_FIELDS_AWK"'
+      line_kv("ev") == "admitted" && line_kv("row") == r { l = line_kv("suite") " until " line_kv("token") } END { if (l != "") print l }')"
+
+    # THE SCAFFOLD, in the shipped order. A label with no source on this row is not written.
     BRF_BODY="$(mktemp "${TMPDIR:-/tmp}/brief.XXXXXX")" || { die "REFUSED — no scratch file can be made. Nothing was written."; exit 2; }
-    BRF_LEFT=""
     case "$BRF_SIZE" in ''|*[!0-9]*) BRF_BIG=no ;; *) if [ "$BRF_SIZE" -ge 15 ]; then BRF_BIG=yes; else BRF_BIG=no; fi ;; esac
     BRF_PROG="$(poker_brief_record_entry "$BRF_FILES" progress "$BRF_ID")"
     [ -n "$BRF_PROG" ] || BRF_PROG="$BRF_RECREL/$BRF_ID.progress.md"
-    while IFS= read -r BRF_L; do
-      case "$BRF_L" in
-        "Expected duration")
-          case "$BRF_SIZE" in
-            ''|*[!0-9]*) printf '%s: <ORCHESTRATOR: the row'"'"'s size is %s; write the minutes>\n' "$BRF_L" "${BRF_SIZE:-empty}" ;;
-            *) printf '%s: %s minutes\n' "$BRF_L" "$BRF_SIZE" ;;
-          esac ;;
-        "Expected artifact") printf '%s: %s\n' "$BRF_L" "${BRF_ART:-$BRF_SLOT}" ;;
-        "Progress artifact") [ "$BRF_BIG" = yes ] && printf '%s: %s\n' "$BRF_L" "$BRF_PROG" ;;
-        "Cadence")           [ "$BRF_BIG" = yes ] && printf '%s: 15 min\n' "$BRF_L" ;;
-        "Files")             poker_brief_none "$BRF_FILES_LINE" || printf '%s: %s\n' "$BRF_L" "$BRF_FILES_LINE" ;;
-        "Suites")            printf '%s: %s\n' "$BRF_L" "$BRF_SUITES" ;;
-        "Row")               printf '%s: %s\n' "$BRF_L" "$BRF_ID" ;;
-        "Lands-on")          printf '%s: %s\n' "$BRF_L" "$BRF_LANDS" ;;
-        *)                   BRF_LEFT="${BRF_LEFT:+$BRF_LEFT, }$BRF_L" ;;
-      esac
-    done > "$BRF_BODY" <<BRF_EOF
+    {
+      printf '%s\n' "$BRF_MARK"
+      while IFS= read -r BRF_L; do
+        case "$BRF_L" in
+          "Expected duration")
+            case "$BRF_SIZE" in
+              ''|*[!0-9]*) printf '%s: <ORCHESTRATOR: the row'"'"'s size is %s; write the minutes>\n' "$BRF_L" "${BRF_SIZE:-empty}" ;;
+              *) printf '%s: %s minutes\n' "$BRF_L" "$BRF_SIZE" ;;
+            esac ;;
+          "Expected artifact") printf '%s: %s\n' "$BRF_L" "${BRF_ART:-<ORCHESTRATOR: the row has none; write it>}" ;;
+          "Progress artifact") [ "$BRF_BIG" = yes ] && printf '%s: %s\n' "$BRF_L" "$BRF_PROG" ;;
+          "Cadence")           [ "$BRF_BIG" = yes ] && printf '%s: 15 min\n' "$BRF_L" ;;
+          "Files")             poker_brief_none "$BRF_FILES_LINE" || printf '%s: %s\n' "$BRF_L" "$BRF_FILES_LINE" ;;
+          "Suites")            printf '%s: %s\n' "$BRF_L" "$BRF_SUITES" ;;
+          "Questions")         [ "$BRF_KIND" != review ] || printf '%s: %s\n' "$BRF_L" "${BRF_QLINE:-<ORCHESTRATOR: the row declares no questions>}" ;;
+          "Row")               printf '%s: %s\n' "$BRF_L" "$BRF_ID" ;;
+          "Lands-on")          printf '%s: %s\n' "$BRF_L" "$BRF_LANDS" ;;
+          "Lands-red")         [ -z "$BRF_RED" ] || printf '%s: %s\n' "$BRF_L" "$BRF_RED" ;;
+          "Red-evidence")      [ -z "$BRF_RED" ] || printf '%s: %s/%s-red.md\n' "$BRF_L" "$BRF_RECREL" "$BRF_NAME" ;;
+        esac
+      done <<BRF_EOF
 $BRF_LABELS
 BRF_EOF
-    {
-      cat "$BRF_BODY"
       printf '\n## The row\n\n%s\n\n' "$BRF_TASK"
-      printf 'Row %s: kind %s, step %s, serves %s, waits on %s, status %s.\n' "$BRF_ID" "$BRF_KIND" "$BRF_STEP" "$BRF_SERVES" "$BRF_DEPS" "$BRF_STATUS"
+      [ -n "$BRF_STATUS" ] || BRF_STATUS="$(bash "$BRF_READER" "$PV_PLAN" status "$BRF_ID" 2>/dev/null | sed -n 's/^state=//p')"
+      printf 'Row %s: kind %s, step %s, serves %s, waits on %s, status %s.\n' "$BRF_ID" "$BRF_KIND" "$BRF_STEP" "$BRF_SERVES" "${BRF_DEPS:-—}" "${BRF_STATUS:-pending}"
       printf 'Working head: %s\n' "$BRF_HEAD"
-      printf 'Plan: %s\n\n' "$(clean "${PV_PLAN#"$PV_REPO"/}")"
-      # THE ORCHESTRATOR'S SECTION: kept whole from a brief already there, else the two marked slots.
-      if [ -f "$BRF_OUT" ] && /usr/bin/grep -q '^## Judgment[[:space:]]*$' "$BRF_OUT"; then
-        awk '/^## Judgment[[:space:]]*$/ { f = 1 } f { print }' "$BRF_OUT"
+      [ -z "$BRF_RANGE" ] || printf '%s\n' "$BRF_RANGE"
+      printf 'Plan: %s\n\n## Judgment\n\n' "$(clean "${PV_PLAN#"$PV_REPO"/}")"
+      if [ -n "$BRF_JUDG" ]; then
+        printf '%s\n' "$BRF_JUDG"
       else
-        printf '## Judgment\n\n'
-        printf 'Research to read: <ORCHESTRATOR: the record files this row reads, or none>\n'
-        printf 'Rulings: <ORCHESTRATOR: the rulings that bind this row, by assumption id, or none>\n'
+        if [ -n "$BRF_HASSEC" ]; then printf 'NO JUDGMENT: the plan'"'"'s section for %s holds nothing but its suites' "$BRF_ID"
+        else printf 'NO JUDGMENT: the plan has no section for %s' "$BRF_ID"; fi
+        printf ', so this brief carries no research to read and no rulings. Write them into the plan under a heading whose first word is %s (## %s — <title>), then render again: bash %s/session-poker.sh brief %s %s\n' \
+          "$BRF_ID" "$BRF_ID" "$HOOK_DIR" "$BRF_ID" "$BRF_NAME"
       fi
-    } > "$BRF_BODY.new"
+    } > "$BRF_BODY"
+
+    # EVERY VERB THE FILE NAMES IS ONE THE LISTING HOLDS: a brief that sends its agent to a verb that does not exist is
+    # refused here, where the section can still be fixed.
+    BRF_UNKNOWN="$(comm -23 <(grep -o 'session-poker\.sh[[:space:]][[:space:]]*[a-z][a-z0-9-]*' "$BRF_BODY" | awk '{ print $2 }' | LC_ALL=C sort -u) \
+      <(poker_verbs_listed | LC_ALL=C sort -u) | paste -sd, - | sed 's/,/, /g')"
+    if [ -n "$BRF_UNKNOWN" ]; then
+      rm -f "$BRF_BODY"
+      die "REFUSED — the brief for $BRF_ID would name session-poker.sh $BRF_UNKNOWN, which the verb listing does not hold; correct the plan's section for $BRF_ID. Nothing was written. Then run again: bash ${HOOK_DIR}/session-poker.sh brief $BRF_ID $BRF_NAME"
+      exit 1
+    fi
     mkdir -p "${BRF_OUT%/*}" 2>/dev/null
-    if ! mv -f "$BRF_BODY.new" "$BRF_OUT" 2>/dev/null; then
-      rm -f "$BRF_BODY" "$BRF_BODY.new"
+    if ! mv -f "$BRF_BODY" "$BRF_OUT" 2>/dev/null; then
+      rm -f "$BRF_BODY"
       die "REFUSED — $BRF_OUT cannot be written. The plan is unchanged."
       exit 2
     fi
-    rm -f "$BRF_BODY"
-    say "brief — $BRF_ID: written to ${BRF_OUT#"$PV_REPO"/}. Scaffold lines left to the orchestrator: ${BRF_LEFT:-none}. Under ## Judgment: the research to read and the rulings."
+    if [ -n "$BRF_JUDG" ]; then BRF_SAID="the plan's section for $BRF_ID"; else BRF_SAID="NONE — the plan has no words for $BRF_ID; write its section and render again"; fi
+    say "brief — $BRF_ID: written to ${BRF_OUT#"$PV_REPO"/} for the dispatch named $BRF_NAME; the dispatch prompt's first line names that file. Its judgment: $BRF_SAID."
     exit 0
   }
 

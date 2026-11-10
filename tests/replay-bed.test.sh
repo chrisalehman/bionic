@@ -10,6 +10,7 @@
 #             list; the cut run is read as it stands, beside the hand-written lines.
 #   §CATCH    a copy of the reader with the replace rule taken out, then the cancel rule, disagrees with a card.
 #   §COVER    every question of the closed list is asked and none is refused, and every event type has a line.
+#   §FOLLOWS  a review row's rendered brief starts its range at the reader's last review proof of its questions.
 #
 # A CARD'S INSTANT. The reader answers a run as it stands, so a card's world holds as its run log the reader's
 # own translation of the fixture up to the card's instant, in the translation's order: a line with no instant
@@ -158,5 +159,23 @@ expect_eq "every hand-written line is marked, and one is a dispatch" "$(grep -c 
 MID="$(ls "$WORLD_ROOT"/wave-49-mid/plans/*/*.plan.md)"
 expect_contains "a hand-written refusal, which no type carries, is named on the gaps list" "gap/v1|ev=refusal|row=" \
   "$( ( . "$RD/lib/reader.sh" && reader_events "$MID" >/dev/null && translate "$MID" gaps ) )"
+
+section "FOLLOWS"
+# The brief follows the reader: over the closed run, a review row's rendered range starts where the reader's last
+# review proof of its questions stands, and each row's Questions are its own. The run is a project's docs root here,
+# its close line taken out of the copy: the verb renders for an open run only, and the range reads no step.
+. "$(dirname "$0")/lib/bound-marker.sh"
+FW="$WORLD_ROOT/brief"; FB="$FW/.bio""nic"; mkdir -p "$FB"; cp -R "$X/wave-49-what-a-run-costs" "$FB/docs"; git -C "$FW" init -q
+FP="$(ls "$FB"/docs/plans/*/*.plan.md)"; FS=fe11a5e0-0000-4000-8000-000000000001; bound_marker "$FW" "$FS" "$FP"
+sed '/^- Step 9: delivered: /d' "$FP" > "$FP.open" && mv "$FP.open" "$FP"
+last() { ask "$FP" reviews | awk -F'|' -v q="question=$1" '$1 == "run/v1" && index($0, "|ev=proof|") && index($0 "|", "|" q "|") { h = $0; sub(/.*\|head=/, "", h); sub(/\|.*/, "", h) } END { print h }'; }
+for r in T23:evidence T24:adversarial,structure; do id=${r%%:*}; q=${r#*:}
+  ( cd "$FW" && CLAUDE_CODE_SESSION_ID=$FS bash "$R/hooks/session-poker.sh" brief "$id" "w49-$id" ) >/dev/null 2>&1
+  expect_status "$id: the brief renders over the closed run" 0 "$?"
+  h="$(last "${q%%,*}")"; expect_regex "$id: the reader holds a review proof of ${q%%,*}" '^[0-9a-f]{40}$' "$h"
+  f="$FB/docs/record/wave-49-what-a-run-costs/briefs/w49-$id.md"
+  expect_regex "$id: its range starts at that proof's head" "^Reviewed range: $h\\.\\." "$(grep '^Reviewed range' "$f")"
+  expect_eq "$id: its Questions are the row's" "Questions: ${q//,/, }" "$(grep '^Questions:' "$f")"
+done
 
 finish
