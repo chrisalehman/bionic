@@ -253,14 +253,19 @@ _translate_dropped() {  # <plan> -> each Tasks row whose status is dropped, name
 }
 
 # THE RECORD'S HOMES sit in the plan's record directory, `<docs>/record/<wave>/`, joined to the plan by
-# name as its run log is. Each line of a ruled type is carried with its first field renamed and every
+# name as its run log is, by the reader's one rule (`reader_record`), so the two never name two
+# directories for one run. Each line of a ruled type is carried with its first field renamed and every
 # other field as written, an empty value too: the field-for-field rename is what makes it the same fact.
 _TRANSLATE_LIB_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P )"
+if ! declare -F reader_record >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$_TRANSLATE_LIB_DIR/reader.sh"
+fi
 _translate_record() {  # <plan> <file> -> the path of <file> in the plan's record directory; 1 when there is none
-  local dir wave="${1##*/}"
-  dir="$(cd "$(dirname "$1")" 2>/dev/null && pwd -P)" || return 1
-  printf '%s/record/%s/%s\n' "${dir%/plans/*}" "${wave%.plan.md}" "$2"
-  [ -f "${dir%/plans/*}/record/${wave%.plan.md}/$2" ]
+  local rec
+  rec="$(reader_record "$1")" || return 1
+  printf '%s/%s\n' "$rec" "$2"
+  [ -f "$rec/$2" ]
 }
 
 # A LANDING IS READ FROM ITS RECORD. The landing record is written by the landing itself, and the plan's

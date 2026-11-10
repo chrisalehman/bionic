@@ -3,10 +3,11 @@
 #
 #   reader_main <plan> <question> [args]   answers one question of the closed list over the plan's run.
 #
-# THE LOG. A plan at `<docs>/plans/<epic>/<wave>.plan.md` owns `<docs>/record/<wave>/run.log`, joined by
-# name alone: no key in the plan points at it, so neither can drift from the other. `reader_events` is
-# the one place a run's lines are read from; a source of events for a run kept in older homes is added
-# there, and every question then answers over it unchanged. The plan's own text is never read here.
+# THE LOG. A plan at `<docs>/plans/<epic>/<wave>.plan.md` owns `<docs>/record/<wave>/run.log` (every
+# place a plan may sit is `reader_record`'s), joined by name alone: no key in the plan points at it, so
+# neither can drift from the other. `reader_events` is the one place a run's lines are read from; a
+# source of events for a run kept in older homes is added there, and every question then answers over
+# it unchanged. The plan's own text is never read here.
 #
 # THE FOLD. `reader_facts` turns the lines into facts, in the order they happened:
 #   - two lines equal in every field but `at=` are one fact; the repeat changes nothing, not even the place;
@@ -54,13 +55,26 @@ reader_identity proof kind head question
 reader_identity ask key round
 reader_identity published row commit
 
-reader_log() {  # <plan> -> the path of its run log; 2 when the plan is not plans/<epic>/<wave>.plan.md
-  local plan="${1:-}" dir wave
-  dir="$(cd "$(dirname "$plan")" 2>/dev/null && pwd -P)" || return 2
-  plan="$dir/${plan##*/}"
-  case "$plan" in */plans/*/*.plan.md) ;; *) return 2 ;; esac
-  wave="${plan##*/}"
-  printf '%s/record/%s/run.log\n' "${plan%/plans/*/*}" "${wave%.plan.md}"
+# THE RECORD is joined to a plan by name, at every place the run walk (lib/run.sh `_run_candidates`)
+# admits a run's plan: in the docs root's plans/ or incidents/, or one folder below either. It is
+# `<docs>/record/<the plan's file name less .plan.md>/`, the name every library's record path takes,
+# so the reader and the writers can never name two directories for one run. The folder one below is
+# tried first, so an epic folder named plans/ joins as it always has. Any other place is no run's plan.
+# This is the one rule here; lib/translate.sh asks it for the record's other homes.
+reader_record() {  # <plan> -> its record directory; 2 when the plan sits where the walk admits none
+  local name="${1##*/}" dir up
+  case "$name" in *.md) ;; *) return 2 ;; esac
+  dir="$(cd "$(dirname "$1")" 2>/dev/null && pwd -P)" || return 2
+  up="${dir%/*}"
+  case "${up##*/}" in plans|incidents) dir="$up" ;;
+    *) case "${dir##*/}" in plans|incidents) ;; *) return 2 ;; esac ;; esac
+  printf '%s/record/%s\n' "${dir%/*}" "${name%.plan.md}"
+}
+
+reader_log() {  # <plan> -> the path of its run log; 2 when the plan sits where the walk admits none
+  local rec
+  rec="$(reader_record "${1:-}")" || return 2
+  printf '%s/run.log\n' "$rec"
 }
 
 reader_events() {  # <plan> -> the run's lines, in the order they were written
@@ -118,7 +132,7 @@ reader_main() {  # <plan> <question> [args] -> the answer in its form; 2 refused
     [ "${e%%:*}" = "$q" ] || continue
     fn="${e##*:}"; form="${e#*:}"; form="${form%%:*}"
     if [ ! -f "$plan" ] || ! reader_log "$plan" >/dev/null; then
-      printf 'reader: %s is not a plan at plans/<epic>/<wave>.plan.md\n' "$plan" >&2; return 2
+      printf 'reader: %s is not a plan in plans/ or incidents/, or one folder below\n' "$plan" >&2; return 2
     fi
     shift 2
     if [ "$form" = yes ]; then "$fn" "$plan" "$@" >/dev/null; return; fi
