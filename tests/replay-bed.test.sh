@@ -181,7 +181,7 @@ for r in T23:evidence T24:adversarial,structure; do id=${r%%:*}; q=${r#*:}
 done
 # The tick follows it too: in the same run, now with a log, a fact the log alone holds changes the tick's fill line.
 # Each tick forgets the last one's digest, which would otherwise print only that nothing changed.
-FL="$FB/docs/record/wave-49-what-a-run-costs/run.log"; events "$FP" > "$FL"
+FL="$FB/docs/record/wave-49-what-a-run-costs/run.log"; events "$FP" > "$FW/run.log"; mv "$FW/run.log" "$FL"
 nofill() { rm -f "$FB"/tmp/tick-digest-*; ( cd "$FW" && CLAUDE_CODE_SESSION_ID=$FS bash "$R/hooks/session-poker.sh" tick 2>&1 ) | grep -m1 '^poker: no FILL — '; }
 ( cd "$FW" && CLAUDE_CODE_SESSION_ID=$FS bash "$R/hooks/session-poker.sh" arm ) >/dev/null 2>&1
 expect_regex "the tick over the logged run fills nothing, every row landed" '^poker: no FILL — width=' "$(nofill)"
