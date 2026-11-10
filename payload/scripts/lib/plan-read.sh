@@ -43,19 +43,21 @@
 _PLAN_READ_EOL='
     function eol(rec, out,   n) { sub(/\r$/, "", rec); n = split(rec, out, "\r"); if (!n) { n = 1; out[1] = "" } return n }'
 
-plan_read_header() {  # <plan> [key] -> `key=value` lines in the header's order; 1 none, 2 no plan
+# With `all` after the key, every line of that key in the header answers, in its order: a key a person may write more
+# than once (`goals:`) is read whole, while every other reader keeps the first line's answer.
+plan_read_header() {  # <plan> [key [all]] -> `key=value` lines in the header's order; 1 none, 2 no plan
   [ -f "${1:-}" ] || return 2
-  awk -v want="${2:-}" "$_PLAN_READ_EOL"'
+  awk -v want="${2:-}" -v every="${3:-}" "$_PLAN_READ_EOL"'
     function line(s,   e, k, v) {
       if (++ln == 1) return s != "---"
       if (s == "---") return 1
       e = index(s, ":"); if (e < 2) return 0
       k = substr(s, 1, e - 1); v = substr(s, e + 1)
       gsub(/^[ \t]+|[ \t]+$/, "", k); gsub(/^[ \t]+|[ \t]+$/, "", v)
-      if (k ~ /[ \t]/ || (k in seen) || (want != "" && k != want)) return 0
+      if (k ~ /[ \t]/ || ((k in seen) && every != "all") || (want != "" && k != want)) return 0
       sub(/^["\047]/, "", v); sub(/["\047]$/, "", v)
       seen[k] = 1; c++; print k "=" v
-      return want != ""
+      return want != "" && every != "all"
     }
     { m = eol($0, L); for (i = 1; i <= m; i++) if (line(L[i])) exit }
     END { exit !c }' "$1"

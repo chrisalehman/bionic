@@ -34,24 +34,14 @@
 # one-file landing or a whole run reads as not measured.
 # Sourced, never executed; bash 3.2.
 
-_PLAN_IB_SDLC_AWK='
-  /^[[:space:]]*```/ { fence = !fence; next }
-  fence { next }
-  /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-  insdlc && /^[[:space:]]*integration-branch[[:space:]]*:/ {
-    v = $0; sub(/^[[:space:]]*integration-branch[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v)
-    gsub(/^["\047]|["\047]$/, "", v); print v; exit }'
-_PLAN_IB_FM_AWK='
-  NR == 1 && $0 == "---" { f = 1; next }
-  f && $0 == "---" { exit }
-  f && /^[[:space:]]*integration-branch[[:space:]]*:/ {
-    v = $0; sub(/^[[:space:]]*integration-branch[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v)
-    gsub(/^["\047]|["\047]$/, "", v); print v; exit }'
+# Both reads are the reader-owned parser's (lib/plan-read.sh): the SDLC State section's key line, then the header key.
 plan_integration_branch() {  # <plan>
   local plan="${1:-}" ib
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
-  ib="$(_run_lines "$plan" | awk "$_PLAN_IB_SDLC_AWK")"
-  [ -n "$ib" ] || ib="$(_run_lines "$plan" | awk "$_PLAN_IB_FM_AWK")"
+  ib="$(plan_read_section "$plan" SDLC integration-branch)" || ib="$(plan_read_header "$plan" integration-branch)" || ib=""
+  ib="${ib#integration-branch=}"; ib="${ib%%[[:space:]]*}"
+  case "$ib" in [\'\"]*) ib="${ib#?}" ;; esac
+  case "$ib" in *[\'\"]) ib="${ib%?}" ;; esac
   printf '%s' "$ib"
   return 0
 }
@@ -132,18 +122,10 @@ plan_requirements_file() {
 plan_goal_paragraph() {
   local f="${1:-}"
   [ -n "$f" ] && [ -f "$f" ] || return 0
-  _run_lines "$f" | awk '
-    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
-    function clean(s) { gsub(/`/, "", s); gsub(/\t/, " ", s); return trim(s) }
-    NR == 1 && $0 == "---" { fm = 1; next }
-    fm == 1 && $0 == "---" { fm = 0; next }
-    fm == 1 { next }
-    /^## / { sec = (substr($0, 4) == "Goal"); next }
-    /^### / { next }
-    sec && !done {
-      if (trim($0) == "") { if (g != "") done = 1 }
-      else g = g (g == "" ? "" : " ") clean($0)
-      next }
+  plan_read_section "$f" Goal | awk '
+    function clean(s) { gsub(/`/, "", s); gsub(/\t/, " ", s); sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    /^[ \t]*$/ { done = 1 }
+    !done { g = g (g == "" ? "" : " ") clean($0) }
     END { if (g != "") print g }'
   return 0
 }
@@ -297,11 +279,8 @@ _plan_theme_reads() {
 plan_goals() {
   local plan="${1:-}"
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
-  _run_lines "$plan" | awk '
-    NR == 1 && $0 == "---" { f = 1; next }
-    f && $0 == "---" { exit }
-    f && /^[[:space:]]*goals[[:space:]]*:/ {
-      v = $0; sub(/^[[:space:]]*goals[[:space:]]*:[[:space:]]*/, "", v)
+  plan_read_header "$plan" goals all | awk '
+    { v = substr($0, 7)
       n = split(v, g, /;/)
       for (i = 1; i <= n; i++) {
         s = g[i]; gsub(/^[ \t]+|[ \t]+$/, "", s); if (s == "") continue
