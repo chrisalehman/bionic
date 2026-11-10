@@ -130,8 +130,6 @@ STATE_BASENAME_PREFIX="preflight-"
 STATE_BASENAME_SUFFIX=".state"
 LEGACY_STATE_BASENAME="preflight.state"
 LOCK_BASENAME=".preflight.lock"
-OTHER_SESSION_WINDOW_MIN=15   # warn-only liveness heuristic; mtime-based, known to
-                              # false-positive on recently-dead sessions (spec Not Doing)
 # Reader copy of hooks/dispatch-preflight.sh's roster filename constants (task
 # 4/7). This script only reads roster files, byte for byte, so a real prefix
 # mismatch is a mislabeled scan, never a write hazard — kept as a copy per TDD
@@ -326,6 +324,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "preflight-probe"; fi
 . "$BIONIC_LIB/root.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
+# Whether another session is alive is lib/alive.sh's one rule. Soft: a library directory without it
+# (an older checkout) prunes nothing and reports no other session, the direction that loses nothing.
+# shellcheck source=/dev/null
+[ -r "$BIONIC_LIB/alive.sh" ] && . "$BIONIC_LIB/alive.sh"
 
 # THE SESSION KEY, from the library (design §1): the environment value is primary. The
 # attestation filename is built from it and the dispatch wall reconstructs that filename
@@ -339,8 +341,8 @@ if [ -z "$SESSION_ID" ]; then
   exit 3
 fi
 
-# Hoisted here (rather than beside its sole prior use in the other-sessions scan) so the
-# D-5 pruning step below can also resolve other sessions' transcript directories.
+# The config directory whose projects/ holds this session's transcript, read by the
+# other-sessions scan below.
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
 # ---------------------------------------------------------------- where state lives
@@ -455,19 +457,10 @@ fi
 # session's own blocking probes above passed — remove: (a) the legacy single-slot file,
 # which this script no longer writes or reads, so a repo mid-transition to per-session
 # filenames must not go on trusting a stale shared record; (b) any per-session
-# attestation whose owning session no longer has a live working log (its own transcript
-# file is gone from every project directory this config dir knows about). A LIVE foreign
-# session's attestation — its transcript still exists — is never touched here or by any
-# other session's run; that concurrency is the entire point of D-5.
-session_transcript_exists() {  # <session id>
-  local sid="$1" d
-  [ -n "$sid" ] || return 1
-  [ -d "$CONFIG_DIR/projects" ] || return 1
-  for d in "$CONFIG_DIR"/projects/*/; do
-    [ -f "${d}${sid}.jsonl" ] && return 0
-  done
-  return 1
-}
+# attestation whose owning session is dead by lib/alive.sh's rule (its process is not running
+# with the start its record names). A transcript outlives its session, so its presence says
+# nothing. A LIVE foreign session's attestation is never touched here or by any other session's
+# run; that concurrency is the entire point of D-5.
 
 prune_stale_attestations() {
   [ -e "$LEGACY_STATE_FILE" ] && rm -f "$LEGACY_STATE_FILE" 2>/dev/null
@@ -478,11 +471,11 @@ prune_stale_attestations() {
     sid="${base#"$STATE_BASENAME_PREFIX"}"
     sid="${sid%"$STATE_BASENAME_SUFFIX"}"
     [ "$sid" = "$SESSION_ID" ] && continue
-    session_transcript_exists "$sid" || rm -f "$f" 2>/dev/null
+    alive_session "$sid" || rm -f "$f" 2>/dev/null
   done
 }
 
-[ "$STATE_DIR_OK" -eq 1 ] && prune_stale_attestations
+[ "$STATE_DIR_OK" -eq 1 ] && declare -F alive_session >/dev/null 2>&1 && prune_stale_attestations
 
 # ---------------------------------------------------------------- context probes
 
@@ -498,8 +491,8 @@ fi
 
 # Other live sessions in this project. Warn-only by design (§4, UC-6): detection, never
 # prevention. The project directory is located by finding the one that holds THIS
-# session's own transcript, so no filename-encoding scheme has to be guessed.
-# (CONFIG_DIR is set earlier, beside the session-key check, so D-5 pruning above can use it.)
+# session's own transcript, so no filename-encoding scheme has to be guessed; a session found there
+# is reported only while it is alive by lib/alive.sh's rule, never by its transcript's age.
 OTHER_SESSIONS=0
 PROJ_DIR=""
 if [ -d "$CONFIG_DIR/projects" ]; then
@@ -520,7 +513,7 @@ fi
 report_roster_coverage() {  # <foreign session id> <that session's transcript dir>
   local sid="$1" tdir="$2" has_roster="absent"
   [ -f "$STATE_DIR/${ROSTER_PREFIX}${sid}${ROSTER_SUFFIX}" ] && has_roster="present"
-  warn "another live session on this project: $sid (transcript touched within ${OTHER_SESSION_WINDOW_MIN}m; roster: ${has_roster})"
+  warn "another live session on this project: $sid (its process is running; roster: ${has_roster})"
 
   local sub="$tdir/$sid/subagents"
   [ -d "$sub" ] || return 0
@@ -542,10 +535,11 @@ if [ -n "$PROJ_DIR" ]; then
     [ -n "$_t" ] || continue
     _other="$(basename "$_t" .jsonl)"
     [ "$_other" = "$SESSION_ID" ] && continue
+    declare -F alive_session >/dev/null 2>&1 && alive_session "$_other" || continue
     OTHER_SESSIONS=$((OTHER_SESSIONS + 1))
     report_roster_coverage "$_other" "$PROJ_DIR"
   done <<EOF
-$(find "$PROJ_DIR" -maxdepth 1 -name '*.jsonl' -mmin "-$OTHER_SESSION_WINDOW_MIN" 2>/dev/null)
+$(find "$PROJ_DIR" -maxdepth 1 -name '*.jsonl' 2>/dev/null)
 EOF
   [ "$OTHER_SESSIONS" -eq 0 ] && say "no other live session detected on this project"
 else
