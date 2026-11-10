@@ -1578,7 +1578,7 @@ proof_fact_awk() {
 
 # proof_last <plan> <kind> [<question>] -> the head of the NEWEST standing proof of <kind> the reader holds for the
 # plan's run, or nothing (`_proof_last_read`). With a <question>, the newest of that kind carrying
-# `question=<question>` (wave-27 T2); with none, the newest of the kind whatever its question, 1.11.0's reading.
+# `question=<question>`; with none, the newest of the kind whatever its question, 1.11.0's reading.
 proof_last() {
   _proof_last_read "$1" "$2" head "${3:-}"
 }
