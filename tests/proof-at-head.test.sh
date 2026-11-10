@@ -11,6 +11,7 @@
 #        head`, a close-out copy printing green splits them; then a green run at F with docs, release and code past it
 # §LOG   a review reading, a regression proof and an approval the run's log alone holds are read by the judge and the
 #        proof readers, which ask the reader; a proof written between two reads in one process is read by the second
+# §KEEP  the kept fold is served from the user's own mode-700 directory, never from one others can write or a link
 #
 # FIXTURE FIDELITY. The project is close-out's own (tests/close-out.prelude.sh) at Step 8, its working branch checked
 # out beside it. `pah_world` lays the regression proof as `proof-add regression` writes it and each landing as the line
@@ -261,5 +262,14 @@ expect_eq "LOG-5 a proof written between two reads in one process is read by the
   "$(bash -c '. "$1/proof.sh" || exit 1; a="$(proof_last "$2" task)"; a="$(proof_last "$2" regression)"
     printf "run/v1|ev=proof|kind=regression|head=%s|evidence=x|at=2026-10-04T13:00:00Z\n" 0000000000000000000000000000000000000001 >> "$3"
     printf "%s|%s" "$a" "$(proof_last "$2" regression)"' _ "$PAH_LIB" "$PL_PLAN" "$PL_REC/run.log")"
+
+section "§KEEP: the kept fold is served only from a directory this user alone can write, and its files are bounded"
+# fails-when: a fold planted under the right key is served from a directory others can write or through a link, the user's own fold is not served to a second process, or a file per plan is kept for ever.
+pk() { TMPDIR="$PK/$1" bash -c '. "$1/proof.sh" && proof_approved_head "$2" release' _ "$PAH_LIB" "$PL_PLAN"; }  # <dir> -> a fresh process's `release` approval head, TMPDIR $PK/<dir>
+PK="$SANDBOX/keep"; PK_D="bionic-facts-$(id -u)"; mkdir -p "$PK/ok" "$PK/open/$PK_D" "$PK/away" "$PK/link" "$PK/full/$PK_D"; pk ok; PK_F="$(ls "$PK/ok/$PK_D")"; printf 'run/v1|ev=approval|key=release|by=intruder|head=%s|said=x|at=2026-10-04T14:00:00Z\n' "$PL_H" >> "$PK/ok/$PK_D/$PK_F"
+cp "$PK/ok/$PK_D/$PK_F" "$PK/open/$PK_D/"; chmod 777 "$PK/open/$PK_D"; cp -R "$PK/ok/$PK_D" "$PK/away/"; ln -s "$PK/away/$PK_D" "$PK/link/$PK_D"; for i in $(seq 40); do : > "$PK/full/$PK_D/$i"; done; touch -t 202601010000 "$PK/full/$PK_D"/*; chmod 700 "$PK/full/$PK_D"; pk full
+expect_eq "KEEP-1 the user's own kept fold (mode 700) is served to a second process, the approval planted in it read" "drwx------|$PL_H" "$(ls -ld "$PK/ok/$PK_D" | cut -c1-10)|$(pk ok)"
+expect_eq "KEEP-2 the same file is served neither from a directory others can write nor through a link to the user's own, each left as planted" "||1|1" "$(pk open)|$(pk link)|$(grep -c intruder "$PK/open/$PK_D/$PK_F")|$(grep -c intruder "$PK/away/$PK_D/$PK_F")"
+expect_eq "KEEP-3 a fold written beside forty older files leaves the sixteen newest, its own the newest" "16|$PK_F" "$(ls "$PK/full/$PK_D" | wc -l | tr -d ' ')|$(ls -t "$PK/full/$PK_D" | head -1)"
 
 finish
