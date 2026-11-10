@@ -31,6 +31,7 @@
 #   §CELLS   a row's suites and lands-on go to the task's own section, or to the gaps list when it has none.
 #   §STEPS   a Step follows the Step above it and a proof or waiver the line above it in its block, whatever
 #            their instants, so the step is the old current: and closure; a Step held (pending) is a gap.
+#   §PARKED  a Step 9 line with no delivered: (a parked plan's note) is a gap, not a step; close-out's parked delivery is.
 #
 # FIXTURE FIDELITY. The plan is a real file in a scratch docs tree, in the shape version-14 plans hold.
 
@@ -157,13 +158,16 @@ stack-health: pending
 
 AC-2: the waived one.
   waiver: Ann Person 2026-11-01T08:00:00Z "not run here" — the reason
+AC-3: the pending one.
+  waiver: Bo Person 2026-11-01 "later, by hand"
 ## SDLC State
 proved: kind=unit head=$H ac=AC-5 at=2026-11-01T06:00:00Z evidence=record/wave-8-matrix/s.log rc=0
 inherited: a.test.sh base=$C head=$H at=2026-11-01T07:00:00Z evidence=record/wave-8-matrix/i.log
 EOF
 MEV="$(translate "$M" events)"; MG="$(translate "$M" gaps)"
+expect_eq "the translation reads every source whatever IFS its caller holds" "$MEV" "$(IFS=$'\t'; translate "$M" events)"
 askm() { bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$M" "$@" | tr '\n' ' ' | sed 's/ $//'; }
-acof() { printf '%s\n' "$MEV" | grep -F "|ac=$1|"; }
+acof() { printf '%s\n' "$MEV" | grep -F "|ac=$1|" | grep -v '^run/v1|ev=hand|'; }
 
 section "MATRIX"
 expect_eq "a discharged row is discharged by its proof" "state=discharged by=proof" "$(askm cell AC-1)"
@@ -172,7 +176,12 @@ expect_eq "a pending row is pending" "state=pending" "$(askm cell AC-3)"
 expect_eq "a waived row takes its author, instant and words from its block's waiver: line" \
   "run/v1|ev=waiver|ac=AC-2|evidence=record/wave-8-matrix/w.md|auditor=REFUTED|by=Ann Person|said=not run here|at=2026-11-01T08:00:00Z" "$(acof AC-2)"
 expect_eq "the proof carries its evidence and auditor cells and nothing else" "run/v1|ev=proof|ac=AC-1|evidence=record/wave-8-matrix/a.log|auditor=CONFIRMED|at=" "$(acof AC-1)"
-expect_absent "a pending row writes no event" "ac=AC-3|" "$MEV"
+expect_absent "a pending row writes no proof and no waiver" "ac=AC-3|" "$(acof AC-3)"
+# a block waiver: line is a hand act whatever its row reads; only the status cell makes a waiver, so the pending row stays pending
+expect_contains "a waiver line in a pending row's block is a hand act, its day as written" \
+  "run/v1|ev=hand|ac=AC-3|what=waive-row|by=Bo Person|said=later, by hand|at=2026-11-01" "$MEV"
+expect_contains "…and so is a waived row's own block line" "run/v1|ev=hand|ac=AC-2|what=waive-row|by=Ann Person|said=not run here|at=2026-11-01T08:00:00Z" "$MEV"
+expect_eq "the reader's hand acts are the two block lines" "AC-2 AC-3" "$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$M" hands | sed -n 's/.*|ac=\(AC-[0-9]*\)|.*|what=waive-row|.*/\1/p' | tr '\n' ' ' | sed 's/ $//')"
 for f in kind head at; do expect_contains "a row holds no $f: a gap" "gap/v1|ev=proof|ac=AC-1|field=$f|why=absent" "$MG"; done
 expect_eq "an empty evidence cell is still discharged" "state=discharged by=proof" "$(askm cell AC-4)"
 expect_eq "and its proof holds no field the row lacks" "run/v1|ev=proof|ac=AC-4|at=" "$(acof AC-4)"
@@ -416,4 +425,13 @@ expect_contains "a Step line held (pending) is no step reached: named, not writt
 expect_eq "Steps stand in their numbers' order, wherever an instant sorts" "0 1 2 3 8 9 " "$(translate "$U" events | sed -n 's/^run\/v1|ev=step|n=\([0-9]*\)|.*/\1/p' | tr '\n' ' ')"
 expect_contains "a Step with no instant keeps none, and its place makes none" "run/v1|ev=step|n=2|at=" "$(translate "$U" events | grep -x 'run/v1|ev=step|n=2|at=')"
 expect_contains "and its instant is still a gap" "gap/v1|ev=step|n=2|field=at|why=absent" "$(translate "$U" gaps)"
+section "PARKED"
+# The note step-line 9 writes on a parked plan, read as a step, would close the run before close-out does.
+K="$D/plans/epic-x/wave-7-parked.plan.md"; k8='- Step 8: integrate: opened 2026-11-01T11:00Z'
+printf '%s\n' '## SDLC State' 'current: 8' '- Step 7: documented at 2026-11-01T10:00Z' "$k8" '- Step 9: parked on wave/7-parked — waits on a hand test' > "$K"
+expect_eq "a parked plan's Step 9 note is no delivery: the step is its current:" "n=8 state=open" "$(bash "$RS" "$K" step | paste -sd' ' -)"
+expect_contains "the note is named on the gaps list, not written" "gap/v1|ev=step|n=9|field=ev|why=undelivered" "$(translate "$K" gaps)"
+printf '%s\n' '## SDLC State' 'current: 9' '- Step 7: documented at 2026-11-01T10:00Z' "$k8" \
+  '- Step 9: delivered: parked on wave/7-parked @ abc1234 — waits on a hand test (2026-11-01T12:00Z wave-7-parked)' > "$K"
+expect_eq "close-out's own parked line is the delivery" "n=9 state=delivered" "$(bash "$RS" "$K" step | paste -sd' ' -)"
 finish

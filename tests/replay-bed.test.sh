@@ -14,6 +14,7 @@
 #             and a step card asks again for an approval a cancel appended to the run's log retracted.
 #   §OPEN     run_open asks the reader's step of a run with a log, whatever its plan's prose says; a run with
 #             none is judged from its plan, so each closed fixture run reads closed and the cut run open.
+#   §FOLLOWS-CONTINUATION  close-out's check reads a debt only the run's log holds into its debt line and Deferrals.
 #
 # A CARD'S INSTANT. The reader answers a run as it stands, so a card's world holds as its run log the reader's
 # own translation of the fixture up to the card's instant, in the translation's order: a line with no instant
@@ -248,5 +249,25 @@ expect_eq "a run whose log holds an abandon is closed" 1 \
 expect_eq "with no log, current: 9 and no delivery is open, and a delivered: Step 9 line closes it" "0 1" \
   "$(opened "$(plant v14 9 '- Step 9: closing')") $(opened "$(plant v14d 9 '- Step 9: delivered: 2026-11-01T00:00Z')")"
 expect_eq "the closed fixture runs read closed and the cut run open" "1 1 0" "$(opened "$P49") $(opened "$(ls "$X"/wave-46-asks-nothing/plans/*/*.plan.md)") $(opened "$(ls "$X"/wave-49-mid/plans/*/*.plan.md)")"
+
+section "FOLLOWS-CONTINUATION"
+# The second closed fixture run reopened at Step 8, its log its own translation, then that log and a debt only the log holds.
+CW="$WORLD_ROOT/close"; CB="$CW/.bio""nic"; mkdir -p "$CB/tmp"; cp -R "$X/wave-49-what-a-run-costs" "$CB/docs"; git -C "$CW" init -q
+CP="$(ls "$CB"/docs/plans/*/*.plan.md)"; CR="$CB/docs/record/$(basename "$CP" .plan.md)"
+printf 'archive-root: %s\n' "$(sed -n 's/^archive-root: *//p' "$CP" | head -1)" > "$CB/config.yaml"
+sed -e '/^- Step 9: delivered: /d' -e 's/^current: 9$/current: 8/' "$CP" > "$CP.open" && mv "$CP.open" "$CP"
+printf '# continuation\n\n## Deferrals\n' > "$CR/continuation.md"
+events "$CP" > "$CW/own.log"; mv "$CW/own.log" "$CR/run.log"
+closecheck() { ( cd "$CW" && env -u CLAUDE_CODE_SESSION_ID HOME="$CW/home" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$R/payload" \
+  BIONIC_CLAUDE_HOME="$CW/home/.claude" bash "$RD/close-out.sh" "$CP" check 2>&1 ); }
+C0="$(closecheck)"
+expect_eq "the reopened run reads at step 8, and its own log carries no debt" "step: current: 8|debt: touched 0 · burned 0" \
+  "$(printf '%s\n' "$C0" | grep -m1 '^step: ')|$(printf '%s\n' "$C0" | grep -m1 '^debt: ')"
+printf 'run/v1|ev=debt|concept=follow_x|kind=duplicate|sites=lib/f.sh:1|raised-by=record/x.md|touches=3|at=\n' >> "$CR/run.log"
+C1="$(closecheck)"
+expect_eq "a debt the log alone holds is counted on the card's debt line" "debt: touched 3 · burned 0" "$(printf '%s\n' "$C1" | grep -m1 '^debt: ')"
+expect_contains "…and the continuation would carry it under ## Deferrals" " follow_x" "$(printf '%s\n' "$C1" | grep -m1 '^continuation: ')"
+expect_contains "the log without it carries the run's own deferrals there" "under ## Deferrals: record/" "$(printf '%s\n' "$C0" | grep -m1 '^continuation: ')"
+expect_absent "…and not that debt" " follow_x" "$(printf '%s\n' "$C0" | grep -m1 '^continuation: ')"
 
 finish

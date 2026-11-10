@@ -10,6 +10,7 @@ all.run.logs=188 of 271 run logs the verdict lines cite at wave 46, and 108 of 1
 wave-49-mid.asks.fields=the open ask is the closed register row set open again at the cut; its sent and title fields were never in the record
 all.finding.unlined=a card also counts the findings a review file holds with no moved: or deferred: line (the S4 flags it carries); the reader holds only lined findings
 wave-49-mid.handoff=the cut keeps the closed run's Handoff section, written in local time after the cut; the scrub's cut reads UTC instants only
+wave-49-mid.hands.waive-row=the cut keeps the closed plan's matrix blocks, so its waiver: line written at 17:34:52Z, after the cut, stands in it as a hand act
 release-approval-31da41f7.stop.ready=a card's world holds the closed plan, so rows born after the card (T31 to T35, born at 12:37Z and later) stand in it and read ready; the run's own stop line before the card wrote ready= empty
 release-approval-f87acbfc.stop.ready=the same: T25 and T26 were born at 15:54Z, after the card, and read ready in the closed plan
 wave-49-mid.status.T3=the cut keeps T3's agent and worktree cells, and no instant says whether it was dispatched by the cut

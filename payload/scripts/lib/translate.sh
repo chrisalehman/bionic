@@ -113,7 +113,9 @@ function whole(t, id, why) { printf "g\t\tgap/v1|ev=%s|%s|field=ev|why=%s\n", t,
 '
 
 translate() {  # <plan> <events|gaps> -> the translation in that form; 2 refused
-  local plan="${1:-}" want="${2:-}" fn
+  # The sources are split on blanks whatever IFS the caller holds: a caller reading tab fields calls this inside its
+  # command substitution, and a tab-only IFS would make the list one word and skip every source.
+  local plan="${1:-}" want="${2:-}" fn IFS=$' \t\n'
   [ -f "$plan" ] || return 2
   case "$want" in events|gaps) ;; *) return 2 ;; esac
   for fn in $TRANSLATE_SOURCES; do "$fn" "$plan"; done | _translate_form "$want"
@@ -150,6 +152,9 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
       n = substr($0, 8, index($0, ":") - 8); text = substr($0, index($0, ":") + 2); at = ""
       # A Step held "(pending)" is a step not reached when the line was written: no fact, so no step.
       if (trim(text) == "(pending)") { whole("step", "n=" n, "pending"); next }
+      # Step 9 is reached only by its delivery, which close-out writes on that line; a note there on a parked plan, written
+      # before close-out runs, delivers nothing, and read as a step it would close the run that close-out has not closed.
+      if (n == "9" && !index(text, "delivered:")) { whole("step", "n=9", "undelivered"); undelivered = 1; next }
       # An approval is written at-then-by or by-then-at, and both are read; the words follow either.
       if (match(text, /(approved|configured) at [^ ]+ (by|via) /)) {
         ap = substr(text, RSTART, RLENGTH); split(ap, w, " "); at = w[3]; rest = substr(text, RSTART + RLENGTH)
@@ -169,7 +174,7 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
     /^deferred: / { kv(substr($0, 11)); split(HEAD, w, " "); begin("finding", "ref", w[1]); put("severity", w[2]); put("to", "deferred")
       put("title", quoted(HEAD)); for (i = 1; i <= NP; i++) put(PK[i], PV[i]); lack("by"); f = w[1]; sub(/#.*/, "", f); if (rev[f] != "") after(rev[f]); emit(""); next }
     /^order: / { split(substr($0, 8), w, " "); begin("order", "act", w[1]); put("said", quoted($0)); emit(w[2]); next }
-    END { if (cur != "" && !(cur in steps)) { begin("step", "n", cur); inblock("steps"); emit("") } }'
+    END { if (cur != "" && !(cur in steps) && !(cur == "9" && undelivered)) { begin("step", "n", cur); inblock("steps"); emit("") } }'
 }
 
 # _TRANSLATE_LANDED_AWK: `landed_at(text)`, a ledger line's text from its landing's marker on when reasons come
@@ -208,7 +213,7 @@ _translate_ledger() {  # <plan> -> the dispatch ledger's landings and born stamp
 
 translate_source _translate_tasks
 _translate_tasks() {  # <plan> -> the Tasks rows: the agent cell's dispatch, the worktree and base cells' tree, a landing with no ledger line
-  local plan="$1"
+  local plan="$1" IFS=$' \t\n'
   { _translate_section "$plan" "SDLC State" | awk "$_TRANSLATE_LANDED_AWK"'/^- T[0-9A-Za-z.]*: / && landed_at(substr($0, index($0, ":") + 2)) ~ /^landed/ { print "L", substr($0, 3, index($0, ":") - 3) }'
     for r in $(_translate_landed_rows "$plan"); do printf 'L %s\n' "$r"; done
     _translate_section "$plan" "Tasks"; } | awk -F'|' "$_TRANSLATE_AWK"'
@@ -238,7 +243,9 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
   # `proved:` or `waived:` line of the SDLC State names by `ac=` is that line's fact, with the head and the
   # instant the row lacks; the row then writes nothing of that type, so one fact is never read as two. A
   # waived row whose criterion's block below the table holds an indented `waiver: <who> <day or instant>
-  # "<words>"` line takes its author, instant and words from it, as the block writes them.
+  # "<words>"` line takes its author, instant and words from it, as the block writes them. That line is also a
+  # hand act of its own, `what=waive-row`, whatever the row's status says: a person wrote it, so it is counted
+  # among the hand acts, while only a row the status marks waived is a waiver the judge honours.
   { _translate_section "$1" "SDLC State" | awk '/^(proved|waived): / && match($0, / ac=[^ ]+/) { print "S", $1, substr($0, RSTART + 4, RLENGTH - 4) }'
     _translate_section "$1" "Verification Matrix" | awk '
       { l = $0; sub(/^[-*+][ \t]+/, "", l) }
@@ -251,7 +258,8 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
         printf "W\036%s\036%s\036%s\036%s\n", ac, by, at, said }'
     _translate_section "$1" "Verification Matrix"; } | awk -F'|' "$_TRANSLATE_AWK"'
     /^S / { split($0, w, " "); stated[(w[2] == "proved:" ? "proof" : "waiver") SUBSEP w[3]] = 1; next }
-    /^W\036/ { split($0, w, "\036"); if (!(w[2] in wat)) { wby[w[2]] = w[3]; wat[w[2]] = w[4]; wsaid[w[2]] = w[5] }; next }
+    /^W\036/ { split($0, w, "\036"); if (!(w[2] in wat)) { wby[w[2]] = w[3]; wat[w[2]] = w[4]; wsaid[w[2]] = w[5] }
+      begin("hand", "ac", w[2]); put("what", "waive-row"); if (w[3] != "") put("by", w[3]); if (w[5] != "") put("said", w[5]); emit(w[4]); next }
     !/^\|/ { if (nh) done = 1; next }
     done { next }
     !nh { for (i = 2; i < NF; i++) { k = tolower(trim($i)); gsub(/[ \t]+/, "-", k); col[k] = i }; nh = 1; next }

@@ -122,15 +122,16 @@ reader_facts() {  # <plan> -> one line per standing fact, in the order the facts
     }'
 }
 
+# The closed list is split on blanks whatever IFS the caller holds, as the translation splits its sources.
 reader_list() {  # -> one line per question: <name> <form>
-  local e
+  local e IFS=$' \t\n'
   for e in $READER_QUESTIONS; do
     e="${e%:*}"; printf '%s %s\n' "${e%%:*}" "${e#*:}"
   done
 }
 
 reader_main() {  # <plan> <question> [args] -> the answer in its form; 2 refused
-  local plan="${1:-}" q="${2:-}" e form fn
+  local plan="${1:-}" q="${2:-}" e form fn IFS=$' \t\n'
   for e in $READER_QUESTIONS; do
     [ "${e%%:*}" = "$q" ] || continue
     fn="${e##*:}"; form="${e#*:}"; form="${form%%:*}"
@@ -204,7 +205,7 @@ reader_q_asks() {  # <plan> -> each ask still open: no reply on it, and no appro
 # through lib/plan-read.sh, the plan's one parser; reviews still answers the log's half alone, and its
 # comment names the half the plan holds.
 reader_identity finding ref
-reader_identity debt concept
+reader_identity debt concept kind
 reader_identity admitted id
 reader_identity dispatch row name
 reader_identity verdict row commit suite
