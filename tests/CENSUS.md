@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 121 · sections: 1103 · keep: 909 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 122 · sections: 1104 · keep: 910 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1092 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1092 - 22 - 8 = 1062.
 
@@ -754,6 +754,10 @@ hook-timeout.test.sh | §3 | duplicate | the shipped hook's input read never rea
 hook-timeout.test.sh | §3b | keep | payload/scripts/lib/cmd-class.sh cmd_effects: the body after a redirect read a line at a time, so g-l runs more commands than g when called directly | none (searched 'cmd_effects' with a size pair in tests/)
 hook-timeout.test.sh | §3c | keep | payload/hooks/permission-answer.sh: the question body walked before the push is reached, so the 64 KB question runs more commands than the 16 KB one | none (searched 'permission-answer' with 'HTCOUNT' in tests/)
 hook-timeout.test.sh | §4 | keep | payload/hooks/session-poker.sh: a plan-row verb (task-set or current) reads the plan once per row instead of in one pass, so the 200 KB plan runs more commands than the 66 KB one | none (searched '§VERB' and 'as many commands on the 200 KB plan' in tests/)
+
+## hooks-closed.test.sh
+
+hooks-closed.test.sh | §CLOSED | keep | hooks/stop.sh, hooks/agent-context-guard.sh and the other blocking hooks: the call under the loader block made `loader_fail_open` again, so a hook with no library exits 0 and names no load refusal (its "no library: exit 2" row goes red); the stop_hook_active check under it deleted, so a re-entered stop, a payload without the field or one that is not JSON is refused again (its "the turn ends" rows go red) | none (searched 'loader_fail_closed' and 'stop_hook_active' in tests/; bash-walls.test.sh §9 drives bash-walls alone, permission-answer.test.sh A5.h1 the permission hook alone)
 
 ## inbox.test.sh
 

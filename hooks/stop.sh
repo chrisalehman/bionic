@@ -30,10 +30,10 @@
 # THE LIBRARY IS WANTED IN FULL. `BIONIC_LIB_WANT` names every file the four
 # functions between them source — the union of the four hooks' lists plus fold.sh
 # and stop.sh — so a partial library fails the loader's readability check and this
-# hook steps aside rather than running three verdicts and dropping the fourth.
+# hook refuses rather than running three verdicts and dropping the fourth.
 #
-# FAIL OPEN, for the reason all four originals gave: this process can refuse a STOP,
-# and a stop refused because a file was missing is a turn nobody can end.
+# FAIL CLOSED, ONCE: a stop refused on every re-entry because a file was missing is a turn
+# nobody can end, so the refusal under the loader block lets the re-entry through.
 #
 # [WALL: tests/stop.test.sh]
 #
@@ -144,7 +144,13 @@ BIONIC_LOADER_REFUSE
   exit 2
 }
 # --- bionic-loader/v2 END
-if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop"; fi
+# A MISSING LIBRARY REFUSES A STOP ONCE. Exit 2 holds the turn open, so only a first stop
+# (`stop_hook_active` false) is refused; the re-entry, a payload without the field and one jq
+# cannot read all end the turn, so a session with no library can still end or be repaired.
+if [ -n "$BIONIC_LIB_MISSING" ]; then
+  [ "$(jq -r '.stop_hook_active' 2>/dev/null)" = "false" ] || exit 0
+  loader_fail_closed "stop"
+fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/context.sh"
 # shellcheck source=/dev/null
@@ -168,13 +174,13 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop"; fi
 # tick's printed line, so a turn that ends on a fillable gap is refused whether or not a
 # Patrol tick fired in it. Named in the WANT line above — and not merely sourced by
 # payload/scripts/lib/stop.sh the way units.sh is — because the loader's readability check is
-# what makes this process step aside rather than run three verdicts and drop the fourth.
+# what makes this process refuse rather than run three verdicts and drop the fourth.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/fill.sh"
 # THE FILL LEDGER'S PATH AND THE PATROL VERDICT (epic-23 wave-20, REQ-5 and REQ-6).
 # `stop_fill_ledger` appends to `fill_ledger_path`, the path `session-poker.sh fill-report`
 # reads, and the death notice asks `patrol_verdict`; both live in patrol.sh. Wanted and
-# sourced here for fill.sh's reason above: a partial library steps this process aside.
+# sourced here for fill.sh's reason above: a partial library makes this process refuse.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/patrol.sh"
 # shellcheck source=/dev/null
