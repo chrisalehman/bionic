@@ -17,6 +17,8 @@
 #   §CELL       a criterion is discharged only by a standing proof, waiver or approval naming it.
 #   §JOIN       a plan's log is found by its name; a header key pointing elsewhere is only words.
 #   §READY      ready reads a row's deps from its Tasks cell when the caller names none.
+#   §JOIN-14    a version-14 row's waits are its reads cell: ready, stop's ready rows, holds, status.
+#   §JOIN-15    a nine-cell row's waits are its deps and what its kind and step imply.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
 
@@ -124,9 +126,11 @@ run/v1|ev=handoff|path=/h1|at=${t}:36Z
 run/v1|ev=verdict|row=T1|commit=c1|suite=s.test.sh|result=red|at=${t}:37Z
 run/v1|ev=verdict|row=T1|commit=c1|suite=s.test.sh|result=green|at=${t}:38Z
 EOF
+printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n' >> "$D/plans/epic-x/rest.plan.md"
+for r in T1 T2 T3 T4; do printf '| %s | 4 | build | t | — | 30 | R | f | out/%s.md |\n' $r $r >> "$D/plans/epic-x/rest.plan.md"; done
 REST=("holds|holds|rc=0 step 4,T9" "reviews|question|rc=0 adversarial,structure,evidence" "reviews $H|question|rc=0 adversarial,evidence"
   "ledger|verb|rc=0 put,ruled,put" "ledger D1|verb|rc=0 put,ruled" "findings|to|rc=0 carried,fix" "findings fix|ref|rc=0 F1"
-  "debts|concept/id/ref|rc=0 F2,c1,d1" "stop|-|rc=0 room=3,session=s1,state=free,at=${t}:21Z,order=given,asks=3"
+  "debts|concept/id/ref|rc=0 F2,c1,d1" "stop|-|rc=0 room=3,session=s1,state=free,at=${t}:21Z,order=given,asks=3,ready="
   "order|-|rc=0 order=given,said=away,at=${t}:24Z" "hands|kind|rc=0 amend,hand" "handoff|-|rc=0 path=/h1,at=${t}:36Z"
   "status T3|-|rc=0 state=returned,files=f,name=w3,suites=b.test.sh,tree=/t3,branch=wt/T3,base=c0"
   "status T4|-|rc=0 state=pending" "status T1|-|rc=0 state=landed,commit=c1" "ready T4 T1|-|rc=0 " "ready T4 T3|-|rc=1 "
@@ -139,6 +143,7 @@ pick() {  # <field[/field…]|-> -> each line's first named field, or the whole 
 rest() { local r q f; for r in "${REST[@]}"; do q="${r%%|*}"; f="${r#*|}"; f="${f%%|*}"; out="$(ask $q)"; printf '%s|rc=%s %s\n' "$q" "$?" "$(printf '%s\n' "$out" | pick "$f")"; done; }
 got="$(rest)"; for r in "${REST[@]}"; do expect_eq "${r%%|*} answers its fold" "${r##*|}" "$(printf '%s\n' "$got" | awk -v p="${r%%|*}|" 'index($0, p) == 1 { print substr($0, length(p) + 1) }')"; done
 awk -F'|' -v OFS='|' '{ f = $2; for (i = 2; i < NF; i++) $i = $(i + 1); $NF = f; print }' "$D/record/rest/run.log" | plan restmoved
+cp "$D/plans/epic-x/rest.plan.md" "$D/plans/epic-x/restmoved.plan.md"
 expect_eq "the twelve answer the same with each line's fields moved" "$got" "$(W=restmoved; rest)"
 ask status 2>/dev/null; expect_status "status with no row exits 2" 2 "$?"
 ask ready 2>/dev/null; expect_status "ready with no row exits 2" 2 "$?"
@@ -243,8 +248,55 @@ W=new; expect_eq "a plan with no pointer key reads its log by name" "state=disch
 W=old; expect_eq "a pointer key in the header is never followed" "log=record/new/run.log state=pending" "$(flat header log) $(flat cell AC-7.4)"
 
 section "READY"
-W=new; printf 'run/v1|ev=published|row=T1|commit=c1|kind=queue|at=2026-11-01T00:00:09Z\n' >> "$D/record/new/run.log"
+W=new; printf 'run/v1|ev=%s|at=2026-11-01T00:00:09Z\n' 'published|row=T1|commit=c1|kind=queue' 'approval|key=step3|by=me' 'step|n=4' >> "$D/record/new/run.log"
 readies() { local r; for r in "$@"; do ask ready $r; printf '%s=%s ' "${r// /+}" "$?"; done; }
 expect_eq "ready reads the deps cell, and deps a caller names stand as given" "T2=0 T3=1 T3+T1=0 T1=1 T7=1 " "$(readies T2 T3 'T3 T1' T1 T7)"
+
+# A version-14 table holds a row's waits in its reads cell: a row id, or a path a row's Files write, is that
+# row. A nine-cell table holds them in deps, and its kind and step imply the rest. A1's status cell says
+# landed and the log does not: state is the log's, so A2 still waits on it.
+JLOG="run/v1|ev=approval|key=step3|by=me|at=2026-11-03T00:00:01Z
+run/v1|ev=step|n=4|at=2026-11-03T00:00:02Z
+run/v1|ev=ask|key=approve:ship|sent=s|at=2026-11-03T00:00:03Z
+run/v1|ev=ask|key=waive:F1|sent=s|at=2026-11-03T00:00:04Z
+run/v1|ev=proof|kind=review|head=$H|question=adversarial|result=pass|at=2026-11-03T00:00:05Z"
+printf '%s\n' "$JLOG" | plan w14; printf '%s\n' "$JLOG" | plan w15
+cat > "$D/plans/epic-x/w14.plan.md" <<'EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads | suites | lands-on | artifact |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| A1 | 4 | build | t | — | — | 30 | R | src/a.sh, out/A1.md | — | — | landed | approval:plan | — | — | out/A1.md |
+| A2 | 4 | build | t | — | — | 30 | R | out/A2.md | — | — | pending | approval:plan, out/A1.md | — | — | out/A2.md |
+| A3 | 4 | build | t | — | — | 30 | R | out/A3.md | — | — | pending | approval:plan, A1 | — | — | out/A3.md |
+| A4 | 4 | build | t | — | — | 30 | R | out/A4.md | — | — | pending | approval:plan, approval:ship | — | — | out/A4.md |
+| A5 | 8 | integrate | t | — | — | 30 | R | out/A5.md | — | — | pending | approval:plan | — | — | out/A5.md |
+EOF
+cat > "$D/plans/epic-x/w15.plan.md" <<'EOF'
+## Tasks
+
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| B1 | 4 | build | t | — | 30 | R | src/b.sh, out/B1.md | out/B1.md |
+| B2 | 4 | build | t | B1 | 30 | R | out/B2.md | out/B2.md |
+| B3 | 6 | test | t | — | 30 | R | tests/b.test.sh | out/B3.md |
+| B4 | 8 | integrate | t | — | 30 | R | out/B4.md | out/B4.md |
+EOF
+joined() {  # <row…> -> each row's ready exit; the stop's ready= line; each ask holds lists, as key>holds; status of an absent row
+  local h; h="$(ask holds | awk -F'|' '{ for (i = 2; i <= NF; i++) { if ($i ~ /^key=/) k = substr($i, 5); if ($i ~ /^holds=/) v = substr($i, 7) }; printf "%s>%s ", k, v }')"
+  local rc; ask status Z9 >/dev/null; rc=$?; printf '%s; %s; %s; Z9=%s' "$(readies "$@")" "$(ask stop | grep '^ready=')" "$h" "$rc"
+}
+land() { printf 'run/v1|ev=published|row=%s|commit=c|kind=queue|at=2026-11-03T00:00:09Z\n' "$1" >> "$D/record/$W/run.log"; }
+
+section "JOIN-14"
+W=w14; expect_eq "a reads cell's row and path wait on the row, an approval on its ask; stop lists the ready rows" \
+  "A1=0 A2=1 A3=1 A4=1 A5=1 ; ready=A1; approve:ship>A4 waive:F1>A5 ; Z9=1" "$(joined A1 A2 A3 A4 A5)"
+land A1; expect_eq "once the row lands its readers are ready, in table order" "A1=1 A2=0 A3=0 A4=1 A5=1 ; ready=A2 A3" "$(joined A1 A2 A3 A4 A5 | cut -d';' -f1-2)"
+ask status A1 >/dev/null; expect_status "a row the plan holds has a status" 0 "$?"
+
+section "JOIN-15"
+W=w15; expect_eq "a nine-cell row waits on its deps and what its kind and step imply, and no approval holds it" \
+  "B1=0 B2=1 B3=1 B4=1 ; ready=B1; waive:F1>B4 ; Z9=1" "$(joined B1 B2 B3 B4)"
+land B1; expect_eq "a test row at Step 6 waits for the code writers before it" "B1=1 B2=0 B3=1 B4=1 ; ready=B2" "$(joined B1 B2 B3 B4 | cut -d';' -f1-2)"
 
 finish

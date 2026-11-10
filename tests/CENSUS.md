@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 125 · sections: 1127 · keep: 933 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 125 · sections: 1129 · keep: 935 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1092 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1092 - 22 - 8 = 1062.
 
@@ -1123,6 +1123,8 @@ reader.test.sh | §CRITERION | keep | payload/scripts/lib/plan-read.sh plan_read
 reader.test.sh | §CELL | keep | payload/scripts/lib/reader.sh reader_q_cell: a failed proof read as a discharge; an event named by its type alone or by another field, not by the criterion's `ac=` or `key=`; the plan's Eval design not consulted, so a criterion the plan lacks has a cell; the proof identity entry with `ac` deleted, so one criterion's proof replaces another's at the same head | none (searched 'cell', 'discharged' and 'reader.sh' in tests/)
 reader.test.sh | §JOIN | keep | payload/scripts/lib/reader.sh reader_events: a header key followed to the run's log, so a plan whose header points at another run answers from that run's log | none (searched 'run.log' and 'reader_log' in tests/)
 reader.test.sh | §READY | keep | payload/scripts/lib/reader.sh reader_q_ready: the deps cell not read when the caller names none, so a row whose dep has not landed answers ready; the deps a caller names ignored; a row the plan lacks answering ready | none (searched 'ready' and 'deps=' in tests/)
+reader.test.sh | §JOIN-14 | keep | payload/scripts/lib/plan-read.sh plan_read_waits: the row-id arm or the path-by-Files arm deleted, so a row reading an unlanded row's id or artifact answers ready; the step hold of an integrate row deleted, so it is ready before the run reaches its step; payload/scripts/lib/reader.sh: stop's ready= not drawn from the ready rows, holds' plan arm (an approval's readers, a waiver's integrate rows) deleted, or status answering a row the plan lacks | none (searched 'plan_read_waits', 'ready=' and 'holds=' in tests/; replay-bed reads the fixtures' answers, not a planted table)
+reader.test.sh | §JOIN-15 | keep | payload/scripts/lib/plan-read.sh plan_read_waits: the kind default taken only where a reads cell is empty, so a nine-cell row waits on its deps alone; the head arm deleted, so a test row at Step 6 is ready before the code writers land; payload/scripts/lib/reader.sh _reader_ready_rows: approval:plan met with no Step-3 approval | none (searched 'plan_read_waits' and 'kdef' in tests/; units.test.sh drives the fill's own scheduler over plan status, not the reader)
 
 ## refuse.test.sh
 
