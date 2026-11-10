@@ -116,7 +116,11 @@ translate() {  # <plan> <events|gaps> -> the translation in that form; 2 refused
   local plan="${1:-}" want="${2:-}" fn
   [ -f "$plan" ] || return 2
   case "$want" in events|gaps) ;; *) return 2 ;; esac
-  for fn in $TRANSLATE_SOURCES; do "$fn" "$plan"; done | if [ "$want" = gaps ]; then
+  for fn in $TRANSLATE_SOURCES; do "$fn" "$plan"; done | _translate_form "$want"
+}
+
+_translate_form() {  # <events|gaps> -> stdin's source records in that form: events in their order, gaps once each
+  if [ "$1" = gaps ]; then
     awk -F'\t' '$1 == "g" && !seen[$3]++ { print $3 }'
   else
     awk -F'\t' -v OFS='\t' '$1 == "e" { print $2, NR, $3 }' | LC_ALL=C sort -t "$(printf '\t')" -k1,1 -k2,2n | cut -f3-
@@ -167,11 +171,25 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
     END { if (cur != "" && !(cur in steps)) { begin("step", "n", cur); inblock("steps"); emit("") } }'
 }
 
+# _TRANSLATE_LANDED_AWK: `landed_at(text)`, a ledger line's text from its landing's marker on when reasons come
+# before it, else the text whole
+_TRANSLATE_LANDED_AWK='
+function landed_at(t,   l, b, h) {
+  if (t ~ /^landed/) return t
+  l = " " t; b = match(l, /[ \t]landed [0-9a-f]+ [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/) ? RSTART : 0
+  h = match(l, /[ \t]landed-by-hand: /) ? RSTART : 0
+  if (b && (!h || b < h)) return substr(l, b + 1)
+  return h ? substr(l, h + 1) : t
+}
+'
 translate_source _translate_ledger
 _translate_ledger() {  # <plan> -> the dispatch ledger's landings and born stamps
-  _translate_section "$1" "SDLC State" | awk -v rec="$(_translate_landed_rows "$1") " "$_TRANSLATE_AWK"'
+  # A landing opens its row's line, or follows the reasons written before it: `landed <sha> <instant>` or
+  # `landed-by-hand: <who> <instant> "<why>"`, the earlier of the two when both are named; the words read
+  # are the landing's own, from its marker on.
+  _translate_section "$1" "SDLC State" | awk -v rec="$(_translate_landed_rows "$1") " "$_TRANSLATE_AWK$_TRANSLATE_LANDED_AWK"'
     /^- T[0-9A-Za-z.]*: / {
-      row = substr($0, 3, index($0, ":") - 3); text = substr($0, index($0, ":") + 2)
+      row = substr($0, 3, index($0, ":") - 3); text = landed_at(substr($0, index($0, ":") + 2))
       own = !index(rec, " " row " ")
       if (own && match(text, /^landed [0-9a-f]+ /)) { split(text, w, " "); begin("published", "row", row); put("commit", w[2]); emit(inst(text)) }
       else if (own && index(text, "landed-by-hand: ") == 1) { split(substr(text, 17), w, " "); begin("published", "row", row)
@@ -190,7 +208,7 @@ _translate_ledger() {  # <plan> -> the dispatch ledger's landings and born stamp
 translate_source _translate_tasks
 _translate_tasks() {  # <plan> -> the Tasks rows: the agent cell's dispatch, the worktree and base cells' tree, a landing with no ledger line
   local plan="$1"
-  { _translate_section "$plan" "SDLC State" | awk '/^- T[0-9A-Za-z.]*: landed/ { print "L", substr($0, 3, index($0, ":") - 3) }'
+  { _translate_section "$plan" "SDLC State" | awk "$_TRANSLATE_LANDED_AWK"'/^- T[0-9A-Za-z.]*: / && landed_at(substr($0, index($0, ":") + 2)) ~ /^landed/ { print "L", substr($0, 3, index($0, ":") - 3) }'
     for r in $(_translate_landed_rows "$plan"); do printf 'L %s\n' "$r"; done
     _translate_section "$plan" "Tasks"; } | awk -F'|' "$_TRANSLATE_AWK"'
     /^L / { led[substr($0, 3)] = 1; next }
@@ -343,27 +361,97 @@ _translate_fill() {  # <plan> -> the fill ledger: each stop, its fields as writt
 }
 
 translate_source _translate_decisions
-_translate_decisions() {  # <plan> -> the design ledger's headings: each put or ruled round a decision
-  # A round's heading is `Δ<n> — D<n> put (<who> <instant>): <title>`, or `… ruled "<reply>" (…): …`. Its
-  # instant is kept as the heading writes it, local clock and zone or a bare day: rewritten to UTC it
-  # would be a time the heading never held. One holding a `|` cannot be written, so it is named. A heading
-  # of any other form is named whole by its first word and writes no round, because a verb or reply read
-  # out of other words would be a guess.
+_translate_decisions() {  # <plan> -> the design ledger's rounds
   local f
   f="$(_translate_record "$1" design-ledger.md)" || return 0
+  _translate_ledger_records "$f"
+}
+
+translate_ledger() {  # <design-ledger.md> <events|gaps> -> one ledger's rounds in the translation's two forms, read alone
+  [ -f "${1:-}" ] || return 2
+  case "${2:-}" in events|gaps) ;; *) return 2 ;; esac
+  _translate_ledger_records "$1" | _translate_form "$2"
+}
+
+# A ROUND is a `## Δ<n> — D<n> [qualifier] <verb> ["<reply>"] (<who> <instant>)[: <title>]` heading, or a `- D<n> …`
+# bullet of that shape under a Δ (the rulings a step card folded in). The verbs are put and every word a ruling is
+# written with: ruled, re-ruled, amended, amended again, ratified, settled, final and withdrawn. verb= is the word as
+# written, a one-word qualifier before it kept with it, because the word is what the person said and the closed list
+# of event types does not move with it. A reply is said=; `D<n> ruled: <title> (<who> <instant>)` has none; a go
+# ledgered as `D<n> settled by <what> (<who> <instant>): "<reply>"` says its reply after the parenthesis and is
+# titled by what settled it. A tail after the parenthesis that is not `: <title>` is the title. A put's wait= is the
+# first line under its heading, what `decisions put` writes there. entry= is the Δ the round is written under, so a
+# decision put twice in the same words at two instants is two rounds, not one line repeated. The instant is kept as the heading writes it, local
+# clock and zone or a bare day: rewritten to UTC it would be a time the heading never held; one holding a `|` cannot
+# be written, so it is named. A heading of any other form, a reply not followed by its parenthesis among them, is
+# named whole by its first word and writes no round, because a verb or reply read out of other words would be a
+# guess. A fenced example is no round and no gap.
+_translate_ledger_records() {  # <design-ledger.md> -> its rounds as source records
   awk "$_TRANSLATE_AWK"'
     function stamp(at,   i) { if (!index(at, "|")) { emit(at); return }
       gap("at", "bar"); printf "e\t%s\t%s|at=\n", slot(T, ""), L; for (i = 1; i <= NG; i++) printf "g\t\t%s\n", G[i] }
-    index($0, "## ") != 1 { next }
-    { h = substr($0, 4); split(h, w, " "); ok = match(h, /^Δ[0-9]+ — D[0-9]+ (put \(|ruled ")/); said = ""
-      re = "[^()]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][^()]*\\): "
-      if (ok) { split(substr(h, 1, RLENGTH), x, " "); rest = substr(h, RLENGTH + 1) }
-      if (ok && x[4] == "put") { ok = match(rest, "^" re); paren = substr(rest, 1, RLENGTH - 3) }
-      else if (ok && (ok = match(rest, "\" \\(" re))) { said = substr(rest, 1, RSTART - 1); paren = substr(rest, RSTART + 3, RLENGTH - 6) }
-      if (!ok) { whole("decision", "heading=" w[1], "shape"); next }
-      title = substr(rest, RSTART + RLENGTH); match(paren, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)
-      begin("decision", "d", x[3]); put("verb", x[4]); if (x[4] == "ruled") put("said", said)
-      put("by", trim(substr(paren, 1, RSTART - 1))); put("title", trim(title)); stamp(substr(paren, RSTART)) }' "$f"
+    function lead(s,   i, n, vs, c) {
+      n = split("amended again|amended|re-ruled|ruled|ratified|settled|final|withdrawn|put", vs, "|")
+      for (i = 1; i <= n; i++) if (index(s, vs[i]) == 1) { c = substr(s, length(vs[i]) + 1, 1); if (c == " " || c == ":") return vs[i] }
+      return ""
+    }
+    function flush() { if (PD != "") { begin("decision", "d", PD); for (i = 1; i <= RN; i++) put(RK[i], RV[i]); if (PW != "") put("wait", PW); stamp(PA) } PD = "" }
+    function round(s, head,   n, rest, verb, qual, reply, hasreply, q, i, depth, inq, ch, fin, c, paren, tail, title, who, by) {
+      if (!match(s, /^D[0-9]+ /)) return 0
+      n = substr(s, 1, RLENGTH - 1); rest = substr(s, RLENGTH + 1); verb = lead(rest); qual = ""
+      if (verb == "") {
+        if (!match(rest, /^[A-Za-z][A-Za-z0-9_-]* /)) return 0
+        qual = substr(rest, 1, RLENGTH - 1); rest = substr(rest, RLENGTH + 1); verb = lead(rest); if (verb == "") return 0
+      }
+      rest = substr(rest, length(verb) + 1); hasreply = 0; reply = ""; paren = ""; title = ""
+      if (substr(rest, 1, 1) == ":") {
+        rest = trim(substr(rest, 2)); if (substr(rest, length(rest)) != ")") return 0
+        for (i = length(rest) - 1; i >= 1; i--) {
+          if (substr(rest, i, 2) != " (") continue
+          c = substr(rest, i + 2, length(rest) - i - 2)
+          if (match(c, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) { paren = c; title = substr(rest, 1, i - 1); break }
+        }
+        if (paren == "") return 0
+      } else {
+        by = ""
+        if (verb == "settled" && index(rest, " by ") == 1) { q = index(substr(rest, 5), " ("); if (q == 0) return 0; by = substr(rest, 5, q - 1); rest = substr(rest, q + 4) }
+        if (index(rest, " \"") == 1) { rest = substr(rest, 3); q = index(rest, "\""); if (q == 0) return 0; reply = substr(rest, 1, q - 1); rest = substr(rest, q + 1); hasreply = 1 }
+        if (index(rest, " (") != 1) return 0
+        rest = substr(rest, 3); depth = 1; inq = 0; fin = 0
+        for (i = 1; i <= length(rest); i++) {
+          ch = substr(rest, i, 1)
+          if (ch == "\"") inq = !inq
+          else if (!inq && ch == "(") depth++
+          else if (!inq && ch == ")" && --depth == 0) { fin = i; break }
+        }
+        if (!fin) fin = index(rest, ")")
+        if (!fin) return 0
+        paren = substr(rest, 1, fin - 1); tail = substr(rest, fin + 1)
+        if (index(tail, ": ") == 1) title = substr(tail, 3); else { title = tail; sub(/^[ \t:,;]+/, "", title) }
+        if (by != "") {
+          if (!hasreply && match(title, /^"[^"]*"[ \t]*$/)) { reply = substr(title, 2, index(substr(title, 2), "\"") - 1); hasreply = 1 }
+          title = by
+        }
+      }
+      if (!match(paren, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) return 0
+      who = trim(substr(paren, 1, RSTART - 1)); sub(/[ \t,]+$/, "", who); if (who == "") return 0
+      flush(); PD = n; RN = 0; PW = ""; PA = trim(substr(paren, RSTART))
+      if (DELTA != "") { RK[++RN] = "entry"; RV[RN] = DELTA }
+      RK[++RN] = "verb"; RV[RN] = (qual == "" ? "" : qual " ") verb
+      if (hasreply) { RK[++RN] = "said"; RV[RN] = reply }
+      RK[++RN] = "by"; RV[RN] = who; RK[++RN] = "title"; RV[RN] = trim(title)
+      WAIT = (verb == "put" && head); if (!WAIT) flush()
+      return 1
+    }
+    { sub(/\r$/, "") }
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    index($0, "## ") == 1 { WAIT = 0; h = substr($0, 4); s = h; split(h, w, " "); DELTA = (w[1] ~ /^Δ[0-9]/) ? w[1] : ""
+      if (sub(/^Δ[0-9]+ — /, "", s) && round(s, 1)) next
+      flush(); whole("decision", "heading=" w[1], "shape"); next }
+    WAIT && NF { PW = $0; WAIT = 0; flush() }
+    /^- D[0-9]+ / { round(substr($0, 3), 0) }
+    END { flush() }' "$1"
 }
 
 translate_source _translate_debts

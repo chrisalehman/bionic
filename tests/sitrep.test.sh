@@ -583,7 +583,7 @@ expect_eq "WS6 …and with no line on the register, to the ruling's own time in 
 section "§ONE-PARSER: one reader of the design ledger's headings, one rule for what rules a decision, settled among its verbs"
 # ============================================================
 # fails-when: a ledger whose only ruling of D<n> is a `settled` heading is open to one reader and ruled to the other, a
-# ruling the ledger writes as a bullet is no ruling to the clock reader, or a second program parses a ledger heading.
+# ruling the ledger writes as a bullet is no ruling to the clock reader, or the sheet parses a ledger heading itself.
 sr_world one-parser "6 6 12 12"
 awk -F'|' 'BEGIN { OFS = "|" } $2 == " T10 " { $8 = " approval:D5 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_bind
@@ -602,7 +602,8 @@ printf '# Design ledger — wave-02-fx\n\n## Δ1 — D5 put (orchestrator 2026-1
 rm -f "$(sr_reg)"
 sr_run "$SR_PLAN"
 expect_eq "OP2 a bullet ruling ends the span at its own clock, as a heading's does" "30 min: decide:D5" "$(sr_m waste.waiting-on-you)"
-# The static row: the code recognises a ledger heading (`## Δn — `) in one program. The control plants the same line
+# The static row: the code recognises a ledger heading (`## Δn — `) in one program, the translation's, and the sheet
+# asks the reader. The control plants the same line
 # twice, and once beside a comment that names the shape, through the same counter.
 op_count() { /usr/bin/grep -vE '^[[:space:]]*#' "$1" | /usr/bin/grep -cE 'Δ\[0-9\]\+ — '; }
 OP_P="$TMPROOT/op-plant.sh"
@@ -610,7 +611,8 @@ printf '%s\n' "# a comment naming Δ[0-9]+ — is no parser" "  index(\$0, 1) { 
 expect_eq "OP3a (control) the counter finds one parser in a file with one, and passes a comment by" "1" "$(op_count "$OP_P")"
 printf '%s\n' "  \$0 ~ /^## Δ[0-9]+ — D[0-9]+ / { next }" >> "$OP_P"
 expect_eq "OP3b (control) …and two in a file with a second" "2" "$(op_count "$OP_P")"
-expect_eq "OP3 the sheet's code holds one heading parser of the design ledger" "1" "$(op_count "${BIONIC_HOOKS_DIR}/poker/sitrep.sh")"
+expect_eq "OP3 the sheet's code parses no ledger heading; the translation holds the one parser" "0 1" \
+  "$(op_count "${BIONIC_HOOKS_DIR}/poker/sitrep.sh") $(op_count "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/translate.sh")"
 
 # ============================================================
 section "§SPAN: an ask closed with no opened= takes its span from the run's record, or the count says it is partial"
@@ -851,6 +853,9 @@ awk '
   /^- T3: / { print "- T3: reason: rebuilt after T2 landed-by-hand: Dana Fixture (the orchestrator) 2026-10-06T10:50:00Z \"merged by hand on its greens\" — .worktrees/02-T3"; next }
   /^\| T10 \| / { sub(/\| — \| 30 \|/, "| lib/t11.sh | 30 |") }
   { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+# T3 landed by hand, which the plan's line alone records: its queue landing leaves the record, which the reader would
+# read before the plan.
+awk '!/^landed: row=T3 / && !/^line\/v1\|ev=published\|row=T3\|/' "$SR_REC" > "$SR_REC.t" && mv "$SR_REC.t" "$SR_REC"
 SR_CAND="$(printf 'd%.0s' $(seq 40))"
 sr_ev "ev=ready|row=T8|name=w-T8|commit=$SR_C1|branch=wt/02-T8|tree=$SR_REPO/.worktrees/02-T8|suites=a.test.sh,b.test.sh|debt=-|carrier=1:x|at=2026-10-06T13:05:00Z"
 sr_ev "ev=ready|row=T6|name=w-T6|commit=$SR_C1|branch=wt/02-T6|tree=$SR_REPO/.worktrees/02-T6|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T13:30:00Z"
@@ -936,7 +941,8 @@ sr_run "$SR_PLAN"
 expect_eq "ME6d a later green of the standing suite answers it: two suites red" "4: 2 green, 2 red" "$(sr_m tests.suites-run)"
 
 # A review is counted once per question and scope, by its latest result: structure on the whole passed then failed
-# (one failed), adversarial on a piece failed then passed (one passed), evidence on the whole passed once.
+# (one failed), adversarial on a piece failed then passed (one passed), evidence on the whole passed once. The reader
+# holds a later reading of one question and scope at one head in place of the earlier, so each stands as one line.
 sr_world metrics-reviews "6 6 12 12"
 for f in s1 s2 a1 a2 e1; do printf 'reviewed: %s..%s\nfindings: 0\n' "$SR_C1" "$SR_H" > "$SR_DIR/$f.md"; done
 awk -v h="$SR_H" '{ print } /^current: 4$/ {
@@ -947,9 +953,9 @@ awk -v h="$SR_H" '{ print } /^current: 4$/ {
   print "proved: kind=review head=" h " at=2026-10-06T20:05:00Z evidence=record/wave-02-fx/a2.md question=adversarial reader=c4 result=pass scope=piece" }' \
   "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
-expect_eq "RV1 five results of reviews, each still a review: line, and the count by question and scope at its latest: 2 passed, 1 failed" \
-  "5|2 passed, 1 failed, 0 running" \
-  "$(sr_lines review | /usr/bin/grep -c .)|$(sr_m reviews)"
+expect_eq "RV1 five results of reviews, a line for each one standing, and the count by question and scope at its latest: 2 passed, 1 failed" \
+  "3|a2.md e1.md s2.md|2 passed, 1 failed, 0 running" \
+  "$(sr_lines review | /usr/bin/grep -c .)|$(sr_lines review | sed 's/.*record=record\/wave-02-fx\///' | sort | tr '\n' ' ' | sed 's/ $//')|$(sr_m reviews)"
 
 # Correctness names the suites run, each by its last verdict on the line, then the whole run. A suite named by its
 # path is the suite its bare name is; the whole run's own verdicts are no suite's run here.
@@ -960,7 +966,7 @@ expect_eq "SU0 the clean world: its one suite green at its last run, and no whol
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=tests/b.test.sh|result=red|log=/rec/T8b.log|at=2026-10-06T14:00:00Z"
 sr_ev "ev=verdict|row=T5|commit=$SR_C1|suite=c.test.sh|result=red|log=/rec/T5c.log|at=2026-10-06T14:05:00Z"
 sr_ev "ev=verdict|row=T6|commit=$SR_C1|suite=c.test.sh|result=green|log=/rec/T6c.log|at=2026-10-06T14:10:00Z"
-sr_ev "ev=verdict|row=T6|commit=$SR_C1|suite=c.test.sh|result=discarded|log=/rec/T6c2.log|at=2026-10-06T14:12:00Z"
+sr_ev "ev=verdict|row=T6|commit=$SR_H|suite=c.test.sh|result=discarded|log=/rec/T6c2.log|at=2026-10-06T14:12:00Z"
 sr_ev "ev=verdict|row=regression|commit=$SR_H|suite=z.test.sh|result=green|log=/rec/z.log|admitted=-|width=-|kind=regression|at=2026-10-06T14:20:00Z"
 sr_ev "ev=verdict|row=regression|commit=$SR_H|suite=y.test.sh|result=red|log=/rec/y.log|admitted=-|width=-|kind=regression|at=2026-10-06T14:21:00Z"
 sr_run "$SR_PLAN"
@@ -1092,9 +1098,10 @@ sr_launch T1 09:35:00; sr_launch T2 10:05:00; sr_launch T3 10:35:00; sr_launch T
 sr_run "$SR_PLAN"
 expect_eq "PA1 four landings: their own time against their size, and the close scaled by it" \
   "4 tasks, 135 min against 120 sized min|5:49 PM|5:30 PM" "$(sr_m work.task-time)|$(sr_m close.predicted)|$(sr_m close.unscaled)"
-# A row landed twice counts once, to its later header; a header naming no row of the plan counts nothing.
+# A row landed twice, the second a merge of its own, counts once, to its later landing; a header naming no row of the
+# plan counts nothing.
 printf 'landed: row=T1 branch=wt/02-T1 head=%s merge=%s at=2026-10-06T12:30:00Z\nlanded: row=— branch=wt/02-x head=%s merge=%s at=2026-10-06T13:00:00Z\nlanded: row=T99 branch=wt/02-y head=%s merge=%s at=2026-10-06T13:00:00Z\n' \
-  "$SR_C1" "$SR_C1" "$SR_C1" "$SR_C1" "$SR_C1" "$SR_C1" >> "$SR_REC"
+  "$SR_C1" "$SR_H" "$SR_C1" "$SR_C1" "$SR_C1" "$SR_C1" >> "$SR_REC"
 sr_run "$SR_PLAN"
 expect_eq "PA1b a re-landed row counts once, to its later header; a header naming no row of the plan counts nothing" \
   "4 tasks, 280 min against 120 sized min" "$(sr_m work.task-time)"
@@ -1104,10 +1111,15 @@ sr_run "$SR_PLAN"
 expect_eq "PA2 no landing: the chain at 1×, nothing landed to measure" \
   "5:30 PM|0 tasks: none has landed|yes" \
   "$(sr_m close.predicted)|$(sr_m work.task-time)|$(sr_d close.predicted | /usr/bin/grep -q 'at 1×: 0 landed build tasks have a launch and a landing on record, under 3' && echo yes)"
-# Fewer than three landings scale nothing: two of the four rows land (T3's and T4's headers gone); then one; then three.
+# Fewer than three landings scale nothing: two of the four rows land (T3's and T4's landings gone from the record and
+# the plan's lines, their status cells still landed); then one; then three. sr_unland <row regex> takes them out.
+sr_unland() {
+  awk -v r="$1" '!($0 ~ "^landed: row=(" r ") " || $0 ~ "^line/v1[|]ev=published[|]row=(" r ")[|]")' "$SR_REC" > "$SR_REC.t" && mv "$SR_REC.t" "$SR_REC"
+  awk -v r="$1" '!($0 ~ "^- (" r "): landed ")' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+}
 sr_world pace-two "5 5 5 5"
 sr_launch T1 09:35:00; sr_launch T2 10:05:00; sr_launch T3 10:35:00; sr_launch T4 11:20:00
-awk '!/^landed: row=T[34] /' "$SR_REC" > "$SR_REC.t" && mv "$SR_REC.t" "$SR_REC"
+sr_unland 'T3|T4'
 sr_run "$SR_PLAN"
 expect_eq "PA4 two landings: their time counted, the rows with no landing header said (precondition)" \
   "2 tasks, 60 min against 60 sized min; 2 landed tasks with no launch or landing on record" "$(sr_m work.task-time)"
@@ -1115,13 +1127,13 @@ expect_eq "PA4b …the close is the chain at 1×, and the basis says 2, under 3"
   "$(sr_m close.predicted)|$(sr_d close.predicted | /usr/bin/grep -q 'at 1×: 2 landed build tasks have a launch and a landing on record, under 3' && echo yes)"
 sr_run --line "$SR_PLAN"
 expect_eq "PA4c …and the Patrol's status carries it" "close 5:30 PM" "${OUT##* · }"
-awk '!/^landed: row=T2 /' "$SR_REC" > "$SR_REC.t" && mv "$SR_REC.t" "$SR_REC"
+sr_unland T2
 sr_run "$SR_PLAN"
 expect_eq "PA4d one landing: the same, said for 1" "yes" \
   "$(sr_d close.predicted | /usr/bin/grep -q 'at 1×: 1 landed build task has a launch and a landing on record, under 3' && echo yes)"
 sr_world pace-three "5 5 5 5"
 sr_launch T1 09:35:00; sr_launch T2 10:05:00; sr_launch T3 10:35:00; sr_launch T4 11:20:00
-awk '!/^landed: row=T4 /' "$SR_REC" > "$SR_REC.t" && mv "$SR_REC.t" "$SR_REC"
+sr_unland T4
 sr_run "$SR_PLAN"
 expect_eq "PA4e three landings scale the chain: 90 min against 90, the basis names them, and no 1× stands" "5:30 PM|yes|0" \
   "$(sr_m close.predicted)|$(sr_d close.predicted | /usr/bin/grep -q 'scaled by the 3 landed build tasks.* 90 min over 90 sized min' && echo yes)|$(sr_d close.predicted | /usr/bin/grep -c 'under 3')"
