@@ -894,6 +894,7 @@ landing-line-2.test.sh | §CAUSE | keep | payload/scripts/lib/line.sh: the stand
 landing-line-2.test.sh | §KEY | keep | payload/scripts/lib/line.sh: the standing red compares the stamp's suite with the declared path whole instead of its file name, so Lands-on: tests/a.test.sh stays cause=code (key1) | none (searched 'cause=environment' and 'suite-key' in tests/)
 landing-line-2.test.sh | §CAUSE-TREE | keep | payload/scripts/booked.sh: the --unplaced arm stamps where the shim stands anyway, so a dirty-tree green lands as a record at the main head (ct2) | none (searched '\-\-unplaced' in tests/)
 landing-line-2.test.sh | §PATH | keep | rule: door refusal — payload/scripts/lib/line.sh: the declared path replaced by tests/<name> when that file exists, so a red declared suite beside a green tests/x.test.sh publishes instead of exit 1 (pa4) | none (searched 'scripts/deploy/__tests__' in tests/)
+landing-line-2.test.sh | §FORK | keep | payload/scripts/lib/line.sh _line_verdict: the refusal clause deleted, so a red whose log holds the shell's refusal of a process reads red and the landing returns RED where it runs twice and stalls (fk1, fk2) | none (searched 'temporarily unavailable' and 'fork:' in tests/)
 landing-line-2.test.sh | §DRAIN | keep | payload/scripts/lib/line.sh _line_red_owner: the red judge re-points the candidate's landing tree at the head mid-drain, so a sibling runs on the head while its verdict names the candidate (dr3, dr4) | none (searched '_line_red_owner' and 'landing_tree_point' in tests/)
 landing-line-2.test.sh | §GRAMMAR | keep | payload/scripts/lib/line.sh _line_verdict_put: admitted= and width= written before log=, so "(g1) the writer puts admitted=, width=, then promised= and actual= after log=" goes red | none (searched 'admitted=' with 'log=' in tests/; landing-line-1.test.sh §WITHIN reads only the order after width=)
 landing-line-2.test.sh | §ASK | keep | payload/scripts/lib/line.sh: the drain stops asking gate_width_ask again as each run ends, so p5 never starts after p1 ends (k2) | none (searched 'gate_width_ask' in tests/; gate.test.sh drives the gate's answer alone)
@@ -1389,6 +1390,7 @@ run-predicate.test.sh | §R7 | keep | payload/scripts/lib/run.sh session_plan: t
 ## run.test.sh
 
 run.test.sh | §ORDER | keep | tests/run.sh: the check that asks the gate for the bound plan's open order deleted, so a suite starts with an order: given line standing (O2, O3) | none (searched 'order: given' and 'order lift' in tests/; landing-line-1.test.sh drives the landing door's order, not the runner's)
+run.test.sh | §FORK | keep | tests/run.sh _verdict: the refusal arm deleted, so a failed suite whose output holds the shell's refusal of a process reads FAIL and the door exits 1, not 75 (F1) | none (searched 'temporarily unavailable' and 'fork:' in tests/)
 
 ## runner-roster.test.sh
 

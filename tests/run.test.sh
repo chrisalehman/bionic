@@ -15,7 +15,7 @@
 #
 # FIXTURE FIDELITY. The runner, the framework, the libraries and the poker are this tree's own
 # files, copied or run in place; the plan is the shared fixture plan, bound through the real
-# bind writer. The stub suite is SYNTHESIZED: one green row and one line appended per run.
+# bind writer. Stub suites, SYNTHESIZED: x, a green row and a line per run; f1-f4, a line and an exit.
 #
 # ANTI-VACUITY. Each "never ran" count reads the same run log as the lifted run's count of one,
 # and the plan's order: lines are read by one extractor that also finds the given line.
@@ -62,6 +62,8 @@ printf 'ran\n' >> "$(dirname "$0")/../ran.log"
 expect_eq "x runs" "1" "1"
 finish
 SUITE
+rt_plant() { printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"; . "$(dirname "$0")/lib/assert.sh"\necho "%s" >&2\nexit %s\nfinish\n' "$2" "$3" > "$W/tests/$1.test.sh"; }
+RF='fork: Resource temporarily unavailable'; rt_plant f1 "tests/f1.test.sh: $RF" 1; rt_plant f2 'FAIL: red' 1; rt_plant f3 "tests/f3.test.sh: $RF" 0; rt_plant f4 "missing 'y' in: tests/f4.test.sh: $RF" 1
 ( cd "$W" && git init -q . && git config user.name "Dana Fixture" && git config user.email d@example.com \
   && printf '.bionic/\nran.log\n' > .gitignore && git add -A && git commit -qm world ) >/dev/null 2>&1
 P="$(plan_fixture "$W/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave \
@@ -111,5 +113,8 @@ expect_regex "O4b …as an order: line with the time and the words it lifted" \
 rt_run
 expect_eq "O5 lifted, the runner runs the suite (exit 0)" "0" "$RC"
 expect_eq "O5b …and the suite ran once" "1" "$(rt_runs)"
+section "§FORK: a failed suite whose output holds the shell's own refusal of a process did not run: exit 75, its output shown"
+rt_fk() { OUT="$(cd "$W" && env "${RT_ENV[@]}" CLAUDE_CODE_SESSION_ID="$SID" bash tests/run.sh --only "$1.test.sh" 2>&1)"; FK="$FK$?:$(printf '%s\n' "$OUT" | awk -v l="$1.test.sh" '$1 == l { print $3 }') "; }; FK=""; rt_fk f1; F1="$OUT"; rt_fk f2; rt_fk f3; rt_fk f4
+expect_eq "F1 refused, exit 1: not run (75), its line shown · exit 1 without it: red · refused, exit 0: green · quoted: red" "75:REFUSED 1:FAIL 0:PASS 1:FAIL 1" "$FK$(printf '%s\n' "$F1" | grep -c "^tests/f1.test.sh: $RF\$")"
 
 finish

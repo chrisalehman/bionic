@@ -2203,7 +2203,9 @@ _line_time_for() {  # <suite> <deadline> <landing tree> -> seconds
 _line_verdict() {  # <rc> <log> [<lands_on entry>]
   case "${1:-}" in ''|*[!0-9]*) echo none; return 0 ;; esac
   if bionic_lands_cmd "${3:-}" >/dev/null; then if [ "$1" = 0 ]; then echo green; else echo red; fi; return 0; fi
-  if [ "$1" -ge 126 ] || ! grep -Eq '^[^ ]+: [0-9]+/[0-9]+ passed, [0-9]+ failed( |$)' "$2" 2>/dev/null; then echo none
+  # A failed run whose log holds the shell's own refusal of a process (suite.sh) is `none`: it did not run.
+  if [ "$1" -ge 126 ] || ! grep -Eq '^[^ ]+: [0-9]+/[0-9]+ passed, [0-9]+ failed( |$)' "$2" 2>/dev/null \
+    || { [ "$1" != 0 ] && bionic_fork_refused "$2"; }; then echo none
   elif [ "$1" = 0 ]; then echo green; else echo red; fi
 }
 

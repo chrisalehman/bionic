@@ -829,7 +829,7 @@ _verdict() {
   fi
   # ONE RUN, ONE VERDICT (wave-35 T2; D11, AC-2.1, AC-2.4): a suite's verdict is its exit code
   # from the one run it had. Nothing is VOID and nothing is re-run: a suite that passes or fails by
-  # the clock is a defect in the suite, not a reading for the runner to excuse.
+  # the clock is the suite's defect, save one red: the machine refused it a process (bionic_fork_refused).
   lost="$(_lost_command "$out")"
   if [ "$rc" = "0" ] && [ -z "$lost" ]; then
     echo "✓ PASS"; pass=$((pass+1)); return
@@ -839,6 +839,8 @@ _verdict() {
     # Exited 0, but the interpreter said a command it called does not exist.
     echo "✗ FAIL (exited 0; a command it called was not found)"
     failed="${failed}\n    - ${label} (exited 0, but: ${lost})"
+  elif _suite_load && bionic_fork_refused "$out"; then budget=$((budget+1))
+    echo "✗ REFUSED (the machine refused it a process; nothing was judged, run it again)"; failed="${failed}\n    - ${label} (refused a process by the machine, never judged)"
   elif [ -z "$rc" ]; then
     # No .rc file: the worker itself did not survive to write one.
     echo "✗ KILLED (no exit status recorded)"
