@@ -337,6 +337,7 @@ section "WAITS"
 expect_eq "a row that read another row's record has that row's id in deps" "deps=T1" "$(askw row T2 | grep '^deps=')"
 expect_eq "a wait the kind implies is in no cell: the old plan held it, the new holds none" "2 0" "$(grep -c 'approval:plan' "$KW") $(grep -c 'approval:plan' "$W")"
 expect_contains "an approval other than the plan's is on the gaps list" "gap/v1|ev=row|row=T2|field=approval:D3|why=unruled" "$OUT"
+expect_absent "a wait the kind implies is not named either" "field=approval:plan" "$OUT"
 expect_eq "and in no cell" "1 0" "$(grep -c 'approval:D3' "$KW") $(grep -c 'approval:D3' "$W")"
 expect_eq "the header names version 15" "canonical_sdlc_version=15" "$(askw header canonical_sdlc_version)"
 
