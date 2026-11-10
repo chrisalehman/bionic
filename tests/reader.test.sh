@@ -61,6 +61,16 @@ ask approved step3; expect_status "an approval no cancel names is a yes" 0 "$?"
 ask approved release; expect_status "a cancelled approval is absent" 1 "$?"
 expect_eq "the later step answers" "n=5 state=open" "$(ask step | tr '\n' ' ' | sed 's/ $//')"
 
+# fails-when: a proof is identified without its scope, so a piece reading replaces a whole one of the same question
+# at the same head, and the judge over the reader reads the whole read absent.
+W=scope; plan scope <<EOF
+run/v1|ev=proof|kind=review|head=$H|question=adversarial|result=pass|scope=whole|at=2026-11-01T00:00:01Z
+run/v1|ev=proof|kind=review|head=$H|question=adversarial|result=pass|scope=piece|at=2026-11-01T00:00:02Z
+run/v1|ev=proof|kind=review|head=$H|question=adversarial|result=fail|scope=piece|at=2026-11-01T00:00:03Z
+EOF
+expect_eq "a whole and a piece reading at one head are two facts, the later piece replacing the earlier" "whole/pass piece/fail " \
+  "$(ask reviews "$H" | awk -F'|' '{ for (i = 2; i <= NF; i++) { if ($i ~ /^scope=/) s = substr($i, 7); if ($i ~ /^result=/) r = substr($i, 8) } printf "%s/%s ", s, r }')"
+
 section "NAME"
 QS=("step" "approved step3" "approved release" "green $H" "green $G" "proof $H" "proof $H regression" "landed" "asks")
 answers() { local q; for q in "${QS[@]}"; do W=$1; out="$(ask $q)"; printf '%s rc=%s %s\n' "$q" "$?" "$out"; done; }
