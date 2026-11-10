@@ -62,7 +62,9 @@ _plan_read_lines() { awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"; }
 # cells it holds, the header line's names fill head[1..nh], `name(i)` prints column i's and `line()` a
 # row's cells as `name=value` joined by tabs (a tab inside a cell read as a space). The key column is
 # `key`, matched in either case, at kc. The reader's own `start()` runs at the header line and `row()`
-# on each row after it, its cells in r[1..rn]. NO APOSTROPHE inside it: it is single-quoted.
+# on each row after it, its cells in r[1..rn]. It reads to the end of its input and sets `stop` where it is
+# done, never exiting early: its input is a pipe, and a writer cut short fails the pipeline under pipefail.
+# NO APOSTROPHE inside it: it is single-quoted.
 _PLAN_READ_TABLE='
     function cells(line, out,   n, i) {
       gsub(/\\[|]/, "\001", line); sub(/^[ \t]*[|]/, "", line); sub(/[|][ \t]*$/, "", line)
@@ -75,11 +77,12 @@ _PLAN_READ_TABLE='
     function cap(s) { return tolower(substr(s, 1, 1)) substr(s, 2) }
     function named(h,   l) { l = length(sec); return (cap(substr(h, 1, l)) == cap(sec) && (length(h) == l || substr(h, l + 1, 1) ~ /[ \t]/)) }
     { sub(/\r$/, "") }
+    stop { next }
     /^[ \t]*```/ { fence = !fence; next }
     fence { next }
-    /^[ \t]*#/ { if (on) exit; if ($0 ~ /^##[ \t]/) { h = $0; sub(/^##[ \t]+/, "", h); sub(/[ \t]+$/, "", h); on = named(h) }; next }
+    /^[ \t]*#/ { if (on) { stop = 1; next }; if ($0 ~ /^##[ \t]/) { h = $0; sub(/^##[ \t]+/, "", h); sub(/[ \t]+$/, "", h); on = named(h) }; next }
     !on { next }
-    !/^[ \t]*[|]/ { if (nh) exit; next }
+    !/^[ \t]*[|]/ { if (nh) stop = 1; next }
     !nh { nh = cells($0, head); kc = 0; for (k = 1; k <= nh && !kc; k++) if (tolower(head[k]) == tolower(key)) kc = k
       if (!kc) { nh = 0; next }
       start(); next }
@@ -93,7 +96,7 @@ plan_read_row() {  # <plan> <heading> <column> <value> -> `name=value` per cell,
     function row(   i) {
       if (r[kc] != want) return
       for (i = 1; i <= nh; i++) print name(i) "=" r[i]
-      found = 1; exit
+      found = stop = 1
     }'"$_PLAN_READ_TABLE"
 }
 
