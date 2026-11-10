@@ -241,7 +241,9 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
   # `proved:` or `waived:` line of the SDLC State names by `ac=` is that line's fact, with the head and the
   # instant the row lacks; the row then writes nothing of that type, so one fact is never read as two. A
   # waived row whose criterion's block below the table holds an indented `waiver: <who> <day or instant>
-  # "<words>"` line takes its author, instant and words from it, as the block writes them.
+  # "<words>"` line takes its author, instant and words from it, as the block writes them. That line is also a
+  # hand act of its own, `what=waive-row`, whatever the row's status says: a person wrote it, so it is counted
+  # among the hand acts, while only a row the status marks waived is a waiver the judge honours.
   { _translate_section "$1" "SDLC State" | awk '/^(proved|waived): / && match($0, / ac=[^ ]+/) { print "S", $1, substr($0, RSTART + 4, RLENGTH - 4) }'
     _translate_section "$1" "Verification Matrix" | awk '
       { l = $0; sub(/^[-*+][ \t]+/, "", l) }
@@ -254,7 +256,8 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
         printf "W\036%s\036%s\036%s\036%s\n", ac, by, at, said }'
     _translate_section "$1" "Verification Matrix"; } | awk -F'|' "$_TRANSLATE_AWK"'
     /^S / { split($0, w, " "); stated[(w[2] == "proved:" ? "proof" : "waiver") SUBSEP w[3]] = 1; next }
-    /^W\036/ { split($0, w, "\036"); if (!(w[2] in wat)) { wby[w[2]] = w[3]; wat[w[2]] = w[4]; wsaid[w[2]] = w[5] }; next }
+    /^W\036/ { split($0, w, "\036"); if (!(w[2] in wat)) { wby[w[2]] = w[3]; wat[w[2]] = w[4]; wsaid[w[2]] = w[5] }
+      begin("hand", "ac", w[2]); put("what", "waive-row"); if (w[3] != "") put("by", w[3]); if (w[5] != "") put("said", w[5]); emit(w[4]); next }
     !/^\|/ { if (nh) done = 1; next }
     done { next }
     !nh { for (i = 2; i < NF; i++) { k = tolower(trim($i)); gsub(/[ \t]+/, "-", k); col[k] = i }; nh = 1; next }

@@ -159,13 +159,15 @@ stack-health: pending
 
 AC-2: the waived one.
   waiver: Ann Person 2026-11-01T08:00:00Z "not run here" — the reason
+AC-3: the pending one.
+  waiver: Bo Person 2026-11-01 "later, by hand"
 ## SDLC State
 proved: kind=unit head=$H ac=AC-5 at=2026-11-01T06:00:00Z evidence=record/wave-8-matrix/s.log rc=0
 inherited: a.test.sh base=$C head=$H at=2026-11-01T07:00:00Z evidence=record/wave-8-matrix/i.log
 EOF
 MEV="$(translate "$M" events)"; MG="$(translate "$M" gaps)"
 askm() { bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$M" "$@" | tr '\n' ' ' | sed 's/ $//'; }
-acof() { printf '%s\n' "$MEV" | grep -F "|ac=$1|"; }
+acof() { printf '%s\n' "$MEV" | grep -F "|ac=$1|" | grep -v '^run/v1|ev=hand|'; }
 
 section "MATRIX"
 expect_eq "a discharged row is discharged by its proof" "state=discharged by=proof" "$(askm cell AC-1)"
@@ -174,7 +176,13 @@ expect_eq "a pending row is pending" "state=pending" "$(askm cell AC-3)"
 expect_eq "a waived row takes its author, instant and words from its block's waiver: line" \
   "run/v1|ev=waiver|ac=AC-2|evidence=record/wave-8-matrix/w.md|auditor=REFUTED|by=Ann Person|said=not run here|at=2026-11-01T08:00:00Z" "$(acof AC-2)"
 expect_eq "the proof carries its evidence and auditor cells and nothing else" "run/v1|ev=proof|ac=AC-1|evidence=record/wave-8-matrix/a.log|auditor=CONFIRMED|at=" "$(acof AC-1)"
-expect_absent "a pending row writes no event" "ac=AC-3|" "$MEV"
+expect_absent "a pending row writes no proof and no waiver" "ac=AC-3|" "$(acof AC-3)"
+# a waiver line a person wrote in a criterion block is a hand act counted from its own line, whatever the row reads;
+# only the status cell makes a waiver the judge honours, so the pending row above stays pending
+expect_contains "a waiver line in a pending row's block is a hand act, its day as written" \
+  "run/v1|ev=hand|ac=AC-3|what=waive-row|by=Bo Person|said=later, by hand|at=2026-11-01" "$MEV"
+expect_contains "…and so is a waived row's own block line" "run/v1|ev=hand|ac=AC-2|what=waive-row|by=Ann Person|said=not run here|at=2026-11-01T08:00:00Z" "$MEV"
+expect_eq "the reader's hand acts are the two block lines" "AC-2 AC-3" "$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$M" hands | sed -n 's/.*|ac=\(AC-[0-9]*\)|.*|what=waive-row|.*/\1/p' | tr '\n' ' ' | sed 's/ $//')"
 for f in kind head at; do expect_contains "a row holds no $f: a gap" "gap/v1|ev=proof|ac=AC-1|field=$f|why=absent" "$MG"; done
 expect_eq "an empty evidence cell is still discharged" "state=discharged by=proof" "$(askm cell AC-4)"
 expect_eq "and its proof holds no field the row lacks" "run/v1|ev=proof|ac=AC-4|at=" "$(acof AC-4)"

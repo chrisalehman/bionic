@@ -780,6 +780,8 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
         if (e == "published" && line_kv("kind") == "hand" && hh_take(t)) n++
         else if (e != "hand") next
         else if (w == "stop-run" && hh_take(t)) s++
+        # a waiver line a person wrote in a criterion block, counted from its own line whatever the row reads
+        else if (w == "waive-row" && hh_take(t)) v++
         # only a write that names the status cell or the task key is one the gate reads; an evidence-only one is neither placed nor counted
         else if (w == "matrix-set" && (index("," line_kv("cells") ",", ",status,") || index("," line_kv("cells") ",", ",task,")) && hh_take(t)) c++
         # a refusal that named a person as its exit is one the person had to answer
@@ -795,7 +797,8 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
         if (++r > 1 && line_kv("starter") == "person" && hh_take(line_kv("at"))) f++
       }
       e == "proof" && line_kv("kind") == "regression" { pr[++np] = line_kv("evidence"); pa[np] = line_kv("at") }
-      e == "waiver" && hh_take(line_kv("at")) { v++ }
+      # a waiver of a question is the line the waive verb writes; a criterion waiver is counted by its block line above
+      e == "waiver" && line_kv("question") != "" && hh_take(line_kv("at")) { v++ }
       e == "finding" && line_kv("to") == "fixed" && line_kv("by") != "landing" { fr[++nf] = line_kv("row"); fa[nf] = line_kv("at") }
       e == "stop" && line_kv("state") == "decline" && hh_take(line_kv("at")) { d++ }
       e == "stop" && line_kv("state") == "lift" && hh_take(line_kv("at")) { l++ }
