@@ -16,7 +16,9 @@ set -euo pipefail
 src=$1 epic=$2 wave=$3 out=$4 cut=${5:-} step=${6:-}
 rec=$src/record/$wave plan=$epic/$wave.plan.md o=$out/record/$wave
 mkdir -p "$o" "$out/plans/$epic"
+# A line with no at= field (the landed:, debt: and void: forms) is timed by the first instant it holds.
 at() { awk -v cut="$cut" '{ t = ""; n = split($0, a, "|"); for (i = 1; i <= n; i++) if (a[i] ~ /^at=/) t = substr(a[i], 4)
+  if (t == "" && match($0, /20[0-9][0-9]-[0-9-]+T[0-9:]+Z/)) t = substr($0, RSTART, RLENGTH)
   if (cut == "" || t == "" || t <= cut) print }' "$1"; }
 for f in landing-proofs.log fill-ledger.log; do at "$rec/$f" > "$o/$f"; done
 awk -F'|' -v cut="$cut" '{ delete v; for (i = 1; i <= NF; i++) { split($i, kv, "="); v[kv[1]] = substr($i, length(kv[1]) + 2) }
