@@ -2,9 +2,18 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 125 · sections: 1129 · keep: 935 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131
 
-The section-list command counts 1092 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1092 - 22 - 8 = 1062.
+The header carries no totals: a count typed by hand is wrong the moment two landings add lines, so the counts are printed from the record lines. From the repository root, this prints the suites, the sections, one count per verdict, and the suites that have no section:
+
+```
+awk -F' [|] ' '$1 ~ /^[^ ]+\.test\.sh$/ && NF >= 5 { if (!($1 in s)) { s[$1] = 1; ns++ }
+  if ($2 ~ /^§/) { n++; v[$3]++ } else if ($4 == "no section") nos++ }
+  END { printf "suites: %d · sections: %d", ns, n; split("keep,duplicate,prose pin,tally,vacuous", w, ",")
+  for (i = 1; i <= 5; i++) printf " · %s: %d", w[i], v[w[i]]; printf " · no section: %d suites\n", nos }' tests/CENSUS.md
+```
+
+The census leaves out the calls the section-list command counts inside heredoc bodies (framework.test.sh and runner-roster.test.sh write scratch suites, which are fixture text) and the fixture setup_sections, which build what a later section reads. A suite with no section has the one line `<suite> | — | — | no section | —`.
 
 ## agent-context-guard.test.sh
 
