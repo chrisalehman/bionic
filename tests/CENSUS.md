@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 121 · sections: 1102 · keep: 908 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 122 · sections: 1107 · keep: 913 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1092 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1092 - 22 - 8 = 1062.
 
@@ -919,6 +919,14 @@ notify.test.sh | §SOURCES | keep | hooks/session-poker.sh tick: the gate-item c
 notify.test.sh | §ASKS | keep | hooks/dispatch-preflight.sh: the refusal's approve:<name> opener deleted, so a dispatch refused for an approval leaves nothing on the ledger; (AK6b) goes red; kept by the one-catcher rule over §ASKS mutants, whose anchor rows also go red when an opener is gone | notify.test.sh §ASKS mutants
 notify.test.sh | §ASKS mutants | duplicate | an opener or closer deleted from the shipped program, so the sed anchor finds no line and ("… the doctored opener is one line") goes red; every MA row past the anchor reads a suite-made mutant | notify.test.sh §ASKS
 notify.test.sh | §QUIET | keep | hooks/session-poker.sh tick: the send called for every unsent ledger item instead of the GATE it raised, so a quiet tick sends the card's item; (Q1a) goes red while §SOURCES S3, whose ledger holds only sent items, stays green | none (searched 'nt_calls' and 'QUIET' in tests/)
+
+## one-reader.test.sh
+
+one-reader.test.sh | §PARSERS | keep | payload/scripts/one-reader-check.sh: the operand rule dropped, so an awk over "$plan" naming no grammar is not a parse and the planted file is not named; READER_FILES emptied, so the reader's own planted awk is listed | none (searched 'one-reader-check' and 'READER_FILES' in tests/)
+one-reader.test.sh | §PLANWRITERS | keep | payload/scripts/one-reader-check.sh: the `>>` destination arm dropped, so an append to "$plan" is not a plan write, or a write read as a parse | none (searched 'one-reader-check' and 'plan_writers' in tests/)
+one-reader.test.sh | §WRITERS | keep | payload/scripts/one-reader-check.sh: writers keyed by file instead of function, so two functions of one file appending `born` are one writer, or the enclosing-function track lost, so `published`'s line_publish and poker_verb_row_landed are not paired | none (searched 'one-reader-check' and 'shared_types' in tests/)
+one-reader.test.sh | §REFUSALS | keep | payload/scripts/one-reader-check.sh: the hook set no longer read from hooks/hooks.json, or the primitive regex lost `deny`, so a refusal planted in a registered hook is not listed | none (searched 'one-reader-check' and 'hook_refusals' in tests/)
+one-reader.test.sh | §REPORT | keep | payload/scripts/one-reader-check.sh: the closing `exit 0` made the finding count, so a report with findings exits non-zero; a count line renamed or reordered; the loader marker read after the comment skip, so no copy is listed | none (searched 'one-reader-check' and 'loader_copies' in tests/)
 
 ## patrol-duties-gate.test.sh
 
