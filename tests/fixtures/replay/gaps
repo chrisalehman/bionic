@@ -9,26 +9,9 @@ all.card.rendered=the render time is the card's local time and its wording belon
 all.run.logs=188 of 271 run logs the verdict lines cite at wave 46, and 108 of 158 at wave 49, are gone with the tmp
 wave-49-mid.asks.fields=the open ask is the closed register row set open again at the cut; its sent and title fields were never in the record
 all.finding.unlined=a card also counts the findings a review file holds with no moved: or deferred: line (the S4 flags it carries); the reader holds only lined findings
-wave-46-asks-nothing.approved.step1=reader disagrees: Steps 1 and 2 read "approved by <name> <instant>", and the translation reads only "approved at <instant> by <name>", so no approval of step1 or step2 is read
-wave-46-asks-nothing.approved.step2=reader disagrees: the same form as step1
-release-approval-31da41f7.finding.critic-adversarial-3.md:1=reader disagrees: a deferred: line has no instant and takes the slot of the finding line before it in the plan, 04:27Z here, though its review was proved at 13:49Z; the reader lists it deferred at a card that predates it
-release-approval-f87acbfc.finding.critic-adversarial.md:4=reader disagrees: the same slot rule places this deferral after the moved: line written beside an earlier finding at 16:01Z, so at 08:35Z it is not listed; the card carries it
-release-approval-f87acbfc.finding.critic-adversarial.md:5=reader disagrees: the same as finding 4
-release-approval-f87acbfc.finding.critic-adversarial.md:6=reader disagrees: the same as finding 4
 wave-49-mid.handoff=the cut keeps the closed run's Handoff section, written in local time after the cut; the scrub's cut reads UTC instants only
 release-approval-31da41f7.stop.ready=a card's world holds the closed plan, so rows born after the card (T31 to T35, born at 12:37Z and later) stand in it and read ready; the run's own stop line before the card wrote ready= empty
 release-approval-f87acbfc.stop.ready=the same: T25 and T26 were born at 15:54Z, after the card, and read ready in the closed plan
-release-approval-93683c5e.stop.ready=reader disagrees: T32's Tasks status is dropped, which the reader does not read, so T32 reads ready; the run's own stop line at 14:09Z wrote ready= empty
-release-approval-93683c5e.ready.T32=reader disagrees: the same dropped row
-release-approval-93683c5e.status.T32=reader disagrees: a dropped row reads pending
-wave-49-mid.status.T1=reader disagrees: the Tasks table's dispatch lines carry no instant and sort after every timed line, so on a run read whole a landed row reads dispatched
-wave-49-mid.status.T2=reader disagrees: the same as T1
-wave-49-mid.status.T4=reader disagrees: the same as T1
-wave-49-mid.status.T6=reader disagrees: the same as T1
-wave-49-mid.status.T7=reader disagrees: the same as T1
-wave-49-mid.status.T8=reader disagrees: the same as T1
-wave-49-mid.status.T15=reader disagrees: the same as T1
-wave-49-mid.status.T16=reader disagrees: the same as T1
 wave-49-mid.status.T3=the cut keeps T3's agent and worktree cells, and no instant says whether it was dispatched by the cut
 wave-49-mid.status.T5=the cut keeps the agent and worktree cells of rows dispatched after it (T5 from T3's landing at 04:40Z); the scrub resets status cells only
 wave-49-mid.status.T9=the same as T5, from T5's landing

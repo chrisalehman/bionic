@@ -9,6 +9,7 @@
 #            list and absent from the line.
 #   §SHAPE   every translated line is a type the appender takes, with fields it takes.
 #   §READER  the reader answers a version-14 plan with no run.log through the translation, in time order.
+#   §PLACE     an approval written by then instant is read; an untimed deferral stands at its review's proof.
 #   §MATRIX    a discharged matrix row is a proof and a waived one a waiver, by ac= with what its cells hold.
 #   §ONE-FACT  a criterion a state line and a matrix row both name is the state line's one fact.
 #   §UNREAD    the header's abandoned: is an abandon; an inherited: line no ruled type carries is a gap.
@@ -121,6 +122,13 @@ ask green "$H"; expect_status "the later proof answers: rc=0 at 06:00 after rc=1
 expect_eq "two landings" "T1 T2 " "$(ask landed | grep -o 'row=T[0-9]*' | cut -c5- | tr '\n' ' ')"
 printf 'run/v1|ev=step|n=7|at=2026-11-02T00:00:00Z\n' > "$D/record/wave-9-old/run.log"
 expect_eq "a run with a log reads the log alone" "n=7 state=open" "$(ask step | tr '\n' ' ' | sed 's/ $//')"
+section "PLACE"
+Q="$D/plans/epic-x/wave-7-by.plan.md"; printf '%s\n' '## SDLC State' '- Step 1: r.md; approved by Ann Person 2026-11-01T01:21Z "go" at the card' \
+  "proved: kind=review head=$H at=2026-11-01T02:00:00Z evidence=c.md" 'moved: c.md#1 to=fixed at=2026-11-01T09:00:00Z' 'deferred: c.md#2 S3 on "t"' \
+  "proved: kind=review head=$H at=2026-11-01T05:00:00Z evidence=o.md" > "$Q"; QEV="$(translate "$Q" events)"
+expect_contains "an approval written by then instant is read" "|ev=approval|key=step1|by=Ann Person|said=go|at=2026-11-01T01:21Z" "$QEV"
+expect_eq "an untimed deferral stands at its review's proof, not beside a later finding, and its instant is a gap" "c.md c.md#2~ o.md c.md#1 " \
+  "$(printf '%s\n' "$QEV" | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^(ref|evidence)=/) printf "%s%s ", substr($i, index($i, "=") + 1), ($NF == "at=" ? "~" : "") }')"
 M="$D/plans/epic-x/wave-8-matrix.plan.md"
 cat > "$M" <<EOF
 ---

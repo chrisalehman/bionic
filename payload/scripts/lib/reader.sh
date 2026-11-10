@@ -288,16 +288,21 @@ reader_question status value reader_q_status
 reader_q_status() {  # <plan> <row> -> state= of the row, then its dispatch contract, its tree and its landing commit
   # state is the latest of dispatched, candidate, ready, returned, stalled and landed; pending when the
   # log holds none. A row the plan's Tasks table lacks has no status, so a wrong id never reads as pending.
+  # A dispatch is its row's first fact, so one with no instant (an older table's agent cell, placed after
+  # every timed line) sets the state only while no other fact of the row stands. A row an older table
+  # drops is dropped unless it landed.
   _reader_needs status '<row>' "${2:-}" || return 2
   plan_read_row "$1" Tasks id "$2" >/dev/null || return 1
-  reader_facts "$1" | awk -F'|' -v r="$2" "$_READER_AWK"'
+  reader_facts "$1" | awk -F'|' -v r="$2" -v drop=" $(plan_read_dropped "$1" | tr '\n' ' ') " "$_READER_AWK"'
     line_kv("row") != r { next }
     { e = ev() }
     e == "published" { s = "landed"; c = line_kv("commit") }
+    e == "dispatch" && line_kv("at") == "" && s != "" { e = "" }
     e == "dispatch" || e == "candidate" || e == "ready" || e == "returned" || e == "stalled" { s = (e == "dispatch") ? "dispatched" : e }
-    e == "dispatch" { d = $0 }
+    ev() == "dispatch" { d = $0 }
     e == "tree" { t = line_kv("path"); b = line_kv("branch"); o = line_kv("base") }
     END {
+      if (s != "landed" && index(drop, " " r " ")) s = "dropped"
       print "state=" (s == "" ? "pending" : s)
       n = split(d, p, "|"); for (i = 2; i <= n; i++) if (p[i] !~ /^(ev|row|at)=/) print p[i]
       if (t != "") { print "tree=" t; print "branch=" b; print "base=" o }
@@ -315,10 +320,11 @@ reader_q_ready() {  # <plan> <row> [dep…] -> 0 when the row has not landed, no
   if [ -z "$deps" ]; then
     [ "$(_reader_ready_rows "$plan" "$row")" = "$row" ]; return
   fi
-  reader_facts "$plan" | awk -F'|' -v r="$row" -v deps="$deps" "$_READER_AWK"'
+  reader_facts "$plan" | awk -F'|' -v r="$row" -v deps="$deps" -v drop=" $(plan_read_dropped "$plan" | tr '\n' ' ') " "$_READER_AWK"'
     ev() == "published" { landed[line_kv("row")] = 1 }
     ev() == "dispatch" && line_kv("row") == r { held = 1 }
-    END { if ((r in landed) || held) exit 1; n = split(deps, d, " "); for (i = 1; i <= n; i++) if (!(d[i] in landed)) exit 1 }'
+    END { if ((r in landed) || held || index(drop, " " r " ")) exit 1
+      n = split(deps, d, " "); for (i = 1; i <= n; i++) if (!(d[i] in landed) && !index(drop, " " d[i] " ")) exit 1 }'
 }
 
 reader_question handoff value reader_q_handoff
@@ -380,12 +386,13 @@ _reader_ready_rows() {  # <plan> [row] -> the rows ready now, in table order, or
   # is met by the standing facts: a row by its landing; approval:<key> by an approval of <key>, and
   # approval:plan by Step 3's approval once the run is at Step 4; a proof by one of its kind that did not
   # fail; step:<n> by the run reaching Step <n>. Any other wait (an external token, an id the table
-  # lacks) is never met here.
+  # lacks) is never met here. A row an older table drops is owed no more, as the fill has it: it is
+  # never ready, and a wait on it is met.
   local waits
   waits="$(plan_read_waits "$1" "${2:-}")" || return 1
-  { printf '%s\n\034\n' "$waits"; reader_facts "$1"; } | awk -F'|' "$_READER_AWK"'
+  { printf '%s\n\034\n' "$waits"; reader_facts "$1"; } | awk -F'|' -v drop=" $(plan_read_dropped "$1" | tr '\n' ' ') " "$_READER_AWK"'
     function met(t, v) {
-      if (t == "row") return (v in landed)
+      if (t == "row") return (v in landed) || index(drop, " " v " ")
       if (v == "approval:plan") return (("step3" in appr) && cur ~ /^[0-9]+$/ && cur + 0 >= 4)
       if (v ~ /^approval:/) return (substr(v, 10) in appr)
       if (v ~ /^proof:/) return (substr(v, 7) in proved)
@@ -401,7 +408,7 @@ _reader_ready_rows() {  # <plan> [row] -> the rows ready now, in table order, or
     ev() == "proof" && line_kv("rc") ~ /^0?$/ && line_kv("result") != "fail" { proved[line_kv("kind")] = 1 }
     END {
       for (i = 1; i <= n; i++) {
-        r = ord[i]; if ((r in landed) || (r in held)) continue
+        r = ord[i]; if ((r in landed) || (r in held) || index(drop, " " r " ")) continue
         for (k = 1; k <= nw[r]; k++) if (!met(wt[r, k], wv[r, k])) break
         if (k > nw[r]) print r
       }
