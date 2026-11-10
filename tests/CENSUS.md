@@ -1042,6 +1042,12 @@ placement.test.sh | §INVISIBLE | keep | payload/scripts/lib/placement.sh cmd_pl
 placement.test.sh | §TARGET | keep | payload/scripts/lib/placement.sh cmd_place: a named target no segment carries answered with the end of the command and exit 0 instead of nothing and exit 3 (G6) | none (searched 'cmd_place' in tests/)
 placement.test.sh | §ARGS | keep | payload/scripts/lib/placement.sh cmd_place: the absolute-cwd check deleted, so a relative cwd is accepted with exit 0 (A2) | none (searched 'cmd_place' in tests/)
 
+## plan-page.test.sh
+
+plan-page.test.sh | §SECTIONS | keep | payload/scripts/lib/plan-read.sh plan_read_faults: the machine sections' heading read dropped, so a version-15 plan holding a matrix, state or handoff section is admitted (6 rows red); plan_read_heading's fence rule dropped, so a fenced ## Handoff is refused | none (searched 'plan_read_faults', 'plan_read_heading' and 'canonical_sdlc_version: 15' in tests/; replay-bed.test.sh names the version and never drives the write hook)
+plan-page.test.sh | §ROW | keep | payload/scripts/lib/plan-read.sh plan_read_faults: the nine-cell check dropped, so a version-15 Tasks table with a status or an agent cell is admitted (4 rows red) | none (searched 'plan_read_faults' and 'nine authored' in tests/; bring-forward.test.sh and reader.test.sh read nine cells and never drive the write hook)
+plan-page.test.sh | §KEYS | keep | payload/scripts/lib/plan-read.sh plan_read_faults: the header-key check dropped, so a version-15 header with any of the gone keys is admitted (10 rows red); the hook's version-15 arm off fails every section | none (searched 'PLAN_READ_GONE_KEYS' and 'plan_read_faults' in tests/)
+
 ## preflight-probe.test.sh
 
 preflight-probe.test.sh | §S1 | keep | hooks/preflight-probe.sh: the chmod 600 on the attestation dropped, so the record is world-readable; ("attestation mode is 0600") goes red | none (searched '.preflight.lock' and "'%OLp'" in tests/)
