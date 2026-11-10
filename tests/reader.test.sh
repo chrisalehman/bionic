@@ -21,6 +21,7 @@
 #               row is never ready and a wait on it is met; a dispatch with no instant never outranks a fact.
 #   §JOIN-15    a nine-cell row's waits are its deps and what its kind and step imply.
 #   §SECTION    a task's own section is the heading whose first word is its id, read to the next heading.
+#   §PLACES     a plan at each place the run walk admits reads its record; any other place is refused.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
 
@@ -320,5 +321,22 @@ expect_eq "a key line of the section answers its value" "a.test.sh, b.test.sh" "
 sect T2 >/dev/null; expect_status "a heading with no body is a section" 0 "$?"
 sect T1 artifact >/dev/null; expect_status "a key the section lacks answers no" 1 "$?"
 sect T3 >/dev/null; expect_status "a row with no heading of its own has no section" 1 "$?"
+
+# A version-14 run is read through the translation, then the same run once it has a log.
+section "PLACES"
+P="$(mktemp -d)"
+at() {  # <place> -> the rows landed over a version-14 run there, then over its log
+  local d="$P/${1//\//-}" r; r="${1##*/}"; r="$d/record/${r%.plan.md}"
+  mkdir -p "$d/${1%/*}" "$r"; printf '# r\n' > "$d/$1"; printf 'landed: row=T1 merge=c1 at=2026-11-01T00:00:01Z\n' > "$r/landing-proofs.log"
+  bash "$READER" "$d/$1" landed | grep -o 'row=T[0-9]'
+  printf 'run/v1|ev=published|row=T2|commit=c2|kind=queue|at=2026-11-01T00:00:02Z\n' > "$r/run.log"
+  bash "$READER" "$d/$1" landed | grep -o 'row=T[0-9]'
+}
+for pl in plans/flat.plan.md plans/epic-y/nest.plan.md incidents/0001-x/plan.md; do expect_eq "$pl: the translation, then the log, read from its record" \
+  "row=T1 row=T2" "$(at $pl | tr '\n' ' ' | sed 's/ $//')"; done
+for pl in notes/w.plan.md plans/a/b/w.plan.md; do
+  mkdir -p "$P/out/${pl%/*}"; printf '# r\n' > "$P/out/$pl"; bash "$READER" "$P/out/$pl" step 2>/dev/null
+  expect_status "$pl: no place the walk admits, refused" 2 "$?"
+done
 
 finish
