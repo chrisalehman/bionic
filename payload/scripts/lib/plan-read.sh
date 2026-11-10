@@ -26,30 +26,29 @@
 #
 # bash 3.2 (ADR-001).
 
-# A plan's lines with their ends translated, never deleted: a CRLF line loses its CR and a lone CR ends a
-# line. Deleted, a CR-only plan would be one line, and every key in it would read as absent. A reader of
-# this pipe takes it to its end and never exits early: an early exit can kill the writer mid-file, and
-# under a caller's `pipefail` that turns a found answer into a failed one.
-plan_read_lines() {  # <plan> -> its lines, LF-ended
-  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"
-}
+# A plan's line ends translated, never deleted: `eol(record, out)` splits one input record into the lines it
+# holds, a trailing CR dropped (CRLF) and each lone CR ending a line, and returns how many. Deleted, a
+# CR-only plan would be one line and every key in it would read as absent. An awk helper, embedded by each
+# reader of the plan, so a reader stays one process that may stop at the line it wants.
+_PLAN_READ_EOL='
+    function eol(rec, out,   n) { sub(/\r$/, "", rec); n = split(rec, out, "\r"); if (!n) { n = 1; out[1] = "" } return n }'
 
 plan_read_header() {  # <plan> [key] -> `key=value` lines in the header's order; 1 none, 2 no plan
   [ -f "${1:-}" ] || return 2
-  plan_read_lines "$1" | awk -v want="${2:-}" '
-    done { next }
-    NR == 1 { done = ($0 != "---"); next }
-    $0 == "---" { done = 1; next }
-    {
-      e = index($0, ":"); if (e < 2) next
-      k = substr($0, 1, e - 1); v = substr($0, e + 1)
+  awk -v want="${2:-}" "$_PLAN_READ_EOL"'
+    function line(s,   e, k, v) {
+      if (++ln == 1) return s != "---"
+      if (s == "---") return 1
+      e = index(s, ":"); if (e < 2) return 0
+      k = substr(s, 1, e - 1); v = substr(s, e + 1)
       gsub(/^[ \t]+|[ \t]+$/, "", k); gsub(/^[ \t]+|[ \t]+$/, "", v)
-      if (k ~ /[ \t]/ || (k in seen) || (want != "" && k != want)) next
+      if (k ~ /[ \t]/ || (k in seen) || (want != "" && k != want)) return 0
       sub(/^["\047]/, "", v); sub(/["\047]$/, "", v)
-      seen[k] = 1; n++; print k "=" v
-      if (want != "") done = 1
+      seen[k] = 1; c++; print k "=" v
+      return want != ""
     }
-    END { exit !n }'
+    { m = eol($0, L); for (i = 1; i <= m; i++) if (line(L[i])) exit }
+    END { exit !c }' "$1"
 }
 
 # The walk both table readers share: `cells` splits a row, the header line's names fill head[1..nh] and

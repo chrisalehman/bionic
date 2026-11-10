@@ -76,7 +76,7 @@ fi
 # plan-read.sh, the same way: the plan's header has one parser, and `plan_frontmatter_get` asks it.
 if ! declare -F plan_read_header >/dev/null 2>&1; then
   # shellcheck source=/dev/null
-  . "$(cd "$(_run_self_dir)" && pwd -P)/plan-read.sh"
+  case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/plan-read.sh" ;; *) . ./plan-read.sh ;; esac
 fi
 
 # normalize_newlines [file] -> that document with its line endings TRANSLATED to \n, never
