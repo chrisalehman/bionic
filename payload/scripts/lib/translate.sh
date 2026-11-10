@@ -22,8 +22,10 @@
 # and `g<TAB><TAB><gap line>` per gap. A source is an awk program over its home that starts each event
 # with `begin(type, id key, id value)`, adds fields with `put(key, value)` (an empty value becomes a
 # gap), names a field its home never holds with `lack(key)`, and ends with `emit(instant)`; the helpers
-# are _TRANSLATE_AWK. The plan's own homes are here; another file adds its homes the same way once it
-# is sourced after this one.
+# are _TRANSLATE_AWK; a line whose home already holds it in the log's shape is passed whole with
+# `carry(type, fields, separator)`. The plan's homes come first, then the record's (the landing record,
+# the asks register, the fill ledger); another file adds its homes the same way once it is sourced
+# after this one.
 #
 # bash 3.2 (ADR-001).
 
@@ -73,14 +75,25 @@ function put(k, v) {
   if (index(v, "|")) { gap(k, "bar"); return }
   SEEN[k] = v; L = L "|" k "=" v
 }
-function emit(at,   key, i) {
+function slot(t, at,   key) { key = ukey(at); if (key == "") key = (t in LAST) ? LAST[t] : "~"; LAST[t] = key; return key }
+function emit(at,   i) {
   if (at == "") lack("at")
-  key = ukey(at); if (key == "") key = (T in LAST) ? LAST[T] : "~"; LAST[T] = key
-  printf "e\t%s\t%s|at=%s\n", key, L, at
+  printf "e\t%s\t%s|at=%s\n", slot(T, at), L, at
   for (i = 1; i <= NG; i++) printf "g\t\t%s\n", G[i]
 }
 function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
 function none(s) { s = trim(s); gsub(/—|–|-/, "", s); return s == "" }
+function carry(t, s, sep,   n, w, i, k, at, out) {
+  n = split(s, w, sep); out = ""; at = ""
+  for (i = 1; i <= n; i++) {
+    k = substr(w[i], 1, index(w[i], "=") - 1)
+    if (k == "at") { at = substr(w[i], 4); continue }
+    if (k !~ /^[a-z][a-z0-9_-]*$/ || k == "ev" || index(w[i], "|")) { whole(t, w[1], "shape"); return }
+    out = out "|" w[i]
+  }
+  printf "e\t%s\trun/v1|ev=%s%s|at=%s\n", slot(t, at), t, out, at
+}
+function whole(t, id, why) { printf "g\t\tgap/v1|ev=%s|%s|field=ev|why=%s\n", t, id, why }
 '
 
 translate() {  # <plan> <events|gaps> -> the translation in that form; 2 refused
@@ -130,11 +143,12 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
 
 translate_source _translate_ledger
 _translate_ledger() {  # <plan> -> the dispatch ledger's landings and born stamps
-  _translate_section "$1" "SDLC State" | awk "$_TRANSLATE_AWK"'
+  _translate_section "$1" "SDLC State" | awk -v rec="$(_translate_landed_rows "$1") " "$_TRANSLATE_AWK"'
     /^- T[0-9A-Za-z.]*: / {
       row = substr($0, 3, index($0, ":") - 3); text = substr($0, index($0, ":") + 2)
-      if (match(text, /^landed [0-9a-f]+ /)) { split(text, w, " "); begin("published", "row", row); put("commit", w[2]); emit(inst(text)) }
-      else if (index(text, "landed-by-hand: ") == 1) { split(substr(text, 17), w, " "); begin("published", "row", row)
+      own = !index(rec, " " row " ")
+      if (own && match(text, /^landed [0-9a-f]+ /)) { split(text, w, " "); begin("published", "row", row); put("commit", w[2]); emit(inst(text)) }
+      else if (own && index(text, "landed-by-hand: ") == 1) { split(substr(text, 17), w, " "); begin("published", "row", row)
         put("kind", "hand"); put("by", w[1]); put("why", quoted(text)); lack("commit")
         if (match(text, /judged-by=[^ ]+/)) put("judged-by", substr(text, RSTART + 10, RLENGTH - 10)); emit(inst(text)) }
       if (match(text, /(added by task-add|split from [^ ]+) at [^ ]+/)) {
@@ -151,6 +165,7 @@ translate_source _translate_tasks
 _translate_tasks() {  # <plan> -> the Tasks rows: the agent cell's dispatch, the worktree and base cells' tree, a landing with no ledger line
   local plan="$1"
   { _translate_section "$plan" "SDLC State" | awk '/^- T[0-9A-Za-z.]*: landed/ { print "L", substr($0, 3, index($0, ":") - 3) }'
+    for r in $(_translate_landed_rows "$plan"); do printf 'L %s\n' "$r"; done
     _translate_section "$plan" "Tasks"; } | awk -F'|' "$_TRANSLATE_AWK"'
     /^L / { led[substr($0, 3)] = 1; next }
     /^\| *id *\|/ { for (i = 2; i < NF; i++) col[trim($i)] = i; next }
@@ -218,4 +233,72 @@ translate_source _translate_inherited
 _translate_inherited() {  # <plan> -> each `inherited: <suite> base= head= …` line of the SDLC State, named a gap
   # No ruled event type carries a suite and its base field for field, so the line is not written as one.
   _translate_section "$1" "SDLC State" | awk '/^inherited:[ \t]+[^ \t|]/ { split($0, w, " "); printf "g\t\tgap/v1|ev=inherited|suite=%s|field=ev|why=unruled\n", w[2] }'
+}
+
+# THE RECORD'S HOMES sit in the plan's record directory, `<docs>/record/<wave>/`, joined to the plan by
+# name as its run log is. Each line of a ruled type is carried with its first field renamed and every
+# other field as written, an empty value too: the field-for-field rename is what makes it the same fact.
+_TRANSLATE_LIB_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P )"
+_translate_record() {  # <plan> <file> -> the path of <file> in the plan's record directory; 1 when there is none
+  local dir wave="${1##*/}"
+  dir="$(cd "$(dirname "$1")" 2>/dev/null && pwd -P)" || return 1
+  printf '%s/record/%s/%s\n' "${dir%/plans/*}" "${wave%.plan.md}" "$2"
+  [ -f "${dir%/plans/*}/record/${wave%.plan.md}/$2" ]
+}
+
+# A LANDING IS READ FROM ITS RECORD. The landing record is written by the landing itself, and the plan's
+# ledger line and Tasks status are copies written after it; a hand landing's copy also drops the commit,
+# which names the landing, so reading both would make one landing two facts. A row the record holds a
+# landing of is read from the record alone; a row only the plan holds as landed is read from the plan.
+_translate_landed_rows() {  # <plan> -> the rows the landing record holds a landing of, space-separated
+  local f
+  f="$(_translate_record "$1" landing-proofs.log)" || return 0
+  awk '/^line\/v1\|ev=published\|/ || /^landed: / { if (match($0, /row=[^| ]+/)) printf " %s", substr($0, RSTART + 4, RLENGTH - 4) }' "$f"
+}
+
+translate_source _translate_landing
+_translate_landing() {  # <plan> -> the landing record: ruled lines renamed, the old landing forms read, the rest named
+  # A stop-run is an act taken by hand, so it is a hand event with what= its kind. close-out is the
+  # Step 9 line the plan already gives, so it is not written again and what it holds beyond the step is
+  # named. A stamp/v1 line is a copy of a run line, dropped with no gap. Any other kind no ruled type
+  # carries is named whole.
+  local f
+  f="$(_translate_record "$1" landing-proofs.log)" || return 0
+  [ -n "${LOG_TYPES:-}" ] || . "$_TRANSLATE_LIB_DIR/log.sh" || return 0
+  awk -v types="$LOG_TYPES" "$_TRANSLATE_AWK"'
+    /^line\/v1\|ev=/ { t = substr($0, 12); t = substr(t, 1, index(t "|", "|") - 1); s = substr($0, 13 + length(t))
+      if (t == "stop-run") carry("hand", "what=stop-run|" s, "|")
+      else if (t == "close-out") { n = split(s, w, "|")
+        for (i = 1; i <= n; i++) if (w[i] !~ /^at=/) printf "g\t\tgap/v1|ev=step|n=9|field=%s|why=unruled\n", substr(w[i], 1, index(w[i], "=") - 1) }
+      else if (index(types, " " t " ")) carry(t, s, "|")
+      else { split(s, w, "|"); whole(t, w[1], "unruled") }
+      next }
+    /^landed: / { s = substr($0, 9); sub(/ merge=/, " commit=", s); carry("published", s, " "); next }
+    /^debt: / { carry("admitted", substr($0, 7), " "); next }
+    /^void: / { carry("void", substr($0, 7), " ") }' "$f"
+}
+
+translate_source _translate_asks
+_translate_asks() {  # <plan> -> the asks register: each round's opening, and the reply that closed it
+  # A closed row is rewritten in place, so it keeps when the round opened and what closed it, never what
+  # was sent: the round is an opening at opened= and a reply at its close, the closer's words as reply=.
+  # An open row's reply= is the wording the ask prompts for, not a reply given, so it is named, not
+  # written: written, it would read as the ask answered.
+  local f
+  f="$(_translate_record "$1" asks.state)" || return 0
+  awk -F'|' "$_TRANSLATE_AWK"'
+    function fld(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
+    $1 != "owed/v1" { next }
+    { k = fld("key"); r = fld("round"); open = (fld("state") == "open"); begin("ask", "key", k); if (r != "") put("round", r)
+      if (open) { put("sent", fld("sent")); put("title", fld("title")) } else { lack("sent"); lack("title") }
+      split("reply answer answered event", u, " "); for (i = 1; i <= 4; i++) if (fld(u[i]) != "") gap(u[i], "unruled")
+      emit(open ? fld("at") : fld("opened")) }
+    !open { begin("ask", "key", k); if (r != "") put("round", r); put("reply", fld("by")); emit(fld("at")) }' "$f"
+}
+
+translate_source _translate_fill
+_translate_fill() {  # <plan> -> the fill ledger: each stop, its fields as written
+  local f
+  f="$(_translate_record "$1" fill-ledger.log)" || return 0
+  awk "$_TRANSLATE_AWK"'index($0, "fill-ledger/v1|") == 1 { carry("stop", substr($0, 16), "|") }' "$f"
 }
