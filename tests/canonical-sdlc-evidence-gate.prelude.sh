@@ -193,16 +193,6 @@ make_project() {
   echo "$dir"
 }
 
-# Writes $2 as a plan file inside $1/.bionic/docs/plans/ (project-local dir).
-write_project_plan() {
-  local project_dir="$1" content="$2" name="${3:-active.md}"
-  local path="$project_dir/.bionic/docs/plans/$name"
-  eg_head_plant "$project_dir" "$content"
-  printf '%s\n' "$(eg_readings "$content")" > "$path"
-  touch "$path"
-  echo "$path"
-}
-
 # Writes $2 as the content of a plan file in the sandbox HOME's OWN docs root
 # ($1/.bionic/docs/plans/) — the plan directory the single-argument runners
 # (run_hook, which posts cwd=$home_dir) make the hook search.
@@ -213,19 +203,6 @@ write_plan() {
   eg_head_plant "$home_dir" "$content"
   printf '%s\n' "$(eg_readings "$content")" > "$path"
   # Ensure mtime > any prior plan in this test by nudging forward.
-  touch "$path"
-  echo "$path"
-}
-
-# Writes $2 into the sandbox's ~/.claude/plans/ — the harness's own,
-# project-AGNOSTIC plan directory, which this gate has NOT searched since
-# 2026-07-28. Whatever lands here must be invisible to the hook; the fixtures
-# using it assert exactly that. Newest mtime by construction, so a case that
-# calls it last is planting the newest .md on the machine.
-write_global_note() {
-  local home_dir="$1" content="$2" name="${3:-note.md}"
-  local path="$home_dir/.claude/plans/$name"
-  printf '%s\n' "$content" > "$path"
   touch "$path"
   echo "$path"
 }
@@ -328,34 +305,6 @@ run_hook_with_project() {
   rm -f "$tmp_err"
 }
 
-# THE PAYLOAD CWD AND CLAUDE_PROJECT_DIR PULL APART (wave-14 REQ-2, A-T2.5). Every runner
-# above posts the SAME directory as both, which is a fixture choice and not how a dispatched
-# writer's Bash call arrives: `bionic_context`'s ladder takes CLAUDE_PROJECT_DIR first
-# (lib/context.sh:294-320), so on a real writer the environment names the session's project —
-# the MAIN checkout — while the payload's own `.cwd` is the worktree the writer is standing
-# in. That is the seam the row-step arm has to read, and a runner that could not express it
-# would prove the arm works only on inputs the CLI never sends.
-run_hook_cwd() {  # <home> <project_dir> <payload cwd> <command>
-  local home_dir="$1" project_dir="$2" payload_cwd="$3" command="$4"
-  local input tmp_err
-  input=$(jq -n --arg c "$command" --arg cwd "$payload_cwd" --arg s "$EG_SID" \
-            '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
-  tmp_err=$(mktemp)
-  eg_autobind "$project_dir"
-  if HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
-    HOOK_EXIT=0
-  else
-    HOOK_EXIT=$?
-  fi
-  split_stderr "$tmp_err"
-  HOOK_VSTDERR=""
-  if [ "$HOOK_EXIT" -ne 0 ]; then
-    eg_knob "$(HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" CLAUDE_CODE_SESSION_ID="$EG_SID" \
-      BIONIC_WALL_VERBOSE=1 bash "$HOOK" <<< "$input" 2>&1 >/dev/null || true)"
-  fi
-  rm -f "$tmp_err"
-}
-
 expect_allow() {
   local label="$1" home_dir="$2" command="$3"
   run_hook "$home_dir" "$command"
@@ -393,30 +342,6 @@ eg_e1_check() {  # -> 0 iff the user stream is one rendered refusal in the crite
 expect_block() {
   local label="$1" home_dir="$2" command="$3" expected_substr="${4:-}"
   run_hook "$home_dir" "$command"
-  if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
-     && { [ -z "$expected_substr" ] || grep -q "$expected_substr" <<<"$HOOK_VSTDERR"; }; then
-    ok "$label"
-  else
-    no "$label" "expected block exit 2, one rendered line, with substring '$expected_substr'; got exit=$HOOK_EXIT line='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
-  fi
-}
-
-# Project-fixture twins of expect_allow/expect_block (run_hook_with_project instead of
-# run_hook) — for cases whose subject needs a real file at a project-relative path
-# (K5's 'requirements:' pointer among them), which a bare HOME sandbox cannot host.
-expect_allow_p() {
-  local label="$1" home_dir="$2" project_dir="$3" command="$4"
-  run_hook_with_project "$home_dir" "$project_dir" "$command"
-  if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
-    ok "$label"
-  else
-    no "$label" "expected allow, exit 0, no stderr; got exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  fi
-}
-
-expect_block_p() {
-  local label="$1" home_dir="$2" project_dir="$3" command="$4" expected_substr="${5:-}"
-  run_hook_with_project "$home_dir" "$project_dir" "$command"
   if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
      && { [ -z "$expected_substr" ] || grep -q "$expected_substr" <<<"$HOOK_VSTDERR"; }; then
     ok "$label"
@@ -542,23 +467,6 @@ v9_step8_body="  merge: merged wave/bionic-1.3.2 into main
 
 v9_step9_body="  delivered: close-out report and continuation.md written"
 
-# Asserts the durable audit file exists under the sandbox HOME and carries a
-# line matching $4 — pins the D14 file channel (not just the stderr echo).
-expect_audit_line() {
-  local label="$1" home_dir="$2" command="$3" substr="$4"
-  run_hook "$home_dir" "$command"
-  # run_hook posts cwd=$home_dir with CLAUDE_PROJECT_DIR="", and the plan lives
-  # in that sandbox's own docs root, which is no git repository — so
-  # audit_root() falls back to PROJECT_DIR == $home_dir. Incident 0001 keys the
-  # file on that root but roots the file itself under HOME.
-  local af; af=$(audit_file_for "$home_dir" "$home_dir")
-  if [ "$HOOK_EXIT" -eq 0 ] && [ -f "$af" ] && grep -q "$substr" "$af"; then
-    ok "$label"
-  else
-    no "$label" "expected exit 0 + audit-file line '$substr'; got exit=$HOOK_EXIT audit='$( [ -f "$af" ] && cat "$af" )'"
-  fi
-}
-
 # Frontmatter carrying the triple. $1 scale, $2 deploy, $3 use_worktree,
 # $4 epic (omitted when empty).
 frontmatter() {
@@ -626,26 +534,6 @@ d7_wave_frontmatter() {
   printf -- 'walk: exempt\n'  # see matrix_frontmatter — the walk arm is fail-closed
   printf -- 'multi_agent: %s\n' "$multi"
   printf -- '---\n'
-}
-
-# A wave plan at current: 5 reaching the dispatcher with the SAME valid
-# Step-5 body + matrix as 19b (so the ONLY variable under test is the
-# dispatched-task ledger; validate_dispatch_ledger runs at the top of
-# dispatch_modern, before the matrix machinery). $1 = ## Tasks section text
-# (empty omits it); $2 = extra ## SDLC State lines, e.g. a `- T<n>:` evidence
-# line (empty omits); $3 rigor (default double); $4 multi_agent (default true).
-d7_wave_plan() {
-  local tasks="$1" extra_state="$2" rigor="${3:-double}" multi="${4:-true}"
-  printf '%s\n' "$(d7_wave_frontmatter "$rigor" "$multi")"
-  [ -n "$tasks" ] && printf '%s\n\n' "$tasks"
-  # Both K5 (this task) and K2 (task 16) scope-match this fixture (rigor:double +
-  # multi_agent:true + wave, at current: 5 >= 4): K5/AC-K5.2 needs the Step-1
-  # requirements: pointer (resolves to the plan file itself — project-relative; this
-  # fixture's own subject is D7, not K5, so a real file is all the arm demands, not a
-  # real requirements document); K2/AC-K2.4 needs approved-by: at current >= 4.
-  printf '## SDLC State\ncurrent: 5\nStep 1: requirements: .bionic/docs/plans/active.md\napproved-by: fixture 2026-09-07T00:00Z approved\nStep 5:\n%s\n' "$step5_base"
-  [ -n "$extra_state" ] && printf '%s\n' "$extra_state"
-  printf '\n%s\n' "$matrix_complete"
 }
 
 tasks_one_done="## Tasks

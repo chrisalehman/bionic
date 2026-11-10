@@ -166,19 +166,6 @@ unset CLAUDE_CODE_SESSION_ID
 # that its fixture always produces the two lines adjacent and in order, so the tighter
 # contiguous check is not a narrowing here; see that assertion's own comment.
 
-# SUBSTRING, AS A FUNCTION RATHER THAN A `case` INSIDE `$( … )`. bash 3.2 — what
-# `/bin/bash` is on macOS, and what this file's shebang names — mis-parses a `case` inside
-# a command substitution: the multi-line form is a hard syntax error, and the ONE-LINE form
-# is worse, because it parses and then evaluates to the tail of its own source text
-# (measured: `expected 'no', got ' echo yes ;; *) echo no ;; esac)'`). §BP below sweeps for
-# both shapes. Step-6 review C-2.
-cg_contains() {  # <haystack> <needle> -> yes|no
-  case "$1" in
-    *"$2"*) printf 'yes' ;;
-    *)      printf 'no'  ;;
-  esac
-}
-
 SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
 # The landing gate's active-wave party (§A1/§A2) plants its own one-row roster; a dedicated
@@ -289,17 +276,6 @@ mk_agent_post_teammate() {  # <sid> <transcript> <cwd> <name> <addressing-id> <t
       tool_use_id:$u, duration_ms:9}'
 }
 
-# The SubagentStart event (task 1). VERBATIM shape from capture probe §3-C: six
-# keys and no `tool_name` at all, which is why the recorder's third arm cannot sit
-# behind the tool-name gate its other two share. `agent_type` is the teammate's
-# NAME here — the platform's own rename — and `agent_id` is the TRANSCRIPT form.
-mk_start_payload() {  # <sid> <transcript> <cwd> <name> <transcript-id>
-  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg n "$4" --arg a "$5" \
-    '{session_id:$s, transcript_path:$t, cwd:$c,
-      prompt_id:"95b0701b-7814-42ca-a26f-58123e667f9a",
-      agent_id:$a, agent_type:$n, hook_event_name:"SubagentStart"}'
-}
-
 # The SubagentStop event (task 5). FAITHFUL to capture probe §3-D, a live teammate
 # stop: `agent_type` carries the name, `agent_id` the transcript form,
 # `background_tasks[]` its task-id key. Only the four fields the gate reads vary.
@@ -349,20 +325,6 @@ mk_substop_payload() {  # <cwd> <sid> <agent-id> <agent-type> <stop_hook_active 
       agent_id:$a, agent_type:$t,
       hook_event_name:"SubagentStop", stop_hook_active:$h,
       last_assistant_message:"Done.", background_tasks:[], session_crons:[]}'
-}
-
-# THE PRODUCER→RECORDER PAIR, DRIVEN END TO END. Since task 4/4 the recorder
-# reads no command line: it copies the machine line the observation printed. So
-# the only honest way to ask "what did the recorder write for this command" is to
-# RUN the observation and hand its real stdout to the real recorder — which is
-# also what makes the two halves one fact rather than two parsers (F-1).
-run_pair() {  # <repo> <transcript> <sid> <args…> -> recorder's exit status; sets PAIR_OUT
-  local repo="$1" tr="$2" sid="$3"; shift 3
-  # The sid is pinned on the observation too, not only stamped into the payload: since S6 it
-  # is how hooks/stop-check.sh finds the transcript carrying the live set.
-  PAIR_OUT=$( cd "$repo" && env CLAUDE_CODE_SESSION_ID="$sid" bash "$OBSERVE" "$@" 2>/dev/null )
-  mk_bash_post "$sid" "$tr" "$repo" "bash ~/.claude/hooks/stop-check.sh $*" "$PAIR_OUT" \
-    | bash "$PARTY_ER" >/dev/null 2>&1
 }
 
 # THE SESSION ROSTER, in the shape its writer writes it — field for field from
@@ -885,18 +847,6 @@ plant_hook_tree() {  # <tree root> -> echoes <tree root>/hooks
   printf '%s' "$root/hooks"
 }
 
-# plant_lg_tree <tree root> -> echoes a runnable hooks/stop.sh whose sibling
-# scripts/lib is this checkout's, for a caller that is about to doctor one file in it.
-# The sweep's body lives in the library, so a mutation of the sweep is a library edit and
-# the hook copied here stays stock — which is also what keeps each mutant's doctored file
-# out of every other mutant's tree.
-plant_lg_tree() {  # <tree root> -> the hook to drive
-  local root="$1" h
-  h="$(plant_hook_tree "$root")"
-  cp "$PARTY_LG" "$h/stop.sh"
-  printf '%s' "$h/stop.sh"
-}
-
 # run_battery <mode>  — mode=assert emits one assertion per fixture;
 #                       mode=detect returns 1 at the FIRST disagreement.
 run_battery() {
@@ -979,11 +929,6 @@ fn_body() {  # <file> <function name> -> the function's body, signature and its 
   ' "$1"
 }
 
-# ---- from §O: fn_code ----
-fn_code() {  # <file> <function name> -> fn_body with pure-comment lines stripped too
-  fn_body "$1" "$2" | grep -v '^#'
-}
-
 # ---- from §V: V_ORIGIN, V_HOOKCHAIN, v_hook_val, V_ORIGIN_VAL, v_hookchain_vals, v_hc_chips_ok, v_hc_agree ----
 V_ORIGIN="$BIONIC_HOOKS_DIR/../payload/scripts/lib/walls.sh"
 [ -r "$V_ORIGIN" ] || V_ORIGIN="$BIONIC_HOOKS_DIR/../scripts/lib/walls.sh"
@@ -996,14 +941,6 @@ v_hookchain_vals() {  # three chips, one per line, in the order they render:
   grep 'class="version-pin"' "$1" 2>/dev/null | while IFS= read -r _vline; do
     printf '%s\n' "$_vline" | grep -oE 'canonical_sdlc_version[=: ]+[0-9]+' | grep -oE '[0-9]+$'
   done
-}
-v_hc_chips_ok() {
-  [ "$(v_hookchain_vals "$1" | grep -c '[0-9]')" -ge 1 ] && echo yes || echo no
-}
-v_hc_agree() {
-  local _v _bad=0
-  for _v in $(v_hookchain_vals "$1"); do [ "$_v" = "$2" ] || _bad=1; done
-  [ "$_bad" -eq 0 ] && echo yes || echo no
 }
 
 # ---- from §Section P (the Patrol stamp): PARTY_PK ----
@@ -1037,9 +974,6 @@ s4_plan() {  # <path> <current> [writers]
   } > "$1"
   return 0
 }
-s4_bind() {  # <repo> <sid> <plan>
-  bound_marker "$1" "$2" "$3"
-}
 s4_attest() {  # <repo> <sid>
   mkdir -p "$1/.bionic/tmp"
   {
@@ -1051,29 +985,7 @@ s4_attest() {  # <repo> <sid>
   } > "$1/.bionic/tmp/preflight-$2.state"
   chmod 600 "$1/.bionic/tmp/preflight-$2.state"
 }
-s4_stop_payload() {  # <repo> <sid> <transcript>
-  jq -nc --arg c "$1" --arg s "$2" --arg t "$3" \
-    '{session_id:$s, transcript_path:$t, cwd:$c, hook_event_name:"Stop", stop_hook_active:false}'
-}
 
 # ---- from §S.4: PARTY_SG_W ----
 PARTY_SG_W="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
-
-# ---- from §S.4: s4_world ----
-s4_world() {  # <name> -> a root with plans A (older, writers=1) and B (newest, writers=1)
-  local r
-  r=$(new_repo "$1")
-  s4_plan "$r/.bionic/docs/plans/epic-99/run-a.md" 4 1
-  s4_plan "$r/.bionic/docs/plans/epic-99/run-b.md" 6 1
-  s_backdate "$r/.bionic/docs/plans/epic-99/run-a.md"
-  # patrol-duties-gate refuses a payload whose transcript is not a regular file; context-spend
-  # needs a last `assistant` line carrying a non-zero usage sum before it will write state.
-  printf '{}\n' > "$r/s4-transcript.jsonl"
-  jq -nc '{type:"assistant",message:{model:"claude-opus-5",usage:{input_tokens:1000,cache_creation_input_tokens:0,cache_read_input_tokens:2000}}}' \
-    > "$r/s4-usage.jsonl"
-  mkdir -p "$r/fakehome/.claude"
-  s4_attest "$r" "$SID_A"
-  s4_attest "$r" "$SID_B"
-  printf '%s' "$r"
-}
 

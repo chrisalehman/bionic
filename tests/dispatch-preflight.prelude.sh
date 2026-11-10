@@ -631,22 +631,6 @@ write_attestation() {
   chmod 600 "$repo/.bionic/tmp/preflight-$sid.state"
 }
 
-# write_legacy_attestation <repo> <session_id> — the OLD, pre-wave-03 single-slot
-# filename. Used to prove the gate never consults it (task 4/2).
-write_legacy_attestation() {
-  local repo="$1" sid="$2"
-  mkdir -p "$repo/.bionic/tmp"
-  {
-    printf '# bionic environment attestation — machine-local, safe to delete\n'
-    printf 'version=1\n'
-    printf 'kind=preflight-attestation\n'
-    printf 'session_id=%s\n' "$sid"
-    printf 'written_at=1785790000\n'
-    printf 'repo=%s\n' "$repo"
-  } > "$repo/.bionic/tmp/preflight.state"
-  chmod 600 "$repo/.bionic/tmp/preflight.state"
-}
-
 # ======================================================================================
 # HOISTED FROM THE SECTIONS (wave-30 T1). Read by sections in more than one shard.
 # ======================================================================================
@@ -722,17 +706,6 @@ s21_idle_tr() {  # -> path of a transcript whose last turn opened after a long i
   printf '%s' "$SANDBOX/.s21-idle.jsonl"
 }
 
-s21_busy_tr() {  # -> path of a transcript holding one continuous 2500s turn
-  { printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"a long piece of work"}}\n' \
-      "$(s21_iso 2500)"
-    for _s21_s in 2400 2100 1800 1500 1200 900 600 300 120 30 5; do
-      printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"working"}]}}\n' \
-        "$(s21_iso "$_s21_s")"
-    done
-  } > "$SANDBOX/.s21-busy.jsonl"
-  printf '%s' "$SANDBOX/.s21-busy.jsonl"
-}
-
 s21_stale_payload() {  # <sid> <repo> -> a dispatch payload carrying the idle transcript
   mk_agent_payload "$1" "$2" "$BRIEF_FULL" w99-impl claude-sonnet-5 "$(s21_idle_tr)"
 }
@@ -777,16 +750,6 @@ s22_roster_row() {
     "claims=${4:-}" cadence= absent= waiver= "tool_use_id=t-$3" >> "$f"
 }
 
-# s22_sweep <repo> <sid> <name> — the landing marker that closes a row.
-# THROUGH THE ONE WRITER (S17, spec AC-26): `swept_marker_write` is
-# hooks/landing-gate.sh's own function, extracted by tests/lib/swept-marker.sh and called
-# for real. The printf that used to sit here wrote a marker the originator would not
-# recognise — no `session=`, no `agent_id=` — and stayed green because every reader of the
-# marker is by key.
-s22_sweep() {
-  swept_marker_write "$(roster_path "$1" "$2")" 2026-09-02T00:00:00Z "$2" "$3" "" MET
-}
-
 # s22_ack <repo> <sid> <name> [at] — one `event=ack` line on the sweeper's OWN ledger,
 # `.bionic/tmp/sweeper-<sid>.state`, which is where `session-sweeper.sh ack` journals the
 # orchestrator's judgement that a row is closed (that verb's write, :1020). The SCHEMA is
@@ -810,23 +773,6 @@ s22_fake_tree() {
 }
 
 # ---- from S27: s27_impact, BRIEF_FILES ----
-# s27_impact <repo> <suite>... — writes an impact command into <repo> that answers with
-# exactly the named suites, in the `suite<TAB>reason:file` shape S12 published, and points
-# .bionic/config.yaml at it. The stub ECHOES ITS ARGUMENTS into a side file, so the test
-# can prove the declared paths reached it rather than assuming they did.
-s27_impact() {
-  local repo="$1"; shift
-  mkdir -p "$repo/.bionic"
-  {
-    printf '#!/bin/bash\n'
-    printf 'printf "%%s\\n" "$@" > "$(dirname "$0")/impact-args.txt"\n'
-    local _s
-    for _s in "$@"; do printf 'printf "%%s\\tpath-ref:fixture\\n" %s\n' "$_s"; done
-  } > "$repo/.bionic/impact-stub.sh"
-  chmod +x "$repo/.bionic/impact-stub.sh"
-  printf 'impact-command: bash %s/.bionic/impact-stub.sh\n' "$repo" > "$repo/.bionic/config.yaml"
-}
-
 BRIEF_FILES='Canonical-sdlc Step 4, task 4/13 of epic-99 wave-01; build · double · wave.
 Your task: build the widget.
 Expected artifact: .bionic/docs/record/w99-files.md
@@ -858,13 +804,6 @@ pf_repo() {
   git -C "$repo" add tests lib
   git -C "$repo" commit -qm base 2>/dev/null
   printf '%s' "$repo"
-}
-# pf_commit <repo> <path> <content> -> one commit on whatever the checkout holds.
-pf_commit() {
-  mkdir -p "$(dirname "$1/$2")"
-  printf '%s\n' "$3" > "$1/$2"
-  git -C "$1" add "$2"
-  git -C "$1" commit -qm "change $2" 2>/dev/null
 }
 pf_plan_path() { printf '%s/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md' "$1"; }
 # pf_row <id> <step> <status> <Files> [<kind> [<deps>]] -> one `## Tasks` data row (a build row
@@ -901,11 +840,6 @@ pf_plan() {
     fi
   } > "$(pf_plan_path "$repo")"
 }
-# pf_state <repo> -> what proof_state prints for the fixture's plan and tree.
-pf_state() {
-  ( . "$PF_LIB_DIR/proof.sh" >/dev/null 2>&1; proof_state "$(pf_plan_path "$1")" "$1" ) 2>/dev/null
-}
-pf_line() { printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: '; }
 
 # ---- from §runs-lift: RL_BT, RL_JEST, RL_PYTEST, RL_GO, RL_NPM ----
 # THE MARK, HELD IN A VARIABLE. A backtick inside a double-quoted string here would be a
