@@ -905,7 +905,18 @@ expect_eq "WH.1 nothing unfinished: regression@<h8>'s whole ask under budget run
   "0|whole" "$(rc_of wh1)|$(field "$(id_of wh1)" kind)"
 expect_eq "WH.2 …alone: a work ask beside it waits, and its request is filed (rc|filed)" "75|yes" \
   "$(ask_fg wx work h 0 | tail -n 1)|$(asked_by wx && echo yes || echo no)"
+# The open whole request is the one fact that a whole run runs in a checkout, matched on its tree; and an end
+# said --waiting ends a request only while it was never admitted, read under the lock that admits.
+wh_open() { ( . "$GATE_LIB" 2>/dev/null; gate_whole_open "$1"; echo "$?" ); }
+expect_eq "WH.2b gate_whole_open: the checkout the admitted whole ask came from reads open, another tree does not (here|other)" \
+  "0|1" "$(wh_open "$WH_P")|$(wh_open "$D")"
+WH_END="$( . "$GATE_LIB" 2>/dev/null; gate_end "$(id_of wh1)" 143 --by "$WORLD_SID" --why load --waiting; echo "$?")"
+expect_eq "WH.2c gate_end --waiting on the admitted whole run: rc 3 and no end written (rc|ended)" "3|" "$WH_END|$(field "$(id_of wh1)" ended)"
+WH_END="$( . "$GATE_LIB" 2>/dev/null; gate_end "$(req_of wx)" 143 --by "$WORLD_SID" --why load --waiting; echo "$?")"
+expect_eq "WH.2d …and on the never-admitted work ask it ends it, saying who and why (rc|rc=|by|why)" "0|143|$WORLD_SID|load" \
+  "$WH_END|$(field "$(req_of wx)" rc)|$(field "$(req_of wx)" by)|$(field "$(req_of wx)" why)"
 release wh1
+expect_eq "WH.2e once the whole run ends its checkout reads no open whole run" "1" "$(wh_open "$WH_P")"
 HOLD=1 ask_bg wl landing k 0; wait_for 20 has wl.rc
 expect_eq "WH.3-pre a landing is admitted and still running" "0" "$(rc_of wl)"
 AGENT=regression_0123abcd ask_fg wh2 whole tests/run.sh 0 >/dev/null
