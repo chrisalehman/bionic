@@ -282,20 +282,6 @@ bind_marker() {  # <repo> <plan path|none> [sid]
   bound_marker "$1" "${3:-$SID}" "$2"
 }
 
-# THE PHYSICAL SPELLING OF A PATH. `$TMPROOT` comes from `mktemp -d`, which on macOS hands
-# back `/var/folders/...` — a symlink to `/private/var/folders/...`. A BOUND session reads its
-# plan out of the marker and gets back whatever spelling was written there; an UNBOUND one
-# gets the spelling the hook's own root walk produced, which is physical because every verb
-# resolves its root with `pwd -P`. Both are the same file and the difference is real, so the
-# fallback assertion below states which one it expects rather than papering over it.
-real_path_of() {  # <path> -> the same file with its directory resolved
-  printf '%s/%s' "$(cd "$(dirname "$1")" && pwd -P)" "$(basename "$1")"
-}
-
-file_mode() {  # <file> -> the three-digit mode, on either stat
-  stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1" 2>/dev/null
-}
-
 stamp_of() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "${2:-$SID}"; }
 
 # THE TICK DIGEST (wave-24 T7, REQ-4; D4). A tick over the same facts as the last one prints one
@@ -472,49 +458,6 @@ poke_pressure() {  # <repo> <free_mb> <load_1m> <args...>
   BIONIC_PROBE_FREE_MB="$free" BIONIC_PROBE_LOAD_1M="$load" poke "$repo" "$@"
 }
 
-# THE SAME, FOR THE BAND THE RUNG IS COMPUTED FROM (S8). `free_mb`/`load_1m` decide the
-# advisory `state=` arm (HOLD/EMERGENCY); the BAND behind `pressure_level` is decided by the
-# free and swap PERCENTAGES, which are a different pair of readings on the same record
-# (lib/resources.sh `pressure_band`). Both seams are pinned, so a case can put the machine in
-# one state and the ring in another band — which is exactly the separation the design asks
-# for: HOLD is advice to the model, the rung is regulation.
-#
-# A RING PER CASE, always empty at entry. `pressure_level` medians every sample inside the
-# smoothing window, so a ring shared between cases would let an earlier case's band decide a
-# later case's fill width. The tick takes its own sample, so an empty ring plus these two
-# pins is a ring holding exactly one reading of the band the case named.
-RUNG_N=0
-poke_rung() {  # <repo> <free_pct> <swap_pct> <args...>
-  local repo="$1" fp="$2" sp="$3"; shift 3
-  RUNG_N=$((RUNG_N + 1))
-  local ring="$TMPROOT/ring-$RUNG_N.ring"
-  rm -f "$ring"
-  BIONIC_PRESSURE_RING="$ring" BIONIC_PROBE_FREE_PCT="$fp" BIONIC_PROBE_SWAP_PCT="$sp" \
-    poke "$repo" "$@"
-}
-
-# ── hoisted from Section 11: count_lines_matching — Sections 50, 55 and 67 count lines with it. ──
-# How many times a line appears in an output — "exactly one rung line per tick" is a claim
-# about a COUNT, and `expect_contains` cannot make it.
-count_lines_matching() {  # <needle> <output> -> integer
-  local n
-  n="$(printf '%s\n' "$2" | /usr/bin/grep -c -- "$1" 2>/dev/null)" || n=0
-  case "${n:-}" in ''|*[!0-9]*) n=0 ;; esac
-  printf '%s' "$n"
-}
-
-# ── hoisted from Section 11: mk_rung_repo — Section 41 builds its rung repos with it. ──
-mk_rung_repo() {  # <label> -> a repo with writers=8 test_jobs=18 and four ready tasks
-  local r; r="$(make_repo "$1")"; new_roster "$r"
-  wave_plan "$r" "writers=8 suites=2 worktrees=8 test_jobs=18 source=user" \
-    "| BASE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |" \
-    "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
-    "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
-    "| THREE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
-    "| FOUR | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
-  printf '%s' "$r"
-}
-
 # ── hoisted from Section 12: sp_plan_at_step — Sections 37–40, 50, 55 and 67 write plans with it. ──
 sp_plan_at_step() {  # <repo> <current> <row>... -> the plan path
   local repo="$1" current="$2"; shift 2
@@ -543,22 +486,6 @@ s20_ack() {  # <repo> <name> <at> — the sweeper ledger's ack line, in its writ
 
 # ── hoisted from Section 26: ack_ledger_of — Section 35 reads the ack ledger with it. ──
 ack_ledger_of() { printf '%s/.bionic/tmp/sweeper-%s.state' "$1" "${2:-$SID}"; }
-
-# ── hoisted from Section 27: S27_OUT, poke_split, last_line — §REPORT-INCL reads stdout alone with them. ──
-# STDOUT ALONE, because "the decision line is the LAST line" is a claim about the machine
-# channel. `poke` merges stderr into OUT, which is right for every other case in this file
-# and cannot answer this one: a `die` WARN on stderr would read as the last line.
-S27_OUT=""; S27_ERR=""
-poke_split() {  # <repo> <args...> -> sets S27_OUT (stdout), S27_ERR (stderr), RC
-  local repo="$1"; shift
-  case "${1:-}" in tick|fill-report) [ "${POKE_UNBOUND:-0}" = 1 ] || poke_bind "$repo" ;; esac
-  ( cd "$repo" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" "$@" ) \
-    > "$TMPROOT/s27.out" 2> "$TMPROOT/s27.err"
-  RC=$?
-  S27_OUT="$(cat "$TMPROOT/s27.out")"; S27_ERR="$(cat "$TMPROOT/s27.err")"
-}
-
-last_line() { printf '%s\n' "$1" | tail -1; }
 
 # ── hoisted from Section 30: s30_row, s30_last, s30_field — Section 43, AMEND-ROOT, Section 66, Section 67, §SEV and §REPORT-INCL write and read rows with them. ──
 s30_row() {  # <repo> <key=value>... — one live row through the one writer

@@ -1765,12 +1765,12 @@ _run_add() { RUN_ROWS="${RUN_ROWS}$1"$'\n'; }
 # page is — it is what fits, and it is what a person would type.
 #
 # THE AGE IS THE PLAN'S OWN mtime, which is what "is anyone still working on
-# this" actually turns on. A `current:` alone says a run was opened; a `current:`
-# next to a fortnight of silence says something else.
+# this" actually turns on. A step alone says a run was opened; a step next to a
+# fortnight of silence says something else. The step is the run's (`run_step`,
+# lib/run.sh), so a step only the run's log holds is the one printed.
 _doctor_run_plan="$(active_run "$DOCTOR_ROOT" 2>/dev/null)" || _doctor_run_plan=""
 if [ -n "$_doctor_run_plan" ]; then
-  _doctor_run_step="$(grep -m1 '^current:' "$_doctor_run_plan" 2>/dev/null \
-                      | sed -e 's/^current:[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  _doctor_run_step="$(run_step "$_doctor_run_plan" 2>/dev/null | sed -n 's/^n=//p')"
   _doctor_run_age="$(_doctor_file_age "$_doctor_run_plan")"
   # PROJECT-RELATIVE, not home-relative: every plan path starts
   # `<root>/.bionic/docs/plans/`, and the segment that identifies WHICH run is at

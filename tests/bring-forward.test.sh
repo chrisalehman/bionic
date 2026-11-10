@@ -10,11 +10,13 @@
 #   §SHAPE   every translated line is a type the appender takes, with fields it takes.
 #   §READER  the reader answers a version-14 plan with no run.log through the translation, in time order.
 #   §PLACE     an approval written by then instant is read; an untimed deferral stands at its review's proof.
-#   §MATRIX    a discharged matrix row is a proof and a waived one a waiver, by ac= with what its cells hold.
+#   §MATRIX    a discharged matrix row is a proof and a waived one a waiver, by ac= with what its cells hold,
+#              and a waiver with the author, instant and words of its block's waiver: line.
 #   §ONE-FACT  a criterion a state line and a matrix row both name is the state line's one fact.
 #   §UNREAD    the header's abandoned: is an abandon; an inherited: line no ruled type carries is a gap.
 #   §RENAME  each landing-record line of a ruled type is carried with its first field renamed and every
-#            other field the same; the other kinds are a hand act, an admitted red, a void, or a gap.
+#            other field the same; the other kinds are a hand act, an admitted red, a void, or a gap; a
+#            landed: header that copies a published line writes nothing.
 #   §ASKS    the asks register is ask events: a closed round its opening and its reply, an open one open.
 #   §ONE     a landing read from the plan and from the record is one fact, and so is a tree; a row the
 #            plan holds as landed and the record lacks is still landed.
@@ -29,6 +31,7 @@
 #   §CELLS   a row's suites and lands-on go to the task's own section, or to the gaps list when it has none.
 #   §STEPS   a Step follows the Step above it and a proof or waiver the line above it in its block, whatever
 #            their instants, so the step is the old current: and closure; a Step held (pending) is a gap.
+#   §PARKED  a Step 9 line with no delivered: (a parked plan's note) is a gap, not a step; close-out's parked delivery is.
 #
 # FIXTURE FIDELITY. The plan is a real file in a scratch docs tree, in the shape version-14 plans hold.
 
@@ -131,6 +134,11 @@ Q="$D/plans/epic-x/wave-7-by.plan.md"; printf '%s\n' '## SDLC State' '- Step 1: 
 expect_contains "an approval written by then instant is read" "|ev=approval|key=step1|by=Ann Person|said=go|at=2026-11-01T01:21Z" "$QEV"
 expect_eq "an untimed deferral stands at its review's proof, not beside a later finding, and its instant is a gap" "c.md c.md#2~ o.md c.md#1 " \
   "$(printf '%s\n' "$QEV" | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^(ref|evidence)=/) printf "%s%s ", substr($i, index($i, "=") + 1), ($NF == "at=" ? "~" : "") }')"
+QF="$D/plans/epic-x/wave-7-fence.plan.md"; printf '%s\n' '## SDLC State' "proved: kind=review head=$H at=2026-11-01T02:00:00Z evidence=k.md" '```' \
+  "proved: kind=review head=$H at=2026-11-01T03:00:00Z evidence=fenced.md" 'moved: fenced.md#1 to=fixed at=2026-11-01T04:00:00Z' '```' > "$QF"
+QFE="$(translate "$QF" events)"
+expect_contains "a proof outside a fence is read" "|ev=proof|kind=review|head=$H|evidence=k.md|" "$QFE"
+expect_absent "a fenced proof and a fenced move are examples: no event" "fenced.md" "$QFE"
 M="$D/plans/epic-x/wave-8-matrix.plan.md"
 cat > "$M" <<EOF
 ---
@@ -147,20 +155,33 @@ stack-health: pending
 | AC-3 | T2 | pending | — | — |
 | AC-4 | T1 | discharged | — | — |
 | AC-5 | T2 | discharged | record/wave-8-matrix/m.log | CONFIRMED |
+
+AC-2: the waived one.
+  waiver: Ann Person 2026-11-01T08:00:00Z "not run here" — the reason
+AC-3: the pending one.
+  waiver: Bo Person 2026-11-01 "later, by hand"
 ## SDLC State
 proved: kind=unit head=$H ac=AC-5 at=2026-11-01T06:00:00Z evidence=record/wave-8-matrix/s.log rc=0
 inherited: a.test.sh base=$C head=$H at=2026-11-01T07:00:00Z evidence=record/wave-8-matrix/i.log
 EOF
 MEV="$(translate "$M" events)"; MG="$(translate "$M" gaps)"
+expect_eq "the translation reads every source whatever IFS its caller holds" "$MEV" "$(IFS=$'\t'; translate "$M" events)"
 askm() { bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$M" "$@" | tr '\n' ' ' | sed 's/ $//'; }
-acof() { printf '%s\n' "$MEV" | grep -F "|ac=$1|"; }
+acof() { printf '%s\n' "$MEV" | grep -F "|ac=$1|" | grep -v '^run/v1|ev=hand|'; }
 
 section "MATRIX"
 expect_eq "a discharged row is discharged by its proof" "state=discharged by=proof" "$(askm cell AC-1)"
 expect_eq "a waived row is discharged by its waiver" "state=discharged by=waiver" "$(askm cell AC-2)"
 expect_eq "a pending row is pending" "state=pending" "$(askm cell AC-3)"
+expect_eq "a waived row takes its author, instant and words from its block's waiver: line" \
+  "run/v1|ev=waiver|ac=AC-2|evidence=record/wave-8-matrix/w.md|auditor=REFUTED|by=Ann Person|said=not run here|at=2026-11-01T08:00:00Z" "$(acof AC-2)"
 expect_eq "the proof carries its evidence and auditor cells and nothing else" "run/v1|ev=proof|ac=AC-1|evidence=record/wave-8-matrix/a.log|auditor=CONFIRMED|at=" "$(acof AC-1)"
-expect_absent "a pending row writes no event" "ac=AC-3|" "$MEV"
+expect_absent "a pending row writes no proof and no waiver" "ac=AC-3|" "$(acof AC-3)"
+# a block waiver: line is a hand act whatever its row reads; only the status cell makes a waiver, so the pending row stays pending
+expect_contains "a waiver line in a pending row's block is a hand act, its day as written" \
+  "run/v1|ev=hand|ac=AC-3|what=waive-row|by=Bo Person|said=later, by hand|at=2026-11-01" "$MEV"
+expect_contains "…and so is a waived row's own block line" "run/v1|ev=hand|ac=AC-2|what=waive-row|by=Ann Person|said=not run here|at=2026-11-01T08:00:00Z" "$MEV"
+expect_eq "the reader's hand acts are the two block lines" "AC-2 AC-3" "$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$M" hands | sed -n 's/.*|ac=\(AC-[0-9]*\)|.*|what=waive-row|.*/\1/p' | tr '\n' ' ' | sed 's/ $//')"
 for f in kind head at; do expect_contains "a row holds no $f: a gap" "gap/v1|ev=proof|ac=AC-1|field=$f|why=absent" "$MG"; done
 expect_eq "an empty evidence cell is still discharged" "state=discharged by=proof" "$(askm cell AC-4)"
 expect_eq "and its proof holds no field the row lacks" "run/v1|ev=proof|ac=AC-4|at=" "$(acof AC-4)"
@@ -202,6 +223,9 @@ debt: id=d1 row=T1 branch=wt/8-T1 head=$H suite=a.test.sh token=tk at=2026-11-01
 void: id=d1 branch=wt/8-T1 at=2026-11-01T02:40:00Z why=merge-undone
 stamp/v1|log=x.log|head=$H|rc=0|at=2026-11-01T02:31:00Z
 line/v1|ev=close-out|part=reviews|commit=$C|branch=wave/8|at=2026-11-01T09:00:00Z
+landed: row=T9 branch=wt/8-T9 head=$H merge=$H at=2026-11-01T05:30:00Z
+line/v1|ev=matrix-set|ac=AC-1.1|cells=status,task|by=s-one|at=2026-11-01T03:10:00Z
+line/v1|ev=refusal|needs=person|verb=x|at=2026-11-01T03:20:00Z
 EOF
 printf 'owed/v1|key=decide:D1|state=closed|by=ruled|at=2026-11-01T01:16:28Z|opened=2026-11-01T01:07:09Z\n%s\n' \
   'owed/v1|key=approve:step4|state=open|sent=2026-11-01T06:00:01Z|at=2026-11-01T06:00:00Z|title=Step 4 card|reply=approve' > "$R8/asks.state"
@@ -217,7 +241,13 @@ expect_nonempty "the closed run's record holds landing lines of ruled types" "$r
 expect_empty "each is carried with its first field renamed and every other field the same" "$(printf '%s\n' "$ruled" | grep -vxF -f <(printf '%s\n' "$EV9"))"
 heads="$(grep '^landed: ' "$R9/landing-proofs.log" | sed 's/^landed: /run\/v1|ev=published|/; s/ merge=/ commit=/; s/ /|/g')"
 expect_nonempty "the closed run's record holds landed: headers" "$heads"
-expect_empty "a landed: header is a landing, merge read as its commit, every other field the same" "$(printf '%s\n' "$heads" | grep -vxF -f <(printf '%s\n' "$EV9"))"
+expect_eq "a landed: header that copies a published line of its row and commit writes nothing" 0 "$(printf '%s\n' "$heads" | grep -cxF -f <(printf '%s\n' "$EV9"))"
+expect_eq "…so the landing is the line's, and keeps its kind" "kind=queue" "$(ask8 landed T1 | grep -o 'kind=[^|]*')"
+expect_eq "a landed: header no line copies is a landing, merge read as its commit, every other field the same" 1 \
+  "$(in8 "run/v1|ev=published|row=T9|branch=wt/8-T9|head=$H|commit=$H|at=2026-11-01T05:30:00Z")"
+expect_eq "a status written into the matrix is a hand act: what it was, and the fields it holds" 1 \
+  "$(in8 "run/v1|ev=hand|what=matrix-set|ac=AC-1.1|cells=status,task|by=s-one|at=2026-11-01T03:10:00Z")"
+expect_eq "a refusal is a hand act: what it was, and the fields it holds" 1 "$(in8 "run/v1|ev=hand|what=refusal|needs=person|verb=x|at=2026-11-01T03:20:00Z")"
 expect_eq "a stop-run is a hand act: what it was, and the fields it holds" 1 "$(in8 "run/v1|ev=hand|what=stop-run|run=w8-T1-a.test.sh|name=w8-T1-a.test.sh|by=s-one|why=-|at=2026-11-01T03:00:00Z")"
 expect_eq "a debt line is an admitted red, a void line a void" "1 1" "$(in8 "run/v1|ev=admitted|id=d1|row=T1|branch=wt/8-T1|head=$H|suite=a.test.sh|token=tk|at=2026-11-01T02:30:00Z") $(in8 "run/v1|ev=void|id=d1|branch=wt/8-T1|why=merge-undone|at=2026-11-01T02:40:00Z")"
 expect_eq "a fill-ledger line is a stop" 1 "$(in8 "run/v1|ev=stop|session=s-one|turn=u1|state=ok|width=3|launched=T1|room=0|at=2026-11-01T04:00:00Z")"
@@ -245,7 +275,7 @@ expect_eq "the cut run's one open ask" "decide:D13" "$(bash "${BIONIC_SCRIPTS_DI
 
 section "ONE"
 pairs() { awk -F'|' '{ r = c = ""; for (i = 2; i <= NF; i++) { if ($i ~ /^row=/) r = substr($i, 5); if ($i ~ /^commit=/) c = substr($i, 8) } printf "%s=%s ", r, c }'; }
-expect_eq "one landing per row: the record's for a hand landing, the plan's for a row the record lacks" "T1=$C T2=$H T3= " "$(ask8 landed | pairs)"
+expect_eq "one landing per row: the record's for a hand landing, the plan's for a row the record lacks" "T1=$C T2=$H T9=$H T3= " "$(ask8 landed | pairs)"
 expect_eq "one tree per row: the plan's cell, none made from the ready line" ".worktrees/8-T1" "$(printf '%s\n' "$EV8" | grep '^run/v1|ev=tree|' | grep -o 'path=[^|]*' | cut -c6-)"
 for w in $W9 $W6; do
   rows="$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$BED/$w/plans/epic-23-bionic-tech-debt/$w.plan.md" landed | grep -o '|row=[^|]*')"
@@ -264,6 +294,18 @@ Body prose is no heading.
 ## Δ3 — D2 amended "x" (Ann Person 2026-10-04): Another verb
 ## Δ4 — D3 put (orchestrator 2026-11-01 6:00 PM | PST): A bar in the instant
 ## Deltas
+## Δ5 — D2 re-ruled "y" (Ann Person 2026-10-05): Re-ruled
+## Δ6 — D2 amended again "z" (Ann Person 2026-10-06), its words after
+## Δ7 — D4 ratified "Yes" (Ann Person 2026-10-07): Ratified
+## Δ8 — D4 settled by the go on Δ7 (Ann Person 2026-10-08 8:12 PM): "go"
+## Δ9 — D5 glyphs final "w" (Ann Person 2026-10-09): A qualified word
+## Δ10 — D5 withdrawn (Ann Person 2026-10-10): Withdrawn
+## Δ11 — D6 ruled: No reply (Ann Person 2026-10-11)
+## Δ12 — D6 ruled "4", provisionally (Ann Person 2026-10-12): undelimited
+- D7 ruled "1" (Ann Person 2026-10-13): A Step-1 bullet
+```
+## Δ13 — D8 ruled "f" (Ann Person 2026-10-14): fenced
+```
 EOF
 cat > "$R7/debt.md" <<'EOF'
 # debt ledger: concept | kind | sites | raised-by <record> | touches N | burned <row> | —
@@ -275,19 +317,27 @@ EOF
 EV7="$(translate "$P7" events)"; GP7="$(translate "$P7" gaps)"; in7() { printf '%s\n' "$EV7" | grep -cxF -- "$1"; }; ask7() { bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$P7" "$@"; }
 
 section "DECISIONS"
-expect_eq "the ledger lists D1 put, then ruled with its reply and who ruled, each instant as the heading writes it" \
-  "run/v1|ev=decision|by=orchestrator|d=D1|title=How the log fills (first)|verb=put|at=2026-11-01 5:47 PM PST run/v1|ev=decision|by=Ann Person|d=D1|said=2 <- and 'why' (a note)|title=How the log fills (first)|verb=ruled|at=2026-11-01 5:49 PM PST" "$(ask7 ledger D1 | paste -sd' ' -)"
-expect_eq "a day-only instant is kept as written; one the appender refuses is not written" "1 1" "$(in7 'run/v1|ev=decision|d=D2|verb=put|by=Ann Person|title=A day only|at=2026-10-03') $(in7 'run/v1|ev=decision|d=D3|verb=put|by=orchestrator|title=A bar in the instant|at=')"
+expect_eq "the ledger lists D1 put, its wait the line under it and each its Δ, then ruled with its reply and who ruled, each instant as the heading writes it" \
+  "run/v1|ev=decision|by=orchestrator|d=D1|entry=Δ0|title=How the log fills (first)|verb=put|wait=Body prose is no heading.|at=2026-11-01 5:47 PM PST run/v1|ev=decision|by=Ann Person|d=D1|entry=Δ1|said=2 <- and 'why' (a note)|title=How the log fills (first)|verb=ruled|at=2026-11-01 5:49 PM PST" "$(ask7 ledger D1 | paste -sd' ' -)"
+expect_eq "a day-only instant is kept as written; one the appender refuses is not written" "1 1" "$(in7 'run/v1|ev=decision|d=D2|entry=Δ2|verb=put|by=Ann Person|title=A day only|at=2026-10-03') $(in7 'run/v1|ev=decision|d=D3|entry=Δ4|verb=put|by=orchestrator|title=A bar in the instant|at=')"
 expect_contains "and is named" "gap/v1|ev=decision|d=D3|field=at|why=bar" "$GP7"
-expect_eq "four rounds, from the four headings of the two forms" 4 "$(printf '%s\n' "$EV7" | grep -c '^run/v1|ev=decision|')"
-expect_absent "body prose is no heading: no line and no gap" "Body prose" "$EV7$GP7"
+# Every word a ruling is written with is its round's verb, a qualifier before it kept with it; the reply is said=,
+# a settled-by heading's reply the quote after it and its title what settled it; a bullet under a Δ is a round too.
+lf() { ask7 ledger "$1" | awk -F'|' '{ v = s = t = a = ""; for (i = 2; i <= NF; i++) { k = substr($i, 1, index($i, "=") - 1); x = substr($i, length(k) + 2)
+  if (k == "verb") v = x; else if (k == "said") s = x; else if (k == "title") t = x; else if (k == "at") a = x }; printf "%s/%s/%s/%s;", v, s, t, a }'; }
+expect_eq "each ruling word is a decision round with that word its verb" \
+  "put//A day only/2026-10-03;amended/x/Another verb/2026-10-04;re-ruled/y/Re-ruled/2026-10-05;amended again/z/its words after/2026-10-06;|ratified/Yes/Ratified/2026-10-07;settled/go/the go on Δ7/2026-10-08 8:12 PM;|glyphs final/w/A qualified word/2026-10-09;withdrawn//Withdrawn/2026-10-10;|ruled//No reply/2026-10-11;|ruled/1/A Step-1 bullet/2026-10-13;" \
+  "$(lf D2)|$(lf D4)|$(lf D5)|$(lf D6)|$(lf D7)"
+expect_eq "rounds from every heading and bullet the ledger rules or puts in, none fenced" 13 "$(printf '%s\n' "$EV7" | grep -c '^run/v1|ev=decision|')"
+expect_no_regex "body prose is no line and no gap, a reply not delimited is no round, a fenced one is none" "Body prose|undelimited|fenced" "$(printf '%s\n' "$EV7" | grep -v '|wait=Body prose')$GP7"
+expect_contains "a ruling whose reply is not delimited is named whole" "gap/v1|ev=decision|heading=Δ12|field=ev|why=shape" "$GP7"
 
 section "DEBTS"
 expect_eq "the debts question lists the open debt and not the burned one" "run/v1|ev=debt|concept=c-open|kind=duplicate|raised-by=record/w/critic.md|sites=a.sh:1, b.sh:2|touches=3|at=" "$(ask7 debts)"
 expect_eq "a burned line is a debt with burned= its row" 1 "$(in7 'run/v1|ev=debt|concept=c-burned|kind=unpinned-pair|sites=a.sh:4|raised-by=record/w/critic-2.md|touches=1|burned=T5|at=')"
 expect_contains "the ledger holds no instant: a gap" "gap/v1|ev=debt|concept=c-open|field=at|why=absent" "$GP7"
-for g in decision\|heading=Δ3 decision\|heading=Deltas debt\|concept=c-note debt\|line=5; do expect_contains "another form is named whole: $g" "gap/v1|ev=$g|field=ev|why=shape" "$GP7"; done
-expect_no_regex "and writes nothing" "Another verb|c-note|A-orch" "$EV7"
+for g in decision\|heading=Deltas debt\|concept=c-note debt\|line=5; do expect_contains "another form is named whole: $g" "gap/v1|ev=$g|field=ev|why=shape" "$GP7"; done
+expect_no_regex "and writes nothing" "undelimited|c-note|A-orch" "$EV7"
 vals="$(printf '%s\n' "$EV7" | awk -F'|' '{ for (i = 3; i <= NF; i++) { v = substr($i, index($i, "=") + 1); if (v != "") print v } }')"; bad="$(refused "$EV7" "$D/shape7.log")"
 expect_contains "the value scan reads the ledgers' values" "2026-11-01 5:49 PM PST" "$vals"
 expect_empty "every value written is found in a ledger" "$(printf '%s\n' "$vals" | while IFS= read -r v; do grep -qF -- "$v" "$R7"/* || printf '%s\n' "$v"; done)"
@@ -375,4 +425,13 @@ expect_contains "a Step line held (pending) is no step reached: named, not writt
 expect_eq "Steps stand in their numbers' order, wherever an instant sorts" "0 1 2 3 8 9 " "$(translate "$U" events | sed -n 's/^run\/v1|ev=step|n=\([0-9]*\)|.*/\1/p' | tr '\n' ' ')"
 expect_contains "a Step with no instant keeps none, and its place makes none" "run/v1|ev=step|n=2|at=" "$(translate "$U" events | grep -x 'run/v1|ev=step|n=2|at=')"
 expect_contains "and its instant is still a gap" "gap/v1|ev=step|n=2|field=at|why=absent" "$(translate "$U" gaps)"
+section "PARKED"
+# The note step-line 9 writes on a parked plan, read as a step, would close the run before close-out does.
+K="$D/plans/epic-x/wave-7-parked.plan.md"; k8='- Step 8: integrate: opened 2026-11-01T11:00Z'
+printf '%s\n' '## SDLC State' 'current: 8' '- Step 7: documented at 2026-11-01T10:00Z' "$k8" '- Step 9: parked on wave/7-parked — waits on a hand test' > "$K"
+expect_eq "a parked plan's Step 9 note is no delivery: the step is its current:" "n=8 state=open" "$(bash "$RS" "$K" step | paste -sd' ' -)"
+expect_contains "the note is named on the gaps list, not written" "gap/v1|ev=step|n=9|field=ev|why=undelivered" "$(translate "$K" gaps)"
+printf '%s\n' '## SDLC State' 'current: 9' '- Step 7: documented at 2026-11-01T10:00Z' "$k8" \
+  '- Step 9: delivered: parked on wave/7-parked @ abc1234 — waits on a hand test (2026-11-01T12:00Z wave-7-parked)' > "$K"
+expect_eq "close-out's own parked line is the delivery" "n=9 state=delivered" "$(bash "$RS" "$K" step | paste -sd' ' -)"
 finish

@@ -755,6 +755,15 @@ hasnt "14c.3 the sibling (unbound) plan is not named" "$(basename "$PLAN14cB")" 
 hasnt "14c.4 no count-style listing" "open runs exist here" "$OUT"
 has   "14c.5 the predecessor roster still prints alongside it" "roster-$OLD_SID.state" "$OUT"
 
+echo ""
+echo "--- 14d: the run's log holds a later step than the plan's current: the bound line prints the log's ---"
+mkdir -p "$P14/.bionic/docs/record/fixture"
+printf 'run/v1|ev=step|n=4|at=2026-11-02T00:00:00Z\n' > "$P14/.bionic/docs/record/fixture/run.log"
+OUT=$(drive "$P14" resume "$CUR_SID" "$CUR_SID" "$CUR_SID")
+has   "14d.1 the bound line names the log's step" "bionic: bound to ${PLAN14#$P14/.bionic/docs/} — current: 4" "$OUT"
+has   "14d.2 …and that step's file" "skills/canonical-sdlc/steps/4.md" "$OUT"
+hasnt "14d.3 …and not the plan's own" "current: 3" "$OUT"
+
 section "15 — engaged, one live run, unbound: the bind line, and otherwise unchanged (S3 scope (c); wave-23 T13, critic C-4)"
 # 3600s: see §1's comment — engaged, N==1, unbound also reaches the sweep below.
 #

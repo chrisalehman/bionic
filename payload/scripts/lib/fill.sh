@@ -172,10 +172,49 @@ fi
 _FILL_CURRENT_PLAN=""
 _FILL_CURRENT_VALUE=""
 _FILL_APPROVED=0
+_FILL_ORDER_PLAN=""
+_FILL_ORDER=""
+_FILL_REVIEW_AT=""
 fill_current_forget() {  # -> drops the memo; the next reader parses whatever path it names
   _FILL_CURRENT_PLAN=""
   _FILL_CURRENT_VALUE=""
   _FILL_APPROVED=0
+  _FILL_ORDER_PLAN=""
+  _FILL_ORDER=""
+  _FILL_REVIEW_AT=""
+}
+
+# fill_facts_load <plan> -> the same memo, and the order's, taken from the run's facts (lib/reader.sh: its step, the
+# Step-3 approval and the standing order), so a fact the run's log alone holds is the fill's fact too; rc 1, the memo
+# untouched, when the reader cannot be loaded. Every reader of this file in the shell that calls it then answers from
+# the facts: the step and the approval through `_fill_current_load`, which keeps a memo it did not parse, the order
+# through `fill_order_open`, and the newest review proof's instant through `fill_review_at`. The facts are
+# lib/proof.sh's kept fold, one fold however many callers ask, so the tick and the stop wall load them alike.
+fill_facts_load() {
+  local plan="${1:-}" got
+  if [ -z "$plan" ] || [ ! -f "$plan" ]; then fill_current_forget; return 0; fi
+  declare -F _proof_ask >/dev/null 2>&1 || . "$_FILL_LIB_DIR/proof.sh" >/dev/null 2>&1
+  declare -F _proof_ask >/dev/null 2>&1 || return 1
+  got="$(_proof_ask "$plan" _fill_facts "$plan")" || return 1
+  _FILL_CURRENT_VALUE="$(printf '%s\n' "$got" | sed -n 's/^n=//p')"
+  _FILL_APPROVED="$(printf '%s\n' "$got" | sed -n 's/^approved=//p')"
+  _FILL_ORDER="$(printf '%s\n' "$got" | sed -n 's/^given=//p')"
+  _FILL_REVIEW_AT="$(printf '%s\n' "$got" | sed -n 's/^review_at=//p')"
+  _FILL_CURRENT_PLAN="$plan"; _FILL_ORDER_PLAN="$plan"
+}
+_fill_facts() {  # <plan> -> n=<step>, approved=1|0, given=<as gate_order_of prints it> while an order stands, review_at=
+  reader_q_step "$1" | grep '^n='
+  if reader_q_approved "$1" step3 >/dev/null; then echo approved=1; else echo approved=0; fi
+  reader_q_order "$1" | awk -F= '{ v[$1] = substr($0, length($1) + 2) } END { if (v["order"] == "given") printf "given=given %s \"%s\"\n", v["at"], v["said"] }'
+  reader_q_reviews "$1" | awk -F'|' "$_READER_AWK"'
+    ev() == "proof" && line_kv("kind") == "review" && line_kv("at") > m { m = line_kv("at") } END { print "review_at=" m }'
+}
+
+# fill_review_at <plan> -> the instant of the newest review proof of any question, or nothing when the run holds none;
+# rc 1 when this shell has not loaded <plan>'s facts, so no caller reads an instant the reader did not give.
+fill_review_at() {
+  [ -n "${1:-}" ] && [ "$1" = "$_FILL_CURRENT_PLAN" ] && [ "$1" = "$_FILL_ORDER_PLAN" ] || return 1
+  printf '%s' "$_FILL_REVIEW_AT"
 }
 _fill_current_load() {  # <plan path> -> sets _FILL_CURRENT_VALUE and _FILL_APPROVED; parses at most once
   local plan="${1:-}" got
@@ -245,9 +284,13 @@ fill_ledger_live() {  # <plan> -> 0 live · 1 not
 # AN ORDER IS ONE OF THE THREE WAYS A ROW WAITS, with a read of the record of an open row and a read
 # of an unruled decision. It is the user's word that the run stop where it is: the runner starts no
 # suite under it (lib/gate.sh), and the fill offers no row, so neither the tick nor the stop wall
-# asks for a dispatch the user has held. lib/gate.sh `gate_order_of` is the one reader of the line;
-# a copy of this file with no gate.sh beside it has no reader, and holds nothing.
+# asks for a dispatch the user has held. In a shell that loaded the run's facts (`fill_facts_load`) the order
+# is the reader's standing order; elsewhere lib/gate.sh `gate_order_of` reads the plan's line, and a copy of
+# this file with no gate.sh beside it has no reader, and holds nothing.
 fill_order_open() {  # <plan>
+  if [ -n "${1:-}" ] && [ "$1" = "$_FILL_ORDER_PLAN" ]; then
+    [ -n "$_FILL_ORDER" ] && printf '%s\n' "$_FILL_ORDER"; return
+  fi
   declare -F gate_order_of >/dev/null 2>&1 || return 1
   gate_order_of "${1:-}" plan
 }

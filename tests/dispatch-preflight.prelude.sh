@@ -625,22 +625,6 @@ write_attestation() {
   chmod 600 "$repo/.bionic/tmp/preflight-$sid.state"
 }
 
-# write_legacy_attestation <repo> <session_id> — the OLD, pre-wave-03 single-slot
-# filename. Used to prove the gate never consults it (task 4/2).
-write_legacy_attestation() {
-  local repo="$1" sid="$2"
-  mkdir -p "$repo/.bionic/tmp"
-  {
-    printf '# bionic environment attestation — machine-local, safe to delete\n'
-    printf 'version=1\n'
-    printf 'kind=preflight-attestation\n'
-    printf 'session_id=%s\n' "$sid"
-    printf 'written_at=1785790000\n'
-    printf 'repo=%s\n' "$repo"
-  } > "$repo/.bionic/tmp/preflight.state"
-  chmod 600 "$repo/.bionic/tmp/preflight.state"
-}
-
 # ======================================================================================
 # HOISTED FROM THE SECTIONS (wave-30 T1). Read by sections in more than one shard.
 # ======================================================================================
@@ -679,17 +663,6 @@ s21_idle_tr() {  # -> path of a transcript whose last turn opened after a long i
       "$(s21_iso 1)"
   } > "$SANDBOX/.s21-idle.jsonl"
   printf '%s' "$SANDBOX/.s21-idle.jsonl"
-}
-
-s21_busy_tr() {  # -> path of a transcript holding one continuous 2500s turn
-  { printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"a long piece of work"}}\n' \
-      "$(s21_iso 2500)"
-    for _s21_s in 2400 2100 1800 1500 1200 900 600 300 120 30 5; do
-      printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"working"}]}}\n' \
-        "$(s21_iso "$_s21_s")"
-    done
-  } > "$SANDBOX/.s21-busy.jsonl"
-  printf '%s' "$SANDBOX/.s21-busy.jsonl"
 }
 
 s21_stale_payload() {  # <sid> <repo> -> a dispatch payload carrying the idle transcript
@@ -734,16 +707,6 @@ s22_roster_row() {
     launched_at=2026-09-02T00:00:00Z "subagent_type=${5:-implementor}" model= \
     "deliverable=/tmp/d-$3" source=declared "duration=~10 minutes" progress= \
     "claims=${4:-}" cadence= absent= waiver= "tool_use_id=t-$3" >> "$f"
-}
-
-# s22_sweep <repo> <sid> <name> — the landing marker that closes a row.
-# THROUGH THE ONE WRITER (S17, spec AC-26): `swept_marker_write` is
-# hooks/landing-gate.sh's own function, extracted by tests/lib/swept-marker.sh and called
-# for real. The printf that used to sit here wrote a marker the originator would not
-# recognise — no `session=`, no `agent_id=` — and stayed green because every reader of the
-# marker is by key.
-s22_sweep() {
-  swept_marker_write "$(roster_path "$1" "$2")" 2026-09-02T00:00:00Z "$2" "$3" "" MET
 }
 
 # s22_ack <repo> <sid> <name> [at] — one `event=ack` line on the sweeper's OWN ledger,
@@ -794,13 +757,6 @@ pf_repo() {
   git -C "$repo" commit -qm base 2>/dev/null
   printf '%s' "$repo"
 }
-# pf_commit <repo> <path> <content> -> one commit on whatever the checkout holds.
-pf_commit() {
-  mkdir -p "$(dirname "$1/$2")"
-  printf '%s\n' "$3" > "$1/$2"
-  git -C "$1" add "$2"
-  git -C "$1" commit -qm "change $2" 2>/dev/null
-}
 pf_plan_path() { printf '%s/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md' "$1"; }
 # pf_row <id> <step> <status> <Files> [<kind> [<deps>]] -> one `## Tasks` data row (a build row
 # with no deps unless told otherwise).
@@ -836,9 +792,4 @@ pf_plan() {
     fi
   } > "$(pf_plan_path "$repo")"
 }
-# pf_state <repo> -> what proof_state prints for the fixture's plan and tree.
-pf_state() {
-  ( . "$PF_LIB_DIR/proof.sh" >/dev/null 2>&1; proof_state "$(pf_plan_path "$1")" "$1" ) 2>/dev/null
-}
-pf_line() { printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: '; }
 

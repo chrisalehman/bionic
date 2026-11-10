@@ -122,20 +122,16 @@ _bind_resolve() {
 }
 
 # bind_delivered <root> <resolved plan> -> 0 when the plan is one of the root's run candidates (the walk `open_runs`
-# reads, lib/run.sh `_run_candidates`) whose run closed by delivery: `run_open` calls it closed, its frontmatter
-# carries no `abandoned:`, and a `Step 9:` line carries `delivered:` (run_open's own test). 1 otherwise, silent.
+# reads, lib/run.sh `_run_candidates`) whose run the reader's step calls delivered (`run_step`), never abandoned.
+# 1 otherwise, silent.
 bind_delivered() {
-  local root="$1" want="$2" droot f c lines
+  local root="$1" want="$2" droot f c
   droot=$(docs_root "$root") || return 1
   while IFS= read -r -d '' f; do
     c=$(_bind_resolve "$f") || continue
     [ "$c" = "$want" ] || continue
-    run_open "$f" && return 1
-    lines=$(_run_lines "$f")
-    awk 'NR == 1 && $0 == "---" { f = 1; next } f && $0 == "---" { exit } f && /^abandoned:/ { a = 1 } END { exit !a }' \
-      <<< "$lines" && return 1
-    grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' <<< "$lines"
-    return
+    case "$(run_step "$f" 2>/dev/null)" in *state=delivered*) return 0 ;; esac
+    return 1
   done < <(_run_candidates "$droot")
   return 1
 }

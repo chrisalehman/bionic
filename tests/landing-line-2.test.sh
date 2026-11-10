@@ -414,6 +414,12 @@ expect_eq "(pa6c) …saying DEBT for the declared suite, once" "1" "$(printf '%s
 expect_eq "(pa6d) …and the gate's reader of the bound plan deals the debt" "debt	x.test.sh	T9" \
   "$(bash -c '. "$1/proof.sh" && proof_debts "$2"' _ "$REPO/payload/scripts/lib" "$(ll_plan "$PF")" | cut -f1-3)"
 
+section "§FORK: a red whose log holds the shell's own refusal of a process is none: run again, then STALLED naming both logs"
+FKR='tests/x.test.sh: fork: Resource temporarily unavailable'; lf_v() { printf '%s\nx.test.sh: 0/1 passed, 1 failed\n' "$2" > "$WORLD_ROOT/fk.log"; bash -c '. "$1" && _line_verdict "$2" "$3"' _ "$LINE" "$1" "$WORLD_ROOT/fk.log"; }
+expect_eq "(fk1) refused, rc 1: none · rc 1 without it: red · refused, rc 0: green · quoted: red · bash 5's retry: none" "none red green red none" "$(lf_v 1 "$FKR") $(lf_v 1 'FAIL: x') $(lf_v 0 "$FKR") $(lf_v 1 "missing 'y' in: $FKR") $(lf_v 1 "${FKR/fork:/fork: retry:}")"
+FK="$(ll_world)"; ll_launch "$FK" T1 x; ll_commit_suite "$FK" T1 x "echo run >> \"\$LL_SIG/fk.runs\"; echo '$FKR' >&2; echo 'x.test.sh: 0/1 passed, 1 failed  sections=1 setup=0'; exit 1"
+ll_verb "$FK" T1; KFK="$(ll_last_cand "$FK" T1)"; LFK="$FK/.bionic/docs/record/wave-x/line/T1-x-${KFK:0:12}"
+expect_eq "(fk2) refused on every run: run twice, none and none, then STALLED naming both logs (exit 70), never RED" "70 2 none none STALLED T1 $LFK.log,$LFK-2.log" "$LL_RC $(ll_lines "$LL_SIG/fk.runs") $(ll_results "$FK" T1 "$KFK") $(printf '%s\n' "$LL_OUT" | grep '^STALLED ')"
 # ---------------------------------------------------------------------------
 section "§DRAIN: a landing drains its suites at most J at once, J the gate's answer; one tree per candidate, the red judge in another (wave-37 T1; D3, REQ-1 AC-1.1; wave-38 T6, D21)"
 #
@@ -1042,8 +1048,10 @@ expect_eq "(rl1) precondition: matrix-retier exits 0 and the record holds its on
   "$RL_RTRC|$(ll_ev "$RL" matrix-retier | /usr/bin/grep -c '|ac=AC-1.1|from=T1|to=T2|' | tr -d ' ')"
 [ "$RL_RTRC" = 0 ] || printf '      retier: %s\n' "$RL_RT"
 expect_eq "(rl2) the retier line moves no field: the counts line reads as before it" "$RL_H0" "$(sr_report "$RL")"
-awk '{ print } /^AC-1\.2:/ { b = 1; next } b && /^[ \t]+evidence:/ { print "  waiver: Dana Fixture 2026-10-20T10:00:00Z \"the unit check is enough\" — a fixture waiver"; b = 0 }' \
+# waive-row writes the block's waiver: line and the row's status waived in one act, so the fixture writes both.
+awk '/^\| AC-1\.2 \|/ { sub(/\| pending \|/, "| waived |") } { print } /^AC-1\.2:/ { b = 1; next } b && /^[ \t]+evidence:/ { print "  waiver: Dana Fixture 2026-10-20T10:00:00Z \"the unit check is enough\" — a fixture waiver"; b = 0 }' \
   "$RLP" > "$RLP.n" && mv "$RLP.n" "$RLP"
+expect_eq "(rl3-pre) the row reads waived, as waive-row leaves it" 1 "$(/usr/bin/grep -c '^| AC-1\.2 |.*| waived |' "$RLP")"
 expect_contains "(rl3) …while a waiver: line in the same plan adds one: waivers=1, total=1" "hand-holds: total=1 · " "$(sr_report "$RL")"
 expect_contains "(rl3b) …in the waivers field" "· waivers=1 · status-writes=0 ·" "$(sr_report "$RL")"
 

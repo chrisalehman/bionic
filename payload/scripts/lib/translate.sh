@@ -113,10 +113,20 @@ function whole(t, id, why) { printf "g\t\tgap/v1|ev=%s|%s|field=ev|why=%s\n", t,
 '
 
 translate() {  # <plan> <events|gaps> -> the translation in that form; 2 refused
-  local plan="${1:-}" want="${2:-}" fn
+  # The sources are split on blanks whatever IFS the caller holds: a caller reading tab fields calls this inside its
+  # command substitution, and a tab-only IFS would make the list one word and skip every source.
+  local plan="${1:-}" want="${2:-}" fn IFS=$' \t\n'
   [ -f "$plan" ] || return 2
   case "$want" in events|gaps) ;; *) return 2 ;; esac
-  for fn in $TRANSLATE_SOURCES; do "$fn" "$plan"; done | if [ "$want" = gaps ]; then
+  # A source that failed (a process refused under memory pressure) left its home short: the translation stops there
+  # and exits non-zero, its pipes under pipefail, so no reader takes the other homes for the whole run. Every source
+  # exits 0 on a home it read, an absent one included.
+  ( set -o pipefail
+    for fn in $TRANSLATE_SOURCES; do "$fn" "$plan" || exit; done | _translate_form "$want" )
+}
+
+_translate_form() {  # <events|gaps> -> stdin's source records in that form: events in their order, gaps once each
+  if [ "$1" = gaps ]; then
     awk -F'\t' '$1 == "g" && !seen[$3]++ { print $3 }'
   else
     awk -F'\t' -v OFS='\t' '$1 == "e" { print $2, NR, $3 }' | LC_ALL=C sort -t "$(printf '\t')" -k1,1 -k2,2n | cut -f3-
@@ -124,7 +134,8 @@ translate() {  # <plan> <events|gaps> -> the translation in that form; 2 refused
 }
 
 _translate_section() {  # <plan> <heading> -> the lines under `## <heading>`, to the next `## `
-  awk -v h="## $2" '$0 == h { on = 1; next } /^## / { on = 0 } on' "$1"
+  # Fenced text is an example, never a fact, as every reader of the plan holds it.
+  awk -v h="## $2" '/^[ \t]*```/ { f = !f; next } f { next } $0 == h { on = 1; next } /^## / { on = 0 } on' "$1"
 }
 
 translate_source _translate_state
@@ -145,6 +156,9 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
       n = substr($0, 8, index($0, ":") - 8); text = substr($0, index($0, ":") + 2); at = ""
       # A Step held "(pending)" is a step not reached when the line was written: no fact, so no step.
       if (trim(text) == "(pending)") { whole("step", "n=" n, "pending"); next }
+      # Step 9 is reached only by its delivery, which close-out writes on that line; a note there on a parked plan, written
+      # before close-out runs, delivers nothing, and read as a step it would close the run that close-out has not closed.
+      if (n == "9" && !index(text, "delivered:")) { whole("step", "n=9", "undelivered"); undelivered = 1; next }
       # An approval is written at-then-by or by-then-at, and both are read; the words follow either.
       if (match(text, /(approved|configured) at [^ ]+ (by|via) /)) {
         ap = substr(text, RSTART, RLENGTH); split(ap, w, " "); at = w[3]; rest = substr(text, RSTART + RLENGTH)
@@ -164,14 +178,30 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
     /^deferred: / { kv(substr($0, 11)); split(HEAD, w, " "); begin("finding", "ref", w[1]); put("severity", w[2]); put("to", "deferred")
       put("title", quoted(HEAD)); for (i = 1; i <= NP; i++) put(PK[i], PV[i]); lack("by"); f = w[1]; sub(/#.*/, "", f); if (rev[f] != "") after(rev[f]); emit(""); next }
     /^order: / { split(substr($0, 8), w, " "); begin("order", "act", w[1]); put("said", quoted($0)); emit(w[2]); next }
-    END { if (cur != "" && !(cur in steps)) { begin("step", "n", cur); inblock("steps"); emit("") } }'
+    END { if (cur != "" && !(cur in steps) && !(cur == "9" && undelivered)) { begin("step", "n", cur); inblock("steps"); emit("") } }'
 }
 
+# _TRANSLATE_LANDED_AWK: `landed_at(text)`, a ledger line's text from its landing's marker on when reasons come
+# before it, else the text whole
+_TRANSLATE_LANDED_AWK='
+function landed_at(t,   l, b, h) {
+  if (t ~ /^landed/) return t
+  l = " " t; b = match(l, /[ \t]landed [0-9a-f]+ [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/) ? RSTART : 0
+  h = match(l, /[ \t]landed-by-hand: /) ? RSTART : 0
+  if (b && (!h || b < h)) return substr(l, b + 1)
+  return h ? substr(l, h + 1) : t
+}
+'
 translate_source _translate_ledger
 _translate_ledger() {  # <plan> -> the dispatch ledger's landings and born stamps
-  _translate_section "$1" "SDLC State" | awk -v rec="$(_translate_landed_rows "$1") " "$_TRANSLATE_AWK"'
+  # A landing opens its row's line, or follows the reasons written before it: `landed <sha> <instant>` or
+  # `landed-by-hand: <who> <instant> "<why>"`, the earlier of the two when both are named; the words read
+  # are the landing's own, from its marker on.
+  local rows
+  rows="$(_translate_landed_rows "$1")" || return
+  _translate_section "$1" "SDLC State" | awk -v rec="$rows " "$_TRANSLATE_AWK$_TRANSLATE_LANDED_AWK"'
     /^- T[0-9A-Za-z.]*: / {
-      row = substr($0, 3, index($0, ":") - 3); text = substr($0, index($0, ":") + 2)
+      row = substr($0, 3, index($0, ":") - 3); text = landed_at(substr($0, index($0, ":") + 2))
       own = !index(rec, " " row " ")
       if (own && match(text, /^landed [0-9a-f]+ /)) { split(text, w, " "); begin("published", "row", row); put("commit", w[2]); emit(inst(text)) }
       else if (own && index(text, "landed-by-hand: ") == 1) { split(substr(text, 17), w, " "); begin("published", "row", row)
@@ -189,9 +219,10 @@ _translate_ledger() {  # <plan> -> the dispatch ledger's landings and born stamp
 
 translate_source _translate_tasks
 _translate_tasks() {  # <plan> -> the Tasks rows: the agent cell's dispatch, the worktree and base cells' tree, a landing with no ledger line
-  local plan="$1"
-  { _translate_section "$plan" "SDLC State" | awk '/^- T[0-9A-Za-z.]*: landed/ { print "L", substr($0, 3, index($0, ":") - 3) }'
-    for r in $(_translate_landed_rows "$plan"); do printf 'L %s\n' "$r"; done
+  local plan="$1" IFS=$' \t\n' rows
+  rows="$(_translate_landed_rows "$plan")" || return
+  { _translate_section "$plan" "SDLC State" | awk "$_TRANSLATE_LANDED_AWK"'/^- T[0-9A-Za-z.]*: / && landed_at(substr($0, index($0, ":") + 2)) ~ /^landed/ { print "L", substr($0, 3, index($0, ":") - 3) }'
+    for r in $rows; do printf 'L %s\n' "$r"; done
     _translate_section "$plan" "Tasks"; } | awk -F'|' "$_TRANSLATE_AWK"'
     /^L / { led[substr($0, 3)] = 1; next }
     /^\| *id *\|/ { for (i = 2; i < NF; i++) col[trim($i)] = i; next }
@@ -217,10 +248,25 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
   # its state and what its evidence and auditor cells hold, so that is all its event carries: the head, the
   # kind, the author and the instant are gaps. A pending or blocked row is no event. A criterion that a
   # `proved:` or `waived:` line of the SDLC State names by `ac=` is that line's fact, with the head and the
-  # instant the row lacks; the row then writes nothing of that type, so one fact is never read as two.
+  # instant the row lacks; the row then writes nothing of that type, so one fact is never read as two. A
+  # waived row whose criterion's block below the table holds an indented `waiver: <who> <day or instant>
+  # "<words>"` line takes its author, instant and words from it, as the block writes them. That line is also a
+  # hand act of its own, `what=waive-row`, whatever the row's status says: a person wrote it, so it is counted
+  # among the hand acts, while only a row the status marks waived is a waiver the judge honours.
   { _translate_section "$1" "SDLC State" | awk '/^(proved|waived): / && match($0, / ac=[^ ]+/) { print "S", $1, substr($0, RSTART + 4, RLENGTH - 4) }'
+    _translate_section "$1" "Verification Matrix" | awk '
+      { l = $0; sub(/^[-*+][ \t]+/, "", l) }
+      match(l, /^AC-[^ \t:]+:/) { ac = substr(l, 1, RLENGTH - 1); next }
+      !/^[ \t]/ { ac = ""; next }
+      ac != "" && match($0, /^[ \t]+waiver:[ \t]+[^"]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9](T[0-9][0-9]:[0-9][0-9](:[0-9][0-9])?Z)?[ \t]+"/) {
+        s = substr($0, index($0, "waiver:") + 7); q = index(s, "\""); h = substr(s, 1, q - 1); n = split(h, w, /[ \t]+/)
+        at = w[n]; if (at == "") at = w[n - 1]; by = substr(h, 1, index(h, at) - 1); sub(/^[ \t]+/, "", by); sub(/[ \t]+$/, "", by)
+        r = substr(s, q + 1); said = (index(r, "\"") ? substr(r, 1, index(r, "\"") - 1) : "")
+        printf "W\036%s\036%s\036%s\036%s\n", ac, by, at, said }'
     _translate_section "$1" "Verification Matrix"; } | awk -F'|' "$_TRANSLATE_AWK"'
     /^S / { split($0, w, " "); stated[(w[2] == "proved:" ? "proof" : "waiver") SUBSEP w[3]] = 1; next }
+    /^W\036/ { split($0, w, "\036"); if (!(w[2] in wat)) { wby[w[2]] = w[3]; wat[w[2]] = w[4]; wsaid[w[2]] = w[5] }
+      begin("hand", "ac", w[2]); put("what", "waive-row"); if (w[3] != "") put("by", w[3]); if (w[5] != "") put("said", w[5]); emit(w[4]); next }
     !/^\|/ { if (nh) done = 1; next }
     done { next }
     !nh { for (i = 2; i < NF; i++) { k = tolower(trim($i)); gsub(/[ \t]+/, "-", k); col[k] = i }; nh = 1; next }
@@ -231,6 +277,7 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
       begin(t, "ac", ac)
       for (j = split("evidence auditor", w, " "); j > 0; j--) c[w[j]] = ((w[j] in col) && !none($(col[w[j]]))) ? trim($(col[w[j]])) : ""
       put("evidence", c["evidence"]); put("auditor", c["auditor"])
+      if (t == "waiver" && (ac in wat)) { put("by", wby[ac]); put("said", wsaid[ac]); lack("head"); emit(wat[ac]); next }
       if (t == "proof") lack("kind"); else lack("by")
       lack("head"); emit("")
     }'
@@ -247,7 +294,7 @@ _translate_abandon() {  # <plan> -> the header's `abandoned:` as the run's aband
   # An abandon has no identifying field, so its gaps are named by the run, the plan's own name; who
   # abandoned it is never parsed out of free words, so it is a gap.
   local wave="${1##*/}"
-  plan_read_header "$1" abandoned | awk -v run="${wave%.plan.md}" "$_TRANSLATE_AWK"'
+  { plan_read_header "$1" abandoned || [ "$?" -eq 1 ]; } | awk -v run="${wave%.plan.md}" "$_TRANSLATE_AWK"'
     { v = trim(substr($0, 11)); at = ""
       if (match(v, /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9](T[0-9:]+Z)?/)) {
         at = substr(v, 1, RLENGTH); v = trim(substr(v, RLENGTH + 1)); sub(/^(—|–|-|:|;|,)[ \t]*/, "", v) }
@@ -266,7 +313,7 @@ _translate_dropped() {  # <plan> -> each Tasks row whose status is dropped, name
   # A dropped row is the plan's word that its work is no longer owed. No ruled event says that of a row:
   # a cancel retracts a fact the log holds, and a row is authored, never logged; so the status is named,
   # not written. Until a type carries it, only the plan's own cell tells a dropped row from a pending one.
-  plan_read_dropped "$1" 2>/dev/null | awk '{ printf "g\t\tgap/v1|ev=dropped|row=%s|field=ev|why=unruled\n", $0 }'
+  { plan_read_dropped "$1" 2>/dev/null || [ "$?" -eq 1 ]; } | awk '{ printf "g\t\tgap/v1|ev=dropped|row=%s|field=ev|why=unruled\n", $0 }'
 }
 
 # THE RECORD'S HOMES sit in the plan's record directory, `<docs>/record/<wave>/`, joined to the plan by
@@ -278,11 +325,11 @@ if ! declare -F reader_record >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$_TRANSLATE_LIB_DIR/reader.sh"
 fi
-_translate_record() {  # <plan> <file> -> the path of <file> in the plan's record directory; 1 when there is none
-  local rec
-  rec="$(reader_record "$1")" || return 1
-  printf '%s/%s\n' "$rec" "$2"
-  [ -f "$rec/$2" ]
+_translate_record() {  # <plan> <file> -> the path of <file> in the plan's record directory, nothing when there is none; non-zero when the lookup died
+  local rec rc=0
+  rec="$(reader_record "$1")" || rc=$?
+  [ "$rc" -eq 0 ] || { [ "$rc" -eq 2 ] && return 0; return "$rc"; }
+  [ ! -f "$rec/$2" ] || printf '%s/%s\n' "$rec" "$2"
 }
 
 # A LANDING IS READ FROM ITS RECORD. The landing record is written by the landing itself, and the plan's
@@ -291,30 +338,38 @@ _translate_record() {  # <plan> <file> -> the path of <file> in the plan's recor
 # landing of is read from the record alone; a row only the plan holds as landed is read from the plan.
 _translate_landed_rows() {  # <plan> -> the rows the landing record holds a landing of, space-separated
   local f
-  f="$(_translate_record "$1" landing-proofs.log)" || return 0
+  f="$(_translate_record "$1" landing-proofs.log)" || return; [ -n "$f" ] || return 0
   awk '/^line\/v1\|ev=published\|/ || /^landed: / { if (match($0, /row=[^| ]+/)) printf " %s", substr($0, RSTART + 4, RLENGTH - 4) }' "$f"
 }
 
 translate_source _translate_landing
 _translate_landing() {  # <plan> -> the landing record: ruled lines renamed, the old landing forms read, the rest named
-  # A stop-run is an act taken by hand, so it is a hand event with what= its kind. close-out is the
+  # A stop-run, a status or task written into the matrix (matrix-set) and a refusal are acts taken by
+  # hand, so each is a hand event with what= its kind and the line's own fields. close-out is the
   # Step 9 line the plan already gives, so it is not written again and what it holds beyond the step is
-  # named. A stamp/v1 line is a copy of a run line, dropped with no gap. Any other kind no ruled type
-  # carries is named whole.
+  # named. A stamp/v1 line is a copy of a run line, dropped with no gap, and so is a landed: header that
+  # copies a published line of its row and commit: the line is the landing, and it carries the kind.
+  # Any other kind no ruled type carries is named whole.
   local f
-  f="$(_translate_record "$1" landing-proofs.log)" || return 0
+  f="$(_translate_record "$1" landing-proofs.log)" || return; [ -n "$f" ] || return 0
   [ -n "${LOG_TYPES:-}" ] || . "$_TRANSLATE_LIB_DIR/log.sh" || return 0
   awk -v types="$LOG_TYPES" "$_TRANSLATE_AWK"'
+    function word(s, k,   n, w, i) { n = split(s, w, " "); for (i = 1; i <= n; i++) if (index(w[i], k "=") == 1) return substr(w[i], length(k) + 2); return "" }
+    FNR == NR { if (index($0, "line/v1|ev=published|") == 1) { split("", g); n = split($0, w, "|")
+        for (i = 2; i <= n; i++) g[substr(w[i], 1, index(w[i], "=") - 1)] = substr(w[i], index(w[i], "=") + 1)
+        lined[g["row"] SUBSEP g["commit"]] = 1 }
+      next }
     /^line\/v1\|ev=/ { t = substr($0, 12); t = substr(t, 1, index(t "|", "|") - 1); s = substr($0, 13 + length(t))
-      if (t == "stop-run") carry("hand", "what=stop-run|" s, "|")
+      if (t == "stop-run" || t == "matrix-set" || t == "refusal") carry("hand", "what=" t "|" s, "|")
       else if (t == "close-out") { n = split(s, w, "|")
         for (i = 1; i <= n; i++) if (w[i] !~ /^at=/) printf "g\t\tgap/v1|ev=step|n=9|field=%s|why=unruled\n", substr(w[i], 1, index(w[i], "=") - 1) }
       else if (index(types, " " t " ")) carry(t, s, "|")
       else { split(s, w, "|"); whole(t, w[1], "unruled") }
       next }
-    /^landed: / { s = substr($0, 9); sub(/ merge=/, " commit=", s); carry("published", s, " "); next }
+    /^landed: / { s = substr($0, 9); if ((word(s, "row") SUBSEP word(s, "merge")) in lined) next
+      sub(/ merge=/, " commit=", s); carry("published", s, " "); next }
     /^debt: / { carry("admitted", substr($0, 7), " "); next }
-    /^void: / { carry("void", substr($0, 7), " ") }' "$f"
+    /^void: / { carry("void", substr($0, 7), " ") }' "$f" "$f"
 }
 
 translate_source _translate_asks
@@ -324,7 +379,7 @@ _translate_asks() {  # <plan> -> the asks register: each round's opening, and th
   # An open row's reply= is the wording the ask prompts for, not a reply given, so it is named, not
   # written: written, it would read as the ask answered.
   local f
-  f="$(_translate_record "$1" asks.state)" || return 0
+  f="$(_translate_record "$1" asks.state)" || return; [ -n "$f" ] || return 0
   awk -F'|' "$_TRANSLATE_AWK"'
     function fld(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
     $1 != "owed/v1" { next }
@@ -338,32 +393,102 @@ _translate_asks() {  # <plan> -> the asks register: each round's opening, and th
 translate_source _translate_fill
 _translate_fill() {  # <plan> -> the fill ledger: each stop, its fields as written
   local f
-  f="$(_translate_record "$1" fill-ledger.log)" || return 0
+  f="$(_translate_record "$1" fill-ledger.log)" || return; [ -n "$f" ] || return 0
   awk "$_TRANSLATE_AWK"'index($0, "fill-ledger/v1|") == 1 { carry("stop", substr($0, 16), "|") }' "$f"
 }
 
 translate_source _translate_decisions
-_translate_decisions() {  # <plan> -> the design ledger's headings: each put or ruled round a decision
-  # A round's heading is `Δ<n> — D<n> put (<who> <instant>): <title>`, or `… ruled "<reply>" (…): …`. Its
-  # instant is kept as the heading writes it, local clock and zone or a bare day: rewritten to UTC it
-  # would be a time the heading never held. One holding a `|` cannot be written, so it is named. A heading
-  # of any other form is named whole by its first word and writes no round, because a verb or reply read
-  # out of other words would be a guess.
+_translate_decisions() {  # <plan> -> the design ledger's rounds
   local f
-  f="$(_translate_record "$1" design-ledger.md)" || return 0
+  f="$(_translate_record "$1" design-ledger.md)" || return; [ -n "$f" ] || return 0
+  _translate_ledger_records "$f"
+}
+
+translate_ledger() {  # <design-ledger.md> <events|gaps> -> one ledger's rounds in the translation's two forms, read alone
+  [ -f "${1:-}" ] || return 2
+  case "${2:-}" in events|gaps) ;; *) return 2 ;; esac
+  _translate_ledger_records "$1" | _translate_form "$2"
+}
+
+# A ROUND is a `## Δ<n> — D<n> [qualifier] <verb> ["<reply>"] (<who> <instant>)[: <title>]` heading, or a `- D<n> …`
+# bullet of that shape under a Δ (the rulings a step card folded in). The verbs are put and every word a ruling is
+# written with: ruled, re-ruled, amended, amended again, ratified, settled, final and withdrawn. verb= is the word as
+# written, a one-word qualifier before it kept with it, because the word is what the person said and the closed list
+# of event types does not move with it. A reply is said=; `D<n> ruled: <title> (<who> <instant>)` has none; a go
+# ledgered as `D<n> settled by <what> (<who> <instant>): "<reply>"` says its reply after the parenthesis and is
+# titled by what settled it. A tail after the parenthesis that is not `: <title>` is the title. A put's wait= is the
+# first line under its heading, what `decisions put` writes there. entry= is the Δ the round is written under, so a
+# decision put twice in the same words at two instants is two rounds, not one line repeated. The instant is kept as the heading writes it, local
+# clock and zone or a bare day: rewritten to UTC it would be a time the heading never held; one holding a `|` cannot
+# be written, so it is named. A heading of any other form, a reply not followed by its parenthesis among them, is
+# named whole by its first word and writes no round, because a verb or reply read out of other words would be a
+# guess. A fenced example is no round and no gap.
+_translate_ledger_records() {  # <design-ledger.md> -> its rounds as source records
   awk "$_TRANSLATE_AWK"'
     function stamp(at,   i) { if (!index(at, "|")) { emit(at); return }
       gap("at", "bar"); printf "e\t%s\t%s|at=\n", slot(T, ""), L; for (i = 1; i <= NG; i++) printf "g\t\t%s\n", G[i] }
-    index($0, "## ") != 1 { next }
-    { h = substr($0, 4); split(h, w, " "); ok = match(h, /^Δ[0-9]+ — D[0-9]+ (put \(|ruled ")/); said = ""
-      re = "[^()]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][^()]*\\): "
-      if (ok) { split(substr(h, 1, RLENGTH), x, " "); rest = substr(h, RLENGTH + 1) }
-      if (ok && x[4] == "put") { ok = match(rest, "^" re); paren = substr(rest, 1, RLENGTH - 3) }
-      else if (ok && (ok = match(rest, "\" \\(" re))) { said = substr(rest, 1, RSTART - 1); paren = substr(rest, RSTART + 3, RLENGTH - 6) }
-      if (!ok) { whole("decision", "heading=" w[1], "shape"); next }
-      title = substr(rest, RSTART + RLENGTH); match(paren, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)
-      begin("decision", "d", x[3]); put("verb", x[4]); if (x[4] == "ruled") put("said", said)
-      put("by", trim(substr(paren, 1, RSTART - 1))); put("title", trim(title)); stamp(substr(paren, RSTART)) }' "$f"
+    function lead(s,   i, n, vs, c) {
+      n = split("amended again|amended|re-ruled|ruled|ratified|settled|final|withdrawn|put", vs, "|")
+      for (i = 1; i <= n; i++) if (index(s, vs[i]) == 1) { c = substr(s, length(vs[i]) + 1, 1); if (c == " " || c == ":") return vs[i] }
+      return ""
+    }
+    function flush() { if (PD != "") { begin("decision", "d", PD); for (i = 1; i <= RN; i++) put(RK[i], RV[i]); if (PW != "") put("wait", PW); stamp(PA) } PD = "" }
+    function round(s, head,   n, rest, verb, qual, reply, hasreply, q, i, depth, inq, ch, fin, c, paren, tail, title, who, by) {
+      if (!match(s, /^D[0-9]+ /)) return 0
+      n = substr(s, 1, RLENGTH - 1); rest = substr(s, RLENGTH + 1); verb = lead(rest); qual = ""
+      if (verb == "") {
+        if (!match(rest, /^[A-Za-z][A-Za-z0-9_-]* /)) return 0
+        qual = substr(rest, 1, RLENGTH - 1); rest = substr(rest, RLENGTH + 1); verb = lead(rest); if (verb == "") return 0
+      }
+      rest = substr(rest, length(verb) + 1); hasreply = 0; reply = ""; paren = ""; title = ""
+      if (substr(rest, 1, 1) == ":") {
+        rest = trim(substr(rest, 2)); if (substr(rest, length(rest)) != ")") return 0
+        for (i = length(rest) - 1; i >= 1; i--) {
+          if (substr(rest, i, 2) != " (") continue
+          c = substr(rest, i + 2, length(rest) - i - 2)
+          if (match(c, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) { paren = c; title = substr(rest, 1, i - 1); break }
+        }
+        if (paren == "") return 0
+      } else {
+        by = ""
+        if (verb == "settled" && index(rest, " by ") == 1) { q = index(substr(rest, 5), " ("); if (q == 0) return 0; by = substr(rest, 5, q - 1); rest = substr(rest, q + 4) }
+        if (index(rest, " \"") == 1) { rest = substr(rest, 3); q = index(rest, "\""); if (q == 0) return 0; reply = substr(rest, 1, q - 1); rest = substr(rest, q + 1); hasreply = 1 }
+        if (index(rest, " (") != 1) return 0
+        rest = substr(rest, 3); depth = 1; inq = 0; fin = 0
+        for (i = 1; i <= length(rest); i++) {
+          ch = substr(rest, i, 1)
+          if (ch == "\"") inq = !inq
+          else if (!inq && ch == "(") depth++
+          else if (!inq && ch == ")" && --depth == 0) { fin = i; break }
+        }
+        if (!fin) fin = index(rest, ")")
+        if (!fin) return 0
+        paren = substr(rest, 1, fin - 1); tail = substr(rest, fin + 1)
+        if (index(tail, ": ") == 1) title = substr(tail, 3); else { title = tail; sub(/^[ \t:,;]+/, "", title) }
+        if (by != "") {
+          if (!hasreply && match(title, /^"[^"]*"[ \t]*$/)) { reply = substr(title, 2, index(substr(title, 2), "\"") - 1); hasreply = 1 }
+          title = by
+        }
+      }
+      if (!match(paren, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) return 0
+      who = trim(substr(paren, 1, RSTART - 1)); sub(/[ \t,]+$/, "", who); if (who == "") return 0
+      flush(); PD = n; RN = 0; PW = ""; PA = trim(substr(paren, RSTART))
+      if (DELTA != "") { RK[++RN] = "entry"; RV[RN] = DELTA }
+      RK[++RN] = "verb"; RV[RN] = (qual == "" ? "" : qual " ") verb
+      if (hasreply) { RK[++RN] = "said"; RV[RN] = reply }
+      RK[++RN] = "by"; RV[RN] = who; RK[++RN] = "title"; RV[RN] = trim(title)
+      WAIT = (verb == "put" && head); if (!WAIT) flush()
+      return 1
+    }
+    { sub(/\r$/, "") }
+    /^[ \t]*```/ { fence = !fence; next }
+    fence { next }
+    index($0, "## ") == 1 { WAIT = 0; h = substr($0, 4); s = h; split(h, w, " "); DELTA = (w[1] ~ /^Δ[0-9]/) ? w[1] : ""
+      if (sub(/^Δ[0-9]+ — /, "", s) && round(s, 1)) next
+      flush(); whole("decision", "heading=" w[1], "shape"); next }
+    WAIT && NF { PW = $0; WAIT = 0; flush() }
+    /^- D[0-9]+ / { round(substr($0, 3), 0) }
+    END { flush() }' "$1"
 }
 
 translate_source _translate_debts
@@ -373,7 +498,7 @@ _translate_debts() {  # <plan> -> the debt ledger's lines: each a debt, burned= 
   # of any other form, a note in the last cell or prose, is named whole and writes no debt: read as open
   # or burned, it would be a guess.
   local f
-  f="$(_translate_record "$1" debt.md)" || return 0
+  f="$(_translate_record "$1" debt.md)" || return; [ -n "$f" ] || return 0
   awk -F' [|] ' "$_TRANSLATE_AWK"'
     /^#/ || /^[ \t]*$/ { next }
     { split("", c); for (i = 1; i <= NF; i++) c[i] = trim($i); b = c[6] }

@@ -9,6 +9,7 @@
 #                     weeks out, a held task naming what it waits on, and a card head with no invented wave
 #   §FACTS            three goals declared, met, not met and not measured; a close at 1× under three landings;
 #                     the suites and the whole run named
+#   §GATE             a rehearsed world whose own gate is full stops at its landing's WAITING
 #
 # EACH SECTION, ONE SHAPE. The sandbox's own `hooks/session-poker.sh sitrep <plan>` prints the sheet, whose `ask:`
 # lines are exactly the state's asks; a judgment written from the sheet, answering every open ask, renders through
@@ -75,5 +76,12 @@ section "§FACTS: the sheet's facts read true: every line a measurement naming w
 # goal, or a goal reads another status; the close is scaled by one or two landed tasks; a review that passed and then
 # failed counts as both; a note counts the reads it leaves out.
 rt_facts_state clean
+
+section "§GATE: a rehearsed world whose own gate is full stops at the build row's landing"
+# fails-when: the rehearsal takes the landing line's WAITING as a landing, or its world's gate ignores its own config.
+mkdir -p "$WORLD_ROOT/full/config/bionic" && printf '1\n' > "$WORLD_ROOT/full/config/bionic/share"
+GA_RC=0; ( RH_WITHIN=5 rehearse single-verify "$WORLD_ROOT/full" ) > /dev/null 2> "$WORLD_ROOT/full.err" || GA_RC=$?
+expect_eq "GA-1 a share of 1% under 30% used admits nothing: rehearse stops (exit 1)" "1" "$GA_RC"
+expect_contains "GA-1b …at the build row's ready, WAITING (rc 75)" "the build row says ready failed (rc 75)" "$(cat "$WORLD_ROOT/full.err")"
 
 finish

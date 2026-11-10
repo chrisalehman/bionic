@@ -29,29 +29,20 @@
 # branch name holds no blank, so the first word is the whole of every value a plan carries; close-out's old reader
 # took the rest of the line, trimmed, which differs only on a line no branch can be.
 #
-# NEEDS lib/run.sh (`_run_lines`, the newline rule: CRLF and a lone CR both end a line). Both callers source it first.
+# NEEDS lib/run.sh (`_run_lines`, the newline rule: CRLF and a lone CR both end a line), which loads lib/plan-read.sh,
+# the parser the header helpers read through. Both callers source it first.
 # The goal readers also ask lib/units.sh `units_rows` and lib/proof.sh `proof_last_line` when loaded; without them a
 # one-file landing or a whole run reads as not measured.
 # Sourced, never executed; bash 3.2.
 
-_PLAN_IB_SDLC_AWK='
-  /^[[:space:]]*```/ { fence = !fence; next }
-  fence { next }
-  /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-  insdlc && /^[[:space:]]*integration-branch[[:space:]]*:/ {
-    v = $0; sub(/^[[:space:]]*integration-branch[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v)
-    gsub(/^["\047]|["\047]$/, "", v); print v; exit }'
-_PLAN_IB_FM_AWK='
-  NR == 1 && $0 == "---" { f = 1; next }
-  f && $0 == "---" { exit }
-  f && /^[[:space:]]*integration-branch[[:space:]]*:/ {
-    v = $0; sub(/^[[:space:]]*integration-branch[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v)
-    gsub(/^["\047]|["\047]$/, "", v); print v; exit }'
+# Both reads are the reader-owned parser's (lib/plan-read.sh): the SDLC State section's key line, then the header key.
 plan_integration_branch() {  # <plan>
   local plan="${1:-}" ib
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
-  ib="$(_run_lines "$plan" | awk "$_PLAN_IB_SDLC_AWK")"
-  [ -n "$ib" ] || ib="$(_run_lines "$plan" | awk "$_PLAN_IB_FM_AWK")"
+  ib="$(plan_read_section "$plan" SDLC integration-branch)" || ib="$(plan_read_header "$plan" integration-branch)" || ib=""
+  ib="${ib#integration-branch=}"; ib="${ib%%[[:space:]]*}"
+  case "$ib" in [\'\"]*) ib="${ib#?}" ;; esac
+  case "$ib" in *[\'\"]) ib="${ib%?}" ;; esac
   printf '%s' "$ib"
   return 0
 }
@@ -132,18 +123,10 @@ plan_requirements_file() {
 plan_goal_paragraph() {
   local f="${1:-}"
   [ -n "$f" ] && [ -f "$f" ] || return 0
-  _run_lines "$f" | awk '
-    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
-    function clean(s) { gsub(/`/, "", s); gsub(/\t/, " ", s); return trim(s) }
-    NR == 1 && $0 == "---" { fm = 1; next }
-    fm == 1 && $0 == "---" { fm = 0; next }
-    fm == 1 { next }
-    /^## / { sec = (substr($0, 4) == "Goal"); next }
-    /^### / { next }
-    sec && !done {
-      if (trim($0) == "") { if (g != "") done = 1 }
-      else g = g (g == "" ? "" : " ") clean($0)
-      next }
+  plan_read_section "$f" Goal | awk '
+    function clean(s) { gsub(/`/, "", s); gsub(/\t/, " ", s); sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    /^[ \t]*$/ { done = 1 }
+    !done { g = g (g == "" ? "" : " ") clean($0) }
     END { if (g != "") print g }'
   return 0
 }
@@ -297,11 +280,8 @@ _plan_theme_reads() {
 plan_goals() {
   local plan="${1:-}"
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
-  _run_lines "$plan" | awk '
-    NR == 1 && $0 == "---" { f = 1; next }
-    f && $0 == "---" { exit }
-    f && /^[[:space:]]*goals[[:space:]]*:/ {
-      v = $0; sub(/^[[:space:]]*goals[[:space:]]*:[[:space:]]*/, "", v)
+  plan_read_header "$plan" goals all | awk '
+    { v = substr($0, 7)
       n = split(v, g, /;/)
       for (i = 1; i <= n; i++) {
         s = g[i]; gsub(/^[ \t]+|[ \t]+$/, "", s); if (s == "") continue
@@ -407,8 +387,8 @@ plan_goal_sheet() {
 # WHERE A TITLE'S SENTENCE ENDS: at a period followed by a space and an uppercase letter, or by the end of the text.
 # `vs. the` and `e.g. a` are followed by a lowercase word, so an abbreviation never ends one, and the rule keeps no
 # word list. plan_cut <text> sets PLAN_CUT_HEAD (the text through that period) and PLAN_CUT_REST (what follows it) and
-# returns 0 when the text has such a period; otherwise it returns 1 with the whole text in PLAN_CUT_HEAD. The card's
-# awk twin for an untagged decision bullet (card.sh `titlesent`) reads the same rule.
+# returns 0 when the text has such a period; otherwise it returns 1 with the whole text in PLAN_CUT_HEAD. The one home
+# of the rule: the cards cut a decision bullet with no bold span here too.
 plan_cut() {
   local t="${1:-}" head=""
   PLAN_CUT_HEAD="$t"; PLAN_CUT_REST=""

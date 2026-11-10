@@ -17,13 +17,13 @@
 # again on the second run and cheap to ask. The branch sweep asks `git cherry`, then
 # deletes, then asks `rev-parse` whether the branch is gone. The wipe counts what is left.
 # The continuation and the epic row look for what they would write before writing it. The
-# whole SCRIPT is idempotent by the same rule at a larger grain: a plan whose `- Step 9:`
-# line already carries `delivered:` is a closed run, and a second `run` says `already
-# closed` and touches nothing (AC-4.4). That marker is `lib/run.sh`'s own — the one every
-# hook in this tree already reads — so there is no second notion of "closed" to drift.
+# whole SCRIPT is idempotent by the same rule at a larger grain: a run the reader reads
+# delivered is closed, and a second `run` says `already closed` and touches nothing.
+# The delivery is the `delivered:` this script writes on the Step 9 line, read by the reader
+# every other surface asks, so there is no second notion of "closed" to drift.
 #
 # THE GATE IS ASKED FIRST, AND ASKED AGAIN AS THE ATTESTATION (critic3 P-1, wave-23 T17).
-# Before the first act, `run` refuses unless `current:` reads 8 and then writes phase 8's
+# Before the first act, `run` refuses unless the run is at Step 8 and then writes phase 8's
 # block into a scratch copy of the plan and asks the real gate about the copy; a refusal
 # there ends the run with nothing touched, and `check` asks the same question, so the two
 # verbs agree on every plan.
@@ -299,41 +299,43 @@ VERSION="$(co_version)"
 # line, the epic row and the continuation header name no version at all.
 RELEASE="$(plan_frontmatter_get "$PLAN" release)"
 
-# ─── The plan as a document ──────────────────────────────────────────────────
-
-# sdlc_section -> the `## SDLC State` section, line endings normalized, terminated by the
-# next flush-left `## ` heading. The same extraction the evidence gate makes (walls.sh
-# :1372) so this script and the wall that validates it read one section.
-sdlc_section() {
-  normalize_newlines "$PLAN" | awk '
-    /^## SDLC State/ { f = 1; next }
-    f && /^## / { exit }
-    f { print }'
+# ─── The run, as the reader answers it ───────────────────────────────────────
+#
+# EVERY FACT OF THE RUN THIS SCRIPT READS IS A READER ANSWER: the step and the delivery, the landings, the trees, the
+# reviews, the deferrals and the debts. The reader (lib/reader.sh) reads the run's log, or translates a run kept in the
+# older homes as it reads them, so a fact the log alone holds is read here as every other reader reads it. One fold
+# serves every answer: the proof library keeps it (lib/proof.sh `_proof_facts`), and the judge this script asks reads
+# the same one. What this script still reads of the plan is what the plan authors (its header, its rows' kinds) and
+# what its own writers need: the Step 8 and Step 9 blocks are written into `## SDLC State`.
+_proof_reader_load || _co_refuse "the reader (lib/reader.sh) cannot be loaded from $CO_LIB, so the run's facts cannot be read"
+co_ask() {  # <reader question's function> [args] -> its answer, over the kept fold of this run
+  local q="$1"; shift
+  _proof_ask "$PLAN" "$q" "$PLAN" "$@"
+}
+co_facts() {  # <event type> [<field>] -> the standing facts of that type, or that field of each, in fact order
+  _proof_facts "$PLAN" | awk -F'|' -v t="$1" -v k="${2:-}" "$_READER_AWK"'ev() == t { if (k == "") print; else print line_kv(k) }'
+}
+co_step9_at() {  # -> the instant of the run's delivery, or nothing
+  _proof_facts "$PLAN" | awk -F'|' "$_READER_AWK"'ev() == "step" && line_kv("n") == "9" { t = line_kv("at") } END { print t }'
 }
 
-# sdlc_header <key> -> the value of a flush-left `<key>: <value>` line in that section.
-sdlc_header() {
-  local key="$1" section="$2"
-  grep -E "^[[:space:]]*${key}[[:space:]]*:" <<< "$section" \
-    | head -1 \
-    | sed -E "s/^[[:space:]]*${key}[[:space:]]*:[[:space:]]*//" \
-    | sed -E 's/[[:space:]]+$//'
-  return 0
-}
-
-SECTION="$(sdlc_section)"
-[ -n "$SECTION" ] || _co_refuse "$PLAN carries no ## SDLC State section"
+# The writers' target: the Step 8 and Step 9 blocks go into `## SDLC State`, so a plan without one cannot be closed.
+awk '/^## SDLC State/ { f = 1; exit } END { exit !f }' "$PLAN" 2>/dev/null \
+  || _co_refuse "$PLAN carries no ## SDLC State section to hold the Step 8 and Step 9 blocks"
 # THE ONE READER OF THE INTEGRATION BRANCH (wave-39 T16; D18, AC-12.1): lib/plan.sh `plan_integration_branch`,
 # `## SDLC State` first, then the frontmatter, as session-poker.sh `handoff` and `release-check` read it.
 INTEGRATION="$(plan_integration_branch "$PLAN")"
 # THE ONE READER OF THE WORKING BRANCH (wave-35 T10; A-orch-16, wave-35 T7): lib/run.sh `plan_working_branch`,
 # `## SDLC State` first, then the frontmatter, as `ready`, the stop wall, the card and the proof judge read it.
 WORKING="$(plan_working_branch "$PLAN")"
-# `run` closes a plan at Step 8 and nowhere else (critic3 P-3, wave-23 T17): the gate judges
-# whatever step `current:` names, so below 8 its refusal would be about a step this script
-# never writes, and above 8 there is nothing left for it to close.
-CURRENT="$(sdlc_header current "$SECTION")"
-STEP_REFUSAL="the plan reads current: ${CURRENT:-<none>} — advance the plan to Step 8 first"
+# `run` closes a run at Step 8 and nowhere else: the gate judges
+# whatever step the run is at, so below 8 its refusal would be about a step this script
+# never writes, and above 8 there is nothing left for it to close. The step and the delivery
+# are the reader's `step`: n= and state=.
+CO_STEP="$(co_ask reader_q_step)"
+CURRENT="$(printf '%s\n' "$CO_STEP" | sed -n 's/^n=//p')"
+CO_STATE="$(printf '%s\n' "$CO_STEP" | sed -n 's/^state=//p')"
+STEP_REFUSAL="the run is at Step ${CURRENT:-<none>} — advance it to Step 8 first"
 [ "$CURRENT" != 8 ] || [ "$VERB" = closed-form ] || CO_HOLD=yes
 
 # A PARKED WAVE IS CLOSED WITHOUT THE MERGE ACT (wave-38 T15; D17, REQ-4 AC-4.3). Parking requires an explicit
@@ -401,14 +403,14 @@ co_branch_line() {
 }
 
 # `closed-form [<instant>]` (wave-38 T37): the two lines, one each, for a plan close-out closed or one it would close;
-# read-only, and asked before the closed run's `already closed`. The instant is the argument, else the first word after
-# the Step-9 line's `delivered:` when it is ISO-shaped (close-out writes its NOW there), else `?`. The integration
+# read-only, and asked before the closed run's `already closed`. The instant is the argument, else the instant of the
+# run's delivery, the reader's step 9 (close-out writes its NOW on that line), else `?`. The integration
 # branch is `plan_integration_branch`'s, as every verb here reads it (wave-39 T16).
 if [ "$VERB" = closed-form ]; then
   INTEGRATION="${INTEGRATION:-(none named)}"; WORKING="${WORKING:-(none named)}"
   NOW="$CO_AT"
   if [ -z "$NOW" ]; then
-    NOW="$(normalize_newlines "$PLAN" | awk '/^[[:space:]]*-?[[:space:]]*Step[[:space:]]+9[[:space:]]*:.*delivered:/ { s = $0; sub(/^.*delivered:[[:space:]]*/, "", s); sub(/[[:space:]].*$/, "", s); print s; exit }')"
+    NOW="$(co_step9_at)"
     case "$NOW" in [0-9][0-9][0-9][0-9]-*) : ;; *) NOW="?" ;; esac
   fi
   printf '%s\n%s\n' "$(co_resume_point)" "$(co_branch_line)"
@@ -420,7 +422,7 @@ fi
 # AC-4.4 FIRST, before any tool is even looked for: a closed run is not a run this script
 # has anything to say about, and a second call must be able to answer that on a machine
 # where jq has since been uninstalled.
-if grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' <<< "$(normalize_newlines "$PLAN")"; then
+if [ "$CO_STATE" = delivered ]; then
   say "already closed"
   exit 0
 fi
@@ -516,8 +518,13 @@ act_merge() {
 # engaged marker for it and for every verb a refusal later in the tail leaves to the person; the marker goes last.
 LANDS_LINE=""
 co_lands_rows() {  # -> the open integrate and close rows' ids, space-joined, in table order; nothing when none
-  units_rows "$PLAN" 2>/dev/null | awk -F'\t' '($3 == "integrate" || $3 == "close") && ($10 == "pending" || $10 == "active") {
-    printf "%s%s", (n++ ? " " : ""), $1 } END { if (n) print "" }'
+  # A row is open while the reader holds no landing of it and the plan has not dropped it; the kind is the row's own cell.
+  units_rows "$PLAN" 2>/dev/null | CO_SHUT=" $(co_facts published row | tr '\n' ' ') $(co_dropped) " awk -F'\t' '
+    ($3 == "integrate" || $3 == "close") && !index(ENVIRON["CO_SHUT"], " " $1 " ") { printf "%s%s", (n++ ? " " : ""), $1 }
+    END { if (n) print "" }'
+}
+co_dropped() {  # -> the rows the plan drops, space-joined: the reader's dropped rows (lib/plan-read.sh), owed no more
+  plan_read_dropped "$PLAN" 2>/dev/null | tr '\n' ' '
 }
 co_lands_refusal() {  # <rows> -> why this session cannot land them, or nothing
   local rows="$1" run bound
@@ -565,27 +572,23 @@ act_lands() {  # <rows> -> each landed by row-landed at the integration head; LA
 # work that exists only on that branch, and deleting the branch would be the last moment
 # anyone could have noticed.
 WT_LINE=""
-# wt_branches -> the registered trees' branches, in `## Tasks` table order: for each
-# row whose `worktree` cell is filled (non-empty, not `—`), `wt/<basename of the
-# cell>` when this repository actually holds that branch (D5, ADR-032; A6 —
-# spawn-worktree.sh's own tree<->branch contract, pinned at
-# tests/spawn-worktree.test.sh's Group 11). A row naming a tree this repository does
-# not hold names nothing to the census — silently absent, the same as an unfilled
-# cell; there is nothing else for this function to say about it. `units_rows` returns
-# rc 1 for a plan with no `## Tasks` table at all, which this treats the same as zero
-# rows: an empty census, not a fault.
+# wt_branches -> the registered trees' branches, in the order the reader holds the rows'
+# trees: for each tree fact, `wt/<basename of its path>` when this repository actually
+# holds that branch, each branch once (spawn-worktree.sh's own tree<->branch contract,
+# pinned at tests/spawn-worktree.test.sh's Group 11). A tree this repository does not
+# hold names nothing to the census, the same as a row with none; a run with no trees is
+# an empty census, not a fault.
 wt_branches() {
-  local rows line cell b
-  rows="$(units_rows "$PLAN")" || return 0
-  [ -n "$rows" ] || return 0
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    cell="$(units_field "$line" worktree)"
+  local cell b seen=" "
+  # The register is the reader's tree facts: a row's tree, as its `worktree` cell or its tree event names it.
+  while IFS= read -r cell; do
     case "$cell" in ''|'—') continue ;; esac
     cell="${cell%/}"
     b="wt/${cell##*/}"
+    case "$seen" in *" $b "*) continue ;; esac
+    seen="$seen$b "
     git -C "$ROOT" show-ref --verify --quiet "refs/heads/$b" && printf '%s\n' "$b"
-  done <<< "$rows"
+  done <<< "$(co_facts tree path)"
   return 0
 }
 
@@ -864,12 +867,10 @@ co_iso_secs() {  # <text> -> its first ISO-8601 UTC instant as YYYY-MM-DDTHH:MM:
     20) printf '%s' "$iso" ;;
   esac
 }
-co_window_start() {  # -> the run's Step-4 instant, else its approval's, as YYYY-MM-DDTHH:MM:SSZ; nothing when neither
-  local s step4 from
-  s="$(sdlc_section)"
-  step4="$(printf '%s\n' "$s" | awk '/^- Step 4:/ { f = 1; print; next } f && /^[[:space:]]+[^[:space:]]/ && !/^[[:space:]]*- / { print; next } { f = 0 }')"
-  from="$(co_iso_secs "$step4")"
-  [ -n "$from" ] || from="$(co_iso_secs "$(sdlc_header approved-by "$s")")"
+co_window_start() {  # -> the run's Step-4 instant, else its plan approval's, as YYYY-MM-DDTHH:MM:SSZ; nothing when neither
+  local from
+  from="$(co_iso_secs "$(co_facts step | awk -F'|' "$_READER_AWK"'line_kv("n") == "4" { print line_kv("at"); exit }')")"
+  [ -n "$from" ] || from="$(co_iso_secs "$(co_facts approval | awk -F'|' "$_READER_AWK"'line_kv("key") == "step3" { print line_kv("at"); exit }')")"
   printf '%s' "$from"
 }
 co_governed_rows() {  # <window start|""> -> "<started>\t<root>\t<commit, or installed <version>>" per record in it
@@ -1068,75 +1069,90 @@ CONT_LINE=""
 # OPEN is what lib/proof.sh `proof_findings_owed` says: a finding with a `deferred:` line whose
 # effective priority is `defer`, rated through the one place the effective rating is applied. A
 # `check:` line alone is a check owed, not a deferral. The sentence is the plan line's ` stated="..."`
-# field copied as it stands (a `\` or a `"` in it is already written `\\` or `\"`), `-` when the
-# line has none; a deferral is carried whether or not it is stated. The reader of the line is
-# `deferral_line`'s twin in hooks/session-poker.sh, which reads the same line to print `stated` or
-# `unstated` at the release check.
-co_deferral_line() {  # <record>#<n> -> the first deferred: line of ## SDLC State naming it
-  awk -v id="$1" '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && !found && /^deferred:[ \t]/ { split($0, f, /[ \t]+/); if (f[2] == id) { found = 1; line = $0 } }
-    END { if (found) print line; exit (found ? 0 : 1) }' "$PLAN"
-}
+# field as the deferral wrote it (a `\` or a `"` in it is already written `\\` or `\"`), `-` when it
+# has none; a deferral is carried whether or not it is stated. The sentence is the first deferral of the
+# finding among the run's events (lib/reader.sh `reader_events`): the standing finding is its newest
+# word, and a move written after the deferral replaces it without the sentence.
 co_deferrals() {  # -> the lines, or nothing: the deferrals, then the unburned debt (co_debts)
-  local id s r p t l st
-  proof_findings_owed "$PLAN" 2>/dev/null | while read -r id s r p t; do
-    [ "$p" = defer ] || continue
-    l="$(co_deferral_line "$id")" || continue
-    st="$(printf '%s\n' "$l" | sed -n 's/^.* stated="\(.*\)"[[:space:]]*$/\1/p')"
-    printf 'deferred: %s %s %s %s stated="%s" from=%s\n' "$id" "$s" "$r" "$t" "${st:--}" "$WAVE_SLUG"
-  done
+  local id s r p t owed said st
+  owed="$(proof_findings_owed "$PLAN" 2>/dev/null | awk '$4 == "defer"')"
+  if [ -n "$owed" ]; then
+    # `<record>#<n><TAB>y<stated>` for each finding's first deferral, in event order: one read of the run's events
+    said="$(reader_events "$PLAN" 2>/dev/null | awk -F'|' "$_READER_AWK"'
+      ev() == "finding" && line_kv("to") == "deferred" && !seen[line_kv("ref")]++ { printf "%s\ty%s\n", line_kv("ref"), line_kv("stated") }')"
+    while read -r id s r p t; do
+      st="$(printf '%s\n' "$said" | CO_ID="$id" awk -F'\t' '$1 == ENVIRON["CO_ID"] { print $2; exit }')"
+      [ -n "$st" ] || continue
+      st="${st#y}"
+      printf 'deferred: %s %s %s %s stated="%s" from=%s\n' "$id" "$s" "$r" "$t" "${st:--}" "$WAVE_SLUG"
+    done <<< "$owed"
+  fi
   co_debts
 }
 
-# THE DEBT THE CONTINUATION CARRIES (wave-30 T22; D2, P2, AC-11.2). Every item of the run's debt ledger
-# (lib/proof.sh `proof_debt_ledger_path`, `proof_debt_items`) not yet burned, in ledger order, after the
-# deferrals and under the same heading, in the one form:
+# THE DEBT THE CONTINUATION CARRIES. Every debt of the run not yet burned, the reader's debt facts in their order,
+# after the deferrals and under the same heading, in the one form:
 #
 #     debt: <concept> <kind> "<sites>" touches=<N> raised-by=<record> from=<wave name>
 #
 # A burned item is paid and is not carried. The merge into an existing continuation is the deferrals'
 # (co_cont_missing), so a line already under the heading is not written twice.
 #
-# ONLY A LINE THAT PARSES IS CARRIED (wave-36 T13; D13, AC-7.8; A-orch-1). The line is rendered and held to
-# the one grammar by lib/debt.sh `debt_carry_lines`, the reader `debt add` and card.sh agree with; a ledger
-# line it cannot carry is never written here, and `run` refuses it, naming it, before its first act
-# (co_debt_refusal) — so the next run's Step-1 card is never refused on a line this run carried.
+# ONLY A LINE THAT PARSES IS CARRIED. Each line is held to the one grammar, lib/debt.sh `debt_line_ok`, which
+# `debt add` and card.sh read by too; a debt it refuses is never written here, and `run` refuses it, naming it,
+# before its first act (co_debt_refusal), so the next run's Step-1 card is never refused on a line this run carried.
+co_debt_lines() {  # -> `ok<TAB><line>` or `bad<TAB><line>` per debt not burned, in the reader's order
+  local l
+  co_facts debt | awk -F'|' -v w="$WAVE_SLUG" "$_READER_AWK"'line_kv("burned") == "" {
+      printf "debt: %s %s \"%s\" touches=%s raised-by=%s from=%s\n", line_kv("concept"), line_kv("kind"), line_kv("sites"), line_kv("touches"), line_kv("raised-by"), w }' \
+    | while IFS= read -r l; do
+        if debt_line_ok "$l"; then printf 'ok\t%s\n' "$l"; else printf 'bad\t%s\n' "$l"; fi
+      done
+}
 co_debts() {
-  local led
-  led="$(proof_debt_ledger_path "$ROOT" "$PLAN" 2>/dev/null)" || return 0
-  debt_carry_lines "$led" "$WAVE_SLUG" | awk -F'\t' '$1 == "ok" { print substr($0, 4) }'
+  co_debt_lines | awk -F'\t' '$1 == "ok" { print substr($0, 4) }'
 }
 
-# co_debt_refusal -> the sentence naming the first debt.md table row the continuation could not carry
-# (debt_carry_lines' `bad`), or nothing when every row parses. `run` refuses on it; `check` says it would. A line
-# that is no table row at all (prose, debt_carry_lines' `skip`) is not refused: co_debt_notes names it (wave-38 T15;
-# AC-4.4), and it is never carried.
+# co_debt_gaps -> the debt lines of the run's version-14 ledger the reader could not read, as its translation
+# names them (`gap/v1|ev=debt|concept=<c>|…` for a row, `…|line=<n>|…` for a line with no concept, prose); nothing
+# for a run with a log, whose debts are its events.
+CO_DEBT_GAPS=""; CO_DEBT_GAPS_READ=no
+co_debt_gaps() {
+  if [ "$CO_DEBT_GAPS_READ" = yes ]; then printf '%s' "$CO_DEBT_GAPS"; return 0; fi
+  [ ! -f "$(reader_log "$PLAN" 2>/dev/null)" ] || return 0
+  declare -F translate >/dev/null 2>&1 || . "$CO_LIB/translate.sh" >/dev/null 2>&1 || return 0
+  translate "$PLAN" gaps 2>/dev/null | /usr/bin/grep '^gap/v1|ev=debt|' | /usr/bin/grep '|field=ev|'
+  return 0
+}
+co_debt_gaps_load() {  # -> the gaps read once for this process: the refusal and the notes both ask them
+  CO_DEBT_GAPS="$(co_debt_gaps)"; [ -z "$CO_DEBT_GAPS" ] || CO_DEBT_GAPS="$CO_DEBT_GAPS"$'\n'
+  CO_DEBT_GAPS_READ=yes
+}
+
+# co_debt_refusal -> the sentence naming the first debt the continuation could not carry: a ledger row the reader
+# could not read, or a debt whose carried line the grammar refuses; nothing when every debt parses. `run` refuses on
+# it; `check` says it would. A line that is no row at all (prose) is not refused: co_debt_notes names it, and it is
+# never carried.
 co_debt_refusal() {
   local led bad
-  led="$(proof_debt_ledger_path "$ROOT" "$PLAN" 2>/dev/null)" || return 0
-  bad="$(debt_carry_lines "$led" "$WAVE_SLUG" | awk -F'\t' '$1 == "bad" { print substr($0, 5); exit }')"
+  led="$(proof_debt_ledger_path "$ROOT" "$PLAN" 2>/dev/null)" || led="the debt ledger"
+  bad="$(co_debt_gaps | awk -F'|' '$3 ~ /^concept=/ { print "the row of " $3; exit }')"
+  [ -n "$bad" ] || bad="$(co_debt_lines | awk -F'\t' '$1 == "bad" { print substr($0, 5); exit }')"
   [ -n "$bad" ] || return 0
-  printf '%s carries a line that does not parse as a debt line: %s' "${led#"$(docs_root "$ROOT")"/}" "$bad"
+  printf '%s carries a line that does not parse as a debt line: %s' "${led#"$DROOT"/}" "$bad"
 }
 
 # co_debt_notes -> one `close-out: debt.md:<n> skipped — not a ledger row` line per prose line of the ledger, in order
 co_debt_notes() {
-  local led
-  led="$(proof_debt_ledger_path "$ROOT" "$PLAN" 2>/dev/null)" || return 0
-  debt_carry_lines "$led" "$WAVE_SLUG" | awk -F'\t' -v f="${led##*/}" '$1 == "skip" { printf "close-out: %s:%s skipped — not a ledger row\n", f, $2 }'
+  co_debt_gaps | awk -F'|' '$3 ~ /^line=/ { printf "close-out: debt.md:%s skipped — not a ledger row\n", substr($3, 6) }'
 }
 
-# THE CARD'S DEBT LINE (wave-30 T22; P2, AC-11.4): `debt: touched <N> · burned <M>` for the run, N the
-# touches summed over every item of its ledger, M the items burned (`proof_debt_counts`), never the
-# ledger's length; `touched 0 · burned 0` when the run kept none, so the line is never omitted.
+# THE CARD'S DEBT LINE: `debt: touched <N> · burned <M>` for the run, N the touches summed over every debt the reader
+# holds, M the debts burned, never the ledger's length; `touched 0 · burned 0` when the run kept none, so the line
+# is never omitted.
 co_debt_card() {
-  local led
-  led="$(proof_debt_ledger_path "$ROOT" "$PLAN" 2>/dev/null)" || led=""
-  set -- $(proof_debt_counts "$led" 2>/dev/null)
-  printf 'debt: touched %s · burned %s\n' "${1:-0}" "${2:-0}"
+  co_facts debt | awk -F'|' "$_READER_AWK"'{ t += line_kv("touches"); if (line_kv("burned") != "") b++ }
+    END { printf "debt: touched %d · burned %d\n", t, b }'
 }
 
 # THE DEFERRALS THIS RUN INHERITED AND DID NOT SETTLE (wave-28 T43; D21, AC-8.10). The run's
@@ -1173,11 +1189,10 @@ co_carried() {  # -> every inherited deferred: line deferred again or left undis
 # carried as the old continuation wrote it, its `from=` kept, unless the ledger holds its concept and
 # kind, whose own line (or burn) is the answer. Before this it was dropped at the next close-out.
 co_carried_debts() {  # -> the inherited debt: lines whose concept and kind the run's ledger lacks
-  local led="" have="" out
+  local have="" out
   out="$(bash "$CO_SCRIPTS/card.sh" inherited-debt "$(co_requirements)" 2>/dev/null)" || return 1
   [ -n "$out" ] || return 0
-  led="$(proof_debt_ledger_path "$ROOT" "$PLAN" 2>/dev/null)" || led=""
-  [ -z "$led" ] || [ ! -f "$led" ] || have="$(proof_debt_items "$led" 2>/dev/null | awk -F '\t' '{ print $1 "\t" $2 }')"
+  have="$(co_facts debt | awk -F'|' "$_READER_AWK"'{ print line_kv("concept") "\t" line_kv("kind") }')"
   printf '%s\n' "$out" | CO_HAVE="$have" awk '
     BEGIN { n = split(ENVIRON["CO_HAVE"], h, "\n"); for (i = 1; i <= n; i++) if (h[i] != "") held[h[i]] = 1 }
     $1 == "debt:" && !(($2 "\t" $3) in held) { print }'
@@ -1399,23 +1414,21 @@ co_inherited_section() {
 # co_task_count -> the build rows of the plan's ## Tasks table that were not dropped: the tasks the
 # template says went RED then GREEN. Zero when the plan carries no table.
 co_task_count() {
-  units_rows "$PLAN" 2>/dev/null | awk -F'\t' '$3 == "build" && $10 != "dropped" { n++ } END { print n + 0 }'
+  units_rows "$PLAN" 2>/dev/null | CO_DROP=" $(co_dropped) " awk -F'\t' '$3 == "build" && !index(ENVIRON["CO_DROP"], " " $1 " ") { n++ }
+    END { print n + 0 }'
 }
 
 # co_reviews_text -> `Reviews: <question> <scope> <result> (<reader>); …. ADRs: <cell>.`, one entry per
-# question and scope in the order the plan first records them, each with the result of its LAST line.
+# question and scope in the order the reader first holds a review proof of it, each with the result of its newest.
 co_reviews_text() {
   local revs adrs
-  revs="$(awk "$(proof_awk)"'
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
+  revs="$(co_ask reader_q_reviews | awk -F'|' "$(proof_fact_awk)"'
+    proof_fact() && PROOF_KIND == "review" && PROOF_QUESTION != "" {
       k = PROOF_QUESTION " " PROOF_SCOPE
       if (!(k in res)) order[++n] = k
       res[k] = PROOF_RESULT " (" PROOF_READER ")"
     }
-    END { for (i = 1; i <= n; i++) printf "%s%s %s", (i > 1 ? "; " : ""), order[i], res[order[i]]; print "" }' "$PLAN")"
+    END { for (i = 1; i <= n; i++) printf "%s%s %s", (i > 1 ? "; " : ""), order[i], res[order[i]]; print "" }')"
   adrs="$(epic_adrs_cell 2>/dev/null)"
   case "$adrs" in ''|—) adrs="none shipped" ;; esac
   printf 'Reviews: %s. ADRs: %s.' "${revs:-none recorded}" "$adrs"
@@ -2353,6 +2366,7 @@ insert_archived() {
 # the answer, not an error, so this verb exits 0 either way.
 do_check() {
   local ws is verdict unreached branches wt_list wt_count wt_word wt_desc count missing CK_LINE
+  co_debt_gaps_load
   if [ "$CURRENT" = 8 ]; then
     say "step: current: 8"
   else
@@ -2527,6 +2541,7 @@ do_run() {
   # the plan `run` will write. Any refusal leaves
   # every branch, every tmp entry, the plan and the epic plan exactly as they were.
   [ "$CURRENT" = 8 ] || _co_refuse "$STEP_REFUSAL"
+  co_debt_gaps_load
   MISSING="$(presence_missing)"
   [ -z "$MISSING" ] || _co_held "the epic plan's row cannot be written" "$MISSING — nothing was done"
   # A DEBT LINE THAT WOULD NOT PARSE IS REFUSED HERE, NAMED (wave-36 T13; AC-7.8), never carried.

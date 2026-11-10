@@ -306,6 +306,10 @@ sched_plan_current() {  # <plan path> -> the current: value (digits only, sub-st
 gate_report() {  # <project root> <session id> -> sets SCHED_GATE_ROOM/SCHED_OWED, says one line
   local st rm used share keys
   sched_budget_read "$1" "${2:-}"
+  # The run's step, Step-3 approval and order are the reader's, loaded once here for every arm that decides
+  # and every fill question after it, so the tick and its fill never read the two from different places.
+  [ -z "${SCHED_PLAN:-}" ] || [ "$POKER_RUN_OPEN" = unreadable ] || [ "${_FILL_ORDER_PLAN:-}" = "$SCHED_PLAN" ] \
+    || ! declare -F fill_facts_load >/dev/null 2>&1 || fill_facts_load "$SCHED_PLAN"
   SCHED_GATE_ROOM=no; SCHED_OVER=no; SCHED_GATE_LOAD=""
   SCHED_OWED="$(sched_owed)"
   if ! declare -F gate_room >/dev/null 2>&1 || ! declare -F fill_gate_width >/dev/null 2>&1; then
@@ -395,7 +399,6 @@ tick_plan_report() {  # -> says the HELD and LEDGER lines; sets SCHED_HOLDS
   local step hold finding kind rest val
   SCHED_HOLDS=""
   [ -n "${SCHED_PLAN:-}" ] && [ "$POKER_RUN_OPEN" != unreadable ] || return 0
-  _fill_current_load "$SCHED_PLAN"
   step="$(fill_step_token "$SCHED_PLAN")"
   [ -z "$step" ] || SCHED_HOLDS="$(units_held "$SCHED_PLAN" "$step" 2>/dev/null)"
   while IFS= read -r hold; do
@@ -416,6 +419,30 @@ EOF
 $(units_findings "$SCHED_PLAN" "$(units_run_rosters "${ROSTER_FILE%/*}" "$SCHED_PLAN" "$ROSTER_FILE")" 2>/dev/null)
 EOF
   return 0
+}
+
+# ---------------------------------------------------------------- the run's facts
+#
+# The bound run's asks, debts and findings are the reader's answers (lib/reader.sh), asked over lib/proof.sh's kept
+# fold, so the tick reads them from the place every other surface does, a fact the run's log alone holds among them.
+tick_ask() {  # <reader question's function> [args] -> its answer over the bound run; rc 1 when no run or no reader
+  [ -n "${POKER_RUN_PLAN:-}" ] && [ -f "$POKER_RUN_PLAN" ] && [ "${POKER_RUN_OPEN:-}" != unreadable ] || return 1
+  declare -F _proof_ask >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; } >/dev/null 2>&1
+  declare -F _proof_ask >/dev/null 2>&1 || return 1
+  local q="$1"; shift
+  _proof_ask "$POKER_RUN_PLAN" "$q" "$POKER_RUN_PLAN" "$@"
+}
+
+# The keys of the open asks that begin with <prefix>: the bound run's from the reader; a session acting for no run keeps
+# its asks in its own file (lib/owed.sh `owed_file`), which is no run's, so that file is read for it.
+tick_open_asks() {  # <prefix> -> one key a line
+  local a
+  if a="$(tick_ask reader_q_asks)"; then
+    printf '%s\n' "$a" | awk -F'|' -v p="key=$1" '{ for (i = 2; i <= NF; i++) if (index($i, p) == 1) print substr($i, 5) }'
+    return 0
+  fi
+  declare -F owed_list >/dev/null 2>&1 || return 0
+  OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_list 2>/dev/null | cut -f1 | /usr/bin/grep "^$1"
 }
 
 # ---------------------------------------------------------------- why each row waits
@@ -453,9 +480,13 @@ TOA
 # the plan itself declared, a standing `debt:` line of the landing record for that suite, opens nothing: the red is
 # owed and tracked as a debt, so a decision on the goal would ask the person about a red already on their ledger.
 tick_owed_goals() {  # <plan> <landing record> -> always 0; one line said per goal it opens
-  local f st t m rd k
+  local f st t m rd k s reds
   declare -F owed_open >/dev/null 2>&1 && declare -F plan_goals_read >/dev/null 2>&1 || return 0
   f="$(OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_file 2>/dev/null)" || return 0
+  # the suites a standing debt declares red: the reader's debts admitted on a red verdict, each with an id, none voided
+  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  reds=" $(tick_ask reader_q_debts | awk -F'|' "${_LINE_FIELDS_AWK:-}"'line_kv("ev") == "admitted" { id = line_kv("id"); s = line_kv("suite")
+      sub(/.*\//, "", s); if (id != "" && s != "") print s }' | tr '\n' ' ') "
   while IFS='	' read -r st t m rd; do
     k="decide:goal:$(plan_goal_slug "$t")"
     if [ "$st" = reached ]; then
@@ -464,7 +495,7 @@ tick_owed_goals() {  # <plan> <landing record> -> always 0; one line said per go
     fi
     [ "$st" = missed ] || continue
     # a suite goal missed by a red the plan declared (a Lands-red: row's standing debt line) is no new decision
-    if declare -F plan_goal_declared_red >/dev/null 2>&1 && plan_goal_declared_red "$2" "$rd"; then continue; fi
+    s="${rd%% red at *}"; case "$s" in *.test.sh) case "$reds" in *" ${s##*/} "*) continue ;; esac ;; esac
     [ -f "$f" ] && /usr/bin/grep -qF "|key=$k|" "$f" 2>/dev/null && continue
     OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_open "$k" "Goal missed: $t" "poker: GOAL $t missed — $m: $rd; keep the target or change course" >/dev/null 2>&1 \
       && say "GOAL $t missed — $m: $rd; owed: $k"
@@ -613,10 +644,8 @@ TICK_WAIT
 tick_finding_report() {  # -> says one FINDING line per finding the plan defers or owes a check for
   local line
   [ -n "${SCHED_PLAN:-}" ] && [ -f "$SCHED_PLAN" ] || return 0
-  /usr/bin/grep -qE '^(deferred|check):[[:space:]]' "$SCHED_PLAN" 2>/dev/null || return 0
-  declare -F proof_findings_owed >/dev/null 2>&1 \
-    || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null; }
-  declare -F proof_findings_owed >/dev/null 2>&1 || return 0
+  # a run whose reader holds no finding owes none, and the rating is not asked
+  [ -n "$(tick_ask reader_q_findings)" ] && declare -F proof_findings_owed >/dev/null 2>&1 || return 0
   while IFS= read -r line; do
     [ -n "$line" ] && say "FINDING $(clean "$line")"
   done <<TICK_FINDINGS
@@ -1356,7 +1385,7 @@ EOF
       local gkey
       declare -F owed_list >/dev/null 2>&1 || return 0
       declare -F owed_close >/dev/null 2>&1 || return 0
-      for gkey in $(OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_list 2>/dev/null | cut -f1 | /usr/bin/grep '^gate:'); do
+      for gkey in $(tick_open_asks gate:); do
         case ",${TICK_GATE_KEYS}," in *",${gkey#gate:},"*) continue ;; esac
         OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_close "$gkey" "gate cleared" >/dev/null 2>&1
       done
@@ -1666,7 +1695,7 @@ BACKSTOP_ROWS
       tick_ruling_close() {
         local keys rk fold writers=" " r a rid w x1 x2 x3 s rest why
         declare -F owed_list >/dev/null 2>&1 && declare -F owed_close >/dev/null 2>&1 || return 0
-        keys="$(OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_list 2>/dev/null | cut -f1 | /usr/bin/grep '^ruling:')" || return 0
+        keys="$(tick_open_asks ruling:)"; [ -n "$keys" ] || return 0
         while IFS=$'\t' read -r r a; do
           [ -n "$r" ] || continue
           row_writer "$ROSTER_FILE" "$POKER_RUN_PLAN" "$r" "$a" && [ -n "$ROW_WRITER" ] && writers="${writers}${ROW_WRITER} "
@@ -2344,9 +2373,9 @@ EOF
     #
     # ONE LEDGER SHAPE (wave-31 T5; D2): `fill_step_token` answers the step number or nothing,
     # at every scale, and the withhold above is that empty answer.
-    # ONE READ OF THE FIELD FOR THE WHOLE TICK (wave-19 REQ-6, D7): loaded here, in this
-    # shell, so every `$( )` reader below — the step, the approval gate, the unreadable
-    # report, the ready set — inherits the answer instead of parsing the plan again.
+    # ONE READ OF THE RUN'S FACTS FOR THE WHOLE TICK: `gate_report` loaded the step and the
+    # approval from the reader in this shell, so every `$( )` reader below — the step, the
+    # approval gate, the unreadable report, the ready set — inherits the one answer.
     #
     # AN UNREADABLE BOUND PLAN FILLS NOTHING, AND SAYS WHICH PLAN (wave-20 T1, REQ-2). Its
     # `current:`, its approval and its task table are all unreadable, and no other plan is
@@ -2354,7 +2383,6 @@ EOF
     # rather than a symptom ("current: unreadable (none)").
     SCHED_CURRENT=""; SCHED_STEP=""
     if [ -n "$SCHED_PLAN" ] && [ "$POKER_RUN_OPEN" != unreadable ]; then
-      _fill_current_load "$SCHED_PLAN"
       SCHED_CURRENT="$(sched_plan_current "$SCHED_PLAN")"
       SCHED_STEP="$(fill_step_token "$SCHED_PLAN")"
     fi

@@ -74,6 +74,24 @@ run/v1|ev=proof|kind=review|head=$H|question=adversarial|result=fail|scope=piece
 EOF
 expect_eq "a whole and a piece reading at one head are two facts, the later piece replacing the earlier" "whole/pass piece/fail " \
   "$(ask reviews "$H" | awk -F'|' '{ for (i = 2; i <= NF; i++) { if ($i ~ /^scope=/) s = substr($i, 7); if ($i ~ /^result=/) r = substr($i, 8) } printf "%s/%s ", s, r }')"
+# fails-when: a review proof is identified without its record, so a second record of one question at one head and
+# scope replaces the first and a finding of the first reads unregistered; or a check is, so a rerun stands beside it.
+W=records; plan records <<EOF
+run/v1|ev=proof|kind=review|head=$H|question=structure|result=fail|scope=piece|evidence=r/b.md|at=2026-11-01T00:00:01Z
+run/v1|ev=proof|kind=review|head=$H|question=structure|result=fail|scope=piece|evidence=r/c.md|at=2026-11-01T00:00:02Z
+run/v1|ev=proof|kind=check|head=$H|rc=1|evidence=r/1.log|at=2026-11-01T00:00:03Z
+run/v1|ev=proof|kind=check|head=$H|rc=0|evidence=r/2.log|at=2026-11-01T00:00:04Z
+EOF
+expect_eq "two review records of one question at one head and scope both stand, and a check's rerun replaces it" "r/b.md r/c.md r/2.log " \
+  "$(ask proof "$H" | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^evidence=/) printf "%s ", substr($i, 10) }')"
+
+# fails-when: two open debts of one concept and two kinds are one fact; a burned line closes another kind than its own.
+W=debtkind; mkdir -p "$D/plans/epic-x" "$D/record/debtkind"; printf '# debtkind\n' > "$D/plans/epic-x/debtkind.plan.md"
+printf '%s\n' 'cv | duplicate | a.sh:1 | raised-by r.md | touches 1 | —' 'cv | unpinned-pair | b.sh:2 | raised-by r.md | touches 2 | —' > "$D/record/debtkind/debt.md"
+dkinds() { ask debts | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^kind=/) printf "%s ", substr($i, 6) }'; }
+expect_eq "two open debts of one concept and two kinds are two facts" "duplicate unpinned-pair " "$(dkinds)"
+printf '%s\n' 'cv | duplicate | a.sh:1 | raised-by r.md | touches 1 | burned T9' 'cv | unpinned-pair | b.sh:2 | raised-by r.md | touches 2 | —' > "$D/record/debtkind/debt.md"
+expect_eq "a burned line closes the debt of its own kind, and the other stays open" "unpinned-pair " "$(dkinds)"
 
 section "NAME"
 QS=("step" "approved step3" "approved release" "green $H" "green $G" "proof $H" "proof $H regression" "landed" "asks")
@@ -142,6 +160,9 @@ run/v1|ev=handoff|path=/h2|at=${t}:35Z
 run/v1|ev=handoff|path=/h1|at=${t}:36Z
 run/v1|ev=verdict|row=T1|commit=c1|suite=s.test.sh|result=red|at=${t}:37Z
 run/v1|ev=verdict|row=T1|commit=c1|suite=s.test.sh|result=green|at=${t}:38Z
+run/v1|ev=verdict|row=T1|commit=c1|suite=s.test.sh|result=discarded|at=${t}:39Z
+run/v1|ev=verdict|row=T1|commit=c1|suite=u.test.sh|result=discarded|at=${t}:40Z
+run/v1|ev=verdict|row=T1|commit=c1|suite=u.test.sh|result=red|at=${t}:41Z
 EOF
 printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n' >> "$D/plans/epic-x/rest.plan.md"
 for r in T1 T2 T3 T4; do printf '| %s | 4 | build | t | — | 30 | R | f | out/%s.md |\n' $r $r >> "$D/plans/epic-x/rest.plan.md"; done
@@ -151,7 +172,7 @@ REST=("holds|holds|rc=0 step 4,T9" "reviews|question|rc=0 adversarial,structure,
   "order|-|rc=0 order=given,said=away,at=${t}:24Z" "hands|kind|rc=0 amend,hand" "handoff|-|rc=0 path=/h1,at=${t}:36Z"
   "status T3|-|rc=0 state=returned,files=f,name=w3,suites=b.test.sh,tree=/t3,branch=wt/T3,base=c0"
   "status T4|-|rc=0 state=pending" "status T1|-|rc=0 state=landed,commit=c1" "ready T4 T1|-|rc=0 " "ready T4 T3|-|rc=1 "
-  "ready T3|-|rc=1 " "ready T1|-|rc=1 " "verdicts|result|rc=0 green" "verdicts T9|result|rc=0 ")
+  "ready T3|-|rc=1 " "ready T1|-|rc=1 " "verdicts|result|rc=0 green,red" "verdicts T9|result|rc=0 ")
 pick() {  # <field[/field…]|-> -> each line's first named field, or the whole line, joined by commas
   awk -F'|' -v f="$1" 'BEGIN { n = split(f, w, "/") } { v = (f == "-") ? $0 : ""
     for (j = 1; j <= n && v == ""; j++) for (i = 2; i <= NF; i++) if (index($i, w[j] "=") == 1) v = substr($i, length(w[j]) + 2)
@@ -232,6 +253,10 @@ ask header sdlc-step; expect_status "a key the header lacks answers no" 1 "$?"
 W=cr; plan cr < /dev/null; printf -- '---\rrigor: double\rabandoned: 2026-11-01\r---\rbody: no\r' > "$D/plans/epic-x/cr.plan.md"
 expect_eq "a CR-only header reads key by key, as a CRLF one does" "rigor=double abandoned=2026-11-01|rigor=double" \
   "$(flat header)|$(printf -- '---\r\nrigor: double\r\n---\r\n' > "$D/plans/epic-x/cr.plan.md"; ask header)"
+printf -- '---\ngoals: a · one (x)\nrigor: double\ngoals: b · two (y)\n---\ngoals: body\n' > "$D/plans/epic-x/cr.plan.md"
+every() { ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/plan-read.sh" && plan_read_header "$D/plans/epic-x/cr.plan.md" "$@" ) | tr '\n' '|'; }
+expect_eq "a repeated key answers its first line, and with all every line of it in the header, the body not read" \
+  "goals=a · one (x)||goals=a · one (x)|goals=b · two (y)|" "$(every goals)|$(every goals all)"
 
 section "ROW"
 W=new; expect_eq "a row is its nine authored cells" \
@@ -320,6 +345,9 @@ expect_eq "a dispatch with no instant sets a state only alone; a timed one by it
 printf '%s\n' "$JLOG" | plan w14d; sed 's/| landed |/| dropped |/' "$D/plans/epic-x/w14.plan.md" > "$D/plans/epic-x/w14d.plan.md"
 W=w14d; expect_eq "a dropped row is not ready and says so; a wait on it is met, named or read" \
   "A1=1 A2=0 A3=0 A4=1 A5=1 ; ready=A2 A3|A3+A1=0 |state=dropped" "$(joined A1 A2 A3 A4 A5 | cut -d';' -f1-2)|$(readies 'A3 A1')|$(ask status A1 | head -1)"
+printf '%s\n' "$JLOG" | plan w14e; sed 's/| pending | approval:plan, approval:ship |/| dropped | approval:plan, approval:ship |/' "$D/plans/epic-x/w14.plan.md" > "$D/plans/epic-x/w14e.plan.md"
+W=w14e; expect_eq "a dropped row is held by no ask: the approval it read holds nothing, the integrate row's waiver still holds it" \
+  " waive:F1>A5 " "$(joined A5 | cut -d';' -f3)"
 
 section "JOIN-15"
 W=w15; expect_eq "a nine-cell row waits on its deps and what its kind and step imply, and no approval holds it" \

@@ -524,12 +524,9 @@ run_open() {
   [ -n "$plan" ] || return 1
   plan_unreadable "$plan" >/dev/null && return 3
   [ -f "$plan" ] || return 1
-  if ! declare -F reader_main >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$(cd "$(_run_self_dir)" && pwd -P)/reader.sh" || return 1
-  fi
+  _run_reader || return 1
   if log="$(reader_log "$plan")" && [ -f "$log" ]; then
-    case "$(reader_main "$plan" step)" in *state=open*) return 0 ;; *) return 1 ;; esac
+    case "$(run_step "$plan")" in *state=open*) return 0 ;; *) return 1 ;; esac
   fi
 
   # THE WHOLE FILE, READ ONCE, HELD IN A VARIABLE — every match below tests this
@@ -604,6 +601,21 @@ run_open() {
 
   # Anything else (out-of-range current:, malformed) is not a recognized open state.
   return 1
+}
+
+_run_reader() {  # -> 0 once lib/reader.sh, beside this file, is loaded in this shell
+  declare -F reader_main >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  . "$(cd "$(_run_self_dir)" && pwd -P)/reader.sh"
+}
+
+# run_step <plan> -> the reader's `step` answer for the plan's run: `n=<step>` when one stands, then
+# `state=open|delivered|abandoned`. Its log when it has one, else the run's homes translated. A caller that
+# prints a run's step or tells a delivered run apart asks this, never the plan's `current:` line, so a step
+# the log alone holds is the one it prints.
+run_step() {
+  _run_reader || return 1
+  reader_main "${1:-}" step
 }
 
 # active_run <root> -> exit 0 + the plan path iff active_plan succeeds and that plan's state
@@ -744,12 +756,17 @@ open_runs() {
 # copies to each other. Both failure directions are silent if guessed at — a window of zero
 # empties the live set and an unbounded one makes `live` mean `open` — so an unparseable
 # value falls back to the same default an absent one gets.
+#
+# THE OPEN SET MAY BE HANDED IN. `live_runs <root> <open set>` filters the set its caller already read from
+# `open_runs <root>` instead of walking again: a process that prints both reads every candidate once, where the
+# second walk asked `run_open` of every plan a second time, and once runs write logs each ask folds one.
 live_runs() {
   local root="$1"
   local open_set raw try n u mult secs="" now cutoff f mt cnt=0
   local window_default="7d"
 
-  open_set=$(open_runs "$root") || return 1
+  if [ "$#" -ge 2 ]; then open_set="$2"; else open_set=$(open_runs "$root") || return 1; fi
+  [ -n "$open_set" ] || return 1
 
   raw=$(config_value "$root" "live-window" "$window_default")
   for try in "$raw" "$window_default"; do

@@ -10,9 +10,11 @@
 #             list; the cut run is read as it stands, beside the hand-written lines.
 #   §CATCH    a copy of the reader with the replace rule taken out, then the cancel rule, disagrees with a card.
 #   §COVER    every question of the closed list is asked and none is refused, and every event type has a line.
-#   §FOLLOWS  a review row's rendered brief starts its range at the reader's last review proof of its questions.
+#   §FOLLOWS  a review row's rendered brief starts its range at the reader's last review proof of its questions,
+#             and a step card asks again for an approval a cancel appended to the run's log retracted.
 #   §OPEN     run_open asks the reader's step of a run with a log, whatever its plan's prose says; a run with
 #             none is judged from its plan, so each closed fixture run reads closed and the cut run open.
+#   §FOLLOWS-CONTINUATION  close-out's check reads a debt only the run's log holds into its debt line and Deferrals.
 #
 # A CARD'S INSTANT. The reader answers a run as it stands, so a card's world holds as its run log the reader's
 # own translation of the fixture up to the card's instant, in the translation's order: a line with no instant
@@ -159,8 +161,8 @@ expect_eq "the types no closed run holds a line of are the hand-written ones" " 
 expect_eq "every hand-written line is marked, and one is a dispatch" "$(grep -c . "$X/hand-written.log") 1" \
   "$(grep -c '[| ]fixture=hand-written[| ]' "$X/hand-written.log") $(grep -c '^line/v1|ev=dispatch|' "$X/hand-written.log")"
 MID="$(ls "$WORLD_ROOT"/wave-49-mid/plans/*/*.plan.md)"
-expect_contains "a hand-written refusal, which no type carries, is named on the gaps list" "gap/v1|ev=refusal|row=" \
-  "$( ( . "$RD/lib/reader.sh" && reader_events "$MID" >/dev/null && translate "$MID" gaps ) )"
+expect_contains "a hand-written refusal is an act taken by hand: a hand event that says it was a refusal" "|ev=hand|what=refusal|row=T14|" \
+  "$(events "$MID")"
 
 section "FOLLOWS"
 # The brief follows the reader: over the closed run, a review row's rendered range starts where the reader's last
@@ -179,6 +181,57 @@ for r in T23:evidence T24:adversarial,structure; do id=${r%%:*}; q=${r#*:}
   expect_regex "$id: its range starts at that proof's head" "^Reviewed range: $h\\.\\." "$(grep '^Reviewed range' "$f")"
   expect_eq "$id: its Questions are the row's" "Questions: ${q//,/, }" "$(grep '^Questions:' "$f")"
 done
+# The sheet follows the reader: a copy of the closed run whose log is its own translation and three facts its plan
+# and record never held, its Step 9 retracted, a decision put and a review read; the sheet prints all three.
+SW="$WORLD_ROOT/sheet"; mkdir -p "$SW/.bio""nic"; cp -R "$X/wave-49-what-a-run-costs" "$SW/.bio""nic/docs"; git -C "$SW" init -q
+SP="$(ls "$SW"/.bio*/docs/plans/*/*.plan.md)"; SL="${SP%/plans/*}/record/wave-49-what-a-run-costs/run.log"
+{ events "$SP"; printf 'run/v1|ev=%s|at=2026-11-08T00:0%dZ\n' "cancel|of=step|n=9" 0 "decision|d=D90|verb=put|by=orchestrator|title=Only the log holds it" 1 \
+  "proof|kind=review|head=$(printf 'e%.0s' {1..40})|question=evidence|reader=w-T99|result=pass|scope=whole|evidence=record/x/log-only.md" 2; } > "$SL.t"; mv "$SL.t" "$SL"
+sheet="$(cd "$SW" && TZ=America/Los_Angeles BIONIC_NOW_EPOCH=1794300000 bash "$R/hooks/session-poker.sh" sitrep "$SP" 2>/dev/null)"
+expect_contains "the sheet over the logged run names the run" "run.name: wave-49-what-a-run-costs" "$sheet"
+expect_eq "its step is the log's, Step 9 retracted, not the plan's current:" "run.step: 8" "$(printf '%s\n' "$sheet" | grep '^run.step: ')"
+expect_contains "a decision only the log puts is an ask" "ask: key=decide:D90 " "$sheet"
+expect_contains "a review only the log holds is a review line" "review: question=evidence scope=whole result=pass " "$(printf '%s\n' "$sheet" | grep 'record=record/x/log-only.md')"
+# The tick follows it too: in the same run, now with a log, a fact the log alone holds changes the tick's fill line.
+# Each tick forgets the last one's digest, which would otherwise print only that nothing changed.
+FL="$FB/docs/record/wave-49-what-a-run-costs/run.log"; events "$FP" > "$FW/run.log"; mv "$FW/run.log" "$FL"
+nofill() { rm -f "$FB"/tmp/tick-digest-*; ( cd "$FW" && CLAUDE_CODE_SESSION_ID=$FS bash "$R/hooks/session-poker.sh" tick 2>&1 ) | grep -m1 '^poker: no FILL — '; }
+( cd "$FW" && CLAUDE_CODE_SESSION_ID=$FS bash "$R/hooks/session-poker.sh" arm ) >/dev/null 2>&1
+expect_regex "the tick over the logged run fills nothing, every row landed" '^poker: no FILL — width=' "$(nofill)"
+sed '/^approved-by: /d' "$FP" > "$FP.t" && mv "$FP.t" "$FP"
+expect_regex "an approval only the log holds is the run's Step-3 approval to the tick" '^poker: no FILL — width=' "$(nofill)"
+printf 'run/v1|ev=order|act=given|said=hold the run|at=2026-11-10T00:00:00Z\n' >> "$FL"
+expect_eq "an order only the log holds holds the tick's fill" \
+  'poker: no FILL — an order of the user stands: given 2026-11-10T00:00:00Z "hold the run"; order lift ends it' "$(nofill)"
+# The step card follows the reader: a render opens the step's approval on the run's register only while the log holds
+# no approval of it, so a cancel appended to the log reopens it though the plan's own approved-by: line still stands.
+CW="$WORLD_ROOT/card"; CS=fe11a5e0-0000-4000-8000-000000000002; CP="$CW/.bio""nic/docs/plans/e/wave-98-cancel.plan.md"
+mkdir -p "${CP%/*}" "$CW/.bio""nic/tmp"; git -C "$CW" init -q
+printf -- '---\ncanonical_sdlc_version: 15\nscale: wave\n---\n\n## Goal\n\nThe card follows the log.\n\n## SDLC State\n\ncurrent: 0\napproved-by: Dana Fixture 2026-11-01T00:00Z "approved"\n' > "$CP"
+bound_marker "$CW" "$CS" "$CP"
+CL="$CW/.bio""nic/docs/record/wave-98-cancel"
+logged() { ( . "$RD/lib/log.sh" && RUN_LOG="$CL/run.log" log_append "$@" ); }
+logged step n=0 && logged approval key=step0 by=Dana
+carded() { ( cd "$CW" && CLAUDE_CODE_SESSION_ID=$CS bash "$RD/card.sh" step0 "$CP" >/dev/null 2>&1 0<&- ) || echo "rc=$?"
+  awk -F'|' '{ k = ""; s = ""; for (i = 1; i <= NF; i++) { if ($i ~ /^key=/) k = substr($i, 5); if ($i ~ /^state=/) s = substr($i, 7) } if (s == "open") print k }' "$CL/asks.state" 2>/dev/null; }
+expect_true "card: the reader holds the logged approval of step0" ask "$CP" approved step0
+expect_empty "card: while the log holds the approval, the render opens nothing" "$(carded)"
+logged cancel of=approval key=step0
+expect_false "card: the cancel retracts the approval in the reader" ask "$CP" approved step0
+expect_eq "card: after the cancel the render opens the approval again, though the plan's approved-by: stands" "approve:step0" "$(carded)"
+# The landing report and the release note follow the reader: a landing only a run's log holds, with no landing
+# record beside it, is counted by the report and rendered in the note, and the note's cut drops a later landing.
+NW="$WORLD_ROOT/note"; NP="$NW/.bio""nic/docs/plans/e/w9.plan.md"; NR="$NW/.bio""nic/docs/record/w9"; mkdir -p "${NP%/*}" "$NR"
+printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## SDLC State\n\ncurrent: 4\n' > "$NP"; git -C "$NW" init -q
+git -C "$NW" -c user.name=fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m w9; NC="$(git -C "$NW" rev-parse HEAD)"
+printf 'run/v1|ev=%s|row=T%s|commit=%s|%sat=2026-11-01T00:0%s:00Z\n' ready 1 "$NC" 'suite=a.test.sh|' 0 published 1 "$NC" 'kind=queue|' 3 \
+  ready 2 "$NC" 'suite=a.test.sh|' 4 published 2 "$NC" 'kind=hand|' 6 > "$NR/run.log"
+note() { ( cd "$NW" && BIONIC_GATE_DIR="$NW/gate" bash "$R/hooks/session-poker.sh" "$@" "$NP" 2>&1 ); }
+expect_contains "the report counts the log's landings" "landings: queue=1 hand=1 git=0 · ready-to-landed median=3.0m" "$(note landing-report --rows)"
+expect_contains "…and prints the queue landing's row" "T1 queue ready=2026-11-01T00:00:00Z landed=2026-11-01T00:03:00Z minutes=3.0" "$(note landing-report --rows)"
+NN="$(note release-note --at "$NC" --on 2026-11-01T00:05:00Z)"
+expect_contains "the note at an instant renders the landing the log holds before it" "landings: queue=1 hand=0 git=0" "$NN"
+expect_eq "…and not the one after it" "0" "$(printf '%s\n' "$NN" | grep -c '^T2 ')"
 section "OPEN"
 opened() { ( . "$RD/lib/run.sh" && run_open "$1" ); echo $?; }
 plant() {  # <wave> <current:> <Step 9 line> [log line…] -> the plan's path; its run log holds the lines given
@@ -196,5 +249,25 @@ expect_eq "a run whose log holds an abandon is closed" 1 \
 expect_eq "with no log, current: 9 and no delivery is open, and a delivered: Step 9 line closes it" "0 1" \
   "$(opened "$(plant v14 9 '- Step 9: closing')") $(opened "$(plant v14d 9 '- Step 9: delivered: 2026-11-01T00:00Z')")"
 expect_eq "the closed fixture runs read closed and the cut run open" "1 1 0" "$(opened "$P49") $(opened "$(ls "$X"/wave-46-asks-nothing/plans/*/*.plan.md)") $(opened "$(ls "$X"/wave-49-mid/plans/*/*.plan.md)")"
+
+section "FOLLOWS-CONTINUATION"
+# The second closed fixture run reopened at Step 8, its log its own translation, then that log and a debt only the log holds.
+CW="$WORLD_ROOT/close"; CB="$CW/.bio""nic"; mkdir -p "$CB/tmp"; cp -R "$X/wave-49-what-a-run-costs" "$CB/docs"; git -C "$CW" init -q
+CP="$(ls "$CB"/docs/plans/*/*.plan.md)"; CR="$CB/docs/record/$(basename "$CP" .plan.md)"
+printf 'archive-root: %s\n' "$(sed -n 's/^archive-root: *//p' "$CP" | head -1)" > "$CB/config.yaml"
+sed -e '/^- Step 9: delivered: /d' -e 's/^current: 9$/current: 8/' "$CP" > "$CP.open" && mv "$CP.open" "$CP"
+printf '# continuation\n\n## Deferrals\n' > "$CR/continuation.md"
+events "$CP" > "$CW/own.log"; mv "$CW/own.log" "$CR/run.log"
+closecheck() { ( cd "$CW" && env -u CLAUDE_CODE_SESSION_ID HOME="$CW/home" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$R/payload" \
+  BIONIC_CLAUDE_HOME="$CW/home/.claude" bash "$RD/close-out.sh" "$CP" check 2>&1 ); }
+C0="$(closecheck)"
+expect_eq "the reopened run reads at step 8, and its own log carries no debt" "step: current: 8|debt: touched 0 · burned 0" \
+  "$(printf '%s\n' "$C0" | grep -m1 '^step: ')|$(printf '%s\n' "$C0" | grep -m1 '^debt: ')"
+printf 'run/v1|ev=debt|concept=follow_x|kind=duplicate|sites=lib/f.sh:1|raised-by=record/x.md|touches=3|at=\n' >> "$CR/run.log"
+C1="$(closecheck)"
+expect_eq "a debt the log alone holds is counted on the card's debt line" "debt: touched 3 · burned 0" "$(printf '%s\n' "$C1" | grep -m1 '^debt: ')"
+expect_contains "…and the continuation would carry it under ## Deferrals" " follow_x" "$(printf '%s\n' "$C1" | grep -m1 '^continuation: ')"
+expect_contains "the log without it carries the run's own deferrals there" "under ## Deferrals: record/" "$(printf '%s\n' "$C0" | grep -m1 '^continuation: ')"
+expect_absent "…and not that debt" " follow_x" "$(printf '%s\n' "$C0" | grep -m1 '^continuation: ')"
 
 finish

@@ -12,6 +12,8 @@
 # THE FOLD. `reader_facts` turns the lines into facts, in the order they happened:
 #   - two lines equal in every field but `at=` are one fact; the repeat changes nothing, not even the place;
 #   - a later line with the same identifying fields and another value replaces the earlier, and takes its place;
+#   - a discarded verdict replaces no earlier verdict, whatever its commit, and one with none before it stands
+#     as the discarded run it was; a red or a green after it replaces it as any later line does;
 #   - `cancel` retracts the fact it names (`of=<event type>` and that fact's identifying fields); a later
 #     line may assert it again.
 # A type's identifying fields are its `reader_identity` entry; a type with none is identified by all its
@@ -61,19 +63,21 @@ reader_identity published row commit
 # so the reader and the writers can never name two directories for one run. The folder one below is
 # tried first, so an epic folder named plans/ joins as it always has. Any other place is no run's plan.
 # This is the one rule here; lib/translate.sh asks it for the record's other homes.
-reader_record() {  # <plan> -> its record directory; 2 when the plan sits where the walk admits none
-  local name="${1##*/}" dir up
+reader_record() {  # <plan> -> its record directory; 2 when the plan sits where the walk admits none; above 2 when the lookup died
+  local name="${1##*/}" dir up rc
   case "$name" in *.md) ;; *) return 2 ;; esac
-  dir="$(cd "$(dirname "$1")" 2>/dev/null && pwd -P)" || return 2
+  # A folder that cannot be entered is no run's plan; a shell that died entering it (a process refused) is no answer,
+  # and its exit is passed on, so a caller can tell "no record" from "not looked up".
+  dir="$(cd "$(dirname "$1")" 2>/dev/null && pwd -P)" || { rc=$?; [ "$rc" -gt 2 ] || rc=2; return "$rc"; }
   up="${dir%/*}"
   case "${up##*/}" in plans|incidents) dir="$up" ;;
     *) case "${dir##*/}" in plans|incidents) ;; *) return 2 ;; esac ;; esac
   printf '%s/record/%s\n' "${dir%/*}" "${name%.plan.md}"
 }
 
-reader_log() {  # <plan> -> the path of its run log; 2 when the plan sits where the walk admits none
+reader_log() {  # <plan> -> the path of its run log; 2 when the plan sits where the walk admits none; above 2 when the lookup died
   local rec
-  rec="$(reader_record "${1:-}")" || return 2
+  rec="$(reader_record "${1:-}")" || return
   printf '%s/run.log\n' "$rec"
 }
 
@@ -109,7 +113,12 @@ reader_facts() {  # <plan> -> one line per standing fact, in the order the facts
       id = named
       if (named in idk) { m = split(idk[named], ik, ","); for (i = 1; i < m; i++) id = id SUBSEP ik[i] "=" f[ik[i]] }
       else id = id SUBSEP body
+      # two review records are two readings, even of one question at one head and scope; a later run of a check
+      # or a regression at a head still replaces the earlier one
+      if (named == "proof" && f["kind"] == "review") id = id SUBSEP "evidence=" f["evidence"]
       if (t == "cancel") { delete live[id]; next }
+      # a discarded run was killed, not judged: it must not unseat the verdict a run already gave
+      if (t == "verdict" && f["result"] == "discarded" && (id in live)) next
       if ((id in live) && fact[id] == body) next
       live[id] = 1; fact[id] = body; type[id] = t; stamp[id] = f["at"]; place[id] = ++seq
     }
@@ -119,15 +128,16 @@ reader_facts() {  # <plan> -> one line per standing fact, in the order the facts
     }'
 }
 
+# The closed list is split on blanks whatever IFS the caller holds, as the translation splits its sources.
 reader_list() {  # -> one line per question: <name> <form>
-  local e
+  local e IFS=$' \t\n'
   for e in $READER_QUESTIONS; do
     e="${e%:*}"; printf '%s %s\n' "${e%%:*}" "${e#*:}"
   done
 }
 
 reader_main() {  # <plan> <question> [args] -> the answer in its form; 2 refused
-  local plan="${1:-}" q="${2:-}" e form fn
+  local plan="${1:-}" q="${2:-}" e form fn IFS=$' \t\n'
   for e in $READER_QUESTIONS; do
     [ "${e%%:*}" = "$q" ] || continue
     fn="${e##*:}"; form="${e#*:}"; form="${form%%:*}"
@@ -201,7 +211,7 @@ reader_q_asks() {  # <plan> -> each ask still open: no reply on it, and no appro
 # through lib/plan-read.sh, the plan's one parser; reviews still answers the log's half alone, and its
 # comment names the half the plan holds.
 reader_identity finding ref
-reader_identity debt concept
+reader_identity debt concept kind
 reader_identity admitted id
 reader_identity dispatch row name
 reader_identity verdict row commit suite
@@ -225,11 +235,13 @@ reader_question holds list reader_q_holds
 reader_q_holds() {  # <plan> -> each open ask that holds something, with `holds=` on its line
   # An ask holds what its writer wrote in `holds=`, and a step's approval holds the next step. Otherwise
   # it holds rows of the plan that have not landed: an `approve:<key>` or a `decide:<D>` each row that
-  # waits on approval:<key> or approval:<D>, and a waiver, a finding or a hold the integrate rows.
-  { plan_read_waits "$1" 2>/dev/null; printf '\034\n'; reader_q_landed "$1"; printf '\035\n'; reader_q_asks "$1"; } | awk -F'|' "$_READER_AWK"'
+  # waits on approval:<key> or approval:<D>, and a waiver, a finding or a hold the integrate rows. A row an
+  # older table drops is owed no more, so no ask holds it.
+  { plan_read_waits "$1" 2>/dev/null; printf '\034\n'; reader_q_landed "$1"; printf '\035\n'; reader_q_asks "$1"; } \
+  | awk -F'|' -v drop=" $(plan_read_dropped "$1" 2>/dev/null | tr '\n' ' ') " "$_READER_AWK"'
     function rows(k,   a, i, r, o) {
       if (k ~ /^(approve|decide):/) a = "approval:" substr(k, index(k, ":") + 1); else if (k !~ /^(waive|finding|row|hold):/) return ""
-      for (i = 1; i <= n; i++) { r = ord[i]; if (!(r in landed) && (a == "" ? knd[r] == "integrate" : ((r, a) in waits))) o = o (o == "" ? "" : ", ") r }
+      for (i = 1; i <= n; i++) { r = ord[i]; if (!(r in landed) && !index(drop, " " r " ") && (a == "" ? knd[r] == "integrate" : ((r, a) in waits))) o = o (o == "" ? "" : ", ") r }
       return o
     }
     $0 == "\034" || $0 == "\035" { part++; next }

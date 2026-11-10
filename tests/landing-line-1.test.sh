@@ -1070,9 +1070,11 @@ expect_contains "WINDOW-1b …and one that closes before the decline drops it" \
 # (w1c) every source by its own time: each planted before, inside and after the window 11:00 to 13:00.
 RW2="$(ll_world)"; WW_RD="$(dirname "$(ll_rec "$RW2")")"; mkdir -p "$WW_RD"
 WW_PL="$(ll_plan "$RW2")"; WW_RO="$RW2/.bionic/tmp/roster-$WORLD_SID.state"
+# Each act is its own: a hand landing is one landing of its row and commit, and a line repeated is one fact, so the
+# three hand landings are three rows and the three stops three requests.
 for t in 10:30 12:30 14:30; do
-  ww_pub T9 hand "2026-10-20T$t:00Z"
-  printf 'line/v1|ev=stop-run|request=21|who=fixture:w-T3|kind=whole|key=tests/run.sh|by=fixture|why=parked|at=2026-10-20T%s:00Z\n' "$t"
+  ww_pub "T9${t%%:*}" hand "2026-10-20T$t:00Z"
+  printf 'line/v1|ev=stop-run|request=2%s|who=fixture:w-T3|kind=whole|key=tests/run.sh|by=fixture|why=parked|at=2026-10-20T%s:00Z\n' "${t%%:*}" "$t"
 done > "$(ll_rec "$RW2")"
 ww_pub T1 queue 2026-10-20T10:00:00Z >> "$(ll_rec "$RW2")"   # the landing the moves name, before each of them
 for t in 10:30 12:30 14:30; do ww_dec "2026-10-20T$t:00Z" decline; ww_dec "2026-10-20T$t:05Z" lift; done > "$WW_RD/fill-ledger.log"
@@ -1144,8 +1146,8 @@ expect_contains "WINDOW-3d …and the hand landing after the page is counted: th
 # delivered: as close-out writes it, a minute; the run reads closed once current is 9 and the Step 9 line says so
 awk '/^current: 4$/ { print "current: 9"; next } /^- T2: / { print; print "- Step 9: delivered: 2026-10-20T11:40Z wave-x — fixture"; next } { print }' \
   "$(ll_plan "$RW4")" > "$(ll_plan "$RW4").d" && mv "$(ll_plan "$RW4").d" "$(ll_plan "$RW4")"
-ww_pub T9 hand 2026-10-20T11:40:30Z >> "$(ll_rec "$RW4")"
-ww_pub T9 hand 2026-10-20T11:41:00Z >> "$(ll_rec "$RW4")"
+ww_pub T10 hand 2026-10-20T11:40:30Z >> "$(ll_rec "$RW4")"
+ww_pub T11 hand 2026-10-20T11:41:00Z >> "$(ll_rec "$RW4")"
 WW_E4="$(ww_ends "$RW4")"
 expect_eq "WINDOW-3e with a delivered: time the ends line prints both ends, the start and the plan's delivered: time, named as such" \
   "2026-10-20T11:00:00Z 2026-10-20T11:40Z|1" "$(ww_times "$WW_E4")|$(printf '%s\n' "$WW_E4" | grep -c 'until 2026-10-20T11:40Z (delivered:)')"
