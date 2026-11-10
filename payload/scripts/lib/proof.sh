@@ -170,12 +170,14 @@ proof_approved() {
 }
 
 # proof_approved_head <plan> <name> -> the 40-hex head the standing approval of <name> records (`head=`), exit 0;
-# nothing, exit 1, with no such approval or one that names no head. The approve verb writes it (the working branch's
-# head at the user's reply); `current 8` reads it for the release. An approval of a name stands once: a later one
-# replaces it, so its head is the newest.
+# nothing, exit 1, with no such approval or one that names no head; exit 2 when the run's facts could not be read. The
+# approve verb writes it (the working branch's head at the user's reply); `current 8` reads it for the release. An
+# approval of a name stands once: a later one replaces it, so its head is the newest.
 proof_approved_head() {
+  local facts
   [ -f "${1:-}" ] && [ -n "${2:-}" ] || return 1
-  _proof_facts "$1" | awk -F'|' -v n="$2" "$(proof_fact_awk)"'
+  facts="$(_proof_facts "$1")" || return 2
+  printf '%s' "$facts" | awk -F'|' -v n="$2" "$(proof_fact_awk)"'
     ev() == "approval" && line_kv("key") == n { h = line_kv("head") }
     END { if (h !~ /^[0-9a-f]+$/ || length(h) != 40) exit 1; print h }'
 }
@@ -1315,9 +1317,10 @@ _proof_run_key() {
 # place proof-add cites from; A-T4-2). One whose sha256=, head= and rc= all equal the log's as it is now is its run.
 # Else a line naming the log by path that differs is refused "the log changed since its run", naming the first fact
 # that differs (sha256, then head, then rc); else "no run recorded for this log". THE HASH BINDS THE LOG, not the line:
-# the record can be written by hand, but a log edited after its run no longer matches the run that wrote it.
+# the record can be written by hand, but a log edited after its run no longer matches the run that wrote it. Runs that
+# could not be read are not "no run": that refusal exits 2.
 _proof_floor_match() {
-  local log="$1" plan="${2:-}" root="${3:-}" sha="${4:-}" rc="${5:-}" rec="" key hash got f a b
+  local log="$1" plan="${2:-}" root="${3:-}" sha="${4:-}" rc="${5:-}" rec="" key hash got facts="" f a b
   hash="$(_proof_sha256 "$log")" || hash=""
   if [ -z "$hash" ]; then
     printf 'the log %s cannot be hashed (no shasum or sha256sum answers), so the run that wrote it cannot be matched; install one and run proof-add regression again' "$log"
@@ -1325,7 +1328,11 @@ _proof_floor_match() {
   fi
   [ -z "$plan" ] || rec="$(proof_debt_record "$plan" "$root" 2>/dev/null)" || rec=""
   key="$(_proof_run_key "$log" "$root")"
-  [ -f "$plan" ] && got="$(_proof_facts "$plan" | awk -F'|' -v key="$key" -v h="$hash" -v hd="$sha" -v rc="$rc" "$(proof_fact_awk)"'
+  if [ -f "$plan" ] && ! facts="$(_proof_facts "$plan")"; then
+    printf 'the facts of %s could not be read, so the run that wrote the log %s cannot be matched; run proof-add regression again' "$plan" "$log"
+    return 2
+  fi
+  [ -f "$plan" ] && got="$(printf '%s' "$facts" | awk -F'|' -v key="$key" -v h="$hash" -v hd="$sha" -v rc="$rc" "$(proof_fact_awk)"'
     ev() != "run" { next }
     { l = line_kv("log"); s = line_kv("sha256") }
     l != key && s != h { next }
@@ -1527,7 +1534,14 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   [ -f "$plan" ] || return 0
   _proof_reader_load || { printf '_proof_facts: the reader cannot be loaded, so the facts of %s are not read\n' "$plan" >&2; return 2; }
   lib="$_READER_LIB_DIR"
-  log="$(reader_log "$plan" 2>/dev/null)" && dir="${log%/*}"
+  # The lookup's exit tells a plan with no record (2), translated from its homes below, from a lookup that died: that
+  # would send a run with a log down the path for one without, so it is a failed fold.
+  log="$(reader_log "$plan" 2>/dev/null)" || rc=$?
+  case "$rc" in
+    0) dir="${log%/*}" ;;
+    2) rc=0 ;;
+    *) printf '_proof_facts: the lookup of the run log of %s exited %s, so its facts are not read\n' "$plan" "$rc" >&2; return 2 ;;
+  esac
   # The key covers every file the fold depends on, or no fold is served or kept under it: a file cksum cannot read
   # would leave the key blind to its changes. A fresh fold is still the run's facts, so that is not worth a word.
   deps=("$plan"); for f in $_PROOF_FACTS_LIBS; do deps+=("$lib/$f"); done
@@ -1618,10 +1632,12 @@ proof_last_line() {
 # proof_chain_head <plan> <question> -> `<head> proof` or `<head> waiver`: the question's newest link among the reviews
 # the reader holds (`reader reviews`, its review proofs and the user's waivers of a question, in fact order), its last
 # review proof or its last waiver, whichever is later; nothing when it has neither. A waiver's head is read as the
-# judge's chain reads it (`facts_state`): 7 to 40 hex.
+# judge's chain reads it (`facts_state`): 7 to 40 hex. Exit 2, nothing printed, when the run's facts could not be read.
 proof_chain_head() {
+  local facts
   [ -f "${1:-}" ] && [ -n "${2:-}" ] || return 0
-  _proof_ask "$1" reader_q_reviews "$1" | awk -F'|' -v q="$2" "$(proof_fact_awk)"'
+  facts="$(_proof_ask "$1" reader_q_reviews "$1")" || return 2
+  printf '%s' "$facts" | awk -F'|' -v q="$2" "$(proof_fact_awk)"'
     proof_fact() && PROOF_KIND == "review" && PROOF_QUESTION == q { h = PROOF_HEAD; w = "proof"; next }
     ev() == "waiver" && line_kv("question") == q {
       wh = line_kv("head"); if (wh ~ /^[0-9a-f]+$/ && length(wh) >= 7 && length(wh) <= 40) { h = wh; w = "waiver" }
@@ -1644,14 +1660,16 @@ proof_floor_absent() {
 
 # _proof_last_read <plan> <kind> <head|line|owed|evidence> [<question>] -> the one reader behind the two above, and the
 # `owed=` or `evidence=` field of that newest proof, nothing when it carries none. The facts are the reader's
-# (`_proof_facts`), in the order they were last set, so the newest is the last one standing.
+# (`_proof_facts`), in the order they were last set, so the newest is the last one standing. Exit 2, nothing printed,
+# when they could not be read: no proof read is not the same answer as no proof held.
 _proof_last_read() {
-  local plan="$1" kind="$2" what="$3" q="${4:-}"
+  local plan="$1" kind="$2" what="$3" q="${4:-}" facts
   # THE KIND ASKED FOR IS READ THROUGH THE MAP TOO (wave-38 T8): a caller asking for the old kind is answered as one
   # asking for the new, silently: the operand is code's, never a person's.
   declare -F alias_read >/dev/null 2>&1 && { alias_read kind "$kind" 2>/dev/null; kind="$ALIAS_TOKEN"; }
   [ -f "$plan" ] || return 0
-  _proof_facts "$plan" | awk -F'|' -v k="$kind" -v what="$what" -v q="$q" "$(proof_fact_awk)"'
+  facts="$(_proof_facts "$plan")" || return 2
+  printf '%s' "$facts" | awk -F'|' -v k="$kind" -v what="$what" -v q="$q" "$(proof_fact_awk)"'
     proof_fact() && PROOF_KIND == k && (q == "" || PROOF_QUESTION == q) { last = PROOF_HEAD; lastline = proof_fact_line(); lastowed = PROOF_OWED; lastev = PROOF_EVIDENCE }
     END { if (last != "") { if (what == "line") print lastline; else if (what == "owed") { if (lastowed != "") print lastowed }
       else if (what == "evidence") { if (lastev != "") print lastev } else print last } }'
@@ -2553,7 +2571,9 @@ review	"*)
   esac
   pfx="$(_facts_docs_prefix "$tree")"
   [ -z "$tree" ] || ! declare -F docs_root >/dev/null 2>&1 || droot="$(docs_root "$tree" 2>/dev/null)"
-  chains="$(_proof_ask "$plan" reader_q_reviews "$plan" | awk -F'|' -v qs="$PROOF_QUESTIONS" "$(proof_fact_awk)"'
+  # FACTS THAT COULD NOT BE READ ARE NO ANSWER: every read of them below exits 2 with the judge's line, never absent.
+  x="$(_proof_ask "$plan" reader_q_reviews "$plan")" || { _facts_unread "$plan"; return; }
+  chains="$(printf '%s' "$x" | awk -F'|' -v qs="$PROOF_QUESTIONS" "$(proof_fact_awk)"'
     proof_fact() && PROOF_KIND == "review" && PROOF_QUESTION != "" {
       q = PROOF_QUESTION; pt[q] = "fact"; pr[q] = PROOF_RESULT; ph[q] = PROOF_HEAD; pe[q] = PROOF_EVIDENCE
       if (PROOF_SCOPE == "whole") { wt[q] = "fact"; wr[q] = PROOF_RESULT; we[q] = pe[q]; wh[q] = PROOF_HEAD }
@@ -2581,9 +2601,9 @@ review	"*) fixed="$(proof_fixed "$plan" "$tree")"; born="$(_facts_born_landings 
         # THE FLOOR AT <head> (wave-35 T9; D8, AC-1.3; A-orch-45): the judge itself, at the head handed in, never
         # a checkout's: owed while a red of the whole run is open, uncovered F..<head> with the reason only for
         # a commit it cannot prove.
-        if proof_floor_absent "$plan" >/dev/null; then st=absent
+        x="$(proof_last "$plan" regression)" || { _facts_unread "$plan"; return; }
+        if [ -z "$x" ] && proof_floor_absent "$plan" >/dev/null; then st=absent
         else
-          x="$(proof_last "$plan" regression)"
           st="$(_proof_floor_judge "$plan" "$tree" "$head" 2>/dev/null | awk 'NR == 1')"
           # GREEN MEANS THE WHOLE SUITE RAN HERE: a head with no pass at it, covered by its landings or uncovered by
           # a landing no run proved, holds only on the person's word given at this head (`approved: merge-unproved …
@@ -2643,12 +2663,12 @@ PROOF_CHAIN
         fi ;;
       check)
         x=""; [ -z "$tree" ] || x="$(git -C "$tree" rev-parse --verify -q "$head^{commit}" 2>/dev/null)"
-        x="$(_facts_check_at "$plan" "$head" "${x:-$head}")"
+        x="$(_facts_check_at "$plan" "$head" "${x:-$head}")" || { _facts_unread "$plan"; return; }
         # The reviews part rendered fresh on the checked head is the release the check passed: judged at that head.
         case "$x" in
           covered|failing"	"*|'') : ;;
           *) [ -z "$tree" ] || { cb="$(proof_part_base "$plan" "$tree" "$head")"
-               [ "$cb" = "$head" ] || x="$(_facts_check_at "$plan" "$cb" "$cb")"; } ;;
+               [ "$cb" = "$head" ] || x="$(_facts_check_at "$plan" "$cb" "$cb")" || { _facts_unread "$plan"; return; }; } ;;
         esac
         case "$x" in
           covered) st=covered ;;
@@ -2670,12 +2690,18 @@ $owed
 PROOF_FACTS
   return "$rc"
 }
+_facts_unread() {  # <plan> -> the judge's line for facts that could not be read, on stderr; exit 2, its "could not deal"
+  printf 'facts_state: the facts of %s could not be read, so no fact it owes is judged; ask again\n' "$1" >&2
+  return 2
+}
 
 # _facts_check_at <plan> <head> <head in full> -> the check fact's state at <head> from the run's check proofs, as the
 # reader holds them (`_proof_facts`): `covered`, `failing<TAB><evidence>` when the last line at <head> carries result=fail, else the newest line's
-# head (nothing when there is none), which the caller reads as uncovered from it.
+# head (nothing when there is none), which the caller reads as uncovered from it; exit 2 when the facts could not be read.
 _facts_check_at() {
-  _proof_facts "$1" | awk -F'|' -v h="$2" -v hh="$3" "$(proof_fact_awk)"'
+  local facts
+  facts="$(_proof_facts "$1")" || return 2
+  printf '%s' "$facts" | awk -F'|' -v h="$2" -v hh="$3" "$(proof_fact_awk)"'
     proof_fact() && PROOF_KIND == "check" {
       last = PROOF_HEAD
       if (last == h || last == hh) { at = 1; fail = (PROOF_RESULT == "fail"); evd = PROOF_EVIDENCE }

@@ -63,19 +63,21 @@ reader_identity published row commit
 # so the reader and the writers can never name two directories for one run. The folder one below is
 # tried first, so an epic folder named plans/ joins as it always has. Any other place is no run's plan.
 # This is the one rule here; lib/translate.sh asks it for the record's other homes.
-reader_record() {  # <plan> -> its record directory; 2 when the plan sits where the walk admits none
-  local name="${1##*/}" dir up
+reader_record() {  # <plan> -> its record directory; 2 when the plan sits where the walk admits none; above 2 when the lookup died
+  local name="${1##*/}" dir up rc
   case "$name" in *.md) ;; *) return 2 ;; esac
-  dir="$(cd "$(dirname "$1")" 2>/dev/null && pwd -P)" || return 2
+  # A folder that cannot be entered is no run's plan; a shell that died entering it (a process refused) is no answer,
+  # and its exit is passed on, so a caller can tell "no record" from "not looked up".
+  dir="$(cd "$(dirname "$1")" 2>/dev/null && pwd -P)" || { rc=$?; [ "$rc" -gt 2 ] || rc=2; return "$rc"; }
   up="${dir%/*}"
   case "${up##*/}" in plans|incidents) dir="$up" ;;
     *) case "${dir##*/}" in plans|incidents) ;; *) return 2 ;; esac ;; esac
   printf '%s/record/%s\n' "${dir%/*}" "${name%.plan.md}"
 }
 
-reader_log() {  # <plan> -> the path of its run log; 2 when the plan sits where the walk admits none
+reader_log() {  # <plan> -> the path of its run log; 2 when the plan sits where the walk admits none; above 2 when the lookup died
   local rec
-  rec="$(reader_record "${1:-}")" || return 2
+  rec="$(reader_record "${1:-}")" || return
   printf '%s/run.log\n' "$rec"
 }
 

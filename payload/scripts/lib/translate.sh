@@ -118,7 +118,11 @@ translate() {  # <plan> <events|gaps> -> the translation in that form; 2 refused
   local plan="${1:-}" want="${2:-}" fn IFS=$' \t\n'
   [ -f "$plan" ] || return 2
   case "$want" in events|gaps) ;; *) return 2 ;; esac
-  for fn in $TRANSLATE_SOURCES; do "$fn" "$plan"; done | _translate_form "$want"
+  # A source that failed (a process refused under memory pressure) left its home short: the translation stops there
+  # and exits non-zero, its pipes under pipefail, so no reader takes the other homes for the whole run. Every source
+  # exits 0 on a home it read, an absent one included.
+  ( set -o pipefail
+    for fn in $TRANSLATE_SOURCES; do "$fn" "$plan" || exit; done | _translate_form "$want" )
 }
 
 _translate_form() {  # <events|gaps> -> stdin's source records in that form: events in their order, gaps once each
@@ -193,7 +197,9 @@ _translate_ledger() {  # <plan> -> the dispatch ledger's landings and born stamp
   # A landing opens its row's line, or follows the reasons written before it: `landed <sha> <instant>` or
   # `landed-by-hand: <who> <instant> "<why>"`, the earlier of the two when both are named; the words read
   # are the landing's own, from its marker on.
-  _translate_section "$1" "SDLC State" | awk -v rec="$(_translate_landed_rows "$1") " "$_TRANSLATE_AWK$_TRANSLATE_LANDED_AWK"'
+  local rows
+  rows="$(_translate_landed_rows "$1")" || return
+  _translate_section "$1" "SDLC State" | awk -v rec="$rows " "$_TRANSLATE_AWK$_TRANSLATE_LANDED_AWK"'
     /^- T[0-9A-Za-z.]*: / {
       row = substr($0, 3, index($0, ":") - 3); text = landed_at(substr($0, index($0, ":") + 2))
       own = !index(rec, " " row " ")
@@ -213,9 +219,10 @@ _translate_ledger() {  # <plan> -> the dispatch ledger's landings and born stamp
 
 translate_source _translate_tasks
 _translate_tasks() {  # <plan> -> the Tasks rows: the agent cell's dispatch, the worktree and base cells' tree, a landing with no ledger line
-  local plan="$1" IFS=$' \t\n'
+  local plan="$1" IFS=$' \t\n' rows
+  rows="$(_translate_landed_rows "$plan")" || return
   { _translate_section "$plan" "SDLC State" | awk "$_TRANSLATE_LANDED_AWK"'/^- T[0-9A-Za-z.]*: / && landed_at(substr($0, index($0, ":") + 2)) ~ /^landed/ { print "L", substr($0, 3, index($0, ":") - 3) }'
-    for r in $(_translate_landed_rows "$plan"); do printf 'L %s\n' "$r"; done
+    for r in $rows; do printf 'L %s\n' "$r"; done
     _translate_section "$plan" "Tasks"; } | awk -F'|' "$_TRANSLATE_AWK"'
     /^L / { led[substr($0, 3)] = 1; next }
     /^\| *id *\|/ { for (i = 2; i < NF; i++) col[trim($i)] = i; next }
@@ -287,7 +294,7 @@ _translate_abandon() {  # <plan> -> the header's `abandoned:` as the run's aband
   # An abandon has no identifying field, so its gaps are named by the run, the plan's own name; who
   # abandoned it is never parsed out of free words, so it is a gap.
   local wave="${1##*/}"
-  plan_read_header "$1" abandoned | awk -v run="${wave%.plan.md}" "$_TRANSLATE_AWK"'
+  { plan_read_header "$1" abandoned || [ "$?" -eq 1 ]; } | awk -v run="${wave%.plan.md}" "$_TRANSLATE_AWK"'
     { v = trim(substr($0, 11)); at = ""
       if (match(v, /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9](T[0-9:]+Z)?/)) {
         at = substr(v, 1, RLENGTH); v = trim(substr(v, RLENGTH + 1)); sub(/^(—|–|-|:|;|,)[ \t]*/, "", v) }
@@ -306,7 +313,7 @@ _translate_dropped() {  # <plan> -> each Tasks row whose status is dropped, name
   # A dropped row is the plan's word that its work is no longer owed. No ruled event says that of a row:
   # a cancel retracts a fact the log holds, and a row is authored, never logged; so the status is named,
   # not written. Until a type carries it, only the plan's own cell tells a dropped row from a pending one.
-  plan_read_dropped "$1" 2>/dev/null | awk '{ printf "g\t\tgap/v1|ev=dropped|row=%s|field=ev|why=unruled\n", $0 }'
+  { plan_read_dropped "$1" 2>/dev/null || [ "$?" -eq 1 ]; } | awk '{ printf "g\t\tgap/v1|ev=dropped|row=%s|field=ev|why=unruled\n", $0 }'
 }
 
 # THE RECORD'S HOMES sit in the plan's record directory, `<docs>/record/<wave>/`, joined to the plan by
@@ -318,11 +325,11 @@ if ! declare -F reader_record >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$_TRANSLATE_LIB_DIR/reader.sh"
 fi
-_translate_record() {  # <plan> <file> -> the path of <file> in the plan's record directory; 1 when there is none
-  local rec
-  rec="$(reader_record "$1")" || return 1
-  printf '%s/%s\n' "$rec" "$2"
-  [ -f "$rec/$2" ]
+_translate_record() {  # <plan> <file> -> the path of <file> in the plan's record directory, nothing when there is none; non-zero when the lookup died
+  local rec rc=0
+  rec="$(reader_record "$1")" || rc=$?
+  [ "$rc" -eq 0 ] || { [ "$rc" -eq 2 ] && return 0; return "$rc"; }
+  [ ! -f "$rec/$2" ] || printf '%s/%s\n' "$rec" "$2"
 }
 
 # A LANDING IS READ FROM ITS RECORD. The landing record is written by the landing itself, and the plan's
@@ -331,7 +338,7 @@ _translate_record() {  # <plan> <file> -> the path of <file> in the plan's recor
 # landing of is read from the record alone; a row only the plan holds as landed is read from the plan.
 _translate_landed_rows() {  # <plan> -> the rows the landing record holds a landing of, space-separated
   local f
-  f="$(_translate_record "$1" landing-proofs.log)" || return 0
+  f="$(_translate_record "$1" landing-proofs.log)" || return; [ -n "$f" ] || return 0
   awk '/^line\/v1\|ev=published\|/ || /^landed: / { if (match($0, /row=[^| ]+/)) printf " %s", substr($0, RSTART + 4, RLENGTH - 4) }' "$f"
 }
 
@@ -344,7 +351,7 @@ _translate_landing() {  # <plan> -> the landing record: ruled lines renamed, the
   # copies a published line of its row and commit: the line is the landing, and it carries the kind.
   # Any other kind no ruled type carries is named whole.
   local f
-  f="$(_translate_record "$1" landing-proofs.log)" || return 0
+  f="$(_translate_record "$1" landing-proofs.log)" || return; [ -n "$f" ] || return 0
   [ -n "${LOG_TYPES:-}" ] || . "$_TRANSLATE_LIB_DIR/log.sh" || return 0
   awk -v types="$LOG_TYPES" "$_TRANSLATE_AWK"'
     function word(s, k,   n, w, i) { n = split(s, w, " "); for (i = 1; i <= n; i++) if (index(w[i], k "=") == 1) return substr(w[i], length(k) + 2); return "" }
@@ -372,7 +379,7 @@ _translate_asks() {  # <plan> -> the asks register: each round's opening, and th
   # An open row's reply= is the wording the ask prompts for, not a reply given, so it is named, not
   # written: written, it would read as the ask answered.
   local f
-  f="$(_translate_record "$1" asks.state)" || return 0
+  f="$(_translate_record "$1" asks.state)" || return; [ -n "$f" ] || return 0
   awk -F'|' "$_TRANSLATE_AWK"'
     function fld(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
     $1 != "owed/v1" { next }
@@ -386,14 +393,14 @@ _translate_asks() {  # <plan> -> the asks register: each round's opening, and th
 translate_source _translate_fill
 _translate_fill() {  # <plan> -> the fill ledger: each stop, its fields as written
   local f
-  f="$(_translate_record "$1" fill-ledger.log)" || return 0
+  f="$(_translate_record "$1" fill-ledger.log)" || return; [ -n "$f" ] || return 0
   awk "$_TRANSLATE_AWK"'index($0, "fill-ledger/v1|") == 1 { carry("stop", substr($0, 16), "|") }' "$f"
 }
 
 translate_source _translate_decisions
 _translate_decisions() {  # <plan> -> the design ledger's rounds
   local f
-  f="$(_translate_record "$1" design-ledger.md)" || return 0
+  f="$(_translate_record "$1" design-ledger.md)" || return; [ -n "$f" ] || return 0
   _translate_ledger_records "$f"
 }
 
@@ -491,7 +498,7 @@ _translate_debts() {  # <plan> -> the debt ledger's lines: each a debt, burned= 
   # of any other form, a note in the last cell or prose, is named whole and writes no debt: read as open
   # or burned, it would be a guess.
   local f
-  f="$(_translate_record "$1" debt.md)" || return 0
+  f="$(_translate_record "$1" debt.md)" || return; [ -n "$f" ] || return 0
   awk -F' [|] ' "$_TRANSLATE_AWK"'
     /^#/ || /^[ \t]*$/ { next }
     { split("", c); for (i = 1; i <= NF; i++) c[i] = trim($i); b = c[6] }
