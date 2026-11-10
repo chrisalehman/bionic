@@ -708,7 +708,7 @@ sitrep_facts() {  # <plan> [<event type>…] -> the run's standing facts, of tho
   local t=" ${*:2} "
   _sitrep_reader || return 0
   { if [ "$_SITREP_FACTS_PLAN" = "$1" ]; then printf '%s\n' "$_SITREP_FACTS"; else _proof_facts "$1"; fi; } \
-    | awk -F'|' -v t="$t" 'NF && (t == "  " || index(t, " " substr($2, 4) " "))'
+    | awk -F'|' -v t="$t" "$_READER_AWK"'NF && (t == "  " || index(t, " " ev() " "))'
 }
 _sitrep_ask() {  # <plan> <reader question's function> [args] -> its answer over the plan's fold
   local plan="$1"; shift
