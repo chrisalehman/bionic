@@ -122,15 +122,16 @@ reader_facts() {  # <plan> -> one line per standing fact, in the order the facts
     }'
 }
 
+# The closed list is split on blanks whatever IFS the caller holds, as the translation splits its sources.
 reader_list() {  # -> one line per question: <name> <form>
-  local e
+  local e IFS=$' \t\n'
   for e in $READER_QUESTIONS; do
     e="${e%:*}"; printf '%s %s\n' "${e%%:*}" "${e#*:}"
   done
 }
 
 reader_main() {  # <plan> <question> [args] -> the answer in its form; 2 refused
-  local plan="${1:-}" q="${2:-}" e form fn
+  local plan="${1:-}" q="${2:-}" e form fn IFS=$' \t\n'
   for e in $READER_QUESTIONS; do
     [ "${e%%:*}" = "$q" ] || continue
     fn="${e##*:}"; form="${e#*:}"; form="${form%%:*}"

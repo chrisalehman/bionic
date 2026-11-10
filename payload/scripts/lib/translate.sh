@@ -113,7 +113,9 @@ function whole(t, id, why) { printf "g\t\tgap/v1|ev=%s|%s|field=ev|why=%s\n", t,
 '
 
 translate() {  # <plan> <events|gaps> -> the translation in that form; 2 refused
-  local plan="${1:-}" want="${2:-}" fn
+  # The sources are split on blanks whatever IFS the caller holds: a caller reading tab fields calls this inside its
+  # command substitution, and a tab-only IFS would make the list one word and skip every source.
+  local plan="${1:-}" want="${2:-}" fn IFS=$' \t\n'
   [ -f "$plan" ] || return 2
   case "$want" in events|gaps) ;; *) return 2 ;; esac
   for fn in $TRANSLATE_SOURCES; do "$fn" "$plan"; done | _translate_form "$want"
@@ -211,7 +213,7 @@ _translate_ledger() {  # <plan> -> the dispatch ledger's landings and born stamp
 
 translate_source _translate_tasks
 _translate_tasks() {  # <plan> -> the Tasks rows: the agent cell's dispatch, the worktree and base cells' tree, a landing with no ledger line
-  local plan="$1"
+  local plan="$1" IFS=$' \t\n'
   { _translate_section "$plan" "SDLC State" | awk "$_TRANSLATE_LANDED_AWK"'/^- T[0-9A-Za-z.]*: / && landed_at(substr($0, index($0, ":") + 2)) ~ /^landed/ { print "L", substr($0, 3, index($0, ":") - 3) }'
     for r in $(_translate_landed_rows "$plan"); do printf 'L %s\n' "$r"; done
     _translate_section "$plan" "Tasks"; } | awk -F'|' "$_TRANSLATE_AWK"'

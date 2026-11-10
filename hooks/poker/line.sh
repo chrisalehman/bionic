@@ -854,7 +854,8 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
 # minute, the shape close-out writes, so the window reaches through it (_HH_PLACE_AWK).
 # hand_holds_window <landing record> <project root> <plan> -> `<since|-><TAB><row|-><TAB><until|-><TAB><delivered|now>`
 hand_holds_window() {
-  local rec="$1" root="$2" plan="$3" builds s="-" row="-" u="-" st=now e
+  # its own reads split on blanks, whatever IFS the caller set around the substitution it is called in
+  local rec="$1" root="$2" plan="$3" builds s="-" row="-" u="-" st=now e IFS=$' \t\n'
   builds="$(units_rows "$plan" 2>/dev/null | awk -F'\t' '$3 == "build" { printf "%s ", $1 }')"
   if [ -n "$builds" ] && [ -f "$plan" ] && _lr_reader; then
     read -r s row <<< "$(_proof_ask "$plan" reader_q_landed "$plan" 2>/dev/null | awk -F'|' -v B=" $builds" "$_READER_AWK$_HH_PLACE_AWK"'

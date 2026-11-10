@@ -166,6 +166,8 @@ proved: kind=unit head=$H ac=AC-5 at=2026-11-01T06:00:00Z evidence=record/wave-8
 inherited: a.test.sh base=$C head=$H at=2026-11-01T07:00:00Z evidence=record/wave-8-matrix/i.log
 EOF
 MEV="$(translate "$M" events)"; MG="$(translate "$M" gaps)"
+# a caller that reads tab fields (the release card reads the hand-holds window so) calls the translation with a tab IFS
+expect_eq "the translation reads every source whatever IFS its caller holds" "$MEV" "$(IFS=$'\t'; translate "$M" events)"
 askm() { bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$M" "$@" | tr '\n' ' ' | sed 's/ $//'; }
 acof() { printf '%s\n' "$MEV" | grep -F "|ac=$1|" | grep -v '^run/v1|ev=hand|'; }
 
