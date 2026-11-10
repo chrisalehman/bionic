@@ -353,8 +353,8 @@ PROOF_READING
 }
 
 # proof_word_in <value> <set> -> 0 when <value> is one of the space-separated words of <set>,
-# whole: a value holding a space matches no word (wave-27 T41; review pass 10 F2). Every list this library splits is
-# split on its own separators, never its caller's: a card calls in under a tab, where <set> would be one word.
+# whole: a value holding a space matches no word (wave-27 T41; review pass 10 F2).
+# Every list this library splits is split on its own separators, never its caller's: a card calls in under a tab.
 proof_word_in() {
   local w IFS=$' \t\n'
   for w in $2; do [ "$1" = "$w" ] && return 0; done
