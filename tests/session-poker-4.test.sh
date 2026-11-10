@@ -1749,8 +1749,21 @@ expect_eq "ST-1 AC-6.1 control: with a writer row running, the tick starts nothi
 s42_builds_landed "$PST"
 awk '/^\| T5 \| 5 \| verify \|/ { sub(/\| pending \|$/, "| landed |") } { print }' "$PST" > "$PST.tmp" && mv "$PST.tmp" "$PST"
 ack_rows "$RST" w-T2
+# A whole run that is running leaves no log and no object until it ends; its open whole request at the gate, held by
+# this live shell, is the one fact of it. Waiting, it leaves the room as it was, so the tick reaches the start; once it
+# is ended the same tick starts (ST-2), and nothing else differs between the two.
+ST_WHOLE="$SP_GATE_DIR/requests/9001"
+printf 'key=tests/run.sh\nkind=whole\nwho=%s:main\ntree=%s\nasked=1000\nholder=%s:%s\n' "$SID" "$(cd "$ST_WT" && pwd -P)" "$$" \
+  "$(bash -c '. "$1/payload/scripts/lib/slots.sh" && _slots_since "$2"' _ "$BIONIC_SCRIPTS_DIR" "$$")" > "$ST_WHOLE"
 forget_digest "$RST"; poke "$RST" tick
-expect_contains "ST-2 AC-6.1 nothing ready, no writer open, the head past the proof: the tick starts regression-run as regression@<h8>" \
+expect_nonempty "ST-1b-pre the tick beside an open whole run printed its decision line" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker-tick/v1|')"
+expect_eq "ST-1b AC-19.1 an open whole request at the gate for the checkout: the tick starts no whole run and no object" "|" "$(st_started)|$(st_objects "${ST_H1:0:8}")"
+poke "$RST" regression-run
+expect_eq "ST-1c AC-19.1 …and regression-run refuses a second whole run beside it" "1" "$RC"
+expect_contains "ST-1d …naming the gate's open whole request for the checkout" "open whole request" "$OUT"
+printf 'ended=1001\nrc=0\n' >> "$ST_WHOLE"
+forget_digest "$RST"; poke "$RST" tick
+expect_contains "ST-2 AC-6.1 AC-19.2 nothing ready, no writer open, the head past the proof: the tick starts regression-run as regression@<h8>" \
   "poker: regression-run started regression@${ST_H1:0:8} (log $(st_log "${ST_H1:0:8}"))" "$(st_started)"
 [ -n "$(st_started)" ] || printf '      the tick said: %s\n' "$OUT"
 expect_contains "ST-2b …and the roster holds the object: a run row, its one suite run.sh, a read-only role, waived as no agent" "|status=run|" "$(st_objects "${ST_H1:0:8}" | head -n 1)"

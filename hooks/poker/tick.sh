@@ -9,7 +9,8 @@
 # reads a five-minute busy load over the share's line (`_gate_share_cores`) and gives no room, the tick orders the
 # newest live writer whose row has not landed to stop, at most one a tick, through the stop order a MET row takes,
 # and returns its row to pending with its tree kept, so FILL offers it again once the room opens. A held row is
-# left to its hold, and no gate request is ended by it: an admitted run finishes and writes its own cost.
+# left to its hold. The writer's asks the gate never admitted are withdrawn with it; an admitted run is never ended
+# by it, finishes and writes its own cost, and while one of a stood-down writer runs no other writer is stood down.
 
 # ---------------------------------------------------------------- the Patrol stamp
 
@@ -2194,8 +2195,9 @@ EOF
     # no row is ready, no writer row is open and no row the regression waits on still writes, and the
     # working branch's head is not the last regression proof's (no proof counts as another head). A fix
     # row that lands past a proof is this same case at the next tick: its landing moved the head, so it
-    # has no branch of its own. Nothing starts at a head that already has a whole-run log, nor from a
-    # dirty checkout, which regression-run would refuse.
+    # has no branch of its own. Nothing starts at a head that already has a whole-run log, nor beside a
+    # whole run still running in the checkout (`whole_run_at_head`), nor from a dirty checkout, which
+    # regression-run would refuse.
     #
     # THE RUN IS AN OBJECT ON THE ROSTER, `regression@<h8>`. A row of status `run`, which no reader
     # counts as a live agent, in a read-only role (it holds no writer slot), waived as no agent's
@@ -2210,7 +2212,7 @@ EOF
     # hand-typed run's does). The command ends with the run's code when the run wrote a log, 75 when the
     # gate never admitted it, and 69 when it ran nothing: a stamp of 75 or 69 is no run of the head.
     tick_regression_start() {
-      local plan="${SCHED_PLAN:-}" head ph wb co docs rel lg h8 name row poker cmd out log
+      local plan="${SCHED_PLAN:-}" head ph wb co docs rel h8 name row poker cmd out log
       [ -n "$plan" ] && [ -f "$plan" ] && [ "${POKER_RUN_OPEN:-}" != unreadable ] || return 0
       case "${SCHED_STEP:-}" in ''|*[!0-9]*) return 0 ;; esac
       [ "$SCHED_STEP" -ge 4 ] || return 0
@@ -2233,7 +2235,9 @@ EOF
       [ -z "$(_wt_piece_dirt "$co" 2>/dev/null)" ] || return 0
       docs="$(docs_root "$REPO_REAL" 2>/dev/null)"; [ -n "$docs" ] || return 0
       rel="record/$(proof_plan_slug "$plan")/regression-run-$head.log"
-      for lg in "$docs/${rel%.log}"*.log; do [ -f "$lg" ] && return 0; done
+      # A whole run at this head that ended left its log; one still running, the tick's own or the orchestrator's,
+      # has written none yet, and its open whole request at the gate is what says so.
+      ! whole_run_at_head "$docs" "$(proof_plan_slug "$plan")" "$head" "$co" || return 0
       h8="${head:0:8}"; name="regression@$h8"
       if run_load_row "$(run_row_of "$ROSTER_FILE" "$name")" "$ROSTER_FILE"; then
         run_read
@@ -2538,8 +2542,14 @@ EOF
     # own verb in a child as launch-sync runs, so a refused write orders no stop: a stopped agent whose
     # row stayed active would never be offered again. The tree and base cells are kept; the agent cell is
     # cleared, as a review row returned on its proof is, and its next launch fills it.
+    #
+    # A STAND-DOWN FREES WHAT IT CAN AND WAITS ON WHAT IT MUST NOT END. The stood-down writer's asks that were never
+    # admitted are withdrawn (`stop_run_gate --waiting`): a detached shim holds them, so the agent's stop reaches none,
+    # and one admitted later would run for a row that is pending again. Its admitted runs are left to finish
+    # (docs/adrs/adr-077-the-gate-steers-by-the-load.md), and until they end the reading still carries their load, so
+    # no second writer is stood down for it (`tick_load_held`).
     tick_load_standdown() {
-      local b5 lim id name row la best="" best_id="" best_la="" out open
+      local b5 lim id name row la best="" best_id="" best_la="" out open held SR_WHY="stood down for the load" SR_REPORT_ONLY=no
       [ "${SCHED_GATE_ROOM:-}" = no ] && declare -F _gate_share_cores >/dev/null 2>&1 || return 0
       [ -n "${SCHED_PLAN:-}" ] && [ -f "$SCHED_PLAN" ] && [ "$POKER_RUN_OPEN" != unreadable ] || return 0
       b5="${SCHED_GATE_LOAD#*/}"
@@ -2561,6 +2571,10 @@ EOF
 $(units_rows "$SCHED_PLAN" 2>/dev/null | awk -F'\t' '$10 == "active" && $5 != "" { print $1 "\t" $5 }')
 EOF
       [ -n "$best" ] || return 0
+      if held="$(tick_load_held)"; then
+        say "no STANDDOWN — load ${b5} over ${lim}; ${held}, stood down already, still runs an admitted run, and its load leaves when that run ends"
+        return 0
+      fi
       if ! out="$( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" \
              task-set "$best_id" status=pending agent=— 2>&1 )"; then
         say "no STANDDOWN ${best} — load ${b5} over ${lim}, and its row ${best_id} could NOT be returned to pending, so no stop is ordered: $(clean "$(printf '%s' "$out" | head -1)")"
@@ -2569,6 +2583,37 @@ EOF
       say "STANDDOWN ${best} — load ${b5} over ${lim}; its row ${best_id} is pending again with its tree kept, so TaskStop it (the order is written) and FILL offers the row when the room opens"
       SD_LOAD_NAME="$best"
       SD_ORDER_NAMES="${SD_ORDER_NAMES}${SD_ORDER_NAMES:+ }${best}"
+      if declare -F stop_run_request >/dev/null 2>&1; then
+        stop_run_request "$best" >/dev/null 2>&1
+        for id in $SR_REQS; do stop_run_gate "$id" --waiting; done
+      fi
+      return 0
+    }
+
+    # tick_load_held -> the first name this session's tick ordered stopped (its patrol stop orders) that still holds an
+    # open admitted request asked before its latest order, read through the gate's own reader (`stop_run_request`);
+    # rc 1 when none. A request asked after the order is a later dispatch under the same name, whose load is its own.
+    tick_load_held() {
+      local f="$REPO_REAL/.bionic/tmp/stop-orders-${SESSION_ID}.state" t ep id
+      [ -f "$f" ] && [ ! -L "$f" ] && declare -F stop_run_request >/dev/null 2>&1 || return 1
+      while IFS=' ' read -r t ep; do
+        [ -n "$t" ] || continue
+        stop_run_request "$t" >/dev/null 2>&1
+        for id in $SR_REQS; do
+          _gate_read "$(gate_dir)/requests/$id" 2>/dev/null && [ -n "$_R_admitted" ] && _gate_num "$_R_asked" \
+            && [ "$_G_NUM" -le "$ep" ] && { printf '%s' "$t"; return 0; }
+        done
+      done <<EOF
+$(awk -v sid="$SESSION_ID" 'index($0, "stop-order/v1|") == 1 {
+    n = split($0, p, "|"); by = ""; s = ""; t = ""; e = ""
+    for (i = 2; i <= n; i++) { j = index(p[i], "="); k = substr(p[i], 1, j - 1); v = substr(p[i], j + 1)
+      if (k == "by") by = v; else if (k == "session") s = v; else if (k == "target") t = v; else if (k == "epoch") e = v }
+    if (by != "patrol" || (s != "" && s != sid) || t !~ /^[A-Za-z0-9_.-]+$/ || t ~ /^[0-9]+$/ || e !~ /^[0-9]+$/) next
+    if (!(t in m) || e + 0 > m[t] + 0) m[t] = e
+  }
+  END { for (t in m) print t " " m[t] }' "$f" 2>/dev/null)
+EOF
+      return 1
     }
 
     # "No roster" and "empty roster" are different facts, and only the latter may DISARM

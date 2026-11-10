@@ -9,6 +9,8 @@
 #   §NAME     every answer over a planted log equals the answer over it with each line's fields moved.
 #   §FORM     a yes or no answer prints nothing; value lines are `key=value`; list lines start `run/v1|`.
 #   §UNKNOWN  an unlisted question exits 2 and prints the list.
+#   §REST     the twelve log-side questions each answer a planted log in their form, honour the fold, and
+#             answer the same with each line's fields moved.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
 
@@ -73,5 +75,66 @@ section "UNKNOWN"
 W=fold; out="$(ask nosuch 2>&1)"; expect_status "an unlisted question exits 2" 2 "$?"
 for q in step approved proof green landed asks; do expect_contains "the refusal lists $q" "$q" "$out"; done
 ask step >/dev/null; expect_status "a listed question is answered" 0 "$?"
+
+section "REST"
+# Each row: the question, the field its lines are read by (`-` the whole line), and `rc=<exit> <values>`.
+W=rest; t=2026-11-02T00:00; plan rest <<EOF
+run/v1|ev=ask|key=approve:step3|sent=s|at=${t}:01Z
+run/v1|ev=ask|key=approve:release|sent=s|holds=T9|at=${t}:02Z
+run/v1|ev=ask|key=decide:D1|sent=s|at=${t}:03Z
+run/v1|ev=proof|kind=review|head=$H|question=adversarial|result=pass|at=${t}:04Z
+run/v1|ev=proof|kind=review|head=$H|question=adversarial|result=pass|at=${t}:05Z
+run/v1|ev=proof|kind=review|head=$G|question=structure|result=fail|at=${t}:06Z
+run/v1|ev=waiver|question=evidence|head=$H|by=me|at=${t}:07Z
+run/v1|ev=decision|d=D1|verb=put|at=${t}:08Z
+run/v1|ev=decision|d=D1|verb=ruled|said=yes|at=${t}:09Z
+run/v1|ev=decision|d=D2|verb=put|at=${t}:10Z
+run/v1|ev=finding|ref=F1|to=defer|at=${t}:11Z
+run/v1|ev=finding|ref=F2|to=carried|at=${t}:12Z
+run/v1|ev=finding|ref=F1|to=fix|row=T5|at=${t}:13Z
+run/v1|ev=debt|concept=c1|kind=k|at=${t}:14Z
+run/v1|ev=debt|concept=c2|kind=k|at=${t}:15Z
+run/v1|ev=debt|concept=c2|kind=k|burned=T4|at=${t}:16Z
+run/v1|ev=admitted|id=d1|row=T3|at=${t}:17Z
+run/v1|ev=admitted|id=d2|row=T3|at=${t}:18Z
+run/v1|ev=void|id=d2|why=w|at=${t}:19Z
+run/v1|ev=stop|session=s1|state=held|room=2|at=${t}:20Z
+run/v1|ev=stop|session=s1|state=free|room=3|at=${t}:21Z
+run/v1|ev=order|act=given|said=away|at=${t}:22Z
+run/v1|ev=order|act=lifted|said=away|at=${t}:23Z
+run/v1|ev=order|act=given|said=away|at=${t}:24Z
+run/v1|ev=hand|kind=amend|lacked=x|at=${t}:25Z
+run/v1|ev=published|row=T2|commit=c2|kind=hand|at=${t}:26Z
+run/v1|ev=published|row=T1|commit=c1|kind=queue|at=${t}:27Z
+run/v1|ev=dispatch|row=T3|name=w3|suites=a.test.sh|files=f|at=${t}:28Z
+run/v1|ev=dispatch|row=T3|name=w3|suites=b.test.sh|files=f|at=${t}:29Z
+run/v1|ev=tree|row=T3|path=/t3|branch=wt/T3|base=c0|at=${t}:30Z
+run/v1|ev=returned|row=T3|why=red|at=${t}:31Z
+run/v1|ev=dispatch|row=T4|name=w4|at=${t}:32Z
+run/v1|ev=cancel|of=dispatch|row=T4|name=w4|at=${t}:33Z
+run/v1|ev=handoff|path=/h1|at=${t}:34Z
+run/v1|ev=handoff|path=/h2|at=${t}:35Z
+run/v1|ev=handoff|path=/h1|at=${t}:36Z
+run/v1|ev=verdict|row=T1|commit=c1|suite=s.test.sh|result=red|at=${t}:37Z
+run/v1|ev=verdict|row=T1|commit=c1|suite=s.test.sh|result=green|at=${t}:38Z
+EOF
+REST=("holds|holds|rc=0 step 4,T9" "reviews|question|rc=0 adversarial,structure,evidence" "reviews $H|question|rc=0 adversarial,evidence"
+  "ledger|verb|rc=0 put,ruled,put" "ledger D1|verb|rc=0 put,ruled" "findings|to|rc=0 carried,fix" "findings fix|ref|rc=0 F1"
+  "debts|concept/id/ref|rc=0 F2,c1,d1" "stop|-|rc=0 room=3,session=s1,state=free,at=${t}:21Z,order=given,asks=3"
+  "order|-|rc=0 order=given,said=away,at=${t}:24Z" "hands|kind|rc=0 amend,hand" "handoff|-|rc=0 path=/h1,at=${t}:36Z"
+  "status T3|-|rc=0 state=returned,files=f,name=w3,suites=b.test.sh,tree=/t3,branch=wt/T3,base=c0"
+  "status T4|-|rc=0 state=pending" "status T1|-|rc=0 state=landed,commit=c1" "ready T4 T1|-|rc=0 " "ready T4 T3|-|rc=1 "
+  "ready T3|-|rc=1 " "ready T1|-|rc=1 " "verdicts|result|rc=0 green" "verdicts T9|result|rc=0 ")
+pick() {  # <field[/field…]|-> -> each line's first named field, or the whole line, joined by commas
+  awk -F'|' -v f="$1" 'BEGIN { n = split(f, w, "/") } { v = (f == "-") ? $0 : ""
+    for (j = 1; j <= n && v == ""; j++) for (i = 2; i <= NF; i++) if (index($i, w[j] "=") == 1) v = substr($i, length(w[j]) + 2)
+    printf "%s%s", (NR > 1 ? "," : ""), v }'
+}
+rest() { local r q f; for r in "${REST[@]}"; do q="${r%%|*}"; f="${r#*|}"; f="${f%%|*}"; out="$(ask $q)"; printf '%s|rc=%s %s\n' "$q" "$?" "$(printf '%s\n' "$out" | pick "$f")"; done; }
+got="$(rest)"; for r in "${REST[@]}"; do expect_eq "${r%%|*} answers its fold" "${r##*|}" "$(printf '%s\n' "$got" | awk -v p="${r%%|*}|" 'index($0, p) == 1 { print substr($0, length(p) + 1) }')"; done
+awk -F'|' -v OFS='|' '{ f = $2; for (i = 2; i < NF; i++) $i = $(i + 1); $NF = f; print }' "$D/record/rest/run.log" | plan restmoved
+expect_eq "the twelve answer the same with each line's fields moved" "$got" "$(W=restmoved; rest)"
+ask status 2>/dev/null; expect_status "status with no row exits 2" 2 "$?"
+ask ready 2>/dev/null; expect_status "ready with no row exits 2" 2 "$?"
 
 finish
