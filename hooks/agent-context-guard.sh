@@ -104,7 +104,7 @@ _jq() { printf '%s' "$BIONIC_INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 
 # ---------- the library ----------
 #
-# One loader idiom, byte-identical in every hook (spec AC-16). FAIL CLOSED, ONCE: a
+# One loader idiom, byte-identical in every hook. FAIL CLOSED, ONCE: a
 # subagent's stop with no library is refused, and exit 2 holds that subagent open, so only
 # a first stop (`stop_hook_active` false) is refused; the re-entry, a payload without the
 # field and one jq cannot read all let it end. A main-thread event has left above.
