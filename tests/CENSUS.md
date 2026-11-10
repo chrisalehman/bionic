@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 119 · sections: 1094 · keep: 900 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 120 · sections: 1096 · keep: 902 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1092 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1092 - 22 - 8 = 1062.
 
@@ -874,6 +874,11 @@ live-agents.test.sh | §L | keep | payload/scripts/lib/agents.sh live_agents_has
 live-agents.test.sh | §M | duplicate | payload/scripts/lib/agents.sh live_agents: a path writes a second stderr line or none | live-agents.test.sh §B, live-agents.test.sh §C, live-agents.test.sh §E
 live-agents.test.sh | §N | keep | payload/scripts/lib/agents.sh live_agents: an inner pipeline left to fail under a caller's set -e, so STALE aborts the caller instead of returning 3 ("set -e caller: STALE returns 3") | none (searched 'set -euo pipefail' with 'live_agents' in tests/)
 live-agents.test.sh | §P | keep | payload/scripts/lib/agents.sh live_row_open: open read as `status = running` again, so an unknown third status word frees the slot ("an UNKNOWN third status word keeps the slot — fail-closed") | none (searched 'live_row_open' and 'live_agents_status' in tests/)
+
+## log.test.sh
+
+log.test.sh | §SHAPE | keep | payload/scripts/lib/log.sh log_append: the `at=` stamp dropped from the line, or the `ev` and `at` key refusal deleted, so a line lacks its instant or a caller sets its own (the shape regex and the at=1 refusal go red); the empty-type, bare-word and `|` refusals deleted, so a malformed call is written | none (searched 'log_append' and 'run/v1' in tests/)
+log.test.sh | §TYPES | keep | payload/scripts/lib/log.sh LOG_TYPES: a type dropped from the list, so a ruled event is refused (its accepted row goes red), or the membership test deleted, so `matrix-set` is appended | none (searched 'log_append' and 'LOG_TYPES' in tests/)
 
 ## loader.test.sh
 
