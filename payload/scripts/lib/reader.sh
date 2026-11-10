@@ -175,3 +175,135 @@ reader_q_asks() {  # <plan> -> each ask still open: no reply on it, and no appro
     ev() == "approval" { for (id in open) if (index(id, "approve:" line_kv("key") SUBSEP) == 1) delete open[id] }
     END { for (i = 1; i <= n; i++) if (ord[i] in open) print open[ord[i]] }'
 }
+
+# The questions below answer from the log alone. A full answer to some of them also needs the plan's
+# authored parts (a row's deps, the reviews the rigor owes, the rows an approval holds); each answers
+# what the log holds, and its own comment names the half the plan holds.
+reader_identity finding ref
+reader_identity debt concept
+reader_identity admitted id
+reader_identity dispatch row name
+reader_identity verdict row commit suite
+# One order and one handoff stand at a time: each line replaces the last, so an order given again with
+# the words of an earlier one, after a lift, answers given.
+reader_identity order
+reader_identity handoff
+
+_reader_of() {  # <plan> <type> [<field> <value>] -> the standing facts of <type>, of <field>=<value> when a value is given
+  reader_facts "$1" | awk -F'|' -v t="$2" -v k="${3:-}" -v v="${4:-}" "$_READER_AWK"'
+    ev() == t && (v == "" || line_kv(k) == v)'
+}
+
+_reader_last() {  # <plan> <type> -> the latest standing fact of <type>, its fields as key=value lines, `ev=` dropped
+  reader_facts "$1" | awk -F'|' -v t="$2" "$_READER_AWK"'
+    ev() == t { l = $0 }
+    END { n = split(l, p, "|"); for (i = 2; i <= n; i++) if (index(p[i], "ev=") != 1) print p[i] }'
+}
+
+reader_question holds list reader_q_holds
+reader_q_holds() {  # <plan> -> each open ask that holds something the log names, with `holds=` on its line
+  # An ask holds what its writer wrote in `holds=`, and a step's approval holds the next step. The rows
+  # that read an approval, a decision's waiters and the integrate rows a waiver holds are Tasks cells of
+  # the plan, so until the plan is read here such an ask is listed only when its line says.
+  reader_q_asks "$1" | awk -F'|' "$_READER_AWK"'
+    { h = line_kv("holds"); k = line_kv("key") }
+    h == "" && k ~ /^approve:step[0-9]+$/ {
+      h = "holds=step " (substr(k, 13) + 1); n = split($0, p, "|"); o = p[1]; put = 0
+      for (i = 2; i <= n; i++) { f = substr(p[i], 1, index(p[i], "=") - 1)
+        if (!put && (f == "at" || f > "holds")) { o = o "|" h; put = 1 }
+        o = o "|" p[i] }
+      print o; next
+    }
+    h != ""'
+}
+
+reader_question reviews list reader_q_reviews
+reader_q_reviews() {  # <plan> [head] -> the review proofs and the waivers of a question standing, at <head> when named
+  # Which reviews a run owes is its rigor, a header key of the plan; this lists what the log holds.
+  reader_facts "$1" | awk -F'|' -v h="${2:-}" "$_READER_AWK"'
+    (ev() == "proof" && line_kv("kind") == "review" || ev() == "waiver" && line_kv("question") != "") && (h == "" || line_kv("head") == h)'
+}
+
+reader_question ledger list reader_q_ledger
+reader_q_ledger() {  # <plan> [d] -> each decision round in order, put and ruled alike, of decision <d> when named
+  _reader_of "$1" decision d "${2:-}"
+}
+
+reader_question findings list reader_q_findings
+reader_q_findings() {  # <plan> [to] -> each finding where it stands now, of those moved to <to> when named
+  _reader_of "$1" finding to "${2:-}"
+}
+
+reader_question debts list reader_q_debts
+reader_q_debts() {  # <plan> -> each debt open: a debt not burned, an admitted red no void names, a finding carried
+  reader_facts "$1" | awk -F'|' "$_READER_AWK"'
+    { e = ev(); id = line_kv("id") }
+    e == "debt" && line_kv("burned") == "" || e == "finding" && line_kv("to") == "carried" { o[++n] = $0 }
+    e == "admitted" { o[++n] = $0; a[id] = n }
+    e == "void" && (id in a) { delete o[a[id]] }
+    END { for (i = 1; i <= n; i++) if (i in o) print o[i] }'
+}
+
+reader_question stop value reader_q_stop
+reader_q_stop() {  # <plan> -> the last stop's fields, then order= and asks=, the open count
+  # The rows ready to fill are the plan's deps cells; the stop line's own `ready=` is what the log holds.
+  _reader_last "$1" stop
+  reader_q_order "$1" | grep '^order='
+  printf 'asks=%s\n' "$(reader_q_asks "$1" | grep -c .)"
+}
+
+reader_question order value reader_q_order
+reader_q_order() {  # <plan> -> order=given with the standing order's words and instant, else order=none
+  reader_facts "$1" | awk -F'|' "$_READER_AWK"'
+    ev() == "order" { a = line_kv("act"); s = line_kv("said"); t = line_kv("at") }
+    END { if (a == "given") { print "order=given"; print "said=" s; print "at=" t } else print "order=none" }'
+}
+
+reader_question hands list reader_q_hands
+reader_q_hands() {  # <plan> -> each act taken by hand: a hand event, or a landing made by hand
+  # A roster act (an amend, a hold, an extension, an adoption) is session-only until its writer writes a
+  # hand event, and a version-14 kind no ruled type carries is a gap of the translation, not a fact here.
+  reader_facts "$1" | awk -F'|' "$_READER_AWK"'
+    ev() == "hand" || ev() == "published" && line_kv("kind") == "hand"'
+}
+
+reader_question status value reader_q_status
+reader_q_status() {  # <plan> <row> -> state= of the row, then its dispatch contract, its tree and its landing commit
+  # state is the latest of dispatched, candidate, ready, returned, stalled and landed; pending when the
+  # log holds none. Whether the plan has the row at all is the plan's.
+  _reader_needs status '<row>' "${2:-}" || return 2
+  reader_facts "$1" | awk -F'|' -v r="$2" "$_READER_AWK"'
+    line_kv("row") != r { next }
+    { e = ev() }
+    e == "published" { s = "landed"; c = line_kv("commit") }
+    e == "dispatch" || e == "candidate" || e == "ready" || e == "returned" || e == "stalled" { s = (e == "dispatch") ? "dispatched" : e }
+    e == "dispatch" { d = $0 }
+    e == "tree" { t = line_kv("path"); b = line_kv("branch"); o = line_kv("base") }
+    END {
+      print "state=" (s == "" ? "pending" : s)
+      n = split(d, p, "|"); for (i = 2; i <= n; i++) if (p[i] !~ /^(ev|row|at)=/) print p[i]
+      if (t != "") { print "tree=" t; print "branch=" b; print "base=" o }
+      if (c != "") print "commit=" c
+    }'
+}
+
+reader_question ready yes reader_q_ready
+reader_q_ready() {  # <plan> <row> [dep…] -> 0 when the row has not landed, no dispatch of it stands, and each dep has landed
+  # A row's deps are its Tasks cell, so the caller names them until the plan is read here.
+  _reader_needs ready '<row> [dep…]' "${2:-}" || return 2
+  local plan="$1" row="$2"; shift 2
+  reader_facts "$plan" | awk -F'|' -v r="$row" -v deps="$*" "$_READER_AWK"'
+    ev() == "published" { landed[line_kv("row")] = 1 }
+    ev() == "dispatch" && line_kv("row") == r { held = 1 }
+    END { if ((r in landed) || held) exit 1; n = split(deps, d, " "); for (i = 1; i <= n; i++) if (!(d[i] in landed)) exit 1 }'
+}
+
+reader_question handoff value reader_q_handoff
+reader_q_handoff() {  # <plan> -> the latest handoff: path= and at=
+  _reader_last "$1" handoff
+}
+
+reader_question verdicts list reader_q_verdicts
+reader_q_verdicts() {  # <plan> [row] -> each suite's verdict standing, of <row> when named
+  _reader_of "$1" verdict row "${2:-}"
+}
