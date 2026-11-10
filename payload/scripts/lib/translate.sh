@@ -302,3 +302,44 @@ _translate_fill() {  # <plan> -> the fill ledger: each stop, its fields as writt
   f="$(_translate_record "$1" fill-ledger.log)" || return 0
   awk "$_TRANSLATE_AWK"'index($0, "fill-ledger/v1|") == 1 { carry("stop", substr($0, 16), "|") }' "$f"
 }
+
+translate_source _translate_decisions
+_translate_decisions() {  # <plan> -> the design ledger's headings: each put or ruled round a decision
+  # A round's heading is `Δ<n> — D<n> put (<who> <instant>): <title>`, or `… ruled "<reply>" (…): …`. Its
+  # instant is kept as the heading writes it, local clock and zone or a bare day: rewritten to UTC it
+  # would be a time the heading never held. One holding a `|` cannot be written, so it is named. A heading
+  # of any other form is named whole by its first word and writes no round, because a verb or reply read
+  # out of other words would be a guess.
+  local f
+  f="$(_translate_record "$1" design-ledger.md)" || return 0
+  awk "$_TRANSLATE_AWK"'
+    function stamp(at,   i) { if (!index(at, "|")) { emit(at); return }
+      gap("at", "bar"); printf "e\t%s\t%s|at=\n", slot(T, ""), L; for (i = 1; i <= NG; i++) printf "g\t\t%s\n", G[i] }
+    index($0, "## ") != 1 { next }
+    { h = substr($0, 4); split(h, w, " "); ok = match(h, /^Δ[0-9]+ — D[0-9]+ (put \(|ruled ")/); said = ""
+      re = "[^()]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][^()]*\\): "
+      if (ok) { split(substr(h, 1, RLENGTH), x, " "); rest = substr(h, RLENGTH + 1) }
+      if (ok && x[4] == "put") { ok = match(rest, "^" re); paren = substr(rest, 1, RLENGTH - 3) }
+      else if (ok && (ok = match(rest, "\" \\(" re))) { said = substr(rest, 1, RSTART - 1); paren = substr(rest, RSTART + 3, RLENGTH - 6) }
+      if (!ok) { whole("decision", "heading=" w[1], "shape"); next }
+      title = substr(rest, RSTART + RLENGTH); match(paren, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)
+      begin("decision", "d", x[3]); put("verb", x[4]); if (x[4] == "ruled") put("said", said)
+      put("by", trim(substr(paren, 1, RSTART - 1))); put("title", trim(title)); stamp(substr(paren, RSTART)) }' "$f"
+}
+
+translate_source _translate_debts
+_translate_debts() {  # <plan> -> the debt ledger's lines: each a debt, burned= its row when burned
+  # A line is `<concept> | <kind> | <sites> | raised-by <record> | touches <n> | burned <row>`, its last
+  # cell `—` while open. The ledger holds no instant, so each debt ends `at=`, empty, and is named. A line
+  # of any other form, a note in the last cell or prose, is named whole and writes no debt: read as open
+  # or burned, it would be a guess.
+  local f
+  f="$(_translate_record "$1" debt.md)" || return 0
+  awk -F' [|] ' "$_TRANSLATE_AWK"'
+    /^#/ || /^[ \t]*$/ { next }
+    { split("", c); for (i = 1; i <= NF; i++) c[i] = trim($i); b = c[6] }
+    NF != 6 || c[1] == "" || c[4] !~ /^raised-by [^ ]/ || c[5] !~ /^touches [0-9]+$/ || !(none(b) || b ~ /^burned [^ ]+$/) {
+      whole("debt", (NF > 1 && c[1] != "") ? "concept=" c[1] : "line=" NR, "shape"); next }
+    { begin("debt", "concept", c[1]); put("kind", c[2]); put("sites", c[3]); put("raised-by", substr(c[4], 11))
+      put("touches", substr(c[5], 9)); if (!none(b)) put("burned", substr(b, 8)); emit("") }' "$f"
+}
