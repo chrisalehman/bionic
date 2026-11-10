@@ -12,6 +12,8 @@
 # THE FOLD. `reader_facts` turns the lines into facts, in the order they happened:
 #   - two lines equal in every field but `at=` are one fact; the repeat changes nothing, not even the place;
 #   - a later line with the same identifying fields and another value replaces the earlier, and takes its place;
+#   - a discarded verdict replaces no earlier verdict, whatever its commit, and one with none before it stands
+#     as the discarded run it was; a red or a green after it replaces it as any later line does;
 #   - `cancel` retracts the fact it names (`of=<event type>` and that fact's identifying fields); a later
 #     line may assert it again.
 # A type's identifying fields are its `reader_identity` entry; a type with none is identified by all its
@@ -113,6 +115,8 @@ reader_facts() {  # <plan> -> one line per standing fact, in the order the facts
       # or a regression at a head still replaces the earlier one
       if (named == "proof" && f["kind"] == "review") id = id SUBSEP "evidence=" f["evidence"]
       if (t == "cancel") { delete live[id]; next }
+      # a discarded run was killed, not judged: it must not unseat the verdict a run already gave
+      if (t == "verdict" && f["result"] == "discarded" && (id in live)) next
       if ((id in live) && fact[id] == body) next
       live[id] = 1; fact[id] = body; type[id] = t; stamp[id] = f["at"]; place[id] = ++seq
     }

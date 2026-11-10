@@ -954,7 +954,7 @@ awk -v h="$SR_H" '{ print } /^current: 4$/ {
   "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
 expect_eq "RV1 five results of reviews, a line for each one standing, and the count by question and scope at its latest: 2 passed, 1 failed" \
-  "3|a2.md e1.md s2.md|2 passed, 1 failed, 0 running" \
+  "5|a1.md a2.md e1.md s1.md s2.md|2 passed, 1 failed, 0 running" \
   "$(sr_lines review | /usr/bin/grep -c .)|$(sr_lines review | sed 's/.*record=record\/wave-02-fx\///' | sort | tr '\n' ' ' | sed 's/ $//')|$(sr_m reviews)"
 
 # Correctness names the suites run, each by its last verdict on the line, then the whole run. A suite named by its
@@ -966,7 +966,7 @@ expect_eq "SU0 the clean world: its one suite green at its last run, and no whol
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=tests/b.test.sh|result=red|log=/rec/T8b.log|at=2026-10-06T14:00:00Z"
 sr_ev "ev=verdict|row=T5|commit=$SR_C1|suite=c.test.sh|result=red|log=/rec/T5c.log|at=2026-10-06T14:05:00Z"
 sr_ev "ev=verdict|row=T6|commit=$SR_C1|suite=c.test.sh|result=green|log=/rec/T6c.log|at=2026-10-06T14:10:00Z"
-sr_ev "ev=verdict|row=T6|commit=$SR_H|suite=c.test.sh|result=discarded|log=/rec/T6c2.log|at=2026-10-06T14:12:00Z"
+sr_ev "ev=verdict|row=T6|commit=$SR_C1|suite=c.test.sh|result=discarded|log=/rec/T6c2.log|at=2026-10-06T14:12:00Z"
 sr_ev "ev=verdict|row=regression|commit=$SR_H|suite=z.test.sh|result=green|log=/rec/z.log|admitted=-|width=-|kind=regression|at=2026-10-06T14:20:00Z"
 sr_ev "ev=verdict|row=regression|commit=$SR_H|suite=y.test.sh|result=red|log=/rec/y.log|admitted=-|width=-|kind=regression|at=2026-10-06T14:21:00Z"
 sr_run "$SR_PLAN"
