@@ -1515,21 +1515,24 @@ if [ -n "$DP_BUDGET_WRITERS" ]; then
           live_agents "$transcript" >/dev/null 2>&1 || :
         fi
 
-        # THE PREDICATE IS NOT SPELLED HERE. It is `live_row_open`
-        # (payload/scripts/lib/agents.sh), and its header says why the rule is an inversion.
+        # THE PREDICATE IS NOT SPELLED HERE. It is `alive_agent` (payload/scripts/lib/alive.sh):
+        # the row's session alive, which this session is to itself, and `live_row_open`
+        # (payload/scripts/lib/agents.sh), whose header says why that rule is an inversion.
         #
         # The reader's own stderr passes through here unchanged — one line,
         # `live-agents: <state> age=<n|none>` — captured rather than left to leak so the
         # STALE/NONE case below can hand its pieces to the caller verbatim. The predicate
         # prints nothing on stdout, so this capture is that line and nothing else.
         la_rc=0
-        la_out=$( { live_row_open "$transcript" "$nm"; } 2>&1 ) || la_rc=$?
+        la_out=$( { alive_agent "$BIONIC_SID" "$transcript" "$nm"; } 2>&1 ) || la_rc=$?
         # STALE (3) AND NONE (4) BECOME OPEN, not a refusal. The reader's own stderr line
         # stays captured in `la_out` and discarded: it named a ListAgents call as the
         # repair, which is no longer anybody's job, and letting it out would put the
         # retired chore back in front of the operator by another route.
+        # A reader that could not run at all (127: a library directory older than alive.sh) is
+        # read the same way: the row stays open, never freed on an answer nobody gave.
         case "$la_rc" in
-          3|4) notfresh=1; la_rc=0; row_dark=1 ;;
+          3|4|127) notfresh=1; la_rc=0; row_dark=1 ;;
         esac
         # ---- END fresh-panel branch ----
       fi
@@ -1688,34 +1691,24 @@ warn() { printf 'dispatch-preflight: WARN %s\n' "$1" >&2; }
 
 # ---------- D-5 pruning ----------
 #
-# The same liveness rule task 4/2 established for the attestation
-# (hooks/preflight-probe.sh): a session is live iff its transcript still exists
-# under CLAUDE_CONFIG_DIR/projects. A LIVE foreign session's roster is never
-# touched — that concurrency is the point of D-5 — and a dead session's is
-# reclaimed so a stale fleet cannot answer as "ours" (the bb20f616 class). There
-# is no legacy single-slot file to prune: this artifact is per-session from
-# birth.
-ROSTER_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-
-roster_session_live() {  # <session id>
-  local sid="$1" d
-  [ -n "$sid" ] || return 1
-  [ -d "$ROSTER_CONFIG_DIR/projects" ] || return 1
-  for d in "$ROSTER_CONFIG_DIR"/projects/*/; do
-    [ -f "${d}${sid}.jsonl" ] && return 0
-  done
-  return 1
-}
-
+# A session is live by lib/alive.sh's one rule: its process is running with the start its
+# record names. A transcript outlives its session, so its presence says nothing. A cleared
+# conversation's predecessor stays live while its process is, through the record `alive_note`
+# writes below while this session's id is current, so the roster of agents it dispatched is
+# never pruned out from under them. A LIVE foreign session's roster is never touched — that
+# concurrency is the point of D-5 — and a dead session's is reclaimed so a stale fleet cannot
+# answer as "ours" (the bb20f616 class). With the rule unreadable here nothing is pruned.
+# There is no legacy single-slot file to prune: this artifact is per-session from birth.
 prune_stale_rosters() {
   local f base sid
+  declare -F alive_session >/dev/null 2>&1 || return 0
   for f in "$STATE_DIR"/"$ROSTER_PREFIX"*"$ROSTER_SUFFIX"; do
     [ -e "$f" ] || continue
     base="$(basename "$f")"
     sid="${base#"$ROSTER_PREFIX"}"
     sid="${sid%"$ROSTER_SUFFIX"}"
     [ "$sid" = "$BIONIC_SID" ] && continue
-    roster_session_live "$sid" || rm -f "$f" 2>/dev/null
+    alive_session "$sid" || rm -f "$f" 2>/dev/null
   done
 }
 
@@ -3340,6 +3333,9 @@ Fix: remove the link (rm ${ROSTER_FILE}), then dispatch again."
 fi
 
 prune_stale_rosters
+# The process this session runs in, recorded while its id is current: what keeps its roster's
+# agents live to every reader after a clear re-keys the conversation.
+declare -F alive_note >/dev/null 2>&1 && alive_note "$BIONIC_SID" >/dev/null 2>&1
 
 # ---------- same-path contention (epic-16 wave-02, R8/AC-12) ----------
 #

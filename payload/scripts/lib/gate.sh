@@ -135,8 +135,8 @@
 #
 # THE RULES, each taken under lock/:
 #
-#   alive     a request's holder is alive by the pid-and-start rule of lib/slots.sh
-#             (`_slots_live`, called, not copied). Admitted, dead and never ended is killed:
+#   alive     a request's holder is alive by lib/alive.sh's one rule, pid and start
+#             (`alive_run`, called, not copied). Admitted, dead and never ended is killed:
 #             the next locked act that reads it writes it ended=<now> rc=137, after which it
 #             overlaps nothing.
 #   open      (T71) ONE rule, `_gate_open`, which the scan, gate_list, gate_asked and the prune
@@ -219,9 +219,10 @@ if ! type -t _res_used_pct >/dev/null 2>&1 && [ -r "$_GATE_LIB_DIR/resources.sh"
   # shellcheck disable=SC1091
   . "$_GATE_LIB_DIR/resources.sh"
 fi
-if ! type -t _slots_live >/dev/null 2>&1 && [ -r "$_GATE_LIB_DIR/slots.sh" ]; then
+# Whether a holder is alive is lib/alive.sh's one rule (`alive_run`, over slots.sh's pid and start).
+if ! type -t alive_run >/dev/null 2>&1 && [ -r "$_GATE_LIB_DIR/alive.sh" ]; then
   # shellcheck disable=SC1091
-  . "$_GATE_LIB_DIR/slots.sh"
+  . "$_GATE_LIB_DIR/alive.sh"
 fi
 # An instant has one reader, lib/time.sh's (wave-39 T17; D18): the finished-row read below dates the record by it.
 if [ -z "${_TIME_ISO_AWK:-}" ] && [ -r "$_GATE_LIB_DIR/time.sh" ]; then
@@ -386,7 +387,7 @@ _gate_read() {  # <file> — sets _R_<field> from its lines (a later line wins);
 
 _gate_alive() {  # the request last read has a live holder (holder=- is nobody)
   case "$_R_holder" in ''|-) return 1 ;; esac
-  _slots_live "${_R_holder%%:*}" "${_R_holder#*:}"
+  alive_run "${_R_holder%%:*}" "${_R_holder#*:}"
 }
 
 # _gate_num <string> — rc 0 and _G_NUM the string as a decimal whole number (leading zeros are
@@ -1429,7 +1430,7 @@ gate_room() {
 # place in line, held by the process that carries it (line.sh `_line_carry`) from its first ask until
 # it publishes, is returned or stalls, so a landing stays the oldest across its gaps.
 #
-#   held   its carrier lives (`_slots_live`, the pid-and-start rule the requests' holders use): the
+#   held   its carrier lives (`alive_run`, the pid-and-start rule the requests' holders use): the
 #          landing is active, ordered by its first-ask instant, ties by seq (THE WIDTH ASK).
 #   away   its carrier ended WAITING (`gate_landing_leave`; line.sh's rc 75, "its place kept"): the
 #          lease is nobody's (carrier=-), orders no one, and keeps its first-ask instant for the next
@@ -1473,7 +1474,7 @@ _gate_lease_state() {
        _gate_num "$(_res_now)" || return 0; now="$_G_NUM"
        [ "$((now - left))" -le "$span" ] || return 0
        _L_state=away ;;
-    *:*) _slots_live "${_L_carrier%%:*}" "${_L_carrier#*:}" && _L_state=held ;;
+    *:*) alive_run "${_L_carrier%%:*}" "${_L_carrier#*:}" && _L_state=held ;;
   esac
   return 0
 }
