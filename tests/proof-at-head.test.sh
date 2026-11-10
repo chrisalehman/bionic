@@ -12,6 +12,8 @@
 # §LOG   a review reading, a regression proof and an approval the run's log alone holds are read by the judge and the
 #        proof readers, which ask the reader; a proof written between two reads in one process is read by the second
 # §KEEP  the kept fold is served from the user's own mode-700 directory, never from one others can write or a link
+# §IFS   under a tab as the caller's only separator the fold's key still covers the log, and a rating and a verdict read
+#        as they do under the default
 #
 # FIXTURE FIDELITY. The project is close-out's own (tests/close-out.prelude.sh) at Step 8, its working branch checked
 # out beside it. `pah_world` lays the regression proof as `proof-add regression` writes it and each landing as the line
@@ -271,5 +273,23 @@ cp "$PK/ok/$PK_D/$PK_F" "$PK/open/$PK_D/"; chmod 777 "$PK/open/$PK_D"; cp -R "$P
 expect_eq "KEEP-1 the user's own kept fold (mode 700) is served to a second process, the approval planted in it read" "drwx------|$PL_H" "$(ls -ld "$PK/ok/$PK_D" | cut -c1-10)|$(pk ok)"
 expect_eq "KEEP-2 the same file is served neither from a directory others can write nor through a link to the user's own, each left as planted" "||1|1" "$(pk open)|$(pk link)|$(grep -c intruder "$PK/open/$PK_D/$PK_F")|$(grep -c intruder "$PK/away/$PK_D/$PK_F")"
 expect_eq "KEEP-3 a fold written beside forty older files leaves the sixteen newest, its own the newest" "16|$PK_F" "$(ls "$PK/full/$PK_D" | wc -l | tr -d ' ')|$(ls -t "$PK/full/$PK_D" | head -1)"
+
+section "§IFS: the library splits its own lists, whatever separators its caller set"
+# fails-when: the fold's key splits its lists of libraries and homes on the caller's IFS, so under a tab it covers the
+# plan alone and a fold kept before the run's log gained a proof is served after it.
+expect_eq "IFS-1 under a tab as the caller's only separator, the second ask reads the proof the log gained after the first" \
+  "0000000000000000000000000000000000000001|0000000000000000000000000000000000000002" \
+  "$(bash -c '. "$1/proof.sh" || exit 1; IFS=$'"'"'\t'"'"'; a="$(proof_last "$2" regression)"
+    printf "run/v1|ev=proof|kind=regression|head=%s|evidence=x|at=2026-10-04T13:10:00Z\n" 0000000000000000000000000000000000000002 >> "$3"
+    printf "%s|%s" "$a" "$(proof_last "$2" regression)"' _ "$PAH_LIB" "$PL_PLAN" "$PL_REC/run.log")"
+# fails-when: a rating or a run's verdict is split on the caller's IFS, so under a tab the finding drops out unrated and
+# a green run's verdict is refused as cut off.
+printf '## SDLC State\n\ndeferred: record/r.md#1 S2 off "a title"\n' > "$SANDBOX/ifs-plan.md"
+printf 'head=%s dirty=0\nGating: 3 passed, 0 failed\n' "$PL_H" > "$SANDBOX/ifs-run.log"
+ifs_read() { bash -c '. "$1/proof.sh" || exit 1; IFS="$2"; printf "%s|%s" "$(proof_findings_owed "$3")" "$(proof_attested task "$4" "$5" "" "" "" "$6")"' \
+  _ "$PAH_LIB" "$1" "$SANDBOX/ifs-plan.md" "$SANDBOX/ifs-run.log" "$PL" "$PL_H"; }  # <IFS> -> the finding's rated line|the head the run attests
+expect_eq "IFS-2 precondition: under the default separators the deferred finding reads rated and the green run attests the head" \
+  "record/r.md#1 S2 off defer \"a title\"|$PL_H" "$(ifs_read $' \t\n')"
+expect_eq "IFS-3 under a tab as the only separator the rating and the verdict read as they do under the default" "$(ifs_read $' \t\n')" "$(ifs_read $'\t')"
 
 finish

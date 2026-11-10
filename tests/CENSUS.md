@@ -1096,6 +1096,8 @@ proof-at-head.test.sh | §LOG | keep | payload/scripts/lib/proof.sh facts_state:
 
 proof-at-head.test.sh | §KEEP | keep | payload/scripts/lib/proof.sh _proof_facts: the kept fold read from a cache directory group or other can write, so an approval planted under the right key stands, or through a link to another directory (KEEP-2); the fold not kept in the user's own mode-700 directory, or not served from it to a second process (KEEP-1); no bound on the kept files, so a file per plan stays for ever (KEEP-3) | none (searched 'bionic-facts' and '_proof_facts' in tests/: §LOG reads the fold within one process, never its directory)
 
+proof-at-head.test.sh | §IFS | keep | payload/scripts/lib/proof.sh _proof_facts: the key's lists of libraries and homes split on the caller's IFS, so under a tab the key covers the plan alone and a fold kept before the run's log gained a proof is served after it (IFS-1); proof_findings_owed, _proof_priority_var or proof_word_in splitting a rating or the priority table on the caller's IFS, so under a tab a deferred finding drops out unrated, or proof_attested splitting the run's verdict so, so a green run is refused as cut off (IFS-3) | none (searched "IFS=$'\t'", 'proof_findings_owed' and 'proof_attested' in tests/: card.test.sh sets a tab only inside a fact printer, and no suite asks the library under a tab)
+
 ## protect-database.test.sh
 
 protect-database.test.sh | §Section 1 | keep | payload/scripts/lib/walls.sh protect-database: the DROP pattern made case-sensitive, so the lowercase form of the table statement is allowed ("lowercase drop table") | none (searched 'DROP' rows in tests/; bash-walls.test.sh §2 drives the uppercase form only)
