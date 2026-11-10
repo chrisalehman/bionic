@@ -1,0 +1,10 @@
+# Auditor — evidence re-read of AC-5.3 after T20, wave-49-what-a-run-costs (w49-T10)
+
+reviewed: 68ef6f3350834e887d6cd212c975a114348aabfa..dd9b12e1883354b73b57fe21b859ef74349d55f2
+question: evidence
+result: pass
+scope: piece
+
+| AC | tier | auditor | evidence read | why |
+|---|---|---|---|---|
+| AC-5.3 | T2 | CONFIRMED | record/wave-49-what-a-run-costs/line/T20-gate-dd9b12e18833.log (H.8, H.9, RM.4 `promised=2.415 room=yes`, RM.5, 175/175); .bionic/tmp/scratch/00000000-0000-4000-8000-000000000002/w49-T20/red-mut.log:114-115; `git show dd9b12e18:tests/gate.test.sh` lines 580-589; A-T20.1 to A-T20.3 | **Both clauses now have a row.** The memory clause is H.8, which admits, and H.9, which waits, kept from main and green at dd9b12e18. The busy clause that auditor-evidence.md refuted is now RM.5: three promises admitted 30 s ago, read through the BUSY_FILE seam on an unreadable busy `-`, give `promised=4.83 room=no`. RM.4 is its numeric control: the same three at busy 1.0 give 2.415, the half-faded value. **The red is real and points at the right condition.** On the scratch mutant with `num(busy) &&` dropped from `_gate_faded`, RM.1 to RM.4 pass, so the mutant runs and RM.4 still reads 2.415. RM.5 alone of the room cases fails, `expected 'promised=4.83 room=no', got 'promised=2.415 room=no'`. That is exactly the criterion's failure: a promise faded on an unknown busy reading. **The mutant was checked against the head.** `diff` of the head's gate.sh against mt/payload/scripts/lib/gate.sh shows the dropped `num(busy) &&` plus the separate `${_G_PROM:-}` fix of A-T20.2, which the mutant copy predates. That fix is why CO.5b and CO.5c also fail in red-mut.log, and it does not touch RM.5. `diff` of the head's tests/gate.test.sh against the mutant's copy is empty, so the red ran the landed cases. **One function serves every site.** RM.5 reads the room, and admission and the width ask call the same `_gate_faded` (gate.sh:767-775 at dd9b12e18), so one pin covers the one condition. RM.3 already pins room and admission agreeing. No suite was run for this re-read, as instructed. The green comes from T20's landing log. |

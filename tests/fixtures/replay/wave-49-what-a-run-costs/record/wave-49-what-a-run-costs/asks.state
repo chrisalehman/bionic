@@ -1,0 +1,39 @@
+owed/v1|key=approve:step0|state=closed|by=card.sh step1|at=2026-11-07T01:16:44Z|opened=2026-11-07T01:06:49Z
+owed/v1|key=decide:D1|state=closed|by=ruled|at=2026-11-07T01:16:28Z|opened=2026-11-07T01:07:09Z
+owed/v1|key=approve:step1|state=closed|by=card.sh step2|at=2026-11-07T01:45:34Z|opened=2026-11-07T01:16:44Z
+owed/v1|key=decide:D2|state=closed|by=ruled|at=2026-11-07T01:25:04Z|opened=2026-11-07T01:23:12Z
+owed/v1|key=decide:D3|state=closed|by=ruled|at=2026-11-07T01:37:05Z|opened=2026-11-07T01:25:04Z
+owed/v1|key=decide:D4|state=closed|by=ruled|at=2026-11-07T01:35:30Z|opened=2026-11-07T01:25:04Z
+owed/v1|key=decide:D5|state=closed|by=ruled|at=2026-11-07T01:35:30Z|opened=2026-11-07T01:25:04Z
+owed/v1|key=decide:D6|state=closed|by=ruled|at=2026-11-07T01:35:31Z|opened=2026-11-07T01:25:05Z
+owed/v1|key=decide:D7|state=closed|by=ruled|at=2026-11-07T01:35:29Z|opened=2026-11-07T01:31:43Z
+owed/v1|key=decide:D8|state=closed|by=ruled|at=2026-11-07T02:12:38Z|opened=2026-11-07T01:37:38Z
+owed/v1|key=decide:D9|state=closed|by=ruled|at=2026-11-07T02:12:39Z|opened=2026-11-07T01:37:38Z
+owed/v1|key=decide:D10|state=closed|by=ruled|at=2026-11-07T02:12:40Z|opened=2026-11-07T01:37:38Z
+owed/v1|key=decide:D11|state=closed|by=ruled|at=2026-11-07T02:12:40Z|opened=2026-11-07T01:37:38Z
+owed/v1|key=decide:D12|state=closed|by=ruled|at=2026-11-07T02:12:41Z|opened=2026-11-07T01:44:31Z
+owed/v1|key=approve:step2|state=closed|by=card.sh step3|at=2026-11-07T02:17:34Z|opened=2026-11-07T01:45:34Z
+owed/v1|key=approve:step3|state=closed|by=plan approved-by|at=2026-11-07T02:32:44Z|opened=2026-11-07T02:17:34Z
+owed/v1|key=decide:D13|state=closed|by=ruled|at=2026-11-07T03:51:50Z|opened=2026-11-07T03:27:37Z
+owed/v1|key=decide:D13|state=closed|by=ruled|at=2026-11-07T04:00:12Z|opened=2026-11-07T03:54:26Z|round=2
+owed/v1|key=waive:adversarial|state=closed|by=landing T17|at=2026-11-07T06:01:46Z|opened=2026-11-07T05:17:46Z
+owed/v1|key=finding:record:wave-49-what-a-run-costs:critic-adversarial.md:1|state=closed|by=task-add T17|at=2026-11-07T05:22:50Z|opened=2026-11-07T05:19:44Z
+owed/v1|key=finding:record:wave-49-what-a-run-costs:critic-adversarial.md:2|state=closed|by=task-add T17|at=2026-11-07T05:22:50Z|opened=2026-11-07T05:19:44Z
+owed/v1|key=waive:evidence|state=closed|by=passing reading|at=2026-11-07T06:22:48Z|opened=2026-11-07T06:08:48Z
+owed/v1|key=waive:adversarial|state=closed|by=landing T22|at=2026-11-07T07:28:11Z|opened=2026-11-07T06:49:29Z|round=2
+owed/v1|key=finding:record:wave-49-what-a-run-costs:critic-adversarial-2.md:1|state=closed|by=task-add T22|at=2026-11-07T06:50:45Z|opened=2026-11-07T06:50:20Z
+owed/v1|key=carry:record:wave-49-what-a-run-costs:critic-adversarial.md:3|state=closed|by=finding-move fix|at=2026-11-07T15:53:05Z|opened=2026-11-07T05:19:44Z
+owed/v1|key=carry:record:wave-49-what-a-run-costs:critic-adversarial.md:4|state=closed|by=release approval reply|at=2026-11-07T15:53:07Z|opened=2026-11-07T05:19:44Z
+owed/v1|key=carry:record:wave-49-what-a-run-costs:critic-adversarial.md:5|state=closed|by=release approval reply|at=2026-11-07T15:53:07Z|opened=2026-11-07T05:19:44Z
+owed/v1|key=carry:record:wave-49-what-a-run-costs:critic-adversarial.md:6|state=closed|by=release approval reply|at=2026-11-07T15:53:07Z|opened=2026-11-07T05:19:44Z
+owed/v1|key=carry:record:wave-49-what-a-run-costs:critic-adversarial-2.md:2|state=closed|by=finding-move fix|at=2026-11-07T15:53:06Z|opened=2026-11-07T06:50:20Z
+owed/v1|key=waive:evidence|state=closed|by=waive|at=2026-11-07T15:53:04Z|opened=2026-11-07T07:23:11Z|round=2
+owed/v1|key=approve:release|state=closed|by=approve|at=2026-11-07T15:53:07Z|opened=2026-11-07T08:35:20Z
+owed/v1|key=decide:D14|state=closed|by=ruled|at=2026-11-07T15:53:01Z|opened=2026-11-07T15:50:30Z
+owed/v1|key=decide:D15|state=closed|by=ruled|at=2026-11-07T15:53:02Z|opened=2026-11-07T15:50:30Z
+owed/v1|key=decide:D16|state=closed|by=ruled|at=2026-11-07T15:53:03Z|opened=2026-11-07T15:50:31Z
+owed/v1|key=carry:record:wave-49-what-a-run-costs:critic-adversarial.md:4|state=closed|by=release approval reply|at=2026-11-07T17:34:53Z|opened=2026-11-07T17:33:49Z|round=2
+owed/v1|key=carry:record:wave-49-what-a-run-costs:critic-adversarial.md:5|state=closed|by=release approval reply|at=2026-11-07T17:34:53Z|opened=2026-11-07T17:33:49Z|round=2
+owed/v1|key=carry:record:wave-49-what-a-run-costs:critic-adversarial.md:6|state=closed|by=release approval reply|at=2026-11-07T17:34:53Z|opened=2026-11-07T17:33:50Z|round=2
+owed/v1|key=hold:merge|state=closed|by=close-out delivered|at=2026-11-07T17:37:11Z|opened=2026-11-07T17:35:48Z
+owed/v1|key=delivered:wave-49-what-a-run-costs|state=closed|by=delivered|at=2026-11-07T17:37:12Z|opened=2026-11-07T17:37:12Z
