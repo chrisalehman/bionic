@@ -15,6 +15,7 @@
 #                            output, in <dir>/rehearsal.log, beside a `# by hand:` line for each file written by
 #                            hand. A command that fails stops the rehearsal: its line and output go to stderr, rc 1,
 #                            and nothing is printed on stdout. A state the library does not know is rc 2.
+#                            RH_WITHIN=<seconds> bounds each rehearsed ready's wait at the world's gate (300 unset).
 #
 #   The states:
 #     delivered        the failed-review run, its project declaring its real release check, carried through the
@@ -187,7 +188,7 @@ _rh_build_ready() {
     > "$t/tests/rehearsal-row.test.sh"
   _rh_commit "$t" "a library change and its suite" || { echo "rehearse $RH_STATE: the build's commit in .worktrees/T1 failed" >&2; return 1; }
   _rh_hand code "T1's code and its suite, committed in .worktrees/T1"
-  RH_CWD="$t" _rh_do "the build row says ready" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" ready --within 300 || return 1
+  RH_CWD="$t" _rh_do "the build row says ready" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" ready --within "${RH_WITHIN:-300}" || return 1
   printf '# T1: the build\n\nThe library change and its suite.\n' > "$RH_REC/T1.md" || return 1
   _rh_hand record "T1's report record/wave-x/T1.md"
   _rh_do "the sweeper acks the build row's writer" bash "$RH_ROOT/hooks/session-sweeper.sh" ack dw-T1
@@ -379,7 +380,7 @@ _rh_replay() {
     && _rh_commit "$t" "a caller reaches the library change" \
     || { echo "rehearse $RH_STATE: the fix's commit in .worktrees/T5 failed" >&2; return 1; }
   _rh_hand code "T5's suite, a caller of the library change, committed in .worktrees/T5"
-  RH_CWD="$t" _rh_do "the fix row says ready" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" ready --within 300 || return 1
+  RH_CWD="$t" _rh_do "the fix row says ready" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" ready --within "${RH_WITHIN:-300}" || return 1
   printf '# T5: the fix\n\nThe suite calls rehearsal_landed, so the library change has a caller.\n' > "$RH_REC/T5.md" || return 1
   _rh_hand record "T5's report record/wave-x/T5.md"
   _rh_do "the sweeper acks the fix row's writer" bash "$RH_ROOT/hooks/session-sweeper.sh" ack w-T5 || return 1
@@ -411,6 +412,10 @@ rehearse() {
   [ -n "$dir" ] || { echo "rehearse: name a directory" >&2; return 2; }
   mkdir -p "$dir" && dir="$(cd "$dir" && pwd -P)" || return 1
   RH_STATE="$state"; RH_LOG="$dir/rehearsal.log"
+  # A rehearsed landing asks the gate, and a suite's verdict never turns on what else the host is doing: the world is a
+  # quiet machine, planted through the readers' pins as the gate's own suites plant one, so only its own store and config
+  # (a share, a reserve) can make a rehearsed landing wait. Callers run rehearse in a subshell, so nothing leaks.
+  export BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0
   : > "$RH_LOG"
   # The single-rigor state is built on the single-rigor fixture; every other state on door_world, at double rigor.
   fx=door_world; [ "$state" != single-verify ] || fx=door_world_single
