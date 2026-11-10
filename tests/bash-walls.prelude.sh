@@ -105,29 +105,6 @@ Step 5: TODO" > "$1/.bionic/docs/plans/active.md"
 # for the backgrounded-suite arm, which is the arm this suite drives.
 arm_roster() { : > "$1/.bionic/tmp/roster-$SID.state"; }
 
-# bw_dispatched <repo> <name> <key=value>... — ACTOR's launch row as the dispatch wall writes it,
-# `agent_id=` EMPTY, on a fresh roster, and then ACTOR's own start through
-# hooks/execution-recorder.sh, which is what writes the id (wave-27 T5, D15, AC-8.1). A row
-# planted with the id already on it hid walk-triage-3's defect: the budget arm was only ever
-# shown an id no hook had written.
-REC_HOOK="${BIONIC_HOOKS_DIR}/execution-recorder.sh"
-BW_TUID=0
-bw_dispatched() {
-  local repo="$1" name="$2"; shift 2
-  BW_TUID=$((BW_TUID + 1))
-  roster_header > "$repo/.bionic/tmp/roster-$SID.state"
-  roster_row_fixture "session=$SID" status=intended "name=$name" agent_id= \
-    subagent_type=bionic:test-runner "tool_use_id=toolu_01bwdisp$BW_TUID" \
-    "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$@" \
-    >> "$repo/.bionic/tmp/roster-$SID.state"
-  jq -n --arg s "$SID" --arg c "$repo" --arg a "$ACTOR" \
-    '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
-      prompt_id:"95b0701b-7814-42ca-a26f-58123e667f9a",
-      agent_id:$a, agent_type:"bionic:test-runner", hook_event_name:"SubagentStart"}' \
-    | env HOME="$FAKE_HOME" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" \
-        CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= bash "$REC_HOOK" >/dev/null 2>&1
-}
-
 # mk_payload <cwd> <command> [agent_id] [run_in_background] [tool_name] [agent_type] [timeout]
 #
 # `agent_type` IS A SEPARATE FIELD FROM `agent_id` and the two walls read different ones:
@@ -183,9 +160,6 @@ EG6_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
 eg6_reading() {  # <head> <question> <result> [<evidence>] -> one reading line
   bash -c '. "$1" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" "$4" w-read "$5" piece' \
     _ "$EG6_LIB" "$1" "${4:-record/w27/$2-$3.md}" "$2" "$3"
-}
-eg6_waiver() {  # <head> <question>
-  bash -c '. "$1" && proof_waiver_line "$2" "$3" "T" 2026-10-04T12:00:00Z "ship it"' _ "$EG6_LIB" "$2" "$1"
 }
 eg6_plan() {  # <current> <scale> <lines> [<Step 6 line>] -> a double plan the gate admits at Step 6 bar the readings
   printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: %s\n' "$2"

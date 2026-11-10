@@ -124,8 +124,3 @@ Progress artifact: .bionic/tmp/w99-widget.progress
 Files: payload/scripts/lib/widget.sh
 Suites: tests/widget.test.sh' "$1"
 }
-
-# adv_ctx -> the model-facing advisory text of the last gate run, `` when stdout carries none.
-# THE ADVISORY RIDES `hookSpecificOutput.additionalContext` on stdout (A-orch-20), so it is read
-# through `jq` like the harness reads it; a stdout that is not one parseable object reads as empty.
-adv_ctx() { printf '%s' "$GATE_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null; }
