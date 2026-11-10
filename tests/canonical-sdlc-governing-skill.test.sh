@@ -403,8 +403,9 @@ fi
 # canonical_sdlc_version: exactly one supported value
 # ============================================================
 #
-# The hook supports canonical_sdlc_version: 14 and nothing else. Every other
-# value blocks with exit 2 and a message naming the value found. One
+# The hook supports canonical_sdlc_version: 14, and for a plan 15 as well (its
+# shape is tests/plan-page.test.sh's). Every other value blocks with exit 2 and a
+# message naming the value found. One
 # table-driven case over representative bad values — an older number, a much
 # older number, a legacy single digit, a far-future number, an empty value,
 # and non-numeric garbage — because there is one behavior here, not one per
