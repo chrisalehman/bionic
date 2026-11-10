@@ -1222,23 +1222,15 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
         # (wave-24 T13, D10): that list is space-joined for reading, so a path holding a
         # space would come back as two. Each path is one quoted `--files+` word here.
         #
-        # EACH IN THE SPELLING amend ACCEPTS (wave-27 T29, T42; REQ-12 AC-12.3, D21). A path at
-        # the root carries no `/`, and the amend this line printed for one was refused by amend
-        # itself. `brief_files_entry` is the Files: reader amend reads with, so a bare name it
-        # would not record comes out as `./<name>`; it lists no directory. Without lib/brief.sh
-        # the path is printed as the diff spells it, as before.
+        # EACH PATH AS THE DIFF SPELLS IT: amend reads a `--files+` value with the one reader of a
+        # brief's Files: line (lib/brief.sh `brief_contract`), which records a path at the root as
+        # written, so the line printed here is one amend accepts.
         LG_FIX_FILES=""
         while IFS= read -r LG_DF; do
           [ -n "$LG_DF" ] || continue
           _lg_path_declared "$LG_DF" "$CFILES" && continue
           LG_OUTSIDE="${LG_OUTSIDE}${LG_OUTSIDE:+ }${LG_DF}"
-          LG_SPELT="$LG_DF"
-          declare -F brief_files_entry >/dev/null 2>&1 \
-            || . "$_STOP_LIB_DIR/brief.sh" >/dev/null 2>&1
-          if declare -F brief_files_entry >/dev/null 2>&1; then
-            LG_SPELT="$(brief_files_entry "$LG_DF")"
-          fi
-          LG_FIX_FILES="${LG_FIX_FILES} --files+ $(refuse_quote "$LG_SPELT")"
+          LG_FIX_FILES="${LG_FIX_FILES} --files+ $(refuse_quote "$LG_DF")"
         done <<LGDIFF
 $(git -C "$LG_WT" diff --name-only "${LG_BASE}..HEAD" 2>/dev/null)
 LGDIFF
