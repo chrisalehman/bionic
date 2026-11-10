@@ -495,7 +495,8 @@ expect_eq "57v2 …one line added" "1 0;" "$(s42_numstat "$R57")"
 expect_contains "57v4 …and the success line names it" "question=adversarial head=${S57_C4}" "$OUT"
 s57_state "$P57" "$S57_C4"
 expect_eq "57v5 …which the judge reads: adversarial covered at the working head" "covered" "$(s57_of "$S57_AD")"
-s57_fact adversarial "$S57_C4" fail piece
+# The verb dated the waiver now, and facts are ordered by their instant, so the reading after it is dated now too.
+s57_add "$P57" "$(bash -c '. "$1" && proof_line review "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" record/wave-01-fixture/adversarial-fail-piece.md adversarial w-read fail piece' _ "$S57_LIB" "$S57_C4")"
 expect_eq "57v6 …a fact registered after it is placed after it" "waived: proved:" \
   "$(/usr/bin/grep -oE '^(waived|proved):' "$P57" | tr '\n' ' ' | sed 's/ $//')"
 s57_state "$P57" "$S57_C4"
