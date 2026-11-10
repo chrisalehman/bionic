@@ -26,12 +26,20 @@
 #
 # bash 3.2 (ADR-001).
 
+# A plan's lines with their ends translated, never deleted: a CRLF line loses its CR and a lone CR ends a
+# line. Deleted, a CR-only plan would be one line, and every key in it would read as absent. A reader of
+# this pipe takes it to its end and never exits early: an early exit can kill the writer mid-file, and
+# under a caller's `pipefail` that turns a found answer into a failed one.
+plan_read_lines() {  # <plan> -> its lines, LF-ended
+  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"
+}
+
 plan_read_header() {  # <plan> [key] -> `key=value` lines in the header's order; 1 none, 2 no plan
   [ -f "${1:-}" ] || return 2
-  awk -v want="${2:-}" '
-    { sub(/\r$/, "") }
-    NR == 1 { if ($0 != "---") exit; next }
-    $0 == "---" { exit }
+  plan_read_lines "$1" | awk -v want="${2:-}" '
+    done { next }
+    NR == 1 { done = ($0 != "---"); next }
+    $0 == "---" { done = 1; next }
     {
       e = index($0, ":"); if (e < 2) next
       k = substr($0, 1, e - 1); v = substr($0, e + 1)
@@ -39,9 +47,9 @@ plan_read_header() {  # <plan> [key] -> `key=value` lines in the header's order;
       if (k ~ /[ \t]/ || (k in seen) || (want != "" && k != want)) next
       sub(/^["\047]/, "", v); sub(/["\047]$/, "", v)
       seen[k] = 1; n++; print k "=" v
-      if (want != "") exit
+      if (want != "") done = 1
     }
-    END { exit !n }' "$1"
+    END { exit !n }'
 }
 
 # The walk both table readers share: `cells` splits a row, the header line's names fill head[1..nh] and

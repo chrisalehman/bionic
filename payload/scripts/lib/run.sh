@@ -73,6 +73,11 @@ if ! declare -F docs_root >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$(cd "$(_run_self_dir)" && pwd -P)/roots.sh"
 fi
+# plan-read.sh, the same way: the plan's header has one parser, and `plan_frontmatter_get` asks it.
+if ! declare -F plan_read_header >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$(cd "$(_run_self_dir)" && pwd -P)/plan-read.sh"
+fi
 
 # normalize_newlines [file] -> that document with its line endings TRANSLATED to \n, never
 # deleted. A trailing \r is stripped from each record (CRLF: \r\n → \n) and any remaining
@@ -123,48 +128,33 @@ plan_lines() {  # <plan>
 }
 
 # plan_frontmatter_get <plan> <key> -> the value of that leading-frontmatter key, one
-# quote layer stripped and trailing whitespace trimmed; empty when the key is absent, the
-# plan has no frontmatter, or the file cannot be read.
+# quote layer stripped and surrounding whitespace trimmed; empty when the key is absent, the
+# plan has no frontmatter, or the file cannot be read. The status is 0 whatever the key's fate:
+# an absent key is an empty value, not a failure.
 #
-# THE GRAMMAR IS THE EVIDENCE GATE'S, MOVED HERE RATHER THAN COPIED (epic-23
-# wave-13-fixit-180 T4, REQ-4/D6). `payload/scripts/lib/walls.sh` has read plan
-# frontmatter since v14 — `FRONTMATTER` captured at :916 and the nested `frontmatter_get`
-# at :918 — but that pair is defined INSIDE `_eg_body`, so it exists only while the gate
-# is running and sourcing walls.sh does not define it. The third caller (close-out.sh's
-# archive binding, and `archive_run` itself) therefore had nowhere to reuse it from. It
-# lives here because this file already owns the plan as a document: `normalize_newlines`
-# is its line-ending rule and `run_open` already lifts the frontmatter block with this
-# exact awk. Two spellings of one grammar is what this avoids; walls.sh's own nested copy
-# stays where it is, because moving a wall's parse mid-wave changes what the wall reads.
-#
-# LEADING BLOCK ONLY, LIKE EVERY OTHER FRONTMATTER READER IN THE TREE: the awk arms at
-# line 1 and exits at the closing `---`, so a `---` inside the body is prose.
-#
-# THE FRONTMATTER IS CAPTURED BEFORE IT IS SEARCHED, never `producer | grep | head` on a
-# live pipe: every caller of this file runs under `set -o pipefail`, where `head -1`'s
-# early exit can leave the producer with SIGPIPE and promote 141 to the pipeline's status
-# (run_open's own note, §R4). A here-string is fully written before the reader starts. The
-# status is 0 whatever the key's fate — an absent key is an empty value, not a failure.
+# THE READER'S HEADER PARSER ANSWERS IT: `plan_read_header` (lib/plan-read.sh) is the one parser
+# of a plan's header, the one `reader <plan> header` asks, so the twenty callers of this function
+# and the reader cannot read one key two ways. It is asked directly, not through `reader_main`,
+# because a header needs no run: the reader refuses a plan outside `plans/<epic>/<wave>.plan.md`,
+# and callers of this function read incident files and planted plans anywhere. No translation is
+# started, so the cost is the parser's own read. LEADING BLOCK ONLY, line ends translated (a
+# CR-only plan reads key by key), first line of a key answers.
 plan_frontmatter_get() {
-  local plan="$1" key="$2" fm v
+  local plan="$1" key="$2" v
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
   [ -n "$key" ] || return 0
-  fm=$(_run_lines "$plan" | awk '
-        NR == 1 && $0 == "---" { f = 1; next }
-        f && $0 == "---" { exit }
-        f { print }')
-  frontmatter_value_v v "$fm" "$key" && printf '%s\n' "$v"
+  v="$(plan_read_header "$plan" "$key")" && printf '%s\n' "${v#*=}"
   return 0
 }
 
 # frontmatter_value_v <var> <frontmatter text> <key> -> rc 0 and the value in <var> when a line
-# carries the key, rc 1 and an empty <var> when none does. THE GRAMMAR ABOVE, IN BUILTINS (wave-34
+# carries the key, rc 1 and an empty <var> when none does. THE HEADER PARSER'S GRAMMAR, IN BUILTINS (wave-34
 # T11, D19): the first line that is `<key>` between optional whitespace and a `:`, the text after the
 # colon with its surrounding whitespace trimmed, then one leading and one trailing quote of either
 # kind dropped — what `grep | head -1 | sed | sed | sed` used to say with five processes. The key is
 # matched as text, which is what every key a caller names (`rigor`, `working-branch`) already was
-# to the regex. walls.sh's `frontmatter_get` reads the evidence gate's FRONTMATTER through this too,
-# so the two readers share one spelling.
+# to the regex. Its one caller is walls.sh's `frontmatter_get`, over the evidence gate's FRONTMATTER
+# text, which it holds already captured and so cannot hand the parser as a file.
 frontmatter_value_v() {
   local _fv_rest="${2}"$'\n' _fv_l
   printf -v "$1" '%s' ''
@@ -521,11 +511,26 @@ plan_parked_why() {
 # closed or gone, 3 is a plan that is there and cannot be read (`plan_unreadable`, below).
 # Closed was the wrong answer for the second: the run may be mid-flight, and a reader that
 # calls it closed stops protecting it — the evidence gate admitted every commit against it.
+#
+# A RUN WITH A LOG IS JUDGED BY THE READER'S STEP ALONE: open while its state is open, closed when the
+# log delivers it (step 9) or abandons it, whatever `current:` or a Step line of its plan still says.
+# Only the log is read for it, so the answer costs no translation. A run with no log keeps its state in
+# the plan, which is read below. The reader is not asked about such a run: its translation orders Step
+# lines by their written instants, and a closed plan whose instants are missing, malformed or out of
+# order reads open there, the fail-dangerous direction; asked of every candidate it would also cost a
+# translation per plan inside `open_runs`.
 run_open() {
-  local plan="$1"
+  local plan="$1" log
   [ -n "$plan" ] || return 1
   plan_unreadable "$plan" >/dev/null && return 3
   [ -f "$plan" ] || return 1
+  if ! declare -F reader_main >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$(cd "$(_run_self_dir)" && pwd -P)/reader.sh" || return 1
+  fi
+  if log="$(reader_log "$plan")" && [ -f "$log" ]; then
+    case "$(reader_main "$plan" step)" in *state=open*) return 0 ;; *) return 1 ;; esac
+  fi
 
   # THE WHOLE FILE, READ ONCE, HELD IN A VARIABLE — every match below tests this
   # variable via a here-string, never a live pipe fed by _run_lines/awk. `grep -q`
@@ -545,16 +550,9 @@ run_open() {
   local lines
   lines=$(_run_lines "$plan")
 
-  # Frontmatter close: a plan explicitly abandoned is never active, regardless of `current:`.
-  local frontmatter
-  frontmatter=$(awk '
-    NR == 1 && $0 == "---" { f = 1; next }
-    f && $0 == "---" { exit }
-    f { print }
-  ' <<< "$lines")
-  if grep -q '^abandoned:' <<< "$frontmatter"; then
-    return 1
-  fi
+  # A plan whose header says `abandoned:` is never active, regardless of `current:`. The header is read
+  # by its one parser, the one the reader's `header` answers from and its translation's abandon reads.
+  plan_read_header "$plan" abandoned >/dev/null && return 1
 
   # The `current:` line. LEADING WHITESPACE IS TOLERATED and the read is fence-aware, for
   # the same reason the marker test above is: this is the exact tolerance the five
@@ -1035,17 +1033,17 @@ _RUN_WB_SDLC_AWK='
   insdlc && /^[[:space:]]*working-branch[[:space:]]*:/ {
     v = $0; sub(/^[[:space:]]*working-branch[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v)
     gsub(/^["\047]|["\047]$/, "", v); print v; exit }'
-_RUN_WB_FM_AWK='
-  NR == 1 && $0 == "---" { f = 1; next }
-  f && $0 == "---" { exit }
-  f && /^[[:space:]]*working-branch[[:space:]]*:/ {
-    v = $0; sub(/^[[:space:]]*working-branch[[:space:]]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v)
-    gsub(/^["\047]|["\047]$/, "", v); print v; exit }'
+# The header's key is the reader's: `plan_read_header`, its first word, a quote off each end of it. The
+# SDLC State key is a version-14 run's state, which no reader question answers yet, so it is read here.
 plan_working_branch() {  # <plan>
   local plan="${1:-}" wb
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
   wb="$(_run_lines "$plan" | awk "$_RUN_WB_SDLC_AWK")"
-  [ -n "$wb" ] || wb="$(_run_lines "$plan" | awk "$_RUN_WB_FM_AWK")"
+  if [ -z "$wb" ] && wb="$(plan_read_header "$plan" working-branch)"; then
+    wb="${wb#*=}"; wb="${wb%%[[:space:]]*}"
+    case "$wb" in [\'\"]*) wb="${wb#?}" ;; esac
+    case "$wb" in *[\'\"]) wb="${wb%?}" ;; esac
+  fi
   printf '%s' "$wb"
 }
 

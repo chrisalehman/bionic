@@ -11,6 +11,8 @@
 #   §CATCH    a copy of the reader with the replace rule taken out, then the cancel rule, disagrees with a card.
 #   §COVER    every question of the closed list is asked and none is refused, and every event type has a line.
 #   §FOLLOWS  a review row's rendered brief starts its range at the reader's last review proof of its questions.
+#   §OPEN     run_open asks the reader's step of a run with a log, whatever its plan's prose says; a run with
+#             none is judged from its plan, so each closed fixture run reads closed and the cut run open.
 #
 # A CARD'S INSTANT. The reader answers a run as it stands, so a card's world holds as its run log the reader's
 # own translation of the fixture up to the card's instant, in the translation's order: a line with no instant
@@ -177,5 +179,22 @@ for r in T23:evidence T24:adversarial,structure; do id=${r%%:*}; q=${r#*:}
   expect_regex "$id: its range starts at that proof's head" "^Reviewed range: $h\\.\\." "$(grep '^Reviewed range' "$f")"
   expect_eq "$id: its Questions are the row's" "Questions: ${q//,/, }" "$(grep '^Questions:' "$f")"
 done
+section "OPEN"
+opened() { ( . "$RD/lib/run.sh" && run_open "$1" ); echo $?; }
+plant() {  # <wave> <current:> <Step 9 line> [log line…] -> the plan's path; its run log holds the lines given
+  local w="$1" p="$WORLD_ROOT/open/plans/e/$1.plan.md"; mkdir -p "${p%/*}" "$WORLD_ROOT/open/record/$w"
+  printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## SDLC State\n\ncurrent: %s\n%s\n' "$2" "$3" > "$p"; shift 3
+  [ $# -eq 0 ] || printf '%s\n' "$@" > "$WORLD_ROOT/open/record/$w/run.log"
+  printf '%s' "$p"
+}
+expect_eq "a run whose delivery is only its log's step 9 is closed, though its plan says current: 4" 1 \
+  "$(opened "$(plant gone 4 '- Step 4: opened' 'run/v1|ev=step|n=9|at=2026-11-01T00:00:00Z')")"
+expect_eq "a run whose log stands at step 8 is open, though its plan says current: 9" 0 \
+  "$(opened "$(plant at9 9 '- Step 9: closing' 'run/v1|ev=step|n=8|at=2026-11-01T00:00:00Z')")"
+expect_eq "a run whose log holds an abandon is closed" 1 \
+  "$(opened "$(plant quit 6 '' 'run/v1|ev=step|n=6|at=2026-11-01T00:00:00Z' 'run/v1|ev=abandon|why=w|at=2026-11-01T00:00:01Z')")"
+expect_eq "with no log, current: 9 and no delivery is open, and a delivered: Step 9 line closes it" "0 1" \
+  "$(opened "$(plant v14 9 '- Step 9: closing')") $(opened "$(plant v14d 9 '- Step 9: delivered: 2026-11-01T00:00Z')")"
+expect_eq "the closed fixture runs read closed and the cut run open" "1 1 0" "$(opened "$P49") $(opened "$(ls "$X"/wave-46-asks-nothing/plans/*/*.plan.md)") $(opened "$(ls "$X"/wave-49-mid/plans/*/*.plan.md)")"
 
 finish

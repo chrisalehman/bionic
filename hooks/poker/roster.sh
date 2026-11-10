@@ -950,21 +950,17 @@ launch_sync_sweep() {  # <plan> <root>
 # another review, the final one among them, says nothing about it, and a live launch the sync had
 # not yet applied when such a proof landed is applied. Newest proof first; the first one not newer
 # than the launch ends the search. The proofs are read once per transaction, and only when a pending
-# row has a launch to judge.
+# row has a launch to judge. THE PROOFS ARE THE READER'S `reviews`: a proof stated twice is one fact,
+# standing at the instant it was first proved, so a repeat never makes a proof newer than a launch.
 # Set in hooks/session-poker.sh, before any part loads: LS_PROOFS, LS_PROOFS_READ.
 launch_sync_read() {  # <plan> <root> <row id> <launched_at> -> 0 when a review proof of that row is newer than the launch
   local plan="$1" root="$2" id="$3" la="$4" at ev q doc
   [ -n "$la" ] || return 1
   if [ "$LS_PROOFS_READ" = no ]; then
-    LS_PROOFS="$(awk '
-      /^[ \t]*```/ { f = !f; next }
-      f { next }
-      /^##[ \t]/ { insdlc = ($0 ~ /^##[ \t]+SDLC State/); next }
-      insdlc && /^proved:[ \t]/ && / kind=review( |$)/ && match($0, / at=[^ ]+/) {
-        a = substr($0, RSTART + 4, RLENGTH - 4); q = ""
-        if (match($0, / question=[^ ]+/)) q = substr($0, RSTART + 10, RLENGTH - 10)
-        if (match($0, / evidence=[^ ]+/)) print a "\t" substr($0, RSTART + 10, RLENGTH - 10) "\t" q
-      }' "$plan" 2>/dev/null | sort -r)"
+    # shellcheck source=/dev/null
+    declare -F reader_main >/dev/null 2>&1 || . "$BIONIC_LIB/reader.sh" 2>/dev/null
+    LS_PROOFS="$(reader_main "$plan" reviews 2>/dev/null | awk -F'|' "${_READER_AWK:-}"'
+      ev() == "proof" && line_kv("at") != "" && line_kv("evidence") != "" { print line_kv("at") "\t" line_kv("evidence") "\t" line_kv("question") }' 2>/dev/null | sort -r)"
     LS_PROOFS_READ=yes
   fi
   [ -n "$LS_PROOFS" ] || return 1
