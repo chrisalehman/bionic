@@ -63,6 +63,7 @@
 #   §CENSUS-2            a section the census keeps that is gone from its suite is refused.
 #   §CENSUS-3            a culled-list line that culls a keep or a rule pin is refused.
 #   §CENSUS-4            the real tests tree is cut as tests/CENSUS.md says.
+#   §CENSUS-GONE         a cull gone with its code needs a listed name; a new culled duplicate has a verified catcher.
 #   §ADR                 an ADR whose `status:` word differs from its `## Status` word is refused by file.
 #   §HEADER              a suite header that lists a section its body lacks, or omits one its body has, is refused.
 #
@@ -1635,9 +1636,9 @@ census_calls() {
     | awk '{ loc = $1; kind = $2; key = $0; sub(/^[^ ]+ [^ ]+ §/, "", key); sub(/^\.\//, "", loc); sub(/:[0-9]+$/, "", loc)
              printf "%s\t%s\t%s\n", loc, kind, key }'
 }
-# census_records <census file> -> `R TAB <suite> TAB <key> TAB <verdict> TAB <defect>` per record line.
+# census_records <census file> -> `R TAB <suite> TAB <key> TAB <verdict> TAB <defect> TAB <catcher> TAB <line>` per record line.
 census_records() {
-  awk -F' [|] ' '/^[A-Za-z0-9._-]+\.test\.sh [|] / { k = $2; sub(/^§/, "", k); printf "R\t%s\t%s\t%s\t%s\n", $1, k, $3, $4 }' "$1" 2>/dev/null
+  awk -F' [|] ' '/^[A-Za-z0-9._-]+\.test\.sh [|] / { k = $2; sub(/^§/, "", k); printf "R\t%s\t%s\t%s\t%s\t%s\t%s\n", $1, k, $3, $4, $5, $0 }' "$1" 2>/dev/null
 }
 # census_refusals <tests dir> <census file> -> one line per refusal, none when the census covers the tree:
 #   no heading: a suite with no `## <suite>` heading
@@ -1760,9 +1761,17 @@ expect_eq "the real tests tree is covered by tests/CENSUS.md: no refusal" "" "$(
 #   culled section present: a key with a cull line still called more often than it has keep lines
 #   kept section absent: a key with more keep lines than calls in its suite
 #   keep in the culled list: a `## Culled` line whose verdict is keep
-#   rule pin culled: a `## Culled` line whose key has a record line with a `rule:` defect
+#   rule pin culled: a `## Culled` line whose key has a record line with a `rule:` defect, unless it is gone with its code
+#   gone with an unlisted name: a `— gone with <name>` line whose name is not on the deletion list
+#   unverified catcher culled: a culled duplicate whose record line names an `(unverified)` catcher and is not a line of
+#     the baseline census (the optional third file, the census before the cull began)
+# A section `gone with <name>` is a cull whose reason is that the code it pinned was deleted, so its record line, a keep
+# or a rule: keep, stands without the section being called. The optional fourth file is the deletion list.
+deletion_names() { /usr/bin/grep -o '`[a-z_.-]*`' "$1" 2>/dev/null | tr -d '`'; }
 census_cull_refusals() {
   {
+    sed 's/^/B\t/' "${3:-/dev/null}"
+    deletion_names "${4:-/dev/null}" | sed 's/^/L\t/'
     census_records "$2"
     sed -n '/^## Culled$/,$p' "$2" 2>/dev/null | LC_ALL=C awk '/^[A-Za-z0-9._-]+\.test\.sh §/ {
       sep = " — "; s = $0; sub(/ .*/, "", s); r = substr($0, length(s) + length(" §") + 1); v = r
@@ -1772,17 +1781,22 @@ census_cull_refusals() {
   } | LC_ALL=C awk -F'\t' '
     $1 == "R" { if ($3 == "—") next; key = $2 SUBSEP $3; seen[key] = 1
                 if ($4 == "keep") nkeep[key]++; else ncull[key]++
-                if ($5 ~ /^rule: /) rule[key] = 1 }
-    $1 == "U" { key = $2 SUBSEP $3
+                if ($5 ~ /^rule: /) rule[key] = 1
+                if ($4 == "duplicate" && $6 ~ /[(]unverified[)]/ && !($7 in base)) fresh[key] = 1 }
+    $1 == "B" { base[$2] = 1 }
+    $1 == "L" { listed[$2] = 1 }
+    $1 == "U" { key = $2 SUBSEP $3; nm = $4
                 if ($4 == "keep") print "keep in the culled list: " $2 " §" $3
+                if (sub(/^gone with /, "", nm)) { gone[key] = 1; if (!(nm in listed)) print "gone with an unlisted name: " nm }
+                if ($4 == "duplicate" && (key in fresh)) print "unverified catcher culled: " $2 " §" $3
                 U[key] = 1 }
     $1 == "C" { called[$2 SUBSEP $4]++ }
     END {
-      for (key in U) if (key in rule) { split(key, p, SUBSEP); print "rule pin culled: " p[1] " §" p[2] }
+      for (key in U) if ((key in rule) && !(key in gone)) { split(key, p, SUBSEP); print "rule pin culled: " p[1] " §" p[2] }
       for (key in seen) {
         split(key, p, SUBSEP)
         if (ncull[key] > 0 && called[key] > nkeep[key]) print "culled section present: " p[1] " §" p[2]
-        if (nkeep[key] > called[key]) print "kept section absent: " p[1] " §" p[2]
+        if (nkeep[key] > called[key] && !(key in gone)) print "kept section absent: " p[1] " §" p[2]
       }
     }' | LC_ALL=C sort
 }
@@ -1851,14 +1865,38 @@ expect_contains "a culled-list line whose verdict is keep is refused naming the 
   "keep in the culled list: x.test.sh §ONE" "$(census_cull_refusals "$CN3/tests" "$CN3/keep.md")"
 
 # ============================================================
+section "CENSUS-GONE: a cull gone with its code needs a listed name, and a new culled duplicate may not rest on an unverified catcher"
+# ============================================================
+# fails-when: a section removed with its code cannot be culled by a name on the deletion list, a name off the list is
+# admitted, or a culled duplicate added since the baseline census names an (unverified) catcher and passes.
+CG="$TMP/cg"; census_scratch "$CG"; CG_LIST="$TESTS_DIR/fixtures/deletion-list.txt"
+printf '%s\n' 'section "ONE: the first"' 'expect_eq a 1 1' > "$CG/tests/x.test.sh"
+CG_NAME="$(deletion_names "$CG_LIST" | sed -n 1p)"
+expect_true "the deletion list yields names to cull by" [ -n "$CG_NAME" ]
+census_file "$CG/gone.md" "$CS_ONE" 'x.test.sh | §TWO | keep | rule: lint — a shape planted | none (searched x in tests/)'
+printf '\n## Culled\n\nx.test.sh §TWO — gone with %s\n' "$CG_NAME" >> "$CG/gone.md"
+expect_eq "a rule: keep gone with a listed name is admitted" "" "$(census_cull_refusals "$CG/tests" "$CG/gone.md" /dev/null "$CG_LIST")"
+sed -e 's/gone with .*/gone with no_such_name/' "$CG/gone.md" > "$CG/off.md"
+expect_eq "…a name off the list is refused, named" "gone with an unlisted name: no_such_name" \
+  "$(census_cull_refusals "$CG/tests" "$CG/off.md" /dev/null "$CG_LIST")"
+census_file "$CG/unv.md" "$CS_ONE" 'x.test.sh | §TWO | duplicate | lib/x.sh: a line changed | x.test.sh §ONE (unverified)'
+printf '\n## Culled\n\nx.test.sh §TWO — duplicate\n' >> "$CG/unv.md"
+expect_eq "a new culled duplicate naming an unverified catcher is refused" "unverified catcher culled: x.test.sh §TWO" \
+  "$(census_cull_refusals "$CG/tests" "$CG/unv.md" /dev/null "$CG_LIST")"
+expect_eq "…and is admitted once its line is in the baseline census" "" \
+  "$(census_cull_refusals "$CG/tests" "$CG/unv.md" "$CG/unv.md" "$CG_LIST")"
+
+# ============================================================
 section "CENSUS-4: the tests tree is cut as tests/CENSUS.md says"
 # ============================================================
 # fails-when: a suite under tests/ still calls a section the census culls, a kept section is gone, or the culled
 # list holds a keep or a rule pin.
 CN4_CULLED="$(sed -n '/^## Culled$/,$p' "$CENSUS_MD" 2>/dev/null | /usr/bin/grep -c '\.test\.sh §')"
 expect_true "the census carries a culled list to read (${CN4_CULLED} lines)" [ "${CN4_CULLED:-0}" -gt 0 ]
+CN4_BASE="$TMP/census-base.md"; git -C "$REPO" show 7a9633486:tests/CENSUS.md > "$CN4_BASE" 2>/dev/null
+expect_true "the baseline census is readable from history" [ -s "$CN4_BASE" ]
 expect_eq "the real tests tree: no culled section called, no kept section gone, no keep or rule pin culled" "" \
-  "$(census_cull_refusals "$TESTS_DIR" "$CENSUS_MD")"
+  "$(census_cull_refusals "$TESTS_DIR" "$CENSUS_MD" "$CN4_BASE" "$TESTS_DIR/fixtures/deletion-list.txt")"
 
 # ── the agreement checks ─────────────────────────────────────────────────────
 # A document states a fact twice, once in a front matter or a header and once in the body that carries it, and
