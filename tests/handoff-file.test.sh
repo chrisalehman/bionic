@@ -474,8 +474,11 @@ hf_world closed
 poke "$HF_R" handoff
 expect_eq "D0 precondition: the open handoff is written" "0" "$RC"
 hf_close "- Step 9: delivered: 2026-10-08T13:00Z wave-01-fixture 9.9.9 — closed by close-out.sh"
+printf '# the brief for w-T2\n' > "$HF_R/.bionic/docs/record/wave-01-fixture/briefs/w-T2.md"
 hf_poke "$HF_R" "$HF_C" handoff
 expect_eq "D1 handoff on a delivered plan exits 0" "0" "$RC"
+expect_contains "D1c the agent's brief is the file named for it, over the one named for its row (T5b reads that one alone)" \
+  "  - w-T2 · implementor · FINISHED rc=0 run=w-T2-x.test.sh · brief .bionic/docs/record/wave-01-fixture/briefs/w-T2.md ·" "$(hf_sec "$HF_F" State)"
 expect_absent "D1b …and does not refuse" "REFUSED" "$OUT"
 expect_eq "D2 the sections, in order" "$HF_HEADS" "$(hf_heads "$HF_F")"
 expect_eq "D2c …and where its continuation is" "continuation: record/wave-01-fixture/continuation.md" "$(hf_label "$HF_F" continuation)"

@@ -2054,10 +2054,12 @@ sitrep_tick_line() {
         HO_ST="no run"
         if run_load_row "$(run_row_of "$HO_RF" "$HO_NAME")" "$HO_RF"; then run_read; HO_ST="$(run_state_words)"; fi
         HO_BRIEF="in its dispatch"
+        # A brief is the dispatch's file, named for the agent; a brief rendered before that is named for its row.
         HO_ID="$(printf '%s\n' "$HO_UROWS" | awk -F'\t' -v n="$HO_NAME" '$5 == n { print $1; exit }')"
-        if [ -n "$HO_ID" ] && [ -f "$(docs_root "$HO_ROOT")/record/$HO_SLUG/briefs/$HO_ID.md" ]; then
-          HO_BRIEF="$(docs_root "$HO_ROOT")/record/$HO_SLUG/briefs/$HO_ID.md"; HO_BRIEF="${HO_BRIEF#"$HO_ROOT"/}"
-        fi
+        for HO_BF in "$HO_NAME" ${HO_ID:+"$HO_ID"}; do
+          [ -f "$(docs_root "$HO_ROOT")/record/$HO_SLUG/briefs/$HO_BF.md" ] || continue
+          HO_BRIEF="$(docs_root "$HO_ROOT")/record/$HO_SLUG/briefs/$HO_BF.md"; HO_BRIEF="${HO_BRIEF#"$HO_ROOT"/}"; break
+        done
         HO_AGENTS="${HO_AGENTS:+$HO_AGENTS
 }  - $(clean "$HO_NAME") · $(clean "${HO_TYPE:-agent}") · $HO_ST · brief $(clean "$HO_BRIEF") · progress $(clean "${HO_PROG:-none named}")"
         HO_N_AG=$((HO_N_AG + 1))

@@ -166,3 +166,22 @@ plan_read_waits() {
       }
     }'
 }
+
+# plan_read_section <plan> <id> [key] -> the task's own section: the lines under the first heading whose first word
+# is <id>, a trailing `:`, `.` or `,` dropped, to the next heading, with its leading and trailing blank lines left
+# out. With <key>: the value of the section's first `<key>: <value>` line. 1 when there is no such section or key,
+# 2 when the plan is not a file. THE RULE IS ONE STRING, so every reader and every writer of a task's section finds
+# the same heading: the act that writes a row's suites into its section takes `heading()` from here.
+_PLAN_READ_SECTION='function heading(s) { sub(/^#+[ \t]+/, "", s); sub(/[ \t].*$/, "", s); sub(/[:.,]+$/, "", s); return s }'
+plan_read_section() {
+  [ -f "${1:-}" ] || return 2
+  [ -n "${2:-}" ] || return 1
+  awk -v id="$2" -v key="${3:-}" "$_PLAN_READ_SECTION"'
+    { sub(/\r$/, "") }
+    /^#+[ \t]/ { if (on) exit; if (heading($0) == id) on = found = 1; next }
+    !on { next }
+    key != "" { if (index($0, key ":") == 1) { v = substr($0, length(key) + 2); gsub(/^[ \t]+|[ \t]+$/, "", v); print v; got = 1; exit }; next }
+    /^[ \t]*$/ { if (n) blank++; next }
+    { for (; blank > 0; blank--) print ""; print; n++ }
+    END { exit !(key == "" ? found : got) }' "$1"
+}
