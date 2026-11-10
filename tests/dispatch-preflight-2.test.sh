@@ -641,6 +641,15 @@ expect_status "the cadence beside the progress path is the one that counts" \
 
 section "S10e — the roster is per-session from birth (D-5)"
 
+# live_session <config dir> <sid> — the CLI's session file naming a running process (this shell,
+# with its start), which is what makes <sid> live to the roster prune; a transcript does not.
+live_session() {
+  mkdir -p "$1/sessions"
+  jq -n --argjson p "$$" --arg s "$2" --arg t "$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$$" | tr -s ' ' | sed 's/ *$//')" \
+    '{pid:$p, sessionId:$s, procStart:$t}' > "$1/sessions/$$.json"
+}
+# A, the first dispatcher, is the live foreign session when B dispatches.
+live_session "$GATE_CONFIG_DIR" "$SID_A"
 REPO=$(make_repo r10e yes)
 write_attestation "$REPO" "$SID_A"
 write_attestation "$REPO" "$SID_B"
@@ -655,21 +664,23 @@ expect_status "A's row is A's agent" "agent-of-A" "$(roster_field "$(roster_nth_
 expect_status "B's row is B's agent" "agent-of-B" "$(roster_field "$(roster_nth_row "$RB" 1)" name)"
 expect_status "no shared single-slot roster.state was created" "1" \
   "$([ -f "$REPO/.bionic/tmp/roster.state" ] && echo 0 || echo 1)"
+rm -rf "$GATE_CONFIG_DIR/sessions/$$.json" "$GATE_CONFIG_DIR/bionic/alive"   # A is not live past this section
 
 section "S10f — dead-session rosters are pruned, LIVE foreign ones are not (D-5)"
 #
-# Same liveness rule task 4/2 established for the attestation
-# (hooks/preflight-probe.sh: a session is live iff its transcript still exists
-# somewhere under CLAUDE_CONFIG_DIR/projects). A live foreign session's roster
-# surviving another session's dispatch IS the concurrency D-5 exists for.
+# A session is live while its process runs with the start the CLI's session file
+# records (payload/scripts/lib/alive.sh), the rule the attestation prune asks too. A
+# transcript outlives its session, so SID_DEAD keeps one and is still dead. A live
+# foreign session's roster surviving another session's dispatch is the concurrency
+# per-session rosters exist for.
 
 SID_DEAD="deadfeed-0000-4000-8000-000000000001"
 SID_LIVE="1ivefeed-0000-4000-8000-000000000002"
 CFG="$SANDBOX/cfg10f/.claude"
 mkdir -p "$CFG/projects/-some-project"
-: > "$CFG/projects/-some-project/$SID_LIVE.jsonl"
 : > "$CFG/projects/-some-project/$SID_A.jsonl"
-# SID_DEAD deliberately has NO transcript anywhere.
+: > "$CFG/projects/-some-project/$SID_DEAD.jsonl"
+live_session "$CFG" "$SID_LIVE"
 
 REPO=$(make_repo r10f yes)
 write_attestation "$REPO" "$SID_A"
