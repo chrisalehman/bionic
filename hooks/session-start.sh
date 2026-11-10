@@ -343,8 +343,9 @@ N=$(printf '%s\n' "$RUNS" | grep -c '.')
 # scripts/lib/run.sh — so the header above still names the true OPEN count (`$N`,
 # unchanged) while the listing itself shows only the LIVE subset; the quiet remainder is
 # reported as one count, not a second listing, because a bystander acts on a live plan by
-# name and on a quiet one only by knowing it exists at all.
-LIVE="$(live_runs "$BIONIC_ROOT")" || LIVE=""
+# name and on a quiet one only by knowing it exists at all. The filter is handed the open set
+# read above, so every candidate is asked once per start, not once for each listing.
+LIVE="$(live_runs "$BIONIC_ROOT" "$RUNS")" || LIVE=""
 LIVE_N=$(printf '%s\n' "$LIVE" | grep -c '.')
 QUIET=$((N - LIVE_N))
 
@@ -400,16 +401,33 @@ print_quiet_line() {
   printf 'bionic: %s quiet open run(s) — bind names any of them\n' "$QUIET"
 }
 
+# THE RUN'S FACTS, ONE FOLD PER START. The bound line's step and the resume door's pointer are
+# the reader's `step` and `handoff` answers (lib/reader.sh) over lib/proof.sh's kept fold, so a
+# step or a handoff only the run's log holds is the one printed, and a start after another pays
+# no fold while the run's files are unchanged. At most one plan is asked: the bound run, or on a
+# resume the newest open run. proof.sh is sourced here rather than wanted by the loader, so a
+# library without it prints no step and no door and the rest of the report stands.
+SS_FACTS_PLAN=""; SS_FACTS=""; SS_ANSWER=""
+ss_ask() {  # <plan> <reader question function> -> SS_ANSWER, its answer over the plan's facts
+  SS_ANSWER=""
+  if [ "$SS_FACTS_PLAN" != "$1" ]; then
+    { declare -F _proof_facts >/dev/null 2>&1 || . "$BIONIC_LIB/proof.sh"; } >/dev/null 2>&1
+    declare -F _proof_facts >/dev/null 2>&1 && _proof_reader_load || return 1
+    SS_FACTS="$(_proof_facts "$1")"; SS_FACTS_PLAN="$1"
+  fi
+  SS_ANSWER="$( reader_facts() { printf '%s' "$SS_FACTS"; }; "$2" "$1" 2>/dev/null )"
+}
+
 # THE BOUND-RUN LINE (AC-21). `session_run` already resolved "this session's binding
 # is to an open plan"; this only formats it. The plan path comes off the marker
 # `session_run` read, not off `$RUNS`/`$LIVE`, because a bound plan is named by the
-# ONE binding fact regardless of how many other runs are open. `current:` is read the
-# same way the poker's own step display does — first match, digits and `T` only, so a
-# multi-digit or ISO-stamped value still comes through whole.
+# ONE binding fact regardless of how many other runs are open. The step is the run's
+# (`ss_ask` above), digits and `T` only, as the poker's own step display prints it.
 print_bound_line() {  # <verdict "bound-open <plan>">
   local verdict="$1" bplan step relplan
   bplan="${verdict#bound-open }"
-  step="$(grep -m1 '^current:' "$bplan" 2>/dev/null | tr -dc '0-9T')"
+  ss_ask "$bplan" reader_q_step
+  step="$(printf '%s\n' "$SS_ANSWER" | sed -n 's/^n=//p' | tr -dc '0-9T')"
   if [ -n "$DOCS" ]; then relplan="${bplan#"$DOCS"/}"; else relplan="$bplan"; fi
   printf 'bionic: bound to %s — current: %s\n' "$relplan" "$step"
   # THE STEP FILE, NAMED RATHER THAN INJECTED (wave-11 row 1b, design D1). The governing
@@ -434,19 +452,16 @@ print_bound_line() {  # <verdict "bound-open <plan>">
 # adopts and recaps (`session-poker.sh resume`). After a clear, resume or compact, the bound plan's pointer, or
 # unbound the newest open plan's, to a file whose first line is the kind line is printed where the engage or bind
 # advice stood (and after the bound line). A startup has nothing to resume; a pointer to no file, or to a file
-# without the kind line, is no door. The pointer is read the way the poker's `handoff_file_of` reads it (the section
-# by its heading, fences skipped); this hook sources no poker code, so the awk is a second copy of that one reader.
+# without the kind line, is no door. The pointer is the run's latest handoff, the reader's `handoff` answer (`ss_ask`
+# above): the plan's ## Handoff line, or a handoff the run's log holds.
 SS_DOOR=""
 case "${SOURCE:-}" in
   clear|resume|compact)
     if [ "${BIONIC_RUN_WORD:-}" = bound-open ] && [ -n "${BIONIC_RUN_PLAN:-}" ]; then SS_DOOR_PLAN="$BIONIC_RUN_PLAN"
     else SS_DOOR_PLAN="$(printf '%s\n' "$RUNS" | head -n 1)"; fi
     if [ -n "$SS_DOOR_PLAN" ] && [ -f "$SS_DOOR_PLAN" ]; then
-      SS_DOOR_REL="$(awk '
-        /^[ \t]*```/ { f = !f; next }
-        f { next }
-        /^##[ \t]/ { h = ($0 ~ /^##[ \t]+Handoff[ \t]*$/); next }
-        h && index($0, "handoff: ") == 1 && / written / { s = substr($0, 10); sub(/ written .*$/, "", s); print s; exit }' "$SS_DOOR_PLAN" 2>/dev/null)"
+      ss_ask "$SS_DOOR_PLAN" reader_q_handoff
+      SS_DOOR_REL="$(printf '%s\n' "$SS_ANSWER" | sed -n 's/^path=//p')"
       case "$SS_DOOR_REL" in
         '') SS_DOOR_FILE="" ;;
         /*) SS_DOOR_FILE="$SS_DOOR_REL" ;;
