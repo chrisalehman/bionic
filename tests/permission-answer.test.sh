@@ -433,7 +433,7 @@ OUT="$(cd "$A5P" && printf '%s' "$(payload "$A5P" Bash "$(bash_ti "touch $A5P/sr
        | env HOME="$HOME_FX" CLAUDE_PROJECT_DIR="$A5P" BIONIC_PLUGINS_DIR="$SANDBOX/plugins" \
          CLAUDE_CODE_SESSION_ID="$SID" bash "$SANDBOX/broken/hooks/permission-answer.sh" 2>/dev/null)"
 RC=$?
-expect_eq "A5.h1 no library: rc 0" "0" "$RC"
+expect_eq "A5.h1 no library: rc 2, which the platform ignores on this event" "2" "$RC"
 expect_empty "A5.h2 …and nothing on stdout (bionic claims no authority it cannot establish)" "$OUT"
 expect_true "A5.h3 …and the copy really is the hook (not an empty file)" test -s "$SANDBOX/broken/hooks/permission-answer.sh"
 

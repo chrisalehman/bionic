@@ -178,10 +178,10 @@ physicalize() {  # $1=absolute path (need not exist) → folded, ancestors resol
 # ---------- the library ----------
 #
 # One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
-# payload/scripts/lib/loader.sh. FAIL OPEN: an artifact written in the wrong place is
-# a mistake a person can move, and the evidence gate's own misplacement sweep catches
-# the consequential half of it at commit time. Refusing every Write and Edit on the
-# machine because a file is missing is not recoverable at that price.
+# payload/scripts/lib/loader.sh. FAIL CLOSED: a wall that cannot read its library cannot
+# say a Write or Edit is safe, so it refuses it; the refusal names /bionic:doctor, and the
+# Bash wall still admits the four repair commands. On PostToolUse the write has already
+# happened and exit 2 only shows the refusal to the model.
 BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh binding.sh units.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
@@ -277,7 +277,7 @@ BIONIC_LOADER_REFUSE
   exit 2
 }
 # --- bionic-loader/v2 END
-if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "canonical-sdlc-governing-skill"; fi
+if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "canonical-sdlc-governing-skill"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/context.sh"
 # shellcheck source=/dev/null

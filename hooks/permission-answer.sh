@@ -34,7 +34,8 @@
 # refusal by exit code is not a decision the platform reads from this event. So the
 # direction is split at the one fact that decides who may answer at all: BEFORE engagement is
 # established a failure is silent (jq missing, the loader failing, a session that cannot be
-# identified: bionic claims no authority it cannot establish), and AFTER it every failure is
+# identified: bionic claims no authority it cannot establish; the loader's refusal exits 2,
+# which this event does not honour, so the dialog shows), and AFTER it every failure is
 # a denial that says what failed. Never an allow, never empty stdout.
 #
 # WHAT IT NEVER PRINTS: `updatedPermissions`, `updatedInput` or `interrupt`, on any path, and
@@ -55,8 +56,9 @@ BIONIC_INPUT=$(cat) || exit 0
 # ---------- the library ----------
 #
 # One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
-# payload/scripts/lib/loader.sh. Its fail-open arm is the silent half of the split above: a
-# library that will not load cannot say whether this session is engaged.
+# payload/scripts/lib/loader.sh. A library that will not load cannot say whether this session
+# is engaged, so the loader refuses with exit 2 and prints nothing on stdout: the platform
+# ignores exit 2 on a permission request and shows the person's dialog, never an allow.
 BIONIC_LIB_WANT="cmd-class.sh context.sh git-argv.sh grant.sh root.sh roots.sh roster.sh run.sh session.sh worktree.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
@@ -152,7 +154,7 @@ BIONIC_LOADER_REFUSE
   exit 2
 }
 # --- bionic-loader/v2 END
-if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "permission-answer"; fi
+if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "permission-answer"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/context.sh"
 # shellcheck source=/dev/null

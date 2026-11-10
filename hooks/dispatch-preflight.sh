@@ -107,9 +107,9 @@ TOOL_NAME=$(_jq '.tool_name')
 # ---------- the library ----------
 #
 # One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
-# payload/scripts/lib/loader.sh. FAIL OPEN: this wall protects a dispatch, and a
-# dispatch that should have been refused can be stopped and re-run — refusing every
-# Agent call on the machine because a file is missing cannot be undone as cheaply.
+# payload/scripts/lib/loader.sh. FAIL CLOSED: a wall that cannot read its library cannot
+# say a dispatch is safe, so it refuses it; the refusal names /bionic:doctor, and the Bash
+# wall still admits the four repair commands.
 # `brief.sh` (wave-20 T6; REQ-4, Δ10) is the contract grammar this wall and `amend` share; it
 # brings `cmd-class.sh` (wave-20 T4; REQ-7, D7) in itself for CMD_RUN_NORM_AWK, the one run
 # normaliser its lift pastes in, so this hook names only brief.sh and lets that source do
@@ -209,7 +209,7 @@ BIONIC_LOADER_REFUSE
   exit 2
 }
 # --- bionic-loader/v2 END
-if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
+if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "dispatch-preflight"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/context.sh"
 # shellcheck source=/dev/null
