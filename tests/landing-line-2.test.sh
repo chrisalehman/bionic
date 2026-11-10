@@ -414,6 +414,12 @@ expect_eq "(pa6c) …saying DEBT for the declared suite, once" "1" "$(printf '%s
 expect_eq "(pa6d) …and the gate's reader of the bound plan deals the debt" "debt	x.test.sh	T9" \
   "$(bash -c '. "$1/proof.sh" && proof_debts "$2"' _ "$REPO/payload/scripts/lib" "$(ll_plan "$PF")" | cut -f1-3)"
 
+section "§FORK: a red whose log holds the shell's own refusal of a process is none: run again, then STALLED naming both logs"
+FKR='tests/x.test.sh: fork: Resource temporarily unavailable'; lf_v() { printf '%s\nx.test.sh: 0/1 passed, 1 failed\n' "$2" > "$WORLD_ROOT/fk.log"; bash -c '. "$1" && _line_verdict "$2" "$3"' _ "$LINE" "$1" "$WORLD_ROOT/fk.log"; }
+expect_eq "(fk1) refused, rc 1: none · rc 1 without it: red · refused, rc 0: green · quoted: red · bash 5's retry: none" "none red green red none" "$(lf_v 1 "$FKR") $(lf_v 1 'FAIL: x') $(lf_v 0 "$FKR") $(lf_v 1 "missing 'y' in: $FKR") $(lf_v 1 "${FKR/fork:/fork: retry:}")"
+FK="$(ll_world)"; ll_launch "$FK" T1 x; ll_commit_suite "$FK" T1 x "echo run >> \"\$LL_SIG/fk.runs\"; echo '$FKR' >&2; echo 'x.test.sh: 0/1 passed, 1 failed  sections=1 setup=0'; exit 1"
+ll_verb "$FK" T1; KFK="$(ll_last_cand "$FK" T1)"; LFK="$FK/.bionic/docs/record/wave-x/line/T1-x-${KFK:0:12}"
+expect_eq "(fk2) refused on every run: run twice, none and none, then STALLED naming both logs (exit 70), never RED" "70 2 none none STALLED T1 $LFK.log,$LFK-2.log" "$LL_RC $(ll_lines "$LL_SIG/fk.runs") $(ll_results "$FK" T1 "$KFK") $(printf '%s\n' "$LL_OUT" | grep '^STALLED ')"
 # ---------------------------------------------------------------------------
 section "§DRAIN: a landing drains its suites at most J at once, J the gate's answer; one tree per candidate, the red judge in another (wave-37 T1; D3, REQ-1 AC-1.1; wave-38 T6, D21)"
 #
