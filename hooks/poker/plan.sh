@@ -2706,7 +2706,7 @@ $BRF_PINNED"; fi
     if [ "$BRF_KIND" = review ]; then
       BRF_QS="$(units_questions "$(printf '%s\t%s\t%s\t%s' "$BRF_ID" "$BRF_STEP" "$BRF_KIND" "$BRF_TASK")")"
       if [ -n "$BRF_QS" ] && ! poker_questions_dealt "$PV_PLAN" "$BRF_QS"; then
-        die "REFUSED — row $BRF_ID declares the questions $BRF_QS, which are not dealt: $PQD_SAID. Nothing was written. Fix: make the row's questions one reader's, then run again: bash ${HOOK_DIR}/session-poker.sh brief $BRF_ID $BRF_NAME"
+        die "REFUSED — row $BRF_ID declares the questions $BRF_QS, which are not dealt: $PQD_SAID. Nothing was written. Fix: make the row's questions one reviewer's, then run again: bash ${HOOK_DIR}/session-poker.sh brief $BRF_ID $BRF_NAME"
         exit 1
       fi
       BRF_QLINE="${BRF_QS//,/, }"
@@ -2917,14 +2917,17 @@ BRF_EOF
     printf '%s' "$v"
   }
 
-  # rr_rows <plan> <current> -> `<AC>\037<tier>\037<status>\037<auditor>\037<ruled 1|0|owed:<step>>` per five-cell
-  # matrix row, table order. THE RULING IS walls.sh's: each row is read by its readers (`matrix_section`, `matrix_block`,
-  # `user_confirmed_value`, `matrix_row_waiver`) and judged by `matrix_row_ruled`, sourced in a subshell as the facts
-  # judge sources it, so the card and the gate cannot answer one row two ways. A row the gate defers at <current>
+  # rr_rows <plan> <current> -> `<AC>\037<tier>\037<status>\037<auditor>\037<ruled 1|0|owed:<step>>\037<reason>` per
+  # five-cell matrix row, table order. THE RULING IS walls.sh's: each row is read by its readers (`matrix_section`,
+  # `matrix_block`, `user_confirmed_value`, `matrix_row_waiver`) and judged by `matrix_row_ruled`, sourced in a subshell
+  # as the facts judge sources it, so the card and the gate cannot answer one row two ways. A WAIVER IS A FACT OF THE
+  # RUN: a status cell that says waived stands only while the reader holds a waiver naming the row (`RR_WAIVED`, the
+  # criteria the run's waiver facts name), so a cell written after the instant the log stands at reads as not run. A row the gate defers at <current>
   # (`matrix_row_deferred`: owed at the later step whose task proves it) is `owed:<step>`, not ruled and not unruled:
   # nothing has run that could prove it, and the step that runs it writes it. The auditor cell is printed as
-  # `placeholder_cell` folds it, `-` when it means none, so `—`, `-`, `n/a` and an empty cell read alike. Exit 2 when
-  # walls.sh cannot be loaded: the card never guesses a ruling.
+  # `placeholder_cell` folds it, `-` when it means none, so `—`, `-`, `n/a` and an empty cell read alike. The reason is
+  # the block's `reason:` key, read from matrix_block. Exit 2 when walls.sh cannot be loaded: the card never guesses a
+  # ruling.
   rr_rows() {
     [ -f "$BIONIC_LIB/walls.sh" ] || return 2
     ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F matrix_row_ruled >/dev/null 2>&1 \
@@ -2933,38 +2936,18 @@ BRF_EOF
       while IFS=$'\037' read -r ac tier status ev aud; do
         [ -n "$ac" ] || continue
         block="$(matrix_block "$ac")"
+        case "$status:${RR_WAIVED:-}" in waived:*" $ac "*) ;; waived:*) status=pending ;; esac
         waiver=0; matrix_row_waiver "$ev" "$block" && waiver=1
         ruled=0; matrix_row_ruled "$tier" "$status" "$aud" "$(user_confirmed_value "$block")" "$waiver" && ruled=1
         owe="$(matrix_owing_step "$PLAN" "$block")"
         [ "$ruled" = 1 ] || ! matrix_row_deferred "$PLAN" "$owe" "$2" "$status" "$(matrix_owing_open "$PLAN" "$block")" || ruled="owed:$owe"
         aud="$(placeholder_cell "$aud")"
-        printf '%s\037%s\037%s\037%s\037%s\n' "$ac" "$tier" "$status" "${aud:--}" "$ruled"
+        printf '%s\037%s\037%s\037%s\037%s\037%s\n' "$ac" "$tier" "$status" "${aud:--}" "$ruled" \
+          "$(printf '%s\n' "$block" | sed -n 's/^[[:space:]]*reason:[[:space:]]*//p' | head -n 1)"
       done <<RR_MATRIX
 $(matrix_table_rows)
 RR_MATRIX
     )
-  }
-
-  rr_block_key() {  # <plan> <AC> <key> -> the first value of <key>: in the AC's block, or nothing
-    RR_AC="$2" RR_BK="$3" awk "$(units_ac_head_awk)"'
-      /^[[:space:]]*```/ { fence = !fence; next }
-      fence { next }
-      /^## / { inm = ($0 ~ /^## Verification Matrix/); inb = 0; next }
-      !inm { next }
-      ac_head($0, ENVIRON["RR_AC"]) { inb = 1; next }
-      inb && /^[^[:space:]]/ { inb = 0 }
-      inb {
-        l = $0; sub(/^[ \t]+/, "", l); k = ENVIRON["RR_BK"] ":"
-        if (index(l, k) == 1) { v = substr(l, length(k) + 1); sub(/^[ \t]+/, "", v); print v; exit }
-      }' "$1"
-  }
-
-  rr_approved() {  # <plan> <name> -> the plan's approved: line for it, or nothing
-    RR_NM="$2" awk '
-      /^[[:space:]]*```/ { fence = !fence; next }
-      fence { next }
-      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-      insdlc && /^approved:[ \t]/ { split($0, w, /[ \t]+/); if (w[2] == ENVIRON["RR_NM"] && w[3] == "by") { print; exit } }' "$1"
   }
 
   rr_since() {  # <approved head> -> `approved at <head8>, <n> commit(s) landed since[ (<rows>)]`, the rows from the landing record
@@ -2977,41 +2960,17 @@ RR_MATRIX
     [ -z "$rows" ] || printf ' (%s)' "$rows"
   }
 
-  rr_sdlc_value() {  # <plan> <field> -> the value of `<field>:` under ## SDLC State, or nothing
-    RR_F="$2" awk '
-      /^[[:space:]]*```/ { fence = !fence; next }
-      fence { next }
-      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-      insdlc && index($0, ENVIRON["RR_F"] ":") == 1 { v = substr($0, length(ENVIRON["RR_F"]) + 2); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit }' "$1"
-  }
-
   rr_proof_field() {  # <proof line> <name> -> the value of name=<word> on it, or nothing
     case " $1 " in *" $2="*) local v="${1#* "$2"=}"; [ "$v" != "$1" ] || v="${1#"$2"=}"; printf '%s' "${v%% *}" ;; esac
   }
 
-  rr_question_of() {  # <plan> <evidence> -> the question of the newest reading that cites it
-    RR_EV="$2" awk "$(proof_awk)"'
-      /^[[:space:]]*```/ { fence = !fence; next }
-      fence { next }
-      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-      insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE == ENVIRON["RR_EV"] { q = PROOF_QUESTION }
-      END { print q }' "$1"
-  }
-
+  # A carry the person answered on a replied page is read from that page, the card's own replay record: the reply
+  # writes no fact of its own for a carried decision, so no reader question holds it.
   rr_carried() {  # <record dir> <finding id> -> 0 when a replied page of this run applied its carry
     local f
     for f in "$1"/release-approval-*.md "$1/$RR_OLD_VERB"-*.md; do
       [ -f "$f" ] || continue
       /usr/bin/grep -qxF "applied: finding:$2 carried" "$f" 2>/dev/null && return 0
-    done
-    return 1
-  }
-
-  rr_carry_ruled() {  # <record dir> <finding id> -> 0 when an answered page of this run carried it, so its reply ruled it
-    local f
-    for f in "$1"/release-approval-*.md "$1/$RR_OLD_VERB"-*.md; do
-      [ -f "$f" ] || continue
-      /usr/bin/grep -q '^replied: ' "$f" 2>/dev/null && /usr/bin/grep -qxF "carried: $2" "$f" 2>/dev/null && return 0
     done
     return 1
   }
@@ -3106,7 +3065,7 @@ RR_MATRIX
   poker_verb_release_approval() {
     local nm line key reply ac tier st au ruled why fid sev reach state rows stated ttl sent ev q num dec grp h r role behind again
     if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-       || ! declare -F proof_last_line >/dev/null 2>&1; then
+       || ! declare -F proof_last_line >/dev/null 2>&1 || ! _proof_reader_load; then
       die "REFUSED — the release approval card is read through lib/proof.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
       exit 2
     fi
@@ -3136,32 +3095,29 @@ RR_MATRIX
     fi
     RR_SETTLE="$(printf '%s\n' "$RR_EOUT" | sed -n 's/^settles: //p')"
 
-    # THE TITLE'S FACTS: the project, the release, the tasks landed.
+    # THE TITLE'S FACTS: the project, the release, the tasks landed. Every fact of the run is a reader answer over the
+    # kept fold (lib/proof.sh `_proof_ask`), so the page says what the log holds at this instant, and the plan's rows
+    # are the scheduler's (`units_rows`).
     RR_PROJ="$(git -C "$PV_REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
     case "$RR_PROJ" in */.git) RR_PROJ="${RR_PROJ%/.git}"; RR_PROJ="${RR_PROJ##*/}" ;; *) RR_PROJ="${PV_REPO##*/}" ;; esac
-    RR_REL="$(plan_frontmatter_get "$PV_PLAN" release 2>/dev/null)"
-    RR_UROWS="$(units_rows "$PV_PLAN" 2>/dev/null)"
-    set -- $(printf '%s\n' "$RR_UROWS" | awk -F'\t' 'NF >= 10 { t++; if ($10 == "landed") l++ } END { print t + 0, l + 0 }')
+    RR_REL="$(_proof_ask "$PV_PLAN" reader_q_header "$PV_PLAN" release | sed -n 's/^release=//p')"
+    RR_LANDED_IDS=" $(_proof_ask "$PV_PLAN" reader_q_landed "$PV_PLAN" | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | tr '\n' ' ')"
+    set -- $(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v l="$RR_LANDED_IDS" 'NF >= 10 { t++; if (index(l, " " $1 " ")) n++ } END { print t + 0, n + 0 }')
     RR_TOTAL="${1:-0}"; RR_LANDED="${2:-0}"
-    RR_LANDED_IDS=" $(printf '%s\n' "$RR_UROWS" | awk -F'\t' 'NF >= 10 && $10 == "landed" { printf "%s ", $1 }')"
 
     RR_N=0; RR_ASIDE=""
     RR_KIND=(); RR_KEY=(); RR_DO=(); RR_ELSE=(); RR_WHYS=(); RR_SUBJ=(); RR_DLAB=(); RR_OLAB=(); RR_DPH=(); RR_OPH=(); RR_PICK=()
 
-    # WAIVERS: the run's open waive: items, then the ones the red check owes, each once; never the regression. The asks
-    # are read from the run's register (lib/owed.sh `owed_list_plan`), never the caller's session alone: a waiver a
-    # close-out preflight or another session of the run raised is owed here as well.
-    RR_WAIVE=""
+    # WAIVERS: the run's open waive: asks (the reader's `asks`), then the ones the red check owes, each once; never the
+    # regression. A waiver a close-out preflight or another session of the run raised is owed here as well. A gate's
+    # ask is an aside in its own words, which only the run's register (lib/owed.sh `owed_list_plan`) keeps.
+    RR_WAIVE="$(_proof_ask "$PV_PLAN" reader_q_asks "$PV_PLAN" | sed -n 's/.*|key=\(waive:[^|]*\)|.*/\1/p' | /usr/bin/grep -vx 'waive:regression')"
     while IFS='	' read -r key _ _ reply; do
-      case "$key" in
-        waive:regression) : ;;
-        waive:?*) RR_WAIVE="${RR_WAIVE}${key}"$'\n' ;;
-        gate:?*) RR_ASIDE="${RR_ASIDE}${reply#poker: }"$'\n' ;;
-      esac
+      case "$key" in gate:?*) RR_ASIDE="${RR_ASIDE}${reply#poker: }"$'\n' ;; esac
     done <<RR_OWED
 $(owed_list_plan "$PV_PLAN" "$PV_REPO" 2>/dev/null)
 RR_OWED
-    RR_WAIVE="$(printf '%s%s\n' "$RR_WAIVE" "$(printf '%s\n' "$RR_SETTLE" | /usr/bin/grep '^waive:' | /usr/bin/grep -vx 'waive:regression')" | awk 'NF && !seen[$0]++')"
+    RR_WAIVE="$(printf '%s\n%s\n' "$RR_WAIVE" "$(printf '%s\n' "$RR_SETTLE" | /usr/bin/grep '^waive:' | /usr/bin/grep -vx 'waive:regression')" | awk 'NF && !seen[$0]++')"
     while IFS= read -r key; do
       [ -n "$key" ] || continue
       q="${key#waive:}"
@@ -3175,13 +3131,16 @@ RR_WAIVES
     # ROWS: every matrix row, ruled or not as walls.sh rules it (rr_rows). Proved when discharged and ruled, and a T4 row
     # so ruled under an empty-like auditor cell is one the user confirmed; waived when ruled with status waived. Every
     # other row is a decision: a discharged T4 row under an empty-like cell is the user's own check, to confirm
-    # (confirm-row) or waive; any other is waived or run, a T4 row's standing finding said in the gate's words.
+    # (confirm-row) or waive; any other is waived or run, a T4 row's standing finding said in the gate's words. The
+    # step a row is owed against is the run's (the reader's `step`), the plan's `current:` only where the log has none.
     RR_ACT=0; RR_ACP=0; RR_ACY=0; RR_ACW=0; RR_ACU=0; RR_ACA=0; RR_ACR=0; RR_ACC=0; RR_ACL=0; RR_MISS=""
-    if ! RR_ROWS="$(rr_rows "$PV_PLAN" "$PV_CUR")"; then
+    RR_CUR="$(_proof_ask "$PV_PLAN" reader_q_step "$PV_PLAN" | sed -n 's/^n=//p')"
+    RR_WAIVED=" $(_proof_facts "$PV_PLAN" | awk -F'|' "$_LINE_FIELDS_AWK"'line_kv("ev") == "waiver" && line_kv("ac") != "" { printf "%s ", line_kv("ac") }') "
+    if ! RR_ROWS="$(rr_rows "$PV_PLAN" "${RR_CUR:-$PV_CUR}")"; then
       die "REFUSED — the release approval card asks walls.sh for each matrix row's ruling, and $BIONIC_LIB/walls.sh cannot be loaded; nothing is written."
       exit 2
     fi
-    while IFS=$'\037' read -r ac tier st au ruled; do
+    while IFS=$'\037' read -r ac tier st au ruled reason; do
       [ -n "$ac" ] || continue
       RR_ACT=$((RR_ACT + 1))
       if [ "$ruled" = 1 ] && [ "$st" = discharged ]; then
@@ -3200,7 +3159,7 @@ RR_WAIVES
         continue
       fi
       if [ "$st" = discharged ]; then RR_ACU=$((RR_ACU + 1)); else RR_ACR=$((RR_ACR + 1)); fi
-      why="$(rr_block_key "$PV_PLAN" "$ac" reason)"
+      why="$reason"
       if [ -z "$why" ]; then
         if [ "$st" != discharged ]; then why="not run on this release"
         elif [ "$tier" = T4 ] && [ "$au" != - ]; then why="the auditor's finding stands ($au)"
@@ -3225,8 +3184,16 @@ RR_ROWS_EOF
       RR_TACC="$RR_TACC acceptance — $RR_ACP of $(rr_plural "$RR_ACT" criterion criteria) proved${line:+; $line}"
     fi
 
-    # FINDINGS: the disposition's one reading, one sentence each; a decision only when recommended against.
+    # FINDINGS: the disposition's one reading, one sentence each; a decision only when recommended against. A FINDING'S
+    # STANDING WORD IS A FACT OF THE RUN: where the reader holds the finding, its `findings` answer gives the state (a
+    # deferral carried; a move to fixed fixed once its row landed, open with that row before), and the question is
+    # the reader's newest review proof citing its record. The disposition's own state stands for a finding the
+    # reader holds no line of, a review's unlined flag.
     RR_FN=0; RR_FNF=0; RR_FNA=0; RR_FNC=0; RR_FLINES=""; RR_FROWS=""; RR_FIDS=""; RR_CARRY=""
+    RR_RFIND="$(_proof_ask "$PV_PLAN" reader_q_findings "$PV_PLAN" | awk -F'|' "$_LINE_FIELDS_AWK"'
+      { print line_kv("ref") "\t" line_kv("to") "\t" line_kv("row") }')"
+    RR_QOF="$(_proof_ask "$PV_PLAN" reader_q_reviews "$PV_PLAN" | awk -F'|' "$_LINE_FIELDS_AWK"'
+      line_kv("ev") == "proof" { print line_kv("evidence") "\t" line_kv("question") }')"
     # A PREVIEW OPENS NOTHING: the disposition it reads is handed a ledger key no file can carry, so the person's
     # items the disposition opens on any other run are left unopened here.
     if [ "$RR_PREVIEW" = yes ]; then
@@ -3241,7 +3208,12 @@ RR_ROWS_EOF
       state="$(rr_field "$line" state)"; rows="$(rr_field "$line" row)"; ev="$(rr_field "$line" record)"
       stated="$(rr_field "$line" stated)"; ttl="$(rr_field "$line" title)"
       sent="${stated:-$ttl}"; [ "$sent" != - ] || sent="$ttl"; sent="${sent%.}"
-      q="$(rr_question_of "$PV_PLAN" "$ev")"; num="${fid##*#}"
+      IFS='	' read -r _ to h <<< "$(printf '%s\n' "$RR_RFIND" | awk -F'\t' -v f="$fid" '$1 == f { l = $0 } END { print l }')"
+      case "${to:-}" in
+        deferred) state=deferred; rows="" ;;
+        fixed) rows="${h:-$rows}"; case "$RR_LANDED_IDS" in *" ${h:-?} "*) state=fixed ;; *) state=open ;; esac ;;
+      esac
+      q="$(printf '%s\n' "$RR_QOF" | awk -F'\t' -v e="$ev" '$1 == e { q = $2 } END { print q }')"; num="${fid##*#}"
       RR_FN=$((RR_FN + 1)); RR_FIDS="${RR_FIDS}finding:$fid"$'\n'
       [ "$state" != deferred ] || RR_CARRY="${RR_CARRY}$fid"$'\n'
       dec=""; grp=C
@@ -3286,7 +3258,7 @@ RR_DISP_EOF
       units_approval_names "$PV_PLAN" 2>/dev/null | /usr/bin/grep -qxF "$nm" || continue
       RR_NAMES="$RR_NAMES $nm"
       again=""
-      if [ -n "$(rr_approved "$PV_PLAN" "$nm")" ]; then
+      if proof_approved "$PV_PLAN" "$nm"; then
         h="$(proof_approved_head "$PV_PLAN" "$nm" 2>/dev/null)" || h=""
         case "$nm" in
           release)
@@ -3367,9 +3339,10 @@ RR_AGAINST_EOF
     # uncovered. A plan the judge cannot deal has no coverage to read, so its lines say the recorded result.
     RR_REVIEWS=""
     RR_COV="$(facts_reviews "$PV_PLAN" "$RR_HEAD" --landings 2>/dev/null)"
+    RR_RIGOR="$(_proof_ask "$PV_PLAN" reader_q_header "$PV_PLAN" rigor | sed -n 's/^rigor=//p')"
     for q in evidence adversarial structure; do
       role=critic
-      [ "$q" != evidence ] || [ "$(plan_frontmatter_get "$PV_PLAN" rigor 2>/dev/null)" != double ] || role=auditor
+      [ "$q" != evidence ] || [ "$RR_RIGOR" != double ] || role=auditor
       line="$(proof_last_line "$PV_PLAN" review "$q" 2>/dev/null)"
       if [ -z "$line" ]; then RR_REVIEWS="${RR_REVIEWS}❔ $q — not read yet"$'\n'; continue; fi
       h="$(rr_proof_field "$line" head)"; r="$(rr_proof_field "$line" result)"
@@ -3436,10 +3409,14 @@ RR_AGAINST_EOF
           "poker: ${key#*:} is decision $((num + 1)) on the release approval card at $RR_H8" >/dev/null 2>&1 || : ;;
       esac
     done
-    # A card with no decision still records its page while it carries a finding no answered page carried, so the reply
-    # that answers it rules the carry; one whose carries were all ruled writes nothing, as before.
+    # A card with no decision still records its page while it carries a finding whose carry is still an open ask (the
+    # reader's `asks`), so the reply that answers it rules the carry; one whose carries were all ruled writes nothing.
     RR_CARRY_OPEN=""
-    while IFS= read -r fid; do [ -z "$fid" ] || rr_carry_ruled "$RR_DIR" "$fid" || RR_CARRY_OPEN=yes; done <<< "$RR_CARRY"
+    RR_OPEN_ASKS="$(_proof_ask "$PV_PLAN" reader_q_asks "$PV_PLAN" | sed -n 's/.*|key=\([^|]*\)|.*/\1/p')"
+    while IFS= read -r fid; do
+      [ -n "$fid" ] || continue
+      case $'\n'"$RR_OPEN_ASKS"$'\n' in *$'\n'"$(carry_owed_key "$fid")"$'\n'*) RR_CARRY_OPEN=yes ;; esac
+    done <<< "$RR_CARRY"
     { [ "$RR_N" -eq 0 ] && [ -z "$RR_CARRY_OPEN" ]; } || rr_record "$RR_TEXT"
     exit 0
   }
