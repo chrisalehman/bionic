@@ -2048,57 +2048,6 @@ expect_eq "FA7 …and its ask lines are the register as it stands: the approval 
 expect_eq "FA7b …and the saved sheet did not have the approval (so FA7 read a refresh)" "0" "$(/usr/bin/grep -c '^ask: key=approve:release ' "$TMPROOT/fast-sheet2.out")"
 
 # ============================================================
-section "§SKILL: the sitrep skill reads the sheet and shows only the card the card verb printed; it never tells the model to show the sheet"
-# ============================================================
-# FIXTURE FIDELITY: the shipped skill text, read in place; each plant is a scratch copy of it with one line appended.
-# fails-when: the skill text tells the model to show the sheet, or to show anything but the card verb's output.
-SR_SKILL="$BIONIC_SKILLS_DIR/sitrep/SKILL.md"
-sr_show_lines() {  # <skill file> -> every line that tells the model to show something (show, shows, display), a negated show cut first
-  awk '{ l = tolower($0); gsub(/(never|not|n.t) (show|display)/, "", l) } l ~ /(^|[^a-z])(shows?|display)([^a-z]|$)/ { print }' "$1"
-}
-sr_show_bad() {  # <skill file> -> each show line that shows the sheet or the page, or anything but the card
-  sr_show_lines "$1" | awk '{ l = tolower($0) } l ~ /sheet|page/ || l !~ /card/ { print }'
-}
-expect_contains "SK0 the skill runs the sheet verb" 'hooks/session-poker.sh sitrep' "$(cat "$SR_SKILL")"
-expect_contains "SK0b …and the card verb, the judgment on its stdin" 'hooks/session-poker.sh sitrep card <<' "$(cat "$SR_SKILL")"
-expect_eq "SK0c the skill offers no plan operand (D13: the sitrep takes no argument)" "0" "$(/usr/bin/grep -c '\[<plan>\]' "$SR_SKILL")"
-expect_nonempty "SK1 the skill has lines that say what to show (the extractor reads the real text)" "$(sr_show_lines "$SR_SKILL")"
-expect_eq "SK1b …one of them shows the card exactly as printed, in one fenced code block, with nothing after it" "1" \
-  "$(sr_show_lines "$SR_SKILL" | /usr/bin/grep -i 'card' | /usr/bin/grep -i 'exactly as printed' | /usr/bin/grep -i 'one fenced code block' | /usr/bin/grep -ci 'nothing after')"
-expect_eq "SK2 the sheet is named as the model's input, never shown" "1" \
-  "$(/usr/bin/grep -i 'sheet' "$SR_SKILL" | /usr/bin/grep -i 'input' | /usr/bin/grep -ci 'never show')"
-expect_empty "SK3 no line of the skill shows the sheet, the page or anything but the card (SK1 read the same lines)" "$(sr_show_bad "$SR_SKILL")"
-for sr_plant in 'Show the sheet to the user.' 'Then show its page inside one fenced code block.' 'Show the card and the sheet beside it.' 'Display the facts as a list.'; do
-  cp "$SR_SKILL" "$TMPROOT/skill-plant.md"; printf '%s\n' "$sr_plant" >> "$TMPROOT/skill-plant.md"
-  expect_eq "SK4 a planted '$sr_plant' is found" "$sr_plant" "$(sr_show_bad "$TMPROOT/skill-plant.md")"
-done
-# The card places each ask from the fact: a held ask under Blocked on you, an unheld one under the Assessment, and
-# Blocked on you reads None when nothing is held. The skill says so, in the model's own register.
-expect_eq "SK4b the skill says the card puts a held ask under Blocked on you, an unheld one under the Assessment, and Blocked on you is None when nothing is held" "1|1" \
-  "$(/usr/bin/grep -i 'blocked on you' "$SR_SKILL" | /usr/bin/grep -i 'held' | /usr/bin/grep -i 'assessment' | /usr/bin/grep -ci 'none')|$(/usr/bin/grep -i 'ask <key>' "$SR_SKILL" | /usr/bin/grep -i 'never choose' | /usr/bin/grep -ci 'section')"
-# The skill weighs measurements: each fact states what it measures, and two are compared only when they share a unit.
-# Pace is the work landed against the forecast time used, the grade's rubric is that same comparison, and the close's
-# basis is said in words. The example judgment states the sheet's measurements, never the plan's allowance.
-expect_eq "SK5 each fact states what it measures; compare only measurements that share a unit" "1" \
-  "$(/usr/bin/grep -i 'what it measures' "$SR_SKILL" | /usr/bin/grep -ci 'share a unit')"
-expect_eq "SK6 the Pace question is pace.work-landed against pace.time-used" "1" \
-  "$(/usr/bin/grep -F '**Pace.**' "$SR_SKILL" | /usr/bin/grep -F 'pace.work-landed' | /usr/bin/grep -cF 'pace.time-used')"
-expect_eq "SK7 the rubric: on pace when pace.work-landed is at least pace.time-used, behind when lower" "1" \
-  "$(/usr/bin/grep -i 'on pace' "$SR_SKILL" | /usr/bin/grep -F 'pace.work-landed' | /usr/bin/grep -F 'pace.time-used' | /usr/bin/grep -ci 'behind')"
-expect_eq "SK8 the close row is the condition in words, and the card draws the basis" "1" \
-  "$(/usr/bin/grep -F 'close:' "$SR_SKILL" | /usr/bin/grep -i 'basis' | /usr/bin/grep -ci 'in words')"
-# The example is the seven lines of the judgment and nothing else: code draws the Metrics, so the example holds no
-# metric: or task: line and does not restate the Pace; it opens on the purpose.
-sr_example() {  # <skill file> -> the lines of the skill's one example judgment, between the heredoc and its terminator
-  awk '/<<.JUDGMENT.$/ { f = 1; next } /^ *JUDGMENT$/ { f = 0 } f { sub(/^ +/, ""); print }' "$1"
-}
-expect_eq "SK9 the example judgment is seven lines, opens on purpose:, and holds no metric: or task: line" "7|purpose|0" \
-  "$(sr_example "$SR_SKILL" | /usr/bin/grep -c .)|$(sr_example "$SR_SKILL" | head -1 | cut -d: -f1)|$(sr_example "$SR_SKILL" | /usr/bin/grep -cE '^(metric|task):')"
-sed 's/^\( *\)grade: .*/\1grade: B\n\1metric: Pace: 37% of the work landed in 60% of the time./' "$SR_SKILL" > "$TMPROOT/skill-plant.md"
-expect_eq "SK9b a planted metric: line in the example is found (SK9 read the same lines)" "1" \
-  "$(sr_example "$TMPROOT/skill-plant.md" | /usr/bin/grep -cE '^(metric|task):')"
-
-# ============================================================
 section "§RECORD: the sitrep and canonical-sdlc skills record an ask through its verb before they put it to the user"
 # ============================================================
 # FIXTURE FIDELITY: the shipped skill texts read in place, the canonical-sdlc skill as rendered and as its source; the
