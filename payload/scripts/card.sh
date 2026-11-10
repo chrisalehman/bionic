@@ -1002,12 +1002,12 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   case "$out" in *"DCUT$CARD_TAB"*)
     out="$(while IFS= read -r line; do
         case "$line" in
-          DCUT"$CARD_TAB"*)
+          (DCUT"$CARD_TAB"*)
             rest="${line#DCUT"$CARD_TAB"}"; k="${rest%%"$CARD_TAB"*}"; rest="${rest#*"$CARD_TAB"}"
             v="${rest%%"$CARD_TAB"*}"; rest="${rest#*"$CARD_TAB"}"
             plan_cut "$rest" || :
             printf 'DCUT\t%s\t%s\t%s\t%s\n' "$k" "$v" "$PLAN_CUT_HEAD" "${rest:${#PLAN_CUT_HEAD}}" ;;
-          *) printf '%s\n' "$line" ;;
+          (*) printf '%s\n' "$line" ;;
         esac
       done <<< "$out" | awk -F'\t' "$_CARD_DEC_AWK"'BEGIN { OFS = "\t" } $1 == "DCUT" { dec_out($2, $3, $4, $5); next } { print }')" ;;
   esac
