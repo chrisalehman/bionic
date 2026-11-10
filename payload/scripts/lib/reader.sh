@@ -183,9 +183,9 @@ reader_q_asks() {  # <plan> -> each ask still open: no reply on it, and no appro
     END { for (i = 1; i <= n; i++) if (ord[i] in open) print open[ord[i]] }'
 }
 
-# The questions below answer from the log alone. A full answer to some of them also needs the plan's
-# authored parts (a row's deps, the reviews the rigor owes, the rows an approval holds); each answers
-# what the log holds, and its own comment names the half the plan holds.
+# The questions below answer from the log. holds, stop, status and ready also join the plan's Tasks table
+# through lib/plan-read.sh, the plan's one parser; reviews still answers the log's half alone, and its
+# comment names the half the plan holds.
 reader_identity finding ref
 reader_identity debt concept
 reader_identity admitted id
@@ -208,20 +208,28 @@ _reader_last() {  # <plan> <type> -> the latest standing fact of <type>, its fie
 }
 
 reader_question holds list reader_q_holds
-reader_q_holds() {  # <plan> -> each open ask that holds something the log names, with `holds=` on its line
-  # An ask holds what its writer wrote in `holds=`, and a step's approval holds the next step. The rows
-  # that read an approval, a decision's waiters and the integrate rows a waiver holds are Tasks cells of
-  # the plan, so until the plan is read here such an ask is listed only when its line says.
-  reader_q_asks "$1" | awk -F'|' "$_READER_AWK"'
-    { h = line_kv("holds"); k = line_kv("key") }
-    h == "" && k ~ /^approve:step[0-9]+$/ {
-      h = "holds=step " (substr(k, 13) + 1); n = split($0, p, "|"); o = p[1]; put = 0
-      for (i = 2; i <= n; i++) { f = substr(p[i], 1, index(p[i], "=") - 1)
+reader_q_holds() {  # <plan> -> each open ask that holds something, with `holds=` on its line
+  # An ask holds what its writer wrote in `holds=`, and a step's approval holds the next step. Otherwise
+  # it holds rows of the plan that have not landed: an `approve:<key>` or a `decide:<D>` each row that
+  # waits on approval:<key> or approval:<D>, and a waiver, a finding or a hold the integrate rows.
+  { plan_read_waits "$1" 2>/dev/null; printf '\034\n'; reader_q_landed "$1"; printf '\035\n'; reader_q_asks "$1"; } | awk -F'|' "$_READER_AWK"'
+    function rows(k,   a, i, r, o) {
+      if (k ~ /^(approve|decide):/) a = "approval:" substr(k, index(k, ":") + 1); else if (k !~ /^(waive|finding|row|hold):/) return ""
+      for (i = 1; i <= n; i++) { r = ord[i]; if (!(r in landed) && (a == "" ? knd[r] == "integrate" : ((r, a) in waits))) o = o (o == "" ? "" : ", ") r }
+      return o
+    }
+    $0 == "\034" || $0 == "\035" { part++; next }
+    !part { split($0, w, "\t"); if (w[2] == "kind") { ord[++n] = w[1]; knd[w[1]] = w[3] } else if (w[2] == "wait") waits[w[1], w[3]] = 1; next }
+    part == 1 { landed[line_kv("row")] = 1; next }
+    line_kv("holds") != "" { print; next }
+    { k = line_kv("key"); h = (k ~ /^approve:step[0-9]+$/) ? "step " (substr(k, 13) + 1) : rows(k) }
+    h != "" {
+      h = "holds=" h; m = split($0, p, "|"); o = p[1]; put = 0
+      for (i = 2; i <= m; i++) { f = substr(p[i], 1, index(p[i], "=") - 1)
         if (!put && (f == "at" || f > "holds")) { o = o "|" h; put = 1 }
         o = o "|" p[i] }
-      print o; next
-    }
-    h != ""'
+      print o
+    }'
 }
 
 reader_question reviews list reader_q_reviews
@@ -252,11 +260,13 @@ reader_q_debts() {  # <plan> -> each debt open: a debt not burned, an admitted r
 }
 
 reader_question stop value reader_q_stop
-reader_q_stop() {  # <plan> -> the last stop's fields, then order= and asks=, the open count
-  # The rows ready to fill are the plan's deps cells; the stop line's own `ready=` is what the log holds.
-  _reader_last "$1" stop
+reader_q_stop() {  # <plan> -> the last stop's fields, then order=, asks= (the open count) and ready=, the plan's ready rows
+  # The ready rows are ready's answer over every row of the plan, in table order; the `ready=` a stop line
+  # wrote is what was ready then, so it is not printed as what is ready now.
+  _reader_last "$1" stop | grep -v '^ready='
   reader_q_order "$1" | grep '^order='
   printf 'asks=%s\n' "$(reader_q_asks "$1" | grep -c .)"
+  printf 'ready=%s\n' "$(_reader_ready_rows "$1" | tr '\n' ' ' | sed 's/ $//')"
 }
 
 reader_question order value reader_q_order
@@ -277,8 +287,9 @@ reader_q_hands() {  # <plan> -> each act taken by hand: a hand event, or a landi
 reader_question status value reader_q_status
 reader_q_status() {  # <plan> <row> -> state= of the row, then its dispatch contract, its tree and its landing commit
   # state is the latest of dispatched, candidate, ready, returned, stalled and landed; pending when the
-  # log holds none. Whether the plan has the row at all is the plan's.
+  # log holds none. A row the plan's Tasks table lacks has no status, so a wrong id never reads as pending.
   _reader_needs status '<row>' "${2:-}" || return 2
+  plan_read_row "$1" Tasks id "$2" >/dev/null || return 1
   reader_facts "$1" | awk -F'|' -v r="$2" "$_READER_AWK"'
     line_kv("row") != r { next }
     { e = ev() }
@@ -295,15 +306,14 @@ reader_q_status() {  # <plan> <row> -> state= of the row, then its dispatch cont
 }
 
 reader_question ready yes reader_q_ready
-reader_q_ready() {  # <plan> <row> [dep…] -> 0 when the row has not landed, no dispatch of it stands, and each dep has landed
-  # A row's deps are its Tasks cell, read through the plan's one parser when the caller names none; a row
-  # the plan lacks is then never ready. Deps a caller names are used as given.
+reader_q_ready() {  # <plan> <row> [dep…] -> 0 when the row has not landed, no dispatch of it stands, and each wait is met
+  # With no deps named, a row's waits are the plan's (plan_read_waits), judged by _reader_ready_rows; a
+  # row the plan lacks is never ready. Deps a caller names are used as given, each a row that must land.
   _reader_needs ready '<row> [dep…]' "${2:-}" || return 2
-  local plan="$1" row="$2" deps cells; shift 2
+  local plan="$1" row="$2" deps; shift 2
   deps="$*"
   if [ -z "$deps" ]; then
-    cells="$(plan_read_row "$plan" Tasks id "$row")" || return 1
-    deps="$(printf '%s\n' "$cells" | awk '/^deps=/ { n = split(substr($0, 6), d, /[, ]+/); for (i = 1; i <= n; i++) if (d[i] ~ /^[A-Za-z0-9]/) printf "%s ", d[i] }')"
+    [ "$(_reader_ready_rows "$plan" "$row")" = "$row" ]; return
   fi
   reader_facts "$plan" | awk -F'|' -v r="$row" -v deps="$deps" "$_READER_AWK"'
     ev() == "published" { landed[line_kv("row")] = 1 }
@@ -363,4 +373,37 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
     ev() == "waiver" && line_kv("ac") == c { by = "waiver" }
     ev() == "proof" && line_kv("ac") == c && line_kv("rc") ~ /^0?$/ && line_kv("result") != "fail" { by = "proof" }
     END { print "state=" (by == "" ? "pending" : "discharged"); if (by != "") print "by=" by }'
+}
+
+_reader_ready_rows() {  # <plan> [row] -> the rows ready now, in table order, or <row> alone when it is; 1 the plan lacks it
+  # A row is ready when it has not landed, no dispatch of it stands, and every wait plan_read_waits names
+  # is met by the standing facts: a row by its landing; approval:<key> by an approval of <key>, and
+  # approval:plan by Step 3's approval once the run is at Step 4; a proof by one of its kind that did not
+  # fail; step:<n> by the run reaching Step <n>. Any other wait (an external token, an id the table
+  # lacks) is never met here.
+  local waits
+  waits="$(plan_read_waits "$1" "${2:-}")" || return 1
+  { printf '%s\n\034\n' "$waits"; reader_facts "$1"; } | awk -F'|' "$_READER_AWK"'
+    function met(t, v) {
+      if (t == "row") return (v in landed)
+      if (v == "approval:plan") return (("step3" in appr) && cur ~ /^[0-9]+$/ && cur + 0 >= 4)
+      if (v ~ /^approval:/) return (substr(v, 10) in appr)
+      if (v ~ /^proof:/) return (substr(v, 7) in proved)
+      if (v ~ /^step:/) return (cur ~ /^[0-9]+$/ && cur + 0 >= substr(v, 6) + 0)
+      return 0
+    }
+    $0 == "\034" { facts = 1; next }
+    !facts { split($0, w, "\t"); if (w[2] == "kind") ord[++n] = w[1]; else { nw[w[1]]++; wt[w[1], nw[w[1]]] = w[2]; wv[w[1], nw[w[1]]] = w[3] }; next }
+    ev() == "published" { landed[line_kv("row")] = 1 }
+    ev() == "dispatch" { held[line_kv("row")] = 1 }
+    ev() == "approval" { appr[line_kv("key")] = 1 }
+    ev() == "step" { cur = line_kv("n") }
+    ev() == "proof" && line_kv("rc") ~ /^0?$/ && line_kv("result") != "fail" { proved[line_kv("kind")] = 1 }
+    END {
+      for (i = 1; i <= n; i++) {
+        r = ord[i]; if ((r in landed) || (r in held)) continue
+        for (k = 1; k <= nw[r]; k++) if (!met(wt[r, k], wv[r, k])) break
+        if (k > nw[r]) print r
+      }
+    }'
 }
