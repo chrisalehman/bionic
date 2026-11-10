@@ -1088,6 +1088,8 @@ proof-at-head.test.sh | §ONE | keep | payload/scripts/lib/proof.sh proof_whole_
 
 proof-at-head.test.sh | §LOG | keep | payload/scripts/lib/proof.sh facts_state: the review chains read off the plan's SDLC State text instead of the reader's reviews answer, so a reading the run's log alone holds reads absent (LOG-3); _proof_last_read or proof_approved_head reading the plan text, so a regression proof or an approval only the log holds reads nothing (LOG-4); _proof_facts serving a kept fold after a file it read changed, so a proof written between two reads in one process is not seen (LOG-5) | none (searched 'run.log' and 'ev=proof' in tests/; reader.test.sh §REST reads the reader's reviews question alone, not the judge over it)
 
+proof-at-head.test.sh | §KEEP | keep | payload/scripts/lib/proof.sh _proof_facts: the kept fold read from a cache directory group or other can write, so an approval planted under the right key stands, or through a link to another directory (KEEP-2); the fold not kept in the user's own mode-700 directory, or not served from it to a second process (KEEP-1); no bound on the kept files, so a file per plan stays for ever (KEEP-3) | none (searched 'bionic-facts' and '_proof_facts' in tests/: §LOG reads the fold within one process, never its directory)
+
 ## protect-database.test.sh
 
 protect-database.test.sh | §Section 1 | keep | payload/scripts/lib/walls.sh protect-database: the DROP pattern made case-sensitive, so the lowercase form of the table statement is allowed ("lowercase drop table") | none (searched 'DROP' rows in tests/; bash-walls.test.sh §2 drives the uppercase form only)
@@ -1434,6 +1436,7 @@ session-poker-3.test.sh | §Section 56 §FACT | keep | payload/hooks/session-pok
 session-poker-3.test.sh | §Section 57 §JUDGE §WHOLE §WAIVE | keep | payload/scripts/lib/proof.sh facts_state: a waiver read by presence instead of by its head, so a failing fact newer than the waiver stays covered (57e2, 57v7) | none (searched 'waived: question=' and 'facts_state' in tests/; close-out and sitrep read facts_state with no waiver)
 session-poker-3.test.sh | §Section 58 §READING | keep | payload/hooks/session-poker.sh proof-add review: a record holding two passes registered instead of refused, so one record carries two readings (58a2) | none (searched 'holds 2 passes' in tests/)
 session-poker-3.test.sh | §Section 59 §RANGE-Q | keep | payload/hooks/session-poker.sh proof-add review: the returned row taken as the first read row instead of the one carrying the reading's question, so the evidence row T3 is returned for an adversarial reading (59c4) | none (searched 'RANGE-Q' and 'back to pending' in tests/)
+session-poker-3.test.sh | §LOG-REVIEW | keep | hooks/poker/proof.sh review_readings, waive_owed_findings, disposition and finding-move: a review reading taken from the plan's proved: lines instead of the reader's reviews answer, so a review proof the run's log alone holds is not read: disposition lists no finding (LR-1, LR-2), finding-move refuses it as unregistered (LR-3), waive leaves its finding's item open (LR-4b); red on the hook as it stood before the reader | none (searched 'run.log' and 'disposition' in tests/session-poker*.sh and tests/release-approval*.sh; release-approval.test.sh §CARRY drives disposition on a plan's own proved: line)
 
 ## session-poker-4.test.sh
 

@@ -953,4 +953,45 @@ poke_pressure "$R59W" 8192 1.0 tick
 POKE_BOUND="$S59_BOUND_WAS"
 
 # ============================================================
+section "§LOG-REVIEW: waive, disposition and finding-move read a run's review proofs through the reader, so one its log alone holds is read"
+# ============================================================
+# fails-when: a review reader under hooks/poker reads the plan's proved: lines itself; a run with a log holds its
+# review proofs there and the plan holds none. FIXTURE FIDELITY: the plan is s42_plan's, bound and committed, at
+# plans/<epic>/<wave>.plan.md, the place the reader joins to record/<wave>/run.log; the log's lines are in the
+# reader's own run/v1 shape, written by hand, as no writer appends a review proof to a log yet; the review record
+# is a reader's record with one S2 finding, the shape proof-add admits.
+LR_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RLR="$(make_repo s-log-review)"; ( cd "$RLR" && git commit -q --allow-empty -m init )
+git -C "$RLR" config user.name "Dana Fixture"
+PLR="$(s42_plan "$RLR" 6)"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PLR" > "$PLR.tmp" && mv "$PLR.tmp" "$PLR"
+( cd "$RLR" && git add -f "$PLR" && git commit -qm wb && git branch -q wave/01-fixture ) >/dev/null 2>&1
+LR_H="$(git -C "$RLR" rev-parse wave/01-fixture)"; LR_REC="record/wave-01-fixture/adv-log.md"
+LR_DIR="$RLR/.bionic/docs/record/wave-01-fixture"; mkdir -p "$LR_DIR"
+printf 'question: adversarial\nresult: fail\nscope: piece\nreviewed: %s..%s\nfindings: 1\nfinding: 1 S2 on lib/a.sh:1 data lost\nshown: 1 bash lib/a.sh\n' "$LR_H" "$LR_H" > "$LR_DIR/adv-log.md"
+printf 'run/v1|ev=step|n=6|at=2026-10-04T11:00:00Z\nrun/v1|ev=proof|evidence=%s|head=%s|kind=review|question=adversarial|reader=w-crit|result=fail|scope=piece|at=2026-10-04T12:00:00Z\n' \
+  "$LR_REC" "$LR_H" > "$LR_DIR/run.log"
+lr_reg() {  # <owed.sh verb> [args] -> run on the run's register, the one the verbs write: record/<wave>/asks.state
+  bash -c '. "$1/roots.sh"; . "$1/owed.sh"; OWED_ROOT="$2" OWED_PLAN="$3" OWED_SID="$4"; export OWED_ROOT OWED_PLAN OWED_SID
+    shift 4; "$@"' _ "${S46_LIB%/*}" "$RLR" "$PLR" "$SID" "$@"
+}
+lr_owed() { lr_reg owed_list 2>/dev/null | cut -f1; }
+expect_eq "LR-0 precondition: the plan holds no proved: line, and the reader holds the log's review proof" "0|1" \
+  "$(/usr/bin/grep -c '^proved:' "$PLR")|$(bash "${S46_LIB%/lib/*}/reader.sh" "$PLR" reviews | /usr/bin/grep -c "|evidence=$LR_REC|")"
+poke "$RLR" disposition
+expect_contains "LR-1 disposition lists the finding of the review the log alone holds" \
+  "finding $LR_REC#1 S2 user-facing=on record=$LR_REC" "$OUT"
+expect_contains "LR-2 …and owes the person a ruling on it" "finding:record:wave-01-fixture:adv-log.md:1" "$(lr_owed)"
+poke "$RLR" finding-move "$LR_REC#9" fixed T1
+expect_contains "LR-3 finding-move takes the record as registered, and refuses only the finding it lacks" "holds no finding 9" "$OUT"
+lr_reg owed_open finding:record:wave-01-fixture:adv-log.md:1 'fixture: the finding' 'poker: fixture item' >/dev/null 2>&1
+expect_contains "LR-4a precondition: the finding's item is open before the waiver, whatever disposition did" \
+  "finding:record:wave-01-fixture:adv-log.md:1" "$(lr_owed)"
+poke "$RLR" waive adversarial 'Ship it, the fix waits on the next release.'
+expect_eq "LR-4 waive writes the waiver (exit 0)" "0" "$RC"
+expect_absent "LR-4b …and closes the finding's item of the review the log alone holds (LR-2 read the same register)" \
+  "finding:record:wave-01-fixture:adv-log.md:1" "$(lr_owed)"
+POKE_BOUND="$LR_BOUND_WAS"
+
+# ============================================================
 finish
