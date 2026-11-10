@@ -148,8 +148,8 @@ plan_frontmatter_get() {
 }
 
 # frontmatter_value_v <var> <frontmatter text> <key> -> rc 0 and the value in <var> when a line
-# carries the key, rc 1 and an empty <var> when none does. THE HEADER PARSER'S GRAMMAR, IN BUILTINS (wave-34
-# T11, D19): the first line that is `<key>` between optional whitespace and a `:`, the text after the
+# carries the key, rc 1 and an empty <var> when none does. THE HEADER PARSER'S GRAMMAR, IN BUILTINS:
+# the first line that is `<key>` between optional whitespace and a `:`, the text after the
 # colon with its surrounding whitespace trimmed, then one leading and one trailing quote of either
 # kind dropped — what `grep | head -1 | sed | sed | sed` used to say with five processes. The key is
 # matched as text, which is what every key a caller names (`rigor`, `working-branch`) already was
