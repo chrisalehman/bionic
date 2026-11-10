@@ -240,6 +240,10 @@ OUT4="$(run_doctor)"
 
 expect_match "9: the row names the plan the predicate resolved" "*active run*wave.plan.md*" "$OUT4"
 expect_match "10: and the step it is on" "*active run*current: 4*" "$OUT4"
+mkdir -p "${PROJ}/.bionic/docs/record/wave"
+printf 'run/v1|ev=step|n=5|at=2026-11-02T00:00:00Z\n' > "${PROJ}/.bionic/docs/record/wave/run.log"
+expect_match "10b: a later step only the run's log holds is the step it is on" "*active run*current: 5*" "$(run_doctor)"
+rm -rf "${PROJ}/.bionic/docs/record/wave"
 
 # Closed: step 9 with a delivered line. `active_run` refuses, and the row has to
 # follow it rather than keep reporting a run nobody is in.
