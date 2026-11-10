@@ -232,6 +232,10 @@ ask header sdlc-step; expect_status "a key the header lacks answers no" 1 "$?"
 W=cr; plan cr < /dev/null; printf -- '---\rrigor: double\rabandoned: 2026-11-01\r---\rbody: no\r' > "$D/plans/epic-x/cr.plan.md"
 expect_eq "a CR-only header reads key by key, as a CRLF one does" "rigor=double abandoned=2026-11-01|rigor=double" \
   "$(flat header)|$(printf -- '---\r\nrigor: double\r\n---\r\n' > "$D/plans/epic-x/cr.plan.md"; ask header)"
+printf -- '---\ngoals: a · one (x)\nrigor: double\ngoals: b · two (y)\n---\ngoals: body\n' > "$D/plans/epic-x/cr.plan.md"
+every() { ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/plan-read.sh" && plan_read_header "$D/plans/epic-x/cr.plan.md" "$@" ) | tr '\n' '|'; }
+expect_eq "a repeated key answers its first line, and with all every line of it in the header, the body not read" \
+  "goals=a · one (x)||goals=a · one (x)|goals=b · two (y)|" "$(every goals)|$(every goals all)"
 
 section "ROW"
 W=new; expect_eq "a row is its nine authored cells" \
