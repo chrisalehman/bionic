@@ -170,6 +170,18 @@ if ! declare -F fill_ready_set >/dev/null 2>&1; then
   . "$_STOP_LIB_DIR/fill.sh"
 fi
 
+# THE RUN'S FACTS, LOADED AS THE TICK LOADS THEM. The step, the Step-3 approval, the standing order and the newest
+# review proof are the reader's answers (`fill_facts_load`), so a fact the run's log alone holds is this wall's fact
+# as it is the tick's, and the two never judge one turn on two readings. Once per process, and only for a bound open
+# run: every verdict below that reads them reads that plan, and a SubagentStop that reaches none pays nothing. A
+# reader that cannot load leaves the fill to read the plan as it does for every other caller.
+stop_facts_load() {  # -> always 0
+  [ -z "${_STOP_FACTS_DONE:-}" ] || return 0
+  _STOP_FACTS_DONE=1
+  [ "${BIONIC_RUN_WORD:-}" = bound-open ] && [ -n "${BIONIC_RUN_PLAN:-}" ] || return 0
+  fill_facts_load "$BIONIC_RUN_PLAN" >/dev/null 2>&1 || :
+}
+
 # THE FILL LEDGER'S PATH (wave-20 REQ-5, D5) and the Patrol verdict: patrol.sh owns both, and
 # the recorder below writes to the path `session-poker.sh fill-report` reads from.
 if ! declare -F fill_ledger_path >/dev/null 2>&1; then
@@ -416,7 +428,7 @@ _lg_path_declared() {  # <diff path> <comma-joined declared files>
 
 stop_context_spend() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _ev="${1:-}" _adv=0
-  local TRANSCRIPT PLAN STEP _row MODEL OCCUPIED STATE_DIR STATE _plan_txt
+  local TRANSCRIPT PLAN STEP _row MODEL OCCUPIED STATE_DIR STATE
   local s_plan s_sess s_step s_occ DELTA LINE AUDIT_FILE
 
   # THE EVENT GUARD THE HOOK NEVER HAD — see this file's header. Stop only, and an
@@ -483,25 +495,11 @@ case "$BIONIC_RUN_WORD" in
 esac
 [ -n "$PLAN" ] && [ -f "$PLAN" ] || return "$_adv"
 
-# current: from ## SDLC State — CR-normalized, fence-aware (the evidence-gate
-# defect class: fenced skeletons quoting `current:` must stay invisible).
+# The step boundary is the run's step, the reader's answer the fill duty reads too (`stop_facts_load`),
+# so a step the run's log alone holds is the step this instrument attributes spend to.
 # [INSTRUMENT]
-#
-# THE CR PASS IS THE SHELL'S NOW (REQ-10, T11). It was a whole `awk` process whose only
-# job was to turn CRLF into LF and a lone CR into LF before the parse below could see
-# lines at all; two parameter expansions over the file text do exactly that, in the same
-# order, and the parsing `awk` is unchanged. `$(< … )` reads the file without forking
-# `cat`, and the here-string hands the normalised text to the one remaining process.
-_plan_txt=$(< "$PLAN")
-_plan_txt="${_plan_txt//$'\r\n'/$'\n'}"
-_plan_txt="${_plan_txt//$'\r'/$'\n'}"
-STEP=$(awk '
-  /^```/ { fence = !fence; next }
-  fence { next }
-  /^## SDLC State/ { insec = 1; next }
-  insec && /^## / { insec = 0 }
-  insec && /^current:[[:space:]]*/ { sub(/^current:[[:space:]]*/, ""); sub(/[[:space:]]*$/, ""); print; exit }
-' <<< "$_plan_txt")
+stop_facts_load
+STEP="$(_fill_current_field "$PLAN")"
 [ -n "$STEP" ] || return "$_adv"
 
 # Last assistant entry with usage, from a bounded tail. fromjson? swallows
@@ -2052,6 +2050,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
     bound-open) _ST_PLAN="$BIONIC_RUN_PLAN" ;;
   esac
   [ -n "$_ST_PLAN" ] && [ -f "$_ST_PLAN" ] || _ST_PLAN=""
+  stop_facts_load
 
   _ST_STREAM=$(tail -n "$SCAN_WINDOW_LINES" "$tr" 2>/dev/null | jq -Rr '
     . as $line
@@ -2164,7 +2163,8 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
     # as a landing past that proof and the wall would owe a review of nothing. So the head goes in
     # only when the digest's `at=` is newer than the newest review proof's `at=`; otherwise
     # there is none, as off a tick's turn, and the review waits for the next tick. Both stamps are
-    # the wall's already: the digest it reads above and the plan it was handed. No git is read.
+    # the wall's already: the digest it reads above and the run's facts. No git is read. A run whose facts
+    # this shell could not load gives no instant, so no head is handed in and the review waits, as off a tick.
     # A TIE HANDS IN NO HEAD (wave-26 T54; review 17 N4): a proof in the tick's own second cannot
     # be ordered against it, and the soft side is a review that waits one tick, not one owed for
     # nothing.
@@ -2181,14 +2181,8 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
       _ST_LIVE_HEAD="$(tick_digest_field "$digest" head)"
       _ST_FACTS="$(tick_digest_field "$digest" facts_state)"
       if { [ -n "$_ST_LIVE_HEAD" ] || [ -n "$_ST_FACTS" ]; } && [ -n "$_ST_PLAN" ]; then
-        rvat="$(awk '
-          /^[ \t]*```/ { f = !f; next }
-          f { next }
-          /^##[ \t]/ { insdlc = ($0 ~ /^##[ \t]+SDLC State/); next }
-          insdlc && /^proved:[ \t]/ && / kind=review( |$)/ && match($0, / at=[^ ]+/) {
-            a = substr($0, RSTART + 4, RLENGTH - 4); if (a > m) m = a }
-          END { print m }' "$_ST_PLAN" 2>/dev/null)"
-        [ -n "$rvat" ] && ! [ "${rvat:0:19}" \< "${at:0:19}" ] && { _ST_LIVE_HEAD=""; _ST_FACTS=""; }
+        if ! rvat="$(fill_review_at "$_ST_PLAN")"; then _ST_LIVE_HEAD=""; _ST_FACTS=""
+        elif [ -n "$rvat" ] && ! [ "${rvat:0:19}" \< "${at:0:19}" ]; then _ST_LIVE_HEAD=""; _ST_FACTS=""; fi
       fi
     fi
   fi
@@ -2326,6 +2320,7 @@ stop_owed_send() {  # <event> -> always 0
   [ "${1:-}" = Stop ] || return 0
   declare -F owed_send >/dev/null 2>&1 || return 0
   local k
+  stop_facts_load
   if [ "${BIONIC_RUN_WORD:-}" = bound-open ] && [ -n "${BIONIC_RUN_PLAN:-}" ] \
      && fill_plan_approved "$BIONIC_RUN_PLAN" >/dev/null 2>&1; then
     for k in approve:step0 approve:step1 approve:step2 approve:step3; do

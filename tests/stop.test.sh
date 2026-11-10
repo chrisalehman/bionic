@@ -32,6 +32,7 @@
 #            or a lapse, and the Patrol prompt names none
 #   §PATROL  a dead Patrol clock is one line of at most 80 characters, the same line on a repeat;
 #            the explanation is asked for, and the one report sentence is in the rules and the prompt
+#   §LOG     a step, an approval or an order the run's log alone holds moves the ready-with-room verdict
 #
 # §1 IS THE ONE THAT GOES RED AGAINST FIRST-BLOCK-WINS, which is the alternative
 # ADR-004 rejects by name, and against the pre-merge arrangement too: before the
@@ -1084,6 +1085,30 @@ expect_eq "PATROL6f the arming paragraphs hold one instruction about what to say
   "$(printf '%s\n' "$PT_ARMING" | /usr/bin/grep -oiE "$PT_SAYRE" | wc -l | tr -d ' ')"
 expect_eq "PATROL6g the prompt holds one as well" "1" \
   "$(printf '%s\n' "$PT_PROMPT" | /usr/bin/grep -oiE "$PT_SAYRE" | wc -l | tr -d ' ')"
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "LOG: the wall reads the run's step, approval and order from its facts, as the tick does, so a fact the log alone holds moves the ready-with-room verdict"
+
+# A run with a log is read from the log alone (lib/reader.sh). LOG1: the plan has no approved-by:, the log
+# holds the step and the Step-3 approval, and the two rows are owed. LOG3: the plan is approved and the log
+# holds the same two facts and an order, so nothing is owed. Under a plan parse the two answers swap.
+log_fixture() {  # <approved: yes|no> <log line>... -> the project
+  local d a="$1"; shift; d="$(s9_fixture)"
+  [ "$a" = yes ] || sed -i.bak '/^approved-by:/d' "$d/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
+  mkdir -p "$d/.bionic/docs/record/wave-09-fixture"; printf '%s\n' "$@" > "$d/.bionic/docs/record/wave-09-fixture/run.log"
+  printf '%s' "$d"
+}
+LOG_FACTS=('run/v1|ev=step|n=4|at=2026-11-01T00:00:01Z' 'run/v1|ev=approval|key=step3|by=me|at=2026-11-01T00:00:02Z')
+LOG_TX="$(mktemp)"; s9_transcript "$LOG_TX"
+LOG_D1="$(log_fixture no "${LOG_FACTS[@]}")"
+s7_fire "$LOG_D1" "$LOG_TX"
+expect_eq "LOG0 meta: that plan carries no approved-by: line" "0" "$(grep -c '^approved-by:' "$LOG_D1/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md")"
+expect_contains "LOG1 the approval the log alone holds readies both rows: the turn is refused" "ready with room: T13 T14 (" "$(s9_headline)"
+LOG_D2="$(log_fixture yes "${LOG_FACTS[@]}" 'run/v1|ev=order|act=given|said=hold the run|at=2026-11-01T00:00:03Z')"
+s7_fire "$LOG_D2" "$LOG_TX"
+expect_contains "LOG2 meta: under the order the wall read a live ledger and found no row ready" "|ready=|" \
+  "$(tail -1 "$LOG_D2/.bionic/docs/record/wave-09-fixture/fill-ledger.log" 2>/dev/null)"
+expect_eq "LOG3 …so the turn ends: the order the log alone holds stands" "" "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 finish
