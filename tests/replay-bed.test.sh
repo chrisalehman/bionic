@@ -179,6 +179,22 @@ for r in T23:evidence T24:adversarial,structure; do id=${r%%:*}; q=${r#*:}
   expect_regex "$id: its range starts at that proof's head" "^Reviewed range: $h\\.\\." "$(grep '^Reviewed range' "$f")"
   expect_eq "$id: its Questions are the row's" "Questions: ${q//,/, }" "$(grep '^Questions:' "$f")"
 done
+# The step card follows the reader: a render opens the step's approval on the run's register only while the log holds
+# no approval of it, so a cancel appended to the log reopens it though the plan's own approved-by: line still stands.
+CW="$WORLD_ROOT/card"; CS=fe11a5e0-0000-4000-8000-000000000002; CP="$CW/.bio""nic/docs/plans/e/wave-98-cancel.plan.md"
+mkdir -p "${CP%/*}" "$CW/.bio""nic/tmp"; git -C "$CW" init -q
+printf -- '---\ncanonical_sdlc_version: 15\nscale: wave\n---\n\n## Goal\n\nThe card follows the log.\n\n## SDLC State\n\ncurrent: 0\napproved-by: Dana Fixture 2026-11-01T00:00Z "approved"\n' > "$CP"
+bound_marker "$CW" "$CS" "$CP"
+CL="$CW/.bio""nic/docs/record/wave-98-cancel"
+logged() { ( . "$RD/lib/log.sh" && RUN_LOG="$CL/run.log" log_append "$@" ); }
+logged step n=0 && logged approval key=step0 by=Dana
+carded() { ( cd "$CW" && CLAUDE_CODE_SESSION_ID=$CS bash "$RD/card.sh" step0 "$CP" >/dev/null 2>&1 0<&- ) || echo "rc=$?"
+  awk -F'|' '{ k = ""; s = ""; for (i = 1; i <= NF; i++) { if ($i ~ /^key=/) k = substr($i, 5); if ($i ~ /^state=/) s = substr($i, 7) } if (s == "open") print k }' "$CL/asks.state" 2>/dev/null; }
+expect_true "card: the reader holds the logged approval of step0" ask "$CP" approved step0
+expect_empty "card: while the log holds the approval, the render opens nothing" "$(carded)"
+logged cancel of=approval key=step0
+expect_false "card: the cancel retracts the approval in the reader" ask "$CP" approved step0
+expect_eq "card: after the cancel the render opens the approval again, though the plan's approved-by: stands" "approve:step0" "$(carded)"
 section "OPEN"
 opened() { ( . "$RD/lib/run.sh" && run_open "$1" ); echo $?; }
 plant() {  # <wave> <current:> <Step 9 line> [log line…] -> the plan's path; its run log holds the lines given

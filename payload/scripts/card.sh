@@ -2387,9 +2387,11 @@ _card_stem() {  # <path> -> the name without `.<kind>.md`: wave-01-x.plan.md -> 
   printf '%s' "${b%.*}"
 }
 
-# WHETHER THE APPROVAL IS ALREADY RECORDED. A card is a question only while its answer is owed: a step
-# below the plan's `current:` was answered to get past it, and `approved-by:` is the person's answer to the
-# plan, which the Stop's sweep takes for every step. A dispatched writer checking its exit asks nobody
+# WHETHER THE APPROVAL IS ALREADY RECORDED. A card is a question only while its answer is owed, and the run's log
+# says whether it is, as the reader answers it over the proof library's kept fold: a step below the reader's step
+# was answered to get past it, and an approval of this step or a later one standing answers this one (the plan's
+# approval is Step 3's, which the Stop's sweep takes for every step). A cancelled approval stands no more, so the
+# card asks again whatever the plan's own text still says. A dispatched writer checking its exit asks nobody
 # anything, so a render under a writer's name owes nothing either. The writer is told where the renderer
 # stands, as the gate tells it: the `bionic-agent` marker in the git directory of the linked tree it runs
 # in. The artifact's directory is not asked, because a bound plan resolves under the project's root and a
@@ -2403,12 +2405,16 @@ _card_writer() {  # -> 0 when the working tree is a linked tree marked with a di
   [ -n "$gitdir" ] && [ "$gitdir" != "$common" ] && [ -s "$gitdir/bionic-agent" ]
 }
 _card_settled() {  # <step> <plan> -> 0 when the step's approval is recorded or the renderer is a writer
-  local step
+  local facts
   _card_writer && return 0
-  fill_current_forget
-  fill_plan_approved "$2" && return 0
-  step="$(fill_step_token "$2")"
-  [ -n "$step" ] && [ "$1" -lt "$step" ] 2>/dev/null
+  _proof_reader_load || return 1
+  facts="$(_proof_facts "$2")"
+  ( reader_facts() { printf '%s' "$facts"; }
+    m="$1"
+    while [ "$m" -le 3 ] 2>/dev/null; do reader_q_approved "$2" "step$m" && exit 0; m=$((m + 1)); done
+    s="$(reader_q_step "$2" | sed -n 's/^n=//p')"; s="${s%[ab]}"
+    case "$s" in ''|*[!0-9]*) exit 1 ;; esac
+    [ "$1" -lt "$s" ] )
 }
 
 _card_owe() {  # <step 0-3> <artifact path as given> -> always 0, prints nothing
