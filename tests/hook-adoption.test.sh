@@ -105,18 +105,18 @@ trap 'rm -rf "$SANDBOX"' EXIT
 # is false. Each wall's own scoping is driven in its own suite, through this process.
 ADOPTED='
 bash-walls|closed|no
-dispatch-preflight|open|yes
-canonical-sdlc-governing-skill|open|yes
-stop|open|no
+dispatch-preflight|closed|yes
+canonical-sdlc-governing-skill|closed|yes
+stop|closed|no
 execution-recorder|open|no
-stop-guard|open|no
-agent-context-guard|open|no
+stop-guard|closed|no
+agent-context-guard|closed|no
 preflight-probe|open|no
 stop-orders|open|no
 session-sweeper|open|no
 stop-check|open|no
 engage|open|no
-permission-answer|open|yes
+permission-answer|closed|yes
 '
 
 BLOCK="$SANDBOX/canonical-block.txt"

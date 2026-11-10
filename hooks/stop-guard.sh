@@ -162,9 +162,9 @@ state_dir() {  # <repo> -> echoes the state directory; nonzero if unsafe
 # ---------- the library ----------
 #
 # One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
-# payload/scripts/lib/loader.sh. FAIL OPEN: the stop verdict is advisory or repeatable, and a
-# hook that refused because a file was missing would hold every turn in every session
-# on the machine hostage to it.
+# payload/scripts/lib/loader.sh. FAIL CLOSED: a TaskStop this hook cannot check against the
+# roster is refused, which blocks only that tool call (never a turn's end); the person can
+# still stop a task from the terminal, and the Bash wall admits the four repair commands.
 BIONIC_LIB_WANT="context.sh observe.sh refuse.sh root.sh roots.sh roster.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
@@ -260,7 +260,7 @@ BIONIC_LOADER_REFUSE
   exit 2
 }
 # --- bionic-loader/v2 END
-if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop-guard"; fi
+if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "stop-guard"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/context.sh"
 # shellcheck source=/dev/null
