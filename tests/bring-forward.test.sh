@@ -17,6 +17,8 @@
 #   §ASKS    the asks register is ask events: a closed round its opening and its reply, an open one open.
 #   §ONE     a landing read from the plan and from the record is one fact, and so is a tree; a row the
 #            plan holds as landed and the record lacks is still landed.
+#   §DECISIONS  a design ledger's put and ruled headings are decision rounds; any other heading is a gap.
+#   §DEBTS      a debt ledger's lines are debts, burned= its row when burned; a line of another form is a gap.
 #
 # FIXTURE FIDELITY. The plan is a real file in a scratch docs tree, in the shape version-14 plans hold.
 
@@ -235,4 +237,43 @@ for w in $W9 $W6; do
 done
 expect_contains "a row the plan holds as landed and the log lacks is still landed" "commit=837ddc39161b522a7071b996cf9d0d9121f1c61b" "$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$BED/$W6/plans/epic-23-bionic-tech-debt/$W6.plan.md" landed T17)"
 
+# SYNTHESIZED: a run whose record holds a design ledger and a debt ledger, each form the closed runs' files hold.
+P7="$D/plans/epic-x/wave-7-led.plan.md"; R7="$D/record/wave-7-led"; mkdir -p "$R7"; printf '# wave-7-led\n' > "$P7"
+cat > "$R7/design-ledger.md" <<'EOF'
+## Δ0 — D1 put (orchestrator 2026-11-01 5:47 PM PST): How the log fills (first)
+Body prose is no heading.
+## Δ1 — D1 ruled "2 <- and 'why' (a note)" (Ann Person 2026-11-01 5:49 PM PST): How the log fills (first)
+## Δ2 — D2 put (Ann Person 2026-10-03): A day only
+## Δ3 — D2 amended "x" (Ann Person 2026-10-04): Another verb
+## Δ4 — D3 put (orchestrator 2026-11-01 6:00 PM | PST): A bar in the instant
+## Deltas
+EOF
+cat > "$R7/debt.md" <<'EOF'
+# debt ledger: concept | kind | sites | raised-by <record> | touches N | burned <row> | —
+c-open | duplicate | a.sh:1, b.sh:2 | raised-by record/w/critic.md | touches 3 | —
+c-burned | unpinned-pair | a.sh:4 | raised-by record/w/critic-2.md | touches 1 | burned T5
+c-note | duplicate | a.sh:9 | raised-by record/w/critic.md | touches 2 | next wave: a note
+- A-orch-1 (2026-10-17 4:22 PM): prose about a debt.
+EOF
+EV7="$(translate "$P7" events)"; GP7="$(translate "$P7" gaps)"; in7() { printf '%s\n' "$EV7" | grep -cxF -- "$1"; }; ask7() { bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$P7" "$@"; }
+
+section "DECISIONS"
+expect_eq "the ledger lists D1 put, then ruled with its reply and who ruled, each instant as the heading writes it" \
+  "run/v1|ev=decision|by=orchestrator|d=D1|title=How the log fills (first)|verb=put|at=2026-11-01 5:47 PM PST run/v1|ev=decision|by=Ann Person|d=D1|said=2 <- and 'why' (a note)|title=How the log fills (first)|verb=ruled|at=2026-11-01 5:49 PM PST" "$(ask7 ledger D1 | paste -sd' ' -)"
+expect_eq "a day-only instant is kept as written; one the appender refuses is not written" "1 1" "$(in7 'run/v1|ev=decision|d=D2|verb=put|by=Ann Person|title=A day only|at=2026-10-03') $(in7 'run/v1|ev=decision|d=D3|verb=put|by=orchestrator|title=A bar in the instant|at=')"
+expect_contains "and is named" "gap/v1|ev=decision|d=D3|field=at|why=bar" "$GP7"
+expect_eq "four rounds, from the four headings of the two forms" 4 "$(printf '%s\n' "$EV7" | grep -c '^run/v1|ev=decision|')"
+expect_absent "body prose is no heading: no line and no gap" "Body prose" "$EV7$GP7"
+
+section "DEBTS"
+expect_eq "the debts question lists the open debt and not the burned one" "run/v1|ev=debt|concept=c-open|kind=duplicate|raised-by=record/w/critic.md|sites=a.sh:1, b.sh:2|touches=3|at=" "$(ask7 debts)"
+expect_eq "a burned line is a debt with burned= its row" 1 "$(in7 'run/v1|ev=debt|concept=c-burned|kind=unpinned-pair|sites=a.sh:4|raised-by=record/w/critic-2.md|touches=1|burned=T5|at=')"
+expect_contains "the ledger holds no instant: a gap" "gap/v1|ev=debt|concept=c-open|field=at|why=absent" "$GP7"
+for g in decision\|heading=Δ3 decision\|heading=Deltas debt\|concept=c-note debt\|line=5; do expect_contains "another form is named whole: $g" "gap/v1|ev=$g|field=ev|why=shape" "$GP7"; done
+expect_no_regex "and writes nothing" "Another verb|c-note|A-orch" "$EV7"
+vals="$(printf '%s\n' "$EV7" | awk -F'|' '{ for (i = 3; i <= NF; i++) { v = substr($i, index($i, "=") + 1); if (v != "") print v } }')"; bad="$(refused "$EV7" "$D/shape7.log")"
+expect_contains "the value scan reads the ledgers' values" "2026-11-01 5:49 PM PST" "$vals"
+expect_empty "every value written is found in a ledger" "$(printf '%s\n' "$vals" | while IFS= read -r v; do grep -qF -- "$v" "$R7"/* || printf '%s\n' "$v"; done)"
+expect_eq "the appender took every ledger line" "$(printf '%s\n' "$EV7" | wc -l)" "$(wc -l < "$D/shape7.log")"
+expect_empty "no line read from a ledger is refused by the appender" "$bad"
 finish
