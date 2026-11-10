@@ -74,6 +74,16 @@ run/v1|ev=proof|kind=review|head=$H|question=adversarial|result=fail|scope=piece
 EOF
 expect_eq "a whole and a piece reading at one head are two facts, the later piece replacing the earlier" "whole/pass piece/fail " \
   "$(ask reviews "$H" | awk -F'|' '{ for (i = 2; i <= NF; i++) { if ($i ~ /^scope=/) s = substr($i, 7); if ($i ~ /^result=/) r = substr($i, 8) } printf "%s/%s ", s, r }')"
+# fails-when: a review proof is identified without its record, so a second record of one question at one head and
+# scope replaces the first and a finding of the first reads unregistered; or a check is, so a rerun stands beside it.
+W=records; plan records <<EOF
+run/v1|ev=proof|kind=review|head=$H|question=structure|result=fail|scope=piece|evidence=r/b.md|at=2026-11-01T00:00:01Z
+run/v1|ev=proof|kind=review|head=$H|question=structure|result=fail|scope=piece|evidence=r/c.md|at=2026-11-01T00:00:02Z
+run/v1|ev=proof|kind=check|head=$H|rc=1|evidence=r/1.log|at=2026-11-01T00:00:03Z
+run/v1|ev=proof|kind=check|head=$H|rc=0|evidence=r/2.log|at=2026-11-01T00:00:04Z
+EOF
+expect_eq "two review records of one question at one head and scope both stand, and a check's rerun replaces it" "r/b.md r/c.md r/2.log " \
+  "$(ask proof "$H" | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^evidence=/) printf "%s ", substr($i, 10) }')"
 
 # fails-when: a debt is identified by its concept alone, so two debts of one concept and two kinds, both open in the
 # ledger, are one fact and the continuation carries one of them; a burned line closes the debt of its own kind.

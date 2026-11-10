@@ -114,3 +114,4 @@ verdicts.T7.green=2
 verdicts.T8.green=2
 verdicts.regression.green=382
 verdicts.regression.red=2
+hands.matrix-set=4

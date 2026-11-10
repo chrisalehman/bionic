@@ -2192,11 +2192,11 @@ sitrep_tick_line() {
       exit 0
     fi
     if [ "$LR_HH" = no ]; then
-      landing_report "$(_wt_proofs_path "$LR_ROOT" "$LR_PLAN")" "$LR_ROOT" "$LR_ROWS"
+      landing_report "$LR_PLAN" "$LR_ROOT" "$LR_ROWS"
       exit 0
     fi
     # THE HAND-HOLDS LINE sits under the landings line, above the rows (D17).
-    LR_TEXT="$(landing_report "$(_wt_proofs_path "$LR_ROOT" "$LR_PLAN")" "$LR_ROOT" "$LR_ROWS")"
+    LR_TEXT="$(landing_report "$LR_PLAN" "$LR_ROOT" "$LR_ROWS")"
     printf '%s\n' "${LR_TEXT%%$'\n'*}"
     # The counts over the window, then its two ends (line.sh `hand_holds_verb`): --since and --until when named, else
     # the last build landing and the release approval page.

@@ -162,8 +162,8 @@ expect_eq "the types no closed run holds a line of are the hand-written ones" " 
 expect_eq "every hand-written line is marked, and one is a dispatch" "$(grep -c . "$X/hand-written.log") 1" \
   "$(grep -c '[| ]fixture=hand-written[| ]' "$X/hand-written.log") $(grep -c '^line/v1|ev=dispatch|' "$X/hand-written.log")"
 MID="$(ls "$WORLD_ROOT"/wave-49-mid/plans/*/*.plan.md)"
-expect_contains "a hand-written refusal, which no type carries, is named on the gaps list" "gap/v1|ev=refusal|row=" \
-  "$( ( . "$RD/lib/reader.sh" && reader_events "$MID" >/dev/null && translate "$MID" gaps ) )"
+expect_contains "a hand-written refusal is an act taken by hand: a hand event that says it was a refusal" "|ev=hand|what=refusal|row=T14|" \
+  "$(events "$MID")"
 
 section "FOLLOWS"
 # The brief follows the reader: over the closed run, a review row's rendered range starts where the reader's last
@@ -220,6 +220,19 @@ expect_empty "card: while the log holds the approval, the render opens nothing" 
 logged cancel of=approval key=step0
 expect_false "card: the cancel retracts the approval in the reader" ask "$CP" approved step0
 expect_eq "card: after the cancel the render opens the approval again, though the plan's approved-by: stands" "approve:step0" "$(carded)"
+# The landing report and the release note follow the reader: a landing only a run's log holds, with no landing
+# record beside it, is counted by the report and rendered in the note, and the note's cut drops a later landing.
+NW="$WORLD_ROOT/note"; NP="$NW/.bio""nic/docs/plans/e/w9.plan.md"; NR="$NW/.bio""nic/docs/record/w9"; mkdir -p "${NP%/*}" "$NR"
+printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## SDLC State\n\ncurrent: 4\n' > "$NP"; git -C "$NW" init -q
+git -C "$NW" -c user.name=fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m w9; NC="$(git -C "$NW" rev-parse HEAD)"
+printf 'run/v1|ev=%s|row=T%s|commit=%s|%sat=2026-11-01T00:0%s:00Z\n' ready 1 "$NC" 'suite=a.test.sh|' 0 published 1 "$NC" 'kind=queue|' 3 \
+  ready 2 "$NC" 'suite=a.test.sh|' 4 published 2 "$NC" 'kind=hand|' 6 > "$NR/run.log"
+note() { ( cd "$NW" && BIONIC_GATE_DIR="$NW/gate" bash "$R/hooks/session-poker.sh" "$@" "$NP" 2>&1 ); }
+expect_contains "the report counts the log's landings" "landings: queue=1 hand=1 git=0 · ready-to-landed median=3.0m" "$(note landing-report --rows)"
+expect_contains "…and prints the queue landing's row" "T1 queue ready=2026-11-01T00:00:00Z landed=2026-11-01T00:03:00Z minutes=3.0" "$(note landing-report --rows)"
+NN="$(note release-note --at "$NC" --on 2026-11-01T00:05:00Z)"
+expect_contains "the note at an instant renders the landing the log holds before it" "landings: queue=1 hand=0 git=0" "$NN"
+expect_eq "…and not the one after it" "0" "$(printf '%s\n' "$NN" | grep -c '^T2 ')"
 section "OPEN"
 opened() { ( . "$RD/lib/run.sh" && run_open "$1" ); echo $?; }
 plant() {  # <wave> <current:> <Step 9 line> [log line…] -> the plan's path; its run log holds the lines given
