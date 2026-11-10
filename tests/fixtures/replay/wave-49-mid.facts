@@ -1,0 +1,16 @@
+approved.step0=yes
+approved.step1=yes
+approved.step2=yes
+approved.step3=yes
+asks.decide:D13=open
+cut.at=2026-11-07T03:30:00Z
+landed.T15=2059d7286bae121523e35d9cee33a954c269d706
+landed.T16=43c8a129bccb6547aa718f9f7e6fb0edf52c84a2
+landed.T1=11f6c32d55bee4421acecfce9c1abd7734c6afbf
+landed.T2=e22c6aee47d17249e5c791384475464d579f3775
+landed.T4=11d89fdd1b3f0937bab1beb5adc9241eeb62613d
+landed.T6=a4a4a4803b80288c115684d96e1cb5ba78f48d4b
+landed.T7=5d58e7676aadc3c110b158cd7534474959793105
+landed.T8=bfebd5fa69d550bcd767f3dfab22168211324a90
+step.n=4
+step.state=open
