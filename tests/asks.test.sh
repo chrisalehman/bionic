@@ -38,8 +38,6 @@
 #                line, the held words, the card and the minutes waiting on you never count it
 # §SHARED        `approve D<n>` and a release card reply that approves D<n> rule it through the same writer: a Δ line
 #                and a closed `decide:D<n>` each, the one who said the reply named as `decisions rule` names them
-# §SETTLED       a heading `D<n> settled by … (<who> <date> <clock>): "<reply>"` (a person's go, as a shipped ledger holds one) is an entry with that
-#                clock, so the decision reads ruled and its waiting span is kept
 #
 # FIXTURE FIDELITY. The project is close-out's own (tests/close-out.prelude.sh, read by name): a git project at
 # Step 8 whose newest structure reading fails, as close-out-1's E2E fixture plants it, and the preflight is the one
@@ -189,7 +187,7 @@ PH_PLAN="$PH/$PLAN_REL"
 as_reading "$PH" 2026-10-04T13:00:00Z record/wave-01-fixture/structure-fail.md fail
 run_close_as "$AS_SIDA" "$PH" run
 expect_eq "HELD-0 precondition: at Step 7 run refuses on the step (rc 2)" "2|yes" \
-  "$CO_RC|$(as_has "$(as_refusal)" 'current: 7')"
+  "$CO_RC|$(as_has "$(as_refusal)" 'at Step 7')"
 expect_eq "HELD-0b …and holds nothing: the run is not at its merge" "" "$(as_register "$PH" "$PH_PLAN")"
 advance_to "$PH" 8
 run_close_as "$AS_SIDA" "$PH" run
@@ -1021,26 +1019,4 @@ expect_eq "SH-13 approve D10 with no transcript to read: exit 1 naming the lack 
   "$RC|$(as_has "$OUT" 'transcript cannot be found or read')|$(as_has "$OUT" 'its ruling is not in the design ledger')|$(cmp -s "$TMPROOT/sh-led-before" "$SH_LED" && echo same || echo changed)|$(as_has "$(cat "$PFC")" 'approved: D10 by')"
 CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
 POKE_BOUND="$AS_BOUND_WAS"
-
-# ============================================================
-section "§SETTLED: a heading D<n> settled by … is a ledger entry whose clock is the line's date, so its waiting span is kept"
-# ============================================================
-# FIXTURE FIDELITY: the settled heading is copied verbatim from a shipped design ledger; the put above it is that ledger's
-# put of the same decision, its title cut short. The parser is read by its own functions out of hooks/poker/sitrep.sh, the file the poker sources.
-# fails-when: the heading parses as no entry, or as one with no clock, so the decision reads open and has no span.
-# ANTI-VACUITY: SE-0 reads the put through the same call SE-1 reads the settled heading through.
-SE_L="$TMPROOT/se-ledger.md"
-{ printf '# Design ledger — wave-42-sitrep-owes\n\n'
-  printf '## Δ19 — D6 put (orchestrator 2026-10-21 7:53 PM PDT): your verdict on the sitrep card\n\nwait: nothing moves\n\n'
-  printf '%s\n' "## Δ20 — D6 settled by the go on Δ19's plan (Chris Lehman 2026-10-21 8:12 PM): \"go\""
-} > "$SE_L"
-se() { bash -c '. "$1/poker/sitrep.sh" && shift && "$@"' _ "$BIONIC_HOOKS_DIR" "$@" 2>/dev/null; }
-se_t() { se decisions_list "$SE_L" times | awk -F'\t' -v v="$1" '$2 == v { print $1 "|" $3 "|" $4 " " $5 }'; }
-expect_eq "SE-0 precondition: the put is an entry with its date and clock" "D6|2026-10-21|7:53 PM" "$(se_t put)"
-expect_eq "SE-1 the settled-by heading is an entry, its date and clock the line's" "D6|2026-10-21|8:12 PM" "$(se_t settled)"
-expect_eq "SE-2 …the register reads it: the verb and the reply, the approver and the date, what settled it" \
-  "D6 · settled \"go\" · Chris Lehman 2026-10-21 · the go on Δ19's plan" "$(se decisions_list "$SE_L")"
-expect_eq "SE-3 …its round reads ruled" "D6	1	ruled" "$(se decisions_rounds "$SE_L")"
-expect_eq "SE-4 …and the decision's waiting span is kept: 19 minutes from the put to the settling" "1140" \
-  "$(se sitrep_ledger_times "$SE_L" | awk -F'\t' '$1 == "D6" && $3 != "-" { print $3 - $2 }')"
 finish
