@@ -225,11 +225,13 @@ reader_question holds list reader_q_holds
 reader_q_holds() {  # <plan> -> each open ask that holds something, with `holds=` on its line
   # An ask holds what its writer wrote in `holds=`, and a step's approval holds the next step. Otherwise
   # it holds rows of the plan that have not landed: an `approve:<key>` or a `decide:<D>` each row that
-  # waits on approval:<key> or approval:<D>, and a waiver, a finding or a hold the integrate rows.
-  { plan_read_waits "$1" 2>/dev/null; printf '\034\n'; reader_q_landed "$1"; printf '\035\n'; reader_q_asks "$1"; } | awk -F'|' "$_READER_AWK"'
+  # waits on approval:<key> or approval:<D>, and a waiver, a finding or a hold the integrate rows. A row an
+  # older table drops is owed no more, so no ask holds it.
+  { plan_read_waits "$1" 2>/dev/null; printf '\034\n'; reader_q_landed "$1"; printf '\035\n'; reader_q_asks "$1"; } \
+  | awk -F'|' -v drop=" $(plan_read_dropped "$1" 2>/dev/null | tr '\n' ' ') " "$_READER_AWK"'
     function rows(k,   a, i, r, o) {
       if (k ~ /^(approve|decide):/) a = "approval:" substr(k, index(k, ":") + 1); else if (k !~ /^(waive|finding|row|hold):/) return ""
-      for (i = 1; i <= n; i++) { r = ord[i]; if (!(r in landed) && (a == "" ? knd[r] == "integrate" : ((r, a) in waits))) o = o (o == "" ? "" : ", ") r }
+      for (i = 1; i <= n; i++) { r = ord[i]; if (!(r in landed) && !index(drop, " " r " ") && (a == "" ? knd[r] == "integrate" : ((r, a) in waits))) o = o (o == "" ? "" : ", ") r }
       return o
     }
     $0 == "\034" || $0 == "\035" { part++; next }

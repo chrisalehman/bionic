@@ -266,6 +266,18 @@ Body prose is no heading.
 ## Δ3 — D2 amended "x" (Ann Person 2026-10-04): Another verb
 ## Δ4 — D3 put (orchestrator 2026-11-01 6:00 PM | PST): A bar in the instant
 ## Deltas
+## Δ5 — D2 re-ruled "y" (Ann Person 2026-10-05): Re-ruled
+## Δ6 — D2 amended again "z" (Ann Person 2026-10-06), its words after
+## Δ7 — D4 ratified "Yes" (Ann Person 2026-10-07): Ratified
+## Δ8 — D4 settled by the go on Δ7 (Ann Person 2026-10-08 8:12 PM): "go"
+## Δ9 — D5 glyphs final "w" (Ann Person 2026-10-09): A qualified word
+## Δ10 — D5 withdrawn (Ann Person 2026-10-10): Withdrawn
+## Δ11 — D6 ruled: No reply (Ann Person 2026-10-11)
+## Δ12 — D6 ruled "4", provisionally (Ann Person 2026-10-12): undelimited
+- D7 ruled "1" (Ann Person 2026-10-13): A Step-1 bullet
+```
+## Δ13 — D8 ruled "f" (Ann Person 2026-10-14): fenced
+```
 EOF
 cat > "$R7/debt.md" <<'EOF'
 # debt ledger: concept | kind | sites | raised-by <record> | touches N | burned <row> | —
@@ -277,19 +289,27 @@ EOF
 EV7="$(translate "$P7" events)"; GP7="$(translate "$P7" gaps)"; in7() { printf '%s\n' "$EV7" | grep -cxF -- "$1"; }; ask7() { bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$P7" "$@"; }
 
 section "DECISIONS"
-expect_eq "the ledger lists D1 put, then ruled with its reply and who ruled, each instant as the heading writes it" \
-  "run/v1|ev=decision|by=orchestrator|d=D1|title=How the log fills (first)|verb=put|at=2026-11-01 5:47 PM PST run/v1|ev=decision|by=Ann Person|d=D1|said=2 <- and 'why' (a note)|title=How the log fills (first)|verb=ruled|at=2026-11-01 5:49 PM PST" "$(ask7 ledger D1 | paste -sd' ' -)"
-expect_eq "a day-only instant is kept as written; one the appender refuses is not written" "1 1" "$(in7 'run/v1|ev=decision|d=D2|verb=put|by=Ann Person|title=A day only|at=2026-10-03') $(in7 'run/v1|ev=decision|d=D3|verb=put|by=orchestrator|title=A bar in the instant|at=')"
+expect_eq "the ledger lists D1 put, its wait the line under it and each its Δ, then ruled with its reply and who ruled, each instant as the heading writes it" \
+  "run/v1|ev=decision|by=orchestrator|d=D1|entry=Δ0|title=How the log fills (first)|verb=put|wait=Body prose is no heading.|at=2026-11-01 5:47 PM PST run/v1|ev=decision|by=Ann Person|d=D1|entry=Δ1|said=2 <- and 'why' (a note)|title=How the log fills (first)|verb=ruled|at=2026-11-01 5:49 PM PST" "$(ask7 ledger D1 | paste -sd' ' -)"
+expect_eq "a day-only instant is kept as written; one the appender refuses is not written" "1 1" "$(in7 'run/v1|ev=decision|d=D2|entry=Δ2|verb=put|by=Ann Person|title=A day only|at=2026-10-03') $(in7 'run/v1|ev=decision|d=D3|entry=Δ4|verb=put|by=orchestrator|title=A bar in the instant|at=')"
 expect_contains "and is named" "gap/v1|ev=decision|d=D3|field=at|why=bar" "$GP7"
-expect_eq "four rounds, from the four headings of the two forms" 4 "$(printf '%s\n' "$EV7" | grep -c '^run/v1|ev=decision|')"
-expect_absent "body prose is no heading: no line and no gap" "Body prose" "$EV7$GP7"
+# Every word a ruling is written with is its round's verb, a qualifier before it kept with it; the reply is said=,
+# a settled-by heading's reply the quote after it and its title what settled it; a bullet under a Δ is a round too.
+lf() { ask7 ledger "$1" | awk -F'|' '{ v = s = t = a = ""; for (i = 2; i <= NF; i++) { k = substr($i, 1, index($i, "=") - 1); x = substr($i, length(k) + 2)
+  if (k == "verb") v = x; else if (k == "said") s = x; else if (k == "title") t = x; else if (k == "at") a = x }; printf "%s/%s/%s/%s;", v, s, t, a }'; }
+expect_eq "each ruling word is a decision round with that word its verb" \
+  "put//A day only/2026-10-03;amended/x/Another verb/2026-10-04;re-ruled/y/Re-ruled/2026-10-05;amended again/z/its words after/2026-10-06;|ratified/Yes/Ratified/2026-10-07;settled/go/the go on Δ7/2026-10-08 8:12 PM;|glyphs final/w/A qualified word/2026-10-09;withdrawn//Withdrawn/2026-10-10;|ruled//No reply/2026-10-11;|ruled/1/A Step-1 bullet/2026-10-13;" \
+  "$(lf D2)|$(lf D4)|$(lf D5)|$(lf D6)|$(lf D7)"
+expect_eq "rounds from every heading and bullet the ledger rules or puts in, none fenced" 13 "$(printf '%s\n' "$EV7" | grep -c '^run/v1|ev=decision|')"
+expect_no_regex "body prose is no line and no gap, a reply not delimited is no round, a fenced one is none" "Body prose|undelimited|fenced" "$(printf '%s\n' "$EV7" | grep -v '|wait=Body prose')$GP7"
+expect_contains "a ruling whose reply is not delimited is named whole" "gap/v1|ev=decision|heading=Δ12|field=ev|why=shape" "$GP7"
 
 section "DEBTS"
 expect_eq "the debts question lists the open debt and not the burned one" "run/v1|ev=debt|concept=c-open|kind=duplicate|raised-by=record/w/critic.md|sites=a.sh:1, b.sh:2|touches=3|at=" "$(ask7 debts)"
 expect_eq "a burned line is a debt with burned= its row" 1 "$(in7 'run/v1|ev=debt|concept=c-burned|kind=unpinned-pair|sites=a.sh:4|raised-by=record/w/critic-2.md|touches=1|burned=T5|at=')"
 expect_contains "the ledger holds no instant: a gap" "gap/v1|ev=debt|concept=c-open|field=at|why=absent" "$GP7"
-for g in decision\|heading=Δ3 decision\|heading=Deltas debt\|concept=c-note debt\|line=5; do expect_contains "another form is named whole: $g" "gap/v1|ev=$g|field=ev|why=shape" "$GP7"; done
-expect_no_regex "and writes nothing" "Another verb|c-note|A-orch" "$EV7"
+for g in decision\|heading=Deltas debt\|concept=c-note debt\|line=5; do expect_contains "another form is named whole: $g" "gap/v1|ev=$g|field=ev|why=shape" "$GP7"; done
+expect_no_regex "and writes nothing" "undelimited|c-note|A-orch" "$EV7"
 vals="$(printf '%s\n' "$EV7" | awk -F'|' '{ for (i = 3; i <= NF; i++) { v = substr($i, index($i, "=") + 1); if (v != "") print v } }')"; bad="$(refused "$EV7" "$D/shape7.log")"
 expect_contains "the value scan reads the ledgers' values" "2026-11-01 5:49 PM PST" "$vals"
 expect_empty "every value written is found in a ledger" "$(printf '%s\n' "$vals" | while IFS= read -r v; do grep -qF -- "$v" "$R7"/* || printf '%s\n' "$v"; done)"
