@@ -354,8 +354,9 @@ PROOF_READING
 
 # proof_word_in <value> <set> -> 0 when <value> is one of the space-separated words of <set>,
 # whole: a value holding a space matches no word (wave-27 T41; review pass 10 F2).
+# Every list this library splits is split on its own separators, never its caller's: a card calls in under a tab.
 proof_word_in() {
-  local w
+  local w IFS=$' \t\n'
   for w in $2; do [ "$1" = "$w" ] && return 0; done
   return 1
 }
@@ -406,7 +407,7 @@ proof_priority() {
 # _proof_priority_var <S> <reach> -> proof_priority's cell in `_PROOF_P` and no fork, for the batch reader
 # (wave-28 T72), which asks it once per finding of every bound reading.
 _proof_priority_var() {
-  local c
+  local c IFS=$' \t\n'
   _PROOF_P=""
   for c in $PROOF_PRIORITY; do
     [ "${c%%=*}" = "${1:-}:${2:-}" ] && { _PROOF_P="${c#*=}"; return 0; }
@@ -633,7 +634,7 @@ _proof_moved_fixed() {
 # `check:` line an older plan carries is not read (wave-31 T32; D6). What the tick and `release-check`
 # print, so the priority a record never states is seen where the run is judged.
 proof_findings_owed() {
-  local plan="$1" id s r t
+  local plan="$1" id s r t IFS=$' \t\n'
   [ -f "$plan" ] || return 0
   while IFS='	' read -r id s r t; do
     [ -n "$id" ] || continue
@@ -866,7 +867,7 @@ _proof_binding_table() {
 # written result. A fifth operand, `_proof_fixed_var`'s newline-wrapped ids, names the findings a landed
 # born row fixed: each drops out, whatever its rating (wave-33 T13; D6).
 _proof_reading_derive() {
-  local droot="$1" ev="$2" res="$3" fixed="${5:-}" nl tb tab got n s r w mv out=""
+  local droot="$1" ev="$2" res="$3" fixed="${5:-}" nl tb tab got n s r w mv out="" IFS=$' \t\n'
   nl=$'\n'; tb=$'\t'; tab="$nl$4"; PROOF_DERIVED="$res"
   got="$(proof_findings "$droot/$ev" 2>/dev/null)" || return 0
   while IFS='	' read -r n s r w _; do
@@ -934,7 +935,7 @@ proof_checkout() {
 #          command passed, and <sha> must be the checkout's HEAD: the command ran in that checkout
 #          at that head.
 proof_attested() {
-  local kind="$1" ev="$2" co="$3" plan="${4:-}" q="${5:-}" root="${6:-}" head stamp sha dirty rng a ah b bh since sh what verdict
+  local kind="$1" ev="$2" co="$3" plan="${4:-}" q="${5:-}" root="${6:-}" head stamp sha dirty rng a ah b bh since sh what verdict IFS=$' \t\n'
   # THE KIND OPERAND IS READ THROUGH THE MAP (wave-38 T8), silently: a caller passing the old kind is the new one.
   declare -F alias_read >/dev/null 2>&1 && { alias_read kind "$kind" 2>/dev/null; kind="$ALIAS_TOKEN"; }
   head="$(git -C "$co" rev-parse --verify -q "${7:-HEAD}^{commit}" 2>/dev/null)" \
@@ -1521,17 +1522,21 @@ _PROOF_FACTS_KEY=""; _PROOF_FACTS=""
 _PROOF_FACTS_KEEP=16
 
 _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one `run/v1` line each, in fact order
-  local plan="${1:-}" lib log="" dir="" f stamp key cdir cache="" tmp
+  local plan="${1:-}" lib log="" dir="" f stamp key cdir cache="" tmp IFS=$' \t\n'
+  local -a deps
   [ -f "$plan" ] && _proof_reader_load || return 0
   lib="$_READER_LIB_DIR"
   log="$(reader_log "$plan" 2>/dev/null)" && dir="${log%/*}"
-  stamp="$( { cksum "$plan"; for f in $_PROOF_FACTS_LIBS; do cksum "$lib/$f"; done
-              [ -z "$dir" ] || for f in $_PROOF_FACTS_HOMES; do [ ! -f "$dir/$f" ] || cksum "$dir/$f"; done; } 2>/dev/null | cksum)"
+  # The key covers every file the fold depends on, or no fold is served or kept under it: a file cksum cannot read
+  # would leave the key blind to its changes. A fresh fold is still the run's facts, so that is not worth a word.
+  deps=("$plan"); for f in $_PROOF_FACTS_LIBS; do deps+=("$lib/$f"); done
+  [ -z "$dir" ] || for f in $_PROOF_FACTS_HOMES; do [ ! -f "$dir/$f" ] || deps+=("$dir/$f"); done
+  stamp="$(cksum "${deps[@]}" 2>/dev/null)" && stamp="$(printf '%s\n' "$stamp" | cksum)" || stamp=""
   key="$plan $stamp"
   if [ "$_PROOF_FACTS_KEY" = "$key" ]; then printf '%s' "$_PROOF_FACTS"; return 0; fi
   cdir="${TMPDIR:-/tmp}/bionic-facts-$(id -u 2>/dev/null)"
   [ -d "$cdir" ] || mkdir -p -m 700 "$cdir" 2>/dev/null
-  if [ -O "$cdir" ] && [ -n "$(find "$cdir" -prune -type d ! -perm -020 ! -perm -002 2>/dev/null)" ]; then
+  if [ -n "$stamp" ] && [ -O "$cdir" ] && [ -n "$(find "$cdir" -prune -type d ! -perm -020 ! -perm -002 2>/dev/null)" ]; then
     cache="$cdir/$(printf '%s' "$plan" | cksum | tr -c '0-9\n' '-')"
   fi
   if [ -n "$cache" ] && [ -f "$cache" ] && [ "$(head -1 "$cache" 2>/dev/null)" = "$key" ]; then
@@ -1545,7 +1550,7 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
     _PROOF_FACTS="$( reader_events() { translate "$1" events; }; reader_facts "$plan" )"
   fi
   [ -z "$_PROOF_FACTS" ] || _PROOF_FACTS="$_PROOF_FACTS"$'\n'
-  _PROOF_FACTS_KEY="$key"
+  _PROOF_FACTS_KEY="${stamp:+$key}"
   if [ -n "$cache" ] && tmp="$(mktemp "$cdir/.facts.XXXXXX" 2>/dev/null)"; then
     { printf '%s\n' "$key"; printf '%s' "$_PROOF_FACTS"; } > "$tmp" && mv -f "$tmp" "$cache" 2>/dev/null || rm -f "$tmp"
     ls -t "$cdir" 2>/dev/null | sed "1,${_PROOF_FACTS_KEEP}d" | while IFS= read -r f; do rm -f "$cdir/$f"; done
