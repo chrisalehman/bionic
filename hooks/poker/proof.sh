@@ -240,6 +240,22 @@ walk_said() {  # <record docs-relative> -> what the registration settled, one li
     "${WALK_DONE:-no row}" "${WALK_N:-0}" "${WALK_LANDED:-none}" "${WALK_LEFT:-none}" "$1" "$WALK_WAVE"
 }
 
+# ONE WHOLE RUN AT A HEAD, ONE READER FOR ITS TWO ASKERS: the tick, before it starts one, and regression-run's rule 3.
+# whole_run_at_head <docs> <wave> <head> <checkout> [<command>] -> rc 0 when the head has its whole run or one is
+# running: WRA_LOG the docs-relative path of a regression-run log at <head> (of <command> alone when one is named, its
+# line 2), else, WRA_LOG empty, an open whole request at the gate for <checkout> (lib/gate.sh `gate_whole_open`), since
+# a running whole run has written no log yet. rc 1 when neither holds.
+whole_run_at_head() {
+  local l
+  WRA_LOG=""
+  for l in "$1/record/$2/regression-run-$3"*.log; do
+    [ -f "$l" ] || continue
+    [ -z "${5:-}" ] || [ "$(sed -n 2p "$l" 2>/dev/null)" = "command: $5" ] || continue
+    WRA_LOG="${l#"$1"/}"; return 0
+  done
+  declare -F gate_whole_open >/dev/null 2>&1 && gate_whole_open "$4"
+}
+
   # THE REGRESSION SETTING (wave-31 T27; REQ-12 AC-12.1, AC-12.2; D4). Whether the run runs the
   # regression is a Step-0 setting, written once into the plan's frontmatter as `regression: <v>`,
   # which lib/walls.sh `validate_tests_block` (Step 5), lib/proof.sh `facts_owed` (Step 8) and the
@@ -1787,12 +1803,16 @@ DSP_READINGS
         exit 1
       fi
       # RULE 3. ONE WHOLE RUN AT A HEAD. A log of tests/run.sh at this head refuses another: a red is a fix row's, its
-      # own suites plus the red one, and the next whole run is at the head its landing makes.
-      for _fr_l in "$FR_DOCS/record/$FR_WAVE/regression-run-$FR_HEAD"*.log; do
-        [ -f "$_fr_l" ] && [ "$(sed -n 2p "$_fr_l" 2>/dev/null)" = "command: tests/run.sh" ] || continue
-        die "REFUSED — the whole run runs once at a head, and ${FR_HEAD:0:12} has it: ${_fr_l#"$FR_DOCS"/}. A red suite is a fix row's: its own suites plus the red one, green at a later head. Nothing was run."
+      # own suites plus the red one, and the next whole run is at the head its landing makes. A whole run still running
+      # in the checkout refuses one too: a second would wait behind it at the gate to prove the same head.
+      if whole_run_at_head "$FR_DOCS" "$FR_WAVE" "$FR_HEAD" "$FR_CO" tests/run.sh; then
+        if [ -n "$WRA_LOG" ]; then
+          die "REFUSED — the whole run runs once at a head, and ${FR_HEAD:0:12} has it: $WRA_LOG. A red suite is a fix row's: its own suites plus the red one, green at a later head. Nothing was run."
+        else
+          die "REFUSED — a whole run is running in the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) now: the gate holds an open whole request for it (gate_list names it), and it proves this head when it ends. Nothing was run."
+        fi
         exit 1
-      done
+      fi
       # A head the last full pass still proves is not run again: nothing a suite runs differs from the pass, so a run here
       # proves what is proved, and the next whole run is at the head a landing of code makes. The printer is the one reader.
       FR_GREEN="$(proof_whole_text "$PV_PLAN" "$FR_CO" "$FR_HEAD" 2>/dev/null)"
