@@ -10,7 +10,8 @@
 #             list; the cut run is read as it stands, beside the hand-written lines.
 #   §CATCH    a copy of the reader with the replace rule taken out, then the cancel rule, disagrees with a card.
 #   §COVER    every question of the closed list is asked and none is refused, and every event type has a line.
-#   §FOLLOWS  a review row's rendered brief starts its range at the reader's last review proof of its questions.
+#   §FOLLOWS  a review row's rendered brief starts its range at the reader's last review proof of its questions,
+#             and a step card asks again for an approval a cancel appended to the run's log retracted.
 #   §OPEN     run_open asks the reader's step of a run with a log, whatever its plan's prose says; a run with
 #             none is judged from its plan, so each closed fixture run reads closed and the cut run open.
 #
