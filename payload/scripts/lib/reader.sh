@@ -381,7 +381,7 @@ reader_q_criterion() {  # <plan> <id> -> its Eval design row as key=value, one p
 
 # A criterion's proof names it by `ac=`, so two criteria proved at one head by one kind are two facts, not
 # one replacing the other. This later entry for the type is the one the fold reads.
-reader_identity proof kind head question ac
+reader_identity proof kind head question ac scope
 reader_question cell value reader_q_cell
 reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>, or state=pending; 1 not in the plan
   _reader_needs cell '<criterion>' "${2:-}" || return 2

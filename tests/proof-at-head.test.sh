@@ -9,6 +9,8 @@
 #
 # §ONE   a red run at F, two landings greening its reds: the three surfaces print `red at <F8>, 2 landings before this
 #        head`, a close-out copy printing green splits them; then a green run at F with docs, release and code past it
+# §LOG   a review reading, a regression proof and an approval the run's log alone holds are read by the judge and the
+#        proof readers, which ask the reader; a proof written between two reads in one process is read by the second
 #
 # FIXTURE FIDELITY. The project is close-out's own (tests/close-out.prelude.sh) at Step 8, its working branch checked
 # out beside it. `pah_world` lays the regression proof as `proof-add regression` writes it and each landing as the line
@@ -225,5 +227,39 @@ printf '%s\n' "_facts_basis() { printf 'cover %s owes\\n' \"\$1\"; return 1; }" 
 PAH_P="$P3"; PAH_PLAN="$P3_PLAN"
 expect_eq "ONE-20 precondition: the mutant runs, its walk reading each docs commit owes" "cover owes|cover owes" "$(pah_cover "$PAH_MUTLIB")"
 expect_eq "ONE-21 …and under it the docs head reads red, so the walk's basis is what turned it green" "red at ${P3_F:0:8}, 2 landings before this head" "$(pah_whole "$PAH_MUTLIB")"
+
+# ============================================================
+section "§LOG: the proof readers answer from the reader's facts, so a proof the run's log alone holds stands"
+# ============================================================
+# fails-when: facts_state, proof_last or proof_approved_head read the plan's SDLC State text themselves, so a review
+# reading, a regression proof or an approval written only as a run/v1 event reads absent; or a fact read once is
+# served after the plan changed under the same process.
+PL="$(mk_fixture log)"; advance_to "$PL" 8
+PL_PLAN="$PL/$PLAN_REL"; PL_H="$(fixture_git "$PL" rev-parse wave/01-fixture)"; PL_REC="$PL/.bionic/docs/record/wave-01-fixture"
+mkdir -p "$PL_REC"
+for q in evidence adversarial structure; do
+  printf '# %s\n\nNo findings.\n' "$q" > "$PL_REC/critic-$q.md"
+  bash -c '. "$1/proof.sh" && proof_add_line "$2" "$(proof_line review "$3" 2026-10-04T12:00:00Z "record/wave-01-fixture/critic-$4.md" "$4" w-critic pass piece)"' \
+    _ "$PAH_LIB" "$PL_PLAN" "$PL_H" "$q" > "$PL_PLAN.n" && mv "$PL_PLAN.n" "$PL_PLAN"
+done
+pl_state() { bash -c '. "$1/roots.sh" && . "$1/proof.sh" && facts_state "$2" "$3"' _ "$PAH_LIB" "$PL_PLAN" "$PL_H" 2>/dev/null | awk -F'\t' '$1 == "review" && $4 == "piece" { printf "%s%s=%s", (n++ ? " " : ""), $2, $5 }'; }
+expect_eq "LOG-1 precondition: the three readings in the plan's text are each covered at the head" \
+  "evidence=covered adversarial=covered structure=covered" "$(pl_state)"
+# The translation is taken whole before the log exists: a run with a log is read from the log alone.
+bash -c '. "$1/reader.sh" && reader_events "$2"' _ "$PAH_LIB" "$PL_PLAN" > "$SANDBOX/pl-events" && mv "$SANDBOX/pl-events" "$PL_REC/run.log"
+printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=record/wave-01-fixture/regression-run.log|at=2026-10-04T12:30:00Z\n' "$PL_H" >> "$PL_REC/run.log"
+printf 'run/v1|ev=approval|key=merge-unproved|by=fixture|head=%s|said=merge it|at=2026-10-04T12:40:00Z\n' "$PL_H" >> "$PL_REC/run.log"
+grep -v '^proved: kind=review .*question=adversarial' "$PL_PLAN" > "$PL_PLAN.n" && mv "$PL_PLAN.n" "$PL_PLAN"
+expect_eq "LOG-2 precondition: the plan holds no adversarial reading and the log holds it as an event" "0|yes" \
+  "$(/usr/bin/grep -c 'question=adversarial' "$PL_PLAN")|$(awk 'index($0, "|ev=proof|") && index($0, "|question=adversarial|") { f = 1 } END { print (f ? "yes" : "no") }' "$PL_REC/run.log")"
+expect_eq "LOG-3 a review reading the log alone holds is covered, as the two the log and the plan both hold" \
+  "evidence=covered adversarial=covered structure=covered" "$(pl_state)"
+expect_eq "LOG-4 …the regression proof and the person's word the log alone holds are read at their head" "$PL_H|$PL_H" \
+  "$(bash -c '. "$1/proof.sh" && printf "%s|%s" "$(proof_last "$2" regression)" "$(proof_approved_head "$2" merge-unproved)"' _ "$PAH_LIB" "$PL_PLAN")"
+# fails-when: the facts are kept for the process past a change, so a proof written between two reads is not seen.
+expect_eq "LOG-5 a proof written between two reads in one process is read by the second" "$PL_H|0000000000000000000000000000000000000001" \
+  "$(bash -c '. "$1/proof.sh" || exit 1; a="$(proof_last "$2" task)"; a="$(proof_last "$2" regression)"
+    printf "run/v1|ev=proof|kind=regression|head=%s|evidence=x|at=2026-10-04T13:00:00Z\n" 0000000000000000000000000000000000000001 >> "$3"
+    printf "%s|%s" "$a" "$(proof_last "$2" regression)"' _ "$PAH_LIB" "$PL_PLAN" "$PL_REC/run.log")"
 
 finish
