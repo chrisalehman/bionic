@@ -464,14 +464,16 @@ BRC_LIB="$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" && pwd -P)"
 BRC_FN="$BRC_DIR/fn.sh"
 sed -n '/^  budget_roster_counts() {/,/^  }$/p' "$GATE" > "$BRC_FN"
 
-# brc_harness <harness path> <function file> [shim dir] — a script that sources the two libraries
-# the function reads, the hook's two constants it uses, and the function, then runs it once:
+# brc_harness <harness path> <function file> [shim dir] — a script that sources the three libraries
+# the function reads, the hook's constants it uses (the session it runs as among them), and the
+# function, then runs it once:
 #   bash <harness> <roster> <ack ledger> <transcript>
 brc_harness() {
   {
     printf '#!/bin/bash\nset -uo pipefail\n'
-    printf '. %q\n. %q\n' "$BRC_LIB/agents.sh" "$BRC_LIB/roster.sh"
+    printf '. %q\n. %q\n. %q\n' "$BRC_LIB/agents.sh" "$BRC_LIB/roster.sh" "$BRC_LIB/alive.sh"
     printf 'ROSTER_VERSION="$ROSTER_SCHEMA_VERSION"\nACK_LEDGER_FILE="$2"\n'
+    printf 'BIONIC_SID=%q CLAUDE_CODE_SESSION_ID=%q\n' "$SID_A" "$SID_A"
     printf '. %q\n' "$2"
     printf 'export BRC_HARNESS_PID=$$\n'
     [ -z "${3:-}" ] || printf 'PATH=%q:"$PATH"\n' "$3"
