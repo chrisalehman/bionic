@@ -2,7 +2,7 @@
 
 One line per section of every suite under tests/, read against tests/RUBRIC.md, in the rubric's record shape. The cull deletes by this file and never by the shape of a line. `## Culled` at the end lists every section the census culls.
 
-rubric: 98b11b131 · head: 67b5f3cd0 · suites: 121 · sections: 1102 · keep: 908 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
+rubric: 98b11b131 · head: 67b5f3cd0 · suites: 121 · sections: 1103 · keep: 909 · duplicate: 158 · prose pin: 21 · tally: 1 · vacuous: 17 · no section: 3 suites
 
 The section-list command counts 1092 calls. The census leaves out 22 that sit inside heredoc bodies (framework.test.sh 17 sections and 1 setup, runner-roster.test.sh 4 sections), which write scratch suites and are fixture text, and 8 fixture setup_sections, which build what a later section reads. 1092 - 22 - 8 = 1062.
 
@@ -1488,6 +1488,7 @@ shell-lint.test.sh | §CENSUS-1 | keep | rule: lint — a section whose only cen
 shell-lint.test.sh | §CENSUS-2 | keep | rule: lint — a section whose census line is a keep deleted from its suite, or its whole suite deleted, planted in a scratch tree, so census_cull_refusals names the suite and the key | none (searched 'census_cull_refusals' and 'kept section absent' in tests/)
 shell-lint.test.sh | §CENSUS-3 | keep | rule: lint — a `## Culled` line naming a record whose defect carries a rule: prefix, or whose verdict is keep, planted in a scratch census, so census_cull_refusals names it | none (searched 'census_cull_refusals' and 'rule pin culled' in tests/)
 shell-lint.test.sh | §CENSUS-4 | keep | rule: lint — a section the census culls left in, or a kept section deleted, in the real tests tree, so the sweep over tests/ with tests/CENSUS.md names it | none (searched 'census_cull_refusals' and '## Culled' in tests/)
+shell-lint.test.sh | §CENSUS-GONE | keep | rule: lint — shell-lint.test.sh census_cull_refusals loses its gone-with arm (a listed name still refused, an unlisted one admitted) or its unverified-catcher arm (a new culled duplicate on an unverified catcher passes, or a baseline line is refused), planted in a scratch census | none (searched 'gone with an unlisted name' and 'unverified catcher culled' in tests/)
 shell-lint.test.sh | §ADR | keep | rule: lint — an ADR whose front-matter status: says Accepted over a ## Status section that still says Proposed, planted in a scratch directory (also nested, in a second directory, and the real tree's ADR-062), so adr_refusals names the file and both words | none (searched 'adr_refusals' and '## Status' in tests/)
 shell-lint.test.sh | §HEADER | keep | rule: lint — a header entry for a section the body lacks, or a body section the header's list omits, planted in a scratch suite and in a copy of shell-lint's own header, so header_refusals names the suite and the key (also the real tree's release-check §REL-1.22.0) | none (searched 'header_refusals' and 'header lists' in tests/)
 
