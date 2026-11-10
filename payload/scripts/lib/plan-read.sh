@@ -4,9 +4,12 @@
 #   plan_read_header <plan> [key]                    -> `key=value` per header key, or the one named
 #   plan_read_row <plan> <heading> <column> <value>  -> `name=value` per cell of the row whose <column> is <value>
 #
+#   plan_read_dropped <plan>                         -> the id of each Tasks row whose status cell is dropped
+#
 # A plan is the words a person wrote: its header and its tables. Everything that is the run's state is
 # the log's, read by lib/reader.sh, so nothing here reads a state cell for an answer or follows a header
-# key to another file.
+# key to another file, but one: an older table's `dropped` status, which no event carries, so that cell
+# is the only word that a row's work is no longer owed.
 #
 # THE HEADER is the leading `---` block alone: a `---` or a `key: value` line in the body is prose.
 # A key's first line answers; one leading and one trailing quote are dropped from its value, as every
@@ -81,6 +84,11 @@ plan_read_rows() {  # <plan> <heading> -> one line per row in table order, its c
       for (i = 1; i <= nh; i++) { v = r[i]; gsub(/\t/, " ", v); o = o (i > 1 ? "\t" : "") name(i) "=" v }
       print o; found = 1
     }'"$_PLAN_READ_TABLE" "$1"
+}
+
+plan_read_dropped() {  # <plan> -> one id per line, in table order; 1 none, 2 no plan
+  plan_read_rows "$1" Tasks | awk -F'\t' '{ split("", c); for (i = 1; i <= NF; i++) c[substr($i, 1, index($i, "=") - 1)] = substr($i, index($i, "=") + 1)
+    if (c["status"] == "dropped") { print c["id"]; n++ } } END { exit !n }'
 }
 
 # plan_read_waits <plan> [id] -> per row, in table order: `<id><TAB>kind<TAB><kind>` first, then one line per

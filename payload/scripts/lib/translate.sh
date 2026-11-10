@@ -79,7 +79,7 @@ function put(k, v) {
 function slot(t, at,   key) { key = ukey(at); if (key == "") key = (t in LAST) ? LAST[t] : "~"; LAST[t] = key; return key }
 function emit(at,   i) {
   if (at == "") lack("at")
-  printf "e\t%s\t%s|at=%s\n", slot(T, at), L, at
+  printf "e\t%s\t%s|at=%s\n", (PLACE != "" ? PLACE : slot(T, at)), L, at; PLACE = ""
   for (i = 1; i <= NG; i++) printf "g\t\t%s\n", G[i]
 }
 function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
@@ -114,7 +114,12 @@ _translate_section() {  # <plan> <heading> -> the lines under `## <heading>`, to
 
 translate_source _translate_state
 _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessions, proofs, findings, waivers, orders
-  _translate_section "$1" "SDLC State" | awk "$_TRANSLATE_AWK"'
+  # A deferral holds no instant, and its finding is raised by its review: it stands at the place of the first
+  # review proof whose evidence is the finding's file, never at its neighbour's, and its instant stays a gap.
+  { _translate_section "$1" "SDLC State" | awk '/^proved: / && / kind=review / && match($0, / evidence=[^ ]+/) {
+      e = substr($0, RSTART + 10, RLENGTH - 10); if (match($0, / at=[^ ]+/)) printf "\035%s %s\n", e, substr($0, RSTART + 4, RLENGTH - 4) }'
+    _translate_section "$1" "SDLC State"; } | awk "$_TRANSLATE_AWK"'
+    /^\035/ { split(substr($0, 2), w, " "); if (!(w[1] in rev)) rev[w[1]] = ukey(w[2]); next }
     /^current: / { cur = trim(substr($0, 10)); next }
     /^approved-by: / { byline("x by " substr($0, 14)); begin("approval", "key", "step3"); put("by", BY); put("said", SAID); emit(AT); next }
     /^approved: / { byline(substr($0, 11)); begin("approval", "key", trim(PRE)); put("by", BY); kv(MID)
@@ -123,11 +128,14 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
       for (i = 2; i <= NP; i++) put(PK[i], PV[i]); put("by", BY); put("said", SAID); emit(AT); next }
     /^- Step [0-9]+: / {
       n = substr($0, 8, index($0, ":") - 8); text = substr($0, index($0, ":") + 2); at = ""
+      # An approval is written at-then-by or by-then-at, and both are read; the words follow either.
       if (match(text, /(approved|configured) at [^ ]+ (by|via) /)) {
         ap = substr(text, RSTART, RLENGTH); split(ap, w, " "); at = w[3]; rest = substr(text, RSTART + RLENGTH)
-        if (n + 0 <= 2) { begin("approval", "key", "step" n); put("by", (index(rest, " \"") ? substr(rest, 1, index(rest, " \"") - 1) : ""))
-          put("said", quoted(rest)); emit(at) }
+        by = index(rest, " \"") ? substr(rest, 1, index(rest, " \"") - 1) : ""
+      } else if (match(text, /approved by [^";]+ [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9](:[0-9][0-9])?Z/)) {
+        ap = substr(text, RSTART, RLENGTH); at = inst(ap); by = trim(substr(ap, 13, length(ap) - 12 - length(at))); rest = substr(text, RSTART + RLENGTH)
       }
+      if (at != "" && n + 0 <= 2) { begin("approval", "key", "step" n); put("by", by); put("said", quoted(rest)); emit(at) }
       if (at == "") at = inst(text)
       begin("step", "n", n); emit(at); steps[n] = 1; next
     }
@@ -137,7 +145,7 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
     /^moved: / { kv(substr($0, 8)); begin("finding", "ref", HEAD); at = ""
       for (i = 1; i <= NP; i++) if (PK[i] == "at") at = PV[i]; else put(PK[i], PV[i]); emit(at); next }
     /^deferred: / { kv(substr($0, 11)); split(HEAD, w, " "); begin("finding", "ref", w[1]); put("severity", w[2]); put("to", "deferred")
-      put("title", quoted(HEAD)); for (i = 1; i <= NP; i++) put(PK[i], PV[i]); lack("by"); emit(""); next }
+      put("title", quoted(HEAD)); for (i = 1; i <= NP; i++) put(PK[i], PV[i]); lack("by"); f = w[1]; sub(/#.*/, "", f); PLACE = rev[f]; emit(""); next }
     /^order: / { split(substr($0, 8), w, " "); begin("order", "act", w[1]); put("said", quoted($0)); emit(w[2]); next }
     END { if (cur != "" && !(cur in steps)) { begin("step", "n", cur); emit("") } }'
 }
@@ -241,9 +249,7 @@ _translate_dropped() {  # <plan> -> each Tasks row whose status is dropped, name
   # A dropped row is the plan's word that its work is no longer owed. No ruled event says that of a row:
   # a cancel retracts a fact the log holds, and a row is authored, never logged; so the status is named,
   # not written. Until a type carries it, only the plan's own cell tells a dropped row from a pending one.
-  plan_read_rows "$1" Tasks 2>/dev/null | awk -F'\t' '{ split("", c)
-    for (i = 1; i <= NF; i++) c[substr($i, 1, index($i, "=") - 1)] = substr($i, index($i, "=") + 1)
-    if (c["status"] == "dropped") printf "g\t\tgap/v1|ev=dropped|row=%s|field=ev|why=unruled\n", c["id"] }'
+  plan_read_dropped "$1" 2>/dev/null | awk '{ printf "g\t\tgap/v1|ev=dropped|row=%s|field=ev|why=unruled\n", $0 }'
 }
 
 # THE RECORD'S HOMES sit in the plan's record directory, `<docs>/record/<wave>/`, joined to the plan by

@@ -17,7 +17,8 @@
 #   §CELL       a criterion is discharged only by a standing proof, waiver or approval naming it.
 #   §JOIN       a plan's log is found by its name; a header key pointing elsewhere is only words.
 #   §READY      ready reads a row's deps from its Tasks cell when the caller names none.
-#   §JOIN-14    a version-14 row's waits are its reads cell: ready, stop's ready rows, holds, status.
+#   §JOIN-14    a version-14 row's waits are its reads cell: ready, stop's ready rows, holds, status; a dropped
+#               row is never ready and a wait on it is met; a dispatch with no instant never outranks a fact.
 #   §JOIN-15    a nine-cell row's waits are its deps and what its kind and step imply.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
@@ -293,6 +294,13 @@ W=w14; expect_eq "a reads cell's row and path wait on the row, an approval on it
   "A1=0 A2=1 A3=1 A4=1 A5=1 ; ready=A1; approve:ship>A4 waive:F1>A5 ; Z9=1" "$(joined A1 A2 A3 A4 A5)"
 land A1; expect_eq "once the row lands its readers are ready, in table order" "A1=1 A2=0 A3=0 A4=1 A5=1 ; ready=A2 A3" "$(joined A1 A2 A3 A4 A5 | cut -d';' -f1-2)"
 ask status A1 >/dev/null; expect_status "a row the plan holds has a status" 0 "$?"
+printf 'run/v1|ev=%s\n' 'dispatch|row=A1|name=n|at=' 'dispatch|row=A3|name=n|at=' 'stalled|row=A4|at=2026-11-03T00:00:10Z' \
+  'dispatch|row=A4|name=n|at=2026-11-03T00:00:11Z' 'stalled|row=A5|at=2026-11-03T00:00:10Z' 'dispatch|row=A5|name=n|at=' >> "$D/record/w14/run.log"
+expect_eq "a dispatch with no instant sets a state only alone; a timed one by its time" "A1=landed A3=dispatched A4=dispatched A5=stalled " \
+  "$(for r in A1 A3 A4 A5; do printf '%s=%s ' $r "$(ask status $r | sed -n 's/^state=//p')"; done)"
+printf '%s\n' "$JLOG" | plan w14d; sed 's/| landed |/| dropped |/' "$D/plans/epic-x/w14.plan.md" > "$D/plans/epic-x/w14d.plan.md"
+W=w14d; expect_eq "a dropped row is not ready and says so; a wait on it is met, named or read" \
+  "A1=1 A2=0 A3=0 A4=1 A5=1 ; ready=A2 A3|A3+A1=0 |state=dropped" "$(joined A1 A2 A3 A4 A5 | cut -d';' -f1-2)|$(readies 'A3 A1')|$(ask status A1 | head -1)"
 
 section "JOIN-15"
 W=w15; expect_eq "a nine-cell row waits on its deps and what its kind and step imply, and no approval holds it" \
