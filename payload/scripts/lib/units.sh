@@ -1077,7 +1077,7 @@ _units_sched() {
 
 # _units_sched_run <mode> <plan> <step> <hasreads> <rows> <regression state> <readings state> <waits> -> the
 # program's answer and its status: 3, with nothing printed, when the answer needs a regression state not
-# handed in; 4 when it needs the readings' state (wave-35 T9).
+# handed in; 4 when it needs the readings' state.
 _units_sched_run() {
   {
     printf '\034rows\n'; printf '%s\n' "$5"
@@ -1754,7 +1754,7 @@ _units_sched_awk() {
         return (nw == 0)
       }
       # head, record, merge AND A PATH wait on each open row the read names (a row reading the settled
-      # head at the same step or later is not one, T35 F1: plan_read_waits decides that); one that has
+      # head at the same step or later is not one, and plan_read_waits decides that); one that has
       # landed or been dropped holds nothing.
       if (t == "head" || t == "record" || t == "merge" || (t ~ /[\/.*?]/ && t !~ /[ \t:!]/)) {
         for (c = 1; c <= ncw; c++) if (cw[c] != i && isopen(cw[c])) wj[++nw] = cw[c]
