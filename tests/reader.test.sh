@@ -323,7 +323,8 @@ sect T1 artifact >/dev/null; expect_status "a key the section lacks answers no" 
 sect T3 >/dev/null; expect_status "a row with no heading of its own has no section" 1 "$?"
 
 # A version-14 run is read through the translation, then the same run once it has a log.
-section "PLACES"; P="$(mktemp -d)"
+section "PLACES"
+P="$(mktemp -d)"
 at() {  # <place> -> the rows landed over a version-14 run there, then over its log
   local d="$P/${1//\//-}" r; r="${1##*/}"; r="$d/record/${r%.plan.md}"
   mkdir -p "$d/${1%/*}" "$r"; printf '# r\n' > "$d/$1"; printf 'landed: row=T1 merge=c1 at=2026-11-01T00:00:01Z\n' > "$r/landing-proofs.log"
