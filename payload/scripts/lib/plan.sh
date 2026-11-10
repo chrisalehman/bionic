@@ -29,7 +29,8 @@
 # branch name holds no blank, so the first word is the whole of every value a plan carries; close-out's old reader
 # took the rest of the line, trimmed, which differs only on a line no branch can be.
 #
-# NEEDS lib/run.sh (`_run_lines`, the newline rule: CRLF and a lone CR both end a line). Both callers source it first.
+# NEEDS lib/run.sh (`_run_lines`, the newline rule: CRLF and a lone CR both end a line), which loads lib/plan-read.sh,
+# the parser the header helpers read through. Both callers source it first.
 # The goal readers also ask lib/units.sh `units_rows` and lib/proof.sh `proof_last_line` when loaded; without them a
 # one-file landing or a whole run reads as not measured.
 # Sourced, never executed; bash 3.2.
@@ -386,8 +387,8 @@ plan_goal_sheet() {
 # WHERE A TITLE'S SENTENCE ENDS: at a period followed by a space and an uppercase letter, or by the end of the text.
 # `vs. the` and `e.g. a` are followed by a lowercase word, so an abbreviation never ends one, and the rule keeps no
 # word list. plan_cut <text> sets PLAN_CUT_HEAD (the text through that period) and PLAN_CUT_REST (what follows it) and
-# returns 0 when the text has such a period; otherwise it returns 1 with the whole text in PLAN_CUT_HEAD. The card's
-# awk twin for an untagged decision bullet (card.sh `titlesent`) reads the same rule.
+# returns 0 when the text has such a period; otherwise it returns 1 with the whole text in PLAN_CUT_HEAD. The one home
+# of the rule: the cards cut a decision bullet with no bold span here too.
 plan_cut() {
   local t="${1:-}" head=""
   PLAN_CUT_HEAD="$t"; PLAN_CUT_REST=""
