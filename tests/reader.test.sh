@@ -11,7 +11,7 @@
 #   §UNKNOWN  an unlisted question exits 2 and prints the list.
 #   §REST     the twelve log-side questions each answer a planted log in their form, honour the fold, and
 #             answer the same with each line's fields moved.
-#   §HEADER     the plan's header keys, its body never read as one, in both shapes of a plan.
+#   §HEADER     the plan's header keys, its body never read as one, in both shapes of a plan, CR-only line ends too.
 #   §ROW        a Tasks row is its nine authored cells, named by the table's header in both shapes.
 #   §CRITERION  a criterion is its Eval design row, an escaped bar kept as a bar.
 #   §CELL       a criterion is discharged only by a standing proof, waiver or approval naming it.
@@ -215,6 +215,9 @@ W=old; expect_eq "a header key, its quotes dropped" "scale-recommendation=one wa
 expect_eq "every header key in its order" "sdlc-step rigor log scale-recommendation" "$(ask header | cut -d= -f1 | tr '\n' ' ' | sed 's/ $//')"
 W=new; expect_eq "the newer header, its quotes dropped" "rigor=single scale-recommendation=one wave" "$(flat header)"
 ask header sdlc-step; expect_status "a key the header lacks answers no" 1 "$?"
+W=cr; plan cr < /dev/null; printf -- '---\rrigor: double\rabandoned: 2026-11-01\r---\rbody: no\r' > "$D/plans/epic-x/cr.plan.md"
+expect_eq "a CR-only header reads key by key, as a CRLF one does" "rigor=double abandoned=2026-11-01|rigor=double" \
+  "$(flat header)|$(printf -- '---\r\nrigor: double\r\n---\r\n' > "$D/plans/epic-x/cr.plan.md"; ask header)"
 
 section "ROW"
 W=new; expect_eq "a row is its nine authored cells" \
