@@ -675,4 +675,28 @@ expect_contains "BC3 …and a different heavy command from one tree keys its own
 guarded "$R1" 'npx playwright test e2e/x.spec.ts &'
 expect_eq "BC2 a backgrounded browser run is REFUSED" "2" "$ST"
 
+section "B-THREAD — a heavy run on the orchestrator's thread leaves it, as a suite does"
+# The farm-out wall refuses a browser or compile run wherever it refuses a suite, and books nothing:
+# the gate's store stays empty because no wrap is staged beside a refusal.
+BT_GATE="$SANDBOX/bt-gate"
+EXTRA_ENV="BIONIC_GATE_DIR=$BT_GATE"
+for BT_CMD in 'npx playwright test e2e/x.spec.ts' 'npx next build'; do
+  guarded "$R1" "$BT_CMD" ""
+  expect_contains "BT1 on the main thread '$BT_CMD' is DENIED" '"permissionDecision":"deny"' "$OUT"
+  expect_contains "BT1 …with the farm-out words" "belongs in a subagent" "$ERR"
+  expect_empty "BT1 …booked into no shim" "$WRAP"
+  expect_eq "BT1 …and the gate's store holds no request" "0" "$(ls "$BT_GATE/requests" 2>/dev/null | wc -l | tr -d ' ')"
+done
+guarded "$R1" 'bash tests/run.sh' ""
+expect_contains "BT1 control: a suite on the main thread is denied the same way" '"permissionDecision":"deny"' "$OUT"
+BT_SHORT="$(mk_payload "$R1" 'npx playwright test e2e/x.spec.ts' "" | jq -c '.tool_input.timeout = 60000')"
+run_hook "$BT_SHORT" "$GUARD"
+expect_empty "BT2 a SHORT browser run is not denied, as a short suite is not" "$OUT$ERR"
+rm -f "$R1/.bionic/tmp/engaged-$SID.state"
+guarded "$R1" 'npx playwright test e2e/x.spec.ts' ""
+expect_eq "BT3 with no run engaged the same command passes" "0" "$ST"
+expect_empty "BT3 …untouched" "$OUT$ERR$WRAP"
+: > "$R1/.bionic/tmp/engaged-$SID.state"
+EXTRA_ENV=""
+
 finish
