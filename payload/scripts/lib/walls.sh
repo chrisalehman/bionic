@@ -2534,15 +2534,15 @@ BIONIC_FINDING_CHANNEL="evidence-gate"
 BIONIC_FINDING_SUBJECT="$PLAN"
 bionic_finding_root() { audit_root; }
 
-# THE READINGS A RUN OWES, JUDGED ON THE SECTION IN HAND (wave-27 T14; REQ-2 AC-2.2, D3, D19).
+# THE READINGS A RUN OWES, JUDGED ON THE RUN'S FACTS.
 # From `current: 6` a commit is admitted only when, for each question `facts_owed` (lib/proof.sh)
-# deals at <rigor>, the section holds a reading of it (`proved: kind=review … question=<q>`) whose
-# newest is not `result=fail`, or a `waived: question=<q>` line newer than that reading. Newer is
-# later in the section, the order `proof_add_line` writes in, and a waiver's fields are those before
-# ` by `: the judge's own reading (`facts_state`), so the wall and the judge never answer one
-# section text two ways on a question both can see (bash-walls §EG-6).
+# deals at <rigor>, the run holds a reading of it (a review proof of question <q>) whose newest is
+# not `result=fail`, or a waiver of <q> with a head, set after that reading. The facts are the
+# reader's `reviews` answer, which the judge's chains read too (lib/proof.sh `facts_state`), so the
+# wall and the judge never answer one run two ways on a question both can see (bash-walls §EG-6),
+# and a reading the run's log alone holds is a reading here.
 #
-# A PREDICATE OVER TEXT, AND NOTHING ELSE (the freeze, .claude/rules/hook-authoring.md). It reads
+# A PREDICATE OVER FACTS, AND NOTHING ELSE (the freeze, .claude/rules/hook-authoring.md). It reads
 # no git and no roster: whether a reading's head is still the working head, its range and its
 # scope are `facts_state`'s, asked at `current 8`, at close-out and by the tick. Below
 # `current: 6` it never runs (D19), so an open run is untouched until its Step 6.
@@ -2562,7 +2562,7 @@ bionic_finding_root() { audit_root; }
 # read. Debts handed for another plan than the one judged here are not this plan's, and are not read.
 _eg_reading_gaps() {
   local qs
-  if ! declare -F facts_owed >/dev/null 2>&1 || ! declare -F proof_awk >/dev/null 2>&1; then
+  if ! declare -F facts_owed >/dev/null 2>&1 || ! declare -F _proof_ask >/dev/null 2>&1; then
     printf 'unreadable\n'
     return 0
   fi
@@ -2577,20 +2577,18 @@ _eg_reading_gaps() {
   # T72): lines the collector read for another plan than the one judged are not this plan's.
   [ "${BIONIC_DEBTS_PLAN:-}" != "$PLAN" ] || handed=1
   [ "$handed" = 0 ] || der="${BIONIC_READINGS:-}"
-  printf '%s\n' "$SECTION" | BIONIC_DERIVED="$der" awk -v qs="$qs" "$(proof_awk)"'
+  # The readings and waivers are the run's facts, in the order they were last set: the plan's section for a run
+  # with no log, the log alone for a run with one, through lib/proof.sh's kept fold of them.
+  _proof_ask "$PLAN" reader_q_reviews "$PLAN" | BIONIC_DERIVED="$der" awk -F'|' -v qs="$qs" "$(proof_fact_awk)"'
     BEGIN { n = split(ENVIRON["BIONIC_DERIVED"], L, "\n")
             for (i = 1; i <= n; i++) { m = split(L[i], F, "\t"); if (m >= 3) D[F[1] SUBSEP F[2]] = F[3] } }
-    proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" {
-      ev = PROOF_EVIDENCE
-      t[PROOF_QUESTION] = "fact"; r[PROOF_QUESTION] = ((ev SUBSEP PROOF_RESULT) in D) ? D[ev SUBSEP PROOF_RESULT] : PROOF_RESULT; e[PROOF_QUESTION] = ev
+    proof_fact() && PROOF_KIND == "review" && PROOF_QUESTION != "" {
+      pe = PROOF_EVIDENCE
+      t[PROOF_QUESTION] = "fact"; r[PROOF_QUESTION] = ((pe SUBSEP PROOF_RESULT) in D) ? D[pe SUBSEP PROOF_RESULT] : PROOF_RESULT; e[PROOF_QUESTION] = pe
       next
     }
-    /^waived:[ \t]/ {
-      m = split($0, w, /[ \t]+/); q = ""; h = ""
-      for (i = 2; i <= m && w[i] != "by"; i++) {
-        if (w[i] ~ /^question=/) q = substr(w[i], 10)
-        else if (w[i] ~ /^head=/) h = substr(w[i], 6)
-      }
+    ev() == "waiver" {
+      q = line_kv("question"); h = line_kv("head")
       if (q == "" || h !~ /^[0-9a-f]+$/ || length(h) < 7 || length(h) > 40) next
       t[q] = "waiver"
     }
@@ -4409,16 +4407,17 @@ resolve_walk_path() {  # $1 = raw walk-artifact value
   esac
 }
 
-# walk_registered <raw walk-artifact value> <its resolved path> -> 0 when the section holds a flush-left
-# `proved: kind=walk` line whose evidence= names that artifact, compared as written and as resolved, so a
-# `record/<f>` spelling and an absolute one meet. proof-add walk writes that line only after it parsed the
-# record's verdict table, so the line is what makes the artifact a registered walk rather than narration.
+# walk_registered <raw walk-artifact value> <its resolved path> -> 0 when the run holds a walk proof whose
+# evidence names that artifact, compared as written and as resolved, so a `record/<f>` spelling and an
+# absolute one meet. proof-add walk registers the proof only after it parsed the record's verdict table, so
+# the proof is what makes the artifact a registered walk rather than narration. The proofs are the reader's,
+# through lib/proof.sh's kept fold, so a walk the run's log alone holds is registered here.
 walk_registered() {
   local ev
   while IFS= read -r ev; do
     [ -n "$ev" ] || continue
     if [ "$ev" = "$1" ] || [ "$(resolve_walk_path "$ev")" = "$2" ]; then return 0; fi
-  done <<< "$(printf '%s\n' "$SECTION" | sed -nE 's/^proved: kind=walk .*[[:space:]]evidence=([^[:space:]]+).*$/\1/p')"
+  done <<< "$(_proof_facts "$PLAN" | awk -F'|' "$(proof_fact_awk)"'proof_fact() && PROOF_KIND == "walk" { print PROOF_EVIDENCE }')"
   return 1
 }
 
