@@ -324,6 +324,9 @@ expect_eq "a dispatch with no instant sets a state only alone; a timed one by it
 printf '%s\n' "$JLOG" | plan w14d; sed 's/| landed |/| dropped |/' "$D/plans/epic-x/w14.plan.md" > "$D/plans/epic-x/w14d.plan.md"
 W=w14d; expect_eq "a dropped row is not ready and says so; a wait on it is met, named or read" \
   "A1=1 A2=0 A3=0 A4=1 A5=1 ; ready=A2 A3|A3+A1=0 |state=dropped" "$(joined A1 A2 A3 A4 A5 | cut -d';' -f1-2)|$(readies 'A3 A1')|$(ask status A1 | head -1)"
+printf '%s\n' "$JLOG" | plan w14e; sed 's/| pending | approval:plan, approval:ship |/| dropped | approval:plan, approval:ship |/' "$D/plans/epic-x/w14.plan.md" > "$D/plans/epic-x/w14e.plan.md"
+W=w14e; expect_eq "a dropped row is held by no ask: the approval it read holds nothing, the integrate row's waiver still holds it" \
+  " waive:F1>A5 " "$(joined A5 | cut -d';' -f3)"
 
 section "JOIN-15"
 W=w15; expect_eq "a nine-cell row waits on its deps and what its kind and step imply, and no approval holds it" \
