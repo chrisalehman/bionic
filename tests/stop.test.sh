@@ -777,6 +777,33 @@ LOAD_D3="$(load_fixture 3)"
 LOAD_T3="$(BIONIC_GATE_DIR="$LOAD_GATE" gap_tick "$LOAD_D3" 14)"
 expect_contains "LOAD3 three writers over the line: the newest is stood down" "poker: STANDDOWN wl-T15 — load 14.0 over 6.36" "$LOAD_T3"
 expect_eq "LOAD3b …and only one on one tick" "1" "$(printf '%s\n' "$LOAD_T3" | grep -c '^poker: STANDDOWN wl-')"
+# THE STAND-DOWN FREES WHAT IT CAN, AND WAITS ON WHAT IT MUST NOT END. wl-T14 holds an admitted run and a waiting
+# ask, each held by a disposable process in a group of its own, since a withdrawal TERMs its holder's group; wl-T13
+# holds a waiting ask too. The stand-down withdraws wl-T14's waiting ask alone; with its admitted run still open the
+# next tick stands no one down.
+LOAD4_GATE="$(cd "$(mktemp -d)" && pwd -P)/gate"; mkdir -p "$LOAD4_GATE/requests" "$LOAD4_GATE/cost"
+load4_holder() { ( set -m; tail -f /dev/null </dev/null >/dev/null 2>&1 & printf '%s' "$!" ); }
+LOAD4_HP="$(load4_holder)"; LOAD4_HA="$(load4_holder)"
+load4_req() {  # <id> <agent> <holder pid> [<admitted line>]
+  printf 'key=b.test.sh\nkind=work\nwho=%s:%s\ntree=/\nasked=1000\nholder=%s:%s\n%s' "$SID" "$2" "$3" \
+    "$(bash -c '. "$1/payload/scripts/lib/slots.sh" && _slots_since "$2"' _ "$BIONIC_SCRIPTS_DIR" "$3")" "${4:-}" > "$LOAD4_GATE/requests/$1"
+}
+load4_req 1 wl-T14 "$LOAD4_HA" 'admitted=1000
+promise=0:1.61:60
+'
+load4_req 2 wl-T14 "$LOAD4_HP"; load4_req 3 wl-T13 "$GAP4_HOLDER"
+LOAD4_D="$(load_fixture 2)"
+LOAD4_T="$(BIONIC_GATE_DIR="$LOAD4_GATE" gap_tick "$LOAD4_D" 14)"
+expect_contains "LOAD4 meta: the newest writer is stood down for the load" "poker: STANDDOWN wl-T14 — load 14.0 over 6.36" "$LOAD4_T"
+expect_eq "LOAD4a AC-20.1 its waiting ask is withdrawn, never admitted: ended with who and why, no admitted line (ended|by|why|admitted)" \
+  "yes|yes|yes|0" "$(for k in ended by why; do grep -q "^$k=." "$LOAD4_GATE/requests/2" && printf 'yes|' || printf 'no|'; done; grep -c '^admitted=' "$LOAD4_GATE/requests/2")"
+expect_true "LOAD4b …and its holder is gone" eval '! kill -0 "$LOAD4_HP" 2>/dev/null'
+expect_eq "LOAD4c AC-20.3 its own admitted run is still in the store, open, and the older writer's waiting ask too (1|3)" "open|open" \
+  "$(grep -q '^ended=' "$LOAD4_GATE/requests/1" && echo ended || echo open)|$(grep -q '^ended=' "$LOAD4_GATE/requests/3" && echo ended || echo open)"
+LOAD4_T2="$(BIONIC_GATE_DIR="$LOAD4_GATE" gap_tick "$LOAD4_D" 14)"
+expect_contains "LOAD4d AC-20.2 the next tick, its admitted run still open, says it waits on it" "poker: no STANDDOWN — load 14.0 over 6.36; wl-T14" "$LOAD4_T2"
+expect_eq "LOAD4e …and across the two ticks one writer was stood down" "1" "$(printf '%s\n%s\n' "$LOAD4_T" "$LOAD4_T2" | grep -c '^poker: STANDDOWN wl-')"
+kill "$LOAD4_HP" "$LOAD4_HA" 2>/dev/null
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "UB: unbound means no run — two plans, two sessions, the real Stop per session (wave-23-fixit-1810, REQ-1, AC-1.1/AC-1.2)"

@@ -107,6 +107,14 @@ STATE_REL=".bionic/tmp/preflight-${SESSION_A}.state"
 STATE_REL_B=".bionic/tmp/preflight-${SESSION_B}.state"
 LEGACY_STATE_REL=".bionic/tmp/preflight.state"
 
+# A live foreign session B, by the one rule: its transcript, and the CLI's file naming a running
+# process (this shell) with that process's start.
+live_b() {
+  : > "$1/config/projects/$PROJSLUG/$SESSION_B.jsonl"; mkdir -p "$1/config/sessions"
+  jq -n --argjson p "$$" --arg s "$SESSION_B" --arg t "$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$$" | tr -s ' ' | sed 's/ *$//')" \
+    '{pid:$p, sessionId:$s, procStart:$t}' > "$1/config/sessions/$$.json"
+}
+
 run_probe() {  # <sandbox> [KEY=VAL ...] -> echoes exit code; stdout/stderr in $OUT/$ERR
   local sbx="$1"; shift
   ( cd "$sbx/repo" && env -u ANTHROPIC_API_KEY \
@@ -374,7 +382,7 @@ expect_true "non-git run still writes an attestation" [ -f "$SBX/repo/$STATE_REL
 
 # other-session scan: warn-only, names the other session, never blocks
 SBX="$(mk_sandbox)"
-: > "$SBX/config/projects/$PROJSLUG/$SESSION_B.jsonl"
+live_b "$SBX"
 rc="$(run_probe "$SBX")"
 expect_eq "another live session does not block the check" "0" "$rc"
 if grep -qE "WARN.*$SESSION_B" "$OUT" "$ERR" 2>/dev/null; then ok "other live session warned by identity"
@@ -383,10 +391,9 @@ else no "other live session warned by identity" "expected a WARN naming $SESSION
 # an old transcript is not a live session
 SBX="$(mk_sandbox)"
 : > "$SBX/config/projects/$PROJSLUG/$SESSION_B.jsonl"
-touch -t 202601010000 "$SBX/config/projects/$PROJSLUG/$SESSION_B.jsonl"
 rc="$(run_probe "$SBX")"
-expect_eq "stale transcript still exits 0" "0" "$rc"
-expect_file_no_regex "stale transcript raises no live-session warning" "WARN.*$SESSION_B" "$OUT"
+expect_eq "a transcript with no running process still exits 0" "0" "$rc"
+expect_file_no_regex "a transcript with no running process raises no live-session warning" "WARN.*$SESSION_B" "$OUT"
 
 # our own transcript is never reported as somebody else
 SBX="$(mk_sandbox)"
@@ -409,22 +416,22 @@ expect_eq "a run over a legacy single-slot file still exits 0" "0" "$rc"
 expect_false "the legacy single-slot file is pruned, not honored" [ -e "$SBX/repo/$LEGACY_STATE_REL" ]
 expect_true "this session's own per-session record was written instead" [ -f "$SBX/repo/$STATE_REL" ]
 
-# (iv) a per-session attestation whose session has no live working log anywhere under
-# CLAUDE_CONFIG_DIR/projects (no transcript file for it at all) is DEAD and pruned.
+# (iv) a per-session attestation whose session has no running process (no CLI session file
+# names it) is DEAD and pruned.
 SBX="$(mk_sandbox)"
 mkdir -p "$SBX/repo/.bionic/tmp"
 printf 'version=1\nkind=preflight-attestation\nsession_id=%s\nrepo=/dead\n' "$SESSION_C" \
   > "$SBX/repo/.bionic/tmp/preflight-$SESSION_C.state"
 rc="$(run_probe "$SBX")"
 expect_eq "a run over a dead-session leftover still exits 0" "0" "$rc"
-expect_false "the dead session's attestation (no transcript anywhere) is pruned" \
+expect_false "the dead session's attestation (no running process) is pruned" \
   [ -e "$SBX/repo/.bionic/tmp/preflight-$SESSION_C.state" ]
 
-# (iv, other half) a LIVE foreign session's attestation — its transcript exists — is
+# (iv, other half) a LIVE foreign session's attestation — its process is running — is
 # NEVER pruned by another session's run. This is the whole point of D-5: two sessions
 # hold valid attestations concurrently.
 SBX="$(mk_sandbox)"
-: > "$SBX/config/projects/$PROJSLUG/$SESSION_B.jsonl"
+live_b "$SBX"
 mkdir -p "$SBX/repo/.bionic/tmp"
 printf 'version=1\nkind=preflight-attestation\nsession_id=%s\nrepo=/somewhere\n' "$SESSION_B" \
   > "$SBX/repo/$STATE_REL_B"
@@ -450,7 +457,7 @@ section "S6c — rostered-vs-unrostered scan (task 4/7, display/warn only)"
 
 # (a) positive: a live foreign session that DOES carry a roster file
 SBX="$(mk_sandbox)"
-: > "$SBX/config/projects/$PROJSLUG/$SESSION_B.jsonl"
+live_b "$SBX"
 mkdir -p "$SBX/repo/.bionic/tmp"
 roster_row_fixture status=confirmed session="$SESSION_B" name=foo agent_id=deadbeef \
   launched_at=x > "$SBX/repo/.bionic/tmp/roster-${SESSION_B}.state"
@@ -464,7 +471,7 @@ fi
 
 # (a) negative: a live foreign session with NO roster file on disk
 SBX="$(mk_sandbox)"
-: > "$SBX/config/projects/$PROJSLUG/$SESSION_B.jsonl"
+live_b "$SBX"
 rc="$(run_probe "$SBX")"
 expect_eq "a live foreign session with NO roster file still exits 0" "0" "$rc"
 if grep -qE "$SESSION_B.*roster: absent" "$OUT" "$ERR" 2>/dev/null; then
@@ -476,7 +483,7 @@ fi
 # (b) an agent-id under a live foreign session's subagents dir that NO roster
 # names is flagged UNROSTERED
 SBX="$(mk_sandbox)"
-: > "$SBX/config/projects/$PROJSLUG/$SESSION_B.jsonl"
+live_b "$SBX"
 mkdir -p "$SBX/config/projects/$PROJSLUG/$SESSION_B/subagents"
 printf '{"name":"orphan"}' > "$SBX/config/projects/$PROJSLUG/$SESSION_B/subagents/agent-orphan123.meta.json"
 rc="$(run_probe "$SBX")"
@@ -490,7 +497,7 @@ fi
 # (b) the same shape, but the agent id IS named by a roster row on disk — no
 # UNROSTERED flag for it
 SBX="$(mk_sandbox)"
-: > "$SBX/config/projects/$PROJSLUG/$SESSION_B.jsonl"
+live_b "$SBX"
 mkdir -p "$SBX/config/projects/$PROJSLUG/$SESSION_B/subagents"
 printf '{"name":"covered"}' > "$SBX/config/projects/$PROJSLUG/$SESSION_B/subagents/agent-covered456.meta.json"
 mkdir -p "$SBX/repo/.bionic/tmp"

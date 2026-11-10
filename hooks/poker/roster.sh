@@ -170,8 +170,12 @@ stop_run_record() {
 # never-admitted id from this call alone), so the parked or running shim, TERMed next, finds its request
 # ended and its own trap's end changes nothing; then its holder's process group is TERMed (never this call's
 # own group: then the holder alone), KILLed after 5 s if it lives on; then the record line.
+# stop_run_gate <id> --waiting -> the same stop of a request that was never admitted, and of no other: the end is
+# written `--waiting`, so the gate refuses it under the lock that admits (rc 3) once the request is admitted, and
+# that run is left to finish, nothing sent. This is the tick's withdrawal of a writer stood down for the load,
+# whose admitted runs are never ended for it (docs/adrs/adr-077-the-gate-steers-by-the-load.md).
 stop_run_gate() {
-  local id="$1" gd f sid who kind key state hp hs pg self what i rec=""
+  local id="$1" only="${2:-}" gd f sid who kind key state hp hs pg self what i rec="" ge
   gd="$(gate_dir)"; f="$gd/requests/$id"
   _gate_read "$f" 2>/dev/null || { die "stop-run — gate request $id cannot be read"; return 2; }
   who="${_R_who#*:}"; kind="$_R_kind"; key="${_R_key//|/ }"
@@ -189,7 +193,12 @@ stop_run_gate() {
     return 0
   fi
   sid="$(session_id 2>/dev/null)" || sid=""; sid="${sid:-none}"
-  if ! gate_end "$id" 143 --by "$sid" --why "${SR_WHY:--}" 2>/dev/null; then
+  gate_end "$id" 143 --by "$sid" --why "${SR_WHY:--}" ${only:+--waiting} 2>/dev/null; ge=$?
+  if [ "$ge" -eq 3 ] && [ -n "$only" ]; then
+    say "stop-run request $id ${who:--} $kind $key — admitted; left to finish, since an admitted run is never ended for the load"
+    return 0
+  fi
+  if [ "$ge" -ne 0 ]; then
     die "stop-run — gate request $id could not be ended (the gate's store or lock); nothing was sent"
     return 2
   fi

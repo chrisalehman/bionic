@@ -299,17 +299,15 @@ printf '# attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\n' "
 # WORLD ISOLATION (w2-s45-wallfacts.md §7 diagnosis): `make_world` gives this world its
 # OWN CLAUDE_CONFIG_DIR under $T_REPO/../cfg, but `drive()` runs the gate under the ONE
 # shared CLAUDE_CONFIG_DIR exported above — the config dir the auto-probe's D-5 pruning
-# actually reads. Under that shared dir session A has no transcript anywhere, so it reads
-# as dead: the FIRST auto-probe driven against this world (start|foreign-attestation,
+# actually reads. Under that shared dir no running process is session A, so it reads as
+# dead: the FIRST auto-probe driven against this world (start|foreign-attestation,
 # session B, driven before start|attested below) prunes A's attestation as a dead
-# session's stale record, and start|attested then finds nothing and refuses. Planting A's
-# transcript under the SHARED config dir — not just the world's own — is what makes A
-# read as live wherever the gate actually looks; `session_transcript_exists()` in
-# hooks/preflight-probe.sh scans every project directory under CONFIG_DIR, not one keyed
-# to a specific repo, so this single file is sufficient regardless of slug.
-T_SLUG=$(printf '%s' "$T_REPO" | sed 's/[^a-zA-Z0-9]/-/g')
-mkdir -p "$CLAUDE_CONFIG_DIR/projects/$T_SLUG"
-printf '{}\n' > "$CLAUDE_CONFIG_DIR/projects/$T_SLUG/$SID_A.jsonl"
+# session's stale record, and start|attested then finds nothing and refuses. A CLI session
+# file under the SHARED config dir naming a running process (this shell) as A is what makes
+# A read as live wherever the gate actually looks (lib/alive.sh's rule; a transcript
+# outlives its session, so it says nothing).
+mkdir -p "$CLAUDE_CONFIG_DIR/sessions"
+jq -n --argjson p "$$" --arg s "$SID_A" '{pid:$p, sessionId:$s}' > "$CLAUDE_CONFIG_DIR/sessions/$$.json"
 
 # `start|attested` (below) is THE POSITIVE PAIR and its §7 direction is literal silence on
 # both streams. Until epic-16 wave-02 that claim needed a genuinely LIVE session sweeper

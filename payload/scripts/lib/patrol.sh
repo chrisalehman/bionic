@@ -89,6 +89,13 @@ if ! declare -F roster_open_names >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/roster.sh"
 fi
+# alive.sh, THE SAME SOFT SOURCE, for `alive_sessions`: whether a session is alive has one rule, and
+# the live set below is that rule's enumeration. Without it the live set is empty and the dead set
+# names nothing: a rule this process cannot read never sends a session's state to the sweep.
+if ! declare -F alive_sessions >/dev/null 2>&1 && [ -r "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/alive.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/alive.sh"
+fi
 # time.sh, THE SAME SOFT SOURCE, for `_TIME_ISO_AWK` (wave-39 T17; D18): an instant has one reader, and this file's
 # date arithmetic below is that reader's.
 # A copy of this file read away from its directory (a suite's mutant) finds no time.sh: it still loads, and only
@@ -135,26 +142,13 @@ EOF
 # nested `.bionic/tmp` while this resolver answered with the git toplevel — the session read
 # as blind (FIX-PATROL-ROOT).
 
-# Every live CLI process, from the session files it keeps. `kind`/`status` are
-# deliberately not read: a session file describes a process, and whether that
-# process still exists is a question only the kernel answers — `kill -0` is a
-# builtin, so this survives a machine with no `ps` on PATH.
+# Every live session, by lib/alive.sh's one rule: a process running with the start its record
+# names, the conversation each one holds now and each recorded predecessor of a cleared one.
+# `kind`/`status` are deliberately not read: a session file describes a process, and whether that
+# process still exists is the kernel's answer, not the file's.
 patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
-  local dir f pid sid cwd
-  dir="$(claude_home)/sessions"
-  [ -d "$dir" ] || return 0
-  command -v jq >/dev/null 2>&1 || return 0
-  for f in "$dir"/*.json; do
-    [ -f "$f" ] || continue
-    pid="$(jq -r '.pid // empty' "$f" 2>/dev/null)"
-    sid="$(jq -r '.sessionId // empty' "$f" 2>/dev/null)"
-    cwd="$(jq -r '.cwd // empty' "$f" 2>/dev/null)"
-    [ -n "$pid" ] && [ -n "$sid" ] || continue
-    case "$pid" in ''|*[!0-9]*) continue ;; esac
-    kill -0 "$pid" 2>/dev/null || continue
-    printf 'session=%s|pid=%s|cwd=%s\n' \
-      "$(_patrol_clean "$sid" 80)" "$pid" "$(_patrol_clean "$cwd" 300)"
-  done
+  declare -F alive_sessions >/dev/null 2>&1 || return 0
+  alive_sessions
 }
 
 # ─── SESSION-KEYED STATE UNDER .bionic/tmp ───────────────────────────────────
@@ -321,6 +315,7 @@ patrol_live_session_ids() {  # -> one live session id per line
 # session sweep its own state out from under itself.
 patrol_dead_sessions() {  # <root> [<also-live id>...] -> one session id per line
   local root="${1:-}" live sid; shift 2>/dev/null || :
+  declare -F alive_sessions >/dev/null 2>&1 || return 0
   live="$(patrol_live_session_ids)"
   for sid in "$@"; do
     [ -n "$sid" ] && live="${live}${live:+
