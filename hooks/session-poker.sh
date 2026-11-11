@@ -38,7 +38,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh sitrep card [<plan>] < judgment   the sitrep card, drawn from the sheet and the model's judgment, or every reason it is refused (settles ruled decisions on the register)
 #     bash <plugin-root>/hooks/session-poker.sh cover <question> <a>..<b>   the cover <sha> <basis> line of each commit the judge walks in that range for that question (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh wait <name|run id> [--for <s>]   wait on a detached run until it ends; exits with its code (read-only)
-#     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] --why '<reason>'   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, one hand event)
+#     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] [--machine <caller>] --why '<reason>'   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, one hand event unless a machine caller stops it)
 #     bash <plugin-root>/hooks/session-poker.sh regression-runs [--write]   the full-runner runs the rosters record; --write puts the count in the bound plan's header
 #     bash <plugin-root>/hooks/session-poker.sh anchors check|index [<root>] [--at <commit>]   check every suite's mutation anchors where they point, or print file -> the suites anchored on it (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh matrix-render   write the bound plan's AC blocks from its ## Eval design, each with evidence: pending, and user-confirmed: pending at T4 (writes the plan)
@@ -548,7 +548,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh sitrep card [<plan>] < judgment   the sitrep card: the judgment on stdin, seven lines, one tagged line each (purpose:, call:, grade: <A-F>, point:, ask <key>[, <key>]: <what> — recommend <answer>, close:), checked against the sheet's facts; the card draws every row that is a fact; a card that fails its check prints nothing and exits 1, every reason on stderr"
   die "  bash ${HOOK_DIR}/session-poker.sh cover <question> <a>..<b>   the basis the judge holds a range by: one cover <sha> prose|release|born-review|born-regression|owes line per commit past <a> on <b>'s first-parent line, for evidence, adversarial or structure; the lines current 7 prints under a review ... uncovered <a>..<b> line (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
-  die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> --why '<reason>' [--report-only]   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one hand event, what=stop-run with its reason, goes to the bound run's log; with no reason the stop is refused and nothing is sent"
+  die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> --why '<reason>' [--report-only] [--machine <caller>]   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one hand event, what=stop-run with its reason, goes to the bound run's log, unless --machine names the tool's own caller (close-out's sweep), whose stop is no act by hand; with no reason the stop is refused and nothing is sent"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
   die "  bash ${HOOK_DIR}/session-poker.sh anchors check|index [<root>] [--at <commit>]   check: MOVED <suite>:<line> for each anchor whose text is not on exactly one line where it points (exit 1), nothing and exit 0 when every anchor holds; index: <file> TAB <suite>[,<suite>] per anchored file. <root> defaults to the current tree, --at reads a commit"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: a tier table row for each criterion it lacks, at the tier its eval type maps to (lib/scale.sh), then provenance, serves (the Eval design row's requirement), fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
@@ -1283,18 +1283,20 @@ $1"; shift ;;
     case "$WT_FOR" in '') : ;; *[!0-9]*) usage "wait --for takes whole seconds." ;; esac
     ;;
   stop-run)
-    SR_ARG=""; SR_REPORT_ONLY=no; SR_WHY=""
+    SR_ARG=""; SR_REPORT_ONLY=no; SR_WHY=""; SR_MACHINE=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --report-only) SR_REPORT_ONLY=yes; shift ;;
         --why) [ $# -ge 2 ] || usage "stop-run --why takes the reason, one line."; SR_WHY="$2"; shift 2 ;;
-        -*) usage "stop-run takes one name, run id or gate request id, and at most --report-only and --why '<reason>'." ;;
+        --machine) case "${2:-}" in [a-z]*) SR_MACHINE="${2//[!a-z-]/}"; shift 2 ;; *) usage "stop-run --machine takes the caller's name, as close-out." ;; esac ;;
+        -*) usage "stop-run takes one name, run id or gate request id, and at most --report-only, --machine <caller> and --why '<reason>'." ;;
         *) [ -z "$SR_ARG" ] || usage "stop-run takes one name."; SR_ARG="$1"; shift ;;
       esac
     done
     [ -n "$SR_ARG" ] || usage "stop-run takes the name of a roster row (or a run id, or a gate request id) whose run to stop."
     case "$SR_WHY" in *$'\n'*|*$'\r'*|*'|'*) usage "stop-run --why takes one line, without a '|'." ;; esac
-    # A person's stop is an act by hand, and an act by hand says why; a report sends nothing and needs none.
+    # A person's stop is an act by hand, and an act by hand says why; so does a machine caller, whose stop is no hand
+    # act (--machine). A report sends nothing and needs none.
     case "$SR_REPORT_ONLY:$SR_WHY" in
       yes:*|*:*[![:space:]-]*) ;;
       *) die "REFUSED — stop-run stops a run by hand, and says why: --why '<what went wrong, what the tool lacked>'. Nothing was stopped."; exit 2 ;;

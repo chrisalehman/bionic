@@ -596,11 +596,11 @@ expect_eq "…and with one stops it and leaves one hand event naming it (exits)"
 mkdir -p "$BIONIC_GATE_DIR/requests"
 sg() {  # <id> <why> [--waiting] -> stop_run_gate as the verb and the tick call it, the session bound to the plan
   printf 'key=k%s\nkind=work\nwho=%s:w-q%s\nasked=1000\nholder=-\n' "$1" "$SID" "$1" > "$BIONIC_GATE_DIR/requests/$1"
-  ( cd "$HR" && CLAUDE_CODE_SESSION_ID="$SID" SR_WHY="$2" P="$HP" bash -c 'H="$1"; shift; say() { :; }; die() { :; }
+  ( cd "$HR" && CLAUDE_CODE_SESSION_ID="$SID" SR_WHY="$2" SR_MACHINE="${SR_MACHINE:-}" P="$HP" bash -c 'H="$1"; shift; say() { :; }; die() { :; }
     resolve_run() { POKER_RUN_PLAN="$P"; POKER_RUN_OPEN=yes; }; for l in roots session gate slots run line; do . "$H/../payload/scripts/lib/$l.sh"; done
     . "$H/poker/roster.sh"; REPO_REAL="$PWD"; SR_REPORT_ONLY=no; stop_run_gate "$@"' _ "$BIONIC_HOOKS_DIR" "$1" ${3:+"$3"} ) >/dev/null 2>&1
 }
-sg 901 'a person stopped it'; sg 902 'stood down for the load' --waiting
+sg 901 'a person stopped it'; SR_MACHINE=tick sg 902 'stood down for the load' --waiting
 expect_eq "a request a person stops is a hand event; the tick's withdrawal for the load is none" \
   "stop-run:a person stopped it" "$(hw stop-run | tr '|' '\n' | /usr/bin/grep -v 'closed pipe')"
 LR2="$TMPROOT/hland"; git init -q "$LR2" && git -C "$LR2" commit -q --allow-empty -m init && mkdir -p "$LR2/.bionic/tmp"

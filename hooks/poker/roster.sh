@@ -176,7 +176,8 @@ poker_hand() {
 # that run is left to finish, nothing sent. This is the tick's withdrawal of a writer stood down for the load,
 # whose admitted runs are never ended for it (docs/adrs/adr-077-the-gate-steers-by-the-load.md). It writes no hand
 # event: the machine steering by the load is the tool working, not a person stepping in, and the gate's own end
-# (`--by`, `--why`) keeps the fact.
+# (`--by`, `--why`) keeps the fact. Every machine caller says so the one way, SR_MACHINE: the tick sets it beside its
+# reason, close-out's sweep through the verb's --machine.
 stop_run_gate() {
   local id="$1" only="${2:-}" gd f sid who kind key state hp hs pg self what i rec="" ge
   gd="$(gate_dir)"; f="$gd/requests/$id"
@@ -223,7 +224,7 @@ stop_run_gate() {
     fi
     what="its holder's process group stopped ($what)"
   fi
-  [ -n "$only" ] || poker_hand stop-run "$SR_WHY" "request=$id" "who=${_R_who//|/ }" "kind=$kind" "key=$key" 2>/dev/null \
+  [ -n "${SR_MACHINE:-}" ] || poker_hand stop-run "$SR_WHY" "request=$id" "who=${_R_who//|/ }" "kind=$kind" "key=$key" 2>/dev/null \
     || rec="; no hand event was written (no bound run, or no reason)"
   say "stop-run request $id ${who:--} $kind $key — $state; ended by=$sid why=${SR_WHY:--}, $what$rec"
   return 0
@@ -2366,7 +2367,7 @@ $(run_groups "$RUN_PID")"
         say "stop-run $RUN_NAME run=$RUN_ID pid=$RUN_PID — stopped ($SR_HOW); the run wrote its own end, rc=$SR_RC" ;;
     esac
     # THE ACT IS RECORDED: one hand event in the bound run's log, as for a request.
-    poker_hand stop-run "$SR_WHY" "run=$RUN_ID" "name=$RUN_NAME" 2>/dev/null || :
+    [ -n "${SR_MACHINE:-}" ] || poker_hand stop-run "$SR_WHY" "run=$RUN_ID" "name=$RUN_NAME" 2>/dev/null || :
     exit 0
   }
 
