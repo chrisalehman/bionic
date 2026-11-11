@@ -125,7 +125,7 @@ s56_rec ev1.md "${S56_B:0:10}" "$S56_C2" evidence pass piece
 s42_snap "$R56" "$P56"
 poke "$R56" proof-add review record/wave-01-fixture/ev1.md --question evidence --reader w-aud
 expect_eq "56a §FACT-shape a whole reading record registers (exit 0)" "0" "$RC"
-expect_eq "56a2 …one line added" "1 0;" "$(s42_numstat "$R56")"
+expect_eq "56a2 …the plan byte for byte as it was: the proof is the run's log's" "$(cksum < "$TMPROOT/s42-before")" "$(cksum < "$P56")"
 expect_regex "56a3 …the proof line with the four reading fields, in the table's order" \
   "^proved: kind=review head=${S56_C2} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/ev1.md question=evidence reader=w-aud result=pass scope=piece$" \
   "$(s46_proved "$P56")"
@@ -567,7 +567,7 @@ for s57q in evidence adversarial structure; do
   expect_eq "57t §TASK a task-scale plan registers a $s57q reading through the verb (exit 0)" "0" "$RC"
 done
 expect_eq "57t2 …three reading lines, at the task branch's head" "3" \
-  "$(/usr/bin/grep -cE "^proved: kind=review head=${S57T_C1} .* reader=w-tcrit result=pass scope=piece$" "$P57T")"
+  "$(s46_proved "$P57T" | /usr/bin/grep -cE "^proved: kind=review head=${S57T_C1} .* reader=w-tcrit result=pass scope=piece$")"
 s57_floor "$S57T_C1" "$P57T"
 s57_state "$P57T" "$S57T_C1"
 expect_eq "57t4 …rc 0" "0" "$S57_RC"

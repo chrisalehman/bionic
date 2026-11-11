@@ -84,7 +84,7 @@ row_writer() {  # <roster> <plan> <row> <agent cell>
 #   - the working head reads as a commit;
 #   - no ruling for the row's writer is unread.
 deliver_check() {
-  local row kind files wt status art docs drel abs real rel e n=0 cands="" call fix wb head sid roster rulings live lrc
+  local row kind files wt status art docs drel abs real rel e n=0 cands="" call fix wb head sid roster rulings live lrc pl
   call="bash $HOOK_DIR/session-poker.sh"
   if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
      || ! declare -F proof_branch_head >/dev/null 2>&1; then
@@ -193,12 +193,11 @@ DELIVER_FILES
     case "$rel" in record/*/walk.md) case "${rel#record/}" in */*/*) : ;; *) RL_WALK="$rel"; RL_WALK_REAL="$real" ;; esac ;; esac
   fi
   if [ "$kind" = review ]; then
-    if [ -z "$(awk -v rec="$rel" "$(proof_awk)"'
-        /^[[:space:]]*```/ { fence = !fence; next }
-        fence { next }
-        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-        insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE == rec { print "y"; exit }' "$PV_PLAN" 2>/dev/null)" ]; then
-      die "REFUSED — $PV_ID is a review row and no proved: kind=review line names its record $rel; register the review first: $call proof-add review $rel --question <q> --reader <name>, then $call deliver $PV_ID. The plan is unchanged."
+    pl="$(proof_lines "$PV_PLAN")" \
+      || { die "REFUSED — the run's facts cannot be read, so whether a review proof names $rel is not known; the plan is unchanged. Run $call deliver $PV_ID again."; exit 2; }
+    if [ -z "$(printf '%s\n' "$pl" | awk -v rec="$rel" "$(proof_awk)"'
+        proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE == rec { print "y"; exit }')" ]; then
+      die "REFUSED — $PV_ID is a review row and no review proof of the run names its record $rel; register the review first: $call proof-add review $rel --question <q> --reader <name>, then $call deliver $PV_ID. The plan is unchanged."
       exit 2
     fi
   fi

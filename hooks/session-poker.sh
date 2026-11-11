@@ -2105,11 +2105,15 @@ sched_live_head() {  # <project root> -> sets UNITS_LIVE_HEAD and UNITS_READINGS
   SCHED_LIVE_PLAN="${SCHED_PLAN:-}"
   UNITS_LIVE_HEAD=""; UNITS_READINGS_STATE=""
   [ -n "${SCHED_PLAN:-}" ] && [ -f "$SCHED_PLAN" ] || return 0
-  /usr/bin/grep -q '^[[:space:]-]*proved:.*kind=review' "$SCHED_PLAN" 2>/dev/null || return 0
   if ! declare -F proof_branch_head >/dev/null 2>&1; then
     [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" 2>/dev/null
   fi
   declare -F proof_branch_head >/dev/null 2>&1 || return 0
+  # The review proofs are the run's, read through the kept fold the schedule reads; a fold that fails is no head, and the
+  # review waits.
+  local pl
+  pl="$(proof_lines "$SCHED_PLAN")" || return 2
+  case "$pl" in *"proved: kind=review "*) : ;; *) return 0 ;; esac
   UNITS_LIVE_HEAD="$(proof_branch_head "$SCHED_PLAN" "$1" 2>/dev/null)" || UNITS_LIVE_HEAD=""
   [ -z "$UNITS_LIVE_HEAD" ] || UNITS_READINGS_STATE="$(_units_readings_state "$SCHED_PLAN")"
   return 0
@@ -2761,14 +2765,12 @@ finding_read() {
     FR_WHY="the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB"; return 1
   fi
   rec="${id%#*}"; n="${id##*#}"
-  got="$(awk -v ev="$rec" "$(proof_awk)"'
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && PROOF_EVIDENCE == ev { q = PROOF_QUESTION; h = PROOF_HEAD }
-    END { if (q != "") print q "\t" h }' "$plan")"
+  got="$(proof_lines "$plan")" || { FR_WHY="the run's facts cannot be read, so whether $(clean "$rec") is a registered review is not known; run it again"; return 1; }
+  got="$(printf '%s\n' "$got" | awk -v ev="$rec" "$(proof_awk)"'
+    proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && PROOF_EVIDENCE == ev { q = PROOF_QUESTION; h = PROOF_HEAD }
+    END { if (q != "") print q "\t" h }')"
   if [ -z "$got" ]; then
-    FR_WHY="$(clean "$rec") is no review registered under ## SDLC State (no proved: kind=review line names it as its evidence); register it first: proof-add review $(clean "$rec") --question <question> --reader <name>"
+    FR_WHY="$(clean "$rec") is no review the run registered (no review proof names it as its evidence); register it first: proof-add review $(clean "$rec") --question <question> --reader <name>"
     return 1
   fi
   FR_Q="${got%%	*}"; FR_H="${got#*	}"
@@ -3042,9 +3044,15 @@ pv_missing() {
     END { if (!found) print "the line or block that step owes (the gate gave no detail)" }'
 }
 
+# A FACT THE VERB WRITES TO THE RUN'S LOG goes in once nothing is left to refuse: PV_ACT names the function that appends
+# it, run after the copy is judged and the plan is seen unchanged, so the rename is the only act after it. Its failure
+# refuses with the plan unchanged; a rename that fails after it says the fact stands in the log and names the plan edit
+# left undone, PV_UNDONE. A copy that is the plan writes the fact alone. Both are cleared once used.
 plan_verb_swap() {
-  local verb="$1" what="$2" dry="$3" cur
+  local verb="$1" what="$2" dry="$3" cur act="${PV_ACT:-}" undone="${PV_UNDONE:-}"
+  PV_ACT=""; PV_UNDONE=""
   if cmp -s "$PV_NEW" "$PV_PLAN"; then
+    if [ -n "$act" ]; then "$act" || exit 2; return 0; fi
     say "$verb — $what: the plan already reads so; nothing was written."
     exit 0
   fi
@@ -3057,8 +3065,13 @@ plan_verb_swap() {
     die "REFUSED — $PV_PLAN changed while the plan with $what was being judged; nothing was written. Run $verb again."
     exit "${PV_RACE_RC:-1}"
   fi
+  [ -z "$act" ] || "$act" || exit 2
   if ! mv -f "$PV_NEW" "$PV_PLAN"; then
-    die "REFUSED — could not move the judged copy over $PV_PLAN; the plan is unchanged."
+    if [ -n "$act" ]; then
+      die "$verb — $what stands in the run's log, so do not run $verb again for it; the judged copy could not be moved over $PV_PLAN, so ${undone:-its plan edit} is left undone."
+    else
+      die "REFUSED — could not move the judged copy over $PV_PLAN; the plan is unchanged."
+    fi
     exit 2
   fi
   return 0

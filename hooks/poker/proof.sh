@@ -200,24 +200,23 @@ walk_settle() {
 }
 
 # THE WALK'S REGISTRATION, one act over a plan copy: the record read as the critic's (proof_verdicts), its head
-# (walk_head), its `proved: kind=walk` line, the cells it confirms (walk_settle) and the pointer (plan.sh
-# walk_pointer_put). proof-add walk runs it alone; deliver runs it at the walk row's landing, in the landing's own write,
-# so the row lands with its cells settled or does not land.
+# (walk_head), the cells it confirms (walk_settle) and the pointer (plan.sh walk_pointer_put), with its proof, one
+# `proof kind=walk` event, pending in every read of the copy and appended by the swap once the copy is judged
+# (`walk_append`, named in PV_ACT). proof-add walk runs it alone; deliver runs it at the walk row's landing, in the
+# landing's own write, so the row lands with its cells settled and its proof in the log, or does neither.
 # walk_register <plan> <copy> <record real path> <record docs-relative> <working head> <repository> -> 0 with the copy
-# written and WALK_HEAD, WALK_N and walk_settle's ids set; 1 with the refusal's sentence in WALK_WHY, the copy to be
-# dropped.
+# written, PV_ACT and PV_UNDONE set for the swap, and WALK_HEAD, WALK_N and walk_settle's ids set; 1 with the refusal's
+# sentence in WALK_WHY, the copy to be dropped.
 walk_register() {
   local plan="$1" copy="$2" real="$3" rel="$4" v rc=0
-  WALK_WHY=""; WALK_HEAD=""; WALK_N=0
+  WALK_WHY=""; WALK_HEAD=""; WALK_N=0; WALK_PLAN="$plan"
   if ! v="$(proof_verdicts "$real")"; then
     WALK_WHY="$v; a walk record carries the critic's shape, a | AC | verdict | why | table and one verdict: line"
     return 1
   fi
   if ! WALK_HEAD="$(walk_head "$real" "$6" "$5")"; then WALK_WHY="$WALK_HEAD"; WALK_HEAD=""; return 1; fi
-  if ! proof_add_line "$copy" "$(proof_line walk "$WALK_HEAD" "$(iso_now)" "$rel")" > "$copy.wr" 2>/dev/null \
-     || [ ! -s "$copy.wr" ] || ! mv -f "$copy.wr" "$copy"; then
-    rm -f "$copy.wr"; WALK_WHY="the plan carries no ## SDLC State section to hold the walk's proof line"; return 1
-  fi
+  WALK_EV=("kind=walk" "head=$WALK_HEAD" "evidence=$rel")
+  proof_pending "${WALK_EV[@]}" || { WALK_WHY="the walk record's path $rel holds a | or a line break, which the run's log cannot hold"; return 1; }
   walk_settle "$plan" "$copy" "$rel" <<< "$v" || return 1
   walk_pointer_put "$copy" "$rel" || rc=$?
   case "$rc" in
@@ -226,7 +225,16 @@ walk_register() {
     *) WALK_WHY="walk-artifact: cannot be written into the Step 5 block (exit $rc)"; return 1 ;;
   esac
   WALK_N="$(printf '%s\n' $WALK_DONE | awk 'NF { n++ } END { print n + 0 }')"
+  PV_ACT=walk_append; PV_UNDONE="the cells the walk confirms (${WALK_DONE:-none}) and walk-artifact:"
   return 0
+}
+# walk_append -> the walk's proof appended to the run's log by the proof library's one writer; 1 with the plan unchanged.
+walk_append() {
+  if ! proof_event "$WALK_PLAN" "${WALK_EV[@]}"; then
+    die "REFUSED — the walk proof at ${WALK_HEAD:0:12} could not be appended to the run's log of $WALK_PLAN; the plan is unchanged."
+    return 1
+  fi
+  proof_pending
 }
 # THE WALK'S ACT IS RECORDED, AND IS NO HAND-HOLD: one `ev=walk` line in the landing record naming the record and how
 # many rows it discharged, appended once the plan write is in. The hand-holds fold counts `ev=matrix-set` as a status
@@ -604,9 +612,18 @@ whole_run_at_head() {
   # never an operand. The line goes in through the shared transaction; every refusal below
   # leaves the plan byte-identical and names its fix. proof.sh is loaded here, for this verb alone, as brief.sh is for task-add and amend:
   # the tick never reads it, so it is not one of the libraries every verb needs.
+  # pf_append -> the proof the verb registers (PF_EV), appended to the run's log by the proof library's one writer once
+  # the plan's copy is judged; the pending proof every read of the copy took is cleared. 1 with the plan unchanged.
+  pf_append() {
+    if ! proof_event "$PV_PLAN" "${PF_EV[@]}"; then
+      die "REFUSED — the ${PF_EV[0]#kind=} proof could not be appended to the run's log of $PV_PLAN; the plan is unchanged. Run proof-add again."
+      return 1
+    fi
+    proof_pending
+  }
   poker_verb_proof_add() {
     if ! { declare -F proof_last >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-       || ! declare -F proof_add_line >/dev/null 2>&1; then
+       || ! declare -F proof_event >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
     fi
@@ -937,7 +954,7 @@ PF_OTHER_LIST
       fi
       plan_verb_swap proof-add "the walk proof at $WALK_HEAD" writer
       walk_recorded "$PV_PLAN" "$PF_REL"
-      say "proof-add — kind=walk head=$WALK_HEAD evidence=$PF_REL: written to $PV_PLAN; dry-committed first."
+      say "proof-add — kind=walk head=$WALK_HEAD evidence=$PF_REL: written to the run's log, the plan's copy dry-committed first."
       say "proof-add — $(walk_said "$PF_REL")"
       exit 0
     fi
@@ -1028,11 +1045,20 @@ PF_PAIRS_LIST
     # a whole read was refused while a build row was open (D10), because the judge covered a whole line with any
     # whole reading whatever its head. The judge now reaches only as far as the question's chain (wave-36 T7;
     # A-T7-5), so what lands after the reading is the cover rule's to judge, and the verb holds nothing.
-    PF_LINE="$(proof_line "$PF_KIND" "$PF_HEAD" "$(iso_now)" "$PF_REL" "$PF_QUESTION" "$PF_READER" "$PF_RESULT" "$PF_SCOPE")"
-    # A RED WHOLE RUN'S REDS RIDE ON ITS LINE (wave-35 T9; D8, AC-1.3): proof_attested took each log and every red
-    # named; the line lists them as owed, and the judge reads them there. Its evidence= is the logs, comma-joined (T35).
+    PF_EV=("kind=$PF_KIND" "head=$PF_HEAD" "evidence=$PF_REL")
+    [ -z "$PF_QUESTION" ] || PF_EV+=("question=$PF_QUESTION" "reader=$PF_READER" "result=$PF_RESULT" "scope=$PF_SCOPE")
+    # A RED WHOLE RUN'S REDS RIDE ON ITS PROOF (wave-35 T9; D8, AC-1.3): proof_attested took each log and every red
+    # named; the proof lists them as owed, and the judge reads them there. Its evidence= is the logs, comma-joined (T35),
+    # and it names the recorded run it read.
     if [ "$PF_KIND" = regression ]; then
-      PF_LINE="$(proof_floor_line "$PF_HEAD" "$(iso_now)" "$PF_REL" "$PF_OWED" "run=$PF_RUNAT head=$PF_HEAD rc=$PF_RUNRC")"
+      [ -z "$PF_OWED" ] || PF_EV+=("owed=$PF_OWED")
+      [ -z "$PF_RUNAT" ] || PF_EV+=("run=$PF_RUNAT")
+      [ -z "$PF_RUNRC" ] || PF_EV+=("rc=$PF_RUNRC")
+    fi
+    # THE PROOF IS READ AS STANDING BY EVERY JUDGMENT OF THE COPY BELOW, and appended only once nothing is left to refuse.
+    if ! proof_pending "${PF_EV[@]}"; then
+      die "REFUSED — the proof's fields hold a | or a line break, which the run's log cannot hold; the plan is unchanged."
+      exit 1
     fi
     # A RATED READING DEFERS WHAT THE TABLE DEFERS: one deferral event per finding the table
     # defers, appended to the run's log once the proof line is in the plan (lib/proof.sh `proof_finding_deferrals`).
@@ -1041,10 +1067,7 @@ PF_PAIRS_LIST
     if [ "$PF_SEV" = 1 ]; then
       PF_FINDS="$(proof_findings "$PF_REAL")"; PF_PLANL="$(proof_finding_lines "$PF_REL" "$PF_FINDS")"
     fi
-    if ! proof_add_line "$PV_PLAN" "$PF_LINE" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
-      die "REFUSED — $PV_PLAN carries no ## SDLC State section to hold the proof; the plan is unchanged."
-      exit 1
-    fi
+    cp "$PV_PLAN" "$PV_NEW"
     # THE VERDICTS GO INTO THE MATRIX IN THE PROOF'S OWN WRITE: each named row's auditor cell, CONFIRMED as the bare
     # token the gate compares and any other verdict as the critic wrote it; a row the table does not name keeps its
     # cell. A criterion the matrix table has no row for refuses the whole registration.
@@ -1078,8 +1101,8 @@ PF_VERDICTS_LIST
       mv "$PV_NEW.v" "$PV_NEW"
     fi
     # THE REGRESSION'S PROOF IS THE STACK'S HEALTH: the head's stack-health: line is the judge's fact rendered by the one
-    # function every writer calls (lib/proof.sh `proof_health_put`), read from the copy that holds the new proof line and
-    # the plan's own landing record. It replaces the stub matrix-render writes and a line a writer rendered before; a
+    # function every writer calls (lib/proof.sh `proof_health_put`), read from the run's facts with the new proof pending
+    # and the plan's own landing record. It replaces the stub matrix-render writes and a line a writer rendered before; a
     # declared n/a: or a person's own snapshot is their word and stays, and a plan with no matrix yet has no head to
     # write, the proof standing alone.
     PF_SH=""
@@ -1140,6 +1163,7 @@ PF_VERDICTS_LIST
       [ "$_pf_live" = " " ] || PF_NONE="$(units_rows "$PV_NEW" 2>/dev/null | awk -F'\t' -v ids="$_pf_live" '
         index(ids, " " $1 " ") { printf "%s%s (%s)", (n++ ? ", " : ""), $1, $9 }')"
     fi
+    PV_ACT=pf_append; PV_UNDONE="${PF_CELLS:+the auditor cells ($PF_CELLS) and auditor-wave: }${PF_SH:+stack-health: }${PF_BACK:+$PF_BACK back to pending}"
     plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
     if [ -n "$PF_PLANL" ] && ! proof_finding_deferrals "$PV_PLAN" "$PF_REL" "$PF_FINDS"; then
       die "proof-add — the $PF_KIND proof at $PF_HEAD is written, and its deferrals could not be appended to the run's log of $PV_PLAN: the findings the table defers are not deferred."
@@ -1161,7 +1185,7 @@ PF_VERDICTS_LIST
       esac
     fi
     PF_FIELDS=""; [ -z "$PF_QUESTION" ] || PF_FIELDS=" question=$PF_QUESTION reader=$PF_READER result=$PF_RESULT scope=$PF_SCOPE ($PF_ROLE)"
-    say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS${PF_OWED:+ owed=$PF_OWED}: written to $PV_PLAN${PF_BACK:+; $PF_BACK back to pending}; dry-committed first."
+    say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS${PF_OWED:+ owed=$PF_OWED}: written to the run's log${PF_BACK:+; $PF_BACK back to pending in $PV_PLAN}; the plan's copy dry-committed first."
     [ -z "$PF_CELLS" ] || say "proof-add — the auditor cells: $PF_CELLS; auditor-wave: $PF_WAVE"
     [ -z "$PF_SH" ] || say "proof-add — stack-health: $PF_SH"
     [ -z "$PF_OWED" ] || say "proof-add — the whole run left $PF_OWED red: each is owed until a later landing runs it green (a fix row), or proof-add inherited <suite> finds it red at the base too."
@@ -1289,7 +1313,7 @@ PF_VERDICTS_LIST
     FM_READS="$(review_readings "$PV_PLAN")" \
       || { die "REFUSED — the run's facts could not be read, so the reviews it registers are not known; the plan is unchanged. Run again: bash ${HOOK_DIR}/session-poker.sh finding-move with the same words"; exit 2; }
     if ! printf '%s\n' "$FM_READS" | awk -F'\t' -v ev="$FM_REC" '$1 == ev { hit = 1 } END { exit !hit }'; then
-      die "REFUSED — $(clean "$FM_REC") is no review registered under ## SDLC State (no proved: line names it as its evidence), and only a registered finding is moved; the plan is unchanged."
+      die "REFUSED — $(clean "$FM_REC") is no review the run registered (no review proof names it as its evidence), and only a registered finding is moved; the plan is unchanged."
       exit 1
     fi
     FM_DOCS="$(docs_root "$PV_REPO")"
@@ -1465,7 +1489,9 @@ DSP_MOVE
             # A landing no green verdict names is fixed by the first green whole run that descends from it.
             if ! { _proof_fields && line_held "$DSP_REC" && line_lines "$DSP_REC" | awk -v k="|row=${DSP_FROW%%	*}|commit=${DSP_FROW#*	}|" \
               'index($0, k) && index($0, "|result=green|") { f = 1 } END { exit !f }'; }; then
-              for DSP_RH in $(_proof_regression_heads "$PV_PLAN" "$DSP_REC"); do
+              DSP_RHS="$(_proof_regression_heads "$PV_PLAN" "$DSP_REC")" \
+                || { die "REFUSED — the run's facts could not be read, so no finding is ruled or opened. Run again: bash ${HOOK_DIR}/session-poker.sh disposition"; exit 2; }
+              for DSP_RH in $DSP_RHS; do
                 git -C "$PV_REPO" merge-base --is-ancestor "${DSP_FROW#*	}" "$DSP_RH" 2>/dev/null || continue
                 DSP_DEC="none: ${DSP_FROW%%	*} landed on no suite; fixed by the regression at $(printf '%.12s' "$DSP_RH")"; break
               done
@@ -1539,8 +1565,8 @@ DSP_READINGS
   poker_verb_release_check() {
     RC_CMD="$(config_value "$(project_root "$PWD")" release-check "" 2>/dev/null)"
     [ -n "$RC_CMD" ] || exit 0
-    if ! { declare -F proof_line >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-       || ! declare -F proof_add_line >/dev/null 2>&1; then
+    if ! { declare -F proof_event >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+       || ! declare -F proof_event >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; nothing was run and the plan is unchanged."
       exit 2
     fi
@@ -1622,11 +1648,10 @@ DSP_READINGS
       exit 1
     fi
     if [ "$RC_RC" -ne 0 ] || [ -n "$RC_LEFT" ]; then
-      if ! proof_add_line "$PV_PLAN" "$(proof_line check "$RC_HEAD" "$(iso_now)" "$RC_REL") result=fail" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
-        die "REFUSED — the declared release-check ($(clean "$RC_CMD")) exited $RC_RC over ${RC_BASE:0:12}..${RC_HEAD:0:12} ($RC_FROM), and $PV_PLAN carries no ## SDLC State section to hold its failing fact; its log is $RC_LOG.$RC_SAID"
+      if ! proof_event "$PV_PLAN" kind=check "head=$RC_HEAD" "evidence=$RC_REL" result=fail; then
+        die "REFUSED — the declared release-check ($(clean "$RC_CMD")) exited $RC_RC over ${RC_BASE:0:12}..${RC_HEAD:0:12} ($RC_FROM), and its failing fact could not be appended to the run's log of $PV_PLAN; its log is $RC_LOG.$RC_SAID"
         exit 1
       fi
-      plan_verb_swap release-check "the failing check at $RC_HEAD" writer
       if [ -n "$RC_LEFT" ]; then
         die "REFUSED — check-dirtied: the declared release-check ($(clean "$RC_CMD")) $RC_LEFT, as land refuses a check that does; its log $RC_REL and a result=fail check fact at ${RC_HEAD:0:12} were written. Put back what it changed, make the check change nothing, and run release-check again.$RC_SAID"
         exit 1
@@ -1638,12 +1663,11 @@ DSP_READINGS
       die "REFUSED — $(clean "$RC_AT"). The plan is unchanged."
       exit 1
     fi
-    if ! proof_add_line "$PV_PLAN" "$(proof_line check "$RC_AT" "$(iso_now)" "$RC_REL")" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
-      die "REFUSED — $PV_PLAN carries no ## SDLC State section to hold the check proof; the plan is unchanged."
+    if ! proof_event "$PV_PLAN" kind=check "head=$RC_AT" "evidence=$RC_REL"; then
+      die "REFUSED — the check proof at ${RC_AT:0:12} could not be appended to the run's log of $PV_PLAN; its log is $RC_LOG. Run release-check again."
       exit 1
     fi
-    plan_verb_swap release-check "the check proof at $RC_AT" writer
-    say "release-check — kind=check head=$RC_AT base=$RC_BASE ($RC_FROM) evidence=$RC_REL: written to $PV_PLAN; dry-committed first.$RC_SAID"
+    say "release-check — kind=check head=$RC_AT base=$RC_BASE ($RC_FROM) evidence=$RC_REL: written to the run's log.$RC_SAID"
     # THE PRIORITY A RECORD NEVER STATES (wave-28 T15; D19): each finding the plan defers or owes a
     # check for, with the table's priority (lib/proof.sh `proof_findings_owed`, the tick's own line).
     proof_findings_owed "$PV_PLAN" 2>/dev/null | while IFS= read -r _rc_f; do say "release-check — finding $(clean "$_rc_f")"; done

@@ -2590,8 +2590,8 @@ bionic_finding_root() { audit_root; }
 # AND ONE LINE PER OPEN DECLARED DEBT (wave-27 T31, T67; REQ-14 AC-14.3, D23; A-orch-121),
 # `debt<TAB><suite><TAB><token>`: a debt `land` wrote to the landing record, HANDED to this wall by
 # its collector (hooks/bash-walls.sh: `BIONIC_DEBTS_OPEN`, read for `BIONIC_DEBTS_PLAN`), with no
-# `proved: kind=floor` or `kind=task` line in the section dated after its threshold (lib/proof.sh
-# `proof_debts_open`, the text half of the judge's own rule). A `landed red:` line in the plan is not
+# regression or task proof of the run dated after its threshold (lib/proof.sh `proof_debts_open`, the
+# judge's own rule over the proofs and the section's approvals). A `landed red:` line in the plan is not
 # read. Debts handed for another plan than the one judged here are not this plan's, and are not read.
 _eg_reading_gaps() {
   local qs
@@ -2636,9 +2636,11 @@ _eg_reading_gaps() {
         else if (t[q] == "fact" && r[q] == "fail") print "failing\t" q "\t" e[q]
       }
     }'
-  if [ -n "${BIONIC_DEBTS_OPEN:-}" ] && [ "$handed" = 1 ] && [ "$_EG_V15" -eq 0 ] \
-     && declare -F proof_debts_open >/dev/null 2>&1; then
-    printf '%s\n' "$SECTION" | proof_debts_open "$BIONIC_DEBTS_OPEN"
+  # The proofs that clear a debt are the run's, read through the kept fold from the plan whose record is read (a dry
+  # copy names none); the approvals are still the section's lines, and its older proof lines are already the fold's.
+  if [ -n "${BIONIC_DEBTS_OPEN:-}" ] && [ "$handed" = 1 ] && declare -F proof_debts_open >/dev/null 2>&1; then
+    f="$(proof_lines "${BIONIC_DEBTS_ORIGIN:-$PLAN}")" || { printf 'unreadable\n'; return 0; }
+    { printf '%s\n' "$SECTION" | awk '!/^proved:[ \t]/'; printf '%s\n' "$f"; } | proof_debts_open "$BIONIC_DEBTS_OPEN"
   fi
 }
 
@@ -2703,7 +2705,7 @@ _eg_refuse_floor_absent() {
   [ "${CURRENT%[ab]}" -ge "$from" ] 2>/dev/null || return 0
   if declare -F proof_floor_absent >/dev/null 2>&1; then
     why="$(proof_floor_absent "$PLAN")" || return 0
-    why="its section holds no 'proved: kind=regression' line: ${why} (the judge's regression absent)"
+    why="the run holds no regression proof: ${why} (the judge's regression absent)"
   else
     why="the regression's proof line cannot be read here: lib/proof.sh is not loaded beside units.sh"
   fi
@@ -5001,8 +5003,6 @@ dispatch() {
       [ -z "$(frontmatter_get environments)" ] || _eg_v15_owe "Step 5's environments-covered:" ;;
     esac
     case "${CURRENT%[ab]}" in 6|7|8|9) _eg_refuse_readings "the run" "$RIGOR"; _eg_refuse_floor_absent "the run" ;; esac
-    [ -z "${BIONIC_DEBTS_OPEN:-}" ] || [ "${BIONIC_DEBTS_PLAN:-}" != "$PLAN" ] \
-      || _eg_v15_owe "the proofs that clear a row's declared red (read from the state section's lines)"
     _eg_v15_refuse
     return 0
   fi

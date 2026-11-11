@@ -231,6 +231,17 @@ _units_live() {
     END { for (i = 1; i <= n; i++) printf "%s\t%s\t%s\n", ord[i], st[ord[i]], (st[ord[i]] == "active" ? nm[ord[i]] : "") }'
 }
 
+# A PROOF IS THE RUN'S TOO: what each row's proof read, `live:head` and a reading's question compare is the run's proofs,
+# from the same kept fold (lib/proof.sh `proof_lines`, which reads a writer's copy as its plan), never the plan's text.
+# _units_proofs <plan> -> one `proved:` line per standing proof, in fact order; nothing without lib/proof.sh; 2 a failed fold
+_units_proofs() {
+  if [ -n "${_UNITS_MEMO_PLAN:-}" ] && [ "$_UNITS_MEMO_PLAN" = "${1:-}" ] && [ -n "${_UNITS_MEMO_PROOFS_RC:-}" ]; then
+    printf '%s' "$_UNITS_MEMO_PROOFS"; return "$_UNITS_MEMO_PROOFS_RC"
+  fi
+  _units_lib proof.sh proof_lines || return 0
+  proof_lines "${1:-}"
+}
+
 # _units_overlay <live> <rows> -> the rows, each moved row's status and agent the run's
 _units_overlay() {
   [ -n "$1" ] || { printf '%s\n' "$2"; return 0; }
@@ -305,9 +316,10 @@ units_memoised() {  # <plan> <command> [args...]
   fi
   local _UNITS_MEMO_PLAN="" _UNITS_MEMO_OUT="" _UNITS_MEMO_RC=1 _UNITS_MEMO_FLOOR="${_UNITS_MEMO_FLOOR:-}" own="" rc
   local _UNITS_MEMO_WAITS="${TMPDIR:-/tmp}/bionic-units-waits-$$-${RANDOM}${RANDOM}"
-  local _UNITS_MEMO_LIVE="" _UNITS_MEMO_LIVE_RC=""
+  local _UNITS_MEMO_LIVE="" _UNITS_MEMO_LIVE_RC="" _UNITS_MEMO_PROOFS="" _UNITS_MEMO_PROOFS_RC=""
   _UNITS_MEMO_OUT="$(_units_read "${1:-}")"; _UNITS_MEMO_RC=$?
   _UNITS_MEMO_LIVE="$(_units_live "${1:-}")"; _UNITS_MEMO_LIVE_RC=$?
+  _UNITS_MEMO_PROOFS="$(_units_proofs "${1:-}")"; _UNITS_MEMO_PROOFS_RC=$?
   _UNITS_MEMO_PLAN="${1:-}"
   if [ -z "$_UNITS_MEMO_FLOOR" ]; then
     _UNITS_MEMO_FLOOR="${TMPDIR:-/tmp}/bionic-units-floor-$$-${RANDOM}${RANDOM}"; own=1
@@ -1094,7 +1106,7 @@ _units_proof_awk() {
 # `covered`. The tick computes it once (session-poker.sh `sched_facts_state`); unset, it waits.
 # `holds` (units_floor_holds) takes the regression row's id, or nothing, in the <step> slot.
 _units_sched() {
-  local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows hasreads=0 i fst rst rc wts live
+  local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows hasreads=0 i fst rst rc wts live proofs
   if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ] && [ "$mode" != whole ] \
      && [ "$mode" != questions ]; then
     case "$step" in ''|*[!0-9]*) return 2 ;; esac
@@ -1103,6 +1115,7 @@ _units_sched() {
   case "$out" in *$'\n'*) rows="${out#*$'\n'}" ;; *) rows="" ;; esac
   [ -n "$rows" ] || return 0
   live="$(_units_live "$plan")" || return 2
+  proofs="$(_units_proofs "$plan")" || return 2
   rows="$(_units_overlay "$live" "$rows")"
   # THE CONTROL LINE'S FOURTH FIELD names the columns the header carries (`units_has_column`'s
   # reading, taken here from the parse already in hand).
@@ -1124,18 +1137,18 @@ _units_sched() {
   wts=""
   case "$mode" in ready|held|waiting|edges|holds) wts="$(_units_waits "$plan")" || return 1 ;; esac
   fst="$(_units_floor_kept "$plan")"; rst="${UNITS_READINGS_STATE:-}"
-  _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst" "$rst" "$wts"; rc=$?
+  _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst" "$rst" "$wts" "$proofs"; rc=$?
   for i in 1 2; do
     if [ "$rc" -eq 3 ] && [ -z "$fst" ]; then fst="$(_units_floor_state "$plan")"
     elif [ "$rc" -eq 4 ] && [ -z "$rst" ]; then rst="$(_units_readings_state "$plan")"
     else break
     fi
-    _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst" "$rst" "$wts"; rc=$?
+    _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst" "$rst" "$wts" "$proofs"; rc=$?
   done
   return "$rc"
 }
 
-# _units_sched_run <mode> <plan> <step> <hasreads> <rows> <regression state> <readings state> <waits> -> the
+# _units_sched_run <mode> <plan> <step> <hasreads> <rows> <regression state> <readings state> <waits> <proofs> -> the
 # program's answer and its status: 3, with nothing printed, when the answer needs a regression state not
 # handed in; 4 when it needs the readings' state.
 _units_sched_run() {
@@ -1143,6 +1156,7 @@ _units_sched_run() {
     printf '\034rows\n'; printf '%s\n' "$5"
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$2" 2>/dev/null
     printf '\034waits\n'; printf '%s\n' "${8:-}"
+    printf '\034proofs\n'; printf '%s\n' "${9:-}"
   } | _UNITS_FLOOR_ST="$6" _UNITS_READ_ST="${7:-}" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" -v hasreads="$4" \
       -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" -v evid="${_UNITS_EVIDENCE:-}" \
       -v liveq="${_UNITS_QUESTION:-}" -v pq="${PROOF_QUESTIONS:-}" -v regno="$(_units_regno "$2")" \
@@ -1411,15 +1425,15 @@ _units_post_awk() {
 # before the person is asked. Nothing printed for a plan with no such row, or a table with no reads column. <origin> is
 # the plan whose landing record orders the rows, when <plan> is a copy (default: <plan>), as `units_validate` takes it.
 units_post_readers() {
-  local plan="${1:-}" origin="${2:-}" rows
+  local plan="${1:-}" origin="${2:-}" rows proofs
   rows="$(units_rows "$plan")" || return 1
   [ -n "$rows" ] && units_has_column "$plan" reads || return 0
-  printf '%s\n' "$rows" | awk -F'\t' -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" "$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
-    FNR == NR { if ($1 != "") { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; fil[n] = $9; sta[n] = $10; rd[n] = $13 }; next }
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE != "" { ev[++ne] = PROOF_EVIDENCE }
+  # The registered reviews are the run's proofs (`_units_proofs`), read from the origin a copy was made from.
+  proofs="$(_units_proofs "${origin:-$plan}")" || return 1
+  { printf '%s\n\034\n' "$rows"; [ -z "$proofs" ] || printf '%s\n' "$proofs"; } | awk -F'\t' -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" "$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
+    $0 == "\034" { p = 1; next }
+    !p { if ($1 != "") { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; fil[n] = $9; sta[n] = $10; rd[n] = $13 }; next }
+    proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE != "" { ev[++ne] = PROOF_EVIDENCE }
     END {
       for (r = 1; r <= n; r++) if (knd[r] == "doc" && stp[r] ~ /^[0-9]+$/ && stp[r] + 0 >= 7 && sta[r] == "landed") rel[r] = 1
       for (j = 1; j <= n; j++) {
@@ -1437,7 +1451,7 @@ units_post_readers() {
         }
         printf "%s\t%s\t%s\n", id[j], sta[j], ((read && !unread) ? "read" : "unread")
       }
-    }' - "$plan"
+    }'
 }
 
 # _units_sched_awk -> the awk program `_units_sched` runs. Printed by a function so the comments
@@ -1449,6 +1463,7 @@ _units_sched_awk() {
     $0 == SUBSEP "rows" { part = 1; next }
     $0 == SUBSEP "plan" { part = 2; next }
     $0 == SUBSEP "waits" { part = 3; next }
+    $0 == SUBSEP "proofs" { part = 4; next }
     part == 1 {
       if ($1 == "") next
       n++; id[n] = $1; stp[n] = $2; knd[n] = $3; agt[n] = $5; dep[n] = $6; fil[n] = $9; st[n] = $10; rd[n] = $13
@@ -1460,7 +1475,7 @@ _units_sched_awk() {
       if ($2 == "row") { m = split($4, a, ","); for (k = 1; k <= m; k++) wr[$1, a[k]] = wr[$1, a[k]] " " $3 }
       next
     }
-    # THE PLAN TEXT: the step, and the approval and proof lines inside `## SDLC State`, fences skipped.
+    # THE PLAN TEXT: the step, and the approval lines inside `## SDLC State`, fences skipped.
     part == 2 {
       if ($0 ~ /^[[:space:]]*```/) { fence = !fence; next }
       if (fence) next
@@ -1478,7 +1493,12 @@ _units_sched_awk() {
       } else if (l ~ /^approved[ \t]*:/) {
         v = l; sub(/^approved[ \t]*:[ \t]*/, "", v); split(v, aw, /[ \t]+/)
         if (aw[1] != "") appr[aw[1]] = 1
-      } else if (proof_fields($0)) {
+      }
+      next
+    }
+    # THE PROOFS OF THE RUN (`_units_proofs`), in the order they were last set.
+    part == 4 {
+      if (proof_fields($0)) {
         # ONE READING OF A PROOF LINE, proof.sh `proof_fields` (wave-26 T14; review 7 F6), the one
         # `proof_last` reads through. THE HEAD IS KEPT (review 5 F8): the last line of a kind is
         # the newest, the order the writer appends in, so `live:head` compares against it.

@@ -764,7 +764,7 @@ expect_contains "(d4b) …check-dirtied, naming the checkout it changed" \
   "REFUSED — check-dirtied: the declared release-check (bash tests/lib/release-check.sh" "$DOOR_OUT"
 expect_contains "(d4c) …its log says what the check left" "check-dirtied: the check left tracked files changed in $DX" "$DX_LOG"
 expect_contains "(d4d) …and a failing check fact is written at that head" "head=$DX_H2" \
-  "$(/usr/bin/grep '^proved: kind=check ' "$DX/$DOOR_PLAN_REL" | /usr/bin/grep 'result=fail')"
+  "$(bash -c '. "$1/proof.sh" && proof_lines "$2"' _ "$DL_LIBDIR" "$DX/$DOOR_PLAN_REL" | /usr/bin/grep '^proved: kind=check ' | /usr/bin/grep 'result=fail')"
 _door_inside "$DX" && git -C "$DX" checkout -q -- CHANGELOG.md
 
 finish
