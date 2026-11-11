@@ -1729,7 +1729,7 @@ EOF
     # `status=pending` or clearing `agent` on its row writes the log's retraction of it (units.sh
     # `units_dispatch_back`); a row launched before the log held launches returns by its cells alone.
     if [ "$VERB" = task-set ]; then
-      PV_LIVE="$(_units_live "$PV_PLAN")" || { die "REFUSED — the run's facts cannot be read, so a launch this call takes back cannot be found; the plan is unchanged."; exit 1; }
+      PV_LIVE="$(_units_live "$PV_PLAN")" || { die "REFUSED — the run's facts cannot be read, so a launch this call takes back cannot be found; the plan is unchanged; run again: the same task-set."; exit 1; }
       for _pv_s in "${PV_SETS[@]}"; do
         pv_set_pairs "$_pv_s"
         _pv_back=""
@@ -1742,7 +1742,7 @@ EOF
         [ -n "$_pv_back" ] || continue
         _pv_nm="$(printf '%s\n' "$PV_LIVE" | awk -F'\t' -v id="$PV_SET_ID" '$1 == id && $2 == "active" { print $3 }')"
         [ -z "$_pv_nm" ] || units_dispatch_back "$PV_PLAN" "$PV_SET_ID" "$_pv_nm" \
-          || { die "REFUSED — the launch of $PV_SET_ID as $_pv_nm could not be taken back in the run's log; the plan is unchanged."; exit 1; }
+          || { die "REFUSED — the launch of $PV_SET_ID as $_pv_nm could not be taken back in the run's log; the plan is unchanged; run again: the same task-set."; exit 1; }
       done
     fi
     plan_verb_swap "$VERB" "$PV_WHAT" writer
