@@ -162,7 +162,6 @@ grep -h 'kind=review' "$GL" >> "$L2"; gate
 expect_status "at 15 with each review, still refused: the step's other facts are not in the log" 2 "$GATE_EXIT"
 for f in "Step 1's requirements:" "each row's '- T<id>:' evidence line"; do
   expect_contains "the refusal names what it could not read at 15: $f" "could not be read at 15: $f" "$GATE_SAID"; done
-# The criteria are read at 15: each criterion's fails-when is its Eval design row's, and the matrix is the reader's.
 for f in "each criterion's fails-when:" "the matrix:"; do expect_absent "…and no longer names $f" "could not be read at 15: $f" "$GATE_SAID"; done
 unruled() { ( . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/run.sh"; . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/units.sh"; . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/proof.sh"
   . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh"; matrix_unruled "$P2" 8 "$@" | tr '\n' ' ' ); }
