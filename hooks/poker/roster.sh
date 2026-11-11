@@ -1987,7 +1987,11 @@ EOF
             BIND_WHY="not a plan under this root" ;;
           *)
             if [ -f "$BIND_PATH" ]; then
+              # A plan whose run cannot be read is not called closed: the predicate answers 3, and the fold's own
+              # line is said beside the reason, so the person is sent to what broke.
+              BIND_RO=0; BIND_FOLD="$(run_open "$BIND_PATH" 2>&1 >/dev/null)" || BIND_RO=$?
               BIND_WHY="not an open run"
+              [ "$BIND_RO" -ne 3 ] || BIND_WHY="the run's state could not be read (its facts did not fold)${BIND_FOLD:+ — ${BIND_FOLD%%$'\n'*}}"
             else
               BIND_WHY="not a plan under this root"
             fi ;;

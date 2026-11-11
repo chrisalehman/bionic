@@ -1781,7 +1781,7 @@ resolve_run() {  # <project root> <session id> -> sets POKER_RUN_PLAN / POKER_RU
 }
 
 run_state() {  # <project root> <arming-record path, may be empty> <session id> -> "delivered|<why>" or "open|<why>"
-  local repo="$1" armed="${2:-}" sid="${3:-}" droot plan section current line
+  local repo="$1" armed="${2:-}" sid="${3:-}" droot plan current
   if [ -z "$repo" ] || [ ! -d "$repo" ]; then
     printf 'open|no project root resolved, so no plan could be read'
     return 0
@@ -1812,17 +1812,14 @@ run_state() {  # <project root> <arming-record path, may be empty> <session id> 
     printf 'open|%s is this session'"'"'s bound plan and it cannot be read' "$plan"
     return 0
   fi
-  section="$(normalize_newlines "$plan" | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## SDLC State/ { flag=1; next }
-    /^## / { flag=0 }
-    flag')"
-  current="$(printf '%s\n' "$section" \
-             | grep -E '^[[:space:]]*current[[:space:]]*:' \
-             | head -1 \
-             | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
-             | tr -d '[:space:]')"
+  # THE RUN'S PLACE IS THE READER'S (lib/run.sh `_run_place`): its step, and whether step 9 is delivered. A place that
+  # cannot be read is doubt, and doubt is `open`.
+  local place
+  if ! place="$(_run_place "$plan" 2>/dev/null)"; then
+    printf 'open|the place of %s cannot be read' "$plan"
+    return 0
+  fi
+  current="$(sed -n 's/^n=//p' <<< "$place")"
   if [ -z "$current" ]; then
     printf 'open|%s carries no readable "current:" line' "$plan"
     return 0
@@ -1831,11 +1828,8 @@ run_state() {  # <project root> <arming-record path, may be empty> <session id> 
     printf 'open|%s is at current: %s' "$plan" "$current"
     return 0
   fi
-  line="$(printf '%s\n' "$section" \
-          | grep -E '^[[:space:]]*-?[[:space:]]*Step[[:space:]]+9[[:space:]]*:' \
-          | head -1)"
-  case "$line" in
-    *delivered:*) : ;;
+  case "$place" in
+    *state=delivered*) : ;;
     *) printf 'open|%s is at current: 9 but its Step 9 line records no delivered:' "$plan"
        return 0 ;;
   esac
@@ -2679,19 +2673,17 @@ sitrep_clock() {  # <epoch> <now epoch> -> `H:MM AM/PM`, then ` YYYY-MM-DD` when
 # Set here, before any verb runs, so a value in the caller's environment never chooses the exit
 # (wave-26 T54; review 17 N2).
 PV_RACE_RC=""
-# plan_delivered <plan> -> 0 when the file is a run closed by delivery: `run_open` calls it closed (not unreadable),
-# its frontmatter carries no `abandoned:`, and a `Step 9:` line carries `delivered:`. 1 otherwise, silent. The plan
-# is judged where it lies, so an archived plan is still its run's: lib/binding.sh `bind_delivered` asks the same of a
-# docs-root candidate only, which an archived plan is not.
+# plan_delivered <plan> -> 0 when the file is a run closed by delivery: `run_open` calls it closed (not unreadable) and
+# the reader's state, read with it, is delivered, never abandoned. 1 otherwise, silent. The plan is judged where it
+# lies, so an archived plan is still its run's: lib/binding.sh `bind_delivered` asks the same of a docs-root candidate
+# only, which an archived plan is not.
 plan_delivered() {
-  local lines rc=0
+  local rc=0
   [ -f "${1:-}" ] || return 1
   run_open "$1" || rc=$?
   [ "$rc" -eq 1 ] || return 1
-  lines=$(_run_lines "$1")
-  awk 'NR == 1 && $0 == "---" { f = 1; next } f && $0 == "---" { exit } f && /^abandoned:/ { a = 1 } END { exit !a }' \
-    <<< "$lines" && return 1
-  grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' <<< "$lines"
+  case "${_PROOF_PLACE:-}" in *state=delivered*) return 0 ;; esac
+  return 1
 }
 
 # pv_plan_arg_file -> the file `--plan` (PV_PLAN_ARG) names, read from the working directory and then from the
@@ -2752,7 +2744,10 @@ plan_verb_open() {
     esac
     exit 1
   fi
-  PV_CUR="$(_fill_current_field "$PV_PLAN")"
+  # The run's step as the reader answers it (lib/fill.sh over lib/proof.sh `proof_step_held`). A step that cannot be read
+  # is no step, and PV_CUR_UNREAD says so: a verb that judges or writes at the step refuses on it, never on a guess.
+  PV_CUR=""; PV_CUR_UNREAD=""
+  if _fill_current_load "$PV_PLAN"; then PV_CUR="$_FILL_CURRENT_VALUE"; else PV_CUR_UNREAD=1; fi
   # THE CHECKSUM IS TAKEN HERE, BEFORE ANY PROJECTION READS THE PLAN, so an edit that lands
   # between the read and the swap is an edit the comparison sees.
   PV_SUM="$(cksum < "$PV_PLAN" 2>/dev/null)"

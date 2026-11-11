@@ -271,6 +271,19 @@ _units_facts_of() {
   proof_held_facts "${1:-}" || _proof_facts "${1:-}"
 }
 
+# _units_place <plan> -> `<step> <1|0>`: the run's step, its sub-step letter dropped, and whether the plan's Step-3
+# approval stands, asked of the reader over the facts this shell holds (`_units_fold`), never a second fold; 2 when the
+# reader fails on them. With no reader loaded there is no step and no approval, so the plan's approval is not met.
+_units_place() {
+  local a
+  declare -F reader_q_step >/dev/null 2>&1 || { declare -F _proof_reader_load >/dev/null 2>&1 && _proof_reader_load; } \
+    || { printf ' 0'; return 0; }
+  a="$(set -o pipefail; reader_facts() { printf '%s' "$_UNITS_FACTS"; }
+    reader_q_step "${1:-}" | sed -n 's/^n=//p' || exit 2
+    reader_q_approved "${1:-}" step3; case $? in (0) echo 1 ;; (1) echo 0 ;; (*) exit 2 ;; esac)" || return 2
+  case "$a" in *$'\n'*) printf '%s %s' "$(a="${a%$'\n'*}"; printf '%s' "${a%[ab]}")" "${a##*$'\n'}" ;; *) printf ' %s' "$a" ;; esac
+}
+
 # _units_origin <plan> -> the plan a copy was made from, whose run it reads: a plan verb's `<plan>.<verb>.<pid>` and
 # close-out's preflight `<dir>/.<plan file>.preflight.<pid>` name their plan when it stands; any other path is its own.
 _units_origin() {
@@ -1203,6 +1216,7 @@ _units_sched() {
   [ "$_UNITS_FACTS_PLAN" = "$(_units_origin "$plan")" ] || _units_fold "$plan" || return 2
   live="$(_units_live "$plan")" || return 2
   proofs="$(_units_proofs "$plan")" || return 2
+  _UNITS_PLACE="$(_units_place "$plan")" || return 2
   rows="$(_units_overlay "$live" "$rows")"
   # THE CONTROL LINE'S FOURTH FIELD names the columns the header carries (`units_has_column`'s
   # reading, taken here from the parse already in hand).
@@ -1246,6 +1260,7 @@ _units_sched_run() {
     printf '\034proofs\n'; printf '%s\n' "${9:-}"
   } | _UNITS_FLOOR_ST="$6" _UNITS_READ_ST="${7:-}" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" -v hasreads="$4" \
       -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" -v evid="${_UNITS_EVIDENCE:-}" \
+      -v plancur="${_UNITS_PLACE%% *}" -v planapby="${_UNITS_PLACE##* }" \
       -v liveq="${_UNITS_QUESTION:-}" -v pq="${PROOF_QUESTIONS:-}" -v regno="$(_units_regno "$2")" \
       -v extre="$(_units_ext_re)" "$(_units_proof_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_sched_awk)"
 }
@@ -1562,22 +1577,16 @@ _units_sched_awk() {
       if ($2 == "row") { m = split($4, a, ","); for (k = 1; k <= m; k++) wr[$1, a[k]] = wr[$1, a[k]] " " $3 }
       next
     }
-    # THE PLAN TEXT: the step, and the approval lines inside `## SDLC State`, fences skipped.
+    # THE PLAN TEXT: the approval lines inside `## SDLC State` other than the plan approval, fences skipped. The step
+    # and the approval of the plan are facts of the run (`_units_place`), handed in as plancur and planapby.
     part == 2 {
       if ($0 ~ /^[[:space:]]*```/) { fence = !fence; next }
       if (fence) next
       if ($0 ~ /^## SDLC State/) { insec = 1; next }
       if ($0 ~ /^## /) insec = 0
       if (!insec) next
-      if (!plancurseen && $0 ~ /^[ \t]*current[ \t]*:/) {
-        plancur = $0; sub(/^[ \t]*current[ \t]*:[ \t]*/, "", plancur); gsub(/[ \t]/, "", plancur); sub(/[ab]$/, "", plancur)
-        plancurseen = 1
-      }
       l = $0; sub(/^[ \t]*-?[ \t]*/, "", l)
-      if (l ~ /^approved-by[ \t]*:/) {
-        v = l; sub(/^approved-by[ \t]*:[ \t]*/, "", v)
-        if (v ~ /[^ \t]/) planapby = 1
-      } else if (l ~ /^approved[ \t]*:/) {
+      if (l ~ /^approved[ \t]*:/) {
         v = l; sub(/^approved[ \t]*:[ \t]*/, "", v); split(v, aw, /[ \t]+/)
         if (aw[1] != "") appr[aw[1]] = 1
       }

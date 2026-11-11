@@ -970,7 +970,8 @@ _wt_land_checks() {  # <tree> <onto> <plan or empty> <need checkout 1|0> -> 0, o
   # review (lib/line.sh `line_born_failing`, which `ready` and the hand landing load; a caller that has
   # not loaded it keeps the refusal).
   if [ -n "$plan" ]; then
-    judged_cur="$(_wt_plan_current "$plan")"
+    judged_cur="$(_wt_plan_current "$plan")" || {
+      _wt_refuse "place-unreadable plan=${plan} — the run's step could not be read, so whether it was judged for integration is not known; land again once the run's facts read"; return 2; }
     case "${judged_cur%[ab]}" in
       8|9) declare -F line_born_failing >/dev/null 2>&1 && line_born_failing "$plan" "$root" "$wt_abs" || {
            _wt_refuse "past-judgment why=current-${judged_cur} plan=${plan} — the run has been judged for integration at current: ${judged_cur}, and a landing would move the working branch past the head that was judged; set the step back (session-poker.sh current 7), land again"; return 2; } ;;
@@ -1762,18 +1763,19 @@ EOF
   _wt_tree_remove "$wt" "$root" || { printf 'git worktree remove refused it (changes in the tree?)'; return 2; }
 }
 
-# _wt_plan_current <plan> -> the plan's raw `current:` value, read by lib/fill.sh's one reader of
-# it (loaded lazily, as units.sh is for the landing record), its memo dropped first.
+# _wt_plan_current <plan> -> the run's step as the reader answers it, through lib/fill.sh (loaded lazily, as units.sh
+# is for the landing record), its memo dropped first; 1 when the step cannot be read.
 _wt_plan_current() {
   local lib
-  if ! declare -F _fill_current_field >/dev/null 2>&1; then
+  if ! declare -F _fill_current_load >/dev/null 2>&1; then
     lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/fill.sh"
     # shellcheck source=/dev/null
     [ -r "$lib" ] && . "$lib" 2>/dev/null
-    declare -F _fill_current_field >/dev/null 2>&1 || return 1
+    declare -F _fill_current_load >/dev/null 2>&1 || return 1
   fi
   fill_current_forget
-  _fill_current_field "$1"
+  _fill_current_load "$1" || return 1
+  printf '%s' "$_FILL_CURRENT_VALUE"
 }
 
 # _wt_declared_debt <root> <sid> <tree> -> `<lands_red><TAB><red_evidence>` from the LAUNCH line of

@@ -1715,7 +1715,8 @@ sr_fd() { printf '%s %s %s' "$RC" "$(printf '%s\n' "$OUT" | grep -cE "$1")" "$(p
 sr_run --line "$SR_PLAN"; SR_F="$(sr_fd '^4 of 17 tasks ')"; POKER="$SR_ST/hooks/session-poker.sh" sr_run --line "$SR_PLAN"
 expect_eq "FD1 the reader exiting 128, a refused fork's exit: the line form says the status could not be read and prints no count, exit 2; whole, its count" "0 1 0|2 0 1" "$SR_F|$(sr_fd '^4 of 17 tasks ')"
 sr_recap; SR_F="$(OUT="$RECAP" ERR= sr_fd '^run: 4 of 17 tasks ')"; POKER="$SR_ST/hooks/session-poker.sh" sr_recap
-expect_eq "FD2 …the recap's run:, ask: and tick lines say so where the status went; whole, the count" "0 1 0|0 0 3" "$SR_F|$(OUT="$RECAP" ERR= sr_fd '^run: 4 of 17 tasks ')"
+expect_eq "FD2 …the resume stops at its bind, the recap naming the run's state that could not be read; whole, the count" "0 1 0|1 0 1|1" \
+  "$SR_F|$(OUT="$RECAP" ERR= sr_fd '^run: 4 of 17 tasks ')|$(printf '%s\n' "$RECAP" | grep -c "REFUSED — the run's state could not be read (its facts did not fold)")"
 sr_run "$SR_PLAN"; SR_S0="$OUT"; SR_F="$(sr_fd '^run\.step: ')"; POKER="$SR_ST/hooks/session-poker.sh" sr_run "$SR_PLAN"
 expect_eq "FD3 …the sheet prints no fact and one line that the run's facts could not be read, exit 2; whole, run.step and exit 0" "0 1 0|2 0 1|" "$SR_F|$(sr_fd '^run\.step: ')|$OUT"
 sr_run "$SR_PLAN"; expect_eq "FD4 …and the next sheet, the reader whole, is the whole sheet before it: nothing of the failed fold was held" "$SR_S0" "$OUT"
