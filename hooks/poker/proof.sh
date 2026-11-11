@@ -1111,14 +1111,16 @@ PF_VERDICTS_LIST
     # alone; a bare row is still found by its Files. The evidence is handed in both spellings, from the docs root
     # (`record/…`) and from the repository, so a Files cell in either matches. It returns with
     # its agent, worktree and base cells cleared: the row is one row across every pass, each pass
-    # its own launch — the launch recorder sets it active again and adds that pass's ledger line,
-    # so the ledger is not touched here (A-T14.4). The next landing past this proof makes it
+    # its own launch: one the run's log holds is taken back there too, once the plan is swapped
+    # (lib/units.sh `units_dispatch_back`), and the next launch appends its own. The next landing past this proof makes it
     # ready again (units.sh `live_head`).
     # A READ ROW RETURNS ONLY TO ITS OWN READER, AND ONLY WHOLE (wave-27 T43; review pass 17 F3):
     # handed --reader, `units_live_rows` names a read row only when its agent cell is this reader
     # and every question it carries now has a reading at this head; until then it stays active and
     # is not offered, and PF_HELD names it. A row abandoned part-way is returned by task-set.
     PF_BACK=""; PF_HELD=""
+    PF_LIVE=""; [ "$PF_KIND" != review ] || PF_LIVE="$(_units_live "$PV_PLAN")" \
+      || { die "REFUSED — the run's facts cannot be read, so a review row's launch cannot be taken back; the plan is unchanged; run again: the same proof-add."; exit 1; }
     if [ "$PF_KIND" = review ]; then
       PF_DOCREL="$(docs_root "$PV_REPO")"
       case "$PF_DOCREL" in "$PV_REPO"/*) PF_DOCREL="${PF_DOCREL#"$PV_REPO"/}/$PF_REL" ;; *) PF_DOCREL="" ;; esac
@@ -1153,6 +1155,11 @@ PF_VERDICTS_LIST
         index(ids, " " $1 " ") { printf "%s%s (%s)", (n++ ? ", " : ""), $1, $9 }')"
     fi
     plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
+    for _pf_id in $PF_BACK; do
+      _pf_nm="$(printf '%s\n' "$PF_LIVE" | awk -F'\t' -v id="$_pf_id" '$1 == id && $2 == "active" { print $3 }')"
+      [ -z "$_pf_nm" ] || units_dispatch_back "$PV_PLAN" "$_pf_id" "$_pf_nm" \
+        || say "proof-add — $_pf_id is back to pending in the plan, and its launch as $_pf_nm could not be taken back in the run's log: run task-set $_pf_id status=pending, which takes it back."
+    done
     # A FAILING READING IS THE PERSON'S TO WAIVE FROM THE MOMENT IT IS RECORDED: fix it, or waive the question. The ask
     # opens here, under the key the judge and the waive verb use, rather than waiting for an advance or a commit to be
     # refused on it; a passing reading of the same question closes it, as the judge closes a question no longer failing.

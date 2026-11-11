@@ -182,7 +182,6 @@ _rh_build_ready() {
   local t="$RH_ROOT/.worktrees/T1"
   _rh_do "the build row's tree" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" create "$(_rh_head)" wt/T1 --for dw-T1 || return 1
   _rh_launch dw-T1 T1 rehearsal-row.test.sh || return 1
-  _rh_poker "the build row's launch written to the plan" launch-sync || return 1
   printf 'rehearsal_landed() { :; }\n' >> "$t/payload/scripts/lib/said.sh"
   printf '#!/bin/bash\n. "$(dirname "$0")/lib/assert.sh"\nsection "the rehearsal holds"\nexpect_eq "one is one" 1 1\nfinish\n' \
     > "$t/tests/rehearsal-row.test.sh"
@@ -294,12 +293,16 @@ _rh_release_card() {
 }
 
 # _rh_launch <name> <row> <suite> -> the writer's roster row, as the dispatch wall writes it when the writer is launched
-# on <row> with its brief's Lands-on suite
+# on <row> with its brief's Lands-on suite, confirmed by the launch recorder: the run's dispatch event and the tree cells
 _rh_launch() {
-  roster_row_fixture session="$WORLD_SID" name="$1" agent_id="a-$1" subagent_type=bionic:senior-implementor \
-    launched_at=2026-10-01T00:00:00Z deliverable="$RH_REC/$2.md" plan="$RH_PLAN" row="$2" lands_on="$3" \
-    >> "$RH_ROOT/.bionic/tmp/roster-$WORLD_SID.state" || return 1
+  local u="toolu-$1"
+  roster_row_fixture status=intended session="$WORLD_SID" name="$1" agent_id= subagent_type=bionic:senior-implementor \
+    launched_at=2026-10-01T00:00:00Z deliverable="$RH_REC/$2.md" plan="$RH_PLAN" row="$2" lands_on="$3" tool_use_id="$u" \
+    brief=".bionic/docs/record/wave-x/briefs/$1.md" brief_sum=- >> "$RH_ROOT/.bionic/tmp/roster-$WORLD_SID.state" || return 1
   _rh_hand launch "$1's roster row on $2, landing on $3 (roster_row)"
+  _rh_do "$1's launch confirmed: its dispatch event and its tree cells" env BIONIC_LAUNCH_SYNC_INLINE=1 bash -c 'printf %s "$1" | bash "$2"' _ \
+    "$(jq -nc --arg s "$WORLD_SID" --arg c "$RH_ROOT" --arg n "$1" --arg u "$u" '{session_id:$s, cwd:$c, hook_event_name:"PostToolUse",
+      tool_name:"Agent", tool_input:{name:$n}, tool_response:{agentId:("a-" + $n)}, tool_use_id:$u}')" "$RH_ROOT/hooks/execution-recorder.sh"
 }
 
 # _rh_follow <label> <row> <record> <cmd> [args] -> <cmd> run; refused, the refusal's first named verb of
@@ -374,7 +377,6 @@ _rh_replay() {
     --born record/wave-x/w-structure-whole-2.md#1 || return 1
   _rh_do "the fix row's tree" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" create "$(_rh_head)" wt/T5 --for w-T5 || return 1
   _rh_launch w-T5 T5 rehearsal-row.test.sh || return 1
-  _rh_poker "the launch written to the plan" launch-sync || return 1
   t="$RH_ROOT/.worktrees/T5"; f="$t/tests/rehearsal-row.test.sh"
   printf '#!/bin/bash\n. "$(dirname "$0")/lib/assert.sh"\n. "$(dirname "$0")/../payload/scripts/lib/said.sh"\nsection "the rehearsal holds"\nexpect_eq "one is one" 1 1\nexpect_eq "a caller reaches the library change" 0 "$(rehearsal_landed; echo $?)"\nfinish\n' > "$f" \
     && _rh_commit "$t" "a caller reaches the library change" \

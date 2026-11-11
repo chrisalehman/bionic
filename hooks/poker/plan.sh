@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # hooks/poker/plan.sh — the plan verbs: the contract grammar, the matrix and the rows of the plan (budget,
-# amend, task-add, task-set, ledger-add, ledger-set, step-line, step-field, matrix-render, discharge,
+# amend, task-add, task-set, step-line, step-field, matrix-render, discharge,
 # matrix-set, matrix-retier, tasks-prose, epic-row, continuation-fill, brief, task-split, release-approval, reply).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
@@ -1477,9 +1477,8 @@ EOF
     exit 0
   }
 
-  # THE ROW-CELL VERBS (wave-24 T15; REQ-9 AC-9.1/9.2, D14). `task-set` sets cells of a
-  # `## Tasks` row, `ledger-set` of a `## Dispatch ledger` row, and `ledger-add` appends a ledger
-  # row; each through `units_table_cells`, on the shared transaction. A `## Tasks` column is any
+  # THE ROW-CELL VERB. `task-set` sets cells of `## Tasks` rows
+  # through `units_table_cells`, on the shared transaction. A `## Tasks` column is any
   # the header carries by `units_has_column`, except `id`, the key the row is found by, and, for a row a live
   # contract holds, `Files`: a dispatched agent's CONTRACT while it is open on the roster (editing the plan row
   # changes nothing a wall reads), so the refusal names `amend` on that contract, the verb that widens it. A row no
@@ -1494,23 +1493,17 @@ EOF
   # dropping the reads that already hold it. Any other column takes `=`.
   poker_verb_task_set() {
     # THE ROWS A CALL SETS (wave-33 T7). One entry per row: its id and its pairs, joined by the unit
-    # separator. A ledger verb names one row; task-set's groups name many, each id with its group's pairs.
+    # separator. Its groups name many rows, each id with its group's pairs.
     PV_SETS=()
-    if [ "$VERB" = task-set ]; then
-      for _pv_g in "${PV_GROUPS[@]}"; do
-        _pv_ids="${_pv_g%%$'\037'*}"; _pv_rest="${_pv_g#*$'\037'}"
-        while [ -n "$_pv_ids" ]; do
-          _pv_i="${_pv_ids%%,*}"
-          case "$_pv_ids" in *,*) _pv_ids="${_pv_ids#*,}" ;; *) _pv_ids="" ;; esac
-          _pv_i="$(printf '%s' "$_pv_i" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-          PV_SETS+=("$_pv_i"$'\037'"$_pv_rest")
-        done
+    for _pv_g in "${PV_GROUPS[@]}"; do
+      _pv_ids="${_pv_g%%$'\037'*}"; _pv_rest="${_pv_g#*$'\037'}"
+      while [ -n "$_pv_ids" ]; do
+        _pv_i="${_pv_ids%%,*}"
+        case "$_pv_ids" in *,*) _pv_ids="${_pv_ids#*,}" ;; *) _pv_ids="" ;; esac
+        _pv_i="$(printf '%s' "$_pv_i" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+        PV_SETS+=("$_pv_i"$'\037'"$_pv_rest")
       done
-    else
-      _pv_rest=""
-      for _pv_a in ${PV_PAIRS[@]+"${PV_PAIRS[@]}"}; do _pv_rest="${_pv_rest:+$_pv_rest$'\037'}$_pv_a"; done
-      PV_SETS=("$PV_ID"$'\037'"$_pv_rest")
-    fi
+    done
     PV_TASK_CELLS=()
     # pv_set_pairs <set> -> PV_SET_ID and PV_SET_PAIRS, the set taken apart.
     pv_set_pairs() {
@@ -1522,9 +1515,8 @@ EOF
         PV_SET_PAIRS+=("$p")
       done
     }
-    # THE ID AND THE COLUMN NAME ARE OPERANDS TOO (wave-24 T27; Step-6 review C1). `ledger-add`
-    # writes its id into the new row's first cell, and a line break there forged a plan line
-    # the commit gate admitted. The id is one token of the grammar every ledger row already
+    # THE ID AND THE COLUMN NAME ARE OPERANDS TOO: a line break in either
+    # would forge a plan line the commit gate admits. The id is one token of the grammar every row
     # carries (`T7`, `T22b`, `T17-critic`); a name is held to the values' own rule.
     for _pv_s in "${PV_SETS[@]}"; do
       pv_set_pairs "$_pv_s"
@@ -1542,7 +1534,6 @@ EOF
           die "REFUSED — the value for $_pv_n carries a |, a tab or a line break, which no table cell can hold; the plan is unchanged."
           exit 1
         fi
-        [ "$VERB" = task-set ] || continue
         _pv_l="$(printf '%s' "$_pv_n" | tr '[:upper:]' '[:lower:]')"
         case "$_pv_l" in
           reads+|deps+) _pv_l="${_pv_l%+}"; PV_APPEND_ASKED=1 ;;
@@ -1577,7 +1568,7 @@ EOF
       done
     fi
     plan_verb_open "$VERB" ${PV_REASON:+closed-ok}
-    PV_TABLE="## Tasks"; [ "$VERB" = task-set ] || PV_TABLE="## Dispatch ledger"
+    PV_TABLE="## Tasks"
     # AN UNKNOWN COLUMN NAMES THE CALL THAT SUCCEEDS (wave-33 T7; REQ-4 AC-4.3). The header's columns are
     # listed, and the call is printed again with each unknown name replaced by the one column it was
     # meant as (`pv_column_guess`); a name with no such column is left out of it, and said so.
@@ -1692,11 +1683,7 @@ EOF
       done
       PV_SETS=("${PV_JUDGED[@]}")
     fi
-    case "$VERB" in
-      task-set)   PV_MODE=set; PV_SECT=tasks ;;
-      ledger-set) PV_MODE=set; PV_SECT=ledger ;;
-      ledger-add) PV_MODE=add; PV_SECT=ledger ;;
-    esac
+    PV_MODE=set; PV_SECT=tasks
     cp "$PV_PLAN" "$PV_NEW"
     PV_WHAT=""
     for _pv_s in "${PV_SETS[@]}"; do
@@ -1706,9 +1693,7 @@ EOF
       case "$PV_RC" in
         0) mv -f "$PV_NEW.2" "$PV_NEW" ;;
         1) die "REFUSED — $PV_PLAN carries no $PV_TABLE table; the plan is unchanged."; exit 1 ;;
-        2) if [ "$PV_MODE" = add ]; then die "REFUSED — the $PV_TABLE table already carries a row $PV_SET_ID; set its cells with ledger-set. The plan is unchanged."
-           else die "REFUSED — the $PV_TABLE table carries no row $PV_SET_ID; the plan is unchanged."; fi
-           exit 1 ;;
+        2) die "REFUSED — the $PV_TABLE table carries no row $PV_SET_ID; the plan is unchanged."; exit 1 ;;
         3) die "REFUSED — the $PV_TABLE header carries no column named in: ${PV_SET_PAIRS[*]%%=*}; the plan is unchanged."
            pv_cols_refuse "$(pv_header_cells "$PV_PLAN" "$PV_SECT")"
            exit 1 ;;
@@ -1740,7 +1725,26 @@ EOF
       done
       PV_WHAT="$PV_WHAT; reason: $PV_REASON"
     fi
-    [ "$PV_MODE" = add ] && PV_WHAT="$PV_ID added to the dispatch ledger"
+    # A ROW RETURNED TO PENDING IS ITS LAUNCH TAKEN BACK. A launch the run's log holds is no cell, so setting
+    # `status=pending` or clearing `agent` on its row writes the log's retraction of it (units.sh
+    # `units_dispatch_back`); a row launched before the log held launches returns by its cells alone.
+    if [ "$VERB" = task-set ]; then
+      PV_LIVE="$(_units_live "$PV_PLAN")" || { die "REFUSED — the run's facts cannot be read, so a launch this call takes back cannot be found; the plan is unchanged; run again: the same task-set."; exit 1; }
+      for _pv_s in "${PV_SETS[@]}"; do
+        pv_set_pairs "$_pv_s"
+        _pv_back=""
+        for _pv_a in ${PV_SET_PAIRS[@]+"${PV_SET_PAIRS[@]}"}; do
+          case "$(printf '%s' "${_pv_a%%=*}" | tr '[:upper:]' '[:lower:]')=${_pv_a#*=}" in
+            status=pending) _pv_back=1 ;;
+            agent=*) case "${_pv_a#*=}" in *[A-Za-z0-9]*) ;; *) _pv_back=1 ;; esac ;;
+          esac
+        done
+        [ -n "$_pv_back" ] || continue
+        _pv_nm="$(printf '%s\n' "$PV_LIVE" | awk -F'\t' -v id="$PV_SET_ID" '$1 == id && $2 == "active" { print $3 }')"
+        [ -z "$_pv_nm" ] || units_dispatch_back "$PV_PLAN" "$PV_SET_ID" "$_pv_nm" \
+          || { die "REFUSED — the launch of $PV_SET_ID as $_pv_nm could not be taken back in the run's log; the plan is unchanged; run again: the same task-set."; exit 1; }
+      done
+    fi
     plan_verb_swap "$VERB" "$PV_WHAT" writer
     say "$VERB — $PV_WHAT: written to $PV_PLAN; dry-committed first."
     # THE SUSPECT TEST AT EVERY RE-AUTHORING (wave-30 T16; AC-12.2): task-set prints it as task-add does.
