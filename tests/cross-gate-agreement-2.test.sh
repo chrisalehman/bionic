@@ -499,9 +499,6 @@ expect_nonempty "S18.2 hooks/stop.sh declares a BIONIC_LIB_WANT line at all" "$S
 # either spelling (quoted or bare), proved on a read that stays — the landing's release-check —
 # before it is asked for the deleted key's reads. proof.sh's floor read is T25's (D3) and is
 # not counted here.
-s18_config_reads() {  # <file> <key> -> how many lines read that key through config_value
-  /usr/bin/grep -cE "config_value .*[[:space:]]\"?$2\"?[[:space:]]+\"\"" "$1" 2>/dev/null | tr -d ' '
-}
 # ============================================================
 section "S13b — one run normaliser on both sides of the row (wave-20 T4; REQ-7, D7)"
 # ============================================================

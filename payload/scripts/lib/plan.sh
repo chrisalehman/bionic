@@ -13,9 +13,8 @@
 #     plan_scale, plan_requirements_file, plan_themes
 #                        the requirements document's theme sections, the goals a wave or an epic reads first; at task
 #                        scale the one theme, the run, over every criterion the matrix measures.
-#     plan_goal_paragraph, plan_goal_status, plan_goal_declared_red
-#                        what a document is for, one goal's status word, and whether the plan declared the red that
-#                        missed a suite goal.
+#     plan_goal_paragraph, plan_goal_status
+#                        what a document is for, and one goal's status word.
 #
 # THE ONE READER (burns debt integration-branch-reader; critic-structure-2). Two orders stood: close-out.sh read
 # ## SDLC State and refused a plan whose frontmatter alone named the branch, its `closed-form` then fell back to the
@@ -409,23 +408,6 @@ plan_task_title() {
   t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
   if [ -z "$t" ]; then w="${1:-}"; w="${w#"${w%%[![:space:]]*}"}"; t="${w%"${w##*[![:space:]]}"}"; fi
   printf '%s' "$t"
-}
-
-# plan_goal_declared_red <landing record> <reading> -> rc 0 when a suite goal's reading, `<suite>.test.sh red at <sha>`,
-# names a suite the record holds a standing `debt:` line for: the line a landing of a `Lands-red:` row writes at its
-# publish (lib/line.sh `_line_debt_write`), not voided by a `void:` line. The plan declared that red, so the miss it
-# causes is no new decision for the person. rc 1 for any other reading or suite, and for no record.
-plan_goal_declared_red() {
-  local rec="${1:-}" suite="${2:-}"
-  suite="${suite%% red at *}"
-  case "$suite" in *.test.sh) ;; *) return 1 ;; esac
-  [ -n "$rec" ] && [ -f "$rec" ] || return 1
-  awk -v s="${suite##*/}" '
-    /^debt: / { id = ""; su = ""; n = split($0, a, " ")
-      for (i = 2; i <= n; i++) { if (index(a[i], "id=") == 1) id = substr(a[i], 4); else if (index(a[i], "suite=") == 1) su = substr(a[i], 7) }
-      b = su; sub(/.*\//, "", b); if (id != "" && b == s) debt[id] = 1; next }
-    /^void: / { n = split($0, a, " "); for (i = 2; i <= n; i++) if (index(a[i], "id=") == 1) void[substr(a[i], 4)] = 1; next }
-    END { for (i in debt) if (!(i in void)) exit 0; exit 1 }' "$rec" 2>/dev/null
 }
 
 # plan_goals_read <plan> <landing record> <landing report with rows> -> `<state><TAB><theme><TAB><measure><TAB><reading>`

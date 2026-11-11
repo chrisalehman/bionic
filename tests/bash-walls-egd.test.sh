@@ -184,9 +184,6 @@ egd_hook() {  # <name> <scripts dir> <code> -> a copy of the hook that runs <cod
     "$EGD_HOOK_KEEP" > "$d/hooks/bash-walls.sh"
   printf '%s' "$d/hooks/bash-walls.sh"
 }
-egd_seen() {  # -> `seen|<lines handed>` once the copy has run, `unseen|` before
-  if [ -f "$EGD_NOBS" ]; then printf 'seen|%s' "$(grep -c . "$EGD_NOBS")"; else printf 'unseen|'; fi
-}
 EGD_SCRIPTS="$BIONIC_SCRIPTS_DIR/payload/scripts"
 EGD_N=88
 EGD_NS=8   # the small plan of each count pair: the first EGD_NS of the same readings and moved: lines
