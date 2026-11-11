@@ -188,14 +188,6 @@ held_pids() { _unfinished pid; }
 places() { _unfinished id; }
 nreq() { ls "$ST/requests" 2>/dev/null | grep -c '^[0-9][0-9]*$'; }
 
-plant_req() {  # <id> <holder pid> — a foreign run the gate admitted, held by a live process
-  local st
-  st="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$2" 2>/dev/null | awk '{ $1 = $1; print }')"
-  mkdir -p "$ST/requests"
-  printf 'key=foreign\nkind=work\nwho=foreign:w\ntree=/\nasked=1\nholder=%s:%s\nadmitted=1\npromise=1:0.1:10\n' \
-    "$2" "$st" > "$ST/requests/$1"
-}
-
 mutant_tree() {  # <name> — a scratch copy of booked.sh and its libraries; prints its root
   local m="$TMPROOT/$1"
   mkdir -p "$m/scripts/lib"

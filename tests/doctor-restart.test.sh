@@ -102,9 +102,6 @@ write_record() {  # <sid> <tree> [<commit>] -> PROJ/.bionic/tmp/loaded-<sid>.sta
       | while IFS= read -r p; do printf '%s %s\n' "$(sha_line "$tree/$p")" "$p"; done
   } > "${PROJ}/.bionic/tmp/loaded-${sid}.state"
 }
-manifest_lines() {  # <record> -> how many `<64-hex> <path>` lines it holds
-  /usr/bin/grep -cE '^[0-9a-f]{64} ' "$1" 2>/dev/null | tr -d ' '
-}
 
 write_installed_plugins() {  # <installPath> [<lastUpdated>]
   jq -nc --arg path "$1" --arg at "${2:-}" \

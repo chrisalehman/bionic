@@ -614,11 +614,6 @@ NB_SKILL="${HOME_FIX}/.claude/skills/notebooklm/SKILL.md"
 GLOBAL_MEMORY="${HOME_FIX}/.claude/CLAUDE.md"
 RC_FILE_FIX="${HOME_FIX}/.zshrc"
 
-jqf() {  # <jq-program> — read one value out of the fixture settings.json
-  [ -f "$SETTINGS" ] || { echo "<no settings.json>"; return 0; }
-  jq -r "$1" "$SETTINGS" 2>/dev/null || echo "<unreadable>"
-}
-
 # One table/section out of a doctor report, by its flush-left heading (doctor
 # no longer delimits sections with `=== NAME ===`; a heading is a line with no
 # leading whitespace — "THIRD PARTY — tools and plugins bionic depends on",
@@ -667,22 +662,6 @@ yn() {  # <string> -> yes|no
   if [ -n "${1:-}" ]; then printf 'yes'; else printf 'no'; fi
 }
 
-# The permission rules a settings.json carries, joined. Read from a FILE argument
-# so the same extractor can be pointed at a planted file that does carry rules —
-# without which "setup wrote none" is a sentence about an extractor that might
-# never return anything at all.
-perm_allow_join() {  # <settings-file>
-  [ -f "$1" ] || return 0
-  jq -r '[.permissions.allow[]?] | join(" ")' "$1" 2>/dev/null
-}
-
-# The environment names bionic owns, as settings.json carries them.
-settings_env_names() {  # <settings-file>
-  [ -f "$1" ] || return 0
-  jq -r '[.env // {} | keys[] | select(startswith("CLAUDE_CODE_") or startswith("BASH_MAX_"))] | join(" ")' \
-    "$1" 2>/dev/null
-}
-
 # --- The verdict glyphs, read from doctor.sh rather than restated -----------
 #
 # A single-quoted shell constant's contents, in pure bash. These values are
@@ -703,39 +682,6 @@ const_from() {  # <file> <name>
 DOCTOR_OK_GLYPH="$(const_from "$DOCTOR_SH" DOCTOR_OK)"   || DOCTOR_OK_GLYPH=""
 DOCTOR_BAD_GLYPH="$(const_from "$DOCTOR_SH" DOCTOR_BAD)" || DOCTOR_BAD_GLYPH=""
 DOCTOR_NIL_GLYPH="$(const_from "$DOCTOR_SH" DOCTOR_NIL)" || DOCTOR_NIL_GLYPH=""
-
-# The STATE MARKER of one ENVIRONMENT row, found by the setting name in its
-# second column. NOT the row's trailing sentence: doctor writes that sentence to
-# be read by a person, and a suite that pinned it would go red the day somebody
-# improved the wording and stay green the day the answer itself was wrong. The
-# symbol is where the answer lives. Comparison is bash `case`, in-process.
-env_row_state() {  # <report-file> <setting> -> yes|no|unknown|"" (no such row)
-  local want="$2" line sym rest
-  while IFS= read -r line || [ -n "$line" ]; do
-    line="${line#"${line%%[![:space:]]*}"}"
-    sym="${line%%[[:space:]]*}"
-    rest="${line#"$sym"}"
-    rest="${rest#"${rest%%[![:space:]]*}"}"
-    case "$rest" in "$want"*) ;; *) continue ;; esac
-    case "$sym" in
-      "$DOCTOR_OK_GLYPH")  printf 'yes' ;;
-      "$DOCTOR_BAD_GLYPH") printf 'no' ;;
-      "$DOCTOR_NIL_GLYPH") printf 'unknown' ;;
-      *)                   printf 'unrecognised-symbol' ;;
-    esac
-    return 0
-  done <<< "$(doctor_section "$1" "ENVIRONMENT")"
-  return 0
-}
-
-# The BIONIC NATIVE row whose component is `plugin`, if the report has one.
-# doctor prints it only when the plugin is NOT loaded, so its absence is the
-# positive proof of a healthy load — a claim that needs the row to be visible to
-# this extractor when it IS printed, which Group 5 proves after the teardown.
-# `$2` is an ASCII component name; the verdict glyph is `$1` and is not compared.
-native_plugin_row() {  # <report-file>
-  doctor_section "$1" "BIONIC NATIVE" | awk '$2 == "plugin" { print; exit }'
-}
 
 # --- The rc item's extractors ------------------------------------------------
 #

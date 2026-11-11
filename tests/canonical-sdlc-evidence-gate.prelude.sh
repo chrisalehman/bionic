@@ -515,27 +515,6 @@ eg_pf_row() {
     "$1" "$1" "$2" "$1" "${4:-—}" "$3"
 }
 
-# A WAVE frontmatter carrying an explicit multi_agent field — the D7
-# dispatch-ledger guard fires ONLY on double + multi_agent:true + wave or task.
-# frontmatter sets NO multi_agent, so every prior wave fixture (19a/b/c,
-# 19r, Section 20) is a guaranteed guard no-op. $1 rigor (default double),
-# $2 multi_agent (default true).
-d7_wave_frontmatter() {
-  local rigor="${1:-double}" multi="${2:-true}"
-  printf -- '---\n'
-  printf -- 'governing-skill: canonical-sdlc\n'
-  printf -- 'canonical_sdlc_version: 14\n'
-  printf -- 'intent: build\n'
-  printf -- 'rigor: %s\n' "$rigor"
-  printf -- 'scale: wave\n'
-  printf -- 'deploy_target: none\n'
-  printf -- 'use_worktree: false\n'
-  printf -- 'has_ui: false\n'
-  printf -- 'walk: exempt\n'  # see matrix_frontmatter — the walk arm is fail-closed
-  printf -- 'multi_agent: %s\n' "$multi"
-  printf -- '---\n'
-}
-
 tasks_one_done="## Tasks
 
 | id | step | kind | task | agent | deps | size | serves | Files | status |

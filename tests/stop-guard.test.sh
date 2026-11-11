@@ -113,23 +113,6 @@ mk_stop_payload() {  # <sid> <transcript> <cwd> <task_id>
       tool_input:{task_id:$id}, tool_use_id:"toolu_018jyjgop7KMxP6yKtoAWWtB"}'
 }
 
-# THE SAME PAYLOADS, INVOKED BY A SUBAGENT (task 4/6, D-3). FAITHFUL to
-# .bionic/docs/record/w3-slice1-posttooluse-probe.md captures C and F: a
-# subagent-invoked PreToolUse or PostToolUse payload carries top-level `agent_id`
-# and `agent_type` alongside every field the orchestrator's payload has, and the
-# orchestrator's omits both. That presence/absence IS the actor key — the gate
-# reads it out of its own payload and the recorder read it out of its own, so a
-# same-actor comparison is one field against one field.
-mk_stop_payload_as() {  # <sid> <transcript> <cwd> <task_id> <invoking-agent-id>
-  mk_stop_payload "$1" "$2" "$3" "$4" \
-    | jq --arg a "$5" '. + {agent_id:$a, agent_type:"general-purpose"}'
-}
-
-mk_bash_post_as() {  # <sid> <transcript> <cwd> <command> <stdout> <invoking-agent-id>
-  mk_bash_post "$1" "$2" "$3" "$4" "$5" \
-    | jq --arg a "$6" '. + {agent_id:$a, agent_type:"general-purpose"}'
-}
-
 GUARD_OUT=""; GUARD_ERR=""; GUARD_ST=0
 # THE ENVIRONMENT AGREES WITH THE PAYLOAD, because on the machine it does (A-probe-2).
 # The gate's siblings — the sweeper, stop-check — take the session key from the
@@ -351,12 +334,6 @@ sg_roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status] [deliver
 # driven through the writer that actually ships.
 ack_row() {  # <repo> <sid> <name>
   ( cd "$1" && CLAUDE_CODE_SESSION_ID="$2" bash "$HERE/session-sweeper.sh" ack "$3" ) >/dev/null 2>&1
-  return 0
-}
-
-# A user's stop order, recorded through the shipped helper for the same reason.
-order_stop() {  # <repo> <sid> <target> [--at <epoch>]
-  ( cd "$1" && CLAUDE_CODE_SESSION_ID="$2" bash "$HERE/stop-orders.sh" order "${@:3}" ) >/dev/null 2>&1
   return 0
 }
 

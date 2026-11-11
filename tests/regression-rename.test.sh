@@ -142,7 +142,6 @@ AV_REC="$RAV/.bionic/docs/record/wave-01-fixture"; mkdir -p "$AV_REC"
 AV_STUB="$TMPROOT/av-regression.sh"
 printf '#!/bin/bash\necho "Gating: 4 passed, 0 failed"\nexit 0\n' > "$AV_STUB"
 av_logs() { ls "$AV_REC"/regression-run-*.log "$AV_REC"/floor-run-*.log 2>/dev/null | awk 'END { print NR + 0 }'; }   # -> the run logs the record holds, by either name
-av_proofs() { /usr/bin/grep -c '^proved: ' "$PAV" | tr -d ' '; }              # -> the proof lines the plan holds
 expect_regex "GV-0 precondition: the working head is a 40-hex commit" '^[0-9a-f]{40}$' "$AV_W"
 
 printf 'regression-command: bash %s\n' "$AV_STUB" > "$RAV/.bionic/config.yaml"
@@ -196,7 +195,6 @@ awk '/^## Tasks/ { t = 1 } /^## Verification/ { t = 0 }
      t && /^\| T/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " — |"; next }
      { print }' "$PAB" > "$PAB.tmp" && mv "$PAB.tmp" "$PAB"
 ( cd "$RAB" && git add -f "$PAB" && git commit -qm floor ) >/dev/null 2>&1
-ab_row() { /usr/bin/grep -c "^- $1:" "$PAB" | tr -d ' '; }   # <id> -> the lines the plan's state block holds for that row
 poke "$RAB" task-add T6 4 build 'fix the red. The red suite turns green.' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born regression:a.test.sh
 expect_eq "GB-1 task-add --born regression:a.test.sh, which the 1.20.0 proof line owes, exits 0" "0" "$RC"
 poke "$RAB" task-add T7 4 build 'fix the other red. The other red suite turns green.' bionic:implementor '—' 30 REQ-5 'lib/d.sh' --born floor:b.test.sh
@@ -307,8 +305,6 @@ expect_eq "AP-9 none of these readers printed a word on stderr for the on-disk t
 SP_SH="$POKER"; PROOF_SH="$LIB/proof.sh"; UNITS_SH="$LIB/units.sh"
 # The regression-run verb's body is in the proof record's part beside the dispatcher; its parse arm stays in the dispatcher.
 SP_PROOF="$(dirname "$POKER")/poker/proof.sh"
-code_lines() { /usr/bin/grep -v -E '^[[:space:]]*#' "$1"; }   # <file> -> its lines that are not comments
-
 
 
 # ============================================================

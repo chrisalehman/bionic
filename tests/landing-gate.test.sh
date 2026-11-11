@@ -123,8 +123,6 @@ expect_eq "every library the gate declares travels with its mutant copies" "" \
 # printer with the framework's exact signature (A-10c) — deleted outright,
 # every existing `section "..."` call site binds unchanged, now WITH the
 # section-floor enforcement it never had before.
-expect_gt() { if [ "$2" -gt "$3" ] 2>/dev/null; then ok "$1"; else no "$1" "expected > $3, got $2"; fi; }
-expect_lt() { if [ "$2" -lt "$3" ] 2>/dev/null; then ok "$1"; else no "$1" "expected < $3, got $2"; fi; }
 
 # ---------- fixtures ----------
 #
@@ -164,16 +162,6 @@ bg_tasks() {  # <agent-id>...
     printf '{"id":"%s","type":"subagent","status":"running","description":"a live dispatch","agent_type":"general-purpose"}' "$id"
   done
   printf ']'
-}
-
-# THE TEAMMATE'S OWN LIVE ROW. A named teammate is entered in `background_tasks[]` under a
-# THIRD id namespace — an opaque nine-character token that appears in no other payload the
-# session ever sees — and it NEVER LEAVES that array: measured `status:"running"` on the last
-# Stop of the session, 2 m 41 s after the teammate had delivered its own SubagentStop
-# (t1-probe-report.md §2.1, §2.3, CLI 2.1.233). Landing-by-disappearance is a subagent-only
-# signal, so this row is what the SubagentStop arm must be indifferent to.
-bg_teammate() {  # <opaque-id>
-  printf '{"id":"%s","type":"teammate","status":"running","description":"a named teammate, still addressable..."}' "$1"
 }
 
 stop_payload() {  # <cwd> <session_id> <stop_hook_active> [live-agent-id...]
@@ -312,9 +300,6 @@ add_row() {  # <repo> <key=value>...
 swept_lines() {  # <repo> -> the marker lines, one per verdicted row
   /usr/bin/grep "^${SWEPT_SCHEMA}|" "$(roster_of "$1")" 2>/dev/null
 }
-swept_count() {  # <repo>
-  swept_lines "$1" | /usr/bin/grep -c '|' | tr -d ' '
-}
 
 # An ACTIVE wave: the fence-aware `## SDLC State` / `current:` marker the evidence gate,
 # stop-guard and dispatch-preflight all read.
@@ -335,81 +320,6 @@ canonical_sdlc_version: 14
 integration-branch: main
 current: 4
 PLAN
-}
-
-# A plan whose ONLY `## SDLC State` section is inside a fence: documentation, invisible to
-# the parser, so no wave is active. The trap this shape encodes is on the record in
-# .claude/rules/hook-authoring.md.
-plan_fenced_only() {  # <repo>
-  local d="$1/.bionic/docs/plans/epic-16-landing-contract"
-  mkdir -p "$d"
-  cat > "$d/wave-01-landing-contract.plan.md" <<'PLAN'
----
-governing-skill: superpowers:writing-plans
----
-
-# How a plan documents its own format
-
-```
-## SDLC State
-
-current: 4
-```
-PLAN
-}
-
-# THE SAME PLAN, WITH `working-branch:` ADDED TO ITS FRONTMATTER (epic-23 wave-16, REQ-7,
-# D4). Overwrites `plan_active`'s file at the same path, so a fixture calls this AFTER
-# `make_wave_repo`/`make_git_wave_repo` to opt the plan into naming a landing base; every
-# fixture that never calls this keeps the D4-absent shape §16 already exercises.
-plan_with_working_branch() {  # <repo> <branch>
-  local d="$1/.bionic/docs/plans/epic-16-landing-contract"
-  mkdir -p "$d"
-  cat > "$d/wave-01-landing-contract.plan.md" <<PLAN
----
-governing-skill: superpowers:writing-plans
-sdlc-step: 4
-canonical_sdlc_version: 14
-working-branch: $2
----
-
-# Wave 01 — landing contract
-
-## SDLC State
-
-integration-branch: main
-current: 4
-PLAN
-}
-
-# THE SAME PLAN AGAIN, THIS TIME CARRYING A `## Tasks` ROW THAT REGISTERS THE TREE
-# (epic-23 wave-17, REQ-2, D3, ADR-032). The row is the tree's record: its `worktree` cell
-# names the tree by basename — the match `_eg_row_for_worktree` makes — and its `base` cell
-# names the commit the tree was cut from, which the landing gate takes as the diff base.
-#
-# `<base cell>` IS WRITTEN LITERALLY, em dash and all, so one helper builds both the declared
-# and the undeclared fixture and the only difference between them is the cell under test.
-# `<working branch>` is optional: omitted, the plan carries no `working-branch:` at all, which
-# is the shape whose fallback the announcement has to name.
-plan_with_task_row() {  # <repo> <worktree basename> <base cell> [working branch]
-  local d="$1/.bionic/docs/plans/epic-16-landing-contract"
-  mkdir -p "$d"
-  {
-    printf -- '---\n'
-    printf 'governing-skill: superpowers:writing-plans\n'
-    printf 'sdlc-step: 4\n'
-    printf 'canonical_sdlc_version: 14\n'
-    [ -n "${4:-}" ] && printf 'working-branch: %s\n' "$4"
-    printf -- '---\n\n'
-    printf '# Wave 01 — landing contract\n\n'
-    printf '## SDLC State\n\n'
-    printf 'integration-branch: main\n'
-    printf 'current: 4\n\n'
-    printf '## Tasks\n\n'
-    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
-    printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-    printf '| T1 | 4 | build | the task in its own tree | implementor | — | 30m | REQ-2 | b.sh | %s | %s | active |\n' "$2" "$3"
-  } > "$d/wave-01-landing-contract.plan.md"
 }
 
 make_repo() {  # <label> -> repo path
@@ -445,58 +355,6 @@ export GIT_CONFIG_GLOBAL=/dev/null
 export GIT_CONFIG_SYSTEM=/dev/null
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_TERMINAL_PROMPT=0
-
-git_id() { git -C "$1" config user.email "test@example.invalid"; git -C "$1" config user.name "Bionic Test"; }
-
-# The main checkout: one commit on a branch named `main` (forced, so the fixture is
-# deterministic regardless of the machine's init.defaultBranch), which is what
-# `git -C <repo> rev-parse --abbrev-ref HEAD` — the branch the reconciliation merge-bases
-# against — reads back.
-make_git_wave_repo() {  # <label> -> repo path
-  local r
-  r="$(make_wave_repo "$1")"
-  git -C "$r" symbolic-ref HEAD refs/heads/main
-  git_id "$r"
-  printf '.bionic\n.bionic/\n.worktrees/\n' > "$r/.gitignore"
-  echo base > "$r/base.txt"
-  git -C "$r" add .gitignore base.txt
-  git -C "$r" commit -q -m base
-  printf '%s' "$r"
-}
-
-# A linked worktree at .worktrees/<name>, branched off the repo's current HEAD — the same
-# place `worktree_for_row` (payload/scripts/lib/worktree.sh) looks and spawn-worktree.sh
-# creates one. <name> doubles as the roster row's `name=` in every case but §16d, so the
-# primary (case-preserving) resolution path is what most of this section exercises.
-make_slice_tree() {  # <repo> <name> -> worktree path
-  local r="$1" name="$2" wt="$1/.worktrees/$2"
-  git -C "$r" worktree add -q "$wt" -b "wt/$name" >/dev/null 2>&1
-  git_id "$wt"
-  printf '%s' "$wt"
-}
-
-# THE SAME THING, CUT FROM A NAMED REF rather than the repo's current HEAD (epic-23
-# wave-16, REQ-7, AC-7.1): the fixture the B2 shape needs — a tree based on a branch that is
-# NOT the main checkout's current one, which every §16 fixture above sidesteps by branching
-# off HEAD while the main checkout sits on the same commit.
-make_slice_tree_from() {  # <repo> <name> <ref> -> worktree path
-  local r="$1" name="$2" ref="$3" wt="$1/.worktrees/$2"
-  git -C "$r" worktree add -q "$wt" -b "wt/$name" "$ref" >/dev/null 2>&1
-  git_id "$wt"
-  printf '%s' "$wt"
-}
-
-# One commit in the worktree touching every path given.
-commit_files() {  # <worktree> <message> <path>...
-  local wt="$1" msg="$2" p
-  shift 2
-  for p in "$@"; do
-    mkdir -p "$(dirname "$wt/$p")"
-    echo content >> "$wt/$p"
-  done
-  git -C "$wt" add "$@"
-  git -C "$wt" commit -q -m "$msg"
-}
 
 # ---------- running the gate ----------
 #
