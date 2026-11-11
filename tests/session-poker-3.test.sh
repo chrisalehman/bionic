@@ -885,8 +885,8 @@ S59_LOG="$R59/.bionic/docs/record/wave-01-fixture/run.log"
 bash -c '. "$1/log.sh" && RUN_LOG="$2" log_append dispatch row=T3 name=w-aud brief=b sum=s' _ "$BIONIC_HOOKS_DIR/../payload/scripts/lib" "$S59_LOG"
 expect_eq "59c0 precondition: T3's launch is in the log alone: its cells pending, the run's state active under w-aud" \
   "pending|active|w-aud" "$(s48_row "$P59" T3 | awk -F'|' '{ print $12 }')|$(s59_live T3)"
-poke "$R59" task-set T4 status=active agent=w-crit
-expect_eq "59c0b precondition: task-set moves T4 active" "0" "$RC"
+sed -i '' -E '/^\| T4 \|/s/\| critic \|(.*)\| pending \|/| w-crit |\1| active |/' "$P59"
+expect_eq "59c0b precondition: T4 is launched by its cells" "active|w-crit" "$(s59_live T4)"
 printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: piece\n\nthe second pass\n' "$S59_A" "$S59_C" \
   > "$R59/.bionic/docs/record/wave-01-fixture/adv-2.md"
 s42_snap "$R59" "$P59"

@@ -1198,11 +1198,11 @@ expect_eq "AN-8b --suites+ naming no file under tests/ is refused (exit 1) and w
 expect_contains "AN-8c …naming the entry" "nosuch.test.sh" "$OUT"
 
 # ============================================================
-section "§REVIEW-FILES §DELIVER-CELL §FILES-UNHELD §STEP8-KEYS §NAMES-A-VERB: each verb a close meets writes its cell, or names the verb that does"
+section "§REVIEW-FILES §DELIVER-CELL §FILES-UNHELD §STEP8-KEYS §NAMES-A-VERB: each verb a close meets writes its cell, or names the verb or the edit that does"
 # ============================================================
 # A close met four verbs that sent it in a circle: a review row's Files held one record for three questions, deliver
 # read an artifact only from a ## Dispatch ledger a task-scale plan does not carry and named ledger-add, which refuses
-# there; task-set sent a launched row's Files to amend, and amend sent a closed contract to a new dispatch; step-field
+# there; amend sent a closed contract to a new dispatch; step-field
 # refused the cleanup keys the gate's Step-8 block reads. FIXTURE FIDELITY: a task-scale plan at single rigor with a
 # reads table carrying an artifact cell and no ledger, bound to this session, its working branch the repository's
 # main; roster rows and acks in their writers' shapes (roster_row_fixture, s20_ack). Every write goes through the
@@ -1236,7 +1236,7 @@ vc_plan() {  # <repo> <row>... -> the plan path; bound and committed
   printf '%s' "$f"
 }
 vc_cell() { s48_row "$VC_P" "$1" | cut -d'|' -f"$2"; }  # <row> <9 Files | 10 status | 12 artifact>
-VC_VERBS="task-set amend step-field step-line"
+VC_VERBS="amend step-field step-line"
 vc_named() {  # <refusal text> -> the first call of a verb that writes a cell, `<verb> <operands…>`, as the refusal prints it
   printf '%s\n' "$1" | /usr/bin/grep -oE 'session-poker\.sh [a-z][a-z-]*[^,;]*' | sed 's/^session-poker\.sh //; s/\. .*$//; s/\.$//' \
     | awk -v set=" $VC_VERBS " '{ if (index(set, " " $1 " ")) { print; exit } }'
@@ -1363,28 +1363,19 @@ expect_eq "DC-1 AC-9.2 deliver lands the review row from its artifact cell (exit
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "DC-1b …naming the artifact it read" "artifact $VC_REC/critic-evidence.md present" "$OUT"
 poke "$VC" task-add T9 6 review "a second review. The critic reads the run again." critic — 30 REQ-1 — head
-poke "$VC" task-set T9 artifact=—
+sed -i '' -E '/^\| T9 \|/s/\| [^|]* \|$/| — |/' "$VC_P"
 s42_snap "$VC" "$VC_P"
 poke "$VC" deliver T9
 s42_unchanged "DC-2 control: a review row with three records and no artifact cell is refused" 2 "$VC_P"
 VC_DREF="$OUT"
-expect_contains "DC-2b …the refusal names the Tasks artifact cell's writer" "task-set T9 artifact=" "$VC_DREF"
+expect_contains "DC-2b …the refusal names the edit of the Tasks artifact cell" "edit the artifact cell of T9 in the plan" "$VC_DREF"
 
-# ---------- §FILES-UNHELD: task-set writes Files on a row no live contract holds ----------
-poke "$VC" task-set T1 "Files=lib/a.sh, lib/a2.sh"
-expect_eq "FU-1 AC-10.1 task-set Files= writes a landed row's cell (exit 0)" "0|lib/a.sh, lib/a2.sh" "$RC|$(vc_cell T1 9)"
-poke "$VC" task-set T3 "Files=lib/c.sh, lib/c2.sh"
-expect_eq "FU-2 …and a row whose roster row is closed by its ack (exit 0)" "0|lib/c.sh, lib/c2.sh" "$RC|$(vc_cell T3 9)"
-s42_snap "$VC" "$VC_P"
-poke "$VC" task-set T2 "Files=lib/b.sh, lib/b2.sh"
-s42_unchanged "FU-3 control: a row a live roster row holds" 1 "$VC_P"
-VC_TREF="$OUT"
-expect_contains "FU-3b …and the refusal names amend on the live contract's name" "amend w-T2 --files+" "$VC_TREF"
+# ---------- §FILES-UNHELD: a closed contract is not amended; its row's Files are the plan's cell ----------
 s42_snap "$VC" "$VC_P"
 poke "$VC" amend w-T3 --files+ lib/c3.sh --reason 'the closed contract'
 VC_AREF="$OUT"
 expect_eq "FU-4 amend on a closed contract is refused (exit 1)" "1" "$RC"
-expect_contains "FU-4b AC-10.1 …and names task-set on the row its contract held" "task-set T3 Files=" "$VC_AREF"
+expect_contains "FU-4b …and names the edit of the Files cell of the row its contract held" "edit the Files cell of T3 in the plan" "$VC_AREF"
 expect_absent "FU-4c …not a new dispatch" "dispatch the work again" "$VC_AREF"
 
 # ---------- §STEP8-KEYS: step-field 8 writes the cleanup keys the gate's Step-8 block reads ----------
@@ -1424,9 +1415,6 @@ vc_follow() {  # <label> <refusal> <slot value> -> the named call, run with the 
   expect_eq "$label — …and that verb's call on the cell exits 0 ($call)" "0" "$RC"
   [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 }
-vc_follow "NV-1 deliver's refusal of an artifact" "$VC_DREF" "$VC_REC/critic-evidence.md"
-vc_follow "NV-2 task-set's refusal of a held row's Files" "$VC_TREF" "lib/b2.sh"
-vc_follow "NV-3 amend's refusal of a closed contract" "$VC_AREF" "lib/c.sh"
 vc_follow "NV-4 step-field's refusal of a key at the wrong step" "$VC_SREF" "done"
 vc_follow "NV-5 step-field's refusal of a step with no line" "$VC_LREF" "the regression"
 

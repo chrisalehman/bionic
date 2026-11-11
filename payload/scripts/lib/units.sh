@@ -129,7 +129,7 @@
 # into trees.
 #
 # `suites` AND `lands-on` ARE TWO MORE OPTIONAL COLUMNS (wave-38 T19; REQ-11 AC-11.3; L7), known to the contract
-# and not carried in the record: `units_has_column` answers yes for a header that has one, `task-set` writes it,
+# and not carried in the record: `units_has_column` answers yes for a header that has one, a person's edit writes it,
 # and `brief` renders a review row's `Suites:` and `Lands-on:` from the cell, the role's defaults standing when
 # the cell is `—` or the column absent. A table without them is valid and `units_validate` names nothing missing.
 #
@@ -680,11 +680,11 @@ units_edges() { _units_sched edges "${1:-}" ""; }
 # below DOUBT a declaration and never change one: each prints, and the mind decides. Rejected:
 # loosening by machine — a dependency may be runtime state or an order no file test can see.
 
-# units_suspect <plan> [<id>] -> `<id><TAB><holder><TAB><clause><TAB><task-set line>`, one line per
+# units_suspect <plan> [<id>] -> `<id><TAB><holder><TAB><clause><TAB><the edit that loosens it>`, one line per
 # suspect dependency, table order; for <id> alone when one is given. Nothing, exit 0, for a plan
 # with no table or no suspect.
 #
-# THE ONE SUSPECT TEST (D14a): `task-add` and `task-set` print its clause after their own line, and
+# THE ONE SUSPECT TEST (D14a): `task-add` prints its clause after its own line, and
 # the tick's WAIT line on such a holder carries the clause and the loosening line. A dependency of
 # row R on row D — a `deps` or `reads` token that is D's id, or a path token D's Files cover — is
 # SUSPECT when
@@ -693,8 +693,8 @@ units_edges() { _units_sched edges "${1:-}" ""; }
 #   - R reads no path outside the record that D's Files cover (reading what D builds is real).
 # Judged only where both rows are open (a landed or dropped holder holds nothing) and R is of a
 # kind that writes: a verify, test, review, doc, integrate or close row reads records by nature.
-# The clause is `suspect: <R> reads <D>, shares no file`; the line is `task-set <R> reads=<the cell
-# less every token naming D>` (`deps=` for a deps token), the cell `—` when nothing is left, so the
+# The clause is `suspect: <R> reads <D>, shares no file`; the edit is `edit <R> in the plan: reads=<the
+# cell less every token naming D>` (`deps=` for a deps token), the cell `—` when nothing is left, so the
 # row takes its kind's default.
 units_suspect() {
   local plan="${1:-}" want="${2:-}" rows hasreads=0
@@ -715,7 +715,7 @@ units_suspect() {
           pr = ""
           if (hasreads) { c = less(rd[i], j); if (c != rd[i]) pr = "reads=" cellq(c) }
           c = less(dep[i], j); if (c != dep[i]) pr = pr (pr == "" ? "" : " ") "deps=" cellq(c)
-          printf "%s\t%s\tsuspect: %s reads %s, shares no file\ttask-set %s %s\n", id[i], id[j], id[i], id[j], id[i], pr
+          printf "%s\t%s\tsuspect: %s reads %s, shares no file\tedit %s in the plan: %s\n", id[i], id[j], id[i], id[j], id[i], pr
         }
       }
     }'
@@ -822,32 +822,6 @@ units_split_candidate() {
       }
       if (bid != "") printf "%s\t%d\t%d\t%d\n", bid, sz[bid], nf[bid], fan[bid]
     }'
-}
-
-# units_cell_append <plan> <id> <reads|deps> <token> -> the cell with <token> after what it holds, as
-# `task-set <id> <column>+=<token>` writes it; exit 1, nothing printed, when the plan has no row <id>.
-#
-# A ROW IS MADE TO WAIT BY APPENDING, NEVER BY REPLACING. A read of the record of the row it waits on, or
-# a read of a decision nobody has ruled, is added to what the row already reads: written over the cell,
-# it would drop the row's `approval:plan, head` and ready it the moment that one read is met. An EMPTY
-# reads cell stands for its kind's default (`kdef`, the reading the scheduler takes), so the default is
-# written out first and the token after it. A cell already naming the token is printed as it stands.
-units_cell_append() {
-  local plan="${1:-}" want="${2:-}" col tok="${4:-}" rows
-  case "${3:-}" in reads) col=13 ;; deps) col=6 ;; *) return 1 ;; esac
-  rows="$(units_rows "$plan" 2>/dev/null)" || return 1
-  [ -n "$rows" ] || return 1
-  printf '%s\n' "$rows" | awk -F'\t' -v want="$want" -v col="$col" -v tok="$tok" -v regno="$(_units_regno "$plan")" \
-    "$(_units_files_awk)$(_units_cell_awk)$(_units_dep_awk)"'
-    $1 == want && !found {
-      found = 1
-      c = $col
-      if (col == 13 && c !~ /[A-Za-z0-9]/) c = kdef($3, $2)
-      tokens(c); o = ""; had = 0
-      for (k = 1; k <= ntk; k++) { if (tk[k] == tok) had = 1; o = o (o == "" ? "" : ", ") tk[k] }
-      print (had ? o : o (o == "" ? "" : ", ") tok)
-    }
-    END { exit !found }'
 }
 
 # units_live_range <plan> [<row id>] -> `<last review proof head>..<UNITS_LIVE_HEAD>`, the
@@ -1355,10 +1329,10 @@ _units_files_awk() {
 }
 
 # _units_cell_awk -> the awk functions `kdef(kind, step)`, the reads a row of that kind takes when its cell is
-# empty (units_ready above), and `cellq(v)`, a cell value as a `task-set` operand prints it: `—` for
-# nothing, else the value in single quotes. ONE DEFAULT, THREE READERS (wave-30 T16): the scheduler
-# reads an empty cell through it, and the suspect test and `task-set <id> reads+=` write a cell back
-# through it, so a printed or appended cell keeps the default the row was scheduled by. NO APOSTROPHE
+# empty (units_ready above), and `cellq(v)`, a cell value as the suspect test prints it: `—` for
+# nothing, else the value in single quotes. ONE DEFAULT, TWO READERS: the scheduler
+# reads an empty cell through it, and the suspect test prints a cell back
+# through it, so a printed cell keeps the default the row was scheduled by. NO APOSTROPHE
 # inside it: cellq builds its quotes with sprintf.
 # AT `regression: no` THE INTEGRATE ROW READS NO FLOOR (wave-31 T27; REQ-12 AC-12.2; D4): each reader
 # hands the awk `-v regno=` from _units_regno below, and the default drops `proof:floor`. Unset (a
@@ -2853,8 +2827,8 @@ units_add_row() {
 #
 # Four more projectors in `units_add_row`'s mould, one per hand edit a run used to make to its
 # own plan: a cell of a table row, a `- Step N:` or `- T<n>:` line, `current:`, and the
-# fields of a step's evidence block. The poker's plan-row verbs (`task-set`, `step-line`,
-# `current`) each run one of them onto a COPY and judge the copy
+# fields of a step's evidence block. The poker's plan-row verbs (`step-line`, `current`) and the
+# machine's cell write (`units_cells_write`) each run one of them onto a COPY and judge the copy
 # before anything is swapped in — the task-add transaction, unchanged.
 #
 # PURE, AS EVERY VERB HERE IS: each prints the WHOLE plan and writes nothing. Fence-aware like

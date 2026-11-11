@@ -21,7 +21,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh amend …    widen a live row's Files/Suites/Re-executes (writes the roster)
 #     bash <plugin-root>/hooks/session-poker.sh rule <writer> '<text>' [--words '<the user's words>'] | ruling-ack <id> | rulings <writer>
 #                                                      a binding ruling for a live writer, its acknowledgement, its state (writes the roster)
-#     bash <plugin-root>/hooks/session-poker.sh task-set | step-line | step-field | current …
+#     bash <plugin-root>/hooks/session-poker.sh step-line | step-field | current …
 #                                                      the plan-row verbs, each the task-add transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a review: that proof line with its question, reviewer, result and scope
@@ -523,7 +523,6 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh regression <yes|no> '<reply>'   record the Step-0 regression setting in the plan header (regression:, and regression-override: against the scale default task no, wave yes, epic no)"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --questions <q>[,<q>] on a review row declares the questions it owes (evidence, adversarial, structure, one role's), so its records and its dispatch are those and not the rigor's full deal; --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--suites=<a,b>] [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract (--suites= narrows its suites, and lands_on= with them): a successor row, judged by the dispatch grammar"
-  die "  bash ${HOOK_DIR}/session-poker.sh task-set <id>[,<id>...] <col>=<val>... [-- <id>[,<id>...] <col>=<val>...]... [--reason '<why>']   set cells of ## Tasks rows (any header column; Files only on a pending row no roster names, a launched row's Files being amend's), every group in one transaction, the table judged once; reads+=<token> or deps+=<token> appends to what the cell holds, an empty reads cell standing for the default of its kind"
   die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
   die "  bash ${HOOK_DIR}/session-poker.sh step-field <N> <key>=<value>... [--plan <delivered plan>]   write or replace fields of a Step N block, as many as one call names: head, cmd, pass, total, output, merge, worktree-removed, adr, share; cleanup, tmp-wiped and tasks-completed (Step 8 only); auditor and walk-artifact (Step 5 only); --plan names a delivered run, whose Step 8 block any session may write"
   die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch; --check (5-8) runs the advance's judgment, writes nothing, and exits as the advance would"
@@ -868,58 +867,6 @@ case "$VERB" in
     [ -z "$AMEND_NARROW" ] || [ -z "$AMEND_SUITES" ] \
       || usage "amend: --suites= sets the suites and --suites+ adds to them; give one."
     case ",$(printf '%s' "$AMEND_NARROW" | tr '\n' ','), " in *,none,*) usage "amend: --suites= narrows to suites the row keeps; none is a waiver, not a narrowing." ;; esac
-    ;;
-  # THE PLAN-ROW VERBS (wave-24 T15; REQ-9, D14). A row verb takes an id and one or more
-  # `<column>=<value>` operands; the shape is checked here and the content in the verb, so a
-  # malformed call is the usage error (2) and a value the plan cannot hold is the verb's own
-  # refusal (1), with the plan untouched either way. Operands are kept in an array, not
-  # newline-joined as amend's are: a value with a line break must reach the verb to be refused
-  # by name, not split into two operands here.
-  task-set)
-    # A REASON, TRAILING (wave-36 T14; D13, AC-7.7): `task-set … --reason '<why>'` also writes the session's own
-    # delivered plan (bound-closed), and records the reason on each row's `- T<n>:` line. Taken off the end, as
-    # epic-row's `--plan` is, before the groups are read.
-    PV_REASON=""
-    if [ "$VERB" = task-set ] && [ $# -ge 2 ] && [ "${*: -2:1}" = --reason ]; then
-      PV_REASON="${*: -1}"; set -- "${@:1:$(($# - 2))}"
-      [ -n "${PV_REASON//[[:space:]]/}" ] || usage "task-set: --reason takes why the cells are set."
-    fi
-    if [ $# -lt 2 ] || [ -z "$1" ]; then
-      usage "$VERB takes an id and at least one <column>=<value>."
-    fi
-    PV_ARGS=("$@")
-    # A TYPED OLD READS TOKEN IN A reads= CELL IS REFUSED (wave-39 T18; REQ-13 AC-13.1): the plan is unchanged.
-    if [ "$VERB" = task-set ] && declare -F alias_gone_cell >/dev/null 2>&1; then
-      for _pv_i in "${!PV_ARGS[@]}"; do
-        case "${PV_ARGS[$_pv_i]}" in
-          reads=*) if alias_gone_cell reads "${PV_ARGS[$_pv_i]#reads=}"; then die "REFUSED — $ALIAS_GONE_SAID. The plan is unchanged."; exit 1; fi ;;
-          reads+=*) if alias_gone_cell reads "${PV_ARGS[$_pv_i]#reads+=}"; then die "REFUSED — $ALIAS_GONE_SAID. The plan is unchanged."; exit 1; fi ;;
-        esac
-      done
-    fi
-    # MANY ROWS, ONE TRANSACTION (wave-33 T7; REQ-4 AC-4.1, D8; A-orch-6). `task-set` takes groups,
-    # `<id>[,<id>…] <col>=<val>…`, joined by `--`: each group's cells are set on each of its rows, and the
-    # table is judged once, after every group, so a restructure that is invalid at every single-row step
-    # can be made. A group is held as its ids and its pairs joined by the unit separator.
-    PV_GROUPS=()
-    if [ "$VERB" = task-set ]; then
-      _pv_g="$1"; _pv_n=0; shift
-      for _pv_a in "$@" --; do
-        if [ -z "$_pv_g" ]; then
-          case "$_pv_a" in ''|--|*=*) usage "task-set: each -- is followed by <id>[,<id>…], then at least one <column>=<value>." ;; esac
-          _pv_g="$_pv_a"; _pv_n=0; continue
-        fi
-        case "$_pv_a" in
-          --) [ "$_pv_n" -gt 0 ] || usage "task-set takes at least one <column>=<value> after $(clean "$_pv_g")."
-              PV_GROUPS+=("$_pv_g"); _pv_g="" ;;
-          [!=]*=*) _pv_g="$_pv_g"$'\037'"$_pv_a"; _pv_n=$((_pv_n + 1)) ;;
-          *) usage "$VERB: '$_pv_a' is not <column>=<value>." ;;
-        esac
-      done
-      set -- "${PV_ARGS[@]}"
-    fi
-    PV_ID="$1"; shift
-    PV_PAIRS=("$@")
     ;;
   # THE MATRIX ROW'S CELLS AND BLOCK KEYS (wave-33 T7; REQ-4 AC-4.1, D8). An AC id, as discharge takes it,
   # then at least one `<key>=<value>`. The keys and the values are the verb's own refusals (1).
@@ -2201,9 +2148,9 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
 #
 # A WAIT ON A SUSPECT HOLDER SAYS SO (wave-30 T16; REQ-12 AC-12.2, D14a). When `units_suspect` (the
 # one suspect test, lib/units.sh) names the row and a holder its WAIT reason names, the line carries
-# ` · suspect: <id> reads <holder>, shares no file — loosen it: bash <hook> task-set <id> reads=…`,
-# the loosening printed and never run. The reason keeps `clean`'s 400-character cut; the clause is
-# cleaned on its own and kept whole, because a cut `task-set` line is no command.
+# ` · suspect: <id> reads <holder>, shares no file — loosen it: edit <id> in the plan: reads=…`,
+# the loosening said and never made. The reason keeps `clean`'s 400-character cut; the clause is
+# cleaned on its own and kept whole, because a cut edit names no cell.
 # THE SPLIT CANDIDATE IS A DECISION WHILE WIDTH IDLES (wave-30 T16, REQ-12 AC-12.4, D14d; wave-38 T7, D22, REQ-6
 # AC-6.5). The pending row of the chain `units_split_candidate` scores highest by fan-in × size × files is printed
 # on its own line, after the CHAIN line,
@@ -2214,10 +2161,9 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
 # still has room for one writer more (one `gate_room` asked past the rows offered, as `fill_gate_width` asks
 # each). <w> is the writer width this tick fills to. A full fill, or no candidate (every pending row on the
 # chain scores 0), prints no line. Through 1.20.0 it rode the CHAIN line as ` · SPLIT? …` on every tick, as
-# advice whatever the width. Nothing is split: `task-split` is the orchestrator's act.
-suspect_lines() {  # <plan> [<id>] -> `<id><TAB><holder><TAB><clause — loosen it: bash <hook> task-set …>`, one per suspect; the one wording the WAIT line, task-add and task-set print
-  units_suspect "$@" 2>/dev/null | awk -F'\t' -v hook="${HOOK_DIR}/session-poker.sh" \
-    'NF >= 4 { printf "%s\t%s\t%s — loosen it: bash %s %s\n", $1, $2, $3, hook, $4 }'
+# advice whatever the width. Nothing is split: a split is the orchestrator's edit of the plan.
+suspect_lines() {  # <plan> [<id>] -> `<id><TAB><holder><TAB><clause — loosen it: edit …>`, one per suspect; the one wording the WAIT line and task-add print
+  units_suspect "$@" 2>/dev/null | awk -F'\t' 'NF >= 4 { printf "%s\t%s\t%s — loosen it: %s\n", $1, $2, $3, $4 }'
 }
 
 run_live() {  # <pid> <log> -> 0 when <pid> is alive and is still <log>'s detached shim
@@ -2936,7 +2882,7 @@ pv_plan_arg_file() {
 }
 
 # plan_verb_open <verb> [closed-ok|delivered-ok] -> sets PV_REPO, PV_PLAN, PV_CUR, PV_SUM, PV_NEW, PV_DRY, PV_MARK,
-# PV_SID and arms the cleanup; exits on every refusal above. `closed-ok` (task-set --reason) also takes the session's
+# PV_SID and arms the cleanup; exits on every refusal above. `closed-ok` (handoff) also takes the session's
 # own closed run (bound-closed) when its plan is on disk. ENGAGEMENT IS THE CONSENT BOUNDARY FOR A RUN STILL MOVING,
 # so it is asked first, except where `delivered-ok` names the one write a delivered run accepts from any session:
 # then a delivered plan named by `--plan` is opened with no engagement asked (close-out's last act wiped it), the
@@ -2978,7 +2924,6 @@ plan_verb_open() {
     die "REFUSED — $verb writes the plan this session is bound to, and it has no bound open run (${run:-none})."
     die "Bind this session to its run first (this script's bind verb), then run $verb again."
     case "$run" in
-      'bound-closed '*) [ "$verb" != task-set ] || die "A delivered run takes task-set with --reason '<why>', which records the reason on each row's step line." ;;
     esac
     exit 1
   fi
@@ -3584,7 +3529,6 @@ case "$VERB" in
   regression) poker_verb_regression "$@" ;;
   amend) poker_verb_amend "$@" ;;
   task-add) poker_verb_task_add "$@" ;;
-  task-set) poker_verb_task_set "$@" ;;
   row-landed|deliver) poker_verb_row_landed "$@" ;;
   reviews-part) poker_verb_reviews_part "$@" ;;
   known-limits-part) poker_verb_known_limits_part "$@" ;;

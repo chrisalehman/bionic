@@ -623,8 +623,7 @@ section "GAP: one width fact and one refusal — the wall asks the gate as the t
 # file is read). The first row is asked with nothing owed and each row offered owes one promise more,
 # so a busy reading of 6.0 leaves room for exactly one writer (6 <= 6.36 < 6 + the suite cost of
 # 1.61), and 8.0 for none.
-# The plan is one the commit gate admits (its version line and a Step-4 block), so a plan verb's dry
-# commit, which GAP3 runs, judges the cells it writes and not the fixture.
+# The plan is one the commit gate admits (its version line and a Step-4 block).
 gap_fixture() {  # -> project dir; three pending writer rows T13 T14 T15 reading their kind's default, an empty roster
   local d
   d=$(cd "$(mktemp -d)" && pwd -P)
@@ -688,17 +687,14 @@ expect_contains "GAP2j the tick that offered one row names the two behind the ga
   "behind the gap: T14 T15" "$GAP_T2"
 expect_absent "GAP2k …and the tick names no decline" "decline" "$GAP_T2"
 
-# GAP3: THE RULING FORM, RUN AS PRINTED, MAKES THE ROWS WAIT. The refusal's read-of-a-ruling line, its
-# ID and DN filled in, is a task-set the poker takes: each row keeps its kind's reads and gains the
-# decision, which is unruled, so the next turn end finds no row ready and passes.
-GAP_CMD="$(reason_of | sed -n 's/^a read of a ruling: \(bash .* task-set ID reads+=approval:DN\).*$/\1/p' | head -1)"
-expect_contains "GAP3a precondition: the reason holds the ruling form" "task-set ID reads+=approval:DN" "$GAP_CMD"
-GAP_CMD="${GAP_CMD/ ID / T13,T14,T15 }"; GAP_CMD="${GAP_CMD/approval:DN/approval:D3}"
-( cd "$GAP_D2" && env CLAUDE_CODE_SESSION_ID="$SID" bash -c "$GAP_CMD" >/dev/null 2>&1 )
+# GAP3: THE RULING FORM, MADE AS SAID, MAKES THE ROWS WAIT. The refusal's read-of-a-ruling line names an edit of the
+# plan's reads cell: each row keeps its kind's reads and gains the decision, which is unruled, so the next turn end
+# finds no row ready and passes.
+expect_contains "GAP3a precondition: the reason holds the ruling form, an edit of the reads cell" \
+  "a read of a ruling: edit ID's reads cell in the plan to add approval:DN" "$(reason_of)"
 GAP_P2="$GAP_D2/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
-expect_contains "GAP3b the read is appended after the kind's default reads, which the empty cell stood for" \
-  "| T13 | 4 | build | first | implementor | — | 15m | REQ-x | a.sh | pending | approval:plan, approval:D3 |" "$(cat "$GAP_P2")"
-expect_contains "GAP3c …on every row the command named" "| pending | approval:plan, approval:D3 |" "$(grep -F '| T15 |' "$GAP_P2")"
+sed -i '' -E '/^\| T1[345] \|/s/\| pending \| *\|$/| pending | approval:plan, approval:D3 |/' "$GAP_P2"
+expect_contains "GAP3c …on every row the edit names" "| pending | approval:plan, approval:D3 |" "$(grep -F '| T15 |' "$GAP_P2")"
 GAP_X3="$(mktemp)"
 jq -nc '{type:"user",uuid:"u-gap3",isSidechain:false,timestamp:"2026-09-19T00:01:00Z",message:{role:"user",content:"carry on"}}' > "$GAP_X3"
 BIONIC_PROBE_BUSY_CORES=6.0 BIONIC_PROBE_BUSY_CORES_5M=6.0 s7_fire "$GAP_D2" "$GAP_X3"
@@ -931,10 +927,8 @@ W_D1="$(wait_fixture "" "$WT_READY")"
 wait_fire "$W_D1"
 expect_eq "WAIT1 a ready row with room and nothing launched is refused" "block" "$(wait_decision)"
 W_R="$(reason_of)"
-expect_contains "WAIT1b the refusal names the first form, a dependency" "a dependency: bash " "$W_R"
-expect_contains "WAIT1c …a task-set that reads the record of the row it waits on" "task-set ID reads+=RECORD" "$W_R"
-expect_contains "WAIT1d the second, a read of a ruling" "a read of a ruling: bash " "$W_R"
-expect_contains "WAIT1e …a task-set that reads the decision" "task-set ID reads+=approval:DN" "$W_R"
+expect_contains "WAIT1b the refusal names the first form, a dependency: an edit adding the record to the reads cell" "a dependency: edit ID's reads cell in the plan to add RECORD" "$W_R"
+expect_contains "WAIT1d the second, a read of a ruling, the same edit adding the decision" "a read of a ruling: edit ID's reads cell in the plan to add approval:DN" "$W_R"
 expect_contains "WAIT1f the third, an order" "an order: bash " "$W_R"
 expect_contains "WAIT1g …the order verb with what the user said" "order 'WORDS'" "$W_R"
 expect_absent "WAIT1h …and no decline anywhere in the refusal" "decline" "$W_R$STOP_ERR"

@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # hooks/poker/plan.sh — the plan verbs: the contract grammar, the matrix and the rows of the plan (budget,
-# amend, task-add, task-set, step-line, step-field, matrix-render, discharge,
-# matrix-set, matrix-retier, tasks-prose, epic-row, continuation-fill, brief, task-split, release-approval, reply).
+# amend, task-add, step-line, step-field, matrix-render, discharge,
+# matrix-set, matrix-retier, epic-row, continuation-fill, brief, release-approval, reply).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
@@ -203,8 +203,7 @@ EOF
 
 # poker_files_cell <id> <kind> <agent> <Files cell> <repo> <plan> -> PFC_OUT (the cell to write) and PFC_ART (the
 # record artifact a reader row gained, or empty); returns 0, or 1 / 2 with the refusal printed. THE ONE JUDGE OF A
-# ROW'S FILES CELL (wave-36 T41; REQ-7 AC-7.1, AC-10.2; D13): `task-add` writes a row's cell and `task-set files=`
-# corrects a pending row's, and both are held to it. A reader row (verify, test, review) whose cell names no record
+# ROW'S FILES CELL: `task-add` writes a row's cell and is held to it. A reader row (verify, test, review) whose cell names no record
 # gains <record dir>/<id>.md, the artifact `brief` gives it; each entry of the cell is then read as the dispatch
 # wall reads the brief's `Files:` line (`brief_contract`), and an entry it reads no path from is refused now, named.
 # `—`, `-` and empty declare nothing to judge.
@@ -342,8 +341,7 @@ poker_brief_suites() {
 }
 
 # poker_brief_record_entry <Files cell> <artifact|progress|named> <row id> -> an entry under record/ for the row; nothing
-# when none. THE ONE RULE FOR A ROW'S RECORD (wave-37 T6; REQ-7 AC-7.1, AC-7.2; D10), read by `brief` and judged by
-# `task-set files=`: `named` is the entry whose basename is <row>.md or starts <row>- (never a progress file);
+# when none. THE ONE RULE FOR A ROW'S RECORD, read by `brief`: `named` is the entry whose basename is <row>.md or starts <row>- (never a progress file);
 # `artifact` is the named entry, else the first entry that is neither a progress file nor assumptions.md; `progress`
 # is the first entry ending .progress.md.
 poker_brief_record_entry() {
@@ -790,38 +788,6 @@ mr_requirements_file() {
 # headings and the AC blocks are read as MR_AWK reads them.
 # Set in hooks/session-poker.sh, before any part loads: LE_AWK.
 
-# pv_roster_live_name <row id> -> the name of an open contract holding a launch of the row for this plan, and rc 0; nothing
-# and rc 1 when none does. A contract is a `roster-state/` row carrying `row=<id>` whose `plan=` is this plan's, or that
-# carries no `plan=` (rows written before it existed); it is open while `roster_open_names` reads its name open on that
-# roster against the session's ack ledger, the same reading `amend` takes, so the row's Files cell is the table's exactly
-# when no contract `amend` would widen holds it. Reads the files itself, never through a quitting pipe.
-pv_roster_live_name() {
-  local rf pb sid open names n
-  pb="$(basename "$PV_PLAN")"
-  for rf in "$PV_REPO"/.bionic/tmp/roster-*.state; do
-    [ -f "$rf" ] && [ ! -L "$rf" ] || continue
-    names="$(awk -F'|' -v id="$1" -v pb="$pb" '
-      index($0, "roster-state/") == 1 {
-        row = ""; plan = ""; has = 0; nm = ""
-        for (i = 2; i <= NF; i++) {
-          if (index($i, "row=") == 1) row = substr($i, 5)
-          else if (index($i, "name=") == 1) nm = substr($i, 6)
-          else if (index($i, "plan=") == 1) { plan = substr($i, 6); has = 1 }
-        }
-        k = split(plan, seg, "/"); base = seg[k]
-        if (row == id && nm != "" && (!has || base == pb)) print nm
-      }' "$rf")"
-    [ -n "$names" ] || continue
-    sid="${rf##*/roster-}"; sid="${sid%.state}"
-    open="$(roster_open_names "$rf" "$PV_REPO/.bionic/tmp/sweeper-${sid}.state" "$sid")"
-    while IFS= read -r n; do
-      [ -n "$n" ] || continue
-      if grep -qxF -- "$n" <<< "$open"; then printf '%s\n' "$n"; return 0; fi
-    done <<< "$names"
-  done
-  return 1
-}
-
   # THE USER'S WRITER CAP (wave-27 T34; REQ-15 AC-15.4; D24; design ledger Δ10). A cap the user
   # chose is a fact, not a reason to repeat on every turn: it is written once into the plan header
   # every reader of the ceiling already reads (`plan_budget_line`, `budget_field` in lib/run.sh: the
@@ -1045,11 +1011,11 @@ pv_roster_live_name() {
     fi
     AM_OPEN="$(roster_open_names "$ROSTER_FILE" "$REPO_REAL/.bionic/tmp/sweeper-${SESSION_ID}.state" "$SESSION_ID")"
     # A CLOSED CONTRACT HOLDS NO CELL: once acked, the row's Files are the plan's again, so the refusal names the
-    # verb that writes them, on the row the contract held, and task-set writes a row no open contract holds.
+    # edit of the plan that writes them, on the row the contract held.
     if ! grep -qxF -- "$AMEND_NAME" <<< "$AM_OPEN"; then
       AM_CROW="$(line_field "$AM_ROW" row)"
       plan_verb_id_ok "$AM_CROW" || AM_CROW="<row>"
-      die "REFUSED — $AMEND_NAME is closed: it was acked after its latest launch, or holds no live row. A closed contract is not amended; its row's Files are the plan's cell, which task-set writes: bash ${HOOK_DIR}/session-poker.sh task-set $AM_CROW Files=<list>. Nothing was written."
+      die "REFUSED — $AMEND_NAME is closed: it was acked after its latest launch, or holds no live row. A closed contract is not amended; its row's Files are the plan's cell: edit the Files cell of $AM_CROW in the plan. Nothing was written."
       exit 1
     fi
     if ! poker_brief_load; then
@@ -1482,286 +1448,6 @@ EOF
     # recreated to keep the order. The entry is named as the task list names it, by the row's title, and the line is
     # the verb's last so the rule is read where it fires and no step text has to carry it.
     say "task-add — owed: create the task-list entry $TA_STEP/$TA_ID: $(clean_whole "$(plan_task_title "$TA_CELL_TASK")"), and recreate the entries after it to keep the order."
-    exit 0
-  }
-
-  # THE ROW-CELL VERB. `task-set` sets cells of `## Tasks` rows
-  # through `units_table_cells`, on the shared transaction. A `## Tasks` column is any
-  # the header carries by `units_has_column`, except `id`, the key the row is found by, and, for a row a live
-  # contract holds, `Files`: a dispatched agent's CONTRACT while it is open on the roster (editing the plan row
-  # changes nothing a wall reads), so the refusal names `amend` on that contract, the verb that widens it. A row no
-  # open contract holds, pending, landed or acked, has its `files=<list>` set by the table (the pre-pass below).
-  # `task-set` is judged by `units_validate` before the gate, as `task-add` is: a status, step or deps cell is a
-  # schedule change.
-  #
-  # `<col>+=<token>` APPENDS, for the two cells that list what a row waits on, `reads` and `deps`: the
-  # token goes after what the cell holds, an empty reads cell standing for its kind's default (units.sh
-  # `units_cell_append`), and a cell already naming it is left as it is. It is how a ready row is made to
-  # wait, by a read of the record of the row it waits on or of a decision nobody has ruled, without
-  # dropping the reads that already hold it. Any other column takes `=`.
-  poker_verb_task_set() {
-    # THE ROWS A CALL SETS (wave-33 T7). One entry per row: its id and its pairs, joined by the unit
-    # separator. Its groups name many rows, each id with its group's pairs.
-    PV_SETS=()
-    for _pv_g in "${PV_GROUPS[@]}"; do
-      _pv_ids="${_pv_g%%$'\037'*}"; _pv_rest="${_pv_g#*$'\037'}"
-      while [ -n "$_pv_ids" ]; do
-        _pv_i="${_pv_ids%%,*}"
-        case "$_pv_ids" in *,*) _pv_ids="${_pv_ids#*,}" ;; *) _pv_ids="" ;; esac
-        _pv_i="$(printf '%s' "$_pv_i" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-        PV_SETS+=("$_pv_i"$'\037'"$_pv_rest")
-      done
-    done
-    PV_TASK_CELLS=()
-    # pv_set_pairs <set> -> PV_SET_ID and PV_SET_PAIRS, the set taken apart.
-    pv_set_pairs() {
-      local r="${1#*$'\037'}" p
-      PV_SET_ID="${1%%$'\037'*}"; PV_SET_PAIRS=()
-      while [ -n "$r" ]; do
-        p="${r%%$'\037'*}"
-        case "$r" in *$'\037'*) r="${r#*$'\037'}" ;; *) r="" ;; esac
-        PV_SET_PAIRS+=("$p")
-      done
-    }
-    # THE ID AND THE COLUMN NAME ARE OPERANDS TOO: a line break in either
-    # would forge a plan line the commit gate admits. The id is one token of the grammar every row
-    # carries (`T7`, `T22b`, `T17-critic`); a name is held to the values' own rule.
-    for _pv_s in "${PV_SETS[@]}"; do
-      pv_set_pairs "$_pv_s"
-      if ! plan_verb_id_ok "$PV_SET_ID"; then
-        die "REFUSED — '$(clean "$PV_SET_ID")' is not one row id: an id is one token of letters, digits, '.', '_' or '-', beginning with a letter or a digit. The plan is unchanged."
-        exit 1
-      fi
-      for _pv_a in ${PV_SET_PAIRS[@]+"${PV_SET_PAIRS[@]}"}; do
-        _pv_n="${_pv_a%%=*}"
-        if ! plan_verb_value_ok "$_pv_n"; then
-          die "REFUSED — the column name '$(clean "$_pv_n")' carries a |, a tab or a line break, which no table header can hold; the plan is unchanged."
-          exit 1
-        fi
-        if ! plan_verb_value_ok "${_pv_a#*=}"; then
-          die "REFUSED — the value for $_pv_n carries a |, a tab or a line break, which no table cell can hold; the plan is unchanged."
-          exit 1
-        fi
-        _pv_l="$(printf '%s' "$_pv_n" | tr '[:upper:]' '[:lower:]')"
-        case "$_pv_l" in
-          reads+|deps+) _pv_l="${_pv_l%+}"; PV_APPEND_ASKED=1 ;;
-          *+)
-            die "REFUSED — += appends to a cell that lists what a row waits on, reads or deps; ${_pv_l%+} takes =. The plan is unchanged."
-            exit 1 ;;
-        esac
-        case "$_pv_l" in
-          files) PV_FILES_ASKED=1; continue ;;  # a fixed column, judged after the plan is open, not an optional one the header lists
-          task) PV_TASK_CELLS+=("$PV_SET_ID" "${_pv_a#*=}") ;;
-          id)
-            die "REFUSED — id is the key task-set finds $PV_SET_ID by, not a cell to set; the plan is unchanged."
-            exit 1 ;;
-          rigor) _pv_l=kind ;;
-        esac
-        PV_COLS="${PV_COLS:-} $_pv_l"
-      done
-    done
-    [ "${#PV_TASK_CELLS[@]}" -eq 0 ] || pv_task_cells_or_refuse "${PV_TASK_CELLS[@]}"
-    if [ -n "${PV_REASON:-}" ]; then
-      if ! plan_verb_value_ok "$PV_REASON"; then
-        die "REFUSED — the reason carries a |, a tab or a line break, which no step line can hold; the plan is unchanged."
-        exit 1
-      fi
-      for _pv_s in "${PV_SETS[@]}"; do
-        pv_set_pairs "$_pv_s"
-        case "$PV_SET_ID" in
-          T[0-9]*) : ;;
-          *) die "REFUSED — a reason is recorded on the row's - T<n>: line, and $PV_SET_ID has none; the plan is unchanged."
-             exit 1 ;;
-        esac
-      done
-    fi
-    plan_verb_open "$VERB" ${PV_REASON:+closed-ok}
-    PV_TABLE="## Tasks"
-    # AN UNKNOWN COLUMN NAMES THE CALL THAT SUCCEEDS (wave-33 T7; REQ-4 AC-4.3). The header's columns are
-    # listed, and the call is printed again with each unknown name replaced by the one column it was
-    # meant as (`pv_column_guess`); a name with no such column is left out of it, and said so.
-    pv_cols_refuse() {  # <columns, one per line>
-      local cols="$1" t want=1 out
-      local -a call
-      call=()
-      for t in "${PV_ARGS[@]}"; do
-        if [ "$want" = 1 ]; then call+=("$t"); want=0; continue; fi
-        case "$t" in
-          --) call+=("$t"); want=1; continue ;;
-        esac
-        pv_fix_pairs "$cols" "$t"
-        [ "${#PV_FIXED[@]}" -eq 0 ] || call+=("${PV_FIXED[0]}")
-        [ -z "$PV_UNKNOWN" ] || out="${out:+$out, }$PV_UNKNOWN"
-      done
-      [ -z "${PV_REASON:-}" ] || call+=(--reason "$PV_REASON")
-      die "The $PV_TABLE columns: $(printf '%s\n' "$cols" | paste -sd, - | sed 's/,/, /g')."
-      [ -z "${out:-}" ] || die "No column is like: ${out}; the call below leaves it out."
-      pv_next "$VERB" "${call[@]}"
-    }
-    if [ "$VERB" = task-set ]; then
-      PV_BAD=""
-      for _pv_l in ${PV_COLS:-}; do
-        # `artifact` is the row's record cell (wave-37 T6; D10): the refusal below names `artifact=<path>` as the remedy, so the
-        # header's own cell takes it, though the units control line lists only the contract columns.
-        units_has_column "$PV_PLAN" "$_pv_l" \
-          || { [ "$_pv_l" = artifact ] && pv_header_cells "$PV_PLAN" tasks | /usr/bin/grep -ix artifact >/dev/null; } \
-          || PV_BAD="${PV_BAD:+$PV_BAD, }$_pv_l"
-      done
-      if [ -n "$PV_BAD" ]; then
-        die "REFUSED — the ## Tasks header of $PV_PLAN carries no column $PV_BAD; the plan is unchanged."
-        pv_cols_refuse "$(pv_header_cells "$PV_PLAN" tasks | awk '{ l = tolower($0) } l != "id" && l != "files" { print l }')"
-        exit 1
-      fi
-    fi
-    # THE APPENDS, WRITTEN OUT: each `reads+=` or `deps+=` pair becomes `<col>=<the cell with the token after
-    # it>`, read from the plan as it stands, so the write below is the one transaction it always was. Two
-    # appends to one cell in one group build on each other.
-    if [ "$VERB" = task-set ] && [ -n "${PV_APPEND_ASKED:-}" ]; then
-      PV_JUDGED=()
-      for _pv_s in "${PV_SETS[@]}"; do
-        pv_set_pairs "$_pv_s"
-        _pv_new="$PV_SET_ID"; _pv_rv=""; _pv_dv=""
-        for _pv_a in ${PV_SET_PAIRS[@]+"${PV_SET_PAIRS[@]}"}; do
-          _pv_c="$(printf '%s' "${_pv_a%%=*}" | tr '[:upper:]' '[:lower:]')"
-          case "$_pv_c" in
-            reads+|deps+)
-              _pv_c="${_pv_c%+}"; _pv_tok="$(printf '%s' "${_pv_a#*=}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-              if [ -z "$_pv_tok" ]; then
-                die "REFUSED — ${_pv_c}+= names nothing to append for $PV_SET_ID; the plan is unchanged."
-                exit 1
-              fi
-              if [ "$_pv_c" = reads ]; then _pv_v="$_pv_rv"; else _pv_v="$_pv_dv"; fi
-              if [ -z "$_pv_v" ]; then
-                _pv_v="$(units_cell_append "$PV_PLAN" "$PV_SET_ID" "$_pv_c" "$_pv_tok")" || {
-                  die "REFUSED — $PV_PLAN carries no ## Tasks row $PV_SET_ID; the plan is unchanged."
-                  exit 1
-                }
-              else
-                case ", $_pv_v, " in *", $_pv_tok, "*) ;; *) _pv_v="$_pv_v, $_pv_tok" ;; esac
-              fi
-              if [ "$_pv_c" = reads ]; then _pv_rv="$_pv_v"; else _pv_dv="$_pv_v"; fi
-              continue ;;
-          esac
-          _pv_new="$_pv_new"$'\037'"$_pv_a"
-        done
-        [ -z "$_pv_rv" ] || _pv_new="$_pv_new"$'\037'"reads=$_pv_rv"
-        [ -z "$_pv_dv" ] || _pv_new="$_pv_new"$'\037'"deps=$_pv_dv"
-        PV_JUDGED+=("$_pv_new")
-      done
-      PV_SETS=("${PV_JUDGED[@]}")
-    fi
-    # A ROW'S FILES CELL IS THE TABLE'S UNLESS A LIVE CONTRACT HOLDS IT. One rule: a row no open roster row names
-    # (`pv_roster_live_name`) has no contract behind it, whatever its status, pending, landed, delivered, or launched
-    # and since acked, so `files=<list>` replaces its cell whole and the list is judged as task-add judges a cell
-    # (`poker_files_cell`). A row an open contract holds is that contract's, which `amend` widens, so the refusal
-    # names amend on that contract's own name, a call amend takes, and never a verb that refuses the same cell. The
-    # judged value takes the place of the operand in its set, so the write below is the one transaction.
-    if [ "$VERB" = task-set ] && [ -n "${PV_FILES_ASKED:-}" ]; then
-      PV_JUDGED=()
-      for _pv_s in "${PV_SETS[@]}"; do
-        pv_set_pairs "$_pv_s"
-        _pv_row="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v id="$PV_SET_ID" '$1 == id { print; exit }')"
-        _pv_new="$PV_SET_ID"
-        for _pv_a in ${PV_SET_PAIRS[@]+"${PV_SET_PAIRS[@]}"}; do
-          _pv_l="$(printf '%s' "${_pv_a%%=*}" | tr '[:upper:]' '[:lower:]')"
-          if [ "$_pv_l" = files ] && [ -n "$_pv_row" ]; then
-            if _pv_live="$(pv_roster_live_name "$PV_SET_ID")"; then
-              die "REFUSED — the Files of $PV_SET_ID are the contract of $_pv_live, open on the roster, and task-set writes the cell only of a row no live contract holds; widen that contract: bash ${HOOK_DIR}/session-poker.sh amend $_pv_live --files+ <path> --reason <why>. The plan is unchanged."
-              exit 1
-            fi
-            poker_files_cell "$PV_SET_ID" "$(printf '%s\n' "$_pv_row" | awk -F'\t' '{ print $3 }')" \
-              "$(printf '%s\n' "$_pv_row" | awk -F'\t' '{ print $5 }')" "${_pv_a#*=}" "$PV_REPO" "$PV_PLAN" || exit $?
-            # A RECORD ROW KEEPS ITS ARTIFACT (wave-37 T6; REQ-7 AC-7.3; D10; A-T6-1): a row whose cell names an entry for
-            # it, or which carries an `artifact` cell, is not left with neither, by the one rule `brief` reads.
-            _pv_art="$(poker_brief_cell "$PV_PLAN" Tasks "$PV_SET_ID" artifact)" || _pv_art=""
-            _pv_had="$_pv_art"
-            for _pv_b in ${PV_SET_PAIRS[@]+"${PV_SET_PAIRS[@]}"}; do
-              case "$(printf '%s' "${_pv_b%%=*}" | tr '[:upper:]' '[:lower:]')" in artifact) _pv_art="${_pv_b#*=}" ;; esac
-            done
-            if { ! poker_brief_none "$_pv_had" || [ -n "$(poker_brief_record_entry "$(units_field "$_pv_row" Files)" named "$PV_SET_ID")" ]; } \
-               && poker_brief_none "$_pv_art" && [ -z "$(poker_brief_record_entry "$PFC_OUT" named "$PV_SET_ID")" ]; then
-              die "task-set refused — Files leaves $PV_SET_ID with no artifact: name a record $PV_SET_ID-<name>.md in Files or set artifact=<path>"
-              exit 1
-            fi
-            _pv_a="${_pv_a%%=*}=$PFC_OUT"
-          fi
-          _pv_new="$_pv_new"$'\037'"$_pv_a"
-        done
-        PV_JUDGED+=("$_pv_new")
-      done
-      PV_SETS=("${PV_JUDGED[@]}")
-    fi
-    PV_MODE=set; PV_SECT=tasks
-    cp "$PV_PLAN" "$PV_NEW"
-    PV_WHAT=""
-    for _pv_s in "${PV_SETS[@]}"; do
-      pv_set_pairs "$_pv_s"
-      PV_RC=0
-      units_table_cells "$PV_NEW" "$PV_MODE" "$PV_SECT" "$PV_SET_ID" "${PV_SET_PAIRS[@]}" > "$PV_NEW.2" 2>/dev/null || PV_RC=$?
-      case "$PV_RC" in
-        0) mv -f "$PV_NEW.2" "$PV_NEW" ;;
-        1) die "REFUSED — $PV_PLAN carries no $PV_TABLE table; the plan is unchanged."; exit 1 ;;
-        2) die "REFUSED — the $PV_TABLE table carries no row $PV_SET_ID; the plan is unchanged."; exit 1 ;;
-        3) die "REFUSED — the $PV_TABLE header carries no column named in: ${PV_SET_PAIRS[*]%%=*}; the plan is unchanged."
-           pv_cols_refuse "$(pv_header_cells "$PV_PLAN" "$PV_SECT")"
-           exit 1 ;;
-        5) die "REFUSED — the $PV_TABLE table carries more than one row $PV_SET_ID; which one is meant is not the verb's to guess. The plan is unchanged."; exit 1 ;;
-        *) die "REFUSED — the value cannot be written as a table cell; the plan is unchanged."; exit 1 ;;
-      esac
-      PV_WHAT="${PV_WHAT:+$PV_WHAT; }$PV_SET_ID ${PV_SET_PAIRS[*]}"
-    done
-    if [ "$VERB" = task-set ]; then
-      PV_VIOL="$(units_validate "$PV_NEW" "$PV_PLAN" 2>&1)"
-      if [ -n "$PV_VIOL" ]; then
-        die "REFUSED — with that change, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
-        printf '%s\n' "$PV_VIOL" >&2
-        exit 1
-      fi
-    fi
-    # THE REASON ON THE STEP LINE (wave-36 T14; AC-7.7): ` reason: <why>` after each named row's own text, once (a
-    # line that already ends so is left), in the same copy, so the cells and the reason are one write.
-    if [ -n "${PV_REASON:-}" ]; then
-      for _pv_s in "${PV_SETS[@]}"; do
-        pv_set_pairs "$_pv_s"
-        _pv_rest="$(units_step_text "$PV_NEW" "$PV_SET_ID" 2>/dev/null)"
-        case "$_pv_rest " in *" reason: $PV_REASON "|"reason: $PV_REASON ") continue ;; esac
-        if ! units_step_line "$PV_NEW" "$PV_SET_ID" "${_pv_rest:+$_pv_rest }reason: $PV_REASON" > "$PV_NEW.2" 2>/dev/null; then
-          die "REFUSED — $PV_PLAN carries no ## SDLC State section for the $PV_SET_ID line; the plan is unchanged."
-          exit 1
-        fi
-        mv -f "$PV_NEW.2" "$PV_NEW"
-      done
-      PV_WHAT="$PV_WHAT; reason: $PV_REASON"
-    fi
-    # A ROW RETURNED TO PENDING IS ITS LAUNCH TAKEN BACK. A launch the run's log holds is no cell, so setting
-    # `status=pending` or clearing `agent` on its row writes the log's retraction of it (units.sh
-    # `units_dispatch_back`); a row launched before the log held launches returns by its cells alone.
-    if [ "$VERB" = task-set ]; then
-      PV_LIVE="$(_units_live "$PV_PLAN")" || { die "REFUSED — the run's facts cannot be read, so a launch this call takes back cannot be found; the plan is unchanged; run again: the same task-set."; exit 1; }
-      for _pv_s in "${PV_SETS[@]}"; do
-        pv_set_pairs "$_pv_s"
-        _pv_back=""
-        for _pv_a in ${PV_SET_PAIRS[@]+"${PV_SET_PAIRS[@]}"}; do
-          case "$(printf '%s' "${_pv_a%%=*}" | tr '[:upper:]' '[:lower:]')=${_pv_a#*=}" in
-            status=pending) _pv_back=1 ;;
-            agent=*) case "${_pv_a#*=}" in *[A-Za-z0-9]*) ;; *) _pv_back=1 ;; esac ;;
-          esac
-        done
-        [ -n "$_pv_back" ] || continue
-        _pv_nm="$(printf '%s\n' "$PV_LIVE" | awk -F'\t' -v id="$PV_SET_ID" '$1 == id && $2 == "active" { print $3 }')"
-        [ -z "$_pv_nm" ] || units_dispatch_back "$PV_PLAN" "$PV_SET_ID" "$_pv_nm" \
-          || { die "REFUSED — the launch of $PV_SET_ID as $_pv_nm could not be taken back in the run's log; the plan is unchanged; run again: the same task-set."; exit 1; }
-      done
-    fi
-    plan_verb_swap "$VERB" "$PV_WHAT" writer
-    say "$VERB — $PV_WHAT: written to $PV_PLAN; dry-committed first."
-    # THE SUSPECT TEST AT EVERY RE-AUTHORING (wave-30 T16; AC-12.2): task-set prints it as task-add does.
-    if [ "$VERB" = task-set ]; then
-      for _pv_s in "${PV_SETS[@]}"; do
-        pv_set_pairs "$_pv_s"
-        suspect_lines "$PV_PLAN" "$PV_SET_ID" | while IFS=$'\t' read -r _ _ PV_SUSPECT; do say "$(clean_whole "$PV_SUSPECT")"; done
-      done
-    fi
     exit 0
   }
 

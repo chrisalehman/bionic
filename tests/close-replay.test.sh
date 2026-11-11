@@ -10,7 +10,7 @@
 #            delivered: with no hand-hold; the replay's log holds no hand landing or merge, plan edit, step set back or waiver
 #   §WINDOW  after the close, the hand-holds window ends at the plan's delivered: time, and a decline planted after
 #            the release approval card is counted: the card ends nothing
-#   §VERBS   every refusal the replay met names a verb that writes the cell (deliver, amend, task-set or
+#   §VERBS   every refusal the replay met names a verb that writes the cell (deliver, amend, the plan's edit or
 #            step-field), and that verb's call on the cell, then the refused call again, exit 0
 #   §PR      the integrate row's pull request goes through a stand-in gh, the only gh on its PATH, whose log holds
 #            `pr create --base main --head wave/x`
@@ -262,7 +262,7 @@ fi
 # ============================================================
 section "§VERBS: every refusal the replay met names the verb that writes the cell, and that verb then writes it"
 # ============================================================
-# fails-when: a refusal names no verb of deliver, amend, task-set and step-field, a refused call is left unfollowed,
+# fails-when: a refusal names no verb of deliver, amend, the plan's edit and step-field, a refused call is left unfollowed,
 # or the named verb, or the refused call after it, exits non-zero.
 if cr_reached "VB-0"; then
   VB_RCS="$(cr_rcs)"
