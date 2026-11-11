@@ -1014,7 +1014,7 @@ _units_landed() {
     $0 == "\034in" { part = 4; next }
     part == 1 { if ($1 == "") next; n++; id[n] = $1; knd[n] = $3; srv[n] = $8; st[n] = $10; at[$1] = n; next }
     part == 2 {
-      # A published event is a landing at its commit: `row-landed --by-hand` records a hand landing with it alone.
+      # A published event is a landing at its commit, a hand landing's and a record row's too.
       r = $2; m = $3
       if (!(r in at)) next
       lm[r] = (m ~ /^[0-9a-f]+$/ && length(m) >= 7 && length(m) <= 40) ? m : "-"
@@ -2695,7 +2695,7 @@ UNITS_RUN
 #      one escape a GFM cell defines.
 #   2. ITS `- <id>:` LINE under `## SDLC State`, after the last `- T<n>:` line and that line's
 #      indented continuation — or at the end of the section when the plan carries none yet.
-#      `pending dispatch`, which its later writers (`row-landed`) append to. How the row was born
+#      `pending dispatch`. How the row was born
 #      is no part of the plan: `task-add` appends it to the run's log (`units_born_event`).
 #
 # NO OTHER ROW IS EDITED IN A TABLE WITH reads (wave-26 T2; D2): its rows wait on what they read,
@@ -2966,8 +2966,8 @@ units_table_cells() {
 # ` born: floor <suite>`, the marker the judge, the fix-cap and `disposition` read, and a later verb
 # may add its own ` <key>: <value>`. The text is what precedes the first ` <key>: ` (a lowercase
 # key); a rewrite replaces the text, or with `append` extends it, and each marker follows in its
-# order. A marker whose ` <key>: ` the new text already carries is the new text's, so row-landed,
-# which folds the old text into the new one, writes each marker once. Replace mode used to drop
+# order. A marker whose ` <key>: ` the new text already carries is the new text's, so a writer
+# that folds the old text into the new one writes each marker once. Replace mode used to drop
 # the born marker at the landing summary (debt step-line-drops-born). A `Step N:` line carries no
 # markers: its text, ` current: ` and all, is replaced whole as before.
 units_step_line() {
@@ -3037,8 +3037,7 @@ units_step_line() {
 
 # units_step_text <plan> <N|T<n>> -> the text of that line of `## SDLC State`, found exactly as
 #   `units_step_line` finds the line it writes (its pattern, fences skipped, the first one in the
-#   section), blanks trimmed; nothing when the line is absent (wave-28 T6: `row-landed` adds to the
-#   text a row's line already has). Exit 1 no `## SDLC State`.
+#   section), blanks trimmed; nothing when the line is absent. Exit 1 no `## SDLC State`.
 units_step_text() {
   local plan="${1:-}" key="${2:-}"
   [ -n "$plan" ] && [ -f "$plan" ] || return 1
@@ -3465,6 +3464,38 @@ units_fix_cap() {
   [ -n "$plan" ] && [ -r "$plan" ] || return 1
   n="$(units_rows "$plan" 2>/dev/null | awk -F'\t' '$1 != "" { n++ } END { print n + 0 }')"
   fix_cap_render "$(plan_frontmatter_get "$plan" fix-cap)" "$(plan_frontmatter_get "$plan" rigor)" "$n"
+}
+
+# THE MATRIX HEAD'S LINES. Between the `## Verification Matrix` heading and its table stand the matrix's own flush-left
+# lines, `stack-health:` first, where matrix-render writes its stub and the gate reads them. One keyed line is written
+# `<key>: <value>`: a line of the key is replaced where it stands, and any second one dropped, so the head holds one;
+# with none, it goes under the `stack-health:` line, else under the heading. <own>, an ERE, names the old values the
+# caller may replace: an old value outside it is a person's word and stays (exit 5, nothing printed). Fences skipped.
+# Exit 3: no matrix section. Here, beside the table's readers, so a landing's writes and the plan verbs share it.
+matrix_head_line() {  # <plan> <key> <value> [<own ERE>] -> the whole plan
+  MH_KEY="$2" MH_VAL="$3" MH_OWN="${4:-}" awk '
+    BEGIN { k = ENVIRON["MH_KEY"]; kre = "^[ \t]*" k "[ \t]*:"; line = k ": " ENVIRON["MH_VAL"]; own = ENVIRON["MH_OWN"] }
+    { L[++n] = $0 }
+    END {
+      for (i = 1; i <= n; i++) {
+        x = L[i]
+        if (x ~ /^[ \t]*```/) { fence = !fence; continue }
+        if (fence) continue
+        if (x ~ /^## /) { if (head) break; if (x ~ /^## Verification Matrix/) head = i; continue }
+        if (!head) continue
+        if (x ~ /^[ \t]*\|/) break
+        if (x ~ kre) { if (!at) at = i; else drop[i] = 1 }
+        else if (x ~ /^[ \t]*stack-health[ \t]*:/ && !sh) sh = i
+      }
+      if (!head) exit 3
+      if (at && own != "") { v = L[at]; sub(kre, "", v); gsub(/^[ \t]+|[ \t]+$/, "", v); if (v !~ own) exit 5 }
+      for (i = 1; i <= n; i++) {
+        if (i in drop) continue
+        if (i == at) { print line; continue }
+        print L[i]
+        if (!at && i == (sh ? sh : head)) { if (!sh) print ""; print line }
+      }
+    }' "$1"
 }
 
 # units_ac_head_awk -> the awk text of `ac_head(line, ac)`, THE ONE MATCHER OF AN AC BLOCK'S HEADING (wave-36 T24;

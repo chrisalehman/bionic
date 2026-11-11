@@ -1126,8 +1126,8 @@ expect_eq "(mc2) close-out's own last landing, from the session bound to the clo
 
 section "§HAND: a hand landing writes the person's verdicts before it publishes, so the born row's landing closes the review's ask"
 #
-# `land --by-hand` with --suites records what the person says of the writer's run as green verdicts, as `row-landed
-# --by-hand` does, and writes them before the publish: the publish reads the reviews the row answers again once the row
+# `land --by-hand` with --suites records what the person says of the writer's run as green verdicts, and writes them
+# before the publish: the publish reads the reviews the row answers again once the row
 # reads landed, judging the row by those verdicts. T3 is born of the one finding of a failing adversarial review that
 # `proof-add review` registered, which opened the waiver ask.
 # fails-when: the ask stays open after the hand landing's publish, or the verdicts follow the published line.

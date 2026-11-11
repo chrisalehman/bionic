@@ -10,7 +10,7 @@
 #            delivered: with no hand-hold; the replay's log holds no hand landing or merge, plan edit, step set back or waiver
 #   §WINDOW  after the close, the hand-holds window ends at the plan's delivered: time, and a decline planted after
 #            the release approval card is counted: the card ends nothing
-#   §VERBS   every refusal the replay met names a verb that writes the cell (deliver, amend, the plan's edit or
+#   §VERBS   every refusal the replay met names a verb that writes the cell (amend, the plan's edit or
 #            step-field), and that verb's call on the cell, then the refused call again, exit 0
 #   §PR      the integrate row's pull request goes through a stand-in gh, the only gh on its PATH, whose log holds
 #            `pr create --base main --head wave/x`
@@ -84,7 +84,7 @@ cr_marks() { cr_part | awk -v t="# ${1}: " 'index($0, t) == 1 { print substr($0,
 # The verbs the replay runs (rehearsal.sh `_rh_replay`), each named `<tool> <verb>`: the tool the command runs and
 # the first bare word of its arguments. A log missing any of them is a replay that did not run that verb, whatever its
 # length. A refusal's follow is not listed: the replay meets one only when a verb refuses.
-CR_VERBS='session-sweeper.sh ack|session-poker.sh task-add|spawn-worktree.sh create|execution-recorder.sh|spawn-worktree.sh ready|session-poker.sh release-check|session-poker.sh release-approval|session-poker.sh reply|session-poker.sh reviews-part|gh pr create|gh pr merge|session-poker.sh deliver|close-out.sh run'
+CR_VERBS='session-sweeper.sh ack|session-poker.sh task-add|spawn-worktree.sh create|execution-recorder.sh|spawn-worktree.sh ready|session-poker.sh release-check|session-poker.sh release-approval|session-poker.sh reply|session-poker.sh reviews-part|gh pr create|gh pr merge|session-poker.sh tick|close-out.sh run'
 # The kinds of hand write the replay makes: the fix writer's launch, its code and report, the user's typed reply.
 CR_HANDS='launch code record typed'
 # cr_names -> for each `$ ` command line on stdin, `<rc>|<tool> <words>`: the tool is the first word naming a script
@@ -202,8 +202,8 @@ if [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ]; then
     "$([ -n "$CL_PART" ] && [ "$CL_PART" = "$CL_MAIN" ] && echo yes)|$([ -n "$CL_REL" ] && /usr/bin/grep -q "^proved: kind=check head=$CL_REL " "$CR_PLAN" && echo yes)|$(/usr/bin/grep "^proved: kind=check head=${CL_REL:-none} " "$CR_PLAN" | tail -1 | /usr/bin/grep -q 'result=fail' && echo yes || echo no)"
   expect_eq "CL-5 the user's reply approves that head: reply exit 0, the newest approved: release and approved: merge-unproved (the fix landed past the whole run) name it" "0|$CL_REL|$CL_REL" \
     "$(cr_rc "the user's reply to the card at the fix's head" | tail -1)|$(for k in release merge-unproved; do /usr/bin/grep "^approved: $k " "$CR_PLAN" | tail -1 | sed -n 's/.* head=\([0-9a-f]*\) .*/\1/p'; done | paste -sd'|' -)"
-  expect_eq "CL-6 the integrate row lands and close-out runs (exit 0)" "landed|0" \
-    "$(awk -F'|' '$2 ~ /^ *T4 *$/ { s = $(NF - 1); gsub(/ /, "", s); print s }' "$CR_PLAN")|$(cr_rc 'close-out, the tail' | tail -1)"
+  expect_eq "CL-6 the integrate row lands by the tick, one published event and no status cell written, and close-out runs (exit 0)" "1|pending|0" \
+    "$(awk -F'|' '$2 == "ev=published" && $3 == "row=T4" && /\|kind=record\|/ { n++ } END { print n + 0 }' <(cr_lines))|$(awk -F'|' '$2 ~ /^ *T4 *$/ { s = $(NF - 1); gsub(/ /, "", s); print s }' "$CR_PLAN")|$(cr_rc 'close-out, the tail' | tail -1)"
   CL_HH="$(cr_out 'close-out, the tail' | /usr/bin/grep '^hand-holds: ')"
   expect_eq "CL-7 close-out prints its hand-holds line" "yes" "$([ -n "$CL_HH" ] && echo yes)"
   expect_contains "CL-7b …and it counts none" "hand-holds: total=0 " "$CL_HH"
@@ -269,7 +269,7 @@ fi
 # ============================================================
 section "§VERBS: every refusal the replay met names the verb that writes the cell, and that verb then writes it"
 # ============================================================
-# fails-when: a refusal names no verb of deliver, amend, the plan's edit and step-field, a refused call is left unfollowed,
+# fails-when: a refusal names no verb of amend, the plan's edit and step-field, a refused call is left unfollowed,
 # or the named verb, or the refused call after it, exits non-zero.
 if cr_reached "VB-0"; then
   VB_RCS="$(cr_rcs)"

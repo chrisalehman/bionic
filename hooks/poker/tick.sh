@@ -653,6 +653,16 @@ $(proof_findings_owed "$SCHED_PLAN" 2>/dev/null)
 TICK_FINDINGS
 }
 
+# tick_told_once <key> <words> -> 0 the first time this session's ticks meet the pair, so the caller says it; 1 after.
+# The pairs go in the line's told file beside the standing reds', so a reason is told once and a new one is told again.
+tick_told_once() {
+  local f="$REPO_REAL/.bionic/tmp/line-told-${SESSION_ID}.state" k="$1|$2"
+  [ ! -L "$f" ] && tmp_dir_ok "${f%/*}" || return 0
+  [ -f "$f" ] && /usr/bin/grep -qxF -- "$k" "$f" && return 1
+  printf '%s\n' "$k" >> "$f" 2>/dev/null
+  return 0
+}
+
 # tick_plan_memoised <command> [args…] -> runs the command with the bound plan's table parsed
 # once for everything it asks (`units_memoised`, payload/scripts/lib/units.sh); a tick with no
 # readable plan runs it bare, since there is no table to hold.
@@ -1597,16 +1607,15 @@ EOF
 $VERDICT_OUT
 EOF
 
-    # ---------- THE BACKSTOP: A RECORD ROW WHOSE AGENT ENDED WITHOUT LANDING IT (wave-33 T6; REQ-3 AC-3.1; D5) ----------
+    # ---------- THE LANDING OF A RECORD ROW: ITS WRITER ENDED WITH ITS CONTRACT MET ----------
     #
-    # A test, verify or review row lands by its own agent's last act, `deliver`. When the agent
-    # ended without it, its roster row reads MET (the deliverable landed and the agent said so)
-    # while its row still reads `active` under that name (its launch, `units_rows`). The tick lands
-    # such a row through `deliver` itself, run as a child, so the one landing writer and every check `deliver` makes stand: a row
-    # whose artifact is absent is refused there, left active, and reported here with the refusal.
-    # Only a row with no tree whose Files write nothing the head carries is asked; a row with a
-    # tree lands through `ready`. MET is read off this tick's one verdict read, acked or not: the
-    # ack closes the agent, never the row. A landed row is no longer `active`, so it is asked once.
+    # A test, verify or review row writes a record and no code, so it has no tree and no `ready`. Its roster row reads
+    # MET (the deliverable landed and the agent said so) while the row still reads `active` under that name (its
+    # launch, `units_rows`), and the tick lands it (hooks/poker/line.sh `record_row_land`, in a subshell, so each of
+    # its checks stands): one `published` event at the working head. A row whose checks fail (no record, a review not
+    # yet registered) is left active and told once per reason, and asked again at the next tick. Only a row with no
+    # tree whose Files write nothing the head carries is asked; a row with a tree lands through `ready`. MET is read
+    # off this tick's one verdict read, acked or not: the ack closes the agent, never the row.
     if [ "${POKER_RUN_OPEN:-}" = yes ] && [ -n "${POKER_RUN_PLAN:-}" ] && [ -f "$POKER_RUN_PLAN" ]; then
       TICK_MET="$(printf '%s\n' "$VERDICT_OUT" | awk -F'|' '$1 == "landing-verdict/v1" { n = ""; s = ""
           for (i = 2; i <= NF; i++) { if ($i ~ /^name=/) n = substr($i, 6); else if ($i ~ /^state=/) s = substr($i, 7) }
@@ -1638,11 +1647,12 @@ EOF
             continue
           fi
           BS_RC=0
-          BS_OUT="$( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" deliver "$BS_ID" 2>&1 )" || BS_RC=$?
+          BS_OUT="$( cd "$REPO_REAL" && PV_PLAN="$POKER_RUN_PLAN" PV_REPO="$REPO_REAL" record_row_land "$BS_ID" 2>&1 )" || BS_RC=$?
           if [ "$BS_RC" -eq 0 ]; then
-            say "LANDED $BS_ID — $(clean "$BS_AGENT") ended (MET) without deliver; the tick landed its row through deliver: $(clean "$(printf '%s\n' "$BS_OUT" | sed -n 's/^poker: deliver — [^:]*: //p' | head -1)")"
+            say "LANDED $BS_ID — $(clean "$BS_AGENT") ended (MET); the tick landed its row: $(clean "$(printf '%s\n' "$BS_OUT" | sed -n 's/^poker: landed [^ ]* — //p' | head -1)")"
           else
-            say "NOT-LANDED $BS_ID — $(clean "$BS_AGENT") ended (MET) without deliver, and deliver refused it: $(clean "$(printf '%s\n' "$BS_OUT" | /usr/bin/grep -m1 'REFUSED' | sed 's/^poker: //')")"
+            tick_told_once "landing:$BS_ID" "$(printf '%s\n' "$BS_OUT" | /usr/bin/grep -m1 'REFUSED' | sed 's/^poker: //')" \
+              && say "NOT-LANDED $BS_ID — $(clean "$BS_AGENT") ended (MET), and its landing waits: $(clean "$(printf '%s\n' "$BS_OUT" | /usr/bin/grep -m1 'REFUSED' | sed 's/^poker: //')")"
           fi
         done <<BACKSTOP_ROWS
 $(units_rows "$POKER_RUN_PLAN" 2>/dev/null | awk -F'\t' -v met="$TICK_MET" '$10 == "active" && $5 != "" && index(met, " " $5 " ") { printf "%s\t%s\t%s\t%s\n", $1, $5, ($9 == "" ? "-" : $9), ($11 == "" ? "-" : $11) }')
@@ -1651,6 +1661,26 @@ BACKSTOP_ROWS
           OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_send ruling: >/dev/null 2>&1
         fi
       fi
+      # A RECORD ROW NOBODY LAUNCHES (the orchestrator's own: a regression row, an integrate row) lands the same way
+      # once it is ready and its checks pass: a ready row of a record kind with no tree, no launch and no writer of its
+      # own. Until its record and the registration its kind owes stand it is offered as before; a reason is told once,
+      # and none while its record is still to be written.
+      while IFS=$'\t' read -r BS_ID BS_KIND; do
+        [ -n "$BS_ID" ] || continue
+        BS_RC=0
+        BS_OUT="$( cd "$REPO_REAL" && PV_PLAN="$POKER_RUN_PLAN" PV_REPO="$REPO_REAL" record_row_land "$BS_ID" 2>&1 )" || BS_RC=$?
+        if [ "$BS_RC" -eq 0 ]; then
+          say "LANDED $BS_ID — the orchestrator's $BS_KIND row; the tick landed it: $(clean "$(printf '%s\n' "$BS_OUT" | sed -n 's/^poker: landed [^ ]* — //p' | head -1)")"
+        else
+          BS_WHY="$(printf '%s\n' "$BS_OUT" | /usr/bin/grep -m1 'REFUSED' | sed 's/^poker: //')"
+          case "$BS_WHY" in *"does not exist"*|*"lands through ready"*) continue ;; esac
+          tick_told_once "landing:$BS_ID" "$BS_WHY" && say "NOT-LANDED $BS_ID — the orchestrator's $BS_KIND row waits: $(clean "$BS_WHY")"
+        fi
+      done <<OWN_ROWS
+$(units_rows "$POKER_RUN_PLAN" 2>/dev/null | awk -F'\t' -v ready=" $(fill_ready_set "$POKER_RUN_PLAN" 99999 0 2>/dev/null | tr '\n' ' ') " '
+    index(ready, " " $1 " ") && $10 == "pending" && $11 !~ /[A-Za-z0-9]/ && $3 ~ /^(test|verify|review|doc|integrate)$/ \
+      && ($5 == "" || $5 == "-" || $5 == "—" || tolower($5) == "orchestrator") { printf "%s\t%s\n", $1, $3 }')
+OWN_ROWS
       # THE PAGE CLOSES WHEN NO ROW WAITS ON IT (wave-34 T4; REQ-3 AC-3.1, D13). An open `ruling:<id>`
       # stands while its ruling is unread and some active row's writer (`row_writer`, the backstop's own
       # answer) is the ruling's writer. A ruling shown closes its item where it is stamped (lib/roster.sh

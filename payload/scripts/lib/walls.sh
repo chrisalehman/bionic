@@ -5910,15 +5910,14 @@ _bsg_wrap_only() {
   return 0
 }
 
-# _bsg_own_deliver — is the matched `session-poker.sh deliver` (`_WALL_POKER_ARGS`) the writer's OWN row, alone in one
-# call (wave-33 T15, D10; T6's concern A-T6-10). `deliver` lands a record row at the working head, which a writer
-# does for the row its dispatch bound and for no other: one that could land another's row would close work nobody did.
-# The row it may deliver is the roster row's own `row=` (the brief's `Row:`, which the dispatch wall wrote). Sets
-# `_BSG_DL_OWN` (that row, empty when its roster row names none) and `_BSG_DL_TARGET` (the operand) for the refusal's
-# detail. ALONE IN ONE CALL because the arm reads only the first matching segment: `deliver T6; deliver T9` would
-# otherwise be admitted for its first half. Returns 0 only when the call is exactly `deliver <own row>`.
+# _bsg_own_row — is the matched poker verb's one operand (`_WALL_POKER_ARGS`) the writer's OWN row, alone in one call?
+# A writer acts for the row its dispatch bound and for no other. Its row is the roster row's own `row=` (the brief's
+# `Row:`, which the dispatch wall wrote). Sets `_BSG_DL_OWN` (that row, empty when its roster row names none) and
+# `_BSG_DL_TARGET` (the operand) for the refusal's detail. ALONE IN ONE CALL because the arm reads only the first
+# matching segment, so a second verb after it would otherwise be admitted for the first. Returns 0 only when the call
+# is exactly `<verb> <own row>`.
 _BSG_DL_OWN=""; _BSG_DL_TARGET=""
-_bsg_own_deliver() {
+_bsg_own_row() {
   local _pick _seg _segs _l _n=0 _oldifs _hadf
   _BSG_DL_OWN=""; _BSG_DL_TARGET=""
   wall_libs background-suite-guard roster.sh || return 1
@@ -5945,14 +5944,14 @@ _bsg_own_deliver() {
 # _bsg_own_reviews_part — is the matched `session-poker.sh reviews-part` (`_WALL_POKER_ARGS`) the INTEGRATE row's own
 # writer's, on that row, alone in one call? `reviews-part` commits the release entry's reviews on the working branch
 # before the pull request, which only the integrate row's writer does and only for its own row. The own-row reading is
-# `_bsg_own_deliver`'s, so the two cannot drift; what this adds is the row's kind, read from the session's bound plan
+# `_bsg_own_row`'s, so it cannot drift; what this adds is the row's kind, read from the session's bound plan
 # through the one reader (`units_rows`), so a build row's writer is refused its own row too. Sets `_BSG_RP_KIND` (that
 # row's kind, empty when no plan names it) for the refusal's detail. A session with no bound plan names no kind.
 _BSG_RP_KIND=""
 _bsg_own_reviews_part() {
   local _alone=1
   _BSG_RP_KIND=""
-  _bsg_own_deliver && _alone=0
+  _bsg_own_row && _alone=0
   [ -n "$_BSG_DL_OWN" ] && [ "$_BSG_DL_OWN" = "$_BSG_DL_TARGET" ] && _bsg_rp_kind
   [ "$_alone" -eq 0 ] && [ "$_BSG_RP_KIND" = integrate ]
 }
@@ -6440,11 +6439,6 @@ A commit placed outside the project root and outside every tree of its repositor
           fold_update_input "$_BSG_AM_UPD"
           return 1
         fi
-        # A WRITER DELIVERS ITS OWN ROW (wave-33 T15, D10): `deliver <the row its roster row names>`, alone in one
-        # call, goes through unchanged. Anything else the verb takes is refused below, naming the row.
-        if [ "$_WALL_POKER_VERB" = deliver ] && _bsg_own_deliver; then
-          return 0
-        fi
         # THE INTEGRATE ROW'S WRITER RENDERS ITS OWN REVIEWS PART: the same own-row admission, and only for a row the
         # bound plan makes the integrate row. Anything else the verb takes is refused below, naming the row.
         if [ "$_WALL_POKER_VERB" = reviews-part ] && _bsg_own_reviews_part; then
@@ -6465,18 +6459,6 @@ A commit placed outside the project root and outside every tree of its repositor
           _bsg_am_more="${_bsg_am_more}
 The integrate row's writer renders its own part, alone in one call, before its push and pull request:
     bash <plugin>/hooks/session-poker.sh reviews-part <your row>"
-        fi
-        if [ "$_WALL_POKER_VERB" = deliver ]; then
-          if [ -n "$_BSG_DL_OWN" ]; then
-            _bsg_am_more="
-\`deliver ${_BSG_DL_TARGET:-<none>}\`: ${_BSG_DL_TARGET:-no row} is not your row (yours is $_BSG_DL_OWN)."
-          else
-            _bsg_am_more="
-\`deliver\`: no roster row of yours names a plan row, so there is no row of yours to deliver."
-          fi
-          _bsg_am_more="${_bsg_am_more}
-A writer delivers its own row, alone in one call:
-    bash <plugin>/hooks/session-poker.sh deliver <your row>"
         fi
         if [ "$_WALL_POKER_VERB" = amend ] && [ -n "$_BSG_AM_OWN" ]; then
           if [ -n "$_BSG_AM_TARGET" ] && [ "$_BSG_AM_TARGET" != "$_BSG_AM_OWN" ]; then

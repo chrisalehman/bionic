@@ -623,7 +623,7 @@ expect_eq "RS1c the terminal is the short page: bound, step, running, landed sin
 expect_eq "RS1d …the step" "step: 4 Implement" "$(printf '%s\n' "$HF_RS_TERM" | grep '^step: ')"
 expect_regex "RS1e …each open agent with what it does and for how long" '^  - w-pred · implementor · for [0-9]+ min$' \
   "$(printf '%s\n' "$HF_RS_TERM" | grep '^  - ')"
-expect_eq "RS1f …what landed after the handoff was written" "landed since the handoff: T4, T3" \
+expect_eq "RS1f …what landed after the handoff was written, in the order it landed" "landed since the handoff: T3, T4" \
   "$(printf '%s\n' "$HF_RS_TERM" | grep '^landed since')"
 expect_absent "RS1h …the adopt verdicts and the task list stay in the recap (RS4 and RS5 read them there)" "task-list: " "$HF_RS_TERM"
 expect_contains "RS2b …saying so (bind's own line)" "poker: bound " "$HF_RS"

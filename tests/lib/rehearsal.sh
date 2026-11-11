@@ -87,7 +87,7 @@ RH_HAND_KINDS="prose record code typed launch"
 # The verbs whose refusals the replay follows: a refusal of a verb that writes the plan's cells names the one of
 # these that writes the cell, `edit` for the person's edit of a Tasks cell, and the replay makes it on that cell
 # and then runs the refused call again.
-RH_FOLLOW_VERBS="deliver amend edit step-field"
+RH_FOLLOW_VERBS="amend edit step-field"
 
 # The run's three goals, as the plan's goals: line declares them: met, not met and not measured yet in every state.
 RH_GOALS="shown · the person says from the card what they owe (record/wave-x/goal-shown.md) ; asks · every ask on the register is on the card (record/wave-x/goal-asks.md) ; walked · the walk finds nothing to fix (record/wave-x/goal-walked.md)"
@@ -275,7 +275,7 @@ _rh_release_card() {
   _rh_poker "record the regression" proof-add regression "record/wave-x/regression-run-$h1.log" || return 1
   printf '# T3: the regression\n\nThe whole run at %s exited 0: record/wave-x/regression-run-%s.log.\n' "$h1" "$h1" > "$RH_REC/T3.md"
   _rh_hand record "the regression row's report record/wave-x/T3.md"
-  _rh_poker "the regression row lands itself" deliver T3 || return 1
+  _rh_tick_land "the tick lands the regression row" T3 record/wave-x/T3.md || return 1
   for qs in evidence:piece adversarial:piece structure:piece adversarial:whole structure:whole; do
     _rh_review "w-${qs%%:*}-${qs#*:}" "${qs%%:*}" "${qs#*:}" "$RH_BASE" "$h1" pass || return 1
   done
@@ -346,6 +346,35 @@ _rh_follow() {
   _rh_do "$label, again" "$@"
 }
 
+# _rh_landed <row> -> 0 when the units helper reads <row> landed
+_rh_landed() {
+  [ "$(bash -c '. "$1/units.sh" >/dev/null 2>&1 && units_rows "$2"' _ "$RH_ROOT/payload/scripts/lib" "$RH_PLAN" 2>/dev/null \
+    | awk -F'\t' -v r="$1" '$1 == r { print $10 }')" = landed ]
+}
+# _rh_tick_land <label> <row> <record> -> a record row landed by the tick, the person's act: a tick runs, and when the row
+# does not read landed its words name the edit of the row's cell, which is made, and the tick runs again
+_rh_tick_land() {
+  local label="$1" row="$2" rec="$3" key val n
+  for n in 1 2; do
+    door_run "$RH_ROOT" bash "$RH_ROOT/hooks/session-poker.sh" tick
+    { _rh_cmdline bash "$RH_ROOT/hooks/session-poker.sh" tick; printf '%s\n' "$DOOR_OUT" | sed 's/^/  | /'
+      printf '  rc=%s  (%s, tick %s)\n' "$DOOR_RC" "$label" "$n"; } >> "$RH_LOG"
+    _rh_landed "$row" && return 0
+    [ "$n" = 1 ] || break
+    key="$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -oE "edit the [A-Za-z-]+ cell of $row in the plan" | head -1)"; key="${key#edit the }"; key="${key%% *}"
+    case "$key" in
+      Files) val=".bionic/docs/$rec" ;;
+      artifact) val="$rec" ;;
+      *) break ;;
+    esac
+    printf '# not landed: %s · names: edit %s\n' "$label" "$key" >> "$RH_LOG"
+    _rh_cell "follow: edit $row $key" "$row" "$key=$val" || return 1
+  done
+  printf 'rehearse %s: %s: the tick did not land %s\n' "$RH_STATE" "$label" "$row" >&2
+  printf '%s\n' "$DOOR_OUT" | sed 's/^/  | /' >&2
+  return 1
+}
+
 # _rh_gh <dir> -> the stand-in gh in <dir>/bin, and RH_GHPATH: that directory, then every PATH entry holding no gh
 _rh_gh() {
   local p d
@@ -410,7 +439,7 @@ _rh_replay() {
   printf '# T4: the pull request\n\n    gh pr create --base main --head wave/x --fill\n\n%s\n' "$h" > "$RH_REC/T4-pr.md" || return 1
   _rh_hand record "T4's report record/wave-x/T4-pr.md: the pull request's command and its address"
   _rh_do "the person merges the pull request" env PATH="$RH_GHPATH" gh pr merge wave/x --merge || return 1
-  _rh_follow "the integrate row lands itself" T4 record/wave-x/T4-pr.md bash "$RH_ROOT/hooks/session-poker.sh" deliver T4 || return 1
+  _rh_tick_land "the tick lands the integrate row" T4 record/wave-x/T4-pr.md || return 1
   _rh_do "close-out, the tail" env HOME="$dir/home" BIONIC_CLAUDE_HOME="$dir/home/.claude" \
     bash "$RH_ROOT/payload/scripts/close-out.sh" "$RH_PLAN" run || return 1
   # close-out archives a delivered run's plans under the home's archive, keeping their path below the project.
