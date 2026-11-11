@@ -674,15 +674,11 @@ landing_report() {  # <plan or landing record> <project root> <rows yes|no> [ins
 #                  question=…` line under `## SDLC State`, and an AC block's indented `waiver: <who> <when> "<words>"`
 #                  an older plan holds under `## Verification Matrix`. Fenced text is skipped, as every reader of the
 #                  plan skips it.
-#   status-writes  the log's `run/v1|ev=hand|what=matrix-set|ac=<id>|cells=<status,evidence,task>|by=<who>|at=<ISO-UTC>`, one per
-#                  `matrix-set` call that changed the plan, written in the same act as its plan write (hooks/poker/plan.sh
-#                  `poker_verb_matrix_set`). It is counted when its cells name the status or the task, placed by its `at=`
-#                  like every record kind. A task write counts: the task: key is what defers a pending row to its
-#                  task's step, so writing it by hand moves the row off every gate. A call the settled-cell rule
-#                  refuses, or that only restates a key, writes none. An evidence-only line is a write and no status:
-#                  not counted. A `run/v1|ev=hand|what=matrix-retier|…` line (`matrix-retier`) raises a tier and resets
-#                  the row: strengthening is the run's act, so it is counted
-#                  in no field; weakening stays a person's, a waiver: line among the waivers.
+#   status-writes  the hand act an older run's cell verb wrote to the log (`what=` its name, `cells=` the cells it
+#                  wrote), one per call that changed the plan: counted when its cells name the status or the task,
+#                  placed by its `at=` like every record kind, since a task written by hand moved its row off every
+#                  gate. An evidence-only line is a write and no status: not counted. An older run's tier raise is
+#                  the run's own act and counted in no field. No verb writes either now.
 #   second-regressions  a whole run a person started, past the first. The tick and the orchestrator start the whole
 #                  run as the machine does, so only a person's start is a hand-hold: the landing record's regression
 #                  run lines (`ev=run`, a log under `regression-run-`, or `kind=regression`) past the record's first

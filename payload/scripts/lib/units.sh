@@ -3507,8 +3507,8 @@ units_fix_cap() {
 
 # units_ac_head_awk -> the awk text of `ac_head(line, ac)`, THE ONE MATCHER OF AN AC BLOCK'S HEADING (wave-36 T24;
 #   REQ-7 AC-7.9; D13). A heading is `<ac>:` at the start of a flush-left line, with the text after it optional:
-#   matrix-render writes `AC-2.1: <the criterion's text>`, and the wall's matrix_block, session-poker.sh's
-#   matrix_block_key and matrix_block_has all read that line through this one function, as
+#   an older plan's block heading carries the criterion's text after the colon, and the wall's matrix_block and
+#   matrix_block_key read that line through this one function, as
 #   `awk "$(units_ac_head_awk)"'...'`. A list bullet (`-`, `*`, `+` and spaces) is stripped from a COPY first, so
 #   `- AC-1:` reads as `AC-1:`; an INDENTED line is no heading, and the colon after the id is why `AC-1` never
 #   begins the `AC-11:` block. Nothing is required after the colon. Pure, silent, and defined at source time.
@@ -3593,7 +3593,7 @@ matrix_row_cell() {
 }
 
 # THE AC BLOCK'S KEYS. The block is the `<AC>:` line under `## Verification Matrix`, text after the
-# colon allowed (matrix-render writes the criterion there), and the indented lines under it (matrix-render's shape,
+# colon allowed (an older plan's rendering wrote the criterion there), and the indented lines under it (that shape,
 # the one walls.sh `matrix_block` reads); both read the heading through `units_ac_head_awk`, above. The key's
 # first line is replaced where it stands; a key the block lacks goes after its last line. Exit 3 no block.
 matrix_block_key() {  # <plan> <AC> <key> <value> -> the whole plan

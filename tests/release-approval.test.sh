@@ -1024,18 +1024,20 @@ expect_absent "OL-4b …and the line names nothing owed by the close" "owed by t
 section "§GOALS-REFUSE: the card refuses to render over matrix rows that map to no requirement, and renders once serves: is written"
 # ============================================================
 # fails-when: the card prints `Goals — 0 of N reached` over rows no theme reads (no serves:, no dotted id), the refusal
-# names neither the rows nor matrix-render, or the plan with serves: written by the real matrix-render is still refused.
+# names neither the rows nor the serves: line that maps them, or the plan with serves: written is still refused.
 # FC_GOOD's plan with lib/plan-fixture.sh's flat themes; each read is --preview, so the two reads differ by serves: alone.
 fc_plan "$FC_GOOD"; plan_fixture_themes "$PFC" flat discharged discharged pending
 FC_GR_REQ="$(bash -c '. "$1/run.sh"; . "$1/plan.sh"; plan_requirements_file "$2"' _ "$FC_LIB" "$PFC")"
 fc_page --preview
 expect_eq "GR-1 over three rows with no serves: and no dotted id the card is refused (exit 1), no page printed, none written; the plan reads two themes" \
   "1|||2" "$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^Goals')|$(fc_pages)|$(/usr/bin/grep -c '^## The ' "$FC_GR_REQ")"
-expect_contains "GR-1b …saying how many rows map to no requirement, naming them and the verb that writes serves:" \
-  "release-approval refused — 3 matrix rows map to no requirement (no serves: and no dotted id): run session-poker.sh matrix-render to write serves: (AC-168, AC-169, AC-170)" "$FC_ERR"
-poke "$RFC" matrix-render; FC_GR_N="$(/usr/bin/grep -c '^  serves: REQ-' "$PFC")"
+expect_contains "GR-1b …saying how many rows map to no requirement, naming them and the line that maps a row" \
+  "release-approval refused — 3 matrix rows map to no requirement (no serves: and no dotted id): give each block a serves: line naming its requirement (AC-168, AC-169, AC-170)" "$FC_ERR"
+for a in AC-168 AC-169 AC-170; do r="$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" criterion "$a" | sed -n 's/^requirement=//p')"
+  awk -v a="$a:" -v r="$r" '{ print } !d && index($0, a) == 1 { print "  serves: " r; d = 1 }' "$PFC" > "$PFC.t" && mv "$PFC.t" "$PFC"; done
+RC=0; FC_GR_N="$(/usr/bin/grep -c '^  serves: REQ-' "$PFC")"
 fc_page --preview
-expect_eq "GR-3 with serves: written (matrix-render exit 0, three lines) the same plan renders (exit 0): one theme of two reached, each its own rows' count" \
+expect_eq "GR-3 with serves: written (three lines) the same plan renders (exit 0): one theme of two reached, each its own rows' count" \
   "0|3|0|Goals — 1 of 2 reached|The card reads true — 2 of 2 criteria discharged, none open|The gate admits the work — 0 of 1 criteria discharged, open: REQ-2" \
   "$RC|$FC_GR_N|$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^Goals')|$(fc_under Goals | sed 's/^[^ ]* //' | paste -sd'|' -)"
 rm -f "$FC_GR_REQ"

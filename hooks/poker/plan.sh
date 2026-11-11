@@ -1,7 +1,6 @@
 # shellcheck shell=bash
-# hooks/poker/plan.sh — the plan verbs: the contract grammar, the matrix and the rows of the plan (budget,
-# amend, task-add, step-line, step-field, matrix-render,
-# matrix-set, matrix-retier, epic-row, continuation-fill, brief, release-approval, reply).
+# hooks/poker/plan.sh — the plan verbs: the contract grammar and the rows of the plan (budget,
+# amend, task-add, step-line, step-field, epic-row, continuation-fill, brief, release-approval, reply).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
@@ -567,72 +566,6 @@ pv_header_cells() {
     }' "$1" 2>/dev/null
 }
 
-# matrix_block_has <plan> <AC> <key> -> 0 when the AC block carries that key.
-matrix_block_has() {
-  MB_AC="$2" MB_KEY="$3" awk "$(units_ac_head_awk)"'
-    BEGIN { a = ENVIRON["MB_AC"]; k = ENVIRON["MB_KEY"] ":" }
-    /^[ \t]*```/ { fence = !fence; next }
-    fence { next }
-    /^## / { inm = ($0 ~ /^## Verification Matrix/); inb = 0; next }
-    !inm { next }
-    { y = $0; sub(/[ \t]+$/, "", y) }
-    ac_head($0, a) { inb = 1; next }
-    inb && /^[ \t]+[^ \t]/ { sub(/^[ \t]+/, "", y); if (index(y, k) == 1) { hit = 1; exit } next }
-    { inb = 0 }
-    END { exit !hit }' "$1"
-}
-
-# matrix_block_drop <plan> <AC> <key> -> the whole plan with every line of that key in the AC block removed, every
-# other byte as it was; the block is read as matrix_block_has reads it. Exit 3: no block.
-matrix_block_drop() {
-  MB_AC="$2" MB_KEY="$3" awk "$(units_ac_head_awk)"'
-    BEGIN { a = ENVIRON["MB_AC"]; k = ENVIRON["MB_KEY"] ":" }
-    /^[ \t]*```/ { fence = !fence; print; next }
-    fence { print; next }
-    /^## / { inm = ($0 ~ /^## Verification Matrix/); inb = 0; print; next }
-    !inm { print; next }
-    ac_head($0, a) { inb = 1; found = 1; print; next }
-    inb && /^[ \t]+[^ \t]/ { y = $0; sub(/^[ \t]+/, "", y); if (index(y, k) != 1) print; next }
-    { inb = 0; print }
-    END { if (!found) exit 3 }' "$1"
-}
-
-# matrix_eval_row <plan> <AC> <eval type> <eval> -> the whole plan with the criterion's `## Eval design` row's Eval type
-# and Eval cells written ` <value> `, every other byte as it was. The columns are named by the table's header row, as
-# SERVES_AWK eval_row reads them, and the row is the first whose Criterion cell is the AC id, the one that reader
-# keeps; an escaped `\|` inside a cell stays one cell. Exit 3: no row for the criterion; 4: no such columns.
-matrix_eval_row() {
-  ME_AC="$2" ME_TYPE="$3" ME_EVAL="$4" awk '
-    function trim(v) { gsub(/^[ \t]+|[ \t]+$/, "", v); return v }
-    /^[ \t]*```/ { fence = !fence; print; next }
-    fence { print; next }
-    /^## / { inev = ($0 ~ /^## Eval design[ \t]*$/); print; next }
-    inev && !done && /^[ \t]*\|/ && $0 !~ /^[ \t]*\|[-|: \t]*$/ {
-      line = $0; gsub(/\\\|/, "\001", line); n = split(line, c, "|")
-      if (!hdr) {
-        hdr = 1
-        for (j = 2; j < n; j++) { h = tolower(trim(c[j])); if (h == "criterion") cc = j; else if (h == "eval type") ct = j; else if (h == "eval") ce = j }
-        if (!cc || !ct || !ce) { bad = 1; exit }
-        print; next
-      }
-      if (trim(c[cc]) == ENVIRON["ME_AC"]) {
-        c[ct] = " " ENVIRON["ME_TYPE"] " "; c[ce] = " " ENVIRON["ME_EVAL"] " "
-        out = c[1]; for (j = 2; j <= n; j++) out = out "|" c[j]
-        gsub(/\001/, "\\|", out); print out; done = 1; next
-      }
-    }
-    { print }
-    END { if (bad) exit 4; if (!done) exit 3 }' "$1"
-}
-
-# THE FILES BESIDE THE PLAN (wave-33 T7; REQ-3 AC-3.3, D8). `epic-row` and `continuation-fill` write the
-# epic plan and the run's continuation, which close-out writes after act 3 has wiped this session's
-# binding (A-orch-145), so their run is the `--plan` operand when given, else the session's own run, open
-# or closed. Neither file is a run plan: the commit gate reads neither, so their transaction is the
-# copy, the checksum taken before the projection, the compare and the move, with no dry commit.
-# ENGAGEMENT GUARDS A RUN STILL MOVING. A delivered run's continuation marks are filled after close-out's last
-# act wiped the engagement, so `continuation-fill --plan <a delivered plan>` is taken from any session; a live
-# plan, and every other verb here, still asks engagement first.
 # pv_file_open <verb> <operand>... -> PV_REPO, PV_RPLAN, and the cleanup armed; every refusal exits.
 pv_file_open() {
   local verb="$1" sid run cand="" p named=""
@@ -691,30 +624,6 @@ pv_file_swap() {
   fi
 }
 
-# mr_tier_keys -> one `<tier><TAB><keys>` line for each of T0..T4, the keys walls.sh `keys_for_tier` names (wave-30
-# T14; D9). The list is the gate's own, read by sourcing walls.sh in a subshell, so the stubs matrix-render writes and
-# the keys the Verify gate demands cannot drift apart; nothing walls.sh defines outlives the subshell. rc 1 when the
-# library or the function cannot be had.
-mr_tier_keys() {
-  [ -f "$BIONIC_LIB/walls.sh" ] || return 1
-  ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 || exit 1
-    declare -F keys_for_tier >/dev/null 2>&1 || exit 1
-    for _mr_t in T0 T1 T2 T3 T4; do printf '%s\t%s\n' "$_mr_t" "$(keys_for_tier "$_mr_t")"; done )
-}
-
-# mr_close_acs <plan> -> the criteria the close proves, one per line: each `## Eval design` row (eval_row, fences
-# skipped as MR_AWK skips them) whose eval walls.sh `matrix_close_eval` names. The question is that function's alone,
-# asked in a subshell as mr_tier_keys asks it, so the task: cell and walls.sh matrix_close_rows read one answer. The
-# render has loaded walls.sh for its keys first; a predicate it cannot ask names no criterion, which leaves the task
-# pending, never a guess.
-mr_close_acs() {
-  awk "$SERVES_AWK"' { sub(/\r$/, "") } /^[ \t]*```/ { f = !f; next } f { next }
-    /^## / { inev = ($0 ~ /^## Eval design[ \t]*$/); evh = 0; next } inev && /^[ \t]*\|/ { eval_row($0) }
-    END { for (i = 1; i <= ne; i++) printf "%s\037%s\n", ec[i], eev[ec[i]] }' "$1" |
-  ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1
-    while IFS=$'\037' read -r _mr_c _mr_e; do matrix_close_eval "$_mr_e" 2>/dev/null && printf '%s\n' "$_mr_c"; done; exit 0 )
-}
-
 # SERVES_AWK / serves_tasks — THE ONE READ OF "WHICH CRITERIA A ROW SERVES" (wave-31 T22; REQ-15 AC-15.1, D15,
 # A-orch-51). A row serves a criterion when its `serves` cell names the criterion's AC id or the REQ id in the
 # Eval design's Requirement column; that two-way read is `serves_hit`, and two verbs call it, never a second reader:
@@ -727,45 +636,6 @@ mr_close_acs() {
 #   eval_row(line)     one `## Eval design` table line: the header row names the columns, a data row fills ereq[] etc.
 #   trim(v), cells(line, out)  the table-cell reads both programs share
 # Set in hooks/session-poker.sh, before any part loads: SERVES_AWK.
-
-# mr_requirements_file <plan> <repo> -> the requirements file the plan names, when it is a readable file: its
-# `requirements:` frontmatter key, else the Step-1 evidence line's `requirements:` field (walls.sh K5's pointer),
-# resolved as the gate resolves it (walls.sh resolve_requirements_path: absolute stands, `specs/` is under the docs
-# root, anything else under the project root); nothing when neither names a readable file (wave-35 T8; AC-6.4).
-mr_requirements_file() {
-  local raw abs
-  raw="$(plan_frontmatter_get "$1" requirements 2>/dev/null)"
-  if [ -z "$raw" ]; then
-    raw="$(awk '
-      /^[[:space:]]*```/ { fence = !fence; next }
-      fence { next }
-      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-      insdlc && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+1[[:space:]]*:/ {
-        if (match($0, /(^|[^-_[:alnum:]])requirements[[:space:]]*:[[:space:]]*/)) {
-          v = substr($0, RSTART + RLENGTH); sub(/;.*$/, "", v); sub(/[[:space:]]+$/, "", v); print v
-        }
-        exit
-      }' "$1")"
-  fi
-  [ -n "$raw" ] || return 0
-  case "$raw" in
-    /*)      abs="$raw" ;;
-    specs/*) abs="$(docs_root "$2")/$raw" ;;
-    *)       abs="$2/$raw" ;;
-  esac
-  [ -f "$abs" ] && [ -r "$abs" ] && printf '%s' "$abs"
-  return 0
-}
-
-# MR_AWK — matrix-render's one pass over the plan (wave-30 T14; D9). ENVIRON: MR_KEYS (mr_tier_keys), MR_TASKS
-# (`<id><TAB><serves>` per ## Tasks row), MR_WALK (the frontmatter walk: value), MR_REQFILE (the requirements file the
-# plan names, mr_requirements_file; empty when none), MR_COUNT (the side file: on success
-# `<blocks written><TAB><keys added><TAB><blocks unchanged>`, on a refusal `<why><TAB><ids>`); -v closeacs, the
-# criteria the close proves (mr_close_acs), newline-joined. Prints the rendered plan; exits 3 no Eval design criteria,
-# 4 no matrix table, 5 a criterion with no matrix row, 6 a tier with no keys.
-# The reads follow the gate's: fences skipped, a table cell trimmed, an AC block a flush-left `AC-<id>:` (a list
-# bullet tolerated) and the indented lines under it until the next flush-left line (walls.sh `matrix_block`).
-# Set in hooks/session-poker.sh, before any part loads: MR_AWK.
 
 # LE_AWK / landing_evidence — A LANDING WRITES ITS CRITERIA'S EVIDENCE (wave-31 T22; REQ-15 AC-15.1 to AC-15.3, D15,
 # A-orch-51 ruling 3). `row-landed` is the one writer both landings call (`ready`'s publish and the hand landing), and
@@ -1647,311 +1517,6 @@ EOF
     exit 0
   }
 
-  # THE MATRIX RENDER (wave-30 T14; REQ-6 AC-6.1, D9, Δ12a). Step 3 writes the matrix and Step 5 fills it: the
-  # verb reads the bound plan's `## Eval design` table and writes, under `## Verification Matrix`, one AC block per
-  # criterion, in the shape the gate reads — its `AC-<n>:` line carrying the criterion's text from its `- AC-<n>`
-  # bullet, `provenance:` (the requirement's `provenance:` line under its `### REQ-<n>` heading in the requirements
-  # file the plan names, else in the plan, else `pending`; never the Approach: wave-35 T8, AC-6.4), `fails-when:`
-  # and `eval:` (`<tier> — <Eval>`) from the table, `serves:` straight after `provenance:` (the REQ ids the Eval design
-  # row's Requirement cell names; no line when it names none, so a later render whose cell names one writes it),
-  # `task:` (the one `## Tasks` row whose serves cell names the criterion or its requirement, else `pending`), then
-  # `evidence:` (and `user-confirmed:` at T4), the keys walls.sh `keys_for_tier` names for the tier the matrix
-  # table gives the criterion, each `pending`. The matrix head gains `stack-health: pending`, and `walk-artifact: pending` unless the
-  # plan is `walk: exempt`, where it has none. `pending` is the stub token (Δ12a): the gate refuses it wherever it
-  # judges evidence and reads nothing of it before Step 5.
-  #
-  # ADDITIVE, SO IT CAN BE RUN AGAIN. A block that exists gains only the keys it lacks, after its last line, but
-  # `serves:`, which stands straight after `provenance:` where the block holds one, so a plan rendered before the key
-  # gains it where a new block carries it; a key
-  # that is there is never rewritten, whatever it says. The one line it prints counts the three outcomes: new
-  # blocks, keys added (to existing blocks and the matrix head), and blocks left as they were. When there is nothing
-  # to add it writes nothing. It takes the transaction every plan verb takes (copy, dry commit, checksum, swap).
-  # REFUSED (1), the plan unchanged: no `## Eval design` with criteria, no matrix table, a criterion with no matrix
-  # row (its tier is unknown, and a guessed tier owes the wrong keys), a tier walls.sh does not know.
-  poker_verb_matrix_render() {
-    plan_verb_open matrix-render
-    MR_KEYS="$(mr_tier_keys)" || MR_KEYS=""
-    if [ -z "$MR_KEYS" ]; then
-      die "REFUSED — the per-tier keys are walls.sh keys_for_tier's, and $BIONIC_LIB/walls.sh cannot be loaded; the plan is unchanged."
-      exit 2
-    fi
-    MR_TASKS="$(serves_tasks "$PV_PLAN")"
-    MR_CLOSE="$(mr_close_acs "$PV_PLAN")"
-    PV_RC=0
-    MR_KEYS="$MR_KEYS" MR_TASKS="$MR_TASKS" MR_WALK="$(plan_frontmatter_get "$PV_PLAN" walk)" MR_COUNT="$PV_NEW.2" \
-      MR_REQFILE="$(mr_requirements_file "$PV_PLAN" "$PV_REPO")" \
-      awk -v closeacs="$MR_CLOSE" "$SERVES_AWK$MR_AWK" "$PV_PLAN" > "$PV_NEW" 2>/dev/null || PV_RC=$?
-    MR_WHY="$(cut -f2 "$PV_NEW.2" 2>/dev/null)"
-    case "$PV_RC" in
-      0) : ;;
-      3) die "REFUSED — the plan has no ## Eval design table with a Criterion column and rows; matrix-render reads the criteria from it. The plan is unchanged."
-         exit 1 ;;
-      4) die "REFUSED — the plan's ## Verification Matrix has no AC tier table (| AC | tier | status | evidence | auditor |); each criterion's tier is read from it. The plan is unchanged."
-         exit 1 ;;
-      5) die "REFUSED — the matrix table has no row for $MR_WHY, so the tier and the keys it owes are unknown; add the row, then render. The plan is unchanged."
-         exit 1 ;;
-      6) die "REFUSED — no tier walls.sh knows for $MR_WHY: the tier cell is T0 to T4. The plan is unchanged."
-         exit 1 ;;
-      *) die "REFUSED — the matrix cannot be rendered (awk exit $PV_RC); the plan is unchanged."
-         exit 2 ;;
-    esac
-    IFS="$(printf '\t')" read -r MR_N MR_M MR_K < "$PV_NEW.2"
-    MR_LINE="matrix-render — ${MR_N:-0} blocks written, ${MR_M:-0} keys added, ${MR_K:-0} unchanged"
-    if [ "$(( ${MR_N:-0} + ${MR_M:-0} ))" -eq 0 ]; then
-      say "$MR_LINE; the plan already reads so, nothing was written."
-      exit 0
-    fi
-    plan_verb_swap matrix-render "the matrix rendered" writer
-    say "$MR_LINE; written to $PV_PLAN, dry-committed first."
-    exit 0
-  }
-
-  # THE MATRIX ROW'S CELLS AND BLOCK KEYS (wave-33 T7; REQ-4 AC-4.1, D8). Wave-32 moved its matrix by hand:
-  # statuses to waived and discharged, evidence to the fix rows' records, multi-row task keys (A-orch-38, 40,
-  # 41, 47). `status=` writes the table's status cell; `evidence=` the evidence cell AND the AC block's
-  # `evidence:` key, so the table and the block name the same path (research G3); `task=` the block's `task:`
-  # key, each id a `## Tasks` row, joined `, `. The tier cell is the plan's, set at Step 3; the auditor cell
-  # is discharge's. `status=waived` stands only beside the block's `waiver:` line, which waive-row writes on
-  # the user's words. Every key is judged before any is written, and the call is one plan transaction.
-  # REFUSED (1), the plan unchanged: a key outside the three, a status outside the gate's four, an evidence
-  # path outside record/ or with a `..`, a task id no row carries, an AC with no row, a block key on an AC
-  # with no block.
-  poker_verb_matrix_set() {
-    MS_HAS_S=0; MS_HAS_E=0; MS_HAS_T=0; MS_STATUS=""; MS_EV=""; MS_TASK=""
-    for _pv_a in "${MS_PAIRS[@]}"; do
-      _pv_k="${_pv_a%%=*}"; _pv_v="${_pv_a#*=}"
-      if ! plan_verb_value_ok "$_pv_v"; then
-        die "REFUSED — the value for $(clean "$_pv_k") carries a |, a tab or a line break, which no matrix cell can hold; the plan is unchanged."
-        exit 1
-      fi
-      case "$_pv_k" in
-        status)   MS_HAS_S=1; MS_STATUS="$_pv_v" ;;
-        evidence) MS_HAS_E=1; MS_EV="$_pv_v" ;;
-        task)     MS_HAS_T=1; MS_TASK="$_pv_v" ;;
-        tier)
-          die "REFUSED — the tier cell is the plan's, set at Step 3 with the criterion's eval; matrix-set never writes it. The plan is unchanged."
-          exit 1 ;;
-        auditor)
-          die "REFUSED — the auditor cell is discharge's, and it holds the bare token CONFIRMED; the plan is unchanged."
-          pv_next discharge "$MS_AC"
-          exit 1 ;;
-        *)
-          die "REFUSED — '$(clean "$_pv_k")' is no key matrix-set writes: status, evidence or task. The plan is unchanged."
-          pv_fix_pairs "$(printf 'status\nevidence\ntask\n')" "${MS_PAIRS[@]}"
-          [ "${#PV_FIXED[@]}" -eq 0 ] || pv_next matrix-set "$MS_AC" "${PV_FIXED[@]}"
-          exit 1 ;;
-      esac
-    done
-    if [ "$MS_HAS_S" = 1 ]; then
-      case "$MS_STATUS" in
-        pending|blocked|discharged|waived) : ;;
-        *)
-          die "REFUSED — '$(clean "$MS_STATUS")' is no matrix status; the gate reads pending, blocked, discharged, waived. The plan is unchanged."
-          exit 1 ;;
-      esac
-    fi
-    if [ "$MS_HAS_E" = 1 ]; then
-      case "$MS_EV" in
-        record/?*) : ;;
-        *)
-          die "REFUSED — the evidence '$(clean "$MS_EV")' is not under record/: a matrix path is docs-root relative, record/<…>. The plan is unchanged."
-          case "$MS_EV" in
-            */record/?*) pv_fix_pairs "$(printf 'status\nevidence\ntask\n')" "${MS_PAIRS[@]/#evidence=*/evidence=record/${MS_EV#*/record/}}"
-                         pv_next matrix-set "$MS_AC" "${PV_FIXED[@]}" ;;
-          esac
-          exit 1 ;;
-      esac
-      case "/$MS_EV/" in
-        */../*)
-          die "REFUSED — the evidence '$(clean "$MS_EV")' has a '..' component; name it under record/. The plan is unchanged."
-          exit 1 ;;
-      esac
-    fi
-    plan_verb_open matrix-set
-    if [ -z "$(matrix_row_cell "$PV_PLAN" "$MS_AC" 1)" ]; then
-      die "REFUSED — the matrix table has no row $MS_AC; the plan is unchanged."
-      exit 1
-    fi
-    # A STATUS A LANDING SETTLED IS THE LANDING'S (lib/line.sh `line_settle`): the landing that wrote the criterion's
-    # evidence wrote its status in the same act, so a status written over it is refused, naming that landing.
-    if [ "$MS_HAS_S" = 1 ] && { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
-       && MS_BY_LANDING="$(line_settled_by "$PV_PLAN" cells "$MS_AC")"; then
-      die "REFUSED — the status of $MS_AC was settled by the landing of ${MS_BY_LANDING% *} at ${MS_BY_LANDING#* }, which wrote its evidence and its status in one act; the plan is unchanged."
-      exit 1
-    fi
-    if [ "$MS_HAS_T" = 1 ]; then
-      MS_ROWS=" $(units_rows "$PV_PLAN" 2>/dev/null | cut -f1 | tr '\n' ' ')"
-      MS_IDS=""; MS_MISS=""
-      for _pv_i in $(printf '%s' "$MS_TASK" | tr ',' ' '); do
-        case "$MS_ROWS" in
-          *" $_pv_i "*) MS_IDS="${MS_IDS:+$MS_IDS, }$_pv_i" ;;
-          *) MS_MISS="${MS_MISS:+$MS_MISS, }$(clean "$_pv_i")" ;;
-        esac
-      done
-      if [ -n "$MS_MISS" ] || [ -z "$MS_IDS" ]; then
-        die "REFUSED — task=$(clean "$MS_TASK") names ${MS_MISS:-no id}, no row of the ## Tasks table; the plan is unchanged."
-        exit 1
-      fi
-    fi
-    if [ "$MS_STATUS" = waived ] && ! matrix_block_has "$PV_PLAN" "$MS_AC" waiver; then
-      die "REFUSED — $MS_AC has no waiver: line, and a waived row is one the user waived in their own words; waive-row writes both. The plan is unchanged."
-      pv_next waive-row "$MS_AC" "<the user's words>" "<why>"
-      exit 1
-    fi
-    cp "$PV_PLAN" "$PV_NEW"
-    MS_CELLS=()
-    [ "$MS_HAS_S" = 0 ] || MS_CELLS+=("3=$MS_STATUS")
-    [ "$MS_HAS_E" = 0 ] || MS_CELLS+=("4=$MS_EV")
-    PV_RC=0
-    if [ "${#MS_CELLS[@]}" -gt 0 ]; then
-      matrix_row_cells "$PV_NEW" "$MS_AC" "${MS_CELLS[@]}" > "$PV_NEW.2" 2>/dev/null || PV_RC=$?
-      [ "$PV_RC" -ne 0 ] || mv -f "$PV_NEW.2" "$PV_NEW"
-    fi
-    if [ "$PV_RC" -eq 0 ] && [ "$MS_HAS_E" = 1 ]; then
-      matrix_block_key "$PV_NEW" "$MS_AC" evidence "$MS_EV" > "$PV_NEW.2" 2>/dev/null || PV_RC=$((10 + $?))
-      [ "$PV_RC" -ne 0 ] || mv -f "$PV_NEW.2" "$PV_NEW"
-    fi
-    if [ "$PV_RC" -eq 0 ] && [ "$MS_HAS_T" = 1 ]; then
-      matrix_block_key "$PV_NEW" "$MS_AC" task "$MS_IDS" > "$PV_NEW.2" 2>/dev/null || PV_RC=$((10 + $?))
-      [ "$PV_RC" -ne 0 ] || mv -f "$PV_NEW.2" "$PV_NEW"
-    fi
-    case "$PV_RC" in
-      0) : ;;
-      4) die "REFUSED — the matrix row $MS_AC does not have five cells, so its cells cannot be found; the plan is unchanged."
-         exit 1 ;;
-      13) die "REFUSED — the matrix has no $MS_AC: block to hold the key; matrix-render writes it. The plan is unchanged."
-          pv_next matrix-render
-          exit 1 ;;
-      *) die "REFUSED — the matrix cannot be written (exit $PV_RC); the plan is unchanged."
-         exit 2 ;;
-    esac
-    plan_verb_swap matrix-set "$MS_AC ${MS_PAIRS[*]}" writer
-    # A STATUS OR A TASK WRITTEN BY HAND IS RECORDED (hand_holds_report counts either as status-writes): one `ev=matrix-set`
-    # line in the landing record naming the criterion and the keys written, appended once the plan write is in.
-    # plan_verb_swap exits before this point when the plan already read so, and every refusal above exits earlier still, so
-    # a call that changed nothing or was refused writes none. The landing's settlement writes the cells through
-    # `matrix_row_cells` and never through this verb, so it is never one. A task key written alone writes the line, because
-    # the task: key is what the gate's deferral reads (`matrix_owing_step`): the write moves a pending row off every gate
-    # until its task's step, a hand-hold the count would otherwise never see. An evidence key alone is a write the gate
-    # never reads for a status: it is named, and the count leaves it out.
-    MS_WROTE=""
-    [ "$MS_HAS_S" = 0 ] || MS_WROTE="status"
-    [ "$MS_HAS_E" = 0 ] || MS_WROTE="${MS_WROTE:+$MS_WROTE,}evidence"
-    [ "$MS_HAS_T" = 0 ] || MS_WROTE="${MS_WROTE:+$MS_WROTE,}task"
-    if [ -n "$MS_WROTE" ]; then
-      _pv_sid="$(session_id 2>/dev/null)" || _pv_sid=""
-      { declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
-        && line_event "$PV_PLAN" hand what=matrix-set "ac=$MS_AC" "cells=$MS_WROTE" "by=${_pv_sid:-none}" >/dev/null 2>&1 \
-        || say "matrix-set — $MS_AC: the plan is written, but its line in the landing record could not be, so the hand-holds count will miss this write."
-    fi
-    say "matrix-set — $MS_AC: ${MS_PAIRS[*]} written to $PV_PLAN; dry-committed first."
-    exit 0
-  }
-
-  # THE TIER'S ONE WRITER. A criterion's tier lives in three places: the matrix table's tier cell, its AC block's
-  # `eval: <tier> — <text>` line, and its `## Eval design` row (Eval type, the word lib/scale.sh SCALE_EVAL_TIERS maps
-  # to the tier, and Eval). `matrix-retier <AC> tier=<T> eval=<text>` rewrites all three in one plan transaction, so no
-  # reader ever sees two tiers for one criterion, and resets the row: the old evidence proved a weaker check, so the
-  # status is pending, the evidence cell and key the render's stubs, the auditor cell cleared, any waiver: line
-  # removed (a waiver of the weaker check waives nothing of the stronger), and the keys the new tier owes that the
-  # block lacks are added as matrix-render adds them (user-confirmed: at T4). The spec is the approved text and is
-  # not touched: the ledger's `## Δ<k> — retier` heading, numbered as decisions_append numbers every entry, is where
-  # the change is read, and the landing record's ev=matrix-retier line is the act, which the hand-holds fold reads as
-  # nothing. ONLY UPWARD: strengthening a check is the run's; a lower or equal tier, or a waiver, is the person's.
-  # REFUSED (1), nothing written: a tier outside T0 to T4, an eval with a |, a tab or a line break, an AC with no row,
-  # a tier at or below the cell's, no Eval design row for the criterion, no block, a ledger that is a symlink.
-  poker_verb_matrix_retier() {
-    case "$RT_TIER" in
-      T[0-4]) : ;;
-      *)
-        die "REFUSED — '$(clean "$RT_TIER")' is no tier: run matrix-retier again with tier= one of T0 to T4, above the cell's own. The plan is unchanged."
-        exit 1 ;;
-    esac
-    RT_EVAL="$(printf '%s' "$RT_EVAL" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-    if [ -z "$RT_EVAL" ] || ! plan_verb_value_ok "$RT_EVAL"; then
-      die "REFUSED — eval= is the criterion's new eval on one line, with no |, tab or line break, which neither its block nor its Eval design cell can hold; run matrix-retier again with such a text. The plan is unchanged."
-      exit 1
-    fi
-    RT_WORD=""
-    for _pv_c in ${SCALE_EVAL_TIERS:-}; do
-      [ "${_pv_c#*=}" != "$RT_TIER" ] || { RT_WORD="${_pv_c%%=*}"; break; }
-    done
-    RT_KEYS="$(mr_tier_keys)" || RT_KEYS=""
-    if [ -z "$RT_WORD" ] || [ -z "$RT_KEYS" ]; then
-      die "REFUSED — the eval type for $RT_TIER is lib/scale.sh SCALE_EVAL_TIERS's and the keys it owes walls.sh keys_for_tier's, and $BIONIC_LIB cannot give them; the plan is unchanged. needs: <the user> — the libraries at $BIONIC_LIB loadable, then run matrix-retier again."
-      exit 2
-    fi
-    plan_verb_open matrix-retier
-    RT_OLD="$(matrix_row_cell "$PV_PLAN" "$RT_AC" 2)"
-    if [ -z "$(matrix_row_cell "$PV_PLAN" "$RT_AC" 1)" ]; then
-      die "REFUSED — the matrix table has no row $RT_AC; matrix-render writes each criterion's row from the ## Eval design. The plan is unchanged."
-      pv_next matrix-render
-      exit 1
-    fi
-    case "$RT_OLD" in
-      T[0-4]) : ;;
-      *)
-        die "REFUSED — the tier cell of $RT_AC reads '$(clean "$RT_OLD")', no tier of T0 to T4, so a raise from it cannot be judged; the cell is the plan's Step-3 text: write its tier there, then run matrix-retier again. The plan is unchanged."
-        exit 1 ;;
-    esac
-    if [ "${RT_TIER#T}" -le "${RT_OLD#T}" ]; then
-      die "matrix-retier refused — $RT_AC is $RT_OLD; a retier only raises the tier (strengthening is the run's, weakening is the person's: needs: <the user> — a lower tier or a waiver)"
-      exit 1
-    fi
-    RT_LED="$(docs_root "$PV_REPO")/record/$(proof_plan_slug "$PV_PLAN")/design-ledger.md"
-    if [ -L "$RT_LED" ]; then
-      die "REFUSED — ${RT_LED#"$PV_REPO"/} is a symlink, and the retier's ledger entry is written there; put the ledger file itself in its place, then run matrix-retier again. The plan is unchanged."
-      exit 1
-    fi
-    PV_RC=0
-    matrix_row_cells "$PV_PLAN" "$RT_AC" "2=$RT_TIER" 3=pending 4=— 5=— > "$PV_NEW" 2>/dev/null || PV_RC=$?
-    if [ "$PV_RC" -eq 0 ]; then
-      matrix_eval_row "$PV_NEW" "$RT_AC" "$RT_WORD" "$RT_EVAL" > "$PV_NEW.2" 2>/dev/null || PV_RC=$((20 + $?))
-      [ "$PV_RC" -ne 0 ] || mv -f "$PV_NEW.2" "$PV_NEW"
-    fi
-    for _pv_kv in "eval=$RT_TIER — $RT_EVAL" evidence=pending; do
-      [ "$PV_RC" -eq 0 ] || break
-      matrix_block_key "$PV_NEW" "$RT_AC" "${_pv_kv%%=*}" "${_pv_kv#*=}" > "$PV_NEW.2" 2>/dev/null || PV_RC=$((10 + $?))
-      [ "$PV_RC" -ne 0 ] || mv -f "$PV_NEW.2" "$PV_NEW"
-    done
-    for _pv_k in $(printf '%s\n' "$RT_KEYS" | awk -F'\t' -v t="$RT_TIER" '$1 == t { print $2 }'); do
-      [ "$PV_RC" -eq 0 ] || break
-      matrix_block_has "$PV_NEW" "$RT_AC" "$_pv_k" && continue
-      matrix_block_key "$PV_NEW" "$RT_AC" "$_pv_k" pending > "$PV_NEW.2" 2>/dev/null || PV_RC=$((10 + $?))
-      [ "$PV_RC" -ne 0 ] || mv -f "$PV_NEW.2" "$PV_NEW"
-    done
-    if [ "$PV_RC" -eq 0 ]; then
-      matrix_block_drop "$PV_NEW" "$RT_AC" waiver > "$PV_NEW.2" 2>/dev/null || PV_RC=$((10 + $?))
-      [ "$PV_RC" -ne 0 ] || mv -f "$PV_NEW.2" "$PV_NEW"
-    fi
-    case "$PV_RC" in
-      0) : ;;
-      4) die "REFUSED — the matrix row $RT_AC does not have five cells, so its tier cell cannot be found; the plan is unchanged. needs: <the user> — the row restored to five cells, then run matrix-retier again."
-         exit 1 ;;
-      13) die "REFUSED — the matrix has no $RT_AC: block to hold the eval: line; matrix-render writes it. The plan is unchanged."
-          pv_next matrix-render
-          exit 1 ;;
-      23) die "REFUSED — the plan's ## Eval design has no row for $RT_AC, and its Eval type and Eval are where the tier is read at Step 3; add the criterion's row there, then retier it. The plan is unchanged."
-          pv_next matrix-retier "$RT_AC" "tier=$RT_TIER" "eval=$RT_EVAL"
-          exit 1 ;;
-      24) die "REFUSED — the plan's ## Eval design table has no Criterion, Eval type and Eval columns, the Step-3 table's shape the retier writes; give its header those columns, then run matrix-retier again. The plan is unchanged."
-          exit 1 ;;
-      *) die "REFUSED — the retier cannot be written (exit $PV_RC); the plan is unchanged. Run matrix-retier again."
-         exit 2 ;;
-    esac
-    plan_verb_swap matrix-retier "$RT_AC raised $RT_OLD to $RT_TIER" writer
-    # THE ACT AND ITS READING, after the plan write is in: plan_verb_swap exits before here when the plan already read
-    # so, and every refusal above exits earlier still, so neither line is written for a call that changed nothing.
-    _pv_sid="$(session_id 2>/dev/null)" || _pv_sid=""
-    { declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
-      && line_event "$PV_PLAN" hand what=matrix-retier "ac=$RT_AC" "from=$RT_OLD" "to=$RT_TIER" "by=${_pv_sid:-none}" >/dev/null 2>&1 \
-      || say "matrix-retier — $RT_AC: the plan is written, but its line in the landing record could not be."
-    decisions_append "$PV_PLAN" "$RT_LED" "$PV_REPO" "retier ${RT_AC} ${RT_OLD}→${RT_TIER} (orchestrator $(decisions_clock)): $RT_EVAL" 2>/dev/null \
-      || say "matrix-retier — $RT_AC: the plan is written, but ${RT_LED#"$PV_REPO"/} could not take its Δ entry; write it with decisions."
-    say "matrix-retier — $RT_AC raised $RT_OLD to $RT_TIER in its tier cell, its eval: line and its ## Eval design row; the row reads pending, its evidence, auditor and waiver cleared. Written to $PV_PLAN; dry-committed first."
-    exit 0
-  }
-
   # THE EPIC'S SHIPPED ROW (wave-33 T7; REQ-3 AC-3.3, D8). close-out.sh writes the row whole when it appends
   # it and never edits a row that is there (`act_epic`), so a `<fill: ADRs>` it left (wave-30's) could be
   # filled by no code. This verb sets cells of the row whose wave cell is <wave>, in the shipped table
@@ -2822,13 +2387,13 @@ RR_AGAINST_EOF
       "$(landing_report "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" yes 2>/dev/null)")"
     # A MATRIX ROW NO THEME CAN READ refuses the page, preview or not, before anything is written: a row with no
     # serves: and no dotted id is in no theme's count, so the Goals block would print a theme short, `0 of N reached`
-    # over criteria discharged. matrix-render writes serves: from the Eval design, and the page then reads them.
+    # over criteria discharged. The block's serves: line names the requirement, and the page then reads it.
     RR_UNMAPPED="$(printf '%s\n' "$RR_GOALS" | awk -F'\t' '$1 == "mapping" && index($2, "not mapped: ") == 1 {
       n = split($3, a, " "); s = ""; for (i = 1; i <= n && i <= 5; i++) s = s (i > 1 ? ", " : "") a[i]
       if (n > 5) s = s " and " (n - 5) " more"
       print n "\t" s; exit }')"
     if [ -n "$RR_UNMAPPED" ]; then
-      die "release-approval refused — ${RR_UNMAPPED%%	*} matrix rows map to no requirement (no serves: and no dotted id): run session-poker.sh matrix-render to write serves: (${RR_UNMAPPED#*	})"
+      die "release-approval refused — ${RR_UNMAPPED%%	*} matrix rows map to no requirement (no serves: and no dotted id): give each block a serves: line naming its requirement (${RR_UNMAPPED#*	})"
       exit 1
     fi
 

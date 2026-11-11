@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/landing-line-2.test.sh — the landing line, part 2 of 2: §INPUTS through §LAND-RC-HAND, then the landing's
-# settlement: §SAMESITE, §CARRIED, §CELL; the hand-holds count's §STARTER and §RETIER.
+# settlement: §SAMESITE, §CARRIED, §CELL; the hand-holds count's §STARTER.
 #
 # THE SUITE IS TWO PARTS (wave-39 T35; D1, D13, REQ-3 AC-3.3). One landing-line.test.sh promised more than the suite
 # bar, ten minutes of the gate's promise, so it runs as two suites cut at a section boundary. Its governing header, its
@@ -872,8 +872,8 @@ expect_eq "(ln2) AC-16.2 a tracked docs path and a .bionic/tmp path in a script,
 # registered as `proof-add review` writes them: A at H1 names s.txt:1 and T1 is born of it; B at H2 names s.txt:3, the
 # same line moved down two; C at H2 names s.txt:1, a line H1 did not have; E at H1 names s.txt:3. The register is
 # opened by `disposition`, E is carried to T1 by `finding-move`, and T1 lands through ready on a.test.sh. The plan's
-# Eval design names tests/a.test.sh for both of its criteria, the matrix is rendered by `matrix-render`, and the second
-# criterion's row reads waived.
+# Eval design names tests/a.test.sh for both of its criteria, the matrix holds a block for each in an older plan's
+# shape, and the second criterion's row reads waived.
 ll_settle_rev() {  # <record dir> <name> <base> <head> <path:line> — a failing review naming one finding at that site
   printf 'reviewed: %s..%s\nquestion: structure\nresult: fail\nscope: piece\n\nfindings: 1\nfinding: 1 S1 off %s the line is wrong\nshown: 1 cat %s\n' \
     "$3" "$4" "$5" "${5%%:*}" > "$1/$2.md"
@@ -913,17 +913,19 @@ ll_settle_world() {  # -> root, the world above, T1 not yet landed
       print "| REQ-1 | the row | AC-1.2 | hermetic | `tests/a.test.sh` | a is red |"
       print ""; print "## Verification Matrix"; print ""
       print "| AC | tier | status | evidence | auditor |"; print "|---|---|---|---|---|"
-      print "| AC-1.1 | T1 | pending | — | — |"; print "| AC-1.2 | T1 | waived | — | — |"
+      print "| AC-1.1 | T1 | pending | — | — |"; print "| AC-1.2 | T1 | waived | — | — |"; print ""
+      print "AC-1.1: the row"; print "  serves: REQ-1"; print "  eval: T1 — `tests/a.test.sh`"; print "  evidence: pending"
+      print "AC-1.2: the row"; print "  serves: REQ-1"; print "  eval: T1 — `tests/a.test.sh`"; print "  evidence: pending"
     }' "$p" > "$p.n" && mv "$p.n" "$p" || return 1
   ll_launch "$r" T1 a.test.sh
   printf '%s' "$r"
 }
 
 ST="$(ll_settle_world)"; STP="$(ll_plan "$ST")"
-ST_R="$(ll_poker "$ST" matrix-render)"; ST_RRC=$?
+ST_RRC=0; ST_R=""
 ST_D="$(ll_poker "$ST" disposition)"; ST_DRC=$?
 ST_M="$(ll_poker "$ST" finding-move record/wave-x/recE.md#1 carried T1)"; ST_MRC=$?
-expect_eq "(st0) the world is built by the verbs: matrix-render, disposition and finding-move carried exit 0" "0|0|0" "$ST_RRC|$ST_DRC|$ST_MRC"
+expect_eq "(st0) the world is built by the verbs: disposition and finding-move carried exit 0" "0|0|0" "$ST_RRC|$ST_DRC|$ST_MRC"
 [ "$ST_RRC|$ST_DRC|$ST_MRC" = "0|0|0" ] || printf '      render: %s\n      disposition: %s\n      move: %s\n' "$ST_R" "$ST_D" "$ST_M"
 expect_eq "(st0b) …the open findings B, C and E each hold an open ask, E's answered carry to T1's landing" "open|open|open" \
   "$(ll_ask "$ST" record/wave-x/recB.md#1 | cut -d'|' -f1)|$(ll_ask "$ST" record/wave-x/recC.md#1 | cut -d'|' -f1)|$(ll_ask "$ST" record/wave-x/recE.md#1 | cut -d'|' -f1)"
@@ -964,18 +966,13 @@ expect_eq "(ca2b) …and its ask closes at once" "closed" "$(ll_ask "$ST" record
 expect_contains "(ca2c) …and C reads fixed by T1" "recC.md#1 T1 moved" "$(ll_fixed "$ST")"
 
 section "§CELL: the landing that writes a criterion's evidence marks no status: no suite a landing ran discharges a cell"
-# fails-when: the landing's evidence is not written, or a landing writes the table's status, or a cell it left takes no matrix-set.
+# fails-when: the landing's evidence is not written, or a landing writes the table's status.
 ll_cell() { awk -F'|' -v a="$2" '$2 ~ "^ *" a " *$" { s = $4; gsub(/^ +| +$/, "", s); print s }' "$1"; }   # <plan> <AC> -> its status cell
 ll_block_ev() { awk -v a="$2:" 'index($0, a) == 1 { b = 1; next } b && /^[^ \t]/ { b = 0 } b && /^[ \t]+evidence:/ { sub(/^[ \t]+evidence:[ \t]*/, ""); print; exit }' "$1"; }   # <plan> <AC>
 expect_contains "(ce1) AC-1.1's block evidence is the landing's log for a.test.sh" "record/wave-x/line/T1-a" "$(ll_block_ev "$STP" AC-1.1)"
 expect_eq "(ce1b) …and its table status still reads pending: the landing marks no cell" "pending" "$(ll_cell "$STP" AC-1.1)"
 expect_eq "(ce2) AC-1.2, waived, keeps its waived status: a landing never overwrites a waiver" "waived" "$(ll_cell "$STP" AC-1.2)"
 expect_eq "(ce2b) …and the record names no cell settled" "0" "$(ll_ev "$ST" settled | grep -c .)"
-ST_MS="$(ll_poker "$ST" matrix-set AC-1.1 status=discharged)"; ST_MSRC=$?
-expect_eq "(ce3) matrix-set on the cell the landing left writes it (exit 0): the status is a person's to set" "0|discharged" \
-  "$ST_MSRC|$(ll_cell "$STP" AC-1.1)"
-ST_MW="$(ll_poker "$ST" matrix-set AC-1.2 task=T1)"; ST_MWRC=$?
-expect_eq "(ce4) matrix-set on a row no landing settled still writes (exit 0)" "0" "$ST_MWRC"
 
 section "§STARTER: a whole run the tick or the orchestrator started is no hand-hold; a person's past the first is one"
 # `regression-run --starter <tick|orchestrator|person>` writes `starter=` on its `ev=run` line; a run past the record's first counts as
@@ -1029,34 +1026,6 @@ SR4="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$SR4")")"
 { sr_run a 01 tick; sr_run b 02 tick; } > "$(ll_rec "$SR4")"
 sr_proofs "$SR4" a b
 expect_eq "(sr4) …and the same two proofs of runs the tick started: second-regressions=0" "0" "$(sr_second "$SR4")"
-
-section "§RETIER: a retier is the run's own act: its hand act of kind matrix-retier moves no hand-holds field, while a waiver: line still adds one (REQ-3 AC-3.3)"
-# `matrix-retier` raises a tier, which strengthens the check: the orchestrator's act and no hand-hold, so the fold reads its line as
-# nothing; a waiver: line in a block (weakening, a person's) still counts. FIXTURE FIDELITY: the world's plan with an Eval design
-# and an empty matrix table, matrix-render and matrix-retier writing their own lines, the waiver: line planted as landing-line-1 §WINDOW does.
-# fails-when: the fold counts a retier line in any field, or stops counting a waiver: line.
-RL="$(ll_world)"; RLP="$(ll_plan "$RL")"
-{ printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n'
-  printf '| REQ-1 | the unit | AC-1.1 | unit | `tests/a.test.sh` | a is red |\n| REQ-1 | the unit | AC-1.2 | unit | `tests/a.test.sh` | a is red |\n'
-  printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
-} >> "$RLP"
-RL_MR="$(ll_poker "$RL" matrix-render)"; RL_MRRC=$?
-RL_H0="$(sr_report "$RL")"
-expect_eq "(rl0) precondition: matrix-render exits 0 and the report prints its counts line, all zero" \
-  "0|hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0" \
-  "$RL_MRRC|$RL_H0"
-[ "$RL_MRRC" = 0 ] || printf '      render: %s\n' "$RL_MR"
-RL_RT="$(ll_poker "$RL" matrix-retier AC-1.1 tier=T2 'eval=`tests/b.test.sh` drives the hermetic run')"; RL_RTRC=$?
-expect_eq "(rl1) precondition: matrix-retier exits 0 and the log holds its one hand act of that kind" "0|1" \
-  "$RL_RTRC|$(ll_ev "$RL" hand | /usr/bin/grep -c '|what=matrix-retier|ac=AC-1.1|from=T1|to=T2|' | tr -d ' ')"
-[ "$RL_RTRC" = 0 ] || printf '      retier: %s\n' "$RL_RT"
-expect_eq "(rl2) the retier line moves no field: the counts line reads as before it" "$RL_H0" "$(sr_report "$RL")"
-# waive-row writes the block's waiver: line and the row's status waived in one act, so the fixture writes both.
-awk '/^\| AC-1\.2 \|/ { sub(/\| pending \|/, "| waived |") } { print } /^AC-1\.2:/ { b = 1; next } b && /^[ \t]+evidence:/ { print "  waiver: Dana Fixture 2026-10-20T10:00:00Z \"the unit check is enough\" — a fixture waiver"; b = 0 }' \
-  "$RLP" > "$RLP.n" && mv "$RLP.n" "$RLP"
-expect_eq "(rl3-pre) the row reads waived, as waive-row leaves it" 1 "$(/usr/bin/grep -c '^| AC-1\.2 |.*| waived |' "$RLP")"
-expect_contains "(rl3) …while a waiver: line in the same plan adds one: waivers=1, total=1" "hand-holds: total=1 · " "$(sr_report "$RL")"
-expect_contains "(rl3b) …in the waivers field" "· waivers=1 · status-writes=0 ·" "$(sr_report "$RL")"
 
 section "§NEEDS-YOU: a refusal that named a person as its exit is a hand-hold: needs-you joins total, and the header names the fields the printf prints (AC-2.4)"
 # fails-when: a needs=person refusal in the window reads needs-you=0 or total=0, one of another needs= or outside the window counts, or the header's fields drift from the printf's.

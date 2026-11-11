@@ -146,7 +146,7 @@ _plan_matrix_acs() {
 }
 
 # THE ONE MAPPER OF A MATRIX ROW TO ITS REQUIREMENT. `_plan_ac_req(id, serves)` returns the requirement a row serves,
-# the word after `REQ-`: the first REQ id of its block's `serves:` value, which matrix-render writes from the Eval
+# the word after `REQ-`: the first REQ id of its block's `serves:` value, an older plan's rendering of the Eval
 # design's Requirement cell; else the <req> of a dotted id `AC-<req>.<n>`; else "". A bare `AC-<n>` maps to nothing:
 # its number counts criteria, it names no requirement, and read as one it lands a criterion under another theme.
 # PAR_BY says how the row was mapped, `serves`, `id` or ""; PAR_MANY is 1 when serves: names several requirements.

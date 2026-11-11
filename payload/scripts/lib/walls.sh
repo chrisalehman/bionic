@@ -1601,11 +1601,8 @@ printed a reason above this line, that is the cause. The commit is still refused
 # ran the eval, copied from the record file the pointer already names, and read by nothing but this loop: a key
 # read by nothing is ceremony. The record file is where the run is shown, and the pointer is checked to name one.
 #
-# AT FILE SCOPE, OUTSIDE `_eg_body`, SO A SOURCE DEFINES IT (wave-30 T14; REQ-6 AC-6.1, D9).
-# `session-poker.sh matrix-render` writes each AC block's stubs from this list, sourcing this
-# file in a subshell to read it, so the keys Step 3 renders and the keys the Verify gate
-# demands are one list and cannot drift. Its name collides with nothing the two sourcing
-# hooks define.
+# AT FILE SCOPE, OUTSIDE `_eg_body`, SO A SOURCE DEFINES IT. Its name collides with nothing the
+# two sourcing hooks define.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 keys_for_tier() {
   case "$1" in
@@ -1846,7 +1843,7 @@ matrix_table_rows() {
 
 # matrix_close_eval <eval text> -> 0 when the eval names `landing-report --hand-holds`, the measure
 # close-out reads last. The one test of which criterion the close proves: matrix_close_rows and the
-# task: cell matrix-render writes both ask it, so no eval reads as the close's to one and not the other.
+# proof close-out writes both ask it, so no eval reads as the close's to one and not the other.
 matrix_close_eval() { grep -qE 'landing-report[[:space:]]+--hand-holds' <<< "$1"; }
 
 # matrix_close_rows <plan> -> the AC id of each pending criterion the close settles, the reader's
@@ -4051,9 +4048,8 @@ Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block �
 # `matrix_row_deferred` at file scope.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 
-# Per-tier required evidence keys: `keys_for_tier`, at file scope above `_eg_body` since
-# wave-30 T14, so `session-poker.sh matrix-render` reads the same list the loop below walks.
-# It names `evidence` for every tier and `user-confirmed` for T4 and nothing else (wave-31 T6).
+# Per-tier required evidence keys: `keys_for_tier`, at file scope above `_eg_body`.
+# It names `evidence` for every tier and `user-confirmed` for T4 and nothing else.
 
 # THE THREE STEP-4 ARMS: `slices_section`, `k2_step_num`, `validate_approved_by`, `validate_fails_when` and
 # `validate_prototype_no_matrix_row` are defined just before `CURRENT` is parsed, above.
@@ -4379,8 +4375,8 @@ MATRIX_STATUS
     fi
   done <<< "$rows"
 
-  # THE WALK-ARTIFACT STUB IS A PLACEHOLDER TOO. Step 3 renders `walk-artifact: pending` above an older plan's table
-  # (`session-poker.sh matrix-render`), and it is judged as a tier key is: unread before Step 5, unread at current: 5
+  # THE WALK-ARTIFACT STUB IS A PLACEHOLDER TOO. An older plan's Step 3 rendered `walk-artifact: pending` above its
+  # table, and it is judged as a tier key is: unread before Step 5, unread at current: 5
   # while any criterion is still pending (the same mid-walk relaxation the key loop above takes), and refused once the
   # walk is done and at every step after it. AFTER the row loop on purpose: UNDISCHARGED is what the loop found. A filled
   # value is the walk gate's; an absent line is legal.
@@ -5436,15 +5432,14 @@ return 0
 # `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `row-landed` — wave-28 T6, D7; `proof-add` and
 # `approve` and `waive`, each written on the user's word; `budget`, the user's cap, from
 # T34, D24; `share` — wave-28 T10, D16, in both its forms; `step-field` — wave-28 T8, D17, the fields the evidence
-# gate reads; `matrix-render` and `discharge` — wave-30 T14, D9, the matrix's stubs and its auditor cell; `handoff` —
+# gate reads; `handoff` —
 # wave-30 T15, D11, the plan's ## Handoff; `task-split` — wave-30 T17, D14d-3, a row rewritten as its children;
 # `regression` — wave-31 T27, D4, A-orch-40, the plan's Step-0 regression setting; and, wave-33 T15 (D10),
 # `deliver` (a record row's own last act: admitted only for the caller's own plan row, by arm A),
-# `rule` (a ruling pushed to a writer), `matrix-set`, `matrix-retier` (a criterion's tier raised, which rewrites its
-# eval and evidence cells), `waive-row`, `confirm-row` (the user's confirmation of a
+# `rule` (a ruling pushed to a writer), `confirm-row` (the user's confirmation of a
 # T4 row, the user's act and never an agent's), `tasks-prose`, `epic-row` and
 # `continuation-fill` (T7's plan verbs), `disposition` (T13's finding ledger) and `reply` (wave-38 T3, the final card's
-# replay into approve, waive, waive-row and finding-move), `decisions` (a decision put or ruled writes the run's
+# replay into approve, waive and finding-move), `decisions` (a decision put or ruled writes the run's
 # design ledger and its register, and the read goes with the verb; a writer reads neither) — `ruling-ack` and `rulings`
 # are the writer's own reads and are NOT on the list); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
 #

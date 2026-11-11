@@ -380,8 +380,7 @@ whole_run_at_head() {
     matrix_block_key "$PV_PLAN" "$CR_AC" "$CR_KEY" "$CR_VALUE" > "$PV_NEW" 2>/dev/null || PV_RC=$?
     case "$PV_RC" in
       0) : ;;
-      3) die "REFUSED — the matrix has no $CR_AC: block to hold the confirmation; matrix-render writes it. The plan is unchanged."
-         pv_next matrix-render
+      3) die "REFUSED — the matrix has no $CR_AC: block to hold the confirmation; the block is the plan's own text: write it there. The plan is unchanged."
          exit 1 ;;
       *) die "REFUSED — the confirmation cannot be written (exit $PV_RC); the plan is unchanged."
          exit 2 ;;

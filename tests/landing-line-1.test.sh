@@ -1007,8 +1007,8 @@ section "§WINDOW: the hand-holds count is read over a window, every source by i
 # two ends are read from records: the start is the newest published landing of a row of kind build, the end the
 # plan's `delivered:` time; before the run is delivered the window runs to now and the report says so. Every source
 # is planted in its writer's shape: the landing record's line/v1 lines, the fill ledger's fill-ledger/v1 lines, the
-# roster through the one production row writer, the plan's proof lines through lib/proof.sh, the AC blocks through
-# matrix-render.
+# roster through the one production row writer, the plan's proof lines through lib/proof.sh, the AC blocks in an
+# older plan's shape.
 ww_report() {  # <root> [flags…] -> landing-report --hand-holds over the root's plan, stdout only
   local root="$1"; shift
   ( cd "$root" && CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO/payload" \
@@ -1027,11 +1027,10 @@ ww_poke() {  # <root> <verb> [args…] -> the poker run as the world's session, 
   ( cd "$root" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO/payload" \
       bash "$BIONIC_HOOKS_DIR/session-poker.sh" "$@" 2>&1 )
 }
-# A matrix whose n-th row carries the n-th waiver line in its block. The blocks are matrix-render's, written from the
-# plan's own requirement bullets, so each header carries its criterion's text after the colon, as a real run's does;
-# the waiver line is waive-row's `  waiver: <who> <time> "<words>" — <why>`, added at the end of its block as
-# waive-row adds a key, at a time the fixture names (the verb stamps its own instant, which no window could place).
-ww_matrix() {  # <root> <waiver value>… -> WW_MR, matrix-render's exit
+# A matrix whose n-th row carries the n-th waiver line in its block, in the shape an older plan holds: each header
+# carries its criterion's text after the colon, and the waiver line `  waiver: <who> <time> "<words>" — <why>` stands
+# at the end of its block, at a time the fixture names.
+ww_matrix() {  # <root> <waiver value>… -> the plan with those blocks; WW_MR 0
   local root="$1" p n=0 v; p="$(ll_plan "$1")"; shift
   { printf '\n## Requirements\n\n### REQ-1 — the window fixture\n\n'
     for v in "$@"; do n=$((n + 1)); printf -- '- AC-1.%d the row %d holds its waiver. Fails when: it is not read.\n' "$n" "$n"; done
@@ -1039,8 +1038,9 @@ ww_matrix() {  # <root> <waiver value>… -> WW_MR, matrix-render's exit
     n=0; for v in "$@"; do n=$((n + 1)); printf '| REQ-1 | fixture | AC-1.%d | hermetic | `tests/a.test.sh` | a planted defect |\n' "$n"; done
     printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
     n=0; for v in "$@"; do n=$((n + 1)); printf '| AC-1.%d | T1 | waived | — | — |\n' "$n"; done
+    n=0; for v in "$@"; do n=$((n + 1)); printf 'AC-1.%d: the row %d holds its waiver.\n  provenance: fixture\n  evidence: pending\n' "$n" "$n"; done
   } >> "$p"
-  ww_poke "$root" matrix-render >/dev/null; WW_MR=$?
+  WW_MR=0
   # through the environment: macOS awk refuses a -v value holding a line break
   WW_WV="$(printf '%s\n' "$@")" awk '
     BEGIN { n = split(ENVIRON["WW_WV"], w, "\n") }
@@ -1097,7 +1097,7 @@ ww_sdlc "$RW2" "$(ww_proof regression "$WW_D" 2026-10-20T09:00:00Z record/wave-x
   "moved: record/wave-x/rev.md#3 to=fixed row=T1 by=Dana at=2026-10-20T14:30:00Z"
 ww_matrix "$RW2" 'Dana Fixture 2026-10-20T10:30:00Z "waive the row" — fixture' \
   'Dana Fixture 2026-10-20T12:30:00Z "waive the row" — fixture' 'Dana Fixture 2026-10-20T14:30:00Z "waive the row" — fixture'
-expect_eq "WINDOW-1c-1 precondition: matrix-render wrote the three blocks, every header carrying its criterion's text, each block one waiver" "0|3|0|3" \
+expect_eq "WINDOW-1c-1 precondition: the fixture holds the three blocks, every header carrying its criterion's text, each block one waiver" "0|3|0|3" \
   "$WW_MR|$(grep -cE '^AC-1\.[0-9]+: .' "$WW_PL")|$(grep -cE '^AC-1\.[0-9]+:[[:space:]]*$' "$WW_PL")|$(grep -c '^  waiver: ' "$WW_PL")"
 expect_eq "WINDOW-1c-0 precondition: the plan holds the four regression proofs, three waived: and three moved: lines" "4/3/3" \
   "$(grep -c '^proved: kind=regression ' "$WW_PL")/$(grep -c '^waived: question=' "$WW_PL")/$(grep -c '^moved: ' "$WW_PL")"
@@ -1109,12 +1109,12 @@ expect_eq "WINDOW-1d …and the window 11:00 to 13:00 reads one of each, every s
   "$(ww_hh "$RW2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
 
 # (w2) the matrix waiver's two forms. The ISO form is placed by its time; the date form counts with no end, and
-# a day the window's start falls inside cannot be placed. That waive-row writes the ISO form is read where the card's
-# reply writes it, tests/release-approval.test.sh §HANDHOLDS (WINDOW-2a).
+# a day the window's start falls inside cannot be placed. A criterion's waiver now is an event at its own instant,
+# read where the card's reply writes it, tests/release-approval.test.sh §HANDHOLDS (WINDOW-2a).
 RW3="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RW3")")"
 ww_matrix "$RW3" 'Dana Fixture 2026-10-20T12:30:00Z "waive the row" — inside' 'Dana Fixture 2026-10-20T14:30:00Z "waive the row" — after' \
   'Dana Fixture 2026-10-19 "waive the row" — a whole day before' 'Dana Fixture 2026-10-20 "waive the row" — the start falls inside this day'
-expect_eq "WINDOW-2-0 precondition: matrix-render wrote the four blocks with their criterion's text, each block one waiver" "0|4|4" \
+expect_eq "WINDOW-2-0 precondition: the fixture holds the four blocks with their criterion's text, each block one waiver" "0|4|4" \
   "$WW_MR|$(grep -cE '^AC-1\.[0-9]+: .' "$(ll_plan "$RW3")")|$(grep -c '^  waiver: ' "$(ll_plan "$RW3")")"
 expect_contains "WINDOW-2 a waiver at a time inside the window counts, the one after it does not, the day before is placed outside, the day the start falls in is unplaced" \
   "waivers=1 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=1" "$(ww_hh "$RW3" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
@@ -1154,14 +1154,14 @@ expect_eq "WINDOW-3e with a delivered: time the ends line prints both ends, the 
 expect_contains "WINDOW-3f …and the count reaches through the delivered minute: the act at 11:40:30 counts, the one at 11:41 does not" \
   "hand-holds: total=2 · by-hand=2 · " "$(ww_hh "$RW4")"
 # ---------------------------------------------------------------------------
-section "§WAIVERS: a waiver in a block matrix-render wrote is counted"
-# matrix-render heads each block `AC-<id>: <the criterion's text>`, and waive-row adds its `waiver:` line to that block.
+section "§WAIVERS: a waiver in a block whose heading carries its criterion's text is counted"
+# An older plan heads each block with its criterion's text after the colon, its `waiver:` line in that block.
 # The count reads that header as it reads a bare `AC-<id>:` one, through the one matcher of a block's heading.
 # fails-when: the header match is bare-only, and the four rendered waivers read waivers=0.
 RW5="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RW5")")"
 ww_matrix "$RW5" 'Dana Fixture 2026-10-20T12:00:00Z "waive the row" — one' 'Dana Fixture 2026-10-20T12:10:00Z "waive the row" — two' \
   'Dana Fixture 2026-10-20T12:20:00Z "waive the row" — three' 'Dana Fixture 2026-10-20T12:30:00Z "waive the row" — four'
-expect_eq "WAIVERS-0 precondition: matrix-render exited 0 and wrote four texted headers, no bare one, and four waivers" "0|4|0|4" \
+expect_eq "WAIVERS-0 precondition: the fixture holds four texted headers, no bare one, and four waivers" "0|4|0|4" \
   "$WW_MR|$(grep -cE '^AC-1\.[0-9]+: .' "$(ll_plan "$RW5")")|$(grep -cE '^AC-1\.[0-9]+:[[:space:]]*$' "$(ll_plan "$RW5")")|$(grep -c '^  waiver: ' "$(ll_plan "$RW5")")"
 expect_eq "WAIVERS-1 the four waivers under rendered headers read waivers=4 over a window that holds them" \
   "hand-holds: total=4 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=4 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" \
@@ -1197,43 +1197,11 @@ expect_contains "MOVED-3 a move the landing wrote (by=landing) is its settlement
   "fixed=1 · needs-you=0 · unplaced=0" "$(ww_hh "$RW9" --since 2026-10-20T09:00:00Z --until 2026-10-20T14:00:00Z)"
 
 # ---------------------------------------------------------------------------
-section "§STATUS: a matrix status written by hand is counted, placed by the time its verb wrote on it"
-# `matrix-set` appends one `line/v1|ev=matrix-set|ac=<id>|cells=<status,evidence>|by=<session>|at=<ISO-UTC>` line to the
-# landing record, in the act that writes the plan, and the hand-holds count folds the lines that name the status cell as
-# `status-writes=`, placed by their `at=` as every record kind is. The landing's own settlement writes the cell through
-# `matrix_row_cells`, never the verb, so it writes no such line; a call that restates a cell, or that a settled cell
-# refuses, writes none.
-# fails-when: hand_holds_report has no arm for the line (a status written by hand reads total=0), or it counts a line
-# outside the window, an evidence-only one, or the verb writes a line for a refused or restated call.
-ss_ms() { cat "$(ll_log "$1")" 2>/dev/null | grep -c '^run/v1|ev=hand|what=matrix-set|'; }   # <root> -> how many matrix-set acts the log holds
-RS1="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RS1")")"
-ww_matrix "$RS1" 'Dana Fixture 2019-06-01T00:00:00Z "waive the row" — one' 'Dana Fixture 2019-06-01T00:00:00Z "waive the row" — two' \
-  'Dana Fixture 2019-06-01T00:00:00Z "waive the row" — three'
-printf 'line/v1|ev=settled|row=T1|commit=%s|findings=|cells=AC-1.2|at=2026-10-20T12:00:00Z\n' "$WW_C" >> "$(ll_rec "$RS1")"
-expect_eq "STATUS-0 precondition: matrix-render wrote three rows, the record holds the one settlement of AC-1.2 and no matrix-set line" "0|3|0" \
-  "$WW_MR|$(grep -cE '^\| AC-1\.[0-9] ' "$(ll_plan "$RS1")")|$(ss_ms "$RS1")"
-ww_poke "$RS1" matrix-set AC-1.1 status=discharged >/dev/null; SS_RC1=$?
-expect_eq "STATUS-1 a status written by the verb exits 0 and leaves one matrix-set line in the record" "0|1" "$SS_RC1|$(ss_ms "$RS1")"
-expect_regex "STATUS-1a …naming the criterion, the cell it wrote, who wrote it and when, at= ISO-UTC last" \
-  "^run/v1\\|ev=hand\\|what=matrix-set\\|ac=AC-1\\.1\\|cells=status\\|by=${WORLD_SID}\\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" \
-  "$(grep '^run/v1|ev=hand|what=matrix-set|' "$(ll_log "$RS1")" | head -n 1)"
-SS_WIDE="--since 2020-01-01T00:00:00Z --until 2100-01-01T00:00:00Z"
-expect_eq "STATUS-2 the count reads the status the verb wrote: status-writes=1, in the total, beside the other kinds" \
-  "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=1 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" \
-  "$(ww_hh "$RS1" $SS_WIDE)"
-ww_poke "$RS1" matrix-set AC-1.1 status=discharged >/dev/null; SS_RC2=$?
-expect_eq "STATUS-3 the same call again restates the cell: it exits 0 and writes no second line" "0|1" "$SS_RC2|$(ss_ms "$RS1")"
-SS_PRE="$(cksum < "$(ll_plan "$RS1")")"
-SS_OUT="$(ww_poke "$RS1" matrix-set AC-1.2 status=discharged)"; SS_RC3=$?
-expect_eq "STATUS-4 a cell a landing settled is refused, the plan unchanged and no line written" "1|1|yes" \
-  "$SS_RC3|$(ss_ms "$RS1")|$([ "$SS_PRE" = "$(cksum < "$(ll_plan "$RS1")")" ] && echo yes)"
-expect_contains "STATUS-4a …and the refusal names the landing that settled it" "settled by the landing of T1" "$SS_OUT"
-expect_contains "STATUS-4b …so the count stays at the one status the verb wrote" "status-writes=1 · second-regressions=0" "$(ww_hh "$RS1" $SS_WIDE)"
-ww_poke "$RS1" matrix-set AC-1.3 evidence=record/wave-x/ev.log >/dev/null; SS_RC5=$?
-expect_eq "STATUS-5 an evidence cell alone is written and recorded as the cell it wrote" "0|2|cells=evidence" \
-  "$SS_RC5|$(ss_ms "$RS1")|$(grep '^run/v1|ev=hand|what=matrix-set|ac=AC-1.3|' "$(ll_log "$RS1")" | grep -o 'cells=[a-z,]*')"
-expect_contains "STATUS-5a …and it is no status: status-writes stays 1" "status-writes=1 · second-regressions=0" "$(ww_hh "$RS1" $SS_WIDE)"
-
+section "§STATUS: an older run's status written by hand is counted, placed by the time its verb wrote on it"
+# An older run's cell verb appended one hand act per call to the log, `what=` its name and `cells=` the cells it wrote,
+# and the hand-holds count folds the ones that name the status cell or the task key as `status-writes=`, placed by
+# their `at=` as every record kind is. No verb writes one now; the count still reads them where a run's record holds them.
+# fails-when: hand_holds_report has no arm for the line, or it counts a line outside the window or an evidence-only one.
 # (s2) placement. Planted lines, each at the time the fixture names, against the window 11:00 to 13:00.
 RS2="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RS2")")"
 ss_line() { printf 'line/v1|ev=matrix-set|ac=%s|cells=%s|by=fixture|at=%s\n' "$1" "$2" "$3"; }   # <ac> <cells> <at>
@@ -1248,19 +1216,8 @@ expect_contains "STATUS-6a a status line whose time cannot be placed is not coun
   "status-writes=2 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=1" "$(ww_hh "$RS2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
 expect_contains "STATUS-6b …and with no window at all every status line counts, the evidence-only one still not" "status-writes=5 · second-regressions=0" "$(ww_hh "$RS2")"
 
-# (s3) a task write is counted. `task=` is the key that defers a pending row to its task's step (`matrix_owing_step`), so a
-# task-only call moves a row off every gate until then: it writes its line, naming `task`, and the count reads it as a
-# status write. A call that restates the key changes nothing and writes none; an evidence-only line is still no status.
-# fails-when: a task-only matrix-set writes no line, or a restated one writes a second, or hand_holds_report leaves a
-# cells=task line out of status-writes, or counts an evidence-only one.
-ss_cnt() { ww_hh "$1" $SS_WIDE | sed -n 's/^hand-holds: total=\([0-9]*\) .* status-writes=\([0-9]*\) .*/\1 \2/p'; }   # <root> -> `<total> <status-writes>`
-expect_eq "STATUS-7 precondition: the record holds two matrix-set lines and the count reads total=1 status-writes=1" "2|1 1" "$(ss_ms "$RS1")|$(ss_cnt "$RS1")"
-ww_poke "$RS1" matrix-set AC-1.3 task=T2 >/dev/null; SS_RC7=$?
-expect_eq "STATUS-7 a task written alone exits 0 and leaves one more matrix-set line, naming the criterion and cells=task" "0|3|cells=task" \
-  "$SS_RC7|$(ss_ms "$RS1")|$(grep '^run/v1|ev=hand|what=matrix-set|ac=AC-1.3|' "$(ll_log "$RS1")" | tail -n 1 | grep -o 'cells=[a-z,]*')"
-expect_eq "STATUS-7a …and the count reads it: status-writes and total each move by one" "2 2" "$(ss_cnt "$RS1")"
-ww_poke "$RS1" matrix-set AC-1.3 task=T2 >/dev/null; SS_RC8=$?
-expect_eq "STATUS-8 the same call again restates the key: it exits 0 and writes no further line" "0|3|2 2" "$SS_RC8|$(ss_ms "$RS1")|$(ss_cnt "$RS1")"
+# (s3) a task write is counted: the task: key deferred a pending row to its task's step, so a task-only call moved a
+# row off every gate until then. An evidence-only line is still no status.
 RS3="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RS3")")"
 { ss_line AC-1.1 task 2026-10-20T12:00:00Z; ss_line AC-1.2 evidence 2026-10-20T12:10:00Z
   ss_line AC-1.3 status,task 2026-10-20T12:30:00Z; ss_line AC-1.4 task 2026-10-20T10:59:00Z; } > "$(ll_rec "$RS3")"
