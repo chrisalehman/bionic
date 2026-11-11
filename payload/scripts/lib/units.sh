@@ -314,9 +314,8 @@ _units_born_logged() {
   [ -s "$log" ] && [ ! -L "$log" ] || return 0
   facts="$(_proof_facts "$plan")" || return 2
   printf '%s\n' "$facts" | awk -F'|' '
-    $2 != "ev=born" { next }
-    { split("", f); for (i = 3; i <= NF; i++) { e = index($i, "="); if (e > 1) f[substr($i, 1, e - 1)] = substr($i, e + 1) } }
-    f["row"] != "" && f["reason"] != "" {
+    { split("", f); for (i = 2; i <= NF; i++) { e = index($i, "="); if (e > 1 && !(substr($i, 1, e - 1) in f)) f[substr($i, 1, e - 1)] = substr($i, e + 1) } }
+    f["ev"] == "born" && f["row"] != "" && f["reason"] != "" {
       if (!n++) print "## SDLC State"
       print "- " f["row"] ": born: " f["reason"] (f["finding"] != "" ? " of=" f["finding"] : "") (f["promoted"] != "" ? " promoted" : "") }'
 }
