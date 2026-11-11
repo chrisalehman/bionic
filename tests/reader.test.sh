@@ -33,6 +33,9 @@
 #               reads the register, then the log, as one list.
 #   §ASK-DOORS  a passing reading closes its question's waiver; the Stop over an approved plan closes the step asks.
 #               A registered proof is one proof event in the run's log, the plan byte for byte as it was.
+#   §HANDS      an amend, a hold, an extension, an adoption, a by-hand landing and a person's stop of a run each leave
+#               one hand event with its reason, through the one writer that refuses an act with none; the tick's
+#               withdrawal of a request for the load leaves none.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
 
