@@ -137,7 +137,9 @@ _plan_first_sentence() {
 # serves the reader's. 2 when the run's facts could not be read: a count over no facts would read every criterion pending.
 _plan_matrix_acs() {
   local plan="${1:-}" cells rc=0
-  if declare -F _proof_ask >/dev/null 2>&1; then cells="$(_proof_ask "$plan" reader_cells "$plan")" || rc=$?
+  # A fold the calling shell holds for this plan (lib/proof.sh `_proof_findings_hold`) is read as it is, never taken again.
+  if [ -n "${_PROOF_HELD_PLAN:-}" ] && [ "$_PROOF_HELD_PLAN" = "$plan" ]; then cells="$( reader_facts() { printf '%s' "$_PROOF_FACTS"; }; reader_cells "$plan" )" || rc=$?
+  elif declare -F _proof_ask >/dev/null 2>&1; then cells="$(_proof_ask "$plan" reader_cells "$plan")" || rc=$?
   else cells="$( . "${BASH_SOURCE[0]%/*}/reader.sh" && reader_cells "$plan")" || rc=$?; fi
   case "$rc" in 0) ;; 1) return 0 ;; *) return 2 ;; esac
   printf '%s\n' "$cells" | awk -F'\037' '$1 != "" { print "M\t" $1 "\t" ($3 == "waiver" ? "waived" : $2) "\t" $8 }'
