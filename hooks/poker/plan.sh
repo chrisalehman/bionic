@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # hooks/poker/plan.sh — the plan verbs: the contract grammar, the matrix and the rows of the plan (budget,
-# amend, task-add, step-line, step-field, matrix-render, discharge,
+# amend, task-add, step-line, step-field, matrix-render,
 # matrix-set, matrix-retier, epic-row, continuation-fill, brief, release-approval, reply).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
@@ -1703,37 +1703,6 @@ EOF
     fi
     plan_verb_swap matrix-render "the matrix rendered" writer
     say "$MR_LINE; written to $PV_PLAN, dry-committed first."
-    exit 0
-  }
-
-  # THE AUDITOR CELL'S ONE WRITER (wave-30 T14; REQ-6 AC-6.2, D9). The gate compares the matrix `auditor` cell with
-  # the bare token `CONFIRMED` past the Verify gate and refuses anything after it; wave-28's scratch scripts wrote
-  # `CONFIRMED <date>` there by hand. This verb sets the row's fifth cell to exactly `CONFIRMED` — whatever it held,
-  # a dated token among them — and leaves every other byte of the plan as it was; the audit's own path belongs in the
-  # row's `evidence:` key, not in this cell. A row already CONFIRMED is nothing to write. REFUSED (1), the plan
-  # unchanged: an AC id the matrix table has no row for (the id is compared whole, so AC-1 is not AC-1.1), a row
-  # that does not have five cells. The plan transaction, as every plan verb.
-  poker_verb_discharge() {
-    plan_verb_open discharge
-    # AT SINGLE RIGOR NO AUDITOR IS SENT: the critic answers the evidence question, and registering its record writes
-    # the auditor cells from its verdict table, so a cell written here would be a verdict nobody gave.
-    if [ "$(plan_frontmatter_get "$PV_PLAN" rigor 2>/dev/null)" = single ]; then
-      die "REFUSED — $PV_PLAN runs at rigor: single, where the critic answers the evidence question and the verdict table of its record writes the auditor cells; register that record: bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question evidence --reader <critic>. The plan is unchanged."
-      exit 1
-    fi
-    PV_RC=0
-    matrix_row_cells "$PV_PLAN" "$DS_AC" 5=CONFIRMED > "$PV_NEW" 2>/dev/null || PV_RC=$?
-    case "$PV_RC" in
-      0) : ;;
-      3) die "REFUSED — the matrix table has no row $DS_AC; the plan is unchanged."
-         exit 1 ;;
-      4) die "REFUSED — the matrix row $DS_AC does not have five cells, so its auditor cell cannot be found; the plan is unchanged."
-         exit 1 ;;
-      *) die "REFUSED — the auditor cell cannot be written (awk exit $PV_RC); the plan is unchanged."
-         exit 2 ;;
-    esac
-    plan_verb_swap discharge "$DS_AC's auditor cell CONFIRMED" writer
-    say "discharge — $DS_AC: auditor CONFIRMED, written to $PV_PLAN; dry-committed first."
     exit 0
   }
 

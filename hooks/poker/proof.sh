@@ -858,17 +858,6 @@ PF_OTHER_LIST
       fi
       PF_ROLE="${PF_ROLE#*	}"; PF_READER="${PF_ROLE#*	}"; PF_ROLE="${PF_ROLE%%	*}"
     fi
-    # AT SINGLE RIGOR THE CRITIC'S EVIDENCE RECORD CARRIES THE VERDICTS, and registering it is the act that learns them,
-    # so the same plan write fills each auditor cell its table names and the head's auditor-wave: line. A record that
-    # does not carry them whole is refused here, before anything is written. At double the auditor's record is not read
-    # for them: the auditor cells there are discharge's.
-    PF_VERDICTS=""
-    if [ "$PF_QUESTION" = evidence ] && [ "$(plan_frontmatter_get "$PV_PLAN" rigor 2>/dev/null)" = single ]; then
-      if ! PF_VERDICTS="$(proof_verdicts "$PF_REAL")"; then
-        die "REFUSED — $(clean "$PF_VERDICTS"); at rigor: single the critic's evidence record is where each row's verdict and the wave's are read. The plan is unchanged."
-        exit 1
-      fi
-    fi
     PF_WB="$(plan_working_branch "$PV_PLAN")"
     if [ -z "$PF_WB" ]; then
       die "REFUSED — $PV_PLAN names no working-branch:, so there is no checkout to read the head from; add 'working-branch: <branch>' under ## SDLC State. The plan is unchanged."
@@ -1007,38 +996,6 @@ PF_PAIRS_LIST
       PF_FINDS="$(proof_findings "$PF_REAL")"; PF_PLANL="$(proof_finding_lines "$PF_REL" "$PF_FINDS")"
     fi
     cp "$PV_PLAN" "$PV_NEW"
-    # THE VERDICTS GO INTO THE MATRIX IN THE PROOF'S OWN WRITE: each named row's auditor cell, CONFIRMED as the bare
-    # token the gate compares and any other verdict as the critic wrote it; a row the table does not name keeps its
-    # cell. A criterion the matrix table has no row for refuses the whole registration.
-    PF_CELLS=""; PF_WAVE=""
-    if [ -n "$PF_VERDICTS" ]; then
-      while IFS='	' read -r _pf_ac _pf_v; do
-        [ -n "$_pf_ac" ] || continue
-        if [ "$_pf_ac" = wave ]; then PF_WAVE="$_pf_v"; continue; fi
-        case "$_pf_v" in *'|'*)
-          die "REFUSED — the verdict for $(clean "$_pf_ac") in $(clean "$PF_REL") carries a |, which a matrix cell cannot hold; write the verdict without it. The plan is unchanged."
-          exit 1 ;;
-        esac
-        _pf_rc=0; matrix_row_cells "$PV_NEW" "$_pf_ac" "5=$_pf_v" > "$PV_NEW.v" 2>/dev/null || _pf_rc=$?
-        case "$_pf_rc" in
-          0) mv "$PV_NEW.v" "$PV_NEW"; PF_CELLS="${PF_CELLS:+$PF_CELLS, }$_pf_ac $_pf_v" ;;
-          3) rm -f "$PV_NEW.v"
-             die "REFUSED — $(clean "$PF_REL") gives a verdict for $(clean "$_pf_ac"), and the matrix table has no row $(clean "$_pf_ac"); give verdicts for the plan's criteria as its matrix spells them. The plan is unchanged."
-             exit 1 ;;
-          *) rm -f "$PV_NEW.v"
-             die "REFUSED — the auditor cell of the matrix row $(clean "$_pf_ac") cannot be written (exit $_pf_rc: a row of five cells is needed); the plan is unchanged."
-             exit 1 ;;
-        esac
-      done <<PF_VERDICTS_LIST
-$PF_VERDICTS
-PF_VERDICTS_LIST
-      if ! matrix_head_line "$PV_NEW" auditor-wave "$PF_WAVE" > "$PV_NEW.v" 2>/dev/null || [ ! -s "$PV_NEW.v" ]; then
-        rm -f "$PV_NEW.v"
-        die "REFUSED — the matrix head's auditor-wave: line cannot be written in $PV_PLAN; the plan is unchanged."
-        exit 1
-      fi
-      mv "$PV_NEW.v" "$PV_NEW"
-    fi
     # A REVIEW THAT FOLLOWS THE BUILD GOES BACK TO WAITING (wave-26 T14; D10). The active review
     # row reading `live:head` (`units_live_rows`, the kind default included) whose `Files` hold
     # this evidence returns to `pending` in the same write — that row alone: the proof of another
@@ -1092,7 +1049,7 @@ PF_VERDICTS_LIST
       [ "$_pf_live" = " " ] || PF_NONE="$(units_rows "$PV_NEW" 2>/dev/null | awk -F'\t' -v ids="$_pf_live" '
         index(ids, " " $1 " ") { printf "%s%s (%s)", (n++ ? ", " : ""), $1, $9 }')"
     fi
-    PV_ACT=pf_append; PV_UNDONE="${PF_CELLS:+the auditor cells ($PF_CELLS) and auditor-wave: }${PF_BACK:+$PF_BACK back to pending}"
+    PV_ACT=pf_append; PV_UNDONE="${PF_BACK:+$PF_BACK back to pending}"
     plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
     if [ -n "$PF_PLANL" ] && ! proof_finding_deferrals "$PV_PLAN" "$PF_REL" "$PF_FINDS"; then
       die "proof-add — the $PF_KIND proof at $PF_HEAD is written, and its deferrals could not be appended to the run's log of $PV_PLAN: the findings the table defers are not deferred."
@@ -1115,7 +1072,6 @@ PF_VERDICTS_LIST
     fi
     PF_FIELDS=""; [ -z "$PF_QUESTION" ] || PF_FIELDS=" question=$PF_QUESTION reader=$PF_READER result=$PF_RESULT scope=$PF_SCOPE ($PF_ROLE)"
     say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS${PF_OWED:+ owed=$PF_OWED}: written to the run's log${PF_BACK:+; $PF_BACK back to pending in $PV_PLAN}; the plan's copy dry-committed first."
-    [ -z "$PF_CELLS" ] || say "proof-add — the auditor cells: $PF_CELLS; auditor-wave: $PF_WAVE"
     [ -z "$PF_OWED" ] || say "proof-add — the whole run left $PF_OWED red: each is owed until a later landing runs it green (a fix row), or proof-add inherited <suite> finds it red at the base too."
     [ -z "$PF_PLANL" ] || printf '%s\n' "$PF_PLANL" | while IFS= read -r _pf_l; do say "proof-add — $_pf_l (in the run's log)"; done
     [ -n "$PF_HELD" ] && say "proof-add — $PF_HELD stays active until every question it carries is read at ${PF_HEAD:0:12}; it returns to pending on that review."

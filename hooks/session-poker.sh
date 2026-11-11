@@ -42,7 +42,6 @@
 #     bash <plugin-root>/hooks/session-poker.sh regression-runs [--write]   the full-runner runs the rosters record; --write puts the count in the bound plan's header
 #     bash <plugin-root>/hooks/session-poker.sh anchors check|index [<root>] [--at <commit>]   check every suite's mutation anchors where they point, or print file -> the suites anchored on it (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh matrix-render   write the bound plan's AC blocks from its ## Eval design, each with evidence: pending, and user-confirmed: pending at T4 (writes the plan)
-#     bash <plugin-root>/hooks/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh handoff ['<purpose>'] < sections   write the handoff document under the handoffs folder of the docs record, bound or not: the composed sections from stdin, State computed, the resume line last; bound, the plan's ## Handoff becomes one pointer line (writes the file, and the plan when bound)
 #     bash <plugin-root>/hooks/session-poker.sh resume <handoff.md>   the one door: engage this session when it is not, bind the plan the file names, arm at a scale with a Patrol, adopt, tick; a dozen lines to the terminal, the rest to one recap file (writes the marker, the stamp, this session's roster and the recap)
 #     bash <plugin-root>/hooks/session-poker.sh decisions [--all]   the register (D24): this run's rulings from record/<wave>/design-ledger.md, or every run's with the ADRs (read-only)
@@ -555,7 +554,6 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
   die "  bash ${HOOK_DIR}/session-poker.sh anchors check|index [<root>] [--at <commit>]   check: MOVED <suite>:<line> for each anchor whose text is not on exactly one line where it points (exit 1), nothing and exit 0 when every anchor holds; index: <file> TAB <suite>[,<suite>] per anchored file. <root> defaults to the current tree, --at reads a commit"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: a tier table row for each criterion it lacks, at the tier its eval type maps to (lib/scale.sh), then provenance, serves (the Eval design row's requirement), fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
-  die "  bash ${HOOK_DIR}/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED, nothing after it"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-set <AC-id> [status=<pending|blocked|discharged|waived>] [evidence=<record/...>] [task=<id>[,<id>...]]   write that matrix row's status and evidence cells and its AC block's evidence: and task: keys; never the tier or auditor cell"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-retier <AC-id> tier=<T0..T4> eval=<text>   raise that criterion's tier where it lives (the matrix tier cell, its block's eval: line, its ## Eval design row) and reset the row to pending, its evidence, auditor and waiver cleared; a lower or equal tier is the user's"
   die "  bash ${HOOK_DIR}/session-poker.sh ${RA_USAGE}"
@@ -1407,14 +1405,6 @@ $1"; shift ;;
   brief)
     { [ $# -ge 1 ] && [ $# -le 2 ] && [ -n "$1" ]; } || usage "brief takes the plan row's id and, optionally, the name its agent is dispatched under, as in: brief T2 w01-T2."
     BRF_ID="$1"; BRF_NAME="${2:-}"
-    ;;
-  discharge)
-    { [ $# -eq 1 ] && [ -n "$1" ]; } || usage "discharge takes exactly one argument: the criterion (AC-<n>.<m>) whose auditor cell becomes CONFIRMED."
-    case "$1" in
-      *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*)
-        usage "discharge: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not a criterion id: letters, digits, '.', '_' or '-'." ;;
-    esac
-    DS_AC="$1"
     ;;
   # THE DEBT LEDGER (wave-30 T22; D2, P2, AC-11.2, AC-11.3). A subcommand, its operands, and at most one
   # plan last, which names the run as landing-report's does; without it, the session's bound run.
@@ -2570,38 +2560,6 @@ pv_next() {  # <verb> <operand>... -> the call on stderr, one line
   die "next call: $(launch_sync_hand "$@")"
 }
 
-# THE MATRIX HEAD'S LINES. Between the `## Verification Matrix` heading and its table stand the matrix's own flush-left
-# lines, `stack-health:` first, where matrix-render writes its stub and the gate reads them. One keyed line is written
-# `<key>: <value>`: a line of the key is replaced where it stands, and any second one dropped, so the head holds one;
-# with none, it goes under the `stack-health:` line, else under the heading. <own>, an ERE, names the old values the
-# caller may replace: an old value outside it is a person's word and stays (exit 5, nothing printed). Fences skipped.
-# Exit 3: no matrix section.
-matrix_head_line() {  # <plan> <key> <value> [<own ERE>] -> the whole plan
-  MH_KEY="$2" MH_VAL="$3" MH_OWN="${4:-}" awk '
-    BEGIN { k = ENVIRON["MH_KEY"]; kre = "^[ \t]*" k "[ \t]*:"; line = k ": " ENVIRON["MH_VAL"]; own = ENVIRON["MH_OWN"] }
-    { L[++n] = $0 }
-    END {
-      for (i = 1; i <= n; i++) {
-        x = L[i]
-        if (x ~ /^[ \t]*```/) { fence = !fence; continue }
-        if (fence) continue
-        if (x ~ /^## /) { if (head) break; if (x ~ /^## Verification Matrix/) head = i; continue }
-        if (!head) continue
-        if (x ~ /^[ \t]*\|/) break
-        if (x ~ kre) { if (!at) at = i; else drop[i] = 1 }
-        else if (x ~ /^[ \t]*stack-health[ \t]*:/ && !sh) sh = i
-      }
-      if (!head) exit 3
-      if (at && own != "") { v = L[at]; sub(kre, "", v); gsub(/^[ \t]+|[ \t]+$/, "", v); if (v !~ own) exit 5 }
-      for (i = 1; i <= n; i++) {
-        if (i in drop) continue
-        if (i == at) { print line; continue }
-        print L[i]
-        if (!at && i == (sh ? sh : head)) { if (!sh) print ""; print line }
-      }
-    }' "$1"
-}
-
 # THE USER'S WORDS, REFUSED IN ONE VOICE. finding-move and a criterion's waiver hold their words to
 # lib/said.sh `user_said`; its three refusals are written here once, the minimum named by the library's
 # own constant. <act> is what the words make: `a move`, `a waiver`.
@@ -3498,7 +3456,6 @@ case "$VERB" in
   step-line) poker_verb_step_line "$@" ;;
   step-field) poker_verb_step_field "$@" ;;
   matrix-render) poker_verb_matrix_render "$@" ;;
-  discharge) poker_verb_discharge "$@" ;;
   matrix-set) poker_verb_matrix_set "$@" ;;
   matrix-retier) poker_verb_matrix_retier "$@" ;;
   confirm-row) poker_verb_confirm_row "$@" ;;

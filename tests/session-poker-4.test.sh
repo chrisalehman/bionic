@@ -1327,17 +1327,12 @@ expect_contains "LIVE-2c …and says it is not covered at the head" "uncovered" 
 expect_eq "LIVE-2d …and the row is still active" "active" "$(lv_cell T12)"
 
 # ============================================================
-section "§VERDICTS §DISCHARGE §STACK: the critic's verdicts and the regression's health reach the matrix by their verbs"
+section "§STACK: the regression's health is the judge's rendering, and no verb writes it into the plan"
 # ============================================================
-# At single rigor the critic holds the evidence question. Its record: a markdown table naming the columns AC and
-# verdict, one row per criterion, and one flush-left `verdict: <VERDICT>[ — <coverage finding>]` line for the wave.
-# `proof-add review <record> --question evidence` at `rigor: single` writes each named row's auditor cell (CONFIRMED
-# bare, other verdicts as written) and the head's `auditor-wave:` line in its proof line's plan write. `discharge`
-# refuses there, naming `proof-add review`; at double it writes as before. `proof-add regression` writes the head's
-# `stack-health:` through lib/proof.sh `proof_health_line`: green only at a pass that left nothing owed; a declared
-# `n/a:` stays.
-# FIXTURE FIDELITY. §STEP-FIELD's shape at Step 5: the reader's row from the production writer with `questions=`, run
-# lines from regression_fixture, the head's stub rendered by matrix-render; every later write goes through a real verb.
+# `proof-add regression` registers the whole run's proof and leaves the plan's text as it was; lib/proof.sh
+# `proof_health_line` renders the health the sheet and the card print: green only at a pass that left nothing owed.
+# FIXTURE FIDELITY. §STEP-FIELD's shape at Step 5, an older plan's matrix head carrying the stub its rendering wrote;
+# run lines from regression_fixture; every later write goes through a real verb.
 VT_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RVT="$(make_repo verdicts)"; ( cd "$RVT" && git commit -q --allow-empty -m init )
 git -C "$RVT" config user.name "Dana Fixture"
@@ -1345,113 +1340,18 @@ VT_B="$(git -C "$RVT" rev-parse HEAD)"
 PVT="$(s42_plan "$RVT" 5 "  worktree: .worktrees/01-fixture
   base-sha: ${VT_B:0:8}
   branch: wave/01-fixture")"
-awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PVT" > "$PVT.tmp" && mv "$PVT.tmp" "$PVT"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }
+  /^## Verification Matrix/ { print ""; print "stack-health: pending" }' "$PVT" > "$PVT.tmp" && mv "$PVT.tmp" "$PVT"
 s42_builds_landed "$PVT"
-# Three criteria, each with a matrix row at T2 and an Eval design row naming it; matrix-render fills the blocks and the head.
-awk '/^## Verification Matrix/ {
-       print "## Eval design\n"
-       print "| Requirement | Criterion | Approach | Eval | Fails when |"
-       print "|---|---|---|---|---|"
-       print "| REQ-1 | AC-1.1 | hermetic | `tests/a.test.sh` | a is wrong |"
-       print "| REQ-1 | AC-1.2 | hermetic | `tests/b.test.sh` | b is wrong |"
-       print "| REQ-1 | AC-1.3 | hermetic | `tests/c.test.sh` | c is wrong |\n" }
-     { print }
-     /^\| AC-1\.1 \| T2 \|/ { print "| AC-1.2 | T2 | pending | — | — |"; print "| AC-1.3 | T2 | pending | — | — |" }' \
-  "$PVT" > "$PVT.tmp" && mv "$PVT.tmp" "$PVT"
 vt_rigor() { sed "s/^rigor: .*/rigor: $1/" "$PVT" > "$PVT.tmp" && mv "$PVT.tmp" "$PVT"; }
-vt_rigor single
 ( cd "$RVT" && git add -f "$PVT" && git commit -qm wb \
   && git worktree add -q -b wave/01-fixture "$RVT/.worktrees/01-fixture" "$VT_B" ) >/dev/null 2>&1
 VT_WT="$RVT/.worktrees/01-fixture"; VT_DIR="$RVT/.bionic/docs/record/wave-01-fixture"; mkdir -p "$VT_DIR"
 VT_A="$(s57_commit "$VT_WT" lib/a.sh A)"
-VT_RECS="ev-double ev-single ev-again ev-notable ev-noverdict ev-twice ev-stray ev-empty"
-VT_FILES=""; for n in $VT_RECS; do VT_FILES="${VT_FILES:+$VT_FILES,}.bionic/docs/record/wave-01-fixture/$n.md"; done
 new_roster "$RVT"
-printf '%s|questions=evidence\n' "$(roster_row_fixture session="$SID" name=vt-crit agent_id=a-vt-crit \
-  subagent_type=bionic:critic files="$VT_FILES")" >> "$(roster_of "$RVT")"
-vt_cell() {  # <AC> -> its matrix row's auditor cell, trimmed
-  awk -F'|' -v a="$1" '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 }
-    m && /^\|/ { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == a) { v = $6; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$PVT"
-}
-vt_cells() { printf '%s|%s|%s' "$(vt_cell AC-1.1)" "$(vt_cell AC-1.2)" "$(vt_cell AC-1.3)"; }
 vt_head() {  # <key> -> the matrix head's <key>: lines, whole, `;`-joined
   awk -v k="$1" '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 } m && index($0, k ":") == 1' "$PVT" | paste -sd';' -
 }
-vt_order() {  # -> the matrix section's head lines and its table header, in file order, by key
-  awk '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 } !m { next }
-    /^stack-health:/ { o = o "stack-health," } /^auditor-wave:/ { o = o "auditor-wave," } /^\| AC \|/ { o = o "table"; exit }
-    END { print o }' "$PVT"
-}
-vt_rec() {  # <name> <verdict: line or -> [<table row>...] -> an evidence reading over base..A
-  local f="$VT_DIR/$1.md" v="$2" r; shift 2
-  { printf '# evidence\n\nreviewed: %s..%s\nquestion: evidence\nresult: flag\nscope: whole\n\n## Row verdicts\n\n' "${VT_B:0:10}" "$VT_A"
-    if [ "$#" -gt 0 ]; then printf '| AC | verdict | why |\n|---|---|---|\n'; for r in "$@"; do printf '%s\n' "$r"; done; fi
-    [ "$v" = - ] || printf '\n%s\n' "$v"
-    printf '\nwhat the critic found\n'; } > "$f"
-}
-vt_add() { poke "$RVT" proof-add review "record/wave-01-fixture/$1.md" --question evidence --reader vt-crit; }
-VT_ROWS=('| AC-1.1 | CONFIRMED | the row reddens without the change |' '| AC-1.2 | REFUTED | the fixture cannot reach the failure |'
-  '| AC-1.3 | UNVERIFIABLE | the record is missing |')
-
-poke "$RVT" matrix-render
-expect_eq "VT-0 setup: matrix-render renders the three blocks and the head's stub (exit 0)" "0|stack-health: pending" "$RC|$(vt_head stack-health)"
-[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
-expect_eq "VT-0b precondition: every auditor cell is empty, and the head has no auditor-wave: line" "—|—|—|" "$(vt_cells)|$(vt_head auditor-wave)"
-
-# ---------- §VERDICTS: the critic's table and wave verdict reach the auditor cells and the head ----------
-vt_rigor double
-vt_rec ev-double 'verdict: REFUTED — AC-1.2 is refuted' "${VT_ROWS[@]}"
-vt_add ev-double
-expect_eq "VT-1 control: at double rigor the same record registers (exit 0) and leaves the auditor cells as they were" "0|—|—|—" "$RC|$(vt_cells)"
-[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
-expect_eq "VT-1b …and writes no auditor-wave: line (the head's stack-health: still read: the extractor is not empty)" "|stack-health: pending" \
-  "$(vt_head auditor-wave)|$(vt_head stack-health)"
-vt_rigor single
-vt_rec ev-single 'verdict: REFUTED — AC-1.2 is refuted' "${VT_ROWS[@]}"
-vt_add ev-single
-expect_eq "VT-2 §VERDICTS AC-6.1 at single rigor the critic's evidence record registers (exit 0) and its verdicts reach the auditor cells" \
-  "0|CONFIRMED|REFUTED|UNVERIFIABLE" "$RC|$(vt_cells)"
-[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
-expect_eq "VT-2b …and the head carries the wave verdict on its auditor-wave: line" "auditor-wave: REFUTED — AC-1.2 is refuted" "$(vt_head auditor-wave)"
-expect_eq "VT-2c …beside stack-health:, above the table" "stack-health,auditor-wave,table" "$(vt_order)"
-expect_eq "VT-2d …in the same plan write as the proof line" "1" \
-  "$(s46_proved "$PVT" | /usr/bin/grep -c "^proved: kind=review head=$VT_A .* evidence=record/wave-01-fixture/ev-single.md question=evidence ")"
-expect_eq "VT-3 a CONFIRMED row needs no discharge: its table row reads the bare token, written by the review's registration" \
-  "| AC-1.1 | T2 | pending | — | CONFIRMED |" "$(/usr/bin/grep -E '^\| AC-1\.1 \|' "$PVT")"
-# A later reading replaces both: a row's verdict is the newest reading's, the head keeps one auditor-wave: line.
-vt_rec ev-again 'verdict: CONFIRMED — every requirement has a row' '| AC-1.1 | CONFIRMED | — |' '| AC-1.2 | CONFIRMED | refixed |'
-vt_add ev-again
-expect_eq "VT-4 a second reading rewrites the rows it names and leaves the row it does not name as it was (exit 0)" \
-  "0|CONFIRMED|CONFIRMED|UNVERIFIABLE" "$RC|$(vt_cells)"
-expect_eq "VT-4b …and the head holds one auditor-wave: line, the newest" "auditor-wave: CONFIRMED — every requirement has a row" "$(vt_head auditor-wave)"
-# What the record must carry at single rigor: each refusal leaves the plan byte-identical.
-vt_rec ev-notable 'verdict: CONFIRMED — fine'
-s42_snap "$RVT" "$PVT"; vt_add ev-notable
-s42_unchanged "VT-5 a single-rigor evidence record with no AC | verdict table" 1 "$PVT"
-expect_contains "VT-5b …named in the refusal" "the columns AC and verdict" "$OUT"
-vt_rec ev-noverdict - '| AC-1.1 | CONFIRMED | — |'
-vt_add ev-noverdict
-s42_unchanged "VT-6 a single-rigor evidence record with the table and no verdict: line" 1 "$PVT"
-expect_contains "VT-6b …named in the refusal" "verdict:" "$OUT"
-vt_rec ev-twice 'verdict: CONFIRMED — one' '| AC-1.1 | CONFIRMED | — |'; printf 'verdict: REFUTED — two\n' >> "$VT_DIR/ev-twice.md"
-vt_add ev-twice
-s42_unchanged "VT-7 a record giving the wave verdict twice" 1 "$PVT"
-vt_rec ev-stray 'verdict: CONFIRMED — fine' '| AC-1.1 | CONFIRMED | — |' '| AC-9.9 | CONFIRMED | — |'
-vt_add ev-stray
-s42_unchanged "VT-8 a row verdict for a criterion the matrix has no row for" 1 "$PVT"
-expect_contains "VT-8b …naming it" "AC-9.9" "$OUT"
-vt_rec ev-empty 'verdict: CONFIRMED — fine' '| AC-1.1 |  | — |'
-vt_add ev-empty
-s42_unchanged "VT-9 a row whose verdict cell is empty" 1 "$PVT"
-
-# ---------- §DISCHARGE: discharge refuses at single rigor and writes at double ----------
-s42_snap "$RVT" "$PVT"
-poke "$RVT" discharge AC-1.3
-s42_unchanged "VT-10 §DISCHARGE AC-6.2 discharge on a single-rigor plan" 1 "$PVT"
-expect_contains "VT-10b …naming proof-add review" "proof-add review" "$OUT"
-vt_rigor double
-poke "$RVT" discharge AC-1.3
-expect_eq "VT-11 …on a double-rigor plan it writes the cell as before (exit 0)" "0|CONFIRMED" "$RC|$(vt_cell AC-1.3)"
 vt_rigor single
 
 # ---------- §STACK: the health line is the judge's rendering, written by one function ----------
@@ -1501,7 +1401,7 @@ section "§STARTER: the tick starts the whole run itself when nothing is ready, 
 # one suite is run.sh, never waiting; the proof lands through proof-add regression. A landing past it moves the head, so
 # the next tick starts again. A live object guards against a second start; a run the gate did not admit (75) is told as
 # waiting and started again.
-# FIXTURE FIDELITY: §VERDICTS's shape at Step 4, with a regression proof at an older head from proof-add over a run line
+# FIXTURE FIDELITY: §STACK's shape at Step 4, with a regression proof at an older head from proof-add over a run line
 # from regression_fixture. The runner is the worktree's committed tests/run.sh stub: it holds while a hold file stands,
 # exits 75 with no verdict while a full file stands, else reports a green whole run. Everything else is real, and the
 # writer row is mkrow's, closed by the real ack.
@@ -1630,7 +1530,7 @@ section "§WALK: the walk's verdicts settle the cells they confirm, through proo
 # write, status `discharged` and the record as evidence (cell and block key) for each CONFIRMED row no landing settled,
 # every other row as it stands, the matrix head's `walk-artifact:` line and one walk proof in the run's log. It appends one `ev=walk`
 # line to the landing record, never `ev=matrix-set`, so the hand-holds fold counts no status write.
-# FIXTURE FIDELITY. §VERDICTS' shape with `walk: required`, so the head carries the gate's stub. The landing-settled row
+# FIXTURE FIDELITY. §STACK's shape with `walk: required`, so the head carries the gate's stub. The landing-settled row
 # is written as `line_settle` leaves it, its `ev=settled` line through the product's line_event.
 WK_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RWK="$(make_repo walk)"; ( cd "$RWK" && git commit -q --allow-empty -m init )
