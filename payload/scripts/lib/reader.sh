@@ -10,7 +10,8 @@
 # it unchanged. The plan's own text is never read here.
 #
 # THE FOLD. `reader_facts` turns the lines into facts, in the order they happened:
-#   - two lines equal in every field but `at=` are one fact; the repeat changes nothing, not even the place;
+#   - two lines equal in every field but `at=` are one fact; the repeat changes nothing, not even the place,
+#     save a step's: a step written again is the run taken back to it, so the step a run stands at is the last written;
 #   - a later line with the same identifying fields and another value replaces the earlier, and takes its place;
 #   - a discarded verdict replaces no earlier verdict, whatever its commit, and one with none before it stands
 #     as the discarded run it was; a red or a green after it replaces it as any later line does;
@@ -119,6 +120,7 @@ reader_facts() {  # <plan> -> one line per standing fact, in the order the facts
       if (t == "cancel") { delete live[id]; next }
       # a discarded run was killed, not judged: it must not unseat the verdict a run already gave
       if (t == "verdict" && f["result"] == "discarded" && (id in live)) next
+      if (named == "step" && (id in live) && fact[id] == body) delete live[id]
       if ((id in live) && fact[id] == body) next
       live[id] = 1; fact[id] = body; type[id] = t; stamp[id] = f["at"]; place[id] = ++seq
     }
