@@ -534,8 +534,8 @@ decisions_all() {
 scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
   local plan="$1" root="$2" start reg rounds stops="unverified" wait="unverified" merge_at agent="unverified" widest
   start="$(sitrep_approved_at "$plan")"
-  reg="$(owed_register "$root" "$plan" 2>/dev/null)" || reg=""
-  if [ -n "$start" ] && [ -n "$reg" ] && [ -f "$reg" ] && [ ! -L "$reg" ]; then
+  reg="$(owed_lines "$plan" "$root" 2>/dev/null)" || reg=""
+  if [ -n "$start" ] && [ -n "$reg" ]; then
     rounds="$(owed_rounds 'approve:step[0-9]+|approve:release|decide:D[0-9]+' "$plan" "$root" | awk -F'\t' \
       -v s="$start" -v now="$(sitrep_now)" "$_PATROL_ISO_AWK"'
       function norm(x) { if (length(x) == 17 && substr(x, 17, 1) == "Z") return substr(x, 1, 16) ":00Z"; return x }
@@ -908,13 +908,13 @@ sitrep_record_spans() {
 # waits on an event counts to its answer, and one that never waits on the user (a carry, a delivery) counts none.
 sitrep_waiting() {
   local plan="$1" root="$2" rows="$3" now="$4" asks="$5" reg="" led out m k spans waits
-  reg="$(owed_register "$root" "$plan" 2>/dev/null)" || reg=""
+  reg="$(owed_lines "$plan" "$root" 2>/dev/null)" || reg=""
   led="$(docs_root "$root")/record/$(proof_plan_slug "$plan")/design-ledger.md"
   spans="$(sitrep_record_spans "$plan")"
   # what each ask no longer open waits on; an open one's is the asks' own fifth field
   waits="$( { printf '%s\n' "$spans" | cut -f1
-      { [ -n "$reg" ] && [ -f "$reg" ] && [ ! -L "$reg" ] && awk "$_OWED_AWK_FIELD"'
-          index($0, "owed/v1|") == 1 && fld($0, "state") != "open" { print key_of($0) }' "$reg"; } 2>/dev/null
+      { [ -n "$reg" ] && printf '%s\n' "$reg" | awk "$_OWED_AWK_FIELD"'
+          index($0, "owed/v1|") == 1 && fld($0, "state") != "open" { print key_of($0) }'; } 2>/dev/null
     } | awk 'NF && !s[$0]++' | while IFS= read -r k; do printf 'W\t%s\t%s\n' "$k" "$(ask_waits_on "$k" "$plan" "$root")"; done)"
   out="$( { printf '%s\n' "$asks" | awk -F'\t' 'NF >= 2 && $1 != "" { print "O\t" $1 "\t" $2 "\t" $5 }'
       printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { s = tolower($10); gsub(/[ \t]/, "", s); k = $3; gsub(/[ \t]/, "", k)
@@ -924,8 +924,8 @@ sitrep_waiting() {
       sitrep_ledger_times "$led" | awk -F'\t' '{ print "D\tdecide:" $1 "\t" $2 "\t" $3 }'
       printf '%s\n' "$spans" | awk -F'\t' 'NF { print "S\t" $1 "\t" $2 "\t" $3 }'
       printf '%s\n' "$waits" | awk 'NF'
-      { [ -n "$reg" ] && [ -f "$reg" ] && [ ! -L "$reg" ] && awk "$_OWED_AWK_FIELD"'
-          index($0, "owed/v1|") == 1 { print "R\t" key_of($0) "\t" fld($0, "state") "\t" fld($0, "at") "\t" fld($0, "opened") "\t" fld($0, "answered") }' "$reg"; } 2>/dev/null
+      { [ -n "$reg" ] && printf '%s\n' "$reg" | awk "$_OWED_AWK_FIELD"'
+          index($0, "owed/v1|") == 1 { print "R\t" key_of($0) "\t" fld($0, "state") "\t" fld($0, "at") "\t" fld($0, "opened") "\t" fld($0, "answered") }'; } 2>/dev/null
     } | awk -F'\t' -v now="$now" "$_PATROL_ISO_AWK"'
       function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
       function ep(s) { if (s == "" || s == "-") return -1; return iso2epoch(norm(s)) }

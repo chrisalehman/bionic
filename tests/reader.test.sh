@@ -29,6 +29,8 @@
 #   §HALF       a run whose landings and asks stand partly in the landing record and asks register and partly in
 #               its log reads as one run in order, a landing the plan's ledger also copies counted once; brought
 #               forward (kept/, its log rewritten), it reads its log alone.
+#   §ASK-LOG    lib/owed.sh writes each act on an ask to the run's log on its own clock and never the register, and
+#               reads the register, then the log, as one list.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
 
@@ -457,4 +459,38 @@ mkdir -p "$HD/kept/record"; cp "$HD/run.log" "$HD/kept/record/run.log"
 expect_eq "kept, the log still its kept copy (an act broken off): still read as one" "T1 T2 " "$(keys landed)"
 printf 'run/v1|ev=step|n=4|at=2026-11-03T00:00:09Z\n' >> "$HD/run.log"
 expect_eq "brought forward, the log changed after its kept copy: the log alone" "T2 " "$(keys landed)"
+
+section "ASK-LOG"
+# The asks library writes each act on an ask as an ask event in the run's log, at its own clock, and reads the register
+# then the log as one list. fails-when: an act writes asks.state, an act leaves no event or one off the library's clock,
+# a standing ask of the register reads otherwise than as before until the log answers it, or a round the log opens is
+# numbered off the register's count.
+AR="$(mktemp -d)"; AP="$AR/.bionic/docs/plans/epic-x/askl.plan.md"; AD="$AR/.bionic/docs/record/askl"; T0=1793577600
+mkdir -p "${AP%/*}" "$AD"; printf '# askl\n' > "$AP"
+printf '%s\n' 'owed/v1|key=waive:old|state=open|sent=-|at=2026-11-01T00:00:01Z|title=t|reply=r' \
+  'owed/v1|key=approve:step2|state=closed|by=card|at=2026-11-01T00:00:03Z|opened=2026-11-01T00:00:02Z' > "$AD/asks.state"
+cp "$AD/asks.state" "$AR/register.was"
+ao() {  # <epoch> <owed.sh function> [args] -> its answer, the run askl bound, the clock fixed at <epoch>
+  local e="$1"; shift
+  OWED_ROOT="$AR" OWED_PLAN="$AP" OWED_SID=s1 BIONIC_NOW_EPOCH="$e" \
+    bash -c '. "$1/roots.sh" && . "$1/owed.sh" && shift && "$@"' _ "${READER%/reader.sh}/lib" "$@" 2>/dev/null
+}
+ao $((T0 + 60)) owed_open waive:new "t new" "poker: r new"; ao $((T0 + 120)) owed_answer waive:new no
+ao $((T0 + 180)) owed_mark_sent waive:new; ao $((T0 + 240)) owed_close waive:new waive
+ao $((T0 + 300)) owed_answer waive:old carry; ao $((T0 + 360)) owed_open approve:step2 "t2" "poker: r2"
+expect_eq "each act is an ask event in the run's log: open, answer, sent, close of the new; answer of the old; round 2" \
+  "waive:new waive:new waive:new waive:new waive:old approve:step2" \
+  "$(awk -F'|' '$2 == "ev=ask" { for (i = 3; i <= NF; i++) if ($i ~ /^key=/) printf "%s ", substr($i, 5) }' "$AD/run.log" 2>/dev/null | sed 's/ $//')"
+expect_eq "…and the register is as it was, never written" "same" "$(cmp -s "$AD/asks.state" "$AR/register.was" && echo same)"
+expect_eq "every round reads as one list, the register's first, on the library's clock, the log's round numbered 2" \
+  "approve:step2 1 closed 2026-11-01T00:00:02Z 2026-11-01T00:00:03Z|approve:step2 2 open 2026-11-02T00:06:00Z -|waive:new 1 closed 2026-11-02T00:01:00Z 2026-11-02T00:04:00Z|waive:old 1 open 2026-11-01T00:00:01Z -" \
+  "$(ao "$T0" owed_rounds 'approve:step2|waive:.*' | tr '\t' ' ' | LC_ALL=C sort | paste -sd'|' -)"
+expect_eq "the open list: the register's standing ask, then the log's new round, each with its title and line" \
+  "waive:old - t r|approve:step2 - t2 poker: r2" "$(ao "$T0" owed_list | tr '\t' ' ' | paste -sd'|' -)"
+expect_eq "the answers read on either home: the closed new keeps its own, the standing old has the log's" \
+  "no 2026-11-02T00:02:00Z|carry 2026-11-02T00:05:00Z" \
+  "$(ao "$T0" owed_answer_of waive:new | cut -f1-2 | tr '\t' ' ')|$(ao "$T0" owed_answer_of waive:old | cut -f1-2 | tr '\t' ' ')"
+ao $((T0 + 420)) owed_close waive:old waive
+expect_eq "the register's standing ask closed through the log reads closed, and the reader agrees" "approve:step2|approve:step2 " \
+  "$(ao "$T0" owed_list | cut -f1 | paste -sd' ' -)|$(W=askl; D="$AR/.bionic/docs"; keys asks)"
 finish

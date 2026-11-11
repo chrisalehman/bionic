@@ -480,9 +480,9 @@ TOA
 # the plan itself declared, a standing `debt:` line of the landing record for that suite, opens nothing: the red is
 # owed and tracked as a debt, so a decision on the goal would ask the person about a red already on their ledger.
 tick_owed_goals() {  # <plan> <landing record> -> always 0; one line said per goal it opens
-  local f st t m rd k s reds
+  local st t m rd k s reds
   declare -F owed_open >/dev/null 2>&1 && declare -F plan_goals_read >/dev/null 2>&1 || return 0
-  f="$(OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_file 2>/dev/null)" || return 0
+  OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_file >/dev/null 2>&1 || return 0
   # the suites a standing debt declares red: the reader's debts admitted on a red verdict, each with an id, none voided
   { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
   reds=" $(tick_ask reader_q_debts | awk -F'|' "${_LINE_FIELDS_AWK:-}"'line_kv("ev") == "admitted" { id = line_kv("id"); s = line_kv("suite")
@@ -496,7 +496,7 @@ tick_owed_goals() {  # <plan> <landing record> -> always 0; one line said per go
     [ "$st" = missed ] || continue
     # a suite goal missed by a red the plan declared (a Lands-red: row's standing debt line) is no new decision
     s="${rd%% red at *}"; case "$s" in *.test.sh) case "$reds" in *" ${s##*/} "*) continue ;; esac ;; esac
-    [ -f "$f" ] && /usr/bin/grep -qF "|key=$k|" "$f" 2>/dev/null && continue
+    [ -n "$(OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_rounds "${k//./\\.}" 2>/dev/null)" ] && continue
     OWED_ROOT="$REPO_REAL" OWED_SID="$SESSION_ID" owed_open "$k" "Goal missed: $t" "poker: GOAL $t missed — $m: $rd; keep the target or change course" >/dev/null 2>&1 \
       && say "GOAL $t missed — $m: $rd; owed: $k"
   done <<TOG

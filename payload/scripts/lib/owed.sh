@@ -271,12 +271,21 @@ owed_close() {
   _owed_act "$f" "$at" "$key" "$(_owed_round "$st")" "reply=${by:--}"
 }
 
-_owed_list_file() {  # <store> -> owed_list's lines for that store
-  [ -f "$1" ] && [ ! -L "$1" ] || return 0
-  awk "$_OWED_AWK_FIELD"'
+_owed_list_file() {  # <store> -> owed_list's lines for that store, read as one list
+  local l
+  l="$(_owed_lines "$1")" || return 1
+  printf '%s\n' "$l" | awk "$_OWED_AWK_FIELD"'
     index($0, "owed/v1|") != 1 { next }
     fld($0, "state") == "open" { printf "%s\t%s\t%s\t%s\n", key_of($0), fld($0, "sent"), fld($0, "title"), fld($0, "reply") }
-  ' "$1" 2>/dev/null
+  '
+}
+
+# owed_lines [<plan> <root>] -> THE ONE LIST (above) of the run's register <plan> names under <root>, else of
+# `owed_file`; rc 1 when there is no store or it cannot be read.
+owed_lines() {
+  local f
+  f="$(_owed_store_for "${1:-}" "${2:-}")" || return 1
+  _owed_lines "$f"
 }
 
 # owed_list -> one line per OPEN item: <key> TAB <sent ISO or -> TAB <title> TAB <reply>.
@@ -288,22 +297,21 @@ owed_list() {
 
 # owed_rounds <key ERE> [<plan> <root>] -> one line per round of every key the extended regular expression matches
 # whole, open or closed, in the order they were opened: <key> TAB <round> TAB <open|closed> TAB <opened ISO or -> TAB
-# <closed ISO, or - while open>; read from the run's register <plan> names under <root>, else from `owed_file`. A round's
+# <closed ISO, or - while open>; read as one list from the run <plan> names under <root>, else from `owed_file`. A round's
 # number is its line's round=, else its place among the key's lines. A closed line written before closed lines kept
 # their opening reads `-` for it.
 owed_rounds() {
-  local f
+  local l
   [ -n "${1:-}" ] || return 1
-  f="$(_owed_store_for "${2:-}" "${3:-}")" || return 1
-  [ -f "$f" ] && [ ! -L "$f" ] || return 0
-  OWED_P="^(${1})\$" awk "$_OWED_AWK_FIELD"'
+  l="$(owed_lines "${2:-}" "${3:-}")" || return 1
+  printf '%s\n' "$l" | OWED_P="^(${1})\$" awk "$_OWED_AWK_FIELD"'
     index($0, "owed/v1|") != 1 { next }
     { k = key_of($0) }
     k !~ ENVIRON["OWED_P"] { next }
     { n[k]++; r = fld($0, "round"); if (r == "") r = n[k] }
     fld($0, "state") == "open" { printf "%s\t%s\topen\t%s\t-\n", k, r, fld($0, "at"); next }
     { o = fld($0, "opened"); printf "%s\t%s\tclosed\t%s\t%s\n", k, r, (o == "" ? "-" : o), fld($0, "at") }
-  ' "$f" 2>/dev/null
+  '
 }
 
 # owed_list_plan <plan> <root> -> owed_list's lines for the run <plan> names, read from its register under <root>,
@@ -351,17 +359,18 @@ owed_answer() {
   _owed_act "$f" - "$key" "$(_owed_round "$st")" "answer=$word" "event=${event:--}"
 }
 
-_owed_answers_file() {  # <store> -> owed_answers' lines for that store
-  [ -f "$1" ] && [ ! -L "$1" ] || return 0
-  awk "$_OWED_AWK_FIELD"'
+_owed_answers_file() {  # <store> -> owed_answers' lines for that store, read as one list
+  local l
+  l="$(_owed_lines "$1")" || return 1
+  printf '%s\n' "$l" | awk "$_OWED_AWK_FIELD"'
     index($0, "owed/v1|") != 1 { next }
     fld($0, "state") == "open" && fld($0, "answer") != "" {
       printf "%s\t%s\t%s\t%s\n", key_of($0), fld($0, "answer"), fld($0, "answered"), fld($0, "event")
-    }' "$1" 2>/dev/null
+    }'
 }
 
 # owed_answers [<plan> <root>] -> one line per OPEN item that holds an answer: <key> TAB <word> TAB <answered ISO> TAB
-# <event or ->, read from the run's register <plan> names under <root>, else from `owed_file`.
+# <event or ->, read as one list from the run <plan> names under <root>, else from `owed_file`.
 owed_answers() {
   local f
   f="$(_owed_store_for "${1:-}" "${2:-}")" || return 1
@@ -372,13 +381,12 @@ owed_answers() {
 # line, open or closed, since a closed line keeps the answer it was given; nothing when it was never answered. A new
 # round after a close is the key's last line and starts with no answer, so it reads none.
 owed_answer_of() {
-  local key f
+  local key l
   key="$(owed_key "${1:-}")"
-  f="$(_owed_store_for "${2:-}" "${3:-}")" || return 0
-  [ -f "$f" ] && [ ! -L "$f" ] || return 0
-  awk -v key="$key" "$_OWED_AWK_FIELD"'
+  l="$(owed_lines "${2:-}" "${3:-}")" || return 1
+  printf '%s\n' "$l" | awk -v key="$key" "$_OWED_AWK_FIELD"'
     index($0, "owed/v1|") == 1 && key_of($0) == key { l = $0 }
-    END { if (l != "" && fld(l, "answer") != "") print fld(l, "answer") "\t" fld(l, "answered") "\t" fld(l, "event") }' "$f" 2>/dev/null
+    END { if (l != "" && fld(l, "answer") != "") print fld(l, "answer") "\t" fld(l, "answered") "\t" fld(l, "event") }'
 }
 
 # ask_waits_on <key> [<plan> <root>] -> `user` or `event <what>` on one line, rc 0, from the key's kind and its answer,
