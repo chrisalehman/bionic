@@ -2491,7 +2491,7 @@ if [ "$_EG_V15" -eq 1 ] && _eg_f="$(plan_read_faults "$PLAN")"; then
 "canonical-sdlc plan declares canonical_sdlc_version: 15, and version 15 has no place for:
 ${_eg_f}
 Plan: $PLAN
-Fix: remove each part named; the run's state is the log's, and the reader answers it."
+Fix: remove each part named; a version-15 run's state is read from its log, not from its plan."
 fi
 
 # THE PLAN'S RIGOR IS A LEVEL OR ABSENT (wave-30 T11; REQ-1 AC-1.4, D1). A `rigor:` that names no
