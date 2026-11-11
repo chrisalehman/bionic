@@ -10,7 +10,7 @@
 #     floor-run                 -> regression-run             the verb, read at `VERB="$1"` in hooks/session-poker.sh
 #     proof-add floor           -> proof-add regression       the proof kind, read at `PF_KIND="$1"`
 #     --born floor:<suite>      -> --born regression:<suite>  task-add's operand
-#     proof:floor (typed)       -> proof:regression           a reads cell given to task-add or task-set reads=
+#     proof:floor (typed)       -> proof:regression           a reads cell given to task-add
 #     floor: (config.yaml)      -> regression-command:        the regression's command, read by `regression-run`
 #     floor-run-<sha>.log       -> regression-run-<sha>.log   the whole-run log's name: the old one is not read, not refused
 #     rigor-floor:              -> rigor-minimum:             the rigor minimum, read by hooks/canonical-sdlc-governing-skill.sh
@@ -211,13 +211,6 @@ expect_contains "GB-4b …naming the new token" "proof:floor is gone; write proo
 poke "$RAB" task-add T9 4 test 'reads the old word live. The row reads the retired word live.' bionic:implementor '—' 30 REQ-5 '—' 'live:proof:floor'
 expect_eq "GB-4c …the live: form too (exit 1), naming the new token" "1|1" \
   "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'proof:floor is gone; write proof:regression' | tr -d ' ')"
-poke "$RAB" task-set T8 reads=proof:floor
-expect_eq "GB-5 task-set T8 reads=proof:floor is refused (exit 1), naming the new token" "1|1" \
-  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'proof:floor is gone; write proof:regression' | tr -d ' ')"
-expect_contains "GB-5b …and T8's cell is as it was" "| proof:regression, head |" "$(/usr/bin/grep '^| T8 |' "$PAB")"
-poke "$RAB" task-set T8 'reads=approval:plan, proof:regression, head'
-expect_eq "GB-5c task-set T8 reads='approval:plan, proof:regression, head' works (exit 0)" "0" "$RC"
-expect_contains "GB-5d …and writes the cell" "| approval:plan, proof:regression, head |" "$(/usr/bin/grep '^| T8 |' "$PAB")"
 POKE_BOUND="$AB_BOUND_WAS"
 
 # ============================================================

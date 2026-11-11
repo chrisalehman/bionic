@@ -50,7 +50,7 @@
 #     bash card.sh inherited <requirements file>       (the inherited deferrals, tagged; close-out's)
 #     bash card.sh inherited-debt <requirements file>  (its open debt: lines, which inherited withholds; close-out's)
 #     bash card.sh early <plan>                         (the CARD-EARLY line, or what the release approval card settles)
-#     bash card.sh task-cell <id> <cell> [<id> <cell>]...  (a Tasks cell judged by the Step-3 card's title cap and sentence rule; task-add's and task-set's)
+#     bash card.sh task-cell <id> <cell> [<id> <cell>]...  (a Tasks cell judged by the Step-3 card's title cap and sentence rule; task-add's)
 #     bash card.sh release                 < facts      (the release approval card, from the facts its verb gathers)
 #     bash card.sh sitrep <sheet>          < judgment   (the sitrep card, from the sheet and the model's judgment)
 #     bash card.sh sitrep-check <sheet>    < card       (the sitrep card's check alone, over a card drawn elsewhere)
@@ -3666,7 +3666,7 @@ case "$1" in
     exit 0 ;;
   task-cell)
     # A TASKS CELL, JUDGED BY THE STEP-3 CARD'S OWN TITLE CAP AND SENTENCE RULE where a verb writes it
-    # (task-add, task-set): the refusal is the card's, word for word, every refused cell named in it, exit 1.
+    # (task-add): the refusal is the card's, word for word, every refused cell named in it, exit 1.
     [ "$#" -ge 3 ] && [ $(( ($# - 1) % 2 )) -eq 0 ] || _card_usage "task-cell takes <id> <cell> pairs (got $(( $# - 1 )) arguments)"
     shift
     CARD_TITLE_BAD=""

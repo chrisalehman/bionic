@@ -1662,16 +1662,17 @@ if [ "$FILL_SRC" = "GAP" ]; then
   # paragraph naming `min(free slots, ready rows)` of the rows. The user reads one line naming every
   # ready row the turn left (`_ST_NAMED`); the rule behind it lives in the dispatch doctrine ('The
   # FILL line is advice; the wall counts'). The model's copy adds the rows comma-joined in one
-  # dispatch line and the three forms that make a row wait, each a command it can complete:
-  # ID, RECORD, N and WORDS are upper-case words, never `<...>` a shell reads as a redirect.
+  # dispatch line and the three forms that make a row wait, two an edit of the plan's reads cell and one a command:
+  # ID, RECORD, N and WORDS are upper-case words, never `<...>` a shell reads as a redirect. An edit adds to what
+  # the cell reads, an empty cell being its kind's default, so the row keeps the reads that already hold it.
   # `FILL_REASON` is the same facts as one line, the form a duty paragraph takes when this refusal
   # rides beside a stand-down's.
   _fd_poker="$(refuse_shell_word "${HOOK_DIR}/session-poker.sh")"
   FILL_FORMS="dispatch ${FILL_MISSING// /,}, or make each wait by one of three forms:"
-  FILL_FORMS="${FILL_FORMS}"$'\n'"a dependency: bash ${_fd_poker} task-set ID reads+=RECORD (RECORD: the record of the open row it waits on)"
-  FILL_FORMS="${FILL_FORMS}"$'\n'"a read of a ruling: bash ${_fd_poker} task-set ID reads+=approval:DN (DN: the decision nobody has ruled)"
+  FILL_FORMS="${FILL_FORMS}"$'\n'"a dependency: edit ID's reads cell in the plan to add RECORD (RECORD: the record of the open row it waits on; an empty cell is its kind's default, written out first)"
+  FILL_FORMS="${FILL_FORMS}"$'\n'"a read of a ruling: edit ID's reads cell in the plan to add approval:DN (DN: the decision nobody has ruled)"
   FILL_FORMS="${FILL_FORMS}"$'\n'"an order: bash ${_fd_poker} order 'WORDS' (WORDS: what the user said)"
-  FILL_REASON="ready with room: ${FILL_MISSING}; dispatch them, or make each wait: a dependency (task-set ID reads+=RECORD), a read of a ruling (task-set ID reads+=approval:DN) or an order (order 'WORDS'), by bash ${_fd_poker}"
+  FILL_REASON="ready with room: ${FILL_MISSING}; dispatch them, or make each wait: a dependency (add RECORD to ID's reads cell in the plan), a read of a ruling (add approval:DN to it) or an order (bash ${_fd_poker} order 'WORDS')"
   # THE LINE HAS width.sh's 100 COLUMNS, and refuse.sh writes it `bionic: stop refused — <fact>
   # (<fix>)`: 23 columns before the fact and 30 after it with this fix, so the fact keeps to 44 and
   # the line to 97. Every id when they fit; else the ids that fit with "+N more" for the rest, which

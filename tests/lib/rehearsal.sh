@@ -85,8 +85,9 @@ fi
 # The kinds of hand write, each what a person, an agent or the harness writes in a real run (above).
 RH_HAND_KINDS="prose record code typed launch"
 # The verbs whose refusals the replay follows: a refusal of a verb that writes the plan's cells names the one of
-# these that writes the cell, and the replay calls it on that cell and then the refused call again.
-RH_FOLLOW_VERBS="deliver amend task-set step-field"
+# these that writes the cell, `edit` for the person's edit of a Tasks cell, and the replay makes it on that cell
+# and then runs the refused call again.
+RH_FOLLOW_VERBS="deliver amend edit step-field"
 
 # The run's three goals, as the plan's goals: line declares them: met, not met and not measured yet in every state.
 RH_GOALS="shown · the person says from the card what they owe (record/wave-x/goal-shown.md) ; asks · every ask on the register is on the card (record/wave-x/goal-asks.md) ; walked · the walk finds nothing to fix (record/wave-x/goal-walked.md)"
@@ -125,6 +126,9 @@ _rh_refused() {
   return 1
 }
 _rh_hand() { printf '# by hand: [%s] %s\n' "$1" "$2" >> "$RH_LOG"; }   # <kind> <what a person or an agent wrote>
+# _rh_cell <label> <row> <column>=<value>… -> the person's edit of a Tasks row's cells, judged by the table check the
+# write hook runs (lib/units.sh `units_cells_write`), as one logged act.
+_rh_cell() { local l="$1"; shift; _rh_do "$l" bash -c '. "$1/units.sh" 2>/dev/null && units_cells_write "${@:2}"' _ "$RH_ROOT/payload/scripts/lib" "$RH_PLAN" "$@"; }
 _rh_head() { git -C "$RH_ROOT" rev-parse --verify -q refs/heads/wave/x; }
 _rh_commit() { git -C "$1" add -A >/dev/null 2>&1 && git -C "$1" commit --quiet -m "$2"; }   # <tree> <message>
 
@@ -260,7 +264,7 @@ _rh_verify() {
 # matrix, Steps 5 to 7 with the regression, the five reviews and the release check, the release landed, the card
 _rh_release_card() {
   local h1 qs t2
-  _rh_poker "move the release row to step 7" task-set T2 step=7 --reason 'the release is the doc row at step 7' || return 1
+  _rh_cell "move the release row to step 7" T2 step=7 || return 1
   _rh_poker "add the regression row" task-add T3 5 test 'the regression. The whole suite runs once.' orchestrator — 10 REQ-1 — || return 1
   _rh_poker "add the integrate row" task-add T4 8 integrate 'merge into main. The run reaches main by its merge.' orchestrator — 10 REQ-1 — \
     'approval:release, approval:merge, head' || return 1
@@ -316,17 +320,18 @@ _rh_follow() {
   said="$DOOR_OUT"
   v="$(printf '%s\n' "$said" | /usr/bin/grep -oE 'session-poker\.sh [a-z][a-z-]*' | awk -v set=" $RH_FOLLOW_VERBS " \
     '{ w = $2; if (index(set, " " w " ")) { print w; exit } }')"
+  key="$(printf '%s\n' "$said" | /usr/bin/grep -oE "edit the [A-Za-z-]+ cell of $row in the plan" | head -1)"; key="${key#edit the }"; key="${key%% *}"
+  [ -z "$key" ] || v=edit
   printf '# refused: %s · names: %s\n' "$label" "${v:-none}" >> "$RH_LOG"
   case "$v" in
-    task-set)
-      key="$(printf '%s\n' "$said" | /usr/bin/grep -oE "task-set $row [A-Za-z-]+=" | head -1)"; key="${key##* }"; key="${key%=}"
+    edit)
       case "$key" in
         Files) val=".bionic/docs/$rec" ;;
         artifact) val="$rec" ;;
-        *) printf 'rehearse %s: %s refused naming task-set %s %s=, a cell the replay holds no value for\n' "$RH_STATE" "$label" "$row" "${key:-<none>}" >&2
+        *) printf 'rehearse %s: %s refused naming an edit of %s %s, a cell the replay holds no value for\n' "$RH_STATE" "$label" "$row" "${key:-<none>}" >&2
            return 1 ;;
       esac
-      _rh_poker "follow: task-set $row $key" task-set "$row" "$key=$val" --reason "the cell the refusal named" || return 1 ;;
+      _rh_cell "follow: edit $row $key" "$row" "$key=$val" || return 1 ;;
     *)
       printf 'rehearse %s: %s refused naming %s, no verb that writes the cell:\n' "$RH_STATE" "$label" "${v:-none of $RH_FOLLOW_VERBS}" >&2
       printf '%s\n' "$said" | sed 's/^/  | /' >&2
@@ -468,8 +473,7 @@ EOF
       _rh_verify || return 1 ;;
     stop-rule)
       _rh_build || return 1
-      _rh_poker "the release row reads D1" task-set T2 reads+=approval:D1 --reason 'the release waits on the stop-rule decision' \
-        || return 1
+      _rh_cell "the release row reads D1" T2 'reads=approval:plan, head, approval:D1' || return 1
       _rh_poker "put D1" decisions put D1 'stop the run: the release row waits until the user rules on going on' || return 1 ;;
     release-waiting)
       _rh_release_card || return 1 ;;

@@ -15,7 +15,7 @@
 #                  matrix-render, before their blocks; an empty table renders whole; an unknown type is refused.
 #
 # FIXTURE FIDELITY: the repository is door_world's, a real `git init` with the check's closure, the real changelog and a
-# plan whose Step-3 state the library authors. Every later change to the plan is a verb's: task-set, task-add,
+# plan whose Step-3 state the library authors. Every later change to the plan is a verb's or a judged cell edit's: task-add,
 # matrix-render, matrix-set, discharge, step-line, step-field, current, proof-add and the hand door's row line. This
 # file never writes the plan, save §GROW's Eval design rows, which no verb writes. What it writes are the records the
 # run's actors write: a one-row suite in the build row's commit, the matrix row's evidence, the walk and audit records,
@@ -94,7 +94,8 @@ dc_reading() {
 section "§CLOSE: the verbs carry the fixture to the end state, and the card renders on it"
 # ============================================================
 DC_T0="$SECONDS"
-dc_verb "(c1) task-set moves the release row to step 7" task-set T2 step=7 --reason 'the release is the doc row at step 7'
+door_run "$DC" bash -c '. "$1/units.sh" 2>/dev/null && units_cells_write "$2" T2 step=7' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$DC_PLAN"
+expect_eq "(c1) the person's edit moves the release row to step 7, judged by the table check" "0" "$DOOR_RC"
 dc_verb "(c2) task-add adds the regression row at step 5" task-add T3 5 test 'the regression. The whole suite runs once.' orchestrator — 10 REQ-1 —
 dc_verb "(c3) task-add adds the integrate row that reads both approvals" \
   task-add T4 8 integrate 'merge into main. The run reaches main by its merge.' orchestrator — 10 REQ-1 — 'approval:release, approval:merge, head'

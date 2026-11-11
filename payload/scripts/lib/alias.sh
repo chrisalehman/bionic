@@ -22,7 +22,7 @@
 #                 verb          floor-run      -> regression-run      hooks/session-poker.sh, after `VERB="$1"`
 #                 proof-kind    floor          -> regression          hooks/session-poker.sh, after `PF_KIND="$1"`
 #                 born-operand  floor:         -> regression:         hooks/session-poker.sh task-add --born
-#                 reads         proof:floor    -> proof:regression    a reads cell TYPED to task-add or task-set reads=
+#                 reads         proof:floor    -> proof:regression    a reads cell TYPED to task-add
 #                 config        floor          -> regression-command  .bionic/config.yaml, read by regression-run
 #                 log           floor-run-     -> regression-run-     the whole-run log's name, the second-run glob
 #                 rigor-key     rigor-floor    -> rigor-minimum       hooks/canonical-sdlc-governing-skill.sh, twice

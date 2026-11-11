@@ -273,7 +273,8 @@ R37D="$(make_repo s37-task-add)"; ( cd "$R37D" && git commit -q --allow-empty -m
 P37D="$(s34_plan "$R37D" 5)"
 poke "$R37D" task-add T7 7 doc 'Keep C:\new\table, a\|b, $5. The release keeps its text as typed.' bionic:implementor 'T5' 30 REQ-5 '—'
 expect_eq "37d task-add of a Step-7 doc row at current: 5 is accepted (exit 0)" "0" "$RC"
-expect_contains "37f …with its - T7: line" "- T7: pending dispatch — added by task-add" "$(cat "$P37D")"
+expect_eq "37f …with its - T7: line, and its birth one born event in the run's log" "- T7: pending dispatch|1" \
+  "$(/usr/bin/grep '^- T7: ' "$P37D")|$(/usr/bin/grep -c '|ev=born|row=T7|' "${P37D%/plans/*}/record/$(basename "$P37D" .plan.md)/run.log")"
 POKE_BOUND="$S37_BOUND_WAS"
 
 
