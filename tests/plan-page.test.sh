@@ -145,6 +145,14 @@ for q in evidence adversarial structure; do
 done
 gate
 expect_status "the same commit with a review event of each question is admitted" 0 "$GATE_EXIT"
+# At 14 too the step and the plan's approval are the run's facts: a step the log alone holds past current: is judged.
+printf 'run/v1|ev=step|n=7|by=f|at=2026-11-01T00:00:03Z\n' >> "$GL"; gate
+expect_eq "a step 7 the log holds past current: 6 is the step judged, refused for its line" "2|has no 'Step 7:' line" "$GATE_EXIT|$(printf '%s' "$GATE_SAID" | /usr/bin/grep -o "has no 'Step 7:' line" | head -1)"
+printf 'run/v1|ev=step|n=6|by=f|at=2026-11-01T00:00:04Z\n' >> "$GL"; GP="$R/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md"
+sed -i.bak '/^approved-by:/d' "$GP"; gate
+expect_eq "taken back to 6 with no approval anywhere, refused for the approval" "2|approved-by" "$GATE_EXIT|$(printf '%s' "$GATE_SAID" | /usr/bin/grep -o 'approved-by' | head -1)"
+printf 'run/v1|ev=approval|key=step3|by=f|said=approved|at=2026-11-01T00:00:05Z\n' >> "$GL"; gate
+expect_status "an approval the log alone holds admits the same commit" 0 "$GATE_EXIT"
 
 # The same run at 15, made by the act from a version-14 plan: judged on what its log holds, and refused naming what it lacks.
 P2="$R/.bionic/docs/plans/epic-01-demo/wave-02-y.plan.md"; L2="$R/.bionic/docs/record/wave-02-y/run.log"; mkdir -p "$R/.bionic/docs/specs"; : > "$R/.bionic/docs/specs/r.md"
