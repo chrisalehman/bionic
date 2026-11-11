@@ -667,7 +667,7 @@ cw_waive_row "$RCW"
 expect_eq "AK-8 precondition: waive-row records the person's waiver (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "AK-8 AC-4.1 …and closes the item the matrix ask opened" "|key=waive-row:AC-1|state=closed|by=waive-row|" \
-  "$(cat "$RCW/.bionic/tmp/owed-$SID.state" 2>/dev/null)"
+  "$(nt_owed "$RCW" owed_lines)"
 expect_eq "AK-8a …and no other: the question's and the other row's stay open" "waive-row:AC-2,waive:structure" "$(cw_open "$RCW")"
 
 # WAIVING A QUESTION SETTLES ITS FINDINGS (AC-4.2). `disposition` opens `finding:<record>#<n>` for each finding that
