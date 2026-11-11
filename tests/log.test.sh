@@ -5,7 +5,8 @@
 # file RUN_LOG names, and refuses (exit 2, file unchanged) what would break the shape or the list.
 #
 #   §SHAPE   a line matches the shape and reads back by field name; no type, a bare word, a `|` in a
-#            value and a caller's own `at=` are refused.
+#            value and a caller's own `at=` are refused; LOG_AT stamps the line when in the shape, is refused
+#            when not, and only lib/owed.sh sets it.
 #   §TYPES   `matrix-set` and a retired word are refused; each of the 29 listed types is accepted.
 #
 # FIXTURE FIDELITY. The log is a real file in a scratch directory; only its path is synthesized.
@@ -32,6 +33,11 @@ refused "no event type"
 refused "a bare word" step n
 refused "a value with a bar" step "why=a|b"
 refused "a key that sets at" step at=1
+LOG_AT=2026-10-06T11:48:01Z log_append ask key=a:b
+expect_eq "a caller's instant in the log's shape stamps the line" "2026-10-06T11:48:01Z" "$(line_value "$(tail -n 1 "$RUN_LOG")" at)"
+LOG_AT=2026-10-06T11:48Z refused "a caller's instant off the log's shape" ask key=a:b
+expect_eq "no file but the asks library hands the appender an instant" "payload/scripts/lib/owed.sh" \
+  "$(cd "$BIONIC_SCRIPTS_DIR" && /usr/bin/grep -rl 'LOG_AT=' payload hooks | LC_ALL=C sort | paste -sd' ' -)"
 
 section "TYPES"
 refused "ev=matrix-set" matrix-set row=T1

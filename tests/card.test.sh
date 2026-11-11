@@ -2380,10 +2380,10 @@ st_req()  { printf '%s/.bionic/docs/specs/epic-99-fixture/%s.requirements.md' "$
 # st_render <cwd> <verb> <artifact> -> ST_RC; the renderer runs as the session, from <cwd>
 ST_RC=0
 st_render() { ST_RC=0; ( cd "$1" && CLAUDE_CODE_SESSION_ID="$ST_SID" bash "$CARD_SH" "$2" "$3" >"${CARD_SANDBOX}/.st-out" 2>&1 0<&- ) || ST_RC=$?; }
-# st_open <root> -> the keys of the asks the run's register holds open, one line
+# st_open <root> -> the keys of the asks the run holds open, read through the asks library's list, one line
 st_open() {
-  awk -F'|' '{ k = ""; s = ""; for (i = 1; i <= NF; i++) { if ($i ~ /^key=/) k = substr($i, 5); if ($i ~ /^state=/) s = substr($i, 7) } if (s == "open") print k }' \
-    "$1/.bionic/docs/record/$ST_STEM/asks.state" 2>/dev/null | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'
+  bash -c '. "$1/roots.sh" && . "$1/owed.sh" && owed_list_plan "$2" "$3"' _ "${CARD_SH%/*}/lib" "$(st_plan "$1")" "$1" 2>/dev/null \
+    | cut -f1 | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'
 }
 
 ST_A="$(st_root a 3 0)"; st_bind "$ST_A"; st_commit "$ST_A"
@@ -2418,7 +2418,7 @@ expect_eq "SETTLED-5 precondition: the writer's tree holds its marker and the ot
 st_render "${CARD_SANDBOX}/st-f-other" step3 "$(st_plan "$ST_F")"
 expect_eq "SETTLED-5b a linked tree with no marker renders the orchestrator's plan and opens approve:step3 (the differential control)" \
   "0|approve:step3" "$ST_RC|$(st_open "$ST_F")"
-rm -f "$ST_F/.bionic/docs/record/$ST_STEM/asks.state"
+rm -f "$ST_F/.bionic/docs/record/$ST_STEM/asks.state" "$ST_F/.bionic/docs/record/$ST_STEM/run.log"
 st_render "${CARD_SANDBOX}/st-f-writer" step3 "$(st_plan "$ST_F")"
 expect_eq "SETTLED-5c the same render from the writer's tree (bionic-agent in its git directory) opens nothing" "0|" "$ST_RC|$(st_open "$ST_F")"
 ST_RC=0; ( cd "$ST_F" && CLAUDE_CODE_SESSION_ID="$ST_SID" bash "$CARD_SH" step3 "$(st_plan "$ST_F")" >/dev/null 2>&1 0<&- ) || ST_RC=$?
