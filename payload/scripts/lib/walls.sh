@@ -1668,9 +1668,22 @@ matrix_auditor_required() {
 # the judge and the cards cannot answer one criterion two ways. 2 when the run's facts could not be read: a run
 # read as holding no fact would read every criterion pending, and a pending criterion is relaxed.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+# A criterion's verdict, where the reader takes the evidence review's, is the newest evidence review's when it passed
+# and the judge reads the evidence question covered from its head to the working head (lib/proof.sh `facts_cover`, the
+# judge's own walk, over the fold this shell already holds): one fact, one judge, so a release landed after the review
+# leaves the verdict standing and code past it ends it. Otherwise the reader answers at the working head. A caller that
+# names no head asks for no review. A dry copy's facts are its plan's run's; its text is its own.
 matrix_load() {  # <plan> [head]
-  local rc=0
-  MATRIX_CELLS="$(_proof_ask "$1" reader_cells "$1" "${2:-}")" || rc=$?
+  local rc=0 rp h="${2:-}" rv lh
+  rp="$(proof_run_plan "$1")"
+  if [ -n "$h" ]; then
+    rv="$(_proof_ask "$rp" reader_q_reviews "$rp")" || return 2
+    lh="$(printf '%s\n' "$rv" | awk -F'|' '{ q = ""; x = ""; r = ""
+        for (i = 2; i <= NF; i++) { if ($i ~ /^question=/) q = substr($i, 10); if ($i ~ /^head=/) x = substr($i, 6); if ($i ~ /^result=/) r = substr($i, 8) }
+        if (q == "evidence") last = (r == "pass") ? x : "" } END { print last }')"
+    if [ -n "$lh" ] && { [ "$lh" = "$h" ] || facts_cover "$rp" "$lh" "$h" evidence >/dev/null 2>&1; }; then h="$lh"; fi
+  fi
+  MATRIX_CELLS="$(_proof_ask "$rp" reader_cells "$1" "$h")" || rc=$?
   case "$rc" in 0) ;; 1) MATRIX_CELLS="" ;; *) return 2 ;; esac
   MATRIX_BLOCKS="$(plan_read_blocks "$1" 2>/dev/null)" || MATRIX_BLOCKS=""
   return 0
@@ -4179,6 +4192,14 @@ MATRIX_STATUS
     # it, so the per-tier keys below are asked of those two facts, written as the keys they stand for.
     if [ "$v15" = 1 ]; then
       block_txt="$( [ -z "$ev" ] || printf '  evidence: %s\n' "$ev"; [ -z "$ucv" ] || printf '  user-confirmed: %s\n' "$ucv")"
+    # AN OLDER PLAN'S BLOCK THAT NAMES NO EVIDENCE takes the evidence of a proof the run's log holds for the criterion,
+    # which names it there and writes no key: an evidence the table's own cell does not hold. A row the text alone
+    # discharges is judged on its text, as it always was.
+    elif [ -n "$ev" ] && ! grep -qE '^[[:space:]]*evidence[[:space:]]*:' <<< "$block_txt" \
+      && [ "$ev" != "$(printf '%s\n' "$table" | awk -F'\t' -v a="$ac" '{ c = ""; e = ""
+           for (i = 1; i <= NF; i++) { if (index($i, "ac=") == 1) c = substr($i, 4); if (index($i, "evidence=") == 1) e = substr($i, 10) }
+           if (c == a) { print e; exit } }')" ]; then
+      block_txt="${block_txt:+$block_txt$'\n'}  evidence: $ev"
     fi
     # provenance arm (epic-14 W1, AC-5): the literal value `provenance:
     # implementation` in an AC block is circular — it names the change as the

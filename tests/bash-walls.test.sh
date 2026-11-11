@@ -647,6 +647,27 @@ expect_eq "RULED-2b: the advance writes current: 8" "0|8" \
   "$RU_RC|$(awk -F': *' '/^current:/ { print $2; exit }' "$R_RU/.bionic/docs/plans/active.md")"
 expect_eq "RULED-2c: …and the row:AC-2 item RULED-1e read open is closed" "" "$(ru_owed)"
 
+# §STANDING — a row a logged proof discharges takes its verdict from the newest passing evidence review for as long as
+# the judge reads the evidence question covered at the working head: past a prose commit it stands and a commit is
+# admitted, past code it is gone and the commit refused by name, and a failing review after the passing one ends it.
+# The commit is judged on the plan itself, whose name, not a copy's, joins the run's log.
+ru_put 6 'T1 | pending | — |  '; RU_P="$R_RU/.bionic/docs/plans/active.md"
+RU_LOG="$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "$RU_LIB" "$RU_P")"; mkdir -p "${RU_LOG%/*}"
+printf 'run/v1|ev=proof|ac=AC-2|evidence=record/generic-evidence.md|at=2026-10-12T12:30:00Z\n' >> "$RU_LOG"
+ru_verdict() { bash -c '. "$1/units.sh" && . "$1/walls.sh" && PLAN="$2" && matrix_load "$2" "$3" && awk -F"\037" "\$1 == \"AC-2\" { print \$6 }" <<< "$MATRIX_CELLS"' \
+  _ "$RU_LIB" "$RU_P" "$(git -C "$R_RU" rev-parse HEAD)" 2>/dev/null; }
+ru_commit() { run_hook "$(mk_payload "$R_RU" 'git commit -m x')"; }
+printf 'more prose\n' >> "$R_RU/README.md"; git -C "$R_RU" commit -qam prose; ru_commit
+expect_eq "STANDING-1: past the review's head a prose commit the judge covers keeps the verdict, and a commit is admitted" "CONFIRMED|0" "$(ru_verdict)|$ST"
+[ "$ST" = 0 ] || printf '      the gate said: %s\n' "$ERR" | head -3
+printf 'x\n' > "$R_RU/lib.sh"; git -C "$R_RU" add lib.sh; git -C "$R_RU" commit -qm code; ru_commit
+expect_eq "STANDING-2: …a code commit it does not cover ends it: no verdict, the commit refused" "|2" "$(ru_verdict)|$ST"
+expect_contains "STANDING-2b: …naming the row" "the auditor has not confirmed AC-2" "$ERR"
+printf 'run/v1|ev=proof|kind=review|head=%s|evidence=record/r/evidence-2.md|question=evidence|reader=w-read|result=fail|scope=piece|at=2026-10-12T13:00:00Z\n' "$H_RU" >> "$RU_LOG"
+git -C "$R_RU" reset -q --hard "$H_RU"
+expect_eq "STANDING-3: a failing review after the passing one at the same head: the passing one no longer stands" "REFUTED" "$(ru_verdict)"
+sed -i.bak -e '/|ac=AC-2|evidence=record\/generic-evidence\.md|/d' -e '/|evidence=record\/r\/evidence-2\.md|/d' "$RU_LOG"; rm -f "$RU_LOG.bak"
+
 # §RULED-ONE — one body: the predicate is defined once, and no file outside walls.sh and the reader's own parses the
 # user's confirmation: the reader reads it from an older plan's block and translates it onto the criterion's event.
 RU_WALLS="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/walls.sh"
