@@ -210,7 +210,7 @@ expect_eq "(cause1-pre) T2's red fails at the head too: published (exit 0), its 
 expect_eq "(cause1-pre) the candidate's tree is T2's, where the door run was green" \
   "$(git -C "$RC1" rev-parse "$TC1^{tree}")" "$(git -C "$RC1" rev-parse "$KC1^{tree}")"
 expect_regex "(cause1) the standing event names its cause, environment, and the run that disagrees: the door run's stamp" \
-  "^line/v1\\|ev=standing\\|head=${HC1}\\|suite=a.test.sh\\|lines=1\\|log=${LC1}\\|cause=environment\\|against=stamp:${TC1}@2020-01-01T00:00:00Z\\|at=[0-9T:-]+Z$" \
+  "^run/v1\\|ev=standing\\|head=${HC1}\\|suite=a.test.sh\\|lines=1\\|log=${LC1}\\|cause=environment\\|against=stamp:${TC1}@2020-01-01T00:00:00Z\\|at=[0-9T:-]+Z$" \
   "$(ll_ev "$RC1" standing)"
 expect_contains "(cause2) ready reports the environment red as a defect, with the run that disagrees and the head's log" \
   "STANDING T2 a.test.sh cause=environment against=stamp:${TC1}@2020-01-01T00:00:00Z log=${LC1}" "$LL_OUT"
@@ -222,7 +222,7 @@ KC2="$(ll_last_cand "$RC2" T2)"; LC2="$RC2/.bionic/docs/record/wave-x/line/T2-a-
 expect_eq "(cause4-pre) with no run disagreeing, T2's red is standing all the same: published, its verdict red" "0 $KC2 red" \
   "$LL_RC $(ll_head "$RC2") $(ll_results "$RC2" T2 "$KC2")"
 expect_regex "(cause4) …and its standing event names its cause, code, and no run disagreeing" \
-  "^line/v1\\|ev=standing\\|head=${HC2}\\|suite=a.test.sh\\|lines=1\\|log=${LC2}\\|cause=code\\|against=-\\|at=[0-9T:-]+Z$" \
+  "^run/v1\\|ev=standing\\|head=${HC2}\\|suite=a.test.sh\\|lines=1\\|log=${LC2}\\|cause=code\\|against=-\\|at=[0-9T:-]+Z$" \
   "$(ll_ev "$RC2" standing)"
 expect_contains "(cause5-pre) ready printed its landing" "LANDED T2 $KC2" "$LL_OUT"
 expect_absent "(cause5) …and no STANDING report: a code red is the branch's own, as before" "STANDING " "$LL_OUT"
@@ -235,7 +235,7 @@ ll_stamp "$RC3/.worktrees/T2" "$TC3" a.test.sh 0 2020-01-01T00:00:00Z
 ll_verb "$RC3" T2
 KC3="$(ll_last_cand "$RC3" T2)"
 expect_contains "(cause7-pre) the landing wrote an environment-class standing event" "cause=environment" "$(ll_ev "$RC3" standing)"
-sed 's/|cause=environment|against=[^|]*|/|/' "$(ll_rec "$RC3")" > "$(ll_rec "$RC3").n" && mv "$(ll_rec "$RC3").n" "$(ll_rec "$RC3")"
+sed 's/|cause=environment|against=[^|]*|/|/' "$(ll_log "$RC3")" > "$(ll_log "$RC3").n" && mv "$(ll_log "$RC3").n" "$(ll_log "$RC3")"
 expect_eq "(cause7) a standing event with no cause is counted: the red stays in the records the floor judge weighs, the door run's green beside it" \
   "1 1" "$(ll_runs "$RC3" a.test.sh "$KC3" "$TC3")"
 
@@ -529,10 +529,10 @@ ll_grammar_read() {  # <record> -> every positional reader's answer, one line
 }
 ll_grammar_put "$PGR"
 expect_regex "(g1) the writer puts admitted=, width=, then promised= and actual= after log=, and at= last (wave-39 T8; AC-4.2)" \
-  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KGR}\\|suite=b\\.test\\.sh\\|result=red\\|log=/logs/b\\.log\\|admitted=1000\\|width=2\\|promised=300\\|actual=280\\|at=[0-9T:-]+Z$" \
+  "^run/v1\\|ev=verdict\\|row=T1\\|commit=${KGR}\\|suite=b\\.test\\.sh\\|result=red\\|log=/logs/b\\.log\\|admitted=1000\\|width=2\\|promised=300\\|actual=280\\|at=[0-9T:-]+Z$" \
   "$(ll_ev "$RGR" verdict)"
 expect_regex "(g1b) …and a verdict given no admission carries admitted=-, promised=- and actual=-" \
-  "^line/v1\\|ev=verdict\\|row=T1\\|commit=${KGR}\\|suite=c\\.test\\.sh\\|result=none\\|log=/logs/c\\.log\\|admitted=-\\|width=2\\|promised=-\\|actual=-\\|at=[0-9T:-]+Z$" \
+  "^run/v1\\|ev=verdict\\|row=T1\\|commit=${KGR}\\|suite=c\\.test\\.sh\\|result=none\\|log=/logs/c\\.log\\|admitted=-\\|width=2\\|promised=-\\|actual=-\\|at=[0-9T:-]+Z$" \
   "$(ll_ev "$RGR" verdict)"
 expect_eq "(g2) every reader reads it: green proved, the red's log, the none's log, the head's verdict, the declared debt" \
   "proved|/logs/b.log|/logs/c.log|red /logs/b.log|b.test.sh" "$(ll_grammar_read "$RECGR")"
@@ -806,7 +806,7 @@ ll_lease_order() {  # <root> -> T1 and T2 in the gate's order: by first, then se
   printf 'T1 %s %s\nT2 %s %s\n' "$(ll_lease_field "$k1" first)" "$(ll_lease_field "$k1" seq)" "$(ll_lease_field "$k2" first)" "$(ll_lease_field "$k2" seq)" \
     | sort -k2,2n -k3,3n | awk 'NF == 3 { o = o (o == "" ? "" : " ") $1 } END { print o }'
 }
-ll_has_ready() { ll_ev "$1" ready | grep -q "|row=$2|"; }   # <root> <row> -> 0 once the row's ready event is on the record
+ll_has_ready() { [ -n "$(ll_ev "$1" ready | grep "|row=$2|")" ]; }   # <root> <row> -> 0 once the row's ready event is on the record
 ll_both_carried() { local p; p="$(ll_plan "$1")"; ll_lease_carried "$(_line_landing_key "$1" "$p" T1)" && ll_lease_carried "$(_line_landing_key "$1" "$p" T2)" && ll_has_ready "$1" T1 && ll_has_ready "$1" T2; }   # <root> -> 0 once both hold a lease and both entries are recorded
 export BIONIC_GATE_DIR="$WORLD_ROOT/gate-order"
 RO="$(ll_order_world o1)"
@@ -945,8 +945,7 @@ expect_contains "(ss1) B's finding, the born finding's line moved down two at B'
 expect_eq "(ss1b) …its move is the landing's event in the run's log, naming the landing's commit" \
   "run/v1|ev=finding|ref=record/wave-x/recB.md#1|to=fixed|row=T1|by=landing|landing=$ST_C" \
   "$(/usr/bin/grep -F '|ref=record/wave-x/recB.md#1|to=fixed|' "$STL" | sed 's/|at=.*//')"
-expect_contains "(ss1c) …and the landing record names it settled by T1 at that commit" "|row=T1|commit=${ST_C}|" \
-  "$(ll_ev "$ST" settled | /usr/bin/grep 'findings=[^|]*record/wave-x/recB.md#1')"
+expect_eq "(ss1c) …and no settled line is written beside it" "0" "$(ll_ev "$ST" settled | grep -c .)"
 expect_eq "(ss2) …its ask is closed by the landing" "closed|landing T1" "$(ll_ask "$ST" record/wave-x/recB.md#1)"
 expect_absent "(ss3) C's finding, at a line the born finding's head did not have, is not settled" "recC.md#1" "$(ll_fixed "$ST")"
 expect_eq "(ss3b) …and its ask stays open" "open" "$(ll_ask "$ST" record/wave-x/recC.md#1 | cut -d'|' -f1)"
@@ -964,19 +963,17 @@ expect_eq "(ca2) a carry of C to T1, already landed, exits 0" "0" "$ST_CMRC"
 expect_eq "(ca2b) …and its ask closes at once" "closed" "$(ll_ask "$ST" record/wave-x/recC.md#1 | cut -d'|' -f1)"
 expect_contains "(ca2c) …and C reads fixed by T1" "recC.md#1 T1 moved" "$(ll_fixed "$ST")"
 
-section "§CELL: the landing that writes a criterion's evidence writes the table's status discharged in the same act (AC-5.1)"
-# fails-when: a row whose block carries a green log still reads pending in the table, or a settled cell takes a matrix-set.
+section "§CELL: the landing that writes a criterion's evidence marks no status: no suite a landing ran discharges a cell"
+# fails-when: the landing's evidence is not written, or a landing writes the table's status, or a cell it left takes no matrix-set.
 ll_cell() { awk -F'|' -v a="$2" '$2 ~ "^ *" a " *$" { s = $4; gsub(/^ +| +$/, "", s); print s }' "$1"; }   # <plan> <AC> -> its status cell
 ll_block_ev() { awk -v a="$2:" 'index($0, a) == 1 { b = 1; next } b && /^[^ \t]/ { b = 0 } b && /^[ \t]+evidence:/ { sub(/^[ \t]+evidence:[ \t]*/, ""); print; exit }' "$1"; }   # <plan> <AC>
 expect_contains "(ce1) AC-1.1's block evidence is the landing's log for a.test.sh" "record/wave-x/line/T1-a" "$(ll_block_ev "$STP" AC-1.1)"
-expect_eq "(ce1b) …and its table status reads discharged, from the landing alone" "discharged" "$(ll_cell "$STP" AC-1.1)"
+expect_eq "(ce1b) …and its table status still reads pending: the landing marks no cell" "pending" "$(ll_cell "$STP" AC-1.1)"
 expect_eq "(ce2) AC-1.2, waived, keeps its waived status: a landing never overwrites a waiver" "waived" "$(ll_cell "$STP" AC-1.2)"
-expect_contains "(ce2b) …the landing record names AC-1.1 settled and not AC-1.2" "cells=AC-1.1|" "$(ll_ev "$ST" settled)"
-ST_P0="$(cat "$STP")"
-ST_MS="$(ll_poker "$ST" matrix-set AC-1.1 status=pending)"; ST_MSRC=$?
-expect_eq "(ce3) matrix-set on the status cell the landing settled is refused (exit 1), the plan unchanged" "1|same" \
-  "$ST_MSRC|$([ "$ST_P0" = "$(cat "$STP")" ] && echo same)"
-expect_contains "(ce3b) …naming the landing" "settled by the landing of T1 at ${ST_C}" "$ST_MS"
+expect_eq "(ce2b) …and the record names no cell settled" "0" "$(ll_ev "$ST" settled | grep -c .)"
+ST_MS="$(ll_poker "$ST" matrix-set AC-1.1 status=discharged)"; ST_MSRC=$?
+expect_eq "(ce3) matrix-set on the cell the landing left writes it (exit 0): the status is a person's to set" "0|discharged" \
+  "$ST_MSRC|$(ll_cell "$STP" AC-1.1)"
 ST_MW="$(ll_poker "$ST" matrix-set AC-1.2 task=T1)"; ST_MWRC=$?
 expect_eq "(ce4) matrix-set on a row no landing settled still writes (exit 0)" "0" "$ST_MWRC"
 
@@ -1033,7 +1030,7 @@ SR4="$(ll_world)"; mkdir -p "$(dirname "$(ll_rec "$SR4")")"
 sr_proofs "$SR4" a b
 expect_eq "(sr4) …and the same two proofs of runs the tick started: second-regressions=0" "0" "$(sr_second "$SR4")"
 
-section "§RETIER: a retier is the run's own act: its ev=matrix-retier line moves no hand-holds field, while a waiver: line still adds one (REQ-3 AC-3.3)"
+section "§RETIER: a retier is the run's own act: its hand act of kind matrix-retier moves no hand-holds field, while a waiver: line still adds one (REQ-3 AC-3.3)"
 # `matrix-retier` raises a tier, which strengthens the check: the orchestrator's act and no hand-hold, so the fold reads its line as
 # nothing; a waiver: line in a block (weakening, a person's) still counts. FIXTURE FIDELITY: the world's plan with an Eval design
 # and an empty matrix table, matrix-render and matrix-retier writing their own lines, the waiver: line planted as landing-line-1 §WINDOW does.
@@ -1050,8 +1047,8 @@ expect_eq "(rl0) precondition: matrix-render exits 0 and the report prints its c
   "$RL_MRRC|$RL_H0"
 [ "$RL_MRRC" = 0 ] || printf '      render: %s\n' "$RL_MR"
 RL_RT="$(ll_poker "$RL" matrix-retier AC-1.1 tier=T2 'eval=`tests/b.test.sh` drives the hermetic run')"; RL_RTRC=$?
-expect_eq "(rl1) precondition: matrix-retier exits 0 and the record holds its one ev=matrix-retier line" "0|1" \
-  "$RL_RTRC|$(ll_ev "$RL" matrix-retier | /usr/bin/grep -c '|ac=AC-1.1|from=T1|to=T2|' | tr -d ' ')"
+expect_eq "(rl1) precondition: matrix-retier exits 0 and the log holds its one hand act of that kind" "0|1" \
+  "$RL_RTRC|$(ll_ev "$RL" hand | /usr/bin/grep -c '|what=matrix-retier|ac=AC-1.1|from=T1|to=T2|' | tr -d ' ')"
 [ "$RL_RTRC" = 0 ] || printf '      retier: %s\n' "$RL_RT"
 expect_eq "(rl2) the retier line moves no field: the counts line reads as before it" "$RL_H0" "$(sr_report "$RL")"
 # waive-row writes the block's waiver: line and the row's status waived in one act, so the fixture writes both.
@@ -1090,7 +1087,7 @@ touch "$LL_SIG/o-T1.go"; ll_wait_file "$WORLD_ROOT/o1.out.rc" 300; ll_wait_file 
 O2C="$(ll_field "$(ll_ev "$RO" ready | /usr/bin/grep '|row=T2|')" carrier)"
 expect_eq "(oh1) T2 lands, started again once by its own carrier, and no command is missing" "0 1 0" \
   "$(cat "$WORLD_ROOT/o2.out.rc") $(/usr/bin/grep -c "^restart: .* carrier=${O2C%%:*} " "$WORLD_ROOT/o2.out") $(/usr/bin/grep -c 'command not found' "$WORLD_ROOT/o2.out")"
-expect_eq "(oh2) …each of its events written once" "ready candidate verdict published" "$(/usr/bin/grep '|row=T2|' "$(ll_rec "$RO")" | cut -d'|' -f2 | sed 's/^ev=//' | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "(oh2) …each of its events written once" "ready candidate verdict published" "$(ll_all "$RO" | /usr/bin/grep '|row=T2|' | cut -d'|' -f2 | sed 's/^ev=//' | tr '\n' ' ' | sed 's/ $//')"
 expect_eq "(oh3) T1, whose head never moved under it, lands and never starts again" "0 0" "$(cat "$WORLD_ROOT/o1.out.rc") $(/usr/bin/grep -c '^restart' "$WORLD_ROOT/o1.out")"
 
 # ---------------------------------------------------------------------------

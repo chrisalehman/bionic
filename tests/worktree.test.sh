@@ -915,22 +915,23 @@ approved-by: fixture 2026-10-04T00:00Z "approved"
 | T1 | 4 | build | row one | bh-T1 | — | | 10 | REQ-1 | bh-T1.txt | .worktrees/bh-T1 | | active |
 BHPLAN
 printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$BHP" > "$BH/.bionic/tmp/engaged-${BHSID}.state"
-BHREC="$BH/.bionic/docs/record/wave-x/landing-proofs.log"
+BHREC="$BH/.bionic/docs/record/wave-x/landing-proofs.log"; BHLOG="${BHREC%/*}/run.log"
+bh_all() { cat "$BHREC" "$BHLOG" 2>/dev/null; }   # the record's lines, then the log's
 BH_REFS0="$(refs_of "$BH")"
 bh_land() { ( cd "$BH" && CLAUDE_CODE_SESSION_ID="$BHSID" bash "$SPAWN" land "$@" 2>&1 ); }
 OUTBH0="$(bh_land "$BHT" --by-hand)"; RCBH0=$?
 expect_eq    "(h1) a hand landing with no --reason is refused (exit 2)" "2" "$RCBH0"
 expect_match "(h1) …naming why" "spawn-worktree: REFUSED reason=no-reason *" "$OUTBH0"
-expect_false "(h1) …and nothing is recorded" test -e "$BHREC"
+expect_false "(h1) …and nothing is recorded" test -e "$BHLOG"
 OUTBHB="$(bh_land "$BHT")"; RCBHB=$?
 expect_ne    "(h2) a bare land exits non-zero" "0" "$RCBHB"
 expect_eq    "(h2) …and no ref moved" "$BH_REFS0" "$(refs_of "$BH")"
 OUTBH="$(bh_land "$BHT" --by-hand --reason "the person's why")"; RCBH=$?
 expect_eq    "(h3) a hand landing with a reason exits 0" "0" "$RCBH"
-expect_match "(h3) …on land's own LANDED line" "*spawn-worktree: LANDED branch=wt/bh-T1 onto=wave/fixture checkout=${BH} merge=* removed=${BHT} proofs=${BHREC}*" "$OUTBH"
-BH_PUB="$(grep '^line/v1|ev=published|' "$BHREC" 2>/dev/null)"
-expect_regex "(h4) the record's published line carries the user, the time and the reason" \
-  "^line/v1\\|ev=published\\|row=T1\\|commit=$(git -C "$BH" rev-parse wave/fixture)\\|kind=hand\\|by=Hand Lander\\|why=the person's why\\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" "$BH_PUB"
+expect_match "(h3) …on land's own LANDED line" "*spawn-worktree: LANDED branch=wt/bh-T1 onto=wave/fixture checkout=${BH} merge=* removed=${BHT} proofs=${BHLOG}*" "$OUTBH"
+BH_PUB="$(grep '^run/v1|ev=published|' "$BHLOG" 2>/dev/null)"
+expect_regex "(h4) the log's published line carries the user, the time and the reason" \
+  "^run/v1\\|ev=published\\|row=T1\\|commit=$(git -C "$BH" rev-parse wave/fixture)\\|kind=hand\\|by=Hand Lander\\|why=the person's why\\|branch=wt/bh-T1\\|head=[0-9a-f]{40}\\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" "$BH_PUB"
 BH_AT="${BH_PUB##*|at=}"
 expect_eq    "(h5) the row's - T1: line gains who, when and why" \
   "- T1: active landed-by-hand: Hand Lander ${BH_AT} \"the person's why\"" "$(grep '^- T1:' "$BHP")"
@@ -958,8 +959,8 @@ expect_eq    "(hd1) the hand landing of a row whose suite is red exits 0, the ro
   "$RCHD $(git -C "$BH" merge-base --is-ancestor "$BHC2" wave/fixture && echo yes)"
 expect_contains "(hd2) …and its - T2: line carries the person's words" '"landed on the report"' "$(grep '^- T2:' "$BHP")"
 expect_eq    "(hd3) …no suite ran, and the record holds the person's verdict, keyed by the commit it was green at" \
-  "0|line/v1|ev=verdict|row=T2|commit=${BHC2}|suite=r.test.sh|result=green|log=/logs/T2-green.log|admitted=-|width=-|promised=-|actual=-" \
-  "$(awk 'END { print NR }' "$TMP/hand-runs")|$(grep '|ev=verdict|' "$BHREC" | sed 's/|at=[^|]*$//')"
+  "0|run/v1|ev=verdict|row=T2|commit=${BHC2}|suite=r.test.sh|result=green|log=/logs/T2-green.log|admitted=-|width=-|promised=-|actual=-" \
+  "$(awk 'END { print NR }' "$TMP/hand-runs")|$(bh_all | grep '|ev=verdict|' | sed 's/|at=[^|]*$//')"
 
 # A hand landing that names its suites leaves a ready line that names them too, so the judge and the door read one
 # row's suites; with none named, the ready line says none.
@@ -972,7 +973,7 @@ BHC3="$(git -C "$BHT3" rev-parse HEAD)"
 bh_land "$BHT3" --by-hand --reason "landed on the report" --suites a.test.sh,b.test.sh --green-at "$BHC3" --log /logs/T3-green.log >/dev/null
 expect_eq    "(hd4) …and its ready line names the suites the person named, where a landing that named none says none" \
   "a.test.sh,b.test.sh|none" \
-  "$(grep '|ev=ready|row=T3|' "$BHREC" | sed 's/.*|suites=\([^|]*\)|.*/\1/')|$(grep '|ev=ready|row=T1|' "$BHREC" | sed 's/.*|suites=\([^|]*\)|.*/\1/')"
+  "$(bh_all | grep '|ev=ready|row=T3|' | sed 's/.*|suites=\([^|]*\)|.*/\1/')|$(bh_all | grep '|ev=ready|row=T1|' | sed 's/.*|suites=\([^|]*\)|.*/\1/')"
 
 BHT4="$(new_tree "$BH" wt/bh-T4)"; mkdir -p "$BHT4/tests"; printf '# the wave-40 run said so\n' > "$BHT4/tests/cited.sh"; git -C "$BHT4" add tests && git -C "$BHT4" commit -qm "T4: a cited comment"; BH_REFS4="$(refs_of "$BH")"
 OUTHL="$(bh_land "$BHT4" --by-hand --reason "landed on the report")"; RCHL=$?
@@ -983,7 +984,7 @@ printf 'line/v1|ev=ready|row=T9|name=-|commit=%s|branch=-|tree=-|suites=none|deb
 bh_land "$BHT5" --by-hand --reason "behind an entry" >/dev/null & BHPID=$!
 sleep 3; printf 'line/v1|ev=returned|row=T9|why=red|detail=-|at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$BHREC"; wait "$BHPID"; RCHW=$?
 expect_eq    "(hd3b) a hand landing held 3 s behind an entry lands, with one candidate on the entry's and one on the head it published onto" \
-  "0|${BHX} $(git -C "$BH" rev-parse wave/fixture^1)" "$RCHW|$(grep '|ev=candidate|row=wt/bh-T5|' "$BHREC" | sed 's/.*|base=\([^|]*\)|.*/\1/' | paste -sd' ' -)"
+  "0|${BHX} $(git -C "$BH" rev-parse wave/fixture^1)" "$RCHW|$(bh_all | grep '|ev=candidate|row=wt/bh-T5|' | sed 's/.*|base=\([^|]*\)|.*/\1/' | paste -sd' ' -)"
 section "§CHECK-FILES: what a range changes of the check's files is the declared list met with the range"
 CF="$(new_repo "$TMP/check-files")"; mkdir -p "$CF/chk/sub" "$CF/lib"
 : > "$CF/chk/a.sh"; : > "$CF/chk/sub/c.sh"; : > "$CF/lib/b.sh"; : > "$CF/lib/d.sh"
@@ -1072,7 +1073,7 @@ expect_eq "(su4) ready from a rebound successor whose roster holds no row lands 
   "0 LANDED T4" "$SC_RC $(sc_head "$SC_OUT")"
 [ "$SC_RC" = 0 ] || printf '      ready said: %s\n' "$SC_OUT"
 expect_contains "(su4b) …proved on that launch row's suite" "|ev=ready|row=T4|" \
-  "$(grep '|suites=b.test.sh|' "$SC/.bionic/docs/record/wave-x/landing-proofs.log" 2>/dev/null)"
+  "$(grep '|suites=b.test.sh|' "$SC/.bionic/docs/record/wave-x/run.log" 2>/dev/null)"
 
 section "§MISMATCH: a tree whose record names another plan than the binding is refused naming both; close-out's own last landing on a closed plan is admitted"
 #
@@ -1151,7 +1152,7 @@ HN_OUT="$( cd "$HN" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$SPAWN" land "$
   --suites a.test.sh --green-at "$HN_C" --log "$HN_RD/T3-green.log" 2>&1 )"; HN_RC=$?
 expect_eq "(hn1) the hand landing of the born row exits 0" "0" "$HN_RC"
 [ "$HN_RC" = 0 ] || printf '      land said: %s\n' "$HN_OUT"
-HN_REC="$HN_RD/landing-proofs.log"
+HN_REC="$HN_RD/run.log"
 expect_eq "(hn2) the row's verdict is written before its published line" "verdict published" \
   "$(awk -F'|' '$3 == "row=T3" && ($2 == "ev=verdict" || $2 == "ev=published") { sub(/^ev=/, "", $2); printf "%s%s", s, $2; s = " " }' "$HN_REC" 2>/dev/null)"
 expect_eq "(hn3) …and the review's waiver ask is closed by the landing, with no regression and no waiver" "closed|landing T3" "$(hn_ask)"

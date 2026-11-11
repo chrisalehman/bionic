@@ -71,7 +71,7 @@ mkdir -p "${PLAN%/*}" && printf '# plan\n' > "$PLAN"
 REC="$(bash -c '. "$1/line.sh" 2>/dev/null; line_record "$2"' _ "$LIB" "$PLAN" 2>/dev/null)"
 expect_regex "AG.0b line.sh names the plan's landing record" '/landing-proofs\.log$' "$REC"
 via_gate() {
-  rm -f "$REC"
+  rm -f "$REC" "${REC%/*}/run.log"
   bash -c '. "$1/line.sh" 2>/dev/null; at="$3"; _line_now() { printf "%s\n" "$at"; }; line_event "$2" published row=T1 commit=c1 kind=queue by=- why=-' \
     _ "$LIB" "$PLAN" "$1" >/dev/null 2>&1
   bash -c '
