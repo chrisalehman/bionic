@@ -3,7 +3,7 @@
 # is walked from its authored plan to the end state by the run's own verbs, and the card is rendered on what they left.
 #
 #   §CLOSE         the plan is put in the release order (a regression row at step 5, an integrate row reading both
-#                  approvals), the build row lands by hand, the matrix is discharged, Steps 5 to 7 are entered with the
+#                  approvals), the build row lands by hand, the walk is registered, Steps 5 to 7 are entered with the
 #                  regression run, five readings and the check recorded, and the release row lands by hand with the
 #                  release and the whole run again at that head, as a delivered run ends. Every fact holds and no
 #                  `approved: release` line is written, so `current 8` refuses on that approval alone; the card exits 0
@@ -16,7 +16,7 @@
 # plan whose Step-3 state the library authors. Every later change to the plan is a verb's or a judged cell edit's: task-add,
 # step-line, step-field, current, proof-add and the hand door's row line. This
 # file never writes the plan. What it writes are the records the
-# run's actors write: a one-row suite in the build row's commit, the matrix row's evidence, the walk and audit records,
+# run's actors write: a one-row suite in the build row's commit, the walk and audit records,
 # five reading records in the readers' grammar (the structure reading answering every id the shipped checks file names),
 # and each reader's roster row through the production writer (`roster_row`), closed by the sweeper's own `ack`; and the
 # release's five readers green at its head through lib/line.sh's writer, as its row's ready over them records them.
@@ -108,11 +108,8 @@ dc_commit "$DC_P1" "a library change and its suite" && door_land "$DC" "$DC_P1"
 printf 'dc: land T1 -> rc %s\n' "$DOOR_RC"
 expect_eq "(c5) the build row lands by hand" "0" "$DOOR_RC"
 
-printf 'the library change holds\n' > "$DC_REC/ac-1.1.md"
-dc_verb "(c6) matrix-render writes the criterion's block" matrix-render
-dc_verb "(c7) matrix-set discharges the row with its evidence" matrix-set AC-1.1 status=discharged evidence=record/wave-x/ac-1.1.md task=T1
-dc_verb "(c8) discharge writes the auditor cell" discharge AC-1.1
-printf 'the walk the build row needed\n' > "$DC_REC/walk.md"
+printf '# walk\n\n| AC | verdict | why |\n|---|---|---|\n| AC-1.1 | CONFIRMED | the library change holds |\n\nverdict: CONFIRMED — the one criterion\n' > "$DC_REC/walk.md"
+dc_verb "(c7) the walk's registration discharges the criterion by its proof" proof-add walk record/wave-x/walk.md
 printf 'CONFIRMED: the one criterion is proved\n' > "$DC_REC/audit.md"
 dc_verb "(c9) step-line writes Step 5" step-line 5 'regression at record/wave-x/regression-run.log'
 dc_verb "(c10) step-field names the walk" step-field 5 walk-artifact=record/wave-x/walk.md

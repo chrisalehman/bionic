@@ -37,8 +37,8 @@
 #                      is put through `decisions put`: the register holds that decision's decide: ask.
 #     clean            the build row landed and the release row is still active: the register holds no open ask.
 #     single-verify    the run at single rigor (door_world_single), carried to the Verify gate: the build landed
-#                      through ready, its criterion left pending by that landing, the walk and Step 5 written, current: 5. No `discharge`:
-#                      the auditor cell stays empty for the single-rigor review that answers the evidence question.
+#                      through ready, its criterion left pending by that landing, the evidence review at the landed head,
+#                      the walk registered (its proof discharges the criterion) and Step 5 written, current: 5.
 #
 # THE SANDBOX is tests/lib/door.sh's `door_world`: a real repository carrying the plugin's hooks and scripts and a
 # plan in its Step-3 shape, bound to WORLD_SID. Each command runs from the sandbox's root through `door_run`, and the
@@ -198,13 +198,11 @@ _rh_build_ready() {
 }
 
 # _rh_review <name> <question> <scope> <a> <b> <pass|fail> -> the reviewer's record and roster row. The evidence question
-# is the auditor's only at double rigor, as the poker deals it; otherwise the critic holds it, and its record carries the
-# verdicts its registration writes into the matrix: a | AC | verdict | table row for each matrix row, and the wave's
-# verdict: line.
+# is the auditor's only at double rigor, as the poker deals it; otherwise the critic holds it.
 _rh_review() {
-  local nm="$1" q="$2" sc="$3" res="$6" t=bionic:critic n=0 rv=CONFIRMED
+  local nm="$1" q="$2" sc="$3" res="$6" t=bionic:critic n=0
   [ "$q" != evidence ] || [ "$(_rh_rigor)" != double ] || t=bionic:auditor
-  [ "$res" = pass ] || { n=1; rv=REFUTED; }
+  [ "$res" = pass ] || n=1
   { printf 'reviewed: %s..%s\nquestion: %s\nresult: %s\nscope: %s\n' "$4" "$5" "$q" "$res" "$sc"
     [ "$q" != structure ] || awk -v r="$res" '/^- \*\*[a-z][a-z-]*\*\*/ { s = $0; sub(/^- \*\*/, "", s); sub(/\*\*.*$/, "", s)
       print "check: " s " " (r == "pass" ? "PASS" : "FAIL") " the build row is one line of a library and a one-row suite" }' \
@@ -214,12 +212,6 @@ _rh_review() {
     # reviewer is pushed to write it: without both the record's findings do not parse, and no row can be born of one.
     [ "$n" = 0 ] || printf 'finding: 1 S1 off payload/scripts/lib/said.sh:%s the library change is not reached by any caller\nshown: 1 grep -rn rehearsal_landed payload/scripts hooks\n' \
       "$(git -C "$RH_ROOT" show "$5:payload/scripts/lib/said.sh" 2>/dev/null | /usr/bin/grep -n '^rehearsal_landed()' | cut -d: -f1)"
-    if [ "$q" = evidence ] && [ "$t" = bionic:critic ]; then
-      printf '\n## Row verdicts\n\n| AC | verdict | why |\n|---|---|---|\n'
-      awk -v v="$rv" '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 }
-        m && /^\| *AC-/ { a = $2; gsub(/^[ \t]+|[ \t]+$/, "", a); print "| " a " | " v " | the row was read against its evidence |" }' "$RH_PLAN"
-      printf '\nverdict: %s — every requirement has a row\n' "$rv"
-    fi
     printf '\nThe review read the rows and found %s.\n' "$([ "$n" = 0 ] && echo nothing || echo one finding)"; } > "$RH_REC/$nm.md"
   printf '%s|questions=%s\n' "$(roster_row_fixture session="$WORLD_SID" name="$nm" agent_id="a-$nm" subagent_type="$t" \
     launched_at=2026-10-01T00:00:00Z deliverable="$RH_REC/$nm.md")" "$q" >> "$RH_ROOT/.bionic/tmp/roster-$WORLD_SID.state"
@@ -230,30 +222,25 @@ _rh_review() {
 # _rh_rigor -> the plan's rigor: word, as its planner wrote it
 _rh_rigor() { awk '/^---$/ { n++; next } n == 1 && /^rigor:/ { sub(/^rigor:[[:space:]]*/, ""); print; exit }' "$RH_PLAN"; }
 
-# _rh_verify -> the matrix rendered, the build landed through ready, which writes its criterion's evidence and the
-# matrix row's status discharged in one act, the walk, Step 5's line and fields, and Step 5 entered. Only a double-rigor
-# run deals an auditor, so only there does `discharge` write the auditor cell and the auditor's record and Step 5's
-# `auditor:` pointer exist; at single rigor the evidence question is the critic's, read whole on the landed head, and
-# registering its record writes the auditor cell and the head's auditor-wave: line, with no discharge.
+# _rh_verify -> the build landed through ready, the evidence review at the landed head (the auditor's at double rigor,
+# the critic's at single), which is the verdict a criterion a logged proof discharges reads, the walk registered (its
+# record the critic's shape, one CONFIRMED row for the one criterion, so the walk's proof discharges it), Step 5's line
+# and fields, and Step 5 entered. Only a double-rigor run deals an auditor, so only there do the audit's record and
+# Step 5's `auditor:` pointer exist.
 _rh_verify() {
   local dbl=no
   [ "$(_rh_rigor)" != double ] || dbl=yes
-  _rh_poker "render the matrix" matrix-render || return 1
   _rh_build_ready || return 1
-  _rh_poker "the criterion's task" matrix-set AC-1.1 task=T1 || return 1
-  if [ "$dbl" = yes ]; then
-    _rh_poker "the auditor cell" discharge AC-1.1 || return 1
-  else
-    _rh_review w-evidence-whole evidence whole "$RH_BASE" "$(_rh_head)" pass || return 1
-    _rh_do "the sweeper acks the evidence reviewer" bash "$RH_ROOT/hooks/session-sweeper.sh" ack w-evidence-whole || return 1
-  fi
-  printf 'the walk the build row needed\n' > "$RH_REC/walk.md"
+  _rh_review w-evidence-whole evidence whole "$RH_BASE" "$(_rh_head)" pass || return 1
+  _rh_do "the sweeper acks the evidence reviewer" bash "$RH_ROOT/hooks/session-sweeper.sh" ack w-evidence-whole || return 1
+  printf '# walk\n\n| AC | verdict | why |\n|---|---|---|\n| AC-1.1 | CONFIRMED | the build row read whole |\n\nverdict: CONFIRMED — the one criterion\n' > "$RH_REC/walk.md"
   if [ "$dbl" = yes ]; then
     printf 'CONFIRMED: the one criterion is proved\n' > "$RH_REC/audit.md"
     _rh_hand record "the walk record/wave-x/walk.md and the audit record/wave-x/audit.md"
   else
     _rh_hand record "the walk record/wave-x/walk.md"
   fi
+  _rh_poker "register the walk" proof-add walk record/wave-x/walk.md || return 1
   _rh_poker "Step 5's line" step-line 5 'regression at record/wave-x/regression-run.log' || return 1
   _rh_poker "Step 5's walk" step-field 5 walk-artifact=record/wave-x/walk.md || return 1
   [ "$dbl" = no ] || _rh_poker "Step 5's auditor" step-field 5 'auditor=CONFIRMED, record/wave-x/audit.md' || return 1

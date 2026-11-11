@@ -2,8 +2,8 @@
 # them: `<path> <count> # <reason or date>`. The count only falls. A file whose count drops writes its new number
 # here; a file not named has ceiling 0, so a new refusal ships with its exit.
 hooks/poker/judge.sh 7 # counted at the first sweep, 2026-10-25
-hooks/poker/line.sh 48 # lowered when the landing stopped writing the dispatch ledger
-hooks/poker/plan.sh 103 # lowered when the matrix verbs went
+hooks/poker/line.sh 47 # lowered when a landing stopped writing a criterion's evidence
+hooks/poker/plan.sh 102 # lowered when the matrix verbs went
 hooks/poker/proof.sh 107 # lowered when the matrix verbs went
 hooks/poker/roster.sh 35 # lowered when launch-sync went
 hooks/poker/sitrep.sh 46 # counted at the first sweep, 2026-10-25

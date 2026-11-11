@@ -1625,39 +1625,6 @@ s42_snap "$RWK" "$PWK"; wk_add walk-nohead
 s42_unchanged "WK-12 a head: line naming no commit of the working branch" 1 "$PWK"
 expect_contains "WK-12b …named in the refusal" "head: 0123456789012345678901234567890123456789" "$OUT"
 
-# ---------- the walk row's landing registers the walk, in deliver's own act ----------
-# A record row has no commit, so it lands through deliver, never ready: a verify row whose artifact is a wave's walk
-# record is registered by the landing itself. The control is the same deliver with the walk test removed in a doctored
-# copy: it lands the row and registers nothing, so the proofs read here are the landing's doing.
-WK_DREL="record/wave-02-fixture/walk.md"; mkdir -p "$RWK/.bionic/docs/record/wave-02-fixture"
-awk '{ print } /^\| T5 \| 5 \| verify \|/ { print "| T6 | 5 | verify | the walk | — | T1, T2 | 30 | REQ-1 | .bionic/docs/'"$WK_DREL"' | — | — | pending |" }' \
-  "$PWK" > "$PWK.tmp" && mv "$PWK.tmp" "$PWK"
-wk_task() { s48_row "$PWK" "$1" | awk -F'|' '{ print $NF }'; }   # <row> -> its status cell
-WK_ALL=('| AC-1.1 | CONFIRMED | the card |' '| AC-1.2 | CONFIRMED | the judge |' '| AC-1.3 | CONFIRMED | the scorecard read the register |')
-wk_rec ../wave-02-fixture/walk - - "${WK_ALL[@]}"
-s42_snap "$RWK" "$PWK"; poke "$RWK" deliver T6
-s42_unchanged "WK-14 AC-8.3 deliver of the walk row whose record has no verdict: line" 1 "$PWK"
-expect_contains "WK-14b …the landing refused naming the walk record and the line it lacks" "$WK_DREL" "$OUT"
-expect_contains "WK-14c …(and the line)" "verdict:" "$OUT"
-wk_rec ../wave-02-fixture/walk 'verdict: CONFIRMED — the scorecard read the register' - "${WK_ALL[@]}"
-s42_snap "$RWK" "$PWK"
-rd_mutant nowalk 's/RL_WALK="\$rel"; RL_WALK_REAL="\$real"/:/'
-expect_eq "WK-15-pre the doctored poker differs from the real one in exactly one line (the doctor took)" "1" \
-  "$(diff <(poker_text "$POKER") <(poker_text "$RD_MUT/nowalk/hooks/session-poker.sh") | /usr/bin/grep -c '^>')"
-WK_REAL_POKER="$POKER"; POKER="$RD_MUT/nowalk/hooks/session-poker.sh"
-poke "$RWK" deliver T6
-POKER="$WK_REAL_POKER"
-expect_eq "WK-15 control: with the walk test removed, deliver lands the row (exit 0) and registers nothing: AC-1.3's proof still names the earlier record" \
-  "0|landed|discharged proof record/wave-01-fixture/walk-again.md|0" "$RC|$(wk_task T6)|$(wk_cell AC-1.3)|$(s46_proved "$PWK" | /usr/bin/grep -c "evidence=$WK_DREL\$")"
-[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
-cp "$TMPROOT/s42-before" "$PWK"
-WK_B5="$(wk_step5)"; poke "$RWK" deliver T6
-expect_eq "WK-16 §WALK AC-8.3 deliver lands the walk row (exit 0) and its CONFIRMED rows read discharged by proofs naming the record" \
-  "0|landed|discharged proof $WK_DREL" "$RC|$(wk_task T6)|$(wk_cell AC-1.3)"
-[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
-expect_eq "WK-16b …in the landing's act: the walk proof, the Step 5 block as it was, and one ev=walk line naming it" \
-  "1|$WK_B5|1" \
-  "$(s46_proved "$PWK" | /usr/bin/grep -c "^proved: kind=walk head=$WK_C .* evidence=$WK_DREL\$")|$(wk_step5)|$(wk_ev walk | /usr/bin/grep -c "|record=$WK_DREL|discharged=3|")"
 POKE_BOUND="$WK_BOUND_WAS"
 
 section "§BORN-RED: a floor-born marker is admitted on the red verdict a whole run recorded, and the refusal names the log to record"

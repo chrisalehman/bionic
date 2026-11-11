@@ -23,13 +23,13 @@
 #   §SR      the replay plants a second review naming the fix row's site under another question; the fix row's landing
 #            writes it fixed, no finding-move follows the landing, and the close reads zero
 #   §LIVE    the replay's live criterion (door.sh DOOR_LIVE_ROW), owed at the close: every advance and the refused
-#            close-out pass with it pending, the release approval card lists it owed by the close, and close-out writes it
-#            discharged from its last reading, with no matrix-set
+#            close-out pass with it pending, the release approval card lists it owed by the close, and close-out proves it
+#            from its last reading by one proof event, the plan unwritten
 #   §LOG     after the replay the record holds run.log, with the fix row's landing in it, and no landing-proofs.log
 #   §CANCEL  reopened at Step 8 by its log, close-out reads the release approved, and not once the log cancels it
-#   §SINGLE  `rehearse single-verify` (door.sh `door_world_single`) stands at current: 5, the build's criterion left pending
-#            by its landing, the critic's evidence review on its own roster row carried into the auditor cell and the
-#            head's auditor-wave: line; its log names the verbs that brought it there and no discharge
+#   §SINGLE  `rehearse single-verify` (door.sh `door_world_single`) stands at current: 5, the build's criterion discharged
+#            by the walk's proof, its verdict the critic's evidence review on its own roster row, standing at the head;
+#            its log names the verbs that brought it there
 #
 # NAMED, NOT COUNTED: the rows reading the replay's part (CL-8, VB-1, VB-2) name each verb the replay runs and each kind
 # of hand write it makes, so a log that lost one of them is red however long it is.
@@ -401,14 +401,14 @@ section "§LIVE: the run's live criterion is owed at the close, passes every gat
 # The replay's plan carries the live row a planner writes (door.sh DOOR_LIVE_ROW): a row at tier T3, its eval the
 # hand-holds line at the close, its task the close row T9. The gate defers it until its step, so each advance and the
 # refused close-out pass with it pending; the release approval card lists it owed by the close, never a decision its
-# reply could waive; close-out writes it from its last reading after delivered:, and no matrix-set touches it.
-# fails-when: an advance or the card refuses or waives the pending row, the delivered plan reads it anything but
-# discharged with the continuation as its evidence, or a matrix-set in the log names it.
+# reply could waive; close-out proves it from its last reading after delivered:.
+# fails-when: an advance or the card refuses or waives the pending row, or the run's log holds no proof naming it
+# with the continuation as its evidence.
 if cr_reached "LV-0"; then
   lv_cells() { awk -F'|' '$2 ~ /^ *AC-2\.1 *$/ { s = $4; e = $5; gsub(/^ +| +$/, "", s); gsub(/^ +| +$/, "", e); print s "|" e }' "$1"; }
   lv_key() { awk -v k="$2" '/^AC-2\.1:/ { b = 1; next } b && /^[^ \t]/ { b = 0 } b && $0 ~ "^[ \t]+" k ": " { sub("^[ \t]+" k ": ", ""); print; exit }' "$1"; }
-  expect_eq "LV-1 the plan's live row is matrix-render's: its task the close row, its eval the hand-holds line" "T9|yes" \
-    "$(lv_key "$CR_PLAN" task)|$(lv_key "$CR_PLAN" eval | /usr/bin/grep -q 'landing-report --hand-holds' && echo yes)"
+  expect_eq "LV-1 the plan's live row is the planner's: its task the close row, its Eval design row's eval the hand-holds line" "T9|yes" \
+    "$(lv_key "$CR_PLAN" task)|$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$CR_PLAN" criterion AC-2.1 | /usr/bin/grep -q '^eval=.*landing-report --hand-holds' && echo yes)"
   expect_eq "LV-2 each advance past the Verify gate exits 0 with the row pending" "0|0|0" \
     "$(cr_rc 'enter Step 6' | tail -1)|$(cr_rc 'enter Step 7' | tail -1)|$(cr_rc 'enter Step 8' | tail -1)"
   LV_CARD="$(cat "$CR_REC"/release-approval-*.md 2>/dev/null)"
@@ -417,9 +417,6 @@ if cr_reached "LV-0"; then
   expect_eq "LV-4 at delivered: the run's log holds one proof naming it, its evidence the continuation, the table as it was" \
     "1|pending" "$(/usr/bin/grep -c '|ev=proof|ac=AC-2\.1|evidence=record/wave-x/continuation\.md|' "$CR_REC/run.log")|$(lv_cells "$CR_PLAN" | cut -d'|' -f1)"
   expect_contains "LV-5 …written by close-out from its last reading" "matrix: AC-2.1 discharged" "$(cr_out 'close-out, the tail')"
-  LV_SETS="$(/usr/bin/grep '^\$ .*session-poker.sh matrix-set ' "$CR_LOG")"
-  expect_contains "LV-6 precondition: the log's matrix-set lines are read (the criterion's task on AC-1.1)" "matrix-set AC-1.1" "$LV_SETS"
-  expect_absent "LV-6b …and none names AC-2.1" "AC-2.1" "$LV_SETS"
 fi
 
 section "§LOG: the run's landings stand in its log, and no landing record is written"
@@ -448,11 +445,11 @@ if cr_reached "CN-0"; then
 fi
 
 # ============================================================
-section "§SINGLE: the single-rigor run reaches the Verify gate with no discharge"
+section "§SINGLE: the single-rigor run reaches the Verify gate, its criterion discharged by the walk"
 # ============================================================
 # fails-when: the rehearsal's single-rigor state does not build, its plan is not at rigor: single, it does not stand at
-# current: 5 with the build's criterion discharged, the auditor cell or the head's auditor-wave: line lacks the critic's
-# verdict, the evidence review is registered on any row but the critic's, or its log runs discharge.
+# current: 5 with the build's criterion discharged by the walk's proof under the critic's verdict at the head, or the
+# evidence review is registered on any row but the critic's.
 SG_DIR="$WORLD_ROOT/single-verify"; SG_RC=0; SG_PLAN=""
 if [ "$CR_LOADED" = 1 ]; then
   # The host is planted busy (load 14 on 8 cores): a rehearsed landing's verdict never turns on the machine's load.
@@ -468,24 +465,18 @@ if [ "$SG_RC" = 0 ] && [ -f "$SG_PLAN" ]; then
     "$(awk '/^---$/ { n++; next } n == 1 && /^rigor:/ { sub(/^rigor:[[:space:]]*/, ""); print }' "$SG_PLAN")"
   expect_eq "SG-3 the run stands at the Verify gate: current: 5, the Step 5 line written" "5|yes" \
     "$(sed -n 's/^current:[[:space:]]*//p' "$SG_PLAN" | head -1)|$(/usr/bin/grep -q '^- Step 5: ' "$SG_PLAN" && echo yes)"
-  # The matrix row as the table holds it: status and auditor cells, so the auditor cell is read beside a status.
-  expect_eq "SG-4 the build's criterion is left pending by its landing, and its auditor cell holds the critic's verdict, the bare token" "pending|CONFIRMED" \
-    "$(awk -F'|' '$2 ~ /^ *AC-1\.1 *$/ { s = $4; a = $6; gsub(/^ +| +$/, "", s); gsub(/^ +| +$/, "", a); print s "|" a }' "$SG_PLAN")"
+  SG_CELL="$(bash -c '. "$1/payload/scripts/lib/reader.sh" && reader_cells "$2" "$3"' _ "$BIONIC_SCRIPTS_DIR" "$SG_PLAN" \
+    "$(git -C "$SG_DIR/project" rev-parse --verify -q refs/heads/wave/x)" | awk -F'\037' '$1 == "AC-1.1" { print $2 "|" $3 "|" $5 "|" $6 }')"
+  expect_eq "SG-4 the build's criterion reads discharged by the walk's proof, its verdict the critic's evidence review at the head" \
+    "discharged|proof|record/wave-x/walk.md|CONFIRMED" "$SG_CELL"
   SG_NAMES="$(cr_names < "$SG_DIR/rehearsal.log" | cut -d'|' -f2-)"
-  expect_eq "SG-5 the log names the verbs that brought it there" \
-    "session-poker.sh matrix-render|spawn-worktree.sh ready|session-poker.sh proof-add review|session-poker.sh step-line|session-poker.sh step-field|session-poker.sh current" \
-    "$(printf '%s\n' "$SG_NAMES" | cr_held 'session-poker.sh matrix-render|spawn-worktree.sh ready|session-poker.sh proof-add review|session-poker.sh step-line|session-poker.sh step-field|session-poker.sh current')"
-  expect_eq "SG-5b …and discharge is not among them" "" \
-    "$(printf '%s\n' "$SG_NAMES" | cr_held 'session-poker.sh discharge')"
-  expect_eq "SG-6 the status is the landing's: no matrix-set writes a status (rehearsal.sh holds none), the block's evidence is the landing's log" "0|yes" \
-    "$(/usr/bin/grep -c 'matrix-set.*status=' "$BIONIC_SCRIPTS_DIR/tests/lib/rehearsal.sh")|$(awk '/^AC-1\.1:/ { b = 1; next } b && /^[^ \t]/ { b = 0 } b && /^[ \t]+evidence: record\/wave-x\/line\/T1-rehearsal-row-/ { y = 1 } END { if (y) print "yes" }' "$SG_PLAN")"
+  SG_WANT='spawn-worktree.sh ready|session-poker.sh proof-add review|session-poker.sh proof-add walk|session-poker.sh step-line|session-poker.sh step-field|session-poker.sh current'
+  expect_eq "SG-5 the log names the verbs that brought it there" "$SG_WANT" "$(printf '%s\n' "$SG_NAMES" | cr_held "$SG_WANT")"
   # The evidence review: one proof line of the question, its reader's roster row the critic's, dealt evidence.
   SG_READER="$(cr_proofs "$SG_PLAN" | sed -n 's/^proved: kind=review .* question=evidence reader=\([^ ]*\) .*/\1/p' | tail -1)"
   expect_eq "SG-7 the evidence question was read by the critic: its proof line names a reader whose roster row is bionic:critic, dealt evidence" \
     "w-evidence-whole|bionic:critic|evidence" \
     "$SG_READER|$(/usr/bin/grep -h "|name=${SG_READER:-none}|" "$SG_DIR"/project/.bionic/tmp/roster-*.state 2>/dev/null | tail -1 | tr '|' '\n' | sed -n 's/^subagent_type=//p;s/^questions=//p' | paste -sd'|' -)"
-  expect_eq "SG-7b …and its wave verdict is the head's auditor-wave: line, above the table" "auditor-wave: CONFIRMED — every requirement has a row|yes" \
-    "$(awk '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 } m && /^\|/ { exit } m && /^auditor-wave:/' "$SG_PLAN")|$(awk '/^## Verification Matrix/ { m = 1; next } m && /^stack-health:/ { s = 1 } m && /^\|/ { exit } END { if (s) print "yes" }' "$SG_PLAN")"
 else
   printf '    the single-rigor rehearsal stopped; rehearse said:\n'
   sed 's/^/    | /' "$WORLD_ROOT/single-verify.err" 2>/dev/null | cut -c1-400 | tail -12
