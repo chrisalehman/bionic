@@ -8,7 +8,9 @@
 #   §PLANWRITERS  a planted append to a plan is named and the count rises by one.
 #   §WRITERS      two functions appending one event type are listed as a pair; so is `published` today.
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted.
-#   §REPORT       the check exits 0 with findings and ends on the five count lines, in their order.
+#   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
+#                 the tree holds none.
+#   §REPORT       the check exits 0 with findings and ends on the six count lines, in their order.
 #   §READINGS     readings.sh prints the release's readings at a revision from git objects; reading 1 is the
 #                 check's own count over that tree, reading 7 the born events the reader lists for the record.
 #
@@ -37,6 +39,8 @@ planted_born_b() { log_append born row=T2; }
 EOF
 printf '%s\n' "planted_reader_rows() { awk -F'|' '\$2 ~ /T/' \"\$plan\"; }" >> "$L/reader.sh"
 printf '%s\n' 'deny "planted refusal words"' >> "$S/hooks/engage.sh"
+printf '%s\n' 'a() { _proof_ask "$p" reader_q_step "$p" | sed -n s/^n=//p; }' 'b() { f="$(_proof_facts "$p")"; }' 'c() { local f="$(reader_main "$p" step)" || return 2; }' \
+  'd() { f="$(_proof_facts "$p")" || return 2; printf "%s" "$f" | awk 1; }' 'reader_facts() { printf "%s" "$f"; }' > "$L/planted-folds.sh"
 AFTER="$(run)"; RC=$?
 
 section "PARSERS"
@@ -63,10 +67,15 @@ expect_contains "a real refusal site in a hook file is listed" "$(printf 'refusa
 expect_regex "the planted refusal words are listed" "^refusal	hooks/engage\.sh:[0-9]+	deny$" "$AFTER"
 expect_eq "the refusal count rises by one" "$(( $(count "$BEFORE" hook_refusals) + 1 ))" "$(count "$AFTER" hook_refusals)"
 
+section "FOLDS"
+expect_eq "a fold through a pipe, an unread \$( ) and a local's \$( ) are named; one whose exit is read and a stand-in are not" "1 2 3" \
+  "$(printf '%s\n' "$AFTER" | sed -n 's|^unheard	payload/scripts/lib/planted-folds\.sh:||p' | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "the unheard count rises by three over the tree, which holds none" "0 3" "$(count "$BEFORE" unheard_folds) $(count "$AFTER" unheard_folds)"
+
 section "REPORT"
 expect_status "the check exits 0 with findings" 0 "$RC"
-expect_eq "it ends on the five count lines, in order" "parsers plan_writers shared_types hook_refusals loader_copies" \
-  "$(printf '%s\n' "$AFTER" | tail -5 | sed -n 's/^\([a-z_]*\)=[0-9][0-9]*$/\1/p' | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "it ends on the six count lines, in order" "parsers plan_writers shared_types hook_refusals loader_copies unheard_folds" \
+  "$(printf '%s\n' "$AFTER" | tail -6 | sed -n 's/^\([a-z_]*\)=[0-9][0-9]*$/\1/p' | tr '\n' ' ' | sed 's/ $//')"
 expect_contains "a pasted loader copy is listed" "$(printf 'loader\thooks/bash-walls.sh\t')" "$AFTER"
 expect_absent "the loader's own library is not a copy" "$(printf 'loader\tpayload/scripts/lib/loader.sh')" "$AFTER"
 bash "$CHECK" "$S/no-such" >/dev/null 2>&1; expect_status "a root that is not a checkout exits 2" 2 "$?"

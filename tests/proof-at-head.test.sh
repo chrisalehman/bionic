@@ -284,6 +284,33 @@ PG_5='{ proof_approved_head "$p" merge-unproved; a=$?; _proof_floor_match "$p" "
 expect_eq "KEEP-9 a lookup of the run log that dies is a failed fold, never a run with no log" "2|0||0|1|$PL_R" "$(pf reader_record '' 128)"
 printf '## SDLC State\n\nproved: kind=regression head=%s at=2026-10-04T12:00:00Z evidence=x\n' "$PL_R" > "$PK/nolog.md"; expect_eq "KEEP-10 a source of a run with no log that dies, its home or its landed rows unread, fails the translation and the fold" "2|0||0|1|$PL_R~2|0||0|1|$PL_R~2|0||0|1|$PL_R" "$(PF_PLAN="$PK/nolog.md"; pf _translate_state 'e\t~\trun/v1|ev=x|at=\n' 128)~$(PF_PLAN="$PK/nolog.md"; pf _translate_record '' 128)~$(PF_PLAN="$PK/nolog.md"; pf _translate_landed_rows '' 128)"
 
+section "§FOLD: a caller of the fold hears it fail: what writes from the facts writes nothing and exits 2, what shows them says they could not be read"
+# fails-when: a reader question asked in-process, close-out's continuation, the release card, a waiver, the bound line,
+# the tick's words, the hand-holds count or a checked ask reads a fold that failed as a run with no fact.
+# The stand-in is a copy of hooks/ and payload/scripts/ whose reader_facts exits 128, a refused fork's exit, inside any
+# function PAH_IN names, and folds whole elsewhere; each row reads the failing call beside the whole one.
+PF_ST="$SANDBOX/stand"; mkdir -p "$PF_ST/payload"; cp -R "$BIONIC_HOOKS_DIR" "$PF_ST/hooks"; cp -R "$REPO_ROOT/payload/scripts" "$PF_ST/payload/scripts"; ln -s ../hooks "$PF_ST/payload/hooks"
+printf '%s\n' 'eval "pf_whole_$(declare -f reader_facts)"; reader_facts() { case " ${FUNCNAME[*]} " in *" ${PAH_IN:-} "*) return 128 ;; esac; pf_whole_reader_facts "$@"; }' >> "$PF_ST/payload/scripts/lib/reader.sh"
+pfu() { printf '%s|%s' "$1" "$(printf '%s\n' "$2" | grep -c "$3")|$(printf '%s\n' "$2" | grep -c 'could not be read')"; }  # <exit> <output> <its fact's pattern> -> exit|fact lines|could-not-read lines
+PF_RS='. "$1/run.sh"; o="$(run_step "$2")"; printf "%s|%s" $? "$o" | tr "\n" " "'
+expect_eq "FOLD-1 a reader question run in-process (run_step) hands back the fold's failure; whole, its step and 0" "128|state=open~0|n=8 state=open" \
+  "$(PAH_IN=reader_facts bash -c "$PF_RS" _ "$PF_ST/payload/scripts/lib" "$PL_PLAN")~$(bash -c "$PF_RS" _ "$PF_ST/payload/scripts/lib" "$PL_PLAN")"
+pf_tmp() { mkdir -p "$SANDBOX/t-$1/bionic-facts-$(id -u)"; chmod 777 "$SANDBOX/t-$1/bionic-facts-$(id -u)"; printf '%s' "$SANDBOX/t-$1"; }  # <label> -> a TMPDIR where no fold is kept, so each read folds
+pf_close() { local p; p="$(mk_fixture "fold-$1")"; advance_to "$p" 8; debt_plant "$p"
+  SCRIPT="$PF_ST/payload/scripts/close-out.sh" TMPDIR="$(pf_tmp "$1")" PAH_IN="$2" run_close_as "pf-$1" "$p" run; pfu "$CO_RC" "$CO_OUT$(cat "$p/$CONT_REL" 2>/dev/null)" '^debt: tree_count '; }  # <label> <function the fold fails in> -> close-out's exit|debt lines|could-not-read lines
+expect_eq "FOLD-2 a fold that fails as close-out writes the continuation writes none and refuses, exit 2; whole, the debt carried" "2|0|1~0|1|0" "$(pf_close c act_continuation)~$(pf_close w none)"
+pah_world fold "" 0; ( in_fixture "$PAH_P" || exit 1; bound_marker "$PAH_P" pah-fold "$PAH_PLAN" ); fixture_git "$PAH_P" config user.name fixture
+PF_POKE() { TMPDIR="$(pf_tmp "p$RANDOM")" PAH_POKER="$PF_ST/hooks/session-poker.sh" PAH_IN="$1" pah_poke "$PAH_P" pah-fold "${@:2}"; pfu "$PAH_RC" "$PAH_OUT" "$PF_PAT"; }  # <function the fold fails in> <verb…> -> exit|lines of PF_PAT|could-not-read lines
+PF_PAT='whole suite: '; expect_eq "FOLD-3 the release card over a fold that fails is not drawn, exit 2; whole, drawn" "2|0|1~0|1|0" "$(PF_POKE poker_verb_release_approval release-approval --preview "$PAH_PLAN")~$(PF_POKE none release-approval --preview "$PAH_PLAN")"
+PF_PAT='^hand-holds: total='; expect_eq "FOLD-4 the hand-holds count over a fold that fails says it could not be read; whole, its total" "0|0|1~0|1|0" "$(PF_POKE reader_facts landing-report --hand-holds "$PAH_PLAN")~$(PF_POKE none landing-report --hand-holds "$PAH_PLAN")"
+PF_PAT='structure waiver at '; expect_eq "FOLD-5 a waiver over a fold that fails is refused before its dry commit; whole, it reaches the gate's dry commit" "2|0|1~1|1|0" "$(PF_POKE reader_facts waive structure 'waive it, the person said')~$(PF_POKE none waive structure 'waive it, the person said')"
+PF_SS="$(sed -n '/^SS_FACTS_PLAN=/p;/^ss_ask() {/,/^}/p;/^print_bound_line() {/,/^}/p' "$BIONIC_HOOKS_DIR/session-start.sh")"
+PF_B='BIONIC_LIB="$1"; DOCS=""; HOOK_ROOT=x; eval "$2"; print_bound_line "bound-open $3"'
+PF_PAT='current: 8$'; expect_eq "FOLD-6 the bound line over a fold that fails says the facts could not be read where the step stands; whole, the step" "0|0|1~0|1|0" \
+  "$(pfu 0 "$(PAH_IN=reader_facts bash -c "$PF_B" _ "$PF_ST/payload/scripts/lib" "$PF_SS" "$PL_PLAN")" "$PF_PAT")~$(pfu 0 "$(bash -c "$PF_B" _ "$PF_ST/payload/scripts/lib" "$PF_SS" "$PL_PLAN")" "$PF_PAT")"
+PG_U='. "$1/units.sh"; _units_readings_state "$p"'; expect_eq "FOLD-7 the tick's words for the reviews over a fold that fails say it did not fold, not rigor and scale" \
+  "the run's facts could not be read: its facts did not fold; ask again~covered" "$(pg failing "$PG_U")~$(pg whole "$PG_U")"
+
 section "§IFS: the library splits its own lists, whatever separators its caller set"
 # fails-when: the fold's key splits its lists of libraries and homes on the caller's IFS, so under a tab it covers the
 # plan alone and a fold kept before the run's log gained a proof is served after it.

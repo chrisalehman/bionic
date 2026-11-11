@@ -89,6 +89,20 @@ awk -v q="'" -v admitted=" $READER_FILES " -v hooks=" $hook_files " '
     gsub(/(line|owed|run)\/v1[|]ev=/, "", s)
     return s ~ /(^|[^A-Za-z0-9_-])(line|owed|run)\/v1/ || s ~ /[#][#](\[\[:space:\]\][+*]?|\\s[+*]?|[ \t+*])+(SDLC State|Verification Matrix|Tasks)/
   }
+  function unheard(s,   seen, pre, post, cut) {  # 1 when the line takes the fold or a reader answer with its exit lost
+    while (match(s, /(^|[^A-Za-z0-9_-])([_]proof_facts|[_]proof_ask|reader[_]main|reader[_]facts|reader[_]events)([^A-Za-z0-9_(-]|$)|(bas[h]|s[h])( +-[a-z]+)* +"?[^ |;&]*(reader[.]sh|READE[R]\}?)"?([^A-Za-z0-9_]|$)/)) {
+      pre = seen substr(s, 1, RSTART); post = substr(s, RSTART + RLENGTH - 1)
+      seen = seen substr(s, 1, RSTART + RLENGTH - 1); s = substr(s, RSTART + RLENGTH - 1)
+      if (pre ~ /(declare|typeset) +-[fF] *.?$|command +-v *.?$/) continue
+      cut = post; sub(/(;|\|\||&&).*/, "", cut)
+      if (cut ~ /(^|[^|])[|]([^|]|$)/ || pre ~ /<\(/) return 1
+      if (pre !~ /\$\(/) continue
+      if (pre ~ /(^|[^A-Za-z0-9_])(local|export|readonly|declare|typeset)( +-[A-Za-z]+)* +[A-Za-z_][A-Za-z0-9_]*=/) return 1
+      if (pre ~ /^[ \t]*(if|elif|while|until|!)[ \t]/ || post ~ /(\|\||&&)|=\$\?/) continue
+      return 1
+    }
+    return 0
+  }
   function writer(type) {
     if (type !~ /^[a-z][a-z-]*$/) type = "?"
     wl[++nw] = "writer\t" type "\t" FILENAME ":" FNR " " fn[depth]
@@ -114,6 +128,7 @@ awk -v q="'" -v admitted=" $READER_FILES " -v hooks=" $hook_files " '
       if (!(FILENAME in pfirst)) { pfirst[FILENAME] = FNR; pord[++np] = FILENAME }
       pn[FILENAME]++
     }
+    if (!(index(admitted, " " FILENAME " ")) && FILENAME != "payload/scripts/lib/proof.sh" && unheard(line)) ul[++nu] = "unheard\t" FILENAME ":" FNR
     if (nwrite) {
       if (!(FILENAME in wfirst)) { wfirst[FILENAME] = FNR; word[++npw] = FILENAME }
       wn[FILENAME]++
@@ -140,6 +155,7 @@ awk -v q="'" -v admitted=" $READER_FILES " -v hooks=" $hook_files " '
     for (i = 1; i <= nt; i++) if (nwr[tord[i]] > 1) { print "shared\t" tord[i] "\t" ids[tord[i]]; ns++ }
     for (i = 1; i <= nr; i++) print rl[i]
     for (i = 1; i <= nl; i++) print ll[i]
-    printf "parsers=%d\nplan_writers=%d\nshared_types=%d\nhook_refusals=%d\nloader_copies=%d\n", np, npw, ns, nr, nl
+    for (i = 1; i <= nu; i++) print ul[i]
+    printf "parsers=%d\nplan_writers=%d\nshared_types=%d\nhook_refusals=%d\nloader_copies=%d\nunheard_folds=%d\n", np, npw, ns, nr, nl, nu
   }' "${files[@]}"
 exit 0
