@@ -2798,7 +2798,13 @@ plan_verb_open() {
     esac
     exit 1
   fi
-  PV_CUR="$(_fill_current_field "$PV_PLAN")"
+  # The run's step as the reader answers it (lib/fill.sh over lib/proof.sh `proof_step_held`); a step that cannot be read
+  # refuses every verb, which would otherwise judge or write at a step it guessed.
+  if ! _fill_current_load "$PV_PLAN"; then
+    die "REFUSED — the step of $PV_PLAN could not be read (the run's facts did not fold); $verb judges and writes nothing at a step it cannot read. The plan is unchanged."
+    exit 2
+  fi
+  PV_CUR="$_FILL_CURRENT_VALUE"
   # THE CHECKSUM IS TAKEN HERE, BEFORE ANY PROJECTION READS THE PLAN, so an edit that lands
   # between the read and the swap is an edit the comparison sees.
   PV_SUM="$(cksum < "$PV_PLAN" 2>/dev/null)"
