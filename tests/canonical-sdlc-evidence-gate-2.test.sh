@@ -821,6 +821,9 @@ od_plan() {  # <current> <SDLC lines> <row>... -> OD_PLAN, bound to this session
     printf '| AC-1.1 | T1 | discharged | see AC-1.1 | CONFIRMED |\n\nAC-1.1:\n  fails-when: the planted defect this eval must go red on\n'
     printf '  evidence: %s/generic-evidence.md\n  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n' "$OD_RL"
   } > "$OD_PLAN"
+  # The plan planted is the run's whole proof state, as when a verb's proof was a plan line: a proof the verb appended to
+  # the run's log goes with it.
+  [ ! -f "$OD_REC/run.log" ] || { /usr/bin/grep -v '^run/v1|ev=proof|' "$OD_REC/run.log" > "$OD_REC/run.log.n"; mv "$OD_REC/run.log.n" "$OD_REC/run.log"; }
   bound_marker "$OD" "$OD_SID" "$OD_PLAN" >/dev/null 2>&1 || :
 }
 od_rows() {  # <T1 status> <T2 status> <T3 and T4 status> -> the order's rows: build, regression, review, release, integrate

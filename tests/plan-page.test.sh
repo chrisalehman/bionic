@@ -163,5 +163,11 @@ for f in "Step 1's requirements:" "each row's '- T<id>:' evidence line" "each cr
   expect_contains "the refusal names what it could not read at 15: $f" "could not be read at 15: $f" "$GATE_SAID"; done
 printf 'run/v1|ev=step|n=5|at=2026-11-01T00:00:03Z\n' >> "$L2"; gate
 expect_contains "at Step 5 the refusal names the step's line" "could not be read at 15: Step 5's line and its fields" "$GATE_SAID"
+# A row's declared red at 15 is judged on the proofs the log holds: owed with none after it, cleared by a later one.
+printf 'run/v1|ev=step|n=6|at=2026-11-01T00:00:04Z\nrun/v1|ev=admitted|id=d1|row=T1|suite=a.test.sh|token=ext:gone|at=2026-11-01T00:00:05Z\n' >> "$L2"; gate
+expect_contains "at 15 a declared red the log holds, no proof after it, is owed" "a.test.sh: landed red until ext:gone" "$GATE_SAID"
+printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=record/floor.log|at=2026-11-01T00:00:06Z\n' "$H" >> "$L2"; gate
+expect_eq "…a regression proof after it in the log clears it: the refusal is the facts the log lacks, and names no proof" "could not be read at 15" \
+  "$(printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o 'landed red until\|could not be read at 15\|the proofs that clear' | LC_ALL=C sort -u | paste -sd'|' -)"
 
 finish

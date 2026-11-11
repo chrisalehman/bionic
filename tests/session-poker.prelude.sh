@@ -617,7 +617,7 @@ s47_lines() { printf '%s\n' "$OUT" | /usr/bin/grep "^poker: $1 " ; }  # <WAIT|FI
 s46_last() {  # <plan> <kind> -> proof_last's answer, from the library itself
   bash -c '. "$1" && proof_last "$2" "$3"' _ "$S46_LIB" "$1" "$2" 2>/dev/null
 }
-s46_proved() { /usr/bin/grep -E '^proved: ' "$1"; }  # <plan> -> its proof lines
+s46_proved() { bash -c '. "$1" && proof_lines "$2"' _ "$S46_LIB" "$1" 2>/dev/null; }  # <plan> -> the run's proofs through the proof library's reader, each in an older plan's line shape
 
 # ── hoisted from Section 48 §READY-EARLY (review half): s48_row, s48_fill_has — Section 59 reads rows and FILL lines with them. ──
 s48_row() {  # <plan> <id> -> the row's cells, `|`-joined and trimmed: id|…|status|reads
