@@ -965,11 +965,11 @@ expect_eq "(ca2) a carry of C to T1, already landed, exits 0" "0" "$ST_CMRC"
 expect_eq "(ca2b) …and its ask closes at once" "closed" "$(ll_ask "$ST" record/wave-x/recC.md#1 | cut -d'|' -f1)"
 expect_contains "(ca2c) …and C reads fixed by T1" "recC.md#1 T1 moved" "$(ll_fixed "$ST")"
 
-section "§CELL: the landing that writes a criterion's evidence marks no status: no suite a landing ran discharges a cell"
-# fails-when: the landing's evidence is not written, or a landing writes the table's status.
+section "§CELL: a landing writes no criterion's cell or key: no suite a landing ran discharges or evidences a criterion"
+# fails-when: a landing writes a criterion's evidence key from the suites it ran, or the table's status.
 ll_cell() { awk -F'|' -v a="$2" '$2 ~ "^ *" a " *$" { s = $4; gsub(/^ +| +$/, "", s); print s }' "$1"; }   # <plan> <AC> -> its status cell
 ll_block_ev() { awk -v a="$2:" 'index($0, a) == 1 { b = 1; next } b && /^[^ \t]/ { b = 0 } b && /^[ \t]+evidence:/ { sub(/^[ \t]+evidence:[ \t]*/, ""); print; exit }' "$1"; }   # <plan> <AC>
-expect_contains "(ce1) AC-1.1's block evidence is the landing's log for a.test.sh" "record/wave-x/line/T1-a" "$(ll_block_ev "$STP" AC-1.1)"
+expect_eq "(ce1) AC-1.1's block evidence still reads as the plan wrote it after T1 landed green on a.test.sh, its eval's suite" "pending" "$(ll_block_ev "$STP" AC-1.1)"
 expect_eq "(ce1b) …and its table status still reads pending: the landing marks no cell" "pending" "$(ll_cell "$STP" AC-1.1)"
 expect_eq "(ce2) AC-1.2, waived, keeps its waived status: a landing never overwrites a waiver" "waived" "$(ll_cell "$STP" AC-1.2)"
 expect_eq "(ce2b) …and the record names no cell settled" "0" "$(ll_ev "$ST" settled | grep -c .)"

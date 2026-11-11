@@ -2546,11 +2546,6 @@ $SAID_REFUSED
 SAID_REFUSE
 }
 
-# serves_tasks <plan> -> `<id><TAB><serves><TAB><step><TAB><kind>` for each `## Tasks` row (lib/units.sh units_rows,
-# the table's one reader).
-serves_tasks() {
-  units_rows "$1" 2>/dev/null | awk -F'\t' '$1 != "" { print $1 "\t" $8 "\t" $2 "\t" $3 }'
-}
 
 # A cell value the plan can hold: no pipe, tab or line break (AC-9.2). 0 when it can.
 plan_verb_value_ok() {
@@ -2939,89 +2934,6 @@ TICK_QUIET_MTIME=""; TICK_QUIET_CHANNEL=""; TICK_QUIET_AGE=""; TICK_QUIET_CAD=""
 POKER_BRIEF_WORDS=""
 BFB_OF=""; BFB_OWED=""; BFB_BRANCH=""
 PFC_OUT=""; PFC_ART=""
-SERVES_AWK='
-function trim(v) { gsub(/^[ \t]+|[ \t]+$/, "", v); return v }
-function cells(line, out,    n, i, t) {
-  gsub(/\\\|/, "\001", line)
-  n = split(line, t, "|")
-  for (i = 2; i < n; i++) { out[i - 1] = trim(t[i]); gsub(/\001/, "|", out[i - 1]) }
-  return n - 2
-}
-function serves_load(spec,    n0, i, tl, tv, ns, sv, s) {
-  n0 = split(spec, tl, "\n"); nt = 0
-  for (i = 1; i <= n0; i++) {
-    split(tl[i], tv, "\t"); if (tv[1] == "") continue
-    nt++; tid[nt] = tv[1]; tstep[nt] = tv[3]; tkind[nt] = tv[4]; ns = split(tv[2], sv, /[ ,;]+/)
-    for (s = 1; s <= ns; s++) if (sv[s] != "") serves[nt, sv[s]] = 1
-  }
-}
-function serves_hit(t, cr) {
-  return (((t, cr) in serves) || (ereq[cr] != "" && ((t, ereq[cr]) in serves)))
-}
-function eval_row(line,    nc, c, j, cr) {
-  if (line ~ /^[ \t]*\|[-|: \t]*$/) return
-  nc = cells(line, c)
-  if (!evh) { evh = 1; delete col; for (j = 1; j <= nc; j++) col[tolower(c[j])] = j; return }
-  cr = ("criterion" in col) ? c[col["criterion"]] : ""
-  if (cr == "" || (cr in eseen)) return
-  eseen[cr] = 1; ne++; ec[ne] = cr
-  ereq[cr] = ("requirement" in col) ? c[col["requirement"]] : ""
-  eapp[cr] = ("approach" in col) ? c[col["approach"]] : ""
-  eev[cr] = ("eval" in col) ? c[col["eval"]] : ""
-  efw[cr] = ("fails when" in col) ? c[col["fails when"]] : ""
-  etype[cr] = ("eval type" in col) ? c[col["eval type"]] : ""
-}'
-LE_AWK='
-function suite_of(ev,    t) {
-  if (!match(ev, /`[^` \t]+\.test\.sh`/)) return ""
-  t = substr(ev, RSTART + 1, RLENGTH - 2)
-  return t
-}
-BEGIN {
-  serves_load(ENVIRON["LE_TASKS"]); row = ENVIRON["LE_ROW"]; slug = ENVIRON["LE_SLUG"]; cf = ENVIRON["LE_COUNT"]
-  nl = split(ENVIRON["LE_LOGS"], ll, "\n")
-  for (i = 1; i <= nl; i++) { split(ll[i], lv, "\t"); if (lv[1] != "" && lv[2] != "") logs[lv[1]] = lv[2] }
-  for (t = 1; t <= nt; t++) if (tid[t] == row) rt = t
-}
-{ raw[NR] = $0; ln = $0; sub(/\r$/, "", ln); L[NR] = ln }
-END {
-  for (i = 1; i <= NR; i++) {
-    line = L[i]
-    if (line ~ /^[ \t]*```/) { fence = !fence; continue }
-    if (fence) continue
-    if (line ~ /^## /) {
-      inm = 0; evh = 0; cur = ""
-      inev = (line ~ /^## Eval design[ \t]*$/)
-      if (line ~ /^## Verification Matrix/) inm = 1
-      continue
-    }
-    if (inev && line ~ /^[ \t]*\|/) { eval_row(line); continue }
-    if (!inm || line ~ /^[ \t]*\|/) { if (inm) cur = ""; continue }
-    if (line ~ /^[^ \t]/) {
-      cur = ac_any(line)
-      if (cur != "") { if (cur in seen) cur = ""; else { seen[cur] = 1; nb++; bord[nb] = cur } }
-      continue
-    }
-    if (cur != "" && line ~ /^[ \t]+[^ \t]/) {
-      k = line; sub(/^[ \t]+/, "", k); v = k; sub(/[ \t]*:.*$/, "", k); sub(/^[^:]*:[ \t]*/, "", v)
-      if (k == "eval" && !(cur in beval)) beval[cur] = trim(v)
-      if (k == "evidence" && !(cur in evl)) { evl[cur] = i; evv[cur] = trim(v) }
-    }
-  }
-  written = 0
-  for (b = 1; b <= nb && rt; b++) {
-    cr = bord[b]
-    if (!(cr in evl) || !serves_hit(rt, cr)) continue
-    s = suite_of(beval[cr])
-    if (s == "" || !(s in logs)) continue
-    if (evv[cr] != "pending" && index(evv[cr], "record/" slug "/line/") != 1) continue
-    if (evv[cr] == logs[s]) continue
-    n = evl[cr]; ln = L[n]
-    if (match(ln, /evidence[ \t]*:/)) { out[n] = substr(ln, 1, RSTART + RLENGTH - 1) " " logs[s]; written++ }
-  }
-  for (i = 1; i <= NR; i++) print ((i in out) ? out[i] : raw[i])
-  printf "%d\n", written > cf
-}'
 
 # ---------------------------------------------------------------- verbs
 
