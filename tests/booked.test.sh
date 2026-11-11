@@ -350,8 +350,8 @@ section "§RUNLINE — the run close writes the run's line to the bound plan's l
 #
 # THE OTHER WRITER. floor-run is one (session-poker-4 §RUNLINE); booked.sh's run close is the other: a detached run
 # whose session is bound to a plan appends, after the log's rc line and before `<log>.rc`,
-#   line/v1|ev=run|log=<rel path>|head=<40-hex>|dirty=<n>|rc=<n>|sha256=<log hash>|starter=<who>|at=<ISO>
-# to that plan's landing record. WHO STARTED IT is the command's own `--starter <tick|orchestrator|person>`, else
+#   run/v1|ev=run|log=<rel path>|head=<40-hex>|dirty=<n>|rc=<n>|sha256=<log hash>|starter=<who>|at=<ISO>
+# to that plan's run log. WHO STARTED IT is the command's own `--starter <tick|orchestrator|person>`, else
 # orchestrator, so the hand-holds count reads a person's run alone. Its log lies under the project's .bionic/tmp/runs, so `log=` is the path from the
 # project root. ONE READER: lib/proof.sh `proof_attested floor` (what `proof-add floor` runs) reads booked's line as
 # it reads floor-run's: the log in place, and a byte copy of it under record/ (the only place proof-add cites from),
@@ -390,7 +390,7 @@ expect_regex "BR-1b precondition: the log's hash reads as 64 hex" '^[0-9a-f]{64}
 expect_eq "BR-2 AC-6.1 the run close appends exactly one run line to the bound plan's landing record" "1" \
   "$(rl_runs | awk 'END { print NR + 0 }')"
 expect_regex "BR-2b …in the grammar: the log from the project root, T1's head, dirty=0, rc=0, the log's sha256, the orchestrator as its starter (the command names none), when" \
-  "^line/v1[|]ev=run[|]log=${RL_LOG#"$RL_WR"/}[|]head=${RL_H}[|]dirty=0[|]rc=0[|]sha256=${RL_SHA}[|]starter=orchestrator[|]at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\$" \
+  "^run/v1[|]ev=run[|]log=${RL_LOG#"$RL_WR"/}[|]head=${RL_H}[|]dirty=0[|]rc=0[|]sha256=${RL_SHA}[|]starter=orchestrator[|]at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\$" \
   "$(rl_runs | tail -n 1)"
 RL_AT="$(rl_runs | tail -n 1 | tr '|' '\n' | sed -n 's/^at=//p')"
 
