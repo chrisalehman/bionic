@@ -982,7 +982,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   WCARD_ND=(); WCARD_RROW=(); WCARD_DROW=(); WCARD_OROW=(); WCARD_EROW=(); WCARD_TROW=()
   WCARD_RDET=(); WCARD_DDET=()
   WCARD_ADRK=(); WCARD_ADRV=()
-  local out line key rest k v wide=""
+  local out line key rest k v wide="" _wc_rc
   # THE HEADER IS THE READER-OWNED PARSER'S (lib/plan-read.sh `plan_read_header`), one read of every key: what the
   # artifact points at, its scale, rigor and walk. The scale goes to the parse, which owes an Eval design unless it is task.
   while IFS= read -r line; do
@@ -1046,7 +1046,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   [ -z "$wide" ] || { WCARD_ERR="$wide"; return 1; }
   # THE TASKS ROWS AND THE MATRIX'S ARE THE PLAN'S TABLES AS THE SCHEDULER AND THE READER READ THEM: `units_rows`, the
   # by-name map over lib/plan-read.sh's table walk, whose rows the chain and the batches below are drawn from too, and
-  # `plan_read_rows` of the Verification Matrix, counted by the criteria it names. A row is
+  # the criteria the reader lists (`reader_cells`), counted. A row is
   # `id, task, kind, deps, agent, serves, the task cell as written`, its backticks off all but the last.
   if [ "$1" = step3 ]; then
     _card_units_rows "$2"
@@ -1056,7 +1056,10 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
       function clean(s) { gsub(/`/, "", s); sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
       $1 != "" { sv = clean($8); if (sv !~ /[A-Za-z0-9]/) sv = ""
         print clean($1) "\t" clean($4) "\t" clean($3) "\t" clean($6) "\t" clean($5) "\t" sv "\t" $4 }')
-    WCARD_MROWS="$(plan_read_rows "$2" "Verification Matrix" ac 2>/dev/null | awk -F'\t' 'index($1, "ac=AC-") == 1 { n++ } END { print n + 0 }')"
+    # the criteria are the reader's list, one fold; a run whose facts could not be read is no count of them
+    WCARD_MROWS="$(_proof_ask "$2" reader_cells "$2")"; _wc_rc=$?
+    case "$_wc_rc" in 0) WCARD_MROWS="$(printf '%s\n' "$WCARD_MROWS" | grep -c .)" ;; 1) WCARD_MROWS=0 ;;
+      *) WCARD_ERR="the run's facts could not be read, so its criteria are not counted"; return 1 ;; esac
   fi
   # THE WRITERS ARE A PERSON'S CAP, READ BY FIELD (wave-28 T9; D15): `budget_cap` (lib/run.sh)
   # answers from a `parallel-budget:` line whose `source=` is `user` or `override`, one whole

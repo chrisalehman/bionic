@@ -428,7 +428,7 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
 }
 
 # reader_cells <plan> [head] -> one line per criterion, `<criterion>\037<state>\037<by>\037<tier>\037<evidence>\037
-# <auditor>\037<confirmed>`: the Eval design's criteria in its order, then each row an older plan's matrix table holds
+# <auditor>\037<confirmed>\037<serves>`: the Eval design's criteria in its order, then each row an older plan's matrix table holds
 # and the Eval design lacks. ONE FOLD answers every criterion, so a caller that judges them all asks once; the cell
 # question answers through it, and no question prints the further fields: the bed pins the cell answer over the
 # closed runs, and the fields are what the gate, the judge and the cards weigh, never a fact a person asks for.
@@ -440,24 +440,27 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
 #               criterion: the evidence review standing at <head>, CONFIRMED when it passed and REFUTED when not.
 #   confirmed   on a row the older table holds: the discharging event's `confirmed=`, else its block's
 #               `user-confirmed:`; on any other criterion: the approval naming it, as `<by> <at>`.
+#   serves      on a row the older table holds: its block's first `serves:`; else the Eval design's requirement.
 # 1 when the plan names no criterion; the fold's failure is its exit.
 reader_cells() {
-  local plan="$1" head="${2:-}" eval rows conf facts
-  eval="$(plan_read_rows "$plan" 'Eval design' criterion 2>/dev/null)" || eval=""
-  rows="$(plan_read_rows "$plan" 'Verification Matrix' ac 2>/dev/null)" || rows=""
-  [ -n "$eval$rows" ] || return 1
-  conf="$(plan_read_blocks "$plan" 2>/dev/null | awk -F'\t' '$1 != "" && $2 ~ /^[ \t]*user-confirmed[ \t]*:/ && !($1 in s) {
-    s[$1] = 1; v = $2; sub(/^[ \t]*user-confirmed[ \t]*:[ \t]*/, "", v); sub(/[ \t]+$/, "", v); print $1 "\t" v }')" || conf=""
-  facts="$(reader_facts "$plan")" || return
-  printf 'E\n%s\nM\n%s\nC\n%s\nF\n%s\n' "$eval" "$rows" "$conf" "$facts" | awk -F'|' -v h="$head" "$_READER_AWK$(scale_tier_awk)"'
+  # Its names are its own: a caller that hands it the facts names its copy `facts`, which a local of that name would hide.
+  local _rc_plan="$1" _rc_head="${2:-}" _rc_eval _rc_rows _rc_conf _rc_facts
+  _rc_eval="$(plan_read_rows "$_rc_plan" 'Eval design' criterion 2>/dev/null)" || _rc_eval=""
+  _rc_rows="$(plan_read_rows "$_rc_plan" 'Verification Matrix' ac 2>/dev/null)" || _rc_rows=""
+  [ -n "$_rc_eval$_rc_rows" ] || return 1
+  _rc_conf="$(plan_read_blocks "$_rc_plan" 2>/dev/null | awk -F'\t' '$1 != "" && match($2, /^[ \t]*(user-confirmed|serves)[ \t]*:/) {
+    k = $2; sub(/^[ \t]+/, "", k); sub(/[ \t]*:.*$/, "", k); if (($1, k) in s) next
+    s[$1, k] = 1; v = substr($2, RLENGTH + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print $1 "\t" k "\t" v }')" || _rc_conf=""
+  _rc_facts="$(reader_facts "$_rc_plan")" || return
+  printf 'E\n%s\nM\n%s\nC\n%s\nF\n%s\n' "$_rc_eval" "$_rc_rows" "$_rc_conf" "$_rc_facts" | awk -F'|' -v h="$_rc_head" "$_READER_AWK$(scale_tier_awk)"'
     function cell(s, k,   n, i, c) { n = split(s, c, "\t"); for (i = 1; i <= n; i++) if (index(c[i], k "=") == 1) return substr(c[i], length(k) + 2); return "" }
     function none(s) { return s == "" || s == "—" || s == "-" || tolower(s) == "n/a" }
     $0 == "E" || $0 == "M" || $0 == "C" || $0 == "F" { part = $0; next }
     $0 == "" { next }
-    part == "E" { c = cell($0, "criterion"); if (c == "" || (c in seen)) next; seen[c] = 1; ord[++n] = c; tier[c] = tier_of(cell($0, "eval-type")); next }
+    part == "E" { c = cell($0, "criterion"); if (c == "" || (c in seen)) next; seen[c] = 1; ord[++n] = c; tier[c] = tier_of(cell($0, "eval-type")); req[c] = cell($0, "requirement"); next }
     part == "M" { c = cell($0, "ac"); if (c == "") next; if (!(c in seen)) { seen[c] = 1; ord[++n] = c }
       row[c] = 1; if (tier[c] == "") tier[c] = cell($0, "tier"); rev[c] = cell($0, "evidence"); raud[c] = cell($0, "auditor"); next }
-    part == "C" { split($0, w, "\t"); rconf[w[1]] = w[2]; next }
+    part == "C" { split($0, w, "\t"); if (w[2] == "serves") sv[w[1]] = w[3]; else rconf[w[1]] = w[3]; next }
     { e = ev(); c = (e == "approval") ? line_kv("key") : line_kv("ac") }
     e == "proof" && line_kv("kind") == "review" && line_kv("question") == "evidence" && h != "" && line_kv("head") == h { review = (line_kv("result") == "pass") ? "CONFIRMED" : "REFUTED" }
     c == "" || !(c in seen) { next }
@@ -472,9 +475,15 @@ reader_cells() {
           ev1 = d ? ev_[c] : (none(rev[c]) ? "" : rev[c]); a = d ? aud[c] : (none(raud[c]) ? "" : raud[c])
           k = d ? cf[c] : rconf[c]
         } else { ev1 = (b == "proof" || b == "waiver") ? ev_[c] : ""; a = review; k = ok[c] }
-        print c "\037" (b == "" ? "pending" : "discharged") "\037" b "\037" tier[c] "\037" ev1 "\037" a "\037" k
+        print c "\037" (b == "" ? "pending" : "discharged") "\037" b "\037" tier[c] "\037" ev1 "\037" a "\037" k "\037" ((c in row) ? sv[c] : req[c])
       }
     }'
+}
+
+# reader_criteria <plan> -> each criterion reader_cells lists, one id per line in its order, with no fold: the list is
+# the plan's alone, so a caller that needs which criteria there are and not where they stand reads no fact.
+reader_criteria() {  # 1 when the plan names none
+  ( reader_facts() { :; }; reader_cells "$1" ) | awk -F'\037' '{ print $1; f = 1 } END { exit !f }'
 }
 
 _reader_ready_rows() {  # <plan> [row] -> the rows ready now, in table order, or <row> alone when it is; 1 the plan lacks it
