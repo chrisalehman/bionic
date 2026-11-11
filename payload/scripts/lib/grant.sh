@@ -1033,3 +1033,81 @@ grant_resolve_lines() (
   done <<< "${1-}"
   exit 0
 )
+
+# THE WORDS OF THE HOOK'S DENIALS, and the one JSON it prints. hooks/permission-answer.sh reads its
+# payload, collects facts and calls these; every sentence a person or an agent reads from a denial is
+# spelled here, so a test calls a function and compares text.
+#
+#   grant_fail_words <key> [<arg>...]
+#       A failure after engagement. Sets GRANT_FAIL_REASON (the answer line's reason) and
+#       GRANT_FAIL_MESSAGE (the denial). The key names what failed, its args are the facts the
+#       sentence quotes; a key that is no name here is taken as the sentence itself. rc 0.
+#   grant_unlogged_words <answers path>
+#       The denial for an allow that could not be written to the answer log. Sets the same two.
+#   grant_deny_words <deny-fix|deny-reserved> <the verdict's fields after the kind>
+#       The words of a decision's denial. Sets GRANT_DENY_REASON, GRANT_DENY_MESSAGE and, for a
+#       reserved denial, GRANT_DENY_CATEGORY; rc 2 for any other kind.
+#   grant_answer_json <allow|deny> [<message>]
+#       The one decision object, on stdout: exactly the two shapes the live check measured as
+#       honoured, and a fixed denial when the object cannot be built. Any word but `allow` is a deny.
+grant_fail_words() {
+  local what
+  case "$1" in
+    not-object)     what="could not read the question: the payload is not a JSON object" ;;
+    no-tool)        what="could not read the question: it names no tool" ;;
+    roster-symlink) what="the roster for this session is a symlink, which bionic refuses to follow" ;;
+    roster-absent)  what="there is no roster for this session, so the asking agent $2 cannot be found" ;;
+    roster-unread)  what="the roster for this session cannot be read, so the asking agent $2 cannot be found" ;;
+    roster-no-row)  what="the roster has no row for the asking agent $2" ;;
+    run-unreadable) what="the run this session is bound to cannot be read ($2)" ;;
+    workspace-unread) what="the workspace record for this session could not be read (a symlink, a file that cannot be opened, or git could not be asked which trees are its linked worktrees)" ;;
+    main-root)      what="the main root of the project, $2, does not resolve to a real location" ;;
+    roots)          what="the grant could not be composed from the recorded roots (grant_roots rc $2)" ;;
+    reader)         what="the command reader failed (cmd_effects rc $2)" ;;
+    reserved)       what="the reserved table failed (grant_reserved rc $2)" ;;
+    reserved-effects) what="the reserved table failed (grant_reserved_effects rc $2)" ;;
+    decide)         what="the decision could not be made (grant_decide rc $2)" ;;
+    no-verdict)     what="the decision printed no verdict" ;;
+    stopped)        what="the hook stopped (exit $2) while $3" ;;
+    *)              what="$*" ;;
+  esac
+  GRANT_FAIL_REASON="failure: $what"
+  GRANT_FAIL_MESSAGE="bionic could not answer this permission question, so it is denied: $what. Tell the lead (the human, if you are the lead) what failed; /bionic:doctor checks the install."
+}
+
+grant_unlogged_words() {
+  GRANT_FAIL_REASON="the answer could not be written to the answer log"
+  GRANT_FAIL_MESSAGE="bionic: denied, because $GRANT_FAIL_REASON ($1). Report it to the lead; /bionic:doctor checks the install."
+}
+
+grant_deny_words() {
+  local rest="$2"
+  case "$1" in
+    deny-fix)
+      # The reason may carry a resolver's mark (a TAB); the fix never does, so it is the last field.
+      GRANT_DENY_REASON="${rest%"$GRANT_TAB"*}"
+      GRANT_DENY_REASON="${GRANT_DENY_REASON//$GRANT_TAB/ }"
+      GRANT_DENY_MESSAGE="bionic: $GRANT_DENY_REASON ${rest##*"$GRANT_TAB"}"
+      ;;
+    deny-reserved)
+      GRANT_DENY_CATEGORY="${rest%%"$GRANT_TAB"*}"
+      GRANT_DENY_REASON="${rest#*"$GRANT_TAB"}"
+      GRANT_DENY_MESSAGE="bionic: $GRANT_DENY_REASON"
+      ;;
+    *) return 2 ;;
+  esac
+}
+
+grant_answer_json() {
+  local out fixed='{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"bionic: denied (the answer could not be built)"}}}'
+  if [ "$1" = allow ]; then
+    out="$(jq -cn '{hookSpecificOutput:{hookEventName:"PermissionRequest",decision:{behavior:"allow"}}}' 2>/dev/null)"
+  else
+    out="$(jq -cn --arg m "${2:-bionic: denied}" \
+      '{hookSpecificOutput:{hookEventName:"PermissionRequest",decision:{behavior:"deny",message:$m}}}' 2>/dev/null)"
+    # jq is known present; if it still fails, a fixed denial is printed rather than nothing.
+    [ -n "$out" ] || out="$fixed"
+  fi
+  [ -n "$out" ] || out="$fixed"
+  printf '%s' "$out"
+}

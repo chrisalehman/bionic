@@ -182,7 +182,7 @@ physicalize() {  # $1=absolute path (need not exist) → folded, ancestors resol
 # say a Write or Edit is safe, so it refuses it; the refusal names /bionic:doctor, and the
 # Bash wall still admits the four repair commands. On PostToolUse the write has already
 # happened and exit 2 only shows the refusal to the model.
-BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh binding.sh plan-read.sh units.sh"
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh binding.sh plan-read.sh units.sh write-gate.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -301,6 +301,11 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "canonical-sdlc-governi
 # `units_validate` and prints the violation lines back; nothing here parses the table.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/units.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/write-gate.sh"
+
+# _gs_refuse <key> [<fact>...] — refuse in lib/write-gate.sh's words, for this artifact.
+_gs_refuse() { write_gate_refuse "$1" "$BASENAME" "$FILE_PATH" "${@:2}"; }
 
 # THE CONTEXT, IN ONE CALL (REQ-1f, lib/context.sh): it adopts the payload read before
 # the loader, and returns the session id past the ONE shape guard (REQ-1h) — which this
@@ -344,12 +349,7 @@ if [ "$EVENT" != "PostToolUse" ] && [ "$BIONIC_ENGAGED" = 1 ]; then
       GS_MEM_PROJECTS="${GS_MEM_ROOT%/}/projects"
       case "$GS_MEM_PATH" in
         "$GS_MEM_PROJECTS"/*/memory|"$GS_MEM_PROJECTS"/*/memory/*)
-          refuse exit2 write "this writes the memory store" "use record/<wave>/assumptions.md" \
-            "This $TOOL writes $GS_MEM_PATH, inside the auto-memory store ($GS_MEM_PROJECTS/*/memory).
-An engaged run keeps what it learns where the run can see it: a judgment call goes in
-record/<wave>/assumptions.md, and a correction that should outlive the run goes to the user
-as a rule proposal (record/<wave>/user-rules-proposed.md), for the rules file that owns it.
-Nothing that gates or reviews this run reads the store. Reading it stays open." ;;
+          write_gate_refuse memory "" "$FILE_PATH" "$TOOL" "$GS_MEM_PATH" "$GS_MEM_PROJECTS" ;;
       esac
       ;;
   esac
@@ -936,13 +936,7 @@ if [ "$UNDER_DOCS_ROOT" -eq 0 ]; then
       adr-*.md)                    MISPLACED_SUBDIR=adrs ;;
       *)                           MISPLACED_SUBDIR=plans ;;
     esac
-    _gs_detail="canonical-sdlc artifact '$BASENAME' is misplaced.
-Path: $FILE_PATH
-It declares canonical-sdlc frontmatter but does not live under this project's docs root.
-Docs root: $DOCS_ROOT
-Fix: write it under $DOCS_ROOT/$MISPLACED_SUBDIR/ instead.
-     (the docs root is <project>/.bionic/docs by default; override with 'docs-root:' in $PROJECT_ROOT_FROM_PATH/.bionic/config.yaml)"
-    refuse exit2 write "this artifact is outside the docs root" "write it under the docs root" "$_gs_detail"
+    _gs_refuse misplaced "$DOCS_ROOT" "$MISPLACED_SUBDIR" "$PROJECT_ROOT_FROM_PATH"
   fi
   # R9/AC-13: the frontmatter arm above only catches artifacts that
   # self-declare canonical-sdlc frontmatter. An operational artifact (a
@@ -953,37 +947,17 @@ Fix: write it under $DOCS_ROOT/$MISPLACED_SUBDIR/ instead.
   # is untouched: TARGET_BIONIC is empty and this arm is silent.
   # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
   if [ -n "$TARGET_BIONIC" ] && [ "$TARGET_BIONIC" != "$PINNED_BIONIC" ]; then
-    _gs_detail="artifact write targets '$TARGET_BIONIC', not this project's pinned .bionic root.
-Path: $FILE_PATH
-Pinned root: $PINNED_BIONIC
-Fix: write under $PINNED_BIONIC instead — the .bionic tree is pinned to the main repository root at Step 0 and is never re-derived from a worktree or subdirectory copy."
-    refuse exit2 write "this write targets an unpinned .bionic root" "write under the pinned root" "$_gs_detail"
+    _gs_refuse unpinned "$TARGET_BIONIC" "$PINNED_BIONIC"
   fi
   exit 0
 fi
 
 if [ -z "$CONTENT" ]; then
-  _gs_detail="canonical-sdlc artifact '$BASENAME' has no content to validate.
-Path: $FILE_PATH
-Fix: use Write to create the artifact with governing-skill frontmatter."
-  refuse exit2 write "this artifact has no content to validate" "create it with Write" "$_gs_detail"
+  _gs_refuse no-content
 fi
 
 if [ -z "$FRONTMATTER" ]; then
-  _gs_detail="canonical-sdlc artifact '$BASENAME' is missing a YAML frontmatter block.
-Path: $FILE_PATH
-Fix: prepend:
-  ---
-  governing-skill: <skill-id for the step that produced this artifact>
-  sdlc-step: <step number>
-  epic: epic-NN-<slug>
-  wave: wave-NN-<slug>   # omit for epic-level and continuation
-  canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION}
-  intent: <build|bugfix|refactor|tune|spike|incident-response>
-  rigor: <single|double>
-  scale: <task|wave|epic>
-  ---"
-  refuse exit2 write "this artifact has no frontmatter block" "prepend a frontmatter block" "$_gs_detail"
+  _gs_refuse no-frontmatter "$SUPPORTED_SDLC_VERSION"
 fi
 
 # THE ARTIFACT AS THE PARSER READS IT. The parser reads a path, and the text judged here is the
@@ -991,9 +965,7 @@ fi
 # file, removed on every way out, and every read below is of that one copy. The header is read
 # once; `yaml_get` and `gs_has_key` answer from that reading with no further process.
 GS_PAGE="$(mktemp "${TMPDIR:-/tmp}/bionic-page.XXXXXX")" || GS_PAGE=""
-[ -n "$GS_PAGE" ] || refuse exit2 write "this artifact could not be read" "retry the write" \
-  "canonical-sdlc artifact '$BASENAME': no temporary file could be made to read it through the plan parser.
-Path: $FILE_PATH"
+[ -n "$GS_PAGE" ] || _gs_refuse no-temp-file
 trap 'rm -f "$GS_PAGE"' EXIT
 printf '%s\n' "$CONTENT" > "$GS_PAGE"
 GS_HEADER="$(plan_read_header "$GS_PAGE")" || GS_HEADER=""
@@ -1016,10 +988,7 @@ gs_has_key() { case $'\n'"$GS_HEADER" in *$'\n'"$1="*) return 0 ;; esac; return 
 GOVERNING=$(yaml_get governing-skill)
 
 if [ -z "$GOVERNING" ]; then
-  _gs_detail="canonical-sdlc artifact '$BASENAME' is missing a 'governing-skill:' frontmatter field.
-Path: $FILE_PATH
-Fix: add a non-empty 'governing-skill: <skill-id>' line to the frontmatter block."
-  refuse exit2 write "this artifact declares no governing skill" "add a 'governing-skill:' line" "$_gs_detail"
+  _gs_refuse no-governing
 fi
 
 # ---------- canonical-sdlc schema enforcement ----------
@@ -1044,10 +1013,7 @@ SDLC_VERSION=$(yaml_get canonical_sdlc_version)
 GS_V15=0
 case "$BASENAME:$SDLC_VERSION" in *.plan.md:15) GS_V15=1 ;; esac
 if [ "$SDLC_VERSION" != "$SUPPORTED_SDLC_VERSION" ] && [ "$GS_V15" -eq 0 ]; then
-  _gs_detail="canonical-sdlc artifact '$BASENAME' declares canonical_sdlc_version: '$SDLC_VERSION'.
-Path: $FILE_PATH
-Fix: set 'canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION}' — the only supported version."
-  refuse exit2 write "this artifact declares an unsupported version" "set the supported version" "$_gs_detail"
+  _gs_refuse bad-version "$SDLC_VERSION" "$SUPPORTED_SDLC_VERSION"
 fi
 
 # ---------- intent × rigor × scale triple + universal contract ----------
@@ -1057,43 +1023,8 @@ fi
 # (line 143), so whole-line yaml_get reads compare cleanly under CRLF too.
 # The triple's presence is the gate — there is no separate mode axis.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-block() {  # <fact> <fix> <what went wrong>
-  # THE FRAME KEEPS ITS PARAMETER AND LOSES ITS VOICE (task 13, ruling D-1). The
-  # caller's ruled fact and fix render as the one user line; the artifact name, its
-  # path and the caller's own sentence become `detail`.
-  refuse exit2 write "$1" "$2" "canonical-sdlc artifact '$BASENAME': $3
-Path: $FILE_PATH"
-}
-
 # Split-brain guard: an artifact declares the triple, never mode.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-[ -z "$(yaml_get mode)" ] || block "this artifact declares mode:" "declare intent:, rigor: and scale:" \
-  "artifacts declare intent:/rigor:/scale:, never mode:"
-INTENT=$(yaml_get intent); RIGOR=$(yaml_get rigor); SCALE=$(yaml_get scale)
-[ -n "$INTENT" ] || block "this artifact declares no intent:" "add an intent: line" \
-  "requires intent: (build|bugfix|refactor|tune|spike|incident-response)"
-# THE SET IS PRINTED BY ITS TWO WORDS, each with what it means (wave-28 T44; wave-30 T11, D1): the
-# printed form is lib/run.sh `rigor_print`'s, so a refusal and a card say a level the same way.
-RIGOR_SET="$(printf '\n  %s' "$(rigor_print single)" "$(rigor_print double)")"
-[ -n "$RIGOR" ]  || block "this artifact declares no rigor:" "add a rigor: line" \
-  "requires rigor: single or double:${RIGOR_SET}"
-[ -n "$SCALE" ]  || block "this artifact declares no scale:" "add a scale: line" \
-  "requires scale: (task|wave|epic)"
-case "$INTENT" in
-  build|bugfix|refactor|tune|spike|incident-response) ;;
-  *) block "that intent is not one of the six" "pick an allowed intent" \
-  "invalid intent: '$INTENT' — allowed: build|bugfix|refactor|tune|spike|incident-response" ;;
-esac
-# THE CLOSED SET IS rigor_level's (lib/run.sh; wave-28 T44; wave-30 T11, D1): `single` or
-# `double`. A word before 1.14.0 is refused here like any other word that is no level.
-rigor_level "$RIGOR" >/dev/null || block "that rigor is not single or double" "pick an allowed rigor" \
-  "invalid rigor: '$RIGOR' — allowed: single or double:${RIGOR_SET}"
-case "$SCALE" in
-  task|wave|epic) ;;
-  *) block "that scale is not task, wave or epic" "pick an allowed scale" \
-  "invalid scale: '$SCALE' — allowed: task|wave|epic" ;;
-esac
-
 # ---------- review-cadence:, fix-policy:, fix-cap: (wave-30 T21; REQ-10 AC-10.1, D4, Δ3) ----------
 #
 # THREE FIELDS THE USER OWNS, beside rigor:. Their vocabulary and their per-level defaults are
@@ -1104,29 +1035,6 @@ esac
 # value outside its vocabulary, the empty fix-policy: included (a set naming no rating). The fix
 # names the vocabulary as one comma-joined word, the field's own syntax: refuse.sh allows six words.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-if gs_has_key review-cadence; then
-  RCAD=$(yaml_get review-cadence)
-  review_cadence_level "$RCAD" >/dev/null || block "that review-cadence is not once" "use once" \
-    "invalid review-cadence: '$RCAD' — allowed: once"
-fi
-if gs_has_key fix-policy; then
-  FPOL=$(yaml_get fix-policy)
-  if FPOL_BAD=$(fix_policy_bad "$FPOL"); then :
-  elif [ -z "${FPOL//[[:space:]]/}" ]; then
-    block "this fix-policy names no rating" "${FIX_POLICY_VOCAB// /,}" \
-      "invalid fix-policy: '' — it names no rating; allowed, comma-joined: $FIX_POLICY_VOCAB"
-  else
-    block "a fix-policy word is no rating" "${FIX_POLICY_VOCAB// /,}" \
-      "invalid fix-policy: '$FPOL' — '$FPOL_BAD' is no rating; allowed, comma-joined: $FIX_POLICY_VOCAB"
-  fi
-fi
-if gs_has_key fix-cap; then
-  FCAP=$(yaml_get fix-cap)
-  { [ -n "$FCAP" ] && fix_cap_render "$FCAP" "$RIGOR" 0 >/dev/null; } \
-    || block "that fix-cap is no count" "a whole number, or a percent" \
-      "invalid fix-cap: '$FCAP' — allowed: a whole number (2) or a percent of the plan's ## Tasks rows (10%)"
-fi
-
 # ---------- walk: enum (epic-14 AC-3) ----------
 #
 # `walk:` is optional at THIS hook — an absent key is not this hook's
@@ -1135,14 +1043,16 @@ fi
 # values `required` and `exempt` are legal — anything else (typo, other
 # value) blocks, naming both legal values.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-WALK=$(yaml_get walk)
-if [ -n "$WALK" ]; then
-  case "$WALK" in
-    required|exempt) ;;
-    *) block "that walk is not required or exempt" "use required or exempt" \
-  "invalid walk: '$WALK' — allowed: required|exempt" ;;
-  esac
+INTENT=$(yaml_get intent); RIGOR=$(yaml_get rigor); SCALE=$(yaml_get scale)
+HAS_CAD=0; HAS_POL=0; HAS_CAP=0
+gs_has_key review-cadence && HAS_CAD=1
+gs_has_key fix-policy && HAS_POL=1
+gs_has_key fix-cap && HAS_CAP=1
+if write_gate_header_fault "$(yaml_get mode)" "$INTENT" "$RIGOR" "$SCALE" "$(yaml_get walk)" \
+    "$HAS_CAD" "$(yaml_get review-cadence)" "$HAS_POL" "$(yaml_get fix-policy)" "$HAS_CAP" "$(yaml_get fix-cap)"; then
+  _gs_refuse "${WG_FAULT[@]}"
 fi
+
 
 # ---------- floor-consistency checks (LOG-ONLY; D14, spec R3) ----------
 #
@@ -1213,8 +1123,7 @@ RL=$(rigor_level "$RIGOR")
 # refused, the fail-open this reader always had.
 PF_TEXT="$(cat "$PROJECT_ROOT_FROM_PATH/.bionic/config.yaml" 2>/dev/null)"
 declare -F alias_gone_text >/dev/null 2>&1 && alias_gone_text rigor-key "$PF_TEXT" \
-  && block "$ALIAS_GONE_SAID" "rename the key" \
-    "$PROJECT_ROOT_FROM_PATH/.bionic/config.yaml still carries the old key; its value is not read"
+  && _gs_refuse alias-project "$ALIAS_GONE_SAID" "$PROJECT_ROOT_FROM_PATH"
 PF="$(rigor_minimum_of "$PF_TEXT")"
 if [ -n "$PF" ]; then
   PR=$(rigor_rank "$PF")
@@ -1232,8 +1141,7 @@ EPIC=$(yaml_get epic)
 if [ -n "$EPIC" ] && [ -r "$DOCS_ROOT/plans/$EPIC/epic.plan.md" ]; then
   EF_TEXT="$(awk '/^---$/{n++;next} n==1' "$DOCS_ROOT/plans/$EPIC/epic.plan.md")"
   declare -F alias_gone_text >/dev/null 2>&1 && alias_gone_text rigor-key "$EF_TEXT" \
-    && block "$ALIAS_GONE_SAID" "rename the key" \
-      "the frontmatter of $DOCS_ROOT/plans/$EPIC/epic.plan.md still carries the old key; its value is not read"
+    && _gs_refuse alias-epic "$ALIAS_GONE_SAID" "$DOCS_ROOT" "$EPIC"
   EF="$(rigor_minimum_of "$EF_TEXT")"
   if [ -n "$EF" ]; then
     ER=$(rigor_rank "$EF")
@@ -1305,19 +1213,7 @@ case "$BASENAME" in
         LEASE_MAIN=""
         [ -n "$LEASE_COMMON" ] && LEASE_MAIN=$( cd "$LEASE_COMMON/.." 2>/dev/null && pwd -P )
         if [ -n "$LEASE_MAIN" ] && [ "$LEASE_MAIN" != "$LEASE_TOP" ]; then
-          _gs_detail="canonical-sdlc plan '$BASENAME' is being written from inside a linked worktree.
-
-    cwd:           $LEASE_CWD
-    worktree:      $LEASE_TOP
-    main checkout: $LEASE_MAIN
-
-The plan is the run's own artifact and it lives in the main checkout: written here
-it lands on the tree's branch, where every hook that reads the active run cannot
-see it until the lease ends.
-
-Fix: write the plan from $LEASE_MAIN. A dispatched agent working in its own tree
-may write there — this refusal is the main thread's alone."
-          refuse exit2 write "this plan is written from a worktree" "write it from the main checkout" "$_gs_detail"
+          _gs_refuse lease "$LEASE_CWD" "$LEASE_TOP" "$LEASE_MAIN"
         fi
       fi
     fi
@@ -1352,13 +1248,7 @@ if ! gs_has_key model_plan; then
 fi
 
 if [ "${#MISSING[@]}" -gt 0 ]; then
-  _gs_detail="canonical-sdlc plan '$BASENAME' is missing required frontmatter flags: ${MISSING[*]}
-Path: $FILE_PATH
-Fix: run Step 0 (Configure) to set these explicitly. See SKILL.md §Step 0.
-Required opt-in flags:        ${REQUIRED_OPT_IN[*]}
-Required discriminator flags: ${REQUIRED_DISCRIMINATORS[*]}
-Required:                     model_plan"
-  refuse exit2 write "this plan is missing frontmatter flags" "run Step 0 to set them" "$_gs_detail"
+  _gs_refuse missing-flags "${MISSING[*]}" "${REQUIRED_OPT_IN[*]}" "${REQUIRED_DISCRIMINATORS[*]}"
 fi
 
 # ---------- pre-registered Verification Matrix required at Step 3+ ----------
@@ -1387,10 +1277,7 @@ case "$BASENAME" in
       *)
         if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null && [ "$SCALE" != "task" ]; then
           if ! plan_read_heading "$GS_PAGE" "Verification Matrix" >/dev/null; then
-            _gs_detail="canonical-sdlc plan '$BASENAME' (sdlc-step ${SDLC_STEP}) is missing a '## Verification Matrix' section.
-Path: $FILE_PATH
-Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix') and lock it at Step 3 approval."
-            refuse exit2 write "this plan has no Verification Matrix" "add the Verification Matrix" "$_gs_detail"
+            _gs_refuse no-matrix "$SDLC_STEP"
           fi
           # ---------- the Step-3 wall on `## Tasks` (REQ-1e, AC-1e.5) ----------
           # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
@@ -1478,18 +1365,10 @@ Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix
                 _gs_units_bad=""
               fi
               if [ "$_gs_bf_fired" -eq 1 ]; then
-                _gs_detail="canonical-sdlc plan '$BASENAME' declares canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION} and its body does not match it:
-${_gs_bf}
-Path: $FILE_PATH
-Fix: repair every line above in one pass — each is a separate arm that would otherwise refuse the next commit in turn."
-                refuse exit2 write "this plan's body is not at contract version ${SUPPORTED_SDLC_VERSION}" "bring the plan forward" "$_gs_detail"
+                _gs_refuse bring-forward "$SUPPORTED_SDLC_VERSION" "$_gs_bf"
               fi
               if [ -n "$_gs_units_bad" ]; then
-                _gs_detail="canonical-sdlc plan '$BASENAME' (sdlc-step ${SDLC_STEP}) has a '## Tasks' table that breaks the Task invariants:
-${_gs_units_bad}
-Path: $FILE_PATH
-Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status. A reads column is optional and may sit anywhere in the header."
-                refuse exit2 write "this plan's Tasks table is invalid" "fix the row the detail names" "$_gs_detail"
+                _gs_refuse tasks-invalid "$SDLC_STEP" "$_gs_units_bad"
               fi
             fi
           fi
@@ -1509,11 +1388,7 @@ esac
 # is not judged, as the Tasks arm above does not judge one: the tool refuses that input itself.
 if [ "$GS_V15" -eq 1 ] && { [ "$TOOL" != "Edit" ] || [ "$EDIT_APPLIED" -eq 1 ]; }; then
   if GS_FAULTS="$(plan_read_faults "$GS_PAGE")"; then
-    refuse exit2 write "this plan holds what version 15 does not" "remove each part named" \
-      "canonical-sdlc plan '$BASENAME' declares canonical_sdlc_version: 15, and version 15 has no place for:
-${GS_FAULTS}
-Path: $FILE_PATH
-Fix: remove each part named; the run's state is the log's, and the reader answers it."
+    _gs_refuse version-15 "$GS_FAULTS"
   fi
 fi
 
@@ -1570,18 +1445,7 @@ case "$BASENAME" in
       # Every block from this arm names all three ways out, whichever arm the
       # author was reaching for — the author who mistyped a pointer may well be
       # the author who should have written the section.
-      block_design() {  # $1 = what went wrong
-        # ONE ROW FOR FOUR ARMS (task 13, table row 101). All four say the same thing to
-        # the reader — this spec names no design anywhere — and differ only in WHICH
-        # route was tried, which is what `detail` carries.
-        refuse exit2 write "this spec names no '## Design' anywhere" "add a '## Design' section" \
-          "canonical-sdlc spec '$BASENAME' (scale: $SCALE): $1
-Path: $FILE_PATH
-A wave- or epic-scale spec must satisfy one of three:
-  (a) a flush-left '## Design' section in this spec;
-  (b) frontmatter 'design: <path>' naming a file that carries a flush-left '## Design';
-  (c) frontmatter 'design-waived: <user> <date> <reason>' — a user-only move."
-      }
+      block_design() { _gs_refuse design "$SCALE" "$1"; }  # $1 = what went wrong
 
       # `## Design` is a section only as the plan parser names one (`plan_read_heading`): flush
       # left, the whole heading word, so `## Design — v2` is the section and `## Designer notes` is
@@ -1690,16 +1554,11 @@ case "$BASENAME" in
               while IFS= read -r ADR_ONE; do
                 [ -n "$ADR_ONE" ] || continue
                 if grep -qE '(^|/)\.\.(/|$)' <<< "$ADR_ONE"; then
-                  _gs_detail="canonical-sdlc spec '$BASENAME' (sdlc-step ${ADRS_STEP}): adrs: '$ADR_ONE' climbs out with a '..' component and is refused.
-Path: $FILE_PATH"
-                  refuse exit2 write "the adrs: path climbs out with '..'" "name it under the docs root" "$_gs_detail"
+                  _gs_refuse adrs-climb "$ADRS_STEP" "$ADR_ONE"
                 fi
                 ADR_ABS=$(resolve_adrs_path "$ADR_ONE")
                 if [ ! -f "$ADR_ABS" ]; then
-                  _gs_detail="canonical-sdlc spec '$BASENAME' (sdlc-step ${ADRS_STEP}): adrs: '$ADR_ONE' names no file (resolved to $ADR_ABS).
-Path: $FILE_PATH
-Fix: draft the ADR at that path, or correct the adrs: pointer."
-                  refuse exit2 write "the adrs: path names no file" "draft the ADR at that path" "$_gs_detail"
+                  _gs_refuse adrs-missing "$ADRS_STEP" "$ADR_ONE" "$ADR_ABS"
                 fi
               done < <(printf '%s\n' "$ADRS_RAW" | awk '{
                 n = split($0, parts, /[ \t]*·[ \t]*/)
@@ -1774,17 +1633,11 @@ case "$BASENAME" in
             ingoal { print }
           ')
           if ! grep -qE '[^[:space:]]' <<< "$GOAL_SECTION_BODY"; then
-            _gs_detail="canonical-sdlc artifact '$BASENAME' (scale: $SCALE): the 'Goal' section is empty.
-Path: $FILE_PATH
-Fix: write one concise paragraph describing the goal under '## Goal'."
-            refuse exit2 write "this artifact's Goal section is empty" "write a paragraph under '## Goal'" "$_gs_detail"
+            _gs_refuse goal-empty "$SCALE"
           fi
           ;;
         *)
-          _gs_detail="canonical-sdlc artifact '$BASENAME' (scale: $SCALE): the first section after the title is not '## Goal'.
-Path: $FILE_PATH
-Fix: open with a '## Goal' section — one concise paragraph — immediately after the title."
-          refuse exit2 write "the first section is not '## Goal'" "open with a '## Goal' section" "$_gs_detail"
+          _gs_refuse goal-first "$SCALE"
           ;;
       esac
     fi
@@ -1822,18 +1675,7 @@ case "$BASENAME" in
         h != "" && first == "" && /[^[:space:]]/ { first = $0; sub(/[ \t]+$/, "", first) }
         END { if (fault == "" && n && (n < 3 || n > 6)) fault = "count\t" n; print fault }')
       if [ -n "$THEME_FAULT" ]; then
-        _th_what="${THEME_FAULT#*	}"
-        case "${THEME_FAULT%%	*}" in
-          flat)  _th_fact="$_th_what is under '## Requirements', no theme" ;;
-          none)  _th_fact="$_th_what is under no ## section" ;;
-          count) _th_fact="$_th_what theme sections, not 3 to 6" ;;
-          *)     [ "${#_th_what}" -le 24 ] || _th_what="${_th_what:0:23}…"
-                 _th_fact="'$_th_what' opens on no sentence" ;;
-        esac
-        _gs_detail="canonical-sdlc requirements '$BASENAME' (scale: $SCALE): $_th_fact.
-Path: $FILE_PATH
-Fix: group the REQs under three to six '## <theme>' sections, each opening on one sentence that says what the run is for in that respect, the '### REQ-' headings under them."
-        refuse exit2 write "$_th_fact" "theme rule: 3-6 ## themes" "$_gs_detail"
+        _gs_refuse theme "$THEME_FAULT" "$SCALE"
       fi
     fi
     ;;
