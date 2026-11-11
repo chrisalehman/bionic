@@ -1577,7 +1577,7 @@ _proof_reader_load() {  # -> 0 once lib/reader.sh, beside this file, is loaded
 # The files a fold depends on: the reader's libraries, then the record's homes beside the run's log.
 _PROOF_FACTS_LIBS="reader.sh translate.sh plan-read.sh log.sh line.sh"
 _PROOF_FACTS_HOMES="run.log landing-proofs.log asks.state fill-ledger.log design-ledger.md debt.md"
-_PROOF_FACTS_KEY=""; _PROOF_FACTS=""; _PROOF_FINDINGS=""
+_PROOF_FACTS_KEY=""; _PROOF_FACTS=""; _PROOF_FINDINGS=""; _PROOF_HELD_PLAN=""; _PROOF_HELD_FINDINGS=""
 # The kept file is a cache and never evidence, yet what it holds is served as the run's proofs and approvals, under a
 # key anyone who reads the repository can compute. So it is read and written only in a directory this user owns
 # (`[ -O ]`), that is a directory and no link and that neither group nor other can write (one `find`, which follows no
@@ -1659,10 +1659,24 @@ PROOF_EVENTS
 # run, in the order the reader reads them, kept with the facts; 2 when the fold fails. A finding's facts come from all
 # its events: an older plan's deferral and a later move of it are two events, and the move, standing, would leave the
 # deferral unread. A reader in this shell reads the one fold, and every later ask in this shell or a subshell is
-# served from it.
+# served from it. A plan whose findings a caller holds (`_proof_findings_hold`) is answered from what it holds, with
+# no fold and no key: the held copy is restored each time, since a fold of another plan in between overwrites
+# _PROOF_FINDINGS.
 _proof_findings_load() {
   [ -f "${1:-}" ] || { _PROOF_FINDINGS=""; return 0; }
+  if [ -n "${_PROOF_HELD_PLAN:-}" ] && [ "$_PROOF_HELD_PLAN" = "$1" ]; then _PROOF_FINDINGS="$_PROOF_HELD_FINDINGS"; return 0; fi
   _proof_facts "$1" >/dev/null
+}
+
+# _proof_findings_hold <plan> -> 0 with the plan's fold taken in the calling shell (_PROOF_FACTS) and its findings held,
+# so every later reader of them in this shell or a subshell takes no fold; 2, nothing held, when the fold fails. No
+# plan releases the hold. A hold is as fresh as the fold it took, so a caller holds only across reads that write no
+# event, and declares the two _PROOF_HELD_* variables local to bound it.
+_proof_findings_hold() {
+  _PROOF_HELD_PLAN=""; _PROOF_HELD_FINDINGS=""
+  [ -n "${1:-}" ] || return 0
+  _proof_findings_load "$1" || return 2
+  _PROOF_HELD_FINDINGS="$_PROOF_FINDINGS"; _PROOF_HELD_PLAN="$1"
 }
 
 _proof_ask() {  # <plan> <reader question's function> [args] -> its answer and exit, over the facts _proof_facts keeps
