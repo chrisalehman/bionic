@@ -1,5 +1,4 @@
 # tests/cross-gate-agreement.prelude.sh — THE HALF OF THE CROSS-GATE AGREEMENT SUITE BOTH PARTS SHARE
-# (wave-39 T36; D1, D13, REQ-3 AC-3.3).
 #
 # Sourced by tests/cross-gate-agreement-1.test.sh and -2.test.sh, after tests/lib/resolve-roots.sh,
 # plan-fixture.sh and assert.sh. It is not a suite: the runner launches `*.test.sh` only. It sits beside the
@@ -53,10 +52,8 @@
 # THE TWO ROOTS ARE DELIBERATELY DIFFERENT. `$CLAUDE_CONFIG_DIR` is NOT
 # `$HOME/.claude` here, because "where Claude Code stores session and project
 # metadata" is computed at three sites in this wave and holding the two roots
-# equal makes every disagreement between them invisible. That is not
-# hypothetical: this file previously pinned the equal case, and behind it the
-# observation resolved NOTHING while the recorder wrote a record and the stop
-# gate spent it (Step-6 critic, issue 1). Every metadata fixture below is
+# equal makes every disagreement between them invisible.
+# Every metadata fixture below is
 # planted under $CLAUDE_CONFIG_DIR, which is what the platform does when the
 # variable is set; §C case 5 plants under $HOME/.claude and proves it is NOT
 # seen.

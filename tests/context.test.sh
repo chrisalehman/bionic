@@ -1,7 +1,5 @@
 #!/bin/bash
 # tests/context.test.sh — payload/scripts/lib/context.sh: THE ONE CONTEXT PREAMBLE
-# (epic-23 wave-11-lean-spine, REQ-1f (ii) and REQ-1h; AC-1f.2, AC-1h.1, AC-1h.2;
-# spec Design §1 "ContextPreamble", §2 D6).
 #
 # WHAT IS UNDER TEST. Six lines that fifteen hooks used to carry a private copy of —
 # read the payload, find the cwd, find the root, resolve the session id, ask whether

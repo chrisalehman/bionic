@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/command-relay.test.sh — the command-relay contract (F4, epic-19 wave-01,
-# spec AC-F4; grounding record/epic-19/step1-fixes-grounding.md §4).
+# tests/command-relay.test.sh — the command-relay contract.
 #
 # WHAT THIS SUITE OWNS. Two malformation sources named at grounding §4, both
 # under the AC-F4 umbrella of "/bionic:setup and /bionic:doctor render faithfully

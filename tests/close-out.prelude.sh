@@ -18,8 +18,7 @@
 # those sections share a part instead (§PARKED builds the repository §ONE-WRITER reads; both are part 4).
 #
 # THE SUITE: payload/scripts/close-out.sh: the Step 8/9 tail, performed
-# by one script that attests its own acts (epic-23 wave-13-fixit-180, REQ-4; AC-4.1,
-# AC-4.3, AC-4.4; design ledger D5, D6).
+# by one script that attests its own acts.
 #
 # WHAT IT OWNS. Four sections, each hermetic against a fixture project under a mktemp
 # sandbox with HOME redirected into it — never this repository, never the real plan,

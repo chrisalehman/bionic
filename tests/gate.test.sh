@@ -1,7 +1,6 @@
 #!/bin/bash
 # tests/gate.test.sh — payload/scripts/lib/gate.sh: one gate admits every heavy command on the
-# machine's present reading, one core a command, keeping only durations (wave-33 T1; Δ10) (epic-23
-# wave-28-finished-work-lands, T2; REQ-2, REQ-4, REQ-7; spec D10, D11, D12; ADR-046).
+# machine's present reading, one core a command, keeping only durations.
 #
 # WHAT IS UNDER TEST. One section per eval the spec names:
 #

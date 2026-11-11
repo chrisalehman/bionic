@@ -1,7 +1,5 @@
 #!/bin/bash
 # tests/hook-adoption.test.sh — ADOPT: every hook on the library spine, always-on.
-# (bionic 1.4.0, wave-bionic-1.4.0-update task ADOPT; spec AC-7, AC-8, AC-9, AC-12,
-# AC-16; design §2 "order in every hook: load, active_run, own work".)
 #
 # WHAT IS UNDER TEST. Not a library — a CONVENTION, held across eighteen files that
 # the CLI invokes independently. Three claims, each of which has its own way of going
@@ -64,8 +62,7 @@ trap 'rm -rf "$SANDBOX"' EXIT
 #
 # RUN-SCOPED IS NOT THE SAME AS ADOPTED. hooks/protect-main.sh and
 # hooks/protect-database.sh guard damage that is wrong in every project the session
-# ENGAGED bionic in, wave or no wave, so they never consult the run. (Machine-wide is what
-# they were until 2026-09-03; Chris's ruling put every wall behind the engagement marker,
+# ENGAGED bionic in, wave or no wave, so they never consult the run. (Every wall sits behind the engagement marker,
 # which is why protect-database now carries a loader at all — the predicate lives in the
 # library. Its direction is OPEN: a wall whose scope it cannot read must not bind a
 # session that never consented.) Everything else is a

@@ -1,12 +1,8 @@
 #!/bin/bash
-# Tests for the CONTEXT-SPEND instrument — epic-23 wave-11-lean-spine, task T12,
-# ruling R1 ("the suite that does not exist is written FIRST").
+# Tests for the CONTEXT-SPEND instrument.
 #
-# WHY THIS FILE EXISTS AT ALL. Census §6.3 measured it: of the four hooks that fire
-# on Stop, this was the ONE with no dedicated suite. It was covered only sideways —
-# doctor-patrol, cross-gate-agreement, engage, hook-adoption, patrol-duties-gate and
-# session-sweep each reach it while asking about something else — so a merge that
-# changed its behaviour had thin cover. This suite is the BASELINE the fold is
+# WHY THIS FILE EXISTS AT ALL.
+# This suite is the BASELINE the fold is
 # proven against: it was committed GREEN against the unmerged `hooks/context-spend.sh`
 # and is re-pointed here, unchanged in count, at `hooks/stop.sh` — which runs this
 # instrument as `stop_context_spend` (payload/scripts/lib/stop.sh).
@@ -17,21 +13,7 @@
 # refuses and it never writes stdout, because a Stop hook's stdout can carry a block
 # payload.
 #
-# ── TWO ASSERTIONS HERE RECORD THE GAP THE MERGE CLOSED ──────────────────────
-#
-# §1b and §2b are marked [GAP CLOSED]. Before the merge this hook read NEITHER
-# `hook_event_name` NOR `stop_hook_active` — measured at the baseline commit:
-#
-#     grep -n 'hook_event_name\|stop_hook_active' hooks/context-spend.sh   -> (no output)
-#
-# while the other three opened with both. In production the omission cost nothing,
-# because hooks.json registered this hook on Stop alone and a re-entry Stop finds the
-# state file already carrying the new step — the same-step arm makes it idempotent by
-# a different route, which §5 drives directly. Both assertions were committed in the
-# OTHER direction first, green against the unmerged hook, so the pair below reads as
-# a change that was measured rather than a rule that was asserted.
-#
-# The gap was load-bearing from the moment the four folded into one process
+# The event guard is load-bearing because the four hooks are one process
 # registered on Stop AND SubagentStop (REQ-1f (iv), ADR-004): without the event guard
 # the instrument would start recording step boundaries on every teammate landing, a
 # thing it has never done.

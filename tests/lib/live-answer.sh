@@ -19,12 +19,6 @@
 # parser does NOT recognise as a ListAgents answer at all — kept as-is, because it is
 # the one corpus-sourced way to exercise NONE without inventing a body.
 #
-# WHAT THIS FILE REPLACES. Eight suites each hand-write a three-entry ListAgents
-# transcript with their own teammate-line spelling (research-code-map §2.a: four of the
-# eight cannot express `idle`, three cannot express STALE). None of them is touched here
-# — collapsing them onto this builder is S17's sweep. This file is the target they
-# collapse onto.
-#
 # EVERY BODY THIS FILE EMITS IS A CORPUS LINE, VERBATIM. The self line, the ref suffix
 # and every status word come from `live_answer_content`, never from a literal typed here.
 # Only the ENVELOPE around a body — the assistant tool_use entry, the user tool_result
