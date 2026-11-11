@@ -647,16 +647,17 @@ expect_eq "RULED-2b: the advance writes current: 8" "0|8" \
   "$RU_RC|$(awk -F': *' '/^current:/ { print $2; exit }' "$R_RU/.bionic/docs/plans/active.md")"
 expect_eq "RULED-2c: …and the row:AC-2 item RULED-1e read open is closed" "" "$(ru_owed)"
 
-# §RULED-ONE — one body: the predicate is defined once, and no file outside walls.sh parses the user's confirmation.
+# §RULED-ONE — one body: the predicate is defined once, and no file outside walls.sh and the reader's own parses the
+# user's confirmation: the reader reads it from an older plan's block and translates it onto the criterion's event.
 RU_WALLS="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/walls.sh"
 expect_eq "RULED-ONE: matrix_row_ruled has exactly one definition in walls.sh" "1" \
   "$(/usr/bin/grep -c '^matrix_row_ruled()' "$RU_WALLS")"
-RU_UC="$(/usr/bin/grep -rn 'user-confirmed' "${BIONIC_HOOKS_DIR}" "${BIONIC_HOOKS_DIR}/../payload/scripts" | /usr/bin/grep -v 'walls.sh')"
+RU_UC="$(/usr/bin/grep -rn 'user-confirmed' "${BIONIC_HOOKS_DIR}" "${BIONIC_HOOKS_DIR}/../payload/scripts" | /usr/bin/grep -v 'walls.sh' | /usr/bin/grep -vE 'lib/(reader|translate)\.sh:')"
 expect_contains "RULED-ONE-b: the search outside walls.sh reads the matrix-render writer" "matrix-render" "$RU_UC"
 # The second writer, confirm-row, spells the key once, on the line that names it for its one write; that line is
 # the whole of its allowance, so a parser of the confirmation added beside it still turns this check red.
 expect_contains "RULED-ONE-d: …and the confirm-row writer's one key line" "CR_KEY=user-confirmed" "$RU_UC"
-expect_eq "RULED-ONE-c: …and nothing else names user-confirmed outside walls.sh" "" \
+expect_eq "RULED-ONE-c: …and nothing else names user-confirmed outside walls.sh and the reader's files" "" \
   "$(printf '%s\n' "$RU_UC" | /usr/bin/grep -v 'matrix-render' | /usr/bin/grep -v 'proof\.sh:[0-9]*:[[:space:]]*CR_KEY=user-confirmed$')"
 
 # ---------------------------------------------------------------------------
