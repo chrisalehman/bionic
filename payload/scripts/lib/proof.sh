@@ -2394,27 +2394,6 @@ PROOF_HEALTH_OWED
   printf 'red head=%s%s owed=%s%s evidence=%s\n' "$f" "$n" "$open" "${closed:+ closed=$closed}" "$ev"
 }
 
-# proof_health_put <copy> <tree> [<record plan>] -> exit 0 with the matrix head's `stack-health:` line of <copy> rewritten
-# to `proof_health_line`, PROOF_HEALTH naming the value written; exit 1, <copy> unchanged, when the write fails.
-# THE ONE WRITE OF THE LINE, for proof-add and the landing's settlement alike, through the matrix head's own writer
-# (hooks/session-poker.sh `matrix_head_line`). Left as it stands, PROOF_HEALTH empty and exit 0: a plan with no
-# regression proof (the stub stays), a writer process with no matrix head writer, a plan with no matrix (exit 3), and a
-# value no rendering wrote, a declared `n/a:` or a person's own snapshot (exit 5), which is their word.
-proof_health_put() {
-  local copy="${1:-}" v rc=0
-  PROOF_HEALTH=""
-  declare -F matrix_head_line >/dev/null 2>&1 || return 0
-  v="$(proof_health_line "$copy" "${2:-}" "${3:-$copy}")" || return 1
-  [ -n "$v" ] && [ "$v" != pending ] || return 0
-  matrix_head_line "$copy" stack-health "$v" '^(pending$|green head=|red head=)' > "$copy.health" 2>/dev/null || rc=$?
-  case "$rc" in
-    0) if [ -s "$copy.health" ] && mv -f "$copy.health" "$copy"; then PROOF_HEALTH="$v"; return 0; fi ;;
-    3|5) rm -f "$copy.health"; return 0 ;;
-  esac
-  rm -f "$copy.health"
-  return 1
-}
-
 # proof_owed_suites <plan> <tree> [<head>] -> `*` when <head> (default: the working branch's ref, `proof_branch_head`)
 # owes a whole run: it is not F, the head of the regression's newest link (`_proof_floor_base`), or there is none.
 # Nothing at F; a waiver makes its own head F. No suite is ever named: the suites F's whole run left red (`owed=`)

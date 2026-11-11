@@ -1039,16 +1039,6 @@ PF_VERDICTS_LIST
       fi
       mv "$PV_NEW.v" "$PV_NEW"
     fi
-    # THE REGRESSION'S PROOF IS THE STACK'S HEALTH: the head's stack-health: line is the judge's fact rendered by the one
-    # function every writer calls (lib/proof.sh `proof_health_put`), read from the run's facts with the new proof pending
-    # and the plan's own landing record. It replaces the stub matrix-render writes and a line a writer rendered before; a
-    # declared n/a: or a person's own snapshot is their word and stays, and a plan with no matrix yet has no head to
-    # write, the proof standing alone.
-    PF_SH=""
-    if [ "$PF_KIND" = regression ]; then
-      proof_health_put "$PV_NEW" "$PV_REPO" "$PV_PLAN" || :
-      PF_SH="$PROOF_HEALTH"
-    fi
     # A REVIEW THAT FOLLOWS THE BUILD GOES BACK TO WAITING (wave-26 T14; D10). The active review
     # row reading `live:head` (`units_live_rows`, the kind default included) whose `Files` hold
     # this evidence returns to `pending` in the same write — that row alone: the proof of another
@@ -1102,7 +1092,7 @@ PF_VERDICTS_LIST
       [ "$_pf_live" = " " ] || PF_NONE="$(units_rows "$PV_NEW" 2>/dev/null | awk -F'\t' -v ids="$_pf_live" '
         index(ids, " " $1 " ") { printf "%s%s (%s)", (n++ ? ", " : ""), $1, $9 }')"
     fi
-    PV_ACT=pf_append; PV_UNDONE="${PF_CELLS:+the auditor cells ($PF_CELLS) and auditor-wave: }${PF_SH:+stack-health: }${PF_BACK:+$PF_BACK back to pending}"
+    PV_ACT=pf_append; PV_UNDONE="${PF_CELLS:+the auditor cells ($PF_CELLS) and auditor-wave: }${PF_BACK:+$PF_BACK back to pending}"
     plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
     if [ -n "$PF_PLANL" ] && ! proof_finding_deferrals "$PV_PLAN" "$PF_REL" "$PF_FINDS"; then
       die "proof-add — the $PF_KIND proof at $PF_HEAD is written, and its deferrals could not be appended to the run's log of $PV_PLAN: the findings the table defers are not deferred."
@@ -1126,7 +1116,6 @@ PF_VERDICTS_LIST
     PF_FIELDS=""; [ -z "$PF_QUESTION" ] || PF_FIELDS=" question=$PF_QUESTION reader=$PF_READER result=$PF_RESULT scope=$PF_SCOPE ($PF_ROLE)"
     say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS${PF_OWED:+ owed=$PF_OWED}: written to the run's log${PF_BACK:+; $PF_BACK back to pending in $PV_PLAN}; the plan's copy dry-committed first."
     [ -z "$PF_CELLS" ] || say "proof-add — the auditor cells: $PF_CELLS; auditor-wave: $PF_WAVE"
-    [ -z "$PF_SH" ] || say "proof-add — stack-health: $PF_SH"
     [ -z "$PF_OWED" ] || say "proof-add — the whole run left $PF_OWED red: each is owed until a later landing runs it green (a fix row), or proof-add inherited <suite> finds it red at the base too."
     [ -z "$PF_PLANL" ] || printf '%s\n' "$PF_PLANL" | while IFS= read -r _pf_l; do say "proof-add — $_pf_l (in the run's log)"; done
     [ -n "$PF_HELD" ] && say "proof-add — $PF_HELD stays active until every question it carries is read at ${PF_HEAD:0:12}; it returns to pending on that review."

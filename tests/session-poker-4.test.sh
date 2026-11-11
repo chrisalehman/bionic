@@ -1467,27 +1467,16 @@ vt_health() {  # -> lib/proof.sh proof_health_line on the fixture plan, as `stac
     _ "${S46_LIB%/*}" "$PVT" "$RVT")"
 }
 expect_eq "VT-12a §STACK AC-5.2 a plan with no regression proof renders pending" "stack-health: pending" "$(vt_health)"
+VT_SH0="$(vt_head stack-health)"
 VT_C="$(s57_commit "$VT_WT" lib/b.sh C)"
 printf 'Gating: 2 passed, 1 failed\nFailed:\n    - c.test.sh\n' | regression_fixture "$PVT" "$VT_DIR/whole-red.log" "$VT_C" 0 1
 poke "$RVT" proof-add regression record/wave-01-fixture/whole-red.log
-expect_eq "VT-12 §STACK AC-7.1 a red regression proof (exit 0) writes stack-health: red, its pass having left c.test.sh owed, with its head, pass and total, over the stub" \
-  "0|$(vt_sh_line red "$VT_C" 2 3 record/wave-01-fixture/whole-red.log c.test.sh)" "$RC|$(vt_head stack-health)"
-expect_eq "VT-12b …the line proof-add wrote is the function's rendering" "$(vt_head stack-health)" "$(vt_health)"
+expect_eq "VT-12 §STACK AC-7.1 a red regression proof (exit 0) renders red, its pass having left c.test.sh owed, with its head, pass and total; the plan's line is not written" \
+  "0|$(vt_sh_line red "$VT_C" 2 3 record/wave-01-fixture/whole-red.log c.test.sh)|$VT_SH0" "$RC|$(vt_health)|$(vt_head stack-health)"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
-VT_D="$(s57_commit "$VT_WT" lib/c.sh D)"
-printf 'Gating: 3 passed, 0 failed\n' | regression_fixture "$PVT" "$VT_DIR/whole-green.log" "$VT_D" 0 0
-poke "$RVT" proof-add regression record/wave-01-fixture/whole-green.log
-expect_eq "VT-13 a green regression proof (exit 0) replaces the line it wrote: one stack-health: line, green with its numbers" \
-  "0|$(vt_sh_line green "$VT_D" 3 3 record/wave-01-fixture/whole-green.log)" "$RC|$(vt_head stack-health)"
-expect_eq "VT-13b …still above the table, auditor-wave: beside it" "stack-health,auditor-wave,table" "$(vt_order)"
-# A declared n/a: is the plan's word that stack health does not apply, so a proof leaves it as written.
-sed 's/^stack-health: .*/stack-health: n\/a: no long-running serve/' "$PVT" > "$PVT.tmp" && mv "$PVT.tmp" "$PVT"
 VT_E="$(s57_commit "$VT_WT" lib/d.sh E)"
 printf 'Gating: 3 passed, 0 failed\n' | regression_fixture "$PVT" "$VT_DIR/whole-na.log" "$VT_E" 0 0
 poke "$RVT" proof-add regression record/wave-01-fixture/whole-na.log
-expect_eq "VT-14 a declared stack-health: n/a: is left as the plan wrote it (the proof registers, exit 0)" \
-  "0|stack-health: n/a: no long-running serve|1" \
-  "$RC|$(vt_head stack-health)|$(s46_proved "$PVT" | /usr/bin/grep -c "^proved: kind=regression head=$VT_E ")"
 expect_eq "VT-15 AC-5.2 the function renders green at the head of a pass that left nothing owed" \
   "$(vt_sh_line green "$VT_E" 3 3 record/wave-01-fixture/whole-na.log)" "$(vt_health)"
 # A red pass at G owing c.test.sh, then a landing H whose run greens c.test.sh: the judge covers H, the line stays red.
