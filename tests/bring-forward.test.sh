@@ -28,7 +28,7 @@
 #   §KEPT    the old plan and record are kept beside the new, byte for byte.
 #   §WAITS   a wait on a row is that row's id in deps; one the kind implies is dropped; any other is a gap.
 #   §DROPPED a dropped row is a gap of the translation, and after the act it is not ready and waits on it are met.
-#   §CELLS   a row's suites and lands-on go to the task's own section, or to the gaps list when it has none.
+#   §CELLS   a row's suites and lands-on go to the task's own section, past a fenced # line in it, or to the gaps list when it has none.
 #   §STEPS   a Step follows the Step above it and a proof or waiver the line above it in its block, whatever
 #            their instants, so the step is the old current: and closure; a Step held (pending) is a gap.
 #   §PARKED  a Step 9 line with no delivered: (a parked plan's note) is a gap, not a step; close-out's parked delivery is.
@@ -386,6 +386,7 @@ canonical_sdlc_version: 14
 
 ### T1
 One's own words.
+$(printf '%s\n' '```bash' '# T2 waits on this' '```')
 
 ## SDLC State
 current: 4
@@ -408,7 +409,7 @@ askw ready T3; expect_status "a dropped row is not ready" 1 "$?"
 expect_contains "a wait on a dropped row is met, and named" "gap/v1|ev=row|row=T4|field=T3|why=dropped" "$OUT"
 
 section "CELLS"
-expect_eq "a row's suites and lands-on go to the task's own section" "One's own words. suites: a.test.sh lands-on: a.test.sh" "$(sed -n '/^### T1$/,/^## /p' "$W" | grep -v '^#' | grep . | paste -sd' ' -)"
+expect_eq "a row's suites and lands-on go to the task's own section, after its fence" "One's own words. "'```bash ```'" suites: a.test.sh lands-on: a.test.sh" "$(sed -n '/^### T1$/,/^## /p' "$W" | grep -v '^#' | grep . | paste -sd' ' -)"
 for f in suites lands-on; do expect_contains "a row with no section of its own has its $f on the gaps list" "gap/v1|ev=row|row=T2|field=$f|why=unruled" "$OUT"; done
 
 section "STEPS"
