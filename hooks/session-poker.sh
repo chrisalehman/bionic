@@ -2523,13 +2523,6 @@ plan_verb_id_ok() {
   return 0
 }
 
-# finding_owed_key <record>#<n> -> the person's-ledger key of the finding's ruling (lib/owed.sh), `finding:` and
-# the identity with each character a key may not hold (lib/owed.sh `_owed_key_ok`: letters, digits and `:._-`)
-# written `:` (wave-33 T13; D6, D2): `record/w/st.md#2` is `finding:record:w:st.md:2`.
-finding_owed_key() {
-  printf 'finding:%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"
-}
-
 # finding_read <plan> <repo> <record>#<n> -> 0 with the finding in FR_S, FR_R (the reader's rating), FR_P (the
 # priority the plan's moves give it, lib/proof.sh `proof_finding_rating`), FR_W (its <path>:<line> or -), FR_T
 # (its title) and FR_Q, FR_H (the question and head of the plan's registered reading of the record: its last

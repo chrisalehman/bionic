@@ -125,6 +125,13 @@ owed_file() {
   printf '%s/.bionic/tmp/owed-%s.state\n' "$root" "$sid"
 }
 
+# finding_owed_key <record>#<n> -> the key of the finding's ruling: `finding:` and the identity with each character a
+# key may not hold (`_owed_key_ok`: letters, digits and `:._-`) written `:`; `record/w/st.md#2` is
+# `finding:record:w:st.md:2`. Here, in the asks library, so the poker and a landing's writes key an ask alike.
+finding_owed_key() {
+  printf 'finding:%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"
+}
+
 _owed_key_ok() {  # <key>
   case "${1:-}" in
     ''|*[!A-Za-z0-9:._-]*) return 1 ;;

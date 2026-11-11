@@ -748,7 +748,7 @@ record_row_land() {
   line_event "$PV_PLAN" published "row=$PV_ID" "commit=$RL_COMMIT" kind=record "by=$ROW_WRITER" "why=$RL_ARTIFACT" >/dev/null || {
     die "REFUSED — the run's log cannot take the landing of $PV_ID; nothing is landed."; exit 1; }
   line_landing_writes "$PV_PLAN" "$PV_ID" "$RL_COMMIT" "$RL_AT" \
-    || say "UNSETTLED $PV_ID — landed at $RL_COMMIT; the findings it settles are not moved"
+    || say "UNSETTLED $PV_ID — landed at $RL_COMMIT; the findings it settles are not moved or their asks not closed"
   say "landed $PV_ID — its record $RL_ARTIFACT at the working head $RL_COMMIT"
   exit 0
 }

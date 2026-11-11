@@ -917,15 +917,17 @@ line_settle() {
   LINE_SETTLED_F="${LINE_SETTLED_F% }"
   return 0
 }
-# line_settled <plan> <root> <row> <commit> -> always 0: the log and the register half of `line_settle`, once the copy
-# it settled is the plan: each settled finding's move to fixed, and its asks closed.
+# line_settled <plan> <root> <row> <commit> -> 0, or 1 when a settled finding's ask cannot be closed because the asks
+# library cannot be loaded: the log and the register half of `line_settle`: each settled finding's move to fixed,
+# and its asks closed. A landing that could not close an ask says so through its caller, never reads as one with none.
 line_settled() {
   local plan="$1" root="$2" row="$3" com="$4" id k
   for id in $LINE_SETTLED_F; do
     proof_finding_event "$plan" "ref=$id" to=fixed "row=$row" by=landing "landing=$com" \
       || printf 'line: the landing of %s settled %s, and its move to fixed could not be written to the run log\n' "$row" "$id" >&2
   done
-  if [ -n "$LINE_SETTLED_F" ] && _line_load_owed && declare -F finding_owed_key >/dev/null 2>&1; then
+  if [ -n "$LINE_SETTLED_F" ]; then
+    _line_load_owed || return 1
     for id in $LINE_SETTLED_F; do
       k="$(finding_owed_key "$id")"
       OWED_ROOT="$root" OWED_PLAN="$plan" OWED_SID="${LINE_SID:-line}" owed_close "$k" "landing ${row}" >/dev/null 2>&1
@@ -1032,7 +1034,7 @@ EOF
   # 9. THE FINDINGS THE LANDING SETTLES (`line_landing_writes`). The row reads landed from the event above whatever
   # they do, so a failure now is told and the publish stands.
   line_landing_writes "$plan" "$row" "$cand" "$at" \
-    || printf 'UNSETTLED %s — published %s; the findings it settles are not moved\n' "$row" "$cand"
+    || printf 'UNSETTLED %s — published %s; the findings it settles are not moved or their asks not closed\n' "$row" "$cand"
   # 10. THE ROSTER MARK (T6): `landed=<40-hex> landed_at=<ISO-UTC>` on the row's roster line.
   _line_roster_mark "$plan" "$root" "$row" "$cand" "$at"
   _line_lock_drop "$lk"
@@ -1047,7 +1049,8 @@ EOF
 # A LANDING WRITES NOTHING OF ITS OWN TO THE PLAN, AND NOTHING OF THE MATRIX: its row reads landed from its `published`
 # event (lib/units.sh `_units_live`), and a landing proves suites, not criteria. What it still does is the findings
 # it settles: read from the plan (`line_settle`), moved to fixed in the log and their asks closed (`line_settled`).
-# line_landing_writes <plan> <row> <commit> <at> -> 0 settled, or nothing to settle; 1 what it settles cannot be read.
+# line_landing_writes <plan> <row> <commit> <at> -> 0 settled, or nothing to settle; 1 what it settles cannot be read
+# or its asks cannot be closed.
 # A row the plan does not hold has nothing to settle.
 line_landing_writes() {
   local plan="$1" row="$2" com="$3" at="$4" root
@@ -1056,7 +1059,6 @@ line_landing_writes() {
   root="$(_line_root "$plan")" && _line_load_proof || return 1
   line_settle "$plan" "$row" "$com" "$plan" "$at" || return 1
   line_settled "$plan" "$root" "$row" "$com"
-  return 0
 }
 
 # ---------------------------------------------------------------------------- the tree's run
