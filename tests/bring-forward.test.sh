@@ -81,6 +81,7 @@ proved: kind=regression head=$H at=2026-11-01T05:00:00Z evidence=record/wave-9-o
 proved: kind=regression head=$H at=2026-11-01T06:00:00Z evidence=record/wave-9-old/r2.log run=2026-11-01T05:59:00Z head=$H rc=0
 moved: record/wave-9-old/critic.md#1 to=fixed row=T3 by=Ann Person at=2026-11-01T06:02:42Z
 deferred: record/wave-9-old/critic.md#2 S3 on "a key one" stated="the cd || exit prefix"
+deferred: record/wave-9-old/critic.md#3 S3 off "repeats all but at=" stated="kept whole"
 waived: question=evidence head=$H by Ann Person 2026-11-01T15:53:03Z "all recommended"
 order: given 2026-11-01T07:00:00Z "hold the line"
 EOF
@@ -88,7 +89,7 @@ EV="$(translate "$P" events)"; GAPS="$(translate "$P" gaps)"
 of() { printf '%s\n' "$EV" | grep "^run/v1|ev=$1|" | grep -F -- "$2"; }
 
 section "GAPS"
-expect_eq "every source gives lines: 26 events" 26 "$(printf '%s\n' "$EV" | grep -c '^run/v1|ev=')"
+expect_eq "every source gives lines: 27 events" 27 "$(printf '%s\n' "$EV" | grep -c '^run/v1|ev=')"
 missing="$(printf '%s\n' "$EV" | awk -F'|' '{ for (i = 3; i <= NF; i++) { v = substr($i, index($i, "=") + 1)
   if (v ~ /^step[0-9]$/) v = "Step " substr(v, 5); if (v != "") print v } }' | while IFS= read -r v; do
   grep -qF -- "$v" "$P" || printf '%s\n' "$v"; done)"
@@ -99,6 +100,7 @@ expect_regex "Step 4 has no instant, and none is made" '\|at=$' "$(of step 'n=4|
 expect_contains "the gaps list names Step 4's instant" "gap/v1|ev=step|n=4|field=at|why=absent" "$GAPS"
 expect_contains "a deferral is a finding" "severity=S3" "$(of finding 'critic.md#2')"
 expect_contains "…carrying its reach, read before its title" "|reach=on|" "$(of finding 'critic.md#2')"
+expect_contains "…and a title holding a word that ends in = is kept whole" "|title=repeats all but at=|" "$(of finding 'critic.md#3')"
 expect_absent "a value holding a bar is not written" "stated=" "$(of finding 'critic.md#2')"
 expect_contains "the gaps list names the unwritable value" "ref=record/wave-9-old/critic.md#2|field=stated|why=bar" "$GAPS"
 expect_contains "a deferral's author is a gap" "ref=record/wave-9-old/critic.md#2|field=by|why=absent" "$GAPS"

@@ -1663,34 +1663,54 @@ matrix_auditor_required() {
   esac
 }
 
-# The `## Verification Matrix` section body of `$PLAN`, newline-normalized. Lines inside ```
-# fenced code blocks are dropped, so a shell pipeline written in leading-pipe continuation
-# style is never mistaken for a table row; every downstream matrix parse (rows, stack-health,
-# false-green, AC blocks) reads this body, so the fence-skip here covers all of them.
+# THE MATRIX IS THE READER'S. Every arm below reads a criterion through two answers, loaded once a pass:
+# MATRIX_CELLS, the reader's line for every criterion (lib/reader.sh `reader_cells`, one fold: its state, tier,
+# evidence, auditor, confirmation and serves, from the run's events and, for an older plan, its table and block), and
+# MATRIX_BLOCKS, each criterion's authored block of an older plan (lib/plan-read.sh `plan_read_blocks`, the plan's
+# one parser), its head lines with the criterion empty. No arm parses the plan's matrix itself, so the commit gate,
+# the judge and the cards cannot answer one criterion two ways. 2 when the run's facts could not be read: a run
+# read as holding no fact would read every criterion pending, and a pending criterion is relaxed.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-matrix_section() {
-  normalize_newlines "$PLAN" | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## Verification Matrix/ { f=1; next }
-    /^## / { f=0 }
-    f'
+matrix_load() {  # <plan> [head]
+  local rc=0
+  MATRIX_CELLS="$(_proof_ask "$1" reader_cells "$1" "${2:-}")" || rc=$?
+  case "$rc" in 0) ;; 1) MATRIX_CELLS="" ;; *) return 2 ;; esac
+  MATRIX_BLOCKS="$(plan_read_blocks "$1" 2>/dev/null)" || MATRIX_BLOCKS=""
+  return 0
 }
 
-# The indented evidence block under "<AC-id>:" within `$MATRIX` (up to the next
-# non-indented line). The heading matcher is lib/units.sh `units_ac_head_awk`, the one the
-# matrix writers read too: it tolerates a markdown list leader (a `- ` before the id reads
-# like the bare id) on a COPY of the line, so the terminator below still tests the raw line
-# and a following list item still ends the block; and it anchors at the line's start
-# without regex-escaping the id, so an id never matches the block of a longer id it
-# prefixes. Without the leader tolerance a list-shaped block extracted as EMPTY and every
-# consumer went silent at once.
+# matrix_fails_when_missing <plan> -> the first criterion, in the reader's order (lib/reader.sh `reader_criteria`, no
+# fold), whose fails-when is empty: the criterion question's answer, its Eval design row's Fails when cell; for an older
+# plan's row the Eval design lacks, the first `fails-when:` line of its block. Such a row with no block is no finding:
+# there is no block to lack the key, and the per-tier evidence loop at the Verify gate owns that gap. Nothing when every
+# criterion names one, or the reader cannot be loaded.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+matrix_fails_when_missing() {
+  declare -F reader_criteria >/dev/null 2>&1 || _proof_reader_load >/dev/null 2>&1 || return 0
+  { reader_criteria "$1" 2>/dev/null; printf '\034\n'; plan_read_rows "$1" 'Eval design' criterion 2>/dev/null
+    printf '\034\n'; plan_read_blocks "$1" 2>/dev/null; } | awk -F'\t' '
+    $0 == "\034" { part++; next }
+    !part { if ($0 != "") ord[++n] = $0; next }
+    part == 1 { c = ""; f = ""; for (i = 1; i <= NF; i++) { if (index($i, "criterion=") == 1) c = substr($i, 11); if (index($i, "fails-when=") == 1) f = substr($i, 12) }
+      gsub(/^[ \t]+|[ \t]+$/, "", f); if (f == "—" || f == "-") f = ""; if (c != "") { ed[c] = 1; fw[c] = f }; next }
+    $1 == "" || ($1 in ed) { next }
+    { if ($2 ~ /[^ \t]/) blk[$1] = 1; if (!($1 in seen) && $2 ~ /^[ \t]*fails-when[ \t]*:/) { seen[$1] = 1; v = $2; sub(/^[ \t]*fails-when[ \t]*:[ \t]*/, "", v); sub(/[ \t]+$/, "", v); fw[$1] = v } }
+    END { for (i = 1; i <= n; i++) { c = ord[i]; if (((c in ed) || (c in blk)) && fw[c] == "") { print c; exit } } }'
+}
+
+# A plan at 15 holds no matrix: a criterion's waiver and confirmation are the run's events, never a block's lines.
+matrix_v15() {  # <plan> -> 0 at version 15
+  [ "$(plan_frontmatter_get "$1" canonical_sdlc_version 2>/dev/null)" = 15 ]
+}
+
+# The lines of <AC>'s authored block, as MATRIX_BLOCKS holds them; nothing at 15, where a criterion has none.
 matrix_block() {
-  echo "$MATRIX" | awk -v ac="$1" "$(units_ac_head_awk)"'
-    ac_head($0, ac) {f=1; next}
-    /^[^[:space:]]/ {f=0}
-    f'
+  awk -F'\t' -v ac="$1" '$1 == ac { print substr($0, length(ac) + 2) }' <<< "$MATRIX_BLOCKS"
+}
+
+# The matrix head's lines (stack-health:, walk-artifact:, false-green:, rewritten:), as MATRIX_BLOCKS holds them.
+matrix_head() {
+  awk -F'\t' '$1 == "" { print substr($0, 2) }' <<< "$MATRIX_BLOCKS"
 }
 
 # The `user-confirmed:` value out of an AC block (empty when absent). The one parser of the
@@ -1808,14 +1828,20 @@ matrix_live_row_exit() {  # <AC> -> the repair prose of a live row's evidence re
   printf '%s' "the row is live past the step that owes it: if the walk proved it, run session-poker.sh matrix-set $1 status=discharged evidence=<its record>; if its eval cannot fire, run session-poker.sh matrix-retier $1 tier=<higher> eval='<the new eval>'; otherwise needs: the user — a waiver, in their words: session-poker.sh waive-row $1 '<their words>' '<why>'."
 }
 
-# matrix_table_rows -> `<AC>\037<tier>\037<status>\037<evidence>\037<auditor>` per five-cell row of
-# `$MATRIX`, trimmed, table order: the header, the separator and a row of another width skipped.
+# matrix_table_rows -> `<AC>\037<tier>\037<status>\037<evidence>\037<auditor>\037<confirmed>\037<waiver 1|0>` per
+# criterion of MATRIX_CELLS, the reader's order. The status is discharged, waived (discharged by a waiver) or pending.
+# THE WAIVER IS RECORDED or it is not one: at 15 the waiver event naming the criterion is the record; an older row's is a
+# `waiver:` in its evidence or a `waiver:` line in its block (`matrix_row_waiver`), whatever its status says.
 matrix_table_rows() {
-  awk -F'|' '/^[[:space:]]*\|/ && NF == 7 {
-    for (i = 2; i <= 6; i++) gsub(/^[ \t]+|[ \t]+$/, "", $i)
-    if ($2 == "" || $2 == "AC" || $2 ~ /^[-:]+$/) next
-    printf "%s\037%s\037%s\037%s\037%s\n", $2, $3, $4, $5, $6
-  }' <<< "$MATRIX"
+  local ac st by tier ev aud conf sv w v15=0
+  ! matrix_v15 "$PLAN" || v15=1
+  while IFS=$'\037' read -r ac st by tier ev aud conf sv; do
+    [ -n "$ac" ] || continue
+    [ "$by" != waiver ] || st=waived
+    w=0
+    if [ "$v15" = 1 ]; then [ "$by" != waiver ] || w=1; else ! matrix_row_waiver "$ev" "$(matrix_block "$ac")" || w=1; fi
+    printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\n' "$ac" "$tier" "$st" "$ev" "$aud" "$conf" "$w"
+  done <<< "$MATRIX_CELLS"
 }
 
 # matrix_close_eval <eval text> -> 0 when the eval names `landing-report --hand-holds`, the measure
@@ -1823,15 +1849,14 @@ matrix_table_rows() {
 # task: cell matrix-render writes both ask it, so no eval reads as the close's to one and not the other.
 matrix_close_eval() { grep -qE 'landing-report[[:space:]]+--hand-holds' <<< "$1"; }
 
-# matrix_close_rows <plan> -> the AC id of each pending or blocked row the close settles, table
+# matrix_close_rows <plan> -> the AC id of each pending criterion the close settles, the reader's
 # order: owed at Step 9, and its block's `eval:` is the close's measure (matrix_close_eval).
-# close-out writes each such row's cells from that reading.
+# close-out writes each such row's cells from that reading. 2 when the run's facts could not be read.
 matrix_close_rows() {
-  local PLAN="$1" MATRIX ac tier status ev aud block
-  MATRIX="$(matrix_section)"
-  while IFS=$'\037' read -r ac tier status ev aud; do
-    [ -n "$ac" ] || continue
-    case "$status" in pending|blocked) ;; *) continue ;; esac
+  local PLAN="$1" MATRIX_CELLS MATRIX_BLOCKS ac tier status ev aud conf w block
+  matrix_load "$PLAN" || return 2
+  while IFS=$'\037' read -r ac tier status ev aud conf w; do
+    [ -n "$ac" ] && [ "$status" = pending ] || continue
     block="$(matrix_block "$ac")"
     [ "$(matrix_owing_step "$PLAN" "$block")" = 9 ] || continue
     matrix_close_eval "$(grep -E '^[[:space:]]*eval[[:space:]]*:' <<< "$block")" || continue
@@ -1887,23 +1912,22 @@ matrix_row_owes() {
   return 0
 }
 
-# matrix_unruled <plan> <step> -> the AC id of each matrix row that owes a ruling or a verdict
-# at <step>, one per line, table order; nothing at `single` rigor. The judge's read of the
+# matrix_unruled <plan> <step> [head] -> the AC id of each criterion that owes a ruling or a verdict
+# at <step>, one per line, the reader's order; nothing at `single` rigor. The judge's read of the
 # matrix at the advance to 8: the same readers and the same `matrix_row_owes` the arm walks,
-# so the advance and the commit after it cannot disagree on a row. A row that is not five
-# cells is the arm's to refuse on a commit, and is skipped here. Needs lib/run.sh and
-# lib/units.sh loaded, as every caller of this file has them.
+# so the advance and the commit after it cannot disagree on a row. <head> is the one the evidence
+# review is read at, for a criterion no older table holds. Needs lib/run.sh, lib/units.sh and
+# lib/proof.sh loaded, as every caller of this file has them. 2 when the run's facts could not be read.
 matrix_unruled() {
-  local PLAN="$1" MATRIX RIGOR ac tier status ev aud block waiver defer
+  local PLAN="$1" MATRIX_CELLS MATRIX_BLOCKS RIGOR ac tier status ev aud conf waiver block defer
   RIGOR="$(plan_frontmatter_get "$1" rigor)"
   matrix_auditor_required || return 0
-  MATRIX="$(matrix_section)"
-  while IFS=$'\037' read -r ac tier status ev aud; do
+  matrix_load "$PLAN" "${3:-}" || return 2
+  while IFS=$'\037' read -r ac tier status ev aud conf waiver; do
     [ -n "$ac" ] || continue
     block="$(matrix_block "$ac")"
-    waiver=0; matrix_row_waiver "$ev" "$block" && waiver=1
     defer=0; matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$block")" "$2" "$status" "$(matrix_owing_open "$PLAN" "$block")" && defer=1
-    matrix_row_owes "$2" "$tier" "$status" "$aud" "$(user_confirmed_value "$block")" "$waiver" "$defer" >/dev/null \
+    matrix_row_owes "$2" "$tier" "$status" "$aud" "$conf" "$waiver" "$defer" >/dev/null \
       && printf '%s\n' "$ac"
   done <<MATRIX_ROWS
 $(matrix_table_rows)
@@ -2901,56 +2925,15 @@ Fix: on the user's literal 'approved', record 'approved-by: <user> <ISO-UTC> \"<
 # demanding it here would be the Verify gate's demand moved four steps early.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_fails_when() {
-  local step rows ac
+  local step ac
   step=$(k2_step_num)
   [ -n "$step" ] || return 0
   [ "$step" -ge 4 ] || return 0
-  [ "$_EG_V15" -eq 0 ] || { _eg_v15_owe "each criterion's fails-when: (the plan holds no matrix, and the log no criterion's words)"; return 0; }
-
-  MATRIX=$(matrix_section)
-  [ -n "$MATRIX" ] || return 0
-  rows=$(echo "$MATRIX" | grep -E '^[[:space:]]*\|')
-  [ -n "$rows" ] || return 0
-
-  # ONE PASS, NOT SIX PROCESSES A ROW (wave-24 T15; REQ-9 AC-9.7). The walk used to fork an
-  # awk for the row's AC, `matrix_block` for its block, and grep|head|sed|sed for the key — 240
-  # processes and half a second on a 40-row matrix, paid by every commit from Step 4 on and by
-  # every plan-row verb's dry commit. The awk below is the same walk, rule for rule: the table
-  # rows in order, the separator and the `AC` header skipped, the AC as the cell between the
-  # first two pipes; its block as `matrix_block` reads it (every header line whose bullet-
-  # stripped text begins `<AC>:`, then the lines under it until a line that is not indented);
-  # a block with no non-empty line is no block; and the FIRST `fails-when:` line of the block
-  # is the one judged, empty after its key or not. It prints the first AC that fails.
-  ac=$(printf '%s\n' "$MATRIX" | awk '
-    { L[++n] = $0 }
-    END {
-      for (i = 1; i <= n; i++) {
-        line = L[i]
-        if (line !~ /^[[:space:]]*\|/) continue
-        if (line ~ /^[[:space:]]*\|[-|:[:space:]]*$/) continue
-        split(line, c, "|"); ac = c[2]; gsub(/^[ \t]+|[ \t]+$/, "", ac)
-        if (ac == "AC" || ac == "") continue
-        if (ac in ok) continue
-        key = ac ":"; f = 0; body = 0; seen = 0; fw = ""
-        for (j = 1; j <= n; j++) {
-          hdr = L[j]; sub(/^[-*+][[:space:]]+/, "", hdr)
-          if (index(hdr, key) == 1) { f = 1; continue }
-          if (L[j] ~ /^[^[:space:]]/) f = 0
-          if (!f) continue
-          if (L[j] != "") body = 1
-          if (!seen && L[j] ~ /^[[:space:]]*fails-when[[:space:]]*:/) {
-            seen = 1; fw = L[j]
-            sub(/^[[:space:]]*fails-when[[:space:]]*:[[:space:]]*/, "", fw); sub(/[[:space:]]+$/, "", fw)
-          }
-        }
-        if (!body || fw != "") { ok[ac] = 1; continue }
-        print ac; exit
-      }
-    }')
+  ac="$(matrix_fails_when_missing "$PLAN")"
   [ -n "$ac" ] || return 0
-  _eg_detail="canonical-sdlc step ${CURRENT} — matrix row '${ac}' names no 'fails-when:'; an eval with no nameable failure is not an eval.
+  _eg_detail="canonical-sdlc step ${CURRENT} — criterion '${ac}' names no 'fails-when:'; an eval with no nameable failure is not an eval.
 Plan: $PLAN
-Fix: add 'fails-when: <the planted defect this eval must go red on>' to the '${ac}:' block — it is authored in the spec's '## Eval design' and rendered here."
+Fix: write the planted defect this eval must go red on in the criterion's '## Eval design' Fails when cell, or, on an older plan, as 'fails-when: <the planted defect>' in the '${ac}:' block."
   refuse exit2 commit "that matrix row names no 'fails-when:'" "add a 'fails-when:' line" "$_eg_detail"
   return 0
 }
@@ -2977,7 +2960,7 @@ Fix: add 'fails-when: <the planted defect this eval must go red on>' to the '${a
 # Verification Matrix are both Step-3 artifacts, not necessarily complete before then.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_prototype_no_matrix_row() {
-  local step task_rows proto_ids line id rows ac block_txt ac_task n
+  local step task_rows proto_ids line id rows ac block_txt ac_task n MATRIX_BLOCKS
   step=$(k2_step_num)
   [ -n "$step" ] || return 0
   [ "$step" -ge 4 ] || return 0
@@ -3000,16 +2983,11 @@ validate_prototype_no_matrix_row() {
   done <<< "$task_rows"
   [ -n "$proto_ids" ] || return 0
 
-  MATRIX=$(matrix_section)
-  [ -n "$MATRIX" ] || return 0
-  rows=$(echo "$MATRIX" | grep -E '^[[:space:]]*\|')
-  [ -n "$rows" ] || return 0
+  # Each criterion's task is its block's, read through the plan's one parser: a criterion with no block names none.
+  MATRIX_BLOCKS="$(plan_read_blocks "$PLAN" 2>/dev/null)" || return 0
+  rows="$(awk -F'\t' '$1 != "" && !s[$1]++ { print $1 }' <<< "$MATRIX_BLOCKS")"
 
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' <<< "$line" && continue
-    ac=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
-    [ "$ac" = "AC" ] && continue
+  while IFS= read -r ac; do
     [ -n "$ac" ] || continue
     block_txt=$(matrix_block "$ac")
     [ -n "$block_txt" ] || continue
@@ -4130,84 +4108,55 @@ matrix_is_placeholder() {
 }
 
 validate_matrix() {
-  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc deferred row_is_waived ev_abs hk hv hf ucv owed live_exit
+  local rows line ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc deferred row_is_waived ev_abs hk hv hf ucv owed live_exit table over head v15=0
 
-  # Set while any row is still pending/blocked at current: 5. The
+  # Set while any row is still pending at current: 5. The
   # Step-5 validator reads it to keep the `auditor:` pointer optional
   # mid-walk (the auditor is the exit gate — it has not run yet).
   UNDISCHARGED=0
-  MATRIX=$(matrix_section)
-  if [ -z "$MATRIX" ]; then
+  [ "$_EG_V15" -eq 0 ] || v15=1
+  # The evidence review is read at the working branch's head, for a criterion no older table holds.
+  head="$(proof_branch_head "$PLAN" "$BIONIC_ROOT" 2>/dev/null)" || head=""
+  if ! matrix_load "$PLAN" "$head"; then
+    block_matrix "the run's facts could not be read" "run the commit again" \
+      "the reader could not fold this run's log, so no criterion's state can be judged." \
+      "run the commit again; if it is refused the same way, the run's log or its record cannot be read: bash payload/scripts/reader.sh <plan> step names why."
+  fi
+  if [ -z "$MATRIX_CELLS" ]; then
     block_matrix "this plan has no verification matrix yet" "add one row per criterion" \
-      "the Verify gate requires a '## Verification Matrix' section." \
-      "add the '## Verification Matrix' section: a stack-health line, the AC tier table, and one per-AC evidence block. See canonical-sdlc/SKILL.md Step 5."
+      "the Verify gate requires the plan's criteria: an '## Eval design' row, or a '## Verification Matrix' row, per criterion." \
+      "add the '## Eval design' table, one row per criterion. See canonical-sdlc/SKILL.md Step 5."
   fi
 
-  # stack-health: non-empty proof, or `n/a: <reason>` with a reason. A placeholder value (the
-  # `pending` stub Step 3 renders) is judged after the row loop, where UNDISCHARGED is known.
-  # A HERE-STRING, NOT A PIPE — see the header. $MATRIX is a whole plan section and
-  # routinely exceeds the pipe buffer; `echo "$MATRIX" | grep -q` turned a present
-  # stack-health line into a refusal of every commit (T37).
-  if ! grep -qE '^[[:space:]]*stack-health[[:space:]]*:' <<< "$MATRIX"; then
-    block_matrix "the matrix says nothing about stack health" "add a before/after snapshot" \
-      "'## Verification Matrix' is missing the 'stack-health:' line." \
-      "add 'stack-health: <before/after snapshot>' or 'stack-health: n/a: <reason>' above the table."
-  fi
-  sh=$(echo "$MATRIX" | grep -E '^[[:space:]]*stack-health[[:space:]]*:' | head -1 \
-       | sed -E 's/^[[:space:]]*stack-health[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
-  case "$sh" in
-    ""|n/a|n/a:)
-      block_matrix "the health snapshot is empty or a bare n/a" "paste it, or say why not" \
-        "'stack-health:' needs a non-empty snapshot, or 'n/a: <reason>' with a non-empty reason." \
-        "paste the before/after snapshot showing no delta, or give the reason stack-health does not apply." ;;
-  esac
+  # THE HEALTH OF THE STACK IS NOT A LINE THE PLAN HOLDS: lib/proof.sh `proof_health_line` computes it from the run's
+  # regression proof, and a run with no regression proof is the floor arm's refusal (`_eg_refuse_floor_absent`), so this
+  # arm asks nothing of it.
 
   # false-green two-part rule: any `false-green:` entry must have a paired
   # `rewritten:` entry, or the gate blocks (Assumption 12a).
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  if grep -qE '^[[:space:]]*false-green[[:space:]]*:' <<< "$MATRIX"; then
-    if ! grep -qE '^[[:space:]]*rewritten[[:space:]]*:' <<< "$MATRIX"; then
+  head="$(matrix_head)"
+  if grep -qE '^[[:space:]]*false-green[[:space:]]*:' <<< "$head"; then
+    if ! grep -qE '^[[:space:]]*rewritten[[:space:]]*:' <<< "$head"; then
       block_matrix "a false green is logged but never rewritten" "rewrite it, then say where" \
         "a 'false-green:' entry in the matrix has no paired 'rewritten:' entry." \
         "add 'rewritten: <commit/test ref>' for the false-green test — a logged-but-unfixed false green is a blocking defect."
     fi
   fi
 
-  rows=$(echo "$MATRIX" | grep -E '^[[:space:]]*\|')
-  if [ -z "$rows" ]; then
-    block_matrix "the verification matrix has no rows" "add one row per criterion" \
-      "'## Verification Matrix' has no tier table rows." \
-      "add the '| AC | tier | status | evidence | auditor |' table with one row per AC."
+  # AN OLDER TABLE'S SHAPE: a row holding more cells than the header (a raw `|` inside a cell, which shifts every
+  # cell after it) and a status outside the four words are the table's faults, read through the plan's one parser; a
+  # row's status is never its state, which is the reader's.
+  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+  table="$(plan_read_table "$PLAN" 'Verification Matrix' ac 2>/dev/null)" || table=""
+  over="$(awk -F'\t' '$1 == "#" && $2 == "over" { print $3; exit }' <<< "$table")"
+  if [ -n "$over" ]; then
+    block_matrix "row ${over} does not have five cells" "give it five cells" \
+      "matrix row for '${over}' is malformed (wrong cell count — no literal '|' inside cells)." \
+      "write the row as '| AC | tier | status | evidence | auditor |' with exactly five cells and no literal pipe inside any cell."
   fi
-
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    # separator row (only pipes/dashes/colons/spaces) → skip
-    grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' <<< "$line" && continue
-    ncols=$(echo "$line" | awk -F'|' '{print NF}')
-    ac=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
-    tier=$(echo "$line"   | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$3); print $3}')
-    status=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$4); print $4}')
-    ev=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$5); print $5}')
-    aud=$(placeholder_cell "$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')")
-    # header row → skip
-    [ "$ac" = "AC" ] && continue
-    # malformed: a well-formed 5-cell row splits into exactly 7 fields on '|'.
-    if [ "$ncols" -ne 7 ]; then
-      block_matrix "row ${ac} does not have five cells" "give it five cells" \
-        "matrix row for '${ac}' is malformed (wrong cell count — no literal '|' inside cells)." \
-        "write the row as '| AC | tier | status | evidence | auditor |' with exactly five cells and no literal pipe inside any cell."
-    fi
-    # tier enum
-    if ! grep -qE '^T[0-4]$' <<< "$tier"; then
-      block_matrix "${ac}'s tier is unknown" "use T0 through T4" \
-        "matrix row for '${ac}' has an invalid tier '${tier}' (want T0..T4)." \
-        "set the tier cell to one of T0, T1, T2, T3, T4."
-    fi
-    # status enum — the status cell is load-bearing (pending/blocked
-    # relax the Verify gate; waived relaxes everything), so a typo must
-    # block, not silently read as discharged-like.
-    # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+  while IFS=$'\t' read -r ac status; do
     case "$status" in
       pending|blocked|discharged|waived) : ;;
       *)
@@ -4215,17 +4164,26 @@ validate_matrix() {
           "matrix row '${ac}' has an invalid status '${status:-empty}' (want pending|blocked|discharged|waived)." \
           "set the status cell to one of: pending, blocked, discharged, waived." ;;
     esac
+  done <<MATRIX_STATUS
+$(awk -F'\t' '$1 != "#" { a = ""; s = ""; for (i = 1; i <= NF; i++) { if (index($i, "ac=") == 1) a = substr($i, 4); if (index($i, "status=") == 1) s = substr($i, 8) }; if (a != "") print a "\t" s }' <<< "$table")
+MATRIX_STATUS
+
+  rows="$(matrix_table_rows)"
+  while IFS=$'\037' read -r ac tier status ev aud ucv row_is_waived; do
+    [ -n "$ac" ] || continue
+    aud="$(placeholder_cell "$aud")"
+    # tier enum: the Eval design's type through the scale profile, else an older row's tier cell
+    if ! grep -qE '^T[0-4]$' <<< "$tier"; then
+      block_matrix "${ac}'s tier is unknown" "use T0 through T4" \
+        "criterion '${ac}' has an invalid tier '${tier}' (want T0..T4: an Eval design type of static, unit, hermetic, live or human)." \
+        "set the criterion's Eval design type to one of static, unit, hermetic, live, human."
+    fi
     block_txt=$(matrix_block "$ac")
-    # Is this row WAIVED? A `waiver:` token in the evidence cell or a
-    # `waiver:` line in the AC block — the loop's long-standing test, hoisted
-    # into one flag (review-a C-2) so every per-row demand below reads the same
-    # fact. Deliberately NOT the status cell alone: a row that says `waived`
-    # while recording no waiver has not been through the Waiver Protocol, and
-    # the per-tier key loop has always demanded its evidence anyway.
-    # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    row_is_waived=0
-    matrix_row_waiver "$ev" "$block_txt" && row_is_waived=1
-    ucv=$(user_confirmed_value "$block_txt")
+    # AT 15 A CRITERION HAS NO BLOCK: its evidence is the discharging proof's and its confirmation the approval naming
+    # it, so the per-tier keys below are asked of those two facts, written as the keys they stand for.
+    if [ "$v15" = 1 ]; then
+      block_txt="$( [ -z "$ev" ] || printf '  evidence: %s\n' "$ev"; [ -z "$ucv" ] || printf '  user-confirmed: %s\n' "$ucv")"
+    fi
     # provenance arm (epic-14 W1, AC-5): the literal value `provenance:
     # implementation` in an AC block is circular — it names the change as the
     # source of its own requirement, which is unfalsifiable by construction.
@@ -4421,33 +4379,22 @@ validate_matrix() {
     fi
   done <<< "$rows"
 
-  # THE MATRIX HEAD'S STUBS ARE PLACEHOLDERS TOO (wave-30 T14; REQ-6 AC-6.1, D9, Δ12a). Step 3
-  # renders `stack-health: pending` (and `walk-artifact: pending` on a walked plan) above the
-  # table, beside the per-AC key stubs (`session-poker.sh matrix-render`). `stack-health:` was
-  # exempt from the placeholder ban — any value but an empty one or a bare `n/a` passed, so the
-  # stub sailed through the Verify gate unfilled — and a matrix-level `walk-artifact:` line was
-  # read by nothing. Both are now judged as a tier key is: unread before Step 5, unread at
-  # current: 5 while any row is still pending or blocked (the same mid-walk relaxation the key
-  # loop above takes, so entering Step 5 never needs an "after" snapshot that cannot exist
-  # yet), and refused once the walk is done and at every step after it. AFTER the row loop on
-  # purpose: UNDISCHARGED is what the loop found. A filled value is not judged here — the
-  # stack-health arm above and the walk gate own those; an absent walk-artifact: line is legal.
+  # THE WALK-ARTIFACT STUB IS A PLACEHOLDER TOO. Step 3 renders `walk-artifact: pending` above an older plan's table
+  # (`session-poker.sh matrix-render`), and it is judged as a tier key is: unread before Step 5, unread at current: 5
+  # while any criterion is still pending (the same mid-walk relaxation the key loop above takes), and refused once the
+  # walk is done and at every step after it. AFTER the row loop on purpose: UNDISCHARGED is what the loop found. A filled
+  # value is the walk gate's; an absent line is legal.
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
   if [ "$UNDISCHARGED" = "0" ]; then
-    for hk in stack-health walk-artifact; do
-      hv=$(grep -E "^[[:space:]]*${hk}[[:space:]]*:" <<< "$MATRIX" | head -1 \
-           | sed -E "s/^[[:space:]]*${hk}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
-      [ -n "$hv" ] || continue
-      if is_placeholder_value "$hv"; then
-        case "$hk" in
-          stack-health) hf="fill it, or n/a: <reason>" ;;
-          *)            hf="name its record, or drop it" ;;
-        esac
-        block_matrix "the ${hk}: line is still a stub" "$hf" \
-          "'${hk}:' is still a placeholder ('${hv}') with no row pending or blocked." \
-          "replace the '${hk}:' stub above the table with the real value before the Verify gate closes — the stub Step 3 rendered is a reminder, not evidence."
-      fi
-    done
+    hk=walk-artifact
+    hv=$(grep -E "^[[:space:]]*${hk}[[:space:]]*:" <<< "$head" | head -1 \
+         | sed -E "s/^[[:space:]]*${hk}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
+    if [ -n "$hv" ] && is_placeholder_value "$hv"; then
+      hf="name its record, or drop it"
+      block_matrix "the ${hk}: line is still a stub" "$hf" \
+        "'${hk}:' is still a placeholder ('${hv}') with no row pending or blocked." \
+        "replace the '${hk}:' stub above the table with the real value before the Verify gate closes — the stub Step 3 rendered is a reminder, not evidence."
+    fi
   fi
 }
 
@@ -4527,16 +4474,13 @@ validate_walk_artifact() {
   local discharged b5 raw abs
   case "${CURRENT%[ab]}" in 5|6|7|8|9) : ;; *) return 0 ;; esac
   [ "$(walk_mode)" = required ] || return 0
-  # Reuses the $MATRIX cache validate_matrix() fills. It runs immediately before
-  # this arm at both call sites (validate_verify_step, dispatch's 6..9 case) and
-  # hard-blocks on an empty matrix, so the cache is populated by the time we get
-  # here. The `:-` fallback keeps that an optimization rather than a trap: a
-  # third call site that forgot the ordering would re-read the section instead
-  # of crashing under `set -u` or, worse, reading an empty matrix as "nothing
-  # discharged" and letting the walk gate fall open.
-  discharged=$(echo "${MATRIX:-$(matrix_section)}" | grep -E '^[[:space:]]*\|' \
-    | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$4); print $4}' \
-    | grep -cx 'discharged')
+  # Reuses the reader's answer validate_matrix() loads (MATRIX_CELLS). It runs immediately before
+  # this arm at both call sites (validate_verify_step, dispatch's 6..9 case), so the answer is
+  # loaded by the time we get here; a third call site that forgot the ordering loads it again, and
+  # a run whose facts could not be read arms the walk gate rather than reading as "nothing
+  # discharged" and letting it fall open.
+  [ -n "${MATRIX_CELLS:-}" ] || matrix_load "$PLAN" || discharged=1
+  [ -n "${discharged:-}" ] || discharged=$(awk -F'\037' '$2 == "discharged" && $3 != "waiver" { n++ } END { print n + 0 }' <<< "${MATRIX_CELLS:-}")
   [ "$discharged" -gt 0 ] || return 0
 
   # Truncated at the first ';' below: sibling extractors in this hook already
@@ -5001,16 +4945,17 @@ dispatch() {
   # Audited multi_agent wave: D7 dispatched-task ledger PRESENCE, at every step
   # that reaches this dispatcher (guarded internally; no-op otherwise).
   validate_dispatch_ledger
-  # At 15 the matrix and the Step 5 block are named, and the reviews and the floor are read before the
-  # refusal of what was not, so a plan lacking what the log does hold is refused as a 14 is.
+  # At 15 the Step 5 block is named, and the reviews and the floor are read before the refusal of what was not, so a
+  # plan lacking what the log does hold is refused as a 14 is. The criteria are judged on the reader's answer as a 14's
+  # are, last: at 14 a step's own lines are refused before its matrix, so at 15 the matrix is judged once nothing else is owed.
   if [ "$_EG_V15" -eq 1 ]; then
     case "${CURRENT%[ab]}" in 5|6|7|8|9)
-      _eg_v15_owe "the matrix: stack-health, each criterion's tier, status and evidence keys, and its auditor verdict"
       [ "$(walk_mode)" = exempt ] || validate_walk_artifact
       [ -z "$(frontmatter_get environments)" ] || _eg_v15_owe "Step 5's environments-covered:" ;;
     esac
     case "${CURRENT%[ab]}" in 6|7|8|9) _eg_refuse_readings "the run" "$RIGOR"; _eg_refuse_floor_absent "the run" ;; esac
     _eg_v15_refuse
+    case "${CURRENT%[ab]}" in 5|6|7|8|9) validate_matrix ;; esac
     return 0
   fi
   # The Verification Matrix is a prefix contract for every step from the Verify
