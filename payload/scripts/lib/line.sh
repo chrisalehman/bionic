@@ -134,8 +134,8 @@ _line_branch() {  # <plan> -> its working-branch
   plan_working_branch "$1"
 }
 # The accepted head is the working branch's REF, read by lib/proof.sh `proof_branch_head`, the one reader of the
-# head the judge, proof-add, waive and deliver ask (wave-36 T12; D13; burns debt `working-head`): this read the
-# ref by hand, a second spelling of the same question.
+# head the judge, proof-add, waive and a record row's landing ask: this read the ref by hand, a second spelling of the
+# same question.
 _line_load_proof() {
   declare -F proof_branch_head >/dev/null 2>&1 && return 0
   # shellcheck source=/dev/null
@@ -448,27 +448,6 @@ _line_pause() {  # <row>
   while [ ! -e "$d/$1.go" ] && [ "$i" -lt 6000 ]; do sleep 0.1; i=$((i + 1)); done
 }
 
-# THE PLAN WRITE (wave-28 T6; D7, AC-3.2; ruling A-orch-81): the row's status `landed`, its `- T<n>:`
-# line and its dispatch-ledger line, in ONE transaction on the BOUND plan: `session-poker.sh row-landed`,
-# run as a command (the plan verbs live in the hook script and exit on refusal), whose one copy is
-# `plan_verb_open`'s and whose one dry commit is a writer's (wave-27 passes 60, 63: no copy stands in for
-# the plan here). A hand landing's line gains its `landed-by-hand:` text in the same write. A row that is
-# no plan row has nothing to write. rc 1 when the verb refused or could not run; its words are printed
-# by the caller, after the publish, never swallowed (LINE_PLAN_SAID).
-_line_plan_write() {  # <plan> <row> <commit> <at> -> 0 written or nothing to write · 1 refused
-  local poker root rc
-  LINE_PLAN_SAID=""
-  _line_plan_agent "$1" "$2" >/dev/null || return 0
-  poker="$(plugin_root 2>/dev/null)/hooks/session-poker.sh"
-  root="$(_line_root "$1")" || { LINE_PLAN_SAID="the plan's root cannot be read"; return 1; }
-  if [ "$LINE_KIND" = hand ]; then
-    LINE_PLAN_SAID="$( cd "$root" && CLAUDE_CODE_SESSION_ID="${LINE_SID}" bash "$poker" row-landed "$2" "$3" "$4" --by-hand "$LINE_BY" "$LINE_WHY" 2>&1 )"; rc=$?
-  else
-    LINE_PLAN_SAID="$( cd "$root" && CLAUDE_CODE_SESSION_ID="${LINE_SID}" bash "$poker" row-landed "$2" "$3" "$4" 2>&1 )"; rc=$?
-  fi
-  [ "$rc" -eq 0 ] && return 0
-  return 1
-}
 
 # THE ROSTER MARK (wave-28 T6; D7): the row's roster line gains `landed=<40-hex> landed_at=<ISO-UTC>`
 # (lib/roster.sh `roster_mark_landed`, the roster's one marker). The name marked is the row's writer as
@@ -837,9 +816,9 @@ _line_carried_close() {  # <plan> <root> <row>
 }
 
 # ---------------------------------------------------------------------------- the landing's settlement
-# A LANDING SETTLES EVERYTHING IT PROVES IN ONE ACT, so nothing it proves is settled by hand afterwards. Its plan write
-# (`session-poker.sh row-landed`, which every landing runs) hands its copy of the plan to `line_settle` before the copy
-# is swapped in, and the copy gains, in that one transaction:
+# A LANDING SETTLES EVERYTHING IT PROVES IN ONE ACT, so nothing it proves is settled by hand afterwards. Its writes
+# (`line_landing_writes`, which every landing runs) hand their copy of the plan to `line_settle` before the copy
+# is moved in, and the copy gains, in that one transaction:
 #   · nothing for a finding: each finding carried to the row (`finding-move … carried <row>`) and each finding any
 #     registered review names at the site of a finding the row answers (born of it, moved fixed to it, or carried to
 #     it) is named in LINE_SETTLED_F, and `line_settled` appends its move to fixed, `finding ref=<record>#<n>
@@ -973,7 +952,7 @@ line_settled_by() {
 
 line_publish() {  # <plan> <row> -> 0 published · 3 rebuild · 4 held · 5 moved · 6 guard · 2 refused · 75 lock
   local plan="${1:-}" row="${2:-}" rec root lk head branch ent first=""
-  local name com present base cand out sui car cbase cat br tr co rc run moved at tip
+  local name com present base cand out sui car cbase cat br tr co rc run moved at tip judged="" chg=""
   rec="$(line_record "$plan")" && root="$(_line_root "$plan")" && branch="$(_line_branch "$plan")" \
     || { _wt_refuse "line-unreadable plan=${plan:-<none>}"; return 2; }
   lk="$(_line_lock_dir "$rec")"
@@ -1043,21 +1022,22 @@ EOF
     return 2
   fi
   # 8. THE `published` EVENT: the landing, with the branch and the row's head the old `landed:` header carried, and
-  # the numbers commit, when one was made, beside the candidate it sits on. The log stamps its own instant.
+  # the numbers commit, when one was made, beside the candidate it sits on. A hand landing names the release base that
+  # judged it and the check's own files it changes, so a change to the check is never silent. The log stamps its instant.
+  if [ "$LINE_KIND" = hand ] && [ -n "${WT_CHECK_JUDGE:-}" ]; then
+    judged="${WT_CHECK_JUDGE:0:12}"; chg="$(_wt_check_judge "$root" "$head" "$cand" 2>/dev/null)" || chg=""
+  fi
   line_event "$plan" published "row=${row}" "commit=${cand}" "kind=${LINE_KIND}" "by=${LINE_BY}" "why=${LINE_WHY}" \
-    ${LINE_NUMBERS:+"numbers=${LINE_NUMBERS}"} "branch=${br}" "head=${com}" >/dev/null
+    ${LINE_NUMBERS:+"numbers=${LINE_NUMBERS}"} "branch=${br}" "head=${com}" ${judged:+"judged-by=${judged}"} ${chg:+"changed-here=${chg}"} >/dev/null
   [ -z "$LINE_DEBT_ID" ] \
     || printf 'DEBT %s %s — published red on the declared suite; the run owes a green run of %s (debt %s in %s)\n' \
          "$row" "$LINE_DEBT_SUITE" "$LINE_DEBT_SUITE" "$LINE_DEBT_ID" "$(line_log "$plan")"
   _line_cover "$plan" "$row" "$root" "$head" "$cand"
-  # 9. THE PLAN WRITE (T6): the row's status, its `- T<n>:` line and its ledger line, in one
-  # transaction, at the publish's own instant. A refusal now is after the publish: it is printed, with
-  # what is owed by hand, and the publish stands.
-  if ! _line_plan_write "$plan" "$row" "$cand" "$at"; then
-    [ -z "$LINE_PLAN_SAID" ] || printf '%s\n' "$LINE_PLAN_SAID"
-    printf 'PLAN-UNWRITTEN %s — published %s; the plan row is not written: run row-landed %s %s %s from the main thread\n' \
-      "$row" "$cand" "$row" "$cand" "$at"
-  fi
+  # 9. THE LANDING'S WRITES (`line_landing_writes`): the matrix's two, then the findings it settles. The row
+  # reads landed from the event above whatever they do, so a failure now is told and the publish stands.
+  line_landing_writes "$plan" "$row" "$cand" "$at" \
+    || printf 'UNSETTLED %s — published %s; the evidence keys and the stack-health line are not written and the findings it settles are not moved\n' \
+      "$row" "$cand"
   # 10. THE ROSTER MARK (T6): `landed=<40-hex> landed_at=<ISO-UTC>` on the row's roster line.
   _line_roster_mark "$plan" "$root" "$row" "$cand" "$at"
   _line_lock_drop "$lk"
@@ -1066,6 +1046,183 @@ EOF
   _line_born_close "$plan" "$root" "$row"
   LINE_PUBLISHED="$cand"; LINE_CHECKOUT="$co"
   return 0
+}
+
+# ---------------------------------------------------------------------------- the landing's writes
+# A LANDING WRITES NOTHING OF ITS OWN TO THE PLAN: its row reads landed from its `published` event (lib/units.sh
+# `_units_live`). Two writes of the matrix ride it still, made onto a copy of the plan judged as the plan is
+# (`units_validate`) and moved over it only while no other write changed it: the `evidence:` key of each criterion the
+# row serves, from the suites the landing ran (`line_evidence`), and the stack-health line (`line_settle`). Then the
+# findings it settles move to fixed in the log and their asks close (`line_settled`). The row's status, its step line
+# and every cell of its Tasks row are left as they stand.
+#
+# SERVES_AWK: the Tasks rows each criterion is served by (`serves_load` over `serves_tasks`, `serves_hit`) and the eval
+# design's rows (`eval_row`); matrix-render reads it too.
+SERVES_AWK='
+function trim(v) { gsub(/^[ \t]+|[ \t]+$/, "", v); return v }
+function cells(line, out,    n, i, t) {
+  gsub(/\\\|/, "\001", line)
+  n = split(line, t, "|")
+  for (i = 2; i < n; i++) { out[i - 1] = trim(t[i]); gsub(/\001/, "|", out[i - 1]) }
+  return n - 2
+}
+function serves_load(spec,    n0, i, tl, tv, ns, sv, s) {
+  n0 = split(spec, tl, "\n"); nt = 0
+  for (i = 1; i <= n0; i++) {
+    split(tl[i], tv, "\t"); if (tv[1] == "") continue
+    nt++; tid[nt] = tv[1]; tstep[nt] = tv[3]; tkind[nt] = tv[4]; ns = split(tv[2], sv, /[ ,;]+/)
+    for (s = 1; s <= ns; s++) if (sv[s] != "") serves[nt, sv[s]] = 1
+  }
+}
+function serves_hit(t, cr) {
+  return (((t, cr) in serves) || (ereq[cr] != "" && ((t, ereq[cr]) in serves)))
+}
+function eval_row(line,    nc, c, j, cr) {
+  if (line ~ /^[ \t]*\|[-|: \t]*$/) return
+  nc = cells(line, c)
+  if (!evh) { evh = 1; delete col; for (j = 1; j <= nc; j++) col[tolower(c[j])] = j; return }
+  cr = ("criterion" in col) ? c[col["criterion"]] : ""
+  if (cr == "" || (cr in eseen)) return
+  eseen[cr] = 1; ne++; ec[ne] = cr
+  ereq[cr] = ("requirement" in col) ? c[col["requirement"]] : ""
+  eapp[cr] = ("approach" in col) ? c[col["approach"]] : ""
+  eev[cr] = ("eval" in col) ? c[col["eval"]] : ""
+  efw[cr] = ("fails when" in col) ? c[col["fails when"]] : ""
+  etype[cr] = ("eval type" in col) ? c[col["eval type"]] : ""
+}'
+
+# serves_tasks <plan> -> `<id><TAB><serves><TAB><step><TAB><kind>` for each `## Tasks` row (lib/units.sh units_rows,
+# the table's one reader).
+serves_tasks() {
+  units_rows "$1" 2>/dev/null | awk -F'\t' '$1 != "" { print $1 "\t" $8 "\t" $2 "\t" $3 }'
+}
+
+# LE_AWK: the evidence pass. In each AC block of `## Verification Matrix` the landed row serves, an `evidence:` key
+# reading `pending` or a path a landing wrote (`record/<plan>/line/`) takes the docs-root-relative log of the row's
+# green verdict for the suite the block's eval names, at this commit, or of the verdict a reuse line names; a hand fill
+# stays, and a block with no `evidence:` key is left alone. ENVIRON: LE_TASKS, LE_ROW, LE_LOGS
+# (`<suite><TAB><path>` per line), LE_SLUG, LE_COUNT (a side file: the number of keys written).
+LE_AWK='
+function suite_of(ev,    t) {
+  if (!match(ev, /`[^` \t]+\.test\.sh`/)) return ""
+  t = substr(ev, RSTART + 1, RLENGTH - 2)
+  return t
+}
+BEGIN {
+  serves_load(ENVIRON["LE_TASKS"]); row = ENVIRON["LE_ROW"]; slug = ENVIRON["LE_SLUG"]; cf = ENVIRON["LE_COUNT"]
+  nl = split(ENVIRON["LE_LOGS"], ll, "\n")
+  for (i = 1; i <= nl; i++) { split(ll[i], lv, "\t"); if (lv[1] != "" && lv[2] != "") logs[lv[1]] = lv[2] }
+  for (t = 1; t <= nt; t++) if (tid[t] == row) rt = t
+}
+{ raw[NR] = $0; ln = $0; sub(/\r$/, "", ln); L[NR] = ln }
+END {
+  for (i = 1; i <= NR; i++) {
+    line = L[i]
+    if (line ~ /^[ \t]*```/) { fence = !fence; continue }
+    if (fence) continue
+    if (line ~ /^## /) {
+      inm = 0; evh = 0; cur = ""
+      inev = (line ~ /^## Eval design[ \t]*$/)
+      if (line ~ /^## Verification Matrix/) inm = 1
+      continue
+    }
+    if (inev && line ~ /^[ \t]*\|/) { eval_row(line); continue }
+    if (!inm || line ~ /^[ \t]*\|/) { if (inm) cur = ""; continue }
+    if (line ~ /^[^ \t]/) {
+      cur = ac_any(line)
+      if (cur != "") { if (cur in seen) cur = ""; else { seen[cur] = 1; nb++; bord[nb] = cur } }
+      continue
+    }
+    if (cur != "" && line ~ /^[ \t]+[^ \t]/) {
+      k = line; sub(/^[ \t]+/, "", k); v = k; sub(/[ \t]*:.*$/, "", k); sub(/^[^:]*:[ \t]*/, "", v)
+      if (k == "eval" && !(cur in beval)) beval[cur] = trim(v)
+      if (k == "evidence" && !(cur in evl)) { evl[cur] = i; evv[cur] = trim(v) }
+    }
+  }
+  written = 0
+  for (b = 1; b <= nb && rt; b++) {
+    cr = bord[b]
+    if (!(cr in evl) || !serves_hit(rt, cr)) continue
+    s = suite_of(beval[cr])
+    if (s == "" || !(s in logs)) continue
+    if (evv[cr] != "pending" && index(evv[cr], "record/" slug "/line/") != 1) continue
+    if (evv[cr] == logs[s]) continue
+    n = evl[cr]; ln = L[n]
+    if (match(ln, /evidence[ \t]*:/)) { out[n] = substr(ln, 1, RSTART + RLENGTH - 1) " " logs[s]; written++ }
+  }
+  for (i = 1; i <= NR; i++) print ((i in out) ? out[i] : raw[i])
+  printf "%d\n", written > cf
+}'
+
+# line_evidence <plan in> <plan out> <row> <commit> <landing record> <docs root> <plan slug> -> prints the number of
+# cells written; <plan out> holds the plan with them (and is left alone when none), and <plan out>.cells the criteria
+# whose block took a log, space-separated, for the landing's settlement. rc 1 when the pass cannot run.
+# A suite is named in an eval by its file name or by its path under tests/, where a bare Lands-on name runs, so a log
+# is keyed by both.
+line_evidence() {
+  local in="$1" out="$2" row="$3" commit="$4" rec="$5" droot="$6" slug="$7" logs n side="$2.count"
+  rm -f "$out.cells"
+  logs="$( line_held "$rec" && line_lines "$rec" | awk -F'|' -v row="$row" -v c="$commit" -v root="$droot/" "$_LINE_FIELDS_AWK"'
+    { e = line_ev() }
+    e == "verdict" && line_kv("result") == "green" {
+      s = line_kv("suite"); l = line_kv("log")
+      gl[line_kv("commit") SUBSEP s SUBSEP line_kv("reads")] = l   # any row: a reuse line after it may name it as its proof
+      if (line_kv("row") == row && line_kv("commit") == c && s != "" && index(l, root) == 1) last[s] = substr(l, length(root) + 1)
+    }
+    e == "reused" && line_kv("row") == row && line_kv("commit") == c {
+      s = line_kv("suite"); k = line_kv("from") SUBSEP s SUBSEP line_kv("reads")
+      if (s != "" && line_kv("reads") != "" && (k in gl) && index(gl[k], root) == 1) last[s] = substr(gl[k], length(root) + 1)
+    }
+    END { for (s in last) { printf "%s\t%s\n", s, last[s]; if (index(s, "/") == 0) printf "tests/%s\t%s\n", s, last[s] } }' 2>/dev/null )"
+  if [ -z "$logs" ]; then printf '0'; return 0; fi
+  LE_TASKS="$(serves_tasks "$in")" LE_ROW="$row" LE_LOGS="$logs" LE_SLUG="$slug" LE_COUNT="$side" \
+    awk "$(units_ac_head_awk)$SERVES_AWK$LE_AWK" "$in" > "$out.le" 2>/dev/null || { rm -f "$out.le" "$side"; return 1; }
+  n="$(cat "$side" 2>/dev/null)"; rm -f "$side"
+  case "$n" in ''|*[!0-9]*) rm -f "$out.le"; return 1 ;; esac
+  if [ "$n" -gt 0 ]; then
+    # The criteria whose block took a log: the pass replaces lines in place, so a line that differs is an evidence line.
+    awk "$(units_ac_head_awk)"'
+      NR == FNR { a[FNR] = $0; next }
+      /^## / { inm = ($0 ~ /^## Verification Matrix/); cur = ""; next }
+      inm && /^[^ \t|]/ { cur = ac_any($0); next }
+      cur != "" && $0 != a[FNR] && !(cur in s) { s[cur] = 1; printf "%s%s", sep, cur; sep = " " }' "$in" "$out.le" > "$out.cells" 2>/dev/null
+    mv -f "$out.le" "$out"
+  else
+    rm -f "$out.le"
+  fi
+  printf '%s' "$n"
+}
+
+# line_landing_writes <plan> <row> <commit> <at> -> 0 written, or nothing to write; 1 the copy cannot be written or breaks
+# the table; 3 the plan kept changing under it (tried five times). A row the plan does not hold has nothing to write.
+line_landing_writes() {
+  local plan="$1" row="$2" com="$3" at="$4" root rec new sum n=0
+  LINE_SETTLED_F=""
+  _line_plan_agent "$plan" "$row" >/dev/null || return 0
+  root="$(_line_root "$plan")" && rec="$(line_record "$plan")" && _line_load_proof || return 1
+  while [ "$n" -lt 5 ]; do
+    sum="$(cksum < "$plan" 2>/dev/null)" || return 1
+    new="$plan.landing.$$"
+    cp "$plan" "$new" 2>/dev/null || return 1
+    if ! line_evidence "$new" "$new.2" "$row" "$com" "$rec" "$(docs_root "$root")" "$(proof_plan_slug "$plan")" >/dev/null; then
+      rm -f "$new" "$new.2" "$new.2.cells"; return 1
+    fi
+    [ ! -f "$new.2" ] || mv -f "$new.2" "$new"
+    rm -f "$new.2.cells"
+    # The copy is judged as the plan is, and refused only for a fault it adds: a plan that already breaks the table
+    # is the person's to mend, and no landing's matrix writes wait on it.
+    if ! line_settle "$plan" "$row" "$com" "$new" "$at" \
+       || [ -n "$(units_validate "$new" "$plan" 2>&1 | /usr/bin/grep -vxF -f <(units_validate "$plan" "$plan" 2>&1))" ]; then
+      rm -f "$new"; return 1
+    fi
+    if [ "$(cksum < "$plan" 2>/dev/null)" = "$sum" ]; then
+      if cmp -s "$new" "$plan"; then rm -f "$new"; else mv -f "$new" "$plan" || { rm -f "$new"; return 1; }; fi
+      line_settled "$plan" "$root" "$row" "$com"
+      return 0
+    fi
+    rm -f "$new"; n=$((n + 1)); sleep 1
+  done
+  return 3
 }
 
 # ---------------------------------------------------------------------------- the tree's run
@@ -1155,7 +1312,7 @@ line_land_by_hand() {  # <tree> <root> <sid> <why> [<suites> <green-at> <log>] -
   ( _line_hand "$target" "$onto" "$plan" "$s" "$why" "$suites" "$at" "$log" )
 }
 # THE WRITER'S RUN, IN THE PERSON'S WORDS: the two writers of what a hand landing records of the row's suites, one for
-# both hand landings (`land --by-hand` above and `session-poker.sh row-landed --by-hand`), so the record they leave is
+# the hand landing (`land --by-hand` above), so the record it leaves is
 # one shape and the floor's judge (lib/proof.sh `_proof_past_f`) proves either. `_line_hand_ready` writes the row's
 # `ready` event, naming the suites (`none` when the person named none), and sets LINE_ME, the carrier a publish locks
 # by. `_line_hand_verdicts` writes one green verdict per suite, keyed by the commit they were green at, the log that
@@ -1194,7 +1351,7 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
   [ -n "$by" ] || by="$(git -C "$root" var GIT_AUTHOR_IDENT 2>/dev/null | sed 's/ <.*//')"
   by="${by//|/}"; [ -n "$by" ] || by="-"
   _line_hand_ready "$plan" "$row" "$head" "$branch" "$wt" "$suites" >/dev/null || { _wt_refuse "record-unwritable why=proofs-unwritable path=${rec} branch=${branch}"; return 2; }
-  # The person's verdicts go in before the publish, as `row-landed --by-hand` writes them: the publish's own reading of
+  # The person's verdicts go in before the publish: the publish's own reading of
   # the reviews the row answers (`_line_born_close`) judges the row by them, so a born row's landing closes its ask.
   if [ -n "$suites" ]; then
     _line_hand_verdicts "$plan" "$row" "$g" "$suites" "$vlog" \
@@ -1337,8 +1494,8 @@ _line_load_roster() {
 # row by `row=`, else by the plan row's agent cell as `name=` (labels, D4); the row the walls read is the
 # latest row of that name's agent id (`_line_current_row`), else the launch line (an adopted row, with no
 # launch line on this roster, stands as both); the writer is that row's name, else the launch line's, else
-# the agent cell. `ready` holds a row's landing to this name, and so do `deliver` and the tick's backstop
-# (hooks/session-poker.sh), so the writer a ruling is read against is one answer wherever a row lands.
+# the agent cell. `ready` holds a row's landing to this name, and so does the tick's landing of a record row
+# (hooks/poker/line.sh `record_row_land`), so the writer a ruling is read against is one answer wherever a row lands.
 # Sets LINE_LAUNCH, LINE_NOW (either may be empty) and LINE_WRITER; 1 when there is no name at all.
 # <agent> is the plan row's agent cell when the caller has it, read off <plan> when it is not given.
 line_row_writer() {  # <roster> <plan> <row> [<agent>]

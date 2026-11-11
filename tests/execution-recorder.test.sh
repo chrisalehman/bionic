@@ -463,7 +463,7 @@ mkdir -p "$RD_REPO/${RD_BRIEF%/*}"; printf 'the brief\n' > "$RD_REPO/$RD_BRIEF"
 { roster_header; roster_row_fixture status=intended session="$SID_A" name=w99-T1 agent_id= row=T1 \
     brief="$RD_BRIEF" brief_sum=5e1f tool_use_id="$TUID"; } > "$RD_REPO/.bionic/tmp/roster-${SID_A}.state"
 RD_SUM="$(shasum < "$RD_PLAN")"
-BIONIC_LAUNCH_SYNC_INLINE=1 run_rec "$(mk_agent_post "$SID_A" "$RD_TR" "$RD_REPO" "w99-T1" "$NEW_AID" "$TUID")"
+run_rec "$(mk_agent_post "$SID_A" "$RD_TR" "$RD_REPO" "w99-T1" "$NEW_AID" "$TUID")"
 RD_LOG="$(grep '^run/v1|ev=dispatch|' "$RD_REPO/.bionic/docs/record/wave-01-test/run.log" 2>/dev/null)"
 expect_eq "a launch appends one dispatch event to the run's log" "1" "$(printf '%s' "$RD_LOG" | grep -c .)"
 expect_eq "…naming the row, the agent, the brief's path and its sum" "T1 w99-T1 $RD_BRIEF 5e1f" \

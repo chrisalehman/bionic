@@ -577,14 +577,8 @@ pushed_onto() {  # <a placing row> -> that row, carrying `pushed=`
 # read of the plan. The event carries the row, the name, the role, the session, the call's id, and the brief's
 # path and sum, which is the contract the agent was given. It writes no cell: a row's state and its agent are
 # read from the log (lib/units.sh `_units_live`). A launch with no row or no brief (a researcher, a probe) is
-# no row's, and appends nothing.
-#
-# THE TREE IS STILL THE PLAN'S, until it is an event of its own: a row's empty `worktree` and `base` cells are
-# filled from the tree spawn-worktree.sh recorded for the name (lib/worktree.sh `workspace_record_for_name`), by
-# lib/units.sh `units_cells_write`, the cell write no person calls. It reads and judges the whole plan, so it runs
-# detached, its output and then `rc=<n>` in `.bionic/tmp/dispatch-<sid>.log`, which the tick names when the
-# status is not 0. Another write to the plan between its read and its move refuses it, so it tries again.
-# BIONIC_LAUNCH_SYNC_INLINE=1 runs it in the foreground, so a test reads the plan the moment the hook returns.
+# no row's, and appends nothing. The row's tree is its run's event too, appended when the tree was made
+# (spawn-worktree.sh create), so a launch writes nothing of it.
 
 dispatch_event() {  # <confirmed roster row> -> 0 always; appends the launch's dispatch event to its run's log
   local r="$1" row brief abs
@@ -601,49 +595,6 @@ dispatch_event() {  # <confirmed roster row> -> 0 always; appends the launch's d
   return 0
 }
 
-dispatch_tree_cells() {  # <row> <name> -> the row's empty worktree and base cells, from the tree recorded for <name>
-  local row="$1" rec tree base plan rows cur wt bs n=0 root_p
-  local -a pairs
-  # shellcheck source=/dev/null
-  . "$BIONIC_LIB/worktree.sh" >/dev/null 2>&1 && . "$BIONIC_LIB/units.sh" >/dev/null 2>&1 || return 1
-  rec="$(workspace_record_for_name "$BIONIC_ROOT" "$BIONIC_SID" "$2" 2>/dev/null)" || return 0
-  tree="${rec%%$'\t'*}"; base="${rec#*$'\t'}"; [ "$base" != "$rec" ] || base=""
-  plan="$(session_run "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || return 0
-  case "$plan" in 'bound-open '*) plan="${plan#bound-open }" ;; *) return 0 ;; esac
-  rows="$(_units_table "$plan")" || return 0
-  cur="$(printf '%s\n' "$rows" | awk -F'\t' -v id="$row" '$1 == id { print; exit }')"
-  [ -n "$cur" ] || return 0
-  units_field_v wt "$cur" worktree; units_field_v bs "$cur" base
-  root_p="$(cd "$BIONIC_ROOT" 2>/dev/null && pwd -P)"
-  [ ! -d "$tree" ] || tree="$(cd "$tree" 2>/dev/null && pwd -P)"
-  case "$tree" in "$root_p"/*) tree="${tree#"$root_p"/}" ;; "$BIONIC_ROOT"/*) tree="${tree#"$BIONIC_ROOT"/}" ;; esac
-  pairs=()
-  case "$wt" in *[A-Za-z0-9]*) ;; *) ! units_has_column "$plan" worktree || pairs+=("worktree=$tree") ;; esac
-  case "$bs$base" in *[A-Za-z0-9]*) case "$bs" in *[A-Za-z0-9]*) ;; *) ! units_has_column "$plan" base || pairs+=("base=${base:0:8}") ;; esac ;; esac
-  [ "${#pairs[@]}" -gt 0 ] || return 0
-  while [ "$n" -lt 5 ]; do
-    units_cells_write "$plan" "$row" "${pairs[@]}"
-    case $? in 0) return 0 ;; 3) n=$((n + 1)); sleep 1 ;; *) echo "the cells ${pairs[*]} of $row break the plan's table"; return 1 ;; esac
-  done
-  return 1
-}
-
-dispatch_tree_start() {  # <row> <name> -> 0 always; fills the tree cells without waiting
-  local log=/dev/null
-  [ -n "$1" ] || return 0
-  if [ -d "$BIONIC_ROOT/.bionic/tmp" ] && [ ! -L "$BIONIC_ROOT/.bionic/tmp/dispatch-${BIONIC_SID}.log" ]; then
-    log="$BIONIC_ROOT/.bionic/tmp/dispatch-${BIONIC_SID}.log"
-  fi
-  if [ "${BIONIC_LAUNCH_SYNC_INLINE:-}" = 1 ]; then
-    ( cd "$BIONIC_ROOT" 2>/dev/null || exit 0; dispatch_tree_cells "$1" "$2" >"$log" 2>&1; printf 'rc=%s\n' "$?" >>"$log" ) </dev/null >/dev/null 2>&1
-    return 0
-  fi
-  ( set -m
-    cd "$BIONIC_ROOT" 2>/dev/null || exit 0
-    ( trap '' HUP; dispatch_tree_cells "$1" "$2" >"$log" 2>&1; printf 'rc=%s\n' "$?" >>"$log" ) </dev/null >/dev/null 2>&1 &
-  ) </dev/null >/dev/null 2>&1
-  return 0
-}
 
 # ============================================================
 # ARM 2 — the ROSTER (PostToolUse|Agent).
@@ -787,9 +738,8 @@ if [ "$TOOL_NAME" = "Agent" ]; then
   COMPLETED=$(pushed_onto "$COMPLETED")
   printf '%s\n' "$COMPLETED" >> "$ROSTER_FILE" 2>/dev/null || exit 0
 
-  # THE LAUNCH'S EVENT, once the roster row is written, and the tree cells it owes. See `dispatch_event` above.
+  # THE LAUNCH'S EVENT, once the roster row is written. See `dispatch_event` above.
   dispatch_event "$COMPLETED"
-  [ -n "$(line_field "$COMPLETED" name)" ] && dispatch_tree_start "$(line_field "$COMPLETED" row)" "$(line_field "$COMPLETED" name)"
 
   # NO BOUND ON THE ROSTER, deliberately (Step-6 critic F-1, reproduced end to end in
   # record/w3-critic-repro-cap.sh). The observation record this reasoning contrasted the

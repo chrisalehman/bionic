@@ -527,8 +527,6 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh order '<the user's words>'   record the user's order: an order: given line with the time and the words, under the bound plan's ## SDLC State, else in record/orders.log; while it stands tests/run.sh starts no suite"
   die "  bash ${HOOK_DIR}/session-poker.sh order lift   end the open order: an order: lifted line with the time and its words"
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>'   record the user's approval <name> as an approved: line under ## SDLC State (the plan's own is approved-by:, written at Step 3)"
-  die "  bash ${HOOK_DIR}/session-poker.sh row-landed <id> <commit> <at> [--by-hand <who> <why> [--suites <a,b> --green-at <commit> --log <path> [--branch <b>] [--tree <t>]]]   the landing's row: status, step line, ledger line, one write; a hand landing's suites, their green commit and log are written to the landing record with it"
-  die "  bash ${HOOK_DIR}/session-poker.sh deliver <id>   a record row's own landing: its artifact checked (a review row's registered review too), then row-landed at the working head"
   die "  bash ${HOOK_DIR}/session-poker.sh reviews-part <id>   the integrate row's render, before its push and pull request: the release entry's ### The reviews from the plan's review and waiver lines, committed on the working branch and named in the landing record (never pushed)"
   die "  bash ${HOOK_DIR}/session-poker.sh known-limits-part <id>   the entry row's render (doc or integrate): the release entry's ### Known limits from the plan's deferrals, each its stated sentence, committed on the working branch and named in the landing record (never pushed)"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <regression|review|task|walk> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read; proof-add regression <log> [<log>…] takes one log or several, each opening head=<40-hex> dirty=0 and ending rc=0"
@@ -939,46 +937,6 @@ case "$VERB" in
       CF_FIELD="$(printf '%s' "${1%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"; CF_TEXT="${1#*=}"
       [ -n "${CF_TEXT//[[:space:]]/}" ] || usage "continuation-fill: the text for '$CF_FIELD' is empty."
     fi
-    ;;
-  # THE LANDING'S ROW (wave-28 T6; D7, A-orch-81): an id, the landed commit (40 hex) and the
-  # publish's instant (ISO-UTC); a hand landing adds `--by-hand <who> <why>` and may add the writer's suites,
-  # `--suites <a,b> --green-at <commit> --log <path>`, all three or none. The shapes are the
-  # usage error's; the values a plan cannot hold are the verb's own refusal.
-  row-landed)
-    RL_BY=""; RL_WHY=""; RL_HAND=0; RL_SUITES=""; RL_GREEN=""; RL_VLOG=""; RL_BRANCH=""; RL_TREE=""
-    if [ $# -ge 6 ] && [ "$4" = "--by-hand" ]; then
-      RL_HAND=1; RL_BY="$5"; RL_WHY="$6"; RL_HEAD3=("$1" "$2" "$3"); shift 6
-      while [ $# -ge 2 ]; do
-        case "$1" in
-          --suites) RL_SUITES="$2" ;;
-          --green-at) RL_GREEN="$2" ;;
-          --log) RL_VLOG="$2" ;;
-          --branch) RL_BRANCH="$2" ;;
-          --tree) RL_TREE="$2" ;;
-          *) break ;;
-        esac
-        shift 2
-      done
-      set -- "${RL_HEAD3[@]}" "$@"
-      { [ -z "${RL_SUITES}${RL_GREEN}${RL_VLOG}" ] || { [ -n "$RL_SUITES" ] && [ -n "$RL_GREEN" ] && [ -n "$RL_VLOG" ]; }; } \
-        || usage "row-landed --by-hand: the writer's suites are --suites <a,b> --green-at <commit> --log <path>, all three or none."
-      [ -z "${RL_BRANCH}${RL_TREE}" ] || [ -n "$RL_SUITES" ] \
-        || usage "row-landed --by-hand: --branch and --tree fill the ready event, which --suites <a,b> --green-at <commit> --log <path> writes."
-    fi
-    [ $# -eq 3 ] && [ -n "$1" ] || usage "row-landed takes <id> <40-hex commit> <ISO-UTC> [--by-hand <who> <why> [--suites <a,b> --green-at <commit> --log <path>]]."
-    case "$2" in *[!0-9a-f]*|'') usage "row-landed: '$2' is not a 40-hex commit." ;; esac
-    [ "${#2}" -eq 40 ] || usage "row-landed: '$2' is not a 40-hex commit."
-    case "$3" in
-      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
-      *) usage "row-landed: '$3' is not an ISO-UTC instant (YYYY-MM-DDTHH:MM:SSZ)." ;;
-    esac
-    PV_ID="$1"; RL_COMMIT="$2"; RL_AT="$3"; RL_ARTIFACT=""
-    ;;
-  # A RECORD ROW LANDS ITSELF (wave-33 T6; REQ-3 AC-3.1, D5): the row id alone. The commit is the
-  # working head and the instant is now, both the verb's, so neither is an operand.
-  deliver)
-    [ $# -eq 1 ] && [ -n "$1" ] || usage "deliver takes one argument: the row id (the head and the instant are the verb's own)."
-    PV_ID="$1"; RL_COMMIT=""; RL_AT=""; RL_ARTIFACT=""; RL_BY=""; RL_WHY=""; RL_HAND=0
     ;;
   # THE INTEGRATE ROW'S RENDER OF THE ENTRY'S REVIEWS: the row id alone; the head is the working branch's.
   reviews-part)
@@ -2573,37 +2531,6 @@ pv_next() {  # <verb> <operand>... -> the call on stderr, one line
   die "next call: $(launch_sync_hand "$@")"
 }
 
-# THE MATRIX HEAD'S LINES. Between the `## Verification Matrix` heading and its table stand the matrix's own flush-left
-# lines, `stack-health:` first, where matrix-render writes its stub and the gate reads them. One keyed line is written
-# `<key>: <value>`: a line of the key is replaced where it stands, and any second one dropped, so the head holds one;
-# with none, it goes under the `stack-health:` line, else under the heading. <own>, an ERE, names the old values the
-# caller may replace: an old value outside it is a person's word and stays (exit 5, nothing printed). Fences skipped.
-# Exit 3: no matrix section.
-matrix_head_line() {  # <plan> <key> <value> [<own ERE>] -> the whole plan
-  MH_KEY="$2" MH_VAL="$3" MH_OWN="${4:-}" awk '
-    BEGIN { k = ENVIRON["MH_KEY"]; kre = "^[ \t]*" k "[ \t]*:"; line = k ": " ENVIRON["MH_VAL"]; own = ENVIRON["MH_OWN"] }
-    { L[++n] = $0 }
-    END {
-      for (i = 1; i <= n; i++) {
-        x = L[i]
-        if (x ~ /^[ \t]*```/) { fence = !fence; continue }
-        if (fence) continue
-        if (x ~ /^## /) { if (head) break; if (x ~ /^## Verification Matrix/) head = i; continue }
-        if (!head) continue
-        if (x ~ /^[ \t]*\|/) break
-        if (x ~ kre) { if (!at) at = i; else drop[i] = 1 }
-        else if (x ~ /^[ \t]*stack-health[ \t]*:/ && !sh) sh = i
-      }
-      if (!head) exit 3
-      if (at && own != "") { v = L[at]; sub(kre, "", v); gsub(/^[ \t]+|[ \t]+$/, "", v); if (v !~ own) exit 5 }
-      for (i = 1; i <= n; i++) {
-        if (i in drop) continue
-        if (i == at) { print line; continue }
-        print L[i]
-        if (!at && i == (sh ? sh : head)) { if (!sh) print ""; print line }
-      }
-    }' "$1"
-}
 
 # THE USER'S WORDS, REFUSED IN ONE VOICE (wave-33 T7). finding-move and waive-row hold their words to
 # lib/said.sh `user_said`; its three refusals are written here once, the minimum named by the library's
@@ -2632,11 +2559,6 @@ $SAID_REFUSED
 SAID_REFUSE
 }
 
-# serves_tasks <plan> -> `<id><TAB><serves><TAB><step><TAB><kind>` for each `## Tasks` row (lib/units.sh units_rows,
-# the table's one reader).
-serves_tasks() {
-  units_rows "$1" 2>/dev/null | awk -F'\t' '$1 != "" { print $1 "\t" $8 "\t" $2 "\t" $3 }'
-}
 
 # A cell value the plan can hold: no pipe, tab or line break (AC-9.2). 0 when it can.
 plan_verb_value_ok() {
@@ -3025,38 +2947,6 @@ TICK_QUIET_MTIME=""; TICK_QUIET_CHANNEL=""; TICK_QUIET_AGE=""; TICK_QUIET_CAD=""
 POKER_BRIEF_WORDS=""
 BFB_OF=""; BFB_OWED=""; BFB_BRANCH=""
 PFC_OUT=""; PFC_ART=""
-SERVES_AWK='
-function trim(v) { gsub(/^[ \t]+|[ \t]+$/, "", v); return v }
-function cells(line, out,    n, i, t) {
-  gsub(/\\\|/, "\001", line)
-  n = split(line, t, "|")
-  for (i = 2; i < n; i++) { out[i - 1] = trim(t[i]); gsub(/\001/, "|", out[i - 1]) }
-  return n - 2
-}
-function serves_load(spec,    n0, i, tl, tv, ns, sv, s) {
-  n0 = split(spec, tl, "\n"); nt = 0
-  for (i = 1; i <= n0; i++) {
-    split(tl[i], tv, "\t"); if (tv[1] == "") continue
-    nt++; tid[nt] = tv[1]; tstep[nt] = tv[3]; tkind[nt] = tv[4]; ns = split(tv[2], sv, /[ ,;]+/)
-    for (s = 1; s <= ns; s++) if (sv[s] != "") serves[nt, sv[s]] = 1
-  }
-}
-function serves_hit(t, cr) {
-  return (((t, cr) in serves) || (ereq[cr] != "" && ((t, ereq[cr]) in serves)))
-}
-function eval_row(line,    nc, c, j, cr) {
-  if (line ~ /^[ \t]*\|[-|: \t]*$/) return
-  nc = cells(line, c)
-  if (!evh) { evh = 1; delete col; for (j = 1; j <= nc; j++) col[tolower(c[j])] = j; return }
-  cr = ("criterion" in col) ? c[col["criterion"]] : ""
-  if (cr == "" || (cr in eseen)) return
-  eseen[cr] = 1; ne++; ec[ne] = cr
-  ereq[cr] = ("requirement" in col) ? c[col["requirement"]] : ""
-  eapp[cr] = ("approach" in col) ? c[col["approach"]] : ""
-  eev[cr] = ("eval" in col) ? c[col["eval"]] : ""
-  efw[cr] = ("fails when" in col) ? c[col["fails when"]] : ""
-  etype[cr] = ("eval type" in col) ? c[col["eval type"]] : ""
-}'
 # matrix-render reads the one AC heading matcher (lib/units.sh ac_any) and the one eval-type map (lib/scale.sh
 # tier_of), so its pass holds no copy of either.
 { declare -F scale_tier_awk >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
@@ -3246,57 +3136,6 @@ END {
     if (i == mlast && nb != "") printf "%s", nb
   }
   printf "%d\t%d\t%d\n", written, added, same > cf
-}'
-LE_AWK='
-function suite_of(ev,    t) {
-  if (!match(ev, /`[^` \t]+\.test\.sh`/)) return ""
-  t = substr(ev, RSTART + 1, RLENGTH - 2)
-  return t
-}
-BEGIN {
-  serves_load(ENVIRON["LE_TASKS"]); row = ENVIRON["LE_ROW"]; slug = ENVIRON["LE_SLUG"]; cf = ENVIRON["LE_COUNT"]
-  nl = split(ENVIRON["LE_LOGS"], ll, "\n")
-  for (i = 1; i <= nl; i++) { split(ll[i], lv, "\t"); if (lv[1] != "" && lv[2] != "") logs[lv[1]] = lv[2] }
-  for (t = 1; t <= nt; t++) if (tid[t] == row) rt = t
-}
-{ raw[NR] = $0; ln = $0; sub(/\r$/, "", ln); L[NR] = ln }
-END {
-  for (i = 1; i <= NR; i++) {
-    line = L[i]
-    if (line ~ /^[ \t]*```/) { fence = !fence; continue }
-    if (fence) continue
-    if (line ~ /^## /) {
-      inm = 0; evh = 0; cur = ""
-      inev = (line ~ /^## Eval design[ \t]*$/)
-      if (line ~ /^## Verification Matrix/) inm = 1
-      continue
-    }
-    if (inev && line ~ /^[ \t]*\|/) { eval_row(line); continue }
-    if (!inm || line ~ /^[ \t]*\|/) { if (inm) cur = ""; continue }
-    if (line ~ /^[^ \t]/) {
-      cur = ac_any(line)
-      if (cur != "") { if (cur in seen) cur = ""; else { seen[cur] = 1; nb++; bord[nb] = cur } }
-      continue
-    }
-    if (cur != "" && line ~ /^[ \t]+[^ \t]/) {
-      k = line; sub(/^[ \t]+/, "", k); v = k; sub(/[ \t]*:.*$/, "", k); sub(/^[^:]*:[ \t]*/, "", v)
-      if (k == "eval" && !(cur in beval)) beval[cur] = trim(v)
-      if (k == "evidence" && !(cur in evl)) { evl[cur] = i; evv[cur] = trim(v) }
-    }
-  }
-  written = 0
-  for (b = 1; b <= nb && rt; b++) {
-    cr = bord[b]
-    if (!(cr in evl) || !serves_hit(rt, cr)) continue
-    s = suite_of(beval[cr])
-    if (s == "" || !(s in logs)) continue
-    if (evv[cr] != "pending" && index(evv[cr], "record/" slug "/line/") != 1) continue
-    if (evv[cr] == logs[s]) continue
-    n = evl[cr]; ln = L[n]
-    if (match(ln, /evidence[ \t]*:/)) { out[n] = substr(ln, 1, RSTART + RLENGTH - 1) " " logs[s]; written++ }
-  }
-  for (i = 1; i <= NR; i++) print ((i in out) ? out[i] : raw[i])
-  printf "%d\n", written > cf
 }'
 
 # ---------------------------------------------------------------- verbs
@@ -3495,7 +3334,6 @@ case "$VERB" in
   regression) poker_verb_regression "$@" ;;
   amend) poker_verb_amend "$@" ;;
   task-add) poker_verb_task_add "$@" ;;
-  row-landed|deliver) poker_verb_row_landed "$@" ;;
   reviews-part) poker_verb_reviews_part "$@" ;;
   known-limits-part) poker_verb_known_limits_part "$@" ;;
   step-line) poker_verb_step_line "$@" ;;

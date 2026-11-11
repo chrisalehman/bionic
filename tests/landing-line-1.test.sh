@@ -1483,9 +1483,13 @@ HL_F="$HL_F" awk '{ print } /^- T2: active$/ { print "proved: kind=regression he
 expect_eq "(hl0) precondition: before the landing the rendering is red at F, both suites owed, nothing closed, and the plan's line reads the same" \
   "red head=$HL_F pass=3 total=5 owed=a.test.sh,b.test.sh evidence=record/wave-x/whole.log|stack-health: red head=$HL_F pass=3 total=5 owed=a.test.sh,b.test.sh evidence=record/wave-x/whole.log" \
   "$(hl_lib proof_health_line "$HLP" "$HL")|$(hl_sh "$HLP")"
+hl_own() { awk '/^## / { s = $0 } (s == "## Tasks" && /^\| T1 \|/) || (s == "## SDLC State" && /^- T1:/)' "$1"; }   # <plan> -> T1's row and step line
+HL_OWN="$(hl_own "$HLP")"
 ll_launch "$HL" T1 a.test.sh
 ll_verb "$HL" T1
 expect_eq "(hl1) T1 lands through ready on a.test.sh, green" "0" "$LL_RC"
+expect_eq "(hl1c) the landing writes nothing of its row: its Tasks row and its step line stand as they were, and it reads landed" \
+  "2|$HL_OWN|landed" "$(printf '%s\n' "$HL_OWN" | grep -c .)|$(hl_own "$HLP")|$( ( . "$REPO/payload/scripts/lib/units.sh" >/dev/null 2>&1; units_rows "$HLP" ) | awk -F'\t' '$1 == "T1" { print $10 }')"
 [ "$LL_RC" = 0 ] || printf '      ready said: %s\n' "$LL_OUT" | head -20
 expect_contains "(hl1b) …the landing record holds its green verdict for a.test.sh, the close the judge reads" "|suite=a.test.sh|result=green|" \
   "$(ll_ev "$HL" verdict | /usr/bin/grep '|row=T1|')"

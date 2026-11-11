@@ -1,61 +1,20 @@
 # shellcheck shell=bash
 # hooks/poker/line.sh — the landing line: a row lands itself, its evidence, the run's numbers and hand-holds
-# (row-landed, deliver, reviews-part, known-limits-part, release-note).
+# (the record row's landing by the tick, reviews-part, known-limits-part, release-note).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
 
-# landing_evidence <plan in> <plan out> <row> <commit> <landing record> <docs root> <plan slug> -> prints the number of
-# cells written; <plan out> holds the plan with them (and is left alone when none), and <plan out>.cells the criteria
-# whose block took a log, space-separated, for the landing's settlement. rc 1 when the pass cannot run.
-# A suite is named in an eval by its file name or by its path under tests/, where a bare Lands-on name runs, so a log
-# is keyed by both.
-landing_evidence() {
-  local in="$1" out="$2" row="$3" commit="$4" rec="$5" droot="$6" slug="$7" logs n side="$2.count"
-  rm -f "$out.cells"
-  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
-  logs="$( line_held "$rec" && line_lines "$rec" | awk -F'|' -v row="$row" -v c="$commit" -v root="$droot/" "${_LINE_FIELDS_AWK:-}"'
-    { e = line_ev() }
-    e == "verdict" && line_kv("result") == "green" {
-      s = line_kv("suite"); l = line_kv("log")
-      gl[line_kv("commit") SUBSEP s SUBSEP line_kv("reads")] = l   # any row: a reuse line after it may name it as its proof
-      if (line_kv("row") == row && line_kv("commit") == c && s != "" && index(l, root) == 1) last[s] = substr(l, length(root) + 1)
-    }
-    e == "reused" && line_kv("row") == row && line_kv("commit") == c {
-      s = line_kv("suite"); k = line_kv("from") SUBSEP s SUBSEP line_kv("reads")
-      if (s != "" && line_kv("reads") != "" && (k in gl) && index(gl[k], root) == 1) last[s] = substr(gl[k], length(root) + 1)
-    }
-    END { for (s in last) { printf "%s\t%s\n", s, last[s]; if (index(s, "/") == 0) printf "tests/%s\t%s\n", s, last[s] } }' 2>/dev/null )"
-  if [ -z "$logs" ]; then printf '0'; return 0; fi
-  LE_TASKS="$(serves_tasks "$in")" LE_ROW="$row" LE_LOGS="$logs" LE_SLUG="$slug" LE_COUNT="$side" \
-    awk "$(units_ac_head_awk)$SERVES_AWK$LE_AWK" "$in" > "$out.le" 2>/dev/null || { rm -f "$out.le" "$side"; return 1; }
-  n="$(cat "$side" 2>/dev/null)"; rm -f "$side"
-  case "$n" in ''|*[!0-9]*) rm -f "$out.le"; return 1 ;; esac
-  if [ "$n" -gt 0 ]; then
-    # The criteria whose block took a log: the pass replaces lines in place, so a line that differs is an evidence line.
-    awk "$(units_ac_head_awk)"'
-      NR == FNR { a[FNR] = $0; next }
-      /^## / { inm = ($0 ~ /^## Verification Matrix/); cur = ""; next }
-      inm && /^[^ \t|]/ { cur = ac_any($0); next }
-      cur != "" && $0 != a[FNR] && !(cur in s) { s[cur] = 1; printf "%s%s", sep, cur; sep = " " }' "$in" "$out.le" > "$out.cells" 2>/dev/null
-    mv -f "$out.le" "$out"
-  else
-    rm -f "$out.le"
-  fi
-  printf '%s' "$n"
-}
 # ---------------------------------------------------------------- a record row lands itself
 #
-# THE RECORD ROW'S OWN LANDING (wave-33 T6; REQ-3 AC-3.1, AC-3.2; D5). A test, verify or review row
-# writes a record and no code, so it has no tree, no `ready` and no `published` event; wave-32 landed
-# eight such rows by `row-landed --by-hand`. `deliver <row>` is its agent's last act, and the tick's
-# backstop when the agent ended without it. It checks what the row owes, then lands it through the
-# one landing writer, `row-landed`, in the same transaction, at the working head (the head of the
-# checkout holding the plan's `working-branch:`).
+# THE RECORD ROW'S OWN LANDING. A test, verify or review row writes a record and no code, so it has no tree and no
+# `ready`. It lands when its writer has ended with its contract met: the tick finds it so and runs `record_row_land`,
+# which checks what the row owes (`deliver_check`) and appends one `published` event at the working head, of the
+# record kind, naming the row's writer and its record. No verb lands one, and nothing is written to the row's cells.
 #
 # THE ROW'S WRITER (wave-34 T4; burns debt row-writer-name): `ready`'s answer, lib/line.sh
-# `line_row_writer`, loaded here the first time it is asked, so `deliver` and the tick's backstop hold a
-# row to the writer `ready` would. Sets ROW_WRITER (empty when the row names no one); 1 when the library
+# `line_row_writer`, loaded here the first time it is asked, so the tick's landing of a record row holds
+# it to the writer `ready` would. Sets ROW_WRITER (empty when the row names no one); 1 when the library
 # cannot be loaded.
 row_writer() {  # <roster> <plan> <row> <agent cell>
   ROW_WRITER=""
@@ -99,7 +58,7 @@ deliver_check() {
   kind="$(units_field "$row" kind)"; files="$(units_field "$row" Files)"
   wt="$(units_field "$row" worktree)"; status="$(units_field "$row" status)"
   case "$status" in
-    landed) say "deliver — $PV_ID is already landed; nothing was written."; exit 0 ;;
+    landed) say "$PV_ID is already landed; nothing was written."; exit 0 ;;
     pending|active) : ;;
     *) die "REFUSED — $PV_ID reads $(clean "$status"), and only a pending or active row lands; the plan is unchanged."; exit 2 ;;
   esac
@@ -151,11 +110,11 @@ DELIVER_FILES
       fix="edit the Files cell of $PV_ID in the plan to name <path>"
     fi
     if [ "$n" -eq 0 ]; then
-      die "REFUSED — $PV_ID names no artifact: no artifact cell names one and its Files name no record under record/; name it: $fix, then $call deliver $PV_ID. The plan is unchanged."
+      die "REFUSED — $PV_ID names no artifact: no artifact cell names one and its Files name no record under record/; name it: $fix; the next tick lands it."
       exit 2
     fi
     if [ "$n" -gt 1 ]; then
-      die "REFUSED — $PV_ID names no artifact in an artifact cell and its Files name $n records ($(clean "$cands")); name the one it delivers: $fix, then $call deliver $PV_ID. The plan is unchanged."
+      die "REFUSED — $PV_ID names no artifact in an artifact cell and its Files name $n records ($(clean "$cands")); name the one it delivers: $fix; the next tick lands it."
       exit 2
     fi
   fi
@@ -172,11 +131,11 @@ DELIVER_FILES
     *) abs="$PV_REPO/$art" ;;
   esac
   if [ -L "$abs" ]; then
-    die "REFUSED — the artifact $(clean "$art") of $PV_ID is a symbolic link, and what it points at can change after the landing; copy the record to that path, then $call deliver $PV_ID. The plan is unchanged."
+    die "REFUSED — the artifact $(clean "$art") of $PV_ID is a symbolic link, and what it points at can change after the landing; copy the record to that path; the next tick lands it."
     exit 2
   fi
   if [ ! -f "$abs" ]; then
-    die "REFUSED — the artifact of $PV_ID, $(clean "$art"), does not exist (read as $(clean "$abs")); write it, then run $call deliver $PV_ID. The plan is unchanged."
+    die "REFUSED — the artifact of $PV_ID, $(clean "$art"), does not exist (read as $(clean "$abs")); write it, and the next tick lands it."
     exit 2
   fi
   real="$(cd "$(dirname "$abs")" 2>/dev/null && pwd -P)/$(basename "$abs")"
@@ -186,18 +145,20 @@ DELIVER_FILES
       die "REFUSED — the artifact $(clean "$art") of $PV_ID is not under record/ of the docs root ($docs/record/), and a record row delivers a record; the plan is unchanged."
       exit 2 ;;
   esac
-  # THE WALK ROW'S RECORD IS SETTLED BY ITS LANDING: a verify row whose artifact is a run's walk record,
-  # record/<run>/walk.md, is registered by walk_register in the landing's own write, so its confirmed cells need no
-  # status write after it. RL_WALK names the record from the docs root, RL_WALK_REAL its real path.
+  # A ROW THAT OWES A REGISTRATION LANDS ON IT, never on its file standing: a walk row on the walk's proof naming its
+  # record (proof-add walk), a regression row on the whole run's proof at the head it lands at (proof-add regression),
+  # a review row on its review registered (proof-add review, below). RL_WALK names a walk row's record from the docs root.
   if [ "$kind" = verify ]; then
-    case "$rel" in record/*/walk.md) case "${rel#record/}" in */*/*) : ;; *) RL_WALK="$rel"; RL_WALK_REAL="$real" ;; esac ;; esac
+    case "$rel" in record/*/walk.md) case "${rel#record/}" in */*/*) : ;; *) RL_WALK="$rel" ;; esac ;; esac
+  fi
+  if [ "$kind" = review ] || [ -n "$RL_WALK" ] || [ "$kind" = test ]; then
+    pl="$(proof_lines "$PV_PLAN")" \
+      || { die "REFUSED — the run's facts cannot be read, so whether the registration $PV_ID owes stands is not known; the next tick asks again."; exit 2; }
   fi
   if [ "$kind" = review ]; then
-    pl="$(proof_lines "$PV_PLAN")" \
-      || { die "REFUSED — the run's facts cannot be read, so whether a review proof names $rel is not known; the plan is unchanged. Run $call deliver $PV_ID again."; exit 2; }
     if [ -z "$(printf '%s\n' "$pl" | awk -v rec="$rel" "$(proof_awk)"'
         proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE == rec { print "y"; exit }')" ]; then
-      die "REFUSED — $PV_ID is a review row and no review proof of the run names its record $rel; register the review first: $call proof-add review $rel --question <q> --reader <name>, then $call deliver $PV_ID. The plan is unchanged."
+      die "REFUSED — $PV_ID is a review row and no review proof of the run names its record $rel; register the review first: $call proof-add review $rel --question <q> --reader <name>; the next tick lands it."
       exit 2
     fi
   fi
@@ -210,7 +171,17 @@ DELIVER_FILES
     *) head="" ;;
   esac
   if [ -z "$head" ]; then
-    die "REFUSED — the plan's working-branch ${wb:-(none named)} names no commit in $PV_REPO, so there is no head to land $PV_ID at; name the branch under ## SDLC State (working-branch: <branch>), then $call deliver $PV_ID. The plan is unchanged."
+    die "REFUSED — the plan's working-branch ${wb:-(none named)} names no commit in $PV_REPO, so there is no head to land $PV_ID at; name the branch under ## SDLC State (working-branch: <branch>); the next tick lands it."
+    exit 2
+  fi
+  if [ -n "$RL_WALK" ] && [ -z "$(printf '%s\n' "$pl" | awk -v rec="$RL_WALK" "$(proof_awk)"'
+      proof_fields($0) && PROOF_KIND == "walk" && PROOF_EVIDENCE == rec { print "y"; exit }')" ]; then
+    die "REFUSED — $PV_ID is the walk row and no walk proof names its record $RL_WALK; register the walk: $call proof-add walk $RL_WALK, and the next tick lands it."
+    exit 2
+  fi
+  if [ "$kind" = test ] && [ -z "$(printf '%s\n' "$pl" | awk -v h="$head" "$(proof_awk)"'
+      proof_fields($0) && PROOF_KIND == "regression" && PROOF_HEAD == h { print "y"; exit }')" ]; then
+    die "REFUSED — $PV_ID is a regression row and no whole run's proof stands at the working head ${head:0:12}; register the run: $call proof-add regression <its log>, and the next tick lands it."
     exit 2
   fi
   # THE INTEGRATE ROW LANDS WITH THE ENTRY'S REVIEWS LISTED: its pull request carries the branch to the integration
@@ -229,16 +200,14 @@ DELIVER_FILES
     fi
     rm -f "$e"
     if [ "$LINE_RV_STATE" = renders ]; then
-      die "REFUSED — $PV_ID is the integrate row, and the $LINE_RV_VER entry's ### The reviews on $wb does not list the plan's $LINE_RV_N review and waiver lines, so its pull request would carry the entry without them; render them before the pull request: $call reviews-part $PV_ID, then $call deliver $PV_ID. The plan is unchanged."
+      die "REFUSED — $PV_ID is the integrate row, and the $LINE_RV_VER entry's ### The reviews on $wb does not list the plan's $LINE_RV_N review and waiver lines, so its pull request would carry the entry without them; render them before the pull request: $call reviews-part $PV_ID; the next tick lands it."
       exit 2
     fi
   fi
-  # AN UNREAD RULING HOLDS THE LANDING (wave-33 T34; Δ1, ADR-052), as at the commit wall and `ready`: a
-  # record row's artifact is gitignored and never commits, so deliver is its only landing. The writer
-  # is `ready`'s (`row_writer`). Each ruling of it not yet shown is printed and stamped shown
-  # (lib/roster.sh `ruling_take_unread`), so the same call after this one lands: this is the writer's
-  # own deliver. The tick's backstop never reaches this read with a ruling unread (it refuses first,
-  # without stamping, wave-34 T4).
+  # AN UNREAD RULING HOLDS THE LANDING, as at the commit wall and `ready`: a record row's artifact is gitignored and
+  # never commits, so this is its only landing. The writer is `ready`'s (`row_writer`). The tick never reaches this
+  # read with a ruling unread (it holds the row first, stamping nothing); a ruling met here is printed and stamped
+  # shown (lib/roster.sh `ruling_take_unread`), and the row lands at the next tick.
   sid="$(session_id)" || sid=""
   roster="$PV_REPO/.bionic/tmp/roster-${sid}.state"
   if ! row_writer "$roster" "$PV_PLAN" "$PV_ID" "$(units_field "$row" agent)"; then
@@ -247,137 +216,13 @@ DELIVER_FILES
   fi
   if [ -n "$sid" ] && declare -F ruling_take_unread >/dev/null 2>&1 \
      && rulings="$(ruling_take_unread "$roster" "$ROW_WRITER" deliver)" && [ -n "$rulings" ]; then
-    die "REFUSED — an orchestrator ruling for $(clean "$ROW_WRITER") is unread ($(printf '%s\n' "$rulings" | sed -n 's/^bionic ruling \([^ ]*\) .*/\1/p' | paste -sd, - | sed 's/,/, /g')); read it below, act on it, then $call deliver $PV_ID. The plan is unchanged."
+    die "REFUSED — an orchestrator ruling for $(clean "$ROW_WRITER") is unread ($(printf '%s\n' "$rulings" | sed -n 's/^bionic ruling \([^ ]*\) .*/\1/p' | paste -sd, - | sed 's/,/, /g')); read it below, act on it; the next tick lands it."
     printf '%s\n' "$rulings" >&2
     exit 2
   fi
   RL_COMMIT="$head"; RL_AT="$(iso_now)"; RL_ARTIFACT="$art"
 }
 
-# THE HAND LANDING'S SUITES ARE THE PERSON'S WORDS, read before anything is written. `row-landed --by-hand` given
-# `--suites <a,b> --green-at <commit> --log <path>` (all three, the dispatcher holds that) says which suites ran, the
-# commit they were green at and the log that shows it; a hand landing runs nothing, so these are all the record can hold
-# of the row's run. The suites must read as suites (lib/line.sh `_line_suites`, the reader every landing uses), the log
-# must fit a `|`-separated line, and the commit must be one the landed commit holds, for a verdict at a commit outside
-# the landing proves nothing about it. Sets RL_SUITES to the suites as the line spells them and RL_GREEN to the commit
-# in full. A refusal exits 1 with the plan unchanged.
-row_landed_suites() {
-  local g
-  [ -n "$RL_SUITES" ] || return 0
-  if ! declare -F _line_hand_ready >/dev/null 2>&1; then
-    { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
-  fi
-  if ! declare -F _line_hand_ready >/dev/null 2>&1; then
-    die "REFUSED — row-landed --by-hand: the landing line (lib/line.sh) cannot be loaded from $BIONIC_LIB, so the suites cannot be recorded; the plan is unchanged."
-    exit 2
-  fi
-  if ! RL_SUITES="$(_line_suites "$RL_SUITES")" || [ "$RL_SUITES" = none ]; then
-    die "REFUSED — row-landed --by-hand: --suites names something that is no suite; name suites bare or by path, comma-separated. The plan is unchanged."
-    exit 1
-  fi
-  case "$RL_VLOG" in
-    *'|'*|*$'\n'*|*$'\r'*) die "REFUSED — row-landed --by-hand: the --log path holds a | or a line break, which no record line can hold; the plan is unchanged."; exit 1 ;;
-  esac
-  # The branch and the tree ride on the same ready line, each a field of its own, so a value that breaks the line is
-  # refused as the log path is.
-  case "${RL_BRANCH-}${RL_TREE-}" in
-    *'|'*|*$'\n'*|*$'\r'*) die "REFUSED — row-landed --by-hand: --branch and --tree each fill a field of the ready line, and a | or a line break cannot be held in one; the plan is unchanged."; exit 1 ;;
-  esac
-  if ! g="$(git -C "$PV_REPO" rev-parse --verify -q "${RL_GREEN}^{commit}" 2>/dev/null)" \
-     || ! git -C "$PV_REPO" merge-base --is-ancestor "$g" "$RL_COMMIT" 2>/dev/null; then
-    die "REFUSED — row-landed --by-hand: --green-at $(clean "$RL_GREEN") is no commit that $RL_COMMIT holds, so the suites' green runs say nothing of the landing; name the row's own head or a commit under it. The plan is unchanged."
-    exit 1
-  fi
-  RL_GREEN="$g"
-}
-
-# THE HAND LANDING'S SCAN (wave-39 T13; REQ-9 AC-9.1, AC-9.3; D14). `row-landed --by-hand` marks a landing no line
-# made: wave 38 fast-forwarded fourteen rows by hand and marked each so, a route that ran no check, and the private
-# name that reached history through it cost a rewrite of 99 commits (A-orch-71, A-orch-78; D32). With `release-check:`
-# declared in `.bionic/config.yaml`, the mark is written only when the commit is held: by a passing `kind=check` proof
-# at it or at a commit that holds it (lib/proof.sh `proof_check_passes`, the last check line at each head deciding
-# it), else by the declared check itself, run by the one runner the release-check verb uses (lib/worktree.sh
-# `worktree_check_run`, as the release base holds it) over the release range, `release_base` to the commit, read in
-# the checkout of the plan's working branch (the project root when none holds it), with BIONIC_CHECK_BRANCH naming
-# that branch for the rewrite a hit prints
-# (tests/lib/name-scan.sh). A check that exits non-zero refuses: its output is printed, each hit with the commit and
-# path that brought it and its fix, and the plan is unchanged. A commit the base already holds is in a release and
-# is not scanned again. With no key nothing runs. The `line_publish` route ran the check over its own range before
-# its fast-forward and then calls this verb, so a hand landing through `land --by-hand` meets it twice; the second
-# run sees the whole release range, which the first did not. Exits on a refusal; returns when the mark may be written.
-row_landed_scan() {
-  local cmd wb co p out rc scan n rb
-  cmd="$(config_value "$PV_REPO" release-check "" 2>/dev/null)"
-  [ -n "$cmd" ] || return 0
-  if ! { declare -F proof_check_passes >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-     || ! declare -F proof_check_passes >/dev/null 2>&1; then
-    die "REFUSED — row-landed --by-hand: the declared release-check cannot be judged, for the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
-    exit 2
-  fi
-  wb="$(plan_working_branch "$PV_PLAN")"
-  co=""; [ -z "$wb" ] || co="$(proof_checkout "$PV_REPO" "$wb")" || co=""
-  [ -n "$co" ] || co="$PV_REPO"
-  if ! git -C "$co" rev-parse --verify -q "$RL_COMMIT^{commit}" >/dev/null 2>&1; then
-    die "REFUSED — row-landed --by-hand: $RL_COMMIT is no commit in $co, so the declared release-check has nothing to run over; the plan is unchanged."
-    exit 1
-  fi
-  # WHAT THE LANDING CHANGES OF THE CHECK. The judge is the release base, a commit no landing writes, so a landing
-  # that changes the check's own files is judged like any other. The files it changes among those the project declares
-  # as the check's (`release-check-files:`, read by lib/worktree.sh `_wt_check_judge` over the landing's own range, its
-  # commit's first parent to the commit) are said on the row's line beside the judge, `judged-by=<judge>
-  # changed-here=<paths>`, so a change to the check is never silent. The paths come back comma-joined and are kept whole.
-  RL_JUDGED=""; RL_CHG=""
-  if p="$(git -C "$co" rev-parse --verify -q "$RL_COMMIT^1" 2>/dev/null)"; then
-    RL_CHG="$(_wt_check_judge "$co" "$p" "$RL_COMMIT" 2>/dev/null)" || RL_CHG=""
-  fi
-  # A LANDING PAST THE RELEASE IS JUDGED AT ITS NUMBERS. The line publishes such a landing with the release numbers
-  # rendered again in a commit on its candidate (lib/line.sh `_line_numbers`) and moves the branch to that commit;
-  # the candidate alone still carries the numbers rendered before it, which the check rightly refuses as landed after
-  # them. So when the record's published line for this row and commit names a numbers commit whose parent is the
-  # commit, the scan runs to that commit. The row's line and the landing's record keep the commit itself.
-  scan="$RL_COMMIT"
-  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
-  p="$(git -C "$co" rev-parse --verify -q "$RL_COMMIT^{commit}" 2>/dev/null)"
-  n="$(line_lines "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" 2>/dev/null | awk -F'|' -v r="$PV_ID" -v c="$p" "${_LINE_FIELDS_AWK:-}"'
-    line_ev() == "published" && line_kv("row") == r && line_kv("commit") == c && line_kv("numbers") != "" { n = line_kv("numbers") }
-    END { print n }' 2>/dev/null)"
-  if [ -n "$n" ] && [ -n "$p" ] && [ "$(git -C "$co" rev-parse --verify -q "$n^1" 2>/dev/null)" = "$p" ]; then
-    scan="$n"
-  fi
-  rb=0; release_base "$PV_PLAN" "$co" "$RL_COMMIT" || rb=1
-  [ "$rb" -ne 0 ] || RL_JUDGED="${RB_BASE:0:12}${RL_CHG:+ changed-here=$RL_CHG}"
-  for p in $(proof_check_passes "$PV_PLAN" "$co"); do
-    if git -C "$co" merge-base --is-ancestor "$scan" "$p" 2>/dev/null; then
-      say "row-landed — release-check: ${scan:0:12} is held by the passing release check at ${p:0:12}; no scan was run."
-      return 0
-    fi
-  done
-  if [ "$rb" -ne 0 ]; then
-    die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")) has no range to run over: no tag reachable from the plan's integration-branch (${RB_IB:-none named}) is a proper ancestor of $RL_COMMIT and its base-sha (${RB_BS:-none}) is no commit here; name the last release as the plan's base-sha, or tag it. The plan is unchanged."
-    exit 1
-  fi
-  if [ "$(git -C "$co" rev-list --count "$RB_BASE..$scan" 2>/dev/null)" = 0 ]; then
-    RL_JUDGED=""
-    say "row-landed — release-check: ${RL_COMMIT:0:12} is held by the release base ${RB_BASE:0:12} ($RB_FROM); no scan was run."
-    return 0
-  fi
-  # THE RUN IS THE ONE RUNNER'S (lib/worktree.sh `worktree_check_run`), as the release base holds the check, with
-  # BIONIC_CHECK_BRANCH naming the working branch for the rewrite a hit prints.
-  worktree_check_run "$PV_REPO" "$PV_PLAN" "$RB_BASE" "$RB_BASE" "$scan" "$co" "$wb"; n=$?
-  [ "$n" -ne 1 ] || return 0
-  if [ "$n" -ne 0 ]; then
-    die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")) cannot be run as the release base ${RB_BASE:0:12} ($RB_FROM) holds it: $(clean "$WT_CHECK_OUT"). The plan is unchanged."
-    exit 1
-  fi
-  out="$WT_CHECK_OUT"; rc="$WT_CHECK_RC"
-  if [ "$rc" -ne 0 ]; then
-    [ -z "$out" ] || printf '%s\n' "$out"
-    die "REFUSED — row-landed --by-hand: the declared release-check ($(clean "$cmd")), judged-by=$RL_JUDGED, exited $rc over ${RB_BASE:0:12}..${scan:0:12} ($RB_FROM), and no passing kind=check proof stands at or past ${scan:0:12}. Its output is above: each hit, the commit and path that brought it, and its fix (a copy only history holds goes by the rewrite it prints). Take out what it names and mark the landing again, or run release-check to a pass at or past the commit; the plan is unchanged."
-    exit 1
-  fi
-  say "row-landed — release-check: clean over ${RB_BASE:0:12}..${scan:0:12} ($RB_FROM), judged-by=$RL_JUDGED."
-  return 0
-}
 # ---------------------------------------------------------------- the run's numbers
 #
 # THE RUN'S NUMBERS ARE FOLDED FROM THE TWO RECORDS, AND ONLY PRINTED (wave-28 T14; D18, REQ-4).
@@ -478,12 +323,13 @@ _lr_events() {  # <plan> [instant] -> the run's lines as the reader reads them, 
 }
 landing_unmeasured() {  # <plan or landing record> -> rc 0 when its run holds landings and none the line recorded
   local plan
+  _lr_reader || return 1
   plan="$(_lr_plan "$1")" || return 1
   _lr_events "$plan" | _lr_unmeasured
 }
 _lr_unmeasured() {  # stdin: the run's lines -> rc 0 when a landing stands and no line of the landing line's own does
   awk -F'|' "$_READER_AWK"'
-    { e = ev() } e == "published" && line_kv("kind") == "" { l = 1; next }
+    { e = ev() } e == "published" && (line_kv("kind") == "" || line_kv("kind") == "record" || line_kv("kind") == "close") { l = 1; next }
     e ~ /^(ready|candidate|verdict|returned|published|run|reused)$/ { m = 1 }
     END { exit !(l && !m) }'
 }
@@ -549,7 +395,8 @@ landing_report() {  # <plan or landing record> <project root> <rows yes|no> [ins
     (et = ev()) == "" { next }
     # the kinds the landing record holds alone: the first of them opens the window the gate requests are counted in
     et !~ /^(ready|candidate|verdict|returned|published|run|reused|standing|stalled|walk|hand|admitted|void)$/ { next }
-    et == "published" && line_kv("kind") == "" { next }
+    # a landing no line ran, a record row or close-out or an older plan line, is no line landing
+    et == "published" && (line_kv("kind") == "" || line_kv("kind") == "record" || line_kv("kind") == "close") { next }
     {
       rk = line_kv("row"); e = iso2epoch(line_kv("at"))
       g = rk SUBSEP (gen[rk] + 0)
@@ -891,144 +738,23 @@ hand_holds_verb() {
   return 0
 }
 
-  # THE LANDING'S ROW (wave-28 T6; REQ-3 AC-3.2, D7; ruling A-orch-81). `line_publish`
-  # (lib/line.sh) runs this verb, as a command, inside its publish lock once the fast-forward and
-  # its `published` event are written: the row's status `landed` (`units_table_cells` on the tasks
-  # table, judged by `units_validate` as the write hook judges a person's edit), its `- T<n>:` line
-  # (`units_step_line`), onto ONE copy and through ONE `plan_verb_swap ... writer`: both lines or none.
-  # Writer mode is the point: past Step 4 the dry copy reads `current: 4`, so the declared debt the
-  # publish has just written (T5) cannot refuse the publish's own bookkeeping, and the debt stays
-  # in the bound plan's landing record for the gate to read at the next step move (wave-27 passes
-  # 60 and 63: the dry copy is `plan_verb_open`'s own, so the gate resolves it to the real plan).
-  # The step line gains ` landed <commit> <at>` after its own text (a hand landing: ` landed-by-hand:
-  # <who> <at> "<why>" judged-by=<judge> [changed-here=<paths>]`, the hand landing's interface, the fields present
-  # when the scan judged or a passing check proof held the commit), once: a text already there is not added
-  # again. A run again of the same landing finds the plan already so and writes nothing. A plan's
-  # `## Dispatch ledger`, where an older run kept one, is history and is not written.
-  #
-  # A PLACEHOLDER LEAD IS REPLACED, NOT KEPT (wave-33 T6; REQ-3 AC-3.3, D5). A line that opens
-  # `pending dispatch` (the Step-3 template, `task-add`) gives that lead to the landing
-  # text and keeps the rest of its words, a ` born: ` marker included (`units_born` reads it there):
-  # `- T5: pending dispatch — .worktrees/01-T5` lands as `- T5: landed <commit> <at> — .worktrees/01-T5`.
-  #
-  # `deliver <row>` (wave-33 T6; D5) is this verb for a record row: `deliver_check` reads what the row
-  # owes and sets the commit (the working head), the instant (now) and the artifact it checked.
-  poker_verb_row_landed() {
-    if ! plan_verb_id_ok "$PV_ID"; then
-      die "REFUSED — '$(clean "$PV_ID")' is not one row id; the plan is unchanged."
-      exit 1
-    fi
-    if ! plan_verb_value_ok "$RL_BY" || ! plan_verb_value_ok "$RL_WHY"; then
-      die "REFUSED — the hand landing's name or reason carries a |, a tab or a line break, which no plan line can hold; the plan is unchanged."
-      exit 1
-    fi
-    plan_verb_open row-landed
-    RL_WALK=""; RL_WALK_REAL=""
-    [ "$VERB" != deliver ] || deliver_check
-    RL_JUDGED=""
-    if [ "$RL_HAND" -eq 1 ]; then row_landed_suites; row_landed_scan; fi
-    PV_RC=0
-    units_table_cells "$PV_PLAN" set tasks "$PV_ID" status=landed > "$PV_NEW" 2>/dev/null || PV_RC=$?
-    case "$PV_RC" in
-      0) : ;;
-      1) die "REFUSED — $PV_PLAN carries no ## Tasks table; the plan is unchanged."; exit 1 ;;
-      2) die "REFUSED — the ## Tasks table carries no row $PV_ID; the plan is unchanged."; exit 1 ;;
-      5) die "REFUSED — the ## Tasks table carries more than one row $PV_ID; the plan is unchanged."; exit 1 ;;
-      *) die "REFUSED — the ## Tasks row $PV_ID cannot take status landed; the plan is unchanged."; exit 1 ;;
-    esac
-    PV_VIOL="$(units_validate "$PV_NEW" 2>&1)"
-    if [ -n "$PV_VIOL" ]; then
-      die "REFUSED — with $PV_ID landed, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
-      printf '%s\n' "$PV_VIOL" >&2
-      exit 1
-    fi
-    case "$PV_ID" in
-      T[0-9]*)
-        RL_TEXT="landed $RL_COMMIT $RL_AT"
-        [ "$RL_HAND" -eq 0 ] || RL_TEXT="landed-by-hand: $RL_BY $RL_AT \"$RL_WHY\"${RL_JUDGED:+ judged-by=$RL_JUDGED}"
-        RL_REST="$(units_step_text "$PV_NEW" "$PV_ID" 2>/dev/null)"
-        case " $RL_REST " in
-          *" $RL_TEXT "*) RL_LINE="$RL_REST" ;;
-          " pending dispatch "*) RL_LINE="$RL_TEXT${RL_REST#pending dispatch}" ;;
-          *) RL_LINE="${RL_REST:+$RL_REST }$RL_TEXT" ;;
-        esac
-        if ! units_step_line "$PV_NEW" "$PV_ID" "$RL_LINE" > "$PV_NEW.2" 2>/dev/null; then
-          die "REFUSED — $PV_PLAN carries no ## SDLC State section for the $PV_ID line; the plan is unchanged."
-          exit 1
-        fi
-        mv -f "$PV_NEW.2" "$PV_NEW" ;;
-    esac
-    # THE EVIDENCE CELLS (wave-31 T22; REQ-15 AC-15.1 to AC-15.3, D15): the criteria this row serves gain the log of
-    # the suite their eval names, read off the landing record's verdicts for this row and commit (`landing_evidence`).
-    # A hand landing's verdicts are keyed by the commit the person says they were green at, not this landing's, so it
-    # writes none here. Same copy, same dry commit, same swap.
-    RL_SLUG="$(proof_plan_slug "$PV_PLAN")"
-    RL_N="$(landing_evidence "$PV_NEW" "$PV_NEW.2" "$PV_ID" "$RL_COMMIT" "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" \
-      "$(docs_root "$PV_REPO")" "$RL_SLUG")" || {
-      die "REFUSED — the evidence cells of the criteria $PV_ID serves cannot be written; the plan is unchanged."
-      exit 1
-    }
-    [ ! -f "$PV_NEW.2" ] || mv -f "$PV_NEW.2" "$PV_NEW"
-    rm -f "$PV_NEW.2.cells"
-    # THE SETTLEMENT (lib/line.sh `line_settle`): what the landing proves goes into the same copy, so the row, its
-    # evidence and the findings it answers are one write. It marks no matrix status.
-    if ! { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
-       || ! declare -F line_settle >/dev/null 2>&1; then
-      die "REFUSED — the landing's settlement (lib/line.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
-      exit 2
-    fi
-    LINE_SID="${LINE_SID:-${CLAUDE_CODE_SESSION_ID:-}}"
-    if ! line_settle "$PV_PLAN" "$PV_ID" "$RL_COMMIT" "$PV_NEW" "$RL_AT"; then
-      die "REFUSED — what the landing of $PV_ID settles cannot be written into the plan's copy; the plan is unchanged."
-      exit 1
-    fi
-    # THE WALK, SETTLED IN THE SAME COPY: its proof line, the cells it confirms and its pointer go in with the row's
-    # landing, and a record that does not register refuses the landing whole.
-    if [ -n "$RL_WALK" ] && ! walk_register "$PV_PLAN" "$PV_NEW" "$RL_WALK_REAL" "$RL_WALK" "$RL_COMMIT" "$PV_REPO"; then
-      die "REFUSED — $PV_ID delivers the walk record $RL_WALK, and it lands only with the record's verdicts settled: $(clean_whole "$WALK_WHY"); fix the record, then bash $HOOK_DIR/session-poker.sh deliver $PV_ID. The plan is unchanged."
-      exit 1
-    fi
-    plan_verb_swap row-landed "$PV_ID landed at $RL_COMMIT" writer
-    [ -z "$RL_WALK" ] || walk_recorded "$PV_PLAN" "$RL_WALK"
-    say "row-landed — $PV_ID landed at $RL_COMMIT: status and step line written to $PV_PLAN in one write; dry-committed first."
-    [ -z "$RL_WALK" ] || say "row-landed — $PV_ID registered its walk at ${WALK_HEAD:0:12}: $(walk_said "$RL_WALK")"
-    line_settled "$PV_PLAN" "$PV_REPO" "$PV_ID" "$RL_COMMIT"
-    [ -z "$LINE_SETTLED_F" ] || say "row-landed — $PV_ID settled the findings $LINE_SETTLED_F: fixed by its landing, their asks closed."
-    # A HAND LANDING IS RECORDED. The run's log gains the line the line's own hand
-    # landing writes (lib/line.sh `line_publish`, field for field), at the landing's instant, so landing-report's
-    # Landings list the row and `--hand-holds` counts it; a hand-marked landing used to reach the plan alone. Once:
-    # the line's `land --by-hand` writes its published line before it runs this verb, and a run again of the same
-    # landing finds it, so a published line for this row and commit already in the record is the landing recorded.
-    # The plan is written first; a record that cannot be written refuses (1) after it, and the same call again
-    # writes the record line alone.
-    if [ "$RL_HAND" -eq 1 ]; then
-      RL_REC="$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")"
-      { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
-      if ! line_lines "$RL_REC" 2>/dev/null | awk -F'|' -v r="$PV_ID" -v c="$RL_COMMIT" "${_LINE_FIELDS_AWK:-}"'
-        line_ev() == "published" && line_kv("row") == r && line_kv("commit") == c { f = 1 } END { exit !f }' 2>/dev/null; then
-        mkdir -p "${RL_REC%/*}" 2>/dev/null
-        # The suites the person named go first: the row's `ready` event, which the judge reads the row's suites from
-        # (the last one before the published line), and its green verdicts, both through the writers `land --by-hand`
-        # uses (lib/line.sh `_line_hand_ready`, `_line_hand_verdicts`).
-        if [ -n "$RL_SUITES" ]; then
-          if ! _line_hand_ready "$PV_PLAN" "$PV_ID" "$RL_COMMIT" "${RL_BRANCH:--}" "${RL_TREE:--}" "$RL_SUITES" >/dev/null \
-             || ! _line_hand_verdicts "$PV_PLAN" "$PV_ID" "$RL_GREEN" "$RL_SUITES" "$RL_VLOG"; then
-            die "REFUSED — the plan records $PV_ID landed by hand, but the run's log ${RL_REC%/*}/run.log cannot take the suites' ready and verdict lines${LINE_UNWRITTEN:+ (the verdict for $LINE_UNWRITTEN)}; make it writable and run the same row-landed again."
-            exit 1
-          fi
-          say "row-landed — $PV_ID: ev=ready and a green verdict for each of $RL_SUITES at ${RL_GREEN:0:12} written to ${RL_REC%/*}/run.log"
-        fi
-        if ! line_event "$PV_PLAN" published "row=${PV_ID}" "commit=${RL_COMMIT}" kind=hand "by=${RL_BY}" "why=${RL_WHY}" >/dev/null; then
-          die "REFUSED — the plan records $PV_ID landed by hand, but the run's log ${RL_REC%/*}/run.log cannot take its published line; make it writable and run the same row-landed again."
-          exit 1
-        fi
-        say "row-landed — $PV_ID landed by hand: ev=published kind=hand written to ${RL_REC%/*}/run.log"
-      fi
-    fi
-    say "evidence: $RL_N cell(s) written by landing"
-    [ "$VERB" != deliver ] || say "deliver — $PV_ID: artifact $RL_ARTIFACT present; landed at the working head $RL_COMMIT."
-    exit 0
-  }
+# record_row_land <row> -> the record row of the run's plan ($PV_PLAN, $PV_REPO) landed, in a subshell of the tick's:
+# every check first (`deliver_check`, the registration a row's kind owes among them), then the one `published` event,
+# then the landing's writes (lib/line.sh `line_landing_writes`). Nothing refuses after the event. Exits 0 landed or
+# already landed, 2 refused with the reason on stderr, 1 not written.
+record_row_land() {
+  PV_ID="$1"; RL_WALK=""; ROW_WRITER=""
+  plan_verb_id_ok "$PV_ID" || { die "REFUSED — '$(clean "$PV_ID")' is not one row id."; exit 2; }
+  deliver_check
+  # A row nobody launched is the orchestrator's own, and its landing says so.
+  case "$ROW_WRITER" in ''|-|—) ROW_WRITER=orchestrator ;; esac
+  line_event "$PV_PLAN" published "row=$PV_ID" "commit=$RL_COMMIT" kind=record "by=$ROW_WRITER" "why=$RL_ARTIFACT" >/dev/null || {
+    die "REFUSED — the run's log cannot take the landing of $PV_ID; nothing is landed."; exit 1; }
+  line_landing_writes "$PV_PLAN" "$PV_ID" "$RL_COMMIT" "$RL_AT" \
+    || say "UNSETTLED $PV_ID — landed at $RL_COMMIT; the evidence keys and the stack-health line are not written and the findings it settles are not moved"
+  say "landed $PV_ID — its record $RL_ARTIFACT at the working head $RL_COMMIT"
+  exit 0
+}
 
 # ---------------------------------------------------------------- the release entry's reviews, before the pull request
 #
@@ -1041,7 +767,7 @@ hand_holds_verb() {
 # `proof_part_base`), so nothing is approved or checked again. The landing record gains
 # `ev=integrate|row=<row>|part=reviews|commit=<c>|branch=<b>|tree=<t>`, so no branch holds a commit the record does not
 # name. Nothing to render, or the part already listed: nothing is made, exit 0. The branch moves on this machine alone;
-# it leaves it by the person's push. `deliver` refuses the integrate row while the part would still render.
+# it leaves it by the person's push. The record row's landing refuses the integrate row while the part would still render.
 REVIEWS_PART_AUTHOR="bionic line"; REVIEWS_PART_EMAIL="line@bionic.invalid"
 
 # THE PARTS RENDER IN THE CHECKOUT THE VERB RUNS FROM. A row's tree renders the part its own landing carries, so the

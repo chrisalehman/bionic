@@ -2091,6 +2091,53 @@ worktree_record_tree() {  # <root> <sid> <name> <abs tree>
     || { rm -f "$f.$$"; printf 'tree-record-unwritable'; return 1; }
 }
 
+# A TREE MADE FOR A ROW IS ONE EVENT OF ITS RUN. The row is the one the name's brief was rendered from
+# (`<record>/briefs/<name>.md`, whose mark names the row and the name), and the event is appended to that run's log
+# through the one appender: the row, the tree's path from the root (as a Tasks cell spells it), its branch, its base
+# and the name. A row's tree and base are read from it (lib/units.sh `_units_live`); no cell is written.
+# THE ROW IS NEVER LOST IN SILENCE: a tree made for a row with no tree event would leave the commit gate and the
+# landing unable to find the row of that writer's commits. So `create` asks first: a name the bound plan's rows
+# claim by the dispatch rule (lib/fill.sh `fill_row_launched`) with no brief rendered for it is refused before
+# anything is made; a name no row claims, or a session bound to no plan, is no row's and makes its tree with no event.
+# worktree_tree_row <root> <sid> <name> -> the brief's row, rc 0; nothing and rc 1 for no row's;
+#   the rows the name claims and rc 2 when it claims one and has no brief
+worktree_tree_row() {
+  local root="${1:-}" name="${3:-}" plan rec d id hits=""
+  plan="$(_wt_workspace_plan "$root" "${2:-}")" && [ "$plan" != none ] || return 1
+  rec="$(_wt_proofs_path "$root" "$plan")" || return 1
+  rec="${rec%/*}"
+  d="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )" || return 1
+  if [ -f "$rec/briefs/$name.md" ]; then
+    # shellcheck source=/dev/null
+    declare -F brief_file_read >/dev/null 2>&1 || . "$d/brief.sh" >/dev/null 2>&1
+    if declare -F brief_file_read >/dev/null 2>&1; then
+      brief_file_read "$root" "$rec/briefs/$name.md"
+      if [ -n "$BRIEF_FILE_ROW" ] && [ "$BRIEF_FILE_NAME" = "$name" ]; then printf '%s' "$BRIEF_FILE_ROW"; return 0; fi
+    fi
+  fi
+  # shellcheck source=/dev/null
+  { declare -F fill_row_launched >/dev/null 2>&1 || . "$d/fill.sh" >/dev/null 2>&1; } && _wt_units_load || return 1
+  for id in $(units_rows "$plan" 2>/dev/null | cut -f1); do
+    fill_row_launched "$id" "$name" && hits="${hits:+$hits,}$id"
+  done
+  [ -n "$hits" ] || return 1
+  printf '%s' "$hits"; return 2
+}
+# worktree_tree_event <root> <sid> <name> <abs tree> <branch> <base sha> <row> -> the row's tree event appended to
+# the log of the session's bound run; rc 1 with nothing appended.
+worktree_tree_event() {
+  local root="${1:-}" tree="${4:-}" plan rec d rp
+  [ -n "${7:-}" ] || return 1
+  plan="$(_wt_workspace_plan "$root" "${2:-}")" && [ "$plan" != none ] || return 1
+  rec="$(_wt_proofs_path "$root" "$plan")" || return 1
+  d="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )" || return 1
+  # shellcheck source=/dev/null
+  declare -F log_append >/dev/null 2>&1 || . "$d/log.sh" >/dev/null 2>&1 || return 1
+  rp="$(cd "$root" 2>/dev/null && pwd -P)" || rp="$root"
+  case "$tree" in "$rp"/*) tree="${tree#"$rp"/}" ;; "$root"/*) tree="${tree#"$root"/}" ;; esac
+  RUN_LOG="${rec%/*}/run.log" log_append tree "row=$7" "path=$tree" "branch=${5:-}" "base=${6:-}" "by=${3:-}"
+}
+
 # worktree_tree_record <tree> -> the tree's record line; rc 1 when it carries none of its own.
 worktree_tree_record() {  # <tree>
   local tree f line=""
@@ -2192,27 +2239,3 @@ workspaces_of_session() {  # <root> <sid> -> every tree recorded, one per line; 
   _wt_workspace_paths "${1:-}" "${2:-}" "" 1
 }
 
-# The tree and base recorded for <name>, `<tree><TAB><base>`, by the rule above (wave-26 T40).
-# The launch recorder fills a plan row's worktree and base cells from this record, so it asks
-# the same witness: the tree is the one `workspace_for_name` answers, and the base is the one on
-# the last line naming that tree. 1 none, 2 refused.
-workspace_record_for_name() {  # <root> <sid> <name> -> tree TAB base
-  local tree f rc
-  tree="$(workspace_for_name "${1:-}" "${2:-}" "${3:-}")" || { rc=$?; return "$rc"; }
-  f="$(_wt_workspaces_file "$1" "$2")" || return 2
-  WT_SID="$2" WT_NAME="$3" WT_TREE="$tree" awk -F'|' -v schema="$WORKSPACE_SCHEMA" '
-    BEGIN { sid = ENVIRON["WT_SID"]; want = ENVIRON["WT_NAME"]; tree = ENVIRON["WT_TREE"]; b = "" }
-    { sub(/\r$/, "") }
-    $1 != schema { next }
-    {
-      s = ""; n = ""; p = ""; v = ""; hn = 0
-      for (i = 2; i <= NF; i++) {
-        if (index($i, "session=") == 1) s = substr($i, 9)
-        else if (index($i, "name=") == 1) { n = substr($i, 6); hn = 1 }
-        else if (index($i, "path=") == 1) p = substr($i, 6)
-        else if (index($i, "base=") == 1) v = substr($i, 6)
-      }
-      if (s == sid && hn && n == want && p == tree) b = v
-    }
-    END { printf "%s\t%s\n", tree, b }' "$f" 2>/dev/null || return 2
-}

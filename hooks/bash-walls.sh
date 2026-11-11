@@ -363,7 +363,7 @@ $BIONIC_RULINGS_UNREAD"
 # for a call that runs the verb (`_wall_poker_contract_verb`'s argv, asked for this one verb) this reads the ruling's
 # writer off the session's roster (lib/roster.sh `ruling_fold`) and the caller's roster name off the payload's
 # `agent_id` (`roster_row_for_id`, empty for the main thread or an agent no row names), and counts the call's segments:
-# the ack is admitted alone, as `deliver` is. An id no ruling carries gathers nothing; the verb refuses it.
+# the ack is admitted alone in one call. An id no ruling carries gathers nothing; the verb refuses it.
 BIONIC_ACK_ID=""; BIONIC_ACK_WRITER=""; BIONIC_ACK_CALLER=""; BIONIC_ACK_AGENT=""; BIONIC_ACK_ALONE=0
 case "$COMMAND" in
   *ruling-ack*)

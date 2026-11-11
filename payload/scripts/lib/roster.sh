@@ -967,7 +967,7 @@ ruling_stamp() {  # <roster> <id> <writer> <key=value>...
 
 # THE PAGE CLOSES WHERE THE RULING IS READ (wave-34 T4; REQ-3 AC-3.1, D13). The tick's backstop opens
 # `ruling:<id>` on the person's ledger for a ruling a writer ended without reading; whoever then shows
-# it (the ack, a successor's commit, `ready` or `deliver`) has read it, so the item closes with the
+# it (the ack, a successor's commit, `ready` or the tick's landing of a record row) has read it, so the item closes with the
 # stamp. The ledger is wherever lib/owed.sh files the session's asks (the register of the run it is bound to, else
 # its own file beside `roster-<sid>.state`), so the item is looked for through `owed_list`, and lib/owed.sh is
 # loaded only for a roster that names a session.
@@ -1018,7 +1018,7 @@ ruling_fold() {  # <roster> [<writer>]
 }
 
 # THE PLUGIN ROOT A RULING NAMES (wave-34 T4; burns debt ruling-plugin-root): the plugin that holds
-# this library, found here once. The push, the commit wall, `ready` and `deliver` each found it their own
+# this library, found here once. The push, the commit wall, `ready` and the tick's landing of a record row each found it their own
 # way, and two of them spelled it differently (record/wave-33-workhorse/critic-structure.md).
 ruling_plugin_root() {  # -> the plugin root, or <plugin-root>
   ( cd "$_RULING_LIB_DIR/../.." 2>/dev/null && pwd -P ) || printf '<plugin-root>'
@@ -1042,7 +1042,7 @@ ruling_push_claim() {  # <roster> <id> <writer> <call>
   [ "$first" = "$4" ]
 }
 
-# THE GUARD'S READ, for the writer's own commit, `ready` and `deliver`: each ruling of <writer> not
+# THE GUARD'S READ, for the writer's own commit, `ready` and the tick's landing of a record row: each ruling of <writer> not
 # yet shown is stamped shown (by <by>) and printed in the one wording, one per line; nothing when none
 # is unread, which is the guard's pass. Marking it shown is what lets the retry through: the refusal
 # that printed it is the reading, because the writer is the one reading it.

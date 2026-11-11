@@ -2644,15 +2644,17 @@ sitrep_tick_line() {
     else printf 'running: none\n'; fi
     RS_AT="$(handoff_line "$RS_FILE" instant)"; RS_AT="${RS_AT#instant: }"
     [ -n "$RS_AT" ] || { RS_AT="$(handoff_line "$RS_FILE" written)"; RS_AT="${RS_AT#written: }"; }
-    RS_LANDED="$(awk -v at="$RS_AT" '
-      /^[[:space:]]*```/ { fence = !fence; next }
-      fence { next }
-      /^##[[:space:]]/ { s = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-      s && /^- T[0-9]+:/ && match($0, /landed [0-9a-f]+ [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:]+Z/) {
-        split(substr($0, RSTART, RLENGTH), f, " "); id = $2; sub(/:$/, "", id)
-        if (at == "" || f[3] > at) out = out (out == "" ? "" : ", ") id }
-      END { print out }' "$RS_PLAN")"
-    printf 'landed since the handoff: %s\n' "${RS_LANDED:-none}"
+    # What landed after the handoff was written: the run's published rows with an instant past it, in the order
+    # they landed, from the fold this shell holds (an older plan's landed lines come through the translation).
+    if { [ "$_SITREP_FACTS_PLAN" = "$RS_PLAN" ] || _sitrep_hold "$RS_PLAN"; } && RS_PUB="$(sitrep_facts "$RS_PLAN" published)"; then
+      RS_LANDED="$(printf '%s\n' "$RS_PUB" | awk -F'|' -v at="$RS_AT" "$_READER_AWK"'
+        { r = line_kv("row"); t = line_kv("at") }
+        r != "" && t != "" && (at == "" || t > at) && !(r in s) { s[r] = 1; out = out (out == "" ? "" : ", ") r }
+        END { print out }')"
+      printf 'landed since the handoff: %s\n' "${RS_LANDED:-none}"
+    else
+      printf 'landed since the handoff: unread — the run'"'"'s facts cannot be folded\n'
+    fi
     RS_FIRST="$(printf '%s\n' "$RS_OWN" | awk 'NF { sub(/^owned-by-user: /, ""); print; exit }')"
     [ -n "$RS_FIRST" ] || RS_FIRST="$(printf '%s\n' "$RS_OPEN" | awk 'NF { sub(/^open: /, ""); print; exit }')"
     printf 'owed now: %s\n' "${RS_FIRST:-nothing waits on you}"

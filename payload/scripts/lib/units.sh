@@ -214,7 +214,12 @@ _units_table() {
 # cell, which is the old home the translation reads, so a run whose log holds none of these reads as its cells say.
 # The text itself is judged as written (`units_validate` reads `_units_table`), so a write is never refused for a
 # state the plan does not carry. A plan writer's dry copy and close-out's preflight copy are read with their plan's run.
-# _units_live <plan> -> `<id><TAB><state><TAB><agent>` per row the log moves; nothing without a log; 2 a failed fold
+# A row the log holds landed keeps the name of the launch that landed it, as its agent cell kept it, so the stop of
+# that name finds its tree. A row's tree and base are the run's the same way: the newest `tree` event the log holds for it (the tree verb's, with an
+# instant) fills the `worktree` and `base` slots, the base by its first eight digits as a cell spells it; a row the
+# log holds no tree for reads its cells.
+# _units_live <plan> -> `<id><TAB><state><TAB><agent><TAB><tree><TAB><base>` per row the log moves; nothing without a
+# log; 2 a failed fold
 _units_live() {
   local plan="${1:-}" log facts
   if [ -n "${_UNITS_MEMO_PLAN:-}" ] && [ "$_UNITS_MEMO_PLAN" = "$plan" ] && [ -n "${_UNITS_MEMO_LIVE_RC:-}" ]; then
@@ -228,9 +233,12 @@ _units_live() {
   printf '%s\n' "$facts" | awk -F'|' '
     { split("", f); for (i = 2; i <= NF; i++) { e = index($i, "="); if (e > 1 && !(substr($i, 1, e - 1) in f)) f[substr($i, 1, e - 1)] = substr($i, e + 1) }
       r = f["row"]; if (r == "") next }
-    f["ev"] == "dispatch" && f["at"] != "" { if (!(r in st)) ord[++n] = r; st[r] = "active"; nm[r] = f["name"] }
-    f["ev"] == "published" { if (!(r in st)) ord[++n] = r; st[r] = "landed" }
-    END { for (i = 1; i <= n; i++) printf "%s\t%s\t%s\n", ord[i], st[ord[i]], (st[ord[i]] == "active" ? nm[ord[i]] : "") }'
+    !(r in seen) { seen[r] = 1; ord[++n] = r }
+    f["ev"] == "dispatch" && f["at"] != "" { st[r] = "active"; nm[r] = f["name"] }
+    f["ev"] == "published" { st[r] = "landed" }
+    f["ev"] == "tree" && f["at"] != "" { tr[r] = f["path"]; bs[r] = substr(f["base"], 1, 8) }
+    END { for (i = 1; i <= n; i++) { r = ord[i]; if ((r in st) || (r in tr))
+      printf "%s\t%s\t%s\t%s\t%s\n", r, st[r], nm[r], tr[r], bs[r] } }'
 }
 
 # A PROOF IS THE RUN'S TOO: what each row's proof read, `live:head` and a reading's question compare is the run's proofs,
@@ -272,13 +280,14 @@ _units_origin() {
   if [ -f "$o" ]; then printf '%s' "$o"; else printf '%s' "$1"; fi
 }
 
-# _units_overlay <live> <rows> -> the rows, each moved row's status and agent the run's
+# _units_overlay <live> <rows> -> the rows, each moved row's status, agent, tree and base the run's
 _units_overlay() {
   [ -n "$1" ] || { printf '%s\n' "$2"; return 0; }
   printf '%s\n\034\n%s' "$1" "$2" | awk -F'\t' -v OFS='\t' '
     $0 == "\034" { r = 1; next }
-    !r { st[$1] = $2; nm[$1] = $3; next }
-    ($1 in st) && $10 != "landed" && $10 != "dropped" { $10 = st[$1]; if (nm[$1] != "") $5 = nm[$1] }
+    !r { st[$1] = $2; nm[$1] = $3; tr[$1] = $4; bs[$1] = $5; next }
+    st[$1] != "" && $10 != "landed" && $10 != "dropped" { $10 = st[$1]; if (nm[$1] != "") $5 = nm[$1] }
+    tr[$1] != "" { $11 = tr[$1]; $12 = bs[$1] }
     { print }'
 }
 
@@ -1045,7 +1054,7 @@ _units_landed() {
     $0 == "\034in" { part = 4; next }
     part == 1 { if ($1 == "") next; n++; id[n] = $1; knd[n] = $3; srv[n] = $8; st[n] = $10; at[$1] = n; next }
     part == 2 {
-      # A published event is a landing at its commit: `row-landed --by-hand` records a hand landing with it alone.
+      # A published event is a landing at its commit, a hand landing and a record row too.
       r = $2; m = $3
       if (!(r in at)) next
       lm[r] = (m ~ /^[0-9a-f]+$/ && length(m) >= 7 && length(m) <= 40) ? m : "-"
@@ -2733,7 +2742,7 @@ UNITS_RUN
 #      one escape a GFM cell defines.
 #   2. ITS `- <id>:` LINE under `## SDLC State`, after the last `- T<n>:` line and that line's
 #      indented continuation — or at the end of the section when the plan carries none yet.
-#      `pending dispatch`, which its later writers (`row-landed`) append to. How the row was born
+#      `pending dispatch`. How the row was born
 #      is no part of the plan: `task-add` appends it to the run's log (`units_born_event`).
 #
 # NO OTHER ROW IS EDITED IN A TABLE WITH reads (wave-26 T2; D2): its rows wait on what they read,
@@ -3004,8 +3013,8 @@ units_table_cells() {
 # ` born: floor <suite>`, the marker the judge, the fix-cap and `disposition` read, and a later verb
 # may add its own ` <key>: <value>`. The text is what precedes the first ` <key>: ` (a lowercase
 # key); a rewrite replaces the text, or with `append` extends it, and each marker follows in its
-# order. A marker whose ` <key>: ` the new text already carries is the new text's, so row-landed,
-# which folds the old text into the new one, writes each marker once. Replace mode used to drop
+# order. A marker whose ` <key>: ` the new text already carries is the new text's, so a writer
+# that folds the old text into the new one writes each marker once. Replace mode used to drop
 # the born marker at the landing summary (debt step-line-drops-born). A `Step N:` line carries no
 # markers: its text, ` current: ` and all, is replaced whole as before.
 units_step_line() {
@@ -3075,8 +3084,7 @@ units_step_line() {
 
 # units_step_text <plan> <N|T<n>> -> the text of that line of `## SDLC State`, found exactly as
 #   `units_step_line` finds the line it writes (its pattern, fences skipped, the first one in the
-#   section), blanks trimmed; nothing when the line is absent (wave-28 T6: `row-landed` adds to the
-#   text a row's line already has). Exit 1 no `## SDLC State`.
+#   section), blanks trimmed; nothing when the line is absent. Exit 1 no `## SDLC State`.
 units_step_text() {
   local plan="${1:-}" key="${2:-}"
   [ -n "$plan" ] && [ -f "$plan" ] || return 1
@@ -3503,6 +3511,38 @@ units_fix_cap() {
   [ -n "$plan" ] && [ -r "$plan" ] || return 1
   n="$(units_rows "$plan" 2>/dev/null | awk -F'\t' '$1 != "" { n++ } END { print n + 0 }')"
   fix_cap_render "$(plan_frontmatter_get "$plan" fix-cap)" "$(plan_frontmatter_get "$plan" rigor)" "$n"
+}
+
+# THE MATRIX HEAD'S LINES. Between the `## Verification Matrix` heading and its table stand the matrix's own flush-left
+# lines, `stack-health:` first, where matrix-render writes its stub and the gate reads them. One keyed line is written
+# `<key>: <value>`: a line of the key is replaced where it stands, and any second one dropped, so the head holds one;
+# with none, it goes under the `stack-health:` line, else under the heading. <own>, an ERE, names the old values the
+# caller may replace: an old value outside it is a person's word and stays (exit 5, nothing printed). Fences skipped.
+# Exit 3: no matrix section. Here, beside the table's readers, so a landing's writes and the plan verbs share it.
+matrix_head_line() {  # <plan> <key> <value> [<own ERE>] -> the whole plan
+  MH_KEY="$2" MH_VAL="$3" MH_OWN="${4:-}" awk '
+    BEGIN { k = ENVIRON["MH_KEY"]; kre = "^[ \t]*" k "[ \t]*:"; line = k ": " ENVIRON["MH_VAL"]; own = ENVIRON["MH_OWN"] }
+    { L[++n] = $0 }
+    END {
+      for (i = 1; i <= n; i++) {
+        x = L[i]
+        if (x ~ /^[ \t]*```/) { fence = !fence; continue }
+        if (fence) continue
+        if (x ~ /^## /) { if (head) break; if (x ~ /^## Verification Matrix/) head = i; continue }
+        if (!head) continue
+        if (x ~ /^[ \t]*\|/) break
+        if (x ~ kre) { if (!at) at = i; else drop[i] = 1 }
+        else if (x ~ /^[ \t]*stack-health[ \t]*:/ && !sh) sh = i
+      }
+      if (!head) exit 3
+      if (at && own != "") { v = L[at]; sub(kre, "", v); gsub(/^[ \t]+|[ \t]+$/, "", v); if (v !~ own) exit 5 }
+      for (i = 1; i <= n; i++) {
+        if (i in drop) continue
+        if (i == at) { print line; continue }
+        print L[i]
+        if (!at && i == (sh ? sh : head)) { if (!sh) print ""; print line }
+      }
+    }' "$1"
 }
 
 # units_ac_head_awk -> the awk text of `ac_head(line, ac)`, THE ONE MATCHER OF AN AC BLOCK'S HEADING (wave-36 T24;

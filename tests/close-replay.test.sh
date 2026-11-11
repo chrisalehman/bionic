@@ -10,8 +10,8 @@
 #            delivered: with no hand-hold; the replay's log holds no hand landing or merge, plan edit, step set back or waiver
 #   §WINDOW  after the close, the hand-holds window ends at the plan's delivered: time, and a decline planted after
 #            the release approval card is counted: the card ends nothing
-#   §VERBS   every refusal the replay met names a verb that writes the cell (deliver, amend, the plan's edit or
-#            step-field), and that verb's call on the cell, then the refused call again, exit 0
+#   §VERBS   every verb the replay's part runs exits 0, no command of it exits otherwise, and each kind of hand
+#            write it makes is marked
 #   §PR      the integrate row's pull request goes through a stand-in gh, the only gh on its PATH, whose log holds
 #            `pr create --base main --head wave/x`
 #   §ENTRY   after close-out, the release entry's reviews part, at the branch's final head and on main after the merge,
@@ -84,7 +84,7 @@ cr_marks() { cr_part | awk -v t="# ${1}: " 'index($0, t) == 1 { print substr($0,
 # The verbs the replay runs (rehearsal.sh `_rh_replay`), each named `<tool> <verb>`: the tool the command runs and
 # the first bare word of its arguments. A log missing any of them is a replay that did not run that verb, whatever its
 # length. A refusal's follow is not listed: the replay meets one only when a verb refuses.
-CR_VERBS='session-sweeper.sh ack|session-poker.sh task-add|spawn-worktree.sh create|execution-recorder.sh|spawn-worktree.sh ready|session-poker.sh release-check|session-poker.sh release-approval|session-poker.sh reply|session-poker.sh reviews-part|gh pr create|gh pr merge|session-poker.sh deliver|close-out.sh run'
+CR_VERBS='session-sweeper.sh ack|session-poker.sh task-add|spawn-worktree.sh create|execution-recorder.sh|spawn-worktree.sh ready|session-poker.sh release-check|session-poker.sh release-approval|session-poker.sh reply|session-poker.sh reviews-part|gh pr create|gh pr merge|close-out.sh run'
 # The kinds of hand write the replay makes: the fix writer's launch, its code and report, the user's typed reply.
 CR_HANDS='launch code record typed'
 # cr_names -> for each `$ ` command line on stdin, `<rc>|<tool> <words>`: the tool is the first word naming a script
@@ -207,8 +207,8 @@ if [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ]; then
     "$([ -n "$CL_PART" ] && [ "$CL_PART" = "$CL_MAIN" ] && echo yes)|$([ -n "$CL_REL" ] && cr_proofs "$CR_PLAN" "$CR_REC/run.log" | /usr/bin/grep -q "^proved: kind=check head=$CL_REL " && echo yes)|$(cr_proofs "$CR_PLAN" "$CR_REC/run.log" | /usr/bin/grep "^proved: kind=check head=${CL_REL:-none} " | tail -1 | /usr/bin/grep -q 'result=fail' && echo yes || echo no)"
   expect_eq "CL-5 the user's reply approves that head: reply exit 0, the newest approved: release and approved: merge-unproved (the fix landed past the whole run) name it" "0|$CL_REL|$CL_REL" \
     "$(cr_rc "the user's reply to the card at the fix's head" | tail -1)|$(for k in release merge-unproved; do /usr/bin/grep "^approved: $k " "$CR_PLAN" | tail -1 | sed -n 's/.* head=\([0-9a-f]*\) .*/\1/p'; done | paste -sd'|' -)"
-  expect_eq "CL-6 the integrate row lands and close-out runs (exit 0)" "landed|0" \
-    "$(awk -F'|' '$2 ~ /^ *T4 *$/ { s = $(NF - 1); gsub(/ /, "", s); print s }' "$CR_PLAN")|$(cr_rc 'close-out, the tail' | tail -1)"
+  expect_eq "CL-6 close-out runs (exit 0) and lands the integrate row by one published event of the close kind, no status cell written" "0|1|pending" \
+    "$(cr_rc 'close-out, the tail' | tail -1)|$(awk -F'|' '$2 == "ev=published" && $3 == "row=T4" && /\|kind=close\|by=close-out\|/ { n++ } END { print n + 0 }' <(cr_lines))|$(awk -F'|' '$2 ~ /^ *T4 *$/ { s = $(NF - 1); gsub(/ /, "", s); print s }' "$CR_PLAN")"
   CL_HH="$(cr_out 'close-out, the tail' | /usr/bin/grep '^hand-holds: ')"
   expect_eq "CL-7 close-out prints its hand-holds line" "yes" "$([ -n "$CL_HH" ] && echo yes)"
   expect_contains "CL-7b …and it counts none" "hand-holds: total=0 " "$CL_HH"
@@ -272,28 +272,18 @@ if cr_reached "SR-0"; then
 fi
 
 # ============================================================
-section "§VERBS: every refusal the replay met names the verb that writes the cell, and that verb then writes it"
+section "§VERBS: every verb the replay's part runs exits 0, and each kind of hand write it makes is marked"
 # ============================================================
-# fails-when: a refusal names no verb of deliver, amend, the plan's edit and step-field, a refused call is left unfollowed,
-# or the named verb, or the refused call after it, exits non-zero.
+# fails-when: a verb the replay runs is missing or exits non-zero, any command of the part exits non-zero, or a kind
+# of hand write goes unmarked.
 if cr_reached "VB-0"; then
   VB_RCS="$(cr_rcs)"
   expect_eq "VB-1 the replay's part logs an exit 0 for each verb the replay runs, named" "$CR_VERBS" \
     "$(cr_part | cr_names | sed -n 's/^0|//p' | cr_held "$CR_VERBS")"
-  expect_eq "VB-1b …and every non-zero exit is a refusal the replay followed" "" \
-    "$(printf '%s\n' "$VB_RCS" | awk -F'|' '$1 != 0 { print $2 }' | while IFS= read -r l; do
-        cr_marks refused | /usr/bin/grep -q -F -- "$l · names: " || printf '%s\n' "$l"; done)"
+  expect_eq "VB-1b …and no command of the part exits non-zero" "" "$(printf '%s\n' "$VB_RCS" | awk -F'|' '$1 != 0 { print $2 }')"
   expect_eq "VB-2 the replay's marks are read: a hand write of each kind the replay makes, named ($CR_HANDS)" \
     "$(printf '%s' "$CR_HANDS" | tr ' ' '|')" \
     "$(cr_marks 'by hand' | sed -n 's/^\[\([a-z]*\)\] .*/\1/p' | cr_held "$(printf '%s' "$CR_HANDS" | tr ' ' '|')")"
-  expect_eq "VB-2b …and every refusal names a verb of $RH_FOLLOW_VERBS" "" \
-    "$(cr_marks refused | while IFS= read -r m; do v="${m##* · names: }"
-        case " $RH_FOLLOW_VERBS " in (*" $v "*) : ;; (*) printf '%s\n' "$m" ;; esac; done)"
-  expect_eq "VB-3 each named verb's call on the cell, then the refused call again, exits 0" "" \
-    "$(cr_marks refused | while IFS= read -r m; do l="${m% · names: *}"
-        f="$(cr_part | awk -v m="# refused: $m" 'index($0, m) == 1 { f = 1; next } f && /^  rc=[0-9]+  \(follow: / { sub(/^  rc=/, ""); sub(/ .*/, ""); print; exit }')"
-        a="$(cr_rc "$l, again" | tail -1)"
-        [ "$f|$a" = "0|0" ] || printf '%s: follow=%s again=%s\n' "$l" "${f:-none}" "${a:-none}"; done)"
 fi
 
 # ============================================================

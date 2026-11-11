@@ -715,18 +715,9 @@ mr_close_acs() {
     while IFS=$'\037' read -r _mr_c _mr_e; do matrix_close_eval "$_mr_e" 2>/dev/null && printf '%s\n' "$_mr_c"; done; exit 0 )
 }
 
-# SERVES_AWK / serves_tasks — THE ONE READ OF "WHICH CRITERIA A ROW SERVES" (wave-31 T22; REQ-15 AC-15.1, D15,
-# A-orch-51). A row serves a criterion when its `serves` cell names the criterion's AC id or the REQ id in the
-# Eval design's Requirement column; that two-way read is `serves_hit`, and two verbs call it, never a second reader:
-# matrix-render (a criterion's `task:` cell is the one row serving it) and row-landed (the evidence a landing writes
-# into every criterion its row serves). The awk functions are concatenated ahead of each verb's program
-# (`awk "$SERVES_AWK$MR_AWK"`); they own these globals: nt tid[] serves[] (serves_load), and evh col[] eseen[] ne ec[]
-# ereq[] eapp[] eev[] efw[] (eval_row), which the program's own pass resets as its headings go by (evh = 0).
-#   serves_load(spec)  spec = `<id><TAB><serves>` per `## Tasks` row, newline-joined (serves_tasks prints it)
-#   serves_hit(t, cr)  1 when row index t serves criterion cr (its AC id, or its Requirement in ereq[])
-#   eval_row(line)     one `## Eval design` table line: the header row names the columns, a data row fills ereq[] etc.
-#   trim(v), cells(line, out)  the table-cell reads both programs share
-# Set in hooks/session-poker.sh, before any part loads: SERVES_AWK.
+# SERVES_AWK / serves_tasks — the one read of which criteria a row serves, matrix-render's and the landing's evidence
+# pass's: lib/line.sh, loaded by the verb that asks (`poker_serves_load`).
+poker_serves_load() { [ -n "${SERVES_AWK:-}" ] || . "$BIONIC_LIB/line.sh" >/dev/null 2>&1; [ -n "${SERVES_AWK:-}" ]; }
 
 # mr_requirements_file <plan> <repo> -> the requirements file the plan names, when it is a readable file: its
 # `requirements:` frontmatter key, else the Step-1 evidence line's `requirements:` field (walls.sh K5's pointer),
@@ -767,26 +758,6 @@ mr_requirements_file() {
 # bullet tolerated) and the indented lines under it until the next flush-left line (walls.sh `matrix_block`).
 # Set in hooks/session-poker.sh, before any part loads: MR_AWK.
 
-# LE_AWK / landing_evidence — A LANDING WRITES ITS CRITERIA'S EVIDENCE (wave-31 T22; REQ-15 AC-15.1 to AC-15.3, D15,
-# A-orch-51 ruling 3). `row-landed` is the one writer both landings call (`ready`'s publish and the hand landing), and
-# it calls this once the status, the step line and the ledger line are in its copy. The copy gains, in each AC block of
-# `## Verification Matrix` that the landed row SERVES (`serves_hit`, the relation matrix-render's `task:` reads; never
-# the block's `task:` cell, which names split parents and is corrected by hand at Step 5), an `evidence:` cell reading
-# the docs-root-relative path of the row's green log for the suite the block's `eval:` names (`<suite>.test.sh` in
-# backticks). The rules, as the pass below keeps them:
-#   · the log is the one the landing's own verdict names: the landing record's last `ev=verdict` line for this row,
-#     this commit, this suite, `result=green` (LE_LOGS, built by landing_evidence); for a suite the landing REUSED
-#     (an `ev=reused` line for this row and commit, lib/line.sh, wave-39 T1; a skip is one, T4), the log of the green
-#     verdict its `from=` names for that suite at its `reads=` key, whichever row ran it: the row's green for that
-#     suite, so a criterion only such a row serves does not stay pending (wave-39 T2; D5, A-orch-11);
-#   · an eval naming a suite the landing did not run, or no suite (a T0 grep), writes nothing;
-#   · the cell is written when it reads `pending` or is already a path under `record/<plan>/line/` (which only a
-#     landing writes: the newer landing replaces it, AC-15.2); any other value is a hand fill and stays;
-#   · a block with no `evidence:` line is left alone: the verb replaces a cell, it adds no key.
-# ENVIRON: LE_TASKS (serves_tasks), LE_ROW, LE_LOGS (`<suite><TAB><docs-root-relative path>` per line), LE_SLUG (the
-# plan's name), LE_COUNT (a side file: the number of cells written). Prints the plan; the fences, the section
-# headings and the AC blocks are read as MR_AWK reads them.
-# Set in hooks/session-poker.sh, before any part loads: LE_AWK.
 
   # THE USER'S WRITER CAP (wave-27 T34; REQ-15 AC-15.4; D24; design ledger Δ10). A cap the user
   # chose is a fact, not a reason to repeat on every turn: it is written once into the plan header
@@ -1671,8 +1642,8 @@ EOF
   poker_verb_matrix_render() {
     plan_verb_open matrix-render
     MR_KEYS="$(mr_tier_keys)" || MR_KEYS=""
-    if [ -z "$MR_KEYS" ]; then
-      die "REFUSED — the per-tier keys are walls.sh keys_for_tier's, and $BIONIC_LIB/walls.sh cannot be loaded; the plan is unchanged."
+    if [ -z "$MR_KEYS" ] || ! poker_serves_load; then
+      die "REFUSED — the per-tier keys are walls.sh keys_for_tier's and the rows each criterion is served by are line.sh's, and $BIONIC_LIB/walls.sh or $BIONIC_LIB/line.sh cannot be loaded; the plan is unchanged."
       exit 2
     fi
     MR_TASKS="$(serves_tasks "$PV_PLAN")"

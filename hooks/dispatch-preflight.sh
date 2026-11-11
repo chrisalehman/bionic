@@ -2341,8 +2341,8 @@ fi
 # (lib/worktree.sh `worktree_marker`). Either one open (`roster_open_names`, acks applied, the in-flight
 # arm's predicate) and not this dispatch's own name is a live writer: the dispatch is refused naming it and
 # its tree, and the marker does not move. THE TREE is the one the open writer recorded
-# (lib/worktree.sh `workspace_for_name`, the record the launch's tree cells are filled from) when it has
-# one, else the plan row's `worktree` cell, so a re-dispatch made before that fill still finds it. Only a
+# (lib/worktree.sh `workspace_for_name`) when it has
+# one, else the row's tree as the run reads it (its tree event, else its `worktree` cell). Only a
 # writer is judged, and only a row-bound, named dispatch. COST: the open-name awk, once per row-bound
 # writer dispatch; the landing library loads, and git is asked for the marker, only when some other name
 # is open.
