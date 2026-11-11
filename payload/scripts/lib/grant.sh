@@ -1039,7 +1039,7 @@ grant_resolve_lines() (
 # spelled here, so a test calls a function and compares text.
 #
 #   grant_fail_words <key> [<arg>...]
-#       A failure after engagement (AC-1.5). Sets GRANT_FAIL_REASON (the answer line's reason) and
+#       A failure after engagement. Sets GRANT_FAIL_REASON (the answer line's reason) and
 #       GRANT_FAIL_MESSAGE (the denial). The key names what failed, its args are the facts the
 #       sentence quotes; a key that is no name here is taken as the sentence itself. rc 0.
 #   grant_unlogged_words <answers path>

@@ -255,7 +255,7 @@ write_gate_header_fault() {
 }
 
 # _write_gate_frame <fact> <fix> <what went wrong> — THE FRAME KEEPS ITS PARAMETER AND LOSES ITS
-# VOICE (task 13, ruling D-1): the ruled fact and fix render as the one user line; the artifact
+# VOICE: the ruled fact and fix render as the one user line; the artifact
 # name, its path and the sentence become `detail`.
 _write_gate_frame() {
   WG_FACT="$1"; WG_FIX="$2"

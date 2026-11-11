@@ -270,7 +270,7 @@ _pa_finish() {
   exit 0
 }
 
-# _pa_fail <key> [<arg>...] (grant_fail_words) — a failure after engagement: a denial that names it (AC-1.5).
+# _pa_fail <key> [<arg>...] (grant_fail_words) — a failure after engagement: a denial that names it.
 _pa_fail() {
   grant_fail_words "$@"
   _pa_finish deny-fix "$GRANT_FAIL_REASON" "$GRANT_FAIL_MESSAGE"
