@@ -34,6 +34,7 @@
 #                      lease is ordered as before. open prints the age it gave; `new` takes a
 #                      fresh one, an age given is set exactly, seq never repeats (A-orch-49).
 #                      Mutation: the lease unread answers 4 in the gap
+#   §REAPED            a killed landing run is ended rc=137 and written to its run's log as ev=run
 #   §TERM      AC-6.2  (wave-38 T5) a waiter killed with TERM hands its request back; the row's
 #                      next ask resumes its number and asked=. Mutation: the trap removed ends it
 #                      rc=gone and files a fresh number (N.12, SIGKILL, unchanged)
@@ -981,5 +982,23 @@ expect_eq "CL.2 at busy 0 the browser ask is promised the width, 6, and a work a
   "0|0:6:0|75" "$(rc_of cb2)|$(field "$(id_of cb2)" promise)|$(ask_fg cw2 work k 0 | tail -n 1)"
 printf '0\n' > "$CLAUDE_CONFIG_DIR/bionic/reserve"
 reap
+
+section "§REAPED — a landing's run the gate finds killed is a run fact in its run's log"
+# fails-when: the scan ends a killed landing run with no ev=run rc=137 line in the log beside its record, or writes
+# one for a killed run that names no record.
+fresh reaped
+kp="$(sleep 30 >/dev/null 2>&1 & echo $!)"; kill "$kp" 2>/dev/null; wait "$kp" 2>/dev/null
+RP_REC="$D/record/wave-x/landing-proofs.log"; mkdir -p "$BIONIC_GATE_DIR/requests" "${RP_REC%/*}"
+rp_plant() {  # <id> <record or empty> — an admitted request whose holder is dead
+  { printf 'key=a.test.sh\nkind=landing\nwho=%s:w-T1\ntree=%s\nasked=1000\nholder=%s:x\nlanding=L1\n' "$WORLD_SID" "$D" "$kp"
+    [ -z "$2" ] || printf 'record=%s\n' "$2"; printf 'admitted=1000\npromise=0:1:60\n'; } > "$BIONIC_GATE_DIR/requests/$1"
+}
+rp_plant 1 "$RP_REC"; rp_plant 2 ""
+state >/dev/null
+expect_eq "RP.1 both killed requests are ended rc=137 by the scan" "137 137" "$(field 1 rc) $(field 2 rc)"
+expect_eq "RP.2 …and the record's run log holds one run line, the one naming a record, rc=137 with its key and request" \
+  "1|run/v1|ev=run|rc=137|key=a.test.sh|kind=landing|tree=$D|landing=L1|request=1" \
+  "$(grep -c '^run/v1|ev=run|' "${RP_REC%/*}/run.log" 2>/dev/null)|$(sed 's/|at=[^|]*$//' "${RP_REC%/*}/run.log" 2>/dev/null)"
+expect_false "RP.3 …and no landing record is written" test -e "$RP_REC"
 
 finish
