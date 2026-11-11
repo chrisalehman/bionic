@@ -928,6 +928,10 @@ expect_eq "(st0) the world is built by the verbs: matrix-render, disposition and
 expect_eq "(st0b) …the open findings B, C and E each hold an open ask, E's answered carry to T1's landing" "open|open|open" \
   "$(ll_ask "$ST" record/wave-x/recB.md#1 | cut -d'|' -f1)|$(ll_ask "$ST" record/wave-x/recC.md#1 | cut -d'|' -f1)|$(ll_ask "$ST" record/wave-x/recE.md#1 | cut -d'|' -f1)"
 expect_eq "(st0c) …before the landing no finding reads fixed" "" "$(ll_fixed "$ST")"
+STL="$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "$REPO/payload/scripts/lib" "$STP")"
+expect_eq "(st0f) …E's carry is one finding event in the run's log naming the row, and no plan line" \
+  "run/v1|ev=finding|ref=record/wave-x/recE.md#1|to=carried|row=T1|0" \
+  "$(/usr/bin/grep -F '|ref=record/wave-x/recE.md#1|' "$STL" | sed 's/|by=.*//')|$(/usr/bin/grep -c '^moved: ' "$STP")"
 ll_verb "$ST" T1
 expect_eq "(st0d) T1 lands through ready" "0" "$LL_RC"
 [ "$LL_RC" = 0 ] || printf '      ready said: %s\n' "$LL_OUT"
@@ -938,8 +942,9 @@ section "§SAMESITE: a fix row's landing reads fixed every finding at the site o
 # fails-when: a second record's finding at the same site still needs `finding-move … fixed` after the landing.
 expect_contains "(ss1) B's finding, the born finding's line moved down two at B's head, reads fixed by T1 with no move" \
   "recB.md#1 T1 moved" "$(ll_fixed "$ST")"
-expect_eq "(ss1b) …its move line is the landing's, naming the landing's commit" \
-  "moved: record/wave-x/recB.md#1 to=fixed row=T1 by=landing" "$(/usr/bin/grep '^moved: record/wave-x/recB.md#1 to=fixed' "$STP" | sed 's/ at=.*//')"
+expect_eq "(ss1b) …its move is the landing's event in the run's log, naming the landing's commit" \
+  "run/v1|ev=finding|ref=record/wave-x/recB.md#1|to=fixed|row=T1|by=landing|landing=$ST_C" \
+  "$(/usr/bin/grep -F '|ref=record/wave-x/recB.md#1|to=fixed|' "$STL" | sed 's/|at=.*//')"
 expect_contains "(ss1c) …and the landing record names it settled by T1 at that commit" "|row=T1|commit=${ST_C}|" \
   "$(ll_ev "$ST" settled | /usr/bin/grep 'findings=[^|]*record/wave-x/recB.md#1')"
 expect_eq "(ss2) …its ask is closed by the landing" "closed|landing T1" "$(ll_ask "$ST" record/wave-x/recB.md#1)"

@@ -957,8 +957,8 @@ section "§PARTS: the release-entry parts render in the checkout they run from: 
 # branch as before, and the part line names the tree that took the commit.
 # FIXTURE FIDELITY: s34_plan's plan, bound to this session, with the working branch and the release in its frontmatter
 # as Step 0 writes them; the doc and integrate rows are the table's own shape; the deferral is lib/proof.sh
-# `proof_finding_lines`' line and its sentence the `finding-stated` verb's; the waiver is `proof_waiver_line`'s, the
-# line `waive` writes. The row's tree is a linked worktree on its own branch cut at the working branch, as
+# `proof_finding_lines`' line with its sentence on it, and the waiver `proof_waiver_line`'s, as an older plan holds
+# both. The row's tree is a linked worktree on its own branch cut at the working branch, as
 # `spawn-worktree.sh create` makes it; the entry is a plain commit on the working branch.
 # fails-when: a verb run from the row's tree commits on the working branch or moves it, leaves the tree's branch or its
 # working tree without the part, changes the commit message, or writes no tree= on the part line; the working branch's
@@ -981,16 +981,14 @@ awk -v v="$PA_V" 'NR == 1 { print; print "working-branch: wave/01-fixture"; prin
                print "| T4 | 8 | integrate | the pull request. The run reaches main. | orchestrator | — | 10 | REQ-1 | — | — | — | pending |" }' \
   "$PPA" > "$PPA.n" && mv "$PPA.n" "$PPA"
 PA_H="$(pa_tip wave/01-fixture)"
-PA_ADD="$(printf '%s\n%s' "$(pa_lib proof_finding_lines record/wave-01-fixture/critic.md "$(printf '1\tS3\ton\t-\tdefer\t-\tthe one title')")" \
+PA_ADD="$(printf '%s stated="%s"\n%s' "$(pa_lib proof_finding_lines record/wave-01-fixture/critic.md "$(printf '1\tS3\ton\t-\tdefer\t-\tthe one title')")" "$PA_S1" \
   "$(pa_lib proof_waiver_line adversarial "$PA_H" 'Dana Fixture' 2026-10-25T10:00:00Z 'go on')")"
 PA_ADD="$PA_ADD" awk '{ print } /^- T2: / && !d { print ENVIRON["PA_ADD"]; d = 1 }' "$PPA" > "$PPA.n" && mv "$PPA.n" "$PPA"
-poke "$RPA" finding-stated record/wave-01-fixture/critic.md#1 "$PA_S1"
-PA_STATED="$RC"
 git -C "$RPA" worktree add -q -b wt/01-T3 "$TMPROOT/parts-T3" wave/01-fixture >/dev/null 2>&1
 PA_WT="$(cd "$TMPROOT/parts-T3" && pwd -P)"
 expect_eq "PA-0 precondition: the plan's working branch is wave/01-fixture, the sentence is stated, the waiver is a line of its own, the row's tree is on wt/01-T3 at the working branch's head" \
-  "wave/01-fixture|0|1|wt/01-T3|$PA_H" \
-  "$(pa_lib plan_working_branch "$PPA")|$PA_STATED|$(/usr/bin/grep -c '^waived: question=adversarial ' "$PPA" | tr -d ' ')|$(git -C "$PA_WT" symbolic-ref --short -q HEAD)|$(git -C "$PA_WT" rev-parse HEAD)"
+  "wave/01-fixture|1|1|wt/01-T3|$PA_H" \
+  "$(pa_lib plan_working_branch "$PPA")|$(/usr/bin/grep -c '^deferred: .* stated="' "$PPA" | tr -d ' ')|$(/usr/bin/grep -c '^waived: question=adversarial ' "$PPA" | tr -d ' ')|$(git -C "$PA_WT" symbolic-ref --short -q HEAD)|$(git -C "$PA_WT" rev-parse HEAD)"
 
 poke "$PA_WT" known-limits-part T3
 PA_T1="$(pa_tip wt/01-T3)"

@@ -7,7 +7,8 @@
 #                 the same awk inside the reader's own file is admitted.
 #   §PLANWRITERS  a planted append to a plan is named and the count rises by one.
 #   §WRITERS      two functions appending one event type are listed as a pair; so is `published` today. A
-#                 launch's `dispatch` has one writer, the launch recorder's, paired with a planted second.
+#                 launch's `dispatch` has one writer, the launch recorder's, paired with a planted second; so is
+#                 a planted second appender of a waiver or a finding beside the one writer of each.
 #   §NAMES        the verbs the dispatch event retired are named nowhere in hooks/ or payload/scripts/ but
 #                 the walls' single-line list of verbs, which the row that edits it clears.
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted.
@@ -39,6 +40,8 @@ EOF
 cat > "$L/planted-writers.sh" <<'EOF'
 planted_born_a() { log_append born row=T1; }
 planted_born_b() { log_append born row=T2; }
+planted_waiver() { log_append waiver question=evidence; }
+planted_finding() { log_append finding ref=r.md#1; }
 planted_dispatch() { log_append dispatch row=T1; }
 EOF
 printf '%s\n' "planted_reader_rows() { awk -F'|' '\$2 ~ /T/' \"\$plan\"; }" >> "$L/reader.sh"
@@ -64,10 +67,15 @@ expect_contains "two functions appending one type are a pair" \
 PUB="$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "shared" && $2 == "published" { print $3 }')"
 expect_contains "published: the queue landing's writer" "payload/scripts/lib/line.sh:line_publish" "$PUB"
 expect_contains "published: the hand landing's writer" "hooks/poker/line.sh:poker_verb_row_landed" "$PUB"
+pair() { printf '%s\n' "$AFTER" | awk -F'\t' -v t="$1" '$1 == "shared" && $2 == t { print $3 }'; }
+expect_contains "a planted second waiver appender is named beside the one waiver writer" \
+  "payload/scripts/lib/planted-writers.sh:planted_waiver payload/scripts/lib/proof.sh:proof_waiver_event" "$(pair waiver)"
+expect_contains "a planted second finding appender is named beside the one finding writer" \
+  "payload/scripts/lib/planted-writers.sh:planted_finding payload/scripts/lib/proof.sh:proof_finding_event" "$(pair finding)"
 DSP="$(printf '%s\n' "$AFTER" | awk -F'\t' '$1 == "shared" && $2 == "dispatch" { print $3 }')"
 expect_contains "dispatch: the launch recorder's one writer" "hooks/execution-recorder.sh:dispatch_event" "$DSP"
 expect_contains "dispatch: the planted second writer beside it" "payload/scripts/lib/planted-writers.sh:planted_dispatch" "$DSP"
-expect_eq "the shared-type count rises by two" "$(( $(count "$BEFORE" shared_types) + 2 ))" "$(count "$AFTER" shared_types)"
+expect_eq "the shared-type count rises by four: born, dispatch, waiver and finding" "$(( $(count "$BEFORE" shared_types) + 4 ))" "$(count "$AFTER" shared_types)"
 
 section "NAMES"
 names() { /usr/bin/grep -rnE 'launch-sync|ledger-add|ledger-set' "$1/hooks" "$1/payload/scripts" | grep -v '/payload/scripts/lib/walls\.sh:'; }

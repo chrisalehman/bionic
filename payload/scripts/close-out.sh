@@ -1079,9 +1079,9 @@ CONT_LINE=""
 # effective priority is `defer`, rated through the one place the effective rating is applied. A
 # `check:` line alone is a check owed, not a deferral. The sentence is the plan line's ` stated="..."`
 # field as the deferral wrote it (a `\` or a `"` in it is already written `\\` or `\"`), `-` when it
-# has none; a deferral is carried whether or not it is stated. The sentence is the first deferral of the
-# finding among the run's events (lib/reader.sh `reader_events`): the standing finding is its newest
-# word, and a move written after the deferral replaces it without the sentence.
+# has none; a deferral is carried whether or not it is stated. The sentence is the newest one any event of the
+# finding states (lib/reader.sh `reader_events`): the standing finding is its newest word, and a move written
+# after the deferral replaces it without the sentence.
 co_deferrals() {  # -> the lines, or nothing: the deferrals, then the unburned debt (co_debts)
   local id s r p t owed said st
   owed="$(proof_findings_owed "$PLAN" 2>/dev/null | awk '$4 == "defer"')"
@@ -1089,7 +1089,7 @@ co_deferrals() {  # -> the lines, or nothing: the deferrals, then the unburned d
     # `<record>#<n><TAB>y<stated>` for each finding's first deferral, in event order: one read of the run's events
     said="$(reader_events "$PLAN" 2>/dev/null)" || return 2
     said="$(printf '%s\n' "$said" | awk -F'|' "$_READER_AWK"'
-      ev() == "finding" && line_kv("to") == "deferred" && !seen[line_kv("ref")]++ { printf "%s\ty%s\n", line_kv("ref"), line_kv("stated") }')"
+      ev() == "finding" { r = line_kv("ref"); if (!(r in st)) o[++n] = r; if (line_kv("stated") != "" || !(r in st)) st[r] = line_kv("stated") } END { for (i = 1; i <= n; i++) printf "%s\ty%s\n", o[i], st[o[i]] }')"
     while read -r id s r p t; do
       st="$(printf '%s\n' "$said" | CO_ID="$id" awk -F'\t' '$1 == ENVIRON["CO_ID"] { print $2; exit }')"
       [ -n "$st" ] || continue
