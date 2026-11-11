@@ -653,7 +653,7 @@ $(proof_findings_owed "$SCHED_PLAN" 2>/dev/null)
 TICK_FINDINGS
 }
 
-# THE DETACHED TREE CELLS' FAILURE, TOLD ONCE (wave-36 T12; D13, AC-7.1; C13). The launch recorder
+# THE DETACHED TREE CELLS' FAILURE, TOLD ONCE. The launch recorder
 # (hooks/execution-recorder.sh `dispatch_tree_start`) writes the write's output and then `rc=<n>` to
 # `.bionic/tmp/dispatch-<sid>.log`, rewriting it at each launch. A log whose last status is not 0
 # and that carries no `told=` line prints
@@ -1274,7 +1274,7 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
 
     # A launch is its run's log's own event, appended by the recorder, so the tick writes none. The recorder's
     # detached write of a launch's tree cells has a log of its own; its failure is told once, outside the held
-    # output, so an unchanged tick still says it (wave-36 T12; D13, AC-7.1).
+    # output, so an unchanged tick still says it.
     if [ -n "$TICK_BUF" ]; then tick_dispatch_failed "$REPO_REAL" "$SESSION_ID" >&3
     else tick_dispatch_failed "$REPO_REAL" "$SESSION_ID"; fi
 

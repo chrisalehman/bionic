@@ -2195,7 +2195,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   #
   # A ROW THIS TURN LAUNCHED IS NEVER MISSED (wave-20 T11b; Step-6 review R4, T12 F7). A launch
   # joins the roster at PreToolUse, so it is already in `open` and has already taken its slot;
-  # its plan row stays ready until the launch recorder appends its dispatch (A-T11.1). Counting it
+  # its plan row stays ready until the launch recorder appends its dispatch. Counting it
   # ready as well charged one launch twice, and the refusal named the rows the turn had just
   # sent. So the ledger's ready set stays the plan's, and what the turn missed is that set less
   # the rows this turn launched, matched by the dispatch name `fill_name` hands out.

@@ -2388,7 +2388,7 @@ $(for f in "$2"/roster-*.state; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n'
 EOF
 }
 
-# A DISPATCH AFTER A HANDOFF IS NAMED AT ITS LOCAL TIME AND ITS ISO INSTANT (wave-34 T29; D24, AC-14.2), by adopt's
+# A DISPATCH AFTER A HANDOFF IS NAMED AT ITS LOCAL TIME AND ITS ISO INSTANT, by adopt's
 # STALE note, the one reader a resumed session runs first.
 handoff_local_time() {  # <ISO-8601 Z> -> `YYYY-MM-DD HH:MM <zone>` on this machine's clock, empty if unreadable
   local e

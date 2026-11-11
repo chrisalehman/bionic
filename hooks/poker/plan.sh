@@ -1477,7 +1477,7 @@ EOF
     exit 0
   }
 
-  # THE ROW-CELL VERB (wave-24 T15; REQ-9 AC-9.1/9.2, D14). `task-set` sets cells of `## Tasks` rows
+  # THE ROW-CELL VERB. `task-set` sets cells of `## Tasks` rows
   # through `units_table_cells`, on the shared transaction. A `## Tasks` column is any
   # the header carries by `units_has_column`, except `id`, the key the row is found by, and, for a row a live
   # contract holds, `Files`: a dispatched agent's CONTRACT while it is open on the roster (editing the plan row
@@ -1515,7 +1515,7 @@ EOF
         PV_SET_PAIRS+=("$p")
       done
     }
-    # THE ID AND THE COLUMN NAME ARE OPERANDS TOO (wave-24 T27; Step-6 review C1): a line break in either
+    # THE ID AND THE COLUMN NAME ARE OPERANDS TOO: a line break in either
     # would forge a plan line the commit gate admits. The id is one token of the grammar every row
     # carries (`T7`, `T22b`, `T17-critic`); a name is held to the values' own rule.
     for _pv_s in "${PV_SETS[@]}"; do
