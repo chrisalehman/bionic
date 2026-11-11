@@ -388,7 +388,6 @@ t77_after_yes() {  # <file> <shape>
   esac
 }
 t77_state() { case "$1" in cur|u-*) echo written ;; old1|old2|old3|empty) echo stale ;; none) echo no ;; *) echo changed ;; esac; }
-t77_last() { local n; n="$(t77_body "$1" | wc -l)"; echo $(( 3 + ${n// /} )); }  # the end marker's line
 T77_ALL="cur u-above u-between u-below old3 old2 old1 empty none old-u-below old-u-above swapped edited"
 
 # THE ONE OWNER. env.sh `rc_state` answers every shape, and the fixture's shapes are
@@ -581,9 +580,6 @@ t78_plant() {  # <file> <shape> — T77's shapes, and `two`: two marker pairs
     printf '%s\n' 'export V1=1' "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_CALL" "$RC_END_LIT" 'export V2=2' \
       "$RC_START_LIT" "$PROXY_UNALIAS" "$PROXY_CALL" "$RC_END_LIT" > "$1"
   else t77_plant "$1" "$2"; fi
-}
-t78_named() {  # <rc name> <shape> — the first line a changed block is named with
-  printf "  lines 2 to %s of ~/%s are bionic's claude() block, changed since bionic wrote it:" "$(t77_last "$2")" "$1"
 }
 T78_HAND="    it is left as it is — edit it by hand"
 T78_WARN="holds only bionic's lines; bionic would delete it."

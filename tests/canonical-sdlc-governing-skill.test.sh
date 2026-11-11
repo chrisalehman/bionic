@@ -190,26 +190,6 @@ run_edit() {
   rm -f "$tmp_err"
 }
 
-# gs_find_bash52 — prints the path to a bash >= 5.2 interpreter (the version that turned on
-# `patsub_replacement`, review R1) if one is reachable, and fails silently otherwise. Checked in
-# this order because /opt/homebrew/bin/bash is the ONE named in the review's own measurement,
-# but a machine without Homebrew may still have a modern bash first on PATH.
-gs_find_bash52() {
-  local cand resolved ver major minor
-  for cand in /opt/homebrew/bin/bash /usr/local/bin/bash bash; do
-    resolved=$(command -v "$cand" 2>/dev/null) || continue
-    ver=$("$resolved" -c 'printf "%s.%s" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"' 2>/dev/null) || continue
-    major="${ver%%.*}"
-    minor="${ver#*.}"
-    case "$major$minor" in *[!0-9]*) continue ;; esac
-    if [ "$major" -gt 5 ] || { [ "$major" -eq 5 ] && [ "$minor" -ge 2 ]; }; then
-      printf '%s' "$resolved"
-      return 0
-    fi
-  done
-  return 1
-}
-
 # Same semantics as the framework's expect_eq (label, expected, actual;
 # string equality) -- delegated rather than reimplemented so the counting
 # and section-floor bookkeeping run through the ONE definition (AC-12, A-16).

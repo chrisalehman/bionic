@@ -143,16 +143,6 @@ write_stamp() {  # <project> <session>
   engage_marker "$1" "$2"
 }
 
-# THE STAMP A TICK WRITES (wave-20 REQ-6, D6): `verb=tick`, dated when it ran, and its mtime
-# set to the same instant. The stop wall now refuses a marker turn unless such a stamp sits at
-# or after the marker row, so the rows that describe a Patrol that fired AND ticked plant this
-# rather than `write_stamp`'s arm stamp.
-write_tick_stamp() {  # <project> <session> <seconds ago>
-  printf 'patrol-stamp/v1|at=%s|session=%s|verb=tick\n' "$(pr_iso "$3")" "$2" > "$(stamp_path "$1" "$2")"
-  engage_marker "$1" "$2"
-  backdate "$(stamp_path "$1" "$2")" "$3"
-}
-
 # The `s21_backdate` idiom of tests/dispatch-preflight.test.sh, verbatim in
 # behaviour: age is a MTIME, never a sleep.
 backdate() {  # <file> <seconds ago>

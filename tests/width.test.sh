@@ -253,10 +253,6 @@ section "Section 5: bionic_wrap folds a string inside a column budget"
 # `LC_ALL=C` are already this file's rulings (Section 3, 7n). A fold that measured
 # its own way would disagree with the truncator on the same string.
 
-wrap_lines() {  # <string> <budget> -> how many lines the fold produced
-  bionic_wrap "${1:-}" "${2:-0}" | wc -l | tr -d ' '
-}
-
 if ! type bionic_wrap >/dev/null 2>&1; then
   no "10: width.sh defines bionic_wrap" "no such function in $WIDTH_SH"
   no "10a: every row in this section needs it" "skipped: bionic_wrap is not defined"
