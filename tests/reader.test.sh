@@ -73,6 +73,9 @@ ask approved release; expect_status "a cancelled approval is absent" 1 "$?"
 expect_eq "the later step answers" "n=5 state=open" "$(ask step | tr '\n' ' ' | sed 's/ $//')"
 printf 'run/v1|ev=step|n=4|by=me|at=2026-11-01T00:00:14Z\n' >> "$D/record/fold/run.log"; expect_eq "a step written again is the step the run went back to" "n=4 state=open " "$(ask step | tr '\n' ' ')"
 W=back14; printf '## SDLC State\ncurrent: 1\n- Step 0: a\n- Step 1: a\n- Step 4: a\n' > "$D/plans/epic-x/back14.plan.md"; expect_eq "a version-14 plan taken back stands at its current:, its Step lines the history" "n=1 state=open " "$(ask step | tr '\n' ' ')"
+for f in 'current: 4\r\n|CRLF' '   current :  4\n|indented' 'current:4\n|unspaced' 'current: 4\ncurrent: x\n|the first of two'; do
+  W=form; printf "## SDLC State\n${f%|*}- Step 3: a\n" > "$D/plans/epic-x/form.plan.md"; expect_eq "a version-14 current: ${f#*|} is read as the gate reads it" "n=4 state=open " "$(ask step | tr '\n' ' ')"; done
+printf '## SDLC State\rcurrent: 4\r- Step 3: a\r' > "$D/plans/epic-x/form.plan.md"; expect_eq "a version-14 current: on CR-only line ends is read" "n=4 state=open " "$(ask step | tr '\n' ' ')"
 
 # fails-when: a proof is identified without its scope, so a piece reading replaces a whole one of the same question
 # at the same head, and the judge over the reader reads the whole read absent.

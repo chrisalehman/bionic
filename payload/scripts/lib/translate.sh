@@ -135,8 +135,10 @@ _translate_form() {  # <events|gaps> -> stdin's source records in that form: eve
 }
 
 _translate_section() {  # <plan> <heading> -> the lines under `## <heading>`, to the next `## `
-  # Fenced text is an example, never a fact, as every reader of the plan holds it.
-  awk -v h="## $2" '/^[ \t]*```/ { f = !f; next } f { next } $0 == h { on = 1; next } /^## / { on = 0 } on' "$1"
+  # Fenced text is an example, never a fact, as every reader of the plan holds it. A CRLF or CR-only plan is read in
+  # lines, as the gates read it: a line end left in would hide every heading and value from the match.
+  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1" \
+    | awk -v h="## $2" '/^[ \t]*```/ { f = !f; next } f { next } $0 == h { on = 1; next } /^## / { on = 0 } on'
 }
 
 translate_source _translate_state
@@ -147,7 +149,8 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
       e = substr($0, RSTART + 10, RLENGTH - 10); if (match($0, / at=[^ ]+/)) printf "\035%s %s\n", e, substr($0, RSTART + 4, RLENGTH - 4) }'
     _translate_section "$1" "SDLC State"; } | awk "$_TRANSLATE_AWK"'
     /^\035/ { split(substr($0, 2), w, " "); if (!(w[1] in rev)) rev[w[1]] = ukey(w[2]); next }
-    /^current: / { cur = trim(substr($0, 10)); next }
+    # current: in each form a gate reads it: indented, unspaced, its blanks dropped, and the first line of two
+    /^[ \t]*current[ \t]*:/ { if (!curseen) { cur = $0; sub(/^[ \t]*current[ \t]*:/, "", cur); gsub(/[ \t]/, "", cur); curseen = 1 }; next }
     /^approved-by: / { byline("x by " substr($0, 14)); begin("approval", "key", "step3"); put("by", BY); put("said", SAID); emit(AT); next }
     /^approved: / { byline(substr($0, 11)); begin("approval", "key", trim(PRE)); put("by", BY); kv(MID)
       for (i = 1; i <= NP; i++) put(PK[i], PV[i]); put("said", SAID); emit(AT); next }
