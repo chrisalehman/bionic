@@ -66,6 +66,11 @@ section "REFUSALS"
 expect_contains "a real refusal site in a hook file is listed" "$(printf 'refusal\thooks/dispatch-preflight.sh:')" "$BEFORE"
 expect_regex "the planted refusal words are listed" "^refusal	hooks/engage\.sh:[0-9]+	deny$" "$AFTER"
 expect_eq "the refusal count rises by one" "$(( $(count "$BEFORE" hook_refusals) + 1 ))" "$(count "$AFTER" hook_refusals)"
+own() { printf '%s\n' "$BEFORE" | awk -F'\t' -v f="hooks/$1.sh:" 'index($2, f) == 1 { n = $2; sub(/.*:/, "", n); print n }'; }
+expect_regex "the extractor reads the dispatch wall's sites" "^[0-9]+" "$(own dispatch-preflight)"
+expect_eq "the write hook's file and the permission hook's list no refusal" "0 0" "$(own canonical-sdlc-governing-skill | grep -c .) $(own permission-answer | grep -c .)"
+expect_eq "the Bash wall lists only the two functions the next row deletes: three sites, none outside" "3 0" \
+  "$(own bash-walls | grep -c .) $(own bash-walls | grep -vxFf <(awk '/^wall_ruling_(unread|ack)\(\)/ { on = 1 } on { print NR } /^}/ { on = 0 }' "$S/hooks/bash-walls.sh") | grep -c .)"
 
 section "FOLDS"
 expect_eq "a fold through a pipe, an unread \$( ) and a local's \$( ) are named; one whose exit is read and a stand-in are not" "1 2 3" \
