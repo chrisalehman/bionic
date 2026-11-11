@@ -1692,6 +1692,7 @@ spawn-worktree.test.sh | §Group 11 | duplicate | payload/scripts/spawn-worktree
 spawn-worktree.test.sh | §Group 12 | keep | rule: door refusal — payload/scripts/spawn-worktree.sh land: the check for a tests/run.sh floor in the checkout holding the working branch dropped, so wt/20-T2 lands instead of HELD exit 2 with no ref moved | none (searched 'HELD wt/' and 'land .* --by-hand' in tests/; tests/worktree.test.sh drives the library arms)
 spawn-worktree.test.sh | §WS | keep | payload/scripts/spawn-worktree.sh create: the workspace/v1 line not appended on `--for`, so workspace_for_name answers no tree for w25-T1 | none (searched 'workspace/v1' writes by create in tests/; permission-answer.test.sh plants the line by hand)
 spawn-worktree.test.sh | §TREE-RECORD | keep | payload/scripts/lib/worktree.sh: create --for writing no tree/v1 record in the tree's git directory, or one keyed by the session instead of the tree's path | none (searched 'worktree_tree_record' and 'bionic-tree' in tests/; landing-line-1.test.sh §SUCCESSOR and stop-orders.test.sh §TREE read it, never its writer)
+spawn-worktree.test.sh | §TREE | keep | payload/scripts/lib/worktree.sh worktree_tree_event and worktree_tree_row: create --for writing no tree event, or two, or one missing a field (tv1, tv2, tv5), writing the plan (tv3), appending for a name no row claims or saying no row (tv4), or making a tree for a claimed row with no brief (tv6, tv7) | none (searched 'ev=tree' and 'brief-unrendered' in tests/)
 
 ## stop-check.test.sh
 
@@ -1780,6 +1781,7 @@ units.test.sh | §ASK | keep | payload/scripts/lib/units.sh _units_read: a recor
 units.test.sh | §LIVE | keep | payload/scripts/lib/units.sh _units_live: the log's dispatch not read, so a launched row stays pending and ready (LIVE-2), or read on the plan alone, so its dry copy reads it pending (LIVE-2); a cancel not read, so the row stays active (LIVE-3); the overlay applied with no log, so the cells' T1 moves (LIVE-1) | execution-recorder.test.sh §Section 6 (the writer's half only)
 units.test.sh | §BORN | keep | payload/scripts/lib/units.sh units_born_event and the born readers: no event appended, or one the fix-cap's count, the findings or the marks do not read, so a review-born row born in the log escapes the cap (BORN-1, BORN-2) | session-poker-5.test.sh §EXEMPT (the count through task-add)
 units.test.sh | §BACK | keep | payload/scripts/lib/units.sh units_row_back: a launch in the log returned by a cell write, or a launch by its cells by a cancel, so the row stays running or the plan is rewritten (BACK-1, BACK-2) | stop-orders.test.sh §BACK (through the verb)
+units.test.sh | §TREE | keep | payload/scripts/lib/units.sh _units_live and _units_overlay: the log's tree event not read, so a row launched with empty cells has no tree or base (TREE-1, TREE-2), or the cells read over the newest event (TREE-2) | none (searched 'ev=tree' and 'tree row=' in tests/)
 
 ## version-compare.test.sh
 

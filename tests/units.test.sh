@@ -39,6 +39,7 @@
 #            dry copy reads its plan's run; a row the cells hold active reads as before
 #   §BORN    a row's born event, one per row, is read by the fix-cap's count, the findings and the marks
 #   §BACK    a launch taken back by one function: a cancel for a launch in the log, the cells for one by its cells
+#   §TREE    a row's tree and base read from the newest tree event in the log, its cells for a row the log holds none for
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT (AC-1e.2, measure §4.3). Before this library two
 # readers in hooks/canonical-sdlc-evidence-gate.sh took `id`/`rigor`/`status` as awk fields

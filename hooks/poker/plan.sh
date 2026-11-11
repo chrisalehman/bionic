@@ -1635,13 +1635,9 @@ EOF
   # row (its tier is unknown, and a guessed tier owes the wrong keys), a tier walls.sh does not know.
   poker_verb_matrix_render() {
     plan_verb_open matrix-render
-    if ! poker_serves_load; then
-      die "REFUSED — which rows serve which criteria is read by lib/line.sh, and $BIONIC_LIB/line.sh cannot be loaded; the plan is unchanged."
-      exit 2
-    fi
     MR_KEYS="$(mr_tier_keys)" || MR_KEYS=""
-    if [ -z "$MR_KEYS" ]; then
-      die "REFUSED — the per-tier keys are walls.sh keys_for_tier's, and $BIONIC_LIB/walls.sh cannot be loaded; the plan is unchanged."
+    if [ -z "$MR_KEYS" ] || ! poker_serves_load; then
+      die "REFUSED — the per-tier keys are walls.sh keys_for_tier's and the rows each criterion is served by are line.sh's, and $BIONIC_LIB/walls.sh or $BIONIC_LIB/line.sh cannot be loaded; the plan is unchanged."
       exit 2
     fi
     MR_TASKS="$(serves_tasks "$PV_PLAN")"
