@@ -2035,12 +2035,17 @@ SR_FM="$TMPROOT/fast-mut"; mkdir -p "$SR_FM/payload"
 cp -R "$BIONIC_HOOKS_DIR" "$SR_FM/hooks" && cp -R "$BIONIC_HOOKS_DIR/../payload/scripts" "$SR_FM/payload/scripts"
 sed 's|^sitrep_gather() {$|sitrep_gather() { [ -z "${SR_GATHER_MARK:-}" ] \|\| echo gather >> "$SR_GATHER_MARK";|' "$BIONIC_HOOKS_DIR/poker/sitrep.sh" > "$SR_FM/hooks/poker/sitrep.sh"
 printf '#!/bin/bash\ncat "$2" > "$SR_CARD_KEPT"\necho drawn\n' > "$SR_FM/payload/scripts/card.sh"
-expect_eq "FA4 precondition: the counting plant took effect (the shipped file and the plant differ)" "yes" \
-  "$(cmp -s "$BIONIC_HOOKS_DIR/poker/sitrep.sh" "$SR_FM/hooks/poker/sitrep.sh" || echo yes)"
+# and the kept fold counts its entries, so a sheet that reads its findings by folding again is seen
+SR_FA_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/proof.sh"
+sed 's|^_proof_facts() {|_proof_facts() { [ -z "${SR_FOLD_MARK:-}" ] \|\| echo fold >> "$SR_FOLD_MARK";|' "$SR_FA_LIB" > "$SR_FM/payload/scripts/lib/proof.sh"
+expect_eq "FA4 precondition: the counting plants took effect (each shipped file and its plant differ)" "yes|yes" \
+  "$(cmp -s "$BIONIC_HOOKS_DIR/poker/sitrep.sh" "$SR_FM/hooks/poker/sitrep.sh" || echo yes)|$(cmp -s "$SR_FA_LIB" "$SR_FM/payload/scripts/lib/proof.sh" || echo yes)"
 SR_FA_MARK="$TMPROOT/fast-gathers"; SR_FA_KEPT="$TMPROOT/fast-kept"; : > "$SR_FA_MARK"
-export SR_GATHER_MARK="$SR_FA_MARK" SR_CARD_KEPT="$SR_FA_KEPT"
+export SR_GATHER_MARK="$SR_FA_MARK" SR_CARD_KEPT="$SR_FA_KEPT" SR_FOLD_MARK="$TMPROOT/fast-folds"
 SR_AT="$SR_FAST_AT" sr_poke_with "$SR_FM/hooks/session-poker.sh" sitrep "$SR_PLAN" > "$TMPROOT/fast-sheet2.out" 2>/dev/null
-SR_FA_G1="$(/usr/bin/grep -c gather "$SR_FA_MARK")"
+SR_FA_G1="$(/usr/bin/grep -c gather "$SR_FA_MARK")"; SR_FA_F1="$(/usr/bin/grep -c fold "$SR_FOLD_MARK")"; unset SR_FOLD_MARK
+expect_eq "FA4b the sheet verb enters the kept fold at least once and at most twice: its findings are answered from the fold its own shell holds" "yes" \
+  "$([ "$SR_FA_F1" -ge 1 ] && [ "$SR_FA_F1" -le 2 ] && echo yes || echo "no: $SR_FA_F1 entries")"
 # an ask opened after the sheet was saved, and one answered no; neither is in the saved sheet
 sr_owed "key=approve:release|state=open|sent=-|at=2026-10-23T07:10:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
 SR_AT="$SR_FAST_AT" sr_poke_with "$SR_FM/hooks/session-poker.sh" sitrep card "$SR_PLAN" < "$SR_FAST_J" > "$TMPROOT/fast-card.out" 2>"$TMPROOT/fast-card.err"

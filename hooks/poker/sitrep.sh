@@ -698,8 +698,11 @@ sitrep_list() {
 # joining, a proof, a waiver, a finding, a verdict and a decision, is a standing fact lib/reader.sh holds, read through
 # lib/proof.sh's kept fold (`_proof_facts`), so a fact only the run's log holds is on the sheet. A sheet folds its run
 # once: `sitrep_gather` holds the fold for its plan in this shell (`_sitrep_hold`), and every question it asks after
-# reads that fold (`_sitrep_ask`), in its own subshells too. The rows, their reads and their states are the
-# scheduler's (`units_rows`), never read again here.
+# reads that fold (`_sitrep_ask`), in its own subshells too. The fold is taken in the calling shell, never in a
+# command substitution: a substitution's copy dies with it, and every later reader, each a subshell of its own, would
+# take the fold again from the kept file. So the facts and the findings are held as this shell's variables, and a
+# finding's rating or a fixed finding is answered from them (lib/proof.sh `_proof_findings_hold`). The rows, their
+# reads and their states are the scheduler's (`units_rows`), never read again here.
 _sitrep_reader() {  # -> 0 once lib/proof.sh and the reader under it are loaded in this shell
   { declare -F _proof_facts >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } >/dev/null 2>&1
   declare -F _proof_facts >/dev/null 2>&1 && _proof_reader_load
@@ -709,7 +712,8 @@ _SITREP_FACTS_PLAN=""; _SITREP_FACTS=""
 # read absent. So it is never held, and each read below takes the fold before it pipes it and exits 2 when it failed.
 _sitrep_hold() {  # <plan> -> 0 once the plan's fold, as it stands now, is held in this shell; 2, nothing held, when it cannot be folded
   _SITREP_FACTS_PLAN=""; _SITREP_FACTS=""
-  { _sitrep_reader && _SITREP_FACTS="$(_proof_facts "$1")"; } || return 2
+  _sitrep_reader || return 2
+  if [ -f "$1" ]; then _proof_findings_hold "$1" || return 2; _SITREP_FACTS="${_PROOF_FACTS%$'\n'}"; fi
   _SITREP_FACTS_PLAN="$1"
 }
 sitrep_facts() {  # <plan> [<event type>…] -> the run's standing facts, of those types when named, one run/v1 line each; 2 when the fold fails
@@ -1176,6 +1180,8 @@ SITREP_ASKS
 sitrep_gather() {
   local plan="$1" root="$2" mode="$3" now rec rows reds red_rows lr lr1 approvals appr_at dlv_at cur lq lwait ledges
   local sit ty gl lab desc kind note id stp state landed=0 total=0 last_id="" last_at="" proj
+  # the findings held for this gather end with it: a hold is as fresh as its fold, and the gather writes no event
+  local _PROOF_HELD_PLAN="" _PROOF_HELD_FINDINGS=""
   now="$(sitrep_now)"
   SG_UNREAD=yes; SG_ASKS=""; SG_TASKS=""; _sitrep_hold "$plan" || return 2; SG_UNREAD=""
   # read on every path below, set only when the record exists; from bash 4.4 a bare local is unset under set -u
