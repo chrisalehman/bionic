@@ -2403,8 +2403,8 @@ proof_plan_slug() {
 
 # proof_debts_read <record> -> `<suite><TAB><token><TAB><time>` once per suite and token with a
 # `debt:` line (in the run's log, an `admitted` event) no `void:` line (a `void` event) names, the record and the log
-# read as one (lib/line.sh `line_lines`), the time the NEWEST of those lines' `at=` (wave-27 T67; review
-# pass 46 B2): each red landing is a debt of its own, and two on one suite and token are both covered
+# read as one (lib/line.sh `line_lines`), the time the NEWEST of those lines' `at=`: each red landing is a
+# debt of its own, and two on one suite and token are both covered
 # only by a green run after the later one. A line whose `at=` is no <ISO-UTC> leaves the time empty,
 # and an empty time is never covered.
 proof_debts_read() {
