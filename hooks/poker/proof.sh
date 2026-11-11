@@ -8,7 +8,7 @@
 
 # ---------------------------------------------------------------- the deferral's sentence
 #
-# A DEFERRED FINDING'S ONE CHANGELOG SENTENCE (wave-28 T17; D21, AC-8.7). Registering a record appends a deferral
+# A DEFERRED FINDING'S ONE CHANGELOG SENTENCE. Registering a record appends a deferral
 # event per finding the table defers (lib/proof.sh `proof_finding_deferrals`); the person's move to defer carries the
 # sentence as its `stated=` field (`finding-move … defer '<words>' '<why>' '<sentence>'`). The sentence is folded to
 # one line of single spaces (`deferral_fold`, lib/said.sh's `said_fold`, the one fold the changelog is read through as
@@ -984,11 +984,11 @@ PF_PAIRS_LIST
       die "REFUSED — $(clean_whole "$PF_HEAD"). The plan is unchanged."
       exit 1
     fi
-    # ONE RECORD PATH IS ONE PASS (wave-28 T60; REQ-8 AC-8.6, D33). A finding event (a deferral or a move) is
+    # ONE RECORD PATH IS ONE PASS. A finding event (a deferral or a move) is
     # keyed `<record>#<n>`, so a second pass registered on the path of a first would inherit its deferral
     # or its move (a #1 moved to defer defers the new pass's fix). A reading's path whose proof line names
     # another head is refused, and so is one such an event already names (lib/proof.sh `proof_bind_awk` is
-    # the one predicate, T72); a relaunched reader re-registering a record no such event names (the same
+    # the one predicate); a relaunched reader re-registering a record no such event names (the same
     # head) is admitted as before.
     if [ -n "$PF_QUESTION" ]; then
       PF_PASS="$(proof_pass_conflict "$PV_PLAN" "$PF_REL" "$PF_HEAD")" \
@@ -1034,9 +1034,9 @@ PF_PAIRS_LIST
     if [ "$PF_KIND" = regression ]; then
       PF_LINE="$(proof_floor_line "$PF_HEAD" "$(iso_now)" "$PF_REL" "$PF_OWED" "run=$PF_RUNAT head=$PF_HEAD rc=$PF_RUNRC")"
     fi
-    # A RATED READING DEFERS WHAT THE TABLE DEFERS (wave-28 T15; D19, D21): one deferral event per finding the table
+    # A RATED READING DEFERS WHAT THE TABLE DEFERS: one deferral event per finding the table
     # defers, appended to the run's log once the proof line is in the plan (lib/proof.sh `proof_finding_deferrals`).
-    # No `check:`: a reader's rating is final (wave-31 T32; D6).
+    # No `check:`: a reader's rating is final.
     PF_FINDS=""; PF_PLANL=""
     if [ "$PF_SEV" = 1 ]; then
       PF_FINDS="$(proof_findings "$PF_REAL")"; PF_PLANL="$(proof_finding_lines "$PF_REL" "$PF_FINDS")"
@@ -1171,7 +1171,7 @@ PF_VERDICTS_LIST
     exit 0
   }
 
-  # THE WAIVER (wave-27 T9; D2). The user's act, on their reply: one waiver event in the run's log,
+  # THE WAIVER. The user's act, on their reply: one waiver event in the run's log,
   #
   #   waiver question=<q> head=<working head> by=<git user.name> said=<reply>
   #

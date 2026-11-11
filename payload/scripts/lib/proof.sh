@@ -596,9 +596,9 @@ proof_finding_lines() {
 # registered record's findings passes each finding through here, and this is the one place the
 # effective rating is applied. The rating is the one the record wrote: a reader's rating is final
 # (wave-31 T32; D6), so no line of the plan re-rates it. The priority is the table's for that rating
-# (`proof_priority`); a move to defer or fix (T42, `_proof_moved_to`) replaces
+# (`proof_priority`); a move to defer or fix (`_proof_moved_to`) replaces
 # the priority alone, so the third word is the one a move changes — except that an S1 is never
-# deferred, whoever moved it (AC-8.9). A move to fixed (`to=fixed row=<T>`, wave-36 T8) puts the
+# deferred, whoever moved it. A move to fixed (`to=fixed row=<T>`) puts the
 # finding on the fix side, as a move to fix does: it reads fix until its row lands green, and then drops out as
 # fixed (`proof_fixed`). A caller reads `set -- $(…)`: three words, rated.
 proof_finding_rating() {
@@ -649,7 +649,7 @@ _proof_rating_apply() {
 
 # _proof_moved_to <plan> <record>#<n> -> `defer`, `fix` or `fixed`, where the LAST whole move among the run's finding
 # events naming it (`_proof_findings_load`, `proof_move_of`) moved the finding, or nothing when there is none
-# (wave-28 T42; D34, AC-8.9). A later move is the later word, so the last decides. Exit 2 when the fold fails.
+# A later move is the later word, so the last decides. Exit 2 when the fold fails.
 _proof_moved_to() {
   local ev
   _proof_findings_load "$1" || return 2; ev="$_PROOF_FINDINGS"
@@ -659,7 +659,7 @@ _proof_moved_to() {
 }
 
 # proof_move_line <plan> <record>#<n> -> the finding's newest whole move event, verbatim, the one `_proof_moved_to`
-# reads its direction from; nothing when the run holds none (wave-36 T8; D10). What a refusal quotes when it names the
+# reads its direction from; nothing when the run holds none. What a refusal quotes when it names the
 # move it read: `task-add --born` refuses a finding whose newest move is to defer, and `disposition` names the row a
 # move to fixed names. Exit 2 when the fold fails.
 proof_move_line() {
@@ -671,7 +671,7 @@ proof_move_line() {
 }
 
 # _proof_moved_fixed <plan> -> `<row><TAB><record>#<n>`, one line per finding whose newest whole move is to fixed
-# (wave-36 T8; D9), in the order the findings were first moved; a later move to defer or fix takes the finding back.
+# in the order the findings were first moved; a later move to defer or fix takes the finding back.
 # `proof_fixed`'s second source. Exit 2 when the fold fails.
 _proof_moved_fixed() {
   local ev
@@ -1516,7 +1516,7 @@ proof_awk() {
 }
 
 # proof_bind_awk -> awk source: THE ONE PREDICATE for the events that bind a record's pass, and the reads of what such
-# an event says (wave-28 T72; D33, D34, AC-8.6, AC-8.9). A finding event (`_proof_findings_load`) is keyed
+# an event says. A finding event (`_proof_findings_load`) is keyed
 # `ref=<record>#<n>`: it defers or moves ONE finding of ONE pass, and every read of the record's findings applies it
 # (`proof_finding_rating`), so a second pass registered on the same path would inherit it. A move binds for the reason
 # a deferral does: it is the person's word about one finding, it changes the priority a later reader of that path
@@ -1784,7 +1784,7 @@ proof_add_line() {
 }
 
 # proof_pass_conflict <plan> <record path> <head> -> why <record path> cannot be registered for another
-# pass at <head>, or nothing (wave-28 T60; D33, AC-8.6). ONE RECORD PATH IS ONE PASS: a finding event binds a
+# pass at <head>, or nothing. ONE RECORD PATH IS ONE PASS: a finding event binds a
 # pass (`proof_bind_awk`) and is keyed `<record>#<n>`, so a second pass on the same
 # path would inherit the first pass's deferral or move. The key stays unique by
 # construction when the path is registered for one pass only, so the verb asks here before it writes. A
