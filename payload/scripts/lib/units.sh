@@ -1014,7 +1014,7 @@ _units_landed() {
     $0 == "\034in" { part = 4; next }
     part == 1 { if ($1 == "") next; n++; id[n] = $1; knd[n] = $3; srv[n] = $8; st[n] = $10; at[$1] = n; next }
     part == 2 {
-      # A published event is a landing at its commit, a hand landing's and a record row's too.
+      # A published event is a landing at its commit, a hand landing and a record row too.
       r = $2; m = $3
       if (!(r in at)) next
       lm[r] = (m ~ /^[0-9a-f]+$/ && length(m) >= 7 && length(m) <= 40) ? m : "-"
