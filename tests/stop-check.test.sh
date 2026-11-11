@@ -803,15 +803,14 @@ chmod 600 "$R8/.bionic/tmp/patrol-${OWN8}.state"
 bound_marker "$R8" "$OWN8" "$R8/.bionic/docs/plans/epic-99/wave-01.md"
 
 echo "progress line" > "$R8/prog-g.progress"
-# THE `Suites:` LINE IS A WRITER PRECONDITION, not part of the value under test (S13,
-# spec AC-20): the start gate refuses a brief that declares neither `Files:` nor `Suites:`,
-# and this case needs the dispatch to actually JOURNAL a row. The DECLARED spelling,
-# because this fixture repo configures no `impact-command:`.
+# Each field stands under its own label on a line of its own: the wall reads no label inside a sentence.
+# `Suites:` is a writer precondition, not the value under test: a brief naming no Files: nor Suites: journals nothing.
 BRIEF_G="Canonical-sdlc Step 4, task 4/12 of epic-99 wave-01; build · double · wave.
 Expected artifact: $R8/deliv-a.md
-Expected duration: ~30 minutes. Progress: $R8/prog-g.progress, cadence ~6m.
+Expected duration: ~30 minutes.
+Progress artifact: $R8/prog-g.progress
+Cadence: ~6m.
 Subprocess claim: \`$MARKER2\` → $H8/claims-out.log
-Exit condition: the artifact exists.
 Suites: tests/widget.test.sh"
 # THE PLANTED LINEAGE IS LANDED FIRST (T22). `make_agent` journals an `identified` row for
 # this name, and since the name-in-flight arm a dispatch cannot reuse a name whose row is
@@ -848,7 +847,8 @@ expect_contains "the real start gate journalled the dispatch this case reads" \
   "name=ours-claims" "$W8G_ROW"
 expect_contains "…and the row it wrote carries the claimed pattern the brief declared" \
   "claims=$MARKER2" "$W8G_ROW"
-expect_contains "…and the cadence declared beside the progress path" "cadence=~6m." "$W8G_ROW"
+expect_contains "…and the progress path its own line declares" "progress=$R8/prog-g.progress|" "$W8G_ROW"
+expect_contains "…and the cadence declared beside the progress path, to its full stop" "cadence=~6m|" "$W8G_ROW"
 
 OUT8H=$(run_check_as "$OWN8" "$H8" "$R8" "ours-claims")
 expect_contains "P2 roster-sourced: a live matching process reports live: yes" "live:     yes" "$OUT8H"
