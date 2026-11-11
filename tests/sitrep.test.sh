@@ -222,7 +222,7 @@ sr_tasks_f() { sr_lines task | while IFS= read -r l; do sr_f "$l" "$1"; done; } 
 # sr_keys -> the sheet's keys in order, a run of one key printed once
 sr_keys() { printf '%s\n' "$OUT" | tail -n +2 | awk -F': ' '$1 != p { print $1; p = $1 }' | sr_join; }
 SR_HEAD="sheet/v1 — facts for the model; the user sees the card, never this sheet"
-SR_ORDER="run.release|run.name|run.wave|run.now|run.step|run.project|run.started|run.last-landing|step|task|clock.now|clock.approved|clock.forecast|clock.elapsed|clock.elapsed-share|work.planned|work.added|work.dropped|work.landed|work.left|work.width|work.task-time|pace.time-used|pace.work-landed|close.chain|close.predicted|close.unscaled|close.waits-on-you|tests.suites-run|tests.suites-total|tests.whole-run|reviews|findings.open|waste.dropped|waste.runs-discarded|waste.ready-unstarted|waste.waiting-on-you|goal|ask|review"
+SR_ORDER="run.release|run.name|run.wave|run.now|run.step|run.project|run.started|run.last-landing|step|task|clock.now|clock.approved|clock.forecast|clock.elapsed|clock.elapsed-share|work.planned|work.added|work.dropped|work.landed|work.left|work.width|work.task-time|pace.time-used|pace.work-landed|close.chain|close.predicted|close.unscaled|close.waits-on-you|tests.suites-run|tests.suites-total|tests.whole-run|reviews|findings.open|waste.dropped|waste.runs-discarded|waste.ready-unstarted|waste.waiting-on-you|run.so-far|goal|ask|review"
 # sr_m <key> -> the measurement alone, the value before its ` — `; sr_d <key> -> what follows it
 sr_m() { sr_val "$1" | awk '{ i = index($0, " — "); print (i ? substr($0, 1, i - 1) : $0) }'; }
 sr_d() { sr_val "$1" | awk '{ i = index($0, " — "); print (i ? substr($0, i + 5) : "") }'; }

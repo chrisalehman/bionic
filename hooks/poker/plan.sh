@@ -2843,6 +2843,7 @@ BRF_EOF
   #   Bottom line   whether every check holds, what the release changes of its own check, the criteria not proved,
   #                 what is owed, the recommendation
   #   Goals         each goal the plan declares, its mark and its reading, reached ones included
+  #   run.so-far    one line, the reader's acts taken by hand and open asks over the run, the sheet's line word for word
   #   hand-holds    one line, landing-report's counts over the window from the last build landing to this render
   #   test-ratio    one line beside it, the release check's count of shell lines under tests/ against the rest
   #   Tests         acceptance (the matrix) and regression (the last whole run's proof line): two claims
@@ -2996,6 +2997,7 @@ RR_MATRIX
       esac
       printf 'goal\t%s\t%s\t%s\n' "${l%%	*}" "$m" "$(printf '%s\n' "${l#*	}" | cut -f1-3)"
     done
+    [ -z "${RR_SOFAR:-}" ] || rr_fact sofar "$RR_SOFAR"
     [ -z "${RR_HH:-}" ] || rr_fact handholds "$RR_HH"
     [ -z "${RR_TR:-}" ] || rr_fact ratio "$RR_TR"
     rr_fact acceptance "$RR_TACC"
@@ -3338,6 +3340,9 @@ RR_AGAINST_EOF
     IFS=$'\t' read -r RR_HHS _ _ _ <<< "$(hand_holds_window "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" "$PV_PLAN")"
     [ "${RR_HHS:--}" != - ] || RR_HHS=""
     RR_HH="$(hand_holds_report "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" "$PV_PLAN" ${RR_HHS:+--since "$RR_HHS"} --until "$RR_AT")"
+    # THE RUN SO FAR, the sheet's own line (`sitrep_so_far`): the reader's acts taken by hand and open asks over the
+    # log this render reads, asked before the render opens anything, so the page and the sheet count at one log.
+    RR_SOFAR="$(sitrep_so_far "$PV_PLAN")"
 
     # THE CAP ON TESTS, as the release check printed it: the line is read from the log of the newest check proof
     # (`sitrep_test_ratio`, the reader the situation report's waste line uses), so the page quotes the check and

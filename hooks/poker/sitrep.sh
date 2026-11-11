@@ -582,6 +582,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #   pace.time-used · pace.work-landed · close.chain · close.predicted · close.unscaled · close.waits-on-you
 #   tests.suites-run · tests.suites-total · tests.whole-run · reviews · findings.open
 #   waste.dropped · waste.runs-discarded · waste.ready-unstarted · waste.waiting-on-you
+#   run.so-far: <n> acts taken by hand · <m> open asks      the release card's line too (`sitrep_so_far`)
 #   goal: name=<goal> status=<met|on course|not measured|not met|unreadable> measure=<what measures it — what it read, or -> for=<the theme's opening sentence>
 #   mapped by id: <n> rows carry no serves: · read as the first: <n> rows serve several requirements ·
 #   not mapped: <n> rows carry no serves: and no dotted id      each once, after the goals, as lib/plan.sh's theme reading says it
@@ -1437,6 +1438,7 @@ SITREP_SIT
   SG_FORECAST="$SG_C_FC"
   SG_P_TIME="$SG_C_SHARE"; SG_P_WORK="$SG_W_SHARE"
   [ "$mode" = sheet ] || return 0
+  SG_SO_FAR="$(sitrep_so_far "$plan")"
 
   # ---- correctness and waste
   local k rv q sc res at ev nf passed=0 failed=0 running=0 jhead jv jrc open idle_min rg rr rn rd rk g m st t md rdg fr u sn sg sr nsu
@@ -1550,6 +1552,15 @@ $SG_ASKS
 SITREP_SHEET_ASKS
 }
 
+# sitrep_so_far <plan> -> `run.so-far: <n> acts taken by hand · <m> open asks`, each the number of lines the reader's
+# hands and asks answer over the run's log as it stands. The sheet and the release card print this one line, so at
+# one log they cannot count either number two ways; the card's hand-holds line counts a window, never the run.
+sitrep_so_far() {
+  local h a
+  h="$(_sitrep_ask "$1" reader_q_hands "$1" | grep -c .)"; a="$(_sitrep_ask "$1" reader_q_asks "$1" | grep -c .)"
+  printf 'run.so-far: %s %s taken by hand · %s open %s\n' "$h" "$(sitrep_noun "$h" act acts)" "$a" "$(sitrep_noun "$a" ask asks)"
+}
+
 # sitrep_m <key> <value> <what it measures> <unit> <source: … or basis: …> -> one measured line of the sheet
 sitrep_m() { printf '%s: %s — %s · unit: %s · %s\n' "$1" "$2" "$3" "$4" "$5"; }
 
@@ -1588,6 +1599,7 @@ sitrep_sheet() {
   sitrep_m waste.runs-discarded "$SG_X_RUNS" "the suite runs thrown away" "count of all suite runs" "source: the landing record and the gate"
   sitrep_m waste.ready-unstarted "$SG_X_IDLE" "the minutes a ready task sat while the machine had room" "minutes" "source: the fill record"
   sitrep_m waste.waiting-on-you "$SG_X_WAIT" "the minutes a task waited on an ask, overlaps counted once" "minutes, and which asks" "source: the register's opened and closed times; a decision with no opened time, its first put in the design ledger"
+  [ -z "${SG_SO_FAR:-}" ] || printf '%s\n' "$SG_SO_FAR"
   printf '%s' "$SG_GOAL_LINES"
   sitrep_ask_lines
   printf '%s' "$SG_REVIEWS"

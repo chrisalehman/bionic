@@ -17,7 +17,8 @@
 #   §OPEN     run_open asks the reader's step of a run with a log, whatever its plan's prose says; a run with
 #             none is judged from its plan, so each closed fixture run reads closed and the cut run open.
 #   §FOLLOWS-CONTINUATION  close-out's check reads a debt only the run's log holds into its debt line and Deferrals.
-#   §AGREE    in each card's world the release card's Reviews lines and the sheet's reviews line count alike.
+#   §AGREE    in each card's world the release card's Reviews lines and the sheet's reviews line count alike, and
+#             both print the reader's acts taken by hand and open asks at the log the card read.
 #
 # A CARD'S INSTANT. The reader answers a run as it stands, so a card's world holds as its run log the reader's
 # own translation of the fixture up to the card's instant, in the translation's order: a line with no instant
@@ -135,7 +136,9 @@ PS=fe11a5e0-0000-4000-8000-0000000000a1; . "$(dirname "$0")/lib/bound-marker.sh"
 page() {  # <page file> -> its replay table as key=value: each decision by its key, each carry by its finding
   sed -n -e 's/^carried: \(.*\)/card.carried.\1=yes/p' -e 's/^release-approval\/v1|dec=[0-9]*|key=\([^|]*\)|/card.decision.\1=/p' "$1" 2>/dev/null; }
 born() { sed -n 's/^run\/v1|ev=born|row=\([^|]*\)|.*/\1/p' | tr '\n' ' '; }  # stdin's events -> the rows born
-render() {  # <world> <plan> [arg…] -> the card rendered as the bound session, the page its record holds, as key=value
+render() {  # <world> <plan> [arg…] -> the card rendered as the bound session, the page its record holds, as key=value;
+  # the log the render read is kept beside its output, so a later read stands at that log and not at one the render moved
+  cp "${2%/plans/*}/record/$(basename "$2" .plan.md)/run.log" "$1.read"
   ( cd "$1" && CLAUDE_CODE_SESSION_ID=$PS bash "$R/hooks/session-poker.sh" release-approval "${@:3}" "$2" ) >"$1.out" 2>"$1.err"
   page "${2%/plans/*}/record/$(basename "$2" .plan.md)/$(basename "$1").md"
 }
@@ -330,11 +333,17 @@ expect_contains "the log without it carries the run's own deferrals there" "unde
 expect_absent "…and not that debt" " follow_x" "$(printf '%s\n' "$C0" | grep -m1 '^continuation: ')"
 
 section "AGREE"
+nums() { sed -n 's/^run\.so-far: \([0-9]*\) acts\{0,1\} taken by hand · \([0-9]*\) open asks\{0,1\}$/\1 \2/p'; }
 for d in "$WORLD_ROOT"/pages/release-approval-*/; do d="${d%/}"; n="${d##*/}"; p="$(ls "$d"/.bio*/docs/plans/*/*.plan.md)"
+  cp "$d.read" "${p%/plans/*}/record/$(basename "$p" .plan.md)/run.log"; sv="$( cd "$d" && bash "$R/hooks/session-poker.sh" sitrep "$p" 2>/dev/null )"
   c="$(awk '$0 == "Reviews" { r = 1; next } r && !NF { exit } r && !/^ / { if (index($0, "✅") == 1) p++; else f++ } END { printf "%d passed, %d failed", p, f }' "$d.out")"
-  s="$( ( cd "$d" && bash "$R/hooks/session-poker.sh" sitrep "$p" 2>/dev/null ) | sed -n 's/^reviews: \([0-9]* passed, [0-9]* failed\), .*/\1/p')"
+  s="$(printf '%s\n' "$sv" | sed -n 's/^reviews: \([0-9]* passed, [0-9]* failed\), .*/\1/p')"
   expect_regex "$n: the sheet prints its reviews line" '^[0-9]+ passed, [0-9]+ failed$' "$s"
   expect_eq "$n: the card's Reviews lines count as the sheet's reviews line does" "$s" "$c"
+  h="$(printf '%s\n' "$sv" | nums)"; k="$(nums < "$d.out")"; a="$(ask "$p" hands | grep -c .) $(ask "$p" asks | grep -c .)"
+  expect_regex "$n: the sheet prints the run's acts taken by hand and open asks" '^[0-9]+ [0-9]+$' "$h"
+  expect_eq "$n: the card and the sheet count the acts taken by hand as the reader answers them" "${a% *} ${a% *}" "${k% *} ${h% *}"
+  expect_eq "$n: …and the open asks" "${a#* } ${a#* }" "${k#* } ${h#* }"
 done
 
 finish
