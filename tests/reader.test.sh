@@ -305,7 +305,7 @@ expect_eq "discharged only with a standing proof, waiver or approval naming the 
   "state=pending; state=discharged by=approval; state=pending; state=discharged by=proof; state=discharged by=waiver; " "$(cells)"
 every() { ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/reader.sh" && reader_cells "$D/plans/epic-x/$W.plan.md" "$@" ) | tr '\037\n' ',;'; }
 expect_eq "at 15 every criterion in one fold: its state, its tier by its eval type, its proof's evidence, the evidence review at the head, its approval" \
-  "AC-7.1,pending,,T1,,CONFIRMED,,REQ-7;AC-7.2,discharged,approval,T1,,CONFIRMED,me 2026-11-01T00:00:04Z,REQ-7;AC-7.3,pending,,T1,,CONFIRMED,,REQ-7;AC-7.4,discharged,proof,T1,record/new/e4.md,CONFIRMED,,REQ-7;AC-7.5,discharged,waiver,T1,,CONFIRMED,,REQ-7;" "$(every "$H")"
+  "AC-7.1,pending,,T1,,CONFIRMED,,REQ-7;AC-7.2,discharged,approval,T1,,CONFIRMED,me 2026-11-01 AC-7.2,REQ-7;AC-7.3,pending,,T1,,CONFIRMED,,REQ-7;AC-7.4,discharged,proof,T1,record/new/e4.md,CONFIRMED,,REQ-7;AC-7.5,discharged,waiver,T1,,CONFIRMED,,REQ-7;" "$(every "$H")"
 expect_eq "a failed evidence review is the auditor's finding; with no head, no review is read" \
   "AC-7.4,discharged,proof,T1,record/new/e4.md,REFUTED,,REQ-7|AC-7.4,discharged,proof,T1,record/new/e4.md,,,REQ-7" \
   "$(every "$G" | tr ';' '\n' | grep '^AC-7.4,')|$(every | tr ';' '\n' | grep '^AC-7.4,')"

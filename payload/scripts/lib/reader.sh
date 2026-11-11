@@ -439,7 +439,8 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
 #   auditor     on a row the older table holds: the discharging event's `auditor=`, else the row's cell; on any other
 #               criterion: the evidence review standing at <head>, CONFIRMED when it passed and REFUTED when not.
 #   confirmed   on a row the older table holds: the discharging event's `confirmed=`, else its block's
-#               `user-confirmed:`; on any other criterion: the approval naming it, as `<by> <at>`.
+#               `user-confirmed:`; on any other criterion: the approval naming it, as `<by> <day> <its words>`, the
+#               criterion standing for words it holds none of, the shape an older block's confirmation is written in.
 #   serves      on a row the older table holds: its block's first `serves:`; else the Eval design's requirement.
 # 1 when the plan names no criterion; the fold's failure is its exit.
 reader_cells() {
@@ -464,7 +465,7 @@ reader_cells() {
     { e = ev(); c = (e == "approval") ? line_kv("key") : line_kv("ac") }
     e == "proof" && line_kv("kind") == "review" && line_kv("question") == "evidence" && h != "" && line_kv("head") == h { review = (line_kv("result") == "pass") ? "CONFIRMED" : "REFUTED" }
     c == "" || !(c in seen) { next }
-    e == "approval" { by[c] = "approval"; ok[c] = line_kv("by") " " line_kv("at") }
+    e == "approval" { by[c] = "approval"; ok[c] = line_kv("by") " " substr(line_kv("at"), 1, 10) " " (line_kv("said") != "" ? line_kv("said") : c) }
     e == "waiver" || e == "proof" && line_kv("rc") ~ /^0?$/ && line_kv("result") != "fail" {
       by[c] = e; ev_[c] = line_kv("evidence"); aud[c] = line_kv("auditor"); cf[c] = line_kv("confirmed") }
     END {
