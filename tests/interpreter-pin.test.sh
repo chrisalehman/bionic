@@ -1,7 +1,6 @@
 #!/bin/bash
 # tests/interpreter-pin.test.sh — the interpreter pin, the environment stamp, and the
-# runner's stderr-strict arm (wave-01 verification-cannot-lie, task S2; spec AC-1, AC-2,
-# AC-3, AC-10, and the runner half of AC-14).
+# runner's stderr-strict arm.
 #
 # WHAT THE PIN IS. Every payload script and hook pins `#!/bin/bash` — bash 3.2 on a Mac —
 # and the CLI runs a hook by path, so the shebang chooses the interpreter. The suites,
@@ -27,8 +26,6 @@
 #       there for the first time): in `VAR=x cmd <<< "$(f)"` the temporary assignment IS in
 #       effect while the here-string's command substitution expands under 3.2 and is NOT
 #       under 5.3, so `f` runs under the stripped PATH and the here-string arrives empty.
-#       This is the live defect behind `jq: command not found` in the recorded 3.2 baseline
-#       and behind tests/patrol-revive.test.sh:264.
 #
 # Each planted suite asserts the 5.x answer. Driven through the pinned runner both go RED;
 # run directly under the machine's other interpreter both go GREEN. A pin that stopped

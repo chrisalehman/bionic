@@ -1,12 +1,7 @@
 #!/bin/bash
 # Tests for hooks/background-suite-guard.sh — THE BUDGET ARM
-# (wave-01 verification-cannot-lie, S13; spec AC-21; seed suite-allowance-wall.md item 3.)
 #
-# THE INCIDENT. Two dispatched writers finished their own work green at ~45 minutes and
-# then spent 40 more re-running the whole tree, one suite at a time, in parallel, on an
-# 8 GB machine at load 10. Their briefs said "run impacted suites only; never
-# tests/run.sh; run X, Y, Z as consumers", and "consumers" was read as "everything". The
-# Patrol notified both as overdue and they were killed by hand. Prose in a brief is a
+# Prose in a brief is a
 # wish. This file tests the wall.
 #
 # WHAT IT COVERS. `hooks/dispatch-preflight.sh` records the budget on the roster row at

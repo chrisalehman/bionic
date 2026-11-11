@@ -7,20 +7,9 @@
 #   detect_plugin_load_state <plugin-id>   is the CLI actually loading this plugin
 #   detect_plugin_duplicates               two catalogs, one bare name
 #
-# WHY ITS OWN SUITE RATHER THAN A GROUP IN plugin-lib.test.sh (that suite was deleted
-# at 8582861, epic-18 wave-03; the rationale below is historical). Different
-# fixture regime. Every other detect function is driven against a fixture
-# TREE; these two are driven against a captured CLI TRANSCRIPT and a planted
-# registry, and the transcript fixtures are the evidence for the whole task.
-# Same reasoning that split spawn-worktree.test.sh out of plugin-lib.
+# FIXTURE FIDELITY.
 #
-# FIXTURE FIDELITY — THE POINT OF THIS TASK, AND IT CAUGHT A REAL DEFECT.
-#
-# The task was planned to build its fixtures from the `claude plugin list`
-# output quoted in record/epic-17-w5/f12-runtime-report.md:84-132. It did, the
-# first parser passed 50/50 against them, and then the same parser was pointed
-# at the real CLI on this machine and answered `absent` for a plugin that was
-# loaded. The report renders each plugin as ONE line; the CLI prints a BLOCK.
+# The report renders each plugin as ONE line; the CLI prints a BLOCK.
 # The report's quote is a reflow, not bytes. A fixture derived from a summary is
 # a fixture that can pin the test away from the behavior.
 #

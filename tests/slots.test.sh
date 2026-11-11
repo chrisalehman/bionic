@@ -1,8 +1,6 @@
 #!/bin/bash
 # tests/slots.test.sh — payload/scripts/booked.sh, the shim every wrapped suite runs in, and
-# payload/scripts/lib/slots.sh, the liveness rule it and the gate share (epic-23
-# wave-26-never-idle, T6; REQ-6 AC-6.3, AC-6.4 hermetic; spec D8, D14; on the gate since
-# wave-28-finished-work-lands T12: D10, D13, AC-2.6, AC-2.13).
+# payload/scripts/lib/slots.sh, the liveness rule it and the gate share.
 #
 # WHAT IS UNDER TEST. The claims, one section each:
 #
@@ -33,16 +31,7 @@
 #                person's line overrides it in all three; and a FILL over slots it cannot fill names
 #                the idle ones.
 #
-# REMOVED AT T12, with the place count, the take loop and the wait they pinned (lib/slots.sh's
-# slots_take, slots_take_all, slots_release, slots_count and the knobs BIONIC_SLOTS_*): §BOOK's
-# B3, B3b, B6, B9, B11; §QUIET's Q2 mutation, Q5's drain and Q6 (lending a place to a nested
-# take); K9's freed-place rows; §QUIET-HELD, §SOLO-SAME and §MAX-WAIT. Their claims are now the
-# gate's: tests/gate.test.sh §NUMBER, §TWO, §ANCESTOR and §WRAP. §BOOK became §RUN (B2 now waits
-# at the gate), and its B5 race and B10 reused pid became §LIVE's L2 and L1.
-#
-# REMOVED AT WAVE-35 T2 (D11, AC-2.1), with `--quiet`, `BIONIC_QUIET` and the whole-machine timing
-# check they pinned: §QUIET (Q1-Q10), B12.7-B12.10 (the 69 refusal), S6 (a void run's stamp) and
-# N4 (BIONIC_QUIET=1 is --quiet). Nothing passes or fails by the clock; tests/runner-width.test.sh
+# Nothing passes or fails by the clock; tests/runner-width.test.sh
 # §NO-VOID proves `--quiet` refused and `BIONIC_QUIET` read by nobody.
 #
 # HERMETIC. No row touches the real store: every call sets BIONIC_GATE_DIR to a scratch

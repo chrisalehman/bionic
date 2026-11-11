@@ -35,8 +35,7 @@
 # A line written there by hand is footprint doctor cannot report
 # and remove cannot strip; inside bionic's markers it is an item with an owner —
 # offered once with a why, reported present or absent, and taken back out on
-# request. That is the whole reason this file exists (Chris 2026-08-23: "It may
-# only be made if it is permanently added").
+# request. That is the whole reason this file exists.
 #
 # EVERY NEGATIVE HERE HAS A POSITIVE BESIDE IT, ON THE SAME EXTRACTOR AND THE
 # SAME FIXTURE (.claude/rules/test-harness.md,

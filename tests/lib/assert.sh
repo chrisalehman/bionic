@@ -1,7 +1,5 @@
 # tests/lib/assert.sh — THE TEST FRAMEWORK. Sections, assertions, counters, the
-# helper-presence derivation, and the tally (wave-01 verification-cannot-lie S1,
-# spec AC-13/AC-14/AC-15; design ledger D1 "a suite is a client of one test
-# framework").
+# helper-presence derivation, and the tally.
 #
 #     . "$(dirname "$0")/lib/resolve-roots.sh"
 #     . "$(dirname "$0")/lib/assert.sh"      # from tests/*.test.sh
@@ -49,8 +47,6 @@
 # column 0 is REFUSED by the adoption wall (`_tf_adoption_wall`, below) and
 # never runs — as is a suite that does not adopt this file at all. The runner
 # asks it before launching a suite and this file asks it at load.
-# Every suite on the roster is a client of it; the ones that once carried private
-# definitions were migrated by S5–S9 and the wall closed the door behind them.
 #
 # ── THE GENERIC FAMILY: SEMANTICS, ARGUMENT ORDER, AND THE OLD SPELLINGS ─────
 #
@@ -68,9 +64,6 @@
 # ARGUMENT ORDER is `<label> <expected> <actual>` throughout, which is what the
 # tree already did unanimously: expected-side first for eq/ne/status, needle
 # before haystack for contains/absent, pattern before subject for match/no_match.
-# The two exceptions in the tree (live-agents and resources spelled expect_match
-# `<label> <actual> <ERE>`) were outvoted 11 to 2 and were renamed onto
-# `expect_regex` by S9b; no `expect_match` call survives in either file.
 #
 # SEMANTICS are the tree's most common definition of each name, measured:
 #
@@ -115,29 +108,7 @@
 #
 #   expect_status compares two exit statuses as strings, expected first.
 #
-# THE OLD SPELLINGS — `old -> canonical`. No aliases are defined here: the
-# migration tasks rename the call sites. S5-S8 quote this table.
-#
-#   expect_equal -> expect_eq — pure rename (stop-check, 4 call sites; its
-#     failing arm also printed a diff, which is detail text, not semantics).
-#   expect_differ -> expect_ne — pure rename (stop-check; defined, never called).
-#   expect_not_contains -> expect_absent — pure rename, same `case` semantics
-#     (command-relay, env, rc-item; 7 call sites).
-#   expect_matches -> expect_regex — PURE rename, same ERE semantics, same
-#     argument order (execution-recorder, interpreter-pin, session-sweeper,
-#     stop-check, stop-guard; 25 call sites). The two pipeline spellings
-#     (interpreter-pin, session-sweeper) lose their 141 exposure in the move.
-#   expect_match, in the THREE suites where it is secretly an ERE -> expect_regex.
-#     live-agents (8 sites) and resources (17) also REVERSE the arguments, spelling
-#     it `<label> <actual> <ERE>`, so those 25 sites need the order corrected as
-#     well as the name changed. This is the highest-risk rebinding in the
-#     migration: their private definition wins today, so nothing is red now, and
-#     the moment the adoption wall removes the shadow the calls bind to the glob
-#     helper with the arguments the wrong way round and STILL nothing goes red.
-#     preflight-probe (11 sites) is the third: its expect_match takes a FILE, so
-#     each call site must grow a read of that file, and its sibling expect_nomatch
-#     stays local — that suite ends up with a split idiom until someone routes
-#     both together.
+# THE OLD SPELLINGS — `old -> canonical`. No aliases are defined here.
 #   expect_nomatch -> NOT a rename: it takes a FILE rather than a string
 #     (preflight-probe, 14 call sites). Stays local under its own name.
 #   expect_absent_ug -> NOT a rename: it pins /usr/bin/grep on purpose, because
@@ -152,10 +123,8 @@
 # anchored line is reworded, reindented or moved, the pattern matches nothing and
 # a mutation whose anchor moved is byte-identical to the shipped file. The mutant
 # is then a control, the row below it goes green, and the suite reports that a
-# check discriminates when nothing was ever mutated. That is the S21 incident
-# (`61b8ca8` reindented a `pressure_sample` call and renamed a local; the anchor
-# pinned both, matched nothing, and only a hand-rolled count-difference row caught
-# it) and it is the shape this helper makes free.
+# check discriminates when nothing was ever mutated.
+# That is the shape this helper makes free.
 #
 #   anchor <file> <pattern> <count>       <pattern> is a FIXED STRING
 #   anchor -E <file> <ERE> <count>        <pattern> is an EXTENDED regular expression
@@ -226,10 +195,8 @@
 # names is not an assertion.
 #
 # LOSSY RENDERS. An assertion about a render that truncates needs a second,
-# unlossy source, and a whole-render glob is not an assertion. (Three assertions
-# in the 1.4.4 fixit were misled by exactly this: doctor's verdict line is cut at
-# 100 columns, so the text the assertion looked for was outside the frame and the
-# row went green on a substring of the ellipsis.) Assert against the value the
+# unlossy source, and a whole-render glob is not an assertion.
+# Assert against the value the
 # renderer was given, or against a non-truncating surface, and let the render
 # assertion pin only the framing.
 #
@@ -292,9 +259,7 @@
 # Every suite here runs under `set -uo pipefail` with NO `-e`, so a call to an
 # assertion helper that was never defined is a silent `command not found` on
 # stderr: the row asserts nothing, TOTAL never increments, and `tests/run.sh`
-# discards a green suite's stderr (research-code-map §5.3–§5.4). That is how
-# `expect_empty` at tests/cross-gate-agreement.test.sh:5960 has been asserting
-# nothing.
+# discards a green suite's stderr.
 #
 # So the framework does not wait to be told which helpers a suite uses. At load
 # it scans the suite's own source ($0) for call tokens matching

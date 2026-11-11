@@ -28,8 +28,7 @@ set +x +v
 #      passed over, its known-limits line unchanged. The plan is read from the working files: `.bionic/` is ignored, so the
 #      head's tree holds no plan to read. No plan naming the release (a closed run is archived), and
 #      a plan with no stated deferral, each pass with one `known-limits:` line saying so; a pass with
-#      sentences held says how many, in one such line. Generalised from the §CORR rule of
-#      tests/release-check.test.sh, which held one release to one plan by hand.
+#      sentences held says how many, in one such line.
 #   4. the landing numbers: the entry's `### The landing numbers` part names the head and the instant it
 #      was rendered for (``landing-report --rows` at <40-hex> on <ISO-UTC>:`, the line `release-note`
 #      prints), and its fenced block must equal, field for field, what `hooks/session-poker.sh release-note
