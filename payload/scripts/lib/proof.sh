@@ -1756,15 +1756,26 @@ proof_fact_awk() {
   '
 }
 
+# proof_run_plan <plan> -> the plan whose run holds <plan>'s proofs: a plan writer's copy (`<plan>.<verb>.<pid>`, its dry
+# commit's `<plan>.<verb>-dry.<pid>`, close-out's `.<plan>.preflight.<pid>` beside it) names no record, and no copy adds
+# a proof, so its proofs are its plan's run's, as lib/units.sh reads a row's state; any other plan is its own.
+proof_run_plan() {
+  local plan="${1:-}" o
+  case "${plan##*/}" in
+    *.plan.md.*)
+      o="${plan%%.plan.md.*}.plan.md"
+      if [ -f "$o" ]; then plan="$o"; else o="${o%/*}/${o##*/.}"; [ ! -f "$o" ] || plan="$o"; fi ;;
+  esac
+  printf '%s' "$plan"
+}
+
 # proof_lines <plan> -> each standing proof of the plan's run as the `proved:` line an older plan holds
 # (`proof_fact_line`), in the order the proofs were last set: one read of the kept fold for a caller whose awk reads
-# proof lines (`proof_awk`). A pending proof (`proof_pending`) stands last. A plan writer's copy (`<plan>.<verb>.<pid>`)
-# names no record, and its proofs are its plan's run's, so it is read as its plan, as lib/units.sh reads a row's state.
+# proof lines (`proof_awk`), a copy read as its plan (`proof_run_plan`). A pending proof (`proof_pending`) stands last.
 # Exit 2 when the facts cannot be read.
 proof_lines() {
-  local plan="${1:-}" facts
-  case "$plan" in *.plan.md.*) [ ! -f "${plan%%.plan.md.*}.plan.md" ] || plan="${plan%%.plan.md.*}.plan.md" ;; esac
-  facts="$(_proof_facts "$plan")" || return 2
+  local facts
+  facts="$(_proof_facts "$(proof_run_plan "${1:-}")")" || return 2
   [ -n "$facts" ] || return 0
   printf '%s' "$facts" | awk -F'|' "$(proof_fact_awk)"'proof_fact() { print proof_fact_line() }'
 }

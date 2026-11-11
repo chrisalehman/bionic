@@ -2614,7 +2614,9 @@ _eg_reading_gaps() {
   # with no log, the log alone for a run with one, through lib/proof.sh's kept fold of them.
   # A fold that failed is no reading: the gaps are then unreadable, never every question absent.
   local f
-  f="$(_proof_ask "$PLAN" reader_q_reviews "$PLAN")" || { printf 'unreadable\n'; return 0; }
+  # A dry commit judges a copy, which names no record: its reviews and waivers are its plan's run's.
+  local rp; rp="$(proof_run_plan "$PLAN")"
+  f="$(_proof_ask "$rp" reader_q_reviews "$rp")" || { printf 'unreadable\n'; return 0; }
   printf '%s\n' "$f" | BIONIC_DERIVED="$der" awk -F'|' -v qs="$qs" "$(proof_fact_awk)"'
     BEGIN { n = split(ENVIRON["BIONIC_DERIVED"], L, "\n")
             for (i = 1; i <= n; i++) { m = split(L[i], F, "\t"); if (m >= 3) D[F[1] SUBSEP F[2]] = F[3] } }
@@ -2704,7 +2706,7 @@ _eg_refuse_floor_absent() {
   ! declare -F units_order >/dev/null 2>&1 || ! units_order "$PLAN" >/dev/null 2>&1 || from=6
   [ "${CURRENT%[ab]}" -ge "$from" ] 2>/dev/null || return 0
   if declare -F proof_floor_absent >/dev/null 2>&1; then
-    why="$(proof_floor_absent "$PLAN")" || return 0
+    why="$(proof_floor_absent "$(proof_run_plan "$PLAN")")" || return 0
     why="the run holds no regression proof: ${why} (the judge's regression absent)"
   else
     why="the regression's proof line cannot be read here: lib/proof.sh is not loaded beside units.sh"
