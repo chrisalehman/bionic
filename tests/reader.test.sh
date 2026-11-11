@@ -26,6 +26,9 @@
 #               one naming the key column, and a lone CR ends a line.
 #   §WAITS      each row a read names carries the reads naming it; a row reading its own id waits on itself, and
 #               one reading live:head still writes the settled head.
+#   §HALF       a run whose landings and asks stand partly in the landing record and asks register and partly in
+#               its log reads as one run in order, a landing the plan's ledger also copies counted once; brought
+#               forward (kept/, its log rewritten), it reads its log alone.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
 
@@ -290,7 +293,8 @@ ask cell; expect_status "cell with no criterion is refused" 2 "$?"
 
 section "JOIN"
 W=new; expect_eq "a plan with no pointer key reads its log by name" "state=discharged by=proof" "$(flat cell AC-7.4)"
-W=old; expect_eq "a pointer key in the header is never followed" "log=record/new/run.log state=pending" "$(flat header log) $(flat cell AC-7.4)"
+W=old; expect_eq "a pointer key in the header is never followed: the approval the pointed-at log holds discharges nothing here" \
+  "log=record/new/run.log state=pending" "$(flat header log) $(flat cell AC-7.2)"
 
 section "READY"
 W=new; printf 'run/v1|ev=%s|at=2026-11-01T00:00:09Z\n' 'published|row=T1|commit=c1|kind=queue' 'approval|key=step3|by=me' 'step|n=4' >> "$D/record/new/run.log"
@@ -367,7 +371,7 @@ sect T2 >/dev/null; expect_status "a heading with no body is a section" 0 "$?"
 sect T1 artifact >/dev/null; expect_status "a key the section lacks answers no" 1 "$?"
 sect T3 >/dev/null; expect_status "a row with no heading of its own has no section" 1 "$?"
 
-# A version-14 run is read through the translation, then the same run once it has a log.
+# A version-14 run is read through the translation, then the same run once it has a log: the old homes and the log.
 section "PLACES"
 P="$(mktemp -d)"
 at() {  # <place> -> the rows landed over a version-14 run there, then over its log
@@ -377,8 +381,8 @@ at() {  # <place> -> the rows landed over a version-14 run there, then over its 
   printf 'run/v1|ev=published|row=T2|commit=c2|kind=queue|at=2026-11-01T00:00:02Z\n' > "$r/run.log"
   bash "$READER" "$d/$1" landed | grep -o 'row=T[0-9]'
 }
-for pl in plans/flat.plan.md plans/epic-y/nest.plan.md incidents/0001-x/plan.md; do expect_eq "$pl: the translation, then the log, read from its record" \
-  "row=T1 row=T2" "$(at $pl | tr '\n' ' ' | sed 's/ $//')"; done
+for pl in plans/flat.plan.md plans/epic-y/nest.plan.md incidents/0001-x/plan.md; do expect_eq "$pl: the translation, then the translation and the log, read from its record" \
+  "row=T1 row=T1 row=T2" "$(at $pl | tr '\n' ' ' | sed 's/ $//')"; done
 for pl in notes/w.plan.md plans/a/b/w.plan.md; do
   mkdir -p "$P/out/${pl%/*}"; printf '# r\n' > "$P/out/$pl"; bash "$READER" "$P/out/$pl" step 2>/dev/null
   expect_status "$pl: no place the walk admits, refused" 2 "$?"
@@ -433,4 +437,22 @@ cat > "$D/plans/epic-x/wr.plan.md" <<'EOF2'
 EOF2
 rw() { ( . "${READER%/reader.sh}/lib/reader.sh" && plan_read_waits "$D/plans/epic-x/wr.plan.md" ) | awk -F'\t' '$2 == "row" { printf "%s>%s<%s ", $1, $3, $4 }'; }
 expect_eq "each row a read names, with the reads that name it" "C1>C1<C1 C1>C2<head C3>C1<src/c.sh,C1 " "$(rw)"
+section "HALF"
+# The half-moved run: T1's landing and two asks opened stand in the old homes, T2's landing (its ledger copy in the
+# plan too), a reply to one ask, a run and its verdict in the log, appended later. fails-when: the reader reads the log
+# alone (T1 gone, the open ask gone), counts T2 twice, or reads the old homes once the run is brought forward.
+HD="$D/record/half"; mkdir -p "$HD"; HC="$(printf 'd%.0s' {1..40})"
+printf '%s\n' '# half' '' '## SDLC State' '' '- T2: landed-by-hand: Ann 2026-11-03T00:00:05Z "the copy names no commit"' > "$D/plans/epic-x/half.plan.md"
+printf 'line/v1|ev=published|row=T1|commit=c1|kind=queue|by=-|why=-|at=2026-11-01T00:00:01Z\n' > "$HD/landing-proofs.log"
+printf 'owed/v1|key=%s|state=open|sent=-|at=2026-11-01T00:00:0%s|title=t|reply=r\n' decide:D1 2 approve:x 3 > "$HD/asks.state"
+printf 'run/v1|ev=%s|at=2026-11-03T00:00:0%s\n' "published|row=T2|commit=$HC|kind=queue|by=-|why=-" 5 'ask|key=decide:D1|reply=yes' 6 \
+  "run|log=record/half/r.log|head=$HC|dirty=0|rc=0|sha256=s" 7 "verdict|row=T2|commit=$HC|suite=a.test.sh|result=green|log=-" 8 > "$HD/run.log"
+W=half
+expect_eq "the landings read in order, the old home's first, and the one the plan's ledger copies once" "T1 T2 " "$(keys landed)"
+expect_eq "the ask the log answers is closed, and the one the register alone holds stays open" "approve:x " "$(keys asks)"
+expect_eq "the log's run and verdict read beside them" "1 1" "$(ask verdicts | grep -c '|row=T2|') $(ask landed T2 | grep -c .)"
+mkdir -p "$HD/kept/record"; cp "$HD/run.log" "$HD/kept/record/run.log"
+expect_eq "kept, the log still its kept copy (an act broken off): still read as one" "T1 T2 " "$(keys landed)"
+printf 'run/v1|ev=step|n=4|at=2026-11-03T00:00:09Z\n' >> "$HD/run.log"
+expect_eq "brought forward, the log changed after its kept copy: the log alone" "T2 " "$(keys landed)"
 finish

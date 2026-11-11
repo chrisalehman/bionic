@@ -10,11 +10,14 @@
 #      the Handoff go), each Tasks row in its nine authored cells, and its version header at 15.
 # It prints the gaps list, then `kept=<directory>`.
 #
-# ONCE. Nothing the act wrote is written again: the kept copies stand once taken, a log that stands is
+# ONCE. Nothing the act wrote is written again: the kept copies stand once taken, a log the act wrote is
 # never rewritten, and a Tasks table already in the nine cells is left as it is. So a second act changes
-# no byte and prints the same, and an act broken off part way is finished by the next one. A run whose log
-# stands with nothing kept is read from that log already; bringing it forward would replace its own
-# facts, so it is refused.
+# no byte and prints the same, and an act broken off part way is finished by the next one. A run whose
+# writers had already moved to its log holds its facts half there: the translation reads that log as the
+# newest of its homes (lib/translate.sh), so the log the act writes holds both halves. A log is the act's
+# to write until the run reads as brought forward (lib/reader.sh `reader_brought`): while it stands as
+# the kept copy of the record holds it, absent or the same bytes; once it differs, the act wrote it, or
+# a writer appended to it after the act.
 #
 # THE WAITS. A row's reads and deps are read through plan_read_waits, the one reads-to-waits rule, twice:
 # over the old table, and over the new one with every deps cell empty, which is what the kind and the
@@ -29,8 +32,8 @@
 # A ROW'S SUITES AND LANDS-ON are a person's words about the task, so they go to the task's own section,
 # a heading whose first word is its id, when the plan has one, and to the gaps list when it has none.
 #
-# EXITS. 0 done; 2 not a plan at plans/<epic>/<wave>.plan.md; 3 refused, a log with nothing kept; 1 a
-# write failed, with nothing after it written.
+# EXITS. 0 done; 2 not a plan at plans/<epic>/<wave>.plan.md; 1 a write failed, with nothing after it
+# written.
 #
 # Executed, never sourced:  bash ${CLAUDE_PLUGIN_ROOT}/scripts/bring-forward.sh <plan>
 # bash 3.2 (ADR-001).
@@ -132,10 +135,6 @@ bf_main() {  # <plan> -> the act; prints the gaps list and kept=<directory>
     printf 'bring-forward: usage: bring-forward <docs>/plans/<epic>/<wave>.plan.md\n' >&2; return 2
   fi
   plan="$(cd "$(dirname "$plan")" && pwd -P)/${plan##*/}"; wave="${plan##*/}"; rec="${log%/run.log}"; kept="$rec/kept"
-  if [ ! -d "$kept" ] && [ -e "$log" ]; then
-    printf 'bring-forward: %s stands and nothing is kept: the run is read from its log, so it is not brought forward\n' "$log" >&2
-    return 3
-  fi
   BF_WORK="$(mktemp -d)" || return 1
   _bf_compute "$plan" "$BF_WORK" || return 1
   if [ ! -d "$kept" ]; then
@@ -143,7 +142,7 @@ bf_main() {  # <plan> -> the act; prints the gaps list and kept=<directory>
     if ! { cp -p "$plan" "$st/$wave" && { [ ! -d "$rec" ] || cp -Rp "$rec" "$st/record"; } && cp "$BF_WORK/gaps" "$st/gaps" \
       && mkdir -p "$rec" && mv "$st" "$kept"; }; then rm -rf "$st"; return 1; fi
   fi
-  if [ ! -e "$log" ]; then
+  if ! reader_brought "$plan"; then
     { translate "$plan" events > "$log.tmp.$$" && mv "$log.tmp.$$" "$log"; } || { rm -f "$log.tmp.$$"; return 1; }
   fi
   if ! cmp -s "$BF_WORK/plan" "$plan"; then

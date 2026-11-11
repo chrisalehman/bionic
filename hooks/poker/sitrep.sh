@@ -155,15 +155,15 @@ count_refused_dispatches() {  # <transcript> [<since ISO>] -> count on stdout
 handoff_landing_lines() {  # <plan> <root> -> `  - <row> landing from <tree> · ready since <time> · pid <pid>`, one per landing
   local rec now row car tr at e
   rec="$(_wt_proofs_path "$2" "$1" 2>/dev/null)" || return 0
-  [ -n "$rec" ] && [ -f "$rec" ] && [ ! -L "$rec" ] && declare -F _line_entries >/dev/null 2>&1 || return 0
+  [ -n "$rec" ] && declare -F _line_entries >/dev/null 2>&1 && line_held "$rec" || return 0
   now="$(sitrep_now)"
   while IFS='|' read -r row car tr; do
     [ -n "$row" ] || continue
-    at="$(awk -F'|' -v r="$row" "${_LINE_FIELDS_AWK:-}"'
+    at="$(line_lines "$rec" | awk -F'|' -v r="$row" "${_LINE_FIELDS_AWK:-}"'
       { e = line_ev() } e == "" || line_kv("row") != r { next }
       e == "published" || e == "returned" { a = ""; next }
       e == "ready" && a == "" { a = line_kv("at") }
-      END { print a }' "$rec" 2>/dev/null)"
+      END { print a }' 2>/dev/null)"
     e="$(iso_epoch "$at")"; [ -n "$e" ] || e="$now"
     case "$tr" in "$2"/*) tr="${tr#"$2"/}" ;; esac
     printf '  - %s landing from %s · ready since %s · pid %s\n' "$(clean "$row")" "$(clean "${tr:-—}")" \
@@ -273,8 +273,12 @@ _sitrep_ledger_facts() {  # <ledger> -> the reader's ledger answer for the ledge
     # shellcheck source=/dev/null
     { . "$lib/reader.sh" && . "$lib/translate.sh"; } >/dev/null 2>&1 || return 0
   fi
-  if [ -f "$log" ] && [ ! -L "$log" ]; then ( reader_events() { cat "$log"; }; reader_q_ledger "$led" )
-  elif [ -f "$led" ] && [ ! -L "$led" ]; then ( reader_events() { translate_ledger "$led" events; }; reader_q_ledger "$led" ); fi
+  # A run brought forward holds its rounds in its log; until then the ledger holds those written before the decisions'
+  # writer moved to the log, and the log those after (lib/reader.sh `reader_events`), so the ledger is read first.
+  if [ -f "$log" ] && [ ! -L "$log" ] && reader_brought_at "${log%/*}"; then ( reader_events() { cat "$log"; }; reader_q_ledger "$led" )
+  elif { [ -f "$led" ] && [ ! -L "$led" ]; } || { [ -f "$log" ] && [ ! -L "$log" ]; }; then
+    ( reader_events() { [ ! -f "$led" ] || [ -L "$led" ] || translate_ledger "$led" events; [ ! -f "$log" ] || [ -L "$log" ] || cat "$log"; }
+      reader_q_ledger "$led" ); fi
 }
 decisions_list() {  # <ledger> [puts|times] -> one line per entry: D<n> · "<reply>" · <who> <date> · <title>, in the ledger's order
   _sitrep_ledger_facts "$1" | awk -F'|' -v mode="${2:-}" '
@@ -1180,9 +1184,8 @@ sitrep_gather() {
   cur="$(_sitrep_ask "$plan" reader_q_step "$plan" | sed -n 's/^n=\([0-9][0-9]*\).*/\1/p')"
 
   # ---- the tasks, in execution order (THE TASKS, IN EXECUTION ORDER, above)
-  if [ -f "$rec" ] && [ ! -L "$rec" ] \
-     && { declare -F _line_fold >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
-     && declare -F _line_fold >/dev/null 2>&1; then
+  if { declare -F _line_fold >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
+     && declare -F _line_fold >/dev/null 2>&1 && line_held "$rec"; then
     lq="$(_line_fold "$rec" | awk -F'\t' 'NF >= 9 { m = 0; if ($9 != "none" && $9 != "") m = split($9, s, ","); printf "Q\t%s\t%s\t%s\t%d\t%d\n", $1, $5, $8, $12 + 0, m }')"
   fi
   lwait="$(units_waiting "$plan" "$cur" 2>/dev/null | awk -F'\t' 'NF >= 3 { print "W\t" $1 "\t" $2 "\t" $3 }')"

@@ -34,7 +34,8 @@
 # `carry(type, fields, separator)`. The plan's homes come first (the SDLC State and its dispatch ledger,
 # the Tasks rows, the Handoff, the Verification Matrix, the header's abandoned:, the inherited: lines, a
 # dropped row), then the record's (the landing record, the asks register, the fill ledger, the design
-# ledger, the debt ledger); another file adds its homes the same way once it is sourced after this one.
+# ledger, the debt ledger), and last the run's log, read with them until the run is brought forward (lib/reader.sh
+# `reader_events`); another file adds its homes the same way once it is sourced after this one.
 #
 # bash 3.2 (ADR-001).
 
@@ -336,10 +337,13 @@ _translate_record() {  # <plan> <file> -> the path of <file> in the plan's recor
 # ledger line and Tasks status are copies written after it; a hand landing's copy also drops the commit,
 # which names the landing, so reading both would make one landing two facts. A row the record holds a
 # landing of is read from the record alone; a row only the plan holds as landed is read from the plan.
-_translate_landed_rows() {  # <plan> -> the rows the landing record holds a landing of, space-separated
-  local f
-  f="$(_translate_record "$1" landing-proofs.log)" || return; [ -n "$f" ] || return 0
-  awk '/^line\/v1\|ev=published\|/ || /^landed: / { if (match($0, /row=[^| ]+/)) printf " %s", substr($0, RSTART + 4, RLENGTH - 4) }' "$f"
+_translate_landed_rows() {  # <plan> -> the rows the landing record or the run's log holds a landing of, space-separated
+  local f l
+  f="$(_translate_record "$1" landing-proofs.log)" || return
+  l="$(_translate_record "$1" run.log)" || return
+  [ -n "$f$l" ] || return 0
+  # the log's landings are the landing record's, written to their new home
+  awk '/^line\/v1\|ev=published\|/ || /^run\/v1\|/ && /\|ev=published(\||$)/ || /^landed: / { if (match($0, /row=[^| ]+/)) printf " %s", substr($0, RSTART + 4, RLENGTH - 4) }' ${f:+"$f"} ${l:+"$l"}
 }
 
 translate_source _translate_landing
@@ -506,4 +510,19 @@ _translate_debts() {  # <plan> -> the debt ledger's lines: each a debt, burned= 
       whole("debt", (NF > 1 && c[1] != "") ? "concept=" c[1] : "line=" NR, "shape"); next }
     { begin("debt", "concept", c[1]); put("kind", c[2]); put("sites", c[3]); put("raised-by", substr(c[4], 11))
       put("touches", substr(c[5], 9)); if (!none(b)) put("burned", substr(b, 8)); emit("") }' "$f"
+}
+
+# THE LOG is the newest home: each line is carried whole, as written. It sorts by its instant among the old homes'
+# lines and after any of them at the same instant, and never before a line written above it in the log, so the log's
+# own order stands; a line with no UTC instant takes the place of the line above it, and the first such line goes
+# after every timed line.
+translate_source _translate_log
+_translate_log() {  # <plan> -> the run's log, each line in its place
+  local f
+  f="$(_translate_record "$1" run.log)" || return; [ -n "$f" ] || return 0
+  awk "$_TRANSLATE_AWK"'
+    index($0, "run/v1|") != 1 { next }
+    { a = ""; n = split($0, w, "|"); for (i = n; i >= 2; i--) if (index(w[i], "at=") == 1) { a = substr(w[i], 4); break }
+      k = ukey(a); if (k == "") k = (p == "" ? "~" : p); else if (k < p) k = p; p = k
+      printf "e\t%s\t%s\n", k, $0 }' "$f"
 }

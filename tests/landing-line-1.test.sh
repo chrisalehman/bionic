@@ -1496,4 +1496,26 @@ expect_eq "(hl2b) …one stack-health: line, the rendering's own" "1|$(hl_lib pr
   "$(hl_sh "$HLP" | awk 'END { print NR }')|$(hl_sh "$HLP" | sed 's/^stack-health: //')"
 
 # ---------------------------------------------------------------------------
+section "§TWO-HOMES: the landing record and the run's log beside it are read as one record, the record first"
+# fails-when: a reader of the record skips the log beside it: the fold leaves T1 waiting on a candidate the log holds,
+# the landings miss the log's, or a debt the record admitted stays open after the log voids it.
+TW="$(ll_world)"; TWP="$(ll_plan "$TW")"; TWR="$(ll_rec "$TW")"; TWC=0123456789abcdef0123456789abcdef01234567
+tw_lib() { ( . "$REPO/payload/scripts/lib/roots.sh" >/dev/null 2>&1; . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1 \
+  && . "$REPO/payload/scripts/lib/units.sh" >/dev/null 2>&1 && "$@" ) 2>/dev/null; }
+ll_ready "$TW" T1 "$(ll_carrier)" >/dev/null
+printf '%s\n' 'line/v1|ev=published|row=T2|commit=c2|kind=queue|by=-|why=-|at=2026-11-01T00:00:01Z' \
+  'debt: id=d1 row=T2 branch=wt/T2 head=c2 suite=a.test.sh token=T9 at=2026-11-01T00:00:02Z' >> "$TWR"
+printf 'run/v1|ev=%s|at=2026-11-03T00:00:0%s\n' "candidate|row=T1|base=$(ll_head "$TW")|commit=$TWC|tree=-" 1 \
+  "verdict|row=T1|commit=$TWC|suite=a.test.sh|result=green|log=-" 2 'published|row=T3|commit=c3|kind=queue|by=-|why=-' 3 > "${TWR%/*}/run.log"
+expect_eq "(tw1) the fold reads T1's ready from the record and its candidate and green verdict from the log" "$TWC green" \
+  "$(line_state "$TWP" | awk -F'\t' '$1 == "T1" { print $6, $7 }')"
+expect_eq "(tw2) the landings are the record's, then the log's" "T2 T3" "$(tw_lib units_record_landings "$TWR" | cut -f2 | paste -sd' ' -)"
+expect_eq "(tw3) a debt the record admitted is open" "a.test.sh T9" "$(tw_lib proof_debts_read "$TWR" | cut -f1,2 | tr '\t' ' ')"
+printf 'run/v1|ev=void|id=d1|branch=wt/T2|why=merge-undone|at=2026-11-03T00:00:04Z\n' >> "${TWR%/*}/run.log"
+expect_eq "(tw3b) …and closed once the log voids it" "" "$(tw_lib proof_debts_read "$TWR")"
+rm -f "$TWR"
+expect_eq "(tw4) with the record gone the log alone stands: the record is held, its landing read" "0 T3" \
+  "$(line_held "$TWR"; echo "$? $(tw_lib units_record_landings "$TWR" | cut -f2 | paste -sd' ' -)")"
+
+# ---------------------------------------------------------------------------
 finish

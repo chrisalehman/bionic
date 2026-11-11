@@ -81,12 +81,25 @@ reader_log() {  # <plan> -> the path of its run log; 2 when the plan sits where 
   printf '%s/run.log\n' "$rec"
 }
 
+# A RUN IS READ FROM ITS LOG ALONE ONCE IT IS BROUGHT FORWARD: bring-forward.sh kept its old homes under kept/ and then
+# wrote its log, every fact the old homes held, so the log differs from the kept copy of it (or that copy is absent).
+# Until then its writers move to the log one family at a time, so a fact stands in an old home or in the log and never
+# in both: the old homes and the log are read together, the log as the newest of the homes lib/translate.sh reads,
+# each line in the order of its instant and the log's lines in the order written. An act broken off after it kept the
+# homes, its log still the kept copy, is a run not yet brought forward, and is read so.
+reader_brought() {  # <plan> -> 0 when the run was brought forward; 1 when not; 2 when the plan sits where the walk admits none
+  local rec
+  rec="$(reader_record "${1:-}")" || return 2
+  reader_brought_at "$rec"
+}
+reader_brought_at() {  # <record directory> -> 0 when its run was brought forward, else 1
+  [ -d "$1/kept" ] && [ -f "$1/run.log" ] && ! cmp -s "$1/run.log" "$1/kept/record/run.log"
+}
+
 reader_events() {  # <plan> -> the run's lines, in the order they were written
   local log
   log="$(reader_log "$1")" || return 2
-  if [ -f "$log" ]; then cat "$log"; return; fi
-  # A run with no log keeps its state in the version-14 homes, so those are read as events instead;
-  # a run with a log is read from the log alone, so no fact is ever counted from both.
+  if [ -d "${log%/run.log}/kept" ] && reader_brought "$1"; then cat "$log"; return; fi
   if ! declare -F translate >/dev/null 2>&1; then
     # shellcheck source=/dev/null
     . "$_READER_LIB_DIR/translate.sh" || return 2

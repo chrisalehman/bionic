@@ -153,10 +153,11 @@ line_head() {  # <plan> -> the accepted head
 #   line_kv(k)    the value of the line's field <k>, or nothing
 # Every reader of the record reads through it: the fold and the readers below, lib/gate.sh's finished-row read, lib/proof.sh's
 # readers of verdicts, runs, landings and debts, and the poker's parts. A shell caller holding one line asks `line_value`.
-# The body reads any line whose fields are split by FS, so a whitespace-split `debt:` line reads through it too.
+# The body reads any line whose fields are split by FS, so a whitespace-split `debt:` line reads through it too. A line of
+# the run's log (`run/v1|`, lib/log.sh) is an event as a record line is, so `line_ev` names it the same way.
 _LINE_FIELDS_AWK='
 function line_kv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
-function line_ev() { return (substr($0, 1, 8) == "line/v1|") ? line_kv("ev") : "" }
+function line_ev() { return (substr($0, 1, 8) == "line/v1|" || substr($0, 1, 7) == "run/v1|") ? line_kv("ev") : "" }
 '
 line_value() {  # <one record line> <key> -> the value of its field <key>, through line_kv
   printf '%s\n' "$1" | awk -F'|' -v k="$2" "$_LINE_FIELDS_AWK"'{ print line_kv(k); exit }'
@@ -175,13 +176,29 @@ line_event() {  # <plan> <ev> <key=value>... -> 0 appended, 1 not
   _wt_proofs_put "$rec" "${line}|at=$(_line_now)"
 }
 
+# THE RECORD, READ AS ONE. A run's landing facts stand in two homes while their writers move to the run's log: the
+# landing record (`landing-proofs.log`) and the log beside it in the record directory (`run.log`). Once a writer writes
+# the log it no longer writes the record, so every line the record holds was written before any line of the log, and
+# the record then the log is the order the lines were written in. Every reader of the record reads it here, through
+# `line_lines`, and asks `line_held` where it asked whether the record stands; a home that is a link is read as absent,
+# as the readers that guard the record against a link always read it.
+line_lines() {  # <record> -> the record's lines, then the log's; rc 0 when neither stands, else cat's
+  local a="$1" b="${1%/*}/run.log"
+  { [ -f "$a" ] && [ ! -L "$a" ]; } || a=""
+  { [ -f "$b" ] && [ ! -L "$b" ]; } || b=""
+  if [ -n "$a" ] && [ -n "$b" ]; then cat "$a" "$b"; elif [ -n "$a$b" ]; then cat "$a$b"; fi
+}
+line_held() {  # <record> -> 0 when the record or the log beside it stands
+  { [ -f "$1" ] && [ ! -L "$1" ]; } || { [ -f "${1%/*}/run.log" ] && [ ! -L "${1%/*}/run.log" ]; }
+}
+
 # The fold's raw form, one tab-separated line per open entry, in record order:
 #   row name commit carrier candidate cbase cat outcome suites branch tree greens
 # greens (wave-39 T10; AC-6.3) is how many of its suites are green (or absent) on its candidate, 0 before one: the
 # sitrep's `in its landing, <greens> of <suites> suites green`.
 _line_fold() {  # <record>
-  [ -f "$1" ] || return 0
-  awk -F'|' "$_LINE_FIELDS_AWK"'
+  line_held "$1" || return 0
+  line_lines "$1" | awk -F'|' "$_LINE_FIELDS_AWK"'
     { ev = line_ev() }
     ev == "" { next }
     {
@@ -233,7 +250,7 @@ _line_fold() {  # <record>
           (c == "" ? "-" : c), (cbase[e] == "" ? "-" : cbase[e]), (cat[e] == "" ? "-" : cat[e]), out, \
           (sui[e] == "" ? "none" : sui[e]), br[e], tr[e], grn[e]
       }
-    }' "$1" 2>/dev/null
+    }' 2>/dev/null
 }
 
 # The fold with presence and the base rule applied: the interface's eight fields, then the raw
@@ -262,10 +279,10 @@ _line_lock_live() {  # <record> -> 0 when a live holder has the publish lock
 # A PLAIN GIT MERGE, COUNTED (see the header).
 _line_count_git() {  # <plan> <record> <root> <accepted head>
   local plan="$1" rec="$2" root="$3" head="$4" named last row com rec_row cell tree tip
-  [ -n "$head" ] && [ -f "$rec" ] || return 0
+  [ -n "$head" ] && line_held "$rec" || return 0
   # A numbers commit is a head the line itself published, named as its candidate is.
-  named="$(awk -F'|' "$_LINE_FIELDS_AWK"'line_ev() == "published" { c = line_kv("commit"); if (c != "") print c
-    c = line_kv("numbers"); if (c != "") print c }' "$rec" 2>/dev/null)"
+  named="$(line_lines "$rec" | awk -F'|' "$_LINE_FIELDS_AWK"'line_ev() == "published" { c = line_kv("commit"); if (c != "") print c
+    c = line_kv("numbers"); if (c != "") print c }' 2>/dev/null)"
   case $'\n'"${named}"$'\n' in *$'\n'"${head}"$'\n'*) return 0 ;; esac
   _line_lock_live "$rec" && return 0
   while IFS=$'\t' read -r row _ com _; do
@@ -286,7 +303,7 @@ EOF
     tip="$(git -C "$tree" rev-parse --verify -q HEAD 2>/dev/null)" || continue
     # A TREE AT ITS CUT HAS LANDED NOTHING (ruling A-orch-39): it is neither counted nor skipped.
     [ "$tip" != "$(_line_cut_at "$root" "$(units_field "$rec_row" base)" "$tree" "$head")" ] || continue
-    awk -F'|' -v r="$row" "$_LINE_FIELDS_AWK"'line_ev() == "published" && line_kv("row") == r { f = 1 } END { exit !f }' "$rec" 2>/dev/null && continue
+    line_lines "$rec" | awk -F'|' -v r="$row" "$_LINE_FIELDS_AWK"'line_ev() == "published" && line_kv("row") == r { f = 1 } END { exit !f }' 2>/dev/null && continue
     git -C "$root" merge-base --is-ancestor "$tip" "$head" 2>/dev/null || continue
     [ -n "$last" ] && git -C "$root" merge-base --is-ancestor "$tip" "$last" 2>/dev/null && continue
     line_event "$plan" published "row=${row}" "commit=${head}" kind=git by=- why=- >/dev/null
@@ -759,8 +776,8 @@ _line_load_owed() {
 _line_answered_records() {  # <plan> <row>
   local rec
   { _line_born_records "$1" "$2"
-    rec="$(line_record "$1")" && [ -f "$rec" ] && awk -F'|' -v r="$2" "$_LINE_FIELDS_AWK"'
-      line_ev() == "settled" && line_kv("row") == r { n = split(line_kv("findings"), a, ","); for (i = 1; i <= n; i++) { sub(/#[0-9]+$/, "", a[i]); print a[i] } }' "$rec"
+    rec="$(line_record "$1")" && line_held "$rec" && line_lines "$rec" | awk -F'|' -v r="$2" "$_LINE_FIELDS_AWK"'
+      line_ev() == "settled" && line_kv("row") == r { n = split(line_kv("findings"), a, ","); for (i = 1; i <= n; i++) { sub(/#[0-9]+$/, "", a[i]); print a[i] } }'
   } | awk 'NF && !s[$0]++'
 }
 # The questions a born row's records were read for are those of the plan's review proof lines naming one of them;
@@ -944,10 +961,10 @@ line_settled() {
 # line_settled_by <plan> <findings|cells> <id> -> `<row> <commit>` of the newest landing that settled <id>; 1 when none did
 line_settled_by() {
   local rec
-  rec="$(line_record "$1")" && [ -f "$rec" ] || return 1
-  awk -F'|' -v k="$2" -v id="$3" "$_LINE_FIELDS_AWK"'
+  rec="$(line_record "$1")" && line_held "$rec" || return 1
+  line_lines "$rec" | awk -F'|' -v k="$2" -v id="$3" "$_LINE_FIELDS_AWK"'
     line_ev() == "settled" { n = split(line_kv(k), a, ","); for (i = 1; i <= n; i++) if (a[i] == id) w = line_kv("row") " " line_kv("commit") }
-    END { if (w == "") exit 1; print w }' "$rec"
+    END { if (w == "") exit 1; print w }'
 }
 
 line_publish() {  # <plan> <row> -> 0 published · 3 rebuild · 4 held · 5 moved · 6 guard · 2 refused · 75 lock
@@ -1568,13 +1585,13 @@ _line_merge_holds() {  # <root> <merge base> <ours> <theirs> <suite>
 # closed. A carrier killed outright leaves a dead carrier, which the gate prunes. No lease, no entry: a
 # landing the gate cannot order is refused before its event is written (rc 2, gate-unavailable).
 _line_entry_age() {  # <record> <row> -> the age of the row's open entry, nothing when it has none
-  [ -f "$1" ] || return 0
-  awk -F'|' -v r="$2" "$_LINE_FIELDS_AWK"'
+  line_held "$1" || return 0
+  line_lines "$1" | awk -F'|' -v r="$2" "$_LINE_FIELDS_AWK"'
     { ev = line_ev() }
     ev == "" || line_kv("row") != r { next }
     ev == "ready" { if (!open) { open = 1; age = "" } a = line_kv("age"); if (age == "" && a != "") age = a; next }
     ev == "published" || ev == "returned" { open = 0; age = "" }
-    END { if (open && age != "") print age }' "$1" 2>/dev/null
+    END { if (open && age != "") print age }' 2>/dev/null
 }
 _line_ready_take() {  # <lock dir> -> 0 held by this carrier; 1 when it could not be had in about a minute
   local i=0
@@ -1994,8 +2011,8 @@ _line_ahead_open() {  # <entries> <row> <candidate>
 # kind=git), or something else closed it.
 _line_closed() {  # <rec> <row> <name> [<plan>]
   local last
-  last="$(awk -F'|' -v r="$2" "$_LINE_FIELDS_AWK"'
-    { e = line_ev() } line_kv("row") == r && (e == "published" || e == "returned") { l = $0 } END { print l }' "$1" 2>/dev/null)"
+  last="$(line_lines "$1" | awk -F'|' -v r="$2" "$_LINE_FIELDS_AWK"'
+    { e = line_ev() } line_kv("row") == r && (e == "published" || e == "returned") { l = $0 } END { print l }' 2>/dev/null)"
   case "$(line_value "$last" ev)" in
     published)
       last="$(line_value "$last" commit)"
@@ -2009,10 +2026,10 @@ _line_closed() {  # <rec> <row> <name> [<plan>]
 # A verdict is keyed by the commit it ran at: an argument that is not a commit id proves nothing.
 _line_proved() {  # <rec> <suite> <commit> -> the commit, when proved
   case "$3" in ''|*[!0-9a-f]*) return 1 ;; esac
-  awk -F'|' -v s="$2" -v c="$3" "$_LINE_FIELDS_AWK"'
+  line_lines "$1" | awk -F'|' -v s="$2" -v c="$3" "$_LINE_FIELDS_AWK"'
     line_ev() == "verdict" && line_kv("commit") == c && line_kv("suite") == s {
       v = line_kv("result"); if (v == "green" || v == "red" || v == "absent") ok = (v != "red") }
-    END { if (!ok) exit 1; print c }' "$1" 2>/dev/null
+    END { if (!ok) exit 1; print c }' 2>/dev/null
 }
 
 # The logs of the `none` verdicts for <suite> on <candidate> since the entry was last published, returned
@@ -2020,19 +2037,19 @@ _line_proved() {  # <rec> <suite> <commit> -> the commit, when proved
 # and a bounded ready that ends one none per call would otherwise never stall. A ready after STALLED is the
 # asked-for retry (AC-9.2), so the stall starts the count again.
 _line_none_logs() {  # <rec> <row> <candidate> <suite>
-  awk -F'|' -v r="$2" -v c="$3" -v s="$4" "$_LINE_FIELDS_AWK"'
+  line_lines "$1" | awk -F'|' -v r="$2" -v c="$3" -v s="$4" "$_LINE_FIELDS_AWK"'
     { e = line_ev() } line_kv("row") != r { next }
     e == "stalled" || e == "published" || e == "returned" { n = 0 }
     e == "verdict" && line_kv("commit") == c && line_kv("suite") == s && line_kv("result") == "none" { l[++n] = line_kv("log") }
-    END { for (i = 1; i <= n; i++) print l[i] }' "$1" 2>/dev/null
+    END { for (i = 1; i <= n; i++) print l[i] }' 2>/dev/null
 }
 # The log of a red verdict for <suite> on <candidate> since the entry opened, or nothing.
 _line_red_log() {  # <rec> <row> <candidate> <suite>
-  awk -F'|' -v r="$2" -v c="$3" -v s="$4" "$_LINE_FIELDS_AWK"'
+  line_lines "$1" | awk -F'|' -v r="$2" -v c="$3" -v s="$4" "$_LINE_FIELDS_AWK"'
     { e = line_ev() } line_kv("row") != r { next }
     e == "published" || e == "returned" { l = "" }
     e == "verdict" && line_kv("commit") == c && line_kv("suite") == s { l = (line_kv("result") == "red" ? line_kv("log") : "") }
-    END { if (l != "") print l }' "$1" 2>/dev/null
+    END { if (l != "") print l }' 2>/dev/null
 }
 
 # A RED IS THE ROW'S ONLY WHEN IT IS NEW (D8). Sets LINE_RED:
@@ -2088,8 +2105,8 @@ EOT
   if [ "$(_line_new_fails "$6" "$hl")" -eq 0 ]; then
     LINE_RED=standing
     cause="$(_line_cause "$plan" "$rec" "$head" "${9:-}" "$s")"; against="${cause#* }"; cause="${cause%% *}"
-    awk -F'|' -v h="$head" -v s="$s" -v c="$cause" "$_LINE_FIELDS_AWK"'
-      line_ev() == "standing" && line_kv("head") == h && line_kv("suite") == s && line_kv("cause") == c { f = 1 } END { exit !f }' "$rec" 2>/dev/null \
+    line_lines "$rec" | awk -F'|' -v h="$head" -v s="$s" -v c="$cause" "$_LINE_FIELDS_AWK"'
+      line_ev() == "standing" && line_kv("head") == h && line_kv("suite") == s && line_kv("cause") == c { f = 1 } END { exit !f }' 2>/dev/null \
       || line_event "$plan" standing "head=${head}" "suite=${s}" "lines=$(_line_fails "$hl" | awk 'END { print NR }')" "log=${hl}" \
            "cause=${cause}" "against=${against}" >/dev/null
     [ "$cause" != environment ] || printf 'STANDING %s %s cause=environment against=%s log=%s\n' "$row" "$s" "$against" "$hl"
@@ -2128,10 +2145,10 @@ _line_load_proof() {
 }
 # The remembered run of <suite> at <head>: `<green|red><TAB><log>` of its latest such verdict, or nothing.
 _line_head_verdict() {  # <rec> <head> <suite>
-  awk -F'|' -v c="$2" -v s="$3" "$_LINE_FIELDS_AWK"'
+  line_lines "$1" | awk -F'|' -v c="$2" -v s="$3" "$_LINE_FIELDS_AWK"'
     line_ev() == "verdict" && line_kv("commit") == c && line_kv("suite") == s {
       r = line_kv("result"); if (r == "green" || r == "red") v = r "\t" line_kv("log") }
-    END { if (v != "") print v }' "$1" 2>/dev/null
+    END { if (v != "") print v }' 2>/dev/null
 }
 # A log's failing lines, as the suite harness prints them (tests/lib/assert.sh: `FAIL: <label>`), each
 # normalised: the indent before `FAIL:`, a carriage return and trailing blanks dropped; one per line.
@@ -2149,13 +2166,13 @@ _line_new_fails() {  # <candidate's log> <head's log>
 # <candidate> is red. Read from the record: the `debt=` of the entry's latest `ready`. The debt names a
 # suite by its file name, so a path-qualified suite is the debt by its file name (wave-34 T27).
 _line_declared() {  # <rec> <row> <candidate> -> the suite; 1 when nothing is owed
-  awk -F'|' -v r="$2" -v c="$3" "$_LINE_FIELDS_AWK"'
+  line_lines "$1" | awk -F'|' -v r="$2" -v c="$3" "$_LINE_FIELDS_AWK"'
     { e = line_ev() } line_kv("row") != r { next }
     e == "published" || e == "returned" { d = "" }
     e == "ready" { d = line_kv("debt") }
     e == "verdict" && line_kv("commit") == c { v[line_kv("suite")] = line_kv("result") }
     END { if (d != "" && d != "-") for (s in v) { b = s; sub(/.*\//, "", b); if (b == d && v[s] == "red") { print d; exit 0 } }
-          exit 1 }' "$1" 2>/dev/null
+          exit 1 }' 2>/dev/null
 }
 # THE DEBT'S WRITE, inside the publish lock, before the fast-forward: one `debt:` line by the debt's
 # one writer (lib/worktree.sh `_wt_debt_write`), naming the row, its branch and head, the suite, the

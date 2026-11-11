@@ -58,16 +58,16 @@ poker_additions_judged() {
 # (`proof_branch_head`), the newest such event first, or (c) it holds the `ev=verdict row=regression result=red` line a
 # whole run left for the suite at such a commit, which `regression-run` writes before any proof-add: a run the machine
 # recorded red backs the marker before its log is cited. A marker the judge holds every chain by is no declaration. No
-# library gives these events a reader; `_bfb_newest` is the one awk, over the file, and it reads the fields as lib/line.sh's
-# fold does (`fv`, a suite by its file name).
+# library gives these events a reader; `_bfb_newest` is the one awk, over the record and the run's log read as one
+# (lib/line.sh `line_lines`), and it reads the fields as lib/line.sh's fold does (`fv`, a suite by its file name).
 # Set in hooks/session-poker.sh, before any part loads: BFB_OF, BFB_OWED, BFB_BRANCH.
 born_floor_backing() {
   local plan="$1" repo="$2" suite="$3" rec bh h
   BFB_OF=""; BFB_OWED="$(_proof_last_read "$plan" regression owed)"; BFB_BRANCH="$(plan_working_branch "$plan" 2>/dev/null)"
   case ",$BFB_OWED," in *",$suite,"*) BFB_OF=regression; return 0 ;; esac
-  rec="$(proof_debt_record "$plan" "$repo" 2>/dev/null)" && [ -f "$rec" ] || return 1
-  bh="$(proof_branch_head "$plan" "$repo")" || return 1
   { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
+  rec="$(proof_debt_record "$plan" "$repo" 2>/dev/null)" && line_held "$rec" 2>/dev/null || return 1
+  bh="$(proof_branch_head "$plan" "$repo")" || return 1
   h="$(_bfb_newest "$rec" "$repo" "$bh" "$suite" standing head)" && { BFB_OF="standing@${h:0:12}"; return 0; }
   h="$(_bfb_newest "$rec" "$repo" "$bh" "$suite" verdict commit)" && { BFB_OF="run@${h:0:12}"; return 0; }
   return 1
@@ -84,10 +84,10 @@ _bfb_newest() {
     git -C "$repo" merge-base --is-ancestor "$h" "$bh" 2>/dev/null || continue
     printf '%s' "$h"; return 0
   done <<BFB_EVENTS
-$(awk -F'|' -v want="$suite" -v ev="$ev" -v fld="$field" "${_LINE_FIELDS_AWK:-}"'
+$(line_lines "$rec" | awk -F'|' -v want="$suite" -v ev="$ev" -v fld="$field" "${_LINE_FIELDS_AWK:-}"'
     line_ev() == ev && (ev != "verdict" || (line_kv("row") == "regression" && line_kv("result") == "red")) {
       s = line_kv("suite"); sub(/.*\//, "", s); if (s == want && line_kv(fld) != "") h[++n] = line_kv(fld) }
-    END { for (i = n; i >= 1; i--) print h[i] }' "$rec" 2>/dev/null)
+    END { for (i = n; i >= 1; i--) print h[i] }' 2>/dev/null)
 BFB_EVENTS
   return 1
 }

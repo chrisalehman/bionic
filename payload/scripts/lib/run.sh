@@ -512,20 +512,21 @@ plan_parked_why() {
 # Closed was the wrong answer for the second: the run may be mid-flight, and a reader that
 # calls it closed stops protecting it — the evidence gate admitted every commit against it.
 #
-# A RUN WITH A LOG IS JUDGED BY THE READER'S STEP ALONE: open while its state is open, closed when the
-# log delivers it (step 9) or abandons it, whatever `current:` or a Step line of its plan still says.
-# Only the log is read for it, so the answer costs no translation. A run with no log keeps its state in
-# the plan, which is read below. The reader is not asked about such a run: its translation orders Step
+# A RUN BROUGHT FORWARD IS JUDGED BY THE READER'S STEP ALONE (lib/reader.sh `reader_brought`): open while its
+# state is open, closed when the log delivers it (step 9) or abandons it, whatever `current:` or a Step line of
+# its plan still says. Only the log is read for it, so the answer costs no translation. Any other run keeps its
+# step in the plan, a log beside it or not (its writers move to the log one family at a time), and the plan is
+# read below. The reader is not asked about such a run: its translation orders Step
 # lines by their written instants, and a closed plan whose instants are missing, malformed or out of
 # order reads open there, the fail-dangerous direction; asked of every candidate it would also cost a
 # translation per plan inside `open_runs`.
 run_open() {
-  local plan="$1" log
+  local plan="$1"
   [ -n "$plan" ] || return 1
   plan_unreadable "$plan" >/dev/null && return 3
   [ -f "$plan" ] || return 1
   _run_reader || return 1
-  if log="$(reader_log "$plan")" && [ -f "$log" ]; then
+  if reader_brought "$plan"; then
     case "$(run_step "$plan")" in *state=open*) return 0 ;; *) return 1 ;; esac
   fi
 

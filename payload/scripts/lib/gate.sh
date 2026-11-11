@@ -237,7 +237,7 @@ if [ -z "${_TIME_ISO_AWK:-}" ] && [ -r "$_GATE_LIB_DIR/time.sh" ]; then
   . "$_GATE_LIB_DIR/time.sh"
 fi
 # THE LANDING KEY AND THE LANDING RECORD ARE lib/line.sh's (wave-39 T17; D18, AC-12.1): its alphabet (`landing_key`,
-# `landing_key_ok`) and its record reader (`_LINE_FIELDS_AWK`). Loaded when first needed, never at source: line.sh
+# `landing_key_ok`) and its record reader (`_LINE_FIELDS_AWK`, over `line_lines`, the record and the run's log read as one). Loaded when first needed, never at source: line.sh
 # sources the worktree library, and most of the gate's callers ask about no landing.
 _gate_load_line() {  # -> 0 once lib/line.sh's key and reader are loaded
   declare -F landing_key >/dev/null 2>&1 && [ -n "${_LINE_FIELDS_AWK:-}" ] && return 0
@@ -715,13 +715,13 @@ _gate_row_done() {
       _G_DONE="${_G_DONE}${l} ${ep}
 "
     done <<EOF
-$(awk -F'|' "$_TIME_ISO_AWK$_LINE_FIELDS_AWK"'
+$(line_lines "$1" | awk -F'|' "$_TIME_ISO_AWK$_LINE_FIELDS_AWK"'
       { ev = line_ev() }
       ev == "published" || ev == "returned" || ev == "stalled" {
         r = line_kv("row"); e = iso2epoch(line_kv("at"))
         if (r != "" && e >= 0 && (!(r in last) || e > last[r])) last[r] = e
       }
-      END { for (r in last) printf "%d\t%s\n", last[r], r }' "$1" 2>/dev/null)
+      END { for (r in last) printf "%d\t%s\n", last[r], r }' 2>/dev/null)
 EOF
   fi
   [ -n "$_G_DONE" ] || return 1

@@ -521,8 +521,8 @@ plan_goals_read() {
       *' §'*)
         s="${r%% §*}"; s="${s##* }"; case "$s" in *.test.sh) ;; *) s="$s.test.sh" ;; esac
         [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "${BASH_SOURCE[0]%/*}/line.sh" ] && . "${BASH_SOURCE[0]%/*}/line.sh"; } >/dev/null 2>&1
-        v="$(awk -F'|' -v s="$s" "${_LINE_FIELDS_AWK:-}"'line_ev() == "verdict" && line_kv("suite") == s {
-               r = line_kv("result"); if (r == "green" || r == "red") l = r "\t" substr(line_kv("commit"), 1, 8) } END { if (l != "") print l }' "$rec" 2>/dev/null)"
+        v="$(line_lines "$rec" 2>/dev/null | awk -F'|' -v s="$s" "${_LINE_FIELDS_AWK:-}"'line_ev() == "verdict" && line_kv("suite") == s {
+               r = line_kv("result"); if (r == "green" || r == "red") l = r "\t" substr(line_kv("commit"), 1, 8) } END { if (l != "") print l }' 2>/dev/null)"
         case "${v%%	*}" in
           green) st=reached; rd="$s green at ${v#*	}" ;;
           red) st=missed; rd="$s red at ${v#*	}" ;;

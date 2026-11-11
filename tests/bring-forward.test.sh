@@ -26,6 +26,9 @@
 #            rows the nine authored cells, and the reader's step, read from the log it wrote, is the old current:.
 #   §TWICE   a second act changes no byte of the plan or the log.
 #   §KEPT    the old plan and record are kept beside the new, byte for byte.
+#   §HALF    a run whose log already holds some of its facts is brought forward: the act exits 0, the log it writes
+#            holds the old homes' landings and the log's own in order, the log as it stood is kept, a second act
+#            changes no byte.
 #   §WAITS   a wait on a row is that row's id in deps; one the kind implies is dropped; any other is a gap.
 #   §DROPPED a dropped row is a gap of the translation, and after the act it is not ready and waits on it are met.
 #   §CELLS   a row's suites and lands-on go to the task's own section, or to the gaps list when it has none.
@@ -126,7 +129,8 @@ ask approved merge-unproved; expect_status "an approval the plan lacks is a no" 
 ask green "$H"; expect_status "the later proof answers: rc=0 at 06:00 after rc=1 at 05:00" 0 "$?"
 expect_eq "two landings" "T1 T2 " "$(ask landed | grep -o 'row=T[0-9]*' | cut -c5- | tr '\n' ' ')"
 printf 'run/v1|ev=step|n=7|at=2026-11-02T00:00:00Z\n' > "$D/record/wave-9-old/run.log"
-expect_eq "a run with a log reads the log alone" "n=7 state=open" "$(ask step | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "a run with a log and nothing kept reads both: the log's later step, the plan's two landings" "n=7 state=open T1 T2 " \
+  "$(ask step | tr '\n' ' ')$(ask landed | grep -o 'row=T[0-9]*' | cut -c5- | tr '\n' ' ')"
 section "PLACE"
 Q="$D/plans/epic-x/wave-7-by.plan.md"; printf '%s\n' '## SDLC State' '- Step 1: r.md; approved by Ann Person 2026-11-01T01:21Z "go" at the card' \
   "proved: kind=review head=$H at=2026-11-01T02:00:00Z evidence=c.md" 'moved: c.md#1 to=fixed at=2026-11-01T09:00:00Z' 'deferred: c.md#2 S3 on "t"' \
@@ -371,6 +375,20 @@ for r in $RUNS; do k="$(sed -n 's/^kept=//p' "$SB/${r%%:*}.out")"; o="$(at "$BED
   expect_eq "${r%%:*}: the kept plan is the old one byte for byte, the new one is not" "differ" "$(cmp -s "$k/${r#*:}.plan.md" "$o" && ! cmp -s "$(at "$SB" "$r")" "$o" && echo differ)"
   expect_empty "${r%%:*}: the kept record is the old one byte for byte" "$(diff -r "$k/record" "$BED/${r%%:*}/record/${r#*:}" 2>&1)"
 done
+section "HALF"
+HP="$SB/half/plans/epic-x/wave-8-half.plan.md"; HR="$SB/half/record/wave-8-half"; mkdir -p "${HP%/*}" "$HR"
+printf '%s\n' '---' 'canonical_sdlc_version: 14' '---' '## Tasks' '| id | step | kind | task | deps | size | status |' '|---|---|---|---|---|---|---|' \
+  '| T1 | 4 | build | One. | — | 30 | landed |' '| T2 | 4 | build | Two. | — | 30 | landed |' '| T3 | 4 | build | Three. | — | 30 | landed |' \
+  '' '## SDLC State' 'current: 4' '- T1: landed 1111111111111111111111111111111111111111 2026-11-01T00:00:01Z' > "$HP"
+printf 'line/v1|ev=published|row=T2|commit=c2|kind=queue|by=-|why=-|at=2026-11-02T00:00:01Z\n' > "$HR/landing-proofs.log"
+printf 'run/v1|ev=published|row=T3|commit=c3|kind=queue|by=-|why=-|at=2026-11-03T00:00:01Z\n' > "$HR/run.log"; cp "$HR/run.log" "$SB/half.log"
+HO="$(bash "$BF" "$HP" 2>&1)"; expect_eq "the act takes a run whose log stands with nothing kept (exit 0)" "0" "$?"
+expect_eq "…its log holds the plan's landing, the landing record's and the log's own, in that order" "T1 T2 T3 " \
+  "$(grep '^run/v1|ev=published|' "$HR/run.log" | grep -o 'row=T[0-9]*' | cut -c5- | tr '\n' ' ')"
+expect_eq "…the log as it stood is kept byte for byte" "kept" "$(cmp -s "$HR/kept/record/run.log" "$SB/half.log" && echo kept)"
+HS="$(cksum < "$HR/run.log") $(cksum < "$HP")"
+bash "$BF" "$HP" >/dev/null 2>&1
+expect_eq "…and a second act changes no byte of the log or the plan" "$HS" "$(cksum < "$HR/run.log") $(cksum < "$HP")"
 W="$SB/docs/plans/epic-x/wave-7-act.plan.md"; mkdir -p "${W%/*}"; c="| — | — |"
 cat > "$W" <<EOF
 ---
