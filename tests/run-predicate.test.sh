@@ -123,141 +123,32 @@ echo
 section "R4 — SIGPIPE-under-pipefail does not flip a >64 KB plan's verdict (AC-21)"
 # ============================================================
 #
-# WHY THIS SECTION EXISTS AND R0-R3 DID NOT CATCH IT (research-refusal.md VERDICT,
-# 2026-09-03). `active_run` decides Step 9 by `_run_lines "$plan" | grep -qE
-# '…delivered:'`. `grep -q`/`-m1` exit at their FIRST match; the awk feeding them is
-# still writing when a match sits well before end-of-file, awk takes SIGPIPE and reports
-# 141, and this whole suite runs under `set -uo pipefail` (line 24) — same as every hook
-# that calls this library — so the PIPELINE's status becomes 141, not the grep's own 0.
-# `if pipeline; then return 1; fi` reads that as false: a CLOSED run (current: 9,
-# `delivered:` present) falls through to the Step-9-open arm and reads OPEN. Every fixture
-# in R0-R3 is a handful of lines, so `awk` always finishes writing before `grep` even
-# looks — too small to reach the SIGPIPE window at all. This section is the one place in
-# the suite where the fixture is deliberately padded PAST that window, on this shell's own
-# options, so a regression here is caught by size rather than only by content.
-#
-# THE MEASURED THRESHOLD (research-refusal.md INSTRUMENT §threshold table, this machine):
-# 16 167 bytes never flips, 20 214 bytes flips 5/5. 64 KB is the plan's own AC-21 floor —
-# comfortably past the measured knee — so every fixture below pads to that literal target,
-# and each one asserts its own size to keep the premise visible if the target ever drifts.
-
-mk_filler() {  # <min-bytes> -> that many-or-more bytes of inert filler lines on stdout
-  local target="$1" n=0
-  while [ "$n" -lt "$target" ]; do
-    echo "filler filler filler filler filler filler filler filler filler filler"
-    n=$((n + 72))
-  done
+# A plan past the 64 KB pipe buffer is read whole under this suite's pipefail, as under every hook that calls this
+# library: a reader of it that quit at its first match would leave its writer killed by SIGPIPE, and the verdict read
+# from a short read. Each fixture pads to 70 000 bytes, before or after the state, and asserts its own size.
+r4() {  # <tag> <head lines> <state lines> <filler first: yes|no> <want exit> -> one fixture, its size and verdict rows
+  local R="$SANDBOX/r4$1" F f; mkdir -p "$R/.bionic/docs/plans"; F="$R/.bionic/docs/plans/wave.plan.md"
+  f="$(awk 'BEGIN { while (n < 70000) { print "filler filler filler filler filler filler filler filler filler filler"; n += 72 } }')"
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n%s---\n\n# fixture plan\n\n' "$2"
+    [ "$4" = no ] || printf '## Notes\n\n%s\n\n' "$f"
+    printf '## SDLC State\n\nintegration-branch: main\n%s' "$3"; [ "$4" = yes ] || printf '\n## Notes\n\n%s\n' "$f"; } > "$F"
+  call_active_run_pf "$R"
+  expect_eq "r4$1 past 64 KB, $(printf '%s' "$3" | head -1), filler first: $4 -> active_run exits $5" "yes|$5|$([ "$5" = 0 ] && printf '%s' "$F")" \
+    "$([ "$(wc -c < "$F")" -gt 65536 ] && echo yes)|$AR_ST|$AR_OUT"
 }
-FILLER_TARGET=70000   # > 64 KB (65536) with margin
-
-# --- Step 9 delivered:, filler AFTER the state block, > 64 KB -> CLOSED ---
-R="$SANDBOX/r4a"; mkdir -p "$R/.bionic/docs/plans"
-F="$R/.bionic/docs/plans/wave.plan.md"
-{
-  echo "---"
-  echo "governing-skill: superpowers:writing-plans"
-  echo "sdlc-step: 9"
-  echo "---"
-  echo
-  echo "# fixture plan"
-  echo
-  echo "## SDLC State"
-  echo
-  echo "integration-branch: main"
-  echo "current: 9"
-  echo "- Step 9: report record/x.md, delivered: 2026-09-02"
-  echo
-  echo "## Notes"
-  echo
-  mk_filler "$FILLER_TARGET"
-} > "$F"
-SZ=$(wc -c < "$F" | tr -d '[:space:]')
-expect_eq "r4a fixture is actually past 64 KB (size=$SZ)" "yes" "$([ "$SZ" -gt 65536 ] && echo yes || echo no)"
-call_active_run_pf "$R"
-expect_eq "Step 9 delivered:, filler AFTER state, >64 KB -> active_run exits 1 (closed)" 1 "$AR_ST"
-expect_empty "…and prints nothing" "$AR_OUT"
-
-# --- Step 9 delivered:, filler BEFORE the state block, > 64 KB -> CLOSED ---
-R="$SANDBOX/r4b"; mkdir -p "$R/.bionic/docs/plans"
-F="$R/.bionic/docs/plans/wave.plan.md"
-{
-  echo "---"
-  echo "governing-skill: superpowers:writing-plans"
-  echo "sdlc-step: 9"
-  echo "---"
-  echo
-  echo "# fixture plan"
-  echo
-  echo "## Notes"
-  echo
-  mk_filler "$FILLER_TARGET"
-  echo
-  echo "## SDLC State"
-  echo
-  echo "integration-branch: main"
-  echo "current: 9"
-  echo "- Step 9: report record/x.md, delivered: 2026-09-02"
-} > "$F"
-SZ=$(wc -c < "$F" | tr -d '[:space:]')
-expect_eq "r4b fixture is actually past 64 KB (size=$SZ)" "yes" "$([ "$SZ" -gt 65536 ] && echo yes || echo no)"
-call_active_run_pf "$R"
-expect_eq "Step 9 delivered:, filler BEFORE state, >64 KB -> active_run exits 1 (closed)" 1 "$AR_ST"
-expect_empty "…and prints nothing" "$AR_OUT"
-
-# --- paired positive: current: 4, > 64 KB -> stays OPEN ---
-R="$SANDBOX/r4c"; mkdir -p "$R/.bionic/docs/plans"
-F="$R/.bionic/docs/plans/wave.plan.md"
-{
-  echo "---"
-  echo "governing-skill: superpowers:writing-plans"
-  echo "sdlc-step: 4"
-  echo "---"
-  echo
-  echo "# fixture plan"
-  echo
-  echo "## SDLC State"
-  echo
-  echo "integration-branch: main"
-  echo "current: 4"
-  echo "- Step 4: in progress"
-  echo
-  echo "## Notes"
-  echo
-  mk_filler "$FILLER_TARGET"
-} > "$F"
-SZ=$(wc -c < "$F" | tr -d '[:space:]')
-expect_eq "r4c fixture is actually past 64 KB (size=$SZ)" "yes" "$([ "$SZ" -gt 65536 ] && echo yes || echo no)"
-call_active_run_pf "$R"
-expect_eq "current: 4, >64 KB -> active_run exits 0 (open, paired positive)" 0 "$AR_ST"
-expect_eq "…and prints the plan path" "$F" "$AR_OUT"
-
-# --- paired positive: frontmatter abandoned:, > 64 KB -> CLOSED ---
-R="$SANDBOX/r4d"; mkdir -p "$R/.bionic/docs/plans"
-F="$R/.bionic/docs/plans/wave.plan.md"
-{
-  echo "---"
-  echo "governing-skill: superpowers:writing-plans"
-  echo "sdlc-step: 4"
-  echo "abandoned: chris 2026-09-03"
-  echo "---"
-  echo
-  echo "# fixture plan"
-  echo
-  echo "## SDLC State"
-  echo
-  echo "integration-branch: main"
-  echo "current: 4"
-  echo "- Step 4: in progress"
-  echo
-  echo "## Notes"
-  echo
-  mk_filler "$FILLER_TARGET"
-} > "$F"
-SZ=$(wc -c < "$F" | tr -d '[:space:]')
-expect_eq "r4d fixture is actually past 64 KB (size=$SZ)" "yes" "$([ "$SZ" -gt 65536 ] && echo yes || echo no)"
-call_active_run_pf "$R"
-expect_eq "frontmatter abandoned:, >64 KB -> active_run exits 1 (closed, paired positive)" 1 "$AR_ST"
-expect_empty "…and prints nothing" "$AR_OUT"
+r4 a '' 'current: 9
+- Step 9: report record/x.md, delivered: 2026-09-02
+' no 1
+r4 b '' 'current: 9
+- Step 9: report record/x.md, delivered: 2026-09-02
+' yes 1
+r4 c '' 'current: 4
+- Step 4: in progress
+' no 0
+r4 d 'abandoned: chris 2026-09-03
+' 'current: 4
+- Step 4: in progress
+' no 1
 
 # ============================================================
 echo
