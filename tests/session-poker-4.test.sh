@@ -2035,8 +2035,8 @@ br_verdict() { printf 'line/v1|ev=verdict|row=regression|commit=%s|suite=%s|resu
 br_log() { printf 'head=%s dirty=%s\nGating: 1 passed, 1 failed\nrc=%s\n' "$1" "$2" "$3" > "$BR_DIR/regression-run-$1.log"; touch -t "$4" "$BR_DIR/regression-run-$1.log"; }  # <sha> <dirty> <rc> <mtime>
 br_add() { poke "$RBR" task-add "$1" 4 build 'fix the red. The red suite turns green.' bionic:implementor '—' 30 REQ-5 "lib/$1.sh" --born "regression:$2"; }
 br_verdict "$BR_C1" a.test.sh red; br_add T6 a.test.sh
-expect_eq "BR-1 a red verdict at a branch commit and no proof line: task-add --born regression:a.test.sh exits 0, the marker reading the run" "0|1" \
-  "$RC|$(/usr/bin/grep "^- T6:" "$PBR" | /usr/bin/grep -c "born: regression a.test.sh of=run@${BR_C1:0:12}")"
+expect_eq "BR-1 a red verdict at a branch commit and no proof line: task-add --born regression:a.test.sh exits 0, the born event reading the run" "0|1" \
+  "$RC|$(/usr/bin/grep -c "|ev=born|row=T6|reason=regression a.test.sh|finding=run@${BR_C1:0:12}|" "$BR_DIR/run.log")"
 br_verdict "$BR_C1" b.test.sh green; br_add T7 b.test.sh; BR_RC=$RC
 br_verdict "$BR_OFF" c.test.sh red; br_add T7 c.test.sh
 expect_eq "BR-2 a green verdict, and a red one at a commit off the branch, back nothing (exit 1 each)" "1|1" "$BR_RC|$RC"
