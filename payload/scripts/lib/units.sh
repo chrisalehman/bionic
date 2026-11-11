@@ -1318,7 +1318,7 @@ _units_regno() {
 }
 
 # units_writes_head <Files cell> -> 0 when the cell names a path outside the record, 1 when not:
-# the same predicate, for a shell caller (session-poker.sh launch-sync).
+# the same predicate, for a shell caller.
 units_writes_head() {
   printf '%s\n' "${1:-}" | awk "$(_units_files_awk)"'{ exit !writes_head($0) }'
 }
@@ -2789,8 +2789,8 @@ units_add_row() {
 #
 # Four more projectors in `units_add_row`'s mould, one per hand edit a run used to make to its
 # own plan: a cell of a table row, a `- Step N:` or `- T<n>:` line, `current:`, and the
-# fields of a step's evidence block. The poker's plan-row verbs (`task-set`, `ledger-add`,
-# `ledger-set`, `step-line`, `current`) each run one of them onto a COPY and judge the copy
+# fields of a step's evidence block. The poker's plan-row verbs (`task-set`, `step-line`,
+# `current`) each run one of them onto a COPY and judge the copy
 # before anything is swapped in — the task-add transaction, unchanged.
 #
 # PURE, AS EVERY VERB HERE IS: each prints the WHOLE plan and writes nothing. Fence-aware like
@@ -2807,8 +2807,8 @@ units_add_row() {
 # units_table_cells <plan> <set|add> <section> <id> <name=value>… -> the whole plan with the
 #   row whose id cell is <id> given those cells (`set`), or a new row with that id appended
 #   after the table's last row (`add`; unnamed cells `—`). <section> is `tasks` (the first
-#   `## Tasks` table, the one `_units_read` parses) or `ledger` (the first `## Dispatch ledger`
-#   table). Names are the header's own cells, matched case-insensitively.
+#   `## Tasks` table, the one `_units_read` parses); an older run's `## Dispatch ledger` is history,
+#   and nothing writes it. Names are the header's own cells, matched case-insensitively.
 #   Exit 1 no such table · 2 `set`: no row with that id, `add`: the id is taken · 3 a name the
 #   header does not carry · 4 a value with a forbidden byte · 5 `set`: more than one row with
 #   that id. Silent on every refusal.
@@ -2820,7 +2820,7 @@ units_table_cells() {
   local plan="${1:-}" mode="${2:-}" sect="${3:-}" id="${4:-}" pairs="" kv
   [ -n "$plan" ] && [ -f "$plan" ] && [ -n "$id" ] || return 1
   case "$mode" in set|add) : ;; *) return 1 ;; esac
-  case "$sect" in tasks|ledger) : ;; *) return 1 ;; esac
+  case "$sect" in tasks) : ;; *) return 1 ;; esac
   shift 4
   for kv in "$@"; do
     case "$kv" in *=*) : ;; *) return 3 ;; esac
@@ -2855,7 +2855,6 @@ units_table_cells() {
         if (line ~ /^[ \t]*#/) {
           if (state == 1 || state == 2) { state = 3; continue }
           if (state == 0 && sect == "tasks" && line ~ /^##[ \t]+[Tt]asks([ \t].*)?$/) state = 1
-          if (state == 0 && sect == "ledger" && line ~ /^##[ \t]+[Dd]ispatch[ \t]+[Ll]edger([ \t].*)?$/) state = 1
           continue
         }
         if (state == 1) {

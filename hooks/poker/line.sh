@@ -51,7 +51,7 @@ landing_evidence() {
 # eight such rows by `row-landed --by-hand`. `deliver <row>` is its agent's last act, and the tick's
 # backstop when the agent ended without it. It checks what the row owes, then lands it through the
 # one landing writer, `row-landed`, in the same transaction, at the working head (the head of the
-# checkout holding the plan's `working-branch:`), with the artifact written into the ledger line.
+# checkout holding the plan's `working-branch:`).
 #
 # THE ROW'S WRITER (wave-34 T4; burns debt row-writer-name): `ready`'s answer, lib/line.sh
 # `line_row_writer`, loaded here the first time it is asked, so `deliver` and the tick's backstop hold a
@@ -79,13 +79,12 @@ row_writer() {  # <roster> <plan> <row> <agent cell>
 #     task-scale plan carries no ledger), else the one record under `<docs-root>/record/` its Files
 #     name (a `.progress.md` and `assumptions.md` are bookkeeping, not the artifact). The file exists,
 #     is no symbolic link, and lies under the docs root's `record/`. A row naming none, or several,
-#     is refused naming the verb that writes a cell this plan carries: task-set's artifact= when the
-#     Tasks header has the column, the ledger's verb when the plan has a ledger, else task-set's Files=;
+#     is refused naming the cell task-set writes: artifact= when the Tasks header has the column, else Files=;
 #   - a review row: a `proved: kind=review` line under `## SDLC State` names that record;
 #   - the working head reads as a commit;
 #   - no ruling for the row's writer is unread.
 deliver_check() {
-  local row kind files wt status art docs drel abs real rel e n=0 cands="" hasl=0 lverb=ledger-set call fix wb head sid roster rulings live lrc
+  local row kind files wt status art docs drel abs real rel e n=0 cands="" call fix wb head sid roster rulings live lrc
   call="bash $HOOK_DIR/session-poker.sh"
   if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
      || ! declare -F proof_branch_head >/dev/null 2>&1; then
@@ -122,7 +121,6 @@ deliver_check() {
   fi
   docs="$(docs_root "$PV_REPO")"; docs="$(cd "$docs" 2>/dev/null && pwd -P)"
   drel=""; case "$docs" in "$PV_REPO"/*) drel="${docs#"$PV_REPO"/}" ;; esac
-  launch_sync_ledger "$PV_PLAN" >/dev/null && hasl=1
   art="$(awk -F'|' -v id="$PV_ID" '
     /^[ \t]*```/ { fence = !fence; next }
     fence { next }
@@ -147,11 +145,8 @@ deliver_check() {
     done <<DELIVER_FILES
 $(printf '%s\n' "$files" | tr ',' '\n')
 DELIVER_FILES
-    [ "$hasl" = 1 ] && launch_sync_ledger "$PV_PLAN" | awk -F'\037' -v id="$PV_ID" '$1 == id { f = 1 } END { exit !f }' || lverb=ledger-add
     if pv_header_cells "$PV_PLAN" tasks 2>/dev/null | /usr/bin/grep -ix artifact >/dev/null; then
       fix="$call task-set $PV_ID artifact=<path>"
-    elif [ "$hasl" = 1 ]; then
-      fix="$call $lverb $PV_ID artifact=<path>"
     else
       fix="$call task-set $PV_ID Files=<path>"
     fi
@@ -901,8 +896,7 @@ hand_holds_verb() {
   # (lib/line.sh) runs this verb, as a command, inside its publish lock once the fast-forward and
   # its `published` event are written: the row's status `landed` (`units_table_cells` on the tasks
   # table, judged by `units_validate` as `task-set` judges a status), its `- T<n>:` line
-  # (`units_step_line`) and its dispatch-ledger row's `landed` cell (`units_table_cells` on the
-  # ledger), onto ONE copy and through ONE `plan_verb_swap ... writer`: all three lines or none.
+  # (`units_step_line`), onto ONE copy and through ONE `plan_verb_swap ... writer`: both lines or none.
   # Writer mode is the point: past Step 4 the dry copy reads `current: 4`, so the declared debt the
   # publish has just written (T5) cannot refuse the publish's own bookkeeping, and the debt stays
   # in the bound plan's landing record for the gate to read at the next step move (wave-27 passes
@@ -910,9 +904,8 @@ hand_holds_verb() {
   # The step line gains ` landed <commit> <at>` after its own text (a hand landing: ` landed-by-hand:
   # <who> <at> "<why>" judged-by=<judge> [changed-here=<paths>]`, the hand landing's interface, the fields present
   # when the scan judged or a passing check proof held the commit), once: a text already there is not added
-  # again. The ledger cell reads `landed <at> <commit>`; a ledger with no row of that id gains one,
-  # and a plan with no `## Dispatch ledger` table has no ledger line to write. A run again of the
-  # same landing finds the plan already so and writes nothing.
+  # again. A run again of the same landing finds the plan already so and writes nothing. A plan's
+  # `## Dispatch ledger`, where an older run kept one, is history and is not written.
   #
   # A PLACEHOLDER LEAD IS REPLACED, NOT KEPT (wave-33 T6; REQ-3 AC-3.3, D5). A line that opens
   # `pending dispatch` (the Step-3 template, `task-add`, `task-split`) gives that lead to the landing
@@ -920,8 +913,7 @@ hand_holds_verb() {
   # `- T5: pending dispatch — .worktrees/01-T5` lands as `- T5: landed <commit> <at> — .worktrees/01-T5`.
   #
   # `deliver <row>` (wave-33 T6; D5) is this verb for a record row: `deliver_check` reads what the row
-  # owes and sets the commit (the working head), the instant (now) and the artifact, which is
-  # written into the ledger line's `artifact` cell beside the landed one, in this same write.
+  # owes and sets the commit (the working head), the instant (now) and the artifact it checked.
   poker_verb_row_landed() {
     if ! plan_verb_id_ok "$PV_ID"; then
       die "REFUSED — '$(clean "$PV_ID")' is not one row id; the plan is unchanged."
@@ -967,29 +959,6 @@ hand_holds_verb() {
         fi
         mv -f "$PV_NEW.2" "$PV_NEW" ;;
     esac
-    PV_RC=0
-    units_table_cells "$PV_NEW" set ledger "$PV_ID" "landed=landed $RL_AT $RL_COMMIT" > "$PV_NEW.2" 2>/dev/null || PV_RC=$?
-    if [ "$PV_RC" -eq 2 ]; then
-      PV_RC=0
-      units_table_cells "$PV_NEW" add ledger "$PV_ID" "landed=landed $RL_AT $RL_COMMIT" > "$PV_NEW.2" 2>/dev/null || PV_RC=$?
-    fi
-    case "$PV_RC" in
-      0) mv -f "$PV_NEW.2" "$PV_NEW" ;;
-      1) rm -f "$PV_NEW.2" ;;
-      3) die "REFUSED — the ## Dispatch ledger header carries no landed column; the plan is unchanged."; exit 1 ;;
-      5) die "REFUSED — the ## Dispatch ledger table carries more than one row $PV_ID; the plan is unchanged."; exit 1 ;;
-      *) die "REFUSED — the ledger row $PV_ID cannot take its landed cell; the plan is unchanged."; exit 1 ;;
-    esac
-    # A DELIVERED ROW'S LEDGER LINE NAMES ITS ARTIFACT (wave-33 T6; AC-3.1): the cell the artifact was
-    # read from, or the empty one of a line this landing added. A ledger with no artifact column has
-    # no cell to hold it, and the landing stands without one.
-    if [ -n "$RL_ARTIFACT" ] && [ "$PV_RC" -eq 0 ]; then
-      if units_table_cells "$PV_NEW" set ledger "$PV_ID" "artifact=$RL_ARTIFACT" > "$PV_NEW.2" 2>/dev/null; then
-        mv -f "$PV_NEW.2" "$PV_NEW"
-      else
-        rm -f "$PV_NEW.2"
-      fi
-    fi
     # THE EVIDENCE CELLS (wave-31 T22; REQ-15 AC-15.1 to AC-15.3, D15): the criteria this row serves gain the log of
     # the suite their eval names, read off the landing record's verdicts for this row and commit (`landing_evidence`).
     # A hand landing's verdicts are keyed by the commit the person says they were green at, not this landing's, so it
@@ -1022,7 +991,7 @@ hand_holds_verb() {
     fi
     plan_verb_swap row-landed "$PV_ID landed at $RL_COMMIT" writer
     [ -z "$RL_WALK" ] || walk_recorded "$PV_PLAN" "$RL_WALK"
-    say "row-landed — $PV_ID landed at $RL_COMMIT: status, step line and ledger line written to $PV_PLAN in one write; dry-committed first."
+    say "row-landed — $PV_ID landed at $RL_COMMIT: status and step line written to $PV_PLAN in one write; dry-committed first."
     [ -z "$RL_WALK" ] || say "row-landed — $PV_ID registered its walk at ${WALK_HEAD:0:12}: $(walk_said "$RL_WALK")"
     line_settled "$PV_PLAN" "$PV_REPO" "$PV_ID" "$RL_COMMIT"
     [ -z "$LINE_SETTLED_F" ] || say "row-landed — $PV_ID settled the findings $LINE_SETTLED_F: fixed by its landing, their asks closed."
