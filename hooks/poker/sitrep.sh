@@ -1896,7 +1896,7 @@ sitrep_tick_line() {
         'bound-open '*) HO_MODE=open ;;
         'bound-closed '*)
           HO_RUN="$(session_run "$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)" "$HO_SID")"
-          if /usr/bin/grep -qE '^[[:space:]]*-?[[:space:]]*Step[[:space:]]+9[[:space:]]*:.*delivered:' "${HO_RUN#bound-closed }" 2>/dev/null; then
+          if plan_delivered "${HO_RUN#bound-closed }"; then
             HO_MODE=closed
           fi ;;
       esac
@@ -2583,7 +2583,7 @@ sitrep_tick_line() {
     printf 'tree: %s (checked out: %s)\n' "$REPO_REAL" "${RS_HEAD:-a detached HEAD}"
     RS_PROOT="$(cd "$HOOK_DIR/.." 2>/dev/null && pwd -P)"
     case "$RS_UNREAD$RS_CURN" in
-      1*) printf 'step-file: none — the run'"'"'s step could not be read\n' ;;
+      1*) printf 'step-file: none — the run'"'"'s step is unreadable\n' ;;
       [0-9]|[0-9][0-9]) printf 'step-file: %s/skills/canonical-sdlc/steps/%s.md\n' "$RS_PROOT" "$RS_CURN" ;;
       *) printf 'step-file: none — the plan'"'"'s current: (%s) names no step\n' "${RS_CUR:-unset}" ;;
     esac

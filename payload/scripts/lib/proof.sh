@@ -1757,7 +1757,8 @@ _proof_keep_sweep() {  # <dir> <n> -> the newest <n> files of <dir> are left, th
 # forward, and keeps the three answers beside the kept fold, under a key of every file that answer is read from: the
 # plan, its log and the log's kept copy, the reader's libraries and this one. An appended event, an edited line or a
 # changed library is a new key, and the next ask folds again. A fold that failed is returned and never kept. This is the
-# one reader and writer of the held file; it holds the answers and nothing else, and the kept fold's sweep sweeps it.
+# one reader and writer of the held file; it holds the answers and nothing else, in a directory of its own beside the
+# kept fold's, and the kept fold's sweep (`_proof_keep_sweep`) sweeps it.
 _PROOF_STEP_KEEP=128
 _PROOF_PLACE_LIBS=""; _PROOF_PLACE_DIR=""
 proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|abandoned, approved=1|0; exit 2, one line on stderr, when the fold fails
@@ -1779,10 +1780,11 @@ proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|
     deps=("$_READER_LIB_DIR/proof.sh"); for f in $_PROOF_FACTS_LIBS; do deps+=("$_READER_LIB_DIR/$f"); done
     _PROOF_PLACE_LIBS="$(cksum "${deps[@]}" 2>/dev/null)" || _PROOF_PLACE_LIBS=""
     _PROOF_PLACE_LIBS="${_PROOF_PLACE_LIBS//$'\n'/ }"
-    _PROOF_PLACE_DIR="${TMPDIR:-/tmp}/bionic-facts-${UID:-0}/place"
-    mkdir -p -m 700 "$_PROOF_PLACE_DIR" 2>/dev/null
-    [ -O "${_PROOF_PLACE_DIR%/place}" ] && [ -O "$_PROOF_PLACE_DIR" ] \
-      && [ -n "$(find "${_PROOF_PLACE_DIR%/place}" "$_PROOF_PLACE_DIR" -prune -type d ! -perm -020 ! -perm -002 2>/dev/null | sed -n 2p)" ] \
+    # A directory of its own beside the kept fold's, never inside it: a sweep of the kept folds meets no entry it
+    # did not write. Trusted as the kept fold is, owned by this user and writable by no one else.
+    _PROOF_PLACE_DIR="${TMPDIR:-/tmp}/bionic-place-${UID:-0}"
+    [ -d "$_PROOF_PLACE_DIR" ] || mkdir -p -m 700 "$_PROOF_PLACE_DIR" 2>/dev/null
+    [ -O "$_PROOF_PLACE_DIR" ] && [ -n "$(find "$_PROOF_PLACE_DIR" -prune -type d ! -perm -020 ! -perm -002 2>/dev/null)" ] \
       || _PROOF_PLACE_DIR=""
   fi
   deps=("$plan"); [ -z "$dir" ] || for f in run.log kept/record/run.log; do [ ! -f "$dir/$f" ] || deps+=("$dir/$f"); done

@@ -2725,19 +2725,17 @@ sitrep_clock() {  # <epoch> <now epoch> -> `H:MM AM/PM`, then ` YYYY-MM-DD` when
 # Set here, before any verb runs, so a value in the caller's environment never chooses the exit
 # (wave-26 T54; review 17 N2).
 PV_RACE_RC=""
-# plan_delivered <plan> -> 0 when the file is a run closed by delivery: `run_open` calls it closed (not unreadable),
-# its frontmatter carries no `abandoned:`, and a `Step 9:` line carries `delivered:`. 1 otherwise, silent. The plan
-# is judged where it lies, so an archived plan is still its run's: lib/binding.sh `bind_delivered` asks the same of a
-# docs-root candidate only, which an archived plan is not.
+# plan_delivered <plan> -> 0 when the file is a run closed by delivery: `run_open` calls it closed (not unreadable) and
+# the reader's state, read with it, is delivered, never abandoned. 1 otherwise, silent. The plan is judged where it
+# lies, so an archived plan is still its run's: lib/binding.sh `bind_delivered` asks the same of a docs-root candidate
+# only, which an archived plan is not.
 plan_delivered() {
-  local lines rc=0
+  local rc=0
   [ -f "${1:-}" ] || return 1
   run_open "$1" || rc=$?
   [ "$rc" -eq 1 ] || return 1
-  lines=$(_run_lines "$1")
-  awk 'NR == 1 && $0 == "---" { f = 1; next } f && $0 == "---" { exit } f && /^abandoned:/ { a = 1 } END { exit !a }' \
-    <<< "$lines" && return 1
-  grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' <<< "$lines"
+  case "${_PROOF_PLACE:-}" in *state=delivered*) return 0 ;; esac
+  return 1
 }
 
 # pv_plan_arg_file -> the file `--plan` (PV_PLAN_ARG) names, read from the working directory and then from the
@@ -2798,13 +2796,10 @@ plan_verb_open() {
     esac
     exit 1
   fi
-  # The run's step as the reader answers it (lib/fill.sh over lib/proof.sh `proof_step_held`); a step that cannot be read
-  # refuses every verb, which would otherwise judge or write at a step it guessed.
-  if ! _fill_current_load "$PV_PLAN"; then
-    die "REFUSED — the step of $PV_PLAN could not be read (the run's facts did not fold); $verb judges and writes nothing at a step it cannot read. The plan is unchanged."
-    exit 2
-  fi
-  PV_CUR="$_FILL_CURRENT_VALUE"
+  # The run's step as the reader answers it (lib/fill.sh over lib/proof.sh `proof_step_held`). A step that cannot be read
+  # is no step, and PV_CUR_UNREAD says so: a verb that judges or writes at the step refuses on it, never on a guess.
+  PV_CUR=""; PV_CUR_UNREAD=""
+  if _fill_current_load "$PV_PLAN"; then PV_CUR="$_FILL_CURRENT_VALUE"; else PV_CUR_UNREAD=1; fi
   # THE CHECKSUM IS TAKEN HERE, BEFORE ANY PROJECTION READS THE PLAN, so an edit that lands
   # between the read and the swap is an edit the comparison sees.
   PV_SUM="$(cksum < "$PV_PLAN" 2>/dev/null)"
