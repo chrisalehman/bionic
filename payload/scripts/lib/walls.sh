@@ -3139,7 +3139,7 @@ validate_net_zero() {
   _eg_detail="canonical-sdlc — the staged change grows the loaded set by +${delta} B (${before} B at HEAD, ${after} B staged) in ${files}; the doctrine is net zero.
 Not admitted: ${lacks}.
 Fix: pay for it with a removal in the set, or, on the user's word, commit it from a row's tree whose row reads the approval:
-  session-poker.sh task-set ${fix_id} reads=${fix_cell}, approval:doctrine-growth
+  edit the reads cell of ${fix_id} in the plan to: ${fix_cell}, approval:doctrine-growth
   session-poker.sh approve doctrine-growth '<reply>'
 Plan: $PLAN
 Grew:${grown}"

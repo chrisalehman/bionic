@@ -278,7 +278,7 @@ expect_eq "FENCE-4 ## Deferrals that is one fenced list: the carried line goes a
   "$CO_RC|$(fence_lines "$PF4/$CONT_REL" "## Deferrals" out)"
 
 # ============================================================
-section "§LANDS — wave-36 T14 (D13; REQ-7 AC-7.7; C70): close-out lands the rows its merge lands, keeps the session engaged until its last act, and task-set --reason amends a delivered plan"
+section "§LANDS — wave-36 T14 (D13; REQ-7 AC-7.7; C70): close-out lands the rows its merge lands, keeps the session engaged until its last act, and a delivered plan binds bound-closed"
 # ============================================================
 # The rows close-out's merge lands are the plan's open (pending or active) rows of kind `integrate` (the merge
 # itself) and `close` (the row the merge is read by, `merge` in units.sh's reads). Each is landed through the one
@@ -286,12 +286,9 @@ section "§LANDS — wave-36 T14 (D13; REQ-7 AC-7.7; C70): close-out lands the r
 # its engagement and its binding), after act 1 and before act 2, so the plan close-out delivers reads them landed.
 # A run with such rows and no session bound to this plan is refused before the first act, nothing done. Act 3 keeps
 # this session's engaged marker, which is also its binding; it is wiped as close-out's last act, so a close-out
-# that refuses midway leaves the session engaged and its plan verbs working. On the delivered plan, a session that
-# re-engaged and bound it (bound-closed) may set cells with `task-set … --reason '<why>'`, which records the reason
-# on the row's step line; without --reason the delivered refusal stands. Engagement is the consent boundary for a
-# run still moving; a delivered run accepts its merge record and its continuation marks from any session that names
-# it (§DELIVERED) and nothing else, so task-set from a session not engaged is refused at that boundary.
-# fails-when: a delivered plan reads a row its merge landed as pending; task-set --reason on it is refused; the
+# that refuses midway leaves the session engaged and its plan verbs working. A session that re-engages and binds the
+# delivered plan reads it bound-closed; its cells are changed by an edit of the file, never by a verb.
+# fails-when: a delivered plan reads a row its merge landed as pending; the bind of a delivered plan is refused; the
 # marker is gone after a refusal midway.
 lands_rows() {  # <project> -> the plan gains T3 (step 8, integrate) and T4 (step 9, close), pending, each with its step line,
   # and the `- Step 4:` line every plan past Step 4 carries (row-landed's dry commit judges a writer's copy at current: 4)
@@ -342,28 +339,11 @@ expect_contains "LANDS-3b …T4's too" "- T4: landed $LA_MAIN " "$(lands_step "$
 expect_contains "LANDS-4 …and the card says which rows it landed" "rows-landed: T3 T4 at main @ ${LA_MAIN:0:7}" "$CO_OUT"
 expect_eq "LANDS-5 the engaged marker is gone after run, and its removal is the card's last line" "no|yes" \
   "$(tmp_file_exists "$PLA" engaged "$LA_SID")|$(printf '%s\n' "$CO_OUT" | tail -1 | /usr/bin/grep -q '^disengaged: ' && echo yes || echo no)"
-# task-set on the delivered plan: the session re-engages and binds it (bound-closed)
-lands_poker "$PLA" "$LA_SID" task-set T3 agent=w-merge --reason 'named the agent after delivery'
-expect_eq "LANDS-6 task-set is neither of the two facts a delivered run accepts by name: an unengaged session is refused at the consent boundary, rc 0, the plan unchanged" \
-  "0|landed|—" "$LP_RC|$(lands_cell "$PLA" T3 11)|$(lands_cell "$PLA" T3 6)"
-expect_contains "LANDS-6b …saying NOT-ENGAGED" "NOT-ENGAGED" "$LP_OUT"
 # the session re-engages and binds its delivered plan by the verb (ruling r1791955629-34788): bound-closed
 lands_bind "$PLA" "$LA_SID"
 expect_eq "LANDS-7a the bind verb binds the delivered plan (rc 0)" "0" "$LP_RC"
 expect_contains "LANDS-7a2 precondition: the session reads its delivered plan as bound-closed (lib/run.sh session_run)" "bound-closed $PLA/$PLAN_REL" \
   "$(bash -c '. "$1/roots.sh" && . "$1/run.sh" || exit 9; session_run "$2" "$3"' _ "$REPO_ROOT/payload/scripts/lib" "$PLA" "$LA_SID")"
-LA_CK1="$(cksum < "$PLA/$PLAN_REL")"
-lands_poker "$PLA" "$LA_SID" task-set T3 agent=w-merge
-expect_eq "LANDS-7 bound to the delivered plan, task-set without --reason keeps the delivered refusal (rc 1), the plan unchanged" \
-  "1|$LA_CK1" "$LP_RC|$(cksum < "$PLA/$PLAN_REL")"
-expect_contains "LANDS-7b …the refusal naming the closed binding" "no bound open run (bound-closed" "$LP_OUT"
-lands_poker "$PLA" "$LA_SID" task-set T3 agent=w-merge --reason 'named the agent after delivery'
-expect_eq "LANDS-8 AC-7.7 with --reason it is accepted: rc 0, the cell set, never NOT-ENGAGED" "0|w-merge|no" \
-  "$LP_RC|$(lands_cell "$PLA" T3 6)|$(contains "$LP_OUT" "NOT-ENGAGED")"
-expect_contains "LANDS-8b …and the reason is recorded on the row's step line, after its landing" \
-  "- T3: landed $LA_MAIN " "$(lands_step "$PLA" T3)"
-expect_eq "LANDS-8c …ending ' reason: <why>'" "yes" \
-  "$(lands_step "$PLA" T3 | /usr/bin/grep -q ' reason: named the agent after delivery$' && echo yes || echo no)"
 # no session bound: the rows cannot be landed, so nothing is done
 PLB="$(mk_fixture lands-unbound)"; advance_to "$PLB" 8; lands_rows "$PLB"
 LB_CK="$(cksum < "$PLB/$PLAN_REL")"
@@ -846,7 +826,7 @@ printf 'release-check: bash tests/lib/release-check.sh\n' >> "$PBP/.bionic/confi
 inh_place "$PBP" "$(bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_line check "$2" 2026-10-05T10:00:00Z record/wave-01-fixture/release-check.log' \
   _ "$REPO_ROOT/payload/scripts/lib" "$BP_H")"
 printf '# T3: the pull request\n\n    gh pr create --base main --head wave/01-fixture --fill\n' > "$BP_REC/T3-pr.md"
-lands_poker "$PBP" "$BP_SID" task-set T3 Files=.bionic/docs/record/wave-01-fixture/T3-pr.md
+sed -i '' -E '/^\| T3 \|/s#\| none \|#| .bionic/docs/record/wave-01-fixture/T3-pr.md |#' "$PBP/$PLAN_REL"
 expect_eq "BP-0 precondition: the session is bound, the integrate row names its record, and the judge reads the check at the release head" \
   "0|pending|0|covered" "$LP_RC|$(lands_cell "$PBP" T3 11)|$(bp_judge "$PBP" "$BP_H")"
 lands_poker "$PBP" "$BP_SID" deliver T3

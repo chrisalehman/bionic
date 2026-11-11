@@ -1124,7 +1124,7 @@ PF_VERDICTS_LIST
     # A READ ROW RETURNS ONLY TO ITS OWN READER, AND ONLY WHOLE (wave-27 T43; review pass 17 F3):
     # handed --reader, `units_live_rows` names a read row only when its agent cell is this reader
     # and every question it carries now has a reading at this head; until then it stays active and
-    # is not offered, and PF_HELD names it. A row abandoned part-way is returned by task-set.
+    # is not offered, and PF_HELD names it. A row abandoned part-way is returned when its agent is stopped.
     PF_BACK=""; PF_HELD=""
     PF_LIVE=""; [ "$PF_KIND" != review ] || PF_LIVE="$(_units_live "$PV_PLAN")" \
       || { die "REFUSED — the run's facts cannot be read, so a review row's launch cannot be taken back; the plan is unchanged; run again: the same proof-add."; exit 1; }
@@ -1170,7 +1170,7 @@ PF_VERDICTS_LIST
     for _pf_id in $PF_BACK; do
       _pf_nm="$(printf '%s\n' "$PF_LIVE" | awk -F'\t' -v id="$_pf_id" '$1 == id && $2 == "active" { print $3 }')"
       [ -z "$_pf_nm" ] || units_dispatch_back "$PV_PLAN" "$_pf_id" "$_pf_nm" \
-        || say "proof-add — $_pf_id is back to pending in the plan, and its launch as $_pf_nm could not be taken back in the run's log: run task-set $_pf_id status=pending, which takes it back."
+        || say "proof-add — $_pf_id is back to pending in the plan, and its launch as $_pf_nm could not be taken back in the run's log: once $_pf_nm is stopped, bash ${HOOK_DIR}/stop-orders.sh stopped $_pf_nm takes it back."
     done
     # A FAILING READING IS THE PERSON'S TO WAIVE FROM THE MOMENT IT IS RECORDED: fix it, or waive the question. The ask
     # opens here, under the key the judge and the waive verb use, rather than waiting for an advance or a commit to be

@@ -580,12 +580,11 @@ pushed_onto() {  # <a placing row> -> that row, carrying `pushed=`
 # no row's, and appends nothing.
 #
 # THE TREE IS STILL THE PLAN'S, until it is an event of its own: a row's empty `worktree` and `base` cells are
-# filled from the tree spawn-worktree.sh recorded for the name (lib/worktree.sh `workspace_record_for_name`), as
-# the plan's own verb writes a cell (`task-set`). That write is a plan transaction of about a second, so it runs
+# filled from the tree spawn-worktree.sh recorded for the name (lib/worktree.sh `workspace_record_for_name`), by
+# lib/units.sh `units_cells_write`, the cell write no person calls. It reads and judges the whole plan, so it runs
 # detached, its output and then `rc=<n>` in `.bionic/tmp/dispatch-<sid>.log`, which the tick names when the
-# status is not 0. Another write to the plan between its read and its swap refuses it, so it tries again.
+# status is not 0. Another write to the plan between its read and its move refuses it, so it tries again.
 # BIONIC_LAUNCH_SYNC_INLINE=1 runs it in the foreground, so a test reads the plan the moment the hook returns.
-POKER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-poker.sh"
 
 dispatch_event() {  # <confirmed roster row> -> 0 always; appends the launch's dispatch event to its run's log
   local r="$1" row brief abs
@@ -623,15 +622,15 @@ dispatch_tree_cells() {  # <row> <name> -> the row's empty worktree and base cel
   case "$bs$base" in *[A-Za-z0-9]*) case "$bs" in *[A-Za-z0-9]*) ;; *) ! units_has_column "$plan" base || pairs+=("base=${base:0:8}") ;; esac ;; esac
   [ "${#pairs[@]}" -gt 0 ] || return 0
   while [ "$n" -lt 5 ]; do
-    CLAUDE_CODE_SESSION_ID="$BIONIC_SID" "${BASH:-bash}" "$POKER" task-set "$row" "${pairs[@]}" && return 0
-    n=$((n + 1)); sleep 1
+    units_cells_write "$plan" "$row" "${pairs[@]}"
+    case $? in 0) return 0 ;; 3) n=$((n + 1)); sleep 1 ;; *) echo "the cells ${pairs[*]} of $row break the plan's table"; return 1 ;; esac
   done
   return 1
 }
 
 dispatch_tree_start() {  # <row> <name> -> 0 always; fills the tree cells without waiting
   local log=/dev/null
-  [ -n "$1" ] && [ -f "$POKER" ] || return 0
+  [ -n "$1" ] || return 0
   if [ -d "$BIONIC_ROOT/.bionic/tmp" ] && [ ! -L "$BIONIC_ROOT/.bionic/tmp/dispatch-${BIONIC_SID}.log" ]; then
     log="$BIONIC_ROOT/.bionic/tmp/dispatch-${BIONIC_SID}.log"
   fi

@@ -681,14 +681,14 @@ expect_eq "ST-6 …and the table reader names T1" "T1" "$(st_ready)"
 
 # ============================================================
 # ============================================================
-section "§TSENTENCE: task-add and task-set refuse a Tasks cell with no sentence after its title, or with a backticked one, in the Step-3 card's words"
+section "§TSENTENCE: task-add refuses a Tasks cell with no sentence after its title, or with a backticked one, in the Step-3 card's words"
 # ============================================================
 # A Tasks cell opens on its title, then one plain sentence saying what the row makes true; the Step-3 card prints the
-# sentence under the row and refuses a cell without one. The two verbs that write the cell refuse it where it is typed,
+# sentence under the row and refuses a cell without one. task-add, the verb that writes the cell, refuses it where it is typed,
 # through the card's own check (`card.sh task-cell`), so the words are the card's and the plan is left as it was.
 # FIXTURE FIDELITY: s34's plan at current: 5, bound to this session; every write is the real verb.
 # fails-when: a verb writes a cell the card would refuse, refuses a cell the card would draw, says other words than the
-# card's check, refuses a task-set that does not write the task cell, or changes a byte of the plan when it refuses.
+# card's check, or changes a byte of the plan when it refuses.
 TS_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 TS_CARD="${BIONIC_HOOKS_DIR}/../payload/scripts/card.sh"
 RTS="$(make_repo tsentence)"; ( cd "$RTS" && git commit -q --allow-empty -m init )
@@ -722,32 +722,13 @@ expect_eq "TSENT-3a task-add of a cell whose sentence carries a backtick is refu
 expect_contains "TSENT-3b …in the card's words" "$TS_WORDS" "$OUT"
 expect_eq "TSENT-3c …and the plan is unchanged" "$TS_BEFORE" "$(cat "$PTS")"
 
-# task-set judges the task cell it writes, and only that: s34's own cells carry no sentence, and setting another
-# column of their rows is not refused for it.
-poke "$RTS" task-set T5 size=45
-expect_eq "TSENT-4 task-set of another column on a row whose cell has no sentence is not refused (exit 0)" "0" "$RC"
-poke "$RTS" task-set T5 'task=The floor. It proves the two builds together.'
-expect_eq "TSENT-5 task-set writes a cell with a plain sentence (exit 0)" "0" "$RC"
-expect_contains "TSENT-5b …as typed" "| T5 | 5 | verify | The floor. It proves the two builds together. |" "$(ts_row T5)"
-
-TS_BEFORE="$(cat "$PTS")"
-poke "$RTS" task-set T2 'task=The second build.'
-expect_eq "TSENT-6 task-set of a cell with no sentence is refused (exit 1)" "1" "$RC"
-expect_contains "TSENT-6b …in the card's words" "$(ts_card_says T2 'The second build.')" "$OUT"
-expect_eq "TSENT-6c …and the plan is unchanged" "$TS_BEFORE" "$(cat "$PTS")"
-poke "$RTS" task-set T2 'task=The second build. It builds `b.sh` too.' -- T5 'task=The floor.'
-expect_eq "TSENT-7 task-set of two groups, one cell backticked and one with no sentence, is refused (exit 1)" "1" "$RC"
-expect_contains "TSENT-7b …naming the backticked one in the card's words" \
-  "$(ts_card_says T2 'The second build. It builds `b.sh` too.')" "$OUT"
-expect_contains "TSENT-7c …and the other in the same refusal" "$(ts_card_says T5 'The floor.')" "$OUT"
-expect_eq "TSENT-7d …and the plan is unchanged" "$TS_BEFORE" "$(cat "$PTS")"
 POKE_BOUND="$TS_BOUND_WAS"
 
 # ============================================================
-section "§CAP: task-add and task-set refuse a title over the card's cap where it is typed, in the card's words, the born suffix counted"
+section "§CAP: task-add refuses a title over the card's cap where it is typed, in the card's words, the born suffix counted"
 # ============================================================
 # The Step-3 card refuses a title of more than 30 columns. A row added or reset with one landed in the plan and
-# reddened the card at the next draw, a step away from the hand that typed it, so the two verbs that write the cell
+# reddened the card at the next draw, a step away from the hand that typed it, so the verb that writes the cell
 # measure it first, through the card's own check (`card.sh task-cell`): the words are the card's, every refused cell
 # is named in the one refusal, and the plan is left as it was. The whole cell is judged as it will be written, the
 # ` · born: …` tag task-add appends included, so no tag can push a title the verb admitted over the cap.
@@ -790,19 +771,6 @@ expect_eq "CAP-3d control: the same cell with a 30-column title and the born tag
 CP_BORN_LAST="$(printf '%s\n' "$OUT" | tail -1)"
 expect_contains "CAP-3e …with the tag written after the sentence" "| T8 | 7 | doc | ${CP_T30}. The fixture ships as one release. · born: review" "$(cp_row T8)"
 
-CP_BEFORE="$(cat "$PCP")"
-poke "$RCP" task-set T5 "task=${CP_T31}. It proves the two builds together."
-expect_eq "CAP-4 task-set of a 31-column title is refused (exit 1)" "1" "$RC"
-expect_contains "CAP-4b …in the card's words" "$(cp_says T5 "${CP_T31}. It proves the two builds together.")" "$OUT"
-expect_eq "CAP-4c …and the plan is unchanged" "$CP_BEFORE" "$(cat "$PCP")"
-poke "$RCP" task-set T2 "task=${CP_T31}. The second build." -- T5 "task=${CP_T31}. It proves the two builds together."
-expect_eq "CAP-5 task-set of two groups, both over the cap, is refused (exit 1)" "1" "$RC"
-expect_contains "CAP-5b …naming the first in the card's words" "$(cp_says T2 "${CP_T31}. The second build.")" "$OUT"
-expect_contains "CAP-5c …and the second in the same refusal" "$(cp_says T5 "${CP_T31}. It proves the two builds together.")" "$OUT"
-expect_eq "CAP-5d …and the plan is unchanged" "$CP_BEFORE" "$(cat "$PCP")"
-poke "$RCP" task-set T5 "task=${CP_T30}. It proves the two builds together."
-expect_eq "CAP-6 task-set writes a title of exactly 30 columns (exit 0)" "0" "$RC"
-expect_contains "CAP-6b …as typed" "| T5 | 5 | verify | ${CP_T30}. It proves the two builds together. |" "$(cp_row T5)"
 
 # ============================================================
 section "§OWED: task-add ends on one line naming the task-list entry the turn now owes, by the row's title"
@@ -856,7 +824,7 @@ ex_add() {  # <id> <files> <born> -> OUT, RC: task-add of a step-4 build row bor
   poke "$REX" task-add "$1" 4 build "Fix $1. The defect is gone." bionic:implementor '—' 30 REQ-1 "$2" --born "$3"
 }
 ex_born_line() { printf '%s\n' "$OUT" | /usr/bin/grep 'is review-born' || :; }
-ex_mark() { /usr/bin/grep "^- $1: " "$PEX" | sed -n 's/.* born: /born: /p'; }
+ex_mark() { bash -c '. "$1/units.sh" >/dev/null 2>&1; _units_born_logged "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$PEX" | /usr/bin/grep "^- $1: " | sed -n 's/.* born: /born: /p'; }
 expect_eq "EX-0 precondition: the plan reads fix-cap: 2 and no fix-policy: (the default, S1,S2-on), and both findings are read" \
   "2||3|1" "$(sed -n 's/^fix-cap: //p' "$PEX")|$(sed -n 's/^fix-policy: //p' "$PEX")|$(/usr/bin/grep -c '^finding: ' "$REX/.bionic/docs/$EX_OWN")|$(/usr/bin/grep -c '^finding: ' "$REX/.bionic/docs/$EX_CARRIED")"
 
@@ -872,17 +840,17 @@ expect_eq "EX-3 the third born review S2 on row lands at fix-cap: 2 (exit 0): in
 EX_LINE="$(ex_born_line)"
 expect_contains "EX-3b …its line ends exempt under fix-policy: S1,S2-on (AC-1.3)" " · exempt under fix-policy: S1,S2-on" "$EX_LINE"
 expect_absent "EX-3c …and names no count of the cap for an exempt row (AC-1.3)" "of cap" "$EX_LINE"
-expect_eq "EX-3d …its ledger marker is the plain rating" "born: review S2 on" "$(ex_mark T8)"
+expect_eq "EX-3d …its born event carries the plain rating" "born: review S2 on" "$(ex_mark T8)"
 
 # A carried finding and a promoted one count; the third counted row is refused.
 ex_add T9 lib/c1.sh "$EX_CARRIED#1"
 expect_eq "EX-4 a finding carried from another plan's record lands, counted (exit 0)" "0" "$RC"
 expect_contains "EX-4b …its line ends counted 1 of 2 (AC-1.3)" " · counted 1 of 2" "$(ex_born_line)"
-expect_eq "EX-4c …its marker names the carried record, as task-add has always written it" "born: review S2 on of=$EX_CARRIED#1" "$(ex_mark T9)"
+expect_eq "EX-4c …its born event names the carried record" "born: review S2 on of=$EX_CARRIED#1" "$(ex_mark T9)"
 ex_add T10 lib/p1.sh "$EX_OWN#1"
 expect_eq "EX-5 a finding rated S3 on that the person moved to fix lands, counted (exit 0)" "0" "$RC"
 expect_contains "EX-5b …its line ends counted 2 of 2 (AC-1.3)" " · counted 2 of 2" "$(ex_born_line)"
-expect_eq "EX-5c …its marker says it was promoted" "born: review S3 on of=$EX_OWN#1 promoted" "$(ex_mark T10)"
+expect_eq "EX-5c …its born event says it was promoted" "born: review S3 on of=$EX_OWN#1 promoted" "$(ex_mark T10)"
 EX_BEFORE="$(cat "$PEX")"
 ex_add T11 lib/p2.sh "$EX_OWN#2"
 expect_eq "EX-6 a third counted row, promoted from S3 on, is refused at fix-cap: 2 (exit 1) (AC-1.2)" "1" "$RC"

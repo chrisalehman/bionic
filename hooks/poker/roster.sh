@@ -1919,9 +1919,9 @@ EOF
     if [ "$BIND_RC" -eq 0 ]; then
       say "bound $BIND_PATH"
       # A DELIVERED RUN (wave-36 T14; ruling r1791955629-34788): bound, and read bound-closed, so every verb keeps
-      # its closed-run refusal but task-set --reason.
+      # its closed-run refusal; the plan is changed by an edit of its file.
       [ "${BIND_DELIVERED:-}" != yes ] \
-        || say "$BIND_PATH is delivered: this session reads it bound-closed, and only task-set … --reason '<why>' writes it"
+        || say "$BIND_PATH is delivered: this session reads it bound-closed, and no verb writes it; a cell of it is changed by an edit of the file"
       # THE RUN'S SESSIONS (wave-36 T9; D10): `bind_plan` writes this session's `- session:` line
       # into the plan beside the marker, `by bind`; a plan that could not take it is said, not hidden.
       case "${BIND_SESSION:-}" in

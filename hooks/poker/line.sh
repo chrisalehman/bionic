@@ -79,7 +79,7 @@ row_writer() {  # <roster> <plan> <row> <agent cell>
 #     task-scale plan carries no ledger), else the one record under `<docs-root>/record/` its Files
 #     name (a `.progress.md` and `assumptions.md` are bookkeeping, not the artifact). The file exists,
 #     is no symbolic link, and lies under the docs root's `record/`. A row naming none, or several,
-#     is refused naming the cell task-set writes: artifact= when the Tasks header has the column, else Files=;
+#     is refused naming the cell to edit in the plan: artifact when the Tasks header has the column, else Files;
 #   - a review row: a `proved: kind=review` line under `## SDLC State` names that record;
 #   - the working head reads as a commit;
 #   - no ruling for the row's writer is unread.
@@ -146,9 +146,9 @@ deliver_check() {
 $(printf '%s\n' "$files" | tr ',' '\n')
 DELIVER_FILES
     if pv_header_cells "$PV_PLAN" tasks 2>/dev/null | /usr/bin/grep -ix artifact >/dev/null; then
-      fix="$call task-set $PV_ID artifact=<path>"
+      fix="edit the artifact cell of $PV_ID in the plan to <path>"
     else
-      fix="$call task-set $PV_ID Files=<path>"
+      fix="edit the Files cell of $PV_ID in the plan to name <path>"
     fi
     if [ "$n" -eq 0 ]; then
       die "REFUSED — $PV_ID names no artifact: no artifact cell names one and its Files name no record under record/; name it: $fix, then $call deliver $PV_ID. The plan is unchanged."
@@ -894,7 +894,7 @@ hand_holds_verb() {
   # THE LANDING'S ROW (wave-28 T6; REQ-3 AC-3.2, D7; ruling A-orch-81). `line_publish`
   # (lib/line.sh) runs this verb, as a command, inside its publish lock once the fast-forward and
   # its `published` event are written: the row's status `landed` (`units_table_cells` on the tasks
-  # table, judged by `units_validate` as `task-set` judges a status), its `- T<n>:` line
+  # table, judged by `units_validate` as the write hook judges a person's edit), its `- T<n>:` line
   # (`units_step_line`), onto ONE copy and through ONE `plan_verb_swap ... writer`: both lines or none.
   # Writer mode is the point: past Step 4 the dry copy reads `current: 4`, so the declared debt the
   # publish has just written (T5) cannot refuse the publish's own bookkeeping, and the debt stays
@@ -907,7 +907,7 @@ hand_holds_verb() {
   # `## Dispatch ledger`, where an older run kept one, is history and is not written.
   #
   # A PLACEHOLDER LEAD IS REPLACED, NOT KEPT (wave-33 T6; REQ-3 AC-3.3, D5). A line that opens
-  # `pending dispatch` (the Step-3 template, `task-add`, `task-split`) gives that lead to the landing
+  # `pending dispatch` (the Step-3 template, `task-add`) gives that lead to the landing
   # text and keeps the rest of its words, a ` born: ` marker included (`units_born` reads it there):
   # `- T5: pending dispatch — .worktrees/01-T5` lands as `- T5: landed <commit> <at> — .worktrees/01-T5`.
   #
