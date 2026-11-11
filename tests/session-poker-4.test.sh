@@ -53,8 +53,8 @@ section "§SEV §FACT-rate §FACT-table §FACT-derive §FACT-shown §FACT-old §
 # `findings: <n>`, that many `finding: <n> <S1-S4> <on|off> <path>:<line>|- <title>` lines, and a `<path>:<line>` with
 # a `shown: <n> <command>` line for each finding the table sends to fix. A READER'S RATING IS FINAL: an `unsure:` line
 # is read by nothing. The result is derived (a fix gives fail, any other finding flag, none pass); a differing
-# `result:` or a `priority:` the table does not give is refused. Registration writes `deferred:` per deferred finding
-# after the proof line, and no `check:` line. A reader with no `severity` push registers as 1.12.0 did.
+# `result:` or a `priority:` the table does not give is refused. Registration appends one deferral event per deferred
+# finding to the run's log, and no `check:` line. A reader with no `severity` push registers as 1.12.0 did.
 #
 # FIXTURE FIDELITY. §56's shape: a bound plan, its working branch in a linked worktree, real commits, roster rows from
 # the production writer with `questions=` and `pushed=` appended, read off the line by key.
@@ -97,7 +97,7 @@ sev_add() {  # <file> [<reader>] -> registers it through the verb
   poke "$RSEV" proof-add review "record/wave-01-fixture/$1.md" --question adversarial --reader "${2:-sev-crit}"
 }
 sev_last() { s46_proved "$PSEV" | tail -1; }
-sev_lines() { /usr/bin/grep -E '^(deferred|check): ' "$PSEV"; }  # the plan's finding lines
+sev_lines() { bash -c '. "$1"; proof_findings_owed "$2"' _ "$SEV_LIB" "$PSEV" 2>/dev/null; }  # the run's deferrals, rated
 expect_regex "SEV-0 precondition: the working branch's head is C1, a 40-hex commit" '^[0-9a-f]{40}$' "$SEV_C1"
 expect_eq "SEV-0b precondition: the reader's row carries the pushed key, read by key" "checks-adversarial,severity" \
   "$(/usr/bin/grep -F '|name=sev-crit|' "$SEV_RS" | tr '|' '\n' | sed -n 's/^pushed=//p')"
@@ -181,16 +181,13 @@ EOF
   sev_add "t-$s-$r"
   expect_eq "SEV-table §FACT-table AC-8.3 $s $r registers (exit 0)" "0" "$RC"
   expect_regex "SEV-table …$s $r: the proof line says result=$want" "evidence=record/wave-01-fixture/t-$s-$r.md .* result=$want scope=piece$" "$(sev_last)"
-  sevd="$(/usr/bin/grep -c "^deferred: record/wave-01-fixture/t-$s-$r.md#1 " "$PSEV")"
+  sevd="$(sev_lines | /usr/bin/grep "^record/wave-01-fixture/t-$s-$r.md#1 ")"
   case "$p" in
-    defer) expect_eq "SEV-table …$s $r: one deferred: line, read back whole" \
-             "deferred: record/wave-01-fixture/t-$s-$r.md#1 $s $r \"the $s $r cell\"" \
-             "$(/usr/bin/grep "^deferred: record/wave-01-fixture/t-$s-$r.md#1 " "$PSEV")" ;;
-    *)     expect_eq "SEV-table …$s $r ($p): no deferred: line (beside the S2 off and S3 on rows that write one)" "0" "$sevd" ;;
+    defer) expect_eq "SEV-table …$s $r: one deferral, read back whole" \
+             "record/wave-01-fixture/t-$s-$r.md#1 $s $r defer \"the $s $r cell\"" "$sevd" ;;
+    *)     expect_eq "SEV-table …$s $r ($p): no deferral (beside the S2 off and S3 on rows that append one)" "" "$sevd" ;;
   esac
 done
-expect_eq "SEV-table2 …the deferred: lines sit inside ## SDLC State, after their proof lines" "2" \
-  "$(awk '/^## /{ s = ($0 ~ /^## SDLC State/) } s && /^deferred: /{ n++ } END { print n + 0 }' "$PSEV")"
 sev_rec r-pri-bad flag "findings: 1" "finding: 1 S2 off - written as fix" "priority: 1 fix"
 s42_snap "$RSEV" "$PSEV"; sev_add r-pri-bad
 s42_unchanged "SEV-table3 §FACT-table AC-8.3 a record that writes a priority the table does not give (S2 off as fix)" 1 "$PSEV"
@@ -272,12 +269,9 @@ expect_contains "SEV-shown3 …is refused as a fix shown nowhere, naming the lin
 expect_absent "SEV-shown3b …and the refusal offers no unsure: line" "unsure:" "$OUT"
 sev_rec sh-defer-unsure flag "findings: 2" 'finding: 1 S3 on - a "quoted" word wrong' "unsure: 1 which platforms" "finding: 2 S4 on - a typo"
 sev_add sh-defer-unsure
-expect_eq "SEV-shown4 a finding the table defers, beside an unsure: line, writes its deferral alone; a note writes none" \
-  "deferred: record/wave-01-fixture/sh-defer-unsure.md#1 S3 on \"a 'quoted' word wrong\"" \
-  "$(/usr/bin/grep -E '^(deferred|check): record/wave-01-fixture/sh-defer-unsure.md#' "$PSEV" | paste -sd'|' -)"
-expect_eq "SEV-shown5 …and the line follows the proof line it belongs to (proof_add_line)" \
-  "deferred: record/wave-01-fixture/sh-defer-unsure.md#1" \
-  "$(awk '/^proved: .*sh-defer-unsure/ { getline; print $1 " " $2 }' "$PSEV")"
+expect_eq "SEV-shown4 a finding the table defers, beside an unsure: line, appends its deferral alone; a note appends none" \
+  "record/wave-01-fixture/sh-defer-unsure.md#1 S3 on defer \"a 'quoted' word wrong\"" \
+  "$(sev_lines | /usr/bin/grep -F 'record/wave-01-fixture/sh-defer-unsure.md#' | paste -sd'|' -)"
 expect_eq "SEV-shown6 …and no check: line names it" "0" "$(/usr/bin/grep -c '^check: record/wave-01-fixture/sh-defer-unsure.md#' "$PSEV")"
 
 # ---------- the priority a record never states: library, release-check and the tick ----------
@@ -295,14 +289,12 @@ sev_rec o-fail fail
 sev_add o-fail old-crit
 expect_eq "SEV-old §FACT-old AC-8.8 a record with a result and no findings, from a reader with no pushed= key, registers (exit 0)" "0" "$RC"
 expect_regex "SEV-old2 …with its result as written" "evidence=record/wave-01-fixture/o-fail.md question=adversarial reader=old-crit result=fail scope=piece$" "$(sev_last)"
-expect_regex "SEV-old2b …placed after the last reading's finding lines, not between a proof and its own" "^proved: .*evidence=record/wave-01-fixture/o-fail.md " \
-  "$(awk '/^deferred: record\/wave-01-fixture\/sh-defer-unsure.md#1 / { getline; print; exit }' "$PSEV")"
 SEV_N="$(sev_lines | wc -l | tr -d ' ')"
 sev_rec o-findings fail "findings: 1" "finding: 1 S4 off - finding lines the old reading ignores"
 sev_add o-findings old-crit
 expect_eq "SEV-old3 …finding lines in such a record are ignored: it registers (exit 0)" "0" "$RC"
 expect_regex "SEV-old4 …with result: fail as written, though S4 off alone would derive flag" "o-findings.md .* result=fail scope=piece$" "$(sev_last)"
-expect_eq "SEV-old5 …and writes no plan line (the count stands at $SEV_N, beside the lines SEV-table wrote)" "$SEV_N" "$(sev_lines | wc -l | tr -d ' ')"
+expect_eq "SEV-old5 …and appends no deferral (the count stands at $SEV_N, beside the deferrals SEV-table appended)" "$SEV_N" "$(sev_lines | wc -l | tr -d ' ')"
 sev_rec o-nopush fail
 sev_add o-nopush nosev-crit
 expect_eq "SEV-old6 a reader whose pushed= names other files, not severity, registers the old form too (exit 0)" "0" "$RC"
@@ -367,13 +359,14 @@ expect_contains "AW-1b …the item the first failing reading's registration open
 SEV_AW="$(sev_store | /usr/bin/grep "|key=waive:adversarial|")"; poke "$RSEV" current 8
 expect_eq "AW-2 a second refusal on the same failing question opens nothing new: one open round, the key's rounds unchanged" "1|1|same" \
   "$RC|$(sev_store | /usr/bin/grep -c '|key=waive:adversarial|state=open|')|$([ "$(sev_store | /usr/bin/grep '|key=waive:adversarial|')" = "$SEV_AW" ] && echo same)"
-cp "$PSEV" "$TMPROOT/sev-before-waive.md"
 poke "$RSEV" waive adversarial 'I waive the adversarial reading for now'
 expect_eq "AW-3 the waive verb records the user's reply (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "AW-3a …and closes the item it answers" "|key=waive:adversarial|state=closed|by=waive|" "$(sev_store)"
+# The waiver taken back where it stands: no verb takes one back, so its event comes out of the run's log by hand.
+AW_LOG="$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "${SEV_LIB%/*}" "$PSEV")"
+/usr/bin/grep -v '^run/v1|ev=waiver|question=adversarial|' "$AW_LOG" > "$TMPROOT/aw-log"; cat "$TMPROOT/aw-log" > "$AW_LOG"
 # The opener doctored to open nothing, in a plugin copy whose loader finds its own library, turns AW-4 red.
-cp "$TMPROOT/sev-before-waive.md" "$PSEV"
 AWM="$TMPROOT/aw-mutant"; mkdir -p "$AWM/hooks"
 cp -R "$BIONIC_HOOKS_DIR/." "$AWM/hooks/"; cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$AWM/scripts"
 awk 'index($0, "owed_open \"waive:$q\"") { sub(/owed_open /, ": "); n++ } { print } END { print n + 0 > "/dev/stderr" }' \
@@ -385,9 +378,8 @@ poke "$RSEV" current 8
 POKER="$AW_POKER_KEEP"
 expect_eq "AW-Ma AC-4.5 the mutant still refuses current 8 (exit 1), and AW-4 goes red: no item opens" "1|" \
   "$RC|$(sev_owed | cut -f1 | /usr/bin/grep '^waive:')"
-cp "$TMPROOT/sev-before-waive.md" "$PSEV"
 poke "$RSEV" current 8
-expect_eq "AW-4 the waiver taken back out of the plan, the refusal is a new need: the item opens again" "1|waive:adversarial" \
+expect_eq "AW-4 the waiver taken back out of the run's log, the refusal is a new need: the item opens again" "1|waive:adversarial" \
   "$RC|$(sev_owed | cut -f1 | /usr/bin/grep '^waive:')"
 sev_cur 4
 sev_rec c-later flag "findings: 2" "finding: 1 S2 off - a side path still wrong" "finding: 2 S4 off - a comment misstates it"
@@ -801,8 +793,8 @@ expect_eq "RS-2b …naming the item and the two it offers, nothing recorded" "1|
 poke "$RVG" reply '1 run, 3 fix, rest default'
 expect_eq "RS-3 AC-13.3 '1 run, 3 fix, rest default': 1 run, 2 its default, 3 fixed, recorded in that order (exit 0)" \
   "0|withheld: row:AC-9.1|applied: row:AC-1.1 waive-row rc=0|applied: finding:$RS_F finding-move rc=0" "$RC|$(rs_done)"
-expect_eq "RS-3b …AC-1.1 waived and the finding moved to fix, each on the user's words" "| waived |1" \
-  "$(/usr/bin/grep -oE '^\| AC-1\.1 \| [^|]* \| [a-z]+ \|' "$PVG" | /usr/bin/grep -oE '\| [a-z]+ \|$')$(/usr/bin/grep -cF "moved: $RS_F to=fix by=Dana Fixture at=" "$PVG")"
+expect_eq "RS-3b …AC-1.1 waived and the finding moved to fix, each on the user's words" "| waived |to=fix|by=Dana Fixture|words=1 run, 3 fix, rest default|" \
+  "$(/usr/bin/grep -oE '^\| AC-1\.1 \| [^|]* \| [a-z]+ \|' "$PVG" | /usr/bin/grep -oE '\| [a-z]+ \|$')$(bash -c '. "$1"; proof_move_line "$2" "$3"' _ "$S46_LIB" "$PVG" "$RS_F" | /usr/bin/grep -oE '\|to=fix\|by=[^|]*\|words=[^|]*\|' | cut -c2-)"
 rs_page "key=row:AC-9.1|default=waive-row AC-9.1|${RS_ROW/pick=default/pick=other}" "${RS_FIND/pick=other/pick=default}"
 poke "$RVG" reply 'all recommended'
 expect_eq "RS-4 AC-13.3 'all recommended' takes the orchestrator's choice on each, in order (exit 0)" \
