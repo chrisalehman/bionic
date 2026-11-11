@@ -11,6 +11,7 @@
 #              refusal naming it; the same key on a version-14 plan is admitted.
 #   §GATE      the commit gate (hooks/bash-walls.sh) asks the run's facts for the step's evidence: a commit at
 #              Step 6 whose log holds no review event is refused, and admitted once the log holds one per question.
+#              The same run at 15, brought forward, is refused as the 14 is, and with its reviews still refused, naming each fact its log lacks.
 #
 # FIXTURE FIDELITY. Each plan is a real file in a scratch git repository with an engaged session, written
 # through hooks/canonical-sdlc-governing-skill.sh as the Write tool would post it. Every plan carries the
@@ -144,5 +145,23 @@ for q in evidence adversarial structure; do
 done
 gate
 expect_status "the same commit with a review event of each question is admitted" 0 "$GATE_EXIT"
+
+# The same run at 15, made by the act from a version-14 plan: judged on what its log holds, and refused naming what it lacks.
+P2="$R/.bionic/docs/plans/epic-01-demo/wave-02-y.plan.md"; L2="$R/.bionic/docs/record/wave-02-y/run.log"; mkdir -p "$R/.bionic/docs/specs"; : > "$R/.bionic/docs/specs/r.md"
+{ printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\nmulti_agent: true\ndeploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n\n## Tasks\n\n'
+  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n|---|---|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | One. | — | — | 30 | REQ-1 | a.sh | — | — | landed |\n\n'
+  printf '## SDLC State\n\ncurrent: 6\napproved-by: f 2026-11-01T00:00Z "approved"\n- Step 1: requirements: specs/r.md\n- Step 5: floor green, record/floor.log\n- T1: landed record/generic-evidence.md\n\n'
+  printf '## Verification Matrix\n\nstack-health: n/a: no serve\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\nAC-1:\n  fails-when: a planted defect\n  evidence: record/generic-evidence.md\n'
+} > "$P2"; printf 'plan=%s\n' "$P2" > "$R/.bionic/tmp/engaged-$SID.state"
+gate; S14="$GATE_EXIT ${GATE_SAID%%$'\n'*}"
+bash "$BIONIC_SCRIPTS_DIR/payload/scripts/bring-forward.sh" "$P2" >/dev/null; expect_contains "the act wrote the plan at 15" "canonical_sdlc_version: 15" "$(cat "$P2")"
+gate; expect_eq "at 15 with no review event, refused as the 14 is, by the same refusal" "$S14" "$GATE_EXIT ${GATE_SAID%%$'\n'*}"
+expect_contains "the 14 was refused for the reviews" "2 bionic: commit refused — a review question is unanswered" "$S14"
+grep -h 'kind=review' "$GL" >> "$L2"; gate
+expect_status "at 15 with each review, still refused: the step's other facts are not in the log" 2 "$GATE_EXIT"
+for f in "Step 1's requirements:" "each row's '- T<id>:' evidence line" "each criterion's fails-when:" "the matrix:"; do
+  expect_contains "the refusal names what it could not read at 15: $f" "could not be read at 15: $f" "$GATE_SAID"; done
+printf 'run/v1|ev=step|n=5|at=2026-11-01T00:00:03Z\n' >> "$L2"; gate
+expect_contains "at Step 5 the refusal names the step's line" "could not be read at 15: Step 5's line and its fields" "$GATE_SAID"
 
 finish

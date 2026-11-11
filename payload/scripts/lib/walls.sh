@@ -2409,20 +2409,6 @@ if [ ! -f "$PLAN" ]; then
   exit 0
 fi
 
-# The newest plan has no ## SDLC State section → not a canonical-sdlc run.
-# Fence-aware (matches the SECTION extraction below): a `## SDLC State` heading
-# that appears ONLY inside a ``` fenced example is documentation, not state, so
-# the file passes through as non-canonical rather than being parsed and then
-# false-blocked on the empty extraction. Line endings normalized (CRLF and
-# CR-only) to real newlines first — see normalize_newlines.
-if [ -z "$(normalize_newlines "$PLAN" | awk '
-  /^[[:space:]]*```/ { fence = !fence; next }
-  fence { next }
-  /^## SDLC State/ { print "yes"; exit }
-')" ]; then
-  exit 0
-fi
-
 # Extract YAML frontmatter (between first two `---` lines at column 0)
 # if the plan has any. Used to read the version marker, the triple, and the
 # discriminator flags the checks below key off.
@@ -2447,18 +2433,65 @@ INTENT=$(frontmatter_get intent)
 RIGOR=$(frontmatter_get rigor)
 MULTI_AGENT=$(frontmatter_get multi_agent)
 
-# ONE supported version. Anything else — an older number, a typo, an empty
-# value, garbage — blocks. Symmetric with the governing-skill hook. There is
-# no version dispatch anywhere below this line, so there is also no path that
-# reaches `exit 0` by matching no arm.
+# The newest plan has no ## SDLC State section → not a canonical-sdlc run.
+# Fence-aware (matches the SECTION extraction below): a `## SDLC State` heading
+# that appears ONLY inside a ``` fenced example is documentation, not state, so
+# the file passes through as non-canonical rather than being parsed and then
+# false-blocked on the empty extraction. Line endings normalized (CRLF and
+# CR-only) to real newlines first — see normalize_newlines.
+#
+# A PLAN AT 15 IS NEVER THIS ESCAPE'S. It holds no state section by its contract, since its run is
+# read from its log, so the escape would admit every commit against it with nothing judged.
+_EG_V15=0
+case "${PLAN##*/}:$SDLC_VERSION" in *.plan.md:15) _EG_V15=1 ;; esac
+if [ "$_EG_V15" -eq 0 ] && [ -z "$(normalize_newlines "$PLAN" | awk '
+  /^[[:space:]]*```/ { fence = !fence; next }
+  fence { next }
+  /^## SDLC State/ { print "yes"; exit }
+')" ]; then
+  exit 0
+fi
+
+# ONE supported version, and for a plan 15 beside it, as the governing-skill hook admits them. Anything
+# else — an older number, a typo, an empty value, garbage — blocks. Below this line a plan at 15 takes
+# each fact from its run's log where it is held, and names each one the log does not hold yet
+# (`_eg_v15_owe`), so no path reaches `exit 0` without the whole contract of the version it declares.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 SUPPORTED_SDLC_VERSION=14
 
-if [ "$SDLC_VERSION" != "$SUPPORTED_SDLC_VERSION" ]; then
+if [ "$SDLC_VERSION" != "$SUPPORTED_SDLC_VERSION" ] && [ "$_EG_V15" -eq 0 ]; then
   _eg_detail="canonical-sdlc evidence-gate: plan declares canonical_sdlc_version: '$SDLC_VERSION'.
 Plan: $PLAN
-Fix: set 'canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION}' — the only supported version."
+Fix: set 'canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION}', or 15 on a plan — the supported versions."
   refuse exit2 commit "this plan declares an unsupported sdlc version" "set the supported version" "$_eg_detail"
+fi
+
+# A PLAN AT 15 IS JUDGED ON ITS LOG. A fact the log does not hold yet is named once, with every other,
+# where the checks this step reaches end: a check that found nothing to read never admits a plan at 15.
+# The words of each are what the row that moves that fact into the log turns into an admission.
+# [WALL: tests/plan-page.test.sh]
+_EG_UNREAD=""
+_eg_v15_owe() { _EG_UNREAD="${_EG_UNREAD}
+- could not be read at 15: $1"; }
+_eg_v15_refuse() {
+  [ -n "$_EG_UNREAD" ] || return 0
+  refuse exit2 commit "a fact this step owes is not in the log" "none until the log holds it" \
+"canonical-sdlc plan at version 15, current: ${CURRENT}: the run's log does not hold what this step is judged on:${_EG_UNREAD}
+Plan: $PLAN
+Fix: none at 15 yet: each fact named reaches the run's log in the row that moves it, and the commit is judged on it then."
+}
+_eg_v15_unreadable() {
+  refuse exit2 commit "the run's facts could not be read" "run the commit again" \
+"canonical-sdlc plan at version 15: the run's facts could not be read, so nothing this commit owes can be judged.
+Plan: $PLAN
+Fix: run the commit again; the fold's own line above names why it failed."
+}
+if [ "$_EG_V15" -eq 1 ] && _eg_f="$(plan_read_faults "$PLAN")"; then
+  refuse exit2 commit "this plan holds what version 15 does not" "remove each part named" \
+"canonical-sdlc plan declares canonical_sdlc_version: 15, and version 15 has no place for:
+${_eg_f}
+Plan: $PLAN
+Fix: remove each part named; the run's state is the log's, and the reader answers it."
 fi
 
 # THE PLAN'S RIGOR IS A LEVEL OR ABSENT (wave-30 T11; REQ-1 AC-1.4, D1). A `rigor:` that names no
@@ -2603,7 +2636,7 @@ _eg_reading_gaps() {
         else if (t[q] == "fact" && r[q] == "fail") print "failing\t" q "\t" e[q]
       }
     }'
-  if [ -n "${BIONIC_DEBTS_OPEN:-}" ] && [ "$handed" = 1 ] \
+  if [ -n "${BIONIC_DEBTS_OPEN:-}" ] && [ "$handed" = 1 ] && [ "$_EG_V15" -eq 0 ] \
      && declare -F proof_debts_open >/dev/null 2>&1; then
     printf '%s\n' "$SECTION" | proof_debts_open "$BIONIC_DEBTS_OPEN"
   fi
@@ -2777,7 +2810,7 @@ SECTION=$(normalize_newlines "$PLAN" | awk '
   /^## / { flag=0 }
   flag')
 
-if [ -z "$SECTION" ]; then
+if [ -z "$SECTION" ] && [ "$_EG_V15" -eq 0 ]; then
   _eg_detail="canonical-sdlc plan file has an empty '## SDLC State' section.
 Plan: $PLAN
 Fix: populate the section with 'current: N' and per-step evidence lines."
@@ -2828,6 +2861,15 @@ validate_approved_by() {
   step=$(k2_step_num)
   [ -n "$step" ] || return 0
   [ "$step" -ge 4 ] || return 0
+  if [ "$_EG_V15" -eq 1 ]; then
+    local rc=0
+    _proof_ask "$PLAN" reader_q_approved "$PLAN" step3 >/dev/null || rc=$?
+    [ "$rc" -eq 0 ] && return 0
+    [ "$rc" -eq 1 ] || _eg_v15_unreadable
+    refuse exit2 commit "the log holds no Step-3 approval" "record the literal approval" "canonical-sdlc step ${CURRENT} — the run's log holds no approval of step3; the Step-3 approval is what admits Step 4.
+Plan: $PLAN
+Fix: on the user's literal 'approved', record that approval of step3 — never on silence, a question, or a partial reply."
+  fi
 
   approved=$(echo "$SECTION" | grep -E '^[[:space:]]*approved-by[[:space:]]*:' | head -1 \
     | sed -E 's/^[[:space:]]*approved-by[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
@@ -2859,6 +2901,7 @@ validate_fails_when() {
   step=$(k2_step_num)
   [ -n "$step" ] || return 0
   [ "$step" -ge 4 ] || return 0
+  [ "$_EG_V15" -eq 0 ] || { _eg_v15_owe "each criterion's fails-when: (the plan holds no matrix, and the log no criterion's words)"; return 0; }
 
   MATRIX=$(matrix_section)
   [ -n "$MATRIX" ] || return 0
@@ -2934,6 +2977,10 @@ validate_prototype_no_matrix_row() {
   step=$(k2_step_num)
   [ -n "$step" ] || return 0
   [ "$step" -ge 4 ] || return 0
+  if [ "$_EG_V15" -eq 1 ]; then
+    case "$(plan_read_rows "$PLAN" Tasks)" in *$'kind=prototype\t'*) _eg_v15_owe "each criterion's task: (whether a prototype row discharges one)" ;; esac
+    return 0
+  fi
 
   task_rows="$(units_rows "$PLAN")" || return 0
   [ -n "$task_rows" ] || return 0
@@ -3076,6 +3123,7 @@ validate_net_zero() {
       END { exit !f }'; then
     lacks="${lacks:+$lacks; }'## SDLC State' carries no 'approved: doctrine-growth' line"
   fi
+  [ "$_EG_V15" -eq 0 ] || lacks="a version-15 row holds no reads cell, so whether a row reads approval:doctrine-growth could not be read at 15"
   [ -n "$lacks" ] || return 0
 
   fix_id="${_EG_RID:-<id>}"; fix_cell="<cell>"
@@ -3096,11 +3144,20 @@ Grew:${grown}"
 
 # Parse current step. Accepts integers (1-13) and the 8b adversarial
 # critic step.
+if [ "$_EG_V15" -eq 1 ]; then
+  _eg_step="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+  CURRENT="$(sed -n 's/^n=//p' <<< "$_eg_step")"
+  [ -n "$CURRENT" ] || refuse exit2 commit "the run's log holds no step" "record the run's step" \
+"canonical-sdlc plan at version 15: the run's log holds no step event, so the step this commit is judged at is not known.
+Plan: $PLAN
+Fix: record the run's step in its log before committing."
+else
 CURRENT=$(echo "$SECTION" \
           | grep -E '^[[:space:]]*current[[:space:]]*:' \
           | head -1 \
           | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
           | tr -d '[:space:]')
+fi
 
 # THE VALUE THE PLAN DECLARED, kept before anything substitutes a subject (wave-18
 # REQ-1, D1). One arm below replaces `CURRENT` for the length of one commit, with a row's
@@ -3351,6 +3408,7 @@ _eg_row_for_worktree() {
   local _want="${1:-}" _rows _line _cell _id _step _status _kind _nocase _same
   _EG_ROW=""; _EG_ROW_DUP=""; _EG_ROW_COLLIDED=0
   [ -n "$_want" ] || return 0
+  if [ "$_EG_V15" -eq 1 ]; then _eg_v15_row_for_tree "$_want"; return; fi
   _rows="$(units_rows "$PLAN")" || return 1
   [ -n "$_rows" ] || return 0
   # THE TWIN OF stop.sh's `_lg_row_for_tree` FOLD (L1, wave-17 T41, critic C14; both sides
@@ -3403,6 +3461,28 @@ _eg_row_for_worktree() {
   return 0
 }
 
+# At 15 a tree is the row's latest tree event; a row in flight (any state between its dispatch and its
+# landing) is what the table's `active` was. Two rows naming one tree collide as they do in the table.
+_eg_v15_tree_rows() {  # <plan> <tree name> -> the rows whose latest tree it is, comma-joined; asked through _proof_ask
+  local f
+  f="$(reader_facts "$1")" || return 2
+  printf '%s\n' "$f" | awk -F'|' -v w="$2" "$_READER_AWK"'
+    ev() == "tree" { p = line_kv("path"); sub(/\/$/, "", p); n = split(p, q, "/"); r = line_kv("row")
+      if (tolower(q[n]) == tolower(w)) { if (!(r in s)) o[++k] = r; s[r] = 1 } else if (r in s) delete s[r] }
+    END { for (i = 1; i <= k; i++) if (o[i] in s) printf "%s%s", (c++ ? ", " : ""), o[i] }'
+}
+_eg_v15_row_for_tree() {  # <tree name> -> _EG_ROW / _EG_ROW_DUP as _eg_row_for_worktree sets them
+  local ids id st cells  # a tree whose row the plan lacks names no row, as in the table
+  ids="$(_proof_ask "$PLAN" _eg_v15_tree_rows "$PLAN" "$1")" || _eg_v15_unreadable
+  [ -n "$ids" ] || return 0
+  case "$ids" in *,*) _EG_ROW_DUP="$ids"; _EG_ROW_COLLIDED=1; return 3 ;; esac
+  id="$ids"
+  st="$(_proof_ask "$PLAN" reader_q_status "$PLAN" "$id")" || { [ $? -eq 1 ] && return 0; _eg_v15_unreadable; }
+  st="$(sed -n 's/^state=//p' <<< "$st")"
+  case "$st" in dispatched|candidate|ready|returned|stalled) st=active ;; esac
+  cells="$(plan_read_row "$PLAN" Tasks id "$id")" || return 0
+  _EG_ROW="$id	$(sed -n 's/^step=//p' <<< "$cells")	$st	$(sed -n 's/^kind=//p' <<< "$cells")"
+}
 _EG_WT=""
 _EG_SUBSTITUTED=0    # set by BOTH substitution forks below (step-below, active-status); read at the pointer-step exit (D7)
 # _EG_CWD and _EG_CWD_SRC were set by `_eg_commit_cwd` at the jurisdiction arm, above the plan read
@@ -3618,6 +3698,10 @@ LINE=$(echo "$SECTION" \
 # here. Every other step keeps its line.
 _EG_STEP_LINE_OWED=1
 [ "$CURRENT" = 6 ] && _EG_STEP_LINE_OWED=0
+if [ "$_EG_V15" -eq 1 ] && [ "$_EG_STEP_LINE_OWED" = 1 ]; then
+  _eg_v15_owe "Step ${CURRENT}'s line and its fields (the log's step event holds its number alone)"
+  _EG_STEP_LINE_OWED=0
+fi
 
 if [ -z "$LINE" ] && [ "$_EG_STEP_LINE_OWED" = 1 ]; then
   _eg_detail="canonical-sdlc plan file has no 'Step ${CURRENT}:' line in '## SDLC State'.
@@ -3744,6 +3828,7 @@ validate_requirements_pointer() {
   [ "$MULTI_AGENT" = "true" ] || return 0
   current_num=$(echo "$CURRENT" | sed -E 's/[ab]$//')
   [ "$current_num" -ge 2 ] 2>/dev/null || return 0
+  [ "$_EG_V15" -eq 0 ] || { _eg_v15_owe "Step 1's requirements: pointer (the log holds no Step 1 line)"; return 0; }
 
   b1=$(step1_evidence_block)
   # ANYWHERE ON THE LINE (AC-3.3, seed B B11). The Step-1 evidence is a semicolon-separated
@@ -3783,7 +3868,7 @@ Fix: write the requirements document at that path (K5 Step-1 artifact) before co
 # at least one version-14 key absent (plan_bring_forward's own trigger). Every other plan
 # falls straight through to the arms below, byte for byte as it does today.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-_eg_bf="$(plan_bring_forward "$PLAN")" || {
+[ "$_EG_V15" -eq 1 ] || _eg_bf="$(plan_bring_forward "$PLAN")" || {
   _eg_detail="canonical-sdlc this plan declares canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION} and its body does not match it:
 ${_eg_bf}
 Plan: $PLAN
@@ -4013,6 +4098,7 @@ for _ps in $POINTER_STEPS; do
   if [ "$_ps" = "4" ] && { [ "$USE_WORKTREE" = "true" ] || [ "${_EG_SUBSTITUTED:-0}" = "1" ]; }; then
     break  # fall through to the Step-4 worktree shape check below
   fi
+  _eg_v15_refuse
   exit 0
 done
 
@@ -4822,6 +4908,7 @@ Plan: $PLAN
 Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); the orchestrator appends one row per dispatched task-shaped unit (D7)."
     refuse exit2 commit "this wave plan has no '## Tasks' ledger" "add a '## Tasks' section" "$_eg_detail"
   fi
+  [ "$_EG_V15" -eq 0 ] || { _eg_v15_owe "each row's '- T<id>:' evidence line and launched agent (a row at 15 is its nine authored cells)"; return 0; }
   # THE SECTION IS PRESENT. What is left is the TABLE, and a section without one is
   # rule 2 — satisfied, and returned BEFORE `units_validate`, which has no rows to
   # judge and would only restate the absence as an invariant violation.
@@ -4905,6 +4992,20 @@ dispatch() {
   # Audited multi_agent wave: D7 dispatched-task ledger PRESENCE, at every step
   # that reaches this dispatcher (guarded internally; no-op otherwise).
   validate_dispatch_ledger
+  # At 15 the matrix and the Step 5 block are named, and the reviews and the floor are read before the
+  # refusal of what was not, so a plan lacking what the log does hold is refused as a 14 is.
+  if [ "$_EG_V15" -eq 1 ]; then
+    case "${CURRENT%[ab]}" in 5|6|7|8|9)
+      _eg_v15_owe "the matrix: stack-health, each criterion's tier, status and evidence keys, and its auditor verdict"
+      [ "$(walk_mode)" = exempt ] || _eg_v15_owe "Step 5's walk-artifact: (whether the walk is recorded)"
+      [ -z "$(frontmatter_get environments)" ] || _eg_v15_owe "Step 5's environments-covered:" ;;
+    esac
+    case "${CURRENT%[ab]}" in 6|7|8|9) _eg_refuse_readings "the run" "$RIGOR"; _eg_refuse_floor_absent "the run" ;; esac
+    [ -z "${BIONIC_DEBTS_OPEN:-}" ] || [ "${BIONIC_DEBTS_PLAN:-}" != "$PLAN" ] \
+      || _eg_v15_owe "the proofs that clear a row's declared red (read from the state section's lines)"
+    _eg_v15_refuse
+    return 0
+  fi
   # The Verification Matrix is a prefix contract for every step from the Verify
   # gate on — current: 5 validates it inside validate_verify_step; current: 6..9
   # validate it here, so a REFUTED auditor blocks post-Verify commits too.
