@@ -959,7 +959,8 @@ launch_sync_read() {  # <plan> <root> <row id> <launched_at> -> 0 when a review 
   if [ "$LS_PROOFS_READ" = no ]; then
     # shellcheck source=/dev/null
     declare -F reader_main >/dev/null 2>&1 || . "$BIONIC_LIB/reader.sh" 2>/dev/null
-    LS_PROOFS="$(reader_main "$plan" reviews 2>/dev/null | awk -F'|' "${_READER_AWK:-}"'
+    LS_PROOFS="$(reader_main "$plan" reviews 2>/dev/null)" || return 2
+    LS_PROOFS="$(printf '%s\n' "$LS_PROOFS" | awk -F'|' "${_READER_AWK:-}"'
       ev() == "proof" && line_kv("at") != "" && line_kv("evidence") != "" { print line_kv("at") "\t" line_kv("evidence") "\t" line_kv("question") }' 2>/dev/null | sort -r)"
     LS_PROOFS_READ=yes
   fi

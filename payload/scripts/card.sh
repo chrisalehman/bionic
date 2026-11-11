@@ -2396,7 +2396,7 @@ _card_settled() {  # <step> <plan> -> 0 when the step's approval is recorded or 
   local facts
   _card_writer && return 0
   _proof_reader_load || return 1
-  facts="$(_proof_facts "$2")"
+  facts="$(_proof_facts "$2")" || return 2
   ( reader_facts() { printf '%s' "$facts"; }
     m="$1"
     while [ "$m" -le 3 ] 2>/dev/null; do reader_q_approved "$2" "step$m" && exit 0; m=$((m + 1)); done

@@ -34,10 +34,13 @@ deferral_line() {  # <plan> <record>#<n> -> the first deferred: line of ## SDLC 
 # evidence, in the order the run first registered it, the question and head of its newest proof: the reader's
 # `reviews` answer (payload/scripts/reader.sh), asked once per call, so a run whose review proofs its log alone
 # holds is read as one whose plan holds them. The waivers that answer lists are no reading, and are left out.
-# Prints nothing when the reader cannot be loaded or refuses the plan.
+# Prints nothing when the reader cannot be loaded or refuses the plan, and exits 2 then, or when the fold fails: no
+# reading is no answer, so a waiver or a ruling over them is refused, never applied to none.
 review_readings() {
+  local r
   { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } || return 0
-  ( . "$BIONIC_LIB/reader.sh" >/dev/null 2>&1 && reader_main "$1" reviews ) 2>/dev/null | awk -F'|' "$_LINE_FIELDS_AWK"'
+  r="$( { . "$BIONIC_LIB/reader.sh" >/dev/null 2>&1 && reader_main "$1" reviews; } 2>/dev/null )" || return 2
+  printf '%s\n' "$r" | awk -F'|' "$_LINE_FIELDS_AWK"'
     line_kv("ev") == "proof" && line_kv("question") != "" && (e = line_kv("evidence")) != "" {
       if (!(e in q)) o[++n] = e
       q[e] = line_kv("question"); h[e] = line_kv("head")
@@ -49,7 +52,7 @@ review_readings() {
 # answer to every finding of its readings ("fix it, defer it, or waive <question>", `disposition`), so it closes each
 # open `finding:<record>#<n>` item of every reading the run registers under that question. The readings are
 # `disposition`'s own, `review_readings`.
-waive_owed_findings() {
+waive_owed_findings() {  # [<readings, review_readings' answer read before the waiver was written>]
   local ev q pre key
   declare -F owed_list >/dev/null 2>&1 || return 0
   while IFS='	' read -r ev q _; do
@@ -59,7 +62,7 @@ waive_owed_findings() {
       case "${key#"$pre"}" in "$key"|''|*[!0-9]*) continue ;; esac
       poker_owed_close "$2" "$key" "waive"
     done
-  done <<< "$(review_readings "$1")"
+  done <<< "${4-$(review_readings "$1")}"
   return 0
 }
 
@@ -1220,10 +1223,12 @@ PF_VERDICTS_LIST
       die "REFUSED — $PV_PLAN carries no ## SDLC State section to hold the waiver; the plan is unchanged."
       exit 1
     fi
+    WV_READS="$(review_readings "$PV_PLAN")" \
+      || { die "REFUSED — the run's facts could not be read, so the findings a waiver closes are not known; the plan is unchanged. Run again: bash ${HOOK_DIR}/session-poker.sh waive $WV_Q"; exit 2; }
     plan_verb_swap waive "the $WV_Q waiver at $WV_HEAD" writer
     for _wv_q in $WV_QS; do
       poker_owed_close "$PV_REPO" "waive:$_wv_q" "waive"
-      waive_owed_findings "$PV_PLAN" "$PV_REPO" "$_wv_q"
+      waive_owed_findings "$PV_PLAN" "$PV_REPO" "$_wv_q" "$WV_READS"
       say "waive — question=$_wv_q head=$WV_HEAD by $WV_WHO: written to $PV_PLAN; dry-committed first."
     done
     exit 0
@@ -1314,7 +1319,9 @@ PF_VERDICTS_LIST
     if [ -z "$FM_ROW" ]; then FM_WORDS="$(said_fold "$FM_RAW")"; FM_WHY="$(deferral_fold "$FM_WHY_RAW")"; fi
     plan_verb_open finding-move
     FM_REC="${FM_ID%#*}"; FM_N="${FM_ID##*#}"
-    if ! review_readings "$PV_PLAN" | awk -F'\t' -v ev="$FM_REC" '$1 == ev { hit = 1 } END { exit !hit }'; then
+    FM_READS="$(review_readings "$PV_PLAN")" \
+      || { die "REFUSED — the run's facts could not be read, so the reviews it registers are not known; the plan is unchanged. Run again: bash ${HOOK_DIR}/session-poker.sh finding-move with the same words"; exit 2; }
+    if ! printf '%s\n' "$FM_READS" | awk -F'\t' -v ev="$FM_REC" '$1 == ev { hit = 1 } END { exit !hit }'; then
       die "REFUSED — $(clean "$FM_REC") is no review registered under ## SDLC State (no proved: line names it as its evidence), and only a registered finding is moved; the plan is unchanged."
       exit 1
     fi
@@ -1477,7 +1484,8 @@ FM_FINDING
     DSP_FIXED="$(proof_fixed "$PV_PLAN" "$PV_REPO")"
     DSP_REC="$(proof_debt_record "$PV_PLAN" "$PV_REPO")" || DSP_REC=""
     DSP_BORN="$(units_born_findings "$PV_PLAN" 2>/dev/null)" || DSP_BORN=""
-    DSP_READS="$(review_readings "$PV_PLAN")"
+    DSP_READS="$(review_readings "$PV_PLAN")" \
+      || { die "REFUSED — the run's facts could not be read, so no finding is ruled or opened. Run again: bash ${HOOK_DIR}/session-poker.sh disposition"; exit 2; }
     DSP_NF=0; DSP_NR=0; DSP_NP=0
     while IFS='	' read -r DSP_EV DSP_Q DSP_H; do
       [ -n "$DSP_EV" ] || continue

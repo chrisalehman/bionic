@@ -4,14 +4,15 @@
 #   bash one-reader-check.sh [<root>]      <root> defaults to the checkout this script sits in
 #
 # It reads every `*.sh` file under <root>/hooks and <root>/payload/scripts (symlinks not followed) and
-# prints one finding per line, `<kind>TAB<where>TAB<detail>`, then the five counts, one `key=value`
-# line each and always in this order, as the last five lines:
+# prints one finding per line, `<kind>TAB<where>TAB<detail>`, then the six counts, one `key=value`
+# line each and always in this order, as the last six lines:
 #
 #   parsers=<n>        files that parse a plan or a log, outside the reader's own files
 #   plan_writers=<n>   files that write a plan
 #   shared_types=<n>   event types appended by two or more functions
 #   hook_refusals=<n>  refusal call sites inside a registered hook's own file
 #   loader_copies=<n>  files holding a pasted copy of the loader block
+#   unheard_folds=<n>  lines that take the run's fold or a reader answer and lose its exit
 #
 # It reports and refuses nothing: exit 0 whatever it finds, 2 when <root> holds no hooks/ and
 # payload/scripts/. A comment line is never a parse, a write or a refusal; the loader's BEGIN marker
@@ -36,6 +37,10 @@
 #   - A REFUSAL is a refusal primitive called with its words (`refuse exit2|deny|block`, `fold_block`,
 #     `dp_finding`, `patrol_deny`, `dp_not_checked`, `deny`, `block`) in a file hooks/hooks.json runs.
 #   - A LOADER COPY is a file other than lib/loader.sh with the loader block's BEGIN marker.
+#   - AN UNHEARD FOLD is a line outside lib/proof.sh and the reader's files that calls _proof_facts,
+#     _proof_ask, reader_main, reader_facts, reader_events or the reader program and pipes it, feeds a
+#     process substitution, assigns it to a local, or takes it in a $( ) whose exit no `||`, `&&`,
+#     `=$?` or `if` reads on that line: a fold that failed would read there as a run with no fact.
 #
 # THE READER'S FILES are named once, in READER_FILES: a parse inside one of them is the reader's own
 # and is admitted. Nothing else is admitted.
@@ -89,6 +94,20 @@ awk -v q="'" -v admitted=" $READER_FILES " -v hooks=" $hook_files " '
     gsub(/(line|owed|run)\/v1[|]ev=/, "", s)
     return s ~ /(^|[^A-Za-z0-9_-])(line|owed|run)\/v1/ || s ~ /[#][#](\[\[:space:\]\][+*]?|\\s[+*]?|[ \t+*])+(SDLC State|Verification Matrix|Tasks)/
   }
+  function unheard(s,   seen, pre, post, cut) {  # 1 when the line takes the fold or a reader answer with its exit lost
+    while (match(s, /(^|[^A-Za-z0-9_-])([_]proof_facts|[_]proof_ask|reader[_]main|reader[_]facts|reader[_]events)([^A-Za-z0-9_(-]|$)|(bas[h]|s[h])( +-[a-z]+)* +"?[^ |;&]*(reader[.]sh|READE[R]\}?)"?([^A-Za-z0-9_]|$)/)) {
+      pre = seen substr(s, 1, RSTART); post = substr(s, RSTART + RLENGTH - 1)
+      seen = seen substr(s, 1, RSTART + RLENGTH - 1); s = substr(s, RSTART + RLENGTH - 1)
+      if (pre ~ /(declare|typeset) +-[fF] *.?$|command +-v *.?$/) continue
+      cut = post; sub(/(;|\|\||&&).*/, "", cut)
+      if (cut ~ /(^|[^|])[|]([^|]|$)/ || pre ~ /<\(/) return 1
+      if (pre !~ /\$\(/) continue
+      if (pre ~ /(^|[^A-Za-z0-9_])(local|export|readonly|declare|typeset)( +-[A-Za-z]+)* +[A-Za-z_][A-Za-z0-9_]*=/) return 1
+      if (pre ~ /^[ \t]*(if|elif|while|until|!)[ \t]/ || post ~ /(\|\||&&)|=\$\?/) continue
+      return 1
+    }
+    return 0
+  }
   function writer(type) {
     if (type !~ /^[a-z][a-z-]*$/) type = "?"
     wl[++nw] = "writer\t" type "\t" FILENAME ":" FNR " " fn[depth]
@@ -114,6 +133,7 @@ awk -v q="'" -v admitted=" $READER_FILES " -v hooks=" $hook_files " '
       if (!(FILENAME in pfirst)) { pfirst[FILENAME] = FNR; pord[++np] = FILENAME }
       pn[FILENAME]++
     }
+    if (!(index(admitted, " " FILENAME " ")) && FILENAME != "payload/scripts/lib/proof.sh" && unheard(line)) ul[++nu] = "unheard\t" FILENAME ":" FNR
     if (nwrite) {
       if (!(FILENAME in wfirst)) { wfirst[FILENAME] = FNR; word[++npw] = FILENAME }
       wn[FILENAME]++
@@ -140,6 +160,7 @@ awk -v q="'" -v admitted=" $READER_FILES " -v hooks=" $hook_files " '
     for (i = 1; i <= nt; i++) if (nwr[tord[i]] > 1) { print "shared\t" tord[i] "\t" ids[tord[i]]; ns++ }
     for (i = 1; i <= nr; i++) print rl[i]
     for (i = 1; i <= nl; i++) print ll[i]
-    printf "parsers=%d\nplan_writers=%d\nshared_types=%d\nhook_refusals=%d\nloader_copies=%d\n", np, npw, ns, nr, nl
+    for (i = 1; i <= nu; i++) print ul[i]
+    printf "parsers=%d\nplan_writers=%d\nshared_types=%d\nhook_refusals=%d\nloader_copies=%d\nunheard_folds=%d\n", np, npw, ns, nr, nl, nu
   }' "${files[@]}"
 exit 0
