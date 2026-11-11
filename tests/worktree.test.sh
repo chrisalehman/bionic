@@ -1029,6 +1029,8 @@ sc_spawn() {  # <root> <row> <sid> -> the tree `create --for wx-<row>` made unde
   p="$(ll_plan "$r")"
   printf '| %s | 4 | build | row %s | wx-%s | — | | 10 | REQ-1 | %s.txt | .worktrees/%s | | active |\n' "$t" "$t" "$t" "$t" "$t" >> "$p"
   awk -v t="$t" '{ print } /^- T2: active$/ { print "- " t ": active" }' "$p" > "$p.n" && mv "$p.n" "$p"
+  mkdir -p "$r/.bionic/docs/record/wave-x/briefs"
+  printf '<!-- brief: rendered from row %s for %s; sum %064d; render it again to change it, never edit it -->\n' "$t" "wx-$t" 0 > "$r/.bionic/docs/record/wave-x/briefs/wx-$t.md"
   out="$( cd "$r" && CLAUDE_CODE_SESSION_ID="$s" bash "$SPAWN" create "$(git -C "$r" rev-parse wave/x)" "wt/$t" --for "wx-$t" 2>/dev/null )" || return 1
   tree="$(printf '%s\n' "$out" | tr ' ' '\n' | sed -n 's/^path=//p')"
   [ -d "$tree" ] || return 1

@@ -184,6 +184,7 @@ _rh_build() {
 # landed through ready on that suite: its landing writes the criterion's evidence and status (lib/line.sh `line_settle`)
 _rh_build_ready() {
   local t="$RH_ROOT/.worktrees/T1"
+  _rh_brief dw-T1 T1 || return 1
   _rh_do "the build row's tree" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" create "$(_rh_head)" wt/T1 --for dw-T1 || return 1
   _rh_launch dw-T1 T1 rehearsal-row.test.sh || return 1
   printf 'rehearsal_landed() { :; }\n' >> "$t/payload/scripts/lib/said.sh"
@@ -296,15 +297,20 @@ _rh_release_card() {
   _rh_poker "the release approval card" release-approval "$RH_PLAN"
 }
 
+# _rh_brief <name> <row> -> the brief's mark for <name> on <row>, which the tree verb reads the row from
+_rh_brief() {
+  mkdir -p "$RH_REC/briefs" && printf '<!-- brief: rendered from row %s for %s; sum %064d; render it again to change it, never edit it -->\n' "$2" "$1" 0 > "$RH_REC/briefs/$1.md"
+}
+
 # _rh_launch <name> <row> <suite> -> the writer's roster row, as the dispatch wall writes it when the writer is launched
-# on <row> with its brief's Lands-on suite, confirmed by the launch recorder: the run's dispatch event and the tree cells
+# on <row> with its brief's Lands-on suite, confirmed by the launch recorder: the run's dispatch event
 _rh_launch() {
   local u="toolu-$1"
   roster_row_fixture status=intended session="$WORLD_SID" name="$1" agent_id= subagent_type=bionic:senior-implementor \
     launched_at=2026-10-01T00:00:00Z deliverable="$RH_REC/$2.md" plan="$RH_PLAN" row="$2" lands_on="$3" tool_use_id="$u" \
     brief=".bionic/docs/record/wave-x/briefs/$1.md" brief_sum=- >> "$RH_ROOT/.bionic/tmp/roster-$WORLD_SID.state" || return 1
   _rh_hand launch "$1's roster row on $2, landing on $3 (roster_row)"
-  _rh_do "$1's launch confirmed: its dispatch event and its tree cells" env BIONIC_LAUNCH_SYNC_INLINE=1 bash -c 'printf %s "$1" | bash "$2"' _ \
+  _rh_do "$1's launch confirmed: its dispatch event" bash -c 'printf %s "$1" | bash "$2"' _ \
     "$(jq -nc --arg s "$WORLD_SID" --arg c "$RH_ROOT" --arg n "$1" --arg u "$u" '{session_id:$s, cwd:$c, hook_event_name:"PostToolUse",
       tool_name:"Agent", tool_input:{name:$n}, tool_response:{agentId:("a-" + $n)}, tool_use_id:$u}')" "$RH_ROOT/hooks/execution-recorder.sh"
 }
@@ -380,6 +386,7 @@ _rh_replay() {
   _rh_poker "the fix row born of the finding" task-add T5 4 build 'Answer the structure finding. A caller reaches the library change. The caller and the library agree again.' \
     orchestrator — 10 REQ-1 'payload/scripts/lib/said.sh, tests/rehearsal-row.test.sh' \
     --born record/wave-x/w-structure-whole-2.md#1 || return 1
+  _rh_brief w-T5 T5 || return 1
   _rh_do "the fix row's tree" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" create "$(_rh_head)" wt/T5 --for w-T5 || return 1
   _rh_launch w-T5 T5 rehearsal-row.test.sh || return 1
   t="$RH_ROOT/.worktrees/T5"; f="$t/tests/rehearsal-row.test.sh"

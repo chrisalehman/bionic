@@ -328,7 +328,7 @@ EOF
 }
 
 cmd_create() {
-  local base="" parent="" name="" named=0 n=0 sid="" why=""
+  local base="" parent="" name="" named=0 n=0 sid="" why="" tree_row="" row_field=""
   branch=""
   while [ $# -gt 0 ]; do
     if [ "$1" = "--for" ]; then
@@ -363,6 +363,10 @@ cmd_create() {
     # shellcheck source=/dev/null
     why="$( . "$LIB_WORKTREE" 2>/dev/null || { printf 'library-unloadable'; exit 1; }
             worktree_workspace_refusal "$main_root" "$sid" "$name" )" || _wt_refuse "${why:-library-unloadable}"
+    # The row the tree is for, from the name's brief; a name a row claims with no brief yet makes nothing.
+    # shellcheck source=/dev/null
+    tree_row="$( . "$LIB_WORKTREE" 2>/dev/null && worktree_tree_row "$main_root" "$sid" "$name" )"
+    [ $? -ne 2 ] || _wt_refuse "brief-unrendered row=${tree_row} name=${name} — render the brief first: session-poker.sh brief ${tree_row%%,*} ${name}, then create again"
   fi
 
   local base_sha
@@ -446,16 +450,20 @@ cmd_create() {
     # shellcheck source=/dev/null
     why="$( . "$LIB_WORKTREE" 2>/dev/null || { printf 'library-unloadable'; exit 1; }
             worktree_record_tree "$main_root" "$sid" "$name" "$wt" )" || abort_created "${why:-tree-record-unwritable}"
-    # The run's tree event, for a name whose brief names its row; a name that is no row's appends nothing.
-    # shellcheck source=/dev/null
-    ( . "$LIB_WORKTREE" 2>/dev/null && worktree_tree_event "$main_root" "$sid" "$name" "$wt" "$branch" "$base_sha" ) >/dev/null 2>&1
+    # The run's tree event for the brief's row; a tree that is no row's appends nothing and says so.
+    if [ -n "$tree_row" ]; then
+      # shellcheck source=/dev/null
+      ( . "$LIB_WORKTREE" 2>/dev/null && worktree_tree_event "$main_root" "$sid" "$name" "$wt" "$branch" "$base_sha" "$tree_row" ) \
+        >/dev/null 2>&1 || abort_created tree-event-unwritten
+    fi
+    row_field=" row=${tree_row:-none}"
   fi
 
   # After the tree is verified and recorded, so an aborted create leaves no exclude line behind;
   # never fails the create (see exclude_lines). The link's line only when the link was planted.
   exclude_lines "$main_root" "$(tree_parent_line "$main_root" "$parent_abs" "$wt")" "${alias_field:+/.bionic}"
 
-  contract "OK path=${wt} branch=${branch} head=${head} base=${base_sha}${alias_field}"
+  contract "OK path=${wt} branch=${branch} head=${head} base=${base_sha}${alias_field}${row_field}"
 }
 
 # THE RE-DISPATCH (wave-34 T2; D11, REQ-1 AC-1.1): a tree handed to a successor row names the

@@ -653,25 +653,6 @@ $(proof_findings_owed "$SCHED_PLAN" 2>/dev/null)
 TICK_FINDINGS
 }
 
-# THE DETACHED TREE CELLS' FAILURE, TOLD ONCE. The launch recorder
-# (hooks/execution-recorder.sh `dispatch_tree_start`) writes the write's output and then `rc=<n>` to
-# `.bionic/tmp/dispatch-<sid>.log`, rewriting it at each launch. A log whose last status is not 0
-# and that carries no `told=` line prints
-#
-#   poker: dispatch tree cells failed — <log>
-#
-# and gets a `told=<ISO>` line, so the line prints once per failure, never per tick: the next launch
-# rewrites the log and a new failure is told again. A log with no `rc=` line is a call still running,
-# or one killed before it ended, and says nothing; so does a symbolic link.
-tick_dispatch_failed() {  # <root> <session-id> -> says the line when the log holds an untold failure
-  local log="$1/.bionic/tmp/dispatch-$2.log" rc
-  [ -f "$log" ] && [ ! -L "$log" ] || return 0
-  rc="$(awk '/^rc=/ { r = substr($0, 4) } /^told=/ { t = 1 } END { if (!t) print r }' "$log" 2>/dev/null)"
-  case "$rc" in ''|0) return 0 ;; esac
-  printf 'told=%s\n' "$(iso_now)" >> "$log" 2>/dev/null || return 0
-  say "dispatch tree cells failed — $log"
-}
-
 # tick_plan_memoised <command> [args…] -> runs the command with the bound plan's table parsed
 # once for everything it asks (`units_memoised`, payload/scripts/lib/units.sh); a tick with no
 # readable plan runs it bare, since there is no table to hold.
@@ -1271,12 +1252,6 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
       exit 2
     fi
     ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
-
-    # A launch is its run's log's own event, appended by the recorder, so the tick writes none. The recorder's
-    # detached write of a launch's tree cells has a log of its own; its failure is told once, outside the held
-    # output, so an unchanged tick still says it.
-    if [ -n "$TICK_BUF" ]; then tick_dispatch_failed "$REPO_REAL" "$SESSION_ID" >&3
-    else tick_dispatch_failed "$REPO_REAL" "$SESSION_ID"; fi
 
     # ---------- THE LINE'S STANDING REDS AND STALLED ENTRIES, EACH TOLD ONCE (wave-28 T5; D8) ----------
     #
