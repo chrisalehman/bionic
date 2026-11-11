@@ -933,8 +933,8 @@ BH_PUB="$(grep '^run/v1|ev=published|' "$BHLOG" 2>/dev/null)"
 expect_regex "(h4) the log's published line carries the user, the time and the reason" \
   "^run/v1\\|ev=published\\|row=T1\\|commit=$(git -C "$BH" rev-parse wave/fixture)\\|kind=hand\\|by=Hand Lander\\|why=the person's why\\|branch=wt/bh-T1\\|head=[0-9a-f]{40}\\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" "$BH_PUB"
 BH_AT="${BH_PUB##*|at=}"
-expect_eq    "(h5) the row's - T1: line gains who, when and why" \
-  "- T1: active landed-by-hand: Hand Lander ${BH_AT} \"the person's why\"" "$(grep '^- T1:' "$BHP")"
+expect_eq    "(h5) the row's - T1: line is the landing's to leave: it stands as it was, the who, when and why on the event" \
+  "- T1: active|Hand Lander|the person's why" "$(grep '^- T1:' "$BHP")|$(printf '%s' "$BH_PUB" | tr '|' '\n' | sed -n 's/^by=//p')|$(printf '%s' "$BH_PUB" | tr '|' '\n' | sed -n 's/^why=//p')"
 
 section "§HAND: a hand landing lands a row whose suite is red, writes the person's words on its line, and runs nothing"
 #
@@ -957,7 +957,8 @@ OUTHD0="$(bh_land "$BHT2" --by-hand --reason "landed on the report" --suites r.t
 OUTHD="$(bh_land "$BHT2" --by-hand --reason "landed on the report" --suites r.test.sh --green-at "$BHC2" --log /logs/T2-green.log)"; RCHD=$?
 expect_eq    "(hd1) the hand landing of a row whose suite is red exits 0, the row's commit on the working branch" "0 yes" \
   "$RCHD $(git -C "$BH" merge-base --is-ancestor "$BHC2" wave/fixture && echo yes)"
-expect_contains "(hd2) …and its - T2: line carries the person's words" '"landed on the report"' "$(grep '^- T2:' "$BHP")"
+expect_contains "(hd2) …and its landing carries the person's words" '|why=landed on the report|' \
+  "$(grep '^run/v1|ev=published|row=T2|' "$BHLOG" 2>/dev/null)"
 expect_eq    "(hd3) …no suite ran, and the record holds the person's verdict, keyed by the commit it was green at" \
   "0|run/v1|ev=verdict|row=T2|commit=${BHC2}|suite=r.test.sh|result=green|log=/logs/T2-green.log|admitted=-|width=-|promised=-|actual=-" \
   "$(awk 'END { print NR }' "$TMP/hand-runs")|$(bh_all | grep '|ev=verdict|' | sed 's/|at=[^|]*$//')"
