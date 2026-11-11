@@ -1825,7 +1825,7 @@ resolve_run() {  # <project root> <session id> -> sets POKER_RUN_PLAN / POKER_RU
 }
 
 run_state() {  # <project root> <arming-record path, may be empty> <session id> -> "delivered|<why>" or "open|<why>"
-  local repo="$1" armed="${2:-}" sid="${3:-}" droot plan section current line
+  local repo="$1" armed="${2:-}" sid="${3:-}" droot plan current
   if [ -z "$repo" ] || [ ! -d "$repo" ]; then
     printf 'open|no project root resolved, so no plan could be read'
     return 0
@@ -1856,17 +1856,14 @@ run_state() {  # <project root> <arming-record path, may be empty> <session id> 
     printf 'open|%s is this session'"'"'s bound plan and it cannot be read' "$plan"
     return 0
   fi
-  section="$(normalize_newlines "$plan" | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## SDLC State/ { flag=1; next }
-    /^## / { flag=0 }
-    flag')"
-  current="$(printf '%s\n' "$section" \
-             | grep -E '^[[:space:]]*current[[:space:]]*:' \
-             | head -1 \
-             | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
-             | tr -d '[:space:]')"
+  # THE RUN'S PLACE IS THE READER'S (lib/run.sh `_run_place`): its step, and whether step 9 is delivered. A place that
+  # cannot be read is doubt, and doubt is `open`.
+  local place
+  if ! place="$(_run_place "$plan" 2>/dev/null)"; then
+    printf 'open|the place of %s cannot be read' "$plan"
+    return 0
+  fi
+  current="$(sed -n 's/^n=//p' <<< "$place")"
   if [ -z "$current" ]; then
     printf 'open|%s carries no readable "current:" line' "$plan"
     return 0
@@ -1875,11 +1872,8 @@ run_state() {  # <project root> <arming-record path, may be empty> <session id> 
     printf 'open|%s is at current: %s' "$plan" "$current"
     return 0
   fi
-  line="$(printf '%s\n' "$section" \
-          | grep -E '^[[:space:]]*-?[[:space:]]*Step[[:space:]]+9[[:space:]]*:' \
-          | head -1)"
-  case "$line" in
-    *delivered:*) : ;;
+  case "$place" in
+    *state=delivered*) : ;;
     *) printf 'open|%s is at current: 9 but its Step 9 line records no delivered:' "$plan"
        return 0 ;;
   esac

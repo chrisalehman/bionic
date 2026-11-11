@@ -127,25 +127,9 @@ fi
 
 # ── THE LEDGER'S OWN FIELD ────────────────────────────────────────────────────
 #
-# _fill_current_field <plan> -> the RAW `current:` value (whitespace stripped), or "" when
-# there is no plan, no `## SDLC State` section, or no `current:` line inside it.
-#
-# THE ONE READER OF THE FIELD (wave-19 REQ-6, D7; AC-6.1). `hooks/session-poker.sh`'s
-# `_sched_plan_current_field` is a one-line wrapper over this function (the tick sources this
-# file), and §CG of tests/cross-gate-agreement.test.sh, which extracts the poker's wrapper as
-# text, sources this file beside it — so the grammar §CG binds to `run.sh`'s `run_open` is
-# this parser's. §32 of tests/session-poker.test.sh drives the wrapper and this function over
-# one table of shapes and pins that the wrapper parses nothing itself.
-#
-# FENCE-AWARE, and the line endings are translated rather than deleted, for the reason every
-# other plan read in this tree gives: a plan documenting its own `## SDLC State` inside a
-# fence is prose, and a CR-only file that collapsed to one record would read as "no section"
-# — the fail-dangerous direction. TWO PROCESSES, NOT SIX: the translation is its own `awk`
-# (the same program `normalize_newlines` runs, because splitting a record on CR inside the
-# reader would be a second spelling of it), and the section walk, the first `current:` line,
-# the prefix strip and the whitespace strip are one pass after it. The pass reads to the end
-# of its input rather than exiting at the match, so the translating `awk` upstream is never
-# cut off mid-write.
+# _fill_current_field <plan> -> the run's step as the reader answers it, its sub-step letter kept, or "" when the run
+# has none or its place cannot be read (`fill_place_unread`). The poker's `_sched_plan_current_field` is a one-line
+# wrapper over it. The answer is lib/proof.sh `proof_step_held`'s, so the step a run's log alone holds is this one.
 #
 # READ ONCE PER PROCESS (AC-6.2). One Stop asks this field three times — `fill_ledger_live`
 # at the gate, then `fill_step_token` and `fill_ledger_live` again inside `fill_ready_set` —
@@ -165,16 +149,16 @@ fi
 # is not a file is answered "" and never memoised, so a plan created later in the same process
 # is still read. Sourcing this file resets the memo.
 #
-# AND THE APPROVAL, IN THE SAME PASS (wave-26 T13; D3, AC-6.2). The ledger is live on the plan's
-# `approved-by:` line, which only the user's act writes, together with `current:`, so the one read
-# of `## SDLC State` that finds `current:` finds that line too: `_FILL_APPROVED` is 1 when a
-# non-blank `approved-by:` sits in the section.
+# AND THE APPROVAL, IN THE SAME ASK. The ledger is live on the Step-3 approval, which only the user's act writes,
+# together with the step, so the one ask of the run's place answers both: `_FILL_APPROVED` is 1 when an approval of
+# step3 stands.
 _FILL_CURRENT_PLAN=""
 _FILL_CURRENT_VALUE=""
 _FILL_APPROVED=0
 _FILL_ORDER_PLAN=""
 _FILL_ORDER=""
 _FILL_REVIEW_AT=""
+_FILL_UNREAD=""
 fill_current_forget() {  # -> drops the memo; the next reader parses whatever path it names
   _FILL_CURRENT_PLAN=""
   _FILL_CURRENT_VALUE=""
@@ -182,6 +166,7 @@ fill_current_forget() {  # -> drops the memo; the next reader parses whatever pa
   _FILL_ORDER_PLAN=""
   _FILL_ORDER=""
   _FILL_REVIEW_AT=""
+  _FILL_UNREAD=""
 }
 
 # fill_facts_load <plan> -> the same memo, and the order's, taken from the run's facts (lib/reader.sh: its step, the
@@ -216,40 +201,23 @@ fill_review_at() {
   [ -n "${1:-}" ] && [ "$1" = "$_FILL_CURRENT_PLAN" ] && [ "$1" = "$_FILL_ORDER_PLAN" ] || return 1
   printf '%s' "$_FILL_REVIEW_AT"
 }
-_fill_current_load() {  # <plan path> -> sets _FILL_CURRENT_VALUE and _FILL_APPROVED; parses at most once
+_fill_current_load() {  # <plan path> -> sets _FILL_CURRENT_VALUE and _FILL_APPROVED; reads at most once; 1 when the run's place cannot be read
   local plan="${1:-}" got
   if [ -n "$plan" ] && [ "$plan" = "$_FILL_CURRENT_PLAN" ]; then
     return 0
   fi
-  if [ -z "$plan" ] || [ ! -f "$plan" ]; then
-    _FILL_CURRENT_VALUE=""
-    _FILL_APPROVED=0
-    _FILL_CURRENT_PLAN=""
-    return 0
-  fi
-  got="$(awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan" 2>/dev/null | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## SDLC State/ { flag = 1; next }
-    /^## / { flag = 0 }
-    flag && !got && /^[[:space:]]*current[[:space:]]*:/ {
-      v = $0
-      sub(/^[[:space:]]*current[[:space:]]*:[[:space:]]*/, "", v)
-      gsub(/[[:space:]]/, "", v)
-      cur = v
-      got = 1
-    }
-    flag && /^[[:space:]]*-?[[:space:]]*approved-by[[:space:]]*:/ {
-      v = $0
-      sub(/^[[:space:]]*-?[[:space:]]*approved-by[[:space:]]*:/, "", v)
-      if (v ~ /[^[:space:]]/) appr = 1
-    }
-    END { printf "%s\037%d", cur, appr }')"
-  _FILL_CURRENT_VALUE="${got%$'\037'*}"
-  _FILL_APPROVED="${got##*$'\037'}"
-  case "$_FILL_APPROVED" in 1) : ;; *) _FILL_APPROVED=0 ;; esac
+  _FILL_CURRENT_VALUE=""; _FILL_APPROVED=0; _FILL_CURRENT_PLAN=""; _FILL_UNREAD=""
+  [ -n "$plan" ] && [ -f "$plan" ] || return 0
+  # The step and the approval are the reader's (lib/proof.sh `proof_step_held`), never the plan's lines read here. A place
+  # that cannot be read is no step and no approval, named by `fill_place_unread` so a caller refuses by name.
+  declare -F proof_step_held >/dev/null 2>&1 || . "$_FILL_LIB_DIR/proof.sh" >/dev/null 2>&1
+  if ! declare -F proof_step_held >/dev/null 2>&1 || ! got="$(proof_step_held "$plan")"; then _FILL_UNREAD="$plan"; return 1; fi
+  _FILL_CURRENT_VALUE="$(printf '%s\n' "$got" | sed -n 's/^n=//p')"
+  case "$got" in *approved=1*) _FILL_APPROVED=1 ;; esac
   _FILL_CURRENT_PLAN="$plan"
 }
+# fill_place_unread <plan> -> 0 when the last read of <plan>'s place in this shell failed
+fill_place_unread() { [ -n "${1:-}" ] && [ "$1" = "${_FILL_UNREAD:-}" ]; }
 _fill_current_field() {  # <plan path> -> the raw current: value, or ""
   _fill_current_load "${1:-}"
   printf '%s' "$_FILL_CURRENT_VALUE"

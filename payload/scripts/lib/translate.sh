@@ -141,6 +141,11 @@ _translate_section() {  # <plan> <heading> -> the lines under `## <heading>`, to
     | awk -v h="## $2" '/^[ \t]*```/ { f = !f; next } f { next } $0 == h { on = 1; next } /^## / { on = 0 } on'
 }
 
+# THE HOMES OF A RUN'S PLACE: the only sources that write a step, an approval or an abandon. A run's step, its state and
+# its approvals are read from these alone (lib/proof.sh `proof_step_held`), so a source that comes to write one of the
+# three joins this list, or that read misses it.
+TRANSLATE_PLACE_SOURCES="_translate_state _translate_abandon _translate_log"
+
 translate_source _translate_state
 _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessions, proofs, findings, waivers, orders
   # A deferral holds no instant, and its finding is raised by its review: it stands at the place of the first

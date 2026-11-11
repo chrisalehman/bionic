@@ -332,6 +332,24 @@ P=$(mk_plan "$R5" "closed-junk.plan.md" "banana")
 call_run_open "$P"
 expect_eq "run_open: a non-numeric current: -> exit 1" 1 "$RO_ST"
 
+# The step the run's log holds is the run's step whatever current: says, here and at the landing's guard at 8.
+P=$(mk_plan "$R5" "logged.plan.md" "4"); RL="$R5/.bionic/docs/record/logged/run.log"; mkdir -p "${RL%/*}"
+wt_cur() { bash -c '. "$1/worktree.sh" && _wt_plan_current "$2"' _ "${LIB%/*}" "$P"; }
+printf 'run/v1|ev=step|n=8|at=2026-11-01T00:00:01Z\n' > "$RL"
+expect_eq "the landing's guard reads the log's step 8 past current: 4" "8" "$(wt_cur)"
+printf 'run/v1|ev=step|n=9|at=2026-11-01T00:00:02Z\n' >> "$RL"; call_run_open "$P"
+expect_eq "run_open: current: 4 and the log delivered at 9 -> exit 1 (closed)" 1 "$RO_ST"
+printf 'run/v1|ev=step|n=4|at=2026-11-01T00:00:03Z\n' >> "$RL"; call_run_open "$P"
+expect_eq "run_open: …the log taken back to 4 -> exit 0 (open), and the guard reads 4" "0 4" "$RO_ST $(wt_cur)"
+# The place is held between asks under a key of the plan, its log and the reader's libraries: each change is read fresh.
+CL="$SANDBOX/lib-copy"; cp -R "${LIB%/*}" "$CL"; P=$(mk_plan "$R5" "held.plan.md" "4"); RL="$R5/.bionic/docs/record/held/run.log"
+place() { bash -c '. "$1/run.sh" && _run_place "$2" | sed -n "s/^n=//p"' _ "$CL" "$P"; }
+a="$(place)"; mkdir -p "${RL%/*}"; printf 'run/v1|ev=step|n=6|at=2026-11-01T00:00:04Z\n' > "$RL"; b="$(place)"
+rm "$RL"; sed -i.bak 's/^current: 4$/current: 5/' "$P"; c="$(place)"; printf '\nreader_q_step() { echo n=7; echo state=open; }\n' >> "$CL/reader.sh"
+expect_eq "held: the first ask, an appended step, an edited current:, a changed library, each read fresh" "4 6 5 7" "$a $b $c $(place)"
+printf '\n_translate_state() { return 3; }\n' >> "$CL/translate.sh"; bash -c '. "$1/run.sh" && run_open "$2"' _ "$CL" "$P" 2>/dev/null
+expect_eq "a place whose fold fails is not read: run_open answers 3, never a held or guessed step" 3 "$?"
+
 R5D="$R5/.bionic/docs/plans"
 cat > "$R5D/closed-abandoned.plan.md" <<'EOF'
 ---
