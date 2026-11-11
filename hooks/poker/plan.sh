@@ -1518,27 +1518,33 @@ EOF
       *) return 1 ;;
     esac
   }
-  # THE WALK POINTER'S ONE WRITER. The walk gate reads `walk-artifact:` from the Step-5 block alone (walls.sh
-  # `step5_evidence_block`); the matrix head's `walk-artifact:` line, when the plan has one, takes the same value in the
-  # same write, so the gate never meets the stub matrix-render left beside a filled block. A matrix with no such line
-  # gains none. step-field, proof-add walk and the walk row's landing write the pointer through this function, so neither
-  # half of it can be written without the other.
+  # THE WALK POINTER, written by step-field alone: the walk's registration writes a proof the gate reads instead. The
+  # walk gate reads `walk-artifact:` from the Step-5 block (walls.sh `step5_evidence_block`) when the run holds no walk
+  # proof; the matrix head's line takes the same value in the same write (`walk_matrix_put`).
   # walk_pointer_put <plan copy> <path> -> the copy rewritten in place; exit 1 no Step 5 line, 5 the Step 5 line itself
   # carries walk-artifact (step-line owns that text), any other exit the copy could not be written. The copy is unchanged
   # on every non-zero exit.
   walk_pointer_put() {
     local rc=0
     units_step_fields --replace "$1" 5 "walk-artifact=$2" > "$1.wp" 2>/dev/null || rc=$?
-    if [ "$rc" -eq 0 ]; then
-      WP_V="$2" awk '
-        { if ($0 ~ /^[ \t]*```/) fence = !fence }
-        /^## / { m = ($0 ~ /^## Verification Matrix/) }
-        !fence && m && !done && /^[ \t]*walk-artifact[ \t]*:/ {
-          ind = $0; sub(/[^ \t].*$/, "", ind); print ind "walk-artifact: " ENVIRON["WP_V"]; done = 1; next }
-        { print }' "$1.wp" > "$1.wp2" 2>/dev/null || rc=2
-    fi
+    [ "$rc" -ne 0 ] || walk_matrix_put "$1.wp" "$2" || rc=$?
+    [ "$rc" -ne 0 ] || mv -f "$1.wp" "$1" || rc=2
+    rm -f "$1.wp"
+    return "$rc"
+  }
+  # THE MATRIX HEAD'S walk-artifact: line, when the plan has one, takes the walk's record, so the gate never meets the
+  # stub matrix-render left. A matrix with no such line gains none.
+  # walk_matrix_put <plan copy> <path> -> the copy rewritten in place; exit 2, the copy unchanged, when it cannot be written.
+  walk_matrix_put() {
+    local rc=0
+    WP_V="$2" awk '
+      { if ($0 ~ /^[ \t]*```/) fence = !fence }
+      /^## / { m = ($0 ~ /^## Verification Matrix/) }
+      !fence && m && !done && /^[ \t]*walk-artifact[ \t]*:/ {
+        ind = $0; sub(/[^ \t].*$/, "", ind); print ind "walk-artifact: " ENVIRON["WP_V"]; done = 1; next }
+      { print }' "$1" > "$1.wp2" 2>/dev/null || rc=2
     [ "$rc" -ne 0 ] || mv -f "$1.wp2" "$1" || rc=2
-    rm -f "$1.wp" "$1.wp2"
+    rm -f "$1.wp2"
     return "$rc"
   }
   poker_verb_step_field() {

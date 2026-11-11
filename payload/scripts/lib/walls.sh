@@ -4507,7 +4507,7 @@ resolve_walk_path() {  # $1 = raw walk-artifact value
 # through lib/proof.sh's kept fold, so a walk the run's log alone holds is registered here.
 walk_registered() {  # 2 when the run's facts cannot be read
   local ev f
-  f="$(_proof_facts "$PLAN")" || return 2
+  f="$(_proof_facts "$(proof_run_plan "$PLAN")")" || return 2
   while IFS= read -r ev; do
     [ -n "$ev" ] || continue
     if [ "$ev" = "$1" ] || [ "$(resolve_walk_path "$ev")" = "$2" ]; then return 0; fi
@@ -4545,15 +4545,20 @@ validate_walk_artifact() {
   # greedy to end-of-line, and swallowed the packed remainder as part of the
   # "path" (plan assumption A17). The dedicated continuation-line shape has
   # no ';' in it, so the truncation is a no-op there.
-  b5=$(step5_evidence_block)
-  # THE SIBLING POINTER READ (AC-3.3). Same record shape, same tolerance: `evidence_line_field`
-  # keeps the first-`;` truncation this read already had and drops only the line-start
-  # anchor, so a Step-5 line that opens with `cmd: …` no longer hides its walk artifact.
-  raw=$(evidence_line_field "$b5" walk-artifact)
+  # THE WALK IS THE RUN'S NEWEST WALK PROOF (proof-add walk), read through the reader, a dry copy as its plan; an
+  # older plan that holds none names its walk in the Step 5 block, and that pointer is read as written.
+  raw="$(_proof_last_read "$(proof_run_plan "$PLAN")" walk evidence)" || raw=""
   if [ -z "$raw" ]; then
-    block_matrix "rows are discharged with no walk recorded" "walk it, then name the file" \
-      "the walk gate: matrix rows are discharged but the Step 5 evidence has no 'walk-artifact:' line." \
-      "run the walk first and record 'walk-artifact: record/<file>.md' in the Step 5 block. Frontmatter 'walk: exempt' is the only way past this arm, and it is a Step-0 decision."
+    b5=$(step5_evidence_block)
+    # THE SIBLING POINTER READ (AC-3.3). Same record shape, same tolerance: `evidence_line_field`
+    # keeps the first-`;` truncation this read already had and drops only the line-start
+    # anchor, so a Step-5 line that opens with `cmd: …` no longer hides its walk artifact.
+    raw=$(evidence_line_field "$b5" walk-artifact)
+  fi
+  if [ -z "$raw" ]; then
+    block_matrix "rows are discharged with no walk recorded" "walk it, then register it" \
+      "the walk gate: matrix rows are discharged but the run holds no walk proof, and the Step 5 evidence has no 'walk-artifact:' line." \
+      "run the walk first and register its record: session-poker.sh proof-add walk record/<file>.md. Frontmatter 'walk: exempt' is the only way past this arm, and it is a Step-0 decision."
   fi
 
   # Containment. A `..` component is refused outright rather than normalized:
@@ -4585,7 +4590,7 @@ validate_walk_artifact() {
   # The walk narrates a running surface without the criteria in hand, so an AC
   # identifier in narration is the tell that it checklists them. The one
   # exception is a registered walk: a verdict table proof-add walk parsed and
-  # recorded as `proved: kind=walk` naming this artifact, whose identifiers are
+  # recorded as a walk proof naming this artifact, whose identifiers are
   # its verdicts. Invariant: the artifact carries no AC identifier unless such a
   # line names it; a line naming another record registers nothing here.
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
@@ -5001,7 +5006,7 @@ dispatch() {
   if [ "$_EG_V15" -eq 1 ]; then
     case "${CURRENT%[ab]}" in 5|6|7|8|9)
       _eg_v15_owe "the matrix: stack-health, each criterion's tier, status and evidence keys, and its auditor verdict"
-      [ "$(walk_mode)" = exempt ] || _eg_v15_owe "Step 5's walk-artifact: (whether the walk is recorded)"
+      [ "$(walk_mode)" = exempt ] || validate_walk_artifact
       [ -z "$(frontmatter_get environments)" ] || _eg_v15_owe "Step 5's environments-covered:" ;;
     esac
     case "${CURRENT%[ab]}" in 6|7|8|9) _eg_refuse_readings "the run" "$RIGOR"; _eg_refuse_floor_absent "the run" ;; esac

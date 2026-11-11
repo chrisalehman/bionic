@@ -200,8 +200,9 @@ walk_settle() {
 }
 
 # THE WALK'S REGISTRATION, one act over a plan copy: the record read as the critic's (proof_verdicts), its head
-# (walk_head), the cells it confirms (walk_settle) and the pointer (plan.sh walk_pointer_put), with its proof, one
-# `proof kind=walk` event, pending in every read of the copy and appended by the swap once the copy is judged
+# (walk_head), the cells it confirms (walk_settle) and the matrix head's walk-artifact: line (plan.sh walk_matrix_put),
+# with its proof, one `proof kind=walk` event, the gate's reading of the walk, pending in every read of the copy and
+# appended by the swap once the copy is judged
 # (`walk_append`, named in PV_ACT). proof-add walk runs it alone; deliver runs it at the walk row's landing, in the
 # landing's own write, so the row lands with its cells settled and its proof in the log, or does neither.
 # walk_register <plan> <copy> <record real path> <record docs-relative> <working head> <repository> -> 0 with the copy
@@ -218,14 +219,9 @@ walk_register() {
   WALK_EV=("kind=walk" "head=$WALK_HEAD" "evidence=$rel")
   proof_pending "${WALK_EV[@]}" || { WALK_WHY="the walk record's path $rel holds a | or a line break, which the run's log cannot hold"; return 1; }
   walk_settle "$plan" "$copy" "$rel" <<< "$v" || return 1
-  walk_pointer_put "$copy" "$rel" || rc=$?
-  case "$rc" in
-    0) : ;;
-    1) WALK_WHY="the plan has no Step 5 line to hold walk-artifact:; write it with step-line 5 '<text>'"; return 1 ;;
-    *) WALK_WHY="walk-artifact: cannot be written into the Step 5 block (exit $rc)"; return 1 ;;
-  esac
+  walk_matrix_put "$copy" "$rel" || { WALK_WHY="the matrix head's walk-artifact: line cannot be written"; return 1; }
   WALK_N="$(printf '%s\n' $WALK_DONE | awk 'NF { n++ } END { print n + 0 }')"
-  PV_ACT=walk_append; PV_UNDONE="the cells the walk confirms (${WALK_DONE:-none}) and walk-artifact:"
+  PV_ACT=walk_append; PV_UNDONE="the cells the walk confirms (${WALK_DONE:-none}) and the matrix head's walk-artifact:"
   return 0
 }
 # walk_append -> the walk's proof appended to the run's log by the proof library's one writer; 1 with the plan unchanged.
