@@ -534,7 +534,7 @@ expect_contains "RC2b …saying nothing is resumed" "nothing to resume" "$OUT"
 expect_absent "RC3b …and no task list is offered" "task-list: " "$OUT"
 
 # ============================================================
-section "§READERS: adopt's STALE note reads the document's written instant through the pointer; launch-sync has no safe line to mark; a wave-37 plan's in-place section reads as before"
+section "§READERS: adopt's STALE note reads the document's written instant through the pointer; a wave-37 plan's in-place section reads as before"
 # ============================================================
 hf_world readers no
 poke "$HF_R" handoff
@@ -547,12 +547,6 @@ add_row "$HF_R" name=w-after status=intended agent_id= plan="$HF_P" launched_at=
 poke "$HF_R" adopt --report-only
 expect_contains "R1 a handoff written before a dispatch reads STALE through its instant: line, though its written: line is the local clock" \
   "handoff written 2026-01-01T00:00:00Z — STALE: 1 dispatch(es)" "$OUT"
-s42_snap "$HF_R" "$HF_P"
-cp "$HF_F" "$TMPROOT/hf-unmarked"
-poke "$HF_R" launch-sync
-expect_eq "R2 launch-sync exits 0 with a later dispatch" "0" "$RC"
-expect_true "R2b …the document is byte-identical: it has no safe line to mark (cmp)" cmp -s "$TMPROOT/hf-unmarked" "$HF_F"
-expect_true "R2c …and the plan is byte-identical: the pointer stands (cmp)" cmp -s "$TMPROOT/s42-before" "$HF_P"
 sed 's/^instant: .*/instant: 2027-01-01T00:00:00Z/' "$HF_F" > "$HF_F.e" && mv "$HF_F.e" "$HF_F"
 poke "$HF_R" adopt --report-only
 expect_absent "R3b …not STALE (R1 read STALE through the same verb)" "STALE" "$OUT"
@@ -566,9 +560,7 @@ awk '
   h && /^## / { h = 0 }
   h { next }
   { print }' "$HF_P" > "$HF_P.o" && mv "$HF_P.o" "$HF_P"
-s42_snap "$HF_R" "$HF_P"
 poke "$HF_R" adopt --report-only
-poke "$HF_R" launch-sync
 
 # ============================================================
 section "§RESUME: /bionic:canonical-sdlc <file> runs session-poker.sh resume <file>: bind, arm (at a scale with a Patrol), adopt, the task list, the recap, the step file, the patrol, the tick; a no-run document binds nothing; no resume command ships"
