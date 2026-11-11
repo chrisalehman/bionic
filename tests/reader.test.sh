@@ -5,7 +5,7 @@
 # and answers one question of a closed list: yes or no by exit code alone, a value as `key=value`
 # lines, a list as one `run/v1` line per item.
 #
-#   §FOLD     a repeated line counts once, a later value answers, a cancelled line is absent.
+#   §FOLD     a repeated line counts once, a later value answers, a cancelled line is absent, a step written again answers.
 #   §NAME     every answer over a planted log equals the answer over it with each line's fields moved.
 #   §FORM     a yes or no answer prints nothing; value lines are `key=value`; list lines start `run/v1|`.
 #   §UNKNOWN  an unlisted question exits 2 and prints the list.
@@ -64,6 +64,8 @@ expect_eq "a later value answers: one proof at the head, the later" "rc=0" "$(as
 ask approved step3; expect_status "an approval no cancel names is a yes" 0 "$?"
 ask approved release; expect_status "a cancelled approval is absent" 1 "$?"
 expect_eq "the later step answers" "n=5 state=open" "$(ask step | tr '\n' ' ' | sed 's/ $//')"
+printf 'run/v1|ev=step|n=4|by=me|at=2026-11-01T00:00:14Z\n' >> "$D/record/fold/run.log"; expect_eq "a step written again is the step the run went back to" "n=4 state=open " "$(ask step | tr '\n' ' ')"
+W=back14; printf '## SDLC State\ncurrent: 1\n- Step 0: a\n- Step 1: a\n- Step 4: a\n' > "$D/plans/epic-x/back14.plan.md"; expect_eq "a version-14 plan taken back stands at its current:, its Step lines the history" "n=1 state=open " "$(ask step | tr '\n' ' ')"
 
 # fails-when: a proof is identified without its scope, so a piece reading replaces a whole one of the same question
 # at the same head, and the judge over the reader reads the whole read absent.

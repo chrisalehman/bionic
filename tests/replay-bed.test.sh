@@ -331,6 +331,7 @@ expect_eq "a debt the log alone holds is counted on the card's debt line" "debt:
 expect_contains "…and the continuation would carry it under ## Deferrals" " follow_x" "$(printf '%s\n' "$C1" | grep -m1 '^continuation: ')"
 expect_contains "the log without it carries the run's own deferrals there" "under ## Deferrals: record/" "$(printf '%s\n' "$C0" | grep -m1 '^continuation: ')"
 expect_absent "…and not that debt" " follow_x" "$(printf '%s\n' "$C0" | grep -m1 '^continuation: ')"
+printf 'run/v1|ev=step|n=7|at=2026-11-02T00:00:00Z\n' >> "$CR/run.log"; expect_contains "the run taken back to Step 7 reads there on close-out's step line" "the run is at Step 7 —" "$(closecheck | grep -m1 '^step: ')"
 
 section "AGREE"
 nums() { sed -n 's/^run\.so-far: \([0-9]*\) acts\{0,1\} taken by hand · \([0-9]*\) open asks\{0,1\}$/\1 \2/p'; }

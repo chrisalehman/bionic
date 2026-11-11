@@ -168,7 +168,7 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
       }
       if (at != "" && n + 0 <= 2) { begin("approval", "key", "step" n); put("by", by); put("said", quoted(rest)); emit(at) }
       if (at == "") at = inst(text)
-      begin("step", "n", n); inblock("steps"); emit(at); steps[n] = 1; next
+      begin("step", "n", n); inblock("steps"); emit(at); last = n; next
     }
     /^- session: / { split(substr($0, 12), w, " "); begin("bind", "session", w[1]); put("by", w[5]); emit(w[3]); next }
     /^proved: / { kv(substr($0, 9)); begin("proof", PK[1], PV[1]); inblock("proofs"); at = ""
@@ -178,7 +178,9 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
     /^deferred: / { kv(substr($0, 11)); split(HEAD, w, " "); begin("finding", "ref", w[1]); put("severity", w[2]); put("to", "deferred")
       put("title", quoted(HEAD)); for (i = 1; i <= NP; i++) put(PK[i], PV[i]); lack("by"); f = w[1]; sub(/#.*/, "", f); if (rev[f] != "") after(rev[f]); emit(""); next }
     /^order: / { split(substr($0, 8), w, " "); begin("order", "act", w[1]); put("said", quoted($0)); emit(w[2]); next }
-    END { if (cur != "" && !(cur in steps) && !(cur == "9" && undelivered)) { begin("step", "n", cur); inblock("steps"); emit("") } }'
+    # current: is where the run stands, as the gate writes it, and the Step lines are its history: a current: other than the
+    # last Step line is a step written after them all, so a run taken back reads at the step it went back to.
+    END { if (cur != "" && cur != last && !(cur == "9" && undelivered)) { begin("step", "n", cur); inblock("steps"); emit("") } }'
 }
 
 # _TRANSLATE_LANDED_AWK: `landed_at(text)`, a ledger line's text from its landing's marker on when reasons come
