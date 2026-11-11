@@ -466,6 +466,7 @@ dispatch-preflight.test.sh | §budget-markers-pipe | keep | payload/scripts/lib/
 dispatch-preflight.test.sh | §budget-roster-one-pass | keep | payload/hooks/dispatch-preflight.sh: the open-name count prints the names in ledger order instead of roster order, so brc-a1's bytes differ | none (searched 'brc-a' and 'roster_open_names' in tests/)
 dispatch-preflight.test.sh | §WHOLE-RUN-ADMITTED | keep | payload/scripts/lib/brief.sh brief_contract: a whole-run brief's Suites: tests/run.sh read to a set without run.sh, so the row a second dispatch follows holds no run.sh (WA.1) | none (searched 'suites_allowed.*run.sh' in tests/dispatch-preflight-*.test.sh)
 dispatch-preflight.test.sh | §LANDS-ON | keep | payload/hooks/dispatch-preflight.sh: the readers-of-Files demand applied to Lands-on, so a Lands-on within Suites is refused for reader.test.sh (LO-1) | none (searched 'lands_on' and 'is outside Suites' in tests/; dispatch-preflight-4b.test.sh holds the outside-Suites half)
+dispatch-preflight.test.sh | §PLACE | keep | payload/scripts/lib/fill.sh _fill_current_load: the step and approval read from the plan's lines, so a writer on a plan approved only in its log is refused and the refusal names current: 4 for the log's step 6 (PL.1, PL.2) | none (searched 'ev=approval' and 'Step: ' in tests/dispatch-preflight*.test.sh)
 
 ## doctor-fleet.test.sh
 
