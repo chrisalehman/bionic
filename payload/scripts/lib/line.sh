@@ -805,16 +805,14 @@ _line_landing_moves() {
 # The questions a born row's records were read for are those of the plan's review proof lines naming one of them;
 # each that the judge no longer finds failing has its ask closed, by the landing.
 _line_born_close() {  # <plan> <root> <row>
-  local recs qs judged q
+  local recs qs judged q pl
   recs="$(_line_answered_records "$1" "$3")" && [ -n "$recs" ] || return 0
   _line_load_proof || return 0
-  qs="$(LINE_RECS="$recs" awk "$(proof_awk)"'
+  pl="$(proof_lines "$1")" || return 2
+  qs="$(printf '%s\n' "$pl" | LINE_RECS="$recs" awk "$(proof_awk)"'
     BEGIN { n = split(ENVIRON["LINE_RECS"], a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") want[a[i]] = 1 }
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && (PROOF_EVIDENCE in want) \
-      && !(PROOF_QUESTION in s) { s[PROOF_QUESTION] = 1; print PROOF_QUESTION }' "$1" 2>/dev/null)"
+    proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && (PROOF_EVIDENCE in want) \
+      && !(PROOF_QUESTION in s) { s[PROOF_QUESTION] = 1; print PROOF_QUESTION }')"
   [ -n "$qs" ] || return 0
   judged="$(_line_judged "$1")" || return 0
   _line_load_owed || return 0
@@ -870,14 +868,12 @@ _line_site_map() {  # <root> <path> <line> <from head> <to head> -> the line's n
     }
     END { if (gone) exit 1; print L + off }'
 }
-_line_review_sites() {  # <plan> <docs root> -> `<record>#<n> TAB <path> TAB <line> TAB <head>` per finding with a site, every registered review
-  local ev h
+_line_review_sites() {  # <plan> <docs root> -> `<record>#<n> TAB <path> TAB <line> TAB <head>` per finding with a site, every registered review; 2 the run's facts unread
+  local ev h pl
   _line_load_proof || return 0
-  for ev in $(awk "$(proof_awk)"'
-      /^[[:space:]]*```/ { fence = !fence; next }
-      fence { next }
-      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-      insdlc && proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE != "" && !(PROOF_EVIDENCE in s) { s[PROOF_EVIDENCE] = 1; print PROOF_EVIDENCE }' "$1" 2>/dev/null); do
+  pl="$(proof_lines "$1")" || return 2
+  for ev in $(printf '%s\n' "$pl" | awk "$(proof_awk)"'
+      proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE != "" && !(PROOF_EVIDENCE in s) { s[PROOF_EVIDENCE] = 1; print PROOF_EVIDENCE }'); do
     [ -f "$2/$ev" ] || continue
     h="$(awk '/^reviewed:[ \t]/ { v = $2; sub(/^.*\.\./, "", v); print v; exit }' "$2/$ev")"
     proof_findings "$2/$ev" 2>/dev/null | awk -F'\t' -v ev="$ev" -v h="$h" '
@@ -928,7 +924,7 @@ line_settle() {
   own="$( { units_born_findings "$copy" 2>/dev/null | awk -F'\t' -v r="$row" '$1 == r { print $3 }'
             printf '%s\n' "$moves" | awk -F'\t' -v r="$row" '($2 == "fixed" || $2 == "carried") && $3 == r { print $1 }'; } | awk 'NF && !s[$0]++')"
   if [ -n "$own" ] && [ -n "$docs" ]; then
-    sites="$(_line_review_sites "$copy" "$docs")"
+    sites="$(_line_review_sites "$copy" "$docs")" || return 1
     osites="$(printf '%s\n' "$sites" | LINE_OWN="$own" awk -F'\t' '
       BEGIN { n = split(ENVIRON["LINE_OWN"], a, "\n"); for (i = 1; i <= n; i++) own[a[i]] = 1 }
       ($1 in own) { print $2 "\t" $3 "\t" $4 }')"

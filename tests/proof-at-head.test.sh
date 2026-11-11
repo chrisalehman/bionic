@@ -10,7 +10,8 @@
 # §ONE   a red run at F, two landings greening its reds: the three surfaces print `red at <F8>, 2 landings before this
 #        head`, a close-out copy printing green splits them; then a green run at F with docs, release and code past it
 # §LOG   a review reading, a regression proof and an approval the run's log alone holds are read by the judge and the
-#        proof readers, which ask the reader; a proof written between two reads in one process is read by the second
+#        proof readers, which ask the reader; a proof written between two reads in one process is read by the second;
+#        an inherited suite is read from an older plan's line and from the log, two at one head as two
 # §KEEP  the kept fold is served from the user's own mode-700 directory, never from one others can write or a link; a fold that failed is kept nowhere
 # §IFS   under a tab as the caller's only separator the fold's key still covers the log, and a rating and a verdict read
 #        as they do under the default
@@ -265,10 +266,18 @@ expect_eq "LOG-5 a proof written between two reads in one process is read by the
     printf "run/v1|ev=proof|kind=regression|head=%s|evidence=x|at=2026-10-04T13:00:00Z\n" 0000000000000000000000000000000000000001 >> "$3"
     printf "%s|%s" "$a" "$(proof_last "$2" regression)"' _ "$PAH_LIB" "$PL_PLAN" "$PL_REC/run.log")"
 
+# fails-when: inherited debt is read from the plan's text alone, so a suite proof-add inherited writes to the log is
+# owed again; or the fold keeps one proof per regression head, so two suites inherited at one head read as one.
+awk -v h="$PL_H" '{ print } /^current: / && !d { print "inherited: a.test.sh base=" h " head=" h " at=2026-10-04T13:10:00Z evidence=record/wave-01-fixture/i-a.log"; d = 1 }' "$PL_PLAN" > "$PL_PLAN.n" && mv "$PL_PLAN.n" "$PL_PLAN"
+for s in b c; do printf 'run/v1|ev=proof|kind=inherited|head=%s|evidence=record/wave-01-fixture/i-%s.log|suite=%s.test.sh|base=%s|at=2026-10-04T13:2%s:00Z\n' "$PL_H" "$s" "$s" "$PL_H" "${#s}" >> "$PL_REC/run.log"; done
+expect_eq "LOG-6 an older plan's inherited line and two suites the log inherits at one head are three debts, each read once" \
+  "a.test.sh,b.test.sh,c.test.sh|3" \
+  "$(bash -c '. "$1/proof.sh" && printf "%s|%s" "$(proof_inherited "$2")" "$(proof_inherited_lines "$2" | grep -c "^inherited: ")"' _ "$PAH_LIB" "$PL_PLAN")"
+
 section "§KEEP: the kept fold is served only from a directory this user alone can write, and its files are bounded"
 # fails-when: a fold planted under the right key is served from a directory others can write or through a link, the user's own fold is not served to a second process, or a file per plan is kept for ever, or a failed fold, or a kept file pruned between two reads, is kept as the run's facts; or a fold that failed reaches the judge or a reader of it as no proof, or a lookup or a translation source that died as a whole run.
 pk() { TMPDIR="$PK/$1" bash -c '. "$1/proof.sh" && proof_approved_head "$2" release' _ "$PAH_LIB" "$PL_PLAN"; }  # <dir> -> a fresh process's `release` approval head, TMPDIR $PK/<dir>
-PK="$SANDBOX/keep"; PK_D="bionic-facts-$(id -u)"; mkdir -p "$PK/ok" "$PK/open/$PK_D" "$PK/away" "$PK/link" "$PK/full/$PK_D"; pk ok; PK_F="$(ls "$PK/ok/$PK_D")"; printf 'run/v1|ev=approval|key=release|by=intruder|head=%s|said=x|at=2026-10-04T14:00:00Z\n' "$PL_H" >> "$PK/ok/$PK_D/$PK_F"
+PK="$SANDBOX/keep"; PK_D="bionic-facts-$(id -u)"; mkdir -p "$PK/ok" "$PK/open/$PK_D" "$PK/away" "$PK/link" "$PK/full/$PK_D"; pk ok; PK_F="$(ls "$PK/ok/$PK_D")"; awk -v l="$(printf 'run/v1|ev=approval|key=release|by=intruder|head=%s|said=x|at=2026-10-04T14:00:00Z' "$PL_H")" '$0 == "\036" && !d { print l; d = 1 } { print }' "$PK/ok/$PK_D/$PK_F" > "$PK/ok.f" && cat "$PK/ok.f" > "$PK/ok/$PK_D/$PK_F"
 cp "$PK/ok/$PK_D/$PK_F" "$PK/open/$PK_D/"; chmod 777 "$PK/open/$PK_D"; cp -R "$PK/ok/$PK_D" "$PK/away/"; ln -s "$PK/away/$PK_D" "$PK/link/$PK_D"; for i in $(seq 40); do : > "$PK/full/$PK_D/$i"; done; touch -t 202601010000 "$PK/full/$PK_D"/*; chmod 700 "$PK/full/$PK_D"; pk full
 expect_eq "KEEP-1 the user's own kept fold (mode 700) is served to a second process, the approval planted in it read" "drwx------|$PL_H" "$(ls -ld "$PK/ok/$PK_D" | cut -c1-10)|$(pk ok)"
 expect_eq "KEEP-2 the same file is served neither from a directory others can write nor through a link to the user's own, each left as planted" "||1|1" "$(pk open)|$(pk link)|$(grep -c intruder "$PK/open/$PK_D/$PK_F")|$(grep -c intruder "$PK/away/$PK_D/$PK_F")"
@@ -303,7 +312,7 @@ pah_world fold "" 0; ( in_fixture "$PAH_P" || exit 1; bound_marker "$PAH_P" pah-
 PF_POKE() { TMPDIR="$(pf_tmp "p$RANDOM")" PAH_POKER="$PF_ST/hooks/session-poker.sh" PAH_IN="$1" pah_poke "$PAH_P" pah-fold "${@:2}"; pfu "$PAH_RC" "$PAH_OUT" "$PF_PAT"; }  # <function the fold fails in> <verb…> -> exit|lines of PF_PAT|could-not-read lines
 PF_PAT='whole suite: '; expect_eq "FOLD-3 the release card over a fold that fails is not drawn, exit 2; whole, drawn" "2|0|1~0|1|0" "$(PF_POKE poker_verb_release_approval release-approval --preview "$PAH_PLAN")~$(PF_POKE none release-approval --preview "$PAH_PLAN")"
 PF_PAT='^hand-holds: total='; expect_eq "FOLD-4 the hand-holds count over a fold that fails says it could not be read; whole, its total" "0|0|1~0|1|0" "$(PF_POKE reader_facts landing-report --hand-holds "$PAH_PLAN")~$(PF_POKE none landing-report --hand-holds "$PAH_PLAN")"
-PF_PAT='structure waiver at '; expect_eq "FOLD-5 a waiver over a fold that fails is refused before its dry commit; whole, it reaches the gate's dry commit" "2|0|1~1|1|0" "$(PF_POKE reader_facts waive structure 'waive it, the person said')~$(PF_POKE none waive structure 'waive it, the person said')"
+PF_PAT='question=structure head='; expect_eq "FOLD-5 a waiver over a fold that fails is refused, nothing written; whole, its event is written to the run's log" "2|0|1~0|1|0" "$(PF_POKE reader_facts waive structure 'waive it, the person said')~$(PF_POKE none waive structure 'waive it, the person said')"
 PF_SS="$(sed -n '/^SS_FACTS_PLAN=/p;/^ss_ask() {/,/^}/p;/^print_bound_line() {/,/^}/p' "$BIONIC_HOOKS_DIR/session-start.sh")"
 PF_B='BIONIC_LIB="$1"; DOCS=""; HOOK_ROOT=x; eval "$2"; print_bound_line "bound-open $3"'
 PF_PAT='current: 8$'; expect_eq "FOLD-6 the bound line over a fold that fails says the facts could not be read where the step stands; whole, the step" "0|0|1~0|1|0" \

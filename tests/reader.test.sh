@@ -32,6 +32,7 @@
 #   §ASK-LOG    lib/owed.sh writes each act on an ask to the run's log on its own clock and never the register, and
 #               reads the register, then the log, as one list.
 #   §ASK-DOORS  a passing reading closes its question's waiver; the Stop over an approved plan closes the step asks.
+#               A registered proof is one proof event in the run's log, the plan byte for byte as it was.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
 
@@ -530,7 +531,10 @@ printf '%s|questions=evidence\n' "$(roster_row_fixture session="$SID" name=w-aud
   files=.bionic/docs/record/wave-01-fixture/ev-fail.md,.bionic/docs/record/wave-01-fixture/ev-pass.md)" >> "$(roster_of "$RF")"
 rec() { printf '# reading\n\nreviewed: %s..%s\nquestion: evidence\nresult: %s\nscope: piece\n\nwhat the reader found\n' "${RF_B:0:10}" "$2" "$3" > "$RF_DIR/$1"; }
 rec ev-fail.md "$(s57_commit "$RF/.worktrees/01-fixture" lib/a.sh C1)" fail
+RF_SUM="$(cksum < "$PF")"
 poke "$RF" proof-add review record/wave-01-fixture/ev-fail.md --question evidence --reader w-aud
+expect_eq "a registered proof leaves the plan byte for byte as it was and adds one proof event to the run's log" "$RF_SUM|1" \
+  "$(cksum < "$PF")|$(/usr/bin/grep -c '^run/v1|ev=proof|kind=review|head=[0-9a-f]*|evidence=record/wave-01-fixture/ev-fail.md|question=evidence|' "$RF_DIR/run.log")"
 expect_eq "a failing reading registered (exit 0) opens its waiver on the run's list at once" "0|waive:evidence" "$RC|$(reg "$RF" "$PF")"
 rec ev-pass.md "$(s57_commit "$RF/.worktrees/01-fixture" lib/a.sh C2)" pass
 poke "$RF" proof-add review record/wave-01-fixture/ev-pass.md --question evidence --reader w-aud

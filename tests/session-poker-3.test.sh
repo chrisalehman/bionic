@@ -125,7 +125,7 @@ s56_rec ev1.md "${S56_B:0:10}" "$S56_C2" evidence pass piece
 s42_snap "$R56" "$P56"
 poke "$R56" proof-add review record/wave-01-fixture/ev1.md --question evidence --reader w-aud
 expect_eq "56a §FACT-shape a whole reading record registers (exit 0)" "0" "$RC"
-expect_eq "56a2 …one line added" "1 0;" "$(s42_numstat "$R56")"
+expect_eq "56a2 …the plan byte for byte as it was: the proof is the run's log's" "$(cksum < "$TMPROOT/s42-before")" "$(cksum < "$P56")"
 expect_regex "56a3 …the proof line with the four reading fields, in the table's order" \
   "^proved: kind=review head=${S56_C2} at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z evidence=record/wave-01-fixture/ev1.md question=evidence reader=w-aud result=pass scope=piece$" \
   "$(s46_proved "$P56")"
@@ -567,7 +567,7 @@ for s57q in evidence adversarial structure; do
   expect_eq "57t §TASK a task-scale plan registers a $s57q reading through the verb (exit 0)" "0" "$RC"
 done
 expect_eq "57t2 …three reading lines, at the task branch's head" "3" \
-  "$(/usr/bin/grep -cE "^proved: kind=review head=${S57T_C1} .* reader=w-tcrit result=pass scope=piece$" "$P57T")"
+  "$(s46_proved "$P57T" | /usr/bin/grep -cE "^proved: kind=review head=${S57T_C1} .* reader=w-tcrit result=pass scope=piece$")"
 s57_floor "$S57T_C1" "$P57T"
 s57_state "$P57T" "$S57T_C1"
 expect_eq "57t4 …rc 0" "0" "$S57_RC"
@@ -916,6 +916,13 @@ expect_eq "59c5d F3 …and never moves T4, which carries structure: still active
   "active|w-crit" "$(s48_row "$P59" T4 | awk -F'|' '{ print $12 "|" $5 }')"
 printf '# reading\n\nreviewed: %s..%s\nquestion: structure\nresult: pass\nscope: piece\n%s\n\nthe structure pass\n' "$S59_B" "$S59_C" "$S56_ALL" \
   > "$R59/.bionic/docs/record/wave-01-fixture/str-2.md"
+# fails-when: a rename that fails after the proof is appended is reported as a refusal of the proof, or the proof is
+# not in the log, or the plan is half written. The fixture's mv refuses a move onto a plan.
+S59_MV="$TMPROOT/s59-mv"; mkdir -p "$S59_MV"; printf '#!/bin/bash\nfor a; do l="$a"; done\ncase "$l" in *.plan.md) exit 1 ;; esac\nexec /bin/mv "$@"\n' > "$S59_MV/mv"; chmod +x "$S59_MV/mv"
+S59_SUM="$(cksum < "$P59")"; PATH="$S59_MV:$PATH" poke "$R59" proof-add review record/wave-01-fixture/str-2.md --question structure --reader w-crit
+expect_eq "59c5e a reading whose plan edit cannot be renamed in: exit 2, the proof in the run's log, the plan byte for byte as it was" "2|1|$S59_SUM" \
+  "$RC|$(/usr/bin/grep -c '^run/v1|ev=proof|kind=review|.*|evidence=record/wave-01-fixture/str-2.md|' "$S59_LOG")|$(cksum < "$P59")"
+expect_regex "59c5f …saying the proof stands and naming the edit left undone" "stands in the run's log, so do not run proof-add again for it; the judged copy could not be moved over .*, so T4 back to pending is left undone" "$OUT"
 poke "$R59" proof-add review record/wave-01-fixture/str-2.md --question structure --reader w-crit
 expect_eq "59c6 F3 w-crit's structure reading at C registers (exit 0)" "0" "$RC"
 expect_eq "59c7 F3 …and with both its questions read at C, T4 returns to pending, its agent cleared" \
