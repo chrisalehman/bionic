@@ -414,9 +414,8 @@ if cr_reached "LV-0"; then
   LV_CARD="$(cat "$CR_REC"/release-approval-*.md 2>/dev/null)"
   expect_eq "LV-3 the release approval card lists it owed by the close, and puts no decision on it" "yes|no" \
     "$(/usr/bin/grep -q 'owed by the close' <<< "$LV_CARD" && echo yes || echo no)|$(/usr/bin/grep -q 'key=row:AC-2\.1|' <<< "$LV_CARD" && echo yes || echo no)"
-  expect_eq "LV-4 at delivered: the plan reads it discharged, its evidence cell and block key the continuation" \
-    "discharged|record/wave-x/continuation.md|record/wave-x/continuation.md" \
-    "$(lv_cells "$CR_PLAN")|$(lv_key "$CR_PLAN" evidence)"
+  expect_eq "LV-4 at delivered: the run's log holds one proof naming it, its evidence the continuation, the table as it was" \
+    "1|pending" "$(/usr/bin/grep -c '|ev=proof|ac=AC-2\.1|evidence=record/wave-x/continuation\.md|' "$CR_REC/run.log")|$(lv_cells "$CR_PLAN" | cut -d'|' -f1)"
   expect_contains "LV-5 …written by close-out from its last reading" "matrix: AC-2.1 discharged" "$(cr_out 'close-out, the tail')"
   LV_SETS="$(/usr/bin/grep '^\$ .*session-poker.sh matrix-set ' "$CR_LOG")"
   expect_contains "LV-6 precondition: the log's matrix-set lines are read (the criterion's task on AC-1.1)" "matrix-set AC-1.1" "$LV_SETS"
