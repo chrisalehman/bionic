@@ -367,7 +367,7 @@ RL_RECORD="$RL_WR/.bionic/docs/record/wave-x/landing-proofs.log"
 RL_H="$(git -C "$RL_T" rev-parse HEAD 2>/dev/null)"
 RL_PROOF="$REPO/payload/scripts/lib/proof.sh"
 RL_ROOTS="$REPO/payload/scripts/lib/roots.sh"
-rl_runs() { /usr/bin/grep -E '^line/v1[|]ev=run[|]' "$RL_RECORD" 2>/dev/null; }
+rl_runs() { /usr/bin/grep -E '^run/v1[|]ev=run[|]' "${RL_RECORD%/*}/run.log" 2>/dev/null; }
 rl_sha() { shasum -a 256 "$1" 2>/dev/null | awk '{ print $1 }'; }
 # rl_judge <proof.sh> <log> -> "<exit>|<what proof_attested floor printed>|<proof_floor_run's answer>"
 rl_judge() {

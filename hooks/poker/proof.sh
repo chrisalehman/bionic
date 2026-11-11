@@ -1893,7 +1893,7 @@ DSP_READINGS
       exit 1
     fi
     # THE RUN IS RECORDED WHERE ITS PROOF WILL LOOK (wave-37 T4; D7, AC-6.1; ADR-057): one `ev=run` line in the plan's
-    # landing record (lib/line.sh `line_event`, through `_wt_proofs_put`), the log by its record path, the head and
+    # run log (lib/line.sh `line_event`, through the log's appender), the log by its record path, the head and
     # dirty count read before the run, its exit, and the log's sha256 (lib/proof.sh `_proof_sha256`), so `proof-add
     # floor` accepts this log, and this log as it is now, and no hand-written one.
     FR_SHA="$(_proof_sha256 "$FR_LOG")" || FR_SHA=""

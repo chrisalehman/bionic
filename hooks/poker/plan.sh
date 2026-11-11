@@ -2166,7 +2166,7 @@ EOF
     if [ -n "$MS_WROTE" ]; then
       _pv_sid="$(session_id 2>/dev/null)" || _pv_sid=""
       { declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
-        && line_event "$PV_PLAN" matrix-set "ac=$MS_AC" "cells=$MS_WROTE" "by=${_pv_sid:-none}" >/dev/null 2>&1 \
+        && line_event "$PV_PLAN" hand what=matrix-set "ac=$MS_AC" "cells=$MS_WROTE" "by=${_pv_sid:-none}" >/dev/null 2>&1 \
         || say "matrix-set — $MS_AC: the plan is written, but its line in the landing record could not be, so the hand-holds count will miss this write."
     fi
     say "matrix-set — $MS_AC: ${MS_PAIRS[*]} written to $PV_PLAN; dry-committed first."
@@ -2269,7 +2269,7 @@ EOF
     # so, and every refusal above exits earlier still, so neither line is written for a call that changed nothing.
     _pv_sid="$(session_id 2>/dev/null)" || _pv_sid=""
     { declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
-      && line_event "$PV_PLAN" matrix-retier "ac=$RT_AC" "from=$RT_OLD" "to=$RT_TIER" "by=${_pv_sid:-none}" >/dev/null 2>&1 \
+      && line_event "$PV_PLAN" hand what=matrix-retier "ac=$RT_AC" "from=$RT_OLD" "to=$RT_TIER" "by=${_pv_sid:-none}" >/dev/null 2>&1 \
       || say "matrix-retier — $RT_AC: the plan is written, but its line in the landing record could not be."
     decisions_append "$PV_PLAN" "$RT_LED" "$PV_REPO" "retier ${RT_AC} ${RT_OLD}→${RT_TIER} (orchestrator $(decisions_clock)): $RT_EVAL" 2>/dev/null \
       || say "matrix-retier — $RT_AC: the plan is written, but ${RT_LED#"$PV_REPO"/} could not take its Δ entry; write it with decisions."

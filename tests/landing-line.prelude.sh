@@ -120,9 +120,11 @@ ll_wait_file() {  # <file> [tenths] -> 0 once it exists
   while [ "$i" -lt "$n" ]; do [ -e "$1" ] && return 0; i=$((i + 1)); sleep 0.1; done
   return 1
 }
-ll_ev() {  # <root> <ev> -> the record's lines of that event
-  grep "^line/v1|ev=$2|" "$(ll_rec "$1")" 2>/dev/null
+ll_ev() {  # <root> <ev> -> the lines of that event, the landing record's then the run's log's
+  ll_all "$1" | grep -E "^(line|run)/v1[|]ev=$2[|]"
 }
+ll_log() { printf '%s/.bionic/docs/record/wave-x/run.log' "$1"; }
+ll_all() { cat "$(ll_rec "$1")" "$(ll_log "$1")" 2>/dev/null; }   # <root> -> the record's lines, then the log's
 ll_head() { git -C "$1" rev-parse --verify -q refs/heads/wave/x; }
 
 

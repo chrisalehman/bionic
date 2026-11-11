@@ -360,7 +360,7 @@ _refuse_log_need() {
     declare -F session_plan >/dev/null 2>&1 || . "$lib/run.sh" || exit 0
     declare -F line_event >/dev/null 2>&1 || . "$lib/line.sh" || exit 0
     plan="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID")" || exit 0
-    line_event "$plan" refusal needs=person "wall=$1"
+    line_event "$plan" hand what=refusal needs=person "wall=$1"
   ) >/dev/null 2>&1 || :
 }
 
