@@ -237,34 +237,6 @@ pdb_stderr() {  # <command> -> the hook's stderr, verbatim
   cat "$SANDBOX/.err"
 }
 
-pdb_one_line() {  # <label> <command> <expected line>
-  local _lbl="$1" _cmd="$2" _want="$3" _got _n _line _rest
-  _got="$(pdb_stderr "$_cmd")"
-  _n="$(/usr/bin/grep -c '^bionic: ' "$SANDBOX/.err" | tr -d ' ')"
-  _line="$(/usr/bin/grep -m1 '^bionic: ' "$SANDBOX/.err")"
-  # WHAT FOLLOWS THE VERDICT, if anything: the stream minus its rendered line(s).
-  # Read here rather than asserted per caller, because every row below carries a
-  # `detail` now and a row that stopped carrying one is the regression worth seeing.
-  _rest="$(/usr/bin/grep -v '^bionic: ' "$SANDBOX/.err" | /usr/bin/grep -c . | tr -d ' ')"
-  if [ "$_n" = "1" ]; then ok "$_lbl: exactly one VERDICT line on the user stream"
-  else no "$_lbl: exactly one VERDICT line on the user stream" "got $_n lines"; fi
-  if printf '%s' "$_line" | /usr/bin/grep -qE "$PDB_LINE_RE"; then
-    ok "$_lbl: in AC-E1.3's shape"
-  else
-    no "$_lbl: in AC-E1.3's shape" "line=[$_line]"
-  fi
-  if [ "$_line" = "$_want" ]; then ok "$_lbl: and it is the table's own wording"
-  else no "$_lbl: and it is the table's own wording" "want [$_want] got [$_line]"; fi
-  # THE POSITIVE THAT KEEPS THE COUNT HONEST (ADR-030, A-T4.9): the verdict is one
-  # line BECAUSE the detail is a separate thing beneath it, not because the wall
-  # went quiet.
-  if [ "$_rest" -ge 1 ]; then
-    ok "$_lbl: with its detail beneath it, no knob set"
-  else
-    no "$_lbl: with its detail beneath it, no knob set" "nothing after the verdict"
-  fi
-}
-
 # THE HEREDOC FORM, not the client pipe: a command naming a client reaches the arms
 # above first (the outer guard matches the same client names), so the piped-SQL arm is
 # reachable only through the `<< ` half of its own condition. Measured, not assumed --

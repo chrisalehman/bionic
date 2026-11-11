@@ -51,25 +51,6 @@ trap 'rm -rf "$SANDBOX"' EXIT
 expect_file()     { if [ -f "$2" ]; then ok "$1"; else no "$1" "no such file: $2"; fi; }
 expect_no_file()  { if [ -f "$2" ]; then no "$1" "file exists but should not: $2"; else ok "$1"; fi; }
 
-# Portable clock helpers for Section 12 (S6): the delivered predicate the fix
-# protects compares a file's mtime against an ISO8601 `launched_at`, and both
-# directions of that conversion differ between BSD (macOS) and GNU date/touch.
-file_mtime_test() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
-iso_to_epoch() {  # <ISO8601Z> -> epoch seconds, or empty
-  date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" '+%s' 2>/dev/null || date -u -d "$1" '+%s' 2>/dev/null
-}
-set_mtime_epoch() {  # <file> <epoch>
-  # `touch -t` interprets its timestamp argument in LOCAL time on both BSD and
-  # GNU touch, so the calendar string handed to it must be the LOCAL rendering
-  # of the epoch (no `-u`) — the earlier `-u` rendering fed a UTC calendar
-  # string through a local-time parser and silently offset every mtime by the
-  # host's UTC delta, large enough to flip the paired-negative's inequality.
-  local ts
-  ts=$(date -r "$2" '+%Y%m%d%H%M.%S' 2>/dev/null || date -d "@$2" '+%Y%m%d%H%M.%S' 2>/dev/null)
-  [ -n "$ts" ] && touch -t "$ts" "$1" 2>/dev/null
-  return 0
-}
-
 # ---------- fixtures ----------
 #
 # FIXTURE FIDELITY (declared per checklist §A / spec §Design).
@@ -663,28 +644,6 @@ section "Section 8: it never blocks, whatever happens (PostToolUse invariant)"
 # 0. The lock is the one place a naive implementation spins forever: `mkdir`
 # fails for reasons no reclaim can fix (an unwritable state directory is
 # repo-controlled) and `rm -rf` of an ABSENT path SUCCEEDS.
-run_bounded() {  # <secs> <payload> -> sets BOUNDED_ST (137 = killed)
-  local secs="$1" payload="$2" waited=0 pid _sid
-  # THE ENVIRONMENT AGREES WITH THE PAYLOAD, for run_rec's reason and with its
-  # spelling (S11). Without the pin this driver left the RUNNER's own
-  # CLAUDE_CODE_SESSION_ID in the environment, the hook took that key as primary,
-  # and the engagement marker this world plants for the fixture session did not
-  # match it — so every bounded drive exited at the engagement switch and the
-  # lock below it was never reached by this section at all.
-  _sid=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
-  printf '%s' "$payload" | env CLAUDE_CODE_SESSION_ID="$_sid" bash "$REC" \
-    >"$SANDBOX/.bout" 2>"$SANDBOX/.berr" &
-  pid=$!
-  while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "$secs" ]; do
-    sleep 1; waited=$((waited + 1))
-  done
-  if kill -0 "$pid" 2>/dev/null; then
-    kill -9 "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; BOUNDED_ST=137
-  else
-    wait "$pid"; BOUNDED_ST=$?
-  fi
-  return 0
-}
 
 # THE LOCK IS GONE WITH THE RECORD IT SERIALIZED (epic-23 wave-15, REQ-2). This world drove
 # the one place a naive implementation spins forever — `mkdir` fails for reasons no reclaim

@@ -40,15 +40,16 @@ OWED_ROWS
   return 0
 }
 
-# cur8_unruled -> the AC id of each matrix row the advance to 8 finds unruled, one per line: walls.sh
-# `matrix_unruled`, the commit gate's own reader and predicate (`matrix_row_ruled`), asked in a subshell so nothing
-# walls.sh defines outlives it. Never a second reading of the matrix here: the advance and every commit after it
-# answer one row one way. rc 1 when the library or the reader cannot be had.
+# cur8_unruled -> the AC id of each criterion the advance to 8 finds unruled, one per line: walls.sh
+# `matrix_unruled`, the commit gate's own reader and predicate (`matrix_row_ruled`) over the reader's answer, the
+# evidence review read at the working head, asked in a subshell so nothing walls.sh defines outlives it. Never a second
+# reading of the criteria here: the advance and every commit after it answer one row one way. rc 1 when the library
+# cannot be had, 2 when the run's facts could not be read.
 cur8_unruled() {
   [ -f "$BIONIC_LIB/walls.sh" ] || return 1
   ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 || exit 1
     declare -F matrix_unruled >/dev/null 2>&1 || exit 1
-    matrix_unruled "$PV_PLAN" 8 )
+    matrix_unruled "$PV_PLAN" 8 "${PV_HEAD8:-}" )
 }
 
 # cur8_unruled_line <AC> -> the refusal's line for an unruled row: the matrix arm's own fact, as a commit at
@@ -151,7 +152,7 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
   # THE RULING IS THE MERGE ADVANCE'S: at 8 every matrix row is ruled, or the advance is refused naming each one.
   local unruled="" ac
   if [ "$step" = 8 ] && ! unruled="$(cur8_unruled)"; then
-    die "REFUSED — current: 8 is admitted only when every matrix row is ruled, and the matrix check (walls.sh matrix_unruled) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+    die "REFUSED — current: 8 is admitted only when every matrix row is ruled, and the matrix check (walls.sh matrix_unruled) cannot be loaded from $BIONIC_LIB or the run's facts could not be read; the plan is unchanged."
     exit 2
   fi
   out="$(facts_state "$PV_PLAN" "$PV_HEAD8" 2>"$PV_NEW.judge")"; rc=$?

@@ -265,11 +265,13 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
         s = substr($0, index($0, "waiver:") + 7); q = index(s, "\""); h = substr(s, 1, q - 1); n = split(h, w, /[ \t]+/)
         at = w[n]; if (at == "") at = w[n - 1]; by = substr(h, 1, index(h, at) - 1); sub(/^[ \t]+/, "", by); sub(/[ \t]+$/, "", by)
         r = substr(s, q + 1); said = (index(r, "\"") ? substr(r, 1, index(r, "\"") - 1) : "")
-        printf "W\036%s\036%s\036%s\036%s\n", ac, by, at, said }'
+        printf "W\036%s\036%s\036%s\036%s\n", ac, by, at, said }
+      ac != "" && match($0, /^[ \t]+user-confirmed[ \t]*:/) { v = substr($0, RLENGTH + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); printf "U\036%s\036%s\n", ac, v }'
     _translate_section "$1" "Verification Matrix"; } | awk -F'|' "$_TRANSLATE_AWK"'
     /^S / { split($0, w, " "); stated[(w[2] == "proved:" ? "proof" : "waiver") SUBSEP w[3]] = 1; next }
     /^W\036/ { split($0, w, "\036"); if (!(w[2] in wat)) { wby[w[2]] = w[3]; wat[w[2]] = w[4]; wsaid[w[2]] = w[5] }
       begin("hand", "ac", w[2]); put("what", "waive-row"); if (w[3] != "") put("by", w[3]); if (w[5] != "") put("said", w[5]); emit(w[4]); next }
+    /^U\036/ { split($0, w, "\036"); if (!(w[2] in uc)) uc[w[2]] = w[3]; next }
     !/^\|/ { if (nh) done = 1; next }
     done { next }
     !nh { for (i = 2; i < NF; i++) { k = tolower(trim($i)); gsub(/[ \t]+/, "-", k); col[k] = i }; nh = 1; next }
@@ -280,6 +282,8 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
       begin(t, "ac", ac)
       for (j = split("evidence auditor", w, " "); j > 0; j--) c[w[j]] = ((w[j] in col) && !none($(col[w[j]]))) ? trim($(col[w[j]])) : ""
       put("evidence", c["evidence"]); put("auditor", c["auditor"])
+      # A person confirms a criterion in its block; a block with no such line holds no confirmation to name.
+      if (ac in uc) put("confirmed", uc[ac])
       if (t == "waiver" && (ac in wat)) { put("by", wby[ac]); put("said", wsaid[ac]); lack("head"); emit(wat[ac]); next }
       if (t == "proof") lack("kind"); else lack("by")
       lack("head"); emit("")

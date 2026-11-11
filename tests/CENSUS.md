@@ -664,7 +664,7 @@ framework.test.sh | §6b | keep | rule: lint — a private ok() or no() definiti
 framework.test.sh | §8 | prose pin | "8: the header points at the live width knob" and its two siblings read the wording of tests/run.sh's header comment — carried by the commit that holds tests/run.sh | none (searched 'BIONIC_TEST_JOBS_CEILING` is there' in tests/)
 framework.test.sh | §9 | keep | tests/lib/assert.sh expect_true: the command's output no longer sent to /dev/null, so NOISE-ON-STDOUT reaches the suite output (9). also: 3 prose pins on the mapping table | none (searched 'NOISE-ON-STDOUT' in tests/)
 framework.test.sh | §10 | keep | tests/lib/assert.sh expect_regex: implemented as a printf piped into grep -qE, so a value past the pipe buffer reports no match (10, the large value); also rule: lint — a producer-into-grep -q planted in assert.sh's code. also: PIPE_SMALL and PIPE_BIG measure bash and grep only | none (searched 'expect_regex' and 'F10_BANNED' in tests/)
-framework.test.sh | §PIN-REL | prose pin | "PIN-REL the shipped file states the ban" reads the wording of assert.sh's comments — carried by the commit that holds tests/lib/assert.sh; the two copy rows run the suite's own f10_stated and f10_code_hits on doctored copies | none (searched 'f10_stated' in tests/)
+framework.test.sh | §PIN-REL | prose pin | "PIN-REL the shipped file states the ban" reads the wording of assert.sh's comments — carried by the commit that holds tests/lib/assert.sh | none (searched 'f10_stated' in tests/)
 
 ## fresh-home.test.sh
 
@@ -1117,7 +1117,7 @@ protect-main.test.sh | §Section 5 | duplicate | payload/scripts/lib/git-argv.sh
 protect-main.test.sh | §Section 6 | duplicate | payload/scripts/lib/git-argv.sh: a topic/main branch, an echo or a heredoc body read as a push to main, or a heredoc swallowing the push after it | git-argv.test.sh §Section 1c (unverified), git-argv.test.sh §Section 1 (unverified)
 protect-main.test.sh | §Section 7 | duplicate | payload/scripts/lib/git-argv.sh: an opener, a command-taking prefix (sudo, time, timeout, env -C, xargs, find -exec, ssh) or a runner string no longer skipped to the push it carries | git-argv.test.sh §Section 1h (unverified), git-argv.test.sh §Section 4b (unverified)
 protect-main.test.sh | §the unengaged session | duplicate | hooks/bash-walls.sh: the engagement question asked once for all five walls inverted or deleted, so an unengaged push is refused; payload/scripts/lib/run.sh engaged_session: a symlinked marker read as engaged | bash-walls.test.sh §1, bash-walls.test.sh §12, engage.test.sh §E8 (unverified)
-protect-main.test.sh | §AC-E1.3/E1.5 | keep | payload/scripts/lib/walls.sh wall_protect_main: the detail naming the current branch dropped from the refusal's stream, so "…it is beneath it, with no knob set at all" goes red; pm_one_line is defined and never called | none (searched 'The current branch is' in tests/)
+protect-main.test.sh | §AC-E1.3/E1.5 | keep | payload/scripts/lib/walls.sh wall_protect_main: the detail naming the current branch dropped from the refusal's stream, so "…it is beneath it, with no knob set at all" goes red | none (searched 'The current branch is' in tests/)
 
 ## rc-item-1.test.sh
 

@@ -2428,28 +2428,24 @@ BRF_EOF
     printf '%s' "$v"
   }
 
-  # rr_rows <plan> <current> -> `<AC>\037<tier>\037<status>\037<auditor>\037<ruled 1|0|owed:<step>>\037<reason>` per
-  # five-cell matrix row, table order. THE RULING IS walls.sh's: each row is read by its readers (`matrix_section`,
-  # `matrix_block`, `user_confirmed_value`, `matrix_row_waiver`) and judged by `matrix_row_ruled`, sourced in a subshell
-  # as the facts judge sources it, so the card and the gate cannot answer one row two ways. A WAIVER IS A FACT OF THE
-  # RUN: a status cell that says waived stands only while the reader holds a waiver naming the row (`RR_WAIVED`, the
-  # criteria the run's waiver facts name), so a cell written after the instant the log stands at reads as not run. A row the gate defers at <current>
-  # (`matrix_row_deferred`: owed at the later step whose task proves it) is `owed:<step>`, not ruled and not unruled:
-  # nothing has run that could prove it, and the step that runs it writes it. The auditor cell is printed as
-  # `placeholder_cell` folds it, `-` when it means none, so `—`, `-`, `n/a` and an empty cell read alike. The reason is
-  # the block's `reason:` key, read from matrix_block. Exit 2 when walls.sh cannot be loaded: the card never guesses a
-  # ruling.
+  # rr_rows <plan> <current> [head] -> `<AC>\037<tier>\037<status>\037<auditor>\037<ruled 1|0|owed:<step>>\037<reason>` per
+  # criterion, the reader's order. THE RULING IS walls.sh's: each criterion is read through its readers (`matrix_load`,
+  # the reader's answer and the authored blocks, `matrix_table_rows`, `matrix_block`) and judged by `matrix_row_ruled`,
+  # sourced in a subshell as the facts judge sources it, so the card and the gate cannot answer one row two ways. A
+  # WAIVER IS A FACT OF THE RUN: the reader's status says waived only where a waiver event names the criterion. A row the
+  # gate defers at <current> (`matrix_row_deferred`: owed at the later step whose task proves it) is `owed:<step>`, not
+  # ruled and not unruled: nothing has run that could prove it, and the step that runs it writes it. The auditor is
+  # printed as `placeholder_cell` folds it, `-` when it means none. The reason is the block's `reason:` key. Exit 2 when
+  # walls.sh cannot be loaded or the run's facts could not be read: the card never guesses a ruling.
   rr_rows() {
     [ -f "$BIONIC_LIB/walls.sh" ] || return 2
     ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F matrix_row_ruled >/dev/null 2>&1 \
         && declare -F matrix_row_deferred >/dev/null 2>&1 || exit 2
-      PLAN="$1"; MATRIX="$(matrix_section)"
-      while IFS=$'\037' read -r ac tier status ev aud; do
+      PLAN="$1"; matrix_load "$PLAN" "${3:-}" || exit 2
+      while IFS=$'\037' read -r ac tier status ev aud conf waiver; do
         [ -n "$ac" ] || continue
         block="$(matrix_block "$ac")"
-        case "$status:${RR_WAIVED:-}" in waived:*" $ac "*) ;; waived:*) status=pending ;; esac
-        waiver=0; matrix_row_waiver "$ev" "$block" && waiver=1
-        ruled=0; matrix_row_ruled "$tier" "$status" "$aud" "$(user_confirmed_value "$block")" "$waiver" && ruled=1
+        ruled=0; matrix_row_ruled "$tier" "$status" "$aud" "$conf" "$waiver" && ruled=1
         owe="$(matrix_owing_step "$PLAN" "$block")"
         [ "$ruled" = 1 ] || ! matrix_row_deferred "$PLAN" "$owe" "$2" "$status" "$(matrix_owing_open "$PLAN" "$block")" || ruled="owed:$owe"
         aud="$(placeholder_cell "$aud")"
@@ -2649,10 +2645,8 @@ RR_WAIVES
     # step a row is owed against is the run's (the reader's `step`), the plan's `current:` only where the log has none.
     RR_ACT=0; RR_ACP=0; RR_ACY=0; RR_ACW=0; RR_ACU=0; RR_ACA=0; RR_ACR=0; RR_ACC=0; RR_ACL=0; RR_MISS=""
     poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_step; RR_CUR="$(printf '%s\n' "$RR_ANS" | sed -n 's/^n=//p')"
-    poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" poker_fold_all
-    RR_WAIVED=" $(printf '%s\n' "$RR_ANS" | awk -F'|' "$_LINE_FIELDS_AWK"'line_kv("ev") == "waiver" && line_kv("ac") != "" { printf "%s ", line_kv("ac") }') "
-    if ! RR_ROWS="$(rr_rows "$PV_PLAN" "${RR_CUR:-$PV_CUR}")"; then
-      die "REFUSED — the release approval card asks walls.sh for each matrix row's ruling, and $BIONIC_LIB/walls.sh cannot be loaded; nothing is written."
+    if ! RR_ROWS="$(rr_rows "$PV_PLAN" "${RR_CUR:-$PV_CUR}" "$RR_HEAD")"; then
+      die "REFUSED — the release approval card asks walls.sh for each matrix row's ruling, and $BIONIC_LIB/walls.sh cannot be loaded or the run's facts could not be read; nothing is written. Run again: bash ${HOOK_DIR}/session-poker.sh $RR_AGAIN"
       exit 2
     fi
     while IFS=$'\037' read -r ac tier st au ruled reason; do

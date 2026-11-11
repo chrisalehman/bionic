@@ -1000,7 +1000,7 @@ units_landings() { _units_landed landings "${1:-}" "" "${2:-}" < /dev/null; }
 
 # units_rows_in_range <plan> <a>..<b> <record> -> `<row id><TAB><serves><TAB><criteria>` for each
 # row whose landing is one of the merges on stdin (one per line: those the caller found inside
-# <a>..<b>), table order; criteria are the `## Verification Matrix` rows of each requirement it
+# <a>..<b>), table order; criteria are the criteria the reader lists of each requirement it
 # serves, `AC-<n>.<m>` for `REQ-<n>`, comma-joined. Nothing, exit 0, when none is; exit 2 when the
 # range is not `<a>..<b>`.
 units_rows_in_range() {
@@ -1029,15 +1029,22 @@ units_record_landings() {
     line_ev() == "published" && line_kv("row") != "" { print NR "\t" line_kv("row") "\t" tolower(line_kv("commit")) }' 2>/dev/null
 }
 
+# _units_criteria <plan> -> the criteria the reader lists (lib/reader.sh `reader_criteria`), one id per line; nothing
+# when the reader cannot be loaded or the plan names none.
+_units_criteria() {
+  declare -F reader_criteria >/dev/null 2>&1 || . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/reader.sh" >/dev/null 2>&1 || return 0
+  reader_criteria "$1" 2>/dev/null || return 0
+}
+
 # _units_landed <landings|inrange> <plan> <range> <record> — the one program behind the two verbs:
-# the rows (`units_rows`), the record's header lines, the plan's matrix, then stdin's merges.
+# the rows (`units_rows`), the record's header lines, the criteria the reader lists, then stdin's merges.
 _units_landed() {
   local mode="$1" plan="$2" rec="$4" rows
   rows="$(units_rows "$plan" 2>/dev/null)" || return 1
   {
     printf '\034rows\n'; printf '%s\n' "$rows"
     printf '\034rec\n'; units_record_landings "$rec"
-    printf '\034plan\n'; awk '{ sub(/\r$/, ""); print }' "$plan" 2>/dev/null
+    printf '\034plan\n'; _units_criteria "$plan"
     printf '\034in\n'; [ "$mode" = landings ] || cat
   } | awk -F'\t' -v mode="$mode" '
     function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
@@ -1055,11 +1062,8 @@ _units_landed() {
       next
     }
     part == 3 {
-      if ($0 ~ /^[ \t]*```/) { fence = !fence; next }
-      if (fence) next
-      if ($0 ~ /^## /) { inm = ($0 ~ /^## Verification Matrix/); next }
-      if (!inm || $0 !~ /^\|[ \t]*AC-[0-9]+\./) next
-      split($0, c, "|"); ac = trim(c[2]); q = ac; sub(/^AC-/, "", q); sub(/\..*$/, "", q)
+      if ($0 !~ /^AC-[0-9]+\./) next
+      ac = $0; q = ac; sub(/^AC-/, "", q); sub(/\..*$/, "", q)
       crit[q] = (q in crit) ? crit[q] ", " ac : ac
       next
     }

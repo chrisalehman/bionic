@@ -208,24 +208,6 @@ run_guard() {  # <payload> <target...>
   return 0
 }
 
-# THE SAME CALL WITH THE DETAIL KNOB ON (task 13, ruling D-1). The user stream is one
-# line now — `bionic: <verb> refused — <fact> (<fix>)` — and everything a refusal used to
-# spell out for the reader is `detail`, which reaches a stream only under
-# BIONIC_WALL_VERBOSE=1. A row that wants a value out of a refusal drives the call a
-# SECOND time through this, and asserts on $VERR; asserting that value on $ERR would now
-# be asserting that the wall leaks it. Driven only after a first drive that refused, so no
-# allowed call is ever run twice.
-VERR=""
-run_guard_verbose() {  # <payload> <target...> -> sets VERR
-  local payload="$1"; shift
-  local _sid; _sid=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
-  printf '%s' "$payload" | env HOME="$FAKE_HOME" CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" \
-          CLAUDE_CODE_SESSION_ID="$_sid" BIONIC_WALL_VERBOSE=1 \
-          ANTHROPIC_API_KEY=sk-fixture-marker bash "$GUARD" "$@" >/dev/null 2>"$SANDBOX/.verr"
-  VERR=$(cat "$SANDBOX/.verr")
-  return 0
-}
-
 # THE DISPATCH WALL DOES NOT ALWAYS BLOCK BY STATUS (wave-12 T17). A brief with SEVERAL
 # shape faults is refused once, on the `deny` channel — a PreToolUse verdict on stdout with
 # exit 0 — so that every fault reaches the model instead of the first one only. A row that

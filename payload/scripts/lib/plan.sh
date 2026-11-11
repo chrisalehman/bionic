@@ -13,9 +13,8 @@
 #     plan_scale, plan_requirements_file, plan_themes
 #                        the requirements document's theme sections, the goals a wave or an epic reads first; at task
 #                        scale the one theme, the run, over every criterion the matrix measures.
-#     plan_goal_paragraph, plan_goal_status, plan_goal_declared_red
-#                        what a document is for, one goal's status word, and whether the plan declared the red that
-#                        missed a suite goal.
+#     plan_goal_paragraph, plan_goal_status
+#                        what a document is for, and one goal's status word.
 #
 # THE ONE READER (burns debt integration-branch-reader; critic-structure-2). Two orders stood: close-out.sh read
 # ## SDLC State and refused a plan whose frontmatter alone named the branch, its `closed-form` then fell back to the
@@ -88,11 +87,7 @@ plan_scale() {
   local plan="${1:-}" sc
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
   sc="$(plan_frontmatter_get "$plan" scale)"
-  [ -n "$sc" ] || sc="$(_run_lines "$plan" | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { s = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    s && /^[[:space:]]*scale[[:space:]]*:/ { v = $0; sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]].*$/, "", v); print v; exit }')"
+  [ -n "$sc" ] || { sc="$(plan_read_section "$plan" SDLC scale)" && sc="${sc%%[[:space:]]*}"; } || sc=""
   printf '%s' "$sc"
   return 0
 }
@@ -137,22 +132,17 @@ _plan_first_sentence() {
   printf '%s\n' "${1:-}" | awk 'NF { if (match($0, /\. /)) print substr($0, 1, RSTART); else print; exit }'
 }
 
-# _plan_matrix_acs <plan> -> `M<TAB><AC id><TAB><status, lower case><TAB><serves>` per row of the plan's
-# `## Verification Matrix` table, the status column found by the header's own name, the serves the value of the first
-# `serves:` line of the row's AC block (the heading read by lib/units.sh `units_ac_head_awk`, the indented lines under
-# it), empty when the block has none or there is no block; fenced lines are not read.
+# _plan_matrix_acs <plan> -> `M<TAB><criterion><TAB><state><TAB><serves>` per criterion the reader lists
+# (lib/reader.sh `reader_cells`, one fold), its state discharged, waived (discharged by a waiver) or pending, its
+# serves the reader's. 2 when the run's facts could not be read: a count over no facts would read every criterion pending.
 _plan_matrix_acs() {
-  declare -F units_ac_head_awk >/dev/null 2>&1 || { [ -r "${BASH_SOURCE[0]%/*}/units.sh" ] && . "${BASH_SOURCE[0]%/*}/units.sh"; } >/dev/null 2>&1
-  _run_lines "${1:-}" | awk -F'|' "$(units_ac_head_awk)"'
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## / { m = ($0 ~ /^## Verification Matrix/); col = 0; cur = ""; next }
-    !m { next }
-    /^\|[ \t]*AC[ \t]*\|/ { for (i = 2; i < NF; i++) { c = $i; gsub(/^[ \t]+|[ \t]+$/, "", c); if (tolower(c) == "status") col = i }; next }
-    col && /^\|[ \t]*AC-/ { a = $2; s = $col; gsub(/^[ \t]+|[ \t]+$/, "", a); gsub(/^[ \t]+|[ \t]+$/, "", s); n++; id[n] = a; st[n] = tolower(s); next }
-    /^[^ \t]/ { cur = ac_any($0); next }
-    cur != "" && /^[ \t]+serves[ \t]*:/ && !(cur in sv) { v = $0; sub(/^[ \t]+serves[ \t]*:[ \t]*/, "", v); sub(/[ \t]+$/, "", v); sv[cur] = v }
-    END { for (i = 1; i <= n; i++) print "M\t" id[i] "\t" st[i] "\t" sv[id[i]] }'
+  local plan="${1:-}" cells rc=0
+  # A fold the calling shell holds for this plan (lib/proof.sh `_proof_findings_hold`) is read as it is, never taken again.
+  if [ -n "${_PROOF_HELD_PLAN:-}" ] && [ "$_PROOF_HELD_PLAN" = "$plan" ]; then cells="$( reader_facts() { printf '%s' "$_PROOF_FACTS"; }; reader_cells "$plan" )" || rc=$?
+  elif declare -F _proof_ask >/dev/null 2>&1; then cells="$(_proof_ask "$plan" reader_cells "$plan")" || rc=$?
+  else cells="$( . "${BASH_SOURCE[0]%/*}/reader.sh" && reader_cells "$plan")" || rc=$?; fi
+  case "$rc" in 0) ;; 1) return 0 ;; *) return 2 ;; esac
+  printf '%s\n' "$cells" | awk -F'\037' '$1 != "" { print "M\t" $1 "\t" ($3 == "waiver" ? "waived" : $2) "\t" $8 }'
 }
 
 # THE ONE MAPPER OF A MATRIX ROW TO ITS REQUIREMENT. `_plan_ac_req(id, serves)` returns the requirement a row serves,
@@ -180,7 +170,7 @@ _PLAN_AC_REQ_AWK='
 # through `_plan_ac_req`, so a row that maps to none is in no theme. The opener is the
 # first sentence of the plan's own `## Goal`. Nothing when the matrix holds no row of any such REQ.
 _plan_task_theme() {
-  local plan="$1" q ids heads goal
+  local plan="$1" q ids heads goal acs
   q="$(plan_requirements_file "$plan")"
   heads="$([ -z "$q" ] || _run_lines "$q" | awk '
     /^[[:space:]]*```/ { fence = !fence; next }
@@ -190,7 +180,9 @@ _plan_task_theme() {
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^### REQ-/ { id = substr($0, 9); if (match(id, /^[A-Za-z0-9]+/)) print "R\t" substr(id, 1, RLENGTH) }')"
-  ids="$({ printf '%s\n' "$heads"; _plan_matrix_acs "$plan" | awk -F'\t' "$_PLAN_AC_REQ_AWK"'{ r = _plan_ac_req($2, $4); if (r != "") print "M\t" r }'; } | awk -F'\t' '
+  # the task's one theme is named only from facts that were read
+  acs="$(_plan_matrix_acs "$plan")" || return 2
+  ids="$({ printf '%s\n' "$heads"; printf '%s\n' "$acs" | awk -F'\t' "$_PLAN_AC_REQ_AWK"'NF { r = _plan_ac_req($2, $4); if (r != "") print "M\t" r }'; } | awk -F'\t' '
     $1 == "R" { if (!($2 in rs)) { rs[$2] = 1; ro[++rn] = $2 }; next }
     $1 == "M" { if (!($2 in ms)) { ms[$2] = 1; mo[++mn] = $2 } }
     END { if (rn) { for (i = 1; i <= rn; i++) if (ro[i] in ms) printf "%s%s", (c++ ? " " : ""), ro[i] }
@@ -210,7 +202,8 @@ plan_themes() {
   local plan="${1:-}" q
   case "$(plan_scale "$plan")" in
     wave|epic) ;;
-    task) _plan_task_theme "$plan"; return 0 ;;
+    # a run whose facts could not be read still has its one theme, which its reading then calls unmeasured
+    task) _plan_task_theme "$plan" || printf 'the run\t\t\n'; return 0 ;;
     *) return 0 ;;
   esac
   q="$(plan_requirements_file "$plan")"
@@ -243,13 +236,14 @@ plan_themes() {
 # nothing: such a row is in no theme's count, so a theme it serves reads short and the reading says why. A task plan
 # reads its matrix even when no theme is found, since its one theme is the matrix's own.
 _plan_theme_reads() {
-  local plan="$1" themes cur
+  local plan="$1" themes cur acs
   themes="$(plan_themes "$plan")"
   [ -n "$themes" ] || [ "$(plan_scale "$plan")" = task ] || return 0
   cur=""; declare -F _fill_current_field >/dev/null 2>&1 && { fill_current_forget; cur="$(_fill_current_field "$plan")"; }
+  # every criterion with its state, asked once; a run whose facts could not be read measures no theme
+  acs="$(_plan_matrix_acs "$plan")" || { printf '%s\n' "$themes" | awk -F'\t' 'NF { print "unmeasured\t" $1 "\t\tthe run'"'"'s facts could not be read" }'; return 0; }
   { printf '%s\n' "$themes" | awk -F'\t' 'NF { print "T\t" $1 "\t" $2 "\t" $3 }'
-    # the matrix table's rows, each AC with its status cell
-    _plan_matrix_acs "$plan"
+    printf '%s\n' "$acs"
   } | awk -F'\t' -v cur="$cur" "$_PLAN_GOAL_MEASURE_AWK$_PLAN_AC_REQ_AWK"'
     $1 == "T" { n++; nm[n] = $2; fr[n] = $4; k[n] = split($3, r, " "); for (i = 1; i <= k[n]; i++) { own[r[i]] = n; rq[n, i] = r[i] }; next }
     $1 == "M" { req = _plan_ac_req($2, $4)
@@ -416,23 +410,6 @@ plan_task_title() {
   t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
   if [ -z "$t" ]; then w="${1:-}"; w="${w#"${w%%[![:space:]]*}"}"; t="${w%"${w##*[![:space:]]}"}"; fi
   printf '%s' "$t"
-}
-
-# plan_goal_declared_red <landing record> <reading> -> rc 0 when a suite goal's reading, `<suite>.test.sh red at <sha>`,
-# names a suite the record holds a standing `debt:` line for: the line a landing of a `Lands-red:` row writes at its
-# publish (lib/line.sh `_line_debt_write`), not voided by a `void:` line. The plan declared that red, so the miss it
-# causes is no new decision for the person. rc 1 for any other reading or suite, and for no record.
-plan_goal_declared_red() {
-  local rec="${1:-}" suite="${2:-}"
-  suite="${suite%% red at *}"
-  case "$suite" in *.test.sh) ;; *) return 1 ;; esac
-  [ -n "$rec" ] && [ -f "$rec" ] || return 1
-  awk -v s="${suite##*/}" '
-    /^debt: / { id = ""; su = ""; n = split($0, a, " ")
-      for (i = 2; i <= n; i++) { if (index(a[i], "id=") == 1) id = substr(a[i], 4); else if (index(a[i], "suite=") == 1) su = substr(a[i], 7) }
-      b = su; sub(/.*\//, "", b); if (id != "" && b == s) debt[id] = 1; next }
-    /^void: / { n = split($0, a, " "); for (i = 2; i <= n; i++) if (index(a[i], "id=") == 1) void[substr(a[i], 4)] = 1; next }
-    END { for (i in debt) if (!(i in void)) exit 0; exit 1 }' "$rec" 2>/dev/null
 }
 
 # plan_goals_read <plan> <landing record> <landing report with rows> -> `<state><TAB><theme><TAB><measure><TAB><reading>`

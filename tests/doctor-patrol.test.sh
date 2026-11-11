@@ -181,22 +181,10 @@ dp_iso() {  # <seconds ago> -> ISO-8601 Z
   date -u -v-"$1"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
     || date -u -d "-$1 seconds" +%Y-%m-%dT%H:%M:%SZ
 }
-dp_assistant() {  # <transcript> <seconds ago>
-  jq -nc --arg ts "$(dp_iso "$2")" \
-    '{type:"assistant",isSidechain:false,timestamp:$ts,
-      message:{role:"assistant",content:[{type:"text",text:"working"}]}}' >> "$1"
-}
 dp_user() {  # <transcript> <seconds ago> <text>
   jq -nc --arg ts "$(dp_iso "$2")" --arg t "$3" \
     '{type:"user",isSidechain:false,timestamp:$ts,
       message:{role:"user",content:[{type:"text",text:$t}]}}' >> "$1"
-}
-# A stamp aged in SECONDS. `plant_patrol_stamp` takes whole hours, which cannot express the
-# field's own number (2459s against a 1320s window).
-dp_backdate() {  # <file> <seconds ago>
-  local ts
-  ts="$(date -v-"$2"S +%Y%m%d%H%M.%S 2>/dev/null || date -d "-$2 seconds" +%Y%m%d%H%M.%S)"
-  touch -t "$ts" "$1"
 }
 # `plant_patrol_job` with its two records DATED. The job join reads `C` records whatever
 # their date (the roster window gates only the `A`/`R` records it counts), but the verdict
@@ -214,12 +202,6 @@ plant_patrol_job_dated() {  # <transcript> <tool_use_id> <job-id> <seconds ago>
     '{type:"user",isSidechain:false,timestamp:$ts,
       message:{role:"user",content:[{type:"tool_result",tool_use_id:$id,content:$c}]}}' \
     >> "$t"
-}
-# THE INTERVAL IS PINNED IN THE FIXTURE, not inherited from the poker's built-in default:
-# this section's numbers (2459s and 1500s against a 1320s window) only mean what they say at
-# a 1200s interval.
-dp_pin_interval() {  # <repo>
-  printf 'poker-interval: 20m\n' > "$1/.bionic/config.yaml"
 }
 
 # A repo whose session never wrote a roster at all — the state this suite's

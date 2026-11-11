@@ -227,7 +227,13 @@ $EVAL
 
 | AC | tier | status | evidence | auditor |
 |---|---|---|---|---|
-| AC-7.4 | T1 | discharged | — | — |
+| AC-7.4 | T1 | discharged | e.md | CONFIRMED |
+| AC-8.1 | T4 | pending | — | REFUTED |
+AC-7.4: read
+  user-confirmed: Ann 2026-11-01 saw it
+AC-8.1: a row the Eval design lacks
+  serves: REQ-8
+  user-confirmed: Bo 2026-11-02 tried it
 EOF
 cat > "$D/plans/epic-x/new.plan.md" <<EOF
 ---
@@ -286,14 +292,21 @@ run/v1|ev=proof|kind=eval|head=$H|ac=AC-7.1|rc=0|at=2026-11-01T00:00:01Z
 run/v1|ev=cancel|of=proof|kind=eval|head=$H|ac=AC-7.1|at=2026-11-01T00:00:02Z
 run/v1|ev=finding|ref=AC-7.1|severity=S2|at=2026-11-01T00:00:03Z
 run/v1|ev=approval|key=AC-7.2|by=me|at=2026-11-01T00:00:04Z
-run/v1|ev=proof|kind=eval|head=$H|ac=AC-7.4|rc=0|at=2026-11-01T00:00:05Z
+run/v1|ev=proof|kind=eval|head=$H|ac=AC-7.4|rc=0|evidence=record/new/e4.md|at=2026-11-01T00:00:05Z
 run/v1|ev=proof|kind=eval|head=$H|ac=AC-7.3|rc=1|at=2026-11-01T00:00:06Z
 run/v1|ev=waiver|ac=AC-7.5|head=$H|by=me|why=w|at=2026-11-01T00:00:07Z
 run/v1|ev=proof|kind=eval|head=$H|ac=AC-9.9|rc=0|at=2026-11-01T00:00:08Z
+run/v1|ev=proof|kind=review|question=evidence|head=$H|result=pass|evidence=record/new/a.md|at=2026-11-01T00:00:09Z
+run/v1|ev=proof|kind=review|question=evidence|head=$G|result=fail|evidence=record/new/b.md|at=2026-11-01T00:00:10Z
 EOF
 cells() { local c; for c in 1 2 3 4 5; do printf '%s; ' "$(flat cell "AC-7.$c")"; done; }
 expect_eq "discharged only with a standing proof, waiver or approval naming the criterion" \
   "state=pending; state=discharged by=approval; state=pending; state=discharged by=proof; state=discharged by=waiver; " "$(cells)"
+every() { ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/reader.sh" && reader_cells "$D/plans/epic-x/$W.plan.md" "$@" ) | tr '\037\n' ',;'; }
+expect_eq "at 15 every criterion in one fold: its state, its tier by its eval type, its proof's evidence, the evidence review at the head (failed, a finding; no head, none), its approval" \
+  "AC-7.1,pending,,T1,,CONFIRMED,,REQ-7;AC-7.2,discharged,approval,T1,,CONFIRMED,me 2026-11-01 AC-7.2,REQ-7;AC-7.3,pending,,T1,,CONFIRMED,,REQ-7;AC-7.4,discharged,proof,T1,record/new/e4.md,CONFIRMED,,REQ-7;AC-7.5,discharged,waiver,T1,,CONFIRMED,,REQ-7;|REFUTED|" "$(every "$H")|$(every "$G" | cut -d, -f6)|$(every | cut -d, -f6)"
+W=old; expect_eq "at 14 a row the table holds answers its event, else its own cells and block; a row the Eval design lacks follows, tiered by its cell" \
+  "AC-7.4,discharged,proof,T1,e.md,CONFIRMED,Ann 2026-11-01 saw it,;AC-8.1,pending,,T4,,REFUTED,Bo 2026-11-02 tried it,REQ-8;" "$(every | tr ';' '\n' | grep -E '^AC-(7.4|8.1),' | tr '\n' ';')"
 ask cell AC-9.9; expect_status "a criterion the plan lacks has no cell" 1 "$?"
 ask cell; expect_status "cell with no criterion is refused" 2 "$?"
 
