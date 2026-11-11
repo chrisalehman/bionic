@@ -1423,6 +1423,38 @@ expect_eq "(k11) a deferral with no stated sentence is refused, the branch unmov
 expect_contains "(k11b) …naming the finding and the verb that states it" "disposition record/wave-x/critic.md#4 defer" "$KL_OUT"
 
 # ---------------------------------------------------------------------------
+section "§HEALTH: a landing writes nothing of its row or of the matrix: the plan's stack-health: stands as written while the rendering moves"
+# fails-when: a landing rewrites the plan's stack-health: line, or writes its row; or the rendering misses a suite it greened.
+# THE WORLD. The working branch's head F carries a whole run's proof that left a.test.sh and b.test.sh red, and the
+# matrix head's stack-health: as an older proof-add wrote it. T1 lands on a.test.sh through ready, its run green.
+hl_lib() { ( . "$REPO/payload/scripts/lib/roots.sh" >/dev/null 2>&1; . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1 && "$@" ) 2>/dev/null; }
+hl_sh() { awk '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 } m && index($0, "stack-health:") == 1' "$1"; }   # <plan>
+HL="$(ll_world)"; HLP="$(ll_plan "$HL")"; HL_F="$(ll_head "$HL")"
+mkdir -p "$HL/.bionic/docs/record/wave-x"
+printf 'head=%s dirty=0\nGating: 3 passed, 2 failed\nFailed:\n    - a.test.sh\n    - b.test.sh\nrc=1\n' "$HL_F" > "$HL/.bionic/docs/record/wave-x/whole.log"
+HL_F="$HL_F" awk '{ print } /^- T2: active$/ { print "proved: kind=regression head=" ENVIRON["HL_F"] " at=2026-10-04T01:00:00Z evidence=record/wave-x/whole.log owed=a.test.sh,b.test.sh run=2026-10-04T00:50:00Z head=" ENVIRON["HL_F"] " rc=1" }
+  END { print ""; print "## Verification Matrix"; print ""
+        print "stack-health: red head=" ENVIRON["HL_F"] " pass=3 total=5 owed=a.test.sh,b.test.sh evidence=record/wave-x/whole.log"; print ""
+        print "| AC | tier | status | evidence | auditor |"; print "|---|---|---|---|---|"; print "| AC-1.1 | T2 | pending | — | — |" }' \
+  "$HLP" > "$HLP.n" && mv "$HLP.n" "$HLP"
+expect_eq "(hl0) precondition: before the landing the rendering is red at F, both suites owed, nothing closed, and the plan's line reads the same" \
+  "red head=$HL_F pass=3 total=5 owed=a.test.sh,b.test.sh evidence=record/wave-x/whole.log|stack-health: red head=$HL_F pass=3 total=5 owed=a.test.sh,b.test.sh evidence=record/wave-x/whole.log" \
+  "$(hl_lib proof_health_line "$HLP" "$HL")|$(hl_sh "$HLP")"
+hl_own() { awk '/^## / { s = $0 } (s == "## Tasks" && /^\| T1 \|/) || (s == "## SDLC State" && /^- T1:/)' "$1"; }   # <plan> -> T1's row and step line
+HL_OWN="$(hl_own "$HLP")"
+ll_launch "$HL" T1 a.test.sh
+ll_verb "$HL" T1
+expect_eq "(hl1) T1 lands through ready on a.test.sh, green" "0" "$LL_RC"
+expect_eq "(hl1c) the landing writes nothing of its row: its Tasks row and its step line stand as they were, and it reads landed" \
+  "2|$HL_OWN|landed" "$(printf '%s\n' "$HL_OWN" | grep -c .)|$(hl_own "$HLP")|$( ( . "$REPO/payload/scripts/lib/units.sh" >/dev/null 2>&1; units_rows "$HLP" ) | awk -F'\t' '$1 == "T1" { print $10 }')"
+[ "$LL_RC" = 0 ] || printf '      ready said: %s\n' "$LL_OUT" | head -20
+expect_contains "(hl1b) …the landing record holds its green verdict for a.test.sh, the close the judge reads" "|suite=a.test.sh|result=green|" \
+  "$(ll_ev "$HL" verdict | /usr/bin/grep '|row=T1|')"
+expect_eq "(hl2) after the landing the plan's line stands as written, and the rendering still reads red at F, owed= dropping a.test.sh, closed= naming it" \
+  "stack-health: red head=$HL_F pass=3 total=5 owed=a.test.sh,b.test.sh evidence=record/wave-x/whole.log|red head=$HL_F pass=3 total=5 owed=b.test.sh closed=a.test.sh evidence=record/wave-x/whole.log" \
+  "$(hl_sh "$HLP")|$(hl_lib proof_health_line "$HLP" "$HL")"
+
+# ---------------------------------------------------------------------------
 section "§TWO-HOMES: the landing record and the run's log beside it are read as one record, the record first"
 # fails-when: a reader of the record skips the log beside it: the fold leaves T1 waiting on a candidate the log holds,
 # the landings miss the log's, or a debt the record admitted stays open after the log voids it.

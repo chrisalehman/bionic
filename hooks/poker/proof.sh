@@ -207,7 +207,8 @@ walk_settle() {
 # THE WALK'S REGISTRATION: the record read as the critic's (proof_verdicts), its head (walk_head) and the criteria it
 # discharges (walk_settle), with its proof, one `proof kind=walk` event, the gate's reading of the walk, pending in
 # every read of the copy, and the criteria's proofs appended by the swap once the copy is judged (`walk_append`, named
-# in PV_ACT). The plan is not written. proof-add walk runs it alone; a walk row's landing runs it in its own act.
+# in PV_ACT). The plan is not written. proof-add walk runs it; the tick's landing of a record row lands the walk row on
+# the proof it leaves.
 # walk_register <plan> <copy> <record real path> <record docs-relative> <working head> <repository> -> 0 with PV_ACT and
 # PV_UNDONE set for the swap, and WALK_HEAD, WALK_N and walk_settle's ids set; 1 with the refusal's sentence in WALK_WHY.
 walk_register() {
@@ -878,8 +879,8 @@ PF_OTHER_LIST
         die "REFUSED — working-branch $(clean "$PF_WB") names no commit in $PV_REPO, so its head cannot be read; name a branch that exists under ## SDLC State and run proof-add again. The plan is unchanged."
         exit 1 ;;
     esac
-    # A WALK IS REGISTERED WHOLE BY walk_register, the one act deliver also runs at the walk row's landing: its verdicts
-    # read as the critic's, its proof and one proof per criterion it confirms; the plan is not written.
+    # A WALK IS REGISTERED WHOLE BY walk_register: its verdicts read as the critic's, its proof and one proof per
+    # criterion it confirms; the plan is not written. The tick's landing of a record row lands the walk row on it.
     if [ "$PF_KIND" = walk ]; then
       cp "$PV_PLAN" "$PV_NEW"
       if ! walk_register "$PV_PLAN" "$PV_NEW" "$PF_REAL" "$PF_REL" "$PF_HEAD" "$PV_REPO"; then

@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/booked.test.sh — THE DETACHED SHIM (epic-23 wave-30-efficiency T8; D6, Δ5, Δ5a;
-# REQ-3 AC-3.1, AC-3.4, AC-3.6, AC-3.8).
+# tests/booked.test.sh — THE DETACHED SHIM.
 #
 # WHAT IT COVERS. `payload/scripts/booked.sh --detach` forks its whole tail (ask → run → end →
 # stamp) into a session of its own, so a run outlives the call that started it. The caller prints

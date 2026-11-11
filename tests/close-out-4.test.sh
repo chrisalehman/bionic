@@ -281,9 +281,9 @@ expect_eq "FENCE-4 ## Deferrals that is one fenced list: the carried line goes a
 section "§LANDS — wave-36 T14 (D13; REQ-7 AC-7.7; C70): close-out lands the rows its merge lands, keeps the session engaged until its last act, and a delivered plan binds bound-closed"
 # ============================================================
 # The rows close-out's merge lands are the plan's open (pending or active) rows of kind `integrate` (the merge
-# itself) and `close` (the row the merge is read by, `merge` in units.sh's reads). Each is landed through the one
-# landing writer, `session-poker.sh row-landed <id> <integration head> <now>`, in this session (the plan verb needs
-# its engagement and its binding), after act 1 and before act 2, so the plan close-out delivers reads them landed.
+# itself) and `close` (the row the merge is read by, `merge` in units.sh's reads). Each is landed by one `published`
+# event at the integration head, of the close kind and by close-out, after act 1 and before act 2, so the plan
+# close-out delivers reads them landed through the units helper, with no cell or step line written.
 # A run with such rows and no session bound to this plan is refused before the first act, nothing done. Act 3 keeps
 # this session's engaged marker, which is also its binding; it is wiped as close-out's last act, so a close-out
 # that refuses midway leaves the session engaged and its plan verbs working. A session that re-engages and binds the
@@ -291,7 +291,7 @@ section "§LANDS — wave-36 T14 (D13; REQ-7 AC-7.7; C70): close-out lands the r
 # fails-when: a delivered plan reads a row its merge landed as pending; the bind of a delivered plan is refused; the
 # marker is gone after a refusal midway.
 lands_rows() {  # <project> -> the plan gains T3 (step 8, integrate) and T4 (step 9, close), pending, each with its step line,
-  # and the `- Step 4:` line every plan past Step 4 carries (row-landed's dry commit judges a writer's copy at current: 4)
+  # and the `- Step 4:` line every plan past Step 4 carries
   local plan="$1/$PLAN_REL"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "lands_rows: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
   awk '
@@ -317,6 +317,14 @@ lands_bind() {  # <project> <sid> -> the session engaged (the marker engage.sh w
 lands_cell() {  # <project> <id> <field> -> the ## Tasks cell, trimmed (field 11 is status, 6 is agent)
   awk -F'|' -v id="$2" -v c="$3" '{ x = $2; gsub(/ /, "", x) } x == id { v = $c; gsub(/^ +| +$/, "", v); print v; exit }' "$1/$PLAN_REL"
 }
+lands_state() {  # <project> <id> -> the row's state as the units helper reads it, the run's log over its cells
+  ( . "$REPO_ROOT/payload/scripts/lib/units.sh" >/dev/null 2>&1; units_rows "$1/$PLAN_REL" 2>/dev/null ) | awk -F'\t' -v id="$2" '$1 == id { print $10; exit }'
+}
+lands_pub() {  # <project> <id> -> the row's published events in its run's log, `<commit> <kind> <by>` each
+  cat "$1"/.bionic/docs/record/*/run.log 2>/dev/null | awk -F'|' -v id="$2" '$2 == "ev=published" && $3 == "row=" id {
+    c = k = b = ""; for (i = 4; i <= NF; i++) { if ($i ~ /^commit=/) c = substr($i, 8); if ($i ~ /^kind=/) k = substr($i, 6); if ($i ~ /^by=/) b = substr($i, 4) }
+    print c, k, b }'
+}
 lands_step() {  # <project> <id> -> the row's `- T<n>:` line under ## SDLC State
   /usr/bin/grep -m1 "^- $2: " "$1/$PLAN_REL"
 }
@@ -332,10 +340,11 @@ run_close_as "$LA_SID" "$PLA" check
 expect_eq "LANDS-1b …and writes nothing" "$LA_CK0" "$(cksum < "$PLA/$PLAN_REL")"
 run_close_as "$LA_SID" "$PLA" run
 expect_eq "LANDS-2 AC-7.7 run exits 0 and the delivered plan reads both rows landed (run_open says closed)" "0|landed|landed|1" \
-  "$CO_RC|$(lands_cell "$PLA" T3 11)|$(lands_cell "$PLA" T4 11)|$(run_open_rc "$PLA/$PLAN_REL")"
-expect_contains "LANDS-3 …each row's step line reads landed at the integration head, by row-landed's write" \
-  "- T3: landed $LA_MAIN " "$(lands_step "$PLA" T3)"
-expect_contains "LANDS-3b …T4's too" "- T4: landed $LA_MAIN " "$(lands_step "$PLA" T4)"
+  "$CO_RC|$(lands_state "$PLA" T3)|$(lands_state "$PLA" T4)|$(run_open_rc "$PLA/$PLAN_REL")"
+expect_eq "LANDS-3 …each row by one published event at the integration head, of the close kind, by close-out" \
+  "$LA_MAIN close close-out|$LA_MAIN close close-out" "$(lands_pub "$PLA" T3)|$(lands_pub "$PLA" T4)"
+expect_eq "LANDS-3b …and no cell or step line of either is written" "pending|pending|- T3: pending dispatch — —|- T4: pending dispatch — —" \
+  "$(lands_cell "$PLA" T3 11)|$(lands_cell "$PLA" T4 11)|$(lands_step "$PLA" T3)|$(lands_step "$PLA" T4)"
 expect_contains "LANDS-4 …and the card says which rows it landed" "rows-landed: T3 T4 at main @ ${LA_MAIN:0:7}" "$CO_OUT"
 expect_eq "LANDS-5 the engaged marker is gone after run, and its removal is the card's last line" "no|yes" \
   "$(tmp_file_exists "$PLA" engaged "$LA_SID")|$(printf '%s\n' "$CO_OUT" | tail -1 | /usr/bin/grep -q '^disengaged: ' && echo yes || echo no)"
@@ -798,7 +807,7 @@ expect_eq "RV-16 …and its branch is where it was" "$RN_H" "$(rv_tip "$PRN")"
 # (lands_bind), as a run at Step 8 is; the project declares a release check and its proof line names the release head,
 # as `release-check` writes it; the integrate row's record is a file under record/ its Files name; the person's merge is
 # a plain merge into main. The hand-edited part is a commit on a side branch, made by git's plumbing.
-# fails-when: deliver lands the integrate row while the part is missing, the verb's part differs from close-out's or
+# fails-when: the tick lands the integrate row while the part is missing, the verb's part differs from close-out's or
 # touches another path, the record does not name the commit, main's entry lacks the part after the merge, close-out
 # commits or records a second part, or the judge holds a hand-edited part covered.
 bp_judge() {  # <project> <head> -> `<proof_prose_past rc from the release head>|<facts_state's check state at head>`
@@ -829,10 +838,11 @@ printf '# T3: the pull request\n\n    gh pr create --base main --head wave/01-fi
 sed -i '' -E '/^\| T3 \|/s#\| none \|#| .bionic/docs/record/wave-01-fixture/T3-pr.md |#' "$PBP/$PLAN_REL"
 expect_eq "BP-0 precondition: the session is bound, the integrate row names its record, and the judge reads the check at the release head" \
   "0|pending|0|covered" "$LP_RC|$(lands_cell "$PBP" T3 11)|$(bp_judge "$PBP" "$BP_H")"
-lands_poker "$PBP" "$BP_SID" deliver T3
-expect_eq "BP-1 deliver refuses the integrate row while the entry's reviews part is missing, the plan unchanged" "1|pending" \
-  "$([ "$LP_RC" -ne 0 ] && echo 1)|$(lands_cell "$PBP" T3 11)"
-expect_contains "BP-1b …naming the verb that renders it" "reviews-part T3" "$LP_OUT"
+lands_poker "$PBP" "$BP_SID" tick
+expect_eq "BP-1 the tick leaves the integrate row unlanded while the entry's reviews part is missing" "pending|0" \
+  "$(lands_state "$PBP" T3)|$(lands_pub "$PBP" T3 | grep -c .)"
+expect_contains "BP-1b …saying why once, naming the verb that renders it" "NOT-LANDED T3 — " "$LP_OUT"
+expect_contains "BP-1c …the verb" "reviews-part T3" "$(printf '%s\n' "$LP_OUT" | /usr/bin/grep '^poker: NOT-LANDED T3')"
 lands_poker "$PBP" "$BP_SID" reviews-part T3
 BP_TIP="$(rv_tip "$PBP")"
 expect_eq "BP-2 reviews-part renders the part: exit 0, a commit by the line's author on the release head" "0|bionic line|$BP_H" \
@@ -855,8 +865,9 @@ fixture_git "$PBP" show "$BP_TIP:CHANGELOG.md" | awk '{ print } $0 == "### The r
 BP_SIDE="$(bp_side "$PBP" "$BP_H" "$SANDBOX/bp-hand.md")"
 expect_eq "BP-9 a hand-edited part on the release head is no fresh render: the approval and the check do not reach it" \
   "1|uncovered" "$(bp_judge "$PBP" "$BP_SIDE" | sed 's/\(uncovered\).*/\1/')"
-lands_poker "$PBP" "$BP_SID" deliver T3
-expect_eq "BP-10 with the part rendered, deliver lands the integrate row" "0|landed" "$LP_RC|$(lands_cell "$PBP" T3 11)"
+lands_poker "$PBP" "$BP_SID" tick
+expect_eq "BP-10 with the part rendered, the next tick lands the integrate row: one published event of the record kind, its cell unwritten" \
+  "landed|1|pending" "$(lands_state "$PBP" T3)|$(lands_pub "$PBP" T3 | grep -c ' record ')|$(lands_cell "$PBP" T3 11)"
 fixture_git "$PBP" merge -q --no-ff -m "the pull request, merged" wave/01-fixture >/dev/null 2>&1
 BP_MAIN="$(fixture_git "$PBP" show "main:CHANGELOG.md" 2>/dev/null | rv_part /dev/stdin 9.9.9)"
 expect_eq "BP-11 after the person's merge, main's entry holds the part" "### The reviews" "$(printf '%s\n' "$BP_MAIN" | sed -n 1p)"

@@ -738,8 +738,8 @@ WOUT="$(ws_create "$WSID" "$WR" "$WBASE" wt/25-T1 --for w25-T1)"
 W1="$(ws_path "$WOUT")"
 expect_eq "a named create exits 0" "rc=0" "$(printf '%s\n' "$WOUT" | tail -n1)"
 expect_eq "the OK line names the tree (the extractor reads real output)" "${WR}/.worktrees/25-T1" "$W1"
-expect_eq "the attestation is byte-identical to an unnamed create's shape" \
-  "spawn-worktree: OK path=${WR}/.worktrees/25-T1 branch=wt/25-T1 head=${WBASE} base=${WBASE} alias=${WR}/.bionic" \
+expect_eq "the attestation is an unnamed create's shape and the row the name is for, none here" \
+  "spawn-worktree: OK path=${WR}/.worktrees/25-T1 branch=wt/25-T1 head=${WBASE} base=${WBASE} alias=${WR}/.bionic row=none" \
   "$(printf '%s\n' "$WOUT" | sed -n 1p)"
 expect_eq "the attestation is the ONLY stdout line" "2" "$(printf '%s\n' "$WOUT" | grep -c '')"
 WLINE="$(sed -n 1p "$WSF" 2>/dev/null)"
@@ -864,6 +864,12 @@ current: 4
 TRP
 printf 'plan=%s\nengaged_at=2026-10-03T00:00:00Z\n' "$TRPLAN" > "$TR/.bionic/tmp/engaged-${TRSID}.state"
 tr_rec() { ( . "$WSLIB" 2>/dev/null || exit 9; worktree_tree_record "$1"; echo "rc=$?" ); }
+# A name a row claims is made only with its brief rendered (§TREE below); these two have theirs.
+mkdir -p "$TR/.bionic/docs/record/wave-x/briefs"
+for TRB in T1 T2; do
+  printf '<!-- brief: rendered from row %s for w45-%s; sum %064d; render it again to change it, never edit it -->\n' "$TRB" "$TRB" 0 \
+    > "$TR/.bionic/docs/record/wave-x/briefs/w45-$TRB.md"
+done
 
 TROUT="$(ws_create "$TRSID" "$TR" "$TRBASE" wt/45-T1 --for w45-T1)"
 TR1="$(ws_path "$TROUT")"
@@ -892,6 +898,31 @@ expect_eq "(tr4) an unnamed create's tree has no record: nothing, rc 1" "rc=1" "
 # A record moved to another tree is not that tree's: the path it names is the key.
 cp "$(git -C "$TR1" rev-parse --absolute-git-dir)/bionic-tree" "$(git -C "$(ws_path "$TROUT4")" rev-parse --absolute-git-dir)/bionic-tree" 2>/dev/null
 expect_eq "(tr5) a record naming another tree's path is no record of this one" "rc=1" "$(tr_rec "$(ws_path "$TROUT4")")"
+
+section "§TREE: a tree made for a row is one event in its run's log, and the plan is not written"
+# The row is the one the name's brief was rendered from (`<record>/briefs/<name>.md`, its mark); a name a row claims by
+# the dispatch rule with no brief is refused with nothing made; a name no row claims makes its tree with no event.
+# fails-when: create writes a cell, the event is missing, doubled or misses a field, or a claimed row's tree goes unrecorded.
+TRREC="$TR/.bionic/docs/record/wave-x"; : > "$TRREC/run.log"
+printf '<!-- brief: rendered from row T2 for w45-T6; sum %064d; render it again to change it, never edit it -->\nRow: T2\n' 0 \
+  > "$TRREC/briefs/w45-T6.md"
+TRSUM="$(cksum < "$TRPLAN")"
+TROUT6="$(ws_create "$TRSID" "$TR" "$TRBASE" wt/45-T6 --for w45-T6)"
+expect_eq "(tv0) the create for a briefed name exits 0" "rc=0" "$(printf '%s\n' "$TROUT6" | tail -n1)"
+tr_trees() { grep '^run/v1|ev=tree|' "$TRREC/run.log" 2>/dev/null; }
+expect_match "(tv1) one tree event: the brief's row, the tree from the root, its branch and base, the name" \
+  "run/v1|ev=tree|row=T2|path=.worktrees/45-T6|branch=wt/45-T6|base=${TRBASE}|by=w45-T6|at=*" "$(tr_trees)"
+expect_eq "(tv2) …and only one" "1" "$(tr_trees | grep -c .)"
+expect_eq "(tv3) the plan's bytes are unchanged" "$TRSUM" "$(cksum < "$TRPLAN")"
+TROUT7="$(ws_create "$TRSID" "$TR" "$TRBASE" wt/45-T7 --for w45-T7)"
+expect_eq "(tv4) a name no row claims makes its tree, says row=none and appends nothing beside the one event" "row=none|1|0" \
+  "$(printf '%s\n' "$TROUT7" | sed -n 1p | grep -o 'row=[^ ]*$')|$(tr_trees | grep -c .)|$(tr_trees | grep -c 'by=w45-T7')"
+expect_eq "(tv5) the briefed create says its row" "row=T2" "$(printf '%s\n' "$TROUT6" | sed -n 1p | grep -o 'row=[^ ]*$')"
+TROUT8="$(ws_create "$TRSID" "$TR" "$TRBASE" wt/45-T1-r2 --for w45-T1-r2)"
+expect_contains "(tv6) a name a row claims with no brief is refused, naming the fix" \
+  "FAIL reason=brief-unrendered row=T1 name=w45-T1-r2 — render the brief first" "$TROUT8"
+expect_eq "(tv7) …and nothing is made: no tree, no branch, no event" "0|0|1" \
+  "$([ -e "$TR/.worktrees/45-T1-r2" ] && echo 1 || echo 0)|$(git -C "$TR" branch --list wt/45-T1-r2 | grep -c .)|$(tr_trees | grep -c .)"
 
 
 finish

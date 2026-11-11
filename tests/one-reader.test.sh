@@ -10,9 +10,9 @@
 #                 launch's `dispatch` has one writer, the launch recorder's, and a row's `born` one, the units
 #                 library's; each is paired with a planted second, the born one in the shape of a split; so is
 #                 a planted second appender of a waiver, a finding or a proof beside the one writer of each.
-#   §NAMES        the verbs the dispatch and born events retired, and the five that wrote a matrix cell, are named
-#                 nowhere in hooks/ or payload/scripts/ but the walls' single-line list of verbs, which the row that
-#                 edits it clears.
+#   §NAMES        the verbs the dispatch, born and tree events and the landing's event retired, and the five that
+#                 wrote a matrix cell, are named nowhere in hooks/ or payload/scripts/ but the walls' single-line list of
+#                 verbs, which the row that edits it clears.
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted.
 #   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
 #                 the tree holds none.
@@ -46,6 +46,7 @@ planted_waiver() { log_append waiver question=evidence; }
 planted_finding() { log_append finding ref=r.md#1; }
 planted_proof() { log_append proof kind=walk; }
 planted_dispatch() { log_append dispatch row=T1; }
+planted_tree() { RUN_LOG="$log" log_append tree row=T1 path=.worktrees/t1; }
 EOF
 printf '%s\n' "planted_reader_rows() { awk -F'|' '\$2 ~ /T/' \"\$plan\"; }" >> "$L/reader.sh"
 printf '%s\n' 'deny "planted refusal words"' >> "$S/hooks/engage.sh"
@@ -71,7 +72,8 @@ expect_contains "two functions appending one type are a pair" \
   "$(printf 'shared\tborn\tpayload/scripts/lib/planted-writers.sh:planted_born_a payload/scripts/lib/planted-writers.sh:planted_born_b')" "$AFTER"
 PUB="$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "shared" && $2 == "published" { print $3 }')"
 expect_contains "published: the queue landing's writer" "payload/scripts/lib/line.sh:line_publish" "$PUB"
-expect_contains "published: the hand landing's writer" "hooks/poker/line.sh:poker_verb_row_landed" "$PUB"
+expect_contains "published: a record row's landing, the tick's" "hooks/poker/line.sh:record_row_land" "$PUB"
+expect_contains "published: close-out's landing of the rows its merge lands" "payload/scripts/close-out.sh:act_lands" "$PUB"
 pair() { printf '%s\n' "$AFTER" | awk -F'\t' -v t="$1" '$1 == "shared" && $2 == t { print $3 }'; }
 expect_contains "a planted second waiver appender is named beside the one waiver writer" \
   "payload/scripts/lib/planted-writers.sh:planted_waiver payload/scripts/lib/proof.sh:proof_waiver_event" "$(pair waiver)"
@@ -85,12 +87,15 @@ expect_contains "dispatch: the planted second writer beside it" "payload/scripts
 BRN="$(printf '%s\n' "$AFTER" | awk -F'\t' '$1 == "shared" && $2 == "born" { print $3 }')"
 expect_contains "born: the units library's one writer" "payload/scripts/lib/units.sh:units_born_event" "$BRN"
 expect_contains "born: the planted split beside it" "payload/scripts/lib/planted-writers.sh:planted_born_b" "$BRN"
-SH0="$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "shared" && ($2 == "born" || $2 == "dispatch" || $2 == "waiver" || $2 == "finding" || $2 == "proof")' | grep -c .)"
-expect_eq "the shared-type count rises by each of the five planted types not shared before" "$(( $(count "$BEFORE" shared_types) + 5 - SH0 ))" "$(count "$AFTER" shared_types)"
+TRE="$(pair tree)"
+expect_contains "tree: the tree verb's one writer" "payload/scripts/lib/worktree.sh:worktree_tree_event" "$TRE"
+expect_contains "tree: the planted second writer beside it" "payload/scripts/lib/planted-writers.sh:planted_tree" "$TRE"
+SH0="$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "shared" && ($2 == "born" || $2 == "dispatch" || $2 == "waiver" || $2 == "finding" || $2 == "proof" || $2 == "tree")' | grep -c .)"
+expect_eq "the shared-type count rises by each of the six planted types not shared before" "$(( $(count "$BEFORE" shared_types) + 6 - SH0 ))" "$(count "$AFTER" shared_types)"
 
 section "NAMES"
-names() { /usr/bin/grep -rnE 'launch-sync|ledger-add|ledger-set|task-set|task-split|tasks-prose' "$1/hooks" "$1/payload/scripts" | grep -v '/payload/scripts/lib/walls\.sh:'; }
-printf '%s\n' '# launch-sync' '# tasks-prose' > "$L/planted-name.sh"
+names() { /usr/bin/grep -rnE 'launch-sync|ledger-add|ledger-set|task-set|task-split|tasks-prose|row-landed|row_landed|session-poker\.sh"? deliver|`deliver`|deliver <(row|id)>|^ *deliver\)' "$1/hooks" "$1/payload/scripts" | grep -v '/payload/scripts/lib/walls\.sh:'; }
+printf '%s\n' '# launch-sync' '# tasks-prose' '# row-landed' '# session-poker.sh deliver T1' > "$L/planted-name.sh"
 expect_contains "the extractor reads a planted name" "planted-name.sh" "$(names "$S")"
 expect_eq "the retired verbs are named nowhere else" "" "$(names "$S" | grep -v planted-name.sh)"
 cells() { /usr/bin/grep -rnE 'matrix-(set|retier|render)|waive-row|poker_verb_discharge|discharge\)|(session-poker\.sh|plan_verb_open|plan_verb_swap|pv_next) discharge' "$1/hooks" "$1/payload/scripts" | grep -vF 'amend|extend|task-add|' \

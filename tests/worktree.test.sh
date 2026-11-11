@@ -933,8 +933,8 @@ BH_PUB="$(grep '^run/v1|ev=published|' "$BHLOG" 2>/dev/null)"
 expect_regex "(h4) the log's published line carries the user, the time and the reason" \
   "^run/v1\\|ev=published\\|row=T1\\|commit=$(git -C "$BH" rev-parse wave/fixture)\\|kind=hand\\|by=Hand Lander\\|why=the person's why\\|branch=wt/bh-T1\\|head=[0-9a-f]{40}\\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" "$BH_PUB"
 BH_AT="${BH_PUB##*|at=}"
-expect_eq    "(h5) the row's - T1: line gains who, when and why" \
-  "- T1: active landed-by-hand: Hand Lander ${BH_AT} \"the person's why\"" "$(grep '^- T1:' "$BHP")"
+expect_eq    "(h5) the row's - T1: line is the landing's to leave: it stands as it was, the who, when and why on the event" \
+  "- T1: active|Hand Lander|the person's why" "$(grep '^- T1:' "$BHP")|$(printf '%s' "$BH_PUB" | tr '|' '\n' | sed -n 's/^by=//p')|$(printf '%s' "$BH_PUB" | tr '|' '\n' | sed -n 's/^why=//p')"
 
 section "§HAND: a hand landing lands a row whose suite is red, writes the person's words on its line, and runs nothing"
 #
@@ -957,7 +957,8 @@ OUTHD0="$(bh_land "$BHT2" --by-hand --reason "landed on the report" --suites r.t
 OUTHD="$(bh_land "$BHT2" --by-hand --reason "landed on the report" --suites r.test.sh --green-at "$BHC2" --log /logs/T2-green.log)"; RCHD=$?
 expect_eq    "(hd1) the hand landing of a row whose suite is red exits 0, the row's commit on the working branch" "0 yes" \
   "$RCHD $(git -C "$BH" merge-base --is-ancestor "$BHC2" wave/fixture && echo yes)"
-expect_contains "(hd2) …and its - T2: line carries the person's words" '"landed on the report"' "$(grep '^- T2:' "$BHP")"
+expect_contains "(hd2) …and its landing carries the person's words" '|why=landed on the report|' \
+  "$(grep '^run/v1|ev=published|row=T2|' "$BHLOG" 2>/dev/null)"
 expect_eq    "(hd3) …no suite ran, and the record holds the person's verdict, keyed by the commit it was green at" \
   "0|run/v1|ev=verdict|row=T2|commit=${BHC2}|suite=r.test.sh|result=green|log=/logs/T2-green.log|admitted=-|width=-|promised=-|actual=-" \
   "$(awk 'END { print NR }' "$TMP/hand-runs")|$(bh_all | grep '|ev=verdict|' | sed 's/|at=[^|]*$//')"
@@ -1029,6 +1030,8 @@ sc_spawn() {  # <root> <row> <sid> -> the tree `create --for wx-<row>` made unde
   p="$(ll_plan "$r")"
   printf '| %s | 4 | build | row %s | wx-%s | — | | 10 | REQ-1 | %s.txt | .worktrees/%s | | active |\n' "$t" "$t" "$t" "$t" "$t" >> "$p"
   awk -v t="$t" '{ print } /^- T2: active$/ { print "- " t ": active" }' "$p" > "$p.n" && mv "$p.n" "$p"
+  mkdir -p "$r/.bionic/docs/record/wave-x/briefs"
+  printf '<!-- brief: rendered from row %s for %s; sum %064d; render it again to change it, never edit it -->\n' "$t" "wx-$t" 0 > "$r/.bionic/docs/record/wave-x/briefs/wx-$t.md"
   out="$( cd "$r" && CLAUDE_CODE_SESSION_ID="$s" bash "$SPAWN" create "$(git -C "$r" rev-parse wave/x)" "wt/$t" --for "wx-$t" 2>/dev/null )" || return 1
   tree="$(printf '%s\n' "$out" | tr ' ' '\n' | sed -n 's/^path=//p')"
   [ -d "$tree" ] || return 1
@@ -1124,8 +1127,8 @@ expect_eq "(mc2) close-out's own last landing, from the session bound to the clo
 
 section "§HAND: a hand landing writes the person's verdicts before it publishes, so the born row's landing closes the review's ask"
 #
-# `land --by-hand` with --suites records what the person says of the writer's run as green verdicts, as `row-landed
-# --by-hand` does, and writes them before the publish: the publish reads the reviews the row answers again once the row
+# `land --by-hand` with --suites records what the person says of the writer's run as green verdicts, and writes them
+# before the publish: the publish reads the reviews the row answers again once the row
 # reads landed, judging the row by those verdicts. T3 is born of the one finding of a failing adversarial review that
 # `proof-add review` registered, which opened the waiver ask.
 # fails-when: the ask stays open after the hand landing's publish, or the verdicts follow the published line.

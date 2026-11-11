@@ -1,12 +1,11 @@
 #!/bin/bash
-# tests/hook-latency.test.sh — THE SUBPROCESS CAP (epic-23 wave-12-fixit-171, T10,
-# REQ-10, spec D8 "measure first"; T11 turns this green).
+# tests/hook-latency.test.sh — THE SUBPROCESS CAP.
 #
-# WHAT IT OWNS. Not timing — timing is `tests/bench/hook-latency.sh`'s, and it is
+# WHAT IT OWNS. Not timing — timing is measured by no file in the tree (the bench is in the history), and it is
 # noisy by nature, which is exactly why it is not gated on. This suite gates on
 # something stable instead: how many EXTERNAL commands `hooks/bash-walls.sh` and
-# `hooks/stop.sh` fork per invocation, traced with `bash -x` over the same fixed
-# payloads the bench uses (an engaged sandbox project, `ls -la` for bash-walls, a
+# `hooks/stop.sh` fork per invocation, traced with `bash -x` over fixed
+# payloads (an engaged sandbox project, `ls -la` for bash-walls, a
 # quiet Stop for stop.sh). A subprocess fork is the dominant, portable, and
 # machine-independent cost a shell hook can carry — jq, grep, awk, one more `git`
 # call — and unlike wall-clock ms it does not move between runs or machines.
@@ -25,12 +24,7 @@
 # because `set -x` nests a `+` per function/subshell depth, and every level's own
 # fork is real cost.
 #
-# CAPS: bash-walls.sh <= 12, stop.sh <= 6 (spec D8's post-cut target; T11 lands the
-# cut that gets both hooks under these). RED TODAY BY DESIGN — the spike measured
-# ~35 for bash-walls and ~10 for stop, both already over cap, so this suite fails
-# at the parent commit and until T11 lands. That is the correct RED for a task-kind
-# row: it proves the counting mechanism finds the real problem before anyone tries
-# to fix it.
+# CAPS: bash-walls.sh <= 12, stop.sh <= 6.
 #
 # THE SELF-CHECK (§3) is not about the cap value at all — it proves the COUNTER
 # itself is sensitive to a single added subprocess, independent of whether today's
@@ -209,8 +203,7 @@ expect_true "2a: stop.sh count <= 6" test "$STOP_COUNT" -le 6
 # ─────────────────────────────────────────────────────────────────────────────
 section "4: the trace-fd trace — one git call, and no plan scan where nobody reads it"
 
-# A SECOND TRACER, BESIDE THE ONE ABOVE, NOT IN PLACE OF IT (epic-23 wave-14 REQ-4,
-# AC-4.3; research R3 §2).
+# A SECOND TRACER, BESIDE THE ONE ABOVE, NOT IN PLACE OF IT.
 #
 # WHY THE `bash -x … 2>trace` TRACER CANNOT ANSWER THIS QUESTION. Both hooks call
 # `bionic_context 2>/dev/null` (hooks/bash-walls.sh, hooks/stop.sh), and `set -x`
@@ -239,9 +232,8 @@ section "4: the trace-fd trace — one git call, and no plan scan where nobody r
 # interpreter every hook's shebang names, and the one `tests/run.sh`'s interpreter pin
 # (ADR-001) puts first on PATH for every `bash` a suite types, so it is what runs the
 # hooks under the floor. BASH_XTRACEFD arrived in bash 4.1; 3.2 accepts the assignment,
-# ignores it, and leaves xtrace on stderr — which `trace_fd_hook` sends to /dev/null. The
-# trace therefore came back EMPTY and nine assertions failed honestly under the floor
-# while this same suite passed by hand, where a bare `bash` is Homebrew's 5.3. The fd is
+# ignores it, and leaves xtrace on stderr — which `trace_fd_hook` sends to /dev/null.
+# The fd is
 # claimed a different way now, one BOTH interpreters honour:
 #
 #   * `exec 2>&9` points stderr itself at the trace file, so plain `set -x` writes there;

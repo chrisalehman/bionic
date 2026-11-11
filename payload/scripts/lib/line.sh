@@ -134,8 +134,8 @@ _line_branch() {  # <plan> -> its working-branch
   plan_working_branch "$1"
 }
 # The accepted head is the working branch's REF, read by lib/proof.sh `proof_branch_head`, the one reader of the
-# head the judge, proof-add, waive and deliver ask (wave-36 T12; D13; burns debt `working-head`): this read the
-# ref by hand, a second spelling of the same question.
+# head the judge, proof-add, waive and a record row's landing ask: this read the ref by hand, a second spelling of the
+# same question.
 _line_load_proof() {
   declare -F proof_branch_head >/dev/null 2>&1 && return 0
   # shellcheck source=/dev/null
@@ -448,27 +448,6 @@ _line_pause() {  # <row>
   while [ ! -e "$d/$1.go" ] && [ "$i" -lt 6000 ]; do sleep 0.1; i=$((i + 1)); done
 }
 
-# THE PLAN WRITE (wave-28 T6; D7, AC-3.2; ruling A-orch-81): the row's status `landed`, its `- T<n>:`
-# line and its dispatch-ledger line, in ONE transaction on the BOUND plan: `session-poker.sh row-landed`,
-# run as a command (the plan verbs live in the hook script and exit on refusal), whose one copy is
-# `plan_verb_open`'s and whose one dry commit is a writer's (wave-27 passes 60, 63: no copy stands in for
-# the plan here). A hand landing's line gains its `landed-by-hand:` text in the same write. A row that is
-# no plan row has nothing to write. rc 1 when the verb refused or could not run; its words are printed
-# by the caller, after the publish, never swallowed (LINE_PLAN_SAID).
-_line_plan_write() {  # <plan> <row> <commit> <at> -> 0 written or nothing to write · 1 refused
-  local poker root rc
-  LINE_PLAN_SAID=""
-  _line_plan_agent "$1" "$2" >/dev/null || return 0
-  poker="$(plugin_root 2>/dev/null)/hooks/session-poker.sh"
-  root="$(_line_root "$1")" || { LINE_PLAN_SAID="the plan's root cannot be read"; return 1; }
-  if [ "$LINE_KIND" = hand ]; then
-    LINE_PLAN_SAID="$( cd "$root" && CLAUDE_CODE_SESSION_ID="${LINE_SID}" bash "$poker" row-landed "$2" "$3" "$4" --by-hand "$LINE_BY" "$LINE_WHY" 2>&1 )"; rc=$?
-  else
-    LINE_PLAN_SAID="$( cd "$root" && CLAUDE_CODE_SESSION_ID="${LINE_SID}" bash "$poker" row-landed "$2" "$3" "$4" 2>&1 )"; rc=$?
-  fi
-  [ "$rc" -eq 0 ] && return 0
-  return 1
-}
 
 # THE ROSTER MARK (wave-28 T6; D7): the row's roster line gains `landed=<40-hex> landed_at=<ISO-UTC>`
 # (lib/roster.sh `roster_mark_landed`, the roster's one marker). The name marked is the row's writer as
@@ -837,9 +816,8 @@ _line_carried_close() {  # <plan> <root> <row>
 }
 
 # ---------------------------------------------------------------------------- the landing's settlement
-# A LANDING SETTLES EVERYTHING IT PROVES IN ONE ACT, so nothing it proves is settled by hand afterwards. Its plan write
-# (`session-poker.sh row-landed`, which every landing runs) hands its copy of the plan to `line_settle` before the copy
-# is swapped in, and the copy gains, in that one transaction:
+# A LANDING SETTLES EVERYTHING IT PROVES IN ONE ACT, so nothing it proves is settled by hand afterwards. Its writes
+# (`line_landing_writes`, which every landing runs) ask `line_settle` what it settles:
 #   · nothing for a finding: each finding carried to the row (`finding-move … carried <row>`) and each finding any
 #     registered review names at the site of a finding the row answers (born of it, moved fixed to it, or carried to
 #     it) is named in LINE_SETTLED_F, and `line_settled` appends its move to fixed, `finding ref=<record>#<n>
@@ -970,7 +948,7 @@ line_settled_by() {
 
 line_publish() {  # <plan> <row> -> 0 published · 3 rebuild · 4 held · 5 moved · 6 guard · 2 refused · 75 lock
   local plan="${1:-}" row="${2:-}" rec root lk head branch ent first=""
-  local name com present base cand out sui car cbase cat br tr co rc run moved at tip
+  local name com present base cand out sui car cbase cat br tr co rc run moved at tip judged="" chg=""
   rec="$(line_record "$plan")" && root="$(_line_root "$plan")" && branch="$(_line_branch "$plan")" \
     || { _wt_refuse "line-unreadable plan=${plan:-<none>}"; return 2; }
   lk="$(_line_lock_dir "$rec")"
@@ -1040,21 +1018,21 @@ EOF
     return 2
   fi
   # 8. THE `published` EVENT: the landing, with the branch and the row's head the old `landed:` header carried, and
-  # the numbers commit, when one was made, beside the candidate it sits on. The log stamps its own instant.
+  # the numbers commit, when one was made, beside the candidate it sits on. A hand landing names the release base that
+  # judged it and the check's own files it changes, so a change to the check is never silent. The log stamps its instant.
+  if [ "$LINE_KIND" = hand ] && [ -n "${WT_CHECK_JUDGE:-}" ]; then
+    judged="${WT_CHECK_JUDGE:0:12}"; chg="$(_wt_check_judge "$root" "$head" "$cand" 2>/dev/null)" || chg=""
+  fi
   line_event "$plan" published "row=${row}" "commit=${cand}" "kind=${LINE_KIND}" "by=${LINE_BY}" "why=${LINE_WHY}" \
-    ${LINE_NUMBERS:+"numbers=${LINE_NUMBERS}"} "branch=${br}" "head=${com}" >/dev/null
+    ${LINE_NUMBERS:+"numbers=${LINE_NUMBERS}"} "branch=${br}" "head=${com}" ${judged:+"judged-by=${judged}"} ${chg:+"changed-here=${chg}"} >/dev/null
   [ -z "$LINE_DEBT_ID" ] \
     || printf 'DEBT %s %s — published red on the declared suite; the run owes a green run of %s (debt %s in %s)\n' \
          "$row" "$LINE_DEBT_SUITE" "$LINE_DEBT_SUITE" "$LINE_DEBT_ID" "$(line_log "$plan")"
   _line_cover "$plan" "$row" "$root" "$head" "$cand"
-  # 9. THE PLAN WRITE (T6): the row's status, its `- T<n>:` line and its ledger line, in one
-  # transaction, at the publish's own instant. A refusal now is after the publish: it is printed, with
-  # what is owed by hand, and the publish stands.
-  if ! _line_plan_write "$plan" "$row" "$cand" "$at"; then
-    [ -z "$LINE_PLAN_SAID" ] || printf '%s\n' "$LINE_PLAN_SAID"
-    printf 'PLAN-UNWRITTEN %s — published %s; the plan row is not written: run row-landed %s %s %s from the main thread\n' \
-      "$row" "$cand" "$row" "$cand" "$at"
-  fi
+  # 9. THE FINDINGS THE LANDING SETTLES (`line_landing_writes`). The row reads landed from the event above whatever
+  # they do, so a failure now is told and the publish stands.
+  line_landing_writes "$plan" "$row" "$cand" "$at" \
+    || printf 'UNSETTLED %s — published %s; the findings it settles are not moved\n' "$row" "$cand"
   # 10. THE ROSTER MARK (T6): `landed=<40-hex> landed_at=<ISO-UTC>` on the row's roster line.
   _line_roster_mark "$plan" "$root" "$row" "$cand" "$at"
   _line_lock_drop "$lk"
@@ -1062,6 +1040,22 @@ EOF
   # the judge reads git and the record, and no publish waits on it. The findings the plan write settled closed with it.
   _line_born_close "$plan" "$root" "$row"
   LINE_PUBLISHED="$cand"; LINE_CHECKOUT="$co"
+  return 0
+}
+
+# ---------------------------------------------------------------------------- the landing's writes
+# A LANDING WRITES NOTHING OF ITS OWN TO THE PLAN, AND NOTHING OF THE MATRIX: its row reads landed from its `published`
+# event (lib/units.sh `_units_live`), and a landing proves suites, not criteria. What it still does is the findings
+# it settles: read from the plan (`line_settle`), moved to fixed in the log and their asks closed (`line_settled`).
+# line_landing_writes <plan> <row> <commit> <at> -> 0 settled, or nothing to settle; 1 what it settles cannot be read.
+# A row the plan does not hold has nothing to settle.
+line_landing_writes() {
+  local plan="$1" row="$2" com="$3" at="$4" root
+  LINE_SETTLED_F=""
+  _line_plan_agent "$plan" "$row" >/dev/null || return 0
+  root="$(_line_root "$plan")" && _line_load_proof || return 1
+  line_settle "$plan" "$row" "$com" "$plan" "$at" || return 1
+  line_settled "$plan" "$root" "$row" "$com"
   return 0
 }
 
@@ -1152,7 +1146,7 @@ line_land_by_hand() {  # <tree> <root> <sid> <why> [<suites> <green-at> <log>] -
   ( _line_hand "$target" "$onto" "$plan" "$s" "$why" "$suites" "$at" "$log" )
 }
 # THE WRITER'S RUN, IN THE PERSON'S WORDS: the two writers of what a hand landing records of the row's suites, one for
-# both hand landings (`land --by-hand` above and `session-poker.sh row-landed --by-hand`), so the record they leave is
+# the hand landing (`land --by-hand` above), so the record it leaves is
 # one shape and the floor's judge (lib/proof.sh `_proof_past_f`) proves either. `_line_hand_ready` writes the row's
 # `ready` event, naming the suites (`none` when the person named none), and sets LINE_ME, the carrier a publish locks
 # by. `_line_hand_verdicts` writes one green verdict per suite, keyed by the commit they were green at, the log that
@@ -1191,7 +1185,7 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
   [ -n "$by" ] || by="$(git -C "$root" var GIT_AUTHOR_IDENT 2>/dev/null | sed 's/ <.*//')"
   by="${by//|/}"; [ -n "$by" ] || by="-"
   _line_hand_ready "$plan" "$row" "$head" "$branch" "$wt" "$suites" >/dev/null || { _wt_refuse "record-unwritable why=proofs-unwritable path=${rec} branch=${branch}"; return 2; }
-  # The person's verdicts go in before the publish, as `row-landed --by-hand` writes them: the publish's own reading of
+  # The person's verdicts go in before the publish: the publish's own reading of
   # the reviews the row answers (`_line_born_close`) judges the row by them, so a born row's landing closes its ask.
   if [ -n "$suites" ]; then
     _line_hand_verdicts "$plan" "$row" "$g" "$suites" "$vlog" \
@@ -1334,8 +1328,8 @@ _line_load_roster() {
 # row by `row=`, else by the plan row's agent cell as `name=` (labels, D4); the row the walls read is the
 # latest row of that name's agent id (`_line_current_row`), else the launch line (an adopted row, with no
 # launch line on this roster, stands as both); the writer is that row's name, else the launch line's, else
-# the agent cell. `ready` holds a row's landing to this name, and so do `deliver` and the tick's backstop
-# (hooks/session-poker.sh), so the writer a ruling is read against is one answer wherever a row lands.
+# the agent cell. `ready` holds a row's landing to this name, and so does the tick's landing of a record row
+# (hooks/poker/line.sh `record_row_land`), so the writer a ruling is read against is one answer wherever a row lands.
 # Sets LINE_LAUNCH, LINE_NOW (either may be empty) and LINE_WRITER; 1 when there is no name at all.
 # <agent> is the plan row's agent cell when the caller has it, read off <plan> when it is not given.
 line_row_writer() {  # <roster> <plan> <row> [<agent>]

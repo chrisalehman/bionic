@@ -1,7 +1,6 @@
 #!/bin/bash
 set +x +v
-# tests/lib/name-scan.sh <list path> — this project's release-time name scan (wave-27 D13, as
-# amended at A-orch-81).
+# tests/lib/name-scan.sh <list path> — this project's release-time name scan.
 #
 # <list path> is a private list, one entry per line, kept OUTSIDE every git checkout (a list in
 # a checkout would itself ship). Blank lines and lines starting with `#` are skipped but still

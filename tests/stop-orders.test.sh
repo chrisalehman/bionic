@@ -973,6 +973,8 @@ current: 4
 RTP
 printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$RT_P" > "$RT/.bionic/tmp/engaged-$SID.state"
 RT_PRED="77777777-8888-4999-8aaa-bbbbbbbbbbbb"
+mkdir -p "$RT/.bionic/docs/record/wave-x/briefs"
+printf '<!-- brief: rendered from row %s for %s; sum %064d; render it again to change it, never edit it -->\n' T1 w45-T1 0 > "$RT/.bionic/docs/record/wave-x/briefs/w45-T1.md"
 ( cd "$RT" && CLAUDE_CODE_SESSION_ID="$RT_PRED" bash "$HERE/../payload/scripts/spawn-worktree.sh" create \
     "$(git -C "$RT" rev-parse HEAD)" wt/45-T1 --for w45-T1 >/dev/null 2>&1 )
 RT_T1="$RT_REAL/.worktrees/45-T1"

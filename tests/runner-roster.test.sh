@@ -1,6 +1,5 @@
 #!/bin/bash
 # tests/runner-roster.test.sh — the gating roster IS the tests/ directory
-# (fixit 1.5.1, plan AC-3/AC-4/AC-5, design D-1/D-3).
 #
 # WHAT IT COVERS. tests/run.sh used to name every suite by hand: fifty-five `run`
 # lines, one per file, and a suite the list forgot never ran at all. The roster is

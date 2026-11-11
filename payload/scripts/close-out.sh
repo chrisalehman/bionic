@@ -521,10 +521,10 @@ act_merge() {
 # rows still `pending dispatch`, and the act that wiped the engaged marker had also taken the only way to write them.
 # The rows the merge lands are the plan's open (pending or active) `## Tasks` rows of kind `integrate` (the merge
 # itself) and `close` (the row units.sh's `merge` read binds to that merge); a build row still open is not landed
-# here, because nothing showed its work on the branch (A-T14-1). Each is landed through the one landing writer,
-# `session-poker.sh row-landed <id> <integration head> <now>`, in THIS session: it is a plan verb, so the session must
-# be engaged and bound to this plan, and `run` refuses before its first act when it is not (A-T14-2). Act 3 keeps the
-# engaged marker for it and for every verb a refusal later in the tail leaves to the person; the marker goes last.
+# here, because nothing showed its work on the branch. Each is landed by one `published` event at the integration
+# head, of the close kind and by close-out, through the line's writer (lib/line.sh `line_event`); no cell is written.
+# The session must be bound to this plan, and `run` refuses before its first act when it is not. Act 3 keeps the
+# engaged marker for every verb a refusal later in the tail leaves to the person; the marker goes last.
 LANDS_LINE=""
 co_lands_rows() {  # -> the open integrate and close rows' ids, space-joined, in table order; nothing when none
   # A row is open while the reader holds no landing of it and the plan has not dropped it; the kind is the row's own cell.
@@ -539,7 +539,7 @@ co_lands_refusal() {  # <rows> -> why this session cannot land them, or nothing
   local rows="$1" run bound
   [ -n "$rows" ] || return 0
   if [ -z "$CO_SID" ]; then
-    printf 'rows %s cannot be landed: no session key (CLAUDE_CODE_SESSION_ID), and row-landed writes only the plan its session is bound to — run close-out from the session bound to %s' "$rows" "$PLAN"
+    printf 'rows %s cannot be landed: no session key (CLAUDE_CODE_SESSION_ID), and close-out lands rows only of the plan its session is bound to — run close-out from the session bound to %s' "$rows" "$PLAN"
     return 0
   fi
   run="$(session_run "$ROOT" "$CO_SID" 2>/dev/null)" || :
@@ -547,28 +547,26 @@ co_lands_refusal() {  # <rows> -> why this session cannot land them, or nothing
   case "$run" in 'bound-open '*) bound="${run#bound-open }" ;; esac
   [ -z "$bound" ] || bound="$(cd "${bound%/*}" 2>/dev/null && pwd -P)/${bound##*/}"
   if [ "$bound" != "$PLAN" ]; then
-    printf 'rows %s cannot be landed: this session (%s) is not bound to this open run (%s), and row-landed writes only the plan its session is bound to — bind %s first' "$rows" "$CO_SID" "${run:-none}" "$PLAN"
+    printf 'rows %s cannot be landed: this session (%s) is not bound to this open run (%s), and close-out lands rows only of the plan its session is bound to — bind %s first' "$rows" "$CO_SID" "${run:-none}" "$PLAN"
   fi
   return 0
 }
-act_lands() {  # <rows> -> each landed by row-landed at the integration head; LANDS_LINE
-  local rows="$1" id ih at out left
+act_lands() {  # <rows> -> each landed by one published event at the integration head; LANDS_LINE
+  local rows="$1" id ih left
   if [ -z "$rows" ]; then
     LANDS_LINE="none — no open integrate or close row"
     return 0
   fi
   ih="$(git -C "$ROOT" rev-parse --verify -q "${INTEGRATION}^{commit}" 2>/dev/null)" \
     || _co_refuse "the integration branch '$INTEGRATION' names no commit to land rows $rows at"
-  at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  co_line_load || _co_refuse "rows $rows cannot be landed: $CO_LIB/line.sh, the landing record's writer, cannot be loaded"
   for id in $rows; do
-    if ! out="$(cd "$ROOT" && CLAUDE_CODE_SESSION_ID="$CO_SID" bash "$(co_poker)" row-landed "$id" "$ih" "$at" 2>&1)"; then
-      printf '%s\n' "$out" >&2
-      _co_refuse "row-landed $id refused (its words above) — rows before it are landed; run close-out again"
-    fi
+    line_event "$PLAN" published "row=$id" "commit=$ih" kind=close by=close-out why=merged >/dev/null \
+      || _co_refuse "the landing of $id cannot be written to the run's log — rows before it are landed; run close-out again"
   done
-  # The readback: the act's own result, asked of the plan rather than assumed from row-landed's status.
+  # The readback: the act's own result, asked of the units helper rather than assumed from the writes.
   left="$(co_lands_rows)"
-  [ -z "$left" ] || _co_refuse "rows $left still read open after row-landed — the plan is not as row-landed reported"
+  [ -z "$left" ] || _co_refuse "rows $left still read open after their landing was written — the run's log is not as written"
   LANDS_LINE="$rows at $INTEGRATION @ $(git -C "$ROOT" rev-parse --short "$ih" 2>/dev/null)"
 }
 

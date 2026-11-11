@@ -84,10 +84,6 @@ fi
 
 # The kinds of hand write, each what a person, an agent or the harness writes in a real run (above).
 RH_HAND_KINDS="prose record code typed launch"
-# The verbs whose refusals the replay follows: a refusal of a verb that writes the plan's cells names the one of
-# these that writes the cell, `edit` for the person's edit of a Tasks cell, and the replay makes it on that cell
-# and then runs the refused call again.
-RH_FOLLOW_VERBS="deliver amend edit step-field"
 
 # The run's three goals, as the plan's goals: line declares them: met, not met and not measured yet in every state.
 RH_GOALS="shown · the person says from the card what they owe (record/wave-x/goal-shown.md) ; asks · every ask on the register is on the card (record/wave-x/goal-asks.md) ; walked · the walk finds nothing to fix (record/wave-x/goal-walked.md)"
@@ -184,6 +180,7 @@ _rh_build() {
 # landed through ready on that suite: its landing writes the criterion's evidence and status (lib/line.sh `line_settle`)
 _rh_build_ready() {
   local t="$RH_ROOT/.worktrees/T1"
+  _rh_brief dw-T1 T1 || return 1
   _rh_do "the build row's tree" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" create "$(_rh_head)" wt/T1 --for dw-T1 || return 1
   _rh_launch dw-T1 T1 rehearsal-row.test.sh || return 1
   printf 'rehearsal_landed() { :; }\n' >> "$t/payload/scripts/lib/said.sh"
@@ -261,7 +258,7 @@ _rh_release_card() {
   _rh_poker "record the regression" proof-add regression "record/wave-x/regression-run-$h1.log" || return 1
   printf '# T3: the regression\n\nThe whole run at %s exited 0: record/wave-x/regression-run-%s.log.\n' "$h1" "$h1" > "$RH_REC/T3.md"
   _rh_hand record "the regression row's report record/wave-x/T3.md"
-  _rh_poker "the regression row lands itself" deliver T3 || return 1
+  _rh_tick_land "the tick lands the regression row" T3 record/wave-x/T3.md || return 1
   for qs in evidence:piece adversarial:piece structure:piece adversarial:whole structure:whole; do
     _rh_review "w-${qs%%:*}-${qs#*:}" "${qs%%:*}" "${qs#*:}" "$RH_BASE" "$h1" pass || return 1
   done
@@ -283,48 +280,52 @@ _rh_release_card() {
   _rh_poker "the release approval card" release-approval "$RH_PLAN"
 }
 
+# _rh_brief <name> <row> -> the brief's mark for <name> on <row>, which the tree verb reads the row from
+_rh_brief() {
+  mkdir -p "$RH_REC/briefs" && printf '<!-- brief: rendered from row %s for %s; sum %064d; render it again to change it, never edit it -->\n' "$2" "$1" 0 > "$RH_REC/briefs/$1.md"
+}
+
 # _rh_launch <name> <row> <suite> -> the writer's roster row, as the dispatch wall writes it when the writer is launched
-# on <row> with its brief's Lands-on suite, confirmed by the launch recorder: the run's dispatch event and the tree cells
+# on <row> with its brief's Lands-on suite, confirmed by the launch recorder: the run's dispatch event
 _rh_launch() {
   local u="toolu-$1"
   roster_row_fixture status=intended session="$WORLD_SID" name="$1" agent_id= subagent_type=bionic:senior-implementor \
     launched_at=2026-10-01T00:00:00Z deliverable="$RH_REC/$2.md" plan="$RH_PLAN" row="$2" lands_on="$3" tool_use_id="$u" \
     brief=".bionic/docs/record/wave-x/briefs/$1.md" brief_sum=- >> "$RH_ROOT/.bionic/tmp/roster-$WORLD_SID.state" || return 1
   _rh_hand launch "$1's roster row on $2, landing on $3 (roster_row)"
-  _rh_do "$1's launch confirmed: its dispatch event and its tree cells" env BIONIC_LAUNCH_SYNC_INLINE=1 bash -c 'printf %s "$1" | bash "$2"' _ \
+  _rh_do "$1's launch confirmed: its dispatch event" bash -c 'printf %s "$1" | bash "$2"' _ \
     "$(jq -nc --arg s "$WORLD_SID" --arg c "$RH_ROOT" --arg n "$1" --arg u "$u" '{session_id:$s, cwd:$c, hook_event_name:"PostToolUse",
       tool_name:"Agent", tool_input:{name:$n}, tool_response:{agentId:("a-" + $n)}, tool_use_id:$u}')" "$RH_ROOT/hooks/execution-recorder.sh"
 }
 
-# _rh_follow <label> <row> <record> <cmd> [args] -> <cmd> run; refused, the refusal's first named verb of
-# RH_FOLLOW_VERBS is read, a `# refused:` line names it, the cell it names on <row> is written with <record> (a path
-# under the docs root) through that verb, and <cmd> is run again. A refusal naming no such verb, or a cell the replay
-# holds no value for, stops the rehearsal.
-_rh_follow() {
-  local label="$1" row="$2" rec="$3" said v key val
-  shift 3
-  _rh_do "$label" "$@" 2>/dev/null && return 0
-  said="$DOOR_OUT"
-  v="$(printf '%s\n' "$said" | /usr/bin/grep -oE 'session-poker\.sh [a-z][a-z-]*' | awk -v set=" $RH_FOLLOW_VERBS " \
-    '{ w = $2; if (index(set, " " w " ")) { print w; exit } }')"
-  key="$(printf '%s\n' "$said" | /usr/bin/grep -oE "edit the [A-Za-z-]+ cell of $row in the plan" | head -1)"; key="${key#edit the }"; key="${key%% *}"
-  [ -z "$key" ] || v=edit
-  printf '# refused: %s · names: %s\n' "$label" "${v:-none}" >> "$RH_LOG"
-  case "$v" in
-    edit)
-      case "$key" in
-        Files) val=".bionic/docs/$rec" ;;
-        artifact) val="$rec" ;;
-        *) printf 'rehearse %s: %s refused naming an edit of %s %s, a cell the replay holds no value for\n' "$RH_STATE" "$label" "$row" "${key:-<none>}" >&2
-           return 1 ;;
-      esac
-      _rh_cell "follow: edit $row $key" "$row" "$key=$val" || return 1 ;;
-    *)
-      printf 'rehearse %s: %s refused naming %s, no verb that writes the cell:\n' "$RH_STATE" "$label" "${v:-none of $RH_FOLLOW_VERBS}" >&2
-      printf '%s\n' "$said" | sed 's/^/  | /' >&2
-      return 1 ;;
-  esac
-  _rh_do "$label, again" "$@"
+
+# _rh_landed <row> -> 0 when the units helper reads <row> landed
+_rh_landed() {
+  [ "$(bash -c '. "$1/units.sh" >/dev/null 2>&1 && units_rows "$2"' _ "$RH_ROOT/payload/scripts/lib" "$RH_PLAN" 2>/dev/null \
+    | awk -F'\t' -v r="$1" '$1 == r { print $10 }')" = landed ]
+}
+# _rh_tick_land <label> <row> <record> -> a record row landed by the tick, the person's act: a tick runs, and when the row
+# does not read landed its words name the edit of the row's cell, which is made, and the tick runs again
+_rh_tick_land() {
+  local label="$1" row="$2" rec="$3" key val n
+  for n in 1 2; do
+    door_run "$RH_ROOT" bash "$RH_ROOT/hooks/session-poker.sh" tick
+    { _rh_cmdline bash "$RH_ROOT/hooks/session-poker.sh" tick; printf '%s\n' "$DOOR_OUT" | sed 's/^/  | /'
+      printf '  rc=%s  (%s, tick %s)\n' "$DOOR_RC" "$label" "$n"; } >> "$RH_LOG"
+    _rh_landed "$row" && return 0
+    [ "$n" = 1 ] || break
+    key="$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -oE "edit the [A-Za-z-]+ cell of $row in the plan" | head -1)"; key="${key#edit the }"; key="${key%% *}"
+    case "$key" in
+      Files) val=".bionic/docs/$rec" ;;
+      artifact) val="$rec" ;;
+      *) break ;;
+    esac
+    printf '# not landed: %s · names: edit %s\n' "$label" "$key" >> "$RH_LOG"
+    _rh_cell "follow: edit $row $key" "$row" "$key=$val" || return 1
+  done
+  printf 'rehearse %s: %s: the tick did not land %s\n' "$RH_STATE" "$label" "$row" >&2
+  printf '%s\n' "$DOOR_OUT" | sed 's/^/  | /' >&2
+  return 1
 }
 
 # _rh_gh <dir> -> the stand-in gh in <dir>/bin, and RH_GHPATH: that directory, then every PATH entry holding no gh
@@ -367,6 +368,7 @@ _rh_replay() {
   _rh_poker "the fix row born of the finding" task-add T5 4 build 'Answer the structure finding. A caller reaches the library change. The caller and the library agree again.' \
     orchestrator — 10 REQ-1 'payload/scripts/lib/said.sh, tests/rehearsal-row.test.sh' \
     --born record/wave-x/w-structure-whole-2.md#1 || return 1
+  _rh_brief w-T5 T5 || return 1
   _rh_do "the fix row's tree" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" create "$(_rh_head)" wt/T5 --for w-T5 || return 1
   _rh_launch w-T5 T5 rehearsal-row.test.sh || return 1
   t="$RH_ROOT/.worktrees/T5"; f="$t/tests/rehearsal-row.test.sh"
@@ -390,7 +392,7 @@ _rh_replay() {
   printf '# T4: the pull request\n\n    gh pr create --base main --head wave/x --fill\n\n%s\n' "$h" > "$RH_REC/T4-pr.md" || return 1
   _rh_hand record "T4's report record/wave-x/T4-pr.md: the pull request's command and its address"
   _rh_do "the person merges the pull request" env PATH="$RH_GHPATH" gh pr merge wave/x --merge || return 1
-  _rh_follow "the integrate row lands itself" T4 record/wave-x/T4-pr.md bash "$RH_ROOT/hooks/session-poker.sh" deliver T4 || return 1
+  # The integrate row is the merge's: close-out lands it at the integration head, the act below.
   _rh_do "close-out, the tail" env HOME="$dir/home" BIONIC_CLAUDE_HOME="$dir/home/.claude" \
     bash "$RH_ROOT/payload/scripts/close-out.sh" "$RH_PLAN" run || return 1
   # close-out archives a delivered run's plans under the home's archive, keeping their path below the project.

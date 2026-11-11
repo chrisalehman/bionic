@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/grant.test.sh — payload/scripts/lib/grant.sh: THE GRANT (epic-23 wave-25-never-paused,
-# REQ-2, REQ-3, REQ-4, REQ-7; spec D2, D4, D6; ADR-042).
+# tests/grant.test.sh — payload/scripts/lib/grant.sh: THE GRANT.
 #
 # WHAT IT OWNS. The verdict the permission answer gives and the words it gives it in. Four
 # functions, one question each:
