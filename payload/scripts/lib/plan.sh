@@ -239,9 +239,13 @@ _plan_theme_reads() {
   local plan="$1" themes cur acs
   themes="$(plan_themes "$plan")"
   [ -n "$themes" ] || [ "$(plan_scale "$plan")" = task ] || return 0
-  cur=""; declare -F _fill_current_field >/dev/null 2>&1 && { fill_current_forget; cur="$(_fill_current_field "$plan")"; }
-  # every criterion with its state, asked once; a run whose facts could not be read measures no theme
-  acs="$(_plan_matrix_acs "$plan")" || { printf '%s\n' "$themes" | awk -F'\t' 'NF { print "unmeasured\t" $1 "\t\tthe run'"'"'s facts could not be read" }'; return 0; }
+  # the run's step as the reader answers it, and every criterion with its state, asked once; a run whose facts could not
+  # be read measures no theme
+  cur=""; acs=""
+  if declare -F _fill_current_load >/dev/null 2>&1; then fill_current_forget; _fill_current_load "$plan" && cur="$_FILL_CURRENT_VALUE"; fi
+  if fill_place_unread "$plan" 2>/dev/null || ! acs="$(_plan_matrix_acs "$plan")"; then
+    printf '%s\n' "$themes" | awk -F'\t' 'NF { print "unmeasured\t" $1 "\t\tthe run'"'"'s facts could not be read" }'; return 0
+  fi
   { printf '%s\n' "$themes" | awk -F'\t' 'NF { print "T\t" $1 "\t" $2 "\t" $3 }'
     printf '%s\n' "$acs"
   } | awk -F'\t' -v cur="$cur" "$_PLAN_GOAL_MEASURE_AWK$_PLAN_AC_REQ_AWK"'

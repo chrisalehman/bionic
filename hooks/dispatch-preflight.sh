@@ -957,30 +957,32 @@ DP_PROTOTYPE=""
 _dp_kind="$(brief_field "$DP_CONTRACT" kind | tr '[:upper:]' '[:lower:]')"
 case " $DP_PREAPPROVAL_KINDS " in *" ${_dp_kind:-none} "*) DP_PROTOTYPE=1 ;; esac
 if ! role_is_readonly "$DP_SUBAGENT" && [ -z "$DP_PROTOTYPE" ] && [ -n "$PLAN" ]; then
-  # `approved-by:` IS READ BY THE FILL'S OWN READER (wave-26 T5; review 10 F2): `fill_plan_approved`
-  # (lib/fill.sh), fence-aware and taking a bulleted `- approved-by:`, so the tick that FILLs a
-  # row and this wall that admits its writer can never disagree about whether the plan is
-  # approved. fill.sh is sourced here, lazily, at the one arm that reads it. A library directory
-  # without the function REFUSES the writer, naming the reader and the file (wave-26 T56; final
-  # review N2, ruled): before wave 26 the line was read inline and an unapproved plan refused,
-  # and an approval this hook cannot read is no approval. Read-only roles never reach here.
-  # `current:` is read only to name the step in the refusal, fence-blind as before.
-  DP_CURRENT=$(awk '
-    /^## SDLC State/ { st = 1; next }
-    st && /^## / { exit }
-    st && /^[[:space:]]*current[[:space:]]*:/ {
-      sub(/^[[:space:]]*current[[:space:]]*:[[:space:]]*/, ""); gsub(/[[:space:]]/, "");
-      print; exit }
-  ' "$PLAN" 2>/dev/null) || DP_CURRENT=""
+  # THE APPROVAL AND THE STEP ARE THE FILL'S (lib/fill.sh, sourced here lazily at the one arm that reads it): the run's
+  # held place (lib/proof.sh `proof_step_held`), so the tick that FILLs a row and this wall that admits its writer never
+  # disagree about whether the plan is approved, and an approval the run's log alone holds admits. A library directory
+  # without the reader, or a place that cannot be read, REFUSES the writer by name: an approval this hook cannot read is
+  # no approval. Read-only roles never reach here. The step is read only to name it in the refusal.
   if ! declare -F fill_plan_approved >/dev/null 2>&1 && [ -r "${BIONIC_LIB:-}/fill.sh" ]; then
     # shellcheck source=/dev/null
     . "$BIONIC_LIB/fill.sh"
   fi
-  DP_APPROVED=""
+  DP_APPROVED=""; DP_CURRENT=""
   if ! declare -F fill_plan_approved >/dev/null 2>&1; then
     DP_APPROVED=unreadable
   elif fill_plan_approved "$PLAN"; then
     DP_APPROVED=yes
+  elif fill_place_unread "$PLAN"; then
+    DP_APPROVED=place
+  fi
+  [ "$DP_APPROVED" = unreadable ] || DP_CURRENT="$_FILL_CURRENT_VALUE"
+  if [ "$DP_APPROVED" = place ]; then
+    dp_finding "the run's facts could not be read" "dispatch again" \
+      "Role: ${DP_SUBAGENT:-(none given, so general-purpose)}
+Plan: ${PLAN}
+The run's step and its Step-3 approval could not be read (lib/proof.sh proof_step_held), so whether
+this plan is approved is not known. A writer is admitted only on an approval this hook has read.
+
+Fix: dispatch again; the fold's own line on stderr names why it failed."
   fi
   if [ "$DP_APPROVED" = unreadable ]; then
     dp_finding "the approval check lib/fill.sh cannot be loaded" "reinstall the plugin" \

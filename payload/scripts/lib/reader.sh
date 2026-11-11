@@ -180,10 +180,11 @@ _reader_needs() {  # <question> <usage> <value> -> 0 when the value is given, el
 
 reader_question step value reader_q_step
 reader_q_step() {  # <plan> -> n=<the current step>, state=open|delivered|abandoned
+  # step 9 is the delivery, save one written as not delivered: a version-14 plan at 9 with no delivered line
   reader_facts "$1" | awk -F'|' "$_READER_AWK"'
-    ev() == "step" { n = line_kv("n") }
+    ev() == "step" { n = line_kv("n"); held = (line_kv("delivered") == "no") }
     ev() == "abandon" { gone = 1 }
-    END { if (n != "") print "n=" n; print "state=" (gone ? "abandoned" : (n == "9" ? "delivered" : "open")) }'
+    END { if (n != "") print "n=" n; print "state=" (gone ? "abandoned" : (n == "9" && !held ? "delivered" : "open")) }'
 }
 
 reader_question approved yes reader_q_approved

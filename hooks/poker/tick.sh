@@ -278,7 +278,7 @@ space_field() {  # <record> <key> -> value on stdout, empty if absent
 # extracts it as text and drives it beside `run_open` with fill.sh sourced, and §32 of
 # tests/session-poker.test.sh drives it beside the library — a poker that called the library
 # directly would leave §32 comparing one function with itself.
-_sched_plan_current_field() {  # <plan path> -> the RAW current: value (trimmed), or ""
+_sched_plan_current_field() {  # <plan path> -> the run's step as the reader answers it, or ""
   _fill_current_field "$@"
 }
 
@@ -2399,11 +2399,15 @@ EOF
     # rather than a symptom ("current: unreadable (none)").
     SCHED_CURRENT=""; SCHED_STEP=""
     if [ -n "$SCHED_PLAN" ] && [ "$POKER_RUN_OPEN" != unreadable ]; then
+      # read in this shell first, so a place that cannot be read is named here and every $( ) below reads the memo
+      _fill_current_load "$SCHED_PLAN" >/dev/null
       SCHED_CURRENT="$(sched_plan_current "$SCHED_PLAN")"
       SCHED_STEP="$(fill_step_token "$SCHED_PLAN")"
     fi
     if [ "$POKER_RUN_OPEN" = unreadable ]; then
       say "no FILL — bound plan unreadable — ${SCHED_PLAN}"
+    elif [ -n "$SCHED_PLAN" ] && fill_place_unread "$SCHED_PLAN"; then
+      say "no FILL — the run's step and approval could not be read — ${SCHED_PLAN}"
     elif [ -n "$SCHED_PLAN" ] && [ -z "$SCHED_STEP" ]; then
       SCHED_CURRENT_RAW="$(_sched_plan_current_field "$SCHED_PLAN")"
       say "no FILL — plan current: unreadable (${SCHED_CURRENT_RAW:-none})"

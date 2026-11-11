@@ -1896,7 +1896,7 @@ sitrep_tick_line() {
         'bound-open '*) HO_MODE=open ;;
         'bound-closed '*)
           HO_RUN="$(session_run "$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)" "$HO_SID")"
-          if /usr/bin/grep -qE '^[[:space:]]*-?[[:space:]]*Step[[:space:]]+9[[:space:]]*:.*delivered:' "${HO_RUN#bound-closed }" 2>/dev/null; then
+          if plan_delivered "${HO_RUN#bound-closed }"; then
             HO_MODE=closed
           fi ;;
       esac
@@ -2537,7 +2537,7 @@ sitrep_tick_line() {
     # 1 is adopt's "open rows found", its NOTIFY, never a refusal; each row it takes over is a hand event with this reason
     rs_step 0,1 adopt --why "the session was cleared and its predecessor's agents were taken over by the resume"
     # The task list: every step with its status from current:, then every row of ## Tasks with its table status.
-    RS_CUR="$(_fill_current_field "$RS_PLAN")"; RS_CURN="${RS_CUR%%[!0-9]*}"
+    RS_CUR=""; RS_UNREAD=""; if _fill_current_load "$RS_PLAN"; then RS_CUR="$_FILL_CURRENT_VALUE"; else RS_UNREAD=1; fi; RS_CURN="${RS_CUR%%[!0-9]*}"
     awk -v cur="$RS_CURN" 'BEGIN {
       n = split("Configure Scope Design Plan Implement Verify Review Document Integrate Close-out", nm, " ")
       for (i = 0; i < n; i++)
@@ -2583,7 +2583,8 @@ sitrep_tick_line() {
     RS_HEAD="$(git -C "$REPO_REAL" symbolic-ref --short -q HEAD 2>/dev/null)" || RS_HEAD=""
     printf 'tree: %s (checked out: %s)\n' "$REPO_REAL" "${RS_HEAD:-a detached HEAD}"
     RS_PROOT="$(cd "$HOOK_DIR/.." 2>/dev/null && pwd -P)"
-    case "$RS_CURN" in
+    case "$RS_UNREAD$RS_CURN" in
+      1*) printf 'step-file: none — the run'"'"'s step is unreadable\n' ;;
       [0-9]|[0-9][0-9]) printf 'step-file: %s/skills/canonical-sdlc/steps/%s.md\n' "$RS_PROOT" "$RS_CURN" ;;
       *) printf 'step-file: none — the plan'"'"'s current: (%s) names no step\n' "${RS_CUR:-unset}" ;;
     esac

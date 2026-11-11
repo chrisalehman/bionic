@@ -1446,17 +1446,14 @@ eg_step_reads_readings() {
   [ "$_c" -ge 6 ]
 }
 
-# eg_plan_reads_readings <plan> -> 0 when <plan>'s declared `current:` is such a step: the first
-# `current:` line of the unfenced `## SDLC State`, line endings translated and white space stripped, as the
-# gate's own `CURRENT` reads it. FILE SCOPE, for the collector, which asks before the wall's body has run.
+# eg_plan_reads_readings <plan> -> 0 when the step <plan>'s run stands at is such a step, as the reader answers it
+# (lib/proof.sh `proof_step_held`, loaded by the collector that asks); 1 when it is not, or when the run's place cannot be
+# read, which the gate's own read then refuses by name. FILE SCOPE, for the collector, which asks before the wall's body
+# has run.
 eg_plan_reads_readings() {
-  [ -f "${1:-}" ] || return 1
-  eg_step_reads_readings "$(normalize_newlines "$1" | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## SDLC State/ { flag = 1; next }
-    /^## / { flag = 0 }
-    flag && /^[[:space:]]*current[[:space:]]*:/ { sub(/^[[:space:]]*current[[:space:]]*:[[:space:]]*/, ""); gsub(/[[:space:]]/, ""); print; exit }')"
+  [ -f "${1:-}" ] && declare -F proof_step_held >/dev/null 2>&1 || return 1
+  proof_step_held "$1" >/dev/null || return 1
+  case "$_PROOF_PLACE" in n=*) local n="${_PROOF_PLACE%%$'\n'*}"; eg_step_reads_readings "${n#n=}" ;; *) return 1 ;; esac
 }
 
 # The plan is read off disk when the CALL starts (PLAN is resolved at :245
@@ -2885,7 +2882,7 @@ k2_step_num() {
 # Step 6 loses the same fact it would have lost at Step 4.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_approved_by() {
-  local step approved
+  local step
   step=$(k2_step_num)
   [ -n "$step" ] || return 0
   [ "$step" -ge 4 ] || return 0
@@ -2899,9 +2896,8 @@ Plan: $PLAN
 Fix: on the user's literal 'approved', record that approval of step3 — never on silence, a question, or a partial reply."
   fi
 
-  approved=$(echo "$SECTION" | grep -E '^[[:space:]]*approved-by[[:space:]]*:' | head -1 \
-    | sed -E 's/^[[:space:]]*approved-by[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
-  [ -n "$approved" ] && return 0
+  # the Step-3 approval, as the reader answered it with the step
+  case "${_EG_PLACE:-}" in *approved=1*) return 0 ;; esac
 
   _eg_detail="canonical-sdlc step ${CURRENT} — '## SDLC State' carries no 'approved-by:' line; the Step-3 approval is what admits Step 4.
 Plan: $PLAN
@@ -3134,11 +3130,16 @@ if [ "$_EG_V15" -eq 1 ]; then
 Plan: $PLAN
 Fix: record the run's step in its log before committing."
 else
-CURRENT=$(echo "$SECTION" \
-          | grep -E '^[[:space:]]*current[[:space:]]*:' \
-          | head -1 \
-          | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
-          | tr -d '[:space:]')
+  # At 14 too the step is the reader's, the plan's current: line read through the translation with the log's events
+  # over it, so a step the log alone holds is the step judged. A place that cannot be read is refused, never guessed.
+  if ! declare -F proof_step_held >/dev/null 2>&1 || ! proof_step_held "$PLAN" >/dev/null; then
+    refuse exit2 commit "the run's facts could not be read" "run the commit again" \
+"canonical-sdlc plan: the run's step and approval could not be read, so the step this commit is judged at is not known.
+Plan: $PLAN
+Fix: run the commit again; the fold's own line above names why it failed."
+  fi
+  _EG_PLACE="$_PROOF_PLACE"; CURRENT=""
+  case "$_EG_PLACE" in n=*) CURRENT="${_EG_PLACE%%$'\n'*}"; CURRENT="${CURRENT#n=}" ;; esac
 fi
 
 # THE VALUE THE PLAN DECLARED, kept before anything substitutes a subject (wave-18

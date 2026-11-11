@@ -512,95 +512,37 @@ plan_parked_why() {
 # Closed was the wrong answer for the second: the run may be mid-flight, and a reader that
 # calls it closed stops protecting it — the evidence gate admitted every commit against it.
 #
-# A RUN BROUGHT FORWARD IS JUDGED BY THE READER'S STEP ALONE (lib/reader.sh `reader_brought`): open while its
-# state is open, closed when the log delivers it (step 9) or abandons it, whatever `current:` or a Step line of
-# its plan still says. Only the log is read for it, so the answer costs no translation. Any other run keeps its
-# step in the plan, a log beside it or not (its writers move to the log one family at a time), and the plan is
-# read below. The reader is not asked about such a run: its translation orders Step
-# lines by their written instants, and a closed plan whose instants are missing, malformed or out of
-# order reads open there, the fail-dangerous direction; asked of every candidate it would also cost a
-# translation per plan inside `open_runs`.
+# THE RUN'S STATE IS THE READER'S, for every run (lib/proof.sh `proof_step_held`): its step, and whether it is open,
+# delivered or abandoned, folded from the homes that write those facts and held between asks, so a step the run's log
+# alone holds closes or opens the run as the plan's current: line would. A run whose place cannot be read is 3, the
+# answer a plan that cannot be read gives: closed would stop protecting a run that may be mid-flight.
+# What decides is the step's number: a sub-step letter (`8a`, `8b`) is stripped, 0 to 8 are open, 9 is open until it
+# is delivered, and any other value is no step this lifecycle has. The retired task-scale pointer `current: T<n>` stays
+# an open run, and only it, so the readers that act on an open run reach the plan and refuse it by name.
 run_open() {
-  local plan="$1"
+  local plan="$1" place n step
   [ -n "$plan" ] || return 1
   plan_unreadable "$plan" >/dev/null && return 3
   [ -f "$plan" ] || return 1
-  _run_reader || return 1
-  if reader_brought "$plan"; then
-    case "$(run_step "$plan")" in *state=open*) return 0 ;; *) return 1 ;; esac
+  _run_place "$plan" >/dev/null || return 3
+  place="$_PROOF_PLACE"
+  case "$place" in *state=open*) : ;; *) return 1 ;; esac
+  n=""; case "$place" in n=*) n="${place%%$'\n'*}"; n="${n#n=}" ;; esac
+  case "$n" in T[0-9]*) case "${n#T}" in *[!0-9]*) return 1 ;; *) return 0 ;; esac ;; esac
+  step="${n%[ab]}"
+  case "$step" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$((10#$step))" -le 9 ]
+}
+
+# _run_place <plan> -> the reader's held answer of where the run stands (`n=`, `state=`, `approved=`), also left in
+# _PROOF_PLACE; 2 when it cannot be read. lib/proof.sh, beside this file, is loaded the first time.
+_run_place() {
+  if ! declare -F proof_step_held >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$(cd "$(_run_self_dir)" && pwd -P)/proof.sh" >/dev/null 2>&1
+    declare -F proof_step_held >/dev/null 2>&1 || return 2
   fi
-
-  # THE WHOLE FILE, READ ONCE, HELD IN A VARIABLE — every match below tests this
-  # variable via a here-string, never a live pipe fed by _run_lines/awk. `grep -q`
-  # (and `-m1`) exit at their FIRST match; piped directly to a still-writing producer,
-  # that early exit closes the read end while the producer is mid-write, the producer
-  # takes SIGPIPE and reports 141, and every caller of this file runs under
-  # `set -o pipefail`, which promotes that 141 to the whole pipeline's own status. An
-  # `if pipeline; then return 1; fi` guarded that way reads 141 as false: a plan that
-  # DOES carry `delivered:` (or `abandoned:`) falls through as if it did not, and a
-  # closed run reads open — the fail-dangerous direction. A here-string is fully
-  # written by the shell before the reader ever starts, so there is no live writer left
-  # to signal, regardless of match position or file size (measured: a `delivered:` line
-  # near the top of a file past ~16-20 KB with pipefail on reproduces this at the
-  # `_run_lines "$plan" | grep -qE …` shape; tests/run-predicate.test.sh §R4, AC-21;
-  # sibling note tests/cross-gate-agreement.test.sh:1502, `producer | grep -q` under
-  # pipefail exits 141 on large files).
-  local lines
-  lines=$(_run_lines "$plan")
-
-  # A plan whose header says `abandoned:` is never active, regardless of `current:`. The header is read
-  # by its one parser, the one the reader's `header` answers from and its translation's abandon reads.
-  plan_read_header "$plan" abandoned >/dev/null && return 1
-
-  # The `current:` line. LEADING WHITESPACE IS TOLERATED and the read is fence-aware, for
-  # the same reason the marker test above is: this is the exact tolerance the five
-  # hand-copies in hooks/ carried, and a predicate that is stricter than the walls it
-  # replaces goes silently inert on a plan those walls read perfectly well.
-  local body
-  body=$(awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    { print }' <<< "$lines")
-  local current
-  current=$(grep -m1 -E '^[[:space:]]*current[[:space:]]*:' <<< "$body" \
-    | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
-    | tr -d '[:space:]')
-  [ -n "$current" ] || return 1
-
-  # THE RETIRED TASK-SCALE POINTER STAYS AN OPEN RUN (wave-31 T24; REQ-1 AC-1.2, D2; A-orch-52).
-  # `current: T<n>` is no step at any scale, and no reader judges a plan by it. It is kept open
-  # here, and only it, so the readers that act on an open run reach the plan and refuse it by
-  # name: the tick's no-FILL, the evidence gate's numeric refusal. Called closed, the plan would be skipped
-  # in silence, which AC-1.2 forbids. Any other malformed value stays closed, below.
-  if grep -qE '^T[0-9]+$' <<< "$current"; then
-    return 0
-  fi
-
-  # THE STEP NUMBER MAY CARRY A SUB-STEP LETTER — `8a`, `8b` — which the lifecycle uses
-  # and every wall this replaces accepted (`^[0-9]+[ab]?$`). A predicate that read `8b`
-  # as malformed would call a live run closed for the whole of step 8, which is where
-  # implementation happens. The letter is stripped; what decides is the number.
-  local step="${current%[ab]}"
-  case "$step" in
-    ''|*[!0-9]*) return 1 ;;
-  esac
-
-  # Steps 0-8: open by definition.
-  if [ "$((10#$step))" -lt 9 ]; then
-    return 0
-  fi
-
-  # Step 9: open unless a Step-9 evidence line records delivery. Anything past 9 is not a
-  # step this lifecycle has, and an unrecognised state is not an open run.
-  if [ "$((10#$step))" -eq 9 ]; then
-    if grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' <<< "$lines"; then
-      return 1
-    fi
-    return 0
-  fi
-
-  # Anything else (out-of-range current:, malformed) is not a recognized open state.
-  return 1
+  proof_step_held "$1"
 }
 
 _run_reader() {  # -> 0 once lib/reader.sh, beside this file, is loaded in this shell

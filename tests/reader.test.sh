@@ -36,6 +36,9 @@
 #   §HANDS      an amend, a hold, an extension, an adoption, a by-hand landing and a person's stop of a run each leave
 #               one hand event with its reason, through the one writer that refuses an act with none; the tick's
 #               withdrawal of a request for the load leaves none.
+#   §HELD       the run's held place answers as the whole fold, over every form of the step's and approval's line
+#               and every plan this suite built: a home that writes one of the three and is not in the place's list
+#               turns it red.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
 
@@ -76,6 +79,15 @@ ask approved release; expect_status "a cancelled approval is absent" 1 "$?"
 expect_eq "the later step answers" "n=5 state=open" "$(ask step | tr '\n' ' ' | sed 's/ $//')"
 printf 'run/v1|ev=step|n=4|by=me|at=2026-11-01T00:00:14Z\n' >> "$D/record/fold/run.log"; expect_eq "a step written again is the step the run went back to" "n=4 state=open " "$(ask step | tr '\n' ' ')"
 W=back14; printf '## SDLC State\ncurrent: 1\n- Step 0: a\n- Step 1: a\n- Step 4: a\n' > "$D/plans/epic-x/back14.plan.md"; expect_eq "a version-14 plan taken back stands at its current:, its Step lines the history" "n=1 state=open " "$(ask step | tr '\n' ' ')"
+for f in 'current: 4\r\n|CRLF' '   current :  4\n|indented' 'current:4\n|unspaced' 'current: 4\ncurrent: x\n|the first of two'; do
+  W=form; printf "## SDLC State\n${f%|*}- Step 3: a\n" > "$D/plans/epic-x/form.plan.md"; expect_eq "a version-14 current: ${f#*|} is read as the gate reads it" "n=4 state=open " "$(ask step | tr '\n' ' ')"; done
+printf '## SDLC State\rcurrent: 4\r- Step 3: a\r' > "$D/plans/epic-x/form.plan.md"; expect_eq "a version-14 current: on CR-only line ends is read" "n=4 state=open " "$(ask step | tr '\n' ' ')"
+for f in '- Step 8: a\n|with no Step 9 line' '- Step 9: drafted\n|with its Step 9 line not delivered' '- Step 9: report, delivered: x\n|delivered'; do
+  printf "## SDLC State\ncurrent: 9\n${f%|*}" > "$D/plans/epic-x/form.plan.md"; W=form; s=open; [ "${f#*|}" = delivered ] && s=delivered
+  expect_eq "a version-14 plan at 9 ${f#*|} stands at 9, $s" "n=9 state=$s " "$(ask step | tr '\n' ' ')"; done
+printf '## SDLC State\n- Step 3: a\n- Step 4: a\n' > "$D/plans/epic-x/form.plan.md"; expect_eq "Step lines with no current: are no step" "state=open " "$(ask step | tr '\n' ' ')"
+for f in '- approved-by: u 2026-01-01T00:00Z "ok"|0' '  approved-by: u 2026-01-01T00:00Z "ok"|0' 'approved-by:  |1'; do
+  printf '## SDLC State\ncurrent: 4\n%s\n' "${f%|*}" > "$D/plans/epic-x/form.plan.md"; ask approved step3; expect_status "the approval line '${f%|*}' is read as the fill reads it" "${f#*|}" "$?"; done
 
 # fails-when: a proof is identified without its scope, so a piece reading replaces a whole one of the same question
 # at the same head, and the judge over the reader reads the whole read absent.
@@ -614,4 +626,34 @@ printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$LP" > "$LR2/.bionic/tmp/en
 ( cd "$LR2" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SPW" land "$LT" --by-hand --reason 'no Lands-on could be read' ) >/dev/null 2>&1; LH_RC=$?
 expect_eq "a by-hand landing is one published landing of the hand kind with its reason, answered by hands (exit)" \
   "0|hand|no Lands-on could be read" "$LH_RC|$(bash "$READER" "$LP" hands | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^(kind|why)=/) printf "|%s", substr($i, index($i, "=") + 1) }' | cut -c2-)"
+section "HELD"
+i=0; while IFS= read -r f; do i=$((i + 1)); printf '%b' "## SDLC State\n$f\n" > "$D/plans/epic-x/held$i.plan.md"; done <<'EOF'
+current: 4\napproved-by: u 2026-01-01T00:00Z "ok"\n- Step 4: x
+   current :  4\napproved-by: u 2026-01-01T00:00Z "ok"
+current:4\napproved-by:u 2026-01-01T00:00Z "ok"
+current: 4\ncurrent: notastep
+current: 8b\n- Step 8: x
+current: 9\n- Step 8: x\n- Step 9: drafted
+current: 9\napproved-by: u 2026-01-01T00:00Z "ok"\nStep 9:\n  delivered: PR 1
+current: 9\n- Step 8: x
+current: 9\n- Step 9: report, delivered: 2026-01-01
+- Step 3: x\n- Step 4: y
+current: T3
+current: 12
+current: <N>
+current: 4\n- approved-by: u 2026-01-01T00:00Z "ok"
+current: 4\n  approved-by: u 2026-01-01T00:00Z "ok"
+current: 4\napproved-by:
+current: 4\napproved: step3 u 2026-01-01T00:00Z "ok"
+current: 4\r\napproved-by: u 2026-01-01T00:00Z "ok"\r
+current: 4\rapproved-by: u 2026-01-01T00:00Z "ok"\r
+EOF
+# each plan asked of the held place cold and of the whole fold: `<compared> <the plans that disagree>`
+held() { TMPDIR="$(mktemp -d)" bash -c '. "$1/lib/proof.sh"; _proof_reader_load; n=0; bad=""; for p in "$2"/*.plan.md; do n=$((n + 1))
+  w="$(reader_q_step "$p"; if reader_q_approved "$p" step3; then echo approved=1; else echo approved=0; fi)"; [ "$(proof_step_held "$p")" = "$w" ] || bad="$bad ${p##*/}"; done
+  echo "$n$bad"' _ "${READER%/*}" "$D/plans/epic-x"; }
+HELD="$(held)"
+expect_eq "the held place answers as the whole fold on every form and every plan this suite built, nineteen forms among them" \
+  "1|" "$([ "${HELD%% *}" -ge 19 ] && echo 1)|$(printf '%s' "${HELD#* }" | sed 's/^[0-9]*$//')"
+
 finish

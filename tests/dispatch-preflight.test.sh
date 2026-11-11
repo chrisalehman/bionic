@@ -686,4 +686,13 @@ expect_eq "LO-1 one suite on Lands-on, within Suites, is admitted though another
   "allow|widget.test.sh" "$GATE_VERDICT|$(roster_field "$LO_ROW" lands_on)"
 expect_absent "LO-1b …and nothing asks for the other reader" "reader.test.sh" "$GATE_ERR"
 
+section "§PLACE — the plan's approval and the step a writer is refused at are the run's facts, its log's among them"
+REPO=$(make_repo pl1 yes); write_attestation "$REPO" "$SID_A"; PL="$REPO/.bionic/docs/record/wave-01-test/run.log"
+sed -i.bak '/^approved-by:/d' "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"; mkdir -p "${PL%/*}"
+printf 'run/v1|ev=step|n=6|at=2026-11-01T00:00:01Z\n' > "$PL"; run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_eq "PL.1 a writer on a plan approved nowhere is refused at the step its log holds" "deny|Step: 6 " \
+  "$GATE_VERDICT|$(printf '%s\n' "$GATE_OUT$GATE_ERR" | /usr/bin/grep -o 'Step: [0-9]* ' | head -1)"
+printf 'run/v1|ev=approval|key=step3|by=u|said=approved|at=2026-11-01T00:00:02Z\n' >> "$PL"; run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_eq "PL.2 …and admitted once its log alone holds the approval" "allow" "$GATE_VERDICT"
+
 finish

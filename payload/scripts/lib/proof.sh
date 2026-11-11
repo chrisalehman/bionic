@@ -1701,7 +1701,7 @@ PROOF_EVENTS
   _PROOF_FACTS_KEY="${stamp:+$key}"
   if [ -n "$cache" ] && tmp="$(mktemp "$cdir/.facts.XXXXXX" 2>/dev/null)"; then
     { printf '%s\n' "$key"; printf '%s' "$_PROOF_FACTS"; printf '\036\n%s' "$_PROOF_FINDINGS"; printf '\036\n%s' "$_PROOF_INHERITED"; } > "$tmp" && mv -f "$tmp" "$cache" 2>/dev/null || rm -f "$tmp"
-    ls -t "$cdir" 2>/dev/null | sed "1,${_PROOF_FACTS_KEEP}d" | while IFS= read -r f; do rm -f "$cdir/$f"; done
+    _proof_keep_sweep "$cdir" "$_PROOF_FACTS_KEEP"
   fi
   _proof_facts_out
 }
@@ -1743,6 +1743,74 @@ _proof_findings_hold() {
 proof_held_facts() {
   [ -n "${_PROOF_HELD_PLAN:-}" ] && [ "$_PROOF_HELD_PLAN" = "${1:-}" ] && [ -z "${_PROOF_PENDING:-}" ] || return 1
   printf '%s' "${_PROOF_HELD_FACTS:-}"
+}
+
+_proof_keep_sweep() {  # <dir> <n> -> the newest <n> files of <dir> are left, the rest removed; a directory is no file
+  ls -tp "$1" 2>/dev/null | sed -e '/\/$/d' -e "1,${2}d" | while IFS= read -r f; do rm -f "$1/$f"; done
+}
+
+# ---------- THE RUN'S PLACE, HELD ----------
+#
+# Where a run stands is asked of every plan at session start and by every hook that scopes itself to a run, under a
+# deadline, so it is not taken from the whole fold. proof_step_held answers it from the fold of the homes that write a
+# step, an approval or an abandon (lib/translate.sh TRANSLATE_PLACE_SOURCES), or the log alone once the run is brought
+# forward, and keeps the three answers beside the kept fold, under a key of every file that answer is read from: the
+# plan, its log and the log's kept copy, the reader's libraries and this one. An appended event, an edited line or a
+# changed library is a new key, and the next ask folds again. A fold that failed is returned and never kept. This is the
+# one reader and writer of the held file; it holds the answers and nothing else, in a directory of its own beside the
+# kept fold's, and the kept fold's sweep (`_proof_keep_sweep`) sweeps it.
+_PROOF_STEP_KEEP=128
+_PROOF_PLACE_LIBS=""; _PROOF_PLACE_DIR=""
+proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|abandoned, approved=1|0; exit 2, one line on stderr, when the fold fails
+  # The answer is also left in _PROOF_PLACE, so a caller in this shell reads it with no subshell.
+  local plan="${1:-}" log="" dir="" f stamp key held="" got ev tmp k rc=0 IFS=$' \t\n'
+  local -a deps
+  _PROOF_PLACE=""
+  [ -f "$plan" ] || return 0
+  _proof_reader_load || { printf 'proof_step_held: lib/reader.sh cannot be loaded, so the place of %s is not read\n' "$plan" >&2; return 2; }
+  log="$(reader_log "$plan" 2>/dev/null)" || rc=$?
+  case "$rc" in
+    0) dir="${log%/*}" ;;
+    2) rc=0 ;;
+    *) printf 'proof_step_held: the lookup of the run log of %s exited %s, so its place is not read\n' "$plan" "$rc" >&2; return 2 ;;
+  esac
+  # The libraries are summed once a shell and the place's directory is judged once a shell, since neither changes
+  # under a process; the plan and its log are summed at every ask.
+  if [ -z "$_PROOF_PLACE_LIBS" ]; then
+    deps=("$_READER_LIB_DIR/proof.sh"); for f in $_PROOF_FACTS_LIBS; do deps+=("$_READER_LIB_DIR/$f"); done
+    _PROOF_PLACE_LIBS="$(cksum "${deps[@]}" 2>/dev/null)" || _PROOF_PLACE_LIBS=""
+    _PROOF_PLACE_LIBS="${_PROOF_PLACE_LIBS//$'\n'/ }"
+    # A directory of its own beside the kept fold's, never inside it: a sweep of the kept folds meets no entry it
+    # did not write. Trusted as the kept fold is, owned by this user and writable by no one else.
+    _PROOF_PLACE_DIR="${TMPDIR:-/tmp}/bionic-place-${UID:-0}"
+    [ -d "$_PROOF_PLACE_DIR" ] || mkdir -p -m 700 "$_PROOF_PLACE_DIR" 2>/dev/null
+    [ -O "$_PROOF_PLACE_DIR" ] && [ -n "$(find "$_PROOF_PLACE_DIR" -prune -type d ! -perm -020 ! -perm -002 2>/dev/null)" ] \
+      || _PROOF_PLACE_DIR=""
+  fi
+  deps=("$plan"); [ -z "$dir" ] || for f in run.log kept/record/run.log; do [ ! -f "$dir/$f" ] || deps+=("$dir/$f"); done
+  stamp="$(cksum "${deps[@]}" 2>/dev/null)" || stamp=""
+  key="$plan ${stamp//$'\n'/ } $_PROOF_PLACE_LIBS"
+  if [ -n "$stamp" ] && [ -n "$_PROOF_PLACE_LIBS" ] && [ -n "$_PROOF_PLACE_DIR" ]; then
+    held="${plan//[^A-Za-z0-9._-]/%}"; [ "${#held}" -le 200 ] || { held="$(cksum <<< "$plan")"; held="${held%% *}"; }
+    held="$_PROOF_PLACE_DIR/$held"
+  fi
+  if [ -n "$held" ] && [ -f "$held" ] && { IFS= read -r k; got=""; while IFS= read -r f; do got="$got$f"$'\n'; done; } < "$held" \
+     && [ "$k" = "$key" ] && [ -n "$got" ]; then
+    _PROOF_PLACE="${got%$'\n'}"; printf '%s' "$got"; return 0
+  fi
+  declare -F translate >/dev/null 2>&1 || . "$_READER_LIB_DIR/translate.sh" >/dev/null 2>&1
+  if [ -n "$dir" ] && reader_brought "$plan"; then ev="$(cat "$log")" || rc=$?
+  else ev="$(set -o pipefail; TRANSLATE_SOURCES="$TRANSLATE_PLACE_SOURCES" translate "$plan" events)" || rc=$?; fi
+  [ "$rc" -ne 0 ] || got="$( set -o pipefail; reader_events() { printf '%s\n' "$ev"; }
+    reader_q_step "$plan" || exit; if reader_q_approved "$plan" step3; then echo approved=1; else [ "$?" -eq 1 ] || exit; echo approved=0; fi )" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf 'proof_step_held: lib/reader.sh exited %s reading the place of %s; nothing is kept\n' "$rc" "$plan" >&2; return 2
+  fi
+  if [ -n "$held" ] && tmp="$(mktemp "$_PROOF_PLACE_DIR/.held.XXXXXX" 2>/dev/null)"; then
+    printf '%s\n%s\n' "$key" "$got" > "$tmp" && mv -f "$tmp" "$held" 2>/dev/null || rm -f "$tmp"
+    _proof_keep_sweep "$_PROOF_PLACE_DIR" "$_PROOF_STEP_KEEP"
+  fi
+  _PROOF_PLACE="$got"; printf '%s\n' "$got"
 }
 
 _proof_ask() {  # <plan> <reader question's function> [args] -> its answer and exit, over the facts _proof_facts keeps
