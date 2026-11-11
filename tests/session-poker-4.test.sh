@@ -922,7 +922,7 @@ hs_merge() {  # <row> <path> -> sets HS_R (the row's head) and HS_M (the person'
   HS_M="$(git -C "$HS" rev-parse HEAD)"
   HS_F="$HS_M"
 }
-hs_rec() { cat "$HS/.bionic/docs/record/wave-01-fixture/landing-proofs.log" 2>/dev/null; }
+hs_rec() { cat "$HS/.bionic/docs/record/wave-01-fixture/landing-proofs.log" "$HS/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null; }
 hs_judge() {  # <base> <head> -> the floor judge's verdict on the commits after <base> to <head>: its exit code and words
   local o rc; o="$(bash -c '. "$1" && _proof_past_f "$2" "$3" "$4" "$5" ""' _ "$S46_LIB" "$HS_PLAN" "$HS" "$1" "$2" 2>&1)"; rc=$?
   printf '%s|%s' "$rc" "$o"
@@ -934,16 +934,16 @@ poke "$HS" row-landed T1 "$HS_M1" "$HS_AT" --by-hand "Dana Fixture" "landed on t
 expect_eq "HS-1 AC-6.1 row-landed --by-hand with --suites, --green-at and --log exits 0" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "HS-1b …the record holds the row's ready event with its suites" \
-  "line/v1|ev=ready|row=T1|name=-|commit=$HS_M1|" "$(hs_rec)"
-expect_contains "HS-1c …naming both suites" "suites=session-poker-4.test.sh,units.test.sh|" "$(hs_rec | /usr/bin/grep '^line/v1|ev=ready|row=T1|')"
+  "run/v1|ev=ready|row=T1|name=-|commit=$HS_M1|" "$(hs_rec)"
+expect_contains "HS-1c …naming both suites" "suites=session-poker-4.test.sh,units.test.sh|" "$(hs_rec | /usr/bin/grep '^run/v1|ev=ready|row=T1|')"
 expect_eq "HS-1d …one green verdict per suite, at the commit they were green at, with the log" \
-  "line/v1|ev=verdict|row=T1|commit=$HS_R1|suite=session-poker-4.test.sh|result=green|log=$HS/.bionic/docs/record/wave-01-fixture/T1-green.log
-line/v1|ev=verdict|row=T1|commit=$HS_R1|suite=units.test.sh|result=green|log=$HS/.bionic/docs/record/wave-01-fixture/T1-green.log" \
-  "$(hs_rec | /usr/bin/grep '^line/v1|ev=verdict|row=T1|' | sed 's/|admitted=.*//')"
+  "run/v1|ev=verdict|row=T1|commit=$HS_R1|suite=session-poker-4.test.sh|result=green|log=$HS/.bionic/docs/record/wave-01-fixture/T1-green.log
+run/v1|ev=verdict|row=T1|commit=$HS_R1|suite=units.test.sh|result=green|log=$HS/.bionic/docs/record/wave-01-fixture/T1-green.log" \
+  "$(hs_rec | /usr/bin/grep '^run/v1|ev=verdict|row=T1|' | sed 's/|admitted=.*//')"
 expect_eq "HS-1e …in the order ready, verdicts, published" "ready verdict verdict published" \
-  "$(hs_rec | /usr/bin/grep '|row=T1|' | sed 's/^line\/v1|ev=\([a-z]*\)|.*/\1/' | paste -sd' ' -)"
+  "$(hs_rec | /usr/bin/grep '|row=T1|' | sed 's/^[a-z]*\/v1|ev=\([a-z]*\)|.*/\1/' | paste -sd' ' -)"
 expect_contains "HS-1f …the published line is the hand landing's, field for field" \
-  "line/v1|ev=published|row=T1|commit=$HS_M1|kind=hand|by=Dana Fixture|why=landed on the report|at=$HS_AT" "$(hs_rec)"
+  "run/v1|ev=published|row=T1|commit=$HS_M1|kind=hand|by=Dana Fixture|why=landed on the report|at=" "$(hs_rec)"
 expect_eq "HS-2 AC-6.1 the floor's judge proves the commit by the verdicts the landing wrote (exit 0, nothing printed)" \
   "0|" "$(hs_judge "$HS_BASE" "$HS_M1")"
 HS_BASE2="$HS_M1"
@@ -951,7 +951,7 @@ hs_merge T2 lib/b.sh; HS_M2="$HS_M"
 poke "$HS" row-landed T2 "$HS_M2" "$HS_AT" --by-hand "Dana Fixture" "landed on the report"
 expect_eq "HS-3 control: the same call without the three flags exits 0" "0" "$RC"
 expect_eq "HS-3b …and writes the published line alone: no ready event, no verdict for T2" "0|1" \
-  "$(hs_rec | /usr/bin/grep -c '^line/v1|ev=\(ready\|verdict\)|row=T2|')|$(hs_rec | /usr/bin/grep -c '^line/v1|ev=published|row=T2|commit='"$HS_M2"'|kind=hand|')"
+  "$(hs_rec | /usr/bin/grep -c '^run/v1|ev=\(ready\|verdict\)|row=T2|')|$(hs_rec | /usr/bin/grep -c '^run/v1|ev=published|row=T2|commit='"$HS_M2"'|kind=hand|')"
 expect_contains "HS-3c …and the judge finds no run of the row's suites at the commit" \
   "1|commit ${HS_M2:0:12} (row T2) is not proved: no run of its row's suites is recorded at it" "$(hs_judge "$HS_BASE2" "$HS_M2")"
 # A RUN AGAIN OF THE SAME LANDING WRITES NOTHING MORE: the published line is the landing recorded.
@@ -983,9 +983,9 @@ poke "$HS" row-landed T3 "$HS_M3" "$HS_AT" --by-hand "Dana Fixture" "landed on t
 expect_eq "EV-2 a hand landing given the suites, the branch and the tree exits 0" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "EV-2b …and its ready event carries both" "|commit=$HS_M3|branch=wt/T3|tree=$HS/.worktrees/T3|suites=units.test.sh|" \
-  "$(hs_rec | /usr/bin/grep '^line/v1|ev=ready|row=T3|')"
+  "$(hs_rec | /usr/bin/grep '^run/v1|ev=ready|row=T3|')"
 expect_contains "EV-3 control: the landing given neither (T1, above) still reads - for both" "|commit=$HS_M1|branch=-|tree=-|suites=session-poker-4.test.sh,units.test.sh|" \
-  "$(hs_rec | /usr/bin/grep '^line/v1|ev=ready|row=T1|')"
+  "$(hs_rec | /usr/bin/grep '^run/v1|ev=ready|row=T1|')"
 
 # ============================================================
 section "§AMEND-NARROW: amend --suites= narrows a live contract's suites and its lands_on= with them; the collector hands the wall the suites that exist"
@@ -1578,7 +1578,7 @@ st_until() {  # <seconds> <command>… -> rc 0 once the command holds, 1 when th
 }
 st_ended() { [ -s "$1.rc" ]; }
 st_rec() { bash -c '. "$1/payload/scripts/lib/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "$BIONIC_SCRIPTS_DIR" "$PST"; }
-st_runline() { /usr/bin/grep -F "|ev=run|log=$1|" "$(st_rec)" 2>/dev/null | tail -n 1; }   # <log from its root> -> its run line
+st_runline() { cat "$(st_rec)" "$(dirname "$(st_rec)")/run.log" 2>/dev/null | /usr/bin/grep -F "|ev=run|log=$1|" | tail -n 1; }   # <log from its root> -> its run line
 : > "$ST_CTL/hold"
 
 # Each tick below but one forgets the last digest, so it prints in full and a line it did not print is a
@@ -1699,7 +1699,7 @@ wk_step5() {  # -> the Step 5 block's walk-artifact: lines, trimmed, `;`-joined
   awk '/^- Step 5:/ { s = 1; next } s && /^- / { s = 0 } s && /^[ \t]+walk-artifact:/ { t = $0; sub(/^[ \t]+/, "", t); print t }' "$PWK" | paste -sd';' -
 }
 wk_recfile() { bash -c '. "$1/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "${S46_LIB%/*}" "$PWK"; }
-wk_ev() { /usr/bin/grep -F "|ev=$1|" "$(wk_recfile)" 2>/dev/null; }   # <ev> -> its lines in the landing record
+wk_ev() { cat "$(wk_recfile)" "$(dirname "$(wk_recfile)")/run.log" 2>/dev/null | /usr/bin/grep -F "|ev=$1|"; }   # <ev> -> its lines in the record, then the log
 wk_rec() {  # <name> <verdict: line or -> [<head: line or ->] [<table row>...] -> a walk record
   local f="$WK_DIR/$1.md" v="$2" h="$3" r; shift 3
   { printf '# walk\n\nwalker: wk-walker\n'; [ "$h" = - ] || printf '%s\n' "$h"
@@ -1715,11 +1715,11 @@ WK_ROWS=('| AC-1.1 | CONFIRMED | the card printed whole |' '| AC-1.2 | CONFIRMED
 poke "$RWK" matrix-render
 expect_eq "WK-0 setup: matrix-render renders the head with the walk stub (exit 0)" "0|walk-artifact: pending" "$RC|$(wk_head walk-artifact)"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
-# The first fixture criterion settled by a landing, as line_settle writes it: cells and block key, and the settled line.
+# The first fixture criterion settled by a landing, as an older run's line_settle wrote it: cells, block key, settled line.
 WK_SET_LOG="record/wave-01-fixture/T2-a.test.sh.log"; printf 'head=%s rc=0\n' "$WK_A" > "$RWK/.bionic/docs/$WK_SET_LOG"
 bash -c '. "$1/units.sh" >/dev/null 2>&1 && matrix_row_cells "$2" AC-1.1 "3=discharged" "4=$3" > "$2.c" && matrix_block_key "$2.c" AC-1.1 evidence "$3" > "$2" && rm -f "$2.c"' \
   _ "${S46_LIB%/*}" "$PWK" "$WK_SET_LOG"
-bash -c '. "$1/line.sh" >/dev/null 2>&1 && line_event "$2" settled row=T2 "commit=$3" findings= cells=AC-1.1' _ "${S46_LIB%/*}" "$PWK" "$WK_A"
+wk_r="$(wk_recfile)"; mkdir -p "${wk_r%/*}"; printf 'line/v1|ev=settled|row=T2|commit=%s|findings=|cells=AC-1.1|at=%s\n' "$WK_A" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$wk_r"
 ( cd "$RWK" && git add -f "$PWK" && git commit -qm settled ) >/dev/null 2>&1
 WK_ROW11="$(wk_row AC-1.1)"; WK_ROW13="$(wk_row AC-1.3)"
 expect_eq "WK-0b precondition: AC-1.1 reads the landing's discharge and the record names it settled; AC-1.2 and AC-1.3 pending" \

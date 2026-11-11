@@ -659,8 +659,9 @@ landing_report() {  # <plan or landing record> <project root> <rows yes|no> [ins
 # verb wrote, and PROSE IS NEVER READ (D1): a line that says `by-hand` in a plan, a note or the orchestrator's
 # own assumptions counts nothing, and so does anything the orchestrator did that no verb recorded.
 #
-#   by-hand        the landing record's `line/v1|ev=published|…|kind=hand|…` (lib/line.sh), one per landing.
-#   stop-runs      the landing record's `line/v1|ev=stop-run|…`, one per `stop-run` that stopped a run or ended a
+#   by-hand        the record's `ev=published|…|kind=hand|…` (lib/line.sh), one per landing.
+#   stop-runs      the run's log's `run/v1|ev=hand|what=stop-run|…` (an older record's `line/v1|ev=stop-run|…`, which
+#                  the translation reads as that hand event), one per `stop-run` that stopped a run or ended a
 #                  gate request (wave-36 T11; D8, AC-2.3). A stop is a verb act: never counted as by-hand.
 #   declines       the run's fill ledger's `fill-ledger/v1|…|state=decline|…` lines, one per `decline`. The Stop hook
 #   lifts          writes `state=ok` and `state=hold` only, so a `hold` there is the fill's wait and not the `hold` verb.
@@ -674,15 +675,14 @@ landing_report() {  # <plan or landing record> <project root> <rows yes|no> [ins
 #                  `waiver: <who> <ISO-UTC> "<words>"` under `## Verification Matrix` (`waive-row`), or the older
 #                  `waiver: <who> <YYYY-MM-DD> "<words>"` a plan may still carry. Fenced text is skipped, as every
 #                  reader of the plan skips it.
-#   status-writes  the landing record's `line/v1|ev=matrix-set|ac=<id>|cells=<status,evidence,task>|by=<who>|at=<ISO-UTC>|`, one per
+#   status-writes  the log's `run/v1|ev=hand|what=matrix-set|ac=<id>|cells=<status,evidence,task>|by=<who>|at=<ISO-UTC>`, one per
 #                  `matrix-set` call that changed the plan, written in the same act as its plan write (hooks/poker/plan.sh
 #                  `poker_verb_matrix_set`). It is counted when its cells name the status or the task, placed by its `at=`
 #                  like every record kind. A task write counts: the task: key is what defers a pending row to its
-#                  task's step, so writing it by hand moves the row off every gate. The landing's settlement (lib/line.sh
-#                  `line_settle`) writes a cell through `matrix_row_cells` and writes no such line, so a status a landing
-#                  wrote is never one; a call the settled-cell rule refuses, or that only restates a key, writes none. An
-#                  evidence-only line is a write and no status: not counted. A `line/v1|ev=matrix-retier|…` line
-#                  (`matrix-retier`) raises a tier and resets the row: strengthening is the run's act, so it is counted
+#                  task's step, so writing it by hand moves the row off every gate. A call the settled-cell rule
+#                  refuses, or that only restates a key, writes none. An evidence-only line is a write and no status:
+#                  not counted. A `run/v1|ev=hand|what=matrix-retier|…` line (`matrix-retier`) raises a tier and resets
+#                  the row: strengthening is the run's act, so it is counted
 #                  in no field; weakening stays a person's, a waiver: line among the waivers.
 #   second-regressions  a whole run a person started, past the first. The tick and the orchestrator start the whole
 #                  run as the machine does, so only a person's start is a hand-hold: the landing record's regression
@@ -701,7 +701,7 @@ landing_report() {  # <plan or landing record> <project root> <rows yes|no> [ins
 #                  event: typed at or before that landing it is the landing's own business and outside the count,
 #                  typed after it a hand marked the fix, inside. A move naming a row with no landing is unplaced.
 #                  A move the landing itself wrote (`by=landing`, lib/line.sh `line_settle`) is its settlement, never a hand.
-#   needs-you      the landing record's `line/v1|ev=refusal|needs=person|…`, a refusal that named a person as its exit, from
+#   needs-you      the log's `run/v1|ev=hand|what=refusal|needs=person|…`, a refusal that named a person as its exit, from
 #                  the one line refuse() wrote, placed by its `at=`. A refusal the person had to answer is a hand-hold; a refusal
 #                  that named another exit (`needs=` anything else) is the machine's own and counts nothing. It is printed last.
 #
@@ -970,16 +970,16 @@ hand_holds_verb() {
       exit 1
     }
     [ ! -f "$PV_NEW.2" ] || mv -f "$PV_NEW.2" "$PV_NEW"
-    RL_CELLS="$(cat "$PV_NEW.2.cells" 2>/dev/null)"; rm -f "$PV_NEW.2.cells"
+    rm -f "$PV_NEW.2.cells"
     # THE SETTLEMENT (lib/line.sh `line_settle`): what the landing proves goes into the same copy, so the row, its
-    # evidence, the findings it answers and the status cells its evidence fills are one write.
+    # evidence and the findings it answers are one write. It marks no matrix status.
     if ! { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
        || ! declare -F line_settle >/dev/null 2>&1; then
       die "REFUSED — the landing's settlement (lib/line.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
     fi
     LINE_SID="${LINE_SID:-${CLAUDE_CODE_SESSION_ID:-}}"
-    if ! line_settle "$PV_PLAN" "$PV_ID" "$RL_COMMIT" "$PV_NEW" "$RL_AT" "$RL_CELLS"; then
+    if ! line_settle "$PV_PLAN" "$PV_ID" "$RL_COMMIT" "$PV_NEW" "$RL_AT"; then
       die "REFUSED — what the landing of $PV_ID settles cannot be written into the plan's copy; the plan is unchanged."
       exit 1
     fi
@@ -995,8 +995,7 @@ hand_holds_verb() {
     [ -z "$RL_WALK" ] || say "row-landed — $PV_ID registered its walk at ${WALK_HEAD:0:12}: $(walk_said "$RL_WALK")"
     line_settled "$PV_PLAN" "$PV_REPO" "$PV_ID" "$RL_COMMIT"
     [ -z "$LINE_SETTLED_F" ] || say "row-landed — $PV_ID settled the findings $LINE_SETTLED_F: fixed by its landing, their asks closed."
-    [ -z "$LINE_SETTLED_C" ] || say "row-landed — $PV_ID settled the matrix status of $LINE_SETTLED_C: discharged by its landing."
-    # A HAND LANDING IS RECORDED (wave-39 T10; D14, AC-6.2). The landing record gains the line the line's own hand
+    # A HAND LANDING IS RECORDED. The run's log gains the line the line's own hand
     # landing writes (lib/line.sh `line_publish`, field for field), at the landing's instant, so landing-report's
     # Landings list the row and `--hand-holds` counts it; a hand-marked landing used to reach the plan alone. Once:
     # the line's `land --by-hand` writes its published line before it runs this verb, and a run again of the same
@@ -1015,16 +1014,16 @@ hand_holds_verb() {
         if [ -n "$RL_SUITES" ]; then
           if ! _line_hand_ready "$PV_PLAN" "$PV_ID" "$RL_COMMIT" "${RL_BRANCH:--}" "${RL_TREE:--}" "$RL_SUITES" >/dev/null \
              || ! _line_hand_verdicts "$PV_PLAN" "$PV_ID" "$RL_GREEN" "$RL_SUITES" "$RL_VLOG"; then
-            die "REFUSED — the plan records $PV_ID landed by hand, but the landing record $RL_REC cannot take the suites' ready and verdict lines${LINE_UNWRITTEN:+ (the verdict for $LINE_UNWRITTEN)}; make it writable and run the same row-landed again."
+            die "REFUSED — the plan records $PV_ID landed by hand, but the run's log ${RL_REC%/*}/run.log cannot take the suites' ready and verdict lines${LINE_UNWRITTEN:+ (the verdict for $LINE_UNWRITTEN)}; make it writable and run the same row-landed again."
             exit 1
           fi
-          say "row-landed — $PV_ID: ev=ready and a green verdict for each of $RL_SUITES at ${RL_GREEN:0:12} written to $RL_REC"
+          say "row-landed — $PV_ID: ev=ready and a green verdict for each of $RL_SUITES at ${RL_GREEN:0:12} written to ${RL_REC%/*}/run.log"
         fi
-        if ! _wt_proofs_put "$RL_REC" "line/v1|ev=published|row=${PV_ID}|commit=${RL_COMMIT}|kind=hand|by=${RL_BY}|why=${RL_WHY}|at=${RL_AT}"; then
-          die "REFUSED — the plan records $PV_ID landed by hand, but the landing record $RL_REC cannot take its published line; make it writable and run the same row-landed again."
+        if ! line_event "$PV_PLAN" published "row=${PV_ID}" "commit=${RL_COMMIT}" kind=hand "by=${RL_BY}" "why=${RL_WHY}" >/dev/null; then
+          die "REFUSED — the plan records $PV_ID landed by hand, but the run's log ${RL_REC%/*}/run.log cannot take its published line; make it writable and run the same row-landed again."
           exit 1
         fi
-        say "row-landed — $PV_ID landed by hand: ev=published kind=hand written to $RL_REC"
+        say "row-landed — $PV_ID landed by hand: ev=published kind=hand written to ${RL_REC%/*}/run.log"
       fi
     fi
     say "evidence: $RL_N cell(s) written by landing"
@@ -1071,8 +1070,9 @@ part_target() {
   [ -n "$PT_HEAD" ] || PT_SAID="the plan's working-branch ${wb:-(none named)} names no commit in $root"
   co="$(worktree_checkout_of "$root" "$wb")" && PT_TREE="$co" || PT_TREE="$root"
 }
-# part_land <ev> <part> <message> <reflog words> <tmp dir holding new> -> the rendered file committed on PT_BRANCH at
-# PT_HEAD, the branch moved in the checkout holding it, and the landing record naming the commit, branch and tree.
+# part_land <kind> <part> <message> <reflog words> <tmp dir holding new> -> the rendered file committed on PT_BRANCH at
+# PT_HEAD, the branch moved in the checkout holding it, and the run's log naming the commit, branch and tree in a
+# `published` line with the part and the row that published it as by=. It carries no row=: a part is no row's landing.
 # <tmp dir> is removed. Every refusal exits, nothing moved before the move refuses.
 part_land() {
   local why
@@ -1088,8 +1088,8 @@ part_land() {
     die "REFUSED — $PT_BRANCH could not be moved from ${PT_HEAD:0:12} to ${LINE_RV_COMMIT:0:12}; nothing was published."
     exit 2
   fi
-  if ! line_event "$PV_PLAN" "$1" "row=$PV_ID" "part=$2" "commit=$LINE_RV_COMMIT" "branch=$PT_BRANCH" "tree=$PT_TREE"; then
-    die "REFUSED — $PT_BRANCH moved to ${LINE_RV_COMMIT:0:12}, and the landing record could not be written: append ev=$1|row=$PV_ID|part=$2|commit=$LINE_RV_COMMIT|branch=$PT_BRANCH|tree=$PT_TREE to $(line_record "$PV_PLAN" 2>/dev/null || printf 'the record')."
+  if ! line_event "$PV_PLAN" published "part=$2" "commit=$LINE_RV_COMMIT" "branch=$PT_BRANCH" "tree=$PT_TREE" "by=$PV_ID"; then
+    die "REFUSED — $PT_BRANCH moved to ${LINE_RV_COMMIT:0:12}, and the run's log could not be written: append ev=published|part=$2|commit=$LINE_RV_COMMIT|branch=$PT_BRANCH|tree=$PT_TREE|by=$PV_ID to $(line_log "$PV_PLAN" 2>/dev/null || printf 'the log')."
     exit 1
   fi
 }

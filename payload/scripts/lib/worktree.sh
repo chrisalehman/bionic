@@ -1226,16 +1226,15 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
   # output on stderr. With no key nothing runs and nothing prints.
   _wt_release_check "$root" "$plan" "$onto_head" "$head" "$wt_abs" "$branch" "$onto" || return 2
 
-  # THE LANDING RECORD IS PROVED WRITABLE BEFORE THE MERGE (wave-27 T44; D15). With a bound plan,
-  # the run's `landing-proofs.log` is proved writable here, and created by nothing but the append
-  # (wave-27 T69); a record that cannot be written is refused with nothing changed: a path that is a
-  # symlink, a FIFO, a device or a directory is refused unopened (wave-27 T50, N1 N2;
-  # `_wt_proofs_prove`). The row is the plan's `## Tasks` row
-  # whose `worktree` cell names this tree. Both are written once the merge is made
-  # (_wt_proofs_append, below).
+  # THE RUN'S LOG IS PROVED WRITABLE BEFORE THE MERGE. With a bound plan, the run's
+  # `run.log`, beside the landing record that nothing writes any more, is proved writable here, and created by
+  # nothing but the append; a log that cannot be written is refused with nothing changed: a path that
+  # is a symlink, a FIFO, a device or a directory is refused unopened (`_wt_proofs_prove`).
+  # The row is the plan's `## Tasks` row whose `worktree` cell names this tree. The landing is written once the
+  # merge is made (its `published` event, below).
   proofs="none"; proofs_row=""
   if [ -n "$plan" ]; then
-    proofs="$(_wt_proofs_path "$root" "$plan")" && _wt_proofs_prove "$proofs" || {
+    proofs="$(_wt_proofs_path "$root" "$plan")" && proofs="${proofs%/*}/run.log" && _wt_proofs_prove "$proofs" || {
       _wt_refuse "record-unwritable why=proofs-unwritable path=${proofs:-<none>} branch=${branch} — the landing record cannot be written, so nothing is merged; make it writable, land again"; return 2
     }
     proofs_row="$(_wt_proofs_row "$root" "$plan" "$wt_abs")"
@@ -1279,7 +1278,7 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
       _wt_refuse "debt-unwritten why=no-bound-plan suite=${landed_red} branch=${branch} — a declared red lands only with its debt written to the run's landing record, and this landing has no bound plan, so nothing is merged; land from the session bound to the run"; return 2
     fi
     debt_id="$$.${RANDOM}${RANDOM}"
-    if ! _wt_debt_write "$proofs" "$debt_id" "$proofs_row" "$branch" "$head" "$landed_red" "${lands_red#* until }" "$landed_at"; then
+    if ! _wt_debt_write "$proofs" "$debt_id" "$proofs_row" "$branch" "$head" "$landed_red" "${lands_red#* until }"; then
       _wt_refuse "debt-unwritten why=proofs-unwritable suite=${landed_red} path=${proofs} branch=${branch} — the declared red's debt cannot be written to the landing record (${_WT_PROOFS_SAW:-the append failed}), so nothing is merged; make it writable, land again"; return 2
     fi
   fi
@@ -1372,14 +1371,15 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
     _wt_refuse "${moved} merge=${merge_sha:-<none>} undo=failed — $(_wt_undo_failed_fix "$co" "$undo_on" "$merge_sha" "$parent"), then ${fix}"; return 2
   fi
 
-  # THE LANDING KEEPS THE PROOF IT READ (wave-27 T44; D15): the header and the stamp lines judged
-  # at <head>, appended before the tree and its stamps go. The merge is not undone if the append
-  # fails; the tree is kept instead, so its stamp file still holds the proof.
+  # THE LANDING IS ONE `published` EVENT: the row, the merge, the branch and the head judged, appended before
+  # the tree goes. It carries no kind, as the `landed:` header it replaces carried none. The stamp lines judged at
+  # <head> are copies of the run lines the booked runs already wrote, so they are not copied again. The merge is
+  # not undone if the append fails; the tree is kept instead, so its stamp file still holds the proof.
   # ONE INSTANT FOR THE LANDING (wave-27 T31; A-orch-85): the record's `at=` and, for a declared
   # red, the `landed-red-at=` its debt line carries (wave-27 T67: taken when the debt was written).
   landed_at="${landed_at:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
   red_said=""; [ -z "$landed_red" ] || red_said=" landed-red=${landed_red} landed-red-at=${landed_at}"
-  if [ "$proofs" != none ] && ! _wt_proofs_append "$proofs" "$proofs_row" "$branch" "$head" "$merge_sha" "$judged" "$landed_at"; then
+  if [ "$proofs" != none ] && ! _wt_log_put "$proofs" published "row=${proofs_row:-—}" "commit=${merge_sha}" "branch=${branch}" "head=${head}"; then
     _wt_say "LANDED branch=${branch} onto=${onto} checkout=${co} merge=${merge_sha} kept=${wt_abs}${red_said} proofs=unwritten — ${proofs} could not be appended after the merge (${_WT_PROOFS_SAW:-the append failed}), so the tree and its stamp file are kept; append the landing to it by hand, then remove the tree"
     return 0
   fi
@@ -1401,11 +1401,10 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
 }
 
 # THE LANDING RECORD (wave-27 T44; D15; the Interfaces row "landing record").
-# `<docs-root>/record/<the bound plan's name less .plan.md>/landing-proofs.log`, appended, never
-# rewritten: one header line per landing, `landed: row=<id|—> branch=<b> head=<40-hex>
-# merge=<40-hex> at=<ISO-UTC>`, then the stamp lines `_wt_stale_proof` judged at <head>, as the
-# stamp file holds them. A row's landing is the `merge=` of the last header carrying its `row=`
-# (the tick reads it, T43). The path is derived as fill_ledger_path (lib/patrol.sh) derives its
+# `<docs-root>/record/<the bound plan's name less .plan.md>/landing-proofs.log`, which nothing writes
+# any more: a run's earlier landings stand in it, one `landed: row=<id|—> branch=<b> head=<40-hex>
+# merge=<40-hex> at=<ISO-UTC>` header per landing, read with the run's log beside it (lib/line.sh
+# `line_lines`), where each landing is now a `published` event. The path is derived as fill_ledger_path (lib/patrol.sh) derives its
 # own, in the project's docs tree, never in the tree being removed. The slug is lib/proof.sh `proof_plan_slug`'s, the
 # one reader (wave-37 T2; AC-9.2), loaded on first use as units.sh and slots.sh are here.
 _wt_proof_load() {  # -> 0 once lib/proof.sh's slug reader is loaded
@@ -1522,12 +1521,21 @@ _wt_proofs_cut() {  # <record path> -> 0 cut, 1 not
   return 1
 }
 
-_wt_proofs_append() {  # <file> <row> <branch> <head> <merge> <judged lines> [<at>]
-  local block
-  block="landed: row=${2:-—} branch=${3} head=${4} merge=${5} at=${7:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
-  [ -z "${6:-}" ] || block="${block}
-${6}"
-  _wt_proofs_write "$1" "$block"
+# A LANDING'S FACT GOES TO THE RUN'S LOG: `run.log` beside <record or log path>, through the log's one appender
+# (lib/log.sh `log_append`, whose write is `_wt_proofs_write`), and never to the landing record. RUN_LOG is set for
+# this one call and never exported, since the poker's globals use the name for a suite's output log.
+_wt_log_put() {  # <record or log path> <event type> <key=value>... -> 0 appended, 1 not (proofs=unwritten)
+  local log="${1%/*}/run.log"
+  shift
+  _WT_PROOFS_SAW=""
+  if ! declare -F log_append >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/log.sh" 2>/dev/null && declare -F log_append >/dev/null 2>&1 \
+      || { _WT_PROOFS_SAW="lib/log.sh could not be loaded"; return 1; }
+  fi
+  RUN_LOG="$log" log_append "$@" && return 0
+  _WT_PROOFS_SAW="${_WT_PROOFS_SAW:-the appender of the log refused the line}"
+  return 1
 }
 
 # The one write itself, for a landing's block and for the debt's lines alike (wave-27 T67): <text>
@@ -1559,19 +1567,19 @@ _wt_proofs_write() {  # <file> <text> -> 0 appended, 1 not (the proofs=unwritten
 }
 
 # THE DEBT'S ONE WRITER (wave-27 T67; review pass 46 B3; A-orch-120). A declared red is owed because
-# `land`, or since wave-28 T5 `line_publish` (lib/line.sh), wrote it here, never because a line was
-# copied into the plan: the judge (lib/proof.sh `proof_debts`) reads these lines and nothing else.
-#   debt: id=<id> row=<row|—> branch=<b> head=<40-hex> suite=<suite> token=<token> at=<ISO-UTC>
-#   void: id=<id> branch=<b> at=<ISO-UTC> why=<merge-failed|merge-undone|publish-failed>
-# Each is one whole line, appended by the one write a landing's block is appended by
-# (`_wt_proofs_write`), with no lock: a line that cannot be written is the append answering
-# `proofs=unwritten`. A debt is written before the merge (the line's fast-forward); a void names the
-# debt of a landing whose merge or fast-forward failed, or was undone.
-_wt_debt_write() {  # <record> <id> <row> <branch> <head> <suite> <token> <at> -> 0 written, 1 not
-  _wt_proofs_put "$1" "debt: id=${2} row=${3:-—} branch=${4} head=${5} suite=${6} token=${7} at=${8}"
+# `land`, or `line_publish` (lib/line.sh), wrote it to the run's log, never because a line was
+# copied into the plan: the judge (lib/proof.sh `proof_debts`) reads these events, and an older run's `debt:` and
+# `void:` lines of its landing record, and nothing else.
+#   run/v1|ev=admitted|id=<id>|row=<row|—>|branch=<b>|head=<40-hex>|suite=<suite>|token=<token>|at=<ISO-UTC>
+#   run/v1|ev=void|id=<id>|branch=<b>|why=<merge-failed|merge-undone|publish-failed>|at=<ISO-UTC>
+# The instant is the appender's, the moment the debt is written, before the merge (the line's fast-forward); a
+# green run after it covers the debt. A line that cannot be written is the append answering `proofs=unwritten`. A
+# void names the debt of a landing whose merge or fast-forward failed, or was undone.
+_wt_debt_write() {  # <record or log> <id> <row> <branch> <head> <suite> <token> -> 0 written, 1 not
+  _wt_log_put "$1" admitted "id=${2}" "row=${3:-—}" "branch=${4}" "head=${5}" "suite=${6}" "token=${7}"
 }
-_wt_debt_void() {  # <record> <id> <branch> <why> -> 0 written, 1 not
-  _wt_proofs_put "$1" "void: id=${2} branch=${3} at=$(date -u +%Y-%m-%dT%H:%M:%SZ) why=${4}"
+_wt_debt_void() {  # <record or log> <id> <branch> <why> -> 0 written, 1 not
+  _wt_log_put "$1" void "id=${2}" "branch=${3}" "why=${4}"
 }
 _wt_proofs_put() {  # <record> <line> -> 0 appended, 1 not (proofs=unwritten)
   [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
@@ -1728,7 +1736,7 @@ _wt_tree_remove() {  # <tree abs> <root>
 # THE HAND LANDING'S LAST ACT (wave-28 T3, D9): as land ended its lease, the writer's tree goes once
 # its row is published, and land's LANDED line says so. (A queue landing's tree goes at the stop:
 # `worktree_remove_landed`, from `stop-orders.sh stopped`; wave-28 T6.)
-_wt_hand_remove() {  # <tree abs> <root> <branch> <onto> <checkout> <published> <record>
+_wt_hand_remove() {  # <tree abs> <root> <branch> <onto> <checkout> <published> <the run log it was written to>
   local wt="$1"
   _wt_tree_remove "$wt" "$2" || { _wt_refuse "worktree-remove-refused path=${wt} merged=${6}"; return 2; }
   _wt_say "LANDED branch=${3} onto=${4} checkout=${5} merge=${6} removed=${wt} proofs=${7}"

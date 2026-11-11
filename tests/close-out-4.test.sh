@@ -784,14 +784,14 @@ expect_eq "RV-8 the commit is close-out's own, on the release head" "bionic clos
 expect_eq "RV-9 …and touches CHANGELOG.md alone" "CHANGELOG.md" "$(fixture_git "$PRV" diff --name-only "$RV_H2" "$RV_TIP")"
 expect_eq "RV-10 the checkout holding the branch is at the commit, its file the committed one" "$RV_TIP|$RV_GOT" \
   "$(fixture_git "$PRV-wave" rev-parse HEAD)|$(cat "$PRV-wave/CHANGELOG.md")"
-RV_EV="$(/usr/bin/grep '^line/v1|ev=close-out|' "$PRV/.bionic/docs/record/wave-01-fixture/landing-proofs.log" 2>/dev/null)"
-expect_contains "RV-11 the landing record names the commit as close-out's" \
-  "line/v1|ev=close-out|part=reviews|commit=$RV_TIP|branch=wave/01-fixture|at=" "$RV_EV"
+RV_EV="$(/usr/bin/grep '^run/v1|ev=published|part=reviews|' "$PRV/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null)"
+expect_contains "RV-11 the run's log names the commit as close-out's part, with no row" \
+  "run/v1|ev=published|part=reviews|commit=$RV_TIP|branch=wave/01-fixture|by=close-out|at=" "$RV_EV"
 expect_contains "RV-12 run's reviews line names the commit" "$(printf '%.12s' "$RV_TIP")" \
   "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^reviews: ')"
 expect_eq "RV-17 control: the plan has no integrate row, so no pull request came first and close-out is the part's one writer" \
-  "0|1|ev=close-out" \
-  "$(/usr/bin/grep -c '^| T[0-9]* | [0-9]* | integrate |' "$PRV/$PLAN_REL")|$(/usr/bin/grep -c '|part=reviews|' "$PRV/.bionic/docs/record/wave-01-fixture/landing-proofs.log" 2>/dev/null)|$(/usr/bin/grep '|part=reviews|' "$PRV/.bionic/docs/record/wave-01-fixture/landing-proofs.log" 2>/dev/null | awk -F'|' '{ print $2 }')"
+  "0|1|by=close-out" \
+  "$(/usr/bin/grep -c '^| T[0-9]* | [0-9]* | integrate |' "$PRV/$PLAN_REL")|$(/usr/bin/grep -c '|part=reviews|' "$PRV/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null)|$(/usr/bin/grep '|part=reviews|' "$PRV/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null | sed 's/.*|\(by=[^|]*\)|.*/\1/')"
 # an entry with no part gets one, before ### Known limits
 PRA="$(rv_fixture reviews-added no)"
 plant_facts "$PRA"
@@ -862,9 +862,9 @@ BP_PART="$(fixture_git "$PBP" show "$BP_TIP:CHANGELOG.md" 2>/dev/null | rv_part 
 expect_eq "BP-4 …one bullet per review line of the plan, under the part's heading" \
   "### The reviews|$(/usr/bin/grep -c '^proved: kind=review ' "$PBP/$PLAN_REL")" \
   "$(printf '%s\n' "$BP_PART" | sed -n 1p)|$(printf '%s\n' "$BP_PART" | /usr/bin/grep -c '^- ')"
-expect_contains "BP-5 the landing record names the commit as the integrate row's" \
-  "line/v1|ev=integrate|row=T3|part=reviews|commit=$BP_TIP|branch=wave/01-fixture|tree=$(cd "$PBP-wave" && pwd -P)|at=" \
-  "$(/usr/bin/grep '^line/v1|ev=integrate|' "$BP_REC/landing-proofs.log" 2>/dev/null)"
+expect_contains "BP-5 the run's log names the commit as the integrate row's part, with no row" \
+  "run/v1|ev=published|part=reviews|commit=$BP_TIP|branch=wave/01-fixture|tree=$(cd "$PBP-wave" && pwd -P)|by=T3|at=" \
+  "$(/usr/bin/grep '^run/v1|ev=published|part=reviews|' "$BP_REC/run.log" 2>/dev/null)"
 expect_eq "BP-6 the checkout holding the branch is at the commit" "$BP_TIP" "$(fixture_git "$PBP-wave" rev-parse HEAD)"
 lands_poker "$PBP" "$BP_SID" reviews-part T3
 expect_eq "BP-7 a second reviews-part finds the part listed: exit 0, no commit" "0|$BP_TIP" "$LP_RC|$(rv_tip "$PBP")"
@@ -884,9 +884,9 @@ expect_eq "BP-11b …byte for byte the part the branch holds" "$BP_PART" "$BP_MA
 run_close_as "$BP_SID" "$PBP" run
 expect_eq "BP-12 close-out closes the run (rc 0) and says the part is already listed" "0|yes" \
   "$CO_RC|$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^reviews: ' | /usr/bin/grep -q 'already lists' && echo yes)"
-BP_PARTS="$(/usr/bin/grep '|part=reviews|' "$BP_REC/landing-proofs.log" 2>/dev/null)"
-expect_eq "BP-13 the record names one writer of the part, the integrate row (read beside close-out's absence)" "1|ev=integrate" \
-  "$(printf '%s\n' "$BP_PARTS" | /usr/bin/grep -c .)|$(printf '%s\n' "$BP_PARTS" | awk -F'|' '{ print $2 }')"
+BP_PARTS="$(/usr/bin/grep '|part=reviews|' "$BP_REC/run.log" 2>/dev/null)"
+expect_eq "BP-13 the log names one writer of the part, the integrate row (read beside close-out's absence)" "1|by=T3" \
+  "$(printf '%s\n' "$BP_PARTS" | /usr/bin/grep -c .)|$(printf '%s\n' "$BP_PARTS" | sed 's/.*|\(by=[^|]*\)|.*/\1/')"
 expect_eq "BP-14 …and close-out made no commit: the branch is at the integrate row's" "$BP_TIP" "$(rv_tip "$PBP")"
 
 # ============================================================

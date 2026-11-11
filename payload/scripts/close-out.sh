@@ -851,7 +851,7 @@ co_reviews_publish() {  # -> the branch at CO_RV_COMMIT and its close-out event 
     CO_RV_LINE="not published — $WORKING could not be moved from ${CO_RV_BASE:0:12} to ${CO_RV_COMMIT:0:12}"
     return 1
   fi
-  line_event "$PLAN" close-out part=reviews "commit=$CO_RV_COMMIT" "branch=$WORKING" && return 0
+  line_event "$PLAN" published part=reviews "commit=$CO_RV_COMMIT" "branch=$WORKING" by=close-out && return 0
   CO_RV_LINE="$WORKING moved to ${CO_RV_COMMIT:0:12}, and the landing record could not be written: append ev=close-out|part=reviews|commit=$CO_RV_COMMIT|branch=$WORKING to $(line_record "$PLAN" 2>/dev/null || printf 'the record')"
   return 1
 }
