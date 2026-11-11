@@ -182,6 +182,20 @@ line_event() {  # <plan> <ev> <key=value>... -> 0 appended, 1 not
   fi
   RUN_LOG="$log" log_append "$ev" "$@" || return 1
 }
+# AN ACT TAKEN BY HAND SAYS WHAT IT WAS AND WHY: every hand event is written here, and one with no reason (empty, blank,
+# or the dash an older writer put for none) is refused with nothing written, so each act the hands question answers
+# names what the interface lacked. A reason is free text: a bar or a line break in it is folded to a space.
+line_hand_event() {  # <plan> <what> <why> [<key=value>...] -> 0 appended, 1 not written, 2 refused: no what or no why
+  local plan="${1:-}" what="${2:-}" why="${3:-}" w
+  w="$(printf '%s' "$why" | tr '|\r\n\t' '    ')"
+  case "$w" in *[![:space:]]*) ;; *) w="" ;; esac
+  if [ -z "$what" ] || [ -z "$w" ] || [ "$w" = - ]; then
+    printf 'line: REFUSED — a hand event names what was done and why; %s carries no reason, so nothing is written\n' "${what:-the act}" >&2
+    return 2
+  fi
+  shift 3
+  line_event "$plan" hand "what=$what" "$@" "why=$w"
+}
 
 # THE RECORD, READ AS ONE. A run's landing facts stand in two homes while their writers move to the run's log: the
 # landing record (`landing-proofs.log`) and the log beside it in the record directory (`run.log`). Once a writer writes

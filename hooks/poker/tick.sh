@@ -2597,7 +2597,7 @@ EOF
     # (docs/adrs/adr-077-the-gate-steers-by-the-load.md), and until they end the reading still carries their load, so
     # no second writer is stood down for it (`tick_load_held`).
     tick_load_standdown() {
-      local b5 lim id name row la best="" best_id="" best_la="" out open held SR_WHY="stood down for the load" SR_REPORT_ONLY=no
+      local b5 lim id name row la best="" best_id="" best_la="" out open held SR_WHY="stood down for the load" SR_MACHINE=tick SR_REPORT_ONLY=no
       [ "${SCHED_GATE_ROOM:-}" = no ] && declare -F _gate_share_cores >/dev/null 2>&1 || return 0
       [ -n "${SCHED_PLAN:-}" ] && [ -f "$SCHED_PLAN" ] && [ "$POKER_RUN_OPEN" != unreadable ] || return 0
       b5="${SCHED_GATE_LOAD#*/}"

@@ -75,9 +75,8 @@ require_helpers ok no expect_status expect_contains expect_absent expect_empty e
 #     to .bionic/docs/record/w3-slice1-posttooluse-probe.md capture E (an
 #     Agent-tool payload captured live at CLI 2.1.222): tool_input carries
 #     description, prompt, subagent_type, run_in_background, and — when the
-#     dispatch names one — name. The earlier note here ("SHAPE-ONLY, no
-#     verbatim Agent capture exists") described the pre-probe state and is
-#     superseded. tool_input became load-bearing in task 4/3: the roster row
+#     dispatch names one — name.
+#     tool_input is load-bearing: the roster row
 #     is lifted from it.
 #   * tool_input.model — SHAPE-EXTRAPOLATED and declared: the Agent tool
 #     accepts a `model` override, but no captured payload carries one (every
@@ -87,8 +86,7 @@ require_helpers ok no expect_status expect_contains expect_absent expect_empty e
 #   * dispatch brief text (BRIEF_FULL / the compact variant) — SYNTHESIZED,
 #     but its LABEL GRAMMAR is the shipped one: skills/canonical-sdlc/SKILL.md
 #     §Dispatch's seven-field sentence (span-pinned by
-#     tests/dispatch-spans.test.sh §5d — that suite was deleted in an earlier
-#     purge, commit b959b5e, and nothing replaced the span pin) and the
+#     no suite) and the
 #     exemplar brief recorded verbatim at .bionic/docs/record/w2-ac3-run.md:25-40.
 #   * attestation record — FAITHFUL to hooks/preflight-probe.sh's own
 #     schema/comment block: `# comment` + `key=value` lines, read BY KEY

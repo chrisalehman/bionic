@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/loader.test.sh — the one loader idiom (bionic 1.4.0, wave-bionic-1.4.0-update
-# task L-LOADER, spec AC-16, plan §L-LOADER; design ledger S4; R-1 §(4) and §(5)).
+# tests/loader.test.sh — the one loader idiom.
 #
 # WHAT IS UNDER TEST. payload/scripts/lib/loader.sh carries the canonical idiom text
 # between the exact marker lines `# --- bionic-loader/v2 BEGIN` and

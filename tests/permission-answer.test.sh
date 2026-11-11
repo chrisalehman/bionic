@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/permission-answer.test.sh — hooks/permission-answer.sh, THE CARRIER (epic-23
-# wave-25-never-paused, REQ-1, REQ-2, REQ-3, REQ-5, REQ-6, REQ-7; spec D1, D8, D9, D10).
+# tests/permission-answer.test.sh — hooks/permission-answer.sh, THE CARRIER.
 #
 # WHAT IT OWNS. The one hook that answers the platform's permission question for an engaged
 # run. It is registered on PermissionRequest only, collects the facts (who asked, which

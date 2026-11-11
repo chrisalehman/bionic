@@ -325,8 +325,8 @@ reader_q_order() {  # <plan> -> order=given with the standing order's words and 
 
 reader_question hands list reader_q_hands
 reader_q_hands() {  # <plan> -> each act taken by hand: a hand event, or a landing made by hand
-  # A roster act (an amend, a hold, an extension, an adoption) is session-only until its writer writes a
-  # hand event, and a version-14 kind no ruled type carries is a gap of the translation, not a fact here.
+  # Every hand event is written by the line library's one writer with its reason; a waiver is its own type, not
+  # answered here, and a version-14 kind no ruled type carries is a gap of the translation, not a fact here.
   reader_facts "$1" | awk -F'|' "$_READER_AWK"'
     ev() == "hand" || ev() == "published" && line_kv("kind") == "hand"'
 }

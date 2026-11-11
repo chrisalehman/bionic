@@ -62,10 +62,7 @@
 # NEW kind (a github-skill, a marketplace plugin) needs a new arm in the shim
 # block — that is the one place this suite has to be extended by hand.
 #
-# REVIVED AND RAISED, epic-18 wave-03 (Chris D2, 2026-08-23). This suite was
-# deleted with eighteen others on the reliability ruling — "if the tests cannot
-# be made to fail, then the tests are no good" — and brought back on the
-# condition that it be fixed in the same act. Three things changed. The rows that
+# The rows that
 # pinned a REPORT'S WORDING were rewritten to read a row's state marker, or
 # deleted where the claim was already carried by a claim about bytes. Every
 # negative now has a positive on the same extractor and the same fixture, and no
