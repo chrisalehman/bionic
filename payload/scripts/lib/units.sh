@@ -242,6 +242,14 @@ _units_proofs() {
   proof_lines "${1:-}"
 }
 
+# _units_fold <plan> -> the run's facts folded once in this shell (lib/proof.sh `_proof_facts`, a copy read as its plan),
+# so the row states and the proofs read after it in subshells are served from this shell's fold, not each from the kept
+# file; 0 with nothing to fold, 2 a failed fold
+_units_fold() {
+  _units_lib proof.sh proof_run_plan || return 0
+  _proof_facts "$(proof_run_plan "${1:-}")" >/dev/null || return 2
+}
+
 # _units_overlay <live> <rows> -> the rows, each moved row's status and agent the run's
 _units_overlay() {
   [ -n "$1" ] || { printf '%s\n' "$2"; return 0; }
@@ -318,6 +326,7 @@ units_memoised() {  # <plan> <command> [args...]
   local _UNITS_MEMO_WAITS="${TMPDIR:-/tmp}/bionic-units-waits-$$-${RANDOM}${RANDOM}"
   local _UNITS_MEMO_LIVE="" _UNITS_MEMO_LIVE_RC="" _UNITS_MEMO_PROOFS="" _UNITS_MEMO_PROOFS_RC=""
   _UNITS_MEMO_OUT="$(_units_read "${1:-}")"; _UNITS_MEMO_RC=$?
+  _units_fold "${1:-}"
   _UNITS_MEMO_LIVE="$(_units_live "${1:-}")"; _UNITS_MEMO_LIVE_RC=$?
   _UNITS_MEMO_PROOFS="$(_units_proofs "${1:-}")"; _UNITS_MEMO_PROOFS_RC=$?
   _UNITS_MEMO_PLAN="${1:-}"
@@ -1114,6 +1123,7 @@ _units_sched() {
   out="$(_units_table "$plan")" || return 1
   case "$out" in *$'\n'*) rows="${out#*$'\n'}" ;; *) rows="" ;; esac
   [ -n "$rows" ] || return 0
+  _units_fold "$plan" || return 2
   live="$(_units_live "$plan")" || return 2
   proofs="$(_units_proofs "$plan")" || return 2
   rows="$(_units_overlay "$live" "$rows")"
