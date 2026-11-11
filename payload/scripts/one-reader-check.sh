@@ -4,14 +4,15 @@
 #   bash one-reader-check.sh [<root>]      <root> defaults to the checkout this script sits in
 #
 # It reads every `*.sh` file under <root>/hooks and <root>/payload/scripts (symlinks not followed) and
-# prints one finding per line, `<kind>TAB<where>TAB<detail>`, then the five counts, one `key=value`
-# line each and always in this order, as the last five lines:
+# prints one finding per line, `<kind>TAB<where>TAB<detail>`, then the six counts, one `key=value`
+# line each and always in this order, as the last six lines:
 #
 #   parsers=<n>        files that parse a plan or a log, outside the reader's own files
 #   plan_writers=<n>   files that write a plan
 #   shared_types=<n>   event types appended by two or more functions
 #   hook_refusals=<n>  refusal call sites inside a registered hook's own file
 #   loader_copies=<n>  files holding a pasted copy of the loader block
+#   unheard_folds=<n>  lines that take the run's fold or a reader answer and lose its exit
 #
 # It reports and refuses nothing: exit 0 whatever it finds, 2 when <root> holds no hooks/ and
 # payload/scripts/. A comment line is never a parse, a write or a refusal; the loader's BEGIN marker
@@ -36,6 +37,10 @@
 #   - A REFUSAL is a refusal primitive called with its words (`refuse exit2|deny|block`, `fold_block`,
 #     `dp_finding`, `patrol_deny`, `dp_not_checked`, `deny`, `block`) in a file hooks/hooks.json runs.
 #   - A LOADER COPY is a file other than lib/loader.sh with the loader block's BEGIN marker.
+#   - AN UNHEARD FOLD is a line outside lib/proof.sh and the reader's files that calls _proof_facts,
+#     _proof_ask, reader_main, reader_facts, reader_events or the reader program and pipes it, feeds a
+#     process substitution, assigns it to a local, or takes it in a $( ) whose exit no `||`, `&&`,
+#     `=$?` or `if` reads on that line: a fold that failed would read there as a run with no fact.
 #
 # THE READER'S FILES are named once, in READER_FILES: a parse inside one of them is the reader's own
 # and is admitted. Nothing else is admitted.
