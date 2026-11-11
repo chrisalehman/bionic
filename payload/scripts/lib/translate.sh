@@ -143,7 +143,7 @@ _translate_section() {  # <plan> <heading> -> the lines under `## <heading>`, to
 
 # THE HOMES OF A RUN'S PLACE: the only sources that write a step, an approval or an abandon. A run's step, its state and
 # its approvals are read from these alone (lib/proof.sh `proof_step_held`), so a source that comes to write one of the
-# three joins this list, or that read misses it.
+# three joins this list, or that read misses it; tests/reader.test.sh §HELD compares the two reads and goes red until it does.
 TRANSLATE_PLACE_SOURCES="_translate_state _translate_abandon _translate_log"
 
 translate_source _translate_state

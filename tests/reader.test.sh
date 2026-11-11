@@ -33,6 +33,9 @@
 #               reads the register, then the log, as one list.
 #   §ASK-DOORS  a passing reading closes its question's waiver; the Stop over an approved plan closes the step asks.
 #               A registered proof is one proof event in the run's log, the plan byte for byte as it was.
+#   §HELD       the run's held place answers as the whole fold, over every form of the step's and approval's line
+#               and every plan this suite built: a home that writes one of the three and is not in the place's list
+#               turns it red.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
 
@@ -560,4 +563,35 @@ for a in 0 1; do
 done
 expect_eq "the Stop over a plan with no approved-by: closes no step ask; over one carrying it, all four, the closer named" \
   "0:$SW_KEYS>$SW_KEYS>0 1:$SW_KEYS>>4 " "$SWEPT"
+
+section "HELD"
+i=0; while IFS= read -r f; do i=$((i + 1)); printf '%b' "## SDLC State\n$f\n" > "$D/plans/epic-x/held$i.plan.md"; done <<'EOF'
+current: 4\napproved-by: u 2026-01-01T00:00Z "ok"\n- Step 4: x
+   current :  4\napproved-by: u 2026-01-01T00:00Z "ok"
+current:4\napproved-by:u 2026-01-01T00:00Z "ok"
+current: 4\ncurrent: notastep
+current: 8b\n- Step 8: x
+current: 9\n- Step 8: x\n- Step 9: drafted
+current: 9\napproved-by: u 2026-01-01T00:00Z "ok"\nStep 9:\n  delivered: PR 1
+current: 9\n- Step 8: x
+current: 9\n- Step 9: report, delivered: 2026-01-01
+- Step 3: x\n- Step 4: y
+current: T3
+current: 12
+current: <N>
+current: 4\n- approved-by: u 2026-01-01T00:00Z "ok"
+current: 4\n  approved-by: u 2026-01-01T00:00Z "ok"
+current: 4\napproved-by:
+current: 4\napproved: step3 u 2026-01-01T00:00Z "ok"
+current: 4\r\napproved-by: u 2026-01-01T00:00Z "ok"\r
+current: 4\rapproved-by: u 2026-01-01T00:00Z "ok"\r
+EOF
+# each plan asked of the held place cold and of the whole fold: `<compared> <the plans that disagree>`
+held() { TMPDIR="$(mktemp -d)" bash -c '. "$1/lib/proof.sh"; _proof_reader_load; n=0; bad=""; for p in "$2"/*.plan.md; do n=$((n + 1))
+  w="$(reader_q_step "$p"; if reader_q_approved "$p" step3; then echo approved=1; else echo approved=0; fi)"; [ "$(proof_step_held "$p")" = "$w" ] || bad="$bad ${p##*/}"; done
+  echo "$n$bad"' _ "${READER%/*}" "$D/plans/epic-x"; }
+HELD="$(held)"
+expect_eq "the held place answers as the whole fold on every form and every plan this suite built, nineteen forms among them" \
+  "1|" "$([ "${HELD%% *}" -ge 19 ] && echo 1)|$(printf '%s' "${HELD#* }" | sed 's/^[0-9]*$//')"
+
 finish
