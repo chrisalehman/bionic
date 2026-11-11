@@ -79,7 +79,7 @@ _plan_read_lines() { awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"; }
 # NO APOSTROPHE inside it: it is single-quoted.
 # A section is named by its heading the one way: `## ` and the name, its first letter in either case, going on
 # only after a blank, so `## Design — v2` is the Design section and `## Designer notes` is not. `sec` is the name.
-# What a fence is, said once for every reader of a heading here, so none can end a section at an example's line:
+# What a fence is, said once for every reader and writer of a heading, so none ends a section at an example's line:
 # `fenced(s)` is 1 on a ``` line, which opens or closes the block, and on each line inside one. It keeps the block in
 # `fence`, so a reader calls it on every line, in order, from the file's first.
 _PLAN_READ_FENCE='
@@ -241,7 +241,7 @@ plan_read_waits() {
 # out; a `#` line inside a fenced block is the section's text, never a heading, so a fence neither starts one nor
 # ends one. With <key>: the value of the section's first `<key>: <value>` line. 1 when there is no such section or key,
 # 2 when the plan is not a file. THE RULE IS ONE STRING, so every reader and every writer of a task's section finds
-# the same heading: the act that writes a row's suites into its section takes `heading()` from here.
+# the same heading: the act that writes a row's suites into its section takes `heading()` and `fenced()` from here.
 _PLAN_READ_SECTION='function heading(s) { sub(/^#+[ \t]+/, "", s); sub(/[ \t].*$/, "", s); sub(/[:.,]+$/, "", s); return s }'
 plan_read_section() {
   [ -f "${1:-}" ] || return 2
