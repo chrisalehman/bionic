@@ -27,7 +27,7 @@
 #            discharged from its last reading, with no matrix-set
 #   §LOG     after the replay the record holds run.log, with the fix row's landing in it, and no landing-proofs.log
 #   §CANCEL  reopened at Step 8 by its log, close-out reads the release approved, and not once the log cancels it
-#   §SINGLE  `rehearse single-verify` (door.sh `door_world_single`) stands at current: 5, the build's criterion discharged
+#   §SINGLE  `rehearse single-verify` (door.sh `door_world_single`) stands at current: 5, the build's criterion left pending
 #            by its landing, the critic's evidence review on its own roster row carried into the auditor cell and the
 #            head's auditor-wave: line; its log names the verbs that brought it there and no discharge
 #
@@ -460,7 +460,7 @@ if [ "$SG_RC" = 0 ] && [ -f "$SG_PLAN" ]; then
   expect_eq "SG-3 the run stands at the Verify gate: current: 5, the Step 5 line written" "5|yes" \
     "$(sed -n 's/^current:[[:space:]]*//p' "$SG_PLAN" | head -1)|$(/usr/bin/grep -q '^- Step 5: ' "$SG_PLAN" && echo yes)"
   # The matrix row as the table holds it: status and auditor cells, so the auditor cell is read beside a status.
-  expect_eq "SG-4 the build's criterion is discharged by status, and its auditor cell holds the critic's verdict, the bare token" "discharged|CONFIRMED" \
+  expect_eq "SG-4 the build's criterion is left pending by its landing, and its auditor cell holds the critic's verdict, the bare token" "pending|CONFIRMED" \
     "$(awk -F'|' '$2 ~ /^ *AC-1\.1 *$/ { s = $4; a = $6; gsub(/^ +| +$/, "", s); gsub(/^ +| +$/, "", a); print s "|" a }' "$SG_PLAN")"
   SG_NAMES="$(cr_names < "$SG_DIR/rehearsal.log" | cut -d'|' -f2-)"
   expect_eq "SG-5 the log names the verbs that brought it there" \
