@@ -1082,7 +1082,7 @@ touch "$LL_SIG/o-T1.go"; ll_wait_file "$WORLD_ROOT/o1.out.rc" 300; ll_wait_file 
 O2C="$(ll_field "$(ll_ev "$RO" ready | /usr/bin/grep '|row=T2|')" carrier)"
 expect_eq "(oh1) T2 lands, started again once by its own carrier, and no command is missing" "0 1 0" \
   "$(cat "$WORLD_ROOT/o2.out.rc") $(/usr/bin/grep -c "^restart: .* carrier=${O2C%%:*} " "$WORLD_ROOT/o2.out") $(/usr/bin/grep -c 'command not found' "$WORLD_ROOT/o2.out")"
-expect_eq "(oh2) …each of its events written once" "ready candidate verdict published" "$(/usr/bin/grep '|row=T2|' "$(ll_rec "$RO")" | cut -d'|' -f2 | sed 's/^ev=//' | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "(oh2) …each of its events written once" "ready candidate verdict published" "$(ll_all "$RO" | /usr/bin/grep '|row=T2|' | cut -d'|' -f2 | sed 's/^ev=//' | tr '\n' ' ' | sed 's/ $//')"
 expect_eq "(oh3) T1, whose head never moved under it, lands and never starts again" "0 0" "$(cat "$WORLD_ROOT/o1.out.rc") $(/usr/bin/grep -c '^restart' "$WORLD_ROOT/o1.out")"
 
 # ---------------------------------------------------------------------------
