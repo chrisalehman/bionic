@@ -1150,8 +1150,8 @@ poker_verb_reviews_part() {
 # ---------------------------------------------------------------- the release entry's Known limits, from the deferrals
 #
 # THE ENTRY'S KNOWN LIMITS ARE THE RUN'S DEFERRALS. `known-limits-part <row>` renders the release entry's
-# `### Known limits` from the plan alone: one bullet per open deferral (lib/proof.sh `proof_findings_owed` rating it
-# `defer`), its stated sentence (`deferral_sentence`, unescaped), in the order the plan wrote them. That is the
+# `### Known limits` from the run's deferrals: one bullet per open deferral (lib/proof.sh `proof_findings_owed` rating it
+# `defer`), its stated sentence (lib/proof.sh `proof_finding_stated`, unescaped), in the order the run deferred them. That is the
 # release check's own reading of the deferrals (tests/lib/release-check.sh `lim_check`), so every sentence the check
 # looks for stands in the part it scans. The part replaces the entry's own (its heading to the next heading; a doubled
 # heading is one part), else goes in before `### The landing numbers`, else at the entry's end (lib/line.sh
@@ -1166,15 +1166,19 @@ poker_verb_reviews_part() {
 # alone; it leaves it by the person's push. Nothing records a stated assumption, so the deferrals are the whole part.
 KL_UNSTATED=""
 known_limits_part() {  # <plan> -> the part, heading to its closing blank line; nothing when no deferral is owed.
-  # rc 1, KL_UNSTATED naming it, at the first open deferral that states no sentence.
-  local plan="$1" id s r p t st n=0 body=""
+  # rc 1, KL_UNSTATED naming it, at the first open deferral that states no sentence; rc 2 when the run's facts cannot
+  # be read.
+  local plan="$1" id s r p t st n=0 body="" owed
   KL_UNSTATED=""
+  owed="$(proof_findings_owed "$plan" 2>/dev/null)" || return 2
   while read -r id s r p t; do
     [ "$p" = defer ] || continue
-    st="$(deferral_sentence "$plan" "$id")" || st=""
+    st="$(proof_finding_stated "$plan" "$id")"; [ "$?" -ne 2 ] || return 2
     if [ -z "$st" ] || [ "$st" = - ]; then KL_UNSTATED="$id"; return 1; fi
     body="${body}- ${st}"$'\n'; n=$((n + 1))
-  done < <(proof_findings_owed "$plan" 2>/dev/null)
+  done <<KL_OWED
+$owed
+KL_OWED
   [ "$n" -gt 0 ] || return 0
   printf '### Known limits\n\n%s\n\n%s\n' \
     "Rendered from the plan's deferred findings, each its stated sentence, in the order they were registered." "$body"
@@ -1217,9 +1221,14 @@ poker_verb_known_limits_part() {
     exit 2
   fi
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/known-limits-part.XXXXXX")" || { die "REFUSED — no temporary directory; nothing was rendered."; exit 2; }
-  if ! known_limits_part "$PV_PLAN" > "$tmp/part"; then
+  known_limits_part "$PV_PLAN" > "$tmp/part"; n=$?
+  if [ "$n" -eq 2 ]; then
     rm -rf "$tmp"
-    die "REFUSED — $(clean "$KL_UNSTATED") is deferred with no stated sentence, and the release check refuses a deferral with none: state it, $call finding-stated $(clean "$KL_UNSTATED") '<sentence>', then render again. Nothing was rendered."
+    die "REFUSED — the run's facts could not be read, so its deferrals are not known; nothing was rendered. Run again: $call known-limits-part $PV_ID"
+    exit 2
+  elif [ "$n" -ne 0 ]; then
+    rm -rf "$tmp"
+    die "REFUSED — $(clean "$KL_UNSTATED") is deferred with no stated sentence, and the release check refuses a deferral with none: state it on the person's words, bash ${HOOK_DIR}/session-poker.sh disposition $(clean "$KL_UNSTATED") defer '<their words>' '<why>' '<sentence>', then render again. Nothing was rendered."
     exit 2
   fi
   n="$(/usr/bin/grep -c '^- ' "$tmp/part" | tr -d ' ')"

@@ -19,7 +19,7 @@ set +x +v
 #      found by the walk every reader of a project's runs uses (lib/run.sh `_run_candidates` under
 #      `docs_root` of the project: BIONIC_CHECK_PROJECT when set, else this checkout's top). Every OPEN deferral of that plan (lib/proof.sh
 #      `proof_findings_owed` rating it `defer`, the reader close-out's continuation carries by) that
-#      states its sentence (the ` stated="…"` field `finding-stated` writes, unescaped) must stand
+#      states its sentence (lib/proof.sh `proof_finding_stated`, the move's `stated=` field, unescaped) must stand
 #      under the entry's `### Known limits`, both sides folded by lib/said.sh `said_fold`, the one
 #      fold the sentence was written through. A missing one is ONE line naming the finding and the
 #      sentence, and exit 1. An open deferral rated `defer` that states none, or a `-` for one (the form a
@@ -145,16 +145,6 @@ rel_plans() {  # <version> -> each run plan under DROOT whose frontmatter says `
     [ "$(plan_frontmatter_get "$f" release 2>/dev/null)" = "$1" ] && printf '%s\n' "$f"
   done < <([ -z "$DROOT" ] || _run_candidates "$DROOT" 2>/dev/null)
 }
-# lim_sentence <plan> <record>#<n> -> the stated sentence of the first `deferred:` line of `## SDLC State`
-# naming it, unescaped; nothing when the line states none.
-lim_sentence() {
-  awk -v id="$2" '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && /^deferred:[ \t]/ { split($0, f, /[ \t]+/); if (f[2] == id) { print; exit } }' "$1" \
-    | sed -n 's/^.* stated="\(.*\)"[[:space:]]*$/\1/p' | sed -e 's/\\\(.\)/\1/g'
-}
 lim_check() {  # <version> <changelog text> -> one line per omission, or one known-limits: line; exit 1 on an omission
   local ver="$1" cl="$2" plans plan kl id s r p t st n=0 un=0 bad=0
   rel_load "the Known limits check" || return 2
@@ -169,7 +159,7 @@ lim_check() {  # <version> <changelog text> -> one line per omission, or one kno
     n=0 un=0
     while read -r id s r p t; do
       [ "$p" = defer ] || continue
-      st="$(said_fold "$(lim_sentence "$plan" "$id")")"
+      st="$(said_fold "$(proof_finding_stated "$plan" "$id")")"
       # Before the floor an unstated deferral, or a dash for one, is passed over as the older rule passed it.
       if ! lim_version_at_least "$ver" "$LIM_RULE_FROM"; then
         { [ -z "$st" ] || [ "$st" = - ]; } && continue

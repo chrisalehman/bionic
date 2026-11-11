@@ -1100,7 +1100,7 @@ SD="$(ll_world)"; SD_P="$(ll_plan "$SD")"
 SD_T3="$(sc_spawn "$SD" T3 "$WORLD_SID")"; ll_launch "$SD" T3 a.test.sh
 # Delivered at current 9, as close-out leaves it; T3 is a fix born of a finding of the review the judge reads failing,
 # the one landing a judged run admits (lib/worktree.sh, THE RUN HAS BEEN JUDGED FOR INTEGRATION), in the shape
-# `proof-add review` and `task-add --born` write (tests/asks.test.sh's world at current 8 is the same plant).
+# `proof-add review` and `task-add --born` write.
 SD_H="$(git -C "$SD" rev-parse wave/x)"; SD_B="$(git -C "$SD" rev-parse main)"
 mkdir -p "$SD/.bionic/docs/record/wave-x"
 printf 'reviewed: %s..%s\nquestion: structure\nresult: fail\nscope: piece\n\nfindings: 1\nfinding: 1 S1 off T3.txt:1 the row is wrong\nshown: 1 cat T3.txt\n' \
@@ -1143,7 +1143,8 @@ printf '%s|questions=adversarial\n' "$(roster_row_fixture session="$WORLD_SID" n
 HN_PA="$( cd "$HN" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$REPO/hooks/session-poker.sh" proof-add review record/wave-x/rev.md --question adversarial --reader w-rev 2>&1 )"; HN_PARC=$?
 awk '/^- T3: active$/ { print "- T3: active — added by task-add at 2026-10-20T00:00:00Z born: review S1 off of=record/wave-x/rev.md#1"; next } { print }' \
   "$HN_P" > "$HN_P.n" && mv "$HN_P.n" "$HN_P"
-hn_ask() { awk -F'|' '$2 == "key=waive:adversarial" { s = ""; b = ""; for (i = 3; i <= NF; i++) { if ($i ~ /^state=/) s = substr($i, 7); if ($i ~ /^by=/) b = substr($i, 4) }; l = s "|" b } END { print l }' "$HN_RD/asks.state" 2>/dev/null; }
+hn_ask() { bash -c '. "$1/roots.sh" && . "$1/owed.sh" && owed_lines "$2" "$3"' _ "$REPO/payload/scripts/lib" "$HN_P" "$HN" 2>/dev/null \
+  | awk -F'|' '$2 == "key=waive:adversarial" { s = ""; b = ""; for (i = 3; i <= NF; i++) { if ($i ~ /^state=/) s = substr($i, 7); if ($i ~ /^by=/) b = substr($i, 4) }; l = s "|" b } END { print l }'; }
 expect_eq "(hn0) proof-add registers the failing review (exit 0) and its waiver ask is open" "0|open|" "$HN_PARC|$(hn_ask)"
 [ "$HN_PARC" = 0 ] || printf '      proof-add said: %s\n' "$HN_PA"
 HN_C="$(git -C "$HN_T3" rev-parse HEAD)"; printf 'a.test.sh: 1/1 passed\n' > "$HN_RD/T3-green.log"

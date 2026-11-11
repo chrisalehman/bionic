@@ -176,8 +176,8 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
       for (i = 2; i <= NP; i++) if (PK[i] == "at") at = PV[i]; else put(PK[i], PV[i]); emit(at); next }
     /^moved: / { kv(substr($0, 8)); begin("finding", "ref", HEAD); at = ""
       for (i = 1; i <= NP; i++) if (PK[i] == "at") at = PV[i]; else put(PK[i], PV[i]); emit(at); next }
-    /^deferred: / { kv(substr($0, 11)); split(HEAD, w, " "); begin("finding", "ref", w[1]); put("severity", w[2]); put("to", "deferred")
-      put("title", quoted(HEAD)); for (i = 1; i <= NP; i++) put(PK[i], PV[i]); lack("by"); f = w[1]; sub(/#.*/, "", f); if (rev[f] != "") after(rev[f]); emit(""); next }
+    /^deferred: / { s = substr($0, 11); r = index(s, "\"") ? substr(s, index(s, "\"") + length(quoted(s)) + 2) : s; kv(r); split(s, w, " "); begin("finding", "ref", w[1]); put("severity", w[2]); put("reach", w[3]); put("to", "deferred")
+      put("title", quoted(s)); for (i = 1; i <= NP; i++) put(PK[i], PV[i]); lack("by"); f = w[1]; sub(/#.*/, "", f); if (rev[f] != "") after(rev[f]); emit(""); next }
     /^order: / { split(substr($0, 8), w, " "); begin("order", "act", w[1]); put("said", quoted($0)); emit(w[2]); next }
     # current: is where the run stands, as the gate writes it, and the Step lines are its history: a current: other than the
     # last Step line is a step written after them all, so a run taken back reads at the step it went back to.

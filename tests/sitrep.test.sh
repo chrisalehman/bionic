@@ -147,6 +147,7 @@ sr_row() {  # <id> <task> <reads> <size> <status>
 # seeded ask lands where every reader of the run reads it (this world's plan by default).
 SR_OWED_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/owed.sh"
 sr_reg() { bash -c '. "$1" && owed_register "$2" "$3"' _ "$SR_OWED_LIB" "$SR_REPO" "${1:-$SR_PLAN}"; }
+sr_asks() { bash -c '. "$1" && owed_lines "$2" "$3"' _ "$SR_OWED_LIB" "$SR_PLAN" "$SR_REPO" 2>/dev/null; }   # the run's asks as the asks library lists them
 sr_owed() {  # <owed/v1 fields after the schema> [<plan>] -> one line on that run's register (this world's own by default)
   local f; f="$(sr_reg "${2:-$SR_PLAN}")" || return 1
   mkdir -p "${f%/*}"; printf 'owed/v1|%s\n' "$1" >> "$f"
@@ -1577,10 +1578,9 @@ section "§GOAL-MISS: the first landing that misses a goal makes the tick open d
 # ============================================================
 SR_GOALS="fast landings · one-file median under 15m (landing-report --rows)
 handoff · a fresh session continues a no-run handoff (record/reader-test-handoff.md)" SR_APPROVED=none sr_tick_world goal-miss "20 20 20 20"
-SR_REG_F="$(sr_reg)"
 sr_tick
 expect_eq "GM1 four 20-minute one-file landings miss the 15-minute goal: the tick opens decide:goal:fast-landings on the register, and nothing for the goal not measured" \
-  "decide:goal:fast-landings" "$(/usr/bin/grep -oE '\|key=decide:goal:[^|]*\|state=open\|' "$SR_REG_F" 2>/dev/null | cut -d'|' -f2 | sed 's/^key=//' | sr_join)"
+  "decide:goal:fast-landings" "$(/usr/bin/grep -oE '\|key=decide:goal:[^|]*\|state=open\|' <(sr_asks) 2>/dev/null | cut -d'|' -f2 | sed 's/^key=//' | sr_join)"
 expect_eq "GM2 …it is owed: the tick's sitrep line counts it" "owed: 1" \
   "$(/usr/bin/grep '^poker: sitrep ' "$TMPROOT/tick.out" | /usr/bin/grep -oE 'owed: [0-9]+')"
 sr_run "$SR_PLAN"
@@ -1596,7 +1596,7 @@ expect_eq "GM3b both goals met while the decision is still open: the sheet drops
   "approve:release|" "$(sr_lines ask | while IFS= read -r l; do sr_f "$l" key; done | sr_join)|$ERR"
 SR_AT=$((SR_NOW + 60)) sr_tick
 expect_eq "GM4 the goal now met: the tick closes its open decision, and the item stays on the register closed" "1|0" \
-  "$(/usr/bin/grep -c '|key=decide:goal:fast-landings|state=closed|' "$SR_REG_F")|$(/usr/bin/grep -c '|key=decide:goal:fast-landings|state=open|' "$SR_REG_F")"
+  "$(/usr/bin/grep -c '|key=decide:goal:fast-landings|state=closed|' <(sr_asks))|$(/usr/bin/grep -c '|key=decide:goal:fast-landings|state=open|' <(sr_asks))"
 
 # ============================================================
 section "§DECLARED-RED: a goal missed by a red the plan itself declares opens no decide:goal:; any other miss still does"
@@ -1613,12 +1613,11 @@ done
 printf 'debt: id=7.1 row=T9 branch=wt/02-T9 head=%s suite=decl.test.sh token=ext:fixture at=2026-10-06T21:00:00Z\n' "$SR_C1" >> "$SR_REC"
 printf 'debt: id=7.2 row=T9 branch=wt/02-T9 head=%s suite=void.test.sh token=ext:fixture at=2026-10-06T21:00:00Z\n' "$SR_C1" >> "$SR_REC"
 printf 'void: id=7.2 branch=wt/02-T9 at=2026-10-06T21:30:00Z why=publish-failed\n' >> "$SR_REC"
-SR_REG_F="$(sr_reg)"
 sr_run "$SR_PLAN"
 expect_eq "DR0 precondition: the sheet reads all three suite goals not met, each from its red verdict" "declared=not met|plain=not met|voided=not met" "$(sr_goal_st)"
 sr_tick
 expect_eq "DR1 the tick opens decide:goal: for the plain miss and the voided debt's, and none for the declared red" \
-  "decide:goal:plain|decide:goal:voided" "$(/usr/bin/grep -oE '\|key=decide:goal:[^|]*\|state=open\|' "$SR_REG_F" 2>/dev/null | cut -d'|' -f2 | sed 's/^key=//' | sr_join)"
+  "decide:goal:plain|decide:goal:voided" "$(/usr/bin/grep -oE '\|key=decide:goal:[^|]*\|state=open\|' <(sr_asks) 2>/dev/null | cut -d'|' -f2 | sed 's/^key=//' | sr_join)"
 expect_eq "DR2 …and it says only the two it opened" "2|0" \
   "$(/usr/bin/grep -c '^poker: GOAL .* missed' "$TMPROOT/tick.out")|$(/usr/bin/grep -c '^poker: GOAL declared' "$TMPROOT/tick.out")"
 
@@ -1724,10 +1723,9 @@ awk -v r="$SR_D_ROW" '{ print } /^\| T17 \|/ { print r }' "$SR_PLAN" > "$SR_PLAN
 sed -i.bak 's/^wave: wave-02-fx$/&\
 canonical_sdlc_version: 14/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
 sr_ledger_put D21 "the gate the judge holds" "Answered in an hour rather than now, T20 starts an hour later and the predicted close holds: it is off the longest chain."
-SR_REG_F="$(sr_reg)"
 sr_tick
 expect_eq "ON0 precondition: the tick says T20 waits on approval:D21 and opens an item for it on the register" "yes|1" \
-  "$(/usr/bin/grep -q '^poker: WAIT T20 — approval:D21$' "$TMPROOT/tick.out" && echo yes)|$(/usr/bin/grep -cE '\|key=[a-z]+:D21\|state=open\|' "$SR_REG_F")"
+  "$(/usr/bin/grep -q '^poker: WAIT T20 — approval:D21$' "$TMPROOT/tick.out" && echo yes)|$(/usr/bin/grep -cE '\|key=[a-z]+:D21\|state=open\|' <(sr_asks))"
 sr_run "$SR_PLAN"
 expect_eq "ON1 the sheet carries the decision once, beside the two approvals the tick opened, holding the row by its card label (step 4, id 20)" \
   "approve:release|approve:merge|decide:D21|4/20" \
@@ -1740,7 +1738,7 @@ expect_eq "ON3 the recap names D21 on one open: line and owes no second approval
   "$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^open: .*D21')|$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^owned-by-user: approval:D21')"
 sr_poke approve D21 "1" >/dev/null 2>&1
 expect_eq "ON4 the approve verb closes the tick's item: nothing for D21 is left open on the register" "0" \
-  "$(/usr/bin/grep -cE '\|key=[a-z]+:D21\|state=open\|' "$SR_REG_F")"
+  "$(/usr/bin/grep -cE '\|key=[a-z]+:D21\|state=open\|' <(sr_asks))"
 
 # ============================================================
 section "§STEPS: a step past current: with a landed or active task is running; a pending task alone does not make it so"
@@ -1856,13 +1854,13 @@ sr_r_want() { printf 'human stops (autonomous half): %s · target 1|human-wait m
 SR_APPROVED=none sr_world rounds "6 6 12 12"   # approved below, at SR_E0, 2026-10-06T10:00:00Z
 sed 's/^wave: wave-02-fx$/canonical_sdlc_version: 14\
 &/' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
-git -C "$SR_REPO" config user.name "Dana Fixture"; sr_bind; SR_REG_R="$(sr_reg)"
+git -C "$SR_REPO" config user.name "Dana Fixture"; sr_bind
 sr_r_open $((SR_E0 - 10800)) approve:step3
 sr_r_put $((SR_E0 - 7200)) D9; sr_r_rule $((SR_E0 - 5400)) D9; sr_r_put $((SR_E0 - 3600)) D9; sr_r_rule $((SR_E0 - 1800)) D9   # before
 SR_AT=$SR_E0 sr_poke approve plan 'approved' >/dev/null 2>&1
 expect_eq "RD-0 precondition: approve plan wrote approved-by: at 10:00Z and closed the Step-3 card's ask at that instant" \
   "approved-by: Dana Fixture 2026-10-06T10:00:00Z|2026-10-06T10:00:00Z" \
-  "$(/usr/bin/grep -o '^approved-by: Dana Fixture [^ ]*' "$SR_PLAN")|$(sed -n 's/^owed\/v1|key=approve:step3|state=closed|by=[^|]*|at=\([^|]*\)|.*/\1/p' "$SR_REG_R")"
+  "$(/usr/bin/grep -o '^approved-by: Dana Fixture [^ ]*' "$SR_PLAN")|$(sed -n 's/^owed\/v1|key=approve:step3|state=closed|by=[^|]*|at=\([^|]*\)|.*/\1/p' <(sr_asks))"
 sr_r_put $((SR_E0 + 600)) D1;    sr_r_rule $((SR_E0 + 1200)) D1     # 10 min
 sr_r_put $((SR_E0 + 3600)) D2;   sr_r_rule $((SR_E0 + 5400)) D2     # 30 min
 sr_r_put $((SR_E0 + 7200)) D2;   sr_r_rule $((SR_E0 + 8100)) D2     # 15 min, the same decision put again
@@ -1871,7 +1869,7 @@ sr_r_open $((SR_E0 + 79200)) approve:release
 SR_AT=$((SR_E0 + 79500)) sr_poke approve release '1' >/dev/null 2>&1   # 5 min
 expect_eq "RD-1 two rounds of D9 before the approval count none; after it four decision rounds and the release card: 5 stops, 10 + 30 + 15 + 476 + 5 minutes" \
   "2|2|0|$(sr_r_want 5 536)" \
-  "$(/usr/bin/grep -c '^owed/v1|key=decide:D9|state=closed|' "$SR_REG_R" | tr -d ' ')|$(/usr/bin/grep -c '^owed/v1|key=decide:D2|state=closed|' "$SR_REG_R" | tr -d ' ')|$(/usr/bin/grep -c '|state=open|' "$SR_REG_R" | tr -d ' ')|$(sr_r_card $((SR_E0 + 82800)))"
+  "$(/usr/bin/grep -c '^owed/v1|key=decide:D9|state=closed|' <(sr_asks) | tr -d ' ')|$(/usr/bin/grep -c '^owed/v1|key=decide:D2|state=closed|' <(sr_asks) | tr -d ' ')|$(/usr/bin/grep -c '|state=open|' <(sr_asks) | tr -d ' ')|$(sr_r_card $((SR_E0 + 82800)))"
 sr_r_put $((SR_E0 + 81000)) D4
 expect_eq "RD-2 a round still open is a stop, its wait running to now" "$(sr_r_want 6 566)" "$(sr_r_card $((SR_E0 + 82800)))"
 

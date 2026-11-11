@@ -256,8 +256,8 @@ expect_eq "5.14: only B's 2 spared files remain under .bionic/tmp/" "2" "$(tmp_e
 
 section "CARRY — wave-28 T17 (AC-8.7, D21): close-out writes every open deferral, with its sentence, under ## Deferrals of the continuation"
 # ============================================================
-# A deferral is held to its debts: the plan carries one `deferred:` line per finding the table
-# defers (`session-poker.sh proof-add` writes it; `finding-stated` adds ` stated="<sentence>"`), and
+# A deferral is held to its debts: an older plan carries one `deferred:` line per finding the table
+# defers, its sentence as ` stated="<sentence>"` (a run now writes both as finding events), and
 # close-out carries each into the continuation, in the one form the next wave's Step 1 card reads:
 #
 #   deferred: <record>#<n> <S> <reach> "<title>" stated="<sentence|->" from=<wave name>

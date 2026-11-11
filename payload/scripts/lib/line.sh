@@ -783,8 +783,8 @@ _line_load_owed() {
   declare -F owed_close >/dev/null 2>&1
 }
 # The records a landed row answers: those its born marker names, and those of every finding a landing of it settled,
-# once each. A settlement is the plan's `moved: … by=landing` line (`line_settle`); an older run's stands as an
-# `ev=settled` line of its landing record too.
+# once each. A settlement is the landing's move to fixed (`line_settled`); an older run's stands as an `ev=settled`
+# line of its landing record too.
 _line_answered_records() {  # <plan> <row>
   local rec
   { _line_born_records "$1" "$2"
@@ -793,18 +793,14 @@ _line_answered_records() {  # <plan> <row>
     _line_landing_moves "$1" | awk -F'\t' -v r="$2" '$2 == r { sub(/#[0-9]+$/, "", $1); print $1 }'
   } | awk 'NF && !s[$0]++'
 }
-# _line_landing_moves <plan> -> `<record>#<n> TAB <row> TAB <commit>` per `moved: … to=fixed row=<row> by=landing …
-# landing=<commit>` line under `## SDLC State`, in plan order: the findings each landing settled.
+# _line_landing_moves <plan> -> `<record>#<n> TAB <row> TAB <commit>` per move to fixed a landing wrote (`by=landing`),
+# among the run's finding events (lib/proof.sh `_proof_findings_load`), an older run's `moved:` lines read as theirs:
+# the findings each landing settled. Exit 2 when the fold fails.
 _line_landing_moves() {
-  awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && /^moved:[ \t]/ {
-      n = split($0, f, /[ \t]+/); r = ""; c = ""; b = ""
-      for (i = 3; i <= n; i++) { if (f[i] ~ /^row=/) r = substr(f[i], 5); else if (f[i] ~ /^by=/) b = substr(f[i], 4); else if (f[i] ~ /^landing=/) c = substr(f[i], 9) }
-      if (b == "landing" && r != "") print f[2] "\t" r "\t" c
-    }' "$1" 2>/dev/null
+  _proof_findings_load "$1" || return 2
+  printf '%s\n' "$_PROOF_FINDINGS" | awk -F'|' "$_LINE_FIELDS_AWK"'
+    line_ev() == "finding" && line_kv("to") == "fixed" && line_kv("by") == "landing" && line_kv("row") != "" {
+      print line_kv("ref") "\t" line_kv("row") "\t" line_kv("landing") }'
 }
 # The questions a born row's records were read for are those of the plan's review proof lines naming one of them;
 # each that the judge no longer finds failing has its ask closed, by the landing.
@@ -846,15 +842,16 @@ _line_carried_close() {  # <plan> <root> <row>
 # A LANDING SETTLES EVERYTHING IT PROVES IN ONE ACT, so nothing it proves is settled by hand afterwards. Its plan write
 # (`session-poker.sh row-landed`, which every landing runs) hands its copy of the plan to `line_settle` before the copy
 # is swapped in, and the copy gains, in that one transaction:
-#   · a `moved: <record>#<n> to=fixed row=<row> by=landing at=<at> landing=<commit>` line for each finding carried to
-#     the row (`finding-move … carried <row>`) and for each finding any registered review names at the site of a
-#     finding the row answers (born of it, moved fixed to it, or carried to it); `proof_fixed` then reads each fixed
+#   · nothing for a finding: each finding carried to the row (`finding-move … carried <row>`) and each finding any
+#     registered review names at the site of a finding the row answers (born of it, moved fixed to it, or carried to
+#     it) is named in LINE_SETTLED_F, and `line_settled` appends its move to fixed, `finding ref=<record>#<n>
+#     to=fixed row=<row> by=landing landing=<commit>`, once the copy is the plan; `proof_fixed` then reads each fixed
 #     once the row's verdicts are green, as it reads a person's move;
 # A landing marks no matrix status: the suites it ran are not a criterion's proof, so no cell is discharged by them.
 # Once the copy is in, `line_settled` closes each settled finding's ask on the register and closes the asks answered
-# carry to the row's landing. The `moved: … by=landing` lines are the fact the correcting verbs read
-# (`line_settled_by`): `finding-move` refuses a finding a landing settled, naming that landing; an older run's
-# landing record also holds `ev=settled` lines naming cells, which `matrix-set` still reads.
+# carry to the row's landing. The landing's moves to fixed are the fact the correcting verbs read (`line_settled_by`):
+# `finding-move` refuses a finding a landing settled, naming that landing; an older run's landing record also holds
+# `ev=settled` lines naming cells, which `matrix-set` still reads.
 #
 # THE SAME SITE IS A LINE AT EACH REVIEW'S OWN HEAD. A finding names `<path>:<line>` at the head its review read; two
 # reviews read at different heads name one line at different numbers. A site is carried from the answered finding's
@@ -904,19 +901,17 @@ $2
 LINE_OWN_SITES
   done
 }
-# _line_moves <plan> -> `<record>#<n> TAB <to> TAB <row>` per finding: its newest `moved:` line, a carry among them
+# _line_moves <plan> -> `<record>#<n> TAB <to> TAB <row>` per finding: its newest move among the run's finding events
+# (lib/proof.sh `_proof_findings_load`), a carry among them; a deferral is no move. Exit 2 when the fold fails.
 _line_moves() {
-  awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && /^moved:[ \t]/ {
-      split($0, f, /[ \t]+/); id = f[2]; to = f[3]; sub(/^to=/, "", to); r = ""
-      if (f[4] ~ /^row=/) r = substr(f[4], 5)
-      if (!(id in last)) ord[++n] = id
-      last[id] = to "\t" r
+  local ev
+  _proof_findings_load "$1" || return 2; ev="$_PROOF_FINDINGS"
+  printf '%s\n' "$ev" | awk -F'|' "$_LINE_FIELDS_AWK"'
+    line_ev() == "finding" && line_kv("to") != "deferred" && line_kv("to") != "" {
+      id = line_kv("ref"); if (!(id in last)) ord[++n] = id
+      last[id] = line_kv("to") "\t" line_kv("row")
     }
-    END { for (i = 1; i <= n; i++) print ord[i] "\t" last[ord[i]] }' "$1" 2>/dev/null
+    END { for (i = 1; i <= n; i++) print ord[i] "\t" last[ord[i]] }'
 }
 # line_settle <plan> <row> <commit> <copy> <at> -> 0 with <copy> settled; 1 when it cannot be written.
 # <plan> is read for what the row answers, <copy> is the copy the plan write swaps in. Sets LINE_SETTLED_F (findings),
@@ -927,7 +922,7 @@ line_settle() {
   root="$(_line_root "$plan")" || return 0
   _line_load_proof || return 0
   _proof_roots_load; docs="$(docs_root "$root" 2>/dev/null)"
-  moves="$(_line_moves "$copy")"
+  moves="$(_line_moves "$plan")" || return 1
   _wt_units_load >/dev/null 2>&1
   # What the row answers: born of it, moved fixed to it, carried to it.
   own="$( { units_born_findings "$copy" 2>/dev/null | awk -F'\t' -v r="$row" '$1 == r { print $3 }'
@@ -944,11 +939,6 @@ line_settle() {
         $1 != "" && !($1 in own)' | _line_same_site "$root" "$osites" "$moves"
     )"
     LINE_SETTLED_F="$(printf '%s\n' "$LINE_SETTLED_F" | awk 'NF && !s[$0]++' | tr '\n' ' ')"
-    for id in $LINE_SETTLED_F; do
-      proof_add_line "$copy" "moved: $id to=fixed row=$row by=landing at=$at landing=$com" > "$copy.st" 2>/dev/null && [ -s "$copy.st" ] \
-        || { rm -f "$copy.st"; return 1; }
-      mv -f "$copy.st" "$copy"
-    done
   fi
   # The health line is the judge's rendering, rewritten here in the same copy: this landing's verdicts are already in
   # the record, so a suite the regression left red that it greened moves from owed= to closed=, and the line stays red.
@@ -956,10 +946,14 @@ line_settle() {
   LINE_SETTLED_F="${LINE_SETTLED_F% }"
   return 0
 }
-# line_settled <plan> <root> <row> <commit> -> always 0: the register half of `line_settle`, once the copy it settled is
-# the plan.
+# line_settled <plan> <root> <row> <commit> -> always 0: the log and the register half of `line_settle`, once the copy
+# it settled is the plan: each settled finding's move to fixed, and its asks closed.
 line_settled() {
   local plan="$1" root="$2" row="$3" com="$4" id k
+  for id in $LINE_SETTLED_F; do
+    proof_finding_event "$plan" "ref=$id" to=fixed "row=$row" by=landing "landing=$com" \
+      || printf 'line: the landing of %s settled %s, and its move to fixed could not be written to the run log\n' "$row" "$id" >&2
+  done
   if [ -n "$LINE_SETTLED_F" ] && _line_load_owed && declare -F finding_owed_key >/dev/null 2>&1; then
     for id in $LINE_SETTLED_F; do
       k="$(finding_owed_key "$id")"
@@ -971,8 +965,8 @@ line_settled() {
   return 0
 }
 # line_settled_by <plan> <findings|cells> <id> -> `<row> <commit>` of the newest landing that settled <id>; 1 when none did.
-# A finding is read from the plan's `moved: … by=landing` lines after the record's `ev=settled` ones; a cell only from
-# the record, since no landing settles one now.
+# A finding is read from the landing's moves to fixed after the record's `ev=settled` lines; a cell only from the record,
+# since no landing settles one now.
 line_settled_by() {
   local rec
   { rec="$(line_record "$1")" && line_lines "$rec" | awk -F'|' -v k="$2" -v id="$3" "$_LINE_FIELDS_AWK"'

@@ -282,7 +282,7 @@ expect_contains "N2e …while it stays open (the block is unresolved)" "approve:
 expect_regex "N2f the bound session's store is its run's register under record/" \
   '/\.bionic/docs/record/wave-01-fixture/asks\.state$' "$(nt_owed "$RO" owed_file)"
 expect_contains "N2g …where the Stop stamped the item it sent" "|key=approve:step1|state=open|sent=20" \
-  "$(cat "$RO/.bionic/docs/record/wave-01-fixture/asks.state" 2>/dev/null)"
+  "$(nt_owed "$RO" owed_lines)"
 
 nt_stop "$RO"
 expect_eq "N3 AC-2.2 a later turn on the same unresolved block sends nothing" "1" "$(nt_calls)"
@@ -549,7 +549,7 @@ POKE_BOUND="$POKE_BOUND_WAS"
 expect_eq "AK5 the approve verb records the user's reply (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "AK5a …and closes the item it answers" "|key=approve:release|state=closed|by=approve|" \
-  "$(cat "$(nt_owed "$RK" owed_file)" 2>/dev/null)"
+  "$(nt_owed "$RK" owed_lines)"
 poke_pressure "$RK" 8192 1.0 tick
 nt_stop "$RK"
 expect_eq "AK5b …so the next tick reopens nothing and the next Stop sends nothing" "1" "$(nt_calls)"
@@ -667,7 +667,7 @@ cw_waive_row "$RCW"
 expect_eq "AK-8 precondition: waive-row records the person's waiver (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "AK-8 AC-4.1 …and closes the item the matrix ask opened" "|key=waive-row:AC-1|state=closed|by=waive-row|" \
-  "$(cat "$RCW/.bionic/tmp/owed-$SID.state" 2>/dev/null)"
+  "$(nt_owed "$RCW" owed_lines)"
 expect_eq "AK-8a …and no other: the question's and the other row's stay open" "waive-row:AC-2,waive:structure" "$(cw_open "$RCW")"
 
 # WAIVING A QUESTION SETTLES ITS FINDINGS (AC-4.2). `disposition` opens `finding:<record>#<n>` for each finding that
@@ -758,7 +758,7 @@ POKE_BOUND="$POKE_BOUND_WAS"
 expect_eq "AK-9b precondition: waive records the waiver (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_eq "AK-9 AC-4.2 waiving structure closes both of its finding items; adversarial's stays open" "$FW_KA" "$(cw_open "$RFW")"
-expect_contains "AK-9c …each closed by the waiver" "|key=$FW_K2|state=closed|by=waive|" "$(cat "$(nt_owed "$RFW" owed_file)" 2>/dev/null)"
+expect_contains "AK-9c …each closed by the waiver" "|key=$FW_K2|state=closed|by=waive|" "$(nt_owed "$RFW" owed_lines)"
 
 # ============================================================
 section "§QUIET: progress never sends — a landing, a dispatch, a quiet tick (AC-2.4)"

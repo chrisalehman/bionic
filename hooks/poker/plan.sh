@@ -1342,7 +1342,9 @@ EOF
           die "task-add refused — $FR_WHY; the plan is unchanged."
           exit 1
         fi
-        if [ "$(_proof_moved_to "$TA_PLAN" "$TA_BID")" = defer ]; then
+        TA_MV="$(_proof_moved_to "$TA_PLAN" "$TA_BID")" \
+          || { die "task-add refused — the run's facts could not be read, so the moves of $(clean "$TA_BID") are not known; the plan is unchanged. Run again: bash ${HOOK_DIR}/session-poker.sh task-add with the same operands"; exit 2; }
+        if [ "$TA_MV" = defer ]; then
           die "task-add refused — $(clean "$TA_BID") was moved to defer, and its newest move stands: $(clean "$(proof_move_line "$TA_PLAN" "$TA_BID")"); the plan is unchanged. To fix it after all: disposition $(clean "$TA_BID") fix '<their words>' '<why>', then task-add again."
           exit 1
         fi

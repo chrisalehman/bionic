@@ -117,11 +117,14 @@ cr_out() {
     index($0, l) && /^  rc=/ { k = n; for (i = 1; i <= n; i++) r[i] = o[i] }
     END { for (i = 1; i <= k; i++) print r[i] }' "$CR_LOG" 2>/dev/null
 }
-# cr_ask <key> -> the register's line for <key> as <state>|<by>
+# cr_ask <key> -> the newest act on <key> as <state>|<by>, read from the register, then the run's log, where an ask
+# event's reply= is the act that closed it
 cr_ask() {
-  awk -F'|' -v k="key=$1" '$2 == k { s = ""; b = ""
-    for (i = 3; i <= NF; i++) { if ($i ~ /^state=/) s = substr($i, 7); if ($i ~ /^by=/) b = substr($i, 4) }
-    print s "|" b }' "$CR_REC/asks.state" 2>/dev/null | tail -1
+  cat "$CR_REC/asks.state" "$CR_REC/run.log" 2>/dev/null | awk -F'|' -v k="key=$1" '
+    ($1 == "owed/v1" && $2 == k) || ($1 == "run/v1" && $2 == "ev=ask" && $3 == k) { s = ($1 == "run/v1") ? "open" : ""; b = ""
+      for (i = 3; i <= NF; i++) { if ($i ~ /^state=/) s = substr($i, 7); if ($i ~ /^by=/) b = substr($i, 4)
+        if ($1 == "run/v1" && $i ~ /^reply=/) { s = "closed"; b = substr($i, 7) } }
+      l = s "|" b } END { if (l != "") print l }'
 }
 cr_closer_is_waiver() {  # <by> -> yes when a waiver or close-out closed the ask, else no
   case "$1" in
@@ -191,6 +194,8 @@ if [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ]; then
     "$([ -n "$CL_W" ] && echo yes)"
   expect_eq "CL-3b …and closed, by neither a waiver nor close-out" "closed|no" \
     "${CL_W%%|*}|$(cr_closer_is_waiver "${CL_W#*|}")"
+  expect_eq "CL-3c …its acts stand in the run's log as ask events, and the record holds no asks.state" "yes|" \
+    "$(/usr/bin/grep -q '^run/v1|ev=ask|key=waive:structure|' "$CR_REC/run.log" 2>/dev/null && echo yes)|$(ls "$CR_REC/asks.state" 2>/dev/null)"
   expect_eq "CL-4 the release lands with the fix: its published event carries the line's release numbers commit" "yes" \
     "$(awk -F'|' '$2 == "ev=published" && $3 == "row=T5" && /\|numbers=[0-9a-f]{40}\|/ { f = 1 } END { if (f) print "yes" }' <(cr_lines))"
   expect_eq "CL-4b …and main holds the reviews part's commit, on the head the release check held (a kind=check line there, not result=fail)" "yes|yes|no" \
@@ -256,7 +261,7 @@ if cr_reached "SR-0"; then
   expect_contains "SR-2 commands follow the fix row's landing in the replay's log (read beside the moves)" "close-out.sh" "$SR_AFTER"
   expect_eq "SR-2b …and none of them is a finding-move" "" "$(printf '%s\n' "$SR_AFTER" | /usr/bin/grep 'session-poker\.sh finding-move')"
   expect_eq "SR-3 the second finding is written fixed by the fix row's landing" "yes" \
-    "$(/usr/bin/grep -q '^moved: record/wave-x/w-adversarial-whole-2\.md#1 to=fixed row=T5 by=landing ' "$CR_PLAN" && echo yes)"
+    "$(/usr/bin/grep -qF 'run/v1|ev=finding|ref=record/wave-x/w-adversarial-whole-2.md#1|to=fixed|row=T5|by=landing|' "$CR_REC/run.log" && echo yes)"
   expect_contains "SR-4 the close reads zero with the window at delivered:" "hand-holds: total=0 " \
     "$(cr_out 'close-out, the tail' | /usr/bin/grep '^hand-holds: ')"
 fi
@@ -324,8 +329,9 @@ if cr_reached "EN-0"; then
   expect_eq "EN-3 …and lists the failed review exactly as the plan registered it" "$EN_WANT" \
     "$([ -n "$EN_WANT" ] && printf '%s\n' "$EN_PART" | /usr/bin/grep -x -F -- "$EN_WANT")"
   EN_PLAN_N="$(awk '/^[[:space:]]*```/ { fence = !fence; next } fence { next } /^##[[:space:]]/ { s = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    s && (/^proved: kind=review / || /^waived:[[:space:]]/) { n++ } END { print n + 0 }' "$CR_PLAN")"
-  expect_eq "EN-4 the part lists as many reviews and waivers as the plan registers (the plan registers some)" "$EN_PLAN_N|yes" \
+    s && /^proved: kind=review / { n++ } END { print n + 0 }' "$CR_PLAN")"
+  EN_PLAN_N=$((EN_PLAN_N + $(cat "$CR_REC/run.log" 2>/dev/null | /usr/bin/grep -c '^run/v1|ev=waiver|')))
+  expect_eq "EN-4 the part lists as many reviews and waivers as the run registers, the reviews in its plan and the waivers in its log (it registers some)" "$EN_PLAN_N|yes" \
     "$(printf '%s\n' "$EN_PART" | /usr/bin/grep -c '^- ')|$([ "$EN_PLAN_N" -ge 1 ] && echo yes)"
   EN_MAIN="$(git -C "$CR_ROOT" show "refs/heads/main:CHANGELOG.md" 2>/dev/null | cr_entry_part "$EN_VER")"
   expect_eq "EN-2m main's release entry holds the reviews part after the person's merge" "### The reviews" \
