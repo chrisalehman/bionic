@@ -597,7 +597,7 @@ mkdir -p "$BIONIC_GATE_DIR/requests"
 sg() {  # <id> <why> [--waiting] -> stop_run_gate as the verb and the tick call it, the session bound to the plan
   printf 'key=k%s\nkind=work\nwho=%s:w-q%s\nasked=1000\nholder=-\n' "$1" "$SID" "$1" > "$BIONIC_GATE_DIR/requests/$1"
   ( cd "$HR" && CLAUDE_CODE_SESSION_ID="$SID" SR_WHY="$2" P="$HP" bash -c 'H="$1"; shift; say() { :; }; die() { :; }
-    resolve_run() { POKER_RUN_PLAN="$P"; }; for l in roots session gate slots run line; do . "$H/../payload/scripts/lib/$l.sh"; done
+    resolve_run() { POKER_RUN_PLAN="$P"; POKER_RUN_OPEN=yes; }; for l in roots session gate slots run line; do . "$H/../payload/scripts/lib/$l.sh"; done
     . "$H/poker/roster.sh"; REPO_REAL="$PWD"; SR_REPORT_ONLY=no; stop_run_gate "$@"' _ "$BIONIC_HOOKS_DIR" "$1" ${3:+"$3"} ) >/dev/null 2>&1
 }
 sg 901 'a person stopped it'; sg 902 'stood down for the load' --waiting

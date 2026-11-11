@@ -152,14 +152,15 @@ stop_run_request() {
 }
 
 # poker_hand <what> <why> [<key=value>...] -> one hand event (lib/line.sh `line_hand_event`, the one writer) in the log
-# of the run this session is bound to, `by=` the session; rc 1, nothing written, with no bound run; rc 2 when the act
-# names no reason. An act a verb takes by hand is a fact of the run it keeps going; a session with no run has none.
+# of the open run this session is bound to, `by=` the session; rc 1, nothing written, with no open bound run; rc 2 when
+# the act names no reason. An act a verb takes by hand is a fact of the run it keeps going, and a closed run's log is
+# not reopened by one.
 poker_hand() {
   local sid
   sid="$(session_id 2>/dev/null)" || sid=""
   [ -n "$sid" ] || return 1
   resolve_run "${REPO_REAL:-$(project_root "$PWD")}" "$sid" 2>/dev/null
-  [ -n "$POKER_RUN_PLAN" ] && [ -f "$POKER_RUN_PLAN" ] || return 1
+  [ "${POKER_RUN_OPEN:-}" = yes ] && [ -n "$POKER_RUN_PLAN" ] && [ -f "$POKER_RUN_PLAN" ] || return 1
   declare -F line_hand_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
   declare -F line_hand_event >/dev/null 2>&1 || return 1
   line_hand_event "$POKER_RUN_PLAN" "$@" "by=$sid"
