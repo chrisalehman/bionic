@@ -35,6 +35,8 @@
 #            task-add's cap refusal, its fourth-fix refusal and its count line each go red when removed
 #   §ASK     a row edited by hand reads as lib/plan-read.sh's row reads it; a floor row whose review proof stands at
 #            an older head is ready only when the judge reads the reviews covered
+#   §LIVE    a launch the run's log holds reads active under its name and is not ready; its cancel returns it; a
+#            dry copy reads its plan's run; a row the cells hold active reads as before
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT (AC-1e.2, measure §4.3). Before this library two
 # readers in hooks/canonical-sdlc-evidence-gate.sh took `id`/`rigor`/`status` as awk fields
@@ -1382,6 +1384,20 @@ AK_J="$SANDBOX/ask-judge.plan.md"
 ak_ready() { ( export UNITS_READINGS_STATE="$1"; call units_ready "$AK_J" 6 ); }
 expect_eq "ASK-3 the floor row with the reviews covered at the head is ready; past the proof at an older head it is not" "T3|" \
   "$(ak_ready covered)|$(ak_ready 'review adversarial critic piece uncovered')"
+
+section "§LIVE — a row's state and agent are the run's: a launch in the log, a cancel of it, the cells for the rest"
+LV_P="$SANDBOX/docs/plans/e/w.plan.md"; LV_LOG="$SANDBOX/docs/record/w/run.log"; mkdir -p "${LV_P%/*}" "${LV_LOG%/*}"
+{ printf -- '---\ncurrent: 4\n---\n\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status |\n|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | one | a1 | — | 30m | R | a.sh | active |\n| T2 | 4 | build | two | — | — | 30m | R | b.sh | pending |\n'; } > "$LV_P"
+lv() { call units_rows "${2:-$LV_P}" | awk -F'\t' -v r="$1" '$1 == r { print $10 "/" $5 }'; }
+lv_log() { bash -c '. "$1/log.sh" && RUN_LOG="$2" log_append "${@:3}"' _ "${LIB%/*}" "$LV_LOG" "$@"; }
+expect_eq "LIVE-1 with no log the cells answer: T1 active, T2 pending and ready" "active/a1 pending/— T2" "$(lv T1) $(lv T2) $(call units_ready "$LV_P" 4)"
+lv_log dispatch row=T2 name=w-T2 brief=b sum=s
+cp "$LV_P" "$LV_P.task-set.1"
+expect_eq "LIVE-2 a launch in the log reads active under its name, on the plan and its dry copy, and is not ready" \
+  "active/w-T2 active/w-T2 active/a1|" "$(lv T2) $(lv T2 "$LV_P.task-set.1") $(lv T1)|$(call units_ready "$LV_P" 4)"
+call units_dispatch_back "$LV_P" T2 w-T2
+expect_eq "LIVE-3 its cancel returns it to pending and ready" "pending/— T2" "$(lv T2) $(call units_ready "$LV_P" 4)"
 
 # ============================================================
 finish
