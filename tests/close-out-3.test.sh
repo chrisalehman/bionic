@@ -483,9 +483,9 @@ run_close "$ID" run
 expect_eq "INSERT.14 a run the gate would refuse still refuses (rc 2) and writes no Step-8 line: plan, branch and tmp untouched" "2/$ID_STATE" \
   "$CO_RC/$(presence_state "$ID")/$(sha_of "$ID/$PLAN_REL")"
 
-# THE WALK POINTER, WHERE THE GATE READS IT. The matrix head carries `walk-artifact:` (what matrix-render stubs and
-# the walk fills); the walk gate reads the Step-5 block (walls.sh step5_evidence_block). Close-out copies a real
-# pointer across when the Step-5 block lacks it, and invents none.
+# THE WALK, WHERE THE GATE READS IT: the run's walk proof (proof-add walk), else an older plan's Step-5 pointer. The
+# matrix head carries `walk-artifact:` (what matrix-render stubs and the walk fills), which the gate does not read as
+# the walk; close-out writes no pointer, so a walked run closes on its proof and an unwalked one is refused.
 mk_walked() {  # <name> <matrix-head-value|-> -> a fixture at Step 8 that owes a walk
   local p
   p="$(mk_fixture "$1")"; advance_to "$p" 8
@@ -502,11 +502,13 @@ step5_has_pointer() {  # <plan> -> yes|no: the Step-5 block (line + continuation
 IW="$(mk_walked insert-w "record/wave-01-fixture/walk.md")"
 expect_eq "INSERT.15 precondition: the plan owes a walk, the matrix head names it, and the Step-5 block does not" "yes/no" \
   "$(/usr/bin/grep -q '^walk: required' "$IW/$PLAN_REL" && /usr/bin/grep -q '^walk-artifact: record/wave-01-fixture/walk.md' "$IW/$PLAN_REL" && echo yes || echo no)/$(step5_has_pointer "$IW/$PLAN_REL")"
+IW_SHA="$(sha_of "$IW/$PLAN_REL")"; run_close "$IW" run
+expect_eq "INSERT.16 AC-4.2 with no walk proof the matrix head's line is no walk: the gate refuses (rc 2), close-out copies no pointer, the plan untouched" \
+  "2/no/$IW_SHA" "$CO_RC/$(step5_has_pointer "$IW/$PLAN_REL")/$(sha_of "$IW/$PLAN_REL")"
+bash -c '. "$1/payload/scripts/lib/proof.sh" && proof_event "$2" kind=walk "head=$3" evidence=record/wave-01-fixture/walk.md' _ "$REPO_ROOT" "$IW/$PLAN_REL" "$(git -C "$IW" rev-parse HEAD)"
 run_close "$IW" run
-expect_eq "INSERT.16 AC-4.2 run succeeds, the walk gate reading the pointer close-out wrote into the Step-5 block (rc 0)" "0/yes" \
+expect_eq "INSERT.17 …with the walk's proof in the run's log, run succeeds (rc 0), the gate reading the proof, and still no pointer is written" "0/no" \
   "$CO_RC/$(step5_has_pointer "$IW/$PLAN_REL")"
-expect_eq "INSERT.17 …as a continuation line of Step 5, naming the same file" "yes" \
-  "$(awk '/^- Step 5:/{f=1; next} /^- Step /{f=0} f && /^  walk-artifact: record\/wave-01-fixture\/walk.md$/{c++} END{print (c==1) ? "yes" : "no"}' "$IW/$PLAN_REL")"
 
 IX="$(mk_walked insert-x "-")"
 IX_SHA="$(sha_of "$IX/$PLAN_REL")"

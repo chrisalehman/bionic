@@ -1539,7 +1539,7 @@ section "§WALK: the walk's verdicts settle the cells they confirm, through proo
 # ============================================================
 # The walk record carries the critic's shape, read by proof_verdicts. `proof-add walk <record>` writes, in one plan
 # write, status `discharged` and the record as evidence (cell and block key) for each CONFIRMED row no landing settled,
-# every other row as it stands, both `walk-artifact:` pointers and a `proved: kind=walk` line. It appends one `ev=walk`
+# every other row as it stands, the matrix head's `walk-artifact:` line and one walk proof in the run's log. It appends one `ev=walk`
 # line to the landing record, never `ev=matrix-set`, so the hand-holds fold counts no status write.
 # FIXTURE FIDELITY. §VERDICTS' shape with `walk: required`, so the head carries the gate's stub. The landing-settled row
 # is written as `line_settle` leaves it, its `ev=settled` line through the product's line_event.
@@ -1575,8 +1575,8 @@ wk_key() {  # <AC> <key> -> the AC block's <key>: value
     b { t = $0; sub(/^[ \t]+/, "", t); if (index(t, k ":") == 1) { sub(/^[^:]*:[ \t]*/, "", t); print t; exit } }' "$PWK"
 }
 wk_head() { awk -v k="$1" '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 } m && index($0, k ":") == 1' "$PWK" | paste -sd';' -; }
-wk_step5() {  # -> the Step 5 block's walk-artifact: lines, trimmed, `;`-joined
-  awk '/^- Step 5:/ { s = 1; next } s && /^- / { s = 0 } s && /^[ \t]+walk-artifact:/ { t = $0; sub(/^[ \t]+/, "", t); print t }' "$PWK" | paste -sd';' -
+wk_step5() {  # -> the Step 5 block, its line and its continuation lines, `;`-joined
+  awk '/^- Step 5:/ { s = 1; print; next } s && /^- / { s = 0 } s && /^[ \t]+[^ \t]/' "$PWK" | paste -sd';' -
 }
 wk_recfile() { bash -c '. "$1/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "${S46_LIB%/*}" "$PWK"; }
 wk_ev() { cat "$(wk_recfile)" "$(dirname "$(wk_recfile)")/run.log" 2>/dev/null | /usr/bin/grep -F "|ev=$1|"; }   # <ev> -> its lines in the record, then the log
@@ -1619,7 +1619,7 @@ expect_contains "WK-2b …refused naming the verdict: line" "verdict:" "$OUT"
 
 # ---------- one write settles the confirmed cells no landing settled ----------
 wk_rec walk 'verdict: REFUTED — AC-1.3 is refuted' - "${WK_ROWS[@]}"
-wk_add walk
+WK_B5="$(wk_step5)"; wk_add walk
 expect_eq "WK-3 §WALK AC-8.1 AC-8.2 the record with the table and one verdict: line registers (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_eq "WK-4 AC-8.2 the pending CONFIRMED row reads discharged with the walk record as its evidence, cell and block key" \
@@ -1629,8 +1629,8 @@ expect_eq "WK-5 AC-8.2 the landing-settled CONFIRMED row is the landing's: its r
   "$WK_ROW11|$WK_SET_LOG" "$(wk_row AC-1.1)|$(wk_key AC-1.1 evidence)"
 expect_eq "WK-6 AC-8.2 the REFUTED row stays as it stood, pending" "$WK_ROW13" "$(wk_row AC-1.3)"
 expect_contains "WK-6b …(the extractor reads it: its status cell)" "| pending |" "$(wk_row AC-1.3)"
-expect_eq "WK-7 AC-8.2 the walk-artifact: pointer is written in both places: the Step 5 block and the matrix head" \
-  "walk-artifact: record/wave-01-fixture/walk.md|walk-artifact: record/wave-01-fixture/walk.md" "$(wk_step5)|$(wk_head walk-artifact)"
+expect_eq "WK-7 AC-8.2 the matrix head's walk-artifact: line names the record, and the Step 5 block stands as it was: the walk is its proof" \
+  "$WK_B5|walk-artifact: record/wave-01-fixture/walk.md" "$(wk_step5)|$(wk_head walk-artifact)"
 expect_eq "WK-8 AC-8.2 one proved: kind=walk line at the working head, naming the record" "1" \
   "$(s46_proved "$PWK" | /usr/bin/grep -c "^proved: kind=walk head=$WK_C at=[0-9TZ:-]* evidence=record/wave-01-fixture/walk.md$")"
 [ "$(s46_proved "$PWK" | /usr/bin/grep -c '^proved: kind=walk ')" = 1 ] || s46_proved "$PWK" | sed 's/^/      /'

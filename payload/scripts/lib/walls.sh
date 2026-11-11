@@ -2590,8 +2590,8 @@ bionic_finding_root() { audit_root; }
 # AND ONE LINE PER OPEN DECLARED DEBT (wave-27 T31, T67; REQ-14 AC-14.3, D23; A-orch-121),
 # `debt<TAB><suite><TAB><token>`: a debt `land` wrote to the landing record, HANDED to this wall by
 # its collector (hooks/bash-walls.sh: `BIONIC_DEBTS_OPEN`, read for `BIONIC_DEBTS_PLAN`), with no
-# `proved: kind=floor` or `kind=task` line in the section dated after its threshold (lib/proof.sh
-# `proof_debts_open`, the text half of the judge's own rule). A `landed red:` line in the plan is not
+# regression or task proof of the run dated after its threshold (lib/proof.sh `proof_debts_open`, the
+# judge's own rule over the proofs and the section's approvals). A `landed red:` line in the plan is not
 # read. Debts handed for another plan than the one judged here are not this plan's, and are not read.
 _eg_reading_gaps() {
   local qs
@@ -2614,7 +2614,9 @@ _eg_reading_gaps() {
   # with no log, the log alone for a run with one, through lib/proof.sh's kept fold of them.
   # A fold that failed is no reading: the gaps are then unreadable, never every question absent.
   local f
-  f="$(_proof_ask "$PLAN" reader_q_reviews "$PLAN")" || { printf 'unreadable\n'; return 0; }
+  # A dry commit judges a copy, which names no record: its reviews and waivers are its plan's run's.
+  local rp; rp="$(proof_run_plan "$PLAN")"
+  f="$(_proof_ask "$rp" reader_q_reviews "$rp")" || { printf 'unreadable\n'; return 0; }
   printf '%s\n' "$f" | BIONIC_DERIVED="$der" awk -F'|' -v qs="$qs" "$(proof_fact_awk)"'
     BEGIN { n = split(ENVIRON["BIONIC_DERIVED"], L, "\n")
             for (i = 1; i <= n; i++) { m = split(L[i], F, "\t"); if (m >= 3) D[F[1] SUBSEP F[2]] = F[3] } }
@@ -2636,9 +2638,11 @@ _eg_reading_gaps() {
         else if (t[q] == "fact" && r[q] == "fail") print "failing\t" q "\t" e[q]
       }
     }'
-  if [ -n "${BIONIC_DEBTS_OPEN:-}" ] && [ "$handed" = 1 ] && [ "$_EG_V15" -eq 0 ] \
-     && declare -F proof_debts_open >/dev/null 2>&1; then
-    printf '%s\n' "$SECTION" | proof_debts_open "$BIONIC_DEBTS_OPEN"
+  # The proofs that clear a debt are the run's, read through the kept fold from the plan whose record is read (a dry
+  # copy names none); the approvals are still the section's lines, and its older proof lines are already the fold's.
+  if [ -n "${BIONIC_DEBTS_OPEN:-}" ] && [ "$handed" = 1 ] && declare -F proof_debts_open >/dev/null 2>&1; then
+    f="$(proof_lines "${BIONIC_DEBTS_ORIGIN:-$PLAN}")" || { printf 'unreadable\n'; return 0; }
+    { printf '%s\n' "$SECTION" | awk '!/^proved:[ \t]/'; printf '%s\n' "$f"; } | proof_debts_open "$BIONIC_DEBTS_OPEN"
   fi
 }
 
@@ -2702,8 +2706,8 @@ _eg_refuse_floor_absent() {
   ! declare -F units_order >/dev/null 2>&1 || ! units_order "$PLAN" >/dev/null 2>&1 || from=6
   [ "${CURRENT%[ab]}" -ge "$from" ] 2>/dev/null || return 0
   if declare -F proof_floor_absent >/dev/null 2>&1; then
-    why="$(proof_floor_absent "$PLAN")" || return 0
-    why="its section holds no 'proved: kind=regression' line: ${why} (the judge's regression absent)"
+    why="$(proof_floor_absent "$(proof_run_plan "$PLAN")")" || return 0
+    why="the run holds no regression proof: ${why} (the judge's regression absent)"
   else
     why="the regression's proof line cannot be read here: lib/proof.sh is not loaded beside units.sh"
   fi
@@ -4503,7 +4507,7 @@ resolve_walk_path() {  # $1 = raw walk-artifact value
 # through lib/proof.sh's kept fold, so a walk the run's log alone holds is registered here.
 walk_registered() {  # 2 when the run's facts cannot be read
   local ev f
-  f="$(_proof_facts "$PLAN")" || return 2
+  f="$(_proof_facts "$(proof_run_plan "$PLAN")")" || return 2
   while IFS= read -r ev; do
     [ -n "$ev" ] || continue
     if [ "$ev" = "$1" ] || [ "$(resolve_walk_path "$ev")" = "$2" ]; then return 0; fi
@@ -4541,15 +4545,20 @@ validate_walk_artifact() {
   # greedy to end-of-line, and swallowed the packed remainder as part of the
   # "path" (plan assumption A17). The dedicated continuation-line shape has
   # no ';' in it, so the truncation is a no-op there.
-  b5=$(step5_evidence_block)
-  # THE SIBLING POINTER READ (AC-3.3). Same record shape, same tolerance: `evidence_line_field`
-  # keeps the first-`;` truncation this read already had and drops only the line-start
-  # anchor, so a Step-5 line that opens with `cmd: …` no longer hides its walk artifact.
-  raw=$(evidence_line_field "$b5" walk-artifact)
+  # THE WALK IS THE RUN'S NEWEST WALK PROOF (proof-add walk), read through the reader, a dry copy as its plan; an
+  # older plan that holds none names its walk in the Step 5 block, and that pointer is read as written.
+  raw="$(_proof_last_read "$(proof_run_plan "$PLAN")" walk evidence)" || raw=""
   if [ -z "$raw" ]; then
-    block_matrix "rows are discharged with no walk recorded" "walk it, then name the file" \
-      "the walk gate: matrix rows are discharged but the Step 5 evidence has no 'walk-artifact:' line." \
-      "run the walk first and record 'walk-artifact: record/<file>.md' in the Step 5 block. Frontmatter 'walk: exempt' is the only way past this arm, and it is a Step-0 decision."
+    b5=$(step5_evidence_block)
+    # THE SIBLING POINTER READ (AC-3.3). Same record shape, same tolerance: `evidence_line_field`
+    # keeps the first-`;` truncation this read already had and drops only the line-start
+    # anchor, so a Step-5 line that opens with `cmd: …` no longer hides its walk artifact.
+    raw=$(evidence_line_field "$b5" walk-artifact)
+  fi
+  if [ -z "$raw" ]; then
+    block_matrix "rows are discharged with no walk recorded" "walk it, then register it" \
+      "the walk gate: matrix rows are discharged but the run holds no walk proof, and the Step 5 evidence has no 'walk-artifact:' line." \
+      "run the walk first and register its record: session-poker.sh proof-add walk record/<file>.md. Frontmatter 'walk: exempt' is the only way past this arm, and it is a Step-0 decision."
   fi
 
   # Containment. A `..` component is refused outright rather than normalized:
@@ -4581,7 +4590,7 @@ validate_walk_artifact() {
   # The walk narrates a running surface without the criteria in hand, so an AC
   # identifier in narration is the tell that it checklists them. The one
   # exception is a registered walk: a verdict table proof-add walk parsed and
-  # recorded as `proved: kind=walk` naming this artifact, whose identifiers are
+  # recorded as a walk proof naming this artifact, whose identifiers are
   # its verdicts. Invariant: the artifact carries no AC identifier unless such a
   # line names it; a line naming another record registers nothing here.
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
@@ -4997,12 +5006,10 @@ dispatch() {
   if [ "$_EG_V15" -eq 1 ]; then
     case "${CURRENT%[ab]}" in 5|6|7|8|9)
       _eg_v15_owe "the matrix: stack-health, each criterion's tier, status and evidence keys, and its auditor verdict"
-      [ "$(walk_mode)" = exempt ] || _eg_v15_owe "Step 5's walk-artifact: (whether the walk is recorded)"
+      [ "$(walk_mode)" = exempt ] || validate_walk_artifact
       [ -z "$(frontmatter_get environments)" ] || _eg_v15_owe "Step 5's environments-covered:" ;;
     esac
     case "${CURRENT%[ab]}" in 6|7|8|9) _eg_refuse_readings "the run" "$RIGOR"; _eg_refuse_floor_absent "the run" ;; esac
-    [ -z "${BIONIC_DEBTS_OPEN:-}" ] || [ "${BIONIC_DEBTS_PLAN:-}" != "$PLAN" ] \
-      || _eg_v15_owe "the proofs that clear a row's declared red (read from the state section's lines)"
     _eg_v15_refuse
     return 0
   fi

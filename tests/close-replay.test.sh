@@ -145,10 +145,15 @@ cr_entry_part() {
     /^### / { t = $0; sub(/[[:space:]]+$/, "", t); inp = inb && (t == "### The reviews") }
     inp { print }'
 }
-# cr_review_bullet <plan> <reader> -> the bullet the plan's review line by <reader> is listed as, built here from
-# the line's own fields: `- <question> review, <scope>: <result> at <head8> by <reader>, <at> (`<evidence file>`)`
+# cr_proofs <plan> [<log>] -> the run's proofs through the proof library's readers, each in an older plan's line shape:
+# the plan's own, then each proof event of <log>, the record's, which stays in the project when close-out archives the
+# plan and so is joined to an archived plan by no reader
+cr_proofs() { bash -c '. "$1/payload/scripts/lib/proof.sh" && proof_lines "$2" && { [ -z "$3" ] || awk -F"|" "$(proof_fact_awk)"'"'"'proof_fact() { print proof_fact_line() }'"'"' "$3"; }' \
+  _ "$BIONIC_SCRIPTS_DIR" "$1" "${2:-}" 2>/dev/null; }
+# cr_review_bullet <plan> <reader> -> the bullet the run's review proof by <reader> is listed as, built here from
+# the proof's own fields: `- <question> review, <scope>: <result> at <head8> by <reader>, <at> (`<evidence file>`)`
 cr_review_bullet() {
-  awk -v r="$2" '
+  cr_proofs "$1" "$CR_REC/run.log" | awk -v r="$2" '
     /^proved: kind=review / {
       q = ""; rd = ""; res = ""; sc = ""; h = ""; at = ""; ev = ""
       for (i = 2; i <= NF; i++) {
@@ -162,7 +167,7 @@ cr_review_bullet() {
       }
       if (rd == r) { n = split(ev, e, "/"); b = sprintf("- %s review, %s: %s at %s by %s, %s (`%s`)", q, sc, res, substr(h, 1, 8), rd, at, e[n]) }
     }
-    END { if (b != "") print b }' "$1" 2>/dev/null
+    END { if (b != "") print b }'
 }
 cr_reached() {  # -> 0 when the replay reached delivered:; else the failure asserted, with where it stopped
   [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ] && return 0
@@ -199,7 +204,7 @@ if [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ]; then
   expect_eq "CL-4 the release lands with the fix: its published event carries the line's release numbers commit" "yes" \
     "$(awk -F'|' '$2 == "ev=published" && $3 == "row=T5" && /\|numbers=[0-9a-f]{40}\|/ { f = 1 } END { if (f) print "yes" }' <(cr_lines))"
   expect_eq "CL-4b …and main holds the reviews part's commit, on the head the release check held (a kind=check line there, not result=fail)" "yes|yes|no" \
-    "$([ -n "$CL_PART" ] && [ "$CL_PART" = "$CL_MAIN" ] && echo yes)|$([ -n "$CL_REL" ] && /usr/bin/grep -q "^proved: kind=check head=$CL_REL " "$CR_PLAN" && echo yes)|$(/usr/bin/grep "^proved: kind=check head=${CL_REL:-none} " "$CR_PLAN" | tail -1 | /usr/bin/grep -q 'result=fail' && echo yes || echo no)"
+    "$([ -n "$CL_PART" ] && [ "$CL_PART" = "$CL_MAIN" ] && echo yes)|$([ -n "$CL_REL" ] && cr_proofs "$CR_PLAN" "$CR_REC/run.log" | /usr/bin/grep -q "^proved: kind=check head=$CL_REL " && echo yes)|$(cr_proofs "$CR_PLAN" "$CR_REC/run.log" | /usr/bin/grep "^proved: kind=check head=${CL_REL:-none} " | tail -1 | /usr/bin/grep -q 'result=fail' && echo yes || echo no)"
   expect_eq "CL-5 the user's reply approves that head: reply exit 0, the newest approved: release and approved: merge-unproved (the fix landed past the whole run) name it" "0|$CL_REL|$CL_REL" \
     "$(cr_rc "the user's reply to the card at the fix's head" | tail -1)|$(for k in release merge-unproved; do /usr/bin/grep "^approved: $k " "$CR_PLAN" | tail -1 | sed -n 's/.* head=\([0-9a-f]*\) .*/\1/p'; done | paste -sd'|' -)"
   expect_eq "CL-6 close-out runs (exit 0) and lands the integrate row by one published event of the close kind, no status cell written" "0|1|pending" \
@@ -255,7 +260,7 @@ if cr_reached "SR-0"; then
   SR_A="$(/usr/bin/grep '^finding: 1 ' "$CR_REC/w-structure-whole-2.md" 2>/dev/null | awk '{ print $5 }')"
   SR_B="$(/usr/bin/grep '^finding: 1 ' "$CR_REC/w-adversarial-whole-2.md" 2>/dev/null | awk '{ print $5 }')"
   expect_eq "SR-1 the replay plants a second review, registered under adversarial, naming the fix row's site" "yes|$SR_A" \
-    "$(/usr/bin/grep -q '^proved: kind=review .*evidence=record/wave-x/w-adversarial-whole-2.md question=adversarial ' "$CR_PLAN" && echo yes)|$SR_B"
+    "$(cr_proofs "$CR_PLAN" "$CR_REC/run.log" | /usr/bin/grep -q '^proved: kind=review .*evidence=record/wave-x/w-adversarial-whole-2.md question=adversarial ' && echo yes)|$SR_B"
   expect_contains "SR-1b …the site is a line of the library the fix answers" "payload/scripts/lib/said.sh:" "$SR_A"
   SR_AFTER="$(cr_part | awk '/^\$ / { c = $0; next } /^  rc=[0-9]+  \(the fix row says ready, / { f = 1; next } f && /^  rc=/ { print c }')"
   expect_contains "SR-2 commands follow the fix row's landing in the replay's log (read beside the moves)" "close-out.sh" "$SR_AFTER"
@@ -304,7 +309,7 @@ if [ -n "$(cr_rc 'the integrate row opens the pull request')" ]; then
   expect_eq "PR-3 the stand-in is the only gh on that PATH" "gh is $CR_DIR/bin/gh" \
     "$(cr_out "the gh on the integrate row's PATH")"
   expect_eq "PR-4 the person's merge through it leaves main holding the reviews part's commit, whose parent is the head the release check held" "0|yes|yes" \
-    "$(cr_rc 'the person merges the pull request' | tail -1)|$([ "$(cr_field "$(cr_part_event)" commit)" = "$(git -C "$CR_ROOT" rev-parse --verify -q refs/heads/main)" ] && echo yes)|$(/usr/bin/grep -q "^proved: kind=check head=$(git -C "$CR_ROOT" rev-parse --verify -q 'refs/heads/main^1' 2>/dev/null) " "$CR_PLAN" 2>/dev/null && echo yes)"
+    "$(cr_rc 'the person merges the pull request' | tail -1)|$([ "$(cr_field "$(cr_part_event)" commit)" = "$(git -C "$CR_ROOT" rev-parse --verify -q refs/heads/main)" ] && echo yes)|$(cr_proofs "$CR_PLAN" "$CR_REC/run.log" | /usr/bin/grep -q "^proved: kind=check head=$(git -C "$CR_ROOT" rev-parse --verify -q 'refs/heads/main^1' 2>/dev/null) " && echo yes)"
 else
   expect_eq "PR-0 the replay reached the integrate row's pull request, so this section can be read" "reached" "not reached"
 fi
@@ -328,10 +333,9 @@ if cr_reached "EN-0"; then
     "$(printf '%s\n' "$EN_PART" | sed -n 1p)"
   expect_eq "EN-3 …and lists the failed review exactly as the plan registered it" "$EN_WANT" \
     "$([ -n "$EN_WANT" ] && printf '%s\n' "$EN_PART" | /usr/bin/grep -x -F -- "$EN_WANT")"
-  EN_PLAN_N="$(awk '/^[[:space:]]*```/ { fence = !fence; next } fence { next } /^##[[:space:]]/ { s = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    s && /^proved: kind=review / { n++ } END { print n + 0 }' "$CR_PLAN")"
+  EN_PLAN_N="$(cr_proofs "$CR_PLAN" "$CR_REC/run.log" | /usr/bin/grep -c '^proved: kind=review ')"
   EN_PLAN_N=$((EN_PLAN_N + $(cat "$CR_REC/run.log" 2>/dev/null | /usr/bin/grep -c '^run/v1|ev=waiver|')))
-  expect_eq "EN-4 the part lists as many reviews and waivers as the run registers, the reviews in its plan and the waivers in its log (it registers some)" "$EN_PLAN_N|yes" \
+  expect_eq "EN-4 the part lists as many reviews and waivers as the run registers, its reviews and its waivers both in its log (it registers some)" "$EN_PLAN_N|yes" \
     "$(printf '%s\n' "$EN_PART" | /usr/bin/grep -c '^- ')|$([ "$EN_PLAN_N" -ge 1 ] && echo yes)"
   EN_MAIN="$(git -C "$CR_ROOT" show "refs/heads/main:CHANGELOG.md" 2>/dev/null | cr_entry_part "$EN_VER")"
   expect_eq "EN-2m main's release entry holds the reviews part after the person's merge" "### The reviews" \
@@ -477,7 +481,7 @@ if [ "$SG_RC" = 0 ] && [ -f "$SG_PLAN" ]; then
   expect_eq "SG-6 the status is the landing's: no matrix-set writes a status (rehearsal.sh holds none), the block's evidence is the landing's log" "0|yes" \
     "$(/usr/bin/grep -c 'matrix-set.*status=' "$BIONIC_SCRIPTS_DIR/tests/lib/rehearsal.sh")|$(awk '/^AC-1\.1:/ { b = 1; next } b && /^[^ \t]/ { b = 0 } b && /^[ \t]+evidence: record\/wave-x\/line\/T1-rehearsal-row-/ { y = 1 } END { if (y) print "yes" }' "$SG_PLAN")"
   # The evidence review: one proof line of the question, its reader's roster row the critic's, dealt evidence.
-  SG_READER="$(sed -n 's/^proved: kind=review .* question=evidence reader=\([^ ]*\) .*/\1/p' "$SG_PLAN" | tail -1)"
+  SG_READER="$(cr_proofs "$SG_PLAN" | sed -n 's/^proved: kind=review .* question=evidence reader=\([^ ]*\) .*/\1/p' | tail -1)"
   expect_eq "SG-7 the evidence question was read by the critic: its proof line names a reader whose roster row is bionic:critic, dealt evidence" \
     "w-evidence-whole|bionic:critic|evidence" \
     "$SG_READER|$(/usr/bin/grep -h "|name=${SG_READER:-none}|" "$SG_DIR"/project/.bionic/tmp/roster-*.state 2>/dev/null | tail -1 | tr '|' '\n' | sed -n 's/^subagent_type=//p;s/^questions=//p' | paste -sd'|' -)"

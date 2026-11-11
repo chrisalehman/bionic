@@ -1323,7 +1323,8 @@ co_cont_sections() {  # <write|check> -> CO_SEC_MSG: what was (write) or would b
       [ "$mode" != write ] || co_cont_write "## Hand-holds" "$miss" lines
     fi
   fi
-  lines="$(proof_inherited_lines "$PLAN" 2>/dev/null)"
+  lines="$(proof_inherited_lines "$PLAN" 2>/dev/null)" \
+    || _co_refuse "the run's facts cannot be read, so the inherited debt it carries is not known; run close-out again"
   if [ -n "$lines" ]; then
     if ! co_cont_has_heading "## Inherited debt"; then
       phr="${phr:+$phr and }the ## Inherited debt section"
@@ -1409,14 +1410,14 @@ co_governed_section() {
   printf '## Governed by\n\n```\n%s\n```\n' "$CO_GOV_LINES"
 }
 
-# co_inherited_section -> `## Inherited debt` and every `inherited:` line of the plan's `## SDLC State`, as the verb
+# co_inherited_section -> `## Inherited debt` and every inherited suite of the run, one `inherited:` line each, as the verb
 # wrote it, fenced as the hand-holds are; nothing at all for a plan that carries none, and the template then prints
 # nothing for it, so that continuation is byte for byte what it was (wave-35
 # T10; AC-1.6 "carried into the continuation", A-orch-18). The lines are lib/proof.sh `proof_inherited_lines`, the
 # one reader the floor's judge reads them through: debt the run inherited, red at its base and at its floor.
 co_inherited_section() {
   local lines
-  lines="$(proof_inherited_lines "$PLAN" 2>/dev/null)"
+  lines="$(proof_inherited_lines "$PLAN" 2>/dev/null)" || return 2
   [ -n "$lines" ] || return 0
   printf '## Inherited debt\n\n```\n%s\n```\n' "$lines"
 }
@@ -1462,7 +1463,8 @@ co_patrol_sentence() {
 continuation_template() {
   local sha tasks regress reviews patrol inherited head resume ws line at ev whole_text
   sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
-  inherited="$(co_inherited_section)"
+  inherited="$(co_inherited_section)" \
+    || _co_refuse "the run's facts cannot be read, so the inherited debt it carries is not known; run close-out again"
   tasks="$(co_task_count)"
   # THE REGRESSION is the full pass's state at the working head, from the one printer the release card and the
   # scorecard draw too (lib/proof.sh `proof_whole_text`), then the proof's instant and log; it is never read off the
@@ -1949,47 +1951,6 @@ ensure_step8_line() {
   mv "$tmp" "$file"
 }
 
-# walk_pointer_wanted <file> -> the `walk-artifact:` value to write into the Step-5 block, or nothing
-# (wave-33 T8; D8, AC-4.2). The walk gate reads the pointer from the Step-5 block (walls.sh
-# step5_evidence_block); `matrix-render` stubs one at the matrix head and the walk fills THAT. When the
-# plan owes a walk, has a Step-5 line, and that block names none while the matrix head names a real file,
-# the head's value is the one pointer there is. A stub (pending, <…>, n/a) is no pointer, and none is invented.
-walk_pointer_wanted() {
-  [ "$(plan_frontmatter_get "$1" walk)" != exempt ] || return 0
-  awk '
-    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
-    /^## / { insdlc = ($0 ~ /^## SDLC State/); inmat = ($0 ~ /^## Verification Matrix/); b5 = 0; next }
-    insdlc && b5 && !/^[[:space:]]/ && !/^[[:space:]]*-?[[:space:]]*Step[[:space:]]+5[[:space:]]*:/ { b5 = 0 }
-    insdlc && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+[0-9]+[[:space:]]*:/ { b5 = 0 }
-    insdlc && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+5[[:space:]]*:/ { has5 = 1; b5 = 1 }
-    insdlc && b5 && /walk-artifact[[:space:]]*:/ { have = 1 }
-    inmat && !head && /^walk-artifact[[:space:]]*:/ {
-      v = $0; sub(/^walk-artifact[[:space:]]*:[[:space:]]*/, "", v); head = trim(v)
-    }
-    END {
-      l = tolower(head)
-      if (!has5 || have || head == "" || head ~ /^</ || l == "pending" || l == "tbd" || l == "todo" || l == "n/a" || l == "na" || l == "none" || l == "-" || l == "—") exit
-      print head
-    }' "$1"
-}
-
-# ensure_walk_pointer <file> -> the pointer written as a continuation line right under the Step-5 line.
-ensure_walk_pointer() {
-  local file="$1" v tmp="$1.walk.$$"
-  v="$(walk_pointer_wanted "$file")"
-  [ -n "$v" ] || return 0
-  CO_WALK="  walk-artifact: $v" awk '
-    /^## / { insdlc = ($0 ~ /^## SDLC State/) }
-    { print }
-    insdlc && !done && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+5[[:space:]]*:/ { print ENVIRON["CO_WALK"]; done = 1 }
-  ' "$file" > "$tmp" 2>/dev/null
-  if [ ! -s "$tmp" ]; then
-    rm -f "$tmp"
-    _co_refuse "could not write the walk pointer into $file"
-  fi
-  mv "$tmp" "$file"
-}
-
 # write_plan_blocks <8|9> [target] — the plan is written in TWO PHASES so the commit gate can judge
 # the Step-8 block while the plan is still open (critic2 N-3, wave-23 T16).
 #   8  replaces the Step-8 line with whatever continuation lines it had. `current:` stays
@@ -2012,12 +1973,11 @@ ensure_walk_pointer() {
 write_plan_blocks() {
   local phase="$1" target="${2:-$PLAN}"
   local tmp="$target.close-out.$$" step8
-  # PHASE 8 WRITES THE LINES IT READS BACK (wave-33 T8; D8, AC-4.2): the Step-8 line when the plan has
-  # none, and the walk pointer where the walk gate reads it. Both are done to the TARGET, which is the
-  # pre-flight's scratch copy on the first call, so a refusal still leaves the plan byte-for-byte as it was.
+  # PHASE 8 WRITES THE LINE IT READS BACK: the Step-8 line when the plan has
+  # none. It is done to the TARGET, which is the pre-flight's scratch copy on the first call, so a refusal
+  # still leaves the plan byte-for-byte as it was. The walk is the gate's to read from the walk's proof.
   if [ "$phase" = 8 ]; then
     ensure_step8_line "$target"
-    ensure_walk_pointer "$target"
   fi
   step8="$(step8_block)"
   step9_present "$target" || step8="$step8"$'\n''- Step 9: (pending)'
@@ -2393,7 +2353,6 @@ do_check() {
     [ -z "$FACTS_LINES" ] || printf '%s\n' "$FACTS_LINES" | sed 's/^/  /'
   fi
   step8_present "$PLAN" || say 'step8: no Step 8 line in ## SDLC State — run writes it with the block (after the Step-7 block)'
-  [ -z "$(walk_pointer_wanted "$PLAN")" ] || say "walk: the Step-5 block names no walk-artifact: — run writes 'walk-artifact: $(walk_pointer_wanted "$PLAN")' there, from the matrix head"
   step9_present "$PLAN" || say 'step9: no Step 9 line in ## SDLC State — run writes `- Step 9: (pending)` with the Step-8 block'
   ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
   is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"

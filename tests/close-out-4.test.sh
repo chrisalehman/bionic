@@ -807,7 +807,7 @@ expect_eq "RV-16 …and its branch is where it was" "$RN_H" "$(rv_tip "$PRN")"
 # (lands_bind), as a run at Step 8 is; the project declares a release check and its proof line names the release head,
 # as `release-check` writes it; the integrate row's record is a file under record/ its Files name; the person's merge is
 # a plain merge into main. The hand-edited part is a commit on a side branch, made by git's plumbing.
-# fails-when: deliver lands the integrate row while the part is missing, the verb's part differs from close-out's or
+# fails-when: the tick lands the integrate row while the part is missing, the verb's part differs from close-out's or
 # touches another path, the record does not name the commit, main's entry lacks the part after the merge, close-out
 # commits or records a second part, or the judge holds a hand-edited part covered.
 bp_judge() {  # <project> <head> -> `<proof_prose_past rc from the release head>|<facts_state's check state at head>`

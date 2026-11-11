@@ -267,8 +267,9 @@ expect_eq "9l a discharged row is never deferred, and a pending one is before it
 # Section 26: the walk gate reads the walk
 # ============================================================
 # A walk narrates without the criteria unless proof-add walk registered it as a verdict table, whose AC identifiers
-# are its verdicts: the arm yields to a `proved: kind=walk` line whose evidence names the Step-5 walk-artifact.
-# fails-when: the identifier arm deleted (26a), a registered walk refused (26b), or the yield read by kind alone (26c).
+# are its verdicts. The walk the gate reads is the run's newest walk proof, else an older plan's Step-5 walk-artifact.
+# fails-when: the identifier arm deleted (26a), a registered walk refused (26b), the Step-5 pointer read over the walk's
+# proof (26c), or a walk proof the run's log alone holds not read as the walk (26d).
 
 section "Section 26: the walk gate reads the walk"
 
@@ -282,6 +283,9 @@ wg_home() {  # <proved line or empty> -> a sandbox at current 5 whose walk recor
 wg_line="proved: kind=walk head=$EG_HEAD at=2026-10-24T00:00:00Z evidence=record/w"
 expect_block "26a an unregistered walk naming AC identifiers is refused on the identifier arm" "$(wg_home "")" 'git commit -m "x"' "AC-<n>"
 expect_allow "26b the same walk, registered by proof-add walk, is its verdict table" "$(wg_home "$wg_line/walk.md")" 'git commit -m "x"'
-expect_block "26c a walk line naming another record does not register this one" "$(wg_home "$wg_line/other.md")" 'git commit -m "x"' "AC-<n>"
+expect_block "26c the walk is the proof's record, not the Step-5 pointer: a proof naming another record, absent, is refused for it" "$(wg_home "$wg_line/other.md")" 'git commit -m "x"' "record/w/other.md"
+wg_h="$(wg_home "")"; awk '!/^  walk-artifact: /' "$wg_h/.bionic/docs/plans/active.md" > "$wg_h/p.n" && mv "$wg_h/p.n" "$wg_h/.bionic/docs/plans/active.md"
+mkdir -p "$wg_h/.bionic/docs/record/active.md"; printf 'run/v1|ev=proof|kind=walk|head=%s|evidence=record/w/walk.md|at=2026-10-24T00:00:00Z\n' "$EG_HEAD" > "$wg_h/.bionic/docs/record/active.md/run.log"
+expect_allow "26d a walk proof the run's log alone holds is the walk, with no Step-5 pointer" "$wg_h" 'git commit -m "x"'
 
 finish
