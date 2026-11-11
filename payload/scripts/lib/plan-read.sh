@@ -137,6 +137,25 @@ plan_read_table() {
     function row() { print line(); if (rn > nh) printf "#\tover\t%s\t%d\n", r[kc], rn }'"$_PLAN_READ_TABLE"
 }
 
+# plan_read_blocks <plan> [<criterion>] -> `<criterion><TAB><line>` per line of each criterion's block in an older
+# plan's `## Verification Matrix`, file order; a line of the section outside every block and outside the table (its
+# head: stack-health:, walk-artifact:, false-green:) with the criterion empty. A block opens at a line whose text, a list
+# leader dropped, begins `<criterion>:` with the criterion `AC-` and no blank or colon, and runs over the indented and
+# blank lines under it; its heading line is not printed. With <criterion>, that block alone. Fenced lines are examples.
+# 1 none, 2 no plan. The block's keys are what the person authored for the criterion; its state is never read here.
+plan_read_blocks() {
+  [ -f "${1:-}" ] || return 2
+  _plan_read_lines "$1" | awk -v sec="Verification Matrix" -v want="${2:-}" "$_PLAN_READ_NAMED"'
+    fenced($0) { next }
+    /^##[ \t]/ { h = $0; sub(/^##[ \t]+/, "", h); sub(/[ \t]+$/, "", h); on = named(h); ac = ""; next }
+    !on { next }
+    /^[ \t]*[|]/ { ac = ""; next }
+    /^[^ \t]/ { l = $0; sub(/^[-*+][ \t]+/, "", l); ac = match(l, /^AC-[^ \t:]+:/) ? substr(l, 1, RLENGTH - 1) : ""; if (ac == "" && want == "") { print "\t" $0; found = 1 }; next }
+    ac == "" && $0 ~ /^[ \t]*$/ { next }
+    want == "" || ac == want { print ac "\t" $0; found = 1 }
+    END { exit !found }'
+}
+
 plan_read_dropped() {  # <plan> -> one id per line, in table order; 1 none, 2 no plan
   plan_read_rows "$1" Tasks | awk -F'\t' '{ split("", c); for (i = 1; i <= NF; i++) c[substr($i, 1, index($i, "=") - 1)] = substr($i, index($i, "=") + 1)
     if (c["status"] == "dropped") { print c["id"]; n++ } } END { exit !n }'
