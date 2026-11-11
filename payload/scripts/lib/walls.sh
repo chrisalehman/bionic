@@ -1860,8 +1860,8 @@ matrix_table_rows() {
 matrix_close_eval() { grep -qE 'landing-report[[:space:]]+--hand-holds' <<< "$1"; }
 
 # matrix_close_rows <plan> -> the AC id of each pending criterion the close settles, the reader's
-# order: owed at Step 9, and its block's `eval:` is the close's measure (matrix_close_eval).
-# close-out writes each such row's cells from that reading. 2 when the run's facts could not be read.
+# order: owed at Step 9, and its block's `eval:`, else its Eval design row's, is the close's measure (matrix_close_eval).
+# close-out proves each such criterion from that reading. 2 when the run's facts could not be read.
 matrix_close_rows() {
   local PLAN="$1" MATRIX_CELLS MATRIX_BLOCKS ac tier status ev aud conf w block
   matrix_load "$PLAN" || return 2
@@ -1869,7 +1869,8 @@ matrix_close_rows() {
     [ -n "$ac" ] && [ "$status" = pending ] || continue
     block="$(matrix_block "$ac")"
     [ "$(matrix_owing_step "$PLAN" "$block")" = 9 ] || continue
-    matrix_close_eval "$(grep -E '^[[:space:]]*eval[[:space:]]*:' <<< "$block")" || continue
+    matrix_close_eval "$(grep -E '^[[:space:]]*eval[[:space:]]*:' <<< "$block")" \
+      || matrix_close_eval "$(plan_read_row "$PLAN" 'Eval design' Criterion "$ac" 2>/dev/null | grep '^eval=')" || continue
     printf '%s\n' "$ac"
   done <<MATRIX_ROWS
 $(matrix_table_rows)
