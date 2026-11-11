@@ -997,4 +997,13 @@ assert_eq "THEMES-7 at task scale the flat list is written" 0 "$HOOK_EXIT"
 # gives every other section in this file) would hide the exact defect this
 # AC guards.
 echo
+# The words, called directly (lib/write-gate.sh): every key says a fact, a fix and a detail that names the artifact; no key says nothing.
+WG="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/write-gate.sh"
+wg() { bash -c '. "$1"; shift; write_gate_say "$@" || exit $?; printf "%s|%s|%s" "$WG_FACT" "$WG_FIX" "$WG_DETAIL"' _ "$WG" "$@"; }
+assert_eq "WG-1 a key says its fact, fix and detail" "this artifact declares no governing skill|add a 'governing-skill:' line|canonical-sdlc artifact 'x.plan.md' is missing a 'governing-skill:' frontmatter field.
+Path: /p/x.plan.md
+Fix: add a non-empty 'governing-skill: <skill-id>' line to the frontmatter block." "$(wg no-governing x.plan.md /p/x.plan.md)"
+assert_contains "WG-2 a frame key renders the path under the artifact" "invalid scale: 'huge' — allowed: task|wave|epic
+Path: /p/x.plan.md" "$(wg bad-scale x.plan.md /p/x.plan.md huge)"
+assert_eq "WG-3 a key that is none of these says nothing, rc 2" "2 " "$(wg nope x /p >/dev/null; echo "$?") $(wg nope x /p 2>/dev/null)"
 finish

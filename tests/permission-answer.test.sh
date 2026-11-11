@@ -872,4 +872,11 @@ a22 "find $A22T/src -name '*.txt'"
 expect_eq "A22.c4 control: a find rooted in the tree: allow" "allow" "$(behavior "$OUT")"
 
 # ══════════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════════════
+# The words, called directly (lib/grant.sh): a failure names what failed, and a denial's message is the reason beside its fix.
+pw() { bash -c '. "$1"; shift; "$@"; printf "%s|%s|%s" "$GRANT_FAIL_REASON" "$GRANT_FAIL_MESSAGE" "$GRANT_DENY_MESSAGE"' _ "$LIBDIR/grant.sh" "$@"; }
+expect_eq "A23.a a failure key quotes its facts in the reason and the message" \
+  "failure: the decision could not be made (grant_decide rc 3)|bionic could not answer this permission question, so it is denied: the decision could not be made (grant_decide rc 3). Tell the lead (the human, if you are the lead) what failed; /bionic:doctor checks the install.|" \
+  "$(pw grant_fail_words decide 3)"
+expect_eq "A23.b a reason with a mark and a fix make one message" "||bionic: outside the grant fix it" "$(pw grant_deny_words deny-fix $'outside\tthe grant\tfix it')"
 finish
