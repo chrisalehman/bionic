@@ -1419,5 +1419,20 @@ call units_row_back "$LV_P" T1
 expect_eq "BACK-2 a launch by its cells returns by its cells, and writes no cancel" "pending/— 0 | T1 | 4 | build | one | — |" \
   "$(lv T1) $(grep -c '|ev=cancel|of=dispatch|row=T1|' "$LV_LOG") $(grep -o '^| T1 | 4 | build | one | [^|]* |' "$LV_P")"
 
+section "§TREE — a row's tree and base are the run's: the newest tree event in the log, the cells for a row it holds none for"
+TV_P="$SANDBOX/docs/plans/e/t.plan.md"; LV_LOG="$SANDBOX/docs/record/t/run.log"; mkdir -p "${LV_LOG%/*}"
+{ printf -- '---\ncurrent: 4\n---\n\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status | worktree | base |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | one | a1 | — | 30m | R | a.sh | active | .worktrees/t1 | 1111aaaa |\n'
+  printf '| T2 | 4 | build | two | — | — | 30m | R | b.sh | pending | — | — |\n'; } > "$TV_P"
+tv() { call units_rows "$TV_P" | awk -F'\t' -v r="$1" '$1 == r { print $10 "/" $5 "/" $11 "/" $12 }'; }
+TV_SUM="$(cksum < "$TV_P")"
+lv_log tree row=T2 path=.worktrees/t2 branch=wt/t2 base=2222bbbbccccdddd by=w-T2
+expect_eq "TREE-1 a tree in the log fills the row's tree and base, its state untouched; a row it holds none for reads its cells" \
+  "pending/—/.worktrees/t2/2222bbbb active/a1/.worktrees/t1/1111aaaa" "$(tv T2) $(tv T1)"
+lv_log dispatch row=T2 name=w-T2 brief=b sum=s
+lv_log tree row=T2 path=.worktrees/t2b branch=wt/t2b base=3333eeee by=w-T2
+expect_eq "TREE-2 with its launch it reads active under its name in its newest tree, and the plan is unchanged" \
+  "active/w-T2/.worktrees/t2b/3333eeee same" "$(tv T2) $([ "$(cksum < "$TV_P")" = "$TV_SUM" ] && echo same)"
+
 # ============================================================
 finish

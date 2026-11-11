@@ -44,6 +44,7 @@ planted_born_b() { RUN_LOG="$log" log_append born "row=$child" "reason=split fro
 planted_waiver() { log_append waiver question=evidence; }
 planted_finding() { log_append finding ref=r.md#1; }
 planted_dispatch() { log_append dispatch row=T1; }
+planted_tree() { RUN_LOG="$log" log_append tree row=T1 path=.worktrees/t1; }
 EOF
 printf '%s\n' "planted_reader_rows() { awk -F'|' '\$2 ~ /T/' \"\$plan\"; }" >> "$L/reader.sh"
 printf '%s\n' 'deny "planted refusal words"' >> "$S/hooks/engage.sh"
@@ -79,8 +80,11 @@ expect_contains "dispatch: the planted second writer beside it" "payload/scripts
 BRN="$(printf '%s\n' "$AFTER" | awk -F'\t' '$1 == "shared" && $2 == "born" { print $3 }')"
 expect_contains "born: the units library's one writer" "payload/scripts/lib/units.sh:units_born_event" "$BRN"
 expect_contains "born: the planted split beside it" "payload/scripts/lib/planted-writers.sh:planted_born_b" "$BRN"
-SH0="$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "shared" && ($2 == "born" || $2 == "dispatch" || $2 == "waiver" || $2 == "finding")' | grep -c .)"
-expect_eq "the shared-type count rises by each of the four planted types not shared before" "$(( $(count "$BEFORE" shared_types) + 4 - SH0 ))" "$(count "$AFTER" shared_types)"
+TRE="$(pair tree)"
+expect_contains "tree: the tree verb's one writer" "payload/scripts/lib/worktree.sh:worktree_tree_event" "$TRE"
+expect_contains "tree: the planted second writer beside it" "payload/scripts/lib/planted-writers.sh:planted_tree" "$TRE"
+SH0="$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "shared" && ($2 == "born" || $2 == "dispatch" || $2 == "waiver" || $2 == "finding" || $2 == "tree")' | grep -c .)"
+expect_eq "the shared-type count rises by each of the five planted types not shared before" "$(( $(count "$BEFORE" shared_types) + 5 - SH0 ))" "$(count "$AFTER" shared_types)"
 
 section "NAMES"
 names() { /usr/bin/grep -rnE 'launch-sync|ledger-add|ledger-set|task-set|task-split|tasks-prose' "$1/hooks" "$1/payload/scripts" | grep -v '/payload/scripts/lib/walls\.sh:'; }

@@ -893,5 +893,23 @@ expect_eq "(tr4) an unnamed create's tree has no record: nothing, rc 1" "rc=1" "
 cp "$(git -C "$TR1" rev-parse --absolute-git-dir)/bionic-tree" "$(git -C "$(ws_path "$TROUT4")" rev-parse --absolute-git-dir)/bionic-tree" 2>/dev/null
 expect_eq "(tr5) a record naming another tree's path is no record of this one" "rc=1" "$(tr_rec "$(ws_path "$TROUT4")")"
 
+section "§TREE: a tree made for a row is one event in its run's log, and the plan is not written"
+# The row is the one the name's brief was rendered from (`<record>/briefs/<name>.md`, its mark); a name with no brief
+# is no row's and appends nothing. fails-when: create writes a cell, or the event is missing, doubled or misses a field.
+TRREC="$TR/.bionic/docs/record/wave-x"; mkdir -p "$TRREC/briefs"
+printf '<!-- brief: rendered from row T2 for w45-T6; sum %064d; render it again to change it, never edit it -->\nRow: T2\n' 0 \
+  > "$TRREC/briefs/w45-T6.md"
+TRSUM="$(cksum < "$TRPLAN")"
+TROUT6="$(ws_create "$TRSID" "$TR" "$TRBASE" wt/45-T6 --for w45-T6)"
+expect_eq "(tv0) the create for a briefed name exits 0" "rc=0" "$(printf '%s\n' "$TROUT6" | tail -n1)"
+tr_trees() { grep '^run/v1|ev=tree|' "$TRREC/run.log" 2>/dev/null; }
+expect_match "(tv1) one tree event: the brief's row, the tree from the root, its branch and base, the name" \
+  "run/v1|ev=tree|row=T2|path=.worktrees/45-T6|branch=wt/45-T6|base=${TRBASE}|by=w45-T6|at=*" "$(tr_trees)"
+expect_eq "(tv2) …and only one" "1" "$(tr_trees | grep -c .)"
+expect_eq "(tv3) the plan's bytes are unchanged" "$TRSUM" "$(cksum < "$TRPLAN")"
+ws_create "$TRSID" "$TR" "$TRBASE" wt/45-T7 --for w45-T7 >/dev/null
+expect_eq "(tv4) a name with no brief appends nothing beside the one event" "1|0" \
+  "$(tr_trees | grep -c .)|$(tr_trees | grep -c 'by=w45-T7')"
+
 
 finish

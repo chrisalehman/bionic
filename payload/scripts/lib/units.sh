@@ -214,7 +214,11 @@ _units_table() {
 # cell, which is the old home the translation reads, so a run whose log holds none of these reads as its cells say.
 # The text itself is judged as written (`units_validate` reads `_units_table`), so a write is never refused for a
 # state the plan does not carry. A plan writer's dry copy and close-out's preflight copy are read with their plan's run.
-# _units_live <plan> -> `<id><TAB><state><TAB><agent>` per row the log moves; nothing without a log; 2 a failed fold
+# A row's tree and base are the run's the same way: the newest `tree` event the log holds for it (the tree verb's, with an
+# instant) fills the `worktree` and `base` slots, the base by its first eight digits as a cell spells it; a row the
+# log holds no tree for reads its cells.
+# _units_live <plan> -> `<id><TAB><state><TAB><agent><TAB><tree><TAB><base>` per row the log moves; nothing without a
+# log; 2 a failed fold
 _units_live() {
   local plan="${1:-}" log facts
   if [ -n "${_UNITS_MEMO_PLAN:-}" ] && [ "$_UNITS_MEMO_PLAN" = "$plan" ] && [ -n "${_UNITS_MEMO_LIVE_RC:-}" ]; then
@@ -228,9 +232,12 @@ _units_live() {
   printf '%s\n' "$facts" | awk -F'|' '
     { split("", f); for (i = 2; i <= NF; i++) { e = index($i, "="); if (e > 1 && !(substr($i, 1, e - 1) in f)) f[substr($i, 1, e - 1)] = substr($i, e + 1) }
       r = f["row"]; if (r == "") next }
-    f["ev"] == "dispatch" && f["at"] != "" { if (!(r in st)) ord[++n] = r; st[r] = "active"; nm[r] = f["name"] }
-    f["ev"] == "published" { if (!(r in st)) ord[++n] = r; st[r] = "landed" }
-    END { for (i = 1; i <= n; i++) printf "%s\t%s\t%s\n", ord[i], st[ord[i]], (st[ord[i]] == "active" ? nm[ord[i]] : "") }'
+    !(r in seen) { seen[r] = 1; ord[++n] = r }
+    f["ev"] == "dispatch" && f["at"] != "" { st[r] = "active"; nm[r] = f["name"] }
+    f["ev"] == "published" { st[r] = "landed" }
+    f["ev"] == "tree" && f["at"] != "" { tr[r] = f["path"]; bs[r] = substr(f["base"], 1, 8) }
+    END { for (i = 1; i <= n; i++) { r = ord[i]; if ((r in st) || (r in tr))
+      printf "%s\t%s\t%s\t%s\t%s\n", r, st[r], (st[r] == "active" ? nm[r] : ""), tr[r], bs[r] } }'
 }
 
 # _units_origin <plan> -> the plan a copy was made from, whose run it reads: a plan verb's `<plan>.<verb>.<pid>` and
@@ -242,13 +249,14 @@ _units_origin() {
   if [ -f "$o" ]; then printf '%s' "$o"; else printf '%s' "$1"; fi
 }
 
-# _units_overlay <live> <rows> -> the rows, each moved row's status and agent the run's
+# _units_overlay <live> <rows> -> the rows, each moved row's status, agent, tree and base the run's
 _units_overlay() {
   [ -n "$1" ] || { printf '%s\n' "$2"; return 0; }
   printf '%s\n\034\n%s' "$1" "$2" | awk -F'\t' -v OFS='\t' '
     $0 == "\034" { r = 1; next }
-    !r { st[$1] = $2; nm[$1] = $3; next }
-    ($1 in st) && $10 != "landed" && $10 != "dropped" { $10 = st[$1]; if (nm[$1] != "") $5 = nm[$1] }
+    !r { st[$1] = $2; nm[$1] = $3; tr[$1] = $4; bs[$1] = $5; next }
+    st[$1] != "" && $10 != "landed" && $10 != "dropped" { $10 = st[$1]; if (nm[$1] != "") $5 = nm[$1] }
+    tr[$1] != "" { $11 = tr[$1]; $12 = bs[$1] }
     { print }'
 }
 

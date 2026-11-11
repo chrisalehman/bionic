@@ -2091,6 +2091,31 @@ worktree_record_tree() {  # <root> <sid> <name> <abs tree>
     || { rm -f "$f.$$"; printf 'tree-record-unwritable'; return 1; }
 }
 
+# A TREE MADE FOR A ROW IS ONE EVENT OF ITS RUN. The row is the one the name's brief was rendered from
+# (`<record>/briefs/<name>.md`, whose mark names the row and the name), and the event is appended to that run's log
+# through the one appender: the row, the tree's path from the root (as a Tasks cell spells it), its branch, its base
+# and the name. A row's tree and base are read from it (lib/units.sh `_units_live`); no cell is written. A name with no
+# brief, or a session bound to no plan, is no row's and appends nothing, as a launch with no brief does.
+# Prints the row; rc 1 with nothing appended.
+worktree_tree_event() {  # <root> <sid> <name> <abs tree> <branch> <base sha>
+  local root="${1:-}" name="${3:-}" tree="${4:-}" plan rec d rp
+  plan="$(_wt_workspace_plan "$root" "${2:-}")" && [ "$plan" != none ] || return 1
+  rec="$(_wt_proofs_path "$root" "$plan")" || return 1
+  rec="${rec%/*}"
+  [ -f "$rec/briefs/$name.md" ] || return 1
+  d="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )" || return 1
+  # shellcheck source=/dev/null
+  declare -F brief_file_read >/dev/null 2>&1 || . "$d/brief.sh" >/dev/null 2>&1 || return 1
+  brief_file_read "$root" "$rec/briefs/$name.md"
+  [ -n "$BRIEF_FILE_ROW" ] && [ "$BRIEF_FILE_NAME" = "$name" ] || return 1
+  # shellcheck source=/dev/null
+  declare -F log_append >/dev/null 2>&1 || . "$d/log.sh" >/dev/null 2>&1 || return 1
+  rp="$(cd "$root" 2>/dev/null && pwd -P)" || rp="$root"
+  case "$tree" in "$rp"/*) tree="${tree#"$rp"/}" ;; "$root"/*) tree="${tree#"$root"/}" ;; esac
+  RUN_LOG="$rec/run.log" log_append tree "row=$BRIEF_FILE_ROW" "path=$tree" "branch=${5:-}" "base=${6:-}" "by=$name" || return 1
+  printf '%s' "$BRIEF_FILE_ROW"
+}
+
 # worktree_tree_record <tree> -> the tree's record line; rc 1 when it carries none of its own.
 worktree_tree_record() {  # <tree>
   local tree f line=""

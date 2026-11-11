@@ -446,6 +446,9 @@ cmd_create() {
     # shellcheck source=/dev/null
     why="$( . "$LIB_WORKTREE" 2>/dev/null || { printf 'library-unloadable'; exit 1; }
             worktree_record_tree "$main_root" "$sid" "$name" "$wt" )" || abort_created "${why:-tree-record-unwritable}"
+    # The run's tree event, for a name whose brief names its row; a name that is no row's appends nothing.
+    # shellcheck source=/dev/null
+    ( . "$LIB_WORKTREE" 2>/dev/null && worktree_tree_event "$main_root" "$sid" "$name" "$wt" "$branch" "$base_sha" ) >/dev/null 2>&1
   fi
 
   # After the tree is verified and recorded, so an aborted create leaves no exclude line behind;
