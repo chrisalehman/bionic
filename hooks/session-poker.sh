@@ -563,7 +563,6 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the release approval card, all default or all recommended, into approve, waive, waive-row and finding-move with their words"
   die "  bash ${HOOK_DIR}/session-poker.sh waive-row <AC-id> '<the user's words>' '<why>'   waive that matrix row on words the user typed in this session: its block's waiver: line and its status waived"
   die "  bash ${HOOK_DIR}/session-poker.sh confirm-row <AC-id> '<the user's words>' ['<why>']   record the user's own confirmation of a T4 row's check, on words they typed in this session: its block's attributed confirmation line"
-  die "  bash ${HOOK_DIR}/session-poker.sh tasks-prose '<text>' [--replace '<first words>']   write a one-line paragraph under ## Tasks, below the table; --replace rewrites the paragraph opening with those words"
   die "  bash ${HOOK_DIR}/session-poker.sh epic-row <wave> <col>=<val>... [--plan <plan>]   set cells of that wave's row in the shipped table of the epic.plan.md beside the run's plan"
   die "  bash ${HOOK_DIR}/session-poker.sh continuation-fill '<field>=<text>' [--plan <plan>]   fill the run's continuation's <fill: field...> mark with the text"
   die "  bash ${HOOK_DIR}/session-poker.sh handoff ['<purpose>'] < sections   write the handoff document, .bionic/docs/record/handoffs/<date>-<slug>.md, bound or not: the kind line, the title, Summary, Goal, State (computed), Findings, Decisions, Ruled out, Open, Suggested skills and Next (composed, on stdin), the resume line last; prints the path and the resume line; bound, the plan's ## Handoff becomes the one line handoff: <path> written <local time>"
@@ -919,15 +918,6 @@ case "$VERB" in
         usage "confirm-row: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not a criterion id: letters, digits, '.', '_' or '-'." ;;
     esac
     CR_AC="$1"; CR_RAW="$2"; CR_WHY_RAW="${3:-}"
-    ;;
-  # A PROSE PARAGRAPH UNDER ## Tasks (wave-33 T7; REQ-4 AC-4.1, D8). The text, then optionally
-  # `--replace '<first words>'`, naming the paragraph it rewrites.
-  tasks-prose)
-    TP_REPLACE=""; TP_HASREP=0
-    if [ $# -eq 3 ] && [ "$2" = --replace ]; then TP_HASREP=1; TP_REPLACE="$3"; set -- "$1"; fi
-    { [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ]; } || usage "tasks-prose takes '<text>', then optionally --replace '<the first words of the paragraph it rewrites>'."
-    [ "$TP_HASREP" = 0 ] || [ -n "${TP_REPLACE//[[:space:]]/}" ] || usage "tasks-prose: --replace takes the first words of the paragraph it rewrites."
-    TP_TEXT="$1"
     ;;
   # THE EPIC'S SHIPPED ROW AND THE RUN'S CONTINUATION (wave-33 T7; REQ-3 AC-3.3, D8). Each takes its operands,
   # then optionally `--plan <plan>`, the run they belong to, which a session close-out unbound must name.
@@ -3515,7 +3505,6 @@ case "$VERB" in
   matrix-retier) poker_verb_matrix_retier "$@" ;;
   waive-row) poker_verb_waive_row "$@" ;;
   confirm-row) poker_verb_confirm_row "$@" ;;
-  tasks-prose) poker_verb_tasks_prose "$@" ;;
   epic-row) poker_verb_epic_row "$@" ;;
   continuation-fill) poker_verb_continuation_fill "$@" ;;
   handoff) poker_verb_handoff "$@" ;;
