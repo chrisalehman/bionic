@@ -565,11 +565,11 @@ expect_eq "LAND-1 run exits 0 over a run whose landing record holds two landings
 expect_nonempty "LAND-3 precondition: the extractor finds lines under the heading" "$(land_section "$PLD/$CONT_REL")"
 expect_eq "LAND-5 …and the heading sits after ## Deferrals and before the Resume instruction" "yes" \
   "$(awk '/^## Deferrals$/ { a = NR } /^## Landings$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PLD/$CONT_REL")"
-# no record: the line with zeros
+# no record, and the plan lands T1 and T2: landings stand that no line measured, so the unmeasured line
 PLZ="$(mk_fixture landings2)"; advance_to "$PLZ" 8
 BIONIC_GATE_DIR="$LAND_GATE" run_close "$PLZ" run
-expect_eq "LAND-7 a run with no landing record exits 0 and its continuation carries the line with zeros, and no row" \
-  "0|landings: queue=0 hand=0 git=0 · ready-to-landed median=0.0m p75=0.0m max=0.0m · runs: green=0 red=0 none=0 discarded=0 red-then-green=0 run=0 reused=0 absent=0 · waited median=0s · killed=0" \
+expect_eq "LAND-7 a run whose plan lands rows and holds no landing record exits 0, its continuation the unmeasured line and no row" \
+  "0|landings: unmeasured — the landing record holds no line/v1 events" \
   "$CO_RC|$(land_section "$PLZ/$CONT_REL")"
 # an existing continuation is never overwritten: no section is added to it
 PLE="$(mk_fixture landings3)"; advance_to "$PLE" 8
