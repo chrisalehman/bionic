@@ -2691,7 +2691,7 @@ CF_CHECKED
 #               nothing)
 #   reply       <the word a reply names the first decision's other choice by>
 #   goal        <status> <mark> <name> <reading> <evidence>
-#   handholds | ratio | acceptance | regression | review   <the line, as the verb words it>
+#   sofar | handholds | ratio | acceptance | regression | review   <the line, as the verb words it>
 #   findings    <n> <fixed> <awaiting your decision> <carried> <the rows that fix them, space-separated>
 #   finding     <F|A|C> <severity> <sentence>
 #
@@ -2743,7 +2743,7 @@ _card_release_dec_of() {  # <key> -> the decision number the card gives it; 1 wh
 
 _card_release_read() {  # facts on stdin -> the RL_* facts; 64 and a line on stderr on a fact it does not know
   local l t title=0
-  RL_EARLY=""; RL_PREVIEW=no; RL_ACT=0; RL_ACW=0; RL_REPLY=""; RL_N=0; RL_HH=""; RL_TR=""; RL_TACC=""; RL_TREG=""
+  RL_EARLY=""; RL_PREVIEW=no; RL_ACT=0; RL_ACW=0; RL_REPLY=""; RL_N=0; RL_SF=""; RL_HH=""; RL_TR=""; RL_TACC=""; RL_TREG=""
   RL_FN=0; RL_FNF=0; RL_FNA=0; RL_FNC=0; RL_FROWS=""
   RL_MISS=(); RL_CHK=(); RL_ASIDE=(); RL_GOAL=(); RL_REVIEW=(); RL_FIND=()
   RL_DKIND=(); RL_DKEY=(); RL_DPICK=(); RL_DSUBJ=(); RL_DLAB=(); RL_OLAB=(); RL_DPH=(); RL_OPH=()
@@ -2766,6 +2766,7 @@ _card_release_read() {  # facts on stdin -> the RL_* facts; 64 and a line on std
         RL_DPH[RL_N]="${CARD_CELLS[7]:-}"; RL_OPH[RL_N]="${CARD_CELLS[8]:-}"; RL_N=$((RL_N + 1)) ;;
       reply) RL_REPLY="${CARD_CELLS[1]:-}" ;;
       goal) RL_GOAL[${#RL_GOAL[@]}]="${l#goal"$CARD_TAB"}" ;;
+      sofar) RL_SF="${CARD_CELLS[1]:-}" ;;
       handholds) RL_HH="${CARD_CELLS[1]:-}" ;;
       ratio) RL_TR="${CARD_CELLS[1]:-}" ;;
       acceptance) RL_TACC="${CARD_CELLS[1]:-}" ;;
@@ -2858,8 +2859,9 @@ _card_release() {  # facts on stdin -> the release approval card; 64 when the fa
     printf 'Goals — %d of %d reached\n' "$r" "${#RL_GOAL[@]}"
     while IFS= read -r g; do [ -z "$g" ] || _card_hang 3 "$g"; done <<< "$lines"
   fi
-  if [ -n "$RL_HH" ] || [ -n "$RL_TR" ]; then
+  if [ -n "$RL_SF" ] || [ -n "$RL_HH" ] || [ -n "$RL_TR" ]; then
     printf '\n'
+    [ -z "$RL_SF" ] || _card_hang 3 "$RL_SF"
     [ -z "$RL_HH" ] || _card_hang 3 "$RL_HH"
     [ -z "$RL_TR" ] || _card_hang 3 "$RL_TR"
   fi
