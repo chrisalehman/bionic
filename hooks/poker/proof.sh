@@ -1515,7 +1515,8 @@ FM_FINDING
             DSP_FROW="$(printf '%s\n' "$DSP_FIXED" | awk -F'\t' -v id="$DSP_FID" '$1 == id { print $2 "\t" $3; exit }')"
             DSP_DEC="none: fixed by ${DSP_FROW%%	*}, landed green at $(printf '%.12s' "${DSP_FROW#*	}")"
             # A landing no green verdict names is fixed by the first green whole run that descends from it.
-            if ! { [ -f "$DSP_REC" ] && /usr/bin/grep -F "|row=${DSP_FROW%%	*}|commit=${DSP_FROW#*	}|" "$DSP_REC" | /usr/bin/grep -qF "|result=green|"; }; then
+            if ! { _proof_fields && line_held "$DSP_REC" && line_lines "$DSP_REC" | awk -v k="|row=${DSP_FROW%%	*}|commit=${DSP_FROW#*	}|" \
+              'index($0, k) && index($0, "|result=green|") { f = 1 } END { exit !f }'; }; then
               for DSP_RH in $(_proof_regression_heads "$PV_PLAN" "$DSP_REC"); do
                 git -C "$PV_REPO" merge-base --is-ancestor "${DSP_FROW#*	}" "$DSP_RH" 2>/dev/null || continue
                 DSP_DEC="none: ${DSP_FROW%%	*} landed on no suite; fixed by the regression at $(printf '%.12s' "$DSP_RH")"; break

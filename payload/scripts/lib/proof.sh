@@ -243,8 +243,8 @@ _proof_release_readers() {
 _proof_release_proved() {
   local chk rec
   chk="$(proof_check_passes "${1:-}" "${2:-}")"
-  [ -n "$chk" ] && rec="$(proof_debt_record "$1" "$2" 2>/dev/null)" && [ -f "$rec" ] && _proof_fields || return 0
-  { printf '%s\n\034\n' "$chk"; _proof_release_readers; printf '\034\n'; cat "$rec"; } | awk -F'|' "$_LINE_FIELDS_AWK"'
+  [ -n "$chk" ] && rec="$(proof_debt_record "$1" "$2" 2>/dev/null)" && _proof_fields && line_held "$rec" || return 0
+  { printf '%s\n\034\n' "$chk"; _proof_release_readers; printf '\034\n'; line_lines "$rec"; } | awk -F'|' "$_LINE_FIELDS_AWK"'
     $0 == SUBSEP { part++; next }
     part == 0 { k[++n] = $0; next }
     part == 1 { rd[++m] = $0; next }
@@ -720,12 +720,12 @@ proof_fixed() {
     part == 2 && ($1 in landed) { print $1 "\t" $2 "\tmoved" }')"
   [ -n "$born" ] || [ -n "$moved" ] || return 0
   rec="$(proof_debt_record "$rplan" "$tree")" || return 0
-  [ -f "$rec" ] && _proof_fields || return 0
+  _proof_fields && line_held "$rec" || return 0
   # Each finding comes out `F` (its row's newest verdict commit owes a suite and every owed suite reads green there:
   # fixed at that commit) or `R` (the row's landing owes no verdict: none recorded, or every one `result=absent`, so
   # the regression arm asks below); a row with a red, or any word but green or absent, is neither.
   out="$({ printf '\034born\n'; [ -z "$moved" ] || printf '%s\n' "$moved"; [ -z "$born" ] || printf '%s\n' "$born"
-    printf '\034rec\n'; cat "$rec" 2>/dev/null; } | awk -F'|' "$_LINE_FIELDS_AWK"'
+    printf '\034rec\n'; line_lines "$rec" 2>/dev/null; } | awk -F'|' "$_LINE_FIELDS_AWK"'
     $0 == SUBSEP "born" { part = 1; next }
     $0 == SUBSEP "rec" { part = 2; next }
     part == 1 { split($0, b, "\t"); if (b[2] in seen1) next; seen1[b[2]] = 1; nb++; brow[nb] = b[1]; bid[nb] = b[2]; bhow[nb] = b[3]; want[b[1]] = 1; next }
@@ -796,7 +796,7 @@ _proof_regression_heads() {
   _proof_fields || return 0
   inh="$(proof_inherited "$1")"
   { printf '\034plan\n'; awk '{ sub(/\r$/, ""); print }' "$1" 2>/dev/null
-    printf '\034rec\n'; [ -z "${2:-}" ] || [ ! -f "$2" ] || cat "$2" 2>/dev/null; } \
+    printf '\034rec\n'; [ -z "${2:-}" ] || line_lines "$2" 2>/dev/null; } \
     | PROOF_I=",$inh," awk -F'|' "$(proof_awk)$_LINE_FIELDS_AWK"'
     function inh(s) { return index(ENVIRON["PROOF_I"], "," s ",") > 0 }
     function clean(o,   n, a, i) { n = split(o, a, ","); for (i = 1; i <= n; i++) if (a[i] != "" && !inh(a[i])) return 0; return 1 }
@@ -1097,7 +1097,7 @@ _proof_records() {
   local co="$1" rec="${2:-}" gd f
   _proof_fields || return 0
   gd="$(cd "$co" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)"
-  { if [ -n "$rec" ] && [ -f "$rec" ]; then cat "$rec"; fi
+  { if [ -n "$rec" ]; then line_lines "$rec"; fi
     if [ -n "$gd" ]; then for f in "$gd/bionic-stamps" "$gd"/worktrees/*/bionic-stamps; do
       [ -f "$f" ] && cat "$f"; done; fi; } 2>/dev/null | awk -F'|' "$_LINE_FIELDS_AWK"'
     function out(l) { lines[++nl] = l }
@@ -1194,9 +1194,9 @@ proof_regression_fold() {
   rec="$(line_record "$plan" 2>/dev/null)" || rec=""
   while IFS='	' read -r s r; do
     [ -n "$s" ] || continue
-    [ -z "$rec" ] || ! awk -F'|' -v c="$head" -v su="$s" -v l="$rel" "$_LINE_FIELDS_AWK"'
+    [ -z "$rec" ] || ! line_lines "$rec" 2>/dev/null | awk -F'|' -v c="$head" -v su="$s" -v l="$rel" "$_LINE_FIELDS_AWK"'
       line_ev() == "verdict" && line_kv("commit") == c && line_kv("suite") == su && line_kv("log") == l && line_kv("kind") == "regression" { f = 1 }
-      END { exit !f }' "$rec" 2>/dev/null \
+      END { exit !f }' 2>/dev/null \
       || continue
     line_event "$plan" verdict "row=regression" "commit=$head" "suite=$s" "result=$r" "log=$rel" "admitted=-" "width=-" \
       "kind=regression" || return 1
@@ -2402,15 +2402,18 @@ proof_plan_slug() {
 }
 
 # proof_debts_read <record> -> `<suite><TAB><token><TAB><time>` once per suite and token with a
-# `debt:` line no `void:` line names, the time the NEWEST of those lines' `at=` (wave-27 T67; review
-# pass 46 B2): each red landing is a debt of its own, and two on one suite and token are both covered
+# `debt:` line (in the run's log, an `admitted` event) no `void:` line (a `void` event) names, the record and the log
+# read as one (lib/line.sh `line_lines`), the time the NEWEST of those lines' `at=`: each red landing is a
+# debt of its own, and two on one suite and token are both covered
 # only by a green run after the later one. A line whose `at=` is no <ISO-UTC> leaves the time empty,
 # and an empty time is never covered.
 proof_debts_read() {
-  [ -f "${1:-}" ] && _proof_fields || return 0
-  awk "$_LINE_FIELDS_AWK"'
-    $1 == "void:" { v = line_kv("id"); if (v != "") voided[v] = 1; next }
-    $1 == "debt:" { n++; id[n] = line_kv("id"); su[n] = line_kv("suite"); tk[n] = line_kv("token"); at[n] = line_kv("at") }
+  _proof_fields && line_held "${1:-}" || return 0
+  # a debt line splits on blanks and an event on bars, so both split on either: no field of either holds one
+  line_lines "$1" | awk -F'[| ]' "$_LINE_FIELDS_AWK"'
+    { e = line_ev() }
+    $1 == "void:" || e == "void" { v = line_kv("id"); if (v != "") voided[v] = 1; next }
+    $1 == "debt:" || e == "admitted" { n++; id[n] = line_kv("id"); su[n] = line_kv("suite"); tk[n] = line_kv("token"); at[n] = line_kv("at") }
     END {
       iso = "^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$"
       for (i = 1; i <= n; i++) {
@@ -2421,7 +2424,7 @@ proof_debts_read() {
         else if (at[i] > when[k]) when[k] = at[i]
       }
       for (j = 1; j <= no; j++) print ord[j] "\t" ((ord[j] in bad) ? "" : when[ord[j]])
-    }' "$1" 2>/dev/null
+    }' 2>/dev/null
 }
 
 # proof_debts_open <debts> < <section text> -> `debt<TAB><suite><TAB><token>` for each of <debts>
@@ -2838,7 +2841,7 @@ _facts_born_landings() {
     && declare -F units_born_marks >/dev/null 2>&1; then
     marks="$(units_born_marks "$plan" 2>/dev/null)"
     if [ -n "$marks" ]; then
-      rec="$(proof_debt_record "$plan" "$tree")" && [ -f "$rec" ] || rec=""
+      rec="$(proof_debt_record "$plan" "$tree")" && _proof_fields && line_held "$rec" || rec=""
     fi
   fi
   [ -n "$fixed" ] || [ -n "$rec" ] || return 0
@@ -2856,7 +2859,7 @@ _facts_born_landings() {
       }' "$plan" 2>/dev/null)"
   fi
   { printf '\034asks\n%s\n\034fixed\n%s\n\034marks\n%s\n\034finds\n%s\n\034rec\n' "$asks" "$fixed" "$marks" "$finds"
-    [ -z "$rec" ] || cat "$rec" 2>/dev/null; } | awk -F'|' "$_LINE_FIELDS_AWK"'
+    [ -z "$rec" ] || line_lines "$rec" 2>/dev/null; } | awk -F'|' "$_LINE_FIELDS_AWK"'
     function rec_of(id) { return match(id, /#[0-9]+$/) ? substr(id, 1, RSTART - 1) : "" }
     function addq(cur, qs,   n, a, i) {
       n = split(qs, a, " ")

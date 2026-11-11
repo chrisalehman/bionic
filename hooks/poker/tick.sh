@@ -715,7 +715,7 @@ landing_carrier_names() {  # <plan> -> the names of the entries whose landing ca
   declare -F _line_entries >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
   declare -F _line_entries >/dev/null 2>&1 || return 0
   rec="$(_wt_proofs_path "$REPO_REAL" "$1" 2>/dev/null)" || rec=""
-  [ -n "$rec" ] && [ -f "$rec" ] && [ ! -L "$rec" ] || return 0
+  [ -n "$rec" ] && line_held "$rec" || return 0
   TICK_CARRIERS="$(_line_entries "$rec" "" 2>/dev/null | awk -F'\t' '$4 == "yes" && $2 != "" { print $2 }')"
   printf '%s' "$TICK_CARRIERS"
 }
@@ -1332,9 +1332,9 @@ RUNNING $TR_NAME $RUN_ID"
     LT_REC=""
     [ -z "$POKER_RUN_PLAN" ] \
       || LT_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(proof_plan_slug "$POKER_RUN_PLAN")/landing-proofs.log"
-    [ -z "$LT_REC" ] || [ ! -f "$LT_REC" ] || declare -F line_value >/dev/null 2>&1 \
+    [ -z "$LT_REC" ] || declare -F line_lines >/dev/null 2>&1 \
       || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
-    if [ -n "$LT_REC" ] && [ -f "$LT_REC" ] && [ ! -L "$LT_TOLD" ] && tmp_dir_ok "${LT_TOLD%/*}" && declare -F line_value >/dev/null 2>&1; then
+    if [ -n "$LT_REC" ] && declare -F line_lines >/dev/null 2>&1 && line_held "$LT_REC" && [ ! -L "$LT_TOLD" ] && tmp_dir_ok "${LT_TOLD%/*}" && declare -F line_value >/dev/null 2>&1; then
       lt_f() { line_value "$LT_EV" "$1"; }   # <key> -> its value in the event
       while IFS= read -r LT_EV; do
         [ -n "$LT_EV" ] || continue
@@ -1346,12 +1346,12 @@ RUNNING $TR_NAME $RUN_ID"
         esac
         printf '%s\n' "$LT_EV" >> "$LT_TOLD"
       done <<EOF
-$(awk -F'|' "${_LINE_FIELDS_AWK:-}"'{ e = line_ev() } e == "standing" || e == "stalled"' "$LT_REC" 2>/dev/null)
+$(line_lines "$LT_REC" | awk -F'|' "${_LINE_FIELDS_AWK:-}"'{ e = line_ev() } e == "standing" || e == "stalled"' 2>/dev/null)
 EOF
     fi
     # THE RUN'S LANDING LINE (wave-28 T14; D18): the report's first line, once the record holds a landing.
     # It is printed by the exit trap above the buffer, in the re-arm slot, so the decision stays the last line, and it enters no hash.
-    if [ -n "$LT_REC" ] && { awk -F'|' "${_LINE_FIELDS_AWK:-}"'line_ev() == "published" { f = 1; exit } END { exit !f }' "$LT_REC" 2>/dev/null \
+    if [ -n "$LT_REC" ] && { line_lines "$LT_REC" 2>/dev/null | awk -F'|' "${_LINE_FIELDS_AWK:-}"'line_ev() == "published" { f = 1 } END { exit !f }' 2>/dev/null \
       || landing_unmeasured "$LT_REC"; }; then
       TICK_LANDINGS="$(landing_report "$LT_REC" "$REPO_REAL" no 2>/dev/null | head -1)"
     fi

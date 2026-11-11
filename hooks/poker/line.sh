@@ -14,7 +14,7 @@ landing_evidence() {
   local in="$1" out="$2" row="$3" commit="$4" rec="$5" droot="$6" slug="$7" logs n side="$2.count"
   rm -f "$out.cells"
   { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
-  logs="$( [ -f "$rec" ] && awk -F'|' -v row="$row" -v c="$commit" -v root="$droot/" "${_LINE_FIELDS_AWK:-}"'
+  logs="$( line_held "$rec" && line_lines "$rec" | awk -F'|' -v row="$row" -v c="$commit" -v root="$droot/" "${_LINE_FIELDS_AWK:-}"'
     { e = line_ev() }
     e == "verdict" && line_kv("result") == "green" {
       s = line_kv("suite"); l = line_kv("log")
@@ -25,7 +25,7 @@ landing_evidence() {
       s = line_kv("suite"); k = line_kv("from") SUBSEP s SUBSEP line_kv("reads")
       if (s != "" && line_kv("reads") != "" && (k in gl) && index(gl[k], root) == 1) last[s] = substr(gl[k], length(root) + 1)
     }
-    END { for (s in last) { printf "%s\t%s\n", s, last[s]; if (index(s, "/") == 0) printf "tests/%s\t%s\n", s, last[s] } }' "$rec" 2>/dev/null )"
+    END { for (s in last) { printf "%s\t%s\n", s, last[s]; if (index(s, "/") == 0) printf "tests/%s\t%s\n", s, last[s] } }' 2>/dev/null )"
   if [ -z "$logs" ]; then printf '0'; return 0; fi
   LE_TASKS="$(serves_tasks "$in")" LE_ROW="$row" LE_LOGS="$logs" LE_SLUG="$slug" LE_COUNT="$side" \
     awk "$(units_ac_head_awk)$SERVES_AWK$LE_AWK" "$in" > "$out.le" 2>/dev/null || { rm -f "$out.le" "$side"; return 1; }
@@ -344,9 +344,9 @@ row_landed_scan() {
   scan="$RL_COMMIT"
   { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
   p="$(git -C "$co" rev-parse --verify -q "$RL_COMMIT^{commit}" 2>/dev/null)"
-  n="$(awk -F'|' -v r="$PV_ID" -v c="$p" "${_LINE_FIELDS_AWK:-}"'
+  n="$(line_lines "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" 2>/dev/null | awk -F'|' -v r="$PV_ID" -v c="$p" "${_LINE_FIELDS_AWK:-}"'
     line_ev() == "published" && line_kv("row") == r && line_kv("commit") == c && line_kv("numbers") != "" { n = line_kv("numbers") }
-    END { print n }' "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" 2>/dev/null)"
+    END { print n }' 2>/dev/null)"
   if [ -n "$n" ] && [ -n "$p" ] && [ "$(git -C "$co" rev-parse --verify -q "$n^1" 2>/dev/null)" = "$p" ]; then
     scan="$n"
   fi
@@ -769,7 +769,7 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
   if [ -f "$plan" ] && [ ! -L "$plan" ] && _lr_reader; then
     hands="$(_proof_ask "$plan" reader_q_hands "$plan" 2>/dev/null)" && lines="$(_lr_events "$plan")" || return 2
     # a version-14 line the translation could not carry as a hand event is one this count cannot see
-    if ! [ -f "$(reader_log "$plan" 2>/dev/null)" ]; then
+    if ! reader_brought "$plan" 2>/dev/null; then
       gaps="$( { declare -F translate >/dev/null 2>&1 || . "$_READER_LIB_DIR/translate.sh"; } 2>/dev/null && translate "$plan" gaps 2>/dev/null \
         | /usr/bin/grep -c '^gap/v1|ev=hand|')"
     fi
@@ -1037,8 +1037,8 @@ hand_holds_verb() {
     if [ "$RL_HAND" -eq 1 ]; then
       RL_REC="$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")"
       { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; }
-      if ! awk -F'|' -v r="$PV_ID" -v c="$RL_COMMIT" "${_LINE_FIELDS_AWK:-}"'
-        line_ev() == "published" && line_kv("row") == r && line_kv("commit") == c { f = 1 } END { exit !f }' "$RL_REC" 2>/dev/null; then
+      if ! line_lines "$RL_REC" 2>/dev/null | awk -F'|' -v r="$PV_ID" -v c="$RL_COMMIT" "${_LINE_FIELDS_AWK:-}"'
+        line_ev() == "published" && line_kv("row") == r && line_kv("commit") == c { f = 1 } END { exit !f }' 2>/dev/null; then
         mkdir -p "${RL_REC%/*}" 2>/dev/null
         # The suites the person named go first: the row's `ready` event, which the judge reads the row's suites from
         # (the last one before the published line), and its green verdicts, both through the writers `land --by-hand`

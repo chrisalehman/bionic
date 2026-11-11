@@ -865,17 +865,17 @@ units_rows_in_range() {
 units_unrecorded() { _units_landed unrecorded "${1:-}" "" "${2:-}"; }
 
 # units_record_landings <record> -> `<line number><TAB><row><TAB><commit, lower case, or nothing>` for each landing line
-# of the landing record, in record order: a `published` event (`commit=`) and the older `landed:` header (`merge=`),
+# of the landing record read as one with the run's log (lib/line.sh `line_lines`), in that order: a `published` event (`commit=`) and the older `landed:` header (`merge=`),
 # whose blank-split fields are read as the event's are. THE ONE READING OF A LANDING IN THE RECORD: the readiness
 # rows (`_units_landed`), the publish order (`_units_publish_order`) and the numbers re-renderer's release row
 # (lib/line.sh `_line_release_landed`) all ask it, so "after the release" is one order. The fields are read by
 # lib/line.sh's reader of a record line, loaded through lib/proof.sh. Nothing, rc 0, for no record or no reader.
 units_record_landings() {
-  [ -f "${1:-}" ] && declare -F _proof_fields >/dev/null 2>&1 && _proof_fields || return 0
-  awk -F'|' "$_LINE_FIELDS_AWK"'
+  declare -F _proof_fields >/dev/null 2>&1 && _proof_fields && line_held "${1:-}" || return 0
+  line_lines "$1" | awk -F'|' "$_LINE_FIELDS_AWK"'
     { sub(/\r$/, "") }
     /^landed:[ \t]/ { gsub(/[ \t]+/, "|"); if (line_kv("row") != "") print NR "\t" line_kv("row") "\t" tolower(line_kv("merge")); next }
-    line_ev() == "published" && line_kv("row") != "" { print NR "\t" line_kv("row") "\t" tolower(line_kv("commit")) }' "$1" 2>/dev/null
+    line_ev() == "published" && line_kv("row") != "" { print NR "\t" line_kv("row") "\t" tolower(line_kv("commit")) }' 2>/dev/null
 }
 
 # _units_landed <landings|inrange> <plan> <range> <record> — the one program behind the two verbs:
@@ -1289,7 +1289,7 @@ _units_publish_order() {
   local plan="${1:-}" rec
   printf '%s\n' "${2:-}" | awk -F'\t' '$3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && $10 == "landed" { f = 1 } END { exit !f }' || return 0
   declare -F proof_debt_record >/dev/null 2>&1 || return 0
-  rec="$(proof_debt_record "$plan" 2>/dev/null)" && [ -f "$rec" ] || return 0
+  rec="$(proof_debt_record "$plan" 2>/dev/null)" && _proof_fields && line_held "$rec" || return 0
   units_record_landings "$rec" | awk -F'\t' '
     { pos[$2] = $1 }
     END { for (r in pos) printf "%s%s=%d", (c++ ? " " : ""), r, pos[r] }'

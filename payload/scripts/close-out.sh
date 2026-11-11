@@ -1128,11 +1128,11 @@ co_debts() {
 
 # co_debt_gaps -> the debt lines of the run's version-14 ledger the reader could not read, as its translation
 # names them (`gap/v1|ev=debt|concept=<c>|…` for a row, `…|line=<n>|…` for a line with no concept, prose); nothing
-# for a run with a log, whose debts are its events.
+# for a run brought forward (lib/reader.sh `reader_brought`), whose debts are its log's events.
 CO_DEBT_GAPS=""; CO_DEBT_GAPS_READ=no
 co_debt_gaps() {
   if [ "$CO_DEBT_GAPS_READ" = yes ]; then printf '%s' "$CO_DEBT_GAPS"; return 0; fi
-  [ ! -f "$(reader_log "$PLAN" 2>/dev/null)" ] || return 0
+  ! reader_brought "$PLAN" 2>/dev/null || return 0
   declare -F translate >/dev/null 2>&1 || . "$CO_LIB/translate.sh" >/dev/null 2>&1 || return 0
   translate "$PLAN" gaps 2>/dev/null | /usr/bin/grep '^gap/v1|ev=debt|' | /usr/bin/grep '|field=ev|'
   return 0
