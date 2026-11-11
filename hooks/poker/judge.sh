@@ -164,7 +164,7 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
   [ "$rc" -eq 0 ] && [ -z "$unruled" ] && return 0
   for ac in $unruled; do printf '%s\n' "$(cur8_unruled_line "$ac")" >&2; done
   if [ "$rc" -eq 0 ]; then
-    die "current: 8 waits on a ruling of each row above; settle each on the release approval card, or waive it with waive-row <AC> '<reply>'. The plan is unchanged."
+    die "current: 8 waits on a ruling of each row above; settle each on the release approval card, or waive it with waive <AC> '<their words>'. The plan is unchanged."
     exit 1
   fi
   if [ "$rc" -eq 2 ]; then

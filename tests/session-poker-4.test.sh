@@ -782,7 +782,7 @@ printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}
   jq -c --arg t "$l" '.message.content = $t' "$RS_FX/typed.jsonl"; done; } > "$RS_TX"
 RS_ROW='other=-|pick=default|choices=waive/run|why=not run on this release'
 RS_FIND="key=finding:$RS_F|default=-|other=finding-move $RS_F fix|pick=other|choices=carry/fix|why=fixed instead of carried"
-rs_page "key=row:AC-9.1|default=waive-row AC-9.1|$RS_ROW" "key=row:AC-1.1|default=waive-row AC-1.1|$RS_ROW" "$RS_FIND"
+rs_page "key=row:AC-9.1|default=waive AC-9.1|$RS_ROW" "key=row:AC-1.1|default=waive AC-1.1|$RS_ROW" "$RS_FIND"
 s42_snap "$RVG" "$PVG"
 poke "$RVG" reply '1 run, 4 fix, rest default'
 s42_unchanged "RS-1 an item naming a decision the page does not hold refuses the whole reply" 1 "$PVG"
@@ -792,10 +792,10 @@ s42_unchanged "RS-2 an item naming a choice its decision does not offer refuses 
 expect_eq "RS-2b …naming the item and the two it offers, nothing recorded" "1|" "$(printf '%s' "$OUT" | /usr/bin/grep -c '"1 fix".*waive.*run')|$(rs_done)"
 poke "$RVG" reply '1 run, 3 fix, rest default'
 expect_eq "RS-3 AC-13.3 '1 run, 3 fix, rest default': 1 run, 2 its default, 3 fixed, recorded in that order (exit 0)" \
-  "0|withheld: row:AC-9.1|applied: row:AC-1.1 waive-row rc=0|applied: finding:$RS_F finding-move rc=0" "$RC|$(rs_done)"
-expect_eq "RS-3b …AC-1.1 waived and the finding moved to fix, each on the user's words" "| waived |to=fix|by=Dana Fixture|words=1 run, 3 fix, rest default|" \
-  "$(/usr/bin/grep -oE '^\| AC-1\.1 \| [^|]* \| [a-z]+ \|' "$PVG" | /usr/bin/grep -oE '\| [a-z]+ \|$')$(bash -c '. "$1"; proof_move_line "$2" "$3"' _ "$S46_LIB" "$PVG" "$RS_F" | /usr/bin/grep -oE '\|to=fix\|by=[^|]*\|words=[^|]*\|' | cut -c2-)"
-rs_page "key=row:AC-9.1|default=waive-row AC-9.1|${RS_ROW/pick=default/pick=other}" "${RS_FIND/pick=other/pick=default}"
+  "0|withheld: row:AC-9.1|applied: row:AC-1.1 waive rc=0|applied: finding:$RS_F finding-move rc=0" "$RC|$(rs_done)"
+expect_eq "RS-3b …AC-1.1 waived and the finding moved to fix, each on the user's words" "waiver|to=fix|by=Dana Fixture|words=1 run, 3 fix, rest default|" \
+  "$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PVG" cell AC-1.1 | sed -n 's/^by=//p')|$(bash -c '. "$1"; proof_move_line "$2" "$3"' _ "$S46_LIB" "$PVG" "$RS_F" | /usr/bin/grep -oE '\|to=fix\|by=[^|]*\|words=[^|]*\|' | cut -c2-)"
+rs_page "key=row:AC-9.1|default=waive AC-9.1|${RS_ROW/pick=default/pick=other}" "${RS_FIND/pick=other/pick=default}"
 poke "$RVG" reply 'all recommended'
 expect_eq "RS-4 AC-13.3 'all recommended' takes the orchestrator's choice on each, in order (exit 0)" \
   "0|withheld: row:AC-9.1|applied: finding:$RS_F carried" "$RC|$(rs_done)"

@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # hooks/poker/proof.sh — the proof record: deferrals, findings, approvals, waivers, confirmations, the regression
-# and the debt ledger (approve, proof-add, waive, waive-row, confirm-row, finding-move, disposition, release-check,
+# and the debt ledger (approve, proof-add, waive, confirm-row, finding-move, disposition, release-check,
 # regression, regression-run, debt).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
@@ -321,68 +321,13 @@ whole_run_at_head() {
     exit 0
   }
 
-  # THE ROW WAIVER (wave-33 T7; REQ-4 AC-4.1, D8). Wave-32's four row waivers were typed by hand (A-orch-49):
-  # the AC block's `  waiver: <who> <ISO-UTC> "<the user's words>" — <why>` line, which the gate reads as the
-  # row's waiver (walls.sh `row_is_waived`), and the status cell `waived`. The words are held to the rule a
-  # finding's move is (finding-move): lib/said.sh `user_said` finds them, as whole words and at least SAID_MIN_WORDS (three)
-  # of them unless they are a whole prompt, in a prompt the user typed in this session. Who is git
-  # user.name, the time ISO-UTC, so the hand-holds window can place it. A second waiver of the row
-  # replaces the first line. REFUSED (1), the plan unchanged: an AC with no row or no block, no git
-  # user.name, words the user did not type, too few words.
-  poker_verb_waive_row() {
-    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then
-      . "$BIONIC_LIB/said.sh"
-    fi
-    if ! declare -F user_said >/dev/null 2>&1; then
-      die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; the plan is unchanged."
-      exit 2
-    fi
-    WR_WORDS="$(said_fold "$WR_RAW")"; WR_WHY="$(deferral_fold "$WR_WHY_RAW")"
-    plan_verb_open waive-row
-    if [ -z "$(matrix_row_cell "$PV_PLAN" "$WR_AC" 1)" ]; then
-      die "REFUSED — the matrix table has no row $WR_AC; the plan is unchanged."
-      exit 1
-    fi
-    WR_WHO="$(deferral_fold "$(git -C "$PV_REPO" config user.name 2>/dev/null)")"
-    if [ -z "$WR_WHO" ]; then
-      die "REFUSED — no git user.name is set for $PV_REPO, and a waiver records who made it; set it, then waive again. The plan is unchanged."
-      exit 1
-    fi
-    user_said "$WR_RAW" "$PV_PLAN"; WR_SAID=$?
-    if [ "$WR_SAID" -ne 0 ]; then
-      said_refuse "$WR_SAID" "$WR_WORDS" "a waiver"
-      exit 1
-    fi
-    WR_LINE="$WR_WHO $(date -u +%Y-%m-%dT%H:%M:%SZ) \"$(deferral_escape "$WR_WORDS")\" — $WR_WHY"
-    PV_RC=0
-    matrix_row_cells "$PV_PLAN" "$WR_AC" 3=waived > "$PV_NEW" 2>/dev/null || PV_RC=$?
-    if [ "$PV_RC" -eq 0 ]; then
-      matrix_block_key "$PV_NEW" "$WR_AC" waiver "$WR_LINE" > "$PV_NEW.2" 2>/dev/null || PV_RC=$((10 + $?))
-      [ "$PV_RC" -ne 0 ] || mv -f "$PV_NEW.2" "$PV_NEW"
-    fi
-    case "$PV_RC" in
-      0) : ;;
-      4) die "REFUSED — the matrix row $WR_AC does not have five cells, so its status cannot be found; the plan is unchanged."
-         exit 1 ;;
-      13) die "REFUSED — the matrix has no $WR_AC: block to hold the waiver; matrix-render writes it. The plan is unchanged."
-          pv_next matrix-render
-          exit 1 ;;
-      *) die "REFUSED — the waiver cannot be written (exit $PV_RC); the plan is unchanged."
-         exit 2 ;;
-    esac
-    plan_verb_swap waive-row "the waiver of $WR_AC" writer
-    poker_owed_close "$PV_REPO" "waive-row:$WR_AC" "waive-row"
-    say "waive-row — $WR_AC waived on the user's words, by $(clean "$WR_WHO"): its waiver: line and status are on $PV_PLAN; dry-committed first."
-    exit 0
-  }
-
   # THE USER'S CONFIRMATION OF A T4 ROW. A T4 criterion's check is the user's own, and the gate rules such a row on
   # its block's attributed confirmation under an empty-like auditor cell (walls.sh `matrix_row_ruled`). This verb
   # writes that line from the user's words, so it is never typed by hand:
   #
   #   <key>: <user> <YYYY-MM-DD> "<the user's words>"[ — <why>]
   #
-  # <user> is git user.name, as approve and waive-row record it, folded to the one word the attributed form takes:
+  # <user> is git user.name, as approve and waive record it, folded to the one word the attributed form takes:
   # each run of characters outside [A-Za-z0-9._-] becomes one '-'. The date is UTC, as a waiver's is. The line
   # replaces the block's pending stub where it stands. The value is held to walls.sh `user_confirmed_attributed`,
   # the one form test, before it is written, so the verb never writes a line the gate would not rule on. The words
@@ -1189,6 +1134,47 @@ PF_VERDICTS_LIST
     exit 0
   }
 
+  # waive_criterion -> the criterion WV_Q waived on WV_REPLY's words (and WV_WHY_RAW's why): 0 written, 1 refused, 2
+  # when the libraries or the run's log cannot be reached.
+  waive_criterion() {
+    local who head why known ac="$WV_Q"
+    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
+    _proof_reader_load
+    if ! declare -F user_said >/dev/null 2>&1 || ! declare -F reader_criteria >/dev/null 2>&1; then
+      die "REFUSED — a criterion's waiver needs lib/said.sh and lib/reader.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
+      return 2
+    fi
+    plan_verb_open waive
+    known="$(reader_criteria "$PV_PLAN" 2>/dev/null)"
+    case $'\n'"$known"$'\n' in
+      *$'\n'"$ac"$'\n'*) : ;;
+      *) die "REFUSED — '$(clean "$ac")' is neither a question to waive (evidence, adversarial, structure or all) nor a criterion $PV_PLAN names; nothing is written."
+         return 1 ;;
+    esac
+    who="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
+    if [ -z "$who" ] || ! plan_verb_value_ok "$who"; then
+      die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who waived; nothing is written."
+      return 1
+    fi
+    why="$(deferral_fold "$WV_WHY_RAW")"
+    case "$WV_REPLY$why" in
+      *'|'*|*$'\n'*|*$'\r'*)
+        die "REFUSED — a waiver's words and why are fields of the run's log, which a '|' or a line break would split; give them without one. Nothing is written."
+        return 1 ;;
+    esac
+    user_said "$WV_REPLY" "$PV_PLAN"; WV_SAID=$?
+    if [ "$WV_SAID" -ne 0 ]; then
+      said_refuse "$WV_SAID" "$(said_fold "$WV_REPLY")" "a waiver"
+      return 1
+    fi
+    head="$(proof_branch_head "$PV_PLAN" "$PV_REPO" 2>/dev/null)" || head=""
+    case "$head" in *[!0-9a-f]*) head="" ;; esac
+    proof_waiver_event "$PV_PLAN" "ac=$ac" ${head:+"head=$head"} "by=$who" "said=$(said_fold "$WV_REPLY")" ${why:+"why=$why"} \
+      || { die "REFUSED — the waiver of $ac could not be written to the run's log of $PV_PLAN (no record directory beside the plan, or the log cannot be written)."; return 2; }
+    poker_owed_close "$PV_REPO" "waive:$ac" "waive"
+    say "waive — $ac waived on the user's words, by $(clean "$who"): one waiver event in the run's log."
+  }
+
   # THE WAIVER. The user's act, on their reply: one waiver event in the run's log,
   #
   #   waiver question=<q> head=<working head> by=<git user.name> said=<reply>
@@ -1197,6 +1183,15 @@ PF_VERDICTS_LIST
   # (lib/proof.sh `facts_state`) is asked about. The log's own order makes a fact written after it newer than it.
   # `waive all` writes three, evidence, adversarial and structure, in that order. The plan is not written. The
   # regression is never waived: it runs once after the build.
+  #
+  # A CRITERION IS WAIVED BY THE SAME ONE WRITER, its event naming it where a question's names the question:
+  #
+  #   waiver ac=<criterion> [head=<working head>] by=<git user.name> said=<the words> [why=<why>]
+  #
+  # which the reader's cell answer reads as the criterion discharged by a waiver. The criterion is one the plan names
+  # (reader_criteria), and the words are held to lib/said.sh `user_said` as a move's are, since nobody but the user lets
+  # a criterion go; the head is written when the working branch names one and is not required, for a criterion is not
+  # judged at a head. Its ask, `waive:<criterion>`, the gate's matrix arm opens, closes as a question's does.
   poker_verb_waive() {
     if ! { declare -F proof_waiver_event >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_waiver_event >/dev/null 2>&1; then
@@ -1204,8 +1199,8 @@ PF_VERDICTS_LIST
       exit 2
     fi
     if ! proof_question_ok "$WV_Q" waive; then
-      die "REFUSED — '$(clean "$WV_Q")' is not a question to waive: name evidence, adversarial, structure or all. The plan is unchanged."
-      exit 1
+      waive_criterion
+      exit $?
     fi
     WV_QS="$WV_Q"; [ "$WV_Q" != all ] || WV_QS="$PROOF_QUESTIONS"
     case "$WV_REPLY" in

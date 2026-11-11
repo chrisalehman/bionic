@@ -1549,9 +1549,9 @@ expect_contains "…while the same line read with its exit cut out is named" "ho
      exit_sites "$(exit_sweep "$TMP/exit3" hooks/poker/plan.sh)")"
 EXIT_WALLS="$REPO/payload/scripts/lib/walls.sh"
 EXIT_LIVE="$(LC_ALL=C awk '/^matrix_live_row_exit\(\)/ { on = 1 } on { print } on && /^}/ { exit }' "$EXIT_WALLS")"
-expect_contains "EXIT-3b the Verify gate's live-row exit in payload/scripts/lib/walls.sh names matrix-set for a row the walk proved" \
-  'session-poker.sh matrix-set $1 status=discharged' "$EXIT_LIVE"
-expect_contains "…matrix-retier for a row whose eval cannot fire" 'session-poker.sh matrix-retier $1 tier=' "$EXIT_LIVE"
+expect_contains "EXIT-3b the Verify gate's live-row exit in payload/scripts/lib/walls.sh names the walk's registration for a row the walk proved" \
+  'session-poker.sh proof-add walk <its record>' "$EXIT_LIVE"
+expect_contains "…the person's change of the Eval design row for a row whose eval cannot fire" 'its ## Eval design row changed' "$EXIT_LIVE"
 expect_contains "…and the user's waiver otherwise" 'needs: the user — a waiver' "$EXIT_LIVE"
 expect_eq "…and the live row's three evidence refusals each carry it" "3" \
   "$(LC_ALL=C grep -cF '"${live_exit:-' "$EXIT_WALLS")"

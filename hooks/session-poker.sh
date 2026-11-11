@@ -26,7 +26,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a review: that proof line with its question, reviewer, result and scope
 #     bash <plugin-root>/hooks/session-poker.sh order '<the user's words>' | order lift   the user's order every suite obeys, or its end: an order: line with the words and the time (writes the plan, or record/orders.log with no run bound)
-#     bash <plugin-root>/hooks/session-poker.sh waive <question|all> '<reply>'   the user's waiver of a review question, or all three, at the working head (writes the run's log)
+#     bash <plugin-root>/hooks/session-poker.sh waive <question|all|AC-id> '<reply>'   the user's waiver of a review question, all three, or a criterion (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh floor-run   run the project's regression (its floor: command, else tests/run.sh, whole, held to the full-run rules) in the working checkout and log it for proof-add floor (writes a log under record/, never the plan)
 #     bash <plugin-root>/hooks/session-poker.sh share [<n>] [reserve=<cores>]   print the machine's share, the reserve the person keeps, the cores and the room, or set the share to <n>, 1 to 100, and the reserve to <cores> (the set writes the user-level files)
@@ -536,6 +536,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a review: the review proof with the question, reviewer, result and scope"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add walk <record>   register the walk: its | AC | verdict | why | table and one verdict: line, read as the critic's; each CONFIRMED row no landing settled reads discharged with the record as its evidence, walk-artifact: is set in the Step 5 block and the matrix head, all in one plan write, and one ev=walk line goes to the landing record"
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure|all> '<reply>'   record the user's waiver of that question, or of all three, at the working head, one waiver event each in the run's log"
+  die "  bash ${HOOK_DIR}/session-poker.sh waive <AC-id> '<the user's words>' ['<why>']   record the user's waiver of that criterion, on words they typed in this session: one waiver event naming it in the run's log, which discharges it"
   die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; record its log and a kind=check proof line, result=fail on a non-zero exit"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-run [--starter tick|orchestrator|person] [--reason '<why>']   run the regression in the working branch's checkout, .bionic/config.yaml's regression-command: command, else tests/run.sh whole (held to the full-run rules); write its log, opening head=<40-hex> dirty=<n> and closing rc=<n>, for proof-add regression to cite; --starter names who started it, written as starter= on its run line (orchestrator by default), and person needs --reason"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>' ['<changelog sentence>']   move a finding across the line on words the user typed in this session, a deferral with its one changelog sentence, as a finding event in the run's log"
@@ -558,8 +559,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-set <AC-id> [status=<pending|blocked|discharged|waived>] [evidence=<record/...>] [task=<id>[,<id>...]]   write that matrix row's status and evidence cells and its AC block's evidence: and task: keys; never the tier or auditor cell"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-retier <AC-id> tier=<T0..T4> eval=<text>   raise that criterion's tier where it lives (the matrix tier cell, its block's eval: line, its ## Eval design row) and reset the row to pending, its evidence, auditor and waiver cleared; a lower or equal tier is the user's"
   die "  bash ${HOOK_DIR}/session-poker.sh ${RA_USAGE}"
-  die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the release approval card, all default or all recommended, into approve, waive, waive-row and finding-move with their words"
-  die "  bash ${HOOK_DIR}/session-poker.sh waive-row <AC-id> '<the user's words>' '<why>'   waive that matrix row on words the user typed in this session: its block's waiver: line and its status waived"
+  die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the release approval card, all default or all recommended, into approve, waive and finding-move with their words"
   die "  bash ${HOOK_DIR}/session-poker.sh confirm-row <AC-id> '<the user's words>' ['<why>']   record the user's own confirmation of a T4 row's check, on words they typed in this session: its block's attributed confirmation line"
   die "  bash ${HOOK_DIR}/session-poker.sh epic-row <wave> <col>=<val>... [--plan <plan>]   set cells of that wave's row in the shipped table of the epic.plan.md beside the run's plan"
   die "  bash ${HOOK_DIR}/session-poker.sh continuation-fill '<field>=<text>' [--plan <plan>]   fill the run's continuation's <fill: field...> mark with the text"
@@ -895,17 +895,6 @@ case "$VERB" in
       esac
     done
     ;;
-  # THE ROW WAIVER (wave-33 T7; REQ-4 AC-4.1, D8). Three operands, finding-move's last two: the user's words
-  # as typed and why. Whether the words stand in a typed prompt is the verb's own refusal (1).
-  waive-row)
-    WR_USAGE="waive-row takes <AC>, the user's words as typed, and why."
-    { [ $# -eq 3 ] && [ -n "$1" ] && [ -n "${2//[[:space:]]/}" ] && [ -n "${3//[[:space:]]/}" ]; } || usage "$WR_USAGE"
-    case "$1" in
-      *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*)
-        usage "waive-row: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not a criterion id: letters, digits, '.', '_' or '-'." ;;
-    esac
-    WR_AC="$1"; WR_RAW="$2"; WR_WHY_RAW="$3"
-    ;;
   # THE USER'S CONFIRMATION OF A T4 ROW: the criterion, the user's words as typed, and optionally why, which the
   # release approval card's reply passes to whichever choice it applies. The words' standing is the verb's own refusal (1).
   confirm-row)
@@ -1150,9 +1139,17 @@ $1"; shift ;;
   # THE WAIVER VERB (wave-27 T9; D2). Two operands, both required: the reading question and the
   # user's reply, verbatim. The question's membership and the reply's shape are the verb's own
   # refusals (1), as proof-add's question is; a missing or blank operand is the usage error.
+  # A CRITERION IS WAIVED BY THE SAME VERB: its id where the question goes, the user's words, and optionally why, which
+  # the release approval card's reply passes.
   waive)
-    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "${2//[[:space:]]/}" ]; then
-      usage "waive takes exactly two arguments: the question (evidence, adversarial, structure or all) and the user's reply, verbatim."
+    WV_WHY_RAW=""
+    case "${1:-}" in
+      evidence|adversarial|structure|all|'') [ $# -eq 2 ] || set -- ;;
+      *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*) set -- ;;
+      *) [ $# -eq 2 ] || { [ $# -eq 3 ] && [ -n "${3//[[:space:]]/}" ] && WV_WHY_RAW="$3"; } || set -- ;;
+    esac
+    if [ $# -lt 2 ] || [ -z "$1" ] || [ -z "${2//[[:space:]]/}" ]; then
+      usage "waive takes the question (evidence, adversarial, structure or all) and the user's reply, verbatim; or a criterion, the user's words as typed, and optionally why."
     fi
     WV_Q="$1"; WV_REPLY="$2"
     ;;
@@ -2605,7 +2602,7 @@ matrix_head_line() {  # <plan> <key> <value> [<own ERE>] -> the whole plan
     }' "$1"
 }
 
-# THE USER'S WORDS, REFUSED IN ONE VOICE (wave-33 T7). finding-move and waive-row hold their words to
+# THE USER'S WORDS, REFUSED IN ONE VOICE. finding-move and a criterion's waiver hold their words to
 # lib/said.sh `user_said`; its three refusals are written here once, the minimum named by the library's
 # own constant. <act> is what the words make: `a move`, `a waiver`.
 #
@@ -3504,7 +3501,6 @@ case "$VERB" in
   discharge) poker_verb_discharge "$@" ;;
   matrix-set) poker_verb_matrix_set "$@" ;;
   matrix-retier) poker_verb_matrix_retier "$@" ;;
-  waive-row) poker_verb_waive_row "$@" ;;
   confirm-row) poker_verb_confirm_row "$@" ;;
   epic-row) poker_verb_epic_row "$@" ;;
   continuation-fill) poker_verb_continuation_fill "$@" ;;

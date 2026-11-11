@@ -2692,7 +2692,7 @@ RR_WAIVES
       RR_MISS="${RR_MISS:+$RR_MISS }$ac"
       if [ "$tier" = T4 ] && [ "$au" = - ] && [ "$st" = discharged ]; then
         RR_ACA=$((RR_ACA + 1))
-        rr_add row "row:$ac" "confirm-row $ac" "waive-row $ac" "a T4 criterion, the user's own check" \
+        rr_add row "row:$ac" "confirm-row $ac" "waive $ac" "a T4 criterion, the user's own check" \
           "$ac, your own check, not confirmed yet" confirm waive "confirm $ac" "waive $ac"
         continue
       fi
@@ -2703,7 +2703,7 @@ RR_WAIVES
         elif [ "$tier" = T4 ] && [ "$au" != - ]; then why="the auditor's finding stands ($au)"
         else why="not confirmed by the auditor on this release"; fi
       fi
-      rr_add row "row:$ac" "waive-row $ac" "-" "$why" "$ac, $why" waive "run it" "waive $ac" "run $ac"
+      rr_add row "row:$ac" "waive $ac" "-" "$why" "$ac, $why" waive "run it" "waive $ac" "run $ac"
     done <<RR_ROWS_EOF
 $RR_ROWS
 RR_ROWS_EOF

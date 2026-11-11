@@ -670,10 +670,10 @@ landing_report() {  # <plan or landing record> <project root> <rows yes|no> [ins
 #   extensions     DISTINCT (name, value) over the rosters whose `plan=` is this run's plan (a row of another run, or of
 #                  `plan=none`, is not this run's). The roster lives in `.bionic/tmp`, which close-out's act 3 wipes,
 #                  so close-out reads this line BEFORE the wipe and carries it.
-#   waivers        the plan's `waived: question=…` line under `## SDLC State` (`waive`) and an AC block's indented
-#                  `waiver: <who> <ISO-UTC> "<words>"` under `## Verification Matrix` (`waive-row`), or the older
-#                  `waiver: <who> <YYYY-MM-DD> "<words>"` a plan may still carry. Fenced text is skipped, as every
-#                  reader of the plan skips it.
+#   waivers        each waiver event `waive` writes, of a question or a criterion, the plan's older `waived:
+#                  question=…` line under `## SDLC State`, and an AC block's indented `waiver: <who> <when> "<words>"`
+#                  an older plan holds under `## Verification Matrix`. Fenced text is skipped, as every reader of the
+#                  plan skips it.
 #   status-writes  the log's `run/v1|ev=hand|what=matrix-set|ac=<id>|cells=<status,evidence,task>|by=<who>|at=<ISO-UTC>`, one per
 #                  `matrix-set` call that changed the plan, written in the same act as its plan write (hooks/poker/plan.sh
 #                  `poker_verb_matrix_set`). It is counted when its cells name the status or the task, placed by its `at=`
@@ -792,8 +792,9 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
         if (++r > 1 && line_kv("starter") == "person" && hh_take(line_kv("at"))) f++
       }
       e == "proof" && line_kv("kind") == "regression" { pr[++np] = line_kv("evidence"); pa[np] = line_kv("at") }
-      # a waiver of a question is the line the waive verb writes; a criterion waiver is counted by its block line above
-      e == "waiver" && line_kv("question") != "" && hh_take(line_kv("at")) { v++ }
+      # a waiver is the event the waive verb writes, of a question or of a criterion; a criterion waiver an older plan
+      # holds as a block line is counted by that line above, and its row read from the table carries no instant
+      e == "waiver" && (line_kv("question") != "" || line_kv("ac") != "" && line_kv("at") != "") && hh_take(line_kv("at")) { v++ }
       e == "finding" && line_kv("to") == "fixed" && line_kv("by") != "landing" { fr[++nf] = line_kv("row"); fa[nf] = line_kv("at") }
       e == "stop" && line_kv("state") == "decline" && hh_take(line_kv("at")) { d++ }
       e == "stop" && line_kv("state") == "lift" && hh_take(line_kv("at")) { l++ }

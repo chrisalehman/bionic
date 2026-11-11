@@ -1820,12 +1820,12 @@ matrix_row_deferred() {
 
 # THE LIVE ROW'S EXITS. A pending or blocked row the owing-step rule no longer defers meets the evidence
 # refusals below for the key it lacks, and those refusals say which of three acts settles it: a row the walk
-# proved is written discharged with its record, a row whose eval cannot fire its fails-when is retiered up
-# with a new eval, and any other row is the user's to waive. The first two are verbs an agent runs; the third
-# is a person's word, said as such, so the refusal never leaves its reader to guess whose move it is.
+# proved is discharged by registering the walk's record, a row whose eval cannot fire its fails-when has its
+# Eval design row changed by the person, and any other row is the user's to waive. The first is a verb an agent
+# runs; the other two are a person's, said as such, so the refusal never leaves its reader to guess whose move it is.
 # [WALL: tests/shell-lint.test.sh]
 matrix_live_row_exit() {  # <AC> -> the repair prose of a live row's evidence refusal
-  printf '%s' "the row is live past the step that owes it: if the walk proved it, run session-poker.sh matrix-set $1 status=discharged evidence=<its record>; if its eval cannot fire, run session-poker.sh matrix-retier $1 tier=<higher> eval='<the new eval>'; otherwise needs: the user — a waiver, in their words: session-poker.sh waive-row $1 '<their words>' '<why>'."
+  printf '%s' "the row is live past the step that owes it: if the walk proved it, register its record: session-poker.sh proof-add walk <its record>; if its eval cannot fire, needs: the user — its ## Eval design row changed; otherwise needs: the user — a waiver, in their words: session-poker.sh waive $1 '<their words>' '<why>'."
 }
 
 # matrix_table_rows -> `<AC>\037<tier>\037<status>\037<evidence>\037<auditor>\037<confirmed>\037<waiver 1|0>` per
@@ -4264,7 +4264,7 @@ MATRIX_STATUS
           T3|T4)
             case "$val_lc" in
               n/a|n/a:*)
-                _eg_owe "waive-row:${ac}" "waiver: row ${ac}" "commit refused — ${ac} calls its ${key} evidence n/a, a live tier; waive the row with: session-poker.sh waive-row ${ac} '<your words>' '<why>'"
+                _eg_owe "waive:${ac}" "waiver: row ${ac}" "commit refused — ${ac} calls its ${key} evidence n/a, a live tier; waive the row with: session-poker.sh waive ${ac} '<your words>' '<why>'"
                 block_matrix "${ac} calls its ${key} evidence n/a" "record it, or waive the row" \
                   "matrix row '${ac}' (${tier}) key '${key}' is a self-written 'n/a' on a live tier." \
                   "a live-tier field cannot be n/a — downgrade the row via the Waiver Protocol (record 'waiver: <user> <date> <reason>'), a user decision." ;;
@@ -4359,7 +4359,7 @@ MATRIX_STATUS
       esac
       if [ "$tier" = "T4" ]; then
         if user_confirmed_attributed "$ucv"; then
-          _eg_owe "waive-row:${ac}" "waiver: row ${ac}" "commit refused — the auditor's finding on ${ac} stands ('${aud}'); settle it with the auditor, or waive the row with: session-poker.sh waive-row ${ac} '<your words>' '<why>'"
+          _eg_owe "waive:${ac}" "waiver: row ${ac}" "commit refused — the auditor's finding on ${ac} stands ('${aud}'); settle it with the auditor, or waive the row with: session-poker.sh waive ${ac} '<your words>' '<why>'"
           block_matrix "the auditor's finding on ${ac} stands" "settle it with the auditor" \
             "matrix row '${ac}' (T4) carries a well-formed 'user-confirmed:', but the independent auditor's standing verdict on it is '${aud}', at step ${CURRENT}." \
             "a user's confirmation does not overturn an auditor's finding — it replaces the WAIVER a T4 row used to need, not the audit. Resolve the '${aud}' verdict (re-run the audit and record CONFIRMED, or clear the cell if the finding was withdrawn), or waive the row."
