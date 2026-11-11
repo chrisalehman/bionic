@@ -52,6 +52,8 @@ AFTER="$(run)"; RC=$?
 
 section "PARSERS"
 expect_contains "a real parser is named at this head" "$(printf 'parser\tpayload/scripts/card.sh\t')" "$BEFORE"
+expect_absent "the goals library reads a criterion's state and a plan's scale through the reader alone" "$(printf 'parser\tpayload/scripts/lib/plan.sh\t')" "$BEFORE"
+expect_eq "the parsers stand at or under twenty-two" 1 "$(( $(count "$BEFORE" parsers) <= 22 ))"
 expect_contains "the planted awk over a plan is named" "$(printf 'parser\tpayload/scripts/lib/planted-parse.sh\t')" "$AFTER"
 expect_eq "the parser count rises by one" "$(( $(count "$BEFORE" parsers) + 1 ))" "$(count "$AFTER" parsers)"
 expect_absent "the reader's own file is admitted, its planted awk too" "lib/reader.sh" "$AFTER"
