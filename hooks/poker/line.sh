@@ -43,7 +43,7 @@ row_writer() {  # <roster> <plan> <row> <agent cell>
 #   - the working head reads as a commit;
 #   - no ruling for the row's writer is unread.
 deliver_check() {
-  local row kind files wt status art docs drel abs real rel e n=0 cands="" call fix wb head sid roster rulings live lrc facts pl
+  local row kind files wt status art docs drel abs real rel e n=0 cands="" call fix wb head sid roster rulings live lrc pl
   call="bash $HOOK_DIR/session-poker.sh"
   if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
      || ! declare -F proof_branch_head >/dev/null 2>&1; then
@@ -151,9 +151,11 @@ DELIVER_FILES
   if [ "$kind" = verify ]; then
     case "$rel" in record/*/walk.md) case "${rel#record/}" in */*/*) : ;; *) RL_WALK="$rel" ;; esac ;; esac
   fi
-  if [ "$kind" = review ]; then
+  if [ "$kind" = review ] || [ -n "$RL_WALK" ] || [ "$kind" = test ]; then
     pl="$(proof_lines "$PV_PLAN")" \
-      || { die "REFUSED — the run's facts cannot be read, so whether a review proof names $rel is not known; the next tick asks again."; exit 2; }
+      || { die "REFUSED — the run's facts cannot be read, so whether the registration $PV_ID owes stands is not known; the next tick asks again."; exit 2; }
+  fi
+  if [ "$kind" = review ]; then
     if [ -z "$(printf '%s\n' "$pl" | awk -v rec="$rel" "$(proof_awk)"'
         proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE == rec { print "y"; exit }')" ]; then
       die "REFUSED — $PV_ID is a review row and no review proof of the run names its record $rel; register the review first: $call proof-add review $rel --question <q> --reader <name>; the next tick lands it."
@@ -172,19 +174,15 @@ DELIVER_FILES
     die "REFUSED — the plan's working-branch ${wb:-(none named)} names no commit in $PV_REPO, so there is no head to land $PV_ID at; name the branch under ## SDLC State (working-branch: <branch>); the next tick lands it."
     exit 2
   fi
-  if [ -n "$RL_WALK" ] || [ "$kind" = test ]; then
-    if ! facts="$(_proof_facts "$PV_PLAN")"; then
-      die "REFUSED — the run's facts cannot be folded, so whether $PV_ID's registration stands cannot be read; the next tick asks again."
-      exit 2
-    fi
-    if [ -n "$RL_WALK" ] && ! printf '%s\n' "$facts" | awk -v e="|evidence=$RL_WALK|" 'index($0, "|ev=proof|") && index($0, "|kind=walk|") && index($0 "|", e) { f = 1 } END { exit !f }'; then
-      die "REFUSED — $PV_ID is the walk row and no walk proof names its record $RL_WALK; register the walk: $call proof-add walk $RL_WALK, and the next tick lands it."
-      exit 2
-    fi
-    if [ "$kind" = test ] && ! printf '%s\n' "$facts" | awk -v h="|head=$head|" 'index($0, "|ev=proof|") && index($0, "|kind=regression|") && index($0 "|", h) { f = 1 } END { exit !f }'; then
-      die "REFUSED — $PV_ID is a regression row and no whole run's proof stands at the working head ${head:0:12}; register the run: $call proof-add regression <its log>, and the next tick lands it."
-      exit 2
-    fi
+  if [ -n "$RL_WALK" ] && [ -z "$(printf '%s\n' "$pl" | awk -v rec="$RL_WALK" "$(proof_awk)"'
+      proof_fields($0) && PROOF_KIND == "walk" && PROOF_EVIDENCE == rec { print "y"; exit }')" ]; then
+    die "REFUSED — $PV_ID is the walk row and no walk proof names its record $RL_WALK; register the walk: $call proof-add walk $RL_WALK, and the next tick lands it."
+    exit 2
+  fi
+  if [ "$kind" = test ] && [ -z "$(printf '%s\n' "$pl" | awk -v h="$head" "$(proof_awk)"'
+      proof_fields($0) && PROOF_KIND == "regression" && PROOF_HEAD == h { print "y"; exit }')" ]; then
+    die "REFUSED — $PV_ID is a regression row and no whole run's proof stands at the working head ${head:0:12}; register the run: $call proof-add regression <its log>, and the next tick lands it."
+    exit 2
   fi
   # THE INTEGRATE ROW LANDS WITH THE ENTRY'S REVIEWS LISTED: its pull request carries the branch to the integration
   # branch, so a part still to render there would never reach it. A part the renderer would change refuses, naming
