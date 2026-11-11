@@ -65,6 +65,23 @@ write_plan "$h2c" "# regular plan
 Some content.
 No SDLC State section here." > /dev/null
 
+section "Section 2b: a plan declares 14, or 15; the two gates agree"
+
+h2v=$(make_home)
+write_plan "$h2v" "${FM/version: 14/version: 13}
+## SDLC State
+current: 4" v.plan.md > /dev/null
+expect_block "a plan at 13 is refused, the fix naming both versions" "$h2v" 'git commit -m "x"' "or 15 on a plan — the supported versions"
+for v in 13 15; do
+  h=$(make_home); git -C "$h" init -q; p=$(write_plan "$h" "${FM/version: 14/version: $v}
+## SDLC State
+current: 4" "v$v.plan.md"); run_hook "$h" 'git commit -m "x"'
+  w=$(jq -n --arg p "$p" --arg c "$(cat "$p")" --arg s "$EG_SID" '{session_id: $s, hook_event_name: "PreToolUse", tool_name: "Write", tool_input: {file_path: $p, content: $c}}' \
+    | HOME="$h" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh" 2>&1 >/dev/null | grep -c 'unsupported version' || true)
+  [ "$v" != 13 ] || expect_eq "the write hook refuses 13 for its version" 1 "$w"
+  expect_eq "the write hook and the commit gate agree on version $v" "$w" "$(grep -c 'unsupported sdlc version' <<< "$HOOK_STDERR" || true)"
+done
+
 # ============================================================
 # Section 5: empty / placeholder evidence — blocked
 # ============================================================

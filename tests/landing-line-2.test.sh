@@ -1069,5 +1069,21 @@ expect_contains "(ny4-0) precondition: the printf's fields are read, needs-you l
 expect_eq "(ny4) the header's example line and its per-kind rows name the fields the printf prints, in its order" "$NY_PF|$NY_PF" \
   "$(printf '%s\n' "$NY_HDR" | sed -n 1p | /usr/bin/grep -o '[a-z-]*=<n>' | sed 's/=<n>//' | tr '\n' ' ')|total $(printf '%s\n' "$NY_HDR" | /usr/bin/grep -o '^#   [a-z][a-z-]*  ' | tr -d '# ' | sed 's/$/ /' | tr -d '\n')"
 
+section "§ONE-HEAD: a ready that waited across a landing of its own code starts again in its place, on one head's code"
+# fails-when: T2 runs T1's units library over its own line library, starts again twice or not at all, writes an event twice, or T1 starts again.
+RO="$(ll_rworld)"; cp -R "$REPO/payload" "$RO/payload" && git -C "$RO" add payload && git -C "$RO" commit -qm "the code"
+for t in T1 T2; do git -C "$RO/.worktrees/$t" merge -q --no-edit wave/x; done; LO="$RO/.worktrees/T1/payload/scripts/lib"
+printf '\nline_probe() { return 0; }\n' >> "$LO/line.sh"; awk '{ print } /^units_record_landings\(\) \{$/ { print "  line_probe || return 0" }' "$LO/units.sh" > "$LO/u"
+mv "$LO/u" "$LO/units.sh"; git -C "$RO/.worktrees/T1" commit -qam "T1: line_probe"; ll_commit_suite "$RO" T1 a "$(ll_block_body o-T1 a green)"
+line_event "$(ll_plan "$RO")" published row=T0 "commit=$(ll_head "$RO")" kind=git by=- why=-
+SPAWN="$RO/payload/scripts/spawn-worktree.sh" ll_verb_bg "$RO" T1 "$WORLD_ROOT/o1.out"; ll_wait_lines "$LL_SIG/o-T1.runs" 1
+SPAWN="$RO/payload/scripts/spawn-worktree.sh" ll_verb_bg "$RO" T2 "$WORLD_ROOT/o2.out"; ll_wait_cand "$RO" T2
+touch "$LL_SIG/o-T1.go"; ll_wait_file "$WORLD_ROOT/o1.out.rc" 300; ll_wait_file "$WORLD_ROOT/o2.out.rc" 300
+O2C="$(ll_field "$(ll_ev "$RO" ready | /usr/bin/grep '|row=T2|')" carrier)"
+expect_eq "(oh1) T2 lands, started again once by its own carrier, and no command is missing" "0 1 0" \
+  "$(cat "$WORLD_ROOT/o2.out.rc") $(/usr/bin/grep -c "^restart: .* carrier=${O2C%%:*} " "$WORLD_ROOT/o2.out") $(/usr/bin/grep -c 'command not found' "$WORLD_ROOT/o2.out")"
+expect_eq "(oh2) …each of its events written once" "ready candidate verdict published" "$(/usr/bin/grep '|row=T2|' "$(ll_rec "$RO")" | cut -d'|' -f2 | sed 's/^ev=//' | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "(oh3) T1, whose head never moved under it, lands and never starts again" "0 0" "$(cat "$WORLD_ROOT/o1.out.rc") $(/usr/bin/grep -c '^restart' "$WORLD_ROOT/o1.out")"
+
 # ---------------------------------------------------------------------------
 finish

@@ -1414,6 +1414,9 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
   wt="$_WT_ABS"; root="$_WT_ROOT"; branch="$_WT_BRANCH"
   head="$(git -C "$wt" rev-parse --verify -q HEAD 2>/dev/null)"
   acc="$(git -C "$root" rev-parse --verify -q "refs/heads/${onto}" 2>/dev/null)"
+  # The head this process's code stands at, when that code is the root checkout's own (`_line_one_head`).
+  _LINE_CODE_REF=""; _LINE_CODE_AT=""
+  [ "$(git -C "$_LINE_LIB_DIR" rev-parse --show-toplevel 2>/dev/null)" != "$root" ] || { _LINE_CODE_REF="refs/heads/${onto}"; _LINE_CODE_AT="$acc"; }
   row="$(_wt_proofs_row "$root" "$plan" "$wt")" || row="$branch"
   case "$row" in *'|'*) _wt_refuse "row-unwritable branch=${branch}"; return 2 ;; esac
   # THE GUARD, BEFORE ANY LANDING TREE (D31): the accepted head and the row's head; the refusal is
@@ -1469,16 +1472,49 @@ line_ready() {  # <tree> <root> <sid> <within seconds | empty> <the same command
   rec="$(line_record "$plan")" && _wt_proofs_prove "${rec%/*}/run.log" || {
     _wt_refuse "record-unwritable why=proofs-unwritable path=${rec:+${rec%/*}/run.log} branch=${branch} — the run's log cannot be written, so nothing is published; make it writable, say ready again"; return 2
   }
+  LINE_SID="$lsid"   # the session the publish's plan write and roster mark run under: the one holding the launch line
+  _LINE_WITHIN="$within"   # the --within the waiting: reasons name (T31)
+  if _line_resumed; then
+    _line_carry "$plan" "$rec" "$root" "$row" "$name" "$head" "$branch" "$wt" "$suites" "$debt" "$_LINE_RESUME_AT" "$again" resumed
+    return $?
+  fi
   [ -z "$within" ] || deadline=$(( $(_res_now) + 10#$within ))   # decimal: `08` is eight seconds
   # THE PROMISE, PRINTED (wave-39 T8; D11, AC-4.3): once, before the carrier starts, the seconds the row's suites
   # promise now against the --within it was given. A suite whose promise the time left cannot hold is waited,
   # never started short (`_line_time_for`, D3); this line says the sum up front. No --within, no line.
   [ -z "$within" ] || printf 'promised %ss of %ss\n' "$(_line_promise_total "$suites" "$wt" "$root" "$acc" "$head")" "$((10#$within))"
-  LINE_SID="$lsid"   # the session the publish's plan write and roster mark run under: the one holding the launch line
-  _LINE_WITHIN="$within"   # the --within the waiting: reasons name (T31)
   ( _line_carry "$plan" "$rec" "$root" "$row" "$name" "$head" "$branch" "$wt" "$suites" "$debt" "$deadline" "$again" )
 }
 
+# ONE PROCESS RUNS ONE HEAD'S CODE. A ready whose code is the root checkout's own loaded it at `_LINE_CODE_AT`; a
+# landing moves the branch and rewrites those files under it, and a library sourced after that is another head's,
+# whose calls the loaded copy may not hold. So after any wait, before the carrier reads the record or writes, a moved
+# branch starts the same command again IN THIS PROCESS: exec keeps the pid and its start, so the `ready` event's
+# carrier, the entry's place and the lease stand, and the new process carries the entry without entering it again
+# (`_line_resumed`), under the deadline it had. exec runs no EXIT trap, so the landing trees are freed first.
+_line_one_head() {  # <tree> <deadline | empty> <the same command> -> 0 while the branch stands; 2 when it cannot start again
+  local now
+  [ -n "${_LINE_CODE_AT:-}" ] || return 0
+  now="$(git -C "$1" rev-parse --verify -q "$_LINE_CODE_REF" 2>/dev/null)" || return 0
+  [ "$now" != "$_LINE_CODE_AT" ] || return 0
+  printf 'restart: the working branch moved %s -> %s under this ready; carrier=%s starts again on its code\n' \
+    "${_LINE_CODE_AT:0:12}" "${now:0:12}" "${LINE_ME%%:*}"
+  [ -z "$_LINE_LT" ] || landing_tree_free "$_LINE_LT"
+  [ -z "$_LINE_JT" ] || landing_tree_free "$_LINE_JT"
+  _LINE_LT=""; _LINE_JT=""
+  export _LINE_CARRIED="$LINE_ME" _LINE_DEADLINE="$2"
+  cd "$1" 2>/dev/null && eval "exec $3"
+  _wt_refuse "restart-failed tree=$1 — the branch moved under this ready and it could not start again; say ready again"
+  return 2
+}
+_line_resumed() {  # -> 0 when this process is the carrier `_line_one_head` started again; _LINE_RESUME_AT its deadline
+  local c="${_LINE_CARRIED:-}"
+  _LINE_RESUME_AT="${_LINE_DEADLINE:-}"
+  unset _LINE_CARRIED _LINE_DEADLINE
+  [ -n "$c" ] || return 1
+  _line_me
+  [ "$c" = "$LINE_ME" ]
+}
 _line_owed() { printf 'landed %s %s — owed: complete task %s, then stop %s\n' "$1" "$2" "$1" "$3"; }   # <row> <commit> <name>
 # THE ROW'S DEBT (wave-30 T22; D2, P2, AC-11.3): `debt: burned <N>, touched <M>` for <row>, when the run
 # keeps a debt ledger (lib/proof.sh `proof_debt_row_counts`): N the items whose last cell says `burned
@@ -1649,7 +1685,7 @@ _line_lease_end() {  # <the carrier's exit status>
 
 # THE CARRIER'S LOOP, in its own subshell, whose pid is the `ready` event's carrier: the entry is
 # present exactly while this runs, its landing tree is freed and its lease ended when it ends.
-_line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <suites> <debt> <deadline> <again>
+_line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <suites> <debt> <deadline> <again> [resumed]
   local plan="$1" rec="$2" root="$3" row="$4" name="$5" com="$6" branch="$7" wt="$8" suites="$9"
   local debt="${10}" deadline="${11}" again="${12}" head all ent base cand cbase first waitbase="" held=""
   local c rc s said anchored="" linted=""
@@ -1659,9 +1695,12 @@ _line_carry() {  # <plan> <rec> <root> <row> <name> <commit> <branch> <tree> <su
   _LINE_LEASED=""   # set once this carrier holds the landing's lease (`_line_enter`)
   trap '_line_lease_end "$?"; [ -z "$_LINE_LT" ] || landing_tree_free "$_LINE_LT"; [ -z "$_LINE_JT" ] || landing_tree_free "$_LINE_JT"' EXIT
   _line_me
-  _line_enter "$plan" "$rec" "$row" "$deadline" "row=${row}" "name=${name}" "commit=${com}" "branch=${branch}" "tree=${wt}" \
+  if [ -n "${13:-}" ]; then _LINE_LEASED=1
+  else _line_enter "$plan" "$rec" "$row" "$deadline" "row=${row}" "name=${name}" "commit=${com}" "branch=${branch}" "tree=${wt}" \
     "suites=${suites}" "debt=${debt}" "carrier=${LINE_ME}" || return 2
+  fi
   while :; do
+    _line_one_head "$wt" "$deadline" "$again" || return 2
     head="$(line_head "$plan")"
     _line_count_git "$plan" "$rec" "$root" "$head"
     all="$(_line_entries "$rec" "$head")"
@@ -1824,6 +1863,7 @@ EOF
       fi
       sleep "$LINE_POLL"; continue
     fi
+    _line_one_head "$wt" "$deadline" "$again" || return 2
     said="$(line_publish "$plan" "$row" 2>&1)"; rc=$?
     case $rc in
       0) [ -z "$said" ] || printf '%s\n' "$said"
