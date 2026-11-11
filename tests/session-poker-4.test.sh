@@ -1225,6 +1225,39 @@ expect_eq "TL-9b …the rows read as they did before any tick" "$TL_ROWS0" "$TL_
 expect_eq "TL-10 T21 landed, T25 is ready" "T25" "$(cd "$TL" && bash -c '. "$1/fill.sh" >/dev/null 2>&1; fill_ready_set "$2" 99999 0' _ "$(dirname "$S46_LIB")" "$TL_P" 2>/dev/null | /usr/bin/grep -x T25)"
 poke "$TL" tick
 expect_eq "TL-11 a landed row is not landed twice" "1 1 1" "$(tl_pub T21) $(tl_pub T22) $(tl_pub T23)"
+# A live review row lands only once the judge reads every question it carries covered at the working head. T11 and T12,
+# launched by their cells, read live:head:adversarial and live:head:structure, their readings at the head; T12's writer
+# ends only after a code commit past the readings.
+LV="$(make_repo tick-live)"; ( cd "$LV" && git commit -q --allow-empty -m base && git branch -M main ) >/dev/null 2>&1
+git -C "$LV" config user.name "Dana Fixture"
+LV_BASE="$(git -C "$LV" rev-parse main)"; LV_RD="record/wave-01-fixture"; LV_D="$LV/.bionic/docs/$LV_RD"
+LV_P="$(vc_plan "$LV" \
+  "| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | lib/a.sh | landed | — | — |" \
+  "| T11 | 6 | review | the adversarial review | w-T11 | — | 30 | REQ-1 | .bionic/docs/$LV_RD/live-adversarial.md | active | live:head:adversarial | .bionic/docs/$LV_RD/live-adversarial.md |" \
+  "| T12 | 6 | review | the structure review | w-T12 | — | 30 | REQ-1 | .bionic/docs/$LV_RD/live-structure.md | active | live:head:structure | .bionic/docs/$LV_RD/live-structure.md |")"
+sed -i.bak "s/base-sha: abc1234/base-sha: $LV_BASE/" "$LV_P" && rm -f "$LV_P.bak"
+( cd "$LV" && git add -f "$LV_P" && git commit -qm base-sha ) >/dev/null 2>&1
+LV_H="$(git -C "$LV" rev-parse main)"
+for lv_q in evidence adversarial structure; do
+  printf 'question: %s\nresult: pass\nscope: piece\nreviewed: %s..%s\nfindings: 0\n' "$lv_q" "${LV_BASE:0:10}" "${LV_H:0:10}" > "$LV_D/live-$lv_q.md"
+  LV_PL="$(bash -c '. "$1" && proof_line review "$2" 2026-10-22T12:00:00Z "$3" "$4" w-crit pass piece' _ "$S46_LIB" "$LV_H" "$LV_RD/live-$lv_q.md" "$lv_q")"
+  LV_PL="$LV_PL" awk '{ print } /^current: / && !p { print ENVIRON["LV_PL"]; p = 1 }' "$LV_P" > "$LV_P.tmp" && mv "$LV_P.tmp" "$LV_P"
+done
+new_roster "$LV"
+add_row "$LV" name=w-T11 deliverable="$LV_D/live-adversarial.md" duration="1 minute" launched_at="$(iso_ago 600)"
+add_row "$LV" name=w-T12 deliverable="$LV_D/T12-done.md" duration="1 minute" launched_at="$(iso_ago 600)"
+lv_state() { ( . "$(dirname "$S46_LIB")/units.sh" >/dev/null 2>&1; units_rows "$LV_P" ) | awk -F'\t' -v r="$1" '$1 == r { print $10 }'; }
+lv_pub() { cat "$LV_D/run.log" 2>/dev/null | /usr/bin/grep -c "^run/v1|ev=published|row=$1|.*|kind=record|"; }
+poke "$LV" tick
+expect_eq "TL-12 a launched live review row whose question the judge reads covered lands at the tick, one published event"   "landed 1" "$(lv_state T11) $(lv_pub T11)"
+LV_X="$(s57_commit "$LV" lib/x.sh 'a code change past every reading')"; printf 'done
+' > "$LV_D/T12-done.md"
+poke "$LV" tick
+expect_contains "TL-13 past a code commit its sibling's question is not covered: not landed, the tick says why, naming it"   "structure uncovered" "$(printf '%s
+' "$OUT" | /usr/bin/grep '^poker: NOT-LANDED T12 ')"
+poke "$LV" tick
+expect_eq "TL-14 …said once, and the row stays active and unpublished" "0 active 0"   "$(printf '%s
+' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T12') $(lv_state T12) $(lv_pub T12)"
 
 # ============================================================
 section "§VERDICTS §DISCHARGE §STACK: the critic's verdicts and the regression's health reach the matrix by their verbs"
