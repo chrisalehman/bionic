@@ -381,7 +381,7 @@ sched_owed() {
 #     been printed.
 #   LEDGER (T5; D4, ADR-037 decision 3). `units_findings` is the reader the commit gate refuses
 #     on — a status off the enum, a row at its terminal word with no `- T<n>:` line, an
-#     `active` row whose agent cell names no row on the run's rosters nor its Dispatch ledger —
+#     `active` row whose agent cell names no row on the run's rosters nor an older run's Dispatch ledger —
 #     and each finding prints as `poker: LEDGER <id> <kind> [<value>]`. The rosters are
 #     `units_run_rosters`' list, this tick's own first, the list the gate reads (wave-36 T29;
 #     D10); with none to read (the first tick) it is the reader's no-roster rule, the gate's too.
@@ -653,23 +653,23 @@ $(proof_findings_owed "$SCHED_PLAN" 2>/dev/null)
 TICK_FINDINGS
 }
 
-# THE DETACHED LAUNCH-SYNC'S FAILURE, TOLD ONCE (wave-36 T12; D13, AC-7.1; C13). The launch recorder
-# (hooks/execution-recorder.sh `launch_sync_start`) writes the call's output and then `rc=<n>` to
-# `.bionic/tmp/launch-sync-<sid>.log`, rewriting it at each launch. A log whose last status is not 0
+# THE DETACHED TREE CELLS' FAILURE, TOLD ONCE (wave-36 T12; D13, AC-7.1; C13). The launch recorder
+# (hooks/execution-recorder.sh `dispatch_tree_start`) writes the write's output and then `rc=<n>` to
+# `.bionic/tmp/dispatch-<sid>.log`, rewriting it at each launch. A log whose last status is not 0
 # and that carries no `told=` line prints
 #
-#   poker: launch-sync failed — <log>
+#   poker: dispatch tree cells failed — <log>
 #
 # and gets a `told=<ISO>` line, so the line prints once per failure, never per tick: the next launch
 # rewrites the log and a new failure is told again. A log with no `rc=` line is a call still running,
 # or one killed before it ended, and says nothing; so does a symbolic link.
-tick_launch_sync_failed() {  # <root> <session-id> -> says the line when the log holds an untold failure
-  local log="$1/.bionic/tmp/launch-sync-$2.log" rc
+tick_dispatch_failed() {  # <root> <session-id> -> says the line when the log holds an untold failure
+  local log="$1/.bionic/tmp/dispatch-$2.log" rc
   [ -f "$log" ] && [ ! -L "$log" ] || return 0
   rc="$(awk '/^rc=/ { r = substr($0, 4) } /^told=/ { t = 1 } END { if (!t) print r }' "$log" 2>/dev/null)"
   case "$rc" in ''|0) return 0 ;; esac
   printf 'told=%s\n' "$(iso_now)" >> "$log" 2>/dev/null || return 0
-  say "launch-sync failed — $log"
+  say "dispatch tree cells failed — $log"
 }
 
 # tick_plan_memoised <command> [args…] -> runs the command with the bound plan's table parsed
@@ -1272,21 +1272,11 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
     fi
     ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
 
-    # ---------- THE LAUNCHES THE PLAN LACKS, WRITTEN BEFORE THE PLAN IS READ (wave-26 T32; D4) ----
-    #
-    # The launch recorder starts `launch-sync` and does not wait for it, so the tick runs the same
-    # transaction before anything below reads the plan: a launch the detached call did not record
-    # is recorded here (its LAUNCHED line enters this tick's output and its status this tick's
-    # change fingerprint), and one that cannot be recorded prints its NOT-RECORDED line and the
-    # commands to run by hand. A child process, as the recorder runs it: its refusals exit, and a
-    # tick must not. It leaves a lock another writer holds to that writer.
-    if [ -f "$ROSTER_FILE" ]; then
-      ( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" launch-sync 2>&1 ) || :
-    fi
-    # The recorder's detached call has a log of its own; its failure is told once, outside the held output, so an
-    # unchanged tick still says it (wave-36 T12; D13, AC-7.1).
-    if [ -n "$TICK_BUF" ]; then tick_launch_sync_failed "$REPO_REAL" "$SESSION_ID" >&3
-    else tick_launch_sync_failed "$REPO_REAL" "$SESSION_ID"; fi
+    # A launch is its run's log's own event, appended by the recorder, so the tick writes none. The recorder's
+    # detached write of a launch's tree cells has a log of its own; its failure is told once, outside the held
+    # output, so an unchanged tick still says it (wave-36 T12; D13, AC-7.1).
+    if [ -n "$TICK_BUF" ]; then tick_dispatch_failed "$REPO_REAL" "$SESSION_ID" >&3
+    else tick_dispatch_failed "$REPO_REAL" "$SESSION_ID"; fi
 
     # ---------- THE LINE'S STANDING REDS AND STALLED ENTRIES, EACH TOLD ONCE (wave-28 T5; D8) ----------
     #
@@ -1307,7 +1297,7 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
     # new full run, or a run starting or ending, is news, so the tick after it prints in full, and an
     # unchanged tick stays the one line it is (AC-4.9 of wave-24). THE HEADER: when the bound plan's
     # `regression-runs:` holds another number, the tick runs `regression-runs --write`, the
-    # transaction, in a child as it runs launch-sync: a hand-typed value does not outlive the tick.
+    # transaction, in a child: a hand-typed value does not outlive the tick.
     TICK_RR="$(regression_runs_count "$REPO_REAL")"
     TICK_RUNS_LINES="poker: regression-runs=$TICK_RR"
     TICK_RUNS_KEY="regression-runs=$TICK_RR"
@@ -1636,9 +1626,8 @@ EOF
     #
     # A test, verify or review row lands by its own agent's last act, `deliver`. When the agent
     # ended without it, its roster row reads MET (the deliverable landed and the agent said so)
-    # while its `## Tasks` row is still `active` under that name (launch-sync wrote the name into
-    # the agent cell). The tick lands such a row through `deliver` itself, run as a child as
-    # launch-sync is above, so the one landing writer and every check `deliver` makes stand: a row
+    # while its row still reads `active` under that name (its launch, `units_rows`). The tick lands
+    # such a row through `deliver` itself, run as a child, so the one landing writer and every check `deliver` makes stand: a row
     # whose artifact is absent is refused there, left active, and reported here with the refusal.
     # Only a row with no tree whose Files write nothing the head carries is asked; a row with a
     # tree lands through `ready`. MET is read off this tick's one verdict read, acked or not: the
@@ -2567,9 +2556,9 @@ EOF
     # live writer is an open roster row of a writer role (`budget_open_writers`, the occupancy's own count)
     # that no fresh panel shows gone, acked by nothing this tick, with no landing mark, whose name is the
     # agent of an `active` row. The row is returned to pending before the order is written, by the plan's
-    # own verb in a child as launch-sync runs, so a refused write orders no stop: a stopped agent whose
-    # row stayed active would never be offered again. The tree and base cells are kept; the agent cell is
-    # cleared, as a review row returned on its proof is, and its next launch fills it.
+    # own verb in a child, which takes the launch back in the run's log (`units_dispatch_back`), so a refused
+    # write orders no stop: a stopped agent whose row stayed active would never be offered again. The tree and
+    # base cells are kept; the agent cell is cleared, as a review row returned on its proof is.
     #
     # A STAND-DOWN FREES WHAT IT CAN AND WAITS ON WHAT IT MUST NOT END. The stood-down writer's asks that were never
     # admitted are withdrawn (`stop_run_gate --waiting`): a detached shim holds them, so the agent's stop reaches none,

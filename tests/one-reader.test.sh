@@ -6,7 +6,10 @@
 #   §PARSERS      an awk over a plan planted under payload/scripts/lib/ is named and the count rises by one;
 #                 the same awk inside the reader's own file is admitted.
 #   §PLANWRITERS  a planted append to a plan is named and the count rises by one.
-#   §WRITERS      two functions appending one event type are listed as a pair; so is `published` today.
+#   §WRITERS      two functions appending one event type are listed as a pair; so is `published` today. A
+#                 launch's `dispatch` has one writer, the launch recorder's, paired with a planted second.
+#   §NAMES        the verbs the dispatch event retired are named nowhere in hooks/ or payload/scripts/ but
+#                 the walls' single-line list of verbs, which the row that edits it clears.
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted.
 #   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
 #                 the tree holds none.
@@ -36,6 +39,7 @@ EOF
 cat > "$L/planted-writers.sh" <<'EOF'
 planted_born_a() { log_append born row=T1; }
 planted_born_b() { log_append born row=T2; }
+planted_dispatch() { log_append dispatch row=T1; }
 EOF
 printf '%s\n' "planted_reader_rows() { awk -F'|' '\$2 ~ /T/' \"\$plan\"; }" >> "$L/reader.sh"
 printf '%s\n' 'deny "planted refusal words"' >> "$S/hooks/engage.sh"
@@ -60,7 +64,16 @@ expect_contains "two functions appending one type are a pair" \
 PUB="$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "shared" && $2 == "published" { print $3 }')"
 expect_contains "published: the queue landing's writer" "payload/scripts/lib/line.sh:line_publish" "$PUB"
 expect_contains "published: the hand landing's writer" "hooks/poker/line.sh:poker_verb_row_landed" "$PUB"
-expect_eq "the shared-type count rises by one" "$(( $(count "$BEFORE" shared_types) + 1 ))" "$(count "$AFTER" shared_types)"
+DSP="$(printf '%s\n' "$AFTER" | awk -F'\t' '$1 == "shared" && $2 == "dispatch" { print $3 }')"
+expect_contains "dispatch: the launch recorder's one writer" "hooks/execution-recorder.sh:dispatch_event" "$DSP"
+expect_contains "dispatch: the planted second writer beside it" "payload/scripts/lib/planted-writers.sh:planted_dispatch" "$DSP"
+expect_eq "the shared-type count rises by two" "$(( $(count "$BEFORE" shared_types) + 2 ))" "$(count "$AFTER" shared_types)"
+
+section "NAMES"
+names() { /usr/bin/grep -rnE 'launch-sync|ledger-add|ledger-set' "$1/hooks" "$1/payload/scripts" | grep -v '/payload/scripts/lib/walls\.sh:'; }
+printf '%s\n' '# launch-sync' > "$L/planted-name.sh"
+expect_contains "the extractor reads a planted name" "planted-name.sh" "$(names "$S")"
+expect_eq "the retired verbs are named nowhere else" "" "$(names "$S" | grep -v planted-name.sh)"
 
 section "REFUSALS"
 expect_contains "a real refusal site in a hook file is listed" "$(printf 'refusal\thooks/dispatch-preflight.sh:')" "$BEFORE"

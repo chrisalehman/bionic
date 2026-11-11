@@ -32,7 +32,7 @@
 #     <root> is the project root the pointer is relative to; absent, the project root of the plan's own directory
 #     (lib/root.sh `project_root`), physical.
 #
-# THE ONE READER OF THE POINTER. The poker's readers (adopt's STALE note, launch-sync's mark, the verb) and
+# THE ONE READER OF THE POINTER. The poker's readers (adopt's STALE note, the verb) and
 # close-out's closed form call these, and tests/handoff-file.test.sh §POINTER-AGREE holds them to one answer.
 #
 # THE SECTION TEST, `_HANDOFF_SEC_AWK`: `ho_track(line)` is 1 for a line inside `## Handoff`, the heading, fences and
