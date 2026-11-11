@@ -2592,9 +2592,8 @@ EOF
         say "no STANDDOWN — load ${b5} over ${lim}; ${held}, stood down already, still runs an admitted run, and its load leaves when that run ends"
         return 0
       fi
-      if ! out="$( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" \
-             task-set "$best_id" status=pending agent=— 2>&1 )"; then
-        say "no STANDDOWN ${best} — load ${b5} over ${lim}, and its row ${best_id} could NOT be returned to pending, so no stop is ordered: $(clean "$(printf '%s' "$out" | head -1)")"
+      if ! units_row_back "$SCHED_PLAN" "$best_id"; then
+        say "no STANDDOWN ${best} — load ${b5} over ${lim}, and its row ${best_id} could NOT be returned to pending (its launch could not be taken back), so no stop is ordered"
         return 0
       fi
       say "STANDDOWN ${best} — load ${b5} over ${lim}; its row ${best_id} is pending again with its tree kept, so TaskStop it (the order is written) and FILL offers the row when the room opens"

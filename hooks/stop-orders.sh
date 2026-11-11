@@ -324,6 +324,29 @@ fi
 # walks for the nearest real `.bionic`.
 REPO="$(project_root "$PWD")"
 REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+
+# stopped_row_back <name> -> the plan row still running under <name> returned to pending, its launch taken back by
+# lib/units.sh `units_row_back` (the log's cancel, or its cells), and said; 1 when this session's open run holds no
+# row running under the name, or the launch could not be taken back. An agent gone unlanded leaves its row to be
+# offered again, so stopping it is the whole of returning it.
+stopped_row_back() {
+  local run plan rows id
+  # shellcheck source=/dev/null
+  { declare -F session_run >/dev/null 2>&1 || . "$BIONIC_LIB/run.sh"; } >/dev/null 2>&1
+  # shellcheck source=/dev/null
+  { declare -F units_row_back >/dev/null 2>&1 || . "$BIONIC_LIB/units.sh"; } >/dev/null 2>&1
+  declare -F session_run >/dev/null 2>&1 && declare -F units_row_back >/dev/null 2>&1 || return 1
+  run="$(session_run "$REPO_REAL" "$SESSION_ID" 2>/dev/null)" || return 1
+  case "$run" in 'bound-open '*) plan="${run#bound-open }" ;; *) return 1 ;; esac
+  rows="$(units_rows "$plan" 2>/dev/null)" || return 1
+  id="$(printf '%s\n' "$rows" | awk -F'\t' -v n="$1" '$10 == "active" && $5 == n { print $1; exit }')"
+  [ -n "$id" ] || return 1
+  if ! units_row_back "$plan" "$id"; then
+    die "stopped: $1 — its row $id still reads running: its launch could not be taken back; stopped $1 again takes it back."
+    return 1
+  fi
+  say "stopped: $1 — its row $id is pending again, its launch taken back, and is offered at the next tick."
+}
 if [ -z "$REPO_REAL" ]; then
   die "REFUSED — cannot resolve the working directory."
   exit 2
@@ -714,12 +737,11 @@ EOF
         if [ -z "$_mark" ] || [ "$_m_at" \> "$_best_at" ]; then _mark="$_m"; _best_at="$_m_at"; _mark_sid="$_msid"; fi
       done <<< "$(roster_sessions_with_name "$STATE_DIR" "$_target")"
     fi
-    _acked=0
+    # A NAME CLOSED WITH ITS ROW STILL RUNNING is closed again by nothing; its row's launch alone is taken back, below,
+    # behind the same fresh-panel check, so no row is left running with no door to return it.
+    _acked=0; _back_only=0
     if [ "$(line_field "$_line" acked)" = "yes" ]; then
-      if [ -z "$_mark" ]; then
-        die "REFUSED — $_target is already acked; a second ack would say nothing new."
-        exit 2
-      fi
+      [ -n "$_mark" ] || _back_only=1
       _acked=1
     fi
     # THE REASON FOLLOWS THE VERDICT (wave-19 T1e, audit V-1; REQ-1 AC-1.2). A landed row
@@ -803,7 +825,13 @@ EOF
       _cad=$(printf '%s' "$_detail" | grep -oE '\([0-9]+s\)' | tr -d '()s')
       say "panel-gone overrides STILL-LIVE (progress ${_age:-?}s old, cadence ${_cad:-?}s)"
     fi
-    if [ "$_acked" -eq 1 ]; then
+    if [ "$_back_only" -eq 1 ]; then
+      if ! stopped_row_back "$_target"; then
+        die "REFUSED — $_target is already acked; a second ack would say nothing new."
+        exit 2
+      fi
+      exit 0
+    elif [ "$_acked" -eq 1 ]; then
       say "stopped: $_target — its row was already closed (acked)."
     else
       if ! _ack=$( cd "$REPO_REAL" 2>/dev/null || exit 9
@@ -814,6 +842,7 @@ EOF
       fi
       [ -n "$_ack" ] && printf '%s\n' "$_ack"
       say "stopped: $_target — its row is closed (acked by human, reason $_reason)."
+      [ "$_reason" != abandoned ] || stopped_row_back "$_target" || :
     fi
     # THE TREE GOES AT THE STOP (wave-28 T6; D7, AC-3.2). Only for a row carrying the mark: the tree
     # recorded for the name (`workspace_for_name`), else the plan's cell, else the convention's, removed by
