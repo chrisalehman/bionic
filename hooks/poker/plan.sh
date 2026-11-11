@@ -1425,7 +1425,7 @@ EOF
     [ -z "$TA_QUESTIONS" ] || TA_CELL_TASK="$TA_CELL_TASK · questions: $TA_QUESTIONS"
     pv_task_cells_or_refuse "$TA_ID" "$TA_CELL_TASK"
     if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_CELL_TASK" "$TA_AGENT" \
-         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" "${TA_BORN:+$TA_BORN$TA_BORN_MARK}${TA_BORN_SUITE:+regression $TA_BORN_SUITE of=$TA_BORN_OF}" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
+         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
       die "REFUSED — $TA_PLAN carries no ## Tasks table or no ## SDLC State section to add $TA_ID to; the plan is unchanged."
       exit 1
     fi
@@ -1448,7 +1448,15 @@ EOF
     fi
 
     plan_verb_swap task-add "$TA_ID added" writer
-    say "task-add — $TA_ID added to $TA_PLAN: the row and its - $TA_ID: line; validated and dry-committed first."
+    # THE BIRTH IS THE LOG'S, BESIDE THE EDIT THAT ADDS THE ROW: one born event, through the one writer, carrying what a
+    # born marker carried (the rating and its findings, or the regression and its record).
+    case "$TA_BORN_MARK" in *" promoted") TA_PROMOTED=1 ;; *) TA_PROMOTED="" ;; esac
+    if ! units_born_event "$TA_PLAN" "$TA_ID" "${TA_BORN}${TA_BORN_SUITE:+regression $TA_BORN_SUITE}" \
+         "${TA_BORN_IDS}${TA_BORN_SUITE:+$TA_BORN_OF}" "$TA_PROMOTED"; then
+      die "task-add — $TA_ID is in $TA_PLAN, and its born event could not be appended to the run's log; the row reads as born by no review or regression until it is."
+      [ -z "${TA_BORN}${TA_BORN_SUITE}" ] || exit 1
+    fi
+    say "task-add — $TA_ID added to $TA_PLAN: the row and its - $TA_ID: line, and its born event in the run's log; validated and dry-committed first."
     [ -z "$TA_ART" ] || say "task-add — $TA_ID is a $TA_KIND row: its Files carry its record artifact, $TA_ART."
     [ -z "$TA_REV_ART" ] || say "task-add — $TA_ID is a review row: its Files carry one record per question the rigor deals${TA_ART_CELL:+, its artifact cell the first, $TA_ART_CELL}."
     [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN); say so in the review findings disposition · $TA_COUNT_SAID"

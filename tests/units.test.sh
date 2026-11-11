@@ -1399,5 +1399,23 @@ expect_eq "LIVE-2 a launch in the log reads active under its name, on the plan a
 call units_dispatch_back "$LV_P" T2 w-T2
 expect_eq "LIVE-3 its cancel returns it to pending and ready" "pending/— T2" "$(lv T2) $(call units_ready "$LV_P" 4)"
 
+section "§BORN — a row's birth is one born event in the run's log, read beside the plan's own born lines"
+lv_ev() { bash -c '. "$1/reader.sh" && reader_facts "$2"' _ "${LIB%/*}" "$LV_P" | grep -c "^run/v1|ev=$1|.*row=$2|"; }
+call units_born_event "$LV_P" T2 "review S1 on" "record/w/r.md#1"; BN_RC=$CALL_RC
+call units_born_event "$LV_P" T1
+expect_eq "BORN-1 the writer appends one born event per row, the reader lists each once" "0 1 1" "$BN_RC $(lv_ev born T2) $(lv_ev born T1)"
+expect_eq "BORN-2 the cap's count, the findings and the marks read the review-born row from the log; the plain one is none of them" \
+  "T2	S1 on	b.sh|T2	pending	record/w/r.md#1|T2	review	S1 on" \
+  "$(call units_born "$LV_P")|$(call units_born_findings "$LV_P")|$(call units_born_marks "$LV_P")"
+
+section "§BACK — a launch taken back is one function: the log's cancel for a launch in the log, the cells for one by its cells"
+lv_log dispatch row=T2 name=w-T2b brief=b sum=s; BK_SUM="$(cksum < "$LV_P")"
+call units_row_back "$LV_P" T2
+expect_eq "BACK-1 a launch in the log returns to pending by one cancel, the plan untouched" "pending/— 1 same" \
+  "$(lv T2) $(grep -c '|ev=cancel|of=dispatch|row=T2|name=w-T2b|' "$LV_LOG") $([ "$(cksum < "$LV_P")" = "$BK_SUM" ] && echo same)"
+call units_row_back "$LV_P" T1
+expect_eq "BACK-2 a launch by its cells returns by its cells, and writes no cancel" "pending/— 0 | T1 | 4 | build | one | — |" \
+  "$(lv T1) $(grep -c '|ev=cancel|of=dispatch|row=T1|' "$LV_LOG") $(grep -o '^| T1 | 4 | build | one | [^|]* |' "$LV_P")"
+
 # ============================================================
 finish

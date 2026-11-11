@@ -856,7 +856,7 @@ ex_add() {  # <id> <files> <born> -> OUT, RC: task-add of a step-4 build row bor
   poke "$REX" task-add "$1" 4 build "Fix $1. The defect is gone." bionic:implementor '—' 30 REQ-1 "$2" --born "$3"
 }
 ex_born_line() { printf '%s\n' "$OUT" | /usr/bin/grep 'is review-born' || :; }
-ex_mark() { /usr/bin/grep "^- $1: " "$PEX" | sed -n 's/.* born: /born: /p'; }
+ex_mark() { bash -c '. "$1/units.sh" >/dev/null 2>&1; _units_born_logged "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$PEX" | /usr/bin/grep "^- $1: " | sed -n 's/.* born: /born: /p'; }
 expect_eq "EX-0 precondition: the plan reads fix-cap: 2 and no fix-policy: (the default, S1,S2-on), and both findings are read" \
   "2||3|1" "$(sed -n 's/^fix-cap: //p' "$PEX")|$(sed -n 's/^fix-policy: //p' "$PEX")|$(/usr/bin/grep -c '^finding: ' "$REX/.bionic/docs/$EX_OWN")|$(/usr/bin/grep -c '^finding: ' "$REX/.bionic/docs/$EX_CARRIED")"
 
@@ -872,17 +872,17 @@ expect_eq "EX-3 the third born review S2 on row lands at fix-cap: 2 (exit 0): in
 EX_LINE="$(ex_born_line)"
 expect_contains "EX-3b …its line ends exempt under fix-policy: S1,S2-on (AC-1.3)" " · exempt under fix-policy: S1,S2-on" "$EX_LINE"
 expect_absent "EX-3c …and names no count of the cap for an exempt row (AC-1.3)" "of cap" "$EX_LINE"
-expect_eq "EX-3d …its ledger marker is the plain rating" "born: review S2 on" "$(ex_mark T8)"
+expect_eq "EX-3d …its born event carries the plain rating" "born: review S2 on" "$(ex_mark T8)"
 
 # A carried finding and a promoted one count; the third counted row is refused.
 ex_add T9 lib/c1.sh "$EX_CARRIED#1"
 expect_eq "EX-4 a finding carried from another plan's record lands, counted (exit 0)" "0" "$RC"
 expect_contains "EX-4b …its line ends counted 1 of 2 (AC-1.3)" " · counted 1 of 2" "$(ex_born_line)"
-expect_eq "EX-4c …its marker names the carried record, as task-add has always written it" "born: review S2 on of=$EX_CARRIED#1" "$(ex_mark T9)"
+expect_eq "EX-4c …its born event names the carried record" "born: review S2 on of=$EX_CARRIED#1" "$(ex_mark T9)"
 ex_add T10 lib/p1.sh "$EX_OWN#1"
 expect_eq "EX-5 a finding rated S3 on that the person moved to fix lands, counted (exit 0)" "0" "$RC"
 expect_contains "EX-5b …its line ends counted 2 of 2 (AC-1.3)" " · counted 2 of 2" "$(ex_born_line)"
-expect_eq "EX-5c …its marker says it was promoted" "born: review S3 on of=$EX_OWN#1 promoted" "$(ex_mark T10)"
+expect_eq "EX-5c …its born event says it was promoted" "born: review S3 on of=$EX_OWN#1 promoted" "$(ex_mark T10)"
 EX_BEFORE="$(cat "$PEX")"
 ex_add T11 lib/p2.sh "$EX_OWN#2"
 expect_eq "EX-6 a third counted row, promoted from S3 on, is refused at fix-cap: 2 (exit 1) (AC-1.2)" "1" "$RC"
