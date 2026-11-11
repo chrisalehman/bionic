@@ -807,7 +807,7 @@ section "§STEP0: card.sh step0 renders the configuration card in the 1.20.0 sha
   printf 'walk: exempt\ndesign-interview: true\nmodel_plan: orchestrator=claude-fable-5-1\nseed: ideas/seed.md\n---\n'
   printf '# plan\n\n## Goal\n\nConfigure the fixture run, and nothing else.\n\n## SDLC State\n\ncurrent: 0\nworking-branch: wave/01-fixture\n'
 } > "$PFC"
-rm -f "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/asks.state"
+rm -f "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/asks.state" "$FC_REC/run.log"
 bind_marker "$RFC" "$PFC"
 fc_card step0
 expect_eq "STEP0-1 AC-20.1 card.sh step0 <plan> exits 0, nothing on stderr, under the card's title" \
@@ -825,7 +825,7 @@ section "§CARRY: a carry the run chose is the run's ask until the release appro
 # render's disposition opens `carry:<record>#<n>`, the page records the carries it puts, and the reply that answers the
 # page closes each. fails-when: the reply leaves the carry open on the run's register.
 FC_CK="carry:record:wave-x:adversarial.md:1"
-fc_reg() { cat "$FC_REC/asks.state" 2>/dev/null; }
+fc_reg() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_lines' _ "$FC_LIB" "$RFC" "$SID" 2>/dev/null; }
 fc_record adversarial adversarial piece 'finding: 1 S3 on lib/x.sh:1 a message could be clearer'
 fc_plan "$FC_GOOD"
 fc_page

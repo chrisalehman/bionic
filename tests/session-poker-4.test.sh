@@ -357,7 +357,7 @@ expect_contains "SEV-cur2 …naming that reading failing" \
 # round and a second opens nothing; the waive verb closes it; a refusal after the waiver is taken back opens a new round;
 # once a passing reading holds the question, current 8 closes what is left. The sections above left closed rounds.
 sev_owed() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && owed_list' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
-sev_store() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && cat "$(owed_file)"' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
+sev_store() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && owed_lines' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
 SEV_WKEYS="$(sev_owed | cut -f1)"
 expect_contains "AW-1 T35 AC-2.2 the refusal on a failing question opens waive:<question>, the waive verb's key" \
   "waive:adversarial" "$SEV_WKEYS"
