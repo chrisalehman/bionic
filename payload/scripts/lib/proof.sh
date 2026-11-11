@@ -1792,7 +1792,12 @@ proof_lines() {
   local facts
   facts="$(_proof_facts "$(proof_run_plan "${1:-}")")" || return 2
   [ -n "$facts" ] || return 0
-  printf '%s' "$facts" | awk -F'|' "$(proof_fact_awk)"'proof_fact() { print proof_fact_line() }'
+  printf '%s' "$facts" | proof_fact_lines
+}
+# proof_fact_lines < facts -> each proof among the `run/v1` facts on stdin, as `proof_lines` prints it: for a caller that
+# already holds the fold's answer, so the proofs cost no second entry into it.
+proof_fact_lines() {
+  awk -F'|' "$(proof_fact_awk)"'proof_fact() { print proof_fact_line() }'
 }
 
 # proof_last <plan> <kind> [<question>] -> the head of the NEWEST standing proof of <kind> the reader holds for the

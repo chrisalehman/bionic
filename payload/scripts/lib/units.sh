@@ -224,7 +224,7 @@ _units_live() {
   _units_lib proof.sh _proof_facts && _units_lib reader.sh reader_log || return 0
   log="$(reader_log "$plan" 2>/dev/null)" || return 0
   [ -s "$log" ] && [ ! -L "$log" ] || return 0
-  facts="$(_proof_facts "$plan")" || return 2
+  facts="$(_units_facts_of "$plan")" || return 2
   printf '%s\n' "$facts" | awk -F'|' '
     { split("", f); for (i = 2; i <= NF; i++) { e = index($i, "="); if (e > 1 && !(substr($i, 1, e - 1) in f)) f[substr($i, 1, e - 1)] = substr($i, e + 1) }
       r = f["row"]; if (r == "") next }
@@ -234,22 +234,32 @@ _units_live() {
 }
 
 # A PROOF IS THE RUN'S TOO: what each row's proof read, `live:head` and a reading's question compare is the run's proofs,
-# from the same kept fold (lib/proof.sh `proof_lines`, which reads a writer's copy as its plan), never the plan's text.
+# from the same fold the row states are read from, never the plan's text. A scheduling call takes the fold's answer once
+# (`_units_fold`, a copy read as its plan) and holds it for the call: the row states and the proofs are read from what
+# it holds, so the call enters the kept fold once. Outside a hold each asks the fold itself.
 # _units_proofs <plan> -> one `proved:` line per standing proof, in fact order; nothing without lib/proof.sh; 2 a failed fold
 _units_proofs() {
+  local facts
   if [ -n "${_UNITS_MEMO_PLAN:-}" ] && [ "$_UNITS_MEMO_PLAN" = "${1:-}" ] && [ -n "${_UNITS_MEMO_PROOFS_RC:-}" ]; then
     printf '%s' "$_UNITS_MEMO_PROOFS"; return "$_UNITS_MEMO_PROOFS_RC"
   fi
-  _units_lib proof.sh proof_lines || return 0
-  proof_lines "${1:-}"
+  _units_lib proof.sh proof_fact_lines || return 0
+  facts="$(_units_facts_of "$(_units_origin "${1:-}")")" || return 2
+  [ -z "$facts" ] || printf '%s\n' "$facts" | proof_fact_lines
 }
 
-# _units_fold <plan> -> the run's facts folded once in this shell (lib/proof.sh `_proof_facts`, a copy read as its plan),
-# so the row states and the proofs read after it in subshells are served from this shell's fold, not each from the kept
-# file; 0 with nothing to fold, 2 a failed fold
+# _units_fold <plan> -> 0 with the fold's answer for <plan>'s run held in _UNITS_FACTS (its plan in _UNITS_FACTS_PLAN),
+# variables the caller declares local; 0 holding nothing without lib/proof.sh; 2 a failed fold
 _units_fold() {
+  _UNITS_FACTS_PLAN=""; _UNITS_FACTS=""
   _units_lib proof.sh _proof_facts || return 0
-  _proof_facts "$(_units_origin "${1:-}")" >/dev/null || return 2
+  _UNITS_FACTS="$(_proof_facts "$(_units_origin "${1:-}")")" || { _UNITS_FACTS=""; return 2; }
+  _UNITS_FACTS_PLAN="$(_units_origin "${1:-}")"
+}
+# _units_facts_of <plan, a copy already read as its plan> -> the held answer when the call holds this plan's, else the fold's
+_units_facts_of() {
+  if [ -n "${_UNITS_FACTS_PLAN:-}" ] && [ "$_UNITS_FACTS_PLAN" = "${1:-}" ]; then printf '%s' "$_UNITS_FACTS"; return 0; fi
+  _proof_facts "${1:-}"
 }
 
 # _units_origin <plan> -> the plan a copy was made from, whose run it reads: a plan verb's `<plan>.<verb>.<pid>` and
@@ -402,7 +412,7 @@ units_memoised() {  # <plan> <command> [args...]
   fi
   local _UNITS_MEMO_PLAN="" _UNITS_MEMO_OUT="" _UNITS_MEMO_RC=1 _UNITS_MEMO_FLOOR="${_UNITS_MEMO_FLOOR:-}" own="" rc
   local _UNITS_MEMO_WAITS="${TMPDIR:-/tmp}/bionic-units-waits-$$-${RANDOM}${RANDOM}"
-  local _UNITS_MEMO_LIVE="" _UNITS_MEMO_LIVE_RC="" _UNITS_MEMO_PROOFS="" _UNITS_MEMO_PROOFS_RC=""
+  local _UNITS_MEMO_LIVE="" _UNITS_MEMO_LIVE_RC="" _UNITS_MEMO_PROOFS="" _UNITS_MEMO_PROOFS_RC="" _UNITS_FACTS_PLAN="" _UNITS_FACTS=""
   _UNITS_MEMO_OUT="$(_units_read "${1:-}")"; _UNITS_MEMO_RC=$?
   _units_fold "${1:-}"
   _UNITS_MEMO_LIVE="$(_units_live "${1:-}")"; _UNITS_MEMO_LIVE_RC=$?
@@ -1168,6 +1178,7 @@ _units_proof_awk() {
 # `holds` (units_floor_holds) takes the regression row's id, or nothing, in the <step> slot.
 _units_sched() {
   local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows hasreads=0 i fst rst rc wts live proofs
+  local _UNITS_FACTS_PLAN="${_UNITS_FACTS_PLAN:-}" _UNITS_FACTS="${_UNITS_FACTS:-}"
   if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ] && [ "$mode" != whole ] \
      && [ "$mode" != questions ]; then
     case "$step" in ''|*[!0-9]*) return 2 ;; esac
@@ -1175,7 +1186,7 @@ _units_sched() {
   out="$(_units_table "$plan")" || return 1
   case "$out" in *$'\n'*) rows="${out#*$'\n'}" ;; *) rows="" ;; esac
   [ -n "$rows" ] || return 0
-  _units_fold "$plan" || return 2
+  [ "$_UNITS_FACTS_PLAN" = "$(_units_origin "$plan")" ] || _units_fold "$plan" || return 2
   live="$(_units_live "$plan")" || return 2
   proofs="$(_units_proofs "$plan")" || return 2
   rows="$(_units_overlay "$live" "$rows")"
