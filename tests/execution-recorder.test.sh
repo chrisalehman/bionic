@@ -27,6 +27,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 
 HERE="${BIONIC_HOOKS_DIR}"
 REC="$HERE/execution-recorder.sh"
@@ -468,6 +469,25 @@ run_rec "$(jq -n --arg s "$SID_A" --arg t "$RS_TR" --arg c "$RS_REPO" --arg u "$
     tool_use_id:$u, duration_ms:4795}')"
 expect_contains "a synchronous dispatch confirms the same way (capture D shape)" \
   "agent_id=a6bc0caf11962bbb6" "$(grep 'status=confirmed' "$RS_REPO/.bionic/tmp/roster-${SID_A}.state")"
+
+# A LAUNCH IS ONE EVENT IN THE RUN'S LOG, and the plan is not written. The session is bound to a plan
+# whose row T1 is pending and needs no tree of its own; the intended row carries the row and its brief as the dispatch wall writes
+# them. The confirmation appends one `dispatch` beside the brief's record, and the plan's bytes stand.
+IFS='|' read -r RD_REPO RD_TR RD_SUB RD_CFG <<< "$(make_world rosterdispatch yes)"
+RD_PLAN="$(plan_fixture "$RD_REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" wave \
+  "| T1 | 4 | build | the build | — | — | — | 30 | REQ-1 | .bionic/docs/record/wave-01-test/T1.md | — | — | pending |")"
+printf 'plan=%s\n' "$RD_PLAN" > "$RD_REPO/.bionic/tmp/engaged-$SID_A.state"
+RD_BRIEF=.bionic/docs/record/wave-01-test/briefs/w99-T1.md
+mkdir -p "$RD_REPO/${RD_BRIEF%/*}"; printf 'the brief\n' > "$RD_REPO/$RD_BRIEF"
+{ roster_header; roster_row_fixture status=intended session="$SID_A" name=w99-T1 agent_id= row=T1 \
+    brief="$RD_BRIEF" brief_sum=5e1f tool_use_id="$TUID"; } > "$RD_REPO/.bionic/tmp/roster-${SID_A}.state"
+RD_SUM="$(shasum < "$RD_PLAN")"
+BIONIC_LAUNCH_SYNC_INLINE=1 run_rec "$(mk_agent_post "$SID_A" "$RD_TR" "$RD_REPO" "w99-T1" "$NEW_AID" "$TUID")"
+RD_LOG="$(grep '^run/v1|ev=dispatch|' "$RD_REPO/.bionic/docs/record/wave-01-test/run.log" 2>/dev/null)"
+expect_eq "a launch appends one dispatch event to the run's log" "1" "$(printf '%s' "$RD_LOG" | grep -c .)"
+expect_eq "…naming the row, the agent, the brief's path and its sum" "T1 w99-T1 $RD_BRIEF 5e1f" \
+  "$(for k in row name brief sum; do printf '%s\n' "$RD_LOG" | tr '|' '\n' | sed -n "s/^$k=//p"; done | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "…and the plan is not written" "$RD_SUM" "$(shasum < "$RD_PLAN")"
 
 # ---------- the TEAMMATE payload shape (AC-10, epic-16 wave-01 task 0) ----------
 #
