@@ -37,6 +37,8 @@
 #            an older head is ready only when the judge reads the reviews covered
 #   §LIVE    a launch the run's log holds reads active under its name and is not ready; its cancel returns it; a
 #            dry copy reads its plan's run; a row the cells hold active reads as before
+#   §BORN    a row's born event, one per row, is read by the fix-cap's count, the findings and the marks
+#   §BACK    a launch taken back by one function: a cancel for a launch in the log, the cells for one by its cells
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT (AC-1e.2, measure §4.3). Before this library two
 # readers in hooks/canonical-sdlc-evidence-gate.sh took `id`/`rigor`/`status` as awk fields

@@ -71,7 +71,8 @@ expect_contains "dispatch: the planted second writer beside it" "payload/scripts
 BRN="$(printf '%s\n' "$AFTER" | awk -F'\t' '$1 == "shared" && $2 == "born" { print $3 }')"
 expect_contains "born: the units library's one writer" "payload/scripts/lib/units.sh:units_born_event" "$BRN"
 expect_contains "born: the planted split beside it" "payload/scripts/lib/planted-writers.sh:planted_born_b" "$BRN"
-expect_eq "the shared-type count rises by two" "$(( $(count "$BEFORE" shared_types) + 2 ))" "$(count "$AFTER" shared_types)"
+SH0="$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "shared" && ($2 == "born" || $2 == "dispatch")' | grep -c .)"
+expect_eq "the shared-type count rises by each planted type not shared before" "$(( $(count "$BEFORE" shared_types) + 2 - SH0 ))" "$(count "$AFTER" shared_types)"
 
 section "NAMES"
 names() { /usr/bin/grep -rnE 'launch-sync|ledger-add|ledger-set|task-set|task-split|tasks-prose' "$1/hooks" "$1/payload/scripts" | grep -v '/payload/scripts/lib/walls\.sh:'; }
