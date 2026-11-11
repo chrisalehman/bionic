@@ -568,62 +568,80 @@ pushed_onto() {  # <a placing row> -> that row, carrying `pushed=`
 # ---- END what a start pushes ----
 
 # ============================================================
-# THE PLAN ROW MOVES WITH THE LAUNCH (wave-26 T12, D4, AC-1.4; T32).
+# A LAUNCH IS ONE EVENT IN ITS RUN'S LOG (D2, D16).
 # ============================================================
 #
-# A dispatch used to cost the orchestrator two more calls after it: `task-set <id>
-# status=active agent=<name>` and `ledger-add`, copying into the plan what this arm had just
-# confirmed on the roster. The confirmation now moves the row, through ONE transaction:
-# `session-poker.sh launch-sync`, which writes every open launch of this session the bound plan
-# lacks, its row and its ledger line, in one validated, dry-committed write. Its rules (which
-# launch maps to which row, the tree cells, a re-dispatch, a launch with no tree of its own) are
-# written beside it, in session-poker.sh.
+# The confirmation appends one `dispatch` event, through the one appender (lib/log.sh `log_append`), to the
+# log of the run whose brief the launch was given: the brief file stands at `<record>/briefs/<name>.md`, the
+# dispatch wall admitted it as this row's, and its record directory is the run's, so the log is found with no
+# read of the plan. The event carries the row, the name, the role, the session, the call's id, and the brief's
+# path and sum, which is the contract the agent was given. It writes no cell: a row's state and its agent are
+# read from the log (lib/units.sh `_units_live`). A launch with no row or no brief (a researcher, a probe) is
+# no row's, and appends nothing.
 #
-# THIS HOOK STARTS IT AND DOES NOT WAIT (T32). Through T12 the hook ran two verb transactions
-# itself, about a second each, under the 10 s limit hooks.json gives it, so a batch of launches
-# outran it and the later ones printed a busy refusal for the orchestrator to finish by hand. The
-# call is now detached: its own process group (`set -m`), no terminal, every stream on /dev/null,
-# so the hook returns at once and the harness has nothing of it to wait for. It takes `--wait`,
-# so it queues behind another launch's transaction rather than giving up.
-#
-# A FAILURE STILL SURFACES, ON A CHANNEL OF ITS OWN (wave-36 T12; D13, AC-7.1; C13). The call's
-# output and its exit status go to `.bionic/tmp/launch-sync-<sid>.log`, rewritten by each launch,
-# the status last as `rc=<n>`; the Patrol tick prints `poker: launch-sync failed — <log>` once for
-# a log whose status is not 0 (session-poker.sh `tick_launch_sync_failed`). Through wave-35 every
-# stream went to /dev/null and only the next caller of the transaction (the tick, the turn-end
-# wall in payload/scripts/lib/stop.sh) could say what it had not recorded, so a refusal reached
-# whichever session ran it next. Those callers still run it and still print what they could not
-# record. A kill of the detached call cannot leave half a launch: the row and its line are one
-# write, by one rename; a log with no `rc=` line is a call still running, or killed, and says nothing.
-#
-# NO RUN PREDICATE HERE (T32; tests/hook-adoption.test.sh §4). This hook is the roster
-# lifecycle and reads nothing out of the plan; the verb asks whose run the session is in, and
-# exits silently when there is none, as it does before Step 4 and without a roster.
-#
-# BIONIC_LAUNCH_SYNC_INLINE=1 runs the call in the foreground, still silent and still logged, so a
-# test can read the plan and the log the moment the hook returns. Nothing in a session sets it.
+# THE TREE IS STILL THE PLAN'S, until it is an event of its own: a row's empty `worktree` and `base` cells are
+# filled from the tree spawn-worktree.sh recorded for the name (lib/worktree.sh `workspace_record_for_name`), as
+# the plan's own verb writes a cell (`task-set`). That write is a plan transaction of about a second, so it runs
+# detached, its output and then `rc=<n>` in `.bionic/tmp/dispatch-<sid>.log`, which the tick names when the
+# status is not 0. Another write to the plan between its read and its swap refuses it, so it tries again.
+# BIONIC_LAUNCH_SYNC_INLINE=1 runs it in the foreground, so a test reads the plan the moment the hook returns.
 POKER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-poker.sh"
 
-launch_sync_start() {  # -> 0 always; starts this session's launch-sync and does not wait for it
+dispatch_event() {  # <confirmed roster row> -> 0 always; appends the launch's dispatch event to its run's log
+  local r="$1" row brief abs
+  row="$(line_field "$r" row)"; brief="$(line_field "$r" brief)"
+  [ -n "$row" ] && [ -n "$brief" ] && [ -n "$(line_field "$r" name)" ] || return 0
+  case "$brief" in /*) abs="$brief" ;; *) abs="$BIONIC_ROOT/$brief" ;; esac
+  case "$abs" in */briefs/*.md) ;; *) return 0 ;; esac
+  [ -d "${abs%/briefs/*}" ] && [ ! -L "${abs%/briefs/*}/run.log" ] || return 0
+  # shellcheck source=/dev/null
+  ( . "$BIONIC_LIB/log.sh" >/dev/null 2>&1 || exit 0
+    RUN_LOG="${abs%/briefs/*}/run.log" log_append dispatch "row=$row" "name=$(line_field "$r" name)" \
+      "role=$(line_field "$r" subagent_type)" "session=$BIONIC_SID" "tool_use_id=$(line_field "$r" tool_use_id)" \
+      "brief=$brief" "sum=$(line_field "$r" brief_sum)" ) >/dev/null 2>&1
+  return 0
+}
+
+dispatch_tree_cells() {  # <row> <name> -> the row's empty worktree and base cells, from the tree recorded for <name>
+  local row="$1" rec tree base plan rows cur wt bs n=0 root_p
+  local -a pairs
+  # shellcheck source=/dev/null
+  . "$BIONIC_LIB/worktree.sh" >/dev/null 2>&1 && . "$BIONIC_LIB/units.sh" >/dev/null 2>&1 || return 1
+  rec="$(workspace_record_for_name "$BIONIC_ROOT" "$BIONIC_SID" "$2" 2>/dev/null)" || return 0
+  tree="${rec%%$'\t'*}"; base="${rec#*$'\t'}"; [ "$base" != "$rec" ] || base=""
+  plan="$(session_run "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || return 0
+  case "$plan" in 'bound-open '*) plan="${plan#bound-open }" ;; *) return 0 ;; esac
+  rows="$(_units_table "$plan")" || return 0
+  cur="$(printf '%s\n' "$rows" | awk -F'\t' -v id="$row" '$1 == id { print; exit }')"
+  [ -n "$cur" ] || return 0
+  units_field_v wt "$cur" worktree; units_field_v bs "$cur" base
+  root_p="$(cd "$BIONIC_ROOT" 2>/dev/null && pwd -P)"
+  [ ! -d "$tree" ] || tree="$(cd "$tree" 2>/dev/null && pwd -P)"
+  case "$tree" in "$root_p"/*) tree="${tree#"$root_p"/}" ;; "$BIONIC_ROOT"/*) tree="${tree#"$BIONIC_ROOT"/}" ;; esac
+  pairs=()
+  case "$wt" in *[A-Za-z0-9]*) ;; *) ! units_has_column "$plan" worktree || pairs+=("worktree=$tree") ;; esac
+  case "$bs$base" in *[A-Za-z0-9]*) case "$bs" in *[A-Za-z0-9]*) ;; *) ! units_has_column "$plan" base || pairs+=("base=${base:0:8}") ;; esac ;; esac
+  [ "${#pairs[@]}" -gt 0 ] || return 0
+  while [ "$n" -lt 5 ]; do
+    CLAUDE_CODE_SESSION_ID="$BIONIC_SID" "${BASH:-bash}" "$POKER" task-set "$row" "${pairs[@]}" && return 0
+    n=$((n + 1)); sleep 1
+  done
+  return 1
+}
+
+dispatch_tree_start() {  # <row> <name> -> 0 always; fills the tree cells without waiting
   local log=/dev/null
-  [ -f "$POKER" ] || return 0
-  # The log lives beside the roster this arm just wrote; a tmp dir that is not there, or a log path
-  # that is a symbolic link, gets no log rather than a write through it.
-  if [ -d "$BIONIC_ROOT/.bionic/tmp" ] && [ ! -L "$BIONIC_ROOT/.bionic/tmp/launch-sync-${BIONIC_SID}.log" ]; then
-    log="$BIONIC_ROOT/.bionic/tmp/launch-sync-${BIONIC_SID}.log"
+  [ -n "$1" ] && [ -f "$POKER" ] || return 0
+  if [ -d "$BIONIC_ROOT/.bionic/tmp" ] && [ ! -L "$BIONIC_ROOT/.bionic/tmp/dispatch-${BIONIC_SID}.log" ]; then
+    log="$BIONIC_ROOT/.bionic/tmp/dispatch-${BIONIC_SID}.log"
   fi
   if [ "${BIONIC_LAUNCH_SYNC_INLINE:-}" = 1 ]; then
-    ( cd "$BIONIC_ROOT" 2>/dev/null || exit 0
-      CLAUDE_CODE_SESSION_ID="$BIONIC_SID" "${BASH:-bash}" "$POKER" launch-sync --wait >"$log" 2>&1
-      printf 'rc=%s\n' "$?" >>"$log" ) </dev/null >/dev/null 2>&1
+    ( cd "$BIONIC_ROOT" 2>/dev/null || exit 0; dispatch_tree_cells "$1" "$2" >"$log" 2>&1; printf 'rc=%s\n' "$?" >>"$log" ) </dev/null >/dev/null 2>&1
     return 0
   fi
   ( set -m
     cd "$BIONIC_ROOT" 2>/dev/null || exit 0
-    # The wrapper that writes the status outlives the hook as the call does: a hangup is ignored by both.
-    ( trap '' HUP
-      CLAUDE_CODE_SESSION_ID="$BIONIC_SID" nohup "${BASH:-bash}" "$POKER" launch-sync --wait >"$log" 2>&1
-      printf 'rc=%s\n' "$?" >>"$log" ) </dev/null >/dev/null 2>&1 &
+    ( trap '' HUP; dispatch_tree_cells "$1" "$2" >"$log" 2>&1; printf 'rc=%s\n' "$?" >>"$log" ) </dev/null >/dev/null 2>&1 &
   ) </dev/null >/dev/null 2>&1
   return 0
 }
@@ -770,10 +788,9 @@ if [ "$TOOL_NAME" = "Agent" ]; then
   COMPLETED=$(pushed_onto "$COMPLETED")
   printf '%s\n' "$COMPLETED" >> "$ROSTER_FILE" 2>/dev/null || exit 0
 
-  # THE PLAN ROW MOVES WITH THE CONFIRMATION (wave-26 T12, D4), only once the roster row is
-  # written: the launch is the record, and the plan follows it. See `launch_sync_start` above.
-  # A dispatch with no name maps to no row, so it starts nothing.
-  [ -n "$(line_field "$COMPLETED" name)" ] && launch_sync_start
+  # THE LAUNCH'S EVENT, once the roster row is written, and the tree cells it owes. See `dispatch_event` above.
+  dispatch_event "$COMPLETED"
+  [ -n "$(line_field "$COMPLETED" name)" ] && dispatch_tree_start "$(line_field "$COMPLETED" row)" "$(line_field "$COMPLETED" name)"
 
   # NO BOUND ON THE ROSTER, deliberately (Step-6 critic F-1, reproduced end to end in
   # record/w3-critic-repro-cap.sh). The observation record this reasoning contrasted the

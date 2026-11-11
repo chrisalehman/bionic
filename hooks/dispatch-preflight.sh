@@ -2341,8 +2341,8 @@ fi
 # (lib/worktree.sh `worktree_marker`). Either one open (`roster_open_names`, acks applied, the in-flight
 # arm's predicate) and not this dispatch's own name is a live writer: the dispatch is refused naming it and
 # its tree, and the marker does not move. THE TREE is the one the open writer recorded
-# (lib/worktree.sh `workspace_for_name`, the record the launch sync fills the plan cell from) when it has
-# one, else the plan row's `worktree` cell, so a re-dispatch made before the sync still finds it. Only a
+# (lib/worktree.sh `workspace_for_name`, the record the launch's tree cells are filled from) when it has
+# one, else the plan row's `worktree` cell, so a re-dispatch made before that fill still finds it. Only a
 # writer is judged, and only a row-bound, named dispatch. COST: the open-name awk, once per row-bound
 # writer dispatch; the landing library loads, and git is asked for the marker, only when some other name
 # is open.
@@ -2783,7 +2783,7 @@ fi
 # arm above read off the bound row's record (or the open writer's own record), and a live writer there
 # has already refused the dispatch (wave-35 T7; D14), so a tree reaching this line has none. Only a
 # linked tree, and only for a writer: a cell naming the main checkout or a tree that is gone, an
-# empty cell (a first dispatch, whose cell the launch sync fills after it), an unnamed launch and a
+# empty cell (a first dispatch, whose cell its launch fills after it), an unnamed launch and a
 # read-only role (a test-runner sent to the row's tree is not its writer) mark nothing. COST: the call
 # (~41 ms: one bash, one git) only when the row names a linked tree. A mark that fails is said, not
 # refused: the launch is the roster's already.

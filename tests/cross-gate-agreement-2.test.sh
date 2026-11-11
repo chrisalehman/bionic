@@ -109,9 +109,8 @@ expect_eq "CG.2 …and run_open agrees (no current: field is not an open state)"
 # ── CG.3 the retired task-scale `current: T<n>`: the divergence that routes it to its refusal ──
 # run_open calls `T<n>` an open run while the FILL gate withholds on it. Since wave-31 (one ledger
 # shape, D2; A-orch-52) `T<n>` is no step at any scale, and the pair answer two questions on
-# purpose: run_open keeps the retired plan OPEN so launch-sync, the stop wall and the tick reach it
-# and refuse it by name (AC-1.2's `NOT-RECORDED … is not numeric`), and the FILL gate, which has no
-# number to compare, fills nothing. A change that closed it would skip such a plan in silence, so
+# purpose: run_open keeps the retired plan OPEN so the tick and the evidence gate reach it and
+# refuse it by name, and the FILL gate, which has no number to compare, fills nothing. A change that closed it would skip such a plan in silence, so
 # it must turn this red.
 for CG_T in T1 T5 T23; do
   CG_PLAN="$(cg_plan "$CG_T")"

@@ -204,6 +204,61 @@ _units_table() {
   _units_read "${1:-}"
 }
 
+# A ROW'S STATE AND ITS AGENT ARE THE RUN'S, NOT THE CELLS' (D2). A launch is a `dispatch` event in the run's log and
+# writes no cell; a launch taken back is a `cancel` of it. So `units_rows` and every scheduling answer read the
+# `status` and `agent` slots through the reader's standing facts: a row the log holds launched (its latest standing
+# dispatch with an instant, never the plan cell's own translation, which has none) reads `active` under that name, and
+# one the log holds landed reads `landed`; a `landed` or `dropped` cell is never moved back. Everything else is the
+# cell, which is the old home the translation reads, so a run whose log holds none of these reads as its cells say.
+# The text itself is judged as written (`units_validate` reads `_units_table`), so a write is never refused for a
+# state the plan does not carry. A plan writer's dry copy (`<plan>.<verb>.<pid>`) is read with its plan's run.
+# _units_live <plan> -> `<id><TAB><state><TAB><agent>` per row the log moves; nothing without a log; 2 a failed fold
+_units_live() {
+  local plan="${1:-}" log facts
+  if [ -n "${_UNITS_MEMO_PLAN:-}" ] && [ "$_UNITS_MEMO_PLAN" = "$plan" ] && [ -n "${_UNITS_MEMO_LIVE_RC:-}" ]; then
+    printf '%s' "$_UNITS_MEMO_LIVE"; return "$_UNITS_MEMO_LIVE_RC"
+  fi
+  case "$plan" in *.plan.md.*) [ ! -f "${plan%%.plan.md.*}.plan.md" ] || plan="${plan%%.plan.md.*}.plan.md" ;; esac
+  _units_lib proof.sh _proof_facts && _units_lib reader.sh reader_log || return 0
+  log="$(reader_log "$plan" 2>/dev/null)" || return 0
+  [ -s "$log" ] && [ ! -L "$log" ] || return 0
+  facts="$(_proof_facts "$plan")" || return 2
+  printf '%s\n' "$facts" | awk -F'|' '
+    { split("", f); for (i = 2; i <= NF; i++) { e = index($i, "="); if (e > 1 && !(substr($i, 1, e - 1) in f)) f[substr($i, 1, e - 1)] = substr($i, e + 1) }
+      r = f["row"]; if (r == "") next }
+    f["ev"] == "dispatch" && f["at"] != "" { if (!(r in st)) ord[++n] = r; st[r] = "active"; nm[r] = f["name"] }
+    f["ev"] == "published" { if (!(r in st)) ord[++n] = r; st[r] = "landed" }
+    END { for (i = 1; i <= n; i++) printf "%s\t%s\t%s\n", ord[i], st[ord[i]], (st[ord[i]] == "active" ? nm[ord[i]] : "") }'
+}
+
+# _units_overlay <live> <rows> -> the rows, each moved row's status and agent the run's
+_units_overlay() {
+  [ -n "$1" ] || { printf '%s\n' "$2"; return 0; }
+  printf '%s\n\034\n%s' "$1" "$2" | awk -F'\t' -v OFS='\t' '
+    $0 == "\034" { r = 1; next }
+    !r { st[$1] = $2; nm[$1] = $3; next }
+    ($1 in st) && $10 != "landed" && $10 != "dropped" { $10 = st[$1]; if (nm[$1] != "") $5 = nm[$1] }
+    { print }'
+}
+
+# _units_lib <file> <function> -> 0 once <function> is defined, sourcing <file> from this library's directory if not
+_units_lib() {
+  local d
+  declare -F "$2" >/dev/null 2>&1 && return 0
+  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || return 1
+  # shellcheck source=/dev/null
+  [ -f "$d/$1" ] && . "$d/$1" >/dev/null 2>&1
+  declare -F "$2" >/dev/null 2>&1
+}
+
+# units_dispatch_back <plan> <row> <name> -> the launch of <row> under <name> taken back: one `cancel` of that dispatch in
+# the run's log, which is what returns a row launched by the log to pending (a cell write cannot). 2 no log to write.
+units_dispatch_back() {
+  local log
+  _units_lib reader.sh reader_log && log="$(reader_log "${1:-}" 2>/dev/null)" && _units_lib log.sh log_append || return 2
+  RUN_LOG="$log" log_append cancel of=dispatch "row=${2:-}" "name=${3:-}"
+}
+
 # _units_waits <plan> -> lib/plan-read.sh `plan_read_waits` for <plan>, the rows each read names: read once
 # per memoised command, kept in `_UNITS_MEMO_WAITS`' file (its first line the plan) for every later question
 # of the command, subshells included, as the regression state is kept; read now outside a memo.
@@ -250,7 +305,9 @@ units_memoised() {  # <plan> <command> [args...]
   fi
   local _UNITS_MEMO_PLAN="" _UNITS_MEMO_OUT="" _UNITS_MEMO_RC=1 _UNITS_MEMO_FLOOR="${_UNITS_MEMO_FLOOR:-}" own="" rc
   local _UNITS_MEMO_WAITS="${TMPDIR:-/tmp}/bionic-units-waits-$$-${RANDOM}${RANDOM}"
+  local _UNITS_MEMO_LIVE="" _UNITS_MEMO_LIVE_RC=""
   _UNITS_MEMO_OUT="$(_units_read "${1:-}")"; _UNITS_MEMO_RC=$?
+  _UNITS_MEMO_LIVE="$(_units_live "${1:-}")"; _UNITS_MEMO_LIVE_RC=$?
   _UNITS_MEMO_PLAN="${1:-}"
   if [ -z "$_UNITS_MEMO_FLOOR" ]; then
     _UNITS_MEMO_FLOOR="${TMPDIR:-/tmp}/bionic-units-floor-$$-${RANDOM}${RANDOM}"; own=1
@@ -366,11 +423,12 @@ units_questions() {  # <units_rows record> -> the declared questions, or nothing
 # dependency ordering, and a reader that re-sorted would answer the dispatch question in an
 # order nobody chose.
 units_rows() {
-  local out rc
+  local out rc live
   out="$(_units_table "${1:-}")"; rc=$?
   [ "$rc" -eq 0 ] || return "$rc"
+  live="$(_units_live "${1:-}")" || return 2
   # Everything after the control line; nothing when the table has no rows.
-  case "$out" in *$'\n'*) printf '%s\n' "${out#*$'\n'}" ;; esac
+  case "$out" in *$'\n'*) _units_overlay "$live" "${out#*$'\n'}" ;; esac
   return 0
 }
 
@@ -1036,7 +1094,7 @@ _units_proof_awk() {
 # `covered`. The tick computes it once (session-poker.sh `sched_facts_state`); unset, it waits.
 # `holds` (units_floor_holds) takes the regression row's id, or nothing, in the <step> slot.
 _units_sched() {
-  local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows hasreads=0 i fst rst rc wts
+  local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows hasreads=0 i fst rst rc wts live
   if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ] && [ "$mode" != whole ] \
      && [ "$mode" != questions ]; then
     case "$step" in ''|*[!0-9]*) return 2 ;; esac
@@ -1044,6 +1102,8 @@ _units_sched() {
   out="$(_units_table "$plan")" || return 1
   case "$out" in *$'\n'*) rows="${out#*$'\n'}" ;; *) rows="" ;; esac
   [ -n "$rows" ] || return 0
+  live="$(_units_live "$plan")" || return 2
+  rows="$(_units_overlay "$live" "$rows")"
   # THE CONTROL LINE'S FOURTH FIELD names the columns the header carries (`units_has_column`'s
   # reading, taken here from the parse already in hand).
   ctl="${out%%$'\n'*}"
@@ -1258,7 +1318,7 @@ _units_regno() {
 }
 
 # units_writes_head <Files cell> -> 0 when the cell names a path outside the record, 1 when not:
-# the same predicate, for a shell caller (session-poker.sh launch-sync).
+# the same predicate, for a shell caller.
 units_writes_head() {
   printf '%s\n' "${1:-}" | awk "$(_units_files_awk)"'{ exit !writes_head($0) }'
 }
@@ -2729,8 +2789,8 @@ units_add_row() {
 #
 # Four more projectors in `units_add_row`'s mould, one per hand edit a run used to make to its
 # own plan: a cell of a table row, a `- Step N:` or `- T<n>:` line, `current:`, and the
-# fields of a step's evidence block. The poker's plan-row verbs (`task-set`, `ledger-add`,
-# `ledger-set`, `step-line`, `current`) each run one of them onto a COPY and judge the copy
+# fields of a step's evidence block. The poker's plan-row verbs (`task-set`, `step-line`,
+# `current`) each run one of them onto a COPY and judge the copy
 # before anything is swapped in — the task-add transaction, unchanged.
 #
 # PURE, AS EVERY VERB HERE IS: each prints the WHOLE plan and writes nothing. Fence-aware like
@@ -2747,8 +2807,8 @@ units_add_row() {
 # units_table_cells <plan> <set|add> <section> <id> <name=value>… -> the whole plan with the
 #   row whose id cell is <id> given those cells (`set`), or a new row with that id appended
 #   after the table's last row (`add`; unnamed cells `—`). <section> is `tasks` (the first
-#   `## Tasks` table, the one `_units_read` parses) or `ledger` (the first `## Dispatch ledger`
-#   table). Names are the header's own cells, matched case-insensitively.
+#   `## Tasks` table, the one `_units_read` parses); an older run's `## Dispatch ledger` is history,
+#   and nothing writes it. Names are the header's own cells, matched case-insensitively.
 #   Exit 1 no such table · 2 `set`: no row with that id, `add`: the id is taken · 3 a name the
 #   header does not carry · 4 a value with a forbidden byte · 5 `set`: more than one row with
 #   that id. Silent on every refusal.
@@ -2760,7 +2820,7 @@ units_table_cells() {
   local plan="${1:-}" mode="${2:-}" sect="${3:-}" id="${4:-}" pairs="" kv
   [ -n "$plan" ] && [ -f "$plan" ] && [ -n "$id" ] || return 1
   case "$mode" in set|add) : ;; *) return 1 ;; esac
-  case "$sect" in tasks|ledger) : ;; *) return 1 ;; esac
+  case "$sect" in tasks) : ;; *) return 1 ;; esac
   shift 4
   for kv in "$@"; do
     case "$kv" in *=*) : ;; *) return 3 ;; esac
@@ -2795,7 +2855,6 @@ units_table_cells() {
         if (line ~ /^[ \t]*#/) {
           if (state == 1 || state == 2) { state = 3; continue }
           if (state == 0 && sect == "tasks" && line ~ /^##[ \t]+[Tt]asks([ \t].*)?$/) state = 1
-          if (state == 0 && sect == "ledger" && line ~ /^##[ \t]+[Dd]ispatch[ \t]+[Ll]edger([ \t].*)?$/) state = 1
           continue
         }
         if (state == 1) {

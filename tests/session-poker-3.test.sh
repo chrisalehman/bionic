@@ -879,8 +879,12 @@ expect_eq "59a2 AC-1.5 both read rows are offered at once" "yes yes" \
   "$(s48_fill_has T3) $(s48_fill_has T4)"
 
 # ---------- a reading returns the row carrying its question, and that row alone ----------
-poke "$R59" task-set T3 status=active agent=w-aud
-expect_eq "59c0 precondition: task-set moves T3 active" "0" "$RC"
+# T3 IS LAUNCHED BY THE RUN'S LOG, as a launch is now: its cells stay pending, and its return is the log's retraction.
+s59_live() { bash -c '. "$1/units.sh" && units_rows "$2"' _ "$BIONIC_HOOKS_DIR/../payload/scripts/lib" "$P59" | awk -F'\t' -v r="$1" '$1 == r { print $10 "|" $5 }'; }
+S59_LOG="$R59/.bionic/docs/record/wave-01-fixture/run.log"
+bash -c '. "$1/log.sh" && RUN_LOG="$2" log_append dispatch row=T3 name=w-aud brief=b sum=s' _ "$BIONIC_HOOKS_DIR/../payload/scripts/lib" "$S59_LOG"
+expect_eq "59c0 precondition: T3's launch is in the log alone: its cells pending, the run's state active under w-aud" \
+  "pending|active|w-aud" "$(s48_row "$P59" T3 | awk -F'|' '{ print $12 }')|$(s59_live T3)"
 poke "$R59" task-set T4 status=active agent=w-crit
 expect_eq "59c0b precondition: task-set moves T4 active" "0" "$RC"
 printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: piece\n\nthe second pass\n' "$S59_A" "$S59_C" \
@@ -895,8 +899,7 @@ expect_contains "59c2 …with its question" "evidence=record/wave-01-fixture/adv
 # its structure reading at C (59c6) returns it. Through T10 the first reading returned it at once.
 expect_eq "59c3 §RANGE-Q F3 the adversarial reading leaves T4, the row carrying it, active under w-crit while structure is unread at C" \
   "active|w-crit" "$(s48_row "$P59" T4 | awk -F'|' '{ print $12 "|" $5 }')"
-expect_eq "59c4 …and leaves the evidence row T3 active under its reader" "active|w-aud" \
-  "$(s48_row "$P59" T3 | awk -F'|' '{ print $12 "|" $5 }')"
+expect_eq "59c4 …and leaves the evidence row T3 active under its reader" "active|w-aud" "$(s59_live T3)"
 expect_absent "59c5b …and gives no Files advice for it" "its Files name another record" "$OUT"
 # A reading by a reader that is not the row's agent never moves it (F3): w-rev's structure reading
 # at C leaves T4 active under w-crit; only w-crit's own structure reading returns it.
@@ -917,7 +920,10 @@ printf '# reading\n\nreviewed: %s..%s\nquestion: evidence\nresult: pass\nscope: 
   > "$R59/.bionic/docs/record/wave-01-fixture/ev.md"
 poke "$R59" proof-add review record/wave-01-fixture/ev.md --question evidence --reader w-aud
 expect_eq "59d the evidence reading registers (exit 0)" "0" "$RC"
-expect_eq "59d2 …and returns T3" "pending" "$(s48_row "$P59" T3 | awk -F'|' '{ print $12 }')"
+expect_eq "59d2 …and returns T3: pending in the run, its launch taken back in the log, once" "pending|—|1" \
+  "$(s59_live T3)|$(/usr/bin/grep -c '^run/v1|ev=cancel|of=dispatch|row=T3|name=w-aud|' "$S59_LOG")"
+expect_eq "59d3 …while T4, launched by its cells, returned with no retraction written: the log's only cancel is T3's" "1" \
+  "$(/usr/bin/grep -c '|ev=cancel|' "$S59_LOG")"
 
 # ---------- the next tick: the evidence row idle, the critic's row offered from structure's B ----------
 rm -f "$R59/.bionic/tmp/tick-digest-$SID.state"
@@ -925,6 +931,11 @@ poke_pressure "$R59" 8192 1.0 tick
 # RE-PINNED BY T43 (review pass 17 F3): both of the critic's questions were read at C before it
 # went back to pending, so at C it is idle too, and is not offered the range it just read.
 expect_absent "59e3 …and neither idle row has a RANGE line" "poker: RANGE T" "$OUT"
+# A landing past the readings readies the returned row again: the fill offers T3, whose launch the log took back.
+( printf 'D\n' >> "$R59/.worktrees/01-fixture/a.sh" && git -C "$R59/.worktrees/01-fixture" commit -qam "landing D" ) >/dev/null 2>&1
+rm -f "$R59/.bionic/tmp/tick-digest-$SID.state"
+poke_pressure "$R59" 8192 1.0 tick
+expect_eq "59e4 …and past a landing D the tick offers T3 again" "yes" "$(s48_fill_has T3)"
 
 # ---------- review pass 17 F1 (blocker) and F2 through the real tick (wave-27 T43) ----------
 # HOISTED to tests/session-poker.prelude.sh: s59_world — §60's world, which §LINE-TELL and §REPORT-RTL build, is built on it.

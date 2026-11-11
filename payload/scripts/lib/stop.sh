@@ -1441,7 +1441,6 @@ stop_patrol_duties() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local -a _FF_IDS
   local _NT_STAMP _NT_LINE _NT_VERB _NT_AT _NT_OK _NT_PRESENT=0
   local STANDDOWN_MISSING STANDDOWN_REASON _SD_BOUND _SD_SET
-  local _LS_OUT _LS_RC LAUNCH_REASON=""
 
   case "$_ev" in Stop) : ;; *) return 0 ;; esac
 
@@ -1528,30 +1527,6 @@ PLAN_NAME=""
 # plan path `session_run` produced from a `find -type f`, so it names a regular file and
 # carries no trailing slash — the one case the two spellings disagree about.
 [ -n "$PLAN" ] && [ -f "$PLAN" ] && PLAN_NAME="${PLAN##*/}"
-
-# ---------- THE LAUNCHES THE PLAN LACKS (wave-26 T32; D4, review-3 F2) ----------
-#
-# The launch recorder starts `session-poker.sh launch-sync` and does not wait for it, so what
-# that detached call could not record has to reach a model somewhere: the turn's end is one of
-# the two places (the Patrol tick is the other). The same transaction runs here, on a bound open
-# run only. A launch it records is silent. One it cannot record refuses the turn once, joined to
-# the other duties below, with the words and the hand commands the verb printed. A lock another
-# writer holds is left to it and says nothing. A RETRYABLE EXIT IS NOT A REFUSAL (wave-26 T51;
-# review 13 F6): 75 is another writer replacing the plan while the transaction judged its copy,
-# which the checksum is there to catch and the next caller repairs by running again. A turn end
-# is the wrong place to fail shut on that: the turn is not refused for it, the launch stays
-# unrecorded, and the next tick, which runs the same transaction before it reads the plan,
-# records it and owes its reconcile. Every other non-zero exit is a fault no retry repairs (a
-# launch the plan cannot take, the validator or the commit gate refusing the batch, a lock that
-# cannot be made, a dry commit that cannot run) and refuses the turn once, as before.
-if [ "$BIONIC_RUN_WORD" = bound-open ] && [ -n "$PLAN_NAME" ] && [ -f "${HOOK_DIR}/session-poker.sh" ]; then
-  _LS_OUT="$( cd "$BIONIC_ROOT" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$BIONIC_SID" \
-    bash "${HOOK_DIR}/session-poker.sh" launch-sync 2>&1 )"; _LS_RC=$?
-  case "$_LS_RC" in
-    0|75) : ;;
-    *) LAUNCH_REASON="Launches not recorded in the plan: the launch-sync transaction could not record every launch this session made, and it said: ${_LS_OUT} Fix what it names or run the commands it prints, then stop again — this gate blocks once." ;;
-  esac
-fi
 
 # ---------- the plan's BASENAME ----------
 #
@@ -1901,7 +1876,6 @@ fi
 TELL_REASON="$FILL_REASON"
 [ -n "$STANDDOWN_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${STANDDOWN_REASON}"
 [ -n "$NOTICK_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${NOTICK_REASON}"
-[ -n "$LAUNCH_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${LAUNCH_REASON}"
 # The tells are judged TOGETHER, so a turn that left two of them is told both things once.
 # Blocking on one and staying silent about the other would hide the second behind the
 # one-shot: the next stop passes by design.
@@ -1916,18 +1890,12 @@ if [ -n "$TELL_REASON" ]; then
   elif [ -n "$FILL_REASON" ]; then
     # THE FACT AND THE FIX COME FROM THE ARM THAT FIRED (REQ-3): the computed gap. Its detail is
     # the dispatch line and the three forms, each on a line of its own so it pastes whole; a marker
-    # turn's or a launch's paragraph rides below them, as it rode in the old paragraph.
+    # turn's paragraph rides below them, as it rode in the old paragraph.
     _fill_detail="$FILL_FORMS"
     [ -n "$NOTICK_REASON" ] && _fill_detail="${_fill_detail}"$'\n\n'"${NOTICK_REASON}"
-    [ -n "$LAUNCH_REASON" ] && _fill_detail="${_fill_detail}"$'\n\n'"${LAUNCH_REASON}"
     fold_block block stop "$FILL_FACT" "$FILL_FIX" "$_fill_detail"
   elif [ -n "$STANDDOWN_REASON" ]; then
     fold_block block stop "a STANDDOWN went unanswered" "stop each agent, or decline" \
-      "$TELL_REASON"
-  elif [ -z "$NOTICK_REASON" ]; then
-    # A LAUNCH THE PLAN CANNOT RECORD (wave-26 T32), alone. Beside another duty it rides in
-    # that duty's paragraph, as the marker turn's does.
-    fold_block block stop "a launch is not recorded in the plan" "run the commands it prints" \
       "$TELL_REASON"
   else
     # THE MARKER TURN THAT RAN NO TICK (wave-20 REQ-6, AC-6.2), alone. Beside another duty it
@@ -2227,7 +2195,7 @@ stop_turn_facts() {  # -> 0 facts computed · 1 nothing to read
   #
   # A ROW THIS TURN LAUNCHED IS NEVER MISSED (wave-20 T11b; Step-6 review R4, T12 F7). A launch
   # joins the roster at PreToolUse, so it is already in `open` and has already taken its slot;
-  # its plan row stays ready until the launch recorder sets it `active` (A-T11.1). Counting it
+  # its plan row stays ready until the launch recorder appends its dispatch. Counting it
   # ready as well charged one launch twice, and the refusal named the rows the turn had just
   # sent. So the ledger's ready set stays the plan's, and what the turn missed is that set less
   # the rows this turn launched, matched by the dispatch name `fill_name` hands out.
