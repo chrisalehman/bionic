@@ -1148,8 +1148,9 @@ sitrep_asks() {
   [ -z "$gk" ] || owed="$(printf '%s\n' "$owed" | awk -F'\t' -v ks="$gk" 'BEGIN { n = split(ks, a, " "); for (i = 1; i <= n; i++) drop[a[i]] = 1 } !($1 in drop)')"
   pages="$(pages_open "$plan" "$led")"
   owed="$(printf '%s\n' "$owed" | pages_owed "$pages")"
-  # when each open ask was raised: the reader's open asks, each its round's instant
-  ats=""; ! _sitrep_reader || ats="$(_sitrep_ask "$plan" reader_q_asks "$plan" | awk -F'|' "$_READER_AWK"'{ print line_kv("key") "\t" line_kv("at") }')"
+  # when each open ask was raised: its open round's opening in the asks library's list, which an answer or a send
+  # marked later does not move
+  ats="$(owed_rounds '.*' "$plan" "$root" 2>/dev/null | awk -F'\t' '$3 == "open" { print $1 "\t" $4 }')"
   while IFS='	' read -r k sent ttl rep; do
     [ -n "$k" ] || continue
     raised="-"
