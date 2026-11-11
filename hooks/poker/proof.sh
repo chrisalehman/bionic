@@ -1041,7 +1041,7 @@ PF_PAIRS_LIST
     # A-T7-5), so what lands after the reading is the cover rule's to judge, and the verb holds nothing.
     PF_EV=("kind=$PF_KIND" "head=$PF_HEAD" "evidence=$PF_REL")
     [ -z "$PF_QUESTION" ] || PF_EV+=("question=$PF_QUESTION" "reader=$PF_READER" "result=$PF_RESULT" "scope=$PF_SCOPE")
-    # A RED WHOLE RUN'S REDS RIDE ON ITS PROOF (wave-35 T9; D8, AC-1.3): proof_attested took each log and every red
+    # A RED WHOLE RUN'S REDS RIDE ON ITS PROOF: proof_attested took each log and every red
     # named; the proof lists them as owed, and the judge reads them there. Its evidence= is the logs, comma-joined (T35),
     # and it names the recorded run it read.
     if [ "$PF_KIND" = regression ]; then

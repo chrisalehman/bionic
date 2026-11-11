@@ -6,9 +6,9 @@
 #     run/v1|ev=proof|kind=<regression|review|task|check|walk|inherited>|head=<40-hex>|evidence=<path under record/>|…|at=
 #
 # appended by `proof_event` alone, and read through the reader's facts (`proof_last`). An older plan holds its proofs as
-# `proved:` lines in its `## SDLC State`, which the reader translates into the same event. A `check` (wave-27 T16; D12)
+# `proved:` lines in its `## SDLC State`, which the reader translates into the same event. A `check`
 # is written only by `session-poker.sh release-check`, the verb that runs the project's declared command, and its
-# evidence is that verb's log. A READING (wave-27 T2; D1) is a review proof that adds four fields,
+# evidence is that verb's log. A READING is a review proof that adds four fields,
 # `question=<q> reader=<roster name> result=<pass|flag|fail> scope=<piece|whole>`, written by
 # `proof-add review <record> --question <q> --reader <name>`; every reader keyed by kind alone reads it as the review
 # proof it is. What is unproved is the difference since the head a
@@ -141,12 +141,12 @@ proof_run_counts() {
 }
 
 # proof_inherited_lines <plan> -> each inherited suite of the plan's run, one `inherited: <suite> base=<sha> head=<sha>
-# at=<ISO-UTC> evidence=<log>` line each (wave-35 T9; D8, AC-1.6): THE ONE READER of inherited debt, written by
+# at=<ISO-UTC> evidence=<log>` line each: THE ONE READER of inherited debt, written by
 # `session-poker.sh proof-add inherited <suite>` once the suite ran red at the base, as a `proof kind=inherited` event.
 # An older plan holds its own as these lines in its unfenced `## SDLC State`, which no event type carries (the
 # translation names them a gap), so they are read as written, then the events, kept whole beside the fold
 # (`_proof_facts`): two suites at one regression head are two debts. The judge reads their suites (`proof_inherited`);
-# close-out carries the lines into the continuation (wave-35 T10; A-orch-18). Exit 2 when the run's facts cannot be read.
+# close-out carries the lines into the continuation. Exit 2 when the run's facts cannot be read.
 proof_inherited_lines() {
   [ -f "${1:-}" ] || return 0
   _proof_facts "$1" >/dev/null || return 2

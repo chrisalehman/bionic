@@ -1975,7 +1975,7 @@ ensure_step8_line() {
 write_plan_blocks() {
   local phase="$1" target="${2:-$PLAN}"
   local tmp="$target.close-out.$$" step8
-  # PHASE 8 WRITES THE LINE IT READS BACK (wave-33 T8; D8, AC-4.2): the Step-8 line when the plan has
+  # PHASE 8 WRITES THE LINE IT READS BACK: the Step-8 line when the plan has
   # none. It is done to the TARGET, which is the pre-flight's scratch copy on the first call, so a refusal
   # still leaves the plan byte-for-byte as it was. The walk is the gate's to read from the walk's proof.
   if [ "$phase" = 8 ]; then
