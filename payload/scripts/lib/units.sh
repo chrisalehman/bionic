@@ -3545,42 +3545,11 @@ units_render_units() {
     }' "$1" 2>/dev/null
 }
 
-# ── THE MATRIX WRITERS ─────────────────────────────────────────────────────────
+# ── THE MATRIX'S ONE BLOCK-KEY WRITER ──────────────────────────────────────────
 #
-# The one cell writer and the one block-key writer of `## Verification Matrix`, here so that every
-# caller that loads this library writes a matrix row the same way: the plan verbs, the landing's
-# settlement (lib/line.sh) and close-out.
+# The one writer of a key in an older plan's `## Verification Matrix` block, which the person's confirmation of a
+# row writes; no other code writes a cell, a key or a head line of the matrix.
 
-# THE MATRIX ROW'S CELLS, the one writer of a row's cells. Inside
-# `## Verification Matrix`, fences skipped, the first `|` line whose trimmed first cell is the AC id has
-# each named cell (1 AC · 2 tier · 3 status · 4 evidence · 5 auditor) written ` <value> `, every other
-# byte as it was. It does not fold `\|` escapes; a matrix cell holds a path or a token. Exit 3 no row ·
-# 4 the row is not five cells.
-matrix_row_cells() {  # <plan> <AC> <cell n>=<value>... -> the whole plan
-  local plan="$1" ac="$2" set="" kv
-  shift 2
-  for kv in "$@"; do set="${set}${kv%%=*}	${kv#*=}
-"; done
-  MX_AC="$ac" MX_SET="$set" awk '
-    BEGIN {
-      a = ENVIRON["MX_AC"]; m = split(ENVIRON["MX_SET"], s, "\n")
-      for (k = 1; k <= m; k++) if ((t = index(s[k], "\t")) > 0) v[substr(s[k], 1, t - 1) + 1] = " " substr(s[k], t + 1) " "
-    }
-    /^[ \t]*```/ { fence = !fence; print; next }
-    fence { print; next }
-    /^## / { inm = ($0 ~ /^## Verification Matrix/); print; next }
-    inm && !done && /^[ \t]*\|/ {
-      n = split($0, c, "|"); id = c[2]; gsub(/^[ \t]+|[ \t]+$/, "", id)
-      if (id == a) {
-        if (n != 7) { bad = 1; exit }
-        for (j in v) c[j] = v[j]
-        out = c[1]; for (j = 2; j <= n; j++) out = out "|" c[j]
-        print out; done = 1; next
-      }
-    }
-    { print }
-    END { if (bad) exit 4; if (!done) exit 3 }' "$plan"
-}
 
 # matrix_row_cell <plan> <AC> <cell n> -> that cell of the AC's matrix row, trimmed (nothing: no row).
 matrix_row_cell() {

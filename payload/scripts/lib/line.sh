@@ -849,7 +849,7 @@ _line_carried_close() {  # <plan> <root> <row>
 # Once the copy is in, `line_settled` closes each settled finding's ask on the register and closes the asks answered
 # carry to the row's landing. The landing's moves to fixed are the fact the correcting verbs read (`line_settled_by`):
 # `finding-move` refuses a finding a landing settled, naming that landing; an older run's landing record also holds
-# `ev=settled` lines naming cells, which `matrix-set` still reads.
+# `ev=settled` lines naming cells, an older run's fact that nothing writes now.
 #
 # THE SAME SITE IS A LINE AT EACH REVIEW'S OWN HEAD. A finding names `<path>:<line>` at the head its review read; two
 # reviews read at different heads name one line at different numbers. A site is carried from the answered finding's

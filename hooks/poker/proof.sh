@@ -165,84 +165,91 @@ walk_head() {
   printf '%s' "$hh"
 }
 
-# THE WALK SETTLES WHAT IT CONFIRMS. Over the plan copy <copy>, for each row of the walk's verdict table (proof_verdicts
-# output on stdin): a CONFIRMED row whose status no landing settled (lib/line.sh `line_settled_by`, read from <plan>'s
-# landing record) gets status `discharged`, and <evidence> in its evidence cell and its block's `evidence:` key; a row
-# a landing settled is the landing's and keeps what it wrote; any other verdict leaves its row as it stands. Every
-# criterion the table names must have a matrix row and a block, or nothing is written.
-# walk_settle <plan> <copy> <evidence> < verdicts -> sets WALK_DONE, WALK_LANDED and WALK_LEFT (space-joined ids) and
-# WALK_WAVE; exit 1 with the refusal's sentence in WALK_WHY, the copy then partly written and to be dropped. It runs in
-# the caller's shell, never a command substitution, so the ids it sets reach the caller.
+# THE WALK DISCHARGES WHAT IT CONFIRMS, AND A RUN HAS ONE WALK RECORD THAT ONLY GROWS. Each row of the walk's verdict
+# table (proof_verdicts output on stdin) must name a criterion the plan names (lib/reader.sh `reader_criteria`); a
+# CONFIRMED row is one proof naming the criterion, the record as its evidence, the shape the translation gives an older
+# plan's discharged row, so the cell answer reads it with no read of its own; any other verdict leaves the criterion
+# as it stands. The record must hold a row for every criterion whose standing proof names a walk's record (the run's
+# walk proofs, at any head), so the record the walk gate reads is the one every walked criterion names: a later record
+# that leaves one out would take the walk from under it. The standing facts are read before the new walk is pending,
+# since a walk at the same head replaces the one before it in the fold.
+# walk_settle <plan> <evidence> < verdicts -> sets WALK_DONE and WALK_LEFT (space-joined ids) and WALK_WAVE; exit 1 with
+# the refusal's sentence in WALK_WHY. It runs in the caller's shell, never a command substitution, so the ids it sets
+# reach the caller.
 walk_settle() {
-  local plan="$1" copy="$2" ev="$3" ac v rc
-  WALK_DONE=""; WALK_LANDED=""; WALK_LEFT=""; WALK_WAVE=""; WALK_WHY=""
-  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
-    && declare -F line_settled_by >/dev/null 2>&1 \
-    || { WALK_WHY="the landing record library (lib/line.sh) cannot be loaded from $BIONIC_LIB, so which rows a landing settled cannot be read"; return 1; }
+  local plan="$1" ev="$2" ac v known facts walked named=" " left=""
+  WALK_DONE=""; WALK_LEFT=""; WALK_WAVE=""; WALK_WHY=""
+  _proof_reader_load && known="$(reader_criteria "$plan" 2>/dev/null)" && facts="$(_proof_facts "$(proof_run_plan "$plan")")" \
+    || { WALK_WHY="the run's facts and the plan's criteria cannot be read, so what the walk confirms cannot be judged"; return 1; }
+  walked="$(printf '%s\n' "$facts" | awk -F'|' '$2 == "ev=proof" { k = ""; e = ""; a = ""
+      for (i = 3; i <= NF; i++) { if ($i ~ /^kind=/) k = substr($i, 6); else if ($i ~ /^evidence=/) e = substr($i, 10); else if ($i ~ /^ac=/) a = substr($i, 4) }
+      if (k == "walk") w[e] = 1; else if (k == "" && a != "") by[a] = e }
+    END { for (a in by) if (by[a] in w) print a }')"
   while IFS='	' read -r ac v; do
     [ -n "$ac" ] || continue
     if [ "$ac" = wave ]; then WALK_WAVE="$v"; continue; fi
-    if [ -z "$(matrix_row_cell "$copy" "$ac" 1)" ]; then
-      WALK_WHY="the walk record gives a verdict for $ac, and the matrix table has no row $ac; give verdicts for the criteria as the matrix spells them"
-      return 1
-    fi
-    if [ "$v" != CONFIRMED ]; then WALK_LEFT="${WALK_LEFT:+$WALK_LEFT }$ac"; continue; fi
-    if line_settled_by "$plan" cells "$ac" >/dev/null 2>&1; then WALK_LANDED="${WALK_LANDED:+$WALK_LANDED }$ac"; continue; fi
-    rc=0; matrix_row_cells "$copy" "$ac" "3=discharged" "4=$ev" > "$copy.ws" 2>/dev/null || rc=$?
-    [ "$rc" -eq 0 ] && mv -f "$copy.ws" "$copy" \
-      || { rm -f "$copy.ws"; WALK_WHY="the matrix row $ac cannot be written (exit $rc: a row of five cells is needed)"; return 1; }
-    rc=0; matrix_block_key "$copy" "$ac" evidence "$ev" > "$copy.ws" 2>/dev/null || rc=$?
-    [ "$rc" -eq 0 ] && mv -f "$copy.ws" "$copy" \
-      || { rm -f "$copy.ws"; WALK_WHY="the matrix has no $ac: block to hold its evidence: key (exit $rc); run matrix-render first"; return 1; }
-    WALK_DONE="${WALK_DONE:+$WALK_DONE }$ac"
+    case $'\n'"$known"$'\n' in
+      *$'\n'"$ac"$'\n'*) : ;;
+      *) WALK_WHY="the walk record gives a verdict for $ac, and the plan names no criterion $ac; give verdicts for the criteria as the plan spells them"
+         return 1 ;;
+    esac
+    named="$named$ac "
+    if [ "$v" = CONFIRMED ]; then WALK_DONE="${WALK_DONE:+$WALK_DONE }$ac"; else WALK_LEFT="${WALK_LEFT:+$WALK_LEFT }$ac"; fi
   done
+  for ac in $walked; do case "$named" in *" $ac "*) : ;; *) left="${left:+$left, }$ac" ;; esac; done
+  if [ -n "$left" ]; then
+    WALK_WHY="the walk record $ev leaves out $left, which the standing walk confirms; a run has one walk record and it only grows: put each such criterion's row in the walk's own record and register the whole record again"
+    return 1
+  fi
   return 0
 }
 
-# THE WALK'S REGISTRATION, one act over a plan copy: the record read as the critic's (proof_verdicts), its head
-# (walk_head), the cells it confirms (walk_settle) and the matrix head's walk-artifact: line (plan.sh walk_matrix_put),
-# with its proof, one `proof kind=walk` event, the gate's reading of the walk, pending in every read of the copy and
-# appended by the swap once the copy is judged
-# (`walk_append`, named in PV_ACT). proof-add walk runs it alone; deliver runs it at the walk row's landing, in the
-# landing's own write, so the row lands with its cells settled and its proof in the log, or does neither.
-# walk_register <plan> <copy> <record real path> <record docs-relative> <working head> <repository> -> 0 with the copy
-# written, PV_ACT and PV_UNDONE set for the swap, and WALK_HEAD, WALK_N and walk_settle's ids set; 1 with the refusal's
-# sentence in WALK_WHY, the copy to be dropped.
+# THE WALK'S REGISTRATION: the record read as the critic's (proof_verdicts), its head (walk_head) and the criteria it
+# discharges (walk_settle), with its proof, one `proof kind=walk` event, the gate's reading of the walk, pending in
+# every read of the copy, and the criteria's proofs appended by the swap once the copy is judged (`walk_append`, named
+# in PV_ACT). The plan is not written. proof-add walk runs it alone; a walk row's landing runs it in its own act.
+# walk_register <plan> <copy> <record real path> <record docs-relative> <working head> <repository> -> 0 with PV_ACT and
+# PV_UNDONE set for the swap, and WALK_HEAD, WALK_N and walk_settle's ids set; 1 with the refusal's sentence in WALK_WHY.
 walk_register() {
-  local plan="$1" copy="$2" real="$3" rel="$4" v rc=0
-  WALK_WHY=""; WALK_HEAD=""; WALK_N=0; WALK_PLAN="$plan"
+  local plan="$1" real="$3" rel="$4" v
+  WALK_WHY=""; WALK_HEAD=""; WALK_N=0; WALK_PLAN="$plan"; WALK_REL="$rel"
   if ! v="$(proof_verdicts "$real")"; then
     WALK_WHY="$v; a walk record carries the critic's shape, a | AC | verdict | why | table and one verdict: line"
     return 1
   fi
   if ! WALK_HEAD="$(walk_head "$real" "$6" "$5")"; then WALK_WHY="$WALK_HEAD"; WALK_HEAD=""; return 1; fi
+  walk_settle "$plan" "$rel" <<< "$v" || return 1
   WALK_EV=("kind=walk" "head=$WALK_HEAD" "evidence=$rel")
   proof_pending "${WALK_EV[@]}" || { WALK_WHY="the walk record's path $rel holds a | or a line break, which the run's log cannot hold"; return 1; }
-  walk_settle "$plan" "$copy" "$rel" <<< "$v" || return 1
-  walk_matrix_put "$copy" "$rel" || { WALK_WHY="the matrix head's walk-artifact: line cannot be written"; return 1; }
   WALK_N="$(printf '%s\n' $WALK_DONE | awk 'NF { n++ } END { print n + 0 }')"
-  PV_ACT=walk_append; PV_UNDONE="the cells the walk confirms (${WALK_DONE:-none}) and the matrix head's walk-artifact:"
+  PV_ACT=walk_append; PV_UNDONE="the proofs of the criteria the walk confirms (${WALK_DONE:-none})"
   return 0
 }
-# walk_append -> the walk's proof appended to the run's log by the proof library's one writer; 1 with the plan unchanged.
+# walk_append -> the walk's proof, then one proof per criterion it confirms, appended to the run's log by the proof
+# library's one writer; 1 when the walk's own proof could not be.
 walk_append() {
+  local ac
   if ! proof_event "$WALK_PLAN" "${WALK_EV[@]}"; then
     die "REFUSED — the walk proof at ${WALK_HEAD:0:12} could not be appended to the run's log of $WALK_PLAN; the plan is unchanged."
     return 1
   fi
+  for ac in $WALK_DONE; do
+    proof_event "$WALK_PLAN" "ac=$ac" "evidence=$WALK_REL" \
+      || say "the walk is registered, but the proof of $ac could not be appended to the run's log: register the walk again."
+  done
   proof_pending
 }
-# THE WALK'S ACT IS RECORDED, AND IS NO HAND-HOLD: one `ev=walk` line in the landing record naming the record and how
-# many rows it discharged, appended once the plan write is in. The hand-holds fold counts `ev=matrix-set` as a status
-# write and reads this line as nothing: the walk's verdicts are a reader's, registered as the critic's are.
+# THE WALK'S ACT IS RECORDED, AND IS NO HAND-HOLD: one `ev=walk` line naming the record and how many criteria it
+# discharged, appended once the proofs are in. The hand-holds fold reads this line as nothing: the walk's verdicts are
+# a reader's, registered as the critic's are.
 walk_recorded() {  # <plan> <record docs-relative>
   { declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
     && line_event "$1" walk "record=$2" "discharged=${WALK_N:-0}" >/dev/null 2>&1 \
-    || say "the plan is written, but the ev=walk line could not be appended to the landing record."
+    || say "the walk is registered, but the ev=walk line could not be appended to the landing record."
 }
-walk_said() {  # <record docs-relative> -> what the registration settled, one line
-  printf 'the walk discharged %s (%s); settled by a landing, kept: %s; left as they stood: %s; walk-artifact: %s; verdict: %s' \
-    "${WALK_DONE:-no row}" "${WALK_N:-0}" "${WALK_LANDED:-none}" "${WALK_LEFT:-none}" "$1" "$WALK_WAVE"
+walk_said() {  # <record docs-relative> -> what the registration discharged, one line
+  printf 'the walk discharged %s (%s); left as they stood: %s; record: %s; verdict: %s' \
+    "${WALK_DONE:-no criterion}" "${WALK_N:-0}" "${WALK_LEFT:-none}" "$1" "$WALK_WAVE"
 }
 
 # ONE WHOLE RUN AT A HEAD, ONE READER FOR ITS TWO ASKERS: the tick, before it starts one, and regression-run's rule 3.
@@ -872,7 +879,7 @@ PF_OTHER_LIST
         exit 1 ;;
     esac
     # A WALK IS REGISTERED WHOLE BY walk_register, the one act deliver also runs at the walk row's landing: its verdicts
-    # read as the critic's, its proof line, the cells it confirms and its pointer, in this one plan write.
+    # read as the critic's, its proof and one proof per criterion it confirms; the plan is not written.
     if [ "$PF_KIND" = walk ]; then
       cp "$PV_PLAN" "$PV_NEW"
       if ! walk_register "$PV_PLAN" "$PV_NEW" "$PF_REAL" "$PF_REL" "$PF_HEAD" "$PV_REPO"; then

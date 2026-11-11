@@ -1354,37 +1354,8 @@ EOF
       *) return 1 ;;
     esac
   }
-  # THE WALK POINTER, written by step-field alone: the walk's registration writes a proof the gate reads instead. The
-  # walk gate reads `walk-artifact:` from the Step-5 block (walls.sh `step5_evidence_block`) when the run holds no walk
-  # proof; the matrix head's line takes the same value in the same write (`walk_matrix_put`).
-  # walk_pointer_put <plan copy> <path> -> the copy rewritten in place; exit 1 no Step 5 line, 5 the Step 5 line itself
-  # carries walk-artifact (step-line owns that text), any other exit the copy could not be written. The copy is unchanged
-  # on every non-zero exit.
-  walk_pointer_put() {
-    local rc=0
-    units_step_fields --replace "$1" 5 "walk-artifact=$2" > "$1.wp" 2>/dev/null || rc=$?
-    [ "$rc" -ne 0 ] || walk_matrix_put "$1.wp" "$2" || rc=$?
-    [ "$rc" -ne 0 ] || mv -f "$1.wp" "$1" || rc=2
-    rm -f "$1.wp"
-    return "$rc"
-  }
-  # THE MATRIX HEAD'S walk-artifact: line, when the plan has one, takes the walk's record, so the gate never meets the
-  # stub matrix-render left. A matrix with no such line gains none.
-  # walk_matrix_put <plan copy> <path> -> the copy rewritten in place; exit 2, the copy unchanged, when it cannot be written.
-  walk_matrix_put() {
-    local rc=0
-    WP_V="$2" awk '
-      { if ($0 ~ /^[ \t]*```/) fence = !fence }
-      /^## / { m = ($0 ~ /^## Verification Matrix/) }
-      !fence && m && !done && /^[ \t]*walk-artifact[ \t]*:/ {
-        ind = $0; sub(/[^ \t].*$/, "", ind); print ind "walk-artifact: " ENVIRON["WP_V"]; done = 1; next }
-      { print }' "$1" > "$1.wp2" 2>/dev/null || rc=2
-    [ "$rc" -ne 0 ] || mv -f "$1.wp2" "$1" || rc=2
-    rm -f "$1.wp2"
-    return "$rc"
-  }
   poker_verb_step_field() {
-    local sf_kv sf_w sf_walk=""
+    local sf_kv sf_w
     case "$PV_KEY" in
       9|9a|9b)
         die "REFUSED — the Step 9 block is close-out's to write (scripts/close-out.sh)."
@@ -1431,7 +1402,6 @@ EOF
             die "REFUSED — the walk artifact '$(clean "$PV_FVAL")' has a '..' component, which the walk gate refuses: name it under record/. The plan is unchanged."
             exit 1 ;;
         esac
-        sf_walk="$PV_FVAL"
       fi
       # THE AUDITOR'S VERDICT is read by the Verify gate from the Step 5 block alone (walls.sh `validate_verify_step`), so
       # the key is written there and at no other step.
@@ -1466,18 +1436,6 @@ EOF
       *) die "REFUSED — the field cannot be written (units_step_fields exit $PV_RC); the plan is unchanged."
          exit 1 ;;
     esac
-    # THE POINTER HAS ONE WRITER (wave-36 T44; REQ-7 AC-7.1, AC-10.2; D13). matrix-render writes a matrix-level
-    # `walk-artifact: pending` stub that the gate refuses as a placeholder once every row is discharged, and no verb filled
-    # it: the fix was a hand edit. The Step 5 block stays the walk gate's one reader; the matrix line, when the plan has
-    # one, takes the same value in the same transaction. A matrix with no such line gains none.
-    if [ -n "$sf_walk" ]; then
-      PV_RC=0
-      walk_pointer_put "$PV_NEW" "$sf_walk" || PV_RC=$?
-      if [ "$PV_RC" -ne 0 ]; then
-        die "REFUSED — the matrix walk-artifact: line cannot be written (exit $PV_RC); the plan is unchanged."
-        exit 1
-      fi
-    fi
     plan_verb_swap step-field "Step $PV_KEY $SF_KEYS" writer
     say "step-field — Step $PV_KEY $SF_KEYS: written to $PV_PLAN; dry-committed first."
     exit 0

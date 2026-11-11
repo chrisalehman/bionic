@@ -1524,8 +1524,142 @@ POKE_BOUND="$ST_BOUND_WAS"
 
 
 # ============================================================
-section "§WALK: the walk's verdicts settle the cells they confirm, through proof-add walk, never a status write"
+section "§WALK: a walk's record discharges each criterion it confirms by one proof naming it, the plan unwritten"
 # ============================================================
+# The walk record carries the critic's shape, read by proof_verdicts. `proof-add walk <record>` appends one walk proof
+# and, for each CONFIRMED row, one proof naming the criterion with the record as its evidence; the plan is not written.
+# A run has one walk record and it only grows: a record that leaves out a criterion a standing walk confirms is refused,
+# naming the rows left out. It appends one `ev=walk` line, so the hand-holds fold counts no status write.
+# FIXTURE FIDELITY. §STACK's shape with `walk: required` and three pending criteria in an older plan's table.
+WK_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
+RWK="$(make_repo walk)"; ( cd "$RWK" && git commit -q --allow-empty -m init )
+git -C "$RWK" config user.name "Dana Fixture"
+WK_B="$(git -C "$RWK" rev-parse HEAD)"
+PWK="$(s42_plan "$RWK" 5 "  worktree: .worktrees/01-fixture
+  base-sha: ${WK_B:0:8}
+  branch: wave/01-fixture")"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PWK" > "$PWK.tmp" && mv "$PWK.tmp" "$PWK"
+s42_builds_landed "$PWK"
+awk '/^## Verification Matrix/ {
+       print "## Eval design\n"
+       print "| Requirement | Criterion | Approach | Eval | Fails when |"
+       print "|---|---|---|---|---|"
+       print "| REQ-1 | AC-1.1 | hermetic | `tests/a.test.sh` | a is wrong |"
+       print "| REQ-1 | AC-1.2 | hermetic | `tests/b.test.sh` | b is wrong |"
+       print "| REQ-1 | AC-1.3 | hermetic | `tests/c.test.sh` | c is wrong |\n" }
+     { print }
+     /^\| AC-1\.1 \| T2 \|/ { print "| AC-1.2 | T2 | pending | — | — |"; print "| AC-1.3 | T2 | pending | — | — |" }' \
+  "$PWK" > "$PWK.tmp" && mv "$PWK.tmp" "$PWK"
+sed -e 's/^rigor: .*/rigor: single/' -e 's/^walk: .*/walk: required/' "$PWK" > "$PWK.tmp" && mv "$PWK.tmp" "$PWK"
+( cd "$RWK" && git add -f "$PWK" && git commit -qm wb \
+  && git worktree add -q -b wave/01-fixture "$RWK/.worktrees/01-fixture" "$WK_B" ) >/dev/null 2>&1
+WK_WT="$RWK/.worktrees/01-fixture"; WK_DIR="$RWK/.bionic/docs/record/wave-01-fixture"; mkdir -p "$WK_DIR"
+WK_A="$(s57_commit "$WK_WT" lib/a.sh A)"
+WK_C="$(s57_commit "$WK_WT" lib/c.sh C)"
+wk_cell() {  # <AC> -> `<state> <by> <evidence>` through the reader's one answer for every criterion
+  bash -c '. "$1/reader.sh" && reader_cells "$2"' _ "${S46_LIB%/*}" "$PWK" 2>/dev/null | awk -F'\037' -v c="$1" '$1 == c { print $2 " " $3 " " $5 }'
+}
+wk_step5() {  # -> the Step 5 block, its line and its continuation lines, `;`-joined
+  awk '/^- Step 5:/ { s = 1; print; next } s && /^- / { s = 0 } s && /^[ \t]+[^ \t]/' "$PWK" | paste -sd';' -
+}
+wk_recfile() { bash -c '. "$1/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "${S46_LIB%/*}" "$PWK"; }
+wk_ev() { cat "$(wk_recfile)" "$(dirname "$(wk_recfile)")/run.log" 2>/dev/null | /usr/bin/grep -F "|ev=$1|"; }   # <ev> -> its lines in the record, then the log
+wk_rec() {  # <name> <verdict: line or -> [<head: line or ->] [<table row>...] -> a walk record
+  local f="$WK_DIR/$1.md" v="$2" h="$3" r; shift 3
+  { printf '# walk\n\nwalker: wk-walker\n'; [ "$h" = - ] || printf '%s\n' "$h"
+    printf '\n## 1. The cards\n\nIt printed whole with rc 0.\n\n## Verdicts\n\n'
+    if [ "$#" -gt 0 ]; then printf '| AC | verdict | why |\n|---|---|---|\n'; for r in "$@"; do printf '%s\n' "$r"; done; fi
+    [ "$v" = - ] || printf '\n%s\n' "$v"
+    printf '\nwhat the walk found\n'; } > "$f"
+}
+wk_add() { poke "$RWK" proof-add walk "record/wave-01-fixture/$1.md"; }
+WK_ROWS=('| AC-1.1 | CONFIRMED | the card printed whole |' '| AC-1.2 | CONFIRMED | the continuation read the judge |'
+  '| AC-1.3 | REFUTED | the scorecard read the ledger |')
+
+( cd "$RWK" && git add -f "$PWK" && git commit -qm settled ) >/dev/null 2>&1
+expect_eq "WK-0 precondition: the three criteria read pending" "pending  |pending  |pending  " "$(wk_cell AC-1.1)|$(wk_cell AC-1.2)|$(wk_cell AC-1.3)"
+WK_SINCE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; sleep 1
+
+# ---------- the walk record is read by the critic's reader ----------
+wk_rec walk-notable 'verdict: CONFIRMED — the cards read the judge' -
+s42_snap "$RWK" "$PWK"; wk_add walk-notable
+s42_unchanged "WK-1 §WALK AC-8.1 a walk record with no AC | verdict table (prose sections only, wave 45's shape)" 1 "$PWK"
+expect_contains "WK-1b …refused naming the shape it needs" "the columns AC and verdict" "$OUT"
+wk_rec walk-noverdict - - "${WK_ROWS[@]}"
+wk_add walk-noverdict
+s42_unchanged "WK-2 AC-8.1 a walk record with the table and no verdict: line" 1 "$PWK"
+expect_contains "WK-2b …refused naming the verdict: line" "verdict:" "$OUT"
+
+# ---------- one registration: the walk's proof and one proof per criterion it confirms, the plan unwritten ----------
+wk_rec walk 'verdict: REFUTED — AC-1.3 is refuted' - "${WK_ROWS[@]}"
+WK_B5="$(wk_step5)"; WK_SUM="$(cksum < "$PWK")"; wk_add walk
+expect_eq "WK-3 §WALK AC-8.1 AC-8.2 the record with the table and one verdict: line registers (exit 0), the plan byte for byte as it was" "0|$WK_SUM" "$RC|$(cksum < "$PWK")"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "WK-4 AC-8.2 each CONFIRMED criterion reads discharged by a proof naming the walk record; the REFUTED one stays pending" \
+  "discharged proof record/wave-01-fixture/walk.md|discharged proof record/wave-01-fixture/walk.md|pending  " \
+  "$(wk_cell AC-1.1)|$(wk_cell AC-1.2)|$(wk_cell AC-1.3)"
+expect_eq "WK-8 AC-8.2 one walk proof at the working head, naming the record, and the Step 5 block as it was" "1|$WK_B5" \
+  "$(s46_proved "$PWK" | /usr/bin/grep -c "^proved: kind=walk head=$WK_C at=[0-9TZ:-]* evidence=record/wave-01-fixture/walk.md$")|$(wk_step5)"
+expect_eq "WK-9 AC-8.2 the run's log gains one ev=walk line, naming the record and the two criteria it discharged" "1" \
+  "$(wk_ev walk | /usr/bin/grep -c '|record=record/wave-01-fixture/walk.md|discharged=2|at=')"
+poke "$RWK" landing-report --hand-holds --since "$WK_SINCE"
+expect_contains "WK-10 AC-8.2 the hand-holds fold over the walk's window reads no status write" "· status-writes=0 ·" "$OUT"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+
+# A run has one walk record and it only grows: a second record, at another head, that leaves out a criterion the
+# standing walk confirms is refused, nothing appended; the whole record registered again carries each proof to it.
+wk_rec walk-again 'verdict: CONFIRMED — every card read the judge' "head: $WK_A" \
+  '| AC-1.2 | CONFIRMED | again |' '| AC-1.3 | CONFIRMED | refixed |'
+WK_LOG0="$(wc -l < "$WK_DIR/run.log" | tr -d ' ')"; wk_add walk-again
+expect_eq "WK-11 a record that leaves out AC-1.1, which the standing walk confirms, is refused (exit 1), nothing appended" \
+  "1|$WK_LOG0|discharged proof record/wave-01-fixture/walk.md" "$RC|$(wc -l < "$WK_DIR/run.log" | tr -d ' ')|$(wk_cell AC-1.1)"
+expect_contains "WK-11b …naming the row left out and the fix" "leaves out AC-1.1, which the standing walk confirms" "$OUT"
+wk_rec walk-again 'verdict: CONFIRMED — every card read the judge' "head: $WK_A" \
+  '| AC-1.1 | CONFIRMED | again |' '| AC-1.2 | CONFIRMED | again |' '| AC-1.3 | CONFIRMED | refixed |'
+wk_add walk-again
+expect_eq "WK-11c the whole record registers at its head: line's head (exit 0), and every criterion's proof names it" \
+  "0|1|discharged proof record/wave-01-fixture/walk-again.md|discharged proof record/wave-01-fixture/walk-again.md|discharged proof record/wave-01-fixture/walk-again.md" \
+  "$RC|$(s46_proved "$PWK" | /usr/bin/grep -c "^proved: kind=walk head=$WK_A .* evidence=record/wave-01-fixture/walk-again.md$")|$(wk_cell AC-1.1)|$(wk_cell AC-1.2)|$(wk_cell AC-1.3)"
+wk_rec walk-nohead 'verdict: CONFIRMED — fine' "head: 0123456789012345678901234567890123456789" '| AC-1.2 | CONFIRMED | — |'
+s42_snap "$RWK" "$PWK"; wk_add walk-nohead
+s42_unchanged "WK-12 a head: line naming no commit of the working branch" 1 "$PWK"
+expect_contains "WK-12b …named in the refusal" "head: 0123456789012345678901234567890123456789" "$OUT"
+
+# ---------- the walk row's landing registers the walk, in deliver's own act ----------
+# A record row has no commit, so it lands through deliver, never ready: a verify row whose artifact is a wave's walk
+# record is registered by the landing itself. The control is the same deliver with the walk test removed in a doctored
+# copy: it lands the row and registers nothing, so the proofs read here are the landing's doing.
+WK_DREL="record/wave-02-fixture/walk.md"; mkdir -p "$RWK/.bionic/docs/record/wave-02-fixture"
+awk '{ print } /^\| T5 \| 5 \| verify \|/ { print "| T6 | 5 | verify | the walk | — | T1, T2 | 30 | REQ-1 | .bionic/docs/'"$WK_DREL"' | — | — | pending |" }' \
+  "$PWK" > "$PWK.tmp" && mv "$PWK.tmp" "$PWK"
+wk_task() { s48_row "$PWK" "$1" | awk -F'|' '{ print $NF }'; }   # <row> -> its status cell
+WK_ALL=('| AC-1.1 | CONFIRMED | the card |' '| AC-1.2 | CONFIRMED | the judge |' '| AC-1.3 | CONFIRMED | the scorecard read the register |')
+wk_rec ../wave-02-fixture/walk - - "${WK_ALL[@]}"
+s42_snap "$RWK" "$PWK"; poke "$RWK" deliver T6
+s42_unchanged "WK-14 AC-8.3 deliver of the walk row whose record has no verdict: line" 1 "$PWK"
+expect_contains "WK-14b …the landing refused naming the walk record and the line it lacks" "$WK_DREL" "$OUT"
+expect_contains "WK-14c …(and the line)" "verdict:" "$OUT"
+wk_rec ../wave-02-fixture/walk 'verdict: CONFIRMED — the scorecard read the register' - "${WK_ALL[@]}"
+s42_snap "$RWK" "$PWK"
+rd_mutant nowalk 's/RL_WALK="\$rel"; RL_WALK_REAL="\$real"/:/'
+expect_eq "WK-15-pre the doctored poker differs from the real one in exactly one line (the doctor took)" "1" \
+  "$(diff <(poker_text "$POKER") <(poker_text "$RD_MUT/nowalk/hooks/session-poker.sh") | /usr/bin/grep -c '^>')"
+WK_REAL_POKER="$POKER"; POKER="$RD_MUT/nowalk/hooks/session-poker.sh"
+poke "$RWK" deliver T6
+POKER="$WK_REAL_POKER"
+expect_eq "WK-15 control: with the walk test removed, deliver lands the row (exit 0) and registers nothing: AC-1.3's proof still names the earlier record" \
+  "0|landed|discharged proof record/wave-01-fixture/walk-again.md|0" "$RC|$(wk_task T6)|$(wk_cell AC-1.3)|$(s46_proved "$PWK" | /usr/bin/grep -c "evidence=$WK_DREL\$")"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+cp "$TMPROOT/s42-before" "$PWK"
+WK_B5="$(wk_step5)"; poke "$RWK" deliver T6
+expect_eq "WK-16 §WALK AC-8.3 deliver lands the walk row (exit 0) and its CONFIRMED rows read discharged by proofs naming the record" \
+  "0|landed|discharged proof $WK_DREL" "$RC|$(wk_task T6)|$(wk_cell AC-1.3)"
+[ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
+expect_eq "WK-16b …in the landing's act: the walk proof, the Step 5 block as it was, and one ev=walk line naming it" \
+  "1|$WK_B5|1" \
+  "$(s46_proved "$PWK" | /usr/bin/grep -c "^proved: kind=walk head=$WK_C .* evidence=$WK_DREL\$")|$(wk_step5)|$(wk_ev walk | /usr/bin/grep -c "|record=$WK_DREL|discharged=3|")"
+POKE_BOUND="$WK_BOUND_WAS"
+
 section "§BORN-RED: a floor-born marker is admitted on the red verdict a whole run recorded, and the refusal names the log to record"
 # fails-when: the verdict backing is dropped (BR-1), a green or off-branch verdict backs it (BR-2), or the refusal misnames the log (BR-3 to BR-5).
 # FIXTURE FIDELITY: §GONE-BORN's plan and branch with no proof line, verdict lines as proof_regression_fold writes them, logs as _proof_floor_log reads.
