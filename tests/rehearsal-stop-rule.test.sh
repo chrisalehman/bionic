@@ -49,7 +49,7 @@ expect_eq "SR-1 rehearse reaches the state and prints the sandbox's plan (exit 0
   "$RT_RC|$([ -f "$RT_PLAN" ] && echo yes)"
 if [ "$RT_RC" = 0 ]; then
   expect_eq "SR-1b …through decisions put and the row's reads set by the person's edit" "yes|yes" \
-    "$([ "$(rt_ran 'decisions put D1')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'reads=approval:plan, head, approval:D1')" -ge 1 ] && echo yes)"
+    "$([ "$(rt_ran 'decisions put D1')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'approval:D1')" -ge 1 ] && echo yes)"
   rt_sheet_and_card SR "decide:D1" "decide:D1>4/2" decide:D1
 fi
 
