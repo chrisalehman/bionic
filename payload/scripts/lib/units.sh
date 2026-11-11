@@ -280,7 +280,7 @@ _units_place() {
     || { printf ' 0'; return 0; }
   a="$(set -o pipefail; reader_facts() { printf '%s' "$_UNITS_FACTS"; }
     reader_q_step "${1:-}" | sed -n 's/^n=//p' || exit 2
-    reader_q_approved "${1:-}" step3; case $? in 0) echo 1 ;; 1) echo 0 ;; *) exit 2 ;; esac)" || return 2
+    reader_q_approved "${1:-}" step3; case $? in (0) echo 1 ;; (1) echo 0 ;; (*) exit 2 ;; esac)" || return 2
   case "$a" in *$'\n'*) printf '%s %s' "$(a="${a%$'\n'*}"; printf '%s' "${a%[ab]}")" "${a##*$'\n'}" ;; *) printf ' %s' "$a" ;; esac
 }
 
