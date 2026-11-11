@@ -82,6 +82,8 @@ if ! type -t roster_row_fixture >/dev/null 2>&1; then
   . "${BIONIC_SCRIPTS_DIR}/tests/lib/roster-row.sh" || return 1 2>/dev/null || exit 1
 fi
 
+# The kinds of hand write, each what a person, an agent or the harness writes in a real run (above).
+RH_HAND_KINDS="prose record code typed launch"
 
 # The run's three goals, as the plan's goals: line declares them: met, not met and not measured yet in every state.
 RH_GOALS="shown · the person says from the card what they owe (record/wave-x/goal-shown.md) ; asks · every ask on the register is on the card (record/wave-x/goal-asks.md) ; walked · the walk finds nothing to fix (record/wave-x/goal-walked.md)"
