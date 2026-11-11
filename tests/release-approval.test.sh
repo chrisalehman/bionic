@@ -419,7 +419,7 @@ poke "$RFC" reply "$FC_WR"
 expect_eq "REPLY-4 the orchestrator recommends fixing the S3; reply all recommended (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
 expect_regex "REPLY-4b …the finding is moved to fix on the user's words" \
-  "^moved: record/wave-x/adversarial\\.md#1 to=fix by=Dana Fixture at=[0-9T:Z-]+ words=\"$FC_WR\"( session=[^ ]+)? why=\"" "$(/usr/bin/grep -F "moved: $FC_FID " "$PFC")"
+  "^run/v1\\|ev=finding\\|ref=record/wave-x/adversarial\\.md#1\\|to=fix\\|by=Dana Fixture\\|words=$FC_WR\\|session=[^|]+\\|why=" "$(/usr/bin/grep -F "|ref=$FC_FID|to=fix|" "$FC_REC/run.log" 2>/dev/null)"
 expect_eq "REPLY-4c …and both approvals are stamped with the same words" \
   "2" "$(/usr/bin/grep '^approved: ' "$PFC" | /usr/bin/grep -cF "\"$FC_WR\"")"
 fc_plan "$FC_GOOD"

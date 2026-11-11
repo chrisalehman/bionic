@@ -498,7 +498,7 @@ expect_eq "57v2 …as one waiver event in the run's log, the plan unchanged" \
 expect_contains "57v4 …and the success line names it" "question=adversarial head=${S57_C4}" "$OUT"
 s57_state "$P57" "$S57_C4"
 expect_eq "57v5 …which the judge reads: adversarial covered at the working head" "covered" "$(s57_of "$S57_AD")"
-s57_add "$P57" "$(bash -c '. "$1" && proof_line review "$2" "$(date -u -v+1M +%Y-%m-%dT%H:%M:%SZ)" "$3" adversarial fail piece w-read' \
+s57_add "$P57" "$(bash -c '. "$1" && proof_line review "$2" "$(date -u -v+1M +%Y-%m-%dT%H:%M:%SZ)" "$3" adversarial w-read fail piece' \
   _ "$S57_LIB" "$S57_C4" record/wave-01-fixture/adversarial-fail-piece.md)"
 s57_state "$P57" "$S57_C4"
 expect_eq "57v7 …so a failing fact registered after it is newer than the waiver" "failing	record/wave-01-fixture/adversarial-fail-piece.md" "$(s57_of "$S57_AD")"

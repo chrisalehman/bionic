@@ -1268,7 +1268,7 @@ PF_VERDICTS_LIST
     fi
     if [ -z "$FM_ROW" ]; then FM_WORDS="$(said_fold "$FM_RAW")"; FM_WHY="$(deferral_fold "$FM_WHY_RAW")"; fi
     FM_SENT=""; [ -z "$FM_SENT_RAW" ] || FM_SENT="$(deferral_fold "$FM_SENT_RAW")"
-    case "$FM_WORDS$FM_WHY$FM_SENT" in
+    case "${FM_WORDS:-}${FM_WHY:-}$FM_SENT" in
       *'|'*)
         die "REFUSED — the words, the why or the sentence hold a '|', which would split the move's field in the run's log; give them without one. Nothing is written."
         exit 1 ;;
