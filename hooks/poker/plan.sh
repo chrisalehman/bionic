@@ -490,6 +490,7 @@ EOF
     die "REFUSED — could not write to $ROSTER_FILE."
     return 2
   }
+  poker_hand amend "$AMEND_REASON" "name=$aid" 2>/dev/null || :
   pick="$(roster_row_for_id "$ROSTER_FILE" "$aid")" || pick=""
   if [ "$pick" != "$row" ]; then
     die "amend written, but the budget wall reads another row for $aid — a later row carrying that id was written after it"
@@ -965,6 +966,8 @@ EOF
       die "REFUSED — could not write to $ROSTER_FILE."
       exit 2
     }
+    # The roster row is the walls' contract; the hand event is the act, in the run's log.
+    poker_hand amend "$AMEND_REASON" "name=$AMEND_NAME" 2>/dev/null || :
     # THE SUCCESS LINE CHECKS ITSELF (wave-22 T1; REQ-1 AC-1.6, D3). It used to print
     # unconditionally, and the wall it promised went on reading the pre-amend row (wave-22
     # seed). Now the verb asks `roster_row_for_id` — the budget wall's own pick, one function

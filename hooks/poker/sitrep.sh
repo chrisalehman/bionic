@@ -2534,7 +2534,8 @@ sitrep_tick_line() {
     fi
     rs_step 0 bind "$RS_PLAN"
     [ "$RS_PATROL" = no ] || rs_step 0 arm
-    rs_step 0,1 adopt    # 1 is adopt's "open rows found", its NOTIFY, never a refusal
+    # 1 is adopt's "open rows found", its NOTIFY, never a refusal; each row it takes over is a hand event with this reason
+    rs_step 0,1 adopt --why "the session was cleared and its predecessor's agents were taken over by the resume"
     # The task list: every step with its status from current:, then every row of ## Tasks with its table status.
     RS_CUR="$(_fill_current_field "$RS_PLAN")"; RS_CURN="${RS_CUR%%[!0-9]*}"
     awk -v cur="$RS_CURN" 'BEGIN {

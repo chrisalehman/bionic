@@ -34,6 +34,9 @@
 #   §ASK-DOORS  a passing reading closes its question's waiver; the Stop over an approved plan closes the step asks.
 #               A registered proof is one proof event in the run's log, the plan byte for byte as it was; a
 #               registered walk discharges each criterion it confirms by one proof naming it.
+#   §HANDS      an amend, a hold, an extension, an adoption, a by-hand landing and a person's stop of a run each leave
+#               one hand event with its reason, through the one writer that refuses an act with none; the tick's
+#               withdrawal of a request for the load leaves none.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
 
@@ -566,4 +569,64 @@ for a in 0 1; do
 done
 expect_eq "the Stop over a plan with no approved-by: closes no step ask; over one carrying it, all four, the closer named" \
   "0:$SW_KEYS>$SW_KEYS>0 1:$SW_KEYS>>4 " "$SWEPT"
+
+section "HANDS"
+# Each act a person takes by hand is one hand event the hands question answers, saying what it was and why, written
+# through the one writer, which refuses an act with no reason. fails-when: an amend, a hold, an extension, an adoption,
+# a by-hand landing or a person's stop of a run leaves no event or one with no reason; the writer writes one with no
+# reason; the tick's withdrawal of a request for the load is answered as an act by hand.
+# FIXTURE FIDELITY: §ASK-DOORS' bound plan and roster rows; the verbs are the shipped ones, the run a stand-in shim.
+HR="$(make_repo hands)"; HP="$(s34_plan "$HR" 4)"; new_roster "$HR"; HD="$HR/.bionic/docs/record/wave-01-fixture"
+hw() {  # <what> -> `<what>:<why>` for each answer of the hands question that names it, `|` between
+  bash "$READER" "$HP" hands | awk -F'|' -v w="$1" '{ a = ""; y = ""; for (i = 2; i <= NF; i++) { if ($i == "what=" w) a = w
+    if (index($i, "why=") == 1) y = substr($i, 5) } if (a != "") printf "%s%s:%s", (n++ ? "|" : ""), a, y }'
+}
+lh() { bash -c '. "$1/line.sh" && shift && line_hand_event "$@"' _ "$AL" "$@"; }   # <plan> <what> <why> [key=value]
+lh "$HP" probe 'a reason given' row=T1; LH_RC=$?
+expect_eq "the writer appends one hand event with its what and its why (exit 0)" "0|probe:a reason given" "$LH_RC|$(hw probe)"
+for y in '' '  ' '-'; do lh "$HP" probe "$y" 2>/dev/null; LH_NO="${LH_NO:-}$?"; done
+expect_eq "…and refuses each act with no reason, exit 2, writing nothing (an empty, a blank, a dash)" "222|probe:a reason given" \
+  "$LH_NO|$(hw probe)"
+s30_row "$HR" deliverable="$HR/w1.md" "$(said "$HR" w1)"; echo done > "$HR/w1.md"
+poke "$HR" amend w1 --files+ lib/z.sh --reason 'the brief missed lib/z.sh'; AM_RC="$RC"
+poke "$HR" hold w1 'kept for a second pass'; HO_RC="$RC"
+poke "$HR" extend w1 'more to read'
+expect_eq "an amend, a hold and an extension each leave one hand event with the verb's reason (exits)" \
+  "0 0 0|amend:the brief missed lib/z.sh|extend:more to read|hold:kept for a second pass" \
+  "$AM_RC $HO_RC $RC|$(hw amend)|$(hw extend)|$(hw hold)"
+HPRED="9f1e2d3c-4b5a-6978-8899-aabbccddeeff"; roster_header > "$(roster_of "$HR" "$HPRED")"
+for n in a1 a2; do roster_row_fixture status=identified session="$HPRED" name="w-$n" agent_id="a$n" plan="$HP" >> "$(roster_of "$HR" "$HPRED")"; done
+poke "$HR" adopt --why 'the session was cleared at 8:21'
+expect_eq "an adoption leaves one hand event per row adopted, with its reason (exit 0 or 1, open rows found)" \
+  "yes|adopt:the session was cleared at 8:21|adopt:the session was cleared at 8:21" "$( [ "$RC" -le 1 ] && echo yes)|$(hw adopt)"
+mkdir -p "$TMPROOT/hshim"; printf '#!/bin/bash\nwhile :; do sleep 0.2; done\n' > "$TMPROOT/hshim/booked.sh"; HL="$HR/.bionic/tmp/runs/h.log"
+mkdir -p "${HL%/*}"; : > "$HL"
+perl -MPOSIX -e 'my $l = shift; exit 0 if fork; POSIX::setsid(); open(my $f, ">", "$l.pid"); print $f "$$\n"; close $f; exec @ARGV' \
+  "$HL" bash "$TMPROOT/hshim/booked.sh" --run-log "$HL"
+i=0; while [ ! -s "$HL.pid" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+poke "$HR" stop-run "$HL"; SR0="$RC"
+expect_true "a person's stop of a run with no reason is refused, the run still alive" kill -0 "$(cat "$HL.pid")"
+poke "$HR" stop-run "$HL" --why 'hung on a closed pipe'
+expect_eq "…and with one stops it and leaves one hand event naming it (exits)" "2 0|stop-run:hung on a closed pipe" "$SR0 $RC|$(hw stop-run)"
+mkdir -p "$BIONIC_GATE_DIR/requests"
+sg() {  # <id> <why> [--waiting] -> stop_run_gate as the verb and the tick call it, the session bound to the plan
+  printf 'key=k%s\nkind=work\nwho=%s:w-q%s\nasked=1000\nholder=-\n' "$1" "$SID" "$1" > "$BIONIC_GATE_DIR/requests/$1"
+  ( cd "$HR" && CLAUDE_CODE_SESSION_ID="$SID" SR_WHY="$2" SR_MACHINE="${SR_MACHINE:-}" P="$HP" bash -c 'H="$1"; shift; say() { :; }; die() { :; }
+    resolve_run() { POKER_RUN_PLAN="$P"; POKER_RUN_OPEN=yes; }; for l in roots session gate slots run line; do . "$H/../payload/scripts/lib/$l.sh"; done
+    . "$H/poker/roster.sh"; REPO_REAL="$PWD"; SR_REPORT_ONLY=no; stop_run_gate "$@"' _ "$BIONIC_HOOKS_DIR" "$1" ${3:+"$3"} ) >/dev/null 2>&1
+}
+sg 901 'a person stopped it'; SR_MACHINE=tick sg 902 'stood down for the load' --waiting
+expect_eq "a request a person stops is a hand event; the tick's withdrawal for the load is none" \
+  "stop-run:a person stopped it" "$(hw stop-run | tr '|' '\n' | /usr/bin/grep -v 'closed pipe')"
+LR2="$TMPROOT/hland"; git init -q "$LR2" && git -C "$LR2" commit -q --allow-empty -m init && mkdir -p "$LR2/.bionic/tmp"
+LB="$(git -C "$LR2" rev-parse HEAD)"; SPW="${BIONIC_SCRIPTS_DIR}/payload/scripts/spawn-worktree.sh"
+( cd "$LR2" && bash "$SPW" create "$LB" wave/20-demo && bash "$SPW" create "$LB" wt/20-T1 ) >/dev/null 2>&1
+LT="$(git -C "$LR2" worktree list --porcelain | sed -n 's/^worktree //p' | /usr/bin/grep '20-T1$')"
+[ -n "$LT" ] && echo w > "$LT/t1.txt" && git -C "$LT" add t1.txt && git -C "$LT" commit -qm T1
+LP="$LR2/.bionic/docs/plans/epic-x/wave-x.plan.md"; mkdir -p "${LP%/*}"
+printf -- '---\nworking-branch: wave/20-demo\n---\n# plan\n\n## SDLC State\n\ncurrent: 4\n' > "$LP"
+printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$LP" > "$LR2/.bionic/tmp/engaged-$SID.state"
+( cd "$LR2" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SPW" land "$LT" --by-hand --reason 'no Lands-on could be read' ) >/dev/null 2>&1; LH_RC=$?
+expect_eq "a by-hand landing is one published landing of the hand kind with its reason, answered by hands (exit)" \
+  "0|hand|no Lands-on could be read" "$LH_RC|$(bash "$READER" "$LP" hands | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^(kind|why)=/) printf "|%s", substr($i, index($i, "=") + 1) }' | cut -c2-)"
 finish
