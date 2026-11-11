@@ -245,15 +245,7 @@ _pa_clean() {
 # measured as honoured; built with jq so the message is escaped. Nothing else is ever added.
 _pa_emit() {
   local out
-  if [ "$1" = allow ]; then
-    out="$(jq -cn '{hookSpecificOutput:{hookEventName:"PermissionRequest",decision:{behavior:"allow"}}}' 2>/dev/null)"
-  else
-    out="$(jq -cn --arg m "${2:-bionic: denied}" \
-      '{hookSpecificOutput:{hookEventName:"PermissionRequest",decision:{behavior:"deny",message:$m}}}' 2>/dev/null)"
-    # jq is known present; if it still fails, a fixed denial is printed rather than nothing.
-    [ -n "$out" ] || out='{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"bionic: denied (the answer could not be built)"}}}'
-  fi
-  [ -n "$out" ] || out='{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"bionic: denied (the answer could not be built)"}}}'
+  out="$(grant_answer_json "$@")"
   PA_ANSWERED=1
   printf '%s\n' "$out" >&3 2>/dev/null || printf '%s\n' "$out"
 }
@@ -269,18 +261,19 @@ _pa_log() {
 _pa_finish() {
   local d="$1" r="$2" m="${3-}"
   if ! _pa_log "$d" "$r" 2>/dev/null && [ "$d" = allow ]; then
+    grant_unlogged_words "$(answers_path "$BIONIC_ROOT" 2>/dev/null || printf 'no HOME')"
     d=deny-fix
-    r="the answer could not be written to the answer log"
-    m="bionic: denied, because $r ($(answers_path "$BIONIC_ROOT" 2>/dev/null || printf 'no HOME')). Report it to the lead; /bionic:doctor checks the install."
+    r="$GRANT_FAIL_REASON"
+    m="$GRANT_FAIL_MESSAGE"
   fi
-  if [ "$d" = allow ]; then _pa_emit allow; else _pa_emit deny "$m"; fi
+  _pa_emit "$d" "$m"
   exit 0
 }
 
-# _pa_fail <what failed> — a failure after engagement: a denial that names it (AC-1.5).
+# _pa_fail <key> [<arg>...] (grant_fail_words) — a failure after engagement: a denial that names it (AC-1.5).
 _pa_fail() {
-  _pa_finish deny-fix "failure: $1" \
-    "bionic could not answer this permission question, so it is denied: $1. Tell the lead (the human, if you are the lead) what failed; /bionic:doctor checks the install."
+  grant_fail_words "$@"
+  _pa_finish deny-fix "$GRANT_FAIL_REASON" "$GRANT_FAIL_MESSAGE"
 }
 
 # The trap: an exit that printed no decision prints the failure's denial, and the hook still
@@ -289,7 +282,7 @@ _pa_on_exit() {
   local rc=$?
   [ "$PA_ANSWERED" = 1 ] && return 0
   trap - EXIT
-  _pa_fail "the hook stopped (exit $rc) while $PA_STAGE"
+  _pa_fail stopped "$rc" "$PA_STAGE"
 }
 
 # ---------- from here, every exit answers ----------
@@ -309,8 +302,8 @@ trap 'exit 143' TERM INT HUP
 
 # ---------- the question ----------
 PA_STAGE="reading the question"
-[ "$PA_PARSED" = 1 ] || _pa_fail "could not read the question: the payload is not a JSON object"
-[ -n "$PA_TOOL" ] || _pa_fail "could not read the question: it names no tool"
+[ "$PA_PARSED" = 1 ] || _pa_fail not-object
+[ -n "$PA_TOOL" ] || _pa_fail no-tool
 PA_AGENT="$(_pa_field .agent_id)"
 PA_SCRATCH="$(_pa_field .scratchpad_dir)"
 PA_CWD="$(_pa_field .cwd)"
@@ -342,14 +335,14 @@ PA_ROW=""
 if [ -n "$PA_AGENT" ]; then
   PA_ROSTER="$BIONIC_ROOT/.bionic/tmp/roster-$BIONIC_SID.state"
   if [ -L "$PA_ROSTER" ]; then
-    _pa_fail "the roster for this session is a symlink, which bionic refuses to follow"
+    _pa_fail roster-symlink
   elif [ ! -e "$PA_ROSTER" ]; then
-    _pa_fail "there is no roster for this session, so the asking agent $PA_AGENT cannot be found"
+    _pa_fail roster-absent "$PA_AGENT"
   elif [ ! -r "$PA_ROSTER" ]; then
-    _pa_fail "the roster for this session cannot be read, so the asking agent $PA_AGENT cannot be found"
+    _pa_fail roster-unread "$PA_AGENT"
   fi
   PA_ROW="$(roster_row_for_id "$PA_ROSTER" "$PA_AGENT")" \
-    || _pa_fail "the roster has no row for the asking agent $PA_AGENT"
+    || _pa_fail roster-no-row "$PA_AGENT"
   PA_NAME="$(_pa_row_field "$PA_ROW" name)"
   # An agent dispatched without a name has a real row whose name= is empty: that is a reader
   # (a tree is recorded for a name, and it has none), not a fault. It stays labelled by its id.
@@ -364,7 +357,7 @@ PA_BOUND=0
 if [ -z "$PA_AGENT" ]; then
   case "$BIONIC_RUN_WORD" in
     bound-open) PA_CLASS=lead ;;
-    bound-unreadable) _pa_fail "the run this session is bound to cannot be read ($BIONIC_RUN_PLAN)" ;;
+    bound-unreadable) _pa_fail run-unreadable "$BIONIC_RUN_PLAN" ;;
     *) PA_CLASS=unbound ;;
   esac
 elif [ -z "$PA_NAME" ]; then
@@ -374,7 +367,7 @@ else
   case "$?" in
     0) PA_CLASS=writer ;;
     1) PA_CLASS=reader; PA_OWN="" ;;
-    *) _pa_fail "the workspace record for this session could not be read (a symlink, a file that cannot be opened, or git could not be asked which trees are its linked worktrees)" ;;
+    *) _pa_fail workspace-unread ;;
   esac
 fi
 
@@ -385,7 +378,7 @@ fi
 # one that does not resolve is a failure rather than a missing fact.
 PA_STAGE="collecting the roots of the asker"
 PA_MAIN="$(grant_resolve "$BIONIC_ROOT")" \
-  || _pa_fail "the main root of the project, $BIONIC_ROOT, does not resolve to a real location"
+  || _pa_fail main-root "$BIONIC_ROOT"
 PA_FACTS=("main=$PA_MAIN")
 _pa_root() {  # <key> <path> — the fact, resolved, or nothing
   local r
@@ -412,7 +405,7 @@ case "$PA_CLASS" in
     case "$?" in
       0) while IFS= read -r PA_T; do _pa_root tree "$PA_T"; done <<< "$PA_TREES" ;;
       1) : ;;
-      *) _pa_fail "the workspace record for this session could not be read (a symlink, a file that cannot be opened, or git could not be asked which trees are its linked worktrees)" ;;
+      *) _pa_fail workspace-unread ;;
     esac
     _pa_root record "$(_pa_record_dir "$PA_PLAN")"
     _pa_root plan "$PA_PLAN"
@@ -445,7 +438,7 @@ case "$PA_CLASS" in
     ;;
 esac
 grant_roots "$PA_CLASS" "${PA_FACTS[@]}" 2>/dev/null \
-  || _pa_fail "the grant could not be composed from the recorded roots (grant_roots rc $?)"
+  || _pa_fail roots $?
 
 # ---------- what the action does ----------
 #
@@ -499,7 +492,7 @@ case "$PA_TOOL" in
       PA_EFFECTS="?${PA_TAB}command too large to read${PA_TAB}$(_pa_clean "$PA_CMD" 200)"
     else
       PA_RAW="$(cmd_effects "$PA_CMD" "$PA_CWD" reads 2>/dev/null)" \
-        || _pa_fail "the command reader failed (cmd_effects rc $?)"
+        || _pa_fail reader $?
       if [ -n "$PA_RAW" ] && _pa_more_than "$PA_RAW" "$PA_EFFECTS_MAX"; then
         PA_MANY=1
         PA_N="$(printf '%s\n' "$PA_RAW" | awk 'END { print NR }')"
@@ -541,7 +534,7 @@ PA_CAT=""
 if [ "$PA_BIG" = 0 ]; then
   case "$PA_TOOL" in
     Bash)
-      PA_CAT="$(grant_reserved Bash "$PA_CMD")" || _pa_fail "the reserved table failed (grant_reserved rc $?)"
+      PA_CAT="$(grant_reserved Bash "$PA_CMD")" || _pa_fail reserved $?
       if [ -z "$PA_CAT" ] && [ "$PA_MANY" = 0 ] && [ -n "$PA_RAW" ]; then
         # The home directory is the fact an RR line is judged against; resolved only when
         # the reader printed one, so no other question pays for it.
@@ -551,14 +544,14 @@ if [ "$PA_BIG" = 0 ]; then
             [ -z "${HOME:-}" ] || PA_HOME="$(grant_resolve "$HOME")" || PA_HOME="" ;;
         esac
         PA_CAT="$(grant_reserved_effects "$PA_HOME" "$PA_RAW$PA_NL$PA_EFFECTS")" \
-          || _pa_fail "the reserved table failed (grant_reserved_effects rc $?)"
+          || _pa_fail reserved-effects $?
       fi
       ;;
     Write|Edit|MultiEdit|NotebookEdit|Read)
-      PA_CAT="$(grant_reserved "$PA_TOOL" "$PA_PATH")" || _pa_fail "the reserved table failed (grant_reserved rc $?)"
+      PA_CAT="$(grant_reserved "$PA_TOOL" "$PA_PATH")" || _pa_fail reserved $?
       if [ -z "$PA_CAT" ] && [ -n "$PA_RESOLVED_PATH" ] && [ "$PA_RESOLVED_PATH" != "$PA_PATH" ]; then
         PA_CAT="$(grant_reserved "$PA_TOOL" "${PA_RESOLVED_PATH#\?"$PA_TAB"}")" \
-          || _pa_fail "the reserved table failed (grant_reserved rc $?)"
+          || _pa_fail reserved $?
       fi
       ;;
   esac
@@ -566,7 +559,7 @@ fi
 
 PA_STAGE="deciding"
 PA_VERDICT="$(grant_decide "$PA_CLASS" "$GRANT_WRITE_ROOTS" "$GRANT_DELETE_ROOTS" "$PA_EFFECTS" "$PA_CAT" "$GRANT_MAIN_ROOT" 2>/dev/null)" \
-  || _pa_fail "the decision could not be made (grant_decide rc $?)"
+  || _pa_fail decide $?
 
 # _pa_gate <category> — the gate request for the lead (D7): one line per distinct request
 # (same asker, category and head), appended to .bionic/tmp/gate-<lead sid>.state. A symlink at
@@ -598,20 +591,16 @@ case "$PA_KIND" in
     esac
     ;;
   deny-fix)
-    # The reason may carry a resolver's mark (a TAB); the fix never does, so it is the last field.
-    PA_FIX="${PA_REST##*"$PA_TAB"}"
-    PA_REASON="${PA_REST%"$PA_TAB"*}"
-    PA_REASON="${PA_REASON//$PA_TAB/ }"
-    _pa_finish deny-fix "$PA_REASON" "bionic: $PA_REASON $PA_FIX"
+    grant_deny_words deny-fix "$PA_REST"
+    _pa_finish deny-fix "$GRANT_DENY_REASON" "$GRANT_DENY_MESSAGE"
     ;;
   deny-reserved)
-    PA_CATEGORY="${PA_REST%%"$PA_TAB"*}"
-    PA_REASON="${PA_REST#*"$PA_TAB"}"
+    grant_deny_words deny-reserved "$PA_REST"
     PA_GATED=""
-    _pa_gate "$PA_CATEGORY" || PA_GATED=" (the gate request could not be recorded: the gate file was refused)"
-    _pa_finish deny-reserved "$PA_CATEGORY: $PA_REASON$PA_GATED" "bionic: $PA_REASON"
+    _pa_gate "$GRANT_DENY_CATEGORY" || PA_GATED=" (the gate request could not be recorded: the gate file was refused)"
+    _pa_finish deny-reserved "$GRANT_DENY_CATEGORY: $GRANT_DENY_REASON$PA_GATED" "$GRANT_DENY_MESSAGE"
     ;;
   *)
-    _pa_fail "the decision printed no verdict"
+    _pa_fail no-verdict
     ;;
 esac
