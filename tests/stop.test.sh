@@ -1109,6 +1109,10 @@ s7_fire "$LOG_D2" "$LOG_TX"
 expect_contains "LOG2 meta: under the order the wall read a live ledger and found no row ready" "|ready=|" \
   "$(tail -1 "$LOG_D2/.bionic/docs/record/wave-09-fixture/fill-ledger.log" 2>/dev/null)"
 expect_eq "LOG3 …so the turn ends: the order the log alone holds stands" "" "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
+printf 'run/v1|ev=cancel|of=approval|key=step3|at=2026-11-01T00:00:03Z\n' >> "$LOG_D1/.bionic/docs/record/wave-09-fixture/run.log"
+s7_fire "$LOG_D1" "$LOG_TX"
+expect_eq "LOG4 a cancel the log appends after LOG1's approval leaves no row ready: the turn ends unrefused" "|" \
+  "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)|$(s9_headline)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 finish

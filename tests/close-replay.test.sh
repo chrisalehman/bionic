@@ -25,6 +25,7 @@
 #   §LIVE    the replay's live criterion (door.sh DOOR_LIVE_ROW), owed at the close: every advance and the refused
 #            close-out pass with it pending, the release approval card lists it owed by the close, and close-out writes it
 #            discharged from its last reading, with no matrix-set
+#   §CANCEL  reopened at Step 8 by its log, close-out reads the release approved, and not once the log cancels it
 #   §SINGLE  `rehearse single-verify` (door.sh `door_world_single`) stands at current: 5, the build's criterion discharged
 #            by its landing, the critic's evidence review on its own roster row carried into the auditor cell and the
 #            head's auditor-wave: line; its log names the verbs that brought it there and no discharge
@@ -409,6 +410,26 @@ if cr_reached "LV-0"; then
   LV_SETS="$(/usr/bin/grep '^\$ .*session-poker.sh matrix-set ' "$CR_LOG")"
   expect_contains "LV-6 precondition: the log's matrix-set lines are read (the criterion's task on AC-1.1)" "matrix-set AC-1.1" "$LV_SETS"
   expect_absent "LV-6b …and none names AC-2.1" "AC-2.1" "$LV_SETS"
+fi
+
+# ============================================================
+section "§CANCEL: a cancel of the release approval appended to the run's log is followed by close-out's facts line"
+# ============================================================
+# The delivered plan is put back where close-out read it, its log the reader's own translation with step 9 cancelled,
+# so close-out's check reads the run at Step 8 and reaches its facts line. Both are removed after.
+# fails-when: close-out reads the release as approved after the log cancels that approval.
+if cr_reached "CN-0"; then
+  CN_P="$CR_ROOT/$DOOR_PLAN_REL"; CN_L="$CR_REC/run.log"; mkdir -p "${CN_P%/*}" && cp "$CR_PLAN" "$CN_P"
+  { ( . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/reader.sh" && reader_events "$CN_P" )
+    printf 'run/v1|ev=cancel|of=step|n=9|at=2099-01-01T00:00:00Z\n'; } > "$WORLD_ROOT/cn.log" && mv "$WORLD_ROOT/cn.log" "$CN_L"
+  cn_facts() { door_run "$CR_ROOT" env HOME="$CR_DIR/home" BIONIC_CLAUDE_HOME="$CR_DIR/home/.claude" \
+    bash "$CR_ROOT/payload/scripts/close-out.sh" "$CN_P" check; printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -m1 '^facts: '; }
+  expect_eq "CN-1 reopened at Step 8, close-out reads the release approved: every fact holds at the branch's head" \
+    "facts: every fact the run owes holds at $(git -C "$CR_ROOT" rev-parse --verify -q refs/heads/wave/x)" "$(cn_facts)"
+  printf 'run/v1|ev=cancel|of=approval|key=release|at=2099-01-01T00:00:01Z\n' >> "$CN_L"
+  expect_contains "CN-2 …and with that approval cancelled in the log, it reads the release as not approved" \
+    "no approved: release line names a head" "$(cn_facts)"
+  rm -f "$CN_L" "$CN_P"
 fi
 
 # ============================================================
