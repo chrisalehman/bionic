@@ -26,7 +26,8 @@
 # every answer is a `key=value` line. An escaped `\|` inside a cell is a `|` in its value.
 #
 # WHERE A TABLE IS, five rules, because a table read in the wrong place is a schedule nobody wrote:
-#   - a fenced block is prose: a table or a heading inside ``` is an example about the plan, not of it;
+#   - a fenced block is prose: a table or a heading inside ``` is an example about the plan, not of it, and every
+#     reader here, of a table, a heading or a section, asks `fenced()` and keeps no rule of its own;
 #   - the heading is `## ` and the name, its first letter in either case, and may go on after a blank
 #     (`## Tasks (amended)`); the first such heading is the section, and any heading ends it;
 #   - the header line is the first table line in the section that names the key column (`id` for a
@@ -78,7 +79,12 @@ _plan_read_lines() { awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"; }
 # NO APOSTROPHE inside it: it is single-quoted.
 # A section is named by its heading the one way: `## ` and the name, its first letter in either case, going on
 # only after a blank, so `## Design — v2` is the Design section and `## Designer notes` is not. `sec` is the name.
-_PLAN_READ_NAMED='
+# What a fence is, said once for every reader of a heading here, so none can end a section at an example's line:
+# `fenced(s)` is 1 on a ``` line, which opens or closes the block, and on each line inside one. It keeps the block in
+# `fence`, so a reader calls it on every line, in order, from the file's first.
+_PLAN_READ_FENCE='
+    function fenced(s) { if (s !~ /^[ \t]*```/) return fence; fence = !fence; return 1 }'
+_PLAN_READ_NAMED="$_PLAN_READ_FENCE"'
     function cap(s) { return tolower(substr(s, 1, 1)) substr(s, 2) }
     function named(h,   l) { l = length(sec); return (cap(substr(h, 1, l)) == cap(sec) && (length(h) == l || substr(h, l + 1, 1) ~ /[ \t]/)) }'
 _PLAN_READ_TABLE="$_PLAN_READ_NAMED"'
@@ -92,8 +98,7 @@ _PLAN_READ_TABLE="$_PLAN_READ_NAMED"'
     function line(   i, o, v) { o = ""; for (i = 1; i <= nh; i++) { v = r[i]; gsub(/\t/, " ", v); o = o (i > 1 ? "\t" : "") name(i) "=" v }; return o }
     { sub(/\r$/, "") }
     stop { next }
-    /^[ \t]*```/ { fence = !fence; next }
-    fence { next }
+    fenced($0) { next }
     /^[ \t]*#/ { if (on) { stop = 1; next }; if ($0 ~ /^##[ \t]/) { h = $0; sub(/^##[ \t]+/, "", h); sub(/[ \t]+$/, "", h); on = named(h) }; next }
     !on { next }
     !/^[ \t]*[|]/ { if (nh) stop = 1; next }
@@ -233,16 +238,17 @@ plan_read_waits() {
 
 # plan_read_section <plan> <id> [key] -> the task's own section: the lines under the first heading whose first word
 # is <id>, a trailing `:`, `.` or `,` dropped, to the next heading, with its leading and trailing blank lines left
-# out. With <key>: the value of the section's first `<key>: <value>` line. 1 when there is no such section or key,
+# out; a `#` line inside a fenced block is the section's text, never a heading, so a fence neither starts one nor
+# ends one. With <key>: the value of the section's first `<key>: <value>` line. 1 when there is no such section or key,
 # 2 when the plan is not a file. THE RULE IS ONE STRING, so every reader and every writer of a task's section finds
 # the same heading: the act that writes a row's suites into its section takes `heading()` from here.
 _PLAN_READ_SECTION='function heading(s) { sub(/^#+[ \t]+/, "", s); sub(/[ \t].*$/, "", s); sub(/[:.,]+$/, "", s); return s }'
 plan_read_section() {
   [ -f "${1:-}" ] || return 2
   [ -n "${2:-}" ] || return 1
-  awk -v id="$2" -v key="${3:-}" "$_PLAN_READ_SECTION"'
-    { sub(/\r$/, "") }
-    /^#+[ \t]/ { if (on) exit; if (heading($0) == id) on = found = 1; next }
+  awk -v id="$2" -v key="${3:-}" "$_PLAN_READ_FENCE$_PLAN_READ_SECTION"'
+    { sub(/\r$/, ""); f = fenced($0) }
+    !f && /^#+[ \t]/ { if (on) exit; if (heading($0) == id) on = found = 1; next }
     !on { next }
     key != "" { if (index($0, key ":") == 1) { v = substr($0, length(key) + 2); gsub(/^[ \t]+|[ \t]+$/, "", v); print v; got = 1; exit }; next }
     /^[ \t]*$/ { if (n) blank++; next }
@@ -259,8 +265,7 @@ plan_read_heading() {
   [ -n "${2:-}" ] || return 1
   _plan_read_lines "$1" | awk -v names="$2" "$_PLAN_READ_NAMED"'
     BEGIN { n = split(names, want, "|") }
-    /^[ \t]*```/ { fence = !fence; next }
-    fence { next }
+    fenced($0) { next }
     /^##[ \t]/ { h = $0; sub(/^##[ \t]+/, "", h); sub(/[ \t]+$/, "", h)
       for (i = 1; i <= n; i++) { sec = want[i]; if (named(h)) { print NR "\t" sec; found = 1; break } } }
     END { exit !found }'

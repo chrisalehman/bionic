@@ -88,6 +88,11 @@ write_plan "$(printf '%s\n' "$MACHINE" | page 14)"
 expect_status "a version-14 plan holding all three is admitted" 0 "$HOOK_EXIT"
 write_plan "$(printf '## Tasks\n\n%s\n\nAn example:\n\n```\n## Handoff\n```\n' "$NINE" | page 15)"
 expect_status "a fenced ## Handoff is prose, and admitted" 0 "$HOOK_EXIT"
+FP="$R/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md"; printf '## SDLC State\n\ncurrent: 4\n\n## Tasks\n\n%s\n\n### T1 — a fenced comment\n\nRuling one.\n\n```bash\n# run it like this\n## run\n```\n\nRuling two: never commit.\n' "$NINE" | page 14 > "$FP"
+expect_contains "a section holding a fenced # line is read whole" "Ruling two: never commit." "$(bash -c '. "$1" && plan_read_section "$2" T1' _ "$PLAN_READ" "$FP")"
+bash -c '. "$1" && plan_read_section "$2" run' _ "$PLAN_READ" "$FP" >/dev/null; expect_status "a heading inside a fence starts no section" 1 "$?"
+printf 'plan=%s\n' "$FP" > "$R/.bionic/tmp/engaged-$SID.state"; ( cd "$R" && HOME="$HOME_DIR" CLAUDE_CODE_SESSION_ID="$SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" brief T1 w01-T1 ) >/dev/null 2>&1
+expect_contains "a brief rendered from that section carries the ruling after the fence" "Ruling two: never commit." "$(cat "$R/.bionic/docs/record/wave-01-x/briefs/w01-T1.md" 2>/dev/null)"
 
 section "ROW"
 for c in status agent; do
