@@ -76,7 +76,6 @@ skills/canonical-sdlc/operational-rules.md|the calls a later reader would want|w
 skills/canonical-sdlc/operational-rules.md|no jargon a plain reader would look up|whoever reads the close-out report, not a review
 payload/context/working-principles.md agents-src/templates/context/working-principles.md.tmpl|Lead with what the reader needs to decide|whoever reads the answer, not a review
 payload/context/working-principles.md agents-src/templates/context/working-principles.md.tmpl|the reader may act on it|whoever reads the answer, not a review
-hooks/dispatch-preflight.sh|a reason the reader can check|whoever reads the plan row, not a review
 hooks/poker/tick.sh|the panel reading is|a reading of the agent panel, a measurement, not a review
 hooks/session-poker.sh|Lands-red from the reader;|the program that answers from the run's log, not a review
 hooks/poker/line.sh|the reader (lib/reader.sh) cannot be loaded|the program that answers from the run's log, named by its file, not a review

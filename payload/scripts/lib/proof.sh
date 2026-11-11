@@ -1532,7 +1532,7 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   local plan="${1:-}" lib log="" dir="" f stamp key cdir cache="" tmp got rc=0 IFS=$' \t\n'
   local -a deps
   [ -f "$plan" ] || return 0
-  _proof_reader_load || { printf '_proof_facts: the reader cannot be loaded, so the facts of %s are not read\n' "$plan" >&2; return 2; }
+  _proof_reader_load || { printf '_proof_facts: lib/reader.sh cannot be loaded, so the facts of %s are not read\n' "$plan" >&2; return 2; }
   lib="$_READER_LIB_DIR"
   # The lookup's exit tells a plan with no record (2), translated from its homes below, from a lookup that died: that
   # would send a run with a log down the path for one without, so it is a failed fold.
@@ -1571,7 +1571,7 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   # ask that the run has no proof. It is an error to whoever asked, and nothing is kept, in this shell or on disk.
   if [ "$rc" -ne 0 ]; then
     _PROOF_FACTS_KEY=""; _PROOF_FACTS=""
-    printf '_proof_facts: the reader exited %s folding the facts of %s; nothing is kept\n' "$rc" "$plan" >&2
+    printf '_proof_facts: lib/reader.sh exited %s folding the facts of %s; nothing is kept\n' "$rc" "$plan" >&2
     return 2
   fi
   [ -z "$_PROOF_FACTS" ] || _PROOF_FACTS="$_PROOF_FACTS"$'\n'

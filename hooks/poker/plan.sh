@@ -206,7 +206,7 @@ poker_files_cell() {
     ''|'—'|'-') return 0 ;;
   esac
   if ! poker_brief_load; then
-    die "REFUSED — the contract reader (lib/brief.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
+    die "REFUSED — the brief library (lib/brief.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
     return 2
   fi
   if ! poker_additions_judged "$(printf '%s' "$PFC_OUT" | tr ',' '\n')" "" "" "$repo" "" ""; then
@@ -438,7 +438,7 @@ amend_unplaced() {  # <agent id> <the last row carrying it, or empty> -> the ver
     return 1
   fi
   if ! poker_brief_load; then
-    die "REFUSED — the contract reader (lib/brief.sh) cannot be loaded from $BIONIC_LIB; nothing was written."
+    die "REFUSED — the brief library (lib/brief.sh) cannot be loaded from $BIONIC_LIB; nothing was written."
     return 2
   fi
   if [ -n "$prior" ]; then
@@ -463,7 +463,7 @@ amend_unplaced() {  # <agent id> <the last row carrying it, or empty> -> the ver
 $(poker_marked_runs "$(brief_field "$add" re_executes)")
 EOF
   if [ "$sa" = "$old_sa" ] && [ "$new_runs" = "$old_runs" ]; then
-    die "REFUSED — this amend changes nothing: every addition is already on the set recorded for $aid, or is not a suite or run the contract reader records. Nothing was written."
+    die "REFUSED — this amend changes nothing: every addition is already on the set recorded for $aid, or is not a suite or run a brief's contract records. Nothing was written."
     return 1
   fi
   row="$(roster_row status=unplaced "session=$SESSION_ID" "name=$aid" "agent_id=$aid" \
@@ -1038,7 +1038,7 @@ pv_roster_live_name() {
       exit 1
     fi
     if ! poker_brief_load; then
-      die "REFUSED — the contract reader (lib/brief.sh) cannot be loaded from $BIONIC_LIB; nothing was written."
+      die "REFUSED — the brief library (lib/brief.sh) cannot be loaded from $BIONIC_LIB; nothing was written."
       exit 2
     fi
 
@@ -1123,7 +1123,7 @@ EOF
 
     if [ "$AM_NEW_FILES" = "$AM_OLD_FILES" ] && [ "$AM_SA" = "$AM_OLD_SA" ] \
        && [ "$AM_NEW_RUNS" = "$AM_OLD_RUNS" ]; then
-      die "REFUSED — this amend changes nothing: every addition is already on $AMEND_NAME's row, or is not a path, suite or run the contract reader records. Nothing was written."
+      die "REFUSED — this amend changes nothing: every addition is already on $AMEND_NAME's row, or is not a path, suite or run a brief's contract records. Nothing was written."
       exit 1
     fi
 
