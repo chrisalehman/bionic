@@ -314,6 +314,9 @@ sed 's/^| AC-8\.1 |/| AC-7.3 | T1 | pending | — | — |\n| AC-7.5 | T1 | disch
 aud() { every "$@" | tr ';' '\n' | awk -F, '$1 ~ /^AC-7\.[345]$/ { printf "%s=%s ", $1, $6 }'; }
 expect_eq "at 14 a row a logged proof discharges with no verdict reads the evidence review at the head (none with no head); the table's own rows keep their cells" \
   "AC-7.3=CONFIRMED AC-7.4=CONFIRMED AC-7.5= |AC-7.3= AC-7.4=CONFIRMED AC-7.5= " "$(aud "$H")|$(aud)"
+W=wv; plan wv <<< "run/v1|ev=waiver|ac=AC-7.4|by=me|said=let it go|at=2026-11-01T00:00:11Z"; cp "$D/plans/epic-x/old.plan.md" "$D/plans/epic-x/wv.plan.md"
+expect_eq "at 14 a row the text discharges, with a logged waiver of it, reads waived by the waiver; with none, discharged by the proof" \
+  "state=discharged by=waiver|state=discharged by=proof" "$(flat cell AC-7.4)|$(W=old; flat cell AC-7.4)"
 W=old; ask cell AC-9.9; expect_status "a criterion the plan lacks has no cell" 1 "$?"
 ask cell; expect_status "cell with no criterion is refused" 2 "$?"
 

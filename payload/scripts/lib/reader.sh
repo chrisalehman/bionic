@@ -433,7 +433,8 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
 # question answers through it, and no question prints the further fields: the bed pins the cell answer over the
 # closed runs, and the fields are what the gate, the judge and the cards weigh, never a fact a person asks for.
 #   state, by   discharged only by a standing event naming the criterion: an approval by its key, a waiver or a
-#               proof by `ac=`; a proof that failed (rc other than 0, or result=fail) discharges nothing.
+#               proof by `ac=`; a proof that failed (rc other than 0, or result=fail) discharges nothing; an older
+#               table's proof, which has no instant, does not displace a waiver the log holds with one.
 #   tier        the Eval design's eval type through lib/scale.sh, else the older table's tier cell.
 #   evidence    the discharging proof's or waiver's `evidence=`, else the older table's evidence cell.
 #   auditor     on a row the older table holds: the discharging event's `auditor=`, else the row's cell; on any other
@@ -466,6 +467,7 @@ reader_cells() {
     e == "proof" && line_kv("kind") == "review" && line_kv("question") == "evidence" && h != "" && line_kv("head") == h { review = (line_kv("result") == "pass") ? "CONFIRMED" : "REFUTED" }
     c == "" || !(c in seen) { next }
     e == "approval" { by[c] = "approval"; ok[c] = line_kv("by") " " substr(line_kv("at"), 1, 10) " " (line_kv("said") != "" ? line_kv("said") : c) }
+    e == "proof" && line_kv("at") == "" && by[c] == "waiver" && at_[c] != "" { next }
     e == "waiver" || e == "proof" && line_kv("rc") ~ /^0?$/ && line_kv("result") != "fail" {
       by[c] = e; ev_[c] = line_kv("evidence"); aud[c] = line_kv("auditor"); cf[c] = line_kv("confirmed"); at_[c] = line_kv("at") }
     END {
