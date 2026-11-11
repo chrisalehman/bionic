@@ -1361,14 +1361,14 @@ EOF
         case " $REGISTRY_FILES " in *" $TA_PATH "*) continue ;; esac
         TA_FIXERS="$(printf '%s\n' "$TA_BORN_ROWS" | while IFS=$'\t' read -r TA_BID _ TA_BFILES; do
             [ -n "$TA_BID" ] || continue
-            _units_split_tokens "$TA_BFILES" | grep -Fx -- "$TA_PATH" >/dev/null && printf '%s\n' "$TA_BID"
+            _units_files_tokens "$TA_BFILES" | grep -Fx -- "$TA_PATH" >/dev/null && printf '%s\n' "$TA_BID"
           done)"
         if [ "$(printf '%s' "$TA_FIXERS" | awk 'NF { n++ } END { print n + 0 }')" -ge 3 ]; then
           die "task-add refused — a fourth fix on $TA_PATH: $(printf '%s' "$TA_FIXERS" | paste -sd, - | sed 's/,/, /g') already fix it; stop the run (AC-10.2)"
           exit 1
         fi
       done <<EOF
-$(_units_split_tokens "$TA_FILES")
+$(_units_files_tokens "$TA_FILES")
 EOF
       TA_CELL_TASK="$TA_TASK · born: review"
     fi
@@ -2474,75 +2474,6 @@ BRF_EOF
     fi
     if [ -n "$BRF_JUDG" ]; then BRF_SAID="the plan's section for $BRF_ID"; else BRF_SAID="NONE — the plan has no words for $BRF_ID; write its section and render again"; fi
     say "brief — $BRF_ID: written to ${BRF_OUT#"$PV_REPO"/} for the dispatch named $BRF_NAME; the dispatch prompt's first line names that file. Its judgment: $BRF_SAID."
-    exit 0
-  }
-
-  # THE SPLIT (wave-30 T17; REQ-12 AC-12.6, D14d-3, design-ledger Δ11: "the machine finds and records
-  # a split; the mind decides it"). Which row to split and where to cut it are the orchestrator's
-  # (steps/4.md, "Splitting a row"); this verb performs the cut it is handed, as task-add's
-  # transaction: refused below Step 4 as task-add is, on a parent that is not `pending` (an active
-  # row's writer is in its tree), and on children whose Files are not a cover of the parent's
-  # (`units_split_check`); then `units_split_row` projects the split onto the copy, `units_validate`
-  # judges the whole plan, the copy is held to its own claim — no row waits on the dropped parent, and
-  # each open row that did waits on a child (`units_split_dependents`, `units_edges`) — and only then
-  # the dry commit and the swap. Any refusal leaves the plan byte-identical.
-  poker_verb_task_split() {
-    plan_verb_open task-split
-    TS_CUR="${PV_CUR%[ab]}"
-    case "$TS_CUR" in
-      ''|*[!0-9]*)
-        die "REFUSED — $PV_PLAN has current: ${TS_CUR:-(none)}; task-split changes a wave plan past Step-3 approval, whose current: is a step number."
-        exit 1 ;;
-    esac
-    if [ "$TS_CUR" -lt 4 ]; then
-      die "REFUSED — $PV_PLAN is at current: $TS_CUR; before Step-3 approval the plan is written by hand and reviewed, not split."
-      exit 1
-    fi
-    TS_REC="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v p="$TS_ID" '$1 == p')"
-    case "$(printf '%s' "$TS_REC" | /usr/bin/grep -c .)" in
-      1) : ;;
-      0) die "REFUSED — the ## Tasks table of $PV_PLAN carries no row $(clean "$TS_ID"); the plan is unchanged."; exit 1 ;;
-      *) die "REFUSED — the ## Tasks table carries more than one row $TS_ID; which one is meant is not the verb's to guess. The plan is unchanged."; exit 1 ;;
-    esac
-    TS_ST="$(units_field "$TS_REC" status)"
-    if [ "$TS_ST" != pending ]; then
-      die "REFUSED — $TS_ID is ${TS_ST:-(no status)}; task-split rewrites a pending row only. The plan is unchanged."
-      exit 1
-    fi
-    TS_VIOL="$(units_split_check "$TS_ID" "$(units_field "$TS_REC" Files)" "${TS_CHECK[@]}")"
-    if [ -n "$TS_VIOL" ]; then
-      die "REFUSED — the children's Files are not a partition of $TS_ID's; the plan is unchanged:"
-      printf '%s\n' "$TS_VIOL" >&2
-      exit 1
-    fi
-    TS_WAITERS="$(units_split_dependents "$PV_PLAN" "$TS_ID")"
-    PV_RC=0
-    units_split_row "$PV_PLAN" "$TS_ID" "$(iso_now)" "${TS_ARGS[@]}" > "$PV_NEW" 2>/dev/null || PV_RC=$?
-    if [ "$PV_RC" -ne 0 ] || [ ! -s "$PV_NEW" ]; then
-      die "REFUSED — the split of $TS_ID cannot be written (units_split_row exit $PV_RC: a value no table cell can hold, or no ## SDLC State); the plan is unchanged."
-      exit 1
-    fi
-    TS_VIOL="$(units_validate "$PV_NEW" "$PV_PLAN" 2>&1)"
-    if [ -n "$TS_VIOL" ]; then
-      die "REFUSED — with $TS_ID split into $TS_IDS, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
-      printf '%s\n' "$TS_VIOL" >&2
-      exit 1
-    fi
-    TS_LEFT="$(units_split_dependents "$PV_NEW" "$TS_ID")"
-    TS_EDGES="$(units_edges "$PV_NEW" 2>/dev/null)"
-    TS_OPEN="$(units_rows "$PV_NEW" 2>/dev/null | awk -F'\t' '$10 == "pending" || $10 == "active" { print $1 }')"
-    for _ts_w in $TS_WAITERS; do
-      /usr/bin/grep -Fxq -- "$_ts_w" <<<"$TS_OPEN" || continue
-      printf '%s\n' "$TS_EDGES" | awk -F'\t' -v w="$_ts_w" -v k=", $TS_IDS," '$2 == w && index(k, ", " $1 ",") { f = 1 } END { exit !f }' \
-        || TS_LEFT="${TS_LEFT:+$TS_LEFT }$_ts_w"
-    done
-    if [ -n "$TS_LEFT" ]; then
-      die "REFUSED — after the split these rows would still wait on $TS_ID, or on no child of it: $(printf '%s' "$TS_LEFT" | tr '\n' ' ' | sed 's/ $//'); the plan is unchanged."
-      exit 1
-    fi
-    TS_K="$(printf '%s' "$TS_WAITERS" | /usr/bin/grep -c .)"
-    plan_verb_swap task-split "$TS_ID split into $TS_IDS" writer
-    say "task-split — $TS_ID → $TS_IDS; $TS_K dependent(s) re-pointed; written to $PV_PLAN, dry-committed first."
     exit 0
   }
 

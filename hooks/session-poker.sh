@@ -50,7 +50,6 @@
 #     bash <plugin-root>/hooks/session-poker.sh decisions put D<n> '<what is decided>'   a decision put: one ledger line, and the wait line it prints
 #     bash <plugin-root>/hooks/session-poker.sh decisions rule D<n> '<reply>'   a decision ruled on the user's reply: its ledger heading and its ask closed, in one act
 #     bash <plugin-root>/hooks/session-poker.sh brief <row> [<name>]   render the dispatch brief into record/<wave>/briefs/<name>.md from the row, its plan section and the reader (writes that file, never the plan)
-#     bash <plugin-root>/hooks/session-poker.sh task-split <id> -- <child spec>…   rewrite one pending row as two or more children, each <id>:<task>:<size>:<Files>, its waiters re-pointed (writes the plan)
 #
 # `<plugin-root>` IS A PLACEHOLDER, NOT A SPELLING TO PASTE (epic-17 W5, spec AC-5). These
 # are commands a MODEL types into its own shell, where `${CLAUDE_PLUGIN_ROOT}` is unset —
@@ -574,7 +573,6 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh decisions put D<n> '<what is decided>'   during a run, write the decision's put line to record/<wave>/design-ledger.md and print its wait line: what an hour's wait moves, from the tasks that read approval:D<n> and the longest chain"
   die "  bash ${HOOK_DIR}/session-poker.sh decisions rule D<n> '<reply>'   during a run, on the user's reply, write the ruling heading ## Δ<k> — D<n> ruled \"<reply>\" (<who> <date>): <title> to record/<wave>/design-ledger.md and close the decision's ask; approve D<n> and a release approval card's reply rule through the same writer; a decision already ruled is refused"
   die "  bash ${HOOK_DIR}/session-poker.sh brief <row> [<name>]   render the dispatch brief of that plan row into record/<wave>/briefs/<name>.md (<name> the agent's, else the fill's for the row): the scaffold from the row, the judgment from the task's own section of the plan, the review range, Questions and Lands-red from the reader; it never rewrites a brief it did not render, and never changes the plan"
-  die "  bash ${HOOK_DIR}/session-poker.sh task-split <id> -- <child spec>…   rewrite one pending row as its children, each <id>:<task>:<size>:<Files>: the parent dropped with split-into, its Files partitioned, every row that waited on it waiting on a child, one validated transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh debt add <record> [<plan>]   write one record/<run>/debt.md line per debt: line of the record (a review's, a writer's, an assumptions.md hole line), each concept and kind once"
   die "  bash ${HOOK_DIR}/session-poker.sh debt touched <concept> [<plan>]   add one to the touches of each unburned item of <concept> (the dispatch wall's call)"
   die "  bash ${HOOK_DIR}/session-poker.sh debt burn <concept> <row> [<plan>]   mark each unburned item of <concept> burned by <row>"
@@ -1435,29 +1433,6 @@ $1"; shift ;;
   brief)
     { [ $# -ge 1 ] && [ $# -le 2 ] && [ -n "$1" ]; } || usage "brief takes the plan row's id and, optionally, the name its agent is dispatched under, as in: brief T2 w01-T2."
     BRF_ID="$1"; BRF_NAME="${2:-}"
-    ;;
-  # THE SPLIT (wave-30 T17; D14d-3, design-ledger Δ11). The row, `--`, then two or more child specs
-  # `<id>:<task>:<size>:<Files>`: the id before the first colon, the Files after the last, the size
-  # before that, and the task between, which may hold a colon of its own. A spec of another shape,
-  # or one leaving its id, task or size empty, is the usage error; what the plan can hold is the verb's.
-  task-split)
-    { [ $# -ge 4 ] && [ -n "$1" ] && [ "$2" = -- ]; } \
-      || usage "task-split takes <id> -- <child spec> <child spec>…: two or more children, each <id>:<task>:<size>:<Files> (write — for no Files)."
-    TS_ID="$1"; shift 2
-    TS_ARGS=(); TS_CHECK=(); TS_IDS=""
-    for _ts_s in "$@"; do
-      case "$_ts_s" in
-        *$'\n'*|*$'\r'*) usage "task-split: a child spec holds a line break; each child is <id>:<task>:<size>:<Files>." ;;
-        *:*:*:*) : ;;
-        *) usage "task-split: '$(printf '%s' "${_ts_s:0:40}" | tr -d '[:cntrl:]')' is not <id>:<task>:<size>:<Files>." ;;
-      esac
-      _ts_id="${_ts_s%%:*}"; _ts_r="${_ts_s#*:}"; _ts_f="${_ts_r##*:}"; _ts_r="${_ts_r%:*}"
-      _ts_z="${_ts_r##*:}"; _ts_t="${_ts_r%:*}"
-      { [ -n "${_ts_id//[[:space:]]/}" ] && [ -n "${_ts_t//[[:space:]]/}" ] && [ -n "${_ts_z//[[:space:]]/}" ]; } \
-        || usage "task-split: '$(printf '%s' "${_ts_s:0:40}" | tr -d '[:cntrl:]')' leaves its id, task or size empty; each child is <id>:<task>:<size>:<Files>."
-      TS_ARGS+=("$_ts_id" "$_ts_t" "$_ts_z" "$_ts_f"); TS_CHECK+=("$_ts_id" "$_ts_f")
-      TS_IDS="${TS_IDS:+$TS_IDS, }$_ts_id"
-    done
     ;;
   discharge)
     { [ $# -eq 1 ] && [ -n "$1" ]; } || usage "discharge takes exactly one argument: the criterion (AC-<n>.<m>) whose auditor cell becomes CONFIRMED."
@@ -3545,7 +3520,6 @@ case "$VERB" in
   continuation-fill) poker_verb_continuation_fill "$@" ;;
   handoff) poker_verb_handoff "$@" ;;
   brief) poker_verb_brief "$@" ;;
-  task-split) poker_verb_task_split "$@" ;;
   current) poker_verb_current "$@" ;;
   reply) poker_verb_reply "$@" ;;
   release-approval) poker_verb_release_approval "$@" ;;
