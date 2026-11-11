@@ -552,6 +552,7 @@ doctor-version.test.sh | §Section 9 | keep | payload/scripts/doctor.sh: detect_
 doctor-version.test.sh | §Section 10 | keep | payload/scripts/doctor.sh: the ahead state rendered as lag, so an install newer than the marketplace prints an update command (38 to 42) | none (searched 'newer than the marketplace' in tests/; version-compare.test.sh drives version_compare alone)
 doctor-version.test.sh | §Section 11 | keep | payload/scripts/doctor.sh: under BIONIC_DOCTOR_ONLY=NATIVE the duplicate-registration gather skipped, so the filtered page carries no duplicates row (73); or the filtered NATIVE table differs from the whole page's (66) | none (searched 'registered twice' and 'BIONIC_DOCTOR_ONLY' in tests/)
 doctor-version.test.sh | §Section 12 | duplicate | payload/scripts/doctor.sh: the MCP row's CLI-absent cause dropped, or its fix line no longer elided past 100 columns | doctor-fleet.test.sh §Section 8 (unverified; rows 21.1 and 21.2 are the same pair)
+doctor-version.test.sh | §Section V14 | keep | payload/scripts/doctor.sh: the version-14 loop deleted, or its open test dropped, so the PROJECT table names no bring-forward command for an open run at 14, or names the closed run beside it (V14.1, V14.2) | none (searched 'bring-forward' in tests/; only bring-forward.test.sh, which drives the act, not the page)
 
 ## doctor-walls.test.sh
 
