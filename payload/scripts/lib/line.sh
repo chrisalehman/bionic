@@ -134,8 +134,8 @@ _line_branch() {  # <plan> -> its working-branch
   plan_working_branch "$1"
 }
 # The accepted head is the working branch's REF, read by lib/proof.sh `proof_branch_head`, the one reader of the
-# head the judge, proof-add, waive and a record row's landing ask (wave-36 T12; D13; burns debt `working-head`): this read the
-# ref by hand, a second spelling of the same question.
+# head the judge, proof-add, waive and a record row's landing ask: this read the ref by hand, a second spelling of the
+# same question.
 _line_load_proof() {
   declare -F proof_branch_head >/dev/null 2>&1 && return 0
   # shellcheck source=/dev/null
