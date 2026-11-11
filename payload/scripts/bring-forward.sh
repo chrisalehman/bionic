@@ -49,8 +49,9 @@ _bf_dir="$(cd "$_bf_dir" && pwd -P)" || exit 2
 _bf_plan() {  # <plan> <deps file|-> <gaps out> <dropped ids> -> the plan's text brought forward
   # Read twice: the first pass learns the Tasks table's columns, each row's suites and lands-on and which
   # rows have a section of their own; the second writes. A cell keeps its text as written, `\|` included.
-  # A task's own section is found by plan-read.sh's one heading rule, so the act writes where the brief reads.
-  awk -v depf="$2" -v gapf="$3" -v drop=" $4 " -v nine="id step kind task deps size serves files artifact" "$_PLAN_READ_SECTION"'
+  # A task's own section is found by plan-read.sh's one heading rule and its one fence rule, so the act writes where
+  # the brief reads: a `#` line inside a fence is the section's text, never a heading, in either pass.
+  awk -v depf="$2" -v gapf="$3" -v drop=" $4 " -v nine="id step kind task deps size serves files artifact" "$_PLAN_READ_FENCE$_PLAN_READ_SECTION"'
     function cells(line, out,   n, i) {
       gsub(/\\[|]/, "\001", line); sub(/^[ \t]*[|]/, "", line); sub(/[|][ \t]*$/, "", line)
       n = split(line, out, "|"); for (i = 1; i <= n; i++) gsub(/^[ \t]+|[ \t]+$/, "", out[i])
@@ -64,11 +65,11 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> <dropped ids> -> the plan's text
       for (k = 0; k < blanks; k++) print ""; ins = ""; blanks = 0 }
     BEGIN { nn = split(nine, w9, " "); split("suites lands-on", w2, " ")
       if (depf != "-") while ((getline l < depf) > 0) { t = index(l, "\t"); dep[substr(l, 1, t - 1)] = substr(l, t + 1) } }
-    FNR == 1 && NR > 1 { sec = ""; nh = 0; tdone = 0; skip = 0 }
-    { sub(/\r$/, "") }
-    /^## / { sec = substr($0, 4); sub(/[ \t]+$/, "", sec) }
+    FNR == 1 && NR > 1 { sec = ""; nh = 0; tdone = 0; skip = 0; fence = 0 }
+    { sub(/\r$/, ""); f = fenced($0) }
+    !f && /^## / { sec = substr($0, 4); sub(/[ \t]+$/, "", sec) }
     FNR == NR {
-      if (/^#+[ \t]/) own[heading($0)] = 1
+      if (!f && /^#+[ \t]/) own[heading($0)] = 1
       if (sec != "Tasks" || tdone || !/^[ \t]*[|]/) { if (sec == "Tasks" && nh) tdone = 1; next }
       if (!nh) { nh = cells($0, h); for (i = 1; i <= nh; i++) { col[name(h[i])] = i; hn[name(h[i])] = h[i] }
         isnine = (nh == nn); for (i = 1; i <= nn; i++) if (!(w9[i] in col)) isnine = 0; next }
@@ -79,10 +80,10 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> <dropped ids> -> the plan's text
     }
     FNR == 1 && $0 == "---" { head = 1; print; next }
     head { if ($0 == "---") head = 0; else if ($0 ~ /^canonical_sdlc_version:[ \t]*["\047]?14["\047]?[ \t]*$/) $0 = "canonical_sdlc_version: 15"; print; next }
-    /^#+[ \t]/ { place() }
-    /^## / { skip = (sec == "SDLC State" || sec == "Verification Matrix" || sec == "Handoff") }
+    !f && /^#+[ \t]/ { place() }
+    !f && /^## / { skip = (sec == "SDLC State" || sec == "Verification Matrix" || sec == "Handoff") }
     skip { next }
-    /^#+[ \t]/ && !isnine && (heading($0) in row) && !index(drop, " " heading($0) " ") { print; ins = heading($0); next }
+    !f && /^#+[ \t]/ && !isnine && (heading($0) in row) && !index(drop, " " heading($0) " ") { print; ins = heading($0); next }
     ins != "" && /^[ \t]*$/ { blanks++; next }
     ins != "" { for (; blanks > 0; blanks--) print "" }
     sec == "Tasks" && !tdone && !isnine && /^[ \t]*[|]/ {

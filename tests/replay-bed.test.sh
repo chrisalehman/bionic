@@ -331,11 +331,12 @@ expect_eq "a debt the log alone holds is counted on the card's debt line" "debt:
 expect_contains "…and the continuation would carry it under ## Deferrals" " follow_x" "$(printf '%s\n' "$C1" | grep -m1 '^continuation: ')"
 expect_contains "the log without it carries the run's own deferrals there" "under ## Deferrals: record/" "$(printf '%s\n' "$C0" | grep -m1 '^continuation: ')"
 expect_absent "…and not that debt" " follow_x" "$(printf '%s\n' "$C0" | grep -m1 '^continuation: ')"
+printf 'run/v1|ev=step|n=7|at=2026-11-02T00:00:00Z\n' >> "$CR/run.log"; expect_contains "the run taken back to Step 7 reads there on close-out's step line" "the run is at Step 7 —" "$(closecheck | grep -m1 '^step: ')"
 
 section "AGREE"
 nums() { sed -n 's/^run\.so-far: \([0-9]*\) acts\{0,1\} taken by hand · \([0-9]*\) open asks\{0,1\}$/\1 \2/p'; }
 for d in "$WORLD_ROOT"/pages/release-approval-*/; do d="${d%/}"; n="${d##*/}"; p="$(ls "$d"/.bio*/docs/plans/*/*.plan.md)"
-  cp "$d.read" "${p%/plans/*}/record/$(basename "$p" .plan.md)/run.log"; sv="$( cd "$d" && bash "$R/hooks/session-poker.sh" sitrep "$p" 2>/dev/null )"
+  cp "$d.read" "${p%/plans/*}/record/$(basename "$p" .plan.md)/run.log"; sv="$( cd "$d" && bash "$R/hooks/session-poker.sh" sitrep "$p" 2>"$d.serr" )"
   c="$(awk '$0 == "Reviews" { r = 1; next } r && !NF { exit } r && !/^ / { if (index($0, "✅") == 1) p++; else f++ } END { printf "%d passed, %d failed", p, f }' "$d.out")"
   s="$(printf '%s\n' "$sv" | sed -n 's/^reviews: \([0-9]* passed, [0-9]* failed\), .*/\1/p')"
   expect_regex "$n: the sheet prints its reviews line" '^[0-9]+ passed, [0-9]+ failed$' "$s"
@@ -343,7 +344,7 @@ for d in "$WORLD_ROOT"/pages/release-approval-*/; do d="${d%/}"; n="${d##*/}"; p
   h="$(printf '%s\n' "$sv" | nums)"; k="$(nums < "$d.out")"; a="$(ask "$p" hands | grep -c .) $(ask "$p" asks | grep -c .)"
   expect_regex "$n: the sheet prints the run's acts taken by hand and open asks" '^[0-9]+ [0-9]+$' "$h"
   expect_eq "$n: the card and the sheet count the acts taken by hand as the reader answers them" "${a% *} ${a% *}" "${k% *} ${h% *}"
-  expect_eq "$n: …and the open asks" "${a#* } ${a#* }" "${k#* } ${h#* }"
+  expect_eq "$n: …and the open asks" "${a#* } ${a#* }" "${k#* } ${h#* }"; [ "$s|$k|$h" = "$c|$a|$a" ] || sed 's/^/      sheet said: /' "$d.serr"
 done
 
 finish
