@@ -323,8 +323,9 @@ if cr_reached "EN-0"; then
   expect_eq "EN-3 …and lists the failed review exactly as the plan registered it" "$EN_WANT" \
     "$([ -n "$EN_WANT" ] && printf '%s\n' "$EN_PART" | /usr/bin/grep -x -F -- "$EN_WANT")"
   EN_PLAN_N="$(awk '/^[[:space:]]*```/ { fence = !fence; next } fence { next } /^##[[:space:]]/ { s = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    s && (/^proved: kind=review / || /^waived:[[:space:]]/) { n++ } END { print n + 0 }' "$CR_PLAN")"
-  expect_eq "EN-4 the part lists as many reviews and waivers as the plan registers (the plan registers some)" "$EN_PLAN_N|yes" \
+    s && /^proved: kind=review / { n++ } END { print n + 0 }' "$CR_PLAN")"
+  EN_PLAN_N=$((EN_PLAN_N + $(cat "$CR_REC/run.log" 2>/dev/null | /usr/bin/grep -c '^run/v1|ev=waiver|')))
+  expect_eq "EN-4 the part lists as many reviews and waivers as the run registers, the reviews in its plan and the waivers in its log (it registers some)" "$EN_PLAN_N|yes" \
     "$(printf '%s\n' "$EN_PART" | /usr/bin/grep -c '^- ')|$([ "$EN_PLAN_N" -ge 1 ] && echo yes)"
   EN_MAIN="$(git -C "$CR_ROOT" show "refs/heads/main:CHANGELOG.md" 2>/dev/null | cr_entry_part "$EN_VER")"
   expect_eq "EN-2m main's release entry holds the reviews part after the person's merge" "### The reviews" \

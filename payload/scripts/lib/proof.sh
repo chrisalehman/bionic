@@ -182,10 +182,37 @@ proof_approved_head() {
     END { if (h !~ /^[0-9a-f]+$/ || length(h) != 40) exit 1; print h }'
 }
 
-# proof_waiver_line <question> <head> <who> <at> <reason> -> the one waiver line, newline-terminated:
-# the user's act, covering <question> up to <head> (wave-27 T9; written by `session-poker.sh waive`).
+# proof_waiver_line <question> <head> <who> <at> <reason> -> a waiver as an older plan's `## SDLC State` holds it,
+# newline-terminated. No verb writes it: the waiver is an event (`proof_waiver_event`), and this shape is kept for a
+# run whose older waivers stand in its plan, which the reader translates.
 proof_waiver_line() {
   printf 'waived: question=%s head=%s by %s %s "%s"\n' "$1" "$2" "$3" "$4" "$5"
+}
+
+# THE RUN'S LOG HOLDS A WAIVER AND A FINDING. Each is one event appended through the one appender (lib/log.sh
+# `log_append`) to the run log the reader joins to the plan (`reader_log`), by one writer each, so no second function
+# can write either type. Fields are the ones the translation gives an older plan's lines, so the reader reads an old
+# fact and a new one alike:
+#
+#   waiver   question=<q> head=<sha> by=<who> said=<the reply>
+#
+# words, why and stated hold `\` and `"` escaped, as the plan's quoted fields held them. RUN_LOG is set for the one
+# call and never exported: the poker's own RUN_LOG names a suite's output log. Exit 0 appended; 2 when the plan has no
+# record to hold its log, the appender cannot be loaded, or the appender refuses a value (a `|` or a line break); 1
+# when the write failed.
+_proof_event_log() {  # <plan> -> the plan's run log, the appender loaded; 2 when either is wanting
+  _proof_reader_load || return 2
+  if ! declare -F log_append >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$_READER_LIB_DIR/log.sh" >/dev/null 2>&1 || return 2
+  fi
+  reader_log "$1" 2>/dev/null || return 2
+}
+proof_waiver_event() {  # <plan> <field>=<value>… -> one waiver event in the plan's run log
+  local log
+  log="$(_proof_event_log "$1")" || return 2
+  shift
+  RUN_LOG="$log" log_append waiver "$@"
 }
 
 # ---------- THE RELEASE'S COVER ----------

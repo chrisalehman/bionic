@@ -1174,18 +1174,17 @@ PF_VERDICTS_LIST
     exit 0
   }
 
-  # THE WAIVER (wave-27 T9; D2). The user's act, on their reply: one line under `## SDLC State`,
+  # THE WAIVER (wave-27 T9; D2). The user's act, on their reply: one waiver event in the run's log,
   #
-  #   waived: question=<q> head=<working head> by <git user.name> <ISO-UTC> "<reply>"
+  #   waiver question=<q> head=<working head> by=<git user.name> said=<reply>
   #
   # covering that question up to the head the plan's working branch's ref names, the head the judge
-  # (lib/proof.sh `facts_state`) is asked about. It goes in through the plan transaction, placed
-  # with the proof lines by `proof_add_line`, so a fact written after it is newer than it.
-  # `waive all` writes three, evidence, adversarial and structure, in that order, in one transaction. The regression
-  # is never waived: it runs once after the build.
+  # (lib/proof.sh `facts_state`) is asked about. The log's own order makes a fact written after it newer than it.
+  # `waive all` writes three, evidence, adversarial and structure, in that order. The plan is not written. The
+  # regression is never waived: it runs once after the build.
   poker_verb_waive() {
-    if ! { declare -F proof_waiver_line >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-       || ! declare -F proof_waiver_line >/dev/null 2>&1; then
+    if ! { declare -F proof_waiver_event >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+       || ! declare -F proof_waiver_event >/dev/null 2>&1; then
       die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
       exit 2
     fi
@@ -1196,7 +1195,7 @@ PF_VERDICTS_LIST
     WV_QS="$WV_Q"; [ "$WV_Q" != all ] || WV_QS="$PROOF_QUESTIONS"
     case "$WV_REPLY" in
       *$'\n'*|*$'\r'*)
-        die "REFUSED — a waiver line is one line, and the reply carries a line break; the plan is unchanged."
+        die "REFUSED — a waiver is one line, and the reply carries a line break; nothing is written."
         exit 1 ;;
     esac
     plan_verb_open waive
@@ -1215,21 +1214,19 @@ PF_VERDICTS_LIST
         die "REFUSED — the plan's working-branch ${WV_WB:-(none named)} names no commit in $PV_REPO, so there is no head to waive at; the plan is unchanged."
         exit 1 ;;
     esac
-    WV_AT="$(iso_now)"; WV_LINE=""
-    for _wv_q in $WV_QS; do
-      WV_LINE="${WV_LINE}${WV_LINE:+$'\n'}$(proof_waiver_line "$_wv_q" "$WV_HEAD" "$WV_WHO" "$WV_AT" "$WV_REPLY")"
-    done
-    if ! proof_add_line "$PV_PLAN" "$WV_LINE" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
-      die "REFUSED — $PV_PLAN carries no ## SDLC State section to hold the waiver; the plan is unchanged."
-      exit 1
-    fi
+    case "$WV_REPLY" in
+      *'|'*)
+        die "REFUSED — a waiver's reply is one field of the run's log, which a '|' would split; give it without one. Nothing is written."
+        exit 1 ;;
+    esac
     WV_READS="$(review_readings "$PV_PLAN")" \
-      || { die "REFUSED — the run's facts could not be read, so the findings a waiver closes are not known; the plan is unchanged. Run again: bash ${HOOK_DIR}/session-poker.sh waive $WV_Q"; exit 2; }
-    plan_verb_swap waive "the $WV_Q waiver at $WV_HEAD" writer
+      || { die "REFUSED — the run's facts could not be read, so the findings a waiver closes are not known; nothing is written. Run again: bash ${HOOK_DIR}/session-poker.sh waive $WV_Q"; exit 2; }
     for _wv_q in $WV_QS; do
+      proof_waiver_event "$PV_PLAN" "question=$_wv_q" "head=$WV_HEAD" "by=$WV_WHO" "said=$WV_REPLY" \
+        || { die "REFUSED — the $_wv_q waiver could not be written to the run's log of $PV_PLAN (no record directory beside the plan, or the log cannot be written)."; exit 2; }
       poker_owed_close "$PV_REPO" "waive:$_wv_q" "waive"
       waive_owed_findings "$PV_PLAN" "$PV_REPO" "$_wv_q" "$WV_READS"
-      say "waive — question=$_wv_q head=$WV_HEAD by $WV_WHO: written to $PV_PLAN; dry-committed first."
+      say "waive — question=$_wv_q head=$WV_HEAD by $WV_WHO: written to the run's log."
     done
     exit 0
   }

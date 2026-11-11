@@ -340,7 +340,8 @@ S57_C2="$(s57_commit "$S57_WT" lib/a.sh C2)"
 S57_C3="$(s57_commit "$S57_WT" .bionic/docs/record/wave-01-fixture/note.md C3)"
 S57_C4="$(s57_commit "$S57_WT" lib/b.sh C4)"
 cp "$P57" "$TMPROOT/s57-clean"
-s57_reset() { cp "$TMPROOT/s57-clean" "$P57"; }
+L57="$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "${S57_LIB%/*}" "$P57")"
+s57_reset() { cp "$TMPROOT/s57-clean" "$P57"; rm -f "$L57"; }
 s57_add() {  # <plan> <line> -> the line placed by the production placer
   bash -c '. "$1" && proof_add_line "$2" "$3"' _ "$S57_LIB" "$1" "$2" > "$1.new" && mv "$1.new" "$1"
 }
@@ -487,22 +488,26 @@ expect_eq "57w8 a planted scope=whole line, whatever range its record read, is t
 expect_eq "57w7 a task-scale dealing owes no whole read" "" \
   "$(bash -c '. "$1" && facts_owed double task' _ "$S57_LIB" | /usr/bin/grep -F whole)"
 
-# ---------- §WAIVE: the verb, through the plan transaction ----------
+# ---------- §WAIVE: the verb, one event in the run's log ----------
 s57_reset; s42_snap "$R57" "$P57"
 poke "$R57" waive adversarial 'Ship it, the fix is one line.'
 expect_eq "57v §WAIVE waive writes the waiver (exit 0)" "0" "$RC"
-expect_eq "57v2 …one line added" "1 0;" "$(s42_numstat "$R57")"
+expect_eq "57v2 …as one waiver event in the run's log, the plan unchanged" \
+  "run/v1|ev=waiver|question=adversarial|head=${S57_C4}|by=Dana Fixture|said=Ship it, the fix is one line.|same" \
+  "$(sed 's/|at=.*//' "$L57" 2>/dev/null)|$(cmp -s "$TMPROOT/s42-before" "$P57" && echo same)"
 expect_contains "57v4 …and the success line names it" "question=adversarial head=${S57_C4}" "$OUT"
 s57_state "$P57" "$S57_C4"
 expect_eq "57v5 …which the judge reads: adversarial covered at the working head" "covered" "$(s57_of "$S57_AD")"
-s57_fact adversarial "$S57_C4" fail piece
-expect_eq "57v6 …a fact registered after it is placed after it" "waived: proved:" \
-  "$(/usr/bin/grep -oE '^(waived|proved):' "$P57" | tr '\n' ' ' | sed 's/ $//')"
+s57_add "$P57" "$(bash -c '. "$1" && proof_line review "$2" "$(date -u -v+1M +%Y-%m-%dT%H:%M:%SZ)" "$3" adversarial fail piece w-read' \
+  _ "$S57_LIB" "$S57_C4" record/wave-01-fixture/adversarial-fail-piece.md)"
 s57_state "$P57" "$S57_C4"
-expect_eq "57v7 …so a later failing fact is newer than the waiver" "failing	record/wave-01-fixture/adversarial-fail-piece.md" "$(s57_of "$S57_AD")"
+expect_eq "57v7 …so a failing fact registered after it is newer than the waiver" "failing	record/wave-01-fixture/adversarial-fail-piece.md" "$(s57_of "$S57_AD")"
 poke "$R57" waive structure 'keep C:\new\t as written'
 expect_eq "57v7b a reply with backslashes is written (exit 0)" "0" "$RC"
-expect_contains "57v7c …byte for byte" '"keep C:\new\t as written"' "$(/usr/bin/grep -F 'waived: question=structure' "$P57")"
+expect_contains "57v7c …byte for byte" '|said=keep C:\new\t as written|' "$(/usr/bin/grep -F '|question=structure|' "$L57")"
+poke "$R57" waive structure 'keep a | out'
+expect_eq "57v7d a reply holding a bar is refused (exit 1), and the log holds no waiver of it" "1|0" \
+  "$RC|$(/usr/bin/grep -c 'said=keep a ' "$L57")"
 s42_snap "$R57" "$P57"
 poke "$R57" waive verdict 'Ship it.'
 s42_unchanged "57v8 a question outside the set" 1 "$P57"
