@@ -3,7 +3,7 @@
 #
 # WHAT IT OWNS. One fact per proof: which commit a test pass or a review read. A proof is one event in the run's log,
 #
-#     run/v1|ev=proof|kind=<regression|review|task|check|walk>|head=<40-hex>|evidence=<path under record/>|…|at=
+#     run/v1|ev=proof|kind=<regression|review|task|check|walk|inherited>|head=<40-hex>|evidence=<path under record/>|…|at=
 #
 # appended by `proof_event` alone, and read through the reader's facts (`proof_last`). An older plan holds its proofs as
 # `proved:` lines in its `## SDLC State`, which the reader translates into the same event. A `check` (wave-27 T16; D12)
@@ -140,24 +140,33 @@ proof_run_counts() {
     END { if (v) print p, p + f }' "$1" 2>/dev/null
 }
 
-# proof_inherited_lines <plan> -> each `inherited: <suite> base=<sha> head=<sha> …` line of the plan's unfenced
-# `## SDLC State`, whole and as written, one per line (wave-35 T9; D8, AC-1.6): THE ONE READER of the inherited-debt
-# lines, written by `session-poker.sh proof-add inherited <suite>` once the suite ran red at the base. The judge
-# reads their suites (`proof_inherited`); close-out carries the lines into the continuation (wave-35 T10; A-orch-18).
+# proof_inherited_lines <plan> -> each inherited suite of the plan's run, one `inherited: <suite> base=<sha> head=<sha>
+# at=<ISO-UTC> evidence=<log>` line each (wave-35 T9; D8, AC-1.6): THE ONE READER of inherited debt, written by
+# `session-poker.sh proof-add inherited <suite>` once the suite ran red at the base, as a `proof kind=inherited` event.
+# An older plan holds its own as these lines in its unfenced `## SDLC State`, which no event type carries (the
+# translation names them a gap), so they are read as written, then the events, kept whole beside the fold
+# (`_proof_facts`): two suites at one regression head are two debts. The judge reads their suites (`proof_inherited`);
+# close-out carries the lines into the continuation (wave-35 T10; A-orch-18). Exit 2 when the run's facts cannot be read.
 proof_inherited_lines() {
   [ -f "${1:-}" ] || return 0
+  _proof_facts "$1" >/dev/null || return 2
   awk '
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
     insdlc && /^inherited:[ \t]+[^ \t]/ && / base=[0-9a-f]+/ && / head=[0-9a-f]+/' "$1"
+  printf '%s' "$_PROOF_INHERITED" | awk -F'|' "$_LINE_FIELDS_AWK"'
+    line_kv("suite") != "" { printf "inherited: %s base=%s head=%s at=%s evidence=%s\n", line_kv("suite"), line_kv("base"), line_kv("head"), line_kv("at"), line_kv("evidence") }'
 }
 
 # proof_inherited <plan> -> the suites the plan carries as inherited debt, comma-joined on one line, each once by
 # its file name, read off `proof_inherited_lines`. The floor's judge owes nothing for a suite named here, and
-# stands on the rest.
+# stands on the rest. Exit 2 when the run's facts cannot be read.
 proof_inherited() {
-  proof_inherited_lines "${1:-}" | awk '
+  local l
+  l="$(proof_inherited_lines "${1:-}")" || return 2
+  [ -n "$l" ] || return 0
+  printf '%s\n' "$l" | awk '
     { split($0, w, /[ \t]+/); s = w[2]; sub(/.*\//, "", s)
       if (!(s in seen)) { seen[s] = 1; o = o (o == "" ? "" : ",") s } }
     END { if (o != "") print o }'
@@ -232,6 +241,7 @@ proof_finding_event() {  # <plan> <field>=<value>… -> one finding event in the
 #   proof  kind=<regression|task|walk> head=<sha> evidence=<path>[,<path>…] [owed=<suites>] [run=<at> rc=<rc>]
 #   proof  kind=review head=<sha> evidence=<record> question=<q> reader=<name> result=<r> scope=<s>
 #   proof  kind=check head=<sha> evidence=<log> [result=fail]
+#   proof  kind=inherited head=<the regression's head> evidence=<log> suite=<suite> base=<sha>
 #
 # Exits as proof_waiver_event's.
 proof_event() {  # <plan> <field>=<value>… -> one proof event in the plan's run log
@@ -1606,7 +1616,7 @@ _proof_reader_load() {  # -> 0 once lib/reader.sh, beside this file, is loaded
 # The files a fold depends on: the reader's libraries, then the record's homes beside the run's log.
 _PROOF_FACTS_LIBS="reader.sh translate.sh plan-read.sh log.sh line.sh"
 _PROOF_FACTS_HOMES="run.log landing-proofs.log asks.state fill-ledger.log design-ledger.md debt.md"
-_PROOF_FACTS_KEY=""; _PROOF_FACTS=""; _PROOF_FINDINGS=""
+_PROOF_FACTS_KEY=""; _PROOF_FACTS=""; _PROOF_FINDINGS=""; _PROOF_INHERITED=""
 # The kept file is a cache and never evidence, yet what it holds is served as the run's proofs and approvals, under a
 # key anyone who reads the repository can compute. So it is read and written only in a directory this user owns
 # (`[ -O ]`), that is a directory and no link and that neither group nor other can write (one `find`, which follows no
@@ -1634,7 +1644,7 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   [ -z "$dir" ] || for f in $_PROOF_FACTS_HOMES; do [ ! -f "$dir/$f" ] || deps+=("$dir/$f"); done
   stamp="$(cksum "${deps[@]}" 2>/dev/null)" && stamp="$(printf '%s\n' "$stamp" | cksum)" || stamp=""
   # The key names the kept file's layout too, so a file another layout wrote is never read as this one.
-  key="$plan $stamp facts+findings"
+  key="$plan $stamp facts+findings+inherited"
   if [ "$_PROOF_FACTS_KEY" = "$key" ]; then _proof_facts_out; return; fi
   cdir="${TMPDIR:-/tmp}/bionic-facts-$(id -u 2>/dev/null)"
   [ -d "$cdir" ] || mkdir -p -m 700 "$cdir" 2>/dev/null
@@ -1647,8 +1657,10 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
      && [ -n "$(printf '%s\n' "$got" | awk '$0 == "\036" { print 1; exit }')" ]; then
     # Split by awk, not by a pattern in the shell: bash 3.2 matches `${v#*x}` over a long value in quadratic time.
     _PROOF_FACTS="$(printf '%s\n' "$got" | awk 'NR == 1 { next } $0 == "\036" { exit } { print }')"
-    _PROOF_FINDINGS="$(printf '%s\n' "$got" | awk 'f { print } $0 == "\036" { f = 1 }')"
+    _PROOF_FINDINGS="$(printf '%s\n' "$got" | awk '$0 == "\036" { f++; next } f == 1 { print }')"
+    _PROOF_INHERITED="$(printf '%s\n' "$got" | awk '$0 == "\036" { f++; next } f == 2 { print }')"
     [ -z "$_PROOF_FINDINGS" ] || _PROOF_FINDINGS="$_PROOF_FINDINGS"$'\n'
+    [ -z "$_PROOF_INHERITED" ] || _PROOF_INHERITED="$_PROOF_INHERITED"$'\n'
   else
     if [ -n "$dir" ]; then
       # pipefail: the reader reads a pipe, and a stage killed in it would leave a short read that exits 0.
@@ -1667,18 +1679,25 @@ $evs
 PROOF_EVENTS
 )"
     [ -z "$_PROOF_FINDINGS" ] || _PROOF_FINDINGS="$_PROOF_FINDINGS"$'\n'
+    # An inherited suite is a proof of its own, yet two of them at one regression head are one fact to the fold, so
+    # they too are kept whole (`proof_inherited_lines`).
+    _PROOF_INHERITED="$(awk 'index($0, "run/v1|ev=proof|kind=inherited|") == 1' <<PROOF_EVENTS
+$evs
+PROOF_EVENTS
+)"
+    [ -z "$_PROOF_INHERITED" ] || _PROOF_INHERITED="$_PROOF_INHERITED"$'\n'
   fi
   # A fold that failed (a process refused under memory pressure) is short or empty: kept, it would answer every later
   # ask that the run has no proof. It is an error to whoever asked, and nothing is kept, in this shell or on disk.
   if [ "$rc" -ne 0 ]; then
-    _PROOF_FACTS_KEY=""; _PROOF_FACTS=""; _PROOF_FINDINGS=""
+    _PROOF_FACTS_KEY=""; _PROOF_FACTS=""; _PROOF_FINDINGS=""; _PROOF_INHERITED=""
     printf '_proof_facts: lib/reader.sh exited %s folding the facts of %s; nothing is kept\n' "$rc" "$plan" >&2
     return 2
   fi
   [ -z "$_PROOF_FACTS" ] || _PROOF_FACTS="$_PROOF_FACTS"$'\n'
   _PROOF_FACTS_KEY="${stamp:+$key}"
   if [ -n "$cache" ] && tmp="$(mktemp "$cdir/.facts.XXXXXX" 2>/dev/null)"; then
-    { printf '%s\n' "$key"; printf '%s' "$_PROOF_FACTS"; printf '\036\n%s' "$_PROOF_FINDINGS"; } > "$tmp" && mv -f "$tmp" "$cache" 2>/dev/null || rm -f "$tmp"
+    { printf '%s\n' "$key"; printf '%s' "$_PROOF_FACTS"; printf '\036\n%s' "$_PROOF_FINDINGS"; printf '\036\n%s' "$_PROOF_INHERITED"; } > "$tmp" && mv -f "$tmp" "$cache" 2>/dev/null || rm -f "$tmp"
     ls -t "$cdir" 2>/dev/null | sed "1,${_PROOF_FACTS_KEEP}d" | while IFS= read -r f; do rm -f "$cdir/$f"; done
   fi
   _proof_facts_out

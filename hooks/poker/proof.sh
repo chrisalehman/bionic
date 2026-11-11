@@ -633,9 +633,9 @@ whole_run_at_head() {
     # project's tests/run.sh --only <suite> when the base has one, else the suite file), keeps the run's
     # log in the record, and removes the tree and its branch. Red there, it writes
     #
-    #     inherited: <suite> base=<base> head=<the floor's head> at=<ISO-UTC> evidence=record/<wave>/<log>
+    #     proof kind=inherited head=<the floor's head> evidence=record/<wave>/<log> suite=<suite> base=<base>
     #
-    # under `## SDLC State` through the plan transaction, and the judge (lib/proof.sh `_proof_floor_judge`)
+    # to the run's log (lib/proof.sh `proof_event`), and the judge (lib/proof.sh `_proof_floor_judge`)
     # owes the floor nothing for that suite and stands on the rest. Green there, it is a regression, and the
     # verb refuses to carry it. Only a suite the floor's proof line lists as owed can be inherited: the line
     # is the whole run's own word that the suite is red at its head.
@@ -703,13 +703,11 @@ command: %s
           die "REFUSED — $PF_SUITE did not run at the base (exit $PF_RC: the gate never admitted it; its log: $PF_REL); run proof-add inherited again. The plan is unchanged."
           exit 1 ;;
       esac
-      PF_LINE="inherited: $PF_SUITE base=$PF_BASEH head=$PF_FHEAD at=$(iso_now) evidence=$PF_REL"
-      if ! proof_add_line "$PV_PLAN" "$PF_LINE" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
-        die "REFUSED — $PV_PLAN carries no ## SDLC State section to hold the line; the plan is unchanged."
+      if ! proof_event "$PV_PLAN" kind=inherited "head=$PF_FHEAD" "evidence=$PF_REL" "suite=$PF_SUITE" "base=$PF_BASEH"; then
+        die "REFUSED — $PF_SUITE is red at the base ${PF_BASEH:0:12} (its log: $PF_REL), and its proof could not be appended to the run's log of $PV_PLAN; run proof-add inherited again. The plan is unchanged."
         exit 1
       fi
-      plan_verb_swap proof-add "$PF_SUITE inherited at ${PF_BASEH:0:12}" writer
-      say "proof-add — inherited: $PF_SUITE red at the base ${PF_BASEH:0:12} (rc=$PF_RC) and at the regression's head ${PF_FHEAD:0:12}; written to $PV_PLAN, its log $PF_REL; the regression stands on the rest."
+      say "proof-add — inherited: $PF_SUITE red at the base ${PF_BASEH:0:12} (rc=$PF_RC) and at the regression's head ${PF_FHEAD:0:12}; written to the run's log, its log $PF_REL; the regression stands on the rest."
       exit 0
     fi
     if ! proof_kind_ok "$PF_KIND"; then

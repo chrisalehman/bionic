@@ -1325,7 +1325,8 @@ co_cont_sections() {  # <write|check> -> CO_SEC_MSG: what was (write) or would b
       [ "$mode" != write ] || co_cont_write "## Hand-holds" "$miss" lines
     fi
   fi
-  lines="$(proof_inherited_lines "$PLAN" 2>/dev/null)"
+  lines="$(proof_inherited_lines "$PLAN" 2>/dev/null)" \
+    || _co_refuse "the run's facts cannot be read, so the inherited debt it carries is not known; run close-out again"
   if [ -n "$lines" ]; then
     if ! co_cont_has_heading "## Inherited debt"; then
       phr="${phr:+$phr and }the ## Inherited debt section"
@@ -1411,14 +1412,14 @@ co_governed_section() {
   printf '## Governed by\n\n```\n%s\n```\n' "$CO_GOV_LINES"
 }
 
-# co_inherited_section -> `## Inherited debt` and every `inherited:` line of the plan's `## SDLC State`, as the verb
+# co_inherited_section -> `## Inherited debt` and every inherited suite of the run, one `inherited:` line each, as the verb
 # wrote it, fenced as the hand-holds are; nothing at all for a plan that carries none, and the template then prints
 # nothing for it, so that continuation is byte for byte what it was (wave-35
 # T10; AC-1.6 "carried into the continuation", A-orch-18). The lines are lib/proof.sh `proof_inherited_lines`, the
 # one reader the floor's judge reads them through: debt the run inherited, red at its base and at its floor.
 co_inherited_section() {
   local lines
-  lines="$(proof_inherited_lines "$PLAN" 2>/dev/null)"
+  lines="$(proof_inherited_lines "$PLAN" 2>/dev/null)" || return 2
   [ -n "$lines" ] || return 0
   printf '## Inherited debt\n\n```\n%s\n```\n' "$lines"
 }
@@ -1464,7 +1465,8 @@ co_patrol_sentence() {
 continuation_template() {
   local sha tasks regress reviews patrol inherited head resume ws line at ev whole_text
   sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
-  inherited="$(co_inherited_section)"
+  inherited="$(co_inherited_section)" \
+    || _co_refuse "the run's facts cannot be read, so the inherited debt it carries is not known; run close-out again"
   tasks="$(co_task_count)"
   # THE REGRESSION is the full pass's state at the working head, from the one printer the release card and the
   # scorecard draw too (lib/proof.sh `proof_whole_text`), then the proof's instant and log; it is never read off the
