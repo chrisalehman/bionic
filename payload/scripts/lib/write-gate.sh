@@ -15,7 +15,7 @@
 #       one-line verdict and the detail. It does not return.
 #
 # Sourced, never executed; it prints nothing and runs nothing at source time. It needs `refuse`
-# (lib/refuse.sh) only for write_gate_refuse.
+# (lib/refuse.sh) for write_gate_refuse and lib/run.sh for write_gate_header_fault.
 
 write_gate_say() {
   local key="${1:-}" BASENAME="${2-}" FILE_PATH="${3-}"
@@ -209,6 +209,49 @@ Path: $FILE_PATH
 Fix: group the REQs under three to six '## <theme>' sections, each opening on one sentence that says what the run is for in that respect, the '### REQ-' headings under them." ;;
     *) return 2 ;;
   esac
+}
+
+# write_gate_header_fault <mode> <intent> <rigor> <scale> <walk> <has cadence 0|1> <cadence> <has policy> <policy> <has cap> <cap>
+#     THE DECISION behind the header refusals, in the order the hook has always asked: a declared
+#     `mode:`; the triple missing, then the triple outside its sets; a present review-cadence:,
+#     fix-policy: or fix-cap: outside its vocabulary (lib/run.sh's, judged only when the key is
+#     there); a walk: that is neither word. rc 0 with WG_FAULT holding the refusal key and its facts,
+#     for `write_gate_refuse "${WG_FAULT[@]}"`'s arguments after the artifact; rc 1 and WG_FAULT
+#     empty when the header holds none. Needs lib/run.sh.
+write_gate_header_fault() {
+  local mode="$1" intent="$2" rigor="$3" scale="$4" walk="$5" cad="$7" pol="$9" cap="${11}" set bad
+  WG_FAULT=()
+  [ -z "$mode" ] || { WG_FAULT=(mode); return 0; }
+  [ -n "$intent" ] || { WG_FAULT=(no-intent); return 0; }
+  set="$(printf '\n  %s' "$(rigor_print single)" "$(rigor_print double)")"
+  [ -n "$rigor" ] || { WG_FAULT=(no-rigor "$set"); return 0; }
+  [ -n "$scale" ] || { WG_FAULT=(no-scale); return 0; }
+  case "$intent" in
+    build|bugfix|refactor|tune|spike|incident-response) ;;
+    *) WG_FAULT=(bad-intent "$intent"); return 0 ;;
+  esac
+  rigor_level "$rigor" >/dev/null || { WG_FAULT=(bad-rigor "$rigor" "$set"); return 0; }
+  case "$scale" in
+    task|wave|epic) ;;
+    *) WG_FAULT=(bad-scale "$scale"); return 0 ;;
+  esac
+  if [ "$6" = 1 ]; then
+    review_cadence_level "$cad" >/dev/null || { WG_FAULT=(bad-cadence "$cad"); return 0; }
+  fi
+  if [ "$8" = 1 ]; then
+    if bad=$(fix_policy_bad "$pol"); then :
+    elif [ -z "${pol//[[:space:]]/}" ]; then WG_FAULT=(policy-empty "$FIX_POLICY_VOCAB"); return 0
+    else WG_FAULT=(policy-word "$pol" "$bad" "$FIX_POLICY_VOCAB"); return 0
+    fi
+  fi
+  if [ "${10}" = 1 ]; then
+    { [ -n "$cap" ] && fix_cap_render "$cap" "$rigor" 0 >/dev/null; } || { WG_FAULT=(bad-cap "$cap"); return 0; }
+  fi
+  case "$walk" in
+    ''|required|exempt) ;;
+    *) WG_FAULT=(bad-walk "$walk"); return 0 ;;
+  esac
+  return 1
 }
 
 # _write_gate_frame <fact> <fix> <what went wrong> — THE FRAME KEEPS ITS PARAMETER AND LOSES ITS

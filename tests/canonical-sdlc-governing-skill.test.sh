@@ -1005,5 +1005,8 @@ Path: /p/x.plan.md
 Fix: add a non-empty 'governing-skill: <skill-id>' line to the frontmatter block." "$(wg no-governing x.plan.md /p/x.plan.md)"
 assert_contains "WG-2 a frame key renders the path under the artifact" "invalid scale: 'huge' — allowed: task|wave|epic
 Path: /p/x.plan.md" "$(wg bad-scale x.plan.md /p/x.plan.md huge)"
+wh() { bash -c '. "$1"; . "$2"; shift 2; write_gate_header_fault "$@"; echo "rc=$? ${WG_FAULT[*]}"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/run.sh" "$WG" "$@"; }
+assert_eq "WG-4 the header's first fault is named; a whole header has none" "rc=0 bad-scale huge|rc=0 mode|rc=1 " \
+  "$(wh '' build double huge '' 0 '' 0 '' 0 '')|$(wh x build double wave '' 0 '' 0 '' 0 '')|$(wh '' build double wave '' 0 '' 0 '' 0 '')"
 assert_eq "WG-3 a key that is none of these says nothing, rc 2" "2 " "$(wg nope x /p >/dev/null; echo "$?") $(wg nope x /p 2>/dev/null)"
 finish

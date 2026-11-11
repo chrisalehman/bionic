@@ -1025,26 +1025,6 @@ fi
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 # Split-brain guard: an artifact declares the triple, never mode.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-[ -z "$(yaml_get mode)" ] || _gs_refuse mode
-INTENT=$(yaml_get intent); RIGOR=$(yaml_get rigor); SCALE=$(yaml_get scale)
-[ -n "$INTENT" ] || _gs_refuse no-intent
-# THE SET IS PRINTED BY ITS TWO WORDS, each with what it means (wave-28 T44; wave-30 T11, D1): the
-# printed form is lib/run.sh `rigor_print`'s, so a refusal and a card say a level the same way.
-RIGOR_SET="$(printf '\n  %s' "$(rigor_print single)" "$(rigor_print double)")"
-[ -n "$RIGOR" ]  || _gs_refuse no-rigor "$RIGOR_SET"
-[ -n "$SCALE" ]  || _gs_refuse no-scale
-case "$INTENT" in
-  build|bugfix|refactor|tune|spike|incident-response) ;;
-  *) _gs_refuse bad-intent "$INTENT" ;;
-esac
-# THE CLOSED SET IS rigor_level's (lib/run.sh; wave-28 T44; wave-30 T11, D1): `single` or
-# `double`. A word before 1.14.0 is refused here like any other word that is no level.
-rigor_level "$RIGOR" >/dev/null || _gs_refuse bad-rigor "$RIGOR" "$RIGOR_SET"
-case "$SCALE" in
-  task|wave|epic) ;;
-  *) _gs_refuse bad-scale "$SCALE" ;;
-esac
-
 # ---------- review-cadence:, fix-policy:, fix-cap: (wave-30 T21; REQ-10 AC-10.1, D4, Δ3) ----------
 #
 # THREE FIELDS THE USER OWNS, beside rigor:. Their vocabulary and their per-level defaults are
@@ -1055,25 +1035,6 @@ esac
 # value outside its vocabulary, the empty fix-policy: included (a set naming no rating). The fix
 # names the vocabulary as one comma-joined word, the field's own syntax: refuse.sh allows six words.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-if gs_has_key review-cadence; then
-  RCAD=$(yaml_get review-cadence)
-  review_cadence_level "$RCAD" >/dev/null || _gs_refuse bad-cadence "$RCAD"
-fi
-if gs_has_key fix-policy; then
-  FPOL=$(yaml_get fix-policy)
-  if FPOL_BAD=$(fix_policy_bad "$FPOL"); then :
-  elif [ -z "${FPOL//[[:space:]]/}" ]; then
-    _gs_refuse policy-empty "$FIX_POLICY_VOCAB"
-  else
-    _gs_refuse policy-word "$FPOL" "$FPOL_BAD" "$FIX_POLICY_VOCAB"
-  fi
-fi
-if gs_has_key fix-cap; then
-  FCAP=$(yaml_get fix-cap)
-  { [ -n "$FCAP" ] && fix_cap_render "$FCAP" "$RIGOR" 0 >/dev/null; } \
-    || _gs_refuse bad-cap "$FCAP"
-fi
-
 # ---------- walk: enum (epic-14 AC-3) ----------
 #
 # `walk:` is optional at THIS hook — an absent key is not this hook's
@@ -1082,13 +1043,16 @@ fi
 # values `required` and `exempt` are legal — anything else (typo, other
 # value) blocks, naming both legal values.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-WALK=$(yaml_get walk)
-if [ -n "$WALK" ]; then
-  case "$WALK" in
-    required|exempt) ;;
-    *) _gs_refuse bad-walk "$WALK" ;;
-  esac
+INTENT=$(yaml_get intent); RIGOR=$(yaml_get rigor); SCALE=$(yaml_get scale)
+HAS_CAD=0; HAS_POL=0; HAS_CAP=0
+gs_has_key review-cadence && HAS_CAD=1
+gs_has_key fix-policy && HAS_POL=1
+gs_has_key fix-cap && HAS_CAP=1
+if write_gate_header_fault "$(yaml_get mode)" "$INTENT" "$RIGOR" "$SCALE" "$(yaml_get walk)" \
+    "$HAS_CAD" "$(yaml_get review-cadence)" "$HAS_POL" "$(yaml_get fix-policy)" "$HAS_CAP" "$(yaml_get fix-cap)"; then
+  _gs_refuse "${WG_FAULT[@]}"
 fi
+
 
 # ---------- floor-consistency checks (LOG-ONLY; D14, spec R3) ----------
 #
