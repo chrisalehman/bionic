@@ -31,6 +31,7 @@
 #               forward (kept/, its log rewritten), it reads its log alone.
 #   §ASK-LOG    lib/owed.sh writes each act on an ask to the run's log on its own clock and never the register, and
 #               reads the register, then the log, as one list.
+#   §ASK-DOORS  a passing reading closes its question's waiver; the Stop over an approved plan closes the step asks.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
 
@@ -493,4 +494,44 @@ expect_eq "the answers read on either home: the closed new keeps its own, the st
 ao $((T0 + 420)) owed_close waive:old waive
 expect_eq "the register's standing ask closed through the log reads closed, and the reader agrees" "approve:step2|approve:step2 " \
   "$(ao "$T0" owed_list | cut -f1 | paste -sd' ' -)|$(W=askl; D="$AR/.bionic/docs"; keys asks)"
+
+section "ASK-DOORS"
+# The doors that close an ask which no verb's own suite pins: a passing reading proof-add registers closes its
+# question's waiver, and the Stop over an approved plan closes the step asks the cards left open. fails-when: either
+# leaves its ask open on the run's list, or the Stop closes the step asks of a plan not approved.
+# FIXTURE FIDELITY: session-poker-3 §FACT's shape (s42_plan, s47_plan), a linked worktree with real commits, roster rows
+# from the production writer; the Stop is the shipped hook.
+. "$(dirname "$0")/lib/bound-marker.sh"; . "$(dirname "$0")/lib/roster-row.sh"
+POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"; S31_STOP_HOOK="${BIONIC_HOOKS_DIR}/stop.sh"; . "$(dirname "$0")/session-poker.prelude.sh"
+AL="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"; POKE_BOUND=180
+al() { bash -c '. "$1/run.sh" && . "$1/binding.sh" && . "$1/owed.sh" && shift && "$@"' _ "$AL" "$@" 2>/dev/null; }
+reg() { al owed_list_plan "$2" "$1" | cut -f1 | LC_ALL=C sort | paste -sd' ' -; }   # <root> <plan> -> the open keys
+RF="$(make_repo ask-doors)"; ( cd "$RF" && git commit -q --allow-empty -m init ); git -C "$RF" config user.name "Dana Fixture"
+RF_B="$(git -C "$RF" rev-parse HEAD)"; PF="$(s42_plan "$RF" 4 "  worktree: .worktrees/01-fixture
+  base-sha: ${RF_B:0:8}
+  branch: wave/01-fixture")"
+awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PF" > "$PF.tmp" && mv "$PF.tmp" "$PF"; s42_builds_landed "$PF"
+( cd "$RF" && git add -f "$PF" && git commit -qm wb && git worktree add -q -b wave/01-fixture "$RF/.worktrees/01-fixture" "$RF_B" ) >/dev/null 2>&1
+RF_DIR="$RF/.bionic/docs/record/wave-01-fixture"; mkdir -p "$RF_DIR"; new_roster "$RF"
+printf '%s|questions=evidence\n' "$(roster_row_fixture session="$SID" name=w-aud agent_id=a-w-aud subagent_type=bionic:auditor \
+  files=.bionic/docs/record/wave-01-fixture/ev-fail.md,.bionic/docs/record/wave-01-fixture/ev-pass.md)" >> "$(roster_of "$RF")"
+rec() { printf '# reading\n\nreviewed: %s..%s\nquestion: evidence\nresult: %s\nscope: piece\n\nwhat the reader found\n' "${RF_B:0:10}" "$2" "$3" > "$RF_DIR/$1"; }
+rec ev-fail.md "$(s57_commit "$RF/.worktrees/01-fixture" lib/a.sh C1)" fail
+poke "$RF" proof-add review record/wave-01-fixture/ev-fail.md --question evidence --reader w-aud
+expect_eq "a failing reading registered (exit 0) opens its waiver on the run's list at once" "0|waive:evidence" "$RC|$(reg "$RF" "$PF")"
+rec ev-pass.md "$(s57_commit "$RF/.worktrees/01-fixture" lib/a.sh C2)" pass
+poke "$RF" proof-add review record/wave-01-fixture/ev-pass.md --question evidence --reader w-aud
+expect_eq "a passing reading of the question registered (exit 0) closes it, the closer named" "0||yes" "$RC|$(reg "$RF" "$PF")|$(al owed_lines "$PF" "$RF" \
+  | /usr/bin/grep -q '|key=waive:evidence|state=closed|by=passing reading|' && echo yes)"
+SW_KEYS="approve:step0 approve:step1 approve:step2 approve:step3"
+for a in 0 1; do
+  SR="$(make_repo "sweep$a")"; new_roster "$SR"
+  SW="$(SP_APPROVED_LINE="$([ "$a" = 1 ] && echo 'approved-by: Dana Fixture 2026-10-21T12:00:00Z "approved"')" \
+    s47_plan "$SR" 8 "| T1 | 4 | build | a work row | implementor | — | 10 | REQ-x | payload/a.sh | pending | |")"; bound_marker "$SR" "$SID" "$SW"
+  for k in $SW_KEYS; do OWED_PLAN="$SW" OWED_ROOT="$SR" OWED_SID=sw-sid al owed_open "$k" "approval: $k" "Do you approve?"; done
+  SB="$(reg "$SR" "$SW")"; s31_stop "$SR" "$(s31_transcript "$SR" "carry on")"
+  SWEPT="${SWEPT:-}$a:$SB>$(reg "$SR" "$SW")>$(al owed_lines "$SW" "$SR" | /usr/bin/grep -c '|state=closed|by=plan approved-by|') "
+done
+expect_eq "the Stop over a plan with no approved-by: closes no step ask; over one carrying it, all four, the closer named" \
+  "0:$SW_KEYS>$SW_KEYS>0 1:$SW_KEYS>>4 " "$SWEPT"
 finish
