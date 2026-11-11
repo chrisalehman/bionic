@@ -406,14 +406,16 @@ print_quiet_line() {
 # step or a handoff only the run's log holds is the one printed, and a start after another pays
 # no fold while the run's files are unchanged. At most one plan is asked: the bound run, or on a
 # resume the newest open run. proof.sh is sourced here rather than wanted by the loader, so a
-# library without it prints no step and no door and the rest of the report stands.
-SS_FACTS_PLAN=""; SS_FACTS=""; SS_ANSWER=""
-ss_ask() {  # <plan> <reader question function> -> SS_ANSWER, its answer over the plan's facts
+# library without it prints no step and no door and the rest of the report stands. A fold that failed is held as
+# nothing and answers 2, and the line says the facts could not be read where the step or the door would stand.
+SS_FACTS_PLAN=""; SS_FACTS=""; SS_ANSWER=""; SS_UNREAD="not read — the run's facts could not be read"
+ss_ask() {  # <plan> <reader question function> -> SS_ANSWER, its answer over the plan's facts; 2 when they cannot be read
   SS_ANSWER=""
   if [ "$SS_FACTS_PLAN" != "$1" ]; then
     { declare -F _proof_facts >/dev/null 2>&1 || . "$BIONIC_LIB/proof.sh"; } >/dev/null 2>&1
     declare -F _proof_facts >/dev/null 2>&1 && _proof_reader_load || return 1
-    SS_FACTS="$(_proof_facts "$1")"; SS_FACTS_PLAN="$1"
+    SS_FACTS="$(_proof_facts "$1")" || { SS_FACTS=""; return 2; }
+    SS_FACTS_PLAN="$1"
   fi
   SS_ANSWER="$( reader_facts() { printf '%s' "$SS_FACTS"; }; "$2" "$1" 2>/dev/null )"
 }
@@ -426,9 +428,10 @@ ss_ask() {  # <plan> <reader question function> -> SS_ANSWER, its answer over th
 print_bound_line() {  # <verdict "bound-open <plan>">
   local verdict="$1" bplan step relplan
   bplan="${verdict#bound-open }"
-  ss_ask "$bplan" reader_q_step
-  step="$(printf '%s\n' "$SS_ANSWER" | sed -n 's/^n=//p' | tr -dc '0-9T')"
   if [ -n "$DOCS" ]; then relplan="${bplan#"$DOCS"/}"; else relplan="$bplan"; fi
+  ss_ask "$bplan" reader_q_step
+  [ $? -ne 2 ] || { printf 'bionic: bound to %s — current: %s\n' "$relplan" "$SS_UNREAD"; return 0; }
+  step="$(printf '%s\n' "$SS_ANSWER" | sed -n 's/^n=//p' | tr -dc '0-9T')"
   printf 'bionic: bound to %s — current: %s\n' "$relplan" "$step"
   # THE STEP FILE, NAMED RATHER THAN INJECTED (wave-11 row 1b, design D1). The governing
   # skill is a core plus one file per step, and the core's own rule is to read `steps/N.md`
@@ -461,6 +464,7 @@ case "${SOURCE:-}" in
     else SS_DOOR_PLAN="$(printf '%s\n' "$RUNS" | head -n 1)"; fi
     if [ -n "$SS_DOOR_PLAN" ] && [ -f "$SS_DOOR_PLAN" ]; then
       ss_ask "$SS_DOOR_PLAN" reader_q_handoff
+      [ $? -ne 2 ] || SS_DOOR="bionic: the resume door is $SS_UNREAD; start again to be offered it"
       SS_DOOR_REL="$(printf '%s\n' "$SS_ANSWER" | sed -n 's/^path=//p')"
       case "$SS_DOOR_REL" in
         '') SS_DOOR_FILE="" ;;

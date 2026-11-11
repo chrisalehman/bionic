@@ -473,12 +473,14 @@ _lr_plan() {  # <plan or landing record> -> the plan; a record is its plan's whe
   done
   return 1
 }
+_lr_lines() { if reader_log "$1" >/dev/null 2>&1; then reader_events "$1"
+  else { declare -F translate >/dev/null 2>&1 || . "$_READER_LIB_DIR/translate.sh"; } && translate "$1" events; fi; }
 _lr_events() {  # <plan> [instant] -> the run's lines as the reader reads them, those written after <instant> left out
   # A plan the reader cannot join to a record has no log: its homes are its lines, translated as the reader would.
+  local l
   _lr_reader || return 0
-  { if reader_log "$1" >/dev/null 2>&1; then reader_events "$1"
-    else { declare -F translate >/dev/null 2>&1 || . "$_READER_LIB_DIR/translate.sh"; } && translate "$1" events; fi; } 2>/dev/null \
-    | awk -F'|' -v t="${2:-}" "$_READER_AWK"'t == "" || line_kv("at") == "" || line_kv("at") <= t'
+  l="$(_lr_lines "$1" 2>/dev/null)" || return 2
+  printf '%s\n' "$l" | awk -F'|' -v t="${2:-}" "$_READER_AWK"'NF > 1 && (t == "" || line_kv("at") == "" || line_kv("at") <= t)'
 }
 landing_unmeasured() {  # <plan or landing record> -> rc 0 when its run holds landings and none the line recorded
   local plan
@@ -755,7 +757,7 @@ _HH_PLACE_AWK='
   function hh_take_after(t, l,   p) { p = hh_after(t, l); if (p < 0) HH_UNPLACED++; return p > 0 }
   BEGIN { HH_S = hh_norm(HH_S); HH_U = (hh_iso(HH_U) && length(HH_U) == 17) ? substr(HH_U, 1, 16) ":59Z" : hh_norm(HH_U) }
 '
-hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] [--until <ISO>] -> the one hand-holds line; rc 0
+hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] [--until <ISO>] -> the one hand-holds line; rc 0, 2 unread
   local root="$2" plan="$3" slug rf hands="" lines="" gaps=0 hand=0 stp=0 stw=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0
   local ney=0 since="" until="" u1=0 u3=0
   shift 3
@@ -765,8 +767,7 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
   done
   slug="$(proof_plan_slug "$plan")"
   if [ -f "$plan" ] && [ ! -L "$plan" ] && _lr_reader; then
-    hands="$(_proof_ask "$plan" reader_q_hands "$plan" 2>/dev/null)"
-    lines="$(_lr_events "$plan")"
+    hands="$(_proof_ask "$plan" reader_q_hands "$plan" 2>/dev/null)" && lines="$(_lr_events "$plan")" || return 2
     # a version-14 line the translation could not carry as a hand event is one this count cannot see
     if ! reader_brought "$plan" 2>/dev/null; then
       gaps="$( { declare -F translate >/dev/null 2>&1 || . "$_READER_LIB_DIR/translate.sh"; } 2>/dev/null && translate "$plan" gaps 2>/dev/null \
@@ -855,15 +856,16 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
 # hand_holds_window <landing record> <project root> <plan> -> `<since|-><TAB><row|-><TAB><until|-><TAB><delivered|now>`
 hand_holds_window() {
   # its own reads split on blanks, whatever IFS the caller set around the substitution it is called in
-  local rec="$1" root="$2" plan="$3" builds s="-" row="-" u="-" st=now e IFS=$' \t\n'
+  local rec="$1" root="$2" plan="$3" builds s="-" row="-" u="-" st=now e l IFS=$' \t\n'
   builds="$(units_rows "$plan" 2>/dev/null | awk -F'\t' '$3 == "build" { printf "%s ", $1 }')"
   if [ -n "$builds" ] && [ -f "$plan" ] && _lr_reader; then
-    read -r s row <<< "$(_proof_ask "$plan" reader_q_landed "$plan" 2>/dev/null | awk -F'|' -v B=" $builds" "$_READER_AWK$_HH_PLACE_AWK"'
+    l="$(_proof_ask "$plan" reader_q_landed "$plan" 2>/dev/null)" || return 2
+    read -r s row <<< "$(printf '%s\n' "$l" | awk -F'|' -v B=" $builds" "$_READER_AWK$_HH_PLACE_AWK"'
       index(B, " " line_kv("row") " ") { a = hh_norm(line_kv("at")); if (hh_iso(a) && a > m) { m = a; r = line_kv("row") } }
       END { if (m != "") print m, r; else print "-", "-" }')"
   fi
   if declare -F sitrep_delivered_at >/dev/null 2>&1 && declare -F epoch_iso >/dev/null 2>&1; then
-    e="$(sitrep_delivered_at "$plan" 2>/dev/null)"
+    e="$(sitrep_delivered_at "$plan" 2>/dev/null)" || return 2
     if [ -n "$e" ] && u="$(epoch_iso "$e")" && [ -n "$u" ]; then
       st=delivered
       case "$u" in *:00Z) u="${u%:00Z}Z" ;; esac
@@ -877,18 +879,18 @@ hand_holds_window() {
 # (hand_holds_window); before the run is delivered the window runs to now and says so, printing no end it has not
 # read from a record.
 hand_holds_verb() {
-  local rec="$1" root="$2" plan="$3" since="$4" until="$5" e s row u st sw uw
+  local rec="$1" root="$2" plan="$3" since="$4" until="$5" e s row u st sw uw no="hand-holds: not read — the run's facts could not be read"
   if [ -n "$since" ] || [ -n "$until" ]; then
-    hand_holds_report "$rec" "$root" "$plan" ${since:+--since "$since"} ${until:+--until "$until"}
+    hand_holds_report "$rec" "$root" "$plan" ${since:+--since "$since"} ${until:+--until "$until"} || { printf '%s\n' "$no"; return 2; }
     printf 'hand-holds window: since %s · until %s\n' "${since:-the first line}" "${until:-now}"
     return 0
   fi
-  e="$(hand_holds_window "$rec" "$root" "$plan")"
+  e="$(hand_holds_window "$rec" "$root" "$plan")" || { printf '%s\n' "$no"; return 2; }
   IFS=$'\t' read -r s row u st <<< "$e"
   [ "$s" != - ] || s=""
   [ "$u" != - ] || u=""
   if [ -n "$s" ] || [ -n "$u" ]; then hand_holds_report "$rec" "$root" "$plan" ${s:+--since "$s"} ${u:+--until "$u"}
-  else hand_holds_report "$rec" "$root" "$plan"; fi
+  else hand_holds_report "$rec" "$root" "$plan"; fi || { printf '%s\n' "$no"; return 2; }
   if [ -n "$s" ]; then sw="since $s (the last build landing, $row)"; else sw="since the first line (no build row has landed)"; fi
   if [ "$st" = delivered ]; then uw="until $u (delivered:)"; else uw="until now: the plan names no delivered: time"; fi
   printf 'hand-holds window: %s · %s\n' "$sw" "$uw"

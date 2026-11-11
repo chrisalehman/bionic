@@ -730,18 +730,22 @@ _SITREP_EPOCH_AWK='
     if (length(s) == 17) s = substr(s, 1, 16) ":00Z"; return iso2epoch(s) }'
 
 # sitrep_approved_at <plan> -> the epoch of the run's Step-3 approval, the standing approval of step3; nothing when it
-# has none
+# has none; 2 when the facts cannot be read
 sitrep_approved_at() {
+  local f
   _sitrep_reader || return 0
-  sitrep_facts "$1" approval | awk -F'|' "$_PATROL_ISO_AWK$_SITREP_EPOCH_AWK$_READER_AWK"'
+  f="$(sitrep_facts "$1" approval)" || return 2
+  printf '%s\n' "$f" | awk -F'|' "$_PATROL_ISO_AWK$_SITREP_EPOCH_AWK$_READER_AWK"'
     line_kv("key") == "step3" { e = ep(line_kv("at")) } END { if (e != "" && e >= 0) print e }'
 }
 
 # sitrep_delivered_at <plan> -> the epoch of its Step 9 when the reader's step calls the run closed; nothing for a run
-# still open, one that cannot be read, or a Step 9 that names no instant
+# still open, one whose reader cannot be loaded, or a Step 9 that names no instant; 2 when the facts cannot be read
 sitrep_delivered_at() {
+  local f
   _sitrep_reader || return 0
-  sitrep_facts "$1" step abandon | awk -F'|' "$_PATROL_ISO_AWK$_SITREP_EPOCH_AWK$_READER_AWK"'
+  f="$(sitrep_facts "$1" step abandon)" || return 2
+  printf '%s\n' "$f" | awk -F'|' "$_PATROL_ISO_AWK$_SITREP_EPOCH_AWK$_READER_AWK"'
     ev() == "step" { n = line_kv("n"); if (n == "9") e = ep(line_kv("at")) }
     ev() == "abandon" { gone = 1 }
     END { if ((gone || n == "9") && e != "" && e >= 0) print e }'

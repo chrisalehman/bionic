@@ -12,6 +12,21 @@
 # read what they were given with payload/scripts/lib/brief.sh's `brief_contract`, the one reader of a
 # brief's lines, so a value is recorded exactly as a dispatch carrying it would record it. Loaded on first
 # use, never at the top: the tick runs every Patrol interval and needs none of it.
+# poker_fold_ask <var> <verb and arguments to run again> <plan> <reader question's function> [args] -> <var> set to the
+# question's answer over the run's facts (lib/proof.sh `_proof_ask`), its own no (exit 1) an answer. A fold that failed
+# is the verb's refusal, exit 2 and nothing written: a page drawn or a file rendered over no facts reads as a run with none.
+poker_fold_ask() {
+  local _pfa_v="$1" _pfa_run="$2" _pfa_a _pfa_rc=0; shift 2
+  _pfa_a="$(_proof_ask "$1" "$2" "$1" "${@:3}")" || _pfa_rc=$?
+  [ "$_pfa_rc" -lt 2 ] || poker_fold_unread "$_pfa_run"
+  printf -v "$_pfa_v" '%s' "$_pfa_a"
+}
+poker_fold_unread() {  # <verb and arguments to run again> -> the refusal, exit 2
+  die "REFUSED — the run's facts could not be read, so nothing is written from them; run again: bash ${HOOK_DIR}/session-poker.sh $1"
+  exit 2
+}
+poker_fold_all() { reader_facts "$1"; }  # <plan> -> every standing fact, a question for poker_fold_ask
+
 poker_brief_load() {
   declare -F brief_contract >/dev/null 2>&1 && return 0
   [ -f "$BIONIC_LIB/brief.sh" ] || return 1
@@ -2569,7 +2584,6 @@ EOF
     BRF_DOCS="$(docs_root "$PV_REPO")"
     BRF_RECDIR="$BRF_DOCS/record/$BRF_WAVE"
     case "$BRF_RECDIR" in "$PV_REPO"/*) BRF_RECREL="${BRF_RECDIR#"$PV_REPO"/}" ;; *) BRF_RECREL="$BRF_RECDIR" ;; esac
-    BRF_READER="$BIONIC_LIB/../reader.sh"
     { [ -n "${_LINE_FIELDS_AWK:-}" ] || . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
 
     # THE NAME IS THE DISPATCH'S: a re-dispatch gets its own file beside the first, so the record keeps what each
@@ -2675,8 +2689,9 @@ $BRF_PINNED"; fi
         exit 1
       fi
       BRF_QLINE="${BRF_QS//,/, }"
-      BRF_BASE="$(bash "$BRF_READER" "$PV_PLAN" header base-sha 2>/dev/null | sed -n 's/^base-sha=//p')"
-      BRF_RANGE="$(bash "$BRF_READER" "$PV_PLAN" reviews 2>/dev/null | awk -F'|' -v qs=",$BRF_QS," -v base="${BRF_BASE:-(no review proof and no base-sha)}" \
+      poker_fold_ask BRF_ANS "brief $BRF_ID $BRF_NAME" "$PV_PLAN" reader_q_header base-sha; BRF_BASE="$(printf '%s\n' "$BRF_ANS" | sed -n 's/^base-sha=//p')"
+      poker_fold_ask BRF_ANS "brief $BRF_ID $BRF_NAME" "$PV_PLAN" reader_q_reviews
+      BRF_RANGE="$(printf '%s\n' "$BRF_ANS" | awk -F'|' -v qs=",$BRF_QS," -v base="${BRF_BASE:-(no review proof and no base-sha)}" \
         -v end="${BRF_SHA:-$BRF_HEAD}" "$_LINE_FIELDS_AWK"'
         $1 == "run/v1" && line_kv("ev") == "proof" && index(qs, "," line_kv("question") ",") { last[line_kv("question")] = line_kv("head") }
         END {
@@ -2688,10 +2703,12 @@ $BRF_PINNED"; fi
     fi
     # A RED THE ROW MAY LAND WITH is a red admitted for it that the reader still holds open; the evidence is the
     # writer's to write, at a path the brief names.
-    BRF_RED="$(bash "$BRF_READER" "$PV_PLAN" debts 2>/dev/null | awk -F'|' -v r="$BRF_ID" "$_LINE_FIELDS_AWK"'
+    poker_fold_ask BRF_ANS "brief $BRF_ID $BRF_NAME" "$PV_PLAN" reader_q_debts
+    BRF_RED="$(printf '%s\n' "$BRF_ANS" | awk -F'|' -v r="$BRF_ID" "$_LINE_FIELDS_AWK"'
       line_kv("ev") == "admitted" && line_kv("row") == r { l = line_kv("suite") " until " line_kv("token") } END { if (l != "") print l }')"
 
     # THE SCAFFOLD, in the shipped order. A label with no source on this row is not written.
+    [ -n "$BRF_STATUS" ] || { poker_fold_ask BRF_ANS "brief $BRF_ID $BRF_NAME" "$PV_PLAN" reader_q_status "$BRF_ID"; BRF_STATUS="$(printf '%s\n' "$BRF_ANS" | sed -n 's/^state=//p')"; }
     BRF_BODY="$(mktemp "${TMPDIR:-/tmp}/brief.XXXXXX")" || { die "REFUSED — no scratch file can be made. Nothing was written."; exit 2; }
     case "$BRF_SIZE" in ''|*[!0-9]*) BRF_BIG=no ;; *) if [ "$BRF_SIZE" -ge 15 ]; then BRF_BIG=yes; else BRF_BIG=no; fi ;; esac
     BRF_PROG="$(poker_brief_record_entry "$BRF_FILES" progress "$BRF_ID")"
@@ -2720,7 +2737,6 @@ $BRF_PINNED"; fi
 $BRF_LABELS
 BRF_EOF
       printf '\n## The row\n\n%s\n\n' "$BRF_TASK"
-      [ -n "$BRF_STATUS" ] || BRF_STATUS="$(bash "$BRF_READER" "$PV_PLAN" status "$BRF_ID" 2>/dev/null | sed -n 's/^state=//p')"
       printf 'Row %s: kind %s, step %s, serves %s, waits on %s, status %s.\n' "$BRF_ID" "$BRF_KIND" "$BRF_STEP" "$BRF_SERVES" "${BRF_DEPS:-—}" "${BRF_STATUS:-pending}"
       printf 'Working head: %s\n' "$BRF_HEAD"
       [ -z "$BRF_RANGE" ] || printf '%s\n' "$BRF_RANGE"
@@ -3067,8 +3083,9 @@ RR_MATRIX
     # are the scheduler's (`units_rows`).
     RR_PROJ="$(git -C "$PV_REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
     case "$RR_PROJ" in */.git) RR_PROJ="${RR_PROJ%/.git}"; RR_PROJ="${RR_PROJ##*/}" ;; *) RR_PROJ="${PV_REPO##*/}" ;; esac
-    RR_REL="$(_proof_ask "$PV_PLAN" reader_q_header "$PV_PLAN" release | sed -n 's/^release=//p')"
-    RR_LANDED_IDS=" $(_proof_ask "$PV_PLAN" reader_q_landed "$PV_PLAN" | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | tr '\n' ' ')"
+    RR_AGAIN="release-approval$([ "$RR_PREVIEW" != yes ] || printf ' --preview') $PV_PLAN"
+    poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_header release; RR_REL="$(printf '%s\n' "$RR_ANS" | sed -n 's/^release=//p')"
+    poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_landed; RR_LANDED_IDS=" $(printf '%s\n' "$RR_ANS" | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | tr '\n' ' ')"
     set -- $(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v l="$RR_LANDED_IDS" 'NF >= 10 { t++; if (index(l, " " $1 " ")) n++ } END { print t + 0, n + 0 }')
     RR_TOTAL="${1:-0}"; RR_LANDED="${2:-0}"
 
@@ -3078,7 +3095,8 @@ RR_MATRIX
     # WAIVERS: the run's open waive: asks (the reader's `asks`), then the ones the red check owes, each once; never the
     # regression. A waiver a close-out preflight or another session of the run raised is owed here as well. A gate's
     # ask is an aside in its own words, which only the run's register (lib/owed.sh `owed_list_plan`) keeps.
-    RR_WAIVE="$(_proof_ask "$PV_PLAN" reader_q_asks "$PV_PLAN" | sed -n 's/.*|key=\(waive:[^|]*\)|.*/\1/p' | /usr/bin/grep -vx 'waive:regression')"
+    poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_asks
+    RR_WAIVE="$(printf '%s\n' "$RR_ANS" | sed -n 's/.*|key=\(waive:[^|]*\)|.*/\1/p' | /usr/bin/grep -vx 'waive:regression')"
     while IFS='	' read -r key _ _ reply; do
       case "$key" in gate:?*) RR_ASIDE="${RR_ASIDE}${reply#poker: }"$'\n' ;; esac
     done <<RR_OWED
@@ -3101,8 +3119,9 @@ RR_WAIVES
     # (confirm-row) or waive; any other is waived or run, a T4 row's standing finding said in the gate's words. The
     # step a row is owed against is the run's (the reader's `step`), the plan's `current:` only where the log has none.
     RR_ACT=0; RR_ACP=0; RR_ACY=0; RR_ACW=0; RR_ACU=0; RR_ACA=0; RR_ACR=0; RR_ACC=0; RR_ACL=0; RR_MISS=""
-    RR_CUR="$(_proof_ask "$PV_PLAN" reader_q_step "$PV_PLAN" | sed -n 's/^n=//p')"
-    RR_WAIVED=" $(_proof_facts "$PV_PLAN" | awk -F'|' "$_LINE_FIELDS_AWK"'line_kv("ev") == "waiver" && line_kv("ac") != "" { printf "%s ", line_kv("ac") }') "
+    poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_step; RR_CUR="$(printf '%s\n' "$RR_ANS" | sed -n 's/^n=//p')"
+    poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" poker_fold_all
+    RR_WAIVED=" $(printf '%s\n' "$RR_ANS" | awk -F'|' "$_LINE_FIELDS_AWK"'line_kv("ev") == "waiver" && line_kv("ac") != "" { printf "%s ", line_kv("ac") }') "
     if ! RR_ROWS="$(rr_rows "$PV_PLAN" "${RR_CUR:-$PV_CUR}")"; then
       die "REFUSED — the release approval card asks walls.sh for each matrix row's ruling, and $BIONIC_LIB/walls.sh cannot be loaded; nothing is written."
       exit 2
@@ -3157,9 +3176,11 @@ RR_ROWS_EOF
     # the reader's newest review proof citing its record. The disposition's own state stands for a finding the
     # reader holds no line of, a review's unlined flag.
     RR_FN=0; RR_FNF=0; RR_FNA=0; RR_FNC=0; RR_FLINES=""; RR_FROWS=""; RR_FIDS=""; RR_CARRY=""
-    RR_RFIND="$(_proof_ask "$PV_PLAN" reader_q_findings "$PV_PLAN" | awk -F'|' "$_LINE_FIELDS_AWK"'
-      { print line_kv("ref") "\t" line_kv("to") "\t" line_kv("row") }')"
-    RR_QOF="$(_proof_ask "$PV_PLAN" reader_q_reviews "$PV_PLAN" | awk -F'|' "$_LINE_FIELDS_AWK"'
+    poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_findings
+    RR_RFIND="$(printf '%s\n' "$RR_ANS" | awk -F'|' "$_LINE_FIELDS_AWK"'
+      NF > 1 { print line_kv("ref") "\t" line_kv("to") "\t" line_kv("row") }')"
+    poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_reviews
+    RR_QOF="$(printf '%s\n' "$RR_ANS" | awk -F'|' "$_LINE_FIELDS_AWK"'
       line_kv("ev") == "proof" { print line_kv("evidence") "\t" line_kv("question") }')"
     # A PREVIEW OPENS NOTHING: the disposition it reads is handed a ledger key no file can carry, so the person's
     # items the disposition opens on any other run are left unopened here.
@@ -3306,7 +3327,7 @@ RR_AGAINST_EOF
     # uncovered. A plan the judge cannot deal has no coverage to read, so its lines say the recorded result.
     RR_REVIEWS=""
     RR_COV="$(facts_reviews "$PV_PLAN" "$RR_HEAD" --landings 2>/dev/null)"
-    RR_RIGOR="$(_proof_ask "$PV_PLAN" reader_q_header "$PV_PLAN" rigor | sed -n 's/^rigor=//p')"
+    poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_header rigor; RR_RIGOR="$(printf '%s\n' "$RR_ANS" | sed -n 's/^rigor=//p')"
     for q in evidence adversarial structure; do
       role=critic
       [ "$q" != evidence ] || [ "$RR_RIGOR" != double ] || role=auditor
@@ -3337,9 +3358,11 @@ RR_AGAINST_EOF
     # own instant is the page's end and the replay line's `at=`: the page counts what was done before it, while
     # landing-report's window runs on to delivery, so acts after the card are counted there and not here.
     RR_AT="$(iso_now)"
-    IFS=$'\t' read -r RR_HHS _ _ _ <<< "$(hand_holds_window "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" "$PV_PLAN")"
+    RR_ANS="$(hand_holds_window "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" "$PV_PLAN")" || poker_fold_unread "$RR_AGAIN"
+    IFS=$'\t' read -r RR_HHS _ _ _ <<< "$RR_ANS"
     [ "${RR_HHS:--}" != - ] || RR_HHS=""
-    RR_HH="$(hand_holds_report "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" "$PV_PLAN" ${RR_HHS:+--since "$RR_HHS"} --until "$RR_AT")"
+    RR_HH="$(hand_holds_report "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" "$PV_PLAN" ${RR_HHS:+--since "$RR_HHS"} --until "$RR_AT")" \
+      || poker_fold_unread "$RR_AGAIN"
     # THE RUN SO FAR, the sheet's own line (`sitrep_so_far`): the reader's acts taken by hand and open asks over the
     # log this render reads, asked before the render opens anything, so the page and the sheet count at one log.
     RR_SOFAR="$(sitrep_so_far "$PV_PLAN")"
@@ -3382,7 +3405,7 @@ RR_AGAINST_EOF
     # A card with no decision still records its page while it carries a finding whose carry is still an open ask (the
     # reader's `asks`), so the reply that answers it rules the carry; one whose carries were all ruled writes nothing.
     RR_CARRY_OPEN=""
-    RR_OPEN_ASKS="$(_proof_ask "$PV_PLAN" reader_q_asks "$PV_PLAN" | sed -n 's/.*|key=\([^|]*\)|.*/\1/p')"
+    poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_asks; RR_OPEN_ASKS="$(printf '%s\n' "$RR_ANS" | sed -n 's/.*|key=\([^|]*\)|.*/\1/p')"
     while IFS= read -r fid; do
       [ -n "$fid" ] || continue
       case $'\n'"$RR_OPEN_ASKS"$'\n' in *$'\n'"$(carry_owed_key "$fid")"$'\n'*) RR_CARRY_OPEN=yes ;; esac

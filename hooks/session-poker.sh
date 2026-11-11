@@ -2182,11 +2182,14 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
     UNITS_FACTS_STATE="the working branch ${wb:-(none named)} names no commit here, so there is no head to judge them at"
     return 0
   fi
-  out="$(facts_state "$SCHED_PLAN" "$head" 2>/dev/null)"; rc=$?
-  case "$rc" in
-    0) UNITS_FACTS_STATE=covered ;;
-    2) UNITS_FACTS_STATE="the plan's rigor and scale cannot be dealt" ;;
-    *) UNITS_FACTS_STATE="$(printf '%s\n' "$out" | awk -F'\t' '$NF != "covered"' \
+  # Exit 2 is the judge's "could not deal" for a plan it cannot deal and for facts that did not fold alike; its line
+  # on stderr tells them apart, so a fold that failed is never named as the plan's rigor and scale.
+  out="$(facts_state "$SCHED_PLAN" "$head" 2>&1)"; rc=$?
+  case "$rc:$out" in
+    0:*) UNITS_FACTS_STATE=covered ;;
+    2:*"could not be read"*) UNITS_FACTS_STATE="the run's facts could not be read: its facts did not fold; ask again" ;;
+    2:*) UNITS_FACTS_STATE="the plan's rigor and scale cannot be dealt" ;;
+    *) UNITS_FACTS_STATE="$(printf '%s\n' "$out" | awk -F'\t' 'NF > 1 && $NF != "covered"' \
          | awk -F'\t' '{ $1 = $1; printf "%s%s", (n++ ? "; " : ""), $0 }' OFS=' ')" ;;
   esac
   return 0

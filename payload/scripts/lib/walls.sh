@@ -2579,7 +2579,10 @@ _eg_reading_gaps() {
   [ "$handed" = 0 ] || der="${BIONIC_READINGS:-}"
   # The readings and waivers are the run's facts, in the order they were last set: the plan's section for a run
   # with no log, the log alone for a run with one, through lib/proof.sh's kept fold of them.
-  _proof_ask "$PLAN" reader_q_reviews "$PLAN" | BIONIC_DERIVED="$der" awk -F'|' -v qs="$qs" "$(proof_fact_awk)"'
+  # A fold that failed is no reading: the gaps are then unreadable, never every question absent.
+  local f
+  f="$(_proof_ask "$PLAN" reader_q_reviews "$PLAN")" || { printf 'unreadable\n'; return 0; }
+  printf '%s\n' "$f" | BIONIC_DERIVED="$der" awk -F'|' -v qs="$qs" "$(proof_fact_awk)"'
     BEGIN { n = split(ENVIRON["BIONIC_DERIVED"], L, "\n")
             for (i = 1; i <= n; i++) { m = split(L[i], F, "\t"); if (m >= 3) D[F[1] SUBSEP F[2]] = F[3] } }
     proof_fact() && PROOF_KIND == "review" && PROOF_QUESTION != "" {
@@ -4412,12 +4415,13 @@ resolve_walk_path() {  # $1 = raw walk-artifact value
 # absolute one meet. proof-add walk registers the proof only after it parsed the record's verdict table, so
 # the proof is what makes the artifact a registered walk rather than narration. The proofs are the reader's,
 # through lib/proof.sh's kept fold, so a walk the run's log alone holds is registered here.
-walk_registered() {
-  local ev
+walk_registered() {  # 2 when the run's facts cannot be read
+  local ev f
+  f="$(_proof_facts "$PLAN")" || return 2
   while IFS= read -r ev; do
     [ -n "$ev" ] || continue
     if [ "$ev" = "$1" ] || [ "$(resolve_walk_path "$ev")" = "$2" ]; then return 0; fi
-  done <<< "$(_proof_facts "$PLAN" | awk -F'|' "$(proof_fact_awk)"'proof_fact() && PROOF_KIND == "walk" { print PROOF_EVIDENCE }')"
+  done <<< "$(printf '%s\n' "$f" | awk -F'|' "$(proof_fact_awk)"'proof_fact() && PROOF_KIND == "walk" { print PROOF_EVIDENCE }')"
   return 1
 }
 

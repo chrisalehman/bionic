@@ -1128,8 +1128,13 @@ _units_readings_state() {
   tree="$(_units_plan_tree "$plan")"
   head="$(proof_branch_head "$plan" "$tree" 2>/dev/null)" \
     || { printf 'the working branch names no commit, so there is no head to judge the reviews at'; return 0; }
-  out="$(facts_state "$plan" "$head" 2>/dev/null)"; rc=$?
-  [ "$rc" -ne 2 ] || { printf "the plan's rigor and scale cannot be dealt"; return 0; }
+  # Exit 2 is the judge's "could not deal" for both a plan it cannot deal and facts that did not fold; its line on
+  # stderr tells them apart, and a fold that failed is said so, never named as the plan's rigor and scale.
+  out="$(facts_state "$plan" "$head" 2>&1)"; rc=$?
+  case "$rc:$out" in
+    2:*"could not be read"*) printf "the run's facts could not be read: its facts did not fold; ask again"; return 0 ;;
+    2:*) printf "the plan's rigor and scale cannot be dealt"; return 0 ;;
+  esac
   out="$(printf '%s\n' "$out" | awk -F'\t' '$1 == "review" && $NF != "covered" { $1 = $1; printf "%s%s", (n++ ? "; " : ""), $0 }' OFS=' ')"
   printf '%s' "${out:-covered}"
 }

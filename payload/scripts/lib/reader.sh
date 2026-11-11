@@ -151,8 +151,8 @@ reader_list() {  # -> one line per question: <name> <form>
   done
 }
 
-reader_main() {  # <plan> <question> [args] -> the answer in its form; 2 refused
-  local plan="${1:-}" q="${2:-}" e form fn IFS=$' \t\n'
+reader_main() {  # <plan> <question> [args] -> the answer in its form; 2 refused; a fold that failed is the question's exit
+  local plan="${1:-}" q="${2:-}" e form fn rc pf=on IFS=$' \t\n'
   for e in $READER_QUESTIONS; do
     [ "${e%%:*}" = "$q" ] || continue
     fn="${e##*:}"; form="${e#*:}"; form="${form%%:*}"
@@ -160,8 +160,13 @@ reader_main() {  # <plan> <question> [args] -> the answer in its form; 2 refused
       printf 'reader: %s is not a plan in plans/ or incidents/, or one folder below\n' "$plan" >&2; return 2
     fi
     shift 2
-    if [ "$form" = yes ]; then "$fn" "$plan" "$@" >/dev/null; return; fi
-    "$fn" "$plan" "$@"; return
+    # Each question pipes the fold into its reading, so a fold that failed would answer as a run with no fact: the
+    # question runs under pipefail, its caller's setting put back after, and the failure is its exit in-process too.
+    shopt -qo pipefail || pf=off
+    set -o pipefail
+    if [ "$form" = yes ]; then "$fn" "$plan" "$@" >/dev/null; else "$fn" "$plan" "$@"; fi; rc=$?
+    [ "$pf" = on ] || set +o pipefail
+    return "$rc"
   done
   printf 'reader: no question %s. usage: reader <plan> <question> [args]; the questions:\n' "'$q'" >&2
   reader_list >&2

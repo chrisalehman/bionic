@@ -312,12 +312,21 @@ co_ask() {  # <reader question's function> [args] -> its answer, over the kept f
   local q="$1"; shift
   _proof_ask "$PLAN" "$q" "$PLAN" "$@"
 }
-co_facts() {  # <event type> [<field>] -> the standing facts of that type, or that field of each, in fact order
-  _proof_facts "$PLAN" | awk -F'|' -v t="$1" -v k="${2:-}" "$_READER_AWK"'ev() == t { if (k == "") print; else print line_kv(k) }'
+co_facts() {  # <event type> [<field>] -> the standing facts of that type, or that field of each, in fact order; 2 when they cannot be read
+  local f
+  f="$(_proof_facts "$PLAN")" || return 2
+  printf '%s' "$f" | awk -F'|' -v t="$1" -v k="${2:-}" "$_READER_AWK"'ev() == t { if (k == "") print; else print line_kv(k) }'
 }
-co_step9_at() {  # -> the instant of the run's delivery, or nothing
-  _proof_facts "$PLAN" | awk -F'|' "$_READER_AWK"'ev() == "step" && line_kv("n") == "9" { t = line_kv("at") } END { print t }'
+co_step9_at() {  # -> the instant of the run's delivery, or nothing; 2 when the facts cannot be read
+  local f
+  f="$(_proof_facts "$PLAN")" || return 2
+  printf '%s' "$f" | awk -F'|' "$_READER_AWK"'ev() == "step" && line_kv("n") == "9" { t = line_kv("at") } END { print t }'
 }
+# A fold that failed reads as a run with no step, no debt and no deferral, and a reader inside a pipe or a $( ) cannot
+# stop this script: before the continuation is written the fold is taken in this shell and held, so the reads that
+# write it are served the facts it read; one that fails is the refusal, and nothing is written from it.
+CO_UNREAD="the run's facts could not be read, so nothing is written from them; run again: bash $0 $PLAN $VERB"
+co_heard() { _proof_facts "$PLAN" >/dev/null || _co_refuse "$CO_UNREAD"; }
 
 # The writers' target: the Step 8 and Step 9 blocks go into `## SDLC State`, so a plan without one cannot be closed.
 awk '/^## SDLC State/ { f = 1; exit } END { exit !f }' "$PLAN" 2>/dev/null \
@@ -332,7 +341,7 @@ WORKING="$(plan_working_branch "$PLAN")"
 # whatever step the run is at, so below 8 its refusal would be about a step this script
 # never writes, and above 8 there is nothing left for it to close. The step and the delivery
 # are the reader's `step`: n= and state=.
-CO_STEP="$(co_ask reader_q_step)"
+CO_STEP="$(co_ask reader_q_step)" || _co_refuse "$CO_UNREAD"
 CURRENT="$(printf '%s\n' "$CO_STEP" | sed -n 's/^n=//p')"
 CO_STATE="$(printf '%s\n' "$CO_STEP" | sed -n 's/^state=//p')"
 STEP_REFUSAL="the run is at Step ${CURRENT:-<none>} — advance it to Step 8 first"
@@ -1078,7 +1087,8 @@ co_deferrals() {  # -> the lines, or nothing: the deferrals, then the unburned d
   owed="$(proof_findings_owed "$PLAN" 2>/dev/null | awk '$4 == "defer"')"
   if [ -n "$owed" ]; then
     # `<record>#<n><TAB>y<stated>` for each finding's first deferral, in event order: one read of the run's events
-    said="$(reader_events "$PLAN" 2>/dev/null | awk -F'|' "$_READER_AWK"'
+    said="$(reader_events "$PLAN" 2>/dev/null)" || return 2
+    said="$(printf '%s\n' "$said" | awk -F'|' "$_READER_AWK"'
       ev() == "finding" && line_kv("to") == "deferred" && !seen[line_kv("ref")]++ { printf "%s\ty%s\n", line_kv("ref"), line_kv("stated") }')"
     while read -r id s r p t; do
       st="$(printf '%s\n' "$said" | CO_ID="$id" awk -F'\t' '$1 == ENVIRON["CO_ID"] { print $2; exit }')"
@@ -1087,7 +1097,7 @@ co_deferrals() {  # -> the lines, or nothing: the deferrals, then the unburned d
       printf 'deferred: %s %s %s %s stated="%s" from=%s\n' "$id" "$s" "$r" "$t" "${st:--}" "$WAVE_SLUG"
     done <<< "$owed"
   fi
-  co_debts
+  co_debts || return 2
 }
 
 # THE DEBT THE CONTINUATION CARRIES. Every debt of the run not yet burned, the reader's debt facts in their order,
@@ -1101,16 +1111,19 @@ co_deferrals() {  # -> the lines, or nothing: the deferrals, then the unburned d
 # ONLY A LINE THAT PARSES IS CARRIED. Each line is held to the one grammar, lib/debt.sh `debt_line_ok`, which
 # `debt add` and card.sh read by too; a debt it refuses is never written here, and `run` refuses it, naming it,
 # before its first act (co_debt_refusal), so the next run's Step-1 card is never refused on a line this run carried.
-co_debt_lines() {  # -> `ok<TAB><line>` or `bad<TAB><line>` per debt not burned, in the reader's order
-  local l
-  co_facts debt | awk -F'|' -v w="$WAVE_SLUG" "$_READER_AWK"'line_kv("burned") == "" {
+co_debt_lines() {  # -> `ok<TAB><line>` or `bad<TAB><line>` per debt not burned, in the reader's order; 2 when unread
+  local l d
+  d="$(co_facts debt)" || return 2
+  printf '%s' "${d:+$d$'\n'}" | awk -F'|' -v w="$WAVE_SLUG" "$_READER_AWK"'line_kv("burned") == "" {
       printf "debt: %s %s \"%s\" touches=%s raised-by=%s from=%s\n", line_kv("concept"), line_kv("kind"), line_kv("sites"), line_kv("touches"), line_kv("raised-by"), w }' \
     | while IFS= read -r l; do
         if debt_line_ok "$l"; then printf 'ok\t%s\n' "$l"; else printf 'bad\t%s\n' "$l"; fi
       done
 }
 co_debts() {
-  co_debt_lines | awk -F'\t' '$1 == "ok" { print substr($0, 4) }'
+  local d
+  d="$(co_debt_lines)" || return 2
+  printf '%s\n' "$d" | awk -F'\t' '$1 == "ok" { print substr($0, 4) }'
 }
 
 # co_debt_gaps -> the debt lines of the run's version-14 ledger the reader could not read, as its translation
@@ -1137,7 +1150,7 @@ co_debt_refusal() {
   local led bad
   led="$(proof_debt_ledger_path "$ROOT" "$PLAN" 2>/dev/null)" || led="the debt ledger"
   bad="$(co_debt_gaps | awk -F'|' '$3 ~ /^concept=/ { print "the row of " $3; exit }')"
-  [ -n "$bad" ] || bad="$(co_debt_lines | awk -F'\t' '$1 == "bad" { print substr($0, 5); exit }')"
+  [ -n "$bad" ] || { bad="$(co_debt_lines)" || return 2; bad="$(printf '%s\n' "$bad" | awk -F'\t' '$1 == "bad" { print substr($0, 5); exit }')"; }
   [ -n "$bad" ] || return 0
   printf '%s carries a line that does not parse as a debt line: %s' "${led#"$DROOT"/}" "$bad"
 }
@@ -1207,8 +1220,7 @@ co_cont_has_deferrals() { co_cont_has_heading "## Deferrals"; }
 # co_deferrals_section -> the heading and its lines, written whether or not there is anything under it:
 # this run's own deferrals first, then what it carries (CO_CARRIED, read by act_continuation)
 co_deferrals_section() {
-  local lines
-  lines="$(co_deferrals)"
+  local lines="$CO_DEFER"
   [ -z "$CO_CARRIED" ] || lines="${lines:+$lines
 }$CO_CARRIED"
   printf '## Deferrals\n'
@@ -1223,7 +1235,7 @@ co_deferrals_section() {
 co_cont_missing() {  # -> the lines owed that are not under the heading yet, in order: co_cont_missing_under's reading
   # of ## Deferrals (wave-38 T15 burns debt continuation-section-reader: one section reader, not two)
   # ## Deferrals is read unfenced (A-T14-4), so a line inside a fence there is not counted as present.
-  CO_UNFENCED=1 co_cont_missing_under "## Deferrals" "" "$(co_deferrals)${CO_CARRIED:+
+  CO_UNFENCED=1 co_cont_missing_under "## Deferrals" "" "$CO_DEFER${CO_CARRIED:+
 $CO_CARRIED}"
 }
 # A SECTION THAT IS ONE FENCED LIST TAKES THE LINES INSIDE ITS FENCE (wave-36 T14; D13, C38). The lines went after the
@@ -1548,6 +1560,7 @@ act_continuation() {
 }
 act_continuation_write() {
   local missing
+  co_heard; CO_DEFER="$(co_deferrals)" || _co_refuse "$CO_UNREAD"
   CO_CARRIED="$(co_carried)" \
     || _co_refuse "could not read the deferrals this run inherited (card.sh inherited) — no continuation written"
   if [ -f "$CONT" ]; then
@@ -2454,7 +2467,7 @@ do_check() {
   say "tasks-completed: $TASKS_LINE"
   say "$(co_debt_card)"
   co_debt_notes
-  CO_DEBT_BAD="$(co_debt_refusal)"
+  CO_DEBT_BAD="$(co_debt_refusal)" || _co_refuse "$CO_UNREAD"
   [ -z "$CO_DEBT_BAD" ] || co_would "debt-lines: WOULD REFUSE — $CO_DEBT_BAD" "a carried debt line does not parse"
   if [ -f "$CONT" ]; then
     if ! co_cont_has_deferrals; then
@@ -2462,6 +2475,7 @@ do_check() {
     else
       CO_CARRIED="$(co_carried)" \
         || _co_refuse "could not read the deferrals this run inherited (card.sh inherited)"
+      CO_DEFER="$(co_deferrals)" || _co_refuse "$CO_UNREAD"
       missing="$(co_cont_missing)"
       if [ -n "$missing" ]; then
         CK_LINE="continuation: $CONT_REL already written — run adds $(co_added_phrase "$missing") under ## Deferrals: $(co_added_ids "$missing")"
@@ -2545,7 +2559,7 @@ do_run() {
   MISSING="$(presence_missing)"
   [ -z "$MISSING" ] || _co_held "the epic plan's row cannot be written" "$MISSING — nothing was done"
   # A DEBT LINE THAT WOULD NOT PARSE IS REFUSED HERE, NAMED (wave-36 T13; AC-7.8), never carried.
-  CO_DEBT_BAD="$(co_debt_refusal)"
+  CO_DEBT_BAD="$(co_debt_refusal)" || _co_refuse "$CO_UNREAD"
   [ -z "$CO_DEBT_BAD" ] || _co_held "a carried debt line does not parse" "$CO_DEBT_BAD — nothing was done"
   # THE ROWS THE MERGE LANDS NEED THIS SESSION BOUND TO THIS PLAN (wave-36 T14; AC-7.7), asked before any act.
   # A PARKED PLAN IS CLOSED WITHOUT THE MERGE ACT (wave-38 T15; AC-4.3): no rows a merge lands, no merge readback, and

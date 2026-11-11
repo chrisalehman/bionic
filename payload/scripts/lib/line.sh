@@ -617,9 +617,11 @@ _line_numbers() {  # <plan> <record> <root> <row> <candidate> -> 0 made or nothi
 # integration branch, and close-out, for a run whose part no earlier verb wrote. The judge holds a commit of the part
 # covered by what holds at its parent only while it is byte-equal to this render (lib/proof.sh `proof_part_base`), so
 # the render must stay deterministic: the run's facts and the entry alone decide it.
-line_reviews_part() {  # <plan> -> the rendered part, heading to its closing blank line; nothing when it lists nothing
+line_reviews_part() {  # <plan> -> the rendered part, heading to its closing blank line; nothing when it lists nothing; 2 unread
+  local f
   _line_load_proof || return 1
-  _proof_ask "$1" reader_q_reviews "$1" | awk -F'|' "$(proof_fact_awk)"'
+  f="$(_proof_ask "$1" reader_q_reviews "$1")" || return 2
+  printf '%s\n' "$f" | awk -F'|' "$(proof_fact_awk)"'
     function base(p,   n, e) { n = split(p, e, "/"); return e[n] }
     proof_fact() && PROOF_KIND == "review" && PROOF_QUESTION != "" {
       at = line_kv("at")
@@ -678,9 +680,11 @@ line_reviews_state() {
   if ! /usr/bin/grep -q "^## ${LINE_RV_VER} " "$tmp/old"; then
     rm -rf "$tmp"; LINE_RV_SAID="CHANGELOG.md on $nm holds no ## $LINE_RV_VER entry"; return 0
   fi
-  if ! line_reviews_part "$plan" > "$tmp/part"; then
-    rm -rf "$tmp"; LINE_RV_SAID="the proof library ($_LINE_LIB_DIR/proof.sh) cannot be loaded to read the plan's reviews"; return 1
-  fi
+  line_reviews_part "$plan" > "$tmp/part"; case $? in
+    0) ;;
+    2) rm -rf "$tmp"; LINE_RV_SAID="the run's facts could not be read, so its reviews are not rendered; run again"; return 1 ;;
+    *) rm -rf "$tmp"; LINE_RV_SAID="the proof library ($_LINE_LIB_DIR/proof.sh) cannot be loaded to read the plan's reviews"; return 1 ;;
+  esac
   LINE_RV_N="$(/usr/bin/grep -c '^- ' "$tmp/part" | tr -d ' ')"
   [ "${LINE_RV_N:-0}" -gt 0 ] || { rm -rf "$tmp"; LINE_RV_N=0; LINE_RV_SAID="the plan registers no review and no waiver"; return 0; }
   line_entry_part "$tmp/old" "$LINE_RV_VER" "$tmp/part" 'The reviews' 'Known limits' 'The landing numbers' > "$out"

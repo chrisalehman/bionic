@@ -51,6 +51,8 @@ echo "r6_hand_edit_lines=$(/usr/bin/grep -c 'hand-edit: ' "$rec/assumptions.md" 
 echo "r6_hand_holds_total_at_close=$(/usr/bin/grep -h -o -E '^hand-holds: total=[0-9]+' "$rec/continuation.md" 2>/dev/null | tail -1 | sed 's/.*=//')"
 # 7. born events the reader lists for the run
 pl=$(ls "$(dirname "$(dirname "$rec")")"/plans/*/"$(basename "$rec")".plan.md 2>/dev/null | head -1)
-echo "r7_born_events=$( [ -n "$pl" ] && ( . "$here/lib/reader.sh" && reader_facts "$pl" ) | /usr/bin/grep -c '^run/v1|ev=born|')"
+# a fold that failed is no count: the readings stop, exit 2, rather than print a nought
+f=""; [ -z "$pl" ] || f="$(set -o pipefail; . "$here/lib/reader.sh" && reader_facts "$pl")" || { echo "readings: the facts of $pl could not be read" >&2; exit 2; }
+echo "r7_born_events=$(printf '%s\n' "$f" | /usr/bin/grep -c '^run/v1|ev=born|')"
 # 8. whole passes: whole-run logs the record holds
 echo "r8_whole_runs=$(ls "$rec" | /usr/bin/grep -c -E '^regression-run-[0-9a-f]+\.log$')"
