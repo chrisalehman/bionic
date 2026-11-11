@@ -64,6 +64,9 @@
 # ARGUMENT ORDER is `<label> <expected> <actual>` throughout, which is what the
 # tree already did unanimously: expected-side first for eq/ne/status, needle
 # before haystack for contains/absent, pattern before subject for match/no_match.
+# The two exceptions in the tree (live-agents and resources spelled expect_match
+# `<label> <actual> <ERE>`) were outvoted 11 to 2 and were renamed onto
+# `expect_regex` by S9b; no `expect_match` call survives in either file.
 #
 # SEMANTICS are the tree's most common definition of each name, measured:
 #
@@ -109,6 +112,12 @@
 #   expect_status compares two exit statuses as strings, expected first.
 #
 # THE OLD SPELLINGS — `old -> canonical`. No aliases are defined here.
+#   expect_equal -> expect_eq — pure rename (stop-check, 4 call sites; its
+#     failing arm also printed a diff, which is detail text, not semantics).
+#   expect_matches -> expect_regex — PURE rename, same ERE semantics, same
+#     argument order (execution-recorder, interpreter-pin, session-sweeper,
+#     stop-check, stop-guard; 25 call sites). The two pipeline spellings
+#     (interpreter-pin, session-sweeper) lose their 141 exposure in the move.
 #   expect_nomatch -> NOT a rename: it takes a FILE rather than a string
 #     (preflight-probe, 14 call sites). Stays local under its own name.
 #   expect_absent_ug -> NOT a rename: it pins /usr/bin/grep on purpose, because
