@@ -253,13 +253,14 @@ _units_proofs() {
 _units_fold() {
   _UNITS_FACTS_PLAN=""; _UNITS_FACTS=""
   _units_lib proof.sh _proof_facts || return 0
-  _UNITS_FACTS="$(_proof_facts "$(_units_origin "${1:-}")")" || { _UNITS_FACTS=""; return 2; }
+  _UNITS_FACTS="$(proof_held_facts "$(_units_origin "${1:-}")")" \
+    || _UNITS_FACTS="$(_proof_facts "$(_units_origin "${1:-}")")" || { _UNITS_FACTS=""; return 2; }
   _UNITS_FACTS_PLAN="$(_units_origin "${1:-}")"
 }
 # _units_facts_of <plan, a copy already read as its plan> -> the held answer when the call holds this plan's, else the fold's
 _units_facts_of() {
   if [ -n "${_UNITS_FACTS_PLAN:-}" ] && [ "$_UNITS_FACTS_PLAN" = "${1:-}" ]; then printf '%s' "$_UNITS_FACTS"; return 0; fi
-  _proof_facts "${1:-}"
+  proof_held_facts "${1:-}" || _proof_facts "${1:-}"
 }
 
 # _units_origin <plan> -> the plan a copy was made from, whose run it reads: a plan verb's `<plan>.<verb>.<pid>` and

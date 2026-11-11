@@ -1617,7 +1617,7 @@ _proof_reader_load() {  # -> 0 once lib/reader.sh, beside this file, is loaded
 # The files a fold depends on: the reader's libraries, then the record's homes beside the run's log.
 _PROOF_FACTS_LIBS="reader.sh translate.sh plan-read.sh log.sh line.sh"
 _PROOF_FACTS_HOMES="run.log landing-proofs.log asks.state fill-ledger.log design-ledger.md debt.md"
-_PROOF_FACTS_KEY=""; _PROOF_FACTS=""; _PROOF_FINDINGS=""; _PROOF_INHERITED=""; _PROOF_HELD_PLAN=""; _PROOF_HELD_FINDINGS=""
+_PROOF_FACTS_KEY=""; _PROOF_FACTS=""; _PROOF_FINDINGS=""; _PROOF_INHERITED=""; _PROOF_HELD_PLAN=""; _PROOF_HELD_FINDINGS=""; _PROOF_HELD_FACTS=""
 # The kept file is a cache and never evidence, yet what it holds is served as the run's proofs and approvals, under a
 # key anyone who reads the repository can compute. So it is read and written only in a directory this user owns
 # (`[ -O ]`), that is a directory and no link and that neither group nor other can write (one `find`, which follows no
@@ -1626,7 +1626,7 @@ _PROOF_FACTS_KEY=""; _PROOF_FACTS=""; _PROOF_FINDINGS=""; _PROOF_INHERITED=""; _
 _PROOF_FACTS_KEEP=16
 
 _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one `run/v1` line each, in fact order; exit 2 with one line on stderr when the fold fails
-  local plan="${1:-}" lib log="" dir="" f stamp key cdir cache="" tmp got evs rc=0 IFS=$' \t\n'
+  local plan="${1:-}" lib log="" dir="" f stamp key cdir cache="" tmp got evs rest rc=0 IFS=$' \t\n'
   local -a deps
   [ -f "$plan" ] || return 0
   _proof_reader_load || { printf '_proof_facts: lib/reader.sh cannot be loaded, so the facts of %s are not read\n' "$plan" >&2; return 2; }
@@ -1658,8 +1658,10 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
      && [ -n "$(printf '%s\n' "$got" | awk '$0 == "\036" { print 1; exit }')" ]; then
     # Split by awk, not by a pattern in the shell: bash 3.2 matches `${v#*x}` over a long value in quadratic time.
     _PROOF_FACTS="$(printf '%s\n' "$got" | awk 'NR == 1 { next } $0 == "\036" { exit } { print }')"
-    _PROOF_FINDINGS="$(printf '%s\n' "$got" | awk '$0 == "\036" { f++; next } f == 1 { print }')"
-    _PROOF_INHERITED="$(printf '%s\n' "$got" | awk '$0 == "\036" { f++; next } f == 2 { print }')"
+    # The findings and the inherited proofs are short, so one pass takes both and the shell splits them.
+    rest="$(printf '%s\n' "$got" | awk 'f { print } $0 == "\036" { f = 1 }')"
+    _PROOF_FINDINGS="${rest%%$'\036'*}"; _PROOF_FINDINGS="${_PROOF_FINDINGS%$'\n'}"
+    case "$rest" in *$'\036'*) _PROOF_INHERITED="${rest#*$'\036'}"; _PROOF_INHERITED="${_PROOF_INHERITED#$'\n'}" ;; *) _PROOF_INHERITED="" ;; esac
     [ -z "$_PROOF_FINDINGS" ] || _PROOF_FINDINGS="$_PROOF_FINDINGS"$'\n'
     [ -z "$_PROOF_INHERITED" ] || _PROOF_INHERITED="$_PROOF_INHERITED"$'\n'
   else
@@ -1731,10 +1733,16 @@ _proof_findings_load() {
 # plan releases the hold. A hold is as fresh as the fold it took, so a caller holds only across reads that write no
 # event, and declares the two _PROOF_HELD_* variables local to bound it.
 _proof_findings_hold() {
-  _PROOF_HELD_PLAN=""; _PROOF_HELD_FINDINGS=""
+  _PROOF_HELD_PLAN=""; _PROOF_HELD_FINDINGS=""; _PROOF_HELD_FACTS=""
   [ -n "${1:-}" ] || return 0
   _proof_findings_load "$1" || return 2
-  _PROOF_HELD_FINDINGS="$_PROOF_FINDINGS"; _PROOF_HELD_PLAN="$1"
+  _PROOF_HELD_FINDINGS="$_PROOF_FINDINGS"; _PROOF_HELD_FACTS="$_PROOF_FACTS"; _PROOF_HELD_PLAN="$1"
+}
+# proof_held_facts <plan> -> the facts a caller holds for <plan> (`_proof_findings_hold`), exit 0; exit 1, nothing printed,
+# when none are held for it or a proof is pending, which a hold does not hold: the caller then asks the fold.
+proof_held_facts() {
+  [ -n "${_PROOF_HELD_PLAN:-}" ] && [ "$_PROOF_HELD_PLAN" = "${1:-}" ] && [ -z "${_PROOF_PENDING:-}" ] || return 1
+  printf '%s' "${_PROOF_HELD_FACTS:-}"
 }
 
 _proof_ask() {  # <plan> <reader question's function> [args] -> its answer and exit, over the facts _proof_facts keeps
@@ -1789,15 +1797,17 @@ proof_run_plan() {
 # proof lines (`proof_awk`), a copy read as its plan (`proof_run_plan`). A pending proof (`proof_pending`) stands last.
 # Exit 2 when the facts cannot be read.
 proof_lines() {
-  local facts
-  facts="$(_proof_facts "$(proof_run_plan "${1:-}")")" || return 2
+  local plan facts
+  plan="$(proof_run_plan "${1:-}")"
+  facts="$(proof_held_facts "$plan")" || facts="$(_proof_facts "$plan")" || return 2
   [ -n "$facts" ] || return 0
   printf '%s' "$facts" | proof_fact_lines
 }
 # proof_fact_lines < facts -> each proof among the `run/v1` facts on stdin, as `proof_lines` prints it: for a caller that
 # already holds the fold's answer, so the proofs cost no second entry into it.
 proof_fact_lines() {
-  awk -F'|' "$(proof_fact_awk)"'proof_fact() { print proof_fact_line() }'
+  # The proofs are taken out first by a plain match: the fact reader's field functions are paid on proofs alone.
+  awk 'index($0, "run/v1|ev=proof|") == 1' | awk -F'|' "$(proof_fact_awk)"'proof_fact() { print proof_fact_line() }'
 }
 
 # proof_last <plan> <kind> [<question>] -> the head of the NEWEST standing proof of <kind> the reader holds for the
