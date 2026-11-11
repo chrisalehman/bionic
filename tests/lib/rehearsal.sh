@@ -30,14 +30,14 @@
 #                      merge without a pass; the reply records the release approval), Step 8, a whole structure review failing, the branch merged into main, and
 #                      close-out refused on the review: the register holds waive:structure and hold:merge.
 #     release-waiting  the release order (the release row at step 7, a regression row, an integrate row reading both
-#                      approvals), the build landed through ready, the matrix discharged by its landing, Steps 5 to 7 with the regression, its row
+#                      approvals), the build landed through ready (a landing marks no matrix cell), Steps 5 to 7 with the regression, its row
 #                      delivered, five passing reviews and the release check, the release landed, and the release
 #                      approval card rendered: the register holds approve:release and approve:merge.
 #     stop-rule        the build row landed; the release row reads the approval of a stop-rule decision, which
 #                      is put through `decisions put`: the register holds that decision's decide: ask.
 #     clean            the build row landed and the release row is still active: the register holds no open ask.
 #     single-verify    the run at single rigor (door_world_single), carried to the Verify gate: the build landed
-#                      through ready, its criterion discharged by that landing, the walk and Step 5 written, current: 5. No `discharge`:
+#                      through ready, its criterion left pending by that landing, the walk and Step 5 written, current: 5. No `discharge`:
 #                      the auditor cell stays empty for the single-rigor review that answers the evidence question.
 #
 # THE SANDBOX is tests/lib/door.sh's `door_world`: a real repository carrying the plugin's hooks and scripts and a

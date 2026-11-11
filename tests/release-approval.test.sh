@@ -233,7 +233,7 @@ expect_eq "EARLY-6b …and yet the page renders: the waiver settles it (exit 0, 
 expect_contains "EARLY-6e …the person's waiver item opened on the ledger" "waive:adversarial" "$(fc_owed)"
 poke "$RFC" reply "$FC_WD"
 expect_regex "EARLY-6f reply all default writes the waiver with the reply's words" \
-  "^waived: question=adversarial head=$FC_R by Dana Fixture [0-9T:Z-]+ \"$FC_WD\"\$" "$(/usr/bin/grep '^waived: question=adversarial ' "$PFC")"
+  "^run/v1\|ev=waiver\|question=adversarial\|head=$FC_R\|by=Dana Fixture\|said=$FC_WD\|at=[0-9T:Z-]+\$" "$(/usr/bin/grep -F '|question=adversarial|' "$FC_REC/run.log" 2>/dev/null)"
 poke "$RFC" current 8 --check
 expect_eq "EARLY-6g …after which current 8 --check is green" "0" "$RC"
 fc_plan "$FC_FAILR"
@@ -374,7 +374,7 @@ expect_contains "REG-2b …with its replay line, waive or withhold" "|key=waive:
 poke "$RFC" reply "$FC_WD"
 expect_eq "REG-3 reply all default applies it (exit 0)" "0" "$RC"
 expect_regex "REG-3b …writing the waiver with the reply's words" \
-  "^waived: question=structure head=$FC_R by Dana Fixture [0-9T:Z-]+ \"$FC_WD\"\$" "$(/usr/bin/grep '^waived: question=structure ' "$PFC")"
+  "^run/v1\|ev=waiver\|question=structure\|head=$FC_R\|by=Dana Fixture\|said=$FC_WD\|at=[0-9T:Z-]+\$" "$(/usr/bin/grep -F '|question=structure|' "$FC_REC/run.log" 2>/dev/null)"
 expect_eq "REG-4 answered here, the waiver is closed for the session that raised it; its gate act stays open" \
   "gate:fixture" "$(fc_owed2)"
 rm -f "$RFC/.bionic/tmp/engaged-$FC_SID2.state" "$RFC/.bionic/tmp/owed-$FC_SID2.state"
@@ -419,7 +419,7 @@ poke "$RFC" reply "$FC_WR"
 expect_eq "REPLY-4 the orchestrator recommends fixing the S3; reply all recommended (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
 expect_regex "REPLY-4b …the finding is moved to fix on the user's words" \
-  "^moved: record/wave-x/adversarial\\.md#1 to=fix by=Dana Fixture at=[0-9T:Z-]+ words=\"$FC_WR\"( session=[^ ]+)? why=\"" "$(/usr/bin/grep -F "moved: $FC_FID " "$PFC")"
+  "^run/v1\\|ev=finding\\|ref=record/wave-x/adversarial\\.md#1\\|to=fix\\|by=Dana Fixture\\|words=$FC_WR\\|session=[^|]+\\|why=" "$(/usr/bin/grep -F "|ref=$FC_FID|to=fix|" "$FC_REC/run.log" 2>/dev/null)"
 expect_eq "REPLY-4c …and both approvals are stamped with the same words" \
   "2" "$(/usr/bin/grep '^approved: ' "$PFC" | /usr/bin/grep -cF "\"$FC_WR\"")"
 fc_plan "$FC_GOOD"
@@ -463,7 +463,7 @@ fc_page
 poke "$RFC" reply "$FC_WD"
 expect_eq "REPLY-11 reply all default over an open waive:adversarial item exits 0" "0" "$RC"
 expect_regex "REPLY-11b …writing the waiver at the working head with the reply's words" \
-  "^waived: question=adversarial head=$FC_R by Dana Fixture [0-9T:Z-]+ \"$FC_WD\"\$" "$(/usr/bin/grep '^waived: question=adversarial ' "$PFC")"
+  "^run/v1\|ev=waiver\|question=adversarial\|head=$FC_R\|by=Dana Fixture\|said=$FC_WD\|at=[0-9T:Z-]+\$" "$(/usr/bin/grep -F '|question=adversarial|' "$FC_REC/run.log" 2>/dev/null)"
 
 # ============================================================
 section "§T4: a T4 row is read through the gate's one predicate: confirmed by you is proved, pending or a standing finding is a decision"
@@ -807,7 +807,7 @@ section "§STEP0: card.sh step0 renders the configuration card in the 1.20.0 sha
   printf 'walk: exempt\ndesign-interview: true\nmodel_plan: orchestrator=claude-fable-5-1\nseed: ideas/seed.md\n---\n'
   printf '# plan\n\n## Goal\n\nConfigure the fixture run, and nothing else.\n\n## SDLC State\n\ncurrent: 0\nworking-branch: wave/01-fixture\n'
 } > "$PFC"
-rm -f "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/asks.state"
+rm -f "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/asks.state" "$FC_REC/run.log"
 bind_marker "$RFC" "$PFC"
 fc_card step0
 expect_eq "STEP0-1 AC-20.1 card.sh step0 <plan> exits 0, nothing on stderr, under the card's title" \
@@ -825,7 +825,7 @@ section "§CARRY: a carry the run chose is the run's ask until the release appro
 # render's disposition opens `carry:<record>#<n>`, the page records the carries it puts, and the reply that answers the
 # page closes each. fails-when: the reply leaves the carry open on the run's register.
 FC_CK="carry:record:wave-x:adversarial.md:1"
-fc_reg() { cat "$FC_REC/asks.state" 2>/dev/null; }
+fc_reg() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_lines' _ "$FC_LIB" "$RFC" "$SID" 2>/dev/null; }
 fc_record adversarial adversarial piece 'finding: 1 S3 on lib/x.sh:1 a message could be clearer'
 fc_plan "$FC_GOOD"
 fc_page
@@ -862,9 +862,12 @@ poke "$RFC" disposition
 expect_contains "CARRY-7 precondition: the disposition owes the person's ruling on the S2" "$FC_FK" "$(fc_owed)"
 [ "$RC" = 0 ] || printf '      disposition said: %s\n' "$OUT"
 fc_typed "$FC_WD" "$FC_WR" "$FC_DW"
-poke "$RFC" disposition "$FC_FID" defer "$FC_DW" 'the fix waits on the next release'
+FC_SUM="$(cksum < "$PFC")"; FC_ST='A path could break; it is carried to the next release.'
+poke "$RFC" disposition "$FC_FID" defer "$FC_DW" 'the fix waits on the next release' "$FC_ST"
 expect_eq "CARRY-8 the person's deferral is recorded (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      disposition said: %s\n' "$OUT"
+expect_eq "CARRY-8d …as one finding event of the run's log carrying its sentence, and the plan's checksum is unchanged" \
+  "1|stated=$FC_ST|same" "$(/usr/bin/grep -cF "run/v1|ev=finding|ref=$FC_FID|to=defer|" "$FC_REC/run.log" 2>/dev/null)|$(/usr/bin/grep -o 'stated=[^|]*' "$FC_REC/run.log" 2>/dev/null)|$([ "$(cksum < "$PFC")" = "$FC_SUM" ] && echo same || echo changed)"
 expect_contains "CARRY-8b …and the finding stays open" "$FC_FK" "$(fc_owed)"
 expect_eq "CARRY-8c …answered carry, waiting on the release card" "carry|event release card" \
   "$(fc_ans owed_answer_of "$FC_FK" | cut -f1)|$(fc_ans ask_waits_on "$FC_FK")"

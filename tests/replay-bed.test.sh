@@ -274,7 +274,7 @@ CL="$CW/.bio""nic/docs/record/wave-98-cancel"
 logged() { ( . "$RD/lib/log.sh" && RUN_LOG="$CL/run.log" log_append "$@" ); }
 logged step n=0 && logged approval key=step0 by=Dana; brought "$CL"
 carded() { ( cd "$CW" && CLAUDE_CODE_SESSION_ID=$CS bash "$RD/card.sh" step0 "$CP" >/dev/null 2>&1 0<&- ) || echo "rc=$?"
-  awk -F'|' '{ k = ""; s = ""; for (i = 1; i <= NF; i++) { if ($i ~ /^key=/) k = substr($i, 5); if ($i ~ /^state=/) s = substr($i, 7) } if (s == "open") print k }' "$CL/asks.state" 2>/dev/null; }
+  bash -c '. "$1/roots.sh" && . "$1/owed.sh" && owed_list_plan "$2" "$3"' _ "$RD/lib" "$CP" "$CW" 2>/dev/null | cut -f1; }
 expect_true "card: the reader holds the logged approval of step0" ask "$CP" approved step0
 expect_empty "card: while the log holds the approval, the render opens nothing" "$(carded)"
 logged cancel of=approval key=step0

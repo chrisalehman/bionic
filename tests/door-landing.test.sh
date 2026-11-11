@@ -83,7 +83,7 @@ if [ "$DL_LOADED" != 1 ] || [ -z "$DW" ] || [ ! -d "$DW/.git" ]; then
   finish
 fi
 
-dl_record() { cat "$1/.bionic/docs/record/wave-x/landing-proofs.log" 2>/dev/null; }   # <root>
+dl_record() { cat "$1/.bionic/docs/record/wave-x/landing-proofs.log" "$1/.bionic/docs/record/wave-x/run.log" 2>/dev/null; }   # <root> -> the record's lines, then the log's
 dl_head() { git -C "$1" rev-parse --verify -q refs/heads/wave/x; }   # <root>
 dl_plan_line() { /usr/bin/grep -E "^- $2:" "$1/$DOOR_PLAN_REL" 2>/dev/null; }   # <root> <row> -> its `- T<n>:` line
 dl_commit() { _door_inside "$1" && git -C "$1" add -A >/dev/null 2>&1 && git -C "$1" commit --quiet -m "$2"; }   # <tree> <message>
@@ -153,7 +153,7 @@ expect_contains "(l1b) …LANDED onto the working branch" "LANDED branch=wt/T2 o
 expect_eq "(l2) the working branch moved to a merge of the release row's head onto the head before it" \
   "$DL_H1 $DL_P2_HEAD" "$(git -C "$DL" rev-parse "$DL_H2^1" "$DL_H2^2" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
 expect_contains "(l3) the record holds the release row's published landing, by hand" \
-  "line/v1|ev=published|row=T2|commit=$DL_H2|kind=hand|" "$(dl_record "$DL")"
+  "run/v1|ev=published|row=T2|commit=$DL_H2|kind=hand|" "$(dl_record "$DL")"
 expect_contains "(l4) the check's second run passed: the plan's T2 line is written landed by hand" \
   "landed-by-hand:" "$(dl_plan_line "$DL" T2)"
 expect_absent "(l4b) …and the door printed no unwritten plan" "PLAN-UNWRITTEN" "$DL_OUT"
@@ -258,7 +258,7 @@ expect_contains "(c1c) …naming the judge" "judged-by=${DC_H0:0:12}" "$DC_OUT"
 expect_contains "(c2) …which names the planted blob" "HIT entry=1 at blob $DC_BLOB line 1" "$DC_OUT"
 expect_absent "(c2b) …and prints no listed name" "$DOOR_NAME" "$DC_OUT"
 expect_eq "(c3) the record holds T1's ready line and no published one" "1 0" \
-  "$(dl_record "$DC" | /usr/bin/grep -c '^line/v1|ev=ready|row=T1|') $(dl_record "$DC" | /usr/bin/grep -c '^line/v1|ev=published|row=T1|')"
+  "$(dl_record "$DC" | /usr/bin/grep -c '^run/v1|ev=ready|row=T1|') $(dl_record "$DC" | /usr/bin/grep -c '^run/v1|ev=published|row=T1|')"
 expect_eq "(c4) the check ran once, the judge's copy in a landing tree" "1 1" "$(dl_seen_judge "$DC")"
 expect_absent "(c4b) …never the target's copy" "copy=target" "$(door_seen)"
 
@@ -489,7 +489,7 @@ door_run "$DH" env DOOR_MUTANT_FN=line_publish 'DOOR_MUTANT=s|_wt_release_check 
 DH_OUT="$DOOR_OUT"
 expect_eq "(hm1) MUTANT the check's call deleted from the publish path: the working branch holds the planted blob" \
   "$DH_BLOB" "$(git -C "$DH" rev-parse "$(dl_head "$DH"):planted.txt" 2>/dev/null | cut -c1-12)"
-expect_contains "(hm1b) MUTANT …published by hand" "line/v1|ev=published|row=T1|commit=$(dl_head "$DH")|kind=hand|" \
+expect_contains "(hm1b) MUTANT …published by hand" "run/v1|ev=published|row=T1|commit=$(dl_head "$DH")|kind=hand|" \
   "$(dl_record "$DH")"
 expect_absent "(hm1c) MUTANT …with no refusal by the door's check" "REFUSED reason=check-failed" "$DH_OUT"
 
@@ -562,7 +562,7 @@ dl_numbers() {
     inb && /^### / { t = $0; sub(/[[:space:]]+$/, "", t); inp = (t == "### The landing numbers") }
     inb && inp'
 }
-dl_published() { dl_record "$1" | /usr/bin/grep -F "line/v1|ev=published|row=$2|"; }   # <root> <row>
+dl_published() { dl_record "$1" | /usr/bin/grep -F "run/v1|ev=published|row=$2|"; }   # <root> <row>
 
 RR_RELEASE=1 dl_rr_world rerender
 expect_eq "(rr0) precondition: T2 is the release row and the plan holds T3; T1 and the release row landed by hand" \
@@ -578,7 +578,7 @@ expect_contains "(rr1b) …onto the working branch" "LANDED branch=wt/T3 onto=wa
 expect_eq "(rr1c) the head is one commit on the published candidate, the merge of the fix onto the release head" \
   "$DR_H2 $DL_P3_HEAD" "$(git -C "$DR" rev-parse "$DR_C3^1" "$DR_C3^2" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
 DR_PUB="$(dl_published "$DR" T3)"
-expect_contains "(rr1d) the record publishes the candidate" "line/v1|ev=published|row=T3|commit=$DR_C3|kind=hand|" "$DR_PUB"
+expect_contains "(rr1d) the record publishes the candidate" "run/v1|ev=published|row=T3|commit=$DR_C3|kind=hand|" "$DR_PUB"
 expect_contains "(rr1e) …and names the numbers commit the line made" "|numbers=$DR_H3|" "$DR_PUB"
 dl_check "$DR" "$DR_H0" "$DR_H3"
 expect_eq "(rr2) the declared release check at the new head exits 0" "0" "$DOOR_RC"
@@ -614,7 +614,7 @@ expect_eq "(rr5b) the fix row past the release is refused (exit 2) and the worki
   "$DOOR_RC $(dl_head "$DR")"
 expect_contains "(rr5c) …in the words of the renderer" "no plan file at" "$DOOR_OUT"
 expect_contains "(rr5d) …named as the numbers refusal" "REFUSED reason=numbers-unrendered row=T3" "$DOOR_OUT"
-expect_contains "(rr5e) the record holds the fix row ready" "line/v1|ev=ready|row=T3|" "$(dl_record "$DR")"
+expect_contains "(rr5e) the log holds the fix row ready" "run/v1|ev=ready|row=T3|" "$(dl_record "$DR")"
 expect_eq "(rr5f) …and never published" "" "$(dl_published "$DR" T3)"
 
 # The release row still open: a landing changes nothing in CHANGELOG.md.
@@ -627,7 +627,7 @@ DR_B0="$(git -C "$DR" rev-parse "$DR_H0:CHANGELOG.md" 2>/dev/null)"
 expect_true "(rr6b) CHANGELOG.md is read at the head before the landing" [ -n "$DR_B0" ]
 expect_eq "(rr6c) …and the head after it carries the same file" "$DR_B0" "$(git -C "$DR" rev-parse "$DR_H3:CHANGELOG.md" 2>/dev/null)"
 DR_PUB="$(dl_published "$DR" T3)"
-expect_contains "(rr6d) the record publishes the landing at the head" "line/v1|ev=published|row=T3|commit=$DR_H3|" "$DR_PUB"
+expect_contains "(rr6d) the record publishes the landing at the head" "run/v1|ev=published|row=T3|commit=$DR_H3|" "$DR_PUB"
 expect_absent "(rr6e) …with no numbers commit" "numbers=" "$DR_PUB"
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -740,7 +740,7 @@ expect_contains "(d1b) …check-dirtied, by the declared check" "REFUSED reason=
 expect_contains "(d1c) …naming the piece's file it changed" "piece_paths=CHANGELOG.md" "$DX_OUT"
 expect_contains "(d1d) …and the judge, the release base" "judged-by=${DX_H1:0:12}" "$DX_OUT"
 expect_eq "(d2) the plant lands nowhere: the record holds T1's ready line and no published one" "1 0" \
-  "$(dl_record "$DX" | /usr/bin/grep -c '^line/v1|ev=ready|row=T1|') $(dl_record "$DX" | /usr/bin/grep -c '^line/v1|ev=published|row=T1|')"
+  "$(dl_record "$DX" | /usr/bin/grep -c '^run/v1|ev=ready|row=T1|') $(dl_record "$DX" | /usr/bin/grep -c '^run/v1|ev=published|row=T1|')"
 expect_eq "(d3) the check ran once, the judge's copy in a landing tree" "1 1" "$(dl_seen_judge "$DX")"
 
 # The same plant with the door's dirtied arm cut out, in a copy of its own: the refusal above is that arm's.

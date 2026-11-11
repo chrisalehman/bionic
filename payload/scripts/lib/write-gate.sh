@@ -164,7 +164,7 @@ Fix: repair each row named above; the columns are id | step | kind | task | agen
       WG_DETAIL="canonical-sdlc plan '$BASENAME' declares canonical_sdlc_version: 15, and version 15 has no place for:
 $1
 Path: $FILE_PATH
-Fix: remove each part named; the run's state is the log's, and the reader answers it." ;;
+Fix: remove each part named; a version-15 run's state is read from its log, not from its plan." ;;
     design)  # <scale> <what went wrong>
       # ONE ROW FOR FOUR ARMS: all four say the same thing to the reader — this spec names no design
       # anywhere — and differ only in WHICH route was tried, which is what `detail` carries.

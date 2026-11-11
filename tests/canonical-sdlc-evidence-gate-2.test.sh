@@ -837,6 +837,7 @@ od_poke() {  # <args...> -> OD_OUT, OD_RC: session-poker.sh as this session, in 
 }
 od_logs() { find "$OD_REC" -name 'regression-run-*.log' | wc -l | tr -d ' '; }
 od_lrec() { bash -c '. "$1/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "$OD_LIB" "$OD_PLAN" || printf '%s/none' "$OD_ROOT"; }
+od_lall() { cat "$(od_lrec)" "$(dirname "$(od_lrec)")/run.log" 2>/dev/null; }   # the record's lines, then the run log's
 od_state() { bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && proof_state "$2" "$3"' _ "$OD_LIB" "$OD_PLAN" "$OD" 2>/dev/null | cut -f1; }
 
 od_plan 4 '' "$(od_rows pending pending pending)"
@@ -855,7 +856,7 @@ expect_contains "WR-1b …naming the open row" "T1 (step 4, pending)" "$OD_OUT"
 od_plan 5 '' "$(od_rows landed pending pending)"
 od_poke regression-run
 expect_eq "WR-2 AC-6.1 every build row landed: one whole run at the head (exit 0, one log)" "0|1" "$OD_RC|$(od_logs)"
-expect_eq "WR-2b …recording one verdict per suite at that commit" "2" "$(/usr/bin/grep -c "^line/v1|ev=verdict|row=regression|commit=$OD_B|" "$(od_lrec)" 2>/dev/null || :)"
+expect_eq "WR-2b …recording one verdict per suite at that commit" "2" "$(od_lall | /usr/bin/grep -c "^run/v1|ev=verdict|row=regression|commit=$OD_B|")"
 od_poke regression-run
 expect_eq "WR-3 AC-6.1 a second whole run at the same green head: refused (exit 1), no second log" "1|1" "$OD_RC|$(od_logs)"
 expect_contains "WR-3b …saying the head has its whole run" "runs once at a head" "$OD_OUT"
@@ -881,7 +882,7 @@ OD_PLANT=0
 bash -c '. "$1/proof.sh" && proof_regression_fold "$2" "$3" "$4" "$5" "$6"' _ "$OD_LIB" "$OD_PLAN" "$OD" "$OD_H" \
   "$OD_REC/regression-run-$OD_H.log" "$OD_RL/regression-run-$OD_H.log" || OD_PLANT=$((OD_PLANT + 10))
 expect_eq "FX-1c precondition: the red run is left at H (both writers exit 0), its run line and its one red verdict in the record" "0|1|1" \
-  "$OD_PLANT|$(/usr/bin/grep -c "^line/v1|ev=run|log=$OD_RL/regression-run-$OD_H.log|head=$OD_H|" "$(od_lrec)" || :)|$(/usr/bin/grep -c "^line/v1|ev=verdict|row=regression|commit=$OD_H|suite=b.test.sh|result=red|" "$(od_lrec)" || :)"
+  "$OD_PLANT|$(od_lall | /usr/bin/grep -c "^run/v1|ev=run|log=$OD_RL/regression-run-$OD_H.log|head=$OD_H|")|$(od_lall | /usr/bin/grep -c "^run/v1|ev=verdict|row=regression|commit=$OD_H|suite=b.test.sh|result=red|")"
 OD_FL="$(bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-12T11:00:00Z "$3" b.test.sh' _ "$OD_LIB" "$OD_H" "$OD_RL/regression-run-$OD_H.log")"
 od_plan 5 "$OD_FL" "$(od_rows landed landed pending)"
 expect_eq "FX-1b precondition: the regression at H owes the red suite" "owed" "$(od_state)"

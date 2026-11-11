@@ -149,7 +149,7 @@ ck_case "CK-8r current 8 from 7, both adversarial readings failing at the head" 
 # repository's owed store. The check takes the same judgment and not that write; the tree row above saw no file
 # change across the check, and this row proves the store is a file that row reads.
 expect_contains "CK-8r-c …the advance opened the waiver item the judge owes, in the store the check's tree row covers" \
-  "waive:adversarial" "$( ( cd "$RCK" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && cat "$(owed_file)"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" ) 2>/dev/null)"
+  "waive:adversarial" "$( ( cd "$RCK" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && owed_lines' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" ) 2>/dev/null)"
 ck_case "CK-8r2 current 8 from 7, the floor one commit behind the head" 8 7 1 "$(ck_floor "$CK_B")
 $(ck_reads "$CK_C")"
 expect_contains "CK-8r2-b …refused by the judge, naming the commit no run proves (the floor owes no suite: unproved, never owed)" \
@@ -530,7 +530,7 @@ ql_ready() {  # <name> <carrier> -> the record's ev=ready of row T1, as `line_re
   bash -c '. "$1/line.sh" && line_event "$2" ready row=T1 "name=$3" "commit=$(printf "c%.0s" $(seq 40))" branch=wt/T1 tree=/x/T1 suites=none debt=none "carrier=$4"' \
     _ "$QL_LIB" "$QL_PLAN" "$1" "$2"
 }
-ql_clear() { rm -f "$QL_REC"; rm -rf "$BIONIC_GATE_DIR/requests"; mkdir -p "$BIONIC_GATE_DIR/requests"; }
+ql_clear() { rm -f "$QL_REC" "${QL_REC%/*}/run.log"; rm -rf "$BIONIC_GATE_DIR/requests"; mkdir -p "$BIONIC_GATE_DIR/requests"; }
 ql_tick() { forget_digest "$RQL"; poke_pressure "$RQL" 8192 1.0 tick; }
 ql_decision() { printf '%s\n' "$OUT" | sed -n 's/^.*|decision=\([A-Z]*\)|.*$/\1/p' | head -1; }
 ql_rows() { printf '%s\n' "$OUT" | sed -n 's/^.*|rows=\([^|]*\).*$/\1/p' | head -1; }
@@ -582,7 +582,7 @@ ql_ask() {  # <agent> -> a request the gate's own ask files for <agent>, its hol
 ql_ask w1
 expect_nonempty "QL-6 precondition: the gate holds a request whose who is this session's w1" \
   "$(/usr/bin/grep -ls "^who=${SID}:w1\$" "$BIONIC_GATE_DIR"/requests/[0-9]* 2>/dev/null | head -1)"
-expect_eq "QL-6b precondition: the record holds no carrier (no file)" "no" "$([ -f "$QL_REC" ] && echo yes || echo no)"
+expect_eq "QL-6b precondition: the record holds no carrier (no file)" "no" "$({ [ -f "$QL_REC" ] || [ -f "${QL_REC%/*}/run.log" ]; } && echo yes || echo no)"
 ql_tick
 expect_eq "QL-6c an open gate request for w1 and no carrier: the tick prints QUIET and names no row" "QUIET|" "$(ql_decision)|$(ql_rows)"
 ql_clear; ql_ask w2
@@ -925,8 +925,8 @@ section "§PARTS: the release-entry parts render in the checkout they run from: 
 # branch as before, and the part line names the tree that took the commit.
 # FIXTURE FIDELITY: s34_plan's plan, bound to this session, with the working branch and the release in its frontmatter
 # as Step 0 writes them; the doc and integrate rows are the table's own shape; the deferral is lib/proof.sh
-# `proof_finding_lines`' line and its sentence the `finding-stated` verb's; the waiver is `proof_waiver_line`'s, the
-# line `waive` writes. The row's tree is a linked worktree on its own branch cut at the working branch, as
+# `proof_finding_lines`' line with its sentence on it, and the waiver `proof_waiver_line`'s, as an older plan holds
+# both. The row's tree is a linked worktree on its own branch cut at the working branch, as
 # `spawn-worktree.sh create` makes it; the entry is a plain commit on the working branch.
 # fails-when: a verb run from the row's tree commits on the working branch or moves it, leaves the tree's branch or its
 # working tree without the part, changes the commit message, or writes no tree= on the part line; the working branch's
@@ -936,7 +936,7 @@ PA_S1='The one limit the run defers, stated.'
 PA_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
 pa_lib() { bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 9; shift; "$@"' _ "$PA_LIB" "$@"; }   # <fn> [args…]
 pa_tip() { git -C "$RPA" rev-parse --verify -q "refs/heads/$1"; }   # <branch>
-pa_ev() { find "$RPA/.bionic" -name landing-proofs.log -exec cat {} + 2>/dev/null | /usr/bin/grep "|part=$1|" | tail -1; }   # <part>
+pa_ev() { find "$RPA/.bionic" \( -name landing-proofs.log -o -name run.log \) -exec cat {} + 2>/dev/null | /usr/bin/grep "|part=$1|" | tail -1; }   # <part>
 pa_has() { /usr/bin/grep -c "^$2" "$1/CHANGELOG.md" 2>/dev/null | tr -d ' '; }   # <checkout> <line start> -> the count in its working tree
 RPA="$(make_repo parts)"; RPA="$(cd "$RPA" && pwd -P)"
 git -C "$RPA" config user.email t@example.com; git -C "$RPA" config user.name "Dana Fixture"
@@ -949,16 +949,14 @@ awk -v v="$PA_V" 'NR == 1 { print; print "working-branch: wave/01-fixture"; prin
                print "| T4 | 8 | integrate | the pull request. The run reaches main. | orchestrator | — | 10 | REQ-1 | — | — | — | pending |" }' \
   "$PPA" > "$PPA.n" && mv "$PPA.n" "$PPA"
 PA_H="$(pa_tip wave/01-fixture)"
-PA_ADD="$(printf '%s\n%s' "$(pa_lib proof_finding_lines record/wave-01-fixture/critic.md "$(printf '1\tS3\ton\t-\tdefer\t-\tthe one title')")" \
+PA_ADD="$(printf '%s stated="%s"\n%s' "$(pa_lib proof_finding_lines record/wave-01-fixture/critic.md "$(printf '1\tS3\ton\t-\tdefer\t-\tthe one title')")" "$PA_S1" \
   "$(pa_lib proof_waiver_line adversarial "$PA_H" 'Dana Fixture' 2026-10-25T10:00:00Z 'go on')")"
 PA_ADD="$PA_ADD" awk '{ print } /^- T2: / && !d { print ENVIRON["PA_ADD"]; d = 1 }' "$PPA" > "$PPA.n" && mv "$PPA.n" "$PPA"
-poke "$RPA" finding-stated record/wave-01-fixture/critic.md#1 "$PA_S1"
-PA_STATED="$RC"
 git -C "$RPA" worktree add -q -b wt/01-T3 "$TMPROOT/parts-T3" wave/01-fixture >/dev/null 2>&1
 PA_WT="$(cd "$TMPROOT/parts-T3" && pwd -P)"
 expect_eq "PA-0 precondition: the plan's working branch is wave/01-fixture, the sentence is stated, the waiver is a line of its own, the row's tree is on wt/01-T3 at the working branch's head" \
-  "wave/01-fixture|0|1|wt/01-T3|$PA_H" \
-  "$(pa_lib plan_working_branch "$PPA")|$PA_STATED|$(/usr/bin/grep -c '^waived: question=adversarial ' "$PPA" | tr -d ' ')|$(git -C "$PA_WT" symbolic-ref --short -q HEAD)|$(git -C "$PA_WT" rev-parse HEAD)"
+  "wave/01-fixture|1|1|wt/01-T3|$PA_H" \
+  "$(pa_lib plan_working_branch "$PPA")|$(/usr/bin/grep -c '^deferred: .* stated="' "$PPA" | tr -d ' ')|$(/usr/bin/grep -c '^waived: question=adversarial ' "$PPA" | tr -d ' ')|$(git -C "$PA_WT" symbolic-ref --short -q HEAD)|$(git -C "$PA_WT" rev-parse HEAD)"
 
 poke "$PA_WT" known-limits-part T3
 PA_T1="$(pa_tip wt/01-T3)"
@@ -971,7 +969,7 @@ expect_eq "PA-1b …rendered into the tree: its HEAD is the commit, its CHANGELO
 expect_eq "PA-2 …and the working branch is where it was, its checkout without the part" \
   "$PA_H|$PA_H|0" "$(pa_tip wave/01-fixture)|$(git -C "$RPA" rev-parse HEAD)|$(pa_has "$RPA" "- $PA_S1")"
 expect_contains "PA-3 the part line names the commit, the tree's branch and the tree" \
-  "|ev=doc|row=T3|part=known-limits|commit=$PA_T1|branch=wt/01-T3|tree=$PA_WT|at=" "$(pa_ev known-limits)"
+  "|ev=published|part=known-limits|commit=$PA_T1|branch=wt/01-T3|tree=$PA_WT|by=T3|at=" "$(pa_ev known-limits)"
 
 poke "$PA_WT" reviews-part T4
 PA_T2="$(pa_tip wt/01-T3)"
@@ -983,7 +981,7 @@ expect_eq "PA-4b …rendered into the tree: its HEAD is the commit and its CHANG
   "$PA_T2|1" "$(git -C "$PA_WT" rev-parse HEAD)|$(pa_has "$PA_WT" '### The reviews')"
 expect_eq "PA-5 …and the working branch is where it was" "$PA_H|0" "$(pa_tip wave/01-fixture)|$(pa_has "$RPA" '### The reviews')"
 expect_contains "PA-6 the part line names the commit, the tree's branch and the tree" \
-  "|ev=integrate|row=T4|part=reviews|commit=$PA_T2|branch=wt/01-T3|tree=$PA_WT|at=" "$(pa_ev reviews)"
+  "|ev=published|part=reviews|commit=$PA_T2|branch=wt/01-T3|tree=$PA_WT|by=T4|at=" "$(pa_ev reviews)"
 
 poke "$RPA" known-limits-part T3
 PA_T3="$(pa_tip wave/01-fixture)"
@@ -992,7 +990,7 @@ expect_eq "PA-7 run from the checkout holding the working branch, known-limits-p
 expect_eq "PA-7b …by a fast-forward of that checkout, which holds the sentence; the row's branch is untouched" \
   "$PA_T3|1|$PA_T2" "$(git -C "$RPA" rev-parse HEAD)|$(pa_has "$RPA" "- $PA_S1")|$(pa_tip wt/01-T3)"
 expect_contains "PA-8 …and its part line names the working branch and its checkout" \
-  "|ev=doc|row=T3|part=known-limits|commit=$PA_T3|branch=wave/01-fixture|tree=$RPA|at=" "$(pa_ev known-limits)"
+  "|ev=published|part=known-limits|commit=$PA_T3|branch=wave/01-fixture|tree=$RPA|by=T3|at=" "$(pa_ev known-limits)"
 
 git -C "$RPA" worktree add -q "$TMPROOT/parts-main" main >/dev/null 2>&1
 PA_M="$(pa_tip main)"
@@ -1001,7 +999,7 @@ PA_T4="$(pa_tip wave/01-fixture)"
 expect_eq "PA-9 run from a checkout on main, reviews-part commits on the working branch as before, main unmoved" \
   "0|$PA_T3|$PA_M|$PA_T4" "$RC|$(git -C "$RPA" log -1 --format='%P' "$PA_T4" 2>/dev/null)|$(pa_tip main)|$(git -C "$RPA" rev-parse HEAD)"
 expect_contains "PA-9b …and its part line names the working branch and the checkout holding it" \
-  "|ev=integrate|row=T4|part=reviews|commit=$PA_T4|branch=wave/01-fixture|tree=$RPA|at=" "$(pa_ev reviews)"
+  "|ev=published|part=reviews|commit=$PA_T4|branch=wave/01-fixture|tree=$RPA|by=T4|at=" "$(pa_ev reviews)"
 
 # ============================================================
 section "§RETIER: matrix-retier raises a criterion's tier in every place it lives and resets the row; a tier at or below the cell's is refused (REQ-3 AC-3.1, AC-3.2)"
@@ -1031,7 +1029,7 @@ awk '/^\| AC-1\.1 \| T2 \|/ { next } /^AC-1\.1:$/ { skip = 1; next } skip && /^[
   { print }' "$PRT" > "$PRT.n" && mv "$PRT.n" "$PRT"
 RT_SPEC="$RRT/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
 RT_LED="$RRT/.bionic/docs/record/wave-01-fixture/design-ledger.md"
-RT_REC="$RRT/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+RT_REC="$RRT/.bionic/docs/record/wave-01-fixture/run.log"
 rt_row() { awk -F'|' -v a="$1" '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 }
   m && /^\|/ { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == a) { o = ""; for (i = 3; i < NF; i++) { v = $i; gsub(/^[ \t]+|[ \t]+$/, "", v); o = o (i > 3 ? "|" : "") v }; print o; exit } }' "$PRT"; }   # <AC> -> tier|status|evidence|auditor
 rt_key() { awk -v a="$1:" -v k="$2:" 'index($0, a) == 1 { b = 1; next } b && /^[^ \t]/ { b = 0 } b && /^[ \t]+/ { y = $0; sub(/^[ \t]+/, "", y); if (index(y, k) == 1) { sub(/^[^:]*:[ \t]*/, "", y); print y; n++ } } END { if (!n) print "(none)" }' "$PRT"; }   # <AC> <key> -> the block's values of that key
@@ -1062,8 +1060,8 @@ expect_eq "RT-1b …the block's eval: line reads the new tier and text, its evid
   "T2 — $RT_TEXT|pending|(none)|pending" "$(rt_key AC-1.1 eval)|$(rt_key AC-1.1 evidence)|$(rt_key AC-1.1 waiver)|$(rt_key AC-1.1 provenance)"
 expect_eq "RT-1c …the Eval design row reads the type T2 maps to and the new text" "hermetic|$RT_TEXT" "$(rt_eval AC-1.1)"
 expect_eq "RT-1d …the other criterion is as it was" "T2|pending|—|—|hermetic|\`tests/b.test.sh\`" "$(rt_row AC-1.2)|$(rt_eval AC-1.2)"
-expect_regex "RT-1e …the landing record holds the retier line, from the old tier to the new, by this session" \
-  "^line/v1\|ev=matrix-retier\|ac=AC-1\.1\|from=T1\|to=T2\|by=$SID\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T" "$(/usr/bin/grep 'ev=matrix-retier' "$RT_REC" | tail -1)"
+expect_regex "RT-1e …the run's log holds the retier as a hand act of its kind, from the old tier to the new, by this session" \
+  "^run/v1\|ev=hand\|what=matrix-retier\|ac=AC-1\.1\|from=T1\|to=T2\|by=$SID\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T" "$(/usr/bin/grep 'what=matrix-retier' "$RT_REC" | tail -1)"
 expect_regex "RT-1f …the ledger's next heading is Δ1, one past the put's, naming the retier and the new text" \
   "^## Δ1 — retier AC-1\.1 T1→T2 \(orchestrator [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{1,2}:[0-9]{2} [AP]M [A-Z]+\): \`tests/b\.test\.sh\` drives the hermetic run$" \
   "$(/usr/bin/grep '^## Δ' "$RT_LED" | tail -1)"

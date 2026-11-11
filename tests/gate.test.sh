@@ -34,6 +34,7 @@
 #                      lease is ordered as before. open prints the age it gave; `new` takes a
 #                      fresh one, an age given is set exactly, seq never repeats (A-orch-49).
 #                      Mutation: the lease unread answers 4 in the gap
+#   §REAPED            a killed landing run is ended rc=137 and written to its run's log as ev=run
 #   §TERM      AC-6.2  (wave-38 T5) a waiter killed with TERM hands its request back; the row's
 #                      next ask resumes its number and asked=. Mutation: the trap removed ends it
 #                      rc=gone and files a fresh number (N.12, SIGKILL, unchanged)
@@ -981,5 +982,15 @@ expect_eq "CL.2 at busy 0 the browser ask is promised the width, 6, and a work a
   "0|0:6:0|75" "$(rc_of cb2)|$(field "$(id_of cb2)" promise)|$(ask_fg cw2 work k 0 | tail -n 1)"
 printf '0\n' > "$CLAUDE_CONFIG_DIR/bionic/reserve"
 reap
+
+section "§REAPED — a landing's run the gate finds killed is a run fact in its run's log"
+# fails-when: the scan ends a killed landing run with no ev=run rc=137 in the log beside its record, or writes one for a
+# killed run that names no record.
+fresh reaped; kp="$(sleep 30 >/dev/null 2>&1 & echo $!)"; kill "$kp" 2>/dev/null; RP_REC="$D/rec/landing-proofs.log"
+mkdir -p "$BIONIC_GATE_DIR/requests"; for i in 1 2; do { printf 'key=a.test.sh\nkind=landing\nwho=w\ntree=%s\nasked=1000\nholder=%s:x\nlanding=L1\nadmitted=1000\n' \
+  "$D" "$kp"; [ "$i" = 2 ] || printf 'record=%s\n' "$RP_REC"; } > "$BIONIC_GATE_DIR/requests/$i"; done; state >/dev/null
+expect_eq "RP.1 both killed requests are ended rc=137, and the record's log holds the one run line, rc=137, of the request naming it, no landing record beside it" \
+  "137 137|run/v1|ev=run|rc=137|key=a.test.sh|kind=landing|tree=$D|landing=L1|request=1|run.log" \
+  "$(field 1 rc) $(field 2 rc)|$(sed 's/|at=[^|]*$//' "${RP_REC%/*}/run.log" 2>/dev/null)|$(ls "${RP_REC%/*}" 2>/dev/null | paste -sd' ' -)"
 
 finish

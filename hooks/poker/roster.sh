@@ -162,7 +162,7 @@ stop_run_record() {
   [ -n "$POKER_RUN_PLAN" ] && [ -f "$POKER_RUN_PLAN" ] || return 1
   declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
   declare -F line_event >/dev/null 2>&1 || return 1
-  line_event "$POKER_RUN_PLAN" stop-run "$@"
+  line_event "$POKER_RUN_PLAN" hand what=stop-run "$@"
 }
 
 # stop_run_gate <id> -> stops gate request <id> and says what it did; rc 0, or 2 when the end could not be

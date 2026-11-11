@@ -194,8 +194,8 @@ section "§LIMITS — the shipped release's Known limits carry every deferred se
 
 # FIXTURE FIDELITY: a real repository whose committed CHANGELOG's newest entry has a `### Known limits` part, and
 # the run's plan on disk under the project's docs root (never committed, as `.bionic/` is ignored in a real
-# project), in the shapes the writers write: frontmatter `release:` and `fix-policy:`, `deferred:` lines under
-# `## SDLC State` with the ` stated="…"` field `finding-stated` appends (a `"` written `\"`, a `\` written `\\`).
+# project), in the shapes an older plan holds: frontmatter `release:` and `fix-policy:`, `deferred:` lines under
+# `## SDLC State` with their ` stated="…"` field (a `"` written `\"`, a `\` written `\\`).
 # Three deferrals: #1 and #2 stated and deferred by the policy, #4 stated but rated fix (S2 on under S1,S2-on), so
 # only #1 and #2 are held. #3, deferred and unstated, is kept apart (LIM_UNSTATED, LIM_DASH): a deferral rated
 # defer with no sentence refuses the release, so it joins a plan only where that refusal is the thing proved.

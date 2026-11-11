@@ -5,7 +5,7 @@
 # tests/session-poker.test.sh's header; the sandbox, the pins and the shared fixture builders are
 # tests/session-poker.prelude.sh, sourced below after the framework and the POKER seam.
 #
-# SPLIT WHERE NO FIXTURE CROSSES. §SEV builds the repository nine later sections read (§RC-DEFER, §CHECK-GONE, §MOVE,
+# SPLIT WHERE NO FIXTURE CROSSES. §SEV builds the repository eight later sections read (§CHECK-GONE, §MOVE,
 # §REPORT-RTL, §REPORT-KEY, §PASS-KEY, §PASS-MOVED, §MOVE-PASTED, §FINAL-RATING); the sections between export the
 # config and home directories the next run under, so this shard keeps them all, in order.
 #
@@ -357,7 +357,7 @@ expect_contains "SEV-cur2 …naming that reading failing" \
 # round and a second opens nothing; the waive verb closes it; a refusal after the waiver is taken back opens a new round;
 # once a passing reading holds the question, current 8 closes what is left. The sections above left closed rounds.
 sev_owed() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && owed_list' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
-sev_store() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && cat "$(owed_file)"' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
+sev_store() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && owed_lines' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
 SEV_WKEYS="$(sev_owed | cut -f1)"
 expect_contains "AW-1 T35 AC-2.2 the refusal on a failing question opens waive:<question>, the waive verb's key" \
   "waive:adversarial" "$SEV_WKEYS"
@@ -638,143 +638,7 @@ printf 'line/v1|ev=standing|head=%s|suite=a.test.sh|lines=1|log=/rec/line/T2-a-%
 s60_tick
 POKE_BOUND="$LT_BOUND_WAS"
 
-# ============================================================
-section "§RC-DEFER §RC-STATED §RC-PARSE: a deferral is held to its debts, the stated sentence and the release check's list of them (wave-28 T17; REQ-8 AC-8.7; D21)"
-# ============================================================
-#
-# `finding-stated <record>#<n> '<sentence>'` stores a deferred finding's changelog sentence on its `deferred:` line as
-# the last field ` stated="<sentence>"`, through the plan transaction. `release-check` prints `deferral <record>#<n>:
-# stated` when the working head's CHANGELOG.md holds the sentence (white space folded), else `unstated`, its exit the
-# check's own. The rows run on §SEV's fixture in its working branch's worktree, where release-check reads the changelog.
-# One deferral's sentence is made of the words the plan's own parsers read, and every row after it keeps it (§RC-PARSE).
-RD_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-RD_ID1="record/wave-01-fixture/t-S2-off.md#1"
-RD_ID2="record/wave-01-fixture/t-S3-on.md#1"
-RD_ID3="record/wave-01-fixture/sh-defer-unsure.md#1"
-RD_ID4="record/wave-01-fixture/r-pri-ok.md#1"
-RD_ID5="record/wave-01-fixture/c-later.md#1"
-RD_CHK="record/wave-01-fixture/sh-unsure.md#1"
-RD_SA="The install record now lists what setup placed"
-RD_SQ='Said "go" \ now | here'
-RD_HAZ='done; delivered: now - Step 9: delivered: x current: 9 approved-by: me proved: kind=regression head=abc'
-rd_line() { /usr/bin/grep -F "deferred: $1 " "$PSEV"; }  # the plan's deferred: line for a finding
-rd_state() {  # <id> -> stated|unstated, from the last release-check's output; nothing when it printed no line
-  local l
-  l="$(printf '%s\n' "$OUT" | /usr/bin/grep -F "release-check — deferral $1: ")" || return 0
-  printf '%s' "${l##*: }"
-}
-printf '#!/bin/bash\necho "scan: entries=0 hits=0"\nexit 0\n' > "$TMPROOT/rd-check.sh"
-cp "$RSEV/.bionic/config.yaml" "$TMPROOT/rd-config" 2>/dev/null || : > "$TMPROOT/rd-config"
-printf 'release-check: bash %s\n' "$TMPROOT/rd-check.sh" >> "$RSEV/.bionic/config.yaml"
-for _rd in "$RD_ID1" "$RD_ID2" "$RD_ID3" "$RD_ID4" "$RD_ID5"; do
-  expect_eq "RD-0 precondition: $_rd has one deferred: line with no sentence yet" "1|0" \
-    "$(rd_line "$_rd" | wc -l | tr -d ' ')|$(rd_line "$_rd" | /usr/bin/grep -c ' stated=')"
-done
-
-# ---------- §RC-DEFER: a deferral reads unstated until its sentence is in the changelog ----------
-poke "$RSEV" release-check
-expect_eq "RD-1 release-check over a plan holding deferrals none of which is stated exits 0 (it refuses nothing)" "0" "$RC"
-expect_eq "RD-1b …and prints each deferral unstated: $RD_ID1" "unstated" "$(rd_state "$RD_ID1")"
-expect_eq "RD-1c …and $RD_ID2" "unstated" "$(rd_state "$RD_ID2")"
-expect_eq "RD-1d …one line per deferred: line the plan holds, and no line for a finding with none" "$(/usr/bin/grep -c '^deferred: ' "$PSEV" | tr -d ' ')|0" \
-  "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: release-check — deferral ')|$(printf '%s\n' "$OUT" | /usr/bin/grep -cF "deferral $RD_CHK")"
-poke "$RSEV" finding-stated "$RD_ID1" "$RD_SA"
-expect_eq "RD-2 finding-stated on a deferral exits 0" "0" "$RC"
-expect_eq "RD-2c …and to no other deferred: line" "1" "$(/usr/bin/grep -c '^deferred: .* stated=' "$PSEV" | tr -d ' ')"
-poke "$RSEV" release-check
-expect_eq "RD-3 a stated deferral whose sentence is not in the changelog is still unstated (exit 0)" "0|unstated" "$RC|$(rd_state "$RD_ID1")"
-
-# ---------- §RC-PARSE: a deferred: line whose sentence carries the plan's own words passes its parsers ----------
-poke "$RSEV" finding-stated "$RD_ID4" "$RD_HAZ"
-expect_eq "RD-4 finding-stated with a sentence made of the words the plan's parsers read exits 0 (the dry commit passed the gate)" "0" "$RC"
-sev_cur 4
-s34_gate "$RSEV"
-expect_eq "RD-4c the real commit gate admits the plan carrying it (at the step a writer's dry commit judges)" "0" "$GATE_RC"
-cp "$PSEV" "$TMPROOT/rd-plan-keep"; sed '/^approved-by:/d' "$TMPROOT/rd-plan-keep" > "$PSEV"
-s34_gate "$RSEV"
-expect_eq "RD-4c2 …and the same gate refuses it with the approval line taken out, so the row above reads the plan" "2" "$GATE_RC"
-cp "$TMPROOT/rd-plan-keep" "$PSEV"
-sev_cur 7
-sp4_rule_rows "$PSEV"
-poke "$RSEV" current 8
-expect_eq "RD-4d current 8 is admitted over the plan (the judge reads the facts past the deferred: lines)" "0|8" "$RC|$(sed -n 's/^current: //p' "$PSEV")"
-expect_eq "RD-4e …and the run still reads open (run_open: 0), the sentence's delivered: taken for no step line" "0" \
-  "$(bash -c '. "$1/run.sh" || exit 9; run_open "$2" >/dev/null 2>&1; echo $?' _ "$BIONIC_HOOKS_DIR/../payload/scripts/lib" "$PSEV")"
-poke "$RSEV" release-check
-expect_eq "RD-4f release-check still prints that deferral's line, as a sentence (exit 0)" "0|unstated" "$RC|$(rd_state "$RD_ID4")"
-
-# the tick prints a stated deferral by its title, not its sentence
-RSEVT2="$(make_repo rd-tick)"; new_roster "$RSEVT2"
-PSEVT2="$(s47_plan "$RSEVT2" 2 \
-  "| T1 | 4 | build | ready | implementor | — | 30 | REQ-x | payload/x.sh | pending | |")"
-awk '{ print } /^current: / && !d { print "deferred: record/w/rev.md#2 S2 off \"a side path\" stated=\"said \\\"x\\\" | y\""; d = 1 }' \
-  "$PSEVT2" > "$PSEVT2.tmp" && mv "$PSEVT2.tmp" "$PSEVT2"
-poke_pressure "$RSEVT2" 8192 1.0 tick
-expect_contains "RD-5 the tick fills the ready row (the path it prints FINDING on)" "poker: FILL T1" "$OUT"
-
-# ---------- §RC-STATED: the sentence in the changelog makes a deferral stated ----------
-RD_CL="## 1.13.0 — fixture
-- The install record now lists
-  what setup placed, and remove acts only on it."
-s57_commit "$SEV_WT" CHANGELOG.md "$RD_CL" >/dev/null
-poke "$RSEV" release-check
-expect_eq "RD-6 with the sentence in the head's CHANGELOG.md, wrapped across two lines, the deferral reads stated (exit 0)" "0|stated" "$RC|$(rd_state "$RD_ID1")"
-expect_eq "RD-6b …while a deferral with no sentence still reads unstated" "unstated" "$(rd_state "$RD_ID2")"
-poke "$RSEV" finding-stated "$RD_ID1" "a sentence the changelog does not hold"
-poke "$RSEV" release-check
-expect_eq "RD-7b …and the deferral reads unstated again" "unstated" "$(rd_state "$RD_ID1")"
-poke "$RSEV" finding-stated "$RD_ID1" "$RD_SA"
-poke "$RSEV" release-check
-expect_eq "RD-7c …and stated again once the changelog's sentence is put back" "stated" "$(rd_state "$RD_ID1")"
-poke "$RSEV" finding-stated "$RD_ID1" "$RD_SA"
-expect_eq "RD-7d stating the same sentence twice writes nothing (exit 0)" "0" "$RC"
-expect_contains "RD-7e …and says so" "nothing was written" "$OUT"
-poke "$RSEV" finding-stated "$RD_ID2" "$RD_SQ"
-expect_eq "RD-8 a sentence with a quote, a backslash and a pipe is stored escaped, the field still one quoted string" \
-  "0|deferred: $RD_ID2 S3 on \"the S3 on cell\" stated=\"Said \\\"go\\\" \\\\ now | here\"" "$RC|$(rd_line "$RD_ID2")"
-s57_commit "$SEV_WT" CHANGELOG.md "- Said \"go\" \\ now | here" >/dev/null
-poke "$RSEV" release-check
-expect_eq "RD-8b …and matches the changelog's own text verbatim: stated" "stated" "$(rd_state "$RD_ID2")"
-poke "$RSEV" finding-stated "$RD_ID3" "The install  record
-now lists	what setup placed."
-s57_commit "$SEV_WT" CHANGELOG.md "- The install record now lists what setup placed." >/dev/null
-poke "$RSEV" release-check
-expect_eq "RD-9b …and that folded sentence is read against the changelog: stated" "stated" "$(rd_state "$RD_ID3")"
-expect_eq "RD-9c …the other deferrals' states unchanged by it (ID2 stated, ID5 unstated)" "stated|unstated" "$(rd_state "$RD_ID2")|$(rd_state "$RD_ID5")"
-
-# ---------- refusals: byte-identical plan ----------
-s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-stated "$RD_CHK" "a sentence"
-s42_unchanged "RD-10 a finding that is a check owed, with no deferred: line, is not stated" 1 "$PSEV"
-expect_contains "RD-10b …naming why" "carries no deferred: line for $RD_CHK" "$OUT"
-s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-stated "record/wave-01-fixture/nowhere.md#9" "a sentence"
-s42_unchanged "RD-10c a finding the plan does not hold" 1 "$PSEV"
-s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-stated "$RD_ID5" "-"
-s42_unchanged "RD-10d the sentence - (what the continuation writes for none)" 1 "$PSEV"
-s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-stated "$RD_ID5" "   "
-s42_unchanged "RD-10e a blank sentence is the usage error" 2 "$PSEV"
-s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-stated "$RD_ID5"
-s42_unchanged "RD-10f one operand is the usage error" 2 "$PSEV"
-s42_snap "$RSEV" "$PSEV"; poke "$RSEV" finding-stated "no-hash-here" "a sentence"
-s42_unchanged "RD-10g a finding that is not <record>#<n> is the usage error" 2 "$PSEV"
-poke "$RSEV" finding-stated "$RD_ID5" "a sentence for the last deferral"
-expect_eq "RD-10h control: the same call on a deferral exits 0, so the refusals above are the verb's own" "0" "$RC"
-
-# ---------- the arm: a subagent may not state a deferral ----------
-rd_wall() {  # <command> -> the real wall's exit and refusal for a rostered subagent's call
-  local input
-  input="$(jq -n --arg s "$SID" --arg cwd "$RSEV" --arg cmd "$1" '{session_id: $s, cwd: $cwd,
-    hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: $cmd},
-    tool_use_id: "toolu_rd", agent_id: "a-implementor", agent_type: "implementor"}')"
-  GATE_ERR="$( cd "$RSEV" && CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 \
-    bash "${BIONIC_HOOKS_DIR}/bash-walls.sh" <<< "$input" 2>&1 >/dev/null )"
-  GATE_RC=$?
-}
-rd_wall "bash $POKER finding-stated '$RD_ID5' 'a sentence'"
-expect_eq "RD-11 a subagent's finding-stated is refused by the existing arm (exit 2)" "2" "$GATE_RC"
-rd_wall "bash $POKER tick"
-expect_eq "RD-11c control: a read-only verb of the same agent is admitted" "0" "$GATE_RC"
-
-# ---------- the mutation arms: a doctored copy of the poker per fix ----------
+# ---------- a doctored copy of the poker, its siblings and lib linked in (§WALK's mutation) ----------
 RD_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-rd-mut.XXXXXX")"
 rd_mutant() {  # <name> <sed script> -> $RD_MUT/<name>/hooks/session-poker.sh, siblings and lib linked in
   local d="$RD_MUT/$1" _sib
@@ -787,26 +651,6 @@ rd_mutant() {  # <name> <sed script> -> $RD_MUT/<name>/hooks/session-poker.sh, s
   done
   poker_doctored "$POKER" "$d/hooks" sed "$2"
 }
-rd_mutant nowrite 's/^    FS_TAIL=" stated=.*$/    FS_TAIL=""/'
-rd_mutant inverted 's/^    \[ -n "\$DS_ST" \] && case .*$/    [ -n "$DS_ST" ] \&\& case "$DS_CL" in *"$DS_ST"*) : ;; *) DS_ANS=stated ;; esac/'
-expect_eq "RD-mut0 each doctored poker differs from the real one in exactly one line (the doctors took)" "1|1" \
-  "$(diff <(poker_text "$POKER") <(poker_text "$RD_MUT/nowrite/hooks/session-poker.sh") | /usr/bin/grep -c '^>')|$(diff <(poker_text "$POKER") <(poker_text "$RD_MUT/inverted/hooks/session-poker.sh") | /usr/bin/grep -c '^>')"
-RD_REAL_POKER="$POKER"
-POKER="$RD_MUT/nowrite/hooks/session-poker.sh"
-poke "$RSEV" finding-stated "$RD_ID5" "a sentence for the doctored verb"
-POKER="$RD_REAL_POKER"
-expect_eq "RD-mut1 the verb with its write removed still runs (exit 0)" "0" "$RC"
-poke "$RSEV" finding-stated "$RD_ID5" "a sentence for the doctored verb"
-POKER="$RD_MUT/inverted/hooks/session-poker.sh"
-poke "$RSEV" release-check
-POKER="$RD_REAL_POKER"
-expect_eq "RD-mut2 the release check with its match inverted still runs and prints its deferrals (exit 0)" "0|yes" \
-  "$RC|$([ -n "$(rd_state "$RD_ID2")" ] && echo yes || echo no)"
-expect_eq "RD-mut2b …and reads the stated deferral unstated, which RD-6 and RD-8b read stated (they go red on it)" "unstated" "$(rd_state "$RD_ID1")"
-rm -rf "$RD_MUT"
-
-cp "$TMPROOT/rd-config" "$RSEV/.bionic/config.yaml"
-POKE_BOUND="$RD_BOUND_WAS"
 
 # ============================================================
 section "§STEP-FIELD §COPIED-LOG §REVIEW-RANGE §CUR7-COVERED: what a run's close wrote by hand, a verb writes or reads"
@@ -855,7 +699,7 @@ expect_eq "VG-3c AC-20.3 a byte copy of the recorded run's log registers (exit 0
 
 # ---------- §REVIEW-RANGE: the user's waiver of a question is where its next reading starts ----------
 poke "$RVG" waive all 'I waive the readings at A'
-expect_eq "VG-2 the user's waiver of every question at A (exit 0)" "0|3" "$RC|$(/usr/bin/grep -c "^waived: question=[a-z]* head=$VG_A " "$PVG")"
+expect_eq "VG-2 the user's waiver of every question at A (exit 0)" "0|3" "$RC|$(/usr/bin/grep -c "^run/v1|ev=waiver|question=[a-z]*|head=$VG_A|" "$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "${S46_LIB%/*}" "$PVG")")"
 VG_C="$(s57_commit "$VG_WT" lib/a.sh C)"
 printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: piece\n' "$VG_A" "$VG_C" > "$VG_DIR/past-waiver.md"
 poke "$RVG" proof-add review record/wave-01-fixture/past-waiver.md --question adversarial --reader vg-crit
@@ -1078,7 +922,7 @@ hs_merge() {  # <row> <path> -> sets HS_R (the row's head) and HS_M (the person'
   HS_M="$(git -C "$HS" rev-parse HEAD)"
   HS_F="$HS_M"
 }
-hs_rec() { cat "$HS/.bionic/docs/record/wave-01-fixture/landing-proofs.log" 2>/dev/null; }
+hs_rec() { cat "$HS/.bionic/docs/record/wave-01-fixture/landing-proofs.log" "$HS/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null; }
 hs_judge() {  # <base> <head> -> the floor judge's verdict on the commits after <base> to <head>: its exit code and words
   local o rc; o="$(bash -c '. "$1" && _proof_past_f "$2" "$3" "$4" "$5" ""' _ "$S46_LIB" "$HS_PLAN" "$HS" "$1" "$2" 2>&1)"; rc=$?
   printf '%s|%s' "$rc" "$o"
@@ -1090,16 +934,16 @@ poke "$HS" row-landed T1 "$HS_M1" "$HS_AT" --by-hand "Dana Fixture" "landed on t
 expect_eq "HS-1 AC-6.1 row-landed --by-hand with --suites, --green-at and --log exits 0" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "HS-1b …the record holds the row's ready event with its suites" \
-  "line/v1|ev=ready|row=T1|name=-|commit=$HS_M1|" "$(hs_rec)"
-expect_contains "HS-1c …naming both suites" "suites=session-poker-4.test.sh,units.test.sh|" "$(hs_rec | /usr/bin/grep '^line/v1|ev=ready|row=T1|')"
+  "run/v1|ev=ready|row=T1|name=-|commit=$HS_M1|" "$(hs_rec)"
+expect_contains "HS-1c …naming both suites" "suites=session-poker-4.test.sh,units.test.sh|" "$(hs_rec | /usr/bin/grep '^run/v1|ev=ready|row=T1|')"
 expect_eq "HS-1d …one green verdict per suite, at the commit they were green at, with the log" \
-  "line/v1|ev=verdict|row=T1|commit=$HS_R1|suite=session-poker-4.test.sh|result=green|log=$HS/.bionic/docs/record/wave-01-fixture/T1-green.log
-line/v1|ev=verdict|row=T1|commit=$HS_R1|suite=units.test.sh|result=green|log=$HS/.bionic/docs/record/wave-01-fixture/T1-green.log" \
-  "$(hs_rec | /usr/bin/grep '^line/v1|ev=verdict|row=T1|' | sed 's/|admitted=.*//')"
+  "run/v1|ev=verdict|row=T1|commit=$HS_R1|suite=session-poker-4.test.sh|result=green|log=$HS/.bionic/docs/record/wave-01-fixture/T1-green.log
+run/v1|ev=verdict|row=T1|commit=$HS_R1|suite=units.test.sh|result=green|log=$HS/.bionic/docs/record/wave-01-fixture/T1-green.log" \
+  "$(hs_rec | /usr/bin/grep '^run/v1|ev=verdict|row=T1|' | sed 's/|admitted=.*//')"
 expect_eq "HS-1e …in the order ready, verdicts, published" "ready verdict verdict published" \
-  "$(hs_rec | /usr/bin/grep '|row=T1|' | sed 's/^line\/v1|ev=\([a-z]*\)|.*/\1/' | paste -sd' ' -)"
+  "$(hs_rec | /usr/bin/grep '|row=T1|' | sed 's/^[a-z]*\/v1|ev=\([a-z]*\)|.*/\1/' | paste -sd' ' -)"
 expect_contains "HS-1f …the published line is the hand landing's, field for field" \
-  "line/v1|ev=published|row=T1|commit=$HS_M1|kind=hand|by=Dana Fixture|why=landed on the report|at=$HS_AT" "$(hs_rec)"
+  "run/v1|ev=published|row=T1|commit=$HS_M1|kind=hand|by=Dana Fixture|why=landed on the report|at=" "$(hs_rec)"
 expect_eq "HS-2 AC-6.1 the floor's judge proves the commit by the verdicts the landing wrote (exit 0, nothing printed)" \
   "0|" "$(hs_judge "$HS_BASE" "$HS_M1")"
 HS_BASE2="$HS_M1"
@@ -1107,7 +951,7 @@ hs_merge T2 lib/b.sh; HS_M2="$HS_M"
 poke "$HS" row-landed T2 "$HS_M2" "$HS_AT" --by-hand "Dana Fixture" "landed on the report"
 expect_eq "HS-3 control: the same call without the three flags exits 0" "0" "$RC"
 expect_eq "HS-3b …and writes the published line alone: no ready event, no verdict for T2" "0|1" \
-  "$(hs_rec | /usr/bin/grep -c '^line/v1|ev=\(ready\|verdict\)|row=T2|')|$(hs_rec | /usr/bin/grep -c '^line/v1|ev=published|row=T2|commit='"$HS_M2"'|kind=hand|')"
+  "$(hs_rec | /usr/bin/grep -c '^run/v1|ev=\(ready\|verdict\)|row=T2|')|$(hs_rec | /usr/bin/grep -c '^run/v1|ev=published|row=T2|commit='"$HS_M2"'|kind=hand|')"
 expect_contains "HS-3c …and the judge finds no run of the row's suites at the commit" \
   "1|commit ${HS_M2:0:12} (row T2) is not proved: no run of its row's suites is recorded at it" "$(hs_judge "$HS_BASE2" "$HS_M2")"
 # A RUN AGAIN OF THE SAME LANDING WRITES NOTHING MORE: the published line is the landing recorded.
@@ -1139,9 +983,9 @@ poke "$HS" row-landed T3 "$HS_M3" "$HS_AT" --by-hand "Dana Fixture" "landed on t
 expect_eq "EV-2 a hand landing given the suites, the branch and the tree exits 0" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "EV-2b …and its ready event carries both" "|commit=$HS_M3|branch=wt/T3|tree=$HS/.worktrees/T3|suites=units.test.sh|" \
-  "$(hs_rec | /usr/bin/grep '^line/v1|ev=ready|row=T3|')"
+  "$(hs_rec | /usr/bin/grep '^run/v1|ev=ready|row=T3|')"
 expect_contains "EV-3 control: the landing given neither (T1, above) still reads - for both" "|commit=$HS_M1|branch=-|tree=-|suites=session-poker-4.test.sh,units.test.sh|" \
-  "$(hs_rec | /usr/bin/grep '^line/v1|ev=ready|row=T1|')"
+  "$(hs_rec | /usr/bin/grep '^run/v1|ev=ready|row=T1|')"
 
 # ============================================================
 section "§AMEND-NARROW: amend --suites= narrows a live contract's suites and its lands_on= with them; the collector hands the wall the suites that exist"
@@ -1722,7 +1566,7 @@ st_until() {  # <seconds> <command>… -> rc 0 once the command holds, 1 when th
 }
 st_ended() { [ -s "$1.rc" ]; }
 st_rec() { bash -c '. "$1/payload/scripts/lib/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "$BIONIC_SCRIPTS_DIR" "$PST"; }
-st_runline() { /usr/bin/grep -F "|ev=run|log=$1|" "$(st_rec)" 2>/dev/null | tail -n 1; }   # <log from its root> -> its run line
+st_runline() { cat "$(st_rec)" "$(dirname "$(st_rec)")/run.log" 2>/dev/null | /usr/bin/grep -F "|ev=run|log=$1|" | tail -n 1; }   # <log from its root> -> its run line
 : > "$ST_CTL/hold"
 
 # Each tick below but one forgets the last digest, so it prints in full and a line it did not print is a
@@ -1843,7 +1687,7 @@ wk_step5() {  # -> the Step 5 block's walk-artifact: lines, trimmed, `;`-joined
   awk '/^- Step 5:/ { s = 1; next } s && /^- / { s = 0 } s && /^[ \t]+walk-artifact:/ { t = $0; sub(/^[ \t]+/, "", t); print t }' "$PWK" | paste -sd';' -
 }
 wk_recfile() { bash -c '. "$1/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "${S46_LIB%/*}" "$PWK"; }
-wk_ev() { /usr/bin/grep -F "|ev=$1|" "$(wk_recfile)" 2>/dev/null; }   # <ev> -> its lines in the landing record
+wk_ev() { cat "$(wk_recfile)" "$(dirname "$(wk_recfile)")/run.log" 2>/dev/null | /usr/bin/grep -F "|ev=$1|"; }   # <ev> -> its lines in the record, then the log
 wk_rec() {  # <name> <verdict: line or -> [<head: line or ->] [<table row>...] -> a walk record
   local f="$WK_DIR/$1.md" v="$2" h="$3" r; shift 3
   { printf '# walk\n\nwalker: wk-walker\n'; [ "$h" = - ] || printf '%s\n' "$h"
@@ -1859,11 +1703,11 @@ WK_ROWS=('| AC-1.1 | CONFIRMED | the card printed whole |' '| AC-1.2 | CONFIRMED
 poke "$RWK" matrix-render
 expect_eq "WK-0 setup: matrix-render renders the head with the walk stub (exit 0)" "0|walk-artifact: pending" "$RC|$(wk_head walk-artifact)"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
-# The first fixture criterion settled by a landing, as line_settle writes it: cells and block key, and the settled line.
+# The first fixture criterion settled by a landing, as an older run's line_settle wrote it: cells, block key, settled line.
 WK_SET_LOG="record/wave-01-fixture/T2-a.test.sh.log"; printf 'head=%s rc=0\n' "$WK_A" > "$RWK/.bionic/docs/$WK_SET_LOG"
 bash -c '. "$1/units.sh" >/dev/null 2>&1 && matrix_row_cells "$2" AC-1.1 "3=discharged" "4=$3" > "$2.c" && matrix_block_key "$2.c" AC-1.1 evidence "$3" > "$2" && rm -f "$2.c"' \
   _ "${S46_LIB%/*}" "$PWK" "$WK_SET_LOG"
-bash -c '. "$1/line.sh" >/dev/null 2>&1 && line_event "$2" settled row=T2 "commit=$3" findings= cells=AC-1.1' _ "${S46_LIB%/*}" "$PWK" "$WK_A"
+wk_r="$(wk_recfile)"; mkdir -p "${wk_r%/*}"; printf 'line/v1|ev=settled|row=T2|commit=%s|findings=|cells=AC-1.1|at=%s\n' "$WK_A" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$wk_r"
 ( cd "$RWK" && git add -f "$PWK" && git commit -qm settled ) >/dev/null 2>&1
 WK_ROW11="$(wk_row AC-1.1)"; WK_ROW13="$(wk_row AC-1.3)"
 expect_eq "WK-0b precondition: AC-1.1 reads the landing's discharge and the record names it settled; AC-1.2 and AC-1.3 pending" \

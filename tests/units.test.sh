@@ -1122,10 +1122,10 @@ sec_poke() {  # -> SEC_OUT (stdout and stderr), SEC_RC: regression-run [flags…
 sec_ran() { [ -e "$SEC_ROOT/ran" ] && printf yes || printf no; }
 sec_logs() { find "$SEC/.bionic/docs/$SEC_REL" -name 'regression-run-*.log' | wc -l | tr -d ' '; }
 sec_rec() { bash -c '. "$1/payload/scripts/lib/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "$BIONIC_SCRIPTS_DIR" "$SEC_PLAN"; }
-sec_runline() { /usr/bin/grep -F "|ev=run|log=$SEC_REL/$1|" "$(sec_rec)" 2>/dev/null || :; }   # <log name> -> its run line
+sec_runline() { cat "$(sec_rec)" "$(dirname "$(sec_rec)")/run.log" 2>/dev/null | /usr/bin/grep -F "|ev=run|log=$SEC_REL/$1|" || :; }   # <log name> -> its run line, the record's or the log's
 printf 'all green\n' | regression_fixture "$SEC_PLAN" "$SEC/.bionic/docs/$SEC_REL/regression-run-$SEC_H.log" "$SEC_H" 0 0
 expect_eq "SEC-0 precondition: the record holds a whole run at H, clean, and no run has started" "1|no|1" \
-  "$(/usr/bin/grep -c "^line/v1|ev=run|log=$SEC_REL/regression-run-$SEC_H.log|head=$SEC_H|dirty=0|" "$(sec_rec)" 2>/dev/null || :)|$(sec_ran)|$(sec_logs)"
+  "$(sec_runline "regression-run-$SEC_H.log" | /usr/bin/grep -c "^run/v1|ev=run|log=$SEC_REL/regression-run-$SEC_H.log|head=$SEC_H|dirty=0|")|$(sec_ran)|$(sec_logs)"
 
 # SEC-2 first, at the head the whole run read: this arm does not refuse it, so the declared regression starts.
 sec_poke
