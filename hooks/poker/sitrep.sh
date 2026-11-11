@@ -701,20 +701,24 @@ _sitrep_reader() {  # -> 0 once lib/proof.sh and the reader under it are loaded 
   declare -F _proof_facts >/dev/null 2>&1 && _proof_reader_load
 }
 _SITREP_FACTS_PLAN=""; _SITREP_FACTS=""
-_sitrep_hold() {  # <plan> -> 0 once the plan's fold, as it stands now, is held in this shell
-  _sitrep_reader || return 1
-  _SITREP_FACTS="$(_proof_facts "$1")"; _SITREP_FACTS_PLAN="$1"
+# A fold that failed (a process refused under memory pressure) is empty or short: held, every fact asked after would
+# read absent. So it is never held, and each read below takes the fold before it pipes it and exits 2 when it failed.
+_sitrep_hold() {  # <plan> -> 0 once the plan's fold, as it stands now, is held in this shell; 2, nothing held, when it cannot be folded
+  _SITREP_FACTS_PLAN=""; _SITREP_FACTS=""
+  { _sitrep_reader && _SITREP_FACTS="$(_proof_facts "$1")"; } || return 2
+  _SITREP_FACTS_PLAN="$1"
 }
-sitrep_facts() {  # <plan> [<event type>…] -> the run's standing facts, of those types when named, one run/v1 line each
-  local t=" ${*:2} "
+sitrep_facts() {  # <plan> [<event type>…] -> the run's standing facts, of those types when named, one run/v1 line each; 2 when the fold fails
+  local t=" ${*:2} " f="$_SITREP_FACTS"
   _sitrep_reader || return 0
-  { if [ "$_SITREP_FACTS_PLAN" = "$1" ]; then printf '%s\n' "$_SITREP_FACTS"; else _proof_facts "$1"; fi; } \
-    | awk -F'|' -v t="$t" "$_READER_AWK"'NF && (t == "  " || index(t, " " ev() " "))'
+  [ "$_SITREP_FACTS_PLAN" = "$1" ] || f="$(_proof_facts "$1")" || return 2
+  printf '%s\n' "$f" | awk -F'|' -v t="$t" "$_READER_AWK"'NF && (t == "  " || index(t, " " ev() " "))'
 }
-_sitrep_ask() {  # <plan> <reader question's function> [args] -> its answer over the plan's fold
-  local plan="$1"; shift
+_sitrep_ask() {  # <plan> <reader question's function> [args] -> its answer over the plan's fold; 2 when the fold fails
+  local plan="$1" f; shift
   _sitrep_reader || return 1
-  ( reader_facts() { sitrep_facts "$plan"; }; "$@" )
+  f="$(sitrep_facts "$plan")" || return 2
+  ( reader_facts() { printf '%s' "${f:+$f$'\n'}"; }; "$@" )
 }
 # _SITREP_EPOCH_AWK: `ep(at)`, beside _PATROL_ISO_AWK, the epoch of a fact's UTC instant, to the minute or the second; -1 for any other text
 _SITREP_EPOCH_AWK='
@@ -1158,12 +1162,13 @@ SITREP_ASKS
 }
 
 # sitrep_gather <plan> <root> <sheet|line> -> every fact of the sheet in the SG_* variables, rc 0; with `line`, only
-# what the Patrol's status and the asks need (no reviews, no idle minutes, no suite runs).
+# what the Patrol's status and the asks need (no reviews, no idle minutes, no suite runs). rc 2, SG_UNREAD set and no
+# other fact set, when the run's fold fails: its facts would read absent, so the caller says they could not be read.
 sitrep_gather() {
   local plan="$1" root="$2" mode="$3" now rec rows reds red_rows lr lr1 approvals appr_at dlv_at cur lq lwait ledges
   local sit ty gl lab desc kind note id stp state landed=0 total=0 last_id="" last_at="" proj
   now="$(sitrep_now)"
-  _sitrep_hold "$plan" || return 0
+  SG_UNREAD=yes; SG_ASKS=""; SG_TASKS=""; _sitrep_hold "$plan" || return 2; SG_UNREAD=""
   # read on every path below, set only when the record exists; from bash 4.4 a bare local is unset under set -u
   lq=""
   rec="$(_wt_proofs_path "$root" "$plan")"
@@ -1557,7 +1562,8 @@ SITREP_SHEET_ASKS
 # one log they cannot count either number two ways; the card's hand-holds line counts a window, never the run.
 sitrep_so_far() {
   local h a
-  h="$(_sitrep_ask "$1" reader_q_hands "$1" | grep -c .)"; a="$(_sitrep_ask "$1" reader_q_asks "$1" | grep -c .)"
+  h="$(_sitrep_ask "$1" reader_q_hands "$1")" && a="$(_sitrep_ask "$1" reader_q_asks "$1")" || return 2
+  h="$(printf '%s' "$h" | grep -c .)"; a="$(printf '%s' "$a" | grep -c .)"
   printf 'run.so-far: %s %s taken by hand · %s open %s\n' "$h" "$(sitrep_noun "$h" act acts)" "$a" "$(sitrep_noun "$a" ask asks)"
 }
 
@@ -1653,6 +1659,7 @@ sitrep_saved_age() {
 # rest; an ask whose wait is not read as an event is the user's, since doubt is the user's.
 sitrep_status() {
   local on ev
+  [ -z "${SG_UNREAD:-}" ] || { printf "the run's status could not be read: its facts did not fold; ask again\n"; return 2; }
   read -r on ev <<SITREP_COUNT
 $(printf '%s\n' "$SG_ASKS" | awk -F'\t' 'NF && $1 != "" { if (index($5, "event ") == 1) e++; else n++ } END { print n + 0, e + 0 }')
 SITREP_COUNT
@@ -2036,6 +2043,7 @@ sitrep_tick_line() {
       if declare -F proof_plan_slug >/dev/null 2>&1 && [ -n "$HO_SRR" ]; then
         sitrep_gather "$PV_PLAN" "$HO_SRR" line 2>/dev/null
         HO_RUNLINE="$(sitrep_status)"; HO_ASKS="$(sitrep_ask_words)"; HO_BLOCKED="$(sitrep_blocked_on_you)"
+        [ -z "${SG_UNREAD:-}" ] || { HO_BLOCKED="not read"; HO_NOROWS="not read"; }
         # The open tasks are the sheet's: every task it does not read as done, so the list is the run line's own
         # `m` less its `k`; each is joined to its row for the agent and the worktree it names.
         HO_ROWS="$( { printf '%s\n' "$SG_TASKS" | awk '/^task: id=/ { id = $2; sub(/^id=/, "", id)
@@ -2073,7 +2081,7 @@ sitrep_tick_line() {
         printf '2\tworking branch: %s\n' "${HO_HEADS%%$'\n'*}"
         printf '2\tintegration: %s\n' "${HO_HEADS#*$'\n'}"
         if [ -n "$HO_ROWS" ]; then printf '2\topen tasks (%s):\n' "$(printf '%s\n' "$HO_ROWS" | grep -c .)"; printf '%s\n' "$HO_ROWS" | awk '{ print "4\t" $0 }'
-        else printf '2\topen tasks: none\n'; fi
+        else printf '2\topen tasks: %s\n' "${HO_NOROWS:-none}"; fi
       fi
       printf '2\tpatrol: %s\n' "$HO_PATROL"
     }
@@ -2538,7 +2546,8 @@ sitrep_tick_line() {
     sitrep_gather "$RS_PLAN" "$(cd "$(project_root "${RS_PLAN%/*}")" 2>/dev/null && pwd -P)" line 2>/dev/null
     printf 'run: %s\n' "$(sitrep_status)"
     RS_ASKW="$(sitrep_ask_words)"
-    if [ -n "$RS_ASKW" ]; then printf '%s\n' "$RS_ASKW" | sed 's/^/ask: /'; else printf 'ask: none — nothing holds on you\n'; fi
+    if [ -n "$RS_ASKW" ]; then printf '%s\n' "$RS_ASKW" | sed 's/^/ask: /'
+    elif [ -n "${SG_UNREAD:-}" ]; then printf "ask: not read — the run's facts could not be read\n"; else printf 'ask: none — nothing holds on you\n'; fi
     RS_OWN="$(printf '%s\n' "$RS_OPEN" | awk '{ k = $2 } k ~ /^(approve|waive|finding|gate):/ { sub(/^open: /, "owned-by-user: "); print }')"
     RS_APPR="$(units_waiting "$RS_PLAN" "$(fill_step_token "$RS_PLAN" 2>/dev/null)" 2>/dev/null | awk -F'\t' -v have="$(printf '%s\n' "$RS_OWED" | cut -f1 | tr '\n' ' ')" '
       { r = $2; sub(/^live:/, "", r); if (r !~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) next
@@ -2681,12 +2690,12 @@ sitrep_tick_line() {
     [ -n "$SR_ROOT" ] || SR_ROOT="$REPO_REAL"
     REPO_REAL="$SR_ROOT" decisions_settle "$SR_PLAN" "$(docs_root "$SR_ROOT")/record/$(proof_plan_slug "$SR_PLAN")/design-ledger.md"
     if [ "$SR_LINE" = yes ]; then
-      sitrep_gather "$SR_PLAN" "$SR_ROOT" line
+      sitrep_gather "$SR_PLAN" "$SR_ROOT" line || { sitrep_status; exit 2; }
       sitrep_status
       exit 0
     fi
     if [ "$SR_CARD" = no ]; then
-      sitrep_gather "$SR_PLAN" "$SR_ROOT" sheet
+      sitrep_gather "$SR_PLAN" "$SR_ROOT" sheet || { die "REFUSED — the run's facts could not be read, so no sheet is printed; run again: bash ${HOOK_DIR}/session-poker.sh sitrep $SR_PLAN"; exit 2; }
       sitrep_save "$SR_ROOT" "$SR_PLAN"
       exit 0
     fi
@@ -2698,6 +2707,7 @@ sitrep_tick_line() {
       die "REFUSED — the sheet you wrote from is $((SR_AGE / 60)) min old: run sitrep again."
       exit 1
     fi
+    _sitrep_hold "$SR_PLAN" || { die "REFUSED — the run's facts could not be read, so no card is drawn; run again: bash ${HOOK_DIR}/session-poker.sh sitrep card $SR_PLAN, the judgment on its stdin"; exit 2; }
     SR_SHEET="$(mktemp "${TMPDIR:-/tmp}/bionic-sheet.XXXXXX")" || { die "REFUSED — no temporary file for the sheet; no card is drawn."; exit 2; }
     # The saved sheet is the facts; only its asks are read again, from the register alone, so a card is never the cost
     # of a second gather. The goals a reached theme drops asks for are the saved sheet's own met goals.

@@ -1702,6 +1702,16 @@ expect_eq "RC3 the decision ruled: no open: and no ask: line names it while the 
   "0|0|2|settled: D21 · \"1\" · Chris Lehman 2026-10-06 · the gate the judge holds" \
   "$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^open: .*D21')|$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^ask: .*D21')|$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^ask: approval: ')|$(printf '%s\n' "$RECAP" | /usr/bin/grep '^settled: D21')"
 
+section "§FOLD: a fold that fails is no fact: the sheet prints none and exits 2, the line and the recap say the status could not be read, and nothing is held"
+SR_ST="$TMPROOT/stand"; mkdir -p "$SR_ST/payload/scripts"; cp -R "$BIONIC_HOOKS_DIR" "$SR_ST/hooks"; cp -R "${SR_OWED_LIB%/*}" "$SR_ST/payload/scripts/lib"; echo 'reader_facts() { return 128; }' >> "$SR_ST/payload/scripts/lib/reader.sh"
+sr_fd() { printf '%s %s %s' "$RC" "$(printf '%s\n' "$OUT" | grep -cE "$1")" "$(printf '%s\n%s\n' "$OUT" "$ERR" | grep -c 'could not be read')"; }  # <pattern> -> exit, its lines, could-not-read lines
+sr_run --line "$SR_PLAN"; SR_F="$(sr_fd '^4 of 17 tasks ')"; POKER="$SR_ST/hooks/session-poker.sh" sr_run --line "$SR_PLAN"
+expect_eq "FD1 the reader exiting 128, a refused fork's exit: the line form says the status could not be read and prints no count, exit 2; whole, its count" "0 1 0|2 0 1" "$SR_F|$(sr_fd '^4 of 17 tasks ')"
+sr_recap; SR_F="$(OUT="$RECAP" ERR= sr_fd '^run: 4 of 17 tasks ')"; POKER="$SR_ST/hooks/session-poker.sh" sr_recap
+expect_eq "FD2 …the recap's run:, ask: and tick lines say so where the status went; whole, the count" "0 1 0|0 0 3" "$SR_F|$(OUT="$RECAP" ERR= sr_fd '^run: 4 of 17 tasks ')"
+sr_run "$SR_PLAN"; SR_S0="$OUT"; SR_F="$(sr_fd '^run\.step: ')"; POKER="$SR_ST/hooks/session-poker.sh" sr_run "$SR_PLAN"
+expect_eq "FD3 …the sheet prints no fact and one line that the run's facts could not be read, exit 2; whole, run.step and exit 0" "0 1 0|2 0 1|" "$SR_F|$(sr_fd '^run\.step: ')|$OUT"
+sr_run "$SR_PLAN"; expect_eq "FD4 …and the next sheet, the reader whole, is the whole sheet before it: nothing of the failed fold was held" "$SR_S0" "$OUT"
 # ============================================================
 section "§ONCE: a decision a row waits on is owed once, not as the tick's approval item and the ledger's decision both"
 # ============================================================
