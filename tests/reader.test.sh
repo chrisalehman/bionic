@@ -308,7 +308,13 @@ expect_eq "at 15 every criterion in one fold: its state, its tier by its eval ty
   "AC-7.1,pending,,T1,,CONFIRMED,,REQ-7;AC-7.2,discharged,approval,T1,,CONFIRMED,me 2026-11-01 AC-7.2,REQ-7;AC-7.3,pending,,T1,,CONFIRMED,,REQ-7;AC-7.4,discharged,proof,T1,record/new/e4.md,CONFIRMED,,REQ-7;AC-7.5,discharged,waiver,T1,,CONFIRMED,,REQ-7;|REFUTED|" "$(every "$H")|$(every "$G" | cut -d, -f6)|$(every | cut -d, -f6)"
 W=old; expect_eq "at 14 a row the table holds answers its event, else its own cells and block; a row the Eval design lacks follows, tiered by its cell" \
   "AC-7.4,discharged,proof,T1,e.md,CONFIRMED,Ann 2026-11-01 saw it,;AC-8.1,pending,,T4,,REFUTED,Bo 2026-11-02 tried it,REQ-8;" "$(every | tr ';' '\n' | grep -E '^AC-(7.4|8.1),' | tr '\n' ';')"
-ask cell AC-9.9; expect_status "a criterion the plan lacks has no cell" 1 "$?"
+W=aud; plan aud <<< "run/v1|ev=proof|kind=review|question=evidence|head=$H|result=pass|evidence=record/aud/a.md|at=2026-11-01T00:00:09Z
+run/v1|ev=proof|ac=AC-7.3|evidence=record/aud/w.md|at=2026-11-01T00:00:10Z"
+sed 's/^| AC-8\.1 |/| AC-7.3 | T1 | pending | — | — |\n| AC-7.5 | T1 | discharged | e5.md | — |\n&/' "$D/plans/epic-x/old.plan.md" | sed 's/\\n/\n/g' > "$D/plans/epic-x/aud.plan.md"
+aud() { every "$@" | tr ';' '\n' | awk -F, '$1 ~ /^AC-7\.[345]$/ { printf "%s=%s ", $1, $6 }'; }
+expect_eq "at 14 a row a logged proof discharges with no verdict reads the evidence review at the head (none with no head); the table's own rows keep their cells" \
+  "AC-7.3=CONFIRMED AC-7.4=CONFIRMED AC-7.5= |AC-7.3= AC-7.4=CONFIRMED AC-7.5= " "$(aud "$H")|$(aud)"
+W=old; ask cell AC-9.9; expect_status "a criterion the plan lacks has no cell" 1 "$?"
 ask cell; expect_status "cell with no criterion is refused" 2 "$?"
 
 section "JOIN"
