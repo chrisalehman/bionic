@@ -10,8 +10,8 @@
 #            delivered: with no hand-hold; the replay's log holds no hand landing or merge, plan edit, step set back or waiver
 #   §WINDOW  after the close, the hand-holds window ends at the plan's delivered: time, and a decline planted after
 #            the release approval card is counted: the card ends nothing
-#   §VERBS   every refusal the replay met names a verb that writes the cell (amend, the plan's edit or
-#            step-field), and that verb's call on the cell, then the refused call again, exit 0
+#   §VERBS   every verb the replay's part runs exits 0, no command of it exits otherwise, and each kind of hand
+#            write it makes is marked
 #   §PR      the integrate row's pull request goes through a stand-in gh, the only gh on its PATH, whose log holds
 #            `pr create --base main --head wave/x`
 #   §ENTRY   after close-out, the release entry's reviews part, at the branch's final head and on main after the merge,
@@ -272,28 +272,18 @@ if cr_reached "SR-0"; then
 fi
 
 # ============================================================
-section "§VERBS: every refusal the replay met names the verb that writes the cell, and that verb then writes it"
+section "§VERBS: every verb the replay's part runs exits 0, and each kind of hand write it makes is marked"
 # ============================================================
-# fails-when: a refusal names no verb of amend, the plan's edit and step-field, a refused call is left unfollowed,
-# or the named verb, or the refused call after it, exits non-zero.
+# fails-when: a verb the replay runs is missing or exits non-zero, any command of the part exits non-zero, or a kind
+# of hand write goes unmarked.
 if cr_reached "VB-0"; then
   VB_RCS="$(cr_rcs)"
   expect_eq "VB-1 the replay's part logs an exit 0 for each verb the replay runs, named" "$CR_VERBS" \
     "$(cr_part | cr_names | sed -n 's/^0|//p' | cr_held "$CR_VERBS")"
-  expect_eq "VB-1b …and every non-zero exit is a refusal the replay followed" "" \
-    "$(printf '%s\n' "$VB_RCS" | awk -F'|' '$1 != 0 { print $2 }' | while IFS= read -r l; do
-        cr_marks refused | /usr/bin/grep -q -F -- "$l · names: " || printf '%s\n' "$l"; done)"
+  expect_eq "VB-1b …and no command of the part exits non-zero" "" "$(printf '%s\n' "$VB_RCS" | awk -F'|' '$1 != 0 { print $2 }')"
   expect_eq "VB-2 the replay's marks are read: a hand write of each kind the replay makes, named ($CR_HANDS)" \
     "$(printf '%s' "$CR_HANDS" | tr ' ' '|')" \
     "$(cr_marks 'by hand' | sed -n 's/^\[\([a-z]*\)\] .*/\1/p' | cr_held "$(printf '%s' "$CR_HANDS" | tr ' ' '|')")"
-  expect_eq "VB-2b …and every refusal names a verb of $RH_FOLLOW_VERBS" "" \
-    "$(cr_marks refused | while IFS= read -r m; do v="${m##* · names: }"
-        case " $RH_FOLLOW_VERBS " in (*" $v "*) : ;; (*) printf '%s\n' "$m" ;; esac; done)"
-  expect_eq "VB-3 each named verb's call on the cell, then the refused call again, exits 0" "" \
-    "$(cr_marks refused | while IFS= read -r m; do l="${m% · names: *}"
-        f="$(cr_part | awk -v m="# refused: $m" 'index($0, m) == 1 { f = 1; next } f && /^  rc=[0-9]+  \(follow: / { sub(/^  rc=/, ""); sub(/ .*/, ""); print; exit }')"
-        a="$(cr_rc "$l, again" | tail -1)"
-        [ "$f|$a" = "0|0" ] || printf '%s: follow=%s again=%s\n' "$l" "${f:-none}" "${a:-none}"; done)"
 fi
 
 # ============================================================

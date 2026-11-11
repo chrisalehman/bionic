@@ -82,12 +82,6 @@ if ! type -t roster_row_fixture >/dev/null 2>&1; then
   . "${BIONIC_SCRIPTS_DIR}/tests/lib/roster-row.sh" || return 1 2>/dev/null || exit 1
 fi
 
-# The kinds of hand write, each what a person, an agent or the harness writes in a real run (above).
-RH_HAND_KINDS="prose record code typed launch"
-# The verbs whose refusals the replay follows: a refusal of a verb that writes the plan's cells names the one of
-# these that writes the cell, `edit` for the person's edit of a Tasks cell, and the replay makes it on that cell
-# and then runs the refused call again.
-RH_FOLLOW_VERBS="amend edit step-field"
 
 # The run's three goals, as the plan's goals: line declares them: met, not met and not measured yet in every state.
 RH_GOALS="shown · the person says from the card what they owe (record/wave-x/goal-shown.md) ; asks · every ask on the register is on the card (record/wave-x/goal-asks.md) ; walked · the walk finds nothing to fix (record/wave-x/goal-walked.md)"
@@ -315,36 +309,6 @@ _rh_launch() {
       tool_name:"Agent", tool_input:{name:$n}, tool_response:{agentId:("a-" + $n)}, tool_use_id:$u}')" "$RH_ROOT/hooks/execution-recorder.sh"
 }
 
-# _rh_follow <label> <row> <record> <cmd> [args] -> <cmd> run; refused, the refusal's first named verb of
-# RH_FOLLOW_VERBS is read, a `# refused:` line names it, the cell it names on <row> is written with <record> (a path
-# under the docs root) through that verb, and <cmd> is run again. A refusal naming no such verb, or a cell the replay
-# holds no value for, stops the rehearsal.
-_rh_follow() {
-  local label="$1" row="$2" rec="$3" said v key val
-  shift 3
-  _rh_do "$label" "$@" 2>/dev/null && return 0
-  said="$DOOR_OUT"
-  v="$(printf '%s\n' "$said" | /usr/bin/grep -oE 'session-poker\.sh [a-z][a-z-]*' | awk -v set=" $RH_FOLLOW_VERBS " \
-    '{ w = $2; if (index(set, " " w " ")) { print w; exit } }')"
-  key="$(printf '%s\n' "$said" | /usr/bin/grep -oE "edit the [A-Za-z-]+ cell of $row in the plan" | head -1)"; key="${key#edit the }"; key="${key%% *}"
-  [ -z "$key" ] || v=edit
-  printf '# refused: %s · names: %s\n' "$label" "${v:-none}" >> "$RH_LOG"
-  case "$v" in
-    edit)
-      case "$key" in
-        Files) val=".bionic/docs/$rec" ;;
-        artifact) val="$rec" ;;
-        *) printf 'rehearse %s: %s refused naming an edit of %s %s, a cell the replay holds no value for\n' "$RH_STATE" "$label" "$row" "${key:-<none>}" >&2
-           return 1 ;;
-      esac
-      _rh_cell "follow: edit $row $key" "$row" "$key=$val" || return 1 ;;
-    *)
-      printf 'rehearse %s: %s refused naming %s, no verb that writes the cell:\n' "$RH_STATE" "$label" "${v:-none of $RH_FOLLOW_VERBS}" >&2
-      printf '%s\n' "$said" | sed 's/^/  | /' >&2
-      return 1 ;;
-  esac
-  _rh_do "$label, again" "$@"
-}
 
 # _rh_landed <row> -> 0 when the units helper reads <row> landed
 _rh_landed() {
