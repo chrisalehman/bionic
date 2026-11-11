@@ -876,7 +876,9 @@ needs_n() { if [ -f "$NREC" ]; then wc -l < "$NREC" | tr -d ' '; else echo 0; fi
 needs_drive "$NB" s "$FX_FACT" "$NEEDS_FIX" ""
 expect_eq "NEEDS-1 a needs fix under a bound plan appends one line" "1" "$(needs_n)"
 expect_regex "NEEDS-2 …a hand act of kind refusal in the run's log, carrying the verb" \
-  "^run/v1\|ev=hand\|what=refusal\|needs=person\|wall=$FX_VERB\|at=[0-9]{4}-[0-9-]{5}T[0-9:]{8}Z$" "$(cat "$NREC")"
+  "^run/v1\|ev=hand\|what=refusal\|needs=person\|wall=$FX_VERB\|why=[^|]+\|at=[0-9]{4}-[0-9-]{5}T[0-9:]{8}Z$" "$(cat "$NREC")"
+expect_eq "NEEDS-2b …its reason what was refused and what it needs, as the user line says them" "$FX_FACT ($NEEDS_FIX)" \
+  "$(sed -n 's/.*|why=\([^|]*\)|.*/\1/p' "$NREC")"
 expect_status "NEEDS-3 …and the refusal still exits 2" "2" "$DRV_RC"
 expect_eq "NEEDS-4 …with the one user line, the fix as given" "bionic: $FX_VERB refused — $FX_FACT ($NEEDS_FIX)" "$DRV_ERR"
 needs_drive "$NB" s "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
