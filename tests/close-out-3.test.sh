@@ -393,14 +393,24 @@ PR_RUNS="$PR/.bionic/tmp/runs"; mkdir -p "$PR_RUNS" "$SANDBOX/fake-shim"
 roster_row_fixture status=identified session=fixture name=w-reg agent_id=areg \
   "run_log=$PR_RUNS/w-reg-run.sh.log" run_cmd=tests/run.sh run_rc=0 >> "$PR/.bionic/tmp/roster-fixture.state"
 printf '#!/bin/bash\nwhile :; do sleep 0.2; done\n' > "$SANDBOX/fake-shim/booked.sh"
-PR_LOG="$PR_RUNS/w-orph-o.test.sh.log"; : > "$PR_LOG"
+pr_shim() {  # <log> -> a stand-in shim on that log, its pid file written; the pid on stdout
+  : > "$1"
+  perl -MPOSIX -e 'my $l = shift; my $p = fork; exit 0 if $p; POSIX::setsid(); open(my $f, ">", "$l.pid"); print $f "$$\n"; close $f; open(STDIN, "<", "/dev/null"); open(STDOUT, ">>", $l); open(STDERR, ">&", \*STDOUT); exec @ARGV' \
+    "$1" bash "$SANDBOX/fake-shim/booked.sh" --run-log "$1"
+  i=0; while [ ! -s "$1.pid" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+  cat "$1.pid" 2>/dev/null
+}
+PR_LOG="$PR_RUNS/w-orph-o.test.sh.log"; PR_PID="$(pr_shim "$PR_LOG")"
 printf '2026-10-08T00:00:02Z\to.test.sh\t§sec-orph\n' > "$PR_LOG.progress.tsv"
-perl -MPOSIX -e 'my $l = shift; my $p = fork; exit 0 if $p; POSIX::setsid(); open(my $f, ">", "$l.pid"); print $f "$$\n"; close $f; open(STDIN, "<", "/dev/null"); open(STDOUT, ">>", $l); open(STDERR, ">&", \*STDOUT); exec @ARGV' \
-  "$PR_LOG" bash "$SANDBOX/fake-shim/booked.sh" --run-log "$PR_LOG"
-i=0; while [ ! -s "$PR_LOG.pid" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
-PR_PID="$(cat "$PR_LOG.pid" 2>/dev/null)"
 TS_LIVE_PIDS="$TS_LIVE_PIDS ${PR_PID:-}"
 expect_true "RUNS.0 precondition: the orphan's shim is alive" kill -0 "${PR_PID:-0}"
+# The session closing the run is bound to it, so a hand act would reach its log: a person's stop of a second run, with
+# its reason, is one hand event there; the close's own sweep, the tool working, adds none.
+printf 'plan=%s\nengaged_at=2026-10-08T00:00:00Z\n' "$PR/$PLAN_REL" > "$PR/.bionic/tmp/engaged-fixture.state"
+PR_HAND="$PR_RUNS/w-hand-h.test.sh.log"; TS_LIVE_PIDS="$TS_LIVE_PIDS $(pr_shim "$PR_HAND")"
+( cd "$PR" && HOME="$SB_HOME" CLAUDE_CODE_SESSION_ID=fixture bash "$REPO_ROOT/hooks/session-poker.sh" stop-run "$PR_HAND" --why 'a person stopped it' ) >/dev/null 2>&1
+pr_hands() { /usr/bin/grep '^run/v1|ev=hand|what=stop-run|' "$PR/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null | sed 's/.*|why=\([^|]*\)|.*/\1/' | paste -sd'|' -; }
+expect_eq "RUNS.0b precondition: a person's stop with its reason is one hand event in the run's log" "a person stopped it" "$(pr_hands)"
 
 run_close "$PR" check
 expect_eq "RUNS.1 AC-4.6 check prints the release card's count of full runs, from the run records" "yes" \
@@ -409,12 +419,13 @@ expect_eq "RUNS.2b …ending in the run's last progress line" "yes" \
   "$(contains "$(printf '%s\n' "$CO_OUT" | grep '^orphan: ')" "; last progress: 2026-10-08T00:00:02Z o.test.sh §sec-orph")"
 expect_true "RUNS.3 …and sends nothing: the orphan is still alive" kill -0 "${PR_PID:-0}"
 
-run_close "$PR" run
+run_close_as fixture "$PR" run
 expect_eq "RUNS.4 run exits 0" "0" "$CO_RC"
 expect_eq "RUNS.5 AC-4.6 run prints the count on the card too" "yes" "$(contains "$CO_OUT" "regression-runs: 1")"
 expect_false "RUNS.7 …and the orphan's process is gone" kill -0 "${PR_PID:-0}"
 expect_eq "RUNS.8 …and the wipe took its files with the rest of .bionic/tmp" "0" "$(tmp_entries "$PR")"
 expect_eq "RUNS.9 one orphan, one line" "1" "$(printf '%s\n' "$CO_OUT" | grep -c '^orphan: ')"
+expect_eq "RUNS.10 …and the close's sweep of it is no hand event: the person's stop is still the only one" "a person stopped it" "$(pr_hands)"
 
 # ============================================================
 section "INSERT — wave-33 T8 (REQ-4 AC-4.2, D8): close-out writes the Step-8 line it checks for"

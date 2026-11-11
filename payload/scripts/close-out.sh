@@ -916,7 +916,7 @@ co_orphans() {  # <run|check> -> one `orphan:` line per live detached run under 
     if [ "$1" = check ]; then
       out="$(cd "$ROOT" && bash "$(co_poker)" stop-run "$log" --report-only 2>/dev/null)"
     else
-      out="$(cd "$ROOT" && bash "$(co_poker)" stop-run "$log" 2>/dev/null)"
+      out="$(cd "$ROOT" && bash "$(co_poker)" stop-run "$log" --machine close-out --why 'an orphan at the close: no session followed it' 2>/dev/null)"
     fi
     case "$out" in
       *" — RUNNING; would TERM"*|*" — stopped ("*) say "orphan: $id — ${out#* — }; last progress: ${prog:-none}" ;;
