@@ -1209,7 +1209,12 @@ line_landing_writes() {
     fi
     [ ! -f "$new.2" ] || mv -f "$new.2" "$new"
     rm -f "$new.2.cells"
-    if ! line_settle "$plan" "$row" "$com" "$new" "$at" || [ -n "$(units_validate "$new" "$plan" 2>&1)" ]; then rm -f "$new"; return 1; fi
+    # The copy is judged as the plan is, and refused only for a fault it adds: a plan that already breaks the table
+    # is the person's to mend, and no landing's matrix writes wait on it.
+    if ! line_settle "$plan" "$row" "$com" "$new" "$at" \
+       || [ -n "$(units_validate "$new" "$plan" 2>&1 | /usr/bin/grep -vxF -f <(units_validate "$plan" "$plan" 2>&1))" ]; then
+      rm -f "$new"; return 1
+    fi
     if [ "$(cksum < "$plan" 2>/dev/null)" = "$sum" ]; then
       if cmp -s "$new" "$plan"; then rm -f "$new"; else mv -f "$new" "$plan" || { rm -f "$new"; return 1; }; fi
       line_settled "$plan" "$root" "$row" "$com"

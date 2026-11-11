@@ -663,6 +663,18 @@ tick_told_once() {
   return 0
 }
 
+# tick_record_stands <row> <Files cell> -> 0 when a record its Files or its artifact cell (TICK_ARTS) names stands as a
+# file: a path from the docs root (TICK_DOCS, for `record/…`) or from the repository, a leading `./` or `!` not part of it.
+tick_record_stands() {
+  local e art
+  art="$(printf '%s\n' "$TICK_ARTS" | awk -F'\t' -v r="$1" '$1 == r { print $2; exit }')"
+  while IFS= read -r e; do
+    e="${e#"${e%%[![:space:]]*}"}"; e="${e%"${e##*[![:space:]]}"}"; e="${e#!}"; e="${e#./}"
+    case "$e" in record/*) [ -n "$TICK_DOCS" ] && [ -f "$TICK_DOCS/$e" ] && return 0 ;; *[A-Za-z0-9]*) [ -f "$REPO_REAL/$e" ] && return 0 ;; esac
+  done <<< "$(printf '%s,%s\n' "${2:-}" "$art" | tr ',' '\n')"
+  return 1
+}
+
 # tick_plan_memoised <command> [args…] -> runs the command with the bound plan's table parsed
 # once for everything it asks (`units_memoised`, payload/scripts/lib/units.sh); a tick with no
 # readable plan runs it bare, since there is no table to hold.
@@ -1664,23 +1676,33 @@ BACKSTOP_ROWS
       # A RECORD ROW NOBODY LAUNCHES (the orchestrator's own: a regression row, an integrate row) lands the same way
       # once it is ready and its checks pass: a ready row of a record kind with no tree, no launch and no writer of its
       # own. Until its record and the registration its kind owes stand it is offered as before; a reason is told once,
-      # and none while its record is still to be written.
-      while IFS=$'\t' read -r BS_ID BS_KIND; do
-        [ -n "$BS_ID" ] || continue
-        BS_RC=0
-        BS_OUT="$( cd "$REPO_REAL" && PV_PLAN="$POKER_RUN_PLAN" PV_REPO="$REPO_REAL" record_row_land "$BS_ID" 2>&1 )" || BS_RC=$?
-        if [ "$BS_RC" -eq 0 ]; then
-          say "LANDED $BS_ID — the orchestrator's $BS_KIND row; the tick landed it: $(clean "$(printf '%s\n' "$BS_OUT" | sed -n 's/^poker: landed [^ ]* — //p' | head -1)")"
-        else
-          BS_WHY="$(printf '%s\n' "$BS_OUT" | /usr/bin/grep -m1 'REFUSED' | sed 's/^poker: //')"
-          case "$BS_WHY" in *"does not exist"*|*"lands through ready"*) continue ;; esac
-          tick_told_once "landing:$BS_ID" "$BS_WHY" && say "NOT-LANDED $BS_ID — the orchestrator's $BS_KIND row waits: $(clean "$BS_WHY")"
-        fi
-      done <<OWN_ROWS
-$(units_rows "$POKER_RUN_PLAN" 2>/dev/null | awk -F'\t' -v ready=" $(fill_ready_set "$POKER_RUN_PLAN" 99999 0 2>/dev/null | tr '\n' ' ') " '
-    index(ready, " " $1 " ") && $10 == "pending" && $11 !~ /[A-Za-z0-9]/ && $3 ~ /^(test|verify|review|doc|integrate)$/ \
-      && ($5 == "" || $5 == "-" || $5 == "—" || tolower($5) == "orchestrator") { printf "%s\t%s\n", $1, $3 }')
-OWN_ROWS
+      # and none while its record is still to be written. The ready set is asked only once some such row's record
+      # stands, so a tick with none pays no second schedule.
+      TICK_OWN="$(units_rows "$POKER_RUN_PLAN" 2>/dev/null | awk -F'\t' '$10 == "pending" && $11 !~ /[A-Za-z0-9]/ \
+          && $3 ~ /^(test|verify|review|doc|integrate)$/ && ($5 == "" || $5 == "-" || $5 == "—" || tolower($5) == "orchestrator") {
+        printf "%s\t%s\t%s\n", $1, $3, $9 }')"
+      TICK_OWN_STANDS=""; TICK_DOCS="$(docs_root "$REPO_REAL" 2>/dev/null)"
+      TICK_ARTS="$(awk -F'|' '/^## / { t = ($0 ~ /^## Tasks/); next } t && /^\| *id *\|/ { a = 0; for (i = 2; i < NF; i++) { h = $i; gsub(/ /, "", h); if (h == "artifact") a = i }; next }
+        t && a && /^\| *T[0-9]/ { id = $2; v = $a; gsub(/ /, "", id); gsub(/^ +| +$/, "", v); print id "\t" v }' "$POKER_RUN_PLAN" 2>/dev/null)"
+      while IFS=$'\t' read -r BS_ID BS_KIND BS_FILES; do
+        [ -n "$BS_ID" ] && tick_record_stands "$BS_ID" "$BS_FILES" && TICK_OWN_STANDS="${TICK_OWN_STANDS}${BS_ID}"$'\t'"${BS_KIND}"$'\n'
+      done <<< "$TICK_OWN"
+      if [ -n "$TICK_OWN_STANDS" ]; then
+        TICK_OWN_READY=" $(fill_ready_set "$POKER_RUN_PLAN" 99999 0 2>/dev/null | tr '\n' ' ') "
+        while IFS=$'\t' read -r BS_ID BS_KIND; do
+          [ -n "$BS_ID" ] || continue
+          case "$TICK_OWN_READY" in *" $BS_ID "*) : ;; *) continue ;; esac
+          BS_RC=0
+          BS_OUT="$( cd "$REPO_REAL" && PV_PLAN="$POKER_RUN_PLAN" PV_REPO="$REPO_REAL" record_row_land "$BS_ID" 2>&1 )" || BS_RC=$?
+          if [ "$BS_RC" -eq 0 ]; then
+            say "LANDED $BS_ID — the orchestrator's $BS_KIND row; the tick landed it: $(clean "$(printf '%s\n' "$BS_OUT" | sed -n 's/^poker: landed [^ ]* — //p' | head -1)")"
+          else
+            BS_WHY="$(printf '%s\n' "$BS_OUT" | /usr/bin/grep -m1 'REFUSED' | sed 's/^poker: //')"
+            case "$BS_WHY" in *"lands through ready"*) continue ;; esac
+            tick_told_once "landing:$BS_ID" "$BS_WHY" && say "NOT-LANDED $BS_ID — the orchestrator's $BS_KIND row waits: $(clean "$BS_WHY")"
+          fi
+        done <<< "$TICK_OWN_STANDS"
+      fi
       # THE PAGE CLOSES WHEN NO ROW WAITS ON IT (wave-34 T4; REQ-3 AC-3.1, D13). An open `ruling:<id>`
       # stands while its ruling is unread and some active row's writer (`row_writer`, the backstop's own
       # answer) is the ruling's writer. A ruling shown closes its item where it is stamped (lib/roster.sh

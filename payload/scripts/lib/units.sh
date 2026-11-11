@@ -214,7 +214,8 @@ _units_table() {
 # cell, which is the old home the translation reads, so a run whose log holds none of these reads as its cells say.
 # The text itself is judged as written (`units_validate` reads `_units_table`), so a write is never refused for a
 # state the plan does not carry. A plan writer's dry copy and close-out's preflight copy are read with their plan's run.
-# A row's tree and base are the run's the same way: the newest `tree` event the log holds for it (the tree verb's, with an
+# A row the log holds landed keeps the name of the launch that landed it, as its agent cell kept it, so the stop of
+# that name finds its tree. A row's tree and base are the run's the same way: the newest `tree` event the log holds for it (the tree verb's, with an
 # instant) fills the `worktree` and `base` slots, the base by its first eight digits as a cell spells it; a row the
 # log holds no tree for reads its cells.
 # _units_live <plan> -> `<id><TAB><state><TAB><agent><TAB><tree><TAB><base>` per row the log moves; nothing without a
@@ -237,7 +238,7 @@ _units_live() {
     f["ev"] == "published" { st[r] = "landed" }
     f["ev"] == "tree" && f["at"] != "" { tr[r] = f["path"]; bs[r] = substr(f["base"], 1, 8) }
     END { for (i = 1; i <= n; i++) { r = ord[i]; if ((r in st) || (r in tr))
-      printf "%s\t%s\t%s\t%s\t%s\n", r, st[r], (st[r] == "active" ? nm[r] : ""), tr[r], bs[r] } }'
+      printf "%s\t%s\t%s\t%s\t%s\n", r, st[r], nm[r], tr[r], bs[r] } }'
 }
 
 # A PROOF IS THE RUN'S TOO: what each row's proof read, `live:head` and a reading's question compare is the run's proofs,
