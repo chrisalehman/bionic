@@ -74,7 +74,6 @@ export BIONIC_WALL_VERBOSE=1
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
-. "$(dirname "$0")/lib/frontmatter-parser.sh"
 
 REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 
@@ -276,23 +275,6 @@ mk_agent_post_teammate() {  # <sid> <transcript> <cwd> <name> <addressing-id> <t
       tool_use_id:$u, duration_ms:9}'
 }
 
-# The SubagentStop event (task 5). FAITHFUL to capture probe §3-D, a live teammate
-# stop: `agent_type` carries the name, `agent_id` the transcript form,
-# `background_tasks[]` its task-id key. Only the four fields the gate reads vary.
-mk_substop_payload() {  # <cwd> <sid> <agent_type> <stop_hook_active true|false>
-  jq -n --arg c "$1" --arg s "$2" --arg a "$3" --argjson h "$4" \
-    '{session_id:$s, transcript_path:("/tmp/transcripts/" + $s + ".jsonl"), cwd:$c,
-      prompt_id:"95b0701b-7814-42ca-a26f-58123e667f9a",
-      permission_mode:"bypassPermissions",
-      agent_id:"aprobemate-4da9be517e8f90bd", agent_type:$a,
-      effort:{level:"high"}, hook_event_name:"SubagentStop", stop_hook_active:$h,
-      agent_transcript_path:("/tmp/transcripts/" + $s + "/subagents/agent-aprobemate-4da9be517e8f90bd.jsonl"),
-      last_assistant_message:"DONE\n\nRan the task; report written.",
-      background_tasks:[{id:"tooha5cgi", type:"teammate", status:"running",
-                         description:"run the task and report"}],
-      session_crons:[]}'
-}
-
 # The LANDING SWEEP's event (epic-16 wave-03, T4c). FAITHFUL to
 # .bionic/docs/record/session-20260814-wave-detector-terminal-state/t4b-probe-report.md
 # §2.1 (the eleven-key Stop envelope) and §2.2 (the `background_tasks[]` row shape,
@@ -311,20 +293,6 @@ mk_stopsweep_payload() {  # <cwd> <sid> <stop_hook_active true|false> [live-agen
       hook_event_name:"Stop", stop_hook_active:$h,
       last_assistant_message:"The background probe agent completed and returned PONG.",
       background_tasks:$bg, session_crons:[]}'
-}
-
-# The landing gate's OTHER arm (session-20260815 T2): a named teammate is judged at its own
-# SubagentStop rather than by disappearing from `background_tasks[]`, which it never does.
-# Key set from t1-probe-report.md §2.1; `agent_type` carries the dispatch NAME for a teammate.
-mk_substop_payload() {  # <cwd> <sid> <agent-id> <agent-type> <stop_hook_active true|false>
-  jq -n --arg c "$1" --arg s "$2" --arg a "$3" --arg t "$4" --argjson h "$5" \
-    '{session_id:$s, transcript_path:("/tmp/transcripts/" + $s + ".jsonl"),
-      agent_transcript_path:("/tmp/transcripts/" + $s + "/subagents/agent-" + $a + ".jsonl"),
-      cwd:$c, prompt_id:"e30e6fb0-3868-467c-b092-ca03e55b4cd5",
-      permission_mode:"bypassPermissions", effort:{level:"high"},
-      agent_id:$a, agent_type:$t,
-      hook_event_name:"SubagentStop", stop_hook_active:$h,
-      last_assistant_message:"Done.", background_tasks:[], session_crons:[]}'
 }
 
 # THE SESSION ROSTER, in the shape its writer writes it — field for field from
@@ -935,56 +903,12 @@ V_ORIGIN="$BIONIC_HOOKS_DIR/../payload/scripts/lib/walls.sh"
 V_HOOKCHAIN="$BIONIC_SKILLS_DIR/canonical-sdlc/diagrams/hook-chain.svg"
 v_hook_val() { grep -m1 '^SUPPORTED_SDLC_VERSION=' "$1" 2>/dev/null | cut -d= -f2 | tr -cd '0-9'; }
 V_ORIGIN_VAL="$(v_hook_val "$V_ORIGIN")"
-v_hookchain_vals() {  # three chips, one per line, in the order they render:
-                      #   "canonical_sdlc_version == 14" (x2) and
-                      #   "canonical_sdlc_version: 14 is the only value either hook accepts."
-  grep 'class="version-pin"' "$1" 2>/dev/null | while IFS= read -r _vline; do
-    printf '%s\n' "$_vline" | grep -oE 'canonical_sdlc_version[=: ]+[0-9]+' | grep -oE '[0-9]+$'
-  done
-}
 
 # ---- from §Section P (the Patrol stamp): PARTY_PK ----
 PARTY_PK="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
 
 # ---- from §S.1: PARTY_PK_S ----
 PARTY_PK_S="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
-
-# ---- from §S: s_backdate ----
-s_backdate() {  # <file> — an hour older than everything else in the fixture
-  touch -t "$(date -v-1H +%Y%m%d%H%M.%S 2>/dev/null || date -d '-1 hour' +%Y%m%d%H%M.%S)" "$1"
-}
-
-# ---- from §S.4 (the fixture world and its drivers): s4_plan, s4_bind, s4_attest, s4_stop_payload ----
-s4_plan() {  # <path> <current> [writers]
-  mkdir -p "$(dirname "$1")"
-  {
-    printf -- '---\n'
-    printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf 'intent: build\nrigor: double\nscale: wave\n'
-    # INSIDE THE LEADING FRONTMATTER, which is the only place hooks/dispatch-preflight.sh
-    # looks for it. A `parallel-budget:` appended after the body parses as prose and the
-    # ceiling reads as absent, which makes the budget wall inert — and an inert wall is not
-    # an observation.
-    [ -n "${3:-}" ] && printf 'parallel-budget: writers=%s test_jobs=2 model=opus source=user\n' "$3"
-    printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\n'
-    printf 'current: %s\n' "$2"
-    # APPROVED, as write_plan's fixtures are and for its reason (wave-20 T7, AC-9.1).
-    printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n'
-    printf -- '\n- Step 3: prior evidence\n'
-  } > "$1"
-  return 0
-}
-s4_attest() {  # <repo> <sid>
-  mkdir -p "$1/.bionic/tmp"
-  {
-    printf '# bionic environment attestation — machine-local, safe to delete\n'
-    printf 'version=1\nkind=preflight-attestation\n'
-    printf 'session_id=%s\n' "$2"
-    printf 'written_at=1785790000\n'
-    printf 'repo=%s\n' "$1"
-  } > "$1/.bionic/tmp/preflight-$2.state"
-  chmod 600 "$1/.bionic/tmp/preflight-$2.state"
-}
 
 # ---- from §S.4: PARTY_SG_W ----
 PARTY_SG_W="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"

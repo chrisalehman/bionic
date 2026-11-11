@@ -689,16 +689,6 @@ F10_BANNED="$(printf '| %s -q' grep)"
 F10_CODE="$(grep -v '^[[:space:]]*#' "$FRAMEWORK")"
 expect_eq "10: no producer-into-grep -q in the framework's code" "0" \
   "$(printf '%s\n' "$F10_CODE" | grep -c -- "$F10_BANNED" | tr -d ' ')"
-# f10_stated <file> -> yes when the file states the ban at least once. The code census above
-# is vacuous over a file that never names the idiom; this row says the ban is still written
-# down. How many comment lines say it is not asked.
-f10_stated() {
-  [ "$(grep -c -- "$F10_BANNED" "$1" | tr -d ' ')" -ge 1 ] && echo yes || echo no
-}
-# f10_code_hits <file> -> the number of banned spellings in the file's non-comment lines
-f10_code_hits() {
-  grep -v '^[[:space:]]*#' "$1" | grep -c -- "$F10_BANNED" | tr -d ' '
-}
 expect_eq "10: …and the census can see one in code when there is one (not vacuous)" "1" \
   "$(printf 'echo "$x" %s -- "$y"\n' "$F10_BANNED" | grep -v '^[[:space:]]*#' | grep -c -- "$F10_BANNED" | tr -d ' ')"
 

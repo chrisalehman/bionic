@@ -199,12 +199,6 @@ a_tool_sidechain() {  # <dir> <name>
     >> "$1/transcript.jsonl"
 }
 
-a_tool_agentid() {  # <dir> <name>
-  jq -nc --arg n "$2" '{type:"assistant",isSidechain:false,agentId:"aworker-5fb2ff80f2de21f7",
-      message:{role:"assistant",content:[{type:"tool_use",id:"toolu_1",name:$n,input:{}}]}}' \
-    >> "$1/transcript.jsonl"
-}
-
 # The orchestrator's own words: a turn's prose, and the one place a stand-down decline may be
 # written. DEFINED WITH THE OTHER ENTRY BUILDERS, above every case (wave-21 T14): §4's 35e calls
 # it, and a definition in §5 left those calls printing "command not found" while the case passed.

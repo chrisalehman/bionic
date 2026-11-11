@@ -92,13 +92,6 @@ call_archive() {
   ( cd "$cwd" && /bin/bash -c '. "$1" || exit 1; archive_run "$2"' _ "$LIB" "$run_dir" ) 2>&1
 }
 
-# call_archive_rc <cwd> <run-dir> -> the same call's exit status alone.
-call_archive_rc() {
-  local cwd="$1" run_dir="$2"
-  ( cd "$cwd" && /bin/bash -c '. "$1" || exit 1; archive_run "$2" >/dev/null 2>&1' _ "$LIB" "$run_dir" )
-  echo $?
-}
-
 # ============================================================
 section "1 — AC-C.1: a standalone run (no open sibling) moves; a RENAME, not a copy"
 # ============================================================
