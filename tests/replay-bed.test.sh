@@ -105,9 +105,12 @@ less() {  # <name> <run> -> stdin's key=value lines less each key the gaps list 
     /^(card|cut)\.(at|head)=/ { next }
     { k = substr($0, 1, index($0, "=") - 1); for (p in g) if (k == p || index(k, p ".") == 1) next; print }' "$X/gaps" - | LC_ALL=C sort
 }
-cut_at() {  # <instant> -> stdin's events up to the first one timed after it, and every untimed one: no instant is after it
-  awk -F'|' -v c="$1" '{ t = substr($NF, 4); if (t ~ /T[0-9][0-9]:[0-9][0-9]Z$/) t = substr(t, 1, 16) ":00Z" }
-    t ~ /^[0-9-]+T[0-9:]+Z$/ && t > c { past = 1 } !past || t == "" { print }'
+cut_at() {  # <instant> -> stdin's events up to the first one timed after it, then each untimed one placed after every timed one
+  # An untimed line among the timed ones follows the fact before it, past the instant when that fact is; one placed after
+  # every timed line has no place in time, so it is no later than any instant.
+  awk -F'|' -v c="$1" '{ t = substr($NF, 4); if (t ~ /T[0-9][0-9]:[0-9][0-9]Z$/) t = substr(t, 1, 16) ":00Z"; l[NR] = $0; u[NR] = (t == "")
+      if (t ~ /^[0-9-]+T[0-9:]+Z$/) { last = NR; if (t > c && !cut) cut = NR } }
+    END { for (i = 1; i <= NR; i++) if (!cut || i < cut || (u[i] && i > last)) print l[i] }'
 }
 disagree() {  # -> `<name> <|> <key=value>` for each fact a world's expected file and the reader part on
   local e n w p
