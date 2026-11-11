@@ -151,7 +151,9 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
     /^\035/ { split(substr($0, 2), w, " "); if (!(w[1] in rev)) rev[w[1]] = ukey(w[2]); next }
     # current: in each form a gate reads it: indented, unspaced, its blanks dropped, and the first line of two
     /^[ \t]*current[ \t]*:/ { if (!curseen) { cur = $0; sub(/^[ \t]*current[ \t]*:/, "", cur); gsub(/[ \t]/, "", cur); curseen = 1 }; next }
-    /^approved-by: / { byline("x by " substr($0, 14)); begin("approval", "key", "step3"); put("by", BY); put("said", SAID); emit(AT); next }
+    # approved-by: bulleted or indented too, as the fill and the scheduler read it; a blank value approves nothing
+    /^[ \t]*-?[ \t]*approved-by[ \t]*:/ { v = $0; sub(/^[ \t]*-?[ \t]*approved-by[ \t]*:/, "", v); if (trim(v) == "") next
+      byline("x by " trim(v)); begin("approval", "key", "step3"); put("by", BY); put("said", SAID); emit(AT); next }
     /^approved: / { byline(substr($0, 11)); begin("approval", "key", trim(PRE)); put("by", BY); kv(MID)
       for (i = 1; i <= NP; i++) put(PK[i], PV[i]); put("said", SAID); emit(AT); next }
     /^waived: / { byline(substr($0, 9)); kv(PRE); begin("waiver", PK[1], PV[1]); inblock("proofs")
@@ -172,7 +174,7 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
       }
       if (at != "" && n + 0 <= 2) { begin("approval", "key", "step" n); put("by", by); put("said", quoted(rest)); emit(at) }
       if (at == "") at = inst(text)
-      begin("step", "n", n); inblock("steps"); emit(at); last = n; next
+      begin("step", "n", n); inblock("steps"); emit(at); last = n; nseen[++ns] = n; next
     }
     /^- session: / { split(substr($0, 12), w, " "); begin("bind", "session", w[1]); put("by", w[5]); emit(w[3]); next }
     /^proved: / { kv(substr($0, 9)); begin("proof", PK[1], PV[1]); inblock("proofs"); at = ""
@@ -183,8 +185,14 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
       put("title", quoted(s)); for (i = 1; i <= NP; i++) put(PK[i], PV[i]); lack("by"); f = w[1]; sub(/#.*/, "", f); if (rev[f] != "") after(rev[f]); emit(""); next }
     /^order: / { split(substr($0, 8), w, " "); begin("order", "act", w[1]); put("said", quoted($0)); emit(w[2]); next }
     # current: is where the run stands, as the gate writes it, and the Step lines are its history: a current: other than the
-    # last Step line is a step written after them all, so a run taken back reads at the step it went back to.
-    END { if (cur != "" && cur != last && !(cur == "9" && undelivered)) { begin("step", "n", cur); inblock("steps"); emit("") } }'
+    # last Step line is a step written after them all, so a run taken back reads at the step it went back to. At 9 with
+    # no delivered Step 9 line the run stands at 9 undelivered, which is open. Step lines with no current: are history
+    # with no place: each is retracted after them, so the run has no step and a reader never judges at a guessed one.
+    END {
+      if (cur == "" && last != "") for (i = 1; i <= ns; i++) { begin("cancel", "of", "step"); put("n", nseen[i]); inblock("steps"); emit("") }
+      else if (cur == "9" && last != "9") { begin("step", "n", cur); put("delivered", "no"); inblock("steps"); emit("") }
+      else if (cur != "" && cur != last) { begin("step", "n", cur); inblock("steps"); emit("") }
+    }'
 }
 
 # _TRANSLATE_LANDED_AWK: `landed_at(text)`, a ledger line's text from its landing's marker on when reasons come

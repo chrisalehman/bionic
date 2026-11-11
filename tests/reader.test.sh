@@ -76,6 +76,12 @@ W=back14; printf '## SDLC State\ncurrent: 1\n- Step 0: a\n- Step 1: a\n- Step 4:
 for f in 'current: 4\r\n|CRLF' '   current :  4\n|indented' 'current:4\n|unspaced' 'current: 4\ncurrent: x\n|the first of two'; do
   W=form; printf "## SDLC State\n${f%|*}- Step 3: a\n" > "$D/plans/epic-x/form.plan.md"; expect_eq "a version-14 current: ${f#*|} is read as the gate reads it" "n=4 state=open " "$(ask step | tr '\n' ' ')"; done
 printf '## SDLC State\rcurrent: 4\r- Step 3: a\r' > "$D/plans/epic-x/form.plan.md"; expect_eq "a version-14 current: on CR-only line ends is read" "n=4 state=open " "$(ask step | tr '\n' ' ')"
+for f in '- Step 8: a\n|with no Step 9 line' '- Step 9: drafted\n|with its Step 9 line not delivered' '- Step 9: report, delivered: x\n|delivered'; do
+  printf "## SDLC State\ncurrent: 9\n${f%|*}" > "$D/plans/epic-x/form.plan.md"; W=form; s=open; [ "${f#*|}" = delivered ] && s=delivered
+  expect_eq "a version-14 plan at 9 ${f#*|} stands at 9, $s" "n=9 state=$s " "$(ask step | tr '\n' ' ')"; done
+printf '## SDLC State\n- Step 3: a\n- Step 4: a\n' > "$D/plans/epic-x/form.plan.md"; expect_eq "Step lines with no current: are no step" "state=open " "$(ask step | tr '\n' ' ')"
+for f in '- approved-by: u 2026-01-01T00:00Z "ok"|0' '  approved-by: u 2026-01-01T00:00Z "ok"|0' 'approved-by:  |1'; do
+  printf '## SDLC State\ncurrent: 4\n%s\n' "${f%|*}" > "$D/plans/epic-x/form.plan.md"; ask approved step3; expect_status "the approval line '${f%|*}' is read as the fill reads it" "${f#*|}" "$?"; done
 
 # fails-when: a proof is identified without its scope, so a piece reading replaces a whole one of the same question
 # at the same head, and the judge over the reader reads the whole read absent.
