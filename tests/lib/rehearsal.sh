@@ -439,7 +439,7 @@ _rh_replay() {
   printf '# T4: the pull request\n\n    gh pr create --base main --head wave/x --fill\n\n%s\n' "$h" > "$RH_REC/T4-pr.md" || return 1
   _rh_hand record "T4's report record/wave-x/T4-pr.md: the pull request's command and its address"
   _rh_do "the person merges the pull request" env PATH="$RH_GHPATH" gh pr merge wave/x --merge || return 1
-  _rh_tick_land "the tick lands the integrate row" T4 record/wave-x/T4-pr.md || return 1
+  # The integrate row is the merge's: close-out lands it at the integration head, the act below.
   _rh_do "close-out, the tail" env HOME="$dir/home" BIONIC_CLAUDE_HOME="$dir/home/.claude" \
     bash "$RH_ROOT/payload/scripts/close-out.sh" "$RH_PLAN" run || return 1
   # close-out archives a delivered run's plans under the home's archive, keeping their path below the project.
