@@ -1095,7 +1095,7 @@ expect_eq "RT-1b …the block's eval: line reads the new tier and text, its evid
 expect_eq "RT-1c …the Eval design row reads the type T2 maps to and the new text" "hermetic|$RT_TEXT" "$(rt_eval AC-1.1)"
 expect_eq "RT-1d …the other criterion is as it was" "T2|pending|—|—|hermetic|\`tests/b.test.sh\`" "$(rt_row AC-1.2)|$(rt_eval AC-1.2)"
 expect_regex "RT-1e …the run's log holds the retier as a hand act of its kind, from the old tier to the new, by this session" \
-  "^run/v1\|ev=hand\|what=matrix-retier\|ac=AC-1\.1\|from=T1\|to=T2\|by=$SID\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T" "$(/usr/bin/grep 'ev=matrix-retier' "$RT_REC" | tail -1)"
+  "^run/v1\|ev=hand\|what=matrix-retier\|ac=AC-1\.1\|from=T1\|to=T2\|by=$SID\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T" "$(/usr/bin/grep 'what=matrix-retier' "$RT_REC" | tail -1)"
 expect_regex "RT-1f …the ledger's next heading is Δ1, one past the put's, naming the retier and the new text" \
   "^## Δ1 — retier AC-1\.1 T1→T2 \(orchestrator [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{1,2}:[0-9]{2} [AP]M [A-Z]+\): \`tests/b\.test\.sh\` drives the hermetic run$" \
   "$(/usr/bin/grep '^## Δ' "$RT_LED" | tail -1)"
