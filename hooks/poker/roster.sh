@@ -151,18 +151,18 @@ stop_run_request() {
   return 0
 }
 
-# stop_run_record <key=value>... -> appends `line/v1|ev=stop-run|…` (lib/line.sh `line_event`) to the landing
-# record of the run this session is bound to; rc 1, nothing written, with no bound run. The hand-hold fold
-# (`hand_holds_report`) counts it under its own kind: a stop is a verb act, never a by-hand one.
-stop_run_record() {
+# poker_hand <what> <why> [<key=value>...] -> one hand event (lib/line.sh `line_hand_event`, the one writer) in the log
+# of the run this session is bound to, `by=` the session; rc 1, nothing written, with no bound run; rc 2 when the act
+# names no reason. An act a verb takes by hand is a fact of the run it keeps going; a session with no run has none.
+poker_hand() {
   local sid
   sid="$(session_id 2>/dev/null)" || sid=""
   [ -n "$sid" ] || return 1
-  resolve_run "$REPO_REAL" "$sid" 2>/dev/null
+  resolve_run "${REPO_REAL:-$(project_root "$PWD")}" "$sid" 2>/dev/null
   [ -n "$POKER_RUN_PLAN" ] && [ -f "$POKER_RUN_PLAN" ] || return 1
-  declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
-  declare -F line_event >/dev/null 2>&1 || return 1
-  line_event "$POKER_RUN_PLAN" hand what=stop-run "$@"
+  declare -F line_hand_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
+  declare -F line_hand_event >/dev/null 2>&1 || return 1
+  line_hand_event "$POKER_RUN_PLAN" "$@" "by=$sid"
 }
 
 # stop_run_gate <id> -> stops gate request <id> and says what it did; rc 0, or 2 when the end could not be
@@ -173,7 +173,9 @@ stop_run_record() {
 # stop_run_gate <id> --waiting -> the same stop of a request that was never admitted, and of no other: the end is
 # written `--waiting`, so the gate refuses it under the lock that admits (rc 3) once the request is admitted, and
 # that run is left to finish, nothing sent. This is the tick's withdrawal of a writer stood down for the load,
-# whose admitted runs are never ended for it (docs/adrs/adr-077-the-gate-steers-by-the-load.md).
+# whose admitted runs are never ended for it (docs/adrs/adr-077-the-gate-steers-by-the-load.md). It writes no hand
+# event: the machine steering by the load is the tool working, not a person stepping in, and the gate's own end
+# (`--by`, `--why`) keeps the fact.
 stop_run_gate() {
   local id="$1" only="${2:-}" gd f sid who kind key state hp hs pg self what i rec="" ge
   gd="$(gate_dir)"; f="$gd/requests/$id"
@@ -220,8 +222,8 @@ stop_run_gate() {
     fi
     what="its holder's process group stopped ($what)"
   fi
-  stop_run_record "request=$id" "who=${_R_who//|/ }" "kind=$kind" "key=$key" "by=$sid" "why=${SR_WHY:--}" \
-    || rec="; no bound run, so no ev=stop-run line was written"
+  [ -n "$only" ] || poker_hand stop-run "$SR_WHY" "request=$id" "who=${_R_who//|/ }" "kind=$kind" "key=$key" 2>/dev/null \
+    || rec="; no hand event was written (no bound run, or no reason)"
   say "stop-run request $id ${who:--} $kind $key — $state; ended by=$sid why=${SR_WHY:--}, $what$rec"
   return 0
 }
@@ -550,7 +552,7 @@ EOF
 # where two sessions hand a run back and forth. The value is the ADOPTER's binding, because
 # the adopter is now the session that owns the row — the launching session is already
 # recorded, separately, in `adopted_from=`.
-adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> <waiver> [<source row> [<suites_source> [<done> [<lands_red> <red_evidence> <row>]]]] -> 0 written/already there, 1 not
+adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> <waiver> [<source row> [<suites_source> [<done> [<lands_red> <red_evidence> <row>]]]] -> 0 written/already there (ADOPT_WROTE yes/no), 1 not
   local f="$1" sid="$2" name="$3" id="$4" typ="$5" deliv="$6" prog="$7" cad="$8"
   local launch="$9" osid="${10}" addr="${11}" plan="${12:-none}" waiver="${13:-}" d
   local src="${14:-}" ssrc="${15:-}" dmark="${16:-}"
@@ -564,6 +566,7 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   d="${f%/*}"
   tmp_dir_ok "$d" || return 1
   [ -L "$f" ] && return 1
+  ADOPT_WROTE=no
   if [ -f "$f" ] && awk -v k="|agent_id=${id}|" '
         index($0, k) > 0 && index($0, "|adopted_from=") > 0 { found = 1 }
         END { exit !found }' "$f" 2>/dev/null; then
@@ -673,6 +676,7 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   ROW="$(roster_row "${RR_ARGS[@]}")" || return 1
   [ -n "$ROW" ] || return 1
   printf '%s\n' "$ROW" >> "$f" 2>/dev/null || return 1
+  ADOPT_WROTE=yes
   return 0
 }
 
@@ -1306,6 +1310,10 @@ ADOPT_READERS
                    "${ADOPT_OWN_PLAN:-none}" "$RWAIVER" \
                    "$RSRC" "$RSSRC" "$RDONE" "$RLRED" "$RREVID" "$RLROW"; then
                 ROW_JOURNALLED=yes
+                # AN ADOPTION IS AN ACT BY HAND, one event per row taken over, the first time only: a row already
+                # adopted is no new act. Its reason is the caller's, else the clear that makes an adoption.
+                [ "$ADOPT_WROTE" = no ] || poker_hand adopt "${ADOPT_WHY:-the session $OSID was cleared and this session took over its agents}" \
+                  "name=$(clean "$RNAME")" "agent=$RID" "from=$OSID" 2>/dev/null || :
                 # THE MARKER COPY (S17, AC-12 attempt 2). `payload/scripts/lib/stop.sh`
                 # (`stop_landing_gate`, reached from hooks/stop.sh) is this schema's one
                 # ORIGINATING writer. This is a second writer, deliberately: adopt never
@@ -2064,6 +2072,7 @@ EOF
       die "REFUSED — could not write to $ROSTER_FILE."
       exit 2
     }
+    poker_hand extend "$EXTEND_REASON" "name=$EXTEND_NAME" 2>/dev/null || :
     say "extended — $EXTEND_NAME is open again: $ROSTER_FILE"
     exit 0
   }
@@ -2137,6 +2146,7 @@ EOF
       die "REFUSED — could not write to $ROSTER_FILE."
       exit 2
     }
+    poker_hand hold "$HOLD_REASON" "name=$HOLD_NAME" 2>/dev/null || :
     say "held — $HOLD_NAME stays up while its launch, deliverable and messages are unchanged (fp=$HOLD_FP); the tick prints it held and orders no stop: $ROSTER_FILE"
     exit 0
   }
@@ -2354,9 +2364,8 @@ $(run_groups "$RUN_PID")"
       *)
         say "stop-run $RUN_NAME run=$RUN_ID pid=$RUN_PID — stopped ($SR_HOW); the run wrote its own end, rc=$SR_RC" ;;
     esac
-    # THE ACT IS RECORDED (wave-36 T11; D8): one ev=stop-run in the bound run's landing record, as for a request.
-    _sr_sid="$(session_id 2>/dev/null)" || _sr_sid=""
-    stop_run_record "run=$RUN_ID" "name=$RUN_NAME" "by=${_sr_sid:-none}" "why=${SR_WHY:--}" || :
+    # THE ACT IS RECORDED: one hand event in the bound run's log, as for a request.
+    poker_hand stop-run "$SR_WHY" "run=$RUN_ID" "name=$RUN_NAME" 2>/dev/null || :
     exit 0
   }
 

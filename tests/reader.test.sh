@@ -577,7 +577,7 @@ expect_eq "an amend, a hold and an extension each leave one hand event with the 
   "0 0 0|amend:the brief missed lib/z.sh|extend:more to read|hold:kept for a second pass" \
   "$AM_RC $HO_RC $RC|$(hw amend)|$(hw extend)|$(hw hold)"
 HPRED="9f1e2d3c-4b5a-6978-8899-aabbccddeeff"; roster_header > "$(roster_of "$HR" "$HPRED")"
-for n in a1 a2; do roster_row_fixture status=identified session="$HPRED" name="w-$n" agent_id="a$n" >> "$(roster_of "$HR" "$HPRED")"; done
+for n in a1 a2; do roster_row_fixture status=identified session="$HPRED" name="w-$n" agent_id="a$n" plan="$HP" >> "$(roster_of "$HR" "$HPRED")"; done
 poke "$HR" adopt --why 'the session was cleared at 8:21'
 expect_eq "an adoption leaves one hand event per row adopted, with its reason (exit 0 or 1, open rows found)" \
   "yes|adopt:the session was cleared at 8:21|adopt:the session was cleared at 8:21" "$( [ "$RC" -le 1 ] && echo yes)|$(hw adopt)"

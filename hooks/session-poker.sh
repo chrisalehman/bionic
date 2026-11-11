@@ -38,7 +38,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh sitrep card [<plan>] < judgment   the sitrep card, drawn from the sheet and the model's judgment, or every reason it is refused (settles ruled decisions on the register)
 #     bash <plugin-root>/hooks/session-poker.sh cover <question> <a>..<b>   the cover <sha> <basis> line of each commit the judge walks in that range for that question (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh wait <name|run id> [--for <s>]   wait on a detached run until it ends; exits with its code (read-only)
-#     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, ev=stop-run)
+#     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] --why '<reason>'   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, one hand event)
 #     bash <plugin-root>/hooks/session-poker.sh regression-runs [--write]   the full-runner runs the rosters record; --write puts the count in the bound plan's header
 #     bash <plugin-root>/hooks/session-poker.sh anchors check|index [<root>] [--at <commit>]   check every suite's mutation anchors where they point, or print file -> the suites anchored on it (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh matrix-render   write the bound plan's AC blocks from its ## Eval design, each with evidence: pending, and user-confirmed: pending at T4 (writes the plan)
@@ -506,7 +506,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh interval-default   this script's built-in default interval, in seconds (ignores config)"
   die "  bash ${HOOK_DIR}/session-poker.sh share [<n>] [reserve=<cores>]   print the machine's share (92 when none is set), the cores the person keeps (1 when none is set), the cores and the room; with <n> or reserve=<cores>, set it in the user-level file the gate reads"
   die "  bash ${HOOK_DIR}/session-poker.sh window     the instant this session's roster begins, UTC ISO-8601 (empty when it cannot be dated)"
-  die "  bash ${HOOK_DIR}/session-poker.sh adopt      every open row a PREDECESSOR session left on this project's rosters"
+  die "  bash ${HOOK_DIR}/session-poker.sh adopt [--why '<reason>']   every open row a PREDECESSOR session left on this project's rosters, each adoption one hand event with its reason (the predecessor's clear when none is given)"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt --report-only   the same rows, with the adoption itself not taken (writes nothing)"
   die "  bash ${HOOK_DIR}/session-poker.sh sweep      delete every DEAD session's leftover state under this project's .bionic/tmp"
   die "  bash ${HOOK_DIR}/session-poker.sh sweep --report-only   the same files, listed, with nothing deleted"
@@ -548,7 +548,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh sitrep card [<plan>] < judgment   the sitrep card: the judgment on stdin, seven lines, one tagged line each (purpose:, call:, grade: <A-F>, point:, ask <key>[, <key>]: <what> — recommend <answer>, close:), checked against the sheet's facts; the card draws every row that is a fact; a card that fails its check prints nothing and exits 1, every reason on stderr"
   die "  bash ${HOOK_DIR}/session-poker.sh cover <question> <a>..<b>   the basis the judge holds a range by: one cover <sha> prose|release|born-review|born-regression|owes line per commit past <a> on <b>'s first-parent line, for evidence, adversarial or structure; the lines current 7 prints under a review ... uncovered <a>..<b> line (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
-  die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> [--report-only] [--why '<reason>']   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one ev=stop-run goes to the bound run's landing record"
+  die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> --why '<reason>' [--report-only]   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one hand event, what=stop-run with its reason, goes to the bound run's log; with no reason the stop is refused and nothing is sent"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
   die "  bash ${HOOK_DIR}/session-poker.sh anchors check|index [<root>] [--at <commit>]   check: MOVED <suite>:<line> for each anchor whose text is not on exactly one line where it points (exit 1), nothing and exit 0 when every anchor holds; index: <file> TAB <suite>[,<suite>] per anchored file. <root> defaults to the current tree, --at reads a commit"
   die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: a tier table row for each criterion it lacks, at the tier its eval type maps to (lib/scale.sh), then provenance, serves (the Eval design row's requirement), fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
@@ -604,18 +604,21 @@ if [ "$VERB" = "$RR_OLD_VERB" ]; then die "$RR_OLD_VERB is now release-approval"
 # poker interval, or that one session — and only that one — is deferred and named in the
 # report; see the verb's own comments. The two flags combine freely, in either order.
 ADOPT_REPORT_ONLY=no
+ADOPT_WHY=""
 SWEEP_REPORT_ONLY=no
 SWEEP_WINDOWED=no
 BIND_ARG=""
 FILL_REPORT_ARG=""
 case "$VERB" in
   adopt)
-    if [ $# -eq 1 ]; then
-      [ "$1" = "--report-only" ] || usage "unknown flag for adopt: $1"
-      ADOPT_REPORT_ONLY=yes
-    elif [ $# -gt 1 ]; then
-      usage "adopt takes at most one flag."
-    fi
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --report-only) [ "$ADOPT_REPORT_ONLY" = no ] || usage "adopt takes at most one flag of each kind."; ADOPT_REPORT_ONLY=yes; shift ;;
+        --why) [ $# -ge 2 ] && [ -z "$ADOPT_WHY" ] || usage "adopt --why takes the reason, once."; ADOPT_WHY="$2"; shift 2 ;;
+        *) usage "unknown flag for adopt: $1" ;;
+      esac
+    done
+    case "$ADOPT_WHY" in *$'\n'*|*$'\r'*|*'|'*) usage "adopt --why takes one line, without a '|'." ;; esac
     ;;
   sweep)
     # THE WORDING "at most one flag" IS PINNED VERBATIM (tests/session-sweep.test.sh
@@ -1291,6 +1294,11 @@ $1"; shift ;;
     done
     [ -n "$SR_ARG" ] || usage "stop-run takes the name of a roster row (or a run id, or a gate request id) whose run to stop."
     case "$SR_WHY" in *$'\n'*|*$'\r'*|*'|'*) usage "stop-run --why takes one line, without a '|'." ;; esac
+    # A person's stop is an act by hand, and an act by hand says why; a report sends nothing and needs none.
+    case "$SR_REPORT_ONLY:$SR_WHY" in
+      yes:*|*:*[![:space:]-]*) ;;
+      *) die "REFUSED — stop-run stops a run by hand, and says why: --why '<what went wrong, what the tool lacked>'. Nothing was stopped."; exit 2 ;;
+    esac
     ;;
   regression-runs)
     RR_WRITE=no
