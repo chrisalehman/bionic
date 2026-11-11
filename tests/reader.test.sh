@@ -32,7 +32,8 @@
 #   §ASK-LOG    lib/owed.sh writes each act on an ask to the run's log on its own clock and never the register, and
 #               reads the register, then the log, as one list.
 #   §ASK-DOORS  a passing reading closes its question's waiver; the Stop over an approved plan closes the step asks.
-#               A registered proof is one proof event in the run's log, the plan byte for byte as it was.
+#               A registered proof is one proof event in the run's log, the plan byte for byte as it was; a
+#               registered walk discharges each criterion it confirms by one proof naming it.
 #
 # FIXTURE FIDELITY. The plan and its log are real files in a scratch docs tree; the lines are planted.
 
@@ -540,6 +541,11 @@ rec ev-pass.md "$(s57_commit "$RF/.worktrees/01-fixture" lib/a.sh C2)" pass
 poke "$RF" proof-add review record/wave-01-fixture/ev-pass.md --question evidence --reader w-aud
 expect_eq "a passing reading of the question registered (exit 0) closes it, the closer named" "0||yes" "$RC|$(reg "$RF" "$PF")|$(al owed_lines "$PF" "$RF" \
   | /usr/bin/grep -q '|key=waive:evidence|state=closed|by=passing reading|' && echo yes)"
+printf '| AC | verdict | why |\n|---|---|---|\n| AC-1.1 | CONFIRMED | walked |\n\nverdict: CONFIRMED — one row\n' > "$RF_DIR/walk.md"
+RF_SUM="$(cksum < "$PF")"; poke "$RF" proof-add walk record/wave-01-fixture/walk.md
+expect_eq "a registered walk discharges the criterion it confirms by one proof naming it, the plan byte for byte as it was" \
+  "0|$RF_SUM|1|state=discharged by=proof" "$RC|$(cksum < "$PF")|$(/usr/bin/grep -c '^run/v1|ev=proof|ac=AC-1\.1|evidence=record/wave-01-fixture/walk\.md|' \
+  "$RF_DIR/run.log")|$(bash "$READER" "$PF" cell AC-1.1 | paste -sd' ' -)"
 SW_KEYS="approve:step0 approve:step1 approve:step2 approve:step3"
 for a in 0 1; do
   SR="$(make_repo "sweep$a")"; new_roster "$SR"

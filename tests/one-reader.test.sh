@@ -10,8 +10,9 @@
 #                 launch's `dispatch` has one writer, the launch recorder's, and a row's `born` one, the units
 #                 library's; each is paired with a planted second, the born one in the shape of a split; so is
 #                 a planted second appender of a waiver, a finding or a proof beside the one writer of each.
-#   §NAMES        the verbs the dispatch and born events retired are named nowhere in hooks/ or payload/scripts/
-#                 but the walls' single-line list of verbs, which the row that edits it clears.
+#   §NAMES        the verbs the dispatch and born events retired, and the five that wrote a matrix cell, are named
+#                 nowhere in hooks/ or payload/scripts/ but the walls' single-line list of verbs, which the row that
+#                 edits it clears.
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted.
 #   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
 #                 the tree holds none.
@@ -92,6 +93,11 @@ names() { /usr/bin/grep -rnE 'launch-sync|ledger-add|ledger-set|task-set|task-sp
 printf '%s\n' '# launch-sync' '# tasks-prose' > "$L/planted-name.sh"
 expect_contains "the extractor reads a planted name" "planted-name.sh" "$(names "$S")"
 expect_eq "the retired verbs are named nowhere else" "" "$(names "$S" | grep -v planted-name.sh)"
+cells() { /usr/bin/grep -rnE 'matrix-(set|retier|render)|waive-row|poker_verb_discharge|discharge\)|(session-poker\.sh|plan_verb_open|plan_verb_swap|pv_next) discharge' "$1/hooks" "$1/payload/scripts" | grep -vF 'amend|extend|task-add|' \
+  | grep -v -e '/payload/scripts/lib/translate\.sh:' -e 'w == "'; }   # an older run's hand acts are read by their names
+printf '%s\n' '# matrix-retier' '# session-poker.sh discharge AC-1' > "$L/planted-cell.sh"
+expect_eq "the extractor reads both planted names of the verbs that wrote a matrix cell" "2" "$(cells "$S" | grep -c planted-cell.sh)"
+expect_eq "the five verbs that wrote a matrix cell are named nowhere else" "" "$(cells "$S" | grep -v planted-cell.sh)"
 
 section "REFUSALS"
 expect_contains "a real refusal site in a hook file is listed" "$(printf 'refusal\thooks/dispatch-preflight.sh:')" "$BEFORE"
