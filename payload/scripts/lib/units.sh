@@ -213,14 +213,14 @@ _units_table() {
 # one the log holds landed reads `landed`; a `landed` or `dropped` cell is never moved back. Everything else is the
 # cell, which is the old home the translation reads, so a run whose log holds none of these reads as its cells say.
 # The text itself is judged as written (`units_validate` reads `_units_table`), so a write is never refused for a
-# state the plan does not carry. A plan writer's dry copy (`<plan>.<verb>.<pid>`) is read with its plan's run.
+# state the plan does not carry. A plan writer's dry copy and close-out's preflight copy are read with their plan's run.
 # _units_live <plan> -> `<id><TAB><state><TAB><agent>` per row the log moves; nothing without a log; 2 a failed fold
 _units_live() {
   local plan="${1:-}" log facts
   if [ -n "${_UNITS_MEMO_PLAN:-}" ] && [ "$_UNITS_MEMO_PLAN" = "$plan" ] && [ -n "${_UNITS_MEMO_LIVE_RC:-}" ]; then
     printf '%s' "$_UNITS_MEMO_LIVE"; return "$_UNITS_MEMO_LIVE_RC"
   fi
-  case "$plan" in *.plan.md.*) [ ! -f "${plan%%.plan.md.*}.plan.md" ] || plan="${plan%%.plan.md.*}.plan.md" ;; esac
+  plan="$(_units_origin "$plan")"
   _units_lib proof.sh _proof_facts && _units_lib reader.sh reader_log || return 0
   log="$(reader_log "$plan" 2>/dev/null)" || return 0
   [ -s "$log" ] && [ ! -L "$log" ] || return 0
@@ -231,6 +231,15 @@ _units_live() {
     f["ev"] == "dispatch" && f["at"] != "" { if (!(r in st)) ord[++n] = r; st[r] = "active"; nm[r] = f["name"] }
     f["ev"] == "published" { if (!(r in st)) ord[++n] = r; st[r] = "landed" }
     END { for (i = 1; i <= n; i++) printf "%s\t%s\t%s\n", ord[i], st[ord[i]], (st[ord[i]] == "active" ? nm[ord[i]] : "") }'
+}
+
+# _units_origin <plan> -> the plan a copy was made from, whose run it reads: a plan verb's `<plan>.<verb>.<pid>` and
+# close-out's preflight `<dir>/.<plan file>.preflight.<pid>` name their plan when it stands; any other path is its own.
+_units_origin() {
+  local o="${1%%.plan.md.*}.plan.md" b
+  case "$1" in *.plan.md.*) ;; *) printf '%s' "$1"; return 0 ;; esac
+  b="${o##*/}"; case "$b" in .?*) o="${o%"$b"}${b#.}" ;; esac
+  if [ -f "$o" ]; then printf '%s' "$o"; else printf '%s' "$1"; fi
 }
 
 # _units_overlay <live> <rows> -> the rows, each moved row's status and agent the run's
@@ -308,7 +317,7 @@ units_born_event() {
 # no log. The born readers read these after the plan's lines, a row's own plan line first. 2 a failed fold.
 _units_born_logged() {
   local plan="${1:-}" log facts
-  case "$plan" in *.plan.md.*) [ ! -f "${plan%%.plan.md.*}.plan.md" ] || plan="${plan%%.plan.md.*}.plan.md" ;; esac
+  plan="$(_units_origin "$plan")"
   _units_lib proof.sh _proof_facts && _units_lib reader.sh reader_log || return 0
   log="$(reader_log "$plan" 2>/dev/null)" || return 0
   [ -s "$log" ] && [ ! -L "$log" ] || return 0
