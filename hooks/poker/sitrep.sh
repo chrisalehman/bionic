@@ -2242,11 +2242,16 @@ sitrep_tick_line() {
   # withdrawn is closed on the run's register. A ruling is the ledger's own entry, written in the person's words with no
   # verb of its own, so every `decisions` call settles the register against the ledger before it reads or puts.
   decisions_settle() {
-    local d st
+    local d st open
     declare -F owed_close >/dev/null 2>&1 || return 0
     [ -f "$2" ] && [ ! -L "$2" ] || return 0
+    # The register is read once, from the store owed_close writes, and a decision's ask is closed only where it stands
+    # open: a close reads the register again, and a ruled decision whose ask is already closed is most of them.
+    open="$(OWED_ROOT="$REPO_REAL" OWED_PLAN="$1" owed_rounds 'decide:.+' 2>/dev/null | awk -F'\t' '$3 == "open" { printf " %s ", $1 }')"
+    [ -n "$open" ] || return 0
     decisions_rounds "$2" | while IFS='	' read -r d _ st; do
-      [ "$st" = open ] || OWED_ROOT="$REPO_REAL" OWED_PLAN="$1" owed_close "decide:$d" "$st" >/dev/null 2>&1
+      [ "$st" != open ] || continue
+      case "$open" in *" decide:$d "*) OWED_ROOT="$REPO_REAL" OWED_PLAN="$1" owed_close "decide:$d" "$st" >/dev/null 2>&1 ;; esac
     done
     return 0
   }
