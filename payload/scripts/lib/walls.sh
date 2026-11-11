@@ -339,7 +339,7 @@ _wall_class_read() {  # <whole command text> -> sets _WALL_CLASS_LINES and _WALL
 # reduced head (tier 2) — and each one used to arrive through its own command
 # substitution over its own string: `$(cmd_strip_heredocs …)`, `$(cmd_unwrap_head …)`,
 # an `awk` and a `grep` for the chain split, and a `sed` per segment to trim it.
-# Measured on the bench payload (`ls -la`, tests/bench/hook-latency.sh), that was
+# Measured on the bench payload (`ls -la`), that was
 # TWO awk execs and four bash forks on the hottest path in the tree, of which
 # exactly one awk exec — the class reading — could change the answer.
 #

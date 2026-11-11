@@ -2,7 +2,7 @@
 # tests/hook-latency.test.sh — THE SUBPROCESS CAP (epic-23 wave-12-fixit-171, T10,
 # REQ-10, spec D8 "measure first"; T11 turns this green).
 #
-# WHAT IT OWNS. Not timing — timing is `tests/bench/hook-latency.sh`'s, and it is
+# WHAT IT OWNS. Not timing — timing is measured by no file in the tree (the bench is in the history), and it is
 # noisy by nature, which is exactly why it is not gated on. This suite gates on
 # something stable instead: how many EXTERNAL commands `hooks/bash-walls.sh` and
 # `hooks/stop.sh` fork per invocation, traced with `bash -x` over the same fixed
