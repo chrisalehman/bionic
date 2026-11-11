@@ -1519,8 +1519,7 @@ expect_eq "(tw4) with the record gone the log alone stands: the record is held, 
 
 # ---------------------------------------------------------------------------
 section "§LOG: ready writes its acts to the run's log, and no landing record; a part is no landing"
-# fails-when: §READY's landing leaves no ready event of T1 in run.log or a landing-proofs.log beside it; a published part
-# with no row is read as a landing by the record's landings or the reader.
+# fails-when: §READY leaves no ready of T1 in run.log or a landing-proofs.log beside it; a row-less part reads as a landing.
 expect_eq "(lg1) the run's log holds T1's ready event, and of run.log and landing-proofs.log the record holds run.log" "T1|run.log" \
   "$(awk -F'|' '$1 == "run/v1" && $2 == "ev=ready" { print substr($3, 5); exit }' "$(ll_log "$RR")" 2>/dev/null)|$(cd "$RR/.bionic/docs/record/wave-x" 2>/dev/null && ls run.log landing-proofs.log 2>/dev/null | paste -sd' ' -)"
 printf 'run/v1|ev=published|part=reviews|commit=%s|branch=wave/x|tree=-|by=T3|at=2026-11-03T00:00:05Z\n' "$TWC" >> "${TWR%/*}/run.log"
