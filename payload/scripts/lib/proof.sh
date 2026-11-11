@@ -195,6 +195,10 @@ proof_waiver_line() {
 # fact and a new one alike:
 #
 #   waiver   question=<q> head=<sha> by=<who> said=<the reply>
+#   finding  ref=<record>#<n> severity=<S> reach=<on|off> to=deferred title=<title>       the registration's deferral
+#   finding  ref=<record>#<n> to=<defer|fix> by=<who> words=<words> session=<sid> why=<why> [severity= reach= title=]
+#            [stated=<the changelog sentence>]                                            a person's move
+#   finding  ref=<record>#<n> to=<fixed|carried> row=<T> by=<who> [landing=<commit>]       a move to a row
 #
 # words, why and stated hold `\` and `"` escaped, as the plan's quoted fields held them. RUN_LOG is set for the one
 # call and never exported: the poker's own RUN_LOG names a suite's output log. Exit 0 appended; 2 when the plan has no
@@ -213,6 +217,12 @@ proof_waiver_event() {  # <plan> <field>=<value>… -> one waiver event in the p
   log="$(_proof_event_log "$1")" || return 2
   shift
   RUN_LOG="$log" log_append waiver "$@"
+}
+proof_finding_event() {  # <plan> <field>=<value>… -> one finding event in the plan's run log
+  local log
+  log="$(_proof_event_log "$1")" || return 2
+  shift
+  RUN_LOG="$log" log_append finding "$@"
 }
 
 # ---------- THE RELEASE'S COVER ----------
@@ -414,8 +424,8 @@ proof_word_in() {
 #
 # The record writes no priority: the table gives it (`proof_priority`), and a `priority: <n> <word>`
 # line that differs from the table is refused. The result follows from the priorities
-# (`proof_findings_result`). At registration `proof-add` writes the plan's `deferred:` lines
-# (`proof_finding_lines`); the tick and `release-check` print them with their priority
+# (`proof_findings_result`). At registration `proof-add` writes a deferral event per finding the table defers
+# (`proof_finding_deferrals`); the tick and `release-check` print them with their priority
 # (`proof_findings_owed`).
 
 # proof_pushed_severity <pushed> -> 0 when the roster row's `pushed=` value (the context files the
@@ -570,10 +580,10 @@ PROOF_RESULT_LINES
   if [ "$fix" = 1 ]; then _PROOF_RESULT=fail; elif [ "$any" = 1 ]; then _PROOF_RESULT=flag; else _PROOF_RESULT=pass; fi
 }
 
-# proof_finding_lines <record path> <proof_findings lines> -> the plan lines registration writes inside
-# `## SDLC State`, newline-terminated: `deferred: <record>#<n> <S> <reach> "<title>"` for each finding
-# the table defers; nothing for a note, nor for a finding to fix, which the verdict carries. A `"` in a
-# title is written `'`, so the quoted title ends where its line does.
+# proof_finding_lines <record path> <proof_findings lines> -> the deferrals an older plan's `## SDLC State` holds,
+# newline-terminated: `deferred: <record>#<n> <S> <reach> "<title>"` for each finding the table defers. No verb writes
+# them: registration writes each deferral as an event (`proof_finding_deferrals`), and this shape is kept for a run
+# whose older deferrals stand in its plan, which the reader translates. A `"` in a title is written `'`.
 proof_finding_lines() {
   printf '%s\n' "${2:-}" | REC="$1" awk -F'\t' '
     NF >= 7 && $5 == "defer" { t = $7; gsub(/"/, "'"'"'", t); printf "deferred: %s#%s %s %s \"%s\"\n", ENVIRON["REC"], $1, $2, $3, t }'
@@ -586,14 +596,42 @@ proof_finding_lines() {
 # registered record's findings passes each finding through here, and this is the one place the
 # effective rating is applied. The rating is the one the record wrote: a reader's rating is final
 # (wave-31 T32; D6), so no line of the plan re-rates it. The priority is the table's for that rating
-# (`proof_priority`); a `moved: <record>#<n> to=<defer|fix>` line (T42, `_proof_moved_to`) replaces
+# (`proof_priority`); a move to defer or fix (T42, `_proof_moved_to`) replaces
 # the priority alone, so the third word is the one a move changes — except that an S1 is never
-# deferred, whoever wrote the line (AC-8.9). A move to fixed (`moved: … to=fixed row=<T>`, wave-36 T8) puts the
+# deferred, whoever moved it (AC-8.9). A move to fixed (`to=fixed row=<T>`, wave-36 T8) puts the
 # finding on the fix side, as a move to fix does: it reads fix until its row lands green, and then drops out as
 # fixed (`proof_fixed`). A caller reads `set -- $(…)`: three words, rated.
 proof_finding_rating() {
-  _proof_rating_apply "$(_proof_moved_to "$1" "$2")" "$3" "$4"
+  local mv
+  mv="$(_proof_moved_to "$1" "$2")" || return 2
+  _proof_rating_apply "$mv" "$3" "$4"
   printf '%s' "$_PROOF_RATING"
+}
+
+# proof_finding_stated <plan> <record>#<n> -> the finding's one changelog sentence, unescaped, nothing when none is given;
+# exit 1 when the run never deferred it, 2 when the fold fails. Every event of the finding is read, not its standing
+# fact alone: that is its newest word, and a move written after the deferral replaces it without the sentence. The
+# newest sentence given is the one.
+proof_finding_stated() {
+  local ev l
+  _proof_findings_load "$1" || return 2; ev="$_PROOF_FINDINGS"
+  l="$(printf '%s\n' "$ev" | awk -v id="$2" "$(proof_bind_awk)"'
+    proof_bound($0) == id { if (proof_defers($0)) d = 1; v = proof_fkv($0, "stated"); if (v != "") st = v }
+    END { if (!d) exit 1; print st }')" || return 1
+  [ -z "$l" ] || printf '%s\n' "$l" | sed -e 's/\\\(.\)/\1/g'
+}
+
+# proof_finding_deferrals <plan> <record path> <proof_findings lines> -> one deferral event in the plan's run log for
+# each finding the table defers (`proof_finding_lines`' findings): `finding ref=<record>#<n> severity=<S> reach=<reach>
+# to=deferred title=<title>`, a `"` in the title written `'`. Exit as `proof_finding_event`, at the first that fails.
+proof_finding_deferrals() {
+  local plan="$1" rec="$2" n s r t
+  while IFS='	' read -r n s r t; do
+    [ -n "$n" ] || continue
+    proof_finding_event "$plan" "ref=$rec#$n" "severity=$s" "reach=$r" to=deferred "title=$t" || return
+  done <<PROOF_DEFERRALS
+$(printf '%s\n' "${3:-}" | awk -F'\t' 'NF >= 7 && $5 == "defer" { t = $7; gsub(/"/, "'"'"'", t); print $1 "\t" $2 "\t" $3 "\t" t }')
+PROOF_DEFERRALS
 }
 
 # _proof_rating_apply <moved to> <S> <reach> -> proof_finding_rating's answer once the plan read is in
@@ -609,83 +647,73 @@ _proof_rating_apply() {
   _PROOF_RATING="$s $r $p"
 }
 
-# _proof_moved_to <plan> <record>#<n> -> `defer`, `fix` or `fixed`, where the LAST `moved:` line of
-# `## SDLC State` naming it (fences skipped) moved the finding, or nothing when there is none
-# (wave-28 T42; D34, AC-8.9). A later move is the later word, so the last line decides. A line is a
-# move only when it is whole, as `finding-move` writes it (`proof_move_of`):
-# `moved: <record>#<n> to=<defer|fix> by=<name> at=<ISO-UTC> words="<words>" why="<why>"`, or
-# `moved: <record>#<n> to=fixed row=<T> by=<name> at=<ISO-UTC>` (wave-36 T8; D9).
+# _proof_moved_to <plan> <record>#<n> -> `defer`, `fix` or `fixed`, where the LAST whole move among the run's finding
+# events naming it (`_proof_findings_load`, `proof_move_of`) moved the finding, or nothing when there is none
+# (wave-28 T42; D34, AC-8.9). A later move is the later word, so the last decides. Exit 2 when the fold fails.
 _proof_moved_to() {
-  [ -f "$1" ] || return 0
-  awk -v id="$2" "$(proof_bind_awk)"'
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && /^moved:[ \t]/ && proof_bound($0) == id { m = proof_move_of($0); if (m != "") to = m }
-    END { if (to != "") print to }' "$1"
+  local ev
+  _proof_findings_load "$1" || return 2; ev="$_PROOF_FINDINGS"
+  printf '%s\n' "$ev" | awk -v id="$2" "$(proof_bind_awk)"'
+    proof_bound($0) == id { m = proof_move_of($0); if (m != "") to = m }
+    END { if (to != "") print to }'
 }
 
-# proof_move_line <plan> <record>#<n> -> the finding's newest whole `moved:` line, verbatim, the one
-# `_proof_moved_to` reads its direction from; nothing when the plan carries none (wave-36 T8; D10). What a
-# refusal quotes when it names the move it read: `task-add --born` refuses a finding whose newest move is
-# to defer, and `disposition` names the row a move to fixed names.
+# proof_move_line <plan> <record>#<n> -> the finding's newest whole move event, verbatim, the one `_proof_moved_to`
+# reads its direction from; nothing when the run holds none (wave-36 T8; D10). What a refusal quotes when it names the
+# move it read: `task-add --born` refuses a finding whose newest move is to defer, and `disposition` names the row a
+# move to fixed names. Exit 2 when the fold fails.
 proof_move_line() {
-  [ -f "$1" ] || return 0
-  awk -v id="$2" "$(proof_bind_awk)"'
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && /^moved:[ \t]/ && proof_bound($0) == id && proof_move_of($0) != "" { l = $0 }
-    END { if (l != "") print l }' "$1"
+  local ev
+  _proof_findings_load "$1" || return 2; ev="$_PROOF_FINDINGS"
+  printf '%s\n' "$ev" | awk -v id="$2" "$(proof_bind_awk)"'
+    proof_bound($0) == id && proof_move_of($0) != "" { l = $0 }
+    END { if (l != "") print l }'
 }
 
-# _proof_moved_fixed <plan> -> `<row><TAB><record>#<n>`, one line per finding whose newest whole move is to
-# fixed (`moved: <record>#<n> to=fixed row=<T> …`, wave-36 T8; D9), in the order the findings were first
-# moved; a later move to defer or fix takes the finding back. `proof_fixed`'s second source.
+# _proof_moved_fixed <plan> -> `<row><TAB><record>#<n>`, one line per finding whose newest whole move is to fixed
+# (wave-36 T8; D9), in the order the findings were first moved; a later move to defer or fix takes the finding back.
+# `proof_fixed`'s second source. Exit 2 when the fold fails.
 _proof_moved_fixed() {
-  [ -f "$1" ] || return 0
-  awk "$(proof_bind_awk)"'
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && /^moved:[ \t]/ {
+  local ev
+  _proof_findings_load "$1" || return 2; ev="$_PROOF_FINDINGS"
+  printf '%s\n' "$ev" | awk "$(proof_bind_awk)"'
+    {
       id = proof_bound($0); m = proof_move_of($0)
       if (id == "" || m == "") next
       if (!(id in last)) ord[++n] = id
       last[id] = m; row[id] = proof_move_row($0)
     }
-    END { for (i = 1; i <= n; i++) if (last[ord[i]] == "fixed") printf "%s\t%s\n", row[ord[i]], ord[i] }' "$1"
+    END { for (i = 1; i <= n; i++) if (last[ord[i]] == "fixed") printf "%s\t%s\n", row[ord[i]], ord[i] }'
 }
 
-# proof_findings_owed <plan> -> one line per finding the plan's `## SDLC State` carries a `deferred:`
-# line for, in the order first written, rated through `proof_finding_rating`:
-# `<record>#<n> <S> <reach> <fix|defer|note> "<title>"`, the priority the effective rating takes. A
-# `check:` line an older plan carries is not read (wave-31 T32; D6). What the tick and `release-check`
-# print, so the priority a record never states is seen where the run is judged.
+# proof_findings_owed <plan> -> one line per finding the run has deferred (`proof_defers`: the registration's deferral,
+# or a move to defer carrying the rating), in the order first deferred, rated as `proof_finding_rating` rates it, from
+# the same events: `<record>#<n> <S> <reach> <fix|defer|note> "<title>"`, the priority the effective rating takes. What
+# the tick and `release-check` print, so the priority a record never states is seen where the run is judged. Exit 2
+# when the fold fails.
 proof_findings_owed() {
-  local plan="$1" id s r t IFS=$' \t\n'
+  local plan="$1" ev id s r t mv IFS=$' \t\n'
   [ -f "$plan" ] || return 0
-  while IFS='	' read -r id s r t; do
+  _proof_findings_load "$plan" || return 2; ev="$_PROOF_FINDINGS"
+  while IFS=$'\037' read -r id s r t mv; do
     [ -n "$id" ] || continue
-    set -- $(proof_finding_rating "$plan" "$id" "$s" "$r")
+    _proof_rating_apply "$mv" "$s" "$r"
+    set -- $_PROOF_RATING
     [ $# -ge 3 ] && [ -n "$3" ] || continue
-    printf '%s %s %s %s %s\n' "$id" "$1" "$2" "$3" "$t"
+    printf '%s %s %s %s "%s"\n' "$id" "$1" "$2" "$3" "$t"
   done <<PROOF_OWED_FINDINGS
-$(awk '
-  /^[[:space:]]*```/ { fence = !fence; next }
-  fence { next }
-  /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-  insdlc && /^deferred:[ \t]/ {
-    m = split($0, f, /[ \t]+/); if (m < 4 || (f[2] in seen)) next
-    seen[f[2]] = 1; t = $0; if (match(t, /"[^"]*"/)) t = substr(t, RSTART, RLENGTH); else t = "\"\""
-    printf "%s\t%s\t%s\t%s\n", f[2], f[3], f[4], t
-  }' "$plan")
+$(printf '%s\n' "$ev" | awk "$(proof_bind_awk)"'
+  { id = proof_bound($0) }
+  id == "" { next }
+  proof_defers($0) && !(id in seen) { seen[id] = 1; ord[++n] = id; sv[id] = proof_fkv($0, "severity"); rc[id] = proof_fkv($0, "reach"); tt[id] = proof_fkv($0, "title") }
+  { m = proof_move_of($0); if (m != "") mv[id] = m }
+  END { for (i = 1; i <= n; i++) { id = ord[i]; printf "%s\037%s\037%s\037%s\037%s\n", id, sv[id], rc[id], tt[id], mv[id] } }')
 PROOF_OWED_FINDINGS
 }
 
 # _proof_reading_result <plan> <docs root> <evidence> <written result> -> the reading's result as its
 # findings give it at their effective ratings (wave-28 T41; D33): a reading whose record a binding line
-# names (`proof_bind_awk`: a `deferred:` or `moved:` line keyed to a finding of it) is derived
+# names (`proof_bind_awk`: a finding event keyed to a finding of it) is derived
 # again from its record at the ratings the plan gives its findings; any other reading, or one whose
 # record cannot be read, keeps its written result.
 #
@@ -706,7 +734,7 @@ _proof_reading_result_var() {
   local plan="$1" droot="$2" ev="$3" res="$4" tab
   PROOF_DERIVED="$res"; _PROOF_FIXED_IDS=""
   [ -n "$droot" ] && [ -n "$ev" ] && [ -f "$droot/$ev" ] || return 0
-  tab="$(_proof_binding_table "$plan" "$ev")" || tab=""
+  tab="$(_proof_binding_table "$plan" "$ev")" || { [ "$?" -eq 1 ] || return 2; tab=""; }
   _proof_fixed_var "${7:-}" "$ev" "${5:-}" "${6:-}"
   [ -n "$tab" ] || [ -n "$_PROOF_FIXED_IDS" ] || return 0
   _proof_reading_derive "$droot" "$ev" "$res" "$tab" "$_PROOF_FIXED_IDS"
@@ -715,7 +743,7 @@ _proof_reading_result_var() {
 # proof_fixed <plan> [<tree>] [<record plan>] -> `<record>#<n><TAB><row><TAB><commit><TAB><born|moved>`, one line per finding a
 # fix row answers and has landed green (wave-33 T13; REQ-5 AC-5.2, D6). The row answers the finding in one of
 # two ways: it names the finding on its born marker (lib/units.sh `units_born_findings`, which `task-add --born
-# <record>#<n>` writes), `born`; or the finding's newest move names it (`moved: <record>#<n> to=fixed row=<T>`,
+# <record>#<n>` writes), `born`; or the finding's newest move names it (`to=fixed row=<T>`,
 # which `finding-move <record>#<n> fixed <row>` writes; wave-36 T8, D9), `moved`, born marker or none. A
 # finding both answer is printed once, as `moved`. Either way the row's `## Tasks` status is `landed`, and the
 # run's landing record (`proof_debt_record`, lib/line.sh's events) holds a verdict for it whose commit is the
@@ -734,13 +762,15 @@ _proof_reading_result_var() {
 # <record plan> is the plan whose landing record is read, <plan> when not given: a plan verb's dry copy is read for
 # its text (its rows, its moves) and its origin for the record (wave-37 T2; REQ-9 AC-9.1, D12; hooks/bash-walls.sh).
 proof_fixed() {
-  local plan="${1:-}" tree="${2:-}" rplan="${3:-${1:-}}" born moved rec out gt="" heads="" lands="" byrow="" k id row c how l
+  local plan="${1:-}" tree="${2:-}" rplan="${3:-${1:-}}" born moved mf rec out gt="" heads="" lands="" byrow="" k id row c how l
   [ -f "$plan" ] || return 0
-  /usr/bin/grep -qE ' born: review S[0-9]+ o[nf]f* of=|^moved:[[:space:]]+[^[:space:]]+[[:space:]]+to=fixed[[:space:]]' "$plan" 2>/dev/null || return 0
+  # The moves are the run's events, read from the plan whose record is read: a dry copy of a plan has no log of its own.
+  mf="$(_proof_moved_fixed "$rplan")" || return 2
+  [ -n "$mf" ] || /usr/bin/grep -qE ' born: review S[0-9]+ o[nf]f* of=' "$plan" 2>/dev/null || return 0
   _proof_units_load || return 0
   declare -F units_born_findings >/dev/null 2>&1 && declare -F units_rows >/dev/null 2>&1 || return 0
   born="$(units_born_findings "$plan" 2>/dev/null | awk -F'\t' '$2 == "landed" { print $1 "\t" $3 "\tborn" }')"
-  moved="$({ printf '\034rows\n'; units_rows "$plan" 2>/dev/null; printf '\034moved\n'; _proof_moved_fixed "$plan"; } | awk -F'\t' '
+  moved="$({ printf '\034rows\n'; units_rows "$plan" 2>/dev/null; printf '\034moved\n'; printf '%s\n' "$mf"; } | awk -F'\t' '
     $0 == SUBSEP "rows" { part = 1; next }
     $0 == SUBSEP "moved" { part = 2; next }
     part == 1 { if ($10 == "landed") landed[$1] = 1; next }
@@ -869,24 +899,22 @@ PROOF_FIXED_LINES
   [ -z "$_PROOF_FIXED_IDS" ] || _PROOF_FIXED_IDS="$_PROOF_FIXED_IDS$nl"
 }
 
-# _proof_binding_table <plan> <record> -> one line per finding of <record> a binding line of the plan's
-# unfenced `## SDLC State` is keyed to: `<record>#<n><TAB><moved to>`, `-` when the plan says none
-# (`_proof_moved_to`'s answer, read in one pass); exit 1, nothing printed, when no binding line names
-# the record.
+# _proof_binding_table <plan> <record> -> one line per finding of <record> a finding event of the run is keyed to:
+# `<record>#<n><TAB><moved to>`, `-` when the run says none (`_proof_moved_to`'s answer, read in one pass); exit 1,
+# nothing printed, when no finding event names the record; exit 2 when the fold fails.
 _proof_binding_table() {
+  local ev
   [ -f "$1" ] || return 1
-  awk -v rec="$2" "$(proof_bind_awk)"'
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    insdlc && proof_binds($0, rec) {
+  _proof_findings_load "$1" || return 2; ev="$_PROOF_FINDINGS"
+  printf '%s\n' "$ev" | awk -v rec="$2" "$(proof_bind_awk)"'
+    proof_binds($0, rec) {
       hit = 1; id = proof_bound($0); ids[id] = 1
-      if ($0 ~ /^moved:/) { m = proof_move_of($0); if (m != "") mv[id] = m }
+      m = proof_move_of($0); if (m != "") mv[id] = m
     }
     END {
       if (!hit) exit 1
       for (id in ids) print id "\t" (id in mv ? mv[id] : "-")
-    }' "$1"
+    }'
 }
 
 # _proof_reading_derive <docs root> <evidence> <written result> <binding table> -> in `PROOF_DERIVED`, the
@@ -1487,44 +1515,45 @@ proof_awk() {
   '
 }
 
-# proof_bind_awk -> awk source: THE ONE PREDICATE for the lines that bind a record's pass, and the reads of
-# what such a line says (wave-28 T72; D33, D34, AC-8.6, AC-8.9; A-T60.5, A-orch-213). A `deferred:` or
-# `moved:` line of `## SDLC State` is keyed `<record>#<n>`: it defers or moves ONE finding of ONE pass,
-# and every read of the record's findings applies it (`proof_finding_rating`), so a second pass registered
-# on the same path would inherit it. `moved:` binds for the reason a deferral does: a move is the user's
-# word about one finding, it changes the priority a later reader of that path judges (T42's seam), and a
-# path that carries one is a settled pass whatever else it carries. A `check:` line binds nothing: a
-# reader's rating is final (wave-31 T32; D6) and no reader reads one. Both callers (`proof_pass_conflict`,
-# the registering verb's guard, and `_proof_reading_result`, the judge's re-derivation) and the batch
-# reader (`proof_readings_derived`) ask these, so none can spell it again:
+# proof_bind_awk -> awk source: THE ONE PREDICATE for the events that bind a record's pass, and the reads of what such
+# an event says (wave-28 T72; D33, D34, AC-8.6, AC-8.9). A finding event (`_proof_findings_load`) is keyed
+# `ref=<record>#<n>`: it defers or moves ONE finding of ONE pass, and every read of the record's findings applies it
+# (`proof_finding_rating`), so a second pass registered on the same path would inherit it. A move binds for the reason
+# a deferral does: it is the person's word about one finding, it changes the priority a later reader of that path
+# judges, and a path that carries one is a settled pass whatever else it carries. Every caller asks these, so none
+# can spell them again; each reads the event whole, whatever the field separator of its own input:
 #
-#     proof_bound(line)       the `<record>#<n>` a binding line is keyed to, else ""
-#     proof_binds(line, rec)  1 when the line is keyed to a finding of the record <rec>
-#     proof_move_of(line)     `defer` or `fix` when a `moved:` line is a whole move (who, when, the words
-#                             and why, as `finding-move` writes it), `fixed` for a whole move to fixed
-#                             (the row, who and when: `to=fixed row=<T> by=… at=…`, wave-36 T8), else ""
+#     proof_fkv(line, key)    the value of a field of a finding event, else ""
+#     proof_bound(line)       the `<record>#<n>` a finding event is keyed to, else ""
+#     proof_binds(line, rec)  1 when the event is keyed to a finding of the record <rec>
+#     proof_defers(line)      1 when the event is a deferral: the registration's, or a move to defer that carries the
+#                             finding's rating
+#     proof_move_of(line)     `defer` or `fix` when the event is a whole move (who, when, the words and why, as
+#                             `finding-move` writes it), `fixed` for a whole move to fixed (the row, who and when),
+#                             else ""
 #     proof_move_row(line)    the <T> of a move to fixed, else ""
 proof_bind_awk() {
   printf '%s' '
-    function proof_bound(s,   f) {
-      if (s !~ /^(deferred|moved):[ \t]/) return ""
-      split(s, f, /[ \t]+/); return f[2]
+    function proof_fkv(s, k,   n, w, i) {
+      n = split(s, w, "|")
+      for (i = 2; i <= n; i++) if (index(w[i], k "=") == 1) return substr(w[i], length(k) + 2)
+      return ""
     }
+    function proof_bound(s) { return (index(s, "run/v1|ev=finding|") == 1) ? proof_fkv(s, "ref") : "" }
     function proof_binds(s, rec) { return index(proof_bound(s), rec "#") == 1 }
-    function proof_move_of(s,   f) {
-      split(s, f, /[ \t]+/)
-      if (f[3] == "to=fixed") {
-        if (f[4] !~ /^row=T[0-9]+$/ || s !~ / by=[^ \t]/ || s !~ / at=[0-9][0-9][0-9][0-9]-/) return ""
-        return "fixed"
-      }
-      if (f[3] != "to=defer" && f[3] != "to=fix") return ""
-      if (s !~ / by=[^ \t]/ || s !~ / at=[0-9][0-9][0-9][0-9]-/ || s !~ / words="/ || s !~ / why="/) return ""
-      return substr(f[3], 4)
+    function proof_defers(s,   t) {
+      t = proof_fkv(s, "to")
+      return proof_bound(s) != "" && (t == "deferred" || (t == "defer" && proof_fkv(s, "severity") != ""))
     }
-    function proof_move_row(s,   f) {
-      split(s, f, /[ \t]+/)
-      return (f[3] == "to=fixed" && f[4] ~ /^row=T[0-9]+$/) ? substr(f[4], 5) : ""
+    function proof_move_of(s,   t) {
+      if (proof_bound(s) == "") return ""
+      t = proof_fkv(s, "to")
+      if (proof_fkv(s, "by") == "" || proof_fkv(s, "at") !~ /^[0-9][0-9][0-9][0-9]-/) return ""
+      if (t == "fixed") return (proof_fkv(s, "row") ~ /^T[0-9]+$/) ? "fixed" : ""
+      if (t != "defer" && t != "fix") return ""
+      return (proof_fkv(s, "words") != "" && proof_fkv(s, "why") != "") ? t : ""
     }
+    function proof_move_row(s) { return (proof_fkv(s, "to") == "fixed" && proof_fkv(s, "row") ~ /^T[0-9]+$/) ? proof_fkv(s, "row") : "" }
   '
 }
 
@@ -1547,7 +1576,7 @@ _proof_reader_load() {  # -> 0 once lib/reader.sh, beside this file, is loaded
 # The files a fold depends on: the reader's libraries, then the record's homes beside the run's log.
 _PROOF_FACTS_LIBS="reader.sh translate.sh plan-read.sh log.sh line.sh"
 _PROOF_FACTS_HOMES="run.log landing-proofs.log asks.state fill-ledger.log design-ledger.md debt.md"
-_PROOF_FACTS_KEY=""; _PROOF_FACTS=""
+_PROOF_FACTS_KEY=""; _PROOF_FACTS=""; _PROOF_FINDINGS=""
 # The kept file is a cache and never evidence, yet what it holds is served as the run's proofs and approvals, under a
 # key anyone who reads the repository can compute. So it is read and written only in a directory this user owns
 # (`[ -O ]`), that is a directory and no link and that neither group nor other can write (one `find`, which follows no
@@ -1556,7 +1585,7 @@ _PROOF_FACTS_KEY=""; _PROOF_FACTS=""
 _PROOF_FACTS_KEEP=16
 
 _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one `run/v1` line each, in fact order; exit 2 with one line on stderr when the fold fails
-  local plan="${1:-}" lib log="" dir="" f stamp key cdir cache="" tmp got rc=0 IFS=$' \t\n'
+  local plan="${1:-}" lib log="" dir="" f stamp key cdir cache="" tmp got evs rc=0 IFS=$' \t\n'
   local -a deps
   [ -f "$plan" ] || return 0
   _proof_reader_load || { printf '_proof_facts: lib/reader.sh cannot be loaded, so the facts of %s are not read\n' "$plan" >&2; return 2; }
@@ -1574,7 +1603,8 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   deps=("$plan"); for f in $_PROOF_FACTS_LIBS; do deps+=("$lib/$f"); done
   [ -z "$dir" ] || for f in $_PROOF_FACTS_HOMES; do [ ! -f "$dir/$f" ] || deps+=("$dir/$f"); done
   stamp="$(cksum "${deps[@]}" 2>/dev/null)" && stamp="$(printf '%s\n' "$stamp" | cksum)" || stamp=""
-  key="$plan $stamp"
+  # The key names the kept file's layout too, so a file another layout wrote is never read as this one.
+  key="$plan $stamp facts+findings"
   if [ "$_PROOF_FACTS_KEY" = "$key" ]; then printf '%s' "$_PROOF_FACTS"; return 0; fi
   cdir="${TMPDIR:-/tmp}/bionic-facts-$(id -u 2>/dev/null)"
   [ -d "$cdir" ] || mkdir -p -m 700 "$cdir" 2>/dev/null
@@ -1583,31 +1613,55 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   fi
   # The kept file is read once, key and body together: another process prunes the directory, and a file gone between
   # two reads would be an empty body under a good key.
-  if [ -n "$cache" ] && [ -f "$cache" ] && got="$(cat "$cache" 2>/dev/null)" && [ "${got%%$'\n'*}" = "$key" ]; then
-    _PROOF_FACTS="${got#"$key"}"; _PROOF_FACTS="${_PROOF_FACTS#$'\n'}"
-  elif [ -n "$dir" ]; then
-    # pipefail: the reader folds a pipe, and a stage killed in it would leave a short fold that exits 0.
-    _PROOF_FACTS="$(set -o pipefail; reader_facts "$plan")" || rc=$?
+  if [ -n "$cache" ] && [ -f "$cache" ] && got="$(cat "$cache" 2>/dev/null)" && [ "${got%%$'\n'*}" = "$key" ] \
+     && [ -n "$(printf '%s\n' "$got" | awk '$0 == "\036" { print 1; exit }')" ]; then
+    # Split by awk, not by a pattern in the shell: bash 3.2 matches `${v#*x}` over a long value in quadratic time.
+    _PROOF_FACTS="$(printf '%s\n' "$got" | awk 'NR == 1 { next } $0 == "\036" { exit } { print }')"
+    _PROOF_FINDINGS="$(printf '%s\n' "$got" | awk 'f { print } $0 == "\036" { f = 1 }')"
+    [ -z "$_PROOF_FINDINGS" ] || _PROOF_FINDINGS="$_PROOF_FINDINGS"$'\n'
   else
-    # A plan the reader cannot join to a record has no log: its homes are its events, translated as the reader would.
-    # shellcheck source=/dev/null
-    declare -F translate >/dev/null 2>&1 || . "$lib/translate.sh" >/dev/null 2>&1
-    _PROOF_FACTS="$( set -o pipefail; reader_events() { translate "$1" events; }; reader_facts "$plan" )" || rc=$?
+    if [ -n "$dir" ]; then
+      # pipefail: the reader reads a pipe, and a stage killed in it would leave a short read that exits 0.
+      evs="$(set -o pipefail; reader_events "$plan")" || rc=$?
+    else
+      # A plan the reader cannot join to a record has no log: its homes are its events, translated as the reader would.
+      # shellcheck source=/dev/null
+      declare -F translate >/dev/null 2>&1 || . "$lib/translate.sh" >/dev/null 2>&1
+      evs="$(set -o pipefail; translate "$plan" events)" || rc=$?
+    fi
+    # The events are read once: the facts are folded from them, and a finding's events are kept whole beside the facts,
+    # since a finding is read from all of them (`_proof_findings_load`), not from its standing fact alone.
+    [ "$rc" -ne 0 ] || _PROOF_FACTS="$( set -o pipefail; reader_events() { printf '%s\n' "$evs"; }; reader_facts "$plan" )" || rc=$?
+    _PROOF_FINDINGS="$(awk -v t=finding 'index($0, "run/v1|ev=" t "|") == 1' <<PROOF_EVENTS
+$evs
+PROOF_EVENTS
+)"
+    [ -z "$_PROOF_FINDINGS" ] || _PROOF_FINDINGS="$_PROOF_FINDINGS"$'\n'
   fi
   # A fold that failed (a process refused under memory pressure) is short or empty: kept, it would answer every later
   # ask that the run has no proof. It is an error to whoever asked, and nothing is kept, in this shell or on disk.
   if [ "$rc" -ne 0 ]; then
-    _PROOF_FACTS_KEY=""; _PROOF_FACTS=""
+    _PROOF_FACTS_KEY=""; _PROOF_FACTS=""; _PROOF_FINDINGS=""
     printf '_proof_facts: lib/reader.sh exited %s folding the facts of %s; nothing is kept\n' "$rc" "$plan" >&2
     return 2
   fi
   [ -z "$_PROOF_FACTS" ] || _PROOF_FACTS="$_PROOF_FACTS"$'\n'
   _PROOF_FACTS_KEY="${stamp:+$key}"
   if [ -n "$cache" ] && tmp="$(mktemp "$cdir/.facts.XXXXXX" 2>/dev/null)"; then
-    { printf '%s\n' "$key"; printf '%s' "$_PROOF_FACTS"; } > "$tmp" && mv -f "$tmp" "$cache" 2>/dev/null || rm -f "$tmp"
+    { printf '%s\n' "$key"; printf '%s' "$_PROOF_FACTS"; printf '\036\n%s' "$_PROOF_FINDINGS"; } > "$tmp" && mv -f "$tmp" "$cache" 2>/dev/null || rm -f "$tmp"
     ls -t "$cdir" 2>/dev/null | sed "1,${_PROOF_FACTS_KEEP}d" | while IFS= read -r f; do rm -f "$cdir/$f"; done
   fi
   printf '%s' "$_PROOF_FACTS"
+}
+
+# _proof_findings_load <plan> -> 0 with _PROOF_FINDINGS set in the calling shell to every finding event of the plan's
+# run, in the order the reader reads them, kept with the facts; 2 when the fold fails. A finding's facts come from all
+# its events: an older plan's deferral and a later move of it are two events, and the move, standing, would leave the
+# deferral unread. A reader in this shell reads the one fold, and every later ask in this shell or a subshell is
+# served from it.
+_proof_findings_load() {
+  [ -f "${1:-}" ] || { _PROOF_FINDINGS=""; return 0; }
+  _proof_facts "$1" >/dev/null
 }
 
 _proof_ask() {  # <plan> <reader question's function> [args] -> its answer and exit, over the facts _proof_facts keeps
@@ -1730,35 +1784,37 @@ proof_add_line() {
 }
 
 # proof_pass_conflict <plan> <record path> <head> -> why <record path> cannot be registered for another
-# pass at <head>, or nothing (wave-28 T60; D33, AC-8.6). ONE RECORD PATH IS ONE PASS: a line that binds a
-# pass (`proof_bind_awk`: `deferred:` or `moved:`) is keyed `<record>#<n>`, so a second pass on the same
+# pass at <head>, or nothing (wave-28 T60; D33, AC-8.6). ONE RECORD PATH IS ONE PASS: a finding event binds a
+# pass (`proof_bind_awk`) and is keyed `<record>#<n>`, so a second pass on the same
 # path would inherit the first pass's deferral or move. The key stays unique by
 # construction when the path is registered for one pass only, so the verb asks here before it writes. A
 # reading's proof line (one with a `question=`) whose `evidence=` is <record path> and whose head is not
-# <head> prints `head <that head>`; otherwise, when a binding line of `## SDLC State` names
+# <head> prints `head <that head>`; otherwise, when a finding event names
 # `<record path>#`, `settled <head>`. A reader relaunched on an unsettled record (the same head, no such
 # line) gets nothing: it is admitted.
 proof_pass_conflict() {
+  local ev
   [ -f "$1" ] || return 0
-  awk -v rec="$2" -v head="$3" "$(proof_awk)$(proof_bind_awk)"'
+  _proof_findings_load "$1" || return 2; ev="$_PROOF_FINDINGS"
+  printf '%s\n' "$ev" | awk -v rec="$2" -v head="$3" "$(proof_awk)$(proof_bind_awk)"'
+    FILENAME == "-" { if (proof_binds($0, rec)) child = 1; next }
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
     !insdlc { next }
-    proof_bound($0) != "" { if (proof_binds($0, rec)) child = 1; next }
     proof_fields($0) && PROOF_QUESTION != "" { if (PROOF_EVIDENCE == rec && PROOF_HEAD != head && other == "") other = PROOF_HEAD }
-    END { if (other != "") print "head " other; else if (child) print "settled " head }' "$1"
+    END { if (other != "") print "head " other; else if (child) print "settled " head }' - "$1"
 }
 
 # proof_readings_derived <plan> <tree> [<record plan>] -> `<evidence><TAB><written result><TAB><derived result>` for each
 # reading proof line (`kind=review` with a `question=`) of the plan's unfenced `## SDLC State`, the
 # derived result what `_proof_reading_result` gives it (wave-28 T60; D33, AC-8.6; A-orch-161), and
-# NOTHING when no binding line (`proof_bind_awk`) is in the plan: every derived result is then the
-# written one. The commit wall judges text and reads no record, so its collector (hooks/bash-walls.sh)
+# NOTHING when no finding event of the run binds a pass (`proof_bind_awk`): every derived result is then the
+# written one. The finding events are the record plan's, read once (`_proof_findings_load`); exit 2 when that fails. The commit wall judges text and reads no record, so its collector (hooks/bash-walls.sh)
 # asks this once, from the step the wall reads (lib/walls.sh `eg_plan_reads_readings`), and hands the
 # lines over; the wall and the judge answer a reading's result one way. ONE PASS OVER THE PLAN (T72): the
-# readings and every binding line's state are gathered together (each reading's own lines come to the
-# shell just before it), and only a reading a binding line names is derived from its record, so the cost
+# readings and every binding event's state are gathered together (each reading's own lines come to the
+# shell just before it), and only a reading a binding event names is derived from its record, so the cost
 # is one plan read and one record read per bound reading, not a plan read per reading and per finding. <tree> is the project root whose docs root holds the records;
 # with no docs root, the derived result is the written one.
 #
@@ -1768,13 +1824,15 @@ proof_pass_conflict() {
 # plan whose landing record `proof_fixed` reads, <plan> when not given (wave-37 T2; REQ-9 AC-9.1, D12): the wall hands
 # a plan verb's dry copy as <plan> and the plan it was copied from (`proof_debt_origin`) as <record plan>.
 proof_readings_derived() {
-  local plan="${1:-}" tree="${2:-}" rplan="${3:-${1:-}}" droot="" k a b c d tab="" nl fixed=""
+  local plan="${1:-}" tree="${2:-}" rplan="${3:-${1:-}}" droot="" k a b c d tab="" nl fixed="" ev
   [ -f "$plan" ] || return 0
   nl=$'\n'
+  # The findings are the run's events, read from the plan whose record is read: a dry copy has no log of its own.
+  _proof_findings_load "$rplan" || return 2; ev="$_PROOF_FINDINGS"
   if [ -n "$tree" ]; then
     _proof_roots_load
     ! declare -F docs_root >/dev/null 2>&1 || droot="$(docs_root "$tree" 2>/dev/null)"
-    fixed="$(proof_fixed "$plan" "$tree" "$rplan")"
+    fixed="$(proof_fixed "$plan" "$tree" "$rplan")" || return 2
   fi
   while IFS='	' read -r k a b c d; do
     case "$k" in
@@ -1787,16 +1845,17 @@ proof_readings_derived() {
          printf '%s\t%s\t%s\n' "$a" "$c" "$PROOF_DERIVED"; tab="" ;;
     esac
   done <<PROOF_READINGS
-$(PROOF_HAS_FIXED="${fixed:+1}" awk "$(proof_awk)$(proof_bind_awk)"'
+$(printf '%s\n' "$ev" | PROOF_HAS_FIXED="${fixed:+1}" awk "$(proof_awk)$(proof_bind_awk)"'
+    FILENAME == "-" {
+      if (proof_bound($0) == "") next
+      nbind++; id = proof_bound($0); ids[id] = 1
+      m = proof_move_of($0); if (m != "") mv[id] = m
+      next
+    }
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
     !insdlc { next }
-    proof_bound($0) != "" {
-      nbind++; id = proof_bound($0); ids[id] = 1
-      if ($0 ~ /^moved:/) { m = proof_move_of($0); if (m != "") mv[id] = m }
-      next
-    }
     proof_fields($0) && PROOF_KIND == "review" && PROOF_QUESTION != "" && PROOF_EVIDENCE != "" && !((PROOF_EVIDENCE SUBSEP PROOF_RESULT) in seen) {
       seen[PROOF_EVIDENCE SUBSEP PROOF_RESULT] = 1; nr++; rev[nr] = PROOF_EVIDENCE; rres[nr] = PROOF_RESULT; rhead[nr] = PROOF_HEAD
     }
@@ -1807,7 +1866,7 @@ $(PROOF_HAS_FIXED="${fixed:+1}" awk "$(proof_awk)$(proof_bind_awk)"'
         for (id in ids) if (index(id, p) == 1) { hit = 1; print "S\t" id "\t" (id in mv ? mv[id] : "-") }
         print "R\t" rev[i] "\t" hit "\t" rres[i] "\t" rhead[i]
       }
-    }' "$plan")
+    }' - "$plan")
 PROOF_READINGS
 }
 
@@ -2622,7 +2681,7 @@ review	"*)
   # THE BORN LANDINGS, read once (wave-36 T7; D9): the commits the walk holds as a born row's landing, the fixed
   # findings' green landings among them.
   case "$owed" in review"	"*|*"
-review	"*) fixed="$(proof_fixed "$plan" "$tree")"; born="$(_facts_born_landings "$plan" "$tree" "$fixed")"
+review	"*) fixed="$(proof_fixed "$plan" "$tree")" || { _facts_unread "$plan"; return; }; born="$(_facts_born_landings "$plan" "$tree" "$fixed")"
                    chk="$(_proof_release_proved "$plan" "$tree")" ;; esac
   while IFS= read -r fact; do
     [ -n "$fact" ] || continue
@@ -2668,8 +2727,8 @@ PROOF_CHAIN
         # A FINDING A BORN ROW FIXED IS SETTLED (wave-33 T13; D6): it drops out of the derivation, so a question
         # whose every finding to fix is fixed is no longer failing, with no waiver; one open finding to fix keeps
         # the reading failing. The commit that landed the fix is a born landing on the walk (wave-36 T7).
-        if [ "$wt" = fact ]; then _proof_reading_result_var "$plan" "$droot" "$we" "$wr" "$wh" "$tree" "$fixed"; wr="$PROOF_DERIVED"; fi
-        if [ "$pt" = fact ]; then _proof_reading_result_var "$plan" "$droot" "$pe" "$pr" "$ph" "$tree" "$fixed"; pr="$PROOF_DERIVED"; fi
+        if [ "$wt" = fact ]; then _proof_reading_result_var "$plan" "$droot" "$we" "$wr" "$wh" "$tree" "$fixed" || { _facts_unread "$plan"; return; }; wr="$PROOF_DERIVED"; fi
+        if [ "$pt" = fact ]; then _proof_reading_result_var "$plan" "$droot" "$pe" "$pr" "$ph" "$tree" "$fixed" || { _facts_unread "$plan"; return; }; pr="$PROOF_DERIVED"; fi
         # THE QUESTION'S CHAIN: its newest link, whole or piece, covered to its head and extended by the walk
         # (wave-36 T7; D9), on which a review-born landing holds whichever registered reading bore it (wave-39 D7,
         # ADR-062). One walk per question and head, however many lines of the question ask it.

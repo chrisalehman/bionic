@@ -254,7 +254,7 @@ if cr_reached "SR-0"; then
   expect_contains "SR-2 commands follow the fix row's landing in the replay's log (read beside the moves)" "close-out.sh" "$SR_AFTER"
   expect_eq "SR-2b …and none of them is a finding-move" "" "$(printf '%s\n' "$SR_AFTER" | /usr/bin/grep 'session-poker\.sh finding-move')"
   expect_eq "SR-3 the second finding is written fixed by the fix row's landing" "yes" \
-    "$(/usr/bin/grep -q '^moved: record/wave-x/w-adversarial-whole-2\.md#1 to=fixed row=T5 by=landing ' "$CR_PLAN" && echo yes)"
+    "$(/usr/bin/grep -qF 'run/v1|ev=finding|ref=record/wave-x/w-adversarial-whole-2.md#1|to=fixed|row=T5|by=landing|' "$CR_REC/run.log" && echo yes)"
   expect_contains "SR-4 the close reads zero with the window at delivered:" "hand-holds: total=0 " \
     "$(cr_out 'close-out, the tail' | /usr/bin/grep '^hand-holds: ')"
 fi

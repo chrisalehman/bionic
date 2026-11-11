@@ -1397,8 +1397,8 @@ section "§KNOWN: the entry's Known limits are rendered from the plan's deferral
 # record names the commit, so the release check's sentence scan reads it on the branch it judges.
 # FIXTURE FIDELITY: the plan names its release in frontmatter, as Step 0 writes it; the doc row is task-add's; each
 # `deferred:` line is lib/proof.sh `proof_finding_lines`' own output for a rated finding (proof-add review writes
-# them so), and each sentence is the `finding-stated` verb's; the entry and the hand edit are plain commits on the
-# working branch, as a writer's landing and a person's edit make them.
+# them so), with its sentence on it as an older plan holds it (`\` and `"` escaped); the entry and the hand edit are
+# plain commits on the working branch, as a writer's landing and a person's edit make them.
 # fails-when: a stated sentence is absent from the part, out of order, still escaped; a hand bullet survives, or
 # another entry's part changes; the part lands after The landing numbers; the commit is
 # not the line's, touches more than CHANGELOG.md, or no record line names it; a second render makes a commit; a
@@ -1425,9 +1425,8 @@ kl_world() {  # -> root: release 9.9.9, its entry on wave/x, the doc row T3, two
     "$KL_V" > "$r/CHANGELOG.md"
   git -C "$r" add CHANGELOG.md && git -C "$r" commit --quiet -m "the entry" || return 1
   ww_poke "$r" task-add T3 7 doc 'the entry. The release entry is rendered.' orchestrator — 10 REQ-1 CHANGELOG.md >/dev/null || return 1
-  ww_sdlc "$r" "$(kl_lib proof_finding_lines record/wave-x/critic.md "$(printf '1\tS3\ton\t-\tdefer\t-\tthe first title\n3\tS3\ton\t-\tdefer\t-\tthe second title')")"
-  ww_poke "$r" finding-stated record/wave-x/critic.md#1 "$KL_S1" >/dev/null || return 1
-  ww_poke "$r" finding-stated record/wave-x/critic.md#3 "$KL_S2" >/dev/null || return 1
+  ww_sdlc "$r" "$(kl_lib proof_finding_lines record/wave-x/critic.md "$(printf '1\tS3\ton\t-\tdefer\t-\tthe first title\n3\tS3\ton\t-\tdefer\t-\tthe second title')" \
+    | A="$(printf '%s' "$KL_S1" | sed 's/["\\]/\\&/g')" B="$KL_S2" awk '{ print $0 " stated=\"" ENVIRON[NR == 1 ? "A" : "B"] "\"" }')"
   printf '%s' "$r"
 }
 RK="$(kl_world)"; PK="$(ll_plan "$RK")"; KL_H="$(kl_tip "$RK")"
@@ -1464,7 +1463,7 @@ expect_contains "(k10b) …naming the row's kind" "T1 is a build row" "$KL_OUT"
 ww_sdlc "$RK" "$(kl_lib proof_finding_lines record/wave-x/critic.md "$(printf '4\tS3\ton\t-\tdefer\t-\tan unstated one')")"
 KL_OUT="$(ww_poke "$RK" known-limits-part T3)"; KL_RC=$?
 expect_eq "(k11) a deferral with no stated sentence is refused, the branch unmoved" "1|$KL_T" "$([ "$KL_RC" -ne 0 ] && echo 1)|$(kl_tip "$RK")"
-expect_contains "(k11b) …naming the finding and the verb that states it" "finding-stated record/wave-x/critic.md#4" "$KL_OUT"
+expect_contains "(k11b) …naming the finding and the verb that states it" "disposition record/wave-x/critic.md#4 defer" "$KL_OUT"
 
 # ---------------------------------------------------------------------------
 section "§HEALTH: a landing's settlement rewrites the plan's stack-health: through the one rendering, and it stays red"

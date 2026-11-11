@@ -108,7 +108,7 @@ fc_plan() {  # <proof lines> [<sed edit>] -> PFC at current: 8, bound to this se
     printf 'AC-1.2:\n  fails-when: a second planted defect\n  evidence: record/generic-evidence.md\n'
     printf '  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n'
   } | sed -e "${2:-}" > "$PFC"
-  rm -f "$FC_REC"/release-approval-*.md "$FC_REC/${RN_W:-review}-results"-*.md "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/asks.state" \
+  rm -f "$FC_REC"/release-approval-*.md "$FC_REC/${RN_W:-review}-results"-*.md "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/asks.state" "$FC_REC/run.log" \
     "$(roster_of "$RFC")" "$(ack_ledger_of "$RFC")"
   bind_marker "$RFC" "$PFC"
 }
