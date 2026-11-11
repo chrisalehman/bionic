@@ -1519,18 +1519,14 @@ expect_eq "(tw4) with the record gone the log alone stands: the record is held, 
   "$(line_held "$TWR"; echo "$? $(tw_lib units_record_landings "$TWR" | cut -f2 | paste -sd' ' -)")"
 
 # ---------------------------------------------------------------------------
-section "§LOG: ready writes its acts to the run's log, and no landing record"
-# fails-when: §READY's landing leaves no ready event of T1 in the record's run.log, or a landing-proofs.log beside it.
-LG_REC="$RR/.bionic/docs/record/wave-x"
-expect_eq "(lg1) the run's log holds T1's ready event, read by name" "T1" \
-  "$(awk -F'|' '$1 == "run/v1" && $2 == "ev=ready" { for (i = 3; i <= NF; i++) if (index($i, "row=") == 1) print substr($i, 5) }' "$LG_REC/run.log" 2>/dev/null | head -1)"
-expect_eq "(lg2) …and of run.log and landing-proofs.log, the record holds run.log alone" "run.log" \
-  "$(cd "$LG_REC" 2>/dev/null && ls run.log landing-proofs.log 2>/dev/null | paste -sd' ' -)"
-# fails-when: a published line with a part and no row is read as a landing by the record's landings or the reader.
+section "§LOG: ready writes its acts to the run's log, and no landing record; a part is no landing"
+# fails-when: §READY's landing leaves no ready event of T1 in run.log or a landing-proofs.log beside it; a published part
+# with no row is read as a landing by the record's landings or the reader.
+expect_eq "(lg1) the run's log holds T1's ready event, and of run.log and landing-proofs.log the record holds run.log" "T1|run.log" \
+  "$(awk -F'|' '$1 == "run/v1" && $2 == "ev=ready" { print substr($3, 5); exit }' "$(ll_log "$RR")" 2>/dev/null)|$(cd "$RR/.bionic/docs/record/wave-x" 2>/dev/null && ls run.log landing-proofs.log 2>/dev/null | paste -sd' ' -)"
 printf 'run/v1|ev=published|part=reviews|commit=%s|branch=wave/x|tree=-|by=T3|at=2026-11-03T00:00:05Z\n' "$TWC" >> "${TWR%/*}/run.log"
-expect_eq "(lg3) a part is no landing: the record's landings and the reader's landed rows are T3 alone, the part still read" \
-  "T3|T3|1" "$(tw_lib units_record_landings "$TWR" | cut -f2 | paste -sd' ' -)|$(bash "$REPO/payload/scripts/reader.sh" "$TWP" landed \
-    | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | paste -sd' ' -)|$(line_lines "$TWR" | grep -c '|ev=published|part=reviews|')"
+expect_eq "(lg3) a part is no landing: the record's landings and the reader's landed rows are T3 alone, the part still read" "T3|T3|1" \
+  "$(tw_lib units_record_landings "$TWR" | cut -f2 | paste -sd' ' -)|$(bash "$REPO/payload/scripts/reader.sh" "$TWP" landed | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | paste -sd' ' -)|$(line_lines "$TWR" | grep -c '|part=reviews|')"
 
 # ---------------------------------------------------------------------------
 finish

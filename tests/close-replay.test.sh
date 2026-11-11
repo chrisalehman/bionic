@@ -131,8 +131,7 @@ cr_closer_is_waiver() {  # <by> -> yes when a waiver or close-out closed the ask
 }
 # cr_field <line> <key> -> the value of <key>= in a `|`-separated landing-record line
 cr_field() { printf '%s\n' "$1" | awk -F'|' -v k="$2=" '{ for (i = 1; i <= NF; i++) if (index($i, k) == 1) { print substr($i, length(k) + 1); exit } }'; }
-# cr_lines -> the record's landing lines, the landing record's then the run log's
-cr_lines() { cat "$CR_REC/landing-proofs.log" "$CR_REC/run.log" 2>/dev/null; }
+cr_lines() { cat "$CR_REC/landing-proofs.log" "$CR_REC/run.log" 2>/dev/null; }   # the landing record's lines, then the log's
 # cr_part_event -> the last line naming a commit of the entry's reviews part, whichever verb wrote it
 cr_part_event() { cr_lines | /usr/bin/grep '|part=reviews|' | tail -1; }
 # cr_entry_part <changelog text on stdin> <version> -> the `### The reviews` part of that version's entry, heading
@@ -414,16 +413,10 @@ if cr_reached "LV-0"; then
   expect_absent "LV-6b …and none names AC-2.1" "AC-2.1" "$LV_SETS"
 fi
 
-# ============================================================
 section "§LOG: the run's landings stand in its log, and no landing record is written"
-# ============================================================
 # fails-when: after the replay the record's run.log lacks the fix row's landing, or the record holds a landing-proofs.log.
-if cr_reached "LG-0"; then
-  expect_eq "LG-1 the log holds the fix row's landing, a published event of T5" "yes" \
-    "$(awk -F'|' '$1 == "run/v1" && $2 == "ev=published" && $3 == "row=T5" { f = 1 } END { if (f) print "yes" }' "$CR_REC/run.log" 2>/dev/null)"
-  expect_eq "LG-2 …and of run.log and landing-proofs.log, the record holds run.log alone" "run.log" \
-    "$(cd "$CR_REC" 2>/dev/null && ls run.log landing-proofs.log 2>/dev/null | paste -sd' ' -)"
-fi
+if cr_reached "LG-0"; then expect_eq "LG-1 the log holds T5's published event, and of run.log and landing-proofs.log the record holds run.log alone" \
+  "1|run.log" "$(/usr/bin/grep -c '^run/v1|ev=published|row=T5|' "$CR_REC/run.log" 2>/dev/null)|$(cd "$CR_REC" 2>/dev/null && ls run.log landing-proofs.log 2>/dev/null | paste -sd' ' -)"; fi
 
 # ============================================================
 section "§CANCEL: a cancel of the release approval appended to the run's log is followed by close-out's facts line"

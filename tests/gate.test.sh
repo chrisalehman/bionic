@@ -984,21 +984,13 @@ printf '0\n' > "$CLAUDE_CONFIG_DIR/bionic/reserve"
 reap
 
 section "§REAPED — a landing's run the gate finds killed is a run fact in its run's log"
-# fails-when: the scan ends a killed landing run with no ev=run rc=137 line in the log beside its record, or writes
-# one for a killed run that names no record.
-fresh reaped
-kp="$(sleep 30 >/dev/null 2>&1 & echo $!)"; kill "$kp" 2>/dev/null; wait "$kp" 2>/dev/null
-RP_REC="$D/record/wave-x/landing-proofs.log"; mkdir -p "$BIONIC_GATE_DIR/requests" "${RP_REC%/*}"
-rp_plant() {  # <id> <record or empty> — an admitted request whose holder is dead
-  { printf 'key=a.test.sh\nkind=landing\nwho=%s:w-T1\ntree=%s\nasked=1000\nholder=%s:x\nlanding=L1\n' "$WORLD_SID" "$D" "$kp"
-    [ -z "$2" ] || printf 'record=%s\n' "$2"; printf 'admitted=1000\npromise=0:1:60\n'; } > "$BIONIC_GATE_DIR/requests/$1"
-}
-rp_plant 1 "$RP_REC"; rp_plant 2 ""
-state >/dev/null
-expect_eq "RP.1 both killed requests are ended rc=137 by the scan" "137 137" "$(field 1 rc) $(field 2 rc)"
-expect_eq "RP.2 …and the record's run log holds one run line, the one naming a record, rc=137 with its key and request" \
-  "1|run/v1|ev=run|rc=137|key=a.test.sh|kind=landing|tree=$D|landing=L1|request=1" \
-  "$(grep -c '^run/v1|ev=run|' "${RP_REC%/*}/run.log" 2>/dev/null)|$(sed 's/|at=[^|]*$//' "${RP_REC%/*}/run.log" 2>/dev/null)"
-expect_false "RP.3 …and no landing record is written" test -e "$RP_REC"
+# fails-when: the scan ends a killed landing run with no ev=run rc=137 in the log beside its record, or writes one for a
+# killed run that names no record.
+fresh reaped; kp="$(sleep 30 >/dev/null 2>&1 & echo $!)"; kill "$kp" 2>/dev/null; RP_REC="$D/rec/landing-proofs.log"
+mkdir -p "$BIONIC_GATE_DIR/requests"; for i in 1 2; do printf 'key=a.test.sh\nkind=landing\nwho=w\ntree=%s\nasked=1000\nholder=%s:x\nlanding=L1\n%sadmitted=1000\n' \
+  "$D" "$kp" "$([ "$i" = 1 ] && printf 'record=%s\n' "$RP_REC")" > "$BIONIC_GATE_DIR/requests/$i"; done; state >/dev/null
+expect_eq "RP.1 both killed requests are ended rc=137, and the record's log holds the one run line, rc=137, of the request naming it, no landing record beside it" \
+  "137 137|run/v1|ev=run|rc=137|key=a.test.sh|kind=landing|tree=$D|landing=L1|request=1|run.log" \
+  "$(field 1 rc) $(field 2 rc)|$(sed 's/|at=[^|]*$//' "${RP_REC%/*}/run.log" 2>/dev/null)|$(ls "${RP_REC%/*}" 2>/dev/null | paste -sd' ' -)"
 
 finish
