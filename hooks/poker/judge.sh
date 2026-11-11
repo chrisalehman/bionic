@@ -324,7 +324,7 @@ current_admit() {
     esac
     plan_verb_open current
     if [ -n "${PV_CUR_UNREAD:-}" ]; then
-      die "REFUSED — the step of $PV_PLAN could not be read (the run's facts did not fold), so the advance is judged from no step; the plan is unchanged."
+      die "REFUSED — the step of $PV_PLAN could not be read (the run's facts did not fold), so the advance is judged from no step; the plan is unchanged. run again: session-poker.sh current $PV_KEY, once the fold's own line above is mended."
       exit 2
     fi
     # THE CHECK-ONLY ADVANCE (wave-38 T1; D20, AC-1.3): `current <N> --check` runs current_admit, the advance's own
