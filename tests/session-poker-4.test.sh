@@ -357,7 +357,7 @@ expect_contains "SEV-cur2 …naming that reading failing" \
 # round and a second opens nothing; the waive verb closes it; a refusal after the waiver is taken back opens a new round;
 # once a passing reading holds the question, current 8 closes what is left. The sections above left closed rounds.
 sev_owed() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && owed_list' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
-sev_store() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && cat "$(owed_file)"' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
+sev_store() { ( cd "$RSEV" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && owed_lines' _ "${SEV_LIB%/*}" ) 2>/dev/null; }
 SEV_WKEYS="$(sev_owed | cut -f1)"
 expect_contains "AW-1 T35 AC-2.2 the refusal on a failing question opens waive:<question>, the waive verb's key" \
   "waive:adversarial" "$SEV_WKEYS"
@@ -1080,7 +1080,7 @@ vc_plan() {  # <repo> <row>... -> the plan path; bound and committed
   printf '%s' "$f"
 }
 vc_cell() { s48_row "$VC_P" "$1" | cut -d'|' -f"$2"; }  # <row> <9 Files | 10 status | 12 artifact>
-VC_VERBS="task-set amend step-field step-line ledger-set ledger-add"
+VC_VERBS="task-set amend step-field step-line"
 vc_named() {  # <refusal text> -> the first call of a verb that writes a cell, `<verb> <operands…>`, as the refusal prints it
   printf '%s\n' "$1" | /usr/bin/grep -oE 'session-poker\.sh [a-z][a-z-]*[^,;]*' | sed 's/^session-poker\.sh //; s/\. .*$//; s/\.$//' \
     | awk -v set=" $VC_VERBS " '{ if (index(set, " " $1 " ")) { print; exit } }'
@@ -1213,7 +1213,6 @@ poke "$VC" deliver T9
 s42_unchanged "DC-2 control: a review row with three records and no artifact cell is refused" 2 "$VC_P"
 VC_DREF="$OUT"
 expect_contains "DC-2b …the refusal names the Tasks artifact cell's writer" "task-set T9 artifact=" "$VC_DREF"
-expect_no_regex "DC-2c …and on a plan with no ledger it never names ledger-set or ledger-add" "ledger-(set|add)" "$VC_DREF"
 
 # ---------- §FILES-UNHELD: task-set writes Files on a row no live contract holds ----------
 poke "$VC" task-set T1 "Files=lib/a.sh, lib/a2.sh"

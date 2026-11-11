@@ -83,7 +83,7 @@ cr_marks() { cr_part | awk -v t="# ${1}: " 'index($0, t) == 1 { print substr($0,
 # The verbs the replay runs (rehearsal.sh `_rh_replay`), each named `<tool> <verb>`: the tool the command runs and
 # the first bare word of its arguments. A log missing any of them is a replay that did not run that verb, whatever its
 # length. A refusal's follow is not listed: the replay meets one only when a verb refuses.
-CR_VERBS='session-sweeper.sh ack|session-poker.sh task-add|spawn-worktree.sh create|session-poker.sh launch-sync|spawn-worktree.sh ready|session-poker.sh release-check|session-poker.sh release-approval|session-poker.sh reply|session-poker.sh reviews-part|gh pr create|gh pr merge|session-poker.sh deliver|close-out.sh run'
+CR_VERBS='session-sweeper.sh ack|session-poker.sh task-add|spawn-worktree.sh create|execution-recorder.sh|spawn-worktree.sh ready|session-poker.sh release-check|session-poker.sh release-approval|session-poker.sh reply|session-poker.sh reviews-part|gh pr create|gh pr merge|session-poker.sh deliver|close-out.sh run'
 # The kinds of hand write the replay makes: the fix writer's launch, its code and report, the user's typed reply.
 CR_HANDS='launch code record typed'
 # cr_names -> for each `$ ` command line on stdin, `<rc>|<tool> <words>`: the tool is the first word naming a script
@@ -116,11 +116,14 @@ cr_out() {
     index($0, l) && /^  rc=/ { k = n; for (i = 1; i <= n; i++) r[i] = o[i] }
     END { for (i = 1; i <= k; i++) print r[i] }' "$CR_LOG" 2>/dev/null
 }
-# cr_ask <key> -> the register's line for <key> as <state>|<by>
+# cr_ask <key> -> the newest act on <key> as <state>|<by>, read from the register, then the run's log, where an ask
+# event's reply= is the act that closed it
 cr_ask() {
-  awk -F'|' -v k="key=$1" '$2 == k { s = ""; b = ""
-    for (i = 3; i <= NF; i++) { if ($i ~ /^state=/) s = substr($i, 7); if ($i ~ /^by=/) b = substr($i, 4) }
-    print s "|" b }' "$CR_REC/asks.state" 2>/dev/null | tail -1
+  cat "$CR_REC/asks.state" "$CR_REC/run.log" 2>/dev/null | awk -F'|' -v k="key=$1" '
+    ($1 == "owed/v1" && $2 == k) || ($1 == "run/v1" && $2 == "ev=ask" && $3 == k) { s = ($1 == "run/v1") ? "open" : ""; b = ""
+      for (i = 3; i <= NF; i++) { if ($i ~ /^state=/) s = substr($i, 7); if ($i ~ /^by=/) b = substr($i, 4)
+        if ($1 == "run/v1" && $i ~ /^reply=/) { s = "closed"; b = substr($i, 7) } }
+      l = s "|" b } END { if (l != "") print l }'
 }
 cr_closer_is_waiver() {  # <by> -> yes when a waiver or close-out closed the ask, else no
   case "$1" in
@@ -189,6 +192,8 @@ if [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ]; then
     "$([ -n "$CL_W" ] && echo yes)"
   expect_eq "CL-3b …and closed, by neither a waiver nor close-out" "closed|no" \
     "${CL_W%%|*}|$(cr_closer_is_waiver "${CL_W#*|}")"
+  expect_eq "CL-3c …its acts stand in the run's log as ask events, and the record holds no asks.state" "yes|" \
+    "$(/usr/bin/grep -q '^run/v1|ev=ask|key=waive:structure|' "$CR_REC/run.log" 2>/dev/null && echo yes)|$(ls "$CR_REC/asks.state" 2>/dev/null)"
   expect_eq "CL-4 the release lands with the fix: its published event carries the line's release numbers commit" "yes" \
     "$(awk -F'|' '$2 == "ev=published" && $3 == "row=T5" && /\|numbers=[0-9a-f]{40}\|/ { f = 1 } END { if (f) print "yes" }' "$CR_REC/landing-proofs.log" 2>/dev/null)"
   expect_eq "CL-4b …and main holds the reviews part's commit, on the head the release check held (a kind=check line there, not result=fail)" "yes|yes|no" \

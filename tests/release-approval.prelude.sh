@@ -2,7 +2,7 @@
 # Sourced by tests/release-approval.test.sh and tests/release-approval-2.test.sh after resolve-roots.sh and assert.sh; not
 # a suite. One file promised more than the suite bar (lib/line.sh LINE_SUITE_BAR), so it is cut at a section boundary.
 # It holds the world and every helper above the old file's first section, plus `fc_published`, never a fixture one
-# section builds for a later one; tests/asks.test.sh reads six of these helpers by name.
+# section builds for a later one.
 #
 # THE SUITE (the old file's own header, whole):
 # tests/release-approval.test.sh — THE RELEASE APPROVAL CARD: hooks/session-poker.sh `release-approval` and `reply`, and

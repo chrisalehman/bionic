@@ -21,7 +21,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh amend …    widen a live row's Files/Suites/Re-executes (writes the roster)
 #     bash <plugin-root>/hooks/session-poker.sh rule <writer> '<text>' [--words '<the user's words>'] | ruling-ack <id> | rulings <writer>
 #                                                      a binding ruling for a live writer, its acknowledgement, its state (writes the roster)
-#     bash <plugin-root>/hooks/session-poker.sh task-set | step-line | step-field | current | ledger-add | ledger-set …
+#     bash <plugin-root>/hooks/session-poker.sh task-set | step-line | step-field | current …
 #                                                      the plan-row verbs, each the task-add transaction (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a review: that proof line with its question, reviewer, result and scope
@@ -529,8 +529,6 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh order '<the user's words>'   record the user's order: an order: given line with the time and the words, under the bound plan's ## SDLC State, else in record/orders.log; while it stands tests/run.sh starts no suite"
   die "  bash ${HOOK_DIR}/session-poker.sh order lift   end the open order: an order: lifted line with the time and its words"
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>'   record the user's approval <name> as an approved: line under ## SDLC State (the plan's own is approved-by:, written at Step 3)"
-  die "  bash ${HOOK_DIR}/session-poker.sh ledger-add <id> <col>=<val>...   add a ## Dispatch ledger row (cells not named are —)"
-  die "  bash ${HOOK_DIR}/session-poker.sh ledger-set <id> <col>=<val>...   set cells of a ## Dispatch ledger row"
   die "  bash ${HOOK_DIR}/session-poker.sh row-landed <id> <commit> <at> [--by-hand <who> <why> [--suites <a,b> --green-at <commit> --log <path> [--branch <b>] [--tree <t>]]]   the landing's row: status, step line, ledger line, one write; a hand landing's suites, their green commit and log are written to the landing record with it"
   die "  bash ${HOOK_DIR}/session-poker.sh deliver <id>   a record row's own landing: its artifact checked (a review row's registered review too), then row-landed at the working head"
   die "  bash ${HOOK_DIR}/session-poker.sh reviews-part <id>   the integrate row's render, before its push and pull request: the release entry's ### The reviews from the plan's review and waiver lines, committed on the working branch and named in the landing record (never pushed)"
@@ -545,7 +543,6 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>' ['<changelog sentence>']   move a finding across the line on words the user typed in this session, a deferral with its one changelog sentence, as a finding event in the run's log"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, landed before the review or after it, as a finding event in the run's log"
   die "  bash ${HOOK_DIR}/session-poker.sh disposition [<record>#<n> <fix|defer> '<the user's words>' '<why>' ['<changelog sentence>']]   render every finding of the registered reviews (rating, record, fix row, state, the decision it needs), adding their debt and opening an owed item per finding the person must rule on; with a finding, record the person's ruling on it"
-  die "  bash ${HOOK_DIR}/session-poker.sh launch-sync [--wait]   write every open launch the bound plan lacks (its row and its ledger line) in one transaction"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds [--since <ISO>] [--until <ISO>]] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote, over the window from the last build landing to the release approval card, or the window --since and --until name, and the window's two ends"
@@ -876,7 +873,7 @@ case "$VERB" in
   # refusal (1), with the plan untouched either way. Operands are kept in an array, not
   # newline-joined as amend's are: a value with a line break must reach the verb to be refused
   # by name, not split into two operands here.
-  task-set|ledger-add|ledger-set)
+  task-set)
     # A REASON, TRAILING (wave-36 T14; D13, AC-7.7): `task-set … --reason '<why>'` also writes the session's own
     # delivered plan (bound-closed), and records the reason on each row's `- T<n>:` line. Taken off the end, as
     # epic-row's `--plan` is, before the groups are read.
@@ -920,14 +917,6 @@ case "$VERB" in
       set -- "${PV_ARGS[@]}"
     fi
     PV_ID="$1"; shift
-    if [ "$VERB" != task-set ]; then
-      for _pv_a in "$@"; do
-        case "$_pv_a" in
-          [!=]*=*) : ;;
-          *) usage "$VERB: '$_pv_a' is not <column>=<value>." ;;
-        esac
-      done
-    fi
     PV_PAIRS=("$@")
     ;;
   # THE MATRIX ROW'S CELLS AND BLOCK KEYS (wave-33 T7; REQ-4 AC-4.1, D8). An AC id, as discharge takes it,
@@ -1292,14 +1281,6 @@ $1"; shift ;;
   # one. Its flags, --starter and --reason, are the verb's own to read and refuse (hooks/poker/proof.sh
   # poker_verb_regression_run), so they pass through.
   regression-run) : ;;
-  # ONE OPTIONAL FLAG (wave-26 T32; D4): `--wait` waits for another writer's lock, which only the
-  # launch recorder's detached call can afford; the tick and the turn-end wall leave a held lock
-  # to its holder.
-  launch-sync)
-    LS_WAIT=no
-    if [ $# -eq 1 ] && [ "$1" = --wait ]; then LS_WAIT=yes
-    elif [ $# -ne 0 ]; then usage "launch-sync takes at most one flag: --wait."; fi
-    ;;
   tick|arm|disarm|interval|interval-default|window|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
     ;;
@@ -2394,13 +2375,8 @@ $(for f in "$2"/roster-*.state; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n'
 EOF
 }
 
-# THE HANDOFF MARKED WHERE IT IS READ (wave-34 T29; D24, AC-14.2). adopt saying STALE reaches only the
-# session that runs adopt; a person or a session reading the plan's `## Handoff` was still told "safe to
-# exit: yes" while writers dispatched after it ran (this wave's own plan, 11:32Z against T19, T22, T21).
-# So the plan writer that runs at every dispatch (`launch-sync`) rewrites the block's two safety lines,
-# and nothing else in it, to STALE, naming each later dispatch at its local time and its ISO instant,
-# until `handoff` writes the block again. The lines are recomputed whole each time, so a second run with
-# no new dispatch writes nothing. A handoff with no safety lines (written before T6) is left as it is.
+# A DISPATCH AFTER A HANDOFF IS NAMED AT ITS LOCAL TIME AND ITS ISO INSTANT, by adopt's
+# STALE note, the one reader a resumed session runs first.
 handoff_local_time() {  # <ISO-8601 Z> -> `YYYY-MM-DD HH:MM <zone>` on this machine's clock, empty if unreadable
   local e
   e="$(iso_epoch "$1")"
@@ -2674,7 +2650,7 @@ poker_union() {  # <separator: , or space> <old list> <new list>... -> the union
 #
 # EVERY PLAN-VERB REFUSAL NAMES THE CALL THAT SUCCEEDS (wave-33 T7; REQ-4 AC-4.3, D8). A refusal
 # that says what is wrong and not what to run costs one retry per guess; wave-32 met three
-# (ledger-add's column names, task-add's approval read on a doc row, decline --on a file). Where the
+# (a ledger verb's column names, task-add's approval read on a doc row, decline --on a file). Where the
 # verb can compute the corrected call it prints it on a line of its own, `poker: next call: <call>`,
 # quoted by the one rule every pasted poker command is (`launch_sync_hand`, refuse.sh
 # `refuse_shell_word`), so the line runs as printed.
@@ -2866,24 +2842,6 @@ launch_sync_lock() {  # <lock dir> <wait: yes|no> -> 0 held, 1 another writer ho
   done
 }
 
-# The dispatch ledger's rows, `id agent-cell dispatched-cell` joined by the unit separator (the
-# dispatched cell found by its header, empty when the table has none); exit 1 when the plan has no
-# ## Dispatch ledger.
-launch_sync_ledger() {  # <plan>
-  awk '
-    /^[ \t]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[ \t]/ { inl = ($0 ~ /^##[ \t]+Dispatch ledger[ \t]*$/ && !done); if (inl) seen = 1; else if (seen) done = 1; rows = 0; next }
-    !inl || $0 !~ /^[ \t]*\|/ { next }
-    { rows++ }
-    rows == 1 { dc = 0; n = split($0, c, "|"); for (k = 2; k <= n; k++) { h = c[k]; gsub(/^[ \t]+|[ \t]+$/, "", h); if (h == "dispatched") dc = k }; next }
-    $0 ~ /^[ \t]*\|[ \t:|-]*$/ { next }
-    { n = split($0, c, "|"); id = c[2]; ag = c[3]; dt = (dc ? c[dc] : "")
-      gsub(/^[ \t]+|[ \t]+$/, "", id); gsub(/^[ \t]+|[ \t]+$/, "", ag); gsub(/^[ \t]+|[ \t]+$/, "", dt)
-      if (id != "") print id "\037" ag "\037" dt }
-    END { exit(seen ? 0 : 1) }' "$1" 2>/dev/null
-}
-
 # The command a person runs for one of the plan-row verbs, quoted where it must be.
 launch_sync_hand() {  # <verb> <operand>...
   local out a
@@ -2934,7 +2892,7 @@ sitrep_clock() {  # <epoch> <now epoch> -> `H:MM AM/PM`, then ` YYYY-MM-DD` when
 # writing verb never writes the newest-plan fallback.
 
 # A plan another writer replaced while the copy was judged exits 1, or PV_RACE_RC when the caller
-# set it: launch-sync sets 75, the one refusal the next caller repairs by running again (T51).
+# set it, the one refusal the next caller repairs by running again (T51).
 # Set here, before any verb runs, so a value in the caller's environment never chooses the exit
 # (wave-26 T54; review 17 N2).
 PV_RACE_RC=""
@@ -3614,7 +3572,7 @@ case "$VERB" in
   regression) poker_verb_regression "$@" ;;
   amend) poker_verb_amend "$@" ;;
   task-add) poker_verb_task_add "$@" ;;
-  task-set|ledger-add|ledger-set) poker_verb_task_set "$@" ;;
+  task-set) poker_verb_task_set "$@" ;;
   row-landed|deliver) poker_verb_row_landed "$@" ;;
   reviews-part) poker_verb_reviews_part "$@" ;;
   known-limits-part) poker_verb_known_limits_part "$@" ;;
@@ -3651,7 +3609,6 @@ case "$VERB" in
   promote) poker_verb_promote "$@" ;;
   resume) poker_verb_resume "$@" ;;
   sitrep) poker_verb_sitrep "$@" ;;
-  launch-sync) poker_verb_launch_sync "$@" ;;
   wait) poker_verb_wait "$@" ;;
   stop-run) poker_verb_stop_run "$@" ;;
   regression-runs) poker_verb_regression_runs "$@" ;;

@@ -947,7 +947,7 @@ sv_run "$SV_P" < /dev/null
 expect_eq "VE1 the sheet prints (exit 0) and holds the open approval as an ask, naming the task it holds by its card label" "0|ask: key=approve:release holds=8/3" \
   "$SV_RC|$(printf '%s\n' "$SV_OUT" | /usr/bin/grep -o '^ask: key=approve:release holds=8/3')"
 expect_contains "VE2 the sheet settled the register against the ledger: D5, ruled there, is closed on it" \
-  "|key=decide:D5|state=closed|" "$(cat "$SV_REG")"
+  "|key=decide:D5|state=closed|" "$(bash -c '. "$1" && owed_lines "$3" "$2"' _ "${REPO}/payload/scripts/lib/owed.sh" "$SV_R" "$SV_P")"
 expect_absent "VE2b …and the sheet shows no D5 (VE1 read the asks of the same sheet)" "decide:D5" "$SV_OUT"
 printf '%s\n' "$SV_OUT" > "$TMPROOT/verb-sheet"
 sv_fact() { sed -n "s/^$1: //p" "$TMPROOT/verb-sheet"; }   # <key> -> the verb sheet's value for it

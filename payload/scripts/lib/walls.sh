@@ -3168,7 +3168,7 @@ _EG_DECLARED_CURRENT="$CURRENT"
 if [ -z "$CURRENT" ] || ! grep -qE '^[0-9]+[ab]?$' <<< "$CURRENT"; then
   # ONE LEDGER SHAPE (wave-31 D2): `current:` is a step number at every scale. A value that is not
   # one, `T<n>` from the retired task-scale shape among them, is named and refused, never judged
-  # by a second set of arms; the words are the readers' (session-poker.sh launch-sync).
+  # by a second set of arms; the words are the readers'.
   _eg_why=""
   [ -z "$CURRENT" ] || _eg_why=": current: ${CURRENT} is not numeric; a plan in the retired task-scale shape is refused, not skipped"
   _eg_detail="canonical-sdlc plan file's '## SDLC State' section is missing a valid 'current: N' line${_eg_why}.

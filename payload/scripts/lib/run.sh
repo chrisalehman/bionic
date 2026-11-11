@@ -570,8 +570,7 @@ run_open() {
   # THE RETIRED TASK-SCALE POINTER STAYS AN OPEN RUN (wave-31 T24; REQ-1 AC-1.2, D2; A-orch-52).
   # `current: T<n>` is no step at any scale, and no reader judges a plan by it. It is kept open
   # here, and only it, so the readers that act on an open run reach the plan and refuse it by
-  # name: launch-sync's `NOT-RECORDED … is not numeric` (and the stop wall that runs it), the
-  # tick's no-FILL, the evidence gate's numeric refusal. Called closed, the plan would be skipped
+  # name: the tick's no-FILL, the evidence gate's numeric refusal. Called closed, the plan would be skipped
   # in silence, which AC-1.2 forbids. Any other malformed value stays closed, below.
   if grep -qE '^T[0-9]+$' <<< "$current"; then
     return 0

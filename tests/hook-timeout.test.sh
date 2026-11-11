@@ -585,7 +585,7 @@ expect_eq "permission-answer [/bin/bash]: the carrier answers in as many command
 
 section "4 — §VERB: each plan-row verb runs as many commands on a 200 KB plan as on a 66 KB one (wave-24 T15; REQ-9 AC-9.7, D14)"
 #
-# The five verbs are typed by the orchestrator in its own turn, so their cost is the turn's.
+# The three verbs are typed by the orchestrator in its own turn, so their cost is the turn's.
 # Each runs the whole task-add transaction — the projection through units.sh, a dry commit
 # through the real bash-walls.sh, the checksum and the swap — on a plan the size of this wave's
 # own (66 KB: 25 task rows, 40 matrix rows, a 30-row dispatch ledger, the rest task detail),
@@ -680,8 +680,6 @@ for VERB_SH in $SHELLS; do
     verb_row 1 current 4
     verb_row 2 task-set T25 size=45
     verb_row 3 step-line T24 'merge checked' --append
-    verb_row 4 ledger-add T31 'agent=implementor (w-T31)' dispatched=2026-10-03T12:00Z
-    verb_row 5 ledger-set T1 'notes=batch 1, re-run'
     expect_contains "§VERB [$VERB_SH] ${VERB_SZ:-small}: the plan carries task-set's cell" "| 45 | REQ-1 |" "$(grep -F '| T25 |' "$VERB_PLAN")"
     expect_contains "§VERB [$VERB_SH] ${VERB_SZ:-small}: …and current's move" "current: 4" "$(grep -x 'current: 4' "$VERB_PLAN")"
     VERB_COUNTS="$VERB_COUNTS|$VERB_N"

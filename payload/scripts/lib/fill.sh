@@ -309,7 +309,7 @@ fill_plan_approved() {
 # ONE LEDGER SHAPE (wave-31 T5; REQ-1 AC-1.2, D2). `current:` is a step number at every scale,
 # and the token is that number with its sub-step letter (`4a`, `8b`) taken off. Any other value —
 # the retired task-scale `current: T<n>` among them — is UNREADABLE and fills nothing: the tick
-# says so (`no FILL — plan current: unreadable (T5)`), and launch-sync refuses the plan aloud.
+# says so (`no FILL — plan current: unreadable (T5)`).
 fill_step_token() {  # <plan> -> a numeric step, or ""
   local step
   _fill_current_load "${1:-}"
