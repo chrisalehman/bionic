@@ -585,7 +585,7 @@ expect_eq "permission-answer [/bin/bash]: the carrier answers in as many command
 
 section "4 — §VERB: each plan-row verb runs as many commands on a 200 KB plan as on a 66 KB one (wave-24 T15; REQ-9 AC-9.7, D14)"
 #
-# The three verbs are typed by the orchestrator in its own turn, so their cost is the turn's.
+# The two verbs are typed by the orchestrator in its own turn, so their cost is the turn's.
 # Each runs the whole task-add transaction — the projection through units.sh, a dry commit
 # through the real bash-walls.sh, the checksum and the swap — on a plan the size of this wave's
 # own (66 KB: 25 task rows, 40 matrix rows, a 30-row dispatch ledger, the rest task detail),
@@ -655,7 +655,7 @@ bound_marker "$R_VERB" "$SID" "$VERB_PLAN"
 
 # THE VERBS ARE COUNTED UNDER A BASH THAT TRACES TO ITS OWN FD (4.1 on). bash 3.2 writes xtrace
 # on fd 2, so a verb that reads a check's stderr through `$( … 2>&1)` reads the trace with it
-# and refuses (measured: task-set under 3.2, traced, refused the copy it admits untraced). Under
+# and refuses (measured: a plan verb under 3.2, traced, refused the copy it admits untraced). Under
 # 3.2 each verb is run untraced and witnessed; the count is taken where the trace is invisible.
 VERB_N=""; VERB_COUNTED=0
 verb_row() {  # <n> <verb> <args…> — one verb under VERB_SH on the plan VERB_SZ names
@@ -678,9 +678,8 @@ for VERB_SH in $SHELLS; do
     cp "$SANDBOX/verb-plan$VERB_SZ.pristine" "$VERB_PLAN"
     VERB_N=""
     verb_row 1 current 4
-    verb_row 2 task-set T25 size=45
     verb_row 3 step-line T24 'merge checked' --append
-    expect_contains "§VERB [$VERB_SH] ${VERB_SZ:-small}: the plan carries task-set's cell" "| 45 | REQ-1 |" "$(grep -F '| T25 |' "$VERB_PLAN")"
+    expect_contains "§VERB [$VERB_SH] ${VERB_SZ:-small}: the plan carries step-line's text" "merge checked" "$(grep -F -- '- T24: ' "$VERB_PLAN")"
     expect_contains "§VERB [$VERB_SH] ${VERB_SZ:-small}: …and current's move" "current: 4" "$(grep -x 'current: 4' "$VERB_PLAN")"
     VERB_COUNTS="$VERB_COUNTS|$VERB_N"
   done

@@ -148,7 +148,7 @@ bind_delivered() {
 #
 # THE BIND VERB MAY NAME A DELIVERED RUN (wave-36 T14; D13, AC-7.7; ruling r1791955629-34788). With the act `bind`
 # (session-poker.sh's verb, and only it), a delivered plan of this root is admitted too, and BIND_DELIVERED reads
-# `yes`: the session then reads it `bound-closed`, which opens nothing but `task-set --reason`. Engagement
+# `yes`: the session then reads it `bound-closed`, which opens no plan verb; its cells are changed by an edit. Engagement
 # (`engage`), the governing skill's Write (`write`) and an act-less call keep the open-run set, unchanged.
 bind_plan() {
   local root="$1" sid="$2" plan="$3" act="${4:-}"

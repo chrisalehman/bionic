@@ -1001,6 +1001,36 @@ expect_status "(tt3) stopped closes a landed row whose cell names no tree on dis
 expect_contains "(tt3b) …and says it found no tree, naming where it looked" \
   "stopped: w45-T2 — its tree is not found: ${RT_REAL}/.worktrees/45-T2" "$OUT"
 
+# ============================================================
+section "§BACK: stopped on an agent gone unlanded takes its row's launch back, so the row is offered again"
+# ============================================================
+# A row launched by the log reads running until a cancel of its launch stands; a row launched by its cells, until its
+# cells say pending. A name already closed before this rule, its row still running, is taken back the same way.
+# FIXTURE FIDELITY: the launch is written by the one appender, the rows read through lib/units.sh, the panel planted.
+# fails-when: an abandoned agent's row reads running for good, or its launch is taken back twice.
+RB="$(make_repo stopped-back)"; RB_P="$RB/.bionic/docs/plans/epic-x/wave-x.plan.md"; mkdir -p "${RB_P%/*}" "$RB/.bionic/docs/record/wave-x"
+{ printf -- '---\ncurrent: 4\n---\n\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | one | — | — | 30 | R | a.sh | — | — | pending |\n'
+  printf '| T2 | 4 | build | two | w-cell | — | 30 | R | b.sh | .worktrees/x | — | active |\n\n## SDLC State\n\ncurrent: 4\n'; } > "$RB_P"
+printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$RB_P" > "$RB/.bionic/tmp/engaged-$SID.state"
+RB_LIB="$HERE/../payload/scripts/lib"
+bash -c '. "$1/log.sh" && RUN_LOG="$2" log_append dispatch row=T1 name=w-log brief=b sum=s' _ "$RB_LIB" "$RB/.bionic/docs/record/wave-x/run.log"
+so_roster_row "$RB" w-log ".bionic/docs/record/never-log.md" "" "w-log@session-6c85684c"
+so_roster_row "$RB" w-cell ".bionic/docs/record/never-cell.md" "" "w-cell@session-6c85684c"
+RBSLUG=$(so_slug "$RB"); mkdir -p "$R8CFG/projects/$RBSLUG"; plant_live "$R8CFG/projects/$RBSLUG/$SID.jsonl" fresh
+rb_rows() { bash -c '. "$1/units.sh" 2>/dev/null; units_rows "$2" | awk -F"\t" "{ printf \"%s/%s/%s \", \$1, \$10, \$5 }"; echo "ready=$(units_ready "$2" 4 | tr "\n" ,)"' _ "$RB_LIB" "$RB_P"; }
+rb_cancels() { grep -c '|ev=cancel|' "$RB/.bionic/docs/record/wave-x/run.log"; }
+expect_eq "(bk0) before: T1 runs by the log, T2 by its cells, neither offered" "T1/active/w-log T2/active/w-cell ready=" "$(rb_rows)"
+run_orders_cfg "$RB" stopped w-log
+expect_status "(bk1) stopped closes the gone, unlanded agent (exit 0)" 0 "$ST"
+expect_eq "(bk1b) …its row reads pending and is offered, by exactly one cancel" "T1/pending/— T2/active/w-cell ready=T1, 1" "$(rb_rows) $(rb_cancels)"
+( cd "$RB" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" ack w-cell --by human --reason abandoned >/dev/null 2>&1 )
+run_orders_cfg "$RB" stopped w-cell
+expect_status "(bk2) a name closed before, its row still running by its cells, is taken back (exit 0)" 0 "$ST"
+expect_eq "(bk2b) …by its cells, with no second cancel" "T1/pending/— T2/pending/— ready=T1,T2, 1" "$(rb_rows) $(rb_cancels)"
+run_orders_cfg "$RB" stopped w-log
+expect_status "(bk3) once its row is back, a closed name is refused as ever (exit 2)" 2 "$ST"
+
 
 # ============================================================
 finish

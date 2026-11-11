@@ -766,7 +766,8 @@ proof_fixed() {
   [ -f "$plan" ] || return 0
   # The moves are the run's events, read from the plan whose record is read: a dry copy of a plan has no log of its own.
   mf="$(_proof_moved_fixed "$rplan")" || return 2
-  [ -n "$mf" ] || /usr/bin/grep -qE ' born: review S[0-9]+ o[nf]f* of=' "$plan" 2>/dev/null || return 0
+  [ -n "$mf" ] || /usr/bin/grep -qE ' born: review S[0-9]+ o[nf]f* of=' "$plan" 2>/dev/null \
+    || { _proof_units_load && units_born_logged "$rplan"; } || return 0
   _proof_units_load || return 0
   declare -F units_born_findings >/dev/null 2>&1 && declare -F units_rows >/dev/null 2>&1 || return 0
   born="$(units_born_findings "$plan" 2>/dev/null | awk -F'\t' '$2 == "landed" { print $1 "\t" $3 "\tborn" }')"
@@ -2923,7 +2924,7 @@ _facts_docs_prefix() {
 # registered reading names, gives no question, so that landing owes on every chain.
 _facts_born_landings() {
   local plan="$1" tree="$2" fixed="${3:-}" marks="" finds="" asks="" rec="" want
-  if /usr/bin/grep -qE " born: (review|$(_proof_alias_born)) " "$plan" 2>/dev/null && _proof_units_load \
+  if { /usr/bin/grep -qE " born: (review|$(_proof_alias_born)) " "$plan" 2>/dev/null || { _proof_units_load && units_born_logged "$plan"; }; } && _proof_units_load \
     && declare -F units_born_marks >/dev/null 2>&1; then
     marks="$(units_born_marks "$plan" 2>/dev/null)"
     if [ -n "$marks" ]; then

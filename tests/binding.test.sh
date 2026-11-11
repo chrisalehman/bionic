@@ -237,7 +237,7 @@ expect_eq "…paired: the same id as a real marker holds it" "$TSID" "$HOLD_IDS"
 section "7 — the bind verb's act admits a delivered plan: the session reads it bound-closed (wave-36 T14; D13, AC-7.7; ruling r1791955629-34788)"
 # ============================================================
 #
-# `task-set --reason` amends a delivered plan from the session bound to it, and after a close-out the session has no
+# A session reads a delivered plan bound-closed once it binds it, and after a close-out the session has no
 # marker, so `bind` must be able to reach that state. Only the bind VERB's act (`bind`) admits a delivered plan;
 # engagement (`engage`), the governing skill's Write (`write`) and an act-less call keep §2's refusal, so the
 # newest-plan fallback and engagement are unchanged. A plan neither open nor delivered (abandoned) is still refused.
