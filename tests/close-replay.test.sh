@@ -8,7 +8,7 @@
 #            the user's reply approves that head and its merge without a whole run, the integrate row renders the
 #            reviews part before its pull request (main holds it on the approved head) and lands, close-out writes
 #            delivered: with no hand-hold; the replay's log holds no hand landing or merge, plan edit, step set back or waiver
-#   §WINDOW  after the close, the hand-holds window ends at the plan's delivered: time, and a decline planted after
+#   §WINDOW  after the close, the hand-holds window ends at the delivery's instant, and a decline planted after
 #            the release approval card is counted: the card ends nothing
 #   §VERBS   every verb the replay's part runs exits 0, no command of it exits otherwise, and each kind of hand
 #            write it makes is marked
@@ -180,8 +180,8 @@ section "§CLOSE: from the failed-review state, the verbs alone reach delivered:
 # ============================================================
 # fails-when: the replay stops before close-out's delivered:, reaches it only past a hand landing, hand merge, plan
 # edit, step set back or waiver, or close-out counts a hand-hold.
-expect_eq "CL-1 the replay reaches delivered: through the verbs (rehearse exit 0, the archived plan's Step 9 line delivered:)" \
-  "0|yes" "$CR_RC|$(/usr/bin/grep -q '^- Step 9: delivered:' "$CR_PLAN" 2>/dev/null && echo yes)"
+expect_eq "CL-1 the replay reaches delivered: through the verbs (rehearse exit 0, the run's step 9 delivered and archived)" \
+  "0|yes" "$CR_RC|$(/usr/bin/grep '|ev=step|n=9|' "$CR_REC/run.log" 2>/dev/null | tail -1 | /usr/bin/grep -q '|delivered=.*|archived=' && echo yes)"
 if [ "$CR_RC" != 0 ]; then
   printf '    the replay stopped; rehearse said:\n'
   sed 's/^/    | /' "$WORLD_ROOT/delivered.err" 2>/dev/null | cut -c1-400 | tail -12
@@ -220,7 +220,7 @@ if [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ]; then
 fi
 
 # ============================================================
-section "§WINDOW: after the close, the hand-holds window ends at the plan's delivered: time, and an act after the card counts"
+section "§WINDOW: after the close, the hand-holds window ends at the delivery's instant, and an act after the card counts"
 # ============================================================
 # The window runs from the last build landing to `delivered:`; the release approval card ends nothing. The report read
 # over the delivered plan names that end, and a decline planted a second after the card's replay time is counted.
@@ -235,13 +235,13 @@ cr_hh() {  # -> landing-report --hand-holds over the delivered plan, as the repl
   printf '%s\n' "$DOOR_OUT"
 }
 if cr_reached "WINDOW-0"; then
-  CW_DEL="$(awk '/^- Step 9: delivered: / { print $5; exit }' "$CR_PLAN")"
+  CW_DEL="$(awk -F'|' '/\|ev=step\|n=9\|/ { for (i = 3; i <= NF; i++) if ($i ~ /^at=/) t = substr($i, 4) } END { print t }' "$CR_REC/run.log" 2>/dev/null)"
   CW_CARD="$(cat "$CR_REC"/release-approval-*.md 2>/dev/null | sed -n 's/^release-approval\/v1|plan=.*|at=\([^|]*\)|.*/\1/p' | LC_ALL=C sort | tail -1)"
-  expect_eq "WINDOW-0 precondition: the plan names a delivered: minute and the record a release approval card's time" "yes|yes" \
-    "$(printf '%s' "$CW_DEL" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z$' && echo yes)|$([ -n "$CW_CARD" ] && echo yes)"
+  expect_eq "WINDOW-0 precondition: the run's log names the delivery's second and the record a release approval card's time" "yes|yes" \
+    "$(printf '%s' "$CW_DEL" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' && echo yes)|$([ -n "$CW_CARD" ] && echo yes)"
   CW_OUT="$(cr_hh)"
-  expect_contains "WINDOW-1 the ends line names the plan's delivered: time as the window's end" \
-    "until $CW_DEL (delivered:)" "$(printf '%s\n' "$CW_OUT" | grep '^hand-holds window: ')"
+  expect_contains "WINDOW-1 the ends line names the delivery's instant as the window's end" \
+    "until ${CW_DEL/%:00Z/Z} (delivered:)" "$(printf '%s\n' "$CW_OUT" | grep '^hand-holds window: ')"
   CW_D0="$(printf '%s\n' "$CW_OUT" | grep '^hand-holds: ' | sed -n 's/.* declines=\([0-9]*\) .*/\1/p')"
   CW_AFTER="$(date -u -j -v+1S -f '%Y-%m-%dT%H:%M:%SZ' "$CW_CARD" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "$CW_CARD + 1 second" +%Y-%m-%dT%H:%M:%SZ)"
   cp "$CR_REC/fill-ledger.log" "$WORLD_ROOT/fill-ledger.kept" 2>/dev/null || : > "$WORLD_ROOT/fill-ledger.kept"

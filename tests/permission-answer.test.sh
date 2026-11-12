@@ -178,7 +178,6 @@ drive() {
 n_obj() { printf '%s' "$1" | jq -s 'length' 2>/dev/null || printf 'bad'; }
 behavior() { printf '%s' "$1" | jq -r '.hookSpecificOutput.decision.behavior // "none"' 2>/dev/null || printf 'bad'; }
 message() { printf '%s' "$1" | jq -r '.hookSpecificOutput.decision.message // ""' 2>/dev/null; }
-event_of() { printf '%s' "$1" | jq -r '.hookSpecificOutput.hookEventName // ""' 2>/dev/null; }
 
 # The answer log for a project: beside the audit log, read from the lib that names that one.
 log_of() {

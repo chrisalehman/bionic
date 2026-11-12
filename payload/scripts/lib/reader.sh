@@ -138,7 +138,9 @@ reader_facts() {  # <plan> -> one line per standing fact, in the order the facts
       if (t == "cancel") { delete live[id]; next }
       # a discarded run was killed, not judged: it must not unseat the verdict a run already gave
       if (t == "verdict" && f["result"] == "discarded" && (id in live)) next
-      if (named == "step" && (id in live) && fact[id] == body) delete live[id]
+      # a step or an approval given again stands at its new place: the run went back to it, or a person approved again
+      # after an ask raised since, which only a later approval closes
+      if ((named == "step" || named == "approval") && (id in live) && fact[id] == body) delete live[id]
       if ((id in live) && fact[id] == body) next
       live[id] = 1; fact[id] = body; type[id] = t; stamp[id] = f["at"]; place[id] = ++seq
     }
@@ -176,6 +178,22 @@ reader_main() {  # <plan> <question> [args] -> the answer in its form; 2 refused
   printf 'reader: no question %s. usage: reader <plan> <question> [args]; the questions:\n' "'$q'" >&2
   reader_list >&2
   return 2
+}
+
+# A SESSION'S FACTS ARE ASKED OF THEIR OWN HOMES. An order and a bind are written by no home of an older run but its SDLC
+# State, a handoff by none but its Handoff, and then each by the run's log (lib/translate.sh TRANSLATE_SESSION_SOURCES,
+# TRANSLATE_HANDOFF_SOURCES), so the three questions over them are answered from those homes alone, a fraction of the
+# whole translation of a long plan: every engagement asks the sessions, and the close and the roster the handoff.
+reader_session() {  # <plan> <order|handoff|sessions> [args] -> reader_main's answer, read from the homes of a session's facts
+  local src
+  case "${2:-}" in order|sessions|handoff) ;; *) printf "reader: '%s' is no question of a session's facts\n" "${2:-}" >&2; return 2 ;; esac
+  if ! declare -F translate >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$_READER_LIB_DIR/translate.sh" || return 2
+  fi
+  case "$2" in handoff) src="${TRANSLATE_HANDOFF_SOURCES:-}" ;; *) src="${TRANSLATE_SESSION_SOURCES:-}" ;; esac
+  [ -n "$src" ] || return 2
+  TRANSLATE_SOURCES="$src" reader_main "$@"
 }
 
 _reader_needs() {  # <question> <usage> <value> -> 0 when the value is given, else 2 with the usage
@@ -316,7 +334,8 @@ reader_q_findings() {  # <plan> [to] -> each finding where it stands now, of tho
 }
 
 reader_question debts list reader_q_debts
-reader_q_debts() {  # <plan> -> each debt open: a debt not burned, an admitted red no void names, a finding carried
+reader_q_debts() {  # <plan> [all] -> each debt open: a debt not burned, an admitted red no void names, a finding carried; with all, every debt, burned or not
+  [ "${2:-}" != all ] || { _reader_of "$1" debt; return; }
   reader_facts "$1" | awk -F'|' "$_READER_AWK"'
     { e = ev(); id = line_kv("id") }
     e == "debt" && line_kv("burned") == "" || e == "finding" && line_kv("to") == "carried" { o[++n] = $0 }
@@ -398,6 +417,13 @@ reader_q_handoff() {  # <plan> -> the latest handoff: path= and at=
   _reader_last "$1" handoff
 }
 
+# A session is bound to a run once: a later binding act of the same session is no new fact of the run's, so the answer is
+# each session's first bind, and the writer appends none for a session the run holds (lib/binding.sh `bind_record_session`).
+reader_question sessions list reader_q_sessions
+reader_q_sessions() {  # <plan> -> each session the run holds, once, by the act that first bound it, in the order they bound
+  reader_facts "$1" | awk -F'|' "$_READER_AWK"'ev() == "bind" && !seen[line_kv("session")]++'
+}
+
 reader_question verdicts list reader_q_verdicts
 reader_q_verdicts() {  # <plan> [row] -> each suite's verdict standing, of <row> when named
   _reader_of "$1" verdict row "${2:-}"
@@ -459,9 +485,11 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
 #   evidence    the discharging proof's or waiver's `evidence=`, else the older table's evidence cell.
 #   auditor     on a row the older table holds: the discharging event's `auditor=`, else the row's cell; on any other
 #               criterion: the evidence review standing at <head>, CONFIRMED when it passed and REFUTED when not.
-#   confirmed   on a row the older table holds: the discharging event's `confirmed=`, else its block's
-#               `user-confirmed:`; on any other criterion: the approval naming it, as `<by> <day> <its words>`, the
-#               criterion standing for words it holds none of, the shape an older block's confirmation is written in.
+#   confirmed   the approval naming the criterion, as `<by> <day> <its words>`, its giver folded to one word and the
+#               criterion standing for words it holds none of, the shape an older block's confirmation is written in;
+#               else, on a row the older table holds, the discharging event's `confirmed=`, else its block's
+#               `user-confirmed:`. On such a row the approval confirms and never unseats the proof or waiver that
+#               discharges it.
 #   serves      on a row the older table holds: its block's first `serves:`; else the Eval design's requirement.
 # 1 when the plan names no criterion; the fold's failure is its exit.
 reader_cells() {
@@ -486,7 +514,8 @@ reader_cells() {
     { e = ev(); c = (e == "approval") ? line_kv("key") : line_kv("ac") }
     e == "proof" && line_kv("kind") == "review" && line_kv("question") == "evidence" && h != "" && line_kv("head") == h { review = (line_kv("result") == "pass") ? "CONFIRMED" : "REFUTED" }
     c == "" || !(c in seen) { next }
-    e == "approval" { by[c] = "approval"; ok[c] = line_kv("by") " " substr(line_kv("at"), 1, 10) " " (line_kv("said") != "" ? line_kv("said") : c) }
+    e == "approval" { if (!(c in row) || by[c] == "") by[c] = "approval"; g = line_kv("by"); gsub(/[^A-Za-z0-9._-]+/, "-", g); sub(/^-+/, "", g); sub(/-+$/, "", g)
+      ok[c] = g " " substr(line_kv("at"), 1, 10) " " (line_kv("said") != "" ? line_kv("said") : c) }
     e == "proof" && line_kv("at") == "" && by[c] == "waiver" && at_[c] != "" { next }
     e == "waiver" || e == "proof" && line_kv("rc") ~ /^0?$/ && line_kv("result") != "fail" {
       by[c] = e; ev_[c] = line_kv("evidence"); aud[c] = line_kv("auditor"); cf[c] = line_kv("confirmed"); at_[c] = line_kv("at") }
@@ -496,7 +525,7 @@ reader_cells() {
         if (c in row) {
           d = (b == "proof" || b == "waiver")
           ev1 = d ? ev_[c] : (none(rev[c]) ? "" : rev[c]); a = d ? aud[c] : (none(raud[c]) ? "" : raud[c]); if (a == "" && d && at_[c] != "") a = review
-          k = d ? cf[c] : rconf[c]
+          k = (c in ok) ? ok[c] : d ? cf[c] : rconf[c]
         } else { ev1 = (b == "proof" || b == "waiver") ? ev_[c] : ""; a = review; k = ok[c] }
         print c "\037" (b == "" ? "pending" : "discharged") "\037" b "\037" tier[c] "\037" ev1 "\037" a "\037" k "\037" ((c in row) ? sv[c] : req[c])
       }

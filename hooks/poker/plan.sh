@@ -1,6 +1,6 @@
 # shellcheck shell=bash
-# hooks/poker/plan.sh — the plan verbs: the contract grammar and the rows of the plan (budget,
-# amend, task-add, epic-row, continuation-fill, brief, release-approval, reply).
+# hooks/poker/plan.sh — the plan verbs: the contract grammar and the rows of the plan
+# (amend, task-add, epic-row, continuation-fill, brief, release-approval, reply).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
@@ -624,135 +624,6 @@ pv_file_swap() {
     exit 2
   fi
 }
-
-  # THE USER'S WRITER CAP (wave-27 T34; REQ-15 AC-15.4; D24; design ledger Δ10). A cap the user
-  # chose is a fact, not a reason to repeat on every turn: it is written once into the plan header
-  # every reader of the ceiling already reads (`plan_budget_line`, `budget_field` in lib/run.sh: the
-  # dispatch wall, the tick and the turn-end wall). `parallel-budget:` keeps its other fields, its
-  # `writers=` becomes the user's and its `source=` reads `user`; the frontmatter gains
-  # `budget-override: <git user.name> <date> derived=<n> chosen=<n>`, the sibling of
-  # `rigor-override:`. `derived=` is the probe's value, read from an override already there so a
-  # second cap keeps it, and the one override line is rewritten, never doubled.
-  # THE VERB ONLY LOWERS (wave-27 T37; review pass 42 N2, A-orch-112). It takes a reply nothing can
-  # verify, so it must not be a way for a model to raise its own cap: a value above the derived
-  # ceiling is refused, and raising it is the user's own edit of the plan's `parallel-budget:` line.
-  # (T74 narrowed "the derived ceiling" to the cap in force; see below.)
-  # A PLAN WITH NO LINE GETS ONE (wave-28 T9; D15, REQ-2 AC-2.10). No plan owes a budget line, so
-  # the verb no longer refuses a plan without one: it writes `parallel-budget: writers=<n>
-  # source=user` directly below the opening `---`, and `budget-override: <who> <date> chosen=<n>`
-  # under it, with no `derived=` because nothing was derived.
-  # It goes through the plan transaction every plan verb takes. REFUSED: a value that is not a
-  # whole number, or 0 (1); one above the cap in force (1); a reply with a line break (1); a
-  # `writers=`/`derived=` on the plan's lines that is not 1 to 4 digits, or a plan with no
-  # leading frontmatter to write into (1).
-  # The cap in force asked again is the plan transaction's no-op: "already reads so" (0).
-  poker_verb_budget() {
-    case "$BG_N" in
-      ''|*[!0-9]*)
-        die "REFUSED — writers=$(clean "$BG_N") is not a whole number of writers; the plan is unchanged."
-        exit 1 ;;
-    esac
-    if [ "${#BG_N}" -gt 9 ]; then
-      die "REFUSED — writers=$BG_N is past any machine's budget; the plan is unchanged."
-      exit 1
-    fi
-    BG_N=$((10#$BG_N))
-    if [ "$BG_N" -eq 0 ]; then
-      die "REFUSED — writers=0 is no budget: a run with no writer slot fills nothing. Name one or more; the plan is unchanged."
-      exit 1
-    fi
-    case "$BG_REPLY" in
-      *$'\n'*|*$'\r'*)
-        die "REFUSED — the user's reply carries a line break; give it on one line. The plan is unchanged."
-        exit 1 ;;
-    esac
-    plan_verb_open budget
-    # THE CAP IN FORCE IS THE PLAN'S OWN (wave-27 T74; review pass 53 N4 ruled, A-orch-145). "At or
-    # below the ceiling the machine derived" let a reply undo the user's 3 back up to the probe's 8.
-    # The verb now records n only at or below the cap the plan states NOW: the `parallel-budget:`
-    # line's `writers=`, the one value every reader of the ceiling reads, which the verb's own
-    # override writes and a user's hand edit sets. A raise, by any amount, is the user's own edit.
-    # A CEILING THAT IS NOT A NUMBER REFUSES (N5): each `writers=` and `derived=` the verb reads off
-    # the frontmatter is one to four digits, or the verb names the line and records nothing; it
-    # never compares as "not greater". `derived=` is the probe's value, carried as a record.
-    BG_LINES="$(awk '
-      NR == 1 && $0 == "---" { f = 1; next }
-      f && $0 == "---" { exit }
-      f && /^(parallel-budget|budget-override):/ { print }' "$PV_PLAN")"
-    BG_HAVE=""; BG_DERIVED=""
-    for BG_KF in parallel-budget:writers budget-override:derived; do
-      BG_K="${BG_KF%%:*}"; BG_F="${BG_KF#*:}"
-      BG_L="$(printf '%s\n' "$BG_LINES" | grep -m1 "^${BG_K}:")" || BG_L=""
-      [ -n "$BG_L" ] || continue
-      BG_S=" ${BG_L#*:} "; BG_S="${BG_S//$'\t'/ }"
-      case "$BG_S" in
-        *" ${BG_F}="*) BG_V="${BG_S#* "${BG_F}"=}"; BG_V="${BG_V%% *}" ;;
-        *) continue ;;
-      esac
-      case "$BG_V" in
-        [0-9]|[0-9][0-9]|[0-9][0-9][0-9]|[0-9][0-9][0-9][0-9]) : ;;
-        *)
-          die "REFUSED — the plan's ${BG_K}: line holds a ${BG_F}= that is not one to four digits."
-          die "Nothing was recorded; the plan is unchanged. The line: $(clean "$BG_L" | cut -c1-160) (in $PV_PLAN)"
-          exit 1 ;;
-      esac
-      if [ "$BG_F" = writers ]; then BG_HAVE=$((10#$BG_V)); else BG_DERIVED=$((10#$BG_V)); fi
-    done
-    # THE CAP IN FORCE IS A PERSON'S (wave-28 T9; D15): `budget_cap`, which answers only from a
-    # `source=user` or `source=override` line. A probe's `writers=` caps nothing, so the verb
-    # records any n over it; the probe's figure is still carried as `derived=`.
-    BG_CAP="$(budget_cap "$PV_PLAN")"; BG_CAP="${BG_CAP#writers=}"
-    [ -n "$BG_DERIVED" ] || BG_DERIVED="$BG_HAVE"
-    if [ -n "$BG_CAP" ] && [ "$BG_N" -gt "$BG_CAP" ]; then
-      die "REFUSED — writers=$BG_N is above the cap in force ($BG_CAP): budget only lowers it."
-      die "Raising it is the user's own edit of the plan's parallel-budget: line in $PV_PLAN; the plan is unchanged."
-      exit 1
-    fi
-    BG_LINE=1
-    case "$BG_LINES" in 'parallel-budget:'*|*$'\n''parallel-budget:'*) : ;; *) BG_LINE=0 ;; esac
-    BG_WHO="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
-    if [ -z "$BG_WHO" ] || ! plan_verb_value_ok "$BG_WHO"; then
-      die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who capped it; the plan is unchanged."
-      exit 1
-    fi
-    BG_OVR="budget-override: $BG_WHO $(date -u +%Y-%m-%d)${BG_DERIVED:+ derived=$BG_DERIVED} chosen=$BG_N"
-    # THE VALUES GO IN THROUGH THE ENVIRONMENT, as approve's line does: `-v` would read a backslash
-    # in a user name as an escape.
-    if ! BG_OVR="$BG_OVR" BG_N="$BG_N" BG_LINE="$BG_LINE" awk '
-      NR == 1 && $0 == "---" {
-        f = 1; print
-        if (ENVIRON["BG_LINE"] == "0") {
-          print "parallel-budget: writers=" ENVIRON["BG_N"] " source=user"
-          print ENVIRON["BG_OVR"]; done = 1
-        }
-        next
-      }
-      f && $0 == "---" { f = 0; print; next }
-      f && /^budget-override:/ { next }
-      f && !done && /^parallel-budget:/ {
-        v = $0; sub(/^parallel-budget:[ \t]*/, "", v)
-        n = split(v, w, /[ \t]+/); out = ""; wr = 0; src = 0
-        for (i = 1; i <= n; i++) {
-          if (w[i] == "") continue
-          if (!wr && w[i] ~ /^writers=/) { w[i] = "writers=" ENVIRON["BG_N"]; wr = 1 }
-          else if (!src && w[i] ~ /^source=/) { w[i] = "source=user"; src = 1 }
-          out = out (out == "" ? "" : " ") w[i]
-        }
-        if (!wr) out = "writers=" ENVIRON["BG_N"] (out == "" ? "" : " ") out
-        if (!src) out = out " source=user"
-        print "parallel-budget: " out
-        print ENVIRON["BG_OVR"]
-        done = 1; next
-      }
-      { print }
-      END { if (!done) exit 1 }' "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
-      die "REFUSED — $PV_PLAN has no leading frontmatter to write the cap into; the plan is unchanged."
-      exit 1
-    fi
-    plan_verb_swap budget "writers=$BG_N (source=user)" writer
-    say "budget — writers=$BG_N source=user and $BG_OVR written to $PV_PLAN; dry-committed first. The dispatch wall, the tick and the turn-end wall read it from the header."
-    exit 0
-  }
 
   # THE CONTRACT CHANGE (wave-20 T9; REQ-4, AC-4.1/4.2; spec D4, ledger Δ10). A writer's
   # Files:, Suites: and Re-executes: are read from its roster row, captured at dispatch —
@@ -2007,7 +1878,7 @@ RR_WAIVES
     # ROWS: every matrix row, ruled or not as walls.sh rules it (rr_rows). Proved when discharged and ruled, and a T4 row
     # so ruled under an empty-like auditor cell is one the user confirmed; waived when ruled with status waived. Every
     # other row is a decision: a discharged T4 row under an empty-like cell is the user's own check, to confirm
-    # (confirm-row) or waive; any other is waived or run, a T4 row's standing finding said in the gate's words. The
+    # (approve <AC>) or waive; any other is waived or run, a T4 row's standing finding said in the gate's words. The
     # step a row is owed against is the run's (the reader's `step`), the plan's `current:` only where the log has none.
     RR_ACT=0; RR_ACP=0; RR_ACY=0; RR_ACW=0; RR_ACU=0; RR_ACA=0; RR_ACR=0; RR_ACC=0; RR_ACL=0; RR_MISS=""
     poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_step; RR_CUR="$(printf '%s\n' "$RR_ANS" | sed -n 's/^n=//p')"
@@ -2029,7 +1900,7 @@ RR_WAIVES
       RR_MISS="${RR_MISS:+$RR_MISS }$ac"
       if [ "$tier" = T4 ] && [ "$au" = - ] && [ "$st" = discharged ]; then
         RR_ACA=$((RR_ACA + 1))
-        rr_add row "row:$ac" "confirm-row $ac" "waive $ac" "a T4 criterion, the user's own check" \
+        rr_add row "row:$ac" "approve $ac" "waive $ac" "a T4 criterion, the user's own check" \
           "$ac, your own check, not confirmed yet" confirm waive "confirm $ac" "waive $ac"
         continue
       fi
@@ -2483,23 +2354,22 @@ RP_TABLE
   }
 
   # THE USER'S ORDER. `order '<words>'` records what the user said as an order every suite obeys;
-  # `order lift` ends the open one. Each is one line with the time and the words:
+  # `order lift` ends the open one. With a bound open run each is one order event in the run's log
+  # (lib/proof.sh `proof_order_event`: act=given or lifted, said=<the words, of the order it ends for a
+  # lift>), and the plan is left as it was. With no run bound it is one line of record/orders.log under
+  # the docs root, made when absent, since there is no run's log to hold it:
   #
   #   order: given <ISO-UTC> "<words>"
   #   order: lifted <ISO-UTC> "<the words of the order it ends>"
   #
-  # With a bound open run the line goes under the plan's `## SDLC State`, after its last order: line,
-  # else after its last approved: or approved-by: line, else after current:, through the plan
-  # transaction every row verb takes. With no run bound it is appended to record/orders.log under the
-  # docs root, made when absent. tests/run.sh asks lib/gate.sh `gate_order`, the one reader of both,
-  # and refuses every suite while an order is open. A newer order replaces the open one; the newest
-  # line decides.
+  # tests/run.sh asks lib/gate.sh `gate_order`, the one reader of both, and refuses every suite while an
+  # order is open. A newer order replaces the open one; the newest fact decides.
   #
-  # REFUSED (1), nothing written: words that hold a line break, a lift with no open order, a plan
-  # with no current: line under ## SDLC State, the log a link. (2): the order reader cannot be loaded,
-  # or the log cannot be written.
+  # REFUSED (1), nothing written: words that hold a line break, or a `|` in a bound run (an event's field
+  # cannot carry one), a lift with no open order, the log a link. (2): the order reader or writer cannot be
+  # loaded, or the order cannot be written.
   poker_verb_order() {
-    local sid mode=log root log open line
+    local sid mode=log root log open plan="" run line
     if ! declare -F gate_order_of >/dev/null 2>&1; then
       die "REFUSED — the order lookup (lib/gate.sh gate_order_of) cannot be loaded from $BIONIC_LIB; nothing was written."
       exit 2
@@ -2516,11 +2386,11 @@ RP_TABLE
       exit 2
     fi
     if [ -n "$sid" ] && engaged_session "$root" "$sid"; then
-      case "$(session_run "$root" "$sid")" in 'bound-open '*) mode=plan ;; esac
+      run="$(session_run "$root" "$sid")"
+      case "$run" in 'bound-open '*) mode=plan; plan="${run#bound-open }" ;; esac
     fi
     if [ "$mode" = plan ]; then
-      plan_verb_open order
-      open="$(gate_order_of "$PV_PLAN" plan)" || open=""
+      open="$(gate_order_plan "$plan")" || open=""
     else
       log="$(docs_root "$root")/record/orders.log"
       if [ -L "$log" ]; then
@@ -2531,7 +2401,7 @@ RP_TABLE
     fi
     if [ -n "$OR_LIFT" ]; then
       if [ -z "$open" ]; then
-        die "REFUSED — no order is open$([ "$mode" = plan ] && printf ' in %s' "$PV_PLAN" || printf ' in %s' "$log"), so there is nothing to lift; nothing was written."
+        die "REFUSED — no order is open$([ "$mode" = plan ] && printf ' in the run of %s' "$plan" || printf ' in %s' "$log"), so there is nothing to lift; nothing was written."
         exit 1
       fi
       OR_WORDS="${open#*\"}"; OR_WORDS="${OR_WORDS%\"}"
@@ -2549,29 +2419,17 @@ RP_TABLE
       say "order — $line, in $log (no run is bound)."
       exit 0
     fi
-    # THE LINE GOES IN THROUGH THE ENVIRONMENT, not `-v`, which would read a backslash in the
-    # user's words as an escape.
-    if ! OR_LINE="$line" awk '
-      { L[++n] = $0 }
-      END {
-        for (i = 1; i <= n; i++) {
-          if (L[i] ~ /^[[:space:]]*```/) { fence = !fence; continue }
-          if (fence) continue
-          if (L[i] ~ /^##[[:space:]]/) { if (insdlc) break; insdlc = (L[i] ~ /^##[[:space:]]+SDLC State/); continue }
-          if (!insdlc) continue
-          if (L[i] ~ /^order:/) ord = i
-          else if (L[i] ~ /^[[:space:]]*approved(-by)?[[:space:]]*:/) ap = i
-          else if (!cur && L[i] ~ /^[[:space:]]*current[[:space:]]*:/) cur = i
-        }
-        at = ord ? ord : (ap ? ap : cur)
-        if (!at) exit 1
-        for (i = 1; i <= n; i++) { print L[i]; if (i == at) print ENVIRON["OR_LINE"] }
-      }' "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
-      die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State to write the order beside; the plan is unchanged."
-      exit 1
+    case "$OR_WORDS" in *'|'*)
+      die "REFUSED — an order's words are one field of the run's log, which cannot carry a |; nothing was written. run again: session-poker.sh order '<the words without it>'"
+      exit 1 ;;
+    esac
+    declare -F proof_order_event >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" >/dev/null 2>&1; }
+    if ! declare -F proof_order_event >/dev/null 2>&1 \
+       || ! proof_order_event "$plan" "$([ -n "$OR_LIFT" ] && echo lifted || echo given)" "$OR_WORDS"; then
+      die "REFUSED — the order cannot be appended to the run's log of $plan (lib/proof.sh proof_order_event from $BIONIC_LIB); nothing was written. run again: session-poker.sh order"
+      exit 2
     fi
-    plan_verb_swap order "the order" writer
-    say "order — $line, under ## SDLC State of $PV_PLAN; dry-committed first."
+    say "order — ${line#order: }, in the run's log of $plan; the plan is unchanged."
     exit 0
   }
 

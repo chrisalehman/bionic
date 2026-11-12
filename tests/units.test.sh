@@ -399,8 +399,7 @@ expect_eq "a plan that has the table exits 0" "0" "$(call_rc units_rows "$SANDBO
 section "4 — units_ready: pending and every dep landed; the step is a label (wave-20 Δ1)"
 # ============================================================
 #
-# RE-AUTHORED FOR wave-20 REQ-5 (Δ1, ADR-036). Through 1.8.6 the step argument FILTERED: a
-# row was ready only at its own step. Readiness is now the prerequisite graph — a work row is
+# Readiness is the prerequisite graph — a work row is
 # ready when it is pending and every prerequisite has landed, whatever its step — so the
 # argument no longer filters a work row. It still decides the gate-act rows (§17).
 
@@ -741,8 +740,7 @@ expect_eq "…with T10 (step 4), T13 and T14 (step 5) all ready at once" \
   "T10
 T13
 T14" "$WAVE_UNION"
-# RE-AUTHORED FOR wave-20 REQ-5 (Δ1, Δ6; ADR-036). Through 1.8.6 the per-step split was the
-# point of this row: asked about Step 4, units_ready named only T10. Readiness is now the
+# Readiness is the
 # prerequisite graph, so for WORK rows the answer at any step IS the old whole-table answer.
 expect_eq "asked at Step 4, units_ready names every work row whose deps landed, whatever its step (Δ1)" \
   "T10
@@ -1391,6 +1389,8 @@ expect_eq "LIVE-2 a launch in the log reads active under its name, on the plan a
   "active/w-T2 active/w-T2 active/a1|" "$(lv T2) $(lv T2 "$LV_P.task-set.1") $(lv T1)|$(call units_ready "$LV_P" 4)"
 call units_dispatch_back "$LV_P" T2 w-T2
 expect_eq "LIVE-3 its cancel returns it to pending and ready" "pending/— T2" "$(lv T2) $(call units_ready "$LV_P" 4)"
+sed 's/| status |$/| status | reads |/; s/|---|$/|---|---|/; s/| pending |$/| pending | approval:ship |/; s/| active |$/| active | — |/' "$LV_P" > "$LV_P.a" && mv "$LV_P.a" "$LV_P"; LV_A="$(call units_ready "$LV_P" 4)"; lv_log approval key=ship by=me
+expect_eq "LIVE-4 a row reading approval:ship waits, and the approval the log holds readies it" "|T2" "$LV_A|$(call units_ready "$LV_P" 4)"
 
 section "§BORN — a row's birth is one born event in the run's log, read beside the plan's own born lines"
 lv_ev() { bash -c '. "$1/reader.sh" && reader_facts "$2"' _ "${LIB%/*}" "$LV_P" | grep -c "^run/v1|ev=$1|.*row=$2|"; }
@@ -1401,14 +1401,11 @@ expect_eq "BORN-2 the cap's count, the findings and the marks read the review-bo
   "T2	S1 on	b.sh|T2	pending	record/w/r.md#1|T2	review	S1 on" \
   "$(call units_born "$LV_P")|$(call units_born_findings "$LV_P")|$(call units_born_marks "$LV_P")"
 
-section "§BACK — a launch taken back is one function: the log's cancel for a launch in the log, the cells for one by its cells"
+section "§BACK — a launch taken back is the log's cancel, the plan untouched"
 lv_log dispatch row=T2 name=w-T2b brief=b sum=s; BK_SUM="$(cksum < "$LV_P")"
 call units_row_back "$LV_P" T2
 expect_eq "BACK-1 a launch in the log returns to pending by one cancel, the plan untouched" "pending/— 1 same" \
   "$(lv T2) $(grep -c '|ev=cancel|of=dispatch|row=T2|name=w-T2b|' "$LV_LOG") $([ "$(cksum < "$LV_P")" = "$BK_SUM" ] && echo same)"
-call units_row_back "$LV_P" T1
-expect_eq "BACK-2 a launch by its cells returns by its cells, and writes no cancel" "pending/— 0 | T1 | 4 | build | one | — |" \
-  "$(lv T1) $(grep -c '|ev=cancel|of=dispatch|row=T1|' "$LV_LOG") $(grep -o '^| T1 | 4 | build | one | [^|]* |' "$LV_P")"
 
 section "§TREE — a row's tree and base are the run's: the newest tree event in the log, the cells for a row it holds none for"
 TV_P="$SANDBOX/docs/plans/e/t.plan.md"; LV_LOG="$SANDBOX/docs/record/t/run.log"; mkdir -p "${LV_LOG%/*}"
@@ -1426,7 +1423,7 @@ expect_eq "TREE-2 with its launch it reads active under its name in its newest t
   "active/w-T2/.worktrees/t2b/3333eeee same" "$(tv T2) $([ "$(cksum < "$TV_P")" = "$TV_SUM" ] && echo same)"
 
 section "§LEDGER — a landed row with no line of its own is the reader's to answer: admitted when it answers landed, refused when it does not"
-LV_LOG="$SANDBOX/docs/record/w/run.log"; lv_log published row=T2 commit=abcdef1 by=w-T2b
+LV_LOG="$SANDBOX/docs/record/w/run.log"; sed -i.bak 's/| a1 | — | 30m | R | a.sh | active |/| — | — | 30m | R | a.sh | pending |/' "$LV_P"; lv_log published row=T2 commit=abcdef1 by=w-T2b
 expect_eq "LEDGER-1 T2 landed by its event, with no line in the plan, owes nothing: the reader answers landed" "landed|" "$(lv T2 | cut -d/ -f1)|$(call units_findings "$LV_P")"
 sed -i.bak 's/| a.sh | pending |/| a.sh | landed |/' "$LV_P"; lv_log published row=T1 commit=abcdef2 by=a1; lv_log cancel of=published row=T1 commit=abcdef2 by=a1
 expect_eq "LEDGER-2 a landing the log took back, under a cell that says landed, is refused for its line: the reader answers it pending" "landed|state=pending|evidence T1" \

@@ -94,7 +94,7 @@ dc_reading() {
 section "§CLOSE: the verbs carry the fixture to the end state, and the card renders on it"
 # ============================================================
 DC_T0="$SECONDS"
-door_run "$DC" bash -c '. "$1/units.sh" 2>/dev/null && units_cells_write "$2" T2 step=7' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$DC_PLAN"
+door_run "$DC" bash -c '. "$1/units.sh" 2>/dev/null && units_table_cells "$2" set tasks T2 step=7 > "$2.t" && [ -z "$(units_validate "$2.t" "$2" 2>&1)" ] && mv "$2.t" "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$DC_PLAN"
 expect_eq "(c1) the person's edit moves the release row to step 7, judged by the table check" "0" "$DOOR_RC"
 awk '{ L[NR] = $0 } /^\| T[0-9]/ { last = NR } END { for (i = 1; i <= NR; i++) { print L[i]; if (i == last) printf "%s\n%s\n", "| T3 | 5 | test | the regression. The whole suite runs once. | orchestrator | — | — | 10 | REQ-1 | .bionic/docs/record/wave-x/T3.md | — | — | pending |", "| T4 | 8 | integrate | merge into main. The run reaches main by its merge. | orchestrator | — | approval:release, approval:merge, head | 10 | REQ-1 | — | — | — | pending |" } }' "$DC_PLAN" > "$DC_PLAN.t" && mv "$DC_PLAN.t" "$DC_PLAN"
 dc_verb "(c2) the orchestrator's edit adds the regression row at step 5, and task-add records its birth" task-add T3

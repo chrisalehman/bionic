@@ -240,7 +240,7 @@ REPO="$(project_root "$PWD")"
 REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
 
 # stopped_row_back <name> -> the plan row still running under <name> returned to pending, its launch taken back by
-# lib/units.sh `units_row_back` (the log's cancel, or its cells), and said; 1 when this session's open run holds no
+# lib/units.sh `units_row_back` (the log's cancel), and said; 1 when this session's open run holds no
 # row running under the name, or the launch could not be taken back. An agent gone unlanded leaves its row to be
 # offered again, so stopping it is the whole of returning it.
 stopped_row_back() {

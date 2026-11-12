@@ -713,7 +713,6 @@ ws_create() {  # <sid or -> <repo> <args...> -> stdout of create, then `rc=<n>`
   fi
 }
 ws_path() { printf '%s\n' "$1" | tr ' ' '\n' | sed -n 's/^path=//p'; }
-ws_lines() { if [ -f "$1" ]; then grep -c '' "$1"; else echo 0; fi; }
 
 WR="$(new_repo "$TMP/ws")"
 WSID="ws-session-01"

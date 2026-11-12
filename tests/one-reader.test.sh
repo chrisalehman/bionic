@@ -12,8 +12,8 @@
 #                 a planted second appender of a waiver, a finding or a proof beside the one writer of each.
 #   §NAMES        the verbs the dispatch, born and tree events and the landing's event retired, and the five that
 #                 wrote a matrix cell, are named nowhere in hooks/ or payload/scripts/ but the walls' single-line list of
-#                 verbs, which the row that edits it clears; nor are those that wrote a step's line, its fields, the
-#                 regression's setting and the count of its runs, beside the step's one writer in §WRITERS.
+#                 verbs; nor, anywhere, those that wrote a step's line, its fields, the regression's setting, its runs'
+#                 count, a row's confirmation and the cap, beside the step's and the approval's one writer in §WRITERS.
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted, one site for each name the
 #                 check counts; the dispatch wall lists none, and no fact the dispatch library says is in its file.
 #   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
@@ -73,6 +73,7 @@ expect_absent "the reader's own file is admitted, its planted awk too" "lib/read
 section "PLANWRITERS"
 expect_contains "the planted plan write is named" "$(printf 'plan-writer\tpayload/scripts/lib/planted-write.sh\t')" "$AFTER"
 expect_absent "a plan write is not a parse" "$(printf 'parser\tpayload/scripts/lib/planted-write.sh')" "$AFTER"
+expect_absent "the units library writes no plan" "$(printf 'plan-writer\tpayload/scripts/lib/units.sh\t')" "$AFTER"
 expect_eq "the plan-writer count rises by one" "$(( $(count "$BEFORE" plan_writers) + 1 ))" "$(count "$AFTER" plan_writers)"
 
 section "WRITERS"
@@ -100,8 +101,13 @@ expect_contains "tree: the tree verb's one writer" "payload/scripts/lib/worktree
 expect_contains "tree: the planted second writer beside it" "payload/scripts/lib/planted-writers.sh:planted_tree" "$TRE"
 SH0="$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "shared" && ($2 == "born" || $2 == "dispatch" || $2 == "waiver" || $2 == "finding" || $2 == "proof" || $2 == "tree")' | grep -c .)"
 expect_eq "the shared-type count rises by each of the six planted types not shared before" "$(( $(count "$BEFORE" shared_types) + 6 - SH0 ))" "$(count "$AFTER" shared_types)"
-expect_eq "step: one writer, the facts library's, and no second" "payload/scripts/lib/proof.sh proof_step_event|" \
-  "$(printf '%s\n' "$AFTER" | awk -F'\t' '$1 == "writer" && $2 == "step" { split($3, w, " "); sub(/:[0-9]+$/, "", w[1]); print w[1], w[2] }')|$(pair step)"
+w1() { printf '%s\n' "$AFTER" | awk -F'\t' -v t="$1" '$1 == "writer" && $2 == t { split($3, w, " "); sub(/:[0-9]+$/, "", w[1]); print w[1], w[2] }'; }
+for t in step approval; do expect_eq "$t: one writer, the facts library's, and no second" "payload/scripts/lib/proof.sh proof_${t}_event|" "$(w1 $t)|$(pair $t)"; done
+expect_eq "decision and debt: one writer each, the facts library's, and no second" "payload/scripts/lib/proof.sh proof_decision_event|payload/scripts/lib/proof.sh proof_debt_event|" \
+  "$(w1 decision)|$(w1 debt)|$(pair decision)$(pair debt)"
+expect_eq "order, handoff and bind: one writer each, the facts library's, and no second" \
+  "payload/scripts/lib/proof.sh proof_order_event|payload/scripts/lib/proof.sh proof_handoff_event|payload/scripts/lib/proof.sh proof_bind_event|" \
+  "$(w1 order)|$(w1 handoff)|$(w1 bind)|$(pair order)$(pair handoff)$(pair bind)"
 # The two setters of matrix cells go with the matrix; every other hand event is written by the one writer.
 expect_eq "hand: one writer, the line library's, beside the matrix setters" "payload/scripts/lib/line.sh line_hand_event" \
   "$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "writer" && $2 == "hand" { split($3, w, " "); sub(/:[0-9]+$/, "", w[1]); print w[1], w[2] }' \
@@ -118,12 +124,17 @@ printf '%s\n' '# matrix-retier' '# session-poker.sh discharge AC-1' > "$L/plante
 expect_eq "the extractor reads both planted names of the verbs that wrote a matrix cell" "2" "$(cells "$S" | grep -c planted-cell.sh)"
 expect_eq "the five verbs that wrote a matrix cell are named nowhere else" "" "$(cells "$S" | grep -v planted-cell.sh)"
 
-# The walls' list of verbs keeps its dead names, and a version-15 header still refuses the runs count's old key.
-steps() { /usr/bin/grep -rnE 'step-line|step-field|regression-runs|regression_runs_count|units_set_current|units_step_line|units_step_fields|poker_verb_regression\b' "$1/hooks" "$1/payload/scripts" \
-  | grep -v -e '/payload/scripts/lib/walls\.sh:' -e 'PLAN_READ_GONE_KEYS='; }
-printf '%s\n' '# step-field 5 walk-artifact=x' '# regression-runs --write' > "$L/planted-step.sh"
-expect_eq "the extractor reads both planted names of the step's writers" "2" "$(steps "$S" | grep -c planted-step.sh)"
-expect_eq "the verbs that wrote a step's line, its fields, the regression's setting and its runs' count are named nowhere else" "" "$(steps "$S" | grep -v planted-step.sh)"
+# A version-15 header still refuses the runs count's old key.
+steps() { /usr/bin/grep -rnE 'step-line|step-field|regression-runs|regression_runs_count|units_set_current|units_step_line|units_step_fields|poker_verb_regression\b|\|budget\||\|regression\|share\||confirm-row|confirm_row|matrix_block_key|poker_verb_budget|budget-override|session-poker\.sh"? budget|^  budget\)$' "$1/hooks" "$1/payload/scripts" \
+  | grep -v -e 'PLAN_READ_GONE_KEYS='; }
+printf '%s\n' '# step-field 5 walk-artifact=x' '# regression-runs --write' '# confirm-row AC-1' '# session-poker.sh budget writers=2' > "$L/planted-step.sh"
+expect_eq "the extractor reads the four planted names of the step's, the confirmation's and the cap's writers" "4" "$(steps "$S" | grep -c planted-step.sh)"
+expect_eq "the verbs that wrote a step's line, its fields, the regression's setting, its runs' count, a row's confirmation and the cap are named nowhere else" "" "$(steps "$S" | grep -v planted-step.sh)"
+# A design ledger heading and a debt ledger row are read by the translation alone; no verb writes either file.
+ledgers() { /usr/bin/grep -rnE '## Δ|/ \\[|] /|" [|] raised-by ' "$1/hooks" "$1/payload/scripts" | grep -v -e '/payload/scripts/lib/translate\.sh:' -e ':[0-9]*: *#'; }
+printf '%s\n' '# ## Δ0 in a comment' "led_n() { sed -n 's/^## Δ\\([0-9]*\\).*/\\1/p' \"\$1\"; }" > "$L/planted-ledger.sh"
+expect_eq "the extractor reads the planted ledger parser and not the comment" "1" "$(ledgers "$S" | grep -c planted-ledger.sh)"
+expect_eq "neither ledger file is written or parsed outside the translation" "" "$(ledgers "$S" | grep -v planted-ledger.sh)"
 
 section "REFUSALS"
 own() { printf '%s\n' "${2:-$BEFORE}" | awk -F'\t' -v f="hooks/$1.sh:" 'index($2, f) == 1 { n = $2; sub(/.*:/, "", n); print n, $3 }'; }

@@ -394,9 +394,9 @@ poke "$RFC" reply "$FC_WD"
 expect_eq "REPLY-1 reply all default replays the page (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
 expect_regex "REPLY-1b approved: release, by the git user, with the reply's words" \
-  "^approved: release by Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z( head=$FC_R)? \"$FC_WD\"\$" "$(/usr/bin/grep '^approved: release ' "$PFC")"
+  "^run/v1\\|ev=approval\\|key=release\\|by=Dana Fixture(\\|head=$FC_R)?\\|said=$FC_WD(\\|why=[^|]+)?\\|at=[0-9T:Z-]+\$" "$(fc_appr release)"
 expect_regex "REPLY-1c approved: merge, the same" \
-  "^approved: merge by Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z( head=$FC_R)? \"$FC_WD\"\$" "$(/usr/bin/grep '^approved: merge ' "$PFC")"
+  "^run/v1\\|ev=approval\\|key=merge\\|by=Dana Fixture(\\|head=$FC_R)?\\|said=$FC_WD(\\|why=[^|]+)?\\|at=[0-9T:Z-]+\$" "$(fc_appr merge)"
 expect_eq "REPLY-1d the unproved row's status is waived" "waived" "$(fc_row AC-1.2)"
 expect_eq "REPLY-1f …the discharged row is untouched" "discharged" "$(fc_row AC-1.1)"
 expect_contains "REPLY-1g the record keeps the reply" "replied: " "$(cat "$FC_REC/release-approval-$FC_H8.md")"
@@ -410,9 +410,9 @@ fc_plan "$FC_GOOD"
 fc_page --against approve:release
 poke "$RFC" reply "$FC_WR"
 expect_eq "REPLY-3 the orchestrator recommends holding the release; reply all recommended (exit 0)" "0" "$RC"
-expect_eq "REPLY-3b …the release is not approved" "" "$(/usr/bin/grep '^approved: release ' "$PFC")"
+expect_eq "REPLY-3b …the release is not approved" "" "$(fc_appr release)"
 expect_regex "REPLY-3c …every other recommendation applied with the user's words: the merge" \
-  "^approved: merge by Dana Fixture [0-9T:Z-]+( head=$FC_R)? \"$FC_WR\"\$" "$(/usr/bin/grep '^approved: merge ' "$PFC")"
+  "^run/v1\\|ev=approval\\|key=merge\\|by=Dana Fixture(\\|head=$FC_R)?\\|said=$FC_WR(\\|why=[^|]+)?\\|at=[0-9T:Z-]+\$" "$(fc_appr merge)"
 expect_eq "REPLY-3d …the row" "waived" "$(fc_row AC-1.2)"
 expect_contains "REPLY-3e …and the reply says what it held back" "withheld: approve:release" "$OUT"
 expect_contains "REPLY-3f …the person's approval item stays open" "approve:release" "$(fc_owed)"
@@ -424,7 +424,7 @@ expect_eq "REPLY-4 the orchestrator recommends fixing the S3; reply all recommen
 expect_regex "REPLY-4b …the finding is moved to fix on the user's words" \
   "^run/v1\\|ev=finding\\|ref=record/wave-x/adversarial\\.md#1\\|to=fix\\|by=Dana Fixture\\|words=$FC_WR\\|session=[^|]+\\|why=" "$(/usr/bin/grep -F "|ref=$FC_FID|to=fix|" "$FC_REC/run.log" 2>/dev/null)"
 expect_eq "REPLY-4c …and both approvals are stamped with the same words" \
-  "2" "$(/usr/bin/grep '^approved: ' "$PFC" | /usr/bin/grep -cF "\"$FC_WR\"")"
+  "2" "$(/usr/bin/grep -c "|ev=approval|.*|said=$FC_WR|" "$FC_REC/run.log")"
 fc_plan "$FC_GOOD"
 fc_page --against "finding:$FC_FID"
 poke "$RFC" reply "$FC_WD"
@@ -473,12 +473,11 @@ section "§T4: a T4 row is read through the gate's one predicate: confirmed by y
 # ============================================================
 # fails-when: an attributed T4 row under an empty-like auditor cell is put as a decision or counted not confirmed by
 # the auditor; a pending one is missing from Decisions; an attributed one under UNVERIFIABLE is counted proved.
-fc_t4() {  # <auditor cell> <user-confirmed value, or noblock> -> PFC: FC_GOOD with a third row, discharged and T4
+fc_t4() {  # <auditor cell> <user-confirmed value> -> PFC: FC_GOOD with a third row, discharged and T4
   local c="$1" v="$2"
   fc_plan "$FC_GOOD"
   FC_T4_ROW="| AC-1.3 | T4 | discharged | see AC-1.3 | $c |" awk '
     { print } /^\| AC-1\.2 \|/ { print ENVIRON["FC_T4_ROW"] }' "$PFC" > "$PFC.t4" && mv -f "$PFC.t4" "$PFC"
-  [ "$v" = noblock ] && return 0
   printf 'AC-1.3:\n  fails-when: the user finds the planted defect by hand\n  evidence: record/generic-evidence.md\n' >> "$PFC"
   printf '  user-confirmed: %s\n  readback: what the user saw\n' "$v" >> "$PFC"
 }
@@ -513,53 +512,43 @@ expect_contains "T4-3d …the line counts it among the auditor's" "1 not confirm
 expect_absent "T4-3e …and not as confirmed by you" "1 confirmed by you" "$(fc_acc)"
 
 # ============================================================
-section "§CONFIRM: confirm-row writes a T4 row's attributed confirmation from the user's words; the card offers confirm or waive and reply applies either"
+section "§CONFIRM: approve <AC> confirms a T4 row on the user's words, an approval naming it; the card offers confirm or waive and reply applies either"
 # ============================================================
-# fails-when: no verb writes the attributed form, the card's choices for a pending T4 row are waive and run, or a
+# fails-when: no verb confirms a T4 row, the card's choices for a pending T4 row are waive and run, or a
 # reply naming either choice leaves the row unruled.
 FC_CR2='2 waive, rest default'
 fc_typed "$FC_WD" "$FC_WR" 'yes' "$FC_CR2"
 fc_t4 '—' pending
-poke "$RFC" confirm-row AC-1.3 'yes'
-expect_eq "CONFIRM-1 confirm-row AC-1.3 'yes' exits 0" "0" "$RC"
-[ "$RC" = 0 ] || printf '      confirm-row said: %s\n' "$OUT"
-expect_regex "CONFIRM-1b the block carries the attributed line: the git user as one word, the date, the words" \
-  '^  user-confirmed: Dana-Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} "yes"$' "$(/usr/bin/grep 'user-confirmed:' "$PFC")"
-expect_contains "CONFIRM-1c …and the verb prints what it wrote" 'Dana-Fixture' "$OUT"
-expect_eq "CONFIRM-1d …once: the pending line is replaced, not joined" "1" "$(/usr/bin/grep -c 'user-confirmed:' "$PFC")"
+cp "$PFC" "$TMPROOT/fc-before-cr"
+poke "$RFC" approve AC-1.3 'yes'
+expect_eq "CONFIRM-1 approve AC-1.3 'yes' exits 0, the plan byte-identical" "0|same" "$RC|$(cmp -s "$TMPROOT/fc-before-cr" "$PFC" && echo same || echo changed)"
+[ "$RC" = 0 ] || printf '      approve said: %s\n' "$OUT"
+expect_regex "CONFIRM-1b one approval names the criterion in the run's log: the git user, the words" \
+  '^run/v1\|ev=approval\|key=AC-1\.3\|by=Dana Fixture\|said=yes\|at=[0-9T:Z-]+$' "$(fc_appr AC-1.3)"
 fc_page --preview
 expect_absent "CONFIRM-1e the card then reads the row as confirmed by you, no longer a decision" "AC-1.3" "$(fc_under Decisions)"
 expect_contains "CONFIRM-1f …on the acceptance line" "1 confirmed by you" "$(fc_acc)"
 fc_t4 '—' pending
-cp "$PFC" "$TMPROOT/fc-before-cr"
-poke "$RFC" confirm-row AC-1.1 'yes'
-expect_eq "CONFIRM-2 a T1 row: refused, exit 1, the plan byte-identical" "1|same" \
-  "$RC|$(cmp -s "$TMPROOT/fc-before-cr" "$PFC" && echo same || echo changed)"
+poke "$RFC" approve AC-1.1 'yes'
+expect_eq "CONFIRM-2 a T1 row: refused, exit 1, nothing appended" "1|" "$RC|$(fc_appr AC-1.1)"
 expect_contains "CONFIRM-2b …naming the tier" "T1" "$OUT"
-poke "$RFC" confirm-row AC-1.3 'never typed by the user'
-expect_eq "CONFIRM-3 words the user never typed: refused, exit 1, the plan byte-identical" "1|same" \
-  "$RC|$(cmp -s "$TMPROOT/fc-before-cr" "$PFC" && echo same || echo changed)"
-poke "$RFC" confirm-row AC-9.9 'yes'
-expect_eq "CONFIRM-4 no such row: refused, exit 1, the plan byte-identical" "1|same" \
-  "$RC|$(cmp -s "$TMPROOT/fc-before-cr" "$PFC" && echo same || echo changed)"
-fc_t4 '—' noblock
-cp "$PFC" "$TMPROOT/fc-before-cr"
-poke "$RFC" confirm-row AC-1.3 'yes'
-expect_eq "CONFIRM-5 a T4 row with no block: refused, exit 1, the plan byte-identical" "1|same" \
-  "$RC|$(cmp -s "$TMPROOT/fc-before-cr" "$PFC" && echo same || echo changed)"
+poke "$RFC" approve AC-1.3 'never typed by the user'
+expect_eq "CONFIRM-3 words the user never typed: refused, exit 1, nothing appended" "1|" "$RC|$(fc_appr AC-1.3)"
+poke "$RFC" approve AC-9.9 'yes'
+expect_eq "CONFIRM-4 no such criterion, a name no row reads: refused, exit 1, nothing appended" "1|" "$RC|$(fc_appr AC-9.9)"
 fc_t4 '—' pending
 fc_page
 expect_eq "CONFIRM-6 the acting render of a pending T4 row exits 0" "0" "$FC_RC"
 [ "$FC_RC" = 0 ] || printf '      release-approval said: %s\n' "$FC_ERR"
-expect_contains "CONFIRM-6b its replay offers confirm, then waive" "|default=confirm-row AC-1.3|other=waive AC-1.3|pick=default|choices=confirm/waive|" \
+expect_contains "CONFIRM-6b its replay offers confirm, then waive" "|default=approve AC-1.3|other=waive AC-1.3|pick=default|choices=confirm/waive|" \
   "$(fc_table | /usr/bin/grep -F 'key=row:AC-1.3|')"
 expect_absent "CONFIRM-6c …never waive and run" "choices=waive/run" "$(fc_table | /usr/bin/grep -F 'key=row:AC-1.3|')"
 poke "$RFC" reply "$FC_WD"
 expect_eq "CONFIRM-7 reply all default applies it (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
-expect_regex "CONFIRM-7b …confirm-row wrote the attributed line with the reply's words" \
-  "^  user-confirmed: Dana-Fixture [0-9]{4}-[0-9]{2}-[0-9]{2} \"$FC_WD\"( — .+)?\$" "$(/usr/bin/grep 'user-confirmed:' "$PFC")"
-expect_contains "CONFIRM-7c …through the page's applied: path" "applied: row:AC-1.3 confirm-row rc=0" \
+expect_regex "CONFIRM-7b …approve appended the approval with the reply's words" \
+  "^run/v1\\|ev=approval\\|key=AC-1\\.3\\|by=Dana Fixture\\|said=$FC_WD(\\|why=[^|]+)?\\|at=[0-9T:Z-]+\$" "$(fc_appr AC-1.3)"
+expect_contains "CONFIRM-7c …through the page's applied: path" "applied: row:AC-1.3 approve rc=0" \
   "$(cat "$FC_REC/release-approval-$FC_H8.md")"
 expect_eq "CONFIRM-7d …and the row stays discharged" "discharged" "$(fc_row AC-1.3)"
 fc_t4 '—' pending
@@ -589,7 +578,7 @@ cp "$PFC" "$TMPROOT/fc-before-legacy"
 poke "$RFC" reply "$FC_WD"
 expect_eq "LEGACY-3 reply all default over the old page replays it (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
-expect_regex "LEGACY-3b …approving the release with the reply's words" "^approved: release by Dana Fixture [0-9T:Z-]+( head=$FC_R)? \"$FC_WD\"\$" "$(/usr/bin/grep '^approved: release ' "$PFC")"
+expect_regex "LEGACY-3b …approving the release with the reply's words" "^run/v1\\|ev=approval\\|key=release\\|by=Dana Fixture(\\|head=$FC_R)?\\|said=$FC_WD(\\|why=[^|]+)?\\|at=[0-9T:Z-]+\$" "$(fc_appr release)"
 expect_contains "LEGACY-3c …recording the reply on the old page" "replied: " "$(cat "$FC_REC/${RN_W}-results-$FC_H8.md")"
 expect_eq "LEGACY-3d …and writing no page under the new stem" "0" "$(ls "$FC_REC" | /usr/bin/grep -c '^release-approval-')"
 rm -f "$FC_REC/${RN_W}-results"-*.md
@@ -894,7 +883,7 @@ section "§STALE: a release approval the head has moved past is put again on the
 # and the card is the only place the user approves the release, so the card settles the stale approval as its own
 # decision: it puts the release approval again, naming the head it was given at and what landed since, and the merge
 # approval given at that earlier head beside it, so the pair is given again together; the reply writes a second
-# approved: release line and a second approved: merge line at the new head, the first of each kept. An approval is
+# release approval and a second merge approval at the new head, the first of each kept. An approval is
 # recorded once per head.
 # fails-when: the card is early on a stale approval; the renewal names neither the earlier head nor the landing; the
 # stale merge approval is left off the card; the reply replaces a first line or writes no second one; current 8
@@ -944,11 +933,11 @@ poke "$RFC" reply "$FC_WR"
 expect_eq "STALE-3 reply all recommended replays the renewal (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
 expect_eq "STALE-3b …a second approved: release line at the new head, beside the first" "2|$FC_R|$FC_X" \
-  "$(/usr/bin/grep -c '^approved: release ' "$PFC")|$(/usr/bin/grep '^approved: release ' "$PFC" | sed -n 's/.* head=\([0-9a-f]*\) .*/\1/p' | paste -sd'|' -)"
+  "$(fc_appr release | grep -c .)|$(fc_appr release | sed -n 's/.*head=\([0-9a-f]*\).*/\1/p' | paste -sd'|' -)"
 expect_regex "STALE-3c …the new line with the reply's words" \
-  "^approved: release by Dana Fixture [0-9T:Z-]+ head=$FC_X \"$FC_WR\"\$" "$(/usr/bin/grep '^approved: release ' "$PFC" | tail -1)"
+  "^run/v1\\|ev=approval\\|key=release\\|by=Dana Fixture\\|head=$FC_X\\|said=$FC_WR(\\|why=[^|]+)?\\|at=[0-9T:Z-]+\$" "$(fc_appr release | tail -1)"
 expect_eq "STALE-3d …and a second approved: merge line at the new head, beside the first" "2|$FC_R|$FC_X" \
-  "$(/usr/bin/grep -c '^approved: merge ' "$PFC")|$(/usr/bin/grep '^approved: merge ' "$PFC" | sed -n 's/.* head=\([0-9a-f]*\) .*/\1/p' | paste -sd'|' -)"
+  "$(fc_appr merge | grep -c .)|$(fc_appr merge | sed -n 's/.*head=\([0-9a-f]*\).*/\1/p' | paste -sd'|' -)"
 poke "$RFC" current 8 --check
 expect_eq "STALE-4 …after which current 8 --check is green at the new head" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
@@ -969,7 +958,7 @@ section "§STALE-NAME: an approval of any name the head has moved past is given 
 # second at the head the newest line names is admitted.
 FC_SN_ORD='s/| pending | approval:release, approval:merge, head |/| pending | approval:release, approval:merge, approval:step4, head |/'
 fc_plan "$FC_GOOD" "$FC_SN_ORD"
-fc_sn_heads() { /usr/bin/grep '^approved: step4 ' "$PFC" | sed -n 's/.* head=\([0-9a-f]*\) .*/\1/p' | paste -sd'|' -; }
+fc_sn_heads() { fc_appr step4 | sed -n 's/.*head=\([0-9a-f]*\).*/\1/p' | paste -sd'|' -; }
 poke "$RFC" approve step4 'go ahead'
 expect_eq "SN-0 setup: the first approve step4 is recorded at the head (exit 0)" "0|$FC_R" "$RC|$(fc_sn_heads)"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
@@ -979,7 +968,7 @@ expect_eq "SN-1 approve step4 at a new head is given again (exit 0): a second li
   "0|$FC_R|$FC_X" "$RC|$(fc_sn_heads)"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_regex "SN-1b …the new line with the reply's words" \
-  "^approved: step4 by Dana Fixture [0-9T:Z-]+ head=$FC_X \"go ahead again\"\$" "$(/usr/bin/grep '^approved: step4 ' "$PFC" | tail -1)"
+  "^run/v1\\|ev=approval\\|key=step4\\|by=Dana Fixture\\|head=$FC_X\\|said=go ahead again(\\|why=[^|]+)?\\|at=[0-9T:Z-]+\$" "$(fc_appr step4 | tail -1)"
 cp "$PFC" "$TMPROOT/fc-before-sn"
 poke "$RFC" approve step4 'and once more'
 expect_eq "SN-2 a third at the head the newest line names: refused, the plan byte-identical" "1|same" \
