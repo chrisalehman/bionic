@@ -3,10 +3,10 @@
 # here; a file not named has ceiling 0, so a new refusal ships with its exit.
 hooks/poker/judge.sh 7 # counted at the first sweep, 2026-10-25
 hooks/poker/line.sh 41 # lowered when the landing stopped writing the plan
-hooks/poker/plan.sh 86 # the plan verbs' refusals that name no exit
-hooks/poker/proof.sh 94 # the proof verbs' refusals that name no exit
+hooks/poker/plan.sh 85 # the plan verbs' refusals that name no exit
+hooks/poker/proof.sh 91 # the proof verbs' refusals that name no exit
 hooks/poker/roster.sh 33 # the roster verbs' refusals that name no exit
-hooks/poker/sitrep.sh 46 # counted at the first sweep, 2026-10-25
+hooks/poker/sitrep.sh 44 # the sitrep and decisions verbs' refusals that name no exit
 hooks/poker/tick.sh 10 # counted at the first sweep, 2026-10-25
 hooks/preflight-probe.sh 11 # counted at the first sweep, 2026-10-25
 hooks/session-poker.sh 4 # counted at the first sweep, 2026-10-25

@@ -187,7 +187,7 @@ fill_facts_load() {
   _FILL_REVIEW_AT="$(printf '%s\n' "$got" | sed -n 's/^review_at=//p')"
   _FILL_CURRENT_PLAN="$plan"; _FILL_ORDER_PLAN="$plan"
 }
-_fill_facts() {  # <plan> -> n=<step>, approved=1|0, given=<as gate_order_of prints it> while an order stands, review_at=
+_fill_facts() {  # <plan> -> n=<step>, approved=1|0, given=<as gate_order_plan prints it> while an order stands, review_at=
   reader_q_step "$1" | grep '^n='
   if reader_q_approved "$1" step3 >/dev/null; then echo approved=1; else echo approved=0; fi
   reader_q_order "$1" | awk -F= '{ v[$1] = substr($0, length($1) + 2) } END { if (v["order"] == "given") printf "given=given %s \"%s\"\n", v["at"], v["said"] }'
@@ -246,21 +246,21 @@ fill_ledger_live() {  # <plan> -> 0 live · 1 not
 
 # ── THE USER'S ORDER HOLDS THE FILL ───────────────────────────────────────────
 #
-# fill_order_open <plan> -> 0, printing the order (`given <ISO-UTC> "<words>"`), while the plan's
-# `## SDLC State` carries an open order; 1 when it carries none.
+# fill_order_open <plan> -> 0, printing the order (`given <ISO-UTC> "<words>"`), while the run's
+# standing order is given; 1 when none stands.
 #
 # AN ORDER IS ONE OF THE THREE WAYS A ROW WAITS, with a read of the record of an open row and a read
 # of an unruled decision. It is the user's word that the run stop where it is: the runner starts no
 # suite under it (lib/gate.sh), and the fill offers no row, so neither the tick nor the stop wall
 # asks for a dispatch the user has held. In a shell that loaded the run's facts (`fill_facts_load`) the order
-# is the reader's standing order; elsewhere lib/gate.sh `gate_order_of` reads the plan's line, and a copy of
-# this file with no gate.sh beside it has no reader, and holds nothing.
+# is theirs; elsewhere lib/gate.sh `gate_order_plan` asks the reader for it, and a copy of this file with no
+# gate.sh beside it has no reader, and holds nothing.
 fill_order_open() {  # <plan>
   if [ -n "${1:-}" ] && [ "$1" = "$_FILL_ORDER_PLAN" ]; then
     [ -n "$_FILL_ORDER" ] && printf '%s\n' "$_FILL_ORDER"; return
   fi
-  declare -F gate_order_of >/dev/null 2>&1 || return 1
-  gate_order_of "${1:-}" plan
+  declare -F gate_order_plan >/dev/null 2>&1 || return 1
+  gate_order_plan "${1:-}"
 }
 
 # fill_plan_approved <plan> -> 0 when `## SDLC State` carries a non-blank `approved-by:` line.

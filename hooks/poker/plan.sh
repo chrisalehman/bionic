@@ -2326,23 +2326,22 @@ RP_TABLE
   }
 
   # THE USER'S ORDER. `order '<words>'` records what the user said as an order every suite obeys;
-  # `order lift` ends the open one. Each is one line with the time and the words:
+  # `order lift` ends the open one. With a bound open run each is one order event in the run's log
+  # (lib/proof.sh `proof_order_event`: act=given or lifted, said=<the words, of the order it ends for a
+  # lift>), and the plan is left as it was. With no run bound it is one line of record/orders.log under
+  # the docs root, made when absent, since there is no run's log to hold it:
   #
   #   order: given <ISO-UTC> "<words>"
   #   order: lifted <ISO-UTC> "<the words of the order it ends>"
   #
-  # With a bound open run the line goes under the plan's `## SDLC State`, after its last order: line,
-  # else after its last approved: or approved-by: line, else after current:, through the plan
-  # transaction every row verb takes. With no run bound it is appended to record/orders.log under the
-  # docs root, made when absent. tests/run.sh asks lib/gate.sh `gate_order`, the one reader of both,
-  # and refuses every suite while an order is open. A newer order replaces the open one; the newest
-  # line decides.
+  # tests/run.sh asks lib/gate.sh `gate_order`, the one reader of both, and refuses every suite while an
+  # order is open. A newer order replaces the open one; the newest fact decides.
   #
-  # REFUSED (1), nothing written: words that hold a line break, a lift with no open order, a plan
-  # with no current: line under ## SDLC State, the log a link. (2): the order reader cannot be loaded,
-  # or the log cannot be written.
+  # REFUSED (1), nothing written: words that hold a line break, or a `|` in a bound run (an event's field
+  # cannot carry one), a lift with no open order, the log a link. (2): the order reader or writer cannot be
+  # loaded, or the order cannot be written.
   poker_verb_order() {
-    local sid mode=log root log open line
+    local sid mode=log root log open plan="" run line
     if ! declare -F gate_order_of >/dev/null 2>&1; then
       die "REFUSED — the order lookup (lib/gate.sh gate_order_of) cannot be loaded from $BIONIC_LIB; nothing was written."
       exit 2
@@ -2359,11 +2358,11 @@ RP_TABLE
       exit 2
     fi
     if [ -n "$sid" ] && engaged_session "$root" "$sid"; then
-      case "$(session_run "$root" "$sid")" in 'bound-open '*) mode=plan ;; esac
+      run="$(session_run "$root" "$sid")"
+      case "$run" in 'bound-open '*) mode=plan; plan="${run#bound-open }" ;; esac
     fi
     if [ "$mode" = plan ]; then
-      plan_verb_open order
-      open="$(gate_order_of "$PV_PLAN" plan)" || open=""
+      open="$(gate_order_plan "$plan")" || open=""
     else
       log="$(docs_root "$root")/record/orders.log"
       if [ -L "$log" ]; then
@@ -2374,7 +2373,7 @@ RP_TABLE
     fi
     if [ -n "$OR_LIFT" ]; then
       if [ -z "$open" ]; then
-        die "REFUSED — no order is open$([ "$mode" = plan ] && printf ' in %s' "$PV_PLAN" || printf ' in %s' "$log"), so there is nothing to lift; nothing was written."
+        die "REFUSED — no order is open$([ "$mode" = plan ] && printf ' in the run of %s' "$plan" || printf ' in %s' "$log"), so there is nothing to lift; nothing was written."
         exit 1
       fi
       OR_WORDS="${open#*\"}"; OR_WORDS="${OR_WORDS%\"}"
@@ -2392,29 +2391,17 @@ RP_TABLE
       say "order — $line, in $log (no run is bound)."
       exit 0
     fi
-    # THE LINE GOES IN THROUGH THE ENVIRONMENT, not `-v`, which would read a backslash in the
-    # user's words as an escape.
-    if ! OR_LINE="$line" awk '
-      { L[++n] = $0 }
-      END {
-        for (i = 1; i <= n; i++) {
-          if (L[i] ~ /^[[:space:]]*```/) { fence = !fence; continue }
-          if (fence) continue
-          if (L[i] ~ /^##[[:space:]]/) { if (insdlc) break; insdlc = (L[i] ~ /^##[[:space:]]+SDLC State/); continue }
-          if (!insdlc) continue
-          if (L[i] ~ /^order:/) ord = i
-          else if (L[i] ~ /^[[:space:]]*approved(-by)?[[:space:]]*:/) ap = i
-          else if (!cur && L[i] ~ /^[[:space:]]*current[[:space:]]*:/) cur = i
-        }
-        at = ord ? ord : (ap ? ap : cur)
-        if (!at) exit 1
-        for (i = 1; i <= n; i++) { print L[i]; if (i == at) print ENVIRON["OR_LINE"] }
-      }' "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
-      die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State to write the order beside; the plan is unchanged."
-      exit 1
+    case "$OR_WORDS" in *'|'*)
+      die "REFUSED — an order's words are one field of the run's log, which cannot carry a |; nothing was written. run again: session-poker.sh order '<the words without it>'"
+      exit 1 ;;
+    esac
+    declare -F proof_order_event >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" >/dev/null 2>&1; }
+    if ! declare -F proof_order_event >/dev/null 2>&1 \
+       || ! proof_order_event "$plan" "$([ -n "$OR_LIFT" ] && echo lifted || echo given)" "$OR_WORDS"; then
+      die "REFUSED — the order cannot be appended to the run's log of $plan (lib/proof.sh proof_order_event from $BIONIC_LIB); nothing was written. run again: session-poker.sh order"
+      exit 2
     fi
-    plan_verb_swap order "the order" writer
-    say "order — $line, under ## SDLC State of $PV_PLAN; dry-committed first."
+    say "order — ${line#order: }, in the run's log of $plan; the plan is unchanged."
     exit 0
   }
 

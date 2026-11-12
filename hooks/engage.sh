@@ -348,9 +348,9 @@ fi
 # that mutation replacing a call the fixture never reaches, and the proof would pass on the
 # unmutated path. The shape of the code is holding the shape of the proof.
 #
-# THE ACT IS NAMED (wave-36 T9; D10): `engage` is this hook's word in the plan's `- session:` line,
-# which `bind_plan` writes beside the marker when the binding names a plan and the plan lacks this
-# session's line — a re-engagement of a bound session writes it once, then never again.
+# THE ACT IS NAMED: `engage` is this hook's word in the run's bind event, which `bind_plan` appends
+# beside the marker when the binding names a plan and the run does not hold this session yet — a
+# re-engagement of a bound session appends it once, then never again.
 bind_plan "$REPO" "$SID" "$PLAN" engage || [ "$BOUND" = 1 ] || bind_plan "$REPO" "$SID" none || :
 
 # ---------- ARM THE PATROL ----------

@@ -2014,11 +2014,11 @@ dispatch_refuse_findings
 # `_fold_emit_context`, which builds the object through `jq`; with no `jq` the lines fall back to `warn`.
 _dp_adv_all=""
 # THE DEBT ARM (wave-30 T22; D2, P2, AC-11.3). Debt is burned by the next row whose Files touch its
-# concept, so an allowed brief whose `Files:` covers a site of an unburned item of the run's ledger
+# concept, so an allowed brief whose `Files:` covers a site of a debt the run holds unburned
 # (lib/proof.sh `proof_debt_hits`: the path, a directory above it, or a glob over it) carries the item,
-# and the item's touches go up by one through the ledger's one writer, `session-poker.sh debt touched`,
+# and the item's touches go up by one through the debt's one writer, `session-poker.sh debt touched`,
 # whose answer is the count printed. A touch the verb cannot write is still advised, at the count the
-# ledger holds. Below the spend for the reason the body advisory is: a refused dispatch touches nothing.
+# reader holds. Below the spend for the reason the body advisory is: a refused dispatch touches nothing.
 _dp_debt=""
 if [ -n "$PLAN" ] && [ -n "$C_FILES" ]; then
   if ! declare -F proof_debt_hits >/dev/null 2>&1 && [ -r "${BIONIC_LIB:-}/proof.sh" ]; then
@@ -2026,7 +2026,7 @@ if [ -n "$PLAN" ] && [ -n "$C_FILES" ]; then
     . "$BIONIC_LIB/proof.sh"
   fi
   if declare -F proof_debt_hits >/dev/null 2>&1; then
-    _dp_debt_hits="$(proof_debt_hits "$(proof_debt_ledger_path "$BIONIC_ROOT" "$PLAN" 2>/dev/null)" "$C_FILES" 2>/dev/null | awk -F'\t' '$6 == "-"')"
+    _dp_debt_hits="$(proof_debt_hits "$PLAN" "$C_FILES" 2>/dev/null | awk -F'\t' '$6 == "-"')"
     _dp_dseen=" "; _dp_dall=""
     while IFS='	' read -r _dp_dc _dp_dk _ _ _dp_dn _; do
       [ -n "$_dp_dc" ] || continue
