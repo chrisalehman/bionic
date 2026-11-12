@@ -125,7 +125,7 @@ expect_eq "the extractor reads both planted names of the verbs that wrote a matr
 expect_eq "the five verbs that wrote a matrix cell are named nowhere else" "" "$(cells "$S" | grep -v planted-cell.sh)"
 # The commands with no job are read by the shape of a use, never the bare word, for several are English: the poker run
 # with one as its verb, a function named for one, and a case arm of the poker's own.
-GONE_V='anchors|patrol|wait|cover|epic-row|continuation-fill'
+GONE_V='anchors|patrol|wait|cover|epic-row|continuation-fill|interval-default'
 gone() {
   { /usr/bin/grep -rnE "(session-poker\.sh|\\\$\{?[A-Za-z_]*(poker|POKER)[A-Za-z_]*\}?)[\"']? ($GONE_V)([^a-z_-]|\$)|poker_verb_(${GONE_V//-/_})([^a-z_]|\$)" "$1/hooks" "$1/payload/scripts"
     /usr/bin/grep -rnE --include='*poker*.sh' "^ *([a-z-]+\|)*($GONE_V)(\|[a-z-]+)*\)" "$1/hooks" "$1/payload/scripts"; } | grep -v '/payload/scripts/lib/walls\.sh:'

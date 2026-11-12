@@ -93,43 +93,23 @@ printf 'poker-interval: not-a-duration\n' > "$R2/.bionic/config.yaml"
 poke "$R2" interval
 expect_eq "a malformed override REFUSES rather than silently defaulting (exit 2)" "2" "$RC"
 
-# ---------- interval-default: the constant, with the config taken out of the question ----------
+# ---------- the default: the Patrol library's one constant ----------
 #
-# ADDED FOR THE ARMING WALL (critic C-2, W5). `interval` above is right to refuse a
-# malformed override — that is this repo's posture everywhere a prose value is read. But
-# hooks/dispatch-preflight.sh has to measure staleness even then, because `.bionic/config.yaml`
-# is machine-local and agent-writable and one bad line there must not be able to disarm a
-# wall. Rather than retype 1200 in the gate — two copies of a constant that drift the first
-# time either moves — the gate asks this verb.
-#
-# THE PROPERTY THAT MATTERS TO ITS CALLER is that the config cannot change the answer, so
-# every arm below is driven ON TOP of a config the `interval` verb refuses or overrides.
-poke "$R2" interval-default
-expect_eq "interval-default answers 0 even though the live config is malformed" "0" "$RC"
-expect_eq "…with this script's own default, in seconds (20m = 1200s)" "1200" "$OUT"
-
-printf 'poker-interval: 5m\n' > "$R2/.bionic/config.yaml"
-poke "$R2" interval-default
-expect_eq "…and a perfectly VALID override does not move it either" "1200" "$OUT"
-poke "$R2" interval
-expect_eq "…while interval, on the same repo, still reads that override (5m = 300s)" "300" "$OUT"
-
-# The gate's fallback is only worth having if it tracks the constant. Mutation-proof: move
-# POKER_INTERVAL_DEFAULT on a copy and the verb has to move with it — a verb that printed a
-# literal 1200 would answer 1200 here.
-# THE DOCTORED COPY LIVES IN A TREE, not in a bare temp directory (bionic 1.4.0). The poker
-# loads its library through the shared idiom, whose first candidate is `<dirname $0>/../
-# scripts/lib` — the shape the installed plugin ships. A copy dropped anywhere else finds no
-# library and fails open, which would make this mutation prove nothing. The library is
-# LINKED, never duplicated: the copy under test must read the same functions the shipped
-# script does.
+# A caller whose `interval` call refuses or cannot be made (the arming wall, the stop library, session start, doctor)
+# falls back to lib/patrol.sh's PATROL_INTERVAL_DEFAULT, so the poker reads its own default from that constant too, or
+# the two would drift. Mutation-proof: the poker beside a library whose constant is moved answers the moved value. The
+# copy lives in a tree shaped as the plugin ships, its library and parts linked, so it reads the shipped functions.
 POKER_MUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-default-mut.XXXXXX")"
-mkdir -p "$POKER_MUT_ROOT/hooks" "$POKER_MUT_ROOT/scripts"
-ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$POKER_MUT_ROOT/scripts/lib"
-POKER_MUT="$POKER_MUT_ROOT/hooks/session-poker.sh"
-sed 's/^POKER_INTERVAL_DEFAULT="20m"$/POKER_INTERVAL_DEFAULT="7m"/' "$POKER" > "$POKER_MUT"
-OUT="$( cd "$R2" && CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER_MUT" interval-default 2>&1 )"; RC=$?
-expect_eq "the verb answers from the CONSTANT, not from a literal (doctored 7m = 420s)" "420" "$OUT"
+mkdir -p "$POKER_MUT_ROOT/hooks" "$POKER_MUT_ROOT/scripts/lib"
+PM_LIB="$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)"
+for PM_F in "$PM_LIB"/*; do ln -s "$PM_F" "$POKER_MUT_ROOT/scripts/lib/"; done
+rm "$POKER_MUT_ROOT/scripts/lib/patrol.sh"
+sed 's/^PATROL_INTERVAL_DEFAULT=1200$/PATROL_INTERVAL_DEFAULT=420/' "$PM_LIB/patrol.sh" > "$POKER_MUT_ROOT/scripts/lib/patrol.sh"
+ln -s "$(cd "$(dirname "$POKER")/poker" && pwd -P)" "$POKER_MUT_ROOT/hooks/poker"
+cp "$POKER" "$POKER_MUT_ROOT/hooks/session-poker.sh"
+rm -f "$R2/.bionic/config.yaml"
+OUT="$( cd "$R2" && CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER_MUT_ROOT/hooks/session-poker.sh" interval 2>&1 )"; RC=$?
+expect_eq "the poker's default is the library's constant: moved to 420 there, interval with no config prints 420" "0|420" "$RC|$OUT"
 
 # ============================================================
 section "Section 3: tick — the accelerated-clock decisions (AC-7, re-authored for the ack)"

@@ -265,7 +265,8 @@ poker_owed_close() {
 }
 
 POKER_DECISION_SCHEMA="poker-tick/v1"
-POKER_INTERVAL_DEFAULT="20m"
+# The default interval is the Patrol library's one constant, which every reader falls back to when `interval` refuses.
+POKER_INTERVAL_DEFAULT="${PATROL_INTERVAL_DEFAULT}s"
 
 # THE SHARED CONSTANT (S15, AC-26; research-code-map §2.c). hooks/landing-gate.sh is the one
 # ORIGINATOR of this marker — its own `swept_marker_write` owns the printf — and this file's
@@ -381,7 +382,6 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh arm        stamp the Patrol as alive for this session (no roster needed)"
   die "  bash ${HOOK_DIR}/session-poker.sh disarm     remove that stamp at run close — this Patrol was ended on purpose"
   die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
-  die "  bash ${HOOK_DIR}/session-poker.sh interval-default   this script's built-in default interval, in seconds (ignores config)"
   die "  bash ${HOOK_DIR}/session-poker.sh share [<n>] [reserve=<cores>]   print the machine's share (92 when none is set), the cores the person keeps (1 when none is set), the cores and the room; with <n> or reserve=<cores>, set it in the user-level file the gate reads"
   die "  bash ${HOOK_DIR}/session-poker.sh window     the instant this session's roster begins, UTC ISO-8601 (empty when it cannot be dated)"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt [--why '<reason>']   every open row a PREDECESSOR session left on this project's rosters, each adoption one hand event with its reason (the predecessor's clear when none is given)"
@@ -857,7 +857,7 @@ $1"; shift ;;
   # one. Its flags, --starter and --reason, are the verb's own to read and refuse (hooks/poker/proof.sh
   # poker_verb_regression_run), so they pass through.
   regression-run) : ;;
-  tick|arm|disarm|interval|interval-default|window|prompt)
+  tick|arm|disarm|interval|window|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
     ;;
   # THE MACHINE'S SHARE. No operand prints it; a share and `reserve=<cores>`
@@ -2481,25 +2481,6 @@ case "$VERB" in
         exit 1
       fi
     done
-    exit 0
-    ;;
-
-  # THE DEFAULT, WITHOUT THE CONFIG — added for hooks/dispatch-preflight.sh's arming wall
-  # (critic C-2, W5). That wall needs a threshold even when `interval` above REFUSES,
-  # because a project's config file is machine-local and agent-writable and one unparseable
-  # line there must not be able to disarm a wall. It could have retyped 1800; then this
-  # script's constant and the gate's would drift the first time either moved, which is the
-  # duplication this repo's ownership rule exists to forbid. So the constant and the
-  # duration parse stay here, where they already lived, and the gate asks.
-  #
-  # NOTHING ELSE READS THE CONFIG ON THIS PATH, deliberately: the whole value of this verb
-  # to its caller is that a hostile or broken config.yaml cannot change what it answers.
-  interval-default)
-    SECS="$(parse_seconds "$POKER_INTERVAL_DEFAULT")" || {
-      die "REFUSED — this script's own POKER_INTERVAL_DEFAULT ('$POKER_INTERVAL_DEFAULT') is not a duration."
-      exit 2
-    }
-    printf '%s\n' "$SECS"
     exit 0
     ;;
 

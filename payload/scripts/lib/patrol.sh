@@ -49,11 +49,11 @@ PATROL_STAMP_SCHEMA_OUT="patrol-stamp/v1"
 PATROL_ROSTER_SCHEMA="patrol-roster/v1"
 PATROL_WALL_SCHEMA="patrol-wall/v1"
 
-# The poker's own default, quoted here ONLY as the last resort when the poker
-# itself cannot be reached to be asked. Where the script exists it is asked —
-# `interval` for the project's configured value and `interval-default` for its
-# built-in — because two copies of a constant drift the first time either moves.
-PATROL_INTERVAL_LAST_RESORT=1200
+# THE DEFAULT PATROL INTERVAL, in seconds: its one copy. hooks/session-poker.sh takes its own default from it, and
+# every reader of the interval (this file's `patrol_interval`, the arming wall, the stop library, session start) asks
+# the poker's `interval` for the project's configured value and falls back to this when that refuses or cannot be
+# asked, so a broken config line cannot disarm a wall and no second copy can drift from the poker's.
+PATROL_INTERVAL_DEFAULT=1200
 
 # HOW STALE IS STALE IS NOT A MULTIPLE OF THE INTERVAL ANY MORE (epic-23 wave-16
 # REQ-11, retiring L-DETECT/4.5's constant below). It held one judgment call —
@@ -489,22 +489,19 @@ _patrol_scan() {  # <transcript> [<since ISO>] -> JOB/AGENTS/REFUSED records
 }
 
 # The interval, from its owner. `interval` is the project's configured value and
-# REFUSES on a malformed one; `interval-default` is the poker's own built-in and
-# is what a refusal falls back to — the same two-step
+# REFUSES on a malformed one; PATROL_INTERVAL_DEFAULT is what a refusal, or a poker
+# that cannot be reached, falls back to — the same two-step
 # hooks/dispatch-preflight.sh's arming wall takes, so doctor measures staleness
 # against the number the wall would refuse against.
-patrol_interval() {  # <repo-root> -> "<seconds> <configured|default|last-resort>"
-  local repo="${1:-}" poker secs
+patrol_interval() {  # <repo-root> -> "<seconds> <configured|default>"
+  local repo="${1:-}" poker secs=""
   poker="$(plugin_root 2>/dev/null)/hooks/session-poker.sh"
   if [ -f "$poker" ]; then
     secs=$( cd "$repo" 2>/dev/null && bash "$poker" interval 2>/dev/null )
     case "$secs" in ''|*[!0-9]*) secs="" ;; esac
-    if [ -n "$secs" ] && [ "$secs" -gt 0 ]; then printf '%s configured' "$secs"; return 0; fi
-    secs=$( bash "$poker" interval-default 2>/dev/null )
-    case "$secs" in ''|*[!0-9]*) secs="" ;; esac
-    if [ -n "$secs" ] && [ "$secs" -gt 0 ]; then printf '%s default' "$secs"; return 0; fi
   fi
-  printf '%s last-resort' "$PATROL_INTERVAL_LAST_RESORT"
+  if [ -n "$secs" ] && [ "$secs" -gt 0 ]; then printf '%s configured' "$secs"; return 0; fi
+  printf '%s default' "$PATROL_INTERVAL_DEFAULT"
 }
 
 # THE WINDOW, from its owner. "Since when does THIS roster's own record of this session

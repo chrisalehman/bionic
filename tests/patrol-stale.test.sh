@@ -55,8 +55,8 @@ sourced() {  # <fn-or-expr...> — run against a clean copy of patrol.sh's globa
 section "Section 2: patrol_stamp_state measures against the fire window"
 
 # No hooks/session-poker.sh beside this fixture repo, so patrol_interval falls
-# back to its own last-resort default (1200s, PATROL_INTERVAL_LAST_RESORT) —
-# matching the poker's own 20m default. The rows read `interval=` and `limit=`
+# back to its own default (1200s, PATROL_INTERVAL_DEFAULT) —
+# the constant the poker takes its own default from. The rows read `interval=` and `limit=`
 # back out of the record and compare the second against the LIBRARY's own
 # `patrol_fire_window`, so a change to either the default or the window's
 # arithmetic is still caught in agreement rather than against a number typed here.

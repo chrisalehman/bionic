@@ -2685,10 +2685,10 @@ STAMP_FILE="$BIONIC_ROOT/.bionic/tmp/patrol-${BIONIC_SID}.state"
 #
 # THE INTERVAL IS THE POKER'S OWN, obtained by invoking its `interval` verb rather
 # than by re-reading `poker-interval:` here: one knob, one reader. A malformed
-# override makes the poker refuse, and the fallback is its own built-in default
-# asked for through `interval-default` — never a constant retyped here, which would
-# drift the first time either side moved and leave this hook measuring against a
-# threshold nobody configured.
+# override makes the poker refuse, and the fallback is lib/patrol.sh's
+# PATROL_INTERVAL_DEFAULT, the constant the poker takes its own default from — never a
+# number retyped here, which would drift the first time either side moved and leave
+# this hook measuring against a threshold nobody configured.
 #
 # NO NUMBER MEANS NO FINDING. Where hooks/dispatch-preflight.sh still has a
 # never-armed arm to run without a threshold, this hook's only question IS the
@@ -2703,7 +2703,7 @@ POKER="${HOOK_DIR}/session-poker.sh"
 INTERVAL=$( cd "$BIONIC_ROOT" 2>/dev/null && bash "$POKER" interval 2>/dev/null )
 case "$INTERVAL" in ''|*[!0-9]*) INTERVAL="" ;; esac
 if [ -z "$INTERVAL" ] || [ "$INTERVAL" -le 0 ]; then
-  INTERVAL=$( bash "$POKER" interval-default 2>/dev/null )
+  INTERVAL="${PATROL_INTERVAL_DEFAULT:-}"
   case "$INTERVAL" in ''|*[!0-9]*) INTERVAL="" ;; esac
 fi
 [ -n "$INTERVAL" ] && [ "$INTERVAL" -gt 0 ] || return "$_adv"
