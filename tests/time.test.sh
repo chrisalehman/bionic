@@ -63,7 +63,7 @@ via_patrol() {
         for (i = 2; i <= NF; i++) { if (index($i, "turns=") == 1) t = substr($i, 7); if (index($i, "missed_s=") == 1) m = substr($i, 10) }
         if (t == 1) printf "%d\n", now - m }'
 }
-# The gate's record is written by line.sh's own writer, its clock pinned to the instant under test.
+# The gate's record is written by line.sh's own writer, its clock pinned in its text: a variable is shadowed by its locals.
 git init -q "$TMP/p" 2>/dev/null
 PLAN="$TMP/p/.bionic/docs/plans/epic-x/wave-x.plan.md"
 mkdir -p "${PLAN%/*}" && printf '# plan\n' > "$PLAN"
@@ -71,7 +71,7 @@ REC="$(bash -c '. "$1/line.sh" 2>/dev/null; line_record "$2"' _ "$LIB" "$PLAN" 2
 expect_regex "AG.0b line.sh names the plan's landing record" '/landing-proofs\.log$' "$REC"
 via_gate() {
   rm -f "$REC" "${REC%/*}/run.log"
-  bash -c '. "$1/line.sh" 2>/dev/null; at="$3"; _line_now() { printf "%s\n" "$at"; }; line_event "$2" published row=T1 commit=c1 kind=queue by=- why=-' \
+  bash -c '. "$1/line.sh" 2>/dev/null; eval "_line_now() { printf \"%s\\n\" $(printf %q "$3"); }"; line_event "$2" published row=T1 commit=c1 kind=queue by=- why=-' \
     _ "$LIB" "$PLAN" "$1" >/dev/null 2>&1
   bash -c '
     . "$1/gate.sh" 2>/dev/null
