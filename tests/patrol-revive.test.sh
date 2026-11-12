@@ -100,6 +100,17 @@ engage_marker() {
   fi
 }
 
+# pr_page <plan> <header lines, or ""> <event>... -> a page at 15 and its run's log, one line per event at
+# increasing instants: the log is where a run at 15 keeps its step, so the page holds its header alone.
+pr_page() {
+  local p="$1" h="$2" d i=0 e; shift 2
+  d="${p%/*}"; case "$d" in */plans/*) d="${d%/plans/*}" ;; *) d="${d%/plans}" ;; esac
+  d="$d/record/$(basename "$p" .plan.md)"; mkdir -p "${p%/*}" "$d"
+  printf -- '---\ncanonical_sdlc_version: 15\n%s---\n' "${h:+$h
+}" > "$p"
+  for e in "$@"; do i=$((i + 1)); printf 'run/v1|ev=%s|at=2026-10-04T00:%02d:00Z\n' "$e" "$i"; done > "$d/run.log"
+}
+
 make_env() {  # [interval] -> project dir on stdout
   local dir; dir=$(mktemp -d)
   mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/docs/plans"
@@ -109,17 +120,7 @@ make_env() {  # [interval] -> project dir on stdout
   # SKILL.md arms the Patrol AT engagement — so the marker travels with the stamp in
   # write_stamp below as well. §12 drives the unengaged direction deliberately.
   printf 'poker-interval: %s\n' "${1:-1s}" > "$dir/.bionic/config.yaml"
-  cat > "$dir/.bionic/docs/plans/wave-01.plan.md" <<'PRPLAN'
----
-canonical_sdlc_version: 14
----
-
-## SDLC State
-
-current: 4
-
-- Step 4: tasks in flight
-PRPLAN
+  pr_page "$dir/.bionic/docs/plans/wave-01.plan.md" "" 'step|n=4'
   engage_marker "$dir" "$SID"
   printf '%s' "$dir"
 }
@@ -501,17 +502,7 @@ mkdir -p "$WTREPO/.bionic/tmp" "$WTREPO/.bionic/docs/plans"
 printf 'poker-interval: 60s\n' > "$WTREPO/.bionic/config.yaml"
 # The open run this monitor is scoped by lives at the MAIN repository too — same
 # mapping, same reason: a reader rooted at the worktree would find neither.
-cat > "$WTREPO/.bionic/docs/plans/wave-01.plan.md" <<'PRWTPLAN'
----
-canonical_sdlc_version: 14
----
-
-## SDLC State
-
-current: 4
-
-- Step 4: tasks in flight
-PRWTPLAN
+pr_page "$WTREPO/.bionic/docs/plans/wave-01.plan.md" "" 'step|n=4'
 WT="$WTBASE/wt"
 git -C "$WTREPO" worktree add -q -b pr-wt "$WT" >/dev/null 2>&1
 
@@ -673,13 +664,9 @@ printf '# bionic session roster — schema roster-state/v1 — machine-local, sa
 # THE ROSTER IS NO LONGER THE WHOLE PREDICATE (bionic 1.3.2, wave-1.3.2 task 4/4). An empty
 # roster on a run that has not delivered is a lull, not a finish, and the tick QUIETs and
 # keeps its stamp — so this fixture has to say the run IS delivered to reach the DISARM this
-# case is about. `current: 9` with `delivered:` on the Step-9 line is the only spelling
-# hooks/session-poker.sh's run_state() accepts.
-mkdir -p "$D/.bionic/docs/plans/epic-99"
-{
-  printf '# fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 9\n\n'
-  printf -- '- Step 9: delivered: fixture run closed; report: record/fixture/close-out.md\n'
-} > "$D/.bionic/docs/plans/epic-99/wave-01.plan.md"
+# case is about: a step-9 event in the run's log that carries `delivered=`.
+pr_page "$D/.bionic/docs/plans/epic-99/wave-02.plan.md" 'integration-branch: main' \
+  'step|n=9|delivered=fixture run closed; report: record/fixture/close-out.md'
 # AND THE ORDERING IS STATED, NOT LEFT TO THE CLOCK. `make_env` plants a second plan at
 # `plans/wave-01.plan.md` reading `current: 4`, and which of the two the tick resolves is
 # `active_plan`'s newest-by-mtime pick. Both files are written inside the same second, so
@@ -745,18 +732,7 @@ section "§TASK-SCALE: the scale table's patrol cell is the one rule four reader
 # asks a task-scale dispatch for a stamp, resume arms one — or any of them stops acting at wave scale.
 ts_env() {  # <scale> -> make_env's project whose plan carries `scale: <scale>`
   local d; d=$(make_env 1m)
-  cat > "$d/.bionic/docs/plans/wave-01.plan.md" <<TSPLAN
----
-canonical_sdlc_version: 14
-scale: $1
----
-
-## SDLC State
-
-current: 4
-
-- Step 4: tasks in flight
-TSPLAN
+  pr_page "$d/.bionic/docs/plans/wave-01.plan.md" "scale: $1" 'step|n=4'
   # An empty roster is a run with nothing dispatched yet, which the tick reads as a lull and carries on from;
   # with no roster file at all it refuses, and a refusal is not the reading TS-2b asks for.
   printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
@@ -802,7 +778,7 @@ fire "$TS_T"; expect_quiet "TS-4 a stale stamp on a task-scale run is not judged
 ts_dispatch() {  # <scale> -> "<verdict>|<yes if the refusal names a missing Patrol stamp>"
   (
     . "$(dirname "$0")/lib/roster-row.sh"; . "$(dirname "$0")/lib/live-answer.sh"; . "$(dirname "$0")/lib/swept-marker.sh"
-    . "$(dirname "$0")/dispatch-preflight.prelude.sh"
+    MAKE_REPO_AT=15 . "$(dirname "$0")/dispatch-preflight.prelude.sh"
     r="$(make_repo "ts-$1" yes)"; write_attestation "$r" "$SID_A"
     p="$r/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
     sed "s/^scale: wave$/scale: $1/" "$p" > "$p.tmp" && mv "$p.tmp" "$p"

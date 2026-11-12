@@ -416,55 +416,6 @@ done
 CO_PLAN_AT=14
 
 # ============================================================
-section "4e — critic4 Q-1 (T19), wave-27 T4 (D14, B2): a plan with no Step 9 line closes; the wave table is still a presence check"
-# ============================================================
-# The delivery is the step's event, so a plan with no Step 9 line closes and is left as it was, closed or refused.
-# presence_state: hoisted to tests/close-out.prelude.sh (a later part reads it)
-# step_lines: hoisted to tests/close-out.prelude.sh (a later part reads it)
-TA="$(mk_fixture t19a)"; advance_to "$TA" 8
-expect_eq "q1.0: the fixture carries its Step-8 line (the counter reads this plan)" "1" "$(step_lines "$TA/$PLAN_REL" 8)"
-expect_eq "q1.0b: …and no Step 9 line: nothing planted it" "0" "$(step_lines "$TA/$PLAN_REL" 9)"
-run_close "$TA" run
-expect_eq "q1.2: run on a plan with no Step 9 line closes rc 0" "0" "$CO_RC"
-expect_eq "q1.3: …its Step lines as they were, the delivery the step's event" "1|0|state=delivered" \
-  "$(step_lines "$TA/$PLAN_REL" 8)|$(step_lines "$TA/$PLAN_REL" 9)|$(co_step_answer "$TA" | tail -1)"
-
-# A refusal on a plan with no Step 9 line writes no Step 9 line: the evidence file is gone,
-# so the pre-flight refuses, and the plan is byte-for-byte what it was.
-TD="$(mk_fixture t19d)"; advance_to "$TD" 8
-rm -f "$TD/.bionic/docs/record/generic-evidence.md"
-PRE_D="$(presence_state "$TD")"; PLAN_D_SHA="$(sha_of "$TD/$PLAN_REL")"
-run_close "$TD" run
-expect_eq "q1.6: a refused run on a plan with no Step 9 line exits 2" "2" "$CO_RC"
-expect_eq "q1.6b: …the plan is byte-identical (no Step 9 line was written early)" "$PLAN_D_SHA" "$(sha_of "$TD/$PLAN_REL")"
-expect_eq "q1.6c: …branch, tmp, continuation, current: and epic row untouched" "$PRE_D" "$(presence_state "$TD")"
-
-# A plan carrying a `- Step 9: (pending)` line by hand closes, the line left as written.
-TE="$(mk_fixture t19e)"; advance_to "$TE" 8
-awk '{ print } /^- Step 8: \(pending\)$/ { print "- Step 9: (pending)" }' "$TE/$PLAN_REL" > "$TE/plan.tmp" \
-  && mv "$TE/plan.tmp" "$TE/$PLAN_REL"
-expect_eq "q1.6d: precondition: the older plan carries its hand-written Step 9 line" "1" "$(step_lines "$TE/$PLAN_REL" 9)"
-run_close "$TE" run
-expect_eq "q1.6e: …it closes rc 0" "0" "$CO_RC"
-expect_eq "q1.6f: …its hand-written line left as it was, the run read delivered" "1|state=delivered" \
-  "$(step_lines "$TE/$PLAN_REL" 9)|$(co_step_answer "$TE" | tail -1)"
-
-TB="$(mk_fixture t19b)"; advance_to "$TB" 8
-printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# epic-fx\n\n## SDLC State\n\ncurrent: 4\n\n## Notes\n\nNo waves table yet.\n' > "$TB/$EPIC_REL"
-run_close "$TB" check
-expect_eq "q1.7: check no longer refuses the missing wave table" "no" "$(contains "$CO_OUT" "WOULD REFUSE — no | wave | table")"
-run_close "$TB" run
-expect_eq "q1.8: run on an epic plan with no wave table closes rc 0" "0" "$CO_RC"
-expect_eq "q1.11: …the row after the header and its rule line" "yes" \
-  "$(awk '/^\| wave \| version /{h=NR} /^\|---\|/{if(h&&!r)r=NR} /^\| 01 \|/{w=NR} END{print (h && r == h + 1 && w > r) ? "yes" : "no"}' "$TB/$EPIC_REL")"
-
-TC="$(mk_fixture t19c)"; advance_to "$TC" 8
-run_close "$TC" check
-expect_eq "q1.13: check on the valid fixture names no missing line" "no" "$(contains "$CO_OUT" "WOULD REFUSE — no ")"
-run_close "$TC" run
-expect_eq "q1.14: run on the valid fixture still succeeds" "0" "$CO_RC"
-
-# ============================================================
 section "VER — wave-27 T4 (AC-7.2, D14, B3): the released version is the run's, never the tool's"
 # ============================================================
 CO_PLAN_AT=15

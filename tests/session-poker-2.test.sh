@@ -63,7 +63,7 @@ section "Section 37: T10b — the release waits for its step and the tick names 
 # Document step's gate act. The tick's no-FILL line now NAMES each row held for its step, so a
 # reader of the line can tell "nothing is ready" from "the release waits for Step 7".
 R37A="$(make_repo s37-held)"; new_roster "$R37A"
-sp_plan_at_step "$R37A" 5 \
+SP_PLAN_AT=15 sp_plan_at_step "$R37A" 5 \
   "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T2 | 5 | verify | the live bed, landed | implementor | T1 | 15m | REQ-x | — | landed |" \
   "| T3 | 7 | doc | Release 1.8.7 | implementor | T2 | 15m | REQ-x | CHANGELOG.md | pending |" > /dev/null
@@ -76,7 +76,7 @@ expect_absent "37a C3 at current: 5 the landed-dep Step-7 release row is not fil
 
 # 37c — AT ITS STEP THE RELEASE FILLS. Same table at current: 7.
 R37C="$(make_repo s37-at-step)"; new_roster "$R37C"
-sp_plan_at_step "$R37C" 7 \
+SP_PLAN_AT=15 sp_plan_at_step "$R37C" 7 \
   "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T2 | 5 | verify | the live bed, landed | implementor | T1 | 15m | REQ-x | — | landed |" \
   "| T3 | 7 | doc | Release 1.8.7 | implementor | T2 | 15m | REQ-x | CHANGELOG.md | pending |" > /dev/null
@@ -88,7 +88,7 @@ expect_contains "37c at current: 7 the release row is filled" "poker: FILL T3" "
 # with the line the verb would accept, which it then accepts as pasted.
 S37_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 R37D="$(make_repo s37-task-add)"; ( cd "$R37D" && git commit -q --allow-empty -m init )
-P37D="$(s34_plan "$R37D" 5)"
+P37D="$(SP_PLAN_AT=15 s34_plan "$R37D" 5)"
 L37D="${P37D%/plans/*}/record/$(basename "$P37D" .plan.md)/run.log"; s37() { cmp -s "$TMPROOT/s42-before" "$P37D" && echo same; }
 ta_add "$R37D" T7 7 doc 'Keep C:\new\table, a\|b, $5. The release keeps its text as typed.' bionic:implementor 'T5' 30 REQ-5 '—'
 expect_eq "37d task-add of a Step-7 doc row edited in at current: 5 is accepted (exit 0)" "0" "$RC"
@@ -120,7 +120,7 @@ section "Section 38: the tick names an ext:-held row — poker: HELD <id> ext:<s
 s38_line_no() { printf '%s\n' "$OUT" | awk -v p="$1" 'index($0, p) == 1 { print NR; f = 1; exit } END { if (!f) print 0 }'; }
 
 R38A="$(make_repo s38-held)"; new_roster "$R38A"
-sp_plan_at_step "$R38A" 4 \
+SP_PLAN_AT=15 sp_plan_at_step "$R38A" 4 \
   "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-ce9520e | 15m | REQ-x | b.sh | pending |" \
   "| T3 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | c.sh | pending |" > /dev/null
@@ -135,7 +135,7 @@ expect_true "38d …and the HELD line sits after the gate line and before the FI
 # 38e — NOTHING ELSE READY: the HELD line still prints, and the no-FILL line's step sentence
 # does not borrow it (the step hold and the ext hold are different facts).
 R38E="$(make_repo s38-held-only)"; new_roster "$R38E"
-sp_plan_at_step "$R38E" 4 \
+SP_PLAN_AT=15 sp_plan_at_step "$R38E" 4 \
   "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T2 | 4 | build | waits on a rig and CI | implementor | ext:rig-2, T1, ext:ci-9 | 15m | REQ-x | b.sh | pending |" > /dev/null
 poke_pressure "$R38E" 8192 1.0 tick
@@ -145,7 +145,7 @@ expect_absent "38g …and the no-FILL line names no step hold for it" "Held for 
 
 # 38h — THE TOKEN REMOVED, the row is ready again and no HELD line is printed (AC-3.4's tick side).
 R38H="$(make_repo s38-cleared)"; new_roster "$R38H"
-sp_plan_at_step "$R38H" 4 \
+SP_PLAN_AT=15 sp_plan_at_step "$R38H" 4 \
   "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T2 | 4 | build | CI went green | implementor | T1 | 15m | REQ-x | b.sh | pending |" \
   "| T3 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | c.sh | pending |" > /dev/null
@@ -383,7 +383,7 @@ s41_transcript() {  # <messages from w-1> <name:status>... -> this session's tra
 # slot — so the tick names no FILL and the stop wall's fill duty owes nothing.
 s41_world() {  # <label> -> a repo: armed, bound, w-1 MET with a landed deliverable
   local r; r="$(make_repo "$1")"; new_roster "$r"; armed_ago "$r"
-  local p; p="$(wave_plan_at "$r" "epic-99-fixture/wave-41.plan.md" \
+  local p; p="$(SP_PLAN_AT=15 wave_plan_at "$r" "epic-99-fixture/wave-41.plan.md" \
     "writers=1 suites=2 worktrees=8 test_jobs=8 source=user" \
     "| R1 | 4 | build | ready row | implementor | — | 15m | REQ-x | r1.sh | pending |")"
   bind_marker "$r" "$p"
