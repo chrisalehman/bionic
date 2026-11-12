@@ -158,13 +158,11 @@ section "S15 — landing-swept/v1: one writer, pinned to a captured marker"
 # line the originator already wrote, verbatim) — what it shares is the `SWEPT_SCHEMA`
 # constant, so §S15b below pins the two hooks' copies of that constant to agree, byte for
 # byte, rather than sourcing one file: two separate hook PROCESSES have no shared memory to
-# source an in-process value from, the same reason payload/scripts/lib/loader.sh's own block
-# is duplicated-but-pinned rather than sourced.
+# source an in-process value from.
 #
 # EXTRACTED, NOT SOURCED FROM A LIB (see tests/lib/swept-marker.sh's own header for why: a
-# hook copied out of the tree, as several sections above already do, resolves its
-# BIONIC_LIB_WANT files through the loader's registry/cache fallback — whatever was last
-# LANDED, not this worktree's uncommitted tree). The real source, `eval`'d, real call — the
+# hook copied out of the tree, as several sections above already do, finds only the library
+# laid beside it, and with none it finds no loader at all — never this worktree's tree). The real source, `eval`'d, real call — the
 # same `field1_via`/`field2_via` idiom this file already uses.
 #
 # BY KEY, NEVER BY POSITION. The captured line's five fields are read out with the same
