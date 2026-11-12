@@ -14,7 +14,7 @@ Runtime verification of browser behavior using **`playwright-cli`** — bionic's
 
 ## Verification tiers
 
-The **T0–T4 ladder** and the one pointer every tier owes (`evidence:`, with `user-confirmed` added at T4) are defined in `canonical-sdlc` (§Step 5 — Verify). They govern every acceptance criterion, browser or not; this skill does not restate them.
+The **T0–T4 ladder** and the evidence every tier owes (a record under `record/`, with the user's approval naming the criterion added at T4) are defined in `canonical-sdlc` (§Step 5 — Verify). They govern every acceptance criterion, browser or not; this skill does not restate them.
 
 What this skill owns is the browser execution of the two tiers that need one — **T2** (real engine over a declared-fidelity fixture) and **T3** (the declared real surface). The T3 conditions below are what `canonical-sdlc` delegates here.
 

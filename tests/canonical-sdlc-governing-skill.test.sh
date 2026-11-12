@@ -11,7 +11,6 @@
 set -euo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
-. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/assert.sh"
 # The column counter for the AC-E1.3 sweep: the em dash is three bytes and one column,
 # so a byte count would pass a line that wraps.

@@ -670,33 +670,20 @@ fi
 
 section "Section 4: evidence gate fires on git global-option commit forms"
 
-FM='---
-governing-skill: canonical-sdlc
-canonical_sdlc_version: 14
-intent: build
-rigor: single
-scale: wave
-deploy_target: none
-use_worktree: false
-has_ui: false
----'
-
 EG_HOME=$(mktemp -d); cleanup_dirs+=("$EG_HOME")
-mkdir -p "$EG_HOME/.claude/plans" "$EG_HOME/.bionic/docs/plans" "$EG_HOME/.bionic/tmp"
+mkdir -p "$EG_HOME/.claude/plans" "$EG_HOME/.bionic/tmp"
 # THE FIXTURE IS AN ENGAGED SESSION (task-engaged-session, 2026-09-03). This gate asks
 # whether the session invoked the canonical-sdlc skill before it reads a plan at all, so
 # without the marker every row below would be silent for a reason that has nothing to do
 # with how a git command line is parsed — which is the whole subject of this section.
 EG_SID="2b7c9d10-4e5f-4a6b-8c9d-0e1f2a3b4c5d"
-printf '%s\n' "$FM
-## SDLC State
-current: 5
-Step 5: TODO" > "$EG_HOME/.bionic/docs/plans/active.md"
 # BOUND TO ITS ONE OPEN PLAN (wave-23-fixit-1810 T12). An empty marker beside an open plan
 # is the unbound state, whose newest-plan fallback is announced and never acted on, so every
 # `git commit` row below would exit 0. `bind_plan` (the real writer) names the plan the
-# gate judges. No case in this section drives an unbound session on purpose.
-bound_marker "$EG_HOME" "$EG_SID" "$EG_HOME/.bionic/docs/plans/active.md"
+# gate judges. No case in this section drives an unbound session on purpose. The run is at 15, at Step 5 with
+# no proof of the whole run, so every commit the gate reads is refused.
+. "$(dirname "$0")/lib/plan-fixture.sh"
+bound_marker "$EG_HOME" "$EG_SID" "$(plan_fixture --at 15 --current 5 "$EG_HOME/.bionic/docs/plans/epic-x/wave-x.plan.md" wave)"
 
 run_gate() {  # <command>
   local input tmp_err
