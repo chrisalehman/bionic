@@ -953,7 +953,7 @@ tick_digest_field() {  # <digest file> <key>
 #
 # TWO PROCESSES READ ONE FILE, so its path and its fold are written once, here: the stop
 # library's recorder (`stop_fill_ledger`, payload/scripts/lib/stop.sh) appends a line per Stop,
-# and `session-poker.sh fill-report` folds them. This file is already sourced by both — the
+# and the sitrep folds them (hooks/poker/sitrep.sh `sitrep_idle_minutes`). This file is already sourced by both — the
 # poker's loader wants it and the stop library sources it for the death notice — and the fold
 # shares the verdict's date arithmetic (`_PATROL_ISO_AWK`, above) rather than growing a second
 # copy of it. The ledger is the Patrol's measure: did the scheduler keep every slot busy.

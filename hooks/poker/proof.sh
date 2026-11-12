@@ -1659,8 +1659,7 @@ DSP_READINGS
   }
 
   # THE RUN'S NUMBERS (wave-28 T14; D18, REQ-4). The fold and its definitions are `landing_report`'s,
-  # above the verbs. The plan is the one named, resolved as fill-report resolves its operand (a path
-  # from the project root, else from the docs root), or else this session's bound run; the record is
+  # above the verbs. The plan is the one named, resolved as a path from the project root, else from the docs root, or else this session's bound run; the record is
   # that plan's landing record, under the plan's own project. It writes nothing and exits 0 whatever
   # the record holds.
   # THE RUN'S DEBTS. Each act is one `debt` event in the run's log through the

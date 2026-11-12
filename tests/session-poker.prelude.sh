@@ -324,7 +324,7 @@ poke_bind() {  # <repo> -> binds an empty engaged marker to the root's open run,
 }
 poke() {  # <repo> <args...> -> sets OUT, RC; POKE_BASH names the interpreter (default: PATH's bash)
   local repo="$1"; shift
-  case "${1:-}" in tick|fill-report) [ "${POKE_UNBOUND:-0}" = 1 ] || poke_bind "$repo" ;; esac
+  case "${1:-}" in tick) [ "${POKE_UNBOUND:-0}" = 1 ] || poke_bind "$repo" ;; esac
   ( cd "$repo" && exec env CLAUDE_CODE_SESSION_ID="$SID" "${POKE_BASH:-bash}" "$POKER" "$@" ) \
     > "$TMPROOT/poke.out" 2>&1 &
   local p=$! i=0
@@ -496,7 +496,7 @@ sp_plan_at_step() {  # <repo> <current> <row>... -> the plan path
   printf '%s' "$f"
 }
 
-# ── hoisted from Section 19: s20_ack — Section 35 plants acks with it. ──
+# ── hoisted from Section 19: s20_ack — session-poker-4 plants acks with it. ──
 s20_ack() {  # <repo> <name> <at> — the sweeper ledger's ack line, in its writer's shape
   local le; le="$1/.bionic/tmp/sweeper-${SID}.state"
   [ -f "$le" ] || printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$le"
@@ -504,7 +504,7 @@ s20_ack() {  # <repo> <name> <at> — the sweeper ledger's ack line, in its writ
     "$3" "$SID" "$2" >> "$le"
 }
 
-# ── hoisted from Section 26: ack_ledger_of — Section 35 reads the ack ledger with it. ──
+# ── hoisted from Section 26: ack_ledger_of — the release approval prelude reads the ack ledger with it. ──
 ack_ledger_of() { printf '%s/.bionic/tmp/sweeper-%s.state' "$1" "${2:-$SID}"; }
 
 # ── hoisted from Section 30: s30_row, s30_last, s30_field — Section 43, AMEND-ROOT, Section 66, Section 67, §SEV and §REPORT-INCL write and read rows with them. ──

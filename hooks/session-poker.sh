@@ -32,7 +32,6 @@
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>' ['<changelog sentence>']   move a finding across the line on words the user typed in this session, a deferral with its sentence (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, whatever its ancestry (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh prompt     the canonical Patrol prompt for this session's CronCreate (read-only)
-#     bash <plugin-root>/hooks/session-poker.sh fill-report [<plan>]   the run's missed-opportunity, HOLD and decline minutes (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh sitrep [--line] [<plan>]   the situation report's fact sheet for the model, or the Patrol's one-line status (settles ruled decisions on the register)
 #     bash <plugin-root>/hooks/session-poker.sh sitrep card [<plan>] < judgment   the sitrep card, drawn from the sheet and the model's judgment, or every reason it is refused (settles ruled decisions on the register)
 #     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] [--machine <caller>] --why '<reason>'   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, one hand event unless a machine caller stops it)
@@ -414,7 +413,6 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, landed before the review or after it, as a finding event in the run's log"
   die "  bash ${HOOK_DIR}/session-poker.sh disposition [<record>#<n> <fix|defer> '<the user's words>' '<why>' ['<changelog sentence>']]   render every finding of the registered reviews (rating, record, fix row, state, the decision it needs), adding their debt and opening an owed item per finding the person must rule on; with a finding, record the person's ruling on it"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
-  die "  bash ${HOOK_DIR}/session-poker.sh fill-report [<plan>]   missed-opportunity, HOLD and decline minutes from the run's fill ledger"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds [--since <ISO>] [--until <ISO>]] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote, over the window from the last build landing to the release approval card, or the window --since and --until name, and the window's two ends"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report --scorecard [<plan>]   the run's scorecard: human stops on the autonomous half, agent minutes after the final reply, the widest landing and human-wait minutes, each against its target, then the sheet's pace, correctness and waste (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh release-note [--at <commit>] [--on <ISO-UTC>] [<plan>]   the release entry's ### The landing numbers block: landing-report --rows over the landing record as it stood at the instant, naming the working head (read-only)"
@@ -470,7 +468,6 @@ ADOPT_WHY=""
 SWEEP_REPORT_ONLY=no
 SWEEP_WINDOWED=no
 BIND_ARG=""
-FILL_REPORT_ARG=""
 case "$VERB" in
   adopt)
     while [ $# -gt 0 ]; do
@@ -874,14 +871,8 @@ $1"; shift ;;
       esac
     done
     ;;
-  # ONE OPTIONAL OPERAND (wave-20 REQ-5, AC-5.6): the plan whose ledger to read. Without it, the
-  # session's own run — the one every other verb here resolves.
-  fill-report)
-    [ $# -le 1 ] || usage "fill-report takes at most one argument: the plan whose fill ledger to read."
-    FILL_REPORT_ARG="${1:-}"
-    ;;
   # ONE OPTIONAL FLAG AND ONE OPTIONAL OPERAND, IN EITHER ORDER (wave-28 T14; D18; A-orch-145): `--rows`
-  # adds a line per landed row; `<plan>` names the run, as fill-report's does, for a caller with no
+  # adds a line per landed row; `<plan>` names the run, for a caller with no
   # binding left (close-out writes its continuation after its tmp is wiped).
   release-note) : ;;
   landing-report)
@@ -2512,7 +2503,6 @@ poker_part_missing() {  # <part> -> exits as loader_fail_open does, naming the p
 { [ -r "$HOOK_DIR/poker/judge.sh" ] && . "$HOOK_DIR/poker/judge.sh"; } || poker_part_missing judge
 
 case "$VERB" in
-  fill-report) poker_verb_fill_report "$@" ;;
   arm) poker_verb_arm "$@" ;;
   disarm) poker_verb_disarm "$@" ;;
   adopt) poker_verb_adopt "$@" ;;

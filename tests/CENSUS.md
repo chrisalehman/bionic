@@ -1441,7 +1441,6 @@ seam-resolution.test.sh | §Group 6 | keep | rule: lint — a tests/*.test.sh th
 
 ## session-poker-2.test.sh
 
-session-poker-2.test.sh | §Section 35 | keep | hooks/session-poker.sh fill-report: the fold by turn key deleted, so a superseded line inside one turn is summed; ("35f …six turns, not seven") goes red | none (searched 'fill-report' in tests/; sitrep and time read its output only in passing)
 session-poker-2.test.sh | §Section 36 | keep | hooks/session-poker.sh prompt: the bionic-patrol session marker dropped from the front of the printed prompt, so ("36b AC-6.1 the prompt starts with this session's marker") goes red | none (searched ' prompt' verb drives in tests/; handoff-file and session-start name the verb in text)
 session-poker-2.test.sh | §Section 37 | keep | payload/scripts/lib/units.sh: the step hold for a gate-act row deleted from the ready program, so the Step-7 release row fills at current: 5; (37a) goes red. also: hooks/poker/plan.sh poker_verb_task_add writing the plan, a birth for a row the plan does not hold, or a short row accepted or refused without the line it would accept, so the plan's sum moves or 37g-37i go red | none (searched 'Release 1.8.7' and 'held for their step' in tests/)
 session-poker-2.test.sh | §Section 38 | keep | hooks/session-poker.sh tick: the poker: HELD line for an ext:-held row deleted, so ("38a AC-3.3 the ext:-held row prints its HELD line") goes red | none (searched 'poker: HELD' in tests/)
