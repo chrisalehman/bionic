@@ -871,6 +871,9 @@ _line_review_sites() {  # <plan> <docs root> -> `<record>#<n> TAB <path> TAB <li
     proof_findings "$2/$ev" 2>/dev/null | awk -F'\t' -v ev="$ev" -v h="$h" '
       $1 ~ /^[0-9]+$/ && $4 ~ /:[0-9]+$/ { p = $4; sub(/:[0-9]+$/, "", p); l = substr($4, length(p) + 2); print ev "#" $1 "\t" p "\t" l "\t" h }'
   done
+  # A review with no findings line gives no sites and is no failure; under pipefail the loop would otherwise answer
+  # with the last review's status, which the caller reads as the run's facts unread.
+  return 0
 }
 # _line_same_site <root> <answered sites> <moves> -> each finding on stdin (`<record>#<n> TAB <path> TAB <line> TAB
 # <head>`) at one of the answered sites, carried to its own head; a finding a person moved to defer or fixed is left:
