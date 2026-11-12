@@ -999,7 +999,7 @@ RO_ENDS="$( ( in_fixture "$RO_P" || exit 9
   HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
     BIONIC_GATE_DIR="$HH_GATE" bash "$BIONIC_HOOKS_DIR/session-poker.sh" landing-report --hand-holds "$RO_AFTER" 2>/dev/null ) | grep '^hand-holds window: ')"
 expect_regex "RO-5 the plan's delivered: time is a minute, as close-out writes it" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z$' "$RO_DEL"
-expect_contains "RO-5b …and the report read after the close names it as the window's end" "until $RO_DEL (delivered:)" "$RO_ENDS"
+expect_contains "RO-5b …and the report read after the close names it as the window's end, the delivery's event at that minute" "until ${RO_DEL%Z}:00Z (delivered:)" "$RO_ENDS"
 
 # ============================================================
 section "§DELIVERED — a delivered run accepts its continuation marks from any session that names it (REQ-10 AC-10.1; D5)"

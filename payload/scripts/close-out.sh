@@ -403,7 +403,12 @@ co_resume_point() {
   if [ "$PARKED" = yes ]; then
     printf 'resume point: PARKED on %s @ %s — %s' "$WORKING" "$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null || printf '?')" "$PARKED_WHY"
   else
-    printf 'resume point: NONE — DELIVERED at %s; %s @ %s.' "$NOW" "$INTEGRATION" "$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null || printf '?')"
+    # The delivery's instant is its fact's, the one the step's event holds, so both doors name one; an instant asked
+    # for by name, or no fact yet, is the minute close-out holds.
+    local at="${CO_AT:-}"
+    [ -n "$at" ] || at="$(co_step9_at 2>/dev/null)" || at=""
+    [ -n "$at" ] || at="$NOW"
+    printf 'resume point: NONE — DELIVERED at %s; %s @ %s.' "$at" "$INTEGRATION" "$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null || printf '?')"
   fi
 }
 co_branch_line() {
@@ -1993,6 +1998,15 @@ write_plan_blocks() {
     return 0
   fi
 
+  # THE DELIVERY IS ALSO THE STEP'S EVENT: a step the run's log holds outranks a Step line stamped only to the minute,
+  # so while the Step 9 line is written here the delivery goes through the step's one writer too, or an advance logged
+  # in the same minute would read the closed run as open. It carries the minute the Step 9 line does, at its first
+  # second, so the delivery reads one instant everywhere; it can read earlier than the log line before it and stands
+  # after it by the log's written order. It goes in before the handoff, which names its instant.
+  local delivered at=""; delivered="$(printf '%s\n' "$CO_STEP9_TEXT" | sed -n '1s/^- Step 9: delivered: //p')"
+  case "$NOW" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]Z) at="${NOW%Z}:00Z" ;; esac
+  LOG_AT="$at" proof_step_event "$PLAN" 9 "delivered=${delivered:-yes}" || _co_refuse "the delivery could not be appended to the run's log of $PLAN"
+
   # A plan that carried no `## Handoff` section gets one rather than silently losing the
   # act: the section is the run's resume pointer, and its absence is not consent.
   if ! grep -qF "handoff: $CO_HO_REL written " "$PLAN"; then
@@ -2007,11 +2021,6 @@ write_plan_blocks() {
   grep -qE '^current: 9$' "$PLAN" || _co_refuse "current: did not advance to 9 in $PLAN"
   co_handoff_closed || _co_refuse "the closed form did not land in the handoff file $CO_HO_FILE"
   grep -qF "handoff: $CO_HO_REL written " "$PLAN" || _co_refuse "the plan's ## Handoff does not point to $CO_HO_REL in $PLAN"
-  # THE DELIVERY IS ALSO THE STEP'S EVENT: a step the run's log holds outranks a Step line stamped only to the minute,
-  # so while the Step 9 line is written here the delivery goes through the step's one writer too, or an advance logged
-  # in the same minute would read the closed run as open.
-  local delivered; delivered="$(printf '%s\n' "$CO_STEP9_TEXT" | sed -n '1s/^- Step 9: delivered: //p')"
-  proof_step_event "$PLAN" 9 "delivered=${delivered:-yes}" || _co_refuse "the delivery could not be appended to the run's log of $PLAN"
 }
 
 # ─── The gate ────────────────────────────────────────────────────────────────
