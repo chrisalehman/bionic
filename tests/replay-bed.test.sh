@@ -193,7 +193,7 @@ done
 RD="$R/payload/scripts"
 
 section "COVER"
-QS="step approved proof green landed asks holds reviews ledger findings debts stop order hands status ready handoff verdicts header row criterion cell"
+QS="step approved proof green landed asks holds reviews ledger findings debts stop order hands status ready handoff sessions verdicts header row criterion cell"
 expect_eq "the bed asks each question of the closed list, and the list has no other" "$(printf '%s\n' $QS | sort | tr '\n' ' ')" \
   "$(ask /dev/null - 2>&1 | awk 'NR > 1 { print $1 }' | sort | tr '\n' ' ')"
 for e in $WORLDS; do n=${e%%:*}; p=${e##*:}; h="$(sed -n 's/^proof\.\([0-9a-f]*\)\..*/\1/p' "$X/$n.facts" | head -1)"; r=""; c=0
