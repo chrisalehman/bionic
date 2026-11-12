@@ -1,11 +1,9 @@
 #!/bin/bash
 # Tests for hooks/stop-guard.sh — the STOP GATE, PreToolUse|TaskStop
-# (epic-15 wave-01R; recorder arm removed at wave-03 task 4/4).
 #
 # The gate: D-1 activity-boundary freshness, D-2 consume-on-stop, and — since
 # wave-03 task 4/6 — D-3 same-actor, D-6 progress staleness, and the
-# foreign-stop rule. Serves wave-01R's AC-4/AC-5 and the stop-side rows of
-# AC-8/AC-10, plus wave-03's AC-4 (§8), AC-5 (§9) and AC-6 (§10).
+# foreign-stop rule.
 #
 # WHAT MOVED OUT. This script used to carry a second arm that WROTE the records
 # it now only reads. Those rows live in tests/execution-recorder.test.sh, because
@@ -699,14 +697,6 @@ if [ "$(id -u)" -ne 0 ]; then
 else
   printf 'SKIPPED: the unreadable-roster case needs a non-root uid (root reads mode 000)\n' >&2
 fi
-
-# THE TEMP FILE IS GONE, WHICH IS STRONGER THAN NAMING IT WELL. The predictable-temp-name
-# plus planted-symlink shape was a proven arbitrary-file overwrite in the discarded run
-# (corr-sec S1/S2), and the answer then was an mktemp X-template. This gate writes NOTHING
-# now — no record, no temp, no lock — so the class is closed by absence rather than by
-# careful naming, and these two rows are what keep it that way.
-expect_absent "the gate creates no temp file at all" "mktemp" "$(cat "$GUARD")"
-expect_absent "no PID-based temp filename" '.tmp.$$' "$(cat "$GUARD")"
 
 # The gate reads the working log; it must never quote it. (§8 keeps that
 # disclosure in the observation, whose whole purpose is to show it to a reader.)

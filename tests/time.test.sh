@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/time.test.sh — payload/scripts/lib/time.sh `iso_epoch`, the one reader of an instant (wave-39 T17; D18,
-# REQ-12 AC-12.1; burns debt iso-to-epoch).
+# tests/time.test.sh — payload/scripts/lib/time.sh `iso_epoch`, the one reader of an instant.
 #
 # WHAT THIS SUITE OWNS. An instant is `YYYY-MM-DDTHH:MM:SSZ`, twenty characters, UTC, and nothing else. Three
 # readers of it stood: hooks/session-poker.sh `iso_epoch` (BSD `date -j -f`, which reads `…Zx` with a warning,

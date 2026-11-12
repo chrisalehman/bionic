@@ -1,6 +1,5 @@
 #!/bin/bash
 # Tests for hooks/agent-context-guard.sh — THE SETTINGS-CHANNEL PARTITION GUARD
-# (session-20260815-landing-supervision, T6; design D1, plan AC-8).
 #
 # The guard is the whole of the settings-channel registration's correctness. Two
 # walls are registered a second time through settings.json — where the skill

@@ -1,6 +1,5 @@
 #!/bin/bash
-# Tests for the loaded-root reader in payload/scripts/lib/detect.sh (wave-36 T1, spec D7, ADR-055;
-# AC-1.2). §LOADED.
+# Tests for the loaded-root reader in payload/scripts/lib/detect.sh. §LOADED.
 #
 # THE FACT UNDER TEST. A session started with `--plugin-dir <checkout>/payload` runs the checkout,
 # and hooks/session-start.sh writes what it loaded to `.bionic/tmp/loaded-<sid>.state`. The verdict

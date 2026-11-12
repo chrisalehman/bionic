@@ -1,6 +1,5 @@
 #!/bin/bash
-# Tests for hooks/execution-recorder.sh — ONE script, TWO arms (epic-15 wave-03,
-# task 4/4).
+# Tests for hooks/execution-recorder.sh — ONE script, TWO arms.
 #
 #   PostToolUse|Bash  — the OBSERVATION arm. Turns hooks/stop-check.sh's printed
 #                       machine line into the record a stop spends. Never blocks.
@@ -293,13 +292,7 @@ run_rec "$(mk_bash_post "$SID_A" "$W1_TR" "$W1_REPO" "ls -la && git status" "REA
 # every Bash call in the session, so the resolution on the unrelated path is the
 # whole cost.
 #
-# THE PLAN WALK IS GONE, AND THAT IS WHY THIS PIN CHANGED SHAPE (S11, AC-16).
-# The comment here used to name `PLAN=`/`for d in "$DOCS_ROOT` as the expensive
-# thing the relevance test had to precede, and derived a `_walk_line` from it —
-# a grep that has matched NOTHING in this file since the run predicate was
-# removed (`THE RUN PREDICATE IS GONE — ENGAGEMENT SCOPES THIS HOOK`). The line
-# number it computed was the empty string, so the comparison the section
-# describes could never have been written against it. What this script actually
+# What this script actually
 # spends on an unrelated Bash call today is the git resolution and, below the
 # pressure sample, the state-path resolution, the symlink guards and the roster
 # read — so those are what the order pin names.

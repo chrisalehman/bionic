@@ -1,7 +1,6 @@
 #!/bin/bash
 # tests/refuse.test.sh — payload/scripts/lib/refuse.sh: the refusal object, its one
-# renderer, and the channel table it renders by (epic-22 wave-01 task 11, REQ-E1;
-# AC-E1.3 and AC-E1.5; ADR-002).
+# renderer, and the channel table it renders by.
 #
 # WHAT IT OWNS. Questions no static pin can answer, each driven through a REAL call site: a
 # scratch hook that sources the shipped library and calls `refuse`.

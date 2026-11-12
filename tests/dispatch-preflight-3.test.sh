@@ -269,7 +269,6 @@ expect_contains "§a3 …and still offering the hand re-arm, which is A4's remed
   "session-poker.sh arm" "$GATE_VERR"
 
 # ======================== §T22-name-in-flight: A NAME IN FLIGHT IS REFUSED AT DISPATCH
-# (T22, A-orch-33; AC-4.4's prevention half.)
 #
 # THE ROSTER IS THE IDENTITY REGISTER. Two agents of one name in one session is the
 # condition every downstream ambiguity was built to survive: the stop gate carried a whole

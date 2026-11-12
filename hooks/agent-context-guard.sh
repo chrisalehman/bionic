@@ -108,7 +108,7 @@ _jq() { printf '%s' "$BIONIC_INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 # subagent's stop with no library is refused, and exit 2 holds that subagent open, so only
 # a first stop (`stop_hook_active` false) is refused; the re-entry, a payload without the
 # field and one jq cannot read all let it end. A main-thread event has left above.
-BIONIC_LIB_WANT="context.sh root.sh run.sh session.sh"
+BIONIC_LIB_WANT="context.sh root.sh run.sh session.sh stop.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -215,51 +215,20 @@ fi
 . "$BIONIC_LIB/run.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/stop.sh"
 
 # ---------- 2. is this session armed? ----------
 #
-# THE CONTEXT IS ONE CALL (REQ-1f, lib/context.sh), and it answers both halves of
-# the question this hook used to spell out over twelve lines.
+# THE CONTEXT IS ONE CALL (lib/context.sh): the session id, environment first and the payload a
+# witness, so this guard and the wall behind it key on the one roster; and the root, mapped from a
+# worktree onto the main repository, so an armed session is not read as unarmed from its trees.
 #
-# THE SESSION ID (design §1): the environment value is primary, the payload a
-# witness. The roster filename is built from it, so this guard and the wall behind
-# it have to key on the same one — a guard reading the payload while the wall read
-# the environment would answer "unarmed" for the roster the wall had just written.
-# The shape guard that used to sit below is the library's now, in the same
-# direction: a key carrying a path separator addresses a file outside the state
-# directory entirely, and `bionic_context` returns 1 rather than hand it back.
-#
-# THE ROOT (spec AC-10). This guard must land on the same `.bionic` the dispatch
-# wall wrote the roster into, or it answers "unarmed" from a worktree of an armed
-# session — a wall that goes quiet exactly where it was added to bind.
+# THE ARMING QUESTION IS THE STOP LIBRARY'S `stop_agent_armed`: the session engaged bionic (every
+# unreadable state of the marker reads as not engaged, since the marker is the consent boundary), no
+# link on the path to the roster, and the roster file there. It lives with the stop hook, whose question it is.
 bionic_context 2>/dev/null || exit 0
-[ -d "$BIONIC_ROOT" ] || exit 0
-
-# ---------- THE ENGAGEMENT GUARD (AC-20): is this session bionic's at all? ----------
-#
-# FIRST, above every other scoping question this hook asks. Chris, 2026-09-03: "all
-# guardrails imposed by bionic should only apply when exercising bionic. Nothing should
-# apply until bionic is triggered" — and the trigger is the canonical-sdlc skill, which
-# writes `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked. A session that
-# never invoked it is one this hook has nothing to say to, and it says nothing: exit 0,
-# no stdout, no stderr.
-#
-# EVERY UNREADABLE STATE READS AS NOT ENGAGED — absent marker, a symlink at the path, a
-# foreign or unshaped session key, no key at all. The marker is the one artifact whose
-# PRESENCE opens a wall, so the fail direction is inverted here on purpose: the arming
-# partition is the consent boundary (1.3.2 close-out), and a wall that binds a session
-# which never consented is the defect this guard exists to remove.
-# [WALL: tests/agent-context-guard.test.sh]
-[ "$BIONIC_ENGAGED" = 1 ] || exit 0
-
-# A symlink anywhere on the arming path is not followed, the same three levels the
-# attestation gets in hooks/dispatch-preflight.sh. The stakes are lower here — the
-# only thing a planted roster can do is make a wall RUN — but a repo pointing this
-# guard at another tree's arming fact is still a repo deciding which session it
-# belongs to, and the answer is cheap.
-[ ! -L "$BIONIC_ROOT/.bionic" ] && [ ! -L "$BIONIC_ROOT/.bionic/tmp" ] || exit 0
-ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
-[ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ] || exit 0
+stop_agent_armed || exit 0
 
 # ---------- both true: hand the payload to the wall ----------
 #

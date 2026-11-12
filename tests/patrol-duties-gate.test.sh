@@ -1,6 +1,5 @@
 #!/bin/bash
-# Tests for hooks/patrol-duties-gate.sh — the PATROL-DUTIES WALL (task-scale
-# session task-dispatch-wall-channel-loss, T5).
+# Tests for hooks/patrol-duties-gate.sh — the PATROL-DUTIES WALL.
 #
 # THE CONTRACT UNDER TEST. A Patrol tick is a turn the machine started, not the
 # user, and its two standing duties — refresh the subagent panel, refresh the

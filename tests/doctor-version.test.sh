@@ -1,8 +1,5 @@
 #!/bin/bash
 # tests/doctor-version.test.sh — doctor.sh's installed-vs-latest version row
-# (F5, epic-19 wave-01, spec AC-F5; design ledger
-# .bionic/docs/record/epic-19/step2-design-ledger.md, T4 "OK"; grounding
-# .bionic/docs/record/epic-19/step1-fixes-grounding.md item 5).
 #
 # THE CONTRACT UNDER TEST. Doctor's BIONIC NATIVE table carries a `version`
 # row, answered per feed kind (payload/scripts/lib/detect.sh:detect_

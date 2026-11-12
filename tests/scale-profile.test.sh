@@ -1,6 +1,5 @@
 #!/bin/bash
-# Tests for payload/scripts/lib/scale.sh — THE SCALE PROFILE (epic-23 wave-38 T16; D25,
-# REQ-5 AC-5.1, AC-5.3).
+# Tests for payload/scripts/lib/scale.sh — THE SCALE PROFILE.
 #
 # ONE ROW PER SCALE, ONE CELL PER PROPERTY. A scale's properties (patrol, rigor default,
 # writer cap, regression default, branch pattern, integrate act, reader dealing) were five

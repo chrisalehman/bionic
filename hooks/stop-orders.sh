@@ -651,10 +651,12 @@ EOF
     # WHAT IS BEING GIVEN UP, from the verdict's own detail and never from a second
     # opinion about the disk. An order is not a claim that the work landed, and the
     # operator is owed the difference in one line.
-    if [ -f "$SWEEPER" ]; then
-      _v=$( cd "$REPO_REAL" 2>/dev/null || exit 9
-            CLAUDE_CODE_SESSION_ID="$SESSION_ID" bash "$SWEEPER" verdict "$_target" 2>/dev/null )
-      _line=$(printf '%s\n' "$_v" | grep -F 'landing-verdict/v1|' | head -1)
+    # The read is the stop library's, the one the stop guard asks: the first line of the call scoped
+    # to the name. Loaded here alone, so no other verb pays for it; a library without it says nothing.
+    # shellcheck source=/dev/null
+    { declare -F stop_verdict_line >/dev/null 2>&1 || . "$BIONIC_LIB/stop.sh"; } >/dev/null 2>&1
+    if [ -f "$SWEEPER" ] && declare -F stop_verdict_line >/dev/null 2>&1; then
+      _line=$(stop_verdict_line "$REPO_REAL" "$SESSION_ID" "$SWEEPER" "$_target")
       if [ -n "$_line" ]; then
         _state=$(line_field "$_line" state)
         _detail=$(line_field "$_line" detail)

@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/notify.test.sh — THE PERSON'S LEDGER AND THE ONE SENDER (epic-23 wave-33-workhorse, T11;
-# REQ-2 AC-2.2, AC-2.3 (the tick half), AC-2.4, AC-2.5; spec D2).
+# tests/notify.test.sh — THE PERSON'S LEDGER AND THE ONE SENDER.
 #
 # WHAT THIS SUITE IS FOR. Nothing in a run called the person: the harness's push reaches a phone
 # only while Remote Control is connected, and the tick's GATE line told the orchestrator to use

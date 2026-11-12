@@ -18,9 +18,7 @@
 # WHAT IT NEVER HOLDS. A fixture: a repository or a run output one section builds and a later one reads is not a
 # helper, so those sections share a part instead.
 #
-# THE SUITE (the old file's own header, whole):
-# The landing line (wave-28 T3, T4; REQ-1 AC-1.1 to AC-1.3, AC-1.5 to
-# AC-1.7, REQ-3 AC-3.1, AC-3.6, AC-3.8, AC-3.9, REQ-5 AC-5.3, REQ-14 AC-14.1; spec D1 to D6, D9, D31).
+# THE SUITE:
 #
 # The line is the landing record's `line/v1` events and their fold (payload/scripts/lib/line.sh);
 # a candidate is built in a landing tree the tool owns (lib/worktree.sh `landing_tree_take`,

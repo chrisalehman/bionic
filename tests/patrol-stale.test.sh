@@ -1,6 +1,5 @@
 #!/bin/bash
-# ONE STALENESS ARITHMETIC FOR THE PATROL STAMP — the FIRE WINDOW (epic-23 wave-16
-# REQ-11, AC-11.1/11.2; ADR-028).
+# ONE STALENESS ARITHMETIC FOR THE PATROL STAMP — the FIRE WINDOW.
 #
 # WHAT THIS SUITE OWNS, AND WHAT CHANGED. It used to own a constant:
 # `payload/scripts/lib/patrol.sh`'s `PATROL_STALE_MULTIPLIER`, "the stamp is stale

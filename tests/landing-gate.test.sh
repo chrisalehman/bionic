@@ -14,9 +14,6 @@
 # `agent_id` is absent from the payload's `background_tasks[]` has landed, and each one is
 # verdicted exactly once, ever.
 #
-# Governing evidence: .bionic/docs/record/session-20260814-wave-detector-terminal-state/
-# t4b-probe-report.md §6 (the ratified mechanism), §2–§4 (its evidence).
-#
 # HERMETIC. Every payload is crafted and piped straight into the gate; nothing here stops a
 # real subagent, touches the live installed hooks, or depends on a live wave. Repos are
 # throwaway `git init`s under a mktemp'd sandbox, and the roster/plan fixtures are written

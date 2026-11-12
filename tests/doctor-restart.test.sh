@@ -1,7 +1,5 @@
 #!/bin/bash
 # tests/doctor-restart.test.sh — doctor.sh's "restart needed" row and the tick's restart line
-# (bionic 1.4.0 fold-in, spec AC-37, plan task DOCTOR-RESTART; wave-35 T5 REQ-4 AC-4.5; from
-# wave-36 T2 a content fact: spec D7, AC-1.3, ADR-055).
 #
 # THE CONTRACT UNDER TEST. The CLI snapshots hooks/hooks.json, the skills, the role files and
 # the commands once, at process start; a change on disk afterward registers nothing in a process

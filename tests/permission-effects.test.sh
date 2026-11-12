@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/permission-effects.test.sh — the effects reader judged THROUGH THE HOOK (epic-23
-# wave-25-never-paused T16; Step-6 review B1, B2).
+# tests/permission-effects.test.sh — the effects reader judged THROUGH THE HOOK.
 #
 # WHAT IT OWNS. The places where payload/scripts/lib/cmd-class.sh `cmd_effects` used to be
 # confident and wrong, driven end to end: a real PermissionRequest payload into
