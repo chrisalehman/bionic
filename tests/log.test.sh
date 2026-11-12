@@ -39,8 +39,7 @@ LOG_AT=2026-10-06T11:48Z refused "a caller's instant off the log's shape" ask ke
 LA_WHO="hooks/poker/proof.sh:the approval of the plan and its asks close at one instant
 payload/scripts/close-out.sh:the delivery of the close stands at the minute of its Step 9 line
 payload/scripts/lib/owed.sh:the act on an ask, counted on the clock of the asks"
-expect_eq "no file hands the appender an instant but those the list names, each for its reason" "$(printf '%s\n' "$LA_WHO" | cut -d: -f1 | paste -sd' ' -)" \
-  "$(cd "$BIONIC_SCRIPTS_DIR" && /usr/bin/grep -rl 'LOG_AT=' payload hooks | LC_ALL=C sort | paste -sd' ' -)"
+expect_eq "no file hands the appender an instant but those the list names, each for its reason" "$(printf '%s\n' "$LA_WHO" | cut -d: -f1 | paste -sd' ' -)" "$(cd "$BIONIC_SCRIPTS_DIR" && /usr/bin/grep -rl 'LOG_AT=' payload hooks | LC_ALL=C sort | paste -sd' ' -)"
 
 section "TYPES"
 refused "ev=matrix-set" matrix-set row=T1
