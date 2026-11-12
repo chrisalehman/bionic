@@ -403,11 +403,11 @@ section "§DEBT-PARSE §DEBT-LEDGER §DEBT-ADVISORY (the verb half): a debt: lin
 # severity.md writes `debt: <kind> <concept> <path>:<line>[, <path>:<line>…]` flush left beside the `finding:` lines,
 # uncounted in `findings:`. lib/proof.sh `proof_findings` reads it as `debt<TAB><kind><TAB><concept><TAB><sites>
 # <TAB>burn`, flag-class; one carrying a severity or reach word, or a kind outside the debt table, is refused, naming
-# the line. `session-poker.sh debt` keeps `record/<run>/debt.md`: a header, then `concept | kind | sites | raised-by
-# <record> | touches N | <burned <row>|—>` per item.
+# the line. `session-poker.sh debt` appends each debt to the run's log, its state the newest event of its concept and
+# kind, and `debt list` prints them as the reader holds them.
 #
 # FIXTURE FIDELITY. The parser rows run §SEV's library (`SEV_LIB`) on the shipped structure checks file (`SEV_CK`); the
-# ledger rows run the real verb in §SEV's bound repository and read the ledger it wrote.
+# ledger rows run the real verb in §SEV's bound repository and read the log it wrote.
 dbt_read() {  # <lib> <record> -> proof_reading's answer and exit, the scale pushed (adversarial)
   bash -c '. "$1"; proof_reading "$2" adversarial "" 1; echo " rc=$?"' _ "$1" "$2" 2>/dev/null
 }
@@ -420,9 +420,6 @@ expect_contains "DEBT-P1b …and the same pass beside result: pass is refused, i
   "$(dbt_read "$SEV_LIB" "$SEV_DIR/dbt-pass.md")"
 expect_eq "DEBT-P2 proof_findings exposes the debt line as a row: debt, kind, concept, sites, burn" \
   "$(printf 'debt\tone-case-abstraction\tlog_shim\tlib/a.sh:4\tburn') rc=0" "$(dbt_rows dbt-only)"
-sev_rec dbt-mixed flag "findings: 1" "finding: 1 S3 on lib/a.sh:3 a message misnames the flag" \
-  "debt: duplicate tree_count lib/b.sh:2,lib/c.sh:5"
-DBT_MIX="$(dbt_rows dbt-mixed)"
 # AC-11.1's fails-when on the record: a debt line carrying a severity or a reach, or a kind outside the table.
 for c in "dbt-sev@debt: duplicate tree_count S2 lib/b.sh:2@rates its debt line (debt: duplicate tree_count S2 lib/b.sh:2) with 'S2'" \
          "dbt-reach@debt: duplicate tree_count on lib/b.sh:2@rates its debt line (debt: duplicate tree_count on lib/b.sh:2) with 'on'" \
@@ -452,13 +449,10 @@ expect_contains "DEBT-mut2 …and with the arm gone the debt-only pass is refuse
 
 # ---------- §DEBT-LEDGER (AC-11.2): the verb writes the ledger from a reading's debt lines ----------
 DBT_SLUG="${PSEV##*/}"; DBT_SLUG="${DBT_SLUG%.plan.md}"
-DBT_LEDGER="$RSEV/.bionic/docs/record/$DBT_SLUG/debt.md"
+DBT_LOG="$RSEV/.bionic/docs/record/$DBT_SLUG/run.log"
 sev_rec dbt-rec flag "findings: 1" "finding: 1 S3 off lib/a.sh:3 a message misnames the flag" \
   "debt: one-case-abstraction log_shim lib/a.sh:4" "debt: duplicate tree_count lib/b.sh:2, lib/c.sh:5"
-DBT_HEAD='# debt ledger: concept | kind | sites | raised-by <record> | touches N | burned <row> | —'
-DBT_L1='log_shim | one-case-abstraction | lib/a.sh:4 | raised-by record/wave-01-fixture/dbt-rec.md | touches 0 | —'
-DBT_L2='tree_count | duplicate | lib/b.sh:2, lib/c.sh:5 | raised-by record/wave-01-fixture/dbt-rec.md | touches 0 | —'
-expect_false "DEBT-L0 precondition: the run has no ledger yet" test -e "$DBT_LEDGER"
+rm -f "$DBT_LOG"
 poke "$RSEV" debt add record/wave-01-fixture/dbt-rec.md
 expect_eq "DEBT-L1 §DEBT-LEDGER debt add over the session's bound run exits 0" "0" "$RC"
 expect_contains "DEBT-L1c …naming each item it added" "poker: debt add — log_shim one-case-abstraction lib/a.sh:4" "$OUT"
@@ -467,38 +461,37 @@ DBT_WANT="$(dbt_rows dbt-rec | awk -F'\t' '$1 == "debt" { print $3 " | " $2 " | 
 expect_nonempty "DEBT-L2 precondition: the record's debt rows read back" "$DBT_WANT"
 poke "$RSEV" debt add record/wave-01-fixture/dbt-rec.md "$PSEV"
 expect_eq "DEBT-L3 a second add of the same record, the plan named, exits 0" "0" "$RC"
-cp "$DBT_LEDGER" "$TMPROOT/dbt-before"
+cp "$DBT_LOG" "$TMPROOT/dbt-before"
 poke "$RSEV" debt add record/wave-01-fixture/dbt-sev.md "$PSEV"
 expect_eq "DEBT-L4 debt add on a record whose debt line carries a severity is refused (exit 1)" "1" "$RC"
-expect_true "DEBT-L4c …and the ledger is byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER"
+expect_true "DEBT-L4c …and the log is byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LOG"
 poke "$RSEV" debt add record/wave-01-fixture/r-ok.md "$PSEV"
 expect_eq "DEBT-L5 debt add on a reading with no debt line exits 0" "0" "$RC"
-expect_true "DEBT-L5c …the ledger byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER"
+expect_true "DEBT-L5c …the log byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LOG"
 poke "$RSEV" debt touched tree_count "$PSEV"
 expect_eq "DEBT-L6 debt touched exits 0 and prints the item with its new count" \
   "0|poker: debt touched — tree_count duplicate touches 1" "$RC|$OUT"
-cp "$DBT_LEDGER" "$TMPROOT/dbt-before"
+cp "$DBT_LOG" "$TMPROOT/dbt-before"
 poke "$RSEV" debt touched no_such_concept "$PSEV"
 expect_eq "DEBT-L6c debt touched on a concept the ledger does not hold is refused (exit 1)" "1" "$RC"
-expect_true "DEBT-L6d …the ledger byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER"
+expect_true "DEBT-L6d …the log byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LOG"
 poke "$RSEV" debt burn log_shim T9 "$PSEV"
 expect_eq "DEBT-L7 debt burn exits 0 and prints the item burned" "0|poker: debt burn — log_shim one-case-abstraction burned T9" "$RC|$OUT"
-expect_eq "DEBT-L7b …and the item's last cell reads burned T9" "${DBT_L1% | —} | burned T9" "$(/usr/bin/grep '^log_shim ' "$DBT_LEDGER")"
-cp "$DBT_LEDGER" "$TMPROOT/dbt-before"
+cp "$DBT_LOG" "$TMPROOT/dbt-before"
 poke "$RSEV" debt burn log_shim T10 "$PSEV"
 expect_eq "DEBT-L7c a second burn of a burned item is refused (exit 1), the ledger unchanged" "1|same" \
-  "$RC|$(cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER" && echo same)"
+  "$RC|$(cmp -s "$TMPROOT/dbt-before" "$DBT_LOG" && echo same)"
 poke "$RSEV" debt touched log_shim "$PSEV"
 expect_eq "DEBT-L7d …and a burned item is touched no more (exit 1, unchanged)" "1|same" \
-  "$RC|$(cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER" && echo same)"
+  "$RC|$(cmp -s "$TMPROOT/dbt-before" "$DBT_LOG" && echo same)"
 poke "$RSEV" debt list "$PSEV"
-expect_eq "DEBT-L8 debt list prints each item line as the ledger holds it" "0|$(/usr/bin/grep -v '^#' "$DBT_LEDGER" | paste -sd'|' -)" \
-  "$RC|$(printf '%s\n' "$OUT" | paste -sd'|' -)"
+expect_eq "DEBT-L8 debt list prints each debt as the reader holds it, the touch and the burn read from the log" \
+  '0|tree_count duplicate "lib/b.sh:2, lib/c.sh:5" touches=1 raised-by=record/wave-01-fixture/dbt-rec.md|log_shim one-case-abstraction "lib/a.sh:4" touches=0 raised-by=record/wave-01-fixture/dbt-rec.md burned=T9' "$RC|$(printf '%s\n' "$OUT" | paste -sd'|' -)"
 poke "$RSEV" debt
 expect_eq "DEBT-L9 debt with no subcommand is a usage error (exit 2)" "2" "$RC"
 poke "$RSEV" debt touched
 expect_eq "DEBT-L9b debt touched with no concept is a usage error (exit 2)" "2" "$RC"
-rm -f "$DBT_LEDGER"
+rm -f "$DBT_LOG"
 
 # ---------- §DEBT-ADOPT (AC-11.2's read-back, wave-30 T32): the next run's ledger takes the carried debt lines ----------
 # Close-out wrote `debt: <concept> <kind> "<sites>" touches=<N> raised-by=<record> from=<wave>` under the
@@ -510,40 +503,36 @@ DBT_CL2='debt: log_shim one-case-abstraction "lib/a.sh:4" touches=2 raised-by=re
 printf '%s\n' "# continuation — wave-00-prior" "" "## Deferrals" "" \
   'deferred: record/wave-00-prior/rev.md#1 S3 on "a deferral" stated="-" from=wave-00-prior' "$DBT_CL1" "$DBT_CL2" "" \
   "## Resume instruction" "" 'debt: not_in_section duplicate "x.sh:1" touches=9 raised-by=record/x.md from=wave-00-prior' > "$DBT_CONT"
-DBT_AL1='tree_count | duplicate | lib/b.sh:2, lib/c.sh:5 | raised-by record/wave-00-prior/critic-structure.md | touches 4 | —'
-DBT_AL2='log_shim | one-case-abstraction | lib/a.sh:4 | raised-by record/wave-00-prior/dbt-rec.md | touches 2 | —'
-expect_false "DEBT-A0 precondition: the run has no ledger yet" test -e "$DBT_LEDGER"
+DBT_AL="$(printf '%s\n' "$DBT_CL1" "$DBT_CL2" | sed -e 's/^debt: //' -e 's/ from=wave-00-prior$//' | paste -sd'|' -)"
 poke "$RSEV" debt adopt "$DBT_CONT"
 expect_eq "DEBT-A1 §DEBT-ADOPT debt adopt over the session's bound run exits 0, saying what it adopted" \
-  "0|poker: debt adopt — 2 adopted, 0 already there: record/$DBT_SLUG/debt.md" "$RC|$OUT"
-expect_eq "DEBT-A1c …and debt list reads both back" "0|$DBT_AL1|$DBT_AL2" "$(poke "$RSEV" debt list "$PSEV"; printf '%s|%s' "$RC" "$(printf '%s\n' "$OUT" | paste -sd'|' -)")"
-cp "$DBT_LEDGER" "$TMPROOT/dbt-before"
+  "0|poker: debt adopt — 2 adopted, 0 already there: record/$DBT_SLUG/run.log" "$RC|$OUT"
+expect_eq "DEBT-A1c …and debt list reads both back" "0|$DBT_AL" "$(poke "$RSEV" debt list "$PSEV"; printf '%s|%s' "$RC" "$(printf '%s\n' "$OUT" | paste -sd'|' -)")"
+cp "$DBT_LOG" "$TMPROOT/dbt-before"
 poke "$RSEV" debt adopt "$DBT_CONT" "$PSEV"
 expect_eq "DEBT-A2 a second adopt, the plan named: 0 adopted, 2 already there" \
-  "0|poker: debt adopt — 0 adopted, 2 already there: record/$DBT_SLUG/debt.md" "$RC|$OUT"
-expect_true "DEBT-A2b …and the ledger is byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER"
-poke "$RSEV" debt touched tree_count "$PSEV"
-poke "$RSEV" debt adopt "$DBT_CONT" "$PSEV"
-cp "$DBT_LEDGER" "$TMPROOT/dbt-before"
+  "0|poker: debt adopt — 0 adopted, 2 already there: record/$DBT_SLUG/run.log" "$RC|$OUT"
+expect_true "DEBT-A2b …and the log is byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LOG"
+cp "$DBT_LOG" "$TMPROOT/dbt-before"
 poke "$RSEV" debt adopt "$TMPROOT/no-such-continuation.md" "$PSEV"
 expect_eq "DEBT-A4 a path that is no file is refused (exit 2)" "2" "$RC"
 expect_contains "DEBT-A4b …naming the path" "$TMPROOT/no-such-continuation.md" "$OUT"
 poke "$RSEV" debt adopt "$TMPROOT" "$PSEV"
 expect_eq "DEBT-A4c a directory is refused as well (exit 2)" "2" "$RC"
 expect_contains "DEBT-A4c2 …naming it" "no readable continuation at $TMPROOT" "$OUT"
-expect_true "DEBT-A4d …and the ledger is byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER"
+expect_true "DEBT-A4d …and the log is byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LOG"
 printf '%s\n' "## Deferrals" "" "$DBT_CL1" 'debt: widget_parse duplicate "lib/w.sh:1" touches=3 from=wave-00-prior' > "$TMPROOT/dbt-cont-bad.md"
 poke "$RSEV" debt adopt "$TMPROOT/dbt-cont-bad.md" "$PSEV"
 expect_eq "DEBT-A5 a debt: line that does not parse is refused (exit 1)" "1" "$RC"
 expect_contains "DEBT-A5a …naming the line" 'debt: widget_parse duplicate "lib/w.sh:1" touches=3 from=wave-00-prior' "$OUT"
-expect_true "DEBT-A5b …and the ledger is byte-identical, the good line before it not adopted either" cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER"
+expect_true "DEBT-A5b …and the log is byte-identical, the good line before it not adopted either" cmp -s "$TMPROOT/dbt-before" "$DBT_LOG"
 printf '%s\n' "## Deferrals" "" 'deferred: record/wave-00-prior/rev.md#1 S3 on "a deferral" stated="-" from=wave-00-prior' > "$TMPROOT/dbt-cont-none.md"
 poke "$RSEV" debt adopt "$TMPROOT/dbt-cont-none.md" "$PSEV"
 expect_eq "DEBT-A6 a continuation with no debt: line adopts nothing and exits 0" "0" "$RC"
-expect_true "DEBT-A6c …the ledger byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER"
+expect_true "DEBT-A6c …the log byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LOG"
 poke "$RSEV" debt adopt
 expect_eq "DEBT-A7 debt adopt with no continuation is a usage error (exit 2)" "2" "$RC"
-rm -f "$DBT_LEDGER"
+rm -f "$DBT_LOG"
 
 # ---------- §DEBT (wave-36 T13; D13, REQ-7 AC-7.2, AC-7.3, AC-7.8; C24, C25, A-orch-1, A-orch-2) ----------
 # `debt add` reads any record carrying grammar-true `debt:` lines, no `reviewed:` line required, so an `assumptions.md`
@@ -557,22 +546,22 @@ printf '%s\n' "# assumptions — wave-01-fixture" "" \
   "- A-orch-2: a second assumption, prose only." > "$DBT_ASM"
 DBT_HL='adopt-orphans | hole | hooks/session-poker.sh:2846, payload/scripts/lib/units.sh:2112 | raised-by record/wave-01-fixture/assumptions.md | touches 0 | —'
 expect_false "DEBT-H0 precondition: the run has no ledger yet, and the record carries no reviewed: line" \
-  test -e "$DBT_LEDGER" -o -n "$(/usr/bin/grep '^reviewed:' "$DBT_ASM")"
+  test -e "$DBT_LOG" -o -n "$(/usr/bin/grep '^reviewed:' "$DBT_ASM")"
 poke "$RSEV" debt add record/wave-01-fixture/assumptions.md "$PSEV"
 expect_eq "DEBT-H1 §DEBT debt add takes an assumptions.md hole line with no reviewed: line (exit 0)" "0" "$RC"
 expect_absent "DEBT-H1d …and the reading's refusal is gone (C24)" "carries no reviewed:" "$OUT"
-cp "$DBT_LEDGER" "$TMPROOT/dbt-before"
+cp "$DBT_LOG" "$TMPROOT/dbt-before"
 printf '%s\n' "# assumptions" "" 'debt: hole step-line-born hooks/session-poker.sh step-line (the born marker is lost)' > "$SEV_DIR/asm-free.md"
 poke "$RSEV" debt add record/wave-01-fixture/asm-free.md "$PSEV"
 expect_eq "DEBT-H2 a hole line whose site is prose, not <path>:<line>, is refused (exit 1)" "1" "$RC"
-expect_true "DEBT-H2c …and the ledger is byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER"
+expect_true "DEBT-H2c …and the log is byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LOG"
 mkdir -p "$SEV_DIR/two words"
 printf '%s\n' 'debt: hole spaced-source lib/s.sh:1' > "$SEV_DIR/two words/assumptions.md"
 poke "$RSEV" debt add "record/wave-01-fixture/two words/assumptions.md" "$PSEV"
 expect_eq "DEBT-H3 a record whose path holds a space would write raised-by with a space (A-orch-1's shape): refused (exit 1)" "1" "$RC"
-expect_true "DEBT-H3c …and the ledger is byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LEDGER"
+expect_true "DEBT-H3c …and the log is byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LOG"
 rm -rf "$SEV_DIR/two words" "$SEV_DIR/asm-free.md" "$DBT_ASM"
-rm -f "$DBT_LEDGER"
+rm -f "$DBT_LOG"
 
 # The unbound adopt (C25, A-orch-2): an engaged session bound to no plan, in a root whose only plan is a
 # CLOSED predecessor that keeps its own ledger. `resolve_run`'s `none` arm hands the tick the newest plan
@@ -582,7 +571,7 @@ DBU_PLAN="$RDU/.bionic/docs/plans/epic-99-fixture/wave-00-prior.plan.md"; mkdir 
 printf '%s\n' "# prior wave" "" "## SDLC State" "" "current: 9" "" \
   "- Step 9: delivered: 2026-10-01T00:00Z wave-00-prior" > "$DBU_PLAN"
 DBU_LED="$RDU/.bionic/docs/record/wave-00-prior/debt.md"; mkdir -p "${DBU_LED%/*}"
-printf '%s\n' "$DBT_HEAD" "$DBT_AL2" > "$DBU_LED"
+echo 'log_shim | one-case-abstraction | lib/a.sh:4 | raised-by record/wave-00-prior/dbt-rec.md | touches 2 | —' > "$DBU_LED"
 DBU_SHA="$(shasum "$DBU_LED" | awk '{ print $1 }')"
 expect_eq "DEBT-U0 precondition: the root's newest plan is the closed predecessor, which active_plan hands an unbound session" \
   "$DBU_PLAN|closed" "$(bash -c '. "$1/run.sh"; p="$(active_plan "$2")"; printf "%s|" "$p"; run_open "$p" >/dev/null 2>&1 && echo open || echo closed' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$RDU" 2>/dev/null)"
@@ -594,7 +583,7 @@ expect_absent "DEBT-U1c …and it adopted nothing" "adopted" "$OUT"
 expect_eq "DEBT-U1d …the predecessor's debt.md is unchanged (sha)" "$DBU_SHA" "$(shasum "$DBU_LED" | awk '{ print $1 }')"
 poke "$RDU" debt adopt "$DBT_CONT" "$DBU_PLAN"
 expect_eq "DEBT-U2 control: the same adopt naming the plan writes that plan's ledger (exit 0)" \
-  "0|poker: debt adopt — 1 adopted, 1 already there: record/wave-00-prior/debt.md" "$RC|$OUT"
+  "0|poker: debt adopt — 1 adopted, 1 already there: record/wave-00-prior/run.log" "$RC|$OUT"
 
 # ============================================================
 section "§LINE-TELL: the tick tells each standing red and each stalled entry once, with its logs (wave-28 T5; REQ-9 AC-9.2, AC-9.3; D8)"

@@ -469,11 +469,11 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh decisions put D<n> '<what is decided>'   during a run, write the decision's put line to record/<wave>/design-ledger.md and print its wait line: what an hour's wait moves, from the tasks that read approval:D<n> and the longest chain"
   die "  bash ${HOOK_DIR}/session-poker.sh decisions rule D<n> '<reply>'   during a run, on the user's reply, write the ruling heading ## Δ<k> — D<n> ruled \"<reply>\" (<who> <date>): <title> to record/<wave>/design-ledger.md and close the decision's ask; approve D<n> and a release approval card's reply rule through the same writer; a decision already ruled is refused"
   die "  bash ${HOOK_DIR}/session-poker.sh brief <row> [<name>]   render the dispatch brief of that plan row into record/<wave>/briefs/<name>.md (<name> the agent's, else the fill's for the row): the scaffold from the row, the judgment from the task's own section of the plan, the review range, Questions and Lands-red from the reader; it never rewrites a brief it did not render, and never changes the plan"
-  die "  bash ${HOOK_DIR}/session-poker.sh debt add <record> [<plan>]   write one record/<run>/debt.md line per debt: line of the record (a review's, a writer's, an assumptions.md hole line), each concept and kind once"
+  die "  bash ${HOOK_DIR}/session-poker.sh debt add <record> [<plan>]   append one debt to the run's log per debt: line of the record (a review's, a writer's, an assumptions.md hole line), each concept and kind once"
   die "  bash ${HOOK_DIR}/session-poker.sh debt touched <concept> [<plan>]   add one to the touches of each unburned item of <concept> (the dispatch wall's call)"
   die "  bash ${HOOK_DIR}/session-poker.sh debt burn <concept> <row> [<plan>]   mark each unburned item of <concept> burned by <row>"
-  die "  bash ${HOOK_DIR}/session-poker.sh debt adopt <continuation> [<plan>]   write each debt: line the continuation carries under ## Deferrals into the run's ledger, its touches and raised-by kept"
-  die "  bash ${HOOK_DIR}/session-poker.sh debt list [<plan>]   print the run's debt ledger, one line per item"
+  die "  bash ${HOOK_DIR}/session-poker.sh debt adopt <continuation> [<plan>]   append each debt: line the continuation carries under ## Deferrals to the run's log as a debt, its touches and its raising record kept"
+  die "  bash ${HOOK_DIR}/session-poker.sh debt list [<plan>]   print the run's debts as the reader holds them, one line each, burned ones too"
   exit 2
 }
 
