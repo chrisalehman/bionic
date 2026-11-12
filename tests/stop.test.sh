@@ -738,7 +738,7 @@ expect_eq "GAP4e …and leaves it open" "open" \
 section "LOAD: over the line with no room, the tick stands down the newest writer whose row has not landed, one a tick; its row is pending and FILL offers it when the room opens; an admitted run is never ended"
 
 # A RUN THAT HAS OVERCOMMITTED THE MACHINE DIALS ITSELF DOWN. gap_fixture's plan with its first rows
-# active under wl-<id>, launched a minute apart, on 8 cores at a busy reading of 14 over both windows
+# launched under wl-<id> by dispatches in the run's log, a minute apart, at a busy reading of 14 over both windows
 # (the line is 6.36), the gate holding one admitted run of this live shell. The stood-down agent is then
 # closed as `stopped` closes a stopped one, and the next tick, at a busy reading of 1, offers its row.
 load_fixture() {  # <active rows> -> project dir; the first <n> of T13 T14 T15 active and rostered
@@ -746,7 +746,7 @@ load_fixture() {  # <active rows> -> project dir; the first <n> of T13 T14 T15 a
   d="$(gap_fixture)"; p="$d/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
   for id in T13 T14 T15; do
     n=$((n + 1)); [ "$n" -le "$1" ] || break
-    awk -v id="$id" '$2 == id { sub(/[|] implementor [|]/, "| wl-" id " |"); sub(/[|] pending [|]/, "| active |") } { print }' "$p" > "$p.t" && mv "$p.t" "$p"
+    bash -c '. "$1/log.sh" && RUN_LOG="$2" log_append dispatch "row=$3" "name=wl-$3" brief=b sum=s' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$d/.bionic/docs/record/wave-37-fixture/run.log" "$id"
     roster_row_fixture session="$SID" name="wl-$id" agent_id="a-wl-$id" launched_at="2026-11-01T00:0${n}:00Z" \
       subagent_type=bionic:senior-implementor deliverable="never-$id.md" plan="$p" >> "$d/.bionic/tmp/roster-$SID.state"
   done
@@ -763,8 +763,8 @@ expect_eq "LOAD1b …and no other row" "1" "$(printf '%s\n' "$LOAD_T" | grep -c 
 expect_contains "LOAD1c its stop order is written" "|target=wl-T14" "$(cat "$LOAD_D/.bionic/tmp/stop-orders-$SID.state" 2>/dev/null)"
 expect_absent "LOAD1d …and the older writer has none" "|target=wl-T13" "$(cat "$LOAD_D/.bionic/tmp/stop-orders-$SID.state" 2>/dev/null)"
 LOAD_P="$LOAD_D/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
-expect_contains "LOAD1e the stood-down row is pending again" "| pending |" "$(grep -F '| T14 |' "$LOAD_P")"
-expect_contains "LOAD1f …and the older writer's row is still active" "| active |" "$(grep -F '| T13 |' "$LOAD_P")"
+expect_eq "LOAD1e the stood-down row is pending again" "pending" "$(bash -c '. "$1/units.sh" && units_rows "$2"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$LOAD_P" | awk -F'\t' '$1 == "T14" { print $10 }')"
+expect_eq "LOAD1f …and the older writer's row is still active" "active" "$(bash -c '. "$1/units.sh" && units_rows "$2"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$LOAD_P" | awk -F'\t' '$1 == "T13" { print $10 }')"
 expect_eq "LOAD1g the admitted run is not ended by the stand-down" "open" \
   "$(grep -q '^ended=' "$LOAD_GATE/requests/1" 2>/dev/null && echo ended || { grep -q '^admitted=' "$LOAD_GATE/requests/1" && echo open; })"
 ( cd "$LOAD_D" && CLAUDE_CODE_SESSION_ID="$SID" bash "$BIONIC_HOOKS_DIR/session-sweeper.sh" ack wl-T14 --by human --reason abandoned >/dev/null 2>&1 )
@@ -941,7 +941,7 @@ wait_fire "$W_D2"
 expect_contains "WAIT2 meta: the wall read the turn, its ledger line is there" "fill-ledger/v1|" "$(wait_led "$W_D2" | tail -1)"
 expect_contains "WAIT2b …and the row reading the unruled D3 is not ready" "|ready=|" "$(wait_led "$W_D2" | tail -1)"
 expect_eq "WAIT2c the turn ends: no refusal" "" "$(wait_decision)"
-W_D2R="$(wait_fixture 'approved: D3 fixture "go"' "$WT_RULED")"
+W_D2R="$(wait_fixture "" "$WT_RULED")"; bash -c '. "$1/proof.sh" && proof_approval_event "$2" D3 by=fixture said=go' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$W_D2R/.bionic/docs/plans/epic-99-fixture/wave-09-wait.plan.md"
 wait_fire "$W_D2R"
 expect_eq "WAIT2d the control: D3 ruled, the same row is ready and refused" "block" "$(wait_decision)"
 expect_contains "WAIT2e …naming it" "ready with room: T13" "$STOP_ERR"
