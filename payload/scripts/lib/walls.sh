@@ -4178,7 +4178,9 @@ validate_matrix() {
       "write the row as '| AC | tier | status | evidence | auditor |' with exactly five cells and no literal pipe inside any cell."
   fi
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+  # A plan with no such table gives no row, yet the here-document still feeds one empty line: that is no row to judge.
   while IFS=$'\t' read -r ac status; do
+    [ -n "$ac" ] || continue
     case "$status" in
       pending|blocked|discharged|waived) : ;;
       *)

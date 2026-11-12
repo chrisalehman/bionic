@@ -588,9 +588,7 @@ section "Section 8: stopped <name> acks the row it stops; standdown drops a row 
 # An unknown or already-acked name is a refusal, exit 2: the sweeper would record an unknown
 # name and warn, and a second ack says nothing new.
 #
-# STOPPED NOW CHECKS WHAT STANDDOWN ALREADY CHECKS (wave-19 T1 follow-up, critic C4). Before
-# this fix `stopped` acked ANY open row on the strength of the name alone — still-live or
-# UNMET — and since T4 that ack frees the name for a fresh dispatch while the agent it named
+# STOPPED CHECKS WHAT STANDDOWN ALREADY CHECKS: an ack frees the name for a fresh dispatch while the agent it named
 # is still running (dispatch-preflight.sh:2272 treats any ack newer than the launch as the
 # name closing). So a FRESH panel reading must confirm the name is gone: present on the
 # panel -> refused, naming it live; a stale or absent panel -> refused, because a verb that
@@ -621,10 +619,8 @@ expect_status "stopped on an UNMET row under a stale panel is refused, exit 2 (C
 expect_contains "…naming the verdict" "UNMET" "$OUT$ERR"
 expect_absent "…and acks nothing" "|name=open-one|" "$(s9_ledger)"
 
-# UNMET AND GONE FROM A FRESH PANEL: closed, reason abandoned (wave-19 T1e, audit V-1; REQ-1
-# AC-1.2). This is T1's own original fixture — `open-one`'s deliverable never exists — and
-# the agent it named was stopped before it landed (w19-T6 this wave). Refusing it left the
-# name blocked and counted against the budget with no close but a hand `sweeper ack`. The
+# UNMET AND GONE FROM A FRESH PANEL: closed, reason abandoned. `open-one`'s deliverable never exists, and refusing
+# it would leave the name blocked and counted against the budget with no close but a hand `sweeper ack`. The
 # ack is attributed honestly: `reason=abandoned`, never `landed` — nothing landed — and never
 # the tick's `moot-and-gone`, which names a row that had nothing to produce.
 plant_live "$R9TR" fresh

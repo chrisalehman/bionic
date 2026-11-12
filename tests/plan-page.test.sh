@@ -163,7 +163,7 @@ P2="$R/.bionic/docs/plans/epic-01-demo/wave-02-y.plan.md"; L2="$R/.bionic/docs/r
   printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n|---|---|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | One. | — | — | 30 | REQ-1 | a.sh | — | — | landed |\n\n'
   printf '## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n| REQ-1 | x | AC-1 | unit | e | a planted defect |\n\n'
   printf '## SDLC State\n\ncurrent: 6\napproved-by: f 2026-11-01T00:00Z "approved"\n- Step 1: requirements: specs/r.md\n- Step 5: floor green, record/floor.log\n- T1: landed record/generic-evidence.md\n\n'
-  printf '## Verification Matrix\n\nstack-health: n/a: no serve\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\nAC-1:\n  fails-when: a planted defect\n  evidence: record/generic-evidence.md\n'
+  printf '## Verification Matrix\n\nstack-health: n/a: no serve\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | record/generic-evidence.md | CONFIRMED |\n\nAC-1:\n  fails-when: a planted defect\n  evidence: record/generic-evidence.md\n'
 } > "$P2"; printf 'plan=%s\n' "$P2" > "$R/.bionic/tmp/engaged-$SID.state"
 gate; S14="$GATE_EXIT ${GATE_SAID%%$'\n'*}"
 bash "$BIONIC_SCRIPTS_DIR/payload/scripts/bring-forward.sh" "$P2" >/dev/null; expect_contains "the act wrote the plan at 15" "canonical_sdlc_version: 15" "$(cat "$P2")"
@@ -229,8 +229,10 @@ expect_eq "a real session's commit with the same variable set is judged at the s
 printf 'run/v1|ev=tree|row=T1|path=.worktrees/t1|at=2026-11-01T00:00:14Z\n' >> "$L2"; mkdir -p "$R/.worktrees/t1"
 contains() { case "$1" in *"$2"*) printf yes ;; *) printf no ;; esac; }
 CF="8|cleanup=done|tmp-wiped=0 entries|tasks-completed=T1"$'\n'"published|row=T2|commit=$H|kind=close|by=close-out|why=merged"$'\n'"tree|row=T1|path="
-L2_SUM="$(cksum < "$L2")"; gate_as closeout-preflight-4243 "$CF"
-expect_eq "the close's own session is judged with its facts pending: no merge, tree or cleanup owed, the log's other asks still made" "|||yes" "$(owed "Step 8's merge")|$(owed "Step 8's trees")|$(owed "Step 8's cleanup")|$(contains "$GATE_SAID" "could not be read at 15: each row's")"
+hdr "working-branch: $(git -C "$R" symbolic-ref --short HEAD)"; L2_SUM="$(cksum < "$L2")"; gate_as closeout-preflight-4243 "$CF"
+expect_eq "the close's own session, every other fact standing and its own pending, is admitted at 15: no merge, tree or cleanup owed, no row a 15 lacks" "0|||" "$GATE_EXIT|$(owed "Step 8's merge")|$(owed "Step 8's trees")|$(owed "Step 8's cleanup")"
+RQ="$R/.bionic/docs/specs/epic-01-demo/wave-02-y.requirements.md"; mv "$RQ" "$RQ.t"; gate_as closeout-preflight-4243 "$CF"; mv "$RQ.t" "$RQ"
+expect_eq "…the log's other asks still made: a requirements record gone is owed beside the close's facts" "2|owed at 15: Step 1's requirements" "$GATE_EXIT|$(owed "Step 1's requirements")"
 gate_as "$SID" "$CF"
 expect_eq "a real session with the same facts set is judged on the log, nothing held of them" "owed at 15: Step 8's merge|owed at 15: Step 8's trees" "$(owed "Step 8's merge")|$(owed "Step 8's trees")"
 expect_eq "nothing pending is appended: the log is as it was" "$L2_SUM" "$(cksum < "$L2")"
@@ -245,6 +247,8 @@ printf 'run/v1|ev=step|n=8|at=2026-11-01T00:00:20Z\n' >> "$GL"; gate
 expect_eq "at 14 a step 8 the log holds is asked of its event: its cleanup owed, no Step 8 line asked for" "2|owed at 14: Step 8's cleanup|no" "$GATE_EXIT|$(owed14 "Step 8's cleanup")|$(contains "$GATE_SAID" "has no 'Step 8:' line")"
 printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=record/floor.log|at=2026-11-01T00:00:21Z\nrun/v1|ev=step|n=8|cleanup=done|tmp-wiped=0 entries|tasks-completed=T1|at=2026-11-01T00:00:21Z\n' "$H" >> "$GL"; gate
 expect_status "…and admitted once the close gives the step its fields" 0 "$GATE_EXIT"
+cp "$GP" "$GP.w"; sed -i '' 's/| AC-1 | T1 | discharged |/| AC-1 | T1 | bogus |/' "$GP"; gate; mv "$GP.w" "$GP"
+expect_eq "…and a row the older table holds with a status outside the four words is refused, named" "2|1" "$GATE_EXIT|$(grep -c "matrix row 'AC-1' has an invalid status 'bogus'" <<< "$GATE_SAID")"
 printf 'run/v1|ev=step|n=9|delivered=no|at=2026-11-01T00:00:22Z\n' >> "$GL"; gate
 expect_eq "at 14 a step 9 not delivered owes its delivery, no Step 9 line asked for" "2|owed at 14: Step 9's delivery|no" "$GATE_EXIT|$(owed14 "Step 9's delivery")|$(contains "$GATE_SAID" "has no 'Step 9:' line")"
 # The doctrine grows on the person's approval, asked of the run at 14 and at 15; at 15 the row's read stays unseen beside it.
