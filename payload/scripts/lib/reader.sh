@@ -184,16 +184,13 @@ reader_main() {  # <plan> <question> [args] -> the answer in its form; 2 refused
 # whole translation of a long plan: every engagement asks the sessions, and the close and the roster the handoff.
 reader_session() {  # <plan> <order|handoff|sessions> [args] -> reader_main's answer, read from the homes of a session's facts
   local src
-  case "${2:-}" in
-    order|sessions) src="$TRANSLATE_SESSION_SOURCES" ;;
-    handoff) src="$TRANSLATE_HANDOFF_SOURCES" ;;
-    *) printf "reader: '%s' is no question of a session's facts\n" "${2:-}" >&2; return 2 ;;
-  esac
+  case "${2:-}" in order|sessions|handoff) ;; *) printf "reader: '%s' is no question of a session's facts\n" "${2:-}" >&2; return 2 ;; esac
   if ! declare -F translate >/dev/null 2>&1; then
     # shellcheck source=/dev/null
     . "$_READER_LIB_DIR/translate.sh" || return 2
-    case "${2:-}" in handoff) src="$TRANSLATE_HANDOFF_SOURCES" ;; *) src="$TRANSLATE_SESSION_SOURCES" ;; esac
   fi
+  case "$2" in handoff) src="${TRANSLATE_HANDOFF_SOURCES:-}" ;; *) src="${TRANSLATE_SESSION_SOURCES:-}" ;; esac
+  [ -n "$src" ] || return 2
   TRANSLATE_SOURCES="$src" reader_main "$@"
 }
 

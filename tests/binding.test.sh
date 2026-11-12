@@ -303,8 +303,8 @@ sz_plan() {  # <name> <with|without> -> a plan of 3,000 distinct session lines, 
     printf '\n## Notes\n\nafter the state.\n'; } > "$SZ/.bionic/docs/plans/epic-01-demo/$1.plan.md"
   printf '%s' "$SZ/.bionic/docs/plans/epic-01-demo/$1.plan.md"
 }
-sz_call() {  # <plan> -> "<rc>|<BIND_SESSION>" from one call, under pipefail as the callers run
-  bash -c 'set -uo pipefail; . "$1" || exit 9; . "$2" || exit 9; rc=0; bind_record_session "$3" "$4" bind || rc=$?; printf "%s|%s" "$rc" "${BIND_SESSION:-}"' \
+sz_call() {  # <plan> -> "<rc>|<BIND_SESSION>" from one call, under pipefail and set -u as the callers run, the reader loaded and its translation not
+  bash -c 'set -uo pipefail; . "$1" || exit 9; . "$2" || exit 9; . "${1%/*}/reader.sh" || exit 9; rc=0; bind_record_session "$3" "$4" bind || rc=$?; printf "%s|%s" "$rc" "${BIND_SESSION:-}"' \
     _ "$RUNLIB" "$BINDLIB" "$1" "$SID" 2>/dev/null
 }
 SZ="$SANDBOX/size"; SZW="$(sz_plan with with)"; SZO="$(sz_plan without without)"; SZS="$(cksum < "$SZW")|$(cksum < "$SZO")"
