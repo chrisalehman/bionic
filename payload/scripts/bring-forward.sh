@@ -25,9 +25,9 @@
 # (an approval other than the plan's, a decision, an external token) is named on the gaps list and
 # written nowhere, since a version-15 row holds no other wait.
 #
-# A DROPPED ROW is named by the translation, since no ruled event carries it. Its work is no longer owed,
-# so it leaves the Tasks table, where the reader would read it as ready, and a wait on it is met as the
-# fill meets it; both are named on the gaps list, and the row stays whole in the kept plan.
+# A DROPPED ROW stays in the Tasks table as the person wrote it: the translation writes its status cell as the
+# run's `drop` event, so the log carries that its work is no longer owed, and a wait on it stays a wait, met
+# as a landing meets it.
 #
 # A ROW'S SUITES AND LANDS-ON are a person's words about the task, so they go to the task's own section,
 # a heading whose first word is its id, when the plan has one, and to the gaps list when it has none.
@@ -46,12 +46,12 @@ _bf_dir="$(cd "$_bf_dir" && pwd -P)" || exit 2
 # shellcheck source=/dev/null
 . "$_bf_dir/lib/translate.sh" || exit 2
 
-_bf_plan() {  # <plan> <deps file|-> <gaps out> <dropped ids> -> the plan's text brought forward
+_bf_plan() {  # <plan> <deps file|-> <gaps out> -> the plan's text brought forward
   # Read twice: the first pass learns the Tasks table's columns, each row's suites and lands-on and which
   # rows have a section of their own; the second writes. A cell keeps its text as written, `\|` included.
   # A task's own section is found by plan-read.sh's one heading rule and its one fence rule, so the act writes where
   # the brief reads: a `#` line inside a fence is the section's text, never a heading, in either pass.
-  awk -v depf="$2" -v gapf="$3" -v drop=" $4 " -v nine="id step kind task deps size serves files artifact" "$_PLAN_READ_FENCE$_PLAN_READ_SECTION"'
+  awk -v depf="$2" -v gapf="$3" -v nine="id step kind task deps size serves files artifact" "$_PLAN_READ_FENCE$_PLAN_READ_SECTION"'
     function cells(line, out,   n, i) {
       gsub(/\\[|]/, "\001", line); sub(/^[ \t]*[|]/, "", line); sub(/[|][ \t]*$/, "", line)
       n = split(line, out, "|"); for (i = 1; i <= n; i++) gsub(/^[ \t]+|[ \t]+$/, "", out[i])
@@ -83,13 +83,13 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> <dropped ids> -> the plan's text
     !f && /^#+[ \t]/ { place() }
     !f && /^## / { skip = (sec == "SDLC State" || sec == "Verification Matrix" || sec == "Handoff") }
     skip { next }
-    !f && /^#+[ \t]/ && !isnine && (heading($0) in row) && !index(drop, " " heading($0) " ") { print; ins = heading($0); next }
+    !f && /^#+[ \t]/ && !isnine && (heading($0) in row) { print; ins = heading($0); next }
     ins != "" && /^[ \t]*$/ { blanks++; next }
     ins != "" { for (; blanks > 0; blanks--) print "" }
     sec == "Tasks" && !tdone && !isnine && /^[ \t]*[|]/ {
       if (!nh) { nh = 1; o = "|"; s = "|"; for (i = 1; i <= nn; i++) { o = o " " ((w9[i] in hn) ? hn[w9[i]] : w9[i]) " |"; s = s "---|" }; print o; print s; next }
       if ($0 ~ /^[ \t]*[|][-:| \t]+$/) next
-      cells($0, r); id = r[col["id"]]; if (index(drop, " " id " ")) next
+      cells($0, r); id = r[col["id"]]
       o = "|"
       for (i = 1; i <= nn; i++) {
         v = (w9[i] == "deps") ? ((id in dep) ? dep[id] : "—") : ((w9[i] in col) ? unesc(r[col[w9[i]]]) : "")
@@ -105,14 +105,12 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> <dropped ids> -> the plan's text
     END { place() }' "$1" "$1"
 }
 
-_bf_deps() {  # <old plan> <implied plan> <dropped ids> <deps out> -> the waits that are not deps, as gaps
+_bf_deps() {  # <old plan> <implied plan> <deps out> -> the waits that are not deps, as gaps
   # The implied plan is the new table with every deps cell empty, so its waits are what kind and step imply.
-  { plan_read_waits "$2"; printf '\034\n'; plan_read_waits "$1"; } | awk -F'\t' -v drop=" $3 " -v out="$4" '
+  { plan_read_waits "$2"; printf '\034\n'; plan_read_waits "$1"; } | awk -F'\t' -v out="$3" '
     $0 == "\034" { old = 1; next }
     !old { if ($2 != "kind") imp[$1, $2, $3] = 1; next }
     $2 == "kind" { ord[++n] = $1; next }
-    index(drop, " " $1 " ") { next }
-    $2 == "row" && index(drop, " " $3 " ") { printf "gap/v1|ev=row|row=%s|field=%s|why=dropped\n", $1, $3; next }
     ($1, $2, $3) in imp { next }
     $2 == "row" { d[$1] = d[$1] (d[$1] == "" ? "" : ", ") $3; next }
     { printf "gap/v1|ev=row|row=%s|field=%s|why=unruled\n", $1, $3 }
@@ -120,13 +118,12 @@ _bf_deps() {  # <old plan> <implied plan> <dropped ids> <deps out> -> the waits 
 }
 
 _bf_compute() {  # <plan> <work dir> -> <work>/plan, the plan brought forward; <work>/gaps, the act's gaps list
-  local plan="$1" w="$2" dropped
+  local plan="$1" w="$2"
   translate "$plan" gaps > "$w/translated.gaps" || return 1
-  dropped="$(sed -n 's/^gap\/v1|ev=dropped|row=\([^|]*\)|.*/\1/p' "$w/translated.gaps" | tr '\n' ' ')"
   : > "$w/deps"; : > "$w/cells.gaps"
-  _bf_plan "$plan" - "" "$dropped" > "$w/implied.plan.md" || return 1
-  _bf_deps "$plan" "$w/implied.plan.md" "$dropped" "$w/deps" > "$w/waits.gaps" || return 1
-  _bf_plan "$plan" "$w/deps" "$w/cells.gaps" "$dropped" > "$w/plan" || return 1
+  _bf_plan "$plan" - "" > "$w/implied.plan.md" || return 1
+  _bf_deps "$plan" "$w/implied.plan.md" "$w/deps" > "$w/waits.gaps" || return 1
+  _bf_plan "$plan" "$w/deps" "$w/cells.gaps" > "$w/plan" || return 1
   cat "$w/translated.gaps" "$w/waits.gaps" "$w/cells.gaps" | awk '!seen[$0]++' > "$w/gaps"
 }
 

@@ -15,9 +15,10 @@
 # times, which no fixed clock moves.
 # A value holding `|` or a line break would split a field or a line, so it is refused unwritten.
 #
-# THE CLOSED LIST. LOG_TYPES is every event type a line may carry: the 28 of the kernel map and `hand`
-# (any act taken by hand to keep the run going). A type outside it is refused, so a misspelt or retired
-# event cannot become a fact the reader has no question for.
+# THE CLOSED LIST. LOG_TYPES is every event type a line may carry: the 28 of the kernel map, `hand`
+# (any act taken by hand to keep the run going) and `drop` (a row's work no longer owed, in the person's
+# words). A type outside it is refused, so a misspelt or retired event cannot become a fact the reader has
+# no question for.
 #
 # EXITS. 0 appended; 2 refused with the file untouched (no type, a type outside the list, a field that is
 # not `<name>=<value>`, no RUN_LOG, a LOG_AT off the shape); 1 the write failed. The write is the landing record's one append
@@ -32,7 +33,7 @@ if ! declare -F line_value >/dev/null 2>&1 || ! declare -F _wt_proofs_put >/dev/
 fi
 
 LOG_TYPES=" ready candidate verdict published returned stalled standing admitted void run walk step approval"
-LOG_TYPES="${LOG_TYPES} proof finding waiver decision order bind handoff dispatch tree born ask stop debt abandon cancel hand "
+LOG_TYPES="${LOG_TYPES} proof finding waiver decision order bind handoff dispatch tree born ask stop debt abandon cancel hand drop "
 
 log_append() {  # <event type> <key>=<value>… -> 0 appended, 2 refused, 1 not written
   local ev="${1:-}" f k line at="${LOG_AT:-}"

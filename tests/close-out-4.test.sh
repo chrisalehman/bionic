@@ -344,6 +344,8 @@ lands_step() {  # <project> <id> -> the row's `- T<n>:` line under ## SDLC State
 }
 LA_SID="closeout-lands-sid"
 PLA="$(mk_fixture lands)"; advance_to "$PLA" 8; lands_rows "$PLA"
+awk '{ print } /^\| T4 \|/ { print "| T5 | 8 | integrate | a second merge | — | — | 10 | AC-1 | none | pending | — |" }' "$PLA/$PLAN_REL" > "$PLA/t5" && mv "$PLA/t5" "$PLA/$PLAN_REL"
+printf 'run/v1|ev=drop|row=T5|why=no longer owed|at=2026-09-14T00:20:00Z\n' >> "$PLA/.bionic/docs/record/$(basename "$PLAN_REL" .plan.md)/run.log"
 LA_MAIN="$(fixture_git "$PLA" rev-parse --verify -q main)"
 lands_bind "$PLA" "$LA_SID"
 expect_eq "LANDS-0 precondition: the session is bound (the verb said so), and T3 and T4 read pending, their step lines pending dispatch" \
@@ -359,7 +361,8 @@ expect_eq "LANDS-3 …each row by one published event at the integration head, o
   "$LA_MAIN close close-out|$LA_MAIN close close-out" "$(lands_pub "$PLA" T3)|$(lands_pub "$PLA" T4)"
 expect_eq "LANDS-3b …and no cell or step line of either is written" "pending|pending|- T3: pending dispatch — —|- T4: pending dispatch — —" \
   "$(lands_cell "$PLA" T3 11)|$(lands_cell "$PLA" T4 11)|$(lands_step "$PLA" T3)|$(lands_step "$PLA" T4)"
-expect_contains "LANDS-4 …and the card says which rows it landed" "rows-landed: T3 T4 at main @ ${LA_MAIN:0:7}" "$CO_OUT"
+expect_contains "LANDS-4 …and the card says which rows it landed, the row the log drops not among them" "rows-landed: T3 T4 at main @ ${LA_MAIN:0:7}" "$CO_OUT"
+expect_eq "LANDS-4b …which reads dropped, with no landing" "dropped|" "$(lands_state "$PLA" T5)|$(lands_pub "$PLA" T5)"
 expect_eq "LANDS-5 the engaged marker is gone after run, and its removal is the card's last line" "no|yes" \
   "$(tmp_file_exists "$PLA" engaged "$LA_SID")|$(printf '%s\n' "$CO_OUT" | tail -1 | /usr/bin/grep -q '^disengaged: ' && echo yes || echo no)"
 # the session re-engages and binds its delivered plan by the verb (ruling r1791955629-34788): bound-closed
