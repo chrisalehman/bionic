@@ -473,7 +473,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh debt touched <concept> [<plan>]   add one to the touches of each unburned item of <concept> (the dispatch wall's call)"
   die "  bash ${HOOK_DIR}/session-poker.sh debt burn <concept> <row> [<plan>]   mark each unburned item of <concept> burned by <row>"
   die "  bash ${HOOK_DIR}/session-poker.sh debt adopt <continuation> [<plan>]   append each debt: line the continuation carries under ## Deferrals to the run's log as a debt, its touches and its raising record kept"
-  die "  bash ${HOOK_DIR}/session-poker.sh debt list [<plan>]   print the run's debts as the reader holds them, one line each, burned ones too"
+  die "  bash ${HOOK_DIR}/session-poker.sh debt list [<plan>]   print the run's debts, one line each, burned ones too"
   exit 2
 }
 
