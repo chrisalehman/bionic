@@ -52,7 +52,8 @@ if [ "$RT_RC" = 0 ]; then
   expect_eq "RW-1b …through the door's landing, the regression run and the release approval card's own verb" \
     "yes|yes|yes" "$([ "$(rt_ran 'spawn-worktree.sh land')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'regression-run')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'release-approval')" -ge 1 ] && echo yes)"
   # The release landed past the whole run with its check passing, so it moved no code: no merge without a pass is asked.
-  rt_sheet_and_card RW "approve:merge approve:release" "approve:merge>8/4 approve:release>8/4" approve:release
+  # The goal the rehearsal writes as not met owes its decision from the first tick that reads it, holding nothing.
+  rt_sheet_and_card RW "approve:merge approve:release decide:goal:asks" "approve:merge>8/4 approve:release>8/4 decide:goal:asks>nothing" approve:release
 fi
 
 # ============================================================
