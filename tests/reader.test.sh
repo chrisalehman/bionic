@@ -40,7 +40,7 @@
 #               withdrawal of a request for the load leaves none.
 #   §SESSION    an order, a handoff and a session the log holds past the plan's text answer, each by its instant; a
 #               session counts once, by its first act; the homes of the three answer as the whole fold.
-#   §HELD       the run's held place answers as the whole fold, over every form of the step's and approval's line
+#   §HELD       the run's held place, its order and its sessions answer as the whole fold, over every form of the step's and approval's line
 #               and every plan this suite built: a home that writes one of the three and is not in the place's list
 #               turns it red.
 #
@@ -713,7 +713,8 @@ current: 4\rapproved-by: u 2026-01-01T00:00Z "ok"\r
 EOF
 # each plan asked of the held place cold and of the whole fold: `<compared> <the plans that disagree>`
 held() { TMPDIR="$(mktemp -d)" bash -c '. "$1/lib/proof.sh"; _proof_reader_load; n=0; bad=""; for p in "$2"/*.plan.md; do n=$((n + 1))
-  w="$(reader_q_step "$p"; if reader_q_approved "$p" step3; then echo approved=1; else echo approved=0; fi)"; [ "$(proof_step_held "$p")" = "$w" ] || bad="$bad ${p##*/}"; done
+  w="$(reader_q_step "$p"; if reader_q_approved "$p" step3; then echo approved=1; else echo approved=0; fi)"; [ "$(proof_step_held "$p")" = "$w" ] || bad="$bad ${p##*/}"
+  [ "$(proof_order_held "$p")|$(proof_sessions_held "$p")" = "$(reader_q_order "$p")|$(reader_q_sessions "$p")" ] || bad="$bad ${p##*/}:order-sessions"; done
   echo "$n$bad"' _ "${READER%/*}" "$D/plans/epic-x"; }
 HELD="$(held)"
 expect_eq "the held place answers as the whole fold on every form and every plan this suite built, nineteen forms among them" \

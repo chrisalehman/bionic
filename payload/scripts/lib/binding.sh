@@ -248,7 +248,7 @@ BIND_SESSION_ACTS="engage bind write"
 
 # bind_sessions <plan> [<root>] -> the sessions the run holds, one per line, in the order they
 # bound (each once); exit 1 when the plan is not a readable file. They are the reader's answer
-# (lib/reader.sh `reader_session` sessions: the run's bind events, and an older plan's `- session:`
+# (lib/reader.sh `reader_q_sessions`: the run's bind events, and an older plan's `- session:`
 # lines under its `## SDLC State`), and an id outside the marker's own shape rule ([A-Za-z0-9_-],
 # not `unknown`) is skipped: a reader turns an id into a transcript path, so a hand-typed `../x`
 # must never reach one.
@@ -282,15 +282,16 @@ bind_sessions() {  # <plan> [<root>]
   done
 }
 
-# _bind_session_ids <plan> -> the ids of the sessions the run holds, each once, in order (above); nothing when the reader
-# beside this file cannot be loaded or cannot answer.
+# _bind_session_ids <plan> -> the ids of the sessions the run holds, each once, in order (above), the reader's answer held
+# with the run's place (lib/proof.sh `proof_sessions_held`, beside this file), since every engagement asks it; nothing
+# when it cannot be loaded or cannot answer.
 _bind_session_ids() {
-  if ! declare -F reader_session >/dev/null 2>&1; then
+  if ! declare -F proof_sessions_held >/dev/null 2>&1; then
     # shellcheck source=/dev/null
-    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/reader.sh" >/dev/null 2>&1
-    declare -F reader_session >/dev/null 2>&1 || return 0
+    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/proof.sh" >/dev/null 2>&1
+    declare -F proof_sessions_held >/dev/null 2>&1 || return 0
   fi
-  reader_session "$1" sessions 2>/dev/null | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "session=") == 1) {
+  proof_sessions_held "$1" 2>/dev/null | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "session=") == 1) {
     s = substr($i, 9); if (s ~ /^[A-Za-z0-9_-]+$/ && s != "unknown" && !(s in got)) { got[s] = 1; print s } } }'
 }
 
