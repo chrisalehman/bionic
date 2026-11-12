@@ -1401,14 +1401,11 @@ expect_eq "BORN-2 the cap's count, the findings and the marks read the review-bo
   "T2	S1 on	b.sh|T2	pending	record/w/r.md#1|T2	review	S1 on" \
   "$(call units_born "$LV_P")|$(call units_born_findings "$LV_P")|$(call units_born_marks "$LV_P")"
 
-section "§BACK — a launch taken back is one function: the log's cancel for a launch in the log, the cells for one by its cells"
+section "§BACK — a launch taken back is the log's cancel, the plan untouched"
 lv_log dispatch row=T2 name=w-T2b brief=b sum=s; BK_SUM="$(cksum < "$LV_P")"
 call units_row_back "$LV_P" T2
 expect_eq "BACK-1 a launch in the log returns to pending by one cancel, the plan untouched" "pending/— 1 same" \
   "$(lv T2) $(grep -c '|ev=cancel|of=dispatch|row=T2|name=w-T2b|' "$LV_LOG") $([ "$(cksum < "$LV_P")" = "$BK_SUM" ] && echo same)"
-call units_row_back "$LV_P" T1
-expect_eq "BACK-2 a launch by its cells returns by its cells, and writes no cancel" "pending/— 0 | T1 | 4 | build | one | — |" \
-  "$(lv T1) $(grep -c '|ev=cancel|of=dispatch|row=T1|' "$LV_LOG") $(grep -o '^| T1 | 4 | build | one | [^|]* |' "$LV_P")"
 
 section "§TREE — a row's tree and base are the run's: the newest tree event in the log, the cells for a row it holds none for"
 TV_P="$SANDBOX/docs/plans/e/t.plan.md"; LV_LOG="$SANDBOX/docs/record/t/run.log"; mkdir -p "${LV_LOG%/*}"
@@ -1426,7 +1423,7 @@ expect_eq "TREE-2 with its launch it reads active under its name in its newest t
   "active/w-T2/.worktrees/t2b/3333eeee same" "$(tv T2) $([ "$(cksum < "$TV_P")" = "$TV_SUM" ] && echo same)"
 
 section "§LEDGER — a landed row with no line of its own is the reader's to answer: admitted when it answers landed, refused when it does not"
-LV_LOG="$SANDBOX/docs/record/w/run.log"; lv_log published row=T2 commit=abcdef1 by=w-T2b
+LV_LOG="$SANDBOX/docs/record/w/run.log"; sed -i.bak 's/| a1 | — | 30m | R | a.sh | active |/| — | — | 30m | R | a.sh | pending |/' "$LV_P"; lv_log published row=T2 commit=abcdef1 by=w-T2b
 expect_eq "LEDGER-1 T2 landed by its event, with no line in the plan, owes nothing: the reader answers landed" "landed|" "$(lv T2 | cut -d/ -f1)|$(call units_findings "$LV_P")"
 sed -i.bak 's/| a.sh | pending |/| a.sh | landed |/' "$LV_P"; lv_log published row=T1 commit=abcdef2 by=a1; lv_log cancel of=published row=T1 commit=abcdef2 by=a1
 expect_eq "LEDGER-2 a landing the log took back, under a cell that says landed, is refused for its line: the reader answers it pending" "landed|state=pending|evidence T1" \

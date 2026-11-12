@@ -2573,10 +2573,9 @@ EOF
     # never a second reading, and compares against `_gate_share_cores`, the gate's one site of the line. A
     # live writer is an open roster row of a writer role (`budget_open_writers`, the occupancy's own count)
     # that no fresh panel shows gone, acked by nothing this tick, with no landing mark, whose name is the
-    # agent of an `active` row. The row is returned to pending before the order is written, by the plan's
-    # own verb in a child, which takes the launch back in the run's log (`units_dispatch_back`), so a refused
-    # write orders no stop: a stopped agent whose row stayed active would never be offered again. The tree and
-    # base cells are kept; the agent cell is cleared, as a review row returned on its proof is.
+    # agent of an `active` row. The row is returned to pending before the order is written, its launch taken back
+    # in the run's log (lib/units.sh `units_row_back`), so a launch that cannot be taken back orders no stop: a
+    # stopped agent whose row stayed active would never be offered again.
     #
     # A STAND-DOWN FREES WHAT IT CAN AND WAITS ON WHAT IT MUST NOT END. The stood-down writer's asks that were never
     # admitted are withdrawn (`stop_run_gate --waiting`): a detached shim holds them, so the agent's stop reaches none,

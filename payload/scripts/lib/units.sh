@@ -322,36 +322,17 @@ units_dispatch_back() {
   RUN_LOG="$log" log_append cancel of=dispatch "row=${2:-}" "name=${3:-}"
 }
 
-# units_cells_write <plan> <row> <column>=<value>… -> the row's cells set in the plan: the plan copied, the cells
-# projected onto the copy (`units_table_cells`), the copy judged by `units_validate` as the plan is, and moved over the
-# plan only when no other write changed it meanwhile. No person calls it: a person changes a cell by editing the plan,
-# which the write hook judges by the same check. 1 the cells cannot be set or the copy breaks the table; 3 the plan
-# changed under it, so the caller may try again.
-units_cells_write() {
-  local plan="${1:-}" row="${2:-}" sum new viol
-  shift 2 || return 1
-  sum="$(cksum < "$plan" 2>/dev/null)" || return 1
-  new="$plan.cells.$$"
-  if ! units_table_cells "$plan" set tasks "$row" "$@" > "$new" 2>/dev/null; then rm -f "$new"; return 1; fi
-  viol="$(units_validate "$new" "$plan" 2>&1)"
-  if [ -n "$viol" ]; then rm -f "$new"; return 1; fi
-  if [ "$(cksum < "$plan" 2>/dev/null)" != "$sum" ]; then rm -f "$new"; return 3; fi
-  mv -f "$new" "$plan"
-}
-
-# units_row_back <plan> <row> -> the row's launch taken back, whichever way it was launched: a launch the log holds by
-# its one cancel (`units_dispatch_back`), a launch its cells hold by setting them pending with no agent. The tick's
-# stand-down and the stop of an agent gone unlanded call it, so a row returned is offered again with no second act.
-# 0 when nothing was running; 2 the run's facts cannot be read; else the writer's own status.
+# units_row_back <plan> <row> -> the row's launch taken back by its one cancel in the run's log (`units_dispatch_back`).
+# The tick's stand-down and the stop of an agent gone unlanded call it, so a row returned is offered again with no
+# second act. No verb writes the plan, so a launch its cells hold is not taken back here: only an edit of the plan
+# undoes it. 0 taken back, or nothing was running; 1 the row still runs by its cells; 2 the run's facts cannot be read.
 units_row_back() {
-  local plan="${1:-}" row="${2:-}" live nm cur st
+  local plan="${1:-}" row="${2:-}" live nm cur
   live="$(_units_live "$plan")" || return 2
   nm="$(printf '%s\n' "$live" | awk -F'\t' -v id="$row" '$1 == id && $2 == "active" { print $3 }')"
-  if [ -n "$nm" ]; then units_dispatch_back "$plan" "$row" "$nm" || return 2; fi
+  if [ -n "$nm" ]; then units_dispatch_back "$plan" "$row" "$nm" || return 2; return 0; fi
   cur="$(_units_table "$plan")" || return 2
-  st="$(printf '%s\n' "$cur" | awk -F'\t' -v id="$row" '$1 == id { print $10; exit }')"
-  [ "$st" = active ] || return 0
-  units_cells_write "$plan" "$row" status=pending agent=—
+  [ "$(printf '%s\n' "$cur" | awk -F'\t' -v id="$row" '$1 == id { print $10; exit }')" != active ]
 }
 
 # units_born_event <plan> <row> [<reason>] [<finding>] [promoted] -> the row's birth appended to its run's log: one
@@ -2816,9 +2797,9 @@ units_thread_rows() {
 
 # ── THE PLAN-ROW PROJECTORS (wave-24 T15; REQ-9, D14) ─────────────────────────
 #
-# One projector, for a hand edit a run used to make to its own plan: a cell of a table row. The machine's cell write
-# (`units_cells_write`) runs it onto a COPY and judges the copy before anything is swapped in. A step is an event in the
-# run's log, and nothing projects it.
+# One projector, for a hand edit a run used to make to its own plan: a cell of a table row. No verb writes a plan, so
+# it only prints; a test standing in for a person's edit writes what it prints. A step is an event in the run's log,
+# and nothing projects it.
 #
 # PURE, AS EVERY VERB HERE IS: each prints the WHOLE plan and writes nothing. Fence-aware like
 # `_units_read`: a table or a state line inside a ``` example is documentation and is never

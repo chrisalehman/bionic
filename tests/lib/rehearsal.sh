@@ -127,9 +127,9 @@ _rh_hand() { printf '# by hand: [%s] %s\n' "$1" "$2" >> "$RH_LOG"; }   # <kind> 
 # _rh_row <label> <Tasks line> <id> [--born <b>] -> the orchestrator's edit adding the row, one hand write, then task-add
 _rh_row() { RH_R="$2" awk '/^## / { t = ($0 ~ /^## Tasks/) } { L[NR] = $0 } t && /^\|/ { last = NR } END { for (i = 1; i <= NR; i++) { print L[i]; if (i == last) print ENVIRON["RH_R"] } }' \
   "$RH_PLAN" > "$RH_PLAN.t" && mv "$RH_PLAN.t" "$RH_PLAN" && _rh_hand plan "the row $3" && _rh_poker "$1" task-add "${@:3}"; }
-# _rh_cell <label> <row> <column>=<value>… -> the person's edit of a Tasks row's cells, judged by the table check the
-# write hook runs (lib/units.sh `units_cells_write`), as one logged act.
-_rh_cell() { local l="$1"; shift; _rh_do "$l" bash -c '. "$1/units.sh" 2>/dev/null && units_cells_write "${@:2}"' _ "$RH_ROOT/payload/scripts/lib" "$RH_PLAN" "$@"; }
+# _rh_cell <label> <row> <column>=<value>… -> the person's edit of a Tasks row's cells, written as text beside the plan
+# (lib/units.sh `units_table_cells`) and judged by the table check the write hook runs before it replaces it, as one logged act.
+_rh_cell() { local l="$1"; shift; _rh_do "$l" bash -c '. "$1/units.sh" 2>/dev/null && units_table_cells "$2" set tasks "${@:3}" > "$2.t" && [ -z "$(units_validate "$2.t" "$2" 2>&1)" ] && mv "$2.t" "$2" || { rm -f "$2.t"; exit 1; }' _ "$RH_ROOT/payload/scripts/lib" "$RH_PLAN" "$@"; }
 # _rh_step <N> <text> [<key: value>]… -> the orchestrator's edit: step N's evidence line and its block at the end of the
 # plan's state section, marked as a hand write of the plan.
 _rh_step() {
