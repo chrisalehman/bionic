@@ -286,7 +286,7 @@ expect_eq "card: after the cancel the render opens the approval again, though th
 # The landing report and the release note follow the reader: a landing only a run's log holds, with no landing
 # record beside it, is counted by the report and rendered in the note, and the note's cut drops a later landing.
 NW="$WORLD_ROOT/note"; NP="$NW/.bio""nic/docs/plans/e/w9.plan.md"; NR="$NW/.bio""nic/docs/record/w9"; mkdir -p "${NP%/*}" "$NR"
-printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## SDLC State\n\ncurrent: 4\n' > "$NP"; git -C "$NW" init -q
+printf -- '---\ncanonical_sdlc_version: 15\n---\n\n# w9\n' > "$NP"; git -C "$NW" init -q
 git -C "$NW" -c user.name=fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m w9; NC="$(git -C "$NW" rev-parse HEAD)"
 printf 'run/v1|ev=%s|row=T%s|commit=%s|%sat=2026-11-01T00:0%s:00Z\n' ready 1 "$NC" 'suite=a.test.sh|' 0 published 1 "$NC" 'kind=queue|' 3 \
   ready 2 "$NC" 'suite=a.test.sh|' 4 published 2 "$NC" 'kind=hand|' 6 > "$NR/run.log"; brought "$NR"

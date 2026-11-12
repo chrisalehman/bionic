@@ -14,8 +14,8 @@
 # under this suite's own mktemp root, so no drive waits on, or writes, this machine's gate.
 #
 # FIXTURE FIDELITY. The runner, the framework, the libraries and the poker are this tree's own
-# files, copied or run in place; the plan is the shared fixture plan, bound through the real
-# bind writer. Stub suites, SYNTHESIZED: x, a green row and a line per run; f1-f4, a line and an exit.
+# files, copied or run in place; the plan is the shared fixture plan's page at 15 and its run's
+# log, bound through the real bind writer. Stub suites, SYNTHESIZED: x, a green row and a line per run; f1-f4, a line and an exit.
 #
 # ANTI-VACUITY. Each "never ran" count reads the same run log as the lifted run's count of one,
 # and the order is read by the reader, whose answer moves from given to none.
@@ -66,7 +66,7 @@ rt_plant() { printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"; . "$
 RF='fork: Resource temporarily unavailable'; rt_plant f1 "tests/f1.test.sh: $RF" 1; rt_plant f2 'FAIL: red' 1; rt_plant f3 "tests/f3.test.sh: $RF" 0; rt_plant f4 "missing 'y' in: tests/f4.test.sh: $RF" 1
 ( cd "$W" && git init -q . && git config user.name "Dana Fixture" && git config user.email d@example.com \
   && printf '.bionic/\nran.log\n' > .gitignore && git add -A && git commit -qm world ) >/dev/null 2>&1
-P="$(plan_fixture "$W/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave \
+P="$(plan_fixture --at 15 "$W/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave \
   "| T1 | 4 | build | the first build | implementor | — | — | 30 | REQ-1 | a.sh | — | — | pending |")"
 bound_marker "$W" "$SID" "$P" >/dev/null 2>&1
 
