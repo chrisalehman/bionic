@@ -436,6 +436,7 @@ wave_plan_at() {  # <repo> <path under <docs-root>/plans> <budget or "-"> <table
     local row
     for row in "$@"; do printf '%s\n' "$row"; done
   } > "$f"
+  [ "${SP_PLAN_AT:-14}" != 15 ] || sp_at15 "$f"
   touch "$f"
   printf '%s' "$f"
 }
@@ -478,7 +479,47 @@ poke_pressure() {  # <repo> <free_mb> <load_1m> <args...>
   BIONIC_PROBE_FREE_MB="$free" BIONIC_PROBE_LOAD_1M="$load" poke "$repo" "$@"
 }
 
+# sp_at15 <plan> -> the page a builder here wrote at 14, rewritten as a run at 15 holds it, and that run's log written
+#   whole beside it (<docs>/record/<stem>/run.log). The header gains the version and the branches the state section named;
+#   the state section, the dispatch ledger and the matrix go; each Tasks row keeps its nine authored cells, read by the
+#   table's own header names; and the log holds a step event for each step to current:, the plan's approval when the
+#   section carried approved-by:, then per row its dispatch (an agent cell on a row not pending), its tree (a worktree
+#   cell) and its landing (status landed). The matrix's criterion is an Eval design row. Instants are fixed and
+#   increasing, so the fold reads the lines in the order written.
+sp_at15() {
+  local p="$1" d n
+  d="${p%/*}"; case "$d" in */plans/*) d="${d%/plans/*}" ;; *) d="${d%/plans}" ;; esac
+  n="$(basename "$p" .plan.md)"; mkdir -p "$d/record/$n" || return 1
+  awk -v lf="$d/record/$n/run.log" '
+    function none(s) { gsub(/—|-/, "", s); return s == "" }
+    function ev(s) { printf "run/v1|ev=%s|at=2026-10-04T00:%02d:00Z\n", s, ++t > lf }
+    function cell(r, k) { return (k in col) ? r[col[k]] : "—" }
+    NR == FNR { if (/^current: /) cur = $2; if (/^approved-by: /) ok = 1
+      if (/^  base-sha: /) base = $2; if (/^  branch: /) br = $2; if (/^working-branch: /) br = $2
+      if (/^integration-branch: /) ib = $2; next }
+    FNR == 1 && /^---$/ { fm = 1; print; next }
+    fm && /^canonical_sdlc_version:/ { next }
+    fm && /^---$/ { fm = 0; print "canonical_sdlc_version: 15"; if (br != "") print "working-branch: " br
+      if (base != "") print "base-sha: " base; if (ib != "") print "integration-branch: " ib; print
+      for (i = 1; i <= cur; i++) ev("step|n=" i); if (ok) ev("approval|key=step3|by=fixture|said=approved"); next }
+    /^## / { skip = ($0 ~ /^## (SDLC State|Dispatch ledger|Verification Matrix)/); tab = ($0 ~ /^## Tasks/); hd = 0
+      if ($0 ~ /^## Verification Matrix/) eval = 1 }
+    skip { next }
+    tab && /^\| *id *\|/ { m = split($0, h, "|"); for (i = 2; i < m; i++) { k = tolower(h[i]); gsub(/^ +| +$/, "", k); col[k] = i }
+      print "| id | step | kind | task | deps | size | serves | Files | artifact |"; print "|---|---|---|---|---|---|---|---|---|"; hd = 1; next }
+    tab && hd && /^\|---/ { next }
+    tab && hd && /^\|/ { split($0, r, "|"); for (i in r) gsub(/^[ \t]+|[ \t]+$/, "", r[i])
+      printf "| %s | %s | %s | %s | %s | %s | %s | %s | — |\n", cell(r, "id"), cell(r, "step"), cell(r, "kind"), cell(r, "task"), cell(r, "deps"), cell(r, "size"), cell(r, "serves"), cell(r, "files")
+      if (!none(cell(r, "agent")) && cell(r, "status") != "pending") ev("dispatch|row=" cell(r, "id") "|name=" cell(r, "agent"))
+      if (!none(cell(r, "worktree"))) ev("tree|row=" cell(r, "id") "|path=.worktrees/" cell(r, "worktree"))
+      if (cell(r, "status") == "landed") ev("published|row=" cell(r, "id")); next }
+    { print }
+    END { if (eval) { print "\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|"
+      print "| REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | the fixture is wrong |" } }' "$p" "$p" > "$p.15" && mv "$p.15" "$p"
+}
+
 # ── hoisted from Section 12: sp_plan_at_step — Sections 37–40, 50, 55 and 67 write plans with it. ──
+# SP_PLAN_AT=15 asks for the same plan at 15 (sp_at15); unasked, the page is at 14.
 sp_plan_at_step() {  # <repo> <current> <row>... -> the plan path
   local repo="$1" current="$2"; shift 2
   local f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" row
@@ -492,6 +533,7 @@ sp_plan_at_step() {  # <repo> <current> <row>... -> the plan path
     printf '%s' "$SP_TASKS_HEADER"
     for row in "$@"; do printf '%s\n' "$row"; done
   } > "$f"
+  [ "${SP_PLAN_AT:-14}" != 15 ] || sp_at15 "$f"
   touch "$f"
   printf '%s' "$f"
 }
@@ -574,6 +616,7 @@ s34_plan() {  # <repo> <current> [step-4 block body] -> the plan path; the sessi
     printf '## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
     printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
   } > "$f"
+  [ "${SP_PLAN_AT:-14}" != 15 ] || sp_at15 "$f"
   bound_marker "$repo" "$SID" "$f" >/dev/null 2>&1
   printf '%s' "$f"
 }
@@ -593,8 +636,8 @@ s34_gate() {
 # ── hoisted from Section 42: s42_plan, s42_numstat, s42_snap, s42_unchanged, s42_builds_landed — every later shard builds, snapshots and compares plans with them. ──
 s42_plan() {  # <repo> <current> [step-4 block body] -> the plan path; bound, committed
   local p; p="$(s34_plan "$1" "$2" "${3:-}")"
-  printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n' >> "$p"
-  printf '|---|---|---|---|---|---|---|\n| T1 | implementor (w-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n' >> "$p"
+  [ "${SP_PLAN_AT:-14}" = 15 ] || printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n' >> "$p"
+  [ "${SP_PLAN_AT:-14}" = 15 ] || printf '|---|---|---|---|---|---|---|\n| T1 | implementor (w-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n' >> "$p"
   ( cd "$1" && git add -f "$p" && git commit -qm plan ) >/dev/null 2>&1
   printf '%s' "$p"
 }
@@ -628,6 +671,7 @@ s47_plan() {  # <repo> <writers> <row>... -> the path; a reads table, approved, 
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
     for row in "$@"; do printf '%s\n' "$row"; done
   } > "$f"
+  [ "${SP_PLAN_AT:-14}" != 15 ] || sp_at15 "$f"
   touch "$f"
   printf '%s' "$f"
 }
