@@ -1397,6 +1397,10 @@ sed 's/| T1 | 30m/| T1, approval:D7 | 30m/' "$DP" > "$DP.n"; mv "$DP.n" "$DP"; s
 expect_eq "NAMED-1 the wait is admitted; a misspelled one is refused, naming it" "|T2: dep aproval:D7 names no row in the table" "$(call units_validate "$DP")|$(call units_validate "$DP.bad")"
 NM_A="$(call units_ready "$DP" 4)|$(dq stop | grep '^ready=')|$(call units_approval_names "$DP" | paste -sd' ' -)"; printf 'run/v1|ev=approval|key=D7|by=me|at=2026-11-01T00:00:04Z\n' >> "$LV_LOG"
 expect_eq "NAMED-2 the fill and the reader hold T2 while D7 is absent and ready it once it stands; D7 is the name approve takes" "T3|ready=T3|D7 plan T2 T3|ready=T2 T3" "$NM_A $(call units_ready "$DP" 4 | paste -sd' ' -)|$(dq stop | grep '^ready=')"
+printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=2' 1Z 'approval|key=step3|by=me' 2Z > "$LV_LOG"
+expect_eq "NAMED-4 every task waits on the plan's approval by its kind: with the run at step 2, the fill offers none at step 4, as the reader offers none" "|ready=" "$(call units_ready "$DP" 4)|$(dq stop | grep '^ready=')"
+OP="$SANDBOX/docs/plans/e/o.plan.md"; printf -- '---\ncurrent: 2\n---\n## Tasks\n| id | step | kind | task | agent | deps | size | serves | Files | status |\n|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | one | — | — | 30m | R | a.sh | pending |\n' > "$OP"
+expect_eq "NAMED-5 the one place the two part: on the shape before the reads column the reader names a wait on the plan's approval and holds T1, the fill offers it" "T1	wait	approval:plan|ready=|T1" "$(bash -c '. "$1/plan-read.sh" && plan_read_waits "$2"' _ "${LIB%/*}" "$OP" | grep '	wait	')|$(bash -c '. "$1/reader.sh" && reader_main "$2" stop' _ "${LIB%/*}" "$OP" | grep '^ready=')|$(call units_ready "$OP" 4)"
 expect_eq "NAMED-3 the stop wall's edit that makes a row wait names the deps cell and a row's id at 15, the reads cell and its record at 14" "deps RID|reads RECORD" "$(bash -c '. "$1/stop.sh" && stop_wait_cell "$2" && stop_wait_cell "$3"' _ "${LIB%/*}" "$DP" "$LV_P" | paste -sd'|' -)"
 
 finish

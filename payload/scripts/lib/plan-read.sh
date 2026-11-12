@@ -162,7 +162,9 @@ plan_read_dropped() {  # <plan> -> one id per line, in table order; 1 none, 2 no
     if (c["status"] == "dropped") { print c["id"]; n++ } } END { exit !n }'
 }
 
-# plan_read_waits <plan> [id] -> per row, in table order: `<id><TAB>kind<TAB><kind>` first, then one line per
+# plan_read_waits <plan> [id] -> per row, in table order: `<id><TAB>kind<TAB><kind><TAB><waits>` first, <waits> every
+# wait the row has as it is spelled (its reads or its kind's default, the release, its deps), comma-joined, so the
+# scheduler judges these and reads no cell; then one line per
 # wait, `<id><TAB>wait<TAB><token>` for one that names no row (an approval, a proof, a step, an external
 # token), whose standing is the log's, and `<id><TAB>row<TAB><row id><TAB><reads>` for each row it waits on,
 # <reads> the reads that name that row, comma-joined, as the row wrote them. Of <id> alone when given: 1
@@ -232,11 +234,12 @@ plan_read_waits() {
           o = t; sub(/^live:/, "", t); sub(/^head:.*/, "head", t)
           if (t !~ /[A-Za-z0-9]/) continue
           nt[i]++; tk[i, nt[i]] = t; rk[i, nt[i]] = o; if (o == "head") rhead[i] = 1; if (o == "record") rrec[i] = 1
+          sp[i] = sp[i] (sp[i] == "" ? "" : ",") o
         }
       }
       for (i = 1; i <= n; i++) {
         if (want != "" && id[i] != want) continue
-        printf "%s\tkind\t%s\n", id[i], knd[i]
+        printf "%s\tkind\t%s\t%s\n", id[i], knd[i], sp[i]
         if ((knd[i] == "integrate" || knd[i] == "close" || (!hasreads && knd[i] == "doc" && stp[i] + 0 >= 7)) && stp[i] ~ /^[0-9]+$/) put(i, "wait\tstep:" stp[i])
         nr = 0; split("", rs)
         for (k = 1; k <= nt[i]; k++) {

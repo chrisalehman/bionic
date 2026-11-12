@@ -578,10 +578,12 @@ units_rows() {
 #     integrate row of a plan that carries one reads `approval:release` besides whatever its cell
 #     says (wave-35 T5, D13; through wave-34 the doc row read it, wave-26 T62, K2-F3).
 #     Its `deps` cell may carry `ext:<slug>` and nothing else (`units_validate` refuses an id).
-#   - A TABLE WITHOUT ONE. Each `deps` id reads as "wait for that task to land", exactly as
-#     through 1.10, and no kind default applies: a plan written before the column schedules as
-#     it always did. `ext:<slug>` is valid there too, and on a version-15 page `approval:<name>`, held
-#     until that approval stands.
+#   - A NINE-CELL PAGE AT 15. The row waits on its deps and on its kind's default, as the plan's
+#     one reader names them (lib/plan-read.sh `plan_read_waits`); the fill reads no cell for it.
+#   - A TABLE FROM BEFORE THE COLUMN (a status cell, no reads cell). Each `deps` id reads as "wait for
+#     that task to land", exactly as through 1.10, and no kind default applies: a plan written before
+#     the column schedules as it always did. `ext:<slug>` is valid in both, and on the nine-cell
+#     page `approval:<name>` too, held until that approval stands.
 #
 # A SETTLED READ waits for every open (`pending` or `active`) row that writes what it names,
 # the row itself never counted:
@@ -1221,6 +1223,12 @@ _units_sched() {
   for i in 1 2 3; do ctl="${ctl#*$'\t'}"; done
   ctl="${ctl%%$'\t'*}"
   case " $ctl " in *" reads "*) hasreads=1 ;; esac
+  # EVERY TABLE IS SCHEDULED ON THE WAITS THE PLAN'S ONE READER NAMES (lib/plan-read.sh `plan_read_waits`), save one: the
+  # shape from before the reads column (a status cell and no reads cell) keeps scheduling on its deps alone, as it always
+  # did. The reader gives that shape its kind's defaults, the plan's approval among them, and its suites hold that answer
+  # on purpose, so on that shape alone the fill and the reader still part. Refusing a live plan at 14 makes the branch moot.
+  local _UNITS_OLD_SHAPE=0
+  [ "$hasreads" = 1 ] || case " $ctl " in *" status "*) _UNITS_OLD_SHAPE=1 ;; esac
   # THE REGRESSION STATE IS ASKED ONLY WHEN AN ANSWER TURNS ON IT (wave-26 T64; REQ-3 AC-3.4). The
   # program runs without it; when a pending row it judges reads a `proof:floor` that a proof line
   # and no open writer would satisfy, it prints nothing and exits 3, and only then is
@@ -1232,8 +1240,7 @@ _units_sched() {
   # judged, so each state is asked once, in the order the program asks for them, and never twice.
   # THE ROWS EACH READ NAMES are lib/plan-read.sh's (`_units_waits`). A plan whose rows cannot be turned into
   # waits schedules nothing: no writer known is not no writer.
-  wts=""
-  case "$mode" in ready|held|waiting|edges|holds) wts="$(_units_waits "$plan")" || return 1 ;; esac
+  wts="$(_units_waits "$plan")" || return 1
   fst="$(_units_floor_kept "$plan")"; rst="${UNITS_READINGS_STATE:-}"
   _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst" "$rst" "$wts" "$proofs"; rc=$?
   for i in 1 2; do
@@ -1255,7 +1262,7 @@ _units_sched_run() {
     printf '\034facts\n'; printf '%s\n' "${_UNITS_FACTS:-}"
     printf '\034waits\n'; printf '%s\n' "${8:-}"
     printf '\034proofs\n'; printf '%s\n' "${9:-}"
-  } | _UNITS_FLOOR_ST="$6" _UNITS_READ_ST="${7:-}" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" -v hasreads="$4" \
+  } | _UNITS_FLOOR_ST="$6" _UNITS_READ_ST="${7:-}" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" -v hasreads="$4" -v oldshape="${_UNITS_OLD_SHAPE:-0}" \
       -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" -v evid="${_UNITS_EVIDENCE:-}" \
       -v plancur="${_UNITS_PLACE%% *}" -v planapby="${_UNITS_PLACE##* }" \
       -v liveq="${_UNITS_QUESTION:-}" -v pq="${PROOF_QUESTIONS:-}" -v regno="$(_units_regno "$2")" \
@@ -1569,8 +1576,10 @@ _units_sched_awk() {
       at[$1] = n
       next
     }
-    # THE WAITS (lib/plan-read.sh plan_read_waits): `<id> row <row> <reads>`, the rows each read names.
+    # THE WAITS (lib/plan-read.sh plan_read_waits): `<id> kind <kind> <waits>`, every wait a row has as it is spelled,
+    # and `<id> row <row> <reads>`, the rows each read names. The fill reads no cell of a row for what it waits on.
     part == 3 {
+      if ($2 == "kind") wl[$1] = $4
       if ($2 == "row") { m = split($4, a, ","); for (k = 1; k <= m; k++) wr[$1, a[k]] = wr[$1, a[k]] " " $3 }
       next
     }
@@ -1858,6 +1867,7 @@ _units_sched_awk() {
     function judge(i, t,   c, j, a) {
       nw = 0; lwhy = ""
       if (t ~ extre) return 0
+      if (t == "approval:release" && knd[i] == "integrate" && !hasrel) return 1
       if (substr(t, 1, 9) == "approval:") return apprmet(substr(t, 10))
       if (substr(t, 1, 5) == "live:") return live_sat(i, substr(t, 6), t)
       cand(i, t)
@@ -1991,17 +2001,15 @@ _units_sched_awk() {
           if (isopen(i)) ixadd(i, nfe[i])
         }
         code[i] = writes_head(fil[i])
-        r = rd[i]
-        if (hasreads && r !~ /[A-Za-z0-9]/) r = kdef(knd[i], stp[i])
-        if (hasreads) { m = split(r, a, ","); for (k = 1; k <= m; k++) addtok(i, a[k]) }
         # THE MERGE READS THE RELEASE APPROVAL (wave-35 T5; REQ-4 AC-4.1; D13). Through wave-34 the
         # Step-7 doc row read it (wave-26 T62, K2-F3), so the release text waited on the person while
         # nothing about writing it did. The text is now ready at its kind default, and the integrate
         # row of a plan that carries a release reads approval:release whatever its cell says: the
         # person approves the release and the merge once, after review. A plan with no release has
         # none to approve, and its integrate row reads what it read before (A-T5-1).
-        if (hasreads && hasrel && knd[i] == "integrate" && (" " rd[i] ",") !~ /[ \t,]approval:release[ \t]*,/) addtok(i, "approval:release")
-        m = split(dep[i], a, ",")
+        # Its waits are named by the one reader of a plan (lib/plan-read.sh plan_read_waits), on the older shape its deps
+        # alone (oldshape, set in _units_sched); a release row dropped is owed no more, so its approval is met (judge).
+        m = split(oldshape ? dep[i] : wl[id[i]], a, ",")
         for (k = 1; k <= m; k++) addtok(i, a[k])
       }
       # THE STATE OF THE READINGS FOR A LIVE ROW PAST ITS READING (wave-36 T28; D9): live_head and live_idle turn on
