@@ -81,6 +81,11 @@ export BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_BUSY_CORES=1.0
 
 # ---------- fixtures ----------
 
+# A FIXTURE'S PLAN AT 15 is the one the poker's prelude writes when asked: sp_at15, read from that file so the
+# rewrite of a page and its log has one source. A fixture here writes its page as before and then rewrites it.
+eval "$(sed -n '/^sp_at15() {/,/^}/p' "$(dirname "$0")/session-poker.prelude.sh")"
+declare -F sp_at15 >/dev/null || { echo "stop: sp_at15 not read from the poker's prelude — suite refuses to run"; exit 1; }
+
 # RESOLVED (`pwd -P`): mktemp answers under /var, which is a symlink to /private/var
 # on this platform, and `project_root` answers with the physical path — so an
 # unresolved fixture path would not match the paths the verdicts print.
@@ -90,6 +95,7 @@ mkfix() {
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans"
   printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4\n' \
     > "$d/.bionic/docs/plans/wave-01.plan.md"
+  sp_at15 "$d/.bionic/docs/plans/wave-01.plan.md"
   # BOUND (wave-23-fixit-1810, REQ-1, D1): an empty marker beside an open plan is the
   # unbound state, whose fallback is announced and never acted on — the Patrol verdict
   # would return before reading the stamp §1 needs. §2 and §UB drive the unbound state.
@@ -300,6 +306,7 @@ s7_fixture() {  # -> project dir on stdout
     printf '|---|---|---|---|---|---|---|---|---|---|\n'
     printf '| T13 | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |\n'
   } > "$d/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  sp_at15 "$d/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
   # BOUND to the plan the tick fills from: the stop wall charges only a bound session's own
   # ledger (wave-23-fixit-1810, REQ-1, D1).
   bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
@@ -497,7 +504,7 @@ section "9: the fill refusal's headline names only the rows the turn left out (w
 # ready set until the orchestrator ledgers it `active` (A-T11.1), so the naming subtracts the
 # turn's launches by dispatch name. Two ready rows, one launched under a wave-prefixed name
 # and still `pending`: the headline says 1 of 2 and names the other.
-s9_fixture() {  # -> project dir; plan with T13 and T14 pending, writers=8
+s9_fixture() {  # -> project dir; plan with T13 and T14 pending, writers=8; STOP_AT=15 asks for the page at 15
   local d
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
@@ -510,6 +517,7 @@ s9_fixture() {  # -> project dir; plan with T13 and T14 pending, writers=8
     printf '| T13 | 4 | build | first task | implementor | — | 15m | REQ-x | a.sh | pending | — |\n'
     printf '| T14 | 4 | build | second task | implementor | — | 15m | REQ-x | b.sh | pending | — |\n'
   } > "$d/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
+  [ "${STOP_AT:-14}" != 15 ] || sp_at15 "$d/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
   bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
   roster_header > "$d/.bionic/tmp/roster-$SID.state"
   printf '%s' "$d"
@@ -533,7 +541,7 @@ require_helpers s9_fixture s9_transcript s9_headline
 S9_RING="$(mktemp)"; printf '1700000000|80|0|1.0|8\n' > "$S9_RING"
 export BIONIC_PRESSURE_RING="$S9_RING" BIONIC_NOW_EPOCH=1700000000
 
-S9_D="$(s9_fixture)"
+S9_D="$(STOP_AT=15 s9_fixture)"
 roster_row_fixture status=intended session="$SID" name=w9-T13 agent_id=aw9T130000000001 deliverable= \
   >> "$S9_D/.bionic/tmp/roster-$SID.state"
 S9_TX="$(mktemp)"; s9_transcript "$S9_TX" w9-T13
@@ -557,7 +565,7 @@ expect_contains "9f: …and the ledger's ready set is still the plan's, both row
 expect_contains "9g: …with one row missed, not two" "|missed=1" "$(cat "$S9_LED" 2>/dev/null)"
 
 # THE ZERO CASE, so 9b cannot pass on a constant: nothing launched reads 0 of 2, both named.
-S9_D0="$(s9_fixture)"
+S9_D0="$(STOP_AT=15 s9_fixture)"
 S9_TX0="$(mktemp)"; s9_transcript "$S9_TX0"
 s7_fire "$S9_D0" "$S9_TX0"
 expect_contains "9h: a turn that launched nothing names both ready rows" "ready with room: T13 T14 (" "$(s9_headline)"
@@ -577,10 +585,10 @@ expect_contains "9p: T16 a turn that launched nothing leaves both ready rows idl
 # columns and refuse.sh refuses a longer one, which would turn this refusal into a refuse-call
 # error. Eight ready rows, nothing launched: the headline names what fits and counts the rest,
 # and the reason still names every row.
-S9_D8="$(s9_fixture)"
+S9_D8="$(STOP_AT=15 s9_fixture)"
 S9_P8="$S9_D8/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
 for _s9_i in 101 102 103 104 105 106; do
-  printf '| T%s | 4 | build | more | implementor | — | 15m | REQ-x | x%s.sh | pending | — |\n' "$_s9_i" "$_s9_i" >> "$S9_P8"
+  printf '| T%s | 4 | build | more | — | 15m | REQ-x | x%s.sh | — |\n' "$_s9_i" "$_s9_i" >> "$S9_P8"
 done
 S9_TX8="$(mktemp)"; s9_transcript "$S9_TX8"
 # ROOM FOR EIGHT (wave-33 T1; Δ10): each owed writer costs one core, and the suite's 8 cores at share
@@ -596,7 +604,7 @@ expect_contains "9m: …while the reason names every row" "T106" "$(reason_of)"
 # five-minute load over the share: the gate gives no room, so the wall owes no row and its
 # ledger records the hold. 9h above is the same fixture with room, and refuses. 8.0 busy cores of the
 # fixture's 8 is over the gate's width at any share below 100 (92 x 8 / 100 less the reserve of 1 = 6.36).
-S9_DG="$(s9_fixture)"
+S9_DG="$(STOP_AT=15 s9_fixture)"
 S9_TXG="$(mktemp)"; s9_transcript "$S9_TXG"
 BIONIC_PROBE_BUSY_CORES_5M=8.0 s7_fire "$S9_DG" "$S9_TXG"
 S9_LEDG="$S9_DG/.bionic/docs/record/wave-09-fixture/fill-ledger.log"
@@ -625,7 +633,8 @@ section "GAP: one width fact and one refusal — the wall asks the gate as the t
 # so a busy reading of 6.0 leaves room for exactly one writer (6 <= 6.36 < 6 + the suite cost of
 # 1.61), and 8.0 for none.
 # The plan is one the commit gate admits (its version line and a Step-4 block).
-gap_fixture() {  # -> project dir; three pending writer rows T13 T14 T15 reading their kind's default, an empty roster
+gap_fixture() {  # -> project dir; three pending writer rows T13 T14 T15 reading their kind's default, an empty roster;
+  # STOP_AT=15 asks for the page at 15
   local d
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
@@ -639,6 +648,7 @@ gap_fixture() {  # -> project dir; three pending writer rows T13 T14 T15 reading
     printf '| T14 | 4 | build | second | implementor | — | 15m | REQ-x | b.sh | pending |  |\n'
     printf '| T15 | 4 | build | third | implementor | — | 15m | REQ-x | c.sh | pending |  |\n'
   } > "$d/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
+  [ "${STOP_AT:-14}" != 15 ] || sp_at15 "$d/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
   bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
   roster_header > "$d/.bionic/tmp/roster-$SID.state"
   printf '%s' "$d"
@@ -743,7 +753,7 @@ section "LOAD: over the line with no room, the tick stands down the newest write
 # closed as `stopped` closes a stopped one, and the next tick, at a busy reading of 1, offers its row.
 load_fixture() {  # <active rows> -> project dir; the first <n> of T13 T14 T15 active and rostered
   local d p n=0 id
-  d="$(gap_fixture)"; p="$d/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
+  d="$(STOP_AT=15 gap_fixture)"; p="$d/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
   for id in T13 T14 T15; do
     n=$((n + 1)); [ "$n" -le "$1" ] || break
     bash -c '. "$1/log.sh" && RUN_LOG="$2" log_append dispatch "row=$3" "name=wl-$3" brief=b sum=s' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$d/.bionic/docs/record/wave-37-fixture/run.log" "$id"
@@ -833,6 +843,7 @@ ub_world() {  # -> the root on stdout; p1 newest, p2 older
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n---\n\n# p2\n\n'
     printf '## SDLC State\n\ncurrent: 2\n\n- Step 2: designing\n'
   } > "$d/.bionic/docs/plans/epic-99-ub/p2.plan.md"
+  sp_at15 "$d/.bionic/docs/plans/epic-99-ub/p1.plan.md"; sp_at15 "$d/.bionic/docs/plans/epic-99-ub/p2.plan.md"
   touch -t 202601010000 "$d/.bionic/docs/plans/epic-99-ub/p2.plan.md"
   bound_marker "$d" "$UB_SID_A" "$d/.bionic/docs/plans/epic-99-ub/p1.plan.md"
   unbound_marker "$d" "$UB_SID_B" none
