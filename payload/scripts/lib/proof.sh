@@ -260,6 +260,12 @@ proof_order_event() {  # <plan> <given|lifted> <the user's words> -> one order e
   _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
   RUN_LOG="$log" log_append order "act=$2" "said=${3:-}"
 }
+proof_handoff_event() {  # <plan> <the handoff file, project-root-relative> -> one handoff event in the plan's run log
+  local log
+  [ -n "${2:-}" ] || return 2
+  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
+  RUN_LOG="$log" log_append handoff "path=$2"
+}
 
 # A STEP A DRY JUDGMENT ASKS ABOUT stands last in the facts of that judgment and nowhere else. The advance runs the
 # commit gate on the plan itself under its own session, `planverb-<pid>`, with the step it moves to in BIONIC_DRY_STEP;

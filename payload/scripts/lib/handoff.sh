@@ -35,23 +35,12 @@
 # THE ONE READER OF THE POINTER. The poker's readers (adopt's STALE note) and close-out's closed form call these,
 # and tests/handoff-file.test.sh §POINTER-AGREE holds them to one answer.
 #
-# THE SECTION TEST, `_HANDOFF_SEC_AWK`: `ho_track(line)` is 1 for a line inside `## Handoff`, the heading, fences and
-# fenced lines excluded. Every awk that looks in the section prepends it, the poker's in-place rewrites included.
-#
 # NEEDS lib/root.sh and lib/roots.sh (both callers source them); loads lib/proof.sh from beside itself when
 # `proof_plan_slug` is not yet defined. Sourced, never executed; bash 3.2.
 
 _HANDOFF_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
 HANDOFF_HOME=".bionic/docs/record/handoffs"
 HANDOFF_SECTIONS="Summary|Goal|State|Findings|Decisions|Ruled out|Open|Suggested skills|Next|Resume"
-
-_HANDOFF_SEC_AWK='
-  function ho_track(l) {
-    if (l ~ /^[ \t]*```/) { _hf = !_hf; return 0 }
-    if (_hf) return 0
-    if (l ~ /^##[ \t]/) { _hs = (l ~ /^##[ \t]+Handoff[ \t]*$/); return 0 }
-    return _hs
-  }'
 
 _handoff_root() {  # <plan> [<root>] -> the root the pointer resolves against
   if [ -n "${2:-}" ]; then printf '%s' "$2"; return 0; fi

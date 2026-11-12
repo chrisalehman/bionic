@@ -196,7 +196,7 @@ fi
 . "$BIONIC_LIB/run.sh"
 # THE ONE READER OF THE INTEGRATION BRANCH AND THE ONE READER OF THE HANDOFF POINTER (wave-39 T16; D18, AC-12.1):
 # lib/plan.sh `plan_integration_branch` (## SDLC State, then the frontmatter) for `handoff` and `release-check`, and
-# lib/handoff.sh `handoff_pointer_of`/`handoff_default_of` and `_HANDOFF_SEC_AWK` for every reader of ## Handoff below.
+# lib/handoff.sh `handoff_pointer_of`/`handoff_default_of` for every reader of the run's handoff below.
 # close-out.sh calls the same two, so the verb and the closed form cannot read two branches or two files.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/plan.sh"
@@ -1986,15 +1986,6 @@ $(for f in "$2"/roster-*.state; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n'
       }
       close($0) }' 2>/dev/null)
 EOF
-}
-
-# A DISPATCH AFTER A HANDOFF IS NAMED AT ITS LOCAL TIME AND ITS ISO INSTANT, by adopt's
-# STALE note, the one reader a resumed session runs first.
-handoff_local_time() {  # <ISO-8601 Z> -> `YYYY-MM-DD HH:MM <zone>` on this machine's clock, empty if unreadable
-  local e
-  e="$(iso_epoch "$1")"
-  [ -n "$e" ] || return 0
-  date -r "$e" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || date -d "@$e" '+%Y-%m-%d %H:%M %Z' 2>/dev/null
 }
 
 # TWO PLAN PATHS ARE THE SAME PLAN when they name the same file, and the two sides of the
