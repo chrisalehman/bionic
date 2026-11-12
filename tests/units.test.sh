@@ -1,6 +1,5 @@
 #!/bin/bash
 # tests/units.test.sh — payload/scripts/lib/units.sh: THE ONE READER OF `## Tasks`
-# (epic-23 wave-11-lean-spine, REQ-1e; AC-1e.1/1e.2; spec Design §1 "Task", §2 D3/D7).
 #
 # WHAT IT OWNS. The contract three callers bind to after T8 — the evidence gate's ledger
 # checks and its prototype check, the tick's FILL, and the governing-skill Step-3 wall — so
