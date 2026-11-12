@@ -251,6 +251,16 @@ proof_step_event() {  # <plan> <step> [<field>=<value>…] -> one step event in 
   RUN_LOG="$log" log_append step "n=$n" "$@"
 }
 
+# THE RUN'S LOG HOLDS A SESSION'S FACTS, one writer for each type, in the fields the translation gives an older plan's
+# line, so the reader reads an old fact and a new one alike, and no plan line is written for any of them. Exits as
+# proof_waiver_event's, and 2 for a value its type does not take.
+proof_order_event() {  # <plan> <given|lifted> <the user's words> -> one order event in the plan's run log
+  local log
+  case "${2:-}" in given|lifted) ;; *) return 2 ;; esac
+  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
+  RUN_LOG="$log" log_append order "act=$2" "said=${3:-}"
+}
+
 # A STEP A DRY JUDGMENT ASKS ABOUT stands last in the facts of that judgment and nowhere else. The advance runs the
 # commit gate on the plan itself under its own session, `planverb-<pid>`, with the step it moves to in BIONIC_DRY_STEP;
 # close-out's pre-flight judges a copy of the plan, whose name joins no record, under `closeout-preflight-<pid>`, with
