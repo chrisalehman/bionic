@@ -217,14 +217,14 @@ current_admit() {
   esac
   case "$PV_KEY" in
     7)
-      plan_verb_dry current "step $PV_KEY" "step:$PV_KEY" "${PV_CUR%[ab]}"
+      plan_verb_dry current "current: $PV_KEY" "step:$PV_KEY" "${PV_CUR%[ab]}"
       cur7_judge 7
       PV_HOW="judged at that step first; every fact the run owes holds at $PV_HEAD8 (facts_state)" ;;
     8|8a|8b)
       cur7_judge 8
       PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)"
       [ -z "$PV_ORDER" ] || PV_HOW="$PV_HOW, the head the user approved for release" ;;
-    *) plan_verb_dry current "step $PV_KEY" "step:$PV_KEY" "${PV_CUR%[ab]}" ;;
+    *) plan_verb_dry current "current: $PV_KEY" "step:$PV_KEY" "${PV_CUR%[ab]}" ;;
   esac
 }
   # THE STEP MOVE. A step is an event in the run's log and nothing writes it into the plan: the advance asks what a
