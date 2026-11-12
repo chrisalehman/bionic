@@ -38,7 +38,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
-. "$(dirname "$0")/dispatch-preflight.prelude.sh"
+MAKE_REPO_AT=15; . "$(dirname "$0")/dispatch-preflight.prelude.sh"
 
 STEPS_DIR="${BIONIC_SKILLS_DIR}/canonical-sdlc/steps"
 AGENTS_DIR="${BIONIC_SCRIPTS_DIR}/agents"
@@ -183,15 +183,13 @@ section "§PROTOTYPE — a confined prototype is admitted before approval and ow
 # prototype owns no plan row: it is admitted with no `Row:`, and a `Row:` on one is refused. A
 # writer brief without the kind is refused before approval, as before.
 #
-# FIXTURES: make_repo's plan, its approval line taken out and `current:` set to 2; a linked tree
+# FIXTURES: make_repo's run, its log at step 2 with no approval; a linked tree
 # under .worktrees/ marked for the agent. README.md is tracked at the head.
 #
 # fails-when: a confined prototype is refused before approval; one is admitted that names a
 # tracked path, a path outside both places, a tree not made for it, or a Row:.
-pt_unapprove() {  # <repo> — the bound plan at Step 2, with no approved-by: line
-  local p="$1/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-  /usr/bin/awk '/^approved-by:/ { next } /^current:/ { print "current: 2"; next } { print }' "$p" > "$p.tmp" \
-    && mv "$p.tmp" "$p"
+pt_unapprove() {  # <repo> — the bound run at Step 2, its log holding no approval
+  printf 'run/v1|ev=step|n=%s|at=2026-09-07T19:0%s:00Z\n' 1 1 2 2 > "$1/.bionic/docs/record/wave-01-test/run.log"
 }
 pt_tree() {  # <repo> <tree name> <marker name> -> a linked tree under .worktrees/, marked
   local t="$1/.worktrees/$2"
@@ -221,8 +219,8 @@ pt_repo() {  # <name> -> an unapproved Step-2 fixture with the tree made for w99
 }
 
 REPO=$(pt_repo rpt1)
-PT_PLAN="$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-expect_absent "PT.0 precondition: the plan carries no approved-by: line" "approved-by:" "$(cat "$PT_PLAN")"
+expect_eq "PT.0 precondition: the run is at step 2 and approved nowhere" "n=2|1" \
+  "$(bash "$DP5_LIB/../reader.sh" "$(pf_plan_path "$REPO")" step | head -1)|$(bash "$DP5_LIB/../reader.sh" "$(pf_plan_path "$REPO")" approved step3; echo $?)"
 expect_true "PT.0b precondition: the throwaway tree is a linked worktree" test -f "$REPO/.worktrees/w99-proto/.git"
 expect_eq "PT.0c precondition: …marked for the agent" "w99-proto" \
   "$( ( . "$DP5_LIB/worktree.sh" >/dev/null 2>&1; worktree_marker "$REPO/.worktrees/w99-proto" ) )"
@@ -289,8 +287,7 @@ expect_contains "PT.8c …naming it" ".worktrees/w99-proto/lib/try.sh is outside
 
 # --- PT.9: the confinement holds after approval too: what it may write decides, not when ---
 REPO=$(make_repo rpt9 yes); write_attestation "$REPO" "$SID_A"; pt_tree "$REPO" w99-proto w99-proto >/dev/null
-expect_contains "PT.9 precondition: this plan is approved" "approved-by:" \
-  "$(cat "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md")"
+expect_status "PT.9 precondition: this run is approved" 0 "$(bash "$DP5_LIB/../reader.sh" "$(pf_plan_path "$REPO")" approved step3; echo $?)"
 pt_gate "$REPO" "$(pt_brief "$PT_OK_FILES, README.md")"
 expect_eq "PT.9b a prototype naming a tracked path is refused on an approved plan" "deny" "$GATE_VERDICT"
 expect_contains "PT.9c …naming it" "README.md is tracked" "$GATE_ERR"
@@ -383,8 +380,7 @@ section "§LANDS-CMD — Lands-on: may name a backticked command its Re-executes
 # command back byte for byte.
 lc_gate() {  # <repo tag> <Lands-on line> [<Re-executes line>] -> GATE_*, LC_ROW
   REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the widget | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' \
-    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  pf_tasks "$REPO" '| T23 | 4 | build | the widget | — | 30 | REQ-1 | a.sh | — |'
   mkdir -p "$REPO/payload/scripts/lib" "$REPO/tests"
   printf 'the widget\n' > "$REPO/payload/scripts/lib/widget.sh"
   printf '#!/bin/bash\nbash "$REPO/payload/scripts/lib/widget.sh"\n' > "$REPO/tests/widget.test.sh"
@@ -442,8 +438,7 @@ section "§LANDS-NONE — Lands-on: none is admitted only for Files the prose li
 # (SYNTHESIZED); a `prose:` line written to the fixture's .bionic/config.yaml where the case names one.
 ln_gate() {  # <repo tag> <Files value> <prose: line or ''> -> GATE_*, LN_ROW
   REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the notes | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' \
-    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  pf_tasks "$REPO" '| T23 | 4 | build | the notes | — | 30 | REQ-1 | a.sh | — |'
   [ -z "$3" ] || printf '%s\n' "$3" > "$REPO/.bionic/config.yaml"
   run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T23 w99-T23 "$(printf '%s\nFiles: %s\nLands-on: none the row'"'"'s Files are prose' "$BRIEF_FULL" "$2")")" w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
   LN_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
