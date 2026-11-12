@@ -1014,11 +1014,7 @@ ww_report() {  # <root> [flags…] -> landing-report --hand-holds over the root'
 }
 ww_hh() { ww_report "$@" | grep '^hand-holds: '; }   # <root> [flags…] -> the counts line
 ww_ends() { ww_report "$@" | grep '^hand-holds window: '; }   # <root> [flags…] -> the ends line
-ww_put() {  # <root> <at> <writer> <field>=<value>… -> the one event lib/proof.sh's <writer> appends to the run's log at <at>
-  local root="$1" at="$2" fn="$3"; shift 3
-  LOG_AT="$at" bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; f="$2" p="$3"; shift 3; "$f" "$p" "$@"' _ \
-    "$REPO/payload/scripts/lib" "$fn" "$(ll_plan "$root")" "$@"
-}
+ww_put() { LOG_AT="$2" bash -c '. "$1/run.sh" && . "$1/proof.sh" && "${@:2}"' _ "$REPO/payload/scripts/lib" "$3" "$(ll_plan "$1")" "${@:4}"; }   # <root> <at> <lib/proof.sh writer> <field>=<value>…
 ww_poke() {  # <root> <verb> [args…] -> the poker run as the world's session, from the root; stdout and stderr
   local root="$1"; shift
   ( cd "$root" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO/payload" \
@@ -1294,15 +1290,13 @@ section "§BORN-AT-8: past judgment only a fix born of a failing review lands; a
 #
 # A run at step 8 that the judge can answer (rigor, scale, base-sha) carries a registered structure reading whose
 # newest result is fail, its record holding one finding to fix. T1 is born of that finding by the event task-add
-# writes; T2 is unborn, then regression-born; T3 is born of the same finding once T1 has answered it. A row's first
-# born event is its marker, so each marker is a row of its own.
+# writes; T2 is unborn, then regression-born; T3 is born of the same finding once T1 has answered it (a row's first
+# born event is its marker, so each marker is a row of its own).
 # FIXTURE FIDELITY: the reading and the markers are planted in the shapes `proof-add review` and `task-add --born` write
 # them (the replay drives the verbs themselves: tests/close-replay.test.sh §CLOSE); the landing is the writer's `ready`.
 # fails-when: lib/worktree.sh `_wt_land_checks` keeps the past-judgment refusal for the born row (ba3), or admits a row
 # the born rule does not name: unborn (ba1), regression-born (ba2), born of a review no longer failing (ba4).
-ba_born() {  # <root> <row> <reason> <finding> — the row's born event, as task-add --born writes it
-  LOG_AT=2026-10-20T00:00:00Z bash -c '. "$1/units.sh" && units_born_event "${@:2}"' _ "$REPO/payload/scripts/lib" "$(ll_plan "$1")" "${@:2}"
-}
+ba_born() { LOG_AT=2026-10-20T00:00:00Z bash -c '. "$1/units.sh" && units_born_event "${@:2}"' _ "$REPO/payload/scripts/lib" "$(ll_plan "$1")" "${@:2}"; }   # <root> <row> <reason> <finding>, as task-add --born writes it
 ba_world() {  # -> a world at step 8: T1 born of rev.md#1, a failing structure reading of it newest
   local r p h b
   r="$(ll_rworld)" || return 1
@@ -1385,10 +1379,8 @@ kl_world() {  # -> root: release 9.9.9, its entry on wave/x, the doc row T3, two
   git -C "$r" add CHANGELOG.md && git -C "$r" commit --quiet -m "the entry" || return 1
   awk '{ print } /^\| T2 \| 4 \|/ { print "| T3 | 7 | doc | the entry. The release entry is rendered. | — | 10 | REQ-1 | CHANGELOG.md | — |" }' "$p" > "$p.n" && mv "$p.n" "$p"
   ww_poke "$r" task-add T3 >/dev/null || return 1
-  ww_put "$r" 2026-10-20T00:00:01Z proof_finding_event ref=record/wave-x/critic.md#1 severity=S3 reach=on to=deferred "title=the first title" \
-    "stated=$(printf '%s' "$KL_S1" | sed 's/["\\]/\\&/g')" || return 1
-  ww_put "$r" 2026-10-20T00:00:02Z proof_finding_event ref=record/wave-x/critic.md#3 severity=S3 reach=on to=deferred "title=the second title" \
-    "stated=$KL_S2" || return 1
+  ww_put "$r" 2026-10-20T00:00:01Z proof_finding_event ref=record/wave-x/critic.md#1 severity=S3 reach=on to=deferred "title=the first title" "stated=$(printf '%s' "$KL_S1" | sed 's/["\\]/\\&/g')" \
+    && ww_put "$r" 2026-10-20T00:00:02Z proof_finding_event ref=record/wave-x/critic.md#3 severity=S3 reach=on to=deferred "title=the second title" "stated=$KL_S2" || return 1
   printf '%s' "$r"
 }
 RK="$(kl_world)"; PK="$(ll_plan "$RK")"; KL_H="$(kl_tip "$RK")"

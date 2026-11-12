@@ -59,17 +59,14 @@ ll_world() {  # -> a world root; its plan admitted by the real commit gate (the 
   r="$(world_repo)" || return 1
   [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
   p="$r/.bionic/docs/plans/epic-x/wave-x.plan.md"
-  # LL_WORLD_AT=15 asks for the same run at 15: the page keeps its header and its rows' authored cells, and the run's
-  # log holds what the state section and the machine's cells held. Unasked, the page is at 14.
+  # LL_WORLD_AT=15 asks for this run at 15: the page keeps its header and authored cells, the log holds the rest.
   if [ "${LL_WORLD_AT:-14}" = 15 ]; then
     awk -F'|' '/^## SDLC State$/ { s = 1; next } /^## / { s = 0 } s { next }
       /^working-branch: / { print; print "canonical_sdlc_version: 15"; next }
-      /^\| id \|/ { print "| id | step | kind | task | deps | size | serves | Files | artifact |"; next }
-      /^\|---/ { print "|---|---|---|---|---|---|---|---|---|"; next }
+      /^\| id \|/ { print "| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|"; getline; next }
       /^\| T[0-9]+ \|/ { printf "|%s|%s|%s|%s|%s|%s|%s|%s| — |\n", $2, $3, $4, $5, $7, $9, $10, $11; next }
       { print }' "$p" > "$p.n" && mv "$p.n" "$p" || return 1
-    mkdir -p "$r/.bionic/docs/record/wave-x" || return 1
-    printf 'run/v1|ev=%s|at=2026-10-04T00:0%s:00Z\n' 'step|n=1' 1 'step|n=2' 2 'step|n=3' 3 'step|n=4' 4 \
+    mkdir -p "$r/.bionic/docs/record/wave-x" && printf 'run/v1|ev=%s|at=2026-10-04T00:0%s:00Z\n' 'step|n=1' 1 'step|n=2' 2 'step|n=3' 3 'step|n=4' 4 \
       'approval|key=step3|by=fixture|said=approved' 5 'dispatch|row=T1|name=wx-T1' 6 'tree|row=T1|path=.worktrees/T1' 7 \
       'dispatch|row=T2|name=wx-T2' 8 'tree|row=T2|path=.worktrees/T2' 9 > "$(ll_log "$r")" || return 1
   else
@@ -82,9 +79,6 @@ ll_world() {  # -> a world root; its plan admitted by the real commit gate (the 
 }
 ll_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }
 ll_rec() { printf '%s/.bionic/docs/record/wave-x/landing-proofs.log' "$1"; }
-# <root> -> stdin's landing-record lines appended to the run's log as its events: what an older run's record held is,
-# at 15, the log's, written beside the world's own events and never over them.
-ll_put() { mkdir -p "$(dirname "$(ll_log "$1")")" && sed 's/^line\/v1|/run\/v1|/' >> "$(ll_log "$1")"; }
 ll_carrier() {  # -> `<pid>:<start>` of a new live process, kept until the suite exits
   local p
   sleep 900 >/dev/null 2>&1 &
