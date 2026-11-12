@@ -2,9 +2,9 @@
 # payload/scripts/lib/handoff.sh — where a handoff document goes, how it is found, and how its composed half is read.
 #
 # WHAT IT OWNS. The home of the handoff document, one file per run or session per day under the handoffs folder of
-# the project's docs record, never a tracked path; the plan's `## Handoff` pointer, the one line `handoff: <path>
-# written <local time>` that session-poker.sh `handoff` and close-out.sh write there; and the two filters every
-# composed section passes through before it is written.
+# the project's docs record, never a tracked path; the pointer to it, the run's latest handoff as the reader answers it
+# (a handoff event in the run's log, or an older plan's `## Handoff` line `handoff: <path> written <local time>`); and
+# the two filters every composed section passes through before it is written.
 #
 #     handoff_home_file <root> <slug>
 #                        <root>/<the handoffs folder>/<date>-<slug>.md, the date the local day of now (BIONIC_NOW_EPOCH
@@ -13,8 +13,8 @@
 #                        the text as a file-name word: lower case, every other character a hyphen, runs of them one,
 #                        none at either end, at most 48 characters; nothing for a text with no letter or digit.
 #     handoff_pointer_of <plan> [<root>]
-#                        the absolute path the pointer names; nothing when the plan carries no pointer (an older plan's
-#                        in-place section, or no ## Handoff at all). Always rc 0.
+#                        the absolute path the run's latest handoff names (lib/reader.sh `reader_session` handoff);
+#                        nothing when the run holds none or the reader cannot answer. Always rc 0.
 #     handoff_default_of <plan> [<root>]
 #                        the run's home file, handoff_home_file of the plan's own slug (lib/proof.sh `proof_plan_slug`,
 #                        the one slug reader). rc 1 when the plan's name leaves no slug.
@@ -32,11 +32,8 @@
 #     <root> is the project root the pointer is relative to; absent, the project root of the plan's own directory
 #     (lib/root.sh `project_root`), physical.
 #
-# THE ONE READER OF THE POINTER. The poker's readers (adopt's STALE note, the verb) and
-# close-out's closed form call these, and tests/handoff-file.test.sh §POINTER-AGREE holds them to one answer.
-#
-# THE SECTION TEST, `_HANDOFF_SEC_AWK`: `ho_track(line)` is 1 for a line inside `## Handoff`, the heading, fences and
-# fenced lines excluded. Every awk that looks in the section prepends it, the poker's in-place rewrites included.
+# THE ONE READER OF THE POINTER. The poker's readers (adopt's STALE note) and close-out's closed form call these,
+# and tests/handoff-file.test.sh §POINTER-AGREE holds them to one answer.
 #
 # NEEDS lib/root.sh and lib/roots.sh (both callers source them); loads lib/proof.sh from beside itself when
 # `proof_plan_slug` is not yet defined. Sourced, never executed; bash 3.2.
@@ -44,14 +41,6 @@
 _HANDOFF_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
 HANDOFF_HOME=".bionic/docs/record/handoffs"
 HANDOFF_SECTIONS="Summary|Goal|State|Findings|Decisions|Ruled out|Open|Suggested skills|Next|Resume"
-
-_HANDOFF_SEC_AWK='
-  function ho_track(l) {
-    if (l ~ /^[ \t]*```/) { _hf = !_hf; return 0 }
-    if (_hf) return 0
-    if (l ~ /^##[ \t]/) { _hs = (l ~ /^##[ \t]+Handoff[ \t]*$/); return 0 }
-    return _hs
-  }'
 
 _handoff_root() {  # <plan> [<root>] -> the root the pointer resolves against
   if [ -n "${2:-}" ]; then printf '%s' "$2"; return 0; fi
@@ -73,8 +62,12 @@ handoff_slug() {  # <text>
 handoff_pointer_of() {  # <plan> [<root>]
   local rel root
   [ -f "${1:-}" ] || return 0
-  rel="$(awk "$_HANDOFF_SEC_AWK"'
-    ho_track($0) && index($0, "handoff: ") == 1 && $0 ~ / written / { s = substr($0, 10); sub(/ written .*$/, "", s); print s; exit }' "$1" 2>/dev/null)"
+  if ! declare -F reader_session >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    [ -r "$_HANDOFF_LIB_DIR/reader.sh" ] && . "$_HANDOFF_LIB_DIR/reader.sh" >/dev/null 2>&1
+    declare -F reader_session >/dev/null 2>&1 || return 0
+  fi
+  rel="$(reader_session "$1" handoff 2>/dev/null | sed -n 's/^path=//p')"
   [ -n "$rel" ] || return 0
   case "$rel" in
     /*) printf '%s\n' "$rel" ;;

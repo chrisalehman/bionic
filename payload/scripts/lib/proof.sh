@@ -192,6 +192,17 @@ proof_approved_head() {
     END { if (h !~ /^[0-9a-f]+$/ || length(h) != 40) exit 1; print h }'
 }
 
+# proof_approval_lines <plan> -> each standing approval, one line in the shape an older plan's `## SDLC State` held it,
+# `approved: <name> by <who> <at>`, in the order the facts were last set; exit 2 when the run's facts could not be read. A
+# declared red's debt on approval:<name> clears after that instant, read here alone: a name approved twice is read at its
+# later approval, the one that stands.
+proof_approval_lines() {
+  local facts
+  facts="$(_proof_facts "${1:-}")" || return 2
+  printf '%s' "$facts" | awk -F'|' "$(proof_fact_awk)"'
+    ev() == "approval" && line_kv("key") != "" { print "approved: " line_kv("key") " by " line_kv("by") " " line_kv("at") }'
+}
+
 # proof_waiver_line <question> <head> <who> <at> <reason> -> a waiver as an older plan's `## SDLC State` holds it,
 # newline-terminated. No verb writes it: the waiver is an event (`proof_waiver_event`), and this shape is kept for a
 # run whose older waivers stand in its plan, which the reader translates.
@@ -238,12 +249,17 @@ proof_finding_event() {  # <plan> <field>=<value>… -> one finding event in the
 # THE RUN'S LOG HOLDS A STEP, and this is the type's one writer: the advance calls it, and so does close-out for the
 # facts its close gives. A step's evidence is what happened, asked of the event that holds it; only what no other event
 # and no header line holds rides on the step's own event, in the fields the reader names for that step
-# (lib/reader.sh `reader_step_fields`), so a field no reader asks for is refused unwritten. Exits as
-# proof_waiver_event's, and 2 for a step this lifecycle has not or a field its step does not carry.
-proof_step_event() {  # <plan> <step> [<field>=<value>…] -> one step event in the plan's run log
+# (lib/reader.sh `reader_step_fields`), so a field no reader asks for is refused unwritten. A caller whose plan has moved
+# since it read where its run's log is (the archive moves a plan and never its record) names that log in the plan's
+# place: it must be a log that exists, so no directory is made for it. Exits as proof_waiver_event's, and 2 for a step
+# this lifecycle has not, a field its step does not carry, or a log named that is not there.
+proof_step_event() {  # <plan|its run's log> <step> [<field>=<value>…] -> one step event in that run's log
   local log n="${2:-}" f
   case "$n" in [0-9]|[0-9][ab]) ;; *) return 2 ;; esac
-  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
+  case "$1" in
+    */run.log) [ -f "$1" ] && [ ! -L "$1" ] && _proof_event_load || return 2; log="$1" ;;
+    *) _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2 ;;
+  esac
   shift 2
   for f in "$@"; do
     case " $(reader_step_fields "$n") " in *" ${f%%=*} "*) ;; *) return 2 ;; esac
@@ -251,18 +267,102 @@ proof_step_event() {  # <plan> <step> [<field>=<value>…] -> one step event in 
   RUN_LOG="$log" log_append step "n=$n" "$@"
 }
 
+# THE RUN'S LOG HOLDS AN APPROVAL, and this is the type's one writer: the approve verb calls it for the plan's approval
+# (key step3, as the translation names an older plan's approved-by:), a criterion a person confirms, and any other name.
+# Its fields are the ones the translation gives an older plan's approval line, `by=<who> [head=<sha>] said=<the reply>`,
+# so the reader reads an old approval and a new one alike; nothing writes an approval into a plan. Exits as
+# proof_waiver_event's, and 2 for a key that is not one name.
+proof_approval_event() {  # <plan> <key> [<field>=<value>…] -> one approval event in the plan's run log
+  local log k="${2:-}"
+  case "$k" in ''|*[!A-Za-z0-9._-]*) return 2 ;; esac
+  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
+  shift 2
+  RUN_LOG="$log" log_append approval "key=$k" "$@"
+}
+
+# THE RUN'S LOG HOLDS A SESSION'S FACTS, one writer for each type, in the fields the translation gives an older plan's
+# line, so the reader reads an old fact and a new one alike, and no plan line is written for any of them. Exits as
+# proof_waiver_event's, and 2 for a value its type does not take.
+proof_order_event() {  # <plan> <given|lifted> <the user's words> -> one order event in the plan's run log
+  local log
+  case "${2:-}" in given|lifted) ;; *) return 2 ;; esac
+  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
+  RUN_LOG="$log" log_append order "act=$2" "said=${3:-}"
+}
+proof_handoff_event() {  # <plan> <the handoff file, project-root-relative> -> one handoff event in the plan's run log
+  local log
+  [ -n "${2:-}" ] || return 2
+  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
+  RUN_LOG="$log" log_append handoff "path=$2"
+}
+proof_bind_event() {  # <plan> <session id> <engage|bind|write> -> one bind event in the plan's run log
+  local log
+  case "${2:-}" in ''|unknown|*[!A-Za-z0-9_-]*) return 2 ;; esac
+  case "${3:-}" in engage|bind|write) ;; *) return 2 ;; esac
+  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
+  RUN_LOG="$log" log_append bind "session=$2" "by=$3"
+}
+
+# THE RUN'S LOG HOLDS A DECISION'S ROUND, and this is the type's one writer: the decisions verb's put and its ruling,
+# however the ruling arrives, call it. Its fields are the ones the translation gives an older run's design-ledger
+# heading, so an old round and a new one read alike:
+#
+#   decision  entry=Δ<k> d=D<n> verb=put by=<who> title=<title> [wait=<the wait line>]
+#   decision  entry=Δ<k> d=D<n> verb=ruled said=<the reply> by=<who> [title=<title>]
+#
+# entry= numbers the round one past the highest the reader holds for the run, the ledger's and the log's alike, so two
+# rounds in the same words are two facts and the numbering runs on from the ledger. Exits as proof_waiver_event's.
+proof_decision_event() {  # <plan> <field>=<value>… -> one decision round in the plan's run log
+  local log k
+  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" && k="$(_proof_ask "$1" reader_q_ledger "$1")" || return 2
+  k="$(printf '%s\n' "$k" | awk -F'|' "$_READER_AWK"'{ e = line_kv("entry"); sub(/^Δ/, "", e); if (e ~ /^[0-9]+$/ && e + 1 > n) n = e + 1 } END { print n + 0 }')"
+  shift
+  RUN_LOG="$log" log_append decision "entry=Δ$k" "$@"
+}
+
 # A STEP A DRY JUDGMENT ASKS ABOUT stands last in the facts of that judgment and nowhere else. The advance runs the
 # commit gate on the plan itself under its own session, `planverb-<pid>`, with the step it moves to in BIONIC_DRY_STEP;
-# close-out's pre-flight judges a copy of the plan, whose name joins no record, under `closeout-preflight-<pid>`, with
-# the run's step. Any other session's commit is judged at the step its log holds, whatever its environment carries,
-# since a variable anyone can set must never move a gate. The step is folded in after the facts, never held or appended.
-_PROOF_DRY=""; _PROOF_DRY_SID="-"
-_proof_dry_step() {  # -> _PROOF_DRY set to the pending step's line, empty when the session judged names none
+# close-out judges the plan under `closeout-preflight-<pid>` before its acts, with the facts those acts will write on the
+# same channel, one per line after the step: the step's own fields on its line (`8|cleanup=done|…`), then the landing of
+# each row it lands (`published|row=<id>|…|kind=close|by=close-out`) and each tree it removes (`tree|row=<id>|path=`).
+# Those three kinds are the whole list: an approval, a proof, a waiver or a finding is what a person or a reviewer gives,
+# and a pending line of any other shape fails the fold, so a judgment never stands on one. Any other session's commit
+# is judged on what its log holds, whatever its environment carries, since a variable anyone can set must never move a
+# gate. What is pending is folded in after the facts, never held and never appended.
+_PROOF_DRY=""; _PROOF_DRY_SID="-"; _PROOF_DRY_BAD=""
+_proof_dry_step() {  # -> _PROOF_DRY set to the pending lines, empty when the session judged names none; _PROOF_DRY_BAD saying why they are refused
+  local first rest l n f row path kind by dry IFS=$' \t\n'
+  local -a w
   [ "$_PROOF_DRY_SID" != "${BIONIC_SID:-}" ] || return 0
-  _PROOF_DRY_SID="${BIONIC_SID:-}"; _PROOF_DRY=""
+  _PROOF_DRY_SID="${BIONIC_SID:-}"; _PROOF_DRY=""; _PROOF_DRY_BAD=""
   case "$_PROOF_DRY_SID" in planverb-*|closeout-preflight-*) ;; *) return 0 ;; esac
   case "${_PROOF_DRY_SID##*-}" in ''|*[!0-9]*) return 0 ;; esac
-  case "${BIONIC_DRY_STEP:-}" in [0-9]|[0-9][ab]) _PROOF_DRY="run/v1|ev=step|n=${BIONIC_DRY_STEP}|at=" ;; esac
+  [ -n "${BIONIC_DRY_STEP:-}" ] || return 0
+  first="${BIONIC_DRY_STEP%%$'\n'*}"; rest=""; [ "$first" = "$BIONIC_DRY_STEP" ] || rest="${BIONIC_DRY_STEP#*$'\n'}"
+  IFS='|' read -r -a w <<< "$first"; n="${w[0]}"
+  case "$n" in [0-9]|[0-9][ab]) ;; *) _PROOF_DRY_BAD="the pending step '$n' is no step"; return 0 ;; esac
+  for f in "${w[@]:1}"; do
+    case "$f" in *=*) ;; *) _PROOF_DRY_BAD="the pending step's '$f' is no field"; return 0 ;; esac
+    case " $(reader_step_fields "$n") " in *" ${f%%=*} "*) ;; *) _PROOF_DRY_BAD="step $n carries no field ${f%%=*}"; return 0 ;; esac
+  done
+  dry="run/v1|ev=step|n=$first|at="
+  while IFS= read -r l; do
+    [ -n "$l" ] || continue
+    IFS='|' read -r -a w <<< "$l"; row=""; path="-"; kind=""; by=""
+    for f in "${w[@]:1}"; do case "$f" in row=*) row="${f#row=}" ;; path=*) path="${f#path=}" ;; kind=*) kind="${f#kind=}" ;; by=*) by="${f#by=}" ;; esac; done
+    case "${w[0]}" in
+      published) [ -n "$row" ] && [ "$kind" = close ] && [ "$by" = close-out ] || { _PROOF_DRY_BAD="a pending landing is not one the close makes"; return 0; } ;;
+      tree) [ -n "$row" ] && [ -z "$path" ] || { _PROOF_DRY_BAD="a pending tree is not one the close removes"; return 0; } ;;
+      *) _PROOF_DRY_BAD="a pending ${w[0]:-line} is no fact the close writes"; return 0 ;;
+    esac
+    dry="$dry"$'\n'"run/v1|ev=$l|at="
+  done <<< "$rest"
+  _PROOF_DRY="$dry"
+}
+_proof_dry_refused() {  # -> 0, one line on stderr, when the pending lines of this judgment are refused
+  _proof_dry_step
+  [ -n "$_PROOF_DRY_BAD" ] || return 1
+  printf '_proof_facts: the facts pending in %s are refused (%s); nothing is judged on them\n' "$_PROOF_DRY_SID" "$_PROOF_DRY_BAD" >&2
 }
 
 # THE RUN'S LOG HOLDS A PROOF, whatever it proves, in the fields the translation gives an older plan's line, so the reader
@@ -1740,7 +1840,7 @@ PROOF_EVENTS
 # answer as the fold of every event and it would, the standing facts being each identity's last. Nothing is kept.
 _proof_facts_out() {
   local f p
-  _proof_dry_step
+  ! _proof_dry_refused || return 2
   p="${_PROOF_PENDING:-}"; [ -z "$_PROOF_DRY" ] || p="${p:+$p$'\n'}$_PROOF_DRY"
   [ -n "$p" ] || { printf '%s' "$_PROOF_FACTS"; return 0; }
   f="$( set -o pipefail; reader_events() { printf '%s%s\n' "$_PROOF_FACTS" "$p"; }; reader_facts - )" || return 2
@@ -1774,7 +1874,7 @@ _proof_findings_hold() {
 # when none are held for it or a proof is pending, which a hold does not hold: the caller then asks the fold.
 proof_held_facts() {
   _proof_dry_step
-  [ -n "${_PROOF_HELD_PLAN:-}" ] && [ "$_PROOF_HELD_PLAN" = "${1:-}" ] && [ -z "${_PROOF_PENDING:-}$_PROOF_DRY" ] || return 1
+  [ -n "${_PROOF_HELD_PLAN:-}" ] && [ "$_PROOF_HELD_PLAN" = "${1:-}" ] && [ -z "${_PROOF_PENDING:-}$_PROOF_DRY$_PROOF_DRY_BAD" ] || return 1
   printf '%s' "${_PROOF_HELD_FACTS:-}"
 }
 
@@ -1791,14 +1891,17 @@ _proof_keep_sweep() {  # <dir> <n> -> the newest <n> files of <dir> are left, th
 # plan, its log and the log's kept copy, the reader's libraries and this one. An appended event, an edited line or a
 # changed library is a new key, and the next ask folds again. A fold that failed is returned and never kept. This is the
 # one reader and writer of the held file; it holds the answers and nothing else, in a directory of its own beside the
-# kept fold's, and the kept fold's sweep (`_proof_keep_sweep`) sweeps it.
+# kept fold's, and the kept fold's sweep (`_proof_keep_sweep`) sweeps it. The run's standing order and its sessions are
+# held after the three, each line led by `order.` or `sessions.`: the same homes write them, so one fold answers all,
+# and the runner asks the order at every suite's start and every engagement the sessions (`proof_order_held`,
+# `proof_sessions_held`).
 _PROOF_STEP_KEEP=128
 _PROOF_PLACE_LIBS=""; _PROOF_PLACE_DIR=""
 proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|abandoned, approved=1|0; exit 2, one line on stderr, when the fold fails
   # The answer is also left in _PROOF_PLACE, so a caller in this shell reads it with no subshell.
   local plan="${1:-}" log="" dir="" f stamp key held="" got ev tmp k rc=0 IFS=$' \t\n'
   local -a deps
-  _PROOF_PLACE=""
+  _PROOF_PLACE=""; _PROOF_PLACE_ORDER=""; _PROOF_PLACE_SESSIONS=""
   [ -f "$plan" ] || return 0
   _proof_reader_load || { printf 'proof_step_held: lib/reader.sh cannot be loaded, so the place of %s is not read\n' "$plan" >&2; return 2; }
   log="$(reader_log "$plan" 2>/dev/null)" || rc=$?
@@ -1824,21 +1927,22 @@ proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|
   stamp="$(cksum "${deps[@]}" 2>/dev/null)" || stamp=""
   key="$plan ${stamp//$'\n'/ } $_PROOF_PLACE_LIBS"
   # A step pending in an advance's own judgment is no place to keep: it is neither read from the held file nor kept in it.
-  _proof_dry_step
+  ! _proof_dry_refused || return 2
   if [ -n "$stamp" ] && [ -n "$_PROOF_PLACE_LIBS" ] && [ -n "$_PROOF_PLACE_DIR" ] && [ -z "$_PROOF_DRY" ]; then
     held="${plan//[^A-Za-z0-9._-]/%}"; [ "${#held}" -le 200 ] || { held="$(cksum <<< "$plan")"; held="${held%% *}"; }
     held="$_PROOF_PLACE_DIR/$held"
   fi
   if [ -n "$held" ] && [ -f "$held" ] && { IFS= read -r k; got=""; while IFS= read -r f; do got="$got$f"$'\n'; done; } < "$held" \
      && [ "$k" = "$key" ] && [ -n "$got" ]; then
-    _PROOF_PLACE="${got%$'\n'}"; printf '%s' "$got"; return 0
+    _proof_place_split "$got"; printf '%s\n' "$_PROOF_PLACE"; return 0
   fi
   declare -F translate >/dev/null 2>&1 || . "$_READER_LIB_DIR/translate.sh" >/dev/null 2>&1
   if [ -n "$dir" ] && reader_brought "$plan"; then ev="$(cat "$log")" || rc=$?
   else ev="$(set -o pipefail; TRANSLATE_SOURCES="$TRANSLATE_PLACE_SOURCES" translate "$plan" events)" || rc=$?; fi
   [ -z "$_PROOF_DRY" ] || ev="${ev:+$ev$'\n'}$_PROOF_DRY"
   [ "$rc" -ne 0 ] || got="$( set -o pipefail; reader_events() { printf '%s\n' "$ev"; }
-    reader_q_step "$plan" || exit; if reader_q_approved "$plan" step3; then echo approved=1; else [ "$?" -eq 1 ] || exit; echo approved=0; fi )" || rc=$?
+    reader_q_step "$plan" || exit; if reader_q_approved "$plan" step3; then echo approved=1; else [ "$?" -eq 1 ] || exit; echo approved=0; fi
+    reader_q_order "$plan" | sed 's/^/order./' || exit; reader_q_sessions "$plan" | sed 's/^/sessions./' )" || rc=$?
   if [ "$rc" -ne 0 ]; then
     printf 'proof_step_held: lib/reader.sh exited %s reading the place of %s; nothing is kept\n' "$rc" "$plan" >&2; return 2
   fi
@@ -1846,7 +1950,28 @@ proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|
     printf '%s\n%s\n' "$key" "$got" > "$tmp" && mv -f "$tmp" "$held" 2>/dev/null || rm -f "$tmp"
     _proof_keep_sweep "$_PROOF_PLACE_DIR" "$_PROOF_STEP_KEEP"
   fi
-  _PROOF_PLACE="$got"; printf '%s\n' "$got"
+  _proof_place_split "$got"; printf '%s\n' "$_PROOF_PLACE"
+}
+_proof_place_split() {  # <held lines> -> _PROOF_PLACE, the place's lines, _PROOF_PLACE_ORDER and _PROOF_PLACE_SESSIONS, unled
+  local l p="" o="" s=""
+  while IFS= read -r l; do
+    case "$l" in
+      order.*) o="$o${l#order.}"$'\n' ;;
+      sessions.*) s="$s${l#sessions.}"$'\n' ;;
+      ?*) p="$p$l"$'\n' ;;
+    esac
+  done <<PROOF_HELD
+$1
+PROOF_HELD
+  _PROOF_PLACE="${p%$'\n'}"; _PROOF_PLACE_ORDER="${o%$'\n'}"; _PROOF_PLACE_SESSIONS="${s%$'\n'}"
+}
+proof_order_held() {  # <plan> -> the reader's order answer for the run, from its held place; exits as proof_step_held's
+  proof_step_held "${1:-}" >/dev/null || return
+  [ -z "$_PROOF_PLACE_ORDER" ] || printf '%s\n' "$_PROOF_PLACE_ORDER"
+}
+proof_sessions_held() {  # <plan> -> the reader's sessions answer for the run, from its held place; exits as proof_step_held's
+  proof_step_held "${1:-}" >/dev/null || return
+  [ -z "$_PROOF_PLACE_SESSIONS" ] || printf '%s\n' "$_PROOF_PLACE_SESSIONS"
 }
 
 _proof_ask() {  # <plan> <reader question's function> [args] -> its answer and exit, over the facts _proof_facts keeps
@@ -2711,12 +2836,12 @@ proof_debts_read() {
     }' 2>/dev/null
 }
 
-# proof_debts_open <debts> < <section text> -> `debt<TAB><suite><TAB><token>` for each of <debts>
-# (`proof_debts_read`'s lines, `<suite><TAB><token><TAB><time>`, what `land` wrote) that the `## SDLC
-# State` text on stdin leaves open (wave-27 T31, T67; D23; A-orch-85, A-orch-121). This is the commit
+# proof_debts_open <debts> < <approval and proof lines> -> `debt<TAB><suite><TAB><token>` for each of <debts>
+# (`proof_debts_read`'s lines, `<suite><TAB><token><TAB><time>`, what `land` wrote) that the run's lines on stdin
+# leave open. This is the commit
 # gate's predicate (lib/walls.sh `_eg_reading_gaps`), over two facts it is handed: the debts its
-# collector read from the landing record (hooks/bash-walls.sh) and the plan text; a `landed red:`
-# line in that text is not read. A debt stays open until a `proved: kind=floor` or `kind=task` line
+# collector read from the landing record (hooks/bash-walls.sh) and the run's approvals and proofs
+# (`proof_approval_lines`, `proof_lines`). A debt stays open until a `proved: kind=floor` or `kind=task` line
 # carries an `at=` STRICTLY later than its threshold: the red landing's own time, and for an
 # `approval:<name>` debt the later of that and the first `approved: <name> by <who> <ISO-UTC> …`
 # line, with none of which it stays open. A debt with no time is never cleared. Whether an `ext:`
@@ -3002,8 +3127,8 @@ _facts_check_at() {
 # threshold, which is never earlier than the red landing (the newest debt line's `at=` in the
 # landing record, `proof_debts_read`):
 #   - no debt line of <suite> and <token> carries an <ISO-UTC> `at=`: never covered, and it says so;
-#   - `approval:<name>`: the later of the red landing and the time on the first `approved: <name> by
-#     <who> <ISO-UTC> …` line of the plan's `## SDLC State`; until that line is written, absent;
+#   - `approval:<name>`: the later of the red landing and the instant of the standing approval of
+#     <name> (`proof_approval_lines`); until one is given, absent;
 #   - `ext:<slug>`: absent while any `## Tasks` cell still names `ext:<slug>` (the owner removing it
 #     is the statement that the blocker cleared); then the red landing's own time. Nothing dates a
 #     clearing, so the green run is held to be later than the red landing, not later than the
@@ -3021,15 +3146,9 @@ _facts_debt() {
   fi
   case "$tok" in
     approval:?*)
-      clear="$(awk -v n="${tok#approval:}" '
-        /^[[:space:]]*```/ { fence = !fence; next }
-        fence { next }
-        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-        insdlc && /^approved:[ \t]/ {
-          m = split($0, w, /[ \t]+/)
-          if (m < 3 || w[2] != n || w[3] != "by") next
-          for (i = 4; i <= m; i++) if (w[i] ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) { print w[i]; exit }
-        }' "$plan")"
+      clear="$(proof_approval_lines "$plan" | awk -v n="${tok#approval:}" '
+        { m = split($0, w, /[ \t]+/); if (m < 3 || w[2] != n || w[3] != "by") next
+          for (i = 4; i <= m; i++) if (w[i] ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) { print w[i]; exit } }')"
       # The later of the approval and the red landing (wave-27 T67; review pass 46 B1).
       if [ -n "$clear" ] && [[ "$landed" > "$clear" ]]; then clear="$landed"; fi ;;
     ext:?*)
@@ -3359,22 +3478,24 @@ PROOF_DOOR_COVER
 }
 
 
-# ---------- THE DEBT LEDGER (wave-30 T22; D2, P2, AC-11.2, AC-11.3, AC-11.4) ----------
+# ---------- THE RUN'S DEBTS ----------
 #
-# `<docs-root>/record/<the plan's name less .plan.md>/debt.md`, derived as the landing record's path is
-# (`_wt_proofs_path`, lib/worktree.sh): PROOF_DEBT_HEADER, then one line per item, six cells joined by
-# ` | `:
+# A debt is one `debt` event, its fields the ones the translation gives an older run's debt.md line, so an old debt and
+# a new one read alike, concept and kind naming it, its newest event its state:
 #
-#     <concept> | <kind> | <sites> | raised-by <record> | touches <N> | —            (not yet burned)
-#     <concept> | <kind> | <sites> | raised-by <record> | touches <N> | burned <row>
+#   debt  concept=<c> kind=<k> sites=<sites> raised-by=<record> touches=<N> [burned=<row>]
 #
-# ONE WRITER, `session-poker.sh debt` (add, touched, burn), under a lock beside the file. These are its
-# readers: the dispatch wall's advisory (`proof_debt_hits`), `ready`'s landing report
-# (`proof_debt_row_counts`) and close-out's card and carry (`proof_debt_counts`, `proof_debt_items`). The
-# last cell is read with index(), never by comparing the `—` glyph (macOS awk and multibyte `==`).
-PROOF_DEBT_HEADER='# debt ledger: concept | kind | sites | raised-by <record> | touches N | burned <row> | —'
+# ONE WRITER, `proof_debt_event`, called by `session-poker.sh debt` (add, touched, burn, adopt). Its readers ask the
+# reader: the dispatch wall's advisory (`proof_debt_hits`), `ready`'s landing report (`proof_debt_row_counts`) and the
+# verb's own merge (`proof_debt_items`); close-out reads the reader's debt facts itself.
+proof_debt_event() {  # <plan> <field>=<value>… -> one debt event in the plan's run log
+  local log
+  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
+  shift
+  RUN_LOG="$log" log_append debt "$@"
+}
 
-# proof_debt_ledger_path <root> <plan> -> the run's ledger path.
+# proof_debt_ledger_path <root> <plan> -> the path an older run's debt ledger has; no verb writes it.
 proof_debt_ledger_path() {
   local slug
   slug="$(proof_plan_slug "${2:-}")" || return 1
@@ -3382,20 +3503,15 @@ proof_debt_ledger_path() {
   printf '%s/record/%s/debt.md\n' "$(docs_root "$1")" "$slug"
 }
 
-# proof_debt_items <ledger> -> one tab-separated line per item, in ledger order:
-# `<concept> <kind> <sites> <record> <touches> <burned row, or ->`. A line of another shape is not an item.
+# proof_debt_items <plan> -> one tab-separated line per debt the run holds, burned or not, in the reader's order:
+# `<concept> <kind> <sites> <record> <touches> <burned row, or ->`.
 proof_debt_items() {
-  [ -f "${1:-}" ] || return 0
-  awk '
-    /^#/ || NF == 0 { next }
-    {
-      if (split($0, c, / \| /) != 6) next
-      if (index(c[4], "raised-by ") != 1 || c[5] !~ /^touches [0-9]+$/) next
-      printf "%s\t%s\t%s\t%s\t%s\t%s\n", c[1], c[2], c[3], substr(c[4], 11), substr(c[5], 9), (index(c[6], "burned ") == 1 ? substr(c[6], 8) : "-")
-    }' "$1"
+  [ -f "${1:-}" ] && _proof_reader_load || return 0
+  _proof_ask "$1" reader_q_debts "$1" all | awk -F'|' "$_READER_AWK"'{ b = line_kv("burned")
+    printf "%s\t%s\t%s\t%s\t%s\t%s\n", line_kv("concept"), line_kv("kind"), line_kv("sites"), line_kv("raised-by"), line_kv("touches"), (b == "" ? "-" : b) }'
 }
 
-# proof_debt_hits <ledger> <Files cell> -> the items (as proof_debt_items prints them, burned ones too)
+# proof_debt_hits <plan> <Files cell> -> the items (as proof_debt_items prints them, burned ones too)
 # one of whose sites the cell covers: the path itself, a directory above it, or a glob over it, by
 # lib/units.sh `cell_covers`, the dispatch grammar's one matcher.
 proof_debt_hits() {
@@ -3410,14 +3526,8 @@ proof_debt_hits() {
     }'
 }
 
-# proof_debt_counts <ledger> -> `<touched> <burned>` for the run: the touches summed over every item,
-# and the items burned. Never the ledger's length (AC-11.4).
-proof_debt_counts() {
-  proof_debt_items "${1:-}" | awk -F'\t' '{ t += $5; if ($6 != "-") b++ } END { printf "%d %d\n", t, b }'
-}
-
-# proof_debt_row_counts <ledger> <row> <Files cell> -> `<burned> <touched>` for one row: the items whose
-# last cell says `burned <row>`, and the items one of whose sites the row's Files cover.
+# proof_debt_row_counts <plan> <row> <Files cell> -> `<burned> <touched>` for one row: the items burned by <row>, and
+# the items one of whose sites the row's Files cover.
 proof_debt_row_counts() {
   local b t
   b="$(proof_debt_items "${1:-}" | awk -F'\t' -v r="${2:-}" 'r != "" && $6 == r { n++ } END { print n + 0 }')"

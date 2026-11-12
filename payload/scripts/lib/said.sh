@@ -19,9 +19,9 @@
 #
 # EVERY RECORDED SESSION OF THE RUN (wave-36 T9; spec D10, design ledger Δ3 "D5 1"; AC-4.2). A `/clear`
 # re-keys the session, and the words typed before it stand in the predecessor's transcript. With a <plan>,
-# the sessions read are the plan's `- session:` lines (lib/binding.sh `bind_sessions`, the one reader of
-# what the binding acts write), in the order they bound, then this session when the plan does not record
-# it; with none, this session alone, as before. The first session, in that order, whose transcript holds
+# the sessions read are the run's (lib/binding.sh `bind_sessions`, the reader's answer of what the binding
+# acts appended), in the order they bound, then this session when the run does not hold it; with none,
+# this session alone, as before. The first session, in that order, whose transcript holds
 # the words as enough whole words answers 0 and is named in SAID_SESSION; else a quote that is short in
 # any of them is 3; else 1. A recorded session whose transcript is gone is skipped; 2 only when none of
 # them can be read. The verbs quote the session beside the words: `words="<words>" session=<sid>`.

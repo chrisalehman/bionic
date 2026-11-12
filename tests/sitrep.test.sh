@@ -1850,12 +1850,7 @@ sr_r_open() {  # <epoch> <key> -> the ask opened on this world's register at tha
     bash -c '. "$1/run.sh" && . "$1/owed.sh" && owed_open "$2" "approval: $2" "Reply approved."' _ "$SR_RLIB" "$2"
 }
 sr_r_put() { SR_AT="$1" sr_poke decisions put "$2" "the decision $2" >/dev/null 2>&1; }   # <epoch> <D<n>>
-sr_r_rule() {  # <epoch> <D<n>> -> a person's ruling heading on the ledger, which `decisions` settles at <epoch>
-  local led="$SR_DIR/design-ledger.md" k
-  k="$(sed -n 's/^## Δ\([0-9][0-9]*\).*/\1/p' "$led" 2>/dev/null | sort -n | tail -1)"; k=$(( ${k:--1} + 1 ))
-  printf '\n## Δ%s — %s ruled "1" (Dana Fixture 2026-10-06): the decision %s\n' "$k" "$2" "$2" >> "$led"
-  SR_AT="$1" sr_poke decisions >/dev/null 2>&1
-}
+sr_r_rule() { SR_AT="$1" sr_poke decisions rule "$2" 1 >/dev/null 2>&1; }   # <epoch> <D<n>>: the verb's ruling closes the ask at <epoch>
 sr_r_card() {  # <epoch> -> the scorecard's two human lines at that instant, joined
   SR_AT="$1" sr_poke landing-report --scorecard "$SR_PLAN" 2>/dev/null | /usr/bin/grep -E '^human( stops|-wait)' | sr_join
 }
@@ -1864,12 +1859,14 @@ SR_APPROVED=none sr_world rounds "6 6 12 12"   # approved below, at SR_E0, 2026-
 sed 's/^wave: wave-02-fx$/canonical_sdlc_version: 14\
 &/' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 git -C "$SR_REPO" config user.name "Dana Fixture"; sr_bind
+SR_T="$CLAUDE_CONFIG_DIR/projects/$(cd "$SR_REPO" && pwd -P | sed 's/[^a-zA-Z0-9]/-/g')/$SID.jsonl"; mkdir -p "${SR_T%/*}"; : > "$SR_REPO/.bionic/tmp/loaded-$SID.state"
+jq -nc '{type:"user",isSidechain:false,userType:"external",message:{role:"user",content:"carry on"}}' > "$SR_T"   # the session the ruling verb reads
 sr_r_open $((SR_E0 - 10800)) approve:step3
 sr_r_put $((SR_E0 - 7200)) D9; sr_r_rule $((SR_E0 - 5400)) D9; sr_r_put $((SR_E0 - 3600)) D9; sr_r_rule $((SR_E0 - 1800)) D9   # before
 SR_AT=$SR_E0 sr_poke approve plan 'approved' >/dev/null 2>&1
-expect_eq "RD-0 precondition: approve plan wrote approved-by: at 10:00Z and closed the Step-3 card's ask at that instant" \
-  "approved-by: Dana Fixture 2026-10-06T10:00:00Z|2026-10-06T10:00:00Z" \
-  "$(/usr/bin/grep -o '^approved-by: Dana Fixture [^ ]*' "$SR_PLAN")|$(sed -n 's/^owed\/v1|key=approve:step3|state=closed|by=[^|]*|at=\([^|]*\)|.*/\1/p' <(sr_asks))"
+expect_eq "RD-0 precondition: approve plan appended its approval at 10:00Z and closed the Step-3 card's ask at that instant" \
+  "key=step3|by=Dana Fixture|2026-10-06T10:00:00Z|2026-10-06T10:00:00Z" \
+  "$(sed -n 's/^run\/v1|ev=approval|\(key=step3|by=[^|]*\)|.*|at=\([^|]*\)$/\1|\2/p' "$SR_DIR/run.log")|$(sed -n 's/^owed\/v1|key=approve:step3|state=closed|by=[^|]*|at=\([^|]*\)|.*/\1/p' <(sr_asks))"
 sr_r_put $((SR_E0 + 600)) D1;    sr_r_rule $((SR_E0 + 1200)) D1     # 10 min
 sr_r_put $((SR_E0 + 3600)) D2;   sr_r_rule $((SR_E0 + 5400)) D2     # 30 min
 sr_r_put $((SR_E0 + 7200)) D2;   sr_r_rule $((SR_E0 + 8100)) D2     # 15 min, the same decision put again

@@ -19,7 +19,7 @@
 # or `current <N> --check` is red for N = 6, 7 or 8 (`card.sh early`); `--preview` renders it anyway and records
 # nothing. The verb gathers the facts and `card.sh release` draws the page at the shared width. One
 # reply, typed by the user, `all default`, `all recommended` or the decisions by number, is replayed by `reply` into
-# approve, waive, waive-row, confirm-row and finding-move with the user's words.
+# approve, waive, waive-row and finding-move with the user's words.
 #
 # FIXTURE FIDELITY. A real repository on `wave/01-fixture`, base B, a code commit C, then the release text's commit
 # R touching CHANGELOG.md alone; a double wave plan the real gate admits at Steps 6 to 8, bound to this session,
@@ -147,6 +147,7 @@ fc_pages() { ( cd "$FC_REC" && ls release-approval-*.md 2>/dev/null ) | LC_ALL=C
 fc_table() { /usr/bin/grep '^release-approval/v1|dec=' "$FC_REC/release-approval-$FC_H8.md" 2>/dev/null; }  # the record's replay table
 fc_keys() { fc_table | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "key=") == 1) print substr($i, 5) }'; }
 fc_row() { /usr/bin/grep -E "^\| $1 \|" "$PFC" | awk -F'|' '{ gsub(/^[ \t]+|[ \t]+$/, "", $4); print $4 }'; }  # <AC> -> its status cell
+fc_appr() { /usr/bin/grep -h -e "^approved: $1 " -e "^run/v1|ev=approval|key=$1|" "$PFC" "$FC_REC/run.log" 2>/dev/null; }  # <name> -> its approvals, the plan's lines then the log's
 fc_owed() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_list' _ "$FC_LIB" "$RFC" "$SID" 2>/dev/null | cut -f1; }
 fc_owe() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_open "$4" "fixture: $4" "poker: fixture item $4"' _ "$FC_LIB" "$RFC" "$SID" "$1"; }
 fc_heads() { printf '%s\n' "$FC_OUT" | sed -n -E 's/^(Bottom line|Goals|Tests|Reviews|Findings|Decisions)( — .*)?$/\1/p' | paste -sd'|' -; }

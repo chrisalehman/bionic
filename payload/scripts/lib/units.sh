@@ -595,9 +595,9 @@ units_rows() {
 #     `units_memoised` it is asked once; `proof:review`, with no open writer, is satisfied only
 #     when the UNITS_FACTS_STATE handed in reads `covered` (wave-27 T14; D3): a reading line, a
 #     failing one included, is not enough;
-#   - `approval:<name>`: its line inside `## SDLC State` — `approved-by:` for `plan`,
-#     `approved: <name> …` otherwise. No row writes one; the user's act does. `approval:plan` is
-#     met only while the plan's `current:` is 4 or later: a plan approved and still at Step 2 or 3
+#   - `approval:<name>`: an approval of <name> standing among the run's facts, Step 3's for `plan`.
+#     No row writes one; the user's act does. `approval:plan` is
+#     met only while the run's step is 4 or later: a plan approved and still at Step 2 or 3
 #     has a table nobody has started, and the line alone readies none of it (lib/fill.sh
 #     `fill_ledger_live` holds the fill's gate to the same rule).
 #   - `ext:<slug>`: never, until its owner removes it from the cell.
@@ -1236,7 +1236,7 @@ _units_sched() {
 _units_sched_run() {
   {
     printf '\034rows\n'; printf '%s\n' "$5"
-    printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$2" 2>/dev/null
+    printf '\034facts\n'; printf '%s\n' "${_UNITS_FACTS:-}"
     printf '\034waits\n'; printf '%s\n' "${8:-}"
     printf '\034proofs\n'; printf '%s\n' "${9:-}"
   } | _UNITS_FLOOR_ST="$6" _UNITS_READ_ST="${7:-}" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" -v hasreads="$4" \
@@ -1544,7 +1544,7 @@ _units_sched_awk() {
   _units_questions_awk
   printf '%s' '
     $0 == SUBSEP "rows" { part = 1; next }
-    $0 == SUBSEP "plan" { part = 2; next }
+    $0 == SUBSEP "facts" { part = 2; next }
     $0 == SUBSEP "waits" { part = 3; next }
     $0 == SUBSEP "proofs" { part = 4; next }
     part == 1 {
@@ -1558,19 +1558,10 @@ _units_sched_awk() {
       if ($2 == "row") { m = split($4, a, ","); for (k = 1; k <= m; k++) wr[$1, a[k]] = wr[$1, a[k]] " " $3 }
       next
     }
-    # THE PLAN TEXT: the approval lines inside `## SDLC State` other than the plan approval, fences skipped. The step
-    # and the approval of the plan are facts of the run (`_units_place`), handed in as plancur and planapby.
+    # THE FACTS OF THE RUN (`_units_fold`): each standing approval by its key. The step and the approval of the plan are
+    # facts of the run too (`_units_place`), handed in as plancur and planapby.
     part == 2 {
-      if ($0 ~ /^[[:space:]]*```/) { fence = !fence; next }
-      if (fence) next
-      if ($0 ~ /^## SDLC State/) { insec = 1; next }
-      if ($0 ~ /^## /) insec = 0
-      if (!insec) next
-      l = $0; sub(/^[ \t]*-?[ \t]*/, "", l)
-      if (l ~ /^approved[ \t]*:/) {
-        v = l; sub(/^approved[ \t]*:[ \t]*/, "", v); split(v, aw, /[ \t]+/)
-        if (aw[1] != "") appr[aw[1]] = 1
-      }
+      if (index($0, "|ev=approval|") && match($0, /\|key=[^|]+/)) appr[substr($0, RSTART + 5, RLENGTH - 5)] = 1
       next
     }
     # THE PROOFS OF THE RUN (`_units_proofs`), in the order they were last set.
@@ -3219,26 +3210,6 @@ units_fix_cap() {
 }
 
 
-# units_ac_head_awk -> the awk text of `ac_head(line, ac)`, THE ONE MATCHER OF AN AC BLOCK'S HEADING (wave-36 T24;
-#   REQ-7 AC-7.9; D13). A heading is `<ac>:` at the start of a flush-left line, with the text after it optional:
-#   an older plan's block heading carries the criterion's text after the colon, and the wall's matrix_block and
-#   matrix_block_key read that line through this one function, as
-#   `awk "$(units_ac_head_awk)"'...'`. A list bullet (`-`, `*`, `+` and spaces) is stripped from a COPY first, so
-#   `- AC-1:` reads as `AC-1:`; an INDENTED line is no heading, and the colon after the id is why `AC-1` never
-#   begins the `AC-11:` block. Nothing is required after the colon. Pure, silent, and defined at source time.
-#   `ac_any(line)` is the same heading read for any id: the id it heads, or nothing, for a reader that walks every
-#   block (the hand-holds count's waiver arm) rather than asking for one.
-units_ac_head_awk() {
-  printf '%s\n' 'function ac_head(line, ac) {' \
-    '  sub(/^[-*+][[:space:]]+/, "", line)' \
-    '  return index(line, ac ":") == 1' \
-    '}' \
-    'function ac_any(line) {' \
-    '  sub(/^[-*+][[:space:]]+/, "", line)' \
-    '  return match(line, /^AC-[^ \t:]+:/) ? substr(line, 1, RLENGTH - 1) : ""' \
-    '}'
-}
-
 # units_render_units <render.sh> -> THE RENDER TABLE, AS render.sh DECLARES IT (wave-36 T38; D12, AC-6.3; found by
 #   w36-T29's landing). render.sh's `RENDER_UNITS` is a list of `<templates dir>|<output dir>` words split on white
 #   space, and its `MANIFEST_REL` names the checksum manifest. This reads both and prints one line per unit,
@@ -3257,53 +3228,4 @@ units_render_units() {
       for (k = 1; k <= nu; k++) printf "unit\t%s\t%s\n", src[k], dst[k]
       if (manifest != "") printf "manifest\t%s\n", manifest
     }' "$1" 2>/dev/null
-}
-
-# ── THE MATRIX'S ONE BLOCK-KEY WRITER ──────────────────────────────────────────
-#
-# The one writer of a key in an older plan's `## Verification Matrix` block, which the person's confirmation of a
-# row writes; no other code writes a cell, a key or a head line of the matrix.
-
-
-# matrix_row_cell <plan> <AC> <cell n> -> that cell of the AC's matrix row, trimmed (nothing: no row).
-matrix_row_cell() {
-  MX_AC="$2" awk -F'|' -v n="$3" '
-    /^[ \t]*```/ { fence = !fence; next }
-    fence { next }
-    /^## / { inm = ($0 ~ /^## Verification Matrix/); next }
-    inm && /^[ \t]*\|/ { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c)
-      if (c == ENVIRON["MX_AC"]) { v = $(n + 1); gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$1"
-}
-
-# THE AC BLOCK'S KEYS. The block is the `<AC>:` line under `## Verification Matrix`, text after the
-# colon allowed (an older plan's rendering wrote the criterion there), and the indented lines under it (that shape,
-# the one walls.sh `matrix_block` reads); both read the heading through `units_ac_head_awk`, above. The key's
-# first line is replaced where it stands; a key the block lacks goes after its last line. Exit 3 no block.
-matrix_block_key() {  # <plan> <AC> <key> <value> -> the whole plan
-  MB_AC="$2" MB_KEY="$3" MB_VAL="$4" awk "$(units_ac_head_awk)"'
-    BEGIN { a = ENVIRON["MB_AC"]; k = ENVIRON["MB_KEY"] ":"; line = "  " ENVIRON["MB_KEY"] ": " ENVIRON["MB_VAL"] }
-    { L[++nl] = $0 }
-    END {
-      for (i = 1; i <= nl; i++) {
-        x = L[i]
-        if (x ~ /^[ \t]*```/) { fence = !fence; continue }
-        if (fence) continue
-        if (x ~ /^## /) { inm = (x ~ /^## Verification Matrix/); inb = 0; continue }
-        if (!inm) continue
-        y = x; sub(/[ \t]+$/, "", y)
-        if (!found && ac_head(x, a)) { found = i; last = i; inb = 1; continue }
-        if (inb && x ~ /^[ \t]+[^ \t]/) {
-          last = i; sub(/^[ \t]+/, "", y)
-          if (!at && index(y, k) == 1) at = i
-          continue
-        }
-        inb = 0
-      }
-      if (!found) exit 3
-      for (i = 1; i <= nl; i++) {
-        if (i == at) { print line; continue }
-        print L[i]
-        if (!at && i == last) print line
-      }
-    }' "$1"
 }

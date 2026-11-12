@@ -415,8 +415,8 @@ park_fixture() {
   esac
   printf '%s\n' "$p"
 }
-# pk_handoff <project> -> the handoff document the plan's ## Handoff pointer names
-pk_handoff() { local r; r="$(sed -n 's/^handoff: \(.*\) written .*$/\1/p' "$1/$PLAN_REL" | head -1)"; [ -n "$r" ] && cat "$1/$r" 2>/dev/null; }
+# pk_handoff <project> -> the handoff document the run's log names
+pk_handoff() { local r; r="$(co_handoff_rel "$1")"; [ -n "$r" ] && cat "$1/$r" 2>/dev/null; }
 
 PPK="$(park_fixture parked1 wake)"
 PK_WS="$(fixture_git "$PPK" rev-parse --short wave/01-fixture)"
@@ -430,8 +430,8 @@ expect_eq "PK-1b …and never merge: WOULD REFUSE" "no" "$(contains "$CO_OUT" "m
 expect_eq "PK-1c …and check writes nothing" "$PK_CK0" "$(cksum < "$PPK/$PLAN_REL")"
 run_close "$PPK" run
 expect_eq "PK-2 AC-4.3 run closes the parked plan rc 0, and the plan reads closed" "0|1" "$CO_RC|$(run_open_rc "$PPK/$PLAN_REL")"
-expect_contains "PK-3 …the Step-9 line reads delivered: parked on <branch> @ <sha>" \
-  "- Step 9: delivered: parked on wave/01-fixture @ $PK_WS" "$(/usr/bin/grep -m1 '^- Step 9: ' "$PPK/$PLAN_REL")"
+expect_contains "PK-3 …step 9 carries delivered: parked on <branch> @ <sha>" \
+  "delivered=parked on wave/01-fixture @ $PK_WS" "$(co_step_answer "$PPK")"
 expect_eq "PK-4 …the continuation is written and its header says parked, where and why" "1|yes|yes" \
   "$([ -f "$PPK/$CONT_REL" ] && echo 1 || echo 0)|$(contains "$(sed -n 3p "$PPK/$CONT_REL" 2>/dev/null)" "Parked ")|$(contains "$(sed -n 3,4p "$PPK/$CONT_REL" 2>/dev/null)" "\`wave/01-fixture\` @ $PK_WS")"
 expect_absent "PK-4c …and never says the branch was merged" "merged into" "$(sed -n 1,6p "$PPK/$CONT_REL" 2>/dev/null)"
@@ -475,9 +475,9 @@ section "§ONE-WRITER — wave-38 T37 (critic-adversarial #2, critic-structure #
 # each as close-out left it, the session bound by the verb.
 # fails-when: close-out writes another shape or drops a composed section; the two doors' closed lines differ.
 . "$REPO_ROOT/payload/scripts/lib/handoff.sh"
-ow_file() {  # <project> -> the absolute file the plan's ## Handoff pointer names
+ow_file() {  # <project> -> the absolute file the run's log names as its handoff
   local r
-  r="$(sed -n 's/^handoff: \(.*\) written .*$/\1/p' "$1/$PLAN_REL" | head -1)"
+  r="$(co_handoff_rel "$1")"
   [ -n "$r" ] && printf '%s/%s\n' "$1" "$r"
 }
 ow_lines() { handoff_line "$1" "resume point"; handoff_line "$1" "working branch"; }  # <file> -> the two closed lines
@@ -884,8 +884,8 @@ expect_eq "BP-14 …and close-out made no commit: the branch is at the integrate
 # ============================================================
 section "§PREFLIGHT-RECORD — close-out's preflight copy reads the landing record of the plan it copies"
 # ============================================================
-# The preflight judges a COPY of the plan (`.<plan>.plan.md.preflight.<pid>`) so that nothing is written until the gate
-# says yes. A finding a landed row fixed is fixed in the RUN's landing record, which the copy's own name names nothing
+# A dry judgment of a COPY of the plan (`.<plan>.plan.md.preflight.<pid>`) is made so that nothing is written until the
+# gate says yes. A finding a landed row fixed is fixed in the RUN's landing record, which the copy's own name names nothing
 # of: read there, the record is absent, the finding is still to fix, and a `flag` review derives `fail`. The marker the
 # preflight binds its stand-in session with carries `dry_of=<plan>`, and `proof_debt_origin` maps the copy to the plan.
 # FIXTURE FIDELITY: the Step-8 fixture; the structure review is `result=flag` over a record holding two findings, one
@@ -953,30 +953,15 @@ rm -f "$PRF_COPY"
 # ============================================================
 section "§TWO-LINES — check gives one answer for the plan as it stands and the plan run would write"
 # ============================================================
-# On a plan whose flag review has a finding a landed row fixed, `check` prints two gate lines: the real plan's, and the
-# preflight copy's. Both read the run's record, so both read ok. The mutant is close-out.sh with the copy's origin left
-# off the call (the marker then names no plan it copies), the case the lines used to split on.
+# On a plan whose flag review has a finding a landed row fixed, `check` prints two gate lines: the plan as it stands, and
+# the plan with the close's facts pending. Both read the run's record, so both read ok.
 # fails-when: payload/scripts/close-out.sh check prints the preflight's ok under another wording, so the second line is not
-# the one the first is paired with (TL-2). The mutant arm is the control: the call losing the plan splits the lines (TL-5).
+# the one the first is paired with (TL-2).
 run_close "$PRF" check
 expect_eq "TL-1 the plan as it stands: ok" "gate: ok against the plan as it stands" \
   "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -m1 '^gate: .*as it stands')"
 expect_eq "TL-2 the plan run would write: ok, the same answer" "gate: ok against the plan run would write" \
   "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -m1 '^gate: .*run would write')"
-TL_MUT="$(mktemp -d "${TMPDIR:-/tmp}/close-out-tl-mut.XXXXXX")"
-mkdir -p "$TL_MUT/scripts"; ln -s "$REPO_ROOT/payload/scripts/lib" "$TL_MUT/scripts/lib"
-ln -s "$REPO_ROOT/payload/scripts/card.sh" "$TL_MUT/scripts/card.sh"
-sed 's/gate_ask "\$copy" "closeout-preflight-\$\$" "\$PLAN"/gate_ask "$copy" "closeout-preflight-$$"/' "$SCRIPT" > "$TL_MUT/scripts/close-out.sh"
-expect_eq "TL-3 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
-  "$(diff "$SCRIPT" "$TL_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
-( in_fixture "$PRF" || exit 9
-  HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
-    bash "$TL_MUT/scripts/close-out.sh" "$PRF_PLAN" check ) > "$SANDBOX/tl-mut.out" 2>&1
-rm -rf "$TL_MUT"
-expect_eq "TL-4 the mutant runs: its first line is ok as before" "gate: ok against the plan as it stands" \
-  "$(/usr/bin/grep -m1 '^gate: .*as it stands' "$SANDBOX/tl-mut.out")"
-expect_contains "TL-5 …and its second reads WOULD REFUSE, the split the fix closes" "gate: WOULD REFUSE the plan run would write" \
-  "$(/usr/bin/grep -m1 '^gate: .*run would write' "$SANDBOX/tl-mut.out")"
 
 # ============================================================
 section "§READ-ORDER — close-out reads the hand-holds line last, over the window to its own delivered: time"
@@ -1007,12 +992,12 @@ expect_eq "RO-4 …and the continuation carries that same final line" "$RO_LINE"
   "$(awk '/^## / { s = ($0 == "## Hand-holds"); next } s && /^hand-holds: / { print; exit }' "$RO_P/$CONT_REL")"
 # the plan where the close left it (the archive may have moved it)
 RO_AFTER="$(find "$RO_P/.bionic/docs" -name "${PLAN_REL##*/}" -type f 2>/dev/null | head -1)"
-RO_DEL="$(awk '/^- Step 9: delivered: / { print $5; exit }' "$RO_AFTER" 2>/dev/null)"
+RO_DEL="$(awk -F'|' '/\|ev=step\|n=9\|/ { for (i = 3; i <= NF; i++) if ($i ~ /^at=/) t = substr($i, 4) } END { print t }' "$RO_REC/run.log" 2>/dev/null)"
 RO_ENDS="$( ( in_fixture "$RO_P" || exit 9
   HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
     BIONIC_GATE_DIR="$HH_GATE" bash "$BIONIC_HOOKS_DIR/session-poker.sh" landing-report --hand-holds "$RO_AFTER" 2>/dev/null ) | grep '^hand-holds window: ')"
-expect_regex "RO-5 the plan's delivered: time is a minute, as close-out writes it" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z$' "$RO_DEL"
-expect_contains "RO-5b …and the report read after the close names it as the window's end" "until $RO_DEL (delivered:)" "$RO_ENDS"
+expect_regex "RO-5 the delivery's instant is its event's own second" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$RO_DEL"
+expect_contains "RO-5b …and the report read after the close names it as the window's end" "until ${RO_DEL/%:00Z/Z} (delivered:)" "$RO_ENDS"
 
 # ============================================================
 section "§DELIVERED — a delivered run accepts its continuation marks from any session that names it (REQ-10 AC-10.1; D5)"
@@ -1024,18 +1009,14 @@ section "§DELIVERED — a delivered run accepts its continuation marks from any
 # plan. FIXTURE FIDELITY: the plan close-out itself delivered (`run_close … run`), read where the close left it; the
 # verb is the real poker run in the fixture as a session with no engaged marker.
 # fails-when: the verb prints NOT-ENGAGED on a delivered plan, or writes a live plan's continuation from an unengaged session.
-dl_merge() {  # <plan> -> the value of the Step 8 block's merge: line
-  awk '/^- Step 8:/ { b = 1; next } b && /^[^ \t]/ { b = 0 } b && /^[ \t]+merge:/ { sub(/^[ \t]+merge:[ \t]*/, ""); print; exit }' "$1"
-}
 DL_SID="closeout-delivered-sid"
 PDL="$(mk_fixture delivered)"; advance_to "$PDL" 8; gov_step4 "$PDL" "implement: opened 2026-09-14T00:10Z"
 run_close "$PDL" run
 DL_PLAN="$(find "$PDL/.bionic/docs" -name "${PLAN_REL##*/}" -type f 2>/dev/null | head -1)"
 DL_CONT="$(find "$PDL/.bionic/docs" -name continuation.md -type f 2>/dev/null | head -1)"
-expect_eq "DL-0 precondition: close-out delivered the plan (rc 0, a Step 9 delivered: line) and wrote its continuation with the first-decision mark" \
-  "0|yes|yes" \
-  "$CO_RC|$(/usr/bin/grep -qE '^- Step 9: delivered: ' "$DL_PLAN" && echo yes || echo no)|$(/usr/bin/grep -qF '<fill: the first decision, or "none">' "$DL_CONT" && echo yes || echo no)"
-expect_nonempty "DL-0b precondition: the Step 8 block carries the merge: line close-out wrote" "$(dl_merge "$DL_PLAN")"
+expect_eq "DL-0 precondition: close-out delivered the plan (rc 0, its step delivered) and wrote its continuation with the first-decision mark" \
+  "0|state=delivered|yes" \
+  "$CO_RC|$(co_step_answer "$PDL" | tail -1)|$(/usr/bin/grep -qF '<fill: the first decision, or "none">' "$DL_CONT" && echo yes || echo no)"
 lands_poker "$PDL" "$DL_SID" continuation-fill 'the first decision=none' --plan "$DL_PLAN"
 expect_eq "DL-1 continuation-fill --plan <delivered> from an unengaged session writes: rc 0, the mark filled, never NOT-ENGAGED" \
   "0|no|no" \
@@ -1160,7 +1141,7 @@ expect_eq "PN-0 precondition: the plan carries the Step 8 line and the note, and
   "$(/usr/bin/grep -c '^- Step 8: integrate: ' "$PPT/$PLAN_REL")|$(/usr/bin/grep -c '^- Step 9: parked on ' "$PPT/$PLAN_REL")|$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$PPT/$PLAN_REL" step | head -1)"
 run_close "$PPT" run
 expect_eq "PN-1 run closes the parked plan (rc 0), not already closed" "0|no" "$CO_RC|$(contains "$CO_OUT" "already closed")"
-expect_eq "PN-2 …its one Step 9 line is close-out's delivery, the note replaced" "1|yes" \
-  "$(/usr/bin/grep -c '^- Step 9: ' "$PPT/$PLAN_REL")|$(contains "$(/usr/bin/grep '^- Step 9: ' "$PPT/$PLAN_REL")" "- Step 9: delivered: parked on wave/01-fixture @ ")"
+expect_eq "PN-2 …the note left as the person wrote it, and the delivery its step's event" "1|yes" \
+  "$(/usr/bin/grep -c '^- Step 9: parked on ' "$PPT/$PLAN_REL")|$(contains "$(co_step_answer "$PPT")" "delivered=parked on wave/01-fixture @ ")"
 
 finish

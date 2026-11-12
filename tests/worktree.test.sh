@@ -112,8 +112,6 @@ bind_plan() {  # <repo> <sid> <working-branch or empty> -> echoes the plan path
 # Every ref and its object, one line each: a refused land changes NONE of them, which is
 # "no merge commit anywhere" read off git rather than off the refusal line.
 refs_of() { git -C "$1" for-each-ref --format='%(refname) %(objectname)'; }
-# Every worktree, its path and its branch, without the heads: what a land removes or keeps.
-trees_of() { git -C "$1" worktree list --porcelain | grep -v '^HEAD '; }
 
 # shellcheck source=/dev/null
 . "$LIB" 2>/dev/null || { echo "FAIL: the library does not source ($LIB)"; exit 1; }
