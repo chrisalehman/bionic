@@ -51,7 +51,8 @@ expect_eq "FR-1 rehearse reaches the state and prints the sandbox's plan (exit 0
 if [ "$RT_RC" = 0 ]; then
   expect_eq "FR-1b …through the door's landing, a failing review registered by its verb, close-out refused, and the reply's release approval at the release head with no merge without a whole run (the landing past the pass moved no code)" \
     "yes|yes|yes|yes|0" "$([ "$(rt_ran 'spawn-worktree.sh land')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'proof-add review')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'close-out.sh')" -ge 1 ] && echo yes)|$(/usr/bin/grep -q "^approved: release by .* head=$(git -C "$RT_ROOT" rev-parse refs/heads/wave/x) " "$RT_PLAN" && echo yes)|$(/usr/bin/grep -c "^approved: merge-unproved " "$RT_PLAN")"
-  rt_sheet_and_card FR "hold:merge waive:structure" "hold:merge>8/4 waive:structure>8/4" waive:structure
+  # The goal the rehearsal writes as not met owes its decision from the first tick that reads it, holding nothing.
+  rt_sheet_and_card FR "decide:goal:asks hold:merge waive:structure" "decide:goal:asks>nothing hold:merge>8/4 waive:structure>8/4" waive:structure
 fi
 
 # ============================================================
