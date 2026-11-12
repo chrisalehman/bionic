@@ -825,17 +825,17 @@ EOF
     TA_PLAN="$PV_PLAN"; TA_CUR="${PV_CUR%[ab]}"
     case "$TA_CUR" in ''|*[!0-9]*) TA_CUR=0 ;; esac
     if [ "$TA_CUR" -lt 4 ]; then
-      die "REFUSED — $TA_PLAN is at current: ${PV_CUR:-(none)}; before Step-3 approval a row is taken out by an edit of the plan. Nothing is dropped."; exit 1
+      die "REFUSED — $TA_PLAN is at current: ${PV_CUR:-(none)}; before Step-3 approval a row is taken out by an edit of the plan. Nothing is dropped; needs: the person — that edit."; exit 1
     fi
     plan_read_row "$TA_PLAN" Tasks id "$TA_ID" >/dev/null 2>&1 \
-      || { die "REFUSED — $TA_PLAN holds no row $TA_ID in its ## Tasks table. Nothing is dropped."; exit 1; }
+      || { die "REFUSED — $TA_PLAN holds no row $TA_ID in its ## Tasks table. Nothing is dropped; name a row it holds: task-add <id> --drop '<words>'."; exit 1; }
     # Its state is the fill's, the run's log over the cells (`units_rows`), so in flight is what holds a slot: an older
     # table's agent cell names who would write the row, not that anyone does.
     st="$(units_rows "$TA_PLAN" 2>/dev/null)" || poker_fold_unread "task-add $TA_ID --drop '<words>'"
     st="$(printf '%s\n' "$st" | awk -F'\t' -v r="$TA_ID" '$1 == r { print $10; exit }')"
     case "$st" in
       pending|dropped) ;;
-      landed) die "REFUSED — $TA_ID has landed: its work is done, not dropped. Nothing is dropped."; exit 1 ;;
+      landed) die "REFUSED — $TA_ID has landed: its work is done, not dropped. Nothing is dropped; work owed again is a new row, written by an edit and born by task-add <id>."; exit 1 ;;
       *) die "REFUSED — $TA_ID is ${st:-unread}: a writer holds it. Stand it down first (its dispatch's cancel returns it to pending), then task-add $TA_ID --drop again. Nothing is dropped."; exit 1 ;;
     esac
     units_drop_event "$TA_PLAN" "$TA_ID" "$TA_DROP" \
