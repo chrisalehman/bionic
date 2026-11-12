@@ -1,7 +1,5 @@
 #!/bin/bash
-# tests/doctor-patrol.test.sh — doctor.sh's PATROL section (F3, epic-19 wave-01,
-# spec AC-F3; design ledger .bionic/docs/record/epic-19/step2-design-ledger.md
-# ratification round 2).
+# tests/doctor-patrol.test.sh — doctor.sh's PATROL section.
 #
 # THE CONTRACT UNDER TEST. Doctor's Patrol section shows running Patrols or
 # nothing: one line per live Patrol — `✓ session <short> · <n> open

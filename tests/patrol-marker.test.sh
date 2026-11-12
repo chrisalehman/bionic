@@ -6,8 +6,6 @@
 # search reads at :177), and payload/skills/canonical-sdlc/dispatch.md (the
 # literal command the patrol prompt actually issues at its "Tick the poker"
 # bullet, which is what ends up in the transcript the other two read back).
-# Bionic 1.3.2, wave-01-dogfood-fixes task 4/6, spec AC-21. Re-pointed from
-# SKILL.md to dispatch.md at wave-11-lean-spine 1b, when the Patrol text moved.
 #
 # WHY THIS EXISTS. Nothing joins these three copies together today
 # (.bionic/docs/record/wave-bionic-1.3.2-dogfood-fixes/

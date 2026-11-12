@@ -1,5 +1,4 @@
 # tests/lib/roster-row.sh — the one `roster-state/v1` fixture builder
-# (wave-01 verification-cannot-lie, S14; spec AC-25; design ledger D3).
 #
 #     . "$(dirname "$0")/lib/resolve-roots.sh"      # first, so BIONIC_SCRIPTS_DIR is set
 #     . "$(dirname "$0")/lib/roster-row.sh"

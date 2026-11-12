@@ -1,6 +1,5 @@
 #!/bin/bash
-# Tests for hooks/patrol-revive.sh — THE PATROL SELF-HEAL (epic-19 wave-01, AC-F6,
-# design ledger D4).
+# Tests for hooks/patrol-revive.sh — THE PATROL SELF-HEAL.
 #
 # THE CONTRACT UNDER TEST. The CLI holds its cron table in process memory with no
 # file behind it, so a `claude plugin update`, a `/reload-plugins` or a

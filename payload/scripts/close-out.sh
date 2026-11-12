@@ -707,29 +707,49 @@ co_regression_runs() {  # -> sets RR_LINE
 # lines the verbs wrote (hooks/poker/line.sh `hand_holds_report` owns the rules), over the window from the last build
 # landing to the plan's `delivered:` time. `run` writes `delivered:` and only then takes its final reading, so every act
 # it performed before it, after the release approval card as much as before, is inside the window; the card prints
-# that reading, and the continuation's line, written earlier, is replaced by it. Three kinds (amend, hold, extend) and
-# the adoptions are roster lines, which act 3 wipes: `co_hh_keep` copies the roster lines aside before the wipe, and
-# every reading after it reads that copy (`BIONIC_HH_ROSTERS`). A report that cannot be read is a sentence, not a count.
+# that reading, and the continuation's line, written earlier, is replaced by it. Every kind is read from the run's
+# record and log, which the wipe of act 3 does not touch. A report that cannot be read is a sentence, not a count.
 CO_HH_LINE=""
-CO_HH_ROSTERS=""
 co_hand_holds() {  # -> sets CO_HH_LINE
   local out
-  out="$(cd "$ROOT" && BIONIC_HH_ROSTERS="$CO_HH_ROSTERS" bash "$(co_poker)" landing-report --hand-holds "$PLAN" 2>/dev/null | /usr/bin/grep '^hand-holds: ' | head -n 1)" || out=""
+  out="$(cd "$ROOT" && bash "$(co_poker)" landing-report --hand-holds "$PLAN" 2>/dev/null | /usr/bin/grep '^hand-holds: ' | head -n 1)" || out=""
   if [ -n "$out" ]; then CO_HH_LINE="$out"
   else CO_HH_LINE="hand-holds: not read — session-poker.sh landing-report --hand-holds $PLAN could not be read"; fi
 }
-co_hh_keep() {  # -> CO_HH_ROSTERS, a file outside the wiped directory holding every roster line there is now
-  local f
-  CO_HH_ROSTERS="$(mktemp "${TMPDIR:-/tmp}/close-out-rosters.XXXXXX" 2>/dev/null)" || { CO_HH_ROSTERS=""; return 0; }
-  for f in "$TMP_DIR"/roster-*.state; do [ -f "$f" ] && [ ! -L "$f" ] && cat "$f"; done > "$CO_HH_ROSTERS" 2>/dev/null
-  return 0
+# THE HAND ACTS, BY KIND. Each kind of act the hands question answers for the run is one line: its name, how many acts,
+# and each distinct reason once, in the order it first appears, since a reason given many times is one thing the
+# interface lacked. A landing by hand is a kind like the others. A kind with no act has no line, and a run with none
+# has no section. The answer is the hand-holds' own source, the run's log, never a roster.
+CO_HA_LINES=""
+CO_HA_READ=no
+co_hand_acts() {  # -> sets CO_HA_LINES, one `hand act: <kind> · <n> · <reasons>` line per kind, or the sentence of a failed read
+  local ans
+  CO_HA_READ=yes
+  ans="$(co_ask reader_q_hands)" || { CO_HA_LINES="hand acts: not read — the run's facts could not be read"; return 0; }
+  CO_HA_LINES="$(printf '%s\n' "$ans" | awk -F'|' "$_READER_AWK"'
+    { k = (ev() == "published") ? "landing by hand" : line_kv("what") }
+    k == "" { next }
+    { if (!(k in n)) o[++m] = k; n[k]++
+      w = line_kv("why"); if (w == "" || w == "-") w = "no reason given"
+      if (!((k SUBSEP w) in seen)) { seen[k SUBSEP w] = 1; r[k] = r[k] (r[k] == "" ? "" : "; ") w } }
+    END { for (i = 1; i <= m; i++) printf "hand act: %s · %d · %s\n", o[i], n[o[i]], r[o[i]] }')"
+}
+# co_hand_acts_section -> `## Hand acts` and its lines, fenced as the hand-holds are, a failed read its sentence
+# unfenced; nothing at all for a run with no act by hand.
+co_hand_acts_section() {
+  [ "$CO_HA_READ" = yes ] || co_hand_acts
+  [ -n "$CO_HA_LINES" ] || return 0
+  printf '## Hand acts\n\n'
+  case "$CO_HA_LINES" in
+    "hand acts: not read "*) printf '%s\n' "$CO_HA_LINES" ;;
+    *) printf '```\n%s\n```\n' "$CO_HA_LINES" ;;
+  esac
 }
 # co_hand_holds_last -> the final reading, after `delivered:` is written: CO_HH_LINE, and the continuation's line this
 # run wrote replaced by it. A line the continuation held before this run is a person's or an earlier close's, and stays.
 co_hand_holds_last() {
   local was="$CO_HH_LINE" tmp
   co_hand_holds
-  [ -n "${CO_HH_ROSTERS:-}" ] && rm -f "$CO_HH_ROSTERS"
   [ -n "$was" ] && [ "$was" != "$CO_HH_LINE" ] && [ "$CO_HH_CONT" = "$was" ] && [ -f "$CONT" ] || return 0
   tmp="$CONT.close-out.$$"
   CO_WAS="$was" CO_NOW="$CO_HH_LINE" awk '
@@ -1285,7 +1305,7 @@ co_added_ids() {  # <lines> -> the ids, space-joined
 # both take the deferrals' road: the section is inserted under its heading when the file has none, a line the
 # section lacks is added at its end, a line already there (fenced or not) is never written twice, and a person's
 # text is not touched. The hand-holds line counts as there when the section holds ANY `hand-holds: ` line: a second
-# close-out reads a different count (the roster is wiped), and a second, contradicting line would be worse than the
+# close-out reads a later window, so another count, and a second, contradicting line would be worse than the
 # first reading standing (A-T33-1). The inherited lines match byte for byte, as the deferrals do.
 co_cont_missing_under() {  # <heading> <prefix|""> <wanted lines> -> the wanted lines the section lacks, in order;
   # CO_UNFENCED=1 counts only the section's unfenced lines as present
@@ -1338,6 +1358,21 @@ co_cont_sections() {  # <write|check> -> CO_SEC_MSG: what was (write) or would b
     if [ -n "$miss" ]; then
       phr="${phr:+$phr and }the governed-by lines under ## Governed by"
       [ "$mode" != write ] || co_cont_write "## Governed by" "$miss" lines
+    fi
+  fi
+  # THE HAND ACTS: the hand-holds' road, inserted last after ## Hand-holds so they stand next to it, as the template
+  # puts them; a line already in the section is never written twice.
+  [ "$CO_HA_READ" = yes ] || co_hand_acts
+  if [ -n "$CO_HA_LINES" ]; then
+    if ! co_cont_has_heading "## Hand acts"; then
+      phr="${phr:+$phr and }the ## Hand acts section"
+      [ "$mode" != write ] || co_cont_write "## Hand-holds" "$(co_hand_acts_section)" section
+    else
+      miss="$(co_cont_missing_under "## Hand acts" "" "$CO_HA_LINES")"
+      if [ -n "$miss" ]; then
+        phr="${phr:+$phr and }the hand act lines under ## Hand acts"
+        [ "$mode" != write ] || co_cont_write "## Hand acts" "$miss" lines
+      fi
     fi
   fi
   # THE SCORECARD (wave-38 T15; D26): the hand-holds' road, after ## Governed by (so last, as the template puts it). It
@@ -1449,8 +1484,9 @@ co_patrol_sentence() {
 }
 
 continuation_template() {
-  local sha tasks regress reviews patrol inherited head resume ws line at ev whole_text
+  local sha tasks regress reviews patrol inherited acts head resume ws line at ev whole_text
   sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
+  acts="$(co_hand_acts_section)"
   inherited="$(co_inherited_section)" \
     || _co_refuse "the run's facts cannot be read, so the inherited debt it carries is not known; run close-out again"
   tasks="$(co_task_count)"
@@ -1506,7 +1542,9 @@ $(co_deferrals_section)
 $(co_landings_section)
 
 $(co_hand_holds_section)
-
+${acts:+
+$acts
+}
 $(co_governed_section)
 ${inherited:+
 $inherited
@@ -2548,8 +2586,6 @@ do_run() {
   fi
   co_orphans run
   co_regression_runs; say "regression-runs: $RR_LINE"
-  # The roster lines the hand-holds count reads, kept before act_tmp wipes them; the count itself is read last.
-  co_hh_keep
   co_governed;      say "$CO_GOV_LINES"
   # Read before act_tmp wipes the rosters it counts: the continuation's `## Scorecard` prints this reading.
   co_scorecard

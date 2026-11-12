@@ -44,13 +44,15 @@ WORLD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/world.XXXXXX" 2>/dev/null)" \
   && WORLD_ROOT="$(cd "$WORLD_ROOT" && pwd -P)" || WORLD_ROOT=''
 if [ -z "$WORLD_ROOT" ] || [ ! -d "$WORLD_ROOT" ]; then
   echo "world.sh: could not make the world's directory under ${TMPDIR:-/tmp}" >&2
-  return 1 2>/dev/null || exit 1
+  exit 1
 fi
 # A world inside a checkout would let a fixture's git act on a real repository (rule 12).
+# Both refusals end the suite that sourced this file: one that went on would name its world by an empty path, and a
+# git call on an empty -C path acts on the directory the suite started in.
 if git -C "$WORLD_ROOT" rev-parse --show-toplevel >/dev/null 2>&1; then
   echo "world.sh: $WORLD_ROOT lies inside a git checkout — set TMPDIR outside every checkout" >&2
   rm -rf "$WORLD_ROOT"
-  return 1 2>/dev/null || exit 1
+  exit 1
 fi
 export WORLD_ROOT
 export WORLD_SID="11111111-2222-4333-8444-555555555555"

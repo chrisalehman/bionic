@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/decision-skill.test.sh — the decision skill's text, pinned (wave-33 REQ-11; wave-29 folded;
-# wave-34 REQ-12 and REQ-13).
+# tests/decision-skill.test.sh — the decision skill's text, pinned.
 #
 # WHAT THIS SUITE OWNS. `skills/decision/SKILL.md` carries one fixed shape for a decision put to
 # the user: four bold labels in order (Goal, Options, Recommendation, Significance), a numbered

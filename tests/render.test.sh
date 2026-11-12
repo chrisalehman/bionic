@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/render.test.sh — the render pipeline's two check arms (epic-22 wave-01 task 1,
-# REQ-R1: AC-R1.1 and AC-R1.4).
+# tests/render.test.sh — the render pipeline's two check arms.
 #
 # WHAT THIS SUITE OWNS. The ARCHIVE arm of `agents-src/render.sh`, and the tree arm's
 # positive control. It does NOT own the passage-identity pins or the hand-edit arm on the

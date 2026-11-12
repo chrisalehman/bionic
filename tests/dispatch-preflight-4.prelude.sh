@@ -1,5 +1,4 @@
 # tests/dispatch-preflight-4.prelude.sh — THE HALF OF THE DISPATCH-PREFLIGHT-4 SUITE BOTH PARTS SHARE
-# (wave-39 T37; D1, D13, REQ-3 AC-3.3).
 #
 # Sourced by tests/dispatch-preflight-4a.test.sh and -4b.test.sh, after the framework, the shared libraries and
 # tests/dispatch-preflight.prelude.sh. It is not a suite: the runner launches `*.test.sh` only. It sits beside the

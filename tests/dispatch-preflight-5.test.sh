@@ -1,6 +1,5 @@
 #!/bin/bash
-# Tests for hooks/dispatch-preflight.sh — THE START GATE. The fifth shard: §AGREE and §PROTOTYPE
-# (wave-38 T21; REQ-13 AC-13.1, AC-13.2; design ledger Δ9, D16).
+# Tests for hooks/dispatch-preflight.sh — THE START GATE. The fifth shard: §AGREE and §PROTOTYPE.
 # §QUESTIONS holds the other half: a row's declared questions are the set a reader's brief is compared to.
 #
 # A STEP-2 PROTOTYPE THE WALL ADMITS. steps/2.md sanctions a prototype at Step 2, before the plan

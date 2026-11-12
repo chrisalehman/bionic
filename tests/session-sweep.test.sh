@@ -2,9 +2,7 @@
 # Tests for hooks/session-poker.sh `sweep` — the verb that deletes what DEAD sessions left
 # under a project's .bionic/tmp.
 #
-# Governing requirement: .bionic/docs/ideas/fixit-1.5.2-dead-session-sweep.md §Proposed fix
-# and §Acceptance, ruled into fixit 1.5.1 as T5 (plan D-4, D-5; AC-9, AC-10, AC-11). The
-# defect it closes: doctor proves a project's predecessor sessions dead, lists their
+# The defect it closes: doctor proves a project's predecessor sessions dead, lists their
 # leftover state, and names no way to clear it — so `.bionic/tmp` grows one set of files per
 # `/clear`, forever, under a header reading "Nothing to do".
 #

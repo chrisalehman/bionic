@@ -525,9 +525,8 @@ assert_eq "continuation_exempt_from_matrix exit 0" 0 "$HOOK_EXIT"
 # ============================================================
 #
 # `walk:` is optional at THIS hook — absence is never blocked here; the
-# evidence-gate hook fail-closes on absence at Step 5 (A1/A7,
-# .bionic/docs/plans/epic-14-verification-power/wave-01-cheapest-first.plan.md
-# — division of labor between the two hooks). When the key IS present, only
+# evidence-gate hook fail-closes on absence at Step 5 (the division of labor
+# between the two hooks). When the key IS present, only
 # the literal values `required` and `exempt` are legal; anything else blocks,
 # naming both legal values.
 
