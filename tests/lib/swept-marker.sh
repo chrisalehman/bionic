@@ -1,5 +1,4 @@
 # tests/lib/swept-marker.sh — extracts the one `landing-swept/v1` writer for fixtures
-# (wave-01-verification-cannot-lie S15, spec AC-26; research-code-map §2.c).
 #
 #     . "$(dirname "$0")/lib/resolve-roots.sh"      # first, so BIONIC_HOOKS_DIR is set
 #     . "$(dirname "$0")/lib/swept-marker.sh"
