@@ -222,7 +222,7 @@ section "§DECISIONS: decisions [--all] reads the design ledgers' register entri
 # with the lines a register must not read (a heading with no ruling, a body line, a fenced example).
 # fails-when: a ruled decision is absent from the list or the recap; a non-entry is listed.
 RDC="$(make_repo decisions)"
-PDC="$(s34_plan "$RDC" 4)"
+PDC="$(SP_PLAN_AT=15 s34_plan "$RDC" 4)"
 DC_DOCS="$RDC/.bionic/docs"
 mkdir -p "$DC_DOCS/record/wave-01-fixture" "$DC_DOCS/record/wave-00-earlier" "$DC_DOCS/record/wave-02-old" "$DC_DOCS/adrs/epic-99-fixture"
 cat > "$DC_DOCS/record/wave-01-fixture/design-ledger.md" <<'LEDGER'
@@ -287,7 +287,7 @@ DC_SKILL="${BIONIC_SKILLS_DIR}/decision/SKILL.md"
 # real one. fails-when: a line of D30 or D31 is absent or listed twice, out of the ledger's order, or the put line
 # has an entry.
 RD6="$(make_repo decisions-w38)"
-PD6="$(s34_plan "$RD6" 4)"
+PD6="$(SP_PLAN_AT=15 s34_plan "$RD6" 4)"
 D6_DOCS="$RD6/.bionic/docs"
 mkdir -p "$D6_DOCS/record/wave-01-fixture"
 cat > "$D6_DOCS/record/wave-01-fixture/design-ledger.md" <<'LEDGER'
@@ -436,7 +436,7 @@ section "§ORDER: the tick orders dispatch — FILL offers the longest remaining
 # remaining chain is its size plus the heaviest path of open rows waiting on it, transitively (the `f` of
 # lib/units.sh `units_chain`, which the CHAIN line prints for the whole graph); ties go by row id. The ready set's
 # membership is unchanged: only its order, and so which rows the writer gap's trim keeps.
-# FIXTURE FIDELITY: §47's reads table (s47_plan): two chains, T1 (10) → T2 (10) = 20 and T3 (30) → T4 (40) → T5 (50)
+# FIXTURE FIDELITY: s47_plan's table at 15, each link a dep: two chains, T1 (10) → T2 (10) = 20 and T3 (30) → T4 (40) → T5 (50)
 # = 120, and T6 (20) alone, tying T1 at 20. Table order offers T1 first; chain order offers T3. The leases are
 # opened by the gate's own writer (`gate_landing_open`), carried by this test's live process, at planted ages.
 # fails-when: FILL names T1 ahead of T3; the writer gap of one keeps T1; the gate line names no widths, names a
@@ -444,13 +444,13 @@ section "§ORDER: the tick orders dispatch — FILL offers the longest remaining
 # SPLIT line prints while the fill is full.
 OR_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
 ROR="$(make_repo order)"; new_roster "$ROR"
-or_plan() {  # <writers> -> the fixture plan, bound by s47_plan's approval line
-  s47_plan "$ROR" "$1" \
+or_plan() {  # <writers> -> the fixture plan at 15, each chain's link a dep on the row before it
+  SP_PLAN_AT=15 s47_plan "$ROR" "$1" \
     "| T1 | 4 | build | the short chain's head | implementor | — | 10 | REQ-x | payload/a.sh | pending | |" \
-    "| T2 | 4 | build | the short chain's tail | implementor | — | 10 | REQ-x | payload/a2.sh | pending | payload/a.sh |" \
+    "| T2 | 4 | build | the short chain's tail | implementor | T1 | 10 | REQ-x | payload/a2.sh | pending | |" \
     "| T3 | 4 | build | the long chain's head | implementor | — | 30 | REQ-x | payload/b.sh | pending | |" \
-    "| T4 | 4 | build | the long chain's middle | implementor | — | 40 | REQ-x | payload/c.sh | pending | payload/b.sh |" \
-    "| T5 | 4 | build | the long chain's tail | implementor | — | 50 | REQ-x | payload/d.sh | pending | payload/c.sh |" \
+    "| T4 | 4 | build | the long chain's middle | implementor | T3 | 40 | REQ-x | payload/c.sh | pending | |" \
+    "| T5 | 4 | build | the long chain's tail | implementor | T4 | 50 | REQ-x | payload/d.sh | pending | |" \
     "| T6 | 4 | build | alone, tying T1's chain | implementor | — | 20 | REQ-x | payload/e.sh | pending | |" >/dev/null
 }
 or_gate() { s47_lines gate | sed -n 's/^.* widths: //p'; }   # -> the gate line's widths field
@@ -522,7 +522,7 @@ QL_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
 QL_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 QL_PIDS=""
 RQL="$(make_repo quiet-landing)"; new_roster "$RQL"
-QL_PLAN="$(wave_plan_at "$RQL" 'epic-99-fixture/wave-01-fixture.plan.md' "-" \
+QL_PLAN="$(SP_PLAN_AT=15 wave_plan_at "$RQL" 'epic-99-fixture/wave-01-fixture.plan.md' "-" \
   "| T1 | 4 | build | the writer's row | implementor | — | 60 | REQ-x | a.sh | active |")"
 QL_REC="$(bash -c '. "$1/line.sh" && line_record "$2"' _ "$QL_LIB" "$QL_PLAN")"
 QL_PROG="$RQL/progress-w1.md"
@@ -700,7 +700,7 @@ section "§TSENTENCE: task-add refuses a Tasks cell with no sentence after its t
 TS_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 TS_CARD="${BIONIC_HOOKS_DIR}/../payload/scripts/card.sh"
 RTS="$(make_repo tsentence)"; ( cd "$RTS" && git commit -q --allow-empty -m init )
-PTS="$(s34_plan "$RTS" 5)"
+PTS="$(SP_PLAN_AT=15 s34_plan "$RTS" 5)"
 ts_card_says() {  # <id> <cell> -> what the card's check prints for that cell
   bash "$TS_CARD" task-cell "$1" "$2" 2>&1 >/dev/null
 }
@@ -745,7 +745,7 @@ section "§CAP: task-add refuses a title over the card's cap where it is typed, 
 CP_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 CP_CARD="${BIONIC_HOOKS_DIR}/../payload/scripts/card.sh"
 RCP="$(make_repo cap)"; ( cd "$RCP" && git commit -q --allow-empty -m init )
-PCP="$(s34_plan "$RCP" 5)"
+PCP="$(SP_PLAN_AT=15 s34_plan "$RCP" 5)"
 CP_T30="Thirty columns of title, no more"; CP_T30="${CP_T30:0:30}"
 CP_T31="${CP_T30}x"
 cp_says() {  # <id> <cell> -> what the card's check prints for that cell
