@@ -201,8 +201,13 @@ for c in "2|approval|step1|Step 1's approval" "7|header|adrs: none — no decisi
   case "$k" in approval) printf 'run/v1|ev=approval|key=%s|by=f|said=yes|at=2026-11-01T00:00:10Z\n' "$v" >> "$L2" ;;
     header) hdr "$v" ;; step) printf 'run/v1|ev=step|n=%s|%s|at=2026-11-01T00:00:10Z\n' "$n" "$v" >> "$L2" ;; esac; gate
   expect_eq "…and not owed once it stands" "" "$(owed "$w")"; done
+# At 8 the merge is owed only when the plan holds an integrate row and the run is not parked, and then until it lands.
 printf 'run/v1|ev=step|n=8|at=2026-11-01T00:00:11Z\n' >> "$L2"; gate
-expect_eq "at 8 the integrate row's landing and the close's cleanup are owed" "owed at 15: Step 8's merge|owed at 15: Step 8's cleanup" "$(owed "Step 8's merge")|$(owed "Step 8's cleanup")"
+expect_eq "at 8 with no integrate row no merge is owed, and the close's cleanup is" "|owed at 15: Step 8's cleanup" "$(owed "Step 8's merge")|$(owed "Step 8's cleanup")"
+awk '{ print } /^\| T1 \| 4 \| build /{ print "| T2 | 8 | integrate | Merge. | — | T1 | 10 | REQ-1 | — | — | — | pending |" }' "$P2" > "$P2.t" && mv "$P2.t" "$P2"; gate
+expect_eq "…with one, its landing is owed" "owed at 15: Step 8's merge" "$(owed "Step 8's merge")"
+cp "$P2" "$P2.w"; printf '\n## Wake Note\n\nParked: the person holds the merge.\n' >> "$P2"; gate; mv "$P2.w" "$P2"
+expect_eq "…and not while the run is parked" "" "$(owed "Step 8's merge")"
 printf 'run/v1|ev=step|n=8|cleanup=n/a: kept|at=2026-11-01T00:00:12Z\n' >> "$L2"; gate
 expect_eq "…and the cleanup not once the close gives it to the step" "owed at 15: Step 8's merge|" "$(owed "Step 8's merge")|$(owed "Step 8's cleanup")"
 # A step pending in an advance's judgment moves the gate only in the advance's own session, and is never held.
@@ -211,5 +216,36 @@ for d in planverb-4242 closeout-preflight-4243; do printf 'plan=%s\n' "$P2" > "$
   expect_eq "a dry judgment's own session ($d) is judged at the step pending" "owed at 15: Step 1's approval" "$(owed "Step 1's approval")"; done
 gate_as "$SID" 2
 expect_eq "a real session's commit with the same variable set is judged at the step its log holds, nothing held of the pending one" "owed at 15: Step 8's merge|" "$(owed "Step 8's merge")|$(owed "Step 1's approval")"
+
+# The close's own judgment folds, last, the facts its acts will write, on the one channel the pending step rides: its step
+# with its fields, the landing of a row it lands, a tree it removes. Nothing else may ride there.
+printf 'run/v1|ev=tree|row=T1|path=.worktrees/t1|at=2026-11-01T00:00:14Z\n' >> "$L2"; mkdir -p "$R/.worktrees/t1"
+contains() { case "$1" in *"$2"*) printf yes ;; *) printf no ;; esac; }
+CF="8|cleanup=done|tmp-wiped=0 entries|tasks-completed=T1
+published|row=T2|commit=$H|kind=close|by=close-out|why=merged
+tree|row=T1|path="
+L2_SUM="$(cksum < "$L2")"; gate_as closeout-preflight-4243 "$CF"
+expect_eq "the close's own session is judged with its facts pending: no merge, tree or cleanup owed, the log's other asks still made" "|||yes" \
+  "$(owed "Step 8's merge")|$(owed "Step 8's trees")|$(owed "Step 8's cleanup")|$(contains "$GATE_SAID" "could not be read at 15: each row's")"
+gate_as "$SID" "$CF"
+expect_eq "a real session with the same facts set is judged on the log, nothing held of them" "owed at 15: Step 8's merge|owed at 15: Step 8's trees" "$(owed "Step 8's merge")|$(owed "Step 8's trees")"
+expect_eq "nothing pending is appended: the log is as it was" "$L2_SUM" "$(cksum < "$L2")"
+for v in "8|delivered=x" "8"$'\n'"approval|key=step3|by=f|said=yes" "8"$'\n'"proof|kind=regression|head=$H|evidence=x" "8"$'\n'"waiver|question=evidence" \
+         "8"$'\n'"finding|ref=r.md#1" "8"$'\n'"published|row=T2|commit=$H|kind=hand|by=f" "8"$'\n'"tree|row=T1|path=.worktrees/t9"; do
+  gate_as closeout-preflight-4243 "$v"
+  expect_eq "a pending line the close does not write is refused by the fold: ${v//$'\n'/ / }" "2|yes" "$GATE_EXIT|$(contains "$GATE_SAID" "the facts pending in closeout-preflight-4243 are refused")"
+done
+
+# At 14 steps 8 and 9 are asked what they are asked at 15, of the reader, with no Step line asked for.
+printf 'plan=%s\n' "$GP" > "$R/.bionic/tmp/engaged-$SID.state"
+owed14() { printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o "owed at 14: $1" | head -1; }
+printf 'run/v1|ev=step|n=8|at=2026-11-01T00:00:20Z\n' >> "$GL"; gate
+expect_eq "at 14 a step 8 the log holds is asked of its event: its cleanup owed, no Step 8 line asked for" "2|owed at 14: Step 8's cleanup|no" \
+  "$GATE_EXIT|$(owed14 "Step 8's cleanup")|$(contains "$GATE_SAID" "has no 'Step 8:' line")"
+printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=record/floor.log|at=2026-11-01T00:00:21Z\nrun/v1|ev=step|n=8|cleanup=done|tmp-wiped=0 entries|tasks-completed=T1|at=2026-11-01T00:00:21Z\n' "$H" >> "$GL"; gate
+expect_status "…and admitted once the close gives the step its fields" 0 "$GATE_EXIT"
+printf 'run/v1|ev=step|n=9|delivered=no|at=2026-11-01T00:00:22Z\n' >> "$GL"; gate
+expect_eq "at 14 a step 9 not delivered owes its delivery, no Step 9 line asked for" "2|owed at 14: Step 9's delivery|no" \
+  "$GATE_EXIT|$(owed14 "Step 9's delivery")|$(contains "$GATE_SAID" "has no 'Step 9:' line")"
 
 finish

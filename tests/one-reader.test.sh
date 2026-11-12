@@ -102,6 +102,8 @@ SH0="$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "shared" && ($2 == "born" || 
 expect_eq "the shared-type count rises by each of the six planted types not shared before" "$(( $(count "$BEFORE" shared_types) + 6 - SH0 ))" "$(count "$AFTER" shared_types)"
 expect_eq "step: one writer, the facts library's, and no second" "payload/scripts/lib/proof.sh proof_step_event|" \
   "$(printf '%s\n' "$AFTER" | awk -F'\t' '$1 == "writer" && $2 == "step" { split($3, w, " "); sub(/:[0-9]+$/, "", w[1]); print w[1], w[2] }')|$(pair step)"
+expect_eq "handoff: one writer, the facts library's, and no second" "payload/scripts/lib/proof.sh proof_handoff_event|" \
+  "$(printf '%s\n' "$AFTER" | awk -F'\t' '$1 == "writer" && $2 == "handoff" { split($3, w, " "); sub(/:[0-9]+$/, "", w[1]); print w[1], w[2] }')|$(pair handoff)"
 # The two setters of matrix cells go with the matrix; every other hand event is written by the one writer.
 expect_eq "hand: one writer, the line library's, beside the matrix setters" "payload/scripts/lib/line.sh line_hand_event" \
   "$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "writer" && $2 == "hand" { split($3, w, " "); sub(/:[0-9]+$/, "", w[1]); print w[1], w[2] }' \

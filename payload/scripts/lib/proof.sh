@@ -238,12 +238,17 @@ proof_finding_event() {  # <plan> <field>=<value>… -> one finding event in the
 # THE RUN'S LOG HOLDS A STEP, and this is the type's one writer: the advance calls it, and so does close-out for the
 # facts its close gives. A step's evidence is what happened, asked of the event that holds it; only what no other event
 # and no header line holds rides on the step's own event, in the fields the reader names for that step
-# (lib/reader.sh `reader_step_fields`), so a field no reader asks for is refused unwritten. Exits as
-# proof_waiver_event's, and 2 for a step this lifecycle has not or a field its step does not carry.
-proof_step_event() {  # <plan> <step> [<field>=<value>…] -> one step event in the plan's run log
+# (lib/reader.sh `reader_step_fields`), so a field no reader asks for is refused unwritten. A caller whose plan has moved
+# since it read where its run's log is (the archive moves a plan and never its record) names that log in the plan's
+# place: it must be a log that exists, so no directory is made for it. Exits as proof_waiver_event's, and 2 for a step
+# this lifecycle has not, a field its step does not carry, or a log named that is not there.
+proof_step_event() {  # <plan|its run's log> <step> [<field>=<value>…] -> one step event in that run's log
   local log n="${2:-}" f
   case "$n" in [0-9]|[0-9][ab]) ;; *) return 2 ;; esac
-  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
+  case "$1" in
+    */run.log) [ -f "$1" ] && [ ! -L "$1" ] && _proof_event_load || return 2; log="$1" ;;
+    *) _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2 ;;
+  esac
   shift 2
   for f in "$@"; do
     case " $(reader_step_fields "$n") " in *" ${f%%=*} "*) ;; *) return 2 ;; esac
@@ -251,18 +256,59 @@ proof_step_event() {  # <plan> <step> [<field>=<value>…] -> one step event in 
   RUN_LOG="$log" log_append step "n=$n" "$@"
 }
 
+# THE RUN'S LOG HOLDS WHERE ITS HANDOFF WAS WRITTEN, and this is the type's one writer: the file's path as a pointer line
+# names it, the one field the translation gives an older plan's `handoff: <path> written <time>`, so the reader answers
+# a pointer logged and a pointer written alike; the instant is the appender's. Exits as proof_waiver_event's.
+proof_handoff_event() {  # <plan> <the handoff file's path, from the project's root> -> one handoff event in the plan's run log
+  local log
+  [ -n "${2:-}" ] || return 2
+  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
+  RUN_LOG="$log" log_append handoff "path=$2"
+}
+
 # A STEP A DRY JUDGMENT ASKS ABOUT stands last in the facts of that judgment and nowhere else. The advance runs the
 # commit gate on the plan itself under its own session, `planverb-<pid>`, with the step it moves to in BIONIC_DRY_STEP;
-# close-out's pre-flight judges a copy of the plan, whose name joins no record, under `closeout-preflight-<pid>`, with
-# the run's step. Any other session's commit is judged at the step its log holds, whatever its environment carries,
-# since a variable anyone can set must never move a gate. The step is folded in after the facts, never held or appended.
-_PROOF_DRY=""; _PROOF_DRY_SID="-"
-_proof_dry_step() {  # -> _PROOF_DRY set to the pending step's line, empty when the session judged names none
+# close-out judges the plan under `closeout-preflight-<pid>` before its acts, with the facts those acts will write on the
+# same channel, one per line after the step: the step's own fields on its line (`8|cleanup=done|…`), then the landing of
+# each row it lands (`published|row=<id>|…|kind=close|by=close-out`) and each tree it removes (`tree|row=<id>|path=`).
+# Those three kinds are the whole list: an approval, a proof, a waiver or a finding is what a person or a reviewer gives,
+# and a pending line of any other shape fails the fold, so a judgment never stands on one. Any other session's commit
+# is judged on what its log holds, whatever its environment carries, since a variable anyone can set must never move a
+# gate. What is pending is folded in after the facts, never held and never appended.
+_PROOF_DRY=""; _PROOF_DRY_SID="-"; _PROOF_DRY_BAD=""
+_proof_dry_step() {  # -> _PROOF_DRY set to the pending lines, empty when the session judged names none; _PROOF_DRY_BAD saying why they are refused
+  local first rest l n f row path kind by dry IFS=$' \t\n'
+  local -a w
   [ "$_PROOF_DRY_SID" != "${BIONIC_SID:-}" ] || return 0
-  _PROOF_DRY_SID="${BIONIC_SID:-}"; _PROOF_DRY=""
+  _PROOF_DRY_SID="${BIONIC_SID:-}"; _PROOF_DRY=""; _PROOF_DRY_BAD=""
   case "$_PROOF_DRY_SID" in planverb-*|closeout-preflight-*) ;; *) return 0 ;; esac
   case "${_PROOF_DRY_SID##*-}" in ''|*[!0-9]*) return 0 ;; esac
-  case "${BIONIC_DRY_STEP:-}" in [0-9]|[0-9][ab]) _PROOF_DRY="run/v1|ev=step|n=${BIONIC_DRY_STEP}|at=" ;; esac
+  [ -n "${BIONIC_DRY_STEP:-}" ] || return 0
+  first="${BIONIC_DRY_STEP%%$'\n'*}"; rest=""; [ "$first" = "$BIONIC_DRY_STEP" ] || rest="${BIONIC_DRY_STEP#*$'\n'}"
+  IFS='|' read -r -a w <<< "$first"; n="${w[0]}"
+  case "$n" in [0-9]|[0-9][ab]) ;; *) _PROOF_DRY_BAD="the pending step '$n' is no step"; return 0 ;; esac
+  for f in "${w[@]:1}"; do
+    case "$f" in *=*) ;; *) _PROOF_DRY_BAD="the pending step's '$f' is no field"; return 0 ;; esac
+    case " $(reader_step_fields "$n") " in *" ${f%%=*} "*) ;; *) _PROOF_DRY_BAD="step $n carries no field ${f%%=*}"; return 0 ;; esac
+  done
+  dry="run/v1|ev=step|n=$first|at="
+  while IFS= read -r l; do
+    [ -n "$l" ] || continue
+    IFS='|' read -r -a w <<< "$l"; row=""; path="-"; kind=""; by=""
+    for f in "${w[@]:1}"; do case "$f" in row=*) row="${f#row=}" ;; path=*) path="${f#path=}" ;; kind=*) kind="${f#kind=}" ;; by=*) by="${f#by=}" ;; esac; done
+    case "${w[0]}" in
+      published) [ -n "$row" ] && [ "$kind" = close ] && [ "$by" = close-out ] || { _PROOF_DRY_BAD="a pending landing is not one the close makes"; return 0; } ;;
+      tree) [ -n "$row" ] && [ -z "$path" ] || { _PROOF_DRY_BAD="a pending tree is not one the close removes"; return 0; } ;;
+      *) _PROOF_DRY_BAD="a pending ${w[0]:-line} is no fact the close writes"; return 0 ;;
+    esac
+    dry="$dry"$'\n'"run/v1|ev=$l|at="
+  done <<< "$rest"
+  _PROOF_DRY="$dry"
+}
+_proof_dry_refused() {  # -> 0, one line on stderr, when the pending lines of this judgment are refused
+  _proof_dry_step
+  [ -n "$_PROOF_DRY_BAD" ] || return 1
+  printf '_proof_facts: the facts pending in %s are refused (%s); nothing is judged on them\n' "$_PROOF_DRY_SID" "$_PROOF_DRY_BAD" >&2
 }
 
 # THE RUN'S LOG HOLDS A PROOF, whatever it proves, in the fields the translation gives an older plan's line, so the reader
@@ -1740,7 +1786,7 @@ PROOF_EVENTS
 # answer as the fold of every event and it would, the standing facts being each identity's last. Nothing is kept.
 _proof_facts_out() {
   local f p
-  _proof_dry_step
+  ! _proof_dry_refused || return 2
   p="${_PROOF_PENDING:-}"; [ -z "$_PROOF_DRY" ] || p="${p:+$p$'\n'}$_PROOF_DRY"
   [ -n "$p" ] || { printf '%s' "$_PROOF_FACTS"; return 0; }
   f="$( set -o pipefail; reader_events() { printf '%s%s\n' "$_PROOF_FACTS" "$p"; }; reader_facts - )" || return 2
@@ -1774,7 +1820,7 @@ _proof_findings_hold() {
 # when none are held for it or a proof is pending, which a hold does not hold: the caller then asks the fold.
 proof_held_facts() {
   _proof_dry_step
-  [ -n "${_PROOF_HELD_PLAN:-}" ] && [ "$_PROOF_HELD_PLAN" = "${1:-}" ] && [ -z "${_PROOF_PENDING:-}$_PROOF_DRY" ] || return 1
+  [ -n "${_PROOF_HELD_PLAN:-}" ] && [ "$_PROOF_HELD_PLAN" = "${1:-}" ] && [ -z "${_PROOF_PENDING:-}$_PROOF_DRY$_PROOF_DRY_BAD" ] || return 1
   printf '%s' "${_PROOF_HELD_FACTS:-}"
 }
 
@@ -1824,7 +1870,7 @@ proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|
   stamp="$(cksum "${deps[@]}" 2>/dev/null)" || stamp=""
   key="$plan ${stamp//$'\n'/ } $_PROOF_PLACE_LIBS"
   # A step pending in an advance's own judgment is no place to keep: it is neither read from the held file nor kept in it.
-  _proof_dry_step
+  ! _proof_dry_refused || return 2
   if [ -n "$stamp" ] && [ -n "$_PROOF_PLACE_LIBS" ] && [ -n "$_PROOF_PLACE_DIR" ] && [ -z "$_PROOF_DRY" ]; then
     held="${plan//[^A-Za-z0-9._-]/%}"; [ "${#held}" -le 200 ] || { held="$(cksum <<< "$plan")"; held="${held%% *}"; }
     held="$_PROOF_PLACE_DIR/$held"
