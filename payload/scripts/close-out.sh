@@ -11,6 +11,7 @@
 #
 #     close-out.sh <plan-path> run      perform the tail and write the two lifecycle blocks
 #     close-out.sh <plan-path> check    report what `run` would do; change nothing
+#     ... run|check --deployed <what> --verified <how> --monitored <how>   when the plan names a deploy_target
 #
 # EVERY ACT IS IDEMPOTENT BY A READBACK OF ITS OWN RESULT, never by a flag this script
 # sets. The merge act asks git whether the working branch is reachable — which is true
@@ -223,10 +224,17 @@ co_would() {
 }
 
 usage() {
-  echo "usage: close-out.sh <plan-path> run|check|closed-form [<instant>]" >&2
+  echo "usage: close-out.sh <plan-path> run|check [--deployed <what> --verified <how> --monitored <how>]" >&2
+  echo "       close-out.sh <plan-path> closed-form [<instant>]" >&2
   echo "       run          perform the Step 8/9 tail and write both lifecycle blocks" >&2
   echo "       check        report what run would do, and change nothing" >&2
   echo "       closed-form  print the closed handoff's resume point: and branch: lines, and change nothing" >&2
+  echo "       --deployed, --verified, --monitored  what was deployed, how it was verified and how it is monitored," >&2
+  echo "                    owed when the plan names a deploy_target and refused when it names none" >&2
+}
+# co_deploy_ask <deployed|verified|monitored> -> what that option asks for, in a person's words
+co_deploy_ask() {
+  case "$1" in deployed) printf 'what was deployed, and where' ;; verified) printf 'how the deploy was verified' ;; *) printf 'how the deploy is monitored' ;; esac
 }
 
 # ─── Arguments ───────────────────────────────────────────────────────────────
@@ -238,8 +246,26 @@ if [ -z "$PLAN" ] || [ -z "$VERB" ]; then
   _co_refuse "this call names no plan, or no verb — the verbs are run and check"
 fi
 CO_AT=""
+# THE THREE OF A DEPLOY ARE A PERSON'S WORDS, given to run and check as named options: the close is the one writer of
+# its delivery's step, so it is the one place they can be written. Each value goes into one field of the run's log,
+# which holds no `|` and no line break, so a value holding either is refused here, before anything is read or done.
+CO_DEPLOYED=""; CO_VERIFIED=""; CO_MONITORED=""; CO_DEPLOY_GIVEN=""
 case "$VERB" in
-  run|check) : ;;
+  run|check)
+    shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --deployed|--verified|--monitored)
+          [ $# -ge 2 ] || { usage; _co_refuse "$1 takes one word: $(co_deploy_ask "${1#--}")"; }
+          case " $CO_DEPLOY_GIVEN " in *" ${1#--} "*) usage; _co_refuse "$1 is given twice" ;; esac
+          case "$2" in *'|'*|*[[:cntrl:]]*) usage; _co_refuse "$1 holds a | or a line break, which the run's log cannot hold; write it without one" ;; esac
+          CO_DEPLOY_GIVEN="${CO_DEPLOY_GIVEN:+$CO_DEPLOY_GIVEN }${1#--}"
+          case "$1" in --deployed) CO_DEPLOYED="$2" ;; --verified) CO_VERIFIED="$2" ;; *) CO_MONITORED="$2" ;; esac
+          shift 2 ;;
+        *) usage; _co_refuse "$VERB takes no word '$1' — its options are --deployed, --verified and --monitored" ;;
+      esac
+    done
+    ;;
   closed-form)
     [ $# -le 3 ] || { usage; _co_refuse "closed-form takes the plan and at most one instant"; }
     CO_AT="${3:-}"
@@ -1823,12 +1849,62 @@ co_close_step8() {
   case "$st" in "n=8"$'\n'*cleanup=*) ;; *) _co_refuse "step 8's fields did not land in the run's log of $PLAN" ;; esac
 }
 
-# co_close_step9 -> the delivery appended at its own second, read back closed; CO_DELIVERED_AT the instant it holds
+# THE DEPLOY IS ASKED BY THE GATE'S OWN QUESTIONS. Whether the plan names a target is lib/walls.sh `deploy_target_named`
+# over the header's deploy_target, read by the header's one grammar, and a value is refused as empty by the gate's own
+# ban, `is_placeholder_value`: both asked in a subshell that sources the gate's library, as co_matrix_settle asks it.
+# A target named owes all three, written on the delivery's step; a target not named owes none, and a word given for one
+# is refused as having no job here, never dropped. A question that cannot be asked refuses: the close cannot tell
+# whether a deploy is owed, and a delivery that skipped it could not be taken back.
+CO_TARGET=""; CO_DEPLOY_NAMED=no; CO_DEPLOY_WHY=""; CO_DEPLOY_SAYS=""
+CO_DEPLOY_FIELDS=()
+co_walls_ask() {  # <lib/walls.sh function> [args] -> its exit status, asked of the gate's library in a subshell; 9 when it cannot be asked
+  ( . "${CO_LIB}/walls.sh" >/dev/null 2>&1 && declare -F "$1" >/dev/null 2>&1 || exit 9
+    DEPLOY_TARGET="$CO_TARGET"
+    "$@" )
+}
+co_deploy_value() {  # <deployed|verified|monitored> -> the value given for it, or nothing
+  case "$1" in deployed) printf '%s' "$CO_DEPLOYED" ;; verified) printf '%s' "$CO_VERIFIED" ;; *) printf '%s' "$CO_MONITORED" ;; esac
+}
+co_deploy_judge() {  # -> CO_DEPLOY_WHY, why the close cannot take the deploy as given, or nothing; CO_DEPLOY_FIELDS when owed
+  local k v rc miss=""
+  CO_TARGET="$(plan_frontmatter_get "$PLAN" deploy_target)"
+  co_walls_ask deploy_target_named; rc=$?
+  case "$rc" in
+    0) CO_DEPLOY_NAMED=yes ;;
+    1) [ -z "$CO_DEPLOY_GIVEN" ] && return 0
+       CO_DEPLOY_SAYS="deploy words given with no deploy target"
+       CO_DEPLOY_WHY="the plan names no deploy target (deploy_target: ${CO_TARGET:-none}), so the words given to --${CO_DEPLOY_GIVEN// / --} have no job here: give them only for a run whose plan names the target it deployed to"
+       return 0 ;;
+    *) CO_DEPLOY_SAYS="the deploy question cannot be asked"
+       CO_DEPLOY_WHY="the gate's deploy question (lib/walls.sh deploy_target_named) cannot be asked from $CO_LIB, so whether this run owes a deploy cannot be read"
+       return 0 ;;
+  esac
+  for k in deployed verified monitored; do
+    v="$(co_deploy_value "$k")"
+    case "$v" in *[![:space:]]*) ;; *) miss="${miss:+$miss, }$k (--$k '<$(co_deploy_ask "$k")>')"; continue ;; esac
+    co_walls_ask is_placeholder_value "$v"; rc=$?
+    case "$rc" in
+      1) CO_DEPLOY_FIELDS+=("$k=$v") ;;
+      0) miss="${miss:+$miss, }$k, whose '$v' is a placeholder (--$k '<$(co_deploy_ask "$k")>')" ;;
+      *) CO_DEPLOY_SAYS="the deploy question cannot be asked"
+         CO_DEPLOY_WHY="the gate's placeholder ban (lib/walls.sh is_placeholder_value) cannot be asked from $CO_LIB, so the deploy's words cannot be judged"
+         return 0 ;;
+    esac
+  done
+  [ -n "$miss" ] || return 0
+  CO_DEPLOY_FIELDS=()
+  CO_DEPLOY_SAYS="the deploy is not answered"
+  CO_DEPLOY_WHY="the plan names a deploy target (deploy_target: $CO_TARGET), and the delivery owes what was deployed, how it was verified and how it is monitored; not given: $miss"
+}
+
+# co_close_step9 -> the delivery appended at its own second, read back closed; CO_DELIVERED_AT the instant it holds. The
+# three of a deploy ride the same event, so no reading of the log finds the run delivered and its deploy unanswered.
 CO_DELIVERED=""; CO_DELIVERED_AT=""
 co_close_step9() {
   local st
   CO_DELIVERED="$(co_delivered_words)"
-  proof_step_event "$PLAN" 9 "delivered=$CO_DELIVERED" || _co_refuse "the delivery could not be appended to the run's log of $PLAN"
+  proof_step_event "$PLAN" 9 "delivered=$CO_DELIVERED" ${CO_DEPLOY_FIELDS[@]+"${CO_DEPLOY_FIELDS[@]}"} \
+    || _co_refuse "the delivery could not be appended to the run's log of $PLAN"
   st="$(co_ask reader_q_step)" || _co_refuse "$CO_UNREAD"
   case "$st" in *state=delivered) ;; *) _co_refuse "the delivery did not land: the run's log of $PLAN reads it open" ;; esac
   CO_DELIVERED_AT="$(co_step9_at)" || _co_refuse "$CO_UNREAD"
@@ -2148,10 +2224,10 @@ act_archive() {
 # The archive moves the plan and never its record, so the plan's new place joins no log: the log found before the move
 # is named to the step's writer, which takes only a log that is there. The restated step carries the delivery's own
 # second, so every reader of when the run was delivered reads one instant; it stands after the lines written between
-# the two by the log's written order.
+# the two by the log's written order. A step given again replaces the first by its number, so it restates the deploy too.
 co_close_archived() {
   local log="$1" last
-  LOG_AT="$CO_DELIVERED_AT" proof_step_event "$log" 9 "delivered=$CO_DELIVERED" "archived=$ARCHIVED_LINE" \
+  LOG_AT="$CO_DELIVERED_AT" proof_step_event "$log" 9 "delivered=$CO_DELIVERED" ${CO_DEPLOY_FIELDS[@]+"${CO_DEPLOY_FIELDS[@]}"} "archived=$ARCHIVED_LINE" \
     || _co_refuse "the archive's line could not be appended to the run's log $log"
   last="$(/usr/bin/grep '|ev=step|' "$log" 2>/dev/null | tail -1)"
   case "$last" in *"|archived="*) ;; *) _co_refuse "the archive's line did not land in the run's log $log" ;; esac
@@ -2171,6 +2247,10 @@ do_check() {
   else
     co_would "step: WOULD REFUSE — $STEP_REFUSAL"
   fi
+  co_deploy_judge
+  if [ -n "$CO_DEPLOY_WHY" ]; then co_would "deploy: WOULD REFUSE — $CO_DEPLOY_WHY" "$CO_DEPLOY_SAYS"
+  elif [ "$CO_DEPLOY_NAMED" = yes ]; then say "deploy: deployed, verified and monitored given for $CO_TARGET; run writes them on the delivery's step"
+  else say "deploy: none owed — the plan names no deploy target"; fi
   MISSING="$(presence_missing)"
   [ -z "$MISSING" ] || co_would "presence: WOULD REFUSE — $MISSING" "the epic plan's row cannot be written"
   facts_judge
@@ -2327,15 +2407,15 @@ do_check() {
 # ─── run ─────────────────────────────────────────────────────────────────────
 
 do_run() {
-  # NOTHING IS TOUCHED UNTIL ALL EIGHT OF THESE PASS (critic3 P-1, P-3), in this order: the
-  # step `run` closes, the presence check (a `| wave |` table, a release with no `|`), every debt.md
-  # line the continuation carries parsing (co_debt_refusal, wave-36 T13), this session bound to the
-  # plan when it has rows the merge lands (co_lands_refusal, wave-36 T14), the merge
-  # verdict (act 1 is a readback and touches nothing), the
-  # branch census, the facts the run owes (`facts_judge`, wave-27 T14), and the gate's answer about
-  # the plan `run` will write. Any refusal leaves
-  # every branch, every tmp entry, the plan and the epic plan exactly as they were.
+  # NOTHING IS TOUCHED UNTIL ALL NINE OF THESE PASS, in this order: the step `run` closes, the deploy the plan owes
+  # (co_deploy_judge), the presence check (a `| wave |` table, a release with no `|`), every debt.md line the
+  # continuation carries parsing (co_debt_refusal), this session bound to the plan when it has rows the merge lands
+  # (co_lands_refusal), the merge verdict (act 1 is a readback and touches nothing), the branch census, the facts the
+  # run owes (`facts_judge`), and the gate's answer about the plan `run` will write. Any refusal leaves every branch,
+  # every tmp entry, the plan and the epic plan exactly as they were.
   [ "$CURRENT" = 8 ] || _co_refuse "$STEP_REFUSAL"
+  co_deploy_judge
+  [ -z "$CO_DEPLOY_WHY" ] || _co_held "$CO_DEPLOY_SAYS" "$CO_DEPLOY_WHY — nothing was done"
   co_debt_gaps_load
   MISSING="$(presence_missing)"
   [ -z "$MISSING" ] || _co_held "the epic plan's row cannot be written" "$MISSING — nothing was done"
