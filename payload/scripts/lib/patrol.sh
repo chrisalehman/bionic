@@ -430,7 +430,7 @@ _patrol_scan_jq='
 #
 # THE WINDOW APPLIES HERE TOO. `agents` and `refused` used to be counted over the
 # transcript's WHOLE LIFE, while hooks/session-poker.sh's own counters scope to the
-# roster's own window (`roster_window()`, exposed as its `window` verb) — and since a
+# roster's own window (`patrol_window()` below) — and since a
 # `.bionic/tmp` wipe re-opens the roster at zero, a session running a second wave read its
 # first wave's dispatches against a roster that only began at the wipe, and doctor printed
 # `N launches unrostered` for a wall that had rostered everything asked of it since. The
@@ -504,32 +504,26 @@ patrol_interval() {  # <repo-root> -> "<seconds> <configured|default>"
   printf '%s default' "$PATROL_INTERVAL_DEFAULT"
 }
 
-# THE WINDOW, from its owner. "Since when does THIS roster's own record of this session
-# begin" is hooks/session-poker.sh's own question — its `window` verb answers it with the
-# roster file's own creation time, or the Patrol stamp beside it when the roster itself
-# cannot be dated (`roster_window()`). This shells out to that verb rather than
-# re-deriving `file_birth`/`epoch_iso`/`roster_window` here, the same call
-# `patrol_interval()` above already makes for the interval and for the identical reason: a
-# copy grown in a lib/ file that cannot source hooks/ would be a second, silently
-# driftable answer to one question. tests/cross-gate-agreement.test.sh §Q.3 compares the
-# two COUNTING functions this window feeds (hooks/session-poker.sh's
-# count_main_thread_dispatches/count_refused_dispatches against this file's own
-# _patrol_scan) on one shared fixture, the same way §Q already does for the refusal-join
-# rule.
+# THE WINDOW: since when does THIS roster's own record of this session begin. The answer is the roster file's
+# creation instant, or the Patrol stamp's beside it when the roster cannot be dated: arming precedes the first
+# dispatch, so the stamp still dates the stretch the session answers for. The creation instant is the filesystem's
+# own (`stat %B`, `%W` on GNU, where 0 means none is kept), never the mtime: the roster is append-only, so its mtime
+# is the last dispatch and a window from it would hide every gap but the newest. tests/cross-gate-agreement.test.sh
+# §Q.3 compares the two COUNTING functions this window feeds on one shared fixture.
 #
-# EVERY FAILURE IS AN EMPTY STRING, never a refusal: an unreachable poker, an unresolvable
-# root or a filesystem that keeps no creation time all mean "no window", and the counters
-# fall back to the whole transcript — the answer doctor gave before this existed.
+# EVERY FAILURE IS AN EMPTY STRING, never a refusal: no session, no root or a filesystem that keeps no creation time
+# all mean "no window", and the counters read the whole transcript.
 patrol_window() {  # <repo-root> <sid> -> ISO instant on stdout, empty for "the whole transcript"
-  local repo="${1:-}" sid="${2:-}" poker w
-  [ -n "$repo" ] && [ -n "$sid" ] || { printf ''; return 0; }
-  poker="$(plugin_root 2>/dev/null)/hooks/session-poker.sh"
-  [ -f "$poker" ] || { printf ''; return 0; }
-  w=$( cd "$repo" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$sid" bash "$poker" window 2>/dev/null )
-  case "$w" in
-    ''|*[!0-9TZ:.-]*) printf '' ;;
-    *) printf '%s' "$w" ;;
-  esac
+  local repo="${1:-}" sid="${2:-}" t f b=""
+  [ -n "$repo" ] && [ -n "$sid" ] || return 0
+  t="$(tmp_root "$repo" 2>/dev/null)" || return 0
+  for f in "$t/roster-${sid}.state" "$t/patrol-${sid}.state"; do
+    b="$(stat -f %B "$f" 2>/dev/null || stat -c %W "$f" 2>/dev/null)" || b=""
+    case "$b" in ''|*[!0-9]*|0) b="" ;; *) break ;; esac
+  done
+  [ -n "$b" ] || return 0
+  date -u -r "$b" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$b" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null
+  return 0
 }
 
 _patrol_mtime() {  # <file>

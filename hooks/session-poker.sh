@@ -383,7 +383,6 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh disarm     remove that stamp at run close — this Patrol was ended on purpose"
   die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
   die "  bash ${HOOK_DIR}/session-poker.sh share [<n>] [reserve=<cores>]   print the machine's share (92 when none is set), the cores the person keeps (1 when none is set), the cores and the room; with <n> or reserve=<cores>, set it in the user-level file the gate reads"
-  die "  bash ${HOOK_DIR}/session-poker.sh window     the instant this session's roster begins, UTC ISO-8601 (empty when it cannot be dated)"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt [--why '<reason>']   every open row a PREDECESSOR session left on this project's rosters, each adoption one hand event with its reason (the predecessor's clear when none is given)"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt --report-only   the same rows, with the adoption itself not taken (writes nothing)"
   die "  bash ${HOOK_DIR}/session-poker.sh sweep      delete every DEAD session's leftover state under this project's .bionic/tmp"
@@ -857,7 +856,7 @@ $1"; shift ;;
   # one. Its flags, --starter and --reason, are the verb's own to read and refuse (hooks/poker/proof.sh
   # poker_verb_regression_run), so they pass through.
   regression-run) : ;;
-  tick|arm|disarm|interval|window|prompt)
+  tick|arm|disarm|interval|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
     ;;
   # THE MACHINE'S SHARE. No operand prints it; a share and `reserve=<cores>`
@@ -1230,32 +1229,9 @@ patrol_stamp_file() {  # <session-id> -> absolute path, or empty
   printf '%s/.bionic/tmp/%s%s%s' "$real" "$PATROL_STAMP_PREFIX" "$1" "$PATROL_STAMP_SUFFIX"
 }
 
-# THE WINDOW. `file_birth` is the creation time the filesystem itself recorded — `stat %B`
-# here, `%W` on GNU, where 0 means "this filesystem does not keep one" and is not an answer.
-# Never mtime: the roster is append-only, so its mtime is the LAST dispatch, and scoping to
-# that would hide every gap but the newest.
-file_birth() {  # <path> -> epoch seconds, empty when the platform has none
-  local b
-  b="$(stat -f %B "$1" 2>/dev/null || stat -c %W "$1" 2>/dev/null)" || return 1
-  case "$b" in ''|*[!0-9]*|0) return 1 ;; esac
-  printf '%s' "$b"
-}
-
 epoch_iso() {  # <epoch seconds> -> UTC ISO-8601, the shape the CLI stamps entries with
   date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
     || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null
-}
-
-# roster_window <roster file> <session id> -> the ISO instant this roster's own record of
-# this session begins, or nothing when neither file can date it (see the block comment).
-# The Patrol stamp is the fallback because it is written at ARMING, which precedes the
-# first dispatch by doctrine — so on a session whose roster was never written it still
-# dates the stretch this session is answerable for.
-roster_window() {
-  local b
-  b="$(file_birth "$1")" || b="$(file_birth "$(patrol_stamp_file "$2")" 2>/dev/null)" || return 1
-  [ -n "$b" ] || return 1
-  epoch_iso "$b"
 }
 
 # THE .bionic/tmp WRITE GUARD, one copy for both of this script's writers — the Patrol
@@ -2481,43 +2457,6 @@ case "$VERB" in
         exit 1
       fi
     done
-    exit 0
-    ;;
-
-  # THE WINDOW, ANSWERED BY ITS OWNER. "Since when does THIS roster's own record of this
-  # session begin" is a question two readers ask: hooks/session-poker.sh's own counters
-  # (`count_main_thread_dispatches`, `count_refused_dispatches`, both of which take the
-  # instant as `<since>`) and payload/scripts/lib/patrol.sh, which reconstructs the same
-  # tally for doctor. patrol.sh cannot source this file, so without this verb it would grow
-  # its own copy of `file_birth`/`epoch_iso`/`roster_window` — a second, silently driftable
-  # answer to one question. `patrol_window()` shells out here instead, the same call
-  # `patrol_interval()` already makes for the interval and for the identical reason.
-  #
-  # OUTSIDE THE ENGAGEMENT GATE, exactly like `interval` above it. The gate in this script
-  # is per-verb (`adopt`, `sweep`, `tick`), and it guards verbs that DECIDE something about
-  # a run. This one decides nothing: it reports a file's creation instant to whoever asks.
-  # A session that never engaged bionic still has a doctor page, and that page must not
-  # silently fall back to a whole-transcript count because a read-only date refused.
-  #
-  # READ-ONLY, and — unlike `tick` and `arm` — it writes no stamp: a caller asking "what
-  # window would you use" is not itself a firing, and a stamp written here would make
-  # doctor's own diagnosis look like a live Patrol.
-  window)
-    SESSION_ID="$(session_id)" || SESSION_ID=""
-    if [ -z "$SESSION_ID" ]; then
-      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
-      die "A window answers for ONE session's roster, so without the key there is nothing to date."
-      exit 3
-    fi
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
-    ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
-    WINDOW="$(roster_window "$ROSTER_FILE" "$SESSION_ID")" || WINDOW=""
-    [ -n "$WINDOW" ] && printf '%s\n' "$WINDOW"
     exit 0
     ;;
 

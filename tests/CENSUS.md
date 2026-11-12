@@ -1501,7 +1501,7 @@ session-poker.test.sh | §Section 3 | keep | payload/hooks/session-poker.sh tick
 session-poker.test.sh | §Section 4 | keep | payload/hooks/session-poker.sh tick: the sweeper's refusal on a symlinked state directory swallowed, so the tick decides DISARM instead of exit 2 | none (searched 'REFUSED' with session-poker.sh tick in tests/)
 session-poker.test.sh | §Section 5 | keep | payload/hooks/session-poker.sh: the root taken from the cwd's git toplevel instead of project_root, so a tick from a linked worktree finds no roster and refuses (the worktree-cwd NOTIFY row) | none (searched 'worktree' with session-poker.sh tick in tests/; root.test.sh §2 drives project_root alone)
 session-poker.test.sh | §Section 6 | keep | payload/hooks/session-poker.sh tick: the Patrol stamp written after the decision, so a refused pre-roster tick leaves no verb=tick stamp | none (searched 'verb=tick' and 'patrol-stamp/v1' in tests/)
-session-poker.test.sh | §Section 7 | keep | payload/hooks/session-poker.sh window: the roster's mtime printed instead of its birth instant, so a roster touched a day ahead moves the window (7d) | none (searched 'window' with session-poker.sh in tests/; doctor-patrol.test.sh reads the window it prints)
+session-poker.test.sh | §Section 7 | keep | payload/scripts/lib/patrol.sh patrol_window: the roster's mtime read instead of its birth instant, so a roster touched a day ahead moves the window; or the stamp's fallback dropped | none (searched 'patrol_window' in tests/; doctor-patrol.test.sh §Section 12 reads it through doctor)
 
 ## session-start.test.sh
 
