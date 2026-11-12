@@ -16,6 +16,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/regression-fixture.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 
 # THE SEAM, exactly as tests/session-poker.test.sh offers it, for RED evidence against a
 # mutated copy without ever touching the shipped file:
@@ -883,36 +884,38 @@ POKE_BOUND="$RG_WAS"
 # ============================================================
 section "§APPROVED-BY: approve plan '<reply>' appends the plan's approval the walls read, with the user's words, once (REQ-9 AC-9.2)"
 # ============================================================
-# The plan's approval is one approval event, key step3, in the run's log, which the commit gate reads from Step 4
-# (walls.sh `validate_approved_by`, through the reader) and `approval:plan` reads. `approve plan` appends it with the
-# project's git user name and the reply as given, and writes nothing into the plan; a second call is refused as
-# recorded once.
-# FIXTURE FIDELITY: s34's plan at current: 3 with its approved-by: line taken out, bound to this session; the gate is
-# the shipped commit gate (s34_gate) at current: 4, before and after; every write is the real verb.
-# fails-when: the only giver of the plan's approval is the orchestrator's editor; it is given twice; the words differ.
+# The plan's approval is one approval event in the run's log, key step3, which the commit gate reads from Step 4; step0,
+# step1 and step2 are the ones the gate at 15 asks at Steps 1 to 3, each closing its own ask at its instant. Each holds the
+# git user and the reply as given, a placeholder refused, the plan unwritten, and a second call refused as recorded once.
+# FIXTURE FIDELITY: s34's plan at current: 3 with its approved-by: line taken out, and for AS-4 plan_fixture's run at 15
+# at Step 3 with its approval taken out, each bound to this session; the gate is the shipped one (s34_gate); every write is the real verb.
+# fails-when: an approval's only giver is the orchestrator's editor; it is given twice; the words differ; a step's is refused.
 AB_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-RAB="$(make_repo approved-by)"; ( cd "$RAB" && git commit -q --allow-empty -m init )
-git -C "$RAB" config user.email t@example.com; git -C "$RAB" config user.name "Dana Fixture"
-PAB="$(s34_plan "$RAB" 3)"
-/usr/bin/grep -v '^approved-by:' "$PAB" > "$PAB.t" && mv "$PAB.t" "$PAB"
-ab_lines() { /usr/bin/grep '^run/v1|ev=approval|key=step3|' "$RAB/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null; }
+RAB="$(make_repo approved-by)"; ( cd "$RAB" && git commit -q --allow-empty -m init ); git -C "$RAB" config user.name "Dana Fixture"
+PAB="$(s34_plan "$RAB" 3)"; /usr/bin/grep -v '^approved-by:' "$PAB" > "$PAB.t" && mv "$PAB.t" "$PAB"
+ab_k() { /usr/bin/grep "^run/v1|ev=$1" "$RAB/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null; }
+ab_said() { printf '%s' "$1" | /usr/bin/grep -q "$2" && echo yes || echo no; }   # <text> <words> -> yes when the text holds them
 ab_at() { awk -v c="$1" '!d && /^current:/ { print "current: " c; d = 1; next } { print }' "$PAB" > "$PAB.t" && mv "$PAB.t" "$PAB"; }
-ab_at 4; s34_gate "$RAB"
-expect_eq "AB-0 precondition: with no approval of the plan the gate refuses a commit at current: 4 (rc 2), saying so" "0|2|yes" \
-  "$(ab_lines | grep -c .)|$GATE_RC|$(printf '%s' "$GATE_ERR" | /usr/bin/grep -q "no 'approved-by:' line" && echo yes || echo no)"
-ab_at 3; AB_BEFORE="$(cat "$PAB")"
-poke "$RAB" approve plan 'approved, go ahead'
-expect_eq "AB-1 approve plan appends one approval (exit 0), the plan unchanged, and says so" "0|1|yes|yes" "$RC|$(ab_lines | grep -c .)|$([ "$AB_BEFORE" = "$(cat "$PAB")" ] && echo yes || echo no)|$(printf '%s' "$OUT" | /usr/bin/grep -q 'approved by Dana Fixture' && echo yes || echo no)"
-[ "$RC" = 0 ] || printf '%s\n' "$OUT" | tail -6 | sed 's/^/    | /'
-expect_regex "AB-1b …the git user, the reply verbatim, an ISO-UTC instant" \
-  '^run/v1\|ev=approval\|key=step3\|by=Dana Fixture\|said=approved, go ahead\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$(ab_lines)"
-ab_at 4; s34_gate "$RAB"
-expect_eq "AB-2 the gate reads it: at current: 4 it no longer refuses for it" "no" \
-  "$(printf '%s' "$GATE_ERR" | /usr/bin/grep -q "no 'approved-by:' line" && echo yes || echo no)"
-ab_at 3; AB_BEFORE="$(cat "$PAB")"
-poke "$RAB" approve plan 'approved'
-expect_eq "AB-3 a second approve plan is refused (exit 1), the plan unchanged and nothing appended" "1|yes|1" "$RC|$([ "$AB_BEFORE" = "$(cat "$PAB")" ] && echo yes || echo no)|$(ab_lines | grep -c .)"
-expect_contains "AB-3b …as recorded once" "recorded once" "$OUT"
+ab_at 4; s34_gate "$RAB"; expect_eq "AB-0 precondition: with no approval of the plan the gate refuses a commit at current: 4 (rc 2), saying so" "0|2|yes" "$(ab_k 'approval|key=step3|' | grep -c .)|$GATE_RC|$(ab_said "$GATE_ERR" "no 'approved-by:' line")"
+ab_at 3; AB_BEFORE="$(cat "$PAB")"; poke "$RAB" approve plan 'approved, go ahead'
+expect_eq "AB-1 approve plan appends one approval (exit 0), the plan unchanged, and says so" "0|1|yes|yes" "$RC|$(ab_k 'approval|key=step3|' | grep -c .)|$([ "$AB_BEFORE" = "$(cat "$PAB")" ] && echo yes || echo no)|$(ab_said "$OUT" 'approved by Dana Fixture')"
+expect_regex "AB-1b …the git user, the reply verbatim, an ISO-UTC instant" '^run/v1\|ev=approval\|key=step3\|by=Dana Fixture\|said=approved, go ahead\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$(ab_k 'approval|key=step3|')"
+ab_at 4; s34_gate "$RAB"; expect_eq "AB-2 the gate reads it: at current: 4 it no longer refuses for it" "no" "$(ab_said "$GATE_ERR" "no 'approved-by:' line")"
+ab_at 3; AB_BEFORE="$(cat "$PAB")"; poke "$RAB" approve plan 'approved'
+expect_eq "AB-3 a second approve plan is refused (exit 1) as recorded once, the plan unchanged and nothing appended" "1|yes|1|yes" "$RC|$([ "$AB_BEFORE" = "$(cat "$PAB")" ] && echo yes || echo no)|$(ab_k 'approval|key=step3|' | grep -c .)|$(ab_said "$OUT" 'recorded once')"
+OWED_ROOT="$RAB" OWED_SID="$SID" OWED_PLAN="$PAB" bash -c '. "$1" && owed_open approve:step1 t q' _ "${S46_LIB%/*}/owed.sh"
+poke "$RAB" approve step2 'TBD'; AS="$RC|$(ab_k 'approval|key=step2|' | grep -c .)"
+for k in step0 step1 step2; do poke "$RAB" approve "$k" "yes, $k as shown"; AS="$AS|$RC"; done
+expect_eq "AS-1 approve refuses a placeholder for step2, appending nothing, then takes step0, step1 and step2" "1|0|0|0|0" "$AS"
+AS="$(ab_k 'approval|key=step1|')"; expect_eq "AS-2 …each under its own key, the git user and the reply verbatim, step1's ask closed at its instant" \
+  "run/v1|ev=approval|key=step1|by=Dana Fixture|said=yes, step1 as shown|1" "${AS%|at=*}|$(ab_k "ask|key=approve:step1|reply=approve step1|${AS##*|}" | grep -c .)"
+poke "$RAB" approve step1 'yes again'
+expect_eq "AS-3 a second approve step1 is refused as recorded once, nothing appended" "1|1|yes" "$RC|$(ab_k 'approval|key=step1|' | grep -c .)|$(ab_said "$OUT" 'recorded once')"
+RAB="$(make_repo approved-15)"; ( cd "$RAB" && git commit -q --allow-empty -m init && git checkout -q -b wave/01-fixture ); git -C "$RAB" config user.name "Dana Fixture"
+PAB="$(plan_fixture --at 15 --current 3 "$RAB/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave)"; bound_marker "$RAB" "$SID" "$PAB"
+L5="$(plan_fixture_log "$PAB")"; /usr/bin/grep -v 'ev=approval' "$L5" > "$L5.t" && mv "$L5.t" "$L5"
+poke "$RAB" approve plan 'approved'; AS="$RC|$(ab_k approval | grep -c .)"; printf 'run/v1|ev=step|n=4|at=2026-10-04T00:04:00Z\n' >> "$L5"; s34_gate "$RAB"
+expect_eq "AS-4 the plan's approval answers the steps before it: at 15 with none of theirs it is taken, the only one, and a commit at Step 4 admitted" "0|1|0" "$AS|$GATE_RC"
 POKE_BOUND="$AB_BOUND_WAS"
 
 # ============================================================
