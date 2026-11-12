@@ -591,7 +591,10 @@ ru_plan() {  # <current> <the second row's tier | status | evidence | auditor> [
   printf 'AC-2:\n  fails-when: a second planted defect\n  evidence: record/generic-evidence.md\n'
   [ -z "${3:-}" ] || printf '%s\n' "$3"
 }
-ru_put() { ru_plan "$@" > "$R_RU/.bionic/docs/plans/active.md"; bw_bind "$R_RU"; }
+ru_put() {  # the plan at the step its text names: a step an earlier advance appended to the run's log is taken out
+  local l; ru_plan "$@" > "$R_RU/.bionic/docs/plans/active.md"; bw_bind "$R_RU"
+  l="$R_RU/.bionic/docs/record/active.md/run.log"; [ ! -f "$l" ] || { /usr/bin/grep -v '|ev=step|' "$l" > "$l.t"; mv "$l.t" "$l"; }
+}
 RU_OUT=""; RU_RC=0
 ru_poke() {  # <verb args...> -> RU_OUT (both streams), RU_RC of session-poker.sh in the repository, as this session
   RU_OUT="$( cd "$R_RU" && env HOME="$FAKE_HOME" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$SID" \
@@ -605,8 +608,9 @@ RU_CONFIRM='Dana 2026-10-20 opened the page and read the line back'
 
 # §VERDICT-1 — a REFUTED row with no waiver is a verdict: the advance to 6 takes it.
 ru_put 5 'T1 | discharged | see AC-2 | REFUTED'
+RU_STEP_LOG="$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "$RU_LIB" "$R_RU/.bionic/docs/plans/active.md")"; RU_SUMS="$(cksum "$RU_STEP_LOG" 2>&1)"
 ru_poke current 6 --check
-expect_eq "VERDICT-1: a REFUTED row with no waiver — current 6 --check passes" "0" "$RU_RC"
+expect_eq "VERDICT-1: a REFUTED row with no waiver — current 6 --check passes, and appends nothing to the run's log" "0|$RU_SUMS" "$RU_RC|$(cksum "$RU_STEP_LOG" 2>&1)"
 expect_contains "VERDICT-1b: …saying it would advance" "current 6 --check: would advance" "$RU_OUT"
 # §VERDICT-2 — an empty auditor cell on a non-T4 row is no verdict: refused, naming the row.
 ru_put 5 'T1 | discharged | see AC-2 |  '
@@ -643,8 +647,8 @@ ru_put 7 'T1 | waived | see AC-2 | REFUTED' '  waiver: Dana 2026-10-20 "waive it
 ru_poke current 8 --check
 expect_eq "RULED-2: the same row waived — current 8 --check passes" "0" "$RU_RC"
 ru_poke current 8
-expect_eq "RULED-2b: the advance writes current: 8" "0|8" \
-  "$RU_RC|$(awk -F': *' '/^current:/ { print $2; exit }' "$R_RU/.bionic/docs/plans/active.md")"
+expect_eq "RULED-2b: the advance appends step 8, the plan's text as it was" "0|n=8|current: 7" \
+  "$RU_RC|$(bash "$RU_LIB/../reader.sh" "$R_RU/.bionic/docs/plans/active.md" step | head -1)|$(/usr/bin/grep -m1 '^current:' "$R_RU/.bionic/docs/plans/active.md")"
 expect_eq "RULED-2c: …and the row:AC-2 item RULED-1e read open is closed" "" "$(ru_owed)"
 
 # §STANDING — a row a logged proof discharges takes its verdict from the newest passing evidence review for as long as

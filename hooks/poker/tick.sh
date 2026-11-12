@@ -1284,36 +1284,23 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
     # printed again. A note enters the decision's hash, so the tick that tells one prints in full.
     resolve_run "$REPO_REAL" "$SESSION_ID"
 
-    # ---------- THE RUNS: regression-runs AND EVERY LIVE RUN OF THIS ROSTER (wave-30 T12; D6, D7d) ----------
+    # ---------- THE RUNS: EVERY LIVE RUN OF THIS ROSTER ----------
     #
-    # `poker: regression-runs=<n>` is the count of full-runner runs the project's rosters record
-    # (REQ-4 AC-4.6, `regression_runs_count`), and a `poker: RUNNING <name> run=<id> pid=<pid>
-    # elapsed=<s>s progress: <line>` line names each row of this roster whose detached run is alive,
-    # with the run's last progress line (AC-3.8). Both print above the buffer on every tick that
-    # prints in full, as the landing line does, and both enter the decision's hash (TICK_RUNS_KEY): a
-    # new full run, or a run starting or ending, is news, so the tick after it prints in full, and an
-    # unchanged tick stays the one line it is (AC-4.9 of wave-24). THE HEADER: when the bound plan's
-    # `regression-runs:` holds another number, the tick runs `regression-runs --write`, the
-    # transaction, in a child: a hand-typed value does not outlive the tick.
-    TICK_RR="$(regression_runs_count "$REPO_REAL")"
-    TICK_RUNS_LINES="poker: regression-runs=$TICK_RR"
-    TICK_RUNS_KEY="regression-runs=$TICK_RR"
+    # A `poker: RUNNING <name> run=<id> pid=<pid> elapsed=<s>s progress: <line>` line names each row of this roster whose
+    # detached run is alive, with the run's last progress line. The lines print above the buffer on every tick that
+    # prints in full, as the landing line does, and enter the decision's hash (TICK_RUNS_KEY): a run starting or ending
+    # is news, so the tick after it prints in full, and an unchanged tick stays the one line it is.
+    TICK_RUNS_LINES=""; TICK_RUNS_KEY=""
     if [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
       for TR_NAME in $(awk -F'|' '/[|]run_log=/ { for (i = 1; i <= NF; i++) if (index($i, "name=") == 1) print substr($i, 6) }' "$ROSTER_FILE" | LC_ALL=C sort -u); do
         run_load_row "$(run_row_of "$ROSTER_FILE" "$TR_NAME")" "$ROSTER_FILE" || continue
         run_read
         [ "$RUN_STATE" = RUNNING ] || continue
-        TICK_RUNS_LINES="$TICK_RUNS_LINES
-poker: RUNNING $TR_NAME run=$RUN_ID pid=$RUN_PID elapsed=${RUN_ELAPSED:-?}s progress: ${RUN_PROGRESS:-none yet}"
-        TICK_RUNS_KEY="$TICK_RUNS_KEY
-RUNNING $TR_NAME $RUN_ID"
+        TICK_RUNS_LINES="${TICK_RUNS_LINES:+$TICK_RUNS_LINES
+}poker: RUNNING $TR_NAME run=$RUN_ID pid=$RUN_PID elapsed=${RUN_ELAPSED:-?}s progress: ${RUN_PROGRESS:-none yet}"
+        TICK_RUNS_KEY="${TICK_RUNS_KEY:+$TICK_RUNS_KEY
+}RUNNING $TR_NAME $RUN_ID"
       done
-    fi
-    if [ "$POKER_RUN_OPEN" = yes ] && [ -f "$POKER_RUN_PLAN" ]; then
-      TICK_RR_HAVE="$(plan_frontmatter_get "$POKER_RUN_PLAN" regression-runs)"
-      if [ -n "$TICK_RR_HAVE" ] && [ "$TICK_RR_HAVE" != "$TICK_RR" ]; then
-        ( cd "$REPO_REAL" && CLAUDE_CODE_SESSION_ID="$SESSION_ID" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" regression-runs --write 2>&1 ) || :
-      fi
     fi
     LT_TOLD="$REPO_REAL/.bionic/tmp/line-told-${SESSION_ID}.state"
     LT_REC=""

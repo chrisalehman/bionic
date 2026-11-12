@@ -92,10 +92,6 @@ expect_eq "the attestation exists where both consumers look" "yes" "$([ -f "$ATT
 expect_contains "the producer spells the identity key 'session_id='" "session_id=$SID_A" "$(cat "$ATT")"
 
 # Consumer 1 — the start gate: the produced value passes; one character off refuses.
-# "Passes in silence" used to need a genuinely LIVE session sweeper armed for this
-# session/repo, or the unarmed-sweeper nag fired legitimately and broke the claim. Both the
-# nag and the watcher it asked about were deleted in epic-16 wave-02, so silence is the
-# gate's own unaided answer here.
 OUT=$(mk_agent_payload "$SID_A" "$IREPO" | bash "$PARTY_DP" 2>&1); ST=$?
 expect_eq "start gate: the producer's own session passes" "0" "$ST"
 # "IN SILENCE" IS NOW "SILENT ABOUT THE ATTESTATION", and the change is a change of

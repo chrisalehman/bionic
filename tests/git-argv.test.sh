@@ -530,7 +530,7 @@ make_layout() {  # <style: installed|payload> -> echoes the tree root
     ln -s ../hooks "$root/payload/hooks"
   fi
   mkdir -p "$libdir"
-  cp "$LIB" "$libdir/git-argv.sh"
+  cp "$LIB" "$libdir/git-argv.sh"; cp "$(dirname "$LIB")/loader.sh" "$libdir/loader.sh"
   # Every other basename the two hooks want, from beside the library under test. The
   # per-style completeness check in the loop below is what makes a copy that did not land
   # a named failure instead of a mysterious refusal.

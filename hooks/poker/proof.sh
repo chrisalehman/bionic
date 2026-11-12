@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # hooks/poker/proof.sh — the proof record: deferrals, findings, approvals, waivers, confirmations, the regression
 # and the debt ledger (approve, proof-add, waive, confirm-row, finding-move, disposition, release-check,
-# regression, regression-run, debt).
+# regression-run, debt).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
@@ -220,6 +220,7 @@ walk_register() {
   if ! WALK_HEAD="$(walk_head "$real" "$6" "$5")"; then WALK_WHY="$WALK_HEAD"; WALK_HEAD=""; return 1; fi
   walk_settle "$plan" "$rel" <<< "$v" || return 1
   WALK_EV=("kind=walk" "head=$WALK_HEAD" "evidence=$rel")
+  [ -z "${PF_ENVS:-}" ] || WALK_EV+=("environments=$PF_ENVS")
   proof_pending "${WALK_EV[@]}" || { WALK_WHY="the walk record's path $rel holds a | or a line break, which the run's log cannot hold"; return 1; }
   WALK_N="$(printf '%s\n' $WALK_DONE | awk 'NF { n++ } END { print n + 0 }')"
   PV_ACT=walk_append; PV_UNDONE="the proofs of the criteria the walk confirms (${WALK_DONE:-none})"
@@ -267,66 +268,6 @@ whole_run_at_head() {
   done
   declare -F gate_whole_open >/dev/null 2>&1 && gate_whole_open "$4"
 }
-
-  # THE REGRESSION SETTING (wave-31 T27; REQ-12 AC-12.1, AC-12.2; D4). Whether the run runs the
-  # regression is a Step-0 setting, written once into the plan's frontmatter as `regression: <v>`,
-  # which lib/walls.sh `validate_tests_block` (Step 5), lib/proof.sh `facts_owed` (Step 8) and the
-  # integrate row's kind default (lib/units.sh) read. THE SCALE DEFAULT is task no, wave yes, epic no;
-  # a value against it is the user's override, recorded beside the key as
-  # `regression-override: <git user.name> <date> derived=<default> chosen=<v>`, budget-override:'s
-  # form above and the sibling of `rigor-override:`. A value AT the default removes any override
-  # line, and the one key and the one override line are rewritten, never doubled. It goes through
-  # the plan transaction every plan verb takes. REFUSED: a value that is not exactly yes or no (1);
-  # a reply with a line break (1); a plan whose scale: is not task, wave or epic, so there is no
-  # default to record against (1); no usable git user name when an override is owed (1); a plan
-  # with no leading frontmatter (1). The value in force asked again is the transaction's no-op (0).
-  poker_verb_regression() {
-    case "$RG_V" in
-      yes|no) : ;;
-      *)
-        die "REFUSED — regression $(clean "$RG_V") is not yes or no; the plan is unchanged."
-        exit 1 ;;
-    esac
-    case "$RG_REPLY" in
-      *$'\n'*|*$'\r'*)
-        die "REFUSED — the user's reply carries a line break; give it on one line. The plan is unchanged."
-        exit 1 ;;
-    esac
-    plan_verb_open regression
-    RG_SCALE="$(plan_frontmatter_get "$PV_PLAN" scale)"
-    case "$RG_SCALE" in
-      task|epic) RG_DEF=no ;;
-      wave) RG_DEF=yes ;;
-      *)
-        die "REFUSED — the plan's scale: is '$(clean "${RG_SCALE:-none}")', not task, wave or epic, so the regression has no default to record against; the plan is unchanged."
-        exit 1 ;;
-    esac
-    RG_OVR=""
-    if [ "$RG_V" != "$RG_DEF" ]; then
-      RG_WHO="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
-      if [ -z "$RG_WHO" ] || ! plan_verb_value_ok "$RG_WHO"; then
-        die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who overrode the $RG_SCALE default; the plan is unchanged."
-        exit 1
-      fi
-      RG_OVR="regression-override: $RG_WHO $(date -u +%Y-%m-%d) derived=$RG_DEF chosen=$RG_V"
-    fi
-    # THE VALUES GO IN THROUGH THE ENVIRONMENT, as budget's do. The key is rewritten where it stands,
-    # its override directly after it; with no key the pair goes in above the closing `---`.
-    if ! RG_V="$RG_V" RG_OVR="$RG_OVR" awk '
-      function pair() { print "regression: " ENVIRON["RG_V"]; if (ENVIRON["RG_OVR"] != "") print ENVIRON["RG_OVR"]; done = 1 }
-      NR == 1 && $0 == "---" { f = 1; print; next }
-      f && $0 == "---" { if (!done) pair(); f = 0; closed = 1; print; next }
-      f && /^regression-override:/ { next }
-      f && /^regression:/ { if (!done) pair(); next }
-      { print }
-      END { if (!closed) exit 1 }' "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
-      die "REFUSED — $PV_PLAN has no leading frontmatter to write the regression setting into; the plan is unchanged."
-      exit 1
-    fi
-    plan_verb_swap regression "regression: $RG_V" writer
-    say "regression — regression: $RG_V${RG_OVR:+ and $RG_OVR} written to $PV_PLAN; dry-committed first. The Step-5 gate reads the key$([ "$RG_V" = no ] && printf ': its block owes regression: no (Step 0, <user>) — <where it runs> in place of the full regression')."
-    exit 0
-  }
 
   # THE USER'S CONFIRMATION OF A T4 ROW. A T4 criterion's check is the user's own, and the gate rules such a row on
   # its block's attributed confirmation under an empty-like auditor cell (walls.sh `matrix_row_ruled`). This verb

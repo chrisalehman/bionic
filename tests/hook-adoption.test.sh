@@ -5,10 +5,10 @@
 # the CLI invokes independently. Three claims, each of which has its own way of going
 # silently wrong:
 #
-#   1. THE IDIOM IS ONE TEXT. Every hook carries `bionic_loader_pin`'s block byte for
-#      byte, under a `BIONIC_LIB_WANT=` line naming exactly what it sources. A hand
-#      edit to one copy is the drift this pins; a copy that wants a library it never
-#      sources is the drift the WANT/source pairing pins.
+#   1. THE STUB IS ONE TEXT. Every hook carries the stub `bionic_loader_pin` prints byte
+#      for byte, directly under a `BIONIC_LIB_WANT=` line naming exactly what it sources.
+#      A hand edit to one copy is the drift this pins; a copy that wants a library it
+#      never sources is the drift the WANT/source pairing pins.
 #   2. THE FACTS HAVE ONE OWNER. No hook resolves a project root, a session id or an
 #      active run by restating the algorithm. `project_root`, `session_id`,
 #      `active_run` — the library answers, and the hook asks.
@@ -116,32 +116,34 @@ engage|open|no
 permission-answer|closed|yes
 '
 
-BLOCK="$SANDBOX/canonical-block.txt"
+BLOCK="$SANDBOX/canonical-stub.txt"
 ( . "$LOADER_LIB" && bionic_loader_pin ) > "$BLOCK" 2>"$SANDBOX/.pinerr"
+NSTUB=$(wc -l < "$BLOCK" | tr -d ' ')
 
-# extract_block <file> -> the marker-delimited span, markers inclusive
+# extract_block <file> -> the stub's count of lines directly under the hook's WANT line
 extract_block() {
-  awk '/^# --- bionic-loader\/v2 BEGIN$/{f=1} f{print} f&&/^# --- bionic-loader\/v2 END$/{exit}' "$1"
+  awk -v n="$NSTUB" 'f && c < n { print; c++ } /^BIONIC_LIB_WANT=/ && !f { f = 1 }' "$1"
 }
-# want_line <file> -> the line immediately ABOVE the BEGIN marker
+# want_line <file> -> the hook's WANT line
 want_line() {
-  awk '/^# --- bionic-loader\/v2 BEGIN$/{print prev; exit} {prev=$0}' "$1"
+  /usr/bin/grep -m1 '^BIONIC_LIB_WANT=' "$1"
 }
+expect_contains "the stub is printed, and it sources the loader" '. "$_bl_l"; bionic_load' "$(cat "$BLOCK")"
 
-section "1 — one idiom, byte for byte, under a WANT line that matches what is sourced"
+section "1 — one stub, byte for byte, under a WANT line that matches what is sourced"
 
-while IFS='|' read -r name class scoped; do
+while IFS='|' read -r name _; do
   [ -n "$name" ] || continue
   f="$HOOKS/$name.sh"
   if [ ! -f "$f" ]; then no "$name.sh exists" "$f"; continue; fi
 
-  expect_eq "$name carries the canonical loader block byte for byte" \
+  expect_eq "$name carries the loader's stub byte for byte, directly under its WANT line" \
     "$(cat "$BLOCK")" "$(extract_block "$f")"
 
   wl=$(want_line "$f")
   case "$wl" in
-    BIONIC_LIB_WANT=\"*\") ok "$name declares BIONIC_LIB_WANT on the line above the block" ;;
-    *) no "$name declares BIONIC_LIB_WANT on the line above the block" "line above BEGIN was: [$wl]" ;;
+    BIONIC_LIB_WANT=\"*\") ok "$name declares BIONIC_LIB_WANT" ;;
+    *) no "$name declares BIONIC_LIB_WANT" "read: [$wl]" ;;
   esac
 
   # Every wanted basename is actually sourced out of $BIONIC_LIB, and nothing is
@@ -152,14 +154,6 @@ while IFS='|' read -r name class scoped; do
   sourced=$(grep -oE '^\. "\$BIONIC_LIB/[a-z.-]+\.sh"' "$f" | sed -E 's|^\. "\$BIONIC_LIB/||; s|"$||' | sort | tr '\n' ' ' | sed 's/ $//')
   expect_eq "$name sources exactly the libraries it wants" \
     "$(printf '%s' "$wants" | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//')" "$sourced"
-
-  # THE FAIL DIRECTION IS DECLARED, not inferred. Exactly one of the two calls
-  # appears, and the closed pair passes the command text so the repair allowlist
-  # has something to match.
-  n_closed=$(grep -c 'loader_fail_closed "' "$f")
-  n_open=$(grep -c 'loader_fail_open "' "$f")
-  case "$class" in
-  esac
 done <<EOF
 $ADOPTED
 EOF
@@ -623,8 +617,6 @@ expect_eq "a project's FIRST artifact, written into .bionic before any run exist
   "2" "$DRV_ST"
 
 section "5d — ONE session-id guard: a malformed or empty key silences all fifteen (REQ-1h, AC-1h.2)"
-#
-# (epic-23 wave-11-lean-spine, added by T10.)
 #
 # WHAT THIS IS FOR. The T10 census measured the shape guard
 # `case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac` in exactly SIX of the fifteen preamble

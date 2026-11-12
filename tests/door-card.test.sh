@@ -13,9 +13,9 @@
 #                  the one place it is spelled, the judge prints the new words and the card still renders.
 #
 # FIXTURE FIDELITY: the repository is door_world's, a real `git init` with the check's closure, the real changelog and a
-# plan whose Step-3 state the library authors. Every later change to the plan is a verb's or a judged cell edit's: task-add,
-# step-line, step-field, current, proof-add and the hand door's row line. This
-# file never writes the plan. What it writes are the records the
+# plan whose Step-3 state the library authors. Every later change to the plan is a verb's or a judged cell edit's
+# (task-add, proof-add and the hand door's row line), or the orchestrator's edit of a step's evidence lines, which no verb
+# writes at version 14 (`dc_step`); `current` appends to the run's log. What it writes besides are the records the
 # run's actors write: a one-row suite in the build row's commit, the walk and audit records,
 # five reading records in the readers' grammar (the structure reading answering every id the shipped checks file names),
 # and each reader's roster row through the production writer (`roster_row`), closed by the sweeper's own `ack`; and the
@@ -67,7 +67,9 @@ dc_verb() {
   [ "$DOOR_RC" = 0 ] || printf '%s\n' "$DOOR_OUT" | sed 's/^/    | /' | head -20
 }
 dc_commit() { _door_inside "$1" && git -C "$1" add -A >/dev/null 2>&1 && git -C "$1" commit --quiet -m "$2"; }   # <tree> <message>
-dc_current() { /usr/bin/grep -E '^current: ' "$1" | head -1; }   # <plan> -> its current: line
+# dc_step <N> <text> [<key: value>]… -> the orchestrator's edit: step N's evidence line and its block, ending the state section
+dc_step() { local n="$1" t="$2"; shift 2; DC_B="$(printf '  %s\n' "$@")" awk -v l="- Step $n: $t" 'BEGIN { b = ENVIRON["DC_B"] }
+  /^## / && on { print l; if (b != "  ") print b; on = 0 } /^## SDLC State/ { on = 1 } { print }' "$DC_PLAN" > "$DC_PLAN.t" && mv "$DC_PLAN.t" "$DC_PLAN"; }
 # dc_approved <plan> -> the `approved…` lines of the plan's ## SDLC State, the plan's own approval and any the user gave
 dc_approved() { awk '/^## SDLC State/ { f = 1; next } f && /^## / { exit } f && /^approved/' "$1"; }
 dc_keys() {   # <record dir> <h8> -> the keys of the card's replay table, in its order, space-joined
@@ -111,10 +113,11 @@ expect_eq "(c5) the build row lands by hand" "0" "$DOOR_RC"
 printf '# walk\n\n| AC | verdict | why |\n|---|---|---|\n| AC-1.1 | CONFIRMED | the library change holds |\n\nverdict: CONFIRMED — the one criterion\n' > "$DC_REC/walk.md"
 dc_verb "(c7) the walk's registration discharges the criterion by its proof" proof-add walk record/wave-x/walk.md
 printf 'CONFIRMED: the one criterion is proved\n' > "$DC_REC/audit.md"
-dc_verb "(c9) step-line writes Step 5" step-line 5 'regression at record/wave-x/regression-run.log'
-dc_verb "(c10) step-field names the walk" step-field 5 walk-artifact=record/wave-x/walk.md
-dc_verb "(c11) step-field records the auditor" step-field 5 'auditor=CONFIRMED, record/wave-x/audit.md'
+dc_step 5 'regression at record/wave-x/regression-run.log' 'walk-artifact: record/wave-x/walk.md' 'auditor: CONFIRMED, record/wave-x/audit.md'
+DC_SUM="$(cksum < "$DC_PLAN")"
 dc_verb "(c12) current 5" current 5
+expect_eq "(c12a) the advance leaves the plan's bytes as they were, and the run stands at step 5" "$DC_SUM|n=5" \
+  "$(cksum < "$DC_PLAN")|$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$DC_PLAN" step | head -1)"
 DC_H1="$(dc_head "$DC")"
 dc_verb "(c13) regression-run runs the whole run green" regression-run
 dc_verb "(c14) proof-add records the regression" proof-add regression "record/wave-x/regression-run-$DC_H1.log"
@@ -126,12 +129,11 @@ done
 door_run "$DC" bash "$BIONIC_SCRIPTS_DIR/hooks/session-sweeper.sh" ack \
   w-evidence-piece w-adversarial-piece w-structure-piece w-adversarial-whole w-structure-whole
 expect_eq "(c16) the sweeper acks the five readers" "0" "$DOOR_RC"
-dc_verb "(c17) step-line writes Step 6" step-line 6 'review at record/wave-x/w-evidence-piece.md'
+dc_step 6 'review at record/wave-x/w-evidence-piece.md'
 dc_verb "(c18) current 6" current 6
 dc_verb "(c19) release-check at the build head" release-check
 printf 'no decision this run\n' > "$DC_REC/adr.md"
-dc_verb "(c20) step-line writes Step 7" step-line 7 'documented at record/wave-x/adr.md'
-dc_verb "(c21) step-field names the document" step-field 7 adr=record/wave-x/adr.md
+dc_step 7 'documented at record/wave-x/adr.md' 'adr: record/wave-x/adr.md'
 dc_verb "(c22) current 7" current 7
 
 DC_P2="$(door_piece "$DC" T2)" && door_release "$DC" "$DC_P2" >/dev/null && door_land "$DC" "$DC_P2"
@@ -144,7 +146,7 @@ dc_verb "(c24) release-check at the release head" release-check
 DC_H="$(dc_head "$DC")"; DC_H8="${DC_H:0:8}"
 echo "dc: the walk took $((SECONDS - DC_T0)) s and ended at $DC_H"
 
-expect_eq "(c25) the end state is current: 7" "current: 7" "$(dc_current "$DC_PLAN")"
+expect_eq "(c25) the end state is step 7" "n=7" "$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$DC_PLAN" step | head -1)"
 expect_contains "(c26) the plan carries its own approval line" "approved-by: " "$(dc_approved "$DC_PLAN")"
 expect_absent "(c27) …and no approved: release line" "approved: release" "$(dc_approved "$DC_PLAN")"
 dc_verb "(c28) current 6 --check would advance at the release head" current 6 --check

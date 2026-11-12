@@ -12,11 +12,14 @@
 #                 a planted second appender of a waiver, a finding or a proof beside the one writer of each.
 #   §NAMES        the verbs the dispatch, born and tree events and the landing's event retired, and the five that
 #                 wrote a matrix cell, are named nowhere in hooks/ or payload/scripts/ but the walls' single-line list of
-#                 verbs, which the row that edits it clears.
+#                 verbs, which the row that edits it clears; nor are those that wrote a step's line, its fields, the
+#                 regression's setting and the count of its runs, beside the step's one writer in §WRITERS.
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted, one site for each name the
 #                 check counts; the dispatch wall lists none, and no fact the dispatch library says is in its file.
 #   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
 #                 the tree holds none.
+#   §LOADER       the loader block's mark is found in one file, lib/loader.sh, and the check reads no copy over the
+#                 tree; a copy planted in a hook file is listed and counted.
 #   §REPORT       the check exits 0 with findings and ends on the six count lines, in their order.
 #   §READINGS     readings.sh prints the release's readings at a revision from git objects; reading 1 is the
 #                 check's own count over that tree, reading 7 the born events the reader lists for the record.
@@ -55,6 +58,7 @@ printf '%s\n' 'refuse exit2 v "w" "x" ""' 'refuse deny v "w" "x" ""' 'refuse blo
   'fold_block "w"' 'dp_finding "w" "x" ""' 'patrol_deny "w" "x" ""' 'dp_not_checked "w"' 'deny "w"' 'block "w"' >> "$S/hooks/engage.sh"
 printf '%s\n' 'a() { _proof_ask "$p" reader_q_step "$p" | sed -n s/^n=//p; }' 'b() { f="$(_proof_facts "$p")"; }' 'c() { local f="$(reader_main "$p" step)" || return 2; }' \
   'd() { f="$(_proof_facts "$p")" || return 2; printf "%s" "$f" | awk 1; }' 'reader_facts() { printf "%s" "$f"; }' > "$L/planted-folds.sh"
+printf '%s\n' '#!/bin/bash' '# --- bionic-loader/v2 BEGIN' > "$S/hooks/planted-loader.sh"
 AFTER="$(run)"; RC=$?
 
 section "PARSERS"
@@ -96,6 +100,8 @@ expect_contains "tree: the tree verb's one writer" "payload/scripts/lib/worktree
 expect_contains "tree: the planted second writer beside it" "payload/scripts/lib/planted-writers.sh:planted_tree" "$TRE"
 SH0="$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "shared" && ($2 == "born" || $2 == "dispatch" || $2 == "waiver" || $2 == "finding" || $2 == "proof" || $2 == "tree")' | grep -c .)"
 expect_eq "the shared-type count rises by each of the six planted types not shared before" "$(( $(count "$BEFORE" shared_types) + 6 - SH0 ))" "$(count "$AFTER" shared_types)"
+expect_eq "step: one writer, the facts library's, and no second" "payload/scripts/lib/proof.sh proof_step_event|" \
+  "$(printf '%s\n' "$AFTER" | awk -F'\t' '$1 == "writer" && $2 == "step" { split($3, w, " "); sub(/:[0-9]+$/, "", w[1]); print w[1], w[2] }')|$(pair step)"
 # The two setters of matrix cells go with the matrix; every other hand event is written by the one writer.
 expect_eq "hand: one writer, the line library's, beside the matrix setters" "payload/scripts/lib/line.sh line_hand_event" \
   "$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "writer" && $2 == "hand" { split($3, w, " "); sub(/:[0-9]+$/, "", w[1]); print w[1], w[2] }' \
@@ -111,6 +117,13 @@ cells() { /usr/bin/grep -rnE 'matrix-(set|retier|render)|waive-row|poker_verb_di
 printf '%s\n' '# matrix-retier' '# session-poker.sh discharge AC-1' > "$L/planted-cell.sh"
 expect_eq "the extractor reads both planted names of the verbs that wrote a matrix cell" "2" "$(cells "$S" | grep -c planted-cell.sh)"
 expect_eq "the five verbs that wrote a matrix cell are named nowhere else" "" "$(cells "$S" | grep -v planted-cell.sh)"
+
+# The walls' list of verbs keeps its dead names, and a version-15 header still refuses the runs count's old key.
+steps() { /usr/bin/grep -rnE 'step-line|step-field|regression-runs|regression_runs_count|units_set_current|units_step_line|units_step_fields|poker_verb_regression\b' "$1/hooks" "$1/payload/scripts" \
+  | grep -v -e '/payload/scripts/lib/walls\.sh:' -e 'PLAN_READ_GONE_KEYS='; }
+printf '%s\n' '# step-field 5 walk-artifact=x' '# regression-runs --write' > "$L/planted-step.sh"
+expect_eq "the extractor reads both planted names of the step's writers" "2" "$(steps "$S" | grep -c planted-step.sh)"
+expect_eq "the verbs that wrote a step's line, its fields, the regression's setting and its runs' count are named nowhere else" "" "$(steps "$S" | grep -v planted-step.sh)"
 
 section "REFUSALS"
 own() { printf '%s\n' "${2:-$BEFORE}" | awk -F'\t' -v f="hooks/$1.sh:" 'index($2, f) == 1 { n = $2; sub(/.*:/, "", n); print n, $3 }'; }
@@ -147,12 +160,18 @@ expect_eq "a fold through a pipe, an unread \$( ) and a local's \$( ) are named;
   "$(printf '%s\n' "$AFTER" | sed -n 's|^unheard	payload/scripts/lib/planted-folds\.sh:||p' | tr '\n' ' ' | sed 's/ $//')"
 expect_eq "the unheard count rises by three over the tree, which holds none" "0 3" "$(count "$BEFORE" unheard_folds) $(count "$AFTER" unheard_folds)"
 
+section "LOADER"
+expect_eq "the loader block's mark is found in one file, the loader's own" "payload/scripts/lib/loader.sh" \
+  "$(cd "$BIONIC_SCRIPTS_DIR" && /usr/bin/grep -rl '^# --- bionic-loader/v2 BEGIN' hooks payload/scripts | sort | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "the check reads no pasted copy over the tree" 0 "$(count "$BEFORE" loader_copies)"
+expect_contains "a copy planted in a hook file is listed" "$(printf 'loader\thooks/planted-loader.sh\t:2')" "$AFTER"
+expect_absent "the loader's own file is not a copy" "$(printf 'loader\tpayload/scripts/lib/loader.sh')" "$AFTER"
+expect_eq "the planted copy raises the count by one" "$(( $(count "$BEFORE" loader_copies) + 1 ))" "$(count "$AFTER" loader_copies)"
+
 section "REPORT"
 expect_status "the check exits 0 with findings" 0 "$RC"
 expect_eq "it ends on the six count lines, in order" "parsers plan_writers shared_types hook_refusals loader_copies unheard_folds" \
   "$(printf '%s\n' "$AFTER" | tail -6 | sed -n 's/^\([a-z_]*\)=[0-9][0-9]*$/\1/p' | tr '\n' ' ' | sed 's/ $//')"
-expect_contains "a pasted loader copy is listed" "$(printf 'loader\thooks/bash-walls.sh\t')" "$AFTER"
-expect_absent "the loader's own library is not a copy" "$(printf 'loader\tpayload/scripts/lib/loader.sh')" "$AFTER"
 bash "$CHECK" "$S/no-such" >/dev/null 2>&1; expect_status "a root that is not a checkout exits 2" 2 "$?"
 
 # §READINGS runs from the checkout; a scratch commit on a shared clone moves a count without touching it.

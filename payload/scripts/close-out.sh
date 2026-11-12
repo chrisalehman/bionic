@@ -353,7 +353,7 @@ STEP_REFUSAL="the run is at Step ${CURRENT:-<none>} — advance it to Step 8 fir
 # without the merge: no merge readback, no rows landed by a merge, no branch census and no tree or branch deleted (the
 # work is kept), no archive move and no delivery notice; the Step-9 line reads `delivered: parked on <branch> @ <sha>`,
 # the continuation, the epic row and the closed handoff say parked, where and why. Everything else stands: the step,
-# the facts, the gate. The rule is lib/run.sh `plan_parked_why`, the one reader session-poker.sh `step-line 9` asks too.
+# the facts, the gate. The rule is lib/run.sh `plan_parked_why`, the one reader.
 PARKED_WHY=""
 PARKED=no
 if PARKED_WHY="$(plan_parked_why "$PLAN")"; then PARKED=yes; fi
@@ -403,7 +403,12 @@ co_resume_point() {
   if [ "$PARKED" = yes ]; then
     printf 'resume point: PARKED on %s @ %s — %s' "$WORKING" "$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null || printf '?')" "$PARKED_WHY"
   else
-    printf 'resume point: NONE — DELIVERED at %s; %s @ %s.' "$NOW" "$INTEGRATION" "$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null || printf '?')"
+    # The delivery's instant is its fact's, the one the step's event holds, so both doors name one; an instant asked
+    # for by name, or no fact yet, is the minute close-out holds.
+    local at="${CO_AT:-}"
+    [ -n "$at" ] || at="$(co_step9_at 2>/dev/null)" || at=""
+    [ -n "$at" ] || at="$NOW"
+    printf 'resume point: NONE — DELIVERED at %s; %s @ %s.' "$at" "$INTEGRATION" "$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null || printf '?')"
   fi
 }
 co_branch_line() {
@@ -687,22 +692,7 @@ act_worktrees() {
 # when it wrote no end) and names it with its last progress line; `check` names it and sends nothing.
 # A run already ended, or LOST, is no process and gets no line. Nothing is refused by the sweep.
 #
-# `regression-runs: <n>` is the release card's count of full-runner runs (REQ-4 AC-4.6, Δ6d):
-# session-poker's `regression-runs`, read off the run records on the rosters BEFORE the wipe takes
-# them. When the records cannot be counted, the plan header's value is printed, and says so.
 co_poker() { printf '%s/hooks/session-poker.sh' "$(plugin_root)"; }
-RR_LINE=""
-co_regression_runs() {  # -> sets RR_LINE
-  local out n
-  out="$(cd "$ROOT" && bash "$(co_poker)" regression-runs 2>/dev/null)" || out=""
-  n="${out#poker: regression-runs=}"
-  case "$n" in
-    ''|*[!0-9]*)
-      n="$(plan_frontmatter_get "$PLAN" regression-runs)"
-      RR_LINE="${n:-unknown} (the plan header's; the run records could not be counted)" ;;
-    *) RR_LINE="$n" ;;
-  esac
-}
 # THE HAND-HOLDS, READ LAST. `landing-report --hand-holds` folds the uses of the escape-hatch verbs by kind from the
 # lines the verbs wrote (hooks/poker/line.sh `hand_holds_report` owns the rules), over the window from the last build
 # landing to the plan's `delivered:` time. `run` writes `delivered:` and only then takes its final reading, so every act
@@ -2007,7 +1997,8 @@ write_plan_blocks() {
   fi
   step8="$(step8_block)"
   step9_present "$target" || step8="$step8"$'\n''- Step 9: (pending)'
-  CO_PHASE="$phase" CO_STEP8="$step8" CO_STEP9="$(step9_block)" CO_HANDOFF="$(handoff_block)" awk '
+  CO_STEP9_TEXT="$(step9_block)"
+  CO_PHASE="$phase" CO_STEP8="$step8" CO_STEP9="$CO_STEP9_TEXT" CO_HANDOFF="$(handoff_block)" awk '
     /^## / {
       insdlc = ($0 ~ /^## SDLC State/)
       skip = 0
@@ -2045,6 +2036,15 @@ write_plan_blocks() {
     return 0
   fi
 
+  # THE DELIVERY IS ALSO THE STEP'S EVENT: a step the run's log holds outranks a Step line stamped only to the minute,
+  # so while the Step 9 line is written here the delivery goes through the step's one writer too, or an advance logged
+  # in the same minute would read the closed run as open. It carries the minute the Step 9 line does, at its first
+  # second, so the delivery reads one instant everywhere; it can read earlier than the log line before it and stands
+  # after it by the log's written order. It goes in before the handoff, which names its instant.
+  local delivered at=""; delivered="$(printf '%s\n' "$CO_STEP9_TEXT" | sed -n '1s/^- Step 9: delivered: //p')"
+  case "$NOW" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]Z) at="${NOW%Z}:00Z" ;; esac
+  LOG_AT="$at" proof_step_event "$PLAN" 9 "delivered=${delivered:-yes}" || _co_refuse "the delivery could not be appended to the run's log of $PLAN"
+
   # A plan that carried no `## Handoff` section gets one rather than silently losing the
   # act: the section is the run's resume pointer, and its absence is not consent.
   if ! grep -qF "handoff: $CO_HO_REL written " "$PLAN"; then
@@ -2063,7 +2063,7 @@ write_plan_blocks() {
 
 # ─── The gate ────────────────────────────────────────────────────────────────
 
-# gate_ask <plan-file> <sid> [<dry_of>] -> GATE_RC, GATE_ERR (the gate's whole stderr) and GATE_LINE
+# gate_ask <plan-file> <sid> [<dry_of>] [<a step pending, honoured for a dry session only>] -> GATE_RC, GATE_ERR (the gate's whole stderr) and GATE_LINE
 # (its one refusal line) for a `git commit` judged against <plan-file>. Status 9, with
 # GATE_LINE saying why, when there is no gate to ask; 0 otherwise, whatever the verdict.
 #
@@ -2086,7 +2086,7 @@ GATE_RC=0
 GATE_ERR=""
 GATE_LINE=""
 gate_ask() {
-  local plan="$1" sid="$2" dry_of="${3:-}" hook marker input
+  local plan="$1" sid="$2" dry_of="${3:-}" step="${4:-}" hook marker input
   GATE_RC=9; GATE_ERR=""; GATE_LINE=""
   hook="$(plugin_root)/hooks/bash-walls.sh"
   [ -f "$hook" ] || { GATE_LINE="no bash-walls.sh at $hook"; return 9; }
@@ -2101,7 +2101,7 @@ gate_ask() {
       tool_name: "Bash",
       tool_input: {command: "git commit -m close-out"},
       tool_use_id: "toolu_closeout"}')"
-  GATE_ERR="$(CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$sid" OWED_PLAN="$PLAN" bash "$hook" <<< "$input" 2>&1 >/dev/null)"
+  GATE_ERR="$(BIONIC_DRY_STEP="$step" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$sid" OWED_PLAN="$PLAN" bash "$hook" <<< "$input" 2>&1 >/dev/null)"
   GATE_RC=$?
   rm -f "$marker"
   GATE_LINE="$(grep -m1 '^bionic: ' <<< "$GATE_ERR")"
@@ -2182,9 +2182,8 @@ step9_present() {
 # 6 appends to a `| wave |` table it never finds and then refuses because no row landed.
 # That is known before the first act, so it is asked here, by presence alone.
 #
-# A MISSING STEP 9 LINE IS NO LONGER ASKED FOR (wave-27 T4, D14). It was, and the line it
-# asked for is one `session-poker.sh step-line 9` refuses as close-out's to write, so a run
-# closed by its tools alone could never get past here. Phase 8 writes it (write_plan_blocks).
+# A MISSING STEP 9 LINE IS NOT ASKED FOR: the line is close-out's own to write, so a run closed by its tools alone
+# could never get past here. Phase 8 writes it (write_plan_blocks).
 presence_missing() {
   # A RELEASE THAT WOULD SPLIT A CELL (wave-27 T14; A-orch-28). The epic row carries `release:` in
   # its version cell, and a `|` in it gives the row a cell more than its header, so it is refused
@@ -2299,7 +2298,8 @@ gate_preflight() {
     PREFLIGHT_LINE="${out#bionic: close-out refused — }"
     return 0
   fi
-  gate_ask "$copy" "closeout-preflight-$$" "$PLAN"
+  # A copy's name joins no record, so its step is its text's: the run's step, the reader's, is handed in pending.
+  gate_ask "$copy" "closeout-preflight-$$" "$PLAN" "$CURRENT"
   rm -f "$copy"; CO_SCRATCH=""
   [ "$GATE_RC" -eq 9 ] && { PREFLIGHT_LINE="$GATE_LINE"; return 0; }
   PREFLIGHT_RC="$GATE_RC"
@@ -2439,8 +2439,6 @@ do_check() {
   say "reviews: $CO_RV_LINE"
 
   co_orphans check
-  co_regression_runs
-  say "regression-runs: $RR_LINE"
   co_hand_holds
   say "$CO_HH_LINE"
   co_governed
@@ -2585,7 +2583,6 @@ do_run() {
     act_worktrees;  say "worktree-removed: $WT_LINE"
   fi
   co_orphans run
-  co_regression_runs; say "regression-runs: $RR_LINE"
   co_governed;      say "$CO_GOV_LINES"
   # Read before act_tmp wipes the rosters it counts: the continuation's `## Scorecard` prints this reading.
   co_scorecard

@@ -85,9 +85,13 @@ for f in 'current: 4\r\n|CRLF' '   current :  4\n|indented' 'current:4\n|unspace
   W=form; printf "## SDLC State\n${f%|*}- Step 3: a\n" > "$D/plans/epic-x/form.plan.md"; expect_eq "a version-14 current: ${f#*|} is read as the gate reads it" "n=4 state=open " "$(ask step | tr '\n' ' ')"; done
 printf '## SDLC State\rcurrent: 4\r- Step 3: a\r' > "$D/plans/epic-x/form.plan.md"; expect_eq "a version-14 current: on CR-only line ends is read" "n=4 state=open " "$(ask step | tr '\n' ' ')"
 for f in '- Step 8: a\n|with no Step 9 line' '- Step 9: drafted\n|with its Step 9 line not delivered' '- Step 9: report, delivered: x\n|delivered'; do
-  printf "## SDLC State\ncurrent: 9\n${f%|*}" > "$D/plans/epic-x/form.plan.md"; W=form; s=open; [ "${f#*|}" = delivered ] && s=delivered
-  expect_eq "a version-14 plan at 9 ${f#*|} stands at 9, $s" "n=9 state=$s " "$(ask step | tr '\n' ' ')"; done
+  printf "## SDLC State\ncurrent: 9\n${f%|*}" > "$D/plans/epic-x/form.plan.md"; W=form; s=open d=no; [ "${f#*|}" = delivered ] && s=delivered d=x
+  expect_eq "a version-14 plan at 9 ${f#*|} stands at 9, $s, its delivery the step's own field" "n=9 delivered=$d state=$s " "$(ask step | tr '\n' ' ')"; done
 printf '## SDLC State\n- Step 3: a\n- Step 4: a\n' > "$D/plans/epic-x/form.plan.md"; expect_eq "Step lines with no current: are no step" "state=open " "$(ask step | tr '\n' ' ')"
+W=fields; plan fields < /dev/null; bash -c '. "$1/proof.sh" && proof_step_event "$2" 8 cleanup=done && ! proof_step_event "$2" 8 merge=main' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$D/plans/epic-x/fields.plan.md"
+expect_eq "a field given at the advance is in the step's answer, and one its step does not carry is refused unwritten" "n=8 cleanup=done state=open |1" "$(ask step | tr '\n' ' ')|$(grep -c . "$D/record/fields/run.log")"
+W=form; printf '## SDLC State\ncurrent: 9\n- Step 8: closed\n  merge: main\n  cleanup: done\n- Step 9: delivered: v1\n  archived: /a\n' > "$D/plans/epic-x/form.plan.md"
+expect_eq "a version-14 step's own fields are read from its block, and no other line of it" "n=9 delivered=v1 archived=/a state=delivered " "$(ask step | tr '\n' ' ')"
 for f in '- approved-by: u 2026-01-01T00:00Z "ok"|0' '  approved-by: u 2026-01-01T00:00Z "ok"|0' 'approved-by:  |1'; do
   printf '## SDLC State\ncurrent: 4\n%s\n' "${f%|*}" > "$D/plans/epic-x/form.plan.md"; ask approved step3; expect_status "the approval line '${f%|*}' is read as the fill reads it" "${f#*|}" "$?"; done
 
