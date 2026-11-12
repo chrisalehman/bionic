@@ -298,25 +298,14 @@ swept_lines() {  # <repo> -> the marker lines, one per verdicted row
   /usr/bin/grep "^${SWEPT_SCHEMA}|" "$(roster_of "$1")" 2>/dev/null
 }
 
-# An ACTIVE wave: the fence-aware `## SDLC State` / `current:` marker the evidence gate,
-# stop-guard and dispatch-preflight all read.
+# An ACTIVE wave: a run at 15 whose log holds Step 4, the step the evidence gate, the stop hook and the
+# dispatch wall all read.
 plan_active() {  # <repo>
-  local d="$1/.bionic/docs/plans/epic-16-landing-contract"
-  mkdir -p "$d"
-  cat > "$d/wave-01-landing-contract.plan.md" <<'PLAN'
----
-governing-skill: superpowers:writing-plans
-sdlc-step: 4
-canonical_sdlc_version: 14
----
-
-# Wave 01 — landing contract
-
-## SDLC State
-
-integration-branch: main
-current: 4
-PLAN
+  local d="$1/.bionic/docs" w=wave-01-landing-contract
+  mkdir -p "$d/plans/epic-16-landing-contract" "$d/record/$w"
+  printf -- '---\ngoverning-skill: superpowers:writing-plans\nsdlc-step: 4\ncanonical_sdlc_version: 15\nintegration-branch: main\n---\n\n# Wave 01 — landing contract\n' \
+    > "$d/plans/epic-16-landing-contract/$w.plan.md"
+  printf 'run/v1|ev=step|n=4|at=2026-10-04T00:00:00Z\n' > "$d/record/$w/run.log"
 }
 
 make_repo() {  # <label> -> repo path
