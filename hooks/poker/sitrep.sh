@@ -2146,7 +2146,7 @@ sitrep_tick_line() {
     fi
     printf '%s\n' "$HO_LAST"
     if ! declare -F proof_handoff_event >/dev/null 2>&1 || ! proof_handoff_event "$PV_PLAN" "$HO_REL"; then
-      say "handoff — the run's log did not take the handoff's event, so the reader does not name $HO_REL; run handoff again"
+      say "handoff — the run's log did not take the handoff's event, so the run does not point at $HO_REL yet; run handoff again"
     fi
     exit 0
   }
