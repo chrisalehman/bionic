@@ -560,7 +560,8 @@ _translate_log() {  # <plan> -> the run's log, each line in its place
   f="$(_translate_record "$1" run.log)" || return; [ -n "$f" ] || return 0
   awk -v dl="$([ -f "${f%/*}/design-ledger.md" ] && echo 1)" -v bl="$([ -f "${f%/*}/debt.md" ] && echo 1)" "$_TRANSLATE_AWK"'
     index($0, "run/v1|") != 1 { next }
-    dl && index($0, "run/v1|ev=decision|") == 1 || bl && index($0, "run/v1|ev=debt|") == 1 { printf "e\t~\t%s\n", $0; next }
+    { e = substr($0, 11); sub(/[|].*/, "", e) }
+    dl && e == "decision" || bl && e == "debt" { printf "e\t~\t%s\n", $0; next }
     { a = ""; n = split($0, w, "|"); for (i = n; i >= 2; i--) if (index(w[i], "at=") == 1) { a = substr(w[i], 4); break }
       k = ukey(a); if (k == "") k = (p == "" ? "~" : p); else if (k < p) k = p; p = k
       printf "e\t%s\t%s\n", k, $0 }' "$f"
