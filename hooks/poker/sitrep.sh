@@ -1883,7 +1883,7 @@ sitrep_tick_line() {
   # There is no safe-to-clear line: the source session is disposable, and anything in flight is in State.
   # Bound, the run's log then takes one handoff event naming the file (lib/proof.sh `proof_handoff_event`), best-effort:
   # the document is in place first, and the plan is never written. REFUSED (2), nothing written: the file's path a link
-  # or a directory; (1) a bound open plan with no `## Tasks` or no `## SDLC State`.
+  # or a directory; (1) a bound open plan with no `## Tasks`, or a run whose step the reader cannot read.
   poker_verb_handoff() {
     HO_IN=""; [ -t 0 ] || HO_IN="$(cat)"
     HO_E="$(sitrep_now)"
@@ -1910,8 +1910,8 @@ sitrep_tick_line() {
           die "REFUSED — the plan has no ## Tasks section, so there are no open tasks to hand off; the plan is unchanged."
           exit 1
         fi
-        if ! /usr/bin/grep -qE '^##[[:space:]]+SDLC State([[:space:]]|$)' "$PV_PLAN"; then
-          die "REFUSED — the plan has no ## SDLC State section, so its step cannot be handed off; the plan is unchanged."
+        if [ -n "${PV_CUR_UNREAD:-}" ]; then
+          die "REFUSED — the run's step cannot be read, so it cannot be handed off; the plan is unchanged."
           exit 1
         fi
       fi

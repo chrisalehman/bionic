@@ -435,12 +435,17 @@ expect_contains "P5b …the usage error names stdin for the sections" "stdin" "$
 expect_eq "P5c …and nothing is written" "$HF_NFILES" "$(ls "$HF_NR/$HF_HOME" | wc -l | tr -d ' ')"
 
 # ============================================================
-section "§POINTER: bound, the run's log holds the handoff, naming the file, and the plan is as it was"
+section "§POINTER: bound, the run's log holds the handoff, naming the file, and the plan is as it was, at 14 and at 15"
 # ============================================================
 s42_snap "$HF_R" "$HF_P"
 BIONIC_NOW_EPOCH=$((HF_NOW + 60)) hf_poke "$HF_R" "$HF_C" handoff 'the next session reviews T2'
 expect_eq "PT1 a bound handoff with a purpose, a minute on, exits 0; the reader's handoff names the file; the plan's sum is unchanged" \
   "0|$HF_DOOR|$(cksum < "$TMPROOT/s42-before")" "$RC|$(hf_ho "$HF_P")|$(cksum < "$HF_P")"
+hf_world fifteen no
+bash "$BIONIC_SCRIPTS_DIR/payload/scripts/bring-forward.sh" "$HF_P" >/dev/null 2>&1; s42_snap "$HF_R" "$HF_P"
+hf_poke "$HF_R" "$HF_C" handoff
+expect_eq "PT2 a plan at 15, which holds no state section, hands off: exit 0, the reader's handoff names the file, the plan's sum is unchanged" \
+  "15|0|0|$HF_DOOR|$(cksum < "$TMPROOT/s42-before")" "$(sed -n 's/^canonical_sdlc_version: //p' "$HF_P")|$(grep -c '^## SDLC State' "$HF_P")|$RC|$(hf_ho "$HF_P")|$(cksum < "$HF_P")"
 
 # ============================================================
 section "§CLOSED: handoff on a delivered or parked plan writes the same document, its State saying where the run closed; the reader names it"
