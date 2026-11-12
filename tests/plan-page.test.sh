@@ -175,11 +175,9 @@ owed() { printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o "owed at 15: $1" | head -
 expect_eq "…and owes Step 1's requirements, which a header naming no epic and wave cannot find" "owed at 15: Step 1's requirements" "$(owed "Step 1's requirements")"
 expect_absent "…and asks a row's landing and launch of the reader, never naming each row's line as unread" "could not be read at 15: each row's" "$GATE_SAID"
 cp "$P2" "$P2.keep"; awk '{ print } /^\| T1 \|/ { t = $0; print; sub(/^\| T1 \|/, "| T2 |", t); sub(/\| build \|/, "| bogus |", t); print t }' "$P2.keep" > "$P2"; gate
-expect_eq "at 15 a second row of one id and a row of an unknown kind are refused at the commit, each named" "2|T1: duplicate id|T2: kind bogus" \
-  "$GATE_EXIT|$(printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o 'T1: duplicate id\|T2: kind bogus' | paste -sd'|' -)"
+expect_eq "at 15 a second row of one id and a row of an unknown kind are refused at the commit, each named" "2|T1: duplicate id|T2: kind bogus" "$GATE_EXIT|$(printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o 'T1: duplicate id\|T2: kind bogus' | paste -sd'|' -)"
 awk '{ print } /^\| T1 \|/ { sub(/^\| T1 \|/, "| T2 |"); print }' "$P2.keep" > "$P2"; printf 'run/v1|ev=dispatch|row=T2|name=w-T2|brief=b|at=2026-11-01T00:00:02Z\n' >> "$L2"; gate
-expect_eq "a row the log holds dispatched under a name stands at 15 on its dispatch: the gate names neither it nor an evidence line, and owes the requirements still" \
-  "|owed at 15: Step 1's requirements" "$(printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o "T2[^ ]*\\|evidence line" | head -1)|$(owed "Step 1's requirements")"
+expect_eq "a row the log holds dispatched under a name stands at 15 on its dispatch: the gate names neither it nor an evidence line, and owes the requirements still" "|owed at 15: Step 1's requirements" "$(printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o "T2[^ ]*\\|evidence line" | head -1)|$(owed "Step 1's requirements")"
 cp "$P2.keep" "$P2"; for f in "each criterion's fails-when:" "the matrix:"; do expect_absent "…and no longer names $f" "could not be read at 15: $f" "$GATE_SAID"; done
 unruled() { ( . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/run.sh"; . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/units.sh"; . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/proof.sh"
   . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh"; matrix_unruled "$P2" 8 "$@" | tr '\n' ' ' ); }
@@ -190,8 +188,7 @@ expect_eq "at Step 5 with no regression proof in the log the regression is owed"
 printf 'run/v1|ev=step|n=6|at=2026-11-01T00:00:04Z\nrun/v1|ev=admitted|id=d1|row=T1|suite=a.test.sh|token=ext:gone|at=2026-11-01T00:00:05Z\n' >> "$L2"; gate
 expect_contains "at 15 a declared red the log holds, no proof after it, is owed" "a.test.sh: landed red until ext:gone" "$GATE_SAID"
 printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=record/floor.log|at=2026-11-01T00:00:06Z\n' "$H" >> "$L2"; gate
-expect_eq "…a regression proof after it in the log clears it: still refused for the facts the log lacks, it names no proof" "2|" \
-  "$GATE_EXIT|$(printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o 'landed red until\|could not be read at 15\|the proofs that clear' | LC_ALL=C sort -u | paste -sd'|' -)"
+expect_eq "…a regression proof after it in the log clears it: still refused for the facts the log lacks, it names no proof" "2|" "$GATE_EXIT|$(printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o 'landed red until\|could not be read at 15\|the proofs that clear' | LC_ALL=C sort -u | paste -sd'|' -)"
 printf 'run/v1|ev=admitted|id=d2|row=T1|suite=b.test.sh|token=approval:ship|at=2026-11-01T00:00:06Z\n' >> "$L2"; gate; AS="$GATE_SAID"; printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%sZ\n' 'approval|key=ship|by=f' 7 "proof|kind=regression|head=$H|evidence=record/floor-2.log" 8 >> "$L2"; gate
 expect_eq "…one held until an approval is owed while the log holds none, and cleared by the approval and a proof after it" "1|0" "$(grep -c 'b.test.sh: landed red until approval:ship' <<< "$AS")|$(grep -c 'b.test.sh: landed red' <<< "$GATE_SAID")"
 
@@ -199,15 +196,15 @@ expect_eq "…one held until an approval is owed while the log holds none, and c
 hdr() { awk -v l="$1" '{ print } /^walk: exempt$/ { print l }' "$P2" > "$P2.t" && mv "$P2.t" "$P2"; }   # <a header line> -> the plan's header gains it
 hdr 'epic: epic-01-demo'; hdr 'wave: wave-02-y'; hdr 'environments: mac'; mkdir -p "$R/.bionic/docs/specs/epic-01-demo"
 : > "$R/.bionic/docs/specs/epic-01-demo/wave-02-y.requirements.md"; printf 'run/v1|ev=step|n=5|at=2026-11-01T00:00:07Z\n' >> "$L2"; gate
-expect_eq "at 5: the regression and the requirements found by the header stand; the environments a walk covered are owed" \
-  "||owed at 15: Step 5's environments covered" "$(owed "Step 5's regression")|$(owed "Step 1's requirements")|$(owed "Step 5's environments covered")"
+expect_eq "at 5: the regression and the requirements found by the header stand; the environments a walk covered are owed" "||owed at 15: Step 5's environments covered" "$(owed "Step 5's regression")|$(owed "Step 1's requirements")|$(owed "Step 5's environments covered")"
 printf 'run/v1|ev=proof|kind=walk|head=%s|evidence=record/generic-evidence.md|environments=mac|at=2026-11-01T00:00:08Z\n' "$H" >> "$L2"; gate
 expect_eq "…and stand once the walk's proof names them" "" "$(owed "Step 5's environments covered")"
 for c in "2|approval|step1|Step 1's approval" "7|header|adrs: none — no decision this run|Step 7's document" "9|step|delivered=v1|Step 9's delivery"; do
-  IFS='|' read -r n k v w <<< "$c"; ev="run/v1|ev=step|n=$n"; [ "$n" != 9 ] || ev="$ev|delivered=no"; printf '%s|at=2026-11-01T00:00:09Z\n' "$ev" >> "$L2"; gate
+  IFS='|' read -r n k v w <<< "$c"; ev="run/v1|ev=step|n=$n"; [ "$n" != 9 ] || ev="$ev|delivered=no"; printf '%s|at=2026-11-01T00:00:09Z\n' "$ev" >> "$L2"; gate; B="$GATE_EXIT"
   expect_eq "at $n the log lacking it, $w is owed" "owed at 15: $w" "$(owed "$w")"
-  case "$k" in approval) printf 'run/v1|ev=approval|key=%s|by=f|said=yes|at=2026-11-01T00:00:10Z\n' "$v" >> "$L2" ;;
+  case "$k" in approval) ( cd "$R" && git config user.name f && HOME="$HOME_DIR" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_NOW_EPOCH=1793491210 bash "$BIONIC_HOOKS_DIR/session-poker.sh" approve "$v" yes >/dev/null 2>&1 ) ;;
     header) hdr "$v" ;; step) printf 'run/v1|ev=step|n=%s|%s|at=2026-11-01T00:00:10Z\n' "$n" "$v" >> "$L2" ;; esac; gate
+  [ "$k" != approval ] || expect_eq "at 2 a commit with no approval of step 1 is refused, and admitted once the approve command gives it" "2|0" "$B|$GATE_EXIT"
   expect_eq "…and not owed once it stands" "" "$(owed "$w")"; done
 # At 8 the merge is owed only when the plan holds an integrate row and the run is not parked, and then until it lands.
 printf 'run/v1|ev=step|n=8|at=2026-11-01T00:00:11Z\n' >> "$L2"; gate
