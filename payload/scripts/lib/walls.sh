@@ -6961,8 +6961,8 @@ $_how"
 # `amend` ever read its arguments. `'<why>'` is one word, like `'<cmd>'`.
 # THE WHOLE RUN IS NO WIDENING (wave-35 T10; D10, REQ-1 AC-1.8). A refused run that is the project's whole tree,
 # `run.sh` or `tests/run.sh` with no `--only`, is never sent to `--reexec+ '<cmd>'`: an amend would hand a row the
-# whole tree outside the full-run rules. Its one path is `session-poker.sh floor-run`, which holds those rules
-# itself (hooks/session-poker.sh, the floor-run arm) and which this wall admits as typed, so the line printed,
+# whole tree outside the full-run rules. Its one path is `session-poker.sh regression-run`, which holds those rules
+# itself (hooks/poker/proof.sh, its verb) and which this wall admits as typed, so the line printed,
 # run as printed, is not refused again. `_budget_whole_run_cmd` is the command, built once, for this line and for
 # the full-tree arm's detail.
 _budget_whole_run_cmd() {
