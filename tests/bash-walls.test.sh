@@ -92,7 +92,7 @@ run_hook "$(mk_payload "$R_QUIET" 'psql -c "DROP TABLE users"')"
 expect_status "2c: protect-database still refuses a DROP" 2 "$ST"
 
 run_hook "$(mk_payload "$R_COMMIT" 'git commit -m "step 5"')"
-expect_status "2e: the evidence gate still refuses a commit with placeholder evidence" 2 "$ST"
+expect_status "2e: the evidence gate still refuses a commit its step's facts do not admit" 2 "$ST"
 
 run_hook "$(mk_payload "$R_QUIET" 'bash tests/run.sh')"
 expect_status "2g: farm-out-reminder still denies at exit 0 — its channel, not exit 2" 0 "$ST"

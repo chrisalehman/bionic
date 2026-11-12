@@ -31,16 +31,7 @@ ACTOR="at23writer-9f8e7d6c5b4a3210"
 FAKE_HOME="$SANDBOX/home"
 mkdir -p "$FAKE_HOME"
 
-FM='---
-governing-skill: canonical-sdlc
-canonical_sdlc_version: 14
-intent: build
-rigor: single
-scale: wave
-deploy_target: none
-use_worktree: false
-has_ui: false
----'
+. "$(dirname "$0")/lib/plan-fixture.sh"
 
 # ---------- fixtures ----------
 
@@ -87,17 +78,11 @@ bw_bind() {
   bound_marker "$1" "$SID" "$1/.bionic/docs/plans/active.md"
 }
 
-# block_plan <repo> — a plan whose current step's evidence is a placeholder, so the
-# evidence gate refuses any `git commit` made under it.
+# block_plan <repo> — a run at Step 5 whose log holds no proof of the whole run, so the evidence gate
+# refuses any `git commit` made under it; an engaged session is bound to it, as bw_bind binds.
 block_plan() {
-  printf '%s\n' "$FM
-# plan
-
-## SDLC State
-current: 5
-approved-by: fixture 2026-09-07T00:00Z \"approved\"
-Step 5: TODO" > "$1/.bionic/docs/plans/active.md"
-  bw_bind "$1"
+  local p; p="$(plan_fixture --at 15 --current 5 "$1/.bionic/docs/plans/epic-x/wave-x.plan.md" wave)" || return 1
+  [ ! -f "$1/.bionic/tmp/engaged-$SID.state" ] || bound_marker "$1" "$SID" "$p"
 }
 
 # arm_roster <repo> — the roster file agent-context-guard.sh required before it would let

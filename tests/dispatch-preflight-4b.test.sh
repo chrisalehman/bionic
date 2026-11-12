@@ -24,7 +24,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
-. "$(dirname "$0")/dispatch-preflight.prelude.sh"
+MAKE_REPO_AT=15; . "$(dirname "$0")/dispatch-preflight.prelude.sh"
 
 . "$(dirname "$0")/dispatch-preflight-4.prelude.sh"
 
@@ -43,8 +43,7 @@ section "§LANDS-ON — a writer binding a row names the suites it lands on (wav
 # fails-when: a well-formed line is refused or not written in the one spelling; an unbound writer is refused.
 t7_gate() {  # <repo tag> <body lines> [<name>] [<subagent_type>] [<brief>] -> GATE_*, T7_ROW
   REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the widget | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n| A2 | 4 | build | another | implementor | — | 30 | REQ-1 | b.sh | — | — | pending | — |\n' \
-    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  pf_tasks "$REPO" '| T23 | 4 | build | the widget | — | 30 | REQ-1 | a.sh | — |' '| A2 | 4 | build | another | — | 30 | REQ-1 | b.sh | — |'
   run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" - "${3:-w99-T23}" "${5:-$(adv_brief "$2")}")" "${3:-w99-T23}" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" "${4:-implementor}")"
   T7_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 }
@@ -115,14 +114,15 @@ section "§ONE-ROW — a dispatch is bound to ONE row, whichever arm asks (wave-
 # this" in one place (`dp_row_reader`): the brief's `Row:` when it carries one, else the row the name
 # matches, and every arm reads that id. A `Row:` naming a row other than the one the name matches is
 # refused; a name that matches no row with a `Row:` that names one is T7's design and stays admitted.
-# FIXTURES: make_repo's approved plan with T1, T2 and T9 (T9 reads approval:release, never recorded).
+# FIXTURES: make_repo's approved plan with T1, T2 and T9 (T9 reads approval:release, never recorded), at 14:
+# a row at 15 holds no reads cell, so no row there can wait on a named approval.
 # P1-P3 are the reader's probe (w28-T24-r26 probe-dp.log). SYNTHESIZED.
 # fails-when: a Row:-bound dispatch under a name that matches no row, or another row, passes the
 # approval arm; the full-run floor reads the name when the brief carries Row:; the mismatch is
 # admitted or its line is over 100 columns; a name that matches nothing is refused for its Row:.
 t55_gate() {  # <tag> <name> <body lines> [<extra row ids, space-separated>] -> GATE_*, T7_ROW
   local _x _ids=""
-  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  REPO=$(MAKE_REPO_AT=14 make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
   local _r
   for _x in ${4:-}; do
     _r="—"; case "$_x" in *=*) _r="${_x#*=}"; _x="${_x%%=*}" ;; esac   # `<id>=<reads>` gives the row a reads cell

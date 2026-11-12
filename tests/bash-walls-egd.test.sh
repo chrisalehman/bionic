@@ -356,12 +356,12 @@ section "§JURIS — the commit wall's jurisdiction: an outside commit it can pl
 # shell; builtins and `GIT_*=` prefixes stay out. A commit the reader places outside the root but
 # cannot exempt is refused with a jurisdiction message naming the split, and the bound plan is
 # never read for it. FIXTURE FIDELITY: §18's shape, a real engaged repository under `block_plan`
-# (current: 5, a placeholder Step-5 line), so every commit the gate still judges is refused by the
+# (a run at 15 at Step 5, no proof of the whole run), so every commit the gate still judges is refused by the
 # plan, and a real `git init`-ed scratch repository beside it.
 JUR_R="$(mk_repo juris)"; block_plan "$JUR_R"
 JUR_S="$SANDBOX/scratchpad/juris-scratch"
 mkdir -p "$JUR_S"; git -C "$JUR_S" init -q 2>/dev/null
-JUR_PLAN_TEXT="Plan: $JUR_R/.bionic/docs/plans/active.md"
+JUR_PLAN_TEXT="Plan: $JUR_R/.bionic/docs/plans/epic-x/wave-x.plan.md"
 JUR_SPLIT="git -C $JUR_S commit"
 jur_line() {  # -> the one boundary line an exempt commit into the scratch repository gets
   printf 'evidence-gate: %s is outside the engaged repository (%s); the evidence gate has no plan here' "$JUR_S" "$JUR_R"
