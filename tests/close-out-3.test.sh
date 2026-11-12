@@ -115,7 +115,6 @@ expect_eq "HH-5 check prints the hand-holds line on the card" "$HH_WANT" "$(prin
 run_close "$PH" run
 expect_eq "HH-6 run exits 0, prints the same line on the card, and the wipe took the roster it read" "0/$HH_WANT/0" \
   "$CO_RC/$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')/$(tmp_entries "$PH")"
-hh_section() { awk '/^## / { s = ($0 == "## Hand-holds"); next } s && NF && !/^```/ { print }' "$1"; }
 expect_eq "HH-7b …and the section sits after ## Landings and before the Resume instruction" "yes" \
   "$(awk '/^## Landings$/ { a = NR } /^## Hand-holds$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PH/$CONT_REL")"
 # wave-36 T11 (D8; REQ-2 AC-2.3): a stop-run is a verb act, counted under its own kind and never as by-hand. A run
@@ -136,7 +135,6 @@ expect_contains "HH-13 AC-2.3 one ev=stop-run reads stop-runs=1 · by-hand=0 on 
 # T33 (D20, critic-adversarial #5; A-orch-32): an existing continuation.md is merged into, never overwritten. The
 # hand-holds line goes under ## Hand-holds (the section appended after ## Deferrals when absent), a line already
 # there is never written twice, and the person's own text is untouched. Run twice: the line is there once.
-hh_count() { /usr/bin/grep -c '^hand-holds: ' "$1" | tr -d ' '; }
 PHE="$(mk_fixture handholds-existing)"; advance_to "$PHE" 8; hh_plant "$PHE"
 mkdir -p "$PHE/${CONT_REL%/*}"
 printf '# continuation — hand written\n\nmy own note on the close\n\n## Deferrals\n\nnone, said the person\n\n## Resume instruction\n\nedited by a person\n' > "$PHE/$CONT_REL"
@@ -505,12 +503,6 @@ section "FILL — wave-33 T8 (REQ-3 AC-3.3, D8): the epic row and the continuati
 # continuation carried fourteen marks the orchestrator completed by hand (A-orch-50). Close-out now writes every
 # field it can derive, refuses the row when the plan says nothing about its ADRs, and leaves a mark only where
 # a person must decide, naming each in its output.
-fill_marks() { /usr/bin/grep -o '<fill: [^>]*>' "$1" 2>/dev/null; }
-OWED_MARKS='<fill: the first decision, or "none">
-<fill: what was ruled at this close, or "none">
-<fill: version>
-<fill: ideas path>
-<fill: carry-overs from this wave>'
 
 FA="$(mk_fixture fill-a)"; advance_to "$FA" 8
 FA_HEAD="$(fixture_git "$FA" rev-parse wave/01-fixture)"

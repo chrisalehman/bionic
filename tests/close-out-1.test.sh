@@ -405,10 +405,6 @@ expect_eq "4c: …reports the branches it would delete" "yes" \
   "$(contains "$CO_OUT" "worktree-removed:")"
 expect_eq "4d: …reports what the tmp wipe would take" "yes" \
   "$(contains "$CO_OUT" "tmp-wiped: 3 entries")"
-# THE PAIR THAT MAKES 1af/1ag NON-VACUOUS. A gate that allowed everything would report
-# `gate: ok` after `run` for no reason at all. Here the SAME gate, on the SAME fixture,
-# with only the Step-8 block missing, says it would refuse — so the two readings together
-# say the gate is reading this plan and discriminating on what the script wrote into it.
 expect_eq "4f: the plan is untouched" "$PLAN4_SHA" "$(sha_of "$P4/$PLAN_REL")"
 expect_eq "4g: the epic plan is untouched" "$EPIC4_SHA" "$(sha_of "$P4/$EPIC_REL")"
 expect_eq "4h: no continuation was written" "no" \
