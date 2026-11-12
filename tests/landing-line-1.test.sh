@@ -1393,7 +1393,8 @@ kl_world() {  # -> root: release 9.9.9, its entry on wave/x, the doc row T3, two
   printf '# Changelog\n\n## %s — 2026-10-24\n\n### The work\n\n- one change\n\n### Known limits\n\n- a limit typed by hand\n\n### The landing numbers\n\nthe numbers\n\n## 9.9.8 — 2026-10-01\n\n### Known limits\n\n- an older limit\n' \
     "$KL_V" > "$r/CHANGELOG.md"
   git -C "$r" add CHANGELOG.md && git -C "$r" commit --quiet -m "the entry" || return 1
-  ww_poke "$r" task-add T3 7 doc 'the entry. The release entry is rendered.' orchestrator — 10 REQ-1 CHANGELOG.md >/dev/null || return 1
+  awk '{ print } /^\| T2 \| 4 \|/ { print "| T3 | 7 | doc | the entry. The release entry is rendered. | orchestrator | — | — | 10 | REQ-1 | CHANGELOG.md | — | — | pending |" }' "$p" > "$p.n" && mv "$p.n" "$p"
+  ww_poke "$r" task-add T3 >/dev/null || return 1
   ww_sdlc "$r" "$(kl_lib proof_finding_lines record/wave-x/critic.md "$(printf '1\tS3\ton\t-\tdefer\t-\tthe first title\n3\tS3\ton\t-\tdefer\t-\tthe second title')" \
     | A="$(printf '%s' "$KL_S1" | sed 's/["\\]/\\&/g')" B="$KL_S2" awk '{ print $0 " stated=\"" ENVIRON[NR == 1 ? "A" : "B"] "\"" }')"
   printf '%s' "$r"

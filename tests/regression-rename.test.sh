@@ -194,18 +194,18 @@ awk '/^## Tasks/ { t = 1 } /^## Verification/ { t = 0 }
      t && /^\| T/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " — |"; next }
      { print }' "$PAB" > "$PAB.tmp" && mv "$PAB.tmp" "$PAB"
 ( cd "$RAB" && git add -f "$PAB" && git commit -qm floor ) >/dev/null 2>&1
-poke "$RAB" task-add T6 4 build 'fix the red. The red suite turns green.' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born regression:a.test.sh
+ta_add "$RAB" T6 4 build 'fix the red. The red suite turns green.' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born regression:a.test.sh
 expect_eq "GB-1 task-add --born regression:a.test.sh, which the 1.20.0 proof line owes, exits 0" "0" "$RC"
-poke "$RAB" task-add T7 4 build 'fix the other red. The other red suite turns green.' bionic:implementor '—' 30 REQ-5 'lib/d.sh' --born floor:b.test.sh
+ta_add "$RAB" T7 4 build 'fix the other red. The other red suite turns green.' bionic:implementor '—' 30 REQ-5 'lib/d.sh' --born floor:b.test.sh
 expect_eq "GB-2 task-add --born floor:b.test.sh is refused (exit 1)" "1" "$RC"
 expect_contains "GB-2b …the refusal names the new operand" "--born floor: is gone; write --born regression:" "$OUT"
-poke "$RAB" task-add T8 4 test 'reads the regression. The row waits on the regression.' bionic:implementor '—' 30 REQ-5 '—' 'proof:regression, head'
+TA_PASTE=1 ta_add "$RAB" T8 4 test 'reads the regression. The row waits on the regression.' bionic:implementor '—' 30 REQ-5 '—' 'proof:regression, head'
 expect_eq "GB-3 task-add with the reads cell 'proof:regression, head' exits 0" "0" "$RC"
 expect_contains "GB-3b …and the row's cell carries it as typed" "| proof:regression, head |" "$(/usr/bin/grep '^| T8 |' "$PAB")"
-poke "$RAB" task-add T9 4 test 'reads the old word. The row reads the retired word.' bionic:implementor '—' 30 REQ-5 '—' 'proof:floor, head'
+ta_add "$RAB" T9 4 test 'reads the old word. The row reads the retired word.' bionic:implementor '—' 30 REQ-5 '—' 'proof:floor, head'
 expect_eq "GB-4 task-add with the reads cell 'proof:floor, head' is refused (exit 1)" "1" "$RC"
 expect_contains "GB-4b …naming the new token" "proof:floor is gone; write proof:regression" "$OUT"
-poke "$RAB" task-add T9 4 test 'reads the old word live. The row reads the retired word live.' bionic:implementor '—' 30 REQ-5 '—' 'live:proof:floor'
+ta_add "$RAB" T9 4 test 'reads the old word live. The row reads the retired word live.' bionic:implementor '—' 30 REQ-5 '—' 'live:proof:floor'
 expect_eq "GB-4c …the live: form too (exit 1), naming the new token" "1|1" \
   "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'proof:floor is gone; write proof:regression' | tr -d ' ')"
 POKE_BOUND="$AB_BOUND_WAS"

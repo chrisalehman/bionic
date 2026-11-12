@@ -9,6 +9,6 @@ hooks/poker/roster.sh 33 # the roster verbs' refusals that name no exit
 hooks/poker/sitrep.sh 46 # counted at the first sweep, 2026-10-25
 hooks/poker/tick.sh 10 # counted at the first sweep, 2026-10-25
 hooks/preflight-probe.sh 11 # counted at the first sweep, 2026-10-25
-hooks/session-poker.sh 4 # counted at the first sweep, 2026-10-25
+hooks/session-poker.sh 3 # lowered when task-add took one operand
 hooks/session-sweeper.sh 7 # counted at the first sweep, 2026-10-25
 hooks/stop-orders.sh 24 # counted at the first sweep, 2026-10-25

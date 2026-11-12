@@ -264,17 +264,23 @@ sp_plan_at_step "$R37C" 7 \
 poke_pressure "$R37C" 8192 1.0 tick
 expect_contains "37c at current: 7 the release row is filled" "poker: FILL T3" "$OUT"
 
-# 37d–37f — TASK-ADD ACCEPTS A STEP-HELD ROW, AND KEEPS ITS TEXT (R6). The hold is a
-# schedule fact, not a broken invariant, so the validator stays silent and the dry commit
-# admits it. Author text reached awk through -v, which read `\n` and `\t` as escapes; now a
-# backslash, an author-escaped `\|` and a `$` land in the row exactly as typed.
+# 37d–37i — A ROW IS ADDED BY AN EDIT AND task-add RECORDS ITS BIRTH, writing no plan. A step hold is a schedule
+# fact, not a broken invariant. A row the plan lacks and a short row are refused in different words, the short one
+# with the line the verb would accept, which it then accepts as pasted.
 S37_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 R37D="$(make_repo s37-task-add)"; ( cd "$R37D" && git commit -q --allow-empty -m init )
 P37D="$(s34_plan "$R37D" 5)"
-poke "$R37D" task-add T7 7 doc 'Keep C:\new\table, a\|b, $5. The release keeps its text as typed.' bionic:implementor 'T5' 30 REQ-5 '—'
-expect_eq "37d task-add of a Step-7 doc row at current: 5 is accepted (exit 0)" "0" "$RC"
-expect_eq "37f …with its - T7: line, and its birth one born event in the run's log" "- T7: pending dispatch|1" \
-  "$(/usr/bin/grep '^- T7: ' "$P37D")|$(/usr/bin/grep -c '|ev=born|row=T7|' "${P37D%/plans/*}/record/$(basename "$P37D" .plan.md)/run.log")"
+L37D="${P37D%/plans/*}/record/$(basename "$P37D" .plan.md)/run.log"; s37() { cmp -s "$TMPROOT/s42-before" "$P37D" && echo same; }
+ta_add "$R37D" T7 7 doc 'Keep C:\new\table, a\|b, $5. The release keeps its text as typed.' bionic:implementor 'T5' 30 REQ-5 '—'
+expect_eq "37d task-add of a Step-7 doc row edited in at current: 5 is accepted (exit 0)" "0" "$RC"
+expect_eq "37f …the plan's sum the same across it, no line of its own written, its birth one born event in the run's log" "same|0|1" \
+  "$(s37)|$(/usr/bin/grep -c '^- T7: ' "$P37D")|$(/usr/bin/grep -c '|ev=born|row=T7|' "$L37D")"
+poke "$R37D" task-add T9; expect_eq "37g a row the plan does not hold is refused in its own words, nothing born" "1|holds no row T9|0" "$RC|$(printf '%s' "$OUT" | /usr/bin/grep -o 'holds no row T9')|$(/usr/bin/grep -c '|ev=born|row=T9|' "$L37D")"
+ta_add "$R37D" T8 5 verify 'Verify the fixture. The floor runs once.' bionic:test-runner — 30 REQ-5 '—'
+expect_eq "37h a verify row whose Files name no record is short: refused with the line it would accept, the plan the same, nothing born" "1|is short|same|0" \
+  "$RC|$(printf '%s' "$OUT" | /usr/bin/grep -o 'is short')|$(s37)|$(/usr/bin/grep -c '|ev=born|row=T8|' "$L37D")"
+S37_LINE="$(printf '%s\n' "$OUT" | /usr/bin/grep '^| T8 |')"; ta_put "$P37D" "$S37_LINE"; poke "$R37D" task-add T8
+expect_eq "37i its own printed line pasted in, the verb accepts it with no further edit" "0|T8.md|1" "$RC|$(printf '%s' "$S37_LINE" | /usr/bin/grep -o 'T8\.md' | head -1)|$(/usr/bin/grep -c '|ev=born|row=T8|' "$L37D")"
 POKE_BOUND="$S37_BOUND_WAS"
 
 
@@ -329,7 +335,7 @@ section "Section 39: the tick lints the ledger — poker: LEDGER <id> <finding> 
 # ============================================================
 #
 # THE SAME READER THE GATE ASKS. `units_findings` names every ledger defect — a status off
-# the enum, a landed row with no `- T<n>:` line, an active row whose agent cell names no row
+# the enum, a landed row the reader does not answer landed, an active row whose agent cell names no row
 # on this session's roster — and the tick prints each one, every interval, as
 # `poker: LEDGER <id> <kind> [<value>]`, after the HELD lines and before the FILL line. The
 # finding reaches the orchestrator, who owns the ledger, before a writer's commit meets it.
@@ -344,13 +350,13 @@ P39A="$(sp_plan_at_step "$R39A" 4 \
   "| T6 | 4 | build | waits on CI | implementor | T1, ext:ci-6 | 15m | REQ-x | f.sh | pending |" \
   "| T7 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | g.sh | pending |")"
 poke_pressure "$R39A" 8192 1.0 tick
-expect_contains "39a AC-4.2 a landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_absent "39a AC-4.2 a landed row with no line, which the reader answers landed, ticks no LEDGER line" "poker: LEDGER T1" "$OUT"
 expect_contains "39b …an active row whose agent is not on the roster ticks a launch line, naming the cell" \
   "poker: LEDGER T3 launch implementor" "$OUT"
 expect_contains "39c …a status off the enum ticks a status line, naming the value" "poker: LEDGER T4 status doing" "$OUT"
 expect_absent "39d …the launched active row is not a finding" "poker: LEDGER T2" "$OUT"
 expect_absent "39e …nor is the self-owned one" "poker: LEDGER T5" "$OUT"
-expect_eq "39f …exactly three LEDGER lines" "3" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: LEDGER ')"
+expect_eq "39f …exactly two LEDGER lines" "2" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: LEDGER ')"
 S39_HELD="$(s38_line_no 'poker: HELD ')"; S39_LEDGER="$(s38_line_no 'poker: LEDGER ')"; S39_FILL="$(s38_line_no 'poker: FILL ')"
 expect_true "39g …and the LEDGER lines sit after the HELD line and before the FILL line (held=$S39_HELD ledger=$S39_LEDGER fill=$S39_FILL)" \
   test "$S39_HELD" -gt 0 -a "$S39_LEDGER" -gt "$S39_HELD" -a "$S39_FILL" -gt "$S39_LEDGER"
@@ -405,12 +411,12 @@ export CLAUDE_CONFIG_DIR="$S40_CFG"
 R40A="$(make_repo s40-no-roster)"
 poke "$R40A" arm
 sp_plan_at_step "$R40A" 4 \
-  "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
-  "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40a | 15m | REQ-x | b.sh | pending |" \
+  "| T1 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | a.sh | doing |" \
+  "| T2 | 4 | build | waits on CI | implementor | ext:ci-40a | 15m | REQ-x | b.sh | pending |" \
   "| T3 | 4 | build | active, agent-named, no line | w-T3 | — | 15m | REQ-x | c.sh | active |" > /dev/null
 poke_pressure "$R40A" 8192 1.0 tick
 expect_contains "40a AC-3.3 the first tick prints the ext:-held row's HELD line" "poker: HELD T2 ext:ci-40a" "$OUT"
-expect_contains "40a2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_contains "40a2 AC-4.2 …and the row off the enum ticks a LEDGER line" "poker: LEDGER T1 status doing" "$OUT"
 expect_contains "40a3 AC-4.1 …and the agent-named active row owes its line, as the gate's no-roster rule says" \
   "poker: LEDGER T3 evidence" "$OUT"
 expect_eq "40a4 …each HELD line once" "1" "$(s40_count 'poker: HELD ')"
@@ -424,13 +430,13 @@ expect_true "40a6 …after the gate line and before the QUIET line (gate=$S40_RU
 # the lint still runs: a busy machine has nothing to do with the ledger.
 R40B="$(make_repo s40-hold)"; new_roster "$R40B"
 sp_plan_at_step "$R40B" 4 \
-  "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
-  "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40b | 15m | REQ-x | b.sh | pending |" \
-  "| T3 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | c.sh | pending |" > /dev/null
+  "| T1 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | a.sh | doing |" \
+  "| T2 | 4 | build | waits on CI | implementor | ext:ci-40b | 15m | REQ-x | b.sh | pending |" \
+  "| T3 | 4 | build | ordinary, ready | implementor | — | 15m | REQ-x | c.sh | pending |" > /dev/null
 BIONIC_PROBE_BUSY_CORES_5M=7.0 poke "$R40B" tick
 expect_absent "40b precondition: …and fills nothing" "poker: FILL" "$OUT"
 expect_contains "40b AC-3.3 with no room the ext:-held row prints its HELD line" "poker: HELD T2 ext:ci-40b" "$OUT"
-expect_contains "40b2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_contains "40b2 AC-4.2 …and the row off the enum ticks a LEDGER line" "poker: LEDGER T1 status doing" "$OUT"
 expect_eq "40b3 …HELD once" "1" "$(s40_count 'poker: HELD ')"
 expect_eq "40b4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 S40_RUNG="$(s38_line_no 'poker: gate share=')"; S40_HELD="$(s38_line_no 'poker: HELD ')"
@@ -446,12 +452,12 @@ expect_eq "40b8 …and LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 # 40c — OVER THE SHARE: the same pair with memory used past the share.
 R40C="$(make_repo s40-emergency)"; new_roster "$R40C"
 sp_plan_at_step "$R40C" 4 \
-  "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
-  "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40c | 15m | REQ-x | b.sh | pending |" > /dev/null
+  "| T1 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | a.sh | doing |" \
+  "| T2 | 4 | build | waits on CI | implementor | ext:ci-40c | 15m | REQ-x | b.sh | pending |" > /dev/null
 BIONIC_PROBE_USED_PCT=90 poke "$R40C" tick
 expect_contains "40c precondition: the tick is over the share" "poker: over share — used=90% admitted: none" "$OUT"
 expect_contains "40c AC-3.3 over the share the ext:-held row prints its HELD line" "poker: HELD T2 ext:ci-40c" "$OUT"
-expect_contains "40c2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_contains "40c2 AC-4.2 …and the row off the enum ticks a LEDGER line" "poker: LEDGER T1 status doing" "$OUT"
 expect_eq "40c3 …HELD once" "1" "$(s40_count 'poker: HELD ')"
 expect_eq "40c4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 
@@ -459,13 +465,13 @@ expect_eq "40c4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 # no-budget note — and the lint does not wait on a budget it has no use for.
 R40D="$(make_repo s40-no-budget)"; new_roster "$R40D"
 P40D="$(sp_plan_at_step "$R40D" 4 \
-  "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
-  "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40d | 15m | REQ-x | b.sh | pending |")"
+  "| T1 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | a.sh | doing |" \
+  "| T2 | 4 | build | waits on CI | implementor | ext:ci-40d | 15m | REQ-x | b.sh | pending |")"
 /usr/bin/grep -v '^parallel-budget:' "$P40D" > "$P40D.new" && mv "$P40D.new" "$P40D"
 poke_pressure "$R40D" 8192 1.0 tick
 expect_absent "40d precondition: the tick names no budget key on a plan with no line" "parallel-budget" "$OUT"
 expect_contains "40d AC-3.3 with no budget the ext:-held row prints its HELD line" "poker: HELD T2 ext:ci-40d" "$OUT"
-expect_contains "40d2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_contains "40d2 AC-4.2 …and the row off the enum ticks a LEDGER line" "poker: LEDGER T1 status doing" "$OUT"
 expect_eq "40d3 …HELD once" "1" "$(s40_count 'poker: HELD ')"
 expect_eq "40d4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 
@@ -477,8 +483,8 @@ expect_eq "40d4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 R40E="$(make_repo s40-disarm)"; new_roster "$R40E"
 armed_ago "$R40E"
 P40E="$(sp_plan_at_step "$R40E" 9 \
-  "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
-  "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-40e | 15m | REQ-x | b.sh | pending |")"
+  "| T1 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | a.sh | doing |" \
+  "| T2 | 4 | build | waits on CI | implementor | ext:ci-40e | 15m | REQ-x | b.sh | pending |")"
 sed -e 's/^- Step 9: in progress$/- Step 9: delivered: bionic 9.9.9; report: record\/fixture\/close-out.md/' \
   "$P40E" > "$P40E.new" && mv "$P40E.new" "$P40E" && touch "$P40E"
 poke_pressure "$R40E" 8192 1.0 tick
@@ -486,7 +492,7 @@ expect_contains "40e precondition: the plan's Step-9 line records the delivery" 
   "- Step 9: delivered: bionic 9.9.9" "$(cat "$P40E")"
 expect_contains "40e precondition: …and the tick decides DISARM" "decision=DISARM" "$OUT"
 expect_contains "40e AC-3.3 the DISARM tick prints the ext:-held row's HELD line" "poker: HELD T2 ext:ci-40e" "$OUT"
-expect_contains "40e2 AC-4.2 …and the landed row with no line ticks a LEDGER line" "poker: LEDGER T1 evidence" "$OUT"
+expect_contains "40e2 AC-4.2 …and the row off the enum ticks a LEDGER line" "poker: LEDGER T1 status doing" "$OUT"
 expect_eq "40e3 …HELD once" "1" "$(s40_count 'poker: HELD ')"
 expect_eq "40e4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 S40_RUNG="$(s38_line_no 'poker: gate share=')"; S40_HELD="$(s38_line_no 'poker: HELD ')"
