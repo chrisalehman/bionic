@@ -1,7 +1,5 @@
 #!/bin/bash
 # tests/card.test.sh — payload/scripts/card.sh, THE CARD ROW RENDERER
-# (epic-23 wave-14-tune-181, T36; REQ-9 AC-9.1/AC-9.4; Chris 2026-09-15 "D4: I
-# want the wrapped version" / "option 1 - renderer script and cap at 110k").
 #
 # WHAT THIS SUITE IS FOR. Until this task the Step-1/2/3 cards were rendered by
 # the MODEL reading a printf format line written beside the card and padding the
@@ -388,8 +386,7 @@ trap card_cleanup EXIT
 # IT SETS GLOBALS AND PRINTS NOTHING, which is not a style choice: a helper
 # called as `X="$(whole_card …)"` runs in a SUBSHELL, so an exit status it
 # assigned there would never reach the assertion — every status row would read
-# the initialised 0 and pass no matter what the renderer did. Caught here at RED
-# (rows 42 and 63-66 passed against a renderer that has no step verbs at all).
+# the initialised 0 and pass no matter what the renderer did.
 WC_RC=0; WC_ERR=""; WC_OUT=""
 whole_card() {  # <verb> [artifact] — sets WC_OUT, WC_RC, WC_ERR
   WC_RC=0
