@@ -1,12 +1,7 @@
 #!/bin/bash
 # tests/close-out-1.test.sh — payload/scripts/close-out.sh, part 1 of 4: sections 0 through E2E.
 #
-# THE SUITE IS FOUR PARTS (wave-39 T6; D1, D13, REQ-3 AC-3.1). One close-out.test.sh promised more than the
-# suite bar, ten minutes of the gate's promise, so it runs as four suites cut at section boundaries. Its
-# governing design, its sandbox, and the fixture builders and helpers every part shares are in
-# tests/close-out.prelude.sh, sourced below after the framework.
-#
-# Usage: bash tests/close-out-1.test.sh
+# Four parts, so each stays under the suite bar; the sandbox, design and shared builders are in tests/close-out.prelude.sh.
 
 set -uo pipefail
 
@@ -38,11 +33,7 @@ run_close "$P0" "fly"
 expect_eq "0c: an unknown verb exits 2" "2" "$CO_RC"
 expect_eq "0d: …and says which verbs there are" "yes" "$(contains "$CO_OUT" "check")"
 
-# 0h–0m — REQ-6 (D5, ADR-032): the census is the REGISTER, never a name.
-# `working-branch:`'s shape decides nothing any more; a `## Tasks` row's `worktree`
-# cell does. This retires the old `wave/<digits>-<slug>` shape refusal (R6 finding 1
-# was the reason the shape existed, and the register has neither of its failure
-# modes: no consumer shape is ever refused, and no foreign branch is ever swept in).
+# The census is the register: a `## Tasks` row's `worktree` cell names a tree, `working-branch:`'s shape decides nothing.
 ROWS04="| T1 | 4 | build | fixture writer one | implementor | — | 10 | AC-1 | file.txt | active | 04-T1 |
 | T2 | 4 | build | fixture writer two | implementor | — | 10 | AC-1 | file.txt | active | 04-T2 |"
 
@@ -78,19 +69,9 @@ expect_eq "0m: …and says so by name, not silently" "yes" \
 # ============================================================
 section "0o — C4: no worktree column at all falls back to the pre-wave glob census"
 # ============================================================
-#
-# Critic C4's reproduction: a plan whose `## Tasks` table has NO `worktree` column at
-# all (every plan this repository shipped through wave-16; every consumer plan on 1.8.3)
-# yields an EMPTY register census, which silently turned `wt_unreached`'s refusal into a
-# no-op — the arm's whole job is to refuse, and an empty census means it never can. The
-# fix: when the table has no `worktree` column, `wt_unreached` falls back to the census
-# every `wt/*` branch this repository holds, announced once on stderr so the fallback is
-# never silent either way.
-
+# A table with no `worktree` column has an empty register, so `wt_unreached` falls back to the `wt/*` glob, announced,
+# and an unmerged wt/01-T1 is refused by name.
 # ROWS_NOWT: hoisted to tests/close-out.prelude.sh (a later part reads it)
-
-# 0o1-0o5: an unmerged wt/01-T1 (git cherry shows a `+` line against the working
-# branch) — today (unfixed) this passes silently; the fix must refuse and say so.
 P0O="$(mk_census_fixture_nowt p0o "wave/01-x" "$ROWS_NOWT")"; advance_to "$P0O" 8
 (
   in_fixture "$P0O" || exit 1
@@ -137,18 +118,8 @@ expect_eq "0p3: run proceeds — nothing in the fallback census carries unreache
 # ============================================================
 section "0q — C7: the column-less fallback is scoped to wt/<NN>-*, exactly as 1.8.3 was"
 # ============================================================
-#
-# Critic C7's reproduction: the fallback T24 shipped was `git for-each-ref 'refs/heads/wt/*'`
-# — every `wt/*` branch this repository holds, unscoped by wave number. On a column-less
-# plan (0o/0p's own shape) that means a DIFFERENT wave's leftover branch — one this task's
-# wave never spawned and never merged — could trip act 2's refusal, or (on 1.8.3, the
-# behaviour this restores) never could. Same fixture as 0p (own tree wt/01-T1 fully
-# merged, so nothing of THIS wave's is unreached) plus a foreign wave's leftover
-# (`wt/07-z`, cut from main, one unmerged commit — `add_foreign_unreached_branch`, whose
-# own contract at :272-275 is that this branch "must never see it: not refused on, not
-# deleted"). At 4e2ac66 (unfixed) this WOULD-REFUSEs and `run` refuses rc=2; at 72e07ec
-# (1.8.3) and after this fix, `wt/07-z` falls outside `wt/01-*` and is invisible.
-
+# 0p's fixture plus another wave's unmerged leftover, wt/07-z: it falls outside `wt/01-*`, so it is neither refused on
+# nor deleted.
 P0Q="$(mk_census_fixture_nowt p0q "wave/01-x" "$ROWS_NOWT")"; advance_to "$P0Q" 8
 (
   in_fixture "$P0Q" || exit 1
@@ -174,17 +145,8 @@ expect_eq "0q5: …wt/07-z survives — a foreign wave's tree is not this run's 
 # ============================================================
 section "0r — C7: a column-less WAVE-scale plan whose working-branch is not wave/<digits>-<slug> shaped refuses, as 1.8.3 did"
 # ============================================================
-#
-# 1.8.3 derived its ENTIRE census (there was no register) from `working-branch:`'s shape
-# and refused outright — before act 1, for both `check` and `run` — when no wave number
-# could be read off it (`git show 72e07ec:payload/scripts/close-out.sh:242-245`). ADR-032
-# retired that refusal for the register path (a `worktree` column names its own trees, no
-# wave number needed), but a column-less plan has no register to fall back on — it is
-# exactly 1.8.3's shape, and it must refuse exactly as 1.8.3 did rather than silently
-# reach for an unscoped repo-wide census (C7's own finding). That refusal is kept for a
-# `scale: wave` plan (this fixture's own scale — every fixture here is wave-scale); a
-# task-scale plan has no wave number to want, and §ANY-BRANCH below pins it closing.
-
+# A column-less wave-scale plan reads its census's wave number off `working-branch:`, so a branch with none refuses
+# before act 1 rather than reach for an unscoped census; a task-scale plan wants none (§ANY-BRANCH).
 P0R="$(mk_census_fixture_nowt p0r "topic/not-a-wave-branch" "$ROWS_NOWT")"; advance_to "$P0R" 8
 run_close "$P0R" check
 expect_eq "0r1: check refuses (1.8.3 refused before act 1, for either verb)" "2" "$CO_RC"
@@ -202,12 +164,7 @@ expect_eq "0s1: a registered table with the same branch shape is never refused f
 # ============================================================
 section "ANY-BRANCH — T11 (AC-9.2): a column-less TASK-scale plan closes on any working-branch"
 # ============================================================
-#
-# A small late fix lives on a branch like `fixit/x`, never `wave/<digits>-<slug>`. A task-
-# scale plan owns no wave, so there is no `wt/<NN>-*` to census and no wave number to
-# refuse for lacking: the shape refusal is a wave-scale rule only. `wt_unreached` finds no
-# branch to report and says nothing about a `wt/-*` glob.
-
+# A task-scale plan owns no wave, so no `wt/<NN>-*` census and no wave number to refuse for lacking.
 mk_task_scale_fixture() {
   local name="$1" working="$2" p
   p="$(mk_census_fixture_nowt "$name" "$working" "$ROWS_NOWT")"; advance_to "$p" 8
@@ -235,11 +192,8 @@ run_close "$PAB" run
 expect_eq "AB4: run on fixit/x closes with rc 0" "0" "$CO_RC"
 expect_eq "AB5: …prints no shape refusal" "no" "$(contains "$CO_OUT" "shaped")"
 
-# THE INTEGRATE ACT IS THE SCALE'S CELL (wave-38 T16; D25, AC-5.1). The task row's branch cell is
-# `any` and its integrate cell `pr`: a task-scale plan on `fix/x`, NOT merged, closes; close-out
-# merges nothing, prints the `gh pr create` command for the working branch against the
-# integration branch and records it in the continuation. It never runs it. The wave-scale pair
-# (0r above) still refuses a branch outside its `wave/<NN>-<slug>` cell.
+# The integrate act is the scale's cell: at task scale, `pr`, so an unmerged fix/x closes, merging nothing, and the
+# `gh pr create` command is printed and recorded, never run.
 # mk_task_pr_fixture: hoisted to tests/close-out.prelude.sh (a later part reads it)
 PPR="$(mk_task_pr_fixture ppr "fix/x")"
 PPR_MAIN="$(git -C "$PPR" rev-parse main)"
@@ -369,12 +323,8 @@ run_close "$P2" run
 expect_eq "2h: with wt/01-y gone the run exits 0" "0" "$CO_RC"
 expect_eq "2i: …and the fully reachable wt/01-x is deleted" "no" "$(branch_exists "$P2" "wt/01-x")"
 
-# 2j–2o — REQ-6 (D5, ADR-032): the census is MEMBERSHIP BY RECORD. A DIFFERENT
-# wave's leftover branch (`wt/07-z`, carrying a commit `main` never took) is outside
-# that record entirely — no row of this plan names it — so `run` must not refuse on
-# it or delete it, and `check`'s report line must name only the registered tree this
-# plan actually holds (`wt/01-x`; `wt/01-y`'s row is registered too, but that branch
-# does not exist yet in this fixture).
+# Membership by record: another wave's unmerged wt/07-z is named by no row, so it is neither refused on nor deleted,
+# and check names only the registered tree that exists (wt/01-x; wt/01-y's branch is not made here).
 P2F="$(mk_fixture p2f)"; advance_to "$P2F" 8
 add_foreign_unreached_branch "$P2F"
 run_close "$P2F" check
@@ -415,13 +365,7 @@ expect_eq "4j: wt/01-x still exists" "yes" "$(branch_exists "$P4" "wt/01-x")"
 # ============================================================
 section "4c — critic3 P-1 (T17): run asks the gate first; check and run agree"
 # ============================================================
-# `run` used to perform acts 1–6 (branch sweep, tmp wipe, continuation, epic row) and only
-# then ask the gate, so a refusal the Step-8 block cannot clear left a half-closed run: the
-# branches and this session's tmp state gone, the continuation and epic row written. And
-# `check` printed one sentence for every refusal ("the Step-8 block run writes is what
-# clears it"), so it could not say which outcome `run` would reach. Now both verbs ask the
-# real gate about the plan itself, with the facts the close's acts will write pending in its
-# own dry session; `run` touches nothing until that pre-flight passes.
+# Both verbs ask the real gate first, the close's facts pending, so a refusal leaves no half-closed run.
 P18="$(mk_fixture p18)"; advance_to "$P18" 8
 rm -f "$P18/.bionic/docs/record/generic-evidence.md"
 PLAN18_SHA="$(sha_of "$P18/$PLAN_REL")"
@@ -445,7 +389,6 @@ expect_eq "4ac: …the plan is byte-for-byte what it was" "$PLAN18_SHA" "$(sha_o
 # The control: the same fixture with its evidence. check says the gate allows the plan run
 # would write, and run then performs the tail as §1 does.
 P19="$(mk_fixture p19)"; advance_to "$P19" 8
-run_close "$P19" check
 run_close "$P19" run
 expect_eq "4af: …and run on it exits 0" "0" "$CO_RC"
 expect_eq "4ah: …and the attestation after step 8's event, as before" "yes" "$(contains "$CO_OUT" "gate: ok")"
@@ -453,9 +396,7 @@ expect_eq "4ah: …and the attestation after step 8's event, as before" "yes" "$
 # ============================================================
 section "4d — critic3 P-3 (T17): run refuses unless the plan reads current: 8"
 # ============================================================
-# Nothing read `current:` before phase 9 wrote `current: 9`, so the dry-run judged whatever
-# step the plan named and the refusal blamed the blocks run wrote. A plan below Step 8 is
-# refused by name, before anything is touched; check reports the same verdict.
+# A plan below Step 8 is refused by name, before anything is touched.
 for _co_cur in 7 4; do
   P20="$(mk_fixture "p20-$_co_cur")"
   advance_to "$P20" "$_co_cur"
@@ -476,11 +417,7 @@ done
 # ============================================================
 section "4e — critic4 Q-1 (T19), wave-27 T4 (D14, B2): a plan with no Step 9 line closes; the wave table is still a presence check"
 # ============================================================
-# `run` used to delete branches, wipe tmp and write the continuation and epic row, and only
-# then refuse for a plan with no `- Step 9:` line or an epic plan with no `| wave |` table.
-# Both became presence checks before the first act. The first one is gone: a plan reaches
-# close-out with no Step 9 line, and the delivery is the step's event, so the plan is left as
-# it was, closed or refused.
+# The delivery is the step's event, so a plan with no Step 9 line closes and is left as it was, closed or refused.
 # presence_state: hoisted to tests/close-out.prelude.sh (a later part reads it)
 # step_lines: hoisted to tests/close-out.prelude.sh (a later part reads it)
 TA="$(mk_fixture t19a)"; advance_to "$TA" 8
@@ -513,8 +450,6 @@ expect_eq "q1.6f: …its hand-written line left as it was, the run read delivere
 
 TB="$(mk_fixture t19b)"; advance_to "$TB" 8
 printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# epic-fx\n\n## SDLC State\n\ncurrent: 4\n\n## Notes\n\nNo waves table yet.\n' > "$TB/$EPIC_REL"
-PRE_B="$(presence_state "$TB")"; PLAN_B_SHA="$(sha_of "$TB/$PLAN_REL")"; EPIC_B_SHA="$(sha_of "$TB/$EPIC_REL")"
-# wave-38 T15 (AC-4.4; D17): a missing shipped table is added, header first, never refused.
 run_close "$TB" check
 expect_eq "q1.7: check no longer refuses the missing wave table" "no" "$(contains "$CO_OUT" "WOULD REFUSE — no | wave | table")"
 run_close "$TB" run
@@ -531,11 +466,7 @@ expect_eq "q1.14: run on the valid fixture still succeeds" "0" "$CO_RC"
 # ============================================================
 section "VER — wave-27 T4 (AC-7.2, D14, B3): the released version is the run's, never the tool's"
 # ============================================================
-# `VERSION` is the INSTALLED bionic's (`plugin_root`'s plugin.json). It is what attests, and
-# it used to be what the delivered line, the epic row and the continuation header called the
-# release too — wave-26 corrected two of them by hand. The release is the plan's own
-# `release:` field now, and with no field no version is written. The tool here is THIS
-# checkout's payload (run_close pins BIONIC_PLUGIN_ROOT), read the way co_version reads it.
+# The tool's version attests; the release written is the plan's `release:`, and none when it names none.
 TOOLV="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/payload/.claude-plugin/plugin.json" | head -1)"
 RELV="7.7.7-fixture"
 expect_nonempty "VER0: the tool's version reads from its manifest" "$TOOLV"
@@ -575,16 +506,7 @@ expect_eq "VER17: …with no version in it" "no" "$(contains "$(head -1 "$PV2/$C
 # ============================================================
 section "E2E — wave-27 T4 (AC-7.1 close-out half, D14, B1): from Step 7 with no Step 9 line, the tools close the run"
 # ============================================================
-# The target, AC-7.1: no hand edit. The real `session-poker.sh current 8` moves the plan,
-# then `close-out.sh run` delivers. The session is bound to the plan the way engagement binds
-# it (tests/lib/bound-marker.sh, the one bound-marker builder).
-#
-# RE-AUTHORED BY wave-27 T14 from T4's pin of the refusal (A-T4.1). The verb no longer
-# dry-commits the plan at Step 8, where the gate asked for the Step-8 block only close-out
-# writes; it asks lib/proof.sh `facts_state` at the working head instead (D3). `mk_fixture`
-# holds what a run at Step 7 owes there (`plant_facts`: at `rigor: single`, `scale: wave`, the
-# floor and the critic's three questions at piece scope and two at whole scope), so `current 8`
-# moves the plan and `close-out.sh run` then delivers, with no hand edit.
+# No hand edit: the real `current 8`, admitted on the facts `plant_facts` holds, then `close-out.sh run` delivers.
 PE="$(mk_fixture e2e)"
 E2E_SID="closeout-e2e-1"
 expect_eq "E2E0: precondition: the fixture is at current: 7 with no Step 8 block written and no Step 9 line" "7/0" \
@@ -621,8 +543,6 @@ run_close "$PF" run
 expect_eq "E2E9: run refuses (rc 2)" "2" "$CO_RC"
 expect_eq "E2E11: …the plan untouched and wt/01-x still standing (nothing was done)" "$PF_SHA/yes" \
   "$(sha_of "$PF/$PLAN_REL")/$(branch_exists "$PF" wt/01-x)"
-PG="$(mk_fixture e2e-holds)"; advance_to "$PG" 8
-run_close "$PG" check
 
 # A RELEASE THAT WOULD SPLIT A CELL (A-orch-28): a `|` in `release:` is refused before any act.
 PR="$(mk_fixture e2e-pipe)"; advance_to "$PR" 8
@@ -645,13 +565,8 @@ expect_eq "E2E18: …and the close that delivers releases it" "0|closed" "$CO_RC
 # ============================================================
 section "BRANCH-AGREE — wave-39 T16 (D18; AC-12.1): one reader of the integration branch; close-out's check and closed-form name one branch"
 # ============================================================
-# Two orders stood: close-out's check and run read ## SDLC State alone and refused a plan whose frontmatter alone named
-# the branch, its closed-form fell back to the frontmatter, and the handoff verb read the frontmatter first
-# (critic-structure-2; debt integration-branch-reader). D18 rules ## SDLC State first, the frontmatter as the fallback,
-# and lib/plan.sh `plan_integration_branch` is that one reader. Here close-out's two doors are asked on one plan: `check`
-# (its merge verdict) and `closed-form` (the branch line), then card.sh's Step-0 card and the gate's merge-target check. handoff-file.test.sh §BRANCH-AGREE asks the handoff verb and
-# close-out on one plan in the verb's own world: this fixture is close-out's, and the verb's dry commit through the
-# real gate is judged there at a worktree row's Step 4, a plan shape this suite does not build.
+# One reader, lib/plan.sh `plan_integration_branch`: ## SDLC State first, the frontmatter as the fallback, asked of
+# close-out's check and closed-form, the Step-0 card and the gate on one plan (handoff-file.test.sh asks the verb's).
 # FIXTURE FIDELITY: mk_fixture's plan at Step 7, as a run that has not closed holds it (check reads it as a diagnosis,
 # its step refusal one line among the rest), naming `integration-branch: main` under ## SDLC State as Step 0 writes
 # it, with the frontmatter key a Step-0 plan also carries; `trunk` is a real branch at the seed, so both values name
@@ -710,5 +625,54 @@ printf '%s\n' 'v="$(plan_frontmatter_get "$p" integration-branch)"' > "$BAT/hook
 expect_eq "BA5 the grep finds the planted reader and lib/plan.sh's, nothing else" "hooks/planted.sh:1 payload/scripts/lib/plan.sh:2" \
   "$( (cd "$BAT" && /usr/bin/grep -rn 'integration-branch' hooks payload) | /usr/bin/grep -vE '^[^:]+:[0-9]+:[[:space:]]*#|(die|usage|_co_refuse|log_finding)( [a-z-]+)? "' \
      | cut -d: -f1 | uniq -c | awk '{ print $2 ":" $1 }' | LC_ALL=C sort | paste -sd' ' -)"
+
+# ============================================================
+section "DEPLOY — a run that names a deploy target is delivered only with what was deployed, verified and monitored"
+# ============================================================
+dp_fixture() {  # <name> <deploy target> -> a fixture at step 8 whose plan names that target
+  local p; p="$(mk_fixture "$1")"; advance_to "$p" 8
+  sed "s|^deploy_target: n/a\$|deploy_target: $2|" "$p/$PLAN_REL" > "$p/$PLAN_REL.d" && mv "$p/$PLAN_REL.d" "$p/$PLAN_REL"
+  printf '%s\n' "$p"
+}
+dp_close() {  # <project> <verb> [<option> <value>]... -> CO_OUT and CO_RC, as run_close with the options after the verb
+  local proj="$1" verb="$2" f="$SANDBOX/co-out"; shift 2
+  ( in_fixture "$proj" || exit 9
+    HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+      bash "$SCRIPT" "$proj/$PLAN_REL" "$verb" "$@" ) > "$f" 2>&1
+  CO_RC=$?; CO_OUT="$(cat "$f")"; rm -f "$f"
+}
+dp_events() { awk -F'|' '{ print $2 }' "$1/$LOG_REL" | LC_ALL=C sort -u | paste -sd' ' -; }
+DP_GIVE=(--deployed "build 7 to vercel production" --verified "the smoke walk passed on the live URL" --monitored "uptime pages on a 5xx")
+PDN="$(dp_fixture dp-none "vercel production")"
+expect_eq "DP0: the fixture's plan names its target" "vercel production" "$(sed -n 's/^deploy_target: //p' "$PDN/$PLAN_REL")"
+PDN_SUM="$(sha_of "$PDN/$PLAN_REL")"
+dp_close "$PDN" check
+expect_eq "DP3: check says the close would refuse, naming the three options, and changes nothing" "0|yes|yes|yes|yes|$PDN_SUM|3" \
+  "$CO_RC|$(contains "$CO_OUT" "deploy: WOULD REFUSE")|$(contains "$CO_OUT" "--deployed '<")|$(contains "$CO_OUT" "--verified '<")|$(contains "$CO_OUT" "--monitored '<")|$(sha_of "$PDN/$PLAN_REL")|$(tmp_entries "$PDN")"
+run_close "$PDN" run
+expect_eq "DP1: given none of the three, the close refuses and the run stays open at 8" "2|n=8|state=open" \
+  "$CO_RC|$(co_step_answer "$PDN" | sed -n 1p)|$(co_step_answer "$PDN" | tail -1)"
+expect_eq "DP2: …before its first act, naming each option: no merge line, wt/01-x and the tmp entries stand" "yes|yes|yes|no|yes|3" \
+  "$(contains "$CO_OUT" "--deployed '<")|$(contains "$CO_OUT" "--verified '<")|$(contains "$CO_OUT" "--monitored '<")|$(contains "$CO_OUT" "merge: ")|$(branch_exists "$PDN" wt/01-x)|$(tmp_entries "$PDN")"
+dp_close "$PDN" run --deployed TBD --verified " " --monitored "uptime pages on a 5xx"
+expect_eq "DP4: a placeholder the gate bans and an empty word are refused by name, the given one is not" "2|yes|yes|no" \
+  "$CO_RC|$(contains "$CO_OUT" "deployed, whose 'TBD' is a placeholder")|$(contains "$CO_OUT" "verified (--verified")|$(contains "$CO_OUT" "monitored (--monitored")"
+dp_close "$PDN" run "${DP_GIVE[@]}"
+DP_A="$(co_step_answer "$PDN")"
+expect_eq "DP5: given, the three stand on the delivery's step after the whole close, the archive's restatement kept them" "0|yes|yes|yes|yes|state=delivered" \
+  "$CO_RC|$(contains "$DP_A" "deployed=build 7 to vercel production")|$(contains "$DP_A" "verified=the smoke walk passed on the live URL")|$(contains "$DP_A" "monitored=uptime pages on a 5xx")|$(contains "$DP_A" "archived=bionic: archive")|$(printf '%s\n' "$DP_A" | tail -1)"
+expect_eq "DP6: …and both of the delivery's events carry them, the first the one that delivers" "2|2" \
+  "$(grep -c '|ev=step|n=9|' "$PDN/$LOG_REL")|$(grep '|ev=step|n=9|' "$PDN/$LOG_REL" | grep -c '|deployed=build 7 to vercel production|verified=the smoke walk passed on the live URL|monitored=uptime pages on a 5xx|')"
+PDO="$(mk_fixture dp-off)"; advance_to "$PDO" 8
+dp_close "$PDO" run --deployed "build 7"
+expect_eq "DP7: a run naming no target is refused the words, with nothing done" "2|yes|yes|n=8" \
+  "$CO_RC|$(contains "$CO_OUT" "names no deploy target")|$(branch_exists "$PDO" wt/01-x)|$(co_step_answer "$PDO" | sed -n 1p)"
+dp_close "$PDO" check
+DP_CK="$CO_OUT"
+run_close "$PDO" run
+expect_eq "DP8: …given none, check owes none and run closes as before, no deploy on its step" "yes|0|yes|no" \
+  "$(contains "$DP_CK" "deploy: none owed")|$CO_RC|$(contains "$(co_step_answer "$PDO")" "delivered=")|$(contains "$(co_step_answer "$PDO")" "deployed=")"
+expect_eq "DP9: the deploy writes no new event type: both closes leave the same set" "$(dp_events "$PDO")" "$(dp_events "$PDN")"
+expect_nonempty "DP9b: …and the set is read" "$(dp_events "$PDN")"
 
 finish
