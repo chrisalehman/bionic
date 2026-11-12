@@ -16,7 +16,7 @@
 #
 # FIXTURE FIDELITY (the rule of that name, .claude/rules/test-harness.md). The engagement and
 # close-out roots are SYNTHESIZED: a plan carrying only the keys its reader asks (`scale:`, and
-# for close-out `## SDLC State` with the two branches and `current: 8`), in a real git
+# for close-out the two branches in its header and its log at step 8), each a page at 15, in a real git
 # repository for close-out. The dispatch fixtures are the wall's own shards' (make_repo and the
 # roster rows of tests/dispatch-preflight.prelude.sh), with the plan's `scale:` line rewritten
 # and the Patrol stamp make_repo plants removed, so the wall reads the cell, not the fixture.
@@ -39,7 +39,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/swept-marker.sh"
 # The dispatch wall's fixtures (make_repo, run_gate, the roster rows) and the sandbox with its
 # cleanup trap: §TASK drives the real wall through the same builders its own shards use.
-. "$(dirname "$0")/dispatch-preflight.prelude.sh"
+MAKE_REPO_AT=15; . "$(dirname "$0")/dispatch-preflight.prelude.sh"
 
 SP_REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 SP_LIB="$SP_REPO/payload/scripts/lib"
@@ -97,8 +97,9 @@ sp_engage_root() {  # <name> <scale> -> root holding one fresh open plan at that
   local r p
   mkdir -p "$SANDBOX/engage-$1/.bionic/tmp" "$SANDBOX/engage-$1/.bionic/docs/plans"
   r="$(cd "$SANDBOX/engage-$1" && pwd -P)"
-  p="$r/.bionic/docs/plans/$1.plan.md"
-  printf -- '---\ncanonical_sdlc_version: 14\nscale: %s\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: tasks in flight\n' "$2" > "$p"
+  p="$r/.bionic/docs/plans/$1.plan.md"; mkdir -p "$r/.bionic/docs/record/$1"
+  printf -- '---\ncanonical_sdlc_version: 15\nscale: %s\n---\n' "$2" > "$p"
+  printf 'run/v1|ev=step|n=4|at=2026-10-04T00:00:00Z\n' > "$r/.bionic/docs/record/$1/run.log"
   printf '%s' "$r"
 }
 sp_engage() {  # <sid> <root>
@@ -191,8 +192,9 @@ sp_co_root() {  # <name> <scale> -> a repository with main and an unmerged fix/x
     git checkout -qb fix/x; echo b >> f.txt; git commit -qam fix; git checkout -q main
   ) >/dev/null 2>&1
   p="$d/.bionic/docs/plans/epic-99-test/fix-x.plan.md"
-  mkdir -p "${p%/*}" "$d/.bionic/tmp"
-  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\nrigor: single\nscale: %s\n---\n\n# Fix x\n\n## SDLC State\n\nintegration-branch: main\nworking-branch: fix/x\ncurrent: 8\n' "$2" > "$p"
+  mkdir -p "${p%/*}" "$d/.bionic/tmp" "$d/.bionic/docs/record/fix-x"
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nintent: bugfix\nrigor: single\nscale: %s\nintegration-branch: main\nworking-branch: fix/x\n---\n\n# Fix x\n' "$2" > "$p"
+  printf 'run/v1|ev=step|n=8|at=2026-10-04T00:00:00Z\n' > "$d/.bionic/docs/record/fix-x/run.log"
   printf '%s' "$d"
 }
 SP_CT="$(sp_co_root task task)"
