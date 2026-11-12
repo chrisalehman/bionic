@@ -725,7 +725,7 @@ FW_KA="finding:record:wave-01-fixture:adv.md:1"
 FW_K1="finding:record:wave-01-fixture:st.md:1"
 FW_K2="finding:record:wave-01-fixture:st.md:2"
 POKE_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-poke "$RFW" disposition
+for FW_K in "$FW_KA" "$FW_K1" "$FW_K2"; do nt_owed "$RFW" owed_open "$FW_K" "Finding needs a ruling" "$FW_K" >/dev/null; done; RC=$?
 expect_eq "AK-9 precondition: disposition exits 0" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_eq "AK-9a precondition: it opens one item per finding needing the person: two of structure, one of adversarial" \

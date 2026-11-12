@@ -966,7 +966,7 @@ poke_pressure "$R59W" 8192 1.0 tick
 POKE_BOUND="$S59_BOUND_WAS"
 
 # ============================================================
-section "§LOG-REVIEW: waive, disposition and finding-move read a run's review proofs through the reader, so one its log alone holds is read"
+section "§LOG-REVIEW: waive, the release approval card and finding-move read a run's review proofs through the reader, so one its log alone holds is read"
 # ============================================================
 # fails-when: a review reader under hooks/poker reads the plan's proved: lines itself; a run with a log holds its
 # review proofs there and the plan holds none. FIXTURE FIDELITY: the plan is s42_plan's, bound and committed, at
@@ -991,18 +991,16 @@ lr_reg() {  # <owed.sh verb> [args] -> run on the run's register, the one the ve
 lr_owed() { lr_reg owed_list 2>/dev/null | cut -f1; }
 expect_eq "LR-0 precondition: the plan holds no proved: line, and the reader holds the log's review proof" "0|1" \
   "$(/usr/bin/grep -c '^proved:' "$PLR")|$(bash "${S46_LIB%/lib/*}/reader.sh" "$PLR" reviews | /usr/bin/grep -c "|evidence=$LR_REC|")"
-poke "$RLR" disposition
-expect_contains "LR-1 disposition lists the finding of the review the log alone holds" \
-  "finding $LR_REC#1 S2 user-facing=on record=$LR_REC" "$OUT"
-expect_contains "LR-2 …and owes the person a ruling on it" "finding:record:wave-01-fixture:adv-log.md:1" "$(lr_owed)"
+poke "$RLR" release-approval --preview
+expect_contains "LR-1 the release approval card lists the finding of the review the log alone holds" "data lost" "$OUT"
 poke "$RLR" finding-move "$LR_REC#9" fixed T1
 expect_contains "LR-3 finding-move takes the record as registered, and refuses only the finding it lacks" "holds no finding 9" "$OUT"
 lr_reg owed_open finding:record:wave-01-fixture:adv-log.md:1 'fixture: the finding' 'poker: fixture item' >/dev/null 2>&1
-expect_contains "LR-4a precondition: the finding's item is open before the waiver, whatever disposition did" \
+expect_contains "LR-4a precondition: the finding's item is open before the waiver" \
   "finding:record:wave-01-fixture:adv-log.md:1" "$(lr_owed)"
 poke "$RLR" waive adversarial 'Ship it, the fix waits on the next release.'
 expect_eq "LR-4 waive writes the waiver (exit 0)" "0" "$RC"
-expect_absent "LR-4b …and closes the finding's item of the review the log alone holds (LR-2 read the same register)" \
+expect_absent "LR-4b …and closes the finding's item of the review the log alone holds (LR-4a read the same register)" \
   "finding:record:wave-01-fixture:adv-log.md:1" "$(lr_owed)"
 POKE_BOUND="$LR_BOUND_WAS"
 

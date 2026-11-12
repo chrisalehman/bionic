@@ -528,10 +528,10 @@ POKER_SCRIPT="${HOOK_DIR}/session-poker.sh"
 # refuse, where `30m` and `30 minutes` both parse.
 #
 # Only the STALENESS arm needs a number. An absent stamp is absent at every interval, so
-# that arm runs unconditionally now. For staleness, an unreadable config falls back to the
-# poker's own POKER_INTERVAL_DEFAULT — asked for through its read-only `interval-default`
-# verb rather than retyped here, because two copies of that constant drift the first time
-# either moves and the gate would then be measuring against a threshold nobody configured.
+# that arm runs unconditionally now. For staleness, an unreadable config falls back to
+# lib/patrol.sh's PATROL_INTERVAL_DEFAULT, the constant the poker takes its own default
+# from, never a number retyped here, which would drift the first time either moved and
+# leave the gate measuring against a threshold nobody configured.
 PATROL_INTERVAL=""
 PATROL_INTERVAL_SOURCE=configured
 if [ -f "$POKER_SCRIPT" ]; then
@@ -540,10 +540,7 @@ if [ -f "$POKER_SCRIPT" ]; then
     ''|*[!0-9]*) PATROL_INTERVAL="" ;;
   esac
   if [ -z "$PATROL_INTERVAL" ] || [ "$PATROL_INTERVAL" -le 0 ]; then
-    PATROL_INTERVAL=$( bash "$POKER_SCRIPT" interval-default 2>/dev/null )
-    case "$PATROL_INTERVAL" in
-      ''|*[!0-9]*) PATROL_INTERVAL="" ;;
-    esac
+    PATROL_INTERVAL="${PATROL_INTERVAL_DEFAULT:-}"
     PATROL_INTERVAL_SOURCE=default
     echo "dispatch-preflight: the Patrol interval could not be read from this project's config — interval unreadable, wall ran at default (${PATROL_INTERVAL:-none}s)." >&2
   fi

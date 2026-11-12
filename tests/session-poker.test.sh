@@ -93,43 +93,23 @@ printf 'poker-interval: not-a-duration\n' > "$R2/.bionic/config.yaml"
 poke "$R2" interval
 expect_eq "a malformed override REFUSES rather than silently defaulting (exit 2)" "2" "$RC"
 
-# ---------- interval-default: the constant, with the config taken out of the question ----------
+# ---------- the default: the Patrol library's one constant ----------
 #
-# ADDED FOR THE ARMING WALL (critic C-2, W5). `interval` above is right to refuse a
-# malformed override — that is this repo's posture everywhere a prose value is read. But
-# hooks/dispatch-preflight.sh has to measure staleness even then, because `.bionic/config.yaml`
-# is machine-local and agent-writable and one bad line there must not be able to disarm a
-# wall. Rather than retype 1200 in the gate — two copies of a constant that drift the first
-# time either moves — the gate asks this verb.
-#
-# THE PROPERTY THAT MATTERS TO ITS CALLER is that the config cannot change the answer, so
-# every arm below is driven ON TOP of a config the `interval` verb refuses or overrides.
-poke "$R2" interval-default
-expect_eq "interval-default answers 0 even though the live config is malformed" "0" "$RC"
-expect_eq "…with this script's own default, in seconds (20m = 1200s)" "1200" "$OUT"
-
-printf 'poker-interval: 5m\n' > "$R2/.bionic/config.yaml"
-poke "$R2" interval-default
-expect_eq "…and a perfectly VALID override does not move it either" "1200" "$OUT"
-poke "$R2" interval
-expect_eq "…while interval, on the same repo, still reads that override (5m = 300s)" "300" "$OUT"
-
-# The gate's fallback is only worth having if it tracks the constant. Mutation-proof: move
-# POKER_INTERVAL_DEFAULT on a copy and the verb has to move with it — a verb that printed a
-# literal 1200 would answer 1200 here.
-# THE DOCTORED COPY LIVES IN A TREE, not in a bare temp directory (bionic 1.4.0). The poker
-# loads its library through the shared idiom, whose first candidate is `<dirname $0>/../
-# scripts/lib` — the shape the installed plugin ships. A copy dropped anywhere else finds no
-# library and fails open, which would make this mutation prove nothing. The library is
-# LINKED, never duplicated: the copy under test must read the same functions the shipped
-# script does.
+# A caller whose `interval` call refuses or cannot be made (the arming wall, the stop library, session start, doctor)
+# falls back to lib/patrol.sh's PATROL_INTERVAL_DEFAULT, so the poker reads its own default from that constant too, or
+# the two would drift. Mutation-proof: the poker beside a library whose constant is moved answers the moved value. The
+# copy lives in a tree shaped as the plugin ships, its library and parts linked, so it reads the shipped functions.
 POKER_MUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-default-mut.XXXXXX")"
-mkdir -p "$POKER_MUT_ROOT/hooks" "$POKER_MUT_ROOT/scripts"
-ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$POKER_MUT_ROOT/scripts/lib"
-POKER_MUT="$POKER_MUT_ROOT/hooks/session-poker.sh"
-sed 's/^POKER_INTERVAL_DEFAULT="20m"$/POKER_INTERVAL_DEFAULT="7m"/' "$POKER" > "$POKER_MUT"
-OUT="$( cd "$R2" && CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER_MUT" interval-default 2>&1 )"; RC=$?
-expect_eq "the verb answers from the CONSTANT, not from a literal (doctored 7m = 420s)" "420" "$OUT"
+mkdir -p "$POKER_MUT_ROOT/hooks" "$POKER_MUT_ROOT/scripts/lib"
+PM_LIB="$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)"
+for PM_F in "$PM_LIB"/*; do ln -s "$PM_F" "$POKER_MUT_ROOT/scripts/lib/"; done
+rm "$POKER_MUT_ROOT/scripts/lib/patrol.sh"
+sed 's/^PATROL_INTERVAL_DEFAULT=1200$/PATROL_INTERVAL_DEFAULT=420/' "$PM_LIB/patrol.sh" > "$POKER_MUT_ROOT/scripts/lib/patrol.sh"
+ln -s "$(cd "$(dirname "$POKER")/poker" && pwd -P)" "$POKER_MUT_ROOT/hooks/poker"
+cp "$POKER" "$POKER_MUT_ROOT/hooks/session-poker.sh"
+rm -f "$R2/.bionic/config.yaml"
+OUT="$( cd "$R2" && CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER_MUT_ROOT/hooks/session-poker.sh" interval 2>&1 )"; RC=$?
+expect_eq "the poker's default is the library's constant: moved to 420 there, interval with no config prints 420" "0|420" "$RC|$OUT"
 
 # ============================================================
 section "Section 3: tick — the accelerated-clock decisions (AC-7, re-authored for the ack)"
@@ -591,124 +571,37 @@ fi
 # HOISTED to tests/session-poker.prelude.sh: fake_config_dir — Sections 41 and 43–45 build config dirs with it.
 
 # ============================================================
-section "Section 7: window — the roster's own birth, and nothing written"
+section "Section 7: window — the roster's own birth, read by the Patrol library"
 # ============================================================
 #
-# WHAT THIS VERB IS FOR (S9, ledger H1/H2 + P4). Two readers ask "since when does THIS
-# roster's own record of this session begin": this script's own counters, which take the
-# instant as `<since>`, and payload/scripts/lib/patrol.sh, which reconstructs the same
-# tally for doctor and cannot source a file under hooks/. Without the verb patrol.sh grows
-# its own copy of `file_birth`/`epoch_iso`/`roster_window` and the two answers drift; with
-# it, `patrol_window()` shells out here exactly as `patrol_interval()` already shells out
-# for the interval.
-#
-# WHY IT IS TESTED HERE AT ALL. The agreement partner
-# (tests/cross-gate-agreement.test.sh §Q.3) calls the two counting FUNCTIONS with a literal
-# `since` and never shells to the verb — so §Q.3 stays green against a `window` that
-# returns the wrong instant, refuses a valid session, or writes a stamp. This section is
-# the only thing that looks at the verb.
-#
-# BIRTH, NEVER MTIME. The roster is append-only: its mtime is the LAST dispatch, so a
-# window taken from mtime would hide every gap but the newest. 7c advances the mtime a day
-# past the file's birth and asks again — an implementation reading mtime answers tomorrow,
-# this one still answers with the creation instant.
-#
-# THE MTIME IS ADVANCED, NEVER BACKDATED, and that is a platform fact rather than a taste:
-# on APFS `touch -t` to an instant EARLIER than the file's birth lowers `st_birthtime` to
-# match (measured on this machine — a file born at 1788749678 backdated a day reported
-# `stat %B` 1788663278), so a backdating probe would move the very quantity it is trying to
-# hold still and could not discriminate at all. Forward is also the append-only direction
-# the roster actually travels.
-
-# The same two-step the production `file_birth`/`epoch_iso` pair takes, recomputed here
-# rather than extracted from the script under test: a helper that called the code under
-# test could only prove it agrees with itself.
+# lib/patrol.sh `patrol_window <repo> <sid>` dates THIS roster's own record of the session for doctor's counters: the
+# roster's creation instant, else the Patrol stamp's when no roster is there, else nothing. BIRTH, NEVER MTIME: the
+# roster is append-only, so an mtime a day ahead must not move the answer. The mtime is advanced, never backdated: on
+# APFS `touch -t` to an instant before a file's birth lowers `st_birthtime` with it, so a backdating probe would move
+# the very quantity it holds still. The expected instant is recomputed here, never read through the code under test.
+s7_win() { bash -c '. "$1"; patrol_window "$2" "$3"' _ "$(dirname "$POKER")/../payload/scripts/lib/patrol.sh" "$@" 2>/dev/null; }
 s7_birth_iso() {  # <path> -> UTC ISO-8601 of the filesystem's own creation instant
   local b
   b="$(stat -f %B "$1" 2>/dev/null || stat -c %W "$1" 2>/dev/null)"
   case "${b:-0}" in ''|*[!0-9]*|0) return 1 ;; esac
   date -u -r "$b" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$b" +%Y-%m-%dT%H:%M:%SZ
 }
-
-# ---------- 7a: no session key ----------
-R7A="$(make_repo s7-nokey)"; new_roster "$R7A"
-OUT="$( cd "$R7A" && env -u CLAUDE_CODE_SESSION_ID bash "$POKER" window 2>&1 )"; RC=$?
-expect_eq "window with no session key REFUSES with exit 3" "3" "$RC"
-
-# ---------- 7b: a roster on disk — its own birth, as ISO ----------
 R7B="$(make_repo s7-roster)"; new_roster "$R7B"
 S7B_EXPECT="$(s7_birth_iso "$(roster_of "$R7B")" || true)"
 if [ -z "$S7B_EXPECT" ]; then
-  # A filesystem that keeps no creation time makes every arm below vacuous. Named out
-  # loud rather than passed over: the fallback is correct and the test would be useless.
-  no "this filesystem records no file birth time — Section 7 cannot run" \
-     "stat %B/%W gave nothing for $(roster_of "$R7B")"
+  no "this filesystem records no file birth time — Section 7 cannot run" "stat %B/%W gave nothing for $(roster_of "$R7B")"
 else
-  poke "$R7B" window
-  expect_eq "window over a present roster exits 0" "0" "$RC"
-  expect_eq "…and prints that roster's own creation instant, as UTC ISO-8601" \
-    "$S7B_EXPECT" "$OUT"
-
-  # ---------- 7c: birth, not mtime ----------
-  S7B_FWD="$(date -v+1d +%Y%m%d%H%M.%S 2>/dev/null || date -d '+1 day' +%Y%m%d%H%M.%S)"
-  touch -t "$S7B_FWD" "$(roster_of "$R7B")"
-  expect_ne "7c is not vacuous: the mtime really did move off the birth instant" \
-    "$(s7_birth_iso "$(roster_of "$R7B")")" \
-    "$(date -u -r "$(mtime_of "$(roster_of "$R7B")")" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-       || date -u -d "@$(mtime_of "$(roster_of "$R7B")")" +%Y-%m-%dT%H:%M:%SZ)"
-  poke "$R7B" window
-  expect_eq "…and an mtime a day ahead does not move it: the roster is append-only" \
-    "$S7B_EXPECT" "$OUT"
-
-  # ---------- 7d: it writes NO stamp — the property that separates it from tick/arm ----------
-  if [ -f "$(stamp_of "$R7B")" ]; then
-    no "window writes no Patrol stamp: asking what window to use is not a firing" \
-       "a stamp appeared at $(stamp_of "$R7B")"
-  else
-    ok "window writes no Patrol stamp: asking what window to use is not a firing"
-  fi
-  S7B_WROTE="$(ls "$R7B/.bionic/tmp/" 2>/dev/null | /usr/bin/grep -v "^engaged-$SID.state$" \
-               | /usr/bin/grep -v "^roster-$SID.state$" || true)"
-  expect_eq "…and writes nothing else under .bionic/tmp either" "" "$S7B_WROTE"
-
-  # ---------- 7e: no roster, a stamp — the stamp's birth ----------
-  # ARMING PRECEDES DISPATCH by doctrine, so on a session whose roster was never written
-  # the stamp still dates the stretch this session is answerable for. This is the arm that
-  # keeps doctor's no-roster page (tests/doctor-patrol.test.sh Section 12c) honest.
-  R7E="$(make_repo s7-stamp-only)"
-  poke "$R7E" arm
-  expect_eq "arm succeeded, so 7e has a stamp to date (not a vacuous fixture)" "0" "$RC"
-  S7E_EXPECT="$(s7_birth_iso "$(stamp_of "$R7E")" || true)"
-  poke "$R7E" window
-  expect_eq "no roster, but a Patrol stamp: window falls back to the stamp exit 0" "0" "$RC"
-  expect_eq "…and prints the STAMP's creation instant" "$S7E_EXPECT" "$OUT"
-  expect_nonempty "…which is a real instant, not the empty fallback" "$OUT"
-  if [ -f "$(roster_of "$R7E")" ]; then
-    no "…and the read created no roster file" "a roster appeared at $(roster_of "$R7E")"
-  else
-    ok "…and the read created no roster file"
-  fi
-
-  # ---------- 7f: neither file — empty stdout, exit 0 ----------
-  # NOT A REFUSAL. "No window" is a legitimate answer that every caller already handles:
-  # patrol.sh passes the empty string down and both counters read the whole transcript,
-  # which is what doctor printed before this verb existed.
+  expect_eq "the window of a present roster is its own creation instant, as UTC ISO-8601" "$S7B_EXPECT" "$(s7_win "$R7B" "$SID")"
+  touch -t "$(date -v+1d +%Y%m%d%H%M.%S 2>/dev/null || date -d '+1 day' +%Y%m%d%H%M.%S)" "$(roster_of "$R7B")"
+  expect_ne "the mtime really did move a day off the birth instant" "$S7B_EXPECT" \
+    "$(date -u -r "$(mtime_of "$(roster_of "$R7B")")" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$(mtime_of "$(roster_of "$R7B")")" +%Y-%m-%dT%H:%M:%SZ)"
+  expect_eq "…and the window does not move with it: the roster is append-only" "$S7B_EXPECT" "$(s7_win "$R7B" "$SID")"
+  R7E="$(make_repo s7-stamp-only)"; poke "$R7E" arm
+  expect_eq "no roster, an armed stamp: the window is the stamp's creation instant" \
+    "0|$(s7_birth_iso "$(stamp_of "$R7E")")" "$RC|$(s7_win "$R7E" "$SID")"
   R7F="$(make_repo s7-nothing)"
-  poke "$R7F" window
-  expect_eq "neither roster nor stamp: window still exits 0" "0" "$RC"
-  expect_eq "…and prints nothing at all" "" "$OUT"
-
-  # ---------- 7g: OUTSIDE the engagement gate, exactly like `interval` ----------
-  # `tick`, `adopt` and `sweep` decide things about a run and refuse in a session that
-  # never invoked the skill. This one reports a file's creation instant, and a session
-  # that never engaged bionic still has a doctor page — a read-only date must not be the
-  # reason that page falls back to a whole-transcript count.
-  R7G="$(make_repo s7-unengaged)"; new_roster "$R7G"
-  S7G_EXPECT="$(s7_birth_iso "$(roster_of "$R7G")" || true)"
-  unengage "$R7G"
-  poke "$R7G" window
-  expect_eq "an UNENGAGED session still gets a window (exit 0)" "0" "$RC"
-  expect_eq "…and the same instant an engaged one would get" "$S7G_EXPECT" "$OUT"
+  expect_eq "neither roster nor stamp: no window, and nothing written beside the engagement" "|" \
+    "$(s7_win "$R7F" "$SID")|$(ls "$R7F/.bionic/tmp" 2>/dev/null | /usr/bin/grep -v "^engaged-$SID.state$")"
 fi
 
 # ============================================================

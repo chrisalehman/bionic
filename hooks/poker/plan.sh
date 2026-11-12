@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # hooks/poker/plan.sh — the plan verbs: the contract grammar and the rows of the plan
-# (amend, task-add, epic-row, continuation-fill, brief, release-approval, reply).
+# (amend, task-add, brief, release-approval, reply).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
@@ -501,48 +501,7 @@ EOF
 }
 # ---- END the set of an agent its start did not place ----
 
-# ---------------------------------------------------------------- the call a refusal names
-
-# pv_fold <name> -> its letters and digits, lower-cased: the form two column names are compared in.
-pv_fold() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]'; }
-
-# pv_column_guess <name> <column>... -> the one column <name> was meant as, or nothing: the column
-# whose folded name equals the name's, else the ONE column whose folded name is a prefix of the
-# name's or has it as a prefix (`artifacts` is `artifact`, `sizes` is `size`). Two are no guess.
-pv_column_guess() {
-  local want c f n=0 hit=""
-  want="$(pv_fold "$1")"; shift
-  [ -n "$want" ] || return 0
-  for c in "$@"; do [ "$(pv_fold "$c")" = "$want" ] && { printf '%s' "$c"; return 0; }; done
-  for c in "$@"; do
-    f="$(pv_fold "$c")"
-    [ -n "$f" ] || continue
-    case "$want" in "$f"*) n=$((n + 1)); hit="$c"; continue ;; esac
-    case "$f" in "$want"*) n=$((n + 1)); hit="$c" ;; esac
-  done
-  [ "$n" -eq 1 ] && printf '%s' "$hit"
-  return 0
-}
-
-# pv_fix_pairs <columns, one per line> <name=value>... -> PV_FIXED, the pairs with each name the
-# columns do not carry (compared case-blind) replaced by its one guess, and PV_UNKNOWN, the names no
-# column was guessed for (comma-joined), which the corrected call leaves out.
-pv_fix_pairs() {
-  local cols="$1" kv n g c known
-  local -a list
-  list=(); PV_FIXED=(); PV_UNKNOWN=""
-  shift
-  while IFS= read -r c; do [ -n "$c" ] && list+=("$c"); done <<< "$cols"
-  for kv in "$@"; do
-    n="${kv%%=*}"; known=""
-    for c in ${list[@]+"${list[@]}"}; do
-      [ "$(printf '%s' "$c" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$n" | tr '[:upper:]' '[:lower:]')" ] && known=1
-    done
-    if [ -n "$known" ]; then PV_FIXED+=("$kv"); continue; fi
-    g="$(pv_column_guess "$n" ${list[@]+"${list[@]}"})"
-    if [ -n "$g" ]; then PV_FIXED+=("$g=${kv#*=}"); else PV_UNKNOWN="${PV_UNKNOWN:+$PV_UNKNOWN, }$n"; fi
-  done
-}
+# ---------------------------------------------------------------- a table's header cells
 
 # pv_header_cells <plan> <tasks|ledger> -> the header cells of the table `units_table_cells` edits (the
 # first table under the heading whose header carries an id cell), trimmed, one per line.
@@ -565,64 +524,6 @@ pv_header_cells() {
       for (i = 2; i < n; i++) if (trim(c[i]) != "") print trim(c[i])
       exit
     }' "$1" 2>/dev/null
-}
-
-# pv_file_open <verb> <operand>... -> PV_REPO, PV_RPLAN, and the cleanup armed; every refusal exits.
-pv_file_open() {
-  local verb="$1" sid run cand="" p named=""
-  shift
-  sid="$(session_id)" || sid=""
-  if [ -z "$sid" ]; then
-    die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
-    exit 3
-  fi
-  if [ "$verb" = continuation-fill ] && [ -n "${PV_PLAN_ARG:-}" ]; then
-    named="$(pv_plan_arg_file)" && plan_delivered "$named" || named=""
-  fi
-  if [ -z "$named" ] && ! engaged_session "$(project_root "$PWD")" "$sid"; then
-    say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
-    exit 0
-  fi
-  PV_REPO="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
-  if [ -z "$PV_REPO" ]; then
-    die "REFUSED — cannot resolve the working directory."
-    exit 2
-  fi
-  PV_NEW=""
-  trap 'rm -f ${PV_NEW:+"$PV_NEW" "$PV_NEW.2"}' EXIT
-  if [ -n "${PV_PLAN_ARG:-}" ]; then
-    p="$(pv_plan_arg_file)" && { PV_RPLAN="$p"; return 0; }
-    die "REFUSED — --plan $(clean "$PV_PLAN_ARG") is no file (read from $PWD and from $PV_REPO); nothing was written."
-    exit 1
-  fi
-  run="$(session_run "$PV_REPO" "$sid" 2>/dev/null)" || :
-  case "$run" in
-    'bound-open '*) PV_RPLAN="${run#bound-open }"; return 0 ;;
-    'bound-closed '*) PV_RPLAN="${run#bound-closed }"; [ -f "$PV_RPLAN" ] && return 0 ;;
-    'fallback '*) cand="${run#fallback }" ;;
-  esac
-  case "$cand" in "$PV_REPO"/*) cand="${cand#"$PV_REPO"/}" ;; esac
-  die "REFUSED — $verb writes for this session's run, and the session is bound to none (${run%% *}); close-out wipes the binding, so name the run's plan. Nothing was written."
-  pv_next "$verb" "$@" --plan "${cand:-<plan>}"
-  exit 1
-}
-
-# pv_file_swap <verb> <file> <checksum before> <what> -> moves $PV_NEW over the file when the file still
-# reads as it did; exits 0 with nothing written when the projection is the file.
-pv_file_swap() {
-  local verb="$1" file="$2" sum="$3" what="$4"
-  if cmp -s "$PV_NEW" "$file"; then
-    say "$verb — $what: the file already reads so; nothing was written."
-    exit 0
-  fi
-  if [ "$(cksum < "$file" 2>/dev/null)" != "$sum" ]; then
-    die "REFUSED — $file changed while $what was being written; nothing was written. Run $verb again."
-    exit 1
-  fi
-  if ! mv -f "$PV_NEW" "$file"; then
-    die "REFUSED — could not move the copy over $file; it is unchanged."
-    exit 2
-  fi
 }
 
   # THE CONTRACT CHANGE (wave-20 T9; REQ-4, AC-4.1/4.2; spec D4, ledger Δ10). A writer's
@@ -1033,7 +934,7 @@ EOF
     # read from its record (`finding_read`); the row's rating is the gravest of them, the lowest S and then on
     # before off, and the guards below hold it as they hold a typed rating.
     # A FINDING THE PERSON MOVED TO FIX IS ASKED, NOT UNASKED (wave-35 T34; A-orch-48): its effective priority
-    # (`finding_read`'s FR_P, a `moved:` line) is fix, and `disposition` tells the orchestrator to born a row of
+    # (`finding_read`'s FR_P, a `moved:` line) is fix, and a fix is answered by a row born of
     # it, so the policy guard holds each finding to the policy OR to the person's move, the first that is
     # neither refused with the remedy. The marker keeps the reader's rating, never re-rated.
     TA_BORN_MARK=""; TA_OFF=""; TA_OFF_RATING=""; TA_CLASS=""; TA_COUNT_SAID=""
@@ -1051,7 +952,7 @@ EOF
         TA_MV="$(_proof_moved_to "$TA_PLAN" "$TA_BID")" \
           || { die "task-add refused — the run's facts could not be read, so the moves of $(clean "$TA_BID") are not known; nothing is born. Run again: bash ${HOOK_DIR}/session-poker.sh task-add $TA_ID with the same operands"; exit 2; }
         if [ "$TA_MV" = defer ]; then
-          die "task-add refused — $(clean "$TA_BID") was moved to defer, and its newest move stands: $(clean "$(proof_move_line "$TA_PLAN" "$TA_BID")"); $TA_ID stands in the plan unborn, the person's to remove. To fix it after all: disposition $(clean "$TA_BID") fix '<their words>' '<why>', then task-add again."
+          die "task-add refused — $(clean "$TA_BID") was moved to defer, and its newest move stands: $(clean "$(proof_move_line "$TA_PLAN" "$TA_BID")"); $TA_ID stands in the plan unborn, the person's to remove. To fix it after all: finding-move $(clean "$TA_BID") fix '<their words>' '<why>', then task-add again."
           exit 1
         fi
         TA_RANK="${FR_S#S}$( [ "$FR_R" = on ] && printf 0 || printf 1 )"
@@ -1188,181 +1089,6 @@ EOF
     # recreated to keep the order. The entry is named as the task list names it, by the row's title, and the line is
     # the verb's last so the rule is read where it fires and no step text has to carry it.
     say "task-add — owed: create the task-list entry $TA_STEP/$TA_ID: $(clean_whole "$(plan_task_title "$TA_CELL_TASK")"), and recreate the entries after it to keep the order."
-    exit 0
-  }
-
-  # THE EPIC'S SHIPPED ROW (wave-33 T7; REQ-3 AC-3.3, D8). close-out.sh writes the row whole when it appends
-  # it and never edits a row that is there (`act_epic`), so a `<fill: ADRs>` it left (wave-30's) could be
-  # filled by no code. This verb sets cells of the row whose wave cell is <wave>, in the shipped table
-  # close-out finds (the table whose header opens `wave` and carries `shipped`) of the `epic.plan.md` beside
-  # the run's plan. A column is named by its header cell or that cell's first word, case-blind (`ADRs`,
-  # `plan`, `spec`). The file transaction (`pv_file_open`, `pv_file_swap`). REFUSED (1), the file unchanged:
-  # no epic plan, no shipped table, a column it does not carry (the columns listed, the corrected call
-  # printed), the wave cell, a value with a |, a line break or a fill mark, no row for the wave.
-  poker_verb_epic_row() {
-    pv_file_open epic-row "$EP_WAVE" "${EP_PAIRS[@]}"
-    EP_FILE="${PV_RPLAN%/*}/epic.plan.md"
-    if [ ! -f "$EP_FILE" ] || [ -L "$EP_FILE" ]; then
-      die "REFUSED — no epic.plan.md beside $PV_RPLAN (or it is a link); nothing was written."
-      exit 1
-    fi
-    EP_AWK='
-      function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
-      function shipped_header(line,   n, a, i) {
-        n = split(line, a, "|")
-        if (tolower(trim(a[2])) != "wave") return 0
-        for (i = 3; i <= n; i++) if (tolower(trim(a[i])) == "shipped") return 1
-        return 0
-      }
-      BEGIN {
-        mode = ENVIRON["EP_MODE"]; w = ENVIRON["EP_WAVE"] + 0; m = split(ENVIRON["EP_SET"], s, "\n")
-        for (k = 1; k <= m; k++) if ((t = index(s[k], "\t")) > 0) v[substr(s[k], 1, t - 1) + 1] = " " substr(s[k], t + 1) " "
-      }
-      /^[ \t]*```/ { fence = !fence; if (mode == "set") print; next }
-      fence { if (mode == "set") print; next }
-      !seen && /^\|/ && shipped_header($0) {
-        intable = 1; seen = 1
-        if (mode == "head") { n = split($0, a, "|"); for (i = 2; i < n; i++) print trim(a[i]); exit }
-        print; next
-      }
-      intable && !/^\|/ { intable = 0 }
-      intable && mode == "set" {
-        n = split($0, c, "|"); x = trim(c[2])
-        if (x ~ /^[0-9]+$/ && x + 0 == w) {
-          hits++
-          if (hits == 1) { for (j in v) c[j] = v[j]; out = c[1]; for (j = 2; j <= n; j++) out = out "|" c[j]; print out; next }
-        }
-      }
-      mode == "set" { print }
-      END { if (mode == "set") { if (!seen) exit 3; if (!hits) exit 4; if (hits > 1) exit 5 } }'
-    EP_COLS="$(EP_MODE=head awk "$EP_AWK" "$EP_FILE" 2>/dev/null)"
-    if [ -z "$EP_COLS" ]; then
-      die "REFUSED — $EP_FILE carries no shipped table (a header whose first cell is wave and which has a shipped cell); nothing was written."
-      exit 1
-    fi
-    EP_SET=""; EP_BAD=""; EP_FIRST=""
-    for _pv_a in "${EP_PAIRS[@]}"; do
-      _pv_k="${_pv_a%%=*}"; _pv_v="${_pv_a#*=}"
-      _pv_f="$(pv_fold "$_pv_k")"; _pv_n=0; _pv_at=""
-      while IFS= read -r _pv_c; do
-        _pv_n=$((_pv_n + 1))
-        if [ "$(pv_fold "$_pv_c")" = "$_pv_f" ] || [ "$(pv_fold "${_pv_c%% *}")" = "$_pv_f" ]; then _pv_at="$_pv_n"; break; fi
-      done <<< "$EP_COLS"
-      if [ -z "$_pv_at" ]; then EP_BAD="${EP_BAD:+$EP_BAD, }$(clean "$_pv_k")"; continue; fi
-      if [ "$_pv_at" = 1 ]; then
-        die "REFUSED — the wave cell is the key epic-row finds the row by, not a cell to set; nothing was written."
-        exit 1
-      fi
-      if ! plan_verb_value_ok "$_pv_v"; then
-        die "REFUSED — the value for $(clean "$_pv_k") carries a |, a tab or a line break, which no table cell can hold; nothing was written."
-        exit 1
-      fi
-      case "$_pv_v" in
-        *'<fill:'*)
-          die "REFUSED — the value for $(clean "$_pv_k") is itself a fill mark; write the fact. Nothing was written."
-          exit 1 ;;
-      esac
-      EP_SET="${EP_SET}${_pv_at}	${_pv_v}
-"
-    done
-    if [ -n "$EP_BAD" ]; then
-      die "REFUSED — the shipped table of $EP_FILE carries no column $EP_BAD; nothing was written."
-      die "The columns: $(printf '%s\n' "$EP_COLS" | paste -sd, - | sed 's/,/, /g')."
-      pv_fix_pairs "$(printf '%s\n' "$EP_COLS" | sed 's/ .*//')" "${EP_PAIRS[@]}"
-      if [ "${#PV_FIXED[@]}" -gt 0 ]; then
-        if [ -n "$PV_PLAN_ARG" ]; then pv_next epic-row "$EP_WAVE" "${PV_FIXED[@]}" --plan "$PV_PLAN_ARG"
-        else pv_next epic-row "$EP_WAVE" "${PV_FIXED[@]}"; fi
-      fi
-      exit 1
-    fi
-    EP_SUM="$(cksum < "$EP_FILE" 2>/dev/null)"
-    PV_NEW="$EP_FILE.epic-row.$$"
-    PV_RC=0
-    EP_MODE=set EP_WAVE="$EP_WAVE" EP_SET="$EP_SET" awk "$EP_AWK" "$EP_FILE" > "$PV_NEW" 2>/dev/null || PV_RC=$?
-    case "$PV_RC" in
-      0) : ;;
-      4) die "REFUSED — the shipped table of $EP_FILE has no row for wave $EP_WAVE; close-out appends it. Nothing was written."
-         exit 1 ;;
-      5) die "REFUSED — the shipped table of $EP_FILE has more than one row for wave $EP_WAVE; which one is meant is not the verb's to guess. Nothing was written."
-         exit 1 ;;
-      *) die "REFUSED — the row cannot be written (awk exit $PV_RC); nothing was written."
-         exit 2 ;;
-    esac
-    pv_file_swap epic-row "$EP_FILE" "$EP_SUM" "wave $EP_WAVE's row"
-    EP_LEFT="$(awk -v w="$EP_WAVE" -F'|' '{ x = $2; gsub(/^[ \t]+|[ \t]+$/, "", x) } x ~ /^[0-9]+$/ && x + 0 == w + 0 && /<fill:/ { n++ } END { print n + 0 }' "$EP_FILE")"
-    say "epic-row — wave $EP_WAVE: ${EP_PAIRS[*]} written to $EP_FILE; fill marks left in the row: $EP_LEFT."
-    exit 0
-  }
-
-  # THE CONTINUATION'S FILL MARKS (wave-33 T7; REQ-3 AC-3.3, D8). close-out.sh writes the run's continuation
-  # (`record/<run>/continuation.md`, under the docs root its plan sits in) with a `<fill: …>` mark wherever
-  # only the orchestrator knows the fact; wave-32 completed its marks by hand (A-orch-50). This verb replaces
-  # the mark whose label is <field>, or opens with it before a character that is no letter or digit
-  # (`the first decision` for `<fill: the first decision, or "none">`); every copy of that mark is filled,
-  # and the marks left are counted. The text may span lines. The file transaction. REFUSED (1), the file
-  # unchanged: no continuation, a field naming no mark or more than one (the fields left listed), a text
-  # that is itself a fill mark.
-  poker_verb_continuation_fill() {
-    pv_file_open continuation-fill "$CF_FIELD=$CF_TEXT"
-    CF_DOCS="$(docs_root "$PV_REPO")"
-    case "$PV_RPLAN" in */plans/*) CF_DOCS="${PV_RPLAN%/plans/*}" ;; esac
-    CF_SLUG="$(proof_plan_slug "$PV_RPLAN")"
-    CF_FILE="$CF_DOCS/record/$CF_SLUG/continuation.md"
-    if [ ! -f "$CF_FILE" ] || [ -L "$CF_FILE" ]; then
-      die "REFUSED — no continuation at $CF_FILE (close-out writes it at close); nothing was written."
-      exit 1
-    fi
-    case "$CF_TEXT" in
-      *'<fill:'*)
-        die "REFUSED — the text is itself a fill mark; write the fact. Nothing was written."
-        exit 1 ;;
-    esac
-    CF_SUM="$(cksum < "$CF_FILE" 2>/dev/null)"
-    PV_NEW="$CF_FILE.continuation-fill.$$"
-    PV_RC=0
-    CF_FIELD="$CF_FIELD" CF_TEXT="$CF_TEXT" CF_LIST="$PV_NEW.2" awk '
-      BEGIN { f = ENVIRON["CF_FIELD"]; text = ENVIRON["CF_TEXT"]; list = ENVIRON["CF_LIST"] }
-      { L[++nl] = $0 }
-      END {
-        for (i = 1; i <= nl; i++) {
-          x = L[i]
-          while ((p = index(x, "<fill: ")) > 0) {
-            x = substr(x, p + 7); q = index(x, ">"); if (!q) break
-            lab = substr(x, 1, q - 1); x = substr(x, q + 1)
-            if (!(lab in seen)) { seen[lab] = 1; labs[++nlab] = lab }
-          }
-        }
-        for (k = 1; k <= nlab; k++) if (labs[k] == f) { exact = labs[k] }
-        if (exact != "") { hit = exact; nhit = 1 }
-        else for (k = 1; k <= nlab; k++) {
-          lab = labs[k]
-          if (index(lab, f) == 1 && substr(lab, length(f) + 1, 1) !~ /[A-Za-z0-9]/) { nhit++; hit = lab }
-        }
-        if (nhit != 1) { for (k = 1; k <= nlab; k++) print labs[k] > list; exit (nhit ? 5 : 3) }
-        mark = "<fill: " hit ">"
-        for (i = 1; i <= nl; i++) {
-          x = L[i]; out = ""
-          while ((p = index(x, mark)) > 0) { out = out substr(x, 1, p - 1) text; x = substr(x, p + length(mark)) }
-          print out x
-        }
-        print hit > list
-      }' "$CF_FILE" > "$PV_NEW" 2>/dev/null || PV_RC=$?
-    case "$PV_RC" in
-      0) : ;;
-      3|5)
-         if [ "$PV_RC" = 3 ]; then die "REFUSED — no fill mark of $CF_FILE is named '$(clean "$CF_FIELD")'; nothing was written."
-         else die "REFUSED — more than one fill mark of $CF_FILE opens with '$(clean "$CF_FIELD")'; name more of it. Nothing was written."; fi
-         if [ -s "$PV_NEW.2" ]; then die "The fields left: $(paste -sd'|' - < "$PV_NEW.2" | sed 's/|/; /g')."
-         else die "The continuation carries no fill mark."; fi
-         exit 1 ;;
-      *) die "REFUSED — the mark cannot be filled (awk exit $PV_RC); nothing was written."
-         exit 2 ;;
-    esac
-    CF_HIT="$(cat "$PV_NEW.2" 2>/dev/null)"
-    pv_file_swap continuation-fill "$CF_FILE" "$CF_SUM" "the mark <fill: $CF_HIT>"
-    CF_LEFT="$(/usr/bin/grep -o '<fill:' "$CF_FILE" | wc -l | tr -d ' ')"
-    CF_W=marks; [ "$CF_LEFT" = 1 ] && CF_W=mark
-    say "continuation-fill — <fill: $(clean "$CF_HIT")> filled in $CF_FILE; $CF_LEFT fill $CF_W left."
     exit 0
   }
 
@@ -1942,12 +1668,12 @@ RR_ROWS_EOF
     poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_reviews
     RR_QOF="$(printf '%s\n' "$RR_ANS" | awk -F'|' "$_LINE_FIELDS_AWK"'
       line_kv("ev") == "proof" { print line_kv("evidence") "\t" line_kv("question") }')"
-    # A PREVIEW OPENS NOTHING: the disposition it reads is handed a ledger key no file can carry, so the person's
-    # items the disposition opens on any other run are left unopened here.
+    # A PREVIEW OPENS NOTHING: the findings' reader is handed a ledger key no file can carry, so the person's
+    # items it opens on any other run are left unopened here.
     if [ "$RR_PREVIEW" = yes ]; then
-      RR_DISP="$( cd "$PV_REPO" && OWED_SID="preview/none" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" disposition 2>&1 )"
+      RR_DISP="$( cd "$PV_REPO" && OWED_SID="preview/none" finding_disposition 2>&1 )"
     else
-      RR_DISP="$( cd "$PV_REPO" && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" disposition 2>&1 )"
+      RR_DISP="$( cd "$PV_REPO" && finding_disposition 2>&1 )"
     fi
     while IFS= read -r line; do
       case "$line" in "poker: finding "*) : ;; *) continue ;; esac

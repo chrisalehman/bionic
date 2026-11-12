@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # hooks/poker/proof.sh — the proof record: deferrals, findings, approvals, waivers, confirmations, the regression
-# and the debt ledger (approve, proof-add, waive, finding-move, disposition, release-check,
+# and the debt ledger (approve, proof-add, waive, finding-move, release-check,
 # regression-run, debt).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
@@ -41,9 +41,9 @@ review_readings() {
 }
 
 # waive_owed_findings <plan> <repo> <question> -> always 0, prints nothing: the waiver of a question is the person's
-# answer to every finding of its readings ("fix it, defer it, or waive <question>", `disposition`), so it closes each
-# open `finding:<record>#<n>` item of every reading the run registers under that question. The readings are
-# `disposition`'s own, `review_readings`.
+# answer to every finding of its readings ("fix it, defer it, or waive <question>", the item `finding_disposition`
+# opens), so it closes each open `finding:<record>#<n>` item of every reading the run registers under that question.
+# The readings are `finding_disposition`'s own, `review_readings`.
 waive_owed_findings() {  # [<readings, review_readings' answer read before the waiver was written>]
   local ev q pre key
   declare -F owed_list >/dev/null 2>&1 || return 0
@@ -1151,61 +1151,32 @@ FM_FINDING
     exit 0
   }
 
-  # THE REVIEW DISPOSITION (wave-33 T13; REQ-5 AC-5.1, D6). One pass over every registered reading (each record a
-  # `proved: kind=review` line with a question names as its evidence, its last such line giving its question and
-  # head) prints one line per finding:
+  # THE FINDINGS THE RELEASE APPROVAL CARD READS. One pass over every registered reading (each record a review proof
+  # with a question names as its evidence, its last such proof giving its question and head) prints one line per finding:
   #
   #   finding <record>#<n> <S> user-facing=<on|off> record=<record> at=<path:line|-> row=<T<k>[,…]|—>
-  #           state=<open|fixed|deferred|accepted> decision="<what it needs>" [stated="<sentence>"|stated=-] title="<title>"
+  #           state=<open|fixed|deferred|accepted> [stated="<sentence>"|stated=-] title="<title>"
   #
-  # the state read as the judge reads it: fixed when a row born of it landed green at or after the reading's head,
-  # or the row its newest move names (`moved: … to=fixed row=<T>`, wave-36 T8) landed green whatever its ancestry
-  # (lib/proof.sh `proof_fixed`), decision="none: fixed by <row>, landed green at <commit>"; else by the priority
-  # the plan's moves give it (`proof_finding_rating`): fix is open, defer is deferred, note is accepted. row= names
+  # the state read as the judge reads it: fixed when a row born of it landed green at or after the reading's head, or
+  # the row its newest move to fixed names landed green whatever its ancestry (lib/proof.sh `proof_fixed`); else by the
+  # priority the moves give it (`proof_finding_rating`): fix is open, defer is deferred, note is accepted. row= names
   # the rows born of it and the row a move to fixed names. An open finding no row answers and no ruling has moved
-  # needs the person, and gets one owed item, `finding_owed_key` (lib/owed.sh; opening is idempotent per key). A reading's
-  # debt: lines go to the run's debt ledger through `debt add`, run as a child. Nothing in the plan is written.
-  #
-  # A RULING (four or five operands) is the person's word on one finding, recorded through finding-move (their
-  # words, typed, at least SAID_MIN_WORDS whole words; an S1 is never deferred) and, for a deferral given a sentence,
-  # a deferral given a sentence carries it on the same move, run as a child; then a fix closes the finding's owed item,
-  # and a deferral leaves it open, answered carry, until the release approval card's reply.
-  poker_verb_disposition() {
-    if ! { declare -F proof_fixed >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
-       || ! declare -F proof_fixed >/dev/null 2>&1; then
-      die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; the plan is unchanged."
-      exit 2
-    fi
-    plan_verb_open disposition
-    if [ -n "$DSP_ID" ] && ! finding_read "$PV_PLAN" "$PV_REPO" "$DSP_ID"; then
-      die "REFUSED — $FR_WHY; the plan is unchanged."
-      exit 1
-    fi
-    if [ -n "$DSP_ID" ]; then
-      DSP_OUT="$( cd "$PV_REPO" && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" finding-move "$DSP_ID" "$DSP_TO" "$DSP_RAW" "$DSP_WHY" ${DSP_SENT:+"$DSP_SENT"} 2>&1 )"; DSP_RC=$?
-      [ -z "$DSP_OUT" ] || printf '%s\n' "$DSP_OUT"
-      [ "$DSP_RC" = 0 ] || exit "$DSP_RC"
-      # A fix ends the ask: a row born of it answers the finding. A deferral was answered carry by finding-move and
-      # its item stays open until the event it waits on.
-      if [ "$DSP_TO" = defer ]; then
-        say "disposition — $(clean "$DSP_ID") ruled defer on the person's words; its owed item stays open, answered carry: it waits on the release approval card."
-        exit 0
-      fi
-      poker_owed_close "$PV_REPO" "$(finding_owed_key "$DSP_ID")" "disposition"
-      say "disposition — $(clean "$DSP_ID") ruled $DSP_TO on the person's words; its owed item is closed."
-      exit 0
-    fi
+  # needs the person, and gets one owed item, `finding_owed_key` (lib/owed.sh; opening is idempotent per key); a
+  # deferral no person ruled is a carry, and gets its carry item. A reading's debt: lines go to the run's debt ledger
+  # through `debt add`, run as a child. Nothing in the plan is written. The plan and the checkout are the caller's
+  # (PV_PLAN, PV_REPO, from plan_verb_open). Facts that cannot be read are said on stderr, and the return is 2.
+  finding_disposition() {
+    { declare -F proof_fixed >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
+      && declare -F proof_fixed >/dev/null 2>&1 \
+      || { die "REFUSED — the proof record (lib/proof.sh) cannot be loaded from $BIONIC_LIB; no finding is read."; return 2; }
     DSP_DOCS="$(docs_root "$PV_REPO")"
     _proof_findings_load "$PV_PLAN" && DSP_FEV="$_PROOF_FINDINGS" && DSP_FIXED="$(proof_fixed "$PV_PLAN" "$PV_REPO")" \
-      || { die "REFUSED — the run's facts could not be read, so no finding is ruled or opened. Run again: bash ${HOOK_DIR}/session-poker.sh disposition"; exit 2; }
-    DSP_REC="$(proof_debt_record "$PV_PLAN" "$PV_REPO")" || DSP_REC=""
+      || { die "REFUSED — the run's facts could not be read, so no finding is read or opened. Run again: bash ${HOOK_DIR}/session-poker.sh release-approval"; return 2; }
     DSP_BORN="$(units_born_findings "$PV_PLAN" 2>/dev/null)" || DSP_BORN=""
     DSP_READS="$(review_readings "$PV_PLAN")" \
-      || { die "REFUSED — the run's facts could not be read, so no finding is ruled or opened. Run again: bash ${HOOK_DIR}/session-poker.sh disposition"; exit 2; }
-    DSP_NF=0; DSP_NR=0; DSP_NP=0
+      || { die "REFUSED — the run's facts could not be read, so no finding is read or opened. Run again: bash ${HOOK_DIR}/session-poker.sh release-approval"; return 2; }
     while IFS='	' read -r DSP_EV DSP_Q DSP_H; do
       [ -n "$DSP_EV" ] || continue
-      DSP_NR=$((DSP_NR + 1))
       if ! DSP_GOT="$(proof_findings "$DSP_DOCS/$DSP_EV" 2>&1)"; then
         say "review $(clean "$DSP_EV") ($DSP_Q) cannot be read: $(clean "$DSP_GOT")"
         continue
@@ -1216,7 +1187,6 @@ FM_FINDING
         [ -n "$DSP_N" ] || continue
         [ "$DSP_N" != debt ] || { DSP_DEBT=1; continue; }
         DSP_FID="$DSP_EV#$DSP_N"
-        DSP_NF=$((DSP_NF + 1))
         # The finding's newest whole move and the row a move to fixed names, from the events read once above.
         IFS='	' read -r DSP_MOVED DSP_MV <<DSP_MOVE
 $(printf '%s\n' "$DSP_FEV" | awk -v id="$DSP_FID" "$(proof_bind_awk)"'
@@ -1232,36 +1202,16 @@ DSP_MOVE
         fi
         DSP_STATED=""
         case "$_PROOF_FIXED_IDS" in
-          *$'\n'"$DSP_FID"$'\n'*)
-            DSP_STATE=fixed
-            DSP_FROW="$(printf '%s\n' "$DSP_FIXED" | awk -F'\t' -v id="$DSP_FID" '$1 == id { print $2 "\t" $3; exit }')"
-            DSP_DEC="none: fixed by ${DSP_FROW%%	*}, landed green at $(printf '%.12s' "${DSP_FROW#*	}")"
-            # A landing no green verdict names is fixed by the first green whole run that descends from it.
-            if ! { _proof_fields && line_held "$DSP_REC" && line_lines "$DSP_REC" | awk -v k="|row=${DSP_FROW%%	*}|commit=${DSP_FROW#*	}|" \
-              'index($0, k) && index($0, "|result=green|") { f = 1 } END { exit !f }'; }; then
-              DSP_RHS="$(_proof_regression_heads "$PV_PLAN" "$DSP_REC")" \
-                || { die "REFUSED — the run's facts could not be read, so no finding is ruled or opened. Run again: bash ${HOOK_DIR}/session-poker.sh disposition"; exit 2; }
-              for DSP_RH in $DSP_RHS; do
-                git -C "$PV_REPO" merge-base --is-ancestor "${DSP_FROW#*	}" "$DSP_RH" 2>/dev/null || continue
-                DSP_DEC="none: ${DSP_FROW%%	*} landed on no suite; fixed by the regression at $(printf '%.12s' "$DSP_RH")"; break
-              done
-            fi ;;
+          *$'\n'"$DSP_FID"$'\n'*) DSP_STATE=fixed ;;
           *)
             case "$DSP_P" in
               fix)
                 DSP_STATE=open
-                if [ -n "$DSP_ROWS" ]; then
-                  DSP_DEC="none: waits on $DSP_ROWS landing green"
-                elif [ -n "$DSP_MOVED" ]; then
-                  DSP_DEC="a row born of it: task-add <id> … --born $DSP_FID"
-                else
+                if [ -z "$DSP_ROWS" ] && [ -z "$DSP_MOVED" ] && declare -F owed_open >/dev/null 2>&1; then
                   if [ "$DSP_S" = S1 ]; then DSP_DEC="the person's: fix it or waive $DSP_Q (an S1 is never deferred)"
                   else DSP_DEC="the person's: fix it, defer it, or waive $DSP_Q"; fi
-                  DSP_NP=$((DSP_NP + 1))
-                  if declare -F owed_open >/dev/null 2>&1; then
-                    OWED_ROOT="$PV_REPO" owed_open "$(finding_owed_key "$DSP_FID")" "Finding $DSP_S needs a ruling" \
-                      "$(clean "$DSP_FID") $DSP_S $DSP_R: $(clean "$DSP_T") — $DSP_DEC" >/dev/null 2>&1 || :
-                  fi
+                  OWED_ROOT="$PV_REPO" owed_open "$(finding_owed_key "$DSP_FID")" "Finding $DSP_S needs a ruling" \
+                    "$(clean "$DSP_FID") $DSP_S $DSP_R: $(clean "$DSP_T") — $DSP_DEC" >/dev/null 2>&1 || :
                 fi ;;
               defer)
                 DSP_STATE=deferred
@@ -1271,13 +1221,11 @@ DSP_MOVE
                 [ -n "$DSP_MOVED" ] \
                   || proof_owed open "$(carry_owed_key "$DSP_FID")" "Carried $DSP_S finding" \
                        "$(clean "$DSP_FID") $DSP_S $DSP_R: $(clean "$DSP_T") — carried, not fixed; the release approval card rules it"
-                DSP_STATED="$(proof_finding_stated "$PV_PLAN" "$DSP_FID" 2>/dev/null)" || DSP_STATED=""
-                if [ -n "$DSP_STATED" ]; then DSP_DEC="none: stated"
-                else DSP_DEC="its changelog sentence: disposition $DSP_FID defer '<their words>' '<why>' '<sentence>'"; fi ;;
-              *) DSP_STATE=accepted; DSP_DEC="none" ;;
+                DSP_STATED="$(proof_finding_stated "$PV_PLAN" "$DSP_FID" 2>/dev/null)" || DSP_STATED="" ;;
+              *) DSP_STATE=accepted ;;
             esac ;;
         esac
-        DSP_LINE="finding $DSP_FID $DSP_S user-facing=$DSP_R record=$DSP_EV at=$DSP_W row=${DSP_ROWS:-—} state=$DSP_STATE decision=\"$DSP_DEC\""
+        DSP_LINE="finding $DSP_FID $DSP_S user-facing=$DSP_R record=$DSP_EV at=$DSP_W row=${DSP_ROWS:-—} state=$DSP_STATE"
         if [ "$DSP_STATE" = deferred ]; then
           if [ -n "$DSP_STATED" ]; then DSP_LINE="$DSP_LINE stated=\"$DSP_STATED\""; else DSP_LINE="$DSP_LINE stated=-"; fi
         fi
@@ -1291,8 +1239,7 @@ DSP_FINDINGS
     done <<DSP_READINGS
 $DSP_READS
 DSP_READINGS
-    say "disposition — $DSP_NF findings in $DSP_NR registered reviews; $DSP_NP need the person's ruling (disposition <record>#<n> fix|defer '<their words>' '<why>' ['<changelog sentence>'])."
-    exit 0
+    return 0
   }
 
   # THE RELEASE CHECK (wave-27 T16; D12). A project may name one command in `.bionic/config.yaml`
@@ -1659,8 +1606,7 @@ DSP_READINGS
   }
 
   # THE RUN'S NUMBERS (wave-28 T14; D18, REQ-4). The fold and its definitions are `landing_report`'s,
-  # above the verbs. The plan is the one named, resolved as fill-report resolves its operand (a path
-  # from the project root, else from the docs root), or else this session's bound run; the record is
+  # above the verbs. The plan is the one named, resolved as a path from the project root, else from the docs root, or else this session's bound run; the record is
   # that plan's landing record, under the plan's own project. It writes nothing and exits 0 whatever
   # the record holds.
   # THE RUN'S DEBTS. Each act is one `debt` event in the run's log through the

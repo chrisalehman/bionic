@@ -92,8 +92,8 @@ fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/fill.sh"
 # THE FILL LEDGER'S PATH AND THE PATROL VERDICT (epic-23 wave-20, REQ-5 and REQ-6).
-# `stop_fill_ledger` appends to `fill_ledger_path`, the path `session-poker.sh fill-report`
-# reads, and the death notice asks `patrol_verdict`; both live in patrol.sh. Wanted and
+# `stop_fill_ledger` appends to `fill_ledger_path`, the path the sitrep's idle minutes
+# read, and the death notice asks `patrol_verdict`; both live in patrol.sh. Wanted and
 # sourced here for fill.sh's reason above: a partial library makes this process refuse.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/patrol.sh"
@@ -131,7 +131,7 @@ EVENT=$(bionic_jq .hook_event_name)
 # guard or the fold decide. It also computes the turn's facts once for the fill duty below
 # (`stop_turn_facts`), so the ledger line and the verdict are one computation. The refusal the
 # CLI feeds back before that re-entry ("Stop hook feedback:") opens no turn there, so both of a
-# refused turn's lines carry its prompt's key and `fill-report` counts them once (wave-20 T11b).
+# refused turn's lines carry its prompt's key and the fold counts them once.
 stop_fill_ledger "$EVENT" 2>/dev/null
 
 # BLOCKS ONCE. (jq's `//` folds `false` to empty, so a literal "true" is the only

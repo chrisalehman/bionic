@@ -571,7 +571,7 @@ fi
 #
 # THE INTERVAL COMES FROM THE POKER BESIDE THIS HOOK, by the same two-step
 # lib/patrol.sh's `patrol_interval` takes — the project's configured value, then
-# the script's built-in default, then the last resort. It is asked HERE rather than
+# the library's PATROL_INTERVAL_DEFAULT. It is asked HERE rather than
 # through `patrol_interval` because that function resolves the poker through
 # `plugin_root` (lib/roots.sh), i.e. the plugin installed on the machine, while a
 # SessionStart hook must measure against the tree it was actually launched from.
@@ -580,12 +580,8 @@ ss_interval() {
   if [ -f "$poker" ]; then
     s="$( cd "$BIONIC_ROOT" 2>/dev/null && bash "$poker" interval 2>/dev/null )"
     case "$s" in ''|*[!0-9]*) s="" ;; esac
-    if [ -z "$s" ]; then
-      s="$( bash "$poker" interval-default 2>/dev/null )"
-      case "$s" in ''|*[!0-9]*) s="" ;; esac
-    fi
   fi
-  if [ -z "$s" ] || [ "$s" -le 0 ]; then s="$PATROL_INTERVAL_LAST_RESORT"; fi
+  if [ -z "$s" ] || [ "$s" -le 0 ]; then s="$PATROL_INTERVAL_DEFAULT"; fi
   printf '%s' "$s"
 }
 

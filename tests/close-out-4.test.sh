@@ -1000,36 +1000,6 @@ expect_regex "RO-5 the delivery's instant is its event's own second" '^[0-9]{4}-
 expect_contains "RO-5b …and the report read after the close names it as the window's end" "until ${RO_DEL/%:00Z/Z} (delivered:)" "$RO_ENDS"
 
 # ============================================================
-section "§DELIVERED — a delivered run accepts its continuation marks from any session that names it (REQ-10 AC-10.1; D5)"
-# ============================================================
-# close-out's last act wipes this session's engaged marker, so the verb that finishes a delivered run, the
-# continuation's marks (`continuation-fill`), is run after the consent boundary is gone. Engagement guards a run still
-# moving; a delivered plan named by `--plan` accepts it from any session, engaged or not: a live plan named so from an
-# unengaged session is NOT-ENGAGED. The pull request's merge is the integrate row's landing, an event, and writes no
-# plan. FIXTURE FIDELITY: the plan close-out itself delivered (`run_close … run`), read where the close left it; the
-# verb is the real poker run in the fixture as a session with no engaged marker.
-# fails-when: the verb prints NOT-ENGAGED on a delivered plan, or writes a live plan's continuation from an unengaged session.
-DL_SID="closeout-delivered-sid"
-PDL="$(mk_fixture delivered)"; advance_to "$PDL" 8; gov_step4 "$PDL" "implement: opened 2026-09-14T00:10Z"
-run_close "$PDL" run
-DL_PLAN="$(find "$PDL/.bionic/docs" -name "${PLAN_REL##*/}" -type f 2>/dev/null | head -1)"
-DL_CONT="$(find "$PDL/.bionic/docs" -name continuation.md -type f 2>/dev/null | head -1)"
-expect_eq "DL-0 precondition: close-out delivered the plan (rc 0, its step delivered) and wrote its continuation with the first-decision mark" \
-  "0|state=delivered|yes" \
-  "$CO_RC|$(co_step_answer "$PDL" | tail -1)|$(/usr/bin/grep -qF '<fill: the first decision, or "none">' "$DL_CONT" && echo yes || echo no)"
-lands_poker "$PDL" "$DL_SID" continuation-fill 'the first decision=none' --plan "$DL_PLAN"
-expect_eq "DL-1 continuation-fill --plan <delivered> from an unengaged session writes: rc 0, the mark filled, never NOT-ENGAGED" \
-  "0|no|no" \
-  "$LP_RC|$(/usr/bin/grep -qF '<fill: the first decision' "$DL_CONT" && echo yes || echo no)|$(contains "$LP_OUT" "NOT-ENGAGED")"
-expect_contains "DL-1b …the filled text stands where the mark was" "1. none" "$(cat "$DL_CONT")"
-# a live plan, named the same way from the same unengaged session: the consent boundary stands
-PLV="$(mk_fixture delivered-live)"; advance_to "$PLV" 8
-mkdir -p "$PLV/${CONT_REL%/*}"; printf '# continuation\n\n1. <fill: the first decision, or "none">\n' > "$PLV/$CONT_REL"
-LV_CC="$(cksum < "$PLV/$CONT_REL")"
-lands_poker "$PLV" "$DL_SID" continuation-fill 'the first decision=none' --plan "$PLV/$PLAN_REL"
-expect_eq "DL-5 continuation-fill --plan <live> from an unengaged session prints NOT-ENGAGED (rc 0), the continuation unchanged" "0|yes|$LV_CC" \
-  "$LP_RC|$(contains "$LP_OUT" "NOT-ENGAGED")|$(cksum < "$PLV/$CONT_REL")"
-# ============================================================
 section "§MARKS — close-out fills every mark it can derive; the continuation keeps only the five a person owns (REQ-10 AC-10.2)"
 # ============================================================
 # The landings, the hand-holds line, the reviews and the governed-by lines are close-out's own readings, rendered in
@@ -1051,12 +1021,6 @@ mk_sec() { awk -v h="$2" '/^## / { s = ($0 == h); next } s && NF && !/^```/ { pr
 expect_eq "MK-3 the four close-out fills are rendered: a landings line, a hand-holds line, the reviews sentence, a governed-by line" \
   "yes|yes|yes|yes" \
   "$(mk_sec "$MK_CONT" "## Landings" | /usr/bin/grep -q '^landings' && echo yes || echo no)|$(mk_sec "$MK_CONT" "## Hand-holds" | /usr/bin/grep -q '^hand-holds: ' && echo yes || echo no)|$(/usr/bin/grep -q '^Reviews: .*ADRs: ' "$MK_CONT" && echo yes || echo no)|$(mk_sec "$MK_CONT" "## Governed by" | /usr/bin/grep -q '^governed-by: ' && echo yes || echo no)"
-# the five filled by their verb from a session close-out let go of: the continuation then owes nothing
-for mk_f in 'the first decision=none' 'what was ruled=none' 'version=1.0.0' 'ideas path=docs/ideas.md' 'carry-overs=none'; do
-  lands_poker "$PMK" "$DL_SID" continuation-fill "$mk_f" --plan "$PMK/$PLAN_REL"
-done
-expect_eq "MK-4 the five filled by continuation-fill from an unengaged session: the last call says none left, the file holds no mark" \
-  "0|yes|" "$LP_RC|$(contains "$LP_OUT" "0 fill marks left")|$(mk_marks "$MK_CONT")"
 
 # ============================================================
 section "§OWED-AT-CLOSE — close-out settles the matrix row its own last reading proves, and the gate before the flip does not refuse on it"

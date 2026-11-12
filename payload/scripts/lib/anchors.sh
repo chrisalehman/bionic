@@ -26,7 +26,7 @@
 #       sorted, each file's suites sorted and unique
 #
 # <at> is `-` for the files under <root> as they stand, or a commit read out of git's objects (the
-# landing's candidate, which no checkout holds). Exposed as `session-poker.sh anchors check|index`.
+# landing's candidate, which no checkout holds).
 #
 # A SUITE IS THE FILE THAT DECLARES (D3 "1", design-ledger Δ2): any *.sh under <root> that git tracks,
 # or holds untracked and unignored, and that carries a shaped call, keyed on its path from the root —

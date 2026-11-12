@@ -10,8 +10,7 @@
 # and is older than one fire window (the poker-interval plus the scheduler's jitter)
 # with an idle stretch that long and no tick in it, it refuses the turn in ONE line that
 # names the three acts in order: look at the cron table, create the job if it is absent,
-# arm. The explanation behind the line is not in the line; `session-poker.sh patrol
-# --explain` prints it.
+# arm. The explanation behind the line is not in the line.
 #
 # THE THREE STAMP STATES, and why only one of them speaks here:
 #   absent  — never armed. Nothing engaged a run on this session, or nothing armed
@@ -24,9 +23,8 @@
 # satisfy the arming wall over a cron table that still holds nothing — a Patrol
 # that reads alive and never fires again, which is worse than the state it
 # replaced. Group 5 asserts the stamp's mtime is untouched; Group 4 demands the line
-# name CronCreate before arm, and the explanation rows demand the rule that a refused
-# CronCreate is never followed by arm, for the same reason
-# tests/dispatch-preflight.test.sh S21 demands it.
+# name CronCreate before arm, for the same reason tests/dispatch-preflight.test.sh S21
+# demands it.
 #
 # ACCELERATED CLOCK, NEVER A WAIT. The interval is pinned tiny through the
 # project's own knob (`poker-interval:` in .bionic/config.yaml) and staleness is
@@ -586,35 +584,6 @@ fire "$D"; expect_quiet "22b: a stamp inside the project's fire window (40s of a
 backdate "$(stamp_path "$D" "$SID")" 90
 fire "$D"; expect_block "22c: …and one past it (90s), still inside twice the interval, is refused"
 
-# THE EXPLANATION is what the line leaves out, asked for through the poker beside the hook under test.
-# It is static text over that poker's own path, so it is read once. Its words are a document's, not a
-# computed fact's: the rows below pin the facts a reader acts on, and each needs the verb to have
-# printed before an absence or a phrase means anything.
-G4_EXPLAIN="$(cd "$(mktemp -d)" && env CLAUDE_CODE_SESSION_ID="$SID" bash "${BIONIC_HOOKS_DIR}/session-poker.sh" patrol --explain 2>&1)"
-G4_EXPLAIN_RC=$?
-if [ "$G4_EXPLAIN_RC" -eq 0 ] && [ -n "$G4_EXPLAIN" ]; then
-  ok "21a meta: patrol --explain prints, rc 0"
-else
-  no "21a meta: patrol --explain printed nothing or failed" "rc=$G4_EXPLAIN_RC out=<$G4_EXPLAIN>"
-fi
-explain_names() {  # <label> <substring>
-  case "$G4_EXPLAIN" in
-    *"$2"*) ok "$1" ;;
-    *)      no "$1" "the explanation does not name <$2>" ;;
-  esac
-}
-
-# The poker it names is the sibling this hook measured against, never a placeholder a model would paste
-# into a `command not found` (the resolved-root rule).
-explain_names "21: the explanation names the arm act with the poker as an absolute path" "${BIONIC_HOOKS_DIR}/session-poker.sh arm"
-
-# Why the operator is seeing a refusal at all: the cron table is in process memory and a plugin
-# update takes it with no file left behind.
-explain_names "23: …and the cause the operator can act on" "plugin update"
-
-# 24 retired: that a refusal comes once per turn is row 9's fact (a re-entered stop passes), and the
-# line never said it.
-
 section "Group 6: registration"
 
 # A hook with a suite, a run line and no registration is installed, green in its
@@ -867,24 +836,6 @@ if [ -f "$(stamp_path "$TS_RW" "$SID")" ]; then
 else
   no "TS-7c the control: resume over a wave-scale run armed no stamp" "$(ls "$TS_RW/.bionic/tmp")"
 fi
-
-# ---------- what the explanation says about the footgun in its own third act ----------
-#
-# CREATING IS THE REFUSABLE HALF. `CronCreate` is measured non-deterministically refusable by the
-# auto-mode classifier, and a model that stamps without it freshens the stamp over an EMPTY cron
-# table: a Patrol that reads alive to this hook, to the arming wall and to /bionic:doctor, and never
-# fires again. The header argues that this is strictly worse than the death it heals. The line is too
-# short to carry the argument (it says "if absent"), so the explanation carries it, and these rows
-# hold it there for the reader who acts on it.
-D=$(make_env 1m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 600
-fire "$D"
-expect_block "35: the stale fixture is refused, so there is a refusal to explain"
-explain_names "36: the arm act is conditional on the create act in the text itself" \
-  "Only once step 2 returned a job"
-explain_names "37: …and a refused CronCreate is told to stop, not to arm" \
-  "do NOT run step 3"
-explain_names "38: …and the deliberate-stop path is named, not left to be guessed" \
-  "session-poker.sh disarm"
 
 # ---------- the header's own honesty about its backstop ----------
 #

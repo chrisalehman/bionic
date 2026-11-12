@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # hooks/poker/sitrep.sh — the situation report: the blind wall, the scorecard, the report and the handoff
-# (fill-report, landing-report, handoff, decisions, resume, sitrep).
+# (landing-report, handoff, decisions, resume, sitrep).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
@@ -610,7 +610,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #
 # EVERY FACT IS ANOTHER READER'S, CALLED: the tasks and sizes are `units_rows`', the longest open chain
 # `units_chain`'s over `units_edges`, the landings, runs and the line `landing_report`'s and lib/line.sh's fold, the
-# idle minutes `fill-report`'s own line, the asks the run's register's (`owed_list_plan`, never the caller's
+# idle minutes `sitrep_idle_minutes`' fold of the fill ledger, the asks the run's register's (`owed_list_plan`, never the caller's
 # session), the launches the rosters', the findings `proof_findings` at `proof_finding_rating` less
 # `proof_fixed`, the landings the landing record's `landed:` headers, a goal's status lib/plan.sh `plan_goal_status`'s, the
 # one the release approval card reads too. What no reader computes is computed here, once: the work's counts, its
@@ -656,7 +656,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #
 # A value the record cannot compute prints `-` or says so in words. Clock times are local and 12-hour on this
 # machine's clock (`sitrep_clock`); a time on another local day than now's carries its date. Now is BIONIC_NOW_EPOCH
-# when set, fill-report's seam.
+# when set, the seam the idle minutes read too.
 SITREP_SHEET_HEAD="sheet/v1 — facts for the model; the user sees the card, never this sheet"
 SITREP_STEP_NAMES="Configure Scope Design Plan Implement Verify Review Document Integrate Close-out"
 
@@ -1080,7 +1080,7 @@ sitrep_forecast_end() {
 
 # sitrep_reviews <plan> <root> -> `<question><TAB><scope><TAB><result><TAB><at ISO or -><TAB><record><TAB><open>` per
 # review proof the reader holds with a question and a record (`reader reviews`), in the order they were last set, a
-# repeated record and result once. <open> counts the record's findings `disposition` would print open: S1 or S2,
+# repeated record and result once. <open> counts the record's findings `finding_disposition` reads open: S1 or S2,
 # rated fix (`proof_finding_rating`), with no fix of it landed (`proof_fixed`).
 sitrep_reviews() {
   local plan="$1" root="$2" docs fixed reads q sc res at ev h got num s r n
@@ -1521,7 +1521,7 @@ SITREP_RUNNING
     SG_T_WHOLE="$(proof_whole_text "$plan" "$root" 2>/dev/null)"
     case "$SG_T_WHOLE" in none) SG_T_WHOLE="not run yet" ;; '') SG_T_WHOLE="unverified" ;; esac
   fi
-  idle_min="$(cd "$root" 2>/dev/null && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" fill-report "$plan" 2>/dev/null | sed -n 's/^idle minutes: \([0-9][0-9]*\)$/\1/p' | head -n 1)"
+  idle_min="$(sitrep_idle_minutes "$plan" "$root")"
   # the landing report's run counts; a run killed at the gate (rc over 128) is a discarded run
   case "$lr1" in
     *'· runs: green='*)
@@ -1698,6 +1698,52 @@ sitrep_blocked_on_you() {
   esac
 }
 
+# sitrep_idle_minutes <plan> <root> -> the run's idle minutes, from the fill ledger the stop library writes
+# (lib/patrol.sh `fill_ledger_path`). Read from times code wrote with the clock, never from the plan's text: the lines
+# are folded by turn (the last of a turn wins), ordered by `at=`, and a line whose idle= is non-empty owns the interval
+# to the next line; the last one owns the interval to now only while the run is open. An interval counts once, however
+# many rows idled in it. No ledger is no idle minute.
+sitrep_idle_minutes() {
+  local plan="$1" root="$2" f FR_OPEN=no FR_NOW FR_LED_IN=/dev/null FR_IDLE_S
+  f="$(fill_ledger_path "$root" "$plan" 2>/dev/null)" || f=""
+  { [ -n "$f" ] && [ -f "$f" ] && [ ! -L "$f" ]; } && FR_LED_IN="$f"
+  run_open "$plan" && FR_OPEN=yes
+  FR_NOW="${BIONIC_NOW_EPOCH:-}"
+  case "$FR_NOW" in ''|*[!0-9]*) FR_NOW="$(date -u +%s)" ;; esac
+  FR_IDLE_S="$(awk -v open="$FR_OPEN" -v now="$FR_NOW" "$_PATROL_ISO_AWK"'
+    function fr_field(line, key,   i, n, parts) {
+      n = split(line, parts, "|")
+      for (i = 2; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+      return ""
+    }
+    index($0, "fill-ledger/v1|") == 1 {
+      e = iso2epoch(fr_field($0, "at"))
+      if (e < 0) next
+      k = fr_field($0, "turn")
+      if (k != "" && (k in slot)) { i = slot[k] } else { i = ++n; if (k != "") slot[k] = i }
+      ep[i] = e; id[i] = fr_field($0, "idle")
+    }
+    END {
+      for (i = 1; i <= n; i++) ord[i] = i
+      for (i = 2; i <= n; i++) {
+        v = ord[i]; j = i - 1
+        while (j >= 1 && ep[ord[j]] > ep[v]) { ord[j + 1] = ord[j]; j-- }
+        ord[j + 1] = v
+      }
+      idle = 0
+      for (x = 1; x <= n; x++) {
+        i = ord[x]
+        if (id[i] == "") continue
+        if (x < n) end = ep[ord[x + 1]]
+        else end = (open == "yes" ? now : ep[i])
+        if (end > ep[i]) idle += end - ep[i]
+      }
+      printf "%d\n", idle
+    }' "$FR_LED_IN")"
+  case "$FR_IDLE_S" in ''|*[!0-9]*) FR_IDLE_S=0 ;; esac
+  printf '%d\n' "$(( (FR_IDLE_S + 30) / 60 ))"
+}
+
 # sitrep_ask_words -> one `<title> — holds <what>` line per ask of sitrep_gather's facts, ` · waits on <what>` ending
 # the line of an ask that waits on an event; the asks the handoff's head and the resume recap carry
 sitrep_ask_words() {
@@ -1717,158 +1763,6 @@ sitrep_tick_line() {
   sitrep_gather "$plan" "$root" line 2>/dev/null
   say "sitrep $(sitrep_status)"
 }
-
-  # THE FILL'S MEASURE (wave-20 REQ-5, AC-5.6; Δ2; ADR-036 decision 4). The stop library appends
-  # one `fill-ledger/v1` line per Stop of an engaged run; this folds them into the run's
-  # missed-opportunity minutes (a free slot, a ready row, nothing launched — target zero), with
-  # HOLD and declines listed separately with their idle cost. The path and the fold are
-  # lib/patrol.sh's (`fill_ledger_path`, `fill_ledger_report`), the ones the recorder writes by.
-  #
-  # THE PLAN: the operand — absolute, project-root-relative or docs-root-relative, `bind`'s
-  # three spellings — or, without one, the session's own run as `resolve_run` names it. OPEN is
-  # `run_open`'s answer: an open run's last line owns the interval to now, a closed one's owns
-  # nothing. READ-ONLY and outside the engagement gate, like `window`.
-  poker_verb_fill_report() {
-    REPO="$(project_root "$PWD")"
-    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
-    if [ -z "$REPO_REAL" ]; then
-      die "REFUSED — cannot resolve the working directory."
-      exit 2
-    fi
-    FR_PLAN=""
-    if [ -n "$FILL_REPORT_ARG" ]; then
-      case "$FILL_REPORT_ARG" in
-        /*) FR_PLAN="$FILL_REPORT_ARG" ;;
-        *)  FR_PLAN="$REPO_REAL/$FILL_REPORT_ARG"
-            [ -f "$FR_PLAN" ] || FR_PLAN="$(docs_root "$REPO_REAL")/$FILL_REPORT_ARG" ;;
-      esac
-      if [ ! -f "$FR_PLAN" ] || [ -L "$FR_PLAN" ]; then
-        die "REFUSED — no plan file at $FILL_REPORT_ARG; name the plan whose fill ledger to read."
-        exit 2
-      fi
-    else
-      SESSION_ID="$(session_id)" || SESSION_ID=""
-      if [ -z "$SESSION_ID" ]; then
-        die "REFUSED — no session key, and no plan named; a report without an operand is for THIS session's run."
-        exit 3
-      fi
-      resolve_run "$REPO_REAL" "$SESSION_ID"
-      FR_PLAN="$POKER_RUN_PLAN"
-      if [ -z "$FR_PLAN" ] || [ ! -f "$FR_PLAN" ]; then
-        die "REFUSED — this session has no run to report on; name the plan: fill-report <plan>."
-        exit 2
-      fi
-    fi
-    FR_SLUG="$(proof_plan_slug "$FR_PLAN")"
-    FR_OPEN=no
-    run_open "$FR_PLAN" && FR_OPEN=yes
-    FR_FILE="$(fill_ledger_path "$REPO_REAL" "$FR_PLAN")"
-    if [ ! -f "$FR_FILE" ] || [ -L "$FR_FILE" ]; then
-      say "fill-report — no fill ledger yet for ${FR_SLUG}: ${FR_FILE} (the stop hook writes it from the first Stop past Step 3)"
-    fi
-    FR_OUT="$(fill_ledger_report "$FR_FILE" "$FR_SLUG" "$FR_OPEN" "${BIONIC_NOW_EPOCH:-}")"
-    printf '%s\n' "$FR_OUT"
-    # IDLE MINUTES AND PEAK WIDTH (wave-26 T16, D17). Both are read from times code wrote with the
-    # clock and never from the plan's text: the ledger's `at=` and `idle=`, the roster's
-    # `launched_at=` and the sweeper ledger's ack stamps, through the roster lib's own close rule.
-    FR_NOW="${BIONIC_NOW_EPOCH:-}"
-    case "$FR_NOW" in ''|*[!0-9]*) FR_NOW="$(date -u +%s)" ;; esac
-    FR_LED_IN=/dev/null
-    [ -f "$FR_FILE" ] && [ ! -L "$FR_FILE" ] && FR_LED_IN="$FR_FILE"
-    # Idle: the lines are folded by turn (the last of a turn wins, as the report above folds them),
-    # ordered by `at`, and a line whose idle= is non-empty owns the interval to the next line; the
-    # last one owns the interval to now only while the run is open. An interval counts once, however
-    # many rows idled in it.
-    FR_IDLE_S="$(awk -v open="$FR_OPEN" -v now="$FR_NOW" "$_PATROL_ISO_AWK"'
-      function fr_field(line, key,   i, n, parts) {
-        n = split(line, parts, "|")
-        for (i = 2; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-        return ""
-      }
-      index($0, "fill-ledger/v1|") == 1 {
-        e = iso2epoch(fr_field($0, "at"))
-        if (e < 0) next
-        k = fr_field($0, "turn")
-        if (k != "" && (k in slot)) { i = slot[k] } else { i = ++n; if (k != "") slot[k] = i }
-        ep[i] = e; id[i] = fr_field($0, "idle")
-      }
-      END {
-        for (i = 1; i <= n; i++) ord[i] = i
-        for (i = 2; i <= n; i++) {
-          v = ord[i]; j = i - 1
-          while (j >= 1 && ep[ord[j]] > ep[v]) { ord[j + 1] = ord[j]; j-- }
-          ord[j + 1] = v
-        }
-        idle = 0
-        for (x = 1; x <= n; x++) {
-          i = ord[x]
-          if (id[i] == "") continue
-          if (x < n) end = ep[ord[x + 1]]
-          else end = (open == "yes" ? now : ep[i])
-          if (end > ep[i]) idle += end - ep[i]
-        }
-        printf "%d\n", idle
-      }' "$FR_LED_IN")"
-    case "$FR_IDLE_S" in ''|*[!0-9]*) FR_IDLE_S=0 ;; esac
-    # Width: every session the ledger names (and this one) has a roster; each live row is open from
-    # its occupancy stamp to the ack that closes its name (`_roster_acks`, `_roster_discharged`:
-    # an ack strictly later than the launch), or to now. A row's `intended`, `confirmed` and
-    # `identified` lines share a name and a stamp, so (name, stamp) is one interval.
-    FR_SIDS="$(awk -F'|' '
-      index($0, "fill-ledger/v1|") == 1 {
-        for (i = 2; i <= NF; i++) if (index($i, "session=") == 1) print substr($i, 9)
-      }' "$FR_LED_IN" | sort -u)"
-    FR_SID_NOW="$(session_id 2>/dev/null)" || FR_SID_NOW=""
-    FR_SIDS="$(printf '%s\n%s\n' "$FR_SIDS" "$FR_SID_NOW" | sort -u)"
-    FR_SPANS=""
-    for FR_S in $FR_SIDS; do
-      case "$FR_S" in ''|*[!A-Za-z0-9_-]*) continue ;; esac
-      FR_RF="$REPO_REAL/.bionic/tmp/roster-${FR_S}.state"
-      FR_AF="$REPO_REAL/.bionic/tmp/sweeper-${FR_S}.state"
-      { [ -f "$FR_RF" ] && [ ! -L "$FR_RF" ] && [ -r "$FR_RF" ]; } || continue
-      { [ -f "$FR_AF" ] && [ ! -L "$FR_AF" ] && [ -r "$FR_AF" ]; } || FR_AF=""
-      FR_SPANS="${FR_SPANS}$(FR_RF="$FR_RF" FR_AF="$FR_AF" awk -v now="$FR_NOW" \
-        -v rpfx="roster-state/${ROSTER_VERSION:-$ROSTER_SCHEMA_VERSION}|" "$_PATROL_ISO_AWK$_ROSTER_OPEN_AWK"'
-        BEGIN {
-          _roster_acks(ENVIRON["FR_AF"], ACK)
-          f = ENVIRON["FR_RF"]
-          while ((getline line < f) > 0) {
-            if (index(line, rpfx) != 1) continue
-            if (!_roster_live(_roster_kv(line, "status"))) continue
-            nm = _roster_kv(line, "name"); if (nm == "") nm = "(unnamed)"
-            st = _roster_occupied_at(line); if (!_roster_stamp_ok(st)) continue
-            key = nm SUBSEP st; if (key in seen) continue
-            seen[key] = 1
-            b = iso2epoch(st); en = now
-            if ((nm in ACK) && _roster_discharged(st, ACK[nm])) en = iso2epoch(ACK[nm])
-            if (en < b) en = b
-            printf "%d %d\n", b, en
-          }
-          close(f)
-        }' </dev/null)
-"
-    done
-    FR_PEAK="$(printf '%s' "$FR_SPANS" | awk '
-      NF == 2 { n++; s[n] = $1; e[n] = $2 }
-      END {
-        peak = 0
-        for (i = 1; i <= n; i++) {
-          c = 0
-          for (j = 1; j <= n; j++) if (s[j] <= s[i] && (s[i] < e[j] || j == i)) c++
-          if (c > peak) peak = c
-        }
-        printf "%d\n", peak
-      }')"
-    case "$FR_PEAK" in ''|*[!0-9]*) FR_PEAK=0 ;; esac
-    printf 'idle minutes: %d\n' "$(( (FR_IDLE_S + 30) / 60 ))"
-    printf 'peak width: %d\n' "$FR_PEAK"
-    FR_HEAD="$(printf '%s\n' "$FR_OUT" | head -n 1)"
-    FR_M="${FR_HEAD#*|missed=}"; FR_M="${FR_M%%|*}"
-    FR_H="${FR_HEAD#*|hold=}"; FR_H="${FR_H%%|*}"
-    FR_D="${FR_HEAD#*|declined=}"; FR_D="${FR_D%%|*}"
-    say "fill-report ${FR_SLUG}: missed opportunity ${FR_M} min (a free slot, a ready row, nothing launched) · HOLD ${FR_H} min · declined ${FR_D} min$( [ "$FR_OPEN" = yes ] && printf ' · run open, last interval to now')"
-    exit 0
-  }
 
   # THE HANDOFF DOCUMENT. One self-contained file a fresh session continues from, written whole by this verb and never
   # by hand, with or without a bound run, to lib/handoff.sh `handoff_home_file`: the run's slug when one is bound, else

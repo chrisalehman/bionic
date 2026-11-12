@@ -907,11 +907,6 @@ expect_eq "(an1) …the entry is returned, why=anchor-moved" "anchor-moved" \
   "$(ll_field "$(ll_ev "$RAM" returned)" why)"
 expect_eq "(an1) …before any suite ran on the candidate" "" "$(ll_ev "$RAM" verdict)"
 expect_nonempty "(an1) …over a candidate that was built" "$(ll_ev "$RAM" candidate)"
-AN_CHECK="$(bash "$REPO/hooks/session-poker.sh" anchors check "$REPO" 2>&1)"; AN_RC=$?
-expect_eq "(an2) session-poker.sh anchors check on the shipped tree exits 0" "0" "$AN_RC"
-expect_empty "(an2) …and names no moved anchor" "$AN_CHECK"
-expect_contains "(an2) …over an index that holds this suite's own anchor" "tests/landing-line-1.test.sh" \
-  "$(bash "$REPO/hooks/session-poker.sh" anchors index "$REPO" 2>&1)"
 
 # ============================================================================ what a red means (wave-28 T5)
 #
@@ -1433,7 +1428,7 @@ expect_contains "(k10b) …naming the row's kind" "T1 is a build row" "$KL_OUT"
 ww_sdlc "$RK" "$(kl_lib proof_finding_lines record/wave-x/critic.md "$(printf '4\tS3\ton\t-\tdefer\t-\tan unstated one')")"
 KL_OUT="$(ww_poke "$RK" known-limits-part T3)"; KL_RC=$?
 expect_eq "(k11) a deferral with no stated sentence is refused, the branch unmoved" "1|$KL_T" "$([ "$KL_RC" -ne 0 ] && echo 1)|$(kl_tip "$RK")"
-expect_contains "(k11b) …naming the finding and the verb that states it" "disposition record/wave-x/critic.md#4 defer" "$KL_OUT"
+expect_contains "(k11b) …naming the finding and the verb that states it" "finding-move record/wave-x/critic.md#4 defer" "$KL_OUT"
 
 # ---------------------------------------------------------------------------
 section "§HEALTH: a landing writes nothing of its row or of the matrix: the plan's stack-health: stands as written while the rendering moves"

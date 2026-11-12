@@ -694,25 +694,6 @@ expect_eq "VG-5e …and the word at the working head under ## SDLC State holds i
 vg_mu ""; /usr/bin/grep -v '|row=T10|' "$VG_DIR/landing-proofs.log" > "$VG_DIR/landing-proofs.log.n" && mv "$VG_DIR/landing-proofs.log.n" "$VG_DIR/landing-proofs.log"
 poke "$RVG" current 8 --check
 
-# ---------- §DISPOSITION: a finding the whole run fixed says so, not that a landing did ----------
-# A build row that landed on no suite owes no verdict, so a green whole run past its landing is what fixes its finding.
-VG_FR="record/wave-01-fixture/adv-fix.md"
-printf 'question: adversarial\nresult: fail\nscope: piece\nreviewed: %s..%s\nfindings: 1\nfinding: 1 S2 on lib/a.sh:1 data lost\nshown: 1 bash lib/a.sh\n' \
-  "$VG_B" "$VG_A" > "$VG_DIR/adv-fix.md"
-VG_PL="$(bash -c '. "$1" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" adversarial vg-crit fail piece' _ "$S46_LIB" "$VG_A" "$VG_FR")"
-VG_CX="$(s57_commit "$VG_WT" lib/a.sh landing-of-the-fix)"
-VG_C4="$(s57_commit "$VG_WT" lib/b.sh after-it)"
-printf 'Gating: 3 passed, 0 failed\n' | regression_fixture "$PVG" "$VG_DIR/whole-c4.log" "$VG_C4" 0 0
-poke "$RVG" proof-add regression record/wave-01-fixture/whole-c4.log
-VG_PL="$VG_PL" VG_CX="$VG_CX" VG_FR="$VG_FR" awk '{ print } /^current: / && !p { print ENVIRON["VG_PL"]; p = 1 }
-  /^- T5: / { print "- T9: landed " ENVIRON["VG_CX"] " 2026-10-04T13:00:00Z born: review S2 on of=" ENVIRON["VG_FR"] "#1" }
-  /^\| T5 \| 5 \| verify / { print "| T9 | 4 | build | fix the finding · born: review | implementor | — | 30 | REQ-1 | lib/a.sh | — | — | landed |" }' \
-  "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
-# The fix row landed by hand: a hand landing records it as the published event alone, no `landed:` header.
-printf 'line/v1|ev=published|row=T9|commit=%s|kind=hand|by=Dana Fixture|why=landed on the report|at=2026-10-04T13:00:00Z\n' "$VG_CX" >> "$VG_DIR/landing-proofs.log"
-poke "$RVG" disposition
-expect_contains "VG-6 AC-10.1 AC-10.4 a finding a hand-landed row fixed, with a green whole run past it, reads fixed by the regression at its head" \
-  "fixed by the regression at ${VG_C4:0:12}" "$(printf '%s\n' "$OUT" | /usr/bin/grep "finding $VG_FR#1 ")"
 POKE_BOUND="$VG_BOUND_WAS"
 
 
@@ -903,7 +884,7 @@ section "§REVIEW-FILES §FILES-UNHELD: each verb a close meets writes its cell,
 # contract to a new dispatch. FIXTURE FIDELITY: a task-scale plan at single rigor with a
 # reads table carrying an artifact cell and no ledger, bound to this session, its working branch the repository's
 # main; roster rows and acks in their writers' shapes (roster_row_fixture, s20_ack). Every write goes through the
-# real verb; the one planted line is a review proof in proof_line's shape, as §DISPOSITION plants one.
+# real verb; the one planted line is a review proof in proof_line's shape, as a review reading's fixture plants one.
 vc_plan() {  # <repo> <row>... -> the plan path; bound and committed
   local repo="$1" f row; shift
   f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"

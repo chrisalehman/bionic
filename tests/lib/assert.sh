@@ -168,8 +168,8 @@
 # suite. A shaped anchor names a file RELATIVE TO THE ROOT (the directory holding
 # tests/lib/) and a text, both LITERALS in the source, so
 # payload/scripts/lib/anchors.sh reads it without running anything:
-# `session-poker.sh anchors check` confirms every one at each landing and prints
-# `MOVED <suite>:<line>`, and `anchors index` maps each file to its suites.
+# the landing's ready confirms every one on its candidate and prints
+# `MOVED <suite>:<line>`, and `anchors_index` maps each file to its suites.
 #
 #   anchor file   <file> <text> [<new> <dest>]       <text> on exactly one line;
 #                                                   writes <dest>, that text made <new>

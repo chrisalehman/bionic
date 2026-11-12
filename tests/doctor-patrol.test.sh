@@ -828,7 +828,7 @@ iso_ago() {  # <seconds ago> -> UTC ISO-8601
     || date -u -d "-$1 seconds" +%Y-%m-%dT%H:%M:%SZ
 }
 
-# THE WINDOW NEEDS A FILESYSTEM THAT KEEPS CREATION TIMES. `roster_window` reads `stat %B`
+# THE WINDOW NEEDS A FILESYSTEM THAT KEEPS CREATION TIMES. `patrol_window` reads `stat %B`
 # / `%W`, and a filesystem answering 0 means "no birth recorded" — the window then falls
 # back to empty and every arm below would read the whole transcript. That is a correct
 # fallback and a useless test, so it is named out loud rather than passed over.
@@ -913,9 +913,8 @@ expect_match "80: …with a fix line for both unrostered launches" \
 # THE WINDOW ITSELF, ASKED DIRECTLY. 75-80 read doctor's rendering; this reads the
 # instant the whole cluster turns on, so a section that went green because the window
 # came back EMPTY (every count falling back to the lifetime) cannot pass unnoticed.
-S12_WIN="$( cd "$REPO12A" && CLAUDE_CODE_SESSION_ID="$SID12A" \
-            bash "${BIONIC_HOOKS_DIR}/session-poker.sh" window 2>/dev/null )"
-expect_regex "81: the poker dates 12a's roster — the window is a real instant, not empty" \
+S12_WIN="$(bash -c '. "$1"; patrol_window "$2" "$3"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/patrol.sh" "$REPO12A" "$SID12A" 2>/dev/null)"
+expect_regex "81: the Patrol library dates 12a's roster — the window is a real instant, not empty" \
   '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$S12_WIN"
 
 fi

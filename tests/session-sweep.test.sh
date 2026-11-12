@@ -612,7 +612,7 @@ section "7d. the failure path — a marker is written, one line prints, and it c
 # rc=2 causes — a symlinked .bionic/tmp, an unresolvable cwd — are either
 # pre-empted by this hook's own guard before it would ever call sweep, or too
 # machine-fragile to plant reliably). The stub is asked ONLY for `sweep`; every
-# other verb this hook calls (`interval`, `interval-default`) gets a real,
+# other verb this hook calls (`interval`) gets a real,
 # trivial answer so the age gate and the report above still behave normally.
 ss_plant_hook_tree() {  # <root> <sweep-exit-code|"hang"> -> echoes <root>/hooks
   local root="$1" mode="$2" lib_src
@@ -623,7 +623,7 @@ ss_plant_hook_tree() {  # <root> <sweep-exit-code|"hang"> -> echoes <root>/hooks
   cp "$lib_src"/*.sh "$root/scripts/lib/" 2>/dev/null
   {
     printf '#!/bin/bash\ncase "$1" in\n'
-    printf '  interval|interval-default) echo 1; exit 0 ;;\n'
+    printf '  interval) echo 1; exit 0 ;;\n'
     if [ "$mode" = hang ]; then
       printf '  sweep) sleep 999 ;;\n'
     else

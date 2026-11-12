@@ -49,11 +49,11 @@ PATROL_STAMP_SCHEMA_OUT="patrol-stamp/v1"
 PATROL_ROSTER_SCHEMA="patrol-roster/v1"
 PATROL_WALL_SCHEMA="patrol-wall/v1"
 
-# The poker's own default, quoted here ONLY as the last resort when the poker
-# itself cannot be reached to be asked. Where the script exists it is asked —
-# `interval` for the project's configured value and `interval-default` for its
-# built-in — because two copies of a constant drift the first time either moves.
-PATROL_INTERVAL_LAST_RESORT=1200
+# THE DEFAULT PATROL INTERVAL, in seconds: its one copy. hooks/session-poker.sh takes its own default from it, and
+# every reader of the interval (this file's `patrol_interval`, the arming wall, the stop library, session start) asks
+# the poker's `interval` for the project's configured value and falls back to this when that refuses or cannot be
+# asked, so a broken config line cannot disarm a wall and no second copy can drift from the poker's.
+PATROL_INTERVAL_DEFAULT=1200
 
 # HOW STALE IS STALE IS NOT A MULTIPLE OF THE INTERVAL ANY MORE (epic-23 wave-16
 # REQ-11, retiring L-DETECT/4.5's constant below). It held one judgment call —
@@ -430,7 +430,7 @@ _patrol_scan_jq='
 #
 # THE WINDOW APPLIES HERE TOO. `agents` and `refused` used to be counted over the
 # transcript's WHOLE LIFE, while hooks/session-poker.sh's own counters scope to the
-# roster's own window (`roster_window()`, exposed as its `window` verb) — and since a
+# roster's own window (`patrol_window()` below) — and since a
 # `.bionic/tmp` wipe re-opens the roster at zero, a session running a second wave read its
 # first wave's dispatches against a roster that only began at the wipe, and doctor printed
 # `N launches unrostered` for a wall that had rostered everything asked of it since. The
@@ -489,50 +489,41 @@ _patrol_scan() {  # <transcript> [<since ISO>] -> JOB/AGENTS/REFUSED records
 }
 
 # The interval, from its owner. `interval` is the project's configured value and
-# REFUSES on a malformed one; `interval-default` is the poker's own built-in and
-# is what a refusal falls back to — the same two-step
+# REFUSES on a malformed one; PATROL_INTERVAL_DEFAULT is what a refusal, or a poker
+# that cannot be reached, falls back to — the same two-step
 # hooks/dispatch-preflight.sh's arming wall takes, so doctor measures staleness
 # against the number the wall would refuse against.
-patrol_interval() {  # <repo-root> -> "<seconds> <configured|default|last-resort>"
-  local repo="${1:-}" poker secs
+patrol_interval() {  # <repo-root> -> "<seconds> <configured|default>"
+  local repo="${1:-}" poker secs=""
   poker="$(plugin_root 2>/dev/null)/hooks/session-poker.sh"
   if [ -f "$poker" ]; then
     secs=$( cd "$repo" 2>/dev/null && bash "$poker" interval 2>/dev/null )
     case "$secs" in ''|*[!0-9]*) secs="" ;; esac
-    if [ -n "$secs" ] && [ "$secs" -gt 0 ]; then printf '%s configured' "$secs"; return 0; fi
-    secs=$( bash "$poker" interval-default 2>/dev/null )
-    case "$secs" in ''|*[!0-9]*) secs="" ;; esac
-    if [ -n "$secs" ] && [ "$secs" -gt 0 ]; then printf '%s default' "$secs"; return 0; fi
   fi
-  printf '%s last-resort' "$PATROL_INTERVAL_LAST_RESORT"
+  if [ -n "$secs" ] && [ "$secs" -gt 0 ]; then printf '%s configured' "$secs"; return 0; fi
+  printf '%s default' "$PATROL_INTERVAL_DEFAULT"
 }
 
-# THE WINDOW, from its owner. "Since when does THIS roster's own record of this session
-# begin" is hooks/session-poker.sh's own question — its `window` verb answers it with the
-# roster file's own creation time, or the Patrol stamp beside it when the roster itself
-# cannot be dated (`roster_window()`). This shells out to that verb rather than
-# re-deriving `file_birth`/`epoch_iso`/`roster_window` here, the same call
-# `patrol_interval()` above already makes for the interval and for the identical reason: a
-# copy grown in a lib/ file that cannot source hooks/ would be a second, silently
-# driftable answer to one question. tests/cross-gate-agreement.test.sh §Q.3 compares the
-# two COUNTING functions this window feeds (hooks/session-poker.sh's
-# count_main_thread_dispatches/count_refused_dispatches against this file's own
-# _patrol_scan) on one shared fixture, the same way §Q already does for the refusal-join
-# rule.
+# THE WINDOW: since when does THIS roster's own record of this session begin. The answer is the roster file's
+# creation instant, or the Patrol stamp's beside it when the roster cannot be dated: arming precedes the first
+# dispatch, so the stamp still dates the stretch the session answers for. The creation instant is the filesystem's
+# own (`stat %B`, `%W` on GNU, where 0 means none is kept), never the mtime: the roster is append-only, so its mtime
+# is the last dispatch and a window from it would hide every gap but the newest. tests/cross-gate-agreement.test.sh
+# §Q.3 compares the two COUNTING functions this window feeds on one shared fixture.
 #
-# EVERY FAILURE IS AN EMPTY STRING, never a refusal: an unreachable poker, an unresolvable
-# root or a filesystem that keeps no creation time all mean "no window", and the counters
-# fall back to the whole transcript — the answer doctor gave before this existed.
+# EVERY FAILURE IS AN EMPTY STRING, never a refusal: no session, no root or a filesystem that keeps no creation time
+# all mean "no window", and the counters read the whole transcript.
 patrol_window() {  # <repo-root> <sid> -> ISO instant on stdout, empty for "the whole transcript"
-  local repo="${1:-}" sid="${2:-}" poker w
-  [ -n "$repo" ] && [ -n "$sid" ] || { printf ''; return 0; }
-  poker="$(plugin_root 2>/dev/null)/hooks/session-poker.sh"
-  [ -f "$poker" ] || { printf ''; return 0; }
-  w=$( cd "$repo" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$sid" bash "$poker" window 2>/dev/null )
-  case "$w" in
-    ''|*[!0-9TZ:.-]*) printf '' ;;
-    *) printf '%s' "$w" ;;
-  esac
+  local repo="${1:-}" sid="${2:-}" t f b=""
+  [ -n "$repo" ] && [ -n "$sid" ] || return 0
+  t="$(tmp_root "$repo" 2>/dev/null)" || return 0
+  for f in "$t/roster-${sid}.state" "$t/patrol-${sid}.state"; do
+    b="$(stat -f %B "$f" 2>/dev/null || stat -c %W "$f" 2>/dev/null)" || b=""
+    case "$b" in ''|*[!0-9]*|0) b="" ;; *) break ;; esac
+  done
+  [ -n "$b" ] || return 0
+  date -u -r "$b" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$b" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null
+  return 0
 }
 
 _patrol_mtime() {  # <file>
@@ -962,7 +953,7 @@ tick_digest_field() {  # <digest file> <key>
 #
 # TWO PROCESSES READ ONE FILE, so its path and its fold are written once, here: the stop
 # library's recorder (`stop_fill_ledger`, payload/scripts/lib/stop.sh) appends a line per Stop,
-# and `session-poker.sh fill-report` folds them. This file is already sourced by both — the
+# and the sitrep folds them (hooks/poker/sitrep.sh `sitrep_idle_minutes`). This file is already sourced by both — the
 # poker's loader wants it and the stop library sources it for the death notice — and the fold
 # shares the verdict's date arithmetic (`_PATROL_ISO_AWK`, above) rather than growing a second
 # copy of it. The ledger is the Patrol's measure: did the scheduler keep every slot busy.

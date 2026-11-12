@@ -183,7 +183,7 @@ stop_facts_load() {  # -> always 0
 }
 
 # THE FILL LEDGER'S PATH (wave-20 REQ-5, D5) and the Patrol verdict: patrol.sh owns both, and
-# the recorder below writes to the path `session-poker.sh fill-report` reads from.
+# the recorder below writes to the path the sitrep's idle minutes read from.
 if ! declare -F fill_ledger_path >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$_STOP_LIB_DIR/patrol.sh"
@@ -2300,12 +2300,12 @@ stop_owed_send() {  # <event> -> always 0
 # `idle` and `room` close the line: the ready rows nothing launched while a slot was
 # free, and the free slots; a reader of the older shape stops at `missed` and still parses.
 # `declined` IS KEPT, EMPTY: nothing answers a ready row in words now, and the field stays so a
-# reader of the shape by position, and fill-report's history column, read every line as before.
+# reader of the shape by position reads every line as before.
 #
 # A RECORDER, NOT A WALL. It never refuses and is silent on every failure: the stop it rides
 # on is a turn somebody has to be able to end. It runs BEFORE `hooks/stop.sh`'s re-entry guard,
 # so the Stop that ends a refused turn — the one carrying the launches the model made after
-# the refusal — is recorded too; `fill-report` folds lines by `turn=`, so a refused turn's two
+# the refusal — is recorded too; the idle fold reads lines by `turn=`, so a refused turn's two
 # lines count once, as the later. That holds because the refusal the CLI feeds back ("Stop hook
 # feedback:") opens no turn in `stop_turn_facts`: both lines carry the prompt's key, and the
 # later one still holds the launches made before the refusal.
@@ -2326,7 +2326,7 @@ stop_fill_ledger() {  # <event> -> always 0
   ready="${_ST_READY// /,}"
   launched="$_ST_LAUNCHED"
   # THE ROWS THAT SAT IDLE: ready, not launched this turn, while a writer slot
-  # was free. `fill-report` charges the interval to the next line. The ids are the plan's own,
+  # was free. The idle fold charges the interval to the next line. The ids are the plan's own,
   # space-split here exactly as `stop_turn_facts` matched them.
   idle=""
   if [ "${_ST_FREE:-0}" -gt 0 ] 2>/dev/null; then
@@ -2685,10 +2685,10 @@ STAMP_FILE="$BIONIC_ROOT/.bionic/tmp/patrol-${BIONIC_SID}.state"
 #
 # THE INTERVAL IS THE POKER'S OWN, obtained by invoking its `interval` verb rather
 # than by re-reading `poker-interval:` here: one knob, one reader. A malformed
-# override makes the poker refuse, and the fallback is its own built-in default
-# asked for through `interval-default` — never a constant retyped here, which would
-# drift the first time either side moved and leave this hook measuring against a
-# threshold nobody configured.
+# override makes the poker refuse, and the fallback is lib/patrol.sh's
+# PATROL_INTERVAL_DEFAULT, the constant the poker takes its own default from — never a
+# number retyped here, which would drift the first time either side moved and leave
+# this hook measuring against a threshold nobody configured.
 #
 # NO NUMBER MEANS NO FINDING. Where hooks/dispatch-preflight.sh still has a
 # never-armed arm to run without a threshold, this hook's only question IS the
@@ -2703,7 +2703,7 @@ POKER="${HOOK_DIR}/session-poker.sh"
 INTERVAL=$( cd "$BIONIC_ROOT" 2>/dev/null && bash "$POKER" interval 2>/dev/null )
 case "$INTERVAL" in ''|*[!0-9]*) INTERVAL="" ;; esac
 if [ -z "$INTERVAL" ] || [ "$INTERVAL" -le 0 ]; then
-  INTERVAL=$( bash "$POKER" interval-default 2>/dev/null )
+  INTERVAL="${PATROL_INTERVAL_DEFAULT:-}"
   case "$INTERVAL" in ''|*[!0-9]*) INTERVAL="" ;; esac
 fi
 [ -n "$INTERVAL" ] && [ "$INTERVAL" -gt 0 ] || return "$_adv"
@@ -2805,15 +2805,14 @@ esac
 # is the refusal's headline with no detail, and the headline is the whole reason. It names the three
 # acts in their order and nothing else. It carries no age, no idle gap and no path, so a repeat over
 # the same stale stamp is byte-identical to the first and the line can never grow. The explanation
-# (why the clock dies, the refused CronCreate, the deliberate stop) is printed only when asked for,
-# by `session-poker.sh patrol --explain`.
+# (why the clock dies, the refused CronCreate, the deliberate stop) is the dispatch rules'.
 #
 # THE CRON HALF IS FIRST because the order is a safety property: `arm` alone freshens the stamp
 # over an empty cron table and buys a Patrol that reads alive and never fires, which is worse than
 # the death because the death is at least detectable. This function therefore reads and names the
 # acts and never arms. CronCreate is the refusable half (the auto-mode classifier refuses it
 # non-deterministically), so "if absent" is in the line and the rule that a refused CronCreate is
-# never followed by `arm` is in the dispatch rules and the explanation.
+# never followed by `arm` is in the dispatch rules.
 #
 # THE CLOCK THAT FIRES AND NEVER TICKS. `patrol_verdict` reads a Patrol marker turn after the stamp
 # as a firing that ran no tick. The job exists and fires, so re-creating it as it is buys the same

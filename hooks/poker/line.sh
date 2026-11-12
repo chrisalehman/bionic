@@ -910,7 +910,7 @@ poker_verb_known_limits_part() {
     exit 2
   elif [ "$n" -ne 0 ]; then
     rm -rf "$tmp"
-    die "REFUSED — $(clean "$KL_UNSTATED") is deferred with no stated sentence, and the release check refuses a deferral with none: state it on the person's words, bash ${HOOK_DIR}/session-poker.sh disposition $(clean "$KL_UNSTATED") defer '<their words>' '<why>' '<sentence>', then render again. Nothing was rendered."
+    die "REFUSED — $(clean "$KL_UNSTATED") is deferred with no stated sentence, and the release check refuses a deferral with none: state it on the person's words, bash ${HOOK_DIR}/session-poker.sh finding-move $(clean "$KL_UNSTATED") defer '<their words>' '<why>' '<sentence>', then render again. Nothing was rendered."
     exit 2
   fi
   n="$(/usr/bin/grep -c '^- ' "$tmp/part" | tr -d ' ')"
