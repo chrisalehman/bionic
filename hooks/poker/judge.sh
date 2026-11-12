@@ -211,6 +211,11 @@ COVER_JUDGED
 current_admit() {
   PV_HOW="judged at that step first"
   case "$PV_KEY" in
+    8|8a|8b) ;;
+    # A run already at the step is judged at 8 alone, on the facts; below it there is no move to judge.
+    *) [ "$PV_CUR" != "$PV_KEY" ] || return 0 ;;
+  esac
+  case "$PV_KEY" in
     7)
       plan_verb_dry current "step $PV_KEY" "step:$PV_KEY" "${PV_CUR%[ab]}"
       cur7_judge 7
@@ -236,10 +241,6 @@ current_admit() {
       die "REFUSED — the step of $PV_PLAN could not be read (the run's facts did not fold), so the advance is judged from no step; nothing was appended. run again: session-poker.sh current $PV_KEY, once the fold's own line above is mended."
       exit 2
     fi
-    if [ "$PV_CUR" = "$PV_KEY" ]; then
-      say "current — the run already stands at step $PV_KEY; nothing was appended."
-      exit 0
-    fi
     # THE CHECK-ONLY ADVANCE: `current <N> --check` runs current_admit, the advance's own path up to its append, in a
     # subshell, and prints its verdict above whatever that path printed; it exits as the advance would and appends nothing.
     if [ -n "$PV_CHECK" ]; then
@@ -247,6 +248,7 @@ current_admit() {
       if [ "$PV_CK_RC" -eq 0 ]; then
         say "current $PV_KEY --check: would advance"
         [ -z "$PV_CK_OUT" ] || printf '%s\n' "$PV_CK_OUT"
+        [ "$PV_CUR" != "$PV_KEY" ] || say "current — the run already stands at step $PV_KEY; the advance would append nothing."
       else
         die "current $PV_KEY --check: would refuse"
         [ -z "$PV_CK_OUT" ] || printf '%s\n' "$PV_CK_OUT" >&2
@@ -254,6 +256,10 @@ current_admit() {
       exit "$PV_CK_RC"
     fi
     current_admit
+    if [ "$PV_CUR" = "$PV_KEY" ]; then
+      say "current — the run already stands at step $PV_KEY; nothing was appended."
+      exit 0
+    fi
     if ! proof_step_event "$PV_PLAN" "$PV_KEY"; then
       die "REFUSED — step $PV_KEY could not be appended to the run's log of $PV_PLAN; nothing was appended."
       exit 2
