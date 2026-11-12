@@ -5476,17 +5476,18 @@ return 0
 
 # ─── _wall_poker_contract_verb — is this a call of a contract-changing poker verb ─
 #
-# 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs
-# `session-poker.sh amend|extend|task-add|hold` or a plan-row verb (`task-set`,
-# `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `row-landed` — wave-28 T6, D7; `proof-add` and
-# `approve` and `waive`, each written on the user's word; `share`, in both its forms; `handoff` —
-# the plan's ## Handoff; `task-split`, a row rewritten as its children; and
-# `deliver` (a record row's own last act: admitted only for the caller's own plan row, by arm A),
-# `rule` (a ruling pushed to a writer), `tasks-prose`, `epic-row` and
-# `continuation-fill` (T7's plan verbs), `disposition` (T13's finding ledger) and `reply` (wave-38 T3, the final card's
-# replay into approve, waive and finding-move), `decisions` (a decision put or ruled writes the run's
-# design ledger and its register, and the read goes with the verb; a writer reads neither) — `ruling-ack` and `rulings`
-# are the writer's own reads and are NOT on the list); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
+# 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs one of these `session-poker.sh`
+# verbs: `amend`, `extend`, `task-add` and `hold` (a roster row, or a row's birth); `current` (the
+# run's step); `proof-add` (a proof the gates judge by); `approve` and `waive` (each written on the
+# user's word); `release-check` (the check's fact); `finding-move` (a finding across the line);
+# `share`, in both its forms; `handoff` (the handoff document); `rule` (a ruling pushed to a
+# writer); `reply` (the final card's replay into approve, waive and finding-move); `order` (the
+# user's order); `reviews-part` (the release entry's reviews, admitted by arm A for the integrate
+# row's own writer); and `decisions` (a decision put or ruled writes the run's design ledger and
+# its register, and the read goes with the verb; a writer reads neither). `ruling-ack` and
+# `rulings` are the writer's own reads and are NOT on the list. 1 otherwise. Every name on the
+# list is a verb the poker dispatches: a verb it no longer has fails there on its own, so its name
+# leaves the list with it.
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
 # (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
@@ -5557,7 +5558,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
           return 0
         fi
         case "$_next" in
-          amend|extend|task-add|hold|task-set|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|matrix-retier|waive-row|tasks-prose|epic-row|continuation-fill|disposition|reply|order|reviews-part|decisions)
+          amend|extend|task-add|hold|current|proof-add|approve|waive|release-check|finding-move|share|handoff|rule|reply|order|reviews-part|decisions)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
             _WALL_POKER_CALL="$GIT_ARGV_REST"
             _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"
