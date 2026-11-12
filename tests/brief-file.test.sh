@@ -22,8 +22,8 @@
 #            hold and extend keep the row's brief path and sum.
 #
 # FIXTURE FIDELITY. The session-poker prelude's sandbox (an engaged, bound session in a scratch repository),
-# a version-14 Tasks table, real commits on the working branch for the proof heads, and a planted run log the
-# reader reads alone. SYNTHESIZED: the sections and the log lines. §NAMES to §SUM drive the real dispatch wall
+# a page at version 15 whose Tasks rows are their nine authored cells, real commits on the working branch for the proof
+# heads, and a planted run log the reader reads alone, its step among its facts. SYNTHESIZED: the sections and the log lines. §NAMES to §SUM drive the real dispatch wall
 # on a real-shaped Agent payload in an approved, bound and armed session; the attestation and the Patrol
 # stamp are written in their writers' shapes, and each drive starts on an empty roster.
 #
@@ -46,13 +46,13 @@ cm() { git -C "$BR" commit -q --allow-empty -m "$1" && git -C "$BR" rev-parse HE
 O="$(cm old)"; A="$(cm a)"; B="$(cm b)"; C="$(cm c)"; HD="$(cm head)"
 REC="$BR/.bionic/docs/record/wave-01-fixture"; BD="$REC/briefs"; mkdir -p "$BD"
 BP="$BR/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"; mkdir -p "${BP%/*}"
-{ printf -- '---\nrigor: double\nscale: wave\nworking-branch: wave/01-fixture\nbase-sha: %s\n---\n\n# fixture\n\n' "${O:0:9}"
-  printf '## SDLC State\n\ncurrent: 4\n\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|\n'
-  printf '| T1 | 4 | build | the build with a section | — | — | 30 | REQ-1 | lib/a.sh, tests/a.test.sh | pending | — |\n'
-  printf '| T2 | 4 | build | the build with none | — | — | 30 | REQ-1 | lib/b.sh, tests/b.test.sh | pending | — |\n'
-  printf '| T3 | 4 | build | a section naming no verb | — | — | 30 | REQ-1 | lib/c.sh, tests/c.test.sh | pending | — |\n'
-  printf '| T4 | 4 | build | a section typing a contract | — | — | 30 | REQ-1 | lib/d.sh, tests/d.test.sh | pending | — |\n'
-  printf '| R1 | 6 | review | the critic reads it · questions: adversarial,structure | — | — | 30 | REQ-1 | record/wave-01-fixture/critic-adversarial.md, record/wave-01-fixture/critic-structure.md | pending | — |\n\n'
+{ printf -- '---\ncanonical_sdlc_version: 15\nrigor: double\nscale: wave\nworking-branch: wave/01-fixture\nbase-sha: %s\n---\n\n# fixture\n\n' "${O:0:9}"
+  printf '## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | the build with a section | — | 30 | REQ-1 | lib/a.sh, tests/a.test.sh | — |\n'
+  printf '| T2 | 4 | build | the build with none | — | 30 | REQ-1 | lib/b.sh, tests/b.test.sh | — |\n'
+  printf '| T3 | 4 | build | a section naming no verb | — | 30 | REQ-1 | lib/c.sh, tests/c.test.sh | — |\n'
+  printf '| T4 | 4 | build | a section typing a contract | — | 30 | REQ-1 | lib/d.sh, tests/d.test.sh | — |\n'
+  printf '| R1 | 6 | review | the critic reads it · questions: adversarial,structure | — | 30 | REQ-1 | record/wave-01-fixture/critic-adversarial.md, record/wave-01-fixture/critic-structure.md | — |\n\n'
   printf '## T1 — the build with a section\n\nResearch to read: record/wave-01-fixture/research.md\nRulings: render again with bash /x/hooks/session-poker.sh brief T1 once this section changes.\n\nsuites: a.test.sh, shared.test.sh\n\n'
   printf '## T3 — naming no verb\n\nRun bash /x/hooks/session-poker.sh floor-run first.\n\n'
   printf '## T4 — typing a contract\n\nRe-executes: `cd /tmp/x && bash tests/d.test.sh`\n'
@@ -60,6 +60,7 @@ BP="$BR/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"; mkdir -p "$
 bind_marker "$BR" "$BP"
 t=2026-11-01T00:00
 cat > "$REC/run.log" <<EOF
+run/v1|ev=step|n=4|at=${t}:00Z
 run/v1|ev=proof|kind=review|head=$O|question=adversarial|result=pass|scope=piece|at=${t}:01Z
 run/v1|ev=proof|kind=review|head=$A|question=adversarial|result=flag|scope=piece|at=${t}:02Z
 run/v1|ev=proof|kind=review|head=$A|question=structure|result=pass|scope=piece|at=${t}:03Z
@@ -121,13 +122,14 @@ NR="$(make_repo wall-names)"; git -C "$NR" config user.name "Dana Fixture"; git 
 mkdir -p "$NR/tests" "$NR/lib"; printf '#!/bin/bash\n' > "$NR/tests/n.test.sh"
 NREC="$NR/.bionic/docs/record/wave-01-fixture"; NBD="$NREC/briefs"; mkdir -p "$NBD"
 NP="$NR/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"; mkdir -p "${NP%/*}"
-{ printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nrigor: double\nscale: wave\nworking-branch: wave/01-fixture\n---\n\n# fixture\n\n'
-  printf '## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n## Tasks\n\n'
-  printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|\n'
-  printf '| N1 | 4 | build | the wall reads its brief | — | — | 30 | REQ-6 | lib/n.sh, tests/n.test.sh, record/wave-01-fixture/N1.md | pending | — |\n\n'
+{ printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nrigor: double\nscale: wave\nworking-branch: wave/01-fixture\n---\n\n# fixture\n\n## Tasks\n\n'
+  printf '| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+  printf '| N1 | 4 | build | the wall reads its brief | — | 30 | REQ-6 | lib/n.sh, tests/n.test.sh, record/wave-01-fixture/N1.md | — |\n\n'
   printf '## N1 — the wall reads its brief\n\nRulings: the file is the contract.\n'
 } > "$NP"
 bind_marker "$NR" "$NP"
+for n in 1 2 3 4; do printf 'run/v1|ev=step|n=%s|at=2026-10-04T00:0%s:00Z\n' "$n" "$n"; done > "$NREC/run.log"
+printf 'run/v1|ev=approval|key=step3|by=fixture|said=approved|at=2026-10-04T00:05:00Z\n' >> "$NREC/run.log"
 printf 'version=1\nkind=preflight-attestation\nsession_id=%s\nwritten_at=1785790000\nrepo=%s\n' "$SID" "$NR" > "$NR/.bionic/tmp/preflight-$SID.state"
 printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SID" > "$(stamp_of "$NR")"
 chmod 600 "$NR/.bionic/tmp/preflight-$SID.state" "$(stamp_of "$NR")"
