@@ -704,27 +704,26 @@ ts_row() {  # <id> -> the plan's ## Tasks row for <id>
   /usr/bin/grep "^| $1 |" "$PTS"
 }
 
-poke "$RTS" task-add T7 7 doc 'Release the fixture. The fixture ships as one release. The entry names `CHANGELOG.md`.' bionic:implementor 'T5' 30 REQ-1 '—'
+ta_add "$RTS" T7 7 doc 'Release the fixture. The fixture ships as one release. The entry names `CHANGELOG.md`.' bionic:implementor 'T5' 30 REQ-1 '—'
 expect_eq "TSENT-1 task-add writes a cell that opens on its title and a plain sentence (exit 0)" "0" "$RC"
 expect_contains "TSENT-1b …the cell as typed, its detail's backtick too" \
   '| T7 | 7 | doc | Release the fixture. The fixture ships as one release. The entry names `CHANGELOG.md`. |' "$(ts_row T7)"
 
-TS_BEFORE="$(cat "$PTS")"
-poke "$RTS" task-add T8 7 doc 'Release the fixture.' bionic:implementor 'T5' 30 REQ-1 '—'
+ta_add "$RTS" T8 7 doc 'Release the fixture.' bionic:implementor 'T5' 30 REQ-1 '—'
 TS_WORDS="$(ts_card_says T8 'Release the fixture.')"
 expect_eq "TSENT-2 precondition: the card's check refuses that cell with its line" \
   "REFUSED — task T8: no sentence after its title" "$TS_WORDS"
 expect_eq "TSENT-2a task-add of a cell with no sentence is refused (exit 1)" "1" "$RC"
 expect_contains "TSENT-2b …in the card's words" "$TS_WORDS" "$OUT"
-expect_eq "TSENT-2c …and the plan is unchanged" "$TS_BEFORE" "$(cat "$PTS")"
+expect_eq "TSENT-2c …and the plan is unchanged" "$(cat "$TMPROOT/s42-before")" "$(cat "$PTS")"
 
-poke "$RTS" task-add T8 7 doc 'Release the fixture. The fixture ships `v2` as one release.' bionic:implementor 'T5' 30 REQ-1 '—'
+ta_add "$RTS" T8 7 doc 'Release the fixture. The fixture ships `v2` as one release.' bionic:implementor 'T5' 30 REQ-1 '—'
 TS_WORDS="$(ts_card_says T8 'Release the fixture. The fixture ships `v2` as one release.')"
 expect_eq "TSENT-3 precondition: the card's check refuses that cell with its line" \
   'REFUSED — task T8: the sentence carries a backtick: The fixture ships `v2` as one release.' "$TS_WORDS"
 expect_eq "TSENT-3a task-add of a cell whose sentence carries a backtick is refused (exit 1)" "1" "$RC"
 expect_contains "TSENT-3b …in the card's words" "$TS_WORDS" "$OUT"
-expect_eq "TSENT-3c …and the plan is unchanged" "$TS_BEFORE" "$(cat "$PTS")"
+expect_eq "TSENT-3c …and the plan is unchanged" "$(cat "$TMPROOT/s42-before")" "$(cat "$PTS")"
 
 POKE_BOUND="$TS_BOUND_WAS"
 
@@ -751,26 +750,25 @@ cp_says() {  # <id> <cell> -> what the card's check prints for that cell
 cp_row() { /usr/bin/grep "^| $1 |" "$PCP"; }
 expect_eq "CAP-0 precondition: the boundary title is 30 columns and the over-long one 31" "30|31" "${#CP_T30}|${#CP_T31}"
 
-poke "$RCP" task-add T7 7 doc "${CP_T30}. The fixture ships as one release." bionic:implementor 'T5' 30 REQ-1 '—'
+ta_add "$RCP" T7 7 doc "${CP_T30}. The fixture ships as one release." bionic:implementor 'T5' 30 REQ-1 '—'
 expect_eq "CAP-1 task-add writes a title of exactly 30 columns (exit 0)" "0" "$RC"
 expect_contains "CAP-1b …the cell as typed" "| T7 | 7 | doc | ${CP_T30}. The fixture ships as one release. |" "$(cp_row T7)"
 
-CP_BEFORE="$(cat "$PCP")"
 CP_CELL="${CP_T31}. The fixture ships as one release."
 CP_WORDS="$(cp_says T8 "$CP_CELL")"
 expect_eq "CAP-2 precondition: the card's check refuses that cell with the title's length, the cap and the title" \
   "REFUSED — task T8: title is 31 characters, the cap is 30: ${CP_T31}" "$CP_WORDS"
-poke "$RCP" task-add T8 7 doc "$CP_CELL" bionic:implementor 'T5' 30 REQ-1 '—'
+ta_add "$RCP" T8 7 doc "$CP_CELL" bionic:implementor 'T5' 30 REQ-1 '—'
 expect_eq "CAP-2a task-add of a 31-column title is refused (exit 1)" "1" "$RC"
 expect_contains "CAP-2b …in the card's words" "$CP_WORDS" "$OUT"
-expect_eq "CAP-2c …and the plan is unchanged" "$CP_BEFORE" "$(cat "$PCP")"
+expect_eq "CAP-2c …and the plan is unchanged" "$(cat "$TMPROOT/s42-before")" "$(cat "$PCP")"
 
 # The tag the verb appends is part of the cell it judges: a title that fits is admitted with it, one that does not is refused with it.
-poke "$RCP" task-add T8 7 doc "$CP_CELL" bionic:implementor 'T5' 30 REQ-1 '—' --born 'review S2 on'
+ta_add "$RCP" T8 7 doc "$CP_CELL" bionic:implementor 'T5' 30 REQ-1 '—' --born 'review S2 on'
 expect_eq "CAP-3 task-add of a 31-column title with a born tag is refused all the same (exit 1)" "1" "$RC"
 expect_contains "CAP-3b …in the card's words, the title whole" "$CP_WORDS" "$OUT"
-expect_eq "CAP-3c …and the plan is unchanged" "$CP_BEFORE" "$(cat "$PCP")"
-poke "$RCP" task-add T8 7 doc "${CP_T30}. The fixture ships as one release." bionic:implementor 'T5' 30 REQ-1 '—' --born 'review S2 on'
+expect_eq "CAP-3c …and the plan is unchanged" "$(cat "$TMPROOT/s42-before")" "$(cat "$PCP")"
+ta_add "$RCP" T8 7 doc "${CP_T30}. The fixture ships as one release." bionic:implementor 'T5' 30 REQ-1 '—' --born 'review S2 on'
 expect_eq "CAP-3d control: the same cell with a 30-column title and the born tag is admitted (exit 0)" "0" "$RC"
 CP_BORN_LAST="$(printf '%s\n' "$OUT" | tail -1)"
 expect_contains "CAP-3e …with the tag written after the sentence" "| T8 | 7 | doc | ${CP_T30}. The fixture ships as one release. · born: review" "$(cp_row T8)"
@@ -784,13 +782,13 @@ section "§OWED: task-add ends on one line naming the task-list entry the turn n
 # (`<step>/<id>: <title>`), so no step text carries it.
 # fails-when: task-add ends on anything but that line, names the entry by anything but the row's title, or says it
 # of a refusal.
-poke "$RCP" task-add T9 7 doc 'Make the entry. The entry is owed the same turn.' bionic:implementor 'T5' 30 REQ-1 '—'
+ta_add "$RCP" T9 7 doc 'Make the entry. The entry is owed the same turn.' bionic:implementor 'T5' 30 REQ-1 '—'
 expect_eq "OWED-1 task-add of a row exits 0 and ends on one line naming the task-list entry by its title" \
   "0|poker: task-add — owed: create the task-list entry 7/T9: Make the entry, and recreate the entries after it to keep the order." "$RC|$(printf '%s\n' "$OUT" | tail -1)"
 expect_eq "OWED-1b …the line is said once" "1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'owed: create the task-list entry')"
 expect_eq "OWED-2 a born row (CAP-3d's T8) ends on the same line, its title without the tag" \
   "poker: task-add — owed: create the task-list entry 7/T8: ${CP_T30}, and recreate the entries after it to keep the order." "$CP_BORN_LAST"
-poke "$RCP" task-add T11 7 doc "${CP_T31}. Over the cap." bionic:implementor 'T5' 30 REQ-1 '—'
+ta_add "$RCP" T11 7 doc "${CP_T31}. Over the cap." bionic:implementor 'T5' 30 REQ-1 '—'
 expect_eq "OWED-3 a refused task-add says nothing is owed" "1|0" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'owed:')"
 POKE_BOUND="$CP_BOUND_WAS"
 # ============================================================
@@ -825,7 +823,7 @@ EX_H="$EX_H" EX_OWN="$EX_OWN" EX_CARRIED="$EX_CARRIED" awk '
     for (i = 1; i <= 3; i++) print "moved: " ENVIRON["EX_OWN"] "#" i " to=fix by=Dana at=2026-10-20T01:00:00Z words=\"fix it in this wave\" why=\"the user ruled it\""
   }' "$PEX" > "$PEX.n" && mv "$PEX.n" "$PEX"
 ex_add() {  # <id> <files> <born> -> OUT, RC: task-add of a step-4 build row born of <born>
-  poke "$REX" task-add "$1" 4 build "Fix $1. The defect is gone." bionic:implementor '—' 30 REQ-1 "$2" --born "$3"
+  TA_PASTE=1 ta_add "$REX" "$1" 4 build "Fix $1. The defect is gone." bionic:implementor '—' 30 REQ-1 "$2" --born "$3"
 }
 ex_born_line() { printf '%s\n' "$OUT" | /usr/bin/grep 'is review-born' || :; }
 ex_mark() { bash -c '. "$1/units.sh" >/dev/null 2>&1; _units_born_logged "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$PEX" | /usr/bin/grep "^- $1: " | sed -n 's/.* born: /born: /p'; }
@@ -855,12 +853,11 @@ ex_add T10 lib/p1.sh "$EX_OWN#1"
 expect_eq "EX-5 a finding rated S3 on that the person moved to fix lands, counted (exit 0)" "0" "$RC"
 expect_contains "EX-5b …its line ends counted 2 of 2 (AC-1.3)" " · counted 2 of 2" "$(ex_born_line)"
 expect_eq "EX-5c …its born event says it was promoted" "born: review S3 on of=$EX_OWN#1 promoted" "$(ex_mark T10)"
-EX_BEFORE="$(cat "$PEX")"
 ex_add T11 lib/p2.sh "$EX_OWN#2"
 expect_eq "EX-6 a third counted row, promoted from S3 on, is refused at fix-cap: 2 (exit 1) (AC-1.2)" "1" "$RC"
 expect_contains "EX-6b …the refusal names the counted and exempt figures and its exit" \
-  "task-add refused — review-born rows: 2 of cap 2 are counted (3 exempt under fix-policy: S1,S2-on); this finding goes to the review findings disposition, or the person raises the cap: set fix-cap=3 at the card." "$OUT"
-expect_eq "EX-6c …and the plan is unchanged" "$EX_BEFORE" "$(cat "$PEX")"
+  "task-add refused — review-born rows: 2 of cap 2 are counted (3 exempt under fix-policy: S1,S2-on); T11 stands in the plan unborn, the person's to remove; this finding goes to the review findings disposition, or the person raises the cap: set fix-cap=3 at the card." "$OUT"
+expect_eq "EX-6c …and the plan is unchanged across it" "$(cat "$TMPROOT/s42-before")" "$(cat "$PEX")"
 ex_add T11 lib/e11.sh 'review S1 off'
 expect_eq "EX-7 control: with the cap full, a row born review S1 off still lands (exit 0): S1 is inside the policy at either reach" "0" "$RC"
 expect_contains "EX-7b …exempt" " · exempt under fix-policy: S1,S2-on" "$(ex_born_line)"

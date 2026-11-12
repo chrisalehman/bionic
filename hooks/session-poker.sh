@@ -17,7 +17,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh interval   the configured Patrol interval, seconds
 #     bash <plugin-root>/hooks/session-poker.sh adopt      what OTHER sessions launched here (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh sweep      delete what DEAD sessions left here (writes, deletes)
-#     bash <plugin-root>/hooks/session-poker.sh task-add … add a ## Tasks row to the bound plan, as a transaction (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh task-add <id> … record the birth of a row an edit added to the bound plan (writes no plan)
 #     bash <plugin-root>/hooks/session-poker.sh amend …    widen a live row's Files/Suites/Re-executes (writes the roster)
 #     bash <plugin-root>/hooks/session-poker.sh rule <writer> '<text>' [--words '<the user's words>'] | ruling-ack <id> | rulings <writer>
 #                                                      a binding ruling for a live writer, its acknowledgement, its state (writes the roster)
@@ -427,7 +427,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh ruling-ack <id>   the writer's acknowledgement of a ruling it was shown (marks it shown)"
   die "  bash ${HOOK_DIR}/session-poker.sh rulings <writer>   each ruling of that writer: recorded, pushed=, and unread or shown= (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh budget writers=<n> '<reply>'   record the user's cap on writers in the plan header (source=user, budget-override:)"
-  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --questions <q>[,<q>] on a review row declares the questions it owes (evidence, adversarial, structure, one role's), so its records and its dispatch are those and not the rigor's full deal; --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> [--born …]   record the birth of row <id>, which an edit of the bound plan wrote first: the row is read back and judged as a row born mid-run, one born event is appended, and the plan is not written; a short row is refused with the lines it would accept; --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--suites=<a,b>] [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract (--suites= narrows its suites, and lands_on= with them): a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   advance the run's step: judged as a commit at <N> would be, then one step event in the run's log, the plan unwritten (9 is close-out's); --check (5-8) runs the judgment, appends nothing, and exits as the advance would"
   die "  bash ${HOOK_DIR}/session-poker.sh order '<the user's words>'   record the user's order: an order: given line with the time and the words, under the bound plan's ## SDLC State, else in record/orders.log; while it stands tests/run.sh starts no suite"
@@ -616,36 +616,14 @@ case "$VERB" in
     BG_N="${1#writers=}"
     BG_REPLY="$2"
     ;;
-  # THE NINE CELLS AN AUTHOR WRITES, IN THE TABLE'S OWN COLUMN ORDER (wave-20 REQ-5, AC-5.3;
-  # Δ5). `status`, `worktree` and `base` are the dispatcher's cells and are not operands:
-  # a new row is `pending` and names no tree. Every operand is required — `—` is how the
-  # table itself spells "none" — so a short list is the usage error, never a guessed default.
-  # THE TENTH, `<reads>`, IS THE ONE OPTIONAL CELL (wave-26 T59; REQ-5 AC-5.4): the reads column
-  # a table may carry (wave-26 T2), from which the row's edges are computed. Left off, the row
-  # is written exactly as the nine-operand form always wrote it.
-  # `--born '<rating>'` (wave-30 T21; REQ-10 AC-10.2, D4) marks a row review made unasked: it comes
-  # last, after the operands, and its value is `review S<n> <on|off>`, the
-  # rating the reader wrote. A missing or malformed value is the usage error; whether the rating may
-  # become a row (fix-policy:, fix-cap:, the fourth fix on a component) is the verb's refusal (1).
-  # `--born <record>#<n>[,<record>#<n>…]` (wave-33 T13; REQ-5, D6) names the findings the row answers, each a
-  # finding of a registered reading: the rating is then read from the record, never typed. A value of neither
-  # shape is the usage error; a finding the plan has not registered is the verb's refusal (1).
-  # `--born floor:<suite>` (wave-36 T7; REQ-3, D9) marks a row born of the floor's red in <suite>, named by its file
-  # name (`<name>.test.sh`, the key the floor's records use): the line ends ` born: floor <suite>`, which the judge
-  # holds the row's landing by (lib/proof.sh `_facts_born_landings`). It is no review-born row, so fix-policy: and
-  # fix-cap: do not hold it. Any other `floor:` value is the usage error. THE MARKER NAMES ITS RED (wave-36 T42; D9,
-  # Δ8): the verb admits it only when the plan's floor proof owes the suite or the landing record holds an `ev=standing`
-  # event for it at a commit on the working branch (`born_floor_backing`), and writes ` born: floor <suite> of=floor`
-  # or ` of=standing@<12-hex>` to say which; with neither it is refused naming both facts.
+  # ONE OPERAND, THE ROW'S ID: the row is the edit's, written into the plan before the verb runs, and the verb reads it
+  # back. `--born` comes last and names what the row was born of, the one fact no cell holds: `review S<n> <on|off>`,
+  # the rating the reader wrote; `<record>#<n>[,<record>#<n>…]`, the findings it answers, their rating read from the
+  # record; or `regression:<suite>`, the suite whose regression red it fixes, by its file name. A missing or malformed
+  # value is the usage error; whether the birth is admitted (fix-policy:, fix-cap:, the fourth fix on a component, a
+  # red the machine recorded behind a regression) is the verb's refusal (1).
   task-add)
-    TA_BORN=""; TA_BORN_IDS=""; TA_BORN_SUITE=""; TA_QUESTIONS=""
-    # `--questions <q>[,<q>]` declares the questions a review row owes, written into its task cell. It is read from
-    # the tail of the operands on either side of `--born`, so the two flags go in either order; its words are judged
-    # for shape below, and whether each is dealt the row's role is the verb's refusal (1).
-    case "${*: -1}" in --questions) usage "task-add: --questions takes a value: the questions the review row owes, evidence, adversarial or structure, comma-separated." ;; esac
-    if [ $# -ge 2 ] && [ "${*: -2:1}" = "--questions" ]; then
-      TA_QUESTIONS="${*: -1}"; set -- "${@:1:$(($# - 2))}"
-    fi
+    TA_BORN=""; TA_BORN_IDS=""; TA_BORN_SUITE=""
     case "${*: -1}" in --born) usage "task-add: --born takes a value: the findings the row answers, <record>#<n>[,<record>#<n>…], 'review S<n> <on|off>', the reviewer's rating, or regression:<suite>, the suite whose regression red the row fixes." ;; esac
     if [ $# -ge 2 ] && [ "${*: -2:1}" = "--born" ]; then
       TA_BORN="${*: -1}"
@@ -676,32 +654,10 @@ case "$VERB" in
       esac
       set -- "${@:1:$(($# - 2))}"
     fi
-    if [ -z "$TA_QUESTIONS" ] && [ $# -ge 2 ] && [ "${*: -2:1}" = "--questions" ]; then
-      TA_QUESTIONS="${*: -1}"; set -- "${@:1:$(($# - 2))}"
+    if [ $# -ne 1 ]; then
+      usage "task-add takes the id of a row an edit of the plan has written, then optionally --born <record>#<n>[,…], --born 'review S<n> <on|off>' or --born regression:<suite>. A review row's questions are written in its task cell, ' · questions: <q>[,<q>]'."
     fi
-    if [ $# -ne 9 ] && [ $# -ne 10 ]; then
-      usage "task-add takes nine arguments and an optional tenth: <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] (write — for none), then optionally --born <record>#<n>[,…], --born 'review S<n> <on|off>' or --born regression:<suite>, and --questions <q>[,<q>] on a review row."
-    fi
-    if [ -n "$TA_QUESTIONS" ]; then
-      [ "$3" = review ] || usage "task-add: --questions declares the questions of a review row, and $1 is a $3 row."
-      TA_QSEEN=""
-      for TA_QW in $(printf '%s' "$TA_QUESTIONS" | tr ',' ' '); do
-        case " evidence adversarial structure " in *" $TA_QW "*) : ;; *) usage "task-add: --questions '$TA_QUESTIONS' names '$TA_QW', which is no question; write evidence, adversarial or structure, comma-separated." ;; esac
-        case " $TA_QSEEN " in *" $TA_QW "*) usage "task-add: --questions '$TA_QUESTIONS' names $TA_QW twice; write each question once." ;; esac
-        TA_QSEEN="$TA_QSEEN $TA_QW"
-      done
-      case "$TA_QUESTIONS" in *[!a-z,]*|,*|*,|*,,*) usage "task-add: --questions '$TA_QUESTIONS' is no list of questions; write evidence, adversarial or structure, comma-separated, with no space." ;; esac
-      # THE DECLARATION IS KEPT IN THE DEALING'S ORDER, so the cell, the records and the dispatch wall's comparison
-      # read one spelling whichever order the author typed.
-      TA_QUESTIONS=""
-      for TA_QW in evidence adversarial structure; do
-        case " $TA_QSEEN " in *" $TA_QW "*) TA_QUESTIONS="${TA_QUESTIONS:+$TA_QUESTIONS,}$TA_QW" ;; esac
-      done
-    fi
-    TA_ID="$1"; TA_STEP="$2"; TA_KIND="$3"; TA_TASK="$4"; TA_AGENT="$5"
-    TA_DEPS="$6"; TA_SIZE="$7"; TA_SERVES="$8"; TA_FILES="$9"; TA_READS="${10:-}"
-    # A TYPED OLD READS TOKEN IS REFUSED (wave-39 T18; REQ-13 AC-13.1): the row is not written.
-    if declare -F alias_gone_cell >/dev/null 2>&1 && alias_gone_cell reads "$TA_READS"; then die "REFUSED — $ALIAS_GONE_SAID. The plan is unchanged."; exit 1; fi
+    TA_ID="$1"
     ;;
   # THE ONE VERB WITH REPEATABLE FLAGS (wave-20 T9, REQ-4; spec D4). Each `--files+`,
   # `--suites+` and `--reexec+` names ONE addition and may be given again; `--reason` is
@@ -2432,11 +2388,7 @@ sitrep_clock() {  # <epoch> <now epoch> -> `H:MM AM/PM`, then ` YYYY-MM-DD` when
 
 # ---------------------------------------------------------------- the plan transaction
 #
-# ONE TRANSACTION, SIX DOORS (wave-24 T15; REQ-9, D14). `task-add` (wave-20 Δ5) was the one
-# verb that wrote the plan, and everything a run did to its plan besides — a status cell, a
-# `- T<n>:` line, `current:`, a dispatch-ledger row — was a hand edit (research-R5 item 6: 339
-# plan-writing commands across nine sessions). The five plan-row verbs take task-add's
-# transaction whole, and task-add now takes it from here too: the change is projected onto a
+# ONE TRANSACTION FOR A VERB THAT STILL WRITES THE PLAN. The change is projected onto a
 # COPY through units.sh, the copy is judged by a dry `git commit` through the REAL
 # hooks/bash-walls.sh, the plan's checksum is compared with the one taken BEFORE the
 # projection read it, and only then is the copy moved over the plan. On any refusal the plan
@@ -2448,7 +2400,7 @@ sitrep_clock() {  # <epoch> <now epoch> -> `H:MM AM/PM`, then ` YYYY-MM-DD` when
 # read one as a run. The marker also names the plan the copy was made from (`dry_of=`), and
 # goes with it: the commit gate reads that plan's landing record for its declared debts, since
 # the copy's name names none (wave-27 T76; lib/proof.sh `proof_debt_origin`). The judged copy
-# is a WRITER's commit (task-add's rule): past Step 4 the dry copy carries `current: 4`,
+# is a WRITER's commit: past Step 4 the dry copy carries `current: 4`,
 # because a main-root commit during Verify is held to the Step-5 block the run is still
 # writing. `current` is the one exception — what it asks is
 # whether the run can commit at the step it moves to, so its copy is judged as it stands.

@@ -124,6 +124,9 @@ _rh_refused() {
   return 1
 }
 _rh_hand() { printf '# by hand: [%s] %s\n' "$1" "$2" >> "$RH_LOG"; }   # <kind> <what a person or an agent wrote>
+# _rh_row <label> <Tasks line> <id> [--born <b>] -> the orchestrator's edit adding the row, one hand write, then task-add
+_rh_row() { RH_R="$2" awk '/^## / { t = ($0 ~ /^## Tasks/) } { L[NR] = $0 } t && /^\|/ { last = NR } END { for (i = 1; i <= NR; i++) { print L[i]; if (i == last) print ENVIRON["RH_R"] } }' \
+  "$RH_PLAN" > "$RH_PLAN.t" && mv "$RH_PLAN.t" "$RH_PLAN" && _rh_hand plan "the row $3" && _rh_poker "$1" task-add "${@:3}"; }
 # _rh_cell <label> <row> <column>=<value>… -> the person's edit of a Tasks row's cells, judged by the table check the
 # write hook runs (lib/units.sh `units_cells_write`), as one logged act.
 _rh_cell() { local l="$1"; shift; _rh_do "$l" bash -c '. "$1/units.sh" 2>/dev/null && units_cells_write "${@:2}"' _ "$RH_ROOT/payload/scripts/lib" "$RH_PLAN" "$@"; }
@@ -259,9 +262,8 @@ _rh_verify() {
 _rh_release_card() {
   local h1 qs t2
   _rh_cell "move the release row to step 7" T2 step=7 || return 1
-  _rh_poker "add the regression row" task-add T3 5 test 'the regression. The whole suite runs once.' orchestrator — 10 REQ-1 — || return 1
-  _rh_poker "add the integrate row" task-add T4 8 integrate 'merge into main. The run reaches main by its merge.' orchestrator — 10 REQ-1 — \
-    'approval:release, approval:merge, head' || return 1
+  _rh_row "add the regression row" '| T3 | 5 | test | the regression. The whole suite runs once. | orchestrator | — | — | 10 | REQ-1 | .bionic/docs/record/wave-x/T3.md | — | — | pending |' T3 || return 1
+  _rh_row "add the integrate row" '| T4 | 8 | integrate | merge into main. The run reaches main by its merge. | orchestrator | — | approval:release, approval:merge, head | 10 | REQ-1 | — | — | — | pending |' T4 || return 1
   _rh_verify || return 1
   h1="$(_rh_head)"
   _rh_poker "run the regression" regression-run || return 1
@@ -374,9 +376,8 @@ _rh_replay() {
   # row's landing settles that finding too, so no move follows the landing.
   _rh_review w-adversarial-whole-2 adversarial whole "$RH_BASE" "$(_rh_head)" fail || return 1
   _rh_do "the sweeper acks the second failing reviewer" bash "$RH_ROOT/hooks/session-sweeper.sh" ack w-adversarial-whole-2 || return 1
-  _rh_poker "the fix row born of the finding" task-add T5 4 build 'Answer the structure finding. A caller reaches the library change. The caller and the library agree again.' \
-    orchestrator — 10 REQ-1 'payload/scripts/lib/said.sh, tests/rehearsal-row.test.sh' \
-    --born record/wave-x/w-structure-whole-2.md#1 || return 1
+  _rh_row "the fix row born of the finding" '| T5 | 4 | build | Answer the structure finding. A caller reaches the library change. The caller and the library agree again. · born: review | orchestrator | — | — | 10 | REQ-1 | payload/scripts/lib/said.sh, tests/rehearsal-row.test.sh | — | — | pending |' \
+    T5 --born record/wave-x/w-structure-whole-2.md#1 || return 1
   _rh_brief w-T5 T5 || return 1
   _rh_do "the fix row's tree" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" create "$(_rh_head)" wt/T5 --for w-T5 || return 1
   _rh_launch w-T5 T5 rehearsal-row.test.sh || return 1

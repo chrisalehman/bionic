@@ -340,6 +340,27 @@ poke() {  # <repo> <args...> -> sets OUT, RC; POKE_BASH names the interpreter (d
   OUT="$(cat "$TMPROOT/poke.out")"
 }
 
+# ta_add <repo> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] [--born <b>] [--questions <q>]
+#   -> OUT, RC: the orchestrator's edit of the row, by the header, then the plan kept for s42_unchanged, then task-add of it;
+#   TA_PASTE=1 pastes the lines a short row's refusal prints, as the orchestrator does, and runs the verb again.
+ta_add() {
+  local repo="$1" b="" q="" p t; shift
+  while [ $# -ge 2 ]; do case "${*: -2:1}" in --born) b="${*: -1}" ;; --questions) q="${*: -1}" ;; *) break ;; esac; set -- "${@:1:$(($# - 2))}"; done
+  p="$(sed -n 's/^plan=//p' "$(marker_of "$repo")" 2>/dev/null)"; [ -f "$p" ] || { poke_bind "$repo"; p="$(sed -n 's/^plan=//p' "$(marker_of "$repo")")"; }
+  t="$4"; case "$b" in '') ;; regression:*) t="$t · born: regression" ;; *) t="$t · born: review" ;; esac; [ -z "$q" ] || t="$t · questions: $q"
+  ta_put "$p" "$(TA_V="$(printf '%s\t' "$1" "$2" "$3" "$t" "$5" "$6" "$7" "$8" "$9" "${10:-}")" awk '
+    BEGIN { split("id step kind task agent deps size serves files reads", k, " "); split(ENVIRON["TA_V"], v, "\t"); for (i in k) val[k[i]] = v[i]; val["status"] = "pending" }
+    /^## / { t = ($0 ~ /^## [Tt]asks/) } t && /^\| *id *\|/ { n = split($0, h, "|"); r = "|"
+      for (c = 2; c < n; c++) { x = tolower(h[c]); gsub(/^ +| +$/, "", x); r = r " " (val[x] == "" ? "—" : val[x]) " |" }; print r; exit }' "$p")"
+  cp "$p" "$TMPROOT/s42-before"; poke "$repo" task-add "$1" ${b:+--born "$b"}
+  [ "${TA_PASTE:-}$RC" = 11 ] && [ "${OUT/ is short /}" != "$OUT" ] && { ta_put "$p" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^| T')"; poke "$repo" task-add "$1" ${b:+--born "$b"}; }; :
+}
+ta_put() {  # <plan> <Tasks lines> -> each line written over the row of its id, or after the table's last row
+  TA_V="$2" awk 'BEGIN { n = split(ENVIRON["TA_V"], v, "\n"); for (i = 1; i <= n; i++) { split(v[i], c, "|"); k = c[2]; gsub(/ /, "", k); if (k != "") { row[k] = v[i]; o[++m] = k } } }
+    /^## / { t = ($0 ~ /^## [Tt]asks/) } { L[NR] = $0 } t && /^\|/ { last = NR; split($0, c, "|"); k = c[2]; gsub(/ /, "", k); if (k in row) { L[NR] = row[k]; put[k] = 1 } }
+    END { for (i = 1; i <= NR; i++) { print L[i]; if (i == last) for (j = 1; j <= m; j++) if (!(o[j] in put)) print row[o[j]] } }' "$1" > "$1.ta" && mv "$1.ta" "$1"
+}
+
 # ── hoisted from Section 6: fake_config_dir — Sections 41 and 43–45 build config dirs with it. ──
 # ============================================================
 # THE BLIND-WALL DETECTOR, RETIRED (bionic 1.4.0, task ADOPT, spec AC-7)

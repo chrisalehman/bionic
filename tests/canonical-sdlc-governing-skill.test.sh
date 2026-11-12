@@ -976,6 +976,12 @@ assert_eq "THEMES-7 at task scale the flat list is written" 0 "$HOOK_EXIT"
 # gives every other section in this file) would hide the exact defect this
 # AC guards.
 echo
+# A plan at 15 has its Tasks rows judged at the write as a plan at 14 has: one id twice, or a kind outside the vocabulary, is refused naming the row.
+g15() { run_write "$project/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan version=15 step=4 matrix=no)$(printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | One. | — | 30 | R | a.sh | — |\n%s\n' "$1")"
+  printf '%s|%s' "$HOOK_EXIT" "$(printf '%s\n' "$HOOK_VSTDERR" | /usr/bin/grep -o "T[12]: [a-z]* [a-z]*" | head -1)"; }
+assert_eq "V15-ROW-1 a second row of one id is refused at the write, the row named" "2|T1: duplicate id" "$(g15 '| T1 | 4 | build | Two. | — | 30 | R | b.sh | — |')"
+assert_eq "V15-ROW-2 a row of a kind outside the vocabulary is refused, the row named" "2|T2: kind bogus" "$(g15 '| T2 | 4 | bogus | Two. | — | 30 | R | b.sh | — |')"
+assert_eq "V15-ROW-3 the same table whose second row has its own id and a known kind is admitted" "0|" "$(g15 '| T2 | 4 | build | Two. | — | 30 | R | b.sh | — |')"
 # The words, called directly (lib/write-gate.sh): every key says a fact, a fix and a detail that names the artifact; no key says nothing.
 WG="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/write-gate.sh"
 wg() { bash -c '. "$1"; shift; write_gate_say "$@" || exit $?; printf "%s|%s|%s" "$WG_FACT" "$WG_FIX" "$WG_DETAIL"' _ "$WG" "$@"; }
