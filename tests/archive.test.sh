@@ -1,6 +1,5 @@
 #!/bin/bash
 # tests/archive.test.sh — payload/scripts/lib/archive.sh: Step 9 archives a closed run
-# (epic-22 wave-01, REQ-C; AC-C.1..7; ADR-003 decisions 2/3; design ledger D5).
 #
 # WHAT IT OWNS. Seven acceptance criteria, each hermetic against a fixture project under a
 # mktemp sandbox with HOME redirected into it — never the real ~/bionic-archive and never

@@ -1,5 +1,4 @@
 # tests/lib/bound-marker.sh — the one bound-marker fixture builder
-# (wave-roster-lifecycle S11, spec AC-24; research-code-map §6.1).
 #
 #     . "$(dirname "$0")/lib/resolve-roots.sh"      # first, so BIONIC_SCRIPTS_DIR is set
 #     . "$(dirname "$0")/lib/bound-marker.sh"

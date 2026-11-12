@@ -1,5 +1,4 @@
 # tests/session-poker.prelude.sh — THE HALF OF THE SESSION-POKER SUITE EVERY SHARD SHARES
-# (wave-30 T2; design-ledger Δ7, D8).
 #
 # Sourced by tests/session-poker.test.sh, -2, -3 and -4, after tests/lib/assert.sh, the four
 # fixture libraries and the POKER seam. It is not a suite: the runner launches `*.test.sh`

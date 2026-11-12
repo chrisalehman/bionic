@@ -202,8 +202,6 @@ expect_contains "…and so does lib/patrol.sh's patrol_roster_state, on the same
   "open=3" "$(cat "$SANDBOX/.r22g")"
 
 # ======================== S22b-nla: A LISTAGENTS ANSWER IS NOT A PRECONDITION
-# (wave-12 T1; spec D1 and principle P-A; Chris 2026-09-13 "What the hell. I don't want
-# this to happen to begin with!" — AC-4.1, AC-4.2.)
 #
 # WHAT MOVED. Until 1.7.0 a transcript carrying no fresh ListAgents answer refused the
 # WHOLE dispatch and told the orchestrator to go call the tool first. That is a chore on
@@ -314,8 +312,7 @@ expect_status "r22jd an empty roster needs no live reading -> the same STALE tra
   "0" "$GATE_ST"
 expect_absent "…and says nothing about live-agents" "live-agents:" "$GATE_ERR"
 
-# (e) THE CLOSING MARKER IS UNREACHABLE WHILE THE PANEL IS FRESH (wave-14 AC-3.4,
-# narrowing wave-12 AC-7).
+# (e) THE CLOSING MARKER IS UNREACHABLE WHILE THE PANEL IS FRESH.
 #
 # WHAT THE OLD PIN SAID. AC-7 retired `landing-swept` as this wall's closing signal
 # outright and pinned the retirement on the function's own body at the TOKEN level, so the
@@ -437,7 +434,6 @@ expect_status "r22mkh six thousand acked rows on a stale panel, writers=1 -> ALL
 expect_absent "…so no writers count is printed at all" "writers:" "$GATE_ERR"
 
 # ================= §budget-roster-one-pass: THE COUNT READS THE ROSTER ONCE, AND COUNTS THE SAME
-# (epic-23 wave-32 T4; REQ-3 AC-3.1, AC-3.3; D3, ruling A-orch-3.)
 #
 # WHAT IT COST. §budget-markers-pipe above spent 351 s of this suite's 739 at b7b5bdbe inside one
 # call to `budget_roster_counts`. Per roster row it ran a command substitution through tr, sed and
@@ -619,7 +615,6 @@ else
 fi
 
 # ============================== S22c: A FINISHED-BUT-UNSTOPPED AGENT IS NOT A WRITER
-# (spec R2, AC-27; task S16, closing the Step-5 auditor's F-1.)
 #
 # R2 names two departure modes — "delivered and stopped, or finished and never stopped".
 # S22b counts a row open on PRESENCE, which discharges the first and misses the second:

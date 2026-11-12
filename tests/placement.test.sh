@@ -1,6 +1,5 @@
 #!/bin/bash
 # tests/placement.test.sh — payload/scripts/lib/placement.sh, THE ONE READER OF WHERE A COMMAND RUNS
-# (wave-36 T3; spec D11, ruled at D6; REQ-5 AC-5.1, AC-5.5).
 #
 # THE DEFECT THIS SUITE EXISTS FOR. Four readers answered "where does this command run" with four
 # grammars (research-landing-and-walls.md §Q2 cause A): the shim's stamp walk, the gate's tree, the
@@ -10,10 +9,6 @@
 # a run that plainly ran in the tree it cd'd to. Eighteen of wave-35's runs were not counted for it
 # (§Q5, probe P1b). `cmd_place` reads cmd-class's parsed segments instead: quoted text and heredoc
 # bodies are invisible to it by construction, and a cd it cannot read is `moving`, never a guess.
-#
-# THE CONTRACT these rows pin is stated in full in
-# .bionic/docs/record/wave-36-zero-machine-errors/T3-placement.md, which T25 (the four callers) and
-# T4 (the jurisdiction arm) read.
 #
 # §FORMS is the row's red-first pin: wave-35's six refused shapes, each placed at the tree.
 #

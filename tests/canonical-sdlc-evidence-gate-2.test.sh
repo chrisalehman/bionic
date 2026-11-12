@@ -264,9 +264,6 @@ h30m2=$(make_home)
 write_plan "$h30m2" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 REFUTED "$GOOD_CONFIRM")")" > /dev/null
 expect_allow "30m2 T4 + well-formed user-confirmed + auditor REFUTED at current 6 → allow" "$h30m2" 'git commit -m "x"'
 
-# (30j — an arm asserting the refusal SENTENCE ("does not overturn") on the same
-# fixture 30h already blocks on — deleted at epic-18 W1: its only failure mode
-# was a reworded message.)
 
 # 30k — and the positive twin, so the pair discriminates: the SAME row with the
 # SAME confirmation and a CONFIRMED verdict passes. (30e proves the well-formed

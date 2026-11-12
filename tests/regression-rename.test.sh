@@ -1,6 +1,5 @@
 #!/bin/bash
-# THE REGRESSION'S OLD SPELLINGS: THE PLAN-READ ROWS STAY, THE TYPED AND CONFIG ROWS ARE GONE (epic-23 wave-38 T8,
-# REQ-9; wave-39 T18, REQ-13 AC-13.1, D2).
+# THE REGRESSION'S OLD SPELLINGS: THE PLAN-READ ROWS STAY, THE TYPED AND CONFIG ROWS ARE GONE.
 #
 # WHAT THIS SUITE OWNS. payload/scripts/lib/alias.sh and the seam each old spelling is met at. Until 1.21.0 the full
 # regression's verbs, keys and record tokens spelled "floor"; wave-38 renamed them and kept each old spelling for one

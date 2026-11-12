@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/framework.test.sh — the test framework's own suite (wave-01
-# verification-cannot-lie S1; spec AC-13, AC-14, AC-15).
+# tests/framework.test.sh — the test framework's own suite.
 #
 # WHAT IT COVERS. tests/lib/assert.sh is the one thing in this tree that decides
 # whether a result exists at all, so it is the one thing that cannot be certified

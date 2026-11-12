@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/bash-walls-egd.test.sh — the §EG-DERIVE sections of the one-process PreToolUse|Bash
-# hook, split out of tests/bash-walls.test.sh at wave-30 T9 (D8, REQ-4 AC-4.1).
+# tests/bash-walls-egd.test.sh — the §EG-DERIVE sections of the one-process PreToolUse|Bash hook.
 #
 # NOTHING HERE READS A CLOCK (wave-35 T11; REQ-2 AC-2.2, D11). §EG-DERIVE's cost rows (EGD-7b,
 # EGD-7f, EGD-8 and the per-reading mutant EGD-mut4) count what a commit or a derivation does

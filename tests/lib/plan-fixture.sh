@@ -1,5 +1,4 @@
 # tests/lib/plan-fixture.sh — THE ONE PLAN A FIXTURE WRITES, AT EITHER SCALE
-# (epic-23 wave-31 T5; REQ-1 AC-1.3, D2).
 #
 #     . "$(dirname "$0")/lib/plan-fixture.sh"
 #     P="$(plan_fixture "$R/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" task \

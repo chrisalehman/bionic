@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/inbox.test.sh — a ruling reaches the writer it is for (epic-23 wave-33 T10; REQ-1, AC-1.1 to
-# AC-1.4; spec D1, the Eval design rows §PUSH, §STATE, §SCOPE, §GUARD).
+# tests/inbox.test.sh — a ruling reaches the writer it is for.
 #
 # A ruling is the orchestrator's binding instruction to one live writer, recorded with
 # `session-poker.sh rule <writer> '<text>'` as `ruling/v1` lines on the session's roster. It is

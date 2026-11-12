@@ -126,9 +126,7 @@ expect_eq "jit_offer(explicit n) ran nothing" "0" "$(grep -c . "$CALLS" | tr -d 
 
 section "Group 6: no assume-yes knob (S1-8 stands)"
 #
-# jit.sh must not grow an env-var bypass around consent — the same rule
-# tests/plugin-lib.test.sh used to pin for install_dep itself; that suite was
-# deleted at 8582861 (epic-18 wave-03) and nothing replaced the pin there.
+# jit.sh must not grow an env-var bypass around consent.
 
 # Matches an actual env-var-shaped bypass token (BIONIC_..._YES, ASSUME_YES=,
 # etc.) — not this file's own prose ("no assume-yes knob"), which is
@@ -230,15 +228,6 @@ section "Group 12: Step-0 model_plan derivation is mechanical, not invented (epi
 # pin literal prose spans of the Step-0 card.
 CANONICAL_SKILL_STEP0="${REPO}/skills/canonical-sdlc/steps/0.md"
 
-# RE-POINTED (epic-22 K1, plan task 15, A-7). K1's Step-0 settings card drops per-line
-# inference rationale — the six "role-file default: agents/<role>.md" annotations that used
-# to sit beside each model value are gone; that string no longer appears anywhere in
-# SKILL.md, so the old grep -c over the whole file now finds 0 by design, not by defect. The
-# provenance sentence stays put (still pinned two assertions above, "rendered role files")
-# and is stated ONCE rather than six times; what this assertion re-points to is the fact the
-# AC actually cares about — that all six dispatched-role tiers are still named, one per line,
-# in the card's Models section (record/wave-01-plugin-only/design-ledger.md §D1).
-#
 # RE-POINTED (wave-27 T11, D6): was a count of six role lines, which a seventh role turned red
 # for no defect. A relation now, naming no count (.claude/rules/test-harness.md): every role
 # render.sh renders has its rendered file and its line in the card's Models section.

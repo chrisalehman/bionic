@@ -1,11 +1,9 @@
 #!/bin/bash
 # Tests for hooks/stop-guard.sh — the STOP GATE, PreToolUse|TaskStop
-# (epic-15 wave-01R; recorder arm removed at wave-03 task 4/4).
 #
 # The gate: D-1 activity-boundary freshness, D-2 consume-on-stop, and — since
 # wave-03 task 4/6 — D-3 same-actor, D-6 progress staleness, and the
-# foreign-stop rule. Serves wave-01R's AC-4/AC-5 and the stop-side rows of
-# AC-8/AC-10, plus wave-03's AC-4 (§8), AC-5 (§9) and AC-6 (§10).
+# foreign-stop rule.
 #
 # WHAT MOVED OUT. This script used to carry a second arm that WROTE the records
 # it now only reads. Those rows live in tests/execution-recorder.test.sh, because

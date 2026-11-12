@@ -1,6 +1,5 @@
 #!/bin/bash
-# Tests for the claude() line bionic's setup writes into the shell rc (wave-36 T1, spec D7, ADR-055;
-# AC-1.1). §PROXY.
+# Tests for the claude() line bionic's setup writes into the shell rc. §PROXY.
 #
 # THE FACT UNDER TEST. A session started inside a bionic checkout runs the checkout: the rc line adds
 # `--plugin-dir <root>/payload` when the cwd is inside a git checkout whose payload/.claude-plugin/

@@ -1,6 +1,5 @@
 #!/bin/bash
-# Tests for tests/lib/release-check.sh — this repo's `release-check:` command (wave-31 T1; spec
-# D1, REQ-3 AC-3.5).
+# Tests for tests/lib/release-check.sh — this repo's `release-check:` command.
 #
 # THE CONTRACT THE DELETED PIN SUITE HELD THAT NO OTHER SUITE HOLDS: the CHANGELOG's newest
 # heading equals `.version` in payload/.claude-plugin/plugin.json. The release check runs the
