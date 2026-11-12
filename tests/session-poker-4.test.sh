@@ -104,8 +104,7 @@ expect_eq "SEV-push3 …no key on the row (1.12.0's): not pushed" "1" "$(sev_pus
 expect_eq "SEV-push5 …a name that only contains the word is not it" "1" "$(sev_pushed severity-old)"
 
 # ---------- an amended, extended or held reader row keeps pushed= (row_copy_args; A-orch-9) ----------
-# The copy hands the key to `roster_row`, which writes it once row T16 teaches it the key; on a
-# tree without T16 the copy leaves it out rather than fail the verb, and these rows are red there.
+# The copy hands the key to `roster_row`, which writes it.
 RSEVA="$(make_repo sev-amend)"; new_roster "$RSEVA"
 s30_row "$RSEVA" subagent_type=bionic:critic suites_allowed=none questions=adversarial
 awk -v k='|pushed=checks-adversarial,severity' '{ l[NR] = $0 } END { for (i = 1; i <= NR; i++) print l[i] (i == NR ? k : "") }' \
@@ -403,8 +402,7 @@ section "§DEBT-PARSE §DEBT-LEDGER §DEBT-ADVISORY (the verb half): a debt: lin
 # severity.md writes `debt: <kind> <concept> <path>:<line>[, <path>:<line>…]` flush left beside the `finding:` lines,
 # uncounted in `findings:`. lib/proof.sh `proof_findings` reads it as `debt<TAB><kind><TAB><concept><TAB><sites>
 # <TAB>burn`, flag-class; one carrying a severity or reach word, or a kind outside the debt table, is refused, naming
-# the line. `session-poker.sh debt` appends each debt to the run's log, its state the newest event of its concept and
-# kind, and `debt list` prints them as the reader holds them.
+# the line. `session-poker.sh debt` appends each debt to the run's log; `debt list` prints them as the reader holds them.
 #
 # FIXTURE FIDELITY. The parser rows run §SEV's library (`SEV_LIB`) on the shipped structure checks file (`SEV_CK`); the
 # ledger rows run the real verb in §SEV's bound repository and read the log it wrote.
