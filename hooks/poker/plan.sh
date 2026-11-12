@@ -7,7 +7,7 @@
 
 # ---------------------------------------------------------------- the contract's reader
 #
-# `amend` widens a live contract and `task-add` writes a Files cell a brief is later rendered from; both
+# `amend` widens a live contract and `task-add` judges a Files cell a brief is later rendered from; both
 # read what they were given with payload/scripts/lib/brief.sh's `brief_contract`, the one reader of a
 # brief's lines, so a value is recorded exactly as a dispatch carrying it would record it. Loaded on first
 # use, never at the top: the tick runs every Patrol interval and needs none of it.
@@ -133,7 +133,7 @@ BFB_LOGS
 # poker_review_records <plan> <repo> [<questions>] -> the records a review row's Files name, comma-joined: one
 # `<record dir>/critic-<q>.md` per question the row owes, in the dealing's order, a question dealt a piece and a whole
 # read named once, since its reader writes one record for it. The questions a row owes are the ones it declares
-# (<questions>, comma-joined, from `task-add --questions`) and, with none declared, the rigor's full deal (lib/proof.sh
+# (<questions>, comma-joined, from the task cell's ` · questions:` tag) and, with none declared, the rigor's full deal (lib/proof.sh
 # `facts_owed`). Nothing and rc 1 when the plan's rigor or scale deals no question and none is declared, and the
 # caller keeps the one-record rule of a reader row.
 poker_review_records() {
@@ -202,8 +202,8 @@ EOF
 
 # poker_files_cell <id> <kind> <agent> <Files cell> <repo> <plan> -> PFC_OUT (the cell to write) and PFC_ART (the
 # record artifact a reader row gained, or empty); returns 0, or 1 / 2 with the refusal printed. THE ONE JUDGE OF A
-# ROW'S FILES CELL: `task-add` writes a row's cell and is held to it. A reader row (verify, test, review) whose cell names no record
-# gains <record dir>/<id>.md, the artifact `brief` gives it; each entry of the cell is then read as the dispatch
+# ROW'S FILES CELL: `task-add` reads a row's cell and judges it. A reader row (verify, test, review) whose cell names no record
+# owes <record dir>/<id>.md, the artifact `brief` gives it; each entry of the cell is then read as the dispatch
 # wall reads the brief's `Files:` line (`brief_contract`), and an entry it reads no path from is refused now, named.
 # `—`, `-` and empty declare nothing to judge.
 # Set in hooks/session-poker.sh, before any part loads: PFC_OUT, PFC_ART.
@@ -897,74 +897,104 @@ EOF
     exit 1
   }
 
-  # THE ROW-ADD VERB (wave-20 REQ-5, AC-5.3; Δ5, research D1 §3). A schedule change is a
-  # TRANSACTION: `units_add_row` projects the row onto a COPY of the bound plan (the row and its
-  # `- <id>:` line, and no other row), the copy is
-  # judged twice — by `units_validate`, and by a dry `git commit` through the REAL
-  # hooks/bash-walls.sh — and only a copy both admit is moved over the plan. On any refusal
-  # the plan is byte-identical and the words that refused it print. The precedent is
-  # close-out.sh's D5: a script writes a lifecycle artifact only where a gate validates what
-  # it wrote. Nothing else judges a Bash write of the plan: the governing-skill hook sees
-  # Write and Edit only.
-  #
-  # THE TRANSACTION IS SHARED (wave-24 T15): `plan_verb_open` and `plan_verb_swap`, above the
-  # verbs, carry the dry commit — a writer's, judged by the task arms, so the dry copy carries
-  # `current: 4` when the run is past it and the copy swapped in keeps the run's own
-  # `current:` — the copy's own engagement marker, the checksum and the swap. What is task-add's
-  # alone is below: a run below Step 4 is refused, the Files cell is judged by the dispatch
-  # grammar, and the projection is `units_add_row`, judged by `units_validate` before the gate.
+  # ta_line <id> [<column>=<value>]... -> the ## Tasks line of row <id> as the plan holds it, each named cell replaced
+  # and a bar in a cell escaped as the table writes it, so the line pastes over the row it names.
+  ta_line() {
+    local id="$1" kv k v o out="|"; shift
+    while IFS= read -r kv; do
+      [ -n "$kv" ] || continue
+      k="${kv%%=*}"; v="${kv#*=}"
+      for o in "$@"; do [ "${o%%=*}" != "$k" ] || v="${o#*=}"; done
+      out="$out ${v//|/\\|} |"
+    done <<EOF
+$(plan_read_row "$TA_PLAN" Tasks id "$id")
+EOF
+    printf '%s\n' "$out"
+  }
+
+  # A ROW IS ADDED BY AN EDIT OF THE PLAN, AND THIS VERB RECORDS ITS BIRTH. Only a person, or the orchestrator as their
+  # hand through an edit, changes a plan file, so the verb writes none: it reads the row back from the plan, judges it as
+  # a row born mid-run is judged, appends its one born event and closes the asks its findings held. Its order is fixed: a
+  # row the plan does not hold is refused, so no birth stands for a row never written; a row short of a cell the verb
+  # would have written (a reader row's record, a review row's records and artifact, the task cell's born and questions
+  # tags, another row's deps in a table with no reads column) is refused with the lines it would accept, ready to paste,
+  # and nothing is born; a row refused for its birth stands in the plan unborn, the person's to remove.
   poker_verb_task_add() {
     plan_verb_open task-add
     TA_PLAN="$PV_PLAN"; REPO_REAL="$PV_REPO"
     TA_CUR="${PV_CUR%[ab]}"
     case "$TA_CUR" in
       ''|*[!0-9]*)
-        die "REFUSED — $TA_PLAN has current: ${TA_CUR:-(none)}; task-add changes a wave plan past Step-3 approval, whose current: is a step number."
+        die "REFUSED — $TA_PLAN has current: ${TA_CUR:-(none)}; task-add records a row born past Step-3 approval, whose current: is a step number."
         exit 1 ;;
     esac
     if [ "$TA_CUR" -lt 4 ]; then
-      die "REFUSED — $TA_PLAN is at current: $TA_CUR; before Step-3 approval the plan is written by hand and reviewed, not added to."
+      die "REFUSED — $TA_PLAN is at current: $TA_CUR; before Step-3 approval the plan is written by hand and reviewed, and no row is born."
       exit 1
     fi
-
-    # A READ NEEDS A COLUMN TO GO IN (wave-26 T59; REQ-5 AC-5.4). The projection drops a value
-    # its table has no column for, so a reads operand on a table without one would be accepted
-    # and lost, and the row would wait on nothing it declared. Refused instead, in one line.
-    # `—` (or `-`, or empty) declares nothing and is the nine-operand form; in a reads table it
-    # is the cell `—`, which the readiness program reads as the kind's default (lib/units.sh).
-    case "$TA_READS" in
-      ''|'—'|'-') : ;;
-      *)
-        if ! units_has_column "$TA_PLAN" reads; then
-          die "REFUSED — the ## Tasks table of $TA_PLAN has no reads column, so the reads operand '$(clean "$TA_READS")' has nowhere to go; add the column, or name what $TA_ID waits for in its deps. The plan is unchanged."
-          exit 1
-        fi
-        ;;
+    if ! TA_ROW="$(plan_read_row "$TA_PLAN" Tasks id "$TA_ID" 2>/dev/null)"; then
+      die "REFUSED — $TA_PLAN holds no row $TA_ID in its ## Tasks table. A row is added by an edit of the plan, then task-add $TA_ID records its birth: write the row first. Nothing is born."
+      exit 1
+    fi
+    ta_cell() { printf '%s\n' "$TA_ROW" | sed -n "s/^$1=//p" | head -1; }
+    if declare -F alias_gone_cell >/dev/null 2>&1 && alias_gone_cell reads "$(ta_cell reads)"; then die "REFUSED — $ALIAS_GONE_SAID. Nothing is born."; exit 1; fi
+    TA_STEP="$(ta_cell step)"; TA_KIND="$(ta_cell kind)"; TA_CELL="$(ta_cell task)"; TA_AGENT="$(ta_cell agent)"
+    TA_FILES="$(ta_cell files)"; TA_READ_FILES="$TA_FILES"
+    # THE TASK CELL CARRIES TWO TAGS THE VERB WROTE AND AN EDIT NOW WRITES: ` · born: review|regression` and
+    # ` · questions: <q>[,<q>]`. Each is lifted off wherever it stands; the cell the verb accepts ends on them in that order.
+    TA_TASK="$TA_CELL"; TA_QUESTIONS=""; TA_TAG=""
+    for TA_T in " · born: review" " · born: regression"; do
+      case "$TA_TASK" in *"$TA_T"|*"$TA_T · "*) TA_TAG="${TA_T# · }"; TA_TASK="${TA_TASK/"$TA_T"/}" ;; esac
+    done
+    case "$TA_TASK" in
+      *" · questions: "*)
+        TA_QUESTIONS="${TA_TASK#*" · questions: "}"; TA_QUESTIONS="${TA_QUESTIONS%%" · "*}"
+        TA_TASK="${TA_TASK/" · questions: $TA_QUESTIONS"/}" ;;
     esac
+    case "$TA_TAG:${TA_BORN}${TA_BORN_IDS}:$TA_BORN_SUITE" in
+      'born: '*'::')
+        die "REFUSED — the task cell of $TA_ID says $TA_TAG, and task-add names no --born: name what it was born of (--born <record>#<n>, 'review S<n> <on|off>' or regression:<suite>), or take the tag out of the cell. Nothing is born."
+        exit 1 ;;
+    esac
+    if [ -n "$TA_QUESTIONS" ]; then
+      [ "$TA_KIND" = review ] || { die "REFUSED — the task cell of $TA_ID declares questions: $TA_QUESTIONS, and only a review row is dealt questions; $TA_ID is a $TA_KIND row. Nothing is born."; exit 1; }
+      TA_QSEEN=""
+      for TA_QW in $(printf '%s' "$TA_QUESTIONS" | tr ',' ' '); do
+        case " evidence adversarial structure " in *" $TA_QW "*) : ;; *) TA_QSEEN=bad; break ;; esac
+        case " $TA_QSEEN " in *" $TA_QW "*) TA_QSEEN=bad; break ;; esac
+        TA_QSEEN="$TA_QSEEN $TA_QW"
+      done
+      case "$TA_QUESTIONS" in *[!a-z,]*|,*|*,|*,,*) TA_QSEEN=bad ;; esac
+      if [ "$TA_QSEEN" = bad ]; then
+        die "REFUSED — the task cell of $TA_ID declares questions: $TA_QUESTIONS, which is no list of questions: write evidence, adversarial or structure, each once, comma-separated with no space. Nothing is born."
+        exit 1
+      fi
+      TA_QUESTIONS=""
+      for TA_QW in evidence adversarial structure; do
+        case " $TA_QSEEN " in *" $TA_QW "*) TA_QUESTIONS="${TA_QUESTIONS:+$TA_QUESTIONS,}$TA_QW" ;; esac
+      done
+    fi
 
-    # A READER ROW WRITES ITS RECORD (wave-35 T8; REQ-6 AC-6.1; D15). A verify, test or review row whose Files
-    # name no record artifact gets <record dir>/<id>.md in its cell, the artifact `brief` gives it, so a row that
+    # A READER ROW WRITES ITS RECORD. A verify, test or review row whose Files
+    # name no record artifact owes <record dir>/<id>.md in its cell, the artifact `brief` gives it, so a row that
     # reads that record waits on this one (the validator refuses a record read no row's Files cover).
-    # THE FILES CELL IS JUDGED BY THE DISPATCH GRAMMAR (wave-20 T9; D4, Δ10; T6 carry-over).
+    # THE FILES CELL IS JUDGED BY THE DISPATCH GRAMMAR.
     # The cell becomes a brief's `Files:` line at dispatch, so it is read here exactly as the
     # dispatch wall will read it: a cell the lift reads as no path — a template slot, a bare
     # word — is refused now, in the grammar's words, rather than forty minutes later at the
     # dispatch of a row nobody can fix from the table. `—` is the table's "none" and declares
-    # nothing to judge. ONE FACT IS THE BRIEF'S, NOT THE CELL'S: a `Files:` line alone names
-    # no suite. A dispatch answers it with a `Suites:` or `Re-executes:` line, which the plan
-    # row has no column for, so here it is a note and the row goes in.
+    # nothing to judge.
     # A REVIEW ROW'S FILES ARE ITS QUESTIONS' RECORDS. Its reader writes one record per question the rigor deals and
     # registers each, so a cell naming fewer leaves deliver a record no proof names, or several and no way to choose.
-    # A cell naming no record is given the rendered list (`poker_review_records`). A cell that already names a record
-    # for every question keeps the names it wrote: the brief and the roster row carry the row's own names, and the
-    # reviewer's registration is judged against them, so a rendered name the cell never used is no name to demand.
-    # A cell naming some records but fewer than the questions is refused with the rendered list. The first record the
-    # cell names is the one deliver takes, written to the row's artifact cell below when the table has one.
+    # A cell naming no record owes the rendered list (`poker_review_records`). A cell that already names a record
+    # for every question keeps the names it wrote. A cell naming some records but fewer than the questions is refused
+    # with the rendered list. The first record the cell names is the one deliver takes, the row's artifact cell when
+    # the table has one.
     TA_REV_ART=""
     # A DECLARED QUESTION IS ONE A READER IS DEALT (`--questions`): judged before the records are rendered, so a row no
     # single reader could answer is refused in the deal's words with the plan unchanged.
     if [ -n "$TA_QUESTIONS" ] && ! poker_questions_dealt "$TA_PLAN" "$TA_QUESTIONS"; then
-      die "REFUSED — $TA_ID declares --questions $TA_QUESTIONS, which is not dealt: $PQD_SAID. Run task-add again with the questions one role holds. The plan is unchanged."
+      die "REFUSED — $TA_ID declares questions: $TA_QUESTIONS, which is not dealt: $PQD_SAID. Edit its task cell to the questions one role holds, then task-add $TA_ID again. Nothing is born."
       exit 1
     fi
     if [ "$TA_KIND" = review ] && TA_REVIEW="$(poker_review_records "$TA_PLAN" "$REPO_REAL" "$TA_QUESTIONS")"; then
@@ -980,7 +1010,7 @@ EOF
         TA_NHAVE="$(printf '%s\n' "$TA_HAVE" | awk 'NF' | wc -l | tr -d ' ')"
         TA_NWANT="$(printf '%s' "$TA_REVIEW" | tr ',' '\n' | awk 'NF' | wc -l | tr -d ' ')"
         if [ "$TA_NHAVE" -lt "$TA_NWANT" ]; then
-          die "REFUSED — $TA_ID is a review row, whose Files name one record per question $TA_QOWES:$TA_NWANT, and its Files name $TA_NHAVE; its Files are: $TA_REVIEW (give that list as the Files operand, or name a record of your own for each question, or — to have the list written). The plan is unchanged."
+          die "REFUSED — $TA_ID is a review row, whose Files name one record per question $TA_QOWES:$TA_NWANT, and its Files name $TA_NHAVE; its Files are: $TA_REVIEW (write that list in its Files cell, or name a record of your own for each question). Nothing is born."
           exit 1
         fi
         TA_REV_ART="$(printf '%s\n' "$TA_HAVE" | sed -n 1p)"
@@ -1015,13 +1045,13 @@ EOF
       TA_BEST=""
       for TA_BID in $(printf '%s' "$TA_BORN_IDS" | tr ',' ' '); do
         if ! finding_read "$TA_PLAN" "$REPO_REAL" "$TA_BID"; then
-          die "task-add refused — $FR_WHY; the plan is unchanged."
+          die "task-add refused — $FR_WHY; nothing is born."
           exit 1
         fi
         TA_MV="$(_proof_moved_to "$TA_PLAN" "$TA_BID")" \
-          || { die "task-add refused — the run's facts could not be read, so the moves of $(clean "$TA_BID") are not known; the plan is unchanged. Run again: bash ${HOOK_DIR}/session-poker.sh task-add with the same operands"; exit 2; }
+          || { die "task-add refused — the run's facts could not be read, so the moves of $(clean "$TA_BID") are not known; nothing is born. Run again: bash ${HOOK_DIR}/session-poker.sh task-add $TA_ID with the same operands"; exit 2; }
         if [ "$TA_MV" = defer ]; then
-          die "task-add refused — $(clean "$TA_BID") was moved to defer, and its newest move stands: $(clean "$(proof_move_line "$TA_PLAN" "$TA_BID")"); the plan is unchanged. To fix it after all: disposition $(clean "$TA_BID") fix '<their words>' '<why>', then task-add again."
+          die "task-add refused — $(clean "$TA_BID") was moved to defer, and its newest move stands: $(clean "$(proof_move_line "$TA_PLAN" "$TA_BID")"); $TA_ID stands in the plan unborn, the person's to remove. To fix it after all: disposition $(clean "$TA_BID") fix '<their words>' '<why>', then task-add again."
           exit 1
         fi
         TA_RANK="${FR_S#S}$( [ "$FR_R" = on ] && printf 0 || printf 1 )"
@@ -1032,7 +1062,7 @@ EOF
       done
       TA_BORN_MARK=" of=$TA_BORN_IDS"
       if [ -n "$TA_OFF" ]; then
-        die "task-add refused — born: $TA_OFF_RATING is outside fix-policy: $TA_POL; the plan is unchanged; the finding goes to the review findings disposition (AC-10.3). To fix $(clean "$TA_OFF") anyway: disposition $(clean "$TA_OFF") fix '<their words>' '<why>', then task-add again."
+        die "task-add refused — born: $TA_OFF_RATING is outside fix-policy: $TA_POL; $TA_ID stands in the plan unborn, the person's to remove; the finding goes to the review findings disposition (AC-10.3). To fix $(clean "$TA_OFF") anyway: disposition $(clean "$TA_OFF") fix '<their words>' '<why>', then task-add again."
         exit 1
       fi
       # A gravest rating outside the policy got here only by the person's move to fix: the marker says so, and
@@ -1044,11 +1074,11 @@ EOF
     if [ -n "$TA_BORN" ]; then
       TA_RATING="${TA_BORN#review }"
       if [ -z "$TA_BORN_IDS" ] && ! fix_policy_covers "$TA_POL" "${TA_RATING% *}" "${TA_RATING#* }"; then
-        die "task-add refused — born: $TA_BORN is outside fix-policy: $TA_POL; the plan is unchanged; the finding goes to the review findings disposition (AC-10.3)."
+        die "task-add refused — born: $TA_BORN is outside fix-policy: $TA_POL; $TA_ID stands in the plan unborn, the person's to remove; the finding goes to the review findings disposition (AC-10.3)."
         exit 1
       fi
       if ! TA_COUNTED="$(units_born_counted "$TA_PLAN")"; then
-        die "task-add refused — the review-born rows of $TA_PLAN cannot be counted against fix-cap: (lib/run.sh, which reads fix-policy:, is not loaded); the plan is unchanged. Run /bionic:doctor to see which library answered."
+        die "task-add refused — the review-born rows of $TA_PLAN cannot be counted against fix-cap: (lib/run.sh, which reads fix-policy:, is not loaded); nothing is born. Run /bionic:doctor to see which library answered."
         exit 1
       fi
       TA_NCOUNT="$(printf '%s\n' "$TA_COUNTED" | awk -F'\t' '$3 == "counted" { n++ } END { print n + 0 }')"
@@ -1057,11 +1087,11 @@ EOF
       TA_COUNT_SAID="exempt under fix-policy: $TA_POL"
       if [ "$TA_CLASS" = counted ]; then
         if ! TA_CAP="$(units_fix_cap "$TA_PLAN")"; then
-          die "task-add refused — born: $TA_BORN has no cap to count against: fix-cap: '$(plan_frontmatter_get "$TA_PLAN" fix-cap)' is no count, or the plan names no rigor: to default it from; the plan is unchanged."
+          die "task-add refused — born: $TA_BORN has no cap to count against: fix-cap: '$(plan_frontmatter_get "$TA_PLAN" fix-cap)' is no count, or the plan names no rigor: to default it from; $TA_ID stands in the plan unborn, the person's to remove."
           exit 1
         fi
         if [ "$TA_NCOUNT" -ge "$TA_CAP" ]; then
-          die "task-add refused — review-born rows: $TA_NCOUNT of cap $TA_CAP are counted ($TA_NEXEMPT exempt under fix-policy: $TA_POL); this finding goes to the review findings disposition, or the person raises the cap: set fix-cap=$((TA_NCOUNT + 1)) at the card."
+          die "task-add refused — review-born rows: $TA_NCOUNT of cap $TA_CAP are counted ($TA_NEXEMPT exempt under fix-policy: $TA_POL); $TA_ID stands in the plan unborn, the person's to remove; this finding goes to the review findings disposition, or the person raises the cap: set fix-cap=$((TA_NCOUNT + 1)) at the card."
           exit 1
         fi
         TA_COUNT_SAID="counted $((TA_NCOUNT + 1)) of $TA_CAP"
@@ -1076,13 +1106,13 @@ EOF
             _units_files_tokens "$TA_BFILES" | grep -Fx -- "$TA_PATH" >/dev/null && printf '%s\n' "$TA_BID"
           done)"
         if [ "$(printf '%s' "$TA_FIXERS" | awk 'NF { n++ } END { print n + 0 }')" -ge 3 ]; then
-          die "task-add refused — a fourth fix on $TA_PATH: $(printf '%s' "$TA_FIXERS" | paste -sd, - | sed 's/,/, /g') already fix it; stop the run (AC-10.2)"
+          die "task-add refused — a fourth fix on $TA_PATH: $(printf '%s' "$TA_FIXERS" | paste -sd, - | sed 's/,/, /g') already fix it; $TA_ID stands in the plan unborn, the person's to remove; stop the run (AC-10.2)"
           exit 1
         fi
       done <<EOF
 $(_units_files_tokens "$TA_FILES")
 EOF
-      TA_CELL_TASK="$TA_TASK · born: review"
+      TA_CELL_TASK="$TA_CELL_TASK · born: review"
     fi
     # A FLOOR-BORN MARKER NAMES ITS RED: the marker is admitted only with a red the machine recorded behind it
     # (`born_floor_backing`), and it records which, ` of=regression`, ` of=standing@<12-hex>` or ` of=run@<12-hex>`.
@@ -1090,53 +1120,51 @@ EOF
     if [ -n "$TA_BORN_SUITE" ]; then
       if ! born_floor_backing "$TA_PLAN" "$REPO_REAL" "$TA_BORN_SUITE"; then
         if born_red_log "$TA_PLAN" "$REPO_REAL"; then
-          die "task-add refused — born: regression $TA_BORN_SUITE names no red the machine recorded; proof-add the red run's log first: bash ${HOOK_DIR}/session-poker.sh proof-add regression $BFB_LOG; the plan is unchanged."
+          die "task-add refused — born: regression $TA_BORN_SUITE names no red the machine recorded; proof-add the red run's log first: bash ${HOOK_DIR}/session-poker.sh proof-add regression $BFB_LOG; $TA_ID stands in the plan unborn, the person's to remove."
         else
-          die "task-add refused — born: regression $TA_BORN_SUITE names no red the machine recorded; it is admitted when the plan's regression proof owes $TA_BORN_SUITE (it owes ${BFB_OWED:-nothing}; proof-add regression, from a whole run that left it red) or when the landing record holds a standing event or a red verdict for $TA_BORN_SUITE at a commit on ${BFB_BRANCH:-the working branch}; the plan is unchanged."
+          die "task-add refused — born: regression $TA_BORN_SUITE names no red the machine recorded; it is admitted when the plan's regression proof owes $TA_BORN_SUITE (it owes ${BFB_OWED:-nothing}; proof-add regression, from a whole run that left it red) or when the landing record holds a standing event or a red verdict for $TA_BORN_SUITE at a commit on ${BFB_BRANCH:-the working branch}; $TA_ID stands in the plan unborn, the person's to remove."
         fi
         exit 1
       fi
-      TA_BORN_OF="$BFB_OF"; TA_CELL_TASK="$TA_TASK · born: regression"
+      TA_BORN_OF="$BFB_OF"; TA_CELL_TASK="$TA_CELL_TASK · born: regression"
     fi
 
     # THE DECLARATION RIDES THE TASK CELL beside the born tag, in its style, where `units_questions` lifts it.
     [ -z "$TA_QUESTIONS" ] || TA_CELL_TASK="$TA_CELL_TASK · questions: $TA_QUESTIONS"
     pv_task_cells_or_refuse "$TA_ID" "$TA_CELL_TASK"
-    if ! units_add_row "$TA_PLAN" "$TA_ID" "$TA_STEP" "$TA_KIND" "$TA_CELL_TASK" "$TA_AGENT" \
-         "$TA_DEPS" "$TA_SIZE" "$TA_SERVES" "$TA_FILES" "$TA_READS" > "$PV_NEW" 2>/dev/null || [ ! -s "$PV_NEW" ]; then
-      die "REFUSED — $TA_PLAN carries no ## Tasks table or no ## SDLC State section to add $TA_ID to; the plan is unchanged."
-      exit 1
-    fi
     TA_ART_CELL=""
-    if [ -n "$TA_REV_ART" ] && pv_header_cells "$TA_PLAN" tasks | /usr/bin/grep -ix artifact >/dev/null; then
-      if ! units_table_cells "$PV_NEW" set tasks "$TA_ID" "artifact=$TA_REV_ART" > "$PV_NEW.2" 2>/dev/null; then
-        die "REFUSED — the artifact cell of $TA_ID cannot be written ($TA_REV_ART); the plan is unchanged."
-        exit 1
-      fi
-      mv -f "$PV_NEW.2" "$PV_NEW"; TA_ART_CELL="$TA_REV_ART"
+    if [ -n "$TA_REV_ART" ] && pv_header_cells "$TA_PLAN" tasks | /usr/bin/grep -ix artifact >/dev/null; then TA_ART_CELL="$TA_REV_ART"; fi
+    ta_none() { case "$1" in ''|'—'|'-') printf '—' ;; *) printf '%s' "$1" ;; esac; }
+    TA_SHORT=""
+    [ "$(ta_none "$TA_FILES")" = "$(ta_none "$TA_READ_FILES")" ] || TA_SHORT="${TA_SHORT}, its Files"
+    [ "$TA_CELL_TASK" = "$TA_CELL" ] || TA_SHORT="${TA_SHORT}, its task cell's tags"
+    [ -z "$TA_ART_CELL" ] || [ "$TA_ART_CELL" = "$(ta_cell artifact)" ] || TA_SHORT="${TA_SHORT}, its artifact"
+    TA_THREAD="$(units_thread_rows "$TA_PLAN" "$TA_ID")" || TA_THREAD=""
+    [ -z "$TA_THREAD" ] || TA_SHORT="${TA_SHORT}, the deps of $(printf '%s\n' "$TA_THREAD" | cut -f1 | paste -sd, - | sed 's/,/, /g'), which must name it"
+    if [ -n "$TA_SHORT" ]; then
+      die "REFUSED — $TA_ID is short of the row task-add accepts: ${TA_SHORT#, }. The plan is unchanged and nothing is born. Edit the ## Tasks table to these lines, $TA_ID first, then task-add $TA_ID again:"
+      { ta_line "$TA_ID" files="$(ta_none "$TA_FILES")" task="$TA_CELL_TASK" ${TA_ART_CELL:+artifact="$TA_ART_CELL"}
+        printf '%s\n' "$TA_THREAD" | while IFS=$'\t' read -r TA_TR TA_TD; do [ -z "$TA_TR" ] || ta_line "$TA_TR" deps="$TA_TD"; done; } >&2
+      exit 1
     fi
-
-    TA_VIOL="$(units_validate "$PV_NEW" "$PV_PLAN" 2>&1)"
+    TA_VIOL="$(units_validate "$TA_PLAN" 2>&1)"
     if [ -n "$TA_VIOL" ]; then
-      die "REFUSED — with $TA_ID added, the ## Tasks table breaks the Task invariants; the plan is unchanged:"
+      die "REFUSED — the ## Tasks table holding $TA_ID breaks the Task invariants; nothing is born:"
       printf '%s\n' "$TA_VIOL" >&2
-      # A STEP-7 DOC ROW IS NO LONGER REFUSED FOR ITS APPROVAL READ (wave-35 T5; D13): the release
-      # approval is the integrate row's read, so the one-retry wave-33 T7 printed here is gone with it.
       exit 1
     fi
 
-    plan_verb_swap task-add "$TA_ID added" writer
-    # THE BIRTH IS THE LOG'S, BESIDE THE EDIT THAT ADDS THE ROW: one born event, through the one writer, carrying what a
-    # born marker carried (the rating and its findings, or the regression and its record).
+    # THE BIRTH IS THE LOG'S: one born event, through the one writer, carrying what a born marker carried (the rating and
+    # its findings, or the regression and its record).
     case "$TA_BORN_MARK" in *" promoted") TA_PROMOTED=1 ;; *) TA_PROMOTED="" ;; esac
     if ! units_born_event "$TA_PLAN" "$TA_ID" "${TA_BORN}${TA_BORN_SUITE:+regression $TA_BORN_SUITE}" \
          "${TA_BORN_IDS}${TA_BORN_SUITE:+$TA_BORN_OF}" "$TA_PROMOTED"; then
-      die "task-add — $TA_ID is in $TA_PLAN, and its born event could not be appended to the run's log; the row reads as born by no review or regression until it is."
-      [ -z "${TA_BORN}${TA_BORN_SUITE}" ] || exit 1
+      die "task-add — the born event of $TA_ID could not be appended to the run's log; the row reads as born by no review or regression until it is. Run task-add $TA_ID again."
+      exit 1
     fi
-    say "task-add — $TA_ID added to $TA_PLAN: the row and its - $TA_ID: line, and its born event in the run's log; validated and dry-committed first."
+    say "task-add — $TA_ID is born: its born event is in the run's log, and $TA_PLAN is unchanged."
     [ -z "$TA_ART" ] || say "task-add — $TA_ID is a $TA_KIND row: its Files carry its record artifact, $TA_ART."
-    [ -z "$TA_REV_ART" ] || say "task-add — $TA_ID is a review row: its Files carry one record per question the rigor deals${TA_ART_CELL:+, its artifact cell the first, $TA_ART_CELL}."
+    [ -z "$TA_REV_ART" ] || say "task-add — $TA_ID is a review row: its Files carry one record per question it is dealt${TA_ART_CELL:+, its artifact cell the first, $TA_ART_CELL}."
     [ -z "$TA_BORN" ] || say "task-add — $TA_ID is review-born ($TA_BORN); say so in the review findings disposition · $TA_COUNT_SAID"
     [ -z "$TA_BORN_SUITE" ] || say "task-add — $TA_ID is regression-born ($TA_BORN_SUITE), backed by of=$TA_BORN_OF: its landing holds every review's cover (D9), and it counts against no fix-cap."
     # A ROW NOW ANSWERS EACH FINDING IT NAMES, so the person owes no ruling on it: its owed item closes.

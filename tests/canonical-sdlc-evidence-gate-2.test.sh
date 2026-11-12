@@ -846,9 +846,8 @@ od_lrec() { bash -c '. "$1/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "$OD_
 od_lall() { cat "$(od_lrec)" "$(dirname "$(od_lrec)")/run.log" 2>/dev/null; }   # the record's lines, then the run log's
 od_state() { bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && proof_state "$2" "$3"' _ "$OD_LIB" "$OD_PLAN" "$OD" 2>/dev/null | cut -f1; }
 
-od_plan 4 '' "$(od_rows pending pending pending)"
-cp "$OD_PLAN" "$OD_ROOT/before"
-od_poke task-add T9 7 test 'a second regression. The suite runs again after the release.' test-runner — 90 REQ-1 .bionic/docs/record/w/T9.md 'approval:plan, head'
+od_plan 4 '' "$(od_rows pending pending pending; od_row T9 7 test 'a second regression. The suite runs again after the release.' test-runner .bionic/docs/record/w/T9.md pending 'approval:plan, head')"
+cp "$OD_PLAN" "$OD_ROOT/before"; od_poke task-add T9
 expect_eq "OV-1 AC-7.1 task-add of a regression row after the review and the release is refused (exit 1)" "1" "$OD_RC"
 expect_eq "OV-1b …and the refusal is the validator's one line for T9, naming T3, the review row it follows" \
   'T9: the regression row comes after the review row T3; the order is build, regression, review, release: put T9 at step 5, ahead of T3' \

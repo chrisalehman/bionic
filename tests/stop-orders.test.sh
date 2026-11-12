@@ -273,8 +273,7 @@ run_orders "$R5" standdown
 expect_contains "…and the ack is what puts it in the batch" "1 row(s) have landed" "$OUT"
 
 # THE APPEND-ONLY ADVANCE, pinned in this suite because standdown now reads the roster
-# through ONE pre-loop fold instead of re-walking the file per verdict row (ap review P-1,
-# epic-16 w2 Step-6 remediation R4). The behaviour is unchanged and that is the point of
+# through ONE pre-loop fold instead of re-walking the file per verdict row. That is the point of
 # the pin: a contract advances along the roster and every writer copies the fields forward,
 # so the LAST row carrying a name is the authoritative one, and a rewrite that starts
 # taking the first row must not be able to stay green here. The cross-script half — the
@@ -351,8 +350,6 @@ R7WT="$SANDBOX/worktree-wt"
 # A REAL `git worktree add` (never a mocked path) — built from the repo root, since
 # `git worktree add` resolves relative paths against pwd (.claude/rules/git-worktree-docs.md).
 git -C "$R7" worktree add -q -b w-r3-wt "$R7WT" >/dev/null 2>&1
-# (fixture sanity check removed epic-18 W3 4/6: not a subject-under-test assertion --
-#  it verified git worktree add itself, not hooks/stop-orders.sh; see ledger-stop-orders.md)
 
 run_orders "$R7" standdown
 expect_status "from the main repo root, standdown sees the true roster" 0 "$ST"
@@ -379,7 +376,6 @@ section "Section 6: standdown LANDS NOTHING; a row is stoppable by its roster ma
 # named `<x>` (or `W-<X>`) holds `.worktrees/<x>`.
 
 R8="$(make_repo standdown-lands-nothing)"
-R8_REAL="$(cd "$R8" && pwd -P)"
 echo seed > "$R8/README.md"
 git -C "$R8" add README.md >/dev/null 2>&1
 git -C "$R8" commit -qm seed >/dev/null 2>&1
@@ -446,10 +442,7 @@ R8TR="$R8CFG/projects/$R8SLUG/$SID.jsonl"
 # THE ANSWER BODY IS BUILT BY tests/lib/live-answer.sh (S17, spec AC-27/AC-28): the self
 # line, the `Teammates (N):` header and every teammate row come out of the committed corpus
 # at tests/fixtures/claude/listagents-answers.jsonl with only this suite's names and
-# statuses substituted in place. The private builder that used to sit here re-typed the
-# harness's separator, its ref suffix and its recognition anchor — three spellings of that
-# anchor across the tree, and the one thing standing between "empty answer" and
-# "unrecognised body".
+# statuses substituted in place.
 # FRESH because the answer postdates the last user prompt.
 LIVE_ANSWER_TYPE="bionic:implementor"
 plant_live() {  # <transcript> <fresh|stale> <name>...
@@ -553,9 +546,8 @@ expect_contains "…while the real still-at-it beside it is still live" "[live]"
 # `Subagents (N):` header rather than `Teammates (N):` — before the fix, `live_agents`
 # (payload/scripts/lib/agents.sh) parsed only the Teammates block, so a panel carrying
 # ONLY a Subagents block answered zero live agents and every held row read `[not live]`
-# regardless of whether its agent was still running. T12's live bed hit exactly this
-# (live-rows-802ee6d.md F2): the literal `STANDDOWN <name>` line could never print in a
-# `-p` bed for the same reason. `tests/lib/live-answer.sh`'s composer only substitutes
+# regardless of whether its agent was still running.
+# `tests/lib/live-answer.sh`'s composer only substitutes
 # into the corpus's Teammates shape (its own header says so), so this body is hand-built —
 # the same precedent that suite's Teammates-forgery shapes are hand-written rather than
 # routed through the composer.
@@ -596,9 +588,7 @@ section "Section 8: stopped <name> acks the row it stops; standdown drops a row 
 # An unknown or already-acked name is a refusal, exit 2: the sweeper would record an unknown
 # name and warn, and a second ack says nothing new.
 #
-# STOPPED NOW CHECKS WHAT STANDDOWN ALREADY CHECKS (wave-19 T1 follow-up, critic C4). Before
-# this fix `stopped` acked ANY open row on the strength of the name alone — still-live or
-# UNMET — and since T4 that ack frees the name for a fresh dispatch while the agent it named
+# STOPPED CHECKS WHAT STANDDOWN ALREADY CHECKS: an ack frees the name for a fresh dispatch while the agent it named
 # is still running (dispatch-preflight.sh:2272 treats any ack newer than the launch as the
 # name closing). So a FRESH panel reading must confirm the name is gone: present on the
 # panel -> refused, naming it live; a stale or absent panel -> refused, because a verb that
@@ -629,10 +619,8 @@ expect_status "stopped on an UNMET row under a stale panel is refused, exit 2 (C
 expect_contains "…naming the verdict" "UNMET" "$OUT$ERR"
 expect_absent "…and acks nothing" "|name=open-one|" "$(s9_ledger)"
 
-# UNMET AND GONE FROM A FRESH PANEL: closed, reason abandoned (wave-19 T1e, audit V-1; REQ-1
-# AC-1.2). This is T1's own original fixture — `open-one`'s deliverable never exists — and
-# the agent it named was stopped before it landed (w19-T6 this wave). Refusing it left the
-# name blocked and counted against the budget with no close but a hand `sweeper ack`. The
+# UNMET AND GONE FROM A FRESH PANEL: closed, reason abandoned. `open-one`'s deliverable never exists, and refusing
+# it would leave the name blocked and counted against the budget with no close but a hand `sweeper ack`. The
 # ack is attributed honestly: `reason=abandoned`, never `landed` — nothing landed — and never
 # the tick's `moot-and-gone`, which names a row that had nothing to produce.
 plant_live "$R9TR" fresh
@@ -740,8 +728,7 @@ git -C "$R11/.worktrees/acked-gone-lease" commit -qm "acked-gone-lease work" >/d
 R11SLUG=$(so_slug "$R11")
 mkdir -p "$R8CFG/projects/$R11SLUG"
 R11TR="$R8CFG/projects/$R11SLUG/$SID.jsonl"
-# THE DELIVERABLE IS WRITTEN (wave-19 T1f, review R2-1). Before T1f this row's n3.md was never
-# written, so the row was UNMET and this block pinned a merge of work nobody landed. A lease
+# THE DELIVERABLE IS WRITTEN. A lease
 # ends in a merge only for a landed row (MET or WAIVED); the UNMET shape is R12 below.
 echo landed > "$R11/.bionic/docs/record/n3.md"
 so_roster_row "$R11" "acked-gone-lease" ".bionic/docs/record/n3.md" "" "acked-gone-lease@session-6c85684c" "" "" "" \
@@ -816,8 +803,6 @@ if [ -d "$R12/.worktrees/half-done" ] && [ -f "$R12/.worktrees/half-done/partial
 else
   no "…its tree stands, the partial work still in it"
 fi
-R12_LE=$(printf '%s\n' "$OUT" | sed -n '/LEASES/,$p')
-R12_REAL=$(cd "$R12" && pwd -P)   # the verb names trees under the physical repo path
 
 # ============================================================
 section "Section 9: stopped — STILL-LIVE is not a close on its own; a fresh, absent panel overrides the progress-artifact shape (wave-19 T1g, audit V2-1, critic C2-2)"
@@ -1005,8 +990,7 @@ expect_contains "(tt3b) …and says it found no tree, naming where it looked" \
 # ============================================================
 section "§BACK: stopped on an agent gone unlanded takes its row's launch back, so the row is offered again"
 # ============================================================
-# A row launched by the log reads running until a cancel of its launch stands; a row launched by its cells, until its
-# cells say pending. A name already closed before this rule, its row still running, is taken back the same way.
+# A row launched by the log reads running until a cancel of its launch stands.
 # FIXTURE FIDELITY: the launch is written by the one appender, the rows read through lib/units.sh, the panel planted.
 # fails-when: an abandoned agent's row reads running for good, or its launch is taken back twice.
 RB="$(make_repo stopped-back)"; RB_P="$RB/.bionic/docs/plans/epic-x/wave-x.plan.md"; mkdir -p "${RB_P%/*}" "$RB/.bionic/docs/record/wave-x"
@@ -1025,10 +1009,6 @@ expect_eq "(bk0) before: T1 runs by the log, T2 by its cells, neither offered" "
 run_orders_cfg "$RB" stopped w-log
 expect_status "(bk1) stopped closes the gone, unlanded agent (exit 0)" 0 "$ST"
 expect_eq "(bk1b) …its row reads pending and is offered, by exactly one cancel" "T1/pending/— T2/active/w-cell ready=T1, 1" "$(rb_rows) $(rb_cancels)"
-( cd "$RB" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" ack w-cell --by human --reason abandoned >/dev/null 2>&1 )
-run_orders_cfg "$RB" stopped w-cell
-expect_status "(bk2) a name closed before, its row still running by its cells, is taken back (exit 0)" 0 "$ST"
-expect_eq "(bk2b) …by its cells, with no second cancel" "T1/pending/— T2/pending/— ready=T1,T2, 1" "$(rb_rows) $(rb_cancels)"
 run_orders_cfg "$RB" stopped w-log
 expect_status "(bk3) once its row is back, a closed name is refused as ever (exit 2)" 2 "$ST"
 

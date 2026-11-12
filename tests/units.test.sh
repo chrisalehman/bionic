@@ -39,6 +39,7 @@
 #   §BORN    a row's born event, one per row, is read by the fix-cap's count, the findings and the marks
 #   §BACK    a launch taken back by one function: a cancel for a launch in the log, the cells for one by its cells
 #   §TREE    a row's tree and base read from the newest tree event in the log, its cells for a row the log holds none for
+#   §LEDGER  a landed row with no line asked of the reader: admitted when it answers landed, refused when it does not
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT (AC-1e.2, measure §4.3). Before this library two
 # readers in hooks/canonical-sdlc-evidence-gate.sh took `id`/`rigor`/`status` as awk fields
@@ -398,8 +399,7 @@ expect_eq "a plan that has the table exits 0" "0" "$(call_rc units_rows "$SANDBO
 section "4 — units_ready: pending and every dep landed; the step is a label (wave-20 Δ1)"
 # ============================================================
 #
-# RE-AUTHORED FOR wave-20 REQ-5 (Δ1, ADR-036). Through 1.8.6 the step argument FILTERED: a
-# row was ready only at its own step. Readiness is now the prerequisite graph — a work row is
+# Readiness is the prerequisite graph — a work row is
 # ready when it is pending and every prerequisite has landed, whatever its step — so the
 # argument no longer filters a work row. It still decides the gate-act rows (§17).
 
@@ -740,8 +740,7 @@ expect_eq "…with T10 (step 4), T13 and T14 (step 5) all ready at once" \
   "T10
 T13
 T14" "$WAVE_UNION"
-# RE-AUTHORED FOR wave-20 REQ-5 (Δ1, Δ6; ADR-036). Through 1.8.6 the per-step split was the
-# point of this row: asked about Step 4, units_ready named only T10. Readiness is now the
+# Readiness is the
 # prerequisite graph, so for WORK rows the answer at any step IS the old whole-table answer.
 expect_eq "asked at Step 4, units_ready names every work row whose deps landed, whatever its step (Δ1)" \
   "T10
@@ -915,8 +914,7 @@ expect_eq "ORD-7 no release row: no order to read (rc 1)" "|1" "$(call units_ord
 section "§POST — a review row after a landed release is admitted when it reads only approval:plan, head and the rows landed past the release"
 # The fix that lands after the release is read as a piece, so its reader row stands after the release row. It is
 # admitted only when the release row has landed and the reader names nothing written before the release; while the
-# release is open the order text refuses it as before. Each case projects the row the way task-add does
-# (units_add_row, then units_validate on the projection).
+# release is open the order text refuses it as before. Each case writes the row as an edit does, then units_validate.
 PO_P="$SANDBOX/post.plan.md"
 po_plan() {  # <release status> -> PO_P: build, regression, review and release rows, and a build row landed past the release
   { printf -- '---\ncurrent: 7\n---\n\n## SDLC State\n\ncurrent: 7\napproved-by: fixture 2026-10-12T00:00Z "approved"\n\n## Tasks\n\n'
@@ -928,10 +926,7 @@ po_plan() {  # <release status> -> PO_P: build, regression, review and release r
     printf '| T8 | 7 | build | the fix after the release | implementor | — | 30 | REQ-1 | lib/b.sh, .bionic/docs/record/w/T8.md | landed | approval:plan |\n'
   } > "$PO_P"
 }
-po_add() {  # <reads> -> PO_P with the review row T9 added past the release, as task-add projects it
-  call units_add_row "$PO_P" T9 7 review "the critic reads the fix as a piece" critic — 20 REQ-1 \
-    .bionic/docs/record/w/T9-adversarial.md "$1" > "$PO_P.new" && mv "$PO_P.new" "$PO_P"
-}
+po_add() { printf '| T9 | 7 | review | the critic reads the fix as a piece | critic | — | 20 | REQ-1 | .bionic/docs/record/w/T9-adversarial.md | pending | %s |\n' "$1" >> "$PO_P"; }   # <reads> -> PO_P with T9 past the release
 PO_ORD='T7: the release row comes ahead of the review row T9; the order is build, regression, review, release: put T7 at step 7, after T9'
 po_plan landed; po_add 'approval:plan, head, .bionic/docs/record/w/T8.md'
 expect_eq "POST-0 precondition: the projection carries T9 after the release row T7 and the fix row T8" "T7 T8 T9" \
@@ -970,9 +965,8 @@ ap_plan() {  # <fix row status> -> AP_P: the POST fixture with the fix row T8 bo
     printf '| T6 | 6 | review | the critic | critic | — | 60 | REQ-1 | .bionic/docs/record/w/T6.md | landed | approval:plan, head |\n'
     printf '| T7 | 7 | doc | the release | implementor | — | 30 | REQ-1 | CHANGELOG.md | landed | approval:plan, head |\n'
     printf '| T8 | 4 | build | the fix born at step 4 | implementor | — | 30 | REQ-1 | lib/b.sh, .bionic/docs/record/w/T8.md | %s | approval:plan |\n' "$1"
+    printf '| T9 | 7 | review | the critic reads the fix as a piece | critic | — | 20 | REQ-1 | .bionic/docs/record/w/T9-adversarial.md | pending | approval:plan, head, .bionic/docs/record/w/T8.md |\n'
   } > "$AP_P"
-  call units_add_row "$AP_P" T9 7 review "the critic reads the fix as a piece" critic — 20 REQ-1 \
-    .bionic/docs/record/w/T9-adversarial.md 'approval:plan, head, .bionic/docs/record/w/T8.md' > "$AP_P.new" && mv "$AP_P.new" "$AP_P"
 }
 ap_pub() {  # <row>... -> AP_REC: a published event for each row, in the order given
   : > "$AP_REC"
@@ -1237,11 +1231,11 @@ db_repo() {  # <label> -> a fresh repository with one commit, engaged by DB_SID
 }
 db_row() { printf '| %s | 4 | build | fix %s | implementor | — | 30 | REQ-1 | %s | — | — | pending |' "$1" "$1" "$2"; }   # <id> <files>
 db_led() { printf -- '- %s: pending dispatch — added by task-add at 2026-10-20T00:00:00Z born: %s' "$1" "$2"; }   # <id> <marker>
-db_poke() {  # <poker> <repo> <id> <files> <born> -> DB_OUT, DB_RC: task-add of a step-4 build row as DB_SID
-  DB_RC=0
+db_poke() {  # <poker> <repo> <id> <files> <born> -> DB_OUT, DB_RC: the step-4 build row an edit adds, then task-add of it as DB_SID
+  local p; p="$(sed -n 's/^plan=//p' "$2/.bionic/tmp/engaged-$DB_SID.state")"; DB_RC=0
+  awk -v r="| $3 | 4 | build | Fix $3. The defect is gone. · born: review | bionic:implementor | — | 30 | REQ-1 | $4 | — | — | pending |" '/^\| T5 \| 5 \|/ { sub(/T1, T2/, "&, " id) } { print } /^\| T5 \| 5 \|/ { print r }' id="$3" "$p" > "$p.t" && mv "$p.t" "$p"
   DB_OUT="$(cd "$2" && env CLAUDE_CODE_SESSION_ID="$DB_SID" HOME="$DB_ROOT/home" CLAUDE_CONFIG_DIR="$DB_ROOT/config" \
-    BIONIC_GATE_DIR="$DB_ROOT/gate" BIONIC_PLUGINS_DIR="$DB_ROOT/no-plugins" \
-    bash "$1" task-add "$3" 4 build "Fix $3. The defect is gone." bionic:implementor '—' 30 REQ-1 "$4" --born "$5" 2>&1)" || DB_RC=$?
+    BIONIC_GATE_DIR="$DB_ROOT/gate" BIONIC_PLUGINS_DIR="$DB_ROOT/no-plugins" bash "$1" task-add "$3" --born "$5" 2>&1)" || DB_RC=$?
 }
 db_lib() { bash -c '. "$1/units.sh" >/dev/null 2>&1 && . "$1/run.sh" >/dev/null 2>&1 || exit 9; shift; "$@"' _ "$REPO_ROOT/payload/scripts/lib" "$@"; }
 
@@ -1287,8 +1281,8 @@ db_cap() {  # <poker> -> green when a counted row past fix-cap: 1 is refused nam
   p="$(db_plan "$r" 1 "$(db_row T3 lib/c1.sh)" "$(db_led T3 "review S2 on of=$DB_CARRIED/critic.md#1")")"
   db_poke "$1" "$r" T6 lib/c2.sh "$DB_CARRIED/critic.md#2"
   case "$DB_RC|$DB_OUT" in
-    "1|"*"task-add refused — review-born rows: 1 of cap 1 are counted (0 exempt under fix-policy: S1,S2-on); this finding goes to the review findings disposition, or the person raises the cap: set fix-cap=2 at the card."*) echo green ;;
-    "0|"*) [ -n "$(/usr/bin/grep '^- T6: ' "$p")" ] && echo "red: admitted" || echo "red: exit 0 with no row" ;;
+    "1|"*"task-add refused — review-born rows: 1 of cap 1 are counted (0 exempt under fix-policy: S1,S2-on); T6 stands in the plan unborn, the person's to remove; this finding goes to the review findings disposition, or the person raises the cap: set fix-cap=2 at the card."*) echo green ;;
+    "0|"*) echo "red: admitted" ;;
     *) echo "red: $DB_RC" ;;
   esac
 }
@@ -1303,7 +1297,7 @@ $(db_led T6 'review S2 on')")"
   db_poke "$1" "$r" T7 lib/x.sh 'review S2 on'
   case "$DB_RC|$DB_OUT" in
     "1|"*"task-add refused — a fourth fix on lib/x.sh: T3, T4, T6 already fix it"*) echo green ;;
-    "0|"*) [ -n "$(/usr/bin/grep '^- T7: ' "$p")" ] && echo "red: admitted" || echo "red: exit 0 with no row" ;;
+    "0|"*) echo "red: admitted" ;;
     *) echo "red: $DB_RC" ;;
   esac
 }
@@ -1407,14 +1401,11 @@ expect_eq "BORN-2 the cap's count, the findings and the marks read the review-bo
   "T2	S1 on	b.sh|T2	pending	record/w/r.md#1|T2	review	S1 on" \
   "$(call units_born "$LV_P")|$(call units_born_findings "$LV_P")|$(call units_born_marks "$LV_P")"
 
-section "§BACK — a launch taken back is one function: the log's cancel for a launch in the log, the cells for one by its cells"
+section "§BACK — a launch taken back is the log's cancel, the plan untouched"
 lv_log dispatch row=T2 name=w-T2b brief=b sum=s; BK_SUM="$(cksum < "$LV_P")"
 call units_row_back "$LV_P" T2
 expect_eq "BACK-1 a launch in the log returns to pending by one cancel, the plan untouched" "pending/— 1 same" \
   "$(lv T2) $(grep -c '|ev=cancel|of=dispatch|row=T2|name=w-T2b|' "$LV_LOG") $([ "$(cksum < "$LV_P")" = "$BK_SUM" ] && echo same)"
-call units_row_back "$LV_P" T1
-expect_eq "BACK-2 a launch by its cells returns by its cells, and writes no cancel" "pending/— 0 | T1 | 4 | build | one | — |" \
-  "$(lv T1) $(grep -c '|ev=cancel|of=dispatch|row=T1|' "$LV_LOG") $(grep -o '^| T1 | 4 | build | one | [^|]* |' "$LV_P")"
 
 section "§TREE — a row's tree and base are the run's: the newest tree event in the log, the cells for a row it holds none for"
 TV_P="$SANDBOX/docs/plans/e/t.plan.md"; LV_LOG="$SANDBOX/docs/record/t/run.log"; mkdir -p "${LV_LOG%/*}"
@@ -1430,6 +1421,13 @@ lv_log dispatch row=T2 name=w-T2 brief=b sum=s
 lv_log tree row=T2 path=.worktrees/t2b branch=wt/t2b base=3333eeee by=w-T2
 expect_eq "TREE-2 with its launch it reads active under its name in its newest tree, and the plan is unchanged" \
   "active/w-T2/.worktrees/t2b/3333eeee same" "$(tv T2) $([ "$(cksum < "$TV_P")" = "$TV_SUM" ] && echo same)"
+
+section "§LEDGER — a landed row with no line of its own is the reader's to answer: admitted when it answers landed, refused when it does not"
+LV_LOG="$SANDBOX/docs/record/w/run.log"; sed -i.bak 's/| a1 | — | 30m | R | a.sh | active |/| — | — | 30m | R | a.sh | pending |/' "$LV_P"; lv_log published row=T2 commit=abcdef1 by=w-T2b
+expect_eq "LEDGER-1 T2 landed by its event, with no line in the plan, owes nothing: the reader answers landed" "landed|" "$(lv T2 | cut -d/ -f1)|$(call units_findings "$LV_P")"
+sed -i.bak 's/| a.sh | pending |/| a.sh | landed |/' "$LV_P"; lv_log published row=T1 commit=abcdef2 by=a1; lv_log cancel of=published row=T1 commit=abcdef2 by=a1
+expect_eq "LEDGER-2 a landing the log took back, under a cell that says landed, is refused for its line: the reader answers it pending" "landed|state=pending|evidence T1" \
+  "$(lv T1 | cut -d/ -f1)|$(bash -c '. "$1/reader.sh" && reader_q_status "$2" T1' _ "${LIB%/*}" "$LV_P" | head -1)|$(call units_findings "$LV_P")"
 
 # ============================================================
 finish

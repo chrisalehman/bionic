@@ -73,6 +73,7 @@ expect_absent "the reader's own file is admitted, its planted awk too" "lib/read
 section "PLANWRITERS"
 expect_contains "the planted plan write is named" "$(printf 'plan-writer\tpayload/scripts/lib/planted-write.sh\t')" "$AFTER"
 expect_absent "a plan write is not a parse" "$(printf 'parser\tpayload/scripts/lib/planted-write.sh')" "$AFTER"
+expect_absent "the units library writes no plan" "$(printf 'plan-writer\tpayload/scripts/lib/units.sh\t')" "$AFTER"
 expect_eq "the plan-writer count rises by one" "$(( $(count "$BEFORE" plan_writers) + 1 ))" "$(count "$AFTER" plan_writers)"
 
 section "WRITERS"

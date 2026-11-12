@@ -4178,7 +4178,9 @@ validate_matrix() {
       "write the row as '| AC | tier | status | evidence | auditor |' with exactly five cells and no literal pipe inside any cell."
   fi
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+  # A plan with no such table gives no row, yet the here-document still feeds one empty line: that is no row to judge.
   while IFS=$'\t' read -r ac status; do
+    [ -n "$ac" ] || continue
     case "$status" in
       pending|blocked|discharged|waived) : ;;
       *)
@@ -4900,7 +4902,6 @@ Plan: $PLAN
 Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); the orchestrator appends one row per dispatched task-shaped unit (D7)."
     refuse exit2 commit "this wave plan has no '## Tasks' ledger" "add a '## Tasks' section" "$_eg_detail"
   fi
-  [ "$_EG_V15" -eq 0 ] || { _eg_v15_owe "each row's '- T<id>:' evidence line and launched agent (a row at 15 is its nine authored cells)"; return 0; }
   # THE SECTION IS PRESENT. What is left is the TABLE, and a section without one is
   # rule 2 — satisfied, and returned BEFORE `units_validate`, which has no rows to
   # judge and would only restate the absence as an invariant violation.
@@ -4917,7 +4918,7 @@ Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); 
     _eg_detail="canonical-sdlc double multi_agent ${SCALE} plan's '## Tasks' table breaks the Task invariants:
 ${violations}
 Plan: $PLAN
-Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status. A reads column is optional and may sit anywhere in the header."
+Fix: repair each row named above; the columns are $(units_columns "$_EG_V15")"
     refuse exit2 commit "that dispatched task's row is invalid" "fix the row the detail names" "$_eg_detail"
   fi
   # PRESENCE IS ASKED OF THE WHOLE TABLE AT ONCE (AC-5.1). This loop used to refuse at the
@@ -4934,8 +4935,17 @@ Fix: repair each row named above; the columns are id | step | kind | task | agen
   # roster row is its own refusal, after the lines. The status enum stays `units_validate`'s,
   # above, whose ids the reader's `status` findings equal.
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  findings="$(units_findings "$PLAN" "$(_eg_roster_path)")"
-  refuse_missing_evidence_lines "$(printf '%s\n' "$findings" | awk '$1 == "evidence" { print $2 }')"
+  # AT 15 NO ROW HAS A LINE: a row's landing and its launch are the reader's, and a row the reader does not answer as the
+  # table reads it is owed until the log holds the fact.
+  if [ "$_EG_V15" -eq 1 ]; then
+    findings="$(units_findings "$PLAN" "$(_eg_roster_path)" v15)"
+    for id in $(printf '%s\n' "$findings" | awk '$1 == "evidence" { print $2 }'); do
+      _eg_v15_ask "${id}'s landing or launch, which the run's log does not hold as its row reads"
+    done
+  else
+    findings="$(units_findings "$PLAN" "$(_eg_roster_path)")"
+    refuse_missing_evidence_lines "$(printf '%s\n' "$findings" | awk '$1 == "evidence" { print $2 }')"
+  fi
   refuse_unlaunched_rows "$(printf '%s\n' "$findings" \
     | awk '$1 == "launch" { v = $0; sub(/^launch [^ ]+ /, "", v); print $2 ": " v }')"
   # Evidence line in ## SDLC State (anchored), judged for a

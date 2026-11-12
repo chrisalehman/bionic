@@ -1299,9 +1299,14 @@ esac
 # authored ones by the table header's line, a header key the reader does not answer from by its
 # name. All are listed in one refusal, so one repair answers it. An Edit the hook could not apply
 # is not judged, as the Tasks arm above does not judge one: the tool refuses that input itself.
+# Its Tasks rows are held to the invariants a plan at 14 is held to, on the page this write hands over, as the arm above
+# holds them: one id twice, a kind outside the vocabulary, a dependency on no row.
 if [ "$GS_V15" -eq 1 ] && { [ "$TOOL" != "Edit" ] || [ "$EDIT_APPLIED" -eq 1 ]; }; then
   if GS_FAULTS="$(plan_read_faults "$GS_PAGE")"; then
     _gs_refuse version-15 "$GS_FAULTS"
+  fi
+  if [ "$SCALE" != "task" ] && units_rows "$GS_PAGE" >/dev/null 2>&1 && GS_FAULTS="$(units_validate "$GS_PAGE" 2>/dev/null)"; [ -n "$GS_FAULTS" ]; then
+    _gs_refuse tasks-invalid "$(yaml_get sdlc-step)" "$GS_FAULTS" 1
   fi
 fi
 
