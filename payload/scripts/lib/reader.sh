@@ -134,7 +134,8 @@ reader_facts() {  # <plan> -> one line per standing fact, in the order the facts
       # an act by hand is counted each time it is taken, so its time names it; an untimed line has nothing to tell
       # it from its twin and stays one. A cancel names the act by its other fields and retracts it at every time.
       if (t == "hand" && f["at"] != "") { act[id SUBSEP "at=" f["at"]] = id; id = id SUBSEP "at=" f["at"] }
-      if (t == "cancel") { delete live[id]; if (named == "hand") for (x in live) if (act[x] == id) delete live[x]; next }
+      if (t == "cancel" && named == "hand") for (x in live) if (act[x] == id) delete live[x]
+      if (t == "cancel") { delete live[id]; next }
       # a discarded run was killed, not judged: it must not unseat the verdict a run already gave
       if (t == "verdict" && f["result"] == "discarded" && (id in live)) next
       if (named == "step" && (id in live) && fact[id] == body) delete live[id]
