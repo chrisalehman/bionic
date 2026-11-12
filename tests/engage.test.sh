@@ -33,7 +33,6 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 HOOK="$BIONIC_HOOKS_DIR/engage.sh"
 LIB="$REPO_ROOT/payload/scripts/lib/run.sh"
 BINDLIB="$REPO_ROOT/payload/scripts/lib/binding.sh"
-LOADER_LIB="$REPO_ROOT/payload/scripts/lib/loader.sh"
 HOOKS_JSON="$REPO_ROOT/hooks/hooks.json"
 RUNNER="$REPO_ROOT/tests/run.sh"
 
@@ -377,17 +376,10 @@ expect_contains "hooks.json registers engage.sh on UserPromptExpansion" \
 expect_eq "engage.sh is registered exactly twice, and no more" "2" \
   "$(printf '%s\n' "$HJ_ROWS" | /usr/bin/grep -c 'engage\.sh')"
 
-# The loader idiom, byte for byte against the pin — the same comparison
-# cross-gate §N.1 and hook-adoption §1 make, restated here so this suite fails on
-# its own subject rather than only in the roster suites.
-N_BLOCK="$( . "$LOADER_LIB" && bionic_loader_pin )"
-BLOCK_OF=$(awk '/^# --- bionic-loader\/v2 BEGIN$/{f=1} f{print} f&&/^# --- bionic-loader\/v2 END$/{exit}' "$HOOK")
-expect_eq "engage.sh carries the canonical loader block, byte for byte" "$N_BLOCK" "$BLOCK_OF"
-
-WANT_LINE=$(awk '/^# --- bionic-loader\/v2 BEGIN$/{print prev; exit} {prev=$0}' "$HOOK")
+WANT_LINE=$(/usr/bin/grep -m1 '^BIONIC_LIB_WANT=' "$HOOK")
 case "$WANT_LINE" in
-  BIONIC_LIB_WANT=\"*\") ok "engage.sh declares BIONIC_LIB_WANT above the block" ;;
-  *) no "engage.sh declares BIONIC_LIB_WANT above the block" "line above BEGIN was: [$WANT_LINE]" ;;
+  BIONIC_LIB_WANT=\"*\") ok "engage.sh declares BIONIC_LIB_WANT" ;;
+  *) no "engage.sh declares BIONIC_LIB_WANT" "read: [$WANT_LINE]" ;;
 esac
 WANTS=$(printf '%s' "$WANT_LINE" | sed -e 's/^BIONIC_LIB_WANT="//' -e 's/"$//')
 SOURCED=$(/usr/bin/grep -oE '^\. "\$BIONIC_LIB/[a-z.-]+\.sh"' "$HOOK" \
