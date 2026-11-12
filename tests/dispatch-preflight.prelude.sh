@@ -739,9 +739,7 @@ s22_fake_tree() {
   printf 'gitdir: %s/.git/worktrees/%s\n' "$1" "$2" > "$1/.worktrees/$2/.git"
 }
 
-# ---- from S28: PF_LIB_DIR, PF_FULL_BRIEF, pf_repo, pf_commit, pf_plan_path, pf_row, PF_FRONT_EXTRA, PF_STATE_EXTRA, pf_plan, pf_state, pf_line ----
-PF_LIB_DIR="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
-[ -r "$PF_LIB_DIR/proof.sh" ] || PF_LIB_DIR="${BIONIC_HOOKS_DIR}/../scripts/lib"
+# ---- from S28: PF_FULL_BRIEF, pf_repo, pf_plan_path, pf_tasks, pf_row, pf_plan ----
 
 # The floor row lands no code, so its brief names no landing suite (wave-28 T7, ruling A-orch-73: a
 # writer brief that binds a row, as `w99-T12` binds T12, carries a Lands-on: line).
@@ -779,32 +777,17 @@ pf_row() {
   printf '| %s | %s | %s | does the thing | implementor | %s | 30 | REQ-1 | %s | — | %s |' \
     "$1" "$2" "${5:-build}" "${6:-—}" "$4" "$3"
 }
-# pf_plan <repo> <floor head, or empty> [<row>...] — the plan, written whole: a `## Tasks`
-# heading closes `## SDLC State`, so a proof or cause line appended after it would be outside
-# the section. PF_STATE_EXTRA, when set, is one more line inside `## SDLC State`; PF_FRONT_EXTRA,
-# when set, is one more frontmatter line (the plan's `regression:` key, wave-31 T26).
-PF_STATE_EXTRA=""
-PF_FRONT_EXTRA=""
+# pf_plan <repo> <floor head, or empty> [<row>...] — make_repo's run at 15 taken to Step 5: the page whole, each row in
+# its nine cells, and the log gains the step, each active row's dispatch under its agent and, given a head, the floor.
 pf_plan() {
-  local repo="$1" head="$2" row; shift 2
-  {
-    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf 'intent: build\nrigor: double\nscale: wave\n'
-    [ -z "$PF_FRONT_EXTRA" ] || printf '%s\n' "$PF_FRONT_EXTRA"
-    printf -- '---\n\n# Test wave plan\n\n'
-    printf '## SDLC State\n\n'
-    printf 'integration-branch: main\nworking-branch: wave/99-test\ncurrent: 5\n'
-    printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n\n'
-    printf -- '- Step 5: verify\n'
-    [ -z "$head" ] || \
-      printf 'proved: kind=floor head=%s at=2026-10-04T00:00:00Z evidence=record/w99-floor.txt\n' "$head"
-    [ -z "$PF_STATE_EXTRA" ] || printf '%s\n' "$PF_STATE_EXTRA"
-    if [ "$#" -gt 0 ]; then
-      printf '\n## Tasks\n\n'
-      printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |\n'
-      printf -- '|---|---|---|---|---|---|---|---|---|---|---|\n'
-      for row in "$@"; do printf '%s\n' "$row"; done
-    fi
-  } > "$(pf_plan_path "$repo")"
+  local repo="$1" head="$2" l="$1/.bionic/docs/record/wave-01-test/run.log"; shift 2
+  { printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nintent: build\nrigor: double\nscale: wave\n'
+    printf 'integration-branch: main\nworking-branch: wave/99-test\n---\n\n# Test wave plan\n'; } > "$(pf_plan_path "$repo")"
+  printf 'run/v1|ev=step|n=5|at=2026-09-07T19:06:00Z\n' >> "$l"
+  [ -z "$head" ] || printf 'run/v1|ev=proof|kind=floor|head=%s|evidence=record/w99-floor.txt|at=2026-10-04T00:00:00Z\n' "$head" >> "$l"
+  [ "$#" -gt 0 ] || return 0
+  { printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+    printf '%s\n' "$@" | awk -F' *[|] *' -v lf="$l" '{ print "| " $2 " | " $3 " | " $4 " | " $5 " | " $7 " | " $8 " | " $9 " | " $10 " | — |"
+      if ($12 == "active") print "run/v1|ev=dispatch|row=" $2 "|name=" $6 "|at=2026-09-07T19:07:00Z" >> lf }'; } >> "$(pf_plan_path "$repo")"
 }
 
