@@ -100,6 +100,10 @@ expect_eq "37h a verify row whose Files name no record is short: refused with th
   "$RC|$(printf '%s' "$OUT" | /usr/bin/grep -o 'is short')|$(s37)|$(/usr/bin/grep -c '|ev=born|row=T8|' "$L37D")"
 S37_LINE="$(printf '%s\n' "$OUT" | /usr/bin/grep '^| T8 |')"; ta_put "$P37D" "$S37_LINE"; poke "$R37D" task-add T8
 expect_eq "37i its own printed line pasted in, the verb accepts it with no further edit" "0|T8.md|1" "$RC|$(printf '%s' "$S37_LINE" | /usr/bin/grep -o 'T8\.md' | head -1)|$(/usr/bin/grep -c '|ev=born|row=T8|' "$L37D")"
+cp "$P37D" "$TMPROOT/s42-before"; poke "$R37D" task-add T7 --drop 'the person no longer wants it'
+expect_eq "37j --drop of a pending row is accepted, the plan the same, its one drop event holding the words" "0|same|1" "$RC|$(s37)|$(/usr/bin/grep -c '|ev=drop|row=T7|why=the person no longer wants it|' "$L37D")"
+S37_D=""; for a in T1 T2 T9; do poke "$R37D" task-add "$a" --drop 'gone'; S37_D="$S37_D$RC"; done; poke "$R37D" task-add T5 --drop 'a|b'; S37_D="$S37_D$RC"
+expect_eq "37k a landed row, a row in flight and a row the plan lacks are refused, words holding a bar are a usage error: nothing dropped" "1112|1" "$S37_D|$(/usr/bin/grep -c '|ev=drop|' "$L37D")"
 POKE_BOUND="$S37_BOUND_WAS"
 
 

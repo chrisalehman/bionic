@@ -30,7 +30,7 @@
 #            holds the old homes' landings and the log's own in order, the log as it stood is kept, a second act
 #            changes no byte.
 #   §WAITS   a wait on a row is that row's id in deps; one the kind implies is dropped; any other is a gap.
-#   §DROPPED a dropped row is a gap of the translation, and after the act it is not ready and waits on it are met.
+#   §DROPPED a dropped row's cell is the run's drop: after the act the row stays, reads dropped, and waits on it are met.
 #   §CELLS   a row's suites and lands-on go to the task's own section, past a fenced # line in it, or to the gaps list when it has none.
 #   §STEPS   a Step follows the Step above it and a proof or waiver the line above it in its block, whatever
 #            their instants, so the step is the old current: and closure; a Step held (pending) is a gap.
@@ -413,7 +413,8 @@ $(printf '%s\n' '```bash' '# T2 waits on this' '```')
 current: 4
 approved-by: Ann Person 2026-11-01T02:25:48Z "go"
 EOF
-OUT="$(bash "$BF" "$W")"; askw() { bash "$RS" "$W" "$@"; }; KW="$(printf '%s\n' "$OUT" | sed -n 's/^kept=//p')/wave-7-act.plan.md"
+askw() { bash "$RS" "$W" "$@"; }; say_rows() { for r in T1 T2 T3 T4; do askw status "$r" | head -1; done; askw landed | grep -c .; ( . "${RS%/*}/lib/units.sh"; units_rows "$W" | cut -f1,3,10 ); }
+PRE="$(say_rows)"; OUT="$(bash "$BF" "$W")"; KW="$(printf '%s\n' "$OUT" | sed -n 's/^kept=//p')/wave-7-act.plan.md"
 
 section "WAITS"
 expect_eq "a row that read another row's record has that row's id in deps" "deps=T1" "$(askw row T2 | grep '^deps=')"
@@ -424,10 +425,11 @@ expect_eq "and in no cell" "1 0" "$(grep -c 'approval:D3' "$KW") $(grep -c 'appr
 expect_eq "the header names version 15" "canonical_sdlc_version=15" "$(askw header canonical_sdlc_version)"
 
 section "DROPPED"
-expect_contains "a dropped row is named on the translation's gaps list: no ruled type carries it" "gap/v1|ev=dropped|row=T3|field=ev|why=unruled" "$(translate "$KW" gaps)"
-expect_eq "after the act the ready rows are the open ones, the dropped row not among them" "ready=T2 T4" "$(askw stop | grep '^ready=')"
+expect_contains "a dropped cell is carried into the run's log as its drop, its words saying so, no instant made" "run/v1|ev=drop|row=T3|why=carried from the status cell of a version-14 Tasks table|at=" "$(cat "${KW%/kept/*}/run.log")"
+expect_eq "the dropped row is read dropped after the act, never absent" "state=dropped" "$(askw status T3 | grep '^state=')"
+expect_eq "every row's state, the landings and the fill's rows read after the act as at 14 (T2's approval:D3 is a gap, so not its readiness)" "$PRE" "$(say_rows)"
 askw ready T3; expect_status "a dropped row is not ready" 1 "$?"
-expect_contains "a wait on a dropped row is met, and named" "gap/v1|ev=row|row=T4|field=T3|why=dropped" "$OUT"
+expect_eq "the dropped row stays in the table, and a wait on it stays a wait, met" "| T3 |deps=T3 ready=T2 T4" "$(grep -o '^| T3 |' "$W")$(askw row T4 | grep '^deps=') $(askw stop | grep '^ready=')"
 
 section "CELLS"
 expect_eq "a row's suites and lands-on go to the task's own section, after its fence" "One's own words. "'```bash ```'" suites: a.test.sh lands-on: a.test.sh" "$(sed -n '/^### T1$/,/^## /p' "$W" | grep -v '^#' | grep . | paste -sd' ' -)"

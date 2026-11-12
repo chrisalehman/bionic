@@ -7,7 +7,7 @@
 #   §SHAPE   a line matches the shape and reads back by field name; no type, a bare word, a `|` in a
 #            value and a caller's own `at=` are refused; LOG_AT stamps the line when in the shape, is refused
 #            when not, and only the files its list names set it, each for its reason.
-#   §TYPES   `matrix-set` and a retired word are refused; each of the 29 listed types is accepted.
+#   §TYPES   `matrix-set` and a retired word are refused; each of the 30 listed types is accepted.
 #
 # FIXTURE FIDELITY. The log is a real file in a scratch directory; only its path is synthesized.
 
@@ -47,9 +47,9 @@ refused "a retired type" settled row=T1
 refused "a type holding a space" "ready step" row=T1
 for t in ready candidate verdict published returned stalled standing admitted void run walk step \
   approval proof finding waiver decision order bind handoff dispatch tree born ask stop debt \
-  abandon cancel hand; do
+  abandon cancel hand drop; do
   log_append "$t" k=v 2>/dev/null; rc=$?; n=$((${n:-0} + 1)); expect_eq "$t is accepted" 0 "$rc"
 done
-expect_eq "twenty-nine types were driven" 29 "$n"
+expect_eq "thirty types were driven" 30 "$n"
 
 finish

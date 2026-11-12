@@ -5,11 +5,8 @@
 # checks and its prototype check, the tick's FILL, and the governing-skill Step-3 wall — so
 # that none of them carries a parser of its own. The questions, one per section:
 #
-#   §1 units_rows <plan>          the thirteen fields, in the FIXED order, whatever order the
-#                                 table's columns are written in; the `worktree` cell (slot 11)
-#                                 and the `base` cell (slot 12) are OPTIONAL, a table without the
-#                                 column is valid and reads it empty, and `base` is a commit id
-#                                 when it holds one
+#   §1 units_rows <plan>          the thirteen fields, in the FIXED order, whatever order the table's columns are written in;
+#                                 the `worktree` (11) and `base` (12) cells are OPTIONAL, absent reading empty, `base` a commit id
 #   §2 header names               reversed columns give identical output
 #   §3 the ## Tasks section       is read, and nothing else
 #   §4 units_ready <plan> <step>  which rows at that step may be dispatched now
@@ -17,18 +14,14 @@
 #   §7 units_validate <plan>      a missing column is a violation of the table, not of a row
 #   §8 the differential           the old fill derivation and units_ready answer the same
 #   §9 a markdown-escaped pipe    in a cell
-#   §ORDER   build, regression, review, release: units_validate refuses any other order naming the
-#            rows; units_order reads it
-#   §POST    a review row after a landed release is admitted when it reads only approval:plan, head
-#            and the rows landed past the release
+#   §ORDER   build, regression, review, release: units_validate refuses any other order naming the rows; units_order reads it
+#   §POST    a review row after a landed release is admitted when it reads only approval:plan, head and the rows landed past it
 #   §AFTER-PUBLISH  after the release is the record's publish order: a step-4 fix row published past the release
 #            is read as a piece; the record's order reversed refuses; no record falls back to the plan's order
-#   §JUDGE   covered at the last green whole run's head; past it each commit owes its row's suites,
-#            never a second whole run
-#   §WALK    the regression walk excuses a real release merge whose check passed, as the judge's
-#            cover reads it
-#   §SECOND  regression-run at a head past the plan's whole run refuses a second whole run in one
-#            line with nothing run, and at the head the whole run read it does not refuse
+#   §JUDGE   covered at the last green whole run's head; past it each commit owes its row's suites, never a second whole run
+#   §WALK    the regression walk excuses a real release merge whose check passed, as the judge's cover reads it
+#   §SECOND  regression-run at a head past the plan's whole run refuses a second whole run in one line with nothing run,
+#            and at the head the whole run read it does not refuse
 #   §STEP-FIELD  units_step_field reads the first key line of the block units_step_fields writes
 #   §DEBT    a review-born row inside fix-policy: is exempt from fix-cap:, a promoted or carried one counts;
 #            task-add's cap refusal, its fourth-fix refusal and its count line each go red when removed
@@ -40,15 +33,10 @@
 #   §BACK    a launch taken back by one function: a cancel for a launch in the log, the cells for one by its cells
 #   §TREE    a row's tree and base read from the newest tree event in the log, its cells for a row the log holds none for
 #   §LEDGER  a landed row with no line asked of the reader: admitted when it answers landed, refused when it does not
+#   §DROP    a drop in the run's log reads dropped to the reader and the fill at 15, launched or not; a wait on it is met
 #
-# WHY HEADER-KEYED IS THE WHOLE POINT (AC-1e.2, measure §4.3). Before this library two
-# readers in hooks/canonical-sdlc-evidence-gate.sh took `id`/`rigor`/`status` as awk fields
-# `$2`/`$4`/`$6` of a five-column table. The ten-column table this wave ships puts `agent`
-# at `$6` and `kind` at `$4`, so both readers would have read an agent name as a status and
-# refused every row — on this wave's own plan, at its own next commit. A reader keyed on
-# the header CELL TEXT cannot be broken by inserting, moving or renaming a column it does
-# not read, which is what makes the schema an ordinary edit again. §2 is that assertion:
-# the same rows with every column REVERSED must produce a byte-identical TSV.
+# WHY HEADER-KEYED IS THE WHOLE POINT is lib/units.sh's own header. §2 is its assertion: the same rows with every
+# column REVERSED must produce a byte-identical TSV.
 #
 # FIXTURE PROVENANCE — NOT HAND-TYPED (fixture fidelity). The table in `tasks_table` below
 # was spliced verbatim out of this wave's own live plan,
@@ -59,17 +47,14 @@
 # reader. Every other fixture here is built FROM that one by a name-blind transform (§2
 # reverses cell order; §3 wraps it in decoys) or is a small purpose-built table (§4).
 #
-# THE REVERSAL IS NAME-BLIND, DELIBERATELY (§2). A permuter that re-ordered columns BY NAME
-# would be a second implementation of the thing under test, and a shared misreading of a
-# header cell would cancel out and show green. Reversing the cells of every row of the table
-# — header, separator and data alike — cannot know what any column is called, so the two
-# sides of the §2 comparison have no common machinery at all.
+# THE REVERSAL IS NAME-BLIND, DELIBERATELY (§2). A permuter that re-ordered columns BY NAME would be a second
+# implementation of the thing under test, and a shared misreading of a header cell would cancel out and show green.
+# Reversing the cells of every row — header, separator and data alike — cannot know what any column is called, so
+# the two sides of the §2 comparison have no common machinery at all.
 #
-# HERMETIC. Every fixture is a file under one mktemp sandbox; nothing reads the repository's
-# own plans, no hook runs, and the library is sourced in a CHILD shell per call so no row can
-# be answered by a function an earlier row left defined in this one.
-# §WALK alone is live tier: it reads this repository's own release merges, read-only, and skips
-# by version and hash a merge the history does not hold.
+# HERMETIC. Every fixture is a file under one mktemp sandbox; nothing reads the repository's own plans, no hook runs,
+# and the library is sourced in a CHILD shell per call so no row is answered by a function an earlier row left defined.
+# §WALK alone is live tier: it reads this repository's own release merges, read-only, and skips one its history lacks.
 #
 # Usage: bash tests/units.test.sh
 
@@ -77,8 +62,6 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-. "$(dirname "$0")/lib/roster-row.sh"
-. "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/regression-fixture.sh"
 
@@ -89,10 +72,9 @@ SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/units-test.XXXXXX")" && pwd -P)"
 cleanup() { rm -rf "$SANDBOX"; }
 trap cleanup EXIT
 
-# call <fn> <args...> — the library in a child shell. Prints the function's stdout; its exit
-# status is left in CALL_RC. A missing or unparsable library yields empty output and a
-# non-zero CALL_RC, which is what makes the RED run of this suite red for the right reason
-# rather than killing it.
+# call <fn> <args...> — the library in a child shell. Prints the function's stdout; its exit status is left in CALL_RC.
+# A missing or unparsable library yields empty output and a non-zero CALL_RC, which is what makes the RED run of this
+# suite red for the right reason rather than killing it.
 CALL_RC=0
 call() {
   local fn="$1" out; shift
@@ -1428,6 +1410,15 @@ expect_eq "LEDGER-1 T2 landed by its event, with no line in the plan, owes nothi
 sed -i.bak 's/| a.sh | pending |/| a.sh | landed |/' "$LV_P"; lv_log published row=T1 commit=abcdef2 by=a1; lv_log cancel of=published row=T1 commit=abcdef2 by=a1
 expect_eq "LEDGER-2 a landing the log took back, under a cell that says landed, is refused for its line: the reader answers it pending" "landed|state=pending|evidence T1" \
   "$(lv T1 | cut -d/ -f1)|$(bash -c '. "$1/reader.sh" && reader_q_status "$2" T1' _ "${LIB%/*}" "$LV_P" | head -1)|$(call units_findings "$LV_P")"
+
+section "§DROP — a drop in the run's log is the row's one answer at 15: dropped for the reader and the fill, holding no slot, a wait on it met"
+DP="$SANDBOX/docs/plans/e/d.plan.md"; LV_LOG="$SANDBOX/docs/record/d/run.log"; mkdir -p "${LV_LOG%/*}"; dq() { bash -c '. "$1/reader.sh" && reader_main "$2" "${@:3}"' _ "${LIB%/*}" "$DP" "$@"; }
+printf -- '---\ncanonical_sdlc_version: 15\n---\n## Tasks\n| id | step | kind | task | deps | size | serves | files | artifact |\n|---|---|---|---|---|---|---|---|---|\n%s\n%s\n%s\n' '| T1 | 4 | build | one | — | 30m | R | a.sh | — |' '| T2 | 4 | build | two | T1 | 30m | R | b.sh | — |' '| T3 | 4 | build | three | — | 30m | R | c.sh | — |' > "$DP"
+printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=4' 1Z 'approval|key=step3|by=me' 2Z 'dispatch|row=T3|name=w-T3|brief=b|sum=s' 3Z 'drop|row=T1|why=no longer owed' 4Z 'drop|row=T3|why=no longer owed' 5Z > "$LV_LOG"
+expect_eq "DROP-1 T1 and T3, one of them launched, read dropped by the reader and the fill; T2's wait on T1 is met, the only row ready" \
+  "state=dropped state=dropped dropped/ dropped/w-T3|T2|ready=T2" "$(dq status T1 | head -1) $(dq status T3 | head -1) $(lv T1 "$DP") $(lv T3 "$DP")|$(call units_ready "$DP" 4)|$(dq stop | grep '^ready=')"
+call units_drop_event "$DP" T2 'the person said so'; DP_RC=$CALL_RC; call units_drop_event "$DP" T2 'a|b'
+expect_eq "DROP-2 the one writer appends the person's words, and refuses words holding a bar" "0 2 1 state=dropped" "$DP_RC $CALL_RC $(grep -c '|ev=drop|row=T2|why=the person said so|at=' "$LV_LOG") $(dq status T2 | head -1)"
 
 # ============================================================
 finish
