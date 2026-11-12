@@ -315,4 +315,32 @@ expect_eq "8c a session the run holds is present (exit 1) and appends nothing; o
 expect_eq "8d …one bind event of this session for the run that lacked it, none for the other; neither plan written" "0|1|$SZS" \
   "$(rlog "$SZ/.bionic/docs/record/with/run.log" bind)|$(rlog "$SZ/.bionic/docs/record/without/run.log" bind)|$(cksum < "$SZW")|$(cksum < "$SZO")"
 
+# ============================================================
+section "9 — a page at 15 is a run: the walk finds it, engagement binds it, an unbound session falls back to it"
+# ============================================================
+#
+# A plan at 15 holds no state section: its header says 15 and its run's log says where it stands. The walk keeps its
+# two protections at 15: a header inside a fenced block is prose, and a page whose lines end in a bare CR still has
+# lines. A page whose header does not say 15 is judged by its state section, as before.
+# fails-when: an open page at 15 is missing from the open-run set, refused by engagement or not the unbound fallback;
+# or a fenced header, or a page at 14 with no state section, is listed.
+page15() {  # <plan> <step> [line end] -> a page at 15 and its run's log, <docs>/record/<stem>/run.log, at <step>
+  local l="${1%/plans/*}/record/$(basename "$1" .plan.md)/run.log"
+  mkdir -p "${1%/*}" "${l%/*}"
+  printf -- "---${3:-\n}canonical_sdlc_version: 15${3:-\n}---${3:-\n}" > "$1"
+  printf 'run/v1|ev=step|n=%s|at=2026-10-04T00:00:00Z\n' "$2" > "$l"
+}
+R9="$(make_repo r9)"; D9="$R9/.bionic/docs/plans/epic-01-demo"; rm -f "$D9/wave-01.plan.md"
+page15 "$D9/wave-01.plan.md" 4; page15 "$D9/wave-02-cr.plan.md" 4 '\r'; page15 "$D9/wave-03-fenced.plan.md" 4; page15 "$D9/wave-04.plan.md" 4
+printf '# notes\n```\n---\ncanonical_sdlc_version: 15\n---\n```\n' > "$D9/wave-03-fenced.plan.md"
+printf -- '---\ncanonical_sdlc_version: 14\n---\n' > "$D9/wave-04.plan.md"
+expect_eq "9a the walk lists the open page at 15 and the CR-only one; not the fenced header, nor the page at 14 with no state section" \
+  "wave-01.plan.md wave-02-cr.plan.md" "$(bash -c '. "$1"; open_runs "$2"' _ "$RUNLIB" "$R9" 2>/dev/null | sed 's#.*/##' | sort | paste -sd' ' -)"
+call_bind_act "$R9" "$SID" "$D9/wave-01.plan.md" engage
+expect_eq "9b engagement binds the page at 15 (exit 0, no refusal) and the session reads it bound-open" "0||bound-open $D9/wave-01.plan.md" "$BIND_ST|$BIND_WHY|$BIND_RUN"
+R9U="$(make_repo r9u)"; rm -f "$R9U/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"; page15 "$R9U/.bionic/docs/plans/epic-01-demo/wave-01.plan.md" 4
+unbound_marker "$R9U" "$SID"
+expect_eq "9c an unbound session reads the root's one page at 15 as its fallback" "fallback $R9U/.bionic/docs/plans/epic-01-demo/wave-01.plan.md" \
+  "$(bash -c '. "$1"; session_run "$2" "$3"' _ "$RUNLIB" "$R9U" "$SID" 2>/dev/null)"
+
 finish
