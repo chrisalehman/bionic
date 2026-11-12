@@ -2155,6 +2155,12 @@ _units_sched_awk() {
   '
 }
 
+# units_columns <1 at version 15> -> the Tasks columns a refusal of a row names for its repair
+units_columns() {
+  if [ "${1:-0}" = 1 ]; then printf 'id | step | kind | task | deps | size | serves | Files | artifact: a version-15 row is its nine authored cells.'
+  else printf 'id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status. A reads column is optional and may sit anywhere in the header.'; fi
+}
+
 # units_validate <plan> [<origin>] -> one line per broken invariant; exit 1 if any, else 0.
 #
 # ONE RULE FOR A PLAN AND FOR ITS COPY. "After the release" is the publish order in a landing record, and a record is
@@ -2196,7 +2202,7 @@ _units_sched_awk() {
 # EVERY FAULT IS REPORTED, not just the first. A writer fixing one line at a time against a
 # wall that stops at the first complaint pays a round trip per fault.
 units_validate() {
-  local plan="${1:-}" origin="${2:-}" out rc ctl missing cols over rows violations cycles _c _o found=0 haswt hasreads
+  local plan="${1:-}" origin="${2:-}" out rc ctl missing cols over rows violations cycles _c _o found=0 haswt hasreads v15=""
 
   out="$(_units_table "$plan")"; rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -2217,6 +2223,11 @@ units_validate() {
       case "$cols" in *$'\t'*) over="${cols#*$'\t'}"; over="${over%%$'\t'*}" ;; esac
       cols="${cols%%$'\t'*}" ;;
   esac
+  # A PLAN AT 15 HOLDS ITS ROWS AS THE NINE AUTHORED CELLS: a row's state and its agent are the log's, so neither column is
+  # missing from it and no status is judged; every other invariant holds its rows as it holds a plan at 14.
+  if [ "$(plan_read_header "$plan" canonical_sdlc_version 2>/dev/null)" = canonical_sdlc_version=15 ]; then
+    v15=1; missing=" $missing "; missing="${missing/ agent / }"; missing="${missing/ status / }"; missing="${missing# }"; missing="${missing% }"
+  fi
   if [ -n "$missing" ]; then
     for _c in $missing; do
       printf '## Tasks: missing column %s\n' "$_c"
@@ -2248,7 +2259,7 @@ units_validate() {
   rows=""
   case "$out" in *$'\n'*) rows="${out#*$'\n'}" ;; esac
   if [ -n "$rows" ]; then
-    violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" \
+    violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" -v v15="$v15" \
       -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
       # rec_written(t): some row of the table, of any status, has a Files entry covering the path t.
       function rec_written(t,   k) {
@@ -2293,7 +2304,7 @@ units_validate() {
             printf "%s: kind %s is not one of build test verify review doc integrate close prototype\n", \
               id[i], (knd[i] == "" ? "(empty)" : knd[i])
 
-          if (!(sta[i] in states))
+          if (v15 == "" && !(sta[i] in states))
             printf "%s: status %s is not one of pending active landed dropped\n", \
               id[i], (sta[i] == "" ? "(empty)" : sta[i])
 
@@ -2589,7 +2600,7 @@ units_validate() {
 #
 # ONE PARSE PER CALL. The reader asks the table for its rows under `units_memoised`; a caller
 # already holding a memo for the plan (the tick) pays nothing more (wave-21 T13; review-bed/perf/report.md observation 3).
-units_findings() { units_memoised "${1:-}" _units_ledger findings "${1:-}" "${2:-}"; }
+units_findings() { units_memoised "${1:-}" _units_ledger findings "${1:-}" "${2:-}" "${3:-}"; }
 
 # units_run_rosters <state dir> <plan> [<own roster>] -> the run's roster set, one path per line.
 #
@@ -2623,8 +2634,13 @@ units_run_rosters() {
 # roster row can begin with: the rows (`units_rows`, so a memoised caller pays no second parse),
 # the plan's text, and — only when there is one to read — this session's roster, then the run's
 # other rosters, one after another.
+#
+# A ROW WITH NO LINE OF ITS OWN IS ASKED OF THE READER: a landed row stands when the reader's status answers landed, and
+# at 15, where no row has a line, a launched row with no roster to judge stands when the reader holds its dispatch under
+# a name. The line was a copy of what the log holds; an answer other than the one asked is the `evidence` finding.
+# <v15> non-empty asks for the launched rows too.
 _units_ledger() {
-  local mode="${1:-}" plan="${2:-}" rosters="${3:-}" rows useroster=0 own="" run="" rf first=1
+  local mode="${1:-}" plan="${2:-}" rosters="${3:-}" v15="${4:-}" rows useroster=0 own="" run="" rf first=1 out line found=0
   rows="$(units_rows "$plan")" || return 0
   [ -n "$rows" ] || return 0
   while IFS= read -r rf; do
@@ -2639,7 +2655,7 @@ _units_ledger() {
 $rosters
 UNITS_ROSTERS
   if [ -n "$own" ] || [ -n "$run" ]; then useroster=1; fi
-  {
+  out="$({
     printf '\034rows\n'; printf '%s\n' "$rows"
     printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan" 2>/dev/null
     if [ -n "$own" ]; then printf '\034roster\n'; cat "$own" 2>/dev/null; printf '\n'; fi
@@ -2649,7 +2665,7 @@ UNITS_ROSTERS
 $run
 UNITS_RUN
     fi
-  } | UNITS_LEDGER_PLAN="$plan" awk -F'\t' -v mode="$mode" -v useroster="$useroster" '
+  } | UNITS_LEDGER_PLAN="$plan" awk -F'\t' -v mode="$mode" -v useroster="$useroster" -v v15="$v15" '
     BEGIN { lplan = ENVIRON["UNITS_LEDGER_PLAN"] }
     function ltrim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
     $0 == SUBSEP "rows"   { part = 1; next }
@@ -2722,16 +2738,39 @@ UNITS_RUN
           printf "status %s %s\n", id[i], (st[i] == "" ? "(empty)" : st[i]); found = 1; continue
         }
         if (st[i] == term) {
-          if (!lined) { printf "evidence %s\n", id[i]; found = 1 }
+          if (!lined) printf "ask landed %s\n", id[i]
           continue
         }
         if (st[i] != "active" || ag[i] !~ /[A-Za-z0-9]/) continue
         if (useroster == 1) {
-          if (!(ag[i] in names)) { printf "launch %s %s\n", id[i], ag[i]; found = 1 }
-        } else if (!lined) { printf "evidence %s\n", id[i]; found = 1 }
+          if (!(ag[i] in names)) printf "launch %s %s\n", id[i], ag[i]
+        } else if (!lined) printf "%s %s\n", (v15 != "" ? "ask dispatched" : "evidence"), id[i]
       }
-      exit (found ? 1 : 0)
-    }'
+    }')"
+  while IFS= read -r line; do
+    case "$line" in
+      '') continue ;;
+      'ask '*) _units_asked "$plan" "${line##* }" "$(line="${line#ask }"; printf '%s' "${line%% *}")" && continue
+               line="evidence ${line##* }" ;;
+    esac
+    printf '%s\n' "$line"; found=1
+  done <<UNITS_FOUND
+$out
+UNITS_FOUND
+  return "$found"
+}
+
+# _units_asked <plan> <row> <landed|dispatched> -> 0 when the reader's status of <row> answers it so, a dispatch under a
+# name, over the facts this call holds; 1 for any other answer and when the reader cannot answer.
+_units_asked() {
+  local a
+  _units_lib reader.sh reader_q_status || return 1
+  a="$(if [ -n "${_UNITS_FACTS_PLAN:-}" ]; then reader_facts() { printf '%s' "$_UNITS_FACTS"; }; fi
+    reader_q_status "$(_units_origin "$1")" "$2" 2>/dev/null)" || return 1
+  case "$3" in
+    landed) [ "${a%%$'\n'*}" = state=landed ] ;;
+    *) [ "${a%%$'\n'*}" = state=dispatched ] && case "$a" in *$'\n'name=?*) : ;; *) false ;; esac ;;
+  esac
 }
 
 # units_add_row <plan> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]

@@ -1430,5 +1430,11 @@ lv_log tree row=T2 path=.worktrees/t2b branch=wt/t2b base=3333eeee by=w-T2
 expect_eq "TREE-2 with its launch it reads active under its name in its newest tree, and the plan is unchanged" \
   "active/w-T2/.worktrees/t2b/3333eeee same" "$(tv T2) $([ "$(cksum < "$TV_P")" = "$TV_SUM" ] && echo same)"
 
+section "§LEDGER — a landed row with no line of its own is the reader's to answer: admitted when it answers landed, refused when it does not"
+LV_LOG="$SANDBOX/docs/record/w/run.log"; lv_log published row=T2 commit=abcdef1 by=w-T2b
+lg() { bash -c '. "$1"; . "${1%/*}/proof.sh"; . "${1%/*}/reader.sh"; [ -z "$3" ] || eval "reader_q_status() { echo state=$3; }"; units_findings "$2"' _ "$LIB" "$LV_P" "${1:-}" 2>/dev/null; }
+expect_eq "LEDGER-1 T2 landed by its event, with no line in the plan, owes nothing: the reader answers landed" "landed|" "$(lv T2 | cut -d/ -f1)|$(lg)"
+expect_eq "LEDGER-2 the same row is refused for its line when the reader answers it otherwise" "evidence T2" "$(lg dispatched)"
+
 # ============================================================
 finish

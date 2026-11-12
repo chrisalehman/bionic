@@ -153,12 +153,12 @@ Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix
 $2
 Path: $FILE_PATH
 Fix: repair every line above in one pass — each is a separate arm that would otherwise refuse the next commit in turn." ;;
-    tasks-invalid)  # <sdlc-step> <the violations>
+    tasks-invalid)  # <sdlc-step> <the violations> [1 at version 15]
       WG_FACT="this plan's Tasks table is invalid"; WG_FIX="fix the row the detail names"
       WG_DETAIL="canonical-sdlc plan '$BASENAME' (sdlc-step $1) has a '## Tasks' table that breaks the Task invariants:
 $2
 Path: $FILE_PATH
-Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status. A reads column is optional and may sit anywhere in the header." ;;
+Fix: repair each row named above; the columns are $(units_columns "${3:-0}")" ;;
     version-15)  # <the parts version 15 has no place for>
       WG_FACT="this plan holds what version 15 does not"; WG_FIX="remove each part named"
       WG_DETAIL="canonical-sdlc plan '$BASENAME' declares canonical_sdlc_version: 15, and version 15 has no place for:
