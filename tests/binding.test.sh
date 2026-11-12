@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/binding.test.sh — payload/scripts/lib/binding.sh: WHICH refusal, not just that
-# there was one (epic-23 wave-18-fixit-185, REQ-2 AC-2.2; spec §2 D5).
+# tests/binding.test.sh — payload/scripts/lib/binding.sh: WHICH refusal, not just that there was one.
 #
 # WHAT IT OWNS. `bind_plan` has five refusal causes and one exit status for all of them,
 # so every caller that wanted to say why had to re-derive the reason from the filesystem
