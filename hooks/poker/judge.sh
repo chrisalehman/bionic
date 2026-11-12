@@ -180,9 +180,8 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
       '$1 == "regression" && $2 == "unproved" && NF == 4 { $4 = x } { print }')"
   fi
   die "REFUSED — current: $step is admitted only when every fact the run owes holds at the working head $PV_HEAD8, and these do not (facts_state):"
-  # THE BASIS UNDER THE LINE (wave-37 T8; D8, AC-4.1): a `review <q> … uncovered <a>..<b>` line is a judge's "no"
-  # with no why; under it go the `cover <sha> <basis>` lines for that range and question, and the line ends with
-  # the ask that reproduces them (the `cover` verb). The text above is the refusal's own and does not change.
+  # THE BASIS UNDER THE LINE: a `review <q> … uncovered <a>..<b>` line is a judge's "no" with no why; under it go the
+  # `cover <sha> <basis>` lines for that range and question. The text above is the refusal's own and does not change.
   local cv_line cv_k cv_q cv_rest cv_st cv_rng
   while IFS= read -r cv_line; do
     [ -n "$cv_line" ] || continue
@@ -191,7 +190,7 @@ $cv_line
 COVER_LINE
     case "$cv_k:$cv_st:$cv_rng" in
       review:uncovered:?*..?*)
-        printf '%s · ask: session-poker.sh cover %s %s\n' "$cv_line" "$cv_q" "$cv_rng" >&2
+        printf '%s\n' "$cv_line" >&2
         cover_basis "$PV_PLAN" "$cv_q" "${cv_rng%%..*}" "${cv_rng##*..}" >&2 || : ;;
       *) printf '%s\n' "$cv_line" >&2 ;;
     esac
@@ -268,18 +267,3 @@ current_admit() {
     exit 0
   }
 
-  # THE BASIS, ON ASK (wave-37 T8; D8, REQ-4 AC-4.2). `cover <question> <a>..<b>` prints, on stdout, the
-  # `cover <sha> <basis>` lines `cover_basis` builds for that range and question, the ones `cur7_judge` prints under
-  # its `review <question> … uncovered <a>..<b>` line, and ends that line by asking for. It writes nothing and asks
-  # the judge nothing more: a range every commit of which holds prints no line, exit 0. A head that is no commit
-  # here, or a plan the library cannot read, is the library's sentence on stderr and exit 1. Never called from the
-  # tick or any wall.
-  poker_verb_cover() {
-    plan_verb_open cover
-    COV_VERB_LINES="$(cover_basis "$PV_PLAN" "$COV_Q" "$COV_A" "$COV_B")"; COV_RC=$?
-    [ "$COV_RC" -ne 2 ] || exit 1
-    if [ -n "${COV_VERB_LINES}" ]; then
-      printf '%s\n' "$COV_VERB_LINES"
-    fi
-    exit 0
-  }
