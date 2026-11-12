@@ -16,9 +16,9 @@
 #
 # FIXTURE FIDELITY: live tier, read-only. The merges are this repository's own commits, read through a scratch
 # repository under the world directory whose object store borrows this repository's (an alternates file); nothing
-# is written here. SYNTHESIZED: the plan, a scratch file whose `## SDLC State` holds one passing check line per
-# merge present, in the shape the release-check verb writes, its readers' green verdicts in the landing record as
-# lib/line.sh writes them, and the one absent hash of the skip row.
+# is written here. SYNTHESIZED: the plan, a page at version 15 under the scratch repository's docs root, and its run's
+# log holding one passing check proof per merge present, written by lib/proof.sh's proof_event, and its readers' green
+# verdicts as lib/line.sh writes them; and the one absent hash of the skip row.
 #
 # ANTI-VACUITY: each mutant row first proves the copy differs from proof.sh by exactly its one arm and that the copy
 # still sources and runs; the mutant's own reading is an exact `cover <merge> owes` line, never an absence.
@@ -50,19 +50,14 @@ DC_HEAD="$(git -C "$BIONIC_SCRIPTS_DIR" rev-parse --verify -q 'HEAD^{commit}' 2>
 git init -q "$DC_R" && printf '%s\n' "$DC_OBJ" > "$DC_R/.git/objects/info/alternates"
 # dc_present <merge> -> 0 when the merge and its first parent are commits here: the reader walks <merge>^1..<merge>.
 dc_present() { git -C "$DC_R" cat-file -e "$1^{commit}" 2>/dev/null && git -C "$DC_R" cat-file -e "$1^1^{commit}" 2>/dev/null; }
-DC_PLAN="$DC_R/plan.md"
-{ printf -- '---\ncurrent: 7\n---\n\n## SDLC State\n\n'
-  while read -r v m; do
-    dc_present "$m" && printf 'proved: kind=check head=%s at=2026-10-20T00:00:00Z evidence=check-%s.log\n' "$m" "$v"
-  done <<EOF
+DC_PLAN="$DC_R/.bionic/docs/plans/e/w.plan.md"; mkdir -p "${DC_PLAN%/*}"
+printf -- '---\ncanonical_sdlc_version: 15\n---\n\n# the release merges\n' > "$DC_PLAN"
+# A release merge is release with its check passing and its readers green at it: per merge present, its check's proof
+# and one green verdict per reader.
+while read -r v m; do dc_present "$m" || continue; bash -c '. "$1/line.sh" && . "$1/proof.sh" || exit 1; proof_event "$2" kind=check "head=$3" "evidence=check-$4.log" || exit 1; for s in $(_proof_release_readers); do line_event "$2" verdict row=T8 "commit=$3" "suite=$s" result=green log=- admitted=- width=-; done' _ "${DC_PROOF%/*}" "$DC_PLAN" "$m" "$v" </dev/null; done <<EOF
 $DC_MERGES
 EOF
-} > "$DC_PLAN"
-# A release merge is release with its readers green at it: one green verdict per reader at each merge present.
-while read -r v m; do dc_present "$m" || continue; bash -c '. "$1/line.sh" && . "$1/proof.sh" || exit 1; for s in $(_proof_release_readers); do line_event "$2" verdict row=T8 "commit=$3" "suite=$s" result=green log=- admitted=- width=-; done' _ "${DC_PROOF%/*}" "$DC_PLAN" "$m" </dev/null; done <<EOF
-$DC_MERGES
-EOF
-echo "door-cover: reading $DC_OBJ through $DC_R; $(/usr/bin/grep -c '^proved: kind=check' "$DC_PLAN") of 3 merges present"
+echo "door-cover: reading $DC_OBJ through $DC_R; $(/usr/bin/grep -c '|ev=proof|kind=check|' "$DC_R/.bionic/docs/record/w/run.log") of 3 merges present"
 
 # dc_cover <proof.sh> <merge> -> the judge's cover of the merge alone, as the judge reads it, then `rc=<n>`.
 dc_cover() {
