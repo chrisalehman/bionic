@@ -6,7 +6,7 @@ updated: 2026-10-10
 
 # canonical-sdlc operational rules
 
-The detail SKILL.md and `steps/*.md` compress, each section cited from the step that needs it. It is reference, not a standing instruction: nothing loads it unprompted.
+The detail SKILL.md and `steps/*.md` compress, each section cited from the step that needs it.
 
 ## Artifact paths and frontmatter
 
@@ -53,7 +53,7 @@ A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch w
 
 | piece | shape |
 |---|---|
-| approval | `session-poker.sh approve <name> '<reply>'` on the user's reply, verbatim: one approval event, at the working head for a named one. `approve plan` is Step 3's |
+| approval | `session-poker.sh approve <name> '<reply>'` on the user's reply, verbatim: one approval event, at the working head for a named one. `approve step0`, `step1`, `step2` and `plan` are Steps 0 to 3's, each once |
 | proof | `session-poker.sh proof-add <kind> <evidence>`: one proof event, `kind=<regression\|review\|task\|walk>`, `head=` and `evidence=<path under record/>`; the head is the evidence's own (a log's `head=` header, a review's `reviewed: a..b` end), never an operand; `proof-add check` is refused |
 | review | `proof-add review <record> --question <q> --reader <name>` adds `question=`, `reader=`, `result=<pass\|flag\|fail>` and `scope=<piece\|whole>`; the reviewer's role is read from its roster row and must be dealt the question. The record's lines are `steps/6.md`'s |
 | declared check | `release-check: <command>` in `.bionic/config.yaml`, run with `BIONIC_CHECK_BASE`, `BIONIC_CHECK_HEAD` and `BIONIC_CHECK_TREE`; exit 0 passes; its words split on white space, so a check needing quoting is a script. `session-poker.sh release-check` (main thread, clean tree, no operand) runs it from the last release to the working head, writes `record/<wave>/release-check-<head>.log` and a `kind=check` proof (`result=fail` on a non-zero exit). `land` runs it in the target checkout up to the task's head and refuses `why=release-check` when it fails, or `reason=check-dirtied` when it moved the target's HEAD or dirtied either tree; nothing is merged |
