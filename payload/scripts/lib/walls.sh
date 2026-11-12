@@ -5476,17 +5476,18 @@ return 0
 
 # ─── _wall_poker_contract_verb — is this a call of a contract-changing poker verb ─
 #
-# 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs
-# `session-poker.sh amend|extend|task-add|hold` or a plan-row verb (`task-set`,
-# `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `row-landed` — wave-28 T6, D7; `proof-add` and
-# `approve` and `waive`, each written on the user's word; `share`, in both its forms; `handoff` —
-# the plan's ## Handoff; `task-split`, a row rewritten as its children; and
-# `deliver` (a record row's own last act: admitted only for the caller's own plan row, by arm A),
-# `rule` (a ruling pushed to a writer), `tasks-prose`, `epic-row` and
-# `continuation-fill` (T7's plan verbs), `disposition` (T13's finding ledger) and `reply` (wave-38 T3, the final card's
-# replay into approve, waive and finding-move), `decisions` (a decision put or ruled writes the run's
-# design ledger and its register, and the read goes with the verb; a writer reads neither) — `ruling-ack` and `rulings`
-# are the writer's own reads and are NOT on the list); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
+# 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs one of these `session-poker.sh`
+# verbs: `amend`, `extend`, `task-add` and `hold` (a roster row, or a row's birth); `current` (the
+# run's step); `proof-add` (a proof the gates judge by); `approve` and `waive` (each written on the
+# user's word); `release-check` (the check's fact); `finding-move` (a finding across the line);
+# `share`, in both its forms; `handoff` (the handoff document); `rule` (a ruling pushed to a
+# writer); `reply` (the final card's replay into approve, waive and finding-move); `order` (the
+# user's order); `reviews-part` (the release entry's reviews, admitted by arm A for the integrate
+# row's own writer); and `decisions` (a decision put or ruled writes the run's design ledger and
+# its register, and the read goes with the verb; a writer reads neither). `ruling-ack` and
+# `rulings` are the writer's own reads and are NOT on the list. 1 otherwise. Every name on the
+# list is a verb the poker dispatches: a verb it no longer has fails there on its own, so its name
+# leaves the list with it.
 #
 # READ AS ARGV, THROUGH THE ONE COMMAND READER. The segments are git-argv.sh's
 # (`git_argv_expand`: `&& ; | ||` and newlines split, heredoc bodies gone, `sh -c` / `bash -c`
@@ -5557,7 +5558,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
           return 0
         fi
         case "$_next" in
-          amend|extend|task-add|hold|task-set|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|matrix-retier|waive-row|tasks-prose|epic-row|continuation-fill|disposition|reply|order|reviews-part|decisions)
+          amend|extend|task-add|hold|current|proof-add|approve|waive|release-check|finding-move|share|handoff|rule|reply|order|reviews-part|decisions)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
             _WALL_POKER_CALL="$GIT_ARGV_REST"
             _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"
@@ -6410,9 +6411,11 @@ A commit placed outside the project root and outside every tree of its repositor
 
   # ---------- ARM A (wave-20 T9; REQ-4, AC-4.2; spec D4): a subagent changes no contract ----
   #
-  # `session-poker.sh amend` widens a live row's Files/Suites/Re-executes, `extend` re-opens a
-  # MET row, and `task-add` writes the bound plan. All three are the orchestrator's: a writer
-  # that could run them would grant itself a wider budget or schedule its own work. The
+  # Every verb on `_wall_poker_contract_verb`'s list changes a roster contract or the run's record:
+  # `amend` widens a live row's Files/Suites/Re-executes, `extend` re-opens a MET row, `task-add`
+  # records a row's birth, and `proof-add` registers the evidence the gates judge by. Each is the
+  # orchestrator's: a writer that could run one would widen its own budget, schedule its own work
+  # or register the evidence it is judged by. The
   # script cannot see who called it — in-process teammates share the session's environment —
   # so the refusal is here, below the partition every arm of this function shares: a payload
   # carrying a top-level `agent_id`, in an armed session. Main-thread calls never reach it.
@@ -6462,10 +6465,10 @@ The one amend a writer runs itself adds Files to its own row, alone in one call:
     bash <plugin>/hooks/session-poker.sh amend $_BSG_AM_OWN --files+ <path> --reason '<why>'"
         fi
         fold_block exit2 "$_WALL_POKER_VERB" \
-          "a subagent may not change a contract or the plan" "ask main" \
-          "\`$_WALL_POKER_SHOWN\` changes a roster contract or the bound plan, and
-only the orchestrator does that: a dispatched agent that could would widen its own budget or
-schedule its own work. Send the orchestrator what you need — the files, suites or runs to
+          "a subagent may not change a contract or the run's record" "ask main" \
+          "\`$_WALL_POKER_SHOWN\` changes a roster contract or the run's record (its plan or its log), and
+only the orchestrator does that: a dispatched agent that could would widen its own budget,
+schedule its own work, or register the evidence it is judged by. Send the orchestrator what you need — the files, suites or runs to
 add and why, or the row to add — and it runs the verb.${_bsg_am_more}"
         return 2
       fi
@@ -6960,8 +6963,8 @@ $_how"
 # `amend` ever read its arguments. `'<why>'` is one word, like `'<cmd>'`.
 # THE WHOLE RUN IS NO WIDENING (wave-35 T10; D10, REQ-1 AC-1.8). A refused run that is the project's whole tree,
 # `run.sh` or `tests/run.sh` with no `--only`, is never sent to `--reexec+ '<cmd>'`: an amend would hand a row the
-# whole tree outside the full-run rules. Its one path is `session-poker.sh floor-run`, which holds those rules
-# itself (hooks/session-poker.sh, the floor-run arm) and which this wall admits as typed, so the line printed,
+# whole tree outside the full-run rules. Its one path is `session-poker.sh regression-run`, which holds those rules
+# itself (hooks/poker/proof.sh, its verb) and which this wall admits as typed, so the line printed,
 # run as printed, is not refused again. `_budget_whole_run_cmd` is the command, built once, for this line and for
 # the full-tree arm's detail.
 _budget_whole_run_cmd() {

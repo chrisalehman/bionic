@@ -1330,21 +1330,18 @@ section "EXIT — every refusal names its exit, and the ones that do not burn do
 #                   one-word verb of EXIT_WORDS followed by its argument (`<`, `'`, `$`, a backquote, a
 #                   digit or a flag). The refusing verb's own name in `<verb> refused —` or in a
 #                   `REFUSED — <verb>:` lead is the refusal's subject, not its exit, and is not read.
-# EXIT_VERBS: continuation-fill epic-row fill-report finding-move finding-stated
-#   known-limits-part landing-report launch-sync ledger-add ledger-set matrix-render matrix-retier matrix-set
-#   proof-add regression-run release-approval release-check release-note reviews-part row-landed ruling-ack
-#   stop-run task-add task-set task-split tasks-prose waive-row
-# EXIT_WORDS: adopt amend approve bind deliver discharge extend reply ready resume waive
+# EXIT_VERBS: finding-move known-limits-part landing-report proof-add regression-run release-approval
+#   release-check release-note reviews-part ruling-ack stop-run task-add
+# EXIT_WORDS: adopt amend approve bind extend reply ready resume waive
+# Each is a verb the poker dispatches, but `ready`, spawn-worktree.sh's.
 # Every other site is UNEXCUSED and counted against its file's ceiling.
 #
 # THE CEILING FILE, tests/lib/refusal-exits.ceiling: `<path> <count> # <reason or date>`, one line per file
 # with unexcused sites. A file it does not name has ceiling 0. A line with no count, no reason after a space,
 # a hash and a space, or a path named twice is refused by line.
-EXIT_VERBS="continuation-fill epic-row fill-report finding-move finding-stated known-limits-part
-  landing-report launch-sync ledger-add ledger-set matrix-render matrix-retier matrix-set proof-add regression-run
-  release-approval release-check release-note reviews-part row-landed ruling-ack stop-run
-  task-add task-set task-split tasks-prose waive-row"
-EXIT_WORDS="adopt amend approve bind deliver discharge extend reply ready resume waive"
+EXIT_VERBS="finding-move known-limits-part landing-report proof-add regression-run release-approval
+  release-check release-note reviews-part ruling-ack stop-run task-add"
+EXIT_WORDS="adopt amend approve bind extend reply ready resume waive"
 EXIT_AWK="$TMP/exit.awk"
 cat > "$EXIT_AWK" <<'EXIT_AWK_EOF'
 # REFUSALS AND THEIR EXITS. Run once per file with -v VERBS=<hyphenated verbs> -v WORDS=<one-word verbs>, the
@@ -1493,7 +1490,7 @@ die "REFUSED — z; needs: Chris — why"  # MARK-C2 a person's exit
 refuse exit2 commit "REFUSED — w" "fix it" "the detail"  # MARK-C3 a refuse call's fix is the exit
 die "REFUSED — run it as: session-poker.sh matrix-set AC-1 status=discharged"  # MARK-C4 a script verb
 die "REFUSED — a text that runs on
-  to its exit: matrix-render writes it."  # MARK-C5 the exit on the joined line
+  to its exit: release-note writes it."  # MARK-C5 the exit on the joined line
 # die "REFUSED — in a comment"  MARK-C6
 cat <<'DOC'
 die "REFUSED — heredoc text"  MARK-C7

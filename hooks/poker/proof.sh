@@ -274,10 +274,13 @@ whole_run_at_head() {
   #   approval  key=<name> by=<who> [head=<40-hex>] said=<the reply> [why=<why>]
   #
   # <who> is the project's git user name, the reply the user's own words; each is one field of the log, so a line break
-  # or a `|` is refused. Three kinds of name:
+  # or a `|` is refused. Four kinds of name:
   #   plan         the plan's approval at Step 3, keyed step3 as an older plan's approved-by: translates; given once. Its
   #                instant is the one the plan's and the step cards' asks close at: a step card left open until a later
   #                card or the Stop closed it would read as a stop the run made after its approval.
+  #   step0 step1 step2  the approval of the step before the plan's that the commit gate at 15 asks at Steps 1, 2 and 3,
+  #                under the key it asks; given once, in the user's words, a placeholder refused, and its own ask closed
+  #                at its instant. No order among them: the gate asks each only at the step after it.
   #   a criterion  a person's confirmation of a criterion whose check is theirs, admitted only where the reader's cells
   #                give it tier T4 (any other tier is refused, naming it), on words lib/said.sh `user_said` finds the
   #                person typed in this session; the reader reads it as that criterion's confirmation.
@@ -310,6 +313,19 @@ whole_run_at_head() {
       AP_KEY=step3
       if proof_approved "$PV_PLAN" step3; then
         die "REFUSED — the run of $PV_PLAN already holds the plan's approval. An approval is recorded once; nothing was appended."
+        exit 1
+      fi
+      AP_AT="$(owed_now 2>/dev/null)" || AP_AT=""
+    elif [ "$AP_NAME" = step0 ] || [ "$AP_NAME" = step1 ] || [ "$AP_NAME" = step2 ]; then
+      # The gate's own placeholder test, asked of its library in a subshell as close-out asks it.
+      ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F is_placeholder_value >/dev/null 2>&1 || exit 9
+        is_placeholder_value "$AP_REPLY" ); AP_RC=$?
+      case "$AP_RC" in
+        0) die "REFUSED — '$AP_REPLY' is a placeholder, not the user's reply; nothing was appended. Give their words verbatim: session-poker.sh approve $AP_NAME '<the user's reply>'"; exit 1 ;;
+        9) die "REFUSED — whether the reply is a placeholder is read by lib/walls.sh, which cannot be loaded from $BIONIC_LIB; nothing was appended. run again: session-poker.sh approve $AP_NAME '<the user's reply>'"; exit 2 ;;
+      esac
+      if proof_approved "$PV_PLAN" "$AP_NAME"; then
+        die "REFUSED — the run of $PV_PLAN already holds the approval $AP_NAME. An approval is recorded once; nothing was appended. Fix: none; it stands, and the gate reads it at Step $(( ${AP_NAME#step} + 1 ))."
         exit 1
       fi
       AP_AT="$(owed_now 2>/dev/null)" || AP_AT=""
@@ -358,6 +374,12 @@ whole_run_at_head() {
           done
         fi
         say "approve — plan: approved by $AP_WHO, appended to the run's log of $PV_PLAN, which is unchanged. The commit gate reads it from Step 4."
+        exit 0 ;;
+      step[012])
+        if declare -F owed_close >/dev/null 2>&1; then
+          OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_close "approve:$AP_NAME" "approve $AP_NAME" "${AP_AT:-}" >/dev/null 2>&1
+        fi
+        say "approve — $AP_NAME: approved by $AP_WHO, appended to the run's log of $PV_PLAN, which is unchanged. The commit gate reads it at Step $(( ${AP_NAME#step} + 1 ))."
         exit 0 ;;
       D[1-9]*) case "${AP_NAME#D}" in
           *[!0-9]*) : ;;
