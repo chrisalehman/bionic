@@ -170,6 +170,13 @@ W=done; printf 'run/v1|ev=step|n=9|by=me|at=2026-11-01T00:00:01Z\n' | plan done
 expect_eq "a run at Step 9 is delivered" "n=9 state=delivered" "$(ask step | tr '\n' ' ' | sed 's/ $//')"
 W=gone; printf 'run/v1|ev=step|n=6|at=2026-11-01T00:00:01Z\nrun/v1|ev=abandon|by=me|why=w|at=2026-11-01T00:00:02Z\n' | plan gone
 expect_eq "an abandoned run says so" "n=6 state=abandoned" "$(ask step | tr '\n' ' ' | sed 's/ $//')"
+p15() { printf -- '---\ncanonical_sdlc_version: 15\n---\n# %s\n' "$1" > "$D/plans/epic-x/$1.plan.md"; }   # <wave> -> its page at 15
+plan fresh < /dev/null; p15 fresh; p15 bare; printf 'run/v1|ev=abandon|by=me|why=w|at=2026-11-01T00:00:01Z\n' | plan left; p15 left
+plan old < /dev/null
+expect_eq "a page at 15 nothing has moved stands at step 0, open: its log empty, or none at all" "n=0 state=open|n=0 state=open" \
+  "$(W=fresh; ask step | paste -sd' ' -)|$(W=bare; ask step | paste -sd' ' -)"
+expect_eq "…one abandoned before a step reads abandoned at none, and a page not at 15 reads open at none, as before" \
+  "state=abandoned|state=open" "$(W=left; ask step | paste -sd' ' -)|$(W=old; ask step | paste -sd' ' -)"
 
 section "UNKNOWN"
 W=fold; out="$(ask nosuch 2>&1)"; expect_status "an unlisted question exits 2" 2 "$?"
