@@ -132,7 +132,7 @@ expect_contains "the stub is printed, and it sources the loader" '. "$_bl_l"; bi
 
 section "1 — one stub, byte for byte, under a WANT line that matches what is sourced"
 
-while IFS='|' read -r name class scoped; do
+while IFS='|' read -r name _; do
   [ -n "$name" ] || continue
   f="$HOOKS/$name.sh"
   if [ ! -f "$f" ]; then no "$name.sh exists" "$f"; continue; fi
@@ -154,12 +154,6 @@ while IFS='|' read -r name class scoped; do
   sourced=$(grep -oE '^\. "\$BIONIC_LIB/[a-z.-]+\.sh"' "$f" | sed -E 's|^\. "\$BIONIC_LIB/||; s|"$||' | sort | tr '\n' ' ' | sed 's/ $//')
   expect_eq "$name sources exactly the libraries it wants" \
     "$(printf '%s' "$wants" | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//')" "$sourced"
-
-  # THE FAIL DIRECTION IS DECLARED, not inferred: exactly one of the two calls appears.
-  n_closed=$(grep -c 'loader_fail_closed "' "$f")
-  n_open=$(grep -c 'loader_fail_open "' "$f")
-  case "$class" in
-  esac
 done <<EOF
 $ADOPTED
 EOF
