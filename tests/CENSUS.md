@@ -225,6 +225,7 @@ close-out-1.test.sh | §VER | keep | payload/scripts/close-out.sh: the delivered
 close-out-1.test.sh | §FIX-SHAPE | vacuous | FS1-FS5 run the suite's own builder_plants over tests/close-out.prelude.sh and doctored copies of it, which reads only suite code | none (searched 'builder_plants' in tests/)
 close-out-1.test.sh | §E2E | keep | payload/scripts/close-out.sh: the refusal of a release: value holding a pipe character deleted, so run splits the epic row's cell and closes (E2E14) | none (searched 'A-orch-28' and 'release: 1.2' in tests/)
 close-out-1.test.sh | §BRANCH-AGREE | keep | rule: lint — a second reader of integration-branch planted in hooks/ or payload/scripts/, so the sweep finds it beside lib/plan.sh (BA5) | none (searched 'plan_integration_branch' and 'integration-branch' in tests/; handoff-file.test.sh §BRANCH-AGREE asks the verbs, not the tree)
+close-out-1.test.sh | §DEPLOY | keep | payload/scripts/close-out.sh co_deploy_judge: its call in do_run deleted, so a run naming a deploy target and given none of the three delivers (DP1); or co_close_archived not restating the three, so the reader after a whole close reads them gone (DP5) | none (searched '--deployed' and 'co_deploy' in tests/; the gate suites judge the step-9 arm over a log, never the close)
 
 ## close-out-2.test.sh
 
