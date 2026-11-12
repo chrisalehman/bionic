@@ -12,6 +12,8 @@
 #   §GATE      the commit gate (hooks/bash-walls.sh) asks the run's facts for the step's evidence: a commit at
 #              Step 6 whose log holds no review event is refused, and admitted once the log holds one per question.
 #              The same run at 15, brought forward, is refused as the 14 is, and with its reviews still refused, naming each fact its log lacks.
+#              At 15 a step's evidence is asked where it is held, owed while missing and not once it stands; a step
+#              pending in an advance's judgment moves the gate only in the advance's own session, and is never held.
 #
 # FIXTURE FIDELITY. Each plan is a real file in a scratch git repository with an engaged session, written
 # through hooks/canonical-sdlc-governing-skill.sh as the Write tool would post it. Every plan carries the
@@ -130,12 +132,13 @@ mkdir -p "${GL%/*}"; printf 'proof\n' > "$R/.bionic/docs/record/generic-evidence
   printf '| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\nAC-1:\n  fails-when: a planted defect\n  evidence: record/generic-evidence.md\n'
 } > "$R/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md"
 printf 'plan=%s\n' "$R/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" > "$R/.bionic/tmp/engaged-$SID.state"
-gate() {  # -> GATE_EXIT, and GATE_SAID: the gate's words on a commit from the repository
+gate_as() {  # <session> <a pending step, or nothing> -> GATE_EXIT, and GATE_SAID: the gate's words on a commit from the repository
   local in
-  in="$(jq -n --arg s "$SID" --arg c "$R" '{session_id: $s, cwd: $c, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "git commit -m x"}}')"
-  GATE_SAID="$(HOME="$HOME_DIR" CLAUDE_PROJECT_DIR= CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 bash "$BIONIC_HOOKS_DIR/bash-walls.sh" <<< "$in" 2>&1 >/dev/null)"
+  in="$(jq -n --arg s "$1" --arg c "$R" '{session_id: $s, cwd: $c, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "git commit -m x"}}')"
+  GATE_SAID="$(HOME="$HOME_DIR" CLAUDE_PROJECT_DIR= CLAUDE_CODE_SESSION_ID="$1" BIONIC_DRY_STEP="$2" BIONIC_WALL_VERBOSE=1 bash "$BIONIC_HOOKS_DIR/bash-walls.sh" <<< "$in" 2>&1 >/dev/null)"
   GATE_EXIT=$?
 }
+gate() { gate_as "$SID" ""; }
 printf 'run/v1|ev=step|n=6|by=f|at=2026-11-01T00:00:01Z\n' > "$GL"
 gate
 expect_status "a commit at step 6 with no review event in the log is refused" 2 "$GATE_EXIT"
@@ -168,19 +171,45 @@ gate; expect_eq "at 15 with no review event, refused as the 14 is, by the same r
 expect_contains "the 14 was refused for the reviews" "2 bionic: commit refused — a review question is unanswered" "$S14"
 grep -h 'kind=review' "$GL" >> "$L2"; gate
 expect_status "at 15 with each review, still refused: the step's other facts are not in the log" 2 "$GATE_EXIT"
-for f in "Step 1's requirements:" "each row's '- T<id>:' evidence line"; do
-  expect_contains "the refusal names what it could not read at 15: $f" "could not be read at 15: $f" "$GATE_SAID"; done
+expect_contains "the refusal names what it could not read at 15: each row's evidence line" "could not be read at 15: each row's '- T<id>:' evidence line" "$GATE_SAID"
+owed() { printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o "owed at 15: $1" | head -1; }
+expect_eq "…and owes Step 1's requirements, which a header naming no epic and wave cannot find" "owed at 15: Step 1's requirements" "$(owed "Step 1's requirements")"
 for f in "each criterion's fails-when:" "the matrix:"; do expect_absent "…and no longer names $f" "could not be read at 15: $f" "$GATE_SAID"; done
 unruled() { ( . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/run.sh"; . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/units.sh"; . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/proof.sh"
   . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh"; matrix_unruled "$P2" 8 "$@" | tr '\n' ' ' ); }
 expect_eq "at 15 the merge advance asks the evidence review at the head of a criterion: none read, AC-1 owes its ruling; read, none" "AC-1 |" "$(unruled)|$(unruled "$H")"
 printf 'run/v1|ev=step|n=5|at=2026-11-01T00:00:03Z\n' >> "$L2"; gate
-expect_contains "at Step 5 the refusal names the step's line" "could not be read at 15: Step 5's line and its fields" "$GATE_SAID"
+expect_eq "at Step 5 with no regression proof in the log the regression is owed" "owed at 15: Step 5's regression" "$(owed "Step 5's regression")"
 # A row's declared red at 15 is judged on the proofs the log holds: owed with none after it, cleared by a later one.
 printf 'run/v1|ev=step|n=6|at=2026-11-01T00:00:04Z\nrun/v1|ev=admitted|id=d1|row=T1|suite=a.test.sh|token=ext:gone|at=2026-11-01T00:00:05Z\n' >> "$L2"; gate
 expect_contains "at 15 a declared red the log holds, no proof after it, is owed" "a.test.sh: landed red until ext:gone" "$GATE_SAID"
 printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=record/floor.log|at=2026-11-01T00:00:06Z\n' "$H" >> "$L2"; gate
 expect_eq "…a regression proof after it in the log clears it: the refusal is the facts the log lacks, and names no proof" "could not be read at 15" \
   "$(printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o 'landed red until\|could not be read at 15\|the proofs that clear' | LC_ALL=C sort -u | paste -sd'|' -)"
+
+# Each fact a step owes at 15 is asked where it is held, owed while it is missing and not once it stands.
+hdr() { awk -v l="$1" '{ print } /^walk: exempt$/ { print l }' "$P2" > "$P2.t" && mv "$P2.t" "$P2"; }   # <a header line> -> the plan's header gains it
+hdr 'epic: epic-01-demo'; hdr 'wave: wave-02-y'; hdr 'environments: mac'; mkdir -p "$R/.bionic/docs/specs/epic-01-demo"
+: > "$R/.bionic/docs/specs/epic-01-demo/wave-02-y.requirements.md"; printf 'run/v1|ev=step|n=5|at=2026-11-01T00:00:07Z\n' >> "$L2"; gate
+expect_eq "at 5: the regression and the requirements found by the header stand; the environments a walk covered are owed" \
+  "||owed at 15: Step 5's environments covered" "$(owed "Step 5's regression")|$(owed "Step 1's requirements")|$(owed "Step 5's environments covered")"
+printf 'run/v1|ev=proof|kind=walk|head=%s|evidence=record/generic-evidence.md|environments=mac|at=2026-11-01T00:00:08Z\n' "$H" >> "$L2"; gate
+expect_eq "…and stand once the walk's proof names them" "" "$(owed "Step 5's environments covered")"
+for c in "2|approval|step1|Step 1's approval" "7|header|adrs: none — no decision this run|Step 7's document" "9|step|delivered=v1|Step 9's delivery"; do
+  IFS='|' read -r n k v w <<< "$c"; ev="run/v1|ev=step|n=$n"; [ "$n" != 9 ] || ev="$ev|delivered=no"; printf '%s|at=2026-11-01T00:00:09Z\n' "$ev" >> "$L2"; gate
+  expect_eq "at $n the log lacking it, $w is owed" "owed at 15: $w" "$(owed "$w")"
+  case "$k" in approval) printf 'run/v1|ev=approval|key=%s|by=f|said=yes|at=2026-11-01T00:00:10Z\n' "$v" >> "$L2" ;;
+    header) hdr "$v" ;; step) printf 'run/v1|ev=step|n=%s|%s|at=2026-11-01T00:00:10Z\n' "$n" "$v" >> "$L2" ;; esac; gate
+  expect_eq "…and not owed once it stands" "" "$(owed "$w")"; done
+printf 'run/v1|ev=step|n=8|at=2026-11-01T00:00:11Z\n' >> "$L2"; gate
+expect_eq "at 8 the integrate row's landing and the close's cleanup are owed" "owed at 15: Step 8's merge|owed at 15: Step 8's cleanup" "$(owed "Step 8's merge")|$(owed "Step 8's cleanup")"
+printf 'run/v1|ev=step|n=8|cleanup=n/a: kept|at=2026-11-01T00:00:12Z\n' >> "$L2"; gate
+expect_eq "…and the cleanup not once the close gives it to the step" "owed at 15: Step 8's merge|" "$(owed "Step 8's merge")|$(owed "Step 8's cleanup")"
+# A step pending in an advance's judgment moves the gate only in the advance's own session, and is never held.
+printf 'run/v1|ev=cancel|of=approval|key=step1|at=2026-11-01T00:00:13Z\n' >> "$L2"
+for d in planverb-4242 closeout-preflight-4243; do printf 'plan=%s\n' "$P2" > "$R/.bionic/tmp/engaged-$d.state"; gate_as "$d" 2
+  expect_eq "a dry judgment's own session ($d) is judged at the step pending" "owed at 15: Step 1's approval" "$(owed "Step 1's approval")"; done
+gate_as "$SID" 2
+expect_eq "a real session's commit with the same variable set is judged at the step its log holds, nothing held of the pending one" "owed at 15: Step 8's merge|" "$(owed "Step 8's merge")|$(owed "Step 1's approval")"
 
 finish
