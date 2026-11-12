@@ -310,10 +310,7 @@ mkdir -p "$CLAUDE_CONFIG_DIR/sessions"
 jq -n --argjson p "$$" --arg s "$SID_A" '{pid:$p, sessionId:$s}' > "$CLAUDE_CONFIG_DIR/sessions/$$.json"
 
 # `start|attested` (below) is THE POSITIVE PAIR and its §7 direction is literal silence on
-# both streams. Until epic-16 wave-02 that claim needed a genuinely LIVE session sweeper
-# armed against this world, or the unarmed-sweeper nag fired legitimately and broke it. The
-# nag was deleted with the watcher, so silence is now the gate's own answer and this world
-# needs no live process standing behind it.
+# both streams.
 
 # THE STOP GATE'S POSITIVE PAIR, re-founded (epic-23 wave-15, REQ-2; ADR-028). It used to be
 # a world with an observation RECORDED through the real producer→recorder→gate path, because

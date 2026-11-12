@@ -77,9 +77,6 @@ expect_file_no_regex() {  # <label> <regex> <file>
   if [ ! -f "$3" ]; then no "$1" "file absent: $3"; return; fi
   if grep -qE "$2" "$3"; then no "$1" "unexpected match for /$2/"; else ok "$1"; fi
 }
-# This suite's private section() was a plain banner printer with the
-# framework's exact signature (A-10c) — deleted outright, every existing
-# section "..." call site binds unchanged.
 
 # ---------- sandbox ----------
 
@@ -524,7 +521,7 @@ ORIG_SUM="$(shasum "$PROBE" | awk '{print $1}')"
 # mutation. So the mutants live in a tree shaped like the shipped one.
 PP_MUT_TREE="$TMPROOT/mutants"
 mkdir -p "$PP_MUT_TREE/hooks" "$PP_MUT_TREE/scripts/lib"
-for _pp_lib in root.sh session.sh; do
+for _pp_lib in loader.sh root.sh session.sh; do
   cp "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/$_pp_lib" "$PP_MUT_TREE/scripts/lib/$_pp_lib" 2>/dev/null \
     || cp "${BIONIC_HOOKS_DIR}/../scripts/lib/$_pp_lib" "$PP_MUT_TREE/scripts/lib/$_pp_lib" 2>/dev/null || true
 done

@@ -462,7 +462,7 @@ EOF
 # heredoc that merely MENTIONED a push was refused.
 #
 # THE COMMAND IS STILL READ BEFORE THE LIBRARY IS, in hooks/bash-walls.sh and not
-# here: the repair allowlist in `loader_fail_closed` needs the text, and it has to be
+# here: the repair commands matched under the loader's stub need the text, and it has to be
 # consulted BEFORE the compound decides to refuse.
 #
 # FAIL-CLOSED (design ledger S4, Chris D1 2026-08-30): a wall over an IRREVERSIBLE
@@ -2057,7 +2057,7 @@ fi
 # `bionic_context` is a pure function of both — so the duplicate costs one root walk on
 # commit commands and nothing else. Consolidating it belongs with the verbatim-carry
 # guarantee it would break, not beside it. It adopts the BIONIC_INPUT read before the loader (R1) — stdin is spent, and
-# `loader_fail_closed` needed the command text before any library existed.
+# the repair commands needed the command text before any library existed.
 #
 # THE CWD LADDER IS THE LIBRARY'S, and is named nowhere else in this file but the
 # fail-closed pre-check above — which restates it by hand for the one reason that

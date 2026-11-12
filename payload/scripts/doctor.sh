@@ -265,10 +265,10 @@ done
 # and the copy nothing walled (this one) was the one that broke.
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/width.sh"
-# loader.sh, which is a CARRIER and not a loader: sourcing it defines
-# `bionic_loader_pin` and nothing else. Doctor wants it for one job — the
-# `walls` row below drives the canonical idiom text against each wall hook's own
-# path instead of re-implementing the candidate list a third time. A row that
+# loader.sh, the one loader: sourcing it defines its functions and runs nothing.
+# Doctor wants it for one job — the `walls` row below drives the stub every hook
+# carries against each wall hook's own path instead of re-implementing the
+# candidate list a second time. A row that
 # re-derived "where would this hook look" could disagree with where the hook
 # actually looks, which is the whole failure the row exists to catch.
 # shellcheck source=/dev/null
@@ -1050,26 +1050,25 @@ done
 # handoff 3.1). Four hooks stand over actions that cannot be taken back or
 # cannot be re-classified — protect-main and the evidence gate refuse a command
 # they cannot read, farm-out-reminder and background-suite-guard classify one —
-# and each of them finds its library through the loader idiom
-# (payload/scripts/lib/loader.sh, spec AC-16). A wall whose library has gone
+# and each of them finds its library through the one loader
+# (payload/scripts/lib/loader.sh). A wall whose library has gone
 # missing is the lockout this whole wave is named for: the wall fires, cannot
 # read, and refuses everything including the command that would repair it.
 #
-# ASKED THROUGH THE IDIOM ITSELF, never through a copy of it. `bionic_loader_pin`
-# prints the canonical block; it runs here in a child shell whose `$0` is the
-# HOOK'S OWN PATH, which is the single input the block's candidate list is a
-# function of. So this row cannot drift from what the hook will do when it
-# fires — a re-implementation of "beside the hook, then the marketplace source,
-# then the newest cache version" would be a fourth copy of the thing the pin
-# exists to keep at one.
+# ASKED THROUGH THE STUB ITSELF, never through a copy of the walk. `bionic_loader_pin`
+# prints the stub every hook carries; it runs here in a child shell whose `$0` is the
+# HOOK'S OWN PATH, which is the single input the candidate list is a function of. So
+# this row cannot drift from what the hook will do when it fires — a re-implementation
+# of "beside the hook, then the marketplace source, then the newest cache version"
+# would be a second copy of the walk the loader keeps at one.
 #
-# READ-ONLY, LIKE EVERYTHING ELSE HERE. The block sets three variables and
-# defines two functions; it executes neither `loader_fail_open` nor
-# `loader_fail_closed`, so nothing refuses and nothing exits on doctor's behalf.
+# READ-ONLY, LIKE EVERYTHING ELSE HERE. The stub sets three variables and defines
+# two functions; it executes neither `loader_fail_open` nor `loader_fail_closed`,
+# so nothing refuses and nothing exits on doctor's behalf.
 #
 # THE WANTED BASENAMES COME FROM THE HOOK, not from a list kept here. A hook
-# that adopts the idiom declares them on a `BIONIC_LIB_WANT=` line above the
-# block; one that has not yet adopted it names its library in the `lib/<name>.sh`
+# that carries the stub declares them on the `BIONIC_LIB_WANT=` line above
+# it; one that does not names its library in the `lib/<name>.sh`
 # path it sources. Either way the answer is the hook's own, so this row keeps
 # telling the truth across the task that rewrites the hooks.
 # THE ROSTER AND THE PROBE ARE lib/checks.sh's (1.5.1). A wall missing from the
