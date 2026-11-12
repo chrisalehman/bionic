@@ -802,8 +802,8 @@ poke "$R58" proof-add review record/wave-01-fixture/plain.md
 expect_eq "58h5 control: a review proof with no flags registers (exit 0)" "0" "$RC"
 expect_regex "58h6 …in 1.11.0's four-field shape, its record in no reader's row" \
   "^proved: kind=review head=${S58_C4} at=[^ ]+ evidence=record/wave-01-fixture/plain.md$" "$(s46_proved "$P58" | tail -1)"
-expect_eq "58i no projection copy is left beside the plan" "" \
-  "$(find "$R58/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
+expect_eq "58i the floor, the task and the plain review leave the plan byte for byte as it was, and no copy beside it" "$(cksum < "$TMPROOT/s42-before")|" \
+  "$(cksum < "$P58")|$(find "$R58/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
 POKE_BOUND="$S58_BOUND_WAS"
 
 # ============================================================
@@ -863,7 +863,7 @@ awk -v l1="$(s59_read adversarial "$S59_A" 01 w-crit)" -v l2="$(s59_read structu
     print "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
     print "| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |  |"
     print "| T3 | 6 | review | the evidence read | auditor | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/ev.md | — | — | pending | approval:plan, live:head:evidence |"
-    print "| T4 | 6 | review | the adversarial and structure read | critic | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/adv.md | — | — | pending | approval:plan, live:head:adversarial+structure |"
+    print "| T4 | 6 | review | the adversarial and structure read | — | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/adv.md | — | — | pending | approval:plan, live:head:adversarial+structure |"
     print "| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-1 | — | — | — | pending |  |"
     next }
   intab && /^\|/ { next }
@@ -887,11 +887,10 @@ expect_eq "59a2 AC-1.5 both read rows are offered at once" "yes yes" \
 # T3 IS LAUNCHED BY THE RUN'S LOG, as a launch is now: its cells stay pending, and its return is the log's retraction.
 s59_live() { bash -c '. "$1/units.sh" && units_rows "$2"' _ "$BIONIC_HOOKS_DIR/../payload/scripts/lib" "$P59" | awk -F'\t' -v r="$1" '$1 == r { print $10 "|" $5 }'; }
 S59_LOG="$R59/.bionic/docs/record/wave-01-fixture/run.log"
-bash -c '. "$1/log.sh" && RUN_LOG="$2" log_append dispatch row=T3 name=w-aud brief=b sum=s' _ "$BIONIC_HOOKS_DIR/../payload/scripts/lib" "$S59_LOG"
+bash -c '. "$1/log.sh" && RUN_LOG="$2" log_append dispatch row=T3 name=w-aud brief=b sum=s && RUN_LOG="$2" log_append dispatch row=T4 name=w-crit brief=b sum=s' _ "$BIONIC_HOOKS_DIR/../payload/scripts/lib" "$S59_LOG"
 expect_eq "59c0 precondition: T3's launch is in the log alone: its cells pending, the run's state active under w-aud" \
   "pending|active|w-aud" "$(s48_row "$P59" T3 | awk -F'|' '{ print $12 }')|$(s59_live T3)"
-sed -i '' -E '/^\| T4 \|/s/\| critic \|(.*)\| pending \|/| w-crit |\1| active |/' "$P59"
-expect_eq "59c0b precondition: T4 is launched by its cells" "active|w-crit" "$(s59_live T4)"
+expect_eq "59c0b precondition: T4 is launched by the log too" "active|w-crit" "$(s59_live T4)"
 printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: piece\n\nthe second pass\n' "$S59_A" "$S59_C" \
   > "$R59/.bionic/docs/record/wave-01-fixture/adv-2.md"
 s42_snap "$R59" "$P59"
@@ -903,7 +902,7 @@ expect_contains "59c2 …with its question" "evidence=record/wave-01-fixture/adv
 # last read at B, so the adversarial reading at C leaves T4 active under its reader, not offered;
 # its structure reading at C (59c6) returns it. Through T10 the first reading returned it at once.
 expect_eq "59c3 §RANGE-Q F3 the adversarial reading leaves T4, the row carrying it, active under w-crit while structure is unread at C" \
-  "active|w-crit" "$(s48_row "$P59" T4 | awk -F'|' '{ print $12 "|" $5 }')"
+  "active|w-crit" "$(s59_live T4)"
 expect_eq "59c4 …and leaves the evidence row T3 active under its reader" "active|w-aud" "$(s59_live T3)"
 expect_absent "59c5b …and gives no Files advice for it" "its Files name another record" "$OUT"
 # A reading by a reader that is not the row's agent never moves it (F3): w-rev's structure reading
@@ -913,29 +912,22 @@ printf '# reading\n\nreviewed: %s..%s\nquestion: structure\nresult: pass\nscope:
 poke "$R59" proof-add review record/wave-01-fixture/str-rev.md --question structure --reader w-rev
 expect_eq "59c5c F3 w-rev's structure reading at C registers (exit 0)" "0" "$RC"
 expect_eq "59c5d F3 …and never moves T4, which carries structure: still active under w-crit" \
-  "active|w-crit" "$(s48_row "$P59" T4 | awk -F'|' '{ print $12 "|" $5 }')"
-printf '# reading\n\nreviewed: %s..%s\nquestion: structure\nresult: pass\nscope: piece\n%s\n\nthe structure pass\n' "$S59_B" "$S59_C" "$S56_ALL" \
-  > "$R59/.bionic/docs/record/wave-01-fixture/str-2.md"
-# fails-when: a rename that fails after the proof is appended is reported as a refusal of the proof, or the proof is
-# not in the log, or the plan is half written. The fixture's mv refuses a move onto a plan.
-S59_MV="$TMPROOT/s59-mv"; mkdir -p "$S59_MV"; printf '#!/bin/bash\nfor a; do l="$a"; done\ncase "$l" in *.plan.md) exit 1 ;; esac\nexec /bin/mv "$@"\n' > "$S59_MV/mv"; chmod +x "$S59_MV/mv"
-S59_SUM="$(cksum < "$P59")"; PATH="$S59_MV:$PATH" poke "$R59" proof-add review record/wave-01-fixture/str-2.md --question structure --reader w-crit
-expect_eq "59c5e a reading whose plan edit cannot be renamed in: exit 2, the proof in the run's log, the plan byte for byte as it was" "2|1|$S59_SUM" \
+  "active|w-crit" "$(s59_live T4)"
+printf '# reading\n\nreviewed: %s..%s\nquestion: structure\nresult: fail\nscope: piece\n%s\n\nthe structure pass\n' "$S59_B" "$S59_C" \
+  "$(s56_checks one-site 'check: one-site FAIL two sites')" > "$R59/.bionic/docs/record/wave-01-fixture/str-2.md"
+# fails-when: a reading that returns its live row writes the plan, or its proof is not in the log once.
+S59_SUM="$(cksum < "$P59")"; poke "$R59" proof-add review record/wave-01-fixture/str-2.md --question structure --reader w-crit
+expect_eq "59c6 F3 w-crit's failing structure reading at C registers (exit 0), its proof in the run's log once, the plan byte for byte as it was" "0|1|$S59_SUM" \
   "$RC|$(/usr/bin/grep -c '^run/v1|ev=proof|kind=review|.*|evidence=record/wave-01-fixture/str-2.md|' "$S59_LOG")|$(cksum < "$P59")"
-expect_regex "59c5f …saying the proof stands and naming the edit left undone" "stands in the run's log, so do not run proof-add again for it; the judged copy could not be moved over .*, so T4 back to pending is left undone" "$OUT"
-poke "$R59" proof-add review record/wave-01-fixture/str-2.md --question structure --reader w-crit
-expect_eq "59c6 F3 w-crit's structure reading at C registers (exit 0)" "0" "$RC"
-expect_eq "59c7 F3 …and with both its questions read at C, T4 returns to pending, its agent cleared" \
-  "pending|—" "$(s48_row "$P59" T4 | awk -F'|' '{ print $12 "|" $5 }')"
+S59_READER="$BIONIC_HOOKS_DIR/../payload/scripts/reader.sh"
+expect_eq "59c7 F3 …and with both its questions read at C, T4 reads pending by the reader" "state=pending" "$(bash "$S59_READER" "$P59" status T4 | head -1)"
 expect_contains "59c8 …naming the row it returned" "T4 back to pending" "$OUT"
 printf '# reading\n\nreviewed: %s..%s\nquestion: evidence\nresult: pass\nscope: piece\n\nthe evidence pass\n' "$S59_B" "$S59_C" \
   > "$R59/.bionic/docs/record/wave-01-fixture/ev.md"
-poke "$R59" proof-add review record/wave-01-fixture/ev.md --question evidence --reader w-aud
-expect_eq "59d the evidence reading registers (exit 0)" "0" "$RC"
-expect_eq "59d2 …and returns T3: pending in the run, its launch taken back in the log, once" "pending|—|1" \
-  "$(s59_live T3)|$(/usr/bin/grep -c '^run/v1|ev=cancel|of=dispatch|row=T3|name=w-aud|' "$S59_LOG")"
-expect_eq "59d3 …while T4, launched by its cells, returned with no retraction written: the log's only cancel is T3's" "1" \
-  "$(/usr/bin/grep -c '|ev=cancel|' "$S59_LOG")"
+S59_SUM="$(cksum < "$P59")"; poke "$R59" proof-add review record/wave-01-fixture/ev.md --question evidence --reader w-aud
+expect_eq "59d the evidence reading of the live T3 registers (exit 0), the plan byte for byte as it was" "0|$S59_SUM" "$RC|$(cksum < "$P59")"
+expect_eq "59d2 …and returns T3: pending in the run, its launch taken back in the log, once" "pending|1" \
+  "$(s59_live T3 | cut -d'|' -f1)|$(/usr/bin/grep -c '^run/v1|ev=cancel|of=dispatch|row=T3|name=w-aud|' "$S59_LOG")"
 
 # ---------- the next tick: the evidence row idle, the critic's row offered from structure's B ----------
 rm -f "$R59/.bionic/tmp/tick-digest-$SID.state"

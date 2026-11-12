@@ -204,26 +204,24 @@ walk_settle() {
 }
 
 # THE WALK'S REGISTRATION: the record read as the critic's (proof_verdicts), its head (walk_head) and the criteria it
-# discharges (walk_settle), with its proof, one `proof kind=walk` event, the gate's reading of the walk, pending in
-# every read of the copy, and the criteria's proofs appended by the swap once the copy is judged (`walk_append`, named
-# in PV_ACT). The plan is not written. proof-add walk runs it; the tick's landing of a record row lands the walk row on
-# the proof it leaves.
-# walk_register <plan> <copy> <record real path> <record docs-relative> <working head> <repository> -> 0 with PV_ACT and
-# PV_UNDONE set for the swap, and WALK_HEAD, WALK_N and walk_settle's ids set; 1 with the refusal's sentence in WALK_WHY.
+# discharges (walk_settle), with its proof, one `proof kind=walk` event, pending in every read that follows, and the
+# criteria's proofs appended by `walk_append` once nothing is left to refuse. The plan is not written. proof-add walk
+# runs it; the tick's landing of a record row lands the walk row on the proof it leaves.
+# walk_register <plan> <record real path> <record docs-relative> <working head> <repository> -> 0 with WALK_HEAD,
+# WALK_N and walk_settle's ids set; 1 with the refusal's sentence in WALK_WHY.
 walk_register() {
-  local plan="$1" real="$3" rel="$4" v
+  local plan="$1" real="$2" rel="$3" v
   WALK_WHY=""; WALK_HEAD=""; WALK_N=0; WALK_PLAN="$plan"; WALK_REL="$rel"
   if ! v="$(proof_verdicts "$real")"; then
     WALK_WHY="$v; a walk record carries the critic's shape, a | AC | verdict | why | table and one verdict: line"
     return 1
   fi
-  if ! WALK_HEAD="$(walk_head "$real" "$6" "$5")"; then WALK_WHY="$WALK_HEAD"; WALK_HEAD=""; return 1; fi
+  if ! WALK_HEAD="$(walk_head "$real" "$5" "$4")"; then WALK_WHY="$WALK_HEAD"; WALK_HEAD=""; return 1; fi
   walk_settle "$plan" "$rel" <<< "$v" || return 1
   WALK_EV=("kind=walk" "head=$WALK_HEAD" "evidence=$rel")
   [ -z "${PF_ENVS:-}" ] || WALK_EV+=("environments=$PF_ENVS")
   proof_pending "${WALK_EV[@]}" || { WALK_WHY="the walk record's path $rel holds a | or a line break, which the run's log cannot hold"; return 1; }
   WALK_N="$(printf '%s\n' $WALK_DONE | awk 'NF { n++ } END { print n + 0 }')"
-  PV_ACT=walk_append; PV_UNDONE="the proofs of the criteria the walk confirms (${WALK_DONE:-none})"
   return 0
 }
 # walk_append -> the walk's proof, then one proof per criterion it confirms, appended to the run's log by the proof
@@ -492,16 +490,15 @@ whole_run_at_head() {
   }
 
   # THE PROOF VERB (wave-26 T4; REQ-3 AC-3.2, D5). Nothing recorded which code state a test pass
-  # or a review read, so the same code was proved again and again. A proof is one line under
-  # `## SDLC State` — `proved: kind=<kind> head=<40-hex> at=<ISO-UTC> evidence=<record/ path>`
-  # (payload/scripts/lib/proof.sh owns its shape and its reader, `proof_last`) — and what is
+  # or a review read, so the same code was proved again and again. A proof is one `proof` event in
+  # the run's log, `kind= head= evidence=` (payload/scripts/lib/proof.sh owns its shape and its
+  # reader, `proof_last`), and what is
   # unproved is the difference since the head it names. The head is the one the evidence attests
   # (its run header or its reviewed: range, held against the working branch's ref; T14, wave-36 T12),
-  # never an operand. The line goes in through the shared transaction; every refusal below
-  # leaves the plan byte-identical and names its fix. proof.sh is loaded here, for this verb alone, as brief.sh is for task-add and amend:
+  # never an operand. The verb never writes the plan; every refusal below names its fix. proof.sh is loaded here, for this verb alone, as brief.sh is for task-add and amend:
   # the tick never reads it, so it is not one of the libraries every verb needs.
   # pf_append -> the proof the verb registers (PF_EV), appended to the run's log by the proof library's one writer once
-  # the plan's copy is judged; the pending proof every read of the copy took is cleared. 1 with the plan unchanged.
+  # nothing is left to refuse; the pending proof every read before it took is cleared. 1 when it could not be.
   pf_append() {
     if ! proof_event "$PV_PLAN" "${PF_EV[@]}"; then
       die "REFUSED — the ${PF_EV[0]#kind=} proof could not be appended to the run's log of $PV_PLAN; the plan is unchanged. Run proof-add again."
@@ -822,14 +819,13 @@ PF_OTHER_LIST
     # A WALK IS REGISTERED WHOLE BY walk_register: its verdicts read as the critic's, its proof and one proof per
     # criterion it confirms; the plan is not written. The tick's landing of a record row lands the walk row on it.
     if [ "$PF_KIND" = walk ]; then
-      cp "$PV_PLAN" "$PV_NEW"
-      if ! walk_register "$PV_PLAN" "$PV_NEW" "$PF_REAL" "$PF_REL" "$PF_HEAD" "$PV_REPO"; then
+      if ! walk_register "$PV_PLAN" "$PF_REAL" "$PF_REL" "$PF_HEAD" "$PV_REPO"; then
         die "REFUSED — $(clean_whole "$WALK_WHY"), then proof-add walk again. The plan is unchanged."
         exit 1
       fi
-      plan_verb_swap proof-add "the walk proof at $WALK_HEAD" writer
+      walk_append || exit 2
       walk_recorded "$PV_PLAN" "$PF_REL"
-      say "proof-add — kind=walk head=$WALK_HEAD evidence=$PF_REL: written to the run's log, the plan's copy dry-committed first."
+      say "proof-add — kind=walk head=$WALK_HEAD evidence=$PF_REL: written to the run's log."
       say "proof-add — $(walk_said "$PF_REL")"
       exit 0
     fi
@@ -930,32 +926,26 @@ PF_PAIRS_LIST
       [ -z "$PF_RUNAT" ] || PF_EV+=("run=$PF_RUNAT")
       [ -z "$PF_RUNRC" ] || PF_EV+=("rc=$PF_RUNRC")
     fi
-    # THE PROOF IS READ AS STANDING BY EVERY JUDGMENT OF THE COPY BELOW, and appended only once nothing is left to refuse.
+    # THE PROOF IS READ AS STANDING BY EVERY READ BELOW, and appended only once nothing is left to refuse.
     if ! proof_pending "${PF_EV[@]}"; then
       die "REFUSED — the proof's fields hold a | or a line break, which the run's log cannot hold; the plan is unchanged."
       exit 1
     fi
     # A RATED READING DEFERS WHAT THE TABLE DEFERS: one deferral event per finding the table
-    # defers, appended to the run's log once the proof line is in the plan (lib/proof.sh `proof_finding_deferrals`).
+    # defers, appended to the run's log once the proof is (lib/proof.sh `proof_finding_deferrals`).
     # No `check:`: a reader's rating is final.
     PF_FINDS=""; PF_PLANL=""
     if [ "$PF_SEV" = 1 ]; then
       PF_FINDS="$(proof_findings "$PF_REAL")"; PF_PLANL="$(proof_finding_lines "$PF_REL" "$PF_FINDS")"
     fi
-    cp "$PV_PLAN" "$PV_NEW"
-    # A REVIEW THAT FOLLOWS THE BUILD GOES BACK TO WAITING (wave-26 T14; D10). The active review
-    # row reading `live:head` (`units_live_rows`, the kind default included) whose `Files` hold
-    # this evidence returns to `pending` in the same write — that row alone: the proof of another
-    # review, the settled final one among them, leaves a live pass still running where it is
-    # (wave-26 T46; review 10 F3). A READING RETURNS THE ROW CARRYING ITS QUESTION (wave-27 T10;
-    # D4): handed --question, `units_live_rows` finds a read row by the question it read, not by
-    # its Files, so a second pass written under a new name still returns its row, and that row
-    # alone; a bare row is still found by its Files. The evidence is handed in both spellings, from the docs root
-    # (`record/…`) and from the repository, so a Files cell in either matches. It returns with
-    # its agent, worktree and base cells cleared: the row is one row across every pass, each pass
-    # its own launch: one the run's log holds is taken back there too, once the plan is swapped
-    # (lib/units.sh `units_dispatch_back`), and the next launch appends its own. The next landing past this proof makes it
-    # ready again (units.sh `live_head`).
+    # A REVIEW THAT FOLLOWS THE BUILD GOES BACK TO WAITING. The active review row reading `live:head` (`units_live_rows`,
+    # the kind default included) whose `Files` hold this evidence returns to pending: that row alone, so the proof of
+    # another review leaves a live pass running where it is. A READING RETURNS THE ROW CARRYING ITS QUESTION: handed
+    # --question, `units_live_rows` finds a read row by the question it read, not by its Files; a bare row is still found
+    # by its Files, the evidence handed in both spellings, from the docs root and from the repository. The row is one row
+    # across every pass, each pass its own launch, and a launch is returned by its one cancel in the run's log
+    # (lib/units.sh `units_dispatch_back`), appended after the proof; the plan is never written, so a row whose launch the
+    # log does not hold is not returned here. The next landing past this proof makes it ready again (units.sh `live_head`).
     # A READ ROW RETURNS ONLY TO ITS OWN READER, AND ONLY WHOLE (wave-27 T43; review pass 17 F3):
     # handed --reader, `units_live_rows` names a read row only when its agent cell is this reader
     # and every question it carries now has a reading at this head; until then it stays active and
@@ -966,22 +956,13 @@ PF_PAIRS_LIST
     if [ "$PF_KIND" = review ]; then
       PF_DOCREL="$(docs_root "$PV_REPO")"
       case "$PF_DOCREL" in "$PV_REPO"/*) PF_DOCREL="${PF_DOCREL#"$PV_REPO"/}/$PF_REL" ;; *) PF_DOCREL="" ;; esac
-      [ -z "$PF_QUESTION" ] || PF_HELD="$(units_live_rows "$PV_NEW" --question "$PF_QUESTION" 2>/dev/null \
+      [ -z "$PF_QUESTION" ] || PF_HELD="$(units_live_rows "$PV_PLAN" --question "$PF_QUESTION" 2>/dev/null \
         | awk -F'\t' '$2 == "review" && $3 == "active" { printf "%s%s", (n++ ? " " : ""), $1 }')"
-      for _pf_id in $(units_live_rows "$PV_NEW" ${PF_QUESTION:+--question "$PF_QUESTION" --reader "$PF_READER"} "$PF_REL" $PF_DOCREL 2>/dev/null | awk -F'\t' '$2 == "review" && $3 == "active" { print $1 }'); do
-        _pf_cells=(status=pending agent=—)
-        units_has_column "$PV_NEW" worktree && _pf_cells+=(worktree=—)
-        units_has_column "$PV_NEW" base && _pf_cells+=(base=—)
-        if ! units_table_cells "$PV_NEW" set tasks "$_pf_id" "${_pf_cells[@]}" > "$PV_NEW.back" 2>/dev/null || [ ! -s "$PV_NEW.back" ]; then
-          rm -f "$PV_NEW.back"
-          die "REFUSED — review row $_pf_id could not be returned to pending in $PV_PLAN; the plan is unchanged."
-          exit 1
-        fi
-        mv "$PV_NEW.back" "$PV_NEW"
+      for _pf_id in $(units_live_rows "$PV_PLAN" ${PF_QUESTION:+--question "$PF_QUESTION" --reader "$PF_READER"} "$PF_REL" $PF_DOCREL 2>/dev/null | awk -F'\t' '$2 == "review" && $3 == "active" { print $1 }'); do
         PF_BACK="${PF_BACK:+$PF_BACK }$_pf_id"
         PF_HELD=" $PF_HELD "; PF_HELD="${PF_HELD/ $_pf_id / }"; PF_HELD="${PF_HELD# }"; PF_HELD="${PF_HELD% }"
       done
-      [ -z "$PF_HELD" ] || PF_HELD="$(units_rows "$PV_NEW" 2>/dev/null | awk -F'\t' -v ids=" $PF_HELD " -v r="$PF_READER" \
+      [ -z "$PF_HELD" ] || PF_HELD="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v ids=" $PF_HELD " -v r="$PF_READER" \
         'index(ids, " " $1 " ") && $5 == r { printf "%s%s", (n++ ? " " : ""), $1 }')"
     fi
     # A REVIEW PROOF THAT RETURNS NO LIVE ROW WHILE ONE IS ACTIVE SAYS SO (wave-26 T51; review 14
@@ -992,20 +973,21 @@ PF_PAIRS_LIST
     # 10 F3), and the final review's proof is one such. With no live review active it says nothing.
     PF_NONE=""
     if [ "$PF_KIND" = review ] && [ -z "$PF_BACK" ] && [ -z "$PF_HELD" ]; then
-      _pf_live=" $(units_live_rows "$PV_NEW" 2>/dev/null | awk -F'\t' '$2 == "review" && $3 == "active" { printf "%s ", $1 }')"
-      [ "$_pf_live" = " " ] || PF_NONE="$(units_rows "$PV_NEW" 2>/dev/null | awk -F'\t' -v ids="$_pf_live" '
+      _pf_live=" $(units_live_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' '$2 == "review" && $3 == "active" { printf "%s ", $1 }')"
+      [ "$_pf_live" = " " ] || PF_NONE="$(units_rows "$PV_PLAN" 2>/dev/null | awk -F'\t' -v ids="$_pf_live" '
         index(ids, " " $1 " ") { printf "%s%s (%s)", (n++ ? ", " : ""), $1, $9 }')"
     fi
-    PV_ACT=pf_append; PV_UNDONE="${PF_BACK:+$PF_BACK back to pending}"
-    plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
+    pf_append || exit 2
     if [ -n "$PF_PLANL" ] && ! proof_finding_deferrals "$PV_PLAN" "$PF_REL" "$PF_FINDS"; then
       die "proof-add — the $PF_KIND proof at $PF_HEAD is written, and its deferrals could not be appended to the run's log of $PV_PLAN: the findings the table defers are not deferred."
       exit 2
     fi
-    for _pf_id in $PF_BACK; do
+    _pf_ids="$PF_BACK"; PF_BACK=""
+    for _pf_id in $_pf_ids; do
       _pf_nm="$(printf '%s\n' "$PF_LIVE" | awk -F'\t' -v id="$_pf_id" '$1 == id && $2 == "active" { print $3 }')"
-      [ -z "$_pf_nm" ] || units_dispatch_back "$PV_PLAN" "$_pf_id" "$_pf_nm" \
-        || say "proof-add — $_pf_id is back to pending in the plan, and its launch as $_pf_nm could not be taken back in the run's log: once $_pf_nm is stopped, bash ${HOOK_DIR}/stop-orders.sh stopped $_pf_nm takes it back."
+      [ -n "$_pf_nm" ] || continue
+      if units_dispatch_back "$PV_PLAN" "$_pf_id" "$_pf_nm"; then PF_BACK="${PF_BACK:+$PF_BACK }$_pf_id"
+      else say "proof-add — $_pf_id still reads running: its launch as $_pf_nm could not be taken back in the run's log; once $_pf_nm is stopped, bash ${HOOK_DIR}/stop-orders.sh stopped $_pf_nm takes it back."; fi
     done
     # A FAILING READING IS THE PERSON'S TO WAIVE FROM THE MOMENT IT IS RECORDED: fix it, or waive the question. The ask
     # opens here, under the key the judge and the waive verb use, rather than waiting for an advance or a commit to be
@@ -1018,7 +1000,7 @@ PF_PAIRS_LIST
       esac
     fi
     PF_FIELDS=""; [ -z "$PF_QUESTION" ] || PF_FIELDS=" question=$PF_QUESTION reader=$PF_READER result=$PF_RESULT scope=$PF_SCOPE ($PF_ROLE)"
-    say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS${PF_OWED:+ owed=$PF_OWED}: written to the run's log${PF_BACK:+; $PF_BACK back to pending in $PV_PLAN}; the plan's copy dry-committed first."
+    say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS${PF_OWED:+ owed=$PF_OWED}: written to the run's log${PF_BACK:+; $PF_BACK back to pending, its launch taken back there}."
     [ -z "$PF_OWED" ] || say "proof-add — the whole run left $PF_OWED red: each is owed until a later landing runs it green (a fix row), or proof-add inherited <suite> finds it red at the base too."
     [ -z "$PF_PLANL" ] || printf '%s\n' "$PF_PLANL" | while IFS= read -r _pf_l; do say "proof-add — $_pf_l (in the run's log)"; done
     [ -n "$PF_HELD" ] && say "proof-add — $PF_HELD stays active until every question it carries is read at ${PF_HEAD:0:12}; it returns to pending on that review."
