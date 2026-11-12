@@ -4130,7 +4130,7 @@ validate_matrix() {
   head="$(proof_branch_head "$PLAN" "$BIONIC_ROOT" 2>/dev/null)" || head=""
   if ! matrix_load "$PLAN" "$head"; then
     block_matrix "the run's facts could not be read" "run the commit again" \
-      "the reader could not fold this run's log, so no criterion's state can be judged." \
+      "the run's facts could not be read, so no criterion's state can be judged." \
       "run the commit again; if it is refused the same way, the run's log or its record cannot be read: bash payload/scripts/reader.sh <plan> step names why."
   fi
   if [ -z "$MATRIX_CELLS" ]; then

@@ -112,7 +112,7 @@ TOOL_NAME=$(_jq '.tool_name')
 # wall still admits the four repair commands.
 # `brief.sh` is the one reader of a dispatch's contract lines; it brings `cmd-class.sh` and
 # `suite.sh` in itself, so this hook names only brief.sh and lets that source do the pulling.
-BIONIC_LIB_WANT="context.sh fold.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh brief.sh prose.sh"
+BIONIC_LIB_WANT="context.sh fold.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh brief.sh prose.sh dispatch.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -212,6 +212,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "dispatch-preflight"; f
 . "$BIONIC_LIB/context.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/refuse.sh"
+# Every refusal's words, said by key (lib/dispatch.sh): sourced up here so the deadline's handler has
+# them before its timer is armed.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/dispatch.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
 # shellcheck source=/dev/null
@@ -333,15 +337,7 @@ DP_DEADLINE_PID=""
 dp_deadline_hit() {
   [ "$DP_DEADLINE_LIVE" = 1 ] || return 0
   DP_DEADLINE_LIVE=0
-  refuse deny dispatch "the wall ran out of time" "dispatch again" \
-"The dispatch wall had not finished ${DP_DEADLINE_S} s after it started. The harness cancels a hook at its
-registration's timeout and admits the call, so this wall refuses first.
-
-Roster:  ${ROSTER_FILE:-(not reached)}
-No row was written for this launch, and nothing was spawned.
-
-Fix: dispatch again. If it recurs the machine is overloaded: wait for the running suites to finish,
-     or run /bionic:doctor."
+  dispatch_refuse deny deadline "$DP_DEADLINE_S" "${ROSTER_FILE:-}"
 }
 dp_deadline_stop() {
   [ -z "$DP_DEADLINE_PID" ] || kill "$DP_DEADLINE_PID" 2>/dev/null
@@ -422,20 +418,6 @@ esac
 
 # ---------- this session is engaged: this IS a decision ----------
 
-deny() {  # <reason line>...
-  # THE FRAME KEEPS ITS PARAMETERS AND LOSES ITS VOICE (task 13, D-1). Its fixed
-  # headline and its Fix line are `detail` now; the caller passes the ruled fact and fix.
-  local fact="$1" fix="$2"; shift 2
-  local reasons="" line
-  for line in "$@"; do reasons="${reasons}${line}
-"; done
-  refuse exit2 dispatch "$fact" "$fix" "${reasons}
-This subagent start needs a working environment, and a wave is active.
-
-Fix: ${PREFLIGHT_CMD}
-Then retry the dispatch."
-}
-
 STATE_FILE="$BIONIC_ROOT/.bionic/tmp/preflight-${BIONIC_SID}.state"
 
 # A symlink ANYWHERE on the attestation path is never followed — a hostile repo
@@ -471,14 +453,11 @@ attested() {
   [ -n "$sid" ] && [ "$sid" = "$BIONIC_SID" ]
 }
 
-# ================================ THE FINDINGS LIST, DECLARED BEFORE THE FIRST ARM (D3)
+# ================================ THE FINDINGS LIST, OPEN BEFORE THE FIRST ARM
 #
-# WHY IT IS UP HERE. Every wall below this line records into it, and the first of them —
-# the arming wall — is two hundred lines above where this list used to be declared. It was
-# declared beside the brief-shape arms because they were the only callers; wave-14 REQ-8
-# made the state arms callers too, so the declaration moves to the top of the range it
-# serves. The SPENDING point has not moved up with it: `dp_refuse_findings` is defined
-# below the last arm and called once there, above the journal.
+# Every wall below this line records its fault into one pool, lib/dispatch.sh's: `dispatch_finding
+# <key> <facts>` records one fault and never exits, and `dispatch_refuse_findings`, called once
+# below the last arm and above the journal, spends it as one refusal.
 #
 # WHAT IS ABOVE IT, AND STAYS ABOVE IT. The attestation arm (the combined preflight, next
 # section) refuses where it stands, first and alone. A repo that cannot be written, or a
@@ -487,43 +466,11 @@ attested() {
 # list that mixed its verdict with theirs would be reporting facts it had just been told
 # not to trust. Relevance, the loader, the root and the engagement switch are above it for
 # the same kind of reason and are not refusals at all.
-DP_FINDING_N=0
-DP_FAULT_LINES=""
-DP_FIRST_FACT=""
-DP_FIRST_FIX=""
-DP_FIRST_DETAIL=""
-
-# dp_finding <fact> <fix> <detail> — record one fault. NEVER exits.
-#
-# THE FIRST FAULT CONTRIBUTES NO LINE OF ITS OWN, and that is the line budget in one
-# sentence (AC-8.3). `refuse` renders the first fault as the user line — `bionic: dispatch
-# refused — <fact> (<fix>)` — at the top of the model's wire, so a list that repeated it
-# would spend a line saying what the reader just read. Faults two and up cost exactly one
-# line each, in the same `<fact> (<fix>)` shape, which is what "one line per additional
-# fault" means and what tests/dispatch-preflight-3.test.sh §three-arms measures.
-#
-# THE `<detail>` OF EVERY FAULT IS STILL PASSED and still carried, because a LONE fault
-# refuses in its arm's own words with its own detail block — byte for byte what that arm
-# emitted before this list existed. It is the SEVERAL-fault wire that drops the details:
-# a reader with three faults met three lectures before a single fix (wave-13, D11).
-dp_finding() {  # <fact> <fix> <detail> — record one fault. NEVER exits.
-  DP_FINDING_N=$((DP_FINDING_N + 1))
-  if [ "$DP_FINDING_N" -eq 1 ]; then
-    DP_FIRST_FACT="$1"; DP_FIRST_FIX="$2"; DP_FIRST_DETAIL="$3"
-    return 0
-  fi
-  DP_FAULT_LINES="${DP_FAULT_LINES}$1 ($2)
-"
-}
 
 # THE UNREADABLE BOUND PLAN, the first finding (wave-20 T1, REQ-2, D2). Resolved at the run
 # predicate above, recorded here because this is where the pool starts.
 if [ -n "${DP_PLAN_UNREADABLE:-}" ]; then
-  dp_finding "the bound plan cannot be read" "restore read access to the plan" \
-    "The plan this session is bound to exists and cannot be read: ${DP_PLAN_UNREADABLE}
-Approval and the writer budget are read out of it, so neither can be measured. It is not
-closed and not gone, so no other plan is read in its place.
-Fix: restore read access (chmod u+r on the plan, u+rx on its folder), then dispatch."
+  dispatch_finding plan-unreadable "$DP_PLAN_UNREADABLE"
 fi
 
 # ==================================================== THE COMBINED PREFLIGHT
@@ -562,9 +509,7 @@ if ! attested; then
   [ -f "$PROBE_SCRIPT" ] || PROBE_SCRIPT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/preflight-probe.sh"
 
   if [ ! -f "$PROBE_SCRIPT" ]; then
-    deny "this repo has no environment attestation" "run the preflight probe" \
-      "No environment attestation was found for this repo, and the probe that writes one" \
-         "could not be located (looked beside this gate and under the Claude config directory)."
+    dispatch_refuse exit2 attest-none "$PREFLIGHT_CMD"
   fi
 
   # Run it AT THE PINNED ROOT and with THIS dispatch's session key, rather than
@@ -581,14 +526,7 @@ if ! attested; then
     # knows WHICH check failed, and an operator handed "something went wrong" has
     # to run it again by hand to learn anything. Indented so the quotation is
     # visibly the probe speaking.
-    {
-      refuse exit2 dispatch "the environment check ran and did not pass" "fix what the probe named" \
-        "The check was run automatically for this session and did not pass:
-$(printf '%s\n' "$PROBE_OUT" | sed 's/^/    /')
-
-A fleet inherits this environment and dies collectively if it is wrong.
-Fix the failure above, then retry the dispatch (or re-run by hand: ${PREFLIGHT_CMD})."
-    }
+    dispatch_refuse exit2 attest-failed "$PROBE_OUT" "$PREFLIGHT_CMD"
   fi
 
   # Announced, never silent. §4 bans printing CHECK DETAIL on the allow path; this
@@ -661,49 +599,11 @@ fi
 POKER_SCRIPT="${HOOK_DIR}/session-poker.sh"
 [ -f "$POKER_SCRIPT" ] || POKER_SCRIPT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/session-poker.sh"
 
-# THE TWO ARMS HAVE DIFFERENT REMEDIES, so the Fix block is an argument rather than a
-# constant in the frame (wave-12 T2, spec D4).
-#
-# NEVER ARMED asks for one act and it is the CronCreate. The stamp is not a hand step any
-# more: hooks/engage.sh runs `session-poker.sh arm` itself, with the session id and the
-# project root it already holds, immediately after writing the engagement marker (T4). A
-# refusal that still ordered `session-poker.sh arm` would be telling the model to do work
-# the machine has already been given — principle P-A at its own wall — and would teach the
-# hand step back into the next brief that quotes it.
-#
-# ARMED AND STOPPED FIRING is the other half and keeps both: the clock is what died, the
-# stamp is stale rather than absent, and re-engaging is not what an operator does about a
-# cron job that stopped. `arm` is offered there because a fresh stamp is what proves the
-# revived clock is landing.
-PATROL_FIX_NEVER="Fix: CronList, then CronCreate a RECURRING session job at the interval \`bash ${POKER_SCRIPT} interval\`
-  reports, carrying the patrol prompt (skills/canonical-sdlc/SKILL.md §Dispatch). That is the
-  one half this model owns. The stamp is the other half and it is written for you:
-  hooks/engage.sh arms it as the session engages canonical-sdlc, so a session that engaged
-  has one. Engage the skill again in this session if it is still missing."
-
-PATROL_FIX_STOPPED="Fix: re-arm the Patrol — look first, then the clock, then the stamp:
-  1. CronList — is this session's Patrol job still listed?
-  2. ONLY IF it is ABSENT: CronCreate a RECURRING session job at the interval
-     \`bash ${POKER_SCRIPT} interval\` reports, carrying the patrol prompt
-     (skills/canonical-sdlc/SKILL.md §Dispatch).
-  3. bash ${POKER_SCRIPT} arm"
-
-# RECORDS, NEVER EXITS (wave-14 REQ-8, D3). The frame is unchanged down to the byte — a
-# lone Patrol fault still refuses on `exit2` with exactly this text, because that is what
-# `dp_refuse_findings` does with a list of one. What changed is that a dispatch with an
-# unarmed Patrol AND a full budget AND a broken label now learns all three at once.
-patrol_deny() {  # <fact> <fix> <fix-block> <state line>...
-  local fact="$1" fix="$2" fixblock="$3"; shift 3
-  local reasons="" line
-  for line in "$@"; do reasons="${reasons}${line}
-"; done
-  dp_finding "$fact" "$fix" "${reasons}
-A dispatch with no Patrol behind it is an agent nobody is waiting on.
-
-${fixblock}
-
-Then retry the dispatch."
-}
+# THE TWO ARMS HAVE DIFFERENT REMEDIES (lib/dispatch.sh `patrol-never` and `patrol-stopped`). NEVER
+# ARMED asks for the CronCreate alone: hooks/engage.sh runs `session-poker.sh arm` itself as the
+# session engages, so a refusal that ordered `arm` would hand the model work the machine already
+# has. ARMED AND STOPPED FIRING keeps both halves: the clock died, and a fresh stamp is what proves
+# the revived clock is landing. Both record into the pool and the wall carries on.
 
 # THE INTERVAL IS A THRESHOLD, NOT A PRECONDITION (critic C-2, W5). This block used to
 # skip BOTH arms when the interval could not be read — so one unparseable line in
@@ -749,12 +649,7 @@ if [ "$DP_PATROL" = no ]; then
   PATROL_STAMPED=not-owed
 elif [ -L "$PATROL_STAMP_FILE" ] || [ ! -f "$PATROL_STAMP_FILE" ]; then
   PATROL_STAMPED=0
-  patrol_deny "no Patrol stamp exists for this session" "CronCreate the Patrol job" \
-    "$PATROL_FIX_NEVER" \
-    "There is no Patrol stamp for this session at:" \
-    "    ${PATROL_STAMP_FILE}" \
-    "The Patrol was never armed on this session (a symbolic link at that path is never" \
-    "followed and reads the same way), so nothing is watching the fleet this dispatch joins."
+  dispatch_finding patrol-never "$POKER_SCRIPT" "$PATROL_STAMP_FILE"
 fi
 
 # The staleness half. Its threshold may be the project's or the poker's default; what it
@@ -779,10 +674,6 @@ else
   # is the one place that arithmetic lives. Past it the stamp is worth asking the
   # transcript about; it is not, on its own, a finding.
   PATROL_WINDOW="$(patrol_fire_window "$PATROL_INTERVAL")" || PATROL_WINDOW=""
-  case "$PATROL_INTERVAL_SOURCE" in
-    default) PATROL_INTERVAL_WORDS="the poker's ${PATROL_INTERVAL}s default interval (this project's configured value could not be read)" ;;
-    *)       PATROL_INTERVAL_WORDS="the ${PATROL_INTERVAL}s poker-interval this project configures" ;;
-  esac
 
   PATROL_MTIME=$(stat -f %m "$PATROL_STAMP_FILE" 2>/dev/null \
                  || stat -c %Y "$PATROL_STAMP_FILE" 2>/dev/null)
@@ -823,31 +714,11 @@ else
             # death notice names it (payload/scripts/lib/stop.sh, stop_patrol_revive).
             case "$PATROL_WHY" in
               *"marker turn"*)
-                dp_finding "the Patrol fires but never ticks" "run the tick; replace the job" \
-"The Patrol was armed on this session and its job still fires, but it never ticks.
-Its last tick stamp is ${PATROL_AGE}s old, and since then ${PATROL_WHY%% marker turn*} Patrol marker turn(s)
-have run on this session without the tick stamping — the job's prompt carries the marker
-but does not run \`bash ${POKER_SCRIPT} tick\`, so nothing has decided anything since:
-    ${PATROL_STAMP_FILE}
-
-A dispatch with no Patrol behind it is an agent nobody is waiting on.
-
-Fix: repair the job, not the clock:
-  1. Run the tick now: bash ${POKER_SCRIPT} tick
-  2. CronList, and CronDelete this session's Patrol job.
-  3. CronCreate a RECURRING session job at the interval \`bash ${POKER_SCRIPT} interval\`
-     reports, carrying exactly the prompt \`bash ${POKER_SCRIPT} prompt\` prints.
-
-Then retry the dispatch."
+                dispatch_finding patrol-silent "$PATROL_AGE" "${PATROL_WHY%% marker turn*}" "$POKER_SCRIPT" "$PATROL_STAMP_FILE"
                 ;;
               *)
-                patrol_deny "the Patrol was armed and stopped firing" "re-arm the Patrol, both halves" \
-                  "$PATROL_FIX_STOPPED" \
-                  "The Patrol was armed on this session and has stopped firing." \
-                  "Its last stamp is ${PATROL_AGE}s old, and this session has since sat idle for" \
-                  "${PATROL_GAP}s in one stretch with no tick in it — past the ${PATROL_WINDOW}s fire window," \
-                  "which is ${PATROL_INTERVAL_WORDS} plus the scheduler's jitter:" \
-                  "    ${PATROL_STAMP_FILE}"
+                dispatch_finding patrol-stopped "$POKER_SCRIPT" "$PATROL_AGE" "$PATROL_GAP" "$PATROL_WINDOW" \
+                  "$PATROL_INTERVAL" "$PATROL_INTERVAL_SOURCE" "$PATROL_STAMP_FILE"
                 ;;
             esac
             ;;
@@ -914,15 +785,7 @@ DP_SUBAGENT=$(_jq '.tool_input.subagent_type')
 # spelling is the retired role; a bare `reviewer` may be a consumer's own agent and is not judged.
 case "$DP_SUBAGENT" in
   bionic:reviewer)
-    dp_finding "bionic:reviewer is retired (1.14.0)" "dispatch bionic:critic" \
-      "The structure reviewer is not a role any more, so a brief cannot name it:
-    Role: ${DP_SUBAGENT}
-
-Fix: structure is the critic's question; dispatch bionic:critic. Its Questions: line is the
-set the plan's rigor deals it, and its checks (reuse and one site per concept among them) are
-pushed to it at start.
-
-Then retry the dispatch." ;;
+    dispatch_finding reviewer-retired "$DP_SUBAGENT" ;;
 esac
 # THE CONTRACT IS THE BRIEF FILE THE PROMPT NAMES, WHEN IT NAMES ONE. `brief_named` reads the prompt's first
 # line for a `briefs/<name>.md` path and `brief_file_read` (lib/brief.sh) reads that file and its render mark.
@@ -976,54 +839,16 @@ if ! role_is_readonly "$DP_SUBAGENT" && [ -z "$DP_PROTOTYPE" ] && [ -n "$PLAN" ]
   fi
   [ "$DP_APPROVED" = unreadable ] || DP_CURRENT="$_FILL_CURRENT_VALUE"
   if [ "$DP_APPROVED" = place ]; then
-    dp_finding "the run's facts could not be read" "dispatch again" \
-      "Role: ${DP_SUBAGENT:-(none given, so general-purpose)}
-Plan: ${PLAN}
-The run's step and its Step-3 approval could not be read (lib/proof.sh proof_step_held), so whether
-this plan is approved is not known. A writer is admitted only on an approval this hook has read.
-
-Fix: dispatch again; the fold's own line on stderr names why it failed."
+    dispatch_finding facts-unread "$DP_SUBAGENT" "$PLAN"
   fi
   if [ "$DP_APPROVED" = unreadable ]; then
-    dp_finding "the approval check lib/fill.sh cannot be loaded" "reinstall the plugin" \
-      "Role: ${DP_SUBAGENT:-(none given, so general-purpose)}
-Plan: ${PLAN}
-Lookup: fill_plan_approved, from ${BIONIC_LIB:-<no library directory>}/fill.sh — not there, or it
-        does not define the function, so whether this plan is approved cannot be read.
-
-A writer is admitted only on an approval this hook has read; one it cannot read is no approval.
-Before approval only a read-only role dispatches: ${ROLE_READONLY_SET}.
-
-Fix: reinstall the plugin (claude plugin install bionic@bionic) so its scripts/lib carries
-     fill.sh again, then retry the dispatch."
+    dispatch_finding fill-missing "$DP_SUBAGENT" "$PLAN" "${BIONIC_LIB:-}" "$ROLE_READONLY_SET"
   elif [ -z "$DP_APPROVED" ]; then
-    dp_finding "the plan this writer builds is unapproved" "get the Step-3 plan approved" \
-      "Role: ${DP_SUBAGENT:-(none given, so general-purpose)}
-Plan: ${PLAN}
-Step: ${DP_CURRENT:-(unreadable)} — writers run against an APPROVED plan, and nothing recorded one.
-
-A writer is the first act of a plan that cannot be taken back by closing a file. Before
-approval only a read-only role dispatches: ${ROLE_READONLY_SET}.
-
-Fix: put the Step-3 card to the user and wait for the literal word 'approved'; then
-     record it under '## SDLC State' in the plan above:
-       approved-by: <user> <ISO-UTC> \"<verbatim reply>\"
-     Silence, a question, or a partial reply is never transcribed as approval.
-
-Then retry the dispatch."
+    dispatch_finding unapproved "$DP_SUBAGENT" "$PLAN" "$DP_CURRENT" "$ROLE_READONLY_SET"
   fi
 fi
 if ! role_is_readonly "$DP_SUBAGENT" && [ -n "$DP_UNBOUND_PLAN" ]; then
-  dp_finding "this session is bound to no run" "bind it, or write its plan" \
-    "Role: ${DP_SUBAGENT:-(none given, so general-purpose)}
-$(run_unbound_advisory "$DP_UNBOUND_PLAN")
-
-A writer is the first act of a plan that cannot be taken back by closing a file, and this
-session has no plan of its own: the run above is the root's newest, announced and never
-acted on. Before approval only a read-only role dispatches: ${ROLE_READONLY_SET}.
-
-Fix: bind this session to the run it is working, or write this session's own plan (the
-     governing-skill hook binds it on the first write), then retry the dispatch."
+  dispatch_finding unbound "$DP_SUBAGENT" "$(run_unbound_advisory "$DP_UNBOUND_PLAN")" "$ROLE_READONLY_SET"
 fi
 
 # ==================================== A ROW THAT READS AN APPROVAL WAITS FOR IT (wave-26 T13)
@@ -1082,22 +907,7 @@ dp_row_reader() {
     || DP_BOUND_REC="$(printf '%s\n' "$rows" | awk -F'\t' -v id="$DP_BOUND_ROW" '$1 != "" && $1 == id { print; exit }')"
   if [ -z "$DP_ROW" ] && [ -n "$DP_NAME_AMBIG" ]; then
     DP_BOUND_ROW=""; DP_BOUND_REC=""
-    _ar_rest="${DP_NAME_ROWS#*$'\n'}"
-    dp_finding "the name matches rows $(bionic_trunc "$DP_NAME_ROW" 11), $(bionic_trunc "${_ar_rest%%$'\n'*}" 11)" \
-      "add Row: <id>" \
-      "The agent's name matches more than one row of the bound plan, and the brief has no Row: to say which:
-    Dispatch: ${DP_ROW_NAME}
-    Rows:     $(printf '%s' "$DP_NAME_ROWS" | tr '\n' ' ')
-    Plan:     ${PLAN}
-
-Every wall reads one row per dispatch, and the launch record records none for such a name.
-
-Fix: add a line of its own to the brief naming the row this agent runs, as the plan's ## Tasks table
-spells it —
-    Row: <id>
-  or name the agent for one row only.
-
-Then retry the dispatch."
+    dispatch_finding name-ambiguous "$DP_ROW_NAME" "$DP_NAME_ROWS" "$PLAN"
   fi
 }
 dp_row_reader
@@ -1114,37 +924,33 @@ if [ -n "$PLAN" ] && [ -n "$DP_BOUND_REC" ]; then
       }
     }')
   if [ -n "$DP_APPROVAL_WAITS" ]; then
-    DP_APPROVALS_HAD=$(awk '
-      /^[[:space:]]*```/ { fence = !fence; next }
-      fence { next }
-      /^## SDLC State/ { st = 1; next }
-      /^## / { st = 0 }
-      st {
-        l = $0; sub(/^[ \t]*-?[ \t]*/, "", l)
-        if (l !~ /^approved[ \t]*:/) next
-        sub(/^approved[ \t]*:[ \t]*/, "", l); split(l, w, /[ \t]+/)
-        if (w[1] != "") printf " %s ", w[1]
-      }' "$PLAN" 2>/dev/null)
+    # WHETHER EACH APPROVAL STANDS IS THE READER'S ANSWER (lib/proof.sh `proof_approved`), the question the
+    # release asks of its own approval, never this plan's lines parsed here: an approval the run's log alone
+    # holds admits, and one recorded as the plan's line is read through the translation of that line. The
+    # answer is taken with its exit; a fold that fails, or a library without the question, refuses by name
+    # and never falls back to the text.
+    if ! declare -F proof_approved >/dev/null 2>&1 && [ -r "${BIONIC_LIB:-}/proof.sh" ]; then
+      # shellcheck source=/dev/null
+      . "$BIONIC_LIB/proof.sh"
+    fi
     while IFS=$'\t' read -r DP_AW_ID DP_AW_NAME; do
       [ -n "$DP_AW_NAME" ] || continue
-      case "$DP_APPROVALS_HAD" in *" $DP_AW_NAME "*) continue ;; esac
-      dp_finding "row ${DP_AW_ID} waits for approval:${DP_AW_NAME}" \
-        "record it with the approve verb" \
-        "Dispatch: ${DP_ROW_NAME:-<unnamed>} (row ${DP_AW_ID} of ${PLAN})
-Reads:    approval:${DP_AW_NAME} — and ## SDLC State carries no 'approved: ${DP_AW_NAME}' line.
-
-An approval is an act of the user. The row waits for it, the ready set does not offer it, and no
-dispatch starts it before the line exists.
-
-Fix: put the decision to the user; on their reply, record it, then retry the dispatch:
-       bash $(refuse_shell_word "$HOOK_DIR/session-poker.sh") approve ${DP_AW_NAME} '<the reply, verbatim>'
-     Silence, a question, or a partial reply is never recorded as approval."
-      # THE PERSON OWES IT (wave-33 T35; AC-2.2, D2): the refusal opens `approve:<name>` on the
-      # person's ledger, the key the approve verb closes, carrying the line printed for it.
-      # Idempotent per key, so a refused dispatch on the same approval again opens nothing new.
+      DP_AW_RC=2
+      if declare -F proof_approved >/dev/null 2>&1; then
+        DP_AW_RC=0; proof_approved "$PLAN" "$DP_AW_NAME" </dev/null || DP_AW_RC=$?
+      fi
+      [ "$DP_AW_RC" -eq 0 ] && continue
+      if [ "$DP_AW_RC" -ne 1 ]; then
+        dispatch_finding approval-unread "$DP_AW_ID" "$DP_AW_NAME" "$DP_ROW_NAME" "$PLAN"
+        continue
+      fi
+      dispatch_finding approval-waits "$DP_AW_ID" "$DP_AW_NAME" "$DP_ROW_NAME" "$PLAN" "$HOOK_DIR"
+      # THE PERSON OWES IT: the refusal opens `approve:<name>` on the person's ledger, the key the approve
+      # verb closes, carrying the line printed for it. Idempotent per key, so a refused dispatch on the same
+      # approval again opens nothing new.
       if declare -F owed_open >/dev/null 2>&1; then
         OWED_ROOT="$BIONIC_ROOT" OWED_SID="$BIONIC_SID" owed_open "approve:${DP_AW_NAME}" "approval: ${DP_AW_NAME}" \
-          "row ${DP_AW_ID} waits for approval:${DP_AW_NAME} (record it with the approve verb)" >/dev/null 2>&1 || :
+          "${DISPATCH_FACT} (${DISPATCH_FIX})" >/dev/null 2>&1 || :
       fi
     done <<DP_AW
 $DP_APPROVAL_WAITS
@@ -1184,15 +990,8 @@ is_agent_context() {
 }
 # [WALL: tests/dispatch-preflight.test.sh]
 if is_agent_context && ! role_is_readonly "$DP_SUBAGENT"; then
-  dp_finding "a subagent may launch only read-only roles" "ask the orchestrator" \
-    "Type: ${DP_SUBAGENT:-(none given, so general-purpose)}
-Caller: $(_jq '.agent_id')${BIONIC_HOOK_CHANNEL:+ (channel ${BIONIC_HOOK_CHANNEL})} $(_jq '.agent_type')
-
-Only the orchestrator dispatches writers. A dispatch made from inside an agent may launch
-one of: ${ROLE_READONLY_SET} — and those cannot launch further.
-
-Fix: launch a read-only role for the help you need, or report back and let the
-     orchestrator dispatch the writer on its own roster."
+  dispatch_finding nested-writer "$DP_SUBAGENT" "$(_jq '.agent_id')" "${BIONIC_HOOK_CHANNEL:-}" "$(_jq '.agent_type')" \
+    "$ROLE_READONLY_SET"
 fi
 
 # ================================================================== THE ROSTER
@@ -1314,18 +1113,7 @@ if ! is_agent_context; then
     LEASE_MAIN=""
     [ -n "$LEASE_COMMON" ] && LEASE_MAIN=$( cd "$LEASE_COMMON/.." 2>/dev/null && pwd -P )
     if [ -n "$LEASE_MAIN" ] && [ "$LEASE_MAIN" != "$LEASE_TOP" ]; then
-      dp_finding "this dispatch came from a worktree" "dispatch from the main checkout" \
-        "    cwd:           ${BIONIC_CWD}
-    worktree:      ${LEASE_TOP}
-    main checkout: ${LEASE_MAIN}
-
-A spawned tree is leased to the writer it was spawned for, and dispatch authority sits
-with the main checkout: the roster this dispatch would be journalled to hangs off
-${LEASE_MAIN}, so a dispatch made here is recorded in one address space by an author
-working in another, and the tree's lease carries no row accounting for the orchestrator.
-
-Fix: dispatch from ${LEASE_MAIN}. A dispatched agent working in its own tree may dispatch
-from there — this refusal is the main thread's alone."
+      dispatch_finding worktree "$BIONIC_CWD" "$LEASE_TOP" "$LEASE_MAIN"
     fi
   fi
 fi
@@ -1577,58 +1365,21 @@ NAMES
     printf '%s\n%s' "$open" "$open_names"
   }
 
-  # budget_writer_rows <roster file> <open names> -> one line per open WRITER row: its name and
-  # the command that closes it. The same `budget_open_writers` that produced the count asks each
-  # name alone, so the rows listed are the rows counted and a read-only row is never one of them.
-  # Run on the refusal path only. The ack command is PRINTED for the orchestrator and never run
-  # here: this gate executes the sweeper on no path, and the suite pins that. The path is
-  # printed as ONE shell word, so a plugin root with a space pastes whole (wave-24 T29, I2).
+  # budget_writer_names <roster file> <open names> -> the open WRITER rows, one name a line. The same
+  # `budget_open_writers` that produced the count asks each name alone, so the rows the refusal lists
+  # are the rows counted and a read-only row is never one of them. Run on the refusal path only. The ack
+  # command each row is printed with is never run here: this gate executes the sweeper on no path. Its
+  # path is passed as ONE shell word, so a plugin root with a space pastes whole.
   DP_ACK_SCRIPT="$(refuse_shell_word "${HOOK_DIR}/session-sweeper.sh")"
-  budget_writer_rows() {
+  budget_writer_names() {
     local f="$1" nm
     while IFS= read -r nm; do
       [ -n "$nm" ] || continue
       [ "$(printf '%s\n' "$nm" | budget_open_writers "$f")" = "1" ] || continue
-      printf '    open: %s — once it has landed, close it: bash %s ack %s\n' \
-        "$nm" "$DP_ACK_SCRIPT" "$(refuse_quote "$nm")"
+      printf '%s\n' "$nm"
     done <<WRITERNAMES
 $2
 WRITERNAMES
-  }
-
-  # FIRST CEILING WINS, STILL (wave-14 REQ-8, D3). The ceilings are readings of
-  # ONE wall and one repair — "land or stand down a row" clears whichever of them fired — so
-  # reporting each would spend a line of the refusal's budget per ceiling to say one thing
-  # several ways (one since wave-28 T9 removed the worktrees arm; wave-26 T8 removed suites). The guard keeps the arm's
-  # pre-REQ-8 behaviour exactly: the first ceiling passed is the one named. What changed is that the wall records instead of exiting, so
-  # the arms after it are read in the same pass.
-  BUDGET_DENIED=""
-  budget_deny() {  # <fact> <the one line naming the resource, its ceiling and its count> [rows]
-    # ONE FIX FOR EVERY ARM (rows 43 and 45): the fact names which ceiling was passed
-    # and the repair is the same act whichever it was. The writer arm adds the rows it counted,
-    # each with the command that closes it (wave-24 T13, D10, AC-6.7).
-    [ -z "$BUDGET_DENIED" ] || return 0
-    BUDGET_DENIED=1
-    local whose="budget: ${PARALLEL_BUDGET}
-  declared by ${PLAN}
-
-That cap is a person's (source=user or source=override): the hand cap verb wrote it, or
-someone typed it. Nothing here raises it; raising it is that person's edit of the line." raise="raise the plan's writers= cap"
-    if [ "$DP_BUDGET_SOURCE" = scale ]; then
-      whose="writers=${DP_BUDGET_WRITERS} is the ${DP_SCALE} scale's writer cap (payload/scripts/lib/scale.sh),
-  read for ${PLAN}, which carries no person's parallel-budget: line
-
-A person's line overrides it: the hand cap verb writes one."
-      raise="write a parallel-budget: writers= line for the plan"
-    fi
-    dp_finding "$1" "land or stand down a row" \
-      "    $2${3:+
-$3}
-
-${whose}
-
-Fix: land or stand down an open row first (\`bash ${HOOK_DIR}/stop-orders.sh
-standdown\` computes the batch), or ask the user to ${raise}."
   }
 
   # THE TRANSCRIPT (spec AC-7, AC-8): the payload's own `transcript_path`, the same
@@ -1653,10 +1404,9 @@ standdown\` computes the batch), or ask the user to ${raise}."
   # A READ-ONLY DISPATCH ASKS FOR NO WRITER SLOT (wave-24 T10, D11): the +1 is a writer's.
   BUDGET_ASK=1
   role_is_readonly "$DP_SUBAGENT" && BUDGET_ASK=0
-  [ $(( BUDGET_OPEN + BUDGET_ASK )) -gt "$B_WRITERS" ] && budget_deny \
-    "this passes the run's writer budget" \
-    "writers: budget=${B_WRITERS} open=${BUDGET_OPEN} with-this-dispatch=$(( BUDGET_OPEN + BUDGET_ASK ))" \
-    "$(budget_writer_rows "$ROSTER_FILE" "$BUDGET_OPEN_NAMES")"
+  [ $(( BUDGET_OPEN + BUDGET_ASK )) -gt "$B_WRITERS" ] && dispatch_finding budget "$B_WRITERS" "$BUDGET_OPEN" \
+    "$(( BUDGET_OPEN + BUDGET_ASK ))" "$(budget_writer_names "$ROSTER_FILE" "$BUDGET_OPEN_NAMES")" "$DP_ACK_SCRIPT" \
+    "$PARALLEL_BUDGET" "$PLAN" "$DP_BUDGET_SOURCE" "$DP_SCALE" "$HOOK_DIR"
 
   # NO SUITES ARM (wave-26 T8; D8, REQ-6 AC-6.3). It refused a dispatch at
   # `claimed + 1 > suites`: a suite booked for every claiming agent's whole life, and one more
@@ -1796,17 +1546,7 @@ if [ -n "$AGENT_NAME" ] && [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; the
     ' "$ROSTER_FILE" 2>/dev/null) || DP_INFLIGHT="open"
   fi
   if [ -n "$DP_INFLIGHT" ]; then
-    dp_finding "that name is in flight" "use the FILL line's name" \
-      "    name: ${AGENT_NAME}   ·   its row on this session's roster: ${DP_INFLIGHT}
-
-A name is an identity here. The stop gate resolves one, \`session-poker.sh adopt\` prints
-one as the message address, and the landing sweep folds this roster to the latest row per
-name — so two agents under one name is one contract, one address and two processes.
-
-Fix: dispatch under the name the Patrol tick's FILL line printed for this task. It derives
-one that is free: the task id, or \`<id>-r<n>\` when that id has already had a run. You never
-choose a name yourself. If this row is finished, land it: the Patrol's ack, taken once the
-agent is gone, frees the name — a landing marker alone does not."
+    dispatch_finding in-flight "$AGENT_NAME" "$DP_INFLIGHT"
   fi
 fi
 
@@ -1919,7 +1659,7 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 #
 # SO EVERYTHING BELOW THE ATTESTATION POOLS. The arming wall, the approval checkpoint, the
 # lease wall, the budget, the name-in-flight arm and the five brief-shape arms
-# all call `dp_finding` and carry on. Principle P-A reads the same way
+# all call `dispatch_finding` and carry on. Principle P-A reads the same way
 # at a wall as at a precondition: where the machine already has the facts, the machine
 # reports them; asking the model to rediscover them one round trip at a time is a chore on
 # the normal path.
@@ -1962,7 +1702,7 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 #
 # THE THREE ENVIRONMENT SITES STAY ON `exit2`, and their audience is why: the loader
 # fail-open (a raw `exit 2` at the top of this file, before `refuse` is even loaded), the
-# missing probe (`deny()` → `refuse exit2`) and the probe that ran and failed. Their
+# missing probe (`dispatch_refuse exit2 attest-none`) and the probe that ran and failed. Their
 # subject is the machine, not the brief — a missing library, an absent probe, a failing
 # dependency — and the one who fixes a machine is the human at it, so the detail goes to
 # BOTH readers on the one wire that paints it to the user (`detail_to_user=yes`). They are
@@ -1973,21 +1713,6 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 # to stdout on the way here (every other message in this hook is on stderr, deliberately),
 # and this call still must sit above the journal, because a refused dispatch that exits 0
 # is exactly the shape that would otherwise be recorded as a launch.
-
-# dp_refuse_findings — emit the whole list as ONE refusal and exit, or return having done nothing at all.
-# Called once, after the last arm; `refuse` owns the exit, so a caller cannot fall through it into the
-# journal with findings outstanding. ONE finding and SEVERAL both refuse on `deny`, so the exit status never
-# depends on the fault count. ONE carries its arm's own detail; SEVERAL carry one `<fact> (<fix>)` line per
-# fault after the first, which the user line already names, and a pointer: no rationale per fault, since
-# a reader with three faults should meet three fixes, not three lectures.
-dp_refuse_findings() {
-  [ "$DP_FINDING_N" -gt 0 ] || return 0
-  if [ "$DP_FINDING_N" -eq 1 ]; then
-    refuse deny dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" "$DP_FIRST_DETAIL"
-  fi
-  refuse deny dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" \
-    "${DP_FAULT_LINES}See skills/canonical-sdlc/dispatch.md §Dispatch for why each line is required."
-}
 
 # ========================================================= THE CONTAINMENT WALL
 # (Step-6 review S-2.)
@@ -2058,18 +1783,7 @@ if [ -n "$C_DELIVERABLE" ]; then
   D_ABS=$(resolve_in_repo "$C_DELIVERABLE")
   case "$D_ABS" in
     "$BIONIC_ROOT"/*) : ;;
-    *)
-      _dp_detail="    ${C_DELIVERABLE}
-  resolves to ${D_ABS}, which is not under ${BIONIC_ROOT}.
-
-The landing check stats — and, for a directory, walks — whatever this names,
-on every stop of the agent that owns it. It must be a path inside this repo.
-
-Fix: name a repo-relative artifact path in the brief —
-    Expected artifact: .bionic/docs/record/my-task-notes.md
-
-Then retry the dispatch."
-      dp_finding "the deliverable is outside this repository" "name a path inside the repo" "$_dp_detail"
+    *) dispatch_finding deliverable-outside "$C_DELIVERABLE" "$D_ABS" "$BIONIC_ROOT"
       ;;
   esac
 fi
@@ -2089,43 +1803,17 @@ fi
 # path in front (`.worktrees/<tree>/lib/try.sh`). The faults are pooled like every other arm's.
 # [WALL: tests/dispatch-preflight-5.test.sh §PROTOTYPE]
 dp_prototype_confine() {
-  local rec_root="$BIONIC_ROOT/.bionic/docs/record" dr tree_line tree="" mark="" files p abs rel why
-  local first="" first_why="" refused="" n=0
-  if [ -n "$DP_ROW" ]; then
-    dp_finding "a prototype owns no plan row; it names Row: $(bionic_trunc "$DP_ROW" 11)" "drop Row:" \
-      "    Row: ${DP_ROW}
-
-A Kind: prototype dispatch answers a design question with a throwaway and owns no row of the plan:
-nothing it writes ships, so no row waits on it and no matrix row is discharged by it.
-
-Fix: take the Row: line off the brief. Work a row owns is dispatched without Kind: prototype, after
-the plan is approved.
-
-Then retry the dispatch."
-  fi
+  local rec_root="$BIONIC_ROOT/.bionic/docs/record" dr tree_line tree="" mark="" files p abs rel why seen=""
+  local refused=""
+  [ -z "$DP_ROW" ] || dispatch_finding proto-row "$DP_ROW"
   tree_line="$(brief_field "$DP_CONTRACT" tree)"
   if [ -n "$tree_line" ]; then
     tree="$(resolve_in_repo "$tree_line")"
     { declare -F worktree_marker >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/worktree.sh" ] && . "$BIONIC_LIB/worktree.sh"; }; } >/dev/null 2>&1
     [ -f "$tree/.git" ] && declare -F worktree_marker >/dev/null 2>&1 && mark="$(worktree_marker "$tree")" || mark=""
     if [ -z "$AGENT_NAME" ] || [ "$mark" != "$AGENT_NAME" ]; then
-      dp_finding "throwaway tree not made for $(bionic_trunc "${AGENT_NAME:-this agent}" 16)" \
-        "spawn it for this agent" \
-        "    Throwaway tree: ${tree_line}
-  resolves to ${tree}
-  $( if [ ! -f "$tree/.git" ]; then printf 'which is no linked worktree.'
-     elif [ -n "$mark" ]; then printf "a linked worktree whose marker holds the name %s." "$mark"
-     else printf 'a linked worktree carrying no marker.'; fi )
-
-A prototype writes code only inside a throwaway tree the dispatcher spawned for it, so that nothing
-it writes reaches a tree that lands. The tree is verified by its marker: the name of the agent it
-was made for${AGENT_NAME:+ (${AGENT_NAME})}.
-
-Fix: spawn the tree for this agent and name it on its own line:
-    bash $(refuse_shell_word "$BIONIC_LIB/../spawn-worktree.sh") create <base-sha> <branch> --for ${AGENT_NAME:-<name>}
-    Throwaway tree: <the tree it printed>
-
-Then retry the dispatch."
+      if [ ! -f "$tree/.git" ]; then seen=none; elif [ -n "$mark" ]; then seen=marked; else seen=unmarked; fi
+      dispatch_finding proto-tree "$AGENT_NAME" "$tree_line" "$tree" "$seen" "$mark" "$BIONIC_LIB/../spawn-worktree.sh"
     fi
   fi
   if declare -F docs_root >/dev/null 2>&1; then
@@ -2133,43 +1821,26 @@ Then retry the dispatch."
   fi
   rec_root="$(resolve_in_repo "$rec_root")"
   files="$(brief_field "$DP_CONTRACT" files)"
+  # Each refused path goes to the words with why, as `tracked` or `outside`, one `<path>TAB<why>` a line.
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     abs="$(resolve_in_repo "$p")"; why=""
     case "$abs" in "$BIONIC_ROOT"/*) rel="${abs#"$BIONIC_ROOT"/}" ;; *) rel="" ;; esac
     if [ -n "$rel" ] && [ -n "$(git -C "$BIONIC_ROOT" ls-tree -r --name-only --full-tree HEAD -- "$rel" 2>/dev/null | head -1)" ]; then
-      why="is tracked"
+      why=tracked
     else
       case "$abs" in
         "$rec_root"/*) : ;;
-        *) case "$abs" in "${tree:-/nonexistent-tree}"/*) : ;; *) why="is outside both" ;; esac ;;
+        *) case "$abs" in "${tree:-/nonexistent-tree}"/*) : ;; *) why=outside ;; esac ;;
       esac
     fi
     [ -n "$why" ] || continue
-    n=$((n + 1)); refused="${refused}    ${p} ${why}
+    refused="${refused}${p}	${why}
 "
-    [ -n "$first" ] || { first="$p"; first_why="$why"; }
   done <<DP_PF
 $(printf '%s' "$files" | tr ',' '\n')
 DP_PF
-  [ -n "$first" ] || return 0
-  dp_finding "prototype path $(bionic_trunc "$first" 20) ${first_why}" "drop it from Files:" \
-    "    a prototype writes only under record/ or its throwaway tree; ${first} ${first_why}
-
-Files:          $(printf '%s' "$files" | sed 's/,/, /g')
-Record root:    ${rec_root}
-Throwaway tree: ${tree:-(none named)}
-Refused (${n}):
-${refused}
-A prototype ships nothing, so it may write only where nothing ships: a record under the docs root's
-record/, and code inside the throwaway tree spawned for it. A path git tracks at the head is the
-project own file, whichever of the two it sits under.
-
-Fix: take each refused path off Files:. Name a record under record/, and code the prototype tries
-under its throwaway tree (its own line, Throwaway tree: <path>), each path written from the project
-root.
-
-Then retry the dispatch."
+  [ -z "$refused" ] || dispatch_finding proto-path "$files" "$rec_root" "$tree" "$refused"
 }
 [ -z "$DP_PROTOTYPE" ] || dp_prototype_confine
 
@@ -2203,19 +1874,7 @@ Then retry the dispatch."
 # journal step bail early — the same reasoning §8 applies to the attestation
 # path, read here in the refuse direction.
 if [ -z "$C_DELIVERABLE" ] && [ -z "$C_WAIVER" ]; then
-  _dp_detail="An agent with nothing durable to produce cannot be checked on: there is no
-path to stat when it reports done, and nothing left behind if it dies quietly.
-
-Fix: declare one durable artifact path, on a line of its own —
-    Expected artifact: .bionic/docs/record/my-task-notes.md
-  The value is one path; the wall never guesses one from prose, and a <slot> is not a name.
-  A dispatch that binds a plan row carries it in its rendered brief file: fill the row and render again.
-
-Or waive it — the reason is recorded on the session roster either way:
-    Deliverable-waiver: <why this dispatch produces nothing durable>
-
-Then retry the dispatch."
-  dp_finding "this brief names no deliverable" "add an Expected artifact: line" "$_dp_detail"
+  dispatch_finding no-deliverable
 fi
 
 # ==================================================== A READER'S QUESTIONS
@@ -2241,19 +1900,7 @@ case "$DP_SUBAGENT" in
   *) [ -z "$C_SUITES" ] || { SUITES_ALLOWED="$C_SUITES"; SUITES_SOURCE=declared; } ;;
 esac
 if [ -z "$C_FILES" ] && [ -z "$C_SUITES" ] && [ -z "$C_RE_EXECUTES" ] && [ -z "$SUITES_ALLOWED" ]; then
-  dp_finding "this brief declares no Files: and no Suites:" "declare Suites:" \
-    "An agent with no declared instrument runs whatever it decides to run, and the budget binds
-only when it is on the roster row.
-
-Fix: name the closed set of suites this task may run, on a line of its own —
-    Suites: one.test.sh, two.test.sh
-  For tests that are not shell suites, name each command in backticks —
-    Re-executes: \`pytest tests/unit\`
-  Or waive the budget for a brief that runs no suite at all —
-    Suites: none
-  A dispatch that binds a plan row carries these in its rendered brief file: fill the row and render again.
-
-Then retry the dispatch."
+  dispatch_finding no-suites
 fi
 
 # ============================================================== A DECLARED DEBT
@@ -2281,14 +1928,7 @@ _lo_ids=""
 _lo_known=""
 case $'\n'"$_lo_ids"$'\n' in *$'\n'"$DP_ROW"$'\n'*) _lo_known=1 ;; esac
 if [ -n "$DP_ROW" ] && [ -n "$_lo_ids" ] && [ -z "$_lo_known" ]; then
-  dp_finding "Row: $(bionic_trunc "$DP_ROW" 20) names no plan row" "name a ## Tasks row id" \
-    "The Row: label binds this dispatch to a row of the bound plan, and the plan has no such row:
-    Given: Row: ${DP_ROW}
-    Plan:  ${PLAN}
-
-Fix: name the id of the row this agent runs, as the plan's ## Tasks table spells it.
-
-Then retry the dispatch."
+  dispatch_finding row-unknown "$DP_ROW" "$PLAN"
 fi
 # A LABEL AND A NAME THAT DISAGREE ARE A LIE (wave-28 T55): the label binds the dispatch to one row and
 # the name's match to another. Only a name that matches a row is judged; a name that matches none with
@@ -2296,20 +1936,7 @@ fi
 _lo_agrees=""
 case $'\n'"$DP_NAME_ROWS"$'\n' in *$'\n'"$DP_ROW"$'\n'*) _lo_agrees=1 ;; esac
 if [ -n "$DP_ROW" ] && [ -n "$_lo_known" ] && [ -n "$DP_NAME_ROWS" ] && [ -z "$_lo_agrees" ]; then
-  dp_finding "Row: $(bionic_trunc "$DP_ROW" 11) is not the name's row $(bionic_trunc "$DP_NAME_ROW" 11)" \
-    "rename or drop Row:" \
-    "The Row: label binds this dispatch to one row of the bound plan and the agent's name to another:
-    Row:  ${DP_ROW}
-    Name: ${DP_ROW_NAME} (row ${DP_NAME_ROW})
-    Plan: ${PLAN}
-
-Every wall reads one row per dispatch, so a label and a name that disagree leave the walls asking
-different rows. A name that matches no row may carry any Row:.
-
-Fix: name the agent for its row (the name the Patrol's FILL line printed), or give Row: the id that
-name matches, or drop Row: and let the name bind.
-
-Then retry the dispatch."
+  dispatch_finding row-mismatch "$DP_ROW" "$DP_NAME_ROW" "$DP_ROW_NAME" "$PLAN"
 fi
 # A ROW THAT LANDS ON NO SUITE IS PROVED BY THE WHOLE RUN AT ITS COMMIT ALONE, so every path its Files: names must be one no
 # suite reads: the prose list (lib/prose.sh, the list the judge reads) holds it. The list is read once and asked per path with
@@ -2320,15 +1947,7 @@ if [ "$DP_LANDS_ON" = none ] && [ -n "$C_FILES" ] && declare -F prose_path >/dev
     case "$_ln_p" in none|—) continue ;; esac
     prose_path "$_ln_p" "$_ln_list" && continue
     # The line holds 100 columns: the fixed words and the fix leave the path 23, the whole sentence rides in the detail.
-    dp_finding "Lands-on: none, not prose: $(bionic_trunc "$_ln_p" 23)" "add suites or prose:" \
-      "Lands-on: none on a row whose Files name ${_ln_p}, which is not prose: only a whole run at its commit proves it; name the suites that read it in Lands-on:, or list it under prose: in .bionic/config.yaml
-    Given: Lands-on: none ${_lo_reason}
-    Files: ${C_FILES}
-
-The prose list holds the record and the notes no suite executes. A path outside it is read by a suite or runs as code, so
-the row must land on the suites that read it.
-
-Then retry the dispatch."
+    dispatch_finding lands-none "$_ln_p" "$_lo_reason" "$C_FILES"
     break
   done
 fi
@@ -2412,19 +2031,7 @@ if [ -n "$PLAN" ] && [ -n "$DP_BOUND_REC" ] && [ -n "$AGENT_NAME" ] && ! role_is
   dp_live_writer
 fi
 if [ -n "$DP_LIVE_WRITER" ]; then
-  _dp_lw_roster="this session's roster"
-  [ "$DP_LIVE_SID" = "$BIONIC_SID" ] || _dp_lw_roster="the roster of session ${DP_LIVE_SID:0:8} (.bionic/tmp/roster-${DP_LIVE_SID}.state)"
-  dp_finding "row ${DP_BOUND_ROW} has a live writer ${DP_LIVE_WRITER} (session ${DP_LIVE_SID:0:8})" "stop it or ack it" \
-    "    row: ${DP_BOUND_ROW}   ·   live writer: ${DP_LIVE_WRITER}   ·   session: ${DP_LIVE_SID}   ·   dispatch: ${AGENT_NAME}
-    tree: ${DP_BOUND_TREE:-(none recorded)}
-
-The row's writer is open on ${_dp_lw_roster}, so the row and its tree are still its own:
-dispatching ${AGENT_NAME} onto it would put two writers on one row, the second asking every wall as the first.
-
-Fix: if ${DP_LIVE_WRITER} is finished, land it and let the Patrol's ack close it, or stop it (stop-orders.sh
-stopped writes the ack, in the session that launched it); then dispatch again. If it is still working, let it
-finish. A writer of a session that is gone is taken over with session-poker.sh adopt, then acked; once that
-session's files are older than the poker interval, session-poker.sh sweep removes them, and the row is free."
+  dispatch_finding live-writer "$DP_BOUND_ROW" "$DP_LIVE_WRITER" "$DP_LIVE_SID" "$AGENT_NAME" "$DP_BOUND_TREE" "$BIONIC_SID"
 fi
 
 # ======================================================= THE BRIEF FILE'S CHECK
@@ -2440,61 +2047,28 @@ fi
 # that fact first.
 DP_BRIEF_REL=""; DP_BRIEF_SUM=""
 if [ -z "$DP_PROTOTYPE" ] && { [ -n "$DP_BRIEF_PATH" ] || [ -n "$DP_BOUND_REC" ] || [ "$DP_BRIEF_STATE" = unreadable ]; }; then
-  _bf_row="${DP_BOUND_ROW:-${BRIEF_FILE_ROW:-<row>}}"
-  _bf_render="bash $(refuse_shell_word "$HOOK_DIR/session-poker.sh") brief ${_bf_row} ${DP_ROW_NAME:-<name>}"
-  _bf_fact=""; _bf_fix="run the brief verb"; _bf_why=""
+  _bf_key=""
   if [ "$DP_BRIEF_STATE" = unreadable ]; then
-    _bf_fact="the brief check lib/brief.sh cannot be loaded"; _bf_fix="reinstall the plugin"
-    _bf_why="The library this hook loaded has no brief_file_read, so no brief file can be read or summed."
+    _bf_key=brief-unreadable
   elif [ -z "$DP_BRIEF_PATH" ]; then
-    _bf_fact="the prompt names no brief file of row $(bionic_trunc "$_bf_row" 11)"
-    _bf_why="The prompt's first line is not a briefs/<name>.md path. A dispatch that binds a plan row is
-given the file the brief verb rendered for it, and the wall reads that file, never the prompt's prose."
+    _bf_key=brief-unnamed
   else
     case "$DP_BRIEF_STATE" in
-      outside)    _bf_fact="the brief file is outside this project"
-                  _bf_why="The path leaves the project root, or is a symbolic link." ;;
-      absent)     _bf_fact="the brief file the prompt names is not there"
-                  _bf_why="No readable file is at that path under the project root." ;;
-      unrendered) _bf_fact="the brief file carries no render mark"
-                  _bf_why="Its first line is not the render's mark, so nothing says which row and name it is for." ;;
-      unsummed)   _bf_fact="the brief file's mark carries no sum"
-                  _bf_why="It was rendered before the render wrote a sum, so an edit since cannot be told apart." ;;
-      unsummable) _bf_fact="the brief file's sum cannot be taken"; _bf_fix="install shasum or sha256sum"
-                  _bf_why="Neither shasum nor sha256sum answered, so the file cannot be held to its render." ;;
-      edited)     _bf_fact="the brief file was edited after its render"
-                  _bf_why="The sum of the file now differs from the sum its mark records." ;;
+      outside|absent|unrendered|unsummed|unsummable|edited) _bf_key="brief-$DP_BRIEF_STATE" ;;
       ok)
         if [ "$BRIEF_FILE_NAME" != "$DP_ROW_NAME" ]; then
-          _bf_fact="the brief file is for $(bionic_trunc "$BRIEF_FILE_NAME" 15), not this name"
-          _bf_why="Its mark names the dispatch ${BRIEF_FILE_NAME}; this one is named ${DP_ROW_NAME:-<unnamed>}. Each
-dispatch has its own file, so the record keeps what each agent was given."
+          _bf_key=brief-other-name
         elif [ -n "$DP_BOUND_ROW" ] && [ "$BRIEF_FILE_ROW" != "$DP_BOUND_ROW" ]; then
-          _bf_fact="the brief file is row $(bionic_trunc "$BRIEF_FILE_ROW" 8)'s, not row $(bionic_trunc "$DP_BOUND_ROW" 8)'s"
-          _bf_why="Its mark names row ${BRIEF_FILE_ROW}; this dispatch binds row ${DP_BOUND_ROW}."
+          _bf_key=brief-other-row
         elif case "${BRIEF_FILE_TEXT%%$'\n## The row'*}" in *'<ORCHESTRATOR:'*) true ;; *) false ;; esac; then
-          _bf_fact="the brief file has a slot left for the orchestrator"; _bf_fix="fill the row, render again"
-          _bf_why="A contract line above its ## The row heading still reads <ORCHESTRATOR: ...>: the row lacks a cell
-the render needs, so the file is not a contract yet."
+          _bf_key=brief-slot
         else
           DP_BRIEF_REL="$BRIEF_FILE_REL"; DP_BRIEF_SUM="$BRIEF_FILE_SUM"
         fi ;;
     esac
   fi
-  if [ -n "$_bf_fact" ]; then
-    dp_finding "$_bf_fact" "$_bf_fix" \
-      "    Dispatch:   ${DP_ROW_NAME:-<unnamed>}${DP_BOUND_ROW:+ (row ${DP_BOUND_ROW})}
-    Brief file: ${DP_BRIEF_PATH:-<none on the first line of the prompt>}
-
-${_bf_why}
-
-Fix: render the brief for this dispatch; it writes briefs/${DP_ROW_NAME:-<name>}.md and prints its path:
-       ${_bf_render}
-     Put that path alone on the prompt's first line, and dispatch under the name it was rendered for.
-     A brief is changed by editing the plan's section for the row and rendering again, never by hand.
-
-Then retry the dispatch."
-  fi
+  [ -z "$_bf_key" ] || dispatch_finding "$_bf_key" "$DP_ROW_NAME" "$DP_BOUND_ROW" "$DP_BRIEF_PATH" "$HOOK_DIR" \
+    "${BRIEF_FILE_ROW:-}" "${BRIEF_FILE_NAME:-}"
 fi
 
 # ================================================ THE ONE REFUSAL, FOR EVERY FAULT
@@ -2514,7 +2088,7 @@ fi
 # IT STAYS ABOVE THE JOURNAL, for the reason each arm used to exit where it stood: a
 # dispatch the gate is about to refuse must never be journalled as a launch — and `deny`
 # exits 0, which is exactly the status the ledger below would otherwise read as a launch.
-dp_refuse_findings
+dispatch_refuse_findings
 
 # ============================================================ WHAT AN ADMITTED DISPATCH IS TOLD
 #
@@ -2614,14 +2188,7 @@ fi
 # path and gets its own check — a hostile repo may make this gate fail to
 # journal, but must not gain an append to a file it points at (§8).
 if [ -L "$ROSTER_FILE" ]; then
-  refuse deny dispatch "the roster path is a symbolic link" "remove the link" \
-"Roster:  ${ROSTER_FILE}
-Reason:  it is a symbolic link, and nothing is ever written through one.
-
-No row was written, so the launch is not admitted: a dispatch the roster does not carry is one no
-later wall can judge.
-
-Fix: remove the link (rm ${ROSTER_FILE}), then dispatch again."
+  dispatch_refuse deny roster-link "$ROSTER_FILE"
 fi
 
 prune_stale_rosters
@@ -2744,15 +2311,7 @@ ROW=$(roster_row \
 # launch it had already recorded.
 DP_DEADLINE_LIVE=0
 if [ -z "$ROW" ]; then
-  refuse deny dispatch "the launch row did not build" "run /bionic:doctor" \
-"Roster:  ${ROSTER_FILE}
-Reason:  roster_row (payload/scripts/lib/roster.sh) refused a field of this launch.
-
-No row was written, so the launch is not admitted: a dispatch the roster does not carry is one no
-later wall can judge.
-
-Fix: run /bionic:doctor; if it reports nothing, the library and this hook are from different
-     versions — reinstall the plugin."
+  dispatch_refuse deny row-unbuilt "$ROSTER_FILE"
 fi
 if [ ! -e "$ROSTER_FILE" ]; then
   # A concurrent dispatch in the same session can lose this race and write the
@@ -2767,14 +2326,7 @@ DP_WERR=""
 DP_WROTE=1
 DP_WERR=$( { printf '%s\n' "$ROW" >> "$ROSTER_FILE"; } 2>&1 ) || DP_WROTE=0
 if [ "$DP_WROTE" -eq 0 ]; then
-  refuse deny dispatch "the roster cannot be written" "make it writable" \
-"Roster:  ${ROSTER_FILE}
-Reason:  ${DP_WERR##*: }
-
-No row was written, so the launch is not admitted: a dispatch the roster does not carry is one no
-later wall can judge (the suite wall, amend, the Patrol and the stop guard all read the row).
-
-Fix: make ${STATE_DIR} and the roster writable by this user, then dispatch again."
+  dispatch_refuse deny roster-unwritable "$ROSTER_FILE" "${DP_WERR##*: }" "$STATE_DIR"
 fi
 
 # THE TREE NAMES ITS NEW WRITER (wave-34 T28; D24, REQ-1 AC-1.1). The gate names a writer that carries
