@@ -1078,8 +1078,8 @@ for t in 10:30 12:30 14:30; do
 done > "$(ll_rec "$RW2")"
 ww_pub T1 queue 2026-10-20T10:00:00Z >> "$(ll_rec "$RW2")"   # the landing the moves name, before each of them
 for t in 10:30 12:30 14:30; do ww_dec "2026-10-20T$t:00Z" decline; ww_dec "2026-10-20T$t:05Z" lift; done > "$WW_RD/fill-ledger.log"
-# An amend, a hold, an extension and an adoption are each the one hand event its verb wrote to the run's log; each
-# act is of its own agent, since two lines equal but for their time are one fact.
+# An amend, a hold, an extension and an adoption are each the one hand event its verb wrote to the run's log, each
+# of its own agent here; one agent's act taken again is WINDOW-1f's.
 ww_hand() { printf 'run/v1|ev=hand|by=fixture|name=%s|what=%s|why=%s|at=%s\n' "$2${t%%:*}" "$1" "$3" "2026-10-20T$t:00Z"; }   # <what> <name> <why>
 for t in 10:30 12:30 14:30; do
   ww_hand amend w-a "widen the files"; ww_hand hold w-b "waiting on the reader"
@@ -1115,6 +1115,10 @@ expect_eq "WINDOW-1d …and the window 11:00 to 13:00 reads one of each, every s
 rm -f "$WW_RO"
 expect_eq "WINDOW-1e …and with the rosters gone, as a close leaves them, the line is the same: each of the four kinds is read from its event" \
   "$WW_1D" "$(ww_hh "$RW2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
+# the agent's name takes its hour, so at 12:45 this is the 12:30 amend's agent and reason again
+t=12:45; ww_hand amend w-a "widen the files" >> "$(ll_log "$RW2")"
+expect_eq "WINDOW-1f …and a second amend of one agent for one reason at another time is a second act" \
+  "$(printf '%s\n' "$WW_1D" | sed 's/total=12/total=13/; s/amends=1 /amends=2 /')" "$(ww_hh "$RW2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
 
 # (w2) the matrix waiver's two forms. The ISO form is placed by its time; the date form counts with no end, and
 # a day the window's start falls inside cannot be placed. A criterion's waiver now is an event at its own instant,
