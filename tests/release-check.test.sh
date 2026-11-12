@@ -48,7 +48,7 @@
 #   §REL-1.27.0     the 1.27.0 entry: the version pair reads 1.27.0, the entry is dated, names ADR-071,
 #                   and its Migration paragraph names the rows that changed what a script may meet.
 #                   The release check is run on a repository holding the real entry and the run's own deferred and
-#                   moved lines, cut from its closed plan into tests/fixtures/release-check/: every deferred sentence
+#                   moved lines, cut from its closed plan as finding events into tests/fixtures/release-check/: every deferred sentence
 #                   stands under Known limits and the check passes; the same entry with its Known limits removed fails
 #                   one line for each deferred sentence; one planted deferral beside them is named too.
 #   §REL-1.28.0     the 1.28.0 entry: its block's own heading reads 1.28.0, the version pair agrees at the newest heading,
@@ -194,27 +194,34 @@ section "§LIMITS — the shipped release's Known limits carry every deferred se
 
 # FIXTURE FIDELITY: a real repository whose committed CHANGELOG's newest entry has a `### Known limits` part, and
 # the run's plan on disk under the project's docs root (never committed, as `.bionic/` is ignored in a real
-# project), in the shapes an older plan holds: frontmatter `release:` and `fix-policy:`, `deferred:` lines under
-# `## SDLC State` with their ` stated="…"` field (a `"` written `\"`, a `\` written `\\`).
+# project): a page at version 15 whose header names `release:` and `fix-policy:`, and beside it the run's log, its step
+# and each deferral a `finding` event whose `stated=` sentence is escaped as the move verb writes it.
 # Three deferrals: #1 and #2 stated and deferred by the policy, #4 stated but rated fix (S2 on under S1,S2-on), so
 # only #1 and #2 are held. #3, deferred and unstated, is kept apart (LIM_UNSTATED, LIM_DASH): a deferral rated
 # defer with no sentence refuses the release, so it joins a plan only where that refusal is the thing proved.
 # SYNTHESIZED: the sentences, the versions, the records.
 LIM_A='The first limit says "quoted" words and a back\slash.'
 LIM_B='The second limit is long enough that a changelog wraps it across two lines.'
-lim_plan() {  # <repo> <release> [<deferred lines>] -> the run's plan under the repository's docs root
-  local d="$1/.bionic/docs/plans/epic-01"
-  mkdir -p "$d"
-  { printf -- '---\nfix-policy: S1,S2-on\nrelease: %s\n---\n\n# fixture run\n\n## SDLC State\n\ncurrent: 7\n' "$2"
-    printf '%s\n' "${3-}"
-    printf '\n## Tasks\n'; } > "$d/wave-01.plan.md"
+lim_plan() {  # <repo> <release> [<finding events>] -> the run's page under the repository's docs root, and its log
+  local d="$1/.bionic/docs"
+  mkdir -p "$d/plans/epic-01" "$d/record/wave-01"
+  printf -- '---\ncanonical_sdlc_version: 15\nfix-policy: S1,S2-on\nrelease: %s\n---\n\n# fixture run\n' "$2" > "$d/plans/epic-01/wave-01.plan.md"
+  { printf 'run/v1|ev=step|n=7|at=2025-12-31T00:00:00Z\n'; [ -z "${3-}" ] || printf '%s\n' "$3"; } > "$d/record/wave-01/run.log"
 }
-LIM_DEFERRED='deferred: record/w/critic.md#1 S3 on "a first title" stated="The first limit says \"quoted\" words and a back\\slash."
-deferred: record/w/critic.md#2 S3 on "a second title" stated="The second limit is long enough that a changelog wraps it across two lines."
-deferred: record/w/critic.md#4 S2 on "fixed instead" stated="A sentence the policy fixes is no limit."'
-LIM_UNSTATED='deferred: record/w/critic.md#3 S3 on "an unstated one"'
-LIM_DASH='deferred: record/w/critic.md#3 S3 on "an unstated one" stated="-"'
-LIM_FIXED='deferred: record/w/critic.md#4 S2 on "fixed instead" stated="A sentence the policy fixes is no limit."'
+# The move verb writes a stated sentence through its own escape, and the one reader of it unescapes, so a deferral's
+# sentence is escaped here by that function, taken from where it lives, never by a rule restated in this suite.
+eval "$(sed -n '/^deferral_escape() {/,/^}/p' "${BIONIC_HOOKS_DIR}/poker/proof.sh")"
+lim_def() {  # <ref> <severity> <reach> <title> [<stated>] -> one deferral as the move verb writes it into the run's log
+  printf 'run/v1|ev=finding|ref=%s|severity=%s|reach=%s|to=deferred|title=%s%s|at=2026-01-01T00:00:00Z' "$1" "$2" "$3" "$4" \
+    "${5+|stated=$(deferral_escape "$5")}"
+}
+expect_eq "(l0) setup: the move verb's escape is loaded and escapes a quote and a backslash" 'a \"b\" c\\d' "$(deferral_escape 'a "b" c\d')"
+LIM_DEFERRED="$(lim_def record/w/critic.md#1 S3 on 'a first title' "$LIM_A")
+$(lim_def record/w/critic.md#2 S3 on 'a second title' "$LIM_B")
+$(lim_def record/w/critic.md#4 S2 on 'fixed instead' 'A sentence the policy fixes is no limit.')"
+LIM_UNSTATED="$(lim_def record/w/critic.md#3 S3 on 'an unstated one')"
+LIM_DASH="$(lim_def record/w/critic.md#3 S3 on 'an unstated one' -)"
+LIM_FIXED="$(lim_def record/w/critic.md#4 S2 on 'fixed instead' 'A sentence the policy fixes is no limit.')"
 lim_changelog() {  # <repo> <Known limits body of 2.3.4> [<older entry body>] -> commit a CHANGELOG whose newest entry is 2.3.4
   { printf '# Changelog\n\n## 2.3.4 — 2026-01-02\n\n- a change\n\n### Known limits\n\n%s\n\n' "$2"
     printf '## 0.0.1 — 2026-01-01\n\n- first\n%s\n' "${3-}"; } > "$1/CHANGELOG.md"
@@ -286,7 +293,7 @@ expect_contains "(L2-2) …the same line, naming the finding" "$(L2_LINE)" "$OUT
 expect_eq "(L2-2) …and it is the only release-check line" "1" "$(lines_of "$OUT")"
 
 R="$TMP/l2-stated"; fx_repo "$R" 2.3.4 2.3.4
-lim_plan "$R" 2.3.4 'deferred: record/w/critic.md#3 S3 on "an unstated one" stated="The third limit is stated and carried."'
+lim_plan "$R" 2.3.4 "$(lim_def record/w/critic.md#3 S3 on 'an unstated one' 'The third limit is stated and carried.')"
 lim_changelog "$R" "- Known limit: The third limit is stated and carried."
 run_check "$R"
 expect_status "(L2-3) the same deferral with its sentence stated and carried in Known limits: the check passes" 0 "$RC"
@@ -397,12 +404,12 @@ expect_contains "(L3-4) MUTANT …by the line naming the finding" "no stated sen
 
 section "§FROM-REPORT — release-note renders the landing numbers at a head; the check holds the entry to them"
 
-# FIXTURE FIDELITY: the run's plan names 2.3.4, and its landing record holds, in the line's event shapes, a queue
+# FIXTURE FIDELITY: the run's plan names 2.3.4, and its log holds, in the line's event shapes, a queue
 # landing at L1 and a hand landing at L2. The entry is rendered at L2 for 01:30 and committed as E, which a hand
 # landing carries at 02:00; a third row lands L3 on top at 03:00. The poker runs from the fixture as a user runs it.
 # SYNTHESIZED: the events.
 POKER="${BIONIC_SCRIPTS_DIR}/hooks/session-poker.sh"; RN_PLAN=".bionic/docs/plans/epic-01/wave-01.plan.md"
-rn_pub() { printf 'line/v1|ev=published|row=%s|commit=%s|kind=%s|by=t|why=w|at=%s\n' "$@" >> "$RN_REC"; }
+rn_pub() { printf 'run/v1|ev=published|row=%s|commit=%s|kind=%s|by=t|why=w|at=%s\n' "$@" >> "$RN_REC"; }
 rn_commit() {  # <file> -> commit a change to it, print the head
   printf '%s\n' "$1" > "$R/$1"; git -C "$R" add -- "$1"; git -C "$R" commit -q -m "$1"; git -C "$R" rev-parse HEAD
 }
@@ -413,11 +420,11 @@ rn_entry() {  # <release-note output> -> commit a CHANGELOG whose 2.3.4 entry ca
 rn_note() { (cd "$R" && bash "$POKER" release-note "$@" "$RN_PLAN" 2>&1; echo "rc=$?"); }
 rn_check() { OUT="$(cd "$R" && env -u BIONIC_CHECK_BASE BIONIC_CHECK_HEAD="$1" bash "$CHECK" "$LIST" 2>&1)"; RC=$?; }
 R="$TMP/rn"; fx_repo "$R" 2.3.4 2.3.4; lim_plan "$R" 2.3.4
-RN_REC="$R/.bionic/docs/record/wave-01/landing-proofs.log"; mkdir -p "${RN_REC%/*}"
+RN_REC="$R/.bionic/docs/record/wave-01/run.log"
 L1="$(rn_commit l1)"; L2="$(rn_commit l2)"
-{ printf 'line/v1|ev=ready|row=T1|commit=%s|at=2026-01-02T00:00:00Z\n' "$L1"
-  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=-|admitted=1767312060|width=2|promised=60|actual=90|at=2026-01-02T00:05:00Z\n' "$L1"
-} > "$RN_REC"; rn_pub T1 "$L1" queue 2026-01-02T00:10:00Z; rn_pub T2 "$L2" hand 2026-01-02T01:00:00Z
+{ printf 'run/v1|ev=ready|row=T1|commit=%s|at=2026-01-02T00:00:00Z\n' "$L1"
+  printf 'run/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=-|admitted=1767312060|width=2|promised=60|actual=90|at=2026-01-02T00:05:00Z\n' "$L1"
+} >> "$RN_REC"; rn_pub T1 "$L1" queue 2026-01-02T00:10:00Z; rn_pub T2 "$L2" hand 2026-01-02T01:00:00Z
 LR1="$(cd "$R" && bash "$POKER" landing-report --rows "$RN_PLAN" 2>&1)"
 B="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; RN1="$(rn_note)"; A="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ON="$(printf '%s\n' "$RN1" | sed -n 's/^`landing-report --rows` at [0-9a-f]* on \(.*\):$/\1/p')"
@@ -661,13 +668,14 @@ cl_lead() {
 flat() { tr '\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g'; }
 # has <text> <phrase> — 0 when the phrase is in the text, white space squeezed on both sides
 has() { local t p; t="$(printf '%s' "$1" | flat)"; p="$(printf '%s' "$2" | flat)"; case "$t" in *"$p"*) return 0 ;; esac; return 1; }
-# plan_deferred <lines> — the stated sentence of each `deferred:` line, one per line
-plan_deferred() { sed -n 's/^deferred: .* stated="\(.*\)"[[:space:]]*$/\1/p' "$1"; }
-# plan_deferred_open <lines> — the stated sentences of the deferrals no `moved: <id> to=fixed` line has closed, the ones the
-# check holds the entry to; a plan whose later rows fixed a deferred finding states more sentences than the entry owes
-plan_deferred_open() {
-  awk 'FNR == NR { if ($1 == "moved:" && $3 == "to=fixed") fixed[$2] = 1; next }
-       $1 == "deferred:" && !($2 in fixed) { print }' "$1" "$1" | sed -n 's/^deferred: .* stated="\(.*\)"[[:space:]]*$/\1/p'
+# plan_deferred <events> [open] — the stated sentence of each deferral, one per line; with `open`, only those of the
+# deferrals no later finding event moved to fixed, the ones the check holds the entry to
+plan_deferred() {
+  awk -F'|' -v open="${2:-}" '
+    { delete f; for (i = 3; i <= NF; i++) { k = substr($i, 1, index($i, "=") - 1); f[k] = substr($i, length(k) + 2) } }
+    $2 != "ev=finding" { next }
+    FNR == NR { if (f["to"] == "fixed") fixed[f["ref"]] = 1; next }
+    f["to"] == "deferred" && ("stated" in f) && !(open != "" && (f["ref"] in fixed)) { print f["stated"] }' "$1" "$1"
 }
 
 # corr_check <file> <plugin.json> — one `corr:` line per broken rule; no output when all hold
@@ -777,11 +785,11 @@ rel_check() {
   has "$blk" "$adr" || echo "rel: the entry does not name $adr"
   [ "$(jq -r '.version // empty' "$pj" 2>/dev/null)" = "$ver" ] || echo "rel: plugin.json does not read $ver"
 }
-# rel_world <dir> <changelog> <version> <lines> [<extra deferred line>] — a committed repository holding <changelog> as its
-# CHANGELOG and, as its plan, the run's deferred lines from <lines> with the moved: lines that later changed their state,
-# so the declared check judges the entry as the door will
+# rel_world <dir> <changelog> <version> <events> [<extra deferral>] — a committed repository holding <changelog> as its
+# CHANGELOG and, in its run's log, the run's finding events from <events>: each deferral and each later move of one, so
+# the declared check judges the entry as the door will
 rel_world() {
-  fx_repo "$1" 2.3.4 "$3" && lim_plan "$1" "$3" "$(/usr/bin/grep -E '^(deferred|moved): ' "$4")${5:+
+  fx_repo "$1" 2.3.4 "$3" && lim_plan "$1" "$3" "$(/usr/bin/grep '^run/v1|ev=finding|' "$4")${5:+
 $5}" &&
   { cat "$2"; printf '\n## 0.0.1 — 2026-01-01\n\n- first\n'; } > "$1/CHANGELOG.md" &&
   git -C "$1" add CHANGELOG.md && git -C "$1" commit -q -m "the $3 entry"
@@ -789,8 +797,9 @@ $5}" &&
 
 section "§REL-1.27.0 — the 1.27.0 entry names its rows and carries the run's deferred sentences"
 
-# The run's deferred and moved lines, cut from its closed plan; a move's words, session and why are kept, since a move
-# to defer or fix without them reads as no move, and its author is a stand-in.
+# The run's deferrals and their moves, cut from its closed plan as the log holds a finding: each deferral dated before
+# the first move, each move at its own instant; a move's words, session and why are kept, since a move to defer or fix
+# without them reads as no move, and its author is a stand-in.
 REL_PLAN="${BIONIC_SCRIPTS_DIR}/tests/fixtures/release-check/wave-44-findings.txt"
 # The rows whose Migration bullets name what a script of yours may meet at 1.27.0
 REL_MIG_ROWS="T1 T2 T3 T4 T5 T13 T14"
@@ -818,15 +827,16 @@ expect_status "(n4) the same entry with its Known limits removed: the check fail
 expect_eq "(n4) …one line for each deferred sentence" "$REL_N" "$(lines_of "$OUT")"
 expect_contains "(n4) …naming a finding" "omit the deferred sentence of record/" "$OUT"
 # One planted deferral beside the run's own: the same entry, no Known limits, names it.
-R="$TMP/rel-planted"; rel_world "$R" "$TMP/rel.nolimits" 1.27.0 "$REL_PLAN" 'deferred: record/w/planted.md#1 S3 on "a planted title" stated="The planted limit is stated and the entry omits it."'
+R="$TMP/rel-planted"; rel_world "$R" "$TMP/rel.nolimits" 1.27.0 "$REL_PLAN" "$(lim_def record/w/planted.md#1 S3 on 'a planted title' 'The planted limit is stated and the entry omits it.')"
 run_check "$R"
 expect_status "(n5) one deferred sentence planted in the run's plan, the entry without Known limits: the check fails" 1 "$RC"
 expect_contains "(n5) …naming the planted finding" "omit the deferred sentence of record/w/planted.md#1" "$OUT"
 
 section "§REL-1.28.0 — the 1.28.0 entry names its rows and its ADRs and carries the run's deferred sentences"
 
-# The run's deferred and moved lines, cut from its closed plan; a move's words, session and why are kept, since a move
-# to defer or fix without them reads as no move, and its author is a stand-in.
+# The run's deferrals and their moves, cut from its closed plan as the log holds a finding: each deferral dated before
+# the first move, each move at its own instant; a move's words, session and why are kept, since a move to defer or fix
+# without them reads as no move, and its author is a stand-in.
 REL_PLAN="${BIONIC_SCRIPTS_DIR}/tests/fixtures/release-check/wave-45-findings.txt"
 # The rows whose Migration bullets name what a script of yours may meet at 1.28.0
 REL_MIG_ROWS="T1 T2 T3 T5 T6 T7 T8 T9 T10 T11 T12 T13 T14 T15 T16 T17 T18 T24 T25 T28 T31 T32 T33"
@@ -846,7 +856,7 @@ doctor r28_noadr2 sed "s/$REL_ADR_B/the second record/g"
 expect_contains "(n2) an entry that does not name $REL_ADR_B: red" "rel: the entry does not name $REL_ADR_B" "$(rel_check "$TMP/doctored.r28_noadr2" "$TMP/plugin.1280.json" 1.28.0 "$REL_ADR_B" "$REL_MIG_ROWS")"
 expect_contains "(n2) a manifest that reads another version: red" "rel: plugin.json does not read 1.28.0" "$(rel_check "$CL" "$TMP/plugin.1270.json" 1.28.0 "$REL_ADR_A" "$REL_MIG_ROWS")"
 
-REL_N="$(plan_deferred_open "$REL_PLAN" | /usr/bin/grep -c .)"
+REL_N="$(plan_deferred "$REL_PLAN" open | /usr/bin/grep -c .)"
 expect_true "(n0) setup: the run's deferred sentences are read, at least one" [ "$REL_N" -gt 0 ]
 cl_block "$CL" 1.28.0 | awk '/^### / { skip = ($0 == "### The landing numbers") } !skip' > "$TMP/rel28.entry"
 cl_block "$CL" 1.28.0 | awk '/^### / { skip = ($0 == "### The landing numbers" || $0 == "### Known limits") } !skip' > "$TMP/rel28.nolimits"
@@ -861,7 +871,7 @@ expect_status "(n4) the same entry with its Known limits removed: the check fail
 expect_eq "(n4) …one line for each deferred sentence" "$REL_N" "$(lines_of "$OUT")"
 expect_contains "(n4) …naming a finding" "omit the deferred sentence of record/" "$OUT"
 # One planted deferral beside the run's own: the same entry, no Known limits, names it.
-R="$TMP/rel28-planted"; rel_world "$R" "$TMP/rel28.nolimits" 1.28.0 "$REL_PLAN" 'deferred: record/w/planted.md#1 S3 on "a planted title" stated="The planted limit is stated and the entry omits it."'
+R="$TMP/rel28-planted"; rel_world "$R" "$TMP/rel28.nolimits" 1.28.0 "$REL_PLAN" "$(lim_def record/w/planted.md#1 S3 on 'a planted title' 'The planted limit is stated and the entry omits it.')"
 run_check "$R"
 expect_status "(n5) one deferred sentence planted in the run's plan, the entry without Known limits: the check fails" 1 "$RC"
 expect_contains "(n5) …naming the planted finding" "omit the deferred sentence of record/w/planted.md#1" "$OUT"
