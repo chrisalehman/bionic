@@ -399,8 +399,7 @@ expect_eq "a plan that has the table exits 0" "0" "$(call_rc units_rows "$SANDBO
 section "4 — units_ready: pending and every dep landed; the step is a label (wave-20 Δ1)"
 # ============================================================
 #
-# RE-AUTHORED FOR wave-20 REQ-5 (Δ1, ADR-036). Through 1.8.6 the step argument FILTERED: a
-# row was ready only at its own step. Readiness is now the prerequisite graph — a work row is
+# Readiness is the prerequisite graph — a work row is
 # ready when it is pending and every prerequisite has landed, whatever its step — so the
 # argument no longer filters a work row. It still decides the gate-act rows (§17).
 
@@ -741,8 +740,7 @@ expect_eq "…with T10 (step 4), T13 and T14 (step 5) all ready at once" \
   "T10
 T13
 T14" "$WAVE_UNION"
-# RE-AUTHORED FOR wave-20 REQ-5 (Δ1, Δ6; ADR-036). Through 1.8.6 the per-step split was the
-# point of this row: asked about Step 4, units_ready named only T10. Readiness is now the
+# Readiness is the
 # prerequisite graph, so for WORK rows the answer at any step IS the old whole-table answer.
 expect_eq "asked at Step 4, units_ready names every work row whose deps landed, whatever its step (Δ1)" \
   "T10

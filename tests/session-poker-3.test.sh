@@ -635,8 +635,7 @@ for s58st in intended confirmed; do
   s58_row r-aud bionic:auditor "$s58st" evidence "$S58_REL/aud.md" "$S58_AUD_FILES"
 done
 s58_row r-int bionic:auditor intended evidence "$S58_REL/int.md" ""
-# A planted row whose name carries a dot, its own record, so 58c3 is refused for the character
-# alone: before T41 this name and record registered (review pass 16 note 4).
+# A planted row whose name carries a dot, its own record, so 58c3 is refused for the character alone.
 s58_row r.aud bionic:auditor confirmed evidence "$S58_REL/dot.md" ""
 s58_row r-tint "$(printf 'bionic:impl\033[31mementor')" confirmed evidence "$S58_REL/tint.md" ""
 S58_ALL="$(s56_checks none)"
@@ -814,8 +813,7 @@ section "Section 59 §RANGE-Q: the tick offers each read row its own range, and 
 # `live:head:adversarial+structure` (the critic). The plan already holds three readings, planted
 # in the shape proof_line writes: adversarial at A, structure at B, evidence at B; the working
 # branch is at C. The tick offers both rows and prints a RANGE line for each, from the oldest last
-# head among that row's own questions: T3 B..C, T4 A..C. Through 1.11.0 there was one range, from
-# the last review proof of any question, so T4 would have been offered B..C and A..B never read.
+# head among that row's own questions: T3 B..C, T4 A..C.
 # A reading registered with --question returns to pending the active row carrying that question,
 # whatever its record is called: the critic's second adversarial pass is written as adv-2.md, a
 # name T4's Files do not hold, and still returns T4 alone. §48 and §49e stay the controls for the
