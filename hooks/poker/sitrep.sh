@@ -281,7 +281,11 @@ _sitrep_ledger_facts() {  # <ledger> -> the reader's ledger answer for the ledge
       reader_q_ledger "$led" ); fi
 }
 decisions_list() {  # <ledger> [puts|times] -> one line per entry: D<n> · "<reply>" · <who> <date> · <title>, in the ledger's order
-  _sitrep_ledger_facts "$1" | awk -F'|' -v mode="${2:-}" '
+  # A round in the log holds the appender's UTC instant; it is read on the local clock a ledger heading names.
+  _sitrep_ledger_facts "$1" | while IFS= read -r l; do
+      case "$l" in *'|at='[0-9][0-9][0-9][0-9]-*Z) e="$(iso_epoch "${l##*|at=}")"
+        [ -z "$e" ] || l="${l%|at=*}|at=$(date -r "$e" '+%Y-%m-%d %-I:%M %p %Z' 2>/dev/null || date -d "@$e" '+%Y-%m-%d %-I:%M %p %Z')" ;; esac
+      printf '%s\n' "$l"; done | awk -F'|' -v mode="${2:-}" '
     { split("", f); for (i = 2; i <= NF; i++) { e = index($i, "="); f[substr($i, 1, e - 1)] = substr($i, e + 1) } }
     f["ev"] != "decision" { next }
     { v = f["verb"]; at = f["at"]; t = f["title"]; if (t == "") t = "(untitled)"
@@ -470,16 +474,18 @@ decision_waiters() {  # <plan> <D<n>> [<root>] -> one line per waiter: a task id
 # entry in the grammar is named once; every ADR (adrs/*/adr-*.md) follows its wave's entries, keyed by its
 # frontmatter `wave:` (its directory when it has none), as `ADR-<n> · <status> · <title>`.
 decisions_all() {
-  local docs="$1" f slug out tab
+  local docs="$1" f slug out tab seen=""
   tab="$(printf '\t')"
   {
-    for f in "$docs"/record/*/design-ledger.md; do
+    for f in "$docs"/record/*/design-ledger.md "$docs"/record/*/run.log; do
       [ -f "$f" ] && [ ! -L "$f" ] || continue
-      slug="${f%/design-ledger.md}"; slug="${slug##*/}"
+      slug="${f%/*}"; slug="${slug##*/}"
+      case " $seen " in *" $slug "*) continue ;; esac
+      seen="$seen $slug"; f="${f%/*}/design-ledger.md"
       out="$(decisions_list "$f")"
       if [ -n "$out" ]; then
         printf '%s\n' "$out" | awk -v s="$slug" '{ printf "%s\t1\t%06d\t%s %s\n", s, NR, s, $0 }'
-      else
+      elif [ -f "$f" ]; then
         printf '%s\t1\t000000\t%s · no register entries (a ledger written before D24)\n' "$slug" "$slug"
       fi
     done
@@ -2112,9 +2118,9 @@ sitrep_tick_line() {
           case "$HO_S" in
             State) ho_state ;;
             Decisions)
-              if [ "$HO_MODE" != none ] && [ -f "$HO_LEDGER" ] && [ ! -L "$HO_LEDGER" ]; then
+              if [ "$HO_MODE" != none ] && [ ! -L "$HO_LEDGER" ] && [ -n "$(decisions_list "$HO_LEDGER")" ]; then
                 handoff_render "$HO_COMP" Decisions | awk -F'\t' '$2 != "- none."'
-                printf '2\t- every ruling of this run: %s\n' "${HO_LEDGER#"$HO_ROOT"/}"
+                printf '2\t- every ruling of this run: session-poker.sh decisions prints them, from %s and the run'"'"'s log\n' "${HO_LEDGER#"$HO_ROOT"/}"
               else
                 handoff_render "$HO_COMP" Decisions
               fi ;;
@@ -2238,13 +2244,14 @@ sitrep_tick_line() {
     case "$LR_TEXT" in *$'\n'*) printf '%s\n' "${LR_TEXT#*$'\n'}" ;; esac
     exit 0
   }
-  # decisions_settle <plan> <ledger> -> always 0, prints nothing: the ask of every decision the ledger reads ruled or
-  # withdrawn is closed on the run's register. A ruling is the ledger's own entry, written in the person's words with no
-  # verb of its own, so every `decisions` call settles the register against the ledger before it reads or puts.
+  # decisions_settle <plan> <ledger> -> always 0, prints nothing: the ask of every decision the run's rounds read ruled
+  # or withdrawn is closed on the run's register. An older run's ruling is its ledger's own entry, written in the
+  # person's words with no verb of its own, so every `decisions` call settles the register against the rounds before it
+  # reads or puts.
   decisions_settle() {
     local d st open
     declare -F owed_close >/dev/null 2>&1 || return 0
-    [ -f "$2" ] && [ ! -L "$2" ] || return 0
+    [ ! -L "$2" ] || return 0
     # The register is read once, from the store owed_close writes, and a decision's ask is closed only where it stands
     # open: a close reads the register again, and a ruled decision whose ask is already closed is most of them.
     open="$(OWED_ROOT="$REPO_REAL" OWED_PLAN="$1" owed_rounds 'decide:.+' 2>/dev/null | awk -F'\t' '$3 == "open" { printf " %s ", $1 }')"
@@ -2255,28 +2262,18 @@ sitrep_tick_line() {
     done
     return 0
   }
-  # THE LEDGER'S ONE WRITE, for the put and the ruling alike: one entry appended as `## Δ<k> — <heading>`, k one past
-  # the ledger's highest Δ, its body under a blank line when it has one, through a copy swapped in whole, so a reader
-  # never sees half an entry and both writers number alike; the ledger is begun when the run has none. 1, with the
-  # refusal said, when the ledger cannot be written. The clock is the local one every heading of the ledger names.
-  decisions_clock() { date '+%Y-%m-%d %-I:%M %p %Z'; }
-  decisions_append() {  # <plan> <ledger> <root> <heading> [<body>]
-    local plan="$1" led="$2" root="$3" k
-    k="$(sed -n 's/^## Δ\([0-9][0-9]*\).*/\1/p' "$led" 2>/dev/null | sort -n | tail -1)"; k=$(( ${k:--1} + 1 ))
-    mkdir -p "${led%/*}" 2>/dev/null
-    { if [ -f "$led" ]; then cat "$led"; else printf '# Design ledger — %s\n' "$(proof_plan_slug "$plan")"; fi
-      printf '\n## Δ%s — %s\n' "$k" "$4"
-      [ -z "${5:-}" ] || printf '\n%s\n' "$5"
-    } > "$led.new.$$" 2>/dev/null && mv -f "$led.new.$$" "$led" 2>/dev/null && return 0
-    rm -f "$led.new.$$" 2>/dev/null
-    die "REFUSED — ${led#"$root"/} cannot be written; nothing is written."
+  # THE ROUND'S ONE WRITE, for the put and the ruling alike: one decision event in the run's log through the type's
+  # one writer (lib/proof.sh `proof_decision_event`, which numbers it); the design ledger is a person's file, read and
+  # never written. 1, with the refusal said, when the log refuses the round.
+  decisions_append() {  # <plan> <field>=<value>…
+    local plan="$1"; shift
+    proof_decision_event "$plan" "$@" && return 0
+    die "REFUSED — the run's log cannot take this round (no record for the plan, or a value holding a |); nothing is written."
     return 1
   }
-  # THE PUT. A decision put during a run is one ledger entry before it is shown, `## Δ<k> — D<n> put (orchestrator
-  # <date> <time>): <title>`, Δ one past the ledger's highest, its body the wait line; the ledger is begun when the run
-  # has none. It prints the round the put opens and the wait line, which ends the decision's Significance as printed.
-  # REFUSED (1), nothing written: a number that is not D<n>, a title that is empty or more than one line, a ledger that
-  # is a symlink.
+  # THE PUT. A decision put during a run is one round before it is shown, by orchestrator, with its title and its wait
+  # line. It prints the round the put opens and the wait line, which ends the decision's Significance as printed.
+  # REFUSED (1), nothing written: a number that is not D<n>, a title that is empty or more than one line.
   decisions_put() {  # <plan> <ledger> <D<n>> <title>
     local plan="$1" led="$2" d="$3" title="$4" wait r
     case "$d" in D[1-9]*) case "${d#D}" in *[!0-9]*) d="" ;; esac ;; *) d="" ;; esac
@@ -2285,12 +2282,8 @@ sitrep_tick_line() {
       exit 1
     fi
     case "$title" in ''|*$'\n'*) die "REFUSED — the title is one line saying what is decided; nothing is written."; exit 1 ;; esac
-    if [ -L "$led" ]; then
-      die "REFUSED — ${led#"$REPO_REAL"/} is a symlink; nothing is written."
-      exit 1
-    fi
     wait="$(decision_wait "$plan" "$d" "$REPO_REAL")"
-    decisions_append "$plan" "$led" "$REPO_REAL" "$d put (orchestrator $(decisions_clock)): $title" "$wait" || exit 1
+    decisions_append "$plan" "d=$d" verb=put by=orchestrator "title=$title" ${wait:+"wait=$wait"} || exit 1
     # THE PUT IS AN ASK ON THE RUN'S REGISTER, in the words the pages owe it in (`pages_owed`), so a decision put and
     # not yet ruled is owed wherever the register is read; the ledger's ruling closes it (`decisions_settle`).
     if declare -F owed_open >/dev/null 2>&1; then
@@ -2304,11 +2297,9 @@ sitrep_tick_line() {
 
   # THE RULING. However the reply arrives, typed to `decisions rule`, given by `approve D<n>`, or replayed from the
   # release approval card (whose reply runs `approve`), it is this one function, so a decision ruled anywhere has its
-  # ledger entry and its closed ask. It writes `## Δ<k> — D<n> ruled "<reply>" (<who> <date> <clock>): <title>`, the
-  # heading `decisions_list` reads as an entry, through the put's own numbering (`decisions_append`), the title the
-  # newest put's and none when the decision was never put; then it settles the register against the ledger, which closes
-  # `decide:D<n>`. A double quote in the reply is written as a single one: the parser ends the reply at the next double
-  # quote. THE WHO IS THE ONE WHO SAID IT: the reply is asked of lib/said.sh `user_said` in the prompts the user typed in
+  # round and its closed ask. It writes the ruled round (`decisions_append`), the title the newest put's and none when
+  # the decision was never put; then it settles the register against the rounds, which closes `decide:D<n>`. A double
+  # quote in the reply is written as a single one, as an older run's ledger heading holds it. THE WHO IS THE ONE WHO SAID IT: the reply is asked of lib/said.sh `user_said` in the prompts the user typed in
   # this run, a reply under three words only in a prompt typed after the orchestrator's own put of this decision (the mark
   # `decisions put D<n> `, its newest round: a digit typed for another decision is not this one's). Found, the user's
   # words: who is the project's git user name. Not found, or found too short to be a quote,
@@ -2316,7 +2307,7 @@ sitrep_tick_line() {
   # written by hand has always read, so the record never says a person decided what they did not. Unable to look (no jq,
   # no transcript) is refused, for a ruling it cannot attribute is not written. 0 ruled, printing
   # `ruled: D<n> · "<reply>" · <title>`; 1 refused, nothing written (a number that is not D<n>, a reply empty or of more
-  # than one line, a ledger that is a symlink, said.sh not loadable, the transcript not readable, and for the user's own
+  # than one line, said.sh not loadable, the transcript not readable, and for the user's own
   # words no usable git user name); 3 refused, nothing written, the decision's last round already closed by a ruling or a
   # withdrawal.
   decisions_rule() {  # <plan> <root> <D<n>> <reply>
@@ -2331,10 +2322,6 @@ sitrep_tick_line() {
     esac
     raw="$reply"; sq="'"; reply="${reply//\"/$sq}"
     led="$(docs_root "$root")/record/$(proof_plan_slug "$plan")/design-ledger.md"
-    if [ -L "$led" ]; then
-      die "REFUSED — ${led#"$root"/} is a symlink; nothing is written."
-      return 1
-    fi
     st="$(decisions_rounds "$led" | awk -F'\t' -v d="$d" '$1 == d { print $3 }')"
     case "$st" in
       ruled|withdrawn)
@@ -2366,16 +2353,16 @@ sitrep_tick_line() {
     esac
     title="$(decisions_list "$led" puts | awk -F' · ' -v d="$d" '$1 == d && $2 == "put" {
       t = $0; for (i = 0; i < 3; i++) t = substr(t, index(t, " · ") + length(" · ")) } END { print t }')"
-    decisions_append "$plan" "$led" "$root" "$d ruled \"$reply\" ($who $(decisions_clock))${title:+: $title}" || return 1
+    decisions_append "$plan" "d=$d" verb=ruled "said=$reply" "by=$who" ${title:+"title=$title"} || return 1
     REPO_REAL="$root" decisions_settle "$plan" "$led"
     printf 'ruled: %s · "%s" · %s\n' "$d" "$reply" "${title:-(untitled)}"
     return 0
   }
 
-  # THE REGISTER (wave-38 T13; D24, AC-3.4). Read-only. `decisions` is the bound run's ledger through `decisions_list`;
-  # `--all` is every run's under the docs root, keyed by wave, with the ADRs (`decisions_all`). Exit 1 in one line
-  # naming the path when the run's ledger is absent; 2 when there is no run to read. `decisions put` and `decisions rule`
-  # are its writers, each one entry (`decisions_append`).
+  # THE REGISTER. `decisions` is the bound run's rounds, its ledger's and its log's as one list, through
+  # `decisions_list`; `--all` is every run's under the docs root, keyed by wave, with the ADRs (`decisions_all`). Exit 1
+  # in one line naming the ledger's path when the run holds no round; 2 when there is no run to read. `decisions put`
+  # and `decisions rule` are its writers, each one round (`decisions_append`).
   poker_verb_decisions() {
     REPO="$(project_root "$PWD")"
     REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
@@ -2411,11 +2398,12 @@ sitrep_tick_line() {
       decisions_rule "$DC_PLAN" "$REPO_REAL" "$DC_RULE" "${DC_REPLY:-}" && exit 0
       exit 1
     fi
-    if [ ! -f "$DC_LEDGER" ] || [ -L "$DC_LEDGER" ]; then
-      say "no design ledger at ${DC_LEDGER#"$REPO_REAL"/} — this run has recorded no ruling"
+    DC_OUT="$(decisions_list "$DC_LEDGER")"
+    if [ -z "$DC_OUT" ]; then
+      say "no ruling in ${DC_LEDGER#"$REPO_REAL"/} or in the run's log — this run has recorded no ruling"
       exit 1
     fi
-    decisions_list "$DC_LEDGER"
+    printf '%s\n' "$DC_OUT"
     exit 0
   }
 
@@ -2549,9 +2537,9 @@ sitrep_tick_line() {
     # The recap.
     RS_LEDGER="$RS_DOCS/record/$(proof_plan_slug "$RS_PLAN")/design-ledger.md"
     RS_SET=""
-    [ ! -f "$RS_LEDGER" ] || [ -L "$RS_LEDGER" ] || RS_SET="$(decisions_list "$RS_LEDGER")"
+    [ -L "$RS_LEDGER" ] || RS_SET="$(decisions_list "$RS_LEDGER")"
     if [ -n "$RS_SET" ]; then printf '%s\n' "$RS_SET" | sed 's/^/settled: /'
-    else printf 'settled: none — no ruling in %s\n' "${RS_LEDGER#"$REPO_REAL"/}"; fi
+    else printf 'settled: none — no ruling in %s or in the run'"'"'s log\n' "${RS_LEDGER#"$REPO_REAL"/}"; fi
     RS_OWED="$( { bind_sessions "$RS_PLAN" 2>/dev/null; printf '%s\n' "$SESSION_ID"; } | awk 'NF && !s[$0]++' \
       | while IFS= read -r RS_S; do OWED_ROOT="$REPO_REAL" OWED_SID="$RS_S" owed_list 2>/dev/null; done | awk -F'\t' 'NF && !k[$1]++')"
     # the sheet's own reader of the open decisions: a decision put and not ruled is open here as there, and owed once

@@ -251,6 +251,23 @@ proof_step_event() {  # <plan> <step> [<field>=<value>…] -> one step event in 
   RUN_LOG="$log" log_append step "n=$n" "$@"
 }
 
+# THE RUN'S LOG HOLDS A DECISION'S ROUND, and this is the type's one writer: the decisions verb's put and its ruling,
+# however the ruling arrives, call it. Its fields are the ones the translation gives an older run's design-ledger
+# heading, so an old round and a new one read alike:
+#
+#   decision  entry=Δ<k> d=D<n> verb=put by=<who> title=<title> [wait=<the wait line>]
+#   decision  entry=Δ<k> d=D<n> verb=ruled said=<the reply> by=<who> [title=<title>]
+#
+# entry= numbers the round one past the highest the reader holds for the run, the ledger's and the log's alike, so two
+# rounds in the same words are two facts and the numbering runs on from the ledger. Exits as proof_waiver_event's.
+proof_decision_event() {  # <plan> <field>=<value>… -> one decision round in the plan's run log
+  local log k
+  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" && k="$(_proof_ask "$1" reader_q_ledger "$1")" || return 2
+  k="$(printf '%s\n' "$k" | awk -F'|' "$_READER_AWK"'{ e = line_kv("entry"); sub(/^Δ/, "", e); if (e ~ /^[0-9]+$/ && e + 1 > n) n = e + 1 } END { print n + 0 }')"
+  shift
+  RUN_LOG="$log" log_append decision "entry=Δ$k" "$@"
+}
+
 # A STEP A DRY JUDGMENT ASKS ABOUT stands last in the facts of that judgment and nowhere else. The advance runs the
 # commit gate on the plan itself under its own session, `planverb-<pid>`, with the step it moves to in BIONIC_DRY_STEP;
 # close-out's pre-flight judges a copy of the plan, whose name joins no record, under `closeout-preflight-<pid>`, with
