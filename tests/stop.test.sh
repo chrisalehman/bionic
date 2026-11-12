@@ -1,6 +1,5 @@
 #!/bin/bash
-# Tests for hooks/stop.sh — ONE PROCESS AT TURN END (epic-23 wave-11-lean-spine,
-# REQ-1f (iv); spec Design §2 D4; ADR-004; T12 ruling R7).
+# Tests for hooks/stop.sh — ONE PROCESS AT TURN END.
 #
 # WHAT THIS FILE IS FOR, AND WHAT IT IS NOT. The four verdicts keep their own
 # suites, re-pointed at this process and unchanged in count:

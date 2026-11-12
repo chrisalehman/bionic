@@ -1,7 +1,5 @@
 #!/bin/bash
 # tests/width.test.sh — payload/scripts/lib/width.sh, the one column budget
-# (bionic 1.4.0, wave-bionic-1.4.0-update task DOCTOR handoff 4.6, spec AC-23:
-# "the arrow glyph measures one column").
 #
 # WHAT THIS SUITE IS FOR. width.sh's own header states the property everything
 # else in it rests on: the glyph set is CLOSED, and "a glyph added to a report

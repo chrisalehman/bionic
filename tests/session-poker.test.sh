@@ -476,8 +476,6 @@ expect_absent "…and the walk is not mistaken for a decision" "decision=" "$OUT
 section "Section 6: the Patrol stamp — the arm verb, and stamp-before-decide on every tick"
 # ============================================================
 #
-# epic-17 W5 task 4/4, spec AC-6; design ledger D-C mechanics (2) and (3).
-#
 # WHAT THE STAMP MEASURES, and the whole reason it is written where it is written.
 # The stamp is the Patrol's liveness signal: a session-keyed file beside the roster whose
 # AGE says how long ago the Patrol last fired. hooks/dispatch-preflight.sh refuses a

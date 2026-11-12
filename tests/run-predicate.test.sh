@@ -1,8 +1,7 @@
 #!/bin/bash
 # tests/run-predicate.test.sh — payload/scripts/lib/run.sh: docs_root, active_plan,
-# active_run (L-RUN, wave-bionic-1.4.0-update, spec AC-8; plan design-ledger S1) and the
+# active_run and the
 # session-bound readers run_open / open_runs / session_plan / session_run
-# (wave-session-bound-run S1, 2026-09-04; spec AC-1, AC-3, AC-6).
 #
 # WHAT IT OWNS. The "is there a run to protect" predicate: active_run <root> is exit 0 +
 # the plan path iff the newest plan (by mtime) under the docs root's plans/incidents trees
