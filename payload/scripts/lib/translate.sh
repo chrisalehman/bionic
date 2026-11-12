@@ -145,10 +145,11 @@ _translate_section() {  # <plan> <heading> -> the lines under `## <heading>`, to
 # its approvals are read from these alone (lib/proof.sh `proof_step_held`), so a source that comes to write one of the
 # three joins this list, or that read misses it; tests/reader.test.sh §HELD compares the two reads and goes red until it does.
 TRANSLATE_PLACE_SOURCES="_translate_state _translate_abandon _translate_log"
-# THE HOMES OF A SESSION'S FACTS: the only sources that write an order, a handoff or a bind. The reader asks the three of
-# these alone (lib/reader.sh `reader_session`), so a source that comes to write one joins this list; tests/reader.test.sh
-# §SESSION compares that read with the whole fold and goes red until it does.
-TRANSLATE_SESSION_SOURCES="_translate_state _translate_handoff _translate_log"
+# THE HOMES OF A SESSION'S FACTS: the only sources that write an order or a bind, and the only ones that write a handoff.
+# The reader asks the three of these alone (lib/reader.sh `reader_session`), so a source that comes to write one joins
+# its list; tests/reader.test.sh §SESSION compares that read with the whole fold and goes red until it does.
+TRANSLATE_SESSION_SOURCES="_translate_state _translate_log"
+TRANSLATE_HANDOFF_SOURCES="_translate_handoff _translate_log"
 
 translate_source _translate_state
 _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessions, proofs, findings, waivers, orders
@@ -275,10 +276,11 @@ translate_source _translate_handoff
 _translate_handoff() {  # <plan> -> the Handoff pointer: its path and the local time it was written
   # The pointer's time is this machine's clock, never UTC, so it stands at the minute it names, read as UTC, beside a
   # handoff the run's log holds; a time this clock cannot read stands after every timed line, as any untimed line does.
-  local l t k=""
-  l="$(_translate_section "$1" "Handoff" | awk '/^handoff: / && / written / { print; exit }')"
-  t="${l#* written }"; [ -z "$l" ] || k="$(_translate_local_minute "$t")"
-  _translate_section "$1" "Handoff" | awk -v k="$k" "$_TRANSLATE_AWK"'
+  local sec l k=""
+  sec="$(_translate_section "$1" "Handoff")" || return
+  l="$(printf '%s\n' "$sec" | awk '/^handoff: / && / written / { print; exit }')"
+  [ -z "$l" ] || k="$(_translate_local_minute "${l#* written }")"
+  printf '%s\n' "$sec" | awk -v k="$k" "$_TRANSLATE_AWK"'
     /^handoff: / { s = substr($0, 10); w = index(s, " written ")
       begin("handoff", "path", (w ? substr(s, 1, w - 1) : s)); if (k != "") after(k); emit(w ? substr(s, w + 9) : "") }'
 }

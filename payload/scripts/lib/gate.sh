@@ -1134,8 +1134,8 @@ gate_budget() {  # <kind> <key> -> rc 0 admitted; rc 75 refused, the budget's li
 # key is refused by the same order; the log is read when no run holds an open one.
 #
 # gate_order_of <orders.log> -> the open order's `given <ISO-UTC> "<words>"`, rc 0; rc 1 when none.
-# gate_order_plan <plan> -> the run's open order in the same shape, asked of the reader; rc 1 when none
-#   stands or the reader cannot answer.
+# gate_order_plan <plan> -> the run's open order in the same shape, the reader's answer held with the run's
+#   place (lib/proof.sh `proof_order_held`); rc 1 when none stands or it cannot be read.
 # gate_order [<root>] -> the open order, as gate_order_of prints it, rc 0; rc 1 when none. The root
 #   defaults to the project the working directory belongs to (lib/root.sh `project_root`, so a linked
 #   tree reads its main checkout's run).
@@ -1150,12 +1150,12 @@ gate_order_of() {
 }
 gate_order_plan() {
   [ -f "${1:-}" ] || return 1
-  if ! declare -F reader_session >/dev/null 2>&1; then
+  if ! declare -F proof_order_held >/dev/null 2>&1; then
     # shellcheck source=/dev/null
-    [ -r "$_GATE_LIB_DIR/reader.sh" ] && . "$_GATE_LIB_DIR/reader.sh" >/dev/null 2>&1
-    declare -F reader_session >/dev/null 2>&1 || return 1
+    [ -r "$_GATE_LIB_DIR/proof.sh" ] && . "$_GATE_LIB_DIR/proof.sh" >/dev/null 2>&1
+    declare -F proof_order_held >/dev/null 2>&1 || return 1
   fi
-  reader_session "$1" order 2>/dev/null | awk '
+  proof_order_held "$1" 2>/dev/null | awk '
     { k = substr($0, 1, index($0, "=") - 1); v[k] = substr($0, index($0, "=") + 1) }
     END { if (v["order"] != "given") exit 1; printf "given %s \"%s\"\n", v["at"], v["said"] }'
 }

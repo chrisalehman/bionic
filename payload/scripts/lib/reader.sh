@@ -178,17 +178,23 @@ reader_main() {  # <plan> <question> [args] -> the answer in its form; 2 refused
   return 2
 }
 
-# A SESSION'S FACTS ARE ASKED OF THEIR OWN HOMES. An order, a handoff and a bind are written by no home of an older run but
-# its SDLC State and its Handoff, and then by the run's log (lib/translate.sh TRANSLATE_SESSION_SOURCES), so the three
-# questions over them are answered from those homes alone, a tenth of the whole translation of a long plan: the runner
-# asks the order at every suite's start, and every engagement asks the sessions.
+# A SESSION'S FACTS ARE ASKED OF THEIR OWN HOMES. An order and a bind are written by no home of an older run but its SDLC
+# State, a handoff by none but its Handoff, and then each by the run's log (lib/translate.sh TRANSLATE_SESSION_SOURCES,
+# TRANSLATE_HANDOFF_SOURCES), so the three questions over them are answered from those homes alone, a fraction of the
+# whole translation of a long plan: every engagement asks the sessions, and the close and the roster the handoff.
 reader_session() {  # <plan> <order|handoff|sessions> [args] -> reader_main's answer, read from the homes of a session's facts
-  case "${2:-}" in order|handoff|sessions) ;; *) printf "reader: '%s' is no question of a session's facts\n" "${2:-}" >&2; return 2 ;; esac
+  local src
+  case "${2:-}" in
+    order|sessions) src="$TRANSLATE_SESSION_SOURCES" ;;
+    handoff) src="$TRANSLATE_HANDOFF_SOURCES" ;;
+    *) printf "reader: '%s' is no question of a session's facts\n" "${2:-}" >&2; return 2 ;;
+  esac
   if ! declare -F translate >/dev/null 2>&1; then
     # shellcheck source=/dev/null
     . "$_READER_LIB_DIR/translate.sh" || return 2
+    case "${2:-}" in handoff) src="$TRANSLATE_HANDOFF_SOURCES" ;; *) src="$TRANSLATE_SESSION_SOURCES" ;; esac
   fi
-  TRANSLATE_SOURCES="$TRANSLATE_SESSION_SOURCES" reader_main "$@"
+  TRANSLATE_SOURCES="$src" reader_main "$@"
 }
 
 _reader_needs() {  # <question> <usage> <value> -> 0 when the value is given, else 2 with the usage
