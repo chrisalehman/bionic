@@ -368,13 +368,7 @@ expect_eq "REMOVE: the claude home itself survives" "yes" "$(path_exists "$SB_RB
 # ---------------------------------------------------------------------------
 section "§EDITED: an edited span is bionic's — setup replaces it and asks nothing (AC-7.2)"
 # ---------------------------------------------------------------------------
-# WAVE-31 T10 REWROTE THIS SECTION. It pinned wave-27 T40 finding 5, "an edited block is
-# the user's": setup kept it, showed a unified diff, and replaced it only on a live yes.
-# The user's ruling (2026-10-09) reverses that: the span between the markers is bionic's.
-# Deleted with the behaviour: "setup prints the difference as a unified diff", "the
-# difference names the user's own line", "the yes arm also showed the difference before
-# asking". Inverted: "a no keeps the edit" and "a closed input keeps the edit" now say the
-# span is replaced whatever the input holds. Kept: a replacement is the shipped text and
+# A replacement is the shipped text and
 # leaves every line outside the markers as it was.
 
 SB_E="$(new_home)"
