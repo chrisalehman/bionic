@@ -1104,10 +1104,10 @@ expect_eq "MK-4 the five filled by continuation-fill from an unengaged session: 
 section "§OWED-AT-CLOSE — close-out settles the matrix row its own last reading proves, and the gate before the flip does not refuse on it"
 # ============================================================
 # A row owed at the close (step 9) whose eval names `landing-report --hand-holds` is proved by the line close-out reads last,
-# after `delivered:`, so the pre-flight and the dry-run at current 8 owe it nothing; close-out writes it in the act that
-# reads that line: discharged at total=0, else blocked with the line quoted, evidence the continuation path. Blocked is
-# reported, never a refusal. FIXTURE: mk_fixture at Step 8 plus a landed close row T4 and two rows owed at the close.
-# fails-when: the run refuses on the pending row (OC-1; OC-1c shows the refusal live with the deferral off), or the delivered plan reads it pending or discharged above zero, or a row on another eval is written.
+# after `delivered:`, so the pre-flight and the dry-run at current 8 owe it nothing; close-out proves it in the act that
+# reads that line: at total=0 one proof event naming it, its evidence the continuation path, else nothing and the line
+# quoted in the report. The plan is not written. FIXTURE: mk_fixture at Step 8 plus a landed close row T4 and two rows owed at the close.
+# fails-when: the run refuses on the pending row (OC-1; OC-1c shows the refusal live with the deferral off), or no proof names it at zero, one does above zero, a row on another eval is proved, or the plan is written.
 oc_rows() {  # <project> -> the plan gains T4 (step 9, close), a T3 row on the close's measure and a T0 row (task: 9) on another eval
   local plan="$1/$PLAN_REL"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "oc_rows: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
@@ -1127,8 +1127,9 @@ oc_cells() {  # <plan> <AC> -> `<status>|<evidence cell>`
   awk -F'|' -v a="$2" '/^## Verification Matrix/ { m = 1 } m && /^\|/ { x = $2; gsub(/^ +| +$/, "", x)
     if (x == a) { s = $4; e = $5; gsub(/^ +| +$/, "", s); gsub(/^ +| +$/, "", e); print s "|" e; exit } }' "$1"
 }
-oc_ev() {  # <plan> <AC> -> the AC block's evidence: value
-  awk -v a="$2:" '$0 == a { b = 1; next } b && /^[^ ]/ { b = 0 } b && /^  evidence: / { sub(/^  evidence: /, ""); print; exit }' "$1"
+oc_proofs() {  # <project> -> `<AC> <evidence>` of each proof naming a criterion in the run's log, space-joined
+  awk -F'|' '$2 == "ev=proof" { a = ""; e = ""; for (i = 3; i <= NF; i++) { if ($i ~ /^ac=/) a = substr($i, 4); if ($i ~ /^evidence=/) e = substr($i, 10) }
+    if (a != "") printf "%s%s %s", (n++ ? " " : ""), a, e }' "$1/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null
 }
 OC_CONT="record/wave-01-fixture/continuation.md"
 POC="$(mk_fixture owed-close)"; advance_to "$POC" 8; oc_rows "$POC"
@@ -1149,12 +1150,11 @@ expect_eq "OC-1 run exits 0: the pre-flight and the dry-run before the flip do n
 expect_contains "OC-1b …the dry-run said ok" "gate: ok" "$CO_OUT"
 expect_contains "OC-2 precondition: the line read last reads zero" "hand-holds: total=0 " "$OC_LINE"
 OC_P="$(oc_after "$POC")"
-expect_eq "OC-3 the delivered plan reads AC-2 discharged, its evidence cell the continuation path" "discharged|$OC_CONT" "$(oc_cells "$OC_P" AC-2)"
-expect_eq "OC-3b …and its block's evidence: key the continuation path" "$OC_CONT" "$(oc_ev "$OC_P" AC-2)"
+expect_eq "OC-3 the run's log holds one proof naming AC-2, its evidence the continuation path, and none naming AC-3, on another measure" \
+  "AC-2 $OC_CONT" "$(oc_proofs "$POC")"
+expect_eq "OC-3b …and the delivered plan's table is as it was" "pending|—|pending|—" "$(oc_cells "$OC_P" AC-2)|$(oc_cells "$OC_P" AC-3)"
 expect_contains "OC-3c …and the card names the row and the status it wrote" "matrix: AC-2 discharged" "$CO_OUT"
-expect_eq "OC-4 a row owed at the close whose eval is another measure is not written: AC-3 still pending" "pending|—|pending" \
-  "$(oc_cells "$OC_P" AC-3)|$(oc_ev "$OC_P" AC-3)"
-expect_eq "OC-4b …written in the act that reads the measure last, before the archive is asked: its line follows the hand-holds line and precedes archived:" "yes" \
+expect_eq "OC-3d …written in the act that reads the measure last, before the archive is asked: its line follows the hand-holds line and precedes archived:" "yes" \
   "$(printf '%s\n' "$CO_OUT" | awk '/^hand-holds: / { h = NR } /^matrix: AC-2 / { m = NR } /^archived: / { a = NR } END { print (h && m > h && a > m) ? "yes" : "no" }')"
 # above zero: an amend after the last landing, as §READ-ORDER plants it
 POB="$(mk_fixture owed-close-above)"; advance_to "$POB" 8; oc_rows "$POB"
@@ -1167,8 +1167,7 @@ expect_eq "OC-5 a measure above zero still delivers: run exits 0" "0" "$CO_RC"
 [ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | tail -15 | sed 's/^/    | /'
 expect_contains "OC-5b precondition: the line read last counts the amend" "amends=1 " "$OB_LINE"
 OB_P="$(oc_after "$POB")"
-expect_eq "OC-6 the delivered plan reads AC-2 blocked, its evidence cell the continuation path" "blocked|$OC_CONT" "$(oc_cells "$OB_P" AC-2)"
-expect_eq "OC-6b …its block's evidence: key the continuation path with the line quoted" "$OC_CONT — $OB_LINE" "$(oc_ev "$OB_P" AC-2)"
+expect_eq "OC-6 above zero no proof names AC-2, and the delivered plan's table is as it was" "|pending|—" "$(oc_proofs "$POB")|$(oc_cells "$OB_P" AC-2)"
 expect_contains "OC-6c …and the card says it is blocked, naming the line" "matrix: AC-2 blocked — $OB_LINE" "$CO_OUT"
 
 # ============================================================

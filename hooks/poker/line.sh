@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# hooks/poker/line.sh — the landing line: a row lands itself, its evidence, the run's numbers and hand-holds
+# hooks/poker/line.sh — the landing line: a row lands itself, the run's numbers and hand-holds
 # (the record row's landing by the tick, reviews-part, known-limits-part, release-note).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
@@ -517,19 +517,15 @@ landing_report() {  # <plan or landing record> <project root> <rows yes|no> [ins
 #   extensions     DISTINCT (name, value) over the rosters whose `plan=` is this run's plan (a row of another run, or of
 #                  `plan=none`, is not this run's). The roster lives in `.bionic/tmp`, which close-out's act 3 wipes,
 #                  so close-out reads this line BEFORE the wipe and carries it.
-#   waivers        the plan's `waived: question=…` line under `## SDLC State` (`waive`) and an AC block's indented
-#                  `waiver: <who> <ISO-UTC> "<words>"` under `## Verification Matrix` (`waive-row`), or the older
-#                  `waiver: <who> <YYYY-MM-DD> "<words>"` a plan may still carry. Fenced text is skipped, as every
-#                  reader of the plan skips it.
-#   status-writes  the log's `run/v1|ev=hand|what=matrix-set|ac=<id>|cells=<status,evidence,task>|by=<who>|at=<ISO-UTC>`, one per
-#                  `matrix-set` call that changed the plan, written in the same act as its plan write (hooks/poker/plan.sh
-#                  `poker_verb_matrix_set`). It is counted when its cells name the status or the task, placed by its `at=`
-#                  like every record kind. A task write counts: the task: key is what defers a pending row to its
-#                  task's step, so writing it by hand moves the row off every gate. A call the settled-cell rule
-#                  refuses, or that only restates a key, writes none. An evidence-only line is a write and no status:
-#                  not counted. A `run/v1|ev=hand|what=matrix-retier|…` line (`matrix-retier`) raises a tier and resets
-#                  the row: strengthening is the run's act, so it is counted
-#                  in no field; weakening stays a person's, a waiver: line among the waivers.
+#   waivers        each waiver event `waive` writes, of a question or a criterion, the plan's older `waived:
+#                  question=…` line under `## SDLC State`, and an AC block's indented `waiver: <who> <when> "<words>"`
+#                  an older plan holds under `## Verification Matrix`. Fenced text is skipped, as every reader of the
+#                  plan skips it.
+#   status-writes  the hand act an older run's cell verb wrote to the log (`what=` its name, `cells=` the cells it
+#                  wrote), one per call that changed the plan: counted when its cells name the status or the task,
+#                  placed by its `at=` like every record kind, since a task written by hand moved its row off every
+#                  gate. An evidence-only line is a write and no status: not counted. An older run's tier raise is
+#                  the run's own act and counted in no field. No verb writes either now.
 #   second-regressions  a whole run a person started, past the first. The tick and the orchestrator start the whole
 #                  run as the machine does, so only a person's start is a hand-hold: the landing record's regression
 #                  run lines (`ev=run`, a log under `regression-run-`, or `kind=regression`) past the record's first
@@ -623,7 +619,7 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
         else if (e != "hand") next
         else if (w == "stop-run" && hh_take(t)) s++
         # a waiver line a person wrote in a criterion block, counted from its own line whatever the row reads
-        else if (w == "waive-row" && hh_take(t)) v++
+        else if (w == "waive-row") { wr[line_kv("ac")] = 1; if (hh_take(t)) v++ }
         # only a write that names the status cell or the task key is one the gate reads; an evidence-only one is neither placed nor counted
         else if (w == "matrix-set" && (index("," line_kv("cells") ",", ",status,") || index("," line_kv("cells") ",", ",task,")) && hh_take(t)) c++
         # a refusal that named a person as its exit is one the person had to answer
@@ -639,8 +635,9 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
         if (++r > 1 && line_kv("starter") == "person" && hh_take(line_kv("at"))) f++
       }
       e == "proof" && line_kv("kind") == "regression" { pr[++np] = line_kv("evidence"); pa[np] = line_kv("at") }
-      # a waiver of a question is the line the waive verb writes; a criterion waiver is counted by its block line above
-      e == "waiver" && line_kv("question") != "" && hh_take(line_kv("at")) { v++ }
+      # a waiver is the event the waive verb writes, of a question or of a criterion; a criterion waiver an older plan
+      # holds as a block line is counted once, by that line above, though its waived row reads as a waiver too
+      e == "waiver" && (line_kv("question") != "" || line_kv("ac") != "" && !(line_kv("ac") in wr)) && hh_take(line_kv("at")) { v++ }
       e == "finding" && line_kv("to") == "fixed" && line_kv("by") != "landing" { fr[++nf] = line_kv("row"); fa[nf] = line_kv("at") }
       e == "stop" && line_kv("state") == "decline" && hh_take(line_kv("at")) { d++ }
       e == "stop" && line_kv("state") == "lift" && hh_take(line_kv("at")) { l++ }
@@ -751,7 +748,7 @@ record_row_land() {
   line_event "$PV_PLAN" published "row=$PV_ID" "commit=$RL_COMMIT" kind=record "by=$ROW_WRITER" "why=$RL_ARTIFACT" >/dev/null || {
     die "REFUSED — the run's log cannot take the landing of $PV_ID; nothing is landed."; exit 1; }
   line_landing_writes "$PV_PLAN" "$PV_ID" "$RL_COMMIT" "$RL_AT" \
-    || say "UNSETTLED $PV_ID — landed at $RL_COMMIT; the evidence keys and the stack-health line are not written and the findings it settles are not moved"
+    || say "UNSETTLED $PV_ID — landed at $RL_COMMIT; the findings it settles are not moved or their asks not closed"
   say "landed $PV_ID — its record $RL_ARTIFACT at the working head $RL_COMMIT"
   exit 0
 }

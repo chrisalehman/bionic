@@ -26,7 +26,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a review: that proof line with its question, reviewer, result and scope
 #     bash <plugin-root>/hooks/session-poker.sh order '<the user's words>' | order lift   the user's order every suite obeys, or its end: an order: line with the words and the time (writes the plan, or record/orders.log with no run bound)
-#     bash <plugin-root>/hooks/session-poker.sh waive <question|all> '<reply>'   the user's waiver of a review question, or all three, at the working head (writes the run's log)
+#     bash <plugin-root>/hooks/session-poker.sh waive <question|all|AC-id> '<reply>'   the user's waiver of a review question, all three, or a criterion (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh floor-run   run the project's regression (its floor: command, else tests/run.sh, whole, held to the full-run rules) in the working checkout and log it for proof-add floor (writes a log under record/, never the plan)
 #     bash <plugin-root>/hooks/session-poker.sh share [<n>] [reserve=<cores>]   print the machine's share, the reserve the person keeps, the cores and the room, or set the share to <n>, 1 to 100, and the reserve to <cores> (the set writes the user-level files)
@@ -41,8 +41,6 @@
 #     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] [--machine <caller>] --why '<reason>'   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, one hand event unless a machine caller stops it)
 #     bash <plugin-root>/hooks/session-poker.sh regression-runs [--write]   the full-runner runs the rosters record; --write puts the count in the bound plan's header
 #     bash <plugin-root>/hooks/session-poker.sh anchors check|index [<root>] [--at <commit>]   check every suite's mutation anchors where they point, or print file -> the suites anchored on it (read-only)
-#     bash <plugin-root>/hooks/session-poker.sh matrix-render   write the bound plan's AC blocks from its ## Eval design, each with evidence: pending, and user-confirmed: pending at T4 (writes the plan)
-#     bash <plugin-root>/hooks/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh handoff ['<purpose>'] < sections   write the handoff document under the handoffs folder of the docs record, bound or not: the composed sections from stdin, State computed, the resume line last; bound, the plan's ## Handoff becomes one pointer line (writes the file, and the plan when bound)
 #     bash <plugin-root>/hooks/session-poker.sh resume <handoff.md>   the one door: engage this session when it is not, bind the plan the file names, arm at a scale with a Patrol, adopt, tick; a dozen lines to the terminal, the rest to one recap file (writes the marker, the stamp, this session's roster and the recap)
 #     bash <plugin-root>/hooks/session-poker.sh decisions [--all]   the register (D24): this run's rulings from record/<wave>/design-ledger.md, or every run's with the ADRs (read-only)
@@ -532,8 +530,9 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <regression|review|task|walk> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read; proof-add regression <log> [<log>…] takes one log or several, each opening head=<40-hex> dirty=0 and ending rc=0"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add inherited <suite>   run that suite file, red in the regression's whole run, at the plan's base in a scratch tree: red there too is inherited debt, written as an inherited: line; green there is a regression, refused"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name>   record a review: the review proof with the question, reviewer, result and scope"
-  die "  bash ${HOOK_DIR}/session-poker.sh proof-add walk <record>   register the walk: its | AC | verdict | why | table and one verdict: line, read as the critic's; each CONFIRMED row no landing settled reads discharged with the record as its evidence, walk-artifact: is set in the Step 5 block and the matrix head, all in one plan write, and one ev=walk line goes to the landing record"
+  die "  bash ${HOOK_DIR}/session-poker.sh proof-add walk <record>   register the walk: its | AC | verdict | why | table and one verdict: line, read as the critic's; one walk proof and one proof naming each CONFIRMED criterion go to the run's log, the plan unwritten; a record that leaves out a criterion the standing walk confirms is refused; one ev=walk line goes to the landing record"
   die "  bash ${HOOK_DIR}/session-poker.sh waive <evidence|adversarial|structure|all> '<reply>'   record the user's waiver of that question, or of all three, at the working head, one waiver event each in the run's log"
+  die "  bash ${HOOK_DIR}/session-poker.sh waive <AC-id> '<the user's words>' ['<why>']   record the user's waiver of that criterion, on words they typed in this session: one waiver event naming it in the run's log, which discharges it"
   die "  bash ${HOOK_DIR}/session-poker.sh release-check   run .bionic/config.yaml's release-check: command from the last release to the working head; record its log and a kind=check proof line, result=fail on a non-zero exit"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-run [--starter tick|orchestrator|person] [--reason '<why>']   run the regression in the working branch's checkout, .bionic/config.yaml's regression-command: command, else tests/run.sh whole (held to the full-run rules); write its log, opening head=<40-hex> dirty=<n> and closing rc=<n>, for proof-add regression to cite; --starter names who started it, written as starter= on its run line (orchestrator by default), and person needs --reason"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>' ['<changelog sentence>']   move a finding across the line on words the user typed in this session, a deferral with its one changelog sentence, as a finding event in the run's log"
@@ -551,13 +550,8 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> --why '<reason>' [--report-only] [--machine <caller>]   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one hand event, what=stop-run with its reason, goes to the bound run's log, unless --machine names the tool's own caller (close-out's sweep), whose stop is no act by hand; with no reason the stop is refused and nothing is sent"
   die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
   die "  bash ${HOOK_DIR}/session-poker.sh anchors check|index [<root>] [--at <commit>]   check: MOVED <suite>:<line> for each anchor whose text is not on exactly one line where it points (exit 1), nothing and exit 0 when every anchor holds; index: <file> TAB <suite>[,<suite>] per anchored file. <root> defaults to the current tree, --at reads a commit"
-  die "  bash ${HOOK_DIR}/session-poker.sh matrix-render   write the bound plan's ## Verification Matrix AC blocks from its ## Eval design: a tier table row for each criterion it lacks, at the tier its eval type maps to (lib/scale.sh), then provenance, serves (the Eval design row's requirement), fails-when, eval, task, evidence: pending, and user-confirmed: pending at a T4 row; adds only what is missing"
-  die "  bash ${HOOK_DIR}/session-poker.sh discharge <AC-id>   write that matrix row's auditor cell as the bare token CONFIRMED, nothing after it"
-  die "  bash ${HOOK_DIR}/session-poker.sh matrix-set <AC-id> [status=<pending|blocked|discharged|waived>] [evidence=<record/...>] [task=<id>[,<id>...]]   write that matrix row's status and evidence cells and its AC block's evidence: and task: keys; never the tier or auditor cell"
-  die "  bash ${HOOK_DIR}/session-poker.sh matrix-retier <AC-id> tier=<T0..T4> eval=<text>   raise that criterion's tier where it lives (the matrix tier cell, its block's eval: line, its ## Eval design row) and reset the row to pending, its evidence, auditor and waiver cleared; a lower or equal tier is the user's"
   die "  bash ${HOOK_DIR}/session-poker.sh ${RA_USAGE}"
-  die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the release approval card, all default or all recommended, into approve, waive, waive-row and finding-move with their words"
-  die "  bash ${HOOK_DIR}/session-poker.sh waive-row <AC-id> '<the user's words>' '<why>'   waive that matrix row on words the user typed in this session: its block's waiver: line and its status waived"
+  die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the release approval card, all default or all recommended, into approve, waive and finding-move with their words"
   die "  bash ${HOOK_DIR}/session-poker.sh confirm-row <AC-id> '<the user's words>' ['<why>']   record the user's own confirmation of a T4 row's check, on words they typed in this session: its block's attributed confirmation line"
   die "  bash ${HOOK_DIR}/session-poker.sh epic-row <wave> <col>=<val>... [--plan <plan>]   set cells of that wave's row in the shipped table of the epic.plan.md beside the run's plan"
   die "  bash ${HOOK_DIR}/session-poker.sh continuation-fill '<field>=<text>' [--plan <plan>]   fill the run's continuation's <fill: field...> mark with the text"
@@ -864,49 +858,6 @@ case "$VERB" in
       || usage "amend: --suites= sets the suites and --suites+ adds to them; give one."
     case ",$(printf '%s' "$AMEND_NARROW" | tr '\n' ','), " in *,none,*) usage "amend: --suites= narrows to suites the row keeps; none is a waiver, not a narrowing." ;; esac
     ;;
-  # THE MATRIX ROW'S CELLS AND BLOCK KEYS (wave-33 T7; REQ-4 AC-4.1, D8). An AC id, as discharge takes it,
-  # then at least one `<key>=<value>`. The keys and the values are the verb's own refusals (1).
-  matrix-set)
-    { [ $# -ge 2 ] && [ -n "$1" ]; } || usage "matrix-set takes <AC> and at least one of status=<pending|blocked|discharged|waived>, evidence=<record/…>, task=<ids>."
-    case "$1" in
-      *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*)
-        usage "matrix-set: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not a criterion id: letters, digits, '.', '_' or '-'." ;;
-    esac
-    MS_AC="$1"; shift
-    for _pv_a in "$@"; do
-      case "$_pv_a" in [!=]*=*) : ;; *) usage "matrix-set: '$_pv_a' is not <key>=<value>." ;; esac
-    done
-    MS_PAIRS=("$@")
-    ;;
-  # THE TIER'S ONE WRITER. An AC id, as matrix-set takes it, then tier=<T> and eval=<text>, each once; what the
-  # values may be is the verb's own refusal (1).
-  matrix-retier)
-    RT_USAGE="matrix-retier takes <AC>, tier=<T0..T4> and eval=<the criterion's new eval>."
-    [ $# -eq 3 ] && [ -n "$1" ] || usage "$RT_USAGE"
-    case "$1" in
-      *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*)
-        usage "matrix-retier: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not a criterion id: letters, digits, '.', '_' or '-'." ;;
-    esac
-    RT_AC="$1"; RT_TIER=""; RT_EVAL=""; RT_HAS_T=0; RT_HAS_E=0; shift
-    for _pv_a in "$@"; do
-      case "$_pv_a" in
-        tier=*) [ "$RT_HAS_T" = 0 ] || usage "$RT_USAGE"; RT_HAS_T=1; RT_TIER="${_pv_a#tier=}" ;;
-        eval=*) [ "$RT_HAS_E" = 0 ] || usage "$RT_USAGE"; RT_HAS_E=1; RT_EVAL="${_pv_a#eval=}" ;;
-        *) usage "matrix-retier: '$(printf '%s' "${_pv_a:0:24}" | tr -d '[:cntrl:]')' is not tier=<T> or eval=<text>." ;;
-      esac
-    done
-    ;;
-  # THE ROW WAIVER (wave-33 T7; REQ-4 AC-4.1, D8). Three operands, finding-move's last two: the user's words
-  # as typed and why. Whether the words stand in a typed prompt is the verb's own refusal (1).
-  waive-row)
-    WR_USAGE="waive-row takes <AC>, the user's words as typed, and why."
-    { [ $# -eq 3 ] && [ -n "$1" ] && [ -n "${2//[[:space:]]/}" ] && [ -n "${3//[[:space:]]/}" ]; } || usage "$WR_USAGE"
-    case "$1" in
-      *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*)
-        usage "waive-row: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not a criterion id: letters, digits, '.', '_' or '-'." ;;
-    esac
-    WR_AC="$1"; WR_RAW="$2"; WR_WHY_RAW="$3"
-    ;;
   # THE USER'S CONFIRMATION OF A T4 ROW: the criterion, the user's words as typed, and optionally why, which the
   # release approval card's reply passes to whichever choice it applies. The words' standing is the verb's own refusal (1).
   confirm-row)
@@ -1111,9 +1062,17 @@ $1"; shift ;;
   # THE WAIVER VERB (wave-27 T9; D2). Two operands, both required: the reading question and the
   # user's reply, verbatim. The question's membership and the reply's shape are the verb's own
   # refusals (1), as proof-add's question is; a missing or blank operand is the usage error.
+  # A CRITERION IS WAIVED BY THE SAME VERB: its id where the question goes, the user's words, and optionally why, which
+  # the release approval card's reply passes.
   waive)
-    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "${2//[[:space:]]/}" ]; then
-      usage "waive takes exactly two arguments: the question (evidence, adversarial, structure or all) and the user's reply, verbatim."
+    WV_WHY_RAW=""
+    case "${1:-}" in
+      evidence|adversarial|structure|all|'') [ $# -eq 2 ] || set -- ;;
+      *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*) set -- ;;
+      *) [ $# -eq 2 ] || { [ $# -eq 3 ] && [ -n "${3//[[:space:]]/}" ] && WV_WHY_RAW="$3"; } || set -- ;;
+    esac
+    if [ $# -lt 2 ] || [ -z "$1" ] || [ -z "${2//[[:space:]]/}" ]; then
+      usage "waive takes the question (evidence, adversarial, structure or all) and the user's reply, verbatim; or a criterion, the user's words as typed, and optionally why."
     fi
     WV_Q="$1"; WV_REPLY="$2"
     ;;
@@ -1333,11 +1292,6 @@ $1"; shift ;;
     if [ "$AN_SUB" = check ]; then anchors_check "$AN_ROOT" "$AN_AT"; exit $?; fi
     anchors_index "$AN_ROOT" "$AN_AT"; exit 0
     ;;
-  # THE MATRIX VERBS (wave-30 T14; D9). matrix-render takes nothing — the bound plan is the operand every plan
-  # verb has; discharge takes the one criterion id, spelled as the matrix table spells it.
-  matrix-render)
-    [ $# -eq 0 ] || usage "matrix-render takes no argument: it renders the bound plan's matrix from its ## Eval design."
-    ;;
   # THE HANDOFF DOCUMENT. At most one operand, the purpose: what the next session is for, in words. The composed
   # sections come on stdin, never as flags; any flag is the usage error (2).
   handoff)
@@ -1378,14 +1332,6 @@ $1"; shift ;;
   brief)
     { [ $# -ge 1 ] && [ $# -le 2 ] && [ -n "$1" ]; } || usage "brief takes the plan row's id and, optionally, the name its agent is dispatched under, as in: brief T2 w01-T2."
     BRF_ID="$1"; BRF_NAME="${2:-}"
-    ;;
-  discharge)
-    { [ $# -eq 1 ] && [ -n "$1" ]; } || usage "discharge takes exactly one argument: the criterion (AC-<n>.<m>) whose auditor cell becomes CONFIRMED."
-    case "$1" in
-      *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*)
-        usage "discharge: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not a criterion id: letters, digits, '.', '_' or '-'." ;;
-    esac
-    DS_AC="$1"
     ;;
   # THE DEBT LEDGER (wave-30 T22; D2, P2, AC-11.2, AC-11.3). A subcommand, its operands, and at most one
   # plan last, which names the run as landing-report's does; without it, the session's bound run.
@@ -2535,8 +2481,7 @@ pv_next() {  # <verb> <operand>... -> the call on stderr, one line
   die "next call: $(launch_sync_hand "$@")"
 }
 
-
-# THE USER'S WORDS, REFUSED IN ONE VOICE (wave-33 T7). finding-move and waive-row hold their words to
+# THE USER'S WORDS, REFUSED IN ONE VOICE. finding-move and a criterion's waiver hold their words to
 # lib/said.sh `user_said`; its three refusals are written here once, the minimum named by the library's
 # own constant. <act> is what the words make: `a move`, `a waiver`.
 #
@@ -2580,13 +2525,6 @@ plan_verb_id_ok() {
   case "$1" in ["$PV_ID_ALNUM"]*) : ;; *) return 1 ;; esac
   case "$1" in *[!"$PV_ID_ALNUM"._-]*) return 1 ;; esac
   return 0
-}
-
-# finding_owed_key <record>#<n> -> the person's-ledger key of the finding's ruling (lib/owed.sh), `finding:` and
-# the identity with each character a key may not hold (lib/owed.sh `_owed_key_ok`: letters, digits and `:._-`)
-# written `:` (wave-33 T13; D6, D2): `record/w/st.md#2` is `finding:record:w:st.md:2`.
-finding_owed_key() {
-  printf 'finding:%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"
 }
 
 # finding_read <plan> <repo> <record>#<n> -> 0 with the finding in FR_S, FR_R (the reader's rating), FR_P (the
@@ -2952,196 +2890,6 @@ TICK_QUIET_MTIME=""; TICK_QUIET_CHANNEL=""; TICK_QUIET_AGE=""; TICK_QUIET_CAD=""
 POKER_BRIEF_WORDS=""
 BFB_OF=""; BFB_OWED=""; BFB_BRANCH=""
 PFC_OUT=""; PFC_ART=""
-# matrix-render reads the one AC heading matcher (lib/units.sh ac_any) and the one eval-type map (lib/scale.sh
-# tier_of), so its pass holds no copy of either.
-{ declare -F scale_tier_awk >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/scale.sh" ] && . "$BIONIC_LIB/scale.sh"; }; } >/dev/null 2>&1
-MR_AWK="$(units_ac_head_awk)$(scale_tier_awk 2>/dev/null)"'
-# acline(line) -> the criterion id of a `- AC-<n> <text>` bullet (bold and a colon tolerated), its text in ACT; "" else.
-function acline(line,    id) {
-  if (line !~ /^[-*][ \t]+/) return ""
-  sub(/^[-*][ \t]+/, "", line); gsub(/\*\*/, "", line)
-  if (!match(line, /^AC-[0-9A-Za-z.]*[0-9A-Za-z]/)) return ""
-  id = substr(line, 1, RLENGTH); line = substr(line, RLENGTH + 1)
-  if (line !~ /^[: \t]/ && line != "") return ""
-  sub(/^:?[ \t]*/, "", line)
-  if (index(line, " Fails when:")) line = substr(line, 1, index(line, " Fails when:") - 1)
-  ACT = trim(line)
-  return id
-}
-# readreq(f) -> fprov[REQ-<n>] and fact[AC-<n>] from the requirements file f: under each `### REQ-<n>` heading its
-# first provenance: line and its `- AC-<n>` bullets; fences skipped, a `## ` heading ends the requirement.
-function readreq(f,    l, h, a, fz) {
-  if (f == "") return
-  while ((getline l < f) > 0) {
-    sub(/\r$/, "", l)
-    if (l ~ /^[ \t]*```/) { fz = !fz; continue }
-    if (fz) continue
-    if (l ~ /^## /) { h = ""; continue }
-    if (l ~ /^### /) { h = ""; if (match(l, /^###[ \t]+REQ-[0-9A-Za-z.]+/)) { h = substr(l, RSTART, RLENGTH); sub(/^###[ \t]+/, "", h) }; continue }
-    if (h == "") continue
-    if (l ~ /^provenance[ \t]*:/ && !(h in fprov)) { sub(/^provenance[ \t]*:[ \t]*/, "", l); fprov[h] = trim(l); continue }
-    a = acline(l); if (a != "" && !(a in fact) && ACT != "") fact[a] = ACT
-  }
-  close(f)
-}
-function actext(cr) { return (cr in fact) ? fact[cr] : ((cr in pact) ? pact[cr] : "") }
-# taskof(cr) -> the row a criterion\047s `task:` names. One serving row is it; several leave it pending, since no row
-# among them is the criterion\047s by the table alone. The exception is the criterion the close proves, one closeacs
-# holds: walls.sh matrix_close_eval alone names it, so this pass matches no eval text and the task: cell and
-# matrix_close_rows read one answer. The owing-step rule reads this key, so a pending key there holds the close\047s own
-# row live until a hand writes it, and that write is a status write the measure counts. Among its serving rows it takes the one of kind close, else the one at step 9 when no row is of
-# kind close; none or several leave it pending, never a guess.
-function taskof(cr,    t, n, id, nk, ik, ns, is) {
-  n = 0; nk = 0; ns = 0
-  for (t = 1; t <= nt; t++) {
-    if (!serves_hit(t, cr)) continue
-    n++; id = tid[t]
-    if (tkind[t] == "close") { nk++; ik = tid[t] }
-    if (tstep[t] + 0 == 9) { ns++; is = tid[t] }
-  }
-  if (n == 1) return id
-  if (n == 0 || !(cr in isclose)) return "pending"
-  if (nk) return (nk == 1) ? ik : "pending"
-  return (ns == 1) ? is : "pending"
-}
-# reqs(cell) -> the REQ ids a Requirement cell names, comma-joined in its order; "" when it names none. A criterion
-# serves one requirement, and a cell naming several is carried whole so the theme reading can say it read the first.
-function reqs(cell,    o) {
-  o = ""
-  while (match(cell, /REQ-[0-9A-Za-z]+/)) { o = o ((o == "") ? "" : ", ") substr(cell, RSTART, RLENGTH); cell = substr(cell, RSTART + RLENGTH) }
-  return o
-}
-# PROVENANCE IS THE REQUIREMENT\047S (wave-35 T8; REQ-6 AC-6.4; D15): the requirements file the plan names (fprov),
-# else the plan\047s own `### REQ-<n>` line (prov), else pending; the Eval design\047s Approach is never a provenance.
-function val(cr, k,    r) {
-  if (k == "provenance") { r = ereq[cr]; if ((r in fprov) && fprov[r] != "") return fprov[r]; if ((r in prov) && prov[r] != "") return prov[r]; return "pending" }
-  if (k == "fails-when") return (efw[cr] != "") ? efw[cr] : "pending"
-  if (k == "eval") return tier[cr] " — " ((eev[cr] != "") ? eev[cr] : "pending")
-  if (k == "task") return taskof(cr)
-  if (k == "serves") return reqs(ereq[cr])
-  return "pending"
-}
-function wptr(l,   v) {  # a Step-5 line naming a real walk-artifact: value: not empty, not the stub token
-  v = l; sub(/^.*walk-artifact[ \t]*:[ \t]*/, "", v); sub(/[ \t]*;.*$/, "", v); sub(/[ \t]+$/, "", v)
-  if (v != "" && tolower(v) != "pending") haptr = 1
-}
-BEGIN {
-  nk = split(ENVIRON["MR_KEYS"], kl, "\n")
-  for (i = 1; i <= nk; i++) { split(kl[i], kv, "\t"); if (kv[1] != "") keys[kv[1]] = kv[2] }
-  serves_load(ENVIRON["MR_TASKS"])
-  ncl = split(closeacs, cl, "\n"); for (i = 1; i <= ncl; i++) if (cl[i] != "") isclose[cl[i]] = 1
-  walk = tolower(ENVIRON["MR_WALK"]); cf = ENVIRON["MR_COUNT"]
-  readreq(ENVIRON["MR_REQFILE"])
-}
-{ raw[NR] = $0; ln = $0; sub(/\r$/, "", ln); L[NR] = ln }
-END {
-  for (i = 1; i <= NR; i++) {
-    line = L[i]
-    if (line ~ /^[ \t]*```/) { fence = !fence; continue }
-    if (fence) continue
-    # THE POINTER IN THE STEP-5 BLOCK (wave-36 T44; REQ-7 AC-7.1, D13): the walk gate reads walk-artifact: from the Step 5
-    # block alone, so a plan whose block already names its record needs no matrix-level stub as the reminder of it.
-    if (line ~ /^## /) { insd = (line ~ /^##[ \t]+SDLC State/); in5 = 0 }
-    else if (insd) {
-      if (line ~ /^[ \t]*-?[ \t]*Step[ \t]+5[ \t]*:/) { in5 = 1; if (line ~ /walk-artifact[ \t]*:/) wptr(line) }
-      else if (in5 && line !~ /^[ \t]*$/) {
-        if (line ~ /^[^ \t]/ || line ~ /^[ \t]*-?[ \t]*Step[ \t]+[0-9]+[ab]?[ \t]*:/) in5 = 0
-        else if (line ~ /^[ \t]*walk-artifact[ \t]*:/) wptr(line)
-      }
-    }
-    if (line ~ /^## /) {
-      inm = 0; reqh = ""; evh = 0
-      inev = (line ~ /^## Eval design[ \t]*$/); if (inev) sawev = 1
-      if (line ~ /^## Verification Matrix/) { inm = 1; sawm = 1; mhead = i; mlast = i; cur = "" }
-      continue
-    }
-    if (line ~ /^### /) {
-      reqh = ""
-      if (match(line, /^###[ \t]+REQ-[0-9A-Za-z.]+/)) { reqh = substr(line, RSTART, RLENGTH); sub(/^###[ \t]+/, "", reqh) }
-      continue
-    }
-    if (reqh != "" && !inm && !inev && line ~ /^provenance[ \t]*:/ && !(reqh in prov)) {
-      v = line; sub(/^provenance[ \t]*:[ \t]*/, "", v); prov[reqh] = trim(v)
-    }
-    if (reqh != "" && !inm && !inev) { v = acline(line); if (v != "" && !(v in pact) && ACT != "") pact[v] = ACT }
-    if (inev && line ~ /^[ \t]*\|/) { eval_row(line); continue }
-    if (!inm) continue
-    if (line !~ /^[ \t]*$/) mlast = i
-    if (line ~ /^[ \t]*\|/) {
-      cur = ""; if (!tabend) mtl = i
-      if (line ~ /^[ \t]*\|[-|: \t]*$/) continue
-      nc = cells(line, c)
-      if (c[1] == "AC") { if (!sawtab) { sawtab = 1; mnc = nc; for (j = 1; j <= nc; j++) mcol[j] = tolower(c[j]) }; continue }
-      if (c[1] == "") continue
-      mrows++; if (!(c[1] in tier)) tier[c[1]] = c[2]
-      continue
-    }
-    if (sawtab) tabend = 1
-    if (line ~ /^[ \t]*stack-health[ \t]*:/ && !hassh) hassh = i
-    if (line ~ /^[ \t]*walk-artifact[ \t]*:/ && !haswa) haswa = i
-    if (line ~ /^[^ \t]/) {
-      cur = ac_any(line)
-      if (cur != "") { if (cur in bstart) cur = ""; else { bstart[cur] = i; bend[cur] = i } }
-      continue
-    }
-    if (cur != "" && line ~ /^[ \t]+[^ \t]/) {
-      bend[cur] = i; k = line; sub(/^[ \t]+/, "", k); sub(/[ \t]*:.*$/, "", k); if (!((cur, k) in has)) kat[cur, k] = i; has[cur, k] = 1
-    }
-  }
-  if (!sawev || ne == 0) { printf "noeval\t\n" > cf; exit 3 }
-  if (!sawm || !sawtab) { printf "notable\t\n" > cf; exit 4 }
-  # A CRITERION THE TABLE LACKS GAINS ITS ROW, at the tier its eval type maps to (tier_of), in Eval design order and
-  # after the table\047s last line, before any block is written: a criterion added after approval reaches the table and
-  # its block by this one pass. A type the map does not hold is refused, for a guessed tier owes the wrong keys.
-  miss = ""; badt = ""; rows = ""; nr = 0
-  for (e = 1; e <= ne; e++) {
-    cr = ec[e]
-    if (!(cr in tier)) {
-      t = tier_of(etype[cr])
-      if (t == "") { miss = miss ((miss == "") ? "" : ", ") cr " (eval type: " ((etype[cr] != "") ? etype[cr] : "none") ")"; continue }
-      tier[cr] = t; nr++; r = "|"
-      for (j = 1; j <= mnc; j++) r = r " " ((mcol[j] == "ac") ? cr : (mcol[j] == "tier") ? t : (mcol[j] == "status") ? "pending" : "—") " |"
-      rows = rows r "\n"
-    }
-    if (!(tier[cr] in keys) || keys[tier[cr]] == "") badt = badt ((badt == "") ? "" : ", ") cr " (" tier[cr] ")"
-  }
-  if (miss != "") { printf "norow\t%s\n", miss > cf; exit 5 }
-  if (badt != "") { printf "badtier\t%s\n", badt > cf; exit 6 }
-  written = 0; added = nr; same = 0; nb = ""
-  if (rows != "") ins[mtl] = ins[mtl] rows
-  heads = ""
-  if (!hassh) { heads = heads "stack-health: pending\n"; added++ }
-  if (walk != "exempt" && !haswa && !haptr) { heads = heads "walk-artifact: pending\n"; added++ }
-  if (heads != "") { if (hassh) ins[hassh] = ins[hassh] heads; else ins[mhead] = ins[mhead] "\n" heads }
-  for (e = 1; e <= ne; e++) {
-    cr = ec[e]; owed = "provenance serves fails-when eval task evidence"
-    nw = split(keys[tier[cr]], tk, " ")
-    for (w = 1; w <= nw; w++) if (tk[w] != "evidence") owed = owed " " tk[w]
-    no = split(owed, ok, " ")
-    if (cr in bstart) {
-      got = 0
-      for (w = 1; w <= no; w++) {
-        if ((cr, ok[w]) in has) continue
-        v = val(cr, ok[w]); if (ok[w] == "serves" && v == "") continue
-        # serves: stands straight after provenance: where the block holds it; every other key after the block\047s last line
-        at = (ok[w] == "serves" && ((cr, "provenance") in kat)) ? kat[cr, "provenance"] : bend[cr]
-        ins[at] = ins[at] "  " ok[w] ": " v "\n"; added++; got++
-      }
-      if (!got) same++
-    } else {
-      nb = nb cr ":" ((actext(cr) != "") ? " " actext(cr) : "") "\n"
-      for (w = 1; w <= no; w++) { v = val(cr, ok[w]); if (ok[w] != "serves" || v != "") nb = nb "  " ok[w] ": " v "\n" }
-      written++
-    }
-  }
-  if (nb != "" && L[mlast] !~ /^[ \t]+[^ \t]/) nb = "\n" nb
-  for (i = 1; i <= NR; i++) {
-    print raw[i]
-    if (i in ins) printf "%s", ins[i]
-    if (i == mlast && nb != "") printf "%s", nb
-  }
-  printf "%d\t%d\t%d\n", written, added, same > cf
-}'
 
 # ---------------------------------------------------------------- verbs
 
@@ -3343,11 +3091,6 @@ case "$VERB" in
   known-limits-part) poker_verb_known_limits_part "$@" ;;
   step-line) poker_verb_step_line "$@" ;;
   step-field) poker_verb_step_field "$@" ;;
-  matrix-render) poker_verb_matrix_render "$@" ;;
-  discharge) poker_verb_discharge "$@" ;;
-  matrix-set) poker_verb_matrix_set "$@" ;;
-  matrix-retier) poker_verb_matrix_retier "$@" ;;
-  waive-row) poker_verb_waive_row "$@" ;;
   confirm-row) poker_verb_confirm_row "$@" ;;
   epic-row) poker_verb_epic_row "$@" ;;
   continuation-fill) poker_verb_continuation_fill "$@" ;;

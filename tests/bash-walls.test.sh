@@ -647,18 +647,38 @@ expect_eq "RULED-2b: the advance writes current: 8" "0|8" \
   "$RU_RC|$(awk -F': *' '/^current:/ { print $2; exit }' "$R_RU/.bionic/docs/plans/active.md")"
 expect_eq "RULED-2c: …and the row:AC-2 item RULED-1e read open is closed" "" "$(ru_owed)"
 
+# §STANDING — a row a logged proof discharges takes its verdict from the newest passing evidence review for as long as
+# the judge reads the evidence question covered at the working head: past a prose commit it stands and a commit is
+# admitted, past code it is gone and the commit refused by name, and a failing review after the passing one ends it.
+# The commit is judged on the plan itself, whose name, not a copy's, joins the run's log.
+ru_put 6 'T1 | pending | — |  '; RU_P="$R_RU/.bionic/docs/plans/active.md"
+RU_LOG="$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "$RU_LIB" "$RU_P")"; mkdir -p "${RU_LOG%/*}"
+printf 'run/v1|ev=proof|ac=AC-2|evidence=record/generic-evidence.md|at=2026-10-12T12:30:00Z\n' >> "$RU_LOG"
+ru_verdict() { bash -c '. "$1/units.sh" && . "$1/walls.sh" && PLAN="$2" && matrix_load "$2" "$3" && awk -F"\037" "\$1 == \"AC-2\" { print \$6 }" <<< "$MATRIX_CELLS"' \
+  _ "$RU_LIB" "$RU_P" "$(git -C "$R_RU" rev-parse HEAD)" 2>/dev/null; }
+ru_commit() { run_hook "$(mk_payload "$R_RU" 'git commit -m x')"; }
+printf 'more prose\n' >> "$R_RU/README.md"; git -C "$R_RU" commit -qam prose; ru_commit
+expect_eq "STANDING-1: past the review's head a prose commit the judge covers keeps the verdict, and a commit is admitted" "CONFIRMED|0" "$(ru_verdict)|$ST"
+[ "$ST" = 0 ] || printf '      the gate said: %s\n' "$ERR" | head -3
+printf 'x\n' > "$R_RU/lib.sh"; git -C "$R_RU" add lib.sh; git -C "$R_RU" commit -qm code; ru_commit
+expect_eq "STANDING-2: …a code commit it does not cover ends it: no verdict, the commit refused" "|2" "$(ru_verdict)|$ST"
+expect_contains "STANDING-2b: …naming the row" "the auditor has not confirmed AC-2" "$ERR"
+printf 'run/v1|ev=proof|kind=review|head=%s|evidence=record/r/evidence-2.md|question=evidence|reader=w-read|result=fail|scope=piece|at=2026-10-12T13:00:00Z\n' "$H_RU" >> "$RU_LOG"
+git -C "$R_RU" reset -q --hard "$H_RU"
+expect_eq "STANDING-3: a failing review after the passing one at the same head: the passing one no longer stands" "REFUTED" "$(ru_verdict)"
+sed -i.bak -e '/|ac=AC-2|evidence=record\/generic-evidence\.md|/d' -e '/|evidence=record\/r\/evidence-2\.md|/d' "$RU_LOG"; rm -f "$RU_LOG.bak"
+
 # §RULED-ONE — one body: the predicate is defined once, and no file outside walls.sh and the reader's own parses the
 # user's confirmation: the reader reads it from an older plan's block and translates it onto the criterion's event.
 RU_WALLS="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/walls.sh"
 expect_eq "RULED-ONE: matrix_row_ruled has exactly one definition in walls.sh" "1" \
   "$(/usr/bin/grep -c '^matrix_row_ruled()' "$RU_WALLS")"
 RU_UC="$(/usr/bin/grep -rn 'user-confirmed' "${BIONIC_HOOKS_DIR}" "${BIONIC_HOOKS_DIR}/../payload/scripts" | /usr/bin/grep -v 'walls.sh' | /usr/bin/grep -vE 'lib/(reader|translate)\.sh:')"
-expect_contains "RULED-ONE-b: the search outside walls.sh reads the matrix-render writer" "matrix-render" "$RU_UC"
-# The second writer, confirm-row, spells the key once, on the line that names it for its one write; that line is
+# The one writer, confirm-row, spells the key once, on the line that names it for its one write; that line is
 # the whole of its allowance, so a parser of the confirmation added beside it still turns this check red.
 expect_contains "RULED-ONE-d: …and the confirm-row writer's one key line" "CR_KEY=user-confirmed" "$RU_UC"
 expect_eq "RULED-ONE-c: …and nothing else names user-confirmed outside walls.sh and the reader's files" "" \
-  "$(printf '%s\n' "$RU_UC" | /usr/bin/grep -v 'matrix-render' | /usr/bin/grep -v 'proof\.sh:[0-9]*:[[:space:]]*CR_KEY=user-confirmed$')"
+  "$(printf '%s\n' "$RU_UC" | /usr/bin/grep -v 'proof\.sh:[0-9]*:[[:space:]]*CR_KEY=user-confirmed$')"
 
 # ---------------------------------------------------------------------------
 section "§PENDING-T4 — a T4 row awaiting its user passes the per-key check at 6 and 7, and the advance to 8 refuses it"
@@ -668,7 +688,7 @@ section "§PENDING-T4 — a T4 row awaiting its user passes the per-key check at
 # stays non-blank; the stub is the card's to settle, and the ruling arm refuses it on the advance to 8 because
 # `user_confirmed_attributed` (the one reader of the confirmation) does not take it.
 # Fixture fidelity: the plan is §VERDICT's `ru_plan`, in a real repository, with a T4 row whose block carries the
-# stub in the shape `matrix-render` writes it.
+# stub in the shape an older plan's rendering wrote it.
 # fails-when: the stub is refused at 6 or 7; the stub is admitted at 8; the advance to 8 opens no row item for the card; or the
 #   key loop goes back to refusing it and the check still passes.
 RU_PENDING='  user-confirmed: pending'
@@ -713,7 +733,7 @@ expect_eq "PT-4c: with the placeholder test restored, current 6 --check refuses 
 expect_contains "PT-4d: …as a placeholder, which is what PT-1 reads" "placeholder" "$PT_OUT"
 
 # ---------------------------------------------------------------------------
-section "§REFUSED-VERB — a dispatched agent's confirm-row and matrix-retier are refused by the wall; the orchestrator's own are not"
+section "§REFUSED-VERB — a dispatched agent's confirm-row is refused by the wall; the orchestrator's own is not"
 # `confirm-row` records the user's confirmation of a T4 row, so it is the user's act and never an agent's. The
 # dispatch wall refuses every verb on its contract list from a payload carrying an agent id in an armed session;
 # the list gained the verb with no test reading it.
@@ -732,14 +752,6 @@ expect_contains "RV-1c: …naming the verb it refused" "session-poker.sh confirm
 run_hook "$(mk_payload "$R_RV" "$RV_CMD")"
 expect_status "RV-2: the orchestrator's own confirm-row passes the wall" 0 "$ST"
 expect_absent "RV-2b: …and that arm's line is absent on the same stream RV-1b read" "$RV_ARM" "$ERR"
-# `matrix-retier` rewrites a criterion's tier, eval and evidence cells: the run's act, held by the same arm.
-RV_RT="bash ${BIONIC_HOOKS_DIR}/session-poker.sh matrix-retier AC-x tier=T2 eval='x'"; run_hook "$(mk_payload "$R_RV" "$RV_RT" "$ACTOR" "" Bash test-runner)"
-expect_status "RV-3: a dispatched agent's matrix-retier is refused" 2 "$ST"
-expect_contains "RV-3b: …with the wall's line" "$RV_ARM" "$ERR"
-expect_contains "RV-3c: …naming the verb it refused" "session-poker.sh matrix-retier" "$ERR"
-run_hook "$(mk_payload "$R_RV" "$RV_RT")"
-expect_status "RV-4: the orchestrator's own matrix-retier passes the wall" 0 "$ST"
-expect_absent "RV-4b: …and that arm's line is absent on the same stream RV-3b read" "$RV_ARM" "$ERR"
 
 # ---------------------------------------------------------------------------
 section "§PART — reviews-part is the main thread's and the integrate row's own writer's; any other writer is refused with the row named"

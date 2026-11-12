@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # hooks/poker/proof.sh — the proof record: deferrals, findings, approvals, waivers, confirmations, the regression
-# and the debt ledger (approve, proof-add, waive, waive-row, confirm-row, finding-move, disposition, release-check,
+# and the debt ledger (approve, proof-add, waive, confirm-row, finding-move, disposition, release-check,
 # regression, regression-run, debt).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
@@ -165,84 +165,91 @@ walk_head() {
   printf '%s' "$hh"
 }
 
-# THE WALK SETTLES WHAT IT CONFIRMS. Over the plan copy <copy>, for each row of the walk's verdict table (proof_verdicts
-# output on stdin): a CONFIRMED row whose status no landing settled (lib/line.sh `line_settled_by`, read from <plan>'s
-# landing record) gets status `discharged`, and <evidence> in its evidence cell and its block's `evidence:` key; a row
-# a landing settled is the landing's and keeps what it wrote; any other verdict leaves its row as it stands. Every
-# criterion the table names must have a matrix row and a block, or nothing is written.
-# walk_settle <plan> <copy> <evidence> < verdicts -> sets WALK_DONE, WALK_LANDED and WALK_LEFT (space-joined ids) and
-# WALK_WAVE; exit 1 with the refusal's sentence in WALK_WHY, the copy then partly written and to be dropped. It runs in
-# the caller's shell, never a command substitution, so the ids it sets reach the caller.
+# THE WALK DISCHARGES WHAT IT CONFIRMS, AND A RUN HAS ONE WALK RECORD THAT ONLY GROWS. Each row of the walk's verdict
+# table (proof_verdicts output on stdin) must name a criterion the plan names (lib/reader.sh `reader_criteria`); a
+# CONFIRMED row is one proof naming the criterion, the record as its evidence, the shape the translation gives an older
+# plan's discharged row, so the cell answer reads it with no read of its own; any other verdict leaves the criterion
+# as it stands. The record must hold a row for every criterion whose standing proof names a walk's record (the run's
+# walk proofs, at any head), so the record the walk gate reads is the one every walked criterion names: a later record
+# that leaves one out would take the walk from under it. The standing facts are read before the new walk is pending,
+# since a walk at the same head replaces the one before it in the fold.
+# walk_settle <plan> <evidence> < verdicts -> sets WALK_DONE and WALK_LEFT (space-joined ids) and WALK_WAVE; exit 1 with
+# the refusal's sentence in WALK_WHY. It runs in the caller's shell, never a command substitution, so the ids it sets
+# reach the caller.
 walk_settle() {
-  local plan="$1" copy="$2" ev="$3" ac v rc
-  WALK_DONE=""; WALK_LANDED=""; WALK_LEFT=""; WALK_WAVE=""; WALK_WHY=""
-  { [ -n "${_LINE_FIELDS_AWK:-}" ] || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
-    && declare -F line_settled_by >/dev/null 2>&1 \
-    || { WALK_WHY="the landing record library (lib/line.sh) cannot be loaded from $BIONIC_LIB, so which rows a landing settled cannot be read"; return 1; }
+  local plan="$1" ev="$2" ac v known facts walked named=" " left=""
+  WALK_DONE=""; WALK_LEFT=""; WALK_WAVE=""; WALK_WHY=""
+  _proof_reader_load && known="$(reader_criteria "$plan" 2>/dev/null)" || known=""
+  facts="$(_proof_facts "$(proof_run_plan "$plan")")" || { WALK_WHY="the run's facts cannot be read, so the standing walk cannot be judged"; return 1; }
+  walked="$(printf '%s\n' "$facts" | awk -F'|' "$(proof_fact_awk)"'ev() == "proof" { k = line_kv("kind"); e = line_kv("evidence"); a = line_kv("ac")
+      if (k == "walk") w[e] = 1; else if (k == "" && a != "") by[a] = e }
+    END { for (a in by) if (by[a] in w) print a }')"
   while IFS='	' read -r ac v; do
     [ -n "$ac" ] || continue
     if [ "$ac" = wave ]; then WALK_WAVE="$v"; continue; fi
-    if [ -z "$(matrix_row_cell "$copy" "$ac" 1)" ]; then
-      WALK_WHY="the walk record gives a verdict for $ac, and the matrix table has no row $ac; give verdicts for the criteria as the matrix spells them"
-      return 1
-    fi
-    if [ "$v" != CONFIRMED ]; then WALK_LEFT="${WALK_LEFT:+$WALK_LEFT }$ac"; continue; fi
-    if line_settled_by "$plan" cells "$ac" >/dev/null 2>&1; then WALK_LANDED="${WALK_LANDED:+$WALK_LANDED }$ac"; continue; fi
-    rc=0; matrix_row_cells "$copy" "$ac" "3=discharged" "4=$ev" > "$copy.ws" 2>/dev/null || rc=$?
-    [ "$rc" -eq 0 ] && mv -f "$copy.ws" "$copy" \
-      || { rm -f "$copy.ws"; WALK_WHY="the matrix row $ac cannot be written (exit $rc: a row of five cells is needed)"; return 1; }
-    rc=0; matrix_block_key "$copy" "$ac" evidence "$ev" > "$copy.ws" 2>/dev/null || rc=$?
-    [ "$rc" -eq 0 ] && mv -f "$copy.ws" "$copy" \
-      || { rm -f "$copy.ws"; WALK_WHY="the matrix has no $ac: block to hold its evidence: key (exit $rc); run matrix-render first"; return 1; }
-    WALK_DONE="${WALK_DONE:+$WALK_DONE }$ac"
+    case $'\n'"$known"$'\n' in
+      *$'\n'"$ac"$'\n'*) : ;;
+      *) WALK_WHY="the walk record gives a verdict for $ac, and the plan names no criterion $ac; give verdicts for the criteria as the plan spells them"
+         return 1 ;;
+    esac
+    named="$named$ac "
+    if [ "$v" = CONFIRMED ]; then WALK_DONE="${WALK_DONE:+$WALK_DONE }$ac"; else WALK_LEFT="${WALK_LEFT:+$WALK_LEFT }$ac"; fi
   done
+  for ac in $walked; do case "$named" in *" $ac "*) : ;; *) left="${left:+$left, }$ac" ;; esac; done
+  if [ -n "$left" ]; then
+    WALK_WHY="the walk record $ev leaves out $left, which the standing walk confirms; a run has one walk record and it only grows: put each such criterion's row in the walk's own record and register the whole record again"
+    return 1
+  fi
   return 0
 }
 
-# THE WALK'S REGISTRATION, one act over a plan copy: the record read as the critic's (proof_verdicts), its head
-# (walk_head), the cells it confirms (walk_settle) and the matrix head's walk-artifact: line (plan.sh walk_matrix_put),
-# with its proof, one `proof kind=walk` event, the gate's reading of the walk, pending in every read of the copy and
-# appended by the swap once the copy is judged
-# (`walk_append`, named in PV_ACT). proof-add walk runs it alone; deliver runs it at the walk row's landing, in the
-# landing's own write, so the row lands with its cells settled and its proof in the log, or does neither.
-# walk_register <plan> <copy> <record real path> <record docs-relative> <working head> <repository> -> 0 with the copy
-# written, PV_ACT and PV_UNDONE set for the swap, and WALK_HEAD, WALK_N and walk_settle's ids set; 1 with the refusal's
-# sentence in WALK_WHY, the copy to be dropped.
+# THE WALK'S REGISTRATION: the record read as the critic's (proof_verdicts), its head (walk_head) and the criteria it
+# discharges (walk_settle), with its proof, one `proof kind=walk` event, the gate's reading of the walk, pending in
+# every read of the copy, and the criteria's proofs appended by the swap once the copy is judged (`walk_append`, named
+# in PV_ACT). The plan is not written. proof-add walk runs it; the tick's landing of a record row lands the walk row on
+# the proof it leaves.
+# walk_register <plan> <copy> <record real path> <record docs-relative> <working head> <repository> -> 0 with PV_ACT and
+# PV_UNDONE set for the swap, and WALK_HEAD, WALK_N and walk_settle's ids set; 1 with the refusal's sentence in WALK_WHY.
 walk_register() {
-  local plan="$1" copy="$2" real="$3" rel="$4" v rc=0
-  WALK_WHY=""; WALK_HEAD=""; WALK_N=0; WALK_PLAN="$plan"
+  local plan="$1" real="$3" rel="$4" v
+  WALK_WHY=""; WALK_HEAD=""; WALK_N=0; WALK_PLAN="$plan"; WALK_REL="$rel"
   if ! v="$(proof_verdicts "$real")"; then
     WALK_WHY="$v; a walk record carries the critic's shape, a | AC | verdict | why | table and one verdict: line"
     return 1
   fi
   if ! WALK_HEAD="$(walk_head "$real" "$6" "$5")"; then WALK_WHY="$WALK_HEAD"; WALK_HEAD=""; return 1; fi
+  walk_settle "$plan" "$rel" <<< "$v" || return 1
   WALK_EV=("kind=walk" "head=$WALK_HEAD" "evidence=$rel")
   proof_pending "${WALK_EV[@]}" || { WALK_WHY="the walk record's path $rel holds a | or a line break, which the run's log cannot hold"; return 1; }
-  walk_settle "$plan" "$copy" "$rel" <<< "$v" || return 1
-  walk_matrix_put "$copy" "$rel" || { WALK_WHY="the matrix head's walk-artifact: line cannot be written"; return 1; }
   WALK_N="$(printf '%s\n' $WALK_DONE | awk 'NF { n++ } END { print n + 0 }')"
-  PV_ACT=walk_append; PV_UNDONE="the cells the walk confirms (${WALK_DONE:-none}) and the matrix head's walk-artifact:"
+  PV_ACT=walk_append; PV_UNDONE="the proofs of the criteria the walk confirms (${WALK_DONE:-none})"
   return 0
 }
-# walk_append -> the walk's proof appended to the run's log by the proof library's one writer; 1 with the plan unchanged.
+# walk_append -> the walk's proof, then one proof per criterion it confirms, appended to the run's log by the proof
+# library's one writer; 1 when the walk's own proof could not be.
 walk_append() {
+  local ac
   if ! proof_event "$WALK_PLAN" "${WALK_EV[@]}"; then
     die "REFUSED — the walk proof at ${WALK_HEAD:0:12} could not be appended to the run's log of $WALK_PLAN; the plan is unchanged."
     return 1
   fi
+  for ac in $WALK_DONE; do
+    proof_event "$WALK_PLAN" "ac=$ac" "evidence=$WALK_REL" \
+      || say "the walk is registered, but the proof of $ac could not be appended to the run's log: register the walk again."
+  done
   proof_pending
 }
-# THE WALK'S ACT IS RECORDED, AND IS NO HAND-HOLD: one `ev=walk` line in the landing record naming the record and how
-# many rows it discharged, appended once the plan write is in. The hand-holds fold counts `ev=matrix-set` as a status
-# write and reads this line as nothing: the walk's verdicts are a reader's, registered as the critic's are.
+# THE WALK'S ACT IS RECORDED, AND IS NO HAND-HOLD: one `ev=walk` line naming the record and how many criteria it
+# discharged, appended once the proofs are in. The hand-holds fold reads this line as nothing: the walk's verdicts are
+# a reader's, registered as the critic's are.
 walk_recorded() {  # <plan> <record docs-relative>
   { declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1; } \
     && line_event "$1" walk "record=$2" "discharged=${WALK_N:-0}" >/dev/null 2>&1 \
-    || say "the plan is written, but the ev=walk line could not be appended to the landing record."
+    || say "the walk is registered, but the ev=walk line could not be appended to the landing record."
 }
-walk_said() {  # <record docs-relative> -> what the registration settled, one line
-  printf 'the walk discharged %s (%s); settled by a landing, kept: %s; left as they stood: %s; walk-artifact: %s; verdict: %s' \
-    "${WALK_DONE:-no row}" "${WALK_N:-0}" "${WALK_LANDED:-none}" "${WALK_LEFT:-none}" "$1" "$WALK_WAVE"
+walk_said() {  # <record docs-relative> -> what the registration discharged, one line
+  printf 'the walk discharged %s (%s); left as they stood: %s; record: %s; verdict: %s' \
+    "${WALK_DONE:-no criterion}" "${WALK_N:-0}" "${WALK_LEFT:-none}" "$1" "$WALK_WAVE"
 }
 
 # ONE WHOLE RUN AT A HEAD, ONE READER FOR ITS TWO ASKERS: the tick, before it starts one, and regression-run's rule 3.
@@ -321,68 +328,13 @@ whole_run_at_head() {
     exit 0
   }
 
-  # THE ROW WAIVER (wave-33 T7; REQ-4 AC-4.1, D8). Wave-32's four row waivers were typed by hand (A-orch-49):
-  # the AC block's `  waiver: <who> <ISO-UTC> "<the user's words>" — <why>` line, which the gate reads as the
-  # row's waiver (walls.sh `row_is_waived`), and the status cell `waived`. The words are held to the rule a
-  # finding's move is (finding-move): lib/said.sh `user_said` finds them, as whole words and at least SAID_MIN_WORDS (three)
-  # of them unless they are a whole prompt, in a prompt the user typed in this session. Who is git
-  # user.name, the time ISO-UTC, so the hand-holds window can place it. A second waiver of the row
-  # replaces the first line. REFUSED (1), the plan unchanged: an AC with no row or no block, no git
-  # user.name, words the user did not type, too few words.
-  poker_verb_waive_row() {
-    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then
-      . "$BIONIC_LIB/said.sh"
-    fi
-    if ! declare -F user_said >/dev/null 2>&1; then
-      die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; the plan is unchanged."
-      exit 2
-    fi
-    WR_WORDS="$(said_fold "$WR_RAW")"; WR_WHY="$(deferral_fold "$WR_WHY_RAW")"
-    plan_verb_open waive-row
-    if [ -z "$(matrix_row_cell "$PV_PLAN" "$WR_AC" 1)" ]; then
-      die "REFUSED — the matrix table has no row $WR_AC; the plan is unchanged."
-      exit 1
-    fi
-    WR_WHO="$(deferral_fold "$(git -C "$PV_REPO" config user.name 2>/dev/null)")"
-    if [ -z "$WR_WHO" ]; then
-      die "REFUSED — no git user.name is set for $PV_REPO, and a waiver records who made it; set it, then waive again. The plan is unchanged."
-      exit 1
-    fi
-    user_said "$WR_RAW" "$PV_PLAN"; WR_SAID=$?
-    if [ "$WR_SAID" -ne 0 ]; then
-      said_refuse "$WR_SAID" "$WR_WORDS" "a waiver"
-      exit 1
-    fi
-    WR_LINE="$WR_WHO $(date -u +%Y-%m-%dT%H:%M:%SZ) \"$(deferral_escape "$WR_WORDS")\" — $WR_WHY"
-    PV_RC=0
-    matrix_row_cells "$PV_PLAN" "$WR_AC" 3=waived > "$PV_NEW" 2>/dev/null || PV_RC=$?
-    if [ "$PV_RC" -eq 0 ]; then
-      matrix_block_key "$PV_NEW" "$WR_AC" waiver "$WR_LINE" > "$PV_NEW.2" 2>/dev/null || PV_RC=$((10 + $?))
-      [ "$PV_RC" -ne 0 ] || mv -f "$PV_NEW.2" "$PV_NEW"
-    fi
-    case "$PV_RC" in
-      0) : ;;
-      4) die "REFUSED — the matrix row $WR_AC does not have five cells, so its status cannot be found; the plan is unchanged."
-         exit 1 ;;
-      13) die "REFUSED — the matrix has no $WR_AC: block to hold the waiver; matrix-render writes it. The plan is unchanged."
-          pv_next matrix-render
-          exit 1 ;;
-      *) die "REFUSED — the waiver cannot be written (exit $PV_RC); the plan is unchanged."
-         exit 2 ;;
-    esac
-    plan_verb_swap waive-row "the waiver of $WR_AC" writer
-    poker_owed_close "$PV_REPO" "waive-row:$WR_AC" "waive-row"
-    say "waive-row — $WR_AC waived on the user's words, by $(clean "$WR_WHO"): its waiver: line and status are on $PV_PLAN; dry-committed first."
-    exit 0
-  }
-
   # THE USER'S CONFIRMATION OF A T4 ROW. A T4 criterion's check is the user's own, and the gate rules such a row on
   # its block's attributed confirmation under an empty-like auditor cell (walls.sh `matrix_row_ruled`). This verb
   # writes that line from the user's words, so it is never typed by hand:
   #
   #   <key>: <user> <YYYY-MM-DD> "<the user's words>"[ — <why>]
   #
-  # <user> is git user.name, as approve and waive-row record it, folded to the one word the attributed form takes:
+  # <user> is git user.name, as approve and waive record it, folded to the one word the attributed form takes:
   # each run of characters outside [A-Za-z0-9._-] becomes one '-'. The date is UTC, as a waiver's is. The line
   # replaces the block's pending stub where it stands. The value is held to walls.sh `user_confirmed_attributed`,
   # the one form test, before it is written, so the verb never writes a line the gate would not rule on. The words
@@ -435,8 +387,7 @@ whole_run_at_head() {
     matrix_block_key "$PV_PLAN" "$CR_AC" "$CR_KEY" "$CR_VALUE" > "$PV_NEW" 2>/dev/null || PV_RC=$?
     case "$PV_RC" in
       0) : ;;
-      3) die "REFUSED — the matrix has no $CR_AC: block to hold the confirmation; matrix-render writes it. The plan is unchanged."
-         pv_next matrix-render
+      3) die "REFUSED — the matrix has no $CR_AC: block to hold the confirmation; the block is the plan's own text: write it there. The plan is unchanged."
          exit 1 ;;
       *) die "REFUSED — the confirmation cannot be written (exit $PV_RC); the plan is unchanged."
          exit 2 ;;
@@ -913,17 +864,6 @@ PF_OTHER_LIST
       fi
       PF_ROLE="${PF_ROLE#*	}"; PF_READER="${PF_ROLE#*	}"; PF_ROLE="${PF_ROLE%%	*}"
     fi
-    # AT SINGLE RIGOR THE CRITIC'S EVIDENCE RECORD CARRIES THE VERDICTS, and registering it is the act that learns them,
-    # so the same plan write fills each auditor cell its table names and the head's auditor-wave: line. A record that
-    # does not carry them whole is refused here, before anything is written. At double the auditor's record is not read
-    # for them: the auditor cells there are discharge's.
-    PF_VERDICTS=""
-    if [ "$PF_QUESTION" = evidence ] && [ "$(plan_frontmatter_get "$PV_PLAN" rigor 2>/dev/null)" = single ]; then
-      if ! PF_VERDICTS="$(proof_verdicts "$PF_REAL")"; then
-        die "REFUSED — $(clean "$PF_VERDICTS"); at rigor: single the critic's evidence record is where each row's verdict and the wave's are read. The plan is unchanged."
-        exit 1
-      fi
-    fi
     PF_WB="$(plan_working_branch "$PV_PLAN")"
     if [ -z "$PF_WB" ]; then
       die "REFUSED — $PV_PLAN names no working-branch:, so there is no checkout to read the head from; add 'working-branch: <branch>' under ## SDLC State. The plan is unchanged."
@@ -938,8 +878,8 @@ PF_OTHER_LIST
         die "REFUSED — working-branch $(clean "$PF_WB") names no commit in $PV_REPO, so its head cannot be read; name a branch that exists under ## SDLC State and run proof-add again. The plan is unchanged."
         exit 1 ;;
     esac
-    # A WALK IS REGISTERED WHOLE BY walk_register, the one act deliver also runs at the walk row's landing: its verdicts
-    # read as the critic's, its proof line, the cells it confirms and its pointer, in this one plan write.
+    # A WALK IS REGISTERED WHOLE BY walk_register: its verdicts read as the critic's, its proof and one proof per
+    # criterion it confirms; the plan is not written. The tick's landing of a record row lands the walk row on it.
     if [ "$PF_KIND" = walk ]; then
       cp "$PV_PLAN" "$PV_NEW"
       if ! walk_register "$PV_PLAN" "$PV_NEW" "$PF_REAL" "$PF_REL" "$PF_HEAD" "$PV_REPO"; then
@@ -1062,48 +1002,6 @@ PF_PAIRS_LIST
       PF_FINDS="$(proof_findings "$PF_REAL")"; PF_PLANL="$(proof_finding_lines "$PF_REL" "$PF_FINDS")"
     fi
     cp "$PV_PLAN" "$PV_NEW"
-    # THE VERDICTS GO INTO THE MATRIX IN THE PROOF'S OWN WRITE: each named row's auditor cell, CONFIRMED as the bare
-    # token the gate compares and any other verdict as the critic wrote it; a row the table does not name keeps its
-    # cell. A criterion the matrix table has no row for refuses the whole registration.
-    PF_CELLS=""; PF_WAVE=""
-    if [ -n "$PF_VERDICTS" ]; then
-      while IFS='	' read -r _pf_ac _pf_v; do
-        [ -n "$_pf_ac" ] || continue
-        if [ "$_pf_ac" = wave ]; then PF_WAVE="$_pf_v"; continue; fi
-        case "$_pf_v" in *'|'*)
-          die "REFUSED — the verdict for $(clean "$_pf_ac") in $(clean "$PF_REL") carries a |, which a matrix cell cannot hold; write the verdict without it. The plan is unchanged."
-          exit 1 ;;
-        esac
-        _pf_rc=0; matrix_row_cells "$PV_NEW" "$_pf_ac" "5=$_pf_v" > "$PV_NEW.v" 2>/dev/null || _pf_rc=$?
-        case "$_pf_rc" in
-          0) mv "$PV_NEW.v" "$PV_NEW"; PF_CELLS="${PF_CELLS:+$PF_CELLS, }$_pf_ac $_pf_v" ;;
-          3) rm -f "$PV_NEW.v"
-             die "REFUSED — $(clean "$PF_REL") gives a verdict for $(clean "$_pf_ac"), and the matrix table has no row $(clean "$_pf_ac"); give verdicts for the plan's criteria as its matrix spells them. The plan is unchanged."
-             exit 1 ;;
-          *) rm -f "$PV_NEW.v"
-             die "REFUSED — the auditor cell of the matrix row $(clean "$_pf_ac") cannot be written (exit $_pf_rc: a row of five cells is needed); the plan is unchanged."
-             exit 1 ;;
-        esac
-      done <<PF_VERDICTS_LIST
-$PF_VERDICTS
-PF_VERDICTS_LIST
-      if ! matrix_head_line "$PV_NEW" auditor-wave "$PF_WAVE" > "$PV_NEW.v" 2>/dev/null || [ ! -s "$PV_NEW.v" ]; then
-        rm -f "$PV_NEW.v"
-        die "REFUSED — the matrix head's auditor-wave: line cannot be written in $PV_PLAN; the plan is unchanged."
-        exit 1
-      fi
-      mv "$PV_NEW.v" "$PV_NEW"
-    fi
-    # THE REGRESSION'S PROOF IS THE STACK'S HEALTH: the head's stack-health: line is the judge's fact rendered by the one
-    # function every writer calls (lib/proof.sh `proof_health_put`), read from the run's facts with the new proof pending
-    # and the plan's own landing record. It replaces the stub matrix-render writes and a line a writer rendered before; a
-    # declared n/a: or a person's own snapshot is their word and stays, and a plan with no matrix yet has no head to
-    # write, the proof standing alone.
-    PF_SH=""
-    if [ "$PF_KIND" = regression ]; then
-      proof_health_put "$PV_NEW" "$PV_REPO" "$PV_PLAN" || :
-      PF_SH="$PROOF_HEALTH"
-    fi
     # A REVIEW THAT FOLLOWS THE BUILD GOES BACK TO WAITING (wave-26 T14; D10). The active review
     # row reading `live:head` (`units_live_rows`, the kind default included) whose `Files` hold
     # this evidence returns to `pending` in the same write — that row alone: the proof of another
@@ -1157,7 +1055,7 @@ PF_VERDICTS_LIST
       [ "$_pf_live" = " " ] || PF_NONE="$(units_rows "$PV_NEW" 2>/dev/null | awk -F'\t' -v ids="$_pf_live" '
         index(ids, " " $1 " ") { printf "%s%s (%s)", (n++ ? ", " : ""), $1, $9 }')"
     fi
-    PV_ACT=pf_append; PV_UNDONE="${PF_CELLS:+the auditor cells ($PF_CELLS) and auditor-wave: }${PF_SH:+stack-health: }${PF_BACK:+$PF_BACK back to pending}"
+    PV_ACT=pf_append; PV_UNDONE="${PF_BACK:+$PF_BACK back to pending}"
     plan_verb_swap proof-add "the $PF_KIND proof at $PF_HEAD" writer
     if [ -n "$PF_PLANL" ] && ! proof_finding_deferrals "$PV_PLAN" "$PF_REL" "$PF_FINDS"; then
       die "proof-add — the $PF_KIND proof at $PF_HEAD is written, and its deferrals could not be appended to the run's log of $PV_PLAN: the findings the table defers are not deferred."
@@ -1180,13 +1078,52 @@ PF_VERDICTS_LIST
     fi
     PF_FIELDS=""; [ -z "$PF_QUESTION" ] || PF_FIELDS=" question=$PF_QUESTION reader=$PF_READER result=$PF_RESULT scope=$PF_SCOPE ($PF_ROLE)"
     say "proof-add — kind=$PF_KIND head=$PF_HEAD evidence=$PF_REL$PF_FIELDS${PF_OWED:+ owed=$PF_OWED}: written to the run's log${PF_BACK:+; $PF_BACK back to pending in $PV_PLAN}; the plan's copy dry-committed first."
-    [ -z "$PF_CELLS" ] || say "proof-add — the auditor cells: $PF_CELLS; auditor-wave: $PF_WAVE"
-    [ -z "$PF_SH" ] || say "proof-add — stack-health: $PF_SH"
     [ -z "$PF_OWED" ] || say "proof-add — the whole run left $PF_OWED red: each is owed until a later landing runs it green (a fix row), or proof-add inherited <suite> finds it red at the base too."
     [ -z "$PF_PLANL" ] || printf '%s\n' "$PF_PLANL" | while IFS= read -r _pf_l; do say "proof-add — $_pf_l (in the run's log)"; done
     [ -n "$PF_HELD" ] && say "proof-add — $PF_HELD stays active until every question it carries is read at ${PF_HEAD:0:12}; it returns to pending on that review."
     [ -n "$PF_NONE" ] && say "proof-add — no active live review row holds $PF_REL in its Files: $PF_NONE stays active, nothing was returned to pending. If this record is that pass, its Files name another record: write the record under that name, or amend the row's Files."
     exit 0
+  }
+
+  # waive_criterion -> the criterion WV_Q waived on WV_REPLY's words (and WV_WHY_RAW's why): 0 written, 1 refused, 2
+  # when the libraries or the run's log cannot be reached.
+  waive_criterion() {
+    local who head why known ac="$WV_Q"
+    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
+    _proof_reader_load
+    if ! declare -F user_said >/dev/null 2>&1 || ! declare -F reader_criteria >/dev/null 2>&1; then
+      die "REFUSED — a criterion's waiver needs lib/said.sh and lib/reader.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
+      return 2
+    fi
+    plan_verb_open waive
+    known="$(reader_criteria "$PV_PLAN" 2>/dev/null)"
+    case $'\n'"$known"$'\n' in
+      *$'\n'"$ac"$'\n'*) : ;;
+      *) die "REFUSED — '$(clean "$ac")' is neither a question to waive (evidence, adversarial, structure or all) nor a criterion $PV_PLAN names; nothing is written."
+         return 1 ;;
+    esac
+    who="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
+    if [ -z "$who" ] || ! plan_verb_value_ok "$who"; then
+      die "REFUSED — the project has no usable git user name (git config user.name) to record as the one who waived; nothing is written."
+      return 1
+    fi
+    why="$(deferral_fold "$WV_WHY_RAW")"
+    case "$WV_REPLY$why" in
+      *'|'*|*$'\n'*|*$'\r'*)
+        die "REFUSED — a waiver's words and why are fields of the run's log, which a '|' or a line break would split; give them without one. Nothing is written."
+        return 1 ;;
+    esac
+    user_said "$WV_REPLY" "$PV_PLAN"; WV_SAID=$?
+    if [ "$WV_SAID" -ne 0 ]; then
+      said_refuse "$WV_SAID" "$(said_fold "$WV_REPLY")" "a waiver"
+      return 1
+    fi
+    head="$(proof_branch_head "$PV_PLAN" "$PV_REPO" 2>/dev/null)" || head=""
+    case "$head" in *[!0-9a-f]*) head="" ;; esac
+    proof_waiver_event "$PV_PLAN" "ac=$ac" ${head:+"head=$head"} "by=$who" "said=$(said_fold "$WV_REPLY")" ${why:+"why=$why"} \
+      || { die "REFUSED — the waiver of $ac could not be written to the run's log of $PV_PLAN (no record directory beside the plan, or the log cannot be written)."; return 2; }
+    poker_owed_close "$PV_REPO" "waive:$ac" "waive"
+    say "waive — $ac waived on the user's words, by $(clean "$who"): one waiver event in the run's log."
   }
 
   # THE WAIVER. The user's act, on their reply: one waiver event in the run's log,
@@ -1197,6 +1134,15 @@ PF_VERDICTS_LIST
   # (lib/proof.sh `facts_state`) is asked about. The log's own order makes a fact written after it newer than it.
   # `waive all` writes three, evidence, adversarial and structure, in that order. The plan is not written. The
   # regression is never waived: it runs once after the build.
+  #
+  # A CRITERION IS WAIVED BY THE SAME ONE WRITER, its event naming it where a question's names the question:
+  #
+  #   waiver ac=<criterion> [head=<working head>] by=<git user.name> said=<the words> [why=<why>]
+  #
+  # which the reader's cell answer reads as the criterion discharged by a waiver. The criterion is one the plan names
+  # (reader_criteria), and the words are held to lib/said.sh `user_said` as a move's are, since nobody but the user lets
+  # a criterion go; the head is written when the working branch names one and is not required, for a criterion is not
+  # judged at a head. Its ask, `waive:<criterion>`, the gate's matrix arm opens, closes as a question's does.
   poker_verb_waive() {
     if ! { declare -F proof_waiver_event >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_waiver_event >/dev/null 2>&1; then
@@ -1204,8 +1150,8 @@ PF_VERDICTS_LIST
       exit 2
     fi
     if ! proof_question_ok "$WV_Q" waive; then
-      die "REFUSED — '$(clean "$WV_Q")' is not a question to waive: name evidence, adversarial, structure or all. The plan is unchanged."
-      exit 1
+      waive_criterion
+      exit $?
     fi
     WV_QS="$WV_Q"; [ "$WV_Q" != all ] || WV_QS="$PROOF_QUESTIONS"
     case "$WV_REPLY" in

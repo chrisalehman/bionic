@@ -572,7 +572,7 @@ expect_contains "AK6c …carrying the refusal's line" "row T4 waits for approval
 # field written n/a, or an auditor's finding a T4 confirmation does not overturn. Each asks the person for a waiver.
 # The gate is a pure predicate (the freeze, .claude/rules/hook-authoring.md), so it hands each ask back beside its
 # refusal and hooks/bash-walls.sh, the hook that calls it, opens the item, keyed as the answer verb closes it:
-# `waive:<question>` (`waive`), `waive-row:<AC>` (`waive-row`). A question with no reading at all asks the run for a
+# `waive:<question>` and `waive:<AC>`, both closed by `waive`. A question with no reading at all asks the run for a
 # reading first, not the person, and opens nothing (the tick's own rule, T35's A-T35-4).
 # FIXTURE FIDELITY: bash-walls.test.sh's §EG-6 world, its prelude's builders read out of that file by name (a plan the
 # real gate admits at current: 6 bar the readings; the reading lines in lib/proof.sh's writer's shape); the real hook.
@@ -614,15 +614,15 @@ cw_commit "$RCW" "$(eg6_plan 6 wave "$CW_FAIL")"
 
 # THE MATRIX ROW'S ASKS. Every reading passes, so only the matrix speaks. A T3 row whose evidence is n/a is a downgrade
 # only the person makes; a T4 row the user confirmed, under a REFUTED auditor cell, needs the finding settled or the row
-# waived. Each opens `waive-row:<AC>`.
+# waived. Each opens `waive:<AC>`.
 CW_NA="$(eg6_plan 6 wave "$CW_READ" | sed -e 's/^| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |$/| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |/' \
   -e 's|^  evidence: record/generic-evidence.md$|  evidence: n/a|')"
 cw_commit "$RCW" "$CW_NA"
 expect_eq "AK-7 precondition: a T3 row whose evidence is n/a is refused (exit 2)" "2" "$CW_RC"
 expect_contains "AK-7a …in the matrix arm's words" "AC-1 calls its evidence evidence n/a" "$CW_ERR"
-expect_eq "AK-7 AC-4.1 the matrix-row ask opens waive-row:AC-1, the waive-row verb's key" \
-  "waive-row:AC-1,waive:structure" "$(cw_open "$RCW")"
-expect_contains "AK-7b …carrying the refusal's line" "AC-1 calls its evidence evidence n/a" "$(nk_reply "$RCW" waive-row:AC-1)"
+expect_eq "AK-7 AC-4.1 the matrix-row ask opens waive:AC-1, the waive verb's key" \
+  "waive:AC-1,waive:structure" "$(cw_open "$RCW")"
+expect_contains "AK-7b …carrying the refusal's line" "AC-1 calls its evidence evidence n/a" "$(nk_reply "$RCW" waive:AC-1)"
 # The ruling is demanded on the advance to 8, the merge: a plan at current: 8 carries the lines of the steps behind it
 # and Step 8's own, so the commit is judged by the matrix arm and not by the missing line.
 CW_AT8='- Step 6: review at record/w27/review.md
@@ -638,9 +638,9 @@ CW_T4="$(eg6_plan 8 wave "$CW_READ" "$CW_AT8" | sed -e 's/AC-1/AC-2/g' \
 cw_commit "$RCW" "$CW_T4"
 expect_eq "AK-7c precondition: a user-confirmed T4 row under a REFUTED auditor cell is refused (exit 2)" "2" "$CW_RC"
 expect_contains "AK-7d …naming the auditor's finding" "the auditor's finding on AC-2 stands" "$CW_ERR"
-expect_eq "AK-7e AC-4.1 that ask opens waive-row:AC-2" "waive-row:AC-1,waive-row:AC-2,waive:structure" "$(cw_open "$RCW")"
+expect_eq "AK-7e AC-4.1 that ask opens waive:AC-2" "waive:AC-1,waive:AC-2,waive:structure" "$(cw_open "$RCW")"
 
-# THE ANSWER CLOSES IT. `waive-row` writes the row's waiver on the person's words and closes `waive-row:<AC>`; the
+# THE ANSWER CLOSES IT. `waive <AC>` writes the criterion's waiver event on the person's words and closes `waive:<AC>`; the
 # transcript is the CLI's typed-prompt shape (tests/fixtures/transcript-move), under a config dir of the verb's own, so
 # the section's transcript (its planted ListAgents answer) is not the one said.sh reads. The transcript sits under the
 # repository's own name (lib/detect.sh `project_slug`) and the session's load record under the repository: the two
@@ -655,20 +655,23 @@ cw_witness() {  # <repo> -> this session's typed words under the repo's own name
     > "$d/$SID.jsonl"
   printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_SCRIPTS_DIR}/payload" "$1" > "$1/.bionic/tmp/loaded-$SID.state"
 }
-cw_waive_row() {  # <repo> -> RC, OUT: `waive-row AC-1` on the person's words, under the verb's config dir
+cw_waive() {  # <repo> -> RC, OUT: the waive verb on the fixture row, in the person's words, under the verb's config dir
   local keep="$CLAUDE_CONFIG_DIR" bound="$POKE_BOUND"
   cw_witness "$1"
   export CLAUDE_CONFIG_DIR="$CW_CFG"; POKE_BOUND=180
-  poke "$1" waive-row AC-1 'I waive row AC-1' 'the live check moved to the next wave'
+  poke "$1" waive AC-1 'I waive row AC-1, the live check moved to the next wave'
   export CLAUDE_CONFIG_DIR="$keep"; POKE_BOUND="$bound"
 }
 printf '%s\n' "$CW_NA" > "$RCW/.bionic/docs/plans/active.md"
-cw_waive_row "$RCW"
-expect_eq "AK-8 precondition: waive-row records the person's waiver (exit 0)" "0" "$RC"
+cw_waive "$RCW"
+expect_eq "AK-8 precondition: waive records the person's waiver of the criterion (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
-expect_contains "AK-8 AC-4.1 …and closes the item the matrix ask opened" "|key=waive-row:AC-1|state=closed|by=waive-row|" \
+expect_contains "AK-8 AC-4.1 …and closes the item the matrix ask opened" "|key=waive:AC-1|state=closed|by=waive|" \
   "$(nt_owed "$RCW" owed_lines)"
-expect_eq "AK-8a …and no other: the question's and the other row's stay open" "waive-row:AC-2,waive:structure" "$(cw_open "$RCW")"
+expect_regex "AK-8b …its one fact a waiver event naming the criterion, by the waiver's one writer" \
+  '^run/v1\|ev=waiver\|ac=AC-1\|.*by=T\|said=I waive row AC-1, the live check moved to the next wave\|' \
+  "$(bash -c '. "$1/reader.sh"; cat "$(reader_log "$2")"' _ "$NT_LIB" "$RCW/.bionic/docs/plans/active.md" | grep '|ev=waiver|')"
+expect_eq "AK-8a …and no other: the question's and the other row's stay open" "waive:AC-2,waive:structure" "$(cw_open "$RCW")"
 
 # WAIVING A QUESTION SETTLES ITS FINDINGS (AC-4.2). `disposition` opens `finding:<record>#<n>` for each finding that
 # needs the person ("fix it, defer it, or waive <question>"); `waive <question>` is that answer for every finding of

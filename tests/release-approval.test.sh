@@ -10,6 +10,9 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/release-approval.prelude.sh"
 . "$(dirname "$0")/lib/plan-fixture.sh"
+# A row's state is the reader's cell answer, a waiver event read as waived: the waiver leaves the table's text as it was.
+fc_row() { bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" cell "$1" | awk -F= '$1 == "state" { s = $2 } $1 == "by" { b = $2 }
+  END { print (b == "waiver") ? "waived" : s }'; }
 
 # ============================================================
 section "§NAME: the card is the release approval card; the old name is read only as an alias and as the stem of pages already written"
@@ -82,7 +85,7 @@ expect_eq "SHAPE-12b …opening on the page, byte for byte as printed" \
 expect_eq "SHAPE-12c …its replay table one line per decision, in the page's order" \
   "row:AC-1.2 approve:release approve:merge" "$(fc_keys | tr '\n' ' ' | sed 's/ $//')"
 expect_contains "SHAPE-12d …each with its default, its other choice and the recommendation" \
-  "release-approval/v1|dec=1|key=row:AC-1.2|default=waive-row AC-1.2|other=-|pick=default|choices=waive/run|why=not run on this release" "$(fc_table)"
+  "release-approval/v1|dec=1|key=row:AC-1.2|default=waive AC-1.2|other=-|pick=default|choices=waive/run|why=not run on this release" "$(fc_table)"
 fc_card final
 expect_eq "SHAPE-13 card.sh final is gone: a usage error, nothing rendered" "64|" "$FC_RC|$FC_OUT"
 expect_contains "SHAPE-13b …naming final as no row kind" "unknown row kind 'final'" "$FC_ERR"
@@ -548,7 +551,7 @@ fc_t4 '—' pending
 fc_page
 expect_eq "CONFIRM-6 the acting render of a pending T4 row exits 0" "0" "$FC_RC"
 [ "$FC_RC" = 0 ] || printf '      release-approval said: %s\n' "$FC_ERR"
-expect_contains "CONFIRM-6b its replay offers confirm, then waive" "|default=confirm-row AC-1.3|other=waive-row AC-1.3|pick=default|choices=confirm/waive|" \
+expect_contains "CONFIRM-6b its replay offers confirm, then waive" "|default=confirm-row AC-1.3|other=waive AC-1.3|pick=default|choices=confirm/waive|" \
   "$(fc_table | /usr/bin/grep -F 'key=row:AC-1.3|')"
 expect_absent "CONFIRM-6c …never waive and run" "choices=waive/run" "$(fc_table | /usr/bin/grep -F 'key=row:AC-1.3|')"
 poke "$RFC" reply "$FC_WD"
@@ -565,7 +568,7 @@ poke "$RFC" reply "$FC_CR2"
 expect_eq "CONFIRM-8 reply '$FC_CR2' applies the other choice (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
 expect_eq "CONFIRM-8b …the row is waived" "waived" "$(fc_row AC-1.3)"
-expect_contains "CONFIRM-8c …through waive-row" "applied: row:AC-1.3 waive-row rc=0" "$(cat "$FC_REC/release-approval-$FC_H8.md")"
+expect_contains "CONFIRM-8c …through waive" "applied: row:AC-1.3 waive rc=0" "$(cat "$FC_REC/release-approval-$FC_H8.md")"
 expect_eq "CONFIRM-8d …and its confirmation stays pending" "  user-confirmed: pending" "$(/usr/bin/grep 'user-confirmed:' "$PFC")"
 fc_typed "$FC_WD" "$FC_WR"
 
@@ -727,13 +730,14 @@ expect_eq "HANDHOLDS-3 the report read after the page counts the page's decline 
 expect_eq "HANDHOLDS-3b …and the report's ends line runs to now, printing the start alone and no page time" \
   "1|0" "$( ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" landing-report --hand-holds "$PFC" ) 2>/dev/null | /usr/bin/grep '^hand-holds window: ' | awk -v at="$HH_AT" '{ print (index($0, "until now: the plan names no delivered: time") > 0) "|" (index($0, at) > 0) }')"
 expect_eq "HANDHOLDS-3c …the page's line stays one entry: it opens once" "1" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c '^hand-holds: ')"
-# WINDOW-2a: waive-row, through the card's reply, writes the matrix waiver with the ISO time, and the window places it.
+# WINDOW-2a: waive, through the card's reply, writes the criterion's waiver event at its instant, and the window places it.
 HH_T0="$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)"
 poke "$RFC" reply "$FC_WD"
-expect_eq "WINDOW-2a-0 precondition: reply all default applies the row's waive-row (exit 0)" "0|waived" "$RC|$(fc_row AC-1.2)"
+expect_eq "WINDOW-2a-0 precondition: reply all default applies the row's waive (exit 0)" "0|waived" "$RC|$(fc_row AC-1.2)"
 [ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
-expect_regex "WINDOW-2a waive-row writes the waiver with the ISO-UTC time, never the date alone" \
-  "^  waiver: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z \"$FC_WD\"" "$(/usr/bin/grep '^  waiver:' "$PFC")"
+expect_regex "WINDOW-2a waive writes one waiver event naming the row, on the reply's words, at an ISO-UTC instant" \
+  "^run/v1\\|ev=waiver\\|ac=AC-1\\.2\\|.*by=Dana Fixture\\|said=$FC_WD\\|.*at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" \
+  "$(/usr/bin/grep -h '|ev=waiver|ac=AC-1.2|' "$FC_REC/run.log")"
 expect_contains "WINDOW-2a-1 …a window around its time counts it" "waivers=1 " "$(hh_lr --since "$HH_T0")"
 expect_contains "WINDOW-2a-2 …a window that ends before it does not" "waivers=0 " "$(hh_lr --since 2026-10-12T08:00:00Z --until "$HH_T0")"
 rm -f "$FC_REC/landing-proofs.log" "$FC_REC/fill-ledger.log" "$FC_REC"/release-approval-*.md
@@ -1020,18 +1024,20 @@ expect_absent "OL-4b …and the line names nothing owed by the close" "owed by t
 section "§GOALS-REFUSE: the card refuses to render over matrix rows that map to no requirement, and renders once serves: is written"
 # ============================================================
 # fails-when: the card prints `Goals — 0 of N reached` over rows no theme reads (no serves:, no dotted id), the refusal
-# names neither the rows nor matrix-render, or the plan with serves: written by the real matrix-render is still refused.
+# names neither the rows nor the serves: line that maps them, or the plan with serves: written is still refused.
 # FC_GOOD's plan with lib/plan-fixture.sh's flat themes; each read is --preview, so the two reads differ by serves: alone.
 fc_plan "$FC_GOOD"; plan_fixture_themes "$PFC" flat discharged discharged pending
 FC_GR_REQ="$(bash -c '. "$1/run.sh"; . "$1/plan.sh"; plan_requirements_file "$2"' _ "$FC_LIB" "$PFC")"
 fc_page --preview
 expect_eq "GR-1 over three rows with no serves: and no dotted id the card is refused (exit 1), no page printed, none written; the plan reads two themes" \
   "1|||2" "$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^Goals')|$(fc_pages)|$(/usr/bin/grep -c '^## The ' "$FC_GR_REQ")"
-expect_contains "GR-1b …saying how many rows map to no requirement, naming them and the verb that writes serves:" \
-  "release-approval refused — 3 matrix rows map to no requirement (no serves: and no dotted id): run session-poker.sh matrix-render to write serves: (AC-168, AC-169, AC-170)" "$FC_ERR"
-poke "$RFC" matrix-render; FC_GR_N="$(/usr/bin/grep -c '^  serves: REQ-' "$PFC")"
+expect_contains "GR-1b …saying how many rows map to no requirement, naming them and the line that maps a row" \
+  "release-approval refused — 3 matrix rows map to no requirement (no serves: and no dotted id): give each block a serves: line naming its requirement (AC-168, AC-169, AC-170)" "$FC_ERR"
+for a in AC-168 AC-169 AC-170; do r="$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" criterion "$a" | sed -n 's/^requirement=//p')"
+  awk -v a="$a:" -v r="$r" '{ print } !d && index($0, a) == 1 { print "  serves: " r; d = 1 }' "$PFC" > "$PFC.t" && mv "$PFC.t" "$PFC"; done
+RC=0; FC_GR_N="$(/usr/bin/grep -c '^  serves: REQ-' "$PFC")"
 fc_page --preview
-expect_eq "GR-3 with serves: written (matrix-render exit 0, three lines) the same plan renders (exit 0): one theme of two reached, each its own rows' count" \
+expect_eq "GR-3 with serves: written (three lines) the same plan renders (exit 0): one theme of two reached, each its own rows' count" \
   "0|3|0|Goals — 1 of 2 reached|The card reads true — 2 of 2 criteria discharged, none open|The gate admits the work — 0 of 1 criteria discharged, open: REQ-2" \
   "$RC|$FC_GR_N|$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^Goals')|$(fc_under Goals | sed 's/^[^ ]* //' | paste -sd'|' -)"
 rm -f "$FC_GR_REQ"

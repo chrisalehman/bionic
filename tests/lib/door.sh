@@ -35,7 +35,8 @@
 #
 #   DOOR_LIVE_ROW=1, set for a door_world call, gives the plan the one live criterion a planner writes for a run's close:
 #   a close row T9 at step 9, an Eval design row of a second requirement whose eval is `landing-report --hand-holds` at
-#   the close, and its matrix row at tier T3, pending. It is owed at the close, which writes it. Unset, the plan is as before.
+#   the close, and its matrix row at tier T3, pending, its block's task the close row. It is owed at the close, which
+#   proves it. Unset, the plan is as before.
 #
 # WHAT THE FIXTURE HOLDS, at its accepted head, committed: hooks/ and payload/scripts/ copied whole from the tree
 # under test, with the payload/hooks link; tests/run.sh and tests/lib/ whole, so the check and the name scan are
@@ -47,9 +48,9 @@
 # `working-branch: wave/x`, `base-sha:` the accepted head (the release range is what lands after it), and rows T1
 # (build) and T2 (the release). The plan is a planner's Step-3 state, so it also carries what only the planner
 # writes and no verb creates: `rigor: double` (`single` from door_world_single) and `scale: wave`, without which
-# the judge cannot deal the readings a run owes, and the matrix skeleton, one `## Eval design` row and its
-# `## Verification Matrix` table row at tier T1, which matrix-render, matrix-set and discharge fill. Every later
-# state of the plan is a verb's.
+# the judge cannot deal the readings a run owes, and the matrix skeleton, one `## Eval design` row, its
+# `## Verification Matrix` table row at tier T1 and its block naming its task, which no verb writes: the walk's proof
+# and the evidence review discharge and rule it. Every later state of the plan is a verb's.
 #
 # WHICH COPY RAN. The fixture's committed release-check.sh carries one line more than the tree under test's, after
 # its shebang: when DOOR_SEEN names a file, it appends where it ran and which script it is. A run of the tree
@@ -129,7 +130,7 @@ _door_world() (
     'tests/lib/*.sh payload/scripts/lib/*.sh hooks/session-poker.sh hooks/poker/*.sh' > "$root/.bionic/config.yaml"
   plan="$root/$DOOR_PLAN_REL"
   mkdir -p "${plan%/*}"
-  local live_step="" live_row="" live_eval="" live_ac=""
+  local live_step="" live_row="" live_eval="" live_ac="" live_block=""
   if [ "${DOOR_LIVE_ROW:-}" = 1 ]; then
     live_step='
 - T9: pending dispatch — the close'
@@ -139,6 +140,9 @@ _door_world() (
 | REQ-2 | the close reads its measure | AC-2.1 | live | `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close → `total=0` | the close reads above zero |'
     live_ac='
 | AC-2.1 | T3 | pending | — | — |'
+    live_block='
+AC-2.1: the close reads its own measure
+  task: T9'
   fi
   cat > "$plan" <<PLAN
 ---
@@ -179,6 +183,9 @@ stack-health: n/a: no long-running serve
 | AC | tier | status | evidence | auditor |
 |---|---|---|---|---|
 | AC-1.1 | T1 | pending | — | — |$live_ac
+
+AC-1.1: the library change holds
+  task: T1$live_block
 PLAN
   bound_marker "$root" "$WORLD_SID" "$plan" || exit 1
   printf '%s %s\n' "$root" "$head"

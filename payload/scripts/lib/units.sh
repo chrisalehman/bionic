@@ -3522,42 +3522,11 @@ units_fix_cap() {
   fix_cap_render "$(plan_frontmatter_get "$plan" fix-cap)" "$(plan_frontmatter_get "$plan" rigor)" "$n"
 }
 
-# THE MATRIX HEAD'S LINES. Between the `## Verification Matrix` heading and its table stand the matrix's own flush-left
-# lines, `stack-health:` first, where matrix-render writes its stub and the gate reads them. One keyed line is written
-# `<key>: <value>`: a line of the key is replaced where it stands, and any second one dropped, so the head holds one;
-# with none, it goes under the `stack-health:` line, else under the heading. <own>, an ERE, names the old values the
-# caller may replace: an old value outside it is a person's word and stays (exit 5, nothing printed). Fences skipped.
-# Exit 3: no matrix section. Here, beside the table's readers, so a landing's writes and the plan verbs share it.
-matrix_head_line() {  # <plan> <key> <value> [<own ERE>] -> the whole plan
-  MH_KEY="$2" MH_VAL="$3" MH_OWN="${4:-}" awk '
-    BEGIN { k = ENVIRON["MH_KEY"]; kre = "^[ \t]*" k "[ \t]*:"; line = k ": " ENVIRON["MH_VAL"]; own = ENVIRON["MH_OWN"] }
-    { L[++n] = $0 }
-    END {
-      for (i = 1; i <= n; i++) {
-        x = L[i]
-        if (x ~ /^[ \t]*```/) { fence = !fence; continue }
-        if (fence) continue
-        if (x ~ /^## /) { if (head) break; if (x ~ /^## Verification Matrix/) head = i; continue }
-        if (!head) continue
-        if (x ~ /^[ \t]*\|/) break
-        if (x ~ kre) { if (!at) at = i; else drop[i] = 1 }
-        else if (x ~ /^[ \t]*stack-health[ \t]*:/ && !sh) sh = i
-      }
-      if (!head) exit 3
-      if (at && own != "") { v = L[at]; sub(kre, "", v); gsub(/^[ \t]+|[ \t]+$/, "", v); if (v !~ own) exit 5 }
-      for (i = 1; i <= n; i++) {
-        if (i in drop) continue
-        if (i == at) { print line; continue }
-        print L[i]
-        if (!at && i == (sh ? sh : head)) { if (!sh) print ""; print line }
-      }
-    }' "$1"
-}
 
 # units_ac_head_awk -> the awk text of `ac_head(line, ac)`, THE ONE MATCHER OF AN AC BLOCK'S HEADING (wave-36 T24;
 #   REQ-7 AC-7.9; D13). A heading is `<ac>:` at the start of a flush-left line, with the text after it optional:
-#   matrix-render writes `AC-2.1: <the criterion's text>`, and the wall's matrix_block, session-poker.sh's
-#   matrix_block_key and matrix_block_has all read that line through this one function, as
+#   an older plan's block heading carries the criterion's text after the colon, and the wall's matrix_block and
+#   matrix_block_key read that line through this one function, as
 #   `awk "$(units_ac_head_awk)"'...'`. A list bullet (`-`, `*`, `+` and spaces) is stripped from a COPY first, so
 #   `- AC-1:` reads as `AC-1:`; an INDENTED line is no heading, and the colon after the id is why `AC-1` never
 #   begins the `AC-11:` block. Nothing is required after the colon. Pure, silent, and defined at source time.
@@ -3594,42 +3563,11 @@ units_render_units() {
     }' "$1" 2>/dev/null
 }
 
-# ── THE MATRIX WRITERS ─────────────────────────────────────────────────────────
+# ── THE MATRIX'S ONE BLOCK-KEY WRITER ──────────────────────────────────────────
 #
-# The one cell writer and the one block-key writer of `## Verification Matrix`, here so that every
-# caller that loads this library writes a matrix row the same way: the plan verbs, the landing's
-# settlement (lib/line.sh) and close-out.
+# The one writer of a key in an older plan's `## Verification Matrix` block, which the person's confirmation of a
+# row writes; no other code writes a cell, a key or a head line of the matrix.
 
-# THE MATRIX ROW'S CELLS, the one writer of a row's cells. Inside
-# `## Verification Matrix`, fences skipped, the first `|` line whose trimmed first cell is the AC id has
-# each named cell (1 AC · 2 tier · 3 status · 4 evidence · 5 auditor) written ` <value> `, every other
-# byte as it was. It does not fold `\|` escapes; a matrix cell holds a path or a token. Exit 3 no row ·
-# 4 the row is not five cells.
-matrix_row_cells() {  # <plan> <AC> <cell n>=<value>... -> the whole plan
-  local plan="$1" ac="$2" set="" kv
-  shift 2
-  for kv in "$@"; do set="${set}${kv%%=*}	${kv#*=}
-"; done
-  MX_AC="$ac" MX_SET="$set" awk '
-    BEGIN {
-      a = ENVIRON["MX_AC"]; m = split(ENVIRON["MX_SET"], s, "\n")
-      for (k = 1; k <= m; k++) if ((t = index(s[k], "\t")) > 0) v[substr(s[k], 1, t - 1) + 1] = " " substr(s[k], t + 1) " "
-    }
-    /^[ \t]*```/ { fence = !fence; print; next }
-    fence { print; next }
-    /^## / { inm = ($0 ~ /^## Verification Matrix/); print; next }
-    inm && !done && /^[ \t]*\|/ {
-      n = split($0, c, "|"); id = c[2]; gsub(/^[ \t]+|[ \t]+$/, "", id)
-      if (id == a) {
-        if (n != 7) { bad = 1; exit }
-        for (j in v) c[j] = v[j]
-        out = c[1]; for (j = 2; j <= n; j++) out = out "|" c[j]
-        print out; done = 1; next
-      }
-    }
-    { print }
-    END { if (bad) exit 4; if (!done) exit 3 }' "$plan"
-}
 
 # matrix_row_cell <plan> <AC> <cell n> -> that cell of the AC's matrix row, trimmed (nothing: no row).
 matrix_row_cell() {
@@ -3642,7 +3580,7 @@ matrix_row_cell() {
 }
 
 # THE AC BLOCK'S KEYS. The block is the `<AC>:` line under `## Verification Matrix`, text after the
-# colon allowed (matrix-render writes the criterion there), and the indented lines under it (matrix-render's shape,
+# colon allowed (an older plan's rendering wrote the criterion there), and the indented lines under it (that shape,
 # the one walls.sh `matrix_block` reads); both read the heading through `units_ac_head_awk`, above. The key's
 # first line is replaced where it stands; a key the block lacks goes after its last line. Exit 3 no block.
 matrix_block_key() {  # <plan> <AC> <key> <value> -> the whole plan

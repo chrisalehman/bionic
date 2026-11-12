@@ -1543,15 +1543,23 @@ section "§GOALS-SERVES: a theme is measured by the rows that serve it, serves: 
 # ============================================================
 # fails-when: a flat-id plan with serves: reads 0 of 0 or, at task scale, no goal; the dotted fallback is silent; a bare
 # id counts under the requirement its number names; unmapped rows print no line. The world's plan is lib/plan-fixture.sh's
-# (hook-valid, so the render's dry commit admits it) with its themes; serves: is written by the real matrix-render.
+# (hook-valid) with its themes; serves: is written into each block as an older plan's rendering wrote it, the
+# criterion's Requirement cell read through the reader.
 sr_sw() { SR_SCALE="$2" sr_world "$1" "6 6 12 12"; plan_fixture "$SR_PLAN" "$2" >/dev/null; plan_fixture_themes "$SR_PLAN" "${@:3}"; sr_run "$SR_PLAN"; }   # <label> <scale> <variant> <statuses…>
-sr_render() { sr_bind; sr_poke matrix-render >/dev/null 2>&1; SR_MR_RC=$?; sr_run "$SR_PLAN"; }
+sr_render() {  # -> each block of the plan gains `serves:` from its criterion's Requirement cell; SR_MR_RC 0
+  local a r
+  for a in $(sed -n 's/^\(AC-[0-9.]*\):.*/\1/p' "$SR_PLAN"); do
+    r="$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$SR_PLAN" criterion "$a" | sed -n 's/^requirement=//p')"
+    [ -z "$r" ] || awk -v a="$a:" -v r="$r" '{ print } !d && index($0, a) == 1 { print "  serves: " r; d = 1 }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+  done
+  SR_MR_RC=0; sr_run "$SR_PLAN"
+}
 sr_n() { sr_lines "$1" | /usr/bin/grep -c .; }
 SR_NM='not mapped: 3 rows carry no serves: and no dotted id'; SR_T2='The gate admits the work'
 sr_sw gs-flat wave flat discharged discharged pending
 expect_eq "GS-0 a flat-id wave plan with no serves: prints the not-mapped line once, and refuses nothing (exit 0)" "$SR_NM|1|0" "$(sr_lines 'not mapped')|$(sr_n 'not mapped')|$RC"
 sr_render
-expect_eq "GS-1 serves: written by matrix-render (exit 0): the theme its two flat rows serve is met, the other open, no mapping line" \
+expect_eq "GS-1 serves: written (exit 0): the theme its two flat rows serve is met, the other open, no mapping line" \
   "0|The card reads true=met|$SR_T2=not measured|2 of 2 criteria discharged — none open|0 of 1 criteria discharged — open: REQ-2|0|0" \
   "$SR_MR_RC|$(sr_goal_st)|$(sr_goal_m 'The card reads true')|$(sr_goal_m "$SR_T2")|$(sr_n 'not mapped')|$(sr_n 'mapped by id')"
 sr_sw gs-task task flat discharged discharged discharged; sr_render

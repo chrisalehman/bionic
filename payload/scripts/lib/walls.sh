@@ -1598,11 +1598,8 @@ printed a reason above this line, that is the cause. The commit is still refused
 # ran the eval, copied from the record file the pointer already names, and read by nothing but this loop: a key
 # read by nothing is ceremony. The record file is where the run is shown, and the pointer is checked to name one.
 #
-# AT FILE SCOPE, OUTSIDE `_eg_body`, SO A SOURCE DEFINES IT (wave-30 T14; REQ-6 AC-6.1, D9).
-# `session-poker.sh matrix-render` writes each AC block's stubs from this list, sourcing this
-# file in a subshell to read it, so the keys Step 3 renders and the keys the Verify gate
-# demands are one list and cannot drift. Its name collides with nothing the two sourcing
-# hooks define.
+# AT FILE SCOPE, OUTSIDE `_eg_body`, SO A SOURCE DEFINES IT. Its name collides with nothing the
+# two sourcing hooks define.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 keys_for_tier() {
   case "$1" in
@@ -1668,9 +1665,22 @@ matrix_auditor_required() {
 # the judge and the cards cannot answer one criterion two ways. 2 when the run's facts could not be read: a run
 # read as holding no fact would read every criterion pending, and a pending criterion is relaxed.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+# A criterion's verdict, where the reader takes the evidence review's, is the newest evidence review's when it passed
+# and the judge reads the evidence question covered from its head to the working head (lib/proof.sh `facts_cover`, the
+# judge's own walk, over the fold this shell already holds): one fact, one judge, so a release landed after the review
+# leaves the verdict standing and code past it ends it. Otherwise the reader answers at the working head. A caller that
+# names no head asks for no review. A dry copy's facts are its plan's run's; its text is its own.
 matrix_load() {  # <plan> [head]
-  local rc=0
-  MATRIX_CELLS="$(_proof_ask "$1" reader_cells "$1" "${2:-}")" || rc=$?
+  local rc=0 rp h="${2:-}" rv lh
+  rp="$(proof_run_plan "$1")"
+  if [ -n "$h" ]; then
+    rv="$(_proof_ask "$rp" reader_q_reviews "$rp")" || return 2
+    lh="$(printf '%s\n' "$rv" | awk -F'|' '{ q = ""; x = ""; r = ""
+        for (i = 2; i <= NF; i++) { if ($i ~ /^question=/) q = substr($i, 10); if ($i ~ /^head=/) x = substr($i, 6); if ($i ~ /^result=/) r = substr($i, 8) }
+        if (q == "evidence") last = (r == "pass") ? x : "" } END { print last }')"
+    if [ -n "$lh" ] && { [ "$lh" = "$h" ] || facts_cover "$rp" "$lh" "$h" evidence >/dev/null 2>&1; }; then h="$lh"; fi
+  fi
+  MATRIX_CELLS="$(_proof_ask "$rp" reader_cells "$1" "$h")" || rc=$?
   case "$rc" in 0) ;; 1) MATRIX_CELLS="" ;; *) return 2 ;; esac
   MATRIX_BLOCKS="$(plan_read_blocks "$1" 2>/dev/null)" || MATRIX_BLOCKS=""
   return 0
@@ -1817,12 +1827,12 @@ matrix_row_deferred() {
 
 # THE LIVE ROW'S EXITS. A pending or blocked row the owing-step rule no longer defers meets the evidence
 # refusals below for the key it lacks, and those refusals say which of three acts settles it: a row the walk
-# proved is written discharged with its record, a row whose eval cannot fire its fails-when is retiered up
-# with a new eval, and any other row is the user's to waive. The first two are verbs an agent runs; the third
-# is a person's word, said as such, so the refusal never leaves its reader to guess whose move it is.
+# proved is discharged by registering the walk's record, a row whose eval cannot fire its fails-when has its
+# Eval design row changed by the person, and any other row is the user's to waive. The first is a verb an agent
+# runs; the other two are a person's, said as such, so the refusal never leaves its reader to guess whose move it is.
 # [WALL: tests/shell-lint.test.sh]
 matrix_live_row_exit() {  # <AC> -> the repair prose of a live row's evidence refusal
-  printf '%s' "the row is live past the step that owes it: if the walk proved it, run session-poker.sh matrix-set $1 status=discharged evidence=<its record>; if its eval cannot fire, run session-poker.sh matrix-retier $1 tier=<higher> eval='<the new eval>'; otherwise needs: the user — a waiver, in their words: session-poker.sh waive-row $1 '<their words>' '<why>'."
+  printf '%s' "the row is live past the step that owes it: if the walk proved it, register its record: session-poker.sh proof-add walk <its record>; if its eval cannot fire, needs: the user — its ## Eval design row changed; otherwise needs: the user — a waiver, in their words: session-poker.sh waive $1 '<their words>' '<why>'."
 }
 
 # matrix_table_rows -> `<AC>\037<tier>\037<status>\037<evidence>\037<auditor>\037<confirmed>\037<waiver 1|0>` per
@@ -1843,12 +1853,12 @@ matrix_table_rows() {
 
 # matrix_close_eval <eval text> -> 0 when the eval names `landing-report --hand-holds`, the measure
 # close-out reads last. The one test of which criterion the close proves: matrix_close_rows and the
-# task: cell matrix-render writes both ask it, so no eval reads as the close's to one and not the other.
+# proof close-out writes both ask it, so no eval reads as the close's to one and not the other.
 matrix_close_eval() { grep -qE 'landing-report[[:space:]]+--hand-holds' <<< "$1"; }
 
 # matrix_close_rows <plan> -> the AC id of each pending criterion the close settles, the reader's
-# order: owed at Step 9, and its block's `eval:` is the close's measure (matrix_close_eval).
-# close-out writes each such row's cells from that reading. 2 when the run's facts could not be read.
+# order: owed at Step 9, and its block's `eval:`, else its Eval design row's, is the close's measure (matrix_close_eval).
+# close-out proves each such criterion from that reading. 2 when the run's facts could not be read.
 matrix_close_rows() {
   local PLAN="$1" MATRIX_CELLS MATRIX_BLOCKS ac tier status ev aud conf w block
   matrix_load "$PLAN" || return 2
@@ -1856,7 +1866,8 @@ matrix_close_rows() {
     [ -n "$ac" ] && [ "$status" = pending ] || continue
     block="$(matrix_block "$ac")"
     [ "$(matrix_owing_step "$PLAN" "$block")" = 9 ] || continue
-    matrix_close_eval "$(grep -E '^[[:space:]]*eval[[:space:]]*:' <<< "$block")" || continue
+    matrix_close_eval "$(grep -E '^[[:space:]]*eval[[:space:]]*:' <<< "$block")" \
+      || matrix_close_eval "$(plan_read_row "$PLAN" 'Eval design' Criterion "$ac" 2>/dev/null | grep '^eval=')" || continue
     printf '%s\n' "$ac"
   done <<MATRIX_ROWS
 $(matrix_table_rows)
@@ -4052,9 +4063,8 @@ Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block �
 # `matrix_row_deferred` at file scope.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 
-# Per-tier required evidence keys: `keys_for_tier`, at file scope above `_eg_body` since
-# wave-30 T14, so `session-poker.sh matrix-render` reads the same list the loop below walks.
-# It names `evidence` for every tier and `user-confirmed` for T4 and nothing else (wave-31 T6).
+# Per-tier required evidence keys: `keys_for_tier`, at file scope above `_eg_body`.
+# It names `evidence` for every tier and `user-confirmed` for T4 and nothing else.
 
 # THE THREE STEP-4 ARMS: `slices_section`, `k2_step_num`, `validate_approved_by`, `validate_fails_when` and
 # `validate_prototype_no_matrix_row` are defined just before `CURRENT` is parsed, above.
@@ -4184,6 +4194,14 @@ MATRIX_STATUS
     # it, so the per-tier keys below are asked of those two facts, written as the keys they stand for.
     if [ "$v15" = 1 ]; then
       block_txt="$( [ -z "$ev" ] || printf '  evidence: %s\n' "$ev"; [ -z "$ucv" ] || printf '  user-confirmed: %s\n' "$ucv")"
+    # AN OLDER PLAN'S BLOCK THAT NAMES NO EVIDENCE takes the evidence of a proof the run's log holds for the criterion,
+    # which names it there and writes no key: an evidence the table's own cell does not hold. A row the text alone
+    # discharges is judged on its text, as it always was.
+    elif [ -n "$ev" ] && ! grep -qE '^[[:space:]]*evidence[[:space:]]*:' <<< "$block_txt" \
+      && [ "$ev" != "$(printf '%s\n' "$table" | awk -F'\t' -v a="$ac" '{ c = ""; e = ""
+           for (i = 1; i <= NF; i++) { if (index($i, "ac=") == 1) c = substr($i, 4); if (index($i, "evidence=") == 1) e = substr($i, 10) }
+           if (c == a) { print e; exit } }')" ]; then
+      block_txt="${block_txt:+$block_txt$'\n'}  evidence: $ev"
     fi
     # provenance arm (epic-14 W1, AC-5): the literal value `provenance:
     # implementation` in an AC block is circular — it names the change as the
@@ -4265,7 +4283,7 @@ MATRIX_STATUS
           T3|T4)
             case "$val_lc" in
               n/a|n/a:*)
-                _eg_owe "waive-row:${ac}" "waiver: row ${ac}" "commit refused — ${ac} calls its ${key} evidence n/a, a live tier; waive the row with: session-poker.sh waive-row ${ac} '<your words>' '<why>'"
+                _eg_owe "waive:${ac}" "waiver: row ${ac}" "commit refused — ${ac} calls its ${key} evidence n/a, a live tier; waive the row with: session-poker.sh waive ${ac} '<your words>' '<why>'"
                 block_matrix "${ac} calls its ${key} evidence n/a" "record it, or waive the row" \
                   "matrix row '${ac}' (${tier}) key '${key}' is a self-written 'n/a' on a live tier." \
                   "a live-tier field cannot be n/a — downgrade the row via the Waiver Protocol (record 'waiver: <user> <date> <reason>'), a user decision." ;;
@@ -4360,7 +4378,7 @@ MATRIX_STATUS
       esac
       if [ "$tier" = "T4" ]; then
         if user_confirmed_attributed "$ucv"; then
-          _eg_owe "waive-row:${ac}" "waiver: row ${ac}" "commit refused — the auditor's finding on ${ac} stands ('${aud}'); settle it with the auditor, or waive the row with: session-poker.sh waive-row ${ac} '<your words>' '<why>'"
+          _eg_owe "waive:${ac}" "waiver: row ${ac}" "commit refused — the auditor's finding on ${ac} stands ('${aud}'); settle it with the auditor, or waive the row with: session-poker.sh waive ${ac} '<your words>' '<why>'"
           block_matrix "the auditor's finding on ${ac} stands" "settle it with the auditor" \
             "matrix row '${ac}' (T4) carries a well-formed 'user-confirmed:', but the independent auditor's standing verdict on it is '${aud}', at step ${CURRENT}." \
             "a user's confirmation does not overturn an auditor's finding — it replaces the WAIVER a T4 row used to need, not the audit. Resolve the '${aud}' verdict (re-run the audit and record CONFIRMED, or clear the cell if the finding was withdrawn), or waive the row."
@@ -4380,8 +4398,8 @@ MATRIX_STATUS
     fi
   done <<< "$rows"
 
-  # THE WALK-ARTIFACT STUB IS A PLACEHOLDER TOO. Step 3 renders `walk-artifact: pending` above an older plan's table
-  # (`session-poker.sh matrix-render`), and it is judged as a tier key is: unread before Step 5, unread at current: 5
+  # THE WALK-ARTIFACT STUB IS A PLACEHOLDER TOO. An older plan's Step 3 rendered `walk-artifact: pending` above its
+  # table, and it is judged as a tier key is: unread before Step 5, unread at current: 5
   # while any criterion is still pending (the same mid-walk relaxation the key loop above takes), and refused once the
   # walk is done and at every step after it. AFTER the row loop on purpose: UNDISCHARGED is what the loop found. A filled
   # value is the walk gate's; an absent line is legal.
@@ -5437,15 +5455,14 @@ return 0
 # `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `row-landed` — wave-28 T6, D7; `proof-add` and
 # `approve` and `waive`, each written on the user's word; `budget`, the user's cap, from
 # T34, D24; `share` — wave-28 T10, D16, in both its forms; `step-field` — wave-28 T8, D17, the fields the evidence
-# gate reads; `matrix-render` and `discharge` — wave-30 T14, D9, the matrix's stubs and its auditor cell; `handoff` —
+# gate reads; `handoff` —
 # wave-30 T15, D11, the plan's ## Handoff; `task-split` — wave-30 T17, D14d-3, a row rewritten as its children;
 # `regression` — wave-31 T27, D4, A-orch-40, the plan's Step-0 regression setting; and, wave-33 T15 (D10),
 # `deliver` (a record row's own last act: admitted only for the caller's own plan row, by arm A),
-# `rule` (a ruling pushed to a writer), `matrix-set`, `matrix-retier` (a criterion's tier raised, which rewrites its
-# eval and evidence cells), `waive-row`, `confirm-row` (the user's confirmation of a
+# `rule` (a ruling pushed to a writer), `confirm-row` (the user's confirmation of a
 # T4 row, the user's act and never an agent's), `tasks-prose`, `epic-row` and
 # `continuation-fill` (T7's plan verbs), `disposition` (T13's finding ledger) and `reply` (wave-38 T3, the final card's
-# replay into approve, waive, waive-row and finding-move), `decisions` (a decision put or ruled writes the run's
+# replay into approve, waive and finding-move), `decisions` (a decision put or ruled writes the run's
 # design ledger and its register, and the read goes with the verb; a writer reads neither) — `ruling-ack` and `rulings`
 # are the writer's own reads and are NOT on the list); 1 otherwise (wave-20 T9, REQ-4, AC-4.2).
 #

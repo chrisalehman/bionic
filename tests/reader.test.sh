@@ -32,7 +32,8 @@
 #   §ASK-LOG    lib/owed.sh writes each act on an ask to the run's log on its own clock and never the register, and
 #               reads the register, then the log, as one list.
 #   §ASK-DOORS  a passing reading closes its question's waiver; the Stop over an approved plan closes the step asks.
-#               A registered proof is one proof event in the run's log, the plan byte for byte as it was.
+#               A registered proof is one proof event in the run's log, the plan byte for byte as it was; a
+#               registered walk discharges each criterion it confirms by one proof naming it.
 #   §HANDS      an amend, a hold, an extension, an adoption, a by-hand landing and a person's stop of a run each leave
 #               one hand event with its reason, through the one writer that refuses an act with none; the tick's
 #               withdrawal of a request for the load leaves none.
@@ -322,7 +323,16 @@ expect_eq "at 15 every criterion in one fold: its state, its tier by its eval ty
   "AC-7.1,pending,,T1,,CONFIRMED,,REQ-7;AC-7.2,discharged,approval,T1,,CONFIRMED,me 2026-11-01 AC-7.2,REQ-7;AC-7.3,pending,,T1,,CONFIRMED,,REQ-7;AC-7.4,discharged,proof,T1,record/new/e4.md,CONFIRMED,,REQ-7;AC-7.5,discharged,waiver,T1,,CONFIRMED,,REQ-7;|REFUTED|" "$(every "$H")|$(every "$G" | cut -d, -f6)|$(every | cut -d, -f6)"
 W=old; expect_eq "at 14 a row the table holds answers its event, else its own cells and block; a row the Eval design lacks follows, tiered by its cell" \
   "AC-7.4,discharged,proof,T1,e.md,CONFIRMED,Ann 2026-11-01 saw it,;AC-8.1,pending,,T4,,REFUTED,Bo 2026-11-02 tried it,REQ-8;" "$(every | tr ';' '\n' | grep -E '^AC-(7.4|8.1),' | tr '\n' ';')"
-ask cell AC-9.9; expect_status "a criterion the plan lacks has no cell" 1 "$?"
+W=aud; plan aud <<< "run/v1|ev=proof|kind=review|question=evidence|head=$H|result=pass|evidence=record/aud/a.md|at=2026-11-01T00:00:09Z
+run/v1|ev=proof|ac=AC-7.3|evidence=record/aud/w.md|at=2026-11-01T00:00:10Z"
+sed 's/^| AC-8\.1 |/| AC-7.3 | T1 | pending | — | — |\n| AC-7.5 | T1 | discharged | e5.md | — |\n&/' "$D/plans/epic-x/old.plan.md" | sed 's/\\n/\n/g' > "$D/plans/epic-x/aud.plan.md"
+aud() { every "$@" | tr ';' '\n' | awk -F, '$1 ~ /^AC-7\.[345]$/ { printf "%s=%s ", $1, $6 }'; }
+expect_eq "at 14 a row a logged proof discharges with no verdict reads the evidence review at the head (none with no head); the table's own rows keep their cells" \
+  "AC-7.3=CONFIRMED AC-7.4=CONFIRMED AC-7.5= |AC-7.3= AC-7.4=CONFIRMED AC-7.5= " "$(aud "$H")|$(aud)"
+W=wv; plan wv <<< "run/v1|ev=waiver|ac=AC-7.4|by=me|said=let it go|at=2026-11-01T00:00:11Z"; cp "$D/plans/epic-x/old.plan.md" "$D/plans/epic-x/wv.plan.md"
+expect_eq "at 14 a row the text discharges, with a logged waiver of it, reads waived by the waiver; with none, discharged by the proof" \
+  "state=discharged by=waiver|state=discharged by=proof" "$(flat cell AC-7.4)|$(W=old; flat cell AC-7.4)"
+W=old; ask cell AC-9.9; expect_status "a criterion the plan lacks has no cell" 1 "$?"
 ask cell; expect_status "cell with no criterion is refused" 2 "$?"
 
 section "JOIN"
@@ -555,6 +565,11 @@ rec ev-pass.md "$(s57_commit "$RF/.worktrees/01-fixture" lib/a.sh C2)" pass
 poke "$RF" proof-add review record/wave-01-fixture/ev-pass.md --question evidence --reader w-aud
 expect_eq "a passing reading of the question registered (exit 0) closes it, the closer named" "0||yes" "$RC|$(reg "$RF" "$PF")|$(al owed_lines "$PF" "$RF" \
   | /usr/bin/grep -q '|key=waive:evidence|state=closed|by=passing reading|' && echo yes)"
+printf '| AC | verdict | why |\n|---|---|---|\n| AC-1.1 | CONFIRMED | walked |\n\nverdict: CONFIRMED — one row\n' > "$RF_DIR/walk.md"
+RF_SUM="$(cksum < "$PF")"; poke "$RF" proof-add walk record/wave-01-fixture/walk.md
+expect_eq "a registered walk discharges the criterion it confirms by one proof naming it, the plan byte for byte as it was" \
+  "0|$RF_SUM|1|state=discharged by=proof" "$RC|$(cksum < "$PF")|$(/usr/bin/grep -c '^run/v1|ev=proof|ac=AC-1\.1|evidence=record/wave-01-fixture/walk\.md|' \
+  "$RF_DIR/run.log")|$(bash "$READER" "$PF" cell AC-1.1 | paste -sd' ' -)"
 SW_KEYS="approve:step0 approve:step1 approve:step2 approve:step3"
 for a in 0 1; do
   SR="$(make_repo "sweep$a")"; new_roster "$SR"

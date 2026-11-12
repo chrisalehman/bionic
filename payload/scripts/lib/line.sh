@@ -831,8 +831,7 @@ _line_carried_close() {  # <plan> <root> <row>
 
 # ---------------------------------------------------------------------------- the landing's settlement
 # A LANDING SETTLES EVERYTHING IT PROVES IN ONE ACT, so nothing it proves is settled by hand afterwards. Its writes
-# (`line_landing_writes`, which every landing runs) hand their copy of the plan to `line_settle` before the copy
-# is moved in, and the copy gains, in that one transaction:
+# (`line_landing_writes`, which every landing runs) ask `line_settle` what it settles:
 #   · nothing for a finding: each finding carried to the row (`finding-move … carried <row>`) and each finding any
 #     registered review names at the site of a finding the row answers (born of it, moved fixed to it, or carried to
 #     it) is named in LINE_SETTLED_F, and `line_settled` appends its move to fixed, `finding ref=<record>#<n>
@@ -842,7 +841,7 @@ _line_carried_close() {  # <plan> <root> <row>
 # Once the copy is in, `line_settled` closes each settled finding's ask on the register and closes the asks answered
 # carry to the row's landing. The landing's moves to fixed are the fact the correcting verbs read (`line_settled_by`):
 # `finding-move` refuses a finding a landing settled, naming that landing; an older run's landing record also holds
-# `ev=settled` lines naming cells, which `matrix-set` still reads.
+# `ev=settled` lines naming cells, an older run's fact that nothing writes now.
 #
 # THE SAME SITE IS A LINE AT EACH REVIEW'S OWN HEAD. A finding names `<path>:<line>` at the head its review read; two
 # reviews read at different heads name one line at different numbers. A site is carried from the answered finding's
@@ -904,7 +903,7 @@ _line_moves() {
 }
 # line_settle <plan> <row> <commit> <copy> <at> -> 0 with <copy> settled; 1 when it cannot be written.
 # <plan> is read for what the row answers, <copy> is the copy the plan write swaps in. Sets LINE_SETTLED_F (findings),
-# space-separated, and rewrites the matrix head's stack-health: line (lib/proof.sh `proof_health_put`).
+# space-separated.
 line_settle() {
   local plan="$1" row="$2" com="$3" copy="$4" at="$5" root docs own sites osites moves id
   LINE_SETTLED_F=""
@@ -929,21 +928,20 @@ line_settle() {
     )"
     LINE_SETTLED_F="$(printf '%s\n' "$LINE_SETTLED_F" | awk 'NF && !s[$0]++' | tr '\n' ' ')"
   fi
-  # The health line is the judge's rendering, rewritten here in the same copy: this landing's verdicts are already in
-  # the record, so a suite the regression left red that it greened moves from owed= to closed=, and the line stays red.
-  proof_health_put "$copy" "$root" "$plan" || return 1
   LINE_SETTLED_F="${LINE_SETTLED_F% }"
   return 0
 }
-# line_settled <plan> <root> <row> <commit> -> always 0: the log and the register half of `line_settle`, once the copy
-# it settled is the plan: each settled finding's move to fixed, and its asks closed.
+# line_settled <plan> <root> <row> <commit> -> 0, or 1 when a settled finding's ask cannot be closed because the asks
+# library cannot be loaded: the log and the register half of `line_settle`: each settled finding's move to fixed,
+# and its asks closed. A landing that could not close an ask says so through its caller, never reads as one with none.
 line_settled() {
   local plan="$1" root="$2" row="$3" com="$4" id k
   for id in $LINE_SETTLED_F; do
     proof_finding_event "$plan" "ref=$id" to=fixed "row=$row" by=landing "landing=$com" \
       || printf 'line: the landing of %s settled %s, and its move to fixed could not be written to the run log\n' "$row" "$id" >&2
   done
-  if [ -n "$LINE_SETTLED_F" ] && _line_load_owed && declare -F finding_owed_key >/dev/null 2>&1; then
+  if [ -n "$LINE_SETTLED_F" ]; then
+    _line_load_owed || return 1
     for id in $LINE_SETTLED_F; do
       k="$(finding_owed_key "$id")"
       OWED_ROOT="$root" OWED_PLAN="$plan" OWED_SID="${LINE_SID:-line}" owed_close "$k" "landing ${row}" >/dev/null 2>&1
@@ -1047,11 +1045,10 @@ EOF
     || printf 'DEBT %s %s — published red on the declared suite; the run owes a green run of %s (debt %s in %s)\n' \
          "$row" "$LINE_DEBT_SUITE" "$LINE_DEBT_SUITE" "$LINE_DEBT_ID" "$(line_log "$plan")"
   _line_cover "$plan" "$row" "$root" "$head" "$cand"
-  # 9. THE LANDING'S WRITES (`line_landing_writes`): the matrix's two, then the findings it settles. The row
-  # reads landed from the event above whatever they do, so a failure now is told and the publish stands.
+  # 9. THE FINDINGS THE LANDING SETTLES (`line_landing_writes`). The row reads landed from the event above whatever
+  # they do, so a failure now is told and the publish stands.
   line_landing_writes "$plan" "$row" "$cand" "$at" \
-    || printf 'UNSETTLED %s — published %s; the evidence keys and the stack-health line are not written and the findings it settles are not moved\n' \
-      "$row" "$cand"
+    || printf 'UNSETTLED %s — published %s; the findings it settles are not moved or their asks not closed\n' "$row" "$cand"
   # 10. THE ROSTER MARK (T6): `landed=<40-hex> landed_at=<ISO-UTC>` on the row's roster line.
   _line_roster_mark "$plan" "$root" "$row" "$cand" "$at"
   _line_lock_drop "$lk"
@@ -1063,180 +1060,19 @@ EOF
 }
 
 # ---------------------------------------------------------------------------- the landing's writes
-# A LANDING WRITES NOTHING OF ITS OWN TO THE PLAN: its row reads landed from its `published` event (lib/units.sh
-# `_units_live`). Two writes of the matrix ride it still, made onto a copy of the plan judged as the plan is
-# (`units_validate`) and moved over it only while no other write changed it: the `evidence:` key of each criterion the
-# row serves, from the suites the landing ran (`line_evidence`), and the stack-health line (`line_settle`). Then the
-# findings it settles move to fixed in the log and their asks close (`line_settled`). The row's status, its step line
-# and every cell of its Tasks row are left as they stand.
-#
-# SERVES_AWK: the Tasks rows each criterion is served by (`serves_load` over `serves_tasks`, `serves_hit`) and the eval
-# design's rows (`eval_row`); matrix-render reads it too.
-SERVES_AWK='
-function trim(v) { gsub(/^[ \t]+|[ \t]+$/, "", v); return v }
-function cells(line, out,    n, i, t) {
-  gsub(/\\\|/, "\001", line)
-  n = split(line, t, "|")
-  for (i = 2; i < n; i++) { out[i - 1] = trim(t[i]); gsub(/\001/, "|", out[i - 1]) }
-  return n - 2
-}
-function serves_load(spec,    n0, i, tl, tv, ns, sv, s) {
-  n0 = split(spec, tl, "\n"); nt = 0
-  for (i = 1; i <= n0; i++) {
-    split(tl[i], tv, "\t"); if (tv[1] == "") continue
-    nt++; tid[nt] = tv[1]; tstep[nt] = tv[3]; tkind[nt] = tv[4]; ns = split(tv[2], sv, /[ ,;]+/)
-    for (s = 1; s <= ns; s++) if (sv[s] != "") serves[nt, sv[s]] = 1
-  }
-}
-function serves_hit(t, cr) {
-  return (((t, cr) in serves) || (ereq[cr] != "" && ((t, ereq[cr]) in serves)))
-}
-function eval_row(line,    nc, c, j, cr) {
-  if (line ~ /^[ \t]*\|[-|: \t]*$/) return
-  nc = cells(line, c)
-  if (!evh) { evh = 1; delete col; for (j = 1; j <= nc; j++) col[tolower(c[j])] = j; return }
-  cr = ("criterion" in col) ? c[col["criterion"]] : ""
-  if (cr == "" || (cr in eseen)) return
-  eseen[cr] = 1; ne++; ec[ne] = cr
-  ereq[cr] = ("requirement" in col) ? c[col["requirement"]] : ""
-  eapp[cr] = ("approach" in col) ? c[col["approach"]] : ""
-  eev[cr] = ("eval" in col) ? c[col["eval"]] : ""
-  efw[cr] = ("fails when" in col) ? c[col["fails when"]] : ""
-  etype[cr] = ("eval type" in col) ? c[col["eval type"]] : ""
-}'
-
-# serves_tasks <plan> -> `<id><TAB><serves><TAB><step><TAB><kind>` for each `## Tasks` row (lib/units.sh units_rows,
-# the table's one reader).
-serves_tasks() {
-  units_rows "$1" 2>/dev/null | awk -F'\t' '$1 != "" { print $1 "\t" $8 "\t" $2 "\t" $3 }'
-}
-
-# LE_AWK: the evidence pass. In each AC block of `## Verification Matrix` the landed row serves, an `evidence:` key
-# reading `pending` or a path a landing wrote (`record/<plan>/line/`) takes the docs-root-relative log of the row's
-# green verdict for the suite the block's eval names, at this commit, or of the verdict a reuse line names; a hand fill
-# stays, and a block with no `evidence:` key is left alone. ENVIRON: LE_TASKS, LE_ROW, LE_LOGS
-# (`<suite><TAB><path>` per line), LE_SLUG, LE_COUNT (a side file: the number of keys written).
-LE_AWK='
-function suite_of(ev,    t) {
-  if (!match(ev, /`[^` \t]+\.test\.sh`/)) return ""
-  t = substr(ev, RSTART + 1, RLENGTH - 2)
-  return t
-}
-BEGIN {
-  serves_load(ENVIRON["LE_TASKS"]); row = ENVIRON["LE_ROW"]; slug = ENVIRON["LE_SLUG"]; cf = ENVIRON["LE_COUNT"]
-  nl = split(ENVIRON["LE_LOGS"], ll, "\n")
-  for (i = 1; i <= nl; i++) { split(ll[i], lv, "\t"); if (lv[1] != "" && lv[2] != "") logs[lv[1]] = lv[2] }
-  for (t = 1; t <= nt; t++) if (tid[t] == row) rt = t
-}
-{ raw[NR] = $0; ln = $0; sub(/\r$/, "", ln); L[NR] = ln }
-END {
-  for (i = 1; i <= NR; i++) {
-    line = L[i]
-    if (line ~ /^[ \t]*```/) { fence = !fence; continue }
-    if (fence) continue
-    if (line ~ /^## /) {
-      inm = 0; evh = 0; cur = ""
-      inev = (line ~ /^## Eval design[ \t]*$/)
-      if (line ~ /^## Verification Matrix/) inm = 1
-      continue
-    }
-    if (inev && line ~ /^[ \t]*\|/) { eval_row(line); continue }
-    if (!inm || line ~ /^[ \t]*\|/) { if (inm) cur = ""; continue }
-    if (line ~ /^[^ \t]/) {
-      cur = ac_any(line)
-      if (cur != "") { if (cur in seen) cur = ""; else { seen[cur] = 1; nb++; bord[nb] = cur } }
-      continue
-    }
-    if (cur != "" && line ~ /^[ \t]+[^ \t]/) {
-      k = line; sub(/^[ \t]+/, "", k); v = k; sub(/[ \t]*:.*$/, "", k); sub(/^[^:]*:[ \t]*/, "", v)
-      if (k == "eval" && !(cur in beval)) beval[cur] = trim(v)
-      if (k == "evidence" && !(cur in evl)) { evl[cur] = i; evv[cur] = trim(v) }
-    }
-  }
-  written = 0
-  for (b = 1; b <= nb && rt; b++) {
-    cr = bord[b]
-    if (!(cr in evl) || !serves_hit(rt, cr)) continue
-    s = suite_of(beval[cr])
-    if (s == "" || !(s in logs)) continue
-    if (evv[cr] != "pending" && index(evv[cr], "record/" slug "/line/") != 1) continue
-    if (evv[cr] == logs[s]) continue
-    n = evl[cr]; ln = L[n]
-    if (match(ln, /evidence[ \t]*:/)) { out[n] = substr(ln, 1, RSTART + RLENGTH - 1) " " logs[s]; written++ }
-  }
-  for (i = 1; i <= NR; i++) print ((i in out) ? out[i] : raw[i])
-  printf "%d\n", written > cf
-}'
-
-# line_evidence <plan in> <plan out> <row> <commit> <landing record> <docs root> <plan slug> -> prints the number of
-# cells written; <plan out> holds the plan with them (and is left alone when none), and <plan out>.cells the criteria
-# whose block took a log, space-separated, for the landing's settlement. rc 1 when the pass cannot run.
-# A suite is named in an eval by its file name or by its path under tests/, where a bare Lands-on name runs, so a log
-# is keyed by both.
-line_evidence() {
-  local in="$1" out="$2" row="$3" commit="$4" rec="$5" droot="$6" slug="$7" logs n side="$2.count"
-  rm -f "$out.cells"
-  logs="$( line_held "$rec" && line_lines "$rec" | awk -F'|' -v row="$row" -v c="$commit" -v root="$droot/" "$_LINE_FIELDS_AWK"'
-    { e = line_ev() }
-    e == "verdict" && line_kv("result") == "green" {
-      s = line_kv("suite"); l = line_kv("log")
-      gl[line_kv("commit") SUBSEP s SUBSEP line_kv("reads")] = l   # any row: a reuse line after it may name it as its proof
-      if (line_kv("row") == row && line_kv("commit") == c && s != "" && index(l, root) == 1) last[s] = substr(l, length(root) + 1)
-    }
-    e == "reused" && line_kv("row") == row && line_kv("commit") == c {
-      s = line_kv("suite"); k = line_kv("from") SUBSEP s SUBSEP line_kv("reads")
-      if (s != "" && line_kv("reads") != "" && (k in gl) && index(gl[k], root) == 1) last[s] = substr(gl[k], length(root) + 1)
-    }
-    END { for (s in last) { printf "%s\t%s\n", s, last[s]; if (index(s, "/") == 0) printf "tests/%s\t%s\n", s, last[s] } }' 2>/dev/null )"
-  if [ -z "$logs" ]; then printf '0'; return 0; fi
-  LE_TASKS="$(serves_tasks "$in")" LE_ROW="$row" LE_LOGS="$logs" LE_SLUG="$slug" LE_COUNT="$side" \
-    awk "$(units_ac_head_awk)$SERVES_AWK$LE_AWK" "$in" > "$out.le" 2>/dev/null || { rm -f "$out.le" "$side"; return 1; }
-  n="$(cat "$side" 2>/dev/null)"; rm -f "$side"
-  case "$n" in ''|*[!0-9]*) rm -f "$out.le"; return 1 ;; esac
-  if [ "$n" -gt 0 ]; then
-    # The criteria whose block took a log: the pass replaces lines in place, so a line that differs is an evidence line.
-    awk "$(units_ac_head_awk)"'
-      NR == FNR { a[FNR] = $0; next }
-      /^## / { inm = ($0 ~ /^## Verification Matrix/); cur = ""; next }
-      inm && /^[^ \t|]/ { cur = ac_any($0); next }
-      cur != "" && $0 != a[FNR] && !(cur in s) { s[cur] = 1; printf "%s%s", sep, cur; sep = " " }' "$in" "$out.le" > "$out.cells" 2>/dev/null
-    mv -f "$out.le" "$out"
-  else
-    rm -f "$out.le"
-  fi
-  printf '%s' "$n"
-}
-
-# line_landing_writes <plan> <row> <commit> <at> -> 0 written, or nothing to write; 1 the copy cannot be written or breaks
-# the table; 3 the plan kept changing under it (tried five times). A row the plan does not hold has nothing to write.
+# A LANDING WRITES NOTHING OF ITS OWN TO THE PLAN, AND NOTHING OF THE MATRIX: its row reads landed from its `published`
+# event (lib/units.sh `_units_live`), and a landing proves suites, not criteria. What it still does is the findings
+# it settles: read from the plan (`line_settle`), moved to fixed in the log and their asks closed (`line_settled`).
+# line_landing_writes <plan> <row> <commit> <at> -> 0 settled, or nothing to settle; 1 what it settles cannot be read
+# or its asks cannot be closed.
+# A row the plan does not hold has nothing to settle.
 line_landing_writes() {
-  local plan="$1" row="$2" com="$3" at="$4" root rec new sum n=0
+  local plan="$1" row="$2" com="$3" at="$4" root
   LINE_SETTLED_F=""
   _line_plan_agent "$plan" "$row" >/dev/null || return 0
-  root="$(_line_root "$plan")" && rec="$(line_record "$plan")" && _line_load_proof || return 1
-  while [ "$n" -lt 5 ]; do
-    sum="$(cksum < "$plan" 2>/dev/null)" || return 1
-    new="$plan.landing.$$"
-    cp "$plan" "$new" 2>/dev/null || return 1
-    if ! line_evidence "$new" "$new.2" "$row" "$com" "$rec" "$(docs_root "$root")" "$(proof_plan_slug "$plan")" >/dev/null; then
-      rm -f "$new" "$new.2" "$new.2.cells"; return 1
-    fi
-    [ ! -f "$new.2" ] || mv -f "$new.2" "$new"
-    rm -f "$new.2.cells"
-    # The copy is judged as the plan is, and refused only for a fault it adds: a plan that already breaks the table
-    # is the person's to mend, and no landing's matrix writes wait on it.
-    if ! line_settle "$plan" "$row" "$com" "$new" "$at" \
-       || [ -n "$(units_validate "$new" "$plan" 2>&1 | /usr/bin/grep -vxF -f <(units_validate "$plan" "$plan" 2>&1))" ]; then
-      rm -f "$new"; return 1
-    fi
-    if [ "$(cksum < "$plan" 2>/dev/null)" = "$sum" ]; then
-      if cmp -s "$new" "$plan"; then rm -f "$new"; else mv -f "$new" "$plan" || { rm -f "$new"; return 1; }; fi
-      line_settled "$plan" "$root" "$row" "$com"
-      return 0
-    fi
-    rm -f "$new"; n=$((n + 1)); sleep 1
-  done
-  return 3
+  root="$(_line_root "$plan")" && _line_load_proof || return 1
+  line_settle "$plan" "$row" "$com" "$plan" "$at" || return 1
+  line_settled "$plan" "$root" "$row" "$com"
 }
 
 # ---------------------------------------------------------------------------- the tree's run
