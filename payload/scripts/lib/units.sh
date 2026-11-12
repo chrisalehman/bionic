@@ -2897,11 +2897,9 @@ units_add_row() {
 
 # ── THE PLAN-ROW PROJECTORS (wave-24 T15; REQ-9, D14) ─────────────────────────
 #
-# Four more projectors in `units_add_row`'s mould, one per hand edit a run used to make to its
-# own plan: a cell of a table row, a `- Step N:` or `- T<n>:` line, `current:`, and the
-# fields of a step's evidence block. The poker's plan-row verbs (`step-line`, `current`) and the
-# machine's cell write (`units_cells_write`) each run one of them onto a COPY and judge the copy
-# before anything is swapped in — the task-add transaction, unchanged.
+# One more projector in `units_add_row`'s mould, for a hand edit a run used to make to its own plan: a cell of a
+# table row. The machine's cell write (`units_cells_write`) runs it onto a COPY and judges the copy before anything is
+# swapped in — the task-add transaction, unchanged. A step is an event in the run's log, and nothing projects it.
 #
 # PURE, AS EVERY VERB HERE IS: each prints the WHOLE plan and writes nothing. Fence-aware like
 # `_units_read`: a table or a state line inside a ``` example is documentation and is never
@@ -3006,111 +3004,6 @@ units_table_cells() {
     }' "$plan"
 }
 
-# units_step_line <plan> <N|T<n>> <text> [append] -> the whole plan with that line of
-#   `## SDLC State` reading `- Step N: <text>` (or `- T<n>: <text>`); with `append`, <text>
-#   follows the line's own text after `; `. A line that is not there is added: a step line
-#   after the last `Step M:` line and its indented block, a task line after the last `- T<n>:`
-#   line (or, with none, at the end of the section). Exit 1 no `## SDLC State` · 4 a text with
-#   a line break.
-#
-# THE LINE IS FOUND AS THE GATE FINDS IT: `^[ \t]*-?[ \t]*Step[ \t]+N[ \t]*:` (walls.sh's own
-# pattern), the first one in the section. Its prefix — indent, marker, key, colon — is kept;
-# only the text after it is replaced, and the block lines under it are not touched.
-#
-# A TASK LINE'S MARKERS OUTLIVE ITS TEXT (wave-36 T10; REQ-4 AC-4.3, D10). A `- T<n>:` line is
-# `- T<n>: <text>[ <key>: <value>]…`: task-add ends it with ` born: review S<n> <reach> of=…` or
-# ` born: floor <suite>`, the marker the judge, the fix-cap and `disposition` read, and a later verb
-# may add its own ` <key>: <value>`. The text is what precedes the first ` <key>: ` (a lowercase
-# key); a rewrite replaces the text, or with `append` extends it, and each marker follows in its
-# order. A marker whose ` <key>: ` the new text already carries is the new text's, so a writer
-# that folds the old text into the new one writes each marker once. Replace mode used to drop
-# the born marker at the landing summary (debt step-line-drops-born). A `Step N:` line carries no
-# markers: its text, ` current: ` and all, is replaced whole as before.
-units_step_line() {
-  local plan="${1:-}" key="${2:-}" text="${3:-}" app="${4:-}"
-  [ -n "$plan" ] && [ -f "$plan" ] || return 1
-  case "$text" in *$'\n'*|*$'\r'*) return 4 ;; esac
-  US_KEY="$key" US_TEXT="$text" US_APP="$app" awk '
-    BEGIN {
-      key = ENVIRON["US_KEY"]; text = ENVIRON["US_TEXT"]; app = (ENVIRON["US_APP"] == "append")
-      isstep = (key !~ /^T/)
-      kq = key; gsub(/[.]/, "[.]", kq)
-      pat = isstep ? ("^[ \t]*-?[ \t]*Step[ \t]+" kq "[ \t]*:") : ("^[ \t]*-?[ \t]*" kq "[ \t]*:")
-      mk = " [a-z][a-z0-9_-]*: "
-    }
-    { L[++nl] = $0 }
-    END {
-      for (i = 1; i <= nl; i++) {
-        line = L[i]
-        if (line ~ /^[ \t]*```/) { fence = !fence; continue }
-        if (fence) continue
-        if (line ~ /^##[ \t]/) {
-          if (sdlc == 1) sdlc = 2
-          if (!seen && line ~ /^##[ \t]+SDLC State([ \t].*)?$/) { sdlc = 1; seen = 1; last = i }
-          continue
-        }
-        if (sdlc != 1) continue
-        if (line ~ /[^ \t]/) last = i
-        if (!at && match(line, pat)) at = i
-        if (line ~ /^[ \t]*-?[ \t]*Step[ \t]+[0-9]+[ab]?[ \t]*:/) { sline = i; inst = 1; intl = 0; continue }
-        if (line ~ /^[ \t]*-?[ \t]*T[0-9]+[ \t]*:/) { if (!tfirst) tfirst = i; tline = i; intl = 1; inst = 0; continue }
-        if ((inst || intl) && line ~ /^[ \t]+[^ \t]/ && line !~ /^[ \t]*-/) {
-          if (inst) sline = i; else tline = i
-          continue
-        }
-        inst = 0; intl = 0
-      }
-      if (!seen) exit 1
-      if (at) {
-        line = L[at]; match(line, pat)
-        pre = substr(line, 1, RLENGTH); rest = substr(line, RLENGTH + 1)
-        sub(/^[ \t]+/, "", rest); sub(/[ \t]+$/, "", rest)
-        marks = ""
-        if (!isstep && match(" " rest, mk)) {
-          marks = substr(" " rest, RSTART); rest = substr(rest, 1, RSTART - 1); sub(/[ \t]+$/, "", rest)
-        }
-        out = (app && rest != "") ? rest "; " text : text
-        while (marks != "") {
-          match(marks, "^" mk); hl = RLENGTH; k = substr(marks, 2, hl - 3); tail = substr(marks, hl + 1)
-          if (match(tail, mk)) { seg = substr(marks, 1, hl + RSTART - 1); marks = substr(tail, RSTART) }
-          else { seg = marks; marks = "" }
-          if (!index(" " out, " " k ": ")) out = out seg
-        }
-        L[at] = pre " " out
-      } else {
-        # AFTER a line, or BEFORE the first task line when a step line has no step to follow.
-        newl = (isstep ? "- Step " key ": " : "- " key ": ") text
-        if (isstep && !sline && tfirst) before = tfirst
-        else after = isstep ? (sline ? sline : last) : (tline ? tline : last)
-      }
-      for (i = 1; i <= nl; i++) {
-        if (i == before) print newl
-        print L[i]
-        if (i == after) print newl
-      }
-    }' "$plan"
-}
-
-# units_step_text <plan> <N|T<n>> -> the text of that line of `## SDLC State`, found exactly as
-#   `units_step_line` finds the line it writes (its pattern, fences skipped, the first one in the
-#   section), blanks trimmed; nothing when the line is absent. Exit 1 no `## SDLC State`.
-units_step_text() {
-  local plan="${1:-}" key="${2:-}"
-  [ -n "$plan" ] && [ -f "$plan" ] || return 1
-  US_KEY="$key" awk '
-    BEGIN {
-      key = ENVIRON["US_KEY"]; kq = key; gsub(/[.]/, "[.]", kq)
-      pat = (key !~ /^T/) ? ("^[ \t]*-?[ \t]*Step[ \t]+" kq "[ \t]*:") : ("^[ \t]*-?[ \t]*" kq "[ \t]*:")
-    }
-    /^[ \t]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[ \t]/ { if (sdlc == 1) sdlc = 2; if (!seen && $0 ~ /^##[ \t]+SDLC State([ \t].*)?$/) { sdlc = 1; seen = 1 }; next }
-    sdlc == 1 && !found && match($0, pat) {
-      r = substr($0, RLENGTH + 1); sub(/^[ \t]+/, "", r); sub(/[ \t]+$/, "", r); print r; found = 1
-    }
-    END { if (!seen) exit 1 }' "$plan"
-}
-
 # _units_files_tokens <Files cell> -> one entry per line, as the readiness program reads a Files cell: comma-split,
 # blanks trimmed, a leading `./` and the unmergeable `!` mark set aside, an entry with no letter or digit (`—`) dropped.
 _units_files_tokens() {
@@ -3118,104 +3011,8 @@ _units_files_tokens() {
     | awk '{ gsub(/^[ \t]+|[ \t]+$/, ""); sub(/^\.\//, ""); sub(/!$/, ""); if ($0 ~ /[A-Za-z0-9]/) print }'
 }
 
-# units_set_current <plan> <value> -> the whole plan with the first `current:` line of
-#   `## SDLC State` reading `current: <value>`. Exit 1 when the section or the line is absent.
-#   Which values are legal is the caller's (the poker refuses 9, close-out's alone); this only
-#   moves the line, which is all a hand edit of it ever did.
-units_set_current() {
-  local plan="${1:-}" v="${2:-}"
-  [ -n "$plan" ] && [ -f "$plan" ] && [ -n "$v" ] || return 1
-  case "$v" in *[!A-Za-z0-9]*) return 4 ;; esac
-  UC_V="$v" awk '
-    BEGIN { v = ENVIRON["UC_V"] }
-    /^[ \t]*```/ { fence = !fence; print; next }
-    fence { print; next }
-    /^##[ \t]/ { insdlc = ($0 ~ /^##[ \t]+SDLC State([ \t].*)?$/) && !seen; if (insdlc) seen = 1; print; next }
-    insdlc && !done && /^current[ \t]*:/ { print "current: " v; done = 1; next }
-    { print }
-    END { if (!done) exit 1 }' "$plan"
-}
-
-# units_step_fields [--replace] <plan> <N> <key=value>… -> the whole plan with each named field written as
-#   an indented `  key: value` line under `- Step N:` — after the block's last line — when the
-#   block does not carry that key already. WITHOUT THE FLAG a key the block has is left as written: this
-#   fills what is missing and never rewrites what is there (`current 4` fills the Step-4 block so).
-#   `--replace` (wave-28 T8; REQ-3 AC-3.5, D17) is the mode `session-poker.sh step-field` writes through: a
-#   key the block has is REPLACED where it stands, its place kept, and a second line of the same key in the
-#   block goes (the gate reads the first, so a stale second could only mislead); a key the block lacks is
-#   written after the block's last line as above. The rest of the plan is the same bytes.
-#   Exit 1 no `Step N:` line in `## SDLC State` · 3 an operand with no `=` · 4 a value with a line break ·
-#   5 (`--replace` only) a key the step line itself carries: the gate reads that text before any indented
-#   line, so a line written beside it could not win, and rewriting the step line is `step-line`'s.
-#
-# THE BLOCK IS THE GATE'S: the indented lines under the step line, up to the next line that is
-# not indented (walls.sh `extract_continuation`), blank lines skipped; a key is present when a
-# line of it starts `key:` (walls.sh `block_has`).
-units_step_fields() {
-  local mode=fill plan n pairs="" kv
-  if [ "${1:-}" = --replace ]; then mode=replace; shift; fi
-  plan="${1:-}"; n="${2:-}"
-  [ -n "$plan" ] && [ -f "$plan" ] && [ -n "$n" ] || return 1
-  shift 2
-  for kv in "$@"; do
-    case "$kv" in *=*) : ;; *) return 3 ;; esac
-    case "$kv" in *$'\n'*|*$'\r'*) return 4 ;; esac
-    pairs="${pairs}${kv%%=*}"$'\t'"${kv#*=}"$'\n'
-  done
-  UF_N="$n" UF_PAIRS="$pairs" UF_MODE="$mode" awk '
-    BEGIN {
-      pat = "^[ \t]*-?[ \t]*Step[ \t]+" ENVIRON["UF_N"] "[ \t]*:"
-      replace = (ENVIRON["UF_MODE"] == "replace")
-      np = split(ENVIRON["UF_PAIRS"], pl, "\n")
-      for (p = 1; p <= np; p++) {
-        if (pl[p] == "") continue
-        t = index(pl[p], "\t"); nk++
-        key[nk] = substr(pl[p], 1, t - 1); val[nk] = substr(pl[p], t + 1)
-      }
-    }
-    { L[++nl] = $0 }
-    END {
-      for (i = 1; i <= nl; i++) {
-        line = L[i]
-        if (line ~ /^[ \t]*```/) { fence = !fence; continue }
-        if (fence) continue
-        if (line ~ /^##[ \t]/) {
-          if (sdlc == 1) sdlc = 2
-          if (!seen && line ~ /^##[ \t]+SDLC State([ \t].*)?$/) { sdlc = 1; seen = 1 }
-          continue
-        }
-        if (sdlc != 1) continue
-        if (!at) {
-          if (match(line, pat)) {
-            at = i; endb = i; inb = 1
-            rest = substr(line, RLENGTH + 1); sub(/^[ \t]+/, "", rest)
-            for (p = 1; p <= nk; p++) if (rest ~ ("^" key[p] "[ \t]*:")) { has[p] = 1; onstep[p] = 1 }
-          }
-          continue
-        }
-        if (!inb) continue
-        if (line ~ /^[ \t]*$/) continue
-        if (line ~ /^[^ \t]/ || line ~ /^[ \t]*-?[ \t]*Step[ \t]+[0-9]+[ab]?[ \t]*:/) { inb = 0; continue }
-        endb = i
-        for (p = 1; p <= nk; p++) if (index(line, key[p]) && line ~ ("^[ \t]*" key[p] "[ \t]*:")) {
-          if (has[p] && !onstep[p]) drop[i] = 1
-          else if (!has[p]) hit[p] = i
-          has[p] = 1
-        }
-      }
-      if (!at) exit 1
-      if (replace) for (p = 1; p <= nk; p++) if (onstep[p]) exit 5
-      for (p = 1; p <= nk; p++) if (hit[p]) at_line[hit[p]] = p
-      for (i = 1; i <= nl; i++) {
-        if (replace && (i in at_line)) print "  " key[at_line[i]] ": " val[at_line[i]]
-        else if (!(replace && drop[i])) print L[i]
-        if (i == endb) for (p = 1; p <= nk; p++) if (!has[p]) print "  " key[p] ": " val[p]
-      }
-    }' "$plan"
-}
-
 # units_step_field <plan> <N> <key> -> the value of the block's first `key:` line, blanks trimmed, read from the
-#   block `units_step_fields` writes: the step line itself when its text opens with `key:`, else the indented lines
+#   step block of an older plan: the step line itself when its text opens with `key:`, else the indented lines
 #   under it, fences skipped, the first `- Step N:` line of `## SDLC State`. The first line wins, as the gate reads it.
 #   Exit 0 printed · 1 no `Step N:` line in `## SDLC State` · 2 the block carries no such key.
 units_step_field() {

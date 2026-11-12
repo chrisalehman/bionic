@@ -81,6 +81,9 @@ ck_plan() {  # <current> <proof lines> [<sed edit>] -> PCK, bound to this sessio
     printf '  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n'
   } | sed -e "${3:-}" > "$PCK"
   bind_marker "$RCK" "$PCK"
+  # The plan stands at the step its text names: a step an earlier advance appended to the run's log is taken out.
+  CK_LOG="$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$PCK")"
+  [ ! -f "$CK_LOG" ] || { /usr/bin/grep -v '|ev=step|' "$CK_LOG" > "$CK_LOG.t"; mv "$CK_LOG.t" "$CK_LOG"; }
 }
 ck_tree() {  # -> one cksum line per file in the fixture repository outside .git: what a write would change
   ( cd "$RCK" && find . -path ./.git -prune -o -type f -print | LC_ALL=C sort | while IFS= read -r f; do cksum "$f"; done )
@@ -112,7 +115,8 @@ ck_case() {
   expect_true "$label — …and wrote no file anywhere in the repository (every file's cksum, before and after)" \
     cmp -s "$TMPROOT/ck-tree-before" "$TMPROOT/ck-tree-after"
   if [ "$want" = 0 ]; then
-    expect_eq "$label — …the advance wrote current: $n (the fixture is one the advance takes)" "$n" "$(sed -n 's/^current: //p' "$PCK")"
+    expect_eq "$label — …the advance appended step $n, the plan byte-identical (the fixture is one the advance takes)" "n=$n|same" \
+      "$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$PCK" step | head -1)|$(cmp -s "$TMPROOT/ck-before" "$PCK" && echo same)"
   else
     expect_true "$label — …the advance left the plan byte-identical (cmp)" cmp -s "$TMPROOT/ck-before" "$PCK"
     expect_contains "$label — …the advance refused in words (REFUSED)" "REFUSED" "$AD_OUT"

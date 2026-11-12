@@ -461,7 +461,7 @@ plan_unreadable() {
 # parked when it carries a flush-left `## Wake Note` whose first non-blank body line is not `(none)` (with no body,
 # when its heading carries a title), or a flush-left `parked: <why>` under `## SDLC State`. Fenced text is skipped. The
 # empty template section older plans carry (`## Wake Note` / `(none)`) parks nothing. The one reader: close-out.sh
-# closes a parked plan without the merge act, and session-poker.sh `step-line 9` is accepted on one.
+# closes a parked plan without the merge act.
 # plan_parked_why <plan> -> the reason (the parked: value, else the Wake Note's first body line, else its heading's
 # title), rc 0; rc 1, nothing printed, when the plan is not parked. A `|` is folded to `/` so it fits a table cell.
 plan_parked_why() {

@@ -677,10 +677,9 @@ for VERB_SH in $SHELLS; do
   for VERB_SZ in "" -l; do
     cp "$SANDBOX/verb-plan$VERB_SZ.pristine" "$VERB_PLAN"
     VERB_N=""
+    rm -f "$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$VERB_PLAN")"
     verb_row 1 current 4
-    verb_row 3 step-line T24 'merge checked' --append
-    expect_contains "§VERB [$VERB_SH] ${VERB_SZ:-small}: the plan carries step-line's text" "merge checked" "$(grep -F -- '- T24: ' "$VERB_PLAN")"
-    expect_contains "§VERB [$VERB_SH] ${VERB_SZ:-small}: …and current's move" "current: 4" "$(grep -x 'current: 4' "$VERB_PLAN")"
+    expect_eq "§VERB [$VERB_SH] ${VERB_SZ:-small}: …and current's move is the run's step" "n=4" "$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$VERB_PLAN" step | head -1)"
     VERB_COUNTS="$VERB_COUNTS|$VERB_N"
   done
   ht_has_xtracefd "$VERB_SH" || continue

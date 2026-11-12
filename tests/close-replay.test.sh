@@ -453,14 +453,14 @@ expect_eq "SG-1 the single-rigor rehearsal reaches its state (rehearse exit 0, i
 if [ "$SG_RC" = 0 ] && [ -f "$SG_PLAN" ]; then
   expect_eq "SG-2 the plan is the single-rigor fixture's: its frontmatter says rigor: single" "single" \
     "$(awk '/^---$/ { n++; next } n == 1 && /^rigor:/ { sub(/^rigor:[[:space:]]*/, ""); print }' "$SG_PLAN")"
-  expect_eq "SG-3 the run stands at the Verify gate: current: 5, the Step 5 line written" "5|yes" \
-    "$(sed -n 's/^current:[[:space:]]*//p' "$SG_PLAN" | head -1)|$(/usr/bin/grep -q '^- Step 5: ' "$SG_PLAN" && echo yes)"
+  expect_eq "SG-3 the run stands at the Verify gate: step 5 in its log, the Step 5 line written" "n=5|yes" \
+    "$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$SG_PLAN" step | head -1)|$(/usr/bin/grep -q '^- Step 5: ' "$SG_PLAN" && echo yes)"
   SG_CELL="$(bash -c '. "$1/payload/scripts/lib/reader.sh" && reader_cells "$2" "$3"' _ "$BIONIC_SCRIPTS_DIR" "$SG_PLAN" \
     "$(git -C "$SG_DIR/project" rev-parse --verify -q refs/heads/wave/x)" | awk -F'\037' '$1 == "AC-1.1" { print $2 "|" $3 "|" $5 "|" $6 }')"
   expect_eq "SG-4 the build's criterion reads discharged by the walk's proof, its verdict the critic's evidence review at the head" \
     "discharged|proof|record/wave-x/walk.md|CONFIRMED" "$SG_CELL"
   SG_NAMES="$(cr_names < "$SG_DIR/rehearsal.log" | cut -d'|' -f2-)"
-  SG_WANT='spawn-worktree.sh ready|session-poker.sh proof-add review|session-poker.sh proof-add walk|session-poker.sh step-line|session-poker.sh step-field|session-poker.sh current'
+  SG_WANT='spawn-worktree.sh ready|session-poker.sh proof-add review|session-poker.sh proof-add walk|session-poker.sh current'
   expect_eq "SG-5 the log names the verbs that brought it there" "$SG_WANT" "$(printf '%s\n' "$SG_NAMES" | cr_held "$SG_WANT")"
   # The evidence review: one proof line of the question, its reader's roster row the critic's, dealt evidence.
   SG_READER="$(cr_proofs "$SG_PLAN" | sed -n 's/^proved: kind=review .* question=evidence reader=\([^ ]*\) .*/\1/p' | tail -1)"

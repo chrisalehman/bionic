@@ -2502,15 +2502,25 @@ fi
 # where the checks this step reaches end: a check that found nothing to read never admits a plan at 15.
 # The words of each are what the row that moves that fact into the log turns into an admission.
 # [WALL: tests/plan-page.test.sh]
-_EG_UNREAD=""
+# A fact a step owes that its event, its header or another event holds is asked there, and named as owed when it is
+# missing (`_eg_v15_ask`): the fix is to record it. One the log has no home for yet is named apart (`_eg_v15_owe`).
+_EG_UNREAD=""; _EG_OWED=""
 _eg_v15_owe() { _EG_UNREAD="${_EG_UNREAD}
 - could not be read at 15: $1"; }
+_eg_v15_ask() { _EG_OWED="${_EG_OWED}
+- owed at 15: $1"; }
 _eg_v15_refuse() {
-  [ -n "$_EG_UNREAD" ] || return 0
-  refuse exit2 commit "a fact this step owes is not in the log" "none until the log holds it" \
-"canonical-sdlc plan at version 15, current: ${CURRENT}: the run's log does not hold what this step is judged on:${_EG_UNREAD}
+  [ -n "$_EG_UNREAD$_EG_OWED" ] || return 0
+  if [ -z "$_EG_UNREAD" ]; then
+    refuse exit2 commit "a fact this step owes is missing" "record each fact named" \
+"canonical-sdlc plan at version 15, current: ${CURRENT}: what this step is judged on is missing:${_EG_OWED}
 Plan: $PLAN
-Fix: none at 15 yet: each fact named reaches the run's log in the row that moves it, and the commit is judged on it then."
+Fix: record each fact named, in the run's log or the plan's header as it says, then commit again."
+  fi
+  refuse exit2 commit "a fact this step owes is not in the log" "none until the log holds it" \
+"canonical-sdlc plan at version 15, current: ${CURRENT}: the run's log does not hold what this step is judged on:${_EG_UNREAD}${_EG_OWED}
+Plan: $PLAN
+Fix: none at 15 yet for each fact the log cannot hold: it reaches the run's log in the row that moves it, and the commit is judged on it then."
 }
 _eg_v15_unreadable() {
   refuse exit2 commit "the run's facts could not be read" "run the commit again" \
@@ -3679,6 +3689,53 @@ Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not rea
   fi
 fi
 
+# A STEP'S EVIDENCE AT 15 IS WHAT HAPPENED, asked where it is held. A pointer step owes the approval of the step before it;
+# Step 4 its branch and base, which the header holds; Step 5 the regression's proof (its criteria, walk and auditor are
+# the matrix's and the walk's arms); Step 7 its document, the header's adrs: line naming records that stand or none with
+# a reason; Step 8 the integrate row's landing, every tree the log names gone, and what the close cleaned, on its step
+# event; Step 9 its delivery and, when a target is named, the three of a deploy on its step event.
+_eg_v15_approved() {  # <key> -> 0 an approval of <key> stands, 1 none; a fold that fails is refused
+  _proof_ask "$PLAN" reader_q_approved "$PLAN" "$1" >/dev/null
+  case $? in 0) return 0 ;; 1) return 1 ;; *) _eg_v15_unreadable ;; esac
+}
+_eg_v15_step_asks() {
+  local n="${CURRENT%[ab]}" st v p r miss=""
+  case "$n" in
+    1|2|3) _eg_v15_approved "step$((n - 1))" || _eg_v15_ask "Step $((n - 1))'s approval (the log holds none)" ;;
+    4) [ -n "$(frontmatter_get working-branch)" ] && [ -n "$(frontmatter_get base-sha)" ] \
+         || _eg_v15_ask "Step 4's branch and base: the header's working-branch: and base-sha:" ;;
+    5) [ "$(plan_regression "$PLAN")" = no ] || [ -n "$(_proof_last_read "$(proof_run_plan "$PLAN")" regression head)" ] \
+         || _eg_v15_ask "Step 5's regression: a proof of the whole run (proof-add regression)" ;;
+    7) v="$(frontmatter_get adrs)"
+       case "$v" in
+         none|'none '|'') miss=1 ;;
+         none*) : ;;
+         *) for p in $(printf '%s' "$v" | tr ',' ' '); do [ -f "$DOCS_ROOT/$p" ] || [ -f "$BIONIC_ROOT/$p" ] || miss=1; done ;;
+       esac
+       [ -z "$miss" ] || _eg_v15_ask "Step 7's document: the header's adrs: naming records that stand, or none with its reason" ;;
+    8) st="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+       for r in $(plan_read_rows "$PLAN" Tasks 2>/dev/null | awk -F'\t' '{ id = ""; k = ""; for (i = 1; i <= NF; i++) { if ($i ~ /^id=/) id = substr($i, 4); if ($i ~ /^kind=/) k = substr($i, 6) } if (k == "integrate") print id }'); do
+         v="$(_proof_ask "$PLAN" reader_q_status "$PLAN" "$r")"; [ "${v#*state=landed}" != "$v" ] && miss="${miss:-0}"
+       done
+       [ "$miss" = 0 ] || _eg_v15_ask "Step 8's merge: the integrate row's landing"
+       v="$(_proof_ask "$PLAN" _eg_v15_trees "$PLAN")" || _eg_v15_unreadable
+       for p in $v; do [ ! -e "$BIONIC_ROOT/$p" ] || _eg_v15_ask "Step 8's trees: $p still stands"; done
+       case "$st" in *$'\ncleanup=n/a'*) : ;;
+         *$'\ncleanup='*$'\ntmp-wiped='*$'\ntasks-completed='*) : ;;
+         *) _eg_v15_ask "Step 8's cleanup, tmp-wiped and tasks-completed, given to its step by close-out" ;; esac ;;
+    9) st="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+       case "$st" in *state=delivered*) : ;; *) _eg_v15_ask "Step 9's delivery, given to its step by close-out" ;; esac
+       case "$(printf '%s' "$DEPLOY_TARGET" | tr '[:upper:]' '[:lower:]')" in ''|none|n/a|n/a:*) ;; *)
+         for v in deployed verified monitored; do case "$st" in *$'\n'"$v="*) : ;; *) miss="${miss:+$miss, }$v" ;; esac; done
+         [ -z "$miss" ] || _eg_v15_ask "Step 9's $miss, given to its step by close-out (deploy_target is named)" ;;
+       esac ;;
+  esac
+}
+_eg_v15_trees() {  # <plan> -> each path the run's latest tree events name, one per line; asked through _proof_ask
+  local f; f="$(reader_facts "$1")" || return 2
+  printf '%s\n' "$f" | awk -F'|' "$_READER_AWK"'ev() == "tree" { t[line_kv("row")] = line_kv("path") } END { for (r in t) if (t[r] != "") print t[r] }'
+}
+
 # Find the evidence line for the current step: a "Step N:" line, with or
 # without a leading list marker.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
@@ -3692,8 +3749,8 @@ LINE=$(echo "$SECTION" \
 # here. Every other step keeps its line.
 _EG_STEP_LINE_OWED=1
 [ "$CURRENT" = 6 ] && _EG_STEP_LINE_OWED=0
-if [ "$_EG_V15" -eq 1 ] && [ "$_EG_STEP_LINE_OWED" = 1 ]; then
-  _eg_v15_owe "Step ${CURRENT}'s line and its fields (the log's step event holds its number alone)"
+if [ "$_EG_V15" -eq 1 ]; then
+  _eg_v15_step_asks
   _EG_STEP_LINE_OWED=0
 fi
 
@@ -3822,7 +3879,12 @@ validate_requirements_pointer() {
   [ "$MULTI_AGENT" = "true" ] || return 0
   current_num=$(echo "$CURRENT" | sed -E 's/[ab]$//')
   [ "$current_num" -ge 2 ] 2>/dev/null || return 0
-  [ "$_EG_V15" -eq 0 ] || { _eg_v15_owe "Step 1's requirements: pointer (the log holds no Step 1 line)"; return 0; }
+  if [ "$_EG_V15" -eq 1 ]; then
+    raw="specs/$(frontmatter_get epic)/$(frontmatter_get wave).requirements.md"
+    case "$raw" in specs//*|*/.requirements.md) raw="the header's epic: and wave:, which name them" ;; esac
+    [ -f "$DOCS_ROOT/$raw" ] || _eg_v15_ask "Step 1's requirements: $raw"
+    return 0
+  fi
 
   b1=$(step1_evidence_block)
   # ANYWHERE ON THE LINE (AC-3.3, seed B B11). The Step-1 evidence is a semicolon-separated
@@ -3934,8 +3996,8 @@ step_prefix() {
 # cmd/pass/total/output/head at `current: 5`, refused unless pass equalled total, and held head: against
 # the release head. The doctrine moved the floor to Step 6's last act and its candidate may be a red
 # whole run (ADR-054), so a run following it could not take Step 5 honestly. The floor is judged by
-# lib/proof.sh `facts_state` at `current 7` and from Step 7 on; the keys may still be written
-# (`floor-run`, `proof-add floor`, `step-field`) and no gate reads them. The walk, the matrix and the
+# lib/proof.sh `facts_state` at `current 7` and from Step 7 on; keys an older plan still carries are read by no
+# gate. The walk, the matrix and the
 # auditor are judged by the caller as they always were.
 # AT `regression: no` THE BLOCK STILL OWES THE STEP-0 LINE (wave-31 T27; REQ-12 AC-12.2; D4): the
 # regression is a Step-0 setting (`session-poker.sh regression`), and a plan whose frontmatter reads
@@ -4621,6 +4683,10 @@ log_finding_quiet() {  # $1=check-id  $2=detail
   return 0
 }
 
+_eg_v15_walk_envs() {  # <plan> -> the newest walk proof's environments= field; asked through _proof_ask
+  local f; f="$(reader_facts "$1")" || return 2
+  printf '%s\n' "$f" | awk -F'|' "$_READER_AWK"'ev() == "proof" && line_kv("kind") == "walk" { e = line_kv("environments") } END { print e }'
+}
 validate_environments() {
   local raw entries name desc cure covered_names fog_names fog_missing_cure
   local b5 covered_line covered_norm missing claimed_fog claimed_undeclared
@@ -4663,6 +4729,11 @@ validate_environments() {
     covered_line=$(echo "$b5" | grep -E '^[[:space:]]*environments-covered[[:space:]]*:' | head -1 \
       | sed -E 's/^[[:space:]]*environments-covered[[:space:]]*:[[:space:]]*//' \
       | sed -E 's/;.*$//' | sed -E 's/[[:space:]]+$//')
+    # At 15 the walk covers them: the newest walk proof's environments= field is the covered set.
+    if [ "$_EG_V15" -eq 1 ]; then
+      covered_line="$(_proof_ask "$(proof_run_plan "$PLAN")" _eg_v15_walk_envs "$PLAN")" || _eg_v15_unreadable
+      [ -n "$covered_line" ] || { _eg_v15_ask "Step 5's environments covered: the walk's proof names none (proof-add walk <record> --environments <names>)"; return 0; }
+    fi
     if [ -z "$covered_line" ]; then
       block_matrix "the plan never says which environments ran" "list what you covered" \
         "environments: declared covered set (${covered_names}) but the Step 5 evidence has no 'environments-covered:' line." \
@@ -4970,7 +5041,7 @@ dispatch() {
   if [ "$_EG_V15" -eq 1 ]; then
     case "${CURRENT%[ab]}" in 5|6|7|8|9)
       [ "$(walk_mode)" = exempt ] || validate_walk_artifact
-      [ -z "$(frontmatter_get environments)" ] || _eg_v15_owe "Step 5's environments-covered:" ;;
+      validate_environments ;;
     esac
     case "${CURRENT%[ab]}" in 6|7|8|9) _eg_refuse_readings "the run" "$RIGOR"; _eg_refuse_floor_absent "the run" ;; esac
     _eg_v15_refuse

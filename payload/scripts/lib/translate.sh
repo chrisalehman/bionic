@@ -152,7 +152,17 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
   # review proof whose evidence is the finding's file, never at its neighbour's, and its instant stays a gap.
   { _translate_section "$1" "SDLC State" | awk '/^proved: / && / kind=review / && match($0, / evidence=[^ ]+/) {
       e = substr($0, RSTART + 10, RLENGTH - 10); if (match($0, / at=[^ ]+/)) printf "\035%s %s\n", e, substr($0, RSTART + 4, RLENGTH - 4) }'
-    _translate_section "$1" "SDLC State"; } | awk "$_TRANSLATE_AWK"'
+    _translate_section "$1" "SDLC State"; } | awk -v sf="$READER_STEP_FIELDS" "$_TRANSLATE_AWK"'
+    # A Step line is written once its block is read: the fields a step event carries (lib/reader.sh READER_STEP_FIELDS)
+    # are taken from its indented lines, and every other line of the block is read by the rules below as before.
+    function stepf(n, k,   i, m, e) { sub(/[ab]$/, "", n); m = split(sf, e, " ")
+      for (i = 1; i <= m; i++) if (substr(e[i], 1, index(e[i], ":") - 1) == n) return index("," substr(e[i], index(e[i], ":") + 1) ",", "," k ",")
+      return 0 }
+    function flushstep(   i) { begin("step", "n", pn); for (i = 1; i <= np; i++) put(pk[i], pv[pk[i]]); inblock("steps"); emit(pat)
+      last = pn; nseen[++ns] = pn; pend = 0; np = 0; split("", pv) }
+    pend && /^[ \t]+[a-z][a-z-]*[ \t]*:/ { k = $0; sub(/^[ \t]+/, "", k); v = k; sub(/[ \t]*:.*$/, "", k); sub(/^[^:]*:/, "", v)
+      if (stepf(pn, k)) { if (!(k in pv)) { pk[++np] = k; pv[k] = trim(v) }; next } }
+    pend && /^[^ \t]/ { flushstep() }
     /^\035/ { split(substr($0, 2), w, " "); if (!(w[1] in rev)) rev[w[1]] = ukey(w[2]); next }
     # current: in each form a gate reads it: indented, unspaced, its blanks dropped, and the first line of two
     /^[ \t]*current[ \t]*:/ { if (!curseen) { cur = $0; sub(/^[ \t]*current[ \t]*:/, "", cur); gsub(/[ \t]/, "", cur); curseen = 1 }; next }
@@ -179,7 +189,9 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
       }
       if (at != "" && n + 0 <= 2) { begin("approval", "key", "step" n); put("by", by); put("said", quoted(rest)); emit(at) }
       if (at == "") at = inst(text)
-      begin("step", "n", n); inblock("steps"); emit(at); last = n; nseen[++ns] = n; next
+      pn = n; pat = at; pend = 1; np = 0
+      if (n == "9") { v = substr(text, index(text, "delivered:") + 10); pk[++np] = "delivered"; pv["delivered"] = trim(v) }
+      next
     }
     /^- session: / { split(substr($0, 12), w, " "); begin("bind", "session", w[1]); put("by", w[5]); emit(w[3]); next }
     /^proved: / { kv(substr($0, 9)); begin("proof", PK[1], PV[1]); inblock("proofs"); at = ""
@@ -194,6 +206,7 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
     # no delivered Step 9 line the run stands at 9 undelivered, which is open. Step lines with no current: are history
     # with no place: each is retracted after them, so the run has no step and a reader never judges at a guessed one.
     END {
+      if (pend) flushstep()
       if (cur == "" && last != "") for (i = 1; i <= ns; i++) { begin("cancel", "of", "step"); put("n", nseen[i]); inblock("steps"); emit("") }
       else if (cur == "9" && last != "9") { begin("step", "n", cur); put("delivered", "no"); inblock("steps"); emit("") }
       else if (cur != "" && cur != last) { begin("step", "n", cur); inblock("steps"); emit("") }

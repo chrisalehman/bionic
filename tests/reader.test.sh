@@ -5,7 +5,8 @@
 # and answers one question of a closed list: yes or no by exit code alone, a value as `key=value`
 # lines, a list as one `run/v1` line per item.
 #
-#   §FOLD     a repeated line counts once, a later value answers, a cancelled line is absent, a step written again answers.
+#   §FOLD     a repeated line counts once, a later value answers, a cancelled line is absent, a step written again answers;
+#             an act by hand taken again at another time counts again.
 #   §NAME     every answer over a planted log equals the answer over it with each line's fields moved.
 #   §FORM     a yes or no answer prints nothing; value lines are `key=value`; list lines start `run/v1|`.
 #   §UNKNOWN  an unlisted question exits 2 and prints the list.
@@ -84,9 +85,13 @@ for f in 'current: 4\r\n|CRLF' '   current :  4\n|indented' 'current:4\n|unspace
   W=form; printf "## SDLC State\n${f%|*}- Step 3: a\n" > "$D/plans/epic-x/form.plan.md"; expect_eq "a version-14 current: ${f#*|} is read as the gate reads it" "n=4 state=open " "$(ask step | tr '\n' ' ')"; done
 printf '## SDLC State\rcurrent: 4\r- Step 3: a\r' > "$D/plans/epic-x/form.plan.md"; expect_eq "a version-14 current: on CR-only line ends is read" "n=4 state=open " "$(ask step | tr '\n' ' ')"
 for f in '- Step 8: a\n|with no Step 9 line' '- Step 9: drafted\n|with its Step 9 line not delivered' '- Step 9: report, delivered: x\n|delivered'; do
-  printf "## SDLC State\ncurrent: 9\n${f%|*}" > "$D/plans/epic-x/form.plan.md"; W=form; s=open; [ "${f#*|}" = delivered ] && s=delivered
-  expect_eq "a version-14 plan at 9 ${f#*|} stands at 9, $s" "n=9 state=$s " "$(ask step | tr '\n' ' ')"; done
+  printf "## SDLC State\ncurrent: 9\n${f%|*}" > "$D/plans/epic-x/form.plan.md"; W=form; s=open d=no; [ "${f#*|}" = delivered ] && s=delivered d=x
+  expect_eq "a version-14 plan at 9 ${f#*|} stands at 9, $s, its delivery the step's own field" "n=9 delivered=$d state=$s " "$(ask step | tr '\n' ' ')"; done
 printf '## SDLC State\n- Step 3: a\n- Step 4: a\n' > "$D/plans/epic-x/form.plan.md"; expect_eq "Step lines with no current: are no step" "state=open " "$(ask step | tr '\n' ' ')"
+W=fields; plan fields < /dev/null; bash -c '. "$1/proof.sh" && proof_step_event "$2" 8 cleanup=done && ! proof_step_event "$2" 8 merge=main' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$D/plans/epic-x/fields.plan.md"
+expect_eq "a field given at the advance is in the step's answer, and one its step does not carry is refused unwritten" "n=8 cleanup=done state=open |1" "$(ask step | tr '\n' ' ')|$(grep -c . "$D/record/fields/run.log")"
+W=form; printf '## SDLC State\ncurrent: 9\n- Step 8: closed\n  merge: main\n  cleanup: done\n- Step 9: delivered: v1\n  archived: /a\n' > "$D/plans/epic-x/form.plan.md"
+expect_eq "a version-14 step's own fields are read from its block, and no other line of it" "n=9 delivered=v1 archived=/a state=delivered " "$(ask step | tr '\n' ' ')"
 for f in '- approved-by: u 2026-01-01T00:00Z "ok"|0' '  approved-by: u 2026-01-01T00:00Z "ok"|0' 'approved-by:  |1'; do
   printf '## SDLC State\ncurrent: 4\n%s\n' "${f%|*}" > "$D/plans/epic-x/form.plan.md"; ask approved step3; expect_status "the approval line '${f%|*}' is read as the fill reads it" "${f#*|}" "$?"; done
 
@@ -117,6 +122,19 @@ dkinds() { ask debts | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^kind=/)
 expect_eq "two open debts of one concept and two kinds are two facts" "duplicate unpinned-pair " "$(dkinds)"
 printf '%s\n' 'cv | duplicate | a.sh:1 | raised-by r.md | touches 1 | burned T9' 'cv | unpinned-pair | b.sh:2 | raised-by r.md | touches 2 | —' > "$D/record/debtkind/debt.md"
 expect_eq "a burned line closes the debt of its own kind, and the other stays open" "unpinned-pair " "$(dkinds)"
+
+# fails-when: two acts by hand equal but for their time are one fact, so a second amend of one agent for one reason
+# goes uncounted; two equal lines with no time, which nothing tells apart, are two; a cancel naming the act misses one.
+W=twice; plan twice <<EOF
+run/v1|ev=hand|what=amend|name=w1|by=s|why=the brief missed a.sh|at=2026-11-01T00:00:01Z
+run/v1|ev=hand|what=amend|name=w1|by=s|why=the brief missed a.sh|at=2026-11-01T00:00:02Z
+run/v1|ev=hand|what=stop-run|name=w2|why=an older line
+run/v1|ev=hand|what=stop-run|name=w2|why=an older line
+EOF
+whats() { ask hands | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^what=/) printf "%s ", substr($i, 6) }'; }
+expect_eq "two amends of one agent for one reason at two times are two acts; two equal untimed lines are one" "amend amend stop-run " "$(whats)"
+printf 'run/v1|ev=cancel|of=hand|what=amend|name=w1|by=s|why=the brief missed a.sh|at=2026-11-01T00:00:03Z\n' >> "$D/record/twice/run.log"
+expect_eq "…and a cancel naming the act by its fields retracts it at each time it was taken" "stop-run " "$(whats)"
 
 section "NAME"
 QS=("step" "approved step3" "approved release" "green $H" "green $G" "proof $H" "proof $H regression" "landed" "asks")

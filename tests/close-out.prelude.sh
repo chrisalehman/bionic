@@ -497,18 +497,13 @@ PLAN_CENSUS
 PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"
 EPIC_REL=".bionic/docs/plans/epic-fx/epic.plan.md"
 CONT_REL=".bionic/docs/record/wave-01-fixture/continuation.md"
-UNITS_LIB="$REPO_ROOT/payload/scripts/lib/units.sh"
 
-# advance_to <project> <N> -> the fixture plan's `current:` moved to N by `units_set_current`,
-# the writer the `current` verb itself calls (hooks/session-poker.sh, the `current)` arm), so
-# the plan holds the bytes the verb writes. The verb's own dry commit is NOT asked here: until
-# wave-27 T14 it demands the Step-8 block close-out writes, and from T14 it demands the
-# review facts; §E2E is the row that drives the whole verb.
+# advance_to <project> <N> -> the fixture plan's `current:` line planted at N, as an older plan's text holds its step;
+# the `current` verb appends a step event and writes no plan, and §E2E is the row that drives the whole verb.
 advance_to() {
   local plan="$1/$PLAN_REL"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "advance_to: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
-  bash -c '. "$1" && units_set_current "$2" "$3"' _ "$UNITS_LIB" "$plan" "$2" > "$plan.adv" \
-    && mv "$plan.adv" "$plan"
+  awk -v n="$2" '!d && /^current:/ { print "current: " n; d = 1; next } { print }' "$plan" > "$plan.adv" && mv "$plan.adv" "$plan"
 }
 
 # ---------- drivers ----------
