@@ -213,15 +213,16 @@ ow_plan() {
 ow_home() {  # <current> <tier> <task value> -> a sandbox holding that plan
   local h; h=$(make_home); write_plan "$h" "$(ow_plan "$@")" > /dev/null; printf '%s' "$h"
 }
-
+# ow_marked <current> <tier> <task value> -> a sandbox holding that plan, its step 8 line in the form close-out wrote
+ow_marked() { local h; h=$(make_home); write_plan "$h" "$(ow_plan "$@" | sed 's/^Step 8:$/- Step 8: CLOSED/')" > /dev/null; printf '%s' "$h"; }
 for ow_c in 5 6 7 8; do
   expect_allow "9a-$ow_c a pending T3 row whose task is a Step-9 row owes nothing at current $ow_c" \
-    "$(ow_home "$ow_c" T3 T9)" 'git commit -m "x"'
+    "$(ow_marked "$ow_c" T3 T9)" 'git commit -m "x"'
 done
-expect_allow "9b at current 9, the plan still open, the row is the close's own to settle" \
-  "$(ow_home 9 T3 T9)" 'git commit -m "x"'
+expect_block "9b at current 9, the plan still open, owes its delivery before anything the row could owe" \
+  "$(ow_home 9 T3 T9)" 'git commit -m "x"' "owed at 14: Step 9's delivery"
 expect_allow "9c the literal task: 9 on a T0 row still defers to the close at current 8" \
-  "$(ow_home 8 T0 9)" 'git commit -m "x"'
+  "$(ow_marked 8 T0 9)" 'git commit -m "x"'
 expect_allow "9d the literal task: 9 on a T3 row defers too: the tier says how, the step says when" \
   "$(ow_home 6 T3 9)" 'git commit -m "x"'
 expect_block "9e a pending T3 row whose task is a Step-4 row still owes its evidence at 6" \
@@ -241,7 +242,7 @@ for ow_s in landed dropped; do
   expect_contains "9i-$ow_s-adv …and so is the advance, naming AC-2 and its exits" "confirmed AC-2 (rule it: the auditor confirms it, the row is waived," "$OW_OUT"
 done
 expect_allow "9m a task list is owed at the latest step it names (T1, T9 at 8)" \
-  "$(ow_home 8 T3 "T1, T9")" 'git commit -m "x"'
+  "$(ow_marked 8 T3 "T1, T9")" 'git commit -m "x"'
 
 # The two file-scope readers the judge and the card share with the gate, asked as hooks/poker/judge.sh asks them.
 ow_ask() {  # <plan> <function> [args…] -> what the function prints, then `rc=<n>`

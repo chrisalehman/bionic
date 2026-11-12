@@ -75,7 +75,7 @@ write_plan "$h29a" "$(ship_plan none "$ship_delivered")" > /dev/null
 # 29b — `delivered:` missing → block. The terminal state is not optional.
 h29b=$(make_home)
 write_plan "$h29b" "$(ship_plan none "  note: wrapped it up")" > /dev/null
-expect_block "29b Step 9 without delivered: → block naming the key" "$h29b" 'git commit -m "x"' "delivered"
+expect_block "29b Step 9 without delivered: → block naming the key" "$h29b" 'git commit -m "x"' "Step 9's delivery"
 
 # 29c — a named live surface: delivered + the full trio → allow.
 h29c=$(make_home)
@@ -121,13 +121,13 @@ h29f=$(make_home)
 write_plan "$h29f" "$(ship_plan none "  deploy: shipped to prod at 14:02
   verified-at: https://app.example/health
   monitor: one cycle clean")" > /dev/null
-expect_block "29f Step 9 in the retired v13 shape → block on delivered" "$h29f" 'git commit -m "x"' "delivered"
+expect_block "29f Step 9 in the retired v13 shape → block on delivered" "$h29f" 'git commit -m "x"' "Step 9's delivery"
 
 # 29g — `n/a:` was v13's escape at deploy_target: none. Under v14 there is
 # nothing to escape: the run still has to name what it delivered.
 h29g=$(make_home)
 write_plan "$h29g" "$(ship_plan none "  n/a: nothing to deploy")" > /dev/null
-expect_block "29g Step 9 with the retired 'n/a:' escape → block on delivered" "$h29g" 'git commit -m "x"' "delivered"
+expect_block "29g Step 9 with the retired 'n/a:' escape → block on delivered" "$h29g" 'git commit -m "x"' "Step 9's delivery"
 
 # 29h — a run with no named target that deployed something anyway and said so
 # is recording MORE than it owes, which is never a reason to refuse a commit.
@@ -188,11 +188,15 @@ AC-1:
 }
 
 GOOD_CONFIRM='chris 2026-08-18 read the rendered wall in his own client and confirmed the wording'
+# marked -> the plan with its bare step 8 or 9 line in the form close-out wrote, which the reader reads the step's
+# fields from: `- Step 8: CLOSED` over its indented keys, and the delivery inline on `- Step 9: delivered:`
+marked() { awk 'p9 && sub(/^  delivered: /, "- Step 9: delivered: ") { p9 = 0; print; next } { p9 = 0 }
+  $0 == "Step 8:" { print "- Step 8: CLOSED"; next } $0 == "Step 9:" { p9 = 1; next } { print }'; }
 
 # 30a — the case the blind spot refused: a real user confirmation, no auditor
 # verdict, no waiver → allow.
 h30a=$(make_home)
-write_plan "$h30a" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 "" "$GOOD_CONFIRM")")")" > /dev/null
+write_plan "$h30a" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 "" "$GOOD_CONFIRM")")" | marked)" > /dev/null
 expect_allow "30a T4 + attributed user-confirmed + empty auditor cell at current 8 → allow (ruled by the user)" "$h30a" 'git commit -m "x"'
 
 # 30b — an agent-shaped claim: no attributed human, no date. Still refused.
@@ -216,7 +220,7 @@ expect_block "30d T3 + well-formed user-confirmed → block (exemption is T4-onl
 
 # 30e — no regression: a T4 row an auditor DID confirm still passes.
 h30e=$(make_home)
-write_plan "$h30e" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 CONFIRMED "$GOOD_CONFIRM")")")" > /dev/null
+write_plan "$h30e" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 CONFIRMED "$GOOD_CONFIRM")")" | marked)" > /dev/null
 expect_allow "30e T4 + CONFIRMED auditor cell → allow (unchanged)" "$h30e" 'git commit -m "x"'
 
 # 30f — pinned scope boundary: the form check lives in the post-Verify arm
@@ -482,10 +486,12 @@ expect_allow "32b same at current 7 → allow" "$h32b" 'git commit -m "x"'
 
 h32c=$(make_home)
 write_plan "$h32c" "$(eg_floor "$(plan_rigor single 8 "$v9_step8_body" "$m32_empty_aud")")" > /dev/null
-expect_allow "32c same at current 8 → allow" "$h32c" 'git commit -m "x"'
+# A step's block written bare, no list mark and nothing after the colon, is not read as the step's fields: the gate
+# names what step 8 owes.
+expect_block "32c same at current 8, its block written bare → block naming the step's fields" "$h32c" 'git commit -m "x"' "owed at 14: Step 8's cleanup"
 
 h32d=$(make_home)
-write_plan "$h32d" "$(eg_floor "$(plan_rigor single 9 "$v9_step9_body" "$m32_empty_aud")")" > /dev/null
+write_plan "$h32d" "$(eg_floor "$(plan_rigor single 9 "$v9_step9_body" "$m32_empty_aud")" | marked)" > /dev/null
 expect_allow "32d same at current 9 → allow (B-10's own repro step)" "$h32d" 'git commit -m "x"'
 
 # 32e — the Step-5 `auditor:` pointer is the same wall one step earlier: it is

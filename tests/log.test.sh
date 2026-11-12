@@ -36,7 +36,10 @@ refused "a key that sets at" step at=1
 LOG_AT=2026-10-06T11:48:01Z log_append ask key=a:b
 expect_eq "a caller's instant in the log's shape stamps the line" "2026-10-06T11:48:01Z" "$(line_value "$(tail -n 1 "$RUN_LOG")" at)"
 LOG_AT=2026-10-06T11:48Z refused "a caller's instant off the log's shape" ask key=a:b
-expect_eq "no file but the asks library hands the appender an instant" "payload/scripts/lib/owed.sh" \
+# Who hands the appender an instant, each for its reason: the asks library stamps an ask's round at the instant it
+# was raised; close-out restates the delivery with the archive's line at the delivery's own second, so every reader of
+# when a run was delivered reads one instant.
+expect_eq "no file but the asks library and close-out hands the appender an instant" "payload/scripts/close-out.sh payload/scripts/lib/owed.sh" \
   "$(cd "$BIONIC_SCRIPTS_DIR" && /usr/bin/grep -rl 'LOG_AT=' payload hooks | LC_ALL=C sort | paste -sd' ' -)"
 
 section "TYPES"
