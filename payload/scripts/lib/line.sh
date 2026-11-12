@@ -1514,18 +1514,17 @@ _line_resumed() {  # -> 0 when this process is the carrier `_line_one_head` star
 }
 _line_owed() { printf 'landed %s %s — owed: complete task %s, then stop %s\n' "$1" "$2" "$1" "$3"; }   # <row> <commit> <name>
 # THE ROW'S DEBT (wave-30 T22; D2, P2, AC-11.3): `debt: burned <N>, touched <M>` for <row>, when the run
-# keeps a debt ledger (lib/proof.sh `proof_debt_row_counts`): N the items whose last cell says `burned
-# <row>`, M the items one of whose sites the row's `Files` cell covers. Printed between LANDED and the
-# owed line, so the owed line stays the last line of ready's output. Nothing when there is no ledger.
+# holds a debt (lib/proof.sh `proof_debt_row_counts`): N the debts burned by <row>, M those one of whose
+# sites the row's `Files` cell covers. Printed between LANDED and the owed line, so the owed line stays the
+# last line of ready's output. Nothing when the run holds no debt.
 _line_debt() {  # <plan> <row>
-  local root led cell="" rec
+  local cell="" rec
   if ! declare -F proof_debt_row_counts >/dev/null 2>&1; then
     # shellcheck source=/dev/null
     [ -r "$_LINE_LIB_DIR/proof.sh" ] && . "$_LINE_LIB_DIR/proof.sh" 2>/dev/null
     declare -F proof_debt_row_counts >/dev/null 2>&1 || return 0
   fi
-  root="$(_line_root "${1:-}")" || return 0
-  led="$(proof_debt_ledger_path "$root" "$1")" && [ -f "$led" ] || return 0
+  [ -n "$(proof_debt_items "${1:-}")" ] || return 0
   _wt_units_load || return 0
   while IFS= read -r rec; do
     [ "$(units_field "$rec" id)" = "$2" ] || continue
@@ -1534,7 +1533,7 @@ _line_debt() {  # <plan> <row>
 $(units_rows "$1" 2>/dev/null)
 LINE_DEBT_ROWS
   # shellcheck disable=SC2046
-  set -- $(proof_debt_row_counts "$led" "$2" "$cell")
+  set -- $(proof_debt_row_counts "$1" "$2" "$cell")
   printf 'debt: burned %s, touched %s\n' "${1:-0}" "${2:-0}"
 }
 # THE REVIEW-BORN COUNT (wave-30 T21; REQ-2 AC-2.3, D4): `review-born rows: <N> of cap <M>`, N the plan's

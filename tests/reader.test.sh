@@ -122,6 +122,12 @@ dkinds() { ask debts | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^kind=/)
 expect_eq "two open debts of one concept and two kinds are two facts" "duplicate unpinned-pair " "$(dkinds)"
 printf '%s\n' 'cv | duplicate | a.sh:1 | raised-by r.md | touches 1 | burned T9' 'cv | unpinned-pair | b.sh:2 | raised-by r.md | touches 2 | —' > "$D/record/debtkind/debt.md"
 expect_eq "a burned line closes the debt of its own kind, and the other stays open" "unpinned-pair " "$(dkinds)"
+# fails-when: a ledger's writer writes its file, or its event in the log reads before the ledger line it follows.
+printf '# l\n\n## Δ0 — D4 put (orchestrator 2026-11-01 9:00 AM PST): the fourth\n' > "$D/record/debtkind/design-ledger.md"; LB="$(cat "$D"/record/debtkind/*.md | cksum)"
+( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/proof.sh"; P="$D/plans/epic-x/debtkind.plan.md"; proof_debt_event "$P" concept=cv kind=unpinned-pair sites=b.sh:2 raised-by=r.md touches=3 burned=T8 && proof_debt_event "$P" \
+  concept=nw kind=duplicate sites=c.sh:3 raised-by=s.md touches=0 && proof_decision_event "$P" d=D4 verb=ruled said=1 by=Dana "title=the fourth" && proof_decision_event "$P" d=D4 verb=put by=orchestrator "title=the fourth" )
+expect_eq "a ledger's debt burned and a debt added, a decision ruled and put again, by their writers: debts and ledger answer each, both files unchanged" \
+  "duplicate |Δ0/put Δ1/ruled Δ2/put |$LB" "$(dkinds)|$(ask ledger D4 | sed -n 's/.*|entry=\([^|]*\)|.*|verb=\([a-z]*\)|.*/\1\/\2/p' | tr '\n' ' ')|$(cat "$D"/record/debtkind/*.md | cksum)"
 
 # fails-when: two acts by hand equal but for their time are one fact, so a second amend of one agent for one reason
 # goes uncounted; two equal lines with no time, which nothing tells apart, are two; a cancel naming the act misses one.

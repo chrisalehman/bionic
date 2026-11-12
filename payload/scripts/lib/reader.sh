@@ -316,7 +316,8 @@ reader_q_findings() {  # <plan> [to] -> each finding where it stands now, of tho
 }
 
 reader_question debts list reader_q_debts
-reader_q_debts() {  # <plan> -> each debt open: a debt not burned, an admitted red no void names, a finding carried
+reader_q_debts() {  # <plan> [all] -> each debt open: a debt not burned, an admitted red no void names, a finding carried; with all, every debt, burned or not
+  [ "${2:-}" != all ] || { _reader_of "$1" debt; return; }
   reader_facts "$1" | awk -F'|' "$_READER_AWK"'
     { e = ev(); id = line_kv("id") }
     e == "debt" && line_kv("burned") == "" || e == "finding" && line_kv("to") == "carried" { o[++n] = $0 }

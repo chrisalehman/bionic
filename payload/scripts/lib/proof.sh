@@ -251,6 +251,23 @@ proof_step_event() {  # <plan> <step> [<field>=<value>…] -> one step event in 
   RUN_LOG="$log" log_append step "n=$n" "$@"
 }
 
+# THE RUN'S LOG HOLDS A DECISION'S ROUND, and this is the type's one writer: the decisions verb's put and its ruling,
+# however the ruling arrives, call it. Its fields are the ones the translation gives an older run's design-ledger
+# heading, so an old round and a new one read alike:
+#
+#   decision  entry=Δ<k> d=D<n> verb=put by=<who> title=<title> [wait=<the wait line>]
+#   decision  entry=Δ<k> d=D<n> verb=ruled said=<the reply> by=<who> [title=<title>]
+#
+# entry= numbers the round one past the highest the reader holds for the run, the ledger's and the log's alike, so two
+# rounds in the same words are two facts and the numbering runs on from the ledger. Exits as proof_waiver_event's.
+proof_decision_event() {  # <plan> <field>=<value>… -> one decision round in the plan's run log
+  local log k
+  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" && k="$(_proof_ask "$1" reader_q_ledger "$1")" || return 2
+  k="$(printf '%s\n' "$k" | awk -F'|' "$_READER_AWK"'{ e = line_kv("entry"); sub(/^Δ/, "", e); if (e ~ /^[0-9]+$/ && e + 1 > n) n = e + 1 } END { print n + 0 }')"
+  shift
+  RUN_LOG="$log" log_append decision "entry=Δ$k" "$@"
+}
+
 # A STEP A DRY JUDGMENT ASKS ABOUT stands last in the facts of that judgment and nowhere else. The advance runs the
 # commit gate on the plan itself under its own session, `planverb-<pid>`, with the step it moves to in BIONIC_DRY_STEP;
 # close-out's pre-flight judges a copy of the plan, whose name joins no record, under `closeout-preflight-<pid>`, with
@@ -3359,22 +3376,24 @@ PROOF_DOOR_COVER
 }
 
 
-# ---------- THE DEBT LEDGER (wave-30 T22; D2, P2, AC-11.2, AC-11.3, AC-11.4) ----------
+# ---------- THE RUN'S DEBTS ----------
 #
-# `<docs-root>/record/<the plan's name less .plan.md>/debt.md`, derived as the landing record's path is
-# (`_wt_proofs_path`, lib/worktree.sh): PROOF_DEBT_HEADER, then one line per item, six cells joined by
-# ` | `:
+# A debt is one `debt` event, its fields the ones the translation gives an older run's debt.md line, so an old debt and
+# a new one read alike, concept and kind naming it, its newest event its state:
 #
-#     <concept> | <kind> | <sites> | raised-by <record> | touches <N> | —            (not yet burned)
-#     <concept> | <kind> | <sites> | raised-by <record> | touches <N> | burned <row>
+#   debt  concept=<c> kind=<k> sites=<sites> raised-by=<record> touches=<N> [burned=<row>]
 #
-# ONE WRITER, `session-poker.sh debt` (add, touched, burn), under a lock beside the file. These are its
-# readers: the dispatch wall's advisory (`proof_debt_hits`), `ready`'s landing report
-# (`proof_debt_row_counts`) and close-out's card and carry (`proof_debt_counts`, `proof_debt_items`). The
-# last cell is read with index(), never by comparing the `—` glyph (macOS awk and multibyte `==`).
-PROOF_DEBT_HEADER='# debt ledger: concept | kind | sites | raised-by <record> | touches N | burned <row> | —'
+# ONE WRITER, `proof_debt_event`, called by `session-poker.sh debt` (add, touched, burn, adopt). Its readers ask the
+# reader: the dispatch wall's advisory (`proof_debt_hits`), `ready`'s landing report (`proof_debt_row_counts`) and the
+# verb's own merge (`proof_debt_items`); close-out reads the reader's debt facts itself.
+proof_debt_event() {  # <plan> <field>=<value>… -> one debt event in the plan's run log
+  local log
+  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
+  shift
+  RUN_LOG="$log" log_append debt "$@"
+}
 
-# proof_debt_ledger_path <root> <plan> -> the run's ledger path.
+# proof_debt_ledger_path <root> <plan> -> the path an older run's debt ledger has; no verb writes it.
 proof_debt_ledger_path() {
   local slug
   slug="$(proof_plan_slug "${2:-}")" || return 1
@@ -3382,20 +3401,15 @@ proof_debt_ledger_path() {
   printf '%s/record/%s/debt.md\n' "$(docs_root "$1")" "$slug"
 }
 
-# proof_debt_items <ledger> -> one tab-separated line per item, in ledger order:
-# `<concept> <kind> <sites> <record> <touches> <burned row, or ->`. A line of another shape is not an item.
+# proof_debt_items <plan> -> one tab-separated line per debt the run holds, burned or not, in the reader's order:
+# `<concept> <kind> <sites> <record> <touches> <burned row, or ->`.
 proof_debt_items() {
-  [ -f "${1:-}" ] || return 0
-  awk '
-    /^#/ || NF == 0 { next }
-    {
-      if (split($0, c, / \| /) != 6) next
-      if (index(c[4], "raised-by ") != 1 || c[5] !~ /^touches [0-9]+$/) next
-      printf "%s\t%s\t%s\t%s\t%s\t%s\n", c[1], c[2], c[3], substr(c[4], 11), substr(c[5], 9), (index(c[6], "burned ") == 1 ? substr(c[6], 8) : "-")
-    }' "$1"
+  [ -f "${1:-}" ] && _proof_reader_load || return 0
+  _proof_ask "$1" reader_q_debts "$1" all | awk -F'|' "$_READER_AWK"'{ b = line_kv("burned")
+    printf "%s\t%s\t%s\t%s\t%s\t%s\n", line_kv("concept"), line_kv("kind"), line_kv("sites"), line_kv("raised-by"), line_kv("touches"), (b == "" ? "-" : b) }'
 }
 
-# proof_debt_hits <ledger> <Files cell> -> the items (as proof_debt_items prints them, burned ones too)
+# proof_debt_hits <plan> <Files cell> -> the items (as proof_debt_items prints them, burned ones too)
 # one of whose sites the cell covers: the path itself, a directory above it, or a glob over it, by
 # lib/units.sh `cell_covers`, the dispatch grammar's one matcher.
 proof_debt_hits() {
@@ -3410,14 +3424,8 @@ proof_debt_hits() {
     }'
 }
 
-# proof_debt_counts <ledger> -> `<touched> <burned>` for the run: the touches summed over every item,
-# and the items burned. Never the ledger's length (AC-11.4).
-proof_debt_counts() {
-  proof_debt_items "${1:-}" | awk -F'\t' '{ t += $5; if ($6 != "-") b++ } END { printf "%d %d\n", t, b }'
-}
-
-# proof_debt_row_counts <ledger> <row> <Files cell> -> `<burned> <touched>` for one row: the items whose
-# last cell says `burned <row>`, and the items one of whose sites the row's Files cover.
+# proof_debt_row_counts <plan> <row> <Files cell> -> `<burned> <touched>` for one row: the items burned by <row>, and
+# the items one of whose sites the row's Files cover.
 proof_debt_row_counts() {
   local b t
   b="$(proof_debt_items "${1:-}" | awk -F'\t' -v r="${2:-}" 'r != "" && $6 == r { n++ } END { print n + 0 }')"

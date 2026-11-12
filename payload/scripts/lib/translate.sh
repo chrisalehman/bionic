@@ -550,13 +550,18 @@ _translate_debts() {  # <plan> -> the debt ledger's lines: each a debt, burned= 
 # THE LOG is the newest home: each line is carried whole, as written. It sorts by its instant among the old homes'
 # lines and after any of them at the same instant, and never before a line written above it in the log, so the log's
 # own order stands; a line with no UTC instant takes the place of the line above it, and the first such line goes
-# after every timed line.
+# after every timed line. In a run that keeps a design or a debt ledger, a decision or a debt follows that ledger's
+# lines instead: neither ledger names an instant the log's can be ordered against, and neither grows once its writer
+# appends to the log, so each of its lines is older than every event of its type, and a burn or a ruling in the log is
+# read after the line it closes.
 translate_source _translate_log
 _translate_log() {  # <plan> -> the run's log, each line in its place
   local f
   f="$(_translate_record "$1" run.log)" || return; [ -n "$f" ] || return 0
-  awk "$_TRANSLATE_AWK"'
+  awk -v dl="$([ -f "${f%/*}/design-ledger.md" ] && echo 1)" -v bl="$([ -f "${f%/*}/debt.md" ] && echo 1)" "$_TRANSLATE_AWK"'
     index($0, "run/v1|") != 1 { next }
+    { e = substr($0, 11); sub(/[|].*/, "", e) }
+    dl && e == "decision" || bl && e == "debt" { printf "e\t~\t%s\n", $0; next }
     { a = ""; n = split($0, w, "|"); for (i = n; i >= 2; i--) if (index(w[i], "at=") == 1) { a = substr(w[i], 4); break }
       k = ukey(a); if (k == "") k = (p == "" ? "~" : p); else if (k < p) k = p; p = k
       printf "e\t%s\t%s\n", k, $0 }' "$f"
