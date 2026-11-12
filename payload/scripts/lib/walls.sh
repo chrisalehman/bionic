@@ -2508,12 +2508,12 @@ _EG_UNREAD=""; _EG_OWED=""
 _eg_v15_owe() { _EG_UNREAD="${_EG_UNREAD}
 - could not be read at 15: $1"; }
 _eg_v15_ask() { _EG_OWED="${_EG_OWED}
-- owed at 15: $1"; }
+- owed at ${SDLC_VERSION}: $1"; }
 _eg_v15_refuse() {
   [ -n "$_EG_UNREAD$_EG_OWED" ] || return 0
   if [ -z "$_EG_UNREAD" ]; then
     refuse exit2 commit "a fact this step owes is missing" "record each fact named" \
-"canonical-sdlc plan at version 15, current: ${CURRENT}: what this step is judged on is missing:${_EG_OWED}
+"canonical-sdlc plan at version ${SDLC_VERSION}, current: ${CURRENT}: what this step is judged on is missing:${_EG_OWED}
 Plan: $PLAN
 Fix: record each fact named, in the run's log or the plan's header as it says, then commit again."
   fi
@@ -2524,7 +2524,7 @@ Fix: none at 15 yet for each fact the log cannot hold: it reaches the run's log 
 }
 _eg_v15_unreadable() {
   refuse exit2 commit "the run's facts could not be read" "run the commit again" \
-"canonical-sdlc plan at version 15: the run's facts could not be read, so nothing this commit owes can be judged.
+"canonical-sdlc plan at version ${SDLC_VERSION}: the run's facts could not be read, so nothing this commit owes can be judged.
 Plan: $PLAN
 Fix: run the commit again; the fold's own line above names why it failed."
 }
@@ -3692,8 +3692,24 @@ fi
 # A STEP'S EVIDENCE AT 15 IS WHAT HAPPENED, asked where it is held. A pointer step owes the approval of the step before it;
 # Step 4 its branch and base, which the header holds; Step 5 the regression's proof (its criteria, walk and auditor are
 # the matrix's and the walk's arms); Step 7 its document, the header's adrs: line naming records that stand or none with
-# a reason; Step 8 the integrate row's landing, every tree the log names gone, and what the close cleaned, on its step
-# event; Step 9 its delivery and, when a target is named, the three of a deploy on its step event.
+# a reason; Step 8 the integrate row's landing when the plan holds one and the run is not parked, every tree the log
+# names gone, and what the close cleaned, on its step event; Step 9 its delivery and, when a target is named, the three
+# of a deploy on its step event. Steps 8 and 9 are asked so at 14 too: the reader answers an older plan's Step 8 and 9
+# lines as those fields, and the close writes them to the step's event, so there is one way to judge a close.
+# Does frontmatter name a LIVE surface this run operates? The default answer
+# is no. `deploy_target` is n/a by default and is never inferred from deploy
+# signals — a target exists only when the user names one — so an absent line,
+# `none`, and `n/a` (with or without a trailing reason) all read as "no live
+# surface". Case-insensitive, matching every other value comparison in this
+# hook. Step 9 owes the three of a deploy exactly when one is named; a run that
+# names none and gives them anyway records more than it owes, and is not refused.
+deploy_target_named() {
+  case "$(printf '%s' "$DEPLOY_TARGET" | tr '[:upper:]' '[:lower:]')" in
+    ""|none|n/a|n/a:*) return 1 ;;
+    *)                 return 0 ;;
+  esac
+}
+
 _eg_v15_approved() {  # <key> -> 0 an approval of <key> stands, 1 none; a fold that fails is refused
   _proof_ask "$PLAN" reader_q_approved "$PLAN" "$1" >/dev/null
   case $? in 0) return 0 ;; 1) return 1 ;; *) _eg_v15_unreadable ;; esac
@@ -3715,9 +3731,10 @@ _eg_v15_step_asks() {
        [ -z "$miss" ] || _eg_v15_ask "Step 7's document: the header's adrs: naming records that stand, or none with its reason" ;;
     8) st="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
        for r in $(plan_read_rows "$PLAN" Tasks 2>/dev/null | awk -F'\t' '{ id = ""; k = ""; for (i = 1; i <= NF; i++) { if ($i ~ /^id=/) id = substr($i, 4); if ($i ~ /^kind=/) k = substr($i, 6) } if (k == "integrate") print id }'); do
-         v="$(_proof_ask "$PLAN" reader_q_status "$PLAN" "$r")"; [ "${v#*state=landed}" != "$v" ] && miss="${miss:-0}"
+         miss="${miss:-1}"; v="$(_proof_ask "$PLAN" reader_q_status "$PLAN" "$r")"; [ "${v#*state=landed}" = "$v" ] || miss=0
        done
-       [ "$miss" = 0 ] || _eg_v15_ask "Step 8's merge: the integrate row's landing"
+       ! plan_parked_why "$PLAN" >/dev/null 2>&1 || miss=0
+       [ "${miss:-0}" = 0 ] || _eg_v15_ask "Step 8's merge: the integrate row's landing"
        v="$(_proof_ask "$PLAN" _eg_v15_trees "$PLAN")" || _eg_v15_unreadable
        for p in $v; do [ ! -e "$BIONIC_ROOT/$p" ] || _eg_v15_ask "Step 8's trees: $p still stands"; done
        case "$st" in *$'\ncleanup=n/a'*) : ;;
@@ -3725,10 +3742,10 @@ _eg_v15_step_asks() {
          *) _eg_v15_ask "Step 8's cleanup, tmp-wiped and tasks-completed, given to its step by close-out" ;; esac ;;
     9) st="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
        case "$st" in *state=delivered*) : ;; *) _eg_v15_ask "Step 9's delivery, given to its step by close-out" ;; esac
-       case "$(printf '%s' "$DEPLOY_TARGET" | tr '[:upper:]' '[:lower:]')" in ''|none|n/a|n/a:*) ;; *)
+       if deploy_target_named; then
          for v in deployed verified monitored; do case "$st" in *$'\n'"$v="*) : ;; *) miss="${miss:+$miss, }$v" ;; esac; done
-         [ -z "$miss" ] || _eg_v15_ask "Step 9's $miss, given to its step by close-out (deploy_target is named)" ;;
-       esac ;;
+         [ -z "$miss" ] || _eg_v15_ask "Step 9's $miss, given to its step by close-out (deploy_target is named)"
+       fi ;;
   esac
 }
 _eg_v15_trees() {  # <plan> -> each path the run's latest tree events name, one per line; asked through _proof_ask
@@ -3749,7 +3766,7 @@ LINE=$(echo "$SECTION" \
 # here. Every other step keeps its line.
 _EG_STEP_LINE_OWED=1
 [ "$CURRENT" = 6 ] && _EG_STEP_LINE_OWED=0
-if [ "$_EG_V15" -eq 1 ]; then
+if [ "$_EG_V15" -eq 1 ] || [ "$CURRENT" = 8 ] || [ "$CURRENT" = 9 ]; then
   _eg_v15_step_asks
   _EG_STEP_LINE_OWED=0
 fi
@@ -4028,74 +4045,6 @@ validate_document_step() {
 Plan: $PLAN"
     refuse exit2 commit "this step names no adr, rca or n/a" "add adr:, rca: or n/a:" "$_eg_detail"
   fi
-}
-
-# Integrate & close: merge/worktree-removed always; then the cleanup triple,
-# OR an explicit `cleanup: n/a` marker (cleanup_on_finish=false).
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-validate_integrate_step() {
-  local cleanup_val
-  shape_block merge worktree-removed
-  cleanup_val=$(block_get cleanup)
-  case "$cleanup_val" in
-    n/a|n/a:*)
-      : # cleanup_on_finish=false / already-cleaned case (reason optional)
-      ;;
-    *)
-      shape_block cleanup tmp-wiped tasks-completed
-      ;;
-  esac
-}
-
-# Does frontmatter name a LIVE surface this run operates? The default answer
-# is no. `deploy_target` is n/a by default and is never inferred from deploy
-# signals — a target exists only when the user names one — so an absent line,
-# `none`, and `n/a` (with or without a trailing reason) all read as "no live
-# surface". Case-insensitive, matching every other value comparison in this
-# hook.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-deploy_target_named() {
-  case "$(printf '%s' "$DEPLOY_TARGET" | tr '[:upper:]' '[:lower:]')" in
-    ""|none|n/a|n/a:*) return 1 ;;
-    *)                 return 0 ;;
-  esac
-}
-
-# Close-out step (v14 contract, ratified 2026-08-19):
-#
-#   `delivered:` ALWAYS — the terminal state of the work. Step 9's default
-#   endpoint is a PR open and ready for a human to review, or commits landed
-#   locally and ready to push; everything past that boundary is the human's
-#   process, not the run's to claim.
-#
-#   `deployed:` / `verified:` / `monitored:` owed EXACTLY when a deploy_target
-#   is named — the run that operates its own live surface (bionic's own
-#   dogfood is the example).
-#
-# Supersedes v13, where the trio was owed whenever any target existed and
-# `n/a:` discharged the step at `deploy_target: none`. That rule encoded
-# wave==release, which is the exception and not the rule, and it let a run
-# with no live surface close without ever naming what it delivered.
-#
-# An UNOWED trio is tolerated, not refused: a run that deployed something
-# without having declared a target and says so is recording more than it owes,
-# and refusing that commit would punish honesty. The wall is on the absent
-# claim, never on the extra one.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-validate_ship_step() {
-  local step="$1" prefix f
-  local missing=()
-  shape_block delivered
-  deploy_target_named || return 0
-  for f in deployed verified monitored; do
-    block_has "$f" || missing+=("$f")
-  done
-  [ "${#missing[@]}" -eq 0 ] && return 0
-  prefix=$(step_prefix "$step")
-  _eg_detail="${prefix} frontmatter names deploy_target=${DEPLOY_TARGET}, so the close-out owes the deploy trio; missing: ${missing[*]}
-Plan: $PLAN
-Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block — or, if this run operates no live surface, set 'deploy_target: n/a' in frontmatter (the trio is owed exactly when a target is named)."
-  refuse exit2 commit "the close-out owes the deploy trio" "add deployed:, verified:, monitored:" "$_eg_detail"
 }
 
 # ---------- pre-registered Verification Matrix ----------
@@ -5029,7 +4978,6 @@ Fix: replace the '- ${id}:' placeholder with the actual evidence artifact before
 # close · 9 Close-out. Steps 1/2/3/6 are pointer steps handled upstream, except
 # that Step 6 reaches here so the matrix prefix check can fire.
 INTEGRATE_STEP=8
-SHIP_STEP=9
 
 dispatch() {
   # Audited multi_agent wave: D7 dispatched-task ledger PRESENCE, at every step
@@ -5069,13 +5017,7 @@ dispatch() {
       validate_intent_evidence
       ;;
     7) validate_document_step 7 ;;
-    *)
-      if [ "$CURRENT" = "$INTEGRATE_STEP" ]; then
-        validate_integrate_step
-      elif [ "$CURRENT" = "$SHIP_STEP" ]; then
-        validate_ship_step "$SHIP_STEP"
-      fi
-      ;;
+    8|9) _eg_v15_refuse ;;
   esac
   # THE READINGS THE RUN OWES are a prefix condition from Step 6 (wave-27 T14; D3, D19), asked
   # last, after each step's own evidence: the Step-6 pointer line no longer answers for them. A

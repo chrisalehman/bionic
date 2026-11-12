@@ -112,8 +112,8 @@ fi
 . "${CO_LIB}/roots.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/run.sh"
-# THE ONE READER OF THE INTEGRATION BRANCH (lib/plan.sh `plan_integration_branch`) AND OF THE HANDOFF POINTER
-# (lib/handoff.sh `handoff_file_of`), wave-39 T16 (D18, AC-12.1): session-poker.sh `handoff` reads both through them.
+# THE ONE READER OF THE INTEGRATION BRANCH (lib/plan.sh `plan_integration_branch`), and the handoff document's
+# grammar and home file (lib/handoff.sh), which session-poker.sh `handoff` reads too.
 # shellcheck source=/dev/null
 . "${CO_LIB}/plan.sh"
 # shellcheck source=/dev/null
@@ -305,8 +305,8 @@ RELEASE="$(plan_frontmatter_get "$PLAN" release)"
 # reviews, the deferrals and the debts. The reader (lib/reader.sh) reads the run's log, or translates a run kept in the
 # older homes as it reads them, so a fact the log alone holds is read here as every other reader reads it. One fold
 # serves every answer: the proof library keeps it (lib/proof.sh `_proof_facts`), and the judge this script asks reads
-# the same one. What this script still reads of the plan is what the plan authors (its header, its rows' kinds) and
-# what its own writers need: the Step 8 and Step 9 blocks are written into `## SDLC State`.
+# the same one. What this script still reads of the plan is what the plan authors: its header and its rows' kinds. It
+# writes nothing into the plan: what step 8 cleaned, the delivery, the archive and the handoff's place are events.
 _proof_reader_load || _co_refuse "the reader (lib/reader.sh) cannot be loaded from $CO_LIB, so the run's facts cannot be read"
 co_ask() {  # <reader question's function> [args] -> its answer, over the kept fold of this run
   local q="$1"; shift
@@ -328,9 +328,6 @@ co_step9_at() {  # -> the instant of the run's delivery, or nothing; 2 when the 
 CO_UNREAD="the run's facts could not be read, so nothing is written from them; run again: bash $0 $PLAN $VERB"
 co_heard() { _proof_facts "$PLAN" >/dev/null || _co_refuse "$CO_UNREAD"; }
 
-# The writers' target: the Step 8 and Step 9 blocks go into `## SDLC State`, so a plan without one cannot be closed.
-awk '/^## SDLC State/ { f = 1; exit } END { exit !f }' "$PLAN" 2>/dev/null \
-  || _co_refuse "$PLAN carries no ## SDLC State section to hold the Step 8 and Step 9 blocks"
 # THE ONE READER OF THE INTEGRATION BRANCH (wave-39 T16; D18, AC-12.1): lib/plan.sh `plan_integration_branch`,
 # `## SDLC State` first, then the frontmatter, as session-poker.sh `handoff` and `release-check` read it.
 INTEGRATION="$(plan_integration_branch "$PLAN")"
@@ -794,9 +791,9 @@ co_scorecard() {  # -> sets CO_SC_LINES
 # listed and writes nothing. A run whose part no earlier verb wrote, one with no pull request among them, gets it here:
 # the commit is made in the object store on the working branch's tip, under close-out's own author, as the line makes
 # its numbers commit. `run` makes it before its first act, so a commit that cannot be made refuses with nothing done,
-# and publishes it after the merge acts: the branch moves to it (lib/line.sh `line_reviews_move`) and the landing
-# record gains `ev=close-out|part=reviews|commit=<c>|branch=<working>`, so the branch holds no commit the record does
-# not name. No `release:`, no CHANGELOG.md on the branch, no entry for the release, no review or waiver registered, or a
+# and publishes it after the merge acts: the branch moves to it (lib/line.sh `line_reviews_move`) and the run's log
+# gains a published event, `part=reviews commit=<c> branch=<working> by=close-out`, so the branch holds no commit the
+# log does not name. No `release:`, no CHANGELOG.md on the branch, no entry for the release, no review or waiver registered, or a
 # part that already reads as rendered: nothing is made and no line is written.
 # Sets CO_RV_LINE (the `reviews:` line's words), CO_RV_COMMIT (the commit, made, not yet published), CO_RV_BASE.
 CO_RV_AUTHOR="bionic close-out"; CO_RV_EMAIL="close-out@bionic.invalid"
@@ -848,7 +845,7 @@ co_reviews_publish() {  # -> the branch at CO_RV_COMMIT and its close-out event 
     return 1
   fi
   line_event "$PLAN" published part=reviews "commit=$CO_RV_COMMIT" "branch=$WORKING" by=close-out && return 0
-  CO_RV_LINE="$WORKING moved to ${CO_RV_COMMIT:0:12}, and the landing record could not be written: append ev=close-out|part=reviews|commit=$CO_RV_COMMIT|branch=$WORKING to $(line_record "$PLAN" 2>/dev/null || printf 'the record')"
+  CO_RV_LINE="$WORKING moved to ${CO_RV_COMMIT:0:12}, and its published event (part=reviews commit=$CO_RV_COMMIT branch=$WORKING) could not be appended to the run's log $(reader_log "$PLAN" 2>/dev/null || printf 'of %s' "$PLAN")"
   return 1
 }
 # WHAT GOVERNED THE RUN, READ BEFORE THE WIPE (wave-36 T2; D7, REQ-1 AC-1.4, ADR-055). hooks/session-start.sh writes
@@ -1777,74 +1774,87 @@ act_epic() {
 # (dispatch.md:24), so both are named in one line.
 PATROL_LINE="CronDelete the bionic-patrol job, then: bash $(plugin_root)/hooks/session-poker.sh disarm"
 
-# ─── Act 9 and the two lifecycle blocks ──────────────────────────────────────
+# ─── Act 9: the step's events ────────────────────────────────────────────────
 #
-# EVERY KEY ON ITS OWN CONTINUATION LINE, NEVER SEMICOLON-JOINED. `block_get`
-# (walls.sh:1856) reads a block with a line-anchored `^<key>:` regex and takes the FIRST
-# match, so `merge: a; worktree-removed: b` on one line is a block with ONE key in it and
-# every other key reads as missing — A-orch-49's finding, and 39 keys across 34 blocks were
-# added to clear it once.
-#
-# `delivered:` IS INLINE ON THE STEP-9 LINE, with exactly one space after `Step 9:`.
-# `run_open` (run.sh:293) greps `^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:` — a
-# literal single space, no `[[:space:]]+` tolerance, unlike the gate's own regex beside
-# it. A `delivered:` written onto a continuation line satisfies the gate and leaves the
-# run OPEN to every other reader in the fleet, forever.
-step8_block() {
-  local what="$WORKING $(co_into) into $INTEGRATION; the tail was performed by close-out.sh $VERSION"
-  [ "$PARKED" = no ] || what="$WORKING parked, not merged into $INTEGRATION; the tail was performed by close-out.sh $VERSION without the merge act"
-  cat <<STEP8
-- Step 8: CLOSED $NOW — $what
-  merge: $MERGE_LINE
-  worktree-removed: $WT_LINE
-  cleanup: done
-  tmp-wiped: $TMP_LINE
-  tasks-completed: $TASKS_LINE
-  attested-by: close-out.sh $VERSION
-STEP8
-}
+# WHAT THE CLOSE GIVES ITS STEPS is written through the step's one writer (lib/proof.sh `proof_step_event`): at 8 what
+# it cleaned, at 9 the delivery's words and, once the plan is archived, the archive's line. The merge and the trees are
+# asked of the landing and tree events, never said again here. No field value may hold a `|` or a newline (the log's
+# grammar); the writer refuses one, and the close refuses with it.
 
-step9_block() {
-  # A PARKED RUN'S DELIVERED LINE NAMES WHERE THE WORK IS (wave-38 T15; AC-4.3): `delivered: parked on <branch> @ <sha>`.
+# co_delivered_words -> the delivery's words, step 9's `delivered=`: the minute and the run, the release when the plan
+# names one, or where a parked run's work is kept.
+co_delivered_words() {
   if [ "$PARKED" = yes ]; then
-    cat <<STEP9
-- Step 9: delivered: parked on $WORKING @ $(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null || printf '?') — $PARKED_WHY ($NOW $WAVE_SLUG); the Step 8/9 tail was performed by close-out.sh without the merge act and attested against the commit gate; continuation at $CONT_REL
-  attested-by: close-out.sh $VERSION
-STEP9
+    printf 'parked on %s @ %s — %s (%s %s); the Step 8/9 tail was performed by close-out.sh without the merge act and attested against the commit gate; continuation at %s' \
+      "$WORKING" "$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null || printf '?')" "$PARKED_WHY" "$NOW" "$WAVE_SLUG" "$CONT_REL"
     return 0
   fi
-  cat <<STEP9
-- Step 9: delivered: $NOW $WAVE_SLUG${RELEASE:+ $RELEASE} — the Step 8/9 tail was performed by close-out.sh and attested against the commit gate; continuation at $CONT_REL
-  attested-by: close-out.sh $VERSION
-STEP9
+  printf '%s %s%s — the Step 8/9 tail was performed by close-out.sh and attested against the commit gate; continuation at %s' \
+    "$NOW" "$WAVE_SLUG" "${RELEASE:+ $RELEASE}" "$CONT_REL"
 }
 
-# THE HANDOFF DOCUMENT IS THE STORE. The closed run's document goes to the run's handoff file, the one the plan's
-# `## Handoff` pointer names, else the run's home file in the handoffs folder (lib/handoff.sh `handoff_file_of`, the
-# one answer every handoff reader asks). It is the document session-poker.sh `handoff` writes, in its shape: the kind
+# co_close_facts -> the facts this close's acts will write, as the judgment before them carries them pending (lib/proof.sh
+# `_proof_dry_step`): its step 8 with the fields it will give, the landing of each row its merge lands, and each tree it
+# removes. A parked close lands and removes nothing. The wipe has not run, so its field is what the census reads now.
+co_close_facts() {
+  local ih id
+  printf '8|cleanup=done|tmp-wiped=%s entries under %s (not yet wiped)|tasks-completed=%s' "$(tmp_count)" "$TMP_DIR" "$TASKS_LINE"
+  [ "$PARKED" = no ] || return 0
+  ih="$(git -C "$ROOT" rev-parse --verify -q "${INTEGRATION}^{commit}" 2>/dev/null)"
+  for id in $(co_lands_rows); do printf '\npublished|row=%s|commit=%s|kind=close|by=close-out|why=merged' "$id" "$ih"; done
+  co_facts tree | awk -F'|' "$_READER_AWK"'ev() == "tree" { p = line_kv("path"); sub(/\/$/, "", p); if (p != "" && p != "—") print line_kv("row") "\t" p }' \
+    | while IFS=$'\t' read -r id p; do
+        git -C "$ROOT" show-ref --verify --quiet "refs/heads/wt/${p##*/}" && printf '\ntree|row=%s|path=' "$id"
+      done
+  return 0
+}
+
+# co_close_step8 -> the run's step 8 carries what this close cleaned. A step 8 already standing with its fields is the
+# record of a close whose attestation refused after its acts ran: it is kept, since this close's wipe of what that one
+# left would say less than the wipe that happened.
+CO_STEP8_KEPT=no
+co_close_step8() {
+  local st
+  st="$(co_ask reader_q_step)" || _co_refuse "$CO_UNREAD"
+  case "$st" in "n=8"$'\n'*cleanup=*) CO_STEP8_KEPT=yes; return 0 ;; esac
+  proof_step_event "$PLAN" 8 cleanup=done "tmp-wiped=$TMP_LINE" "tasks-completed=$TASKS_LINE" \
+    || _co_refuse "what step 8 cleaned could not be appended to the run's log of $PLAN"
+  st="$(co_ask reader_q_step)" || _co_refuse "$CO_UNREAD"
+  case "$st" in "n=8"$'\n'*cleanup=*) ;; *) _co_refuse "step 8's fields did not land in the run's log of $PLAN" ;; esac
+}
+
+# co_close_step9 -> the delivery appended at its own second, read back closed; CO_DELIVERED_AT the instant it holds
+CO_DELIVERED=""; CO_DELIVERED_AT=""
+co_close_step9() {
+  local st
+  CO_DELIVERED="$(co_delivered_words)"
+  proof_step_event "$PLAN" 9 "delivered=$CO_DELIVERED" || _co_refuse "the delivery could not be appended to the run's log of $PLAN"
+  st="$(co_ask reader_q_step)" || _co_refuse "$CO_UNREAD"
+  case "$st" in *state=delivered) ;; *) _co_refuse "the delivery did not land: the run's log of $PLAN reads it open" ;; esac
+  CO_DELIVERED_AT="$(co_step9_at)" || _co_refuse "$CO_UNREAD"
+}
+
+# THE HANDOFF DOCUMENT IS THE STORE. The closed run's document goes to the run's handoff file, the one the reader's
+# handoff answer names (a logged place, or an older plan's `## Handoff` pointer as the reader translates it), else the
+# run's home file in the handoffs folder (lib/handoff.sh `handoff_default_of`). It is the document session-poker.sh `handoff` writes, in its shape: the kind
 # line, the title, the sections in their order, the door last. Its State is the closed run's, and its two closed
 # lines are `closed-form`'s, the branch line under the verb's `working branch:` label. A section a session composed
 # into that document before the close is kept as it stands, title included; a section it lacks is the one line
 # `- none.`. A file of the old shape (the kind line, then facts and five human lines) is carried whole: mid-flight and
 # risks into Open, order into Next, rulings into Decisions, lessons into Findings, every other line into State after
 # the closed run's own, a line under a key State writes itself marked `was`. The page is not folded: every reader
-# joins a folded line back, so a long line reads the same. The plan's section becomes the one pointer line `handoff: <path> written <local time>`.
+# joins a folded line back, so a long line reads the same. Where it was written is a fact of the run's log, given through
+# the handoff's one writer (lib/proof.sh `proof_handoff_event`), and read back as every reader of it asks.
 CO_HO_FILE=""; CO_HO_REL=""; CO_HO_WRITTEN=""; CO_HO_LOCAL=""; CO_HO_CLOCK=""
 co_handoff_where() {  # -> sets CO_HO_FILE/REL (the pointer's path, else the default) and the instant, once
+  local rel
   [ -z "$CO_HO_FILE" ] || return 0
-  CO_HO_FILE="$(handoff_file_of "$PLAN" "$ROOT")"
+  rel="$(co_ask reader_q_handoff 2>/dev/null | sed -n 's/^path=//p')"
+  case "$rel" in '') CO_HO_FILE="$(handoff_default_of "$PLAN" "$ROOT")" ;; /*) CO_HO_FILE="$rel" ;; *) CO_HO_FILE="$ROOT/$rel" ;; esac
   CO_HO_REL="${CO_HO_FILE#"$ROOT"/}"
   CO_HO_WRITTEN="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   CO_HO_LOCAL="$(date '+%Y-%m-%d %H:%M %Z')"
   CO_HO_CLOCK="$(date '+%-I:%M %p')"
-}
-handoff_block() {
-  co_handoff_where
-  cat <<HANDOFF
-## Handoff
-
-handoff: $CO_HO_REL written $CO_HO_LOCAL
-HANDOFF
 }
 co_handoff_closed() {  # -> 0 when the handoff document's resume point is the closed one
   co_handoff_where
@@ -1919,167 +1929,33 @@ co_handoff_write() {  # -> writes the closed document to the handoff file, a ses
   return 1
 }
 
-# step8_present <file> -> 0 when `## SDLC State` carries a `Step 8:` line.
-step8_present() {
-  awk '
-    /^## / { insdlc = ($0 ~ /^## SDLC State/) }
-    insdlc && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+8[[:space:]]*:/ { found = 1 }
-    END { exit !found }
-  ' "$1" 2>/dev/null
-}
-
-# ensure_step8_line <file> -> the file with a `- Step 8: (pending)` line when `## SDLC State` has none
-# (wave-33 T8; D8, AC-4.2). The line is close-out's to write, and the replace below only replaces: it
-# used to refuse for the line it never inserted. It goes after the last block of a step below 8, which is
-# the Step-7 line and its indented continuation lines, in front of whatever follows (a Step 9 line, or
-# the next key); with no such block, at the end of the section. Held blank lines stay below the insert.
-ensure_step8_line() {
-  local file="$1" tmp="$1.step8.$$"
-  step8_present "$file" && return 0
-  awk '
-    function isstep(s) { return match(s, /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+[0-9]+[[:space:]]*:/) }
-    function stepnum(s,   t) { t = substr(s, RSTART, RLENGTH); gsub(/[^0-9]/, "", t); return t + 0 }
-    function flush_blanks() { while (blanks > 0) { print ""; blanks-- } }
-    function insert() { if (!done) { print "- Step 8: (pending)"; done = 1 } }
-    /^## / {
-      if (insdlc) { insert(); flush_blanks() }
-      insdlc = ($0 ~ /^## SDLC State/); blk = 0; blanks = 0
-      print; next
-    }
-    insdlc && /^[[:space:]]*$/ { blanks++; next }
-    insdlc {
-      step = isstep($0)
-      if (step) { n = stepnum($0) }
-      if (blk && !(step && n < 8) && $0 !~ /^[[:space:]]/) insert()
-      flush_blanks()
-      print
-      if (step) blk = (n < 8)
-      else if ($0 !~ /^[[:space:]]/) blk = 0
-      next
-    }
-    { print }
-    END { if (insdlc) { insert(); flush_blanks() } }
-  ' "$file" > "$tmp" 2>/dev/null
-  if [ ! -s "$tmp" ]; then
-    rm -f "$tmp"
-    _co_refuse "could not insert the Step-8 line into $file"
-  fi
-  mv "$tmp" "$file"
-}
-
-# write_plan_blocks <8|9> [target] — the plan is written in TWO PHASES so the commit gate can judge
-# the Step-8 block while the plan is still open (critic2 N-3, wave-23 T16).
-#   8  replaces the Step-8 line with whatever continuation lines it had. `current:` stays
-#      at 8, so the plan still reads OPEN to `run_open` and the bound dry-run is judged by
-#      the gate's step-evidence checks, not short-circuited by `bound-closed`.
-#   9  replaces the Step-9 line, sets `current: 9`, and rewrites `## Handoff` whole. After
-#      this the plan reads closed and the gate exits 0 before it looks at evidence.
-# [target] defaults to the plan; the pre-flight (below) passes a scratch copy of it instead.
-#
-# A CONTINUATION LINE IS DROPPED BY THE SAME GRAMMAR THE GATE READS IT BY
-# (`extract_continuation`, walls.sh:1697): everything after a Step line up to the next
-# `Step N:` line or the next line starting at column zero. Anything else and a second
-# close would leave the old block's keys underneath the new one, where `block_get`'s
-# first-match rule would quietly prefer them.
-#
-# THE STEP 9 LINE IS WRITTEN HERE WHEN THE PLAN HAS NONE (wave-27 T4, D14): `- Step 9:
-# (pending)`, right under the Step-8 block phase 8 writes, for phase 9 to replace. Phase 8
-# and not earlier, because nothing touches the plan before the pre-flight passes, and the
-# pre-flight writes phase 8 into its scratch copy, so the gate judges the line too.
-write_plan_blocks() {
-  local phase="$1" target="${2:-$PLAN}"
-  local tmp="$target.close-out.$$" step8
-  # PHASE 8 WRITES THE LINE IT READS BACK: the Step-8 line when the plan has
-  # none. It is done to the TARGET, which is the pre-flight's scratch copy on the first call, so a refusal
-  # still leaves the plan byte-for-byte as it was. The walk is the gate's to read from the walk's proof.
-  if [ "$phase" = 8 ]; then
-    ensure_step8_line "$target"
-  fi
-  step8="$(step8_block)"
-  step9_present "$target" || step8="$step8"$'\n''- Step 9: (pending)'
-  CO_STEP9_TEXT="$(step9_block)"
-  CO_PHASE="$phase" CO_STEP8="$step8" CO_STEP9="$CO_STEP9_TEXT" CO_HANDOFF="$(handoff_block)" awk '
-    /^## / {
-      insdlc = ($0 ~ /^## SDLC State/)
-      skip = 0
-      if ($0 ~ /^## Handoff/ && ENVIRON["CO_PHASE"] == "9") { print ENVIRON["CO_HANDOFF"]; hskip = 1; next }
-      hskip = 0
-      print; next
-    }
-    hskip { next }
-    skip {
-      if ($0 ~ /^[[:space:]]*$/) next
-      if ($0 ~ /^[^[:space:]]/) { skip = 0 }
-      else if ($0 ~ /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+[0-9]/) { skip = 0 }
-      else next
-    }
-    insdlc && ENVIRON["CO_PHASE"] == "9" && /^[[:space:]]*current[[:space:]]*:/ { print "current: 9"; next }
-    insdlc && ENVIRON["CO_PHASE"] == "8" && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+8[[:space:]]*:/ {
-      print ENVIRON["CO_STEP8"]; skip = 1; next
-    }
-    insdlc && ENVIRON["CO_PHASE"] == "9" && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+9[[:space:]]*:/ {
-      print ENVIRON["CO_STEP9"]; skip = 1; next
-    }
-    { print }
-  ' "$target" > "$tmp" 2>/dev/null
-
-  if [ ! -s "$tmp" ]; then
-    rm -f "$tmp"
-    _co_refuse "could not rewrite $target"
-  fi
-  mv "$tmp" "$target"
-
-  if [ "$phase" = 8 ]; then
-    grep -qE '^- Step 8: CLOSED ' "$target" || _co_refuse "the Step-8 line did not land in $target"
-    grep -qE '^  attested-by: close-out.sh ' "$target" || _co_refuse "the attestation did not land in $target"
-    step9_present "$target" || _co_refuse "the Step 9 line did not land in $target"
-    return 0
-  fi
-
-  # THE DELIVERY IS ALSO THE STEP'S EVENT: a step the run's log holds outranks a Step line stamped only to the minute,
-  # so while the Step 9 line is written here the delivery goes through the step's one writer too, or an advance logged
-  # in the same minute would read the closed run as open. It carries the minute the Step 9 line does, at its first
-  # second, so the delivery reads one instant everywhere; it can read earlier than the log line before it and stands
-  # after it by the log's written order. It goes in before the handoff, which names its instant.
-  local delivered at=""; delivered="$(printf '%s\n' "$CO_STEP9_TEXT" | sed -n '1s/^- Step 9: delivered: //p')"
-  case "$NOW" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]Z) at="${NOW%Z}:00Z" ;; esac
-  LOG_AT="$at" proof_step_event "$PLAN" 9 "delivered=${delivered:-yes}" || _co_refuse "the delivery could not be appended to the run's log of $PLAN"
-
-  # A plan that carried no `## Handoff` section gets one rather than silently losing the
-  # act: the section is the run's resume pointer, and its absence is not consent.
-  if ! grep -qF "handoff: $CO_HO_REL written " "$PLAN"; then
-    printf '\n%s\n' "$(handoff_block)" >> "$PLAN"
-  fi
+# co_close_handoff -> the closed handoff written, its place appended to the run's log, both read back
+co_close_handoff() {
+  local got
   co_handoff_write || _co_refuse "the closed handoff could not be written to $CO_HO_FILE"
-
-  # The readback, act by act: every phase-9 line this function claims to have written,
-  # asked for back out of the file (phase 8 read its own back above).
-  grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' "$PLAN" \
-    || _co_refuse "the Step-9 delivered: line did not land in $PLAN"
-  grep -qE '^current: 9$' "$PLAN" || _co_refuse "current: did not advance to 9 in $PLAN"
   co_handoff_closed || _co_refuse "the closed form did not land in the handoff file $CO_HO_FILE"
-  grep -qF "handoff: $CO_HO_REL written " "$PLAN" || _co_refuse "the plan's ## Handoff does not point to $CO_HO_REL in $PLAN"
+  proof_handoff_event "$PLAN" "$CO_HO_REL" || _co_refuse "the handoff's place could not be appended to the run's log of $PLAN"
+  got="$(co_ask reader_q_handoff | sed -n 's/^path=//p')" || _co_refuse "$CO_UNREAD"
+  [ "$got" = "$CO_HO_REL" ] || _co_refuse "the run's log does not name the handoff at $CO_HO_REL (it names ${got:-none})"
 }
 
 # ─── The gate ────────────────────────────────────────────────────────────────
 
-# gate_ask <plan-file> <sid> [<dry_of>] [<a step pending, honoured for a dry session only>] -> GATE_RC, GATE_ERR (the gate's whole stderr) and GATE_LINE
+# gate_ask <plan-file> <sid> [<dry_of>] [<the facts pending, honoured for a dry session only>] -> GATE_RC, GATE_ERR (the gate's whole stderr) and GATE_LINE
 # (its one refusal line) for a `git commit` judged against <plan-file>. Status 9, with
 # GATE_LINE saying why, when there is no gate to ask; 0 otherwise, whatever the verdict.
 #
 # THE MARKER IS BOUND TO THE FILE UNDER CHECK (wave-23-fixit-1810 T12). An empty marker is
 # the unbound state, whose commit-gate verdict is an announcement and exit 0, so the
 # dry-run would attest nothing. The two-line shape binding.sh's bind_plan writes, with the
-# plan stored directly: bind_plan refuses any file that `open_runs` does not list, and the
-# pre-flight's scratch copy is deliberately not one (its name does not end `.plan.md`, so
-# no other session's walk can ever pick it up).
+# plan stored directly.
 #
 # The environment agrees with the payload because on a real call it does: lib/session.sh
 # takes the env value as primary and the payload as a witness, and a dry-run whose two
 # disagreed would be answered for a session that does not exist.
 #
-# THE ASKS IT RAISES ARE THE RUN'S. The stand-in session is in no plan's session list and its
-# marker may name the scratch copy, so `OWED_PLAN` names the plan this close-out acts for: a
+# THE ASKS IT RAISES ARE THE RUN'S. The stand-in session is in no plan's session list, so
+# `OWED_PLAN` names the plan this close-out acts for: a
 # waiver the gate asks for is opened in that run's register (lib/owed.sh), where the run's
 # pages read it, never in a session file nothing reads.
 GATE_RC=0
@@ -2109,57 +1985,32 @@ gate_ask() {
   return 0
 }
 
-# gate_dry_run -> the ATTESTATION: the gate asked about the plan as this run wrote it, Step-8
-# block in place and still open at current 8. A refusal here is rare now that the pre-flight
-# asked the same question first; it is kept because the pre-flight judged a copy and this
-# judges the file the commit will carry.
+# gate_dry_run -> the ATTESTATION: the gate asked, as a real session, about the run as this close left it, its step 8
+# in the log and still open at 8. A refusal here is rare now that the pre-flight asked the same question first; it is
+# kept because the pre-flight judged what the acts would write and this judges what they wrote.
 gate_dry_run() {
-  gate_ask "$PLAN" "closeout-$$" || _co_refuse "$GATE_LINE — the blocks cannot be attested"
+  gate_ask "$PLAN" "closeout-$$" || _co_refuse "$GATE_LINE — the close cannot be attested"
   if [ "$GATE_RC" -eq 0 ]; then
     say "gate: ok"
     return 0
   fi
   [ -n "$GATE_ERR" ] && printf '%s\n' "$GATE_ERR"
-  _co_refuse "the commit gate refused the blocks this run wrote (rc=$GATE_RC) — the plan edits are left in place, because they are what to fix"
+  _co_refuse "the commit gate refused the run as this close left it (rc=$GATE_RC) — its step 8 stands in the run's log and the run is open at 8; fix what the gate names and run close-out again"
 }
 
 # ─── The pre-flight: the gate's question, asked before the first act ─────────
 #
-# ASKED OF A COPY, BEFORE ANYTHING IS TOUCHED (critic3 P-1, wave-23 T17). The attestation
-# above judges the plan after acts 1–6, and by then the `wt/*` branches are deleted, this
-# session's tmp state is wiped and the continuation and epic row are written. A refusal the
-# Step-8 block cannot clear (a matrix, evidence or ledger fault) used to land there, on a
-# half-closed run. So the same question is asked first: the plan is copied to a hidden
-# scratch file beside it (same directory, so every path the gate resolves from the plan
-# resolves the same), phase 8's block is written into the copy, a synthetic marker is bound
-# to the copy, and the real gate judges it. The copy is removed whatever the answer, and by
-# the EXIT trap if the script dies in between.
+# ASKED BEFORE ANYTHING IS TOUCHED. The attestation above judges the run after the acts, and by then the
+# `wt/*` branches are deleted, this session's tmp state is wiped and the continuation and epic row are written. A
+# refusal the close cannot clear (a matrix, evidence or ledger fault) used to land there, on a half-closed run. So the
+# same question is asked first, of the plan itself, under the close's own dry session, with the facts its acts will
+# write pending (`co_close_facts`): nothing is appended and nothing is held while they are.
 #
-# THE BLOCK CARRIES PREDICTIONS, NOT RESULTS. The merge, census and wipe have not run yet,
-# so their lines are what they will say. The gate's Step-8 check is presence-only
-# (walls.sh `validate_integrate_step` -> `shape_block`); a gate that ever reads those
-# values is caught by the attestation, which judges the real ones.
-#
-# PREFLIGHT_RC is GATE_RC, or 9 when the block could not be written or there is no gate;
-# PREFLIGHT_LINE is the one line to show, PREFLIGHT_ERR the gate's whole answer. Every
-# mention of the scratch path is put back to the plan's, because the copy is gone by the
-# time anyone reads it.
-CO_SCRATCH=""
-trap '[ -n "$CO_SCRATCH" ] && rm -f "$CO_SCRATCH"' EXIT
+# PREFLIGHT_RC is GATE_RC, or 9 when there is no gate; PREFLIGHT_LINE is the one line to show, PREFLIGHT_ERR the gate's
+# whole answer.
 PREFLIGHT_RC=0
 PREFLIGHT_LINE=""
 PREFLIGHT_ERR=""
-preview_block_lines() {
-  local ws is wt
-  ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
-  is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
-  MERGE_LINE="$WORKING @ ${ws:-?} reachable from $INTEGRATION @ ${is:-?}"
-  ! co_pr_owed || MERGE_LINE="$(co_pr_line "$ws" "$is")"
-  wt="$(wt_branches | tr '\n' ',' | sed -E 's/,$//; s/,/, /g')"
-  WT_LINE="${wt:-none}"
-  if [ "$PARKED" = yes ]; then MERGE_LINE="$(co_parked_merge_line)"; WT_LINE="$(co_parked_wt_line)"; fi
-  TMP_LINE="$(tmp_count) entries under $TMP_DIR (not yet wiped)"
-}
 
 # co_parked_wt_line -> the worktree-removed key's value on a parked plan: nothing removed, the registered trees named
 co_parked_wt_line() {
@@ -2168,22 +2019,10 @@ co_parked_wt_line() {
   printf 'none — parked, the work is kept%s' "${wt:+ ($wt)}"
 }
 
-# step9_present <file> -> 0 when `## SDLC State` carries a `Step 9:` line.
-step9_present() {
-  awk '
-    /^## / { insdlc = ($0 ~ /^## SDLC State/) }
-    insdlc && /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+9[[:space:]]*:/ { found = 1 }
-    END { exit !found }
-  ' "$1" 2>/dev/null
-}
-
 # presence_missing -> the first thing a later act needs and the files do not carry, or
 # nothing. It used to be a readback that fired AFTER the destructive acts (critic4 Q-1): act
 # 6 appends to a `| wave |` table it never finds and then refuses because no row landed.
 # That is known before the first act, so it is asked here, by presence alone.
-#
-# A MISSING STEP 9 LINE IS NOT ASKED FOR: the line is close-out's own to write, so a run closed by its tools alone
-# could never get past here. Phase 8 writes it (write_plan_blocks).
 presence_missing() {
   # A RELEASE THAT WOULD SPLIT A CELL (wave-27 T14; A-orch-28). The epic row carries `release:` in
   # its version cell, and a `|` in it gives the row a cell more than its header, so it is refused
@@ -2280,41 +2119,18 @@ co_facts_says() {
 }
 
 gate_preflight() {
-  local copy out
-  copy="$PLANS_DIR/.${PLAN##*/}.preflight.$$"
-  CO_SCRATCH="$copy"
   PREFLIGHT_RC=9; PREFLIGHT_LINE=""; PREFLIGHT_ERR=""
-  preview_block_lines
-  if ! cp "$PLAN" "$copy" 2>/dev/null; then
-    rm -f "$copy"; CO_SCRATCH=""
-    PREFLIGHT_LINE="could not copy the plan to $copy"
-    return 0
-  fi
-  # A SUBSHELL, so write_plan_blocks' own refusal ends it and not this script: `check`
-  # must still report, and `run` refuses below with the reason in hand.
-  if ! out="$(write_plan_blocks 8 "$copy")"; then
-    rm -f "$copy"; CO_SCRATCH=""
-    out="${out//"$copy"/$PLAN}"
-    PREFLIGHT_LINE="${out#bionic: close-out refused — }"
-    return 0
-  fi
-  # A copy's name joins no record, so its step is its text's: the run's step, the reader's, is handed in pending.
-  gate_ask "$copy" "closeout-preflight-$$" "$PLAN" "$CURRENT"
-  rm -f "$copy"; CO_SCRATCH=""
+  gate_ask "$PLAN" "closeout-preflight-$$" "" "$(co_close_facts)"
   [ "$GATE_RC" -eq 9 ] && { PREFLIGHT_LINE="$GATE_LINE"; return 0; }
-  PREFLIGHT_RC="$GATE_RC"
-  PREFLIGHT_LINE="${GATE_LINE//"$copy"/$PLAN}"
-  PREFLIGHT_ERR="${GATE_ERR//"$copy"/$PLAN}"
+  PREFLIGHT_RC="$GATE_RC"; PREFLIGHT_LINE="$GATE_LINE"; PREFLIGHT_ERR="$GATE_ERR"
   return 0
 }
 
 # ─── Act 7: the archive ──────────────────────────────────────────────────────
 #
 # ITS LINES ARE COLLAPSED ONTO ONE. `archive_run` prints one line for a skip or a refusal
-# and one PER MOVED TREE for a move (up to three: specs, plans, adrs). `archived:` is a
-# block continuation line, and a value carrying a newline would be read by `block_get` as
-# one key followed by two lines of nothing — so the lines are joined with `; ` and the
-# value stays a value.
+# and one PER MOVED TREE for a move (up to three: specs, plans, adrs). The archive's field
+# is one value of one log line, so the lines are joined with `; `.
 ARCHIVED_LINE=""
 act_archive() {
   local out rc
@@ -2328,31 +2144,17 @@ act_archive() {
   return 0
 }
 
-# insert_archived -> writes the `archived:` key into the Step-9 block, immediately under
-# the `delivered:` line. The plan may have MOVED: `archive_run` renames the whole run
-# directory, and the line it printed is where it went.
-insert_archived() {
-  local target="$PLAN" moved tmp
-  if [ ! -f "$target" ]; then
-    moved="$(printf '%s' "$ARCHIVED_LINE" \
-      | tr ';' '\n' \
-      | sed -nE 's/.*bionic: archived .*plans\/[^ ]+ -> ([^ ]+).*/\1/p' \
-      | head -1)"
-    [ -n "$moved" ] && [ -f "$moved/${PLAN##*/}" ] && target="$moved/${PLAN##*/}"
-  fi
-  [ -f "$target" ] || _co_refuse "the plan is no longer at $PLAN and the archive line does not say where it went"
-
-  tmp="$target.close-out.$$"
-  CO_ARCHIVED="  archived: $ARCHIVED_LINE" awk '
-    { print }
-    /^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:/ && !done { print ENVIRON["CO_ARCHIVED"]; done = 1 }
-  ' "$target" > "$tmp" 2>/dev/null
-  if [ ! -s "$tmp" ]; then
-    rm -f "$tmp"
-    _co_refuse "could not write the archived: line into $target"
-  fi
-  mv "$tmp" "$target"
-  grep -qE '^  archived: ' "$target" || _co_refuse "the archived: line did not land in $target"
+# co_close_archived <the run's log, found before the move> -> the delivery's step restated with the archive's line.
+# The archive moves the plan and never its record, so the plan's new place joins no log: the log found before the move
+# is named to the step's writer, which takes only a log that is there. The restated step carries the delivery's own
+# second, so every reader of when the run was delivered reads one instant; it stands after the lines written between
+# the two by the log's written order.
+co_close_archived() {
+  local log="$1" last
+  LOG_AT="$CO_DELIVERED_AT" proof_step_event "$log" 9 "delivered=$CO_DELIVERED" "archived=$ARCHIVED_LINE" \
+    || _co_refuse "the archive's line could not be appended to the run's log $log"
+  last="$(/usr/bin/grep '|ev=step|' "$log" 2>/dev/null | tail -1)"
+  case "$last" in *"|archived="*) ;; *) _co_refuse "the archive's line did not land in the run's log $log" ;; esac
 }
 
 # ─── check ───────────────────────────────────────────────────────────────────
@@ -2378,8 +2180,6 @@ do_check() {
     co_would "facts: WOULD REFUSE — $FACTS_WHY" "$FACTS_SAYS"
     [ -z "$FACTS_LINES" ] || printf '%s\n' "$FACTS_LINES" | sed 's/^/  /'
   fi
-  step8_present "$PLAN" || say 'step8: no Step 8 line in ## SDLC State — run writes it with the block (after the Step-7 block)'
-  step9_present "$PLAN" || say 'step9: no Step 9 line in ## SDLC State — run writes `- Step 9: (pending)` with the Step-8 block'
   ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
   is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
   if [ "$PARKED" = yes ]; then
@@ -2483,10 +2283,10 @@ do_check() {
   say "patrol: $PATROL_LINE"
   co_handoff_where
   if [ "$PARKED" = yes ]; then
-    say "handoff: would write the closed form ($(co_resume_point)) to $CO_HO_REL; the plan's ## Handoff would point to it"
+    say "handoff: would write the closed form ($(co_resume_point)) to $CO_HO_REL; the run's log would name it"
     say "archived: not asked — the run is parked, not delivered; its plan stays where it is"
   else
-    say "handoff: would write the closed form (resume point NONE) to $CO_HO_REL; the plan's ## Handoff would point to it"
+    say "handoff: would write the closed form (resume point NONE) to $CO_HO_REL; the run's log would name it"
     # THE ARCHIVE IS NAMED, NEVER ASKED. `archive_run` has no dry mode and this verb has no
     # licence to move anything, so `check` reports the destination the binding fixed and
     # leaves the verdict to `run`, which asks once the plan reads closed.
@@ -2590,7 +2390,7 @@ do_run() {
                     say "tasks-completed: $TASKS_LINE"
                     say "$(co_debt_card)"
   co_debt_notes
-  # The close's instant, read again here: the continuation, the epic row, the Step 8 and 9 lines and the handoff
+  # The close's instant, read again here: the continuation, the epic row, the delivery's words and the handoff
   # carry it, and `delivered:` ends the hand-holds window, so every act above (the merge, the landings, the wipe) is
   # inside the minute it names or before it.
   NOW="$(date -u +%Y-%m-%dT%H:%MZ)"
@@ -2598,27 +2398,29 @@ do_run() {
                     say "$(co_owed_line)"
   act_epic;         say "epic-row: $EPIC_LINE"
                     say "patrol: $PATROL_LINE"
-  # ORDER (critic2 N-3): Step-8 block -> gate dry-run -> Step-9 flip. The dry-run judges
-  # the plan while it is still OPEN at current 8; flipping first made the bound marker
-  # resolve bound-closed, and the gate exits 0 before it checks step evidence. A refusal
-  # here leaves the plan at current 8 with the Step-8 block in place and no `delivered:`.
-  write_plan_blocks 8
-                    say "step8: CLOSED $NOW, attested-by close-out.sh $VERSION"
+  # ORDER: step 8's event -> the attestation -> step 9's. The attestation judges the run while it is
+  # still OPEN at 8; delivering first would close it, and the gate checks no evidence of a closed run. A refusal here
+  # leaves step 8 standing in the log with what the close cleaned, and no delivery.
+  co_close_step8
+  if [ "$CO_STEP8_KEPT" = yes ]; then say "step8: the step 8 standing in the run's log is kept, attested-by close-out.sh $VERSION"
+  else                say "step8: CLOSED $NOW, attested-by close-out.sh $VERSION"; fi
   gate_dry_run
-  write_plan_blocks 9
+  co_close_step9
+  co_close_handoff
   co_hand_holds_last; say "$CO_HH_LINE"
   co_matrix_settle; [ -z "$CO_MX_LINES" ] || say "$CO_MX_LINES"
   co_hold_release
   if [ "$PARKED" = yes ]; then
     # A PARKED RUN IS NOT ARCHIVED AND SENDS NO DELIVERY NOTICE: its plan is where the resume reads it (wave-38 T15).
-                    say "handoff: the closed form ($(co_resume_point)) written to $CO_HO_REL; the plan's ## Handoff points to it"
+                    say "handoff: the closed form ($(co_resume_point)) written to $CO_HO_REL; the run's log names it"
                     say "step9: delivered: parked on $WORKING @ $(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null) — $PARKED_WHY"
                     say "archived: not asked — the run is parked, not delivered; its plan stays where it is"
   else
-                    say "handoff: the closed form (resume point NONE) written to $CO_HO_REL; the plan's ## Handoff points to it"
+                    say "handoff: the closed form (resume point NONE) written to $CO_HO_REL; the run's log names it"
                     say "step9: delivered: $NOW $WAVE_SLUG${RELEASE:+ $RELEASE}"
+    CO_LOG="$(reader_log "$PLAN" 2>/dev/null)" || _co_refuse "the run's log of $PLAN cannot be found, so the archive's line has nowhere to go; nothing was moved"
     act_archive
-    insert_archived
+    co_close_archived "$CO_LOG"
                     say "archived: $ARCHIVED_LINE"
     co_deliver_notice
   fi
