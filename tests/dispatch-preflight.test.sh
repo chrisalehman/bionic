@@ -695,4 +695,75 @@ expect_eq "PL.1 a writer on a plan approved nowhere is refused at the step its l
 printf 'run/v1|ev=approval|key=step3|by=u|said=approved|at=2026-11-01T00:00:02Z\n' >> "$PL"; run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_eq "PL.2 …and admitted once its log alone holds the approval" "allow" "$GATE_VERDICT"
 
+section "§WORDS — every refusal of the wall is said by key from lib/dispatch.sh, in the words the wall gave"
+# The library sourced in a shell of its own: each key said once with sample facts, its user line compared with the
+# words the hook printed before they moved; an unknown key answers 2 with no words.
+WORDS_GOT="$(bash -c '. "$1/refuse.sh" && . "$1/dispatch.sh" || exit 3
+w() { local k="$1" rc=0; shift; dispatch_say "$k" "$@" || rc=$?; printf "%s|%s (%s)|%s\n" "$k" "$DISPATCH_FACT" "$DISPATCH_FIX" "$rc"; }
+w deadline 22 /r; w attest-none "bash /h/p.sh"; w attest-failed out "bash /h/p.sh"; w plan-unreadable /p.md
+w patrol-never /h/sp.sh /s; w patrol-silent 9 3 /h/sp.sh /s; w patrol-stopped /h/sp.sh 9 8 7 6 default /s
+w reviewer-retired bionic:reviewer; w facts-unread w /p.md; w fill-missing w /p.md /lib "a b"; w unapproved w /p.md 3 "a b"
+w unbound w adv "a b"; w name-ambiguous x-T1 "$(printf "T1\nA-T1")" /p.md; w approval-waits T9 release w-T9 /p.md /h
+w approval-unread T9 release w-T9 /p.md; w nested-writer w id ch ty "a b"; w worktree /c /t /m
+w budget 3 3 4 "" /h/ss.sh "writers=3 source=user" /p.md person wave /h; w in-flight w-1 intended
+w deliverable-outside /x /x /r; w proto-row T1; w proto-tree w-1 t /r/t none "" /s.sh; w proto-path a.sh /rec "" "$(printf "a.sh\ttracked")"
+w no-deliverable; w no-suites; w row-unknown T99 /p.md; w row-mismatch T2 T1 w-T1 /p.md; w lands-none a.sh why a.sh
+w live-writer T1 w-2 abcdef123456 w-1 /t abcdef123456
+for b in unreadable unnamed outside absent unrendered unsummed unsummable edited other-name other-row slot; do w brief-$b w-T1 T1 "" /h T2 x; done
+w roster-link /r; w row-unbuilt /r; w roster-unwritable /r denied /s; w no-such-key a
+printf "detail|%s\n" "$(dispatch_say deadline 22 "" && printf "%s" "$DISPATCH_DETAIL" | head -4 | tail -1)"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib")"
+expect_eq "W.1 each key says the fact and fix the wall gave, and an unknown key answers 2 with no words" "deadline|the wall ran out of time (dispatch again)|0
+attest-none|this repo has no environment attestation (run the preflight probe)|0
+attest-failed|the environment check ran and did not pass (fix what the probe named)|0
+plan-unreadable|the bound plan cannot be read (restore read access to the plan)|0
+patrol-never|no Patrol stamp exists for this session (CronCreate the Patrol job)|0
+patrol-silent|the Patrol fires but never ticks (run the tick; replace the job)|0
+patrol-stopped|the Patrol was armed and stopped firing (re-arm the Patrol, both halves)|0
+reviewer-retired|bionic:reviewer is retired (1.14.0) (dispatch bionic:critic)|0
+facts-unread|the run's facts could not be read (dispatch again)|0
+fill-missing|the approval check lib/fill.sh cannot be loaded (reinstall the plugin)|0
+unapproved|the plan this writer builds is unapproved (get the Step-3 plan approved)|0
+unbound|this session is bound to no run (bind it, or write its plan)|0
+name-ambiguous|the name matches rows T1, A-T1 (add Row: <id>)|0
+approval-waits|row T9 waits for approval:release (record it with the approve verb)|0
+approval-unread|the run's facts could not be read (dispatch again)|0
+nested-writer|a subagent may launch only read-only roles (ask the orchestrator)|0
+worktree|this dispatch came from a worktree (dispatch from the main checkout)|0
+budget|this passes the run's writer budget (land or stand down a row)|0
+in-flight|that name is in flight (use the FILL line's name)|0
+deliverable-outside|the deliverable is outside this repository (name a path inside the repo)|0
+proto-row|a prototype owns no plan row; it names Row: T1 (drop Row:)|0
+proto-tree|throwaway tree not made for w-1 (spawn it for this agent)|0
+proto-path|prototype path a.sh is tracked (drop it from Files:)|0
+no-deliverable|this brief names no deliverable (add an Expected artifact: line)|0
+no-suites|this brief declares no Files: and no Suites: (declare Suites:)|0
+row-unknown|Row: T99 names no plan row (name a ## Tasks row id)|0
+row-mismatch|Row: T2 is not the name's row T1 (rename or drop Row:)|0
+lands-none|Lands-on: none, not prose: a.sh (add suites or prose:)|0
+live-writer|row T1 has a live writer w-2 (session abcdef12) (stop it or ack it)|0
+brief-unreadable|the brief check lib/brief.sh cannot be loaded (reinstall the plugin)|0
+brief-unnamed|the prompt names no brief file of row T1 (run the brief verb)|0
+brief-outside|the brief file is outside this project (run the brief verb)|0
+brief-absent|the brief file the prompt names is not there (run the brief verb)|0
+brief-unrendered|the brief file carries no render mark (run the brief verb)|0
+brief-unsummed|the brief file's mark carries no sum (run the brief verb)|0
+brief-unsummable|the brief file's sum cannot be taken (install shasum or sha256sum)|0
+brief-edited|the brief file was edited after its render (run the brief verb)|0
+brief-other-name|the brief file is for x, not this name (run the brief verb)|0
+brief-other-row|the brief file is row T2's, not row T1's (run the brief verb)|0
+brief-slot|the brief file has a slot left for the orchestrator (fill the row, render again)|0
+roster-link|the roster path is a symbolic link (remove the link)|0
+row-unbuilt|the launch row did not build (run /bionic:doctor)|0
+roster-unwritable|the roster cannot be written (make it writable)|0
+no-such-key| ()|2
+detail|Roster:  (not reached)" "$WORDS_GOT"
+
+# A row that waits for a named approval asks the reader, so an approval its run's log alone holds admits it.
+REPO=$(make_repo wa1 yes); write_attestation "$REPO" "$SID_A"; PL="$REPO/.bionic/docs/record/wave-01-test/run.log"; mkdir -p "${PL%/*}"
+printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T9 | 7 | doc | the release | implementor | — | 20 | REQ-1 | CHANGELOG.md | — | — | pending | approval:release |\n' \
+  >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+printf 'run/v1|ev=approval|key=release|by=u|said=approved|at=2026-11-01T00:00:02Z\n' > "$PL"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T9 w-T9 "$BRIEF_FULL")" w-T9)"
+expect_eq "W.2 a row reading approval:release is admitted on an approval its log alone holds" "allow" "$GATE_VERDICT"
+
 finish

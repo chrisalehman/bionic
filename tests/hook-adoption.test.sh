@@ -314,6 +314,14 @@ fi
 # THE `no` ROWS ARE STRICTER THAN THEY WERE: a hook that is not run-scoped must call NEITHER
 # reader. Under the old text a non-run-scoped hook could have picked up `session_run` and
 # stayed green, which is exactly the direction this wave made reachable.
+# A HOOK THAT IS NOT RUN-SCOPED MAY ASK THE SESSION'S RUN IN ONE FUNCTION, ADMITTED BY NAME, as long as no verb is
+# gated on the answer: stop-orders' stopped_row_back asks which run the session is bound to only to find the row a
+# stopped agent held, and does nothing when there is none. Its top level, every verb's entry and any other function
+# are still read.
+HA_ADMIT="stop-orders:stopped_row_back"
+ha_text() {  # <hook name> <file> -> the hook's text less the one function the roster admits for it
+  awk -v fn="$(printf '%s\n' $HA_ADMIT | sed -n "s/^$1://p")" 'fn != "" && index($0, fn "() {") == 1 { skip = 1 } !skip { print } skip && /^}/ { skip = 0 }' "$2"
+}
 while IFS='|' read -r name class scoped; do
   [ -n "$name" ] || continue
   f="$HOOKS/$name.sh"
@@ -325,7 +333,7 @@ while IFS='|' read -r name class scoped; do
   # or BIONIC_RUN_PLAN, and for a hook outside the preamble it is still the call itself.
   # A hook that reverted to the PROJECT-keyed `active_run` fails either way.
   if grep -qE 'session_run "|BIONIC_RUN_WORD|BIONIC_RUN_PLAN' "$f"; then found=yes; else found=no; fi
-  if grep -qE 'active_run "|session_run "|BIONIC_RUN_WORD|BIONIC_RUN_PLAN' "$f"; then found_any=yes; else found_any=no; fi
+  if ha_text "$name" "$f" | grep -qE 'active_run "|session_run "|BIONIC_RUN_WORD|BIONIC_RUN_PLAN'; then found_any=yes; else found_any=no; fi
   case "$scoped" in
     yes) expect_eq "$name gates on the session-keyed run verdict" "yes" "$found" ;;
     no)  expect_eq "$name is NOT run-scoped and reads neither run predicate" "no" "$found_any" ;;
@@ -333,6 +341,9 @@ while IFS='|' read -r name class scoped; do
 done <<EOF
 $ADOPTED
 EOF
+{ cat "$HOOKS/stop-orders.sh"; printf '%s\n' 'second_fn() {' '  r="$(session_run "$a" "$b")"' '}'; } > "$SANDBOX/so-planted.sh"
+expect_eq "stop-orders: the admitted function asks the session's run, and a second function that asks it is still read" "yes yes" \
+  "$(awk '/^stopped_row_back\(\)/,/^}/' "$HOOKS/stop-orders.sh" | grep -qE 'session_run "' && echo yes || echo no) $(ha_text stop-orders "$SANDBOX/so-planted.sh" | grep -qE 'session_run "' && echo yes || echo no)"
 
 # THE ONE SURVIVING `active_run` CALLER, NAMED RATHER THAN EXCUSED. The evidence gate keeps
 # `active_run "$PROJECT_DIR"` on its unbound arm on purpose (S3 assumption 3): the fallback

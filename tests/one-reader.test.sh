@@ -13,7 +13,8 @@
 #   §NAMES        the verbs the dispatch, born and tree events and the landing's event retired are named nowhere in
 #                 hooks/ or payload/scripts/
 #                 but the walls' single-line list of verbs, which the row that edits it clears.
-#   §REFUSALS     refusal words planted in a registered hook file are listed and counted.
+#   §REFUSALS     refusal words planted in a registered hook file are listed and counted, one site for each name the
+#                 check counts; the dispatch wall lists none, and no fact the dispatch library says is in its file.
 #   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
 #                 the tree holds none.
 #   §REPORT       the check exits 0 with findings and ends on the six count lines, in their order.
@@ -49,7 +50,9 @@ planted_dispatch() { log_append dispatch row=T1; }
 planted_tree() { RUN_LOG="$log" log_append tree row=T1 path=.worktrees/t1; }
 EOF
 printf '%s\n' "planted_reader_rows() { awk -F'|' '\$2 ~ /T/' \"\$plan\"; }" >> "$L/reader.sh"
-printf '%s\n' 'deny "planted refusal words"' >> "$S/hooks/engage.sh"
+# One planted site for each name the check counts, on each wire, so the section's proof rests on no real hook.
+printf '%s\n' 'refuse exit2 v "w" "x" ""' 'refuse deny v "w" "x" ""' 'refuse block v "w" "x" ""' 'refuse "$m" v "w" "x" ""' \
+  'fold_block "w"' 'dp_finding "w" "x" ""' 'patrol_deny "w" "x" ""' 'dp_not_checked "w"' 'deny "w"' 'block "w"' >> "$S/hooks/engage.sh"
 printf '%s\n' 'a() { _proof_ask "$p" reader_q_step "$p" | sed -n s/^n=//p; }' 'b() { f="$(_proof_facts "$p")"; }' 'c() { local f="$(reader_main "$p" step)" || return 2; }' \
   'd() { f="$(_proof_facts "$p")" || return 2; printf "%s" "$f" | awk 1; }' 'reader_facts() { printf "%s" "$f"; }' > "$L/planted-folds.sh"
 AFTER="$(run)"; RC=$?
@@ -105,14 +108,24 @@ expect_contains "the extractor reads a planted name" "planted-name.sh" "$(names 
 expect_eq "the retired verbs are named nowhere else" "" "$(names "$S" | grep -v planted-name.sh)"
 
 section "REFUSALS"
-expect_contains "a real refusal site in a hook file is listed" "$(printf 'refusal\thooks/dispatch-preflight.sh:')" "$BEFORE"
-expect_regex "the planted refusal words are listed" "^refusal	hooks/engage\.sh:[0-9]+	deny$" "$AFTER"
-expect_eq "the refusal count rises by one" "$(( $(count "$BEFORE" hook_refusals) + 1 ))" "$(count "$AFTER" hook_refusals)"
-own() { printf '%s\n' "$BEFORE" | awk -F'\t' -v f="hooks/$1.sh:" 'index($2, f) == 1 { n = $2; sub(/.*:/, "", n); print n }'; }
-expect_regex "the extractor reads the dispatch wall's sites" "^[0-9]+" "$(own dispatch-preflight)"
+own() { printf '%s\n' "${2:-$BEFORE}" | awk -F'\t' -v f="hooks/$1.sh:" 'index($2, f) == 1 { n = $2; sub(/.*:/, "", n); print n, $3 }'; }
+expect_eq "every planted site is listed, one for each name the check counts" \
+  "refuse refuse refuse refuse fold_block dp_finding patrol_deny dp_not_checked deny block" "$(own engage "$AFTER" | awk '{ print $2 }' | tr '\n' ' ' | sed 's/ $//')"
+expect_regex "the extractor reads the planted file's sites by line" "^[0-9]+ refuse$" "$(own engage "$AFTER" | head -1)"
+expect_eq "the refusal count rises by ten" "$(( $(count "$BEFORE" hook_refusals) + 10 ))" "$(count "$AFTER" hook_refusals)"
 expect_eq "the write hook's file and the permission hook's list no refusal" "0 0" "$(own canonical-sdlc-governing-skill | grep -c .) $(own permission-answer | grep -c .)"
+expect_eq "the dispatch wall's file lists no refusal" "0" "$(own dispatch-preflight | grep -c .)"
 expect_eq "the Bash wall lists only the two functions the next row deletes: three sites, none outside" "3 0" \
-  "$(own bash-walls | grep -c .) $(own bash-walls | grep -vxFf <(awk '/^wall_ruling_(unread|ack)\(\)/ { on = 1 } on { print NR } /^}/ { on = 0 }' "$S/hooks/bash-walls.sh") | grep -c .)"
+  "$(own bash-walls | grep -c .) $(own bash-walls | awk '{ print $1 }' | grep -vxFf <(awk '/^wall_ruling_(unread|ack)\(\)/ { on = 1 } on { print NR } /^}/ { on = 0 }' "$S/hooks/bash-walls.sh") | grep -c .)"
+# Each fact the dispatch library says, its facts given as @, cut at them into pieces of ten columns or more: a
+# piece found in the wall's code is a refusal's words left in the hook, whatever function holds them.
+DPIECES="$(bash -c '. "$1/refuse.sh" && . "$1/dispatch.sh" || exit 1
+  for k in $(dispatch_keys); do dispatch_say "$k" @ @ @ @ @ @ @ @ @ @ && printf "%s\n" "$DISPATCH_FACT"; done' _ "$L" | tr '@' '\n' | awk 'length($0) >= 10')"
+pieces_in() { awk '!/^[ \t]*#/' "$1" > "$S/.code"; printf '%s\n' "$DPIECES" | while IFS= read -r p; do /usr/bin/grep -qF -- "$p" "$S/.code" && printf '%s\n' "$p"; done; }
+DKEYS="$(bash -c '. "$1/refuse.sh" && . "$1/dispatch.sh" && for k in $(dispatch_keys); do dispatch_say "$k" @ && [ -n "$DISPATCH_FACT" ] && echo "$k"; done' _ "$L" | grep -c .)"
+expect_eq "the dispatch library says a fact under a key for each of the wall's 43 refusals" 43 "$DKEYS"
+expect_eq "every piece of those facts is found in the library's own text" "$(printf '%s\n' "$DPIECES" | grep -c .)" "$(pieces_in "$L/dispatch.sh" | grep -c .)"
+expect_eq "no fact of the dispatch library is found in the wall's file" "" "$(pieces_in "$S/hooks/dispatch-preflight.sh")"
 
 section "FOLDS"
 expect_eq "a fold through a pipe, an unread \$( ) and a local's \$( ) are named; one whose exit is read and a stand-in are not" "1 2 3" \

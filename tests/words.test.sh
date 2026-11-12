@@ -5,9 +5,9 @@
 # WHAT THIS SUITE OWNS. The lint `words_hits` and the surfaces it reads: the skill texts
 # (skills/canonical-sdlc, skills/handoff, skills/sitrep), the command pages (payload/commands), the
 # agent role texts and the texts pushed to an agent at start (agents/, payload/context), the strings
-# the poker and its verbs, the card renderer, the dispatch wall and the plan, proof, walls and units
+# the poker and its verbs, the card renderer, the dispatch wall and the plan, proof, walls, units and dispatch
 # libraries print (hooks/session-poker.sh, hooks/poker/*.sh, payload/scripts/card.sh,
-# hooks/dispatch-preflight.sh, payload/scripts/lib/{plan,proof,walls,units}.sh), the sources under
+# hooks/dispatch-preflight.sh, payload/scripts/lib/{plan,proof,walls,units,dispatch}.sh), the sources under
 # agents-src/ the generated texts are rendered from, and what the user reads rendered: the sitrep
 # card, the handoff head and the Patrol line. It refuses "reader", "readers" and
 # "readings" anywhere in that text, and "reading" as a noun: after a determiner ("a reading", "the
@@ -93,7 +93,7 @@ words_surfaces() {
       agents-src/templates/*.tmpl agents-src/templates/commands/*.tmpl agents-src/templates/skills/canonical-sdlc/*.tmpl \
       agents-src/templates/skills/canonical-sdlc/steps/*.tmpl agents-src/templates/context/*.tmpl payload/context/*.md \
       payload/scripts/lib/plan.sh payload/scripts/lib/proof.sh payload/scripts/lib/walls.sh payload/scripts/lib/units.sh \
-      hooks/dispatch-preflight.sh hooks/session-poker.sh hooks/poker/*.sh payload/scripts/card.sh 2>/dev/null
+      payload/scripts/lib/dispatch.sh hooks/dispatch-preflight.sh hooks/session-poker.sh hooks/poker/*.sh payload/scripts/card.sh 2>/dev/null
   )
 }
 
@@ -170,7 +170,7 @@ section "§TEXTS: no review-sense reading or reader, and no \"no reader for\", o
 SURF="$(words_surfaces "$REPO")"
 for cls in 'skills/canonical-sdlc/' 'skills/handoff/' 'skills/sitrep/' 'payload/commands/' 'agents/' 'agents-src/blocks/' \
   'agents-src/templates/' 'agents-src/templates/context/' 'payload/context/' 'hooks/poker/' 'hooks/poker/sitrep.sh' \
-  'hooks/session-poker.sh' 'payload/scripts/card.sh' 'hooks/dispatch-preflight.sh' 'payload/scripts/lib/plan.sh' 'payload/scripts/lib/proof.sh' 'payload/scripts/lib/walls.sh' 'payload/scripts/lib/units.sh'; do
+  'hooks/session-poker.sh' 'payload/scripts/card.sh' 'hooks/dispatch-preflight.sh' 'payload/scripts/lib/plan.sh' 'payload/scripts/lib/proof.sh' 'payload/scripts/lib/walls.sh' 'payload/scripts/lib/units.sh' 'payload/scripts/lib/dispatch.sh'; do
   expect_nonempty "the surfaces include $cls" "$(printf '%s\n' "$SURF" | /usr/bin/grep -F "$cls" | head -1)"
 done
 EMPTY=""
