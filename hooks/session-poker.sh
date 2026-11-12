@@ -424,8 +424,6 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> --why '<reason>' [--report-only] [--machine <caller>]   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one hand event, what=stop-run with its reason, goes to the bound run's log, unless --machine names the tool's own caller (close-out's sweep), whose stop is no act by hand; with no reason the stop is refused and nothing is sent"
   die "  bash ${HOOK_DIR}/session-poker.sh ${RA_USAGE}"
   die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the release approval card, all default or all recommended, into approve, waive and finding-move with their words"
-  die "  bash ${HOOK_DIR}/session-poker.sh epic-row <wave> <col>=<val>... [--plan <plan>]   set cells of that wave's row in the shipped table of the epic.plan.md beside the run's plan"
-  die "  bash ${HOOK_DIR}/session-poker.sh continuation-fill '<field>=<text>' [--plan <plan>]   fill the run's continuation's <fill: field...> mark with the text"
   die "  bash ${HOOK_DIR}/session-poker.sh handoff ['<purpose>'] < sections   write the handoff document, .bionic/docs/record/handoffs/<date>-<slug>.md, bound or not: the kind line, the title, Summary, Goal, State (computed), Findings, Decisions, Ruled out, Open, Suggested skills and Next (composed, on stdin), the resume line last; prints the path and the resume line; bound, the plan's ## Handoff becomes the one line handoff: <path> written <local time>"
   die "  bash ${HOOK_DIR}/session-poker.sh resume <handoff.md>   the one door: engage this session when it is not, bind the plan the file names, arm at a scale with a Patrol, adopt and tick; print the run in a dozen lines (bound, step, agents running, landed since, owed now, patrol) and the path of the recap file holding the rest (task-list:, settled:, open:, the Patrol job). A closed or no-run file binds nothing"
   die "  bash ${HOOK_DIR}/session-poker.sh promote <adr|design|requirement> <path>   copy one durable record into the project's tracked home (docs-tracked: in .bionic/config.yaml, docs/ when absent) as <home>/<kind>s/<name>, the run number dropped from the name; a plan, a log or a run record is refused and nothing is copied"
@@ -661,29 +659,6 @@ case "$VERB" in
     [ -z "$AMEND_NARROW" ] || [ -z "$AMEND_SUITES" ] \
       || usage "amend: --suites= sets the suites and --suites+ adds to them; give one."
     case ",$(printf '%s' "$AMEND_NARROW" | tr '\n' ','), " in *,none,*) usage "amend: --suites= narrows to suites the row keeps; none is a waiver, not a narrowing." ;; esac
-    ;;
-  # THE EPIC'S SHIPPED ROW AND THE RUN'S CONTINUATION (wave-33 T7; REQ-3 AC-3.3, D8). Each takes its operands,
-  # then optionally `--plan <plan>`, the run they belong to, which a session close-out unbound must name.
-  epic-row|continuation-fill)
-    PV_PLAN_ARG=""
-    if [ $# -ge 2 ] && [ "${*: -2:1}" = --plan ]; then
-      PV_PLAN_ARG="${*: -1}"; set -- "${@:1:$(($# - 2))}"
-      [ -n "${PV_PLAN_ARG//[[:space:]]/}" ] || usage "$VERB: --plan takes the run's plan."
-    fi
-    if [ "$VERB" = epic-row ]; then
-      [ $# -ge 2 ] || usage "epic-row takes <wave> and at least one <column>=<value>, then optionally --plan <plan>."
-      case "$1" in ''|*[!0123456789]*) usage "epic-row: '$(printf '%s' "${1:0:12}" | tr -d '[:cntrl:]')' is not a wave number." ;; esac
-      EP_WAVE="$1"; shift
-      for _pv_a in "$@"; do
-        case "$_pv_a" in [!=]*=*) : ;; *) usage "epic-row: '$_pv_a' is not <column>=<value>." ;; esac
-      done
-      EP_PAIRS=("$@")
-    else
-      [ $# -eq 1 ] || usage "continuation-fill takes '<field>=<text>', then optionally --plan <plan>."
-      case "$1" in [!=]*=*) : ;; *) usage "continuation-fill: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not <field>=<text>." ;; esac
-      CF_FIELD="$(printf '%s' "${1%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"; CF_TEXT="${1#*=}"
-      [ -n "${CF_TEXT//[[:space:]]/}" ] || usage "continuation-fill: the text for '$CF_FIELD' is empty."
-    fi
     ;;
   # THE INTEGRATE ROW'S RENDER OF THE ENTRY'S REVIEWS: the row id alone; the head is the working branch's.
   reviews-part)
@@ -2293,36 +2268,18 @@ plan_delivered() {
   return 1
 }
 
-# pv_plan_arg_file -> the file `--plan` (PV_PLAN_ARG) names, read from the working directory and then from the
-# project root; nothing, exit 1, when it names no file.
-pv_plan_arg_file() {
-  local root p
-  root="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
-  for p in "$PV_PLAN_ARG" ${root:+"$root/$PV_PLAN_ARG"}; do
-    case "$p" in /*) : ;; *) p="$PWD/$p" ;; esac
-    [ -f "$p" ] && { printf '%s\n' "$p"; return 0; }
-  done
-  return 1
-}
-
-# plan_verb_open <verb> [closed-ok|delivered-ok] -> sets PV_REPO, PV_PLAN, PV_CUR, PV_NEW, PV_DRY, PV_MARK,
-# PV_SID and arms the cleanup; exits on every refusal above. `closed-ok` (handoff) also takes the session's
-# own closed run (bound-closed) when its plan is on disk. ENGAGEMENT IS THE CONSENT BOUNDARY FOR A RUN STILL MOVING,
-# so it is asked first, except where `delivered-ok` names the one write a delivered run accepts from any session:
-# then a delivered plan named by `--plan` is opened with no engagement asked (close-out's last act wiped it), the
-# bound-closed run is taken as `closed-ok` takes it, and `--plan` naming anything else is refused once engagement is.
+# plan_verb_open <verb> [closed-ok] -> sets PV_REPO, PV_PLAN, PV_CUR, PV_NEW, PV_DRY, PV_MARK, PV_SID and arms the
+# cleanup; exits on every refusal above. `closed-ok` (handoff) also takes the session's own closed run (bound-closed)
+# when its plan is on disk. ENGAGEMENT IS THE CONSENT BOUNDARY FOR A RUN STILL MOVING, so it is asked first.
 plan_verb_open() {
-  local verb="$1" closed="${2:-}" sid run named=""
+  local verb="$1" closed="${2:-}" sid run
   sid="$(session_id)" || sid=""
   if [ -z "$sid" ]; then
     die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
     die "$verb writes ONE session's bound plan, so without the key there is nothing to write."
     exit 3
   fi
-  if [ "$closed" = delivered-ok ] && [ -n "${PV_PLAN_ARG:-}" ]; then
-    named="$(pv_plan_arg_file)" && plan_delivered "$named" || named=""
-  fi
-  if [ -z "$named" ] && ! engaged_session "$(project_root "$PWD")" "$sid"; then
+  if ! engaged_session "$(project_root "$PWD")" "$sid"; then
     say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
     exit 0
   fi
@@ -2332,18 +2289,11 @@ plan_verb_open() {
     exit 2
   fi
   PV_PLAN=""
-  if [ -n "$named" ]; then
-    PV_PLAN="$named"; run="named-delivered $named"
-  elif [ "$closed" = delivered-ok ] && [ -n "${PV_PLAN_ARG:-}" ]; then
-    die "REFUSED — --plan $(clean "$PV_PLAN_ARG") is no delivered run's plan: $verb writes a delivered run by name, and a live run through this session's binding. The plan is unchanged."
-    exit 1
-  else
-    run="$(session_run "$PV_REPO" "$sid")"
-    case "$run" in
-      'bound-open '*) PV_PLAN="${run#bound-open }" ;;
-      'bound-closed '*) [ "$closed" = "" ] || [ ! -f "${run#bound-closed }" ] || PV_PLAN="${run#bound-closed }" ;;
-    esac
-  fi
+  run="$(session_run "$PV_REPO" "$sid")"
+  case "$run" in
+    'bound-open '*) PV_PLAN="${run#bound-open }" ;;
+    'bound-closed '*) [ "$closed" = "" ] || [ ! -f "${run#bound-closed }" ] || PV_PLAN="${run#bound-closed }" ;;
+  esac
   if [ -z "$PV_PLAN" ]; then
     die "REFUSED — $verb writes the plan this session is bound to, and it has no bound open run (${run:-none})."
     die "Bind this session to its run first (this script's bind verb), then run $verb again."
@@ -2655,8 +2605,6 @@ case "$VERB" in
   task-add) poker_verb_task_add "$@" ;;
   reviews-part) poker_verb_reviews_part "$@" ;;
   known-limits-part) poker_verb_known_limits_part "$@" ;;
-  epic-row) poker_verb_epic_row "$@" ;;
-  continuation-fill) poker_verb_continuation_fill "$@" ;;
   handoff) poker_verb_handoff "$@" ;;
   brief) poker_verb_brief "$@" ;;
   current) poker_verb_current "$@" ;;
