@@ -2826,7 +2826,7 @@ units_thread_rows() {
 # backslashes). Every line a projector does not own is printed as it was read, byte for byte,
 # so `git diff` of a projection shows the target line and nothing else.
 #
-# A VALUE MAY CARRY NO `|`, TAB OR LINE BREAK (AC-9.2). These operands are cell values typed at a
+# A VALUE MAY CARRY NO `|`, TAB OR LINE BREAK. These operands are cell values typed at a
 # prompt, and a pipe there is far likelier a slip than a cell meant to hold one. The caller refuses
 # first, and each projector refuses again (exit 4) rather than trust it.
 
