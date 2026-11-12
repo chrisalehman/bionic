@@ -193,34 +193,48 @@ rm -rf "$GOV_MUT"
 # ============================================================
 section "§HAND-HOLDS-KINDS — wave-36 T14 (D13; REQ-7 AC-7.6): adopt's adoptions and the fixed disposals are folded under their own kinds, never as by-hand"
 # ============================================================
-# AC-7.6: the fold counts every act a verb of this release writes. Two more kinds join `stop-runs` (T11):
-#   adoptions   the roster row `adopt` files for each adopted agent (`source=adopted|…|adopted_from=<sid>`, written by
-#               session-poker.sh adopt_write_row; its printed `poker-adopt/v1|…` report is stdout and kept nowhere), counted
-#               DISTINCT (agent_id, adopted_from) over the rosters whose `plan=` is this run's, as amends are;
-#   fixed       the plan's `moved: <record>#<n> to=fixed row=<T> …` line under ## SDLC State (`finding-move … fixed`),
-#               one per line, fenced text skipped.
-# by-hand stays the number of `--by-hand` landings. fails-when: by-hand>0 for these acts, or a kind omitted.
-# FIXTURE FIDELITY: the roster rows through the one production row builder (roster_row_fixture), in adopt_write_row's
-# field set; the moved line in finding-move's shape, placed under ## SDLC State.
+# Every act a verb writes is folded under its own kind, and each kind of act by hand the hands question answers is one
+# line of the continuation's ## Hand acts: its name, its count, each distinct reason once, in the order first given.
+# fails-when: by-hand>0 for these acts, a kind omitted from either, a reason given twice, or a line for a kind with no act.
+# FIXTURE FIDELITY: an amend, a hold, an extension and an adoption are the shipped verbs, driven as the session bound to the
+# plan, each writing its own event; a by-hand landing (of a row no build row names, so no window opens) and two stops
+# of a run with one reason are planted in their writers' shapes (driving them takes a landing tree and a live run:
+# tests/reader.test.sh §HANDS drives both); the moved line is finding-move's, under ## SDLC State.
 HK_P="$(mk_fixture handholds-kinds)"; advance_to "$HK_P" 8
-HK_PLAN="$HK_P/$PLAN_REL"
-{
-  roster_row_fixture status=identified name=w-ad agent_id=ad source=adopted adopted_from=old-sid-1 plan="$HK_PLAN"
-  roster_row_fixture status=confirmed name=w-ad agent_id=ad source=adopted adopted_from=old-sid-1 plan="$HK_PLAN"
-  roster_row_fixture status=identified name=w-oz agent_id=oz source=adopted adopted_from=old-sid-1 plan="/elsewhere/wave-99-other.plan.md"
-  roster_row_fixture status=identified name=w-ln agent_id=ln source=launched plan="$HK_PLAN"
-} >> "$HK_P/.bionic/tmp/roster-fixture.state"
+HK_PLAN="$HK_P/$PLAN_REL"; HK_SID="closeout-hands-1"; HK_PRED="9f1e2d3c-4b5a-6978-8899-aabbccddeeff"; HK_RC=""
+( in_fixture "$HK_P" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$HK_P" "$HK_SID" "$HK_PLAN" )
+for s in "$HK_SID" "$HK_PRED"; do bash -c '. "$1/roster.sh" && roster_header' _ "$REPO_ROOT/payload/scripts/lib" > "$HK_P/.bionic/tmp/roster-$s.state"; done
+roster_row_fixture status=identified session="$HK_SID" name=w1 agent_id=aw1 plan="$HK_PLAN" files=hooks/a.sh suites_allowed=a.test.sh \
+  suites_source=declared >> "$HK_P/.bionic/tmp/roster-$HK_SID.state"
+roster_row_fixture status=identified session="$HK_PRED" name=w-ad agent_id=ad plan="$HK_PLAN" >> "$HK_P/.bionic/tmp/roster-$HK_PRED.state"
+{ printf 'run/v1|ev=published|row=T9|commit=%s|kind=hand|by=Chris|why=no Lands-on could be read|at=2026-10-06T10:40:00Z\n' "$(printf 'd%.0s' $(seq 40))"
+  for r in r1 r2; do printf 'run/v1|ev=hand|by=Chris|name=w-%s|run=%s|what=stop-run|why=hung on a closed pipe|at=2026-10-06T10:5%s:00Z\n' "$r" "$r" "${r#r}"; done
+} >> "$HK_P/.bionic/docs/record/wave-01-fixture/run.log"
+hk_poke() { ( in_fixture "$HK_P" || exit 9; HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+  CLAUDE_CODE_SESSION_ID="$HK_SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" "$@" ) >> "$SANDBOX/hk-poker" 2>&1; HK_RC="$HK_RC$?"; }
+hk_poke amend w1 --files+ lib/z.sh --reason 'the brief missed lib/z.sh'; hk_poke hold w1 'kept for a second pass'
+hk_poke extend w1 'more to read'; hk_poke adopt --why 'the session was cleared'
+expect_regex "HK-0 precondition: amend, hold and extend exit 0, adopt 0 or 1 (open rows found)" '^000[01]$' "$HK_RC"
 HK_MOVED="moved: record/wave-01-fixture/rev.md#1 to=fixed row=T1 by=Chris Lehman at=2026-10-06T14:00:00Z"
 awk -v m="$HK_MOVED" '
   /^approved-by: / { print; print m; next }
   /^## Tasks/ { print "```"; print "moved: record/wave-01-fixture/rev.md#2 to=fixed row=T2 by=Someone at=2026-10-06T14:10:00Z"; print "```"; print ""; print; next }
   /^- Step 8:/ { print "- T1: the reviewer said rev.md#3 was moved: to=fixed by hand, says this prose"; print; next }
   { print }' "$HK_PLAN" > "$HK_PLAN.k" && mv "$HK_PLAN.k" "$HK_PLAN"
-HK_WANT="hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=1 · fixed=1 · needs-you=0"
-expect_eq "HK-1 AC-7.6 one adoption (re-written once, another run's not counted) and one to=fixed move read adoptions=1 · fixed=1 · needs-you=0 · by-hand=0, in the total" \
+HK_WANT="hand-holds: total=8 · by-hand=1 · stop-runs=2 · declines=0 · lifts=0 · amends=1 · holds=1 · extensions=1 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=1 · fixed=1 · needs-you=0"
+expect_eq "HK-1 one act of each kind, and one to=fixed move, each read under its own kind, by-hand the landing alone, in the total" \
   "$HK_WANT" "$(hh_report "$HK_P" --hand-holds | grep '^hand-holds: ')"
 run_close "$HK_P" check
 expect_eq "HK-2 …and close-out's card prints the same line" "$HK_WANT" "$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')"
+run_close "$HK_P" run
+expect_eq "HK-3 the continuation carries one line per kind with an act, its count and each reason once, and none for a kind with none" \
+  "0|hand act: landing by hand · 1 · no Lands-on could be read
+hand act: stop-run · 2 · hung on a closed pipe
+hand act: amend · 1 · the brief missed lib/z.sh
+hand act: hold · 1 · kept for a second pass
+hand act: extend · 1 · more to read
+hand act: adopt · 1 · the session was cleared" \
+  "$CO_RC|$(awk '/^## / { s = ($0 == "## Hand acts"); next } s && /^hand act/' "$HK_P/$CONT_REL")"
 
 # ============================================================
 section "§FENCE — wave-36 T14 (D13; C38): a line merged into a section that is one fenced list goes inside the fence"
@@ -981,10 +995,9 @@ expect_contains "TL-5 …and its second reads WOULD REFUSE, the split the fix cl
 section "§READ-ORDER — close-out reads the hand-holds line last, over the window to its own delivered: time"
 # ============================================================
 # close-out writes `delivered:` and wipes its rosters before its last read of the hand-holds line, so what it does is
-# inside the window and a release approval card ends nothing. The roster kinds are kept aside before the wipe and read
-# back. The fixture: T1 landed (the start), a release approval page, then an amend on the roster and a decline in the
-# fill ledger, both after the page. fails-when: the line is read before delivered: (the card ends it, and both acts
-# are outside), or after the wipe with nothing kept (the amend is lost).
+# inside the window and a release approval card ends nothing. The fixture: T1 landed (the start), a release approval
+# page, then an amend in the run's log and a decline in the fill ledger, both after the page. fails-when: the line is
+# read before delivered: (the card ends it, and both acts are outside), or the wipe of the rosters loses the amend.
 RO_P="$(mk_fixture read-order)"; advance_to "$RO_P" 8
 RO_PLAN="$RO_P/$PLAN_REL"; RO_REC="$RO_P/.bionic/docs/record/wave-01-fixture"; mkdir -p "$RO_REC"
 ro_ago() { date -u -v-"$1"M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "-$1 minutes" +%Y-%m-%dT%H:%M:%SZ; }   # <minutes> -> that long ago
@@ -992,14 +1005,14 @@ RO_C="$(printf 'e%.0s' $(seq 40))"
 printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=%s\n' "$RO_C" "$(ro_ago 20)" > "$RO_REC/landing-proofs.log"
 printf '# page\n\n## Replay\n\nrelease-approval/v1|plan=%s|head=%s|at=%s|decisions=1\n' "$RO_PLAN" "$RO_C" "$(ro_ago 10)" > "$RO_REC/release-approval-eeeeeeee.md"
 printf 'fill-ledger/v1|at=%s|session=fixture|turn=|current=8|state=decline|ceiling=6|width=|open=|free=|ready=T3|launched=|declined=no room|missed=0|idle=|room=|named=T3\n' "$(ro_ago 5)" > "$RO_REC/fill-ledger.log"
-roster_row_fixture status=identified name=w-ro agent_id=ro plan="$RO_PLAN" amended="$(ro_ago 5) widen the files" >> "$RO_P/.bionic/tmp/roster-fixture.state"
-expect_contains "RO-0 precondition: before close-out a window opening before both acts reads them, the roster read" \
+printf 'run/v1|ev=hand|by=fixture|name=w-ro|what=amend|why=widen the files|at=%s\n' "$(ro_ago 5)" >> "$RO_REC/run.log"
+expect_contains "RO-0 precondition: before close-out a window opening before both acts reads them" \
   "declines=1 · lifts=0 · amends=1 " "$(hh_report "$RO_P" --hand-holds --since "$(ro_ago 15)" | grep '^hand-holds: ')"
 run_close "$RO_P" run
 RO_LINE="$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')"
 expect_eq "RO-1 run exits 0 and its wipe took the roster" "0/0" "$CO_RC/$(tmp_entries "$RO_P")"
 [ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | tail -15 | sed 's/^/    | /'
-expect_contains "RO-2 the card's line counts the decline and the amend after the card: read last, the roster kept" \
+expect_contains "RO-2 the card's line counts the decline and the amend after the card: read last, after the wipe" \
   "hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=1 · lifts=0 · amends=1 " "$RO_LINE"
 expect_eq "RO-3 …and the card prints it after its step8 line: it is read once Steps 8 and 9 are written" "yes" \
   "$(printf '%s\n' "$CO_OUT" | awk '/^step8: / { a = NR } /^hand-holds: / { b = NR } END { print (a && b > a) ? "yes" : "no" }')"
@@ -1154,13 +1167,15 @@ expect_eq "OC-3 the run's log holds one proof naming AC-2, its evidence the cont
   "AC-2 $OC_CONT" "$(oc_proofs "$POC")"
 expect_eq "OC-3b …and the delivered plan's table is as it was" "pending|—|pending|—" "$(oc_cells "$OC_P" AC-2)|$(oc_cells "$OC_P" AC-3)"
 expect_contains "OC-3c …and the card names the row and the status it wrote" "matrix: AC-2 discharged" "$CO_OUT"
+expect_eq "OC-3e …and a run with no act by hand has no ## Hand acts section beside its ## Hand-holds" "1|0" \
+  "$(grep -c '^## Hand-holds$' "$POC/$CONT_REL")|$(grep -c '^## Hand acts$' "$POC/$CONT_REL")"
 expect_eq "OC-3d …written in the act that reads the measure last, before the archive is asked: its line follows the hand-holds line and precedes archived:" "yes" \
   "$(printf '%s\n' "$CO_OUT" | awk '/^hand-holds: / { h = NR } /^matrix: AC-2 / { m = NR } /^archived: / { a = NR } END { print (h && m > h && a > m) ? "yes" : "no" }')"
 # above zero: an amend after the last landing, as §READ-ORDER plants it
 POB="$(mk_fixture owed-close-above)"; advance_to "$POB" 8; oc_rows "$POB"
 OB_REC="$POB/.bionic/docs/record/wave-01-fixture"
 printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=%s\n' "$(printf 'e%.0s' $(seq 40))" "$(ro_ago 20)" > "$OB_REC/landing-proofs.log"
-roster_row_fixture status=identified name=w-oc agent_id=oc plan="$POB/$PLAN_REL" amended="$(ro_ago 5) widen the files" >> "$POB/.bionic/tmp/roster-fixture.state"
+printf 'run/v1|ev=hand|by=fixture|name=w-oc|what=amend|why=widen the files|at=%s\n' "$(ro_ago 5)" >> "$OB_REC/run.log"
 run_close "$POB" run
 OB_LINE="$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')"
 expect_eq "OC-5 a measure above zero still delivers: run exits 0" "0" "$CO_RC"

@@ -512,11 +512,9 @@ landing_report() {  # <plan or landing record> <project root> <rows yes|no> [ins
 #   declines       the run's fill ledger's `fill-ledger/v1|…|state=decline|…` lines, one per `decline`. The Stop hook
 #   lifts          writes `state=ok` and `state=hold` only, so a `hold` there is the fill's wait and not the `hold` verb.
 #                  `state=lift` is `decline lift`'s line.
-#   amends         the roster's `amended=<iso> <reason>` (`amend`), `held=` (`hold`) and `extended=` (`extend`).
-#   holds          A roster row is re-written on every status change and copies the field, so a kind is counted by
-#   extensions     DISTINCT (name, value) over the rosters whose `plan=` is this run's plan (a row of another run, or of
-#                  `plan=none`, is not this run's). The roster lives in `.bionic/tmp`, which close-out's act 3 wipes,
-#                  so close-out reads this line BEFORE the wipe and carries it.
+#   amends         the log's `run/v1|ev=hand|what=amend|…` (`amend`), `what=hold` (`hold`) and `what=extend` (`extend`),
+#   holds          one per act, placed by its `at=`. The roster row each verb also writes is the agent's contract and
+#   extensions     never a count: the rosters are session state a close wipes, and the run's log is not.
 #   waivers        each waiver event `waive` writes, of a question or a criterion, the plan's older `waived:
 #                  question=…` line under `## SDLC State`, and an AC block's indented `waiver: <who> <when> "<words>"`
 #                  an older plan holds under `## Verification Matrix`. Fenced text is skipped, as every reader of the
@@ -533,10 +531,8 @@ landing_report() {  # <plan or landing record> <project root> <rows yes|no> [ins
 #                  older than `starter=` names no starter, and its run is counted as it was before the field: by its
 #                  `proved: kind=regression` line under `## SDLC State` past the first (lib/proof.sh `proof_fields`),
 #                  unless that proof cites a log whose run line names a starter, which the run lines count.
-#   adoptions      the roster row `adopt` files for each agent it adopts (`adopt_write_row`: `source=adopted`,
-#                  `adopted_from=<sid>`), DISTINCT (agent_id, adopted_from) over the run's rosters, as the amends are
-#                  (wave-36 T14; D13, AC-7.6). Its printed `poker-adopt/v1|…` report is kept in no file, so the row is
-#                  the line the verb wrote. A verb act: never counted as by-hand.
+#   adoptions      the log's `run/v1|ev=hand|what=adopt|…`, one per agent `adopt` took over, placed by its `at=`.
+#                  A verb act: never counted as by-hand.
 #   fixed          the plan's `moved: <record>#<n> to=fixed row=<T> …` line under `## SDLC State` (`finding-move …
 #                  fixed`, wave-36 T8), one per line (wave-36 T14; AC-7.6). A verb act: never counted as by-hand.
 #                  A move is placed by its time against the landing of the row it names, the row's first `published`
@@ -549,18 +545,13 @@ landing_report() {  # <plan or landing record> <project root> <rows yes|no> [ins
 #
 # THE WINDOW. `--since <ISO>` and `--until <ISO>` count a hand-hold only when its own line's time is after the start
 # and at or before the end; either end may be absent, and absent is open. Each source is placed by the time its writer
-# put on it: the landing record's `at=`, the fill ledger's `at=`, the leading ISO of a roster `amended=`, `held=` or
-# `extended=` value, the ISO on a `waived:` line, a `moved:` or regression proof line's `at=`, and the matrix waiver's
-# time. An end written to the minute (`<date>T<hh>:<mm>Z`, the shape close-out writes `delivered:` in) reaches through
+# put on it: the landing record's and the log's `at=`, the fill ledger's `at=`, the ISO on a `waived:` line, a
+# `moved:` or regression proof line's `at=`, and the matrix waiver's time. An end written to the minute (`<date>T<hh>:<mm>Z`, the shape close-out writes `delivered:` in) reaches through
 # that minute's last second, so an act in the minute an end names is inside it. A waiver of the date form is placed
 # when its whole day falls on one side of each end. A line that cannot be
-# placed (an adoption row carries no time of the adopt; a date form a window end falls inside) is not counted, and with
-# either end set the line ends ` · unplaced=<n>`, so a windowed count never hides what it left out. With no end set
-# every line counts and the line keeps its open shape, so a run with no window reads as it always has.
-#
-# THE ROSTERS, KEPT. Three kinds and the adoptions are roster lines, and close-out wipes the rosters before its last
-# read of this line. `BIONIC_HH_ROSTERS=<file>` names a file holding the roster lines to read in place of the
-# rosters in the project's tmp directory: close-out keeps them there before the wipe and reads them back after it.
+# placed (a line that carries no time, a date form a window end falls inside, a move naming a row with no landing) is
+# not counted, and with either end set the line ends ` · unplaced=<n>`, so a windowed count never hides what it left
+# out. With no end set every line counts and the line keeps its open shape, so a run with no window reads as it always has.
 #
 # READ-ONLY and FAIL-SOFT: an absent source counts zero. It decides nothing; nothing reads it but close-out's card and
 # continuation, the release approval page and the goal that names landing-report (and a person).
@@ -568,9 +559,6 @@ _HH_PLACE_AWK='
   function hh_iso(t) { return t ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9](:[0-9][0-9])?Z$/ }
   function hh_day(t) { return t ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ }
   function hh_norm(t) { return (hh_iso(t) && length(t) == 17) ? substr(t, 1, 16) ":00Z" : t }
-  function hh_first(s,   n, w, i) { n = split(s, w, /[ \t]+/); for (i = 1; i <= n; i++) if (hh_iso(w[i]) || hh_day(w[i])) return w[i]; return "" }
-  function hh_kv(s, k,   n, w, i) { n = split(s, w, /[ \t|]+/); for (i = 1; i <= n; i++) if (index(w[i], k "=") == 1) return substr(w[i], length(k) + 2); return "" }
-  function hh_at(s) { return hh_kv(s, "at") }
   # 1 inside the window, 0 outside it, -1 not placeable; HH_S and HH_U are the ends, empty when open
   function hh_place(t,   a, b) {
     if (HH_S == "" && HH_U == "") return 1
@@ -595,14 +583,13 @@ _HH_PLACE_AWK='
   BEGIN { HH_S = hh_norm(HH_S); HH_U = (hh_iso(HH_U) && length(HH_U) == 17) ? substr(HH_U, 1, 16) ":59Z" : hh_norm(HH_U) }
 '
 hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] [--until <ISO>] -> the one hand-holds line; rc 0, 2 unread
-  local root="$2" plan="$3" slug rf hands="" lines="" gaps=0 hand=0 stp=0 stw=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0
-  local ney=0 since="" until="" u1=0 u3=0
+  local plan="$3" hands="" lines="" gaps=0 hand=0 stp=0 stw=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0
+  local ney=0 since="" until="" u1=0
   shift 3
   while [ $# -ge 2 ]; do
     case "$1" in --since) since="$2" ;; --until) until="$2" ;; esac
     shift 2
   done
-  slug="$(proof_plan_slug "$plan")"
   if [ -f "$plan" ] && [ ! -L "$plan" ] && _lr_reader; then
     hands="$(_proof_ask "$plan" reader_q_hands "$plan" 2>/dev/null)" && lines="$(_lr_events "$plan")" || return 2
     # a version-14 line the translation could not carry as a hand event is one this count cannot see
@@ -610,7 +597,7 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
       gaps="$( { declare -F translate >/dev/null 2>&1 || . "$_READER_LIB_DIR/translate.sh"; } 2>/dev/null && translate "$plan" gaps 2>/dev/null \
         | /usr/bin/grep -c '^gap/v1|ev=hand|')"
     fi
-    read -r hand stp stw ney fl wv fix dec lif u1 <<< "$( { printf '%s\n\034\n' "$hands"; printf '%s\n' "$lines"; } \
+    read -r hand stp stw ney fl wv fix dec lif amd hld ext ado u1 <<< "$( { printf '%s\n\034\n' "$hands"; printf '%s\n' "$lines"; } \
       | awk -F'|' -v HH_S="$since" -v HH_U="$until" "$_READER_AWK$_HH_PLACE_AWK"'
       $0 == "\034" { part = 1; next }
       # the hands answer: a landing by hand, and each hand event by what its line was
@@ -618,6 +605,10 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
         if (e == "published" && line_kv("kind") == "hand" && hh_take(t)) n++
         else if (e != "hand") next
         else if (w == "stop-run" && hh_take(t)) s++
+        else if (w == "amend" && hh_take(t)) am++
+        else if (w == "hold" && hh_take(t)) ho++
+        else if (w == "extend" && hh_take(t)) ex++
+        else if (w == "adopt" && hh_take(t)) ad++
         # a waiver line a person wrote in a criterion block, counted from its own line whatever the row reads
         else if (w == "waive-row") { wr[line_kv("ac")] = 1; if (hh_take(t)) v++ }
         # only a write that names the status cell or the task key is one the gate reads; an evidence-only one is neither placed nor counted
@@ -645,42 +636,11 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
         # the first regression proof is the floor itself; each one past it whose run names no starter is a hand-hold
         for (i = 2; i <= np; i++) { m = split(pr[i], ee, ","); st = 0; for (j = 1; j <= m; j++) if (ee[j] in started) st = 1; if (!st && hh_take(pa[i])) f++ }
         for (i = 1; i <= nf; i++) if (hh_take_after(fa[i], LAND[fr[i]])) x++
-        print n + 0, s + 0, c + 0, y + 0, f + 0, v + 0, x + 0, d + 0, l + 0, HH_UNPLACED + 0 }')"
+        print n + 0, s + 0, c + 0, y + 0, f + 0, v + 0, x + 0, d + 0, l + 0, am + 0, ho + 0, ex + 0, ad + 0, HH_UNPLACED + 0 }')"
   fi
-  read -r amd hld ext ado u3 <<< "$(if [ -n "${BIONIC_HH_ROSTERS:-}" ]; then
-      [ -f "$BIONIC_HH_ROSTERS" ] && [ ! -L "$BIONIC_HH_ROSTERS" ] && cat "$BIONIC_HH_ROSTERS"
-    else
-      for rf in "$root/.bionic/tmp"/roster-*.state; do [ -f "$rf" ] && [ ! -L "$rf" ] && cat "$rf"; done
-    fi 2>/dev/null | awk -F'|' -v want="/$slug.plan.md" -v HH_S="$since" -v HH_U="$until" "$_HH_PLACE_AWK"'
-      index($0, "roster-state/") == 1 {
-        name = ""; plan = ""; a = ""; h = ""; x = ""; id = ""; src = ""; af = ""
-        for (i = 2; i <= NF; i++) {
-          if (index($i, "name=") == 1) name = substr($i, 6)
-          else if (index($i, "agent_id=") == 1) id = substr($i, 10)
-          else if (index($i, "source=") == 1) src = substr($i, 8)
-          else if (index($i, "adopted_from=") == 1) af = substr($i, 14)
-          else if (index($i, "plan=") == 1) plan = substr($i, 6)
-          else if (index($i, "amended=") == 1) a = substr($i, 9)
-          else if (index($i, "held=") == 1) h = substr($i, 6)
-          else if (index($i, "extended=") == 1) x = substr($i, 10)
-        }
-        if (length(plan) < length(want) || substr(plan, length(plan) - length(want) + 1) != want) next
-        if (a != "") A[name SUBSEP a] = 1
-        if (h != "") H[name SUBSEP h] = 1
-        if (x != "") X[name SUBSEP x] = 1
-        if (src == "adopted" && af != "" && id != "") D[id SUBSEP af] = 1
-      }
-      # a value opens on the time its verb wrote it; an adoption row carries none of the adopt
-      function lead(k,   v) { v = substr(k, index(k, SUBSEP) + 1); return hh_first(substr(v, 1, index(v " ", " ") - 1)) }
-      END {
-        for (k in A) if (hh_take(lead(k))) na++
-        for (k in H) if (hh_take(lead(k))) nh++
-        for (k in X) if (hh_take(lead(k))) nx++
-        for (k in D) if (hh_take("")) nd++
-        print na + 0, nh + 0, nx + 0, nd + 0, HH_UNPLACED + 0 }')"
   printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · status-writes=%d · second-regressions=%d · adoptions=%d · fixed=%d · needs-you=%d' \
     $(( hand + stp + dec + lif + amd + hld + ext + wv + stw + fl + ado + fix + ney )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$stw" "$fl" "$ado" "$fix" "$ney"
-  if [ -n "$since" ] || [ -n "$until" ]; then printf ' · unplaced=%d' $(( ${u1:-0} + ${u3:-0} )); fi
+  if [ -n "$since" ] || [ -n "$until" ]; then printf ' · unplaced=%d' "${u1:-0}"; fi
   [ "${gaps:-0}" -eq 0 ] || printf ' · unseen=%d' "$gaps"
   printf '\n'
   return 0
