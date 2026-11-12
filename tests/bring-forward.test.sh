@@ -440,7 +440,7 @@ printf '%s\n' '## SDLC State' 'current: 9' '- Step 0: configured at 2026-11-01T0
 printf '%s\n' '## SDLC State' 'current: 9' '- Step 7: documented at 2026-11-01T13:40Z' '- Step 8: CLOSED 2026-11-01T13:34Z' "$s9" > "$B"
 A="$D/plans/epic-x/wave-4-held.plan.md"; printf '%s\n' '---' 'abandoned: 2026-11-02 held' '---' '## SDLC State' 'current: 3' '- Step 3: p.md' '- Step 4: (pending)' '- Step 9: (pending)' > "$A"
 for x in "$U:n=9 state=delivered" "$B:n=9 state=delivered" "$A:n=3 state=abandoned"; do p="${x%%:*}"
-  expect_eq "${p##*/}: the step is the plan's current: and its closure" "${x#*:}" "$(bash "$RS" "$p" step | paste -sd' ' -)"; done
+  expect_eq "${p##*/}: the step is the plan's current: and its closure" "${x#*:}" "$(bash "$RS" "$p" step | /usr/bin/grep -E '^(n|state)=' | paste -sd' ' -)"; done
 printf '%s\n' '## SDLC State' "waived: question=evidence head=$H by Ann 2026-11-01T15:53:03Z \"go\"" "proved: kind=review head=$H at=2026-10-04T00:00:00Z evidence=r.md question=evidence" > "$B.late"
 expect_eq "a proof registered after a waiver stands after it, though its instant is earlier" "waiver proof " "$(translate "$B.late" events | sed -nE 's/^run\/v1\|ev=(waiver|proof)\|.*/\1/p' | tr '\n' ' ')"
 expect_contains "a Step line held (pending) is no step reached: named, not written" "gap/v1|ev=step|n=9|field=ev|why=pending" "$(translate "$A" gaps)"
@@ -455,5 +455,5 @@ expect_eq "a parked plan's Step 9 note is no delivery: the step is its current:"
 expect_contains "the note is named on the gaps list, not written" "gap/v1|ev=step|n=9|field=ev|why=undelivered" "$(translate "$K" gaps)"
 printf '%s\n' '## SDLC State' 'current: 9' '- Step 7: documented at 2026-11-01T10:00Z' "$k8" \
   '- Step 9: delivered: parked on wave/7-parked @ abc1234 — waits on a hand test (2026-11-01T12:00Z wave-7-parked)' > "$K"
-expect_eq "close-out's own parked line is the delivery" "n=9 state=delivered" "$(bash "$RS" "$K" step | paste -sd' ' -)"
+expect_eq "close-out's own parked line is the delivery, its words the step's own field" "n=9|parked on wave/7-parked|state=delivered" "$(bash "$RS" "$K" step | sed 's/^delivered=\(parked on [^ ]*\).*/\1/' | paste -sd'|' -)"
 finish
