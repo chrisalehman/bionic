@@ -1495,4 +1495,20 @@ expect_eq "(lg3) a part is no landing: the record's landings and the reader's la
   "$(tw_lib units_record_landings "$TWR" | cut -f2 | paste -sd' ' -)|$(bash "$REPO/payload/scripts/reader.sh" "$TWP" landed | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | paste -sd' ' -)|$(line_lines "$TWR" | grep -c '|part=reviews|')"
 
 # ---------------------------------------------------------------------------
+section "§WORLD: a world that lies inside a checkout ends the suite that sourced it"
+# The world refuses a directory inside a checkout so that no fixture's git acts on a real repository. A suite that went
+# on past that refusal names its world by an empty path, and a git call on an empty -C path runs in the directory the
+# suite started in: there a commit of every tracked change is a commit to the checkout. So the refusal ends the suite.
+# fails-when: the refusal returns to the sourcing suite, which goes on and commits the checkout's tracked change.
+WL_CO="$WORLD_ROOT/leak-co"; mkdir -p "$WL_CO/tmp"
+git -C "$WL_CO" init -q && printf 'a\n' > "$WL_CO/f" && git -C "$WL_CO" add f \
+  && git -C "$WL_CO" -c user.name=w -c user.email=w@x commit -qm base && printf 'b\n' > "$WL_CO/f"
+WL_HEAD="$(git -C "$WL_CO" rev-parse HEAD 2>/dev/null)"
+WL_OUT="$(cd "$WL_CO" && TMPDIR="$WL_CO/tmp" bash -c '. "$1"; git -C "${WL_NONE:-}" -c user.name=w -c user.email=w@x commit -qam leaked; echo went-on' \
+  _ "$REPO/tests/lib/world.sh" 2>&1)"; WL_RC=$?
+expect_eq "WORLD-1 the suite ends at the refusal: its line, a failing exit, nothing after it run, the checkout's head unmoved" \
+  "1|1|0|$WL_HEAD" "$(grep -c 'lies inside a git checkout' <<< "$WL_OUT")|$WL_RC|$(grep -c went-on <<< "$WL_OUT")|$(git -C "$WL_CO" rev-parse HEAD 2>/dev/null)"
+expect_nonempty "WORLD-1a precondition: the scratch checkout has a head to compare" "$WL_HEAD"
+
+# ---------------------------------------------------------------------------
 finish
