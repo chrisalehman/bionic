@@ -825,21 +825,20 @@ S46_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
 S31_STOP_HOOK="${BIONIC_HOOKS_DIR}/stop.sh"
 . "$T/session-poker.prelude.sh"
 export BIONIC_PROBE_CORES=64
-room_plan() {  # <repo> <scale> <budget or -> <ready rows> -> the plan, at `current: 4`, approved
+room_plan() {  # <repo> <scale> <budget or -> <ready rows> -> the plan page at 15, its run's log at step 4, approved
   local repo="$1" scale="$2" budget="$3" n="$4" i=0
-  local f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
-  mkdir -p "$(dirname "$f")"
+  local f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" l="$repo/.bionic/docs/record/wave-01-fixture/run.log"
+  mkdir -p "$(dirname "$f")" "${l%/*}"
   {
-    printf -- '---\ngoverning-skill: superpowers:writing-plans\nscale: %s\n' "$scale"
+    printf -- '---\ngoverning-skill: superpowers:writing-plans\ncanonical_sdlc_version: 15\nscale: %s\n' "$scale"
     [ "$budget" = - ] || printf 'parallel-budget: %s\n' "$budget"
-    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n%s\n\n- Step 4: in progress\n\n' "$SP_APPROVED_LINE"
-    printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n'
-    printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf -- '---\n\n# fixture plan\n\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
     while [ "$i" -lt "$n" ]; do
       i=$((i + 1))
-      printf '| T%s | 4 | build | row %s | implementor | — | 10 | REQ-x | payload/f%s.sh | pending | |\n' "$i" "$i" "$i"
+      printf '| T%s | 4 | build | row %s | — | 10 | REQ-x | payload/f%s.sh | — |\n' "$i" "$i" "$i"
     done
   } > "$f"
+  printf 'run/v1|ev=%s|at=2026-10-04T00:0%s:00Z\n' 'step|n=4' 1 'approval|key=step3|by=fixture|said=approved' 2 > "$l"
   touch "$f"
 }
 room_case() {  # <label> <scale> <budget or -> <open writers> <ready rows>
@@ -870,6 +869,10 @@ room_case idle1 task - 0 1
 room_case idle2 task - 0 2
 room_case full task - 0 5
 room_case waveidle wave "$CAP3" 0 1
+r="$(make_repo agree)"; room_plan "$r" task - 3; p="$r/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+printf 'run/v1|ev=%s|at=2026-10-04T00:0%s:00Z\n' 'dispatch|row=T1|name=W-1' 3 'dispatch|row=T2|name=W-2' 4 'published|row=T2' 5 >> "$r/.bionic/docs/record/wave-01-fixture/run.log"
+printf 'agree=%s\n' "$(bash -c '. "$1/run.sh"; . "$1/units.sh"; . "$1/reader.sh"; units_rows "$2" | while IFS= read -r x; do
+  printf "%s:%s/%s " "${x%%$(printf "\t")*}" "$(units_field "$x" status)" "$(reader_main "$2" status "${x%%$(printf "\t")*}" | sed -n "s/^state=//p")"; done' _ "${S46_LIB%/*}" "$p")"
 ROOM_TS_EOF
 cat > "$ROW/w.sh" <<'ROOM_W_EOF'
 set -uo pipefail
@@ -944,6 +947,10 @@ expect_eq "ROOM.4d five rows over three slots: the FILL names three (the cap is 
 expect_eq "ROOM.4e …and no slot is idle" "" "$(room_get ts.out full.idle)"
 expect_eq "ROOM.4f a person's cap at wave scale reads the same: one row ready over three slots, two idle" \
   "IDLE 2 of 3 writer slots — FILL names T1, every row that is ready" "$(room_get ts.out waveidle.idle)"
+# (5) THE SCHEDULER AND THE READER DO NOT PART on a row's state at 15: dispatched is the scheduler's active, a landing
+# is landed to both, and a row no event moves is pending to both.
+expect_eq "ROOM.5 at 15 the scheduler's and the reader's state agree, row by row (scheduler/reader)" \
+  "T1:active/dispatched T2:landed/landed T3:pending/pending " "$(room_get ts.out agree)"
 
 # ═══════════════════════════════════════════════════════════════════ §KILL
 finish
