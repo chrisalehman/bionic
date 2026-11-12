@@ -546,9 +546,8 @@ expect_contains "…while the real still-at-it beside it is still live" "[live]"
 # `Subagents (N):` header rather than `Teammates (N):` — before the fix, `live_agents`
 # (payload/scripts/lib/agents.sh) parsed only the Teammates block, so a panel carrying
 # ONLY a Subagents block answered zero live agents and every held row read `[not live]`
-# regardless of whether its agent was still running. T12's live bed hit exactly this
-# (live-rows-802ee6d.md F2): the literal `STANDDOWN <name>` line could never print in a
-# `-p` bed for the same reason. `tests/lib/live-answer.sh`'s composer only substitutes
+# regardless of whether its agent was still running.
+# `tests/lib/live-answer.sh`'s composer only substitutes
 # into the corpus's Teammates shape (its own header says so), so this body is hand-built —
 # the same precedent that suite's Teammates-forgery shapes are hand-written rather than
 # routed through the composer.

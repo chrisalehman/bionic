@@ -180,7 +180,7 @@ expect_eq "at 15 a second row of one id and a row of an unknown kind are refused
 awk '{ print } /^\| T1 \|/ { sub(/^\| T1 \|/, "| T2 |"); print }' "$P2.keep" > "$P2"; printf 'run/v1|ev=dispatch|row=T2|name=w-T2|brief=b|at=2026-11-01T00:00:02Z\n' >> "$L2"; gate
 expect_eq "a row the log holds dispatched under a name stands at 15 on its dispatch: the gate names neither it nor an evidence line, and owes the requirements still" \
   "|owed at 15: Step 1's requirements" "$(printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o "T2[^ ]*\\|evidence line" | head -1)|$(owed "Step 1's requirements")"
-for f in "each criterion's fails-when:" "the matrix:"; do expect_absent "…and no longer names $f" "could not be read at 15: $f" "$GATE_SAID"; done
+cp "$P2.keep" "$P2"; for f in "each criterion's fails-when:" "the matrix:"; do expect_absent "…and no longer names $f" "could not be read at 15: $f" "$GATE_SAID"; done
 unruled() { ( . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/run.sh"; . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/units.sh"; . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/proof.sh"
   . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh"; matrix_unruled "$P2" 8 "$@" | tr '\n' ' ' ); }
 expect_eq "at 15 the merge advance asks the evidence review at the head of a criterion: none read, AC-1 owes its ruling; read, none" "AC-1 |" "$(unruled)|$(unruled "$H")"
@@ -212,7 +212,7 @@ for c in "2|approval|step1|Step 1's approval" "7|header|adrs: none — no decisi
 # At 8 the merge is owed only when the plan holds an integrate row and the run is not parked, and then until it lands.
 printf 'run/v1|ev=step|n=8|at=2026-11-01T00:00:11Z\n' >> "$L2"; gate
 expect_eq "at 8 with no integrate row no merge is owed, and the close's cleanup is" "|owed at 15: Step 8's cleanup" "$(owed "Step 8's merge")|$(owed "Step 8's cleanup")"
-awk '{ print } /^\| T1 \| 4 \| build /{ print "| T2 | 8 | integrate | Merge. | — | T1 | 10 | REQ-1 | — | — | — | pending |" }' "$P2" > "$P2.t" && mv "$P2.t" "$P2"; gate
+awk '{ print } /^\| T1 \| 4 \| build /{ print "| T2 | 8 | integrate | Merge. | T1 | 10 | REQ-1 | — | — |" }' "$P2" > "$P2.t" && mv "$P2.t" "$P2"; gate
 expect_eq "…with one, its landing is owed" "owed at 15: Step 8's merge" "$(owed "Step 8's merge")"
 cp "$P2" "$P2.w"; printf '\n## Wake Note\n\nParked: the person holds the merge.\n' >> "$P2"; gate; mv "$P2.w" "$P2"
 expect_eq "…and not while the run is parked" "" "$(owed "Step 8's merge")"
