@@ -170,8 +170,10 @@ plan_read_dropped() {  # <plan> -> one id per line, in table order; 1 none, 2 no
 #
 # THE TOKENS ARE THE FILL'S (lib/units.sh, its scheduler): the reads cell, or the kind's default when the
 # cell is empty, then the deps cell. A table with no reads cell is the nine-cell shape, whose row waits
-# on its deps and on what its kind and step imply and on nothing else, so it always takes the kind's
-# default. The kind default and the Files matcher are units.sh's own awk, sourced, never restated here.
+# on its deps (the rows it names, an outside event's token, an approval of the person's it names) and on
+# what its kind and step imply and on nothing else, so it always takes the kind's default. A named
+# approval is one `wait` line whichever cell named it, so every reader of a wait reads it here. The kind
+# default and the Files matcher are units.sh's own awk, sourced, never restated here.
 # WHICH ROWS A READ NAMES IS DECIDED HERE ALONE, and the scheduler takes its writers from these lines: a
 # row id is that row, itself included, so a row that waits on itself waits for ever; a path is each other
 # row whose Files write it, so a row's artifact is that row; `head` is each other row writing the tracked

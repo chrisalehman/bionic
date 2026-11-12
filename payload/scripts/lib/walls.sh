@@ -3053,9 +3053,11 @@ _eg_commit_repo() {
 # about to run. After ≤ before passes without a word, whichever files moved, so growth paid for
 # elsewhere in the set is no growth. After > before is refused, naming the bytes added and each
 # file that grew, unless all three hold: the committing tree's `## Tasks` row (`_EG_RID`, set by the
-# worktree fork above) is open, its reads cell holds `approval:doctrine-growth`, and the run holds the
+# worktree fork above) is open, it waits on `approval:doctrine-growth`, and the run holds the
 # approval of doctrine-growth `session-poker.sh approve` gives, as the reader answers it. A commit no row
 # owns (the main checkout) has no row to read, so its growth is always refused.
+# WHAT A ROW WAITS ON IS THE PLAN'S ONE READER'S (lib/plan-read.sh `plan_read_waits`): its reads cell at 14 and its
+# deps cell at 15, so growth is admitted at 15 exactly as at 14, and the refusal names the cell the person edits.
 #
 # NO STEP GUARD, AND THAT IS THE POINT. The rule holds at every numeric `current:`, so the arm sits
 # with the three that run before the pointer-step exit; a writer's commit reaches it through the
@@ -3072,8 +3074,8 @@ _eg_commit_repo() {
 # Refusing those spellings is a different wall's job.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_net_zero() {
-  local dir rc sums delta before after grown="" files="" short="" n=0 fact line path b a reads="" tok row_reads=0 lacks="" fix_id fix_cell base=HEAD
-  local -a dirs=() toks=()
+  local dir rc sums delta before after grown="" files="" short="" n=0 fact line path b a written="" row_waits=0 lacks="" fix_id fix_cell base=HEAD cell verb verbs
+  local -a dirs=()
   _eg_commit_repo; dir="$_EG_REPO"
   # A MERGE IN A ROW'S TREE IS MEASURED AGAINST THE PARENT THAT IS NOT THE ROW'S OWN (wave-33 T15, D10). A row's tree
   # that merges the working branch in commits that branch's content on top of its own, and growth already landed there
@@ -3112,27 +3114,21 @@ validate_net_zero() {
   ${path}: ${b} B → ${a} B (+$((a - b)) B)"
   done < <(printf '%s\n' "$sums" | awk -F'\t' '$1 == "1"')
 
-  # THE APPROVAL: the row, its read, and the approval. Each missing part is named.
+  # THE APPROVAL: the row, its wait, and the approval. Each missing part is named.
+  cell=reads; verb=read; verbs=reads; [ "$_EG_V15" -eq 0 ] || { cell=deps; verb="wait on"; verbs="waits on"; }
   if [ -n "${_EG_RID:-}" ]; then
     while IFS= read -r line; do
       [ "${line%%$'\t'*}" = "$_EG_RID" ] || continue
-      reads="$(units_field "$line" reads)"; break
+      written="$(units_field "$line" "$cell")"; break
     done < <(units_rows "$PLAN" 2>/dev/null)
-    if [ -n "$reads" ]; then
-      IFS=',' read -ra toks <<< "$reads"
-      for tok in "${toks[@]}"; do
-        tok="${tok#"${tok%%[![:space:]]*}"}"; tok="${tok%"${tok##*[![:space:]]}"}"; tok="${tok#live:}"
-        [ "$tok" = "approval:doctrine-growth" ] && row_reads=1
-      done
-    fi
+    plan_read_waits "$PLAN" "$_EG_RID" 2>/dev/null | /usr/bin/grep -qxF "${_EG_RID}"$'\t'"wait"$'\t'"approval:doctrine-growth" && row_waits=1
     case "${_EG_RSTATUS:-}" in
-      pending|active) [ "$row_reads" = 1 ] || lacks="row ${_EG_RID} does not read approval:doctrine-growth" ;;
+      pending|active) [ "$row_waits" = 1 ] || lacks="row ${_EG_RID} does not ${verb} approval:doctrine-growth" ;;
       *) lacks="row ${_EG_RID} is ${_EG_RSTATUS:-without a status}, not open" ;;
     esac
   else
-    lacks="no '## Tasks' row owns the tree this commit is made in, so no row can read the approval"
+    lacks="no '## Tasks' row owns the tree this commit is made in, so no row can ${verb} the approval"
   fi
-  [ "$_EG_V15" -eq 0 ] || lacks="a version-15 row holds no reads cell, so whether a row reads approval:doctrine-growth could not be read at 15"
   _proof_ask "$PLAN" reader_q_approved "$PLAN" doctrine-growth >/dev/null
   case $? in
     0) ;;
@@ -3141,16 +3137,19 @@ validate_net_zero() {
   esac
   [ -n "$lacks" ] || return 0
 
-  fix_id="${_EG_RID:-<id>}"; fix_cell="<cell>"
-  [ -n "${_EG_RID:-}" ] && [ -n "$reads" ] && [ "$reads" != "—" ] && fix_cell="$reads"
+  # An empty reads cell at 14 is its kind's default, written out before the approval is added; at 15 what the kind implies
+  # is never written, so an empty deps cell takes the approval alone.
+  fix_id="${_EG_RID:-<id>}"; fix_cell="<cell>, "
+  [ -n "${_EG_RID:-}" ] && [ "$_EG_V15" -eq 1 ] && fix_cell=""
+  [ -n "${_EG_RID:-}" ] && [ -n "$written" ] && [ "$written" != "—" ] && fix_cell="$written, "
   # THE ONE LINE HOLDS 100 COLUMNS (lib/refuse.sh): the delta and each grown file's last two path
   # segments when they fit, else the delta and the count; the detail names every path in full.
   fact="loaded set grows +${delta} B: ${short}"
   [ "${#fact}" -le 39 ] || fact="loaded set grows +${delta} B, ${n} files"
   _eg_detail="canonical-sdlc — the staged change grows the loaded set by +${delta} B (${before} B at HEAD, ${after} B staged) in ${files}; the doctrine is net zero.
 Not admitted: ${lacks}.
-Fix: pay for it with a removal in the set, or, on the user's word, commit it from a row's tree whose row reads the approval:
-  edit the reads cell of ${fix_id} in the plan to: ${fix_cell}, approval:doctrine-growth
+Fix: pay for it with a removal in the set, or, on the user's word, commit it from a row's tree whose row ${verbs} the approval:
+  edit the ${cell} cell of ${fix_id} in the plan to: ${fix_cell}approval:doctrine-growth
   session-poker.sh approve doctrine-growth '<reply>'
 Plan: $PLAN
 Grew:${grown}"

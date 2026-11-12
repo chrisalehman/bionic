@@ -1300,7 +1300,8 @@ esac
 # name. All are listed in one refusal, so one repair answers it. An Edit the hook could not apply
 # is not judged, as the Tasks arm above does not judge one: the tool refuses that input itself.
 # Its Tasks rows are held to the invariants a plan at 14 is held to, on the page this write hands over, as the arm above
-# holds them: one id twice, a kind outside the vocabulary, a dependency on no row.
+# holds them: one id twice, a kind outside the vocabulary, a dependency on no row. A deps cell at 15 may also name the
+# approval its task waits on (`approval:<name>`), the one shape it holds that a deps cell at 14 does not.
 if [ "$GS_V15" -eq 1 ] && { [ "$TOOL" != "Edit" ] || [ "$EDIT_APPLIED" -eq 1 ]; }; then
   if GS_FAULTS="$(plan_read_faults "$GS_PAGE")"; then
     _gs_refuse version-15 "$GS_FAULTS"
