@@ -692,46 +692,23 @@ fp_commit() {  # <repo> <path> <text> -> the new commit's sha
   git -C "$1" rev-parse HEAD
 }
 fp_plan_path() { printf '%s/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md' "$1"; }
-fp_plan() {  # <repo> <base> <SDLC lines> <task rows> -> writes the plan (a plan the gate admits, plus the review header fields)
-  local r="$1" f; f="$(fp_plan_path "$1")"
-  printf '# requirements\n' > "$r/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md"
-  printf '# spec\n' > "$r/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.spec.md"
-  {
-    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
-    printf 'rigor: double\nreview-cadence: once\nfix-policy: S1,S2-on\nfix-cap: 4\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
-    printf 'walk: exempt\ndeploy_target: n/a\n'
-    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
-    printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\nworking-branch: wave/01-fixture\n'
-    printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n\n'
-    printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md\n'
-    printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-fixture.spec.md\n'
-    printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-fixture.plan.md\n'
-    printf -- '- Step 4: opened\n  worktree: .worktrees/01-fixture\n  base-sha: %s\n  branch: wave/01-fixture\n' "$2"
-    printf -- '- T1: landed at record/T1.md\n'
-    [ -z "$3" ] || printf '%s\n' "$3"
-    printf '\n## Tasks\n\n'
-    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
-    printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-    printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |\n'
-    [ -z "$4" ] || printf '%s\n' "$4"
-    printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
-    printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
-    printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n'
-    printf '|---|---|---|---|---|---|---|\n| T1 | implementor (w-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n'
-  } > "$f"
+fp_plan() {  # <repo> <base> <reading>... -> the run at 15 at Step 4, double, with the review header fields; T1 landed and
+  # the readings in its log
+  local p r="$1" b="$2"; shift 2
+  p="$(plan_fixture --at 15 "$(fp_plan_path "$r")" wave '| T1 | 4 | build | the first build | implementor | — | — | 30 | REQ-1 | a.sh | — | — | landed |')" || return 1
+  awk -v b="$b" '/^rigor: /{ print "rigor: double\nreview-cadence: once\nfix-policy: S1,S2-on\nfix-cap: 4"; next }
+    /^multi_agent: /{ $0 = "multi_agent: true" } /^base-sha: /{ $0 = "base-sha: " b } { print }' "$p" > "$p.t" && mv "$p.t" "$p"
+  printf '%s\n' "$@" >> "$(plan_fixture_log "$p")"
 }
 fp_record() {  # <repo> <file> <question> <result> <range> <line>... -> a reading record in the docs root
   local r="$1" f="$2" q="$3" res="$4" rg="$5"; shift 5
   { printf 'question: %s\nresult: %s\nscope: piece\nreviewed: %s\n' "$q" "$res" "$rg"; printf '%s\n' "$@"; printf '\nwhat the reader found\n'; } \
     > "$r/.bionic/docs/$FP_REC/$f"
 }
-fp_proved() {  # <head> <file> <question> <result> -> the reading's proof line, as proof_line writes it
-  bash -c '. "$1/proof.sh" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" "$4" w-read "$5" piece' _ "$FP_LIB" "$1" "$FP_REC/$2" "$3" "$4"
+fp_proved() {  # <head> <file> <question> <result> -> the reading as the run's log holds it
+  printf 'run/v1|ev=proof|kind=review|head=%s|evidence=%s/%s|question=%s|reader=w-read|result=%s|scope=piece|at=2026-10-04T12:00:00Z' "$1" "$FP_REC" "$2" "$3" "$4"
 }
-fp_landing() {  # <repo> <line>... -> the run's landing record, whole
-  printf '%s\n' "$@" > "$1/.bionic/docs/$FP_REC/landing-proofs.log"
-}
-FP_SID="$SID"; FP_LIB="$NT_LIB"; FP_REC="record/wave-01-fixture"
+FP_SID="$SID"; FP_REC="record/wave-01-fixture"
 FP_ROOT="$TMPROOT/nt-findings"; mkdir -p "$FP_ROOT"
 RFW="$(fp_repo findings)"
 FW_B="$(git -C "$RFW" rev-parse HEAD)"
@@ -741,9 +718,7 @@ fp_record "$RFW" adv.md adversarial fail "${FW_B:0:10}..${FW_C1:0:10}" 'findings
 fp_record "$RFW" st.md structure fail "${FW_B:0:10}..${FW_C1:0:10}" 'findings: 2' \
   'finding: 1 S2 on b.sh:2 a side path loses data' 'shown: 1 bash b.sh --side' \
   'finding: 2 S1 on b.sh:3 the parser crashes on an empty file' 'shown: 2 bash b.sh < /dev/null'
-fp_plan "$RFW" "${FW_B:0:10}" "$(fp_proved "$FW_C1" adv.md adversarial fail)
-$(fp_proved "$FW_C1" st.md structure fail)" ""
-fp_landing "$RFW" ""
+fp_plan "$RFW" "${FW_B:0:10}" "$(fp_proved "$FW_C1" adv.md adversarial fail)" "$(fp_proved "$FW_C1" st.md structure fail)"
 ( cd "$RFW" && git add -f .bionic/docs && git commit -qm "the plan and its records" ) >/dev/null 2>&1
 bound_marker "$RFW" "$SID" "$(fp_plan_path "$RFW")" >/dev/null 2>&1
 FW_KA="finding:record:wave-01-fixture:adv.md:1"
