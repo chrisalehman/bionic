@@ -1921,11 +1921,11 @@ EOF
       # its closed-run refusal; the plan is changed by an edit of its file.
       [ "${BIND_DELIVERED:-}" != yes ] \
         || say "$BIND_PATH is delivered: this session reads it bound-closed, and no verb writes it; a cell of it is changed by an edit of the file"
-      # THE RUN'S SESSIONS (wave-36 T9; D10): `bind_plan` writes this session's `- session:` line
-      # into the plan beside the marker, `by bind`; a plan that could not take it is said, not hidden.
+      # THE RUN'S SESSIONS: `bind_plan` appends this session's bind event to the run's log beside the
+      # marker, `by bind`; a log that could not take it is said, not hidden.
       case "${BIND_SESSION:-}" in
-        recorded) say "session $SESSION_ID recorded under ## SDLC State of $BIND_PATH" ;;
-        failed) die "the session line could not be written into $BIND_PATH (the plan changed, or is not a regular file); bind again to write it" ;;
+        recorded) say "session $SESSION_ID recorded in the run's log of $BIND_PATH" ;;
+        failed) die "the session's bind event could not be appended to the run's log of $BIND_PATH; bind again to append it" ;;
       esac
       exit 0
     else

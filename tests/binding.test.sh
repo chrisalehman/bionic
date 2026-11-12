@@ -282,69 +282,37 @@ call_bind_act "$R7" "$SID" "$OTHER7/.bionic/docs/plans/epic-01-demo/wave-02-deli
 expect_eq "7e a delivered plan of ANOTHER root is refused not-an-open-run" "1|not-an-open-run" "$BIND_ST|$BIND_WHY"
 
 # ============================================================
-section "SIZE — a plan carrying 3,000 session lines binds once as present, and a session not on it is recorded exactly once"
+section "8 — the run's sessions are events: a first engagement is one bind event, a session the run holds adds none, the plan is never written"
 # ============================================================
 #
-# `bind_record_session` asks `bind_sessions` whether the line of this session is already there. A reader that quits at the
-# first match leaves the writer a closed pipe, and under `set -o pipefail`, which every caller of the library runs under, a
-# writer killed that way fails the pipeline and a session already on the plan reads absent: the call answers `recorded`
-# and the plan gains a second line. `bind_sessions` ends in `return 0`, which masks its own writer, so the quitting form
-# does not bite through it on this library; the presence read still reads to the end, so that no change to that function
-# can make it bite. The rows build a plan whose id stream (over 100 KB) outruns one 64 KB pipe buffer, with the line of
-# this session FIRST, where an early quit happens, and SZ-3 shows this plan is one a quitting reader bites on.
-# fails-when: the presence read quits early, the call answers recorded and the plan gains a second line (SZ-1).
-sz_plan() {  # <path> <with|without> -> a plan of 3,000 distinct session lines, the line of this session first when "with"
-  {
-    printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in flight\n'
+# `bind_record_session` asks the reader which sessions the run holds and appends a bind event, through the one writer,
+# for a session it lacks. FIXTURE FIDELITY: a fresh root's open plan bound by engagement's act twice; then a plan whose
+# text carries 3,000 session lines (over 100 KB, past one 64 KB pipe buffer), this session's line first, where a reader
+# that quit early would read it absent. fails-when: an engagement writes the plan, a held session is appended again, or
+# a session missing from 3,000 is not appended once.
+rlog() { cat "$1" 2>/dev/null | awk -v s="|session=$SID|" -v b="|by=$2|" 'index($0, "run/v1|ev=bind|") == 1 && index($0, s) && index($0, b) { n++ } END { print n + 0 }'; }  # <log> <act> -> this session's bind events by that act
+R8="$(make_repo r8)"; P8="$R8/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"; S8="$(cksum < "$P8")"
+call_bind_act "$R8" "$SID" "$P8" engage; A8="$BIND_ST"; call_bind_act "$R8" "$SID" "$P8" engage
+expect_eq "8a a first engagement binds (exit 0) and is one bind event by engage; a second adds none; the plan's sum is unchanged" \
+  "0|0|1|$S8" "$A8|$BIND_ST|$(rlog "$R8/.bionic/docs/record/wave-01/run.log" engage)|$(cksum < "$P8")"
+sz_plan() {  # <name> <with|without> -> a plan of 3,000 distinct session lines, the line of this session first when "with"
+  mkdir -p "$SZ/.bionic/docs/plans/epic-01-demo"
+  { printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in flight\n'
     [ "$2" = with ] && printf -- '- session: %s bound 2026-10-01T00:00:00Z by engage\n' "$SID"
     awk 'BEGIN { for (i = 1; i <= 3000; i++) printf "- session: %08d-0000-4000-8000-000000000000 bound 2026-10-01T00:00:00Z by bind\n", i }'
-    printf '\n## Notes\n\nafter the state.\n'
-  } > "$1"
+    printf '\n## Notes\n\nafter the state.\n'; } > "$SZ/.bionic/docs/plans/epic-01-demo/$1.plan.md"
+  printf '%s' "$SZ/.bionic/docs/plans/epic-01-demo/$1.plan.md"
 }
-sz_call() {  # <bindlib> <plan> <act> -> prints "<rc>|<BIND_SESSION>|" from one call, under pipefail as the callers run
-  bash -c '
-      set -uo pipefail
-      . "$1" || exit 9
-      . "$2" || exit 9
-      rc=0
-      bind_record_session "$3" "$4" "$5" || rc=$?
-      printf "%s|%s|" "$rc" "${BIND_SESSION:-}"
-    ' _ "$RUNLIB" "$1" "$2" "$SID" "$3" 2>/dev/null
+sz_call() {  # <plan> -> "<rc>|<BIND_SESSION>" from one call, under pipefail as the callers run
+  bash -c 'set -uo pipefail; . "$1" || exit 9; . "$2" || exit 9; rc=0; bind_record_session "$3" "$4" bind || rc=$?; printf "%s|%s" "$rc" "${BIND_SESSION:-}"' \
+    _ "$RUNLIB" "$BINDLIB" "$1" "$SID" 2>/dev/null
 }
-sz_count() { grep -c -- "^- session: $SID " "$1"; }
-
-SZ="$SANDBOX/size"; mkdir -p "$SZ"
-sz_plan "$SZ/with.plan.md" with
-expect_eq "SZ-1 the plan is over 64 KB (the writer cannot fit one pipe buffer)" "yes" \
-  "$([ "$(wc -c < "$SZ/with.plan.md")" -gt 65536 ] && echo yes || echo no)"
-expect_eq "SZ-1 the plan carries the line of this session once, among 3,000 session lines" "1|3001" \
-  "$(sz_count "$SZ/with.plan.md")|$(grep -c '^- session: ' "$SZ/with.plan.md")"
-cp "$SZ/with.plan.md" "$SZ/with.before"
-expect_eq "SZ-1 a session already on a 3,000-line plan binds once as present: exit 1, BIND_SESSION present" "1|present|" \
-  "$(sz_call "$BINDLIB" "$SZ/with.plan.md" bind)"
-expect_true "SZ-1 …and the plan is byte-identical after" cmp -s "$SZ/with.plan.md" "$SZ/with.before"
-
-sz_plan "$SZ/without.plan.md" without
-expect_eq "SZ-2 control: the same plan without a line for this session carries none" "0|3000" \
-  "$(sz_count "$SZ/without.plan.md")|$(grep -c '^- session: ' "$SZ/without.plan.md")"
-expect_eq "SZ-2 a session not on the plan is recorded: exit 0, BIND_SESSION recorded" "0|recorded|" \
-  "$(sz_call "$BINDLIB" "$SZ/without.plan.md" bind)"
-expect_eq "SZ-2 …a second call over the same plan answers present" "1|present|" \
-  "$(sz_call "$BINDLIB" "$SZ/without.plan.md" bind)"
-expect_eq "SZ-2 …so the plan gained exactly one line, that of this session, over the two calls" "1|3001" \
-  "$(sz_count "$SZ/without.plan.md")|$(grep -c '^- session: ' "$SZ/without.plan.md")"
-
-# SZ-3: a quitting reader over the raw id stream, put into a copy of the library, turns SZ-1's answer into `recorded`. The
-# mutant is proved to differ from the library and to carry that reader before its answer is read, so a sed that matched
-# nothing cannot pass for a mutant that was caught; the same plan, read to the end, binds as present in SZ-1.
-SZ_MUT="$SZ/binding-mutant.sh"
-sed 's/^  case "\$nl\$ids\$nl" in .*$/  if _bind_session_ids "$plan" | grep -qxF -- "$sid"; then BIND_SESSION="present"; return 1; fi/' "$BINDLIB" > "$SZ_MUT"
-expect_eq "SZ-3 the mutant carries the quitting reader over the id stream once" "1" \
-  "$(grep -c 'if _bind_session_ids "\$plan" | grep -qxF -- "\$sid"; then BIND_SESSION="present"' "$SZ_MUT")"
-expect_true "SZ-3 …and the mutant parses" bash -n "$SZ_MUT"
-cp "$SZ/with.before" "$SZ/mutant.plan.md"
-expect_eq "SZ-3 the quitting reader answers recorded on the plan SZ-1 binds as present" "0|recorded|" \
-  "$(sz_call "$SZ_MUT" "$SZ/mutant.plan.md" bind)"
-expect_eq "SZ-3 …and the plan gains the second line" "2" "$(sz_count "$SZ/mutant.plan.md")"
+SZ="$SANDBOX/size"; SZW="$(sz_plan with with)"; SZO="$(sz_plan without without)"; SZS="$(cksum < "$SZW")|$(cksum < "$SZO")"
+expect_eq "8b the plan is over 64 KB and carries the line of this session once, among 3,001 session lines" "yes|1|3001" \
+  "$([ "$(wc -c < "$SZW")" -gt 65536 ] && echo yes)|$(grep -c -- "^- session: $SID " "$SZW")|$(grep -c '^- session: ' "$SZW")"
+expect_eq "8c a session the run holds is present (exit 1) and appends nothing; one it lacks is recorded (exit 0), then present" \
+  "1|present 0|recorded 1|present" "$(sz_call "$SZW") $(sz_call "$SZO") $(sz_call "$SZO")"
+expect_eq "8d …one bind event of this session for the run that lacked it, none for the other; neither plan written" "0|1|$SZS" \
+  "$(rlog "$SZ/.bionic/docs/record/with/run.log" bind)|$(rlog "$SZ/.bionic/docs/record/without/run.log" bind)|$(cksum < "$SZW")|$(cksum < "$SZO")"
 
 finish

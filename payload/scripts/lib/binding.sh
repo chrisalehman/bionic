@@ -72,24 +72,22 @@
 #
 # THE RUN'S SESSIONS (wave-36 T9; spec D10, design ledger Δ3 "D5 1"; AC-4.2). A `/clear`
 # re-keys the session, so a reader keyed by the live session id loses what the session before
-# it did. The run owns its session history instead: the act that binds a plan writes the
-# binding INTO THE PLAN, one line per session, under `## SDLC State`:
-#
-#     - session: <sid> bound <ISO-8601 UTC> by <act>        act: engage | bind | write
+# it did. The run owns its session history instead: the act that binds a plan appends one
+# bind event to the run's log, `session=<sid> by=<act>` (act: engage | bind | write), through
+# the type's one writer, lib/proof.sh `proof_bind_event`; the plan is never written.
 #
 # `bind_plan`'s fourth operand names the act (engage.sh, `session-poker.sh bind`, and the
-# governing skill's bind on the Write that creates a plan). The line is written once per
-# session — a later binding by the same session leaves it — never for `none` and never when
-# no act is named, so a library caller of the three-operand form changes no plan. It is
-# placed after the section's last `- session:` line, else after the section's last non-blank
-# line, fences skipped. `bind_sessions <plan> [<root>]` is its one reader. Neither the marker's
-# status contract nor its shape changes: the record reports beside it, in `BIND_SESSION`:
+# governing skill's bind on the Write that creates a plan). The event is appended once per
+# session — a later binding by the same session appends none, so the log does not grow with
+# every engagement — never for `none` and never when no act is named. `bind_sessions <plan>
+# [<root>]` is its one reader. Neither the marker's status contract nor its shape changes:
+# the record reports beside it, in `BIND_SESSION`:
 #
-#     recorded  the line was written     present  the plan already had this session's line
+#     recorded  the event was appended   present  the run already holds this session
 #     act       the act is not one of the three, nothing written
-#     failed    the plan could not take the write (a symlink, not a regular file, no
-#               `## SDLC State`, or the plan changed while the line was being placed); the
-#               marker stands, and the session's next binding act writes it
+#     failed    the run's log could not take the event (no record to hold it, or the writer
+#               could not be loaded); the marker stands, and the session's next binding act
+#               appends it
 #
 # DEPENDS ON run.sh, which must be sourced first: `engaged_marker_path` owns the sid shape
 # rule and the marker path, `open_runs` owns the set, `_run_lines` owns the line-ending
@@ -137,7 +135,7 @@ bind_delivered() {
 }
 
 # bind_plan <root> <sid> <plan|none> [<act>] -> write the session's binding; with an act and a
-# plan, the session's line in that plan too (THE RUN'S SESSIONS, above; never changes the status).
+# plan, the session's bind event in that run's log too (THE RUN'S SESSIONS, above; never changes the status).
 #
 #   0  written: the marker is exactly `plan=<value>\nengaged_at=<iso>\n`, mode 600, and
 #      <value> is the plan's CANONICAL spelling (`_bind_resolve`'s) or the literal `none`
@@ -237,7 +235,7 @@ bind_plan() {
   ( umask 077; printf 'plan=%s\nengaged_at=%s\n' "$value" "$stamp" > "$path" ) 2>/dev/null \
     || { BIND_REFUSAL="write-failed"; return 2; }
   chmod 600 "$path" 2>/dev/null || :
-  # THE RUN'S SESSIONS: after the marker, so a plan line never exists for a binding that was
+  # THE RUN'S SESSIONS: after the marker, so a bind event never stands for a binding that was
   # not written. Its outcome rides in BIND_SESSION; the binding's status is the marker's.
   if [ -n "$act" ] && [ "$value" != "none" ]; then
     bind_record_session "$value" "$sid" "$act" || :
@@ -296,65 +294,29 @@ _bind_session_ids() {
     s = substr($i, 9); if (s ~ /^[A-Za-z0-9_-]+$/ && s != "unknown" && !(s in got)) { got[s] = 1; print s } } }'
 }
 
-# bind_record_session <plan> <sid> <act> -> the session's line written into <plan>, once.
+# bind_record_session <plan> <sid> <act> -> the session's bind event appended to the run's log, once.
 #   0 recorded · 1 present · 2 act (not one of BIND_SESSION_ACTS) · 3 failed; BIND_SESSION
 #   names which. Prints nothing.
 #
-# THE PLAN IS REPLACED, NOT EDITED IN PLACE, as every plan verb replaces it
-# (hooks/session-poker.sh `plan_verb_swap`): the new text goes to a sibling file, the plan's
-# checksum is compared with the one read before, and the sibling is moved over the plan. A plan
-# that changed in between is left alone — a verb's write wins, and the session's next binding
-# act writes the line. The sibling takes the plan's own mode and mtime before the move.
+# PRESENCE IS READ FROM THE WHOLE LIST. The ids are collected, then tested, so no reader sits on a
+# writer's pipe to quit at the first match: under `set -o pipefail` a writer killed by that closed
+# pipe fails the pipeline, a session the run holds reads absent, and the call appends it again. The
+# writer, lib/proof.sh beside this file, is loaded only when an event is owed, so an engagement of a
+# session the run holds reads the reader and nothing more.
 bind_record_session() {  # <plan> <sid> <act>
-  local plan="${1:-}" sid="${2:-}" act="${3:-}" iso sum tmp mode line
+  local plan="${1:-}" sid="${2:-}" act="${3:-}" ids nl=$'\n'
   BIND_SESSION=""
   case "$act" in ''|*[!a-z]*) BIND_SESSION="act"; return 2 ;; esac
   case " $BIND_SESSION_ACTS " in *" $act "*) ;; *) BIND_SESSION="act"; return 2 ;; esac
   case "$sid" in ''|unknown|*[!A-Za-z0-9_-]*) BIND_SESSION="failed"; return 3 ;; esac
-  { [ -f "$plan" ] && [ ! -L "$plan" ]; } || { BIND_SESSION="failed"; return 3; }
-  # PRESENCE IS READ FROM THE WHOLE LIST. The ids are collected, then tested, so no reader sits on a writer's pipe
-  # to quit at the first match: under `set -o pipefail` a writer killed by that closed pipe fails the pipeline, a
-  # session already on a long plan reads absent, and the call records it a second time. An unreadable plan reads
-  # as no ids, as the failed pipeline read as absent.
-  local ids nl=$'\n'
+  [ -f "$plan" ] || { BIND_SESSION="failed"; return 3; }
   ids=$(bind_sessions "$plan") || ids=""
   case "$nl$ids$nl" in *"$nl$sid$nl"*) BIND_SESSION="present"; return 1 ;; esac
-  iso=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) && [ -n "$iso" ] || { BIND_SESSION="failed"; return 3; }
-  line="- session: $sid bound $iso by $act"
-  sum=$(cksum < "$plan" 2>/dev/null) || { BIND_SESSION="failed"; return 3; }
-  tmp="$(dirname "$plan")/.$(basename "$plan").session-$$"
-  { [ ! -e "$tmp" ] && [ ! -L "$tmp" ]; } || { BIND_SESSION="failed"; return 3; }
-  if ! BS_LINE="$line" awk '
-    BEGIN { line = ENVIRON["BS_LINE"] }
-    { L[++n] = $0 }
-    END {
-      for (i = 1; i <= n; i++) {
-        l = L[i]
-        if (l ~ /^[ \t]*```/) { fence = !fence; continue }
-        if (fence) continue
-        if (l ~ /^##[ \t]/) {
-          if (sdlc == 1) sdlc = 2
-          if (!seen && l ~ /^##[ \t]+SDLC State([ \t].*)?\r?$/) { sdlc = 1; seen = 1; last = i }
-          continue
-        }
-        if (sdlc != 1) continue
-        if (l ~ /[^ \t\r]/) last = i
-        if (l ~ /^- session:[ \t]/) sess = i
-      }
-      if (!seen) exit 1
-      at = sess ? sess : last
-      for (i = 1; i <= n; i++) { print L[i]; if (i == at) print line }
-    }' "$plan" > "$tmp" 2>/dev/null; then
-    rm -f "$tmp"; BIND_SESSION="failed"; return 3
+  if ! declare -F proof_bind_event >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)/proof.sh" >/dev/null 2>&1
   fi
-  mode=$(stat -f %Lp "$plan" 2>/dev/null || stat -c %a "$plan" 2>/dev/null) && chmod "$mode" "$tmp" 2>/dev/null
-  # THE PLAN'S MTIME IS KEPT. Recording a session is bookkeeping, not work on the run, and the fleet
-  # reads mtime as activity: `live_runs`' window and the newest-plan fallback (lib/run.sh) would
-  # otherwise rank a plan by when a session last bound it.
-  touch -r "$plan" "$tmp" 2>/dev/null || :
-  if [ "$(cksum < "$plan" 2>/dev/null)" != "$sum" ] || ! mv -f "$tmp" "$plan" 2>/dev/null; then
-    rm -f "$tmp"; BIND_SESSION="failed"; return 3
-  fi
+  declare -F proof_bind_event >/dev/null 2>&1 && proof_bind_event "$plan" "$sid" "$act" || { BIND_SESSION="failed"; return 3; }
   BIND_SESSION="recorded"
   return 0
 }
