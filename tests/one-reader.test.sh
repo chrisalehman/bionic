@@ -131,6 +131,16 @@ DKEYS="$(bash -c '. "$1/refuse.sh" && . "$1/dispatch.sh" && for k in $(dispatch_
 expect_eq "the dispatch library says a fact under a key for each of the wall's 43 refusals" 43 "$DKEYS"
 expect_eq "every piece of those facts is found in the library's own text" "$(printf '%s\n' "$DPIECES" | grep -c .)" "$(pieces_in "$L/dispatch.sh" | grep -c .)"
 expect_eq "no fact of the dispatch library is found in the wall's file" "" "$(pieces_in "$S/hooks/dispatch-preflight.sh")"
+expect_eq "the stop guard's file lists no refusal" "0" "$(own stop-guard | grep -c .)"
+# The stop guard's words are its facts and its details, each line cut at its facts and trimmed.
+DPIECES="$(bash -c '. "$1/refuse.sh" && . "$1/stop.sh" || exit 1
+  for k in $(stop_guard_keys); do stop_guard_say "$k" @ @ @ @ @ @ && printf "%s\n%s\n" "$SG_FACT" "$SG_DETAIL"; done' _ "$L" \
+  | tr '@' '\n' | awk '{ gsub(/^[ \t]+|[ \t]+$/, "") } length($0) >= 10' | sort -u)"
+expect_eq "the stop library says a fact under a key for each of the guard's nine refusals, its frame the detail of six" 9 \
+  "$(bash -c '. "$1/refuse.sh" && . "$1/stop.sh" && for k in $(stop_guard_keys); do stop_guard_say "$k" @ && [ -n "$SG_FACT" ] && echo "$k"; done' _ "$L" | grep -c .)"
+expect_regex "the guard's words cut into pieces" "^[1-9][0-9]*$" "$(printf '%s\n' "$DPIECES" | grep -c .)"
+expect_eq "every piece of the guard's words is found in the stop library's own text" "$(printf '%s\n' "$DPIECES" | grep -c .)" "$(pieces_in "$L/stop.sh" | grep -c .)"
+expect_eq "no piece of the guard's words is found in the guard's file" "" "$(pieces_in "$S/hooks/stop-guard.sh")"
 
 section "FOLDS"
 expect_eq "a fold through a pipe, an unread \$( ) and a local's \$( ) are named; one whose exit is read and a stand-in are not" "1 2 3" \

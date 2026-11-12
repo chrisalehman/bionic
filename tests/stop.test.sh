@@ -33,6 +33,8 @@
 #   §PATROL  a dead Patrol clock is one line of at most 80 characters, the same line on a repeat;
 #            the explanation is asked for, and the one report sentence is in the rules and the prompt
 #   §LOG     a step, an approval or an order the run's log alone holds moves the ready-with-room verdict
+#   §GUARD   the stop guard's words, its roster writes, the verdict read and the agent guard's
+#            arming check, each a stop-library function called in a shell of its own
 #
 # §1 IS THE ONE THAT GOES RED AGAINST FIRST-BLOCK-WINS, which is the alternative
 # ADR-004 rejects by name, and against the pre-merge arrangement too: before the
@@ -1107,6 +1109,56 @@ printf 'run/v1|ev=cancel|of=approval|key=step3|at=2026-11-01T00:00:03Z\n' >> "$L
 s7_fire "$LOG_D1" "$LOG_TX"
 expect_eq "LOG4 a cancel the log appends after LOG1's approval leaves no row ready: the turn ends unrefused" "|" \
   "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)|$(s9_headline)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "GUARD: the stop guard's words, its roster writes and the agent guard's check are the stop library's, each called in a shell of its own"
+
+# Every expected value below is what hooks/stop-guard.sh printed or wrote before its fold.
+GL="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+gcall() { bash -c '. "$1/refuse.sh" && . "$1/roster.sh" && . "$1/context.sh" && . "$1/stop.sh" || exit 9; shift; "$@"' _ "$GL" "$@"; }
+GD="$(mktemp -d "${TMPDIR:-/tmp}/stop-guard-lib.XXXXXX")"
+expect_eq "GD1 each key says the guard's fact and fix" "$(printf '%s\n' \
+  'the stop guard did not finish in 7 s (stop again)' 'this stop names no target (name the agent to stop)' \
+  'this stop carries no transcript path (run /bionic:doctor)' 'the state directory is a symlink (remove that symlink)' \
+  'the stop could not be recorded (make the roster writable)' 'this target is on no roster row of this session (name a rostered agent or id)' \
+  'that name has more than one live row (name the full agent id)' 'that alias is not accepted for this agent (use the agent'"'"'s own name)' \
+  'the session roster carries no id for it (stop it yourself or order it)')" \
+  "$(gcall eval 'for k in $(stop_guard_keys); do stop_guard_say "$k" /h 7 || echo "rc=$?"; printf "%s (%s)\n" "$SG_FACT" "$SG_FIX"; done')"
+expect_eq "GD2 an unknown key says nothing and returns 2" "2||" "$(gcall eval 'stop_guard_say nosuch /h; printf "%s|%s|%s" "$?" "$SG_FACT" "$SG_DETAIL"')"
+expect_eq "GD3 a frame key's detail is the reason, then the look and the order" "Target 'victim' is on no roster row of this session and wears no agent-address or
+background-bash-task-id shape, so this gate cannot tell which Agent-tool dispatch,
+if any, it names (REQ-5, D8).
+A stop is irreversible, and a wave is active.
+
+This gate took its own look at the target. To read the whole evidence tier yourself:
+
+Fix: bash /h/stop-check.sh victim
+     (pass each contracted deliverable path as a further argument)
+
+If a human ordered this stop, it executes — record the order and stop again:
+     bash /h/stop-orders.sh order victim
+A stop the human performs themselves does not reach this gate at all." "$(gcall eval 'stop_guard_say no-row /h victim; printf "%s" "$SG_DETAIL"')"
+GD_ERR="$(gcall stop_guard_refuse no-target /h "" 2>&1 | head -1)"; GD_RC="$(gcall stop_guard_refuse no-target /h "" 2>/dev/null; echo $?)"
+expect_eq "GD4 a refusal exits 2, its first line the guard's" "2|bionic: stop refused — this stop names no target (name the agent to stop)" "$GD_RC|$GD_ERR"
+gcall stop_guard_unrostered_write "$GD/roster.state" s1 ghost "seen on the panel"; GD_RC=$?
+expect_eq "GD5 an unrostered stop is written as a closed row under the roster's header, mode 600" \
+  "0|600|# bionic session roster — schema roster-state/v1 — machine-local, safe to delete|roster-state/v1|status=closed|session=s1|name=ghost|agent_id=|launched_at=T|subagent_type=|model=|deliverable=|source=|duration=|progress=|claims=|cadence=|absent=|waiver=|reason=seen on the panel|tool_use_id=|plan=none" \
+  "$GD_RC|$(stat -f %Lp "$GD/roster.state")|$(head -1 "$GD/roster.state")|$(tail -1 "$GD/roster.state" | sed 's/launched_at=[^|]*/launched_at=T/')"
+printf '%s\n' 'roster-state/v1|status=identified|name=w|agent_id=aw-1|reason=old|tool_use_id=tu1' > "$GD/r2.state"
+gcall stop_guard_reason_write "$GD/r2.state" aw-1 "unmet: deliverable missing; progress fresh"; GD_RC=$?
+expect_eq "GD6 an alive stop's verdict is the agent's latest row again, reason= before tool_use_id=" \
+  "0|roster-state/v1|status=identified|name=w|agent_id=aw-1|reason=unmet: deliverable missing; progress fresh|tool_use_id=tu1" "$GD_RC|$(tail -1 "$GD/r2.state")"
+mkdir -p "$GD/p/.bionic/tmp"; : > "$GD/p/.bionic/tmp/roster-s1.state"
+expect_eq "GD7 an agent's stop is armed when the session is engaged and its roster is there, and not without it" "0 1" \
+  "$(GDP="$GD/p" gcall eval 'BIONIC_ROOT="$GDP" BIONIC_SID=s1 BIONIC_ENGAGED=1; stop_agent_armed; a=$?; rm "$GDP/.bionic/tmp/roster-s1.state"; stop_agent_armed; echo "$a $?"')"
+printf '#!/bin/bash\necho "sweeper: $1"\necho "landing-verdict/v1|name=$2|detail=$CLAUDE_CODE_SESSION_ID $(pwd -P)"\necho "landing-verdict/v1|name=other"\n' > "$GD/sweeper.sh"
+expect_eq "GD8 the verdict read is the first verdict line of the call scoped to the name, asked in the root under the session" \
+  "landing-verdict/v1|name=w|detail=s1 $(cd "$GD/p" && pwd -P)" "$(gcall stop_verdict_line "$GD/p" s1 "$GD/sweeper.sh" w)"
+# The guard writes no temp file, by name or by pid: the class is closed by absence, read off its functions.
+GD_FN="$(gcall eval 'declare -f stop_guard stop_guard_unrostered_write stop_guard_reason_write $(compgen -A function _sg_)')"
+expect_contains "GD9 the guard's functions are read whole" "stop_guard_refuse no-target" "$GD_FN"
+expect_eq "GD9 …and none makes a temp file" "" "$(printf '%s\n' "$GD_FN" | grep -E 'mktemp|[.]tmp[.][$][$]')"
+rm -rf "$GD"
 
 # ─────────────────────────────────────────────────────────────────────────────
 finish
