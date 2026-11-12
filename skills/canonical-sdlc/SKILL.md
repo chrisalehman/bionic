@@ -41,7 +41,7 @@ Governs non-trivial engineering work. Every run declares a triple — `<intent> 
 
 **Decisions.** Every decision you put to the user, at any step and with no run open, goes through the `decision` skill: invoke it, never restate its shape. The Step-1 and Step-2 interviews are its heaviest users; small decisions may share a turn, a momentous one goes alone. An ask that holds the run is recorded in the run's register by its verb before it is put to the user — a decision or a stop-rule call by `decisions put D<n> '<what is decided>'` — so the sitrep cannot miss it. Approvals wait for the release approval card (`release-approval`, answered by `reply`); a reversible call is yours to make.
 
-**Iron law.** No commit without evidence from the current step. The evidence gate reads the plan's `current:` and validates that step's evidence only — it never re-checks earlier steps, so a skipped step is caught by review, not by code.
+**Iron law.** No commit without evidence from the current step. The evidence gate reads the run's step from its log and asks that step's evidence only — it never re-checks earlier steps, so a skipped step is caught by review, not by code.
 
 **Bulk reference.** Artifact shape and authoring detail live in `skills/canonical-sdlc/operational-rules.md`, beside this file, and the version history in the CHANGELOG. Read it when you need the detail this file compresses; nothing loads it for you.
 
@@ -96,7 +96,7 @@ Rigor follows one principle: the moment of a check is set by its cost model; mac
 | `wave` | 0–9, the default | wave spec + plan | yes | double | uncapped | yes | `wave/<NN>-<slug>` | merge | piece+whole |
 | `epic` | 0–3; carves waves | epic spec + plan | yes | double | uncapped | no | `epic/<NN>-<slug>` | merge | piece |
 
-**Rigor minimums.** Default is the Rigor cell: at `task`, `single` unless a flag raises it; at `wave` and above, `double`. Effective rigor is the MAX of the default and four minimums — intent (`incident-response` is at least `double`, `spike` is CAPPED at `single`), flag (security-touching or privacy/vulnerable-population work is at least `double`), project (`rigor-minimum:` in `.bionic/config.yaml`), epic (`rigor-minimum:` in epic frontmatter). Provisional at Step 0, locked at Step 3. **Minimums advise; they never force.** Upgrades are free, and a rigor below the minimum is the user's to choose: advised against at Step 0, then accepted and recorded as `rigor-override:` (see the Override DSL). One adjacent check does block, and it is not a minimum: a task-ledger row whose rigor cell sits *below* the plan's own frontmatter `rigor:` is refused unless the row records a waiver. That is a consistency check against the value the plan declares — lower the frontmatter and the rows follow it down, so it never re-imposes a minimum the user has overridden.
+**Rigor minimums.** Default is the Rigor cell: at `task`, `single` unless a flag raises it; at `wave` and above, `double`. Effective rigor is the MAX of the default and four minimums — intent (`incident-response` is at least `double`, `spike` is CAPPED at `single`), flag (security-touching or privacy/vulnerable-population work is at least `double`), project (`rigor-minimum:` in `.bionic/config.yaml`), epic (`rigor-minimum:` in epic frontmatter). Provisional at Step 0, locked at Step 3. **Minimums advise; they never force.** Upgrades are free, and a rigor below the minimum is the user's to choose: advised against at Step 0, then accepted and recorded as `rigor-override:` (see the Override DSL).
 
 Do not carve a sensitive concern into a tiny unflagged wave to dodge a minimum. The wave that owns the integration point carries the flag minimum.
 
@@ -134,22 +134,22 @@ writes `wave-NN-<slug>.requirements.md`: numbered requirements/user stories, eac
 provenance and acceptance criteria written so a "fails when" is nameable, plus Not Doing. Step
 2 writes `wave-NN-<slug>.spec.md`: the technical design (domain model, architecture, ownership
 table, rejected alternatives), the Eval design table, and ADR pointers. Step 3 writes
-`wave-NN-<slug>.plan.md`: tasks, sequencing, the dispatch ledger, and the verification matrix
-rendered from Step 2's Eval design. Requirements live beside the spec, both under
+`wave-NN-<slug>.plan.md`: tasks, sequencing and one section per task; its criteria are Step 2's
+Eval design rows, read in place. Requirements live beside the spec, both under
 `specs/epic-NN-<slug>/` — the governing-skill hook validates `*.requirements.md` frontmatter the
 same way it validates `*.spec.md`, minus the design three-way rule (that stays spec-only). Each
 of the three opens with a `## Goal` section — one concise paragraph, first after the title — and a governing-skill arm at `scale: wave` or `scale: epic` refuses a
 write whose first section is not Goal, or whose Goal section is empty.
 
-**Anything the matrix cites as evidence goes in `record/`, never `tmp/`.** Auditor reports,
-review records, test-run captures — the matrix names them by path, so
+**Anything a proof cites as evidence goes in `record/`, never `tmp/`.** Auditor reports,
+review records, test-run captures — the run's log names them by path, so
 they must outlive the run that produced them. `tmp/` is wiped at Step 8 and takes its contents
 with it — everything, that is, except a live session's own keyed state, which the wipe spares
 by owner liveness, not file name. Give an agent a `record/` path in its brief.
 
-Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 14`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`. Plan files additionally carry `walk: required | exempt` — Step 0's derivation, and the key the Verify gate reads — Step 0's `design-interview:` value beside it, `regression:` (`yes` or `no`, Step 0's setting) and, where it differs from the scale default, `regression-override:` beside those, and, where the run's rigor sits below its derived minimum, `rigor-override:`. None of these is required to write, but a `walk:` value outside the enum blocks.
+Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 15`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`. Plan files additionally carry `walk: required | exempt` — Step 0's derivation, and the key the Verify gate reads — Step 0's `design-interview:` value beside it, `regression:` (`yes` or `no`, Step 0's setting) and, where it differs from the scale default, `regression-override:` beside those, and, where the run's rigor sits below its derived minimum, `rigor-override:`. None of these is required to write, but a `walk:` value outside the enum blocks.
 
-**14 is the only supported version.** Any other value — an older number, an empty value, a typo — blocks at both hooks. A run that predates it is brought forward to 14, not exempted.
+**15 is the version a plan is written at.** An unsupported value — an empty value, a typo — blocks at both hooks. A live plan at 14 is brought forward by the act `doctor` names, `bash <plugin-root>/scripts/bring-forward.sh <plan>`, not exempted.
 
 ## Steps
 
@@ -189,7 +189,7 @@ Deliverable-waiver: <reason>  # only for a report returned by message
 ```
 <!-- BRIEF-SCAFFOLD-END -->
 
-Committing is a cross-cutting rhythm (~once per step), not a numbered step. Update `## SDLC State` **before staging** — the gate reads the file, not the diff. Do not add a `commit:` field; the SHA lives in git.
+Committing is a cross-cutting rhythm (~once per step), not a numbered step; the SHA lives in git.
 
 **Engagement:** a clean run has five human stops: the configuration, requirements, design and plan cards, then the release approval card. Steps 4–9 are unattended within the stop-and-wake rules.
 
@@ -199,32 +199,32 @@ Committing is a cross-cutting rhythm (~once per step), not a numbered step. Upda
 
 ## Evidence shapes
 
-One evidence artifact per step under `Step N:` in `## SDLC State`. The gate validates the current step only.
+A step's evidence is events in the run's log and the header a person wrote; `reader.sh <plan> step` answers the step. The gate asks the current step only.
 
-| Step | Required fields |
+| Step | What the gate asks |
 |---|---|
-| 0 | `prereqs: ok` |
-| 1, 2, 3 | pointer (presence only) |
-| 4 | pointer, plus `worktree:`/`base-sha:`/`branch:`, owed at every scale and whatever `use_worktree:` says; `current 4` fills them at wave scale |
-| 5 | `head:`/`cmd:`/`pass:`/`total:`/`output:` optional, read by no gate; a valid `## Verification Matrix`, `walk-artifact:` naming a real file under `<docs-root>/record/` once any row is `discharged` (unless `walk: exempt`), once no row is `pending`/`blocked` a non-empty `auditor:`, and at `regression: no` the line `regression: no (Step 0, <user>) — <where it runs>`. The whole run is Step 5's, once after the build; a red is a fix row's (`steps/5.md`) |
-| 6 | one fact per owed question (`proved: kind=review`), or its `waived:` line; matrix re-validated here |
-| 7 | `adr:` OR `rca:` OR `n/a:` |
-| 8 | `merge:`, `worktree-removed:`, and (`cleanup:`, `tmp-wiped:`, `tasks-completed:` OR `cleanup: n/a`) |
-| 9 | `delivered:` always, ON the `Step 9:` line itself — the run-closure predicate (`lib/run.sh`) greps that one line, so a `delivered:` written on a continuation line leaves the run open forever; `archived:` always, naming what `archive_run` moved or why nothing moved; plus `deployed:`, `verified:`, `monitored:` exactly when `deploy_target` names a live surface |
+| 1 | the requirements file the header's `epic:` and `wave:` name |
+| 2, 3 | the approval of the step before |
+| 4 | the header's `working-branch:` and `base-sha:` |
+| 5 | the regression's proof, unless the header reads `regression: no`; every criterion discharged or waived; the walk proof (unless `walk: exempt`); the auditor's evidence review; the environments the walk proof covers. The whole run is Step 5's, once after the build; a red is a fix row's (`steps/5.md`) |
+| 6 | one review proof per owed question at the head, or its waiver |
+| 7 | the header's `adrs:` naming records that stand, or `none` with its reason |
+| 8 | the integrate row's landing, every tree gone, and step 8's `cleanup`, `tmp-wiped`, `tasks-completed` from close-out |
+| 9 | the delivery: step 9's `delivered` from close-out, closing the run, with `archived`; plus `deployed`, `verified`, `monitored` when `deploy_target` names a live surface |
 
-**The matrix.** Step 3 renders the matrix (`matrix-render`); Step 5 fills values.
+**The matrix** is a view: a criterion is its Eval design row, its state the log's (`reader.sh <plan> cell <AC>`).
 
 **Placeholder ban.** These exact values are rejected anywhere evidence is required: `todo`, `pending`, `in progress`, `inprogress`, `xxx`, `tbd`, `placeholder`.
 
-**Handoff.** A plan spanning sessions carries one `## Handoff` pointer line to the file `session-poker.sh handoff` writes (`record/<wave>/handoff.md`: the machine's facts, the five human lines carried, safe to clear or wait N minutes, the door last), never by hand. Invoked with that file's path, run `session-poker.sh resume <path>` first and do what it prints: it binds, arms, adopts and ticks, and prints the task list, the recap, the step file and the Patrol job. At Step 9 write `continuation.md` — wave completed, integration branch + merge SHA, next wave, open carry-overs.
+**Handoff.** A run spanning sessions hands off through `session-poker.sh handoff`, which writes `record/handoffs/<date>-<slug>.md` (the machine's facts, the five human lines carried, safe to clear or wait N minutes, the door last) and one handoff event. Invoked with that file's path, run `session-poker.sh resume <path>` first and do what it prints: it binds, arms, adopts and ticks, and prints the task list, the recap, the step file and the Patrol job. At Step 9 write `continuation.md` — wave completed, integration branch + merge SHA, next wave, open carry-overs.
 
 ## Hooks
 
-**`bash-walls.sh`** (`PreToolUse|Bash`) fires only on a real `git commit` segment. It validates the session's bound plan: the current step's evidence, the matrix, and the task ledger. **From `current: 5` onward** it also blocks on `provenance: implementation` in any AC block. **The gate reads the plan as it is when the call starts, not as it will be once the rest of the command runs** — a Bash call that edits the plan and commits in the same invocation is judged on the pre-edit plan, so edit the plan in one call and commit in a separate one. Log-only (never blocks): the epic merge-target check, and the `refactor`/`tune` intent-scoped Step-5 keys. A task row's `agent` cell carries the agent's ROSTER NAME, never its role, matched byte for byte.
+**`bash-walls.sh`** (`PreToolUse|Bash`) fires only on a real `git commit` segment. It validates the session's bound run: the current step's evidence, the criteria, and the Tasks rows. **The gate reads the plan and the log as they are when the call starts, not as it will be once the rest of the command runs** — a Bash call that edits the plan and commits in the same invocation is judged on the pre-edit plan, so edit the plan in one call and commit in a separate one. Log-only (never blocks): the epic merge-target check, and the `refactor`/`tune` intent-scoped Step-5 keys. 
 
-**`canonical-sdlc-governing-skill.sh`** (`PreToolUse|Write,Edit`) blocks any artifact under `<docs-root>/{specs,plans,adrs,incidents}/` lacking `governing-skill:` frontmatter, and blocks a `mode:` line, a missing or non-enum triple, a missing flag or `model_plan`, a `walk:` value outside `required|exempt`, or a missing `## Verification Matrix` at `sdlc-step ≥ 3`. On a **spec** artifact at `scale: wave` or `scale: epic` it also blocks a write satisfying no arm of the three-way design rule: no flush-left `## Design` in place, no `design:` pointer resolving to a real file that itself carries a flush-left `## Design` (a dangling path, a target without the section, and a `..` component each fail the arm), and no `design-waived:` token. A `design:` pointer that is present is validated on the unwaived path whether or not the spec also carries its own section. On the same wave/epic **spec** it also blocks, from `sdlc-step ≥ 3` only, an `adrs:` frontmatter line naming a path (or several, joined by ` · `) that does not resolve to a real file — the momentous-ADR pointer D6 requires; below `sdlc-step 3` the arm is silent, since the ADR is drafted alongside the spec that names it. Plans and every task-scale artifact are untouched by it. Minimum-consistency checks are log-only, and log `user-overridden` in place of a minimum violation when frontmatter carries `rigor-override:` — presence only; the marker's fields are never validated, and it does not quiet a malformed `rigor-minimum:` value in `config.yaml`.
+**`canonical-sdlc-governing-skill.sh`** (`PreToolUse|Write,Edit`) blocks any artifact under `<docs-root>/{specs,plans,adrs,incidents}/` lacking `governing-skill:` frontmatter, and blocks a `mode:` line, a missing or non-enum triple, a missing flag or `model_plan`, a `walk:` value outside `required|exempt`, or a plan part no person wrote (`steps/3.md`). On a **spec** artifact at `scale: wave` or `scale: epic` it also blocks a write satisfying no arm of the three-way design rule: no flush-left `## Design` in place, no `design:` pointer resolving to a real file that itself carries a flush-left `## Design` (a dangling path, a target without the section, and a `..` component each fail the arm), and no `design-waived:` token. A `design:` pointer that is present is validated on the unwaived path whether or not the spec also carries its own section. On the same wave/epic **spec** it also blocks, from `sdlc-step ≥ 3` only, an `adrs:` frontmatter line naming a path (or several, joined by ` · `) that does not resolve to a real file — the momentous-ADR pointer D6 requires; below `sdlc-step 3` the arm is silent, since the ADR is drafted alongside the spec that names it. Plans and every task-scale artifact are untouched by it. Minimum-consistency checks are log-only, and log `user-overridden` in place of a minimum violation when frontmatter carries `rigor-override:` — presence only; the marker's fields are never validated, and it does not quiet a malformed `rigor-minimum:` value in `config.yaml`.
 
-**Known holes — do not mistake these for enforcement.** Flag *values* are never checked, only presence. The evidence gate reads the plan file's text, so an `Edit` that writes evidence for tests never run passes unseen. Proof-shape is a heuristic: a digit plus a `/` satisfies it. Task-scale ledgers have no write-time check. An `active` row whose agent the session's roster names needs no evidence line; with no roster, an agent-named one still does. The fact gate knows who answered which question about which code, never that the answer is right, and a hand-typed `git merge` meets no gate: only the step advance, the integrate row and close-out ask it.
+**Known holes — do not mistake these for enforcement.** Flag *values* are never checked, only presence. A proof names a record, so a record written for tests never run passes unseen. The fact gate knows who answered which question about which code, never that the answer is right, and a hand-typed `git merge` meets no gate: only the step advance, the integrate row and close-out ask it.
 
 ## Diagrams
 

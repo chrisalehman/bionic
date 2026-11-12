@@ -81,4 +81,4 @@ Before you put any ask to the user in chat, record it through its verb so the sh
 ## The rules
 
 - Every fact on the card comes from the verb: the card verb refuses a row that drops or contradicts one. Your words reach the card only through the judgment.
-- Both verbs first close any ask whose decision the design ledger already reads as ruled. Apart from that and the asks you record, nothing here changes a plan, a record or a run.
+- Both verbs first close any ask whose decision the run's log already holds as ruled. Apart from that and the asks you record, nothing here changes a plan, a record or a run.
