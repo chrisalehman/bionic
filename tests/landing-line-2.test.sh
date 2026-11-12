@@ -901,10 +901,12 @@ ll_settle_world() {  # -> root, the world above, T1 not yet landed
   h2="$(git -C "$r" rev-parse HEAD)"
   ll_settle_rev "$rd" recA "$b" "$h1" s.txt:1; ll_settle_rev "$rd" recB "$b" "$h2" s.txt:3
   ll_settle_rev "$rd" recC "$b" "$h2" s.txt:1; ll_settle_rev "$rd" recE "$b" "$h1" s.txt:3
+  printf 'reviewed: %s..%s\nquestion: evidence\nresult: flag\nscope: piece\n\nAn evidence read that names no finding.\n' "$b" "$h1" > "$rd/recZ.md"
   H1="$h1" H2="$h2" awk '
     function pr(n, h) { print "proved: kind=review head=" h " at=2026-10-20T00:00:00Z evidence=record/wave-x/" n ".md question=structure reader=w-" n " result=fail scope=piece" }
     /^- T1: active$/ { print "- T1: active — added by task-add at 2026-10-20T00:00:00Z born: review S1 off of=record/wave-x/recA.md#1"
-      pr("recA", ENVIRON["H1"]); pr("recB", ENVIRON["H2"]); pr("recC", ENVIRON["H2"]); pr("recE", ENVIRON["H1"]); next }
+      pr("recA", ENVIRON["H1"]); pr("recB", ENVIRON["H2"]); pr("recC", ENVIRON["H2"]); pr("recE", ENVIRON["H1"])
+      print "proved: kind=review head=" ENVIRON["H1"] " at=2026-10-20T00:00:00Z evidence=record/wave-x/recZ.md question=evidence reader=w-recZ result=flag scope=piece"; next }
     { print }
     END {
       print ""; print "## Eval design"; print ""
@@ -938,6 +940,8 @@ expect_eq "(st0f) …E's carry is one finding event in the run's log naming the 
 ll_verb "$ST" T1
 expect_eq "(st0d) T1 lands through ready" "0" "$LL_RC"
 [ "$LL_RC" = 0 ] || printf '      ready said: %s\n' "$LL_OUT"
+expect_contains "(st0g) …its words name the landing" "LANDED T1 " "$LL_OUT"
+expect_absent "(st0g) …and hold no UNSETTLED, the last registered review (Z) carrying no findings line" "UNSETTLED" "$LL_OUT"
 ST_C="$(ll_field "$(ll_ev "$ST" published | /usr/bin/grep '|row=T1|' | tail -1)" commit)"
 expect_nonempty "(st0e) the landing record names T1's published commit, which the rows below read" "$ST_C"
 
