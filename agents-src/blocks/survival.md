@@ -43,9 +43,8 @@ about doing the job well; they are about still being alive to report it.
   command you start keeps running after you stop. Launch it with the Bash tool's own
   `run_in_background: true` — not a shell background job, which severs the harness's own
   delivery-by-exit — and shape the command so the log ends with its own status line:
-  `<cmd> > "$LOG" 2>&1; echo "EXIT=$?" >> "$LOG"`. Nothing else writes that line, so a launch
-  without it is a Monitor that never fires. Then print the path and stop; the orchestrator arms
-  a Monitor on the file's `EXIT=` line.
+  `<cmd> > "$LOG" 2>&1; echo "EXIT=$?" >> "$LOG"`, which nothing else writes. Then print the
+  path and stop; the orchestrator reads that line at its next tick and arms no watch on it.
 - **You do not set your test width.** Every suite asks the gate for its place, and the gate
   admits it when the machine has room under the share; a run it cannot admit in its time
   exits 75 with the line to run again, and nothing ran, so run that line again. There is
