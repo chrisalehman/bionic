@@ -1154,6 +1154,10 @@ expect_eq "GD7 an agent's stop is armed when the session is engaged and its rost
 printf '#!/bin/bash\necho "sweeper: $1"\necho "landing-verdict/v1|name=$2|detail=$CLAUDE_CODE_SESSION_ID $(pwd -P)"\necho "landing-verdict/v1|name=other"\n' > "$GD/sweeper.sh"
 expect_eq "GD8 the verdict read is the first verdict line of the call scoped to the name, asked in the root under the session" \
   "landing-verdict/v1|name=w|detail=s1 $(cd "$GD/p" && pwd -P)" "$(gcall stop_verdict_line "$GD/p" s1 "$GD/sweeper.sh" w)"
+# The guard writes no temp file, by name or by pid: the class is closed by absence, read off its functions.
+GD_FN="$(gcall eval 'declare -f stop_guard stop_guard_unrostered_write stop_guard_reason_write $(compgen -A function _sg_)')"
+expect_contains "GD9 the guard's functions are read whole" "stop_guard_refuse no-target" "$GD_FN"
+expect_eq "GD9 …and none makes a temp file" "" "$(printf '%s\n' "$GD_FN" | grep -E 'mktemp|[.]tmp[.][$][$]')"
 rm -rf "$GD"
 
 # ─────────────────────────────────────────────────────────────────────────────

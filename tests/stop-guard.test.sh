@@ -700,14 +700,6 @@ else
   printf 'SKIPPED: the unreadable-roster case needs a non-root uid (root reads mode 000)\n' >&2
 fi
 
-# THE TEMP FILE IS GONE, WHICH IS STRONGER THAN NAMING IT WELL. The predictable-temp-name
-# plus planted-symlink shape was a proven arbitrary-file overwrite in the discarded run
-# (corr-sec S1/S2), and the answer then was an mktemp X-template. This gate writes NOTHING
-# now — no record, no temp, no lock — so the class is closed by absence rather than by
-# careful naming, and these two rows are what keep it that way.
-expect_absent "the gate creates no temp file at all" "mktemp" "$(cat "$GUARD")"
-expect_absent "no PID-based temp filename" '.tmp.$$' "$(cat "$GUARD")"
-
 # The gate reads the working log; it must never quote it. (§8 keeps that
 # disclosure in the observation, whose whole purpose is to show it to a reader.)
 printf '{"type":"assistant","message":{"content":[{"type":"text","text":"CANARY_LOG_BODY"}]}}\n' \
