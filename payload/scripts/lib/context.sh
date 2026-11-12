@@ -92,9 +92,9 @@
 # READ ONCE, ADOPT IF ALREADY READ (R1). stdin is consumed exactly once in a
 # process, so a second `cat` returns empty or blocks. Two hooks — protect-main and
 # canonical-sdlc-evidence-gate — MUST read the payload before any library exists,
-# because `loader_fail_closed` matches the repair allowlist on the command TEXT
-# and the library that would have supplied it is precisely the one that failed to
-# load. They assign BIONIC_INPUT from what they read, and this file adopts it. The
+# because the Bash wall matches its repair commands on the command TEXT before it
+# refuses, and the library that would have supplied it is precisely the one that
+# failed to load. They assign BIONIC_INPUT from what they read, and this file adopts it. The
 # test is `${BIONIC_INPUT+x}` and not `-n`: a hook whose payload really was empty
 # has still consumed stdin.
 #
@@ -189,7 +189,7 @@ fi
 # field that routinely carries newlines (a heredoc, a multi-line pipeline), and
 # a line-oriented record cannot hold it without an escaping scheme this file
 # would then have to reverse. The two hooks that need it read it once, above the
-# loader, for `loader_fail_closed`'s allowlist (R1) — so it is already read
+# loader, for the Bash wall's repair commands — so it is already read
 # exactly once without any help from here.
 _BIONIC_JQ_STATE=""
 _BIONIC_JQ_END="__bionic_jq_end__"

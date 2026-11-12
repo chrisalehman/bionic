@@ -158,9 +158,9 @@ BIONIC_WALL_HOOKS="$(bionic_check_wall_roster) permission-answer"
 bionic_check_payload_root() { plugin_root; }
 
 # THE WANTED BASENAMES COME FROM THE HOOK, not from a list kept here. A hook that
-# adopts the loader idiom declares them on a `BIONIC_LIB_WANT=` line above the
-# block; one that has not yet adopted it names its library in the `lib/<name>.sh`
-# path it sources. Either way the answer is the hook's own.
+# carries the loader's stub declares them on the `BIONIC_LIB_WANT=` line above it;
+# one that does not names its library in the `lib/<name>.sh` path it sources.
+# Either way the answer is the hook's own.
 bionic_check_wall_want() {  # <hook-file> -> space-separated library basenames
   local f="${1:-}" want=""
   want="$(grep -m1 '^[[:space:]]*BIONIC_LIB_WANT=' "$f" 2>/dev/null \
@@ -216,9 +216,9 @@ bionic_check_wall_missing_lib() {  # <wanted basenames> -> the first this payloa
   printf ''
 }
 
-# ASKED THROUGH THE IDIOM ITSELF, never through a copy of it. `bionic_loader_pin`
-# prints the canonical block; it runs in a child shell whose `$0` is the HOOK'S
-# OWN PATH, which is the single input the block's candidate list is a function of.
+# ASKED THROUGH THE STUB ITSELF, never through a copy of the walk. `bionic_loader_pin`
+# prints the stub every hook carries; it runs in a child shell whose `$0` is the HOOK'S
+# OWN PATH, which is the single input the candidate list is a function of.
 # Built on first use, not at source time: setup never asks this question, and a
 # library that paid for a heredoc and a subshell on every setup run would be
 # charging the wrong script.

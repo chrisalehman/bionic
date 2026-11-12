@@ -18,9 +18,6 @@
 # WHAT IT NEVER HOLDS. A fixture: a repository one section builds and a later one reads is not a helper, so
 # those sections share a part instead. None crosses the cut today.
 #
-# THE OLD FILE'S GOVERNING HEADER FOLLOWS, unchanged but for its usage line, since no cross-gate-agreement.test.sh
-# remains to hold it.
-#
 # CROSS-COMPONENT INSTRUMENT PROOFS — epic-15 wave-01R, task 4/6.
 #
 # Serves AC-9 (N-way agreement over every copy of a duplicated concept,

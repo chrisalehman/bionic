@@ -1,21 +1,16 @@
 #!/bin/bash
 # tests/loader.test.sh — the one loader idiom.
 #
-# WHAT IS UNDER TEST. payload/scripts/lib/loader.sh carries the canonical idiom text
-# between the exact marker lines `# --- bionic-loader/v2 BEGIN` and
-# `# --- bionic-loader/v2 END`, and exposes `bionic_loader_pin`, which prints that
-# block (markers inclusive). Task ADOPT pastes the printed block byte-identically
-# into every hook; the byte-identity pin lives in the cross-gate suite. This suite
-# tests the BEHAVIOUR of the block, and it tests it the only honest way: by pasting
-# `bionic_loader_pin`'s output into a throwaway hook and running that hook. A library
-# cannot load itself, so `$0` — the hook's own path — is the block's first input, and
-# nothing that sources loader.sh directly could observe that.
+# WHAT IS UNDER TEST. payload/scripts/lib/loader.sh, the one loader. Between the exact marker lines
+# `# --- bionic-loader/v2 BEGIN` and `# --- bionic-loader/v2 END` it defines the walk, `bionic_load`, and
+# the two calls a hook makes when nothing was found; `bionic_loader_pin` prints the stub every hook
+# carries under its BIONIC_LIB_WANT line. This suite tests the behaviour the only honest way: it writes
+# the printed stub into a throwaway hook, lays loader.sh beside it as an install or the repository does,
+# and runs that hook, because `$0`, the hook's own path, is the walk's first input. A hook with no
+# loader beside it is a broken install: §N proves the stub then answers in the loader's own words.
 #
-# WHY THE BLOCK IS NOT EXECUTABLE AT loader.sh's TOP LEVEL. loader.sh is a carrier,
-# not a loader: sourcing it must define `bionic_loader_pin` and do nothing else. The
-# canonical text therefore sits inside a QUOTED heredoc, so the marker lines and every
-# line between them are literal bytes in the file and extraction by marker works
-# identically on loader.sh and on any hook ADOPT has written.
+# SOURCING loader.sh RUNS NOTHING: it defines functions, so doctor and the check table can source it
+# for `bionic_loader_pin` and probe a hook's own path without the walk running against theirs.
 #
 # THE THREE CANDIDATE CLASSES (plan §L-LOADER, spec AC-16), later ones evaluated only
 # when the earlier ones fail:
@@ -39,8 +34,8 @@
 #
 # ANTI-VACUITY (.claude/rules/test-harness.md, "Anti-vacuity"). Three guards, each of which
 # would go red on a suite that had quietly stopped testing anything:
-#   - §0 proves the block exists, is marker-delimited, and parses as bash before any
-#     behavioural assertion runs.
+#   - §0 proves the stub is printed and parses as bash inside a hook, and that the walk's marks
+#     stand in loader.sh once, before any behavioural assertion runs.
 #   - §A's "jq was never called" claim is only worth something if the jq shim can
 #     actually be reached, so §A3 runs a fixture that MUST consult the registry and
 #     asserts the shim fired.
@@ -78,37 +73,33 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/bionic-loader.XXXXXX")" || exit 1
 trap 'rm -rf "$WORK"' EXIT
 FAKE_HOME="$WORK/nohome"; mkdir -p "$FAKE_HOME"
 
-# ── §0 — the block extracts, is marker-delimited, and parses ─────────────────
-BLOCK="$WORK/block.txt"
+# ── §0 — the stub is printed and parses; the walk's marks stand once ─────────
+BLOCK="$WORK/stub.txt"
 ( set +u; . "$LOADER_LIB" && bionic_loader_pin ) > "$BLOCK" 2>"$WORK/pin.err"
-if [ ! -s "$BLOCK" ]; then
-  no "0.1 bionic_loader_pin prints the canonical block" "empty; stderr: $(cat "$WORK/pin.err")"
+if grep -qF '. "$_bl_l"; bionic_load' "$BLOCK"; then
+  ok "0.1 bionic_loader_pin prints the stub that sources the loader"
 else
-  ok "0.1 bionic_loader_pin prints the canonical block"
+  no "0.1 bionic_loader_pin prints the stub that sources the loader" "got: $(head -3 "$BLOCK"); stderr: $(cat "$WORK/pin.err")"
 fi
-eq "0.2 first line is the BEGIN marker"  "$(head -1 "$BLOCK")" "$MARK_BEGIN"
-eq "0.3 last line is the END marker"     "$(tail -1 "$BLOCK")" "$MARK_END"
-if [ "$(grep -c -- "^${MARK_BEGIN}\$" "$BLOCK")" = "1" ] && [ "$(grep -c -- "^${MARK_END}\$" "$BLOCK")" = "1" ]; then
-  ok "0.4 exactly one marker pair in the block"
+eq "0.2 the stub carries no block mark" "$(grep -c -- '^# --- bionic-loader/v2' "$BLOCK")" "0"
+eq "0.3 loader.sh holds one marker pair" "$(grep -c -- "^${MARK_BEGIN}\$" "$LOADER_LIB") $(grep -c -- "^${MARK_END}\$" "$LOADER_LIB")" "1 1"
+# Sourcing the loader must define functions and run nothing — in particular it must not set
+# BIONIC_LIB, which would mean the walk ran against the sourcing script's own path.
+if ( set +u; . "$LOADER_LIB" >/dev/null 2>&1; [ -z "${BIONIC_LIB:-}" ] && [ -z "${BIONIC_LIB_MISSING:-}" ] && declare -F bionic_load >/dev/null ); then
+  ok "0.6 sourcing loader.sh defines the walk and does not run it"
 else
-  no "0.4 exactly one marker pair in the block"
-fi
-# Sourcing the carrier must define the function and do nothing else — in
-# particular it must not set BIONIC_LIB, which would mean the block ran.
-if ( set +u; . "$LOADER_LIB" >/dev/null 2>&1; [ -z "${BIONIC_LIB:-}" ] && [ -z "${BIONIC_LIB_MISSING:-}" ] ); then
-  ok "0.6 sourcing loader.sh does not execute the block"
-else
-  no "0.6 sourcing loader.sh does not execute the block" "BIONIC_LIB/BIONIC_LIB_MISSING set on source"
+  no "0.6 sourcing loader.sh defines the walk and does not run it" "BIONIC_LIB/BIONIC_LIB_MISSING set on source, or no bionic_load"
 fi
 
 # ── fixture builder ─────────────────────────────────────────────────────────
-# Writes <root>/hooks/probe.sh: a hook whose body is the canonical block
-# verbatim, preceded by the BIONIC_LIB_WANT declaration ADOPT will write and
-# followed by whatever tail the case needs. `$0` is <root>/hooks/probe.sh, so
-# candidate (1) resolves relative to <root> exactly as it does in a real install.
+# Writes <root>/hooks/probe.sh: a hook whose body is the printed stub verbatim, preceded by
+# a BIONIC_LIB_WANT line and followed by whatever tail the case needs, and lays loader.sh at
+# <root>/<loader dir> (default scripts/lib, the install's spelling; "none" lays no loader).
+# `$0` is <root>/hooks/probe.sh, so candidate (1) resolves as it does in a real install.
 REPORT_TAIL='echo "LIB=${BIONIC_LIB}"; echo "MISSING=${BIONIC_LIB_MISSING}"; echo "CANDS=${BIONIC_LIB_CANDS}"'
-mkhook() { # mkhook <root> <tail>
+mkhook() { # mkhook <root> <tail> [loader dir]
   mkdir -p "$1/hooks"
+  if [ "${3:-scripts/lib}" != none ]; then mkdir -p "$1/${3:-scripts/lib}"; cp "$LOADER_LIB" "$1/${3:-scripts/lib}/loader.sh"; fi
   {
     echo '#!/bin/bash'
     echo 'set -u'
@@ -139,12 +130,12 @@ exit 99
 SHIM
 chmod +x "$SHIM_BIN/jq"
 
-# `bash -n` on a built hook — the block must parse where it is actually pasted.
+# `bash -n` on a built hook — the stub must parse where it is actually carried.
 mkhook "$WORK/parse" "$REPORT_TAIL"
 if bash -n "$WORK/parse/hooks/probe.sh" 2>"$WORK/parse.err"; then
-  ok "0.7 the block parses as bash inside a hook"
+  ok "0.7 the stub parses as bash inside a hook"
 else
-  no "0.7 the block parses as bash inside a hook" "$(cat "$WORK/parse.err")"
+  no "0.7 the stub parses as bash inside a hook" "$(cat "$WORK/parse.err")"
 fi
 
 # ── §A — candidate (1) wins, and (2)/(3) are never evaluated ────────────────
@@ -162,7 +153,7 @@ else
 fi
 
 A2="$WORK/a2"; mkdir -p "$A2/payload/scripts/lib"; : > "$A2/payload/scripts/lib/git-argv.sh"
-mkhook "$A2" "$REPORT_TAIL"
+mkhook "$A2" "$REPORT_TAIL" payload/scripts/lib
 rm -f "$JQ_MARK"
 runhook "$A2" "$WORK/a2-plugins" "$SHIM_BIN" > "$WORK/a2.out" 2>"$WORK/a2.err"; A2RC=$?
 eq "A2.1 repo spelling: hook exits 0"    "$A2RC" "0"
@@ -173,7 +164,7 @@ else
   ok "A2.3 repo spelling is still class (1) — no jq"
 fi
 
-# A3 — the shim is reachable. Without this, A1.4/A2.3 could pass on a block that
+# A3 — the shim is reachable. Without this, A1.4/A2.3 could pass on a walk that
 # never consults the registry at all, or on a PATH the hook does not inherit.
 A3="$WORK/a3"; mkhook "$A3" "$REPORT_TAIL"
 A3PD="$WORK/a3-plugins"; mkdir -p "$A3PD"
@@ -228,7 +219,7 @@ eq "C.3 control: a lone 1.3.2 is selected" \
 D="$WORK/d"; mkhook "$D" "$REPORT_TAIL"
 DPD="$WORK/d-plugins"; mkdir -p "$DPD"
 runhook "$D" "$DPD" "" > "$WORK/d.out" 2>"$WORK/d.err"; DRC=$?
-eq "D.1 all candidates missing: block does not exit"  "$DRC" "0"
+eq "D.1 all candidates missing: the walk does not exit"  "$DRC" "0"
 eq "D.2 BIONIC_LIB empty"                             "$(field "$WORK/d.out" LIB)" ""
 eq "D.3 BIONIC_LIB_MISSING names the wanted library"  "$(field "$WORK/d.out" MISSING)" "git-argv.sh"
 DCANDS="$(field "$WORK/d.out" CANDS)"
@@ -237,13 +228,13 @@ case "$DCANDS" in
   *) no "D.4 candidate list records what was tried" "CANDS=[$DCANDS]" ;;
 esac
 
-# ── §H — the BIONIC_LIB_WANT contract ADOPT writes ─────────────────────────
+# ── §H — the BIONIC_LIB_WANT contract a hook writes ─────────────────────────
 # A hook may want more than one basename. A candidate directory qualifies only when
 # it holds ALL of them, so a directory holding half the library is not "found" — the
 # alternative is a hook that sources one file and dies on the next.
 H1="$WORK/h1"; mkdir -p "$H1/scripts/lib"; : > "$H1/scripts/lib/git-argv.sh"
 mkdir -p "$H1/payload/scripts/lib"; : > "$H1/payload/scripts/lib/git-argv.sh"; : > "$H1/payload/scripts/lib/cmd-class.sh"
-mkdir -p "$H1/hooks"
+mkdir -p "$H1/hooks"; cp "$LOADER_LIB" "$H1/scripts/lib/loader.sh"
 { echo '#!/bin/bash'; echo 'set -u'; echo 'BIONIC_LIB_WANT="git-argv.sh cmd-class.sh"'; cat "$BLOCK"; printf '%s\n' "$REPORT_TAIL"; } > "$H1/hooks/probe.sh"
 runhook "$H1" "$WORK/h1-plugins" "" > "$WORK/h1.out" 2>"$WORK/h1.err"
 eq "H.1 a partial directory is skipped; the complete one wins" \
@@ -255,7 +246,7 @@ eq "H.1 a partial directory is skipped; the complete one wins" \
 H2="$WORK/h2"; mkhook "$H2" "$REPORT_TAIL"
 H2PD="$WORK/h2-plugins"; mkdir -p "$H2PD"
 printf '%s\n' '{"plugins":{"bionic@bionic":[{"installPath":"/nowhere"}]}}' > "$H2PD/installed_plugins.json"
-# A REALISTIC no-jq PATH: every other tool the block may reach for is present, jq
+# A REALISTIC no-jq PATH: every other tool the walk may reach for is present, jq
 # alone is absent. Emptying PATH outright would also strip dirname and prove nothing
 # about jq.
 NOJQ_BIN="$WORK/nojq-bin"; mkdir -p "$NOJQ_BIN"
@@ -268,7 +259,7 @@ else
   no "H.0 the no-jq fixture really lacks jq"
 fi
 env HOME="$FAKE_HOME" BIONIC_PLUGINS_DIR="$H2PD" PATH="$NOJQ_BIN" /bin/bash "$H2/hooks/probe.sh" > "$WORK/h2.out" 2>"$WORK/h2.err"; H2RC=$?
-eq "H.2 no jq on PATH: the block still exits 0"        "$H2RC" "0"
+eq "H.2 no jq on PATH: the walk still exits 0"        "$H2RC" "0"
 eq "H.3 no jq on PATH: BIONIC_LIB_MISSING is set"      "$(field "$WORK/h2.out" MISSING)" "git-argv.sh"
 eq "H.4 no jq on PATH: nothing leaks to stderr"        "$(cat "$WORK/h2.err")" ""
 
@@ -286,29 +277,14 @@ for needle in "farm-out-reminder" "git-argv.sh" "$E/hooks/../scripts/lib" "/bion
   esac
 done
 
-# ── §F — loader_fail_closed: the four repair commands, and nothing else ────
+# ── §F — loader_fail_closed: one refusal line, the detail behind the knob ────
+# The commands that mend an install are admitted by the Bash wall in its own file, ahead of
+# this call (tests/hooks-closed.test.sh §REPAIR); the call itself refuses whatever it is given.
 F="$WORK/f"; mkhook "$F" 'loader_fail_closed "protect-main" "$1"; echo "REACHED-PAST-FAIL-CLOSED"'
 FROOT="$(cd "$F" && pwd -P)"
 FPD="$WORK/f-plugins"; mkdir -p "$FPD"
-allow() { # allow <label> <command>
-  runhook "$F" "$FPD" "" "$2" > "$WORK/f.out" 2>"$WORK/f.err"
-  _rc=$?
-  eq "F.$1 permitted (exit 0): $2" "$_rc" "0"
-}
-deny() { # deny <label> <command>
-  runhook "$F" "$FPD" "" "$2" > "$WORK/f.out" 2>"$WORK/f.err"
-  _rc=$?
-  eq "F.$1 refused (exit 2): $2" "$_rc" "2"
-}
-allow 1 "claude plugin update bionic@bionic"
-allow 2 "claude plugin install bionic@bionic"
-allow 3 "bash $FROOT/scripts/doctor.sh"
-allow 4 "bash $FROOT/scripts/setup.sh"
-deny  5 "claude plugin update bionic@bionic; git push origin main"
-deny  6 "git push"
-deny  7 "claude plugin update bionic@bionic && git push"
-deny  8 "echo claude plugin update bionic@bionic"
-deny  9 "bash $FROOT/scripts/doctor.sh --fix"
+runhook "$F" "$FPD" "" "claude plugin update bionic@bionic" > "$WORK/f.out" 2>"$WORK/f.err"
+eq "F.1 the closed call refuses even a repair command: the wall matches those before calling it" "$?" "2"
 
 # THE REFUSAL IS ONE LINE, IN THE RENDERER'S FORMAT — the only wall in the tree that
 # spells that line without scripts/lib/refuse.sh, because refuse.sh is inside the
@@ -360,7 +336,7 @@ for needle in \
 done
 
 # THE NAME IS BOUNDED. The longest caller in the tree is `canonical-sdlc-evidence-gate`
-# (28 columns), and the line budget leaves 25 — so the block truncates in pure bash
+# (28 columns), and the line budget leaves 25 — so the loader truncates in pure bash
 # (bionic_trunc lives in the library that is missing) and the line still fits 100.
 F2="$WORK/f2"; mkhook "$F2" 'loader_fail_closed "canonical-sdlc-evidence-gate" "$1"'
 runhook "$F2" "$FPD" "" "git push" > "$WORK/f8.out" 2>"$WORK/f8.err"
@@ -377,25 +353,33 @@ case "$(cat "$WORK/f6.out")" in
   *) ok "F.11 a refusal does not fall through to the hook body" ;;
 esac
 
-# A permitted command must not reach the hook body either — the wall has no
-# library, so permitting means standing aside, not proceeding half-loaded.
-runhook "$F" "$FPD" "" "claude plugin update bionic@bionic" > "$WORK/f1.out" 2>"$WORK/f1.err"
-case "$(cat "$WORK/f1.out")" in
-  *REACHED-PAST-FAIL-CLOSED*) no "F.12 a permit stands aside rather than proceeding" ;;
-  *) ok "F.12 a permit stands aside rather than proceeding" ;;
-esac
 
-# ── §G — the allowlist is checked before any sourcing ──────────────────────
-# A hook written the ADOPT way calls loader_fail_closed on the missing-library
-# path; the library is never sourced there because both branches exit. Prove it
-# by planting a booby-trapped library that would be found if the block tried to
-# source anything after the candidate walk.
+# ── §G — the walk never sources the library ────────────────────────────────
+# A hook calls loader_fail_closed on the missing-library path, which exits; the walk only
+# tests readability. Prove it by planting a booby-trapped library the walk inspects.
 G="$WORK/g"; mkdir -p "$G/scripts/lib"
 printf '%s\n' 'echo "SOURCED-THE-LIBRARY"' > "$G/scripts/lib/git-argv.sh"
 mkhook "$G" 'loader_fail_closed "protect-main" "$1"'
 runhook "$G" "$WORK/g-plugins" "" "git push" > "$WORK/g.out" 2>"$WORK/g.err"; GRC=$?
-eq "G.1 the block itself never sources the library" "$(cat "$WORK/g.out")" ""
-eq "G.2 with a library present, fail_closed is the caller's choice, still exact-match" "$GRC" "2"
+eq "G.1 the walk itself never sources the library" "$(cat "$WORK/g.out")" ""
+eq "G.2 with a library present, fail_closed is the caller's choice and refuses" "$GRC" "2"
+
+# ── §N — no loader beside the hook: a broken install, answered in the loader's own words ──
+# The stub sets what the walk sets when it finds nothing and defines the two calls, so each line
+# is byte for byte the line the loader prints for the same state: the long name truncated alike.
+N="$WORK/n"; mkhook "$N" "$REPORT_TAIL" none
+runhook "$N" "$WORK/n-plugins" "" > "$WORK/n.out" 2>"$WORK/n.err"; NRC=$?
+eq "N.1 no loader: the stub does not exit" "$NRC" "0"
+eq "N.2 …BIONIC_LIB empty, the first wanted name missing" "$(field "$WORK/n.out" LIB)|$(field "$WORK/n.out" MISSING)" "|git-argv.sh"
+eq "N.3 …and the candidates are the two places beside the hook" "$(field "$WORK/n.out" CANDS)" "$N/hooks/../scripts/lib, $N/hooks/../payload/scripts/lib"
+for call in 'loader_fail_closed "canonical-sdlc-governing-skill"' 'loader_fail_closed "stop"' 'loader_fail_open "engage"'; do
+  mkhook "$WORK/nl" "$call" none; mkhook "$WORK/ll" "$call"
+  runhook "$WORK/nl" "$WORK/n-plugins" "" > /dev/null 2>"$WORK/nl.err"; NLRC=$?
+  runhook "$WORK/ll" "$WORK/n-plugins" "" > /dev/null 2>"$WORK/ll.err"; LLRC=$?
+  sed "s#$WORK/ll/#$WORK/nl/#g" "$WORK/ll.err" > "$WORK/ll.norm"
+  expect_nonempty "N.4 $call: the loader's own line is read" "$(cat "$WORK/ll.err")"
+  eq "N.5 $call: with no loader, the same exit and the same line as the loader's" "$NLRC $(cat "$WORK/nl.err")" "$LLRC $(cat "$WORK/ll.norm")"
+done
 
 # ── §S — the setup door reads its flags before it sources a library (wave-32 T6) ──
 # THE START-UP CEILING, COUNTED RATHER THAN TIMED. A flag the door refuses needs no
