@@ -9,7 +9,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/regression-fixture.sh"
 . "$(dirname "$0")/lib/roster-row.sh"   # the one roster-row builder (cross-gate S17; wave-30 T23)
-. "$(dirname "$0")/close-out.prelude.sh"
+CO_PLAN_AT=15; . "$(dirname "$0")/close-out.prelude.sh"
 
 # ============================================================
 section "0 — the script exists, parses, and refuses an unusable call"
@@ -72,7 +72,7 @@ section "0o — C4: no worktree column at all falls back to the pre-wave glob ce
 # A table with no `worktree` column has an empty register, so `wt_unreached` falls back to the `wt/*` glob, announced,
 # and an unmerged wt/01-T1 is refused by name.
 # ROWS_NOWT: hoisted to tests/close-out.prelude.sh (a later part reads it)
-P0O="$(mk_census_fixture_nowt p0o "wave/01-x" "$ROWS_NOWT")"; advance_to "$P0O" 8
+P0O="$(CO_PLAN_AT=14 mk_census_fixture_nowt p0o "wave/01-x" "$ROWS_NOWT")"; advance_to "$P0O" 8
 (
   in_fixture "$P0O" || exit 1
   git checkout -q -b wave/01-x
@@ -97,7 +97,7 @@ expect_eq "0o5b: …the branch survives (nothing was deleted, nothing else was d
 
 # 0p: a columnless table whose only wt/* branch is fully merged — the fallback still
 # fires (announced) but finds nothing to refuse, and the run proceeds.
-P0P="$(mk_census_fixture_nowt p0p "wave/01-x" "$ROWS_NOWT")"; advance_to "$P0P" 8
+P0P="$(CO_PLAN_AT=14 mk_census_fixture_nowt p0p "wave/01-x" "$ROWS_NOWT")"; advance_to "$P0P" 8
 (
   in_fixture "$P0P" || exit 1
   git checkout -q -b wave/01-x
@@ -120,7 +120,7 @@ section "0q — C7: the column-less fallback is scoped to wt/<NN>-*, exactly as 
 # ============================================================
 # 0p's fixture plus another wave's unmerged leftover, wt/07-z: it falls outside `wt/01-*`, so it is neither refused on
 # nor deleted.
-P0Q="$(mk_census_fixture_nowt p0q "wave/01-x" "$ROWS_NOWT")"; advance_to "$P0Q" 8
+P0Q="$(CO_PLAN_AT=14 mk_census_fixture_nowt p0q "wave/01-x" "$ROWS_NOWT")"; advance_to "$P0Q" 8
 (
   in_fixture "$P0Q" || exit 1
   git checkout -q -b wave/01-x
@@ -147,7 +147,7 @@ section "0r — C7: a column-less WAVE-scale plan whose working-branch is not wa
 # ============================================================
 # A column-less wave-scale plan reads its census's wave number off `working-branch:`, so a branch with none refuses
 # before act 1 rather than reach for an unscoped census; a task-scale plan wants none (§ANY-BRANCH).
-P0R="$(mk_census_fixture_nowt p0r "topic/not-a-wave-branch" "$ROWS_NOWT")"; advance_to "$P0R" 8
+P0R="$(CO_PLAN_AT=14 mk_census_fixture_nowt p0r "topic/not-a-wave-branch" "$ROWS_NOWT")"; advance_to "$P0R" 8
 run_close "$P0R" check
 expect_eq "0r1: check refuses (1.8.3 refused before act 1, for either verb)" "2" "$CO_RC"
 
@@ -290,7 +290,7 @@ expect_eq "1ar: the step's writer takes a run's log that is there, and refuses o
 
 # A SECOND CLOSE KEEPS THE STEP 8 THAT STANDS. A close whose attestation was refused left its step 8 in the log with what
 # it cleaned, the run open at 8; the close run again delivers on that step and appends no emptier one over it.
-PS="$(mk_fixture p-again)"; advance_to "$PS" 8
+PS="$(mk_fixture p-again)"
 printf 'run/v1|ev=step|n=8|cleanup=done|tmp-wiped=7 entries under the first close|tasks-completed=%s|at=2026-10-04T12:30:00Z\n' "$TASKS_WORDS" >> "$PS/$LOG_REL"
 run_close "$PS" run
 expect_eq "1aq: the second close delivers on the step 8 that stood, its wipe kept: one step 8 in the log" "0|yes|1|n=9" \
@@ -413,6 +413,7 @@ for _co_cur in 7 4; do
   expect_eq "4ap.$_co_cur: …and the plan is unchanged (no Step-8 block written)" "$PLAN20_SHA" \
     "$(sha_of "$P20/$PLAN_REL")"
 done
+CO_PLAN_AT=14
 
 # ============================================================
 section "4e — critic4 Q-1 (T19), wave-27 T4 (D14, B2): a plan with no Step 9 line closes; the wave table is still a presence check"
@@ -466,6 +467,7 @@ expect_eq "q1.14: run on the valid fixture still succeeds" "0" "$CO_RC"
 # ============================================================
 section "VER — wave-27 T4 (AC-7.2, D14, B3): the released version is the run's, never the tool's"
 # ============================================================
+CO_PLAN_AT=15
 # The tool's version attests; the release written is the plan's `release:`, and none when it names none.
 TOOLV="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/payload/.claude-plugin/plugin.json" | head -1)"
 RELV="7.7.7-fixture"
@@ -509,11 +511,11 @@ section "E2E — wave-27 T4 (AC-7.1 close-out half, D14, B1): from Step 7 with n
 # No hand edit: the real `current 8`, admitted on the facts `plant_facts` holds, then `close-out.sh run` delivers.
 PE="$(mk_fixture e2e)"
 E2E_SID="closeout-e2e-1"
-expect_eq "E2E0: precondition: the fixture is at current: 7 with no Step 8 block written and no Step 9 line" "7/0" \
-  "$(sed -n 's/^current: //p' "$PE/$PLAN_REL")/$(step_lines "$PE/$PLAN_REL" 9)"
+expect_eq "E2E0: precondition: the run stands at step 7 with no step 8 or 9 event" "n=7/0" \
+  "$(co_step_answer "$PE" | head -1)/$(grep -c '|ev=step|n=[89]|' "$PE/$LOG_REL")"
 expect_eq "E2E0c: precondition: …and a base-sha naming a commit at or before the readings' head" "yes" \
   "$(b="$(sed -n 's/^base-sha: //p' "$PE/$PLAN_REL")"; [ -n "$b" ] && fixture_git "$PE" merge-base --is-ancestor "$b" wave/01-fixture && echo yes || echo no)"
-( in_fixture "$PE" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PE" "$E2E_SID" "$PE/$PLAN_REL" )
+( in_fixture "$PE" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PE" "$E2E_SID" "$PE/$PLAN_REL" ); PE_SUM="$(sha_of "$PE/$PLAN_REL")"
 # The advance's step event is stamped past any minute close-out writes on its Step lines (the log's clock seam, LOG_AT),
 # as an advance and a close in one minute are: the closed run must read delivered all the same.
 ( in_fixture "$PE" || exit 9
@@ -522,7 +524,7 @@ expect_eq "E2E0c: precondition: …and a base-sha naming a commit at or before t
 E2E_POKER_RC=$?
 E2E_POKER_OUT="$(cat "$SANDBOX/e2e-poker")"
 expect_eq "E2E1: AC-7.1 the real current 8 is admitted on the facts (exit 0)" "0" "$E2E_POKER_RC"
-expect_eq "E2E3: …and the run stands at step 8, its plan unwritten" "n=8|7" "$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$PE/$PLAN_REL" step | head -1)|$(sed -n 's/^current: //p' "$PE/$PLAN_REL")"
+expect_eq "E2E3: …and the run stands at step 8, its plan unwritten" "n=8|$PE_SUM" "$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$PE/$PLAN_REL" step | head -1)|$(sha_of "$PE/$PLAN_REL")"
 run_close "$PE" run
 expect_eq "E2E4: AC-7.1 then close-out.sh run delivers (rc 0)" "0" "$CO_RC"
 expect_eq "E2E5: …the run's step carries the delivery" "yes" "$( [ -n "$(delivered_line "$PE")" ] && echo yes || echo no)"
@@ -532,9 +534,8 @@ expect_eq "E2E6: …and reads closed, delivered at step 9 though the log's step 
 # THE SAME FUNCTION REFUSES IN CLOSE-OUT (D3). A fixture whose structure reading is the newest and
 # fails: `check` says it would refuse, naming the failing line, and `run` refuses with nothing done.
 PF="$(mk_fixture e2e-fail)"; advance_to "$PF" 8
-bash -c '. "$1/proof.sh" && proof_add_line "$2" "$(proof_line review "$3" 2026-10-04T13:00:00Z record/wave-01-fixture/structure-fail.md structure w-read fail piece)"' \
-  _ "$REPO_ROOT/payload/scripts/lib" "$PF/$PLAN_REL" "$(fixture_git "$PF" rev-parse wave/01-fixture)" > "$PF/$PLAN_REL.n" \
-  && mv "$PF/$PLAN_REL.n" "$PF/$PLAN_REL"
+bash -c '. "$1/proof.sh" && LOG_AT=2026-10-04T13:00:00Z proof_event "$2" kind=review "head=$3" evidence=record/wave-01-fixture/structure-fail.md \
+  question=structure reader=w-read result=fail scope=piece' _ "$REPO_ROOT/payload/scripts/lib" "$PF/$PLAN_REL" "$(fixture_git "$PF" rev-parse wave/01-fixture)"
 run_close "$PF" check
 expect_eq "E2E8: …naming the failing reading and its evidence" "yes" \
   "$(contains "$CO_OUT" "$(printf 'review\tstructure\tbionic:critic\tpiece\tfailing\trecord/wave-01-fixture/structure-fail.md')")"
@@ -583,7 +584,7 @@ ba_doors() {  # <project> -> BA_CHECK, BA_CLOSED: the branch close-out's check a
   run_close "$1" closed-form
   BA_CLOSED="$(printf '%s\n' "$CO_OUT" | sed -n 's/^branch: .* into \([^ ]*\)\.$/\1/p')"
 }
-PBA="$(mk_fixture branch-agree)"
+PBA="$(CO_PLAN_AT=14 mk_fixture branch-agree)"
 fixture_git "$PBA" branch trunk "$(fixture_git "$PBA" rev-list --max-parents=0 main)"
 ba_fm "$PBA" trunk
 expect_eq "BA0 precondition: ## SDLC State names main and the frontmatter trunk, both branches" "main|trunk|yes|yes" \
@@ -609,7 +610,7 @@ integration-branch: trunk/' "$e" > "$e.b" && mv "$e.b" "$e"
 }
 expect_eq "BA3 the card and the gate name ## SDLC State's branch too" "main|main" "$(ba_card "$PBA")|$(ba_gate "$PBA")"
 
-PBF="$(mk_fixture branch-agree-fm)"
+PBF="$(CO_PLAN_AT=14 mk_fixture branch-agree-fm)"
 awk '/^## SDLC State/ { s = 1 } /^## Tasks/ { s = 0 } !(s && /^integration-branch:/)' "$PBF/$PLAN_REL" > "$PBF/$PLAN_REL.ba" \
   && mv "$PBF/$PLAN_REL.ba" "$PBF/$PLAN_REL"
 ba_fm "$PBF" main
