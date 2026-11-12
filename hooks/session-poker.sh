@@ -2374,11 +2374,6 @@ sitrep_clock() {  # <epoch> <now epoch> -> `H:MM AM/PM`, then ` YYYY-MM-DD` when
 # unengaged session (decides nothing, 0), and a session with no BOUND open plan (1) — a
 # writing verb never writes the newest-plan fallback.
 
-# A plan another writer replaced while the copy was judged exits 1, or PV_RACE_RC when the caller
-# set it, the one refusal the next caller repairs by running again (T51).
-# Set here, before any verb runs, so a value in the caller's environment never chooses the exit
-# (wave-26 T54; review 17 N2).
-PV_RACE_RC=""
 # plan_delivered <plan> -> 0 when the file is a run closed by delivery: `run_open` calls it closed (not unreadable) and
 # the reader's state, read with it, is delivered, never abandoned. 1 otherwise, silent. The plan is judged where it
 # lies, so an archived plan is still its run's: lib/binding.sh `bind_delivered` asks the same of a docs-root candidate
@@ -2404,7 +2399,7 @@ pv_plan_arg_file() {
   return 1
 }
 
-# plan_verb_open <verb> [closed-ok|delivered-ok] -> sets PV_REPO, PV_PLAN, PV_CUR, PV_SUM, PV_NEW, PV_DRY, PV_MARK,
+# plan_verb_open <verb> [closed-ok|delivered-ok] -> sets PV_REPO, PV_PLAN, PV_CUR, PV_NEW, PV_DRY, PV_MARK,
 # PV_SID and arms the cleanup; exits on every refusal above. `closed-ok` (handoff) also takes the session's
 # own closed run (bound-closed) when its plan is on disk. ENGAGEMENT IS THE CONSENT BOUNDARY FOR A RUN STILL MOVING,
 # so it is asked first, except where `delivered-ok` names the one write a delivered run accepts from any session:
@@ -2454,9 +2449,6 @@ plan_verb_open() {
   # is no step, and PV_CUR_UNREAD says so: a verb that judges or writes at the step refuses on it, never on a guess.
   PV_CUR=""; PV_CUR_UNREAD=""
   if _fill_current_load "$PV_PLAN"; then PV_CUR="$_FILL_CURRENT_VALUE"; else PV_CUR_UNREAD=1; fi
-  # THE CHECKSUM IS TAKEN HERE, BEFORE ANY PROJECTION READS THE PLAN, so an edit that lands
-  # between the read and the swap is an edit the comparison sees.
-  PV_SUM="$(cksum < "$PV_PLAN" 2>/dev/null)"
   PV_NEW="${PV_PLAN}.${verb}.$$"
   PV_DRY="${PV_PLAN}.${verb}-dry.$$"
   PV_SID="planverb-$$"
@@ -2464,13 +2456,9 @@ plan_verb_open() {
   trap 'rm -f "$PV_NEW" "$PV_NEW.2" "$PV_DRY" ${PV_MARK:+"$PV_MARK"}' EXIT
 }
 
-# plan_verb_swap <verb> <what changed> <dry: writer|as-is|judged> -> judges $PV_NEW and moves it over
-# $PV_PLAN; exits 1 on a refusal, 2 when the dry commit cannot run. Returns 0 once swapped,
-# and exits 0 with nothing written when the projection IS the plan. `judged` runs no dry commit:
-# the caller has judged the copy itself (`current 8`, on lib/proof.sh `facts_state`; wave-27 T14).
 # plan_verb_dry <verb> <what changed> <dry: writer|as-is|step:<N>> <current> -> the dry commit of $PV_NEW
 # through the real gate, at `current: 4` for a writer past Step 4 and as written otherwise; exits 1
-# on the gate's refusal, 2 when it cannot run. plan_verb_swap's, split out so `judged` can skip it.
+# on the gate's refusal, 2 when it cannot run.
 # `step:<N>` judges no copy: the gate is asked about the plan itself with step N pending in its facts (BIONIC_DRY_STEP,
 # honoured only for this session, lib/proof.sh `_proof_dry_step`), so the advance is judged as a commit at N would be.
 plan_verb_dry() {
@@ -2529,39 +2517,6 @@ pv_missing() {
     /^bionic: / { seen = 1; next }
     seen && NF { sub(/^[ \t]+/, ""); sub(/^canonical-sdlc /, ""); print; found = 1; exit }
     END { if (!found) print "the line or block that step owes (the gate gave no detail)" }'
-}
-
-# A FACT THE VERB WRITES TO THE RUN'S LOG goes in once nothing is left to refuse: PV_ACT names the function that appends
-# it, run after the copy is judged and the plan is seen unchanged, so the rename is the only act after it. Its failure
-# refuses with the plan unchanged; a rename that fails after it says the fact stands in the log and names the plan edit
-# left undone, PV_UNDONE. A copy that is the plan writes the fact alone. Both are cleared once used.
-plan_verb_swap() {
-  local verb="$1" what="$2" dry="$3" cur act="${PV_ACT:-}" undone="${PV_UNDONE:-}"
-  PV_ACT=""; PV_UNDONE=""
-  if cmp -s "$PV_NEW" "$PV_PLAN"; then
-    if [ -n "$act" ]; then "$act" || exit 2; return 0; fi
-    say "$verb — $what: the plan already reads so; nothing was written."
-    exit 0
-  fi
-  cur="${PV_CUR%[ab]}"
-  case "$cur" in
-    ''|*[!0-9]*) [ "$dry" = judged ] || dry=as-is ;;
-  esac
-  [ "$dry" = judged ] || plan_verb_dry "$verb" "$what" "$dry" "$cur"
-  if [ "$(cksum < "$PV_PLAN" 2>/dev/null)" != "$PV_SUM" ]; then
-    die "REFUSED — $PV_PLAN changed while the plan with $what was being judged; nothing was written. Run $verb again."
-    exit "${PV_RACE_RC:-1}"
-  fi
-  [ -z "$act" ] || "$act" || exit 2
-  if ! mv -f "$PV_NEW" "$PV_PLAN"; then
-    if [ -n "$act" ]; then
-      die "$verb — $what stands in the run's log, so do not run $verb again for it; the judged copy could not be moved over $PV_PLAN, so ${undone:-its plan edit} is left undone."
-    else
-      die "REFUSED — could not move the judged copy over $PV_PLAN; the plan is unchanged."
-    fi
-    exit 2
-  fi
-  return 0
 }
 
 # ---------------------------------------------------------------- the parts' state
