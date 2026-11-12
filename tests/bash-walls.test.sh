@@ -744,7 +744,7 @@ section "§REFUSED-VERB — a dispatched agent's approve of a criterion is refus
 #   by the same arm.
 R_RV="$(mk_repo refusedverb)"
 arm_roster "$R_RV"
-RV_ARM="a subagent may not change a contract or the plan"
+RV_ARM="a subagent may not change a contract or the run's record"
 RV_CMD="bash ${BIONIC_HOOKS_DIR}/session-poker.sh approve AC-x 'yes'"
 run_hook "$(mk_payload "$R_RV" "$RV_CMD" "$ACTOR" "" Bash test-runner)"
 expect_status "RV-1: a dispatched agent's approve AC-x is refused" 2 "$ST"
@@ -781,7 +781,7 @@ bw_bind "$R_PT"
   roster_row_fixture "session=$SID" status=confirmed name=w-integrate "agent_id=$PT_ACTOR_I" subagent_type=bionic:implementor row=T9
   roster_row_fixture "session=$SID" status=confirmed name=w-build "agent_id=$PT_ACTOR_B" subagent_type=bionic:implementor row=T3 tool_use_id=toolu_01FIXTURE2
 } > "$R_PT/.bionic/tmp/roster-$SID.state"
-PT_ARM="a subagent may not change a contract or the plan"
+PT_ARM="a subagent may not change a contract or the run's record"
 PT_CMD() { printf 'bash %s/session-poker.sh reviews-part %s' "${BIONIC_HOOKS_DIR}" "$1"; }
 run_hook "$(mk_payload "$R_PT" "$(PT_CMD T9)")"
 expect_status "PART-1: the main thread's reviews-part passes the wall" 0 "$ST"
