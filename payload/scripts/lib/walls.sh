@@ -1875,6 +1875,45 @@ MATRIX_ROWS
   return 0
 }
 
+# Whole-value placeholder test: trim leading/trailing whitespace, lowercase,
+# then require whole-value EQUALITY against the known token set. A token that
+# merely appears as a substring of a longer value ("resolved TODOs",
+# "*.example placeholders", "status pending → done") is legal evidence.
+# "in progress" and its whitespace-free "inprogress" are both listed so
+# either spelling of the value matches. At file scope, outside the gate's body, so a
+# source of this file defines it: close-out asks the gate's own ban of a value it is given.
+# IN BUILTINS: each line trimmed
+# on its own and trailing blank lines dropped, so a value is a placeholder exactly when its FIRST
+# line is one and nothing but whitespace follows; the word compared without regard to case.
+is_placeholder_value() {
+  local v="$1" rest="" rc=1 restore=0
+  case "$v" in *$'\n'*) rest="${v#*$'\n'}"; v="${v%%$'\n'*}" ;; esac
+  case "$rest" in *[![:space:]]*) return 1 ;; esac
+  v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
+  shopt -q nocasematch || { shopt -s nocasematch; restore=1; }
+  case "$v" in
+    todo|pending|"in progress"|inprogress|xxx|tbd|placeholder) rc=0 ;;
+  esac
+  [ "$restore" = 0 ] || shopt -u nocasematch
+  return "$rc"
+}
+
+# Does frontmatter name a LIVE surface this run operates? The default answer
+# is no. `deploy_target` is n/a by default and is never inferred from deploy
+# signals — a target exists only when the user names one — so an absent line,
+# `none`, and `n/a` (with or without a trailing reason) all read as "no live
+# surface". Case-insensitive, matching every other value comparison in this
+# hook. Step 9 owes the three of a deploy exactly when one is named; a run that
+# names none and gives them anyway records more than it owes, and is not refused.
+# At file scope for the same reason as is_placeholder_value: close-out asks it of the
+# value it reads by the header's grammar, with DEPLOY_TARGET set in its own subshell.
+deploy_target_named() {
+  case "$(printf '%s' "$DEPLOY_TARGET" | tr '[:upper:]' '[:lower:]')" in
+    ""|none|n/a|n/a:*) return 1 ;;
+    *)                 return 0 ;;
+  esac
+}
+
 # matrix_row_has_verdict <tier> <status> <auditor cell> <user-confirmed value> <waiver 1|0>
 #   -> 0 when the row is waived (status `waived` with its waiver recorded), its auditor cell
 #   is CONFIRMED, REFUTED or UNVERIFIABLE, or it is a T4 row carrying any `user-confirmed:`.
@@ -2547,29 +2586,6 @@ Plan: $PLAN
 Fix: set 'rigor:' to single or double."
   refuse exit2 commit "this plan's rigor is not single or double" "use single or double" "$_eg_detail"
 fi
-
-# Whole-value placeholder test: trim leading/trailing whitespace, lowercase,
-# then require whole-value EQUALITY against the known token set. A token that
-# merely appears as a substring of a longer value ("resolved TODOs",
-# "*.example placeholders", "status pending → done") is legal evidence.
-# "in progress" and its whitespace-free "inprogress" are both listed so
-# either spelling of the value matches. Defined here (ahead of the Step-line
-# checks) so the task-ledger validator, which runs before them, can reuse it.
-# IN BUILTINS (wave-34 T11, D19), reading what the `sed | tr` it replaces read: each line trimmed
-# on its own and trailing blank lines dropped, so a value is a placeholder exactly when its FIRST
-# line is one and nothing but whitespace follows; the word compared without regard to case.
-is_placeholder_value() {
-  local v="$1" rest="" rc=1 restore=0
-  case "$v" in *$'\n'*) rest="${v#*$'\n'}"; v="${v%%$'\n'*}" ;; esac
-  case "$rest" in *[![:space:]]*) return 1 ;; esac
-  v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
-  shopt -q nocasematch || { shopt -s nocasematch; restore=1; }
-  case "$v" in
-    todo|pending|"in progress"|inprogress|xxx|tbd|placeholder) rc=0 ;;
-  esac
-  [ "$restore" = 0 ] || shopt -u nocasematch
-  return "$rc"
-}
 
 # Audit dir follows the PLAN's own project, not necessarily the invoking one:
 # findings live with the project that owns the artifact, and every worktree of one
@@ -3696,19 +3712,6 @@ fi
 # names gone, and what the close cleaned, on its step event; Step 9 its delivery and, when a target is named, the three
 # of a deploy on its step event. Steps 8 and 9 are asked so at 14 too: the reader answers an older plan's Step 8 and 9
 # lines as those fields, and the close writes them to the step's event, so there is one way to judge a close.
-# Does frontmatter name a LIVE surface this run operates? The default answer
-# is no. `deploy_target` is n/a by default and is never inferred from deploy
-# signals — a target exists only when the user names one — so an absent line,
-# `none`, and `n/a` (with or without a trailing reason) all read as "no live
-# surface". Case-insensitive, matching every other value comparison in this
-# hook. Step 9 owes the three of a deploy exactly when one is named; a run that
-# names none and gives them anyway records more than it owes, and is not refused.
-deploy_target_named() {
-  case "$(printf '%s' "$DEPLOY_TARGET" | tr '[:upper:]' '[:lower:]')" in
-    ""|none|n/a|n/a:*) return 1 ;;
-    *)                 return 0 ;;
-  esac
-}
 
 _eg_v15_approved() {  # <key> -> 0 an approval of <key> stands, 1 none; a fold that fails is refused
   _proof_ask "$PLAN" reader_q_approved "$PLAN" "$1" >/dev/null
