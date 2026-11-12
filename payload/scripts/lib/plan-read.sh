@@ -5,14 +5,15 @@
 #   plan_read_row <plan> <heading> <column> <value>  -> `name=value` per cell of the row whose <column> is <value>
 #
 #   plan_read_table <plan> <heading> [key]           -> the header's names, then each row, then each row too wide
-#   plan_read_dropped <plan>                         -> the id of each Tasks row whose status cell is dropped
+#   plan_read_dropped <plan>                         -> the id of each Tasks row whose status cell is dropped, for the translation
 #   plan_read_heading <plan> <name>[|<name>...]      -> the line of each `## <name>` heading outside a fence
 #   plan_read_faults <plan>                          -> each part a version-15 plan has no place for, its line named
 #
 # A plan is the words a person wrote: its header and its tables. Everything that is the run's state is
 # the log's, read by lib/reader.sh, so nothing here reads a state cell for an answer or follows a header
-# key to another file, but one: an older table's `dropped` status, which no event carries, so that cell
-# is the only word that a row's work is no longer owed.
+# key to another file. An older table's `dropped` status is read by `plan_read_dropped` for the translation
+# alone (lib/translate.sh), which writes it as the run's `drop` event, the one word that a row's work is no
+# longer owed.
 #
 # THE HEADER is the leading `---` block alone: a `---` or a `key: value` line in the body is prose.
 # A key's first line answers; one leading and one trailing quote are dropped from its value, as every

@@ -813,6 +813,38 @@ EOF
     printf '%s\n' "$out"
   }
 
+  # A ROW'S WORK NO LONGER OWED IS SAID BY THE BIRTH DOOR'S DROP FORM, task-add <id> --drop '<the person's words>': one
+  # drop event through its one writer (lib/units.sh `units_drop_event`), the plan unwritten, so the row stays as the person
+  # wrote it and the reader and the fill read it dropped. Only a pending row is dropped, past Step-3 approval: a landed
+  # row's work is done, a row in flight has a writer to stand down first (its dispatch's cancel returns it to pending),
+  # and before the approval a row is taken out by an edit. A row dropped already takes the new words.
+  poker_verb_task_drop() {
+    local st
+    [ -z "$TA_BORN$TA_BORN_IDS$TA_BORN_SUITE" ] || { die "task-add: --drop and --born are two acts; name one."; exit 2; }
+    plan_verb_open task-add
+    TA_PLAN="$PV_PLAN"; TA_CUR="${PV_CUR%[ab]}"
+    case "$TA_CUR" in ''|*[!0-9]*) TA_CUR=0 ;; esac
+    if [ "$TA_CUR" -lt 4 ]; then
+      die "REFUSED — $TA_PLAN is at current: ${PV_CUR:-(none)}; before Step-3 approval a row is taken out by an edit of the plan. Nothing is dropped; needs: the person — that edit."; exit 1
+    fi
+    plan_read_row "$TA_PLAN" Tasks id "$TA_ID" >/dev/null 2>&1 \
+      || { die "REFUSED — $TA_PLAN holds no row $TA_ID in its ## Tasks table. Nothing is dropped; name a row it holds: task-add <id> --drop '<words>'."; exit 1; }
+    # Its state is the fill's, the run's log over the cells (`units_rows`), so in flight is what holds a slot: an older
+    # table's agent cell names who would write the row, not that anyone does.
+    st="$(units_rows "$TA_PLAN" 2>/dev/null)" || poker_fold_unread "task-add $TA_ID --drop '<words>'"
+    st="$(printf '%s\n' "$st" | awk -F'\t' -v r="$TA_ID" '$1 == r { print $10; exit }')"
+    case "$st" in
+      pending|dropped) ;;
+      landed) die "REFUSED — $TA_ID has landed: its work is done, not dropped. Nothing is dropped; work owed again is a new row, written by an edit and born by task-add <id>."; exit 1 ;;
+      *) die "REFUSED — $TA_ID is ${st:-unread}: a writer holds it. Stand it down first (its dispatch's cancel returns it to pending), then task-add $TA_ID --drop again. Nothing is dropped."; exit 1 ;;
+    esac
+    units_drop_event "$TA_PLAN" "$TA_ID" "$TA_DROP" \
+      || { die "task-add — the drop of $TA_ID could not be appended to the run's log; it reads $st until it is. Run task-add $TA_ID --drop again."; exit 1; }
+    say "task-add — $TA_ID is dropped: its drop is in the run's log with the words given, and $TA_PLAN is unchanged."
+    say "task-add — owed: mark the task-list entry of $TA_ID deleted."
+    exit 0
+  }
+
   # A ROW IS ADDED BY AN EDIT OF THE PLAN, AND THIS VERB RECORDS ITS BIRTH. Only a person, or the orchestrator as their
   # hand through an edit, changes a plan file, so the verb writes none: it reads the row back from the plan, judges it as
   # a row born mid-run is judged, appends its one born event and closes the asks its findings held. Its order is fixed: a
@@ -821,6 +853,7 @@ EOF
   # tags, another row's deps in a table with no reads column) is refused with the lines it would accept, ready to paste,
   # and nothing is born; a row refused for its birth stands in the plan unborn, the person's to remove.
   poker_verb_task_add() {
+    [ -z "${TA_DROP:-}" ] || poker_verb_task_drop
     plan_verb_open task-add
     TA_PLAN="$PV_PLAN"; REPO_REAL="$PV_REPO"
     TA_CUR="${PV_CUR%[ab]}"

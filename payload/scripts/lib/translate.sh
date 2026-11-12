@@ -6,8 +6,9 @@
 #                             the old homes do not hold (why=absent) or a line cannot carry (why=bar:
 #                             the value holds a `|`; why=repeated: one key given two values).
 #
-# NOTHING IS MADE UP. Every value written is text found in its home; a field with no text is left out
-# and named on the gaps list, never filled. A line whose home gives no instant still ends `at=`, empty,
+# NOTHING IS MADE UP. Every value written is text found in its home, save the words of a drop an older
+# status cell said, which name where it was carried from (`_translate_dropped`); a field with no text is
+# left out and named on the gaps list, never filled. A line whose home gives no instant still ends `at=`, empty,
 # because a run's line always closes on its instant and an invented one would be a false fact. An
 # instant is kept as written (to the minute, the day, or in local time): rewriting it to seconds would
 # add precision the home never had.
@@ -33,7 +34,7 @@
 # are _TRANSLATE_AWK; a line whose home already holds it in the log's shape is passed whole with
 # `carry(type, fields, separator)`. The plan's homes come first (the SDLC State and its dispatch ledger,
 # the Tasks rows, the Handoff, the Verification Matrix, the header's abandoned:, the inherited: lines, a
-# dropped row), then the record's (the landing record, the asks register, the fill ledger, the design
+# dropped row's status cell), then the record's (the landing record, the asks register, the fill ledger, the design
 # ledger, the debt ledger), and last the run's log, read with them until the run is brought forward (lib/reader.sh
 # `reader_events`); another file adds its homes the same way once it is sourced after this one.
 #
@@ -366,11 +367,11 @@ _translate_inherited() {  # <plan> -> each `inherited: <suite> base= head= …` 
 }
 
 translate_source _translate_dropped
-_translate_dropped() {  # <plan> -> each Tasks row whose status is dropped, named whole on the gaps list
-  # A dropped row is the plan's word that its work is no longer owed. No ruled event says that of a row:
-  # a cancel retracts a fact the log holds, and a row is authored, never logged; so the status is named,
-  # not written. Until a type carries it, only the plan's own cell tells a dropped row from a pending one.
-  { plan_read_dropped "$1" 2>/dev/null || [ "$?" -eq 1 ]; } | awk '{ printf "g\t\tgap/v1|ev=dropped|row=%s|field=ev|why=unruled\n", $0 }'
+_translate_dropped() {  # <plan> -> each Tasks row whose status is dropped, as the drop that cell said
+  # The cell is an older table's word that the row's work is no longer owed: a drop, whose one writer took no words
+  # from a person here, so its words say where it was carried from. The cell holds no instant, and none is made.
+  { plan_read_dropped "$1" 2>/dev/null || [ "$?" -eq 1 ]; } | awk "$_TRANSLATE_AWK"'
+    { begin("drop", "row", $0); put("why", "carried from the status cell of a version-14 Tasks table"); emit("") }'
 }
 
 # THE RECORD'S HOMES sit in the plan's record directory, `<docs>/record/<wave>/`, joined to the plan by
