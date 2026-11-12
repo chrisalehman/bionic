@@ -1119,15 +1119,14 @@ _units_landed() {
 # full run: a run now proves a head these rows are about to move.
 units_floor_holds() { _units_sched holds "${1:-}" "${2:-}"; }
 
-# units_approval_names <plan> -> each approval an OPEN row waits on, `approval:<name>` among its waits, once, sorted
-# (wave-26 T46; review 10 F6). `approve` records only these: a name no row waits on would be recorded once while the
-# row it was meant for waits. A name only a landed or dropped row waits on satisfies nothing either, so it is not one of
-# them (T52; review 14 N4). The match is exact, case included, as the readiness program keys it. `plan` is a wait like
+# units_approval_names <plan> -> each approval an OPEN row waits on, `approval:<name>` among its waits, once, sorted.
+# `approve` records only these: a name no row waits on would be recorded once while the row it was meant for waits. A
+# name only a landed or dropped row waits on satisfies nothing either, so it is not one of them. The match is exact, case included, as the readiness program keys it. `plan` is a wait like
 # any other here, and an empty cell at 14 waits on it by its kind.
 # THE WAITS ARE THE PLAN'S ONE READER'S (lib/plan-read.sh `plan_read_waits`): a read at 14, `live:` or not, and a
 # name a task's deps cell holds at 15 are one wait, so the approve command takes at 15 what it takes at 14. That reader
-# gives an open integrate row `release` in a plan that carries a release; one whose release row is dropped carries none
-# (wave-35 T5; D13), so its integrate row is not listed for it.
+# gives an open integrate row `release` in a plan that carries a release; one whose release row is dropped carries none,
+# so its integrate row is not listed for it.
 units_approval_names() {
   local rows waits
   rows="$(units_rows "${1:-}" 2>/dev/null)" && waits="$(_units_waits "${1:-}" 2>/dev/null)" || return 0
@@ -2168,7 +2167,7 @@ units_columns() {
 # THE INVARIANTS (spec Design §1 "Task", verbatim): id unique and matching `^T[0-9]+$`; step
 # in 3–9; kind in build · test · verify · review · doc · integrate · close · prototype;
 # status in pending · active · landed · dropped; every dep naming an id present in the table
-# or an external prerequisite `ext:<slug>` (wave-21 T4; `_units_ext_re` is its one shape), and on a
+# or an external prerequisite `ext:<slug>` (`_units_ext_re` is its one shape), and on a
 # version-15 page an approval of the person's, `approval:<name>`, in the spelling a read gives it.
 # A TABLE WITH A `reads` COLUMN (wave-26 T2; D1) adds two: its deps cells carry `ext:<slug>`
 # and nothing else — a task id there is refused, because the row waits on what it reads — and
