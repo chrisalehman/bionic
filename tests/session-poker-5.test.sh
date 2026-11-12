@@ -881,43 +881,39 @@ expect_contains "RG-2b …naming lib/shared.sh and the three rows" "a fourth fix
 POKE_BOUND="$RG_WAS"
 
 # ============================================================
-section "§APPROVED-BY: approve plan '<reply>' writes the approved-by: line the walls read, with the user's words, once (REQ-9 AC-9.2)"
+section "§APPROVED-BY: approve plan '<reply>' appends the plan's approval the walls read, with the user's words, once (REQ-9 AC-9.2)"
 # ============================================================
-# The plan's approval is the `approved-by: <user> <ISO-UTC> "<reply>"` line under `## SDLC State` that the commit gate
-# reads from Step 4 (walls.sh `validate_approved_by`) and `approval:plan` reads; `approve` refused the name, so the
-# line was typed by hand. `approve plan` writes it through the plan transaction, beside the approval lines already
-# there, the approver the project's git user name and the reply as given; a plan that carries the line keeps it, and
-# a second call is refused as recorded once.
+# The plan's approval is one approval event, key step3, in the run's log, which the commit gate reads from Step 4
+# (walls.sh `validate_approved_by`, through the reader) and `approval:plan` reads. `approve plan` appends it with the
+# project's git user name and the reply as given, and writes nothing into the plan; a second call is refused as
+# recorded once.
 # FIXTURE FIDELITY: s34's plan at current: 3 with its approved-by: line taken out, bound to this session; the gate is
 # the shipped commit gate (s34_gate) at current: 4, before and after; every write is the real verb.
-# fails-when: the only writer of approved-by: is the orchestrator's editor; the line is written twice; the words differ.
+# fails-when: the only giver of the plan's approval is the orchestrator's editor; it is given twice; the words differ.
 AB_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RAB="$(make_repo approved-by)"; ( cd "$RAB" && git commit -q --allow-empty -m init )
 git -C "$RAB" config user.email t@example.com; git -C "$RAB" config user.name "Dana Fixture"
 PAB="$(s34_plan "$RAB" 3)"
 /usr/bin/grep -v '^approved-by:' "$PAB" > "$PAB.t" && mv "$PAB.t" "$PAB"
-ab_lines() { /usr/bin/grep -c '^approved-by:' "$PAB" | tr -d ' '; }
+ab_lines() { /usr/bin/grep '^run/v1|ev=approval|key=step3|' "$RAB/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null; }
 ab_at() { awk -v c="$1" '!d && /^current:/ { print "current: " c; d = 1; next } { print }' "$PAB" > "$PAB.t" && mv "$PAB.t" "$PAB"; }
 ab_at 4; s34_gate "$RAB"
-expect_eq "AB-0 precondition: with no approved-by: line the gate refuses a commit at current: 4 (rc 2), saying so" "0|2|yes" \
-  "$(ab_lines)|$GATE_RC|$(printf '%s' "$GATE_ERR" | /usr/bin/grep -q "no 'approved-by:' line" && echo yes || echo no)"
-ab_at 3
+expect_eq "AB-0 precondition: with no approval of the plan the gate refuses a commit at current: 4 (rc 2), saying so" "0|2|yes" \
+  "$(ab_lines | grep -c .)|$GATE_RC|$(printf '%s' "$GATE_ERR" | /usr/bin/grep -q "no 'approved-by:' line" && echo yes || echo no)"
+ab_at 3; AB_BEFORE="$(cat "$PAB")"
 poke "$RAB" approve plan 'approved, go ahead'
-expect_eq "AB-1 approve plan writes one approved-by: line (exit 0)" "0|1" "$RC|$(ab_lines)"
+expect_eq "AB-1 approve plan appends one approval (exit 0), the plan unchanged" "0|1|yes" "$RC|$(ab_lines | grep -c .)|$([ "$AB_BEFORE" = "$(cat "$PAB")" ] && echo yes || echo no)"
 [ "$RC" = 0 ] || printf '%s\n' "$OUT" | tail -6 | sed 's/^/    | /'
-expect_regex "AB-1b …in the gate's grammar: the git user, the ISO-UTC instant, the reply verbatim in quotes" \
-  '^approved-by: Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z "approved, go ahead"$' \
-  "$(/usr/bin/grep '^approved-by:' "$PAB")"
-expect_eq "AB-1c …under ## SDLC State, after current:" "yes" \
-  "$(awk '/^## SDLC State/ { s = 1 } s && /^current:/ { c = NR } s && /^approved-by:/ { a = NR } END { print (c && a == c + 1) ? "yes" : "no" }' "$PAB")"
-expect_contains "AB-1d …and the verb says what it wrote" "approved-by: Dana Fixture" "$OUT"
+expect_regex "AB-1b …the git user, the reply verbatim, an ISO-UTC instant" \
+  '^run/v1\|ev=approval\|key=step3\|by=Dana Fixture\|said=approved, go ahead\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$(ab_lines)"
+expect_contains "AB-1d …and the verb says what it appended" "approved by Dana Fixture" "$OUT"
 ab_at 4; s34_gate "$RAB"
-expect_eq "AB-2 the gate reads the line: at current: 4 it no longer refuses for it" "no" \
+expect_eq "AB-2 the gate reads it: at current: 4 it no longer refuses for it" "no" \
   "$(printf '%s' "$GATE_ERR" | /usr/bin/grep -q "no 'approved-by:' line" && echo yes || echo no)"
 ab_at 3
 AB_BEFORE="$(cat "$PAB")"
 poke "$RAB" approve plan 'approved'
-expect_eq "AB-3 a second approve plan is refused (exit 1) and the plan is unchanged" "1|yes" "$RC|$([ "$AB_BEFORE" = "$(cat "$PAB")" ] && echo yes || echo no)"
+expect_eq "AB-3 a second approve plan is refused (exit 1), the plan unchanged and nothing appended" "1|yes|1" "$RC|$([ "$AB_BEFORE" = "$(cat "$PAB")" ] && echo yes || echo no)|$(ab_lines | grep -c .)"
 expect_contains "AB-3b …as recorded once" "recorded once" "$OUT"
 POKE_BOUND="$AB_BOUND_WAS"
 

@@ -461,9 +461,11 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
 #   evidence    the discharging proof's or waiver's `evidence=`, else the older table's evidence cell.
 #   auditor     on a row the older table holds: the discharging event's `auditor=`, else the row's cell; on any other
 #               criterion: the evidence review standing at <head>, CONFIRMED when it passed and REFUTED when not.
-#   confirmed   on a row the older table holds: the discharging event's `confirmed=`, else its block's
-#               `user-confirmed:`; on any other criterion: the approval naming it, as `<by> <day> <its words>`, the
-#               criterion standing for words it holds none of, the shape an older block's confirmation is written in.
+#   confirmed   the approval naming the criterion, as `<by> <day> <its words>`, its giver folded to one word and the
+#               criterion standing for words it holds none of, the shape an older block's confirmation is written in;
+#               else, on a row the older table holds, the discharging event's `confirmed=`, else its block's
+#               `user-confirmed:`. On such a row the approval confirms and never unseats the proof or waiver that
+#               discharges it.
 #   serves      on a row the older table holds: its block's first `serves:`; else the Eval design's requirement.
 # 1 when the plan names no criterion; the fold's failure is its exit.
 reader_cells() {
@@ -488,7 +490,8 @@ reader_cells() {
     { e = ev(); c = (e == "approval") ? line_kv("key") : line_kv("ac") }
     e == "proof" && line_kv("kind") == "review" && line_kv("question") == "evidence" && h != "" && line_kv("head") == h { review = (line_kv("result") == "pass") ? "CONFIRMED" : "REFUTED" }
     c == "" || !(c in seen) { next }
-    e == "approval" { by[c] = "approval"; ok[c] = line_kv("by") " " substr(line_kv("at"), 1, 10) " " (line_kv("said") != "" ? line_kv("said") : c) }
+    e == "approval" { if (!(c in row) || by[c] == "") by[c] = "approval"; g = line_kv("by"); gsub(/[^A-Za-z0-9._-]+/, "-", g); sub(/^-+/, "", g); sub(/-+$/, "", g)
+      ok[c] = g " " substr(line_kv("at"), 1, 10) " " (line_kv("said") != "" ? line_kv("said") : c) }
     e == "proof" && line_kv("at") == "" && by[c] == "waiver" && at_[c] != "" { next }
     e == "waiver" || e == "proof" && line_kv("rc") ~ /^0?$/ && line_kv("result") != "fail" {
       by[c] = e; ev_[c] = line_kv("evidence"); aud[c] = line_kv("auditor"); cf[c] = line_kv("confirmed"); at_[c] = line_kv("at") }
@@ -498,7 +501,7 @@ reader_cells() {
         if (c in row) {
           d = (b == "proof" || b == "waiver")
           ev1 = d ? ev_[c] : (none(rev[c]) ? "" : rev[c]); a = d ? aud[c] : (none(raud[c]) ? "" : raud[c]); if (a == "" && d && at_[c] != "") a = review
-          k = d ? cf[c] : rconf[c]
+          k = (c in ok) ? ok[c] : d ? cf[c] : rconf[c]
         } else { ev1 = (b == "proof" || b == "waiver") ? ev_[c] : ""; a = review; k = ok[c] }
         print c "\037" (b == "" ? "pending" : "discharged") "\037" b "\037" tier[c] "\037" ev1 "\037" a "\037" k "\037" ((c in row) ? sv[c] : req[c])
       }

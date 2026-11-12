@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # hooks/poker/proof.sh — the proof record: deferrals, findings, approvals, waivers, confirmations, the regression
-# and the debt ledger (approve, proof-add, waive, confirm-row, finding-move, disposition, release-check,
+# and the debt ledger (approve, proof-add, waive, finding-move, disposition, release-check,
 # regression-run, debt).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
@@ -269,208 +269,110 @@ whole_run_at_head() {
   declare -F gate_whole_open >/dev/null 2>&1 && gate_whole_open "$4"
 }
 
-  # THE USER'S CONFIRMATION OF A T4 ROW. A T4 criterion's check is the user's own, and the gate rules such a row on
-  # its block's attributed confirmation under an empty-like auditor cell (walls.sh `matrix_row_ruled`). This verb
-  # writes that line from the user's words, so it is never typed by hand:
+  # THE APPROVAL. A person's approval is one event in the run's log, appended by its one writer (lib/proof.sh
+  # `proof_approval_event`) and never written into the plan, so the plan's bytes are the same before and after and no
+  # copy of it is judged: an approval can only let the gate admit more, never refuse.
   #
-  #   <key>: <user> <YYYY-MM-DD> "<the user's words>"[ — <why>]
+  #   approval  key=<name> by=<who> [head=<40-hex>] said=<the reply> [why=<why>]
   #
-  # <user> is git user.name, as approve and waive record it, folded to the one word the attributed form takes:
-  # each run of characters outside [A-Za-z0-9._-] becomes one '-'. The date is UTC, as a waiver's is. The line
-  # replaces the block's pending stub where it stands. The value is held to walls.sh `user_confirmed_attributed`,
-  # the one form test, before it is written, so the verb never writes a line the gate would not rule on. The words
-  # are held to lib/said.sh `user_said` as a waiver's are. The key is spelled once, on CR_KEY's line: every reader
-  # of it lives in walls.sh, and bash-walls.test.sh allows that one line and nothing else outside it.
-  # REFUSED (1), the plan unchanged: no such row, a row that is not T4, no block, no git user.name, a name that
-  # folds to no attributed form, words the user did not type. (2): lib/said.sh or walls.sh cannot be loaded.
-  poker_verb_confirm_row() {
-    CR_KEY=user-confirmed
-    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then
-      . "$BIONIC_LIB/said.sh"
-    fi
-    if ! declare -F user_said >/dev/null 2>&1; then
-      die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; the plan is unchanged."
-      exit 2
-    fi
-    CR_WORDS="$(said_fold "$CR_RAW")"; CR_WHY="$(deferral_fold "$CR_WHY_RAW")"
-    plan_verb_open confirm-row
-    if [ -z "$(matrix_row_cell "$PV_PLAN" "$CR_AC" 1)" ]; then
-      die "REFUSED — the matrix table has no row $CR_AC; the plan is unchanged."
-      exit 1
-    fi
-    CR_TIER="$(matrix_row_cell "$PV_PLAN" "$CR_AC" 2)"
-    if [ "$CR_TIER" != T4 ]; then
-      die "REFUSED — $CR_AC is a ${CR_TIER:-tierless} row, and only a T4 row's check is the user's own to confirm; the auditor or a waiver rules it. The plan is unchanged."
-      exit 1
-    fi
-    CR_WHO="$(git -C "$PV_REPO" config user.name 2>/dev/null \
-      | LC_ALL=C sed -e 's/[^A-Za-z0-9._-][^A-Za-z0-9._-]*/-/g' -e 's/^-*//' -e 's/-*$//')"
-    if [ -z "$CR_WHO" ]; then
-      die "REFUSED — no git user.name is set for $PV_REPO, and a confirmation records who made it; set it, then confirm again. The plan is unchanged."
-      exit 1
-    fi
-    user_said "$CR_RAW" "$PV_PLAN"; CR_SAID=$?
-    if [ "$CR_SAID" -ne 0 ]; then
-      said_refuse "$CR_SAID" "$CR_WORDS" "a confirmation"
-      exit 1
-    fi
-    CR_VALUE="$CR_WHO $(date -u +%Y-%m-%d) \"$(deferral_escape "$CR_WORDS")\"${CR_WHY:+ — $CR_WHY}"
-    ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F user_confirmed_attributed >/dev/null 2>&1 || exit 2
-      user_confirmed_attributed "$CR_VALUE" ); CR_FORM=$?
-    case "$CR_FORM" in
-      0) : ;;
-      1) die "REFUSED — git user.name folds to '$(clean "$CR_WHO")', which is not the one word, starting with a letter, that the gate reads as who confirmed; set user.name so it does. The plan is unchanged."
-         exit 1 ;;
-      *) die "REFUSED — the confirmation's form is walls.sh's to judge, and $BIONIC_LIB/walls.sh cannot be loaded; the plan is unchanged."
-         exit 2 ;;
-    esac
-    PV_RC=0
-    matrix_block_key "$PV_PLAN" "$CR_AC" "$CR_KEY" "$CR_VALUE" > "$PV_NEW" 2>/dev/null || PV_RC=$?
-    case "$PV_RC" in
-      0) : ;;
-      3) die "REFUSED — the matrix has no $CR_AC: block to hold the confirmation; the block is the plan's own text: write it there. The plan is unchanged."
-         exit 1 ;;
-      *) die "REFUSED — the confirmation cannot be written (exit $PV_RC); the plan is unchanged."
-         exit 2 ;;
-    esac
-    plan_verb_swap confirm-row "the confirmation of $CR_AC" writer
-    say "confirm-row — $CR_AC confirmed on the user's words: $CR_KEY: $(clean "$CR_VALUE") is in its block on $PV_PLAN; dry-committed first."
-    exit 0
-  }
-
-  # THE APPROVAL (wave-26 T13; D3, AC-6.2). A row that reads `approval:<name>` is not ready, and
-  # the dispatch wall refuses it, until `## SDLC State` carries
-  #
-  #   approved: <name> by <who> <ISO-UTC> head=<40-hex> "<reply>"
-  #
-  # written here on the user's reply and nowhere else: `<who>` is the project's git user name,
-  # the instant is `date -u`, the head is the working branch's (lib/proof.sh `proof_branch_head`;
-  # no head= when the plan names no branch with a commit), the reply is the user's own words. It
-  # goes through the plan transaction every row verb takes (copy, dry commit through the real gate,
-  # checksum, swap), beside the approval lines already there — after the last `approved:` or
-  # `approved-by:` line, else after `current:`. An approval is recorded once at a head: a second
-  # `approve` of a name the plan already carries is refused while the working head is the one its
-  # newest line names (lib/proof.sh `proof_approved_head`), so the first reply stands. At any other
-  # head the approval is stale, whatever its name: the user gave it for code the branch has moved
-  # past, so it is given again, a second line beside the first, and the newest is the one read.
-  #
-  # THE PLAN'S APPROVAL IS ITS OWN LINE. `approve plan '<reply>'` writes, at Step 3 on the user's reply,
-  #
-  #   approved-by: <who> <ISO-UTC> "<reply>"
-  #
-  # the line the commit gate reads from Step 4 (walls.sh `validate_approved_by`) and `approval:plan` reads,
-  # in that grammar and not `approved:`'s, through the same transaction and placement. Every row may read
-  # the plan's approval, so the name is not held to the rows' reads; a plan that carries the line keeps it.
-  # ap_place <line> <plan> -> the plan with <line> after the last `approved:` or `approved-by:` line of
-  # `## SDLC State`, else after `current:`; exit 1 when the section has neither. THE LINE GOES IN THROUGH
-  # THE ENVIRONMENT, not `-v`, which would read a backslash in the user's reply as an escape and write a
-  # different reply than the one given.
-  ap_place() {
-    AP_LINE="$1" awk '
-      { L[++n] = $0 }
-      END {
-        for (i = 1; i <= n; i++) {
-          if (L[i] ~ /^[[:space:]]*```/) { fence = !fence; continue }
-          if (fence) continue
-          if (L[i] ~ /^##[[:space:]]/) { if (insdlc) break; insdlc = (L[i] ~ /^##[[:space:]]+SDLC State/); continue }
-          if (!insdlc) continue
-          if (L[i] ~ /^[[:space:]]*approved(-by)?[[:space:]]*:/) at = i
-          else if (!at && !cur && L[i] ~ /^[[:space:]]*current[[:space:]]*:/) cur = i
-        }
-        if (!at) at = cur
-        if (!at) exit 1
-        for (i = 1; i <= n; i++) { print L[i]; if (i == at) print ENVIRON["AP_LINE"] }
-      }' "$2"
-  }
+  # <who> is the project's git user name, the reply the user's own words; each is one field of the log, so a line break
+  # or a `|` is refused. Three kinds of name:
+  #   plan         the plan's approval at Step 3, keyed step3 as an older plan's approved-by: translates; given once. Its
+  #                instant is the one the plan's and the step cards' asks close at: a step card left open until a later
+  #                card or the Stop closed it would read as a stop the run made after its approval.
+  #   a criterion  a person's confirmation of a criterion whose check is theirs, admitted only where the reader's cells
+  #                give it tier T4 (any other tier is refused, naming it), on words lib/said.sh `user_said` finds the
+  #                person typed in this session; the reader reads it as that criterion's confirmation.
+  #   any other    a name an open row reads as `approval:<name>` (units.sh `units_approval_names`, exact, case kept), and
+  #                merge-unproved where there is a release to approve: a name no row reads would be recorded while the
+  #                row it was meant for waits. It is recorded once at a head: given again only once the working head
+  #                (lib/proof.sh `proof_branch_head`) moved past the one the standing approval names, so the newest is
+  #                read. An approval of a decision D<n> is also its ruling, by the one ruling writer (sitrep.sh
+  #                `decisions_rule`), before the approval's own ask closes; a ruling already in the ledger stands beside it.
   poker_verb_approve() {
-    case "$AP_REPLY" in
-      *$'\n'*|*$'\r'*)
-        die "REFUSED — an approval line is one line, and the reply carries a line break; the plan is unchanged."
+    case "$AP_REPLY$AP_WHY" in
+      *$'\n'*|*$'\r'*|*'|'*)
+        die "REFUSED — an approval is one field of the run's log, and the reply carries a line break or a '|'; give it without one. Nothing was appended."
         exit 1 ;;
     esac
     plan_verb_open approve
-    if [ "$AP_NAME" = plan ]; then
-      if proof_approved "$PV_PLAN" step3; then
-        die "REFUSED — the run of $PV_PLAN already holds the plan's approval. An approval is recorded once; the plan is unchanged."
-        exit 1
-      fi
-      AP_WHO="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
-      if [ -z "$AP_WHO" ] || ! plan_verb_value_ok "$AP_WHO"; then
-        die "REFUSED — the project has no usable git user name (git config user.name) to record as the approver; the plan is unchanged."
-        exit 1
-      fi
-      # ONE INSTANT FOR THE PLAN AND THE REGISTER. The approved-by: instant is where the run's autonomous half starts,
-      # and the step cards' asks are answered by this reply, so they close at that same instant: a step card left open
-      # until a later card or the Stop closed it would read as a stop the run made after its approval.
-      AP_AT="$(owed_now 2>/dev/null)" || AP_AT=""
-      [ -n "$AP_AT" ] || AP_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-      AP_LINE="approved-by: $AP_WHO $AP_AT \"$AP_REPLY\""
-      if ! ap_place "$AP_LINE" "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
-        die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State to write the approval beside; the plan is unchanged."
-        exit 1
-      fi
-      plan_verb_swap approve "approved-by:" writer
-      poker_owed_close "$PV_REPO" "approve:plan" "approve"
-      if declare -F owed_close >/dev/null 2>&1; then
-        for AP_K in approve:step0 approve:step1 approve:step2 approve:step3; do
-          OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_close "$AP_K" "approve plan" "$AP_AT" >/dev/null 2>&1
-        done
-      fi
-      say "approve — plan: $AP_LINE written to $PV_PLAN; dry-committed first. The commit gate reads it from Step 4."
-      exit 0
-    fi
-    # A NAME NO ROW READS IS REFUSED (wave-26 T46; review 10 F6). `approve relase` used to be
-    # recorded "once" while the release kept waiting in silence; the names the rows read, as
-    # `approval:<name>` or `live:approval:<name>` (units.sh `units_approval_names`), are the only
-    # names an approval can satisfy. Exact match, case included, as readiness keys it.
-    AP_READ="$(units_approval_names "$PV_PLAN" | /usr/bin/grep -v '^plan$' | tr '\n' ' ' | sed 's/ $//')"
-    # THE MERGE WITHOUT A PASS is the answer to the release card's ask, so it is a name only where there is a release
-    # to approve: `release` is the name an open integrate row behind the release doc row derives, whatever its cell reads.
-    case " $AP_READ " in *" release "*) AP_READ="$AP_READ merge-unproved" ;; esac
-    case " $AP_READ " in
-      *" $AP_NAME "*) : ;;
-      *)
-        die "REFUSED — no row in $PV_PLAN reads approval:$AP_NAME, so recording it would satisfy nothing; the rows read: ${AP_READ:-(no named approval)}. Approve one of those names exactly; the plan is unchanged."
-        exit 1 ;;
-    esac
-    AP_HEAD="$(proof_branch_head "$PV_PLAN" "$PV_REPO" 2>/dev/null)" || AP_HEAD=""
-    case "$AP_HEAD" in *[!0-9a-f]*|'') AP_HEAD="" ;; esac
-    if proof_approved "$PV_PLAN" "$AP_NAME"; then
-      AP_WAS="$(proof_approved_head "$PV_PLAN" "$AP_NAME" 2>/dev/null)" || AP_WAS=""
-      if [ -z "$AP_HEAD" ] || [ "$AP_WAS" = "$AP_HEAD" ]; then
-        die "REFUSED — the run of $PV_PLAN already holds the approval $AP_NAME. An approval is recorded once at a head, and ${AP_HEAD:+the working head ${AP_HEAD:0:12} is the one it names}${AP_HEAD:-the plan names no working-branch head to give it again at}; the plan is unchanged."
-        exit 1
-      fi
-    fi
     AP_WHO="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
     if [ -z "$AP_WHO" ] || ! plan_verb_value_ok "$AP_WHO"; then
-      die "REFUSED — the project has no usable git user name (git config user.name) to record as the approver; the plan is unchanged."
+      die "REFUSED — the project has no usable git user name (git config user.name) to record as the approver; nothing was appended."
       exit 1
     fi
-    AP_LINE="approved: $AP_NAME by $AP_WHO $(date -u +%Y-%m-%dT%H:%M:%SZ)${AP_HEAD:+ head=$AP_HEAD} \"$AP_REPLY\""
-    if ! ap_place "$AP_LINE" "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
-      die "REFUSED — $PV_PLAN carries no current: line under ## SDLC State to write the approval beside; the plan is unchanged."
-      exit 1
+    AP_KEY="$AP_NAME"; AP_HEAD=""; AP_AT=""
+    AP_CELLS="$(_proof_ask "$PV_PLAN" reader_cells "$PV_PLAN" 2>/dev/null)"; AP_RC=$?
+    if [ "$AP_RC" -gt 1 ]; then
+      die "REFUSED — the run's facts could not be read, so whether $AP_NAME is a criterion is not known; nothing was appended. run again: session-poker.sh approve $AP_NAME '<reply>'"
+      exit 2
     fi
-    plan_verb_swap approve "approved: $AP_NAME" writer
-    # AN APPROVAL OF A DECISION IS ITS RULING, written by the one ruling writer (sitrep.sh `decisions_rule`) before the
-    # approval's own close, so a decision approved by name, or on the release approval card whose reply runs this verb,
-    # has its ledger heading and an ask the ruling closed. A decision the ledger already rules keeps that ruling, and
-    # the approval stands beside it.
+    AP_TIER="$(printf '%s\n' "$AP_CELLS" | awk -F'\037' -v c="$AP_NAME" '$1 == c { print ($4 == "" ? "-" : $4); exit }')"
+    if [ "$AP_NAME" = plan ]; then
+      AP_KEY=step3
+      if proof_approved "$PV_PLAN" step3; then
+        die "REFUSED — the run of $PV_PLAN already holds the plan's approval. An approval is recorded once; nothing was appended."
+        exit 1
+      fi
+      AP_AT="$(owed_now 2>/dev/null)" || AP_AT=""
+    elif [ -n "$AP_TIER" ]; then
+      if [ "$AP_TIER" != T4 ]; then
+        die "REFUSED — $AP_NAME is a $AP_TIER criterion, and only a T4 criterion's check is the user's own to confirm; the auditor or a waiver rules it. Nothing was appended."
+        exit 1
+      fi
+      if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
+      if ! declare -F user_said >/dev/null 2>&1; then
+        die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing was appended."
+        exit 2
+      fi
+      user_said "$AP_REPLY" "$PV_PLAN"; AP_SAID=$?
+      [ "$AP_SAID" -eq 0 ] || { said_refuse "$AP_SAID" "$(said_fold "$AP_REPLY")" "a confirmation"; exit 1; }
+    else
+      AP_READ="$(units_approval_names "$PV_PLAN" | /usr/bin/grep -v '^plan$' | tr '\n' ' ' | sed 's/ $//')"
+      case " $AP_READ " in *" release "*) AP_READ="$AP_READ merge-unproved" ;; esac
+      case " $AP_READ " in
+        *" $AP_NAME "*) : ;;
+        *)
+          die "REFUSED — no row in $PV_PLAN reads approval:$AP_NAME, so recording it would satisfy nothing; the rows read: ${AP_READ:-(no named approval)}. Approve one of those names exactly; nothing was appended."
+          exit 1 ;;
+      esac
+      AP_HEAD="$(proof_branch_head "$PV_PLAN" "$PV_REPO" 2>/dev/null)" || AP_HEAD=""
+      case "$AP_HEAD" in *[!0-9a-f]*|'') AP_HEAD="" ;; esac
+      if proof_approved "$PV_PLAN" "$AP_NAME"; then
+        AP_WAS="$(proof_approved_head "$PV_PLAN" "$AP_NAME" 2>/dev/null)" || AP_WAS=""
+        if [ -z "$AP_HEAD" ] || [ "$AP_WAS" = "$AP_HEAD" ]; then
+          die "REFUSED — the run of $PV_PLAN already holds the approval $AP_NAME. An approval is recorded once at a head, and ${AP_HEAD:+the working head ${AP_HEAD:0:12} is the one it names}${AP_HEAD:-the plan names no working-branch head to give it again at}; nothing was appended."
+          exit 1
+        fi
+      fi
+    fi
+    if ! LOG_AT="$AP_AT" proof_approval_event "$PV_PLAN" "$AP_KEY" "by=$AP_WHO" ${AP_HEAD:+"head=$AP_HEAD"} "said=$AP_REPLY" ${AP_WHY:+"why=$AP_WHY"}; then
+      die "REFUSED — the approval $AP_NAME could not be appended to the run's log of $PV_PLAN (no record directory beside the plan, or the log cannot be written)."
+      exit 2
+    fi
     AP_RC=-; AP_RULED=""
     case "$AP_NAME" in
+      plan)
+        poker_owed_close "$PV_REPO" "approve:plan" "approve"
+        if declare -F owed_close >/dev/null 2>&1; then
+          for AP_K in approve:step0 approve:step1 approve:step2 approve:step3; do
+            OWED_ROOT="$PV_REPO" OWED_PLAN="$PV_PLAN" owed_close "$AP_K" "approve plan" "${AP_AT:-}" >/dev/null 2>&1
+          done
+        fi
+        say "approve — plan: approved by $AP_WHO, appended to the run's log of $PV_PLAN, which is unchanged. The commit gate reads it from Step 4."
+        exit 0 ;;
       D[1-9]*) case "${AP_NAME#D}" in
           *[!0-9]*) : ;;
           *) AP_RULED="$(decisions_rule "$PV_PLAN" "$PV_REPO" "$AP_NAME" "$AP_REPLY" 2>&1)"; AP_RC=$? ;;
         esac ;;
     esac
     poker_owed_close "$PV_REPO" "approve:$AP_NAME" "approve"
-    say "approve — $AP_NAME: approved: $AP_NAME by $AP_WHO written to $PV_PLAN; dry-committed first."
+    say "approve — $AP_NAME: approved by $AP_WHO, appended to the run's log of $PV_PLAN, which is unchanged."
     case "$AP_RC" in
       -) : ;;
       0) printf '%s\n' "$AP_RULED" ;;
       3) say "approve — $AP_NAME: the design ledger already rules it; that ruling stands beside the approval." ;;
-      *) die "approve — $AP_NAME is approved on the plan, but its ruling is not in the design ledger: ${AP_RULED#poker: }; rule it with: bash ${HOOK_DIR}/session-poker.sh decisions rule $AP_NAME '<the reply>'."
+      *) die "approve — $AP_NAME is approved in the run's log, but its ruling is not in the design ledger: ${AP_RULED#poker: }; rule it with: bash ${HOOK_DIR}/session-poker.sh decisions rule $AP_NAME '<the reply>'."
          exit 1 ;;
     esac
     exit 0

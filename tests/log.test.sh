@@ -6,7 +6,7 @@
 #
 #   §SHAPE   a line matches the shape and reads back by field name; no type, a bare word, a `|` in a
 #            value and a caller's own `at=` are refused; LOG_AT stamps the line when in the shape, is refused
-#            when not, and only lib/owed.sh sets it.
+#            when not, and only the files its list names set it, each for its reason.
 #   §TYPES   `matrix-set` and a retired word are refused; each of the 29 listed types is accepted.
 #
 # FIXTURE FIDELITY. The log is a real file in a scratch directory; only its path is synthesized.
@@ -36,7 +36,11 @@ refused "a key that sets at" step at=1
 LOG_AT=2026-10-06T11:48:01Z log_append ask key=a:b
 expect_eq "a caller's instant in the log's shape stamps the line" "2026-10-06T11:48:01Z" "$(line_value "$(tail -n 1 "$RUN_LOG")" at)"
 LOG_AT=2026-10-06T11:48Z refused "a caller's instant off the log's shape" ask key=a:b
-expect_eq "no file but the asks library hands the appender an instant" "payload/scripts/lib/owed.sh" \
+# Who may hand the appender an instant, and why; a fourth file that sets LOG_AT turns this row red.
+LA_WHO="hooks/poker/proof.sh:the approval of the plan and its asks close at one instant
+payload/scripts/close-out.sh:the delivery of the close stands at the minute of its Step 9 line
+payload/scripts/lib/owed.sh:the act on an ask, counted on the clock of the asks"
+expect_eq "no file hands the appender an instant but those the list names, each for its reason" "$(printf '%s\n' "$LA_WHO" | cut -d: -f1 | paste -sd' ' -)" \
   "$(cd "$BIONIC_SCRIPTS_DIR" && /usr/bin/grep -rl 'LOG_AT=' payload hooks | LC_ALL=C sort | paste -sd' ' -)"
 
 section "TYPES"

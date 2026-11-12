@@ -262,6 +262,19 @@ proof_step_event() {  # <plan> <step> [<field>=<value>…] -> one step event in 
   RUN_LOG="$log" log_append step "n=$n" "$@"
 }
 
+# THE RUN'S LOG HOLDS AN APPROVAL, and this is the type's one writer: the approve verb calls it for the plan's approval
+# (key step3, as the translation names an older plan's approved-by:), a criterion a person confirms, and any other name.
+# Its fields are the ones the translation gives an older plan's approval line, `by=<who> [head=<sha>] said=<the reply>`,
+# so the reader reads an old approval and a new one alike; nothing writes an approval into a plan. Exits as
+# proof_waiver_event's, and 2 for a key that is not one name.
+proof_approval_event() {  # <plan> <key> [<field>=<value>…] -> one approval event in the plan's run log
+  local log k="${2:-}"
+  case "$k" in ''|*[!A-Za-z0-9._-]*) return 2 ;; esac
+  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
+  shift 2
+  RUN_LOG="$log" log_append approval "key=$k" "$@"
+}
+
 # A STEP A DRY JUDGMENT ASKS ABOUT stands last in the facts of that judgment and nowhere else. The advance runs the
 # commit gate on the plan itself under its own session, `planverb-<pid>`, with the step it moves to in BIONIC_DRY_STEP;
 # close-out's pre-flight judges a copy of the plan, whose name joins no record, under `closeout-preflight-<pid>`, with

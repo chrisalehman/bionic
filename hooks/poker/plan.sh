@@ -1850,7 +1850,7 @@ RR_WAIVES
     # ROWS: every matrix row, ruled or not as walls.sh rules it (rr_rows). Proved when discharged and ruled, and a T4 row
     # so ruled under an empty-like auditor cell is one the user confirmed; waived when ruled with status waived. Every
     # other row is a decision: a discharged T4 row under an empty-like cell is the user's own check, to confirm
-    # (confirm-row) or waive; any other is waived or run, a T4 row's standing finding said in the gate's words. The
+    # (approve <AC>) or waive; any other is waived or run, a T4 row's standing finding said in the gate's words. The
     # step a row is owed against is the run's (the reader's `step`), the plan's `current:` only where the log has none.
     RR_ACT=0; RR_ACP=0; RR_ACY=0; RR_ACW=0; RR_ACU=0; RR_ACA=0; RR_ACR=0; RR_ACC=0; RR_ACL=0; RR_MISS=""
     poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_step; RR_CUR="$(printf '%s\n' "$RR_ANS" | sed -n 's/^n=//p')"
@@ -1872,7 +1872,7 @@ RR_WAIVES
       RR_MISS="${RR_MISS:+$RR_MISS }$ac"
       if [ "$tier" = T4 ] && [ "$au" = - ] && [ "$st" = discharged ]; then
         RR_ACA=$((RR_ACA + 1))
-        rr_add row "row:$ac" "confirm-row $ac" "waive $ac" "a T4 criterion, the user's own check" \
+        rr_add row "row:$ac" "approve $ac" "waive $ac" "a T4 criterion, the user's own check" \
           "$ac, your own check, not confirmed yet" confirm waive "confirm $ac" "waive $ac"
         continue
       fi

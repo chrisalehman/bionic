@@ -15,7 +15,7 @@ section "§JUDGE: the Tests line prints the full pass's state at this head, and 
 # ============================================================
 # fails-when: the page reads covered or green over a whole run behind the head, names a suite still owed, or leaves
 # the landings since the run uncounted; the card puts no merge-unproved decision while the whole suite is not green
-# at the head; reply on that decision writes no `approved: merge-unproved` line at the head; or `current 8 --check`
+# at the head; reply on that decision appends no merge-unproved approval at the head; or `current 8 --check`
 # passes before that line is written, or refuses after it.
 FC_F6="$(s57_commit "$RFC" lib/x.sh 'T6: the fix that greens a')"
 fc_published T6 "$FC_F6" > "$FC_REC/landing-proofs.log"
@@ -62,7 +62,7 @@ expect_eq "JUDGE-4d …proof_merge_ask exits 1 at that head, printing nothing; o
 fc_plan "$FC_GOOD"; fc_page; fc_typed "$FC_WD"
 poke "$RFC" reply "$FC_WD"; FC_J4_REPLY="$RC"
 poke "$RFC" current 8 --check; FC_WN_GREEN="$RC"
-expect_eq "JUDGE-4e …the reply that takes every default replays (exit 0), writing no merge-unproved line, and current 8 --check is admitted (exit 0)" "0||0" "$FC_J4_REPLY|$(/usr/bin/grep '^approved: merge-unproved ' "$PFC")|$RC"
+expect_eq "JUDGE-4e …the reply that takes every default replays (exit 0), writing no merge-unproved line, and current 8 --check is admitted (exit 0)" "0||0" "$FC_J4_REPLY|$(fc_appr merge-unproved)|$RC"
 [ "$RC" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$OUT" | tail -4)"
 git -C "$RFC" reset -q --hard "$FC_R"; fc_typed "$FC_WD" "$FC_WR"; rm -f "$FC_REC"/release-approval-*.md
 # JUDGE-3: the whole run at B, T1's code at C landed green on its suite, the release text at R: covered to the judge,
@@ -83,7 +83,7 @@ expect_eq "JUDGE-3c …the replay line waits by default and merges as its other 
 FC_J3W="${FC_J3N:-0} wait, rest default"
 fc_typed "$FC_J3W"
 poke "$RFC" reply "$FC_J3W"
-expect_eq "JUDGE-3d a reply that waits on it and takes every other default replays (exit 0), writing no merge-unproved line" "0|" "$RC|$(/usr/bin/grep '^approved: merge-unproved ' "$PFC")"
+expect_eq "JUDGE-3d a reply that waits on it and takes every other default replays (exit 0), writing no merge-unproved line" "0|" "$RC|$(fc_appr merge-unproved)"
 poke "$RFC" current 8 --check; FC_WN_COV="$RC"
 expect_eq "JUDGE-3e …and current 8 --check still refuses (exit 1), on the regression alone" "1|1" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -cE '^regression	unproved	')"
 expect_contains "JUDGE-3f …naming the person's exit" "or wait for the pass" "$OUT"
@@ -93,7 +93,7 @@ FC_J3M="${FC_J3N:-0} merge"
 fc_typed "$FC_J3M"
 poke "$RFC" reply "$FC_J3M"
 expect_eq "JUDGE-3g the card put again holds the one decision, and reply ${FC_J3M} replays it (exit 0)" "1|0" "${FC_J3N:-}|$RC"
-expect_regex "JUDGE-3h …writing the approval at the working head with the user's words" "^approved: merge-unproved by Dana Fixture [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z head=$FC_R \"$FC_J3M\"\$" "$(/usr/bin/grep '^approved: merge-unproved ' "$PFC")"
+expect_regex "JUDGE-3h …writing the approval at the working head with the user's words" "^run/v1\\|ev=approval\\|key=merge-unproved\\|by=Dana Fixture\\|head=$FC_R\\|said=$FC_J3M\\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z\$" "$(fc_appr merge-unproved)"
 expect_eq "JUDGE-3i …closing its ask on the person's ledger" "" "$(fc_owed | /usr/bin/grep -x 'approve:merge-unproved')"
 poke "$RFC" current 8 --check; FC_WY_COV="$RC"
 expect_eq "JUDGE-3j …after which current 8 --check passes (exit 0)" "0" "$RC"
@@ -127,10 +127,10 @@ expect_contains "WORD-1b …drawn on the page with the head's state" ". Merge wi
 expect_contains "WORD-1b2 …and naming the commit no run proved, as the judge's refusal does" "; commit ${FC_C:0:12} (no landing row) is not proved: " "$(fc_unproved)"
 FC_WDM="${FC_WDN:-0} merge, rest default"; fc_typed "$FC_WDM"
 poke "$RFC" reply "$FC_WDM"
-expect_regex "WORD-1c reply ${FC_WDM} replays (exit 0), writing the word at the head with the user's words" "^0\|approved: merge-unproved by Dana Fixture [0-9T:Z-]+ head=$FC_R \"$FC_WDM\"\$" "$RC|$(/usr/bin/grep '^approved: merge-unproved ' "$PFC")"
+expect_regex "WORD-1c reply ${FC_WDM} replays (exit 0), writing the word at the head with the user's words" "^0\\|run/v1\\|ev=approval\\|key=merge-unproved\\|by=Dana Fixture\\|head=$FC_R\\|said=$FC_WDM\\|at=[0-9T:Z-]+\$" "$RC|$(fc_appr merge-unproved)"
 poke "$RFC" current 8 --check; FC_WY_UNC="$RC"
 expect_eq "WORD-1d …and current 8 --check is admitted (exit 0) over the uncovered floor" "0" "$RC"
-/usr/bin/grep -v '^approved: merge-unproved ' "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
+/usr/bin/grep -v '|ev=approval|key=merge-unproved|' "$FC_REC/run.log" > "$FC_REC/run.log.new"; mv "$FC_REC/run.log.new" "$FC_REC/run.log"
 poke "$RFC" current 8 --check; FC_WN_UNC="$RC"
 expect_eq "WORD-1e …the word taken out, the release approval kept: refused (exit 1) on the regression unproved, so the word is what admits" "1|unproved" "$RC|$(fc_regline | cut -f2)"
 fc_typed "$FC_WD" "$FC_WR"; rm -f "$FC_REC"/release-approval-*.md
@@ -145,7 +145,7 @@ expect_contains "WORD-2f …the refusal names the pass as the exit" "needs: the 
 expect_absent "WORD-2g …and names no reply" "reply" "$(fc_regline)"
 poke "$RFC" approve merge-unproved 'merge it'
 poke "$RFC" current 8 --check; FC_WY_OWED="$RC"
-expect_eq "WORD-2h the word recorded at the head over the owed floor: still refused (exit 1) on the regression owed" "1|owed|1" "$RC|$(fc_regline | cut -f2)|$(/usr/bin/grep -c '^approved: merge-unproved ' "$PFC")"
+expect_eq "WORD-2h the word recorded at the head over the owed floor: still refused (exit 1) on the regression owed" "1|owed|1" "$RC|$(fc_regline | cut -f2)|$(fc_appr merge-unproved | grep -c .)"
 # (3) The states table, each row the card's draw beside the gate's exits without and with the word.
 fc_wrow() { local h=no; [ "$3" = 0 ] || [ "$4" != 0 ] || h=yes; printf '%s:draw=%s:honour=%s ' "$1" "$2" "$h"; }  # <state> <draw> <exit without the word> <with it, or -> -> one cell
 FC_WT="$(fc_wrow covered "$FC_WD_COV" "$FC_WN_COV" "$FC_WY_COV")$(fc_wrow uncovered "$FC_WD_UNC" "$FC_WN_UNC" "$FC_WY_UNC")$(fc_wrow owed "$FC_WD_OWED" "$FC_WN_OWED" "$FC_WY_OWED")$(fc_wrow green "$FC_WD_GREEN" "$FC_WN_GREEN" -)"
@@ -170,7 +170,7 @@ fc_page --preview
 expect_eq "OF-2 the card puts the release decision and no merge without a whole run, as JUDGE-2 at an owed head" "yes|" "$(fc_has "$(fc_under Decisions | fc_flat)" 'Release 1.0.0')|$(fc_unproved)"
 poke "$RFC" approve release 'ship it'; poke "$RFC" approve merge-unproved 'merge it'
 poke "$RFC" current 8 --check
-expect_eq "OF-3 the word recorded at the head: current 8 --check refuses (exit 1) on the regression owed, never covered" "1|owed|1" "$RC|$(fc_regline | cut -f2)|$(/usr/bin/grep -c '^approved: merge-unproved ' "$PFC")"
+expect_eq "OF-3 the word recorded at the head: current 8 --check refuses (exit 1) on the regression owed, never covered" "1|owed|1" "$RC|$(fc_regline | cut -f2)|$(fc_appr merge-unproved | grep -c .)"
 expect_contains "OF-3b …naming the pass or a fix row as the exit" "needs: the pass — a fix row for a.test.sh, then the pass" "$(fc_regline)"
 expect_absent "OF-3c …and no reply" "reply" "$(fc_regline)"
 FC_OFX="$(git -C "$RFC" commit-tree -p "$FC_B" -m 'a whole run off the head line' "$FC_C^{tree}")"
@@ -191,8 +191,8 @@ fc_ua() {  # [<integrate row's status>] -> PFC: the red world, the integrate row
   fc_plan "$(fc_floor "$FC_B")
 $(fc_reads "$FC_C")" "s/| pending | approval:release, approval:merge, head |\$/| ${1:-pending} | head |/"
 }
-fc_ua; poke "$RFC" approve merge-unproved 'words'
-expect_eq "UA-1 approve merge-unproved writes the line (exit 0) where the integrate row is open and no row reads approval:merge" "0|1" "$RC|$(/usr/bin/grep -c '^approved: merge-unproved ' "$PFC")"
+fc_ua; FC_S0="$(cksum < "$PFC")"; poke "$RFC" approve merge-unproved 'words'
+expect_eq "UA-1 approve merge-unproved appends it (exit 0) where the integrate row is open and no row reads approval:merge, the plan's sum the same" "0|1|$FC_S0" "$RC|$(fc_appr merge-unproved | grep -c .)|$(cksum < "$PFC")"
 FC_AT='|by=me|at=2026-10-12T14:00:00Z'; fc_ua; printf 'run/v1|ev=approval|key=merge-unproved|head=%s%s\n' "$FC_R" "$FC_AT" >> "$FC_REC/run.log"
 FC_S0="$(cksum < "$PFC")"; poke "$RFC" approve merge-unproved 'again'; FC_UA1="$RC|$(cksum < "$PFC")"
 fc_plan "$(fc_floor "$FC_B")" '/^approved-by:/d'; printf 'run/v1|ev=approval|key=step3%s\n' "$FC_AT" >> "$FC_REC/run.log"; FC_S1="$(cksum < "$PFC")"; poke "$RFC" approve plan 'approved'
@@ -201,11 +201,11 @@ fc_ua; fc_page
 FC_UAN="$(fc_table | /usr/bin/grep -F '|key=approve:merge-unproved|' | sed -n 's/^release-approval\/v1|dec=\([0-9]*\)|.*/\1/p')"
 FC_UAM="${FC_UAN:-0} merge, rest default"; fc_typed "$FC_UAM"
 poke "$RFC" reply "$FC_UAM"
-expect_eq "UA-2 …and so does reply on the card's decision (exit 0)" "0|1" "$RC|$(/usr/bin/grep -c '^approved: merge-unproved ' "$PFC")"
+expect_eq "UA-2 …and so does reply on the card's decision (exit 0)" "0|1" "$RC|$(fc_appr merge-unproved | grep -c .)"
 for FC_UAS in dropped landed; do
   fc_ua "$FC_UAS"
   poke "$RFC" approve merge-unproved 'words'
-  expect_eq "UA-3 …refused with the integrate row $FC_UAS, the plan unchanged" "1|0" "$RC|$(/usr/bin/grep -c '^approved: merge-unproved ' "$PFC")"
+  expect_eq "UA-3 …refused with the integrate row $FC_UAS, the plan unchanged" "1|0" "$RC|$(fc_appr merge-unproved | grep -c .)"
   expect_contains "UA-3b …naming what the rows read, in the refusal's words ($FC_UAS)" "reads approval:merge-unproved, so recording it would satisfy nothing; the rows read: (no named approval)" "$OUT"
 done
 fc_typed "$FC_WD" "$FC_WR"

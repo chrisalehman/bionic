@@ -677,12 +677,10 @@ sed -i.bak -e '/|ac=AC-2|evidence=record\/generic-evidence\.md|/d' -e '/|evidenc
 RU_WALLS="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/walls.sh"
 expect_eq "RULED-ONE: matrix_row_ruled has exactly one definition in walls.sh" "1" \
   "$(/usr/bin/grep -c '^matrix_row_ruled()' "$RU_WALLS")"
-RU_UC="$(/usr/bin/grep -rn 'user-confirmed' "${BIONIC_HOOKS_DIR}" "${BIONIC_HOOKS_DIR}/../payload/scripts" | /usr/bin/grep -v 'walls.sh' | /usr/bin/grep -vE 'lib/(reader|translate)\.sh:')"
-# The one writer, confirm-row, spells the key once, on the line that names it for its one write; that line is
-# the whole of its allowance, so a parser of the confirmation added beside it still turns this check red.
-expect_contains "RULED-ONE-d: …and the confirm-row writer's one key line" "CR_KEY=user-confirmed" "$RU_UC"
-expect_eq "RULED-ONE-c: …and nothing else names user-confirmed outside walls.sh and the reader's files" "" \
-  "$(printf '%s\n' "$RU_UC" | /usr/bin/grep -v 'proof\.sh:[0-9]*:[[:space:]]*CR_KEY=user-confirmed$')"
+RU_UC="$(/usr/bin/grep -rn 'user-confirmed' "${BIONIC_HOOKS_DIR}" "${BIONIC_HOOKS_DIR}/../payload/scripts")"
+expect_contains "RULED-ONE-d: …the search reads walls.sh's own parser of the key" "lib/walls.sh:" "$RU_UC"
+expect_eq "RULED-ONE-c: …and nothing names user-confirmed outside walls.sh and the reader's files, no writer of it either" "" \
+  "$(printf '%s\n' "$RU_UC" | /usr/bin/grep -v 'walls.sh' | /usr/bin/grep -vE 'lib/(reader|translate)\.sh:')"
 
 # ---------------------------------------------------------------------------
 section "§PENDING-T4 — a T4 row awaiting its user passes the per-key check at 6 and 7, and the advance to 8 refuses it"
@@ -737,8 +735,8 @@ expect_eq "PT-4c: with the placeholder test restored, current 6 --check refuses 
 expect_contains "PT-4d: …as a placeholder, which is what PT-1 reads" "placeholder" "$PT_OUT"
 
 # ---------------------------------------------------------------------------
-section "§REFUSED-VERB — a dispatched agent's confirm-row is refused by the wall; the orchestrator's own is not"
-# `confirm-row` records the user's confirmation of a T4 row, so it is the user's act and never an agent's. The
+section "§REFUSED-VERB — a dispatched agent's approve of a criterion is refused by the wall; the orchestrator's own is not"
+# `approve <AC>` records the user's confirmation of a T4 row, so it is the user's act and never an agent's. The
 # dispatch wall refuses every verb on its contract list from a payload carrying an agent id in an armed session;
 # the list gained the verb with no test reading it.
 # Fixture fidelity: the PreToolUse payload of section 7 (top-level `agent_id`, the roster file armed); the
@@ -748,13 +746,13 @@ section "§REFUSED-VERB — a dispatched agent's confirm-row is refused by the w
 R_RV="$(mk_repo refusedverb)"
 arm_roster "$R_RV"
 RV_ARM="a subagent may not change a contract or the plan"
-RV_CMD="bash ${BIONIC_HOOKS_DIR}/session-poker.sh confirm-row AC-x 'yes'"
+RV_CMD="bash ${BIONIC_HOOKS_DIR}/session-poker.sh approve AC-x 'yes'"
 run_hook "$(mk_payload "$R_RV" "$RV_CMD" "$ACTOR" "" Bash test-runner)"
-expect_status "RV-1: a dispatched agent's confirm-row is refused" 2 "$ST"
+expect_status "RV-1: a dispatched agent's approve AC-x is refused" 2 "$ST"
 expect_contains "RV-1b: …with the wall's line" "$RV_ARM" "$ERR"
-expect_contains "RV-1c: …naming the verb it refused" "session-poker.sh confirm-row" "$ERR"
+expect_contains "RV-1c: …naming the verb it refused" "session-poker.sh approve" "$ERR"
 run_hook "$(mk_payload "$R_RV" "$RV_CMD")"
-expect_status "RV-2: the orchestrator's own confirm-row passes the wall" 0 "$ST"
+expect_status "RV-2: the orchestrator's own approve AC-x passes the wall" 0 "$ST"
 expect_absent "RV-2b: …and that arm's line is absent on the same stream RV-1b read" "$RV_ARM" "$ERR"
 
 # ---------------------------------------------------------------------------

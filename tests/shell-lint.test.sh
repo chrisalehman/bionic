@@ -1330,7 +1330,7 @@ section "EXIT — every refusal names its exit, and the ones that do not burn do
 #                   one-word verb of EXIT_WORDS followed by its argument (`<`, `'`, `$`, a backquote, a
 #                   digit or a flag). The refusing verb's own name in `<verb> refused —` or in a
 #                   `REFUSED — <verb>:` lead is the refusal's subject, not its exit, and is not read.
-# EXIT_VERBS: confirm-row continuation-fill epic-row fill-report finding-move finding-stated
+# EXIT_VERBS: continuation-fill epic-row fill-report finding-move finding-stated
 #   known-limits-part landing-report launch-sync ledger-add ledger-set matrix-render matrix-retier matrix-set
 #   proof-add regression-run release-approval release-check release-note reviews-part row-landed ruling-ack
 #   stop-run task-add task-set task-split tasks-prose waive-row
@@ -1340,7 +1340,7 @@ section "EXIT — every refusal names its exit, and the ones that do not burn do
 # THE CEILING FILE, tests/lib/refusal-exits.ceiling: `<path> <count> # <reason or date>`, one line per file
 # with unexcused sites. A file it does not name has ceiling 0. A line with no count, no reason after a space,
 # a hash and a space, or a path named twice is refused by line.
-EXIT_VERBS="confirm-row continuation-fill epic-row fill-report finding-move finding-stated known-limits-part
+EXIT_VERBS="continuation-fill epic-row fill-report finding-move finding-stated known-limits-part
   landing-report launch-sync ledger-add ledger-set matrix-render matrix-retier matrix-set proof-add regression-run
   release-approval release-check release-note reviews-part row-landed ruling-ack stop-run
   task-add task-set task-split tasks-prose waive-row"
