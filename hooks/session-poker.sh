@@ -24,7 +24,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh current <N> [--check]   advance the run's step, judged at it first (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a review: that proof line with its question, reviewer, result and scope
-#     bash <plugin-root>/hooks/session-poker.sh order '<the user's words>' | order lift   the user's order every suite obeys, or its end: an order: line with the words and the time (writes the plan, or record/orders.log with no run bound)
+#     bash <plugin-root>/hooks/session-poker.sh order '<the user's words>' | order lift   the user's order every suite obeys, or its end: an order event with the words in the bound run's log (record/orders.log with no run bound)
 #     bash <plugin-root>/hooks/session-poker.sh waive <question|all|AC-id> '<reply>'   the user's waiver of a review question, all three, or a criterion (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh release-check   run the project's declared release check over the release range; its log and its check fact, failing or not (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh floor-run   run the project's regression (its floor: command, else tests/run.sh, whole, held to the full-run rules) in the working checkout and log it for proof-add floor (writes a log under record/, never the plan)
@@ -196,7 +196,7 @@ fi
 . "$BIONIC_LIB/run.sh"
 # THE ONE READER OF THE INTEGRATION BRANCH AND THE ONE READER OF THE HANDOFF POINTER (wave-39 T16; D18, AC-12.1):
 # lib/plan.sh `plan_integration_branch` (## SDLC State, then the frontmatter) for `handoff` and `release-check`, and
-# lib/handoff.sh `handoff_pointer_of`/`handoff_default_of` and `_HANDOFF_SEC_AWK` for every reader of ## Handoff below.
+# lib/handoff.sh `handoff_pointer_of`/`handoff_default_of` for every reader of the run's handoff below.
 # close-out.sh calls the same two, so the verb and the closed form cannot read two branches or two files.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/plan.sh"
@@ -430,7 +430,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --questions <q>[,<q>] on a review row declares the questions it owes (evidence, adversarial, structure, one role's), so its records and its dispatch are those and not the rigor's full deal; --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--suites=<a,b>] [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract (--suites= narrows its suites, and lands_on= with them): a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   advance the run's step: judged as a commit at <N> would be, then one step event in the run's log, the plan unwritten (9 is close-out's); --check (5-8) runs the judgment, appends nothing, and exits as the advance would"
-  die "  bash ${HOOK_DIR}/session-poker.sh order '<the user's words>'   record the user's order: an order: given line with the time and the words, under the bound plan's ## SDLC State, else in record/orders.log; while it stands tests/run.sh starts no suite"
+  die "  bash ${HOOK_DIR}/session-poker.sh order '<the user's words>'   record the user's order: an order event with the words in the bound run's log, else a line in record/orders.log; while it stands tests/run.sh starts no suite"
   die "  bash ${HOOK_DIR}/session-poker.sh order lift   end the open order: an order: lifted line with the time and its words"
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>'   record the user's approval <name> as an approved: line under ## SDLC State (the plan's own is approved-by:, written at Step 3)"
   die "  bash ${HOOK_DIR}/session-poker.sh reviews-part <id>   the integrate row's render, before its push and pull request: the release entry's ### The reviews from the plan's review and waiver lines, committed on the working branch and named in the landing record (never pushed)"
@@ -1986,15 +1986,6 @@ $(for f in "$2"/roster-*.state; do [ -f "$f" ] && [ ! -L "$f" ] && printf '%s\n'
       }
       close($0) }' 2>/dev/null)
 EOF
-}
-
-# A DISPATCH AFTER A HANDOFF IS NAMED AT ITS LOCAL TIME AND ITS ISO INSTANT, by adopt's
-# STALE note, the one reader a resumed session runs first.
-handoff_local_time() {  # <ISO-8601 Z> -> `YYYY-MM-DD HH:MM <zone>` on this machine's clock, empty if unreadable
-  local e
-  e="$(iso_epoch "$1")"
-  [ -n "$e" ] || return 0
-  date -r "$e" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || date -d "@$e" '+%Y-%m-%d %H:%M %Z' 2>/dev/null
 }
 
 # TWO PLAN PATHS ARE THE SAME PLAN when they name the same file, and the two sides of the

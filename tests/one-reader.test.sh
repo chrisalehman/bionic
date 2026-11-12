@@ -104,6 +104,9 @@ w1() { printf '%s\n' "$AFTER" | awk -F'\t' -v t="$1" '$1 == "writer" && $2 == t 
 expect_eq "step: one writer, the facts library's, and no second" "payload/scripts/lib/proof.sh proof_step_event|" "$(w1 step)|$(pair step)"
 expect_eq "decision and debt: one writer each, the facts library's, and no second" "payload/scripts/lib/proof.sh proof_decision_event|payload/scripts/lib/proof.sh proof_debt_event|" \
   "$(w1 decision)|$(w1 debt)|$(pair decision)$(pair debt)"
+expect_eq "order, handoff and bind: one writer each, the facts library's, and no second" \
+  "payload/scripts/lib/proof.sh proof_order_event|payload/scripts/lib/proof.sh proof_handoff_event|payload/scripts/lib/proof.sh proof_bind_event|" \
+  "$(w1 order)|$(w1 handoff)|$(w1 bind)|$(pair order)$(pair handoff)$(pair bind)"
 # The two setters of matrix cells go with the matrix; every other hand event is written by the one writer.
 expect_eq "hand: one writer, the line library's, beside the matrix setters" "payload/scripts/lib/line.sh line_hand_event" \
   "$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "writer" && $2 == "hand" { split($3, w, " "); sub(/:[0-9]+$/, "", w[1]); print w[1], w[2] }' \

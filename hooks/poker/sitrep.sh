@@ -1887,9 +1887,9 @@ sitrep_tick_line() {
   # (lib/handoff.sh `handoff_redact`) and folds at the shared width (card.sh fold); the last line is never folded: bound,
   # `/bionic:canonical-sdlc <path>`, the door that rebinds the run; with no run, `Read <path> whole, then do Next 1.`
   # There is no safe-to-clear line: the source session is disposable, and anything in flight is in State.
-  # Bound, the plan's `## Handoff` then becomes the heading and one pointer line, through the plan transaction,
-  # best-effort: the document is in place first. REFUSED (2), nothing written: the file's path a link or a directory;
-  # (1) a bound open plan with no `## Tasks` or no `## SDLC State`.
+  # Bound, the run's log then takes one handoff event naming the file (lib/proof.sh `proof_handoff_event`), best-effort:
+  # the document is in place first, and the plan is never written. REFUSED (2), nothing written: the file's path a link
+  # or a directory; (1) a bound open plan with no `## Tasks`, or a run whose step the reader cannot read.
   poker_verb_handoff() {
     HO_IN=""; [ -t 0 ] || HO_IN="$(cat)"
     HO_E="$(sitrep_now)"
@@ -1916,8 +1916,8 @@ sitrep_tick_line() {
           die "REFUSED — the plan has no ## Tasks section, so there are no open tasks to hand off; the plan is unchanged."
           exit 1
         fi
-        if ! /usr/bin/grep -qE '^##[[:space:]]+SDLC State([[:space:]]|$)' "$PV_PLAN"; then
-          die "REFUSED — the plan has no ## SDLC State section, so its step cannot be handed off; the plan is unchanged."
+        if [ -n "${PV_CUR_UNREAD:-}" ]; then
+          die "REFUSED — the run's step cannot be read, so it cannot be handed off; the plan is unchanged."
           exit 1
         fi
       fi
@@ -2143,47 +2143,17 @@ sitrep_tick_line() {
       printf '%s\n' "$HO_LAST"
       exit 0
     fi
-    # THE DOCUMENT FIRST, ALWAYS; THE POINTER AFTER, AND ONLY IF THE PLAN TAKES IT. The source session may be dying,
-    # so nothing about the plan may cost it the document: the file is moved into place before the plan is touched.
-    # The plan's `## Handoff` then becomes one line, rewritten in place or created before ## Not Doing, through the
-    # plan transaction (its dry commit through the real gate); when the gate or the rewrite refuses, one line says the
-    # pointer was not written and why, the plan is left as it was, and the verb still exits 0.
+    # THE DOCUMENT FIRST, ALWAYS; THE EVENT AFTER. The source session may be dying, so nothing about the run's log may cost
+    # it the document: the file is moved into place before the event is appended, and when the append fails one line
+    # says so and the verb still exits 0.
     if ! mv -f "$HO_TMP" "$HO_FILE" 2>/dev/null; then
       die "REFUSED — the handoff file cannot be moved into place at $HO_FILE."
       exit 2
     fi
     printf '%s\n' "$HO_LAST"
-    HO_PTR="handoff: $HO_REL written $(handoff_local_time "$HO_NOW")"
-    PV_RC=0
-    HO_PTR="$HO_PTR" awk "$_HANDOFF_SEC_AWK"'
-      function emit() { print ""; print ENVIRON["HO_PTR"]; print "" }
-      FNR == NR {
-        if ($0 ~ /^[ \t]*```/) { f1 = !f1; next }
-        if (f1) next
-        if ($0 ~ /^##[ \t]+Handoff[ \t]*$/) have = 1
-        if ($0 ~ /^##[ \t]+Not Doing/) nd = 1
-        next
-      }
-      {
-        ho_track($0)
-        if (_hs && $0 ~ /^##[ \t]+Handoff[ \t]*$/) { if (!wrote) { print; emit(); wrote = 1 }; next }
-        if (_hs) next
-        if (!have && !wrote && !_hf && ((nd && $0 ~ /^##[ \t]+Not Doing/) || (!nd && $0 ~ /^##[ \t]+SDLC State/))) {
-          print "## Handoff"; emit(); wrote = 1
-        }
-        print
-      }' "$PV_PLAN" "$PV_PLAN" > "$PV_NEW" 2>/dev/null || PV_RC=$?
-    HO_DRY=writer; [ "$HO_MODE" != closed ] || HO_DRY=as-is
-    HO_NOPTR=""
-    if [ "$PV_RC" -ne 0 ]; then
-      HO_NOPTR="its rewrite failed (awk exit $PV_RC)"
-    elif ! cmp -s "$PV_NEW" "$PV_PLAN"; then
-      HO_SWAP="$( ( plan_verb_swap handoff "the handoff pointed at $HO_REL" "$HO_DRY" ) 2>&1 )" || {
-        HO_NOPTR="$(printf '%s\n' "$HO_SWAP" | sed -n 's/^poker: //p' | awk 'NF { print; exit }')"
-        [ -n "$HO_NOPTR" ] || HO_NOPTR="the plan transaction refused it"
-      }
+    if ! declare -F proof_handoff_event >/dev/null 2>&1 || ! proof_handoff_event "$PV_PLAN" "$HO_REL"; then
+      say "handoff — the run's log did not take the handoff's event, so the run does not point at $HO_REL yet; run handoff again"
     fi
-    [ -z "$HO_NOPTR" ] || say "handoff — the plan's ## Handoff pointer was not written: $(clean "${HO_NOPTR:0:240}")"
     exit 0
   }
 

@@ -251,6 +251,29 @@ proof_step_event() {  # <plan> <step> [<field>=<value>…] -> one step event in 
   RUN_LOG="$log" log_append step "n=$n" "$@"
 }
 
+# THE RUN'S LOG HOLDS A SESSION'S FACTS, one writer for each type, in the fields the translation gives an older plan's
+# line, so the reader reads an old fact and a new one alike, and no plan line is written for any of them. Exits as
+# proof_waiver_event's, and 2 for a value its type does not take.
+proof_order_event() {  # <plan> <given|lifted> <the user's words> -> one order event in the plan's run log
+  local log
+  case "${2:-}" in given|lifted) ;; *) return 2 ;; esac
+  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
+  RUN_LOG="$log" log_append order "act=$2" "said=${3:-}"
+}
+proof_handoff_event() {  # <plan> <the handoff file, project-root-relative> -> one handoff event in the plan's run log
+  local log
+  [ -n "${2:-}" ] || return 2
+  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
+  RUN_LOG="$log" log_append handoff "path=$2"
+}
+proof_bind_event() {  # <plan> <session id> <engage|bind|write> -> one bind event in the plan's run log
+  local log
+  case "${2:-}" in ''|unknown|*[!A-Za-z0-9_-]*) return 2 ;; esac
+  case "${3:-}" in engage|bind|write) ;; *) return 2 ;; esac
+  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
+  RUN_LOG="$log" log_append bind "session=$2" "by=$3"
+}
+
 # THE RUN'S LOG HOLDS A DECISION'S ROUND, and this is the type's one writer: the decisions verb's put and its ruling,
 # however the ruling arrives, call it. Its fields are the ones the translation gives an older run's design-ledger
 # heading, so an old round and a new one read alike:
@@ -1808,14 +1831,17 @@ _proof_keep_sweep() {  # <dir> <n> -> the newest <n> files of <dir> are left, th
 # plan, its log and the log's kept copy, the reader's libraries and this one. An appended event, an edited line or a
 # changed library is a new key, and the next ask folds again. A fold that failed is returned and never kept. This is the
 # one reader and writer of the held file; it holds the answers and nothing else, in a directory of its own beside the
-# kept fold's, and the kept fold's sweep (`_proof_keep_sweep`) sweeps it.
+# kept fold's, and the kept fold's sweep (`_proof_keep_sweep`) sweeps it. The run's standing order and its sessions are
+# held after the three, each line led by `order.` or `sessions.`: the same homes write them, so one fold answers all,
+# and the runner asks the order at every suite's start and every engagement the sessions (`proof_order_held`,
+# `proof_sessions_held`).
 _PROOF_STEP_KEEP=128
 _PROOF_PLACE_LIBS=""; _PROOF_PLACE_DIR=""
 proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|abandoned, approved=1|0; exit 2, one line on stderr, when the fold fails
   # The answer is also left in _PROOF_PLACE, so a caller in this shell reads it with no subshell.
   local plan="${1:-}" log="" dir="" f stamp key held="" got ev tmp k rc=0 IFS=$' \t\n'
   local -a deps
-  _PROOF_PLACE=""
+  _PROOF_PLACE=""; _PROOF_PLACE_ORDER=""; _PROOF_PLACE_SESSIONS=""
   [ -f "$plan" ] || return 0
   _proof_reader_load || { printf 'proof_step_held: lib/reader.sh cannot be loaded, so the place of %s is not read\n' "$plan" >&2; return 2; }
   log="$(reader_log "$plan" 2>/dev/null)" || rc=$?
@@ -1848,14 +1874,15 @@ proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|
   fi
   if [ -n "$held" ] && [ -f "$held" ] && { IFS= read -r k; got=""; while IFS= read -r f; do got="$got$f"$'\n'; done; } < "$held" \
      && [ "$k" = "$key" ] && [ -n "$got" ]; then
-    _PROOF_PLACE="${got%$'\n'}"; printf '%s' "$got"; return 0
+    _proof_place_split "$got"; printf '%s\n' "$_PROOF_PLACE"; return 0
   fi
   declare -F translate >/dev/null 2>&1 || . "$_READER_LIB_DIR/translate.sh" >/dev/null 2>&1
   if [ -n "$dir" ] && reader_brought "$plan"; then ev="$(cat "$log")" || rc=$?
   else ev="$(set -o pipefail; TRANSLATE_SOURCES="$TRANSLATE_PLACE_SOURCES" translate "$plan" events)" || rc=$?; fi
   [ -z "$_PROOF_DRY" ] || ev="${ev:+$ev$'\n'}$_PROOF_DRY"
   [ "$rc" -ne 0 ] || got="$( set -o pipefail; reader_events() { printf '%s\n' "$ev"; }
-    reader_q_step "$plan" || exit; if reader_q_approved "$plan" step3; then echo approved=1; else [ "$?" -eq 1 ] || exit; echo approved=0; fi )" || rc=$?
+    reader_q_step "$plan" || exit; if reader_q_approved "$plan" step3; then echo approved=1; else [ "$?" -eq 1 ] || exit; echo approved=0; fi
+    reader_q_order "$plan" | sed 's/^/order./' || exit; reader_q_sessions "$plan" | sed 's/^/sessions./' )" || rc=$?
   if [ "$rc" -ne 0 ]; then
     printf 'proof_step_held: lib/reader.sh exited %s reading the place of %s; nothing is kept\n' "$rc" "$plan" >&2; return 2
   fi
@@ -1863,7 +1890,28 @@ proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|
     printf '%s\n%s\n' "$key" "$got" > "$tmp" && mv -f "$tmp" "$held" 2>/dev/null || rm -f "$tmp"
     _proof_keep_sweep "$_PROOF_PLACE_DIR" "$_PROOF_STEP_KEEP"
   fi
-  _PROOF_PLACE="$got"; printf '%s\n' "$got"
+  _proof_place_split "$got"; printf '%s\n' "$_PROOF_PLACE"
+}
+_proof_place_split() {  # <held lines> -> _PROOF_PLACE, the place's lines, _PROOF_PLACE_ORDER and _PROOF_PLACE_SESSIONS, unled
+  local l p="" o="" s=""
+  while IFS= read -r l; do
+    case "$l" in
+      order.*) o="$o${l#order.}"$'\n' ;;
+      sessions.*) s="$s${l#sessions.}"$'\n' ;;
+      ?*) p="$p$l"$'\n' ;;
+    esac
+  done <<PROOF_HELD
+$1
+PROOF_HELD
+  _PROOF_PLACE="${p%$'\n'}"; _PROOF_PLACE_ORDER="${o%$'\n'}"; _PROOF_PLACE_SESSIONS="${s%$'\n'}"
+}
+proof_order_held() {  # <plan> -> the reader's order answer for the run, from its held place; exits as proof_step_held's
+  proof_step_held "${1:-}" >/dev/null || return
+  [ -z "$_PROOF_PLACE_ORDER" ] || printf '%s\n' "$_PROOF_PLACE_ORDER"
+}
+proof_sessions_held() {  # <plan> -> the reader's sessions answer for the run, from its held place; exits as proof_step_held's
+  proof_step_held "${1:-}" >/dev/null || return
+  [ -z "$_PROOF_PLACE_SESSIONS" ] || printf '%s\n' "$_PROOF_PLACE_SESSIONS"
 }
 
 _proof_ask() {  # <plan> <reader question's function> [args] -> its answer and exit, over the facts _proof_facts keeps

@@ -178,6 +178,22 @@ reader_main() {  # <plan> <question> [args] -> the answer in its form; 2 refused
   return 2
 }
 
+# A SESSION'S FACTS ARE ASKED OF THEIR OWN HOMES. An order and a bind are written by no home of an older run but its SDLC
+# State, a handoff by none but its Handoff, and then each by the run's log (lib/translate.sh TRANSLATE_SESSION_SOURCES,
+# TRANSLATE_HANDOFF_SOURCES), so the three questions over them are answered from those homes alone, a fraction of the
+# whole translation of a long plan: every engagement asks the sessions, and the close and the roster the handoff.
+reader_session() {  # <plan> <order|handoff|sessions> [args] -> reader_main's answer, read from the homes of a session's facts
+  local src
+  case "${2:-}" in order|sessions|handoff) ;; *) printf "reader: '%s' is no question of a session's facts\n" "${2:-}" >&2; return 2 ;; esac
+  if ! declare -F translate >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$_READER_LIB_DIR/translate.sh" || return 2
+  fi
+  case "$2" in handoff) src="${TRANSLATE_HANDOFF_SOURCES:-}" ;; *) src="${TRANSLATE_SESSION_SOURCES:-}" ;; esac
+  [ -n "$src" ] || return 2
+  TRANSLATE_SOURCES="$src" reader_main "$@"
+}
+
 _reader_needs() {  # <question> <usage> <value> -> 0 when the value is given, else 2 with the usage
   [ -n "$3" ] && return 0
   printf 'reader: usage: reader <plan> %s %s\n' "$1" "$2" >&2; return 2
@@ -397,6 +413,13 @@ reader_q_ready() {  # <plan> <row> [dep…] -> 0 when the row has not landed, no
 reader_question handoff value reader_q_handoff
 reader_q_handoff() {  # <plan> -> the latest handoff: path= and at=
   _reader_last "$1" handoff
+}
+
+# A session is bound to a run once: a later binding act of the same session is no new fact of the run's, so the answer is
+# each session's first bind, and the writer appends none for a session the run holds (lib/binding.sh `bind_record_session`).
+reader_question sessions list reader_q_sessions
+reader_q_sessions() {  # <plan> -> each session the run holds, once, by the act that first bound it, in the order they bound
+  reader_facts "$1" | awk -F'|' "$_READER_AWK"'ev() == "bind" && !seen[line_kv("session")]++'
 }
 
 reader_question verdicts list reader_q_verdicts
