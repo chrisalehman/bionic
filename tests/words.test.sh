@@ -336,12 +336,12 @@ section "§BIND: over the same fixture run, a judgment that sets 1 green and 3 r
 
 # The rendered texts above are read for refused words; a card the judgment filled with the wrong number beside a word
 # the sheet places is a wrong card with no refused word in it, so the same run is given a suite line of its own and the
-# card verb is asked the swap. The landing record holds four suites by their last verdict, three green and one red.
+# card verb is asked the swap. The run's log holds four suites by their last verdict, three green and one red.
 # fails-when: the swap draws, the control in the sheet's order is refused, or the refusal leaves the card on stdout.
-WR_REC="$WR_R/.bionic/docs/record/wave-02-fx/landing-proofs.log"
+WR_REC="$WR_R/.bionic/docs/record/wave-02-fx/run.log"
 mkdir -p "${WR_REC%/*}"
 for wr_k in "a green" "b green" "c green" "d red"; do
-  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=%s.test.sh|result=%s|log=/rec/%s.log|at=2026-10-06T18:00:00Z\n' "$(printf 'c%.0s' $(seq 40))" "${wr_k%% *}" "${wr_k##* }" "${wr_k%% *}" >> "$WR_REC"
+  printf 'run/v1|ev=verdict|row=T1|commit=%s|suite=%s.test.sh|result=%s|log=/rec/%s.log|at=2026-10-06T18:00:00Z\n' "$(printf 'c%.0s' $(seq 40))" "${wr_k%% *}" "${wr_k##* }" "${wr_k%% *}" >> "$WR_REC"
 done
 wr_poke sitrep "$WR_P" > "$TMP/wr-sheet"
 expect_eq "BN0 precondition: the sheet holds 3 green and 1 red on one line" "1" "$(/usr/bin/grep -c '^tests.suites-run: 4: 3 green, 1 red ' "$TMP/wr-sheet")"
