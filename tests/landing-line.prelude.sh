@@ -59,10 +59,22 @@ ll_world() {  # -> a world root; its plan admitted by the real commit gate (the 
   r="$(world_repo)" || return 1
   [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
   p="$r/.bionic/docs/plans/epic-x/wave-x.plan.md"
-  awk '{ print }
-    /^working-branch: / { print "canonical_sdlc_version: 14" }
-    /^current: 4$/ { print "approved-by: fixture 2026-10-04T00:00Z \"approved\""; print "- Step 4: started"; print "- T1: active"; print "- T2: active" }' \
-    "$p" > "$p.n" && mv "$p.n" "$p"
+  # LL_WORLD_AT=15 asks for this run at 15: the page keeps its header and authored cells, the log holds the rest.
+  if [ "${LL_WORLD_AT:-14}" = 15 ]; then
+    awk -F'|' '/^## SDLC State$/ { s = 1; next } /^## / { s = 0 } s { next }
+      /^working-branch: / { print; print "canonical_sdlc_version: 15"; next }
+      /^\| id \|/ { print "| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|"; getline; next }
+      /^\| T[0-9]+ \|/ { printf "|%s|%s|%s|%s|%s|%s|%s|%s| — |\n", $2, $3, $4, $5, $7, $9, $10, $11; next }
+      { print }' "$p" > "$p.n" && mv "$p.n" "$p" || return 1
+    mkdir -p "$r/.bionic/docs/record/wave-x" && printf 'run/v1|ev=%s|at=2026-10-04T00:0%s:00Z\n' 'step|n=1' 1 'step|n=2' 2 'step|n=3' 3 'step|n=4' 4 \
+      'approval|key=step3|by=fixture|said=approved' 5 'dispatch|row=T1|name=wx-T1' 6 'tree|row=T1|path=.worktrees/T1' 7 \
+      'dispatch|row=T2|name=wx-T2' 8 'tree|row=T2|path=.worktrees/T2' 9 > "$(ll_log "$r")" || return 1
+  else
+    awk '{ print }
+      /^working-branch: / { print "canonical_sdlc_version: 14" }
+      /^current: 4$/ { print "approved-by: fixture 2026-10-04T00:00Z \"approved\""; print "- Step 4: started"; print "- T1: active"; print "- T2: active" }' \
+      "$p" > "$p.n" && mv "$p.n" "$p"
+  fi
   printf '%s' "$r"
 }
 ll_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }
@@ -122,6 +134,7 @@ ll_ev() {  # <root> <ev> -> the lines of that event, the landing record's then t
   ll_all "$1" | grep -E "^(line|run)/v1[|]ev=$2[|]"
 }
 ll_log() { printf '%s/.bionic/docs/record/wave-x/run.log' "$1"; }
+ll_acts() { /usr/bin/grep -v '|at=2026-10-04T00:0[1-9]:00Z$' "$(ll_log "$1")" 2>/dev/null; }   # <root> -> the log's lines past the world's own events at 15
 ll_all() { cat "$(ll_rec "$1")" "$(ll_log "$1")" 2>/dev/null; }   # <root> -> the record's lines, then the log's
 ll_head() { git -C "$1" rev-parse --verify -q refs/heads/wave/x; }
 
