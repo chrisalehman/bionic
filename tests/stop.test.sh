@@ -33,6 +33,8 @@
 #   §PATROL  a dead Patrol clock is one line of at most 80 characters, the same line on a repeat;
 #            the explanation is asked for, and the one report sentence is in the rules and the prompt
 #   §LOG     a step, an approval or an order the run's log alone holds moves the ready-with-room verdict
+#   §GUARD   the stop guard's words, its roster writes, the verdict read and the agent guard's
+#            arming check, each a stop-library function called in a shell of its own
 #
 # §1 IS THE ONE THAT GOES RED AGAINST FIRST-BLOCK-WINS, which is the alternative
 # ADR-004 rejects by name, and against the pre-merge arrangement too: before the
@@ -1136,11 +1138,11 @@ Fix: bash /h/stop-check.sh victim
 If a human ordered this stop, it executes — record the order and stop again:
      bash /h/stop-orders.sh order victim
 A stop the human performs themselves does not reach this gate at all." "$(gcall eval 'stop_guard_say no-row /h victim; printf "%s" "$SG_DETAIL"')"
-GD_ERR="$(gcall stop_guard_refuse no-target /h "" 2>&1)"; GD_RC=$?
-expect_eq "GD4 a refusal exits 2 with the guard's one line" "2|bionic: stop refused — this stop names no target (name the agent to stop)" "$GD_RC|$GD_ERR"
+GD_ERR="$(gcall stop_guard_refuse no-target /h "" 2>&1 | head -1)"; GD_RC="$(gcall stop_guard_refuse no-target /h "" 2>/dev/null; echo $?)"
+expect_eq "GD4 a refusal exits 2, its first line the guard's" "2|bionic: stop refused — this stop names no target (name the agent to stop)" "$GD_RC|$GD_ERR"
 gcall stop_guard_unrostered_write "$GD/roster.state" s1 ghost "seen on the panel"; GD_RC=$?
 expect_eq "GD5 an unrostered stop is written as a closed row under the roster's header, mode 600" \
-  "0|600|# bionic session roster — schema roster-state/v1 — machine-local, safe to delete|roster-state/v1|status=closed|session=s1|name=ghost|agent_id=|launched_at=T|reason=seen on the panel|plan=none" \
+  "0|600|# bionic session roster — schema roster-state/v1 — machine-local, safe to delete|roster-state/v1|status=closed|session=s1|name=ghost|agent_id=|launched_at=T|subagent_type=|model=|deliverable=|source=|duration=|progress=|claims=|cadence=|absent=|waiver=|reason=seen on the panel|tool_use_id=|plan=none" \
   "$GD_RC|$(stat -f %Lp "$GD/roster.state")|$(head -1 "$GD/roster.state")|$(tail -1 "$GD/roster.state" | sed 's/launched_at=[^|]*/launched_at=T/')"
 printf '%s\n' 'roster-state/v1|status=identified|name=w|agent_id=aw-1|reason=old|tool_use_id=tu1' > "$GD/r2.state"
 gcall stop_guard_reason_write "$GD/r2.state" aw-1 "unmet: deliverable missing; progress fresh"; GD_RC=$?
