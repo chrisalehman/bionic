@@ -2467,8 +2467,8 @@ RP_TABLE
   # order is open. A newer order replaces the open one; the newest fact decides.
   #
   # REFUSED (1), nothing written: words that hold a line break, or a `|` in a bound run (an event's field
-  # cannot carry one), a lift with no open order, the log a link. (2): the order reader or the run's log
-  # cannot be loaded, or the order cannot be written.
+  # cannot carry one), a lift with no open order, the log a link. (2): the order reader or writer cannot be
+  # loaded, or the order cannot be written.
   poker_verb_order() {
     local sid mode=log root log open plan="" run line
     if ! declare -F gate_order_of >/dev/null 2>&1; then
@@ -2521,16 +2521,13 @@ RP_TABLE
       exit 0
     fi
     case "$OR_WORDS" in *'|'*)
-      die "REFUSED — an order's words are one field of the run's log, which cannot carry a |; nothing was written."
+      die "REFUSED — an order's words are one field of the run's log, which cannot carry a |; nothing was written. run again: session-poker.sh order '<the words without it>'"
       exit 1 ;;
     esac
     declare -F proof_order_event >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh" >/dev/null 2>&1; }
-    if ! declare -F proof_order_event >/dev/null 2>&1; then
-      die "REFUSED — the order's writer (lib/proof.sh proof_order_event) cannot be loaded from $BIONIC_LIB; nothing was written."
-      exit 2
-    fi
-    if ! proof_order_event "$plan" "$([ -n "$OR_LIFT" ] && echo lifted || echo given)" "$OR_WORDS"; then
-      die "REFUSED — the order cannot be appended to the run's log of $plan; nothing was written."
+    if ! declare -F proof_order_event >/dev/null 2>&1 \
+       || ! proof_order_event "$plan" "$([ -n "$OR_LIFT" ] && echo lifted || echo given)" "$OR_WORDS"; then
+      die "REFUSED — the order cannot be appended to the run's log of $plan (lib/proof.sh proof_order_event from $BIONIC_LIB); nothing was written. run again: session-poker.sh order"
       exit 2
     fi
     say "order — ${line#order: }, in the run's log of $plan; the plan is unchanged."

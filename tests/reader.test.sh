@@ -38,6 +38,8 @@
 #   §HANDS      an amend, a hold, an extension, an adoption, a by-hand landing and a person's stop of a run each leave
 #               one hand event with its reason, through the one writer that refuses an act with none; the tick's
 #               withdrawal of a request for the load leaves none.
+#   §SESSION    an order, a handoff and a session the log holds past the plan's text answer, each by its instant; a
+#               session counts once, by its first act; the homes of the three answer as the whole fold.
 #   §HELD       the run's held place answers as the whole fold, over every form of the step's and approval's line
 #               and every plan this suite built: a home that writes one of the three and is not in the place's list
 #               turns it red.
