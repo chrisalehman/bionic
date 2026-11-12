@@ -83,7 +83,7 @@ hf_wide() {  # <file> -> how many of its lines are wider than 100 columns, the s
 }
 hf_ho() { bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$1" handoff | sed -n 's/^path=//p'; }  # <plan> -> the file the reader's handoff names
 hf_iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
-hf_ev() { mkdir -p "${HF_REC%/*}"; printf 'line/v1|%s\n' "$1" >> "$HF_REC"; }
+hf_ev() { mkdir -p "${HF_REC%/*}"; printf 'run/v1|%s\n' "$1" >> "$HF_REC"; }
 hf_live() {  # -> HF_CARRIER, a live process's `<pid>:<start>` (lib/slots.sh's rule); its pid in HF_PID
   tail -f /dev/null & HF_PID=$!
   HF_PIDS="$HF_PIDS $HF_PID"
@@ -158,7 +158,7 @@ HF_EMPTY="$TMPROOT/hf-empty.md"; : > "$HF_EMPTY"
 
 # ---------- the bound world ----------
 #
-# hf_world <label> [roster yes|no] -> HF_R (repo), HF_P (plan), HF_F (the handoff file), HF_REC (its landing record),
+# hf_world <label> [roster yes|no] -> HF_R (repo), HF_P (plan), HF_F (the handoff file), HF_REC (its run's log),
 # HF_INT/HF_WORK (the two heads). The frontmatter branch keys over real branches, two landed lines, two proof lines,
 # active rows T2 and T3 and a pending T6 with a worktree, a Not Doing; the bionic folder excluded from git, as a
 # project ignores it; with `roster yes`, w-T2's finished run, its progress file named and its brief on disk.
@@ -193,7 +193,7 @@ hf_world() {
     printf '# the brief for T2\n' > "$HF_R/.bionic/docs/record/wave-01-fixture/briefs/T2.md"
   fi
   HF_F="$HF_R/$HF_DOOR"
-  HF_REC="$HF_R/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+  HF_REC="$HF_R/.bionic/docs/record/wave-01-fixture/run.log"
   s42_snap "$HF_R" "$HF_P"
 }
 
