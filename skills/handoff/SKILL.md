@@ -73,4 +73,4 @@ Typed as `/bionic:handoff` with no argument, it hands off whatever this session 
 
 - Never write the handoff file by hand, and never edit it: State is computed, and the rest passes through the verb's redaction.
 - The document lives under `.bionic/docs/record/handoffs/`, which git never tracks; the verb creates the folder and its ignore file when the project has none.
-- Nothing here changes a plan, a record or a run beyond the file and, with a run bound, the plan's `## Handoff` pointer the verb writes.
+- Nothing here changes a plan, a record or a run beyond the file and, with a run bound, the one handoff event the verb appends to the run's log.

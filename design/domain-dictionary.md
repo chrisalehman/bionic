@@ -108,15 +108,30 @@ date and the effort that adopted it.
   owning the requirements file and the ADR directory the waves write into. Names a directory under
   `.bionic/docs/specs/` and `.bionic/docs/plans/`, never a run of its own.
   *(adopted 2026-09-11, epic-23 wave-11-lean-spine)*
-- **wave** — one run of the canonical SDLC inside an epic: one spec, one plan, one verification
-  matrix, one integration. The unit a triple (`intent · rigor · scale`) is declared for and the
+- **wave** — one run of the canonical SDLC inside an epic: one spec, one plan, one log, one
+  integration. The unit a triple (`intent · rigor · scale`) is declared for and the
   unit a worktree is spawned for. *(adopted 2026-09-11, epic-23 wave-11-lean-spine)*
-- **task** — the unit of work at Steps 3–9: one row of the plan's `## Tasks` table, carrying
-  `id · step · kind · task · agent · deps · size · serves · Files · status`. The thing a brief is
-  written for, a writer is dispatched on, and a status is kept for. Read by exactly one parser,
+- **task** — the unit of work at Steps 3–9: one row of the plan's `## Tasks` table, carrying the
+  nine cells a person writes, `id · step · kind · task · deps · size · serves · Files · artifact`.
+  The thing a brief is written for and a writer is dispatched on; its state is asked of the reader,
+  never written in the plan. Read by `payload/scripts/lib/plan-read.sh` and judged by
   `payload/scripts/lib/units.sh`; the surfaces that use the word are the plan's `## Tasks` table,
-  the tick's FILL line, and the evidence gate's ledger checks.
-  *(adopted 2026-09-11, epic-23 wave-11-lean-spine)*
+  the tick's FILL line, and the evidence gate's row checks.
+  *(adopted 2026-09-11, epic-23 wave-11-lean-spine; nine cells 2026-11-12, wave-50-one-log)*
+- **record** — `record/<wave>/` under the docs root: the run's log and every file a proof, a brief
+  or a review names (reviews, walks, suite logs, briefs). Operational: nothing loads it, it is
+  reached by citing a path, and it outlives the run. *(adopted 2026-11-12, wave-50-one-log)*
+- **log** — `record/<wave>/run.log`, one per plan and joined to it by name: append-only, one line
+  shape, every act of a run written once, by its one writer, through `log_append`. A later line
+  with the same identifying fields replaces the earlier; `cancel` retracts one.
+  *(adopted 2026-11-12, wave-50-one-log)*
+- **event type** — the kind a log line names, `ev=<type>`, from a closed list (`step`,
+  `approval`, `proof`, `dispatch`, `tree`, `published`, `decision`, `debt`, `ask`, `born`,
+  `hand` among them); each type has one writer function. *(adopted 2026-11-12, wave-50-one-log)*
+- **reader** — the one program that parses a run's log and its plan's authored parts,
+  `payload/scripts/reader.sh <plan> <question>`, answering a closed list of questions; every card,
+  gate, brief and report asks it, and nothing else parses either. *(adopted 2026-11-12,
+  wave-50-one-log)*
 - **slice** *(retired 2026-09-11 in favour of task)* — the former name for the unit of work,
   carried by the plan's `## Slices` table and by `slice_table`/`slice_ready` in the tick. Retired
   because the four-column table it named could not express the step a unit belongs to, so the tick
