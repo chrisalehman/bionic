@@ -4,9 +4,9 @@
 
 A plan holds only what a person wrote: its header, `## Goal`, `## Tasks`, and one `## T<n> — <title>` section per row for what a person has to say about it (its research and rulings; the brief renders it). It holds no state, matrix or handoff section, and its rows are the nine cells `operational-rules.md` gives; the write hook refuses either, and a header key the log now holds. The step, each row's state and the delivery are asked of the run's log: `bash <plugin-root>/scripts/reader.sh <plan> step`, or `status <id>`. Advance with `session-poker.sh current <N>`: judged as a commit at `<N>` would be, then one step event.
 
-**Task-scale variant.** Requirements go under `## Requirements`, each a `### REQ-<n> — <title>` heading with a `provenance:` line (the Step-1 card renders them). The register is the one `## Tasks` table; the reviews its rigor deals (review proofs, or a waiver) are owed from Step 6. When the plan is written, its author writes `base-sha: <the commit the work started from>` (`git rev-parse HEAD` at that moment) in its frontmatter: without it the first review is refused. Beside it the author writes `working-branch: <the branch the work is built on>`: without it `proof-add`, `waive` and `current 8` refuse.
+**Task-scale variant.** Requirements go under `## Requirements`, each a `### REQ-<n> — <title>` heading with a `provenance:` line (the Step-1 card renders them). The register is the one `## Tasks` table; the reviews its rigor deals (review proofs, or a waiver) are owed from Step 6. The plan's author writes `base-sha: <the commit the work started from>` (`git rev-parse HEAD` then) in its frontmatter: without it the first review is refused. Beside it the author writes `working-branch: <the branch the work is built on>`: without it `proof-add`, `waive` and `current 8` refuse.
 
-**A `## Tasks` cell opens on a title of at most 30 characters,** then a period and the detail; the card prints the title, `serves` in its own column and a run of `depends` ids as `T1–T5`, refuses a longer title and never cuts it; `show task <n>` prints the whole cell.
+**A `## Tasks` cell opens on a title of at most 30 characters,** then a period and the detail; the card prints the title, refuses a longer one and never cuts it; `show task <n>` prints the whole cell.
 
 **A row's tree is an event.** `spawn-worktree.sh create --for <name>` records it. A commit from it is judged by that row — its step at wave scale, its task arms at task scale — never by the run's step, and a row ahead of the run is refused.
 
@@ -31,7 +31,7 @@ dispatch-preflight refuses every writer-class dispatch (implementor, senior-impl
 walls, and the fails-when wall beside them, bind at every scale. The Patrol's below-Step-4
 fill refusal is the second backstop.
 
-On approval, rebuild the task list from the plan before the first dispatch, in execution order: one `<step>/<n>: <title>` entry per `## Tasks` row in the order the card's batches print, then one `<step>: <desc>` entry per remaining step; the tool appends, so recreate the later entries rather than insert among them. Mark a row's entry in progress in the turn it is dispatched.
+On approval, rebuild the task list from the plan before the first dispatch: one `<step>/<n>: <title>` entry per `## Tasks` row in the order the card's batches print, then one `<step>: <desc>` entry per remaining step; the tool appends, so recreate the later entries rather than insert among them. Mark a row's entry in progress in the turn it is dispatched.
 
 ```
 Step 3 · Plan
@@ -62,5 +62,5 @@ show evals <req> · show task <n> · explain <decision>
 
 Card: `bash <plugin-root>/scripts/card.sh step3 <plan.md>` renders it whole; no stdin.
 
-**Wave shape locks at approval, and changes only by re-plan**, on a finding, a red test, an approved scope change, a task overrunning its size, a report naming follow-up work. A row is changed by an edit, and added by one: every cell its header carries, a review row's task cell ending ` · questions: <q>[,<q>]` when it owes fewer than its rigor deals, a born row's ` · born: review` or ` · born: regression`; then `session-poker.sh task-add <id>` records its birth (`--born <record>#<n>`, `--born regression:<suite>`), the plan unwritten. A short row is refused with the lines to paste; a refused birth leaves the row unborn, the person's to remove. Any other discovery is a W+1 candidate; one that makes the wave structurally impossible surfaces a Wake Note and halts.
+**Wave shape locks at approval, and changes only by re-plan**, on a finding, a red test, an approved scope change, a task overrunning its size, a report naming follow-up work. A row is changed by an edit, and added by one: every cell its header carries, a review row's task cell ending ` · questions: <q>[,<q>]` when it owes fewer than its rigor deals, a born row's ` · born: review` or ` · born: regression`; then `session-poker.sh task-add <id>` records its birth (`--born <record>#<n>`, `--born regression:<suite>`), the plan unwritten. A pending row no longer owed is dropped by `session-poker.sh task-add <id> --drop '<the person's words>'`, the plan unwritten. A short row is refused with the lines to paste; a refused birth leaves the row unborn, the person's to remove. Any other discovery is a W+1 candidate; one that makes the wave impossible surfaces a Wake Note and halts.
 
