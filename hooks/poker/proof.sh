@@ -316,16 +316,16 @@ whole_run_at_head() {
         exit 1
       fi
       AP_AT="$(owed_now 2>/dev/null)" || AP_AT=""
-    elif case "$AP_NAME" in step0|step1|step2) true ;; *) false ;; esac; then
+    elif [ "$AP_NAME" = step0 ] || [ "$AP_NAME" = step1 ] || [ "$AP_NAME" = step2 ]; then
       # The gate's own placeholder test, asked of its library in a subshell as close-out asks it.
       ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F is_placeholder_value >/dev/null 2>&1 || exit 9
         is_placeholder_value "$AP_REPLY" ); AP_RC=$?
       case "$AP_RC" in
-        0) die "REFUSED — '$AP_REPLY' is a placeholder, not the user's reply; give their words verbatim. Nothing was appended."; exit 1 ;;
-        9) die "REFUSED — whether the reply is a placeholder is read by lib/walls.sh, which cannot be loaded from $BIONIC_LIB; nothing was appended."; exit 2 ;;
+        0) die "REFUSED — '$AP_REPLY' is a placeholder, not the user's reply; nothing was appended. Give their words verbatim: session-poker.sh approve $AP_NAME '<the user's reply>'"; exit 1 ;;
+        9) die "REFUSED — whether the reply is a placeholder is read by lib/walls.sh, which cannot be loaded from $BIONIC_LIB; nothing was appended. run again: session-poker.sh approve $AP_NAME '<the user's reply>'"; exit 2 ;;
       esac
       if proof_approved "$PV_PLAN" "$AP_NAME"; then
-        die "REFUSED — the run of $PV_PLAN already holds the approval $AP_NAME. An approval is recorded once; nothing was appended."
+        die "REFUSED — the run of $PV_PLAN already holds the approval $AP_NAME. An approval is recorded once; nothing was appended. Fix: none; it stands, and the gate reads it at Step $(( ${AP_NAME#step} + 1 ))."
         exit 1
       fi
       AP_AT="$(owed_now 2>/dev/null)" || AP_AT=""
