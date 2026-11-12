@@ -137,8 +137,8 @@ write_stamp() {  # <project> <sid>
 
 # An OPEN RUN, in the shape lib/run.sh's active_plan/active_run read: a plan page at 15
 # under `.bionic/docs/plans/`, its run's log (`<docs>/record/<name>/run.log`) at a step
-# below 9. This is the T4 gate's own precondition (AC-11/AC-12) — no earlier section in
-# this suite plants one, so the engagement gate is a complete no-op for every fixture above.
+# below 9. This is the engagement gate's own precondition — no earlier section in this
+# suite plants one, so that gate is a complete no-op for every fixture above.
 write_open_plan() {  # <project> [name] [step] -> plan path on stdout
   local f="$1/.bionic/docs/plans/fixture/${2:-fixture}.plan.md" l="$1/.bionic/docs/record/${2:-fixture}/run.log"
   mkdir -p "${f%/*}" "${l%/*}"
