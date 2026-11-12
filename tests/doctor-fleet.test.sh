@@ -223,37 +223,28 @@ expect_no_match "8: and no fabricated writers count rides it" \
 
 section "Section 4: the active-run row"
 
-# A plan the `active_run` predicate calls OPEN: a `## SDLC State` heading and a
-# flush-left `current:` below 9.
+# A run the `active_run` predicate calls OPEN: a page at version 15 whose run's log stands at a step below 9.
 cat > "${PROJ}/.bionic/docs/plans/w/wave.plan.md" <<'PLAN'
-# a fixture plan
-
-## SDLC State
-
+---
+canonical_sdlc_version: 15
 integration-branch: main
-current: 4
+---
+
+# a fixture plan
 PLAN
+mkdir -p "${PROJ}/.bionic/docs/record/wave"
+printf 'run/v1|ev=step|n=4|at=2026-11-01T00:00:00Z\n' > "${PROJ}/.bionic/docs/record/wave/run.log"
 
 OUT4="$(run_doctor)"
 
 expect_match "9: the row names the plan the predicate resolved" "*active run*wave.plan.md*" "$OUT4"
 expect_match "10: and the step it is on" "*active run*current: 4*" "$OUT4"
-mkdir -p "${PROJ}/.bionic/docs/record/wave"
-printf 'run/v1|ev=step|n=5|at=2026-11-02T00:00:00Z\n' > "${PROJ}/.bionic/docs/record/wave/run.log"
-expect_match "10b: a later step only the run's log holds is the step it is on" "*active run*current: 5*" "$(run_doctor)"
-rm -rf "${PROJ}/.bionic/docs/record/wave"
+printf 'run/v1|ev=step|n=5|at=2026-11-02T00:00:00Z\n' >> "${PROJ}/.bionic/docs/record/wave/run.log"
+expect_match "10b: a later step the run's log appends is the step it is on" "*active run*current: 5*" "$(run_doctor)"
 
-# Closed: step 9 with a delivered line. `active_run` refuses, and the row has to
+# Closed: the log's step 9, the run delivered. `active_run` refuses, and the row has to
 # follow it rather than keep reporting a run nobody is in.
-cat > "${PROJ}/.bionic/docs/plans/w/wave.plan.md" <<'PLAN'
-# a fixture plan
-
-## SDLC State
-
-current: 9
-
-- Step 9: delivered: 2026-09-02
-PLAN
+printf 'run/v1|ev=step|n=9|at=2026-11-03T00:00:00Z\n' >> "${PROJ}/.bionic/docs/record/wave/run.log"
 
 OUT5="$(run_doctor)"
 expect_match "11: a closed run reads as no active run" "*active run*none*" "$OUT5"

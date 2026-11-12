@@ -27,6 +27,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 HOOK="$BIONIC_HOOKS_DIR/engage.sh"
@@ -49,18 +50,8 @@ OTHER_SID="0ther999-8888-7777-6666-555555555555"
 make_repo() {  # [name] -> project dir on stdout
   local dir
   dir="$(cd "$(mktemp -d "$SANDBOX/${1:-repo}.XXXXXX")" && pwd -P)"
-  mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/docs/plans"
-  cat > "$dir/.bionic/docs/plans/wave-01.plan.md" <<'ENGPLAN'
----
-canonical_sdlc_version: 14
----
-
-## SDLC State
-
-current: 4
-
-- Step 4: tasks in flight
-ENGPLAN
+  mkdir -p "$dir/.bionic/tmp"
+  mk_page "$dir/.bionic/docs/plans/wave-01.plan.md" 4
   printf '%s' "$dir"
 }
 
@@ -134,50 +125,29 @@ call_engaged() {  # <root> <sid> -> sets ES_ST
 #
 # `open_runs` decides membership, so these builders exist to move a fixture across
 # that boundary and back: an OPEN plan is a member, a CLOSED one is not, and a
-# markdown file with no flush-left `## SDLC State` is not a plan at all. Every
-# negative arm below pairs with a positive built by the sibling function on the SAME
-# root, so a refusal can never pass because the root was empty.
+# markdown file that is neither a page at 15 nor carries a state section is not a plan at
+# all. Every negative arm below pairs with a positive built by the sibling function on the
+# SAME root, so a refusal can never pass because the root was empty.
 
-mk_open_plan() {  # <root> <relname> [mmddhhmm-ish touch stamp] -> abs path on stdout
-  local p="$1/.bionic/docs/plans/$2"
-  mkdir -p "$(dirname "$p")"
-  cat > "$p" <<'MKOPEN'
----
-canonical_sdlc_version: 14
----
-
-## SDLC State
-
-current: 4
-
-- Step 4: tasks in flight
-MKOPEN
-  [ -n "${3:-}" ] && touch -t "$3" "$p"
-  printf '%s' "$p"
+# mk_page <plan> <step> -> a plan page at 15 and its run's log (plan_fixture_log), at <step>: 9 is delivered.
+mk_page() {
+  local l; l="$(plan_fixture_log "$1")"; mkdir -p "${1%/*}" "${l%/*}"
+  printf -- '---\ncanonical_sdlc_version: 15\n---\n' > "$1"
+  printf 'run/v1|ev=step|n=%s|at=2026-10-04T00:00:00Z\n' "$2" > "$l"
 }
-
+mk_open_plan() {  # <root> <relname> [mmddhhmm-ish touch stamp] -> abs path on stdout
+  mk_page "$1/.bionic/docs/plans/$2" 4; [ -n "${3:-}" ] && touch -t "$3" "$1/.bionic/docs/plans/$2"
+  printf '%s' "$1/.bionic/docs/plans/$2"
+}
 mk_closed_plan() {  # <root> <relname> [stamp] -> abs path on stdout
-  local p="$1/.bionic/docs/plans/$2"
-  mkdir -p "$(dirname "$p")"
-  cat > "$p" <<'MKCLOSED'
----
-canonical_sdlc_version: 14
----
-
-## SDLC State
-
-current: 9
-
-- Step 9: close-out — delivered: 2026-09-01
-MKCLOSED
-  [ -n "${3:-}" ] && touch -t "$3" "$p"
-  printf '%s' "$p"
+  mk_page "$1/.bionic/docs/plans/$2" 9; [ -n "${3:-}" ] && touch -t "$3" "$1/.bionic/docs/plans/$2"
+  printf '%s' "$1/.bionic/docs/plans/$2"
 }
 
 mk_nonplan() {  # <root> <relname> -> abs path on stdout
   local p="$1/.bionic/docs/plans/$2"
   mkdir -p "$(dirname "$p")"
-  printf 'just notes, no SDLC State heading anywhere\n' > "$p"
+  printf 'just notes, no state section and no header anywhere\n' > "$p"
   printf '%s' "$p"
 }
 

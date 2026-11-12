@@ -294,7 +294,8 @@ budget_cap() {  # <plan> -> `writers=<n>`, or nothing
 }
 
 # _run_candidates <droot> -> every file under <droot>/plans and <droot>/incidents (each
-# walked to depth <= 2) that carries a flush-left `## SDLC State`, NUL-separated, in walk
+# walked to depth <= 2) that carries a flush-left `## SDLC State`, or is a plan page at 15
+# (`_run_page15`), NUL-separated, in walk
 # order: plans/ then incidents/, and within each whatever order `find` produced. Prints
 # nothing and exits 0 when there is no candidate; the caller counts.
 #
@@ -371,10 +372,21 @@ _run_candidates() {
         /^[[:space:]]*```/ { fence = !fence; next }
         fence { next }
         /^## SDLC State/ { found = 1 }
-        END { exit !found }' || continue
+        END { exit !found }' || _run_page15 "$d" "$droot" "$f" || continue
       printf '%s\0' "$f"
     done < <(find "$d" -maxdepth 2 -type f -name '*.md' -print0 2>/dev/null)
   done
+}
+
+# _run_page15 <walked dir> <droot> <file> -> 0 when the file is a plan page at 15: a `*.plan.md` under <droot>/plans
+# whose header says `canonical_sdlc_version: 15`. Such a page holds no state section, since its run's state is its
+# log, which run_open reads; so the walk finds it by its header, read by the header's one parser, which reads the
+# leading `---` block alone (a header inside a fenced block is prose) and ends a line at a bare CR. A page whose
+# header says anything else is judged by its state section alone. Asked only of a file the state section did not
+# admit, so a walk over pages at 14 runs no process more.
+_run_page15() {
+  [ "$1" = "$2/plans" ] || return 1
+  case "$3" in *.plan.md) [ "$(plan_read_header "$3" canonical_sdlc_version)" = canonical_sdlc_version=15 ] ;; *) return 1 ;; esac
 }
 
 # active_plan <root> -> the newest *.md by mtime under <docs_root>/plans and

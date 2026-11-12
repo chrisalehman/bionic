@@ -94,17 +94,14 @@ new_tree() {  # <repo> <branch> [content] -> echoes the worktree path
 # A BOUND PLAN (wave-20 T8, REQ-1, D1). The engaged marker names a plan, in the shape
 # payload/scripts/lib/binding.sh writes it, and the plan's frontmatter carries
 # `working-branch:` — or does not, when <working-branch> is empty. The plan is an OPEN run
-# (`## SDLC State`, `current: 4`) under the docs root, so the same file doubles as the root's
-# newest open run for the unbound `fallback` arm.
+# (a page at 15, its run's log at step 4) under the docs root, so the same file doubles as the
+# root's newest open run for the unbound `fallback` arm.
 bind_plan() {  # <repo> <sid> <working-branch or empty> -> echoes the plan path
   local r="$1" sid="$2" wb="$3" p
   p="$r/.bionic/docs/plans/epic-x/wave-x.plan.md"
-  mkdir -p "${p%/*}" "$r/.bionic/tmp"
-  {
-    printf -- '---\n'
-    if [ -n "$wb" ]; then printf 'working-branch: %s\n' "$wb"; fi
-    printf -- '---\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n'
-  } > "$p"
+  mkdir -p "${p%/*}" "$r/.bionic/tmp" "$r/.bionic/docs/record/wave-x"
+  printf -- '---\ncanonical_sdlc_version: 15\n%s---\n# fixture plan\n' "${wb:+working-branch: $wb$'\n'}" > "$p"
+  printf 'run/v1|ev=step|n=4|at=2026-09-23T00:00:00Z\n' >> "$r/.bionic/docs/record/wave-x/run.log"
   printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$p" > "$r/.bionic/tmp/engaged-${sid}.state"
   printf '%s' "$p"
 }
@@ -891,35 +888,23 @@ BH="$(new_repo "$TMP/by-hand")"; git -C "$BH" config user.name "Hand Lander"
 BHSID="by-hand-session-01"
 BHT="$(new_tree "$BH" wt/bh-T1)"
 BHP="$BH/.bionic/docs/plans/epic-x/wave-x.plan.md"; mkdir -p "${BHP%/*}" "$BH/.bionic/tmp"
-cat > "$BHP" <<'BHPLAN'
----
-working-branch: wave/fixture
-canonical_sdlc_version: 14
----
-# fixture plan (§BY-HAND)
-
-## SDLC State
-
-current: 4
-approved-by: fixture 2026-10-04T00:00Z "approved"
-- Step 4: started
-- T1: active
-
-## Tasks
-
-| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | row one | bh-T1 | — | | 10 | REQ-1 | bh-T1.txt | .worktrees/bh-T1 | | active |
-BHPLAN
+{ printf -- '---\nworking-branch: wave/fixture\ncanonical_sdlc_version: 15\n---\n# fixture plan (§BY-HAND)\n\n## Tasks\n\n'
+  printf '| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'; } > "$BHP"
+BHLOG="$BH/.bionic/docs/record/wave-x/run.log"; mkdir -p "${BHLOG%/*}"
+bh_row() {  # <n> -> row T<n> on the plan, dispatched to bh-T<n> on its tree in the run's log
+  printf '| T%s | 4 | build | row %s | — | 10 | REQ-1 | bh-T%s.txt | — |\n' "$1" "$1" "$1" >> "$BHP"
+  printf 'run/v1|ev=%s|at=2026-10-04T00:0%s:0%sZ\n' "dispatch|row=T$1|name=bh-T$1" "$1" 1 "tree|row=T$1|path=.worktrees/bh-T$1" "$1" 2 >> "$BHLOG"
+}
+printf 'run/v1|ev=%s|at=2026-10-04T00:00:0%sZ\n' 'step|n=4' 1 'approval|key=step3|by=fixture|said=approved' 2 > "$BHLOG"; bh_row 1
 printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$BHP" > "$BH/.bionic/tmp/engaged-${BHSID}.state"
-BHREC="$BH/.bionic/docs/record/wave-x/landing-proofs.log"; BHLOG="${BHREC%/*}/run.log"
-bh_all() { cat "$BHREC" "$BHLOG" 2>/dev/null; }   # the record's lines, then the log's
+bh_all() { cat "$BHLOG" 2>/dev/null; }
+BH_SUM="$(cksum < "$BHP")|$(cksum < "$BHLOG")"
 BH_REFS0="$(refs_of "$BH")"
 bh_land() { ( cd "$BH" && CLAUDE_CODE_SESSION_ID="$BHSID" bash "$SPAWN" land "$@" 2>&1 ); }
 OUTBH0="$(bh_land "$BHT" --by-hand)"; RCBH0=$?
 expect_eq    "(h1) a hand landing with no --reason is refused (exit 2)" "2" "$RCBH0"
 expect_match "(h1) …naming why" "spawn-worktree: REFUSED reason=no-reason *" "$OUTBH0"
-expect_false "(h1) …and nothing is recorded" test -e "$BHLOG"
+expect_eq    "(h1) …and nothing is recorded: the plan and its log are as they were" "$BH_SUM" "$(cksum < "$BHP")|$(cksum < "$BHLOG")"
 OUTBHB="$(bh_land "$BHT")"; RCBHB=$?
 expect_ne    "(h2) a bare land exits non-zero" "0" "$RCBHB"
 expect_eq    "(h2) …and no ref moved" "$BH_REFS0" "$(refs_of "$BH")"
@@ -930,16 +915,15 @@ BH_PUB="$(grep '^run/v1|ev=published|' "$BHLOG" 2>/dev/null)"
 expect_regex "(h4) the log's published line carries the user, the time and the reason" \
   "^run/v1\\|ev=published\\|row=T1\\|commit=$(git -C "$BH" rev-parse wave/fixture)\\|kind=hand\\|by=Hand Lander\\|why=the person's why\\|branch=wt/bh-T1\\|head=[0-9a-f]{40}\\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" "$BH_PUB"
 BH_AT="${BH_PUB##*|at=}"
-expect_eq    "(h5) the row's - T1: line is the landing's to leave: it stands as it was, the who, when and why on the event" \
-  "- T1: active|Hand Lander|the person's why" "$(grep '^- T1:' "$BHP")|$(printf '%s' "$BH_PUB" | tr '|' '\n' | sed -n 's/^by=//p')|$(printf '%s' "$BH_PUB" | tr '|' '\n' | sed -n 's/^why=//p')"
+expect_eq    "(h5) the plan is the landing's to leave: its bytes stand as they were, the who, when and why on the event" \
+  "${BH_SUM%|*}|Hand Lander|the person's why" "$(cksum < "$BHP")|$(printf '%s' "$BH_PUB" | tr '|' '\n' | sed -n 's/^by=//p')|$(printf '%s' "$BH_PUB" | tr '|' '\n' | sed -n 's/^why=//p')"
 
 section "§HAND: a hand landing lands a row whose suite is red, writes the person's words on its line, and runs nothing"
 #
 # A second row of the same plan commits a suite that fails and logs each run of it, and its launch line names that suite
 # as the one it lands on. The hand landing merges it all the same: running a suite is no part of it, and none is wanted.
 # What the person says of the writer's run (its suites, the commit they were green at, its log) is recorded as verdicts.
-printf '| T2 | 4 | build | row two | bh-T2 | — | | 10 | REQ-1 | bh-T2.txt | .worktrees/bh-T2 | | active |\n' >> "$BHP"
-awk '{ print } /^- T1:/ { print "- T2: active" }' "$BHP" > "$BHP.n" && mv "$BHP.n" "$BHP"
+bh_row 2
 BHT2="$(new_tree "$BH" wt/bh-T2)"; mkdir -p "$BHT2/tests"
 printf '#!/bin/bash\necho run >> "%s"\necho "FAIL: planted"; echo; echo "r.test.sh: 0/1 passed, 1 failed  sections=1 setup=0"; exit 1\n' \
   "$TMP/hand-runs" > "$BHT2/tests/r.test.sh"
@@ -962,8 +946,7 @@ expect_eq    "(hd3) …no suite ran, and the record holds the person's verdict, 
 
 # A hand landing that names its suites leaves a ready line that names them too, so the judge and the door read one
 # row's suites; with none named, the ready line says none.
-printf '| T3 | 4 | build | row three | bh-T3 | — | | 10 | REQ-1 | bh-T3.txt | .worktrees/bh-T3 | | active |\n' >> "$BHP"
-awk '{ print } /^- T2:/ { print "- T3: active" }' "$BHP" > "$BHP.n" && mv "$BHP.n" "$BHP"
+bh_row 3
 BHT3="$(new_tree "$BH" wt/bh-T3)"; printf 'three\n' > "$BHT3/three.txt"; git -C "$BHT3" add three.txt && git -C "$BHT3" commit -qm "T3: a row"
 printf '%s|row=T3|lands_on=a.test.sh,b.test.sh\n' "$(roster_row_fixture status=intended session="$BHSID" name=bh-T3 agent_id=b00T3 plan="$BHP")" \
   >> "$BH/.bionic/tmp/roster-${BHSID}.state"
@@ -978,9 +961,9 @@ OUTHL="$(bh_land "$BHT4" --by-hand --reason "landed on the report")"; RCHL=$?
 expect_eq    "(hl1) a hand landing whose added comment cites the run exits 2 with ready's LINT line, and no ref moved" "2|LINT wt/bh-T4 tests/cited.sh:1 wave|same" "$RCHL|$(printf '%s\n' "$OUTHL" | grep '^LINT ')|$([ "$BH_REFS4" = "$(refs_of "$BH")" ] && echo same)"
 # A hand landing behind an entry still proving waits on it, and builds its candidate once for each base it is given.
 BHT5="$(new_tree "$BH" wt/bh-T5)"; BHX="$(git -C "$BH" commit-tree -p wave/fixture -m ahead "$(git -C "$BH" rev-parse 'wave/fixture^{tree}')")"; BHAT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-printf 'line/v1|ev=ready|row=T9|name=-|commit=%s|branch=-|tree=-|suites=none|debt=-|carrier=%s:|at=%s\nline/v1|ev=candidate|row=T9|base=%s|commit=%s|tree=-|at=%s\n' "$BHX" "$$" "$BHAT" "$(git -C "$BH" rev-parse wave/fixture)" "$BHX" "$BHAT" >> "$BHREC"
+printf 'run/v1|ev=ready|row=T9|name=-|commit=%s|branch=-|tree=-|suites=none|debt=-|carrier=%s:|at=%s\nrun/v1|ev=candidate|row=T9|base=%s|commit=%s|tree=-|at=%s\n' "$BHX" "$$" "$BHAT" "$(git -C "$BH" rev-parse wave/fixture)" "$BHX" "$BHAT" >> "$BHLOG"
 bh_land "$BHT5" --by-hand --reason "behind an entry" >/dev/null & BHPID=$!
-sleep 3; printf 'line/v1|ev=returned|row=T9|why=red|detail=-|at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$BHREC"; wait "$BHPID"; RCHW=$?
+sleep 3; printf 'run/v1|ev=returned|row=T9|why=red|detail=-|at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$BHLOG"; wait "$BHPID"; RCHW=$?
 expect_eq    "(hd3b) a hand landing held 3 s behind an entry lands, with one candidate on the entry's and one on the head it published onto" \
   "0|${BHX} $(git -C "$BH" rev-parse wave/fixture^1)" "$RCHW|$(bh_all | grep '|ev=candidate|row=wt/bh-T5|' | sed 's/.*|base=\([^|]*\)|.*/\1/' | paste -sd' ' -)"
 section "§CHECK-FILES: what a range changes of the check's files is the declared list met with the range"
@@ -1082,7 +1065,8 @@ section "§MISMATCH: a tree whose record names another plan than the binding is 
 # lands its last rows from; any other session is refused naming the closed plan.
 # fails-when: a stale tree lands on the wrong plan silently, or close-out's last landing is refused.
 SC_Q="$SC/.bionic/docs/plans/epic-x/wave-y.plan.md"
-printf -- '---\nworking-branch: wave/x\n---\n# another run\n\n## SDLC State\n\ncurrent: 4\n' > "$SC_Q"
+printf -- '---\ncanonical_sdlc_version: 15\nworking-branch: wave/x\n---\n# another run\n' > "$SC_Q"
+mkdir -p "$SC/.bionic/docs/record/wave-y"; printf 'run/v1|ev=step|n=4|at=2026-10-04T00:00:00Z\n' > "$SC/.bionic/docs/record/wave-y/run.log"
 SQ="55555555-6666-4777-8888-999999999999"
 bound_marker "$SC" "$SQ" "$SC_Q" >/dev/null
 SC_T5="$(sc_spawn "$SC" T5 "$WORLD_SID")"; ll_launch "$SC" T5 a.test.sh

@@ -1044,9 +1044,9 @@ expect_eq "VE10e the call, in words that owe something, prints, the ruling ask u
 # ============================================================
 section "§ONE-READER: the goal's status, the task's title and the goal's measure are each one function the sheet and the cards call"
 # ============================================================
-# FIXTURE FIDELITY: one run of the verbs' own shapes: a wave plan approved at Step 3 whose requirements give it two
-# themes and whose matrix discharges one of the first theme's two criteria and the second theme's one, so the second
-# goal reads met. T1's cell opens on a title with a colon in it, the shape the plan card and the sheet once cut two
+# FIXTURE FIDELITY: one run of the verbs' own shapes: a wave plan at version 15, approved at Step 3 in its run's log,
+# whose requirements give it two themes and whose log holds a criterion's proof for one of the first theme's two
+# criteria and for the second theme's one, so the second goal reads met. T1's cell opens on a title with a colon in it, the shape the plan card and the sheet once cut two
 # ways. The surfaces are the real verbs: `sitrep` for the sheet, `sitrep card` for the sitrep card, `card.sh step3`
 # for the plan's card. The plants are a copy of the tree with the one reading of a fact changed: both surfaces must
 # move with it, so a surface that keeps its own copy reads apart from the sheet and the row reddens.
@@ -1057,19 +1057,25 @@ section "§ONE-READER: the goal's status, the task's title and the goal's measur
 # whether a goal is met by a word of its own (OR-3), or card.sh parses the goal's measure by a grammar of its own (OR-5).
 OR_R="$TMPROOT/one-reader"; OR_D="$OR_R/.bionic/docs/record/wave-02-fx"; OR_P="$OR_R/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
 OR_Q="$OR_R/.bionic/docs/specs/epic-01-fx/wave-02-fx.requirements.md"
-mkdir -p "$OR_D" "${OR_P%/*}" "${OR_Q%/*}" "$OR_R/.bionic/tmp"; ( cd "$OR_R" && git init -q . ); : > "$OR_D/landing-proofs.log"
-or_plan() {  # <status of the second theme's one criterion> -> the plan, that theme met when it is discharged
+mkdir -p "$OR_D" "${OR_P%/*}" "${OR_Q%/*}" "$OR_R/.bionic/tmp"; ( cd "$OR_R" && git init -q . )
+or_plan() {  # <discharged|pending: the second theme's one criterion> -> the page and its run's log, that theme met when discharged
   {
-    printf -- '---\nwave: wave-02-fx\nrelease: 9.9.0\nscale: wave\nworking-branch: wave/02-fx\nintegration-branch: main\nforecast: 8h\n---\n'
-    printf '# fixture plan\n\n## Goal\n\nThe fixture ships.\n\n## SDLC State\n\napproved-by: fixture 2026-10-06T16:00:00Z "approved"\ncurrent: 4\n\n- Step 4: implementation opened\n'
-    printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
-    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-    printf '| T1 | 4 | build | The release row: 1.27.0. It names the release it cuts · complexity: standard | — | — | — | 30 | REQ-1 | lib/t1.sh | — | — | active | — | — | — |\n'
-    printf '| T2 | 4 | build | Fix vs. the old path. It does the second thing · complexity: standard | — | — | — | 30 | REQ-2 | lib/t2.sh | — | — | pending | — | — | — |\n'
-    printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
-    printf '| AC-1.1 | T2 | discharged | pending | — |\n| AC-1.2 | T2 | pending | pending | — |\n| AC-2.1 | T2 | %s | pending | — |\n' "$1"
+    printf -- '---\ncanonical_sdlc_version: 15\nwave: wave-02-fx\nrelease: 9.9.0\nscale: wave\nworking-branch: wave/02-fx\nintegration-branch: main\nforecast: 8h\n---\n'
+    printf '# fixture plan\n\n## Goal\n\nThe fixture ships.\n'
+    printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | The release row: 1.27.0. It names the release it cuts · complexity: standard | — | 30 | REQ-1 | lib/t1.sh | — |\n'
+    printf '| T2 | 4 | build | Fix vs. the old path. It does the second thing · complexity: standard | — | 30 | REQ-2 | lib/t2.sh | — |\n'
+    printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n'
+    printf '| REQ-1 | x | AC-1.1 | hermetic | `tests/a.test.sh` | b |\n| REQ-1 | x | AC-1.2 | hermetic | `tests/a.test.sh` | b |\n| REQ-2 | x | AC-2.1 | hermetic | `tests/a.test.sh` | b |\n'
     printf '\n## Not Doing\n\n- nothing\n'
   } > "$OR_P"
+  {
+    for n in 1 2 3 4; do printf 'run/v1|ev=step|n=%s|at=2026-10-06T15:5%s:00Z\n' "$n" "$n"; done
+    printf 'run/v1|ev=approval|key=step3|by=fixture|said=approved|at=2026-10-06T16:00:00Z\n'
+    printf 'run/v1|ev=dispatch|row=T1|name=w02-T1|at=2026-10-06T16:01:00Z\n'
+    printf 'run/v1|ev=proof|ac=AC-1.1|evidence=record/wave-02-fx/a.log|at=2026-10-06T16:02:00Z\n'
+    [ "$1" != discharged ] || printf 'run/v1|ev=proof|ac=AC-2.1|evidence=record/wave-02-fx/a.log|at=2026-10-06T16:03:00Z\n'
+  } > "$OR_D/run.log"
 }
 {
   printf -- '---\nscale: wave\n---\n# fixture requirements\n\n## Goal\n\nThe fixture ships.\n'

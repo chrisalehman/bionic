@@ -95,27 +95,19 @@ make_project() {
   plan="$dir/.bionic/docs/plans/epic-99/$PLAN_BASE.plan.md"
   cat > "$plan" <<PAPLAN
 ---
-canonical_sdlc_version: 14
+canonical_sdlc_version: 15
 intent: build
 rigor: double
 scale: wave
 working-branch: $BRANCH
+integration-branch: main
 spec: specs/epic-99/$PLAN_BASE.spec.md
 requirements: specs/epic-99/$PLAN_BASE.requirements.md
 ---
 
 # fixture plan
-
-## SDLC State
-
-integration-branch: main
-intent: build
-rigor: double
-scale: wave
-current: 4
-
-- Step 4: tasks in flight
 PAPLAN
+printf 'run/v1|ev=step|n=4|at=2026-10-03T00:00:00Z\n' > "$dir/.bionic/docs/record/$PLAN_BASE/run.log"
   : > "$dir/.bionic/docs/specs/epic-99/$PLAN_BASE.spec.md"
   : > "$dir/.bionic/docs/specs/epic-99/$PLAN_BASE.requirements.md"
   if [ "$mode" = bound ]; then
