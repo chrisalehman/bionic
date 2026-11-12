@@ -695,7 +695,7 @@ section "§POINTER-AGREE: one reader of the pointer, lib/handoff.sh handoff_file
 hf_co() { ( cd "$HF_R" && bash "$BIONIC_HOOKS_DIR/../payload/scripts/close-out.sh" "$HF_P" "$1" 2>&1 ); }  # <verb> -> close-out's output on the plan
 
 pa_check_file() {  # -> the file close-out check says its closed form would be written to
-  hf_co check | sed -n 's/^handoff: would write the closed form .* to \([^ ;]*\); the plan.*$/\1/p'
+  hf_co check | sed -n 's/^handoff: would write the closed form .* to \([^ ;]*\); the run.s log.*$/\1/p'
 }
 HF_OLD="$HF_HOME/2026-10-05-wave-01-fixture.md"
 hf_world pointer-agree no
