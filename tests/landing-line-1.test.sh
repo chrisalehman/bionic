@@ -1078,13 +1078,17 @@ for t in 10:30 12:30 14:30; do
 done > "$(ll_rec "$RW2")"
 ww_pub T1 queue 2026-10-20T10:00:00Z >> "$(ll_rec "$RW2")"   # the landing the moves name, before each of them
 for t in 10:30 12:30 14:30; do ww_dec "2026-10-20T$t:00Z" decline; ww_dec "2026-10-20T$t:05Z" lift; done > "$WW_RD/fill-ledger.log"
+# An amend, a hold, an extension and an adoption are each the one hand event its verb wrote to the run's log.
+ww_hand() { printf 'run/v1|ev=hand|by=fixture|name=%s|what=%s|why=%s|at=%s\n' "$2" "$1" "$3" "$4"; }   # <what> <name> <why> <at>
 for t in 10:30 12:30 14:30; do
-  roster_row_fixture status=identified name=w-a agent_id=aa plan="$WW_PL" amended="2026-10-20T$t:00Z widen the files"
-  roster_row_fixture status=confirmed name=w-a agent_id=aa plan="$WW_PL" amended="2026-10-20T$t:00Z widen the files"
-  roster_row_fixture status=identified name=w-b agent_id=ab plan="$WW_PL" held="2026-10-20T$t:00Z waiting on the reader"
-  roster_row_fixture status=identified name=w-c agent_id=ac plan="$WW_PL" extended="2026-10-20T$t:00Z more work"
-done >> "$WW_RO"
-roster_row_fixture status=identified name=w-ad agent_id=ad source=adopted adopted_from=old-sid plan="$WW_PL" >> "$WW_RO"
+  ww_hand amend w-a "widen the files" "2026-10-20T$t:00Z"; ww_hand hold w-b "waiting on the reader" "2026-10-20T$t:00Z"
+  ww_hand extend w-c "more work" "2026-10-20T$t:00Z"; ww_hand adopt "w-d${t%%:*}" "the session was cleared" "2026-10-20T$t:00Z"
+done >> "$(ll_log "$RW2")"
+# A roster row's audit keys with no event beside them are no act: inside the window, and counted nowhere.
+{ roster_row_fixture status=identified name=w-x agent_id=ax plan="$WW_PL" amended="2026-10-20T12:30:00Z widen the files"
+  roster_row_fixture status=identified name=w-x agent_id=ax plan="$WW_PL" held="2026-10-20T12:30:00Z waiting fp=1-2-3"
+  roster_row_fixture status=identified name=w-x agent_id=ax plan="$WW_PL" extended="2026-10-20T12:30:00Z more work"
+  roster_row_fixture status=identified name=w-y agent_id=ay source=adopted adopted_from=old-sid plan="$WW_PL"; } >> "$WW_RO"
 ww_sdlc "$RW2" "$(ww_proof regression "$WW_D" 2026-10-20T09:00:00Z record/wave-x/floor.log)" \
   "$(ww_proof regression "$WW_D" 2026-10-20T10:30:00Z record/wave-x/floor-2.log)" \
   "$(ww_proof regression "$WW_D" 2026-10-20T12:30:00Z record/wave-x/floor-3.log)" \
@@ -1101,12 +1105,15 @@ expect_eq "WINDOW-1c-1 precondition: the fixture holds the three blocks, every h
   "$WW_MR|$(grep -cE '^AC-1\.[0-9]+: .' "$WW_PL")|$(grep -cE '^AC-1\.[0-9]+:[[:space:]]*$' "$WW_PL")|$(grep -c '^  waiver: ' "$WW_PL")"
 expect_eq "WINDOW-1c-0 precondition: the plan holds the four regression proofs, three waived: and three moved: lines" "4/3/3" \
   "$(grep -c '^proved: kind=regression ' "$WW_PL")/$(grep -c '^waived: question=' "$WW_PL")/$(grep -c '^moved: ' "$WW_PL")"
-expect_eq "WINDOW-1c a wide window reads three of every kind, the regressions past the first, and the adoption it cannot place" \
-  "hand-holds: total=33 · by-hand=3 · stop-runs=3 · declines=3 · lifts=3 · amends=3 · holds=3 · extensions=3 · waivers=6 · status-writes=0 · second-regressions=3 · adoptions=0 · fixed=3 · needs-you=0 · unplaced=1" \
+expect_eq "WINDOW-1c a wide window reads three of every kind, the adoptions placed by their events, the regressions past the first" \
+  "hand-holds: total=36 · by-hand=3 · stop-runs=3 · declines=3 · lifts=3 · amends=3 · holds=3 · extensions=3 · waivers=6 · status-writes=0 · second-regressions=3 · adoptions=3 · fixed=3 · needs-you=0 · unplaced=0" \
   "$(ww_hh "$RW2" --since 2026-10-20T08:00:00Z --until 2026-10-20T16:00:00Z)"
+WW_1D="hand-holds: total=12 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=1 · holds=1 · extensions=1 · waivers=2 · status-writes=0 · second-regressions=1 · adoptions=1 · fixed=1 · needs-you=0 · unplaced=0"
 expect_eq "WINDOW-1d …and the window 11:00 to 13:00 reads one of each, every source filtered by its own time" \
-  "hand-holds: total=11 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=1 · holds=1 · extensions=1 · waivers=2 · status-writes=0 · second-regressions=1 · adoptions=0 · fixed=1 · needs-you=0 · unplaced=1" \
-  "$(ww_hh "$RW2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
+  "$WW_1D" "$(ww_hh "$RW2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
+rm -f "$WW_RO"
+expect_eq "WINDOW-1e …and with the rosters gone, as a close leaves them, the line is the same: each of the four kinds is read from its event" \
+  "$WW_1D" "$(ww_hh "$RW2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
 
 # (w2) the matrix waiver's two forms. The ISO form is placed by its time; the date form counts with no end, and
 # a day the window's start falls inside cannot be placed. A criterion's waiver now is an event at its own instant,
