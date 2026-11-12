@@ -123,6 +123,17 @@ cells() { /usr/bin/grep -rnE 'matrix-(set|retier|render)|waive-row|poker_verb_di
 printf '%s\n' '# matrix-retier' '# session-poker.sh discharge AC-1' > "$L/planted-cell.sh"
 expect_eq "the extractor reads both planted names of the verbs that wrote a matrix cell" "2" "$(cells "$S" | grep -c planted-cell.sh)"
 expect_eq "the five verbs that wrote a matrix cell are named nowhere else" "" "$(cells "$S" | grep -v planted-cell.sh)"
+# The commands with no job are read by the shape of a use, never the bare word, for several are English: the poker run
+# with one as its verb, a function named for one, and a case arm of the poker's own.
+GONE_V='anchors|patrol|wait'
+gone() {
+  { /usr/bin/grep -rnE "(session-poker\.sh|\\\$\{?[A-Za-z_]*(poker|POKER)[A-Za-z_]*\}?)[\"']? ($GONE_V)([^a-z_-]|\$)|poker_verb_(${GONE_V//-/_})([^a-z_]|\$)" "$1/hooks" "$1/payload/scripts"
+    /usr/bin/grep -rnE --include='*poker*.sh' "^ *([a-z-]+\|)*($GONE_V)(\|[a-z-]+)*\)" "$1/hooks" "$1/payload/scripts"; } | grep -v '/payload/scripts/lib/walls\.sh:'
+}
+printf '%s\n' '# bash "$POKER" wait r1' '  poker_verb_patrol() {' > "$L/planted-gone.sh"
+printf '%s\n' '  tick|anchors)' > "$L/planted-poker-arm.sh"
+expect_eq "the extractor reads the planted call, function and case arm" "3" "$(gone "$S" | grep -c '/planted-')"
+expect_eq "the commands with no job are named nowhere else" "" "$(gone "$S" | grep -v '/planted-')"
 
 # A version-15 header still refuses the runs count's old key.
 steps() { /usr/bin/grep -rnE 'step-line|step-field|regression-runs|regression_runs_count|units_set_current|units_step_line|units_step_fields|poker_verb_regression\b|\|budget\||\|regression\|share\||confirm-row|confirm_row|matrix_block_key|poker_verb_budget|budget-override|session-poker\.sh"? budget|^  budget\)$' "$1/hooks" "$1/payload/scripts" \

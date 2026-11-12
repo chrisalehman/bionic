@@ -163,8 +163,8 @@
 #
 # --no-wait: THE CALLER WHO IS NOT THE RUN'S WATCHER. A caller that only starts the run (the tick starting the
 # whole run, which must answer within its own call) passes --no-wait beside --detach: it prints the same one
-# line, `started` or `attached`, and exits 0 at once, leaving the run to `session-poker.sh wait <name>`, the
-# roster's RUNNING line and the run's own log. Without --detach it is usage (exit 2).
+# line, `started` or `attached`, and exits 0 at once, leaving the run to the roster's RUNNING line and the run's
+# own log. Without --detach it is usage (exit 2).
 #
 # THE WAIT polls the log every BIONIC_RUN_POLL seconds (1 unless set; a fraction is allowed), copies
 # each new WHOLE line of it to stdout, and exits with the run's code once `<log>.rc` holds it (the
@@ -176,7 +176,7 @@
 # nothing. A run whose pid is alive is "live" only while that pid is still this run's detached shim
 # (`ps` names booked.sh and its --run-log), so a recycled pid is never waited on. LOST is never a
 # timeout: a dead pid with no `<log>.rc` is reported with the time the log was last written, and the
-# caller exits 70. `session-poker.sh wait <name>` is the same wait, by name, after the caller is gone.
+# caller exits 70.
 #
 # THE LOG is `<runs>/<id>.log`, `<runs>` being the project's
 # `.bionic/tmp/runs` (the project is the checkout git's common dir belongs to, so a row tree's run
@@ -211,7 +211,7 @@
 # when nothing smaller bounds it, so a run the gate has not admitted by then ends through the
 # not-admitted path below: exit 75, one line naming the wait and the command to run again in the log,
 # `rc=75` there, `75` in `<log>.rc`, `run_rc=75` on the roster row; the caller copies the line and
-# exits 75, and `session-poker.sh wait` prints it. The detached side is started by `perl -MPOSIX` (fork, `POSIX::setsid`, exec):
+# exits 75. The detached side is started by `perl -MPOSIX` (fork, `POSIX::setsid`, exec):
 # macOS ships no `setsid`, and perl is the one tool a stock machine has for it. No perl, or a
 # detached side that is neither alive nor ended once its pid file is read, exits 71 with one line.
 #

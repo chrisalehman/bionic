@@ -2242,53 +2242,6 @@ EOF
     esac
   }
 
-  # ---------- wait: THE RE-ENTRANT WAIT ON A DETACHED RUN (wave-30 T12; D6; AC-3.2, AC-3.3, AC-3.8) ----------
-  #
-  # The attach half of `booked.sh --detach`, by name, for a caller that is gone (a /clear, a stopped
-  # agent, a call the harness moved to the background). It reads the run's record and never starts
-  # anything, so two waits on one run are one run. It polls every BIONIC_RUN_POLL seconds (1 unless
-  # set), never one long call, and prints a RUNNING line with the run's last progress line on the
-  # first poll, whenever that line changes, and at least every 30 seconds. It exits with the run's
-  # code once the run has one; 70 when the run is LOST (its pid gone, no end written: a kill, never a
-  # timeout); 75 when `--for` ran out first, the run untouched. No session key is needed. A run that
-  # ended 75 (the gate did not admit it inside its bound) is reported with the shim's one line first.
-  poker_verb_wait() {
-    REPO_REAL="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
-    [ -n "$REPO_REAL" ] || { die "REFUSED — cannot resolve the working directory."; exit 2; }
-    if ! run_find "$REPO_REAL" "$WT_ARG"; then
-      die "wait — no run named $WT_ARG: no roster row of this project carries a run for it, and there is no $REPO_REAL/.bionic/tmp/runs/$WT_ARG.log"
-      exit 2
-    fi
-    WT_POLL="${BIONIC_RUN_POLL:-1}"
-    case "$WT_POLL" in ''|*[!0-9.]*|.|*.*.*) WT_POLL=1 ;; esac
-    WT_T0="$(now_epoch)"; WT_SAID=""; WT_SAID_AT=0
-    while :; do
-      run_read
-      case "$RUN_STATE" in
-        FINISHED)
-          # A run the gate did not admit inside its bound ends 75 with the shim's one line in its log
-          # (booked.sh, the detached side's ceiling; wave-31 T12, D10): the wait says what it waited
-          # for and the command to run again, before the FINISHED line, whose text is unchanged.
-          if [ "$RUN_RC" = 75 ]; then
-            WT_NOTE="$(grep '^booked: the gate did not admit' "$RUN_LOG" 2>/dev/null | tail -n 1)"
-            [ -z "$WT_NOTE" ] || say "$WT_NOTE"
-          fi
-          say "FINISHED $RUN_NAME run=$RUN_ID rc=$RUN_RC log=$RUN_LOG"; exit "$RUN_RC" ;;
-        LOST)     say "LOST $RUN_NAME run=$RUN_ID last-written=$RUN_LAST_WRITTEN — its pid is gone and it wrote no end; log $RUN_LOG"; exit 70 ;;
-      esac
-      WT_NOW="$(now_epoch)"
-      if [ "$WT_SAID_AT" = 0 ] || [ "$RUN_PROGRESS" != "$WT_SAID" ] || [ $((WT_NOW - WT_SAID_AT)) -ge 30 ]; then
-        say "RUNNING $RUN_NAME run=$RUN_ID pid=$RUN_PID elapsed=${RUN_ELAPSED:-?}s progress: ${RUN_PROGRESS:-none yet}"
-        WT_SAID="$RUN_PROGRESS"; WT_SAID_AT="$WT_NOW"
-      fi
-      if [ -n "$WT_FOR" ] && [ $((WT_NOW - WT_T0)) -ge "$WT_FOR" ]; then
-        say "still RUNNING after ${WT_FOR}s — the run goes on; wait again: bash ${POKER_WORD} wait $RUN_NAME"
-        exit 75
-      fi
-      sleep "$WT_POLL"
-    done
-  }
-
   # ---------- stop-run: STOPPING A DETACHED RUN ON PURPOSE (wave-30 T12; D6) ----------
   #
   # A detached run is in nobody's process group, so TaskStop and a killed caller cannot reach it; this

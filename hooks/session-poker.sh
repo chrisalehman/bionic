@@ -36,9 +36,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh sitrep [--line] [<plan>]   the situation report's fact sheet for the model, or the Patrol's one-line status (settles ruled decisions on the register)
 #     bash <plugin-root>/hooks/session-poker.sh sitrep card [<plan>] < judgment   the sitrep card, drawn from the sheet and the model's judgment, or every reason it is refused (settles ruled decisions on the register)
 #     bash <plugin-root>/hooks/session-poker.sh cover <question> <a>..<b>   the cover <sha> <basis> line of each commit the judge walks in that range for that question (read-only)
-#     bash <plugin-root>/hooks/session-poker.sh wait <name|run id> [--for <s>]   wait on a detached run until it ends; exits with its code (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] [--machine <caller>] --why '<reason>'   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, one hand event unless a machine caller stops it)
-#     bash <plugin-root>/hooks/session-poker.sh anchors check|index [<root>] [--at <commit>]   check every suite's mutation anchors where they point, or print file -> the suites anchored on it (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh handoff ['<purpose>'] < sections   write the handoff document under the handoffs folder of the docs record, bound or not: the composed sections from stdin, State computed, the resume line last; bound, the plan's ## Handoff becomes one pointer line (writes the file, and the plan when bound)
 #     bash <plugin-root>/hooks/session-poker.sh resume <handoff.md>   the one door: engage this session when it is not, bind the plan the file names, arm at a scale with a Patrol, adopt, tick; a dozen lines to the terminal, the rest to one recap file (writes the marker, the stamp, this session's roster and the recap)
 #     bash <plugin-root>/hooks/session-poker.sh decisions [--all]   the register: this run's rulings from record/<wave>/design-ledger.md and its log, or every run's with the ADRs (read-only)
@@ -346,33 +344,6 @@ PATROL_PROMPT_VERSION=8
 # the same words, and tests/stop.test.sh §PATROL pins both sites to this one.
 PATROL_REARM_SAY="Patrol re-armed: the session's cron table was empty, so I created the recurring <interval> job and stamped it. Next fire is <time>."
 
-# THE EXPLANATION OF A DEAD PATROL CLOCK, printed by `patrol --explain` and by nothing else. The stop
-# hook's refusal is one line and the tick prints none of this, so a user sees it only by asking.
-# Static text over this script's own path: it reads no project and no session, so it answers anywhere.
-poker_patrol_explain() {
-  cat <<EXPLAIN_EOF
-Why the Patrol clock dies, and the acts that revive it
-
-The CLI holds the session's cron table in process memory, with no file behind it. A plugin update, a /reload-plugins, a session continue or a /clear and resume therefore deletes the Patrol job and leaves the stamp as the only trace. Nothing ticks the poker after that: no dispatched row is judged against its declared duration, and anything the run launched waits on a clock that stopped.
-
-The stop hook reads the stamp and the transcript. A stamp older than one fire window (the poker interval plus the scheduler's jitter), with an idle stretch that long and no tick in it, is a dead clock. The hook refuses the turn once per turn, in one line, until the stamp is fresh or removed.
-
-The three acts, in this order. Look first: creating a second job over one that is still there is two clocks on one run.
-  1. CronList. Is this session's bionic-patrol job still listed?
-  2. Only if it is absent: CronCreate a RECURRING session job at the interval that bash ${POKER_WORD} interval prints, carrying exactly the prompt that bash ${POKER_WORD} prompt prints.
-  3. Only once step 2 returned a job, or step 1 showed the job listed: bash ${POKER_WORD} arm
-
-If CronCreate is refused or fails, do NOT run step 3. A fresh stamp over an empty cron table reads alive to the stop hook, to the dispatch wall and to /bionic:doctor while nothing fires again, which is worse than the death. Tell the user the Patrol is down and that CronCreate was refused, and leave the stamp stale.
-
-If the Patrol was stopped ON PURPOSE, record that instead of re-arming: bash ${POKER_WORD} disarm removes the stamp, and the notice goes with it.
-
-The clock that fires and never ticks. When a Patrol marker turn has run since the stamp and no tick stamped, the job exists and fires but its prompt never runs the tick, so nothing has decided anything. Re-creating the job as it is buys the same silence, and arming the stamp over it makes a Patrol that never decides read alive. Repair the job, not the clock:
-  1. Run the tick now: bash ${POKER_WORD} tick
-  2. CronList, and CronDelete this session's Patrol job.
-  3. CronCreate a RECURRING session job at the interval bash ${POKER_WORD} interval prints, carrying exactly the prompt bash ${POKER_WORD} prompt prints. It leads with this session's marker and runs the tick.
-EXPLAIN_EOF
-}
-
 # THE SCHEDULER KEEPS NO STATE ACROSS TICKS (S8). There used to be a third sibling of the
 # stamp here — a `.holds` counter of consecutive holds, the one fact the tick carried from
 # one firing to the next, and the input to a halve-the-width recommendation that fired on
@@ -410,7 +381,6 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh tick       one decision over this session's roster (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh arm        stamp the Patrol as alive for this session (no roster needed)"
   die "  bash ${HOOK_DIR}/session-poker.sh disarm     remove that stamp at run close — this Patrol was ended on purpose"
-  die "  bash ${HOOK_DIR}/session-poker.sh patrol --explain   why the Patrol clock dies and the acts that revive it: the explanation the stop hook's one-line refusal leaves out (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
   die "  bash ${HOOK_DIR}/session-poker.sh interval-default   this script's built-in default interval, in seconds (ignores config)"
   die "  bash ${HOOK_DIR}/session-poker.sh share [<n>] [reserve=<cores>]   print the machine's share (92 when none is set), the cores the person keeps (1 when none is set), the cores and the room; with <n> or reserve=<cores>, set it in the user-level file the gate reads"
@@ -453,9 +423,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh sitrep [--line] [<plan>]   the situation report's fact sheet: one fact per line, <key>: <value> — the run, the steps, every task with its state, the metrics in numbers, each goal's status, the predicted close and its arithmetic, every ask open on the run's register with what it holds, and every review; the model reads it and the user sees the card; --line prints the Patrol's status, <k> of <m> tasks · owed: <n> on you · <m> on events · close <time> (closes the asks of decisions the ledger ruled)"
   die "  bash ${HOOK_DIR}/session-poker.sh sitrep card [<plan>] < judgment   the sitrep card: the judgment on stdin, seven lines, one tagged line each (purpose:, call:, grade: <A-F>, point:, ask <key>[, <key>]: <what> — recommend <answer>, close:), checked against the sheet's facts; the card draws every row that is a fact; a card that fails its check prints nothing and exits 1, every reason on stderr"
   die "  bash ${HOOK_DIR}/session-poker.sh cover <question> <a>..<b>   the basis the judge holds a range by: one cover <sha> prose|release|born-review|born-regression|owes line per commit past <a> on <b>'s first-parent line, for evidence, adversarial or structure; the lines current 7 prints under a review ... uncovered <a>..<b> line (read-only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> --why '<reason>' [--report-only] [--machine <caller>]   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one hand event, what=stop-run with its reason, goes to the bound run's log, unless --machine names the tool's own caller (close-out's sweep), whose stop is no act by hand; with no reason the stop is refused and nothing is sent"
-  die "  bash ${HOOK_DIR}/session-poker.sh anchors check|index [<root>] [--at <commit>]   check: MOVED <suite>:<line> for each anchor whose text is not on exactly one line where it points (exit 1), nothing and exit 0 when every anchor holds; index: <file> TAB <suite>[,<suite>] per anchored file. <root> defaults to the current tree, --at reads a commit"
   die "  bash ${HOOK_DIR}/session-poker.sh ${RA_USAGE}"
   die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the release approval card, all default or all recommended, into approve, waive and finding-move with their words"
   die "  bash ${HOOK_DIR}/session-poker.sh epic-row <wave> <col>=<val>... [--plan <plan>]   set cells of that wave's row in the shipped table of the epic.plan.md beside the run's plan"
@@ -919,10 +887,6 @@ $1"; shift ;;
   tick|arm|disarm|interval|interval-default|window|prompt)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
     ;;
-  # ONE FLAG: the explanation of a dead Patrol clock, the only thing this verb prints.
-  patrol)
-    { [ $# -eq 1 ] && [ "$1" = --explain ]; } || usage "patrol takes one flag: --explain."
-    ;;
   # THE MACHINE'S SHARE. No operand prints it; a share and `reserve=<cores>`
   # set theirs, together or one at a time. A value's own shape is the verb's refusal; a third operand, or the
   # same one twice, is the usage error.
@@ -1005,22 +969,8 @@ $1"; shift ;;
       :*|*:|-*|*:-*|*..*|*[[:space:]]*|*[[:cntrl:]]*) usage "cover takes its range as <a>..<b>, two commits and nothing else." ;;
     esac
     ;;
-  # THE RUN VERBS (wave-30 T12; D6, D7d). `wait` and `stop-run` take ONE operand: a roster row's name,
-  # a run id (`run=` as the shim printed it), or a run's log path. `wait` takes `--for <seconds>`, a
-  # bound on this call (75 when it runs out, the run untouched); `stop-run` takes `--report-only`, the
-  # promise that word makes on adopt and sweep.
-  wait)
-    WT_ARG=""; WT_FOR=""
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --for) [ $# -ge 2 ] || usage "wait --for takes a number of seconds."; WT_FOR="$2"; shift 2 ;;
-        -*) usage "wait takes one name and at most --for <seconds>." ;;
-        *) [ -z "$WT_ARG" ] || usage "wait takes one name."; WT_ARG="$1"; shift ;;
-      esac
-    done
-    [ -n "$WT_ARG" ] || usage "wait takes the name of a roster row (or a run id) whose run to wait on."
-    case "$WT_FOR" in '') : ;; *[!0-9]*) usage "wait --for takes whole seconds." ;; esac
-    ;;
+  # THE RUN VERB. `stop-run` takes ONE operand: a roster row's name, a run id (`run=` as
+  # the shim printed it), or a run's log path; and `--report-only`, the promise that word makes on adopt and sweep.
   stop-run)
     SR_ARG=""; SR_REPORT_ONLY=no; SR_WHY=""; SR_MACHINE=""
     while [ $# -gt 0 ]; do
@@ -1040,32 +990,6 @@ $1"; shift ;;
       yes:*|*:*[![:space:]-]*) ;;
       *) die "REFUSED — stop-run stops a run by hand, and says why: --why '<what went wrong, what the tool lacked>'. Nothing was stopped."; exit 2 ;;
     esac
-    ;;
-  # THE ANCHORS (wave-35 T3; D16, D9). Read-only and session-free, so it runs here and exits: the extractor,
-  # the check and the index are lib/anchors.sh's, loaded on demand rather than through BIONIC_LIB_WANT, so a
-  # copied hook resolving an older library still loads (.claude/rules/lib-changes-in-worktrees.md).
-  anchors)
-    AN_SUB="${1:-}"; [ $# -eq 0 ] || shift
-    case "$AN_SUB" in check|index) ;; *) usage "anchors takes check or index." ;; esac
-    AN_ROOT=""; AN_AT=-
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --at) [ -n "${2:-}" ] || usage "anchors --at takes a commit."; AN_AT="$2"; shift 2 ;;
-        -*) usage "unknown flag for anchors: $1" ;;
-        *) [ -z "$AN_ROOT" ] || usage "anchors takes at most one root."; AN_ROOT="$1"; shift ;;
-      esac
-    done
-    [ -n "$AN_ROOT" ] || AN_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || AN_ROOT=""
-    [ -n "$AN_ROOT" ] || AN_ROOT="$PWD"
-    [ -d "$AN_ROOT" ] || { echo "poker: anchors: no directory $AN_ROOT" >&2; exit 2; }
-    [ -n "$BIONIC_LIB" ] && [ -r "$BIONIC_LIB/anchors.sh" ] && . "$BIONIC_LIB/anchors.sh" \
-      || { echo "poker: anchors: cannot load ${BIONIC_LIB:-the bionic library}/anchors.sh" >&2; exit 2; }
-    if [ "$AN_AT" != - ]; then
-      git -C "$AN_ROOT" rev-parse --verify -q "${AN_AT}^{commit}" >/dev/null 2>&1 \
-        || { echo "poker: anchors: no commit $AN_AT in $AN_ROOT" >&2; exit 2; }
-    fi
-    if [ "$AN_SUB" = check ]; then anchors_check "$AN_ROOT" "$AN_AT"; exit $?; fi
-    anchors_index "$AN_ROOT" "$AN_AT"; exit 0
     ;;
   # THE HANDOFF DOCUMENT. At most one operand, the purpose: what the next session is for, in words. The composed
   # sections come on stdin, never as flags; any flag is the usage error (2).
@@ -2702,11 +2626,6 @@ case "$VERB" in
   # WAITING, and `v=` after the
   # marker names the prompt's version so `arm` can record it and a later tick can ask for a
   # re-arm when the poker has moved on.
-  patrol)
-    poker_patrol_explain
-    exit 0
-    ;;
-
   prompt)
     SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
@@ -2777,7 +2696,6 @@ case "$VERB" in
   promote) poker_verb_promote "$@" ;;
   resume) poker_verb_resume "$@" ;;
   sitrep) poker_verb_sitrep "$@" ;;
-  wait) poker_verb_wait "$@" ;;
   stop-run) poker_verb_stop_run "$@" ;;
   tick) poker_verb_tick "$@" ;;
 esac

@@ -907,11 +907,6 @@ expect_eq "(an1) …the entry is returned, why=anchor-moved" "anchor-moved" \
   "$(ll_field "$(ll_ev "$RAM" returned)" why)"
 expect_eq "(an1) …before any suite ran on the candidate" "" "$(ll_ev "$RAM" verdict)"
 expect_nonempty "(an1) …over a candidate that was built" "$(ll_ev "$RAM" candidate)"
-AN_CHECK="$(bash "$REPO/hooks/session-poker.sh" anchors check "$REPO" 2>&1)"; AN_RC=$?
-expect_eq "(an2) session-poker.sh anchors check on the shipped tree exits 0" "0" "$AN_RC"
-expect_empty "(an2) …and names no moved anchor" "$AN_CHECK"
-expect_contains "(an2) …over an index that holds this suite's own anchor" "tests/landing-line-1.test.sh" \
-  "$(bash "$REPO/hooks/session-poker.sh" anchors index "$REPO" 2>&1)"
 
 # ============================================================================ what a red means (wave-28 T5)
 #

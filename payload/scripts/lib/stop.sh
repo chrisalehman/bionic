@@ -2805,15 +2805,14 @@ esac
 # is the refusal's headline with no detail, and the headline is the whole reason. It names the three
 # acts in their order and nothing else. It carries no age, no idle gap and no path, so a repeat over
 # the same stale stamp is byte-identical to the first and the line can never grow. The explanation
-# (why the clock dies, the refused CronCreate, the deliberate stop) is printed only when asked for,
-# by `session-poker.sh patrol --explain`.
+# (why the clock dies, the refused CronCreate, the deliberate stop) is the dispatch rules'.
 #
 # THE CRON HALF IS FIRST because the order is a safety property: `arm` alone freshens the stamp
 # over an empty cron table and buys a Patrol that reads alive and never fires, which is worse than
 # the death because the death is at least detectable. This function therefore reads and names the
 # acts and never arms. CronCreate is the refusable half (the auto-mode classifier refuses it
 # non-deterministically), so "if absent" is in the line and the rule that a refused CronCreate is
-# never followed by `arm` is in the dispatch rules and the explanation.
+# never followed by `arm` is in the dispatch rules.
 #
 # THE CLOCK THAT FIRES AND NEVER TICKS. `patrol_verdict` reads a Patrol marker turn after the stamp
 # as a firing that ran no tick. The job exists and fires, so re-creating it as it is buys the same

@@ -995,14 +995,13 @@ expect_contains "GONE3 the Patrol prompt still says how a FILL is answered" 'Ans
 expect_absent "GONE3b …and names no decline" "decline" "$GONE_PROMPT"
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "PATROL: a dead Patrol clock is one line of at most 80 characters, the same line on a repeat; the explanation is asked for, and the one report sentence is in the rules and the prompt"
+section "PATROL: a dead Patrol clock is one line of at most 80 characters, the same line on a repeat; the one report sentence is in the rules and the prompt"
 
 # THE USER-VISIBLE REASON IS THE CLI'S "Stop hook error:" LINE, and the plugin can only make it short.
 # A dead clock is three acts in one order (look, create if absent, stamp), so the line names them and
-# nothing else; the explanation moved behind `session-poker.sh patrol --explain`, and the line must not
+# nothing else, and the line must not
 # vary with the stamp's age, or a repeat for the same stale stamp would print more than the first.
 PT_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
-PT_EXPLAIN_FIRST="Why the Patrol clock dies, and the acts that revive it"
 PT_SAY="Patrol re-armed: the session's cron table was empty, so I created the recurring <interval> job and stamped it. Next fire is <time>."
 
 D=$(mkfix); stale_stamp "$D"
@@ -1017,7 +1016,6 @@ expect_true "PATROL1d …naming CronList, then CronCreate, then arm" \
   test "$(offset_in_reason 'CronList')" -ge 0 -a "$(offset_in_reason 'CronList')" -lt "$(offset_in_reason 'CronCreate')" \
        -a "$(offset_in_reason 'CronCreate')" -lt "$(offset_in_reason '; arm')"
 expect_contains "PATROL1e …CronCreate only if absent" "CronCreate if absent" "$PT_R1"
-expect_absent "PATROL1f …and carries none of the explanation" "process memory" "$PT_R1"
 
 # THE SAME STAMP, OLDER: an age in the line would make the repeat differ.
 touch -t "$(date -v-1100S +%Y%m%d%H%M.%S 2>/dev/null || date -d '-1100 seconds' +%Y%m%d%H%M.%S)" \
@@ -1044,27 +1042,7 @@ expect_true "PATROL3c …naming the tick first, then CronList" \
        -a "$(printf '%s' "$PT_NT" | /usr/bin/grep -c '(tick; CronList')" -eq 1
 expect_absent "PATROL3d …and not the dead-clock line" "Patrol dead" "$(reason_of)"
 
-# THE EXPLANATION IS ASKED FOR AND NOWHERE ELSE. The verb prints it; the stop reason, the user stream, the
-# tick and the prompt print none of it.
-PT_EXP="$(cd "$(mktemp -d)" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$PT_POKER" patrol --explain 2>&1)"
-PT_EXP_RC=$?
-expect_status "PATROL4 patrol --explain exits 0" "0" "$PT_EXP_RC"
-expect_eq "PATROL4b …and its first line is the heading" "$PT_EXPLAIN_FIRST" "$(printf '%s\n' "$PT_EXP" | sed -n 1p)"
-expect_contains "PATROL4c …it says why the clock dies" "process memory" "$PT_EXP"
-expect_contains "PATROL4d …and the three acts, the stamp last" "CronList" "$PT_EXP"
-expect_contains "PATROL4e …and the case of a clock that fires and never ticks" "never ticks" "$PT_EXP"
-
-D=$(mkfix); stale_stamp "$D"
-fire "$D"
-PT_TICK="$(cd "$D" && env HOME="$(mktemp -d)" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="" bash "$PT_POKER" tick 2>&1)"
 PT_PROMPT="$(cd "$(mktemp -d)" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$PT_POKER" prompt 2>/dev/null)"
-expect_nonempty "PATROL5 meta: the tick over the stale stamp printed something" "$PT_TICK"
-for PT_PHRASE in "$PT_EXPLAIN_FIRST" "process memory"; do
-  expect_absent "PATROL5b the stop reason does not carry: $PT_PHRASE" "$PT_PHRASE" "$(reason_of)"
-  expect_absent "PATROL5c …nor the user stream: $PT_PHRASE" "$PT_PHRASE" "$STOP_ERR"
-  expect_absent "PATROL5d …nor the tick: $PT_PHRASE" "$PT_PHRASE" "$PT_TICK"
-  expect_absent "PATROL5e …nor the prompt: $PT_PHRASE" "$PT_PHRASE" "$PT_PROMPT"
-done
 
 # THE ONE SENTENCE, in the rules and in the prompt, and no other instruction about what to say beside it.
 # The words are counted in the two arming paragraphs of the rendered rules and in the prompt line.
