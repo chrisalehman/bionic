@@ -426,12 +426,10 @@ expect_false "RUNS.7 …and the orphan's process is gone" kill -0 "${PR_PID:-0}"
 expect_eq "RUNS.8 …and the wipe took its files with the rest of .bionic/tmp" "0" "$(tmp_entries "$PR")"
 expect_eq "RUNS.9 one orphan, one line" "1" "$(printf '%s\n' "$CO_OUT" | grep -c '^orphan: ')"
 expect_eq "RUNS.10 …and the close's sweep of it is no hand event: the person's stop is still the only one" "a person stopped it" "$(pr_hands)"
-CO_PLAN_AT=14
 
 # ============================================================
 section "FILL — wave-33 T8 (REQ-3 AC-3.3, D8): the epic row and the continuation are written whole"
 # ============================================================
-CO_PLAN_AT=15
 #
 # The epic row's ADR cell was `<fill: ADRs>` when no source named one, and wave-30's still reads so; the
 # continuation carried fourteen marks the orchestrator completed by hand (A-orch-50). Close-out now writes every

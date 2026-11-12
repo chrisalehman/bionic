@@ -413,12 +413,10 @@ for _co_cur in 7 4; do
   expect_eq "4ap.$_co_cur: …and the plan is unchanged (no Step-8 block written)" "$PLAN20_SHA" \
     "$(sha_of "$P20/$PLAN_REL")"
 done
-CO_PLAN_AT=14
 
 # ============================================================
 section "VER — wave-27 T4 (AC-7.2, D14, B3): the released version is the run's, never the tool's"
 # ============================================================
-CO_PLAN_AT=15
 # The tool's version attests; the release written is the plan's `release:`, and none when it names none.
 TOOLV="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$REPO_ROOT/payload/.claude-plugin/plugin.json" | head -1)"
 RELV="7.7.7-fixture"
