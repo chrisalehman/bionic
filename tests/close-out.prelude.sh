@@ -17,24 +17,9 @@
 # WHAT IT NEVER HOLDS. A fixture: a repository one section builds and a later one reads is not a helper, so
 # those sections share a part instead (§PARKED builds the repository §ONE-WRITER reads; both are part 4).
 #
-# THE SUITE: payload/scripts/close-out.sh: the Step 8/9 tail, performed
-# by one script that attests its own acts.
-#
-# WHAT IT OWNS. Four sections, each hermetic against a fixture project under a mktemp
-# sandbox with HOME redirected into it — never this repository, never the real plan,
-# never the real archive:
-#
-#   §1  AC-4.1  `run` performs every act on a fixture at Step 8: the merge readback,
-#               the worktree sweep, the tmp wipe, the TaskUpdate instruction, the
-#               continuation, the epic row, the patrol instruction, the handoff,
-#               the step's events, the gate dry-run, and the archive, the plan's
-#               own text untouched. Then the REAL hooks/bash-walls.sh, on a
-#               `git commit` payload, allows the commit.
-#   §2  AC-4.3  a `wt/*` branch carrying a commit the working branch never took
-#               refuses BY NAME and performs nothing; a fully reachable one is deleted.
-#   §3  AC-4.4  a second `run` prints `already closed` and touches nothing — the plan,
-#               the epic plan and the continuation keep their checksums.
-#   §4          `check` is a diagnosis: it reports and changes not one byte.
+# THE SUITE: payload/scripts/close-out.sh, the Step 8/9 tail performed by one script that attests its own acts. Every
+# section is hermetic against a fixture project under a mktemp sandbox with HOME redirected into it: never this
+# repository, never the real plan, never the real archive.
 #
 # WHY A GIT FIXTURE AND NOT A STUB. Two of the acts are git verdicts — `merge-base
 # --is-ancestor` and `git cherry` — and both are exactly the kind of answer a stub
@@ -387,6 +372,26 @@ mk_census_fixture() {
   local name="$1" working="$2" rows="$3"
   local p="$SANDBOX/$name"
   local aroot="$SANDBOX/$name-archive"
+  local title="census tests only" cols="| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |"
+  local sep="|---|---|---|---|---|---|---|---|---|---|---|" matrix=""
+  if [ -n "${CO_NOWT:-}" ]; then
+    title="no worktree column at all (C4)"; cols="${cols% worktree |}"; sep="${sep%---|}"
+    matrix="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
+  tier-run: bash tests/close-out-1.test.sh
+  readback: the two lifecycle blocks the script wrote
+
+"
+  fi
   mkdir -p "$p/.bionic/docs/plans/epic-fx" "$p/.bionic/docs/record" "$p/.bionic/tmp" "$aroot"
   printf 'archive-root: %s\n' "$aroot" > "$p/.bionic/config.yaml"
   # The dry-run now judges the OPEN plan (T16), so the matrix evidence file must exist.
@@ -407,7 +412,7 @@ walk: exempt
 archive-root: ${aroot}
 ---
 
-# fixture register plan — census tests only
+# fixture register plan — ${title}
 
 ## SDLC State
 
@@ -425,11 +430,11 @@ approved-by: fixture 2026-09-14T00:00Z "approved"
 
 ## Tasks
 
-| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |
-|---|---|---|---|---|---|---|---|---|---|---|
+${cols}
+${sep}
 ${rows}
 
-## Handoff
+${matrix}## Handoff
 
 - resume point: Step 8 open; the tail has not run.
 - open blockers: none.
@@ -458,83 +463,7 @@ mk_census_branch() {
 # shape research R1 reports as every plan this repository shipped through wave-16, and
 # every consumer plan on 1.8.3 (critic C4). `units_has_column <plan> worktree` reads
 # false against this table, which is the fork `wt_unreached`'s C4 fix reads.
-mk_census_fixture_nowt() {
-  local name="$1" working="$2" rows="$3"
-  local p="$SANDBOX/$name"
-  local aroot="$SANDBOX/$name-archive"
-  mkdir -p "$p/.bionic/docs/plans/epic-fx" "$p/.bionic/docs/record" "$p/.bionic/tmp" "$aroot"
-  printf 'archive-root: %s\n' "$aroot" > "$p/.bionic/config.yaml"
-  # The dry-run now judges the OPEN plan (T16), so the matrix evidence file must exist.
-  printf 'generic fixture proof — this suite tests the tail, not the artifact.\n' \
-    > "$p/.bionic/docs/record/generic-evidence.md"
-  cat > "$p/.bionic/docs/plans/epic-fx/wave-01-fixture.plan.md" <<PLAN_CENSUS
----
-governing-skill: canonical-sdlc
-canonical_sdlc_version: 14
-intent: bugfix
-rigor: single
-scale: wave
-deploy_target: n/a
-use_worktree: false
-has_ui: false
-multi_agent: false
-walk: exempt
-archive-root: ${aroot}
----
-
-# fixture register plan — no worktree column at all (C4)
-
-## SDLC State
-
-integration-branch: main
-working-branch: ${working}
-base: main @ fixture
-intent: bugfix
-rigor: single
-scale: wave
-current: 7
-approved-by: fixture 2026-09-14T00:00Z "approved"
-
-- Step 7: CLOSED — n/a: no ADR owed by a fixture
-- Step 8: (pending)
-
-## Tasks
-
-| id | step | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|---|
-${rows}
-
-## Verification Matrix
-
-stack-health: n/a: no long-running serve
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
-
-AC-1:
-  fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  tier-run: bash tests/close-out-1.test.sh
-  readback: the two lifecycle blocks the script wrote
-
-## Handoff
-
-- resume point: Step 8 open; the tail has not run.
-- open blockers: none.
-PLAN_CENSUS
-  (
-    in_fixture "$p" || exit 1
-    git init -q . >/dev/null 2>&1
-    git symbolic-ref HEAD refs/heads/main
-    printf '.bionic/\n' > .gitignore
-    printf 'seed\n' > file.txt
-    git add -A >/dev/null 2>&1
-    git commit -q -m "seed" >/dev/null 2>&1
-  )
-  [ "${CO_PLAN_AT:-14}" != 15 ] || co_page15 "$p"
-  printf '%s\n' "$p"
-}
+mk_census_fixture_nowt() { CO_NOWT=1 mk_census_fixture "$@"; }
 
 PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"
 EPIC_REL=".bionic/docs/plans/epic-fx/epic.plan.md"
