@@ -2492,7 +2492,7 @@ RP_TABLE
     fi
     if [ "$mode" = plan ]; then
       plan_verb_open order
-      open="$(gate_order_of "$PV_PLAN" plan)" || open=""
+      open="$(gate_order_plan "$PV_PLAN")" || open=""
     else
       log="$(docs_root "$root")/record/orders.log"
       if [ -L "$log" ]; then

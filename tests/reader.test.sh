@@ -659,6 +659,34 @@ printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$LP" > "$LR2/.bionic/tmp/en
 ( cd "$LR2" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SPW" land "$LT" --by-hand --reason 'no Lands-on could be read' ) >/dev/null 2>&1; LH_RC=$?
 expect_eq "a by-hand landing is one published landing of the hand kind with its reason, answered by hands (exit)" \
   "0|hand|no Lands-on could be read" "$LH_RC|$(bash "$READER" "$LP" hands | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^(kind|why)=/) printf "|%s", substr($i, index($i, "=") + 1) }' | cut -c2-)"
+section "SESSION"
+# The plan's order, handoff and session lines, then events past them; a handoff's local time is placed by its instant.
+E=1793606400; lt() { TZ=America/Los_Angeles date -r "$1" '+%Y-%m-%d %H:%M %Z'; }; ut() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; }
+sess() {  # <wave> <order act> <handoff epoch>, the log on stdin -> a plan whose text gives an order, a session and a handoff
+  plan "$1"; printf '## SDLC State\ncurrent: 4\norder: %s %s "stop"\n- session: s-one bound %s by write\n\n## Handoff\nhandoff: h/old.md written %s\n' \
+    "$2" "$(ut "$E")" "$(ut "$E")" "$(lt "$3")" >> "$D/plans/epic-x/$1.plan.md"; }
+sess sesspast given "$E" <<EOF
+run/v1|ev=order|act=lifted|said=stop|at=$(ut $((E + 60)))
+run/v1|ev=bind|session=s-two|by=engage|at=$(ut $((E + 61)))
+run/v1|ev=bind|session=s-one|by=bind|at=$(ut $((E + 62)))
+run/v1|ev=handoff|path=h/new.md|at=$(ut $((E + 63)))
+EOF
+sess sesstext lifted $((E + 120)) <<EOF
+run/v1|ev=order|act=given|said=go|at=$(ut $((E + 60)))
+run/v1|ev=handoff|path=h/new.md|at=$(ut $((E + 63)))
+EOF
+sa() { W="$1" TZ=America/Los_Angeles ask "$2" | sed -n "s/^$3=//p" | paste -sd' ' -; }
+expect_eq "events past the text answer: the order lifted, the newer handoff, each session once in the order it bound, by its first act" \
+  "none|h/new.md|s-one:write s-two:engage" "$(sa sesspast order order)|$(sa sesspast handoff path)|$(W=sesspast ask sessions \
+    | awk -F'|' '{ for (i = 2; i <= NF; i++) { split($i, k, "="); f[k[1]] = k[2] } printf "%s%s:%s", (NR > 1 ? " " : ""), f["session"], f["by"] }')"
+expect_eq "an order given past a lifted line stands; a handoff written before the text's is not the answer" \
+  "given go|h/old.md" "$(sa sesstext order order) $(sa sesstext order said)|$(sa sesstext handoff path)"
+# the homes of a session's facts answer as the whole fold on every plan this suite built
+SESS_N=0; for p in "$D"/plans/epic-x/*.plan.md; do for q in order handoff sessions; do SESS_N=$((SESS_N + 1))
+  [ "$(TZ=America/Los_Angeles bash -c '. "$1/lib/reader.sh"; reader_session "$2" "$3"' _ "${READER%/*}" "$p" "$q")" = "$(TZ=America/Los_Angeles bash "$READER" "$p" "$q")" ] || SESS_BAD="${SESS_BAD:-} ${p##*/}:$q"
+done; done
+expect_eq "the session homes answer as the whole fold, every plan, each of the three, on over sixty asks" "yes|" "$([ "$SESS_N" -gt 60 ] && echo yes)|${SESS_BAD:-}"
+
 section "HELD"
 i=0; while IFS= read -r f; do i=$((i + 1)); printf '%b' "## SDLC State\n$f\n" > "$D/plans/epic-x/held$i.plan.md"; done <<'EOF'
 current: 4\napproved-by: u 2026-01-01T00:00Z "ok"\n- Step 4: x

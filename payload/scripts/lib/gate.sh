@@ -1120,35 +1120,44 @@ gate_budget() {  # <kind> <key> -> rc 0 admitted; rc 75 refused, the budget's li
 
 # ── THE ORDER: THE USER'S WORDS STOP EVERY SUITE ─────────────────────────────────────────────
 #
-# An order is what the user said, recorded by the poker's `order` verb as one line, and ended by
-# `order lift` with another:
+# An order is what the user said, recorded by the poker's `order` verb as one event, and ended by
+# `order lift` with another: an order event (act=given or lifted, said=<words>) appended to the bound
+# run's log, which the reader answers with the order a version-14 plan's `order:` lines still give.
+# With no run bound it is one line of record/orders.log under the docs root:
 #
 #   order: given <ISO-UTC> "<words>"
 #   order: lifted <ISO-UTC> "<words>"
 #
-# under the bound plan's `## SDLC State`, or, with no run bound, in record/orders.log under the docs
-# root. The newest line decides: a `given` line is an open order. tests/run.sh asks gate_order before
-# it starts anything and, while an order is open, refuses with the user's words. Who runs it does not
-# matter: the plan read is the asking session's bound run, else the project's one open run, so a shell
-# with no session key is refused by the same order; the log is read when no plan holds an open one.
+# The newest fact decides: a given order is an open order. tests/run.sh asks gate_order before it starts
+# anything and, while an order is open, refuses with the user's words. Who runs it does not matter: the
+# run read is the asking session's bound run, else the project's one open run, so a shell with no session
+# key is refused by the same order; the log is read when no run holds an open one.
 #
-# gate_order_of <file> [plan] -> the open order's `given <ISO-UTC> "<words>"`, rc 0; rc 1 when none.
-#   With `plan`, only the lines under `## SDLC State` count, outside code fences.
+# gate_order_of <orders.log> -> the open order's `given <ISO-UTC> "<words>"`, rc 0; rc 1 when none.
+# gate_order_plan <plan> -> the run's open order in the same shape, asked of the reader; rc 1 when none
+#   stands or the reader cannot answer.
 # gate_order [<root>] -> the open order, as gate_order_of prints it, rc 0; rc 1 when none. The root
 #   defaults to the project the working directory belongs to (lib/root.sh `project_root`, so a linked
 #   tree reads its main checkout's run).
 gate_order_of() {
   [ -f "${1:-}" ] && [ -r "$1" ] || return 1
-  awk -v plan="${2:-}" '
-    plan != "" && /^[[:space:]]*```/ { fence = !fence; next }
-    plan != "" && fence { next }
-    plan != "" && /^##[[:space:]]/ { s = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-    plan != "" && !s { next }
+  awk '
     /^order:[ \t]+(given|lifted)[ \t]/ { last = $0 }
     END {
       if (last !~ /^order:[ \t]+given[ \t]/) exit 1
       sub(/^order:[ \t]+/, "", last); print last
     }' "$1" 2>/dev/null
+}
+gate_order_plan() {
+  [ -f "${1:-}" ] || return 1
+  if ! declare -F reader_session >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    [ -r "$_GATE_LIB_DIR/reader.sh" ] && . "$_GATE_LIB_DIR/reader.sh" >/dev/null 2>&1
+    declare -F reader_session >/dev/null 2>&1 || return 1
+  fi
+  reader_session "$1" order 2>/dev/null | awk '
+    { k = substr($0, 1, index($0, "=") - 1); v[k] = substr($0, index($0, "=") + 1) }
+    END { if (v["order"] != "given") exit 1; printf "given %s \"%s\"\n", v["at"], v["said"] }'
 }
 
 _gate_order_libs() {  # -> 0 once project_root, session_run and docs_root are loaded
@@ -1174,7 +1183,7 @@ gate_order() {
     'bound-open '*) plan="${run#bound-open }" ;;
     'fallback '*) plan="${run#fallback }" ;;
   esac
-  [ -z "$plan" ] || ! gate_order_of "$plan" plan || return 0
+  [ -z "$plan" ] || ! gate_order_plan "$plan" || return 0
   gate_order_of "$(docs_root "$root")/record/orders.log"
 }
 
