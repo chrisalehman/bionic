@@ -10,10 +10,10 @@
 #                 launch's `dispatch` has one writer, the launch recorder's, and a row's `born` one, the units
 #                 library's; each is paired with a planted second, the born one in the shape of a split; so is
 #                 a planted second appender of a waiver, a finding or a proof beside the one writer of each.
-#   §NAMES        the verbs the dispatch, born and tree events and the landing's event retired, and the five that
-#                 wrote a matrix cell, are named nowhere in hooks/ or payload/scripts/ but the walls' single-line list of
-#                 verbs; nor, anywhere, those that wrote a step's line, its fields, the regression's setting, its runs'
-#                 count, a row's confirmation and the cap, beside the step's and the approval's one writer in §WRITERS.
+#   §NAMES        the verbs the dispatch, born and tree events and the landing's event retired, the five that wrote
+#                 a matrix cell and the commands with no job are named nowhere in hooks/ or payload/scripts/; nor those
+#                 that wrote a step's line, its fields, the regression's setting, its runs' count, a row's
+#                 confirmation and the cap, beside the step's and the approval's one writer in §WRITERS.
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted, one site for each name the
 #                 check counts; the dispatch wall lists none, and no fact the dispatch library says is in its file.
 #   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
@@ -114,11 +114,11 @@ expect_eq "hand: one writer, the line library's, beside the matrix setters" "pay
     | /usr/bin/grep -v ' poker_verb_matrix_' | sort -u)"
 
 section "NAMES"
-names() { /usr/bin/grep -rnE 'launch-sync|ledger-add|ledger-set|task-set|task-split|tasks-prose|row-landed|row_landed|session-poker\.sh"? deliver|`deliver`|deliver <(row|id)>|^ *deliver\)' "$1/hooks" "$1/payload/scripts" | grep -v '/payload/scripts/lib/walls\.sh:'; }
+names() { /usr/bin/grep -rnE 'launch-sync|ledger-add|ledger-set|task-set|task-split|tasks-prose|row-landed|row_landed|session-poker\.sh"? deliver|`deliver`|deliver <(row|id)>|^ *deliver\)' "$1/hooks" "$1/payload/scripts"; }
 printf '%s\n' '# launch-sync' '# tasks-prose' '# row-landed' '# session-poker.sh deliver T1' > "$L/planted-name.sh"
 expect_contains "the extractor reads a planted name" "planted-name.sh" "$(names "$S")"
 expect_eq "the retired verbs are named nowhere else" "" "$(names "$S" | grep -v planted-name.sh)"
-cells() { /usr/bin/grep -rnE 'matrix-(set|retier|render)|waive-row|poker_verb_discharge|discharge\)|(session-poker\.sh|plan_verb_open|plan_verb_swap|pv_next) discharge' "$1/hooks" "$1/payload/scripts" | grep -vF 'amend|extend|task-add|' \
+cells() { /usr/bin/grep -rnE 'matrix-(set|retier|render)|waive-row|poker_verb_discharge|discharge\)|(session-poker\.sh|plan_verb_open|plan_verb_swap|pv_next) discharge' "$1/hooks" "$1/payload/scripts" \
   | grep -v -e '/payload/scripts/lib/translate\.sh:' -e 'w == "'; }   # an older run's hand acts are read by their names
 printf '%s\n' '# matrix-retier' '# session-poker.sh discharge AC-1' > "$L/planted-cell.sh"
 expect_eq "the extractor reads both planted names of the verbs that wrote a matrix cell" "2" "$(cells "$S" | grep -c planted-cell.sh)"
@@ -128,7 +128,7 @@ expect_eq "the five verbs that wrote a matrix cell are named nowhere else" "" "$
 GONE_V='anchors|patrol|wait|cover|epic-row|continuation-fill|interval-default|window|fill-report|disposition'
 gone() {
   { /usr/bin/grep -rnE "(session-poker\.sh|\\\$\{?[A-Za-z_]*(poker|POKER)[A-Za-z_]*\}?)[\"']? ($GONE_V)([^a-z_-]|\$)|poker_verb_(${GONE_V//-/_})([^a-z_]|\$)" "$1/hooks" "$1/payload/scripts"
-    /usr/bin/grep -rnE --include='*poker*.sh' "^ *([a-z-]+\|)*($GONE_V)(\|[a-z-]+)*\)" "$1/hooks" "$1/payload/scripts"; } | grep -v '/payload/scripts/lib/walls\.sh:'
+    /usr/bin/grep -rnE --include='*poker*.sh' "^ *([a-z-]+\|)*($GONE_V)(\|[a-z-]+)*\)" "$1/hooks" "$1/payload/scripts"; }
 }
 printf '%s\n' '# bash "$POKER" wait r1' '  poker_verb_patrol() {' > "$L/planted-gone.sh"
 printf '%s\n' '  tick|anchors)' > "$L/planted-poker-arm.sh"
