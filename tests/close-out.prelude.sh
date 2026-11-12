@@ -271,9 +271,48 @@ mk_fixture() {
     git checkout -q main
     git merge -q --no-ff -m "merge wave" wave/01-fixture >/dev/null 2>&1
   )
+  [ "${CO_PLAN_AT:-14}" != 15 ] || co_page15 "$p"
   plant_facts "$p"
   printf '%s\n' "$p"
 }
+
+# CO_PLAN_AT=15, set by a suite before it sources this file, asks every builder here for the run a version-15 plan
+# holds; unasked, each writes the page at 14 it always wrote. co_page15 <project> makes the page a builder wrote the
+# version-15 one: both branches in its header; no state, matrix or handoff section; each Tasks row in its nine authored
+# cells; each criterion a row of `## Eval design`. The run's log beside it holds what those parts said, each in the
+# shape its writer appends: a step per step to the plan's current one, the plan's approval, each row's dispatch, tree
+# and landing, each discharged criterion's proof. A handoff written into the page is no fact the reader answers, so
+# none is written. The instants are fixed and one apart; the reader folds the log in the order its lines stand.
+co_page15() {
+  local plan="$1/$PLAN_REL" log="$1/$LOG_REL"
+  mkdir -p "${log%/*}" || return 1
+  awk -v lf="$log" '
+    function ev(s) { printf "run/v1|ev=%s|at=2026-10-04T00:%02d:00Z\n", s, ++t > lf }
+    function cells(l, c,   n, i) { n = split(l, c, "|"); for (i = 2; i < n; i++) gsub(/^[ \t]+|[ \t]+$/, "", c[i]); return n }
+    FNR == 1 { pass++; sec = "" }
+    /^## / { sec = substr($0, 4) }
+    pass == 1 && sec == "SDLC State" { if ($0 ~ /^(integration|working)-branch: /) hk = hk $0 "\n"; if ($1 == "current:") cur = $2
+      if ($1 == "approved-by:") { by = $2; said = $0; sub(/^[^"]*"/, "", said); sub(/"$/, "", said) } }
+    pass == 1 && sec == "Verification Matrix" { if (/^\| AC-/) { cells($0, c); ac[++na] = c[2]; tr[c[2]] = c[3]; st[c[2]] = c[4]; au[c[2]] = c[6] }
+      else if (/^[A-Z]+-[0-9.]+:$/) b = substr($0, 1, length($0) - 1); else if (b != "" && match($0, /^  [a-z-]+: /)) k[b, $1] = substr($0, RLENGTH + 1) }
+    pass == 1 { next }
+    FNR == 1 { for (i = 1; i <= cur; i++) ev("step|n=" i); if (by != "") ev("approval|key=step3|by=" by "|said=" said) }
+    FNR == 1 || hd { if ($0 == "---" && hd) printf "%s", hk; hd = ($0 != "---" || FNR == 1); sub(/^canonical_sdlc_version: 14$/, "canonical_sdlc_version: 15"); print; next }
+    /^## / && sec == "Verification Matrix" { print "## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|"
+      for (i = 1; i <= na; i++) { a = ac[i]; e = k[a, "tier-run:"]; printf "| — | fixture | %s | %s | %s | %s |\n", a, tr[a], (e == "" ? "—" : "`" e "`"), k[a, "fails-when:"]
+        if (st[a] == "discharged") ev("proof|ac=" a "|evidence=" k[a, "evidence:"] "|auditor=" au[a]) }
+      print ""; next }
+    sec == "SDLC State" || sec == "Verification Matrix" || sec == "Handoff" { next }
+    sec == "Tasks" && /^\|/ { n = cells($0, c); if (!nh) { for (i = 2; i < n; i++) col[c[i]] = i; nh = 1; print "| id | step | kind | task | deps | size | serves | Files | artifact |"; next }
+      if (c[2] ~ /^-+$/) { print "|---|---|---|---|---|---|---|---|---|"; next }
+      printf "| %s | %s | %s | %s | %s | %s | %s | %s | — |\n", c[col["id"]], c[col["step"]], c[col["kind"]], c[col["task"]], c[col["deps"]], c[col["size"]], c[col["serves"]], c[col["Files"]]
+      w = ("worktree" in col) ? c[col["worktree"]] : "—"; s = c[col["status"]]; if (s != "pending") ev("dispatch|row=" c[col["id"]] "|name=" c[col["agent"]])
+      if (w != "—" && w != "") ev("tree|row=" c[col["id"]] "|path=" w); if (s == "landed") ev("published|row=" c[col["id"]]); next }
+    { print }' "$plan" "$plan" > "$plan.15" && mv "$plan.15" "$plan"
+}
+
+# co_at15 <project> -> 0 when the project's plan is a version-15 page, which the readers below answer from its run's log
+co_at15() { /usr/bin/grep -qx 'canonical_sdlc_version: 15' "$1/$PLAN_REL"; }
 
 # plant_facts <project> -> what the run owes, held at the working branch's head, as a run that
 # reached Step 7 has it (wave-27 T14; D3): the working branch checked out in a linked worktree
@@ -303,8 +342,9 @@ base-sha: $(fixture_git "$p" rev-list --max-parents=0 "$wb" | head -1)/" "$plan"
             review) l="$(proof_line review "$3" 2026-10-04T12:00:00Z "record/wave-01-fixture/$q-$scope.md" "$q" w-read pass "$scope")" ;;
             *) continue ;;
           esac
-          proof_add_line "$2" "$l" > "$2.pf" && mv "$2.pf" "$2"
-        done' _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h"
+          if [ "$4" = 15 ]; then f="${l#proved: }"; LOG_AT=2026-10-04T12:00:00Z proof_event "$2" ${f/ at=2026-10-04T12:00:00Z/}
+          else proof_add_line "$2" "$l" > "$2.pf" && mv "$2.pf" "$2"; fi
+        done' _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h" "$(co_at15 "$p" && echo 15)"
 }
 
 # add_unreached_branch <project> -> plants `wt/01-y` carrying one commit the working branch
@@ -403,6 +443,7 @@ PLAN_CENSUS
     git add -A >/dev/null 2>&1
     git commit -q -m "seed" >/dev/null 2>&1
   )
+  [ "${CO_PLAN_AT:-14}" != 15 ] || co_page15 "$p"
   printf '%s\n' "$p"
 }
 
@@ -491,6 +532,7 @@ PLAN_CENSUS
     git add -A >/dev/null 2>&1
     git commit -q -m "seed" >/dev/null 2>&1
   )
+  [ "${CO_PLAN_AT:-14}" != 15 ] || co_page15 "$p"
   printf '%s\n' "$p"
 }
 
@@ -513,11 +555,12 @@ co_step_answer() {
     reader_facts() { printf "%s\n" "$f"; }; reader_q_step -' _ "$REPO_ROOT/payload/scripts" "$1/$LOG_REL" "$2" 2>/dev/null
 }
 
-# advance_to <project> <N> -> the fixture plan's `current:` line planted at N, as an older plan's text holds its step;
-# the `current` verb appends a step event and writes no plan, and §E2E is the row that drives the whole verb.
+# advance_to <project> <N> -> the run stood at step N: at 15 one step event appended to its log, as the `current` verb
+# appends it; at 14 the plan's `current:` line planted at N, as an older plan's text holds its step. §E2E drives the verb.
 advance_to() {
   local plan="$1/$PLAN_REL"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "advance_to: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
+  if co_at15 "$1"; then printf 'run/v1|ev=step|n=%s|at=%s\n' "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$1/$LOG_REL"; return; fi
   awk -v n="$2" '!d && /^current:/ { print "current: " n; d = 1; next } { print }' "$plan" > "$plan.adv" && mv "$plan.adv" "$plan"
 }
 
@@ -654,7 +697,7 @@ presence_state() {
   printf 'br=%s tmp=%s cont=%s cur8=%s epicrow=%s' \
     "$(branch_exists "$1" "wt/01-x")" "$(tmp_entries "$1")" \
     "$([ -f "$1/$CONT_REL" ] && echo yes || echo no)" \
-    "$(grep -qE '^current: 8$' "$1/$PLAN_REL" && echo yes || echo no)" \
+    "$(if co_at15 "$1"; then co_step_answer "$1" | grep -qx 'n=8'; else grep -qE '^current: 8$' "$1/$PLAN_REL"; fi && echo yes || echo no)" \
     "$(grep -c '^| 01 ' "$1/$EPIC_REL")"
 }
 
@@ -712,10 +755,16 @@ set_plan_keys() {
 
 CARRY_REC="record/wave-01-fixture/rev.md"
 
-# carry_plant <project> <line>... -> each line inside the plan's ## SDLC State, after approved-by:
+# carry_plant <project> <line>... -> each line inside the plan's ## SDLC State, after approved-by:; at 15 each `deferred:`
+# line its run's deferral event, as the translation of the line writes it: a `stated=` holding a `|` cannot be a field,
+# and a `check:` line is a retired verb's, so neither is written
 carry_plant() {
   local proj="$1" plan="$1/$PLAN_REL" l; shift
   case "$proj" in "$SANDBOX"/*) : ;; *) echo "carry_plant: refusing outside the sandbox: '$proj'" >&2; return 1 ;; esac
+  if co_at15 "$proj"; then printf '%s\n' "$@" | awk '/^deferred: / { s = substr($0, 11); split(s, w, " "); t = substr(s, index(s, "\"") + 1)
+      r = substr(t, index(t, "\"") + 1); t = substr(t, 1, index(t, "\"") - 1); o = "|ref=" w[1] "|severity=" w[2] "|reach=" w[3] "|to=deferred|title=" t
+      if (match(r, /stated="[^"]*"/) && !index(r, "|")) o = o "|stated=" substr(r, RSTART + 8, RLENGTH - 9)
+      print "run/v1|ev=finding" o "|at=2026-10-04T12:00:00Z" }' >> "$proj/$LOG_REL"; return; fi
   local lines=""
   for l in "$@"; do lines="${lines}${l}
 "; done
