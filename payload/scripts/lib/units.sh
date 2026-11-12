@@ -1579,7 +1579,7 @@ _units_sched_awk() {
     # THE WAITS (lib/plan-read.sh plan_read_waits): `<id> kind <kind> <waits>`, every wait a row has as it is spelled,
     # and `<id> row <row> <reads>`, the rows each read names. The fill reads no cell of a row for what it waits on.
     part == 3 {
-      if ($2 == "kind") wl[$1] = $4
+      if ($2 == "kind") { wl[$1] = $4; wim[$1] = "," $5 "," }
       if ($2 == "row") { m = split($4, a, ","); for (k = 1; k <= m; k++) wr[$1, a[k]] = wr[$1, a[k]] " " $3 }
       next
     }
@@ -1867,7 +1867,7 @@ _units_sched_awk() {
     function judge(i, t,   c, j, a) {
       nw = 0; lwhy = ""
       if (t ~ extre) return 0
-      if (t == "approval:release" && knd[i] == "integrate" && !hasrel) return 1
+      if (t == "approval:release" && knd[i] == "integrate" && !hasrel && index(wim[id[i]], ",approval:release,")) return 1
       if (substr(t, 1, 9) == "approval:") return apprmet(substr(t, 10))
       if (substr(t, 1, 5) == "live:") return live_sat(i, substr(t, 6), t)
       cand(i, t)
@@ -2008,7 +2008,8 @@ _units_sched_awk() {
         # person approves the release and the merge once, after review. A plan with no release has
         # none to approve, and its integrate row reads what it read before (A-T5-1).
         # Its waits are named by the one reader of a plan (lib/plan-read.sh plan_read_waits), on the older shape its deps
-        # alone (oldshape, set in _units_sched); a release row dropped is owed no more, so its approval is met (judge).
+        # alone (oldshape, set in _units_sched). The release approval an integrate row is given by the reader, not written
+        # in a cell, is met while no release row stands, a dropped one owed no more (judge); one a person wrote is asked.
         m = split(oldshape ? dep[i] : wl[id[i]], a, ",")
         for (k = 1; k <= m; k++) addtok(i, a[k])
       }

@@ -1402,6 +1402,9 @@ printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=2' 1Z 'approval|key=step
 expect_eq "NAMED-4 every task waits on the plan's approval by its kind: with the run at step 2, the fill offers none at step 4, as the reader offers none" "|ready=" "$(call units_ready "$DP" 4)|$(dq stop | grep '^ready=')"
 OP="$SANDBOX/docs/plans/e/o.plan.md"; printf -- '---\ncurrent: 2\n---\n## Tasks\n| id | step | kind | task | agent | deps | size | serves | Files | status |\n|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | one | — | — | 30m | R | a.sh | pending |\n' > "$OP"
 expect_eq "NAMED-5 the one place the two part: on the shape before the reads column the reader names a wait on the plan's approval and holds T1, the fill offers it" "T1	wait	approval:plan|ready=|T1" "$(bash -c '. "$1/plan-read.sh" && plan_read_waits "$2"' _ "${LIB%/*}" "$OP" | grep '	wait	')|$(bash -c '. "$1/reader.sh" && reader_main "$2" stop' _ "${LIB%/*}" "$OP" | grep '^ready=')|$(call units_ready "$OP" 4)"
+RP="$SANDBOX/docs/plans/e/r.plan.md"; LV_LOG="$SANDBOX/docs/record/r/run.log"; mkdir -p "${LV_LOG%/*}"; rw() { call units_waiting "$RP" 8 | awk -F'\t' '$2 ~ /^approval:/ { print $1 " " $2 }'; }
+sed 's/| T2 | 4 | build | two | T1, approval:D7 |/| T2 | 8 | integrate | two | approval:release |/' "$DP" > "$RP"; printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=8' 1Z 'approval|key=step3|by=me' 2Z 'published|row=T1|commit=c1|by=w' 3Z > "$LV_LOG"; RW_A="$(rw)"; sed -i.bak 's/| approval:release |/| — |/' "$RP"
+expect_eq "NAMED-6 with no release row an integrate task waits on the release approval it names, never on the one its kind implies" "T2 approval:release|" "$RW_A|$(rw)"
 expect_eq "NAMED-3 the stop wall's edit that makes a row wait names the deps cell and a row's id at 15, the reads cell and its record at 14" "deps RID|reads RECORD" "$(bash -c '. "$1/stop.sh" && stop_wait_cell "$2" && stop_wait_cell "$3"' _ "${LIB%/*}" "$DP" "$LV_P" | paste -sd'|' -)"
 
 finish

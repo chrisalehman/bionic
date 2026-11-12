@@ -162,9 +162,10 @@ plan_read_dropped() {  # <plan> -> one id per line, in table order; 1 none, 2 no
     if (c["status"] == "dropped") { print c["id"]; n++ } } END { exit !n }'
 }
 
-# plan_read_waits <plan> [id] -> per row, in table order: `<id><TAB>kind<TAB><kind><TAB><waits>` first, <waits> every
-# wait the row has as it is spelled (its reads or its kind's default, the release, its deps), comma-joined, so the
-# scheduler judges these and reads no cell; then one line per
+# plan_read_waits <plan> [id] -> per row, in table order: `<id><TAB>kind<TAB><kind><TAB><waits><TAB><implied>` first,
+# <waits> every wait the row has as it is spelled (its reads or its kind's default, the release, its deps), comma-joined,
+# so the scheduler judges these and reads no cell, and <implied> those of them no cell wrote (its kind's default, the
+# release an integrate row is given), so a rule that holds for an implied wait alone is applied by its asker; then one line per
 # wait, `<id><TAB>wait<TAB><token>` for one that names no row (an approval, a proof, a step, an external
 # token), whose standing is the log's, and `<id><TAB>row<TAB><row id><TAB><reads>` for each row it waits on,
 # <reads> the reads that name that row, comma-joined, as the row wrote them. Of <id> alone when given: 1
@@ -225,9 +226,9 @@ plan_read_waits() {
           if (e == "" || e !~ /[\/.*?]/ || e ~ /[ \t]/) continue
           sub(/!$/, "", e); nfe[i]++; fe[i, nfe[i]] = e; if (in_docs(e)) docs[i] = 1
         }
-        r = rd[i]; if (r !~ /[A-Za-z0-9]/) r = kdef(knd[i], stp[i])
-        if (hasrel && knd[i] == "integrate" && (" " r ",") !~ /[ \t,]approval:release[ \t]*,/) r = r ", approval:release"
-        m = split(r "," dep[i], a, ",")
+        r = rd[i]; kd = (r !~ /[A-Za-z0-9]/); rel = 0; if (kd) r = kdef(knd[i], stp[i])
+        if (hasrel && knd[i] == "integrate" && (" " r ",") !~ /[ \t,]approval:release[ \t]*,/) { r = r ", approval:release"; rel = 1 }
+        mr = split(r, a, ","); m = split(r "," dep[i], a, ","); split("", wr1); split("", im1)
         for (k = 1; k <= m; k++) {
           t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t)
           '"$_UNITS_READS_NORM"'
@@ -235,11 +236,13 @@ plan_read_waits() {
           if (t !~ /[A-Za-z0-9]/) continue
           nt[i]++; tk[i, nt[i]] = t; rk[i, nt[i]] = o; if (o == "head") rhead[i] = 1; if (o == "record") rrec[i] = 1
           sp[i] = sp[i] (sp[i] == "" ? "" : ",") o
+          if (k <= mr && (kd || (rel && k == mr))) im1[o] = 1; else wr1[o] = 1
         }
+        for (o in im1) if (!(o in wr1)) ip[i] = ip[i] (ip[i] == "" ? "" : ",") o
       }
       for (i = 1; i <= n; i++) {
         if (want != "" && id[i] != want) continue
-        printf "%s\tkind\t%s\t%s\n", id[i], knd[i], sp[i]
+        printf "%s\tkind\t%s\t%s\t%s\n", id[i], knd[i], sp[i], ip[i]
         if ((knd[i] == "integrate" || knd[i] == "close" || (!hasreads && knd[i] == "doc" && stp[i] + 0 >= 7)) && stp[i] ~ /^[0-9]+$/) put(i, "wait\tstep:" stp[i])
         nr = 0; split("", rs)
         for (k = 1; k <= nt[i]; k++) {
