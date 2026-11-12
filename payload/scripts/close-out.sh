@@ -555,13 +555,11 @@ act_merge() {
 # engaged marker for every verb a refusal later in the tail leaves to the person; the marker goes last.
 LANDS_LINE=""
 co_lands_rows() {  # -> the open integrate and close rows' ids, space-joined, in table order; nothing when none
-  # A row is open while the reader holds no landing of it and the plan has not dropped it; the kind is the row's own cell.
-  units_rows "$PLAN" 2>/dev/null | CO_SHUT=" $(co_facts published row | tr '\n' ' ') $(co_dropped) " awk -F'\t' '
-    ($3 == "integrate" || $3 == "close") && !index(ENVIRON["CO_SHUT"], " " $1 " ") { printf "%s%s", (n++ ? " " : ""), $1 }
+  # A row is open while the reader holds no landing of it and the rows' one answer (units_rows, the run's log over the
+  # cells) does not read it dropped; the kind is the row's own cell.
+  units_rows "$PLAN" 2>/dev/null | CO_SHUT=" $(co_facts published row | tr '\n' ' ') " awk -F'\t' '
+    ($3 == "integrate" || $3 == "close") && $10 != "dropped" && !index(ENVIRON["CO_SHUT"], " " $1 " ") { printf "%s%s", (n++ ? " " : ""), $1 }
     END { if (n) print "" }'
-}
-co_dropped() {  # -> the rows the plan drops, space-joined: the reader's dropped rows (lib/plan-read.sh), owed no more
-  plan_read_dropped "$PLAN" 2>/dev/null | tr '\n' ' '
 }
 co_lands_refusal() {  # <rows> -> why this session cannot land them, or nothing
   local rows="$1" run bound
@@ -1458,11 +1456,10 @@ co_inherited_section() {
   printf '## Inherited debt\n\n```\n%s\n```\n' "$lines"
 }
 
-# co_task_count -> the build rows of the plan's ## Tasks table that were not dropped: the tasks the
-# template says went RED then GREEN. Zero when the plan carries no table.
+# co_task_count -> the build rows of the plan's ## Tasks table that the rows' one answer does not read dropped: the
+# tasks the template says went RED then GREEN. Zero when the plan carries no table.
 co_task_count() {
-  units_rows "$PLAN" 2>/dev/null | CO_DROP=" $(co_dropped) " awk -F'\t' '$3 == "build" && !index(ENVIRON["CO_DROP"], " " $1 " ") { n++ }
-    END { print n + 0 }'
+  units_rows "$PLAN" 2>/dev/null | awk -F'\t' '$3 == "build" && $10 != "dropped" { n++ } END { print n + 0 }'
 }
 
 # co_reviews_text -> `Reviews: <question> <scope> <result> (<reader>); …. ADRs: <cell>.`, one entry per

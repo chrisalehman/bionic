@@ -51,6 +51,8 @@
 #                              reads column, with the deps it owes; `task-add` is its caller.
 #   units_born_event <plan> <row> [<reason>] [<finding>] [promoted]
 #                              the row's one born event in the run's log; `task-add` is its caller.
+#   units_drop_event <plan> <row> <words>
+#                              the row's one drop event in the run's log; `task-add --drop` is its caller.
 #   units_born <plan>          `<id>\t<S<n> <reach>>\t<Files>` per review-born row, read off its
 #                              `- <id>:` line's ` born: review` marker or its born event.
 #   units_born_counted <plan>  `<id>\t<S<n> <reach>>\t<exempt|counted>` per review-born row: the
@@ -213,7 +215,8 @@ _units_table() {
 # writes no cell; a launch taken back is a `cancel` of it. So `units_rows` and every scheduling answer read the
 # `status` and `agent` slots through the reader's standing facts: a row the log holds launched (its latest standing
 # dispatch with an instant, never the plan cell's own translation, which has none) reads `active` under that name, and
-# one the log holds landed reads `landed`; a `landed` or `dropped` cell is never moved back. Everything else is the
+# one the log holds landed reads `landed`, and one it holds dropped reads `dropped` by the reader's one rule (lib/reader.sh
+# `_READER_DROP_AWK`), whatever launch stands; a `landed` or `dropped` cell is never moved back. Everything else is the
 # cell, which is the old home the translation reads, so a run whose log holds none of these reads as its cells say.
 # The text itself is judged as written (`units_validate` reads `_units_table`), so a write is never refused for a
 # state the plan does not carry. A plan writer's dry copy and close-out's preflight copy are read with their plan's run.
@@ -233,14 +236,14 @@ _units_live() {
   log="$(reader_log "$plan" 2>/dev/null)" || return 0
   [ -s "$log" ] && [ ! -L "$log" ] || return 0
   facts="$(_units_facts_of "$plan")" || return 2
-  printf '%s\n' "$facts" | awk -F'|' '
+  printf '%s\n' "$facts" | awk -F'|' "$_READER_AWK$_READER_DROP_AWK"'
     { split("", f); for (i = 2; i <= NF; i++) { e = index($i, "="); if (e > 1 && !(substr($i, 1, e - 1) in f)) f[substr($i, 1, e - 1)] = substr($i, e + 1) }
       r = f["row"]; if (r == "") next }
     !(r in seen) { seen[r] = 1; ord[++n] = r }
     f["ev"] == "dispatch" && f["at"] != "" { st[r] = "active"; nm[r] = f["name"] }
     f["ev"] == "published" { st[r] = "landed" }
     f["ev"] == "tree" && f["at"] != "" { tr[r] = f["path"]; bs[r] = substr(f["base"], 1, 8) }
-    END { for (i = 1; i <= n; i++) { r = ord[i]; if ((r in st) || (r in tr))
+    END { for (i = 1; i <= n; i++) { r = ord[i]; if (dropped(r)) st[r] = "dropped"; if ((r in st) || (r in tr))
       printf "%s\t%s\t%s\t%s\t%s\n", r, st[r], nm[r], tr[r], bs[r] } }'
 }
 
@@ -346,6 +349,16 @@ units_born_event() {
   local log
   _units_lib reader.sh reader_log && log="$(reader_log "${1:-}" 2>/dev/null)" && _units_lib log.sh log_append || return 2
   RUN_LOG="$log" log_append born "row=${2:-}" ${3:+"reason=$3"} ${4:+"finding=$4"} ${5:+promoted=yes}
+}
+
+# units_drop_event <plan> <row> <the person's words> -> the row's work no longer owed: one `drop` event in its run's log,
+# the person's words its `why=`. THE ONE WRITER OF A DROP: the plan keeps the row as it was written. 2 no log to write, no
+# row or no words named, or words the appender refuses (a bar or a line break).
+units_drop_event() {
+  local log
+  [ -n "${2:-}" ] && [ -n "${3:-}" ] || return 2
+  _units_lib reader.sh reader_log && log="$(reader_log "${1:-}" 2>/dev/null)" && _units_lib log.sh log_append || return 2
+  RUN_LOG="$log" log_append drop "row=$2" "why=$3"
 }
 
 # _units_born_logged <plan> -> each born event of the run's log that carries a reason, as the `- <row>: born: <reason>

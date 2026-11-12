@@ -17,7 +17,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh interval   the configured Patrol interval, seconds
 #     bash <plugin-root>/hooks/session-poker.sh adopt      what OTHER sessions launched here (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh sweep      delete what DEAD sessions left here (writes, deletes)
-#     bash <plugin-root>/hooks/session-poker.sh task-add <id> … record the birth of a row an edit added to the bound plan (writes no plan)
+#     bash <plugin-root>/hooks/session-poker.sh task-add <id> … record the birth of a row an edit added to the bound plan, or with --drop '<words>' that its work is no longer owed (writes no plan)
 #     bash <plugin-root>/hooks/session-poker.sh amend …    widen a live row's Files/Suites/Re-executes (writes the roster)
 #     bash <plugin-root>/hooks/session-poker.sh rule <writer> '<text>' [--words '<the user's words>'] | ruling-ack <id> | rulings <writer>
 #                                                      a binding ruling for a live writer, its acknowledgement, its state (writes the roster)
@@ -393,7 +393,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh rule <writer> '<text>' [--words '<the user's words>']   record a binding ruling for a live writer: pushed with its next tool result, and its commit and ready refused until it is shown; --words quotes what the user typed, in any session the run recorded, with that session"
   die "  bash ${HOOK_DIR}/session-poker.sh ruling-ack <id>   the writer's acknowledgement of a ruling it was shown (marks it shown)"
   die "  bash ${HOOK_DIR}/session-poker.sh rulings <writer>   each ruling of that writer: recorded, pushed=, and unread or shown= (read-only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> [--born …]   record the birth of row <id>, which an edit of the bound plan wrote first: the row is read back and judged as a row born mid-run, one born event is appended, and the plan is not written; a short row is refused with the lines it would accept; --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite"
+  die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> [--born …]   record the birth of row <id>, which an edit of the bound plan wrote first: the row is read back and judged as a row born mid-run, one born event is appended, and the plan is not written; a short row is refused with the lines it would accept; --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite; task-add <id> --drop '<the person's words>' says a pending row's work is no longer owed: one drop event, the plan not written"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--suites=<a,b>] [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract (--suites= narrows its suites, and lands_on= with them): a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   advance the run's step: judged as a commit at <N> would be, then one step event in the run's log, the plan unwritten (9 is close-out's); --check (5-8) runs the judgment, appends nothing, and exits as the advance would"
   die "  bash ${HOOK_DIR}/session-poker.sh order '<the user's words>'   record the user's order: an order event with the words in the bound run's log, else a line in record/orders.log; while it stands tests/run.sh starts no suite"
@@ -566,7 +566,15 @@ case "$VERB" in
   # value is the usage error; whether the birth is admitted (fix-policy:, fix-cap:, the fourth fix on a component, a
   # red the machine recorded behind a regression) is the verb's refusal (1).
   task-add)
-    TA_BORN=""; TA_BORN_IDS=""; TA_BORN_SUITE=""
+    TA_BORN=""; TA_BORN_IDS=""; TA_BORN_SUITE=""; TA_DROP=""
+    # `--drop` comes last too, with the person's words: why the row's work is no longer owed. The words are the fact, so
+    # none, or words a log line cannot hold (a bar, a line break), are the usage error.
+    case "${*: -1}" in --drop) usage "task-add: --drop takes the person's words: why the row's work is no longer owed." ;; esac
+    if [ $# -ge 2 ] && [ "${*: -2:1}" = "--drop" ]; then
+      TA_DROP="${*: -1}"
+      case "$TA_DROP" in ''|*'|'*|*$'\n'*|*$'\r'*) usage "task-add: --drop takes the person's words, not empty and holding no | or line break." ;; esac
+      set -- "${@:1:$(($# - 2))}"
+    fi
     case "${*: -1}" in --born) usage "task-add: --born takes a value: the findings the row answers, <record>#<n>[,<record>#<n>…], 'review S<n> <on|off>', the reviewer's rating, or regression:<suite>, the suite whose regression red the row fixes." ;; esac
     if [ $# -ge 2 ] && [ "${*: -2:1}" = "--born" ]; then
       TA_BORN="${*: -1}"
