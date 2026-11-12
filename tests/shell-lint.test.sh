@@ -1333,7 +1333,7 @@ section "EXIT — every refusal names its exit, and the ones that do not burn do
 # EXIT_VERBS: confirm-row continuation-fill epic-row fill-report finding-move finding-stated
 #   known-limits-part landing-report launch-sync ledger-add ledger-set matrix-render matrix-retier matrix-set
 #   proof-add regression-run release-approval release-check release-note reviews-part row-landed ruling-ack
-#   step-field step-line stop-run task-add task-set task-split tasks-prose waive-row
+#   stop-run task-add task-set task-split tasks-prose waive-row
 # EXIT_WORDS: adopt amend approve bind deliver discharge extend reply ready resume waive
 # Every other site is UNEXCUSED and counted against its file's ceiling.
 #
@@ -1342,7 +1342,7 @@ section "EXIT — every refusal names its exit, and the ones that do not burn do
 # a hash and a space, or a path named twice is refused by line.
 EXIT_VERBS="confirm-row continuation-fill epic-row fill-report finding-move finding-stated known-limits-part
   landing-report launch-sync ledger-add ledger-set matrix-render matrix-retier matrix-set proof-add regression-run
-  release-approval release-check release-note reviews-part row-landed ruling-ack step-field step-line stop-run
+  release-approval release-check release-note reviews-part row-landed ruling-ack stop-run
   task-add task-set task-split tasks-prose waive-row"
 EXIT_WORDS="adopt amend approve bind deliver discharge extend reply ready resume waive"
 EXIT_AWK="$TMP/exit.awk"
