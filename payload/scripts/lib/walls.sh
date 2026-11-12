@@ -5524,9 +5524,8 @@ return 0
 # 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs
 # `session-poker.sh amend|extend|task-add|hold` or a plan-row verb (`task-set`,
 # `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `row-landed` — wave-28 T6, D7; `proof-add` and
-# `approve` and `waive`, each written on the user's word; `share` — wave-28 T10, D16, in both its forms; `handoff` —
-# wave-30 T15, D11, the plan's ## Handoff; `task-split` — wave-30 T17, D14d-3, a row rewritten as its children;
-# and, wave-33 T15 (D10),
+# `approve` and `waive`, each written on the user's word; `share`, in both its forms; `handoff` —
+# the plan's ## Handoff; `task-split`, a row rewritten as its children; and
 # `deliver` (a record row's own last act: admitted only for the caller's own plan row, by arm A),
 # `rule` (a ruling pushed to a writer), `tasks-prose`, `epic-row` and
 # `continuation-fill` (T7's plan verbs), `disposition` (T13's finding ledger) and `reply` (wave-38 T3, the final card's

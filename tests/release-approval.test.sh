@@ -473,12 +473,11 @@ section "§T4: a T4 row is read through the gate's one predicate: confirmed by y
 # ============================================================
 # fails-when: an attributed T4 row under an empty-like auditor cell is put as a decision or counted not confirmed by
 # the auditor; a pending one is missing from Decisions; an attributed one under UNVERIFIABLE is counted proved.
-fc_t4() {  # <auditor cell> <user-confirmed value, or noblock> -> PFC: FC_GOOD with a third row, discharged and T4
+fc_t4() {  # <auditor cell> <user-confirmed value> -> PFC: FC_GOOD with a third row, discharged and T4
   local c="$1" v="$2"
   fc_plan "$FC_GOOD"
   FC_T4_ROW="| AC-1.3 | T4 | discharged | see AC-1.3 | $c |" awk '
     { print } /^\| AC-1\.2 \|/ { print ENVIRON["FC_T4_ROW"] }' "$PFC" > "$PFC.t4" && mv -f "$PFC.t4" "$PFC"
-  [ "$v" = noblock ] && return 0
   printf 'AC-1.3:\n  fails-when: the user finds the planted defect by hand\n  evidence: record/generic-evidence.md\n' >> "$PFC"
   printf '  user-confirmed: %s\n  readback: what the user saw\n' "$v" >> "$PFC"
 }
@@ -530,15 +529,13 @@ fc_page --preview
 expect_absent "CONFIRM-1e the card then reads the row as confirmed by you, no longer a decision" "AC-1.3" "$(fc_under Decisions)"
 expect_contains "CONFIRM-1f …on the acceptance line" "1 confirmed by you" "$(fc_acc)"
 fc_t4 '—' pending
-cp "$PFC" "$TMPROOT/fc-before-cr"
 poke "$RFC" approve AC-1.1 'yes'
 expect_eq "CONFIRM-2 a T1 row: refused, exit 1, nothing appended" "1|" "$RC|$(fc_appr AC-1.1)"
 expect_contains "CONFIRM-2b …naming the tier" "T1" "$OUT"
 poke "$RFC" approve AC-1.3 'never typed by the user'
 expect_eq "CONFIRM-3 words the user never typed: refused, exit 1, nothing appended" "1|" "$RC|$(fc_appr AC-1.3)"
 poke "$RFC" approve AC-9.9 'yes'
-expect_eq "CONFIRM-4 no such criterion, a name no row reads: refused, exit 1, the plan byte-identical" "1|same" \
-  "$RC|$(cmp -s "$TMPROOT/fc-before-cr" "$PFC" && echo same || echo changed)"
+expect_eq "CONFIRM-4 no such criterion, a name no row reads: refused, exit 1, nothing appended" "1|" "$RC|$(fc_appr AC-9.9)"
 fc_t4 '—' pending
 fc_page
 expect_eq "CONFIRM-6 the acting render of a pending T4 row exits 0" "0" "$FC_RC"

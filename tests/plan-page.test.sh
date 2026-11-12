@@ -186,8 +186,7 @@ expect_contains "at 15 a declared red the log holds, no proof after it, is owed"
 printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=record/floor.log|at=2026-11-01T00:00:06Z\n' "$H" >> "$L2"; gate
 expect_eq "…a regression proof after it in the log clears it: the refusal is the facts the log lacks, and names no proof" "could not be read at 15" \
   "$(printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o 'landed red until\|could not be read at 15\|the proofs that clear' | LC_ALL=C sort -u | paste -sd'|' -)"
-printf 'run/v1|ev=admitted|id=d2|row=T1|suite=b.test.sh|token=approval:ship|at=2026-11-01T00:00:06Z\n' >> "$L2"; gate; AS="$GATE_SAID"
-printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%sZ\n' 'approval|key=ship|by=f' 7 "proof|kind=regression|head=$H|evidence=record/floor-2.log" 8 >> "$L2"; gate
+printf 'run/v1|ev=admitted|id=d2|row=T1|suite=b.test.sh|token=approval:ship|at=2026-11-01T00:00:06Z\n' >> "$L2"; gate; AS="$GATE_SAID"; printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%sZ\n' 'approval|key=ship|by=f' 7 "proof|kind=regression|head=$H|evidence=record/floor-2.log" 8 >> "$L2"; gate
 expect_eq "…one held until an approval is owed while the log holds none, and cleared by the approval and a proof after it" "1|0" "$(grep -c 'b.test.sh: landed red until approval:ship' <<< "$AS")|$(grep -c 'b.test.sh: landed red' <<< "$GATE_SAID")"
 
 # Each fact a step owes at 15 is asked where it is held, owed while it is missing and not once it stands.
@@ -215,11 +214,9 @@ for d in planverb-4242 closeout-preflight-4243; do printf 'plan=%s\n' "$P2" > "$
 gate_as "$SID" 2
 expect_eq "a real session's commit with the same variable set is judged at the step its log holds, nothing held of the pending one" "owed at 15: Step 8's merge|" "$(owed "Step 8's merge")|$(owed "Step 1's approval")"
 # The doctrine grows on the person's approval, asked of the run at 14 and at 15; at 15 the row's read stays unseen beside it.
-mkdir -p "$R/payload/.claude-plugin" "$R/agents"; printf '{"name": "bionic"}\n' > "$R/payload/.claude-plugin/plugin.json"; printf 'a\n' > "$R/agents/a.md"
-git -C "$R" add payload agents; git -C "$R" -c user.name=f -c user.email=f@x.invalid -c core.hooksPath=/dev/null commit -q -m set; printf 'ab\n' > "$R/agents/a.md"; git -C "$R" add agents/a.md
+mkdir -p "$R/payload/.claude-plugin" "$R/agents"; printf '{"name": "bionic"}\n' > "$R/payload/.claude-plugin/plugin.json"; printf 'a\n' > "$R/agents/a.md"; git -C "$R" add payload agents; git -C "$R" -c user.name=f -c user.email=f@x.invalid -c core.hooksPath=/dev/null commit -q -m set; printf 'ab\n' > "$R/agents/a.md"; git -C "$R" add agents/a.md
 nz() { gate; for w in 'no reads cell' 'no approval of doctrine-growth' 'no .## Tasks. row owns'; do printf '%s\n' "$GATE_SAID" | /usr/bin/grep -q "Not admitted: .*$w" && printf 'y' || printf 'n'; done; }
-for c in "$P2|$L2|yyn" "$GP|$GL|nyy"; do IFS='|' read -r p l w <<< "$c"; printf 'plan=%s\n' "$p" > "$R/.bionic/tmp/engaged-$SID.state"; A="$(nz)"
-  printf 'run/v1|ev=approval|key=doctrine-growth|by=f|said=yes|at=2026-11-01T00:00:14Z\n' >> "$l"
+for c in "$P2|$L2|yyn" "$GP|$GL|nyy"; do IFS='|' read -r p l w <<< "$c"; printf 'plan=%s\n' "$p" > "$R/.bionic/tmp/engaged-$SID.state"; A="$(nz)"; printf 'run/v1|ev=approval|key=doctrine-growth|by=f|said=yes|at=2026-11-01T00:00:14Z\n' >> "$l"
   expect_eq "growth of the loaded set at ${p##*/} names the approval while the run holds none, and not once it does" "$w|${w:0:1}n${w:2:1}" "$A|$(nz)"; done
 
 finish

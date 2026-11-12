@@ -36,7 +36,6 @@ refused "a key that sets at" step at=1
 LOG_AT=2026-10-06T11:48:01Z log_append ask key=a:b
 expect_eq "a caller's instant in the log's shape stamps the line" "2026-10-06T11:48:01Z" "$(line_value "$(tail -n 1 "$RUN_LOG")" at)"
 LOG_AT=2026-10-06T11:48Z refused "a caller's instant off the log's shape" ask key=a:b
-# Who may hand the appender an instant, and why; a fourth file that sets LOG_AT turns this row red.
 LA_WHO="hooks/poker/proof.sh:the approval of the plan and its asks close at one instant
 payload/scripts/close-out.sh:the delivery of the close stands at the minute of its Step 9 line
 payload/scripts/lib/owed.sh:the act on an ask, counted on the clock of the asks"

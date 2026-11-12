@@ -2737,7 +2737,7 @@ proof_debts_read() {
 
 # proof_debts_open <debts> < <approval and proof lines> -> `debt<TAB><suite><TAB><token>` for each of <debts>
 # (`proof_debts_read`'s lines, `<suite><TAB><token><TAB><time>`, what `land` wrote) that the run's lines on stdin
-# leave open (wave-27 T31, T67; D23; A-orch-85, A-orch-121). This is the commit
+# leave open. This is the commit
 # gate's predicate (lib/walls.sh `_eg_reading_gaps`), over two facts it is handed: the debts its
 # collector read from the landing record (hooks/bash-walls.sh) and the run's approvals and proofs
 # (`proof_approval_lines`, `proof_lines`). A debt stays open until a `proved: kind=floor` or `kind=task` line

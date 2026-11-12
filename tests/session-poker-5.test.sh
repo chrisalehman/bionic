@@ -902,16 +902,14 @@ expect_eq "AB-0 precondition: with no approval of the plan the gate refuses a co
   "$(ab_lines | grep -c .)|$GATE_RC|$(printf '%s' "$GATE_ERR" | /usr/bin/grep -q "no 'approved-by:' line" && echo yes || echo no)"
 ab_at 3; AB_BEFORE="$(cat "$PAB")"
 poke "$RAB" approve plan 'approved, go ahead'
-expect_eq "AB-1 approve plan appends one approval (exit 0), the plan unchanged" "0|1|yes" "$RC|$(ab_lines | grep -c .)|$([ "$AB_BEFORE" = "$(cat "$PAB")" ] && echo yes || echo no)"
+expect_eq "AB-1 approve plan appends one approval (exit 0), the plan unchanged, and says so" "0|1|yes|yes" "$RC|$(ab_lines | grep -c .)|$([ "$AB_BEFORE" = "$(cat "$PAB")" ] && echo yes || echo no)|$(printf '%s' "$OUT" | /usr/bin/grep -q 'approved by Dana Fixture' && echo yes || echo no)"
 [ "$RC" = 0 ] || printf '%s\n' "$OUT" | tail -6 | sed 's/^/    | /'
 expect_regex "AB-1b …the git user, the reply verbatim, an ISO-UTC instant" \
   '^run/v1\|ev=approval\|key=step3\|by=Dana Fixture\|said=approved, go ahead\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$(ab_lines)"
-expect_contains "AB-1d …and the verb says what it appended" "approved by Dana Fixture" "$OUT"
 ab_at 4; s34_gate "$RAB"
 expect_eq "AB-2 the gate reads it: at current: 4 it no longer refuses for it" "no" \
   "$(printf '%s' "$GATE_ERR" | /usr/bin/grep -q "no 'approved-by:' line" && echo yes || echo no)"
-ab_at 3
-AB_BEFORE="$(cat "$PAB")"
+ab_at 3; AB_BEFORE="$(cat "$PAB")"
 poke "$RAB" approve plan 'approved'
 expect_eq "AB-3 a second approve plan is refused (exit 1), the plan unchanged and nothing appended" "1|yes|1" "$RC|$([ "$AB_BEFORE" = "$(cat "$PAB")" ] && echo yes || echo no)|$(ab_lines | grep -c .)"
 expect_contains "AB-3b …as recorded once" "recorded once" "$OUT"

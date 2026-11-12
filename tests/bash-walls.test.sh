@@ -1,6 +1,5 @@
 #!/bin/bash
 # tests/bash-walls.test.sh — ONE PROCESS ON PreToolUse|Bash
-# (epic-23 wave-11-lean-spine, REQ-1f (v), AC-1f.5; ADR-004; T23 rulings R3–R7).
 #
 # WHAT THIS FILE OWNS: the COMPOSITION. Five walls fired on every Bash tool call —
 # protect-main, protect-database, the canonical-sdlc evidence gate, farm-out-reminder and

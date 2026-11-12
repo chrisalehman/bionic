@@ -504,7 +504,6 @@ hf_resume_new_session() {  # -> this session engaged and unbound, with no stamp,
   engage "$HF_R"
   rm -f "$(stamp_of "$HF_R")" "$(armed_of "$HF_R")" "$(digest_of "$HF_R")"
 }
-hf_marker_plans() { grep -c '^plan=' "$(marker_of "${1:-$HF_R}")" 2>/dev/null; }  # [<repo>] -> how many plan= lines the marker holds
 hf_resume_new_session
 poke "$HF_R" resume "$HF_DOOR"
 expect_eq "OW2 resume on the parked document exits 0" "0" "$RC"
