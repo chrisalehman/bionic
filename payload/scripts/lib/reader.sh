@@ -138,7 +138,9 @@ reader_facts() {  # <plan> -> one line per standing fact, in the order the facts
       if (t == "cancel") { delete live[id]; next }
       # a discarded run was killed, not judged: it must not unseat the verdict a run already gave
       if (t == "verdict" && f["result"] == "discarded" && (id in live)) next
-      if (named == "step" && (id in live) && fact[id] == body) delete live[id]
+      # a step or an approval given again stands at its new place: the run went back to it, or a person approved again
+      # after an ask raised since, which only a later approval closes
+      if ((named == "step" || named == "approval") && (id in live) && fact[id] == body) delete live[id]
       if ((id in live) && fact[id] == body) next
       live[id] = 1; fact[id] = body; type[id] = t; stamp[id] = f["at"]; place[id] = ++seq
     }

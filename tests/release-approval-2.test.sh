@@ -193,6 +193,10 @@ $(fc_reads "$FC_C")" "s/| pending | approval:release, approval:merge, head |\$/|
 }
 fc_ua; poke "$RFC" approve merge-unproved 'words'
 expect_eq "UA-1 approve merge-unproved writes the line (exit 0) where the integrate row is open and no row reads approval:merge" "0|1" "$RC|$(/usr/bin/grep -c '^approved: merge-unproved ' "$PFC")"
+FC_AT='|by=me|at=2026-10-12T14:00:00Z'; fc_ua; printf 'run/v1|ev=approval|key=merge-unproved|head=%s%s\n' "$FC_R" "$FC_AT" >> "$FC_REC/run.log"
+FC_S0="$(cksum < "$PFC")"; poke "$RFC" approve merge-unproved 'again'; FC_UA1="$RC|$(cksum < "$PFC")"
+fc_plan "$(fc_floor "$FC_B")" '/^approved-by:/d'; printf 'run/v1|ev=approval|key=step3%s\n' "$FC_AT" >> "$FC_REC/run.log"; FC_S1="$(cksum < "$PFC")"; poke "$RFC" approve plan 'approved'
+expect_eq "UA-1b an approval the log holds at the working head, and the plan's, is not given again (exit 1), the plan unchanged" "1|$FC_S0|1|$FC_S1" "$FC_UA1|$RC|$(cksum < "$PFC")"
 fc_ua; fc_page
 FC_UAN="$(fc_table | /usr/bin/grep -F '|key=approve:merge-unproved|' | sed -n 's/^release-approval\/v1|dec=\([0-9]*\)|.*/\1/p')"
 FC_UAM="${FC_UAN:-0} merge, rest default"; fc_typed "$FC_UAM"

@@ -614,9 +614,9 @@ units_rows() {
 #     `units_memoised` it is asked once; `proof:review`, with no open writer, is satisfied only
 #     when the UNITS_FACTS_STATE handed in reads `covered` (wave-27 T14; D3): a reading line, a
 #     failing one included, is not enough;
-#   - `approval:<name>`: its line inside `## SDLC State` — `approved-by:` for `plan`,
-#     `approved: <name> …` otherwise. No row writes one; the user's act does. `approval:plan` is
-#     met only while the plan's `current:` is 4 or later: a plan approved and still at Step 2 or 3
+#   - `approval:<name>`: an approval of <name> standing among the run's facts, Step 3's for `plan`.
+#     No row writes one; the user's act does. `approval:plan` is
+#     met only while the run's step is 4 or later: a plan approved and still at Step 2 or 3
 #     has a table nobody has started, and the line alone readies none of it (lib/fill.sh
 #     `fill_ledger_live` holds the fill's gate to the same rule).
 #   - `ext:<slug>`: never, until its owner removes it from the cell.
@@ -1255,7 +1255,7 @@ _units_sched() {
 _units_sched_run() {
   {
     printf '\034rows\n'; printf '%s\n' "$5"
-    printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$2" 2>/dev/null
+    printf '\034facts\n'; printf '%s\n' "${_UNITS_FACTS:-}"
     printf '\034waits\n'; printf '%s\n' "${8:-}"
     printf '\034proofs\n'; printf '%s\n' "${9:-}"
   } | _UNITS_FLOOR_ST="$6" _UNITS_READ_ST="${7:-}" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" -v hasreads="$4" \
@@ -1563,7 +1563,7 @@ _units_sched_awk() {
   _units_questions_awk
   printf '%s' '
     $0 == SUBSEP "rows" { part = 1; next }
-    $0 == SUBSEP "plan" { part = 2; next }
+    $0 == SUBSEP "facts" { part = 2; next }
     $0 == SUBSEP "waits" { part = 3; next }
     $0 == SUBSEP "proofs" { part = 4; next }
     part == 1 {
@@ -1577,19 +1577,10 @@ _units_sched_awk() {
       if ($2 == "row") { m = split($4, a, ","); for (k = 1; k <= m; k++) wr[$1, a[k]] = wr[$1, a[k]] " " $3 }
       next
     }
-    # THE PLAN TEXT: the approval lines inside `## SDLC State` other than the plan approval, fences skipped. The step
-    # and the approval of the plan are facts of the run (`_units_place`), handed in as plancur and planapby.
+    # THE FACTS OF THE RUN (`_units_fold`): each standing approval by its key. The step and the approval of the plan are
+    # facts of the run too (`_units_place`), handed in as plancur and planapby.
     part == 2 {
-      if ($0 ~ /^[[:space:]]*```/) { fence = !fence; next }
-      if (fence) next
-      if ($0 ~ /^## SDLC State/) { insec = 1; next }
-      if ($0 ~ /^## /) insec = 0
-      if (!insec) next
-      l = $0; sub(/^[ \t]*-?[ \t]*/, "", l)
-      if (l ~ /^approved[ \t]*:/) {
-        v = l; sub(/^approved[ \t]*:[ \t]*/, "", v); split(v, aw, /[ \t]+/)
-        if (aw[1] != "") appr[aw[1]] = 1
-      }
+      if (index($0, "|ev=approval|") && match($0, /\|key=[^|]+/)) appr[substr($0, RSTART + 5, RLENGTH - 5)] = 1
       next
     }
     # THE PROOFS OF THE RUN (`_units_proofs`), in the order they were last set.

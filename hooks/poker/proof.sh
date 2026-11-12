@@ -390,13 +390,8 @@ whole_run_at_head() {
     esac
     plan_verb_open approve
     if [ "$AP_NAME" = plan ]; then
-      AP_HAVE="$(awk '
-        /^[[:space:]]*```/ { fence = !fence; next }
-        fence { next }
-        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-        insdlc && /^[[:space:]]*-?[[:space:]]*approved-by[[:space:]]*:/ { print; exit }' "$PV_PLAN")"
-      if [ -n "$AP_HAVE" ]; then
-        die "REFUSED — $PV_PLAN already records the plan's approval: $(clean "$AP_HAVE"). An approval is recorded once; the plan is unchanged."
+      if proof_approved "$PV_PLAN" step3; then
+        die "REFUSED — the run of $PV_PLAN already holds the plan's approval. An approval is recorded once; the plan is unchanged."
         exit 1
       fi
       AP_WHO="$(git -C "$PV_REPO" config user.name 2>/dev/null)"
@@ -438,22 +433,12 @@ whole_run_at_head() {
         die "REFUSED — no row in $PV_PLAN reads approval:$AP_NAME, so recording it would satisfy nothing; the rows read: ${AP_READ:-(no named approval)}. Approve one of those names exactly; the plan is unchanged."
         exit 1 ;;
     esac
-    AP_HAVE="$(awk -v want="$AP_NAME" '
-      /^[[:space:]]*```/ { fence = !fence; next }
-      fence { next }
-      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-      insdlc {
-        l = $0; sub(/^[ \t]*-?[ \t]*/, "", l)
-        if (l !~ /^approved[ \t]*:/) next
-        sub(/^approved[ \t]*:[ \t]*/, "", l); split(l, w, /[ \t]+/)
-        if (w[1] == want) { print $0; exit }
-      }' "$PV_PLAN")"
     AP_HEAD="$(proof_branch_head "$PV_PLAN" "$PV_REPO" 2>/dev/null)" || AP_HEAD=""
     case "$AP_HEAD" in *[!0-9a-f]*|'') AP_HEAD="" ;; esac
-    if [ -n "$AP_HAVE" ]; then
+    if proof_approved "$PV_PLAN" "$AP_NAME"; then
       AP_WAS="$(proof_approved_head "$PV_PLAN" "$AP_NAME" 2>/dev/null)" || AP_WAS=""
       if [ -z "$AP_HEAD" ] || [ "$AP_WAS" = "$AP_HEAD" ]; then
-        die "REFUSED — $PV_PLAN already records this approval: $(clean "$AP_HAVE"). An approval is recorded once at a head, and ${AP_HEAD:+the working head ${AP_HEAD:0:12} is the one its newest line names}${AP_HEAD:-the plan names no working-branch head to give it again at}; the plan is unchanged."
+        die "REFUSED — the run of $PV_PLAN already holds the approval $AP_NAME. An approval is recorded once at a head, and ${AP_HEAD:+the working head ${AP_HEAD:0:12} is the one it names}${AP_HEAD:-the plan names no working-branch head to give it again at}; the plan is unchanged."
         exit 1
       fi
     fi

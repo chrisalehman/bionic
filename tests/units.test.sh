@@ -1396,6 +1396,9 @@ expect_eq "LIVE-2 a launch in the log reads active under its name, on the plan a
   "active/w-T2 active/w-T2 active/a1|" "$(lv T2) $(lv T2 "$LV_P.task-set.1") $(lv T1)|$(call units_ready "$LV_P" 4)"
 call units_dispatch_back "$LV_P" T2 w-T2
 expect_eq "LIVE-3 its cancel returns it to pending and ready" "pending/— T2" "$(lv T2) $(call units_ready "$LV_P" 4)"
+sed 's/| status |$/| status | reads |/; s/|---|$/|---|---|/; s/| pending |$/| pending | approval:ship |/; s/| active |$/| active | — |/' "$LV_P" > "$LV_P.a" && mv "$LV_P.a" "$LV_P"; LV_A="$(call units_ready "$LV_P" 4)"
+lv_log approval key=ship by=me
+expect_eq "LIVE-4 a row reading approval:ship waits, and the approval the log holds readies it" "|T2" "$LV_A|$(call units_ready "$LV_P" 4)"
 
 section "§BORN — a row's birth is one born event in the run's log, read beside the plan's own born lines"
 lv_ev() { bash -c '. "$1/reader.sh" && reader_facts "$2"' _ "${LIB%/*}" "$LV_P" | grep -c "^run/v1|ev=$1|.*row=$2|"; }
