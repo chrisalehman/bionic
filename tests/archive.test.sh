@@ -57,20 +57,17 @@ contains() {
   esac
 }
 
-# fixture_plan <plan-file> <current> [delivered] -> writes a minimal plan, creating its
-# parent directory first (never via a caller-side `>` redirection, which bash opens
-# BEFORE this function's body runs and would fail on a not-yet-created directory), whose
-# run_open verdict is exactly what the caller asked for: current: 9 with a delivered:
-# Step-9 line is CLOSED, anything else (or 9 without delivered:) is OPEN.
+# fixture_plan <plan-file> <current> [delivered] [header line] -> writes a minimal plan at 15, creating
+# its parent directory first (never via a caller-side `>` redirection, which bash opens BEFORE this
+# function's body runs and would fail on a not-yet-created directory), and its run's log
+# (<docs>/record/<stem>/run.log), whose run_open verdict is exactly what the caller asked for: a
+# step 9 delivered is CLOSED, anything else (or 9 written as not delivered) is OPEN.
 fixture_plan() {
-  local file="$1" current="$2" delivered="${3:-}"
-  mkdir -p "$(dirname "$file")"
-  {
-    printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: %s\n' "$current"
-    if [ "$current" = "9" ] && [ "$delivered" = "yes" ]; then
-      printf -- '\n- Step 9: delivered: yes\n'
-    fi
-  } > "$file"
+  local file="$1" current="$2" log="${1%/plans/*}/record/$(basename "$1" .plan.md)/run.log" held=""
+  [ "$current" = 9 ] && [ "${3:-}" != yes ] && held="|delivered=no"
+  mkdir -p "$(dirname "$file")" "${log%/*}"
+  printf -- '---\ncanonical_sdlc_version: 15\n%s---\n' "${4:+$4$'\n'}" > "$file"
+  printf 'run/v1|ev=step|n=%s%s|at=2026-10-04T00:00:00Z\n' "$current" "$held" > "$log"
 }
 
 # new_project <name> -> a fresh sandbox project dir with HOME redirected beside it and the
@@ -257,14 +254,7 @@ section "binding — AC-4.2: the destination approval fixed at Step 0 binds the 
 # fixture_binding_plan <file> <archive-root> — fixture_plan's shape plus the one
 # frontmatter key this section is about, written as a CLOSED run so the open-run scan
 # never gets to answer first.
-fixture_binding_plan() {
-  local file="$1" aroot="$2"
-  mkdir -p "$(dirname "$file")"
-  {
-    printf -- '---\ncanonical_sdlc_version: 14\narchive-root: %s\n---\n\n' "$aroot"
-    printf -- '## SDLC State\n\ncurrent: 9\n\n- Step 9: delivered: yes\n'
-  } > "$file"
-}
+fixture_binding_plan() { fixture_plan "$1" 9 yes "archive-root: $2"; }
 
 # --- drifted: the plan names one root, the live config another ---
 PB1="$(new_project pbind1)"

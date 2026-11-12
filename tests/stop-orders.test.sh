@@ -91,8 +91,9 @@ so_mark() {  # <repo> <name> <landed commit> — the name's roster line marked l
 so_bind_plan() {  # <repo> <working-branch> -> echoes the plan path
   local repo="$1" wb="$2" p
   p="$repo/.bionic/docs/plans/epic-x/wave-x.plan.md"
-  mkdir -p "${p%/*}" "$repo/.bionic/tmp"
-  printf -- '---\nworking-branch: %s\n---\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n' "$wb" > "$p"
+  mkdir -p "${p%/*}" "$repo/.bionic/tmp" "$repo/.bionic/docs/record/wave-x"
+  printf -- '---\ncanonical_sdlc_version: 15\nworking-branch: %s\n---\n# fixture plan\n' "$wb" > "$p"
+  printf 'run/v1|ev=step|n=4|at=2026-09-23T00:00:00Z\n' >> "$repo/.bionic/docs/record/wave-x/run.log"
   printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$p" > "$repo/.bionic/tmp/engaged-$SID.state"
   printf '%s\n' "$p"
 }
@@ -924,13 +925,13 @@ fi
 
 
 # ============================================================
-section "§TREE: stopped finds a landed row's tree by the plan's Tasks cell when the session's record lacks it, removes it, and names it"
+section "§TREE: stopped finds a landed row's tree by its row's tree in the run's log when the session's record lacks it, removes it, and names it"
 # ============================================================
 #
 # THE TREE GOES AT THE STOP, WHOEVER SPAWNED IT. A row's tree is recorded under the session whose carrier made
 # it; after a `/clear` that is a predecessor, and the name's convention spelling (`.worktrees/w45-t1`) is never
-# the dispatcher's (`.worktrees/45-T1`). So `stopped` reads the plan's `## Tasks` worktree cell for the row whose
-# agent cell is the name, removes that tree when the row carries the landing's mark, and says what it removed;
+# the dispatcher's (`.worktrees/45-T1`). So `stopped` asks the run for the tree of the row the name was dispatched
+# to, removes that tree when the row carries the landing's mark, and says what it removed;
 # where it finds no tree there, it says that too, naming where it looked.
 # FIXTURE FIDELITY: the tree is made by `spawn-worktree.sh create --for` under a predecessor session, the mark by
 # the roster's one marker (`so_mark`), the panel by tests/lib/live-answer.sh.
@@ -938,23 +939,12 @@ section "§TREE: stopped finds a landed row's tree by the plan's Tasks cell when
 RT="$(make_repo stopped-tree)"; RT_REAL="$(cd "$RT" && pwd -P)"
 echo seed > "$RT/README.md"; git -C "$RT" add README.md >/dev/null 2>&1; git -C "$RT" commit -qm seed >/dev/null 2>&1
 RT_P="$RT/.bionic/docs/plans/epic-x/wave-x.plan.md"; mkdir -p "${RT_P%/*}"
-cat > "$RT_P" <<'RTP'
----
-working-branch: wave/fixture
----
-# fixture plan
-
-## SDLC State
-
-current: 4
-
-## Tasks
-
-| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | row one | w45-T1 | — | | 10 | REQ-1 | T1.txt | .worktrees/45-T1 | | active |
-| T2 | 4 | build | row two | w45-T2 | — | | 10 | REQ-1 | T2.txt | .worktrees/45-T2 | | active |
-RTP
+{ printf -- '---\ncanonical_sdlc_version: 15\nworking-branch: wave/fixture\n---\n# fixture plan\n\n## Tasks\n\n'
+  printf '| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T%s | 4 | build | row %s | — | 10 | REQ-1 | T%s.txt | — |\n' 1 one 1 2 two 2; } > "$RT_P"
+mkdir -p "$RT/.bionic/docs/record/wave-x"
+printf 'run/v1|ev=%s|at=2026-09-23T00:00:0%sZ\n' 'step|n=4' 1 'dispatch|row=T1|name=w45-T1' 2 'tree|row=T1|path=.worktrees/45-T1' 3 \
+  'dispatch|row=T2|name=w45-T2' 4 'tree|row=T2|path=.worktrees/45-T2' 5 > "$RT/.bionic/docs/record/wave-x/run.log"
 printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$RT_P" > "$RT/.bionic/tmp/engaged-$SID.state"
 RT_PRED="77777777-8888-4999-8aaa-bbbbbbbbbbbb"
 mkdir -p "$RT/.bionic/docs/record/wave-x/briefs"
@@ -978,7 +968,7 @@ expect_eq "(tt0) the predecessor's record names the tree" "$(printf '%s\nrc=0' "
 expect_eq "(tt0b) …and this session's names none" "rc=1" "$(rt_ws "$SID")"
 run_orders_cfg "$RT" stopped w45-T1
 expect_status "(tt1) stopped closes the landed row (exit 0)" 0 "$ST"
-expect_contains "(tt1b) …finds its tree by the Tasks cell, removes it and names it" \
+expect_contains "(tt1b) …finds its tree by its row's tree, removes it and names it" \
   "stopped: w45-T1 — its tree is removed: ${RT_T1} (branch wt/45-T1 stays; landed ${RT_C1:0:12}" "$OUT"
 expect_false "(tt2) …the tree is gone" test -d "$RT_T1"
 expect_eq "(tt2b) …and its branch stays" "$RT_C1" "$(git -C "$RT" rev-parse --verify -q wt/45-T1)"

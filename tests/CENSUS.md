@@ -104,6 +104,7 @@ binding.test.sh | §4 | duplicate | payload/scripts/lib/binding.sh bind_plan:161
 binding.test.sh | §5 | keep | payload/scripts/lib/binding.sh bind_holders: the symlinked-marker skip deleted, so a linked marker naming the plan holds it (exit 0 instead of 1) | none (searched 'bind_holders' and 'BIND_HOLDERS' in tests/)
 binding.test.sh | §7 | keep | payload/scripts/lib/binding.sh bind_delivered: the reader's `state=delivered` test widened to any closed state, so the bind verb's act binds an abandoned plan (7c) | none (searched 'bind_delivered' and 'abandoned' in tests/)
 binding.test.sh | §8 | keep | payload/scripts/lib/binding.sh bind_record_session: the presence read deleted, so a first engagement's second call and a session the run holds each append a bind event again (8a, 8c, 8d); or the append made a write of the plan, so its sum moves (8a, 8d) | none (searched 'bind_record_session' and 'ev=bind' in tests/)
+binding.test.sh | §9 | keep | payload/scripts/lib/run.sh _run_candidates: the page-at-15 arm (`_run_page15`) deleted, so the walk lists no page at 15 (9a), engagement refuses it unresolvable (9b) and an unbound session reads none (9c) | none (searched '_run_page15' and 'canonical_sdlc_version: 15' with open_runs in tests/)
 
 ## booked.test.sh
 
@@ -1678,7 +1679,7 @@ slots.test.sh | §TAKING | keep | payload/scripts/lib/slots.sh: a claim with no 
 slots.test.sh | §STAMP | keep | payload/scripts/booked.sh: the dirty count includes the tree's own .bionic link, so a tree whose only untracked path is that link stamps dirty=1 (S7.2) | none (searched 'dirty=0' and 'stamp-dir' stamp rows in tests/)
 slots.test.sh | §NESTED-ENV | keep | payload/scripts/booked.sh: BIONIC_GATE_ADMIT not honoured, so a booked command nested in one asks the gate and waits on its parent (N3.2, N3.3) | none (searched 'BIONIC_GATE_ADMIT' nested rows in tests/)
 slots.test.sh | §SHELL | keep | payload/scripts/booked.sh: the stamp's cmd= written from the --shell form instead of the original command, so it carries eval (H3.3, H3.4) | none (searched '--shell' stamp rows in tests/)
-slots.test.sh | §ROOM | keep | payload/scripts/lib/stop.sh and payload/scripts/lib/walls.sh: the tick's FILL, the stop wall or the dispatch wall counting the writers that fit by a rule of its own, so the three disagree at N open roster rows (the scale's cap, and a person's line moving it) | none (searched 'writers fit' in tests/)
+slots.test.sh | §ROOM | keep | payload/scripts/lib/stop.sh and payload/scripts/lib/walls.sh: the tick's FILL, the stop wall or the dispatch wall counting the writers that fit by a rule of its own, so the three disagree at N open roster rows (the scale's cap, and a person's line moving it); or payload/scripts/lib/units.sh _units_read: a table with no status column read with an empty state, so no row of a page at 15 is ready (ROOM.1 to ROOM.5) | none (searched 'writers fit' in tests/)
 
 ## spawn-worktree.test.sh
 
