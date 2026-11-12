@@ -40,13 +40,12 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
-. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
-. "$(dirname "$0")/dispatch-preflight.prelude.sh"
+MAKE_REPO_AT=15; . "$(dirname "$0")/dispatch-preflight.prelude.sh"
 
 section "§CAP — a probe's writers= refuses nothing; a plan with no line is not named (wave-28 T9, AC-2.9)"
 CAP_RUN_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/run.sh"
@@ -658,8 +657,7 @@ section "§LANDS-ON — a brief's Lands-on is held within its Suites and nothing
 # holds payload/scripts/lib/widget.sh, run by widget.test.sh and grepped by reader.test.sh.
 lo_gate() {  # <repo tag> <Lands-on line> -> GATE_*, LO_ROW
   REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T23 | 4 | build | the widget | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n' \
-    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  pf_tasks "$REPO" '| T23 | 4 | build | the widget | — | 30 | REQ-1 | a.sh | — |'
   mkdir -p "$REPO/payload/scripts/lib" "$REPO/tests"
   printf 'the widget\n' > "$REPO/payload/scripts/lib/widget.sh"
   printf '#!/bin/bash\nbash "$REPO/payload/scripts/lib/widget.sh"\n' > "$REPO/tests/widget.test.sh"
@@ -683,7 +681,6 @@ expect_absent "LO-1b …and nothing asks for the other reader" "reader.test.sh" 
 
 section "§PLACE — the plan's approval and the step a writer is refused at are the run's facts, its log's among them"
 REPO=$(make_repo pl1 yes); write_attestation "$REPO" "$SID_A"; PL="$REPO/.bionic/docs/record/wave-01-test/run.log"
-sed -i.bak '/^approved-by:/d' "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"; mkdir -p "${PL%/*}"
 printf 'run/v1|ev=step|n=6|at=2026-11-01T00:00:01Z\n' > "$PL"; run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_eq "PL.1 a writer on a plan approved nowhere is refused at the step its log holds" "deny|Step: 6 " \
   "$GATE_VERDICT|$(printf '%s\n' "$GATE_OUT$GATE_ERR" | /usr/bin/grep -o 'Step: [0-9]* ' | head -1)"
@@ -753,8 +750,9 @@ roster-unwritable|the roster cannot be written (make it writable)|0
 no-such-key| ()|2
 detail|Roster:  (not reached)" "$WORDS_GOT"
 
-# A row that waits for a named approval asks the reader, so an approval its run's log alone holds admits it.
-REPO=$(make_repo wa1 yes); write_attestation "$REPO" "$SID_A"; PL="$REPO/.bionic/docs/record/wave-01-test/run.log"; mkdir -p "${PL%/*}"
+# A row that waits for a named approval asks the reader, so an approval its run's log alone holds admits it. The run
+# stays at 14: a row at 15 holds no reads cell, so no row there can wait on a named approval.
+REPO=$(MAKE_REPO_AT=14 make_repo wa1 yes); write_attestation "$REPO" "$SID_A"; PL="$REPO/.bionic/docs/record/wave-01-test/run.log"; mkdir -p "${PL%/*}"
 printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T9 | 7 | doc | the release | implementor | — | 20 | REQ-1 | CHANGELOG.md | — | — | pending | approval:release |\n' \
   >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
 printf 'run/v1|ev=approval|key=release|by=u|said=approved|at=2026-11-01T00:00:02Z\n' > "$PL"

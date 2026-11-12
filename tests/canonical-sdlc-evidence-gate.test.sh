@@ -81,6 +81,11 @@ current: 4" "v$v.plan.md"); run_hook "$h" 'git commit -m "x"'
   [ "$v" != 13 ] || expect_eq "the write hook refuses 13 for its version" 1 "$w"
   expect_eq "the write hook and the commit gate agree on version $v" "$w" "$(grep -c 'unsupported sdlc version' <<< "$HOOK_STDERR" || true)"
 done
+# The plan builder writes either page: asked for 15, the version 15, no state section, and the log the reader reads.
+for v in 14 15; do p=$(plan_fixture --at $v --current 5 "$EG_PF_DIR/plans/epic-99-fixture/wave-0$v.plan.md" wave "$(eg_pf_row T1 dw active)")
+  PF_GOT[$v]="$(grep -c -e "^canonical_sdlc_version: $v\$" -e '^## SDLC State' "$p")|$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$p" status T1 | head -1)"; done
+expect_eq "plan_fixture at 14 holds the version and its state section; at 15 the version alone, and the row's dispatch in its log" \
+  "2|state=dispatched 1|state=dispatched" "${PF_GOT[14]} ${PF_GOT[15]}"
 
 # ============================================================
 # Section 5: empty / placeholder evidence — blocked

@@ -37,7 +37,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
-. "$(dirname "$0")/dispatch-preflight.prelude.sh"
+MAKE_REPO_AT=15; . "$(dirname "$0")/dispatch-preflight.prelude.sh"
 
 section "S1 — relevance hoist (A7): irrelevant tool passes, silent"
 
