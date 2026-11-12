@@ -444,23 +444,16 @@ adopt_reads_write() {  # <file> <new lines> <now epoch> -> 0 written, 1 not
   return 1
 }
 
-# THE HANDOFF, READ BACK (wave-34 T6; REQ-14 AC-14.2, D23). `handoff` writes `## Handoff` with its
-# `written:` instant, and a dispatch after it starts an agent that handoff never saw — so the first verb a
+# THE HANDOFF, READ BACK. A handoff records the instant it was written, and a
+# dispatch after it starts an agent that handoff never saw — so the first verb a
 # resumed session runs says whether the bound plan's handoff still stands: STALE, naming every dispatch
 # stamped with that plan (the dispatch wall's `intended` row, `plan=` and `launched_at=`) later than it.
 # Silent when the session is unbound or its plan carries no handoff.
 #
-# THE FILE IS THE STORE (wave-38 T12; D23). `handoff` writes record/<wave>/handoff.md and the plan's section is
-# one pointer line, `handoff: <path> written <local time>`, the path project-root-relative. Every reader below
-# resolves the pointer and reads the FILE's own `written:` instant; a section still in the in-place form a wave-37
-# plan carries (its own `written:` line) reads as it always did.
-#
-# ONE READER OF THE SECTION (burns debt handoff-section-reader): `_HANDOFF_SEC_AWK`'s `ho_track(line)` is 1 for
-# a line inside `## Handoff` (the heading, fences and fenced lines excluded), and every awk here that looks in the
-# section calls it, the in-place rewrite of the safety lines included. It and the pointer's reader live in
-# lib/handoff.sh since wave-39 T16 (D18; burns debt handoff-pointer-reader): `handoff_pointer_of` is the absolute
-# path the pointer names, project-root relative, empty when the plan has none, and close-out.sh reads it there too.
-# Set in hooks/session-poker.sh, before any part loads: _HANDOFF_ISO_RE.
+# THE FILE IS THE STORE. The handoff is a file under the handoffs folder, and the run's latest
+# handoff names it: lib/handoff.sh `handoff_pointer_of`, the reader's answer, the path project-root-relative, which
+# close-out.sh reads too. The instant is the FILE's own. Set in hooks/session-poker.sh, before any part loads:
+# _HANDOFF_ISO_RE.
 handoff_instant_pick() {  # stdin: a handoff's lines -> its `instant:` ISO, else the first ISO `written:`, empty when neither
   awk -v re="$_HANDOFF_ISO_RE" '$0 ~ re { v = substr($0, index($0, ": ") + 2); if (index($0, "instant: ") == 1) { print v; got = 1; exit } if (w == "") w = v }
     END { if (!got && w != "") print w }' 2>/dev/null
@@ -468,12 +461,8 @@ handoff_instant_pick() {  # stdin: a handoff's lines -> its `instant:` ISO, else
 handoff_written_at() {  # <plan file> -> the handoff's instant (the file's, through the pointer), empty when none
   local f
   f="$(handoff_pointer_of "$1")"
-  if [ -n "$f" ]; then
-    [ -f "$f" ] && [ ! -L "$f" ] || return 0
-    handoff_instant_pick < "$f"
-    return 0
-  fi
-  awk "$_HANDOFF_SEC_AWK"'ho_track($0) { print }' "$1" 2>/dev/null | handoff_instant_pick
+  [ -n "$f" ] && [ -f "$f" ] && [ ! -L "$f" ] || return 0
+  handoff_instant_pick < "$f"
 }
 
 adopt_handoff_note() {  # <bound plan, raw> <repo root> <state dir>
