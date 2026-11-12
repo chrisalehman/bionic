@@ -26,10 +26,10 @@
 #
 #   §1  AC-4.1  `run` performs every act on a fixture at Step 8: the merge readback,
 #               the worktree sweep, the tmp wipe, the TaskUpdate instruction, the
-#               continuation, the epic row, the patrol instruction, the handoff
-#               rewrite, the two lifecycle blocks with `attested-by:`, the gate
-#               dry-run, and the archive. Then the REAL hooks/bash-walls.sh, on a
-#               `git commit` payload, allows the commit the script's blocks describe.
+#               continuation, the epic row, the patrol instruction, the handoff,
+#               the step's events, the gate dry-run, and the archive, the plan's
+#               own text untouched. Then the REAL hooks/bash-walls.sh, on a
+#               `git commit` payload, allows the commit.
 #   §2  AC-4.3  a `wt/*` branch carrying a commit the working branch never took
 #               refuses BY NAME and performs nothing; a fully reachable one is deleted.
 #   §3  AC-4.4  a second `run` prints `already closed` and touches nothing — the plan,
@@ -497,6 +497,21 @@ PLAN_CENSUS
 PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"
 EPIC_REL=".bionic/docs/plans/epic-fx/epic.plan.md"
 CONT_REL=".bionic/docs/record/wave-01-fixture/continuation.md"
+LOG_REL=".bionic/docs/record/wave-01-fixture/run.log"
+TASKS_WORDS="mark every 4/"
+
+# co_handoff_rel <project> -> where the run's handoff was written, from the project's root, as the reader answers it
+co_handoff_rel() { bash "$REPO_ROOT/payload/scripts/reader.sh" "$1/$PLAN_REL" handoff 2>/dev/null | sed -n 's/^path=//p'; }
+
+# co_step_answer <project> [<n>] -> the reader's step answer for the fixture's run; with <n>, the answer the reader gives
+# over the run's log as it stood at its last step-<n> event, the log cut there and nothing else of the run read.
+co_step_answer() {
+  if [ -z "${2:-}" ]; then bash "$REPO_ROOT/payload/scripts/reader.sh" "$1/$PLAN_REL" step 2>/dev/null; return; fi
+  bash -c '. "$1/lib/reader.sh" || exit 9
+    f="$(awk -v n="|ev=step|n=$3|" "{ l[NR] = \$0; if (index(\$0, n)) c = NR } END { for (i = 1; i <= c; i++) print l[i] }" "$2")"
+    [ -n "$f" ] || exit 1
+    reader_facts() { printf "%s\n" "$f"; }; reader_q_step -' _ "$REPO_ROOT/payload/scripts" "$1/$LOG_REL" "$2" 2>/dev/null
+}
 
 # advance_to <project> <N> -> the fixture plan's `current:` line planted at N, as an older plan's text holds its step;
 # the `current` verb appends a step event and writes no plan, and §E2E is the row that drives the whole verb.

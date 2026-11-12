@@ -260,6 +260,7 @@ section "1 — AC-4.1: run performs the tail and the gate allows the commit"
 
 P1="$(mk_fixture p1)"; advance_to "$P1" 8
 expect_eq "1.0: the fixture starts with three entries under .bionic/tmp/" "3" "$(tmp_entries "$P1")"
+P1_SUM0="$(sha_of "$P1/$PLAN_REL")"
 run_close "$P1" run
 
 expect_eq "1a: run exits 0" "0" "$CO_RC"
@@ -286,35 +287,11 @@ expect_eq "1p: act 8 — patrol: names CronDelete and the disarm verb" "yes" \
   "$(contains "$CO_OUT" "patrol: CronDelete")"
 expect_eq "1q: …and the disarm command" "yes" \
   "$(contains "$CO_OUT" "session-poker.sh disarm")"
-HO_REL="$(sed -n 's/^handoff: \(.*\) written .*$/\1/p' "$P1/$PLAN_REL" | head -1)"
+HO_REL="$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$P1/$PLAN_REL" handoff 2>/dev/null | sed -n 's/^path=//p')"
 expect_eq "1r2: …under the file's kind line" "bionic-handoff/v1" "$(sed -n 1p "$P1/$HO_REL" 2>/dev/null)"
 expect_eq "1r3: …whose last line is the one door, naming the file" "/bionic:canonical-sdlc $HO_REL" "$(tail -1 "$P1/$HO_REL" 2>/dev/null)"
-expect_eq "1r4: …and the plan's ## Handoff points to the run's file in the handoffs folder" "yes" \
+expect_eq "1r4: …and the run's log names the run's file in the handoffs folder" "yes" \
   "$([[ "$HO_REL" == .bionic/docs/record/handoffs/*-wave-01-fixture.md ]] && echo yes || echo "no: $HO_REL")"
-expect_eq "1s: …and the open-run resume point is gone from the plan" "no" \
-  "$(contains "$(cat "$P1/$PLAN_REL")" "the tail has not run")"
-
-PLAN1="$(cat "$P1/$PLAN_REL")"
-expect_eq "1t: the Step-8 line is CLOSED with a timestamp" "yes" \
-  "$(grep -qE '^- Step 8: CLOSED [0-9]{4}-[0-9]{2}-[0-9]{2}T' <<< "$PLAN1" && echo yes || echo no)"
-expect_eq "1u: …merge: on its own continuation line, never semicolon-joined" "yes" \
-  "$(grep -qE '^  merge: ' <<< "$PLAN1" && echo yes || echo no)"
-expect_eq "1v: …worktree-removed: on its own line" "yes" \
-  "$(grep -qE '^  worktree-removed: ' <<< "$PLAN1" && echo yes || echo no)"
-expect_eq "1w: …cleanup: done" "yes" \
-  "$(grep -qE '^  cleanup: done' <<< "$PLAN1" && echo yes || echo no)"
-expect_eq "1x: …tmp-wiped: on its own line" "yes" \
-  "$(grep -qE '^  tmp-wiped: ' <<< "$PLAN1" && echo yes || echo no)"
-expect_eq "1y: …tasks-completed: on its own line" "yes" \
-  "$(grep -qE '^  tasks-completed: ' <<< "$PLAN1" && echo yes || echo no)"
-expect_eq "1aa: the Step-9 line carries delivered: INLINE, the shape run.sh greps for" "yes" \
-  "$(grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' <<< "$PLAN1" && echo yes || echo no)"
-expect_eq "1ab: …with archived: on its own continuation line" "yes" \
-  "$(grep -qE '^  archived: ' <<< "$PLAN1" && echo yes || echo no)"
-expect_eq "1ac: …and current: advanced to 9" "yes" \
-  "$(grep -qE '^current: 9$' <<< "$PLAN1" && echo yes || echo no)"
-expect_eq "1ad: the (pending) placeholders are gone" "no" "$(contains "$PLAN1" "Step 8: (pending)")"
-
 expect_eq "1ae: run_open now reads the plan as CLOSED" "1" "$(run_open_rc "$P1/$PLAN_REL")"
 expect_eq "1af: the script's own gate dry-run reported ok" "yes" "$(contains "$CO_OUT" "gate: ok")"
 expect_eq "1ag: AC-4.1 — the real bash-walls.sh allows the close-out commit" "0" "$(gate_rc "$P1")"
@@ -322,6 +299,48 @@ expect_eq "1ah: act 7 — archived: passes archive_run's line through" "yes" \
   "$(contains "$CO_OUT" "archived: bionic: archive")"
 expect_eq "1ai: …and the run directory stayed, the epic being open" "yes" \
   "$([ -f "$P1/$PLAN_REL" ] && echo yes || echo no)"
+
+# THE CLOSE WRITES EVENTS. What step 8 cleaned and the delivery are fields of the step's events, and the plan's text is
+# the person's: its sum is the one it had before the close. The step answer is read twice: on the run's log as it stood
+# at the close's step 8, and whole after the close.
+expect_eq "1aj: the close writes nothing into the plan: its sum is the same before and after" "$P1_SUM0" "$(sha_of "$P1/$PLAN_REL")"
+P1_S8="$(co_step_answer "$P1" 8)"
+expect_eq "1ak: the step answer at the close's step 8 carries what it cleaned" "n=8|done|yes|yes|state=open" \
+  "$(printf '%s\n' "$P1_S8" | sed -n 1p)|$(printf '%s\n' "$P1_S8" | sed -n 's/^cleanup=//p')|$(contains "$P1_S8" "tmp-wiped=3 entries under ")|$(contains "$P1_S8" "tasks-completed=$TASKS_WORDS")|$(printf '%s\n' "$P1_S8" | tail -1)"
+P1_S9="$(co_step_answer "$P1")"
+expect_eq "1al: …and after the close it carries the delivery and the archive's line, the run delivered" "n=9|yes|yes|state=delivered" \
+  "$(printf '%s\n' "$P1_S9" | sed -n 1p)|$(contains "$P1_S9" "delivered=")|$(contains "$P1_S9" "archived=bionic: archive")|$(printf '%s\n' "$P1_S9" | tail -1)"
+
+# THE ARCHIVE IS A FIELD OF THE DELIVERY'S STEP, WRITTEN WHERE THE RUN'S LOG IS. With no open sibling the plan moves out of
+# the project and its record stays: the project's log gains the delivery restated with the archive's line, at the
+# delivery's own second, and the archive gains no record. The three readers of when the run was delivered (the handoff
+# file the close wrote, closed-form, the landing report's window) read one instant, the plan put back where its record is.
+PA="$(mk_fixture p-arch)"; advance_to "$PA" 8; rm -f "$PA/$EPIC_REL"
+run_close "$PA" run
+PA_MOVED="$(find "$SANDBOX/p-arch-archive" -name "${PLAN_REL##*/}" -type f 2>/dev/null | head -1)"
+expect_eq "1am: the close archives: rc 0, the plan in the archive and gone from the project" "0|yes|no" \
+  "$CO_RC|$([ -n "$PA_MOVED" ] && echo yes || echo no)|$([ -f "$PA/$PLAN_REL" ] && echo yes || echo no)"
+expect_eq "1an: the project's log holds the archive's field on the delivery's step, and the archive holds no record" "yes|yes|0" \
+  "$(contains "$(co_step_answer "$PA" 9)" "archived=bionic: archived ")|$(contains "$(co_step_answer "$PA" 9)" "delivered=")|$(find "$SANDBOX/p-arch-archive" -type d -name record | grep -c .)"
+mkdir -p "$PA/${PLAN_REL%/*}"; cp "$PA_MOVED" "$PA/$PLAN_REL"
+PA_HO="$(sed -n 's/^resume point: NONE — DELIVERED at \([^;]*\);.*/\1/p' "$PA"/.bionic/docs/record/handoffs/*-wave-01-fixture.md 2>/dev/null | head -1)"
+run_close "$PA" closed-form
+PA_CF="$(printf '%s\n' "$CO_OUT" | sed -n 's/^resume point: NONE — DELIVERED at \([^;]*\);.*/\1/p')"
+PA_HH="$(hh_report "$PA" --hand-holds | sed -n 's/^hand-holds window: .*until \([^ ]*\) (delivered:).*/\1/p')"
+expect_regex "1ao: the handoff file names the delivery's instant to the second" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$PA_HO"
+expect_eq "1ap: …and closed-form and the landing report's window read that one instant" "$PA_HO|$PA_HO" \
+  "$PA_CF|$(printf '%s' "$PA_HH" | sed -E 's/^([0-9-]+T[0-9]{2}:[0-9]{2})Z$/\1:00Z/')"
+pa_step() { bash -c '. "$1/run.sh" && . "$1/proof.sh" && proof_step_event "$2" 9 delivered=x' _ "$REPO_ROOT/payload/scripts/lib" "$1" >/dev/null 2>&1; echo $?; }
+expect_eq "1ar: the step's writer takes a run's log that is there, and refuses one that is not, making no directory" "0|2|no" \
+  "$(pa_step "$PA/$LOG_REL")|$(pa_step "$SANDBOX/p-none/record/w/run.log")|$([ -d "$SANDBOX/p-none" ] && echo yes || echo no)"
+
+# A SECOND CLOSE KEEPS THE STEP 8 THAT STANDS. A close whose attestation was refused left its step 8 in the log with what
+# it cleaned, the run open at 8; the close run again delivers on that step and appends no emptier one over it.
+PS="$(mk_fixture p-again)"; advance_to "$PS" 8
+printf 'run/v1|ev=step|n=8|cleanup=done|tmp-wiped=7 entries under the first close|tasks-completed=%s|at=2026-10-04T12:30:00Z\n' "$TASKS_WORDS" >> "$PS/$LOG_REL"
+run_close "$PS" run
+expect_eq "1aq: the second close delivers on the step 8 that stood, its wipe kept: one step 8 in the log" "0|yes|1|n=9" \
+  "$CO_RC|$(contains "$(co_step_answer "$PS" 8)" "tmp-wiped=7 entries under the first close")|$(grep -c '|ev=step|n=8|' "$PS/$LOG_REL")|$(co_step_answer "$PS" | sed -n 1p)"
 
 # ============================================================
 section "2 — AC-4.3: an unreached wt/* branch refuses by name and nothing else happens"
@@ -404,9 +423,9 @@ section "4c — critic3 P-1 (T17): run asks the gate first; check and run agree"
 # then ask the gate, so a refusal the Step-8 block cannot clear left a half-closed run: the
 # branches and this session's tmp state gone, the continuation and epic row written. And
 # `check` printed one sentence for every refusal ("the Step-8 block run writes is what
-# clears it"), so it could not say which outcome `run` would reach. Now both verbs write
-# phase 8's block into a scratch copy of the plan, bind a synthetic marker to the copy,
-# and ask the real gate; `run` touches nothing until that pre-flight passes.
+# clears it"), so it could not say which outcome `run` would reach. Now both verbs ask the
+# real gate about the plan itself, with the facts the close's acts will write pending in its
+# own dry session; `run` touches nothing until that pre-flight passes.
 P18="$(mk_fixture p18)"; advance_to "$P18" 8
 rm -f "$P18/.bionic/docs/record/generic-evidence.md"
 PLAN18_SHA="$(sha_of "$P18/$PLAN_REL")"
@@ -415,8 +434,6 @@ run_close "$P18" check
 expect_eq "4r: check on the evidence-missing plan exits 0" "0" "$CO_RC"
 expect_eq "4t: …never the old sentence that promised the Step-8 block would clear it" "no" \
   "$(contains "$CO_OUT" "is what clears it")"
-expect_eq "4u: …and leaves no scratch copy beside the plan" "0" \
-  "$(find "$P18/.bionic/docs/plans" -name '*preflight*' | wc -l | tr -d ' ')"
 
 run_close "$P18" run
 expect_eq "4v: run on the same plan refuses rc 2" "2" "$CO_RC"
@@ -427,10 +444,7 @@ expect_eq "4aa: …no continuation was written" "no" \
   "$([ -f "$P18/$CONT_REL" ] && echo yes || echo no)"
 expect_eq "4ab: …the epic plan is byte-for-byte what it was (no row for wave 01)" "$EPIC18_SHA" \
   "$(sha_of "$P18/$EPIC_REL")"
-expect_eq "4ac: …the plan is byte-for-byte what it was (the block went into the copy only)" "$PLAN18_SHA" \
-  "$(sha_of "$P18/$PLAN_REL")"
-expect_eq "4ad: …and no scratch copy is left beside the plan" "0" \
-  "$(find "$P18/.bionic/docs/plans" -name '*preflight*' | wc -l | tr -d ' ')"
+expect_eq "4ac: …the plan is byte-for-byte what it was" "$PLAN18_SHA" "$(sha_of "$P18/$PLAN_REL")"
 
 # The control: the same fixture with its evidence. check says the gate allows the plan run
 # would write, and run then performs the tail as §1 does.
@@ -438,7 +452,7 @@ P19="$(mk_fixture p19)"; advance_to "$P19" 8
 run_close "$P19" check
 run_close "$P19" run
 expect_eq "4af: …and run on it exits 0" "0" "$CO_RC"
-expect_eq "4ah: …and the attestation after the Step-8 block, as before" "yes" "$(contains "$CO_OUT" "gate: ok")"
+expect_eq "4ah: …and the attestation after step 8's event, as before" "yes" "$(contains "$CO_OUT" "gate: ok")"
 
 # ============================================================
 section "4d — critic3 P-3 (T17): run refuses unless the plan reads current: 8"
@@ -464,28 +478,22 @@ for _co_cur in 7 4; do
 done
 
 # ============================================================
-section "4e — critic4 Q-1 (T19), wave-27 T4 (D14, B2): the Step 9 line is close-out's to write; the wave table is still a presence check"
+section "4e — critic4 Q-1 (T19), wave-27 T4 (D14, B2): a plan with no Step 9 line closes; the wave table is still a presence check"
 # ============================================================
 # `run` used to delete branches, wipe tmp and write the continuation and epic row, and only
 # then refuse for a plan with no `- Step 9:` line or an epic plan with no `| wave |` table.
-# T19 made both presence checks before the first act. Since wave-27 T4 the first one is
-# gone: no verb writes a Step 9 line but close-out itself, so a plan reaches
-# close-out with no Step 9 line, and close-out writes it. It is written with phase 8's block
-# and never earlier, so a refusal still leaves the plan byte-for-byte as it was.
+# Both became presence checks before the first act. The first one is gone: a plan reaches
+# close-out with no Step 9 line, and the delivery is the step's event, so the plan is left as
+# it was, closed or refused.
 # presence_state: hoisted to tests/close-out.prelude.sh (a later part reads it)
 # step_lines: hoisted to tests/close-out.prelude.sh (a later part reads it)
 TA="$(mk_fixture t19a)"; advance_to "$TA" 8
 expect_eq "q1.0: the fixture carries its Step-8 line (the counter reads this plan)" "1" "$(step_lines "$TA/$PLAN_REL" 8)"
 expect_eq "q1.0b: …and no Step 9 line: nothing planted it" "0" "$(step_lines "$TA/$PLAN_REL" 9)"
-run_close "$TA" check
-expect_eq "q1.1b: …it says run writes it" "yes" "$(contains "$CO_OUT" 'run writes `- Step 9: (pending)`')"
 run_close "$TA" run
 expect_eq "q1.2: run on a plan with no Step 9 line closes rc 0" "0" "$CO_RC"
-expect_eq "q1.3: …and the plan carries exactly one Step 9 line" "1" "$(step_lines "$TA/$PLAN_REL" 9)"
-expect_eq "q1.4: …which is the delivered line" "yes" \
-  "$(grep -qE '^- Step 9: delivered: ' "$TA/$PLAN_REL" && echo yes || echo no)"
-expect_eq "q1.5: …written after the Step-8 block" "yes" \
-  "$(awk '/^- Step 8: CLOSED /{s8=NR} /^- Step 9: delivered: /{s9=NR} END{print (s8 && s9 > s8) ? "yes" : "no"}' "$TA/$PLAN_REL")"
+expect_eq "q1.3: …its Step lines as they were, the delivery the step's event" "1|0|state=delivered" \
+  "$(step_lines "$TA/$PLAN_REL" 8)|$(step_lines "$TA/$PLAN_REL" 9)|$(co_step_answer "$TA" | tail -1)"
 
 # A refusal on a plan with no Step 9 line writes no Step 9 line: the evidence file is gone,
 # so the pre-flight refuses, and the plan is byte-for-byte what it was.
@@ -497,16 +505,15 @@ expect_eq "q1.6: a refused run on a plan with no Step 9 line exits 2" "2" "$CO_R
 expect_eq "q1.6b: …the plan is byte-identical (no Step 9 line was written early)" "$PLAN_D_SHA" "$(sha_of "$TD/$PLAN_REL")"
 expect_eq "q1.6c: …branch, tmp, continuation, current: and epic row untouched" "$PRE_D" "$(presence_state "$TD")"
 
-# A plan written before T4, carrying a `- Step 9: (pending)` line by hand, still closes with
-# one Step 9 line: close-out replaces the line it finds and adds none.
+# A plan carrying a `- Step 9: (pending)` line by hand closes, the line left as written.
 TE="$(mk_fixture t19e)"; advance_to "$TE" 8
 awk '{ print } /^- Step 8: \(pending\)$/ { print "- Step 9: (pending)" }' "$TE/$PLAN_REL" > "$TE/plan.tmp" \
   && mv "$TE/plan.tmp" "$TE/$PLAN_REL"
 expect_eq "q1.6d: precondition: the older plan carries its hand-written Step 9 line" "1" "$(step_lines "$TE/$PLAN_REL" 9)"
 run_close "$TE" run
 expect_eq "q1.6e: …it closes rc 0" "0" "$CO_RC"
-expect_eq "q1.6f: …with exactly one Step 9 line, the delivered one" "1/yes" \
-  "$(step_lines "$TE/$PLAN_REL" 9)/$(grep -qE '^- Step 9: delivered: ' "$TE/$PLAN_REL" && echo yes || echo no)"
+expect_eq "q1.6f: …its hand-written line left as it was, the run read delivered" "1|state=delivered" \
+  "$(step_lines "$TE/$PLAN_REL" 9)|$(co_step_answer "$TE" | tail -1)"
 
 TB="$(mk_fixture t19b)"; advance_to "$TB" 8
 printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# epic-fx\n\n## SDLC State\n\ncurrent: 4\n\n## Notes\n\nNo waves table yet.\n' > "$TB/$EPIC_REL"
@@ -542,8 +549,8 @@ expect_ne "VER0b: …and differs from the release the fixture names" "$RELV" "$T
 epic_version_cell() {
   grep '^| 01 |' "$1/$EPIC_REL" | head -1 | awk -F'|' '{ v = $3; gsub(/^[ \t]+|[ \t]+$/, "", v); print v }'
 }
-# delivered_line <project> -> the plan's Step 9 delivered line.
-delivered_line() { grep -m1 '^- Step 9: delivered: ' "$1/$PLAN_REL"; }
+# delivered_line <project> -> the words the run's step 9 carries as delivered.
+delivered_line() { co_step_answer "$1" | sed -n 's/^delivered=//p'; }
 
 PV1="$(mk_fixture ver1)"; advance_to "$PV1" 8
 awk -v r="$RELV" '{ print } /^walk: exempt$/ { print "release: " r }' "$PV1/$PLAN_REL" > "$PV1/plan.tmp" \
@@ -600,7 +607,7 @@ expect_eq "E2E1: AC-7.1 the real current 8 is admitted on the facts (exit 0)" "0
 expect_eq "E2E3: …and the run stands at step 8, its plan unwritten" "n=8|7" "$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$PE/$PLAN_REL" step | head -1)|$(sed -n 's/^current: //p' "$PE/$PLAN_REL")"
 run_close "$PE" run
 expect_eq "E2E4: AC-7.1 then close-out.sh run delivers (rc 0)" "0" "$CO_RC"
-expect_eq "E2E5: …the plan carries the delivered line" "yes" "$( [ -n "$(delivered_line "$PE")" ] && echo yes || echo no)"
+expect_eq "E2E5: …the run's step carries the delivery" "yes" "$( [ -n "$(delivered_line "$PE")" ] && echo yes || echo no)"
 expect_eq "E2E6: …and reads closed, delivered at step 9 though the log's step 8 is stamped later than the close's lines" "1|n=9" \
   "$(run_open_rc "$PE/$PLAN_REL")|$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$PE/$PLAN_REL" step | head -1)"
 
@@ -628,6 +635,16 @@ PR_SHA="$(sha_of "$PR/$PLAN_REL")"
 run_close "$PR" run
 expect_eq "E2E14: A-orch-28 run refuses a release holding a | (rc 2)" "2" "$CO_RC"
 expect_eq "E2E16: …the plan untouched and wt/01-x still standing" "$PR_SHA/yes" "$(sha_of "$PR/$PLAN_REL")/$(branch_exists "$PR" wt/01-x)"
+# THE CLOSE THAT DELIVERS RELEASES THE MERGE IT HELD: the refusal above held the merge on the run's register, and once the
+# release is written whole the delivering close closes that ask.
+co_hold_state() {  # <project> -> open|closed, the state of the run's latest hold:merge round; nothing when none
+  bash -c '. "$1/run.sh" && . "$1/owed.sh" && owed_rounds hold:merge "$2" "$3"' _ "$REPO_ROOT/payload/scripts/lib" "$1/$PLAN_REL" "$1" 2>/dev/null \
+    | tail -1 | cut -f3
+}
+expect_eq "E2E17: the refused close holds the merge on the run's register" "open" "$(co_hold_state "$PR")"
+sed 's/^release: 1\.2|3$/release: 1.2.3/' "$PR/$PLAN_REL" > "$PR/$PLAN_REL.n" && mv "$PR/$PLAN_REL.n" "$PR/$PLAN_REL"
+run_close "$PR" run
+expect_eq "E2E18: …and the close that delivers releases it" "0|closed" "$CO_RC|$(co_hold_state "$PR")"
 
 # ============================================================
 section "BRANCH-AGREE — wave-39 T16 (D18; AC-12.1): one reader of the integration branch; close-out's check and closed-form name one branch"

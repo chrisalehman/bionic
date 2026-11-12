@@ -430,70 +430,35 @@ expect_eq "RUNS.9 one orphan, one line" "1" "$(printf '%s\n' "$CO_OUT" | grep -c
 expect_eq "RUNS.10 …and the close's sweep of it is no hand event: the person's stop is still the only one" "a person stopped it" "$(pr_hands)"
 
 # ============================================================
-section "INSERT — wave-33 T8 (REQ-4 AC-4.2, D8): close-out writes the Step-8 line it checks for"
+section "INSERT — wave-33 T8 (REQ-4 AC-4.2, D8): a plan with no Step-8 line closes"
 # ============================================================
 #
-# `run` at `current: 8` with the facts held used to refuse when the plan carried no `- Step 8:` line:
-# the writer replaced a line it never inserted, then read back for the line it had not written. Wave-32's
-# own close met it. The fixture is the plan the tools leave: `advance_to 8` then the Step-8 line removed.
-#
-# step_order <plan> -> the step numbers of the `- Step N:` lines of ## SDLC State, in order, space-joined.
-step_order() {
-  awk '
-    /^## / { insdlc = ($0 ~ /^## SDLC State/) }
-    insdlc && match($0, /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+[0-9]+[[:space:]]*:/) {
-      s = substr($0, RSTART, RLENGTH); gsub(/[^0-9]/, "", s); printf "%s%s", (n++ ? " " : ""), s }
-    END { print "" }' "$1"
-}
+# `run` at `current: 8` with the facts held used to refuse when the plan carried no `- Step 8:` line. The close writes
+# no Step line now: what step 8 cleaned is the step's event. The fixture is the plan the tools leave: `advance_to 8`
+# then the Step-8 line removed.
 # drop_step_line <project> <N> -> the plan without its `- Step N:` line (continuation lines stay).
 drop_step_line() {
   /usr/bin/grep -v "^- Step $2:" "$1/$PLAN_REL" > "$1/plan.tmp" && mv "$1/plan.tmp" "$1/$PLAN_REL"
 }
-# block_lines <plan> <N> -> how many indented continuation lines follow the `- Step N:` line.
-block_lines() {
-  awk -v n="$2" '
-    $0 ~ "^- Step " n ":" { f = 1; next }
-    /^- Step / || /^[^ \t-]/ || /^$/ { f = 0 }
-    f && /^  / { c++ }
-    END { print c + 0 }' "$1"
-}
 
 IA="$(mk_fixture insert-a)"; advance_to "$IA" 8; drop_step_line "$IA" 8
-expect_eq "INSERT.0 precondition: the plan reads current: 8, carries a Step-7 line, no Step-8 line and no Step-9 line" "8/7" \
-  "$(sed -n 's/^current: //p' "$IA/$PLAN_REL")/$(step_order "$IA/$PLAN_REL")"
+expect_eq "INSERT.0 precondition: the plan reads current: 8, carries a Step-7 line, no Step-8 line and no Step-9 line" "8/1/0/0" \
+  "$(sed -n 's/^current: //p' "$IA/$PLAN_REL")/$(step_lines "$IA/$PLAN_REL" 7)/$(step_lines "$IA/$PLAN_REL" 8)/$(step_lines "$IA/$PLAN_REL" 9)"
 IA_SHA="$(sha_of "$IA/$PLAN_REL")"
 run_close "$IA" check
 expect_eq "INSERT.2 …and check changed not one byte" "$IA_SHA" "$(sha_of "$IA/$PLAN_REL")"
 run_close "$IA" run
-expect_eq "INSERT.3 AC-4.2 run succeeds on a plan with no Step-8 line (rc 0)" "0" "$CO_RC"
-expect_eq "INSERT.4 …the Step-8 line is there, closed, once" "1/yes" \
-  "$(step_lines "$IA/$PLAN_REL" 8)/$(grep -qE '^- Step 8: CLOSED [0-9]{4}-' "$IA/$PLAN_REL" && echo yes || echo no)"
-expect_eq "INSERT.5 …between the Step-7 line and the Step-9 line, in step order" "7 8 9" "$(step_order "$IA/$PLAN_REL")"
+expect_eq "INSERT.3 AC-4.2 run succeeds on a plan with no Step-8 line (rc 0), the plan as it was" "0|$IA_SHA" "$CO_RC|$(sha_of "$IA/$PLAN_REL")"
 expect_eq "INSERT.7 …the gate dry-run attested it, and the plan reads closed" "yes/1" \
   "$(contains "$CO_OUT" "gate: ok")/$(run_open_rc "$IA/$PLAN_REL")"
 expect_eq "INSERT.8 …and the real bash-walls.sh allows the close-out commit" "0" "$(gate_rc "$IA")"
 
-# THE INSERT SITS AFTER THE STEP-7 BLOCK, NOT BETWEEN ITS LINES: a Step-7 line with continuation lines keeps them.
-IB="$(mk_fixture insert-b)"; advance_to "$IB" 8; drop_step_line "$IB" 8
-awk '{ print } /^- Step 7:/ { print "  adr: none owed"; print "  documented: the fixture has nothing to document" }' "$IB/$PLAN_REL" > "$IB/plan.tmp" && mv "$IB/plan.tmp" "$IB/$PLAN_REL"
-expect_eq "INSERT.9 precondition: Step 7 carries two continuation lines" "2" "$(block_lines "$IB/$PLAN_REL" 7)"
-run_close "$IB" run
-expect_eq "INSERT.10 a plan whose Step-7 block has continuation lines closes (rc 0)" "0" "$CO_RC"
-expect_eq "INSERT.11 …the Step-7 block is intact and the Step-8 line follows its last continuation line" "7 8 9/2/yes" \
-  "$(step_order "$IB/$PLAN_REL")/$(block_lines "$IB/$PLAN_REL" 7)/$(awk '/^  documented: /{d=NR} /^- Step 8: CLOSED /{s=NR} END{print (d && s == d + 1) ? "yes" : "no"}' "$IB/$PLAN_REL")"
-
-# A PLAN WITH NO STEP LINE AT ALL gets the block at the end of ## SDLC State.
-IC="$(mk_fixture insert-c)"; advance_to "$IC" 8; drop_step_line "$IC" 8; drop_step_line "$IC" 7
-expect_eq "INSERT.12 precondition: the plan carries no step line" "" "$(step_order "$IC/$PLAN_REL")"
-run_close "$IC" run
-expect_eq "INSERT.13 a plan with no step line closes too (rc 0), with Step 8 then Step 9" "0/8 9" "$CO_RC/$(step_order "$IC/$PLAN_REL")"
-
-# A REFUSED RUN WRITES NO STEP-8 LINE: the insert is phase 8's, behind the pre-flight (paired with INSERT.3).
+# A REFUSED RUN WRITES NOTHING: the pre-flight refuses before any act (paired with INSERT.3).
 ID="$(mk_fixture insert-d)"; advance_to "$ID" 8; drop_step_line "$ID" 8
 rm -f "$ID/.bionic/docs/record/generic-evidence.md"
 ID_STATE="$(presence_state "$ID")/$(sha_of "$ID/$PLAN_REL")"
 run_close "$ID" run
-expect_eq "INSERT.14 a run the gate would refuse still refuses (rc 2) and writes no Step-8 line: plan, branch and tmp untouched" "2/$ID_STATE" \
+expect_eq "INSERT.14 a run the gate would refuse still refuses (rc 2): plan, branch and tmp untouched" "2/$ID_STATE" \
   "$CO_RC/$(presence_state "$ID")/$(sha_of "$ID/$PLAN_REL")"
 
 # THE WALK, WHERE THE GATE READS IT: the run's walk proof (proof-add walk), else an older plan's Step-5 pointer. The
