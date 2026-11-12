@@ -3121,7 +3121,9 @@ validate_net_zero() {
       [ "${line%%$'\t'*}" = "$_EG_RID" ] || continue
       written="$(units_field "$line" "$cell")"; break
     done < <(units_rows "$PLAN" 2>/dev/null)
-    plan_read_waits "$PLAN" "$_EG_RID" 2>/dev/null | /usr/bin/grep -qxF "${_EG_RID}"$'\t'"wait"$'\t'"approval:doctrine-growth" && row_waits=1
+    case $'\n'"$(plan_read_waits "$PLAN" "$_EG_RID" 2>/dev/null)"$'\n' in
+      *$'\n'"${_EG_RID}"$'\t'wait$'\t'approval:doctrine-growth$'\n'*) row_waits=1 ;;
+    esac
     case "${_EG_RSTATUS:-}" in
       pending|active) [ "$row_waits" = 1 ] || lacks="row ${_EG_RID} does not ${verb} approval:doctrine-growth" ;;
       *) lacks="row ${_EG_RID} is ${_EG_RSTATUS:-without a status}, not open" ;;

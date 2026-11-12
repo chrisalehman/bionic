@@ -34,6 +34,7 @@
 #   §TREE    a row's tree and base read from the newest tree event in the log, its cells for a row the log holds none for
 #   §LEDGER  a landed row with no line asked of the reader: admitted when it answers landed, refused when it does not
 #   §DROP    a drop in the run's log reads dropped to the reader and the fill at 15, launched or not; a wait on it is met
+#   §NAMED   a task at 15 names in its deps the approval it waits on; the fill takes every wait from plan_read_waits
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT is lib/units.sh's own header. §2 is its assertion: the same rows with every
 # column REVERSED must produce a byte-identical TSV.
