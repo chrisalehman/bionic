@@ -97,8 +97,8 @@ plan_fixture_log() {
 
 # _plan_fixture_rows <log> <step> [<row>...] -> each row, given in PLAN_FIXTURE_HEADER's thirteen cells, printed in the
 #   nine a version-15 row holds; the log is written whole with what the other cells and the state section said: a step
-#   event for each step to <step> (step 9 not delivered, as the state section's open 9 was), the approval of each gate
-#   the run has passed (steps 0 to 3), then
+#   event for each step to <step> (step 9 not delivered, as the state section's open 9 was), the plan's approval (the
+#   one approval a verb writes), then
 #   per row its dispatch under the agent cell's name (a row not
 #   pending), its tree, and its landing. Each line has its own instant, so the fold reads them in the order written.
 _plan_fixture_rows() {
@@ -107,8 +107,7 @@ _plan_fixture_rows() {
   printf '%s\n' "$@" | awk -F'|' -v lf="$log" -v n="$n" '
     function none(s) { gsub(/—|-/, "", s); return s == "" }
     function ev(s) { printf "run/v1|ev=%s|at=2026-10-04T00:%02d:00Z\n", s, ++t > lf }
-    BEGIN { for (i = 1; i <= n; i++) ev("step|n=" i (i == 9 ? "|delivered=no" : ""))
-      for (i = 0; i < n && i <= 3; i++) ev("approval|key=step" i "|by=fixture|said=approved") }
+    BEGIN { for (i = 1; i <= n; i++) ev("step|n=" i (i == 9 ? "|delivered=no" : "")); ev("approval|key=step3|by=fixture|said=approved") }
     NF > 13 { for (i = 2; i < NF; i++) { c[i - 1] = $i; gsub(/^[ \t]+|[ \t]+$/, "", c[i - 1]) }
       printf "| %s | %s | %s | %s | %s | %s | %s | %s | — |\n", c[1], c[2], c[3], c[4], c[6], c[8], c[9], c[10]
       if (!none(c[5]) && c[13] != "pending") ev("dispatch|row=" c[1] "|name=" c[5])
