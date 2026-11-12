@@ -70,14 +70,20 @@ call_bind() {  # <root> <sid> <plan|none> -> sets BIND_ST / BIND_WHY / BIND_ERR
   BIND_ERR=$(cat "$SANDBOX/.err" 2>/dev/null)
 }
 
-open_body()   { printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in flight\n'; }
-closed_body() { printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 9\n\n- Step 9: close-out delivered: yes\n'; }
+# page15 <plan> <step> [line end] -> a plan page at 15 and its run's log, <docs>/record/<stem>/run.log, at <step>:
+# open below 9, delivered at 9. A plan at 15 holds no state section; its header says 15 and its log where it stands.
+page15() {
+  local l="${1%/plans/*}/record/$(basename "$1" .plan.md)/run.log"
+  mkdir -p "${1%/*}" "${l%/*}"
+  printf -- "---${3:-\n}canonical_sdlc_version: 15${3:-\n}---${3:-\n}" > "$1"
+  printf 'run/v1|ev=step|n=%s|at=2026-10-04T00:00:00Z\n' "$2" > "$l"
+}
 
 make_repo() {  # <name> -> an engaged-looking root holding one OPEN plan
   local d="$SANDBOX/$1"
-  mkdir -p "$d/.bionic/docs/plans/epic-01-demo" "$d/.bionic/tmp"
+  mkdir -p "$d/.bionic/tmp"
   git -C "$d" init -q . 2>/dev/null
-  open_body > "$d/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
+  page15 "$d/.bionic/docs/plans/epic-01-demo/wave-01.plan.md" 4
   printf '%s' "$d"
 }
 
@@ -136,7 +142,7 @@ expect_eq "…and so does a path whose directory does not exist" "unresolvable" 
 
 # (e) :117 — the path resolves, and is simply not a member of the open-run set.
 CLOSED="$R1/.bionic/docs/plans/epic-01-demo/wave-09-closed.plan.md"
-closed_body > "$CLOSED"
+page15 "$CLOSED" 9
 call_bind "$R1" "$SID" "$CLOSED"
 expect_eq "a CLOSED plan of this root refuses (exit 1)" "1" "$BIND_ST"
 expect_eq "…and names the open-run set" "not-an-open-run" "$BIND_WHY"
@@ -147,7 +153,7 @@ expect_eq "…and so does an open plan of ANOTHER root" "not-an-open-run" "$BIND
 NOTPLAN="$R1/.bionic/docs/plans/epic-01-demo/notes.md"
 printf '# just notes\n' > "$NOTPLAN"
 call_bind "$R1" "$SID" "$NOTPLAN"
-expect_eq "…and so does a file under plans/ carrying no ## SDLC State" "not-an-open-run" "$BIND_WHY"
+expect_eq "…and so does a file under plans/ carrying neither a state section nor a header at 15" "not-an-open-run" "$BIND_WHY"
 call_bind "$R1" "$SID" "$P1"
 expect_eq "…paired: the root's open plan on the same fixture is accepted (exit 0)" "0" "$BIND_ST"
 
@@ -258,9 +264,9 @@ call_bind_act() {  # <root> <sid> <plan|none> <act> -> sets BIND_ST / BIND_WHY /
 R7="$(make_repo r7)"
 P7="$R7/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"
 D7="$R7/.bionic/docs/plans/epic-01-demo/wave-02-delivered.plan.md"
-closed_body > "$D7"
+page15 "$D7" 9
 A7="$R7/.bionic/docs/plans/epic-01-demo/wave-03-abandoned.plan.md"
-printf -- '---\ncanonical_sdlc_version: 14\nabandoned: 2026-10-01 superseded\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in flight\n' > "$A7"
+page15 "$A7" 4; printf 'run/v1|ev=abandon|why=superseded|at=2026-10-04T00:01:00Z\n' >> "$R7/.bionic/docs/record/wave-03-abandoned/run.log"
 call_bind_act "$R7" "$SID" "$P7" bind
 expect_eq "7a paired positive: the root's open plan binds by the verb's act, bound-open" "0||bound-open $P7" "$BIND_ST|$BIND_WHY|$BIND_RUN"
 call_bind_act "$R7" "$SID" "$D7" bind
@@ -277,7 +283,7 @@ for act in engage write; do
     "$BIND_ST|$BIND_WHY|$(grep -m1 '^plan=' "$(marker_of "$R7")")"
 done
 OTHER7="$(make_repo r7-other)"
-closed_body > "$OTHER7/.bionic/docs/plans/epic-01-demo/wave-02-delivered.plan.md"
+page15 "$OTHER7/.bionic/docs/plans/epic-01-demo/wave-02-delivered.plan.md" 9
 call_bind_act "$R7" "$SID" "$OTHER7/.bionic/docs/plans/epic-01-demo/wave-02-delivered.plan.md" bind
 expect_eq "7e a delivered plan of ANOTHER root is refused not-an-open-run" "1|not-an-open-run" "$BIND_ST|$BIND_WHY"
 
@@ -324,21 +330,15 @@ section "9 — a page at 15 is a run: the walk finds it, engagement binds it, an
 # lines. A page whose header does not say 15 is judged by its state section, as before.
 # fails-when: an open page at 15 is missing from the open-run set, refused by engagement or not the unbound fallback;
 # or a fenced header, or a page at 14 with no state section, is listed.
-page15() {  # <plan> <step> [line end] -> a page at 15 and its run's log, <docs>/record/<stem>/run.log, at <step>
-  local l="${1%/plans/*}/record/$(basename "$1" .plan.md)/run.log"
-  mkdir -p "${1%/*}" "${l%/*}"
-  printf -- "---${3:-\n}canonical_sdlc_version: 15${3:-\n}---${3:-\n}" > "$1"
-  printf 'run/v1|ev=step|n=%s|at=2026-10-04T00:00:00Z\n' "$2" > "$l"
-}
-R9="$(make_repo r9)"; D9="$R9/.bionic/docs/plans/epic-01-demo"; rm -f "$D9/wave-01.plan.md"
-page15 "$D9/wave-01.plan.md" 4; page15 "$D9/wave-02-cr.plan.md" 4 '\r'; page15 "$D9/wave-03-fenced.plan.md" 4; page15 "$D9/wave-04.plan.md" 4
+R9="$(make_repo r9)"; D9="$R9/.bionic/docs/plans/epic-01-demo"
+page15 "$D9/wave-02-cr.plan.md" 4 '\r'; page15 "$D9/wave-03-fenced.plan.md" 4; page15 "$D9/wave-04.plan.md" 4
 printf '# notes\n```\n---\ncanonical_sdlc_version: 15\n---\n```\n' > "$D9/wave-03-fenced.plan.md"
 printf -- '---\ncanonical_sdlc_version: 14\n---\n' > "$D9/wave-04.plan.md"
 expect_eq "9a the walk lists the open page at 15 and the CR-only one; not the fenced header, nor the page at 14 with no state section" \
   "wave-01.plan.md wave-02-cr.plan.md" "$(bash -c '. "$1"; open_runs "$2"' _ "$RUNLIB" "$R9" 2>/dev/null | sed 's#.*/##' | sort | paste -sd' ' -)"
 call_bind_act "$R9" "$SID" "$D9/wave-01.plan.md" engage
 expect_eq "9b engagement binds the page at 15 (exit 0, no refusal) and the session reads it bound-open" "0||bound-open $D9/wave-01.plan.md" "$BIND_ST|$BIND_WHY|$BIND_RUN"
-R9U="$(make_repo r9u)"; rm -f "$R9U/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"; page15 "$R9U/.bionic/docs/plans/epic-01-demo/wave-01.plan.md" 4
+R9U="$(make_repo r9u)"
 unbound_marker "$R9U" "$SID"
 expect_eq "9c an unbound session reads the root's one page at 15 as its fallback" "fallback $R9U/.bionic/docs/plans/epic-01-demo/wave-01.plan.md" \
   "$(bash -c '. "$1"; session_run "$2" "$3"' _ "$RUNLIB" "$R9U" "$SID" 2>/dev/null)"
