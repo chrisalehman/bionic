@@ -6411,9 +6411,11 @@ A commit placed outside the project root and outside every tree of its repositor
 
   # ---------- ARM A (wave-20 T9; REQ-4, AC-4.2; spec D4): a subagent changes no contract ----
   #
-  # `session-poker.sh amend` widens a live row's Files/Suites/Re-executes, `extend` re-opens a
-  # MET row, and `task-add` writes the bound plan. All three are the orchestrator's: a writer
-  # that could run them would grant itself a wider budget or schedule its own work. The
+  # Every verb on `_wall_poker_contract_verb`'s list changes a roster contract or the run's record:
+  # `amend` widens a live row's Files/Suites/Re-executes, `extend` re-opens a MET row, `task-add`
+  # records a row's birth, and `proof-add` registers the evidence the gates judge by. Each is the
+  # orchestrator's: a writer that could run one would widen its own budget, schedule its own work
+  # or register the evidence it is judged by. The
   # script cannot see who called it — in-process teammates share the session's environment —
   # so the refusal is here, below the partition every arm of this function shares: a payload
   # carrying a top-level `agent_id`, in an armed session. Main-thread calls never reach it.
@@ -6463,10 +6465,10 @@ The one amend a writer runs itself adds Files to its own row, alone in one call:
     bash <plugin>/hooks/session-poker.sh amend $_BSG_AM_OWN --files+ <path> --reason '<why>'"
         fi
         fold_block exit2 "$_WALL_POKER_VERB" \
-          "a subagent may not change a contract or the plan" "ask main" \
-          "\`$_WALL_POKER_SHOWN\` changes a roster contract or the bound plan, and
-only the orchestrator does that: a dispatched agent that could would widen its own budget or
-schedule its own work. Send the orchestrator what you need — the files, suites or runs to
+          "a subagent may not change a contract or the run's record" "ask main" \
+          "\`$_WALL_POKER_SHOWN\` changes a roster contract or the run's record (its plan or its log), and
+only the orchestrator does that: a dispatched agent that could would widen its own budget,
+schedule its own work, or register the evidence it is judged by. Send the orchestrator what you need — the files, suites or runs to
 add and why, or the row to add — and it runs the verb.${_bsg_am_more}"
         return 2
       fi
