@@ -12,7 +12,8 @@
 #                 a planted second appender of a waiver, a finding or a proof beside the one writer of each.
 #   §NAMES        the verbs the dispatch, born and tree events and the landing's event retired, and the five that
 #                 wrote a matrix cell, are named nowhere in hooks/ or payload/scripts/ but the walls' single-line list of
-#                 verbs, which the row that edits it clears.
+#                 verbs, which the row that edits it clears; nor are those that wrote a step's line, its fields, the
+#                 regression's setting and the count of its runs, beside the step's one writer in §WRITERS.
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted, one site for each name the
 #                 check counts; the dispatch wall lists none, and no fact the dispatch library says is in its file.
 #   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
@@ -96,6 +97,8 @@ expect_contains "tree: the tree verb's one writer" "payload/scripts/lib/worktree
 expect_contains "tree: the planted second writer beside it" "payload/scripts/lib/planted-writers.sh:planted_tree" "$TRE"
 SH0="$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "shared" && ($2 == "born" || $2 == "dispatch" || $2 == "waiver" || $2 == "finding" || $2 == "proof" || $2 == "tree")' | grep -c .)"
 expect_eq "the shared-type count rises by each of the six planted types not shared before" "$(( $(count "$BEFORE" shared_types) + 6 - SH0 ))" "$(count "$AFTER" shared_types)"
+expect_eq "step: one writer, the facts library's, and no second" "payload/scripts/lib/proof.sh proof_step_event|" \
+  "$(printf '%s\n' "$AFTER" | awk -F'\t' '$1 == "writer" && $2 == "step" { split($3, w, " "); sub(/:[0-9]+$/, "", w[1]); print w[1], w[2] }')|$(pair step)"
 # The two setters of matrix cells go with the matrix; every other hand event is written by the one writer.
 expect_eq "hand: one writer, the line library's, beside the matrix setters" "payload/scripts/lib/line.sh line_hand_event" \
   "$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "writer" && $2 == "hand" { split($3, w, " "); sub(/:[0-9]+$/, "", w[1]); print w[1], w[2] }' \
@@ -111,6 +114,13 @@ cells() { /usr/bin/grep -rnE 'matrix-(set|retier|render)|waive-row|poker_verb_di
 printf '%s\n' '# matrix-retier' '# session-poker.sh discharge AC-1' > "$L/planted-cell.sh"
 expect_eq "the extractor reads both planted names of the verbs that wrote a matrix cell" "2" "$(cells "$S" | grep -c planted-cell.sh)"
 expect_eq "the five verbs that wrote a matrix cell are named nowhere else" "" "$(cells "$S" | grep -v planted-cell.sh)"
+
+# The walls' list of verbs keeps its dead names, and a version-15 header still refuses the runs count's old key.
+steps() { /usr/bin/grep -rnE 'step-line|step-field|regression-runs|regression_runs_count|units_set_current|units_step_line|units_step_fields|poker_verb_regression\b' "$1/hooks" "$1/payload/scripts" \
+  | grep -v -e '/payload/scripts/lib/walls\.sh:' -e 'PLAN_READ_GONE_KEYS='; }
+printf '%s\n' '# step-field 5 walk-artifact=x' '# regression-runs --write' > "$L/planted-step.sh"
+expect_eq "the extractor reads both planted names of the step's writers" "2" "$(steps "$S" | grep -c planted-step.sh)"
+expect_eq "the verbs that wrote a step's line, its fields, the regression's setting and its runs' count are named nowhere else" "" "$(steps "$S" | grep -v planted-step.sh)"
 
 section "REFUSALS"
 own() { printf '%s\n' "${2:-$BEFORE}" | awk -F'\t' -v f="hooks/$1.sh:" 'index($2, f) == 1 { n = $2; sub(/.*:/, "", n); print n, $3 }'; }

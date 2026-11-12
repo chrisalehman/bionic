@@ -448,7 +448,7 @@ expect_eq "Steps stand in their numbers' order, wherever an instant sorts" "0 1 
 expect_contains "a Step with no instant keeps none, and its place makes none" "run/v1|ev=step|n=2|at=" "$(translate "$U" events | grep -x 'run/v1|ev=step|n=2|at=')"
 expect_contains "and its instant is still a gap" "gap/v1|ev=step|n=2|field=at|why=absent" "$(translate "$U" gaps)"
 section "PARKED"
-# The note step-line 9 writes on a parked plan, read as a step, would close the run before close-out does.
+# A person's note on a parked plan's Step 9 line, read as a step, would close the run before close-out does.
 K="$D/plans/epic-x/wave-7-parked.plan.md"; k8='- Step 8: integrate: opened 2026-11-01T11:00Z'
 printf '%s\n' '## SDLC State' 'current: 8' '- Step 7: documented at 2026-11-01T10:00Z' "$k8" '- Step 9: parked on wave/7-parked — waits on a hand test' > "$K"
 expect_eq "a parked plan's Step 9 note is no delivery: the step is its current:" "n=8 state=open" "$(bash "$RS" "$K" step | paste -sd' ' -)"

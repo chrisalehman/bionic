@@ -208,7 +208,7 @@ FL_AT="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" || exit 9
   proof_add_line "$6" "$(proof_line regression "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/regression-run-$3.log")" > "$6.pf" && mv "$6.pf" "$6" && printf "%s" "$h"' \
   _ "$REPO_ROOT/payload/scripts/lib" "$PFL/.bionic/docs" "$FL_H" "$PFL-wave" "$PFL" "$PFL/$PLAN_REL" 2>&1)"
 fl_poke current 8
-expect_eq "FL3 current 8 is admitted on the facts (exit 0)" "0|8" "$FL_RC|$(sed -n 's/^current: //p' "$PFL/$PLAN_REL")"
+expect_eq "FL3 current 8 is admitted on the facts (exit 0)" "0|n=8" "$FL_RC|$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$PFL/$PLAN_REL" step | head -1)"
 run_close "$PFL" run
 expect_eq "FL4 AC-17.1 close-out.sh run delivers on a declared floor's proof (rc 0), the plan closed" "0|1" \
   "$CO_RC|$(run_open_rc "$PFL/$PLAN_REL")"
@@ -231,7 +231,7 @@ FN_AT="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" || exit 9
 FN_RC="$( ( in_fixture "$PFN" || exit 9
   HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
     CLAUDE_CODE_SESSION_ID="$FN_SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" current 8 ) > "$SANDBOX/fn-poker" 2>&1; echo $?)"
-expect_eq "FL7 AC-7.10 current 8 is admitted on that floor (exit 0)" "0|8" "$FN_RC|$(sed -n 's/^current: //p' "$PFN/$PLAN_REL")"
+expect_eq "FL7 AC-7.10 current 8 is admitted on that floor (exit 0)" "0|n=8" "$FN_RC|$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$PFN/$PLAN_REL" step | head -1)"
 run_close "$PFN" run
 expect_eq "FL8 AC-7.10 close-out.sh run delivers on the project's own runner's log (rc 0), the plan closed" "0|1" \
   "$CO_RC|$(run_open_rc "$PFN/$PLAN_REL")"
@@ -377,11 +377,10 @@ DL_N="$(carry_section "$PDL/$CONT_REL" | /usr/bin/grep -c -e '^deferred: ' -e '^
 expect_absent "DEBT-LINES-4c …printing none of them, the corrected debt line included" "hole_x hole" "$DL_CARD"
 
 # ============================================================
-section "RUNS — wave-30 T12 (REQ-4 AC-4.6, D7d; D6): the card prints regression-runs, and the Step-8 sweep stops every orphan run"
+section "RUNS: the Step-8 sweep stops every orphan run"
 # ============================================================
 #
-# THE COUNT IS READ BEFORE THE WIPE TAKES THE ROSTERS: `regression-runs: <n>` is session-poker's
-# `regression-runs`, the full-runner runs the rosters record as ended. THE SWEEP: a detached run
+# THE SWEEP: a detached run
 # (booked.sh --detach) whose pid is alive and that wrote no end, left by a closing run, is an orphan;
 # `run` stops it through `session-poker.sh stop-run` and names it with its last progress line, then
 # the wipe takes its files; `check` names it and sends nothing. FIXTURE FIDELITY: the roster row is a
@@ -413,15 +412,12 @@ pr_hands() { /usr/bin/grep '^run/v1|ev=hand|what=stop-run|' "$PR/.bionic/docs/re
 expect_eq "RUNS.0b precondition: a person's stop with its reason is one hand event in the run's log" "a person stopped it" "$(pr_hands)"
 
 run_close "$PR" check
-expect_eq "RUNS.1 AC-4.6 check prints the release card's count of full runs, from the run records" "yes" \
-  "$(contains "$CO_OUT" "regression-runs: 1")"
 expect_eq "RUNS.2b …ending in the run's last progress line" "yes" \
   "$(contains "$(printf '%s\n' "$CO_OUT" | grep '^orphan: ')" "; last progress: 2026-10-08T00:00:02Z o.test.sh §sec-orph")"
 expect_true "RUNS.3 …and sends nothing: the orphan is still alive" kill -0 "${PR_PID:-0}"
 
 run_close_as fixture "$PR" run
 expect_eq "RUNS.4 run exits 0" "0" "$CO_RC"
-expect_eq "RUNS.5 AC-4.6 run prints the count on the card too" "yes" "$(contains "$CO_OUT" "regression-runs: 1")"
 expect_false "RUNS.7 …and the orphan's process is gone" kill -0 "${PR_PID:-0}"
 expect_eq "RUNS.8 …and the wipe took its files with the rest of .bionic/tmp" "0" "$(tmp_entries "$PR")"
 expect_eq "RUNS.9 one orphan, one line" "1" "$(printf '%s\n' "$CO_OUT" | grep -c '^orphan: ')"
@@ -728,15 +724,12 @@ expect_eq "ORDER-9b …and rendered no second part: the branch is where the firs
   "$(fixture_git "$PMO" rev-parse --verify -q refs/heads/wave/01-fixture)"
 
 # ============================================================
-section "§ADRS — the Step-7 advance renders adrs: from the Step 7 adr: line, and close-out's epic row reads either (REQ-9 AC-9.1)"
+section "§ADRS — close-out's epic row reads the plan's adrs:, else the Step 7 block's adr: line (REQ-9 AC-9.1)"
 # ============================================================
-# The document step's pointer is the Step 7 block's `adr:` line (`step-field 7 adr=…`); the epic row reads the plan's
-# `adrs:` frontmatter, which no verb wrote, so a plan with the first and not the second was refused its row. `current 7`
-# renders `adrs:` from the block when the frontmatter has none (`adrs: none` when the block says n/a), and never
-# rewrites one that is there; close-out reads the frontmatter, else the Step 7 `adr:` line. An ADR path with no
-# `adr-<n>` gives no number, so the row carries the path as written. FIXTURE FIDELITY: mk_fixture's plan with its
-# `adrs:` line taken out and its Step 7 line written as `step-line 7` and `step-field 7 adr=` write it; the advance is
-# the real verb, run as a session bound to the plan.
+# The document step's pointer is the plan's `adrs:` header line, written by the orchestrator; an older plan may name it
+# only on its Step 7 block's `adr:` line, and close-out reads that too. An ADR path with no `adr-<n>` gives no number,
+# so the row carries the path as written. FIXTURE FIDELITY: mk_fixture's plan with its `adrs:` line taken out and its
+# Step 7 line a block carrying `adr:`, as an older plan's edit wrote it.
 # fails-when: a plan with `adr:` on its Step 7 line and no `adrs:` makes `epic_row_missing` refuse the row.
 ad_step7() {  # <project> <adr value> -> the plan without adrs:, its Step 7 line a block carrying adr: <value>
   local plan="$1/$PLAN_REL"
@@ -748,52 +741,16 @@ ad_step7() {  # <project> <adr value> -> the plan without adrs:, its Step 7 line
     { print }' "$plan" > "$plan.a" && mv "$plan.a" "$plan"
 }
 ad_adrs() { awk 'NR == 1 { fm = 1; next } fm && /^---$/ { exit } fm && /^adrs:/ { sub(/^adrs:[ \t]*/, ""); print }' "$1"; }
-ad_poke() {  # <project> <sid> <verb> [<arg>...] -> AD_RC, AD_OUT: the real poker verb, in the fixture, as that session
-  local proj="$1" sid="$2"; shift 2
-  ( in_fixture "$proj" || exit 9
-    HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
-      CLAUDE_CODE_SESSION_ID="$sid" bash "$BIONIC_HOOKS_DIR/session-poker.sh" "$@" ) > "$SANDBOX/ad-poker" 2>&1
-  AD_RC=$?; AD_OUT="$(cat "$SANDBOX/ad-poker")"
-}
-ad_bind() { ( in_fixture "$1" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$1" "$2" "$1/$PLAN_REL" ); }
 AD_ADR="adrs/epic-fx/adr-061-the-pointer.md"
-# close-out reads either: the plan carries the Step 7 adr: line and no adrs:
 PAD="$(mk_fixture adrs-either)"; ad_step7 "$PAD" "$AD_ADR"; advance_to "$PAD" 8
 expect_eq "AD-0 precondition: the plan carries no adrs: line, and its Step 7 block the adr: line" "|yes" \
   "$(ad_adrs "$PAD/$PLAN_REL")|$(/usr/bin/grep -qxF "  adr: $AD_ADR" "$PAD/$PLAN_REL" && echo yes || echo no)"
 run_close "$PAD" run
 expect_eq "AD-1 close-out reads the Step 7 adr: line: run exits 0 and the epic row's ADR cell names its number" "0|061" "$CO_RC|$(adr_cell "$PAD")"
 [ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | /usr/bin/grep -i 'adrs\|refuse' | head -4 | sed 's/^/    | /'
-# the advance renders the line, from a session bound to the plan
-AD_SID="closeout-adrs-sid"
-PAV="$(mk_fixture adrs-advance)"; ad_step7 "$PAV" "$AD_ADR"; advance_to "$PAV" 6; ad_bind "$PAV" "$AD_SID"
-ad_poke "$PAV" "$AD_SID" current 7
-expect_eq "AD-2 current 7 renders adrs: from the Step 7 adr: line: rc 0, current: 7, the frontmatter names the ADR" \
-  "0|7|$AD_ADR" "$AD_RC|$(sed -n 's/^current: //p' "$PAV/$PLAN_REL")|$(ad_adrs "$PAV/$PLAN_REL")"
-[ "$AD_RC" = 0 ] || printf '%s\n' "$AD_OUT" | tail -6 | sed 's/^/    | /'
-expect_contains "AD-2b …and says what it rendered" "adrs: $AD_ADR" "$AD_OUT"
-advance_to "$PAV" 8
-run_close "$PAV" run
-expect_eq "AD-3 the rendered line closes the run: rc 0 and the epic row names 061" "0|061" "$CO_RC|$(adr_cell "$PAV")"
-# an ADR named by a path with no adr-<n>: the line is rendered, and the row carries the path
-PAP="$(mk_fixture adrs-path)"; ad_step7 "$PAP" "record/wave-01-fixture/adr.md"; advance_to "$PAP" 6; ad_bind "$PAP" "$AD_SID"
-ad_poke "$PAP" "$AD_SID" current 7
-expect_eq "AD-4 a path with no adr-<n> is rendered as written" "0|record/wave-01-fixture/adr.md" "$AD_RC|$(ad_adrs "$PAP/$PLAN_REL")"
-advance_to "$PAP" 8
+PAP="$(mk_fixture adrs-path)"; ad_step7 "$PAP" "record/wave-01-fixture/adr.md"; advance_to "$PAP" 8
 run_close "$PAP" run
-expect_eq "AD-5 …and the epic row is written, its ADR cell the path, never refused" "0|record/wave-01-fixture/adr.md" "$CO_RC|$(adr_cell "$PAP")"
-# a Step 7 that says n/a renders adrs: none; an adrs: line already there is never rewritten
-PAN="$(mk_fixture adrs-na)"; advance_to "$PAN" 6; ad_bind "$PAN" "$AD_SID"
-awk 'NR == 1 { fm = 1 } fm && NR > 1 && /^---$/ { fm = 0 } fm && /^adrs:/ { next }
-  /^- Step 7:/ { print "- Step 7: document: no ADR"; print "  n/a: no ADR owed by a fixture"; next } { print }' \
-  "$PAN/$PLAN_REL" > "$PAN/plan.tmp" && mv "$PAN/plan.tmp" "$PAN/$PLAN_REL"
-ad_poke "$PAN" "$AD_SID" current 7
-expect_eq "AD-6 a Step 7 line that says n/a renders adrs: none" "0|none" "$AD_RC|$(ad_adrs "$PAN/$PLAN_REL")"
-[ "$AD_RC" = 0 ] || printf '%s\n' "$AD_OUT" | tail -6 | sed 's/^/    | /'
-PAK="$(mk_fixture adrs-kept)"; ad_step7 "$PAK" "$AD_ADR"; advance_to "$PAK" 6; ad_bind "$PAK" "$AD_SID"
-set_plan_keys "$PAK" "-" "adrs: adrs/epic-fx/adr-060-written-by-hand.md"
-ad_poke "$PAK" "$AD_SID" current 7
-expect_eq "AD-7 an adrs: line the plan carries is kept as written" "0|adrs/epic-fx/adr-060-written-by-hand.md" "$AD_RC|$(ad_adrs "$PAK/$PLAN_REL")"
+expect_eq "AD-5 a path with no adr-<n>: the epic row is written, its ADR cell the path, never refused" "0|record/wave-01-fixture/adr.md" "$CO_RC|$(adr_cell "$PAP")"
 
 # ============================================================
 section "§REG: the continuation's regression line prints the full pass's state at this head from the one printer"

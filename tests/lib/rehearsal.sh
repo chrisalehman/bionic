@@ -55,7 +55,9 @@
 #   [typed]   the user's typed words in the session's transcript, with the session's start record: the CLI and
 #             session-start write those two in a real session
 #   [launch]  a launched agent's roster row, through the roster's production writer (below)
-# A register, a ledger line a verb owns, a proof line, a step line, an approval or a landing record is never written
+#   [plan]    the orchestrator's edit of a version-14 plan's state section: a step's evidence lines, which no verb
+#             writes, since a step is an event its advance appends
+# A register, a ledger line a verb owns, a proof line, a step, an approval or a landing record is never written
 # here: each comes from its command.
 #
 # THE ROSTER ROW of each reviewer is written through the roster's production writer (`roster_row`, by
@@ -83,7 +85,7 @@ if ! type -t roster_row_fixture >/dev/null 2>&1; then
 fi
 
 # The kinds of hand write, each what a person, an agent or the harness writes in a real run (above).
-RH_HAND_KINDS="prose record code typed launch"
+RH_HAND_KINDS="prose record code typed launch plan"
 
 # The run's three goals, as the plan's goals: line declares them: met, not met and not measured yet in every state.
 RH_GOALS="shown · the person says from the card what they owe (record/wave-x/goal-shown.md) ; asks · every ask on the register is on the card (record/wave-x/goal-asks.md) ; walked · the walk finds nothing to fix (record/wave-x/goal-walked.md)"
@@ -125,6 +127,15 @@ _rh_hand() { printf '# by hand: [%s] %s\n' "$1" "$2" >> "$RH_LOG"; }   # <kind> 
 # _rh_cell <label> <row> <column>=<value>… -> the person's edit of a Tasks row's cells, judged by the table check the
 # write hook runs (lib/units.sh `units_cells_write`), as one logged act.
 _rh_cell() { local l="$1"; shift; _rh_do "$l" bash -c '. "$1/units.sh" 2>/dev/null && units_cells_write "${@:2}"' _ "$RH_ROOT/payload/scripts/lib" "$RH_PLAN" "$@"; }
+# _rh_step <N> <text> [<key: value>]… -> the orchestrator's edit: step N's evidence line and its block at the end of the
+# plan's state section, marked as a hand write of the plan.
+_rh_step() {
+  local n="$1" t="$2"; shift 2
+  RH_B="$(printf '  %s\n' "$@")" awk -v l="- Step $n: $t" 'BEGIN { b = ENVIRON["RH_B"] }
+    /^## / && on { print l; if (b != "  ") print b; on = 0 } /^## SDLC State/ { on = 1 } { print }
+    END { if (on) { print l; if (b != "  ") print b } }' "$RH_PLAN" > "$RH_PLAN.t" && mv "$RH_PLAN.t" "$RH_PLAN" || return 1
+  _rh_hand plan "the evidence of step $n: $t"
+}
 _rh_head() { git -C "$RH_ROOT" rev-parse --verify -q refs/heads/wave/x; }
 _rh_commit() { git -C "$1" add -A >/dev/null 2>&1 && git -C "$1" commit --quiet -m "$2"; }   # <tree> <message>
 
@@ -238,9 +249,8 @@ _rh_verify() {
     _rh_hand record "the walk record/wave-x/walk.md"
   fi
   _rh_poker "register the walk" proof-add walk record/wave-x/walk.md || return 1
-  _rh_poker "Step 5's line" step-line 5 'regression at record/wave-x/regression-run.log' || return 1
-  _rh_poker "Step 5's walk" step-field 5 walk-artifact=record/wave-x/walk.md || return 1
-  [ "$dbl" = no ] || _rh_poker "Step 5's auditor" step-field 5 'auditor=CONFIRMED, record/wave-x/audit.md' || return 1
+  if [ "$dbl" = no ]; then _rh_step 5 'regression at record/wave-x/regression-run.log' 'walk-artifact: record/wave-x/walk.md' || return 1
+  else _rh_step 5 'regression at record/wave-x/regression-run.log' 'walk-artifact: record/wave-x/walk.md' 'auditor: CONFIRMED, record/wave-x/audit.md' || return 1; fi
   _rh_poker "enter Step 5" current 5
 }
 
@@ -264,12 +274,11 @@ _rh_release_card() {
   done
   _rh_do "the sweeper acks the five reviewers" bash "$RH_ROOT/hooks/session-sweeper.sh" ack \
     w-evidence-piece w-adversarial-piece w-structure-piece w-adversarial-whole w-structure-whole || return 1
-  _rh_poker "Step 6's line" step-line 6 'review at record/wave-x/w-evidence-piece.md' || return 1
+  _rh_step 6 'review at record/wave-x/w-evidence-piece.md' || return 1
   _rh_poker "enter Step 6" current 6 || return 1
   _rh_poker "the release check at the build head" release-check || return 1
   printf 'no decision this run\n' > "$RH_REC/adr.md"; _rh_hand record "the document record/wave-x/adr.md"
-  _rh_poker "Step 7's line" step-line 7 'documented at record/wave-x/adr.md' || return 1
-  _rh_poker "Step 7's document" step-field 7 adr=record/wave-x/adr.md || return 1
+  _rh_step 7 'documented at record/wave-x/adr.md' 'adr: record/wave-x/adr.md' || return 1
   _rh_poker "enter Step 7" current 7 || return 1
   t2="$(door_piece "$RH_ROOT" T2)" && door_release "$RH_ROOT" "$t2" >/dev/null \
     || { echo "rehearse $RH_STATE: the release commit in .worktrees/T2 failed" >&2; return 1; }

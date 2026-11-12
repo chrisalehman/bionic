@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # hooks/poker/roster.sh — the roster: the runs, adoption and the sweep (adopt, sweep, bind,
-# extend, hold, rule, ruling-ack, rulings, wait, stop-run, regression-runs).
+# extend, hold, rule, ruling-ack, rulings, wait, stop-run).
 #
 # A part of hooks/session-poker.sh, which sets every global and loads this file before any verb runs. A part
 # defines functions only, and is never run by itself.
@@ -64,7 +64,7 @@
 # (a line per suite and per section as it opens). With --agent naming a row, the row carries the
 # record too: `run_pid= run_log= run_head= run_cmd= run_started_at=` at the start, `run_rc=
 # run_ended_at=` at the end (lib/roster.sh `roster_mark_run`). These readers serve `wait`,
-# `stop-run`, `adopt`, the tick's RUNNING lines and `regression-runs`, one reading for all five.
+# `stop-run`, `adopt` and the tick's RUNNING lines, one reading for all four.
 #
 # THREE STATES, AND NO FOURTH. FINISHED: the row carries `run_rc`, or `<log>.rc` holds a code.
 # RUNNING: neither, and the pid is alive AND is still that run's detached shim (`ps` names
@@ -2372,36 +2372,5 @@ $(run_groups "$RUN_PID")"
     esac
     # THE ACT IS RECORDED: one hand event in the bound run's log, as for a request.
     [ -n "${SR_MACHINE:-}" ] || poker_hand stop-run "$SR_WHY" "run=$RUN_ID" "name=$RUN_NAME" 2>/dev/null || :
-    exit 0
-  }
-
-  # ---------- regression-runs: THE FULL RUNS, COUNTED FROM THE RECORDS (wave-30 T12; D7d, Δ6d; AC-4.6) ----------
-  #
-  # The count is `regression_runs_count`'s: every ended run on this project's rosters whose command
-  # is the full runner. Bare, it prints `poker: regression-runs=<n>` and needs no session. `--write`
-  # puts the count in the bound plan's `regression-runs:` header through the plan-verb transaction,
-  # and only when the plan carries the field and holds another value: a hand-typed number does not
-  # survive it. The tick runs `--write` when its own reading of the header differs from the count,
-  # so the value is the landing's, never a hand's. The one change is a number in one header line, so
-  # the copy is judged here and needs no dry commit.
-  poker_verb_regression_runs() {
-    REPO_REAL="$(cd "$(project_root "$PWD")" 2>/dev/null && pwd -P)"
-    [ -n "$REPO_REAL" ] || { die "REFUSED — cannot resolve the working directory."; exit 2; }
-    RR_N="$(regression_runs_count "$REPO_REAL")"
-    if [ "$RR_WRITE" = no ]; then say "regression-runs=$RR_N"; exit 0; fi
-    plan_verb_open regression-runs
-    RR_HAVE="$(plan_frontmatter_get "$PV_PLAN" regression-runs)"
-    [ -n "$RR_HAVE" ] && [ "$RR_HAVE" != "$RR_N" ] || exit 0
-    if ! RR_N="$RR_N" awk '
-      NR == 1 && $0 == "---" { f = 1; print; next }
-      f && $0 == "---" { f = 0; print; next }
-      f && !done && /^[[:space:]]*regression-runs[[:space:]]*:/ { print "regression-runs: " ENVIRON["RR_N"]; done = 1; next }
-      { print }
-      END { if (!done) exit 1 }' "$PV_PLAN" > "$PV_NEW" 2>/dev/null; then
-      die "REFUSED — $PV_PLAN has no regression-runs: line in its leading frontmatter; the plan is unchanged."
-      exit 1
-    fi
-    plan_verb_swap regression-runs "regression-runs: $RR_N" judged
-    say "regression-runs — the plan header read $RR_HAVE and the run records count $RR_N: $RR_N written to $PV_PLAN"
     exit 0
   }

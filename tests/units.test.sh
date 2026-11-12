@@ -1154,20 +1154,15 @@ expect_contains "SEC-1d …and its run line names the person as its starter, wit
 
 
 # ============================================================
-section "§STEP-FIELD — units_step_field reads the block units_step_fields writes: the first key line, fences skipped"
+section "§STEP-FIELD — units_step_field reads an older plan's step block: the first key line, fences skipped"
 # ============================================================
-# The Step-7 advance and close-out's epic row both read the Step 7 block's `adr:` pointer; this is their one reader,
-# beside the writer, reading the block the writer writes. FIXTURE FIDELITY: a planted plan whose Step 7 block is
-# written by `units_step_fields` itself, with a fenced decoy block above and a second `adr:` line under the first.
+# Close-out's epic row reads an older plan's Step 7 block `adr:` pointer; this is its one reader. FIXTURE FIDELITY: a
+# planted plan whose Step 7 block carries the pointer as an older plan's edit wrote it, with a fenced decoy block above
+# and a second `adr:` line under the first.
 # fails-when: the reader reads the fenced decoy, the second line, another step's block, or calls a missing key found.
 SF_PLAN="$SANDBOX/step-field.plan.md"
-printf '# plan\n\n## SDLC State\n\ncurrent: 7\n```\n- Step 7: a fenced example\n  adr: fenced.md\n```\n- Step 7: n/a: no ADR owed here\n- Step 8: merge: main @ 0123abc\n  cleanup: n/a\n\n## Tasks\n' > "$SF_PLAN"
+printf '# plan\n\n## SDLC State\n\ncurrent: 7\n```\n- Step 7: a fenced example\n  adr: fenced.md\n```\n- Step 7: n/a: no ADR owed here\n  adr: adrs/epic-x/adr-061-the-pointer.md\n  adr: second.md\n- Step 8: merge: main @ 0123abc\n  cleanup: n/a\n\n## Tasks\n' > "$SF_PLAN"
 sf_lib() { bash -c '. "$1" || exit 9; shift; "$@"' _ "$LIB" "$@"; }
-sf_lib units_step_fields "$SF_PLAN" 7 "adr=adrs/epic-x/adr-061-the-pointer.md" > "$SF_PLAN.w" && mv "$SF_PLAN.w" "$SF_PLAN"
-printf '%s\n' "$(awk '{ print } /^  adr: adrs/ { print "  adr: second.md" }' "$SF_PLAN")" > "$SF_PLAN.w" && mv "$SF_PLAN.w" "$SF_PLAN"
-expect_contains "SF-0 precondition: the writer put the adr: line under the Step 7 line" \
-  "- Step 7: n/a: no ADR owed here
-  adr: adrs/epic-x/adr-061-the-pointer.md" "$(cat "$SF_PLAN")"
 sf_get() { SF_OUT="$(sf_lib units_step_field "$@")"; SF_RC=$?; }
 sf_get "$SF_PLAN" 7 adr
 expect_eq "SF-1 the first adr: line of the Step 7 block, not the fenced decoy's or the second (exit 0)" \

@@ -21,8 +21,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh amend …    widen a live row's Files/Suites/Re-executes (writes the roster)
 #     bash <plugin-root>/hooks/session-poker.sh rule <writer> '<text>' [--words '<the user's words>'] | ruling-ack <id> | rulings <writer>
 #                                                      a binding ruling for a live writer, its acknowledgement, its state (writes the roster)
-#     bash <plugin-root>/hooks/session-poker.sh step-line | step-field | current …
-#                                                      the plan-row verbs, each the task-add transaction (writes the plan)
+#     bash <plugin-root>/hooks/session-poker.sh current <N> [--check]   advance the run's step, judged at it first (writes the run's log)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add <kind> <evidence>   a proof line naming the head its evidence read (writes the plan)
 #     bash <plugin-root>/hooks/session-poker.sh proof-add review <record> --question <q> --reader <name>   a review: that proof line with its question, reviewer, result and scope
 #     bash <plugin-root>/hooks/session-poker.sh order '<the user's words>' | order lift   the user's order every suite obeys, or its end: an order: line with the words and the time (writes the plan, or record/orders.log with no run bound)
@@ -39,7 +38,6 @@
 #     bash <plugin-root>/hooks/session-poker.sh cover <question> <a>..<b>   the cover <sha> <basis> line of each commit the judge walks in that range for that question (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh wait <name|run id> [--for <s>]   wait on a detached run until it ends; exits with its code (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh stop-run <name|run id|request id> [--report-only] [--machine <caller>] --why '<reason>'   stop a detached run, or end a gate request and TERM its holder's group (signals, writes ends, one hand event unless a machine caller stops it)
-#     bash <plugin-root>/hooks/session-poker.sh regression-runs [--write]   the full-runner runs the rosters record; --write puts the count in the bound plan's header
 #     bash <plugin-root>/hooks/session-poker.sh anchors check|index [<root>] [--at <commit>]   check every suite's mutation anchors where they point, or print file -> the suites anchored on it (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh handoff ['<purpose>'] < sections   write the handoff document under the handoffs folder of the docs record, bound or not: the composed sections from stdin, State computed, the resume line last; bound, the plan's ## Handoff becomes one pointer line (writes the file, and the plan when bound)
 #     bash <plugin-root>/hooks/session-poker.sh resume <handoff.md>   the one door: engage this session when it is not, bind the plan the file names, arm at a scale with a Patrol, adopt, tick; a dozen lines to the terminal, the rest to one recap file (writes the marker, the stamp, this session's roster and the recap)
@@ -516,12 +514,9 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh ruling-ack <id>   the writer's acknowledgement of a ruling it was shown (marks it shown)"
   die "  bash ${HOOK_DIR}/session-poker.sh rulings <writer>   each ruling of that writer: recorded, pushed=, and unread or shown= (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh budget writers=<n> '<reply>'   record the user's cap on writers in the plan header (source=user, budget-override:)"
-  die "  bash ${HOOK_DIR}/session-poker.sh regression <yes|no> '<reply>'   record the Step-0 regression setting in the plan header (regression:, and regression-override: against the scale default task no, wave yes, epic no)"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --questions <q>[,<q>] on a review row declares the questions it owes (evidence, adversarial, structure, one role's), so its records and its dispatch are those and not the rigor's full deal; --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--suites=<a,b>] [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract (--suites= narrows its suites, and lands_on= with them): a successor row, judged by the dispatch grammar"
-  die "  bash ${HOOK_DIR}/session-poker.sh step-line <N|T<n>> <text> [--append]   write a - Step N: or - T<n>: line under ## SDLC State"
-  die "  bash ${HOOK_DIR}/session-poker.sh step-field <N> <key>=<value>... [--plan <delivered plan>]   write or replace fields of a Step N block, as many as one call names: head, cmd, pass, total, output, merge, worktree-removed, adr, share; cleanup, tmp-wiped and tasks-completed (Step 8 only); auditor and walk-artifact (Step 5 only); --plan names a delivered run, whose Step 8 block any session may write"
-  die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   move current: (9 is close-out's); advancing to 4 fills the Step-4 block's worktree/base-sha/branch; --check (5-8) runs the advance's judgment, writes nothing, and exits as the advance would"
+  die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   advance the run's step: judged as a commit at <N> would be, then one step event in the run's log, the plan unwritten (9 is close-out's); --check (5-8) runs the judgment, appends nothing, and exits as the advance would"
   die "  bash ${HOOK_DIR}/session-poker.sh order '<the user's words>'   record the user's order: an order: given line with the time and the words, under the bound plan's ## SDLC State, else in record/orders.log; while it stands tests/run.sh starts no suite"
   die "  bash ${HOOK_DIR}/session-poker.sh order lift   end the open order: an order: lifted line with the time and its words"
   die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>'   record the user's approval <name> as an approved: line under ## SDLC State (the plan's own is approved-by:, written at Step 3)"
@@ -548,7 +543,6 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh cover <question> <a>..<b>   the basis the judge holds a range by: one cover <sha> prose|release|born-review|born-regression|owes line per commit past <a> on <b>'s first-parent line, for evidence, adversarial or structure; the lines current 7 prints under a review ... uncovered <a>..<b> line (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh wait <name|run id> [--for <seconds>]   wait on a detached run (booked.sh --detach) until it ends, printing its progress; exits with its code, 70 when it was LOST, 75 when --for ran out first"
   die "  bash ${HOOK_DIR}/session-poker.sh stop-run <name|run id|request id> --why '<reason>' [--report-only] [--machine <caller>]   stop a detached run: TERM its process group, then KILL every group below it still alive; records rc=137 when it wrote no end. A gate request id, or a name holding no running detached run but one open request: ends the request (by=<session> why=<reason>) and TERMs its holder's group. Either way one hand event, what=stop-run with its reason, goes to the bound run's log, unless --machine names the tool's own caller (close-out's sweep), whose stop is no act by hand; with no reason the stop is refused and nothing is sent"
-  die "  bash ${HOOK_DIR}/session-poker.sh regression-runs [--write]   the number of full-runner runs (tests/run.sh with no --only) the project's rosters record as ended; --write puts it in the bound plan's regression-runs: header"
   die "  bash ${HOOK_DIR}/session-poker.sh anchors check|index [<root>] [--at <commit>]   check: MOVED <suite>:<line> for each anchor whose text is not on exactly one line where it points (exit 1), nothing and exit 0 when every anchor holds; index: <file> TAB <suite>[,<suite>] per anchored file. <root> defaults to the current tree, --at reads a commit"
   die "  bash ${HOOK_DIR}/session-poker.sh ${RA_USAGE}"
   die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the release approval card, all default or all recommended, into approve, waive and finding-move with their words"
@@ -708,15 +702,6 @@ case "$VERB" in
     esac
     BG_N="${1#writers=}"
     BG_REPLY="$2"
-    ;;
-  # THE REGRESSION SETTING (wave-31 T27; REQ-12; D4). `yes` or `no` and the user's reply, verbatim;
-  # the value's own shape is the verb's refusal (1), a missing operand or reply the usage error.
-  regression)
-    if [ $# -ne 2 ] || [ -z "${2//[[:space:]]/}" ]; then
-      usage "regression takes exactly two arguments: yes or no, and the user's reply, verbatim."
-    fi
-    RG_V="$1"
-    RG_REPLY="$2"
     ;;
   # THE NINE CELLS AN AUTHOR WRITES, IN THE TABLE'S OWN COLUMN ORDER (wave-20 REQ-5, AC-5.3;
   # Δ5). `status`, `worktree` and `base` are the dispatcher's cells and are not operands:
@@ -902,56 +887,6 @@ case "$VERB" in
     [ $# -eq 1 ] && [ -n "$1" ] || usage "known-limits-part takes one argument: the doc or integrate row's id."
     PV_ID="$1"
     ;;
-  step-line)
-    PV_APPEND=""
-    if [ $# -eq 3 ] && [ "$3" = "--append" ]; then PV_APPEND=append; set -- "$1" "$2"; fi
-    if [ $# -ne 2 ] || [ -z "$2" ]; then
-      usage "step-line takes <N|T<n>> <text> [--append]."
-    fi
-    case "$1" in
-      [0-9]|[0-9][ab]) : ;;
-      T[0-9]*) case "${1#T}" in *[!0-9]*) usage "step-line: '$1' is not a task id (T<n>)." ;; esac ;;
-      *) usage "step-line: '$1' is neither a step number (0-9, 4a) nor a task id (T<n>)." ;;
-    esac
-    PV_KEY="$1"; PV_TEXT="$2"
-    ;;
-  # THE STEP-FIELD VERB: a step and one or more `<key>=<value>`, each key once. The
-  # shapes are the usage error's (2); the key set, the line break, a step with no line and Step 9 are the verb's own
-  # refusals (1).
-  # `--plan <plan>` names a delivered run whose Step 8 merge record is written after close-out let go of the session;
-  # it may stand anywhere after the step number.
-  step-field)
-    PV_PLAN_ARG=""; _pv_ops=()
-    while [ $# -gt 0 ]; do
-      if [ "$1" = --plan ] && [ ${#_pv_ops[@]} -gt 0 ]; then
-        [ $# -ge 2 ] && [ -n "${2//[[:space:]]/}" ] || usage "step-field: --plan takes the run's plan."
-        PV_PLAN_ARG="$2"; shift 2; continue
-      fi
-      _pv_ops+=("$1"); shift
-    done
-    set -- ${_pv_ops[@]+"${_pv_ops[@]}"}
-    if [ $# -lt 2 ] || [ -z "$1" ]; then
-      usage "step-field takes <N> <key>=<value>...: a step number and its fields, then optionally --plan <a delivered plan>."
-    fi
-    case "$1" in
-      [0-9]|[0-9][ab]) : ;;
-      *) usage "step-field: '$(printf '%s' "${1:0:12}" | tr -d '[:cntrl:]')' is not a step number (0-9, 4a)." ;;
-    esac
-    PV_KEY="$1"; shift
-    PV_FIELDS=(); _pv_seen=" "
-    for _pv_kv in "$@"; do
-      case "$_pv_kv" in
-        [!=]*=*) : ;;
-        *) usage "step-field: '$(printf '%s' "${_pv_kv:0:24}" | tr -d '[:cntrl:]')' is not <key>=<value>." ;;
-      esac
-      [ -n "${_pv_kv#*=}" ] || usage "step-field: the value of '$(printf '%s' "${_pv_kv%%=*}" | cut -c 1-24 | tr -d '[:cntrl:]')' is empty."
-      case "$_pv_seen" in
-        *" ${_pv_kv%%=*} "*) usage "step-field: '$(printf '%s' "${_pv_kv%%=*}" | cut -c 1-24 | tr -d '[:cntrl:]')' is named twice; a field is written once per call." ;;
-      esac
-      _pv_seen="$_pv_seen${_pv_kv%%=*} "
-      PV_FIELDS+=("$_pv_kv")
-    done
-    ;;
   # `current <N> --check` (wave-38 T1; D20, AC-1.3): the flag after the step, for 5 to 8, asks the advance without writing.
   current)
     { [ $# -eq 1 ] || [ $# -eq 2 ]; } && [ -n "$1" ] \
@@ -1032,17 +967,20 @@ case "$VERB" in
   # two flags, both or neither, to a review proof only: `--question <q> --reader <name>`, in
   # either order. Without them a review proof is 1.11.0's, so a plan built under it still works.
   proof-add)
-    PF_USAGE="proof-add takes two arguments, <regression|review|task|walk> <evidence path under record/>, and for a review two flags more: proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name> (the head is the one the evidence names, the head= line of a run log or the end of the reviewed: a..b line of a review, never an operand); proof-add regression takes one log or several, proof-add regression <log> [<log>…], each opening head=<40-hex> dirty=0 and ending rc=0; proof-add walk <record> takes the walk's record, its head the one its head: line names, else the working head; or proof-add inherited <suite file name>, which runs that suite at the plan's base-sha: in a scratch tree."
+    PF_USAGE="proof-add takes two arguments, <regression|review|task|walk> <evidence path under record/>, and for a review two flags more: proof-add review <record> --question <evidence|adversarial|structure> --reader <roster name> (the head is the one the evidence names, the head= line of a run log or the end of the reviewed: a..b line of a review, never an operand); proof-add regression takes one log or several, proof-add regression <log> [<log>…], each opening head=<40-hex> dirty=0 and ending rc=0; proof-add walk <record> [--environments <name>[,<name>…]] takes the walk's record, its head the one its head: line names, else the working head, and the environments it covered; or proof-add inherited <suite file name>, which runs that suite at the plan's base-sha: in a scratch tree."
     if [ $# -lt 2 ] || [ -z "$1" ] || [ -z "$2" ]; then usage "$PF_USAGE"; fi
     # SEVERAL LOGS ON ONE LINE (wave-36 T35; D13, AC-7.10): a floor may be the logs of several runners, each its own
     # operand after the first, newline-joined in PF_EVIDS (a path holding a line break is refused below, by name).
-    PF_KIND="$1"; PF_EVID="$2"; PF_EVIDS="$2"; PF_QUESTION=""; PF_READER=""; shift 2
+    PF_KIND="$1"; PF_EVID="$2"; PF_EVIDS="$2"; PF_QUESTION=""; PF_READER=""; PF_ENVS=""; shift 2
     # THE KIND'S OLD SPELLING IS REFUSED (wave-39 T18; REQ-13 AC-13.1): no proof line is written.
     if declare -F alias_gone >/dev/null 2>&1 && alias_gone proof-kind "$PF_KIND"; then die "REFUSED — $ALIAS_GONE_SAID. No proof was written."; exit 1; fi
     while [ $# -gt 0 ]; do
       case "$1" in
         --question) [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$PF_QUESTION" ] || usage "$PF_USAGE"; PF_QUESTION="$2"; shift 2 ;;
         --reader)   [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$PF_READER" ] || usage "$PF_USAGE"; PF_READER="$2"; shift 2 ;;
+        # The environments a walk covered are a field of its proof: the walk is what covers them.
+        --environments) [ $# -ge 2 ] && [ "$PF_KIND" = walk ] && [ -z "$PF_ENVS" ] || usage "$PF_USAGE"
+          case "$2" in ''|*[!A-Za-z0-9._,\ -]*) usage "$PF_USAGE" ;; esac; PF_ENVS="$2"; shift 2 ;;
         -*|'') usage "$PF_USAGE" ;;
         *$'\n'*) usage "$PF_USAGE" ;;
         *[!0123456789abcdefABCDEF]*|*/*) [ "$PF_KIND" = regression ] || usage "$PF_USAGE"; PF_EVIDS="$PF_EVIDS
@@ -1228,7 +1166,7 @@ $1"; shift ;;
   # THE RUN VERBS (wave-30 T12; D6, D7d). `wait` and `stop-run` take ONE operand: a roster row's name,
   # a run id (`run=` as the shim printed it), or a run's log path. `wait` takes `--for <seconds>`, a
   # bound on this call (75 when it runs out, the run untouched); `stop-run` takes `--report-only`, the
-  # promise that word makes on adopt and sweep. `regression-runs` takes `--write` only.
+  # promise that word makes on adopt and sweep.
   wait)
     WT_ARG=""; WT_FOR=""
     while [ $# -gt 0 ]; do
@@ -1260,11 +1198,6 @@ $1"; shift ;;
       yes:*|*:*[![:space:]-]*) ;;
       *) die "REFUSED — stop-run stops a run by hand, and says why: --why '<what went wrong, what the tool lacked>'. Nothing was stopped."; exit 2 ;;
     esac
-    ;;
-  regression-runs)
-    RR_WRITE=no
-    if [ $# -eq 1 ] && [ "$1" = --write ]; then RR_WRITE=yes
-    elif [ $# -ne 0 ]; then usage "regression-runs takes at most one flag: --write."; fi
     ;;
   # THE ANCHORS (wave-35 T3; D16, D9). Read-only and session-free, so it runs here and exits: the extractor,
   # the check and the index are lib/anchors.sh's, loaded on demand rather than through BIONIC_LIB_WANT, so a
@@ -2097,62 +2030,6 @@ run_state_words() {
   esac
 }
 
-# regression_runs_count <project root> -> the number of full-runner runs the project's rosters
-# record as ended (Δ6d; REQ-4 AC-4.6). One run is one `run_log`, however many rows copy it. A run
-# is the FULL runner when the command it ran is a whole run (wave-31 T21; REQ-2, D3): the command
-# is `<log>.key`'s lines 2 and on, as the shim wrote them with the tree on line 1, else the row's
-# `run_cmd=` (booked.sh `booked_one_line`, the lossy front of the same command), and
-# `cmd_whole_run` (payload/scripts/lib/cmd-class.sh) is the one judgment on it. The log's own name
-# is never read: the wave-30 id `w30-T26-tests_run.sh` is the full runner, and an id ending
-# `-run.sh` need not be. The root the classifier reads a script against is the key's tree, else the
-# project's own.
-regression_runs_count() {
-  local rf files="" lg cmd key tree n=0
-  for rf in "$1/.bionic/tmp"/roster-*.state; do
-    [ -f "$rf" ] && [ ! -L "$rf" ] || continue
-    files="${files}${rf}
-"
-  done
-  [ -n "$files" ] || { printf '0'; return 0; }
-  poker_cmdclass_load || { printf '0'; return 0; }
-  while IFS=$'\t' read -r lg cmd; do
-    [ -n "$lg" ] || continue
-    tree="$1"
-    if [ -f "$lg.key" ] && [ ! -L "$lg.key" ]; then
-      key="$(cat "$lg.key" 2>/dev/null)"
-      case "$key" in
-        *$'\n'*) tree="${key%%$'\n'*}"; cmd="${key#*$'\n'}" ;;
-      esac
-    fi
-    cmd_whole_run "$cmd" "$tree" && n=$((n + 1))
-  done <<EOF_RUNS
-$(printf '%s' "$files" | while IFS= read -r rf; do [ -n "$rf" ] && cat "$rf"; done 2>/dev/null | awk -F'|' '
-    {
-      lg = ""; rc = ""; cmd = ""
-      for (i = 1; i <= NF; i++) {
-        if (index($i, "run_log=") == 1) lg = substr($i, 9)
-        else if (index($i, "run_rc=") == 1) rc = substr($i, 8)
-        else if (index($i, "run_cmd=") == 1) cmd = substr($i, 9)
-      }
-      if (lg == "" || rc !~ /^[0-9]+$/ || lg in seen) next
-      seen[lg] = 1
-      print lg "\t" cmd
-    }')
-EOF_RUNS
-  printf '%d' "$n"
-}
-
-# The classifier `regression_runs_count` asks, loaded on first use and never at the top: the tick
-# runs every Patrol interval and counts at most a few runs, and a hook copied outside the repo
-# resolves its libraries from a checkout that may not carry cmd-class.sh (the count is then 0).
-poker_cmdclass_load() {
-  declare -F cmd_whole_run >/dev/null 2>&1 && return 0
-  [ -f "$BIONIC_LIB/cmd-class.sh" ] || return 1
-  # shellcheck source=/dev/null
-  . "$BIONIC_LIB/cmd-class.sh"
-  declare -F cmd_whole_run >/dev/null 2>&1
-}
-
 # `<config>/projects/<slug>/<sid>/subagents` — the same walk session_transcript does, one
 # level deeper, and keyed on the DIRECTORY rather than the session's own `.jsonl`: an old
 # session's transcript can be reclaimed while its agents' files survive, and the agents are
@@ -2762,12 +2639,17 @@ plan_verb_open() {
 # $PV_PLAN; exits 1 on a refusal, 2 when the dry commit cannot run. Returns 0 once swapped,
 # and exits 0 with nothing written when the projection IS the plan. `judged` runs no dry commit:
 # the caller has judged the copy itself (`current 8`, on lib/proof.sh `facts_state`; wave-27 T14).
-# plan_verb_dry <verb> <what changed> <dry: writer|as-is> <current> -> the dry commit of $PV_NEW
+# plan_verb_dry <verb> <what changed> <dry: writer|as-is|step:<N>> <current> -> the dry commit of $PV_NEW
 # through the real gate, at `current: 4` for a writer past Step 4 and as written otherwise; exits 1
 # on the gate's refusal, 2 when it cannot run. plan_verb_swap's, split out so `judged` can skip it.
+# `step:<N>` judges no copy: the gate is asked about the plan itself with step N pending in its facts (BIONIC_DRY_STEP,
+# honoured only for this session, lib/proof.sh `_proof_dry_step`), so the advance is judged as a commit at N would be.
 plan_verb_dry() {
-  local verb="$1" what="$2" dry="$3" cur="$4" err rc
-  if [ "$dry" = writer ] && [ "$cur" -gt 4 ]; then
+  local verb="$1" what="$2" dry="$3" cur="$4" err rc judged="$PV_DRY" step=""
+  case "$dry" in step:*) step="${dry#step:}"; judged="$PV_PLAN" ;; esac
+  if [ -n "$step" ]; then
+    :
+  elif [ "$dry" = writer ] && [ "$cur" -gt 4 ]; then
     awk '
       /^[[:space:]]*```/ { fence = !fence; print; next }
       fence { print; next }
@@ -2782,8 +2664,9 @@ plan_verb_dry() {
     exit 2
   fi
   mkdir -p "${PV_MARK%/*}" 2>/dev/null
-  printf 'plan=%s\ndry_of=%s\nengaged_at=%s\n' "$PV_DRY" "$PV_PLAN" "$(iso_now)" > "$PV_MARK"
-  err="$(cd "$PV_REPO" && CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$PV_SID" BIONIC_WALL_VERBOSE=1 \
+  if [ -n "$step" ]; then printf 'plan=%s\nengaged_at=%s\n' "$judged" "$(iso_now)"
+  else printf 'plan=%s\ndry_of=%s\nengaged_at=%s\n' "$judged" "$PV_PLAN" "$(iso_now)"; fi > "$PV_MARK"
+  err="$(cd "$PV_REPO" && BIONIC_DRY_STEP="$step" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$PV_SID" BIONIC_WALL_VERBOSE=1 \
     bash "$HOOK_DIR/bash-walls.sh" 2>&1 >/dev/null <<< "$(jq -n --arg s "$PV_SID" --arg cwd "$PV_REPO" --arg v "$verb" \
       '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
         tool_input: {command: ("git commit -m " + $v)}, tool_use_id: "toolu_planverb"}')")"
@@ -2804,13 +2687,13 @@ pv_missing() {
   local n f
   n="$(printf '%s\n' "$1" | sed -n "s/.*has no 'Step \([0-9][0-9]*[ab]\{0,1\}\):' line.*/\1/p" | head -1)"
   if [ -n "$n" ]; then
-    printf "the line '- Step %s: <its evidence>' under ## SDLC State (step-line %s '<text>' writes it)" "$n" "$n"
+    printf "the line '- Step %s: <its evidence>' under ## SDLC State (an edit of the plan writes it)" "$n"
     return 0
   fi
   n="$(printf '%s\n' "$1" | sed -n 's/.*step \([0-9][0-9]*[ab]\{0,1\}\) evidence missing required field(s): \(.*\)$/\1/p' | head -1)"
   f="$(printf '%s\n' "$1" | sed -n 's/.*step [0-9][0-9]*[ab]\{0,1\} evidence missing required field(s): \(.*\)$/\1/p' | head -1)"
   if [ -n "$n" ] && [ -n "$f" ]; then
-    printf "the Step %s block's %s (step-field %s <key>=<value> writes each)" "$n" "$(printf '%s' "$f" | awk '{ for (i = 1; i <= NF; i++) printf "%s%s:", (i > 1 ? " " : ""), $i }')" "$n"
+    printf "the Step %s block's %s (an edit of the plan writes each)" "$n" "$(printf '%s' "$f" | awk '{ for (i = 1; i <= NF; i++) printf "%s%s:", (i > 1 ? " " : ""), $i }')"
     return 0
   fi
   printf '%s\n' "$1" | awk '
@@ -3084,13 +2967,10 @@ case "$VERB" in
   hold) poker_verb_hold "$@" ;;
   rule|ruling-ack|rulings) poker_verb_rule "$@" ;;
   budget) poker_verb_budget "$@" ;;
-  regression) poker_verb_regression "$@" ;;
   amend) poker_verb_amend "$@" ;;
   task-add) poker_verb_task_add "$@" ;;
   reviews-part) poker_verb_reviews_part "$@" ;;
   known-limits-part) poker_verb_known_limits_part "$@" ;;
-  step-line) poker_verb_step_line "$@" ;;
-  step-field) poker_verb_step_field "$@" ;;
   confirm-row) poker_verb_confirm_row "$@" ;;
   epic-row) poker_verb_epic_row "$@" ;;
   continuation-fill) poker_verb_continuation_fill "$@" ;;
@@ -3117,6 +2997,5 @@ case "$VERB" in
   sitrep) poker_verb_sitrep "$@" ;;
   wait) poker_verb_wait "$@" ;;
   stop-run) poker_verb_stop_run "$@" ;;
-  regression-runs) poker_verb_regression_runs "$@" ;;
   tick) poker_verb_tick "$@" ;;
 esac

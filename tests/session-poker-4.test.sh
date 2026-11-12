@@ -377,8 +377,8 @@ expect_eq "SEV-cur3 a later pass over the fix, holding only a deferral and a not
 sev_cur 7
 sp4_rule_rows "$PSEV"
 poke "$RSEV" current 8
-expect_eq "SEV-cur4 §CUR8-sev …and current 8 is admitted on it: deferrals and notes do not hold the step" "0|8" \
-  "$RC|$(sed -n 's/^current: //p' "$PSEV")"
+expect_eq "SEV-cur4 §CUR8-sev …and current 8 is admitted on it: deferrals and notes do not hold the step" "0|n=8" \
+  "$RC|$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$PSEV" step | head -1)"
 expect_contains "AW-5 T35 once the question holds again, current 8 closes its waiver item" \
   "|key=waive:adversarial|state=closed|by=no longer failing|" "$(sev_store)"
 expect_eq "AW-5a …and no waiver item is left open" "" "$(sev_owed | cut -f1 | /usr/bin/grep '^waive:')"
@@ -619,7 +619,7 @@ s60_tick
 POKE_BOUND="$LT_BOUND_WAS"
 
 # ============================================================
-section "§STEP-FIELD §COPIED-LOG §REVIEW-RANGE §CUR7-COVERED: what a run's close wrote by hand, a verb writes or reads"
+section "§COPIED-LOG §REVIEW-RANGE §CUR7-COVERED: what a run's close wrote by hand, a verb writes or reads"
 # ============================================================
 # FIXTURE FIDELITY. §SEV's shape, built fresh: a plan bound to this session at Step 5, its working branch in a
 # linked worktree, real commits, a reader row from the production writer, and the run line through the product's
@@ -641,14 +641,8 @@ new_roster "$RVG"
 printf '%s|questions=adversarial\n' "$(roster_row_fixture session="$SID" name=vg-crit agent_id=a-vg-crit \
   subagent_type=bionic:critic files=.bionic/docs/record/wave-01-fixture/past-waiver.md)" >> "$(roster_of "$RVG")"
 
-# ---------- §STEP-FIELD: the Step-5 auditor: line is a field the verb writes ----------
-s42_snap "$RVG" "$PVG"
-poke "$RVG" step-field 5 "auditor=CONFIRMED 3 of 3, record/wave-01-fixture/auditor.md"
-expect_eq "VG-1 AC-20.1 step-field 5 auditor= writes the line under the Step 5 line (exit 0)" \
-  "0|  auditor: CONFIRMED 3 of 3, record/wave-01-fixture/auditor.md" "$RC|$(awk '/^- Step 5:/ { getline; print; exit }' "$PVG")"
-s42_snap "$RVG" "$PVG"
-poke "$RVG" step-field 4 "auditor=CONFIRMED"
-s42_unchanged "VG-1b the auditor: line is read from the Step 5 block alone, so Step 4's is" 1 "$PVG"
+# The Step-5 auditor: line is the orchestrator's edit of a version-14 plan: no verb writes a step's evidence.
+awk '{ print } /^- Step 5:/ && !d { print "  auditor: CONFIRMED 3 of 3, record/wave-01-fixture/auditor.md"; d = 1 }' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
 
 # ---------- §COPIED-LOG: a recorded run's log, copied under record/, is that run ----------
 # The run's log is written outside record/ (where a detached run keeps it), its run line naming that path; the
@@ -738,7 +732,7 @@ POKE_BOUND="$VG_BOUND_WAS"
 # ============================================================
 section "§REPLY-SEQ: one reply orders the release approval card's decisions in sequence, each applied in order and recorded"
 # ============================================================
-# FIXTURE FIDELITY. §STEP-FIELD's plan at its working head, its reading's record given one S3 finding; the page's
+# FIXTURE FIDELITY. §COPIED-LOG's plan at its working head, its reading's record given one S3 finding; the page's
 # record carries the replay table in its writer's row shape (release-approval.test.sh §SHAPE pins that row). Decision
 # 1's default names a row the plan lacks, so taking it refuses; 2 waives the plan's one matrix row; 3 moves the
 # finding. The user's words stand in a transcript of this session under a config dir of this section's own.
@@ -916,10 +910,10 @@ expect_eq "AN-8b --suites+ naming no file under tests/ is refused (exit 1) and w
 expect_contains "AN-8c …naming the entry" "nosuch.test.sh" "$OUT"
 
 # ============================================================
-section "§REVIEW-FILES §FILES-UNHELD §STEP8-KEYS §NAMES-A-VERB: each verb a close meets writes its cell, or names the verb or the edit that does"
+section "§REVIEW-FILES §FILES-UNHELD: each verb a close meets writes its cell, or names the edit that does"
 # ============================================================
-# A close met verbs that sent it in a circle: a review row's Files held one record for three questions; amend sent a closed contract to a new dispatch; step-field
-# refused the cleanup keys the gate's Step-8 block reads. FIXTURE FIDELITY: a task-scale plan at single rigor with a
+# A close met verbs that sent it in a circle: a review row's Files held one record for three questions; amend sent a closed
+# contract to a new dispatch. FIXTURE FIDELITY: a task-scale plan at single rigor with a
 # reads table carrying an artifact cell and no ledger, bound to this session, its working branch the repository's
 # main; roster rows and acks in their writers' shapes (roster_row_fixture, s20_ack). Every write goes through the
 # real verb; the one planted line is a review proof in proof_line's shape, as §DISPOSITION plants one.
@@ -952,11 +946,6 @@ vc_plan() {  # <repo> <row>... -> the plan path; bound and committed
   printf '%s' "$f"
 }
 vc_cell() { s48_row "$VC_P" "$1" | cut -d'|' -f"$2"; }  # <row> <9 Files | 10 status | 12 artifact>
-VC_VERBS="amend step-field step-line"
-vc_named() {  # <refusal text> -> the first call of a verb that writes a cell, `<verb> <operands…>`, as the refusal prints it
-  printf '%s\n' "$1" | /usr/bin/grep -oE 'session-poker\.sh [a-z][a-z-]*[^,;]*' | sed 's/^session-poker\.sh //; s/\. .*$//; s/\.$//' \
-    | awk -v set=" $VC_VERBS " '{ if (index(set, " " $1 " ")) { print; exit } }'
-}
 VC="$(make_repo verb-cells)"; ( cd "$VC" && git commit -q --allow-empty -m init && git branch -M main ) >/dev/null 2>&1
 git -C "$VC" config user.name "Dana Fixture"
 VC_REC=".bionic/docs/record/wave-01-fixture"
@@ -1076,81 +1065,6 @@ expect_eq "FU-4 amend on a closed contract is refused (exit 1)" "1" "$RC"
 expect_contains "FU-4b …and names the edit of the Files cell of the row its contract held" "edit the Files cell of T3 in the plan" "$VC_AREF"
 expect_absent "FU-4c …not a new dispatch" "dispatch the work again" "$VC_AREF"
 
-# ---------- §STEP8-KEYS: step-field 8 writes the cleanup keys the gate's Step-8 block reads ----------
-poke "$VC" step-line 8 "integrated"
-expect_eq "S8-0 setup: step-line writes the Step 8 line (exit 0)" "0" "$RC"
-VC_S8=""
-for VC_KV in merge=abc1234 worktree-removed=yes cleanup=done tmp-wiped=yes tasks-completed=yes; do
-  poke "$VC" step-field 8 "$VC_KV"; VC_S8="$VC_S8 $RC"
-  [ "$RC" = 0 ] || printf '      step-field 8 %s said: %s\n' "$VC_KV" "$OUT"
-done
-expect_eq "S8-1 AC-10.2 step-field 8 takes merge, worktree-removed, cleanup, tmp-wiped and tasks-completed (each exit 0)" " 0 0 0 0 0" "$VC_S8"
-expect_eq "S8-1b …and writes the block the gate reads, under the Step 8 line" \
-  "  merge: abc1234|  worktree-removed: yes|  cleanup: done|  tmp-wiped: yes|  tasks-completed: yes" \
-  "$(awk '/^- Step 8:/ { f = 1; next } f && /^  [a-z-]+: / { printf "%s%s", (n++ ? "|" : ""), $0; next } f { exit }' "$VC_P")"
-s42_snap "$VC" "$VC_P"
-poke "$VC" step-field 5 cleanup=done
-s42_unchanged "S8-2 control: cleanup is read from the Step 8 block alone, so Step 5's is" 1 "$VC_P"
-VC_SREF="$OUT"
-
-# ---------- §NAMES-A-VERB: each refusal names a verb that writes the cell, and that verb then does ----------
-# The refusals planted above, plus a field on a step with no line. For each: the first call of a verb from the set it
-# prints is run on the cell, with the refusal's own operands and a value for its slot, and exits 0.
-s42_snap "$VC" "$VC_P"
-poke "$VC" step-field 6 head=abc1234
-s42_unchanged "NV-0 setup: a field on a step with no line" 1 "$VC_P"
-VC_LREF="$OUT"
-vc_follow() {  # <label> <refusal> <slot value> -> the named call, run with the slot filled
-  local label="$1" q="'" call; call="$(vc_named "$2")"
-  expect_nonempty "$label — the refusal names a verb from the set" "$call"
-  [ -n "$call" ] || { printf '      the refusal: %s\n' "$2"; return; }
-  call="${call//$q</<}"; call="${call//>$q/>}"
-  call="${call//<path>/$q$3$q}"; call="${call//<list>/$q$3$q}"; call="${call//<value>/$q$3$q}"; call="${call//<text>/$q$3$q}"
-  call="${call//<why>/${q}the cell the refusal named$q}"
-  case "$call" in *'<'*'>'*) expect_eq "$label — …and the call it names fills every slot this test knows ($call)" "" "$call"; return ;; esac
-  eval "set -- $call"
-  poke "$VC" "$@"
-  expect_eq "$label — …and that verb's call on the cell exits 0 ($call)" "0" "$RC"
-  [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
-}
-vc_follow "NV-4 step-field's refusal of a key at the wrong step" "$VC_SREF" "done"
-vc_follow "NV-5 step-field's refusal of a step with no line" "$VC_LREF" "the regression"
-
-# ---------- §TRIPLE: step-field 8 takes the integration's fields in one call; an unknown key names the verb that writes it ----------
-# The Step 8 block above holds all five fields. One call carries merge, worktree-removed and cleanup, each replaced where
-# it stands. A key the step blocks do not hold, but another verb writes, is refused naming that verb's call; a key no
-# verb writes is refused saying so.
-# fails-when: the triple needs three calls; one call writes fewer than three, or moves one; a bad pair beside good ones
-# writes the good ones; a key another verb writes is refused without naming that verb; a key no verb writes names one;
-# the usage line leaves out a field the verb takes.
-vc_s8() { awk '/^- Step 8:/ { f = 1; next } f && /^  [a-z-]+: / { printf "%s%s", (n++ ? "|" : ""), $0; next } f { exit }' "$VC_P"; }
-poke "$VC" step-field 8 merge=def5678 worktree-removed=no cleanup=partial
-expect_eq "TR-1 step-field 8 takes merge, worktree-removed and cleanup in one call (exit 0)" "0" "$RC"
-[ "$RC" = 0 ] || printf '      step-field 8 said: %s\n' "$OUT"
-expect_eq "TR-1b …and writes all three, each where it stood, the other two as they were" \
-  "  merge: def5678|  worktree-removed: no|  cleanup: partial|  tmp-wiped: yes|  tasks-completed: yes" "$(vc_s8)"
-s42_snap "$VC" "$VC_P"
-poke "$VC" step-field 8 merge=0000000 foo=bar
-s42_unchanged "TR-2 a call with one key no step block holds beside a good one is refused whole" 1 "$VC_P"
-expect_contains "TR-2b …naming that key" "'foo' is not a step field" "$OUT"
-expect_contains "TR-3 …and saying no verb writes it" "no verb writes 'foo'" "$OUT"
-expect_absent "TR-3b …so it names no call" "next call:" "$OUT"
-poke "$VC" step-field 8 approved=yes
-s42_unchanged "TR-4 a key another verb writes (approved:) is refused" 1 "$VC_P"
-expect_contains "TR-4b …naming the verb that writes it" "next call: bash " "$OUT"
-expect_contains "TR-4c …approve, with its operands" "session-poker.sh approve '<name>' '<reply>'" "$OUT"
-poke "$VC" step-field 4 base-sha=abc1234
-s42_unchanged "TR-5 a Step 4 key current writes (base-sha:) is refused" 1 "$VC_P"
-expect_contains "TR-5b …naming current 4" "session-poker.sh current 4" "$OUT"
-poke "$VC" step-field 8 delivered=yes
-s42_unchanged "TR-5c the Step 9 line's key (delivered:) is refused" 1 "$VC_P"
-expect_contains "TR-5d …naming close-out, the script that writes it" "close-out writes it with current: 9 (scripts/close-out.sh)" "$OUT"
-poke "$VC" step-field
-expect_eq "TR-6 step-field with no operands prints its usage (exit 2)" "2" "$RC"
-expect_contains "TR-6b …the usage names the fields it takes, the cleanup and the auditor among them" \
-  "head, cmd, pass, total, output, merge, worktree-removed, adr, share; cleanup, tmp-wiped and tasks-completed (Step 8 only); auditor and walk-artifact (Step 5 only)" "$OUT"
-expect_contains "TR-6c …and that it takes more than one" "step-field <N> <key>=<value>..." "$OUT"
-
 # ============================================================
 section "§TICK-LANDS: the tick lands a record row on the registration its kind owes, one published event, no cell"
 # ============================================================
@@ -1238,7 +1152,7 @@ section "§STACK: the regression's health is the judge's rendering, and no verb 
 # ============================================================
 # `proof-add regression` registers the whole run's proof and leaves the plan's text as it was; lib/proof.sh
 # `proof_health_line` renders the health the sheet and the card print: green only at a pass that left nothing owed.
-# FIXTURE FIDELITY. §STEP-FIELD's shape at Step 5, an older plan's matrix head carrying the stub its rendering wrote;
+# FIXTURE FIDELITY. §COPIED-LOG's shape at Step 5, an older plan's matrix head carrying the stub its rendering wrote;
 # run lines from regression_fixture; every later write goes through a real verb.
 VT_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RVT="$(make_repo verdicts)"; ( cd "$RVT" && git commit -q --allow-empty -m init )

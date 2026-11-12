@@ -469,7 +469,7 @@ section "4e — critic4 Q-1 (T19), wave-27 T4 (D14, B2): the Step 9 line is clos
 # `run` used to delete branches, wipe tmp and write the continuation and epic row, and only
 # then refuse for a plan with no `- Step 9:` line or an epic plan with no `| wave |` table.
 # T19 made both presence checks before the first act. Since wave-27 T4 the first one is
-# gone: `step-line 9` is refused by the poker as close-out's to write, so a plan reaches
+# gone: no verb writes a Step 9 line but close-out itself, so a plan reaches
 # close-out with no Step 9 line, and close-out writes it. It is written with phase 8's block
 # and never earlier, so a refusal still leaves the plan byte-for-byte as it was.
 # presence_state: hoisted to tests/close-out.prelude.sh (a later part reads it)
@@ -589,17 +589,20 @@ expect_eq "E2E0: precondition: the fixture is at current: 7 with no Step 8 block
 expect_eq "E2E0c: precondition: …and a base-sha naming a commit at or before the readings' head" "yes" \
   "$(b="$(sed -n 's/^base-sha: //p' "$PE/$PLAN_REL")"; [ -n "$b" ] && fixture_git "$PE" merge-base --is-ancestor "$b" wave/01-fixture && echo yes || echo no)"
 ( in_fixture "$PE" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PE" "$E2E_SID" "$PE/$PLAN_REL" )
+# The advance's step event is stamped past any minute close-out writes on its Step lines (the log's clock seam, LOG_AT),
+# as an advance and a close in one minute are: the closed run must read delivered all the same.
 ( in_fixture "$PE" || exit 9
-  HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+  HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" LOG_AT=2099-01-01T00:00:59Z \
     CLAUDE_CODE_SESSION_ID="$E2E_SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" current 8 ) > "$SANDBOX/e2e-poker" 2>&1
 E2E_POKER_RC=$?
 E2E_POKER_OUT="$(cat "$SANDBOX/e2e-poker")"
 expect_eq "E2E1: AC-7.1 the real current 8 is admitted on the facts (exit 0)" "0" "$E2E_POKER_RC"
-expect_eq "E2E3: …and the plan reads current: 8" "8" "$(sed -n 's/^current: //p' "$PE/$PLAN_REL")"
+expect_eq "E2E3: …and the run stands at step 8, its plan unwritten" "n=8|7" "$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$PE/$PLAN_REL" step | head -1)|$(sed -n 's/^current: //p' "$PE/$PLAN_REL")"
 run_close "$PE" run
 expect_eq "E2E4: AC-7.1 then close-out.sh run delivers (rc 0)" "0" "$CO_RC"
 expect_eq "E2E5: …the plan carries the delivered line" "yes" "$( [ -n "$(delivered_line "$PE")" ] && echo yes || echo no)"
-expect_eq "E2E6: …and reads closed" "1" "$(run_open_rc "$PE/$PLAN_REL")"
+expect_eq "E2E6: …and reads closed, delivered at step 9 though the log's step 8 is stamped later than the close's lines" "1|n=9" \
+  "$(run_open_rc "$PE/$PLAN_REL")|$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$PE/$PLAN_REL" step | head -1)"
 
 # THE SAME FUNCTION REFUSES IN CLOSE-OUT (D3). A fixture whose structure reading is the newest and
 # fails: `check` says it would refuse, naming the failing line, and `run` refuses with nothing done.

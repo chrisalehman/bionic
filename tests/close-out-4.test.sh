@@ -380,8 +380,8 @@ section "§PARKED — wave-38 T15 (REQ-4 AC-4.3; D17): close-out closes a parked
 # printed `merge: WOULD REFUSE`; `run` performs the tail without the merge act: the Step-9 line reads
 # `delivered: parked on <working branch> @ <sha>`, the continuation's header says parked, where and why, the epic
 # row is written `parked`, the patrol is disarmed, and the handoff's closed form says `resume point: PARKED on
-# <branch> @ <sha> — <why>`. Nothing of the work is deleted: the trees and branches stay. `step-line 9` is accepted
-# on such a plan. A Wake Note whose body is empty or `(none)` (the old plans' template section) parks nothing.
+# <branch> @ <sha> — <why>`. Nothing of the work is deleted: the trees and branches stay. A Wake Note whose body is
+# empty or `(none)` (the old plans' template section) parks nothing.
 # fails-when: `check` prints `merge: WOULD REFUSE` on a parked plan; a parked run deletes a branch.
 PK_WHY="The release waits on a hand test on the user's machine."
 # park_fixture <name> <wake|line|none|unparked> -> a fixture at Step 8 whose working branch carries one commit main
@@ -448,19 +448,6 @@ for _pk in unparked none; do
   expect_eq "PK-11b.$_pk …and run refuses it, naming the merge, the plan unchanged" "2|yes|$PPU_CK" \
     "$CO_RC|$(contains "$CO_OUT" "is not reachable from main")|$(cksum < "$PPU/$PLAN_REL")"
 done
-
-# step-line 9: accepted on a parked plan, refused as close-out's on an unparked one
-PK_SID="closeout-park-sid"
-PPS="$(park_fixture parked3 wake)"
-# the `- Step 4:` line every plan past Step 4 carries: step-line's dry commit judges a writer's copy at current: 4 (§LANDS)
-awk '/^- Step 7:/ { print "- Step 4: implement: opened 2026-09-14T00:10Z" } { print }' "$PPS/$PLAN_REL" > "$PPS/pk.tmp" && mv "$PPS/pk.tmp" "$PPS/$PLAN_REL"
-lands_bind "$PPS" "$PK_SID"
-expect_eq "PK-12 precondition: the session is bound to the parked plan" "0" "$LP_RC"
-lands_poker "$PPS" "$PK_SID" step-line 9 "parked on wave/01-fixture — $PK_WHY"
-PPN="$(park_fixture parked4 unparked)"
-lands_bind "$PPN" "$PK_SID"
-PPN_CK="$(cksum < "$PPN/$PLAN_REL")"
-lands_poker "$PPN" "$PK_SID" step-line 9 "delivered by hand"
 
 # ============================================================
 section "§ONE-WRITER — wave-38 T37 (critic-adversarial #2, critic-structure #1; D23): close-out and the handoff verb write one document on a parked or pull-request plan, with one pair of closed lines"
@@ -1015,17 +1002,15 @@ expect_regex "RO-5 the plan's delivered: time is a minute, as close-out writes i
 expect_contains "RO-5b …and the report read after the close names it as the window's end" "until $RO_DEL (delivered:)" "$RO_ENDS"
 
 # ============================================================
-section "§DELIVERED — a delivered run accepts its merge record and its continuation marks from any session that names it (REQ-10 AC-10.1; D5)"
+section "§DELIVERED — a delivered run accepts its continuation marks from any session that names it (REQ-10 AC-10.1; D5)"
 # ============================================================
-# close-out's last act wipes this session's engaged marker, so the two verbs that finish a delivered run, the
-# continuation's marks (`continuation-fill`) and the pull request's merge record (`step-field 8`), are run after the
-# consent boundary is gone. Engagement guards a run still moving; a delivered plan named by `--plan` accepts those two
-# from any session, engaged or not, and nothing else: a live plan named so from an unengaged session is NOT-ENGAGED,
-# and so is any other step of the delivered plan. The bound path (a session that re-bound its delivered plan) takes
-# `step-field 8` too. FIXTURE FIDELITY: the plan close-out itself delivered (`run_close … run`), read where the close
-# left it, carrying the `- Step 4:` line every plan past Step 4 has (a writer's dry commit is judged at current: 4);
-# the verbs are the real poker run in the fixture as a session with no engaged marker.
-# fails-when: either verb prints NOT-ENGAGED on a delivered plan; either writes a live plan from an unengaged session.
+# close-out's last act wipes this session's engaged marker, so the verb that finishes a delivered run, the
+# continuation's marks (`continuation-fill`), is run after the consent boundary is gone. Engagement guards a run still
+# moving; a delivered plan named by `--plan` accepts it from any session, engaged or not: a live plan named so from an
+# unengaged session is NOT-ENGAGED. The pull request's merge is the integrate row's landing, an event, and writes no
+# plan. FIXTURE FIDELITY: the plan close-out itself delivered (`run_close … run`), read where the close left it; the
+# verb is the real poker run in the fixture as a session with no engaged marker.
+# fails-when: the verb prints NOT-ENGAGED on a delivered plan, or writes a live plan's continuation from an unengaged session.
 dl_merge() {  # <plan> -> the value of the Step 8 block's merge: line
   awk '/^- Step 8:/ { b = 1; next } b && /^[^ \t]/ { b = 0 } b && /^[ \t]+merge:/ { sub(/^[ \t]+merge:[ \t]*/, ""); print; exit }' "$1"
 }
@@ -1043,34 +1028,13 @@ expect_eq "DL-1 continuation-fill --plan <delivered> from an unengaged session w
   "0|no|no" \
   "$LP_RC|$(/usr/bin/grep -qF '<fill: the first decision' "$DL_CONT" && echo yes || echo no)|$(contains "$LP_OUT" "NOT-ENGAGED")"
 expect_contains "DL-1b …the filled text stands where the mark was" "1. none" "$(cat "$DL_CONT")"
-lands_poker "$PDL" "$DL_SID" step-field 8 'merge=main @ 0123abc (pull request #45)' --plan "$DL_PLAN"
-expect_eq "DL-2 step-field 8 --plan <delivered> from an unengaged session writes the merge record: rc 0, the field replaced, never NOT-ENGAGED" \
-  "0|main @ 0123abc (pull request #45)|no" "$LP_RC|$(dl_merge "$DL_PLAN")|$(contains "$LP_OUT" "NOT-ENGAGED")"
-[ "$LP_RC" = 0 ] || printf '%s\n' "$LP_OUT" | tail -8 | sed 's/^/    | /'
-lands_poker "$PDL" "$DL_SID" step-field 8 --plan "$DL_PLAN" 'worktree-removed=wt/01-x (by the pull request)'
-expect_eq "DL-2b …the --plan operand may stand before the pair too" "0|yes" \
-  "$LP_RC|$(/usr/bin/grep -qF '  worktree-removed: wt/01-x (by the pull request)' "$DL_PLAN" && echo yes || echo no)"
-DL_CK="$(cksum < "$DL_PLAN")"
-lands_poker "$PDL" "$DL_SID" step-field 5 'auditor=CONFIRMED, record/x.md' --plan "$DL_PLAN"
-expect_eq "DL-3 any other step of the delivered plan, unengaged, is NOT-ENGAGED (rc 0) and the plan unchanged" "0|yes|$DL_CK" \
-  "$LP_RC|$(contains "$LP_OUT" "NOT-ENGAGED")|$(cksum < "$DL_PLAN")"
 # a live plan, named the same way from the same unengaged session: the consent boundary stands
 PLV="$(mk_fixture delivered-live)"; advance_to "$PLV" 8
-LV_CK="$(cksum < "$PLV/$PLAN_REL")"
-lands_poker "$PLV" "$DL_SID" step-field 8 'merge=main @ 0123abc' --plan "$PLV/$PLAN_REL"
-expect_eq "DL-4 step-field 8 --plan <live> from an unengaged session prints NOT-ENGAGED (rc 0), the plan unchanged" "0|yes|$LV_CK" \
-  "$LP_RC|$(contains "$LP_OUT" "NOT-ENGAGED")|$(cksum < "$PLV/$PLAN_REL")"
 mkdir -p "$PLV/${CONT_REL%/*}"; printf '# continuation\n\n1. <fill: the first decision, or "none">\n' > "$PLV/$CONT_REL"
 LV_CC="$(cksum < "$PLV/$CONT_REL")"
 lands_poker "$PLV" "$DL_SID" continuation-fill 'the first decision=none' --plan "$PLV/$PLAN_REL"
 expect_eq "DL-5 continuation-fill --plan <live> from an unengaged session prints NOT-ENGAGED (rc 0), the continuation unchanged" "0|yes|$LV_CC" \
   "$LP_RC|$(contains "$LP_OUT" "NOT-ENGAGED")|$(cksum < "$PLV/$CONT_REL")"
-# the bound path: a session that re-bound its delivered plan writes the merge record with no --plan
-lands_bind "$PDL" "$DL_SID"
-lands_poker "$PDL" "$DL_SID" step-field 8 'merge=main @ 4567def (pull request #45, merged)'
-expect_eq "DL-6 bound to its delivered plan, step-field 8 writes the merge record: rc 0, the field replaced" \
-  "0|main @ 4567def (pull request #45, merged)" "$LP_RC|$(dl_merge "$DL_PLAN")"
-
 # ============================================================
 section "§MARKS — close-out fills every mark it can derive; the continuation keeps only the five a person owns (REQ-10 AC-10.2)"
 # ============================================================
@@ -1173,7 +1137,7 @@ expect_contains "OC-6c …and the card says it is blocked, naming the line" "mat
 # ============================================================
 section "§PARKED-NOTE — close-out takes its step and its closure from the reader: a parked plan's Step 9 note closes nothing"
 # ============================================================
-# FIXTURE FIDELITY: §PARKED's park_fixture, an advanced run's Step 8 line, the note in the words step-line 9 writes (PK-12).
+# FIXTURE FIDELITY: §PARKED's park_fixture, an advanced run's Step 8 line, and a person's note on its Step 9 line.
 # fails-when: close-out reads the note as the delivery, says already closed, and the parked run never closes.
 PPT="$(park_fixture parked5 wake)"
 awk -v w="parked on wave/01-fixture — $PK_WHY" '/^- Step 8: \(pending\)$/ { print "- Step 8: integrate: opened 2026-09-14T00:20Z"; print "- Step 9: " w; next } { print }' "$PPT/$PLAN_REL" > "$PPT/pk.tmp" && mv "$PPT/pk.tmp" "$PPT/$PLAN_REL"
