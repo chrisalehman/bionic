@@ -178,6 +178,9 @@ _units_read() {
     {
       split("", c)
       for (i = 1; i <= NF; i++) { e = index($i, "="); k = substr($i, 1, e - 1); if (!(k in c)) c[k] = substr($i, e + 1) }
+      # A TABLE WITH NO STATUS COLUMN (a page at 15, its nine authored cells) holds no row state of its own: every
+      # row is pending until the run log moves it (`_units_live`). A table that carries the column is read cell and all.
+      if (!("status" in has)) c["status"] = "pending"
       line = c["id"]
       for (k = 2; k <= 13; k++) line = line "\t" c[want[k]]
       row[++nr] = line

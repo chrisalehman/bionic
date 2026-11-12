@@ -552,7 +552,8 @@ git -C "$LR" checkout --quiet -b feature/human
 LFEAT0="$(sha_of "$LR" feature/human)"
 mkdir -p "$LR/.bionic/docs/plans/epic-x" "$LR/.bionic/tmp"
 LPLAN="$LR/.bionic/docs/plans/epic-x/wave-x.plan.md"
-printf -- '---\nworking-branch: wave/20-demo\n---\n# plan\n\n## SDLC State\n\ncurrent: 4\n' > "$LPLAN"
+printf -- '---\ncanonical_sdlc_version: 15\nworking-branch: wave/20-demo\n---\n# plan\n' > "$LPLAN"
+mkdir -p "$LR/.bionic/docs/record/wave-x"; printf 'run/v1|ev=step|n=4|at=2026-09-23T00:00:00Z\n' > "$LR/.bionic/docs/record/wave-x/run.log"
 printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$LPLAN" > "$LR/.bionic/tmp/engaged-${LSID}.state"
 
 # A BARE `land` (wave-28 T3, D9): the line lands a row with `ready`, and a person lands one with
@@ -720,7 +721,8 @@ WBASE="$(sha_of "$WR")"
 WSF="${WR}/.bionic/tmp/workspaces-${WSID}.state"
 mkdir -p "$WR/.bionic/docs/plans/epic-x" "$WR/.bionic/tmp"
 WPLAN="$WR/.bionic/docs/plans/epic-x/wave-x.plan.md"
-printf -- '---\nworking-branch: wave/25-demo\n---\n# plan\n\n## SDLC State\n\ncurrent: 4\n' > "$WPLAN"
+printf -- '---\ncanonical_sdlc_version: 15\nworking-branch: wave/25-demo\n---\n# plan\n' > "$WPLAN"
+mkdir -p "$WR/.bionic/docs/record/wave-x"; printf 'run/v1|ev=step|n=4|at=2026-10-03T00:00:00Z\n' > "$WR/.bionic/docs/record/wave-x/run.log"
 printf 'plan=%s\nengaged_at=2026-10-03T00:00:00Z\n' "$WPLAN" > "$WR/.bionic/tmp/engaged-${WSID}.state"
 
 # A named create: one line, all eight fields, the attestation unchanged.
@@ -826,7 +828,7 @@ section "§TREE-RECORD: a named create gives the tree its own record, keyed by i
 #
 # THE TREE DESCRIBES ITSELF. `create … --for <name>` writes one `tree/v1` line into the tree's own git
 # directory (`bionic-tree`, beside the `bionic-agent` marker): the tree's path, the spawning session's bound
-# plan, the plan row whose agent cell holds the name, the worker and the spawning session. A landing from any
+# plan, the plan row the name was dispatched to, the worker and the spawning session. A landing from any
 # later session reads it first (lib/line.sh), so the session that spawned the tree need not be the one that
 # lands it. Read through the library's one reader, `worktree_tree_record`, never off the file.
 # fails-when: create writes no record, or one keyed by the session rather than the tree.
@@ -835,23 +837,11 @@ TRSID="tr-session-01"
 TRBASE="$(sha_of "$TR")"
 mkdir -p "$TR/.bionic/docs/plans/epic-x" "$TR/.bionic/tmp"
 TRPLAN="$TR/.bionic/docs/plans/epic-x/wave-x.plan.md"
-cat > "$TRPLAN" <<'TRP'
----
-working-branch: wave/25-demo
----
-# plan
-
-## SDLC State
-
-current: 4
-
-## Tasks
-
-| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | row one | w45-T1 | — | | 10 | REQ-1 | a.txt | — | | active |
-| T2 | 4 | build | row two | — | — | | 10 | REQ-1 | b.txt | — | | pending |
-TRP
+{ printf -- '---\ncanonical_sdlc_version: 15\nworking-branch: wave/25-demo\n---\n# plan\n\n## Tasks\n\n'
+  printf '| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T%s | 4 | build | row %s | — | 10 | REQ-1 | %s.txt | — |\n' 1 one a 2 two b; } > "$TRPLAN"
+TRLOG0="$(printf 'run/v1|ev=%s|at=2026-10-03T00:00:0%sZ\n' 'step|n=4' 1 'dispatch|row=T1|name=w45-T1' 2)"
+mkdir -p "$TR/.bionic/docs/record/wave-x"; printf '%s\n' "$TRLOG0" > "$TR/.bionic/docs/record/wave-x/run.log"
 printf 'plan=%s\nengaged_at=2026-10-03T00:00:00Z\n' "$TRPLAN" > "$TR/.bionic/tmp/engaged-${TRSID}.state"
 tr_rec() { ( . "$WSLIB" 2>/dev/null || exit 9; worktree_tree_record "$1"; echo "rc=$?" ); }
 # A name a row claims is made only with its brief rendered (§TREE below); these two have theirs.
@@ -866,15 +856,15 @@ TR1="$(ws_path "$TROUT")"
 expect_eq "(tr0) the named create exits 0 and names its tree" "rc=0|${TR}/.worktrees/45-T1" \
   "$(printf '%s\n' "$TROUT" | tail -n1)|$TR1"
 TRL="$(tr_rec "$TR1")"
-expect_match "(tr1) the tree's record names its path, the plan, the row whose agent cell holds the name, the worker and the spawning session" \
+expect_match "(tr1) the tree's record names its path, the plan, the row the name was dispatched to, the worker and the spawning session" \
   "tree/v1|path=${TR1}|plan=${TRPLAN}|row=T1|worker=w45-T1|spawned-by=${TRSID}|at=*" "$(printf '%s\n' "$TRL" | sed -n 1p)"
 expect_eq "(tr1b) …one line, read with rc 0" "rc=0" "$(printf '%s\n' "$TRL" | sed -n 2p)"
 expect_regex "(tr1c) …closed by an ISO-UTC stamp" '\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' \
   "$(printf '%s\n' "$TRL" | sed -n 1p)"
 
-# A name no row's agent cell holds is recorded with row=-; an unbound session records plan=none.
+# A name no row was dispatched to is recorded with row=-; an unbound session records plan=none.
 TROUT2="$(ws_create "$TRSID" "$TR" "$TRBASE" wt/45-T2 --for w45-T2)"
-expect_match "(tr2) a name no agent cell holds is recorded row=-" \
+expect_match "(tr2) a name no row was dispatched to is recorded row=-" \
   "tree/v1|path=$(ws_path "$TROUT2")|plan=${TRPLAN}|row=-|worker=w45-T2|spawned-by=${TRSID}|at=*" \
   "$(tr_rec "$(ws_path "$TROUT2")" | sed -n 1p)"
 TROUT3="$(ws_create tr-session-unbound "$TR" "$TRBASE" wt/45-T3 --for w45-T3)"
@@ -893,7 +883,7 @@ section "§TREE: a tree made for a row is one event in its run's log, and the pl
 # The row is the one the name's brief was rendered from (`<record>/briefs/<name>.md`, its mark); a name a row claims by
 # the dispatch rule with no brief is refused with nothing made; a name no row claims makes its tree with no event.
 # fails-when: create writes a cell, the event is missing, doubled or misses a field, or a claimed row's tree goes unrecorded.
-TRREC="$TR/.bionic/docs/record/wave-x"; : > "$TRREC/run.log"
+TRREC="$TR/.bionic/docs/record/wave-x"; printf '%s\n' "$TRLOG0" > "$TRREC/run.log"
 printf '<!-- brief: rendered from row T2 for w45-T6; sum %064d; render it again to change it, never edit it -->\nRow: T2\n' 0 \
   > "$TRREC/briefs/w45-T6.md"
 TRSUM="$(cksum < "$TRPLAN")"
