@@ -618,8 +618,6 @@ expect_eq "a project's FIRST artifact, written into .bionic before any run exist
 
 section "5d — ONE session-id guard: a malformed or empty key silences all fifteen (REQ-1h, AC-1h.2)"
 #
-# (epic-23 wave-11-lean-spine, added by T10.)
-#
 # WHAT THIS IS FOR. The T10 census measured the shape guard
 # `case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac` in exactly SIX of the fifteen preamble
 # hooks; nine had no shape check at all, background-suite-guard blanked the variable instead

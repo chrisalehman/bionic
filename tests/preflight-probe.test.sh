@@ -77,9 +77,6 @@ expect_file_no_regex() {  # <label> <regex> <file>
   if [ ! -f "$3" ]; then no "$1" "file absent: $3"; return; fi
   if grep -qE "$2" "$3"; then no "$1" "unexpected match for /$2/"; else ok "$1"; fi
 }
-# This suite's private section() was a plain banner printer with the
-# framework's exact signature (A-10c) — deleted outright, every existing
-# section "..." call site binds unchanged.
 
 # ---------- sandbox ----------
 

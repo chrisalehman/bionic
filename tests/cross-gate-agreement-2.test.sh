@@ -363,11 +363,6 @@ expect_eq "S13.4 mutation: …and red on the printf copy too (R4)" "1" \
 # every named suite in the fleet.
 expect_eq "S13.5 the guard reads the key the wall writes" "0" \
   "$(grep -qF 'suites_allowed=' "$S13_BG" && echo 0 || echo 1)"
-# DROPPED (wave-22 T9, review fix candidate 7; critic Scope). A second row here counted the
-# source text of the arm's prefix strip (`${_bseg#suites_allowed=}`). It pinned how the arm
-# spells the read, not what the arm does: a rename of the strip's variable turned it red with
-# no change in behaviour. That the arm reads the key the wall writes is proven behaviourally,
-# by bash-walls §15 and by §AM2 here (an amended `suites_allowed=` is admitted by the arm).
 
 # ============================================================
 # --- S18 — landing-gate.sh reconciles the diff against Files:, once (spec AC-22) ---
@@ -591,11 +586,6 @@ mkdir -p "$S19_SB"
 printf 'if cmp -%s "$SKILL_MD" "$DOCTORED_REPLANTED"; then no "x" "the %s target matched nothing"; fi\n' \
   s sed >> "$S19_SB/replanted.test.sh"
 
-# --- §S19.3 retired (wave-24): six exact-count pins on `anchor` calls (per-suite sites and calls,
-# this suite, agent-context-guard, landing-gate, and their total). An exact count goes red on
-# every legitimate new mutant and is repaired by retyping the number, so it tested the author's
-# memory, not the tree. The relation it stood for is derived below, in §S19.4, with its paired
-# positive; §S19.2 holds the absence side across every suite.
 
 # --- §S19.4 every doctored copy is anchored, suite by suite ---
 # Each doctoring suite gets its own site pattern, and a pattern that finds no site is RED

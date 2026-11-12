@@ -1,6 +1,5 @@
 #!/bin/bash
-# tests/engage.test.sh — hooks/engage.sh, the ENGAGEMENT TRIGGER (task-engaged-session,
-# task T1; matrix AC-1, AC-2, AC-3, AC-4, AC-17, AC-18).
+# tests/engage.test.sh — hooks/engage.sh, the ENGAGEMENT TRIGGER.
 #
 # WHAT IT OWNS. The one act that puts a session inside bionic: invoking the
 # canonical-sdlc skill. The hook fires on the two paths that invocation can take —
