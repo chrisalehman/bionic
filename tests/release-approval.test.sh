@@ -844,21 +844,20 @@ expect_eq "CARRY-6 reply all default answers that page (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
 expect_contains "CARRY-6b …and rules its carry: the register says the reply closed it" \
   "|key=$FC_CK2|state=closed|by=release approval reply|" "$(fc_reg)"
-# A finding the person defers through disposition is answered carry on the run's register and stays open, waiting on the
+# A finding the person defers through finding-move is answered carry on the run's register and stays open, waiting on the
 # release approval card; the reply that answers the page closes it. fails-when: hooks/poker/proof.sh closes the finding at
 # the ruling (CARRY-8b), or hooks/poker/plan.sh `reply` leaves the answered finding open (CARRY-10).
 FC_FK="finding:record:wave-x:adversarial.md:1"
 FC_DW='carry this finding to the next release'
 fc_record adversarial adversarial piece $'finding: 1 S2 on lib/x.sh:1 a path could break\nshown: 1 cat lib/x.sh'
 fc_plan "$FC_GOOD"
-poke "$RFC" disposition
-expect_contains "CARRY-7 precondition: the disposition owes the person's ruling on the S2" "$FC_FK" "$(fc_owed)"
-[ "$RC" = 0 ] || printf '      disposition said: %s\n' "$OUT"
+fc_owe "$FC_FK" >/dev/null 2>&1
+expect_contains "CARRY-7 precondition: the person's ruling on the S2 is owed" "$FC_FK" "$(fc_owed)"
 fc_typed "$FC_WD" "$FC_WR" "$FC_DW"
 FC_SUM="$(cksum < "$PFC")"; FC_ST='A path could break; it is carried to the next release.'
-poke "$RFC" disposition "$FC_FID" defer "$FC_DW" 'the fix waits on the next release' "$FC_ST"
+poke "$RFC" finding-move "$FC_FID" defer "$FC_DW" 'the fix waits on the next release' "$FC_ST"
 expect_eq "CARRY-8 the person's deferral is recorded (exit 0)" "0" "$RC"
-[ "$RC" = 0 ] || printf '      disposition said: %s\n' "$OUT"
+[ "$RC" = 0 ] || printf '      finding-move said: %s\n' "$OUT"
 expect_eq "CARRY-8d …as one finding event of the run's log carrying its sentence, and the plan's checksum is unchanged" \
   "1|stated=$FC_ST|same" "$(/usr/bin/grep -cF "run/v1|ev=finding|ref=$FC_FID|to=defer|" "$FC_REC/run.log" 2>/dev/null)|$(/usr/bin/grep -o 'stated=[^|]*' "$FC_REC/run.log" 2>/dev/null)|$([ "$(cksum < "$PFC")" = "$FC_SUM" ] && echo same || echo changed)"
 expect_contains "CARRY-8b …and the finding stays open" "$FC_FK" "$(fc_owed)"

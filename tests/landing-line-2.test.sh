@@ -871,7 +871,7 @@ expect_eq "(ln2) AC-16.2 a tracked docs path and a .bionic/tmp path in a script,
 # THE WORLD. On the working branch, s.txt is three lines (H1), then two lines are put above them (H2). Four reviews are
 # registered as `proof-add review` writes them: A at H1 names s.txt:1 and T1 is born of it; B at H2 names s.txt:3, the
 # same line moved down two; C at H2 names s.txt:1, a line H1 did not have; E at H1 names s.txt:3. The register is
-# opened by `disposition`, E is carried to T1 by `finding-move`, and T1 lands through ready on a.test.sh. The plan's
+# opened on the register as the card's findings reader opens it, E is carried to T1 by `finding-move`, and T1 lands through ready on a.test.sh. The plan's
 # Eval design names tests/a.test.sh for both of its criteria, the matrix holds a block for each in an older plan's
 # shape, and the second criterion's row reads waived.
 ll_settle_rev() {  # <record dir> <name> <base> <head> <path:line> — a failing review naming one finding at that site
@@ -923,10 +923,11 @@ ll_settle_world() {  # -> root, the world above, T1 not yet landed
 
 ST="$(ll_settle_world)"; STP="$(ll_plan "$ST")"
 ST_RRC=0; ST_R=""
-ST_D="$(ll_poker "$ST" disposition)"; ST_DRC=$?
+ST_D="$(for k in recB recC recE; do bash -c '. "$1/roots.sh" && . "$1/owed.sh" && OWED_ROOT="$2" OWED_PLAN="$3" owed_open "finding:record:wave-x:$4.md:1" "Finding S2 needs a ruling" "record/wave-x/$4.md#1"' \
+  _ "$REPO/payload/scripts/lib" "$ST" "$STP" "$k" || exit 1; done 2>&1)"; ST_DRC=$?
 ST_M="$(ll_poker "$ST" finding-move record/wave-x/recE.md#1 carried T1)"; ST_MRC=$?
-expect_eq "(st0) the world is built by the verbs: disposition and finding-move carried exit 0" "0|0|0" "$ST_RRC|$ST_DRC|$ST_MRC"
-[ "$ST_RRC|$ST_DRC|$ST_MRC" = "0|0|0" ] || printf '      render: %s\n      disposition: %s\n      move: %s\n' "$ST_R" "$ST_D" "$ST_M"
+expect_eq "(st0) the world is built: the three asks opened on the register and finding-move carried exit 0" "0|0|0" "$ST_RRC|$ST_DRC|$ST_MRC"
+[ "$ST_RRC|$ST_DRC|$ST_MRC" = "0|0|0" ] || printf '      render: %s\n      asks: %s\n      move: %s\n' "$ST_R" "$ST_D" "$ST_M"
 expect_eq "(st0b) …the open findings B, C and E each hold an open ask, E's answered carry to T1's landing" "open|open|open" \
   "$(ll_ask "$ST" record/wave-x/recB.md#1 | cut -d'|' -f1)|$(ll_ask "$ST" record/wave-x/recC.md#1 | cut -d'|' -f1)|$(ll_ask "$ST" record/wave-x/recE.md#1 | cut -d'|' -f1)"
 expect_eq "(st0c) …before the landing no finding reads fixed" "" "$(ll_fixed "$ST")"

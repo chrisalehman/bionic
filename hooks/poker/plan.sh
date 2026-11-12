@@ -934,7 +934,7 @@ EOF
     # read from its record (`finding_read`); the row's rating is the gravest of them, the lowest S and then on
     # before off, and the guards below hold it as they hold a typed rating.
     # A FINDING THE PERSON MOVED TO FIX IS ASKED, NOT UNASKED (wave-35 T34; A-orch-48): its effective priority
-    # (`finding_read`'s FR_P, a `moved:` line) is fix, and `disposition` tells the orchestrator to born a row of
+    # (`finding_read`'s FR_P, a `moved:` line) is fix, and a fix is answered by a row born of
     # it, so the policy guard holds each finding to the policy OR to the person's move, the first that is
     # neither refused with the remedy. The marker keeps the reader's rating, never re-rated.
     TA_BORN_MARK=""; TA_OFF=""; TA_OFF_RATING=""; TA_CLASS=""; TA_COUNT_SAID=""
@@ -952,7 +952,7 @@ EOF
         TA_MV="$(_proof_moved_to "$TA_PLAN" "$TA_BID")" \
           || { die "task-add refused — the run's facts could not be read, so the moves of $(clean "$TA_BID") are not known; nothing is born. Run again: bash ${HOOK_DIR}/session-poker.sh task-add $TA_ID with the same operands"; exit 2; }
         if [ "$TA_MV" = defer ]; then
-          die "task-add refused — $(clean "$TA_BID") was moved to defer, and its newest move stands: $(clean "$(proof_move_line "$TA_PLAN" "$TA_BID")"); $TA_ID stands in the plan unborn, the person's to remove. To fix it after all: disposition $(clean "$TA_BID") fix '<their words>' '<why>', then task-add again."
+          die "task-add refused — $(clean "$TA_BID") was moved to defer, and its newest move stands: $(clean "$(proof_move_line "$TA_PLAN" "$TA_BID")"); $TA_ID stands in the plan unborn, the person's to remove. To fix it after all: finding-move $(clean "$TA_BID") fix '<their words>' '<why>', then task-add again."
           exit 1
         fi
         TA_RANK="${FR_S#S}$( [ "$FR_R" = on ] && printf 0 || printf 1 )"
@@ -1668,12 +1668,12 @@ RR_ROWS_EOF
     poker_fold_ask RR_ANS "$RR_AGAIN" "$PV_PLAN" reader_q_reviews
     RR_QOF="$(printf '%s\n' "$RR_ANS" | awk -F'|' "$_LINE_FIELDS_AWK"'
       line_kv("ev") == "proof" { print line_kv("evidence") "\t" line_kv("question") }')"
-    # A PREVIEW OPENS NOTHING: the disposition it reads is handed a ledger key no file can carry, so the person's
-    # items the disposition opens on any other run are left unopened here.
+    # A PREVIEW OPENS NOTHING: the findings' reader is handed a ledger key no file can carry, so the person's
+    # items it opens on any other run are left unopened here.
     if [ "$RR_PREVIEW" = yes ]; then
-      RR_DISP="$( cd "$PV_REPO" && OWED_SID="preview/none" "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" disposition 2>&1 )"
+      RR_DISP="$( cd "$PV_REPO" && OWED_SID="preview/none" finding_disposition 2>&1 )"
     else
-      RR_DISP="$( cd "$PV_REPO" && "${BASH:-bash}" "$HOOK_DIR/session-poker.sh" disposition 2>&1 )"
+      RR_DISP="$( cd "$PV_REPO" && finding_disposition 2>&1 )"
     fi
     while IFS= read -r line; do
       case "$line" in "poker: finding "*) : ;; *) continue ;; esac

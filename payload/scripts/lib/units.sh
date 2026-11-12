@@ -3153,7 +3153,7 @@ UNITS_BORN_COUNTED
 #   (fences skipped, the first line per id), the status the row's own `## Tasks` cell (`units_rows`), empty for a
 #   line whose row the table does not carry. Nothing, exit 0, when no line names a finding; exit 1 when the plan
 #   cannot be read. Readers: lib/proof.sh `proof_fixed` (the judge's fixed findings) and the poker's
-#   `disposition` (the fix row of each finding).
+#   `finding_disposition` (the fix row of each finding).
 units_born_findings() {
   local plan="${1:-}" rows logged
   [ -n "$plan" ] && [ -r "$plan" ] || return 1

@@ -411,7 +411,6 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh regression-run [--starter tick|orchestrator|person] [--reason '<why>']   run the regression in the working branch's checkout, .bionic/config.yaml's regression-command: command, else tests/run.sh whole (held to the full-run rules); write its log, opening head=<40-hex> dirty=<n> and closing rc=<n>, for proof-add regression to cite; --starter names who started it, written as starter= on its run line (orchestrator by default), and person needs --reason"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> <defer|fix> '<the user's words>' '<why>' ['<changelog sentence>']   move a finding across the line on words the user typed in this session, a deferral with its one changelog sentence, as a finding event in the run's log"
   die "  bash ${HOOK_DIR}/session-poker.sh finding-move <record>#<n> fixed <row>   name the ## Tasks row that fixed a finding, landed before the review or after it, as a finding event in the run's log"
-  die "  bash ${HOOK_DIR}/session-poker.sh disposition [<record>#<n> <fix|defer> '<the user's words>' '<why>' ['<changelog sentence>']]   render every finding of the registered reviews (rating, record, fix row, state, the decision it needs), adding their debt and opening an owed item per finding the person must rule on; with a finding, record the person's ruling on it"
   die "  bash ${HOOK_DIR}/session-poker.sh prompt     the canonical Patrol prompt: the one a CronCreate for this session carries"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report [--rows] [--hand-holds [--since <ISO>] [--until <ISO>]] [<plan>]   the run's landings, waits and runs, folded from its landing record and the gate's requests; --rows adds a line per landed row; --hand-holds adds the count of escape-hatch uses by kind, folded from the lines their verbs wrote, over the window from the last build landing to the release approval card, or the window --since and --until name, and the window's two ends"
   die "  bash ${HOOK_DIR}/session-poker.sh landing-report --scorecard [<plan>]   the run's scorecard: human stops on the autonomous half, agent minutes after the final reply, the widest landing and human-wait minutes, each against its target, then the sheet's pace, correctness and waste (read-only)"
@@ -822,27 +821,6 @@ $1"; shift ;;
     case "${1##*#}" in *[!0123456789]*) usage "finding-move: '$1' is not <record>#<n>." ;; esac
     FM_ID="$1"; FM_TO="$2"; FM_RAW="${3:-}"; FM_WHY_RAW="${4:-}"
     [ -z "$FM_ROW" ] || FM_RAW=""
-    ;;
-  # NO OPERAND RENDERS; FOUR OR FIVE RULE (wave-33 T13; REQ-5 AC-5.1, D6): the finding (`<record>#<n>`), fix or
-  # defer, the person's words as typed, why, and for a deferral optionally its changelog sentence. Another count,
-  # a direction, an id of another shape or a sentence on a fix is the usage error; the rules the ruling is held to
-  # are finding-move's, the verb's own refusals (1).
-  disposition)
-    DSP_USAGE="disposition takes no argument (it renders every finding of the registered reviews), or <record>#<n>, fix or defer, the person's words as typed, why, and for defer optionally its changelog sentence."
-    DSP_ID=""; DSP_TO=""; DSP_RAW=""; DSP_WHY=""; DSP_SENT=""
-    if [ $# -gt 0 ]; then
-      { [ $# -eq 4 ] || [ $# -eq 5 ]; } && [ -n "${3//[[:space:]]/}" ] && [ -n "${4//[[:space:]]/}" ] || usage "$DSP_USAGE"
-      case "$2" in defer|fix) : ;; *) usage "$DSP_USAGE" ;; esac
-      case "$1" in
-        *?#[0123456789]*) : ;;
-        *) usage "disposition: '$1' is not <record>#<n>." ;;
-      esac
-      case "${1##*#}" in *[!0123456789]*) usage "disposition: '$1' is not <record>#<n>." ;; esac
-      if [ $# -eq 5 ]; then
-        [ "$2" = defer ] && [ -n "${5//[[:space:]]/}" ] || usage "$DSP_USAGE"
-      fi
-      DSP_ID="$1"; DSP_TO="$2"; DSP_RAW="$3"; DSP_WHY="$4"; DSP_SENT="${5:-}"
-    fi
     ;;
   # NO OPERAND (wave-27 T16; D12): the range is the verb's own, from the last release to the working
   # head, so a base typed on the command line is the usage error, as a head is for proof-add.
@@ -2089,7 +2067,7 @@ plan_verb_id_ok() {
 # priority the plan's moves give it, lib/proof.sh `proof_finding_rating`), FR_W (its <path>:<line> or -), FR_T
 # (its title) and FR_Q, FR_H (the question and head of the plan's registered reading of the record: its last
 # `proved: kind=review` line naming the record as evidence); 1 with FR_WHY, one clause naming what is missing
-# and the call that supplies it (wave-33 T13; REQ-5, D6). The readers: `task-add --born` and `disposition`.
+# and the call that supplies it. Its reader: `task-add --born`.
 finding_read() {
   local plan="$1" repo="$2" id="$3" rec n got
   FR_S=""; FR_R=""; FR_P=""; FR_W=""; FR_T=""; FR_Q=""; FR_H=""; FR_WHY=""
@@ -2525,7 +2503,6 @@ case "$VERB" in
   proof-add) poker_verb_proof_add "$@" ;;
   waive) poker_verb_waive "$@" ;;
   finding-move) poker_verb_finding_move "$@" ;;
-  disposition) poker_verb_disposition "$@" ;;
   release-check) poker_verb_release_check "$@" ;;
   regression-run) poker_verb_regression_run "$@" ;;
   debt) poker_verb_debt "$@" ;;

@@ -1428,7 +1428,7 @@ expect_contains "(k10b) …naming the row's kind" "T1 is a build row" "$KL_OUT"
 ww_sdlc "$RK" "$(kl_lib proof_finding_lines record/wave-x/critic.md "$(printf '4\tS3\ton\t-\tdefer\t-\tan unstated one')")"
 KL_OUT="$(ww_poke "$RK" known-limits-part T3)"; KL_RC=$?
 expect_eq "(k11) a deferral with no stated sentence is refused, the branch unmoved" "1|$KL_T" "$([ "$KL_RC" -ne 0 ] && echo 1)|$(kl_tip "$RK")"
-expect_contains "(k11b) …naming the finding and the verb that states it" "disposition record/wave-x/critic.md#4 defer" "$KL_OUT"
+expect_contains "(k11b) …naming the finding and the verb that states it" "finding-move record/wave-x/critic.md#4 defer" "$KL_OUT"
 
 # ---------------------------------------------------------------------------
 section "§HEALTH: a landing writes nothing of its row or of the matrix: the plan's stack-health: stands as written while the rendering moves"

@@ -1080,7 +1080,7 @@ sitrep_forecast_end() {
 
 # sitrep_reviews <plan> <root> -> `<question><TAB><scope><TAB><result><TAB><at ISO or -><TAB><record><TAB><open>` per
 # review proof the reader holds with a question and a record (`reader reviews`), in the order they were last set, a
-# repeated record and result once. <open> counts the record's findings `disposition` would print open: S1 or S2,
+# repeated record and result once. <open> counts the record's findings `finding_disposition` reads open: S1 or S2,
 # rated fix (`proof_finding_rating`), with no fix of it landed (`proof_fixed`).
 sitrep_reviews() {
   local plan="$1" root="$2" docs fixed reads q sc res at ev h got num s r n

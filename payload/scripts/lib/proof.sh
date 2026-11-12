@@ -832,8 +832,7 @@ _proof_moved_to() {
 
 # proof_move_line <plan> <record>#<n> -> the finding's newest whole move event, verbatim, the one `_proof_moved_to`
 # reads its direction from; nothing when the run holds none. What a refusal quotes when it names the
-# move it read: `task-add --born` refuses a finding whose newest move is to defer, and `disposition` names the row a
-# move to fixed names. Exit 2 when the fold fails.
+# move it read: `task-add --born` refuses a finding whose newest move is to defer. Exit 2 when the fold fails.
 proof_move_line() {
   local ev
   _proof_findings_load "$1" || return 2; ev="$_PROOF_FINDINGS"
