@@ -126,9 +126,8 @@ expect_eq "a burned line closes the debt of its own kind, and the other stays op
 printf '# l\n\n## Δ0 — D4 put (orchestrator 2026-11-01 9:00 AM PST): the fourth\n' > "$D/record/debtkind/design-ledger.md"; LB="$(cat "$D"/record/debtkind/*.md | cksum)"
 ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/proof.sh"; P="$D/plans/epic-x/debtkind.plan.md"; proof_debt_event "$P" concept=cv kind=unpinned-pair sites=b.sh:2 raised-by=r.md touches=3 burned=T8 && proof_debt_event "$P" \
   concept=nw kind=duplicate sites=c.sh:3 raised-by=s.md touches=0 && proof_decision_event "$P" d=D4 verb=ruled said=1 by=Dana "title=the fourth" && proof_decision_event "$P" d=D4 verb=put by=orchestrator "title=the fourth" )
-kf() { awk -F'|' -v a="$1" -v b="$2" '{ x = ""; y = ""; for (i = 2; i <= NF; i++) { if (index($i, a "=") == 1) x = substr($i, length(a) + 2); if (index($i, b "=") == 1) y = substr($i, length(b) + 2) } printf "%s/%s ", x, y }'; }
 expect_eq "a ledger's debt burned and a debt added, a decision ruled and put again, by their writers: debts and ledger answer each, both files unchanged" \
-  "nw/duplicate |Δ0/put Δ1/ruled Δ2/put |$LB" "$(ask debts | kf concept kind)|$(ask ledger D4 | kf entry verb)|$(cat "$D"/record/debtkind/*.md | cksum)"
+  "duplicate |Δ0/put Δ1/ruled Δ2/put |$LB" "$(dkinds)|$(ask ledger D4 | sed -n 's/.*|entry=\([^|]*\)|.*|verb=\([a-z]*\)|.*/\1\/\2/p' | tr '\n' ' ')|$(cat "$D"/record/debtkind/*.md | cksum)"
 
 # fails-when: two acts by hand equal but for their time are one fact, so a second amend of one agent for one reason
 # goes uncounted; two equal lines with no time, which nothing tells apart, are two; a cancel naming the act misses one.
