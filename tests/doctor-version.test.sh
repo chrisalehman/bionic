@@ -855,7 +855,7 @@ section "Section V14: a run open at version 14 is named, with the act that bring
 V14="$(mktemp -d -p "$TMP")"; ( cd "$V14" && git init -q . ); V14P="$V14/.bionic/docs/plans/epic-99-fixture"
 plan_fixture "$V14P/wave-01-open.plan.md" wave >/dev/null
 plan_fixture --current 9 "$V14P/wave-02-closed.plan.md" wave >/dev/null
-printf -- '- Step 9: shipped delivered: x\n' >> "$V14P/wave-02-closed.plan.md"
+bash -c '. "$1/proof.sh" && proof_step_event "$2" 9 delivered=x' _ "$PAYLOAD/scripts/lib" "$V14P/wave-02-closed.plan.md" >/dev/null 2>&1
 V14_OUT="$(run_doctor_only PROJECT "$HOME2" "$V14")"
 expect_match "V14.1: the open run at 14 is named with the command that brings it forward" \
   "*bring-forward.sh*.bionic/docs/plans/epic-99-fixture/wave-01-open.plan.md*" "$V14_OUT"
