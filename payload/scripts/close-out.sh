@@ -1305,7 +1305,7 @@ co_added_ids() {  # <lines> -> the ids, space-joined
 # both take the deferrals' road: the section is inserted under its heading when the file has none, a line the
 # section lacks is added at its end, a line already there (fenced or not) is never written twice, and a person's
 # text is not touched. The hand-holds line counts as there when the section holds ANY `hand-holds: ` line: a second
-# close-out reads a different count (the roster is wiped), and a second, contradicting line would be worse than the
+# close-out reads a later window, so another count, and a second, contradicting line would be worse than the
 # first reading standing (A-T33-1). The inherited lines match byte for byte, as the deferrals do.
 co_cont_missing_under() {  # <heading> <prefix|""> <wanted lines> -> the wanted lines the section lacks, in order;
   # CO_UNFENCED=1 counts only the section's unfenced lines as present
