@@ -100,10 +100,13 @@ expect_contains "tree: the tree verb's one writer" "payload/scripts/lib/worktree
 expect_contains "tree: the planted second writer beside it" "payload/scripts/lib/planted-writers.sh:planted_tree" "$TRE"
 SH0="$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "shared" && ($2 == "born" || $2 == "dispatch" || $2 == "waiver" || $2 == "finding" || $2 == "proof" || $2 == "tree")' | grep -c .)"
 expect_eq "the shared-type count rises by each of the six planted types not shared before" "$(( $(count "$BEFORE" shared_types) + 6 - SH0 ))" "$(count "$AFTER" shared_types)"
-expect_eq "step: one writer, the facts library's, and no second" "payload/scripts/lib/proof.sh proof_step_event|" \
-  "$(printf '%s\n' "$AFTER" | awk -F'\t' '$1 == "writer" && $2 == "step" { split($3, w, " "); sub(/:[0-9]+$/, "", w[1]); print w[1], w[2] }')|$(pair step)"
-expect_eq "handoff: one writer, the facts library's, and no second" "payload/scripts/lib/proof.sh proof_handoff_event|" \
-  "$(printf '%s\n' "$AFTER" | awk -F'\t' '$1 == "writer" && $2 == "handoff" { split($3, w, " "); sub(/:[0-9]+$/, "", w[1]); print w[1], w[2] }')|$(pair handoff)"
+w1() { printf '%s\n' "$AFTER" | awk -F'\t' -v t="$1" '$1 == "writer" && $2 == t { split($3, w, " "); sub(/:[0-9]+$/, "", w[1]); print w[1], w[2] }'; }
+expect_eq "step: one writer, the facts library's, and no second" "payload/scripts/lib/proof.sh proof_step_event|" "$(w1 step)|$(pair step)"
+expect_eq "decision and debt: one writer each, the facts library's, and no second" "payload/scripts/lib/proof.sh proof_decision_event|payload/scripts/lib/proof.sh proof_debt_event|" \
+  "$(w1 decision)|$(w1 debt)|$(pair decision)$(pair debt)"
+expect_eq "order, handoff and bind: one writer each, the facts library's, and no second" \
+  "payload/scripts/lib/proof.sh proof_order_event|payload/scripts/lib/proof.sh proof_handoff_event|payload/scripts/lib/proof.sh proof_bind_event|" \
+  "$(w1 order)|$(w1 handoff)|$(w1 bind)|$(pair order)$(pair handoff)$(pair bind)"
 # The two setters of matrix cells go with the matrix; every other hand event is written by the one writer.
 expect_eq "hand: one writer, the line library's, beside the matrix setters" "payload/scripts/lib/line.sh line_hand_event" \
   "$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "writer" && $2 == "hand" { split($3, w, " "); sub(/:[0-9]+$/, "", w[1]); print w[1], w[2] }' \
@@ -126,6 +129,11 @@ steps() { /usr/bin/grep -rnE 'step-line|step-field|regression-runs|regression_ru
 printf '%s\n' '# step-field 5 walk-artifact=x' '# regression-runs --write' > "$L/planted-step.sh"
 expect_eq "the extractor reads both planted names of the step's writers" "2" "$(steps "$S" | grep -c planted-step.sh)"
 expect_eq "the verbs that wrote a step's line, its fields, the regression's setting and its runs' count are named nowhere else" "" "$(steps "$S" | grep -v planted-step.sh)"
+# A design ledger heading and a debt ledger row are read by the translation alone; no verb writes either file.
+ledgers() { /usr/bin/grep -rnE '## Δ|/ \\[|] /|" [|] raised-by ' "$1/hooks" "$1/payload/scripts" | grep -v -e '/payload/scripts/lib/translate\.sh:' -e ':[0-9]*: *#'; }
+printf '%s\n' '# ## Δ0 in a comment' "led_n() { sed -n 's/^## Δ\\([0-9]*\\).*/\\1/p' \"\$1\"; }" > "$L/planted-ledger.sh"
+expect_eq "the extractor reads the planted ledger parser and not the comment" "1" "$(ledgers "$S" | grep -c planted-ledger.sh)"
+expect_eq "neither ledger file is written or parsed outside the translation" "" "$(ledgers "$S" | grep -v planted-ledger.sh)"
 
 section "REFUSALS"
 own() { printf '%s\n' "${2:-$BEFORE}" | awk -F'\t' -v f="hooks/$1.sh:" 'index($2, f) == 1 { n = $2; sub(/.*:/, "", n); print n, $3 }'; }
