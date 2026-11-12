@@ -92,6 +92,12 @@ for f in '- Step 8: a\n|with no Step 9 line' '- Step 9: drafted\n|with its Step 
 printf '## SDLC State\n- Step 3: a\n- Step 4: a\n' > "$D/plans/epic-x/form.plan.md"; expect_eq "Step lines with no current: are no step" "state=open " "$(ask step | tr '\n' ' ')"
 W=fields; plan fields < /dev/null; bash -c '. "$1/proof.sh" && proof_step_event "$2" 8 cleanup=done && ! proof_step_event "$2" 8 merge=main' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$D/plans/epic-x/fields.plan.md"
 expect_eq "a field given at the advance is in the step's answer, and one its step does not carry is refused unwritten" "n=8 cleanup=done state=open |1" "$(ask step | tr '\n' ' ')|$(grep -c . "$D/record/fields/run.log")"
+W=apw; plan apw < /dev/null; AW="$(bash -c '. "$1/proof.sh" && proof_approval_event "$2" release by=me head="$3" && proof_approved_head "$2" release' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$D/plans/epic-x/apw.plan.md" "$H")"
+expect_eq "an approval the one writer appends is the reader's yes, at the head it was given" "$H|0" "$AW|$(ask approved release; echo $?)"
+# fails-when: an approval given again in all but its time keeps its first place, so an ask raised again after it stays open.
+W=again; printf 'run/v1|ev=%s\n' 'ask|key=approve:release|sent=s|at=2026-11-01T00:00:01Z' 'approval|key=release|by=me|at=2026-11-01T00:00:02Z' 'ask|key=approve:release|round=2|sent=s|at=2026-11-01T00:00:03Z' | plan again
+AG="$(keys asks)"; printf 'run/v1|ev=approval|key=release|by=me|at=2026-11-01T00:00:04Z\n' >> "$D/record/again/run.log"
+expect_eq "an ask raised again after an approval is open, and the same approval given again closes it" "approve:release |" "$AG|$(keys asks)"
 W=form; printf '## SDLC State\ncurrent: 9\n- Step 8: closed\n  merge: main\n  cleanup: done\n- Step 9: delivered: v1\n  archived: /a\n' > "$D/plans/epic-x/form.plan.md"
 expect_eq "a version-14 step's own fields are read from its block, and no other line of it" "n=9 delivered=v1 archived=/a state=delivered " "$(ask step | tr '\n' ' ')"
 for f in '- approved-by: u 2026-01-01T00:00Z "ok"|0' '  approved-by: u 2026-01-01T00:00Z "ok"|0' 'approved-by:  |1'; do

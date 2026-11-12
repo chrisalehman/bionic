@@ -2614,7 +2614,7 @@ _card_fmt_is() {
 # _card_settles <a red check's output> -> 0 when each refusal it prints is settled by a decision the page puts, the
 # items appended to CF_SETTLE (`waive:<q>`, `row:<AC>`); 1 at the first refusal none settles. THE PAGE'S OWN
 # DEFAULTS: a matrix row the auditor has not confirmed (waived with the user's words, `waive <AC>`), a T4 row whose
-# user has not yet confirmed its check, its block's confirmation still a placeholder (confirmed, `confirm-row`, or
+# user has not yet confirmed its check, its block's confirmation still a placeholder (confirmed, `approve <AC>`, or
 # waived), and a question whose newest reading fails (`waive <q>`). A placeholder of any other key is early: it is
 # evidence that was never recorded. The judge's unproved regression, a head with no pass at it whose floor its
 # landings cover or no run reaches, is the page's own decision too (`approve:merge-unproved`, lib/proof.sh

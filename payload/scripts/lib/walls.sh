@@ -2681,10 +2681,10 @@ _eg_reading_gaps() {
       }
     }'
   # The proofs that clear a debt are the run's, read through the kept fold from the plan whose record is read (a dry
-  # copy names none); the approvals are still the section's lines, and its older proof lines are already the fold's.
+  # copy names none), and so are the approvals, each in the line shape an older plan held.
   if [ -n "${BIONIC_DEBTS_OPEN:-}" ] && [ "$handed" = 1 ] && declare -F proof_debts_open >/dev/null 2>&1; then
-    f="$(proof_lines "${BIONIC_DEBTS_ORIGIN:-$PLAN}")" || { printf 'unreadable\n'; return 0; }
-    { printf '%s\n' "$SECTION" | awk '!/^proved:[ \t]/'; printf '%s\n' "$f"; } | proof_debts_open "$BIONIC_DEBTS_OPEN"
+    f="$(proof_approval_lines "${BIONIC_DEBTS_ORIGIN:-$PLAN}" && proof_lines "${BIONIC_DEBTS_ORIGIN:-$PLAN}")" || { printf 'unreadable\n'; return 0; }
+    printf '%s\n' "$f" | proof_debts_open "$BIONIC_DEBTS_OPEN"
   fi
 }
 
@@ -3037,8 +3037,8 @@ _eg_commit_repo() {
 # about to run. After ≤ before passes without a word, whichever files moved, so growth paid for
 # elsewhere in the set is no growth. After > before is refused, naming the bytes added and each
 # file that grew, unless all three hold: the committing tree's `## Tasks` row (`_EG_RID`, set by the
-# worktree fork above) is open, its reads cell holds `approval:doctrine-growth`, and `## SDLC State`
-# carries the `approved: doctrine-growth …` line `session-poker.sh approve` writes. A commit no row
+# worktree fork above) is open, its reads cell holds `approval:doctrine-growth`, and the run holds the
+# approval of doctrine-growth `session-poker.sh approve` gives, as the reader answers it. A commit no row
 # owns (the main checkout) has no row to read, so its growth is always refused.
 #
 # NO STEP GUARD, AND THAT IS THE POINT. The rule holds at every numeric `current:`, so the arm sits
@@ -3096,7 +3096,7 @@ validate_net_zero() {
   ${path}: ${b} B → ${a} B (+$((a - b)) B)"
   done < <(printf '%s\n' "$sums" | awk -F'\t' '$1 == "1"')
 
-  # THE APPROVAL: the row, its read, and the line. Each missing part is named.
+  # THE APPROVAL: the row, its read, and the approval. Each missing part is named.
   if [ -n "${_EG_RID:-}" ]; then
     while IFS= read -r line; do
       [ "${line%%$'\t'*}" = "$_EG_RID" ] || continue
@@ -3116,13 +3116,13 @@ validate_net_zero() {
   else
     lacks="no '## Tasks' row owns the tree this commit is made in, so no row can read the approval"
   fi
-  if ! printf '%s\n' "$SECTION" | awk '{ l = $0; sub(/^[ \t]*-?[ \t]*/, "", l) }
-      l ~ /^approved[ \t]*:/ { v = l; sub(/^approved[ \t]*:[ \t]*/, "", v); split(v, aw, /[ \t]+/)
-                               if (aw[1] == "doctrine-growth") f = 1 }
-      END { exit !f }'; then
-    lacks="${lacks:+$lacks; }'## SDLC State' carries no 'approved: doctrine-growth' line"
-  fi
   [ "$_EG_V15" -eq 0 ] || lacks="a version-15 row holds no reads cell, so whether a row reads approval:doctrine-growth could not be read at 15"
+  _proof_ask "$PLAN" reader_q_approved "$PLAN" doctrine-growth >/dev/null
+  case $? in
+    0) ;;
+    1) lacks="${lacks:+$lacks; }the run holds no approval of doctrine-growth" ;;
+    *) lacks="${lacks:+$lacks; }the run's facts could not be read, so no approval of doctrine-growth is known" ;;
+  esac
   [ -n "$lacks" ] || return 0
 
   fix_id="${_EG_RID:-<id>}"; fix_cell="<cell>"
@@ -5464,16 +5464,12 @@ return 0
 # ─── _wall_poker_contract_verb — is this a call of a contract-changing poker verb ─
 #
 # 0, with `_WALL_POKER_VERB` set, when some segment of `$1` runs
-# `session-poker.sh amend|extend|task-add|hold` or a plan-row verb (`task-set`, `step-line`,
+# `session-poker.sh amend|extend|task-add|hold` or a plan-row verb (`task-set`,
 # `current`, `ledger-add`, `ledger-set` — wave-24 T15, REQ-9 AC-9.4, D14; `row-landed` — wave-28 T6, D7; `proof-add` and
-# `approve` and `waive`, each written on the user's word; `budget`, the user's cap, from
-# T34, D24; `share` — wave-28 T10, D16, in both its forms; `step-field` — wave-28 T8, D17, the fields the evidence
-# gate reads; `handoff` —
-# wave-30 T15, D11, the plan's ## Handoff; `task-split` — wave-30 T17, D14d-3, a row rewritten as its children;
-# `regression` — wave-31 T27, D4, A-orch-40, the plan's Step-0 regression setting; and, wave-33 T15 (D10),
+# `approve` and `waive`, each written on the user's word; `share`, in both its forms; `handoff` —
+# the plan's ## Handoff; `task-split`, a row rewritten as its children; and
 # `deliver` (a record row's own last act: admitted only for the caller's own plan row, by arm A),
-# `rule` (a ruling pushed to a writer), `confirm-row` (the user's confirmation of a
-# T4 row, the user's act and never an agent's), `tasks-prose`, `epic-row` and
+# `rule` (a ruling pushed to a writer), `tasks-prose`, `epic-row` and
 # `continuation-fill` (T7's plan verbs), `disposition` (T13's finding ledger) and `reply` (wave-38 T3, the final card's
 # replay into approve, waive and finding-move), `decisions` (a decision put or ruled writes the run's
 # design ledger and its register, and the read goes with the verb; a writer reads neither) — `ruling-ack` and `rulings`
@@ -5548,7 +5544,7 @@ _wall_poker_contract_verb() {  # <command> [<verb>] -> 0 a contract verb, or <ve
           return 0
         fi
         case "$_next" in
-          amend|extend|task-add|hold|task-set|step-line|step-field|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|budget|regression|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|matrix-retier|waive-row|confirm-row|tasks-prose|epic-row|continuation-fill|disposition|reply|order|reviews-part|decisions)
+          amend|extend|task-add|hold|task-set|current|ledger-add|ledger-set|row-landed|proof-add|approve|waive|release-check|finding-stated|finding-move|share|matrix-render|discharge|handoff|task-split|deliver|rule|matrix-set|matrix-retier|waive-row|tasks-prose|epic-row|continuation-fill|disposition|reply|order|reviews-part|decisions)
             _WALL_POKER_VERB="$_next"; _WALL_POKER_SHOWN="session-poker.sh $_next"
             _WALL_POKER_CALL="$GIT_ARGV_REST"
             _oldifs="$IFS"; IFS="$GIT_ARGV_US"; _WALL_POKER_ARGS="${*:2}"; IFS="$_oldifs"

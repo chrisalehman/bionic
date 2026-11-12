@@ -192,6 +192,17 @@ proof_approved_head() {
     END { if (h !~ /^[0-9a-f]+$/ || length(h) != 40) exit 1; print h }'
 }
 
+# proof_approval_lines <plan> -> each standing approval, one line in the shape an older plan's `## SDLC State` held it,
+# `approved: <name> by <who> <at>`, in the order the facts were last set; exit 2 when the run's facts could not be read. A
+# declared red's debt on approval:<name> clears after that instant, read here alone: a name approved twice is read at its
+# later approval, the one that stands.
+proof_approval_lines() {
+  local facts
+  facts="$(_proof_facts "${1:-}")" || return 2
+  printf '%s' "$facts" | awk -F'|' "$(proof_fact_awk)"'
+    ev() == "approval" && line_kv("key") != "" { print "approved: " line_kv("key") " by " line_kv("by") " " line_kv("at") }'
+}
+
 # proof_waiver_line <question> <head> <who> <at> <reason> -> a waiver as an older plan's `## SDLC State` holds it,
 # newline-terminated. No verb writes it: the waiver is an event (`proof_waiver_event`), and this shape is kept for a
 # run whose older waivers stand in its plan, which the reader translates.
@@ -254,6 +265,19 @@ proof_step_event() {  # <plan|its run's log> <step> [<field>=<value>…] -> one 
     case " $(reader_step_fields "$n") " in *" ${f%%=*} "*) ;; *) return 2 ;; esac
   done
   RUN_LOG="$log" log_append step "n=$n" "$@"
+}
+
+# THE RUN'S LOG HOLDS AN APPROVAL, and this is the type's one writer: the approve verb calls it for the plan's approval
+# (key step3, as the translation names an older plan's approved-by:), a criterion a person confirms, and any other name.
+# Its fields are the ones the translation gives an older plan's approval line, `by=<who> [head=<sha>] said=<the reply>`,
+# so the reader reads an old approval and a new one alike; nothing writes an approval into a plan. Exits as
+# proof_waiver_event's, and 2 for a key that is not one name.
+proof_approval_event() {  # <plan> <key> [<field>=<value>…] -> one approval event in the plan's run log
+  local log k="${2:-}"
+  case "$k" in ''|*[!A-Za-z0-9._-]*) return 2 ;; esac
+  _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
+  shift 2
+  RUN_LOG="$log" log_append approval "key=$k" "$@"
 }
 
 # THE RUN'S LOG HOLDS A SESSION'S FACTS, one writer for each type, in the fields the translation gives an older plan's
@@ -2812,12 +2836,12 @@ proof_debts_read() {
     }' 2>/dev/null
 }
 
-# proof_debts_open <debts> < <section text> -> `debt<TAB><suite><TAB><token>` for each of <debts>
-# (`proof_debts_read`'s lines, `<suite><TAB><token><TAB><time>`, what `land` wrote) that the `## SDLC
-# State` text on stdin leaves open (wave-27 T31, T67; D23; A-orch-85, A-orch-121). This is the commit
+# proof_debts_open <debts> < <approval and proof lines> -> `debt<TAB><suite><TAB><token>` for each of <debts>
+# (`proof_debts_read`'s lines, `<suite><TAB><token><TAB><time>`, what `land` wrote) that the run's lines on stdin
+# leave open. This is the commit
 # gate's predicate (lib/walls.sh `_eg_reading_gaps`), over two facts it is handed: the debts its
-# collector read from the landing record (hooks/bash-walls.sh) and the plan text; a `landed red:`
-# line in that text is not read. A debt stays open until a `proved: kind=floor` or `kind=task` line
+# collector read from the landing record (hooks/bash-walls.sh) and the run's approvals and proofs
+# (`proof_approval_lines`, `proof_lines`). A debt stays open until a `proved: kind=floor` or `kind=task` line
 # carries an `at=` STRICTLY later than its threshold: the red landing's own time, and for an
 # `approval:<name>` debt the later of that and the first `approved: <name> by <who> <ISO-UTC> …`
 # line, with none of which it stays open. A debt with no time is never cleared. Whether an `ext:`
@@ -3103,8 +3127,8 @@ _facts_check_at() {
 # threshold, which is never earlier than the red landing (the newest debt line's `at=` in the
 # landing record, `proof_debts_read`):
 #   - no debt line of <suite> and <token> carries an <ISO-UTC> `at=`: never covered, and it says so;
-#   - `approval:<name>`: the later of the red landing and the time on the first `approved: <name> by
-#     <who> <ISO-UTC> …` line of the plan's `## SDLC State`; until that line is written, absent;
+#   - `approval:<name>`: the later of the red landing and the instant of the standing approval of
+#     <name> (`proof_approval_lines`); until one is given, absent;
 #   - `ext:<slug>`: absent while any `## Tasks` cell still names `ext:<slug>` (the owner removing it
 #     is the statement that the blocker cleared); then the red landing's own time. Nothing dates a
 #     clearing, so the green run is held to be later than the red landing, not later than the
@@ -3122,15 +3146,9 @@ _facts_debt() {
   fi
   case "$tok" in
     approval:?*)
-      clear="$(awk -v n="${tok#approval:}" '
-        /^[[:space:]]*```/ { fence = !fence; next }
-        fence { next }
-        /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); next }
-        insdlc && /^approved:[ \t]/ {
-          m = split($0, w, /[ \t]+/)
-          if (m < 3 || w[2] != n || w[3] != "by") next
-          for (i = 4; i <= m; i++) if (w[i] ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) { print w[i]; exit }
-        }' "$plan")"
+      clear="$(proof_approval_lines "$plan" | awk -v n="${tok#approval:}" '
+        { m = split($0, w, /[ \t]+/); if (m < 3 || w[2] != n || w[3] != "by") next
+          for (i = 4; i <= m; i++) if (w[i] ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) { print w[i]; exit } }')"
       # The later of the approval and the red landing (wave-27 T67; review pass 46 B1).
       if [ -n "$clear" ] && [[ "$landed" > "$clear" ]]; then clear="$landed"; fi ;;
     ext:?*)

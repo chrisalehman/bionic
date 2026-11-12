@@ -426,13 +426,12 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh rule <writer> '<text>' [--words '<the user's words>']   record a binding ruling for a live writer: pushed with its next tool result, and its commit and ready refused until it is shown; --words quotes what the user typed, in any session the run recorded, with that session"
   die "  bash ${HOOK_DIR}/session-poker.sh ruling-ack <id>   the writer's acknowledgement of a ruling it was shown (marks it shown)"
   die "  bash ${HOOK_DIR}/session-poker.sh rulings <writer>   each ruling of that writer: recorded, pushed=, and unread or shown= (read-only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh budget writers=<n> '<reply>'   record the user's cap on writers in the plan header (source=user, budget-override:)"
   die "  bash ${HOOK_DIR}/session-poker.sh task-add <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>]   add a ## Tasks row to the bound plan as a transaction: validated and dry-committed on a copy, then swapped in; <reads> fills a reads column (— for the default of its kind); --questions <q>[,<q>] on a review row declares the questions it owes (evidence, adversarial, structure, one role's), so its records and its dispatch are those and not the rigor's full deal; --born <record>#<n>[,…] names the findings the row fixes; --born regression:<suite> marks a row born of the regression's red in that suite"
   die "  bash ${HOOK_DIR}/session-poker.sh amend <name> [--files+ <path>]... [--suites+ <suite>]... [--suites=<a,b>] [--reexec+ '<cmd>']... --reason <why>   widen a live row's contract (--suites= narrows its suites, and lands_on= with them): a successor row, judged by the dispatch grammar"
   die "  bash ${HOOK_DIR}/session-poker.sh current <N> [--check]   advance the run's step: judged as a commit at <N> would be, then one step event in the run's log, the plan unwritten (9 is close-out's); --check (5-8) runs the judgment, appends nothing, and exits as the advance would"
   die "  bash ${HOOK_DIR}/session-poker.sh order '<the user's words>'   record the user's order: an order event with the words in the bound run's log, else a line in record/orders.log; while it stands tests/run.sh starts no suite"
   die "  bash ${HOOK_DIR}/session-poker.sh order lift   end the open order: an order: lifted line with the time and its words"
-  die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>'   record the user's approval <name> as an approved: line under ## SDLC State (the plan's own is approved-by:, written at Step 3)"
+  die "  bash ${HOOK_DIR}/session-poker.sh approve <name> '<reply>' ['<why>']   record the user's approval <name> as one approval in the run's log: a name a row reads, plan at Step 3, or a T4 criterion the user confirms on words they typed"
   die "  bash ${HOOK_DIR}/session-poker.sh reviews-part <id>   the integrate row's render, before its push and pull request: the release entry's ### The reviews from the plan's review and waiver lines, committed on the working branch and named in the landing record (never pushed)"
   die "  bash ${HOOK_DIR}/session-poker.sh known-limits-part <id>   the entry row's render (doc or integrate): the release entry's ### Known limits from the plan's deferrals, each its stated sentence, committed on the working branch and named in the landing record (never pushed)"
   die "  bash ${HOOK_DIR}/session-poker.sh proof-add <regression|review|task|walk> <evidence>   record a proof line under ## SDLC State, naming the head its evidence read; proof-add regression <log> [<log>…] takes one log or several, each opening head=<40-hex> dirty=0 and ending rc=0"
@@ -459,7 +458,6 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh anchors check|index [<root>] [--at <commit>]   check: MOVED <suite>:<line> for each anchor whose text is not on exactly one line where it points (exit 1), nothing and exit 0 when every anchor holds; index: <file> TAB <suite>[,<suite>] per anchored file. <root> defaults to the current tree, --at reads a commit"
   die "  bash ${HOOK_DIR}/session-poker.sh ${RA_USAGE}"
   die "  bash ${HOOK_DIR}/session-poker.sh reply '<the user's reply>'   replay the user's one reply to the release approval card, all default or all recommended, into approve, waive and finding-move with their words"
-  die "  bash ${HOOK_DIR}/session-poker.sh confirm-row <AC-id> '<the user's words>' ['<why>']   record the user's own confirmation of a T4 row's check, on words they typed in this session: its block's attributed confirmation line"
   die "  bash ${HOOK_DIR}/session-poker.sh epic-row <wave> <col>=<val>... [--plan <plan>]   set cells of that wave's row in the shipped table of the epic.plan.md beside the run's plan"
   die "  bash ${HOOK_DIR}/session-poker.sh continuation-fill '<field>=<text>' [--plan <plan>]   fill the run's continuation's <fill: field...> mark with the text"
   die "  bash ${HOOK_DIR}/session-poker.sh handoff ['<purpose>'] < sections   write the handoff document, .bionic/docs/record/handoffs/<date>-<slug>.md, bound or not: the kind line, the title, Summary, Goal, State (computed), Findings, Decisions, Ruled out, Open, Suggested skills and Next (composed, on stdin), the resume line last; prints the path and the resume line; bound, the plan's ## Handoff becomes the one line handoff: <path> written <local time>"
@@ -602,20 +600,6 @@ case "$VERB" in
     { [ $# -eq 1 ] && [ -n "${1//[[:space:]]/}" ]; } || usage "rulings takes exactly one argument: the writer's roster name."
     RULE_WRITER="$1"
     ;;
-  # THE USER'S WRITER CAP (wave-27 T34; REQ-15 AC-15.4, D24). `writers=<n>` and the user's reply,
-  # verbatim; the value's own shape is the verb's refusal (1), its absence or another field the
-  # usage error.
-  budget)
-    if [ $# -ne 2 ] || [ -z "${2//[[:space:]]/}" ]; then
-      usage "budget takes exactly two arguments: writers=<n> and the user's reply, verbatim."
-    fi
-    case "$1" in
-      writers=*) : ;;
-      *) usage "budget: '$1' is not writers=<n>; the writer cap is the one value this verb records." ;;
-    esac
-    BG_N="${1#writers=}"
-    BG_REPLY="$2"
-    ;;
   # THE NINE CELLS AN AUTHOR WRITES, IN THE TABLE'S OWN COLUMN ORDER (wave-20 REQ-5, AC-5.3;
   # Δ5). `status`, `worktree` and `base` are the dispatcher's cells and are not operands:
   # a new row is `pending` and names no tree. Every operand is required — `—` is how the
@@ -756,17 +740,6 @@ case "$VERB" in
       || usage "amend: --suites= sets the suites and --suites+ adds to them; give one."
     case ",$(printf '%s' "$AMEND_NARROW" | tr '\n' ','), " in *,none,*) usage "amend: --suites= narrows to suites the row keeps; none is a waiver, not a narrowing." ;; esac
     ;;
-  # THE USER'S CONFIRMATION OF A T4 ROW: the criterion, the user's words as typed, and optionally why, which the
-  # release approval card's reply passes to whichever choice it applies. The words' standing is the verb's own refusal (1).
-  confirm-row)
-    CR_USAGE="confirm-row takes <AC>, the user's words as typed, and optionally why."
-    { { [ $# -eq 2 ] || { [ $# -eq 3 ] && [ -n "${3//[[:space:]]/}" ]; }; } && [ -n "$1" ] && [ -n "${2//[[:space:]]/}" ]; } || usage "$CR_USAGE"
-    case "$1" in
-      *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*)
-        usage "confirm-row: '$(printf '%s' "${1:0:24}" | tr -d '[:cntrl:]')' is not a criterion id: letters, digits, '.', '_' or '-'." ;;
-    esac
-    CR_AC="$1"; CR_RAW="$2"; CR_WHY_RAW="${3:-}"
-    ;;
   # THE EPIC'S SHIPPED ROW AND THE RUN'S CONTINUATION (wave-33 T7; REQ-3 AC-3.3, D8). Each takes its operands,
   # then optionally `--plan <plan>`, the run they belong to, which a session close-out unbound must name.
   epic-row|continuation-fill)
@@ -849,8 +822,8 @@ case "$VERB" in
   # reply, verbatim. The name's shape is checked here, by the ASCII letters spelled out (a range
   # is a collation range under a UTF-8 locale; wave-24 T29); the reply's is the verb's own refusal.
   approve)
-    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "${2//[[:space:]]/}" ]; then
-      usage "approve takes exactly two arguments: the approval's name and the user's reply, verbatim."
+    if [ $# -lt 2 ] || [ $# -gt 3 ] || [ -z "$1" ] || [ -z "${2//[[:space:]]/}" ]; then
+      usage "approve takes the approval's name, the user's reply, verbatim, and optionally why."
     fi
     case "$1" in
       [ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789]*) : ;;
@@ -860,7 +833,7 @@ case "$VERB" in
       *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*)
         usage "approve: '$1' is not an approval name: a letter or a digit, then letters, digits, '.', '_' or '-'." ;;
     esac
-    AP_NAME="$1"; AP_REPLY="$2"
+    AP_NAME="$1"; AP_REPLY="$2"; AP_WHY="${3:-}"
     ;;
   # THE USER'S ORDER. One operand: the user's words, which must hold something once blanks are gone,
   # or the word lift, which ends the open order.
@@ -2870,12 +2843,10 @@ case "$VERB" in
   extend) poker_verb_extend "$@" ;;
   hold) poker_verb_hold "$@" ;;
   rule|ruling-ack|rulings) poker_verb_rule "$@" ;;
-  budget) poker_verb_budget "$@" ;;
   amend) poker_verb_amend "$@" ;;
   task-add) poker_verb_task_add "$@" ;;
   reviews-part) poker_verb_reviews_part "$@" ;;
   known-limits-part) poker_verb_known_limits_part "$@" ;;
-  confirm-row) poker_verb_confirm_row "$@" ;;
   epic-row) poker_verb_epic_row "$@" ;;
   continuation-fill) poker_verb_continuation_fill "$@" ;;
   handoff) poker_verb_handoff "$@" ;;

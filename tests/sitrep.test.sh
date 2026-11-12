@@ -1864,9 +1864,9 @@ jq -nc '{type:"user",isSidechain:false,userType:"external",message:{role:"user",
 sr_r_open $((SR_E0 - 10800)) approve:step3
 sr_r_put $((SR_E0 - 7200)) D9; sr_r_rule $((SR_E0 - 5400)) D9; sr_r_put $((SR_E0 - 3600)) D9; sr_r_rule $((SR_E0 - 1800)) D9   # before
 SR_AT=$SR_E0 sr_poke approve plan 'approved' >/dev/null 2>&1
-expect_eq "RD-0 precondition: approve plan wrote approved-by: at 10:00Z and closed the Step-3 card's ask at that instant" \
-  "approved-by: Dana Fixture 2026-10-06T10:00:00Z|2026-10-06T10:00:00Z" \
-  "$(/usr/bin/grep -o '^approved-by: Dana Fixture [^ ]*' "$SR_PLAN")|$(sed -n 's/^owed\/v1|key=approve:step3|state=closed|by=[^|]*|at=\([^|]*\)|.*/\1/p' <(sr_asks))"
+expect_eq "RD-0 precondition: approve plan appended its approval at 10:00Z and closed the Step-3 card's ask at that instant" \
+  "key=step3|by=Dana Fixture|2026-10-06T10:00:00Z|2026-10-06T10:00:00Z" \
+  "$(sed -n 's/^run\/v1|ev=approval|\(key=step3|by=[^|]*\)|.*|at=\([^|]*\)$/\1|\2/p' "$SR_DIR/run.log")|$(sed -n 's/^owed\/v1|key=approve:step3|state=closed|by=[^|]*|at=\([^|]*\)|.*/\1/p' <(sr_asks))"
 sr_r_put $((SR_E0 + 600)) D1;    sr_r_rule $((SR_E0 + 1200)) D1     # 10 min
 sr_r_put $((SR_E0 + 3600)) D2;   sr_r_rule $((SR_E0 + 5400)) D2     # 30 min
 sr_r_put $((SR_E0 + 7200)) D2;   sr_r_rule $((SR_E0 + 8100)) D2     # 15 min, the same decision put again
