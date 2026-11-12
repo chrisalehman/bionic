@@ -12,11 +12,12 @@
 # THE FOLD. `reader_facts` turns the lines into facts, in the order they happened:
 #   - two lines equal in every field but `at=` are one fact; the repeat changes nothing, not even the place,
 #     save a step's: a step written again is the run taken back to it, so the step a run stands at is the last written;
+#     and save a hand's: an act taken by hand again at another time is another act, so two timed ones are two facts;
 #   - a later line with the same identifying fields and another value replaces the earlier, and takes its place;
 #   - a discarded verdict replaces no earlier verdict, whatever its commit, and one with none before it stands
 #     as the discarded run it was; a red or a green after it replaces it as any later line does;
-#   - `cancel` retracts the fact it names (`of=<event type>` and that fact's identifying fields); a later
-#     line may assert it again.
+#   - `cancel` retracts the fact it names (`of=<event type>` and that fact's identifying fields), a hand's at every
+#     time it was taken; a later line may assert it again.
 # A type's identifying fields are its `reader_identity` entry; a type with none is identified by all its
 # fields but `at=`, so its lines only ever repeat. Every field is read by name, never by place, and a fact
 # is printed in one form, `run/v1|ev=<type>|<fields sorted by name>|at=<its line's instant>`, so the order
@@ -130,6 +131,10 @@ reader_facts() {  # <plan> -> one line per standing fact, in the order the facts
       # two review records are two readings, even of one question at one head and scope; a later run of a check
       # or a regression at a head still replaces the earlier one
       if (named == "proof" && f["kind"] == "review") id = id SUBSEP "evidence=" f["evidence"]
+      # an act by hand is counted each time it is taken, so its time names it; an untimed line has nothing to tell
+      # it from its twin and stays one. A cancel names the act by its other fields and retracts it at every time.
+      if (t == "hand" && f["at"] != "") { act[id SUBSEP "at=" f["at"]] = id; id = id SUBSEP "at=" f["at"] }
+      if (t == "cancel" && named == "hand") for (x in live) if (act[x] == id) delete live[x]
       if (t == "cancel") { delete live[id]; next }
       # a discarded run was killed, not judged: it must not unseat the verdict a run already gave
       if (t == "verdict" && f["result"] == "discarded" && (id in live)) next

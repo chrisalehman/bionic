@@ -5,7 +5,8 @@
 # and answers one question of a closed list: yes or no by exit code alone, a value as `key=value`
 # lines, a list as one `run/v1` line per item.
 #
-#   §FOLD     a repeated line counts once, a later value answers, a cancelled line is absent, a step written again answers.
+#   §FOLD     a repeated line counts once, a later value answers, a cancelled line is absent, a step written again answers;
+#             an act by hand taken again at another time counts again.
 #   §NAME     every answer over a planted log equals the answer over it with each line's fields moved.
 #   §FORM     a yes or no answer prints nothing; value lines are `key=value`; list lines start `run/v1|`.
 #   §UNKNOWN  an unlisted question exits 2 and prints the list.
@@ -121,6 +122,19 @@ dkinds() { ask debts | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^kind=/)
 expect_eq "two open debts of one concept and two kinds are two facts" "duplicate unpinned-pair " "$(dkinds)"
 printf '%s\n' 'cv | duplicate | a.sh:1 | raised-by r.md | touches 1 | burned T9' 'cv | unpinned-pair | b.sh:2 | raised-by r.md | touches 2 | —' > "$D/record/debtkind/debt.md"
 expect_eq "a burned line closes the debt of its own kind, and the other stays open" "unpinned-pair " "$(dkinds)"
+
+# fails-when: two acts by hand equal but for their time are one fact, so a second amend of one agent for one reason
+# goes uncounted; two equal lines with no time, which nothing tells apart, are two; a cancel naming the act misses one.
+W=twice; plan twice <<EOF
+run/v1|ev=hand|what=amend|name=w1|by=s|why=the brief missed a.sh|at=2026-11-01T00:00:01Z
+run/v1|ev=hand|what=amend|name=w1|by=s|why=the brief missed a.sh|at=2026-11-01T00:00:02Z
+run/v1|ev=hand|what=stop-run|name=w2|why=an older line
+run/v1|ev=hand|what=stop-run|name=w2|why=an older line
+EOF
+whats() { ask hands | awk -F'|' '{ for (i = 2; i <= NF; i++) if ($i ~ /^what=/) printf "%s ", substr($i, 6) }'; }
+expect_eq "two amends of one agent for one reason at two times are two acts; two equal untimed lines are one" "amend amend stop-run " "$(whats)"
+printf 'run/v1|ev=cancel|of=hand|what=amend|name=w1|by=s|why=the brief missed a.sh|at=2026-11-01T00:00:03Z\n' >> "$D/record/twice/run.log"
+expect_eq "…and a cancel naming the act by its fields retracts it at each time it was taken" "stop-run " "$(whats)"
 
 section "NAME"
 QS=("step" "approved step3" "approved release" "green $H" "green $G" "proof $H" "proof $H regression" "landed" "asks")
