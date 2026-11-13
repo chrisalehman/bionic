@@ -9,7 +9,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/regression-fixture.sh"
 . "$(dirname "$0")/lib/roster-row.sh"   # the one roster-row builder (cross-gate S17; wave-30 T23)
-CO_PLAN_AT=15; . "$(dirname "$0")/close-out.prelude.sh"
+. "$(dirname "$0")/close-out.prelude.sh"
 
 # ============================================================
 section "0 — the script exists, parses, and refuses an unusable call"

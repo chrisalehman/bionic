@@ -419,14 +419,14 @@ nt_import_fn() {  # <name> [<file>] -> the function, defined here, read out of <
 }
 REPO_ROOT="$BIONIC_SCRIPTS_DIR"
 SCRIPT="$REPO_ROOT/payload/scripts/close-out.sh"
-PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"
+PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"; LOG_REL=".bionic/docs/record/wave-01-fixture/run.log"
 UNITS_LIB="$REPO_ROOT/payload/scripts/lib/units.sh"
 SANDBOX="$(cd "$(mktemp -d "$TMPROOT/co.XXXXXX")" && pwd -P)"
 SB_HOME="$SANDBOX/home"; mkdir -p "$SB_HOME/.claude"
 export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.invalid
 export GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
 NT_IMPORT_MISSING=""
-for _f in in_fixture fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture advance_to run_close_as plant_tmp_session; do
+for _f in in_fixture fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture co_page15 advance_to run_close_as plant_tmp_session; do
   nt_import_fn "$_f" || NT_IMPORT_MISSING="$NT_IMPORT_MISSING $_f"
 done
 expect_eq "D0 close-out.prelude.sh's fixture builders were all read out of it" "" "$NT_IMPORT_MISSING"

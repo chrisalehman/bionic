@@ -2440,14 +2440,14 @@ up_import() {  # <name> <file> -> the function, defined here, read out of <file>
   eval "$body"
 }
 UP_MISSING=""
-for _f in in_fixture fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture advance_to; do
+for _f in in_fixture fixture_git fixture_plan_text fixture_epic_text plant_facts mk_fixture co_page15 advance_to; do
   up_import "$_f" "$(dirname "$0")/close-out.prelude.sh" || UP_MISSING="$UP_MISSING $_f"
 done
 for _f in pah_world pah_poke pah_card_state; do up_import "$_f" "$(dirname "$0")/proof-at-head.test.sh" || UP_MISSING="$UP_MISSING $_f"; done
 expect_eq "UP-0 the builders were all read out of their suites" "" "$UP_MISSING"
 SANDBOX="$CARD_SANDBOX/up"; mkdir -p "$SANDBOX"; SB_HOME="$SANDBOX/home"; mkdir -p "$SB_HOME/.claude"
 REPO_ROOT="$REPO"; UNITS_LIB="$REPO/payload/scripts/lib/units.sh"; PAH_LIB="$REPO/payload/scripts/lib"
-PAH_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"; PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"
+PAH_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"; PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"; LOG_REL=".bionic/docs/record/wave-01-fixture/run.log"
 export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.invalid GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
 up_line() { printf '%s\n' "$1" | /usr/bin/grep -F "whole suite: " | head -1; }  # <card> -> its whole-suite line
 # up_ask <card> -> the card's merge-unproved decision, its folded lines joined: `<n>. Merge without … · default: none`
