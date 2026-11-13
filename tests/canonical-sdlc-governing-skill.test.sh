@@ -204,10 +204,10 @@ assert_contains() { expect_contains "$1" "$2" "$3"; }
 #   intent/rigor/scale — triple values (default build/double/wave);
 #     value OMIT drops the line entirely (missing-field cases).
 #   step    — sdlc-step (default 3).
-#   version — canonical_sdlc_version (default 14); OMIT drops the line.
+#   version — canonical_sdlc_version (default 15, a plan's version); OMIT drops the line.
 #   mode    — if set, inject a `mode:` line (split-brain guard case).
 #   omit    — space-separated flag names to drop (missing-flag cases).
-#   matrix  — yes|no; drop the "## Verification Matrix" section when no.
+#   matrix  — yes|no (default no: a plan at 15 holds none); write the "## Verification Matrix" section when yes.
 #   walk    — if set, inject a `walk: <value>` line (default OMIT, no line).
 #   override — if set, inject the given full `rigor-override: ...` line
 #              verbatim (default OMIT, no line).
@@ -218,7 +218,7 @@ assert_contains() { expect_contains "$1" "$2" "$3"; }
 #             about design must satisfy that arm to keep testing its own
 #             subject. Plan-targeting cases never set it.
 build_plan() {
-  local intent=build rigor=double scale=wave step=3 version=14 mode="OMIT" omit=" " matrix=yes
+  local intent=build rigor=double scale=wave step=3 version=15 mode="OMIT" omit=" " matrix=no
   local skill="superpowers:writing-plans"
   local walk="OMIT" override="OMIT" waived="OMIT"
   # goal: yes (default) | no | empty — K5.4. "yes" injects a real '## Goal' paragraph as
@@ -305,12 +305,14 @@ stack-health: n/a: no long-running serve observed
 }
 
 VALID_FRONTMATTER="$(build_plan)"
+# A document that is no plan is written at 14, as it may be.
+VALID_DOC_FRONTMATTER="$(build_plan version=14)"
 
 # A wave-scale spec must satisfy the design wall (wave-02 AC-2). Cases below
 # that write a plan fixture to a *.spec.md path are not about design, so they
 # carry the waiver token and keep testing their own subject.
 SPEC_DESIGN_WAIVER='design-waived: test-fixture 2026-08-02 covered by the design-wall cases'
-VALID_SPEC_FRONTMATTER="$(build_plan waived="$SPEC_DESIGN_WAIVER")"
+VALID_SPEC_FRONTMATTER="$(build_plan version=14 waived="$SPEC_DESIGN_WAIVER")"
 
 MISSING_FM='# Plan body, no frontmatter
 '
@@ -339,13 +341,13 @@ echo "Write: spec file with valid frontmatter → allow"
 run_write "$project/.bionic/docs/specs/epic-01-demo/wave-01-x.spec.md" "$VALID_SPEC_FRONTMATTER"
 
 echo "Write: adr file with valid frontmatter → allow"
-run_write "$project/.bionic/docs/adrs/epic-01-demo/adr-001-x.md" "$VALID_FRONTMATTER"
+run_write "$project/.bionic/docs/adrs/epic-01-demo/adr-001-x.md" "$VALID_DOC_FRONTMATTER"
 
 echo "Write: continuation.md with valid frontmatter → allow"
-run_write "$project/.bionic/docs/plans/epic-01-demo/continuation.md" "$VALID_FRONTMATTER"
+run_write "$project/.bionic/docs/plans/epic-01-demo/continuation.md" "$VALID_DOC_FRONTMATTER"
 
 echo "Write: continuation-checkpoint.md with valid frontmatter → allow"
-run_write "$project/.bionic/docs/plans/epic-01-demo/continuation-checkpoint.md" "$VALID_FRONTMATTER"
+run_write "$project/.bionic/docs/plans/epic-01-demo/continuation-checkpoint.md" "$VALID_DOC_FRONTMATTER"
 
 echo "Write: README.md under plans dir, no frontmatter → allow (not an enforced artifact)"
 run_write "$project/.bionic/docs/plans/epic-01-demo/README.md" "# some notes"
@@ -498,7 +500,7 @@ assert_eq "blocks_missing_model_plan exit 2" 2 "$HOOK_EXIT"
 assert_contains "blocks_missing_model_plan names model_plan" "model_plan" "$HOOK_VSTDERR"
 
 echo "*.plan.md at sdlc-step 3 without matrix → block"
-run_write "$project/.bionic/docs/plans/epic-01-demo/no-matrix.plan.md" "$(build_plan step=3 matrix=no)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/no-matrix.plan.md" "$(build_plan version=14 step=3 matrix=no)"
 assert_eq "blocks_missing_matrix exit 2" 2 "$HOOK_EXIT"
 assert_contains "blocks_missing_matrix names the matrix" "Verification Matrix" "$HOOK_STDERR"
 
@@ -512,11 +514,11 @@ assert_eq "task_scale_exempt_from_matrix exit 0" 0 "$HOOK_EXIT"
 
 echo "spec at sdlc-step 3 without matrix → allow (matrix is a plan-body artifact)"
 run_write "$project/.bionic/docs/specs/epic-01-demo/no-matrix.spec.md" \
-  "$(build_plan step=3 matrix=no waived="$SPEC_DESIGN_WAIVER")"
+  "$(build_plan version=14 step=3 matrix=no waived="$SPEC_DESIGN_WAIVER")"
 assert_eq "spec_exempt_from_matrix exit 0" 0 "$HOOK_EXIT"
 
 echo "continuation.md at sdlc-step 3 without matrix → allow"
-run_write "$project/.bionic/docs/plans/epic-01-demo/continuation.md" "$(build_plan step=3 matrix=no)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/continuation.md" "$(build_plan version=14 step=3 matrix=no)"
 assert_eq "continuation_exempt_from_matrix exit 0" 0 "$HOOK_EXIT"
 
 # ============================================================
@@ -928,7 +930,7 @@ section "THEMES: at wave and epic scale a requirements write holds its REQs unde
 # ============================================================
 # fails-when: the flat list writes, or a themed one is refused.
 # th_req <scale> <body> -> a requirements artifact: the shared frontmatter and Goal, then <body>.
-th_req() { printf '%s\n%s' "$(build_plan scale="$1" step=1 matrix=no skill=agent-skills:idea-refine)" "$2"; }
+th_req() { printf '%s\n%s' "$(build_plan version=14 scale="$1" step=1 skill=agent-skills:idea-refine)" "$2"; }
 # th_theme <heading> <first body line> <REQ id...> -> one `## ` section holding those REQs.
 th_theme() {
   local h="$1" first="$2" r; shift 2
