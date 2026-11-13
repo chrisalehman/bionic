@@ -190,7 +190,7 @@ expect_eq "9l a discharged row is never deferred, and a pending one is before it
 
 section "Section 26: the walk gate reads the walk"
 
-wg_home() {  # [<record the walk proof names>] -> a sandbox at 15, current 5, the walk owed and AC-1.1 discharged
+wg_home() {  # [<record the walk proof names>] -> a sandbox at 15, current 5, the walk owed and its criterion discharged
   local h p; h=$(make_home); eg_head_repo "$h"; mkdir -p "$h/.bionic/docs/record/w"
   printf 'verdict: confirmed\n\n| AC | verdict | why |\n|---|---|---|\n| AC-1.1 | CONFIRMED | drove it |\n' > "$h/.bionic/docs/record/w/walk.md"
   p=$(eg_page "$h" 5 "run/v1|ev=proof|kind=regression|head=$EG_HEAD|evidence=record/floor.log|at=2026-10-24T00:00:00Z" \

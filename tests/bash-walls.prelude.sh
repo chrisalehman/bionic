@@ -159,10 +159,10 @@ eg6_plan() {  # <current> <scale> <lines> [<Step 6 line>] -> a double plan the g
   printf 'AC-1:\n  fails-when: the planted defect this eval must go red on\n  evidence: record/generic-evidence.md\n'
   printf '  tier-run: bash tests/x.test.sh\n  readback: the line it wrote\n'
 }
-# eg6_world <repo> <plan text> [<eval type of AC-1.1>] [<log line>...] -> EG6_PAGE, the run at 15 the text's state section
+# eg6_world <repo> <plan text> [<eval type of its criterion>] [<log line>...] -> EG6_PAGE, the run at 15 the text's state section
 #   stands for: plan_fixture's page at the text's current:, at double rigor, its log holding the fixture's events, a
 #   regression proof, the text's readings, moves and waivers read through lib/translate.sh, then each line given, then
-#   the criterion's proof (EG6_AC, AC-1.1 unless named; its evidence EG6_EVIDENCE, the generic record unless named),
+#   the criterion's proof (EG6_AC, the fixture's own unless named; its evidence EG6_EVIDENCE, the generic record unless named),
 #   then the asks the run already held, which belong to the run and outlive a rebuild of its other facts; the working
 #   branch and the base at the repository's head, so the evidence review there is the auditor's cell and the judge's
 #   chains start there.

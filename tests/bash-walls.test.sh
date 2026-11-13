@@ -601,8 +601,8 @@ ru_owed() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_list' _ "
 # bound), removed
 ru_owed_clear() { rm -f "$(bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_file' _ "$RU_LIB" "$R_RU" "$SID" 2>/dev/null)"; }
 
-# ru_put <current> <AC-2's eval type> <the evidence review at the head: pass | fail, waived | none, the question waived>
-#   [<log line>...] -> RU_P, the run at 15 §RULED's plan text stands for (the prelude's eg6_world), AC-2 its criterion,
+# ru_put <current> <the criterion's eval type> <the evidence review at the head: pass | fail, waived | none, the question waived>
+#   [<log line>...] -> RU_P, the run at 15 §RULED's plan text stands for (the prelude's eg6_world), its criterion the one the rows name,
 #   discharged by a proof after the lines given; the session bound to it. Its auditor cell is that review's verdict.
 ru_put() {
   local c="$1" ty="$2" ev="$3" t; shift 3
