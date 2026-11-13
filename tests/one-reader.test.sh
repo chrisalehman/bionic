@@ -163,7 +163,7 @@ DPIECES="$(bash -c '. "$1/refuse.sh" && . "$1/dispatch.sh" || exit 1
   for k in $(dispatch_keys); do dispatch_say "$k" @ @ @ @ @ @ @ @ @ @ && printf "%s\n" "$DISPATCH_FACT"; done' _ "$L" | tr '@' '\n' | awk 'length($0) >= 10')"
 pieces_in() { awk '!/^[ \t]*#/' "$1" > "$S/.code"; printf '%s\n' "$DPIECES" | while IFS= read -r p; do /usr/bin/grep -qF -- "$p" "$S/.code" && printf '%s\n' "$p"; done; }
 DKEYS="$(bash -c '. "$1/refuse.sh" && . "$1/dispatch.sh" && for k in $(dispatch_keys); do dispatch_say "$k" @ && [ -n "$DISPATCH_FACT" ] && echo "$k"; done' _ "$L" | grep -c .)"
-expect_eq "the dispatch library says a fact under a key for each of the wall's 43 refusals" 43 "$DKEYS"
+expect_eq "the dispatch library says a fact under a key for each of the wall's 44 refusals" 44 "$DKEYS"
 expect_eq "every piece of those facts is found in the library's own text" "$(printf '%s\n' "$DPIECES" | grep -c .)" "$(pieces_in "$L/dispatch.sh" | grep -c .)"
 expect_eq "no fact of the dispatch library is found in the wall's file" "" "$(pieces_in "$S/hooks/dispatch-preflight.sh")"
 expect_eq "the stop guard's file lists no refusal" "0" "$(own stop-guard | grep -c .)"

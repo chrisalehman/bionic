@@ -114,22 +114,21 @@ section "§ONE-ROW — a dispatch is bound to ONE row, whichever arm asks (wave-
 # this" in one place (`dp_row_reader`): the brief's `Row:` when it carries one, else the row the name
 # matches, and every arm reads that id. A `Row:` naming a row other than the one the name matches is
 # refused; a name that matches no row with a `Row:` that names one is T7's design and stays admitted.
-# FIXTURES: make_repo's approved plan with T1, T2 and T9 (T9 reads approval:release, never recorded), at 14:
-# a row at 15 holds no reads cell, so no row there can wait on a named approval.
+# FIXTURES: make_repo's approved plan with T1, T2 and T9 (T9 waits on approval:release, never recorded).
 # P1-P3 are the reader's probe (w28-T24-r26 probe-dp.log). SYNTHESIZED.
 # fails-when: a Row:-bound dispatch under a name that matches no row, or another row, passes the
 # approval arm; the full-run floor reads the name when the brief carries Row:; the mismatch is
 # admitted or its line is over 100 columns; a name that matches nothing is refused for its Row:.
 t55_gate() {  # <tag> <name> <body lines> [<extra row ids, space-separated>] -> GATE_*, T7_ROW
   local _x _ids=""
-  REPO=$(MAKE_REPO_AT=14 make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
   local _r
   for _x in ${4:-}; do
-    _r="—"; case "$_x" in *=*) _r="${_x#*=}"; _x="${_x%%=*}" ;; esac   # `<id>=<reads>` gives the row a reads cell
-    _ids="${_ids}| ${_x} | 4 | build | long | implementor | — | 30 | REQ-1 | c.sh | — | — | pending | ${_r} |
+    _r="—"; case "$_x" in *=*) _r="${_x#*=}"; _x="${_x%%=*}" ;; esac   # `<id>=<deps>` gives the row a deps cell
+    _ids="${_ids}| ${_x} | 4 | build | long | ${_r} | 30 | REQ-1 | c.sh | — |
 "; done
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | the widget | implementor | — | 30 | REQ-1 | a.sh | — | — | pending | — |\n| T2 | 4 | build | another | implementor | — | 30 | REQ-1 | b.sh | — | — | pending | — |\n| T9 | 7 | doc | the release | implementor | — | 20 | REQ-1 | CHANGELOG.md | — | — | pending | approval:release |\n%s' "$_ids" \
-    >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  pf_tasks "$REPO" '| T1 | 4 | build | the widget | — | 30 | REQ-1 | a.sh | — |' '| T2 | 4 | build | another | — | 30 | REQ-1 | b.sh | — |' \
+    '| T9 | 7 | doc | the release | approval:release | 20 | REQ-1 | CHANGELOG.md | — |' ${_ids:+"${_ids%$'\n'}"}
   run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" - "$2" "$(adv_brief "$3")")" "$2" claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" implementor)"
   T7_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 }
@@ -189,6 +188,10 @@ t55_gate or10 w-release 'Row: T9
 Lands-on: widget'
 expect_eq "OR10b with the reader returning the name's row alone, P2 is ADMITTED (the row above is red on it)" \
   "allow" "$GATE_VERDICT"
+sed 's/DP_AW_NAMES="$(units_approval_names /DP_AW_NAMES="$(false /' "$OR_SAVED_GATE" > "$GATE"; t55_gate or11 w-T2 'Row: T2
+Lands-on: widget'
+expect_eq "OR11 a reader that fails refuses a row waiting on nothing by name, and no row is written" \
+  "deny|row T2's waits could not be read (dispatch again)|" "$GATE_VERDICT|$(t7_first | sed 's/^bionic: dispatch refused — //')|$T7_ROW"
 GATE="$OR_SAVED_GATE"; rm -rf "$OR_ROOT"
 
 # AN NAME THAT MATCHES MORE THAN ONE ROW, WITH NO Row:, IS REFUSED (wave-28 T58; REQ-5, D8). The reader
@@ -196,7 +199,7 @@ GATE="$OR_SAVED_GATE"; rm -rf "$OR_ROOT"
 # was carried past (the pass-31 probe: `x-A-T1` against rows T1 and A-T1). The launch record already
 # records nothing for such a name; the wall now says the same. A `Row:` resolves it (T55's mismatch arm
 # still judges a label outside the matches); a name that matches one row or none is as T55 built it.
-# FIXTURES: rows T1, T2, T9 and A-T1 (A-T1 reads approval:release); `x-A-T1` matches T1 and A-T1, in
+# FIXTURES: rows T1, T2, T9 and A-T1 (A-T1 waits on approval:release); `x-A-T1` matches T1 and A-T1, in
 # plan order. SYNTHESIZED from the probe. fails-when: the ambiguous name is admitted, its line names
 # no row or is over 100 columns, or a Row: on it is not bound and judged.
 AN_ROWS="A-T1=approval:release"

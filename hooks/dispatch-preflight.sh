@@ -765,9 +765,9 @@ fi
 # ==================================== A ROW THAT READS AN APPROVAL WAITS FOR IT (wave-26 T13)
 # (REQ-6 AC-6.2; spec D3, ADR-043.)
 #
-# THE PLAN'S APPROVAL IS NOT THE ONLY ONE. A row whose `reads` cell names `approval:<name>` —
-# the release reads `approval:release` — is not ready until `## SDLC State` carries
-# `approved: <name> …`, a line only `session-poker.sh approve` writes, on the user's reply. The
+# THE PLAN'S APPROVAL IS NOT THE ONLY ONE. A row that waits on `approval:<name>`, an approval of
+# the person's with a name of its own (the release's, a decision's), is not ready until that
+# approval stands, an act only `session-poker.sh approve` records, on the user's reply. The
 # ready set (lib/fill.sh over lib/units.sh) never offers such a row; this arm refuses the
 # dispatch that would start one anyway, whatever the role, because the thing being waited for
 # is the user's act and no role is entitled to stand in for it.
@@ -794,8 +794,8 @@ DP_MINE_AWK='
 # dp_row_reader — sets DP_ROW (the brief's `Row:`, or empty), DP_NAME_ROWS (every plan row the name
 # matches, one per line), DP_NAME_ROW (the first), DP_BOUND_ROW: the row this dispatch is bound to, and
 # DP_BOUND_REC: that row's record, `units_rows`' thirteen cells, read here once (wave-35 T7; burns debt
-# bound-row-read). The approval arm and the live-writer arm read their
-# cells off it with `units_field`; none reads the table again.
+# bound-row-read). The live-writer arm reads its cells off it with `units_field`, and the approval
+# arm asks the plan's reader for this row's waits; none reads the table again.
 # A name that matches more than one row, with no `Row:` to say which, binds NOTHING and is refused
 # (wave-28 T58): the launch record records no row for such a name either (session-poker NOT-RECORDED),
 # and binding the first would let the approval arm pass a second match that waits for approval.
@@ -823,17 +823,21 @@ dp_row_reader() {
 }
 dp_row_reader
 if [ -n "$PLAN" ] && [ -n "$DP_BOUND_REC" ]; then
-  DP_APPROVAL_WAITS=$(printf '%s\n' "$DP_BOUND_REC" | awk -F'\t' '
-    $1 != "" {
-      m = split($13, a, ",")
-      for (k = 1; k <= m; k++) {
-        t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t)
-        # A LIVE READ OF AN APPROVAL IS STILL AN APPROVAL READ (review 10 F5): readiness waits
-        # on `live:approval:<name>` exactly as on the bare token, so this arm does too.
-        sub(/^live:/, "", t)
-        if (t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/ && t != "approval:plan") print $1 "\t" substr(t, 10)
-      }
-    }')
+  # WHICH APPROVALS A ROW WAITS FOR IS THE SCHEDULER'S ANSWER (lib/units.sh `units_approval_names`), asked for this row
+  # alone. It takes the row's waits from the plan's one reader (lib/plan-read.sh `plan_read_waits`): a name in the reads
+  # cell at 14 or in the deps cell at 15, `live:` or not, and the release an integrate row is given while a release row
+  # stands. It names them only for an open row, so this arm asks for no approval the approve verb cannot record, and no
+  # cell is split here. A failure of that answer refuses by name and never falls back to a cell: waits this hook could
+  # not read are not known to be none.
+  DP_APPROVAL_WAITS=""; DP_AW_NAMES=""; DP_AW_RC=2
+  if declare -F units_approval_names >/dev/null 2>&1; then
+    DP_AW_RC=0; DP_AW_NAMES="$(units_approval_names "$PLAN" "$DP_BOUND_ROW" </dev/null)" || DP_AW_RC=$?
+  fi
+  if [ "$DP_AW_RC" -ne 0 ]; then
+    dispatch_finding waits-unread "$DP_BOUND_ROW" "$DP_ROW_NAME" "$PLAN"
+  else
+    DP_APPROVAL_WAITS=$(printf '%s\n' "$DP_AW_NAMES" | awk -v id="$DP_BOUND_ROW" '$0 != "" && $0 != "plan" { print id "\t" $0 }')
+  fi
   if [ -n "$DP_APPROVAL_WAITS" ]; then
     # WHETHER EACH APPROVAL STANDS IS THE READER'S ANSWER (lib/proof.sh `proof_approved`), the question the
     # release asks of its own approval, never this plan's lines parsed here: an approval the run's log alone
