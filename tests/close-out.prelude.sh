@@ -296,7 +296,10 @@ co_page15() {
     { print }' "$plan" "$plan" > "$plan.15" && mv "$plan.15" "$plan"
 }
 
-# co_at15 <project> -> 0 when the project's plan is a version-15 page, which the readers below answer from its run's log
+# co_at15 <project> -> 0 when the project's plan is a version-15 page, which the readers below answer from its run's log.
+# plant_facts and advance_to test the version inline instead: card.test.sh and notify.test.sh read those builders out
+# of this file by name, with in_fixture, fixture_git, fixture_plan_text, fixture_epic_text and mk_fixture, so a builder
+# they read calls nothing outside that set, or it runs there as a command not found.
 co_at15() { /usr/bin/grep -qx 'canonical_sdlc_version: 15' "$1/$PLAN_REL"; }
 
 # plant_facts <project> -> what the run owes, held at the working branch's head, as a run that
@@ -329,7 +332,7 @@ base-sha: $(fixture_git "$p" rev-list --max-parents=0 "$wb" | head -1)/" "$plan"
           esac
           if [ "$4" = 15 ]; then f="${l#proved: }"; LOG_AT=2026-10-04T12:00:00Z proof_event "$2" ${f/ at=2026-10-04T12:00:00Z/}
           else proof_add_line "$2" "$l" > "$2.pf" && mv "$2.pf" "$2"; fi
-        done' _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h" "$(co_at15 "$p" && echo 15)"
+        done' _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h" "$(/usr/bin/grep -qx 'canonical_sdlc_version: 15' "$plan" && echo 15)"
 }
 
 # add_unreached_branch <project> -> plants `wt/01-y` carrying one commit the working branch
@@ -489,7 +492,7 @@ co_step_answer() {
 advance_to() {
   local plan="$1/$PLAN_REL"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "advance_to: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
-  if co_at15 "$1"; then printf 'run/v1|ev=step|n=%s|at=%s\n' "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$1/$LOG_REL"; return; fi
+  if /usr/bin/grep -qx 'canonical_sdlc_version: 15' "$plan"; then printf 'run/v1|ev=step|n=%s|at=%s\n' "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$1/$LOG_REL"; return; fi
   awk -v n="$2" '!d && /^current:/ { print "current: " n; d = 1; next } { print }' "$plan" > "$plan.adv" && mv "$plan.adv" "$plan"
 }
 
