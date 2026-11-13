@@ -82,7 +82,7 @@ fi
 
 dl_record() { cat "$1/.bionic/docs/record/wave-x/landing-proofs.log" "$1/.bionic/docs/record/wave-x/run.log" 2>/dev/null; }   # <root> -> the record's lines, then the log's
 dl_head() { git -C "$1" rev-parse --verify -q refs/heads/wave/x; }   # <root>
-dl_plan_line() { /usr/bin/grep -E "^- $2:" "$1/$DOOR_PLAN_REL" 2>/dev/null; }   # <root> <row> -> its `- T<n>:` line
+dl_plan_line() { /usr/bin/grep -E "^\\| $2 \\|" "$1/$DOOR_PLAN_REL" 2>/dev/null; }   # <root> <row> -> its Tasks row
 dl_commit() { _door_inside "$1" && git -C "$1" add -A >/dev/null 2>&1 && git -C "$1" commit --quiet -m "$2"; }   # <tree> <message>
 # dl_lib_row <root> -> the library row T1 landed by hand: one commit to a file the check's closure holds.
 dl_lib_row() {
@@ -152,7 +152,7 @@ expect_eq "(l2) the working branch moved to a merge of the release row's head on
 expect_contains "(l3) the record holds the release row's published landing, by hand" \
   "run/v1|ev=published|row=T2|commit=$DL_H2|kind=hand|" "$(dl_record "$DL")"
 dl_judged() { dl_record "$1" | /usr/bin/grep "^run/v1|ev=published|row=$2|.*|kind=hand|" | tail -1 | tr '|' '\n' | /usr/bin/grep -E '^(judged-by|changed-here)=' | paste -sd' ' -; }   # <root> <row>
-expect_regex "(l4) the T2 row's step line stands" "^- T2: " "$(dl_plan_line "$DL" T2)"
+expect_regex "(l4) the T2 row stands in the plan" "^\\| T2 \\| " "$(dl_plan_line "$DL" T2)"
 expect_absent "(l4a) …untouched by its landing" "landed" "$(dl_plan_line "$DL" T2)"
 expect_absent "(l4b) …and the door printed no unwritten plan" "PLAN-UNWRITTEN" "$DL_OUT"
 expect_eq "(l4c) each hand landing's event names the judge, and the library row's the file of the check it changes" \
@@ -491,16 +491,15 @@ expect_contains "(v3b) CONTROL …and its landing reads the cover over its candi
 section "§RERENDER: a row landing past the landed release has its release numbers rendered and committed by the line"
 
 # dl_rr_world <dir> -> DR, DR_H0: a copy whose T2 is the release row (a doc row at step 7) and whose plan gains the
-# fix row T3, one code file; with RR_RELEASE=1, T1 and then the release row T2 land by hand first (DR_T1_RC, DR_T2_RC,
-# DR_H2 the head after the release).
+# fix row T3, one code file, its writer dispatched; with RR_RELEASE=1, T1 and then the release row T2 land by hand first
+# (DR_T1_RC, DR_T2_RC, DR_H2 the head after the release).
 dl_rr_world() {
   read -r DR DR_H0 <<EOF2
 $(door_copy "$DW" "$WORLD_ROOT/$1")
 EOF2
   awk '{ sub(/^\| T2 \| 4 \| doc \|/, "| T2 | 7 | doc |"); print }
-    /^\| T2 \| 7 \| doc \|/ { print "| T3 | 4 | build | a fix after the release | dw-T3 | — | | 10 | REQ-1 | fix.sh | .worktrees/T3 | | active |" }
-    /^- T2: active$/ { print "- T3: active" }' "$DR/$DOOR_PLAN_REL" > "$DR/$DOOR_PLAN_REL.new" \
-    && mv "$DR/$DOOR_PLAN_REL.new" "$DR/$DOOR_PLAN_REL"
+    /^\| T2 \| 7 \| doc \|/ { print "| T3 | 4 | build | a fix after the release | — | 10 | REQ-1 | fix.sh | — |" }' "$DR/$DOOR_PLAN_REL" > "$DR/$DOOR_PLAN_REL.new" \
+    && mv "$DR/$DOOR_PLAN_REL.new" "$DR/$DOOR_PLAN_REL" && RUN_LOG="$DR/.bionic/docs/record/wave-x/run.log" bash -c '. "$1/log.sh" && log_append dispatch row=T3 name=dw-T3' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib"
   DR_T1_RC=-; DR_T2_RC=-; DR_H2="$DR_H0"
   [ "${RR_RELEASE:-0}" = 1 ] || return 0
   dl_lib_row "$DR"; DR_T1_RC="$DOOR_RC"

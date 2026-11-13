@@ -107,13 +107,13 @@ expect_eq "(c5) the build row lands by hand" "0" "$DOOR_RC"
 
 printf '# walk\n\n| AC | verdict | why |\n|---|---|---|\n| AC-1.1 | CONFIRMED | the library change holds |\n\nverdict: CONFIRMED — the one criterion\n' > "$DC_REC/walk.md"
 dc_verb "(c7) the walk's registration discharges the criterion by its proof" proof-add walk record/wave-x/walk.md
+DC_H1="$(dc_head "$DC")"
+dc_verb "(c13) regression-run runs the whole run green" regression-run
+dc_verb "(c14) proof-add records the regression" proof-add regression "record/wave-x/regression-run-$DC_H1.log"
 DC_SUM="$(cksum < "$DC_PLAN")"
 dc_verb "(c12) current 5" current 5
 expect_eq "(c12a) the advance leaves the plan's bytes as they were, and the run stands at step 5" "$DC_SUM|n=5" \
   "$(cksum < "$DC_PLAN")|$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$DC_PLAN" step | head -1)"
-DC_H1="$(dc_head "$DC")"
-dc_verb "(c13) regression-run runs the whole run green" regression-run
-dc_verb "(c14) proof-add records the regression" proof-add regression "record/wave-x/regression-run-$DC_H1.log"
 for dc_qs in evidence:piece adversarial:piece structure:piece adversarial:whole structure:whole; do
   dc_reading "w-${dc_qs%%:*}-${dc_qs#*:}" "${dc_qs%%:*}" "${dc_qs#*:}" "$DC_BASE" "$DC_H1"
   dc_verb "(c15 ${dc_qs}) proof-add registers the reading" proof-add review "record/wave-x/w-${dc_qs%%:*}-${dc_qs#*:}.md" \
