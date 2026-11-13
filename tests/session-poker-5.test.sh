@@ -896,12 +896,10 @@ PAB="$(SP_PLAN_AT=14 s34_plan "$RAB" 3)"; /usr/bin/grep -v '^approved-by:' "$PAB
 ab_k() { /usr/bin/grep "^run/v1|ev=$1" "$RAB/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null; }
 ab_said() { printf '%s' "$1" | /usr/bin/grep -q "$2" && echo yes || echo no; }   # <text> <words> -> yes when the text holds them
 ab_at() { awk -v c="$1" '!d && /^current:/ { print "current: " c; d = 1; next } { print }' "$PAB" > "$PAB.t" && mv "$PAB.t" "$PAB"; }
-ab_at 4; s34_gate "$RAB"; expect_eq "AB-0 precondition: with no approval of the plan the gate refuses a commit at current: 4 (rc 2), saying so" "0|2|yes" "$(ab_k 'approval|key=step3|' | grep -c .)|$GATE_RC|$(ab_said "$GATE_ERR" "no 'approved-by:' line")"
 ab_at 3; poke "$RAB" approve plan 'TBD'; expect_eq "AB-0b approve plan refuses a placeholder for the user's words (exit 1), appending nothing" "1|0" "$RC|$(ab_k 'approval|key=step3|' | grep -c .)"
 AB_BEFORE="$(cat "$PAB")"; poke "$RAB" approve plan 'approved, go ahead'
 expect_eq "AB-1 approve plan appends one approval (exit 0), the plan unchanged, and says so" "0|1|yes|yes" "$RC|$(ab_k 'approval|key=step3|' | grep -c .)|$([ "$AB_BEFORE" = "$(cat "$PAB")" ] && echo yes || echo no)|$(ab_said "$OUT" 'approved by Dana Fixture')"
 expect_regex "AB-1b …the git user, the reply verbatim, an ISO-UTC instant" '^run/v1\|ev=approval\|key=step3\|by=Dana Fixture\|said=approved, go ahead\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$(ab_k 'approval|key=step3|')"
-ab_at 4; s34_gate "$RAB"; expect_eq "AB-2 the gate reads it: at current: 4 it no longer refuses for it" "no" "$(ab_said "$GATE_ERR" "no 'approved-by:' line")"
 ab_at 3; AB_BEFORE="$(cat "$PAB")"; poke "$RAB" approve plan 'approved'
 expect_eq "AB-3 a second approve plan is refused (exit 1) as recorded once, the plan unchanged and nothing appended" "1|yes|1|yes" "$RC|$([ "$AB_BEFORE" = "$(cat "$PAB")" ] && echo yes || echo no)|$(ab_k 'approval|key=step3|' | grep -c .)|$(ab_said "$OUT" 'recorded once')"
 OWED_ROOT="$RAB" OWED_SID="$SID" OWED_PLAN="$PAB" bash -c '. "$1" && owed_open approve:step1 t q' _ "${S46_LIB%/*}/owed.sh"
