@@ -758,14 +758,12 @@ hook-adoption.test.sh | §5d | keep | hooks/permission-answer.sh: its exit 0 aft
 
 ## hook-timeout.test.sh
 
-hook-timeout.test.sh | §1 | keep | payload/hooks/canonical-sdlc-governing-skill.sh: the plan text after `CONTENT=$(printf` read by a bash loop over its lines instead of whole, so a2's 200 KB plan runs more commands than its 64 KB one | none (searched 'canonical-sdlc-governing-skill' with a size pair in tests/; hook-latency.test.sh times the hooks on one input)
+hook-timeout.test.sh | §1 | keep | payload/hooks/canonical-sdlc-governing-skill.sh: the plan text after `CONTENT=$(printf` read by a bash loop over its lines instead of whole, so a2's 200 KB plan runs more commands than its 64 KB one | none (searched 'canonical-sdlc-governing-skill' with a size pair in tests/)
 hook-timeout.test.sh | §2 | keep | payload/scripts/lib/cmd-class.sh: the segment split of a long chain done by a bash loop per segment character, so d's and d2's large input runs more commands than the small one | none (searched 'HTCOUNT' and 'as many commands' in tests/)
 hook-timeout.test.sh | §2b | keep | payload/scripts/lib/cmd-class.sh: a quoted python3 -c body walked a line at a time instead of read whole as one word, so e's 200 KB command counts more than its 50 KB one | none (searched 'HTCOUNT' in tests/)
 hook-timeout.test.sh | §2c | keep | payload/scripts/lib/walls.sh: the leading cd's target found by walking the heredoc after it line by line, so b3-l counts more than b3; also cmd_effects walking g's body | none (searched 'HTCOUNT' in tests/)
 hook-timeout.test.sh | §3 | duplicate | the shipped hook's input read never reached (the planted line sits on the hook's empty-input exit), so neither the planted copy nor the shipped hook reaches its witness; the planted-walk rows otherwise read the suite's own inserted loop | hook-timeout.test.sh §1, hook-timeout.test.sh §2
-hook-timeout.test.sh | §3b | keep | payload/scripts/lib/cmd-class.sh cmd_effects: the body after a redirect read a line at a time, so g-l runs more commands than g when called directly | none (searched 'cmd_effects' with a size pair in tests/)
 hook-timeout.test.sh | §3c | keep | payload/hooks/permission-answer.sh: the question body walked before the push is reached, so the 64 KB question runs more commands than the 16 KB one | none (searched 'permission-answer' with 'HTCOUNT' in tests/)
-hook-timeout.test.sh | §4 | keep | payload/hooks/session-poker.sh: the advance (current) reads the plan once per row instead of in one pass, so the 200 KB plan runs more commands than the 66 KB one | none (searched '§VERB' and 'as many commands on the 200 KB plan' in tests/)
 
 ## hooks-closed.test.sh
 
