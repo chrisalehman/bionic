@@ -41,8 +41,8 @@
 # A ROW'S SUITES AND LANDS-ON are a person's words about the task, so they go to the task's own section,
 # a heading whose first word is its id, when the plan has one, and to the gaps list when it has none.
 #
-# EXITS. 0 done; 2 not a plan at plans/<epic>/<wave>.plan.md; 1 a write failed, with nothing after it
-# written.
+# EXITS. 0 done; 2 not a plan at plans/<epic>/<wave>.plan.md, or a plan not named *.plan.md; 1 a write failed, with
+# nothing after it written.
 #
 # Executed, never sourced:  bash ${CLAUDE_PLUGIN_ROOT}/scripts/bring-forward.sh <plan>
 # bash 3.2 (ADR-001).
@@ -158,7 +158,48 @@ _bf_compute() {  # <plan> <work dir> -> <work>/plan, the plan brought forward; <
   _bf_deps "$plan" "$w/implied.plan.md" "$w/deps" > "$w/waits.gaps" || return 1
   plan_read_criterion_task "$plan" > "$w/tasks" 2>/dev/null || :
   _bf_plan "$plan" "$w/deps" "$w/cells.gaps" "$w/tasks" > "$w/plan" || return 1
-  cat "$w/translated.gaps" "$w/waits.gaps" "$w/cells.gaps" | awk '!seen[$0]++' > "$w/gaps"
+  _bf_shared "$plan" > "$w/shared.gaps" || return 1
+  cat "$w/translated.gaps" "$w/waits.gaps" "$w/cells.gaps" "$w/shared.gaps" | awk '!seen[$0]++' > "$w/gaps"
+}
+
+# THE RECORD AN INCIDENT'S PLAIN plan.md JOINED. At 14 every incident's plan named plain joins one record,
+# `<docs>/record/plan.md`; renamed for its directory, the plan joins its own, and the old one is read by nothing. Facts of
+# several incidents cannot be told apart there, so the act writes nothing from it and names each of its files on the
+# gaps list: a fact is never dropped without a word. The refusal of the plain name says to move it first when no other
+# plan shares it (_bf_misnamed).
+_bf_shared() {  # <plan> -> a gap line per file of the shared record, when the plan is an incident's named for its directory
+  local d="${1%/*}" docs old
+  [ "${1##*/}" = "${d##*/}.plan.md" ] && [ "${d%/*/*}/incidents" = "${d%/*}" ] || return 0
+  docs="${d%/*/*}"; old="$docs/record/plan.md"
+  [ -d "$old" ] || return 0
+  ( cd "$old" && find . -type f | sed 's#^\./##' | LC_ALL=C sort ) | sed 's#^#gap/v1|ev=record|record=plan.md|field=#; s#$#|why=shared#'
+}
+
+# A PLAN NOT NAMED *.plan.md is refused before anything is written. At 15 a run is found by the walk, and joined to
+# its record, by that name (lib/run.sh `_run_page15`, lib/reader.sh `reader_record`); a page at 15 under any other name
+# is found by no walk and judged by no gate, and every incident's plain plan.md shares one record. The words name the
+# plan for its directory, which is how the skill lays an incident out; elsewhere for its own stem. For an incident's
+# plain plan.md whose record stands they say what becomes of it: moved to the new name when no other plan named plain
+# joins it and that name is free, so the road loses nothing; otherwise named file by file on the act's gaps list.
+_bf_misnamed() {  # <plan, resolved> <its record> -> the refusal on stderr
+  local dir="${1%/*}" base="${1##*/}" want to f n=0 tail
+  case "$dir" in */incidents/*) want="${dir##*/}.plan.md" ;; *) want="${base%.md}.plan.md" ;; esac
+  tail="name it $dir/$want and run the act again"
+  if [ "$base" = plan.md ] && [ "${dir%/*}" = "${2%/record/*}/incidents" ] && [ -d "$2" ]; then
+    to="${2%/*}/${want%.plan.md}"
+    for f in "${2%/record/*}"/plans/"$base" "${2%/record/*}"/plans/*/"$base" "${2%/record/*}"/incidents/"$base" "${2%/record/*}"/incidents/*/"$base"; do
+      [ -f "$f" ] && [ "$f" != "$1" ] && n=$((n + 1))
+    done
+    if [ "$n" -gt 0 ]; then
+      tail="$tail; $2 is shared by $n other plan$([ "$n" -eq 1 ] || echo s) named $base, so the act will name each of its files on the gaps list"
+    elif [ -e "$to" ]; then
+      tail="$tail; $to already stands, so the act will name each file of $2 on the gaps list"
+    else
+      tail="name it $dir/$want, move $2 to $to, and run the act again"
+    fi
+  fi
+  printf 'bring-forward: refused — %s is not named as a plan: at version 15 a run is found and joined to its record by a name ending .plan.md; %s\n' \
+    "$1" "$tail" >&2
 }
 
 bf_main() {  # <plan> -> the act; prints the gaps list and kept=<directory>
@@ -167,6 +208,7 @@ bf_main() {  # <plan> -> the act; prints the gaps list and kept=<directory>
     printf 'bring-forward: usage: bring-forward <docs>/plans/<epic>/<wave>.plan.md\n' >&2; return 2
   fi
   plan="$(cd "$(dirname "$plan")" && pwd -P)/${plan##*/}"; wave="${plan##*/}"; rec="${log%/run.log}"; kept="$rec/kept"
+  case "$wave" in *.plan.md) ;; *) _bf_misnamed "$plan" "$rec"; return 2 ;; esac
   BF_WORK="$(mktemp -d)" || return 1
   _bf_compute "$plan" "$BF_WORK" || return 1
   if [ ! -d "$kept" ]; then
