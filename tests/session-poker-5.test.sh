@@ -89,9 +89,9 @@ ck_plan() {  # <current> <proof lines> [<sed edit>] -> PCK, bound to this sessio
 ck_tree() {  # -> one cksum line per file in the fixture repository outside .git: what a write would change
   ( cd "$RCK" && find . -path ./.git -prune -o -type f -print | LC_ALL=C sort | while IFS= read -r f; do cksum "$f"; done )
 }
-ck_unpid() {  # [<text>] (else stdin) -> the text with each plan copy's process suffix (.current-dry.<pid>) read as <pid>
+ck_unpid() {  # [<text>] (else stdin) -> the text with each plan copy's process suffix (.current.<pid>) read as <pid>
   if [ $# -gt 0 ]; then printf '%s\n' "$1" | ck_unpid; return; fi
-  sed -E 's/\.(current(-dry)?)\.[0-9]+/.\1.<pid>/g'
+  sed -E 's/\.current\.[0-9]+/.current.<pid>/g'
 }
 CK_GOOD="$(ck_floor "$CK_C")
 $(ck_reads "$CK_C")"

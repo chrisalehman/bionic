@@ -2186,22 +2186,14 @@ sitrep_clock() {  # <epoch> <now epoch> -> `H:MM AM/PM`, then ` YYYY-MM-DD` when
 
 # ---------------------------------------------------------------- the plan transaction
 #
-# ONE TRANSACTION FOR A VERB THAT STILL WRITES THE PLAN. The change is projected onto a
-# COPY through units.sh, the copy is judged by a dry `git commit` through the REAL
-# hooks/bash-walls.sh, the plan's checksum is compared with the one taken BEFORE the
-# projection read it, and only then is the copy moved over the plan. On any refusal the plan
-# is byte-identical and the words that refused it print.
+# A VERB THAT JUDGES A MOVE ASKS THE REAL GATE FIRST. No verb writes the plan: a fact is an event in
+# the run's log. What `current` moves, it first proves by a dry `git commit` through the REAL
+# hooks/bash-walls.sh, asked about the plan itself with the step it moves to pending in its facts, so
+# the advance is judged as a commit at that step would be. On a refusal nothing is appended and the
+# words that refused it print.
 #
-# THE DRY RUN IS BOUND TO THE COPY, NEVER TO THE PLAN: its own engagement marker for a
-# synthetic session whose `plan=` names the dry copy, removed after (close-out.sh's pattern).
-# Both copies sit beside the plan under names that do not end in `.md`, so no plan walk can
-# read one as a run. The marker also names the plan the copy was made from (`dry_of=`), and
-# goes with it: the commit gate reads that plan's landing record for its declared debts, since
-# the copy's name names none (wave-27 T76; lib/proof.sh `proof_debt_origin`). The judged copy
-# is a WRITER's commit: past Step 4 the dry copy carries `current: 4`,
-# because a main-root commit during Verify is held to the Step-5 block the run is still
-# writing. `current` is the one exception — what it asks is
-# whether the run can commit at the step it moves to, so its copy is judged as it stands.
+# THE DRY RUN HAS ITS OWN SESSION: an engagement marker for a synthetic session whose `plan=` names
+# the plan, removed after (close-out.sh's pattern), so the person's own session is never rebound.
 #
 # MAIN THREAD ONLY is the Bash wall's to enforce (payload/scripts/lib/walls.sh, the
 # `agent_id` verb list); these refuse what the script can see: no session key (3), an
@@ -2221,7 +2213,7 @@ plan_delivered() {
   return 1
 }
 
-# plan_verb_open <verb> [closed-ok] -> sets PV_REPO, PV_PLAN, PV_CUR, PV_NEW, PV_DRY, PV_MARK, PV_SID and arms the
+# plan_verb_open <verb> [closed-ok] -> sets PV_REPO, PV_PLAN, PV_CUR, PV_NEW, PV_MARK, PV_SID and arms the
 # cleanup; exits on every refusal above. `closed-ok` (handoff) also takes the session's own closed run (bound-closed)
 # when its plan is on disk. ENGAGEMENT IS THE CONSENT BOUNDARY FOR A RUN STILL MOVING, so it is asked first.
 plan_verb_open() {
@@ -2268,39 +2260,22 @@ plan_verb_open() {
   PV_CUR=""; PV_CUR_UNREAD=""
   if _fill_current_load "$PV_PLAN"; then PV_CUR="$_FILL_CURRENT_VALUE"; else PV_CUR_UNREAD=1; fi
   PV_NEW="${PV_PLAN}.${verb}.$$"
-  PV_DRY="${PV_PLAN}.${verb}-dry.$$"
   PV_SID="planverb-$$"
   PV_MARK="$(engaged_marker_path "$PV_REPO" "$PV_SID")" || PV_MARK=""
-  trap 'rm -f "$PV_NEW" "$PV_NEW.2" "$PV_DRY" ${PV_MARK:+"$PV_MARK"}' EXIT
+  trap 'rm -f "$PV_NEW" "$PV_NEW.2" ${PV_MARK:+"$PV_MARK"}' EXIT
 }
 
-# plan_verb_dry <verb> <what changed> <dry: writer|as-is|step:<N>> <current> -> the dry commit of $PV_NEW
-# through the real gate, at `current: 4` for a writer past Step 4 and as written otherwise; exits 1
-# on the gate's refusal, 2 when it cannot run.
-# `step:<N>` judges no copy: the gate is asked about the plan itself with step N pending in its facts (BIONIC_DRY_STEP,
-# honoured only for this session, lib/proof.sh `_proof_dry_step`), so the advance is judged as a commit at N would be.
+# plan_verb_dry <verb> <what changed> <step> -> the dry commit through the real gate, asked about the plan itself
+# with <step> pending in its facts (BIONIC_DRY_STEP, honoured only for this session, lib/proof.sh `_proof_dry_step`),
+# so the move is judged as a commit at that step would be; exits 1 on the gate's refusal, 2 when it cannot run.
 plan_verb_dry() {
-  local verb="$1" what="$2" dry="$3" cur="$4" err rc judged="$PV_DRY" step=""
-  case "$dry" in step:*) step="${dry#step:}"; judged="$PV_PLAN" ;; esac
-  if [ -n "$step" ]; then
-    :
-  elif [ "$dry" = writer ] && [ "$cur" -gt 4 ]; then
-    awk '
-      /^[[:space:]]*```/ { fence = !fence; print; next }
-      fence { print; next }
-      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); print; next }
-      insdlc && !done && /^[[:space:]]*current[[:space:]]*:/ { print "current: 4"; done = 1; next }
-      { print }' "$PV_NEW" > "$PV_DRY"
-  else
-    cp "$PV_NEW" "$PV_DRY"
-  fi
+  local verb="$1" what="$2" step="$3" err rc
   if [ ! -f "$HOOK_DIR/bash-walls.sh" ] || [ -z "$PV_MARK" ] || ! command -v jq >/dev/null 2>&1; then
     die "REFUSED — the dry commit cannot be run (no bash-walls.sh beside this script, no marker path, or no jq); the plan is unchanged."
     exit 2
   fi
   mkdir -p "${PV_MARK%/*}" 2>/dev/null
-  if [ -n "$step" ]; then printf 'plan=%s\nengaged_at=%s\n' "$judged" "$(iso_now)"
-  else printf 'plan=%s\ndry_of=%s\nengaged_at=%s\n' "$judged" "$PV_PLAN" "$(iso_now)"; fi > "$PV_MARK"
+  printf 'plan=%s\nengaged_at=%s\n' "$PV_PLAN" "$(iso_now)" > "$PV_MARK"
   err="$(cd "$PV_REPO" && BIONIC_DRY_STEP="$step" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$PV_SID" BIONIC_WALL_VERBOSE=1 \
     bash "$HOOK_DIR/bash-walls.sh" 2>&1 >/dev/null <<< "$(jq -n --arg s "$PV_SID" --arg cwd "$PV_REPO" --arg v "$verb" \
       '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",
