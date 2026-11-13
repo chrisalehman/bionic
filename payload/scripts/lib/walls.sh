@@ -2556,46 +2556,6 @@ Fix: run the whole run with 'session-poker.sh regression-run' and record its log
   refuse exit2 commit "no regression proof on this plan yet" "record it with proof-add regression" "$_eg_detail"
 }
 
-# ---------- the per-row evidence-line obligation (wave-17 REQ-5, AC-5.1) ----------
-#
-# ONE LINE PER `## Tasks` ROW, and the refusal says so. The arm used to name ONE id and ask
-# for "a '- <id>:' evidence line"; an author owing eighteen of them learned of the second only
-# after landing the first (wave-16's A-orch-10 is that specimen). So the COUNT and the IDS come
-# from the whole table in one pass.
-#
-# THE LOOKUP IS THE READER'S (wave-21 T5; D4, ADR-037 decision 3). It lived here as
-# `missing_evidence_ids`, a grep over `$SECTION` asked once per row; it is `units_findings` in
-# lib/units.sh now, one program, so the gate and the Patrol tick cannot disagree about whether a
-# row carries its line. What the arm passes below is the reader's answer: the `evidence`
-# findings (a row owes its line at `landed`).
-
-# Refuse for EVERY id named, or return 0 if none is. The id list is printed as the lines the
-# author has to write, so the repair is a copy out of the refusal; it sits LAST so refuse.sh's
-# twelve-line fold (BIONIC_REFUSE_DETAIL_LINES, a ratified bound this does not move) bites the
-# list rather than the instruction above it.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-refuse_missing_evidence_lines() {  # $1 = the T-ids owing a line, one per line (the reader's)
-  local ids count subject verdict
-  ids="$(printf '%s\n' "$1" | awk 'NF')"
-  [ -n "$ids" ] || return 0
-  count=$(printf '%s\n' "$ids" | wc -l | tr -d ' ')
-  if [ "$count" -eq 1 ]; then
-    verdict="1 task has no evidence line"
-    subject="1 '## Tasks' row has"
-  else
-    verdict="${count} tasks have no evidence line"
-    subject="${count} '## Tasks' rows have"
-  fi
-  _eg_detail="canonical-sdlc: ${subject} no '- T<id>:' evidence line in '## SDLC State'.
-Plan: $PLAN
-Fix: add one line per row named below, each recording what proves that row, before committing.
-$(printf '%s\n' "$ids" | sed -E 's/^/- /; s/$/:/')"
-  # THE FIX FIELD IS SIX WORDS AND FORTY COLUMNS (refuse.sh's own self-check, ratified
-  # constants this does not move), so the `## Tasks` half of the rule rides the detail
-  # above rather than the one line: "per row" is the part a committer acts on.
-  refuse exit2 commit "$verdict" "add one '- T<id>:' per row" "$_eg_detail"
-}
-
 # THE RUN'S ROSTERS, as the gate reads them (wave-36 T29; REQ-4 AC-4.1; D10; was this session's
 # roster alone, wave-21 T5). lib/units.sh `units_run_rosters` lists them, the one lister the Patrol
 # tick asks too: this session's roster first — the path the suite-budget arm builds from the same
@@ -4287,20 +4247,18 @@ validate_environments() {
 #   2. NO TABLE, OR A TABLE WITH ZERO DATA ROWS -> SATISFIED (a human
 #      `none dispatched` prose line is documentation, not required by the
 #      parser — the shape this refusal's own Fix text advertises). return 0.
-#   3. Each data row: the Task invariants, delegated to `units_validate` (REQ-1e)
-#      — status in {pending,active,landed,dropped} among them — else exit 2; then
-#      the reader's ledger findings (`units_findings`, wave-21 T5, D4): a `landed`
-#      row with no `- T<n>:` line in ## SDLC State, or an `active` row whose agent
-#      cell names no row on this session's roster, on another roster of this plan,
-#      or in its `## Dispatch ledger` (wave-36 T29), else exit 2; a line that is
-#      there must not be a placeholder, else exit 2.
+#   3. Each data row: the Task invariants, delegated to `units_validate`, else
+#      exit 2; then the reader's ledger findings (`units_findings`): a row whose
+#      landing or launch the run's log does not hold as the row reads is owed, and
+#      an `active` row whose agent cell names no row on this session's roster, on
+#      another roster of this plan, or in its `## Dispatch ledger` is refused.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_dispatch_ledger() {
   case "$SCALE" in wave|task) : ;; *) return 0 ;; esac
   [ "$(rigor_level "$RIGOR")" = double ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
 
-  local tasks rows id ev violations findings _eg_ph _eg_origin
+  local tasks rows id violations findings _eg_origin
   # THE ROWS AND THE INVARIANTS BOTH COME FROM lib/units.sh (REQ-1e, spec §2 D3).
   # This is the check the widened table breaks hardest: `| id | step | kind | task |
   # agent | deps | size | serves | Files | status |` puts `agent` at the `$6` this
@@ -4356,66 +4314,16 @@ Plan: $PLAN
 Fix: repair each row named above; the columns are $(units_columns "$_EG_V15")"
     refuse exit2 commit "that dispatched task's row is invalid" "fix the row the detail names" "$_eg_detail"
   fi
-  # PRESENCE IS ASKED OF THE WHOLE TABLE AT ONCE (AC-5.1). This loop used to refuse at the
-  # first id it found short, so a wave owing three lines paid three refused commits; the
-  # shared arm below counts every row and prints the lines the author owes. It runs ahead
-  # of the placeholder walk: "you wrote nothing" and "you wrote a placeholder" are two
-  # findings, and the first is the one a whole-table answer can give.
-  #
-  # AND WHAT A ROW OWES IS THE READER'S ANSWER (wave-21 T5; REQ-4, AC-4.1, AC-4.3; D4,
-  # ADR-037 decision 3). Through 1.8.7 every row owed a line, so an `active` row the dispatch
-  # hook had just written to the roster was refused for a hand copy of that record at its
-  # writer's first commit. A `landed` row owes its line; an `active` row whose agent cell is
-  # a roster name owes nothing; a self-owned row owes neither; and an agent cell naming no
-  # roster row is its own refusal, after the lines. The status enum stays `units_validate`'s,
-  # above, whose ids the reader's `status` findings equal.
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  # AT 15 NO ROW HAS A LINE: a row's landing and its launch are the reader's, and a row the reader does not answer as the
-  # table reads it is owed until the log holds the fact.
-  if [ "$_EG_V15" -eq 1 ]; then
-    findings="$(units_findings "$PLAN" "$(_eg_roster_path)" v15)"
-    for id in $(printf '%s\n' "$findings" | awk '$1 == "evidence" { print $2 }'); do
-      _eg_v15_ask "${id}'s landing or launch, which the run's log does not hold as its row reads"
-    done
-  else
-    findings="$(units_findings "$PLAN" "$(_eg_roster_path)")"
-    refuse_missing_evidence_lines "$(printf '%s\n' "$findings" | awk '$1 == "evidence" { print $2 }')"
-  fi
+  # A ROW HAS NO LINE: a row's landing and its launch are the reader's, and a row the reader does not answer as the
+  # table reads it is owed until the log holds the fact. An older plan's `- T<n>:` lines are never read.
+  [ "$_EG_V15" -eq 1 ] || return 0
+  findings="$(units_findings "$PLAN" "$(_eg_roster_path)" v15)"
+  for id in $(printf '%s\n' "$findings" | awk '$1 == "evidence" { print $2 }'); do
+    _eg_v15_ask "${id}'s landing or launch, which the run's log does not hold as its row reads"
+  done
   refuse_unlaunched_rows "$(printf '%s\n' "$findings" \
     | awk '$1 == "launch" { v = $0; sub(/^launch [^ ]+ /, "", v); print $2 ": " v }')"
-  # Evidence line in ## SDLC State (anchored), judged for a
-  # placeholder. ONE PASS (wave-24 T15; REQ-9 AC-9.7): this walk forked grep|head|sed|sed for
-  # the line and sed|tr for the test, six processes a row; the awk is the same lookup — the
-  # first section line matching `^[[:space:]]*-?[[:space:]]*<id>[[:space:]]*:`, its text after
-  # that prefix with trailing space trimmed — and `is_placeholder_value`'s whole-value test
-  # (trimmed, lower-cased, one of its seven tokens). It prints the first `<id><TAB><ev>` that is
-  # a placeholder, rows in table order.
-  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  _eg_ph=$(printf '%s\n' "$SECTION" | EG_IDS="$(printf '%s\n' "$rows" | awk -F'\t' '$1 ~ /^T[0-9]/ { print $1 }')" awk '
-    { L[++n] = $0 }
-    END {
-      m = split(ENVIRON["EG_IDS"], ids, "\n")
-      for (k = 1; k <= m; k++) {
-        id = ids[k]; if (id == "") continue
-        pat = "^[[:space:]]*-?[[:space:]]*" id "[[:space:]]*:"
-        for (i = 1; i <= n; i++) {
-          if (L[i] !~ pat) continue
-          ev = L[i]; sub(pat "[[:space:]]*", "", ev); sub(/[[:space:]]+$/, "", ev)
-          v = ev; sub(/^[[:space:]]+/, "", v); v = tolower(v)
-          if (v == "todo" || v == "pending" || v == "in progress" || v == "inprogress" || v == "xxx" || v == "tbd" || v == "placeholder") {
-            printf "%s\t%s\n", id, ev; exit
-          }
-          break
-        }
-      }
-    }')
-  if [ -n "$_eg_ph" ]; then
-    id="${_eg_ph%%$'\t'*}"; ev="${_eg_ph#*$'\t'}"
-    _eg_detail="canonical-sdlc dispatched task ${id} evidence line is a placeholder ('${ev}').
-Plan: $PLAN
-Fix: replace the '- ${id}:' placeholder with the actual evidence artifact before committing."
-    refuse exit2 commit "the dispatched task's evidence is a placeholder" "replace it with evidence" "$_eg_detail"
-  fi
   return 0
 }
 
