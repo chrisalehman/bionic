@@ -282,8 +282,11 @@ expect_eq "EARLY-9c …putting the release approval and the merge approval" "app
 # ============================================================
 section "§PREVIEW: --preview renders an early run's page and records nothing"
 # ============================================================
+FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
 # fails-when: the preview refuses, records a page or opens an approval item, or does not say why the run is early.
 fc_plan "$FC_GOOD" '/structure-whole/d'
+expect_eq "PREV-0 precondition: the page stands at 15 with no State, the act having written the run's log" "15|0|yes" \
+  "$(sed -n 's/^canonical_sdlc_version: //p' "$PFC")|$(/usr/bin/grep -c '^## SDLC State' "$PFC")|$([ -s "$FC_REC/run.log" ] && [ -d "$FC_REC/kept" ] && echo yes)"
 fc_page --preview
 expect_eq "PREV-1 the early run previews (exit 0, nothing on stderr)" "0|" "$FC_RC|$FC_ERR"
 expect_eq "PREV-3 …every section printed" "Bottom line|Goals|Tests|Reviews|Findings|Decisions" "$(fc_heads)"
@@ -315,6 +318,7 @@ expect_eq "PREV-8c control: the reviewer acked, the same run is ready and the de
   "yes|yes|" \
   "$(fc_has "$FC_BL" 'Ready for your decisions')|$(fc_has "$FC_BL" 'You owe ')|$(fc_has "$FC_BL" 'Once the run is ready')"
 new_roster "$RFC"
+FC_VERSION=14
 
 # ============================================================
 section "§AGREE: the decisions are the owed items, the unproved rows and the findings recommended against (D7, D19)"
@@ -355,6 +359,7 @@ expect_eq "AGREE-4 a finding recommended against joins the set" "same" "$(fc_agr
 # ============================================================
 section "§REGISTER: the card's waivers are the run's asks, whichever session of the run raised them (AC-6.6)"
 # ============================================================
+FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
 # fails-when: a waiver another session of the run raised has no decision on the card. A question failing at the head
 # is settled by the card's own check whichever session holds its ask, so here the question passes at the head and only
 # the run's register owes its waiver, as when a close-out preflight raised it on a failing reading at an earlier head.
@@ -381,6 +386,7 @@ expect_regex "REG-3b …writing the waiver with the reply's words" \
 expect_eq "REG-4 answered here, the waiver is closed for the session that raised it; its gate act stays open" \
   "gate:fixture" "$(fc_owed2)"
 rm -f "$RFC/.bionic/tmp/engaged-$FC_SID2.state" "$RFC/.bionic/tmp/owed-$FC_SID2.state"
+FC_VERSION=14
 
 # ============================================================
 section "§REPLY: all default and all recommended replay into their verbs with the user's words; anything else writes nothing"
@@ -734,6 +740,7 @@ rm -f "$FC_REC/landing-proofs.log" "$FC_REC/fill-ledger.log" "$FC_REC"/release-a
 # ============================================================
 section "§RATIO: the card prints the release check's test-ratio line once, among the facts it states about the head"
 # ============================================================
+FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
 # The line is the check's own, read from the log of the plan's newest release-check proof, so the page and the check
 # cannot differ. fails-when: the page lacks the line, prints it twice, differs from the check's output at the same
 # head, moves when the log does not, or prints a number when no check has run.
@@ -789,6 +796,7 @@ expect_eq "CHECK-CHANGED-3 a release that leaves its check alone renders with it
   "$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c '^Bottom line$')"
 expect_eq "CHECK-CHANGED-3b …and says nothing of the check" "" "$(cc_line)"
 rm -f "$RFC/.bionic/config.yaml" "$FC_REC"/release-check-*.log "$FC_REC"/release-approval-*.md
+FC_VERSION=14
 
 # ============================================================
 section "§STEP0: card.sh step0 renders the configuration card in the 1.20.0 shape, ending on its question, and owes its reply (AC-20.1, AC-20.2; D3, D23)"
@@ -814,6 +822,7 @@ expect_eq "STEP0-7 every line of the card is within the shared 100 columns" "0" 
 # ============================================================
 section "§CARRY: a carry the run chose is the run's ask until the release approval card's reply rules it"
 # ============================================================
+FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
 # A reading's S3 on finding is deferred by the severity table and moved by no person: the run carries it. The acting
 # render's disposition opens `carry:<record>#<n>`, the page records the carries it puts, and the reply that answers the
 # page closes each. fails-when: the reply leaves the carry open on the run's register.
@@ -874,6 +883,7 @@ expect_contains "CARRY-10b …the register says the reply closed it" "|key=$FC_F
 fc_typed "$FC_WD" "$FC_WR"
 fc_record structure structure piece
 fc_record adversarial adversarial piece "$FC_S3"
+FC_VERSION=14
 
 # ============================================================
 section "§STALE: a release approval the head has moved past is put again on the card with the merge beside it, and the reply records both again"

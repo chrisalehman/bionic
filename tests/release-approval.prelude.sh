@@ -92,8 +92,9 @@ PFC="$RFC/.bionic/docs/plans/wave-x.plan.md"
 # the log as the act reads it.
 # The discharged criterion's evidence cell is `—`, so its proof carries the block's path: the act lets a cell holding
 # anything win. The pending one names the close as its task: a pending criterion owed now meets the gate's live-row
-# refusal at Step 6, which leaves the card early. The act's kept copy is removed first: left standing, it decides whether the act writes the
-# log at all. Any version but 14 or 15, or an act that leaves the page short of 15, stops the suite.
+# refusal at Step 6, which leaves the card early. A kept copy an earlier act left is removed at either version: left
+# standing, it decides whether the act writes the log at all, and at 14 it makes the reader take the page as brought
+# forward. Any version but 14 or 15, or an act that leaves the page short of 15, stops the suite.
 FC_VERSION=14
 fc_homes15() {  # -> PFC, a page at 14, given the homes an authored plan at 14 holds outside the State and the matrix
   awk -v b="$FC_B" '
@@ -132,10 +133,10 @@ fc_plan() {  # <proof lines> [<sed edit>] [<edit function>] -> PFC at current: 8
   } | sed -e "${2:-}" > "$PFC"
   rm -f "$FC_REC"/release-approval-*.md "$FC_REC/${RN_W:-review}-results"-*.md "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/asks.state" "$FC_REC/run.log" \
     "$(roster_of "$RFC")" "$(ack_ledger_of "$RFC")"
+  rm -rf "$FC_REC/kept"
   [ "$FC_VERSION" = 14 ] || fc_homes15
   [ -z "${3:-}" ] || "$3" "$PFC" || { echo "fc_plan: the edit $3 failed on $PFC" >&2; exit 2; }
   if [ "$FC_VERSION" = 15 ]; then
-    rm -rf "$FC_REC/kept"
     bash "${BIONIC_HOOKS_DIR}/../payload/scripts/bring-forward.sh" "$PFC" > "$TMPROOT/fc-act.out" 2>&1
     [ "$(sed -n 's/^canonical_sdlc_version: //p' "$PFC")" = 15 ] \
       || { echo "fc_plan: the act left $PFC short of 15:" >&2; cat "$TMPROOT/fc-act.out" >&2; exit 2; }
