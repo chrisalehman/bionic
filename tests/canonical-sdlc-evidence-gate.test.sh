@@ -34,12 +34,8 @@ eg_floor() {  # <plan content> -> the content with the readings and one floor pr
 section "Section 1: Non-commit commands pass through"
 
 h1=$(make_home)
-# Seed a plan that WOULD block if the command were a commit.
-write_plan "$h1" "$FM
-## SDLC State
-current: 5
-approved-by: fixture 2026-09-07T00:00Z "approved"
-Step 5: TODO" > /dev/null
+# Seed a plan that WOULD block if the command were a commit: a run at Step 5 with no regression proof.
+eg_page "$h1" 5 > /dev/null
 
 expect_allow "ls command — not a commit" "$h1" "ls /tmp"
 expect_allow "git status — not a commit" "$h1" "git status"
