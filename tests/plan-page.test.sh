@@ -3,21 +3,23 @@
 # written and read through the one parser of its authored parts (payload/scripts/lib/plan-read.sh).
 #
 #   §SECTIONS  a version-15 plan holding a verification matrix, a state or a handoff section is refused at
-#              the write with the heading's line named; a version-14 plan holding all three is admitted, and
-#              so is a version-15 plan whose only copy of one is inside a fence.
+#              the write with the heading's line named; a version-15 plan whose only copy of one is inside a
+#              fence is admitted.
 #   §ROW       a version-15 Tasks table with a status or an agent cell is refused, naming the cell; its nine
 #              authored cells alone are admitted.
 #   §KEYS      each header key the version-15 header has no place for is refused on a version-15 plan, the
-#              refusal naming it; the same key on a version-14 plan is admitted.
+#              refusal naming it.
 #   §TASK      a criterion's Task cell at 15 naming a token no Tasks row carries is refused at the write, naming it and
 #              what to write; an id, `9`, a dash or no column is admitted; the reader answers the task from the column at
 #              15 and from the block's `task:` line at 14.
-#   §GATE      the commit gate (hooks/bash-walls.sh) asks the run's facts for the step's evidence: a commit at
-#              Step 6 whose log holds no review event is refused, and admitted once the log holds one per question.
-#              The same run at 15, brought forward, is refused as the 14 is, and with its reviews still refused, naming each fact its log lacks.
+#   §GATE      the commit gate (hooks/bash-walls.sh) asks the run's facts for the step's evidence: a run open at 14
+#              is refused, naming the act; brought forward to 15 it is refused for its reviews, and with its
+#              reviews still refused, naming each fact its log lacks.
 #              At 15 a step's evidence is asked where it is held, owed while missing and not once it stands; a step
 #              pending in an advance's judgment moves the gate only in the advance's own session, and is never held.
 #              A page at 15 whose landed tasks stand out of order is admitted: the hook judges its copy with the plan's log.
+#   §V14       a plan at 14 binds only while its run is open: refused at the write and the commit, naming the act on
+#              its path; a closed one admitted at both; a new one refused; a spec at 14 or 15 admitted, at 13 refused.
 #
 # FIXTURE FIDELITY. Each plan is a real file in a scratch git repository with an engaged session, written
 # through hooks/canonical-sdlc-governing-skill.sh as the Write tool would post it. Every plan carries the
@@ -53,10 +55,11 @@ page() {
   cat
 }
 
-# write_plan <text> -> HOOK_EXIT, and HOOK_SAID: the refusal with its detail (BIONIC_WALL_VERBOSE=1).
-write_plan() {
+# write_to <path> <text> -> HOOK_EXIT, and HOOK_SAID: the refusal with its detail (BIONIC_WALL_VERBOSE=1).
+write_plan() { write_to "$R/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$1"; }
+write_to() {
   local in
-  in="$(jq -n --arg p "$R/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" --arg c "$1" --arg s "$SID" \
+  in="$(jq -n --arg p "$1" --arg c "$2" --arg s "$SID" \
     '{session_id: $s, hook_event_name: "PreToolUse", tool_name: "Write", tool_input: {file_path: $p, content: $c}}')"
   HOOK_SAID="$(HOME="$HOME_DIR" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 bash "$HOOK" <<< "$in" 2>&1 >/dev/null)"
   HOOK_EXIT=$?
@@ -91,8 +94,6 @@ for h in "Verification Matrix" "SDLC State" "Handoff"; do
   expect_status "a version-15 plan holding ## $h is refused" 2 "$HOOK_EXIT"
   expect_contains "the refusal names ## $h at its line" "line $n: ## $h" "$HOOK_SAID"
 done
-write_plan "$(printf '%s\n' "$MACHINE" | page 14)"
-expect_status "a version-14 plan holding all three is admitted" 0 "$HOOK_EXIT"
 write_plan "$(printf '## Tasks\n\n%s\n\nAn example:\n\n```\n## Handoff\n```\n' "$NINE" | page 15)"
 expect_status "a fenced ## Handoff is prose, and admitted" 0 "$HOOK_EXIT"
 FP="$R/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md"; printf '## SDLC State\n\ncurrent: 4\n\n## Tasks\n\n%s\n\n### T1 — a fenced comment\n\nRuling one.\n\n```bash\n# run it like this\n## run\n```\n\nRuling two: never commit.\n' "$NINE" | page 14 > "$FP"
@@ -119,8 +120,6 @@ for k in $gone; do
   write_plan "$(printf '## Tasks\n\n%s\n' "$NINE" | page 15 "$k: 2026-11-10")"
   expect_status "a version-15 header with $k: is refused" 2 "$HOOK_EXIT"
   expect_contains "the refusal names $k" "header key $k:" "$HOOK_SAID"
-  write_plan "$(printf '%s\n' "$MACHINE" | page 14 "$k: 2026-11-10")"
-  expect_status "a version-14 header with $k: is admitted" 0 "$HOOK_EXIT"
 done
 
 # A run with a log is read from the log alone, so the plan below holds no proved: line and the planted log holds
@@ -137,8 +136,6 @@ for v in "T99|T99" "T1, 9|9" "T1, T99|T99"; do write_plan "$(evp "${v%|*}" | pag
   expect_status "a criterion whose Task is '${v%|*}' is refused" 2 "$HOOK_EXIT"
   expect_contains "…naming the token no row of the table carries, and what to write" "AC-1: task ${v#*|} names no row in the Tasks table; write a task id the table holds, several joined by commas, or 9 alone for the close" "$HOOK_SAID"
 done
-write_plan "$(printf '%s\n\n%s\n' "$MACHINE" "$(evp T99 | sed -n '/^## Eval design/,$p')" | page 14)"
-expect_status "a version-14 plan is not judged by the column: its block says the task" 0 "$HOOK_EXIT"
 ask_task() { bash -c '. "$1" && plan_read_criterion_task "$2"' _ "$PLAN_READ" "$FP"; }
 evp T1 | page 15 > "$FP"; expect_eq "at 15 the reader answers a criterion's task from its column" "AC-1	T1" "$(ask_task)"
 evp — | page 15 > "$FP"; expect_eq "…and a dash names none" "" "$(ask_task)"
@@ -149,13 +146,6 @@ section "GATE"
 git -C "$R" -c user.name=f -c user.email=f@x.invalid -c core.hooksPath=/dev/null commit -q --allow-empty -m base
 H="$(git -C "$R" rev-parse HEAD)"; GL="$R/.bionic/docs/record/wave-01-x/run.log"
 mkdir -p "${GL%/*}"; printf 'proof\n' > "$R/.bionic/docs/record/generic-evidence.md"
-{ printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
-  printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n\n## SDLC State\n\ncurrent: 6\n'
-  printf 'approved-by: f 2026-11-01T00:00Z "approved"\n- Step 5: floor green, record/floor.log\n\n## Verification Matrix\n\n'
-  printf 'stack-health: n/a: no serve\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
-  printf '| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\nAC-1:\n  fails-when: a planted defect\n  evidence: record/generic-evidence.md\n'
-} > "$R/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md"
-printf 'plan=%s\n' "$R/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" > "$R/.bionic/tmp/engaged-$SID.state"
 gate_as() {  # <session> <a pending step, or nothing> [the tree it commits in] -> GATE_EXIT, and GATE_SAID: the gate's words on a commit from the repository
   local in
   in="$(jq -n --arg s "$1" --arg c "${3:-$R}" '{session_id: $s, cwd: $c, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "git commit -m x"}}')"
@@ -163,23 +153,9 @@ gate_as() {  # <session> <a pending step, or nothing> [the tree it commits in] -
   GATE_EXIT=$?
 }
 gate() { gate_as "$SID" ""; }
-printf 'run/v1|ev=step|n=6|by=f|at=2026-11-01T00:00:01Z\n' > "$GL"
-gate
-expect_status "a commit at step 6 with no review event in the log is refused" 2 "$GATE_EXIT"
-expect_contains "the refusal names the unanswered reading" "evidence: no review, and no waiver" "$GATE_SAID"
 for q in evidence adversarial structure; do
   printf 'run/v1|ev=proof|evidence=record/%s.md|head=%s|kind=review|question=%s|reader=r|result=pass|scope=piece|at=2026-11-01T00:00:02Z\n' "$q" "$H" "$q" >> "$GL"
 done
-gate
-expect_status "the same commit with a review event of each question is admitted" 0 "$GATE_EXIT"
-# At 14 too the step and the plan's approval are the run's facts: a step the log alone holds past current: is judged.
-printf 'run/v1|ev=step|n=7|by=f|at=2026-11-01T00:00:03Z\n' >> "$GL"; gate
-expect_eq "a step 7 the log holds past current: 6 is the step judged, refused for its line" "2|has no 'Step 7:' line" "$GATE_EXIT|$(printf '%s' "$GATE_SAID" | /usr/bin/grep -o "has no 'Step 7:' line" | head -1)"
-printf 'run/v1|ev=step|n=6|by=f|at=2026-11-01T00:00:04Z\n' >> "$GL"; GP="$R/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md"
-sed -i.bak '/^approved-by:/d' "$GP"; gate
-expect_eq "taken back to 6 with no approval anywhere, refused for the approval" "2|approved-by" "$GATE_EXIT|$(printf '%s' "$GATE_SAID" | /usr/bin/grep -o 'approved-by' | head -1)"
-printf 'run/v1|ev=approval|key=step3|by=f|said=approved|at=2026-11-01T00:00:05Z\n' >> "$GL"; gate
-expect_status "an approval the log alone holds admits the same commit" 0 "$GATE_EXIT"
 
 # The same run at 15, made by the act from a version-14 plan: judged on what its log holds, and refused naming what it lacks.
 P2="$R/.bionic/docs/plans/epic-01-demo/wave-02-y.plan.md"; L2="$R/.bionic/docs/record/wave-02-y/run.log"; mkdir -p "$R/.bionic/docs/specs"; : > "$R/.bionic/docs/specs/r.md"
@@ -189,10 +165,10 @@ P2="$R/.bionic/docs/plans/epic-01-demo/wave-02-y.plan.md"; L2="$R/.bionic/docs/r
   printf '## SDLC State\n\ncurrent: 6\napproved-by: f 2026-11-01T00:00Z "approved"\n- Step 1: requirements: specs/r.md\n- Step 5: floor green, record/floor.log\n- T1: landed record/generic-evidence.md\n\n'
   printf '## Verification Matrix\n\nstack-health: n/a: no serve\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | record/generic-evidence.md | CONFIRMED |\n\nAC-1:\n  fails-when: a planted defect\n  evidence: record/generic-evidence.md\n'
 } > "$P2"; printf 'plan=%s\n' "$P2" > "$R/.bionic/tmp/engaged-$SID.state"
-gate; S14="$GATE_EXIT ${GATE_SAID%%$'\n'*}"
+gate; expect_eq "at 14 the open run is refused, naming the act on its path" "2|1" "$GATE_EXIT|$(grep -c "scripts/bring-forward.sh $P2\$" <<< "$GATE_SAID")"
 bash "$BIONIC_SCRIPTS_DIR/payload/scripts/bring-forward.sh" "$P2" >/dev/null; expect_contains "the act wrote the plan at 15" "canonical_sdlc_version: 15" "$(cat "$P2")"
-gate; expect_eq "at 15 with no review event, refused as the 14 is, by the same refusal" "$S14" "$GATE_EXIT ${GATE_SAID%%$'\n'*}"
-expect_contains "the 14 was refused for the reviews" "2 bionic: commit refused — a review question is unanswered" "$S14"
+gate; expect_eq "at 15 with no review event, refused for the reviews" "2 bionic: commit refused — a review question is unanswered (record or waive each review)" "$GATE_EXIT ${GATE_SAID%%$'\n'*}"
+expect_contains "…naming the unanswered one" "evidence: no review, and no waiver" "$GATE_SAID"
 grep -h 'kind=review' "$GL" >> "$L2"; gate
 expect_status "at 15 with each review, still refused: the step's other facts are not in the log" 2 "$GATE_EXIT"
 owed() { printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o "owed at 15: $1" | head -1; }
@@ -261,22 +237,11 @@ for v in "8|delivered=x" "8"$'\n'"approval|key=step3|by=f|said=yes" "8"$'\n'"pro
   gate_as closeout-preflight-4243 "$v"
   expect_eq "a pending line the close does not write is refused by the fold: ${v//$'\n'/ / }" "2|yes" "$GATE_EXIT|$(contains "$GATE_SAID" "the facts pending in closeout-preflight-4243 are refused")"
 done
-# At 14 steps 8 and 9 are asked what they are asked at 15, of the reader, with no Step line asked for.
-printf 'plan=%s\n' "$GP" > "$R/.bionic/tmp/engaged-$SID.state"
-owed14() { printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o "owed at 14: $1" | head -1; }
-printf 'run/v1|ev=step|n=8|at=2026-11-01T00:00:20Z\n' >> "$GL"; gate
-expect_eq "at 14 a step 8 the log holds is asked of its event: its cleanup owed, no Step 8 line asked for" "2|owed at 14: Step 8's cleanup|no" "$GATE_EXIT|$(owed14 "Step 8's cleanup")|$(contains "$GATE_SAID" "has no 'Step 8:' line")"
-printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=record/floor.log|at=2026-11-01T00:00:21Z\nrun/v1|ev=step|n=8|cleanup=done|tmp-wiped=0 entries|tasks-completed=T1|at=2026-11-01T00:00:21Z\n' "$H" >> "$GL"; gate
-expect_status "…and admitted once the close gives the step its fields" 0 "$GATE_EXIT"
-cp "$GP" "$GP.w"; sed -i '' 's/| AC-1 | T1 | discharged |/| AC-1 | T1 | bogus |/' "$GP"; gate; mv "$GP.w" "$GP"
-expect_eq "…and a row the older table holds with a status outside the four words is refused, named" "2|1" "$GATE_EXIT|$(grep -c "matrix row 'AC-1' has an invalid status 'bogus'" <<< "$GATE_SAID")"
-printf 'run/v1|ev=step|n=9|delivered=no|at=2026-11-01T00:00:22Z\n' >> "$GL"; gate
-expect_eq "at 14 a step 9 not delivered owes its delivery, no Step 9 line asked for" "2|owed at 14: Step 9's delivery|no" "$GATE_EXIT|$(owed14 "Step 9's delivery")|$(contains "$GATE_SAID" "has no 'Step 9:' line")"
-# The doctrine grows on the person's approval, asked of the run at 14 and at 15 alike, and never from a tree no task owns.
+# The doctrine grows on the person's approval, asked of the run, and never from a tree no task owns.
 mkdir -p "$R/payload/.claude-plugin" "$R/agents"; printf '{"name": "bionic"}\n' > "$R/payload/.claude-plugin/plugin.json"; printf 'a\n' > "$R/agents/a.md"; git -C "$R" add payload agents; git -C "$R" -c user.name=f -c user.email=f@x.invalid -c core.hooksPath=/dev/null commit -q -m set; printf 'ab\n' > "$R/agents/a.md"; git -C "$R" add agents/a.md
 nz() { gate; for w in 'no approval of doctrine-growth' 'no .## Tasks. row owns'; do printf '%s\n' "$GATE_SAID" | /usr/bin/grep -q "Not admitted: .*$w" && printf 'y' || printf 'n'; done; }
-for c in "$P2|$L2" "$GP|$GL"; do IFS='|' read -r p l <<< "$c"; printf 'plan=%s\n' "$p" > "$R/.bionic/tmp/engaged-$SID.state"; A="$(nz)"; printf 'run/v1|ev=approval|key=doctrine-growth|by=f|said=yes|at=2026-11-01T00:00:14Z\n' >> "$l"
-  expect_eq "growth of the loaded set at ${p##*/} names the approval while the run holds none, and not once it does; no task owns the tree" "yy|ny" "$A|$(nz)"; done
+printf 'plan=%s\n' "$P2" > "$R/.bionic/tmp/engaged-$SID.state"; A="$(nz)"; printf 'run/v1|ev=approval|key=doctrine-growth|by=f|said=yes|at=2026-11-01T00:00:14Z\n' >> "$L2"
+expect_eq "growth of the loaded set names the approval while the run holds none, and not once it does; no task owns the tree" "yy|ny" "$A|$(nz)"
 # A task at 15 names the approval it waits on: its page is admitted, approve takes the name, and growth is admitted from its tree.
 NW="$(printf '%s\n' "$NINE" '| T2 | 4 | build | the second | T1, approval:D7 | 30 | REQ-1 | b.sh | — |')"; write_plan "$(printf '## Tasks\n\n%s\n' "$NW" | page 15)"; A="$HOOK_EXIT"; write_plan "$(printf '## Tasks\n\n%s\n' "${NW/approval:D7/aproval:D7}" | page 15)"
 expect_eq "a page at 15 whose task waits on approval:D7 is admitted; one misspelling it is refused, naming it" "0|2|1" "$A|$HOOK_EXIT|$(grep -c 'T2: dep aproval:D7 names no row' <<< "$HOOK_SAID")"
@@ -303,5 +268,25 @@ expect_contains "a copy of that page judged with no plan it is of reads every ta
 write_plan "$(cat "$R/ot-copy")"
 expect_status "…the hook names the plan it writes, so the landed tasks are read from its log and the page is admitted" 0 "$HOOK_EXIT"
 rm -f "$OL"; [ ! -f "$OL.kept" ] || mv "$OL.kept" "$OL"
+
+# A plan at 14 binds only while its run is open: refused at the write and the commit, naming the act with the plan's
+# path; a closed one is admitted at both; a new one is refused; a document that is no plan may say 14 or 15.
+section "V14"
+P3="$R/.bionic/docs/plans/epic-01-demo/wave-03-z.plan.md"; SP="$R/.bionic/docs/specs/epic-01-demo/wave-03-z.spec.md"; mkdir -p "${SP%/*}"
+OPEN14="$(printf '%s\n' "$MACHINE" | page 14)"; SHUT14="${OPEN14/current: 4/current: 9
+- Step 9: delivered: v1 tagged}"
+expect_contains "the closed twin differs in its state alone" "delivered: v1 tagged" "$SHUT14"
+printf '%s\n' "$OPEN14" > "$P3"; write_to "$P3" "$OPEN14"
+expect_eq "an open plan at 14 is refused at the write, naming the act on its path" "2|1" "$HOOK_EXIT|$(grep -c "scripts/bring-forward.sh $P3\$" <<< "$HOOK_SAID")"
+printf '%s\n' "$SHUT14" > "$P3"; write_to "$P3" "$SHUT14"
+expect_status "a closed plan at 14 is admitted at the write" 0 "$HOOK_EXIT"
+rm -f "$P3"; write_to "$P3" "$OPEN14"
+expect_eq "a new plan at 14 is refused, saying a new plan is written at 15" "2|1" "$HOOK_EXIT|$(grep -c 'a new plan is written at 15' <<< "$HOOK_SAID")"
+for v in 14 15 13; do write_to "$SP" "$(printf '## Design\n\nOne design.\n' | page "$v")"; eval "SPEC$v=\$HOOK_EXIT"; done
+expect_eq "a spec at 14 and a spec at 15 are admitted, and one at 13 refused naming the two it may say" "0|0|2|1" "$SPEC14|$SPEC15|$SPEC13|$(grep -c "'14' or '15'" <<< "$HOOK_SAID")"
+printf 'plan=%s\n' "$P3" > "$R/.bionic/tmp/engaged-$SID.state"; printf '%s\n' "$OPEN14" > "$P3"; gate
+expect_eq "an open plan at 14 is refused at the commit, naming the act on its path" "2|1" "$GATE_EXIT|$(grep -c "scripts/bring-forward.sh $P3\$" <<< "$GATE_SAID")"
+printf '%s\n' "$SHUT14" > "$P3"; gate
+expect_status "a closed plan at 14 is admitted at the commit" 0 "$GATE_EXIT"
 
 finish

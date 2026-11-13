@@ -491,6 +491,9 @@ verdict_eg() {  # <repo> -> yes:<current>|no|other:<detail>
       printf 'yes:%s\n' \
         "$(printf '%s' "$out" | sed -n "s/.*has no 'Step \([^']*\):' line.*/\1/p" | head -1)" ;;
     *"missing a valid 'current: N' line"*) echo no ;;
+    # A plan named as a plan and open at 14 is refused before any step is read; the refusal is
+    # the gate's word that it chose that plan, which is what the fixtures that hold one ask.
+    *"this plan's run is open at version 14"*) echo "yes:open-at-14" ;;
     *"empty '## SDLC State' section"*)     echo "other:empty-section" ;;
     *) echo "other:$(printf '%s' "$out" | head -1 | cut -c1-60)" ;;
   esac
@@ -630,8 +633,8 @@ current-indented|yes|4
 current-duplicate-lines|yes|4
 current-fenced-only|no|-
 newest-plan-wins|yes|8b
-marker-less-newest-loses|yes|4
-fenced-only-newest-loses|yes|4
+marker-less-newest-loses|yes|open-at-14
+fenced-only-newest-loses|yes|open-at-14
 only-marker-less-files|no|-
 nested-two-deep|yes|4
 nested-three-deep|no|-

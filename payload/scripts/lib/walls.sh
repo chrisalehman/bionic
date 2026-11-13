@@ -2308,6 +2308,28 @@ MULTI_AGENT=$(frontmatter_get multi_agent)
 # read from its log, so the escape would admit every commit against it with nothing judged.
 _EG_V15=0
 case "${PLAN##*/}:$SDLC_VERSION" in *.plan.md:15) _EG_V15=1 ;; esac
+
+# A PLAN AT 14 BINDS ONLY WHILE ITS RUN IS OPEN, by the verdict the run predicate below takes: the
+# session's own open run, or with no binding the root's open run. Open, it is refused naming the act
+# that brings it forward, since a run is carried at 15; closed, it is history and nothing of it is
+# judged.
+# [WALL: tests/plan-page.test.sh]
+_eg_refuse_live14() {
+  refuse exit2 commit "this plan's run is open at version 14" "run bring-forward on the plan" \
+"canonical-sdlc plan declares canonical_sdlc_version: 14 and its run is open; a run is carried at version 15.
+Plan: $PLAN
+Fix: bring the plan forward, then commit again:
+  bash $(refuse_shell_word "$(refuse_plugin_root)/scripts/bring-forward.sh") $(refuse_shell_word "$PLAN")"
+}
+case "${PLAN##*/}:$SDLC_VERSION" in
+  *.plan.md:14)
+    case "$EG_VERDICT" in
+      bound-open) _eg_refuse_live14 ;;
+      none) ! active_run "$BIONIC_ROOT" >/dev/null || _eg_refuse_live14 ;;
+    esac
+    exit 0 ;;
+esac
+
 if [ "$_EG_V15" -eq 0 ] && [ -z "$(normalize_newlines "$PLAN" | awk '
   /^[[:space:]]*```/ { fence = !fence; next }
   fence { next }
@@ -2316,8 +2338,8 @@ if [ "$_EG_V15" -eq 0 ] && [ -z "$(normalize_newlines "$PLAN" | awk '
   exit 0
 fi
 
-# ONE supported version, and for a plan 15 beside it, as the governing-skill hook admits them. Anything
-# else — an older number, a typo, an empty value, garbage — blocks. Below this line a plan at 15 takes
+# A plan at 15; a plan at 14 was decided above. A run file not named as a plan is still read at the
+# supported version. Anything else — an older number, a typo, an empty value, garbage — blocks. Below this line a plan at 15 takes
 # each fact from its run's log where it is held, and names each one the log does not hold yet
 # (`_eg_v15_owe`), so no path reaches `exit 0` without the whole contract of the version it declares.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
@@ -2326,7 +2348,7 @@ SUPPORTED_SDLC_VERSION=14
 if [ "$SDLC_VERSION" != "$SUPPORTED_SDLC_VERSION" ] && [ "$_EG_V15" -eq 0 ]; then
   _eg_detail="canonical-sdlc evidence-gate: plan declares canonical_sdlc_version: '$SDLC_VERSION'.
 Plan: $PLAN
-Fix: set 'canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION}', or 15 on a plan — the supported versions."
+Fix: set 'canonical_sdlc_version: 15' — a plan is written at 15, and a plan at 14 is brought forward with scripts/bring-forward.sh."
   refuse exit2 commit "this plan declares an unsupported sdlc version" "set the supported version" "$_eg_detail"
 fi
 

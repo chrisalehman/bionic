@@ -73,11 +73,22 @@ Path: $FILE_PATH" ;;
       WG_DETAIL="canonical-sdlc artifact '$BASENAME' is missing a 'governing-skill:' frontmatter field.
 Path: $FILE_PATH
 Fix: add a non-empty 'governing-skill: <skill-id>' line to the frontmatter block." ;;
-    bad-version)  # <declared version> <supported version>
+    bad-version)  # <declared version> <the values it may declare, quoted>
       WG_FACT="this artifact declares an unsupported version"; WG_FIX="set the supported version"
       WG_DETAIL="canonical-sdlc artifact '$BASENAME' declares canonical_sdlc_version: '$1'.
 Path: $FILE_PATH
-Fix: set 'canonical_sdlc_version: $2' — the only supported version." ;;
+Fix: set 'canonical_sdlc_version:' to $2: a plan is written at 15, and a document that is no plan may declare 14 or 15." ;;
+    live-14)  # <the command that brings the plan forward>
+      WG_FACT="this plan's run is open at version 14"; WG_FIX="run bring-forward on the plan"
+      WG_DETAIL="canonical-sdlc plan '$BASENAME' declares canonical_sdlc_version: 14 and its run is open; a run is carried at version 15.
+Path: $FILE_PATH
+Fix: bring the plan forward, then write it again:
+  $1" ;;
+    new-14)
+      WG_FACT="this new plan declares version 14"; WG_FIX="write it at version 15"
+      WG_DETAIL="canonical-sdlc plan '$BASENAME' is new and declares canonical_sdlc_version: 14: a new plan is written at 15.
+Path: $FILE_PATH
+Fix: set 'canonical_sdlc_version: 15', and write the plan in that shape: its header, '## Goal', '## Tasks' and one section per row." ;;
     mode)
       _write_gate_frame "this artifact declares mode:" "declare intent:, rigor: and scale:" \
         "artifacts declare intent:/rigor:/scale:, never mode:" ;;
