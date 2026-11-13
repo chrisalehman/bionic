@@ -60,7 +60,7 @@ s56_last() {  # <plan> <kind> [<question>] -> proof_last's answer, from the libr
 }
 R56="$(make_repo s56-fact)"; ( cd "$R56" && git commit -q --allow-empty -m init )
 S56_B="$(git -C "$R56" rev-parse HEAD)"
-P56="$(s42_plan "$R56" 4 "  worktree: .worktrees/01-fixture
+P56="$(SP_PLAN_AT=14 s42_plan "$R56" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${S56_B:0:8}
   branch: wave/01-fixture")"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P56" > "$P56.tmp" && mv "$P56.tmp" "$P56"
@@ -327,7 +327,7 @@ S57_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
 R57="$(make_repo s57-judge)"; ( cd "$R57" && git commit -q --allow-empty -m init )
 git -C "$R57" config user.name "Dana Fixture"
 S57_B="$(git -C "$R57" rev-parse HEAD)"
-P57="$(s42_plan "$R57" 4 "  worktree: .worktrees/01-fixture
+P57="$(SP_PLAN_AT=14 s42_plan "$R57" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${S57_B:0:8}
   branch: wave/01-fixture")"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P57" > "$P57.tmp" && mv "$P57.tmp" "$P57"
@@ -607,7 +607,7 @@ git -C "$R58" worktree add -q -b wave/01-fixture "$R58/.worktrees/01-fixture" "$
 for s58c in 1 2 3 4; do git -C "$R58/.worktrees/01-fixture" commit -q --allow-empty -m "C$s58c" >/dev/null 2>&1; done
 S58_C1="$(git -C "$R58/.worktrees/01-fixture" rev-parse HEAD~3)"; S58_C2="$(git -C "$R58/.worktrees/01-fixture" rev-parse HEAD~2)"
 S58_C3="$(git -C "$R58/.worktrees/01-fixture" rev-parse HEAD~1)"; S58_C4="$(git -C "$R58/.worktrees/01-fixture" rev-parse HEAD)"
-P58="$(s42_plan "$R58" 4 "  worktree: .worktrees/01-fixture
+P58="$(SP_PLAN_AT=14 s42_plan "$R58" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${S58_C1:0:8}
   branch: wave/01-fixture")"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P58" > "$P58.tmp" && mv "$P58.tmp" "$P58"
@@ -837,7 +837,7 @@ for s59st in intended confirmed; do
 done
 # A BASE THE JUDGE CAN HOLD (wave-36 T28; D9): live:head asks facts_state, which judges only a plan whose base-sha:
 # is a commit, so the Step-4 block names the init commit, not s42_plan's placeholder.
-P59="$(s42_plan "$R59" 4 "  worktree: .worktrees/01-fixture
+P59="$(SP_PLAN_AT=14 s42_plan "$R59" 4 "  worktree: .worktrees/01-fixture
   base-sha: $(git -C "$R59" rev-parse --short=8 HEAD)
   branch: wave/01-fixture")"
 # EACH LANDING TOUCHES CODE (wave-36 T28; D9): the judge reads a commit that touches nothing as prose, and a review
@@ -976,7 +976,7 @@ section "§LOG-REVIEW: waive, the release approval card and finding-move read a 
 LR_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RLR="$(make_repo s-log-review)"; ( cd "$RLR" && git commit -q --allow-empty -m init )
 git -C "$RLR" config user.name "Dana Fixture"
-PLR="$(s42_plan "$RLR" 6)"
+PLR="$(SP_PLAN_AT=14 s42_plan "$RLR" 6)"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PLR" > "$PLR.tmp" && mv "$PLR.tmp" "$PLR"
 ( cd "$RLR" && git add -f "$PLR" && git commit -qm wb && git branch -q wave/01-fixture ) >/dev/null 2>&1
 LR_H="$(git -C "$RLR" rev-parse wave/01-fixture)"; LR_REC="record/wave-01-fixture/adv-log.md"
