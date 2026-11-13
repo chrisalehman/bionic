@@ -1169,11 +1169,12 @@ tlog() {  # <agent-id> [touch -t stamp] — the agent's working log, written now
   [ -z "${2:-}" ] || touch -t "$2" "$TSUB/agent-$1.jsonl"
 }
 ago() { date -v-"$1"S +%Y%m%d%H%M.%S 2>/dev/null || date -d "$1 seconds ago" +%Y%m%d%H%M.%S; }
-# tdrive <payload> [hook] -> T_RC, T_ERR (stderr), T_LINE (its first line); T_VERR (verbose stderr) when refused
+# tdrive <payload> [hook] -> T_RC, T_ERR (stderr), T_LINE (its first line); T_VERR (verbose stderr) when refused.
+# Run from the world's repo, so a payload that names no cwd still resolves to the fixture and never to this tree.
 tdrive() {
-  env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" bash "${2:-$HOOK}" <<< "$1" >/dev/null 2>"$STOP_ERRFILE"; T_RC=$?
+  ( cd "$TW" && exec env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" bash "${2:-$HOOK}" ) <<< "$1" >/dev/null 2>"$STOP_ERRFILE"; T_RC=$?
   T_ERR=$(cat "$STOP_ERRFILE"); T_LINE=$(printf '%s\n' "$T_ERR" | head -1); T_VERR=""
-  [ "$T_RC" = 0 ] || T_VERR=$(env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 bash "${2:-$HOOK}" <<< "$1" 2>&1 >/dev/null)
+  [ "$T_RC" = 0 ] || T_VERR=$(cd "$TW" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 bash "${2:-$HOOK}" <<< "$1" 2>&1 >/dev/null)
 }
 tpay() {  # <task_id> [tool] -> the PreToolUse payload of that tool, over the current world
   jq -nc --arg s "$SID" --arg t "$TTR" --arg c "$TW" --arg k "$1" --arg n "${2:-TaskStop}" \
@@ -1198,6 +1199,9 @@ expect_eq "EV2 the hook alone, with no library: another tool still passes, since
 tdrive "$(tpay quiet-reviewer)" "$EVA/stop.sh"
 expect_eq "EV2 …and TaskStop is refused every time, re-entry or none, for want of the library" \
   "2|bionic: load refused — stop cannot load the bionic library (run /bionic:doctor)" "$T_RC|$T_ERR"
+
+tdrive 'not json at all'
+expect_eq "EV3 a payload that is not JSON names no event to judge: exit 0, silent" "0|" "$T_RC|$T_ERR"
 
 # ── a background shell's id is the one the transcript recorded, else [bt] and eight; standing is asked first ──
 tstop b66vjp0ok
