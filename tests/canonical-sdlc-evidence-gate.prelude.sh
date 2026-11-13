@@ -411,32 +411,6 @@ plan() {
 # A pointer body for post-Verify steps (6..9): non-empty, non-placeholder.
 step6_body="  review: .bionic/docs/plans/wave-01.plan.md#step-6-review"
 
-# Complete, valid matrix: T3 (all five fields), T1 (tier-run+readback),
-# waived T3 row. stack-health present. All auditor cells CONFIRMED/waived.
-matrix_complete="## Verification Matrix
-
-stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
-| AC-2 | T1 | discharged | see AC-2 | CONFIRMED |
-| AC-3 | T3 | waived | waiver: dana 2026-07-16 env stale | waived |
-
-AC-1:
-  fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  tier-run: https://app.example/panel — opened the panel
-  fresh: origin A rebuilt token-9f3a; origin B cdn purged
-  cold-client: fresh incognito profile, no SW cache
-  contact: clicked open — panel closed → open
-  readback: panel.visible === true via page eval
-AC-2:
-  fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  tier-run: bash test.sh — unit suite
-  readback: 332/332 asserted"
-
 # Post-Verify step bodies for the 7 / 8 / 9 cases (the shapes their own
 # validators demand — 29a and 19's integrate fixtures pin these independently).
 v9_step7_body="  n/a: no architectural decision in this wave"
@@ -449,46 +423,13 @@ v9_step9_body="  delivered: close-out report and continuation.md written"
 
 # Frontmatter carrying the triple. $1 scale, $2 deploy, $3 use_worktree,
 # $4 epic (omitted when empty).
-frontmatter() {
-  local scale="${1:-wave}" deploy="${2:-none}" use_wt="${3:-false}" epic="${4:-}"
-  printf -- '---\n'
-  printf -- 'governing-skill: canonical-sdlc\n'
-  printf -- 'canonical_sdlc_version: 14\n'
-  printf -- 'intent: build\n'
-  printf -- 'rigor: double\n'
-  printf -- 'scale: %s\n' "$scale"
-  printf -- 'deploy_target: %s\n' "$deploy"
-  printf -- 'use_worktree: %s\n' "$use_wt"
-  printf -- 'has_ui: false\n'
-  printf -- 'walk: exempt\n'  # see matrix_frontmatter — the walk arm is fail-closed
-  [ -n "$epic" ] && printf -- 'epic: %s\n' "$epic"
-  printf -- '---\n'
-}
-
-# A wave plan: frontmatter + ## SDLC State (current + Step
-# block) + ## Verification Matrix. Reuses the Section-17 matrix fixtures.
-wave_plan() {
-  printf '%s\n## SDLC State\ncurrent: %s\napproved-by: fixture 2026-09-07T00:00Z "approved"\nStep %s:\n%s\n\n%s\n' \
-    "$(frontmatter wave)" "$1" "$1" "$2" "$3"
-}
-
 # THE ONE TABLE, AT EITHER SCALE (wave-31 T24; REQ-1, D2). The task-scale fixtures this file
 # carried were the retired shape: a five- or six-column `## Tasks` (`id | intent | rigor |
 # description | status [| worktree]`) under `current: T<n>`. The gate reads one table now and a
 # `current:` that is a step number, so a task-scale plan is tests/lib/plan-fixture.sh's, the one
-# helper the shards share. That helper writes `rigor: single` and `multi_agent: false`; the arms
-# keyed on the other values (the dispatch ledger at double + multi_agent) take them through this
-# seam, which edits those two frontmatter lines and nothing else (A-T24-7).
+# helper the shards share.
 . "$(dirname "$0")/lib/plan-fixture.sh"
 EG_PF_DIR="$(mktemp -d)"; cleanup_dirs+=("$EG_PF_DIR")
-# eg_pf_plan <current> <task|wave> <rigor> <multi_agent> <SDLC-State lines, or ""> [<row>...]
-#   -> the plan text. The lines (a `- T<n>:` evidence line, say) land after `approved-by:`.
-eg_pf_plan() {
-  local cur="$1" sc="$2" rg="$3" ma="$4" extra="$5" p; shift 5
-  p="$(plan_fixture --at 14 --current "$cur" "$EG_PF_DIR/plans/epic-99-fixture/$sc-01-fixture.plan.md" "$sc" "$@")" || return 1
-  sed -e "s/^rigor: single$/rigor: $rg/" -e "s/^multi_agent: false$/multi_agent: $ma/" "$p" \
-    | EG_PF_X="$extra" awk '{ print } /^approved-by: / && ENVIRON["EG_PF_X"] != "" { print ENVIRON["EG_PF_X"] }'
-}
 # eg_page <dir> <step> [<log line>...] -> the page a run at 15 holds at <step>, under <dir>'s docs root, its log the
 #   fixture's events and then each line given; prints its path. The gate reads the run from the log, never the page.
 eg_page() {
@@ -501,21 +442,4 @@ eg_pf_row() {
     "$1" "$1" "$2" "$1" "${4:-—}" "$3"
 }
 
-tasks_one_done="## Tasks
-
-| id | step | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | the dispatched unit | implementor | — | 30m | REQ-x | a.sh | landed |"
-
-# Every row still pending: nothing has discharged, so the arm must not fire —
-# a mid-discharge commit before the walk is written stays legal. No auditor
-# pointer either (the Step-5 relaxation), which is the honest shape here.
-walk_matrix_all_pending="## Verification Matrix
-
-stack-health: before: process restarts 0; walk not yet run
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1 | T1 | pending | see AC-1 |  |
-| AC-2 | T1 | pending | see AC-2 |  |"
 
