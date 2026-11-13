@@ -1273,7 +1273,7 @@ case "$BASENAME" in
                 fi
               fi
               if units_rows "$_gs_units_tmp" >/dev/null 2>&1; then
-                _gs_units_bad="$(units_validate "$_gs_units_tmp" 2>/dev/null)" || true
+                _gs_units_bad="$(units_validate "$_gs_units_tmp" "$FILE_PATH" 2>/dev/null)" || true
               else
                 _gs_units_bad=""
               fi
@@ -1311,7 +1311,7 @@ if [ "$GS_V15" -eq 1 ] && { [ "$TOOL" != "Edit" ] || [ "$EDIT_APPLIED" -eq 1 ]; 
   if GS_FAULTS="$(plan_read_criterion_faults "$GS_PAGE")"; then
     _gs_refuse criterion-task "$GS_FAULTS"
   fi
-  if [ "$SCALE" != "task" ] && units_rows "$GS_PAGE" >/dev/null 2>&1 && GS_FAULTS="$(units_validate "$GS_PAGE" 2>/dev/null)"; [ -n "$GS_FAULTS" ]; then
+  if [ "$SCALE" != "task" ] && units_rows "$GS_PAGE" >/dev/null 2>&1 && GS_FAULTS="$(units_validate "$GS_PAGE" "$FILE_PATH" 2>/dev/null)"; [ -n "$GS_FAULTS" ]; then
     _gs_refuse tasks-invalid "$(yaml_get sdlc-step)" "$GS_FAULTS" 1
   fi
 fi
