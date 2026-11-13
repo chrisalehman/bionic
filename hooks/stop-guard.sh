@@ -10,6 +10,7 @@
 set -uo pipefail
 
 BIONIC_LIB_WANT="context.sh root.sh run.sh session.sh"
+# Find the library through lib/loader.sh beside this hook; payload/scripts/lib/loader.sh says how.
 _bl_dir="$(dirname "$0")"; _bl_l="$_bl_dir/../scripts/lib/loader.sh"; [ -r "$_bl_l" ] || _bl_l="$_bl_dir/../payload/scripts/lib/loader.sh"
 # shellcheck source=/dev/null
 if [ -r "$_bl_l" ]; then . "$_bl_l"; bionic_load; else
