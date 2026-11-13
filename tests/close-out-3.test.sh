@@ -646,7 +646,7 @@ for _f in pah_world pah_cont_state; do
 done
 expect_eq "REG-0 the builders were read out of tests/proof-at-head.test.sh" "" "$REG_MISSING"
 PAH_LIB="$REPO_ROOT/payload/scripts/lib"
-CO_PLAN_AT=14 pah_world reg-red "notify.test.sh,rehearsal-failed-review.test.sh,shell-lint.test.sh,sitrep.test.sh" 2
+CO_PLAN_AT=15 pah_world reg-red "notify.test.sh,rehearsal-failed-review.test.sh,shell-lint.test.sh,sitrep.test.sh" 2
 run_close_as reg-close "$PAH_P" run
 expect_eq "REG-1 close-out delivers over the run (exit 0), its continuation holding a regression line" "0|1" \
   "$CO_RC|$(/usr/bin/grep -c 'the regression: ' "$PAH_P/$CONT_REL" 2>/dev/null)"
