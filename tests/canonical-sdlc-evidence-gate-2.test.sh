@@ -405,9 +405,8 @@ expect_allow "31d naming the plan in an otherwise-clean commit → allow, silent
 # 'empty', not CONFIRMED".
 #
 # The rule: at `single` the matrix's auditor column is not read (any value —
-# empty included — passes the post-Verify CONFIRMED arm at every step 6..9) and
-# the Step-5 `auditor:` pointer is not demanded once the rows are discharged.
-# At `double` and `double` both walls are exactly as they were. An
+# empty included — passes the post-Verify CONFIRMED arm at every step 6..9).
+# At `double` the wall is exactly as it was. An
 # unknown or missing frontmatter `rigor:` takes the STRICT reading — fail
 # closed, since a plan that does not say what rigor it runs at has not bought
 # the relaxation.
@@ -471,13 +470,6 @@ m32_refuted="${m32_empty_aud/| AC-1 | T1 | discharged | see AC-1 |  |/| AC-1 | T
 m32_nl=$'\n'
 m32_missing_key="${m32_empty_aud/  evidence: record\/generic-evidence.md${m32_nl}  tier-run: bash test.sh — unit suite/  tier-run: bash test.sh — unit suite}"
 
-# Step-5 tests floor with NO `auditor:` pointer.
-step5_noaud="  cmd: bash test.sh
-  pass: 332
-  total: 332
-  head: ${EG_HEAD}
-  output: .bionic/docs/plans/wave-01.plan.md#step-5"
-
 # ---- AC-26: at `single` the wall is not there ------------------------------
 
 # 32a..32d — the post-Verify CONFIRMED arm is a prefix contract at 6, 7, 8 and
@@ -500,12 +492,6 @@ expect_block "32c same at current 8, its block written bare → block naming the
 h32d=$(make_home)
 write_plan "$h32d" "$(eg_floor "$(plan_rigor single 9 "$v9_step9_body" "$m32_empty_aud")" | marked)" > /dev/null
 expect_allow "32d same at current 9 → allow (B-10's own repro step)" "$h32d" 'git commit -m "x"'
-
-# 32e — the Step-5 `auditor:` pointer is the same wall one step earlier: it is
-# demanded once no row is pending. At single there is no auditor to point at.
-h32e=$(make_home)
-write_plan "$h32e" "$(plan_rigor single 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
-expect_allow "32e rigor single, all rows discharged, no Step-5 auditor: pointer → allow" "$h32e" 'git commit -m "x"'
 
 # 32f — the task-ledger mirror (AC-26, second half) is gone with the task ledger (wave-31 T24;
 # D2): its `done` row at single, and 32k's row raised to double by its own cell, were the
@@ -539,17 +525,6 @@ write_plan "$h32g" "$(plan_rigor double 6 "$step6_body" "$m32_empty_aud")" > /de
 h32h=$(make_home)
 write_plan "$h32h" "$(plan_rigor double 6 "$step6_body" "$m32_empty_aud")" > /dev/null
 
-# 32i/32j — the Step-5 pointer half of AC-27.
-h32i=$(make_home)
-write_plan "$h32i" "$(plan_rigor double 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
-expect_block "32i rigor double, discharged rows, no Step-5 auditor: pointer → block" \
-  "$h32i" 'git commit -m "x"' "requires 'auditor:"
-
-h32j=$(make_home)
-write_plan "$h32j" "$(plan_rigor double 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
-expect_block "32j rigor double, discharged rows, no Step-5 auditor: pointer → block" \
-  "$h32j" 'git commit -m "x"' "requires 'auditor:"
-
 # ---- fail-closed on an unknown or missing rigor ----------------------------
 
 # 32l — no `rigor:` key at all. A plan that never says what rigor it runs at
@@ -563,12 +538,6 @@ expect_block "32l frontmatter with NO rigor key at current 6 → block (fail clo
 # level before any arm reads it, so a typo is refused on its rigor, ahead of the matrix.
 h32m=$(make_home)
 write_plan "$h32m" "$(plan_rigor reviewed 6 "$step6_body" "$m32_empty_aud")" > /dev/null
-
-# 32m2 — and the Step-5 pointer half fails closed too.
-h32m2=$(make_home)
-write_plan "$h32m2" "$(plan_rigor "" 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
-expect_block "32m2 no rigor key at current 5, no auditor: pointer → block (fail closed)" \
-  "$h32m2" 'git commit -m "x"' "requires 'auditor:"
 
 # ============================================================
 # Section 33: a row owed at the close owes nothing before it

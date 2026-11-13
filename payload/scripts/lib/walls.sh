@@ -743,7 +743,7 @@ return 0
 #
 # THIS BODY HAS 32, at up to four frames deep, and 32 of them are inside `validate_matrix`
 # alone — a 300-line function whose refusals fire from inside loops, through helper
-# frames (`block_matrix`, `shape_block`) that were written knowing
+# frames (`block_matrix`) that were written knowing
 # `refuse` never returns. Propagating a return through every one of those call sites is
 # ~50 edits in which a single miss converts a BLOCK into a silent pass: the wall keeps
 # running, the next `fold_block` overwrites the staged object, and the function returns
@@ -2533,8 +2533,8 @@ Fix: register each review with 'session-poker.sh proof-add review <record> --que
   refuse exit2 commit "$(eg_review_unanswered_fact)" "record or waive each review" "$_eg_detail"
 }
 
-# THE FLOOR IS OWED A PROOF LINE FROM STEP 7 (wave-35 T31; D20, A-orch-50). Step 5 owes no floor key
-# (validate_tests_block); the floor's whole run is Step 6's last act, and from `current: 7` a plan whose
+# THE FLOOR IS OWED A PROOF LINE FROM STEP 7 (wave-35 T31; D20, A-orch-50). Step 5 owes no floor key;
+# the floor's whole run is Step 6's last act, and from `current: 7` a plan whose
 # regression is `yes` (lib/run.sh `plan_regression`: any value but `no`) is refused while its section holds
 # no `proved: kind=floor` line at all: the judge's `absent` (lib/proof.sh `facts_state`; `proof_state`
 # says "no regression proof on this plan yet"). THE JUDGE'S OWN READER decides it (wave-35 T38; critic-structure-3,
@@ -3443,8 +3443,7 @@ Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not rea
           # the arms it owes are the task arms.
           #
           # WHY THAT IS SPELLED `CURRENT=4` AND NOT A SECOND ARM TABLE. The task arms
-          # already have a home: `dispatch`'s `4)` case is `shape_block worktree base-sha
-          # branch`, and the matrix `fails-when:` presence arm runs for every commit at
+          # already have a home: Step 4's ask of the branch and base, and the matrix `fails-when:` presence arm runs for every commit at
           # step ≥ 4 regardless. Step 4 IS the arm set a task owes, so naming it is the
           # whole implementation — a parallel dispatcher would be a second place to keep in
           # step with the first. The run's arms (the regression block, the walk artifact, the
@@ -3479,7 +3478,7 @@ Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not rea
           # Step 4 is on POINTER_STEPS, so without this flag the pointer exit a few hundred
           # lines below took `exit 0` on the step this line just substituted — unless the
           # frontmatter happened to say `use_worktree: true`. The one arm the substitution
-          # exists to reach, `shape_block worktree base-sha branch`, was therefore skipped on
+          # exists to reach, Step 4's branch and base, was therefore skipped on
           # every `use_worktree: false` plan and the note above promised arms that never ran.
           # The fork owns the arms it announces. THIS IS THE SAME RULE THE step-below ARM
           # ABOVE NOW CARRIES (critic C1): D7 is about "a substituted step", not about which
@@ -3606,10 +3605,8 @@ Fix: record the evidence artifact (commit SHA, path, link) for step ${CURRENT} b
   refuse exit2 commit "this step's evidence line is empty" "record the step's evidence" "$_eg_detail"
 fi
 
-# R7 intent-scoped Step-5 keys (D14 log-only — see validate_intent_evidence
-# below). A whole-value match against this exact key name exempts the line from
-# the universal placeholder ban; the R7 contract is enforced instead by
-# validate_intent_evidence, which logs a finding but never blocks.
+# R7 intent-scoped Step-5 keys. A whole-value match against this exact key name exempts
+# the line from the universal placeholder ban.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 is_r7_key() {
   case "$1" in
@@ -3736,88 +3733,6 @@ POINTER_STEPS="1 2 3 4"  # Step 6 must reach dispatch for the matrix prefix chec
 # `exit 0`, so ANY wall written below it is dead at exactly the step it was written for:
 # `current: 4` is a pointer step. Everything between here and the new position is
 # function definitions and nothing else, so no other behaviour moved with it.
-
-# Extract a value for a key from the BLOCK ("key: value" lines or
-# "key: value" appearing on the Step line directly). Returns empty if
-# not found.
-block_get() {
-  local key="$1"
-  echo "$BLOCK" \
-    | grep -E "^[[:space:]]*${key}[[:space:]]*:" \
-    | head -1 \
-    | sed -E "s/^[[:space:]]*${key}[[:space:]]*:[[:space:]]*//" \
-    | sed -E 's/[[:space:]]+$//'
-}
-
-block_has() {
-  grep -qE "^[[:space:]]*$1[[:space:]]*:" <<< "$BLOCK"
-}
-
-block_has_na() {
-  block_has "n/a"
-}
-
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-shape_block() {
-  local missing=()
-  for f in "$@"; do
-    if ! block_has "$f"; then
-      missing+=("$f")
-    fi
-  done
-  if [ "${#missing[@]}" -gt 0 ]; then
-    _eg_detail="canonical-sdlc step ${CURRENT} evidence missing required field(s): ${missing[*]}
-Plan: $PLAN
-Required for step ${CURRENT}: $*
-Fix: rewrite the Step ${CURRENT} block as multi-line YAML-style fields. See canonical-sdlc/SKILL.md \"Evidence (two tiers)\" → verification shape table."
-    refuse exit2 commit "this step's evidence is missing fields" "add the fields the step owes" "$_eg_detail"
-  fi
-}
-
-# ---------- shared per-step validators ----------
-
-# Compose the "canonical-sdlc step <N>" message prefix.
-step_prefix() {
-  echo "canonical-sdlc step $1"
-}
-
-# THE STEP-5 BLOCK OWES NO FLOOR KEYS (wave-35 T31; D20, A-orch-32). Until 1.18.0 this function demanded
-# cmd/pass/total/output/head at `current: 5`, refused unless pass equalled total, and held head: against
-# the release head. The doctrine moved the floor to Step 6's last act and its candidate may be a red
-# whole run (ADR-054), so a run following it could not take Step 5 honestly. The floor is judged by
-# lib/proof.sh `facts_state` at `current 7` and from Step 7 on; keys an older plan still carries are read by no
-# gate. The walk, the matrix and the
-# auditor are judged by the caller as they always were.
-# AT `regression: no` THE BLOCK STILL OWES THE STEP-0 LINE (wave-31 T27; REQ-12 AC-12.2; D4): the
-# regression is a Step-0 setting (`session-poker.sh regression`), and a plan whose frontmatter reads
-# exactly `regression: no` records who chose it and where the regression runs instead:
-#     regression: no (Step 0, <user>) — <where it runs>
-# with the user and the place each non-empty. Any other value, or none, owes no line here.
-# `regression-override:` is never read.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-validate_tests_block() {
-  local step="$1" rline
-  [ "$step" = 5 ] && [ "$(plan_regression "$PLAN")" = no ] || return 0
-  rline=$(block_get regression)
-  if ! grep -qE '^no \(Step 0, [^)]*[^)[:space:]][^)]*\) — .*[^[:space:]]' <<< "$rline"; then
-    _eg_detail="$(step_prefix "$step") evidence has no Step-0 regression line; the plan reads 'regression: no', so the line records who chose it and where the regression runs (got '${rline:-(none)}').
-Plan: $PLAN
-Fix: add to the Step 5 block the line 'regression: no (Step 0, <user>) — <where it runs>', naming who chose it at Step 0 and where the regression runs instead."
-    refuse exit2 commit "the Step-5 regression: no line is missing" "add the Step-0 regression line" "$_eg_detail"
-  fi
-}
-
-# Document step: adr OR rca OR n/a.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-validate_document_step() {
-  local step="$1" prefix
-  if ! block_has adr && ! block_has rca && ! block_has_na; then
-    prefix=$(step_prefix "$step")
-    _eg_detail="${prefix} evidence requires 'adr: <path>', 'rca: <path>' (incident-response mode), or 'n/a: <reason>'.
-Plan: $PLAN"
-    refuse exit2 commit "this step names no adr, rca or n/a" "add adr:, rca: or n/a:" "$_eg_detail"
-  fi
-}
 
 # ---------- pre-registered Verification Matrix ----------
 # The Verify gate discharges a Verification Matrix stored in a top-level
@@ -4279,7 +4194,7 @@ validate_walk_artifact() {
   case "${CURRENT%[ab]}" in 5|6|7|8|9) : ;; *) return 0 ;; esac
   [ "$(walk_mode)" = required ] || return 0
   # Reuses the reader's answer validate_matrix() loads (MATRIX_CELLS). It runs immediately before
-  # this arm at both call sites (validate_verify_step, dispatch's 6..9 case), so the answer is
+  # this arm at its call sites in dispatch, so the answer is
   # loaded by the time we get here; a third call site that forgot the ordering loads it again, and
   # a run whose facts could not be read arms the walk gate rather than reading as "nothing
   # discharged" and letting it fall open.
@@ -4507,103 +4422,6 @@ validate_environments() {
   return 0
 }
 
-# Verify gate: the Verification Matrix, the walk artifact, the Step-0 line at
-# `regression: no`, and — at double rigor, once no row is still pending — a
-# non-empty `auditor:` pointer. No floor key: the floor is Step 7's (D20).
-# At `single` that pointer is not demanded (matrix_auditor_required).
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-validate_verify_step() {
-  local aud
-  validate_tests_block 5
-  validate_environments
-  validate_matrix
-  # Walk-first: the narration must already exist once anything has discharged.
-  validate_walk_artifact
-  # The auditor is the Step-5 exit gate — it cannot have run while
-  # rows are still pending/blocked, so the pointer is required only once
-  # every row is discharged or waived, and only where an auditor exists at
-  # all (matrix_auditor_required: never at `single`).
-  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  if [ "$UNDISCHARGED" -eq 0 ] && matrix_auditor_required; then
-    if ! block_has auditor; then
-      block_matrix "this plan has no auditor verdict yet" "record what the auditor said" \
-        "the Verify gate requires 'auditor: <verdict summary + report pointer>' in the Step 5 block." \
-        "record the independent auditor's one-line verdict summary and report pointer as 'auditor: ...'."
-    fi
-    # THE SECOND READER OF AN AUDITOR CELL, folding the same way (D15). `auditor: —` in the
-    # Step-5 block is the absence `block_has` cannot see, and reading it as a verdict let a
-    # plan past the Verify gate with no audit recorded at all.
-    aud=$(placeholder_cell "$(block_get auditor)")
-    if [ -z "$aud" ]; then
-      block_matrix "the auditor verdict is blank" "record what the auditor said" \
-        "the Step 5 'auditor:' pointer is empty." \
-        "record the auditor's verdict summary and report pointer."
-    fi
-  fi
-}
-
-# Epic merge-target consistency (LOG-ONLY; D14, check-id `merge-target`).
-# On a wave-scale plan naming an `epic:`, when the epic plan exists and
-# declares an `integration-branch:` in its ## SDLC State, a mismatch with this
-# plan's integration-branch logs a finding. Never blocks. First cross-file read
-# in this hook — read-only, fail-open (missing epic plan / missing key → no
-# finding). Fires at the integrate step.
-# [INSTRUMENT]
-validate_merge_target() {
-  local epic epic_plan epic_branch this_branch
-  epic=$(frontmatter_get epic)
-  [ -n "$epic" ] || return 0
-  epic_plan="$DOCS_ROOT/plans/$epic/epic.plan.md"
-  [ -r "$epic_plan" ] || return 0
-  # Both branches are lib/plan.sh `plan_integration_branch`'s answer, the one reader close-out, the card and the
-  # handoff ask: ## SDLC State, fenced lines unread, then the frontmatter.
-  # [INSTRUMENT]
-  wall_libs evidence-gate plan.sh || return 0
-  epic_branch=$(plan_integration_branch "$epic_plan")
-  [ -n "$epic_branch" ] || return 0
-  this_branch=$(plan_integration_branch "$PLAN")
-  if [ -n "$this_branch" ] && [ "$this_branch" != "$epic_branch" ]; then
-    log_finding merge-target "plan integration-branch '$this_branch' != epic '$epic' integration-branch '$epic_branch'"
-  fi
-  return 0
-}
-
-# Intent-scoped Step-5 evidence keys (R7) — LOG-ONLY (D14; check-ids
-# `refactor-evidence`, `tune-evidence`). Fires on plans whose
-# declared intent carries a conditional key set; never blocks. Reuses the
-# Step-5 BLOCK/block_has/block_get accessors already populated for the
-# current step's evidence (same accessors validate_verify_step uses),
-# so this validator is only meaningful when called at current: 5.
-# [INSTRUMENT]
-validate_intent_evidence() {
-  local key val
-  case "$INTENT" in
-    refactor)
-      if ! block_has behavior-preservation || [ -z "$(block_get behavior-preservation)" ] \
-         || is_placeholder_value "$(block_get behavior-preservation)"; then
-        log_finding refactor-evidence "refactor plan Step 5 missing 'behavior-preservation:' evidence"
-      fi
-      for key in compat-matrix revert-plan; do
-        if block_has "$key"; then
-          val=$(block_get "$key")
-          if [ -z "$val" ] || is_placeholder_value "$val"; then
-            log_finding refactor-evidence "refactor plan Step 5 '${key}:' present but empty"
-          fi
-        fi
-      done
-      ;;
-    tune)
-      for key in baseline target re-measure; do
-        val=$(block_get "$key")
-        if ! block_has "$key" || [ -z "$val" ] || is_placeholder_value "$val"; then
-          log_finding tune-evidence "tune plan Step 5 missing '${key}:' evidence"
-        fi
-      done
-      ;;
-  esac
-  return 0
-}
-
 # D7 dispatched-task ledger PRESENCE (D-task 4/3). Guarded to scale wave or task +
 # frontmatter rigor:double + multi_agent:true plans; for every other plan it is a no-op
 # (return 0). ONE LEDGER SHAPE (wave-31 T24; REQ-1, D2): a task-scale plan carries the same
@@ -4756,11 +4574,6 @@ Fix: replace the '- ${id}:' placeholder with the actual evidence artifact before
   return 0
 }
 
-# Step numbering: 4 worktree · 5 Verify gate · 7 Document · 8 Integrate &
-# close · 9 Close-out. Steps 1/2/3/6 are pointer steps handled upstream, except
-# that Step 6 reaches here so the matrix prefix check can fire.
-INTEGRATE_STEP=8
-
 dispatch() {
   # Audited multi_agent wave: D7 dispatched-task ledger PRESENCE, at every step
   # that reaches this dispatcher (guarded internally; no-op otherwise).
@@ -4778,39 +4591,13 @@ dispatch() {
     case "${CURRENT%[ab]}" in 5|6|7|8|9) validate_matrix ;; esac
     return 0
   fi
-  # The Verification Matrix is a prefix contract for every step from the Verify
-  # gate on — current: 5 validates it inside validate_verify_step; current: 6..9
-  # validate it here, so a REFUTED auditor blocks post-Verify commits too.
-  # The walk artifact is a durable prefix condition alongside it (A5): deleting
-  # the narration after the Verify gate blocks every later commit. The
-  # environments claim (S3, AC-4) is the same shape: covered ⊆ declared and
-  # every fog entry's cure stay true across the whole post-Verify span. A lettered step is its step
-  # here, in the walk and environments arms and in the matrix's own step tests (wave-27 T67; review
-  # pass 46 N10): `6a` binds as 6.
   case "${CURRENT%[ab]}" in
+    5) validate_environments; validate_matrix; validate_walk_artifact ;;
     6|7|8|9) validate_matrix; validate_walk_artifact; validate_environments ;;
   esac
-  # Log-only epic merge-target check at the integrate step.
-  [ "$CURRENT" = "$INTEGRATE_STEP" ] && validate_merge_target
-  case "$CURRENT" in
-    4) shape_block worktree base-sha branch ;;
-    5)
-      validate_verify_step
-      validate_intent_evidence
-      ;;
-    7) validate_document_step 7 ;;
-    8|9) _eg_v15_refuse ;;
-  esac
-  # THE READINGS THE RUN OWES are a prefix condition from Step 6 (wave-27 T14; D3, D19), asked
-  # last, after each step's own evidence: the Step-6 pointer line no longer answers for them. A
-  # lettered step is its step (T31; review pass 25 F1): `6a` binds as 6, `5b` as 5.
+  case "$CURRENT" in 8|9) _eg_v15_refuse ;; esac
   case "${CURRENT%[ab]}" in
-    6|7|8|9) _eg_refuse_readings "the run" "$RIGOR" ;;
-  esac
-  # THE FLOOR'S PROOF LINE is a prefix condition from Step 7, or from Step 6 in the order
-  # (`_eg_refuse_floor_absent`), asked last.
-  case "${CURRENT%[ab]}" in
-    6|7|8|9) _eg_refuse_floor_absent "the run" ;;
+    6|7|8|9) _eg_refuse_readings "the run" "$RIGOR"; _eg_refuse_floor_absent "the run" ;;
   esac
 }
 
