@@ -256,15 +256,14 @@ mk_fixture() {
     git checkout -q main
     git merge -q --no-ff -m "merge wave" wave/01-fixture >/dev/null 2>&1
   )
-  [ "${CO_PLAN_AT:-14}" != 15 ] || co_page15 "$p"
+  [ "${CO_PLAN_AT:-15}" != 15 ] || co_page15 "$p"
   plant_facts "$p"
   printf '%s\n' "$p"
 }
 
-# CO_PLAN_AT=15, set by a suite before it sources this file, asks every builder here for the run a version-15 plan
-# holds; unasked, each writes the page at 14 it always wrote. co_page15 <project> makes the page a builder wrote the
-# version-15 one: both branches in its header; no state, matrix or handoff section; each Tasks row in its nine authored
-# cells; each criterion a row of `## Eval design`. The run's log beside it holds what those parts said, each in the
+# CO_PLAN_AT=14, set for a builder's call, asks it for the page at 14 an older run holds; unasked, every builder here writes
+# the run a version-15 plan holds, its page made the version-15 one by co_page15 <project>: both branches in its header;
+# no state, matrix or handoff section; each Tasks row in its nine authored cells; each criterion a row of `## Eval design`. The run's log beside it holds what those parts said, each in the
 # shape its writer appends: a step per step to the plan's current one, the plan's approval, each row's dispatch, tree
 # and landing, each discharged criterion's proof. A handoff written into the page is no fact the reader answers, so
 # none is written. The instants are fixed and one apart; the reader folds the log in the order its lines stand.
@@ -451,7 +450,7 @@ PLAN_CENSUS
     git add -A >/dev/null 2>&1
     git commit -q -m "seed" >/dev/null 2>&1
   )
-  [ "${CO_PLAN_AT:-14}" != 15 ] || co_page15 "$p"
+  [ "${CO_PLAN_AT:-15}" != 15 ] || co_page15 "$p"
   printf '%s\n' "$p"
 }
 
