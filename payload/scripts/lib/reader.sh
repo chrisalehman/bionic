@@ -500,7 +500,10 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
 #   tier        the Eval design's eval type through lib/scale.sh, else the older table's tier cell.
 #   evidence    the discharging proof's or waiver's `evidence=`, else the older table's evidence cell.
 #   auditor     on a row the older table holds: the discharging event's `auditor=`, else the row's cell; on any other
-#               criterion: the evidence review standing at <head>, CONFIRMED when it passed and REFUTED when not.
+#               criterion: the `auditor=` its discharging proof carries when that proof has no instant, else the
+#               evidence review standing at <head>, CONFIRMED when it passed and REFUTED when not. An untimed proof is
+#               one the act translated from an older row, whose verdict stood from then on; the appender stamps
+#               every line it writes, so a verdict named on a proof written since is never read as one.
 #   confirmed   the approval naming the criterion, as `<by> <day> <its words>`, its giver folded to one word and the
 #               criterion standing for words it holds none of, the shape an older block's confirmation is written in;
 #               else, on a row the older table holds, the discharging event's `confirmed=`, else its block's
@@ -542,7 +545,7 @@ reader_cells() {
           d = (b == "proof" || b == "waiver")
           ev1 = d ? ev_[c] : (none(rev[c]) ? "" : rev[c]); a = d ? aud[c] : (none(raud[c]) ? "" : raud[c]); if (a == "" && d && at_[c] != "") a = review
           k = (c in ok) ? ok[c] : d ? cf[c] : rconf[c]
-        } else { ev1 = (b == "proof" || b == "waiver") ? ev_[c] : ""; a = review; k = ok[c] }
+        } else { ev1 = (b == "proof" || b == "waiver") ? ev_[c] : ""; a = (b == "proof" && at_[c] == "" && aud[c] != "") ? aud[c] : review; k = ok[c] }
         print c "\037" (b == "" ? "pending" : "discharged") "\037" b "\037" tier[c] "\037" ev1 "\037" a "\037" k "\037" ((c in row) ? sv[c] : req[c])
       }
     }'

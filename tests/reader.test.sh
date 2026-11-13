@@ -15,7 +15,8 @@
 #   §HEADER     the plan's header keys, its body never read as one, in both shapes of a plan, CR-only line ends too.
 #   §ROW        a Tasks row is its nine authored cells, named by the table's header in both shapes.
 #   §CRITERION  a criterion is its Eval design row, an escaped bar kept as a bar.
-#   §CELL       a criterion is discharged only by a standing proof, waiver or approval naming it.
+#   §CELL       a criterion is discharged only by a standing proof, waiver or approval naming it; at 15 its
+#               verdict is the one an untimed proof the act wrote carries, else the evidence review at the head.
 #   §JOIN       a plan's log is found by its name; a header key pointing elsewhere is only words.
 #   §READY      ready reads a row's deps from its Tasks cell when the caller names none.
 #   §JOIN-14    a version-14 row's waits are its reads cell: ready, stop's ready rows, holds, status; a dropped
@@ -368,6 +369,16 @@ sed 's/^| AC-8\.1 |/| AC-7.3 | T1 | pending | — | — |\n| AC-7.5 | T1 | disch
 aud() { every "$@" | tr ';' '\n' | awk -F, '$1 ~ /^AC-7\.[345]$/ { printf "%s=%s ", $1, $6 }'; }
 expect_eq "at 14 a row a logged proof discharges with no verdict reads the evidence review at the head (none with no head); the table's own rows keep their cells" \
   "AC-7.3=CONFIRMED AC-7.4=CONFIRMED AC-7.5= |AC-7.3= AC-7.4=CONFIRMED AC-7.5= " "$(aud "$H")|$(aud)"
+# A run brought forward: the act carries an older row's verdict on its proof, untimed; a proof appended at 15 is
+# stamped by the appender, so a verdict named on it by hand is no verdict.
+W=fwd; plan fwd <<< "run/v1|ev=proof|kind=review|question=evidence|head=$G|result=fail|evidence=record/fwd/b.md|at=2026-11-01T00:00:10Z
+run/v1|ev=proof|ac=AC-7.1|evidence=record/fwd/e1.log|auditor=CONFIRMED|at="
+cp "$D/plans/epic-x/new.plan.md" "$D/plans/epic-x/fwd.plan.md"
+( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/proof.sh" && proof_event "$D/plans/epic-x/fwd.plan.md" kind=eval "head=$H" ac=AC-7.4 evidence=record/fwd/e4.log auditor=CONFIRMED )
+expect_eq "the proof appended at 15 is stamped with its instant" 1 "$(grep -c '^run/v1|ev=proof|kind=eval|.*|ac=AC-7.4|.*|auditor=CONFIRMED|at=20[0-9-]*T' "$D/record/fwd/run.log")"
+fwd() { every "$@" | tr ';' '\n' | awk -F, '$1 == "AC-7.1" || $1 == "AC-7.4" { printf "%s=%s:%s ", $1, $3, $6 }'; }
+expect_eq "at 15 a criterion takes the verdict the act carried on its proof, at any head; one named on a proof appended at 15 is the review's at the head" \
+  "AC-7.1=proof:CONFIRMED AC-7.4=proof:REFUTED |AC-7.1=proof:CONFIRMED AC-7.4=proof: " "$(fwd "$G")|$(fwd)"
 W=wv; plan wv <<< "run/v1|ev=waiver|ac=AC-7.4|by=me|said=let it go|at=2026-11-01T00:00:11Z"; cp "$D/plans/epic-x/old.plan.md" "$D/plans/epic-x/wv.plan.md"
 expect_eq "at 14 a row the text discharges, with a logged waiver of it, reads waived by the waiver; with none, discharged by the proof" \
   "state=discharged by=waiver|state=discharged by=proof" "$(flat cell AC-7.4)|$(W=old; flat cell AC-7.4)"
