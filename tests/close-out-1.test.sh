@@ -469,7 +469,7 @@ expect_eq "E2E18: …and the close that delivers releases it" "0|closed" "$CO_RC
 section "BRANCH-AGREE — wave-39 T16 (D18; AC-12.1): one reader of the integration branch; close-out's check and closed-form name one branch"
 # ============================================================
 # One reader, lib/plan.sh `plan_integration_branch`: ## SDLC State first, the frontmatter as the fallback, asked of
-# close-out's check and closed-form and the Step-0 card on one plan (handoff-file.test.sh asks the verb's).
+# close-out's check and closed-form, the Step-0 card and the gate on one plan (handoff-file.test.sh asks the verb's).
 # FIXTURE FIDELITY: mk_fixture's plan at Step 7, as a run that has not closed holds it (check reads it as a diagnosis,
 # its step refusal one line among the rest), naming `integration-branch: main` under ## SDLC State as Step 0 writes
 # it, with the frontmatter key a Step-0 plan also carries; `trunk` is a real branch at the seed, so both values name
@@ -509,6 +509,26 @@ ba_doors "$PBF"
 expect_eq "BA2b check and closed-form both name the frontmatter's branch, the fallback (check prints its merge verdict only past its refusal)" \
   "main|main" "$BA_CHECK|$BA_CLOSED"
 expect_eq "BA4 the card reads the frontmatter's branch too when ## SDLC State names none" "main" "$(ba_card "$PBF")"
+# The gate's merge-target check reads the plan's branch and its epic's through the same reader, at Step 8, on a plan
+# and an epic at 15, each naming its branch in its header; it logs a finding when the two differ and never refuses.
+# fails-when: the check is not asked of a page at 15, or asks some reader other than the plan's and the epic's headers.
+ba_gate() {  # <project> <epic's branch> -> <plan version>|<gate audit lines for the plan, yes or no>|<merge-target finding>
+  local e="$1/.bionic/docs/plans/epic-fx/epic.plan.md" a
+  awk -v b="$2" 'NR == 1 && $0 == "---" { print; print "integration-branch: " b; next }
+    /^canonical_sdlc_version: / { print "canonical_sdlc_version: 15"; next }
+    /^## / { s = ($0 == "## SDLC State") } !s' "$e" > "$e.b" && mv "$e.b" "$e"
+  awk 'NR == 1 && $0 == "---" { print; print "epic: epic-fx"; next } { print }' "$1/$PLAN_REL" > "$1/$PLAN_REL.e" \
+    && mv "$1/$PLAN_REL.e" "$1/$PLAN_REL"
+  advance_to "$1" 8; gate_rc "$1" >/dev/null
+  a="$(cat "$SB_HOME"/.claude/logs/*/sdlc-audit.md 2>/dev/null | grep -F "($1/$PLAN_REL)")"
+  printf '%s|%s|%s\n' "$(sed -n 's/^canonical_sdlc_version: //p' "$1/$PLAN_REL")" \
+    "$(printf '%s\n' "$a" | grep -q 'evidence-gate ' && echo yes || echo no)" \
+    "$(printf '%s\n' "$a" | sed -n "s/.* merge-target: \(plan integration-branch .*\) (.*/\1/p" | tail -1)"
+}
+expect_eq "BA6 a plan at 15 and its epic naming one branch: the gate reads them at Step 8 and logs no merge-target finding" \
+  "15|yes|" "$(ba_gate "$(mk_fixture branch-agree-gate)" main)"
+expect_eq "BA7 …naming two, it logs the finding with both" \
+  "15|yes|plan integration-branch 'main' != epic 'epic-fx' integration-branch 'trunk'" "$(ba_gate "$(mk_fixture branch-differ-gate)" trunk)"
 # One reader: a grep of hooks/ and payload/scripts/, copied with one planted reader, finds the plant and lib/plan.sh's
 # two lines that ask the plan parser, and no other line naming the key outside a comment or a sentence a refusal prints.
 BAT="$SANDBOX/ba-tree"; mkdir -p "$BAT/payload"; cp -R "$BIONIC_HOOKS_DIR" "$BAT/hooks"; cp -R "$REPO_ROOT/payload/scripts" "$BAT/payload/scripts"
