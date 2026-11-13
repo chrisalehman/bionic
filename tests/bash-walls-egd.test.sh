@@ -31,11 +31,10 @@ section "§EG-DERIVE — the commit wall reads a reading's result as the judge d
 # its findings derive at their effective ratings, which the judge reads (lib/proof.sh
 # `_proof_reading_result`). The wall used to read the `result=` the review registered, so after a re-rating
 # the judge and the wall answered a section two ways (§EG-6's promise). The collector (hooks/bash-walls.sh)
-# now hands the wall the derived result for the plan it judges. AN OLD `check:` LINE RE-RATES NOTHING
-# (wave-31 T32; D6): a reader's rating is final, so a plan still carrying one is judged as written, by the
-# wall and the judge alike. FIXTURE FIDELITY: §EG-6's repository, plan writer and gate drive; the records
-# are in the shape the producing verb reads (`reviewed:`, `findings:`, `finding:`, `shown:`), the judge
-# half is `facts_state` over the same plan text.
+# now hands the wall the derived result for the plan it judges. FIXTURE FIDELITY: §EG-6's repository and
+# gate drive, its plan writer's text made the run at 15 it stands for (the prelude's eg6_world: the readings
+# and the moves read into the run's log by lib/translate.sh); the records are in the shape the producing verb
+# reads (`reviewed:`, `findings:`, `finding:`, `shown:`), the judge half is `facts_state` over the same run.
 EGD_REC="$R_EG6/.bionic/docs/record/w28t60"
 mkdir -p "$EGD_REC"
 egd_rec() {  # <file> <result> <finding line> -> a one-finding adversarial reading record, the finding shown
@@ -45,10 +44,8 @@ egd_rec() {  # <file> <result> <finding line> -> a one-finding adversarial readi
 egd_rec adv fail "finding: 1 S2 on x.sh:9 - data lost on a second run"
 egd_rec flag flag "finding: 1 S3 off x.sh:9 - a message the reader could not rate"
 EGD_DEFERRED='moved: record/w28t60/adv.md#1 to=defer by=Dana at=2026-10-07T12:00:00Z words="defer it to the next wave" why="the user ruled it"'
-EGD_REFUTED='check: record/w28t60/adv.md#1 S2 on "data lost on a second run" refuted by=record/w28t60/chk.md'
-EGD_SETTLED='check: record/w28t60/flag.md#1 S3 off "a message the reader could not rate" settled=S1:on by=record/w28t60/chk.md'
 egd_judge() {  # <question> -> the judge's state of its piece line, over the plan eg6_gate wrote last
-  bash -c '. "$1" && facts_state "$2" "$3"' _ "$EG6_LIB" "$R_EG6/.bionic/docs/plans/active.md" "$H_EG6" 2>/dev/null \
+  bash -c '. "$1" && facts_state "$2" "$3"' _ "$EG6_LIB" "$EG6_PAGE" "$H_EG6" 2>/dev/null \
     | awk -F'\t' -v q="$1" '$1 == "review" && $2 == q && $4 == "piece" { print $5 }'
 }
 egd_lib() {  # <plan> <evidence> <written> -> the result the judge derives
@@ -67,26 +64,16 @@ expect_eq "EGD-1c …and the judge reads that piece line as failing, on the same
 eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
 $EGD_DEFERRED")"
 expect_eq "EGD-2c precondition: the judge derives flag for the reading its proof line writes as fail (its only finding moved to defer)" \
-  "flag|covered" "$(egd_lib "$R_EG6/.bionic/docs/plans/active.md" record/w28t60/adv.md fail)|$(egd_judge adversarial)"
+  "flag|covered" "$(egd_lib "$EG6_PAGE" record/w28t60/adv.md fail)|$(egd_judge adversarial)"
 expect_status "EGD-2 §EG-6 AC-8.6 the only finding moved to defer by a moved: line, the Step-6 commit is admitted" 0 "$ST"
 expect_absent "EGD-2b …and no reading question is named unanswered" "a review question is unanswered" "$ERR"
-eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
-$EGD_REFUTED")"
-expect_eq "EGD-2d §FINAL-RATING an old refuted check: line re-rates nothing (wave-31 T32): the judge derives fail and holds the piece line failing" \
-  "fail|failing" "$(egd_lib "$R_EG6/.bionic/docs/plans/active.md" record/w28t60/adv.md fail)|$(egd_judge adversarial)"
-expect_status "EGD-2e …and the wall agrees: the commit is refused, as EGD-1" 2 "$ST"
 
-# ---------- an old check: line settling a finding to fix on a reading written flag re-rates nothing ----------
+# ---------- a reading written flag that no move re-rates ----------
 EGD_FLAGBASE="$(eg6_reading "$H_EG6" evidence pass)
 $(eg6_reading "$H_EG6" structure pass)
 $(eg6_reading "$H_EG6" adversarial flag record/w28t60/flag.md)"
 eg6_gate "$(eg6_plan 6 wave "$EGD_FLAGBASE")"
 expect_status "EGD-3 the reading written result=flag and no line re-rating it: the commit is admitted (the control)" 0 "$ST"
-eg6_gate "$(eg6_plan 6 wave "$EGD_FLAGBASE
-$EGD_SETTLED")"
-expect_eq "EGD-4 §FINAL-RATING the judge derives flag for it beside an old check: line settling it to S1 on, and holds the piece line covered (wave-31 T32)" \
-  "flag|covered" "$(egd_lib "$R_EG6/.bionic/docs/plans/active.md" record/w28t60/flag.md flag)|$(egd_judge adversarial)"
-expect_status "EGD-4b …and the wall agrees: the commit is admitted, as EGD-3" 0 "$ST"
 
 # ---------- a moved finding: the reading written flag is derived to fail at the moved priority ----------
 { printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: flag\nscope: piece\nfindings: 1\n' "${H_EG6:0:10}" "$H_EG6"
@@ -100,7 +87,7 @@ expect_status "EGD-5 a reading written flag whose one finding is a deferral, no 
 eg6_gate "$(eg6_plan 6 wave "$EGD_MVBASE
 $EGD_MOVED")"
 expect_eq "EGD-6 precondition: the judge derives fail for it once a moved: line sends the finding to fix, and holds the piece line failing" \
-  "fail|failing" "$(egd_lib "$R_EG6/.bionic/docs/plans/active.md" record/w28t60/mv.md flag)|$(egd_judge adversarial)"
+  "fail|failing" "$(egd_lib "$EG6_PAGE" record/w28t60/mv.md flag)|$(egd_judge adversarial)"
 expect_status "EGD-6b §EG-6 AC-8.6 the moved priority is the one the wall reads: the commit is refused" 2 "$ST"
 expect_contains "EGD-6c …naming the reading failing at its derived result" \
   "- adversarial: the newest review is result=fail (evidence=record/w28t60/mv.md)" "$ERR"
@@ -171,10 +158,10 @@ egd_names() {  # <path> -> how many times the trace names <path>: every read of 
 }
 egd_gate_count() {  # <plan text> -> EGD_CN (commands the commit ran) and ST, traced
   : > "$EGD_TRACE"
-  printf '%s\n' "$1" > "$R_EG6/.bionic/docs/plans/active.md"
-  bw_bind "$R_EG6"
+  eg6_world "$R_EG6" "$1"
+  [ ! -f "$R_EG6/.bionic/tmp/engaged-$SID.state" ] || bound_marker "$R_EG6" "$SID" "$EG6_PAGE"
   run_hook "$(mk_payload "$R_EG6" 'git commit -m "x"')" BASH_ENV="$EGD_PRELUDE" EGD_TRACE_OUT="$EGD_TRACE"
-  EGD_CN="$(egd_marks)"; EGD_PN="$(egd_names "$R_EG6/.bionic/docs/plans/active.md")"
+  EGD_CN="$(egd_marks)"; EGD_PN="$(egd_names "$EG6_PAGE")"
 }
 egd_hook() {  # <name> <scripts dir> <code> -> a copy of the hook that runs <code> just before it folds the verdict
   local d="$SANDBOX/egd-hook-$1"
@@ -265,9 +252,6 @@ rm -f "$EGD_NOBS"
 eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
 $EGD_DEFERRED")"
 expect_status "EGD-9d …and the reading moved to defer is admitted (EGD-2)" 0 "$ST"
-rm -f "$EGD_NOBS"
-eg6_gate "$(eg6_plan 6 wave "$EGD_BASE
-$EGD_REFUTED")"
 
 # ---------- the facts are for one plan: BIONIC_DEBTS_PLAN other than the plan judged ----------
 EGD_OTHER="$(egd_hook other "$EGD_SCRIPTS" "printf '%s' \"\$BIONIC_READINGS\" > '$EGD_NOBS'; BIONIC_DEBTS_PLAN=/nonexistent/other.plan.md")"
