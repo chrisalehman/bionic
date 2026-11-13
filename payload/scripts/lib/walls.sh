@@ -2555,7 +2555,7 @@ Fix: register each review with 'session-poker.sh proof-add review <record> --que
   refuse exit2 commit "$(eg_review_unanswered_fact)" "record or waive each review" "$_eg_detail"
 }
 
-# THE FLOOR IS OWED A PROOF LINE FROM STEP 7 (wave-35 T31; D20, A-orch-50). Step 5 owes no floor key;
+# THE FLOOR IS OWED A PROOF LINE FROM STEP 7. Step 5 owes no floor key;
 # the floor's whole run is Step 6's last act, and from `current: 7` a plan whose
 # regression is `yes` (lib/run.sh `plan_regression`: any value but `no`) is refused while its section holds
 # no `proved: kind=floor` line at all: the judge's `absent` (lib/proof.sh `facts_state`; `proof_state`
