@@ -786,40 +786,6 @@ return 0
 # WHAT THE BODY ITSELF WRITES TO STDOUT, which it does not today, still reaches the hook's
 # stdout, refusal or not; only its trailing newlines are normalized to one.
 # [WALL: tests/bash-walls.test.sh §11, §STAGE]
-# ─── evidence_line_field — a key read ANYWHERE on a line, not only at its start ───────
-#
-# WHY IT IS NOT `grep -E '^[[:space:]]*<key>:'` (wave-16 REQ-3, AC-3.3; seed B B11). A
-# `## SDLC State` evidence line is a SEMICOLON-SEPARATED RECORD, not a one-key line:
-#
-#     - Step 1: opened 2026-09-19T22:00Z; requirements: specs/<epic>/<wave>.requirements.md; card approved
-#
-# Every pointer read in this file anchored its key at line start, so a record whose pointer
-# is not the FIRST field carried a perfectly good path the gate could not see, and the
-# commit was refused "Step 1's evidence names no requirements file". The value still ends
-# at the first `;` — that truncation has been the contract since plan assumption A17 — and
-# the continuation-line shape (`  requirements: …` on its own line) is unaffected, because
-# a key at line start is a key anywhere on the line.
-#
-# THE LEFT BOUNDARY IS WHAT KEEPS IT HONEST: `pre-requirements:` and `walk-artifact-sha:`
-# are different fields, so the key must be preceded by the start of the line or by a
-# character that cannot be part of a key, and followed by optional blanks and a colon.
-# awk's `match` takes the LEFTMOST match, so a record naming the key twice reads the first.
-#
-# A HERE-STRING, not a pipe: `awk … exit` quits early, and walls.sh header's SIGPIPE rule
-# (T37, wave-14) applies to every early-quitting reader under `pipefail`, not only grep.
-evidence_line_field() {  # <text> <key> -> the value, or empty
-  awk -v k="$2" '
-    {
-      if (match($0, "(^|[^-_[:alnum:]])" k "[[:space:]]*:[[:space:]]*")) {
-        v = substr($0, RSTART + RLENGTH)
-        sub(/;.*$/, "", v)
-        sub(/[[:space:]]+$/, "", v)
-        print v
-        exit
-      }
-    }' <<< "$1"
-}
-
 # ── THE JURISDICTION HELPERS, AT FILE SCOPE (wave-27 T80) ──────────────────────
 #
 # The helpers below are the evidence gate's own: from the command text, the payload and
@@ -3656,87 +3622,24 @@ Fix: replace with the actual evidence artifact before committing."
   fi
 done <<< "$BLOCK"
 
-# ---------- K5 / AC-K5.2: Step-1 'requirements:' pointer (durable, current: 2+) ----------
+# ---------- the requirements a run is held to, from Step 2 ----------
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 #
-# K5 fixes three artifacts to three steps (design ledger K5; ADR-001): Step 1 authors
-# the wave's `*.requirements.md`, and the Step-1 evidence line is where that artifact's
-# path is recorded — once, at Step 1, and never revisited. This arm reads THAT line (not
-# the current step's own line) at every commit from current: 2 onward, so a plan cannot
-# progress past Step 1 without a resolving pointer and cannot lose it later — the same
-# durable-prefix shape validate_walk_artifact uses for the Step-5 walk narration (A5).
-# Inert at current: 1 — Step 1 is still being written, and POINTER_STEPS below is what
-# governs Step 1's own commit.
-#
-# SCOPE: rigor:double + multi_agent:true + scale wave|epic — the same guard
-# validate_dispatch_ledger uses (D7) to keep wave-lane machinery that predates a new
-# requirement out of the way of fixtures that are not about it. This suite's shared FM
-# (rigor: single) and frontmatter() (no multi_agent: line, so MULTI_AGENT reads empty)
-# are both guaranteed no-ops under this guard by the same construction the D7 comment
-# documents; only a fixture that opts in — this wave's own plan among them (rigor:
-# double, multi_agent: true) — exercises it. Judgment call recorded because AC-K5.2's
-# text names no such guard; the alternative (firing on every wave/epic plan regardless of
-# rigor) blocked 170/316 of this suite's pre-existing cases on first RED and is not what
-# "touch only your own span" can mean here.
-step1_evidence_block() {
-  local line raw cont
-  line=$(echo "$SECTION" | grep -E '^[[:space:]]*-?[[:space:]]*Step[[:space:]]+1[[:space:]]*:' | head -1)
-  [ -n "$line" ] || return 0
-  raw=$(echo "$line" | sed -E 's/^[[:space:]]*-?[[:space:]]*Step[[:space:]]+1[[:space:]]*:[[:space:]]*//')
-  cont=$(extract_continuation "$SECTION" "1")
-  printf '%s\n%s\n' "$raw" "$cont"
-}
-
-# Resolution mirrors resolve_walk_path: absolute stands, a `specs/` leader is
-# docs-root-relative (the form K5's layout names — requirements live beside the spec
-# under specs/epic-NN-<slug>/), anything else is project-relative.
-resolve_requirements_path() {  # $1 = raw requirements: value
-  case "$1" in
-    /*)      printf '%s\n' "$1" ;;
-    specs/*) printf '%s/%s\n' "$DOCS_ROOT" "$1" ;;
-    *)       printf '%s/%s\n' "$BIONIC_ROOT" "$1" ;;
-  esac
-}
-
+# Step 1 authors the wave's `*.requirements.md` under specs/<epic>/, and the header's epic:
+# and wave: name it. From current: 2 a plan whose named requirements file is not on disk owes
+# it, so a run cannot pass Step 1 without the file and cannot lose it later. SCOPE: rigor
+# double, multi_agent true and scale wave or epic, the guard validate_dispatch_ledger uses.
 validate_requirements_pointer() {
-  local current_num b1 raw abs
+  local current_num raw
+  [ "$_EG_V15" -eq 1 ] || return 0
   case "$SCALE" in wave|epic) : ;; *) return 0 ;; esac
   [ "$(rigor_level "$RIGOR")" = double ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
   current_num=$(echo "$CURRENT" | sed -E 's/[ab]$//')
   [ "$current_num" -ge 2 ] 2>/dev/null || return 0
-  if [ "$_EG_V15" -eq 1 ]; then
-    raw="specs/$(frontmatter_get epic)/$(frontmatter_get wave).requirements.md"
-    case "$raw" in specs//*|*/.requirements.md) raw="the header's epic: and wave:, which name them" ;; esac
-    [ -f "$DOCS_ROOT/$raw" ] || _eg_v15_ask "Step 1's requirements: $raw"
-    return 0
-  fi
-
-  b1=$(step1_evidence_block)
-  # ANYWHERE ON THE LINE (AC-3.3, seed B B11). The Step-1 evidence is a semicolon-separated
-  # record and the pointer is rarely its first field; see evidence_line_field's docblock for why the
-  # old line-start anchor refused a plan that named its requirements perfectly well.
-  raw=$(evidence_line_field "$b1" requirements)
-  if [ -z "$raw" ]; then
-    _eg_detail="canonical-sdlc step ${CURRENT} — the Step 1 evidence has no 'requirements:' field.
-Plan: $PLAN
-Fix: add 'requirements: specs/<epic>/<wave>.requirements.md' to the Step 1 line, naming the Step-1 artifact (K5)."
-    refuse exit2 commit "Step 1's evidence names no requirements file" "add a 'requirements:' field" "$_eg_detail"
-  fi
-
-  if grep -qE '(^|/)\.\.(/|$)' <<< "$raw"; then
-    _eg_detail="canonical-sdlc step ${CURRENT} — Step 1 'requirements: ${raw}' climbs out with a '..' component.
-Plan: $PLAN
-Fix: name the requirements file relative to the docs root, e.g. 'requirements: specs/<epic>/<wave>.requirements.md'."
-    refuse exit2 commit "the requirements path climbs out with '..'" "name it under the docs root" "$_eg_detail"
-  fi
-  abs=$(resolve_requirements_path "$raw")
-  if [ ! -f "$abs" ]; then
-    _eg_detail="canonical-sdlc step ${CURRENT} — Step 1 'requirements: ${raw}' does not resolve to a real file (resolved to ${abs}).
-Plan: $PLAN
-Fix: write the requirements document at that path (K5 Step-1 artifact) before committing at step ${CURRENT}."
-    refuse exit2 commit "the named requirements file does not exist" "write the requirements file" "$_eg_detail"
-  fi
+  raw="specs/$(frontmatter_get epic)/$(frontmatter_get wave).requirements.md"
+  case "$raw" in specs//*|*/.requirements.md) raw="the header's epic: and wave:, which name them" ;; esac
+  [ -f "$DOCS_ROOT/$raw" ] || _eg_v15_ask "Step 1's requirements: $raw"
   return 0
 }
 
@@ -4036,9 +3939,7 @@ MATRIX_STATUS
           # path half — see the split above — is tested here, so `a.md; b.md` was
           # handed to the resolver entire, missed, and refused as "names no real file",
           # which sent the author to write a file at a path nobody meant to name. The
-          # sibling reader of the walk artifact has truncated at the first `;` since
-          # epic-14 (evidence_line_field); this cell is the outlier, and the repair is to
-          # say the rule rather than to start splitting. FIRST in the branch, ahead of the
+          # repair says the rule rather than splitting. FIRST in the branch, ahead of the
           # climb-out and file tests: a cell holding two paths has no single path for
           # either of them to be asked about.
           # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
