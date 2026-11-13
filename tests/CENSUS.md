@@ -60,7 +60,7 @@ background-suite-guard.test.sh | §B6 | keep | payload/scripts/lib/walls.sh wall
 background-suite-guard.test.sh | §B7 | duplicate | payload/scripts/lib/walls.sh wall_background_suite_guard: the backgrounded-suite arm (ARM 1) deleted, or run_in_background false read as true, so an on-budget backgrounded suite is admitted (B7a) or a false flag refused (B7c) | cmd-class.test.sh §C4
 background-suite-guard.test.sh | §B8 | keep | payload/scripts/lib/walls.sh wall_background_suite_guard: the `set -f` around the target split removed, so `bash tests/*.test.sh` expands in the hook's cwd to two on-budget names and passes (B8f); also the repo scoping of a suite path outside the tree (B8c, B8d) | none (searched 'set -f', 'scratch-probe' and '\*.test.sh' in tests/)
 background-suite-guard.test.sh | §B9 | keep | payload/scripts/lib/cmd-class.sh: the literal `for s in` list no longer resolved into the suites it names, so a loop over two on-budget suites is refused (B9a0) | none (searched 'for s in' and 'unexpanded name' in tests/)
-background-suite-guard.test.sh | §B10 | duplicate | payload/scripts/lib/context.sh bionic_context: the `[!A-Za-z0-9_-]` shape case deleted (regex row); payload/hooks/bash-walls.sh stops calling bionic_context ahead of bionic_fold, so no wall runs (call and order rows) | context.test.sh §3, background-suite-guard.test.sh §B1, agent-context-guard.test.sh §G1, execution-recorder.test.sh §Section 1
+background-suite-guard.test.sh | §B10 | duplicate | payload/scripts/lib/context.sh bionic_context: the `[!A-Za-z0-9_-]` shape case deleted (regex row); payload/hooks/bash-walls.sh stops calling bionic_context ahead of bionic_fold, so no wall runs (call and order rows) | context.test.sh §3, background-suite-guard.test.sh §B1, agent-context-guard.test.sh §G1
 background-suite-guard.test.sh | §B11 | duplicate | payload/scripts/lib/refuse.sh: exit2's detail_to_user cell made no, so the recorded set and its detail leave the default stream (B11e1, B11e3); b11_line is defined and never called, so the four guarded calls above B11e assert nothing, and the "On the budget:" absence on the verdict line pins wording | refuse.test.sh §1, background-suite-guard.test.sh §B1
 background-suite-guard.test.sh | §B12 | keep | payload/scripts/lib/cmd-class.sh cmd_backgrounded: the quote-aware scan dropped, so an & inside quotes reads as backgrounding and the on-budget foreground suite is refused (B12f); B12a and B12b are refused by the budget arm whatever ARM 1 does | none (searched 'cmd_backgrounded' and 'a & b' in tests/)
 background-suite-guard.test.sh | §B-CLASS | keep | payload/scripts/lib/walls.sh _bsg_wrap_text: the browser and compile classes left out of the wrapped set, so a browser run passes as typed with no `--class` (BC1) and a backgrounded one is admitted (BC2); the leading-cd strip dropped from the key, so a cd prefix fills the 60 characters and two trees running one command key apart (BC3) | none (searched 'class browser' and 'playwright' in tests/)
@@ -94,6 +94,7 @@ bash-walls.test.sh | §VERDICT / §RULED | keep | payload/scripts/lib/walls.sh m
 bash-walls.test.sh | §PENDING-T4 | keep | payload/scripts/lib/walls.sh validate_matrix: the per-key loop's placeholder test restored over the `user-confirmed: pending` stub, so a T4 row awaiting its user is refused at `current 6` and `7` (PT-1, PT-2, PT-4c); also: the stub admitted at 8 or opening no row:AC-2 item (PT-3) | none (searched 'user-confirmed: pending' and 'pending' near current 6 in tests/; release-approval.test.sh reads the written stub, not the gate)
 bash-walls.test.sh | §REFUSED-VERB | keep | payload/scripts/lib/walls.sh _wall_poker_contract_verb: `confirm-row` dropped from the contract-verb list, so a dispatched agent records the user's confirmation of a T4 row (RV-1, RV-1b, RV-1c); `matrix-retier` dropped from it, so a dispatched agent raises a criterion's tier and rewrites its eval and evidence cells (RV-3, RV-3b, RV-3c) | none (searched 'confirm-row' and 'matrix-retier' in tests/; release-approval.test.sh drives confirm-row and session-poker-5.test.sh drives matrix-retier, never through the wall)
 bash-walls.test.sh | §PART | keep | payload/scripts/lib/walls.sh _bsg_own_reviews_part: the contract arm admits a build row's writer to run reviews-part, refuses the integrate row's writer for its own row, or refuses the main thread | none (searched 'reviews-part' in tests/; close-out-3.test.sh §ORDER and landing-line-1.test.sh §KNOWN run the verb, never the wall)
+bash-walls.test.sh | §CARRY | keep | payload/scripts/lib/walls.sh background-suite-guard: the booking wrap applied to every call of an agent with a budget row, so its plain `ls -la` comes back staged in bypass and in default mode (CARRY-a2, CARRY-c2) | none (searched 'left as typed' in tests/)
 
 ## binding.test.sh
 
@@ -380,7 +381,6 @@ detect-probes.test.sh | §Group 6b | keep | payload/scripts/lib/detect.sh detect
 detect-probes.test.sh | §Group 6c | keep | payload/scripts/lib/detect.sh:1045 detect_marketplace_source_path: the empty-or-null arm's return 1 made return 0, so a registry naming no entry for the resolved name exits 0 | none (searched 'detect_marketplace_source_path' in tests/; doctor-version.test.sh §Section 7 renders the path, not the status)
 detect-probes.test.sh | §Group 6d | keep | payload/scripts/lib/detect.sh _detect_bound_kill: the no-group fallback signals only the direct child, so the grandchild survives the bound ("…the bound reaps its grandchild there anyway") | none (searched '_detect_bound_kill' and 'grandchild' in tests/)
 detect-probes.test.sh | §Group 6d2 | keep | payload/scripts/lib/detect.sh detect_bounded: the probe's own exit code replaced by 0, so "…and its own exit code is the bound's exit code" reads 0 not 7 | none (searched 'detect_bounded' in tests/)
-detect-probes.test.sh | §Group 6d3 | keep | payload/scripts/lib/detect.sh detect_bounded: the micro-sleep counter starts at 4, so the first tenth is not split and the best instant call costs 0.1 s (ceiling 0.08) | none (searched 'micro=' in tests/)
 detect-probes.test.sh | §Group 6e | keep | payload/scripts/lib/detect.sh detect_auto_memory: settings.local.json no longer outranks settings.json, so "a local \"1\" over a shared \"0\" is no override" goes red | none (searched 'detect_auto_memory' and 'env:auto-memory' in tests/)
 detect-probes.test.sh | §Group 6f | duplicate | payload/scripts/lib/env.sh rc_state: a stale or changed block read as yes, as detect_rc_claude_proxy passes it through | rc-item-2.test.sh §wave-27 T77, rc-item-1.test.sh §the two doors answer the same question the same way
 detect-probes.test.sh | §Group 7 | vacuous | no probe in detect.sh writes to a file it reads, so the fingerprints cannot move under any mutation of a line that exists | none (searched '> "\$' in payload/scripts/lib/detect.sh's probe bodies)
@@ -607,7 +607,6 @@ env.test.sh | §Group 8 | keep | rule: lint — a second reader of .env (`.env.`
 
 ## execution-recorder.test.sh
 
-execution-recorder.test.sh | §Section 1 | keep | hooks/execution-recorder.sh: the Bash early exit moved below the STATE_DIR resolution, so every unrelated Bash call pays for the state paths and the roster read ("the early exit PRECEDES the state paths…") | none (searched 'IS_START' and 'STATE_DIR=' in tests/)
 execution-recorder.test.sh | §Sections 2-5 | vacuous | a setup_section tombstone for the deleted observation record: it builds nothing a later section reads and asserts nothing | none (searched 'Sections 2-5' in tests/)
 execution-recorder.test.sh | §Section 6 | keep | hooks/execution-recorder.sh: the teammate arm writes the addressing id into agent_id instead of teammate_id, so "agent_id stays EMPTY — a confirmed row never carries a wrong-namespace id" goes red | none (searched 'teammate_spawned' and 'teammate_id=' in tests/; cross-gate-agreement.prelude.sh drives the shape but was not read to its verdict)
 execution-recorder.test.sh | §Section 7 | keep | hooks/execution-recorder.sh: the -L check on the roster file deleted, so a symlinked roster is appended through and the victim gains status=confirmed | none (searched 'symlinked ROSTER' and 'execution-recorder.sh' in tests/)
@@ -756,31 +755,14 @@ hook-adoption.test.sh | §5c | duplicate | each listed hook's engagement check d
 hook-adoption.test.sh | §5b | keep | hooks/canonical-sdlc-governing-skill.sh: the content clause arming the gate on a declared canonical_sdlc_version deleted, so a misplaced plan declaring it is written; ("…but the same write DECLARING canonical_sdlc_version is refused as misplaced") goes red | none (searched 'canonical_sdlc_version: 14\\n' write payloads in tests/; the governing-skill suite's frontmatter rows sit above its first section)
 hook-adoption.test.sh | §5d | keep | hooks/permission-answer.sh: its exit 0 after a failed bionic_context made non-zero, so an empty session key exits 1; ("permission-answer: an empty session id -> exit 0") goes red | none (searched empty-session rows in tests/permission-answer.test.sh: none)
 
-## hook-latency.test.sh
-
-hook-latency.test.sh | §1 | keep | payload/scripts/lib/walls.sh: a parameter expansion on the quiet `ls -la` path replaced by forks (a printf piped to sed per wall), so bash-walls.sh passes 12 external commands (1a) | none (searched 'forks at most' and 'bash -x' in tests/)
-hook-latency.test.sh | §2 | keep | payload/scripts/lib/stop.sh: a builtin read on the Stop path replaced by `$(jq ...)` calls, so stop.sh passes 6 external commands (2a) | none (searched 'forks at most' in tests/)
-hook-latency.test.sh | §3 | vacuous | it plants a jq call into a doctored copy and reads the suite's own fork counter, so it reads only suite code | none (searched 'planted jq' in tests/)
-hook-latency.test.sh | §4 | keep | hooks/bash-walls.sh: the run verdict (session_run, a plan-directory scan) computed ahead of the walls though none reads it, so 4c and 4d count one | none (searched 'plan-directory scan' and 'session_run' in tests/)
-hook-latency.test.sh | §5 | keep | payload/scripts/lib/walls.sh: the suite command classified once per ask instead of once, so cmd_class_lines runs twice on a wrapped suite call (5e) | none (searched 'cmd_class_lines' in tests/)
-hook-latency.test.sh | §6 | keep | hooks/canonical-sdlc-governing-skill.sh: the plans directory walked a second time for the run verdict (6a) | none (searched 'plan-directory walk' in tests/)
-hook-latency.test.sh | §7 | vacuous | the rows read tests/bench/hook-latency.sh, test tooling that is not code the plugin runs, the runner or a declared check, so no program mutation turns them red | none (searched 'BENCH_EXTRA_CANDIDATES' in tests/)
-hook-latency.test.sh | §8 | vacuous | the rows read the bench's own interpreter header, tests/bench/hook-latency.sh, which is not the program | none (searched 'interpreter header' in tests/)
-hook-latency.test.sh | §9 | keep | hooks/execution-recorder.sh: a builtin field read on the Bash path replaced by per-field jq forks, so the count passes 10 (9a) | none (searched 'execution-recorder.sh (Bash path)' in tests/)
-hook-latency.test.sh | §10 | keep | hooks/ruling-push.sh: the one file test ahead of the fast path removed, so the fast path forks (10b) | none (searched 'ruling-push' in tests/)
-hook-latency.test.sh | §11 | keep | payload/scripts/lib/walls.sh: the booking wrap applied to every call of an agent with a budget row, so its plain `ls -la` comes back staged (11a, 11c) | none (searched 'left as typed' in tests/)
-hook-latency.test.sh | §PLACE | keep | payload/scripts/lib/placement.sh: the reader walks the command text instead of its segments, so a 200 KB quoted body costs more commands than a 2 KB one (PL-d) | none (searched 'placement' cost rows in tests/; placement.test.sh reads where, not cost)
-
 ## hook-timeout.test.sh
 
-hook-timeout.test.sh | §1 | keep | payload/hooks/canonical-sdlc-governing-skill.sh: the plan text after `CONTENT=$(printf` read by a bash loop over its lines instead of whole, so a2's 200 KB plan runs more commands than its 64 KB one | none (searched 'canonical-sdlc-governing-skill' with a size pair in tests/; hook-latency.test.sh times the hooks on one input)
+hook-timeout.test.sh | §1 | keep | payload/hooks/canonical-sdlc-governing-skill.sh: the plan text after `CONTENT=$(printf` read by a bash loop over its lines instead of whole, so a2's 200 KB plan runs more commands than its 64 KB one | none (searched 'canonical-sdlc-governing-skill' with a size pair in tests/)
 hook-timeout.test.sh | §2 | keep | payload/scripts/lib/cmd-class.sh: the segment split of a long chain done by a bash loop per segment character, so d's and d2's large input runs more commands than the small one | none (searched 'HTCOUNT' and 'as many commands' in tests/)
 hook-timeout.test.sh | §2b | keep | payload/scripts/lib/cmd-class.sh: a quoted python3 -c body walked a line at a time instead of read whole as one word, so e's 200 KB command counts more than its 50 KB one | none (searched 'HTCOUNT' in tests/)
 hook-timeout.test.sh | §2c | keep | payload/scripts/lib/walls.sh: the leading cd's target found by walking the heredoc after it line by line, so b3-l counts more than b3; also cmd_effects walking g's body | none (searched 'HTCOUNT' in tests/)
 hook-timeout.test.sh | §3 | duplicate | the shipped hook's input read never reached (the planted line sits on the hook's empty-input exit), so neither the planted copy nor the shipped hook reaches its witness; the planted-walk rows otherwise read the suite's own inserted loop | hook-timeout.test.sh §1, hook-timeout.test.sh §2
-hook-timeout.test.sh | §3b | keep | payload/scripts/lib/cmd-class.sh cmd_effects: the body after a redirect read a line at a time, so g-l runs more commands than g when called directly | none (searched 'cmd_effects' with a size pair in tests/)
 hook-timeout.test.sh | §3c | keep | payload/hooks/permission-answer.sh: the question body walked before the push is reached, so the 64 KB question runs more commands than the 16 KB one | none (searched 'permission-answer' with 'HTCOUNT' in tests/)
-hook-timeout.test.sh | §4 | keep | payload/hooks/session-poker.sh: the advance (current) reads the plan once per row instead of in one pass, so the 200 KB plan runs more commands than the 66 KB one | none (searched '§VERB' and 'as many commands on the 200 KB plan' in tests/)
 
 ## hooks-closed.test.sh
 
@@ -790,10 +772,10 @@ hooks-closed.test.sh | §REPAIR | keep | hooks/bash-walls.sh: the repair command
 
 ## inbox.test.sh
 
-inbox.test.sh | §PUSH | keep | hooks/ruling-push.sh: the pushed= claim before printing deleted, so the writer's next call carries the same ruling again; ("(p4) across both calls the ruling appears exactly once") goes red | none (searched 'ruling-push' in tests/; hook-latency.test.sh times the fast path only)
+inbox.test.sh | §PUSH | keep | hooks/ruling-push.sh: the pushed= claim before printing deleted, so the writer's next call carries the same ruling again; ("(p4) across both calls the ruling appears exactly once") goes red | none (searched 'ruling-push' in tests/)
 inbox.test.sh | §STATE | keep | hooks/session-poker.sh ruling-ack: the shown= line not written to the roster, so ("(s3) …rulings reads shown=<epoch>") goes red | none (searched 'ruling-ack' and 'ruling/v1' in tests/)
 inbox.test.sh | §SCOPE | keep | hooks/ruling-push.sh: the named-writer match dropped, so every rostered writer's call carries the ruling; ("(c1) …the second live writer's call did not") goes red | none (searched 'ruling-push' in tests/)
-inbox.test.sh | §ACK | keep | hooks/session-poker.sh ruling-ack: the pending flag left up after the last unread ruling is acknowledged, so ("(k3) both acknowledged … the flag is down") goes red | none (searched 'ruling-pending' in tests/; hook-latency.test.sh reads the flag only to take its fast path)
+inbox.test.sh | §ACK | keep | hooks/session-poker.sh ruling-ack: the pending flag left up after the last unread ruling is acknowledged, so ("(k3) both acknowledged … the flag is down") goes red | none (searched 'ruling-pending' in tests/)
 inbox.test.sh | §GUARD | keep | rule: door refusal — payload/scripts/lib/line.sh:838 line_ready's ruling-unread refusal dropped, so a row with an unread ruling publishes instead of exit 2 reason=ruling-unread; (g6) goes red | none (searched 'ruling-unread' in tests/)
 inbox.test.sh | §ROOT | keep | payload/scripts/lib/walls.sh: the commit wall's acknowledgement call built from its own library directory instead of the shared plugin-root helper, so ("(rt2) the commit wall's refusal names the same root") goes red | none (searched 'acknowledge with: bash' in tests/)
 
@@ -1036,7 +1018,7 @@ placement.test.sh | §P0 | duplicate | payload/scripts/lib/placement.sh: a synta
 placement.test.sh | §FORMS | keep | payload/scripts/lib/placement.sh cmd_place: a parenthesis inside double quotes read as a subshell, so `echo "red run done (7 BM FAIL…)"` makes the suite moving instead of placed at the tree (F1) | none (searched 'cmd_place' in tests/)
 placement.test.sh | §CHAIN | keep | payload/scripts/lib/placement.sh cmd_place: a relative cd not joined to the previous cd's directory, so `cd trees; cd t1` places at the cwd's t1 (C6, C26) | none (searched 'cmd_place' in tests/)
 placement.test.sh | §MOVING | keep | payload/scripts/lib/placement.sh cmd_place: a cd on the right of an or-list followed as if it ran, so M4 (true, or cd T, then the suite) is placed at T instead of moving (M4) | none (searched 'cmd_place' and 'moving cd' in tests/)
-placement.test.sh | §INVISIBLE | keep | payload/scripts/lib/placement.sh cmd_place: a heredoc body's lines read as commands, so its cd moves the suite (I2) | none (searched 'cmd_place' in tests/; hook-latency.test.sh §PLACE places only the python3 -c body)
+placement.test.sh | §INVISIBLE | keep | payload/scripts/lib/placement.sh cmd_place: a heredoc body's lines read as commands, so its cd moves the suite (I2) | none (searched 'cmd_place' in tests/)
 placement.test.sh | §TARGET | keep | payload/scripts/lib/placement.sh cmd_place: a named target no segment carries answered with the end of the command and exit 0 instead of nothing and exit 3 (G6) | none (searched 'cmd_place' in tests/)
 placement.test.sh | §ARGS | keep | payload/scripts/lib/placement.sh cmd_place: the absolute-cwd check deleted, so a relative cwd is accepted with exit 0 (A2) | none (searched 'cmd_place' in tests/)
 
@@ -1954,9 +1936,6 @@ handoff-file.test.sh §BRANCH-AGREE — duplicate
 hook-adoption.test.sh §0 — duplicate
 hook-adoption.test.sh §5 — duplicate
 hook-adoption.test.sh §5c — duplicate
-hook-latency.test.sh §3 — vacuous
-hook-latency.test.sh §7 — vacuous
-hook-latency.test.sh §8 — vacuous
 hook-timeout.test.sh §3 — duplicate
 interpreter-pin.test.sh §3 the planted 3.2 incompatibilities — duplicate
 interpreter-pin.test.sh §6 one pin, one owner — vacuous

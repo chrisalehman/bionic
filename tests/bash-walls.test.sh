@@ -461,9 +461,9 @@ st_drive outq ':' "_eg_body() { printf 'BODY-QUIET\\n'; exit 0; }"
 expect_status "STAGE-n10: a body that prints on stdout and refuses nothing exits 0" 0 "$ST_RC"
 expect_eq "STAGE-n11: …and what it printed is on the hook's stdout" "BODY-QUIET" "$ST_OUT"
 
-# (l) THE PATH THAT REFUSES NOTHING forks no external command and leaves no file, counted the
-# way tests/hook-latency.test.sh counts (`bash -x`, one `+` line per external command). The
-# refusing drive is the positive on the same counter: it forks at least the fold's `mktemp`.
+# (l) THE PATH THAT REFUSES NOTHING forks no external command and leaves no file, counted by
+# `bash -x`, one `+` line per external command. The refusing drive is the positive on the same
+# counter: it forks at least the fold's `mktemp`.
 ST_EXT='^\++ (jq|grep|awk|sed|cut|tr|git|date|stat|find|sort|uniq|head|tail|wc|mkdir|rm|mktemp|cat|ls|mv|cp|ln)( |$)'
 ST_X=-x st_drive quiet ': > "$TMPDIR/keep.me"' "$ST_SILENT" '/bin/ls -A "$TMPDIR" > "$TMPDIR/../left"'
 expect_status "STAGE-q1: the silent gate exits 0" 0 "$ST_RC"
@@ -802,6 +802,34 @@ expect_status "PART-5: the integrate row's writer is refused another row" 2 "$ST
 expect_contains "PART-5b: …naming the row it asked for and its own" '`reviews-part T3`: T3 is not your row (yours is T9)' "$ERR"
 run_hook "$(mk_payload "$R_PT" "$(PT_CMD T9); $(PT_CMD T3)" "$PT_ACTOR_I" "" Bash implementor)"
 expect_status "PART-6: its own row chained with another in one call is refused" 2 "$ST"
+
+# ---------------------------------------------------------------------------
+section "§CARRY — a budgeted agent's plain call is left as typed in every mode"
+# The booking wrap rewrites a suite call into the shim and nothing else: the CLI checks its
+# permission rules against a hook's rewrite, so a plain command rewritten to name its agent is a
+# command the person never typed. An agent whose roster row states a budget asks for `ls -la`, in
+# bypass mode and in default mode, and the hook stages no rewrite. Fixture fidelity: one engaged
+# repo and one roster row in the product's writer's shape (`roster_row_fixture`) stating a budget;
+# the payloads are mk_payload's with the permission mode the CLI sends.
+# fails-when: the wrap is staged for a budgeted agent's call that runs no suite.
+# The positive on the same extractor: that agent's on-budget suite comes back staged into the shim.
+R_CA="$(mk_repo carry)"
+CA_ACTOR="atcarry-0a1b2c3d4e5f6071"
+{ roster_header
+  roster_row_fixture "session=$SID" status=identified name=w-carry "agent_id=$CA_ACTOR" \
+    subagent_type=bionic:implementor suites_allowed=x.test.sh suites_source=declared
+} > "$R_CA/.bionic/tmp/roster-$SID.state"
+ca_payload() {  # <permission mode> <command>
+  mk_payload "$R_CA" "$2" "$CA_ACTOR" "" Bash bionic:implementor | jq -c --arg m "$1" '. + {permission_mode: $m}'
+}
+run_hook "$(ca_payload bypassPermissions 'tests/run.sh --only x.test.sh')"
+expect_contains "CARRY-positive: the budgeted agent's on-budget suite is staged into the shim" "booked.sh" "$(updated_command_of)"
+run_hook "$(ca_payload bypassPermissions 'ls -la')"
+expect_status "CARRY-a: in bypass mode the budgeted agent's ls -la passes" 0 "$ST"
+expect_eq "CARRY-a2: …left as typed: no rewrite staged" "no" "$(has_updated_input)"
+run_hook "$(ca_payload default 'ls -la')"
+expect_status "CARRY-c: in default mode the budgeted agent's ls -la passes" 0 "$ST"
+expect_eq "CARRY-c2: …left as typed: no rewrite staged" "no" "$(has_updated_input)"
 
 # ---------------------------------------------------------------------------
 finish
