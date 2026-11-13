@@ -1094,11 +1094,8 @@ fi
 # PLAN-SCOPED. A spec, an ADR, a record note — those are ordinary artifacts and a writer
 # in a tree produces them there by design. Only the file the run is steered by is refused.
 #
-# AN AGENT CONTEXT IS ALLOWED. Two spellings mark one and either is enough: the payload's
-# own `agent_type`, which the harness sets for a dispatched agent, and the settings-channel
-# guard's BIONIC_HOOK_CHANNEL. This hook is registered directly on Write|Edit rather than
-# behind the guard, so `agent_type` is the spelling that answers here — the other is read
-# anyway, because a partition maintained by hand is one edit away from covering neither.
+# AN AGENT CONTEXT IS ALLOWED: the payload's own `agent_type`, which the harness sets for a
+# dispatched agent, marks one.
 #
 # AMBIGUITY PASSES. No cwd in the payload, a cwd outside any repository, a tree whose main
 # repository cannot be resolved: this wall has no main checkout to name and says nothing.
@@ -1115,7 +1112,6 @@ fi
 case "$BASENAME" in
   *.plan.md)
     LEASE_AGENT=0
-    [ "${BIONIC_HOOK_CHANNEL:-}" = "agent-context" ] && LEASE_AGENT=1
     [ -n "$(echo "$BIONIC_INPUT" | jq -r '.agent_type // empty')" ] && LEASE_AGENT=1
     LEASE_CWD=$(bionic_jq .cwd)
     if [ "$LEASE_AGENT" -eq 0 ] && [ -n "$LEASE_CWD" ] && [ -d "$LEASE_CWD" ]; then
