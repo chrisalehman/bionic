@@ -1121,7 +1121,10 @@ _units_landed() {
 # full run: a run now proves a head these rows are about to move.
 units_floor_holds() { _units_sched holds "${1:-}" "${2:-}"; }
 
-# units_approval_names <plan> -> each approval an OPEN row waits on, `approval:<name>` among its waits, once, sorted.
+# units_approval_names <plan> [<id>] -> each approval an OPEN row waits on, `approval:<name>` among its waits, once, sorted.
+# With <id>, row <id>'s alone, the reader asked for that row only, and a failure of the table's read or of the reader is
+# returned with its exit, so an asker that must not take a failure for "none" hears it; with none, a failure answers
+# nothing, rc 0, as every caller of the plan-wide list takes it.
 # `approve` records only these: a name no row waits on would be recorded once while the row it was meant for waits. A
 # name only a landed or dropped row waits on satisfies nothing either, so it is not one of them. The match is exact, case included, as the readiness program keys it. `plan` is a wait like
 # any other here, and an empty cell at 14 waits on it by its kind.
@@ -1131,7 +1134,13 @@ units_floor_holds() { _units_sched holds "${1:-}" "${2:-}"; }
 # so its integrate row is not listed for it.
 units_approval_names() {
   local rows waits
-  rows="$(units_rows "${1:-}" 2>/dev/null)" && waits="$(_units_waits "${1:-}" 2>/dev/null)" || return 0
+  if [ -n "${2:-}" ]; then
+    rows="$(units_rows "${1:-}" 2>/dev/null)" || return $?
+    declare -F plan_read_waits >/dev/null 2>&1 || return 2
+    waits="$(plan_read_waits "$1" "$2" 2>/dev/null)" || return $?
+  else
+    rows="$(units_rows "${1:-}" 2>/dev/null)" && waits="$(_units_waits "${1:-}" 2>/dev/null)" || return 0
+  fi
   { printf '%s\n\034\n' "$rows"; printf '%s\n' "$waits"; } | awk -F'\t' '
     $0 == "\034" { w = 1; next }
     !w { s = tolower($10)

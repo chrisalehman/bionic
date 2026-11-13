@@ -515,35 +515,12 @@ make_repo() {
       : > "$repo/.bionic/tmp/engaged-$_psid.state"
     done
     mkdir -p "$repo/.bionic/docs/plans/epic-99-test"
-    # Unasked, the live wave is at 15: the page holds no state section, and the run's log the step and
-    # the approval the section held. MAKE_REPO_AT=14 asks for the same wave on a page at 14.
-    if [ "${MAKE_REPO_AT:-15}" = 15 ]; then
-      printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nintent: build\nrigor: double\nscale: wave\nintegration-branch: main\n---\n\n# Test wave plan\n' \
-        > "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-      mkdir -p "$repo/.bionic/docs/record/wave-01-test"
-      printf 'run/v1|ev=%s|at=2026-09-07T19:0%sZ\n' 'step|n=1' 1:00 'step|n=2' 2:00 'step|n=3' 3:00 'step|n=4' 4:00 \
-        'approval|key=step3|by=dana|said=approved' 5:00 > "$repo/.bionic/docs/record/wave-01-test/run.log"
-    else
-    cat > "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" <<'PLAN'
----
-governing-skill: canonical-sdlc
-canonical_sdlc_version: 14
-intent: build
-rigor: double
-scale: wave
----
-
-# Test wave plan
-
-## SDLC State
-
-integration-branch: main
-current: 4
-approved-by: dana 2026-09-07T19:05Z "approved"
-
-- Step 4: tasks in flight
-PLAN
-    fi
+    # The live wave is at 15: the page holds no state section, and the run's log the step and the approval.
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nintent: build\nrigor: double\nscale: wave\nintegration-branch: main\n---\n\n# Test wave plan\n' \
+      > "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+    mkdir -p "$repo/.bionic/docs/record/wave-01-test"
+    printf 'run/v1|ev=%s|at=2026-09-07T19:0%sZ\n' 'step|n=1' 1:00 'step|n=2' 2:00 'step|n=3' 3:00 'step|n=4' 4:00 \
+      'approval|key=step3|by=dana|said=approved' 5:00 > "$repo/.bionic/docs/record/wave-01-test/run.log"
     # A LIVE WAVE'S SESSIONS ARE BOUND TO IT (wave-23-fixit-1810, REQ-1, D1). An empty marker
     # beside an open plan is the UNBOUND state, whose `fallback` plan is announced and never
     # acted on — so a fixture that meant "this session is running this wave" and left the
