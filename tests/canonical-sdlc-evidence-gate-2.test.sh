@@ -540,6 +540,55 @@ h32m=$(make_home)
 write_plan "$h32m" "$(plan_rigor reviewed 6 "$step6_body" "$m32_empty_aud")" > /dev/null
 
 # ============================================================
+# Section 32b: the auditor and the confirmation, read from the run
+# ============================================================
+#
+# A criterion's auditor cell is the evidence review standing at the working branch's head, CONFIRMED on a pass and
+# REFUTED on a fail, empty with none; its confirmation is the approval naming it. At double rigor the auditor owes
+# a verdict from Step 6 and a ruling from Step 8; at single the column is unread; with no rigor the strict reading
+# holds. A T4 criterion is ruled by its approval unless the auditor's finding stands.
+# FIXTURE FIDELITY: eg_page's run at 15, its branch at the fixture head, AC-1.1 discharged by a proof after the rest.
+# fails-when: matrix_auditor_required reads single as required (m32-single), or an unknown rigor as not (m32-norigor);
+# matrix_row_owes admits an empty cell at 6 (m32-6v) or a REFUTED one at 8 (m32-8r); the finding-stands arm admits a
+# confirmed T4 row the auditor refuted (m32-t4r).
+
+section "Section 32b: the auditor and the confirmation, read from the run"
+
+m32_home() {  # <step> <rigor, or - for none> <eval type> <evidence review: pass|fail|none, waived unless pass> [<log line>...]
+  local q; M32_H=$(make_home); eg_head_repo "$M32_H"; git -C "$M32_H" branch wave/01-fixture 2>/dev/null
+  P32=$(eg_page "$M32_H" "$1" "run/v1|ev=proof|kind=regression|head=$EG_HEAD|evidence=record/floor.log|at=2026-10-04T01:00:00Z" \
+    $(for q in adversarial structure; do printf 'run/v1|ev=proof|kind=review|head=%s|question=%s|result=pass|scope=piece|reader=w-read|evidence=record/generic-evidence.md|at=2026-10-04T01:00:01Z\n' "$EG_HEAD" "$q"; done))
+  case "$2" in -) awk '!/^rigor: /' "$P32" ;; *) awk -v r="$2" '/^rigor: /{ $0 = "rigor: " r } { print }' "$P32" ;; esac \
+    | awk -v t="$3" '{ sub(/\| AC-1\.1 \| hermetic \|/, "| AC-1.1 | " t " |"); print }' > "$P32.t" && mv "$P32.t" "$P32"
+  case "$4" in
+    pass|fail) printf 'run/v1|ev=proof|kind=review|head=%s|question=evidence|result=%s|scope=piece|reader=w-read|evidence=record/generic-evidence.md|at=2026-10-04T01:00:03Z\n' "$EG_HEAD" "$4" >> "$(plan_fixture_log "$P32")" ;;
+  esac
+  [ "$4" = pass ] || printf 'run/v1|ev=waiver|question=evidence|head=%s|by=Dana|said=ship it|at=2026-10-04T01:00:04Z\n' "$EG_HEAD" >> "$(plan_fixture_log "$P32")"
+  [ "$1" != 8 ] || printf 'run/v1|ev=step|n=8|cleanup=n/a|at=2026-10-04T01:00:05Z\n' >> "$(plan_fixture_log "$P32")"
+  shift 4; [ "$#" -eq 0 ] || printf '%s\n' "$@" >> "$(plan_fixture_log "$P32")"
+  printf 'run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|at=2026-10-04T01:00:09Z\n' >> "$(plan_fixture_log "$P32")"
+}
+m32_ap='run/v1|ev=approval|key=AC-1.1|by=Dana Fixture|said=I watched it hold|at=2026-10-04T01:00:06Z'
+m32_home 6 double hermetic none
+expect_block "m32-6v double rigor at 6, the evidence question waived with no review: the criterion owes the auditor's verdict" "$M32_H" 'git commit -m "x"' "get the auditor's verdict"
+m32_home 6 double hermetic fail
+expect_allow "m32-6r …and a REFUTED verdict, its review waived, is a verdict at 6: admitted" "$M32_H" 'git commit -m "x"'
+m32_home 8 double hermetic fail
+expect_block "m32-8r at 8 the same REFUTED row owes a ruling, naming the verdict" "$M32_H" 'git commit -m "x"' "verdict is 'REFUTED', not CONFIRMED"
+m32_home 8 double hermetic pass
+expect_allow "m32-8c at 8 a CONFIRMED row is ruled: admitted" "$M32_H" 'git commit -m "x"'
+m32_home 8 single hermetic fail
+expect_allow "m32-single at single rigor the column is unread: the REFUTED row is admitted at 8" "$M32_H" 'git commit -m "x"'
+m32_home 8 - hermetic fail
+expect_block "m32-norigor with no rigor the strict reading holds: the REFUTED row is refused at 8" "$M32_H" 'git commit -m "x"' "not CONFIRMED"
+m32_home 8 double human pass "$m32_ap"
+expect_allow "m32-t4c a T4 row CONFIRMED and confirmed by its approval is admitted at 8" "$M32_H" 'git commit -m "x"'
+m32_home 8 double human pass
+expect_block "m32-t4n …and with no approval naming it, owes its confirmation" "$M32_H" 'git commit -m "x"' "no user-confirmed evidence"
+m32_home 8 double human fail "$m32_ap"
+expect_block "m32-t4r a T4 row its approval confirms is refused while the auditor's REFUTED stands" "$M32_H" 'git commit -m "x"' "finding on AC-1.1 stands"
+
+# ============================================================
 # Section 33: a row owed at the close owes nothing before it
 # ============================================================
 #
