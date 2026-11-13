@@ -628,6 +628,22 @@ s34_gate() {
   GATE_RC=$?
 }
 
+# s34_gate15 <repo> <plan> -> GATE_RC, GATE_ERR of a main-checkout commit judged against the run at 15 the plan's run at 14
+#   stands for: a twin of the plan rewritten by sp_at15 (the header naming its branch, base, epic and wave; the log its
+#   steps, approval and rows), the run's own log after them, bound for that commit alone, then taken away and the plan
+#   bound again. The commit gate refuses an open run at 14, so a world built at 14 for what the translation reads asks
+#   the gate of its run as this release carries it.
+s34_gate15() {
+  local p="$2" t r n e
+  n="$(basename "$p" .plan.md)"; e="$(basename "${p%/*}")"; t="${p%/*}/$n-at15.plan.md"; r="${p%/plans/*}/record"
+  rm -rf "$t" "$r/$n-at15"; cp "$p" "$t"; sp_at15 "$t"
+  awk -v e="$e" -v w="$n" 'NR == 1 { print; next } !d && /^---$/ { if (!ep) print "epic: " e; if (!wv) print "wave: " w; d = 1 }
+    !d && /^epic: / { ep = 1 } !d && /^wave: / { wv = 1 } { print }' "$t" > "$t.x" && mv "$t.x" "$t"
+  [ ! -f "$r/$n/run.log" ] || cat "$r/$n/run.log" >> "$r/$n-at15/run.log"
+  bind_marker "$1" "$t"; s34_gate "$1"; bind_marker "$1" "$p"
+  rm -rf "$t" "$r/$n-at15"
+}
+
 # ── hoisted from Section 42: s42_plan, s42_numstat, s42_snap, s42_unchanged, s42_builds_landed — every later shard builds, snapshots and compares plans with them. ──
 s42_plan() {  # <repo> <current> [step-4 block body] -> the plan path; bound, committed
   local p; p="$(s34_plan "$1" "$2" "${3:-}")"

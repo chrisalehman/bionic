@@ -117,8 +117,9 @@ expect_eq "56a0b precondition: a fixture row carries the appended questions key,
   "$(/usr/bin/grep -F '|name=w-aud|' "$S56_RS" | tr '|' '\n' | sed -n 's/^questions=//p')"
 expect_eq "56a0c precondition: …and its role, as the production writer wrote it" "bionic:auditor" \
   "$(/usr/bin/grep -F '|name=w-aud|' "$S56_RS" | tr '|' '\n' | sed -n 's/^subagent_type=//p')"
-s34_gate "$R56"
-expect_eq "56a0d precondition: the fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
+s34_gate15 "$R56" "$P56"
+expect_eq "56a0d precondition: the fixture's run, brought forward to 15, is admitted by the real commit gate" "0" "$GATE_RC"
+[ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 
 # ---------- §FACT-shape (AC-2.1): question, reader, range and result, or refused ----------
 s56_rec ev1.md "${S56_B:0:10}" "$S56_C2" evidence pass piece
@@ -133,8 +134,9 @@ expect_contains "56a4 …and the success line names them" "question=evidence rea
 expect_eq "56a5 proof_last review evidence reads that question's head" "$S56_C2" "$(s56_last "$P56" review evidence)"
 expect_eq "56a6 …a question never read reads nothing" "" "$(s56_last "$P56" review adversarial)"
 expect_eq "56a7 …and with no question, the last review proof of any question (1.11.0's reading)" "$S56_C2" "$(s56_last "$P56" review)"
-s34_gate "$R56"
-expect_eq "56a8 …and the next commit is admitted by the real gate" "0" "$GATE_RC"
+s34_gate15 "$R56" "$P56"
+expect_eq "56a8 …and with the reading registered, the next commit against it is admitted by the real gate" "0" "$GATE_RC"
+[ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 
 s56_rec no-reviewed.md - - evidence pass piece
 s56_rec no-question.md "$S56_C2" "$S56_C3" - pass piece
@@ -560,8 +562,9 @@ for s57q in evidence adversarial structure; do
     [ "$s57q" = evidence ] && printf '\n| AC | verdict | why |\n|---|---|---|\n| AC-1.1 | CONFIRMED | the fixture holds |\n\nverdict: CONFIRMED — the one criterion has a row\n'
     :; } > "$S57T_REC/$s57q.md"
 done
-s34_gate "$R57T"
-expect_eq "57t0b precondition: the task-scale fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
+s34_gate15 "$R57T" "$P57T"
+expect_eq "57t0b precondition: the task-scale fixture's run, brought forward to 15, is admitted by the real commit gate" "0" "$GATE_RC"
+[ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 for s57q in evidence adversarial structure; do
   poke "$R57T" proof-add review "record/task-01-fixture/$s57q.md" --question "$s57q" --reader w-tcrit
   expect_eq "57t §TASK a task-scale plan registers a $s57q reading through the verb (exit 0)" "0" "$RC"
@@ -648,8 +651,9 @@ expect_eq "58a0c precondition: the confirmed r-aud row carries its files= list, 
   "$(/usr/bin/grep -F '|status=confirmed|' "$S58_RS" | /usr/bin/grep -F '|name=r-aud|' | tr '|' '\n' | sed -n 's/^files=//p')"
 expect_eq "58a0d precondition: …and its deliverable=" "$S58_REL/aud.md" \
   "$(/usr/bin/grep -F '|status=confirmed|' "$S58_RS" | /usr/bin/grep -F '|name=r-aud|' | tr '|' '\n' | sed -n 's/^deliverable=//p')"
-s34_gate "$R58"
-expect_eq "58a0e precondition: the fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
+s34_gate15 "$R58" "$P58"
+expect_eq "58a0e precondition: the fixture's run, brought forward to 15, is admitted by the real commit gate" "0" "$GATE_RC"
+[ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 
 # ---------- §ONE-PASS (F1): a reading record is one pass ----------
 # The reviewer's reproduction: the newest pass on top wrote no result, no scope and one FAIL
@@ -871,8 +875,9 @@ mkdir -p "$R59/.bionic/docs/record/wave-01-fixture"
 expect_eq "59a0 precondition: three readings planted, each with its question" "adversarial structure evidence" \
   "$(/usr/bin/grep -E '^proved: kind=review ' "$P59" | sed 's/.* question=\([a-z]*\) .*/\1/' | tr '\n' ' ' | sed 's/ $//')"
 expect_true "59a0b precondition: A, B and C are three commits" test -n "$S59_A" -a "$S59_A" != "$S59_B" -a "$S59_B" != "$S59_C"
-s34_gate "$R59"
-expect_eq "59a0c precondition: the two-read-row plan is admitted by the real commit gate" "0" "$GATE_RC"
+s34_gate15 "$R59" "$P59"
+expect_eq "59a0c precondition: the two-read-row run, brought forward to 15, is admitted by the real commit gate" "0" "$GATE_RC"
+[ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 
 # ---------- the tick: both rows offered, each with its own range ----------
 rm -f "$R59/.bionic/tmp/tick-digest-$SID.state"
@@ -949,8 +954,9 @@ s59w_bare() { printf 'proved: kind=review head=%s at=2026-10-04T09:00:00Z eviden
 # F1: the bare T3 above the adversarial row T4; adversarial read at A, the bare proof at C, head C.
 s59_world s59-f1 "$(s59_read adversarial @A 01 w-crit)
 $(s59w_bare @C)" "$S59W_T1" "$S59W_BARE" "$(s59w_q T4 adversarial)" "$S59W_T5"
-s34_gate "$R59W"
-expect_eq "59f0 precondition: the bare-above-read plan is admitted by the real commit gate" "0" "$GATE_RC"
+s34_gate15 "$R59W" "$P59W"
+expect_eq "59f0 precondition: the bare-above-read run, brought forward to 15, is admitted by the real commit gate" "0" "$GATE_RC"
+[ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 poke_pressure "$R59W" 8192 1.0 tick
 expect_nonempty "59f F1 the tick prints a FILL line (the extractor reads real output)" "$(s47_lines FILL)"
 expect_absent "59f4 F1 …and no WAIT line says T3 goes first" "review T3 goes first" "$(s47_lines WAIT)"
