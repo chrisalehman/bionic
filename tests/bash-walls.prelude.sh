@@ -81,7 +81,7 @@ bw_bind() {
 # block_plan <repo> — a run at Step 5 whose log holds no proof of the whole run, so the evidence gate
 # refuses any `git commit` made under it; an engaged session is bound to it, as bw_bind binds.
 block_plan() {
-  local p; p="$(plan_fixture --at 15 --current 5 "$1/.bionic/docs/plans/epic-x/wave-x.plan.md" wave)" || return 1
+  local p; p="$(plan_fixture --current 5 "$1/.bionic/docs/plans/epic-x/wave-x.plan.md" wave)" || return 1
   [ ! -f "$1/.bionic/tmp/engaged-$SID.state" ] || bound_marker "$1" "$SID" "$p"
 }
 
