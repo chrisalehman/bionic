@@ -13,7 +13,7 @@
 # (`payload missing its session key`) adjacent so that start=open and stop=closed
 # are one artefact.
 #
-# T32 (wave-31, D6; A-orch-61) RETIRED THE STOP GATE'S CLOSED SIDE for a live writer: the stop gate
+# THE STOP GATE'S CLOSED SIDE IS RETIRED for a live writer: the stop gate
 # records reason=unmet and allows, so the keyless pair no longer differs and A10 is retired for
 # the stop gate. The stop rows that reached that deny are the allowed-with-reason case below.
 #
