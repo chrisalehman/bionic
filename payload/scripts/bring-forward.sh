@@ -41,8 +41,8 @@
 # A ROW'S SUITES AND LANDS-ON are a person's words about the task, so they go to the task's own section,
 # a heading whose first word is its id, when the plan has one, and to the gaps list when it has none.
 #
-# EXITS. 0 done; 2 not a plan at plans/<epic>/<wave>.plan.md; 1 a write failed, with nothing after it
-# written.
+# EXITS. 0 done; 2 not a plan at plans/<epic>/<wave>.plan.md, or a plan not named *.plan.md; 1 a write failed, with
+# nothing after it written.
 #
 # Executed, never sourced:  bash ${CLAUDE_PLUGIN_ROOT}/scripts/bring-forward.sh <plan>
 # bash 3.2 (ADR-001).
@@ -161,11 +161,24 @@ _bf_compute() {  # <plan> <work dir> -> <work>/plan, the plan brought forward; <
   cat "$w/translated.gaps" "$w/waits.gaps" "$w/cells.gaps" | awk '!seen[$0]++' > "$w/gaps"
 }
 
+# A PLAN NOT NAMED *.plan.md is refused before anything is written. At 15 a run is found by the walk, and joined to
+# its record, by that name (lib/run.sh `_run_page15`, lib/reader.sh `reader_record`); a page at 15 under any other name
+# is found by no walk and judged by no gate, and every incident's plain plan.md shares one record. The words name the
+# plan for its directory, which is how the skill lays an incident out; elsewhere for its own stem.
+_bf_misnamed() {  # <plan> -> the refusal on stderr
+  local dir="${1%/*}" base="${1##*/}" want
+  [ "$dir" != "$1" ] || dir="."
+  case "$dir" in */incidents/*|incidents/*) want="${dir##*/}.plan.md" ;; *) want="${base%.md}.plan.md" ;; esac
+  printf 'bring-forward: refused — %s is not named as a plan: at version 15 a run is found and joined to its record by a name ending .plan.md; name it %s/%s and run the act again\n' \
+    "$1" "$dir" "$want" >&2
+}
+
 bf_main() {  # <plan> -> the act; prints the gaps list and kept=<directory>
   local plan="${1:-}" log rec kept wave st
   if [ ! -f "$plan" ] || ! log="$(reader_log "$plan" 2>/dev/null)"; then
     printf 'bring-forward: usage: bring-forward <docs>/plans/<epic>/<wave>.plan.md\n' >&2; return 2
   fi
+  case "${plan##*/}" in *.plan.md) ;; *) _bf_misnamed "$plan"; return 2 ;; esac
   plan="$(cd "$(dirname "$plan")" && pwd -P)/${plan##*/}"; wave="${plan##*/}"; rec="${log%/run.log}"; kept="$rec/kept"
   BF_WORK="$(mktemp -d)" || return 1
   _bf_compute "$plan" "$BF_WORK" || return 1

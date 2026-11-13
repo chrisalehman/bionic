@@ -37,6 +37,7 @@
 #   §STEPS   a Step follows the Step above it and a proof or waiver the line above it in its block, whatever
 #            their instants, so the step is the old current: and closure; a Step held (pending) is a gap.
 #   §PARKED  a Step 9 line with no delivered: (a parked plan's note) is a gap, not a step; close-out's parked delivery is.
+#   §NAME    a plan not named *.plan.md is refused before anything is written, in words naming it for its directory.
 #
 # FIXTURE FIDELITY. The plan is a real file in a scratch docs tree, in the shape version-14 plans hold.
 
@@ -496,4 +497,16 @@ expect_contains "the note is named on the gaps list, not written" "gap/v1|ev=ste
 printf '%s\n' '## SDLC State' 'current: 9' '- Step 7: documented at 2026-11-01T10:00Z' "$k8" \
   '- Step 9: delivered: parked on wave/7-parked @ abc1234 — waits on a hand test (2026-11-01T12:00Z wave-7-parked)' > "$K"
 expect_eq "close-out's own parked line is the delivery, its words the step's own field" "n=9|parked on wave/7-parked|state=delivered" "$(bash "$RS" "$K" step | sed 's/^delivered=\(parked on [^ ]*\).*/\1/' | paste -sd'|' -)"
+
+section "NAME"
+# An incident's plan named plain is a run at 14; at 15 a run is found and joined to its record by a name ending
+# .plan.md, so the act on the plain name would leave a run no gate sees.
+NI="$SB/name/incidents/0001-db-outage"; NP="$NI/plan.md"; mkdir -p "$NI"
+printf '%s\n' '---' 'canonical_sdlc_version: 14' 'intent: incident-response' '---' '## Tasks' '| id | step | kind | task | deps | size | status |' \
+  '|---|---|---|---|---|---|---|' '| T1 | 4 | build | Fix. | — | 30 | pending |' '' '## SDLC State' 'current: 4' > "$NP"; NS="$(cksum < "$NP")"
+NO="$(bash "$BF" "$NP" 2>&1)"; expect_status "an incident's plan named plain is refused (exit 2)" 2 "$?"
+expect_contains "…in words that name the plan for its directory and say to run the act again" "name it $NI/0001-db-outage.plan.md and run the act again" "$NO"
+expect_eq "…before anything is written: the plan is unchanged and no record stands" "$NS|" "$(cksum < "$NP")|$(find "$SB/name" -path '*/record/*' -type f | sed 's#.*/name/##' | paste -sd' ' -)"
+mv "$NP" "$NI/0001-db-outage.plan.md"; bash "$BF" "$NI/0001-db-outage.plan.md" >/dev/null 2>&1; expect_status "renamed as the words say, the act takes it (exit 0)" 0 "$?"
+expect_contains "…and the record it writes is the incident's own" "record/0001-db-outage/run.log" "$(find "$SB/name" -path '*/record/*' -type f | sed 's#.*/name/##' | paste -sd' ' -)"
 finish
