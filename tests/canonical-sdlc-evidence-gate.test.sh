@@ -165,7 +165,9 @@ expect_block "continuation 'stack-health: pending' (whole value) → block" \
 # A matrix row's `task:` names the plan row whose work proves it, and the row is owed at that row's step: before
 # it, a pending or blocked row owes neither its per-tier keys nor an auditor's verdict. The literal `task: 9` is the
 # close's step; a row owed at 9 is the close's to settle, never demanded of an open plan.
-# FIXTURE FIDELITY: the matrix plan builders with a `## Tasks` table before the matrix; Step-7+ plans via eg_floor.
+# At 15 the criteria table's Task column says it, read by the same rule; a page with no column owes at no step.
+# FIXTURE FIDELITY: the matrix plan builders with a `## Tasks` table before the matrix; Step-7+ plans via eg_floor; the
+# page at 15 is SYNTHESIZED in the nine cells and the Eval design, its one landing an event of its run's log.
 # fails-when: a pending T3 row whose task is a Step-9 row is refused at 6, 7 or 8, or a row whose task
 # is a Step-4 row is let through at 6, or the deferral outlives its owing step.
 
@@ -253,11 +255,33 @@ ow_ask() {  # <plan> <function> [args…] -> what the function prints, then `rc=
 ow_p8="$(write_plan "$(make_home)" "$(ow_plan 8 T3 T9 | awk '
   /^\| AC-2 \|/ { print; print "| AC-3 | T3 | pending | — |  |"; next }
   { print }
-  END { print "AC-3:"; print "  fails-when: the build is red"; print "  task: T1"; print "  evidence: pending" }')")"
+  END { print "AC-3:"; print "  fails-when: the build is red"; print "  task: T1"; print "  evidence: pending"
+    print "AC-4:"; print "  task: T7"; print "AC-5:"; print "  task: 9"; print "AC-6:"; print "  task: T1, T9" }')")"
 expect_eq "9n matrix_unruled at 8 names the row owed at 4 and not the row owed at the close" "AC-3
 rc=0" "$(ow_ask "$ow_p8" matrix_unruled "$ow_p8" 8)"
-expect_eq "9j the owing step of a row id is that row's step, read from the Tasks table" "9|4|7|9|9" \
-  "$(for t in T9 T1 T7 9 'T1, T9'; do ow_ask "$ow_p8" matrix_owing_step "$ow_p8" "  task: $t" | head -1; done | paste -sd'|' -)"
+expect_eq "9j the owing step of a criterion whose block names a row id is that row's step, read from the Tasks table" "9|4|7|9|9" \
+  "$(for a in AC-2 AC-3 AC-4 AC-5 AC-6; do ow_ask "$ow_p8" matrix_owing_step "$ow_p8" "$a" | head -1; done | paste -sd'|' -)"
+# At 15 a criterion has no block: the criteria table's Task column names the task that proves it, read by the same rule.
+ow_h15="$(make_home)"; ow_15="$ow_h15/.bionic/docs/plans/epic-01-x/wave-01-x.plan.md"; mkdir -p "${ow_15%/*}" "$ow_h15/.bionic/docs/record/wave-01-x"
+ow_page15() {  # <Task column: yes|no> -> the page at 15, T1 landed in its log
+  local h=' Task |' s='---|' x c
+  [ "$1" = yes ] || { h=''; s=''; }
+  printf -- '---\ncanonical_sdlc_version: 15\nrigor: double\nscale: wave\n---\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | the build | — | 30 | REQ-1 | a.sh | — |\n| T7 | 7 | doc | the release | — | 10 | REQ-1 | CHANGELOG.md | — |\n| T9 | 9 | close | the close | — | 10 | REQ-1 | — | — |\n'
+  printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |%s\n|---|---|---|---|---|---|%s\n' "$h" "$s"
+  for x in "AC-2|T9" "AC-3|T1" "AC-4|T7" "AC-5|9" "AC-6|T1, T9" "AC-7|—"; do c=" ${x#*|} |"; [ "$1" = yes ] || c=''
+    printf '| REQ-1 | a suite | %s | live | `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close | above zero |%s\n' "${x%%|*}" "$c"; done
+}
+printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-11-01T00:00:01Z\n' "$EG_HEAD" > "$ow_h15/.bionic/docs/record/wave-01-x/run.log"
+ow_owe15() { local a; for a in AC-2 AC-3 AC-4 AC-5 AC-6 AC-7; do printf '%s:%s:%s ' "$a" "$(ow_ask "$ow_15" matrix_owing_step "$ow_15" "$a" | head -1 | sed 's/^rc=.*//')" "$(ow_ask "$ow_15" matrix_owing_open "$ow_15" "$a" | head -1 | sed 's/^rc=.*//')"; done; }
+ow_page15 yes > "$ow_15"
+expect_eq "9o at 15 each criterion is owed at the step of the task its Task cell names, open while that task is not landed; a dash names none" \
+  "AC-2:9:yes AC-3:4: AC-4:7:yes AC-5:9: AC-6:9:yes AC-7:: " "$(ow_owe15)"
+expect_eq "9p …so the close settles the criteria owed at 9 whose eval is its measure, and the advance to 8 owes those owed before it and none of these" \
+  "AC-2 AC-5 AC-6|AC-3 AC-4 AC-7" "$(ow_ask "$ow_15" matrix_close_rows "$ow_15" | /usr/bin/grep -v '^rc=' | paste -sd' ' -)|$(ow_ask "$ow_15" matrix_unruled "$ow_15" 8 | /usr/bin/grep -v '^rc=' | paste -sd' ' -)"
+ow_page15 no > "$ow_15"
+expect_eq "9q a page at 15 with no Task column owes every criterion at no particular step, as before the column" \
+  "AC-2:: AC-3:: AC-4:: AC-5:: AC-6:: AC-7:: " "$(ow_owe15)"
 ow_p9="$(write_plan "$(make_home)" "$(ow_plan 9 T3 T9)")"
 ow_p9d="$(write_plan "$(make_home)" "$(ow_plan 9 T3 T9 | awk '/^Step 9:/ { print "- Step 9: delivered: 2026-10-24T00:00Z wave-01"; skip = 1; next } skip && /^  / { next } { skip = 0; print }')")"
 expect_eq "9k a row owed at 9 is deferred while the plan is open, and owed once the Step-9 line carries delivered:" \

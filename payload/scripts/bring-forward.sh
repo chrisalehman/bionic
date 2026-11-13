@@ -30,6 +30,14 @@
 # run's `drop` event, so the log carries that its work is no longer owed, and a wait on it stays a wait, met
 # as a landing meets it.
 #
+# A CRITERION'S TASK, the row or rows whose work proves it, was its block's `task:` line; at 15 it is the criteria
+# table's `Task` cell (lib/plan-read.sh `plan_read_criterion_task`), so the act gives the `## Eval design` table that
+# column, each criterion's cell what its block named, so it is owed at the same step after the act as before. Only what
+# a version-15 cell can say is carried: the ids of rows the table holds, or `9` alone; any other token (the 9 beside an
+# id, an id the table lacks), which the older reader passed over, and a block's task whose criterion has no Eval design
+# row, are named on the gaps list, so the act never writes a page the write hook refuses. A table that already holds a
+# `Task` column is left as written.
+#
 # A ROW'S SUITES AND LANDS-ON are a person's words about the task, so they go to the task's own section,
 # a heading whose first word is its id, when the plan has one, and to the gaps list when it has none.
 #
@@ -47,12 +55,12 @@ _bf_dir="$(cd "$_bf_dir" && pwd -P)" || exit 2
 # shellcheck source=/dev/null
 . "$_bf_dir/lib/translate.sh" || exit 2
 
-_bf_plan() {  # <plan> <deps file|-> <gaps out> -> the plan's text brought forward
+_bf_plan() {  # <plan> <deps file|-> <gaps out> [<criteria tasks file>] -> the plan's text brought forward
   # Read twice: the first pass learns the Tasks table's columns, each row's suites and lands-on and which
   # rows have a section of their own; the second writes. A cell keeps its text as written, `\|` included.
   # A task's own section is found by plan-read.sh's one heading rule and its one fence rule, so the act writes where
   # the brief reads: a `#` line inside a fence is the section's text, never a heading, in either pass.
-  awk -v depf="$2" -v gapf="$3" -v nine="id step kind task deps size serves files artifact" "$_PLAN_READ_FENCE$_PLAN_READ_SECTION"'
+  awk -v depf="$2" -v gapf="$3" -v taskf="${4:--}" -v nine="id step kind task deps size serves files artifact" "$_PLAN_READ_FENCE$_PLAN_READ_SECTION"'
     function cells(line, out,   n, i) {
       gsub(/\\[|]/, "\001", line); sub(/^[ \t]*[|]/, "", line); sub(/[|][ \t]*$/, "", line)
       n = split(line, out, "|"); for (i = 1; i <= n; i++) gsub(/^[ \t]+|[ \t]+$/, "", out[i])
@@ -61,11 +69,22 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> -> the plan's text brought forwa
     function unesc(s,   o, i) { o = ""; while ((i = index(s, "\001"))) { o = o substr(s, 1, i - 1) "\\|"; s = substr(s, i + 1) }; return o s }
     function name(s) { s = tolower(s); gsub(/[ \t]+/, "-", s); return s }
     function none(s) { gsub(/—|–|-/, "", s); return s == "" }
+    # carry(c, v): what a version-15 Task cell can say of criterion c whose block named v; each other token a gap.
+    function carry(c, v,   n, a, j, o) {
+      if (v == "9") return "9"
+      gsub(/,/, " ", v); n = split(v, a, /[ \t]+/); o = ""
+      for (j = 1; j <= n; j++) { if (a[j] == "") continue
+        if (a[j] in row) o = o (o == "" ? "" : ", ") a[j]
+        else if (gapf != "") print "gap/v1|ev=criterion|criterion=" c "|field=task:" a[j] "|why=unruled" > gapf }
+      return o == "" ? "—" : o
+    }
+    function addcell(l, v) { sub(/[ \t]+$/, "", l); return (l ~ /[|]$/) ? l " " v " |" : l " | " v }
     function place(   k) { if (ins == "") return
       for (k = 1; k <= 2; k++) if (!none(cell[ins, w2[k]])) print w2[k] ": " unesc(cell[ins, w2[k]])
       for (k = 0; k < blanks; k++) print ""; ins = ""; blanks = 0 }
     BEGIN { nn = split(nine, w9, " "); split("suites lands-on", w2, " ")
-      if (depf != "-") while ((getline l < depf) > 0) { t = index(l, "\t"); dep[substr(l, 1, t - 1)] = substr(l, t + 1) } }
+      if (depf != "-") while ((getline l < depf) > 0) { t = index(l, "\t"); dep[substr(l, 1, t - 1)] = substr(l, t + 1) }
+      if (taskf != "-") while ((getline l < taskf) > 0) { t = index(l, "\t"); if (t > 1) { tk[substr(l, 1, t - 1)] = substr(l, t + 1); tord[++ntk] = substr(l, 1, t - 1) } } }
     FNR == 1 && NR > 1 { sec = ""; nh = 0; tdone = 0; skip = 0; fence = 0 }
     { sub(/\r$/, ""); f = fenced($0) }
     !f && /^## / { sec = substr($0, 4); sub(/[ \t]+$/, "", sec) }
@@ -87,6 +106,17 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> -> the plan's text brought forwa
     !f && /^#+[ \t]/ && !isnine && (heading($0) in row) { print; ins = heading($0); next }
     ins != "" && /^[ \t]*$/ { blanks++; next }
     ins != "" { for (; blanks > 0; blanks--) print "" }
+    sec == "Eval design" && eh && !/^[ \t]*[|]/ { edone = 1 }
+    sec == "Eval design" && ntk && !edone && /^[ \t]*[|]/ {
+      if (!eh) { eh = cells($0, e); ec = 0; et = 0
+        for (i = 1; i <= eh; i++) { if (name(e[i]) == "criterion") ec = i; if (name(e[i]) == "task") et = 1 }
+        if (et || !ec) { edone = 1; print; next }
+        print addcell($0, "Task"); next }
+      if ($0 ~ /^[ \t]*[|][-:| \t]+$/) { l = $0; sub(/[ \t]+$/, "", l); print l "---|"; next }
+      cells($0, r); c = r[ec]; v = "—"
+      if (c in tk) { if (!(c in cv)) cv[c] = carry(c, tk[c]); v = cv[c] }
+      print addcell($0, v); next
+    }
     sec == "Tasks" && !tdone && !isnine && /^[ \t]*[|]/ {
       if (!nh) { nh = 1; o = "|"; s = "|"; for (i = 1; i <= nn; i++) { o = o " " ((w9[i] in hn) ? hn[w9[i]] : w9[i]) " |"; s = s "---|" }; print o; print s; next }
       if ($0 ~ /^[ \t]*[|][-:| \t]+$/) next
@@ -103,7 +133,8 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> -> the plan's text brought forwa
     }
     sec == "Tasks" && nh { tdone = 1 }
     { print }
-    END { place() }' "$1" "$1"
+    END { place()
+      if (gapf != "" && !et) for (i = 1; i <= ntk; i++) if (!(tord[i] in cv)) print "gap/v1|ev=criterion|criterion=" tord[i] "|field=task|why=absent" > gapf }' "$1" "$1"
 }
 
 _bf_deps() {  # <old plan> <implied plan> <deps out> -> the waits that are not deps, as gaps
@@ -125,7 +156,8 @@ _bf_compute() {  # <plan> <work dir> -> <work>/plan, the plan brought forward; <
   : > "$w/deps"; : > "$w/cells.gaps"
   _bf_plan "$plan" - "" > "$w/implied.plan.md" || return 1
   _bf_deps "$plan" "$w/implied.plan.md" "$w/deps" > "$w/waits.gaps" || return 1
-  _bf_plan "$plan" "$w/deps" "$w/cells.gaps" > "$w/plan" || return 1
+  plan_read_criterion_task "$plan" > "$w/tasks" 2>/dev/null || :
+  _bf_plan "$plan" "$w/deps" "$w/cells.gaps" "$w/tasks" > "$w/plan" || return 1
   cat "$w/translated.gaps" "$w/waits.gaps" "$w/cells.gaps" | awk '!seen[$0]++' > "$w/gaps"
 }
 

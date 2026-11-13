@@ -1804,7 +1804,7 @@ sitrep_tick_line() {
     if [ "$HO_MODE" != none ]; then
       plan_verb_open handoff closed-ok
       HO_ROOT="$PV_REPO"
-      trap 'rm -f "$PV_NEW" "$PV_NEW.2" "$PV_DRY" ${PV_MARK:+"$PV_MARK"} "$HO_CF"' EXIT
+      trap 'rm -f "$PV_NEW" "$PV_NEW.2" ${PV_MARK:+"$PV_MARK"} "$HO_CF"' EXIT
       if [ "$HO_MODE" = open ]; then
         if ! /usr/bin/grep -qE '^##[[:space:]]+Tasks([[:space:]]|$)' "$PV_PLAN"; then
           die "REFUSED — the plan has no ## Tasks section, so there are no open tasks to hand off; the plan is unchanged."

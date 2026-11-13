@@ -165,6 +165,12 @@ Fix: repair each row named above; the columns are $(units_columns "${3:-0}")" ;;
 $1
 Path: $FILE_PATH
 Fix: remove each part named; a version-15 run's state is read from its log, not from its plan." ;;
+    criterion-task)  # <each criterion's task token no Tasks row carries>
+      WG_FACT="a criterion names a task the Tasks table lacks"; WG_FIX="name a task the table holds"
+      WG_DETAIL="canonical-sdlc plan '$BASENAME': a criterion's Task cell in '## Eval design' names no row of '## Tasks':
+$1
+Path: $FILE_PATH
+Fix: write in each named Task cell a task id the table holds, several joined by commas, or 9 alone for the close." ;;
     design)  # <scale> <what went wrong>
       # ONE ROW FOR FOUR ARMS: all four say the same thing to the reader — this spec names no design
       # anywhere — and differ only in WHICH route was tried, which is what `detail` carries.
