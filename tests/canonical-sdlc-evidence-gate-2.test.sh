@@ -154,6 +154,9 @@ m32_home 8 double human pass
 expect_block "m32-t4n …and with no approval naming it, owes its confirmation" "$M32_H" 'git commit -m "x"' "no user-confirmed evidence"
 m32_home 6 reviewed hermetic pass
 expect_block "m32-enum a rigor that names no level is refused on its rigor, ahead of the matrix" "$M32_H" 'git commit -m "x"' "rigor is not single or double"
+m32_home 6 double hermetic pass
+printf 'run/v1|ev=proof|ac=AC-1.1|evidence=TBD|at=2026-10-04T01:00:10Z\n' >> "$(plan_fixture_log "$P32")"
+expect_block "m32-ph a criterion whose proof names a placeholder for its evidence is refused as one" "$M32_H" 'git commit -m "x"' "AC-1.1 has placeholder evidence evidence"
 m32_home 8 double human fail "$m32_ap"
 expect_block "m32-t4r a T4 row its approval confirms is refused while the auditor's REFUTED stands" "$M32_H" 'git commit -m "x"' "finding on AC-1.1 stands"
 

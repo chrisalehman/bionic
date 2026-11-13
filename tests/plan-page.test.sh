@@ -288,5 +288,16 @@ printf 'plan=%s\n' "$P3" > "$R/.bionic/tmp/engaged-$SID.state"; printf '%s\n' "$
 expect_eq "an open plan at 14 is refused at the commit, naming the act on its path" "2|1" "$GATE_EXIT|$(grep -c "scripts/bring-forward.sh $P3\$" <<< "$GATE_SAID")"
 printf '%s\n' "$SHUT14" > "$P3"; gate
 expect_status "a closed plan at 14 is admitted at the commit" 0 "$GATE_EXIT"
+# Under any other file name an open run at 14 is refused too, its words naming the plan for its directory first, as the
+# act's own refusal does; a closed one under another name is admitted.
+for P4 in "$R/.bionic/docs/plans/epic-01-demo/wave-04-w.md" "$R/.bionic/docs/incidents/inc-04/incident.md"; do
+  case "$P4" in */incidents/*) W4="${P4%/*}/inc-04.plan.md" ;; *) W4="${P4%.md}.plan.md" ;; esac
+  mkdir -p "${P4%/*}"; printf 'plan=%s\n' "$P4" > "$R/.bionic/tmp/engaged-$SID.state"; printf '%s\n' "$OPEN14" > "$P4"; gate
+  expect_eq "an open run at 14 under ${P4#"$R"/} is refused at the commit, naming the plan for its directory, then the act" "2|1|1" \
+    "$GATE_EXIT|$(grep -c "mv $P4 $W4\$" <<< "$GATE_SAID")|$(grep -c "scripts/bring-forward.sh $W4\$" <<< "$GATE_SAID")"
+  printf '%s\n' "$SHUT14" > "$P4"; gate
+  expect_status "…and closed there it is admitted" 0 "$GATE_EXIT"
+  rm -f "$P4"
+done
 
 finish

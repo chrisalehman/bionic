@@ -2278,9 +2278,22 @@ case "${PLAN##*/}:$SDLC_VERSION" in *.plan.md:15) _EG_V15=1 ;; esac
 # A PLAN AT 14 BINDS ONLY WHILE ITS RUN IS OPEN, by the verdict the run predicate below takes: the
 # session's own open run, or with no binding the root's open run. Open, it is refused naming the act
 # that brings it forward, since a run is carried at 15; closed, it is history and nothing of it is
-# judged.
+# judged. Whatever its file is called: a run at 15 is found and joined to its record by a name ending
+# .plan.md, so a plan under any other name is first named for its directory (an incident's for its
+# own, any other for its stem), as the act's own refusal says, and then brought forward.
 # [WALL: tests/plan-page.test.sh]
 _eg_refuse_live14() {
+  local d="${PLAN%/*}" to
+  case "${PLAN##*/}" in
+    *.plan.md) ;;
+    *) case "$d" in */incidents/*) to="$d/${d##*/}.plan.md" ;; *) to="${PLAN%.md}.plan.md" ;; esac
+       refuse exit2 commit "this plan's run is open at version 14" "rename it, then run bring-forward" \
+"canonical-sdlc plan declares canonical_sdlc_version: 14 and its run is open; a run is carried at version 15, under a plan named *.plan.md.
+Plan: $PLAN
+Fix: name the plan for its directory, then bring it forward, then commit again:
+  mv $(refuse_shell_word "$PLAN") $(refuse_shell_word "$to")
+  bash $(refuse_shell_word "$(refuse_plugin_root)/scripts/bring-forward.sh") $(refuse_shell_word "$to")" ;;
+  esac
   refuse exit2 commit "this plan's run is open at version 14" "run bring-forward on the plan" \
 "canonical-sdlc plan declares canonical_sdlc_version: 14 and its run is open; a run is carried at version 15.
 Plan: $PLAN
@@ -2288,7 +2301,7 @@ Fix: bring the plan forward, then commit again:
   bash $(refuse_shell_word "$(refuse_plugin_root)/scripts/bring-forward.sh") $(refuse_shell_word "$PLAN")"
 }
 case "${PLAN##*/}:$SDLC_VERSION" in
-  *.plan.md:14)
+  *:14)
     case "$EG_VERDICT" in
       bound-open) _eg_refuse_live14 ;;
       none) ! active_run "$BIONIC_ROOT" >/dev/null || _eg_refuse_live14 ;;
@@ -2304,8 +2317,8 @@ if [ "$_EG_V15" -eq 0 ] && [ -z "$(normalize_newlines "$PLAN" | awk '
   exit 0
 fi
 
-# A plan at 15; a plan at 14 was decided above. A run file not named as a plan is still read at the
-# supported version. Anything else — an older number, a typo, an empty value, garbage — blocks. Below this line a plan at 15 takes
+# A plan at 15; a plan at 14 was decided above, under any name. Anything else — an older number, a typo,
+# an empty value, garbage — blocks. Below this line a plan at 15 takes
 # each fact from its run's log where it is held, and names each one the log does not hold yet
 # (`_eg_v15_owe`), so no path reaches `exit 0` without the whole contract of the version it declares.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
@@ -2597,29 +2610,6 @@ $(printf '%s\n' "$rows" | sed -E 's/^/- /')"
   refuse exit2 commit "$verdict" "write the roster name as agent" "$_eg_detail"
 }
 
-# Extract the ## SDLC State section (from its header up to the next ##
-# header or EOF). Line endings normalized here too (normalize_newlines), for
-# the same reason as FRONTMATTER above. Fence-aware (same idiom as matrix_section): lines inside
-# ``` fenced code blocks are skipped, so a plan documenting the schema in a fenced
-# example — a `## SDLC State` heading with its own `current:` — does not shadow the
-# REAL section (which would mis-parse `current:` and false-
-# block). Fence state is tracked across the whole file so section detection
-# stays fence-aware.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-SECTION=$(normalize_newlines "$PLAN" | awk '
-  /^[[:space:]]*```/ { fence = !fence; next }
-  fence { next }
-  /^## SDLC State/ { flag=1; next }
-  /^## / { flag=0 }
-  flag')
-
-if [ -z "$SECTION" ] && [ "$_EG_V15" -eq 0 ]; then
-  _eg_detail="canonical-sdlc plan file has an empty '## SDLC State' section.
-Plan: $PLAN
-Fix: populate the section with 'current: N' and per-step evidence lines."
-  refuse exit2 commit "'## SDLC State' is empty" "add current: and the step lines" "$_eg_detail"
-fi
-
 # ================================================== THE TWO STEP-4 ARMS (epic-22 K2)
 #
 # Defined here, directly before `CURRENT` is parsed; the matrix readers they call are at file
@@ -2879,27 +2869,13 @@ Grew:${grown}"
   refuse exit2 commit "$fact" "approve doctrine-growth or shrink" "$_eg_detail"
 }
 
-# Parse current step. Accepts integers (1-13) and the 8b adversarial
-# critic step.
-if [ "$_EG_V15" -eq 1 ]; then
-  _eg_step="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
-  CURRENT="$(sed -n 's/^n=//p' <<< "$_eg_step")"
-  [ -n "$CURRENT" ] || refuse exit2 commit "the run's log holds no step" "record the run's step" \
+# The step is the run's newest step event: an integer, or 8b, the adversarial critic's step.
+_eg_step="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+CURRENT="$(sed -n 's/^n=//p' <<< "$_eg_step")"
+[ -n "$CURRENT" ] || refuse exit2 commit "the run's log holds no step" "record the run's step" \
 "canonical-sdlc plan at version 15: the run's log holds no step event, so the step this commit is judged at is not known.
 Plan: $PLAN
 Fix: record the run's step in its log before committing."
-else
-  # At 14 too the step is the reader's, the plan's current: line read through the translation with the log's events
-  # over it, so a step the log alone holds is the step judged. A place that cannot be read is refused, never guessed.
-  if ! declare -F proof_step_held >/dev/null 2>&1 || ! proof_step_held "$PLAN" >/dev/null; then
-    refuse exit2 commit "the run's facts could not be read" "run the commit again" \
-"canonical-sdlc plan: the run's step and approval could not be read, so the step this commit is judged at is not known.
-Plan: $PLAN
-Fix: run the commit again; the fold's own line above names why it failed."
-  fi
-  _EG_PLACE="$_PROOF_PLACE"; CURRENT=""
-  case "$_EG_PLACE" in n=*) CURRENT="${_EG_PLACE%%$'\n'*}"; CURRENT="${CURRENT#n=}" ;; esac
-fi
 
 # THE VALUE THE PLAN DECLARED, kept before anything substitutes a subject (wave-18
 # REQ-1, D1). One arm below replaces `CURRENT` for the length of one commit, with a row's
@@ -3382,8 +3358,7 @@ fi
 # the matrix's and the walk's arms); Step 7 its document, the header's adrs: line naming records that stand or none with
 # a reason; Step 8 the integrate row's landing when the plan holds one and the run is not parked, every tree the log
 # names gone, and what the close cleaned, on its step event; Step 9 its delivery and, when a target is named, the three
-# of a deploy on its step event. Steps 8 and 9 are asked so at 14 too: the reader answers an older plan's Step 8 and 9
-# lines as those fields, and the close writes them to the step's event, so there is one way to judge a close.
+# of a deploy on its step event, which the close writes.
 
 _eg_v15_approved() {  # <key> -> 0 an approval of <key> stands, 1 none; a fold that fails is refused
   _proof_ask "$PLAN" reader_q_approved "$PLAN" "$1" >/dev/null
@@ -3428,97 +3403,7 @@ _eg_v15_trees() {  # <plan> -> each path the run's latest tree events name, one 
   printf '%s\n' "$f" | awk -F'|' "$_READER_AWK"'ev() == "tree" { t[line_kv("row")] = line_kv("path") } END { for (r in t) if (t[r] != "") print t[r] }'
 }
 
-# Find the evidence line for the current step: a "Step N:" line, with or
-# without a leading list marker.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-LINE=$(echo "$SECTION" \
-       | grep -E "^[[:space:]]*-?[[:space:]]*Step[[:space:]]+${CURRENT}[[:space:]]*:" \
-       | head -1)
-
-# STEP 6 OWES READINGS, NOT A POINTER (wave-27 T14; D3). A `Step 6:` line naming a review used to
-# be what this step's commits were admitted on; from wave-27 the readings themselves are, judged
-# in `dispatch` (`_eg_refuse_readings`), so at `current: 6` the line is neither demanded nor read
-# here. Every other step keeps its line.
-_EG_STEP_LINE_OWED=1
-[ "$CURRENT" = 6 ] && _EG_STEP_LINE_OWED=0
-if [ "$_EG_V15" -eq 1 ] || [ "$CURRENT" = 8 ] || [ "$CURRENT" = 9 ]; then
-  _eg_v15_step_asks
-  _EG_STEP_LINE_OWED=0
-fi
-
-if [ -z "$LINE" ] && [ "$_EG_STEP_LINE_OWED" = 1 ]; then
-  _eg_detail="canonical-sdlc plan file has no 'Step ${CURRENT}:' line in '## SDLC State'.
-Plan: $PLAN
-Fix: add the evidence artifact for step ${CURRENT} before committing."
-  refuse exit2 commit "the plan has no line for the current step" "add the step's evidence line" "$_eg_detail"
-fi
-
-RAW_VALUE=$(echo "$LINE" | sed -E "s/^[[:space:]]*-?[[:space:]]*Step[[:space:]]+${CURRENT}[[:space:]]*:[[:space:]]*//")
-
-# Multi-line form: when the Step line has no inline content, evidence lives on
-# indented continuation lines below. Collect them so the rest of the hook treats
-# `Step N:\n  field: value\n  ...` as non-empty evidence.
-extract_continuation() {
-  local section="$1" step="$2"
-  local sline
-  sline=$(echo "$section" | grep -nE "^[[:space:]]*-?[[:space:]]*Step[[:space:]]+${step}[[:space:]]*:" | head -1 | cut -d: -f1)
-  [ -z "$sline" ] && return
-  echo "$section" | awk -v start="$sline" '
-    NR > start {
-      if ($0 ~ /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+[0-9]+[ab]?[[:space:]]*:/) exit
-      if ($0 ~ /^[^[:space:]]/) exit
-      if ($0 ~ /^[[:space:]]*$/) next
-      print $0
-    }
-  '
-}
-
-CONTINUATION=$(extract_continuation "$SECTION" "$CURRENT")
-
-# Combined block used for empty/placeholder/shape checks.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-BLOCK=$RAW_VALUE
-if [ -n "$CONTINUATION" ]; then
-  BLOCK="${BLOCK}
-${CONTINUATION}"
-fi
-BLOCK_STRIPPED=$(echo "$BLOCK" | tr -d '[:space:]')
-
-if [ -z "$BLOCK_STRIPPED" ] && [ "$_EG_STEP_LINE_OWED" = 1 ]; then
-  _eg_detail="canonical-sdlc step ${CURRENT} evidence line is empty in '## SDLC State'.
-Plan: $PLAN
-Fix: record the evidence artifact (commit SHA, path, link) for step ${CURRENT} before committing."
-  refuse exit2 commit "this step's evidence line is empty" "record the step's evidence" "$_eg_detail"
-fi
-
-# R7 intent-scoped Step-5 keys. A whole-value match against this exact key name exempts
-# the line from the universal placeholder ban.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-is_r7_key() {
-  case "$1" in
-    behavior-preservation|compat-matrix|revert-plan|baseline|target|re-measure) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-# Placeholder detection. Each line of the block is checked as a whole value:
-# the text after the first ':' on a "key: value" continuation line, or the
-# whole line when it has no colon (the single-line "Step N: <value>" case,
-# which arrives here as RAW_VALUE). ${_bline#*:} yields the after-colon text
-# on colon lines and the unchanged line otherwise.
-[ "$_EG_STEP_LINE_OWED" = 1 ] && while IFS= read -r _bline; do
-  _bkey="${_bline#"${_bline%%[![:space:]]*}"}"
-  case "$_bkey" in *:*) _bkey="${_bkey%%:*}"; _bkey="${_bkey%"${_bkey##*[![:space:]]}"}" ;; esac
-  if is_r7_key "$_bkey"; then
-    continue
-  fi
-  if is_placeholder_value "${_bline#*:}"; then
-    _eg_detail="canonical-sdlc step ${CURRENT} evidence line is a placeholder (\"${BLOCK}\").
-Plan: $PLAN
-Fix: replace with the actual evidence artifact before committing."
-    refuse exit2 commit "this step's evidence line is a placeholder" "replace it with real evidence" "$_eg_detail"
-  fi
-done <<< "$BLOCK"
+_eg_v15_step_asks
 
 # ---------- the requirements a run is held to, from Step 2 ----------
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]

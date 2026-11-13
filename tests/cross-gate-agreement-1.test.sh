@@ -17,7 +17,7 @@ set -uo pipefail
 # ============================================================
 section "A1 — N-way agreement on active-wave detection (AC-9, checklist A8/A9)"
 # ============================================================
-echo "parties: $(basename "$PARTY_DP") · $(basename "$PARTY_SG") · $(basename "$PARTY_EG") · $(basename "$PARTY_ER") · $(basename "$PARTY_LG")"
+echo "parties: $(basename "$PARTY_DP") · $(basename "$PARTY_SG") · $(basename "$PARTY_ER") · $(basename "$PARTY_LG")"
 
 run_battery assert
 
