@@ -35,6 +35,7 @@
 #   §LEDGER  a landed row with no line asked of the reader: admitted when it answers landed, refused when it does not
 #   §DROP    a drop in the run's log reads dropped to the reader and the fill at 15, launched or not; a wait on it is met
 #   §NAMED   a task at 15 names in its deps the approval it waits on; the fill takes every wait from plan_read_waits
+#   §ORDER-15  the order and its post-release exception hold at 15, a row's state the run's, the exception's waits the reader's
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT is lib/units.sh's own header. §2 is its assertion: the same rows with every
 # column REVERSED must produce a byte-identical TSV.
@@ -1407,5 +1408,27 @@ RP="$SANDBOX/docs/plans/e/r.plan.md"; LV_LOG="$SANDBOX/docs/record/r/run.log"; m
 sed 's/| T2 | 4 | build | two | T1, approval:D7 |/| T2 | 8 | integrate | two | approval:release |/' "$DP" > "$RP"; printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=8' 1Z 'approval|key=step3|by=me' 2Z 'published|row=T1|commit=c1|by=w' 3Z > "$LV_LOG"; RW_A="$(rw)"; sed -i.bak 's/| approval:release |/| — |/' "$RP"
 expect_eq "NAMED-6 with no release row an integrate task waits on the release approval it names, never on the one its kind implies" "T2 approval:release|" "$RW_A|$(rw)"
 expect_eq "NAMED-3 the stop wall's edit that makes a row wait names the deps cell and a row's id at 15, the reads cell and its record at 14" "deps RID|reads RECORD" "$(bash -c '. "$1/stop.sh" && stop_wait_cell "$2" && stop_wait_cell "$3"' _ "${LIB%/*}" "$DP" "$LV_P" | paste -sd'|' -)"
+
+section "§ORDER-15 — at 15 the order holds as §ORDER and §POST hold it at 14: a row is open unless the run's log lands or drops it, and the fix read as a piece is the reader's waits"
+O5="$SANDBOX/docs/plans/e/o5.plan.md"; O5_LOG="$SANDBOX/docs/record/o5/run.log"; mkdir -p "${O5_LOG%/*}"
+o5() { printf -- '---\ncanonical_sdlc_version: 15\n---\n## Tasks\n| id | step | kind | task | deps | size | serves | files | artifact |\n|---|---|---|---|---|---|---|---|---|\n' > "$O5"; printf '| %s | %s | %s | t | %s | 30m | R | %s | — |\n' "$@" >> "$O5"; }   # <id step kind deps files>...
+o5log() { printf 'run/v1|ev=%s|at=2026-11-01T00:00:00Z\n' 'step|n=7' "$@" > "$O5_LOG"; }   # <event>... -> the run's log
+ov() { call units_validate "$O5" > "$SANDBOX/.ov"; printf '%s|%s' "$(cat "$SANDBOX/.ov")" "$CALL_RC"; }
+O5_REG="T5 5 test — r/T5.md"; O5_REV="T6 6 review — r/T6.md"; O5_REL="T7 7 doc — CHANGELOG.md"
+# shellcheck disable=SC2086
+o5 $O5_REG $O5_REV $O5_REL; o5log
+expect_eq "ORD15-1 control: regression at 5, review at 6, release at 7, all open: admitted (rc 0)" "|0" "$(ov)"
+# shellcheck disable=SC2086
+o5 $O5_REV $O5_REL ${O5_REG/ 5 / 7 }; O5_A="$(ov)"; o5log 'published|row=T5|commit=c1|by=w' 'published|row=T6|commit=c2|by=w' 'published|row=T7|commit=c3|by=w'; O5_B="$(ov)"; o5log 'drop|row=T5|why=not owed'
+expect_eq "ORD15-2 the regression after the review: refused with the words 14 gives (rc 1); every row landed, or the regression dropped: not judged" "$OR_REGLINE|1 |0 |0" "$O5_A $O5_B $(ov)"
+# shellcheck disable=SC2086
+o5 $O5_REG $O5_REL ${O5_REV/ 6 / 7 }; o5log
+expect_eq "ORD15-3 the release ahead of a review: refused with the words 14 gives (rc 1)" \
+  "T7: the release row comes ahead of the review row T6; the order is build, regression, review, release: put T7 at step 7, after T6|1" "$(ov)"
+# shellcheck disable=SC2086
+o5 T1 4 build — a.sh $O5_REG $O5_REV $O5_REL T8 7 build — b.sh T9 7 review T8 r/T9.md; o5log 'published|row=T1|commit=c1|by=w' 'published|row=T5|commit=c2|by=w' 'published|row=T6|commit=c3|by=w'
+O5_A="$(ov)"; printf 'run/v1|ev=published|row=T7|commit=c4|by=w|at=2026-11-01T00:00:01Z\n' >> "$O5_LOG"; O5_B="$(ov)"; sed -i.bak 's/| review | t | T8 |/| review | t | T1 |/' "$O5"
+expect_eq "ORD15-4 a review past the release waiting on the fix T8: refused while the release is open, admitted once the log lands it, refused when it waits on T1 written before it" \
+  "$PO_ORD|1 |0 $PO_ORD|1" "$O5_A $O5_B $(ov)"
 
 finish
