@@ -2028,15 +2028,15 @@ if [ -n "$PLAN" ] && [ -n "$C_FILES" ]; then
   fi
   if declare -F proof_debt_hits >/dev/null 2>&1; then
     _dp_debt_hits="$(proof_debt_hits "$PLAN" "$C_FILES" 2>/dev/null | awk -F'\t' '$6 == "-"')"
-    _dp_dseen=" "; _dp_dall=""
+    # ONE CALL FOR EVERY CONCEPT THE BRIEF TOUCHES: the verb is a process that reads the run whole, so a call per
+    # concept spent a read per concept, and a brief touching nine spent the wall's deadline. The verb touches every
+    # unburned item of each concept named, whatever its kind.
+    _dp_dcs="$(printf '%s\n' "$_dp_debt_hits" | awk -F'\t' '$1 != "" && !($1 in s) { s[$1] = 1; printf "%s%s", (n++ ? " " : ""), $1 }')"
+    _dp_dall=""
+    [ -z "$_dp_dcs" ] \
+      || _dp_dall="$(cd "$BIONIC_ROOT" 2>/dev/null && bash "$HOOK_DIR/session-poker.sh" debt touched "$_dp_dcs" "$PLAN" 2>/dev/null)"
     while IFS='	' read -r _dp_dc _dp_dk _ _ _dp_dn _; do
       [ -n "$_dp_dc" ] || continue
-      # One call per concept: the verb touches every unburned item of it, whatever its kind.
-      case "$_dp_dseen" in *" $_dp_dc "*) : ;; *)
-        _dp_dseen="$_dp_dseen$_dp_dc "
-        _dp_dall="$_dp_dall
-$(cd "$BIONIC_ROOT" 2>/dev/null && bash "$HOOK_DIR/session-poker.sh" debt touched "$_dp_dc" "$PLAN" 2>/dev/null)" ;;
-      esac
       _dp_dsaid="$(printf '%s\n' "$_dp_dall" | awk -v c="$_dp_dc" -v k="$_dp_dk" \
         '$1 == "poker:" && $2 == "debt" && $3 == "touched" && $5 == c && $6 == k && $7 == "touches" && $8 ~ /^[0-9]+$/ { print $8; exit }')"
       _dp_debt="${_dp_debt:+$_dp_debt

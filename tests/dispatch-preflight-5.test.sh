@@ -474,4 +474,60 @@ expect_eq "LN.5 a Files path under the tracked docs home (docs/adrs/…): admitt
 ln_gate ln6 notes-home/records/x.md 'docs-root: notes-home'
 expect_eq "LN.6 a Files path under a docs-root: set off the default: admitted" "allow" "$GATE_VERDICT"
 
+section "§DEBT-ONCE — an admitted launch asks the debt verb once for every concept its Files touch"
+# ============================================================================
+#
+# A brief whose Files: cover a site of a debt the run holds unburned carries one advisory line per item,
+# `debt: <concept> <kind> touches <n> — burn it in this row or say why not`, and each item's touches go up by one
+# through the debt's one writer, `session-poker.sh debt touched`, a process that reads the run whole. So the wall
+# starts it once, naming every concept the brief touches, however many.
+# FIXTURES: make_repo's approved, bound plan with row T23; nine debts of nine concepts written to its run's log by the
+# verb's own `debt add` over a record of nine debt: lines sited at notes/c<i>.md:1; a brief binding T23 whose Files:
+# name the nine notes, admitted with Lands-on: none by the fixture's `prose: notes/`. SYNTHESIZED.
+# THE COUNT: BASH_ENV names a prelude every bash the drive starts reads. In a `session-poker.sh debt touched` process
+# alone (known by its command line: bash 3.2 gives the prelude no $0 or arguments of the script) it writes one `call` line and traces into the same file with the function in PS4, so each entry to lib/proof.sh
+# `_proof_facts` there (the run's facts, read whole) is one read.
+# fails-when: nine concepts start the verb more than once, or it reads the run more than once; the advisory loses an
+# item or its count.
+DO_N=9
+DO_PRE="$SANDBOX/do-prelude.sh"
+cat > "$DO_PRE" <<'DO_PRELUDE'
+case "$(ps -o args= -p $$ 2>/dev/null)" in
+  *"/session-poker.sh debt touched "*) printf 'call\n' >> "$DO_TRACE"; exec 2>>"$DO_TRACE"; PS4='+|DO|${FUNCNAME[0]:-}| '; set -x ;;
+esac
+DO_PRELUDE
+do_repo() {  # <repo tag> -> REPO, its run holding DO_N untouched debts of DO_N concepts
+  REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"
+  pf_tasks "$REPO" '| T23 | 4 | build | the notes | — | 30 | REQ-1 | a.sh | — |'
+  printf 'prose: notes/\n' > "$REPO/.bionic/config.yaml"
+  seq 1 "$DO_N" | awk '{ print "debt: duplicate c" $1 " notes/c" $1 ".md:1" }' > "$REPO/.bionic/docs/record/wave-01-test/do-debts.md"
+  (cd "$REPO" && bash "$BIONIC_HOOKS_DIR/session-poker.sh" debt add record/wave-01-test/do-debts.md "$(pf_plan_path "$REPO")" >/dev/null 2>&1)
+}
+do_gate() {  # [<extra jq filter>] -> GATE_*, DO_CALLS, DO_READS, DO_SAID (the advisory's debt lines)
+  DO_TRACE="$SANDBOX/do-trace.$RANDOM"; : > "$DO_TRACE"
+  GATE_ENV="BASH_ENV=$DO_PRE DO_TRACE=$DO_TRACE" run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T23 w99-T23 \
+    "$(printf '%s\nFiles: %s\nLands-on: none the notes are prose' "$BRIEF_FULL" "$(seq 1 "$DO_N" | awk '{ printf "%snotes/c%s.md", (NR > 1 ? ", " : ""), $1 }')")")" \
+    w99-T23 claude-sonnet-5 "$S5_LIVE_TRANSCRIPT" "${2:-implementor}" | jq -c "${1:-.}")"
+  DO_CALLS="$(/usr/bin/grep -c '^call$' "$DO_TRACE")"
+  DO_READS="$(/usr/bin/grep -c -F '|DO|_proof_facts| local plan=' "$DO_TRACE")"
+  DO_SAID="$(printf '%s' "$GATE_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null | /usr/bin/grep '^debt: ')"
+}
+do_touches() {  # -> each debt as <concept>=<touches>, in the run's order
+  (cd "$REPO" && bash "$BIONIC_HOOKS_DIR/session-poker.sh" debt list "$(pf_plan_path "$REPO")" 2>/dev/null) \
+    | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^touches=/) printf "%s%s=%s", (NR > 1 ? " " : ""), $1, substr($i, 9) }'
+}
+do_want() { seq 1 "$DO_N" | awk -v t="$1" '{ printf "%sc%s=%s", (NR > 1 ? " " : ""), $1, t }'; }
+DO_LINES="$(seq 1 "$DO_N" | awk '{ print "debt: c" $1 " duplicate touches 1 — burn it in this row or say why not" }')"
+
+do_repo rdo1
+expect_eq "DO.0 precondition: the run holds nine debts of nine concepts, none touched" "$(do_want 0)" "$(do_touches)"
+do_gate
+echo "      (DO counts: $DO_CALLS calls of debt touched, $DO_READS reads of the run, for $DO_N concepts)"
+expect_eq "DO.1 the brief touching nine concepts is admitted" "allow" "$GATE_VERDICT"
+expect_eq "DO.2 …and the wall starts the debt verb once for all nine" "1" "$DO_CALLS"
+expect_eq "DO.3 …which reads the run once" "1" "$DO_READS"
+expect_eq "DO.4 …each item touched once" "$(do_want 1)" "$(do_touches)"
+expect_eq "DO.5 …and the advisory carries one line per item, at its new count, in its words" \
+  "$DO_LINES" "$DO_SAID"
+
 finish

@@ -473,6 +473,14 @@ cp "$DBT_LOG" "$TMPROOT/dbt-before"
 poke "$RSEV" debt touched no_such_concept "$PSEV"
 expect_eq "DEBT-L6c debt touched on a concept the ledger does not hold is refused (exit 1)" "1" "$RC"
 expect_true "DEBT-L6d …the log byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LOG"
+# The dispatch wall's one call names every concept a brief touches, blank-separated in one operand.
+poke "$RSEV" debt touched "tree_count no_such_concept" "$PSEV"
+expect_eq "DEBT-L6e several concepts, one the ledger does not hold: refused (exit 1) naming that one alone, the log byte-identical" \
+  "1|names no_such_concept;|same" "$RC|$(printf '%s' "$OUT" | /usr/bin/grep -o 'names [a-z_ ]*;')|$(cmp -s "$TMPROOT/dbt-before" "$DBT_LOG" && echo same)"
+poke "$RSEV" debt touched "tree_count log_shim" "$PSEV"
+expect_eq "DEBT-L6f several concepts in one call: each item touched once, its new count printed" \
+  "0|poker: debt touched — log_shim one-case-abstraction touches 1|poker: debt touched — tree_count duplicate touches 2" \
+  "$RC|$(printf '%s\n' "$OUT" | sort | paste -sd'|' -)"
 poke "$RSEV" debt burn log_shim T9 "$PSEV"
 expect_eq "DEBT-L7 debt burn exits 0 and prints the item burned" "0|poker: debt burn — log_shim one-case-abstraction burned T9" "$RC|$OUT"
 cp "$DBT_LOG" "$TMPROOT/dbt-before"
@@ -484,7 +492,7 @@ expect_eq "DEBT-L7d …and a burned item is touched no more (exit 1, unchanged)"
   "$RC|$(cmp -s "$TMPROOT/dbt-before" "$DBT_LOG" && echo same)"
 poke "$RSEV" debt list "$PSEV"
 expect_eq "DEBT-L8 debt list prints each debt as the reader holds it, the touch and the burn read from the log" \
-  '0|tree_count duplicate "lib/b.sh:2, lib/c.sh:5" touches=1 raised-by=record/wave-01-fixture/dbt-rec.md|log_shim one-case-abstraction "lib/a.sh:4" touches=0 raised-by=record/wave-01-fixture/dbt-rec.md burned=T9' "$RC|$(printf '%s\n' "$OUT" | paste -sd'|' -)"
+  '0|tree_count duplicate "lib/b.sh:2, lib/c.sh:5" touches=2 raised-by=record/wave-01-fixture/dbt-rec.md|log_shim one-case-abstraction "lib/a.sh:4" touches=1 raised-by=record/wave-01-fixture/dbt-rec.md burned=T9' "$RC|$(printf '%s\n' "$OUT" | paste -sd'|' -)"
 poke "$RSEV" debt
 expect_eq "DEBT-L9 debt with no subcommand is a usage error (exit 2)" "2" "$RC"
 poke "$RSEV" debt touched
