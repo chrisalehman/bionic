@@ -38,6 +38,8 @@
 #            their instants, so the step is the old current: and closure; a Step held (pending) is a gap.
 #   §PARKED  a Step 9 line with no delivered: (a parked plan's note) is a gap, not a step; close-out's parked delivery is.
 #   §NAME    a plan not named *.plan.md is refused before anything is written, in words naming it for its directory.
+#   §SHARED  the old record a plain name joined: the words say to move it when no other plan shares it, else by how many
+#            it is shared; renamed, the act names each of its files on the gaps list and writes nothing from it.
 #
 # FIXTURE FIDELITY. The plan is a real file in a scratch docs tree, in the shape version-14 plans hold.
 
@@ -505,8 +507,27 @@ NI="$SB/name/incidents/0001-db-outage"; NP="$NI/plan.md"; mkdir -p "$NI"
 printf '%s\n' '---' 'canonical_sdlc_version: 14' 'intent: incident-response' '---' '## Tasks' '| id | step | kind | task | deps | size | status |' \
   '|---|---|---|---|---|---|---|' '| T1 | 4 | build | Fix. | — | 30 | pending |' '' '## SDLC State' 'current: 4' > "$NP"; NS="$(cksum < "$NP")"
 NO="$(bash "$BF" "$NP" 2>&1)"; expect_status "an incident's plan named plain is refused (exit 2)" 2 "$?"
-expect_contains "…in words that name the plan for its directory and say to run the act again" "name it $NI/0001-db-outage.plan.md and run the act again" "$NO"
+expect_contains "…in words that name the plan for its directory and say to run the act again" "name it $(cd "$NI" && pwd -P)/0001-db-outage.plan.md and run the act again" "$NO"
 expect_eq "…before anything is written: the plan is unchanged and no record stands" "$NS|" "$(cksum < "$NP")|$(find "$SB/name" -path '*/record/*' -type f | sed 's#.*/name/##' | paste -sd' ' -)"
 mv "$NP" "$NI/0001-db-outage.plan.md"; bash "$BF" "$NI/0001-db-outage.plan.md" >/dev/null 2>&1; expect_status "renamed as the words say, the act takes it (exit 0)" 0 "$?"
 expect_contains "…and the record it writes is the incident's own" "record/0001-db-outage/run.log" "$(find "$SB/name" -path '*/record/*' -type f | sed 's#.*/name/##' | paste -sd' ' -)"
+
+section "SHARED"
+# At 14 every plain-named incident plan joins one record, record/plan.md. Renamed, the plan joins its own, so the old
+# one is read by nothing: moved first when no other plan shares it, else named file by file on the gaps list.
+SD="$SB/shared"; SA="$SD/incidents/0006-a"; mkdir -p "$SA" "$SD/record/plan.md"; SD="$(cd "$SD" && pwd -P)"; SA="$SD/incidents/0006-a"
+printf '%s\n' '---' 'canonical_sdlc_version: 14' '---' '## Tasks' '| id | step | kind | task | deps | size | status |' '|---|---|---|---|---|---|---|' \
+  '| T1 | 4 | build | Fix. | — | 30 | pending |' '' '## SDLC State' 'current: 4' > "$SA/plan.md"
+printf 'line/v1|ev=published|row=T1|commit=c1|kind=queue|by=-|why=-|at=2026-11-02T00:00:01Z\n' > "$SD/record/plan.md/landing-proofs.log"
+printf 'a\n' > "$SD/record/plan.md/asks.state"; SL="$(cd "$SD/record/plan.md" && cksum landing-proofs.log asks.state)"
+SO="$(bash "$BF" "$SA/plan.md" 2>&1)"; expect_status "an incident's plain plan with a record no other plan shares is refused (exit 2)" 2 "$?"
+expect_contains "…in words that say to move the record to the incident's own name first" "name it $SA/0006-a.plan.md, move $SD/record/plan.md to $SD/record/0006-a, and run the act again" "$SO"
+mkdir -p "$SD/incidents/0007-b"; printf '%s\n' '---' 'canonical_sdlc_version: 13' 'abandoned: 2026-10-01 superseded' '---' '## SDLC State' 'current: 8' > "$SD/incidents/0007-b/plan.md"
+SO="$(bash "$BF" "$SA/plan.md" 2>&1)"; expect_status "shared with a closed incident's plain plan, it is refused (exit 2)" 2 "$?"
+expect_contains "…in words that say by how many the record is shared and that the act will name it" "$SD/record/plan.md is shared by 1 other plan named plan.md, so the act will name each of its files on the gaps list" "$SO"
+expect_eq "…and no word to move it" "0" "$(grep -c 'move ' <<< "$SO")"
+mv "$SA/plan.md" "$SA/0006-a.plan.md"; SO="$(bash "$BF" "$SA/0006-a.plan.md" 2>/dev/null)"; expect_status "renamed, the act takes it (exit 0)" 0 "$?"
+for f in asks.state landing-proofs.log; do expect_contains "the gaps list names $f of the shared record, unread" "gap/v1|ev=record|record=plan.md|field=$f|why=shared" "$SO"; done
+expect_eq "…and the act wrote nothing from it: the shared record stands as it was, its landing not the incident's" "$SL|state=pending" \
+  "$(cd "$SD/record/plan.md" && cksum landing-proofs.log asks.state)|$(bash "$RS" "$SA/0006-a.plan.md" status T1 | head -1)"
 finish
