@@ -2282,11 +2282,15 @@ case "${PLAN##*/}:$SDLC_VERSION" in *.plan.md:15) _EG_V15=1 ;; esac
 # .plan.md, so a plan under any other name is first named for its directory (an incident's for its
 # own, any other for its stem), as the act's own refusal says, and then brought forward.
 # [WALL: tests/plan-page.test.sh]
+_eg_plan_named() {  # -> the path the plan takes when named for its directory: an incident's for it, any other for its stem
+  local d="${PLAN%/*}"
+  case "$d" in */incidents/*) printf '%s/%s.plan.md' "$d" "${d##*/}" ;; *) printf '%s.plan.md' "${PLAN%.md}" ;; esac
+}
 _eg_refuse_live14() {
-  local d="${PLAN%/*}" to
+  local to
   case "${PLAN##*/}" in
     *.plan.md) ;;
-    *) case "$d" in */incidents/*) to="$d/${d##*/}.plan.md" ;; *) to="${PLAN%.md}.plan.md" ;; esac
+    *) to="$(_eg_plan_named)"
        refuse exit2 commit "this plan's run is open at version 14" "rename it, then run bring-forward" \
 "canonical-sdlc plan declares canonical_sdlc_version: 14 and its run is open; a run is carried at version 15, under a plan named *.plan.md.
 Plan: $PLAN
@@ -2300,7 +2304,21 @@ Plan: $PLAN
 Fix: bring the plan forward, then commit again:
   bash $(refuse_shell_word "$(refuse_plugin_root)/scripts/bring-forward.sh") $(refuse_shell_word "$PLAN")"
 }
+# A PAGE AT 15 IS A PLAN ONLY BY ITS NAME: a run at 15 is found by the walk and joined to its record by a name ending
+# .plan.md, so a page at 15 a session is bound to under any other name has no run this gate can read, and the escape
+# for a file with no state section below would admit every commit against it unjudged. It is refused, named for its
+# directory as a plan at 14 is.
+# [WALL: tests/plan-page.test.sh]
+_eg_refuse_misnamed15() {
+  refuse exit2 commit "this plan at 15 is not named as a plan" "name it for its directory" \
+"canonical-sdlc plan declares canonical_sdlc_version: 15, and a run at 15 is found and joined to its record by a name ending .plan.md, so nothing of this one is judged under its name.
+Plan: $PLAN
+Fix: name the plan for its directory, then commit again:
+  mv $(refuse_shell_word "$PLAN") $(refuse_shell_word "$(_eg_plan_named)")"
+}
 case "${PLAN##*/}:$SDLC_VERSION" in
+  *.plan.md:15) ;;
+  *:15) case "$EG_VERDICT" in bound-open|bound-closed) _eg_refuse_misnamed15 ;; esac ;;
   *:14)
     case "$EG_VERDICT" in
       bound-open) _eg_refuse_live14 ;;

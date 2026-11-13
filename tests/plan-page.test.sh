@@ -299,5 +299,14 @@ for P4 in "$R/.bionic/docs/plans/epic-01-demo/wave-04-w.md" "$R/.bionic/docs/inc
   expect_status "…and closed there it is admitted" 0 "$GATE_EXIT"
   rm -f "$P4"
 done
+# A page at 15 bound to a session under a name not ending .plan.md is found by no walk and joined to no record, so
+# nothing of it is judged under that name: it is refused, its words naming it for its directory.
+for P5 in "$R/.bionic/docs/plans/epic-01-demo/wave-05-v.md" "$R/.bionic/docs/incidents/inc-05/incident.md"; do
+  case "$P5" in */incidents/*) W5="${P5%/*}/inc-05.plan.md" ;; *) W5="${P5%.md}.plan.md" ;; esac
+  mkdir -p "${P5%/*}"; cp "$P2" "$P5"; printf 'plan=%s\n' "$P5" > "$R/.bionic/tmp/engaged-$SID.state"; gate
+  expect_eq "a page at 15 bound under ${P5#"$R"/} is refused at the commit, naming it for its directory" "2|1" \
+    "$GATE_EXIT|$(grep -c "mv $P5 $W5\$" <<< "$GATE_SAID")"
+  rm -f "$P5"
+done
 
 finish
