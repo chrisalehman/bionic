@@ -17,7 +17,9 @@
 #   door_copy <root> <dir>         copies a built fixture to <dir>, binds the copy's own plan, and prints the same
 #                                  line for the copy. A section that changes the fixture changes a copy.
 #   door_piece <root> <row>        cuts the tree <root>/.worktrees/<row> on `wt/<row>` off the accepted head, with
-#                                  its `.bionic` link, and prints its path. The plan's rows are T1 and T2.
+#                                  its `.bionic` link, records its tree event in the run's log through the writer the
+#                                  create verb records it with (lib/worktree.sh `worktree_tree_event`, by `dw-<row>`), and
+#                                  prints its path. The plan's rows are T1 and T2.
 #   door_release <root> <tree>     commits the release in <tree>: CHANGELOG.md gains the DOOR_VERSION entry whose
 #                                  landing numbers `release-note` renders at the accepted head, and plugin.json
 #                                  carries DOOR_VERSION. Prints the instant the numbers were rendered for. DOOR_RUNNER
@@ -192,8 +194,12 @@ door_copy() (  # <root> <dir> -> `<root> <accepted head>` of the copy
 door_piece() (  # <root> <row> -> the tree's path
   local t="$1/.worktrees/$2"
   _door_inside "$1" || { echo "door_piece: $1 is no fixture under WORLD_ROOT" >&2; exit 2; }
+  local base
+  base="$(git -C "$1" rev-parse "refs/heads/$DOOR_BRANCH")" || exit 1
   git -C "$1" worktree add --quiet -b "wt/$2" "$t" "$DOOR_BRANCH" >/dev/null 2>&1 || exit 1
   ln -s "$1/.bionic" "$t/.bionic" || exit 1
+  bash -c '. "$1/worktree.sh" && worktree_tree_event "$2" "$3" "dw-$4" "$5" "wt/$4" "$6" "$4"' _ \
+    "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$1" "$WORLD_SID" "$2" "$t" "$base" || exit 1
   printf '%s' "$t"
 )
 
