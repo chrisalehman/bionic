@@ -4160,21 +4160,6 @@ walk_mode() {
   esac
 }
 
-# The Step-5 evidence block, read at ANY current step. The module-level BLOCK
-# holds the CURRENT step's evidence, so at current: 6..9 it is the Step-6..9
-# block and cannot answer for the walk; this extractor re-reads Step 5 out of
-# SECTION with the same line + continuation grammar the top of the hook uses.
-# Empty when the plan carries no Step-5 line at all — which, post-Verify, is
-# itself a missing walk artifact.
-step5_evidence_block() {
-  local line raw cont
-  line=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*Step[[:space:]]+5[[:space:]]*:" | head -1)
-  [ -n "$line" ] || return 0
-  raw=$(echo "$line" | sed -E "s/^[[:space:]]*-?[[:space:]]*Step[[:space:]]+5[[:space:]]*:[[:space:]]*//")
-  cont=$(extract_continuation "$SECTION" "5")
-  printf '%s\n%s\n' "$raw" "$cont"
-}
-
 # Resolve a `walk-artifact:` value to an absolute path. Absolute passes through;
 # a `record/...` value is docs-root-relative (the form the Step-5 contract
 # names); anything else is project-relative, so the fully-spelled
@@ -4256,12 +4241,11 @@ validate_walk_artifact() {
 # exception, not the rule), so the no-op is recorded to the durable audit
 # file only (log_finding_quiet, below) and never echoed to stderr — an
 # ordinary commit stays exactly as silent as it is today. Declared, it
-# requires the Step-5 evidence to carry an `environments-covered:` line
-# naming every non-fog environment, and blocks a fog entry that names no
-# cure — both are real refusals, spoken the normal BLOCKED way.
+# requires the newest walk proof's `environments=` field to name every
+# non-fog environment, and blocks a fog entry that names no cure.
 #
-# AC-23: this arm reads only the DECLARATION and the Step-5
-# `environments-covered:` line — never a derived suite set. It is
+# This arm reads only the DECLARATION and the walk proof's covered
+# set — never a derived suite set. It is
 # independent of the floor, which lib/proof.sh `facts_state` judges from
 # Step 7 (wave-35 T31; D20); nothing here substitutes for that.
 #
@@ -4309,7 +4293,8 @@ _eg_v15_walk_envs() {  # <plan> -> the newest walk proof's environments= field; 
 }
 validate_environments() {
   local raw entries name desc cure covered_names fog_names fog_missing_cure
-  local b5 covered_line covered_norm missing claimed_fog claimed_undeclared
+  local covered_line covered_norm missing claimed_fog claimed_undeclared
+  [ "$_EG_V15" -eq 1 ] || return 0
   case "${CURRENT%[ab]}" in 5|6|7|8|9) : ;; *) return 0 ;; esac
   raw=$(frontmatter_get environments)
   if [ -z "$raw" ]; then
@@ -4345,20 +4330,9 @@ validate_environments() {
   fi
 
   if [ -n "$covered_names" ]; then
-    b5=$(step5_evidence_block)
-    covered_line=$(echo "$b5" | grep -E '^[[:space:]]*environments-covered[[:space:]]*:' | head -1 \
-      | sed -E 's/^[[:space:]]*environments-covered[[:space:]]*:[[:space:]]*//' \
-      | sed -E 's/;.*$//' | sed -E 's/[[:space:]]+$//')
-    # At 15 the walk covers them: the newest walk proof's environments= field is the covered set.
-    if [ "$_EG_V15" -eq 1 ]; then
-      covered_line="$(_proof_ask "$(proof_run_plan "$PLAN")" _eg_v15_walk_envs "$PLAN")" || _eg_v15_unreadable
-      [ -n "$covered_line" ] || { _eg_v15_ask "Step 5's environments covered: the walk's proof names none (proof-add walk <record> --environments <names>)"; return 0; }
-    fi
-    if [ -z "$covered_line" ]; then
-      block_matrix "the plan never says which environments ran" "list what you covered" \
-        "environments: declared covered set (${covered_names}) but the Step 5 evidence has no 'environments-covered:' line." \
-        "record 'environments-covered: <name>[, <name>...]' in the Step 5 block naming every declared non-fog environment."
-    fi
+    # The walk covers them: the newest walk proof's environments= field is the covered set.
+    covered_line="$(_proof_ask "$(proof_run_plan "$PLAN")" _eg_v15_walk_envs "$PLAN")" || _eg_v15_unreadable
+    [ -n "$covered_line" ] || { _eg_v15_ask "Step 5's environments covered: the walk's proof names none (proof-add walk <record> --environments <names>)"; return 0; }
     covered_norm=$(printf '%s' "$covered_line" | tr ',' ' ' | tr -s '[:space:]' ' ')
     missing=""
     for name in $covered_names; do
