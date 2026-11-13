@@ -559,11 +559,12 @@ section "§VERDICT / §RULED — the matrix asks for a verdict from step 6 and f
 # person answered what the release approval card collects after Step 7. From step 6 every row needs a verdict; from
 # step 8 every row needs a ruling, and the advance to 8 is the judge's, so the judge asks the wall's own predicate
 # (walls.sh `matrix_row_ruled`) and opens one `row:<AC>` item per unruled row for the card to settle.
-# Fixture fidelity: a real repository on feature/t23, a double wave plan bound to this session, its floor and its
-# five readings in their production writer's shape (lib/proof.sh `proof_floor_line`, `proof_line`) at the head.
+# Fixture fidelity: a real repository on the run's working branch, the run at 15 a double wave plan's text stands for
+# (the prelude's eg6_world) bound to this session, its five readings in their production writer's shape (lib/proof.sh
+# `proof_line`) at the head, read into its log; the auditor's cell is the evidence review there.
 # fails-when: a REFUTED row is refused at 6; an empty auditor cell passes 6; an unruled row passes 8 or opens no
-#   item; a waived row is refused at 8; a second definition of the predicate, or a parser of the user's
-#   confirmation outside walls.sh.
+#   item; a waived row is refused at 8; a T4 row its approval confirms is refused at 8; a second definition of the
+#   predicate, or a parser of the user's confirmation outside walls.sh.
 R_RU="$(mk_repo ruled)"
 H_RU="$(git -C "$R_RU" rev-parse HEAD)"
 RU_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
@@ -590,10 +591,6 @@ ru_plan() {  # <current> <the second row's tier | status | evidence | auditor> [
   printf 'AC-2:\n  fails-when: a second planted defect\n  evidence: record/generic-evidence.md\n'
   [ -z "${3:-}" ] || printf '%s\n' "$3"
 }
-ru_put() {  # the plan at the step its text names: a step an earlier advance appended to the run's log is taken out
-  local l; ru_plan "$@" > "$R_RU/.bionic/docs/plans/active.md"; bw_bind "$R_RU"
-  l="$R_RU/.bionic/docs/record/active.md/run.log"; [ ! -f "$l" ] || { /usr/bin/grep -v '|ev=step|' "$l" > "$l.t"; mv "$l.t" "$l"; }
-}
 RU_OUT=""; RU_RC=0
 ru_poke() {  # <verb args...> -> RU_OUT (both streams), RU_RC of session-poker.sh in the repository, as this session
   RU_OUT="$( cd "$R_RU" && env HOME="$FAKE_HOME" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$SID" \
@@ -603,60 +600,63 @@ ru_owed() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_list' _ "
 # ru_owed_clear -> the store the session's asks are filed in, as ru_owed reads it (the run's register when the session is
 # bound), removed
 ru_owed_clear() { rm -f "$(bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_file' _ "$RU_LIB" "$R_RU" "$SID" 2>/dev/null)"; }
-RU_CONFIRM='Dana 2026-10-20 opened the page and read the line back'
+
+# ru_put <current> <AC-2's eval type> <the evidence review at the head: pass | fail, waived | none, the question waived>
+#   [<log line>...] -> RU_P, the run at 15 §RULED's plan text stands for (the prelude's eg6_world), AC-2 its criterion,
+#   discharged by a proof after the lines given; the session bound to it. Its auditor cell is that review's verdict.
+ru_put() {
+  local c="$1" ty="$2" ev="$3" t; shift 3
+  t="$(ru_plan "$c" 'T1 | discharged | see AC-2 | CONFIRMED')"
+  [ "$ev" = pass ] || t="$(printf '%s\n' "$t" | /usr/bin/grep -v 'question=evidence')"
+  [ "$ev" = pass ] || set -- "run/v1|ev=waiver|question=evidence|head=$H_RU|by=Dana|said=ship it|at=2026-10-12T12:11:00Z" "$@"
+  [ "$ev" != fail ] || set -- "run/v1|ev=proof|kind=review|head=$H_RU|question=evidence|result=fail|scope=piece|reader=w-read|evidence=record/r/evidence-2.md|at=2026-10-12T12:10:00Z" "$@"
+  EG6_AC=AC-2 eg6_world "$R_RU" "$t" "$ty" "$@"; RU_P="$EG6_PAGE"
+  bound_marker "$R_RU" "$SID" "$RU_P" >/dev/null 2>&1
+}
+ru_step() { bash "$RU_LIB/../reader.sh" "$RU_P" step 2>/dev/null | head -1; }
+git -C "$R_RU" checkout -q -B wave/01-fixture
+RU_AP='run/v1|ev=approval|key=AC-2|by=Dana|said=opened the page and read the line back|at=2026-10-12T12:20:00Z'
 
 # §VERDICT-1 — a REFUTED row with no waiver is a verdict: the advance to 6 takes it.
-ru_put 5 'T1 | discharged | see AC-2 | REFUTED'
-RU_STEP_LOG="$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "$RU_LIB" "$R_RU/.bionic/docs/plans/active.md")"; RU_SUMS="$(cksum "$RU_STEP_LOG" 2>&1)"
+ru_put 5 unit fail
+RU_STEP_LOG="$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "$RU_LIB" "$RU_P")"; RU_SUMS="$(cksum "$RU_STEP_LOG" 2>&1)"
 ru_poke current 6 --check
 expect_eq "VERDICT-1: a REFUTED row with no waiver — current 6 --check passes, and appends nothing to the run's log" "0|$RU_SUMS" "$RU_RC|$(cksum "$RU_STEP_LOG" 2>&1)"
 expect_contains "VERDICT-1b: …saying it would advance" "current 6 --check: would advance" "$RU_OUT"
 # §VERDICT-2 — an empty auditor cell on a non-T4 row is no verdict: refused, naming the row.
-ru_put 5 'T1 | discharged | see AC-2 |  '
+ru_put 5 unit none
 ru_poke current 6 --check
 expect_eq "VERDICT-2: an empty auditor cell on a T1 row — current 6 --check refuses" "1" "$RU_RC"
 expect_contains "VERDICT-2b: …naming the row" "the auditor has not confirmed AC-2" "$RU_OUT"
-# §VERDICT-3 — a T4 row the user confirmed under a standing UNVERIFIABLE has a verdict at 6 (its ruling is step 8's).
-ru_put 5 'T4 | discharged | see AC-2 | UNVERIFIABLE' "  user-confirmed: $RU_CONFIRM"
-ru_poke current 6 --check
-expect_eq "VERDICT-3: a confirmed T4 row under UNVERIFIABLE — current 6 --check passes" "0" "$RU_RC"
 
 # §RULED-1 — at 7, an unruled REFUTED row: the advance to 8 refuses naming it, and the judge opens its row item.
 ru_owed_clear
-ru_put 7 'T1 | discharged | see AC-2 | REFUTED'
+ru_put 7 unit fail
 ru_poke current 8 --check
 expect_eq "RULED-1: an unruled REFUTED row — current 8 --check refuses" "1" "$RU_RC"
 expect_contains "RULED-1b: …naming the row in the matrix arm's words" "the auditor has not confirmed AC-2" "$RU_OUT"
 expect_eq "RULED-1c: …and the check writes no item" "" "$(ru_owed)"
 ru_poke current 8
-expect_eq "RULED-1d: the advance itself refuses too, the plan unchanged" "1|7" \
-  "$RU_RC|$(awk -F': *' '/^current:/ { print $2; exit }' "$R_RU/.bionic/docs/plans/active.md")"
+expect_eq "RULED-1d: the advance itself refuses too, the run's step unchanged" "1|n=7" "$RU_RC|$(ru_step)"
 expect_eq "RULED-1e: …and the judge opens one row:AC-2 item for the card to settle" "row:AC-2" "$(ru_owed)"
-# §RULED-3 — a confirmed T4 row under a standing UNVERIFIABLE has a verdict and no ruling: refused at 8.
-ru_put 7 'T4 | discharged | see AC-2 | UNVERIFIABLE' "  user-confirmed: $RU_CONFIRM"
+# §RULED-4 — a T4 row its approval confirms, with no auditor verdict, is ruled by that confirmation.
+ru_put 7 human none "$RU_AP"
 ru_poke current 8 --check
-expect_eq "RULED-3: a confirmed T4 row under UNVERIFIABLE — current 8 --check refuses" "1" "$RU_RC"
-expect_contains "RULED-3b: …naming the row" "AC-2" "$RU_OUT"
-# §RULED-4 — the same T4 row with the auditor cell a dash is ruled by the user's confirmation.
-ru_put 7 'T4 | discharged | see AC-2 | —' "  user-confirmed: $RU_CONFIRM"
-ru_poke current 8 --check
-expect_eq "RULED-4: a confirmed T4 row under a dash — current 8 --check passes" "0" "$RU_RC"
+expect_eq "RULED-4: a T4 row its approval confirms, its cell empty — current 8 --check passes" "0" "$RU_RC"
 # §RULED-2 — the REFUTED row waived: ruled, the advance to 8 takes it, and the judge closes the item it opened.
-ru_put 7 'T1 | waived | see AC-2 | REFUTED' '  waiver: Dana 2026-10-20 "waive it" — the finding is accepted'
+ru_put 7 unit fail
+printf 'run/v1|ev=waiver|ac=AC-2|by=Dana|said=waive it|at=2026-10-20T00:00:00Z\n' >> "$RU_STEP_LOG"
 ru_poke current 8 --check
 expect_eq "RULED-2: the same row waived — current 8 --check passes" "0" "$RU_RC"
 ru_poke current 8
-expect_eq "RULED-2b: the advance appends step 8, the plan's text as it was" "0|n=8|current: 7" \
-  "$RU_RC|$(bash "$RU_LIB/../reader.sh" "$R_RU/.bionic/docs/plans/active.md" step | head -1)|$(/usr/bin/grep -m1 '^current:' "$R_RU/.bionic/docs/plans/active.md")"
+expect_eq "RULED-2b: the advance appends step 8" "0|n=8" "$RU_RC|$(ru_step)"
 expect_eq "RULED-2c: …and the row:AC-2 item RULED-1e read open is closed" "" "$(ru_owed)"
 
 # §STANDING — a row a logged proof discharges takes its verdict from the newest passing evidence review for as long as
 # the judge reads the evidence question covered at the working head: past a prose commit it stands and a commit is
 # admitted, past code it is gone and the commit refused by name, and a failing review after the passing one ends it.
-# The commit is judged on the plan itself, whose name, not a copy's, joins the run's log.
-ru_put 6 'T1 | pending | — |  '; RU_P="$R_RU/.bionic/docs/plans/active.md"
-RU_LOG="$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "$RU_LIB" "$RU_P")"; mkdir -p "${RU_LOG%/*}"
-printf 'run/v1|ev=proof|ac=AC-2|evidence=record/generic-evidence.md|at=2026-10-12T12:30:00Z\n' >> "$RU_LOG"
+ru_put 6 unit pass
+RU_LOG="$RU_STEP_LOG"
 ru_verdict() { bash -c '. "$1/units.sh" && . "$1/walls.sh" && PLAN="$2" && matrix_load "$2" "$3" && awk -F"\037" "\$1 == \"AC-2\" { print \$6 }" <<< "$MATRIX_CELLS"' \
   _ "$RU_LIB" "$RU_P" "$(git -C "$R_RU" rev-parse HEAD)" 2>/dev/null; }
 ru_commit() { run_hook "$(mk_payload "$R_RU" 'git commit -m x')"; }
@@ -669,7 +669,6 @@ expect_contains "STANDING-2b: …naming the row" "the auditor has not confirmed 
 printf 'run/v1|ev=proof|kind=review|head=%s|evidence=record/r/evidence-2.md|question=evidence|reader=w-read|result=fail|scope=piece|at=2026-10-12T13:00:00Z\n' "$H_RU" >> "$RU_LOG"
 git -C "$R_RU" reset -q --hard "$H_RU"
 expect_eq "STANDING-3: a failing review after the passing one at the same head: the passing one no longer stands" "REFUTED" "$(ru_verdict)"
-sed -i.bak -e '/|ac=AC-2|evidence=record\/generic-evidence\.md|/d' -e '/|evidence=record\/r\/evidence-2\.md|/d' "$RU_LOG"; rm -f "$RU_LOG.bak"
 
 # §RULED-ONE — one body: the predicate is defined once, and no file outside walls.sh and the reader's own parses the
 # user's confirmation: the reader reads it from an older plan's block and translates it onto the criterion's event.
@@ -681,6 +680,10 @@ expect_contains "RULED-ONE-d: …the search reads walls.sh's own parser of the k
 expect_eq "RULED-ONE-c: …and nothing names user-confirmed outside walls.sh and the reader's files, no writer of it either" "" \
   "$(printf '%s\n' "$RU_UC" | /usr/bin/grep -v 'walls.sh' | /usr/bin/grep -vE 'lib/(reader|translate)\.sh:')"
 
+ru_put14() {  # the plan at 14 at the step its text names: a step an earlier advance appended to the run's log is taken out
+  local l; ru_plan "$@" > "$R_RU/.bionic/docs/plans/active.md"; bw_bind "$R_RU"
+  l="$R_RU/.bionic/docs/record/active.md/run.log"; [ ! -f "$l" ] || { /usr/bin/grep -v '|ev=step|' "$l" > "$l.t"; mv "$l.t" "$l"; }
+}
 # ---------------------------------------------------------------------------
 section "§PENDING-T4 — a T4 row awaiting its user passes the per-key check at 6 and 7, and the advance to 8 refuses it"
 # Step 3 renders `user-confirmed: pending` into every T4 row. The per-key loop used to refuse that stub as a
@@ -693,7 +696,7 @@ section "§PENDING-T4 — a T4 row awaiting its user passes the per-key check at
 # fails-when: the stub is refused at 6 or 7; the stub is admitted at 8; the advance to 8 opens no row item for the card; or the
 #   key loop goes back to refusing it and the check still passes.
 RU_PENDING='  user-confirmed: pending'
-ru_put 5 'T4 | discharged | see AC-2 |  ' "$RU_PENDING"
+ru_put14 5 'T4 | discharged | see AC-2 |  ' "$RU_PENDING"
 ru_poke current 6 --check
 expect_eq "PT-1: a T4 row whose user-confirmed is pending — current 6 --check passes" "0" "$RU_RC"
 expect_contains "PT-1b: …saying it would advance" "current 6 --check: would advance" "$RU_OUT"
@@ -703,7 +706,7 @@ ru_plan 7 'T4 | discharged | see AC-2 |  ' "$RU_PENDING" | sed 's/^current: 7$/c
 ru_poke current 7 --check
 expect_eq "PT-2: the same row — current 7 --check passes" "0" "$RU_RC"
 ru_owed_clear
-ru_put 7 'T4 | discharged | see AC-2 |  ' "$RU_PENDING"
+ru_put14 7 'T4 | discharged | see AC-2 |  ' "$RU_PENDING"
 ru_poke current 8 --check
 expect_eq "PT-3: the same row — current 8 --check refuses" "1" "$RU_RC"
 expect_contains "PT-3b: …naming the row in the judge's own words" "the auditor has not confirmed AC-2" "$RU_OUT"
@@ -712,7 +715,7 @@ expect_eq "PT-3c: the advance itself refuses, the plan unchanged" "1|7" \
   "$RU_RC|$(awk -F': *' '/^current:/ { print $2; exit }' "$R_RU/.bionic/docs/plans/active.md")"
 expect_eq "PT-3d: …and the judge opens the one row:AC-2 item the card settles" "row:AC-2" "$(ru_owed)"
 # The key is still demanded and still non-blank: only the stub is let through, so the loop is not switched off.
-ru_put 5 'T4 | discharged | see AC-2 |  ' '  user-confirmed: todo'
+ru_put14 5 'T4 | discharged | see AC-2 |  ' '  user-confirmed: todo'
 ru_poke current 6 --check
 expect_eq "PT-3e: control — any other placeholder in the key is still refused at 6" "1" "$RU_RC"
 expect_contains "PT-3f: …as a placeholder" "placeholder" "$RU_OUT"
@@ -727,7 +730,7 @@ sed -i.bak 's/^\(.*\)if matrix_is_placeholder "\$val" && ! user_confirmed_pendin
 expect_eq "PT-4: the doctor took — the copy differs from the real library in exactly one line" "1" \
   "$(diff "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/walls.sh" "$PT_MUT/scripts/lib/walls.sh" | /usr/bin/grep -c '^>')"
 expect_eq "PT-4b: …and the mutant still parses" "0" "$(bash -n "$PT_MUT/scripts/lib/walls.sh" 2>/dev/null; echo $?)"
-ru_put 5 'T4 | discharged | see AC-2 |  ' "$RU_PENDING"
+ru_put14 5 'T4 | discharged | see AC-2 |  ' "$RU_PENDING"
 PT_OUT="$( cd "$R_RU" && env HOME="$FAKE_HOME" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$SID" \
   CLAUDE_PROJECT_DIR= bash "$PT_MUT/hooks/session-poker.sh" current 6 --check 2>&1 )"; PT_RC=$?
 expect_eq "PT-4c: with the placeholder test restored, current 6 --check refuses the stub" "1" "$PT_RC"
