@@ -142,11 +142,6 @@ Fix: run Step 0 (Configure) to set these explicitly. See SKILL.md §Step 0.
 Required opt-in flags:        $2
 Required discriminator flags: $3
 Required:                     model_plan" ;;
-    no-matrix)  # <sdlc-step>
-      WG_FACT="this plan has no Verification Matrix"; WG_FIX="add the Verification Matrix"
-      WG_DETAIL="canonical-sdlc plan '$BASENAME' (sdlc-step $1) is missing a '## Verification Matrix' section.
-Path: $FILE_PATH
-Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix') and lock it at Step 3 approval." ;;
     tasks-invalid)  # <sdlc-step> <the violations> [1 at version 15]
       WG_FACT="this plan's Tasks table is invalid"; WG_FIX="fix the row the detail names"
       WG_DETAIL="canonical-sdlc plan '$BASENAME' (sdlc-step $1) has a '## Tasks' table that breaks the Task invariants:
