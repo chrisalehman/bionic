@@ -530,4 +530,33 @@ expect_eq "DO.4 …each item touched once" "$(do_want 1)" "$(do_touches)"
 expect_eq "DO.5 …and the advisory carries one line per item, at its new count, in its words" \
   "$DO_LINES" "$DO_SAID"
 
+section "§DEBT-ADMITTED — a touch is written only for a launch the wall admits"
+# ============================================================================
+#
+# The touch is written past the wall's last refusal, so a launch refused after the debt arm's read leaves every count
+# as it was: here by the roster's own two refusals, a roster that is a link and one that cannot be appended to. A launch
+# admitted with no row (a read-only role from inside an agent) is still a launch, and touches.
+# FIXTURES: §DEBT-ONCE's run and brief; the roster a link to a sandbox file, or a file with no write bit; for the nested
+# launch, the payload given an agent_id and the role bionic:researcher. SYNTHESIZED.
+# fails-when: a refused launch moves a count; an admitted one, with a row or without, does not touch.
+do_repo rda1
+ln -s "$SANDBOX/rda1-elsewhere" "$(roster_path "$REPO" "$SID_A")"
+do_gate
+expect_eq "DA.1 a launch the roster's link refuses, past the debt arm's read: refused, by the link" "deny|symbolic link" \
+  "$GATE_VERDICT|$(printf '%s' "$GATE_ERR$GATE_REASON" | /usr/bin/grep -o 'symbolic link' | head -1)"
+expect_eq "DA.1b …and no count moved" "$(do_want 0)" "$(do_touches)"
+do_repo rda2
+printf '# roster\n' > "$(roster_path "$REPO" "$SID_A")"; chmod 400 "$(roster_path "$REPO" "$SID_A")"
+do_gate
+expect_eq "DA.2 a launch whose roster cannot be appended to: refused, as unwritable" "deny|cannot be written" \
+  "$GATE_VERDICT|$(printf '%s' "$GATE_ERR$GATE_REASON" | /usr/bin/grep -o 'cannot be written' | head -1)"
+expect_eq "DA.2b …and no count moved" "$(do_want 0)" "$(do_touches)"
+chmod 600 "$(roster_path "$REPO" "$SID_A")"
+do_repo rda3
+do_gate '. + {agent_id: "a7f3c2e1"}' bionic:researcher
+expect_eq "DA.3 a read-only role launched from inside an agent: admitted with no row" "allow|0" \
+  "$GATE_VERDICT|$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+expect_eq "DA.3b …its items touched once, in one call" "$(do_want 1)|1" "$(do_touches)|$DO_CALLS"
+expect_eq "DA.3c …and advised at their new counts" "$DO_LINES" "$DO_SAID"
+
 finish
