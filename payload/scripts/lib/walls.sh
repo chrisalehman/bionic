@@ -4188,21 +4188,6 @@ resolve_walk_path() {  # $1 = raw walk-artifact value
   esac
 }
 
-# walk_registered <raw walk-artifact value> <its resolved path> -> 0 when the run holds a walk proof whose
-# evidence names that artifact, compared as written and as resolved, so a `record/<f>` spelling and an
-# absolute one meet. proof-add walk registers the proof only after it parsed the record's verdict table, so
-# the proof is what makes the artifact a registered walk rather than narration. The proofs are the reader's,
-# through lib/proof.sh's kept fold, so a walk the run's log alone holds is registered here.
-walk_registered() {  # 2 when the run's facts cannot be read
-  local ev f
-  f="$(_proof_facts "$(proof_run_plan "$PLAN")")" || return 2
-  while IFS= read -r ev; do
-    [ -n "$ev" ] || continue
-    if [ "$ev" = "$1" ] || [ "$(resolve_walk_path "$ev")" = "$2" ]; then return 0; fi
-  done <<< "$(printf '%s\n' "$f" | awk -F'|' "$(proof_fact_awk)"'proof_fact() && PROOF_KIND == "walk" { print PROOF_EVIDENCE }')"
-  return 1
-}
-
 # The arm itself. Fires at current: 5..9 (the Verify gate and, as a durable
 # prefix condition — plan assumption A5 — every step after it, so the artifact
 # cannot be deleted once Verify is behind you). Trigger: at least one matrix row
@@ -4212,7 +4197,8 @@ walk_registered() {  # 2 when the run's facts cannot be read
 # has verified nothing to narrate.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_walk_artifact() {
-  local discharged b5 raw abs
+  local discharged raw abs
+  [ "$_EG_V15" -eq 1 ] || return 0
   case "${CURRENT%[ab]}" in 5|6|7|8|9) : ;; *) return 0 ;; esac
   [ "$(walk_mode)" = required ] || return 0
   # Reuses the reader's answer validate_matrix() loads (MATRIX_CELLS). It runs immediately before
@@ -4224,22 +4210,9 @@ validate_walk_artifact() {
   [ -n "${discharged:-}" ] || discharged=$(awk -F'\037' '$2 == "discharged" && $3 != "waiver" { n++ } END { print n + 0 }' <<< "${MATRIX_CELLS:-}")
   [ "$discharged" -gt 0 ] || return 0
 
-  # Truncated at the first ';' below: sibling extractors in this hook already
-  # tolerate a Step-5 line with more fields packed after the value
-  # (`walk-artifact: record/x.md; cmd: ...`); this one was the outlier,
-  # greedy to end-of-line, and swallowed the packed remainder as part of the
-  # "path" (plan assumption A17). The dedicated continuation-line shape has
-  # no ';' in it, so the truncation is a no-op there.
-  # THE WALK IS THE RUN'S NEWEST WALK PROOF (proof-add walk), read through the reader, a dry copy as its plan; an
-  # older plan that holds none names its walk in the Step 5 block, and that pointer is read as written.
+  # THE WALK IS THE RUN'S NEWEST WALK PROOF (proof-add walk), read through the reader, a dry copy as its plan. The
+  # verb registers it only once it parsed the record's verdict table, so the record's AC identifiers are its verdicts.
   raw="$(_proof_last_read "$(proof_run_plan "$PLAN")" walk evidence)" || raw=""
-  if [ -z "$raw" ]; then
-    b5=$(step5_evidence_block)
-    # THE SIBLING POINTER READ (AC-3.3). Same record shape, same tolerance: `evidence_line_field`
-    # keeps the first-`;` truncation this read already had and drops only the line-start
-    # anchor, so a Step-5 line that opens with `cmd: …` no longer hides its walk artifact.
-    raw=$(evidence_line_field "$b5" walk-artifact)
-  fi
   if [ -z "$raw" ]; then
     block_matrix "rows are discharged with no walk recorded" "walk it, then register it" \
       "the walk gate: matrix rows are discharged but the run holds no walk proof, and the Step 5 evidence has no 'walk-artifact:' line." \
@@ -4270,19 +4243,6 @@ validate_walk_artifact() {
     block_matrix "the walk file is empty" "narrate what you drove" \
       "the walk gate: walk-artifact '${raw}' is named in the Step 5 evidence but the file is empty at ${abs}." \
       "write real narration into the walk artifact before discharging any matrix row — an empty file is not a walk."
-  fi
-
-  # The walk narrates a running surface without the criteria in hand, so an AC
-  # identifier in narration is the tell that it checklists them. The one
-  # exception is a registered walk: a verdict table proof-add walk parsed and
-  # recorded as a walk proof naming this artifact, whose identifiers are
-  # its verdicts. Invariant: the artifact carries no AC identifier unless such a
-  # line names it; a line naming another record registers nothing here.
-  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  if grep -qE 'AC-[0-9]' "$abs" 2>/dev/null && ! walk_registered "$raw" "$abs"; then
-    block_matrix "the walk narration names acceptance criteria" "drop the criteria names" \
-      "the walk gate: walk artifact ${abs} names acceptance criteria (matched 'AC-<n>')." \
-      "rewrite the walk as narration of what was driven and what came back, with no AC identifiers — the walk is written without reading the criteria, or register the record with session-poker.sh proof-add walk <record> when it is the walk's verdict table."
   fi
   return 0
 }

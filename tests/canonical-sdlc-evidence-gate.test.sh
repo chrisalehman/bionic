@@ -292,26 +292,23 @@ expect_eq "9l a discharged row is never deferred, and a pending one is before it
 # ============================================================
 # Section 26: the walk gate reads the walk
 # ============================================================
-# A walk narrates without the criteria unless proof-add walk registered it as a verdict table, whose AC identifiers
-# are its verdicts. The walk the gate reads is the run's newest walk proof, else an older plan's Step-5 walk-artifact.
-# fails-when: the identifier arm deleted (26a), a registered walk refused (26b), the Step-5 pointer read over the walk's
-# proof (26c), or a walk proof the run's log alone holds not read as the walk (26d).
+# The walk the gate reads is the run's newest walk proof, which proof-add walk registers only once it parsed the
+# record's verdict table, so the AC identifiers in that record are its verdicts.
+# fails-when: a discharged criterion admitted with no walk proof (26a), a walk proof naming an absent record admitted
+# (26c), or a walk proof the run's log holds not read as the walk (26d).
 
 section "Section 26: the walk gate reads the walk"
 
-wg_home() {  # <proved line or empty> -> a sandbox at current 5 whose walk record holds one verdict row
-  local h; h=$(make_home); mkdir -p "$h/.bionic/docs/record/w"
+wg_home() {  # [<record the walk proof names>] -> a sandbox at 15, current 5, the walk owed and AC-1.1 discharged
+  local h p; h=$(make_home); eg_head_repo "$h"; mkdir -p "$h/.bionic/docs/record/w"
   printf 'verdict: confirmed\n\n| AC | verdict | why |\n|---|---|---|\n| AC-1.1 | CONFIRMED | drove it |\n' > "$h/.bionic/docs/record/w/walk.md"
-  write_plan "$h" "$(ow_plan 5 T3 T9 | WG_P="$1" awk '/^walk: exempt$/ { next } { print }
-    /^current: 5$/ && ENVIRON["WG_P"] != "" { print ENVIRON["WG_P"] }
-    /^  auditor: / { print "  walk-artifact: record/w/walk.md" }')" > /dev/null; printf '%s' "$h"
+  p=$(eg_page "$h" 5 "run/v1|ev=proof|kind=regression|head=$EG_HEAD|evidence=record/floor.log|at=2026-10-24T00:00:00Z" \
+    "run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|at=2026-10-24T00:00:01Z" \
+    ${1:+"run/v1|ev=proof|kind=walk|head=$EG_HEAD|evidence=record/w/$1|at=2026-10-24T00:00:02Z"})
+  awk '!/^walk: exempt$/' "$p" > "$p.t" && mv "$p.t" "$p"; printf '%s' "$h"
 }
-wg_line="proved: kind=walk head=$EG_HEAD at=2026-10-24T00:00:00Z evidence=record/w"
-expect_block "26a an unregistered walk naming AC identifiers is refused on the identifier arm" "$(wg_home "")" 'git commit -m "x"' "AC-<n>"
-expect_allow "26b the same walk, registered by proof-add walk, is its verdict table" "$(wg_home "$wg_line/walk.md")" 'git commit -m "x"'
-expect_block "26c the walk is the proof's record, not the Step-5 pointer: a proof naming another record, absent, is refused for it" "$(wg_home "$wg_line/other.md")" 'git commit -m "x"' "record/w/other.md"
-wg_h="$(wg_home "")"; awk '!/^  walk-artifact: /' "$wg_h/.bionic/docs/plans/active.md" > "$wg_h/p.n" && mv "$wg_h/p.n" "$wg_h/.bionic/docs/plans/active.md"
-mkdir -p "$wg_h/.bionic/docs/record/active.md"; printf 'run/v1|ev=proof|kind=walk|head=%s|evidence=record/w/walk.md|at=2026-10-24T00:00:00Z\n' "$EG_HEAD" > "$wg_h/.bionic/docs/record/active.md/run.log"
-expect_allow "26d a walk proof the run's log alone holds is the walk, with no Step-5 pointer" "$wg_h" 'git commit -m "x"'
+expect_block "26a a discharged criterion with no walk proof is refused for the walk" "$(wg_home)" 'git commit -m "x"' "no walk recorded"
+expect_block "26c a walk proof naming an absent record is refused for it" "$(wg_home other.md)" 'git commit -m "x"' "record/w/other.md"
+expect_allow "26d a walk proof the run's log holds is the walk, its record's AC identifiers its verdicts" "$(wg_home walk.md)" 'git commit -m "x"'
 
 finish
