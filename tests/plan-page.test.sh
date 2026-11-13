@@ -126,7 +126,7 @@ done
 # A run with a log is read from the log alone, so the plan below holds no proved: line and the planted log holds
 # the run's step and, in the admitted twin, its readings: the gate admits on the facts the reader answers.
 section "TASK"
-# evp <cell|-> -> the Tasks table, then an Eval design whose criterion AC-1 names <cell> in its Task column; `-` writes no column.
+# evp <cell|-> -> the Tasks table, then an Eval design whose one criterion names <cell> in its Task column; `-` writes no column.
 evp() {
   local h='| Requirement | Approach | Criterion | Eval type | Eval | Fails when |' s='|---|---|---|---|---|---|' r='| REQ-1 | a suite | AC-1 | hermetic | `a.test.sh` | a is red |'
   [ "$1" = - ] || { h="$h Task |"; s="${s}---|"; r="$r $1 |"; }
