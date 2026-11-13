@@ -68,11 +68,12 @@ ck_reads() {  # <head> [<adversarial result>] -> the five readings a double wave
   ck_line review "$1" 2026-10-12T12:00:00Z record/w35/adversarial-whole.md adversarial w-read "${2:-pass}" whole
   ck_line review "$1" 2026-10-12T12:00:00Z record/w35/structure-whole.md structure w-read pass whole
 }
-ck_plan() {  # <current> <proof lines> -> PCK, the run at 15 those proofs stand in, bound to this session
+ck_plan() {  # <current> <proof lines> [<row>...] -> PCK, the run at 15 those proofs stand in, bound to this session
   local t="$TMPROOT/ck-text.plan.md"
-  printf -- '---\ncanonical_sdlc_version: 14\n---\n## SDLC State\n\ncurrent: %s\n%s\n' "$1" "$2" > "$t"
   rm -rf "${PCK%/*}" "$RCK/.bionic/docs/record/wave-01-fixture"
-  plan_fixture --current "$1" "$PCK" wave > /dev/null
+  local cur="$1" proofs="$2"; shift 2
+  printf -- '---\ncanonical_sdlc_version: 14\n---\n## SDLC State\n\ncurrent: %s\n%s\n' "$cur" "$proofs" > "$t"
+  plan_fixture --current "$cur" "$PCK" wave "$@" > /dev/null
   awk -v b="$CK_B" '/^rigor: /{ $0 = "rigor: double" } /^base-sha: /{ print "base-sha: " b; print "adrs: none — no decision this run"; next } { print }' \
     "$PCK" > "$PCK.t" && mv "$PCK.t" "$PCK"
   { bash -c '. "$1/reader.sh" && . "$1/translate.sh" && translate "$2" events' _ "$CK_LIB" "$t" \
@@ -387,22 +388,20 @@ section "§EARLY-TICK: the tick says CARD-EARLY as advice beside its WAIT lines 
 # 6, 7 or 8 checks red (payload/scripts/card.sh `early`, the one owner of the three facts). The tick asks the same
 # function whenever the plan carries an open integrate row and prints its line as advice, `poker: CARD-EARLY —
 # <reason>`, beside the WAIT lines; it refuses nothing and writes nothing for it.
-# FIXTURE FIDELITY: §CHECK's world and plan at current: 8, with a reads table after the matrix: T1 landed, the
-# integrate row T3 pending on the two approvals and head. The red fact is the Step-7 line naming no adr, rca or n/a,
-# a refusal no default of the card settles, so `current 7 --check` refuses while `current 6 --check` holds.
+# FIXTURE FIDELITY: §CHECK's world and run at 15 at Step 8, its Tasks rows T1 landed and the integrate row T3 waiting
+# on the two approvals. The red fact is a header naming no Step-7 document (no adrs: line), a refusal no default of
+# the card settles, so `current 7 --check` refuses while `current 6 --check` holds.
 # fails-when: the tick stays silent while a fact fails; it says CARD-EARLY on a settled run, or with no open
 # integrate row; its line is not the card's own.
 ET_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-et_plan() {  # <proof lines> <integrate status> [<sed edit>] -> PCK at current: 8 with a reads table, bound to this session
-  ck_plan 8 "$1" "${3:-}"; new_roster "$RCK"
-  { printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
-    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-    printf '| T1 | 4 | build | the x writer | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |\n'
-    printf '| T3 | 8 | integrate | merge into main | orchestrator | — | 10 | REQ-1 | — | — | — | %s | approval:release, approval:merge, head |\n' "$2"
-  } >> "$PCK"
+et_plan() {  # <proof lines> <integrate status> [no-document] -> PCK at current: 8, T1 landed and the integrate row T3, bound
+  ck_plan 8 "$1" '| T1 | 4 | build | the x writer | implementor | — | | 30 | REQ-1 | lib/x.sh | — | — | landed |' \
+    "| T3 | 8 | integrate | merge into main | orchestrator | approval:release, approval:merge | | 10 | REQ-1 | — | — | — | $2 |"
+  [ -z "${3:-}" ] || { /usr/bin/grep -v '^adrs: ' "$PCK" > "$PCK.t" && mv "$PCK.t" "$PCK"; }
+  new_roster "$RCK"
 }
 ET_CARD="${BIONIC_HOOKS_DIR}/../payload/scripts/card.sh"
-et_plan "$CK_GOOD" pending '/n\/a: no decision/d'
+et_plan "$CK_GOOD" pending no-document
 ET_EARLY="$( ( cd "$RCK" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$ET_CARD" early "$PCK" ) 2>&1 )"
 expect_eq "ET-0 precondition: card.sh early names the red check on this plan" "CARD-EARLY — current 7 --check: would refuse" "$ET_EARLY"
 forget_digest "$RCK"
@@ -416,7 +415,7 @@ forget_digest "$RCK"
 poke "$RCK" tick
 expect_contains "ET-2 on a settled run the tick still says the integrate row's WAIT line" "poker: WAIT T3" "$OUT"
 expect_absent "ET-2b …and no CARD-EARLY" "CARD-EARLY" "$OUT"
-et_plan "$CK_GOOD" landed '/n\/a: no decision/d'
+et_plan "$CK_GOOD" landed no-document
 forget_digest "$RCK"
 poke "$RCK" tick
 expect_contains "ET-3 with no open integrate row the tick still answers" "poker:" "$OUT"
