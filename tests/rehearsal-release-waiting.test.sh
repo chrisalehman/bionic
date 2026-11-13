@@ -78,8 +78,8 @@ rt_facts_state release-waiting
 RT_ROOT="$WORLD_ROOT/release-waiting/project"; RT_PLAN="$RT_ROOT/$DOOR_PLAN_REL"
 if [ -f "$RT_PLAN" ]; then
   rt_poker sitrep "$RT_PLAN"
-  expect_eq "FA-6 release-waiting: the merge row names what it waits on, in words: its step" \
-    "note=waits on step 8" \
+  expect_eq "FA-6 release-waiting: the merge row names what it waits on, in words: its step, the reviews and the release's approval" \
+    "note=waits on step 8, the reviews and your approval of the release" \
     "$(rt_taskline "$RT_OUT" T4 | /usr/bin/grep -o 'note=.*$')"
   # The whole run's head F, read off the plan's regression proof, and the working head H, off the branch's ref; the
   # count between them is git's, so the line is held to the history and not to the printer's own arithmetic.
