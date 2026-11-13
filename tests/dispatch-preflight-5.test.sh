@@ -38,7 +38,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
-MAKE_REPO_AT=15; . "$(dirname "$0")/dispatch-preflight.prelude.sh"
+. "$(dirname "$0")/dispatch-preflight.prelude.sh"
 
 STEPS_DIR="${BIONIC_SKILLS_DIR}/canonical-sdlc/steps"
 AGENTS_DIR="${BIONIC_SCRIPTS_DIR}/agents"
