@@ -37,6 +37,11 @@
 #   §STEPS   a Step follows the Step above it and a proof or waiver the line above it in its block, whatever
 #            their instants, so the step is the old current: and closure; a Step held (pending) is a gap.
 #   §PARKED  a Step 9 line with no delivered: (a parked plan's note) is a gap, not a step; close-out's parked delivery is.
+#   §NAME    a plan not named *.plan.md is refused before anything is written, in words naming it for its directory.
+#   §SHARED  the old record a plain name joined: the words say to move it when no other plan shares it, else by how many
+#            it is shared; renamed, the act names each of its files on the gaps list and writes nothing from it.
+#   §ROAD    an incident open at 14 with a record, renamed and moved as the words say, brought forward: the same step and
+#            rows at 15, found by the walk, bound, and a commit under it judged on its own plan.
 #
 # FIXTURE FIDELITY. The plan is a real file in a scratch docs tree, in the shape version-14 plans hold.
 
@@ -496,4 +501,65 @@ expect_contains "the note is named on the gaps list, not written" "gap/v1|ev=ste
 printf '%s\n' '## SDLC State' 'current: 9' '- Step 7: documented at 2026-11-01T10:00Z' "$k8" \
   '- Step 9: delivered: parked on wave/7-parked @ abc1234 — waits on a hand test (2026-11-01T12:00Z wave-7-parked)' > "$K"
 expect_eq "close-out's own parked line is the delivery, its words the step's own field" "n=9|parked on wave/7-parked|state=delivered" "$(bash "$RS" "$K" step | sed 's/^delivered=\(parked on [^ ]*\).*/\1/' | paste -sd'|' -)"
+
+section "NAME"
+# An incident's plan named plain is a run at 14; at 15 a run is found and joined to its record by a name ending
+# .plan.md, so the act on the plain name would leave a run no gate sees.
+NI="$SB/name/incidents/0001-db-outage"; NP="$NI/plan.md"; mkdir -p "$NI"
+printf '%s\n' '---' 'canonical_sdlc_version: 14' 'intent: incident-response' '---' '## Tasks' '| id | step | kind | task | deps | size | status |' \
+  '|---|---|---|---|---|---|---|' '| T1 | 4 | build | Fix. | — | 30 | pending |' '' '## SDLC State' 'current: 4' > "$NP"; NS="$(cksum < "$NP")"
+NO="$(bash "$BF" "$NP" 2>&1)"; expect_status "an incident's plan named plain is refused (exit 2)" 2 "$?"
+expect_contains "…in words that name the plan for its directory and say to run the act again" "name it $(cd "$NI" && pwd -P)/0001-db-outage.plan.md and run the act again" "$NO"
+expect_eq "…before anything is written: the plan is unchanged and no record stands" "$NS|" "$(cksum < "$NP")|$(find "$SB/name" -path '*/record/*' -type f | sed 's#.*/name/##' | paste -sd' ' -)"
+mv "$NP" "$NI/0001-db-outage.plan.md"; bash "$BF" "$NI/0001-db-outage.plan.md" >/dev/null 2>&1; expect_status "renamed as the words say, the act takes it (exit 0)" 0 "$?"
+expect_contains "…and the record it writes is the incident's own" "record/0001-db-outage/run.log" "$(find "$SB/name" -path '*/record/*' -type f | sed 's#.*/name/##' | paste -sd' ' -)"
+
+section "SHARED"
+# At 14 every plain-named incident plan joins one record, record/plan.md. Renamed, the plan joins its own, so the old
+# one is read by nothing: moved first when no other plan shares it, else named file by file on the gaps list.
+SD="$SB/shared"; SA="$SD/incidents/0006-a"; mkdir -p "$SA" "$SD/record/plan.md"; SD="$(cd "$SD" && pwd -P)"; SA="$SD/incidents/0006-a"
+printf '%s\n' '---' 'canonical_sdlc_version: 14' '---' '## Tasks' '| id | step | kind | task | deps | size | status |' '|---|---|---|---|---|---|---|' \
+  '| T1 | 4 | build | Fix. | — | 30 | pending |' '' '## SDLC State' 'current: 4' > "$SA/plan.md"
+printf 'line/v1|ev=published|row=T1|commit=c1|kind=queue|by=-|why=-|at=2026-11-02T00:00:01Z\n' > "$SD/record/plan.md/landing-proofs.log"
+printf 'a\n' > "$SD/record/plan.md/asks.state"; SL="$(cd "$SD/record/plan.md" && cksum landing-proofs.log asks.state)"
+SO="$(bash "$BF" "$SA/plan.md" 2>&1)"; expect_status "an incident's plain plan with a record no other plan shares is refused (exit 2)" 2 "$?"
+expect_contains "…in words that say to move the record to the incident's own name first" "name it $SA/0006-a.plan.md, move $SD/record/plan.md to $SD/record/0006-a, and run the act again" "$SO"
+mkdir -p "$SD/incidents/0007-b"; printf '%s\n' '---' 'canonical_sdlc_version: 13' 'abandoned: 2026-10-01 superseded' '---' '## SDLC State' 'current: 8' > "$SD/incidents/0007-b/plan.md"
+SO="$(bash "$BF" "$SA/plan.md" 2>&1)"; expect_status "shared with a closed incident's plain plan, it is refused (exit 2)" 2 "$?"
+expect_contains "…in words that say by how many the record is shared and that the act will name it" "$SD/record/plan.md is shared by 1 other plan named plan.md, so the act will name each of its files on the gaps list" "$SO"
+expect_eq "…and no word to move it" "0" "$(grep -c 'move ' <<< "$SO")"
+mv "$SA/plan.md" "$SA/0006-a.plan.md"; SO="$(bash "$BF" "$SA/0006-a.plan.md" 2>/dev/null)"; expect_status "renamed, the act takes it (exit 0)" 0 "$?"
+for f in asks.state landing-proofs.log; do expect_contains "the gaps list names $f of the shared record, unread" "gap/v1|ev=record|record=plan.md|field=$f|why=shared" "$SO"; done
+expect_eq "…and the act wrote nothing from it: the shared record stands as it was, its landing not the incident's" "$SL|state=pending" \
+  "$(cd "$SD/record/plan.md" && cksum landing-proofs.log asks.state)|$(bash "$RS" "$SA/0006-a.plan.md" status T1 | head -1)"
+
+section "ROAD"
+# The whole road once: an incident open at 14 past its first step, a landing held only in the record its plain name
+# joined; refused, renamed and its record moved as the words say; brought forward; then the same step and rows read at
+# 15, the run found by the walk, bound by engagement, and a commit under it judged on its own plan.
+RD="$(cd "$(mktemp -d)" && pwd -P)"; RO="$RD/.bionic/docs"; RI="$RO/incidents/0005-cache"; mkdir -p "$RI" "$RO/record/plan.md" "$RD/.bionic/tmp"
+git -C "$RD" init -q; git -C "$RD" -c user.name=f -c user.email=f@x.invalid -c commit.gpgsign=false commit -q --allow-empty -m seed
+printf '%s\n' '---' 'governing-skill: canonical-sdlc' 'canonical_sdlc_version: 14' 'intent: incident-response' 'rigor: double' 'scale: wave' '---' \
+  '## Tasks' '| id | step | kind | task | deps | size | serves | Files | artifact | status |' '|---|---|---|---|---|---|---|---|---|---|' \
+  '| T1 | 4 | build | Fix. | — | 30 | REQ-1 | a.sh | out/T1.md | landed |' '| T2 | 4 | build | Guard. | — | 30 | REQ-1 | b.sh | out/T2.md | pending |' '' \
+  '## SDLC State' 'current: 4' 'approved-by: Ann Person 2026-11-01T02:25:48Z "Approved"' \
+  '- Step 3: plan: p.md; approved at 2026-11-01T02:25:48Z "Approved" at the Step-3 card' '- Step 4: rows dispatched' > "$RI/plan.md"
+printf 'line/v1|ev=published|row=T2|commit=%s|kind=queue|by=-|why=-|at=2026-11-02T00:00:01Z\n' "$C" > "$RO/record/plan.md/landing-proofs.log"
+road() { bash "$RS" "$1" step | /usr/bin/grep -E '^(n|state)=' | paste -sd' ' -; for t in T1 T2; do bash "$RS" "$1" status "$t" | head -1; done; }
+RPRE="$(road "$RI/plan.md")"; expect_eq "at 14 the incident stands at Step 4, open, T1 landed in its table and T2 in its record" "n=4 state=open
+state=landed
+state=landed" "$RPRE"
+RW="$(bash "$BF" "$RI/plan.md" 2>&1)"; expect_status "the act refuses the plain name (exit 2)" 2 "$?"
+expect_contains "…and says to rename the plan and move its record" "move $RO/record/plan.md to $RO/record/0005-cache," "$RW"
+mv "$RI/plan.md" "$RI/0005-cache.plan.md"; mv "$RO/record/plan.md" "$RO/record/0005-cache"; RP="$RI/0005-cache.plan.md"
+bash "$BF" "$RP" >/dev/null 2>&1; expect_status "done as the words say, the act takes it (exit 0)" 0 "$?"
+expect_eq "at 15 the same step and the same rows: T2's landing came with its record" "canonical_sdlc_version=15|$RPRE" "$(bash "$RS" "$RP" header canonical_sdlc_version)|$(road "$RP")"
+expect_eq "the walk finds the incident's run" "$RP" "$(bash -c '. "$1/lib/run.sh"; open_runs "$2"' _ "${RS%/*}" "$RD" 2>/dev/null)"
+RSID="7d6c5b4a-3928-4170-8e6d-5c4b3a291807"
+bash -c '. "$1/lib/run.sh"; . "$1/lib/binding.sh"; bind_plan "$2" "$3" "$4" engage' _ "${RS%/*}" "$RD" "$RSID" "$RP" >/dev/null 2>&1
+expect_status "engagement binds it (exit 0)" 0 "$?"
+RG="$(jq -n --arg c "git commit -m x" --arg cwd "$RD" --arg s "$RSID" '{session_id:$s, tool_input:{command:$c}, cwd:$cwd}' \
+  | ( cd "$RD" && HOME="$RD" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$RSID" BIONIC_WALL_VERBOSE=1 bash "$BIONIC_HOOKS_DIR/bash-walls.sh" 2>&1 ); printf '|rc=%s' "$?")"
+expect_contains "a commit under it is judged and refused (exit 2)" "|rc=2" "$RG"
+expect_contains "…on the incident's own plan" "incidents/0005-cache/0005-cache.plan.md" "$RG"
 finish
