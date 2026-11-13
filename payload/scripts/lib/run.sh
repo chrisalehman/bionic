@@ -379,13 +379,15 @@ _run_candidates() {
 }
 
 # _run_page15 <walked dir> <droot> <file> -> 0 when the file is a plan page at 15: a `*.plan.md` under <droot>/plans
-# whose header says `canonical_sdlc_version: 15`. Such a page holds no state section, since its run's state is its
-# log, which run_open reads; so the walk finds it by its header, read by the header's one parser, which reads the
-# leading `---` block alone (a header inside a fenced block is prose) and ends a line at a bare CR. A page whose
-# header says anything else is judged by its state section alone. Asked only of a file the state section did not
-# admit, so a walk over pages at 14 runs no process more.
+# or <droot>/incidents whose header says `canonical_sdlc_version: 15`. Such a page holds no state section, since its
+# run's state is its log, which run_open reads; so the walk finds it by its header, read by the header's one parser,
+# which reads the leading `---` block alone (a header inside a fenced block is prose) and ends a line at a bare CR. A
+# page whose header says anything else is judged by its state section alone. Asked only of a file the state section
+# did not admit, so a walk over pages at 14 runs no process more. The name is what joins a page to its record
+# (lib/reader.sh `reader_record`), so an incident's plan is a run at 15 when named as a plan, as the skill lays it out
+# (`incidents/<d>/<d>.plan.md`), and a plain `plan.md`, whose record every incident would share, is none.
 _run_page15() {
-  [ "$1" = "$2/plans" ] || return 1
+  case "$1" in "$2/plans"|"$2/incidents") ;; *) return 1 ;; esac
   case "$3" in *.plan.md) [ "$(plan_read_header "$3" canonical_sdlc_version)" = canonical_sdlc_version=15 ] ;; *) return 1 ;; esac
 }
 

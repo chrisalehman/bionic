@@ -92,7 +92,7 @@ binding.test.sh | §4 | duplicate | payload/scripts/lib/binding.sh bind_plan:161
 binding.test.sh | §5 | keep | payload/scripts/lib/binding.sh bind_holders: the symlinked-marker skip deleted, so a linked marker naming the plan holds it (exit 0 instead of 1) | none (searched 'bind_holders' and 'BIND_HOLDERS' in tests/)
 binding.test.sh | §7 | keep | payload/scripts/lib/binding.sh bind_delivered: the reader's `state=delivered` test widened to any closed state, so the bind verb's act binds an abandoned plan (7c) | none (searched 'bind_delivered' and 'abandoned' in tests/)
 binding.test.sh | §8 | keep | payload/scripts/lib/binding.sh bind_record_session: the presence read deleted, so a first engagement's second call and a session the run holds each append a bind event again (8a, 8c, 8d); or the append made a write of the plan, so its sum moves (8a, 8d) | none (searched 'bind_record_session' and 'ev=bind' in tests/)
-binding.test.sh | §9 | keep | payload/scripts/lib/run.sh _run_candidates: the page-at-15 arm (`_run_page15`) deleted, so the walk lists no page at 15 (9a), engagement refuses it unresolvable (9b) and an unbound session reads none (9c) | none (searched '_run_page15' and 'canonical_sdlc_version: 15' with open_runs in tests/)
+binding.test.sh | §9 | keep | payload/scripts/lib/run.sh _run_candidates: the page-at-15 arm (`_run_page15`) deleted, so the walk lists no page at 15 (9a), engagement refuses it unresolvable (9b) and an unbound session reads none (9c); the arm narrowed to plans/, so an incident's page at 15 named for its directory is no run, its engagement refused and a commit under it judged on none (9d-9f) | none (searched '_run_page15' and 'canonical_sdlc_version: 15' with open_runs in tests/)
 
 ## booked.test.sh
 
