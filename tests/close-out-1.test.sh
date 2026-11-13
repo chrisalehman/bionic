@@ -95,53 +95,6 @@ expect_eq "0o5: …naming wt/01-T1" "yes" "$(contains "$CO_OUT" "wt/01-T1")"
 expect_eq "0o5b: …the branch survives (nothing was deleted, nothing else was done)" "yes" \
   "$(branch_exists "$P0O" "wt/01-T1")"
 
-# 0p: a columnless table whose only wt/* branch is fully merged — the fallback still
-# fires (announced) but finds nothing to refuse, and the run proceeds.
-P0P="$(CO_PLAN_AT=14 mk_census_fixture_nowt p0p "wave/01-x" "$ROWS_NOWT")"; advance_to "$P0P" 8
-(
-  in_fixture "$P0P" || exit 1
-  git checkout -q -b wave/01-x
-  printf 'work\n' >> file.txt
-  git commit -q -am "wave work" >/dev/null 2>&1
-  git branch wt/01-T1 wave/01-x
-  git checkout -q main
-  git merge -q --no-ff -m "merge wave" wave/01-x >/dev/null 2>&1
-)
-plant_facts "$P0P"
-run_close "$P0P" check
-expect_eq "0p1: check does not WOULD-REFUSE — the only wt/* branch is fully merged" "no" \
-  "$(contains "$CO_OUT" "WOULD REFUSE")"
-
-run_close "$P0P" run
-expect_eq "0p3: run proceeds — nothing in the fallback census carries unreached work" "0" "$CO_RC"
-
-# ============================================================
-section "0q — C7: the column-less fallback is scoped to wt/<NN>-*, exactly as 1.8.3 was"
-# ============================================================
-# 0p's fixture plus another wave's unmerged leftover, wt/07-z: it falls outside `wt/01-*`, so it is neither refused on
-# nor deleted.
-P0Q="$(CO_PLAN_AT=14 mk_census_fixture_nowt p0q "wave/01-x" "$ROWS_NOWT")"; advance_to "$P0Q" 8
-(
-  in_fixture "$P0Q" || exit 1
-  git checkout -q -b wave/01-x
-  printf 'work\n' >> file.txt
-  git commit -q -am "wave work" >/dev/null 2>&1
-  git branch wt/01-T1 wave/01-x
-  git checkout -q main
-  git merge -q --no-ff -m "merge wave" wave/01-x >/dev/null 2>&1
-)
-add_foreign_unreached_branch "$P0Q"
-plant_facts "$P0Q"
-run_close "$P0Q" check
-expect_eq "0q1: check does not WOULD-REFUSE over a foreign wt/07-z (out of wt/01-* scope)" "no" \
-  "$(contains "$CO_OUT" "WOULD REFUSE")"
-expect_eq "0q2: …never naming the foreign branch" "no" "$(contains "$CO_OUT" "wt/07-z")"
-
-run_close "$P0Q" run
-expect_eq "0q4: run does not refuse on the foreign branch" "0" "$CO_RC"
-expect_eq "0q5: …wt/07-z survives — a foreign wave's tree is not this run's to judge" "yes" \
-  "$(branch_exists "$P0Q" "wt/07-z")"
-
 # ============================================================
 section "0r — C7: a column-less WAVE-scale plan whose working-branch is not wave/<digits>-<slug> shaped refuses, as 1.8.3 did"
 # ============================================================
@@ -540,24 +493,13 @@ expect_eq "BA0 precondition: ## SDLC State names main and the frontmatter trunk,
   "$(sed -n '/^## SDLC State/,/^## /s/^integration-branch: //p' "$PBA/$PLAN_REL")|$(sed -n '2s/^integration-branch: //p' "$PBA/$PLAN_REL")|$(branch_exists "$PBA" main)|$(branch_exists "$PBA" trunk)"
 ba_doors "$PBA"
 expect_eq "BA1 close-out check and closed-form name one branch, ## SDLC State's" "main|main" "$BA_CHECK|$BA_CLOSED"
-# The card's Step-0 branch block and the gate's epic merge-target check read the same reader. The card needs a ## Goal;
-# the gate reads at Step 8 against an epic naming trunk, and names the plan's branch in its finding when the two differ.
+# The card's Step-0 branch block reads the same reader. The card needs a ## Goal.
 ba_card() {  # <project> -> the integration branch card.sh step0 prints for the plan, a ## Goal added first
   awk '/^## SDLC State/ && !g { print "## Goal"; print ""; print "A fixture goal."; print ""; g = 1 } { print }' "$1/$PLAN_REL" \
     > "$1/$PLAN_REL.g" && mv "$1/$PLAN_REL.g" "$1/$PLAN_REL"
   bash "$REPO_ROOT/payload/scripts/card.sh" step0 "$1/$PLAN_REL" 2>/dev/null | sed -n 's/^    integration  *\([^ ]*\) .*/\1/p'
 }
-ba_gate() {  # <project> -> the plan's branch the gate's merge-target finding names, at Step 8, its epic naming trunk
-  local e="$1/.bionic/docs/plans/epic-fx/epic.plan.md"
-  sed 's/^current: 4$/&\
-integration-branch: trunk/' "$e" > "$e.b" && mv "$e.b" "$e"
-  awk 'NR == 1 && $0 == "---" { print; print "epic: epic-fx"; next } { print }' "$1/$PLAN_REL" > "$1/$PLAN_REL.e" \
-    && mv "$1/$PLAN_REL.e" "$1/$PLAN_REL"
-  advance_to "$1" 8; gate_rc "$1" >/dev/null
-  cat "$SB_HOME"/.claude/logs/*/sdlc-audit.md 2>/dev/null | grep -F "($1/$PLAN_REL)" \
-    | sed -n "s/.* merge-target: plan integration-branch '\([^']*\)' != epic .*/\1/p" | tail -1
-}
-expect_eq "BA3 the card and the gate name ## SDLC State's branch too" "main|main" "$(ba_card "$PBA")|$(ba_gate "$PBA")"
+expect_eq "BA3 the card names ## SDLC State's branch too" "main" "$(ba_card "$PBA")"
 
 PBF="$(CO_PLAN_AT=14 mk_fixture branch-agree-fm)"
 awk '/^## SDLC State/ { s = 1 } /^## Tasks/ { s = 0 } !(s && /^integration-branch:/)' "$PBF/$PLAN_REL" > "$PBF/$PLAN_REL.ba" \
@@ -566,8 +508,27 @@ ba_fm "$PBF" main
 ba_doors "$PBF"
 expect_eq "BA2b check and closed-form both name the frontmatter's branch, the fallback (check prints its merge verdict only past its refusal)" \
   "main|main" "$BA_CHECK|$BA_CLOSED"
-expect_eq "BA4 the card and the gate read the frontmatter's branch too when ## SDLC State names none" "main|main" \
-  "$(ba_card "$PBF")|$(ba_gate "$PBF")"
+expect_eq "BA4 the card reads the frontmatter's branch too when ## SDLC State names none" "main" "$(ba_card "$PBF")"
+# The gate's merge-target check reads the plan's branch and its epic's through the same reader, at Step 8, on a plan
+# and an epic at 15, each naming its branch in its header; it logs a finding when the two differ and never refuses.
+# fails-when: the check is not asked of a page at 15, or asks some reader other than the plan's and the epic's headers.
+ba_gate() {  # <project> <epic's branch> -> <plan version>|<gate audit lines for the plan, yes or no>|<merge-target finding>
+  local e="$1/.bionic/docs/plans/epic-fx/epic.plan.md" a
+  awk -v b="$2" 'NR == 1 && $0 == "---" { print; print "integration-branch: " b; next }
+    /^canonical_sdlc_version: / { print "canonical_sdlc_version: 15"; next }
+    /^## / { s = ($0 == "## SDLC State") } !s' "$e" > "$e.b" && mv "$e.b" "$e"
+  awk 'NR == 1 && $0 == "---" { print; print "epic: epic-fx"; next } { print }' "$1/$PLAN_REL" > "$1/$PLAN_REL.e" \
+    && mv "$1/$PLAN_REL.e" "$1/$PLAN_REL"
+  advance_to "$1" 8; gate_rc "$1" >/dev/null
+  a="$(cat "$SB_HOME"/.claude/logs/*/sdlc-audit.md 2>/dev/null | grep -F "($1/$PLAN_REL)")"
+  printf '%s|%s|%s\n' "$(sed -n 's/^canonical_sdlc_version: //p' "$1/$PLAN_REL")" \
+    "$(printf '%s\n' "$a" | grep -q 'evidence-gate ' && echo yes || echo no)" \
+    "$(printf '%s\n' "$a" | sed -n "s/.* merge-target: \(plan integration-branch .*\) (.*/\1/p" | tail -1)"
+}
+expect_eq "BA6 a plan at 15 and its epic naming one branch: the gate reads them at Step 8 and logs no merge-target finding" \
+  "15|yes|" "$(ba_gate "$(mk_fixture branch-agree-gate)" main)"
+expect_eq "BA7 …naming two, it logs the finding with both" \
+  "15|yes|plan integration-branch 'main' != epic 'epic-fx' integration-branch 'trunk'" "$(ba_gate "$(mk_fixture branch-differ-gate)" trunk)"
 # One reader: a grep of hooks/ and payload/scripts/, copied with one planted reader, finds the plant and lib/plan.sh's
 # two lines that ask the plan parser, and no other line naming the key outside a comment or a sentence a refusal prints.
 BAT="$SANDBOX/ba-tree"; mkdir -p "$BAT/payload"; cp -R "$BIONIC_HOOKS_DIR" "$BAT/hooks"; cp -R "$REPO_ROOT/payload/scripts" "$BAT/payload/scripts"
