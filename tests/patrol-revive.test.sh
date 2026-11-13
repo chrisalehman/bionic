@@ -778,7 +778,7 @@ fire "$TS_T"; expect_quiet "TS-4 a stale stamp on a task-scale run is not judged
 ts_dispatch() {  # <scale> -> "<verdict>|<yes if the refusal names a missing Patrol stamp>"
   (
     . "$(dirname "$0")/lib/roster-row.sh"; . "$(dirname "$0")/lib/live-answer.sh"; . "$(dirname "$0")/lib/swept-marker.sh"
-    MAKE_REPO_AT=15 . "$(dirname "$0")/dispatch-preflight.prelude.sh"
+    . "$(dirname "$0")/dispatch-preflight.prelude.sh"
     r="$(make_repo "ts-$1" yes)"; write_attestation "$r" "$SID_A"
     p="$r/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
     sed "s/^scale: wave$/scale: $1/" "$p" > "$p.tmp" && mv "$p.tmp" "$p"

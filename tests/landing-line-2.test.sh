@@ -12,7 +12,6 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-LL_WORLD_AT=15   # every world is a run at 15 (tests/landing-line.prelude.sh ll_world)
 . "$(dirname "$0")/landing-line.prelude.sh"
 
 ll_carrier_env; printf '0\n' > "$CLAUDE_CONFIG_DIR/bionic/reserve"   # part 1's carrier environment (tests/landing-line.prelude.sh); the rows read the share's room whole

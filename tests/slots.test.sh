@@ -883,7 +883,7 @@ T="$1"
 . "$T/lib/roster-row.sh"
 . "$T/lib/live-answer.sh"
 . "$T/lib/swept-marker.sh"
-MAKE_REPO_AT=15; . "$T/dispatch-preflight.prelude.sh"
+. "$T/dispatch-preflight.prelude.sh"
 room_wall_repo() {  # <name> <open writers> <budget line or ""> -> a task-scale repo with that many writers open
   local r p k=0
   r="$(make_repo "$1" yes)"

@@ -11,7 +11,6 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-LL_WORLD_AT=15   # every world is a run at 15 unless a section says otherwise (tests/landing-line.prelude.sh ll_world)
 . "$(dirname "$0")/landing-line.prelude.sh"
 
 section "§EVENTS: each event is one line, appended by one write, to the landing record"

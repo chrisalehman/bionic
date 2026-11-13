@@ -45,7 +45,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
-MAKE_REPO_AT=15; . "$(dirname "$0")/dispatch-preflight.prelude.sh"
+. "$(dirname "$0")/dispatch-preflight.prelude.sh"
 
 section "§CAP — a probe's writers= refuses nothing; a plan with no line is not named (wave-28 T9, AC-2.9)"
 CAP_RUN_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/run.sh"
