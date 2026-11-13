@@ -204,7 +204,7 @@ expect_eq "FL1 regression-run runs the declared floor at the working head (exit 
   "$FL_RC|$(head -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/regression-run-$FL_H.log" 2>/dev/null)|$(tail -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/regression-run-$FL_H.log" 2>/dev/null)"
 # THE FLOOR FACT FROM THAT LOG, BY THE PRODUCT'S JUDGE AND WRITER (as plant_facts writes its lines): the judge
 # with the plan and the project root, as proof-add calls it, attests the declared log by the run line regression-run
-# wrote beside it (wave-37 T4; D7), and proof_event appends the proof to the run's log.
+# wrote beside it, and proof_event appends the proof to the run's log.
 # proof-add itself is not driven here: its dry commit runs the real gate at current: 4, which this fixture's
 # Step-7 plan (no Step 0-6 lines) does not meet for any floor; session-poker §FLOOR-DECLARED drives the verb.
 FL_AT="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" || exit 9
