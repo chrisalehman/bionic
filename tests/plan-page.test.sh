@@ -9,6 +9,9 @@
 #              authored cells alone are admitted.
 #   §KEYS      each header key the version-15 header has no place for is refused on a version-15 plan, the
 #              refusal naming it; the same key on a version-14 plan is admitted.
+#   §TASK      a criterion's Task cell at 15 naming a token no Tasks row carries is refused at the write, naming it and
+#              what to write; an id, `9`, a dash or no column is admitted; the reader answers the task from the column at
+#              15 and from the block's `task:` line at 14.
 #   §GATE      the commit gate (hooks/bash-walls.sh) asks the run's facts for the step's evidence: a commit at
 #              Step 6 whose log holds no review event is refused, and admitted once the log holds one per question.
 #              The same run at 15, brought forward, is refused as the 14 is, and with its reviews still refused, naming each fact its log lacks.
@@ -121,6 +124,26 @@ done
 
 # A run with a log is read from the log alone, so the plan below holds no proved: line and the planted log holds
 # the run's step and, in the admitted twin, its readings: the gate admits on the facts the reader answers.
+section "TASK"
+# evp <cell|-> -> the Tasks table, then an Eval design whose criterion AC-1 names <cell> in its Task column; `-` writes no column.
+evp() {
+  local h='| Requirement | Approach | Criterion | Eval type | Eval | Fails when |' s='|---|---|---|---|---|---|' r='| REQ-1 | a suite | AC-1 | hermetic | `a.test.sh` | a is red |'
+  [ "$1" = - ] || { h="$h Task |"; s="${s}---|"; r="$r $1 |"; }
+  printf '## Tasks\n\n%s\n\n## Eval design\n\n%s\n%s\n%s\n' "$NINE" "$h" "$s" "$r"
+}
+for v in T1 9 — '' -; do write_plan "$(evp "$v" | page 15)"; expect_status "a criterion whose Task is '$v' (- for no column) is admitted" 0 "$HOOK_EXIT"; done
+for v in "T99|T99" "T1, 9|9" "T1, T99|T99"; do write_plan "$(evp "${v%|*}" | page 15)"
+  expect_status "a criterion whose Task is '${v%|*}' is refused" 2 "$HOOK_EXIT"
+  expect_contains "…naming the token no row of the table carries, and what to write" "AC-1: task ${v#*|} names no row in the Tasks table; write a task id the table holds, several joined by commas, or 9 alone for the close" "$HOOK_SAID"
+done
+write_plan "$(printf '%s\n\n%s\n' "$MACHINE" "$(evp T99 | sed -n '/^## Eval design/,$p')" | page 14)"
+expect_status "a version-14 plan is not judged by the column: its block says the task" 0 "$HOOK_EXIT"
+ask_task() { bash -c '. "$1" && plan_read_criterion_task "$2"' _ "$PLAN_READ" "$FP"; }
+evp T1 | page 15 > "$FP"; expect_eq "at 15 the reader answers a criterion's task from its column" "AC-1	T1" "$(ask_task)"
+evp — | page 15 > "$FP"; expect_eq "…and a dash names none" "" "$(ask_task)"
+printf '## Verification Matrix\n\n| AC | tier | status |\n|---|---|---|\n| AC-1 | T1 | pending |\n\nAC-1:\n  task: T7, T8\n\n%s\n' "$(evp T99 | sed -n '/^## Eval design/,$p')" | page 14 > "$FP"
+expect_eq "at 14 it answers from the block's task: line, and never from a column" "AC-1	T7, T8" "$(ask_task)"
+
 section "GATE"
 git -C "$R" -c user.name=f -c user.email=f@x.invalid -c core.hooksPath=/dev/null commit -q --allow-empty -m base
 H="$(git -C "$R" rev-parse HEAD)"; GL="$R/.bionic/docs/record/wave-01-x/run.log"

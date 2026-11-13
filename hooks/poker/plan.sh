@@ -1442,8 +1442,8 @@ BRF_EOF
         [ -n "$ac" ] || continue
         block="$(matrix_block "$ac")"
         ruled=0; matrix_row_ruled "$tier" "$status" "$aud" "$conf" "$waiver" && ruled=1
-        owe="$(matrix_owing_step "$PLAN" "$block")"
-        [ "$ruled" = 1 ] || ! matrix_row_deferred "$PLAN" "$owe" "$2" "$status" "$(matrix_owing_open "$PLAN" "$block")" || ruled="owed:$owe"
+        owe="$(matrix_owing_step "$PLAN" "$ac")"
+        [ "$ruled" = 1 ] || ! matrix_row_deferred "$PLAN" "$owe" "$2" "$status" "$(matrix_owing_open "$PLAN" "$ac")" || ruled="owed:$owe"
         aud="$(placeholder_cell "$aud")"
         printf '%s\037%s\037%s\037%s\037%s\037%s\n' "$ac" "$tier" "$status" "${aud:--}" "$ruled" \
           "$(printf '%s\n' "$block" | sed -n 's/^[[:space:]]*reason:[[:space:]]*//p' | head -n 1)"
