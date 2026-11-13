@@ -12,7 +12,8 @@
 #   §PLACE     an approval written by then instant is read; an untimed deferral stands at its review's proof.
 #   §MATRIX    a discharged matrix row is a proof and a waived one a waiver, by ac= with what its cells hold,
 #              and a waiver with the author, instant and words of its block's waiver: line; a cell that holds no
-#              evidence takes the evidence: line of the block, and a cell that holds one wins.
+#              evidence takes the evidence: line of the block, and a cell that holds one wins; a pending or blocked
+#              row is no event, and its evidence or auditor, which 15 has no place for, is on the gaps list.
 #   §ONE-FACT  a criterion a state line and a matrix row both name is the state line's one fact.
 #   §UNREAD    the header's abandoned: is an abandon; an inherited: line no ruled type carries is a gap.
 #   §RENAME  each landing-record line of a ruled type is carried with its first field renamed and every
@@ -161,7 +162,7 @@ cat > "$M" <<EOF
 abandoned: 2026-11-02 — folded into wave-9
 ---
 ## Eval design
-$(printf '| Criterion |\n|---|\n'; printf '| AC-%s |\n' 1 2 3 4 5 6 7)
+$(printf '| Criterion |\n|---|\n'; printf '| AC-%s |\n' 1 2 3 4 5 6 7 8 9 10)
 ## Verification Matrix
 stack-health: pending
 | AC | tier | status | evidence | auditor |
@@ -173,6 +174,9 @@ stack-health: pending
 | AC-5 | T2 | discharged | record/wave-8-matrix/m.log | CONFIRMED |
 | AC-6 | T2 | discharged | — | CONFIRMED |
 | AC-7 | T2 | discharged | record/wave-8-matrix/c.log | CONFIRMED |
+| AC-8 | T0 | pending | record/wave-8-matrix/p.md | REFUTED |
+| AC-9 | T2 | blocked | — | — |
+| AC-10 | T2 | pending | — | — |
 
 AC-2: the waived one.
   waiver: Ann Person 2026-11-01T08:00:00Z "not run here" — the reason
@@ -182,6 +186,10 @@ AC-6: proved, its evidence written in its block.
   evidence: record/wave-8-matrix/b.log
 AC-7: proved, its evidence in its cell and another in its block.
   evidence: record/wave-8-matrix/other.log
+AC-9: blocked, an evidence written in its block.
+  evidence: record/wave-8-matrix/q.log
+AC-10: pending, its block saying so.
+  evidence: pending
 ## SDLC State
 proved: kind=unit head=$H ac=AC-5 at=2026-11-01T06:00:00Z evidence=record/wave-8-matrix/s.log rc=0
 inherited: a.test.sh base=$C head=$H at=2026-11-01T07:00:00Z evidence=record/wave-8-matrix/i.log
@@ -214,6 +222,14 @@ expect_contains "…whose proof still lacks its head, a gap" "gap/v1|ev=proof|ac
 expect_absent "…and whose evidence the gaps list does not name" "gap/v1|ev=proof|ac=AC-6|field=evidence|" "$MG"
 expect_eq "a cell that holds an evidence wins over its block's line" \
   "run/v1|ev=proof|ac=AC-7|evidence=record/wave-8-matrix/c.log|auditor=CONFIRMED|at=" "$(acof AC-7)"
+expect_eq "a pending row's evidence and auditor cells, which no event at 15 can hold, are on the gaps list as undischarged" \
+  "gap/v1|ev=criterion|criterion=AC-8|field=evidence|why=undischarged gap/v1|ev=criterion|criterion=AC-8|field=auditor|why=undischarged" \
+  "$(printf '%s\n' "$MG" | grep -F 'criterion=AC-8|' | tr '\n' ' ' | sed 's/ $//')"
+expect_absent "…and its row writes no proof and no waiver" "ac=AC-8|" "$(acof AC-8)"
+expect_eq "a blocked row's evidence written in its block is named too" "gap/v1|ev=criterion|criterion=AC-9|field=evidence|why=undischarged" \
+  "$(printf '%s\n' "$MG" | grep -F 'criterion=AC-9|')"
+expect_empty "a row whose cells hold nothing, or only its own status word, is named for neither" \
+  "$(printf '%s\n' "$MG" | grep -E 'criterion=AC-(3|10)\|')"
 section "ONE-FACT"
 expect_eq "a criterion a proved: line and a matrix row both name is one proof" 1 "$(acof AC-5 | grep -c .)"
 expect_contains "the stated proof stands, with its head and instant" "head=$H|ac=AC-5|" "$(acof AC-5)"

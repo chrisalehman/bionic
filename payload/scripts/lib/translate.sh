@@ -300,7 +300,10 @@ translate_source _translate_matrix
 _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged row's proof, a waived row's waiver
   # The table's cells are named by its own header line, never counted by place. A row says only its criterion,
   # its state and what its evidence and auditor cells hold, so that is all its event carries: the head, the
-  # kind, the author and the instant are gaps. A pending or blocked row is no event. A criterion that a
+  # kind, the author and the instant are gaps. A pending or blocked row is no event: 15 holds no evidence or
+  # verdict for a criterion not discharged, so an evidence or auditor cell such a row holds (its evidence in its
+  # block when the cell holds none), unless it only repeats the row's status, is named on the gaps list as
+  # undischarged rather than dropped without a word. A criterion that a
   # `proved:` or `waived:` line of the SDLC State names by `ac=` is that line's fact, with the head and the
   # instant the row lacks; the row then writes nothing of that type, so one fact is never read as two. A
   # waived row whose criterion's block below the table holds an indented `waiver: <who> <day or instant>
@@ -323,6 +326,14 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
       ac != "" && match($0, /^[ \t]+user-confirmed[ \t]*:/) { v = substr($0, RLENGTH + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); printf "U\036%s\036%s\n", ac, v }
       ac != "" && match($0, /^[ \t]+evidence[ \t]*:/) { v = substr($0, RLENGTH + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); printf "E\036%s\036%s\n", ac, v }'
     _translate_section "$1" "Verification Matrix"; } | awk -F'|' "$_TRANSLATE_AWK"'
+    function undischarged(ac, s,   j, n, w, k, v) {
+      n = split("evidence auditor", w, " ")
+      for (j = 1; j <= n; j++) {
+        k = w[j]; v = ((k in col) && !none($(col[k]))) ? trim($(col[k])) : ""
+        if (v == "" && k == "evidence" && (ac in be)) v = be[ac]
+        if (v != "" && tolower(v) != s) printf "g\t\tgap/v1|ev=criterion|criterion=%s|field=%s|why=undischarged\n", ac, k
+      }
+    }
     /^S / { split($0, w, " "); stated[(w[2] == "proved:" ? "proof" : "waiver") SUBSEP w[3]] = 1; next }
     /^W\036/ { split($0, w, "\036"); if (!(w[2] in wat)) { wby[w[2]] = w[3]; wat[w[2]] = w[4]; wsaid[w[2]] = w[5] }
       begin("hand", "ac", w[2]); put("what", "waive-row"); if (w[3] != "") put("by", w[3]); if (w[5] != "") put("said", w[5]); emit(w[4]); next }
@@ -334,6 +345,7 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
     /^\|[-:| \t]+$/ || !("ac" in col) || !("status" in col) { next }
     {
       ac = trim($(col["ac"])); s = trim($(col["status"])); t = (s == "discharged") ? "proof" : (s == "waived") ? "waiver" : ""
+      if (t == "" && ac != "" && (s == "pending" || s == "blocked")) { undischarged(ac, s); next }
       if (t == "" || ac == "" || ((t SUBSEP ac) in stated)) next
       begin(t, "ac", ac)
       for (j = split("evidence auditor", w, " "); j > 0; j--) c[w[j]] = ((w[j] in col) && !none($(col[w[j]]))) ? trim($(col[w[j]])) : ""
