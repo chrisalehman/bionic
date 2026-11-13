@@ -147,7 +147,7 @@ expect_eq "(c27) …and no release approval" "1" "$(dc_approved release)"
 dc_verb "(c28) current 6 --check would advance at the release head" current 6 --check
 dc_verb "(c29) current 7 --check would advance: every fact the run owes holds at the release head" current 7 --check
 door_run "$DC" bash "$DOOR_POKER" current 8 --check
-DC_C8="$DOOR_OUT"
+DC_C8="$DOOR_OUT"; printf 'dc: current 8 --check -> rc %s: %s\n' "$DOOR_RC" "$(printf '%s\n' "$DC_C8" | /usr/bin/grep '^poker: REFUSED' | head -1)"
 expect_eq "(c30) current 8 --check refuses" "1" "$DOOR_RC"
 expect_contains "(c31) …on the release approval the plan does not carry" "carries no approved: release line" "$DC_C8"
 expect_eq "(c32) …and on nothing else: one refusal line" "1" "$(printf '%s\n' "$DC_C8" | /usr/bin/grep -c '^poker: REFUSED')"
