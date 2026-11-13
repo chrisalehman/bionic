@@ -1,5 +1,6 @@
 # tests/lib/rehearsal.sh — the rehearsal: a small run played forward in a sandbox through the commands a real run
-# uses, until it holds one of the states the sitrep card is read in, or the Verify gate of a single-rigor run.
+# uses, from the skill's invocation and the configuration card of a project with no plan, until it holds one of the
+# states the sitrep card is read in, or the Verify gate of a single-rigor run.
 #
 #     . "$(dirname "$0")/lib/resolve-roots.sh"      # first, so BIONIC_SCRIPTS_DIR names the tree under test
 #     . "$(dirname "$0")/lib/rehearsal.sh"          # sources tests/lib/door.sh, and with it tests/lib/world.sh
@@ -15,54 +16,62 @@
 #                            output, in <dir>/rehearsal.log, beside a `# by hand:` line for each file written by
 #                            hand. A command that fails stops the rehearsal: its line and output go to stderr, rc 1,
 #                            and nothing is printed on stdout. A state the library does not know is rc 2.
+#                            After each command the run's log as it stood is kept as <dir>/logs/<n>.log, and the
+#                            plan's checksum before and after it is a line `<label>|<before>|<after>` of
+#                            <dir>/plan-sums: what the run's log and the plan were at every point of the run.
 #                            RH_WITHIN=<seconds> bounds each rehearsed ready's wait at the world's gate (300 unset).
+#
+#   Every state starts the same way, at version 15 (_rh_fresh): the skill invoked, the planner's page with its header
+#   and goal, the configuration card, and Steps 0 to 3 each through its card, its approval and its advance, the plan
+#   approved and Step 4 entered; nothing between is stamped.
 #
 #   The states:
 #     delivered        the failed-review run, its project declaring its real release check, carried through the
 #                      verbs to close-out's delivered: (rehearse prints the archived plan's path): the sweeper acks
 #                      the failing reviewer, a second review failing on the same site is registered, a fix row born
-#                      of the first review's finding is added, cut, launched and landed through ready, settling both, the release check runs at its head, the release approval card is
-#                      rendered there and the user's reply approves it, the integrate row renders the release entry's
+#                      of the first review's finding is added (the later rows' deps naming it), cut, launched and
+#                      landed through ready, settling both, the release check runs at its head, the release approval
+#                      card is rendered there and the user's reply approves it, the integrate row renders the release entry's
 #                      reviews part on the working branch and opens the pull request through gh, the person merges
-#                      it, the integrate row delivers its record, and close-out runs.
+#                      it, the integrate row delivers its record, close-out runs, and the Patrol is disarmed.
 #     failed-review    the release-waiting run, the user's reply (all recommended: the release landing past the
 #                      pass is a release commit with its check passing, so the head reads green and the card asks no
-#                      merge without a pass; the reply records the release approval), Step 8, a whole structure review failing, the branch merged into main, and
-#                      close-out refused on the review: the register holds waive:structure and hold:merge.
-#     release-waiting  the release order (the release row at step 7, a regression row, an integrate row reading both
-#                      approvals), the build landed through ready (a landing marks no matrix cell), Steps 5 to 7 with the regression, its row
-#                      delivered, five passing reviews and the release check, the release landed, and the release
-#                      approval card rendered: the register holds approve:release and approve:merge.
-#     stop-rule        the build row landed; the release row reads the approval of a stop-rule decision, which
-#                      is put through `decisions put`: the register holds that decision's decide: ask.
-#     clean            the build row landed and the release row is still active: the register holds no open ask.
-#     single-verify    the run at single rigor (door_world_single), carried to the Verify gate: the build landed
+#                      merge without a pass; the reply records the release approval), Step 8, a whole structure
+#                      review failing, the branch merged into main, and close-out refused on the review: the register
+#                      holds waive:structure and hold:merge.
+#     release-waiting  the release order (the release row at step 7, a regression row, an integrate row), the build
+#                      landed through ready, Steps 5 to 7 with the regression and its row delivered, five passing
+#                      reviews and the release check, the release landed, and the release approval card rendered.
+#     stop-rule        the build row landed; a stop-rule decision put through `decisions put`: the register holds that
+#                      decision's decide: ask.
+#     clean            the build row landed through ready and the release row is launched: the register holds no open ask.
+#     single-verify    the run at rigor: single, carried to the Verify gate: the build landed
 #                      through ready, its criterion left pending by that landing, the evidence review at the landed head,
-#                      the walk registered (its proof discharges the criterion) and Step 5 written, current: 5.
+#                      the walk registered (its proof discharges the criterion), the regression proved, and Step 5 entered.
 #
-# THE SANDBOX is tests/lib/door.sh's `door_world`: a real repository carrying the plugin's hooks and scripts and a
-# plan in its Step-3 shape, bound to WORLD_SID. Each command runs from the sandbox's root through `door_run`, and the
-# poker, close-out, the sweeper and the door are the sandbox's own copies, so a kept sandbox is read by the same
-# plugin that played it. The plugin's context files are laid beside its scripts, as an install lays them out.
+# THE SANDBOX is tests/lib/door.sh's `door_project`: a real repository carrying the plugin's hooks and scripts, its
+# config, and no plan. Each command runs from the sandbox's root through `door_run`, and the poker, the cards,
+# close-out, the sweeper and the door are the sandbox's own copies, so a kept sandbox is read by the same plugin that
+# played it. The plugin's context files and skills are laid beside its scripts, as an install lays them out.
 #
 # WHAT IS WRITTEN BY HAND is what a run's people and agents write by hand, and each `# by hand:` line names its
 # kind first, one of RH_HAND_KINDS:
-#   [prose]   the person's words: the plan's Step-3 prose and goals, its Step-3 approval line, stamped when the
-#             rehearsal starts, and the project's config
+#   [prose]   the person's words: the plan's page (its header, goal, rows and Eval design), the requirements and
+#             the spec, and the project's config
 #   [record]  a record an agent writes: a review's, a criterion's evidence, the walk and the audit, a row's report,
 #             the records two of the goals are measured by, the document Step 7 names
 #   [code]    a row's code and its suite, and the release's changelog entry
-#   [typed]   the user's typed words in the session's transcript, with the session's start record: the CLI and
-#             session-start write those two in a real session
+#   [typed]   what the CLI writes in the session's transcript, the user's typed words and the answer to the
+#             orchestrator's ListAgents call, with the session's start record, which session-start writes
 #   [launch]  a launched agent's roster row, through the roster's production writer (below)
-#   [plan]    the orchestrator's edit of a version-14 plan's state section: a step's evidence lines, which no verb
-#             writes, since a step is an event its advance appends
-# A register, a ledger line a verb owns, a proof line, a step, an approval or a landing record is never written
+#   [plan]    the orchestrator's edit of the plan's ## Tasks table: a row added, which task-add then records, or a
+#             row's cell changed, judged by the table check the write hook runs
+# A register, a ledger line a verb owns, a proof, a step, an approval, a brief or a landing record is never written
 # here: each comes from its command.
 #
 # THE ROSTER ROW of each reviewer is written through the roster's production writer (`roster_row`, by
-# tests/lib/roster-row.sh), as the dispatch wall writes it when the reviewer is launched; the sweeper's own `ack`
-# closes it.
+# tests/lib/roster-row.sh), as the dispatch wall writes it when the reviewer is launched; `stop-orders.sh stopped`
+# closes it once the session's panel reads the reviewer gone (_rh_stopped).
 #
 # A STAND-IN `gh` (delivered alone). The pull request is an outward act, so the integrate row's `gh` is a stand-in, the
 # only `gh` on the PATH of the commands that call it: it logs each call's arguments to <dir>/bin/gh.log, answers `pr
@@ -83,6 +92,8 @@ if ! type -t roster_row_fixture >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "${BIONIC_SCRIPTS_DIR}/tests/lib/roster-row.sh" || return 1 2>/dev/null || exit 1
 fi
+# shellcheck source=/dev/null
+type -t live_answer_body >/dev/null 2>&1 || . "${BIONIC_SCRIPTS_DIR}/tests/lib/live-answer.sh" || return 1 2>/dev/null || exit 1
 
 # The kinds of hand write, each what a person, an agent or the harness writes in a real run (above).
 RH_HAND_KINDS="prose record code typed launch plan"
@@ -102,13 +113,30 @@ rh_state_known() {
 # escaped, so the log stays valid text and the line still runs as the same command.
 _rh_cmdline() { ( LC_ALL=C; printf '$'; printf ' %q' "$@"; printf '\n' ); }
 
-# _rh_do <label> <cmd> [args] -> runs <cmd> from the sandbox root as the bound session, logging the label, the
-# command, its exit and its output; a non-zero exit is reported on stderr and returned.
-_rh_do() {
-  local label="$1" t0="$SECONDS"
+# _rh_sum -> the plan's checksum, read where close-out archives it once it has left the project; `none` before it exists
+_rh_sum() {
+  local f="$RH_PLAN"
+  [ -f "$f" ] || f="$(find "$RH_DIR/home" -path "*/$DOOR_PLAN_REL" -type f 2>/dev/null | head -1)"
+  if [ -n "$f" ] && [ -f "$f" ]; then cksum < "$f" | awk '{ print $1 "-" $2 }'; else echo none; fi
+}
+# _rh_run <label> <cmd> [args] -> runs <cmd> from the sandbox root as the bound session, logging the label, the
+# command, its exit and its output, then keeping the run's log as it stands and the plan's checksum on each side
+_rh_run() {
+  local label="$1" t0="$SECONDS" s0 n
   shift
+  s0="$(_rh_sum)"
   door_run "${RH_CWD:-$RH_ROOT}" "$@"
   { _rh_cmdline "$@"; printf '%s\n' "$DOOR_OUT" | sed 's/^/  | /'; printf '  rc=%s  (%s, %s s)\n' "$DOOR_RC" "$label" "$((SECONDS - t0))"; } >> "$RH_LOG"
+  printf '%s|%s|%s\n' "$label" "$s0" "$(_rh_sum)" >> "$RH_DIR/plan-sums"
+  # Numbered by the logs already kept, so a command run in a subshell keeps its place in the order.
+  n="$(( $(ls "$RH_DIR/logs" | wc -l) + 1 ))"
+  cat "$RH_REC/run.log" > "$RH_DIR/logs/$n.log" 2>/dev/null || : > "$RH_DIR/logs/$n.log"
+}
+# _rh_do <label> <cmd> [args] -> _rh_run's run; a non-zero exit is reported on stderr and returned.
+_rh_do() {
+  local label="$1"
+  _rh_run "$@"
+  shift
   [ "$DOOR_RC" = 0 ] && return 0
   printf 'rehearse %s: %s failed (rc %s): %s\n' "$RH_STATE" "$label" "$DOOR_RC" "$*" >&2
   printf '%s\n' "$DOOR_OUT" | sed 's/^/  | /' >&2
@@ -125,39 +153,60 @@ _rh_refused() {
 }
 _rh_hand() { printf '# by hand: [%s] %s\n' "$1" "$2" >> "$RH_LOG"; }   # <kind> <what a person or an agent wrote>
 # _rh_row <label> <Tasks line> <id> [--born <b>] -> the orchestrator's edit adding the row, one hand write, then task-add
-_rh_row() { RH_R="$2" awk '/^## / { t = ($0 ~ /^## Tasks/) } { L[NR] = $0 } t && /^\|/ { last = NR } END { for (i = 1; i <= NR; i++) { print L[i]; if (i == last) print ENVIRON["RH_R"] } }' \
-  "$RH_PLAN" > "$RH_PLAN.t" && mv "$RH_PLAN.t" "$RH_PLAN" && _rh_hand plan "the row $3" && _rh_poker "$1" task-add "${@:3}"; }
-# _rh_cell <label> <row> <column>=<value>… -> the person's edit of a Tasks row's cells, written as text beside the plan
-# (lib/units.sh `units_table_cells`) and judged by the table check the write hook runs before it replaces it, as one logged act.
-_rh_cell() { local l="$1"; shift; _rh_do "$l" bash -c '. "$1/units.sh" 2>/dev/null && units_table_cells "$2" set tasks "${@:3}" > "$2.t" && [ -z "$(units_validate "$2.t" "$2" 2>&1)" ] && mv "$2.t" "$2" || { rm -f "$2.t"; exit 1; }' _ "$RH_ROOT/payload/scripts/lib" "$RH_PLAN" "$@"; }
-# _rh_step <N> <text> [<key: value>]… -> the orchestrator's edit: step N's evidence line and its block at the end of the
-# plan's state section, marked as a hand write of the plan.
-_rh_step() {
-  local n="$1" t="$2"; shift 2
-  RH_B="$(printf '  %s\n' "$@")" awk -v l="- Step $n: $t" 'BEGIN { b = ENVIRON["RH_B"] }
-    /^## / && on { print l; if (b != "  ") print b; on = 0 } /^## SDLC State/ { on = 1 } { print }
-    END { if (on) { print l; if (b != "  ") print b } }' "$RH_PLAN" > "$RH_PLAN.t" && mv "$RH_PLAN.t" "$RH_PLAN" || return 1
-  _rh_hand plan "the evidence of step $n: $t"
+_rh_row() { _rh_addrow "$2" "$3" && _rh_poker "$1" task-add "${@:3}"; }
+# _rh_addrow <Tasks line> <id> -> the orchestrator's edit adding the row as the table's last, one hand write
+_rh_addrow() { RH_R="$1" awk '/^## / { t = ($0 ~ /^## Tasks/) } { L[NR] = $0 } t && /^\|/ { last = NR } END { for (i = 1; i <= NR; i++) { print L[i]; if (i == last) print ENVIRON["RH_R"] } }' \
+  "$RH_PLAN" > "$RH_PLAN.t" && mv "$RH_PLAN.t" "$RH_PLAN" && _rh_hand plan "the row $2"; }
+# _rh_cell <what> <row> <column>=<value>… -> the person's edit of a Tasks row's cells, written as text beside the plan
+# (lib/units.sh `units_table_cells`) and judged by the table check the write hook runs before it replaces it
+_rh_cell() {
+  local w="$1"; shift
+  bash -c '. "$1/units.sh" 2>/dev/null && units_table_cells "$2" set tasks "${@:3}" > "$2.t" && [ -z "$(units_validate "$2.t" "$2" 2>&1)" ] && mv "$2.t" "$2" || { rm -f "$2.t"; exit 1; }' \
+    _ "$RH_ROOT/payload/scripts/lib" "$RH_PLAN" "$@" || { echo "rehearse $RH_STATE: the edit of $1 was refused: $w" >&2; return 1; }
+  _rh_hand plan "$w: $*"
 }
-_rh_head() { git -C "$RH_ROOT" rev-parse --verify -q refs/heads/wave/x; }
+_rh_head() { git -C "$RH_ROOT" rev-parse --verify -q "refs/heads/$DOOR_BRANCH"; }
 _rh_commit() { git -C "$1" add -A >/dev/null 2>&1 && git -C "$1" commit --quiet -m "$2"; }   # <tree> <message>
 
 # _rh_typed <words> -> the session's transcript holds <words> as a prompt the user typed, under the rehearsal's own
 # config directory, and the session's start record names this root: the two witnesses a verb holding words to what
 # the user typed asks (lib/said.sh). The CLI writes the one and session-start the other; the rehearsal stands in for
 # both, in their shapes (tests/fixtures/transcript-move).
-_rh_typed() {
-  local proj fx="$BIONIC_SCRIPTS_DIR/tests/fixtures/transcript-move"
+_rh_transcript() {  # -> the session's transcript, its frame written once
+  local proj
   proj="$CLAUDE_CONFIG_DIR/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ \
     "$RH_ROOT/payload/scripts/lib" "$RH_ROOT")" || return 1
-  mkdir -p "$proj" || return 1
-  [ -s "$proj/$WORLD_SID.jsonl" ] || cat "$fx/frame.jsonl" > "$proj/$WORLD_SID.jsonl" || return 1
-  jq -c --arg t "$1" --arg s "$WORLD_SID" '.message.content = $t | .sessionId = $s' "$fx/typed.jsonl" \
-    >> "$proj/$WORLD_SID.jsonl" || return 1
+  mkdir -p "$proj" && { [ -s "$proj/$WORLD_SID.jsonl" ] || cat "$BIONIC_SCRIPTS_DIR/tests/fixtures/transcript-move/frame.jsonl" > "$proj/$WORLD_SID.jsonl"; } \
+    && printf '%s' "$proj/$WORLD_SID.jsonl"
+}
+_rh_typed() {
+  local tr
+  tr="$(_rh_transcript)" || return 1
+  jq -c --arg t "$1" --arg s "$WORLD_SID" '.message.content = $t | .sessionId = $s' "$BIONIC_SCRIPTS_DIR/tests/fixtures/transcript-move/typed.jsonl" \
+    >> "$tr" || return 1
   [ -f "$RH_ROOT/.bionic/tmp/loaded-$WORLD_SID.state" ] \
     || printf 'root=%s\nstarted=2026-10-01T00:00:00Z\ncwd=%s\n' "$RH_ROOT/hooks" "$RH_ROOT" \
       > "$RH_ROOT/.bionic/tmp/loaded-$WORLD_SID.state" || return 1
   _rh_hand typed "the user typed '$1' (the session's transcript, and its start record)"
+}
+
+# _rh_stopped <name>… -> each agent's report reaching the session (the envelope the harness writes into its transcript
+# for the agent's SendMessage naming its deliverable), the session's panel read fresh (the harness's answer to the
+# orchestrator's ListAgents call, after the last prompt, in tests/lib/live-answer.sh's corpus shape) listing none of
+# them, and each row closed by the act the dispatch page names, `stop-orders.sh stopped`
+_rh_stopped() {
+  local n tr at d
+  tr="$(_rh_transcript)" && at="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" || return 1
+  for n; do
+    d="$(/usr/bin/grep -h "|name=$n|" "$RH_ROOT"/.bionic/tmp/roster-*.state 2>/dev/null | tail -1 | tr '|' '\n' | sed -n 's/^deliverable=//p')"
+    _live_answer_entry_prompt "$at" "<teammate-message teammate_id=\"$n\">$n: done, the report is $d</teammate-message>" >> "$tr" || return 1
+  done
+  # The panel is read after the reports arrive, half a second into the same second: a reading older than the last
+  # prompt is stale.
+  at="${at%.000Z}.500Z"
+  { _live_answer_entry_tool_use "$at" "toolu-panel-$#-$1"; _live_answer_entry_tool_result "$at" "toolu-panel-$#-$1" "$(live_answer_body)"; } >> "$tr" || return 1
+  _rh_hand typed "the reports of $* and the panel the orchestrator read before closing their rows, in the session's transcript"
+  for n; do _rh_do "the orchestrator closes $n's row" bash "$RH_ROOT/hooks/stop-orders.sh" stopped "$n" || return 1; done
 }
 
 # _rh_reply <label> -> the user's reply to the newest release card at the working head, typed, then replayed: all as
@@ -178,18 +227,6 @@ _rh_land() {
     --reason "the rehearsal lands $1 by hand"
 }
 
-# _rh_build -> the build row written in its tree, with a one-row suite, and landed
-_rh_build() {
-  local t
-  t="$(door_piece "$RH_ROOT" T1)" || { echo "rehearse $RH_STATE: door_piece T1 failed" >&2; return 1; }
-  printf 'rehearsal_landed() { :; }\n' >> "$t/payload/scripts/lib/said.sh"
-  printf '#!/bin/bash\n. "$(dirname "$0")/lib/assert.sh"\nsection "the rehearsal holds"\nexpect_eq "one is one" 1 1\nfinish\n' \
-    > "$t/tests/rehearsal-row.test.sh"
-  _rh_commit "$t" "a library change and its suite" || return 1
-  _rh_hand code "T1's code and its suite, committed in .worktrees/T1"
-  _rh_land T1
-}
-
 # _rh_build_ready -> the build row written in a tree the create verb makes for its writer, with a one-row suite, and
 # landed through ready on that suite: its landing writes the criterion's evidence and status (lib/line.sh `line_settle`)
 _rh_build_ready() {
@@ -205,7 +242,7 @@ _rh_build_ready() {
   RH_CWD="$t" _rh_do "the build row says ready" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" ready --within "${RH_WITHIN:-300}" || return 1
   printf '# T1: the build\n\nThe library change and its suite.\n' > "$RH_REC/T1.md" || return 1
   _rh_hand record "T1's report record/wave-x/T1.md"
-  _rh_do "the sweeper acks the build row's writer" bash "$RH_ROOT/hooks/session-sweeper.sh" ack dw-T1
+  _rh_stopped dw-T1
 }
 
 # _rh_review <name> <question> <scope> <a> <b> <pass|fail> -> the reviewer's record and roster row. The evidence question
@@ -235,15 +272,15 @@ _rh_rigor() { awk '/^---$/ { n++; next } n == 1 && /^rigor:/ { sub(/^rigor:[[:sp
 
 # _rh_verify -> the build landed through ready, the evidence review at the landed head (the auditor's at double rigor,
 # the critic's at single), which is the verdict a criterion a logged proof discharges reads, the walk registered (its
-# record the critic's shape, one CONFIRMED row for the one criterion, so the walk's proof discharges it), Step 5's line
-# and fields, and Step 5 entered. Only a double-rigor run deals an auditor, so only there do the audit's record and
-# Step 5's `auditor:` pointer exist.
+# record the critic's shape, one CONFIRMED row for the one criterion, so the walk's proof discharges it), the whole run's
+# regression proved at the head, and Step 5 entered. Only a double-rigor run deals an auditor, so only there is the
+# audit's record written.
 _rh_verify() {
   local dbl=no
   [ "$(_rh_rigor)" != double ] || dbl=yes
   _rh_build_ready || return 1
   _rh_review w-evidence-whole evidence whole "$RH_BASE" "$(_rh_head)" pass || return 1
-  _rh_do "the sweeper acks the evidence reviewer" bash "$RH_ROOT/hooks/session-sweeper.sh" ack w-evidence-whole || return 1
+  _rh_stopped w-evidence-whole || return 1
   printf '# walk\n\n| AC | verdict | why |\n|---|---|---|\n| AC-1.1 | CONFIRMED | the build row read whole |\n\nverdict: CONFIRMED — the one criterion\n' > "$RH_REC/walk.md"
   if [ "$dbl" = yes ]; then
     printf 'CONFIRMED: the one criterion is proved\n' > "$RH_REC/audit.md"
@@ -252,8 +289,8 @@ _rh_verify() {
     _rh_hand record "the walk record/wave-x/walk.md"
   fi
   _rh_poker "register the walk" proof-add walk record/wave-x/walk.md || return 1
-  if [ "$dbl" = no ]; then _rh_step 5 'regression at record/wave-x/regression-run.log' 'walk-artifact: record/wave-x/walk.md' || return 1
-  else _rh_step 5 'regression at record/wave-x/regression-run.log' 'walk-artifact: record/wave-x/walk.md' 'auditor: CONFIRMED, record/wave-x/audit.md' || return 1; fi
+  _rh_poker "run the regression" regression-run || return 1
+  _rh_poker "record the regression" proof-add regression "record/wave-x/regression-run-$(_rh_head).log" || return 1
   _rh_poker "enter Step 5" current 5
 }
 
@@ -261,28 +298,26 @@ _rh_verify() {
 # matrix, Steps 5 to 7 with the regression, the five reviews and the release check, the release landed, the card
 _rh_release_card() {
   local h1 qs t2
-  _rh_cell "move the release row to step 7" T2 step=7 || return 1
-  _rh_row "add the regression row" '| T3 | 5 | test | the regression. The whole suite runs once. | orchestrator | — | — | 10 | REQ-1 | .bionic/docs/record/wave-x/T3.md | — | — | pending |' T3 || return 1
-  _rh_row "add the integrate row" '| T4 | 8 | integrate | merge into main. The run reaches main by its merge. | orchestrator | — | approval:release, approval:merge, head | 10 | REQ-1 | — | — | — | pending |' T4 || return 1
+  _rh_cell "the release row moves to step 7" T2 step=7 || return 1
+  _rh_row "add the regression row" '| T3 | 5 | test | the regression. The whole suite runs once. | — | 10 | REQ-1 | .bionic/docs/record/wave-x/T3.md | — |' T3 || return 1
+  _rh_row "add the integrate row" '| T4 | 8 | integrate | merge into main. The run reaches main by its merge. | — | 10 | REQ-1 | — | — |' T4 || return 1
   _rh_verify || return 1
   h1="$(_rh_head)"
-  _rh_poker "run the regression" regression-run || return 1
-  _rh_poker "record the regression" proof-add regression "record/wave-x/regression-run-$h1.log" || return 1
   printf '# T3: the regression\n\nThe whole run at %s exited 0: record/wave-x/regression-run-%s.log.\n' "$h1" "$h1" > "$RH_REC/T3.md"
   _rh_hand record "the regression row's report record/wave-x/T3.md"
   _rh_tick_land "the tick lands the regression row" T3 record/wave-x/T3.md || return 1
   for qs in evidence:piece adversarial:piece structure:piece adversarial:whole structure:whole; do
     _rh_review "w-${qs%%:*}-${qs#*:}" "${qs%%:*}" "${qs#*:}" "$RH_BASE" "$h1" pass || return 1
   done
-  _rh_do "the sweeper acks the five reviewers" bash "$RH_ROOT/hooks/session-sweeper.sh" ack \
+  _rh_stopped \
     w-evidence-piece w-adversarial-piece w-structure-piece w-adversarial-whole w-structure-whole || return 1
-  _rh_step 6 'review at record/wave-x/w-evidence-piece.md' || return 1
   _rh_poker "enter Step 6" current 6 || return 1
   _rh_poker "the release check at the build head" release-check || return 1
-  printf 'no decision this run\n' > "$RH_REC/adr.md"; _rh_hand record "the document record/wave-x/adr.md"
-  _rh_step 7 'documented at record/wave-x/adr.md' 'adr: record/wave-x/adr.md' || return 1
   _rh_poker "enter Step 7" current 7 || return 1
-  t2="$(door_piece "$RH_ROOT" T2)" && door_release "$RH_ROOT" "$t2" >/dev/null \
+  t2="$RH_ROOT/.worktrees/T2"
+  _rh_brief dw-T2 T2 && _rh_do "the release row's tree" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" create "$(_rh_head)" wt/T2 --for dw-T2 \
+    && _rh_launch dw-T2 T2 release-check.test.sh || return 1
+  DOOR_RUNNER=_rh_note door_release "$RH_ROOT" "$t2" >/dev/null \
     || { echo "rehearse $RH_STATE: the release commit in .worktrees/T2 failed" >&2; return 1; }
   _rh_hand code "the release $DOOR_VERSION: its changelog entry (release-note's numbers) and plugin.json, committed in .worktrees/T2"
   _rh_land T2 || return 1
@@ -291,10 +326,11 @@ _rh_release_card() {
   _rh_poker "the release approval card" release-approval "$RH_PLAN"
 }
 
-# _rh_brief <name> <row> -> the brief's mark for <name> on <row>, which the tree verb reads the row from
-_rh_brief() {
-  mkdir -p "$RH_REC/briefs" && printf '<!-- brief: rendered from row %s for %s; sum %064d; render it again to change it, never edit it -->\n' "$2" "$1" 0 > "$RH_REC/briefs/$1.md"
-}
+# _rh_note <root> <cmd> [args] -> door_release's run of the release note, as the rehearsal runs each command
+_rh_note() { shift; _rh_run "the release note's numbers" "$@"; }
+
+# _rh_brief <name> <row> -> the brief of <row> rendered for <name> by the brief verb, which the tree verb reads the row from
+_rh_brief() { _rh_poker "render $2's brief for $1" brief "$2" "$1"; }
 
 # _rh_launch <name> <row> <suite> -> the writer's roster row, as the dispatch wall writes it when the writer is launched
 # on <row> with its brief's Lands-on suite, confirmed by the launch recorder: the run's dispatch event
@@ -320,9 +356,7 @@ _rh_landed() {
 _rh_tick_land() {
   local label="$1" row="$2" rec="$3" key val n
   for n in 1 2; do
-    door_run "$RH_ROOT" bash "$RH_ROOT/hooks/session-poker.sh" tick
-    { _rh_cmdline bash "$RH_ROOT/hooks/session-poker.sh" tick; printf '%s\n' "$DOOR_OUT" | sed 's/^/  | /'
-      printf '  rc=%s  (%s, tick %s)\n' "$DOOR_RC" "$label" "$n"; } >> "$RH_LOG"
+    _rh_run "$label, tick $n" bash "$RH_ROOT/hooks/session-poker.sh" tick
     _rh_landed "$row" && return 0
     [ "$n" = 1 ] || break
     key="$(printf '%s\n' "$DOOR_OUT" | /usr/bin/grep -oE "edit the [A-Za-z-]+ cell of $row in the plan" | head -1)"; key="${key#edit the }"; key="${key%% *}"
@@ -332,7 +366,7 @@ _rh_tick_land() {
       *) break ;;
     esac
     printf '# not landed: %s · names: edit %s\n' "$label" "$key" >> "$RH_LOG"
-    _rh_cell "follow: edit $row $key" "$row" "$key=$val" || return 1
+    _rh_cell "the tick names the edit of $row's $key cell" "$row" "$key=$val" || return 1
   done
   printf 'rehearse %s: %s: the tick did not land %s\n' "$RH_STATE" "$label" "$row" >&2
   printf '%s\n' "$DOOR_OUT" | sed 's/^/  | /' >&2
@@ -371,13 +405,15 @@ GH
 _rh_replay() {
   local dir="$1" t f h
   printf '# replay: from failed-review, through the verbs to delivered:\n' >> "$RH_LOG"
-  _rh_do "the sweeper acks the failing reviewer" bash "$RH_ROOT/hooks/session-sweeper.sh" ack w-structure-whole-2 || return 1
+  _rh_stopped w-structure-whole-2 || return 1
   # A second reader of the same head names the same site under another question, dealt it on its roster row: the fix
   # row's landing settles that finding too, so no move follows the landing.
   _rh_review w-adversarial-whole-2 adversarial whole "$RH_BASE" "$(_rh_head)" fail || return 1
-  _rh_do "the sweeper acks the second failing reviewer" bash "$RH_ROOT/hooks/session-sweeper.sh" ack w-adversarial-whole-2 || return 1
-  _rh_row "the fix row born of the finding" '| T5 | 4 | build | Answer the structure finding. A caller reaches the library change. The caller and the library agree again. · born: review | orchestrator | — | — | 10 | REQ-1 | payload/scripts/lib/said.sh, tests/rehearsal-row.test.sh | — | — | pending |' \
-    T5 --born record/wave-x/w-structure-whole-2.md#1 || return 1
+  _rh_stopped w-adversarial-whole-2 || return 1
+  # The fix row, and the rows of later steps waiting on it as task-add asks: their deps name it.
+  _rh_addrow '| T5 | 4 | build | Answer the structure finding. A caller reaches the library change. The caller and the library agree again. · born: review | — | 10 | REQ-1 | payload/scripts/lib/said.sh, tests/rehearsal-row.test.sh | — |' T5 \
+    && _rh_cell "the release row waits on the fix" T2 deps=T5 && _rh_cell "the integrate row waits on the fix" T4 deps=T5 \
+    && _rh_poker "the fix row born of the finding" task-add T5 --born record/wave-x/w-structure-whole-2.md#1 || return 1
   _rh_brief w-T5 T5 || return 1
   _rh_do "the fix row's tree" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" create "$(_rh_head)" wt/T5 --for w-T5 || return 1
   _rh_launch w-T5 T5 rehearsal-row.test.sh || return 1
@@ -389,7 +425,7 @@ _rh_replay() {
   RH_CWD="$t" _rh_do "the fix row says ready" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" ready --within "${RH_WITHIN:-300}" || return 1
   printf '# T5: the fix\n\nThe suite calls rehearsal_landed, so the library change has a caller.\n' > "$RH_REC/T5.md" || return 1
   _rh_hand record "T5's report record/wave-x/T5.md"
-  _rh_do "the sweeper acks the fix row's writer" bash "$RH_ROOT/hooks/session-sweeper.sh" ack w-T5 || return 1
+  _rh_stopped w-T5 || return 1
   _rh_poker "the release check at the fix's head" release-check || return 1
   _rh_poker "the release approval card at the fix's head" release-approval "$RH_PLAN" || return 1
   _rh_reply "the user's reply to the card at the fix's head" || return 1
@@ -397,11 +433,11 @@ _rh_replay() {
   _rh_poker "the integrate row renders the entry's reviews part" reviews-part T4 || return 1
   _rh_gh "$dir" || { echo "rehearse $RH_STATE: the stand-in gh could not be written in $dir/bin" >&2; return 1; }
   _rh_do "the gh on the integrate row's PATH" env PATH="$RH_GHPATH" bash -c 'type -a gh' || return 1
-  _rh_do "the integrate row opens the pull request" env PATH="$RH_GHPATH" gh pr create --base main --head wave/x --fill || return 1
+  _rh_do "the integrate row opens the pull request" env PATH="$RH_GHPATH" gh pr create --base main --head "$DOOR_BRANCH" --fill || return 1
   h="$DOOR_OUT"
-  printf '# T4: the pull request\n\n    gh pr create --base main --head wave/x --fill\n\n%s\n' "$h" > "$RH_REC/T4-pr.md" || return 1
+  printf '# T4: the pull request\n\n    gh pr create --base main --head %s --fill\n\n%s\n' "$DOOR_BRANCH" "$h" > "$RH_REC/T4-pr.md" || return 1
   _rh_hand record "T4's report record/wave-x/T4-pr.md: the pull request's command and its address"
-  _rh_do "the person merges the pull request" env PATH="$RH_GHPATH" gh pr merge wave/x --merge || return 1
+  _rh_do "the person merges the pull request" env PATH="$RH_GHPATH" gh pr merge "$DOOR_BRANCH" --merge || return 1
   # The integrate row is the merge's: close-out lands it at the integration head, the act below.
   _rh_do "close-out, the tail" env HOME="$dir/home" BIONIC_CLAUDE_HOME="$dir/home/.claude" \
     bash "$RH_ROOT/payload/scripts/close-out.sh" "$RH_PLAN" run || return 1
@@ -409,36 +445,167 @@ _rh_replay() {
   f="$(find "$dir/home" -path "*/$DOOR_PLAN_REL" -type f 2>/dev/null | head -1)"
   [ -n "$f" ] || { echo "rehearse $RH_STATE: close-out ran and no archived plan holds $DOOR_PLAN_REL under $dir/home" >&2; return 1; }
   RH_PLAN="$f"
+  # At the run's close the Patrol's stamp goes with it, as the skill says to end it.
+  _rh_poker "the Patrol is disarmed at the close" disarm
+}
+
+# _rh_card <step> <artifact> -> the step's card rendered by its verb
+_rh_card() { _rh_do "the Step ${1#step} card" bash "$RH_ROOT/payload/scripts/card.sh" "$1" "$2"; }
+# _rh_approve <name> -> the user types the literal word, and the approval of <name> is recorded on it
+_rh_approve() { _rh_typed approved && _rh_poker "approve $1" approve "$1" approved; }
+
+# _rh_fresh <rigor> -> the run from the skill's invocation to Step 4, each step's artifact written by its person and the
+# rest by commands: the session engages, the planner's page binds it, and each of Steps 0 to 3 ends on its card, its
+# approval and its advance.
+_rh_fresh() {
+  local spec="$RH_ROOT/.bionic/docs/specs/epic-x"
+  _rh_do "the skill is invoked: the session engages" bash -c 'printf %s "$1" | bash "$2"' _ \
+    "$(jq -nc --arg s "$WORLD_SID" --arg c "$RH_ROOT" '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Skill", tool_input:{skill:"bionic:canonical-sdlc"}}')" \
+    "$RH_ROOT/hooks/engage.sh" || return 1
+  mkdir -p "${RH_PLAN%/*}" "$spec" || return 1
+  # The planner names the branch the run merges into and the run's goals, each measured by a record: one the
+  # rehearsal writes passing, one failing, and one it never writes, so every state's sheet reads a goal met, one not
+  # met and one not measured yet. The run writes no durable decision, so its document is none, with the reason.
+  cat > "$RH_PLAN" <<PLAN || return 1
+---
+working-branch: $DOOR_BRANCH
+integration-branch: main
+goals: $RH_GOALS
+base-sha: $RH_BASE
+release: $DOOR_VERSION
+rigor: $1
+scale: wave
+adrs: none: the run decides nothing durable
+canonical_sdlc_version: 15
+---
+# a rehearsed run
+
+## Goal
+
+One library change, released.
+PLAN
+  _rh_hand prose "the plan's page at Step 0, $DOOR_PLAN_REL: its header (branches, base, release, rigor, scale, goals, document) and its goal"
+  _rh_poker "the plan binds the session" bind "$RH_PLAN" || return 1
+  _rh_card step0 "$RH_PLAN" && _rh_approve step0 && _rh_poker "enter Step 1" current 1 || return 1
+  cat > "$spec/wave-x.requirements.md" <<REQ || return 1
+---
+working-branch: $DOOR_BRANCH
+integration-branch: main
+---
+# wave x · requirements
+
+## Goal
+
+One library change, released.
+
+## Not Doing
+
+- A second change: one is enough to rehearse.
+
+## The change
+
+The run ships one change.
+
+### REQ-1 — the library change
+
+The library gains one function, and a suite proves it.
+
+provenance: user 2026-11-12 "rehearse a run"
+- AC-1.1 the library change holds. Fails when: the build row's suite is red.
+REQ
+  _rh_hand prose "the requirements, specs/epic-x/wave-x.requirements.md"
+  _rh_card step1 "$spec/wave-x.requirements.md" && _rh_approve step1 && _rh_poker "enter Step 2" current 2 || return 1
+  cat > "$spec/wave-x.spec.md" <<SPEC || return 1
+---
+working-branch: $DOOR_BRANCH
+integration-branch: main
+---
+# wave x · spec
+
+## Goal
+
+Answer the requirements with one function.
+
+## Design
+
+### 1. Domain model
+
+- **The change** — one function in a library.
+
+### 2. Component boundaries and interfaces
+
+- **\`payload/scripts/lib/said.sh\`** owns the function. (D1; REQ-1)
+
+### 3. Ownership table
+
+| concept | owning module (SSoT) | reuses | rendering surfaces | agreement test |
+|---|---|---|---|---|
+| the change | \`payload/scripts/lib/said.sh\` | none fits: new | none | \`tests/rehearsal-row.test.sh\` |
+
+### 4. Rejected alternatives
+
+- No change — lost: nothing to rehearse.
+
+### 5. Assumptions
+
+- The library is sourced by its callers.
+
+### Decisions
+
+- **D1 — one function** (D1; REQ-1)
+
+## Eval design
+
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+| REQ-1 | the build row's suite | AC-1.1 | hermetic | \`rehearsal-row.test.sh\` | the build row's suite is red |
+SPEC
+  _rh_hand prose "the spec, specs/epic-x/wave-x.spec.md"
+  _rh_card step2 "$spec/wave-x.spec.md" && _rh_approve step2 && _rh_poker "enter Step 3" current 3 || return 1
+  cat >> "$RH_PLAN" <<PLAN || return 1
+
+## Tasks
+
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | a library change. One function and its suite. | — | 10 | REQ-1 | payload/scripts/lib/said.sh, tests/rehearsal-row.test.sh | — |
+| T2 | 4 | doc | the release $DOOR_VERSION. Its changelog entry and version. | — | 10 | REQ-1 | CHANGELOG.md, payload/.claude-plugin/plugin.json | — |
+
+## Eval design
+
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+| REQ-1 | the build row's suite | AC-1.1 | hermetic | \`rehearsal-row.test.sh\` | the build row's suite is red |
+PLAN
+  _rh_hand prose "the plan's Step-3 prose: its rows and its Eval design"
+  _rh_card step3 "$RH_PLAN" && _rh_approve plan && _rh_poker "enter Step 4" current 4
 }
 
 # rehearse <state> <dir> -> the sandbox plan's path
 rehearse() {
-  local state="${1:-}" dir="${2:-}" built fx
+  local state="${1:-}" dir="${2:-}" built rigor=double
   rh_state_known "$state" || { echo "rehearse: no state '$state': delivered, failed-review, release-waiting, stop-rule, clean or single-verify" >&2; return 2; }
   [ -n "$dir" ] || { echo "rehearse: name a directory" >&2; return 2; }
   mkdir -p "$dir" && dir="$(cd "$dir" && pwd -P)" || return 1
-  RH_STATE="$state"; RH_LOG="$dir/rehearsal.log"
+  RH_STATE="$state"; RH_LOG="$dir/rehearsal.log"; RH_DIR="$dir"
   # A rehearsed landing asks the gate, and a suite's verdict never turns on what else the host is doing: the world is a
   # quiet machine, planted through the readers' pins as the gate's own suites plant one, so only its own store and config
   # (a share, a reserve) can make a rehearsed landing wait. Callers run rehearse in a subshell, so nothing leaks.
   export BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0
-  : > "$RH_LOG"
-  # The single-rigor state is built on the single-rigor fixture; every other state on door_world, at double rigor.
-  fx=door_world; [ "$state" != single-verify ] || fx=door_world_single
-  built="$($fx "$dir/project")" || { echo "rehearse $state: $fx failed under $dir" >&2; return 1; }
-  read -r RH_ROOT RH_BASE <<EOF
-$built
-EOF
+  : > "$RH_LOG"; : > "$dir/plan-sums"; mkdir -p "$dir/logs" || return 1
+  [ "$state" != single-verify ] || rigor=single
+  built="$(door_project "$dir/project")" || { echo "rehearse $state: door_project failed under $dir" >&2; return 1; }
+  RH_ROOT="${built% *}"; RH_BASE="${built##* }"
   RH_PLAN="$RH_ROOT/$DOOR_PLAN_REL"
   RH_REC="$RH_ROOT/.bionic/docs/record/wave-x"
-  # The plugin's context files go beside its scripts, as an install lays them out: the poker reads the structure
-  # checks from there. Excluded from the sandbox's git, so the plugin's files never enter the run's range.
-  cp -R "$BIONIC_SCRIPTS_DIR/payload/context" "$RH_ROOT/payload/context" \
-    && printf 'payload/context/\n' >> "$RH_ROOT/.git/info/exclude" \
-    || { echo "rehearse $state: the plugin's context files could not be laid beside its scripts" >&2; return 1; }
+  # The plugin's context files and skills go beside its scripts, as an install lays them out: the poker reads the
+  # structure checks and the brief's scaffold from there. Excluded from the sandbox's git, so they never enter the range.
+  cp -R "$BIONIC_SCRIPTS_DIR/payload/context" "$RH_ROOT/payload/context" && cp -R "$BIONIC_SCRIPTS_DIR/skills" "$RH_ROOT/skills" \
+    && printf 'payload/context/\nskills/\n' >> "$RH_ROOT/.git/info/exclude" \
+    || { echo "rehearse $state: the plugin's context files and skills could not be laid beside its scripts" >&2; return 1; }
   # A project's config is its person's words, so it is written by hand. The run that closes declares the project's
-  # real release check, the one door_world commits and declares, since its close is judged by that check. The other
-  # states declare the name scan alone: no state short of the close turns on the rest of the check.
+  # real release check, the one door_project commits, since its close is judged by that check. The other states
+  # declare the name scan alone: no state short of the close turns on the rest of the check.
   if [ "$state" = delivered ]; then
     printf 'release-check: bash tests/lib/release-check.sh %s\n' "$RH_ROOT-names.list" > "$RH_ROOT/.bionic/config.yaml"
     _rh_hand prose "the project's .bionic/config.yaml, declaring its real release check, tests/lib/release-check.sh"
@@ -448,31 +615,18 @@ EOF
   fi
   export CLAUDE_CONFIG_DIR="$dir/config"
   mkdir -p "$CLAUDE_CONFIG_DIR/bionic" "$dir/home/.claude"
-  printf '# rehearse %s: door_world built %s at %s, its plan bound to %s\n' "$state" "$RH_ROOT" "$RH_BASE" "$WORLD_SID" >> "$RH_LOG"
-  # The planner names the branch the run merges into; door_world's plan, which never merges, leaves it out. It also
-  # declares the run's goals, each measured by a record: one the rehearsal writes passing, one failing, and one it
-  # never writes, so every state's sheet reads a goal met, one not met and one not measured yet.
-  # Its Eval design names the build row's own suite, so the build's landing proves the criterion.
-  awk -v g="$RH_GOALS" '{ print } $0 == "working-branch: wave/x" && !d { print "integration-branch: main"; print "goals: " g; d = 1 }' \
-    "$RH_PLAN" | sed 's/| `tests\/run.sh` | the whole run is red |/| `rehearsal-row.test.sh` | the build row'"'"'s suite is red |/' > "$RH_PLAN.rh" \
-    && mv "$RH_PLAN.rh" "$RH_PLAN" && /usr/bin/grep -q '`rehearsal-row.test.sh`' "$RH_PLAN" || return 1
-  _rh_hand prose "the plan's Step-3 prose, $DOOR_PLAN_REL (door_world), naming integration-branch: main, the run's three goals and the build row's suite as AC-1.1's eval"
+  printf '# rehearse %s: door_project built %s at %s, with no plan and no session bound\n' "$state" "$RH_ROOT" "$RH_BASE" >> "$RH_LOG"
+  _rh_fresh "$rigor" || return 1
   printf '# the card read\n\nverdict: pass\n' > "$RH_REC/goal-shown.md" \
     && printf '# the asks checked\n\nverdict: fail\n' > "$RH_REC/goal-asks.md" || return 1
   _rh_hand record "the goal records record/wave-x/goal-shown.md (verdict: pass) and record/wave-x/goal-asks.md (verdict: fail)"
-  # The person approves the plan at Step 3 just before the build, so the approval is stamped now: a stamp from the
-  # fixture's own past would make the pace read the hours between it and the first landing, and the close land weeks out.
-  awk -v at="$(date -u +%Y-%m-%dT%H:%MZ)" '/^approved-by:/ { print "approved-by: user " at " \"approved\""; next } { print }' "$RH_PLAN" > "$RH_PLAN.rh" \
-    && mv "$RH_PLAN.rh" "$RH_PLAN" && /usr/bin/grep -q '^approved-by: user ' "$RH_PLAN" || return 1
-  _rh_hand prose "the plan's Step-3 approval line, approved-by: user <now> \"approved\" (the person's words, at the rehearsal's start)"
   case "$state" in
     clean)
-      _rh_build || return 1 ;;
+      _rh_build_ready && _rh_brief dw-T2 T2 && _rh_launch dw-T2 T2 release-check.test.sh || return 1 ;;
     single-verify)
       _rh_verify || return 1 ;;
     stop-rule)
-      _rh_build || return 1
-      _rh_cell "the release row reads D1" T2 'reads=approval:plan, head, approval:D1' || return 1
+      _rh_build_ready || return 1
       _rh_poker "put D1" decisions put D1 'stop the run: the release row waits until the user rules on going on' || return 1 ;;
     release-waiting)
       _rh_release_card || return 1 ;;
@@ -482,7 +636,7 @@ EOF
       _rh_poker "enter Step 8" current 8 || return 1
       _rh_review w-structure-whole-2 structure whole "$RH_BASE" "$(_rh_head)" fail || return 1
       # The integrate row's merge, as the pull request's merge lands it: main moves to the working head.
-      _rh_do "merge wave/x into main" git -C "$RH_ROOT" fetch --quiet . wave/x:main || return 1
+      _rh_do "merge the working branch into main" git -C "$RH_ROOT" fetch --quiet . "$DOOR_BRANCH:main" || return 1
       _rh_refused "close-out, refused on the failing review" env HOME="$dir/home" BIONIC_CLAUDE_HOME="$dir/home/.claude" \
         bash "$RH_ROOT/payload/scripts/close-out.sh" "$RH_PLAN" run || return 1
       if [ "$state" = delivered ]; then
@@ -506,6 +660,9 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0
 fi
 
+# The run's working branch is shaped as its wave scale's branch cell asks (wave/<NN>-<slug>), which the close's census
+# reads its wave number from.
+DOOR_BRANCH="wave/01-x"
 # shellcheck source=/dev/null
 . "${BIONIC_SCRIPTS_DIR}/tests/lib/door.sh" || return 1 2>/dev/null || exit 1
 

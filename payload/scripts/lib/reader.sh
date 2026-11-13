@@ -214,14 +214,18 @@ reader_step_fields() {  # <step> -> the fields that step's event may carry, blan
 
 reader_question step value reader_q_step
 reader_q_step() {  # <plan> -> n=<the current step>, its own fields as key=value, state=open|delivered|abandoned
-  # step 9 is the delivery, save one written as not delivered: a version-14 plan at 9 with no delivered line
-  reader_facts "$1" | awk -F'|' -v sf="$READER_STEP_FIELDS" "$_READER_AWK"'
+  # step 9 is the delivery, save one written as not delivered: a version-14 plan at 9 with no delivered line. A page
+  # at 15 that no step has moved stands at step 0, as a row nothing has dispatched is pending: its planner wrote it,
+  # and binding it and its first advance both ask where it stands. Abandoned before a step, it is abandoned at none.
+  local v15=""
+  [ "$(plan_read_header "$1" canonical_sdlc_version 2>/dev/null)" != canonical_sdlc_version=15 ] || v15=1
+  reader_facts "$1" | awk -F'|' -v sf="$READER_STEP_FIELDS" -v v15="$v15" "$_READER_AWK"'
     BEGIN { m = split(sf, s, " "); for (i = 1; i <= m; i++) { k = substr(s[i], 1, index(s[i], ":") - 1); fl[k] = substr(s[i], index(s[i], ":") + 1) } }
     ev() == "step" { n = line_kv("n"); held = (line_kv("delivered") == "no"); f = ""
       k = n; sub(/[ab]$/, "", k); c = split(fl[k], w, ",")
       for (i = 1; i <= c; i++) if ((v = line_kv(w[i])) != "") f = f w[i] "=" v "\n" }
     ev() == "abandon" { gone = 1 }
-    END { if (n != "") print "n=" n; printf "%s", f; print "state=" (gone ? "abandoned" : (n == "9" && !held ? "delivered" : "open")) }'
+    END { if (n == "" && v15 && !gone) n = 0; if (n != "") print "n=" n; printf "%s", f; print "state=" (gone ? "abandoned" : (n == "9" && !held ? "delivered" : "open")) }'
 }
 
 reader_question approved yes reader_q_approved
