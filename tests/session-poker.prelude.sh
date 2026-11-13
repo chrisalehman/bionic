@@ -393,22 +393,17 @@ fake_config_dir() {  # <label> -> a CLAUDE_CONFIG_DIR with a projects/ tree
   printf '%s' "$c"
 }
 
-# ── hoisted from Section 11: wave_plan, wave_plan_at, SP_TASKS_HEADER, SP_APPROVED_LINE, plant_answer, poke_pressure, RUNG_N, poke_rung — every later shard plants plans and answers and ticks under a pinned pressure with them. ──
+# ── hoisted from Section 11: wave_plan_at, SP_TASKS_HEADER, SP_APPROVED_LINE, plant_answer, poke_pressure, RUNG_N, poke_rung — every later shard plants plans and answers and ticks under a pinned pressure with them. ──
 # A plan carrying BOTH halves the scheduler reads: the frontmatter `parallel-budget:` line
 # and the machine-readable task table. Written as one builder because a fixture that
 # carried only one of them would be testing a plan shape the wave never produces.
 #
 # The budget line's shape is byte-identical to what Step 0 writes and to what
 # hooks/dispatch-preflight.sh's budget arm reads (L-RESOURCES/2): one string, four fields.
-wave_plan() {  # <repo> <budget line body, or "-" for none> <table row>...
-  local repo="$1"; shift
-  wave_plan_at "$repo" 'epic-99-fixture/wave-01-fixture.plan.md' "$@" >/dev/null
-}
-
-# THE SAME PLAN, AT A PATH THE CALLER NAMES, and echoing that path back. Section 18 needs
+#
+# AT A PATH THE CALLER NAMES, and echoing that path back. Section 18 needs
 # TWO budgeted plans in one root — one bound, one not — which a fixed filename cannot
-# describe. `wave_plan` is now a two-line delegate to this, so every Section 11/12 case
-# still writes exactly the file it always wrote.
+# describe.
 # THE ONE `## Tasks` HEADER EVERY FIXTURE PLAN IN THIS SUITE CARRIES (REQ-1e). The tick
 # reads the table through payload/scripts/lib/units.sh now, which keys every column off
 # this header row by NAME — so a fixture that named fewer columns would be testing a
@@ -436,7 +431,7 @@ wave_plan_at() {  # <repo> <path under <docs-root>/plans> <budget or "-"> <table
     local row
     for row in "$@"; do printf '%s\n' "$row"; done
   } > "$f"
-  [ "${SP_PLAN_AT:-14}" != 15 ] || sp_at15 "$f"
+  [ "${SP_PLAN_AT:-15}" != 15 ] || sp_at15 "$f"
   touch "$f"
   printf '%s' "$f"
 }
@@ -519,7 +514,7 @@ sp_at15() {
 }
 
 # ── hoisted from Section 12: sp_plan_at_step — Sections 37–40, 50, 55 and 67 write plans with it. ──
-# SP_PLAN_AT=15 asks for the same plan at 15 (sp_at15); unasked, the page is at 14.
+# SP_PLAN_AT=14 asks for the page at 14; unasked, sp_at15 rewrites it as a run at 15 holds it.
 sp_plan_at_step() {  # <repo> <current> <row>... -> the plan path
   local repo="$1" current="$2"; shift 2
   local f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" row
@@ -533,7 +528,7 @@ sp_plan_at_step() {  # <repo> <current> <row>... -> the plan path
     printf '%s' "$SP_TASKS_HEADER"
     for row in "$@"; do printf '%s\n' "$row"; done
   } > "$f"
-  [ "${SP_PLAN_AT:-14}" != 15 ] || sp_at15 "$f"
+  [ "${SP_PLAN_AT:-15}" != 15 ] || sp_at15 "$f"
   touch "$f"
   printf '%s' "$f"
 }
@@ -616,7 +611,7 @@ s34_plan() {  # <repo> <current> [step-4 block body] -> the plan path; the sessi
     printf '## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
     printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
   } > "$f"
-  [ "${SP_PLAN_AT:-14}" != 15 ] || sp_at15 "$f"
+  [ "${SP_PLAN_AT:-15}" != 15 ] || sp_at15 "$f"
   bound_marker "$repo" "$SID" "$f" >/dev/null 2>&1
   printf '%s' "$f"
 }
@@ -636,8 +631,8 @@ s34_gate() {
 # ── hoisted from Section 42: s42_plan, s42_numstat, s42_snap, s42_unchanged, s42_builds_landed — every later shard builds, snapshots and compares plans with them. ──
 s42_plan() {  # <repo> <current> [step-4 block body] -> the plan path; bound, committed
   local p; p="$(s34_plan "$1" "$2" "${3:-}")"
-  [ "${SP_PLAN_AT:-14}" = 15 ] || printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n' >> "$p"
-  [ "${SP_PLAN_AT:-14}" = 15 ] || printf '|---|---|---|---|---|---|---|\n| T1 | implementor (w-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n' >> "$p"
+  [ "${SP_PLAN_AT:-15}" = 15 ] || printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n' >> "$p"
+  [ "${SP_PLAN_AT:-15}" = 15 ] || printf '|---|---|---|---|---|---|---|\n| T1 | implementor (w-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n' >> "$p"
   ( cd "$1" && git add -f "$p" && git commit -qm plan ) >/dev/null 2>&1
   printf '%s' "$p"
 }
@@ -671,7 +666,7 @@ s47_plan() {  # <repo> <writers> <row>... -> the path; a reads table, approved, 
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
     for row in "$@"; do printf '%s\n' "$row"; done
   } > "$f"
-  [ "${SP_PLAN_AT:-14}" != 15 ] || sp_at15 "$f"
+  [ "${SP_PLAN_AT:-15}" != 15 ] || sp_at15 "$f"
   touch "$f"
   printf '%s' "$f"
 }
@@ -715,7 +710,7 @@ s59_world() {
   R59W="$(make_repo "$lab")"; new_roster "$R59W"; ( cd "$R59W" && git commit -q --allow-empty -m init )
   # A BASE THE JUDGE CAN HOLD (wave-36 T28; D9): live:head asks facts_state, which judges only a plan whose base-sha:
   # is a commit, so the Step-4 block names the init commit, not s42_plan's placeholder.
-  P59W="$(s42_plan "$R59W" 4 "  worktree: .worktrees/01-fixture
+  P59W="$(SP_PLAN_AT=14 s42_plan "$R59W" 4 "  worktree: .worktrees/01-fixture
   base-sha: $(git -C "$R59W" rev-parse --short=8 HEAD)
   branch: wave/01-fixture")"
   # EACH LANDING TOUCHES CODE (wave-36 T28; D9): the judge reads a commit that touches nothing as prose, and a

@@ -505,7 +505,7 @@ EG_PF_DIR="$(mktemp -d)"; cleanup_dirs+=("$EG_PF_DIR")
 #   -> the plan text. The lines (a `- T<n>:` evidence line, say) land after `approved-by:`.
 eg_pf_plan() {
   local cur="$1" sc="$2" rg="$3" ma="$4" extra="$5" p; shift 5
-  p="$(plan_fixture --current "$cur" "$EG_PF_DIR/plans/epic-99-fixture/$sc-01-fixture.plan.md" "$sc" "$@")" || return 1
+  p="$(plan_fixture --at 14 --current "$cur" "$EG_PF_DIR/plans/epic-99-fixture/$sc-01-fixture.plan.md" "$sc" "$@")" || return 1
   sed -e "s/^rigor: single$/rigor: $rg/" -e "s/^multi_agent: false$/multi_agent: $ma/" "$p" \
     | EG_PF_X="$extra" awk '{ print } /^approved-by: / && ENVIRON["EG_PF_X"] != "" { print ENVIRON["EG_PF_X"] }'
 }

@@ -578,7 +578,7 @@ AL="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"; POKE_BOUND=180
 al() { bash -c '. "$1/run.sh" && . "$1/binding.sh" && . "$1/owed.sh" && shift && "$@"' _ "$AL" "$@" 2>/dev/null; }
 reg() { al owed_list_plan "$2" "$1" | cut -f1 | LC_ALL=C sort | paste -sd' ' -; }   # <root> <plan> -> the open keys
 RF="$(make_repo ask-doors)"; ( cd "$RF" && git commit -q --allow-empty -m init ); git -C "$RF" config user.name "Dana Fixture"
-RF_B="$(git -C "$RF" rev-parse HEAD)"; PF="$(s42_plan "$RF" 4 "  worktree: .worktrees/01-fixture
+RF_B="$(git -C "$RF" rev-parse HEAD)"; PF="$(SP_PLAN_AT=14 s42_plan "$RF" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${RF_B:0:8}
   branch: wave/01-fixture")"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PF" > "$PF.tmp" && mv "$PF.tmp" "$PF"; s42_builds_landed "$PF"

@@ -131,7 +131,7 @@ section "§GONE-VERB: floor-run, floor: and proof-add floor are refused by the r
 # script printing a runner's verdict. Each run is the real verb, each proof the real proof-add.
 AV_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RAV="$(make_repo gone-verbs)"; ( cd "$RAV" && git commit -q --allow-empty -m init )
-PAV="$(s42_plan "$RAV" 4)"
+PAV="$(SP_PLAN_AT=14 s42_plan "$RAV" 4)"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PAV" > "$PAV.tmp" && mv "$PAV.tmp" "$PAV"
 ( cd "$RAV" && git add -f "$PAV" && git commit -qm wb \
   && git worktree add -q -b wave/01-fixture "$RAV/.worktrees/01-fixture" \
@@ -181,7 +181,7 @@ AB_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RAB="$(make_repo gone-born)"; ( cd "$RAB" && git commit -q --allow-empty -m init )
 AB_C1="$(git -C "$RAB" rev-parse HEAD)"
 git -C "$RAB" branch wave/01-fixture
-PAB="$(s42_plan "$RAB" 4 "  worktree: .worktrees/01-fixture
+PAB="$(SP_PLAN_AT=14 s42_plan "$RAB" 4 "  worktree: .worktrees/01-fixture
   base-sha: abc1234
   branch: wave/01-fixture
   working-branch: wave/01-fixture")"
@@ -225,7 +225,7 @@ mkdir -p "$RGL/tests"
 printf '#!/bin/bash\nprintf "ran\\n" >> "%s"\nprintf "head=x dirty=0\\nGating: 1 passed, 0 failed\\n"\n' "$GL_SEEN" > "$RGL/tests/run.sh"
 printf '#!/bin/bash\nexit 0\n' > "$RGL/tests/a.test.sh"
 ( cd "$RGL" && git add tests && git commit -qm suites ) >/dev/null 2>&1
-PGL="$(s42_plan "$RGL" 4)"; s42_builds_landed "$PGL"
+PGL="$(SP_PLAN_AT=14 s42_plan "$RGL" 4)"; s42_builds_landed "$PGL"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PGL" > "$PGL.tmp" && mv "$PGL.tmp" "$PGL"
 ( cd "$RGL" && git add -f "$PGL" && git commit -qm wb \
   && git worktree add -q -b wave/01-fixture "$RGL/.worktrees/01-fixture" \

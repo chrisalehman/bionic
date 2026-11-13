@@ -853,8 +853,8 @@ expect_match "76: …and the refusal on stderr lists NATIVE among the valid name
 section "Section V14: a run open at version 14 is named, with the act that brings it forward"
 . "$(dirname "$0")/lib/plan-fixture.sh"
 V14="$(mktemp -d -p "$TMP")"; ( cd "$V14" && git init -q . ); V14P="$V14/.bionic/docs/plans/epic-99-fixture"
-plan_fixture "$V14P/wave-01-open.plan.md" wave >/dev/null
-plan_fixture --current 9 "$V14P/wave-02-closed.plan.md" wave >/dev/null
+plan_fixture --at 14 "$V14P/wave-01-open.plan.md" wave >/dev/null
+plan_fixture --at 14 --current 9 "$V14P/wave-02-closed.plan.md" wave >/dev/null
 bash -c '. "$1/proof.sh" && proof_step_event "$2" 9 delivered=x' _ "$PAYLOAD/scripts/lib" "$V14P/wave-02-closed.plan.md" >/dev/null 2>&1
 V14_OUT="$(run_doctor_only PROJECT "$HOME2" "$V14")"
 expect_match "V14.1: the open run at 14 is named with the command that brings it forward" \

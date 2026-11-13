@@ -51,7 +51,7 @@ SEV_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
 RSEV="$(make_repo sev-fact)"; ( cd "$RSEV" && git commit -q --allow-empty -m init )
 git -C "$RSEV" config user.name "Dana Fixture"
 SEV_B="$(git -C "$RSEV" rev-parse HEAD)"
-PSEV="$(s42_plan "$RSEV" 4 "  worktree: .worktrees/01-fixture
+PSEV="$(SP_PLAN_AT=14 s42_plan "$RSEV" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${SEV_B:0:8}
   branch: wave/01-fixture")"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PSEV" > "$PSEV.tmp" && mv "$PSEV.tmp" "$PSEV"
@@ -296,7 +296,7 @@ cp "$TMPROOT/sev-config" "$RSEV/.bionic/config.yaml"
 
 # ---------- the tick prints the derived priority ----------
 RSEVT="$(make_repo sev-tick)"; new_roster "$RSEVT"
-PSEVT="$(s47_plan "$RSEVT" 2 \
+PSEVT="$(SP_PLAN_AT=14 s47_plan "$RSEVT" 2 \
   "| T1 | 4 | build | ready | implementor | — | 30 | REQ-x | payload/x.sh | pending | |")"
 awk '{ print } /^current: / && !d { print "deferred: record/w/rev.md#2 S2 off \"a side path\""; print "check: record/w/rev.md#3 S1 on \"unsure of it\""; d = 1 }' \
   "$PSEVT" > "$PSEVT.tmp" && mv "$PSEVT.tmp" "$PSEVT"
@@ -615,7 +615,7 @@ VG_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RVG="$(make_repo verb-gaps)"; ( cd "$RVG" && git commit -q --allow-empty -m init )
 git -C "$RVG" config user.name "Dana Fixture"
 VG_B="$(git -C "$RVG" rev-parse HEAD)"
-PVG="$(s42_plan "$RVG" 5 "  worktree: .worktrees/01-fixture
+PVG="$(SP_PLAN_AT=14 s42_plan "$RVG" 5 "  worktree: .worktrees/01-fixture
   base-sha: ${VG_B:0:8}
   branch: wave/01-fixture")"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
@@ -750,7 +750,7 @@ mkdir -p "$BP/tests"
 printf '#!/bin/bash\n# a scratch suite that pins two files\n# pins: tests/fixtures/x tests/fixtures/y\nset -u\n# pins: tests/fixtures/body-only\n' > "$BP/tests/pinned.test.sh"
 printf '#!/bin/bash\n# a scratch suite that declares no pins\nset -u\n' > "$BP/tests/plain.test.sh"
 printf '#!/bin/bash\n# pins: tests/fixtures/x\nset -u\n' > "$BP/tests/shared.test.sh"
-BP_PLAN="$(s47_plan "$BP" 4 \
+BP_PLAN="$(SP_PLAN_AT=14 s47_plan "$BP" 4 \
   '| T1 | 4 | build | the pinned build | implementor | — | 30 | REQ-12 | lib/a.sh, tests/pinned.test.sh | pending |' \
   '| T2 | 4 | build | the control build | implementor | — | 30 | REQ-12 | lib/b.sh, tests/plain.test.sh | pending |' \
   '| T3 | 4 | build | a pin the Files already hold | implementor | — | 30 | REQ-12 | lib/c.sh, tests/fixtures/x, tests/pinned.test.sh | pending |' \
@@ -1116,7 +1116,7 @@ VT_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RVT="$(make_repo verdicts)"; ( cd "$RVT" && git commit -q --allow-empty -m init )
 git -C "$RVT" config user.name "Dana Fixture"
 VT_B="$(git -C "$RVT" rev-parse HEAD)"
-PVT="$(s42_plan "$RVT" 5 "  worktree: .worktrees/01-fixture
+PVT="$(SP_PLAN_AT=14 s42_plan "$RVT" 5 "  worktree: .worktrees/01-fixture
   base-sha: ${VT_B:0:8}
   branch: wave/01-fixture")"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }
@@ -1200,7 +1200,7 @@ printf 'Gating: 1 passed, 0 failed\n'
 RUNNER
 ( cd "$RST" && git add tests/run.sh && git commit -qm runner ) >/dev/null 2>&1
 ST_B="$(git -C "$RST" rev-parse HEAD)"
-PST="$(s42_plan "$RST" 4 "  worktree: .worktrees/01-fixture
+PST="$(SP_PLAN_AT=14 s42_plan "$RST" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${ST_B:0:8}
   branch: wave/01-fixture")"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PST" > "$PST.tmp" && mv "$PST.tmp" "$PST"
@@ -1314,7 +1314,7 @@ WK_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RWK="$(make_repo walk)"; ( cd "$RWK" && git commit -q --allow-empty -m init )
 git -C "$RWK" config user.name "Dana Fixture"
 WK_B="$(git -C "$RWK" rev-parse HEAD)"
-PWK="$(s42_plan "$RWK" 5 "  worktree: .worktrees/01-fixture
+PWK="$(SP_PLAN_AT=14 s42_plan "$RWK" 5 "  worktree: .worktrees/01-fixture
   base-sha: ${WK_B:0:8}
   branch: wave/01-fixture")"
 awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PWK" > "$PWK.tmp" && mv "$PWK.tmp" "$PWK"
