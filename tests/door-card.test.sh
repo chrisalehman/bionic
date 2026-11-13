@@ -15,8 +15,9 @@
 #
 # FIXTURE FIDELITY: the repository is door_world's, a real `git init` with the check's closure, the real changelog and a
 # plan whose Step-3 state the library authors. Every later change to the plan is a verb's or a judged cell edit's
-# (task-add, proof-add and the hand door's row line); `current` appends each step to the run's log. What it writes
-# besides are the records the run's actors write: a one-row suite in the build row's commit, the walk record,
+# (task-add, proof-add and the hand door's row line), or the orchestrator's edit of the header's adrs: line at Step 7,
+# which no verb writes; `current` appends each step to the run's log. What it writes
+# besides are the records the run's actors write: a one-row suite in the build row's commit, the walk and decision records,
 # five reading records in the readers' grammar (the structure reading answering every id the shipped checks file names),
 # and each reader's roster row through the production writer (`roster_row`), closed by the sweeper's own `ack`; and the
 # release's five readers green at its head through lib/line.sh's writer, as its row's ready over them records them.
@@ -124,6 +125,9 @@ door_run "$DC" bash "$BIONIC_SCRIPTS_DIR/hooks/session-sweeper.sh" ack \
 expect_eq "(c16) the sweeper acks the five readers" "0" "$DOOR_RC"
 dc_verb "(c18) current 6" current 6
 dc_verb "(c19) release-check at the build head" release-check
+# The orchestrator's edit at Step 7: the header names the run's decision record, which no verb writes.
+printf 'no decision this run\n' > "$DC_REC/adr.md"
+awk '{ print } /^scale: / && !d { print "adrs: record/wave-x/adr.md"; d = 1 }' "$DC_PLAN" > "$DC_PLAN.t" && mv "$DC_PLAN.t" "$DC_PLAN"
 dc_verb "(c22) current 7" current 7
 
 DC_P2="$(door_piece "$DC" T2)" && door_release "$DC" "$DC_P2" >/dev/null && door_land "$DC" "$DC_P2"
