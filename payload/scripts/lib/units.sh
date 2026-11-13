@@ -1498,6 +1498,9 @@ _units_publish_order() {
 # a row that names none would read the whole head, which belongs ahead of the release. A path some row not later than
 # r also writes is pre-release work and refuses the row, and so does a path no row but j writes. ONE PREDICATE, TWO
 # READERS: `units_validate` admits the row by it, and `units_post_readers` names it to the release approval card.
+# A TABLE AT 15 HAS NO READS CELL: a caller that sets `v15` hands the waits each task's person wrote as `wtn[<id>]`
+# and the rows each names as `nmd[<id>, <wait>, <row id>]`, both from lib/plan-read.sh `plan_read_waits`, and the
+# predicate splits no cell of its own.
 _units_post_awk() {
   printf '%s' '
     function after(a, b) { return (stp[a] + 0 > stp[b] + 0 || (stp[a] + 0 == stp[b] + 0 && a + 0 > b + 0)) }
@@ -1515,13 +1518,13 @@ _units_post_awk() {
     }
     function post_reader(j, r,   m, a, k, t, w, hit, named) {
       named = 0
-      m = split(rd[j], a, ",")
+      m = split(v15 ? wtn[id[j]] : rd[j], a, ",")
       for (k = 1; k <= m; k++) {
         t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t)
         if (t == "" || t == "approval:plan" || t == "head") continue
         hit = 0
         for (w = 1; w <= n; w++) {
-          if (w == j || sta[w] == "dropped" || !cell_covers(fil[w], t)) continue
+          if (w == j || sta[w] == "dropped" || !(v15 ? ((id[j], t, id[w]) in nmd) : cell_covers(fil[w], t))) continue
           if (!later(w, r)) return 0
           hit = 1
         }
@@ -2209,7 +2212,8 @@ units_columns() {
 # EVERY FAULT IS REPORTED, not just the first. A writer fixing one line at a time against a
 # wall that stops at the first complaint pays a round trip per fault.
 units_validate() {
-  local plan="${1:-}" origin="${2:-}" out rc ctl missing cols over rows violations cycles _c _o found=0 haswt hasreads v15=""
+  local plan="${1:-}" origin="${2:-}" out rc ctl missing cols over rows violations cycles _c _o found=0 haswt hasreads v15="" \
+    live="" lrc=0 st15="" rows15="" waits=""
 
   out="$(_units_table "$plan")"; rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -2265,9 +2269,21 @@ units_validate() {
 
   rows=""
   case "$out" in *$'\n'*) rows="${out#*$'\n'}" ;; esac
+  # A ROW AT 15 IS OPEN UNLESS THE RUN LANDS OR DROPS IT: its state is the log's, read from the plan a copy was made from,
+  # and only the order rule asks it, so every other invariant still judges the text as written. A fold that fails leaves
+  # the order unjudged rather than judging landed history as open. The exception past a landed release asks the plan's
+  # one reader for each task's waits, read only when a release has landed.
+  if [ -n "$v15" ] && [ -n "$rows" ]; then
+    live="$(_units_live "${origin:-$plan}")" || lrc=1
+    st15="$(printf '%s\n' "$live" | awk -F'\t' '$2 != "" { printf "%s=%s ", $1, $2 }')"
+    rows15="$(_units_overlay "$live" "$rows")"
+    if printf '%s\n' "$rows15" | awk -F'\t' '$3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && $10 == "landed" { f = 1 } END { exit !f }'; then
+      waits="$(_units_waits "$plan")" || waits=""
+    fi
+  fi
   if [ -n "$rows" ]; then
-    violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" -v v15="$v15" \
-      -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
+    violations="$({ printf '%s\n' "$rows"; [ -z "$waits" ] || printf '\034\n%s\n' "$waits"; } | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" -v v15="$v15" \
+      -v st15="$st15" -v lrc="$lrc" -v pubs="$(_units_publish_order "${origin:-$plan}" "${rows15:-$rows}")" -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
       # rec_written(t): some row of the table, of any status, has a Files entry covering the path t.
       function rec_written(t,   k) {
         for (k = 1; k <= n; k++) if (cell_covers(fil[k], t)) return 1
@@ -2291,6 +2307,18 @@ units_validate() {
         for (i in kk) kinds[kk[i]] = 1
         split("pending active landed dropped", ss, " ")
         for (i in ss) states[ss[i]] = 1
+        m0 = split(st15, o0, " ")
+        for (i0 = 1; i0 <= m0; i0++) { e0 = index(o0[i0], "="); if (e0 > 1) ost[substr(o0[i0], 1, e0 - 1)] = substr(o0[i0], e0 + 1) }
+      }
+      # THE READER LINES FOLLOW THE ROWS: a kind line gives each wait as spelled and the ones its kind implies, and the
+      # waits a person wrote are the first less the second; a row line gives the reads that name a row.
+      $0 == "\034" { wpart = 1; next }
+      wpart {
+        if ($2 == "kind") {
+          split("", imp); m0 = split($5, o0, ","); for (i0 = 1; i0 <= m0; i0++) imp[o0[i0]] = 1
+          m0 = split($4, o0, ","); for (i0 = 1; i0 <= m0; i0++) if (!(o0[i0] in imp)) wtn[$1] = wtn[$1] (wtn[$1] == "" ? "" : ",") o0[i0]
+        } else if ($2 == "row") { m0 = split($4, o0, ","); for (i0 = 1; i0 <= m0; i0++) nmd[$1, o0[i0], $3] = 1 }
+        next
       }
       $1 == "" { next }
       { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; fil[n] = $9; sta[n] = $10; wtc[n] = $11
@@ -2467,8 +2495,10 @@ units_validate() {
         # THE ORDER IS BUILD, REGRESSION, REVIEW, RELEASE. The regression is a test row, a review row is kind review,
         # the release a doc row at Step 7 or later. A row comes before another by step, then by table order. A pair out
         # of order is refused when neither row is dropped and one of them is open, so landed history is not judged.
-        # Only a table with a reads column, as the head rule above.
-        if (hasreads) {
+        # A table at 15 holds no status, so there a row is open unless the run lands or drops it; a table from before
+        # the reads column is not held to it, and neither is one at 15 whose run could not be read.
+        if (v15) for (i = 1; i <= n; i++) sta[i] = (id[i] in ost) ? ost[id[i]] : "pending"
+        if (hasreads || (v15 && lrc == 0)) {
           for (i = 1; i <= n; i++) {
             if ((id[i] in skip) || stp[i] !~ /^[0-9]+$/ || sta[i] == "dropped") continue
             if (knd[i] == "test") ord[i] = 1
