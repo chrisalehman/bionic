@@ -177,6 +177,8 @@ stack-health: pending
 | AC-8 | T0 | pending | record/wave-8-matrix/p.md | REFUTED |
 | AC-9 | T2 | blocked | — | — |
 | AC-10 | T2 | pending | — | — |
+| AC-11 | T2 | discharged | see AC-11 | CONFIRMED |
+| AC-12 | T2 | discharged | see AC-12 | CONFIRMED |
 
 AC-2: the waived one.
   waiver: Ann Person 2026-11-01T08:00:00Z "not run here" — the reason
@@ -190,6 +192,8 @@ AC-9: blocked, an evidence written in its block.
   evidence: record/wave-8-matrix/q.log
 AC-10: pending, its block saying so.
   evidence: pending
+AC-11: proved, its cell pointing at its block.
+  evidence: record/wave-8-matrix/d.log
 ## SDLC State
 proved: kind=unit head=$H ac=AC-5 at=2026-11-01T06:00:00Z evidence=record/wave-8-matrix/s.log rc=0
 inherited: a.test.sh base=$C head=$H at=2026-11-01T07:00:00Z evidence=record/wave-8-matrix/i.log
@@ -222,6 +226,9 @@ expect_contains "…whose proof still lacks its head, a gap" "gap/v1|ev=proof|ac
 expect_absent "…and whose evidence the gaps list does not name" "gap/v1|ev=proof|ac=AC-6|field=evidence|" "$MG"
 expect_eq "a cell that holds an evidence wins over its block's line" \
   "run/v1|ev=proof|ac=AC-7|evidence=record/wave-8-matrix/c.log|auditor=CONFIRMED|at=" "$(acof AC-7)"
+expect_eq "a cell that only points at its block is no evidence: the block's line is" \
+  "run/v1|ev=proof|ac=AC-11|evidence=record/wave-8-matrix/d.log|auditor=CONFIRMED|at=" "$(acof AC-11)"
+expect_contains "…and with no block line the evidence is a gap, the pointer written nowhere" "gap/v1|ev=proof|ac=AC-12|field=evidence|why=absent" "$MG"
 expect_eq "a pending row's evidence and auditor cells, which no event at 15 can hold, are on the gaps list as undischarged" \
   "gap/v1|ev=criterion|criterion=AC-8|field=evidence|why=undischarged gap/v1|ev=criterion|criterion=AC-8|field=auditor|why=undischarged" \
   "$(printf '%s\n' "$MG" | grep -F 'criterion=AC-8|' | tr '\n' ' ' | sed 's/ $//')"

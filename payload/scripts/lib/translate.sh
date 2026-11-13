@@ -311,7 +311,9 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
   # hand act of its own, `what=waive-row`, whatever the row's status says: a person wrote it, so it is counted
   # among the hand acts, while only a row the status marks waived is a waiver the judge honours. A criterion's
   # evidence was written in one of two places, its cell or an indented `evidence:` line of its block with a dash
-  # in the cell; a cell that holds a value wins, and only an evidence in neither place is a gap. Version 15 has no
+  # in the cell; a cell that holds a value wins, and only an evidence in neither place is a gap. A cell that only
+  # points at its own block (`see AC-1.1`) holds no value: the block's line is the evidence, and with none the evidence
+  # is a gap, since a pointer carried into the proof resolves to nothing once the block is gone. Version 15 has no
   # block, so the proof is where the evidence lives after the act: read from the cell alone, it would be lost.
   { _translate_section "$1" "SDLC State" | awk '/^(proved|waived): / && match($0, / ac=[^ ]+/) { print "S", $1, substr($0, RSTART + 4, RLENGTH - 4) }'
     _translate_section "$1" "Verification Matrix" | awk '
@@ -326,10 +328,11 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
       ac != "" && match($0, /^[ \t]+user-confirmed[ \t]*:/) { v = substr($0, RLENGTH + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); printf "U\036%s\036%s\n", ac, v }
       ac != "" && match($0, /^[ \t]+evidence[ \t]*:/) { v = substr($0, RLENGTH + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); printf "E\036%s\036%s\n", ac, v }'
     _translate_section "$1" "Verification Matrix"; } | awk -F'|' "$_TRANSLATE_AWK"'
+    function pointer(ac, v) { return tolower(v) == "see " tolower(ac) }
     function undischarged(ac, s,   j, n, w, k, v) {
       n = split("evidence auditor", w, " ")
       for (j = 1; j <= n; j++) {
-        k = w[j]; v = ((k in col) && !none($(col[k]))) ? trim($(col[k])) : ""
+        k = w[j]; v = ((k in col) && !none($(col[k]))) ? trim($(col[k])) : ""; if (pointer(ac, v)) v = ""
         if (v == "" && k == "evidence" && (ac in be)) v = be[ac]
         if (v != "" && tolower(v) != s) printf "g\t\tgap/v1|ev=criterion|criterion=%s|field=%s|why=undischarged\n", ac, k
       }
@@ -349,6 +352,7 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
       if (t == "" || ac == "" || ((t SUBSEP ac) in stated)) next
       begin(t, "ac", ac)
       for (j = split("evidence auditor", w, " "); j > 0; j--) c[w[j]] = ((w[j] in col) && !none($(col[w[j]]))) ? trim($(col[w[j]])) : ""
+      if (pointer(ac, c["evidence"])) c["evidence"] = ""
       if (c["evidence"] == "" && (ac in be)) c["evidence"] = be[ac]
       put("evidence", c["evidence"]); put("auditor", c["auditor"])
       # A person confirms a criterion in its block; a block with no such line holds no confirmation to name.
