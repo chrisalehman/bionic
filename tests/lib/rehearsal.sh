@@ -413,6 +413,7 @@ _rh_replay() {
   # The fix row, and the rows of later steps waiting on it as task-add asks: their deps name it.
   _rh_addrow '| T5 | 4 | build | Answer the structure finding. A caller reaches the library change. The caller and the library agree again. · born: review | — | 10 | REQ-1 | payload/scripts/lib/said.sh, tests/rehearsal-row.test.sh | — |' T5 \
     && _rh_cell "the release row waits on the fix" T2 deps=T5 && _rh_cell "the integrate row waits on the fix" T4 deps=T5 \
+    && { [ "${DOOR_LIVE_ROW:-}" != 1 ] || _rh_cell "the close row waits on the fix" T9 deps=T5; } \
     && _rh_poker "the fix row born of the finding" task-add T5 --born record/wave-x/w-structure-whole-2.md#1 || return 1
   _rh_brief w-T5 T5 || return 1
   _rh_do "the fix row's tree" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" create "$(_rh_head)" wt/T5 --for w-T5 || return 1

@@ -1430,8 +1430,8 @@ BRF_EOF
   # sourced in a subshell as the facts judge sources it, so the card and the gate cannot answer one row two ways. A
   # WAIVER IS A FACT OF THE RUN: the reader's status says waived only where a waiver event names the criterion. A row the
   # gate defers at <current> (`matrix_row_deferred`: owed at the later step whose task proves it) is `owed:<step>`, not
-  # ruled and not unruled: nothing has run that could prove it, and the step that runs it writes it. The auditor is
-  # printed as `placeholder_cell` folds it, `-` when it means none. The reason is the block's `reason:` key. Exit 2 when
+  # ruled and not unruled, whatever verdict a passed evidence review gives it, as the gate asks the deferral first:
+  # nothing has run that could prove it, and the step that runs it writes it. The auditor is printed as `placeholder_cell` folds it, `-` when it means none. The reason is the block's `reason:` key. Exit 2 when
   # walls.sh cannot be loaded or the run's facts could not be read: the card never guesses a ruling.
   rr_rows() {
     [ -f "$BIONIC_LIB/walls.sh" ] || return 2
@@ -1443,7 +1443,7 @@ BRF_EOF
         block="$(matrix_block "$ac")"
         ruled=0; matrix_row_ruled "$tier" "$status" "$aud" "$conf" "$waiver" && ruled=1
         owe="$(matrix_owing_step "$PLAN" "$ac")"
-        [ "$ruled" = 1 ] || ! matrix_row_deferred "$PLAN" "$owe" "$2" "$status" "$(matrix_owing_open "$PLAN" "$ac")" || ruled="owed:$owe"
+        ! matrix_row_deferred "$PLAN" "$owe" "$2" "$status" "$(matrix_owing_open "$PLAN" "$ac")" || ruled="owed:$owe"
         aud="$(placeholder_cell "$aud")"
         printf '%s\037%s\037%s\037%s\037%s\037%s\n' "$ac" "$tier" "$status" "${aud:--}" "$ruled" \
           "$(printf '%s\n' "$block" | sed -n 's/^[[:space:]]*reason:[[:space:]]*//p' | head -n 1)"
