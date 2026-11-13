@@ -394,6 +394,7 @@ SB="$(mktemp -d)"; BF="${BIONIC_SCRIPTS_DIR}/payload/scripts/bring-forward.sh"; 
 for r in $W6 $W9 wave-49-mid; do cp -R "$BED/$r" "$SB/$r"; done
 RUNS="$W6:$W6 $W9:$W9 wave-49-mid:$W9"; at() { printf '%s/%s/plans/epic-23-bionic-tech-debt/%s.plan.md' "$1" "${2%%:*}" "${2#*:}"; }
 machine() { grep -cE '^## (SDLC State|Verification Matrix|Handoff) *$' "$1"; }
+head_of() { awk 'NR == 1 && $0 == "---" { h = 1; next } h && $0 == "---" { exit } h' "$1"; }
 
 section "ACT"
 for r in $RUNS; do p="$(at "$SB" "$r")"; cur="$(sed -n 's/^current: *//p' "$p")"; pre="$(machine "$p")"
@@ -401,6 +402,8 @@ for r in $RUNS; do p="$(at "$SB" "$r")"; cur="$(sed -n 's/^current: *//p' "$p")"
   expect_eq "${r%%:*}: the reader's step is the old current: ($cur)" "n=$cur" "$(bash "$RS" "$p" step | grep '^n=')"
   expect_eq "${r%%:*}: the state, matrix and handoff sections the plan held are gone" "held 0" "$([ "$pre" -ge 3 ] && echo held) $(machine "$p")"
   expect_eq "${r%%:*}: each Tasks row holds the nine authored cells" "id step kind task deps size serves files artifact" "$(plan_read_rows "$p" Tasks | awk -F'\t' '{ for (i = 1; i <= NF; i++) printf "%s%s", (i > 1 ? " " : ""), substr($i, 1, index($i, "=") - 1); print "" }' | sort -u)"
+  expect_eq "${r%%:*}: a header that held the branch, base and documents is left as it was but for its version" \
+    "< canonical_sdlc_version: 14 > canonical_sdlc_version: 15" "$(diff <(head_of "$(at "$BED" "$r")") <(head_of "$p") | grep '^[<>]' | paste -sd' ' -)"
 done
 
 # A criterion the closed runs proved with its evidence in its block and a dash in its cell, as `<ac> <evidence>`.
@@ -520,6 +523,53 @@ expect_eq "a second act adds no second Task column: the plan is unchanged" "$WS"
 section "CELLS"
 expect_eq "a row's suites and lands-on go to the task's own section, after its fence" "One's own words. "'```bash ```'" suites: a.test.sh lands-on: a.test.sh" "$(sed -n '/^### T1$/,/^## /p' "$W" | grep -v '^#' | grep . | paste -sd' ' -)"
 for f in suites lands-on; do expect_contains "a row with no section of its own has its $f on the gaps list" "gap/v1|ev=row|row=T2|field=$f|why=unruled" "$OUT"; done
+
+section "HOMES"
+# SYNTHESIZED: a plan at 14 as a person has one, holding none of 15's homes: no working-branch:, base-sha: or adrs: in
+# its header, no criteria table; the branch and base in its Step 4 block, its document in its Step 7 block.
+homes() {  # <name> [<sed edit>] -> the plan's path, written
+  local p="$SB/homes/plans/epic-x/$1.plan.md"; mkdir -p "${p%/*}"
+  sed -e "${2:-}" > "$p" <<EOF
+---
+canonical_sdlc_version: 14
+rigor: double
+---
+## Tasks
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | One. | — | — | 30 | REQ-1 | a.sh | landed |
+| T2 | 8 | integrate | Merge. | — | — | 10 | REQ-1 | — | pending |
+
+## Verification Matrix
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1.1 | T1 | discharged | see AC-1.1 | CONFIRMED |
+| AC-1.2 | T2 | pending | — | — |
+
+AC-1.1:
+  serves: REQ-1
+  eval: \`a.test.sh\`
+  fails-when: a is red
+  task: T1
+  evidence: record/$1/a.log
+AC-1.2:
+  fails-when: b is red
+  task: T2
+
+## SDLC State
+current: 8
+- Step 4: rows dispatched from the working branch
+  base-sha: 2222222bb
+  branch: wave/6-homes
+- Step 7: documented at record/$1/docs.md
+  n/a: no decision this run
+EOF
+  printf '%s' "$p"; }
+G="$(homes wave-6-homes)"; GO="$(bash "$BF" "$G" 2>&1)"; askg() { bash "$RS" "$G" "$@"; }
+GB="$(homes wave-6-bare '/^  base-sha:/d; /^  branch:/d')"; GBO="$(bash "$BF" "$GB" 2>&1)"
+expect_eq "the working branch and base its Step 4 block held are the header's after the act" "working-branch=wave/6-homes base-sha=2222222bb" \
+  "$(askg header working-branch) $(askg header base-sha)"
+for f in working-branch base-sha; do expect_contains "a run past Step 4 whose block held no $f has it named on the gaps list" "gap/v1|ev=step|n=4|field=$f|why=absent" "$GBO"; done
 
 section "STEPS"
 U="$D/plans/epic-x/wave-6-untimed.plan.md"; B="$D/plans/epic-x/wave-5-back.plan.md"; s9='- Step 9: delivered: 2026-11-01T13:34Z'

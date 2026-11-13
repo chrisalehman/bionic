@@ -55,12 +55,12 @@ _bf_dir="$(cd "$_bf_dir" && pwd -P)" || exit 2
 # shellcheck source=/dev/null
 . "$_bf_dir/lib/translate.sh" || exit 2
 
-_bf_plan() {  # <plan> <deps file|-> <gaps out> [<criteria tasks file>] -> the plan's text brought forward
+_bf_plan() {  # <plan> <deps file|-> <gaps out> [<criteria tasks file>] [<header keys file>] -> the plan's text brought forward
   # Read twice: the first pass learns the Tasks table's columns, each row's suites and lands-on and which
   # rows have a section of their own; the second writes. A cell keeps its text as written, `\|` included.
   # A task's own section is found by plan-read.sh's one heading rule and its one fence rule, so the act writes where
   # the brief reads: a `#` line inside a fence is the section's text, never a heading, in either pass.
-  awk -v depf="$2" -v gapf="$3" -v taskf="${4:--}" -v nine="id step kind task deps size serves files artifact" "$_PLAN_READ_FENCE$_PLAN_READ_SECTION"'
+  awk -v depf="$2" -v gapf="$3" -v taskf="${4:--}" -v headf="${5:--}" -v nine="id step kind task deps size serves files artifact" "$_PLAN_READ_FENCE$_PLAN_READ_SECTION"'
     function cells(line, out,   n, i) {
       gsub(/\\[|]/, "\001", line); sub(/^[ \t]*[|]/, "", line); sub(/[|][ \t]*$/, "", line)
       n = split(line, out, "|"); for (i = 1; i <= n; i++) gsub(/^[ \t]+|[ \t]+$/, "", out[i])
@@ -84,7 +84,8 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> [<criteria tasks file>] -> the p
       for (k = 0; k < blanks; k++) print ""; ins = ""; blanks = 0 }
     BEGIN { nn = split(nine, w9, " "); split("suites lands-on", w2, " ")
       if (depf != "-") while ((getline l < depf) > 0) { t = index(l, "\t"); dep[substr(l, 1, t - 1)] = substr(l, t + 1) }
-      if (taskf != "-") while ((getline l < taskf) > 0) { t = index(l, "\t"); if (t > 1) { tk[substr(l, 1, t - 1)] = substr(l, t + 1); tord[++ntk] = substr(l, 1, t - 1) } } }
+      if (taskf != "-") while ((getline l < taskf) > 0) { t = index(l, "\t"); if (t > 1) { tk[substr(l, 1, t - 1)] = substr(l, t + 1); tord[++ntk] = substr(l, 1, t - 1) } }
+      if (headf != "-") while ((getline l < headf) > 0) { t = index(l, "\t"); if (t > 1) { hk[++nhk] = substr(l, 1, t - 1); hv[hk[nhk]] = substr(l, t + 1) } } }
     FNR == 1 && NR > 1 { sec = ""; nh = 0; tdone = 0; skip = 0; fence = 0 }
     { sub(/\r$/, ""); f = fenced($0) }
     !f && /^## / { sec = substr($0, 4); sub(/[ \t]+$/, "", sec) }
@@ -99,7 +100,10 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> [<criteria tasks file>] -> the p
       next
     }
     FNR == 1 && $0 == "---" { head = 1; print; next }
-    head { if ($0 == "---") head = 0; else if ($0 ~ /^canonical_sdlc_version:[ \t]*["\047]?14["\047]?[ \t]*$/) $0 = "canonical_sdlc_version: 15"; print; next }
+    # A key the header names with no value takes the value in its place; one it does not name goes last.
+    head && match($0, /^[a-z][a-z_-]*[ \t]*:[ \t]*$/) { k = $0; sub(/[ \t]*:.*$/, "", k); if ((k in hv) && !(k in hput)) { hput[k] = 1; print k ": " hv[k]; next } }
+    head { if ($0 == "---") { for (i = 1; i <= nhk; i++) if (!(hk[i] in hput)) print hk[i] ": " hv[hk[i]]; head = 0 }
+      else if ($0 ~ /^canonical_sdlc_version:[ \t]*["\047]?14["\047]?[ \t]*$/) $0 = "canonical_sdlc_version: 15"; print; next }
     !f && /^#+[ \t]/ { place() }
     !f && /^## / { skip = (sec == "SDLC State" || sec == "Verification Matrix" || sec == "Handoff") }
     skip { next }
@@ -154,12 +158,44 @@ _bf_compute() {  # <plan> <work dir> -> <work>/plan, the plan brought forward; <
   local plan="$1" w="$2"
   translate "$plan" gaps > "$w/translated.gaps" || return 1
   : > "$w/deps"; : > "$w/cells.gaps"
+  _bf_homes "$plan" "$w/head" > "$w/homes.gaps" || return 1
   _bf_plan "$plan" - "" > "$w/implied.plan.md" || return 1
   _bf_deps "$plan" "$w/implied.plan.md" "$w/deps" > "$w/waits.gaps" || return 1
   plan_read_criterion_task "$plan" > "$w/tasks" 2>/dev/null || :
-  _bf_plan "$plan" "$w/deps" "$w/cells.gaps" "$w/tasks" > "$w/plan" || return 1
+  _bf_plan "$plan" "$w/deps" "$w/cells.gaps" "$w/tasks" "$w/head" > "$w/plan" || return 1
   _bf_shared "$plan" > "$w/shared.gaps" || return 1
-  cat "$w/translated.gaps" "$w/waits.gaps" "$w/cells.gaps" "$w/shared.gaps" | awk '!seen[$0]++' > "$w/gaps"
+  cat "$w/translated.gaps" "$w/homes.gaps" "$w/waits.gaps" "$w/cells.gaps" "$w/shared.gaps" | awk '!seen[$0]++' > "$w/gaps"
+}
+
+# THE HEADER'S KEYS A STEP OWES AT 15. At 14 the working branch and the base were the SDLC State's: its first
+# `working-branch:` line and its first `base-sha:` line, read as lib/run.sh `plan_working_branch` and lib/proof.sh
+# `proof_plan_base` read them, else the Step 4 block's `branch:` and `base-sha:` fields. At 15 the header holds them and
+# Step 4 and the merge's check ask it there, so the act writes each the header lacks. One the run owed, past Step 4, and
+# no home held is named on the gaps list; a header that holds a key keeps its own value.
+_bf_homes() {  # <plan> <header out> -> a `<key><TAB><value>` line in <header out> per key to write; a gap line per key owed and held nowhere
+  local plan="$1" k v found
+  # A Step block is its `- Step <n>:` line and the indented lines under it; one held (pending) is no step reached.
+  found="$(_translate_section "$plan" "SDLC State" | awk '
+    function word(s) { sub(/^[ \t]+/, "", s); sub(/[ \t].*$/, "", s); gsub(/^["\047]|["\047]$/, "", s); return s }
+    function field(s, k) { if (!match(s, "(^|[^-_[:alnum:]])" k "[ \t]*:")) return ""; s = substr(s, RSTART + RLENGTH); sub(/;.*$/, "", s); return word(s) }
+    function first(k, v) { if (v != "" && !(k in got)) got[k] = v }
+    /^- Step [0-9]+[ab]?:/ { n = substr($0, 8, index($0, ":") - 8); sub(/[ab]$/, "", n); t = substr($0, index($0, ":") + 1)
+      blk = (t ~ /^[ \t]*\(pending\)[ \t]*$/) ? "" : n; if (blk != "") reached[blk] = 1 }
+    !/^- Step [0-9]/ { t = $0; if (/^[^ \t]/) blk = "" }
+    !curseen && /^[ \t]*current[ \t]*:/ { cur = word(substr($0, index($0, ":") + 1)) + 0; curseen = 1 }
+    /^[ \t]*working-branch[ \t]*:/ { first("working-branch", word(substr($0, index($0, ":") + 1))) }
+    /^[ \t]*base-sha[ \t]*:/ { first("base-sha", word(substr($0, index($0, ":") + 1))) }
+    blk == "4" { if (b4 == "") b4 = field(t, "branch"); if (s4 == "") s4 = field(t, "base-sha") }
+    END { first("working-branch", b4); first("base-sha", s4)
+      for (k in got) printf "%s\t%s\n", k, got[k]
+      if (cur >= 4 || (4 in reached)) print "reached\t4" }')" || return 1
+  : > "$2"
+  for k in working-branch base-sha; do
+    v="$(plan_read_header "$plan" "$k" 2>/dev/null)" && [ -n "${v#*=}" ] && continue
+    v="$(printf '%s\n' "$found" | awk -F'\t' -v k="$k" '$1 == k { print $2; exit }')"
+    if [ -n "$v" ]; then printf '%s\t%s\n' "$k" "$v" >> "$2"
+    elif printf '%s\n' "$found" | grep -qx "reached	4"; then printf 'gap/v1|ev=step|n=4|field=%s|why=absent\n' "$k"; fi
+  done
 }
 
 # THE RECORD AN INCIDENT'S PLAIN plan.md JOINED. At 14 every incident's plan named plain joins one record,
