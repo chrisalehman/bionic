@@ -739,14 +739,15 @@ section "§AWAITS — at 15 a criterion the person confirms, proved and not yet 
 # person confirms, with no approval yet, was refused at the review step for the missing confirmation, so the run could
 # not leave the verify step until the person answered what the release approval card collects after the release. The
 # criterion awaits its person: a commit at 6 or 7 owes nothing for it; the advance to 8 refuses it and the judge opens the
-# row item the card settles; a commit at 8 is refused naming it until the approval is given, and admitted once it is.
+# row item the card settles; a commit at 8 is refused naming it until the approval is given, and admitted once it is,
+# the approval coming after the proof as a person gives it: it confirms the criterion and leaves the proof its discharge.
 # Fixture fidelity: a real repository on the run's working branch, plan_fixture's run at 15 bound to this session, its
 # criterion of eval type human (T4 through lib/scale.sh), its regression proof, the five readings at the head and the
 # criterion's proof each appended by its production writer (lib/proof.sh `proof_event`), so the evidence review at the
 # head is the criterion's auditor cell; the approval is the approve verb's writer's (`proof_approval_event`).
 # fails-when: a commit at 6 or 7 is refused for the confirmation; the advance to 8 passes, or opens no item; a commit at
-#   8 is admitted with no approval, or refused with one; any of these at single rigor but the judge's item, which double
-#   alone asks.
+#   8 is admitted with no approval, or refused with one written after the proof; any of these at single rigor but the
+#   judge's item, which double alone asks.
 R_AW="$(mk_repo awaits)"; H_AW="$(git -C "$R_AW" rev-parse HEAD)"; git -C "$R_AW" checkout -q -B wave/01-fixture
 AW_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
 aw_ev() { bash -c '. "$1/proof.sh" && shift && proof_event "$@"' _ "$AW_LIB" "$AW_P" "$@"; }
@@ -785,6 +786,9 @@ for AW_R in double single; do
   aw_put 8 "$AW_R"; aw_commit
   expect_eq "AW-3 ($AW_R): a commit at 8 is refused" "2" "$ST"
   expect_contains "AW-3b ($AW_R): …for the person's confirmation of the criterion" "AC-1.1 has no user-confirmed evidence" "$ERR"
+  aw_approve; aw_commit
+  expect_eq "AW-4 ($AW_R): the person's approval given after the proof, the commit at 8 is admitted" "0" "$ST"
+  [ "$ST" = 0 ] || printf '      the gate said: %s\n' "$ERR" | head -3
 done
 aw_put 7 double; rm -f "$(bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_file' _ "$AW_LIB" "$R_AW" "$SID" 2>/dev/null)"
 aw_poke current 8 --check
@@ -793,6 +797,9 @@ expect_contains "AW-5b: …naming it" "AC-1.1" "$AW_OUT"
 aw_poke current 8
 expect_eq "AW-5c: the advance itself refuses, the run's step unchanged" "1|n=7" "$AW_RC|$(aw_step)"
 expect_eq "AW-5d: …and the judge opens the one row:AC-1.1 item the card settles" "row:AC-1.1" "$(aw_owed)"
+aw_approve; aw_poke current 8 --check
+expect_eq "AW-5e: the approval given after the proof, the advance to 8 would be taken" "0" "$AW_RC"
+[ "$AW_RC" = 0 ] || printf '      the judge said: %s\n' "$AW_OUT" | head -3
 
 # ---------------------------------------------------------------------------
 section "§REFUSED-VERB — a dispatched agent's approve of a criterion is refused by the wall; the orchestrator's own is not"
