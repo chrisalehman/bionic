@@ -38,13 +38,8 @@
 #   sets it before sourcing this file.
 #
 #   DOOR_LIVE_ROW=1, set for a door_world call, gives the plan the one live criterion a planner writes for a run's close:
-#   a close row T9 at step 9, an Eval design row of a second requirement whose eval is `landing-report --hand-holds` at
-#   the close, and its matrix row at tier T3, pending, its block's task the close row. It is owed at the close, which
-#   proves it. Unset, the plan is as before.
-#
-#   DOOR_AT=15, set for a door_world call, writes the same run's plan at version 15 (`_door_page15`): its rows in nine
-#   cells and no state or matrix section, its steps 1 to 4, the plan's approval and each row's dispatch in the run's log.
-#   Unset, the plan is the version-14 page below, byte for byte.
+#   a close row T9 at step 9 and an Eval design row of a second requirement whose eval is `landing-report --hand-holds`
+#   at the close, of live type. It is owed at the close, which proves it. Unset, the plan is as before.
 #
 # WHAT THE FIXTURE HOLDS, at its accepted head, committed: hooks/ and payload/scripts/ copied whole from the tree
 # under test, with the payload/hooks link; tests/run.sh and tests/lib/ whole, so the check and the name scan are
@@ -52,13 +47,13 @@
 # commits it, the real file of more than a pipe's buffer, never a filler; payload/.claude-plugin/plugin.json.
 # Ignored and so never landed: .bionic/config.yaml declaring `release-check: bash tests/lib/release-check.sh
 # <list>`, the list a file beside <dir>, outside every checkout, and the check's files as bionic declares its own,
-# `release-check-files:`; the bound plan with `release: DOOR_VERSION`,
+# `release-check-files:`; the bound plan, a page at version 15, with `release: DOOR_VERSION`,
 # `working-branch: wave/x`, `base-sha:` the accepted head (the release range is what lands after it), and rows T1
-# (build) and T2 (the release). The plan is a planner's Step-3 state, so it also carries what only the planner
-# writes and no verb creates: `rigor: double` (`single` from door_world_single) and `scale: wave`, without which
-# the judge cannot deal the readings a run owes, and the matrix skeleton, one `## Eval design` row, its
-# `## Verification Matrix` table row at tier T1 and its block naming its task, which no verb writes: the walk's proof
-# and the evidence review discharge and rule it. Every later state of the plan is a verb's.
+# (build) and T2 (the release) in nine cells. The plan is a planner's Step-3 state, so it also carries what only the
+# planner writes and no verb creates: `rigor: double` (`single` from door_world_single) and `scale: wave`, without
+# which the judge cannot deal the readings a run owes, and one `## Eval design` row, whose criterion the walk's proof
+# and the evidence review discharge. The run's log, beside the record, holds steps 1 to 4, the plan's approval and
+# each row's dispatch. Every later state of the run is a verb's.
 #
 # WHICH COPY RAN. The fixture's committed release-check.sh carries one line more than the tree under test's, after
 # its shebang: when DOOR_SEEN names a file, it appends where it ran and which script it is. A run of the tree
@@ -141,72 +136,12 @@ _door_world() (
   [ "$me" != door_project ] || { printf '%s %s\n' "$root" "$head"; exit 0; }
   plan="$root/$DOOR_PLAN_REL"
   mkdir -p "${plan%/*}"
-  local live_step="" live_row="" live_eval="" live_ac="" live_block=""
-  if [ "${DOOR_LIVE_ROW:-}" = 1 ]; then
-    live_step='
-- T9: pending dispatch — the close'
-    live_row='
-| T9 | 9 | close | the close. The run reads its own measure last. | orchestrator | — | | 10 | REQ-2 | .bionic/docs/record/wave-x/continuation.md | | | pending |'
-    live_eval='
-| REQ-2 | the close reads its measure | AC-2.1 | live | `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close → `total=0` | the close reads above zero |'
-    live_ac='
-| AC-2.1 | T3 | pending | — | — |'
-    live_block='
-AC-2.1: the close reads its own measure
-  task: T9'
-  fi
-  if [ "${DOOR_AT:-}" = 15 ]; then
-    _door_page15 "$plan" "$head" "$rigor" || exit 1
-  else
-  cat > "$plan" <<PLAN
----
-working-branch: $DOOR_BRANCH
-base-sha: $head
-release: $DOOR_VERSION
-rigor: $rigor
-scale: wave
-canonical_sdlc_version: 14
----
-# door fixture plan (tests/lib/door.sh)
-
-## SDLC State
-
-current: 4
-approved-by: fixture 2026-10-04T00:00Z "approved"
-- Step 4: started
-- T1: active
-- T2: active$live_step
-
-## Tasks
-
-| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | a library change | dw-T1 | — | | 10 | REQ-1 | payload/scripts/lib/said.sh | .worktrees/T1 | | active |
-| T2 | 4 | doc | the release $DOOR_VERSION | dw-T2 | — | | 10 | REQ-1 | CHANGELOG.md, payload/.claude-plugin/plugin.json | .worktrees/T2 | | active |$live_row
-
-## Eval design
-
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
-|---|---|---|---|---|---|
-| REQ-1 | fixture run | AC-1.1 | hermetic | \`tests/run.sh\` | the whole run is red |$live_eval
-
-## Verification Matrix
-
-stack-health: n/a: no long-running serve
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1.1 | T1 | pending | — | — |$live_ac
-
-AC-1.1: the library change holds
-  task: T1$live_block
-PLAN
-  fi
+  _door_page15 "$plan" "$head" "$rigor" || exit 1
   bound_marker "$root" "$WORLD_SID" "$plan" || exit 1
   printf '%s %s\n' "$root" "$head"
 )
 
-# _door_page15 <plan> <head> <rigor> -> the same run's page at 15: the header, its rows in nine cells and the Eval design,
+# _door_page15 <plan> <head> <rigor> -> the run's page at 15: the header, its rows in nine cells and the Eval design,
 # no state or matrix section; what those held is its log's, beside the record (steps 1 to 4, the plan's approval, each
 # row's dispatch). DOOR_LIVE_ROW's close row is a row of the page, and its criterion an Eval design row of live type.
 _door_page15() {
