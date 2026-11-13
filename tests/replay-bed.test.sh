@@ -6,10 +6,11 @@
 #
 #   §TRACKED  every fixture is a tracked file, neither the bed nor the scrub names the project's own record
 #             store, and the private-name scan passes over the fixtures.
-#   §CARDS    for each card, the reader's answers at the card's instant equal its expected file less the gaps
-#             list; the cut run is read as it stands, beside the hand-written lines.
-#   §PAGES    the release card rendered in each card's world equals the replay table that card printed, less the
-#             gaps list.
+#   §CARDS    for each card, in a world brought forward, the reader's answers at the card's instant equal its
+#             expected file less the gaps list; the cut run is read as it stands at 14, beside the hand-written lines.
+#   §PAGES    the release card rendered in each card's world, brought forward, equals the replay table that card
+#             printed, less the gaps list; the one world where a criterion was pending with cells written
+#             by hand draws no card, and the act names those cells on its gaps list.
 #   §CATCH    a copy of the reader with the replace rule taken out, then the cancel rule, disagrees with a card.
 #   §COVER    every question of the closed list is asked and none is refused, and every event type has a line.
 #   §FOLLOWS  a review row's rendered brief starts its range at the reader's last review proof of its questions,
@@ -17,7 +18,7 @@
 #   §OPEN     run_open asks the reader's step of a run brought forward, whatever its plan's prose says; a run with
 #             no log is judged from its plan, so each closed fixture run reads closed and the cut run open.
 #   §FOLLOWS-CONTINUATION  close-out's check reads a debt only the run's log holds into its debt line and Deferrals.
-#   §AGREE    in each card's world the release card's Reviews lines and the sheet's reviews line count alike, and
+#   §AGREE    in each card's world that draws a card, the release card's Reviews lines and the sheet's reviews line count alike, and
 #             both print the reader's acts taken by hand and open asks at the log the card read.
 #   §HALF     a run not brought forward, its approval and landings in its plan and records and what came after in
 #             its log: a landing the log appends reads once and last, the run reads open at the plan's step, and a
@@ -26,9 +27,14 @@
 # A CARD'S INSTANT. The reader answers a run as it stands, so a card's world holds as its run log the reader's
 # own translation of the fixture up to the card's instant, in the translation's order: a line with no instant
 # of its own stands where the translation put it. The cut run has no log, so it is translated as it is read.
+# A CARD'S WORLD IS BROUGHT FORWARD by the act itself (scripts/bring-forward.sh), as a person brings an open run
+# forward: its page is rewritten at 15 and its plan and record kept, and then the translation cut at the instant is
+# moved over the whole log the act wrote. An open run is carried at 15 and the card asks the commit gate first, so
+# a card is asked only of a page at 15; whatever the act drops or moves shows as a card or a fact apart.
 # A WORLD WHOSE LOG IS MOVED INTO PLACE is a run whose log is the whole truth, which in the reader's terms is a run
-# brought forward (lib/reader.sh `reader_brought`: kept/ stands beside a log that is not its kept copy), so each is
-# marked so by `brought` where its log is placed, and its plan's later lines are not read beside the log.
+# brought forward (lib/reader.sh `reader_brought`: kept/ stands beside a log that is not its kept copy), so each
+# world asked no card is marked so by `brought` where its log is placed, and its plan's later lines are not read
+# beside the log. The closed runs, the cut run and §HALF's run stay at 14: they prove how a plan at 14 is read.
 #
 # FIXTURE FIDELITY. The fixtures are real files but hand-written.log: the lines of the event types no closed
 # run holds, in the landing record's own shapes, each marked fixture=hand-written. They join the cut run only.
@@ -71,6 +77,12 @@ RD="$R/payload/scripts"   # the reader under test; §CATCH points it at a plante
 ask() { bash "$RD/reader.sh" "$@"; }
 events() { ( . "$RD/lib/reader.sh" && reader_events "$1" ); }
 brought() { mkdir -p "$1/kept"; }  # <record directory> -> its run read as brought forward
+rec() { printf '%s/record/%s' "${1%/plans/*}" "$(basename "$1" .plan.md)"; }  # <plan> -> its record directory
+stands() { echo "$(ask "$1" header canonical_sdlc_version) $([ -f "$(rec "$1")/kept/${1##*/}" ] && echo kept)"; }  # <plan> -> its version and whether the act kept its page
+# <plan> <log> -> the world's run brought forward as a person brings one, by the act on this copy, and then <log>
+# moved in as its run log. The act writes the whole run's translation, while the world stands at an instant the run
+# was open, so the log it holds is the translation cut there; the act's kept copy beside it marks it brought forward.
+forward() { bash "$R/payload/scripts/bring-forward.sh" "$1" >/dev/null && mv "$2" "$(rec "$1")/run.log"; }
 # A reader answer as the expected files' keys, by question: a value names its fact, a count stands for a list
 # whose items the cards only count.
 _PROJ='function f(k,   i, n, p) { n = split($0, p, "|"); for (i = 2; i <= n; i++) if (index(p[i], k "=") == 1) return substr(p[i], length(k) + 2); return "" }
@@ -125,15 +137,16 @@ for x in "$X"/*.facts; do
   n="${x##*/}"; n="${n%.facts}"; w="$n"
   [ -d "$X/$w" ] || w="$(cd "$X" && ls -d */record/*/"$n.md" | cut -d/ -f1)"
   cp -R "$X/$w" "$WORLD_ROOT/$n"; p="$(ls "$WORLD_ROOT/$n"/plans/*/*.plan.md)"; at="$(sed -n 's/^card\.at=//p' "$x")"
-  # The log is moved into place whole, a run brought forward, so the reader reads it alone, even while empty; the
-  # cut ends the translation early, so the pipe's status is not the move's condition.
-  if [ -n "$at" ]; then events "$p" | cut_at "$at" > "$WORLD_ROOT/$n.log"; mv "$WORLD_ROOT/$n.log" "${p%/plans/*}/record/$(basename "$p" .plan.md)/run.log"
-    brought "${p%/plans/*}/record/$(basename "$p" .plan.md)"
+  # The run is brought forward and its log moved into place whole, so the reader reads it alone, even while empty;
+  # the cut ends the translation early, so the pipe's status is not the move's condition.
+  if [ -n "$at" ]; then events "$p" | cut_at "$at" > "$WORLD_ROOT/$n.log"; forward "$p" "$WORLD_ROOT/$n.log"
   else cat "$X/hand-written.log" >> "$WORLD_ROOT/$n/record/$(basename "$p" .plan.md)/landing-proofs.log"; fi
   WORLDS="$WORLDS $n:$w:$p"
 done
 D="$(disagree)"
 for e in $WORLDS; do n=${e%%:*}; w=${e#*:}; p=${w#*:}; w=${w%%:*}
+  grep -q '^card\.at=' "$X/$n.facts" && expect_eq "$n: its world is brought forward by the act, its page at 15 and kept" \
+    "canonical_sdlc_version=15 kept" "$(stands "$p")"
   expect_eq "$n: the reader answers as many facts as its expected file holds less the gaps" \
     "$(less "$n" "$w" < "$X/$n.facts" | wc -l | tr -d ' ')" "$(facts "$p" "$X/$n.facts" | less "$n" "$w" | wc -l | tr -d ' ')"
   expect_empty "$n: every answer equals its expected fact" "$(printf '%s\n' "$D" | grep "^$n ")"
@@ -158,26 +171,45 @@ for x in "$X"/release-approval-*.facts; do
   at="$(sed -n 's/^card\.at=//p' "$x")"; h="$(sed -n 's/^card\.head=//p' "$x")"; d="$WORLD_ROOT/pages/release-approval-${h:0:8}"
   mkdir -p "$d/.bio""nic"; cp -R "$X/$w" "$d/.bio""nic/docs"; p="$(ls "$d"/.bio*/docs/plans/*/*.plan.md)"; c="${p%/plans/*}/record/$(basename "$p" .plan.md)"
   for f in "$c"/release-approval-*.md; do [ "$(sed -n 's/^release-approval\/v1|plan=.*|at=\([^|]*\)|.*/\1/p' "$f")" \< "$at" ] || rm -f "$f"; done
-  events "$(ls "$X/$w"/plans/*/*.plan.md)" | cut_at "$at" > "$d.log"; mv "$d.log" "$c/run.log"; brought "$c"
+  # The page is cut by the reader's answers at the cut log, so that log stands marked while the page is cut; the marks
+  # are then lifted and the run, page and record as they stood at the instant, is brought forward by the act.
+  events "$(ls "$X/$w"/plans/*/*.plan.md)" | cut_at "$at" > "$d.log"; cp "$d.log" "$c/run.log"; brought "$c"
   o=" $(born < "$c/run.log") "
-  awk -F'|' -v l=" $(ask "$p" landed | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | tr '\n' ' ') " -v a="$at" -v o="$o" -v g=" $(events "$(ls "$X/$w"/plans/*/*.plan.md)" | born) " '
-    /^## /{ t = ($0 == "## Tasks"); u = ($0 == "## SDLC State"); s = 0 }
+  # A matrix row whose block's waiver: line is timed past the instant was not waived then: it reads pending, its other
+  # cells as written, so the act meets the row as the run held it.
+  lw=" $(awk -v a="$at" '/^## /{ m = ($0 == "## Verification Matrix") } m && /^AC-[^ :]+:/{ b = $1; sub(/:$/, "", b) }
+    m && /^  waiver:/ && match($0, /20[0-9-]+T[0-9:]+Z/) && substr($0, RSTART, RLENGTH) > a { print b }' "$p" | tr '\n' ' ') "
+  awk -F'|' -v l=" $(ask "$p" landed | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | tr '\n' ' ') " -v a="$at" -v o="$o" -v g=" $(events "$(ls "$X/$w"/plans/*/*.plan.md)" | born) " -v lw="$lw" '
+    /^## /{ t = ($0 == "## Tasks"); u = ($0 == "## SDLC State"); v = ($0 == "## Verification Matrix"); s = 0 }
+    v && $2 ~ /^ AC-/ && $4 ~ /^ *waived *$/ { r = $2; gsub(/ /, "", r); if (index(lw, " " r " ")) $4 = " pending " }
     u && /^(proved|waived|approved|moved): |^- T[0-9]+: landed / && match($0, /20[0-9-]+T[0-9:]+Z/) && substr($0, RSTART, RLENGTH) > a { next } t && !s && /^\| id \|/ { for (i = 2; i < NF; i++) if ($i ~ /^ *status *$/) s = i }
     t && s && $2 ~ /^ T[0-9]/ { r = $2; gsub(/ /, "", r); if (index(g, " " r " ") && !index(o, " " r " ")) next
       if ($s ~ /^ *landed *$/ && !index(l, " " r " ")) $s = " pending " }
     { print }' OFS='|' "$p" > "$d.plan"; mv "$d.plan" "$p"
+  rm -rf "$c/kept" "$c/run.log"; forward "$p" "$d.log"
+  expect_eq "$n: its world is brought forward by the act before its card is asked" "canonical_sdlc_version=15 kept" "$(stands "$p")"
   expect_true "$n: its head is a commit of this repository" $GIT cat-file -e "$h^{commit}"
   b="$(sed -n 's/^working-branch: //p' "$p" | head -1)"
   ( cd "$d" && git init -q && echo "$($GIT rev-parse --path-format=absolute --git-common-dir)/objects" > .git/objects/info/alternates \
     && git update-ref "refs/heads/$b" "$h" && git symbolic-ref HEAD "refs/heads/$b" && git reset -q --hard "$h" )
-  for f in $(grep -ohE '(record|specs)/[A-Za-z0-9._/-]+\.(log|md|txt)' "$p" | sort -u); do f="${p%/plans/*}/$f"
+  for f in $(grep -ohE '(record|specs)/[A-Za-z0-9._/-]+\.(log|md|txt)' "$c/kept/${p##*/}" | sort -u); do f="${p%/plans/*}/$f"
     [ -e "$f" ] || { mkdir -p "${f%/*}"; echo "a stand-in for a file the record lost" > "$f"; }; done
   bound_marker "$d" "$PS" "$p" >/dev/null 2>&1
   a=""; for k in $(page "$X/$w/record/${c##*/}/$n.md" | sed -n 's/^card\.decision\.\([^=]*\)=.*|pick=other|.*/\1/p'); do a="$a --against $k"; done
   W="$(page "$X/$w/record/${c##*/}/$n.md" | less "$n" "$w")"; expect_nonempty "$n: the card printed a replay table" "$W"
   G="$(render "$d" "$p" $a | less "$n" "$w")"
-  expect_eq "$n: the card rendered at its instant equals the card printed, less the gaps" "$W" "$G"
-  [ "$W" = "$G" ] || sed 's/^/      render said: /' "$d.err"
+  if [ "$n" = release-approval-fcbb975f ]; then
+    # The one world a run brought forward truly differs from what it printed: a criterion was pending at the instant with an
+    # evidence and a verdict written into its cells by hand, which 15 has no place for, so the act names them on its
+    # gaps list and the card is early for a criterion with no proof, where the run's own card put it as a decision.
+    expect_eq "$n: brought forward at its instant, the card is early and draws no table" "1|" "$(grep -c '^CARD-EARLY — ' "$d.err")|$G"
+    expect_eq "$n: …AC-7.3 alone is named undischarged on the act's gaps list, by its evidence and auditor cells" "AC-7.3:auditor AC-7.3:evidence" \
+      "$(sed -n 's/^gap\/v1|ev=criterion|criterion=\([^|]*\)|field=\([^|]*\)|why=undischarged$/\1:\2/p' "$c/kept/gaps" | sort | tr '\n' ' ' | sed 's/ $//')"
+    expect_eq "$n: …and the reader at 15 reads it pending" "state=pending" "$(ask "$p" cell AC-7.3)"
+  else
+    expect_eq "$n: the card rendered at its instant equals the card printed, less the gaps" "$W" "$G"
+    [ "$W" = "$G" ] || sed 's/^/      render said: /' "$d.err"
+  fi
   [ "$n" != release-approval-31da41f7 ] || { PG="$G"; PD="$d"; PP="$p"; PH="$h"; PA="$at"; }
 done
 
@@ -346,7 +378,8 @@ printf 'run/v1|ev=step|n=7|at=2026-11-02T00:00:00Z\n' >> "$CR/run.log"; expect_c
 
 section "AGREE"
 nums() { sed -n 's/^run\.so-far: \([0-9]*\) acts\{0,1\} taken by hand · \([0-9]*\) open asks\{0,1\}$/\1 \2/p'; }
-for d in "$WORLD_ROOT"/pages/release-approval-*/; do d="${d%/}"; n="${d##*/}"; p="$(ls "$d"/.bio*/docs/plans/*/*.plan.md)"
+# The world whose card is early draws no card to count; the three that draw hold the subject.
+for d in "$WORLD_ROOT"/pages/release-approval-*/; do d="${d%/}"; n="${d##*/}"; [ "$n" != release-approval-fcbb975f ] || continue; p="$(ls "$d"/.bio*/docs/plans/*/*.plan.md)"
   cp "$d.read" "${p%/plans/*}/record/$(basename "$p" .plan.md)/run.log"; sv="$( cd "$d" && bash "$R/hooks/session-poker.sh" sitrep "$p" 2>"$d.serr" )"
   c="$(awk '$0 == "Reviews" { r = 1; next } r && !NF { exit } r && !/^ / { if (index($0, "✅") == 1) p++; else f++ } END { printf "%d passed, %d failed", p, f }' "$d.out")"
   s="$(printf '%s\n' "$sv" | sed -n 's/^reviews: \([0-9]* passed, [0-9]* failed\), .*/\1/p')"
