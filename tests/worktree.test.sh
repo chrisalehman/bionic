@@ -1031,7 +1031,7 @@ sc_head() {  # <ready's output> -> its LANDED line's first two words, else its f
 SUCC="33333333-4444-4555-8666-777777777777"     # the successor: no binding, no roster
 SUCC2="44444444-5555-4666-8777-888888888888"    # a successor rebound to the same plan, its roster empty
 
-SC="$(ll_world)"; SC_P="$(ll_plan "$SC")"
+SC="$(LL_WORLD_AT=14 ll_world)"; SC_P="$(ll_plan "$SC")"   # sc_spawn appends the older table's rows and the state section's lines
 SC_T3="$(sc_spawn "$SC" T3 "$WORLD_SID")"; ll_launch "$SC" T3 a.test.sh
 expect_match "(su0) the spawned tree's own record names its plan, its row, its worker and the spawning session" \
   "tree/v1|path=${SC_T3}|plan=${SC_P}|row=T3|worker=wx-T3|spawned-by=${WORLD_SID}|at=*" "$(worktree_tree_record "$SC_T3" 2>/dev/null)"
@@ -1080,7 +1080,7 @@ sc_ready "$SC_T5" "$WORLD_SID"
 expect_eq "(mm2) the same tree from the session bound to its plan lands (exit 0)" "0 LANDED T5" "$SC_RC $(sc_head "$SC_OUT")"
 [ "$SC_RC" = 0 ] || printf '      ready said: %s\n' "$SC_OUT"
 
-SD="$(ll_world)"; SD_P="$(ll_plan "$SD")"
+SD="$(LL_WORLD_AT=14 ll_world)"; SD_P="$(ll_plan "$SD")"
 SD_T3="$(sc_spawn "$SD" T3 "$WORLD_SID")"; ll_launch "$SD" T3 a.test.sh
 # Delivered at current 9, as close-out leaves it; T3 is a fix born of a finding of the review the judge reads failing,
 # the one landing a judged run admits (lib/worktree.sh, THE RUN HAS BEEN JUDGED FOR INTEGRATION), in the shape
@@ -1113,7 +1113,7 @@ section "§HAND: a hand landing writes the person's verdicts before it publishes
 # reads landed, judging the row by those verdicts. T3 is born of the one finding of a failing adversarial review that
 # `proof-add review` registered, which opened the waiver ask.
 # fails-when: the ask stays open after the hand landing's publish, or the verdicts follow the published line.
-HN="$(ll_world)"; HN_P="$(ll_plan "$HN")"; HN_RD="$HN/.bionic/docs/record/wave-x"; mkdir -p "$HN_RD"
+HN="$(LL_WORLD_AT=14 ll_world)"; HN_P="$(ll_plan "$HN")"; HN_RD="$HN/.bionic/docs/record/wave-x"; mkdir -p "$HN_RD"
 HN_T3="$(sc_spawn "$HN" T3 "$WORLD_SID")"
 HN_H="$(git -C "$HN" rev-parse wave/x)"; HN_B="$(git -C "$HN" rev-parse main)"
 # The planner's frontmatter: the rigor and scale the judge deals by, and where the work started, the base an

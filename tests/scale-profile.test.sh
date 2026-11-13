@@ -39,7 +39,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/swept-marker.sh"
 # The dispatch wall's fixtures (make_repo, run_gate, the roster rows) and the sandbox with its
 # cleanup trap: §TASK drives the real wall through the same builders its own shards use.
-MAKE_REPO_AT=15; . "$(dirname "$0")/dispatch-preflight.prelude.sh"
+. "$(dirname "$0")/dispatch-preflight.prelude.sh"
 
 SP_REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 SP_LIB="$SP_REPO/payload/scripts/lib"

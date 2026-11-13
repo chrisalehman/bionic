@@ -912,7 +912,7 @@ AS="$(ab_k 'approval|key=step1|')"; expect_eq "AS-2 …each under its own key, t
   "run/v1|ev=approval|key=step1|by=Dana Fixture|said=yes, step1 as shown|1" "${AS%|at=*}|$(ab_k "ask|key=approve:step1|reply=approve step1|${AS##*|}" | grep -c .)"
 poke "$RAB" approve step1 'yes again'; expect_eq "AS-3 a second approve step1 is refused as recorded once, nothing appended" "1|1|yes" "$RC|$(ab_k 'approval|key=step1|' | grep -c .)|$(ab_said "$OUT" 'recorded once')"
 RAB="$(make_repo approved-15)"; ( cd "$RAB" && git commit -q --allow-empty -m init && git checkout -q -b wave/01-fixture ); git -C "$RAB" config user.name "Dana Fixture"
-PAB="$(plan_fixture --at 15 --current 3 "$RAB/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave)"; bound_marker "$RAB" "$SID" "$PAB"
+PAB="$(plan_fixture --current 3 "$RAB/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave)"; bound_marker "$RAB" "$SID" "$PAB"
 L5="$(plan_fixture_log "$PAB")"; /usr/bin/grep -v 'ev=approval' "$L5" > "$L5.t" && mv "$L5.t" "$L5"
 poke "$RAB" approve plan 'approved'; AS="$RC|$(ab_k approval | grep -c .)"; printf 'run/v1|ev=step|n=4|at=2026-10-04T00:04:00Z\n' >> "$L5"; s34_gate "$RAB"
 expect_eq "AS-4 the plan's approval answers the steps before it: at 15 with none of theirs it is taken, the only one, and a commit at Step 4 admitted" "0|1|0" "$AS|$GATE_RC"

@@ -1545,7 +1545,7 @@ section "§GOALS-SERVES: a theme is measured by the rows that serve it, serves: 
 # id counts under the requirement its number names; unmapped rows print no line. The world's plan is lib/plan-fixture.sh's
 # (hook-valid) with its themes; serves: is written into each block as an older plan's rendering wrote it, the
 # criterion's Requirement cell read through the reader.
-sr_sw() { SR_SCALE="$2" sr_world "$1" "6 6 12 12"; plan_fixture "$SR_PLAN" "$2" >/dev/null; plan_fixture_themes "$SR_PLAN" "${@:3}"; sr_run "$SR_PLAN"; }   # <label> <scale> <variant> <statuses…>
+sr_sw() { SR_SCALE="$2" sr_world "$1" "6 6 12 12"; plan_fixture --at 14 "$SR_PLAN" "$2" >/dev/null; plan_fixture_themes "$SR_PLAN" "${@:3}"; sr_run "$SR_PLAN"; }   # <label> <scale> <variant> <statuses…>
 sr_render() {  # -> each block of the plan gains `serves:` from its criterion's Requirement cell; SR_MR_RC 0
   local a r
   for a in $(sed -n 's/^\(AC-[0-9.]*\):.*/\1/p' "$SR_PLAN"); do

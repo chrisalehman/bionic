@@ -515,9 +515,9 @@ make_repo() {
       : > "$repo/.bionic/tmp/engaged-$_psid.state"
     done
     mkdir -p "$repo/.bionic/docs/plans/epic-99-test"
-    # MAKE_REPO_AT=15 asks for the same live wave at 15: the page holds no state section, and the
-    # run's log the step and the approval the section held. Unasked, the page is at 14.
-    if [ "${MAKE_REPO_AT:-14}" = 15 ]; then
+    # Unasked, the live wave is at 15: the page holds no state section, and the run's log the step and
+    # the approval the section held. MAKE_REPO_AT=14 asks for the same wave on a page at 14.
+    if [ "${MAKE_REPO_AT:-15}" = 15 ]; then
       printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nintent: build\nrigor: double\nscale: wave\nintegration-branch: main\n---\n\n# Test wave plan\n' \
         > "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
       mkdir -p "$repo/.bionic/docs/record/wave-01-test"

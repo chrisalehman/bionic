@@ -531,7 +531,7 @@ P57T="$R57T/.bionic/docs/plans/epic-99-fixture/task-01-fixture.plan.md"
 # the one shape carries it at either scale (A-T24-12); with none, a first reading is refused and the
 # judge exits 2 (section 63 pins that twin, its Step-4 key empty).
 s57t_task_plan() {  # <plan> <Step-4 base-sha value, or "" for the key alone> -> the plan, with the run's branch and the row's line
-  plan_fixture "$1" task "| T1 | 4 | build | the fix | — | — | — | 30 | REQ-1 | lib/fix.sh | — | — | active |" > /dev/null || return 1
+  plan_fixture --at 14 "$1" task "| T1 | 4 | build | the fix | — | — | — | 30 | REQ-1 | lib/fix.sh | — | — | active |" > /dev/null || return 1
   S57T_BASE="$2" awk '
     /^  base-sha: / { print "  base-sha:" (ENVIRON["S57T_BASE"] != "" ? " " ENVIRON["S57T_BASE"] : ""); next }
     { print }

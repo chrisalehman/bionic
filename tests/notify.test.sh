@@ -695,7 +695,7 @@ fp_plan_path() { printf '%s/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.p
 fp_plan() {  # <repo> <base> <reading>... -> the run at 15 at Step 4, double, with the review header fields; T1 landed and
   # the readings in its log
   local p r="$1" b="$2"; shift 2
-  p="$(plan_fixture --at 15 "$(fp_plan_path "$r")" wave '| T1 | 4 | build | the first build | implementor | — | — | 30 | REQ-1 | a.sh | — | — | landed |')" || return 1
+  p="$(plan_fixture "$(fp_plan_path "$r")" wave '| T1 | 4 | build | the first build | implementor | — | — | 30 | REQ-1 | a.sh | — | — | landed |')" || return 1
   awk -v b="$b" '/^rigor: /{ print "rigor: double\nreview-cadence: once\nfix-policy: S1,S2-on\nfix-cap: 4"; next }
     /^multi_agent: /{ $0 = "multi_agent: true" } /^base-sha: /{ $0 = "base-sha: " b } { print }' "$p" > "$p.t" && mv "$p.t" "$p"
   printf '%s\n' "$@" >> "$(plan_fixture_log "$p")"
