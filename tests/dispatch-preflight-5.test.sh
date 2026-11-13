@@ -294,11 +294,11 @@ expect_contains "PT.9c …naming it" "README.md is tracked" "$GATE_ERR"
 
 # --- PT.10: the evidence gate still refuses a criterion naming a prototype row (its existing arm) ---
 # Driven as it stands (lib/walls.sh validate_prototype_no_matrix_row): a run at 15 at Step 4 whose
-# `## Tasks` names T12 `kind: prototype` and whose `## Eval design` Task cell for AC-1 names T12. The
+# `## Tasks` names T12 `kind: prototype` and whose `## Eval design` Task cell for its criterion names T12. The
 # control repoints that cell at the build row T13 and changes nothing else.
 EG_GATE="${BIONIC_HOOKS_DIR}/bash-walls.sh"   # the evidence gate is a wall of bash-walls.sh
 PT_EG_SID="5d4c3b2a-9e8f-4a76-8b1c-2d3e4f506172"
-pt_eg_plan() {  # <dir> <AC-1's task> -> writes the plan and its run's log, echoes the plan's path
+pt_eg_plan() {  # <dir> <the criterion's task> -> writes the plan and its run's log, echoes the plan's path
   local p="$1/.bionic/docs/plans/epic-99-x/wave-01-x.plan.md" n
   mkdir -p "${p%/*}" "$1/.bionic/docs/record/wave-01-x" "$1/.bionic/tmp" "$1/.claude/plans"
   printf 'generic fixture proof\n' > "$1/.bionic/docs/record/generic-evidence.md"
