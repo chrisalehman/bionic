@@ -2682,13 +2682,10 @@ k2_step_num() {
 # WHAT `approved` BINDS. Step 3 ends at one approval checkpoint, and until this arm
 # existed the user's word left no trace: a run could be building at Step 4 with nobody
 # able to say whether the plan had ever been ratified, and the only backstop was the
-# Patrol's below-Step-4 fill refusal, which asks a different question. Decision 2 settled
-# the recording — on the user's LITERAL `approved` the orchestrator writes
-#
-#     approved-by: <user> <ISO-UTC> "<verbatim reply>"
-#
-# into `## SDLC State` — and this is the wall that makes its absence cost something.
-# Silence, a question, or a partial reply is never transcribed as approval, so PRESENCE
+# Patrol's below-Step-4 fill refusal, which asks a different question. On the user's
+# LITERAL `approved` the approve verb appends an approval of step3, with the git user and
+# the reply as given, to the run's log, and this is the wall that makes its absence cost
+# something. Silence, a question, or a partial reply is never transcribed as approval, so PRESENCE
 # is the whole check: nothing here grades the quote, and nothing here can tell a
 # transcription from an invention. What it can tell is that nobody wrote one down.
 #
@@ -2696,31 +2693,22 @@ k2_step_num() {
 # is authored, and the approval is asked for at the END of Step 3 — a wall there would
 # refuse the very commit that writes the plan the user is about to approve.
 #
-# DURABLE FROM 4 ONWARD, the same shape the matrix prefix check has: deleting the line at
-# Step 6 loses the same fact it would have lost at Step 4.
+# DURABLE FROM 4 ONWARD, the same shape the matrix prefix check has: a run at Step 6 owes
+# the same approval it owed at Step 4.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_approved_by() {
   local step
+  local rc=0
+  [ "$_EG_V15" -eq 1 ] || return 0
   step=$(k2_step_num)
   [ -n "$step" ] || return 0
   [ "$step" -ge 4 ] || return 0
-  if [ "$_EG_V15" -eq 1 ]; then
-    local rc=0
-    _proof_ask "$PLAN" reader_q_approved "$PLAN" step3 >/dev/null || rc=$?
-    [ "$rc" -eq 0 ] && return 0
-    [ "$rc" -eq 1 ] || _eg_v15_unreadable
-    refuse exit2 commit "the log holds no Step-3 approval" "record the literal approval" "canonical-sdlc step ${CURRENT} — the run's log holds no approval of step3; the Step-3 approval is what admits Step 4.
+  _proof_ask "$PLAN" reader_q_approved "$PLAN" step3 >/dev/null || rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  [ "$rc" -eq 1 ] || _eg_v15_unreadable
+  refuse exit2 commit "the log holds no Step-3 approval" "record the literal approval" "canonical-sdlc step ${CURRENT} — the run's log holds no approval of step3; the Step-3 approval is what admits Step 4.
 Plan: $PLAN
 Fix: on the user's literal 'approved', record that approval of step3 — never on silence, a question, or a partial reply."
-  fi
-
-  # the Step-3 approval, as the reader answered it with the step
-  case "${_EG_PLACE:-}" in *approved=1*) return 0 ;; esac
-
-  _eg_detail="canonical-sdlc step ${CURRENT} — '## SDLC State' carries no 'approved-by:' line; the Step-3 approval is what admits Step 4.
-Plan: $PLAN
-Fix: on the user's literal 'approved', record 'approved-by: <user> <ISO-UTC> \"<verbatim reply>\"' under '## SDLC State' — never on silence, a question, or a partial reply."
-  refuse exit2 commit "'## SDLC State' has no 'approved-by:' line" "record the literal approval" "$_eg_detail"
 }
 
 # ---------- the fails-when arm (AC-K2.3, AC-K2.5) ----------
