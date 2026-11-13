@@ -517,6 +517,7 @@ for x in "AC-1.1|T1" "AC-1.2|9" "AC-1.3|—" "AC-1.4|T1, T4" "AC-1.6|T2"; do
   expect_eq "${x%%|*}'s Eval design row holds its task in the Task column" "task=${x#*|}" "$(askw criterion "${x%%|*}" | grep '^task=')"; done
 expect_contains "a block's task with no Eval design row to carry it is on the gaps list" "gap/v1|ev=criterion|criterion=AC-1.5|field=task|why=absent" "$OUT"
 expect_contains "a token 15 cannot say, the 9 beside an id, is on the gaps list" "gap/v1|ev=criterion|criterion=AC-1.6|field=task:9|why=unruled" "$OUT"
+expect_eq "a plan that held a criteria table keeps that one table, made no other" 1 "$(grep -c '^## Eval design' "$W")"
 WS="$(cksum < "$W")"; bash "$BF" "$W" >/dev/null 2>&1
 expect_eq "a second act adds no second Task column: the plan is unchanged" "$WS" "$(cksum < "$W")"
 
@@ -565,7 +566,8 @@ current: 8
   n/a: no decision this run
 EOF
   printf '%s' "$p"; }
-G="$(homes wave-6-homes)"; GO="$(bash "$BF" "$G" 2>&1)"; askg() { bash "$RS" "$G" "$@"; }
+gcells() { for c in AC-1.1 AC-1.2; do bash "$RS" "$1" cell "$c" | paste -sd' ' -; done | paste -sd'|' -; }
+G="$(homes wave-6-homes)"; GC="$(gcells "$G")"; GO="$(bash "$BF" "$G" 2>&1)"; askg() { bash "$RS" "$G" "$@"; }
 GB="$(homes wave-6-bare '/^  base-sha:/d; /^  branch:/d; /^  n\/a:/d')"; GBO="$(bash "$BF" "$GB" 2>&1)"
 expect_eq "the working branch and base its Step 4 block held are the header's after the act" "working-branch=wave/6-homes base-sha=2222222bb" \
   "$(askg header working-branch) $(askg header base-sha)"
@@ -574,6 +576,11 @@ GA="$(homes wave-6-adr 's#^  n/a: no decision this run#  adr: adrs/a.md (Propose
 expect_eq "Step 7's document is the header's adrs: after the act: none with its n/a reason, or the records its block named" \
   "adrs=none — no decision this run|adrs=adrs/a.md, rca/r.md" "$(askg header adrs)|$(bash "$RS" "$GA" header adrs)"
 expect_contains "a run past Step 7 whose block named no document has it named on the gaps list" "gap/v1|ev=step|n=7|field=adrs|why=absent" "$GBO"
+expect_eq "a plan whose criteria stood only in its matrix holds them after the act, each where it stood" "state=discharged by=proof|state=pending" "$GC"
+expect_eq "…each its own row of a criteria table: its tier, and its block's requirement, eval, failure and task" \
+  "requirement=REQ-1|eval-type=T1|eval=\`a.test.sh\`|fails-when=a is red|task=T1;requirement=—|eval-type=T2|eval=—|fails-when=b is red|task=T2" \
+  "$(for c in AC-1.1 AC-1.2; do askg criterion "$c" | grep -v '^criterion=' | paste -sd'|' -; done | paste -sd';' -)"
+expect_eq "…and the reader's cells after the act are those before" "$GC" "$(gcells "$G")"
 
 section "STEPS"
 U="$D/plans/epic-x/wave-6-untimed.plan.md"; B="$D/plans/epic-x/wave-5-back.plan.md"; s9='- Step 9: delivered: 2026-11-01T13:34Z'

@@ -55,12 +55,12 @@ _bf_dir="$(cd "$_bf_dir" && pwd -P)" || exit 2
 # shellcheck source=/dev/null
 . "$_bf_dir/lib/translate.sh" || exit 2
 
-_bf_plan() {  # <plan> <deps file|-> <gaps out> [<criteria tasks file>] [<header keys file>] -> the plan's text brought forward
+_bf_plan() {  # <plan> <deps file|-> <gaps out> [<criteria tasks file>] [<header keys file>] [<criteria file>] -> the plan's text brought forward
   # Read twice: the first pass learns the Tasks table's columns, each row's suites and lands-on and which
   # rows have a section of their own; the second writes. A cell keeps its text as written, `\|` included.
   # A task's own section is found by plan-read.sh's one heading rule and its one fence rule, so the act writes where
   # the brief reads: a `#` line inside a fence is the section's text, never a heading, in either pass.
-  awk -v depf="$2" -v gapf="$3" -v taskf="${4:--}" -v headf="${5:--}" -v nine="id step kind task deps size serves files artifact" "$_PLAN_READ_FENCE$_PLAN_READ_SECTION"'
+  awk -v depf="$2" -v gapf="$3" -v taskf="${4:--}" -v headf="${5:--}" -v critf="${6:--}" -v nine="id step kind task deps size serves files artifact" "$_PLAN_READ_FENCE$_PLAN_READ_SECTION"'
     function cells(line, out,   n, i) {
       gsub(/\\[|]/, "\001", line); sub(/^[ \t]*[|]/, "", line); sub(/[|][ \t]*$/, "", line)
       n = split(line, out, "|"); for (i = 1; i <= n; i++) gsub(/^[ \t]+|[ \t]+$/, "", out[i])
@@ -78,6 +78,7 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> [<criteria tasks file>] [<header
         else if (gapf != "") print "gap/v1|ev=criterion|criterion=" c "|field=task:" a[j] "|why=unruled" > gapf }
       return o == "" ? "—" : o
     }
+    function tcell(v) { if (v == "") return "—"; gsub(/[|]/, "\\|", v); return v }
     function addcell(l, v) { sub(/[ \t]+$/, "", l); return (l ~ /[|]$/) ? l " " v " |" : l " | " v }
     function place(   k) { if (ins == "") return
       for (k = 1; k <= 2; k++) if (!none(cell[ins, w2[k]])) print w2[k] ": " unesc(cell[ins, w2[k]])
@@ -85,7 +86,8 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> [<criteria tasks file>] [<header
     BEGIN { nn = split(nine, w9, " "); split("suites lands-on", w2, " ")
       if (depf != "-") while ((getline l < depf) > 0) { t = index(l, "\t"); dep[substr(l, 1, t - 1)] = substr(l, t + 1) }
       if (taskf != "-") while ((getline l < taskf) > 0) { t = index(l, "\t"); if (t > 1) { tk[substr(l, 1, t - 1)] = substr(l, t + 1); tord[++ntk] = substr(l, 1, t - 1) } }
-      if (headf != "-") while ((getline l < headf) > 0) { t = index(l, "\t"); if (t > 1) { hk[++nhk] = substr(l, 1, t - 1); hv[hk[nhk]] = substr(l, t + 1) } } }
+      if (headf != "-") while ((getline l < headf) > 0) { t = index(l, "\t"); if (t > 1) { hk[++nhk] = substr(l, 1, t - 1); hv[hk[nhk]] = substr(l, t + 1) } }
+      if (critf != "-") while ((getline l < critf) > 0) if (split(l, x, "\t") >= 5) { ncr++; for (i = 1; i <= 5; i++) cr[ncr, i] = x[i] } }
     FNR == 1 && NR > 1 { sec = ""; nh = 0; tdone = 0; skip = 0; fence = 0 }
     { sub(/\r$/, ""); f = fenced($0) }
     !f && /^## / { sec = substr($0, 4); sub(/[ \t]+$/, "", sec) }
@@ -105,6 +107,12 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> [<criteria tasks file>] [<header
     head { if ($0 == "---") { for (i = 1; i <= nhk; i++) if (!(hk[i] in hput)) print hk[i] ": " hv[hk[i]]; head = 0 }
       else if ($0 ~ /^canonical_sdlc_version:[ \t]*["\047]?14["\047]?[ \t]*$/) $0 = "canonical_sdlc_version: 15"; print; next }
     !f && /^#+[ \t]/ { place() }
+    # A plan whose criteria stood only in its matrix gets their table where the matrix stood, a row per criterion.
+    !f && /^## / && sec == "Verification Matrix" && ncr && !made { made = 1
+      print "## Eval design"; print ""; print "| Requirement | Criterion | Eval type | Eval | Fails when | Task |"; print "|---|---|---|---|---|---|"
+      for (i = 1; i <= ncr; i++) { c = cr[i, 1]; v = "—"; if (c in tk) { cv[c] = carry(c, tk[c]); v = cv[c] }
+        print "| " tcell(cr[i, 3]) " | " tcell(c) " | " tcell(cr[i, 2]) " | " tcell(cr[i, 4]) " | " tcell(cr[i, 5]) " | " v " |" }
+      print "" }
     !f && /^## / { skip = (sec == "SDLC State" || sec == "Verification Matrix" || sec == "Handoff") }
     skip { next }
     !f && /^#+[ \t]/ && !isnine && (heading($0) in row) { print; ins = heading($0); next }
@@ -162,9 +170,28 @@ _bf_compute() {  # <plan> <work dir> -> <work>/plan, the plan brought forward; <
   _bf_plan "$plan" - "" > "$w/implied.plan.md" || return 1
   _bf_deps "$plan" "$w/implied.plan.md" "$w/deps" > "$w/waits.gaps" || return 1
   plan_read_criterion_task "$plan" > "$w/tasks" 2>/dev/null || :
-  _bf_plan "$plan" "$w/deps" "$w/cells.gaps" "$w/tasks" "$w/head" > "$w/plan" || return 1
+  _bf_criteria "$plan" > "$w/criteria" || return 1
+  _bf_plan "$plan" "$w/deps" "$w/cells.gaps" "$w/tasks" "$w/head" "$w/criteria" > "$w/plan" || return 1
   _bf_shared "$plan" > "$w/shared.gaps" || return 1
   cat "$w/translated.gaps" "$w/homes.gaps" "$w/waits.gaps" "$w/cells.gaps" "$w/shared.gaps" | awk '!seen[$0]++' > "$w/gaps"
+}
+
+# THE CRITERIA. At 15 a run's criteria are its `## Eval design` table's rows; at 14 a plan could hold them in its matrix
+# alone, which the act takes out. Such a plan gets the table from the matrix: a row per criterion in the matrix's order,
+# its tier as the Eval type (lib/scale.sh reads a `T<n>` type as that tier), its block's first `serves:`, `eval:` and
+# `fails-when:` as its Requirement, Eval and Fails when, and its block's task in the Task column as a table's rows are
+# given one. A plan that holds a criteria table is left as the act leaves it.
+_bf_criteria() {  # <plan> -> `<criterion><TAB><tier><TAB><requirement><TAB><eval><TAB><fails when>` per matrix row; nothing when the plan holds a criteria table
+  plan_read_table "$1" 'Eval design' criterion >/dev/null 2>&1 && return 0
+  { plan_read_rows "$1" 'Verification Matrix' ac 2>/dev/null; printf '\034\n'; plan_read_blocks "$1" 2>/dev/null || :; } | awk -F'\t' '
+    $0 == "\034" { part = 1; next }
+    !part { a = ""; t = ""; for (i = 1; i <= NF; i++) { e = index($i, "="); k = substr($i, 1, e - 1); if (k == "ac") a = substr($i, e + 1); else if (k == "tier") t = substr($i, e + 1) }
+      if (a != "" && !(a in seen)) { seen[a] = 1; ord[++n] = a; tier[a] = t }; next }
+    $1 == "" { next }
+    { l = substr($0, length($1) + 2) }
+    match(l, /^[ \t]*(serves|eval|fails-when)[ \t]*:/) { k = l; sub(/^[ \t]+/, "", k); sub(/[ \t]*:.*$/, "", k)
+      if (($1, k) in v) next; x = substr(l, RLENGTH + 1); gsub(/\t/, " ", x); sub(/^[ ]+/, "", x); sub(/[ ]+$/, "", x); v[$1, k] = x }
+    END { for (i = 1; i <= n; i++) { a = ord[i]; printf "%s\t%s\t%s\t%s\t%s\n", a, tier[a], v[a, "serves"], v[a, "eval"], v[a, "fails-when"] } }'
 }
 
 # THE HEADER'S KEYS A STEP OWES AT 15. At 14 the working branch and the base were the SDLC State's: its first
