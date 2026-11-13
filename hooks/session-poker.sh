@@ -2205,8 +2205,8 @@ sitrep_clock() {  # <epoch> <now epoch> -> `H:MM AM/PM`, then ` YYYY-MM-DD` when
 #
 # MAIN THREAD ONLY is the Bash wall's to enforce (payload/scripts/lib/walls.sh, the
 # `agent_id` verb list); these refuse what the script can see: no session key (3), an
-# unengaged session (decides nothing, 0), and a session with no BOUND open plan (1) — a
-# writing verb never writes the newest-plan fallback.
+# unengaged session (decides nothing, 0), a session with no BOUND open plan (1) — a
+# writing verb never writes the newest-plan fallback — and a bound run that could not be read (2).
 
 # plan_delivered <plan> -> 0 when the file is a run closed by delivery: `run_open` calls it closed (not unreadable) and
 # the reader's state, read with it, is delivered, never abandoned. 1 otherwise, silent. The plan is judged where it
@@ -2246,12 +2246,21 @@ plan_verb_open() {
   case "$run" in
     'bound-open '*) PV_PLAN="${run#bound-open }" ;;
     'bound-closed '*) [ "$closed" = "" ] || [ ! -f "${run#bound-closed }" ] || PV_PLAN="${run#bound-closed }" ;;
+    'bound-unreadable '*)
+      # The session IS bound and its run is there: telling it to bind would be false, and a run that could not be
+      # read is not known to be closed. Nothing is written from facts that were not read, so this is the verbs'
+      # own refusal for unread facts, exit 2. A plan that cannot be opened is told apart from facts that did not
+      # fold, because only the first is cured by restoring access and only the second by asking again.
+      if plan_unreadable "${run#bound-unreadable }" >/dev/null; then
+        die "REFUSED — the run's facts could not be read: its plan ${run#bound-unreadable } is there and cannot be opened, so $verb writes nothing. Restore read access to it, then run $verb again."
+      else
+        die "REFUSED — the run's facts could not be read: the facts of ${run#bound-unreadable } did not fold, so $verb writes nothing. Run $verb again."
+      fi
+      exit 2 ;;
   esac
   if [ -z "$PV_PLAN" ]; then
     die "REFUSED — $verb writes the plan this session is bound to, and it has no bound open run (${run:-none})."
     die "Bind this session to its run first (this script's bind verb), then run $verb again."
-    case "$run" in
-    esac
     exit 1
   fi
   # The run's step as the reader answers it (lib/fill.sh over lib/proof.sh `proof_step_held`). A step that cannot be read
