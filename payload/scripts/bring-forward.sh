@@ -19,6 +19,13 @@
 # the kept copy of the record holds it, absent or the same bytes; once it differs, the act wrote it, or
 # a writer appended to it after the act.
 #
+# WHOSE KEPT COPY. A kept copy standing beside a plan not yet at 15 is this act's own only when it holds the plan as it
+# stands, byte for byte, and the run's log is absent, the log the copy holds, or the log the act writes from the copy (the
+# translation of the kept plan and record, laid out as a run of their own): then the act was broken off before it rewrote
+# the plan, and this act finishes it. Any other kept copy was left by another build of the record directory or by the
+# plan as it stood before a later edit, and a log neither it nor the act wrote is no log the act may judge as its own; both
+# are refused in words, before anything is written (_bf_own).
+#
 # THE WAITS. A row's reads and deps are read through plan_read_waits, the one reads-to-waits rule, twice:
 # over the old table, and over the new one with every deps cell empty, which is what the kind and the
 # step imply. A wait on a row becomes that row's id in deps, and a wait on a named approval (a decision's, the
@@ -41,8 +48,8 @@
 # A ROW'S SUITES AND LANDS-ON are a person's words about the task, so they go to the task's own section,
 # a heading whose first word is its id, when the plan has one, and to the gaps list when it has none.
 #
-# EXITS. 0 done; 2 not a plan at plans/<epic>/<wave>.plan.md, or a plan not named *.plan.md; 1 a write failed, with
-# nothing after it written.
+# EXITS. 0 done; 2 not a plan at plans/<epic>/<wave>.plan.md, a plan not named *.plan.md, or a kept copy not this run's
+# own; 1 a write failed, with nothing after it written.
 #
 # Executed, never sourced:  bash ${CLAUDE_PLUGIN_ROOT}/scripts/bring-forward.sh <plan>
 # bash 3.2 (ADR-001).
@@ -271,6 +278,22 @@ _bf_misnamed() {  # <plan, resolved> <its record> -> the refusal on stderr
     "$1" "$tail" >&2
 }
 
+_bf_own() {  # <plan> <kept> <log> <work dir> -> 0 the kept copy is this act's own; 1 not, the refusal on stderr; 3 a copy failed
+  local plan="$1" kept="$2" log="$3" name="${1##*/}" k why
+  if ! cmp -s "$kept/$name" "$plan"; then
+    why="the plan it holds is not $plan as it stands, so another build of the record or the plan before a later edit left it"
+  elif [ ! -f "$log" ] || cmp -s "$log" "$kept/record/run.log"; then
+    return 0
+  else
+    k="$4/kept"; mkdir -p "$k/plans" "$k/record" && cp "$kept/$name" "$k/plans/" || return 3
+    [ ! -d "$kept/record" ] || cp -R "$kept/record" "$k/record/${name%.plan.md}" || return 3
+    translate "$k/plans/$name" events 2>/dev/null | cmp -s - "$log" && return 0
+    why="the run's log $log is neither the log it holds nor the one the act writes from it, so another build left the two"
+  fi
+  printf 'bring-forward: refused — %s is not this run'"'"'s kept copy: %s. Move it aside and run the act again; nothing was written.\n' "$kept" "$why" >&2
+  return 1
+}
+
 bf_main() {  # <plan> -> the act; prints the gaps list and kept=<directory>
   local plan="${1:-}" log rec kept wave st
   if [ ! -f "$plan" ] || ! log="$(reader_log "$plan" 2>/dev/null)"; then
@@ -279,6 +302,9 @@ bf_main() {  # <plan> -> the act; prints the gaps list and kept=<directory>
   plan="$(cd "$(dirname "$plan")" && pwd -P)/${plan##*/}"; wave="${plan##*/}"; rec="${log%/run.log}"; kept="$rec/kept"
   case "$wave" in *.plan.md) ;; *) _bf_misnamed "$plan" "$rec"; return 2 ;; esac
   BF_WORK="$(mktemp -d)" || return 1
+  if [ -d "$kept" ] && [ "$(plan_read_header "$plan" canonical_sdlc_version 2>/dev/null)" != canonical_sdlc_version=15 ]; then
+    _bf_own "$plan" "$kept" "$log" "$BF_WORK"; case $? in 0) ;; 1) return 2 ;; *) return 1 ;; esac
+  fi
   _bf_compute "$plan" "$BF_WORK" || return 1
   if [ ! -d "$kept" ]; then
     mkdir -p "${rec%/*}" && st="$(mktemp -d "${rec%/*}/.kept.XXXXXX")" || return 1

@@ -12,7 +12,8 @@
 #   §PLACE     an approval written by then instant is read; an untimed deferral stands at its review's proof.
 #   §MATRIX    a discharged matrix row is a proof and a waived one a waiver, by ac= with what its cells hold,
 #              and a waiver with the author, instant and words of its block's waiver: line; a cell that holds no
-#              evidence takes the evidence: line of the block, and a cell that holds one wins; a pending or blocked
+#              evidence takes the evidence: line of the block, and a cell that holds one wins unless it only points at
+#              its block (`see AC-11`); a pending or blocked
 #              row is no event, and its evidence or auditor, which 15 has no place for, is on the gaps list.
 #   §ONE-FACT  a criterion a state line and a matrix row both name is the state line's one fact.
 #   §UNREAD    the header's abandoned: is an abandon; an inherited: line no ruled type carries is a gap.
@@ -32,11 +33,15 @@
 #   §HALF    a run whose log already holds some of its facts is brought forward: the act exits 0, the log it writes
 #            holds the old homes' landings and the log's own in order, the log as it stood is kept, a second act
 #            changes no byte.
+#   §OWN     an act broken off is finished by the next; a kept copy holding another plan, or beside a log neither it
+#            nor the act wrote, is refused in words before anything is written.
 #   §WAITS   a wait on a row is that row's id in deps; one the kind implies is dropped; any other is a gap.
 #   §DROPPED a dropped row's cell is the run's drop: after the act the row stays, reads dropped, and waits on it are met.
 #   §CRITERIA each criterion's block task is carried into the Eval design's Task column, so it is owed at the same step after the
 #            act; a task with no Eval design row, or a token 15 cannot say (a 9 beside an id), is on the gaps list.
 #   §CELLS   a row's suites and lands-on go to the task's own section, past a fenced # line in it, or to the gaps list when it has none.
+#   §HOMES   a plan at 14 holding none of 15's homes: its Step 4 branch and base and its Step 7 document are the header's
+#            after the act, each one owed and held nowhere a gap; its matrix's criteria are a criteria table.
 #   §STEPS   a Step follows the Step above it and a proof or waiver the line above it in its block, whatever
 #            their instants, so the step is the old current: and closure; a Step held (pending) is a gap.
 #   §PARKED  a Step 9 line with no delivered: (a parked plan's note) is a gap, not a step; close-out's parked delivery is.
@@ -452,6 +457,18 @@ expect_eq "…the log as it stood is kept byte for byte" "kept" "$(cmp -s "$HR/k
 HS="$(cksum < "$HR/run.log") $(cksum < "$HP")"
 bash "$BF" "$HP" >/dev/null 2>&1
 expect_eq "…and a second act changes no byte of the log or the plan" "$HS" "$(cksum < "$HR/run.log") $(cksum < "$HP")"
+section "OWN"
+# The act finishes one of its own broken off; a kept copy it did not take for this plan and this log is refused.
+HK="$HR/kept/wave-8-half.plan.md"; HW="$(cksum < "$HP")"; HL="$(cksum < "$HR/run.log")"
+cp "$HK" "$HP"; bash "$BF" "$HP" >/dev/null 2>&1; r1=$?; cp "$HK" "$HP"; cp "$HR/kept/record/run.log" "$HR/run.log"; bash "$BF" "$HP" >/dev/null 2>&1
+expect_eq "an act broken off after its log, or after its copies, is finished by the next: the same plan and log" "0 0 $HW $HL" "$r1 $? $(cksum < "$HP") $(cksum < "$HR/run.log")"
+cp "$HK" "$HP"; printf 'run/v1|ev=step|n=0|at=2026-11-04T00:00:00Z\n' > "$HR/run.log"; HS="$(cksum < "$HP") $(cksum < "$HR/run.log")"
+HO="$(bash "$BF" "$HP" 2>&1)"; expect_status "a log neither the kept copy holds nor the act writes from it is refused (exit 2)" 2 "$?"
+expect_contains "…in words that say the kept copy is not this run's and why" "is not this run's kept copy: the run's log" "$HO"
+expect_eq "…and nothing is written" "$HS" "$(cksum < "$HP") $(cksum < "$HR/run.log")"
+sed 's/One\./Uno./' "$HK" > "$HP"; rm "$HR/run.log"; HS="$(cksum < "$HP")"
+HO="$(bash "$BF" "$HP" 2>&1)"; expect_status "a plan other than the one its kept copy holds is refused (exit 2)" 2 "$?"
+expect_eq "…in words that say why, and nothing is written" "1 $HS absent" "$(grep -c "is not this run's kept copy: the plan it holds" <<< "$HO") $(cksum < "$HP") $([ -e "$HR/run.log" ] || echo absent)"
 W="$SB/docs/plans/epic-x/wave-7-act.plan.md"; mkdir -p "${W%/*}"; c="| — | — |"
 cat > "$W" <<EOF
 ---
