@@ -21,9 +21,10 @@
 #
 # THE WAITS. A row's reads and deps are read through plan_read_waits, the one reads-to-waits rule, twice:
 # over the old table, and over the new one with every deps cell empty, which is what the kind and the
-# step imply. A wait on a row becomes that row's id in deps; a wait implied anyway is dropped; any other
-# (an approval other than the plan's, a decision, an external token) is named on the gaps list and
-# written nowhere, since a version-15 row holds no other wait.
+# step imply. A wait on a row becomes that row's id in deps, and a wait on a named approval (a decision's, the
+# growth of the loaded set's) its `approval:<name>` after them, each in the order the row wrote it, so the task waits
+# at 15 on what it waited on at 14; a wait implied anyway is dropped; any other (an external token, a proof
+# a kind does not imply) is named on the gaps list and written nowhere, since a version-15 row holds no other wait.
 #
 # A DROPPED ROW stays in the Tasks table as the person wrote it: the translation writes its status cell as the
 # run's `drop` event, so the log carries that its work is no longer owed, and a wait on it stays a wait, met
@@ -113,8 +114,9 @@ _bf_deps() {  # <old plan> <implied plan> <deps out> -> the waits that are not d
     $2 == "kind" { ord[++n] = $1; next }
     ($1, $2, $3) in imp { next }
     $2 == "row" { d[$1] = d[$1] (d[$1] == "" ? "" : ", ") $3; next }
+    $3 ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/ { a[$1] = a[$1] ", " $3; next }
     { printf "gap/v1|ev=row|row=%s|field=%s|why=unruled\n", $1, $3 }
-    END { for (i = 1; i <= n; i++) if (d[ord[i]] != "") printf "%s\t%s\n", ord[i], d[ord[i]] > out; close(out) }'
+    END { for (i = 1; i <= n; i++) { r = ord[i]; v = d[r] a[r]; sub(/^, /, "", v); if (v != "") printf "%s\t%s\n", r, v > out }; close(out) }'
 }
 
 _bf_compute() {  # <plan> <work dir> -> <work>/plan, the plan brought forward; <work>/gaps, the act's gaps list

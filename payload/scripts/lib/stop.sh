@@ -1286,6 +1286,16 @@ esac
 return 2
 }
 
+# stop_wait_cell <plan> -> `<cell> <row>`: the Tasks cell a person edits to make a row wait, and the word the edit adds
+# for the open row it waits on. A version-15 page holds a task's waits in its deps cell, a row by its id and a ruling as
+# `approval:DN`; an older page in its reads cell, a row by its record, the ruling the same.
+stop_wait_cell() {
+  declare -F plan_read_header >/dev/null 2>&1 || . "$_STOP_LIB_DIR/plan-read.sh" >/dev/null 2>&1
+  case "$(plan_read_header "${1:-}" canonical_sdlc_version 2>/dev/null)" in
+    canonical_sdlc_version=15) printf 'deps RID\n' ;;
+    *) printf 'reads RECORD\n' ;;
+  esac
+}
 
 # ─── stop_patrol_duties ───
 #
@@ -1437,7 +1447,7 @@ stop_patrol_duties() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _ev="${1:-}" _adv=0
   local TRANSCRIPT HOOK_DIR PLAN PLAN_NAME STREAM
   local RITUAL RITUAL_REASON TICK_MARK FILL_MISSING FILL_REASON FILL_FORMS _fill_detail
-  local FILL_SRC FILL_FACT FILL_FIX NOTICK_REASON _FF_SHOWN _FF_MORE _FF_ID
+  local FILL_SRC FILL_FACT FILL_FIX NOTICK_REASON _FF_SHOWN _FF_MORE _FF_ID _fd_cell _fd_row _fd_what
   local -a _FF_IDS
   local _NT_STAMP _NT_LINE _NT_VERB _NT_AT _NT_OK _NT_PRESENT=0
   local STANDDOWN_MISSING STANDDOWN_REASON _SD_BOUND _SD_SET
@@ -1662,17 +1672,21 @@ if [ "$FILL_SRC" = "GAP" ]; then
   # paragraph naming `min(free slots, ready rows)` of the rows. The user reads one line naming every
   # ready row the turn left (`_ST_NAMED`); the rule behind it lives in the dispatch doctrine ('The
   # FILL line is advice; the wall counts'). The model's copy adds the rows comma-joined in one
-  # dispatch line and the three forms that make a row wait, two an edit of the plan's reads cell and one a command:
-  # ID, RECORD, N and WORDS are upper-case words, never `<...>` a shell reads as a redirect. An edit adds to what
-  # the cell reads, an empty cell being its kind's default, so the row keeps the reads that already hold it.
+  # dispatch line and the three forms that make a row wait, two an edit of the cell that holds the row's waits
+  # (`stop_wait_cell`: deps at 15, reads before) and one a command: ID, RECORD, RID, N and WORDS are upper-case words,
+  # never `<...>` a shell reads as a redirect. An edit adds to what the cell holds, an empty reads cell being its kind's
+  # default, so the row keeps the waits that already hold it.
   # `FILL_REASON` is the same facts as one line, the form a duty paragraph takes when this refusal
   # rides beside a stand-down's.
   _fd_poker="$(refuse_shell_word "${HOOK_DIR}/session-poker.sh")"
+  read -r _fd_cell _fd_row <<< "$(stop_wait_cell "$PLAN")"
+  _fd_what="the record of the open row it waits on; an empty cell is its kind's default, written out first"
+  [ "$_fd_row" = RECORD ] || _fd_what="the id of the open row it waits on"
   FILL_FORMS="dispatch ${FILL_MISSING// /,}, or make each wait by one of three forms:"
-  FILL_FORMS="${FILL_FORMS}"$'\n'"a dependency: edit ID's reads cell in the plan to add RECORD (RECORD: the record of the open row it waits on; an empty cell is its kind's default, written out first)"
-  FILL_FORMS="${FILL_FORMS}"$'\n'"a read of a ruling: edit ID's reads cell in the plan to add approval:DN (DN: the decision nobody has ruled)"
+  FILL_FORMS="${FILL_FORMS}"$'\n'"a dependency: edit ID's ${_fd_cell} cell in the plan to add ${_fd_row} (${_fd_row}: ${_fd_what})"
+  FILL_FORMS="${FILL_FORMS}"$'\n'"a read of a ruling: edit ID's ${_fd_cell} cell in the plan to add approval:DN (DN: the decision nobody has ruled)"
   FILL_FORMS="${FILL_FORMS}"$'\n'"an order: bash ${_fd_poker} order 'WORDS' (WORDS: what the user said)"
-  FILL_REASON="ready with room: ${FILL_MISSING}; dispatch them, or make each wait: a dependency (add RECORD to ID's reads cell in the plan), a read of a ruling (add approval:DN to it) or an order (bash ${_fd_poker} order 'WORDS')"
+  FILL_REASON="ready with room: ${FILL_MISSING}; dispatch them, or make each wait: a dependency (add ${_fd_row} to ID's ${_fd_cell} cell in the plan), a read of a ruling (add approval:DN to it) or an order (bash ${_fd_poker} order 'WORDS')"
   # THE LINE HAS width.sh's 100 COLUMNS, and refuse.sh writes it `bionic: stop refused — <fact>
   # (<fix>)`: 23 columns before the fact and 30 after it with this fix, so the fact keeps to 44 and
   # the line to 97. Every id when they fit; else the ids that fit with "+N more" for the rest, which
