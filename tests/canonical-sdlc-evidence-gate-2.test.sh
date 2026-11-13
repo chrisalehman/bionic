@@ -353,7 +353,8 @@ expect_block "30g meta: the real hook still refuses the impostor after the mutat
 
 section "Section 31: refusal names the edit-then-commit split"
 
-# s31_home -> S31_H, a sandbox whose run is at Step 6, readings and floor proved, AC-1.1 proved and AC-2 pending; P31, its page.
+# s31_home -> S31_H, a sandbox whose run is at Step 6, readings and floor proved, the first criterion proved and the
+#   second pending; P31, its page.
 s31_home() {
   local q; S31_H=$(make_home); eg_head_repo "$S31_H"
   P31=$(eg_page "$S31_H" 6 "run/v1|ev=proof|kind=regression|head=$EG_HEAD|evidence=record/floor.log|at=2026-10-04T01:00:00Z" \
