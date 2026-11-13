@@ -132,10 +132,10 @@ mkdir -p "${GL%/*}"; printf 'proof\n' > "$R/.bionic/docs/record/generic-evidence
   printf '| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\nAC-1:\n  fails-when: a planted defect\n  evidence: record/generic-evidence.md\n'
 } > "$R/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md"
 printf 'plan=%s\n' "$R/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" > "$R/.bionic/tmp/engaged-$SID.state"
-gate_as() {  # <session> <a pending step, or nothing> -> GATE_EXIT, and GATE_SAID: the gate's words on a commit from the repository
+gate_as() {  # <session> <a pending step, or nothing> [the tree it commits in] -> GATE_EXIT, and GATE_SAID: the gate's words on a commit from the repository
   local in
-  in="$(jq -n --arg s "$1" --arg c "$R" '{session_id: $s, cwd: $c, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "git commit -m x"}}')"
-  GATE_SAID="$(HOME="$HOME_DIR" CLAUDE_PROJECT_DIR= CLAUDE_CODE_SESSION_ID="$1" BIONIC_DRY_STEP="$2" BIONIC_WALL_VERBOSE=1 bash "$BIONIC_HOOKS_DIR/bash-walls.sh" <<< "$in" 2>&1 >/dev/null)"
+  in="$(jq -n --arg s "$1" --arg c "${3:-$R}" '{session_id: $s, cwd: $c, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "git commit -m x"}}')"
+  GATE_SAID="$(cd "${3:-$R}" && HOME="$HOME_DIR" CLAUDE_PROJECT_DIR= CLAUDE_CODE_SESSION_ID="$1" BIONIC_DRY_STEP="$2" BIONIC_WALL_VERBOSE=1 bash "$BIONIC_HOOKS_DIR/bash-walls.sh" <<< "$in" 2>&1 >/dev/null)"
   GATE_EXIT=$?
 }
 gate() { gate_as "$SID" ""; }
@@ -248,10 +248,19 @@ cp "$GP" "$GP.w"; sed -i '' 's/| AC-1 | T1 | discharged |/| AC-1 | T1 | bogus |/
 expect_eq "…and a row the older table holds with a status outside the four words is refused, named" "2|1" "$GATE_EXIT|$(grep -c "matrix row 'AC-1' has an invalid status 'bogus'" <<< "$GATE_SAID")"
 printf 'run/v1|ev=step|n=9|delivered=no|at=2026-11-01T00:00:22Z\n' >> "$GL"; gate
 expect_eq "at 14 a step 9 not delivered owes its delivery, no Step 9 line asked for" "2|owed at 14: Step 9's delivery|no" "$GATE_EXIT|$(owed14 "Step 9's delivery")|$(contains "$GATE_SAID" "has no 'Step 9:' line")"
-# The doctrine grows on the person's approval, asked of the run at 14 and at 15; at 15 the row's read stays unseen beside it.
+# The doctrine grows on the person's approval, asked of the run at 14 and at 15 alike, and never from a tree no task owns.
 mkdir -p "$R/payload/.claude-plugin" "$R/agents"; printf '{"name": "bionic"}\n' > "$R/payload/.claude-plugin/plugin.json"; printf 'a\n' > "$R/agents/a.md"; git -C "$R" add payload agents; git -C "$R" -c user.name=f -c user.email=f@x.invalid -c core.hooksPath=/dev/null commit -q -m set; printf 'ab\n' > "$R/agents/a.md"; git -C "$R" add agents/a.md
-nz() { gate; for w in 'no reads cell' 'no approval of doctrine-growth' 'no .## Tasks. row owns'; do printf '%s\n' "$GATE_SAID" | /usr/bin/grep -q "Not admitted: .*$w" && printf 'y' || printf 'n'; done; }
-for c in "$P2|$L2|yyn" "$GP|$GL|nyy"; do IFS='|' read -r p l w <<< "$c"; printf 'plan=%s\n' "$p" > "$R/.bionic/tmp/engaged-$SID.state"; A="$(nz)"; printf 'run/v1|ev=approval|key=doctrine-growth|by=f|said=yes|at=2026-11-01T00:00:14Z\n' >> "$l"
-  expect_eq "growth of the loaded set at ${p##*/} names the approval while the run holds none, and not once it does" "$w|${w:0:1}n${w:2:1}" "$A|$(nz)"; done
+nz() { gate; for w in 'no approval of doctrine-growth' 'no .## Tasks. row owns'; do printf '%s\n' "$GATE_SAID" | /usr/bin/grep -q "Not admitted: .*$w" && printf 'y' || printf 'n'; done; }
+for c in "$P2|$L2" "$GP|$GL"; do IFS='|' read -r p l <<< "$c"; printf 'plan=%s\n' "$p" > "$R/.bionic/tmp/engaged-$SID.state"; A="$(nz)"; printf 'run/v1|ev=approval|key=doctrine-growth|by=f|said=yes|at=2026-11-01T00:00:14Z\n' >> "$l"
+  expect_eq "growth of the loaded set at ${p##*/} names the approval while the run holds none, and not once it does; no task owns the tree" "yy|ny" "$A|$(nz)"; done
+# A task at 15 names the approval it waits on: its page is admitted, approve takes the name, and growth is admitted from its tree.
+NW="$(printf '%s\n' "$NINE" '| T2 | 4 | build | the second | T1, approval:D7 | 30 | REQ-1 | b.sh | — |')"; write_plan "$(printf '## Tasks\n\n%s\n' "$NW" | page 15)"; A="$HOOK_EXIT"; write_plan "$(printf '## Tasks\n\n%s\n' "${NW/approval:D7/aproval:D7}" | page 15)"
+expect_eq "a page at 15 whose task waits on approval:D7 is admitted; one misspelling it is refused, naming it" "0|2|1" "$A|$HOOK_EXIT|$(grep -c 'T2: dep aproval:D7 names no row' <<< "$HOOK_SAID")"
+printf 'plan=%s\n' "$P2" > "$R/.bionic/tmp/engaged-$SID.state"; T3W="$R/.worktrees/50-T3"; git -C "$R" worktree add -q "$T3W" -b wt/t3 2>/dev/null; printf 'ab\n' > "$T3W/agents/a.md"; git -C "$T3W" add agents/a.md
+awk '{ print } /^\| T1 \| 4 \| build /{ print "| T3 | 4 | build | Grow. | — | 10 | REQ-1 | agents/a.md | — |" }' "$P2" > "$P2.t" && mv "$P2.t" "$P2"; printf 'run/v1|ev=tree|row=T3|path=.worktrees/50-T3|branch=wt/t3|base=%s|at=2026-11-01T00:00:15Z\n' "$H" >> "$L2"
+ap() { ( cd "$R" && HOME="$HOME_DIR" CLAUDE_CODE_SESSION_ID="$SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" approve "$1" yes >/dev/null 2>&1 ); printf '%s' "$?"; }; grows() { gate_as "$SID" "" "$T3W"; printf '%s|%s' "$GATE_EXIT$(grep -c 'loaded set grows' <<< "$GATE_SAID")" "$(grep -o 'Not admitted: row T3 does not wait on approval:doctrine-growth\|edit the deps cell of T3 in the plan to: [^ ]*' <<< "$GATE_SAID" | paste -sd'|' -)"; }
+hdr "base-sha: $H"; B="$(ap launch)|$(grows)"; sed -i '' 's/| Grow. | — |/| Grow. | approval:doctrine-growth, approval:launch |/' "$P2"
+expect_eq "with the approval standing, growth from T3's tree is refused (exit 2) while T3 names no wait on it, saying what to write, and admitted (exit 0) once it does" "1|21|Not admitted: row T3 does not wait on approval:doctrine-growth|edit the deps cell of T3 in the plan to: approval:doctrine-growth|00|" "$B|$(grows)"
+expect_eq "approve refuses launch while no task waits on it, takes it once T3 does, and refuses a name none waits on" "1|0|1" "${B%%|*}|$(ap launch)|$(ap nobody)"
 
 finish
