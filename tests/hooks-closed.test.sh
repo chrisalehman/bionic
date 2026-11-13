@@ -11,33 +11,32 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 
-S="$(cd "$(mktemp -d)" && pwd -P)"; mkdir -p "$S/hooks" "$S/home" "$S/plugins" "$S/nojq"; : > "$S/target.sh"
+S="$(cd "$(mktemp -d)" && pwd -P)"; mkdir -p "$S/hooks" "$S/home" "$S/plugins" "$S/nojq"
 hc() {  # <hook file> <event> <tool> <stop_hook_active: true|false|null (absent)|raw (not JSON)> [PATH] -> exit status
   { if [ "$4" = raw ]; then printf 'not json'; else jq -nc --arg d "$S" --arg e "$2" --arg t "$3" --argjson a "$4" \
       '{session_id:"hc",cwd:$d,hook_event_name:$e,tool_name:$t,tool_input:{command:"ls",file_path:"\($d)/x.md"},
         agent_id:"a1",stop_hook_active:$a} | if $a == null then del(.stop_hook_active) else . end'; fi; } \
     | (cd "$S" && env HOME="$S/home" BIONIC_PLUGINS_DIR="$S/plugins" CLAUDE_PROJECT_DIR= CLAUDE_CODE_SESSION_ID=hc \
-        PATH="${5:-$PATH}" /bin/bash "$1" "$S/target.sh" >/dev/null 2>"$S/err"); echo $?
+        PATH="${5:-$PATH}" /bin/bash "$1" >/dev/null 2>"$S/err"); echo $?
 }
 
 section "CLOSED"
 while read -r h ev tool _; do
   cp "$BIONIC_HOOKS_DIR/$h.sh" "$S/hooks/"
-  expect_eq "$h, no library: exit 2" 2 "$(hc "$S/hooks/$h.sh" "$ev" "$tool" false)"
-  expect_contains "$h, no library: it says it cannot load" "cannot load the bionic library" "$(cat "$S/err")"
-  expect_eq "$h, library present, quiet payload: exit 0" 0 "$(hc "$BIONIC_HOOKS_DIR/$h.sh" "$ev" "$tool" false)"
+  expect_eq "$h on $ev, no library: exit 2" 2 "$(hc "$S/hooks/$h.sh" "$ev" "$tool" false)"
+  expect_contains "$h on $ev, no library: it says it cannot load" "cannot load the bionic library" "$(cat "$S/err")"
+  expect_eq "$h on $ev, library present, quiet payload: exit 0" 0 "$(hc "$BIONIC_HOOKS_DIR/$h.sh" "$ev" "$tool" false)"
 done <<'EOF'
 bash-walls PreToolUse Bash
 dispatch-preflight PreToolUse Agent
 canonical-sdlc-governing-skill PreToolUse Write
-stop-guard PreToolUse TaskStop
 permission-answer PermissionRequest Bash  exit 2 is not honoured on this event: the dialog shows
 stop Stop -
-agent-context-guard SubagentStop -
+stop SubagentStop -
 EOF
-for h in stop agent-context-guard; do
-  for a in true null raw; do expect_eq "$h, no library, stop_hook_active $a: the turn ends" 0 "$(hc "$S/hooks/$h.sh" Stop - "$a")"; done
-  expect_eq "$h, no library, no jq: the turn ends" 0 "$(hc "$S/hooks/$h.sh" Stop - false "$S/nojq")"
+for ev in Stop SubagentStop; do
+  for a in true null raw; do expect_eq "stop on $ev, no library, stop_hook_active $a: the turn ends" 0 "$(hc "$S/hooks/stop.sh" "$ev" - "$a")"; done
+  expect_eq "stop on $ev, no library, no jq: the turn ends" 0 "$(hc "$S/hooks/stop.sh" "$ev" - false "$S/nojq")"
 done
 
 
@@ -49,9 +48,9 @@ ha() {
 }
 STUB="$( . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/loader.sh" && bionic_loader_pin | sed -n '4p')"
 expect_contains "the stub's line that sources the loader is read" '. "$_bl_l"; bionic_load' "$STUB"
-expect_eq "each of the fifteen hooks holds it" 15 "$(cd "$BIONIC_HOOKS_DIR" && /usr/bin/grep -lxF -- "$STUB" agent-context-guard.sh bash-walls.sh \
+expect_eq "each of the thirteen hooks holds it" 13 "$(cd "$BIONIC_HOOKS_DIR" && /usr/bin/grep -lxF -- "$STUB" bash-walls.sh \
   canonical-sdlc-governing-skill.sh dispatch-preflight.sh engage.sh execution-recorder.sh permission-answer.sh preflight-probe.sh \
-  session-poker.sh session-start.sh session-sweeper.sh stop-check.sh stop-guard.sh stop-orders.sh stop.sh | wc -l | tr -d ' ')"
+  session-poker.sh session-start.sh session-sweeper.sh stop-check.sh stop-orders.sh stop.sh | wc -l | tr -d ' ')"
 
 section "OPEN"
 while IFS='|' read -r h p a; do

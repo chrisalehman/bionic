@@ -343,7 +343,7 @@ STATE_FILE="$BIONIC_ROOT/.bionic/tmp/preflight-${BIONIC_SID}.state"
 # for a different tree — and this gate deliberately parses no check detail (§4),
 # so the record's own `repo=` field never exposes the mismatch. Checklist A3
 # names this class; it was discharged for the WRITE path only. The sibling stop
-# gate refuses at all three levels (hooks/stop-guard.sh's state_paths()); these
+# gate refuses at all three levels (lib/stop.sh's `_sg_state_dir`); these
 # are the same three.
 #
 # Read by KEY, never by position (checklist A6) — mirrors the producer's own
@@ -877,35 +877,28 @@ fi
 # (spec D9 and its Writer-origin invariant; design ledger Δ11 as amended by Δ12.)
 #
 # ONLY THE ORCHESTRATOR DISPATCHES WRITERS. A dispatch made from inside a subagent — a
-# payload carrying a top-level `agent_id` (t1-probe-report §3), or the guard's channel
-# variable: `is_agent_context` below — may launch a read-only role and
-# nothing else. The read-only roles' own files disallow the Agent tool (agents-src), so the
+# payload carrying a top-level `agent_id` (t1-probe-report §3): `is_agent_context` below —
+# may launch a read-only role and nothing else. The read-only roles' own files disallow the Agent tool (agents-src), so the
 # longest chain there is is orchestrator → writer → read-only helper: every writer is
 # rostered, contracted and dispatched by the orchestrator. Before Δ12 nothing bounded the
 # depth, and the consumer wave that reported it ran orchestrator → implementor → fork →
 # dispatch, with the nested rows accreting onto the orchestrator's roster.
 #
 # is_agent_context — defined HERE, above its first caller, because bash resolves a function
-# at the call. Two spellings mark an agent context and either one is enough:
-#   * `.agent_id` — the harness's own marker, present only when the hook fires inside a
-#     subagent (the Bash walls' ARM C and hooks/stop-guard.sh read the same field). The
-#     dependable one: measured on a nested PreToolUse|Agent payload (T12).
-#   * BIONIC_HOOK_CHANNEL=agent-context — the settings-channel guard's marker. No
-#     registration hands it to THIS hook today (hooks.json runs the guard on SubagentStop
-#     only), so it is kept as one spelling of two, never the one the journal relies on.
+# at the call. `.agent_id` marks an agent context: the harness's own marker, present only
+# when the hook fires inside a subagent (the Bash walls' ARM C and the stop hook read the
+# same field), measured on a nested PreToolUse|Agent payload.
 # NOT `.agent_type` (wave-20 T7b; critic C4). The harness sets it "when the session uses
 # --agent or the hook fires inside a subagent", so a main session started as `claude --agent
 # <x>` carries it with no `agent_id` — and that session is the orchestrator: reading it as a
 # subagent refused its every writer dispatch and journalled none of its launches. A real
 # subagent's payload carries `agent_id` beside its `agent_type`, so nothing is lost.
 is_agent_context() {
-  [ -n "$(_jq '.agent_id')" ] && return 0
-  [ "${BIONIC_HOOK_CHANNEL:-}" = "agent-context" ] && return 0
-  return 1
+  [ -n "$(_jq '.agent_id')" ]
 }
 # [WALL: tests/dispatch-preflight.test.sh]
 if is_agent_context && ! role_is_readonly "$DP_SUBAGENT"; then
-  dispatch_finding nested-writer "$DP_SUBAGENT" "$(_jq '.agent_id')" "${BIONIC_HOOK_CHANNEL:-}" "$(_jq '.agent_type')" \
+  dispatch_finding nested-writer "$DP_SUBAGENT" "$(_jq '.agent_id')" "" "$(_jq '.agent_type')" \
     "$ROLE_READONLY_SET"
 fi
 
@@ -941,8 +934,7 @@ fi
 #
 # Schema roster-state/v1 — one `#` header line plus one line per row, each
 # `<version>|key=value|...`, read BY KEY and never by position (checklist A6),
-# mirroring the observation record in hooks/stop-guard.sh so both machine
-# artifacts in .bionic/tmp/ parse the same way. Per-session filename from birth
+# so every machine artifact in .bionic/tmp/ parses the same way. Per-session filename from birth
 # (D-5): .bionic/tmp/roster-<session_id>.state.
 #
 # wave-session-bound-run S5 (spec §Roster attribution, AC-2): the row's LAST
@@ -1299,7 +1291,7 @@ WRITERNAMES
 
   # THE TRANSCRIPT (spec AC-7, AC-8): the payload's own `transcript_path`, the same
   # field every other liveness reader in this wave keys off (context-spend.sh,
-  # execution-recorder.sh, patrol-duties-gate.sh, stop-guard.sh).
+  # execution-recorder.sh, patrol-duties-gate.sh, stop.sh).
   BUDGET_TRANSCRIPT=$(_jq '.transcript_path')
 
   # NO ARM BETWEEN THE COUNT AND THE CEILINGS (D1, wave-12; Chris 2026-09-13 "I don't
@@ -2069,8 +2061,7 @@ fi
 # (session-20260815-landing-supervision T6; design D1 "writers stay put".)
 #
 # Every wall above this line has now run, and that is the whole of what travels
-# into an agent context: hooks/agent-context-guard.sh registers THIS script on the
-# settings channel so a dispatch made from inside a teammate or subagent meets the
+# into an agent context: a dispatch made from inside a teammate or subagent meets the
 # same refusals a main-thread one does. What must NOT travel is the journal. The
 # roster is the depth-one ledger of what the orchestrator launched, read by the
 # landing verdict and the poker as the set of contracts this session owes; a
@@ -2078,11 +2069,9 @@ fi
 # confirms, nobody lands, and nobody was ever going to check — a teammate's
 # deliverable subsumes its subtree.
 #
-# THE PAYLOAD DECIDES (wave-20 T7, AC-9.2). This skip used to key on the guard's
-# BIONIC_HOOK_CHANNEL alone — and hooks.json registers the guard on SubagentStop only, so
-# no dispatch ever reached here carrying it: every nested launch was journalled onto the
-# orchestrator's roster as a contract it owed (triage-B D2c, driven). It asks
-# `is_agent_context` now, whose first spelling is the payload's own top-level `agent_id`.
+# THE PAYLOAD DECIDES. This skip asks `is_agent_context`, the payload's
+# own top-level `agent_id`: a skip keyed on anything no dispatch carries journals every nested
+# launch onto the orchestrator's roster as a contract it owes.
 # On the pass side — a dispatch that got this far has been allowed (and, from inside an agent,
 # is a read-only role by the delegation arm), and this line only declines to write it down.
 # THIS EXIT IS REACHABLE ONLY BY A READ-ONLY ROLE LAUNCHED FROM INSIDE AN AGENT: the delegation
