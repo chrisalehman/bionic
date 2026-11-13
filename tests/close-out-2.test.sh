@@ -15,7 +15,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/regression-fixture.sh"
 . "$(dirname "$0")/lib/roster-row.sh"   # the one roster-row builder (cross-gate S17; wave-30 T23)
-CO_PLAN_AT=15; . "$(dirname "$0")/close-out.prelude.sh"
+. "$(dirname "$0")/close-out.prelude.sh"
 
 # ============================================================
 section "4f — REQ-1 (AC-1.1–1.4): the shipped table is found once; the ADR cell is read, not marked"

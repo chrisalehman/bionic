@@ -2,11 +2,12 @@
 # Tests for the release approval card at the end of a run the verbs carried there: the door fixture (tests/lib/door.sh)
 # is walked from its authored plan to the end state by the run's own verbs, and the card is rendered on what they left.
 #
-#   §CLOSE         the plan is put in the release order (a regression row at step 5, an integrate row reading both
-#                  approvals), the build row lands by hand, the walk is registered, Steps 5 to 7 are entered with the
-#                  regression run, five readings and the check recorded, and the release row lands by hand with the
-#                  release and the whole run again at that head, as a delivered run ends. Every fact holds and no
-#                  `approved: release` line is written, so `current 8` refuses on that approval alone; the card exits 0
+#   §CLOSE         the plan is put in the release order (a regression row at step 5, an integrate row waiting on the
+#                  merge approval, the release approval its kind's), the build row lands by hand, the walk is
+#                  registered, Steps 5 to 7 are entered with the regression run, five readings and the check recorded,
+#                  and the release row lands by hand with the release and the whole run again at that head, as a
+#                  delivered run ends. Every fact holds and no release approval is given, so `current 8` refuses on
+#                  that approval alone; the card exits 0
 #                  and its replay table puts `approve:release` and `approve:merge` only, the pass being at the head.
 #   §CLOSE-MUTANT  the same end state under copies of the tree under test. Unchanged, the copy renders the card. With
 #                  the card's `approve:release` settle deleted, the card is early. With the judge's refusal reworded in
@@ -14,9 +15,9 @@
 #
 # FIXTURE FIDELITY: the repository is door_world's, a real `git init` with the check's closure, the real changelog and a
 # plan whose Step-3 state the library authors. Every later change to the plan is a verb's or a judged cell edit's
-# (task-add, proof-add and the hand door's row line), or the orchestrator's edit of a step's evidence lines, which no verb
-# writes at version 14 (`dc_step`); `current` appends to the run's log. What it writes besides are the records the
-# run's actors write: a one-row suite in the build row's commit, the walk and audit records,
+# (task-add, proof-add and the hand door's row line), or the orchestrator's edit of the header's adrs: line at Step 7,
+# which no verb writes; `current` appends each step to the run's log. What it writes
+# besides are the records the run's actors write: a one-row suite in the build row's commit, the walk and decision records,
 # five reading records in the readers' grammar (the structure reading answering every id the shipped checks file names),
 # and each reader's roster row through the production writer (`roster_row`), closed by the sweeper's own `ack`; and the
 # release's five readers green at its head through lib/line.sh's writer, as its row's ready over them records them.
@@ -67,11 +68,6 @@ dc_verb() {
   [ "$DOOR_RC" = 0 ] || printf '%s\n' "$DOOR_OUT" | sed 's/^/    | /' | head -20
 }
 dc_commit() { _door_inside "$1" && git -C "$1" add -A >/dev/null 2>&1 && git -C "$1" commit --quiet -m "$2"; }   # <tree> <message>
-# dc_step <N> <text> [<key: value>]… -> the orchestrator's edit: step N's evidence line and its block, ending the state section
-dc_step() { local n="$1" t="$2"; shift 2; DC_B="$(printf '  %s\n' "$@")" awk -v l="- Step $n: $t" 'BEGIN { b = ENVIRON["DC_B"] }
-  /^## / && on { print l; if (b != "  ") print b; on = 0 } /^## SDLC State/ { on = 1 } { print }' "$DC_PLAN" > "$DC_PLAN.t" && mv "$DC_PLAN.t" "$DC_PLAN"; }
-# dc_approved <plan> -> the `approved…` lines of the plan's ## SDLC State, the plan's own approval and any the user gave
-dc_approved() { awk '/^## SDLC State/ { f = 1; next } f && /^## / { exit } f && /^approved/' "$1"; }
 dc_keys() {   # <record dir> <h8> -> the keys of the card's replay table, in its order, space-joined
   /usr/bin/grep '^release-approval/v1|dec=' "$1/release-approval-$2.md" 2>/dev/null \
     | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "key=") == 1) print substr($i, 5) }' | paste -sd' ' -
@@ -96,9 +92,9 @@ section "§CLOSE: the verbs carry the fixture to the end state, and the card ren
 DC_T0="$SECONDS"
 door_run "$DC" bash -c '. "$1/units.sh" 2>/dev/null && units_table_cells "$2" set tasks T2 step=7 > "$2.t" && [ -z "$(units_validate "$2.t" "$2" 2>&1)" ] && mv "$2.t" "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$DC_PLAN"
 expect_eq "(c1) the person's edit moves the release row to step 7, judged by the table check" "0" "$DOOR_RC"
-awk '{ L[NR] = $0 } /^\| T[0-9]/ { last = NR } END { for (i = 1; i <= NR; i++) { print L[i]; if (i == last) printf "%s\n%s\n", "| T3 | 5 | test | the regression. The whole suite runs once. | orchestrator | — | — | 10 | REQ-1 | .bionic/docs/record/wave-x/T3.md | — | — | pending |", "| T4 | 8 | integrate | merge into main. The run reaches main by its merge. | orchestrator | — | approval:release, approval:merge, head | 10 | REQ-1 | — | — | — | pending |" } }' "$DC_PLAN" > "$DC_PLAN.t" && mv "$DC_PLAN.t" "$DC_PLAN"
+awk '{ L[NR] = $0 } /^\| T[0-9]/ { last = NR } END { for (i = 1; i <= NR; i++) { print L[i]; if (i == last) printf "%s\n%s\n", "| T3 | 5 | test | the regression. The whole suite runs once. | — | 10 | REQ-1 | .bionic/docs/record/wave-x/T3.md | — |", "| T4 | 8 | integrate | merge into main. The run reaches main by its merge. | approval:merge | 10 | REQ-1 | — | — |" } }' "$DC_PLAN" > "$DC_PLAN.t" && mv "$DC_PLAN.t" "$DC_PLAN"
 dc_verb "(c2) the orchestrator's edit adds the regression row at step 5, and task-add records its birth" task-add T3
-dc_verb "(c3) …and the integrate row that reads both approvals" task-add T4
+dc_verb "(c3) …and the integrate row that waits on the merge approval" task-add T4
 expect_eq "(c4) the plan is in the release order, its regression row T3" "T3" \
   "$(bash -c '. "$1/units.sh" && units_order "$2"' _ "$DC_LIB" "$DC_PLAN" 2>/dev/null)"
 
@@ -112,15 +108,13 @@ expect_eq "(c5) the build row lands by hand" "0" "$DOOR_RC"
 
 printf '# walk\n\n| AC | verdict | why |\n|---|---|---|\n| AC-1.1 | CONFIRMED | the library change holds |\n\nverdict: CONFIRMED — the one criterion\n' > "$DC_REC/walk.md"
 dc_verb "(c7) the walk's registration discharges the criterion by its proof" proof-add walk record/wave-x/walk.md
-printf 'CONFIRMED: the one criterion is proved\n' > "$DC_REC/audit.md"
-dc_step 5 'regression at record/wave-x/regression-run.log' 'walk-artifact: record/wave-x/walk.md' 'auditor: CONFIRMED, record/wave-x/audit.md'
+DC_H1="$(dc_head "$DC")"
+dc_verb "(c13) regression-run runs the whole run green" regression-run
+dc_verb "(c14) proof-add records the regression" proof-add regression "record/wave-x/regression-run-$DC_H1.log"
 DC_SUM="$(cksum < "$DC_PLAN")"
 dc_verb "(c12) current 5" current 5
 expect_eq "(c12a) the advance leaves the plan's bytes as they were, and the run stands at step 5" "$DC_SUM|n=5" \
   "$(cksum < "$DC_PLAN")|$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$DC_PLAN" step | head -1)"
-DC_H1="$(dc_head "$DC")"
-dc_verb "(c13) regression-run runs the whole run green" regression-run
-dc_verb "(c14) proof-add records the regression" proof-add regression "record/wave-x/regression-run-$DC_H1.log"
 for dc_qs in evidence:piece adversarial:piece structure:piece adversarial:whole structure:whole; do
   dc_reading "w-${dc_qs%%:*}-${dc_qs#*:}" "${dc_qs%%:*}" "${dc_qs#*:}" "$DC_BASE" "$DC_H1"
   dc_verb "(c15 ${dc_qs}) proof-add registers the reading" proof-add review "record/wave-x/w-${dc_qs%%:*}-${dc_qs#*:}.md" \
@@ -129,11 +123,11 @@ done
 door_run "$DC" bash "$BIONIC_SCRIPTS_DIR/hooks/session-sweeper.sh" ack \
   w-evidence-piece w-adversarial-piece w-structure-piece w-adversarial-whole w-structure-whole
 expect_eq "(c16) the sweeper acks the five readers" "0" "$DOOR_RC"
-dc_step 6 'review at record/wave-x/w-evidence-piece.md'
 dc_verb "(c18) current 6" current 6
 dc_verb "(c19) release-check at the build head" release-check
+# The orchestrator's edit at Step 7: the header names the run's decision record, which no verb writes.
 printf 'no decision this run\n' > "$DC_REC/adr.md"
-dc_step 7 'documented at record/wave-x/adr.md' 'adr: record/wave-x/adr.md'
+awk '{ print } /^scale: / && !d { print "adrs: record/wave-x/adr.md"; d = 1 }' "$DC_PLAN" > "$DC_PLAN.t" && mv "$DC_PLAN.t" "$DC_PLAN"
 dc_verb "(c22) current 7" current 7
 
 DC_P2="$(door_piece "$DC" T2)" && door_release "$DC" "$DC_P2" >/dev/null && door_land "$DC" "$DC_P2"
@@ -147,12 +141,13 @@ DC_H="$(dc_head "$DC")"; DC_H8="${DC_H:0:8}"
 echo "dc: the walk took $((SECONDS - DC_T0)) s and ended at $DC_H"
 
 expect_eq "(c25) the end state is step 7" "n=7" "$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$DC_PLAN" step | head -1)"
-expect_contains "(c26) the plan carries its own approval line" "approved-by: " "$(dc_approved "$DC_PLAN")"
-expect_absent "(c27) …and no approved: release line" "approved: release" "$(dc_approved "$DC_PLAN")"
+dc_approved() { bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$DC_PLAN" approved "$1" >/dev/null 2>&1; echo "$?"; }   # <key> -> 0 when it stands
+expect_eq "(c26) the run holds the plan's own approval" "0" "$(dc_approved step3)"
+expect_eq "(c27) …and no release approval" "1" "$(dc_approved release)"
 dc_verb "(c28) current 6 --check would advance at the release head" current 6 --check
 dc_verb "(c29) current 7 --check would advance: every fact the run owes holds at the release head" current 7 --check
 door_run "$DC" bash "$DOOR_POKER" current 8 --check
-DC_C8="$DOOR_OUT"
+DC_C8="$DOOR_OUT"; printf 'dc: current 8 --check -> rc %s: %s\n' "$DOOR_RC" "$(printf '%s\n' "$DC_C8" | /usr/bin/grep '^poker: REFUSED' | head -1)"
 expect_eq "(c30) current 8 --check refuses" "1" "$DOOR_RC"
 expect_contains "(c31) …on the release approval the plan does not carry" "carries no approved: release line" "$DC_C8"
 expect_eq "(c32) …and on nothing else: one refusal line" "1" "$(printf '%s\n' "$DC_C8" | /usr/bin/grep -c '^poker: REFUSED')"
