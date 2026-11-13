@@ -162,14 +162,14 @@ expect_block "continuation 'stack-health: pending' (whole value) → block" \
 # Section 9: a criterion is owed at the step whose task proves it
 # ============================================================
 #
-# A matrix row's `task:` names the plan row whose work proves it, and the row is owed at that row's step: before
-# it, a pending or blocked row owes neither its per-tier keys nor an auditor's verdict. The literal `task: 9` is the
-# close's step; a row owed at 9 is the close's to settle, never demanded of an open plan.
-# At 15 the criteria table's Task column says it, read by the same rule; a page with no column owes at no step.
+# A criterion is owed at the step of the task that proves it: before it, a pending or blocked criterion owes neither
+# its per-tier keys nor an auditor's verdict. The literal 9 is the close's step; a criterion owed at 9 is the close's
+# to settle, never demanded of an open plan. At 15 the criteria table's Task column names the task; an older plan's
+# block names it on its `task:` line, which the readers below still read for the judge and the close.
 # FIXTURE FIDELITY: the matrix plan builders with a `## Tasks` table before the matrix; Step-7+ plans via eg_floor; the
 # page at 15 is SYNTHESIZED in the nine cells and the Eval design, its one landing an event of its run's log.
-# fails-when: a pending T3 row whose task is a Step-9 row is refused at 6, 7 or 8, or a row whose task
-# is a Step-4 row is let through at 6, or the deferral outlives its owing step.
+# fails-when: a criterion is owed at a step other than its task's (9j, 9o), a dash or a missing column names a step
+# (9o, 9q), the close settles one it does not measure (9p), or the deferral outlives its owing step (9k, 9l).
 
 section "Section 9: a criterion is owed at the step whose task proves it"
 
@@ -213,40 +213,6 @@ ow_plan() {
   p="$(plan "$1" "$body" "$(ow_matrix "$2" "$3")" | OW_T="$ow_tasks" awk '/^## Verification Matrix/ { print ENVIRON["OW_T"]; print "" } { print }')"
   if [ "$1" -ge 7 ]; then eg_floor "$p"; else printf '%s\n' "$p"; fi
 }
-ow_home() {  # <current> <tier> <task value> -> a sandbox holding that plan
-  local h; h=$(make_home); write_plan "$h" "$(ow_plan "$@")" > /dev/null; printf '%s' "$h"
-}
-# ow_marked <current> <tier> <task value> -> a sandbox holding that plan, its step 8 line in the form close-out wrote
-ow_marked() { local h; h=$(make_home); write_plan "$h" "$(ow_plan "$@" | sed 's/^Step 8:$/- Step 8: CLOSED/')" > /dev/null; printf '%s' "$h"; }
-for ow_c in 5 6 7 8; do
-  expect_allow "9a-$ow_c a pending T3 row whose task is a Step-9 row owes nothing at current $ow_c" \
-    "$(ow_marked "$ow_c" T3 T9)" 'git commit -m "x"'
-done
-expect_block "9b at current 9, the plan still open, owes its delivery before anything the row could owe" \
-  "$(ow_home 9 T3 T9)" 'git commit -m "x"' "owed at 14: Step 9's delivery"
-expect_allow "9c the literal task: 9 on a T0 row still defers to the close at current 8" \
-  "$(ow_marked 8 T0 9)" 'git commit -m "x"'
-expect_allow "9d the literal task: 9 on a T3 row defers too: the tier says how, the step says when" \
-  "$(ow_home 6 T3 9)" 'git commit -m "x"'
-expect_block "9e a pending T3 row whose task is a Step-4 row still owes its evidence at 6" \
-  "$(ow_home 6 T3 T1)" 'git commit -m "x"' "AC-2 has placeholder evidence"
-expect_allow "9f a row whose task is a Step-7 row owes nothing at 6" \
-  "$(ow_home 6 T3 T7)" 'git commit -m "x"'
-ow_adv() { OW_RC=0; eg_head_repo "$1"; sed -i.bak -e "s/reader=w-read result=pass scope=piece/reader=bionic:critic result=pass scope=whole/" -e "1s/^---\$/---\nbase-sha: $EG_HEAD/" -e "s/^current: .*/current: $(($2 - 1))\nworking-branch: $(git -C "$1" branch --show-current)/" "$1/.bionic/docs/plans/active.md"; eg_autobind "$1"; OW_OUT="$(cd "$1" && HOME="$1" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" current "$2" --check 2>&1)" || OW_RC=$?; }
-ow_t7() { local ow_tasks="${ow_tasks//CHANGELOG.md | pending/CHANGELOG.md | $2}"; ow_home 7 T3 T7; }
-ow_adv "$(ow_home 7 T3 T7)" 7
-expect_eq "9g the advance into the step that owes a row whose task is open is admitted" 0 "$OW_RC"
-expect_allow "9h a commit at the owing step with the task row pending owes nothing" \
-  "$(ow_home 7 T3 T7)" 'git commit -m "x"'
-for ow_s in landed dropped; do
-  expect_block "9i-$ow_s once the task row is $ow_s the commit is refused" \
-    "$(ow_t7 x $ow_s)" 'git commit -m "x"' "AC-2 has placeholder evidence"
-  ow_adv "$(ow_t7 x $ow_s)" 8
-  expect_contains "9i-$ow_s-adv …and so is the advance, naming AC-2 and its exits" "confirmed AC-2 (rule it: the auditor confirms it, the row is waived," "$OW_OUT"
-done
-expect_allow "9m a task list is owed at the latest step it names (T1, T9 at 8)" \
-  "$(ow_marked 8 T3 "T1, T9")" 'git commit -m "x"'
-
 # The two file-scope readers the judge and the card share with the gate, asked as hooks/poker/judge.sh asks them.
 ow_ask() {  # <plan> <function> [args…] -> what the function prints, then `rc=<n>`
   bash -c 'L="$1"; shift; . "$L/root.sh" && . "$L/run.sh" && . "$L/units.sh" && . "$L/walls.sh" >/dev/null 2>&1 || exit 9

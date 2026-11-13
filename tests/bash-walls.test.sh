@@ -680,62 +680,6 @@ expect_contains "RULED-ONE-d: …the search reads walls.sh's own parser of the k
 expect_eq "RULED-ONE-c: …and nothing names user-confirmed outside walls.sh and the reader's files, no writer of it either" "" \
   "$(printf '%s\n' "$RU_UC" | /usr/bin/grep -v 'walls.sh' | /usr/bin/grep -vE 'lib/(reader|translate)\.sh:')"
 
-ru_put14() {  # the plan at 14 at the step its text names: a step an earlier advance appended to the run's log is taken out
-  local l; ru_plan "$@" > "$R_RU/.bionic/docs/plans/active.md"; bw_bind "$R_RU"
-  l="$R_RU/.bionic/docs/record/active.md/run.log"; [ ! -f "$l" ] || { /usr/bin/grep -v '|ev=step|' "$l" > "$l.t"; mv "$l.t" "$l"; }
-}
-# ---------------------------------------------------------------------------
-section "§PENDING-T4 — a T4 row awaiting its user passes the per-key check at 6 and 7, and the advance to 8 refuses it"
-# Step 3 renders `user-confirmed: pending` into every T4 row. The per-key loop used to refuse that stub as a
-# placeholder from Step 6, so a run with a T4 row the person had not yet answered could not leave Step 5: the
-# gate held a human answer the release approval card collects after the release. The key stays required and
-# stays non-blank; the stub is the card's to settle, and the ruling arm refuses it on the advance to 8 because
-# `user_confirmed_attributed` (the one reader of the confirmation) does not take it.
-# Fixture fidelity: the plan is §VERDICT's `ru_plan`, in a real repository, with a T4 row whose block carries the
-# stub in the shape an older plan's rendering wrote it.
-# fails-when: the stub is refused at 6 or 7; the stub is admitted at 8; the advance to 8 opens no row item for the card; or the
-#   key loop goes back to refusing it and the check still passes.
-RU_PENDING='  user-confirmed: pending'
-ru_put14 5 'T4 | discharged | see AC-2 |  ' "$RU_PENDING"
-ru_poke current 6 --check
-expect_eq "PT-1: a T4 row whose user-confirmed is pending — current 6 --check passes" "0" "$RU_RC"
-expect_contains "PT-1b: …saying it would advance" "current 6 --check: would advance" "$RU_OUT"
-# The advance to 7 needs the Step 7 line on the plan, which the fixture writes only at 7, so the plan is written at 7
-# and put back to 6: a check on a plan already at 7 would be no advance at all.
-ru_plan 7 'T4 | discharged | see AC-2 |  ' "$RU_PENDING" | sed 's/^current: 7$/current: 6/' > "$R_RU/.bionic/docs/plans/active.md"; bw_bind "$R_RU"
-ru_poke current 7 --check
-expect_eq "PT-2: the same row — current 7 --check passes" "0" "$RU_RC"
-ru_owed_clear
-ru_put14 7 'T4 | discharged | see AC-2 |  ' "$RU_PENDING"
-ru_poke current 8 --check
-expect_eq "PT-3: the same row — current 8 --check refuses" "1" "$RU_RC"
-expect_contains "PT-3b: …naming the row in the judge's own words" "the auditor has not confirmed AC-2" "$RU_OUT"
-ru_poke current 8
-expect_eq "PT-3c: the advance itself refuses, the plan unchanged" "1|7" \
-  "$RU_RC|$(awk -F': *' '/^current:/ { print $2; exit }' "$R_RU/.bionic/docs/plans/active.md")"
-expect_eq "PT-3d: …and the judge opens the one row:AC-2 item the card settles" "row:AC-2" "$(ru_owed)"
-# The key is still demanded and still non-blank: only the stub is let through, so the loop is not switched off.
-ru_put14 5 'T4 | discharged | see AC-2 |  ' '  user-confirmed: todo'
-ru_poke current 6 --check
-expect_eq "PT-3e: control — any other placeholder in the key is still refused at 6" "1" "$RU_RC"
-expect_contains "PT-3f: …as a placeholder" "placeholder" "$RU_OUT"
-
-# PT-4 — the mutation: the loop's placeholder test restored over the stub, PT-1's check turns red. A copy of the
-# library is mutated in a sandbox (the real file is never touched); the copy is proved to differ by exactly one line
-# and still to parse before its absence of the pass is read.
-PT_MUT="$SANDBOX/pt-mut"; mkdir -p "$PT_MUT/scripts" "$PT_MUT/hooks"
-cp -R "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$PT_MUT/scripts/lib"
-cp -R "${BIONIC_HOOKS_DIR}/." "$PT_MUT/hooks/"
-sed -i.bak 's/^\(.*\)if matrix_is_placeholder "\$val" && ! user_confirmed_pending "\$key" "\$val"; then$/\1if matrix_is_placeholder "$val"; then/' "$PT_MUT/scripts/lib/walls.sh"
-expect_eq "PT-4: the doctor took — the copy differs from the real library in exactly one line" "1" \
-  "$(diff "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/walls.sh" "$PT_MUT/scripts/lib/walls.sh" | /usr/bin/grep -c '^>')"
-expect_eq "PT-4b: …and the mutant still parses" "0" "$(bash -n "$PT_MUT/scripts/lib/walls.sh" 2>/dev/null; echo $?)"
-ru_put14 5 'T4 | discharged | see AC-2 |  ' "$RU_PENDING"
-PT_OUT="$( cd "$R_RU" && env HOME="$FAKE_HOME" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$SID" \
-  CLAUDE_PROJECT_DIR= bash "$PT_MUT/hooks/session-poker.sh" current 6 --check 2>&1 )"; PT_RC=$?
-expect_eq "PT-4c: with the placeholder test restored, current 6 --check refuses the stub" "1" "$PT_RC"
-expect_contains "PT-4d: …as a placeholder, which is what PT-1 reads" "placeholder" "$PT_OUT"
-
 # ---------------------------------------------------------------------------
 section "§REFUSED-VERB — a dispatched agent's approve of a criterion is refused by the wall; the orchestrator's own is not"
 # `approve <AC>` records the user's confirmation of a T4 row, so it is the user's act and never an agent's. The

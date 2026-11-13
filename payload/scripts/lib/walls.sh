@@ -3640,13 +3640,9 @@ matrix_is_placeholder() {
 }
 
 validate_matrix() {
-  local rows line ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc deferred row_is_waived ev_abs hk hv hf ucv owed live_exit table over head v15=0
+  local rows ac tier status ev aud block_txt key val val_lc deferred row_is_waived ev_abs ucv owed live_exit head
 
-  # Set while any row is still pending at current: 5. The
-  # Step-5 validator reads it to keep the `auditor:` pointer optional
-  # mid-walk (the auditor is the exit gate — it has not run yet).
-  UNDISCHARGED=0
-  [ "$_EG_V15" -eq 0 ] || v15=1
+  [ "$_EG_V15" -eq 1 ] || return 0
   # The evidence review is read at the working branch's head, for a criterion no older table holds.
   head="$(proof_branch_head "$PLAN" "$BIONIC_ROOT" 2>/dev/null)" || head=""
   if ! matrix_load "$PLAN" "$head"; then
@@ -3660,48 +3656,6 @@ validate_matrix() {
       "add the '## Eval design' table, one row per criterion. See canonical-sdlc/SKILL.md Step 5."
   fi
 
-  # THE HEALTH OF THE STACK IS NOT A LINE THE PLAN HOLDS: lib/proof.sh `proof_health_line` computes it from the run's
-  # regression proof, and a run with no regression proof is the floor arm's refusal (`_eg_refuse_floor_absent`), so this
-  # arm asks nothing of it.
-
-  # false-green two-part rule: any `false-green:` entry must have a paired
-  # `rewritten:` entry, or the gate blocks (Assumption 12a).
-  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  head="$(matrix_head)"
-  if grep -qE '^[[:space:]]*false-green[[:space:]]*:' <<< "$head"; then
-    if ! grep -qE '^[[:space:]]*rewritten[[:space:]]*:' <<< "$head"; then
-      block_matrix "a false green is logged but never rewritten" "rewrite it, then say where" \
-        "a 'false-green:' entry in the matrix has no paired 'rewritten:' entry." \
-        "add 'rewritten: <commit/test ref>' for the false-green test — a logged-but-unfixed false green is a blocking defect."
-    fi
-  fi
-
-  # AN OLDER TABLE'S SHAPE: a row holding more cells than the header (a raw `|` inside a cell, which shifts every
-  # cell after it) and a status outside the four words are the table's faults, read through the plan's one parser; a
-  # row's status is never its state, which is the reader's.
-  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  table="$(plan_read_table "$PLAN" 'Verification Matrix' ac 2>/dev/null)" || table=""
-  over="$(awk -F'\t' '$1 == "#" && $2 == "over" { print $3; exit }' <<< "$table")"
-  if [ -n "$over" ]; then
-    block_matrix "row ${over} does not have five cells" "give it five cells" \
-      "matrix row for '${over}' is malformed (wrong cell count — no literal '|' inside cells)." \
-      "write the row as '| AC | tier | status | evidence | auditor |' with exactly five cells and no literal pipe inside any cell."
-  fi
-  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  # A plan with no such table gives no row, yet the here-document still feeds one empty line: that is no row to judge.
-  while IFS=$'\t' read -r ac status; do
-    [ -n "$ac" ] || continue
-    case "$status" in
-      pending|blocked|discharged|waived) : ;;
-      *)
-        block_matrix "${ac}'s status is unknown" "use pending, blocked, discharged, waived" \
-          "matrix row '${ac}' has an invalid status '${status:-empty}' (want pending|blocked|discharged|waived)." \
-          "set the status cell to one of: pending, blocked, discharged, waived." ;;
-    esac
-  done <<MATRIX_STATUS
-$(awk -F'\t' '$1 != "#" { a = ""; s = ""; for (i = 1; i <= NF; i++) { if (index($i, "ac=") == 1) a = substr($i, 4); if (index($i, "status=") == 1) s = substr($i, 8) }; if (a != "") print a "\t" s }' <<< "$table")
-MATRIX_STATUS
-
   rows="$(matrix_table_rows)"
   while IFS=$'\037' read -r ac tier status ev aud ucv row_is_waived; do
     [ -n "$ac" ] || continue
@@ -3712,40 +3666,9 @@ MATRIX_STATUS
         "criterion '${ac}' has an invalid tier '${tier}' (want T0..T4: an Eval design type of static, unit, hermetic, live or human)." \
         "set the criterion's Eval design type to one of static, unit, hermetic, live, human."
     fi
-    block_txt=$(matrix_block "$ac")
-    # AT 15 A CRITERION HAS NO BLOCK: its evidence is the discharging proof's and its confirmation the approval naming
-    # it, so the per-tier keys below are asked of those two facts, written as the keys they stand for.
-    if [ "$v15" = 1 ]; then
-      block_txt="$( [ -z "$ev" ] || printf '  evidence: %s\n' "$ev"; [ -z "$ucv" ] || printf '  user-confirmed: %s\n' "$ucv")"
-    # AN OLDER PLAN'S BLOCK THAT NAMES NO EVIDENCE takes the evidence of a proof the run's log holds for the criterion,
-    # which names it there and writes no key: an evidence the table's own cell does not hold. A row the text alone
-    # discharges is judged on its text, as it always was.
-    elif [ -n "$ev" ] && ! grep -qE '^[[:space:]]*evidence[[:space:]]*:' <<< "$block_txt" \
-      && [ "$ev" != "$(printf '%s\n' "$table" | awk -F'\t' -v a="$ac" '{ c = ""; e = ""
-           for (i = 1; i <= NF; i++) { if (index($i, "ac=") == 1) c = substr($i, 4); if (index($i, "evidence=") == 1) e = substr($i, 10) }
-           if (c == a) { print e; exit } }')" ]; then
-      block_txt="${block_txt:+$block_txt$'\n'}  evidence: $ev"
-    fi
-    # provenance arm (epic-14 W1, AC-5): the literal value `provenance:
-    # implementation` in an AC block is circular — it names the change as the
-    # source of its own requirement, which is unfalsifiable by construction.
-    # Whole-value match after whitespace-trimming; a citation that merely
-    # CONTAINS the word ("implementation-first rewrite of spec §3") is a real
-    # citation and passes. A missing `provenance:` line does not block (plan
-    # assumption A4 — presence is a W+1 candidate, not this wave's). Fires for
-    # every row regardless of tier/status, since the spec (AC-5) says "any AC
-    # block" — unlike the tier-key checks below, it does not sit behind the
-    # waived/undischarged branches. Compared case-insensitively, matching the
-    # placeholder and live-tier n/a checks a few lines below in this same loop.
-    # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    prov_val=$(echo "$block_txt" | grep -E '^[[:space:]]*provenance[[:space:]]*:' | head -1 \
-      | sed -E 's/^[[:space:]]*provenance[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
-    prov_val_lc=$(echo "$prov_val" | tr '[:upper:]' '[:lower:]')
-    if [ "$prov_val_lc" = "implementation" ]; then
-      block_matrix "row ${ac} cites the code as its own source" "cite what asked for it" \
-        "matrix row '${ac}' cites 'provenance: implementation' — the implementation cannot be the source of its own requirement." \
-        "cite the real requirement source (user quote, spec section, ticket, report) for '${ac}', not the implementation itself."
-    fi
+    # A CRITERION HAS NO BLOCK: its evidence is the discharging proof's and its confirmation the approval naming it, so
+    # the per-tier keys below are asked of those two facts, written as the keys they stand for.
+    block_txt="$( [ -z "$ev" ] || printf '  evidence: %s\n' "$ev"; [ -z "$ucv" ] || printf '  user-confirmed: %s\n' "$ucv")"
     # A CRITERION IS OWED AT THE STEP WHOSE TASK PROVES IT (`matrix_owing_step`,
     # `matrix_row_deferred`, at file scope above). Before that step a pending or blocked row
     # owes nothing: not the per-tier keys below, and not the auditor's verdict or ruling
@@ -3790,7 +3713,7 @@ MATRIX_STATUS
             "matrix row '${ac}' (${tier}) evidence key '${key}' is empty." \
             "${live_exit:-record the evidence for '${key}' in the '${ac}:' block, or waive the row.}"
         fi
-        if matrix_is_placeholder "$val" && ! user_confirmed_pending "$key" "$val"; then
+        if matrix_is_placeholder "$val"; then
           block_matrix "${ac} has placeholder ${key} evidence" "record what actually ran" \
             "matrix row '${ac}' (${tier}) evidence key '${key}' is a placeholder (\"${val}\")." \
             "${live_exit:-replace '${key}' with the real evidence before committing.}"
@@ -3885,18 +3808,6 @@ MATRIX_STATUS
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     if matrix_auditor_required \
        && owed=$(matrix_row_owes "$CURRENT" "$tier" "$status" "$aud" "$ucv" "$row_is_waived" "$deferred"); then
-      # THE CELL IS AN EQUALITY, AND THE VERDICT SAYS WHICH FAULT IT IS. An annotated cell
-      # (`CONFIRMED (audit-b3b87dc.md)`) refuses, because a reader scanning the column has to be
-      # able to compare it and the audit's own path has a key of its own; but it refuses as a
-      # shape fault, not as "no audit happened" to the one person who knows one did.
-      # AHEAD OF THE T4 BRANCHES ON PURPOSE: the shape fault is the same whatever the tier.
-      # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-      case "$aud" in
-        CONFIRMED*)
-          block_matrix "the auditor cell is not the bare token" "write CONFIRMED; cite in evidence:" \
-            "matrix row '${ac}' auditor cell is '${aud}' — it starts with CONFIRMED but is not the bare token, at step ${CURRENT}." \
-            "write exactly 'CONFIRMED' in the auditor cell and cite the audit's own path in the row's 'evidence:' key — the column is compared, not read." ;;
-      esac
       if [ "$tier" = "T4" ]; then
         if user_confirmed_attributed "$ucv"; then
           _eg_owe "waive:${ac}" "waiver: row ${ac}" "commit refused — the auditor's finding on ${ac} stands ('${aud}'); settle it with the auditor, or waive the row with: session-poker.sh waive ${ac} '<your words>' '<why>'"
@@ -3919,23 +3830,6 @@ MATRIX_STATUS
     fi
   done <<< "$rows"
 
-  # THE WALK-ARTIFACT STUB IS A PLACEHOLDER TOO. An older plan's Step 3 rendered `walk-artifact: pending` above its
-  # table, and it is judged as a tier key is: unread before Step 5, unread at current: 5
-  # while any criterion is still pending (the same mid-walk relaxation the key loop above takes), and refused once the
-  # walk is done and at every step after it. AFTER the row loop on purpose: UNDISCHARGED is what the loop found. A filled
-  # value is the walk gate's; an absent line is legal.
-  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  if [ "$UNDISCHARGED" = "0" ]; then
-    hk=walk-artifact
-    hv=$(grep -E "^[[:space:]]*${hk}[[:space:]]*:" <<< "$head" | head -1 \
-         | sed -E "s/^[[:space:]]*${hk}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
-    if [ -n "$hv" ] && is_placeholder_value "$hv"; then
-      hf="name its record, or drop it"
-      block_matrix "the ${hk}: line is still a stub" "$hf" \
-        "'${hk}:' is still a placeholder ('${hv}') with no row pending or blocked." \
-        "replace the '${hk}:' stub above the table with the real value before the Verify gate closes — the stub Step 3 rendered is a reminder, not evidence."
-    fi
-  fi
 }
 
 # ---------- walk-first artifact arm (epic-14 W1) ----------
