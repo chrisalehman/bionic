@@ -756,21 +756,6 @@ hook-adoption.test.sh | §5c | duplicate | each listed hook's engagement check d
 hook-adoption.test.sh | §5b | keep | hooks/canonical-sdlc-governing-skill.sh: the content clause arming the gate on a declared canonical_sdlc_version deleted, so a misplaced plan declaring it is written; ("…but the same write DECLARING canonical_sdlc_version is refused as misplaced") goes red | none (searched 'canonical_sdlc_version: 14\\n' write payloads in tests/; the governing-skill suite's frontmatter rows sit above its first section)
 hook-adoption.test.sh | §5d | keep | hooks/permission-answer.sh: its exit 0 after a failed bionic_context made non-zero, so an empty session key exits 1; ("permission-answer: an empty session id -> exit 0") goes red | none (searched empty-session rows in tests/permission-answer.test.sh: none)
 
-## hook-latency.test.sh
-
-hook-latency.test.sh | §1 | keep | payload/scripts/lib/walls.sh: a parameter expansion on the quiet `ls -la` path replaced by forks (a printf piped to sed per wall), so bash-walls.sh passes 12 external commands (1a) | none (searched 'forks at most' and 'bash -x' in tests/)
-hook-latency.test.sh | §2 | keep | payload/scripts/lib/stop.sh: a builtin read on the Stop path replaced by `$(jq ...)` calls, so stop.sh passes 6 external commands (2a) | none (searched 'forks at most' in tests/)
-hook-latency.test.sh | §3 | vacuous | it plants a jq call into a doctored copy and reads the suite's own fork counter, so it reads only suite code | none (searched 'planted jq' in tests/)
-hook-latency.test.sh | §4 | keep | hooks/bash-walls.sh: the run verdict (session_run, a plan-directory scan) computed ahead of the walls though none reads it, so 4c and 4d count one | none (searched 'plan-directory scan' and 'session_run' in tests/)
-hook-latency.test.sh | §5 | keep | payload/scripts/lib/walls.sh: the suite command classified once per ask instead of once, so cmd_class_lines runs twice on a wrapped suite call (5e) | none (searched 'cmd_class_lines' in tests/)
-hook-latency.test.sh | §6 | keep | hooks/canonical-sdlc-governing-skill.sh: the plans directory walked a second time for the run verdict (6a) | none (searched 'plan-directory walk' in tests/)
-hook-latency.test.sh | §7 | vacuous | the rows read tests/bench/hook-latency.sh, test tooling that is not code the plugin runs, the runner or a declared check, so no program mutation turns them red | none (searched 'BENCH_EXTRA_CANDIDATES' in tests/)
-hook-latency.test.sh | §8 | vacuous | the rows read the bench's own interpreter header, tests/bench/hook-latency.sh, which is not the program | none (searched 'interpreter header' in tests/)
-hook-latency.test.sh | §9 | keep | hooks/execution-recorder.sh: a builtin field read on the Bash path replaced by per-field jq forks, so the count passes 10 (9a) | none (searched 'execution-recorder.sh (Bash path)' in tests/)
-hook-latency.test.sh | §10 | keep | hooks/ruling-push.sh: the one file test ahead of the fast path removed, so the fast path forks (10b) | none (searched 'ruling-push' in tests/)
-hook-latency.test.sh | §11 | keep | payload/scripts/lib/walls.sh: the booking wrap applied to every call of an agent with a budget row, so its plain `ls -la` comes back staged (11a, 11c) | none (searched 'left as typed' in tests/)
-hook-latency.test.sh | §PLACE | keep | payload/scripts/lib/placement.sh: the reader walks the command text instead of its segments, so a 200 KB quoted body costs more commands than a 2 KB one (PL-d) | none (searched 'placement' cost rows in tests/; placement.test.sh reads where, not cost)
-
 ## hook-timeout.test.sh
 
 hook-timeout.test.sh | §1 | keep | payload/hooks/canonical-sdlc-governing-skill.sh: the plan text after `CONTENT=$(printf` read by a bash loop over its lines instead of whole, so a2's 200 KB plan runs more commands than its 64 KB one | none (searched 'canonical-sdlc-governing-skill' with a size pair in tests/; hook-latency.test.sh times the hooks on one input)
@@ -790,10 +775,10 @@ hooks-closed.test.sh | §REPAIR | keep | hooks/bash-walls.sh: the repair command
 
 ## inbox.test.sh
 
-inbox.test.sh | §PUSH | keep | hooks/ruling-push.sh: the pushed= claim before printing deleted, so the writer's next call carries the same ruling again; ("(p4) across both calls the ruling appears exactly once") goes red | none (searched 'ruling-push' in tests/; hook-latency.test.sh times the fast path only)
+inbox.test.sh | §PUSH | keep | hooks/ruling-push.sh: the pushed= claim before printing deleted, so the writer's next call carries the same ruling again; ("(p4) across both calls the ruling appears exactly once") goes red | none (searched 'ruling-push' in tests/)
 inbox.test.sh | §STATE | keep | hooks/session-poker.sh ruling-ack: the shown= line not written to the roster, so ("(s3) …rulings reads shown=<epoch>") goes red | none (searched 'ruling-ack' and 'ruling/v1' in tests/)
 inbox.test.sh | §SCOPE | keep | hooks/ruling-push.sh: the named-writer match dropped, so every rostered writer's call carries the ruling; ("(c1) …the second live writer's call did not") goes red | none (searched 'ruling-push' in tests/)
-inbox.test.sh | §ACK | keep | hooks/session-poker.sh ruling-ack: the pending flag left up after the last unread ruling is acknowledged, so ("(k3) both acknowledged … the flag is down") goes red | none (searched 'ruling-pending' in tests/; hook-latency.test.sh reads the flag only to take its fast path)
+inbox.test.sh | §ACK | keep | hooks/session-poker.sh ruling-ack: the pending flag left up after the last unread ruling is acknowledged, so ("(k3) both acknowledged … the flag is down") goes red | none (searched 'ruling-pending' in tests/)
 inbox.test.sh | §GUARD | keep | rule: door refusal — payload/scripts/lib/line.sh:838 line_ready's ruling-unread refusal dropped, so a row with an unread ruling publishes instead of exit 2 reason=ruling-unread; (g6) goes red | none (searched 'ruling-unread' in tests/)
 inbox.test.sh | §ROOT | keep | payload/scripts/lib/walls.sh: the commit wall's acknowledgement call built from its own library directory instead of the shared plugin-root helper, so ("(rt2) the commit wall's refusal names the same root") goes red | none (searched 'acknowledge with: bash' in tests/)
 
@@ -1036,7 +1021,7 @@ placement.test.sh | §P0 | duplicate | payload/scripts/lib/placement.sh: a synta
 placement.test.sh | §FORMS | keep | payload/scripts/lib/placement.sh cmd_place: a parenthesis inside double quotes read as a subshell, so `echo "red run done (7 BM FAIL…)"` makes the suite moving instead of placed at the tree (F1) | none (searched 'cmd_place' in tests/)
 placement.test.sh | §CHAIN | keep | payload/scripts/lib/placement.sh cmd_place: a relative cd not joined to the previous cd's directory, so `cd trees; cd t1` places at the cwd's t1 (C6, C26) | none (searched 'cmd_place' in tests/)
 placement.test.sh | §MOVING | keep | payload/scripts/lib/placement.sh cmd_place: a cd on the right of an or-list followed as if it ran, so M4 (true, or cd T, then the suite) is placed at T instead of moving (M4) | none (searched 'cmd_place' and 'moving cd' in tests/)
-placement.test.sh | §INVISIBLE | keep | payload/scripts/lib/placement.sh cmd_place: a heredoc body's lines read as commands, so its cd moves the suite (I2) | none (searched 'cmd_place' in tests/; hook-latency.test.sh §PLACE places only the python3 -c body)
+placement.test.sh | §INVISIBLE | keep | payload/scripts/lib/placement.sh cmd_place: a heredoc body's lines read as commands, so its cd moves the suite (I2) | none (searched 'cmd_place' in tests/)
 placement.test.sh | §TARGET | keep | payload/scripts/lib/placement.sh cmd_place: a named target no segment carries answered with the end of the command and exit 0 instead of nothing and exit 3 (G6) | none (searched 'cmd_place' in tests/)
 placement.test.sh | §ARGS | keep | payload/scripts/lib/placement.sh cmd_place: the absolute-cwd check deleted, so a relative cwd is accepted with exit 0 (A2) | none (searched 'cmd_place' in tests/)
 
@@ -1953,9 +1938,6 @@ handoff-file.test.sh §BRANCH-AGREE — duplicate
 hook-adoption.test.sh §0 — duplicate
 hook-adoption.test.sh §5 — duplicate
 hook-adoption.test.sh §5c — duplicate
-hook-latency.test.sh §3 — vacuous
-hook-latency.test.sh §7 — vacuous
-hook-latency.test.sh §8 — vacuous
 hook-timeout.test.sh §3 — duplicate
 interpreter-pin.test.sh §3 the planted 3.2 incompatibilities — duplicate
 interpreter-pin.test.sh §6 one pin, one owner — vacuous

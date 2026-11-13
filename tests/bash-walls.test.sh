@@ -461,9 +461,9 @@ st_drive outq ':' "_eg_body() { printf 'BODY-QUIET\\n'; exit 0; }"
 expect_status "STAGE-n10: a body that prints on stdout and refuses nothing exits 0" 0 "$ST_RC"
 expect_eq "STAGE-n11: …and what it printed is on the hook's stdout" "BODY-QUIET" "$ST_OUT"
 
-# (l) THE PATH THAT REFUSES NOTHING forks no external command and leaves no file, counted the
-# way tests/hook-latency.test.sh counts (`bash -x`, one `+` line per external command). The
-# refusing drive is the positive on the same counter: it forks at least the fold's `mktemp`.
+# (l) THE PATH THAT REFUSES NOTHING forks no external command and leaves no file, counted by
+# `bash -x`, one `+` line per external command. The refusing drive is the positive on the same
+# counter: it forks at least the fold's `mktemp`.
 ST_EXT='^\++ (jq|grep|awk|sed|cut|tr|git|date|stat|find|sort|uniq|head|tail|wc|mkdir|rm|mktemp|cat|ls|mv|cp|ln)( |$)'
 ST_X=-x st_drive quiet ': > "$TMPDIR/keep.me"' "$ST_SILENT" '/bin/ls -A "$TMPDIR" > "$TMPDIR/../left"'
 expect_status "STAGE-q1: the silent gate exits 0" 0 "$ST_RC"
