@@ -202,7 +202,7 @@ COVER_JUDGED
 }
 
 # current_admit -> everything `current <N>` asks before it appends: the commit gate on the plan itself with the step it
-# moves to pending (plan_verb_dry's `step:` mode), and the facts judge at 7 and 8. Sets PV_HOW; exits on every refusal in
+# moves to pending (hooks/session-poker.sh `plan_verb_dry`), and the facts judge at 7 and 8. Sets PV_HOW; exits on every refusal in
 # the advance's own words and code. THE ONE PATH: the advance calls it and then appends; `current <N> --check` calls it
 # and stops, so the two cannot answer differently. Step 8 is admitted on the judge alone (lib/proof.sh `facts_state`),
 # since what the gate asks at 8 is the close's to give, and close-out judges it itself; Step 7 asks the gate and then the
@@ -216,14 +216,14 @@ current_admit() {
   esac
   case "$PV_KEY" in
     7)
-      plan_verb_dry current "current: $PV_KEY" "step:$PV_KEY" "${PV_CUR%[ab]}"
+      plan_verb_dry current "current: $PV_KEY" "$PV_KEY"
       cur7_judge 7
       PV_HOW="judged at that step first; every fact the run owes holds at $PV_HEAD8 (facts_state)" ;;
     8|8a|8b)
       cur7_judge 8
       PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)"
       [ -z "$PV_ORDER" ] || PV_HOW="$PV_HOW, the head the user approved for release" ;;
-    *) plan_verb_dry current "current: $PV_KEY" "step:$PV_KEY" "${PV_CUR%[ab]}" ;;
+    *) plan_verb_dry current "current: $PV_KEY" "$PV_KEY" ;;
   esac
 }
   # THE STEP MOVE. A step is an event in the run's log and nothing writes it into the plan: the advance asks what a

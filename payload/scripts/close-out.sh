@@ -2020,7 +2020,7 @@ co_close_handoff() {
 
 # ─── The gate ────────────────────────────────────────────────────────────────
 
-# gate_ask <plan-file> <sid> [<dry_of>] [<the facts pending, honoured for a dry session only>] -> GATE_RC, GATE_ERR (the gate's whole stderr) and GATE_LINE
+# gate_ask <plan-file> <sid> [<the facts pending, honoured for a dry session only>] -> GATE_RC, GATE_ERR (the gate's whole stderr) and GATE_LINE
 # (its one refusal line) for a `git commit` judged against <plan-file>. Status 9, with
 # GATE_LINE saying why, when there is no gate to ask; 0 otherwise, whatever the verdict.
 #
@@ -2041,14 +2041,14 @@ GATE_RC=0
 GATE_ERR=""
 GATE_LINE=""
 gate_ask() {
-  local plan="$1" sid="$2" dry_of="${3:-}" step="${4:-}" hook marker input
+  local plan="$1" sid="$2" step="${3:-}" hook marker input
   GATE_RC=9; GATE_ERR=""; GATE_LINE=""
   hook="$(plugin_root)/hooks/bash-walls.sh"
   [ -f "$hook" ] || { GATE_LINE="no bash-walls.sh at $hook"; return 9; }
   marker="$(engaged_marker_path "$ROOT" "$sid")" \
     || { GATE_LINE="could not build an engagement marker path for the dry-run"; return 9; }
   mkdir -p "${marker%/*}" 2>/dev/null
-  printf 'plan=%s\n%sengaged_at=%s\n' "$plan" "${dry_of:+dry_of=$dry_of$'\n'}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
+  printf 'plan=%s\nengaged_at=%s\n' "$plan" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
   input="$(jq -n --arg s "$sid" --arg cwd "$ROOT" \
     '{session_id: $s,
       cwd: $cwd,
@@ -2199,7 +2199,7 @@ co_facts_says() {
 
 gate_preflight() {
   PREFLIGHT_RC=9; PREFLIGHT_LINE=""; PREFLIGHT_ERR=""
-  gate_ask "$PLAN" "closeout-preflight-$$" "" "$(co_close_facts)"
+  gate_ask "$PLAN" "closeout-preflight-$$" "$(co_close_facts)"
   [ "$GATE_RC" -eq 9 ] && { PREFLIGHT_LINE="$GATE_LINE"; return 0; }
   PREFLIGHT_RC="$GATE_RC"; PREFLIGHT_LINE="$GATE_LINE"; PREFLIGHT_ERR="$GATE_ERR"
   return 0
