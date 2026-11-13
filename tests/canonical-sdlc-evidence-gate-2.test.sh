@@ -353,10 +353,18 @@ expect_block "30g meta: the real hook still refuses the impostor after the mutat
 
 section "Section 31: refusal names the edit-then-commit split"
 
+# s31_home -> S31_H, a sandbox whose run is at Step 6, readings and floor proved, the first criterion proved and the
+#   second pending; P31, its page.
+s31_home() {
+  local q; S31_H=$(make_home); eg_head_repo "$S31_H"
+  P31=$(eg_page "$S31_H" 6 "run/v1|ev=proof|kind=regression|head=$EG_HEAD|evidence=record/floor.log|at=2026-10-04T01:00:00Z" \
+    $(for q in evidence adversarial structure; do printf 'run/v1|ev=proof|kind=review|head=%s|question=%s|result=pass|scope=piece|reader=w-read|evidence=record/generic-evidence.md|at=2026-10-04T01:01:00Z\n' "$EG_HEAD" "$q"; done) \
+    "run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|at=2026-10-04T01:02:00Z")
+  awk '{ print } /^\| REQ-1 \| fixture \| AC-1\.1 /{ print "| REQ-1 | fixture | AC-2 | hermetic | `tests/b.test.sh` | the second is wrong |" }' "$P31" > "$P31.t" && mv "$P31.t" "$P31"
+}
 # 31a — a python3 heredoc writing the plan's absolute path, then a commit,
 # refused by the matrix arm → the refusal carries the split line.
-h31a=$(make_home)
-p31a=$(write_plan "$h31a" "$(plan 6 "$step6_body" "$v101_matrix_pending")")
+s31_home; h31a="$S31_H"; p31a="$P31"
 cmd31a=$(printf 'python3 - <<%s\nopen("%s","a").write("\\nAC-2:\\n  tier-run: x\\n")\nEOF\ngit commit -m "discharge AC-2"' "'EOF'" "$p31a")
 
 # 31a — the same refusal still names the row it refused (the note is an extra
@@ -365,8 +373,7 @@ expect_block "31a the split line does not displace the original refusal" "$h31a"
 
 # 31b — the project-relative spelling of the same path (what an agent actually
 # types) is matched too.
-h31b=$(make_home)
-write_plan "$h31b" "$(plan 6 "$step6_body" "$v101_matrix_pending")" > /dev/null
+s31_home; h31b="$S31_H"
 
 # 31c — a refused commit that does NOT name the plan gets the ordinary 3-line
 # refusal and no split line. Same fixture and same extractor as 31a, so this
@@ -382,8 +389,8 @@ fi
 
 # 31d — the note rides on a refusal, never on its own: a command that names the
 # plan but has nothing to refuse is still allowed silently.
-h31d=$(make_home)
-p31d=$(write_plan "$h31d" "$(plan 6 "$step6_body" "$matrix_complete")")
+s31_home; h31d="$S31_H"; p31d="$P31"
+printf 'run/v1|ev=proof|ac=AC-2|evidence=record/generic-evidence.md|at=2026-10-04T01:03:00Z\n' >> "$(plan_fixture_log "$p31d")"
 expect_allow "31d naming the plan in an otherwise-clean commit → allow, silent" "$h31d" "python3 -c \"open('$p31d','a')\" && git commit -m \"x\""
 
 # ============================================================
@@ -693,25 +700,23 @@ expect_refused() {  # <label> — the control: the SAME fixture, marker restored
 
 # --- 34a: an open run whose current step has no evidence — the gate's core refusal ---
 h34a=$(make_home)
-write_plan "$h34a" "$(plan 5 "" "$matrix_complete")" > /dev/null
+eg_page "$h34a" 5 > /dev/null
 unengage "$h34a"
 run_hook_full "$h34a" 'git commit -m "x"'
-expect_silent "34a an empty Step 5 line passes an unengaged session"
+expect_silent "34a a Step 5 with no regression proof passes an unengaged session"
 engage "$h34a"
 run_hook_full "$h34a" 'git commit -m "x"'
 expect_refused "34a control: the same commit, marker restored, is REFUSED"
 
 # --- 34b: PLAN HYGIENE, the half that sits ABOVE the run predicate ---
-# A plan with no readable `current:` is refused whether or not a run is open, because a
+# A run whose step cannot be read is refused whether or not a run is open, because a
 # plan that lies is a defect in every state. That refusal is owed to an ENGAGED session
 # and to nobody else.
 h34b=$(make_home)
-printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: single\nscale: wave\n---\n\n## SDLC State\ncurrent: banana\n' \
-  > "$h34b/.bionic/docs/plans/active.md"
-touch "$h34b/.bionic/docs/plans/active.md"
+eg_page "$h34b" 5 'run/v1|ev=step|n=banana|at=2026-10-04T01:00:00Z' > /dev/null
 unengage "$h34b"
 run_hook_full "$h34b" 'git commit -m "x"'
-expect_silent "34b a malformed 'current:' passes an unengaged session"
+expect_silent "34b a step that is not a number passes an unengaged session"
 engage "$h34b"
 run_hook_full "$h34b" 'git commit -m "x"'
 expect_refused "34b control: plan hygiene still refuses the ENGAGED session"
@@ -720,7 +725,7 @@ expect_refused "34b control: plan hygiene still refuses the ENGAGED session"
 h34c=$(make_home)
 p34c=$(mktemp -d); cleanup_dirs+=("$p34c")
 mkdir -p "$p34c/docs/bionic/plans/epic-01-demo"
-s24_marked_plan > "$p34c/docs/bionic/plans/epic-01-demo/wave-01-x.plan.md"
+plan_fixture --current 3 "$p34c/docs/bionic/plans/epic-01-demo/wave-01-x.plan.md" task > /dev/null
 run_hook_with_project "$h34c" "$p34c" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
   ok "34c the misplacement sweep does not fire in an unengaged session"
@@ -737,7 +742,7 @@ fi
 
 # --- 34d: the shapes that are NOT engagement, on a fixture that otherwise refuses ---
 h34d=$(make_home)
-write_plan "$h34d" "$(plan 5 "" "$matrix_complete")" > /dev/null
+eg_page "$h34d" 5 > /dev/null
 
 # A SYMLINK at the marker path is refused before it is followed (lib/run.sh), so a link
 # into an engaged tree cannot open this gate from outside it.
