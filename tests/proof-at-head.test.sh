@@ -43,7 +43,7 @@ PAH_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
 # integration branch takes the working branch, the readings move to H and the plan carries the word to merge at H.
 pah_world() {
   local label="$1" owed="$2" n="${3:-0}" p plan w rec k i s su c
-  p="$(mk_fixture "$label")" || return 1
+  p="$(CO_PLAN_AT=14 mk_fixture "$label")" || return 1
   advance_to "$p" 8
   plan="$p/$PLAN_REL"; w="$p-wave"; rec="$p/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
   PAH_F="$(fixture_git "$p" rev-parse wave/01-fixture)"
@@ -238,7 +238,7 @@ section "§LOG: the proof readers answer from the reader's facts, so a proof the
 # fails-when: facts_state, proof_last or proof_approved_head read the plan's SDLC State text themselves, so a review
 # reading, a regression proof or an approval written only as a run/v1 event reads absent; or a fact read once is
 # served after the plan changed under the same process.
-PL="$(mk_fixture log)"; advance_to "$PL" 8
+PL="$(CO_PLAN_AT=14 mk_fixture log)"; advance_to "$PL" 8
 PL_PLAN="$PL/$PLAN_REL"; PL_H="$(fixture_git "$PL" rev-parse wave/01-fixture)"; PL_REC="$PL/.bionic/docs/record/wave-01-fixture"
 mkdir -p "$PL_REC"
 for q in evidence adversarial structure; do
