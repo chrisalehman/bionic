@@ -22,6 +22,8 @@ rt_poker() {
     > "$WORLD_ROOT/rt.out" 2> "$WORLD_ROOT/rt.err" || RT_PRC=$?
   RT_OUT="$(cat "$WORLD_ROOT/rt.out")"; RT_ERR="$(cat "$WORLD_ROOT/rt.err")"
 }
+# rt_approved_head <name> -> the head the run's standing approval of <name> records, asked of the proof library
+rt_approved_head() { bash -c '. "$1/proof.sh" && proof_approved_head "$2" "$3"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$RT_PLAN" "$1" 2>/dev/null; }
 rt_asks() { printf '%s\n' "$1" | sed -n 's/^ask: key=\([^ ]*\) .*/\1/p' | LC_ALL=C sort | paste -sd' ' -; }   # <sheet>
 # <sheet> -> each ask as <key>><what it holds>, sorted, space-joined
 rt_holds() { printf '%s\n' "$1" | sed -n 's/^ask: key=\([^ ]*\) holds=\(.*\) title=.*/\1>\2/p' | LC_ALL=C sort | paste -sd' ' -; }
