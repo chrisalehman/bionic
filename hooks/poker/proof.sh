@@ -1639,7 +1639,8 @@ DSP_READINGS
   # translation and never written. `add` reads a record's `debt:` lines, a reading's or any other's
   # (`proof_record_debts`, the registering verb's debt arm), holds each to the one grammar (lib/debt.sh
   # `debt_line_ok`), and writes a debt per concept and kind the run does not hold yet; `touched` adds one to the
-  # touches of every unburned debt of the concept (the dispatch wall's advisory calls it); `burn` writes it burned by
+  # touches of every unburned debt of each concept its one operand names, blank-separated, the run read once for all
+  # of them (the dispatch wall's advisory calls it once a launch); `burn` writes it burned by
   # <row>; `adopt` reads the `debt:` lines close-out carried under `## Deferrals` of a continuation, the next
   # run's read-back, and writes each with its touches and raised-by kept, none burned.
   # Exit 0 done; 1 refused, nothing written; 2 the run, the record or its log cannot be found or written.
@@ -1795,11 +1796,19 @@ DSP_READINGS
         exit 0
         ;;
       touched|burn)
-        DEBT_HIT="$(printf '%s\n' "$DEBT_HAVE" | awk -F'\t' -v c="$DEBT_A" '$1 == c && $6 == "-"')"
-        if [ -z "$DEBT_HIT" ]; then
-          die "REFUSED — no unburned debt of the run names $DEBT_A; debt list prints what it holds."
+        # Every concept named is held to the ledger before any item is written: one that holds no unburned item
+        # refuses the lot, so a touch is never half written.
+        DEBT_MISS="$(printf '%s\n' "$DEBT_HAVE" | awk -F'\t' -v cs="$DEBT_A" '
+          BEGIN { n = split(cs, c, / +/) }
+          $6 == "-" { held[$1] = 1 }
+          END { for (i = 1; i <= n; i++) if (c[i] != "" && !(c[i] in held) && !(c[i] in said)) { said[c[i]] = 1; printf "%s%s", (m++ ? " " : ""), c[i] } }')"
+        if [ -n "$DEBT_MISS" ]; then
+          die "REFUSED — no unburned debt of the run names $DEBT_MISS; debt list prints what it holds."
           exit 1
         fi
+        DEBT_HIT="$(printf '%s\n' "$DEBT_HAVE" | awk -F'\t' -v cs="$DEBT_A" '
+          BEGIN { n = split(cs, c, / +/); for (i = 1; i <= n; i++) want[c[i]] = 1 }
+          $1 != "" && ($1 in want) && $6 == "-"')"
         while IFS='	' read -r _dc _dk _ds _dr _dt _; do
           if [ "$DEBT_SUB" = touched ]; then
             _dt=$((_dt + 1)); proof_debt_event "$DEBT_PLAN" "concept=$_dc" "kind=$_dk" "sites=$_ds" "raised-by=$_dr" "touches=$_dt" || debt_refuse
