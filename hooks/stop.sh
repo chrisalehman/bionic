@@ -2,11 +2,16 @@
 # hooks/stop.sh — ONE PROCESS AT TURN END (epic-23 wave-11-lean-spine, REQ-1f (iv);
 # spec Design §1 "TurnEndVerdict", §2 D4; ADR-004).
 #
-# Registered exactly once on Stop and exactly once on SubagentStop. It reads the
+# It answers three events, told apart by the event's name. Stop is the turn's end: it reads the
 # event, runs the four verdict functions of payload/scripts/lib/stop.sh, and lets
 # payload/scripts/lib/fold.sh compose whatever they say by one rule:
 #
 #     any block is a block · all reasons print · blocks before advisories
+#
+# SubagentStop is an agent's own stop: judged by the same four only in a session the stop library's
+# `stop_agent_armed` calls armed, and silent for a payload with no `agent_id`. PreToolUse of TaskStop
+# is the orchestrator's stop of an agent, judged by the library's `stop_guard`; any other tool's
+# PreToolUse is not a stop and passes before anything is loaded.
 #
 # WHAT THIS REPLACES. Four separate command objects fired on Stop — context-spend,
 # landing-gate, patrol-duties-gate, patrol-revive — each with its own copy of the
@@ -33,23 +38,33 @@
 # hook refuses rather than running three verdicts and dropping the fourth.
 #
 # FAIL CLOSED, ONCE: a stop refused on every re-entry because a file was missing is a turn
-# nobody can end, so the refusal under the loader's stub lets the re-entry through.
+# nobody can end, so the refusal under the loader's stub lets the re-entry through. The stop
+# of an agent is refused every time: exit 2 there blocks only that tool call.
 #
 # [WALL: tests/stop.test.sh]
 #
-# Registered in hooks/hooks.json: once on Stop, once on SubagentStop behind
-# hooks/agent-context-guard.sh — the same wrapper landing-gate's SubagentStop
-# registration carried, with the same reach.
+# Registered in hooks/hooks.json on Stop. hooks/stop-guard.sh (PreToolUse TaskStop) and
+# hooks/agent-context-guard.sh (SubagentStop) hand their payload to this file and decide nothing.
 
 set -uo pipefail
 
 command -v jq >/dev/null 2>&1 || exit 0
 
+# THE PAYLOAD IS READ FIRST, so the event is known before anything is loaded; `bionic_context`
+# adopts this text rather than reading stdin again. A terminal on stdin is a hand run with no payload.
+if [ -t 0 ]; then BIONIC_INPUT=""; else BIONIC_INPUT="$(cat)"; fi
+_st_jq() { printf '%s' "$BIONIC_INPUT" | jq -r "$1 // empty" 2>/dev/null; }
+EVENT=$(_st_jq .hook_event_name)
+case "$EVENT" in
+  PreToolUse)   [ "$(_st_jq .tool_name)" = "TaskStop" ] || exit 0 ;;
+  SubagentStop) [ -n "$(_st_jq .agent_id)" ] || exit 0 ;;
+esac
+
 # ---------- the library ----------
 #
 # The stub below sources the one loader, whose stub and walk both live in
 # payload/scripts/lib/loader.sh.
-BIONIC_LIB_WANT="context.sh fill.sh fold.sh patrol.sh refuse.sh root.sh roster.sh run.sh session.sh stop.sh worktree.sh"
+BIONIC_LIB_WANT="context.sh fill.sh fold.sh observe.sh patrol.sh refuse.sh root.sh roots.sh roster.sh run.sh session.sh stop.sh worktree.sh"
 # Find the library through lib/loader.sh beside this hook; payload/scripts/lib/loader.sh says how.
 _bl_dir="$(dirname "$0")"; _bl_l="$_bl_dir/../scripts/lib/loader.sh"; [ -r "$_bl_l" ] || _bl_l="$_bl_dir/../payload/scripts/lib/loader.sh"
 # shellcheck source=/dev/null
@@ -61,8 +76,9 @@ fi
 # A MISSING LIBRARY REFUSES A STOP ONCE. Exit 2 holds the turn open, so only a first stop
 # (`stop_hook_active` false) is refused; the re-entry, a payload without the field and one jq
 # cannot read all end the turn, so a session with no library can still end or be repaired.
+# The stop of an agent it cannot check is refused outright, as the TaskStop gate always was.
 if [ -n "$BIONIC_LIB_MISSING" ]; then
-  [ "$(jq -r '.stop_hook_active' 2>/dev/null)" = "false" ] || exit 0
+  [ "$EVENT" = "PreToolUse" ] || [ "$(printf '%s' "$BIONIC_INPUT" | jq -r '.stop_hook_active' 2>/dev/null)" = "false" ] || exit 0
   loader_fail_closed "stop"
 fi
 # shellcheck source=/dev/null
@@ -97,33 +113,34 @@ fi
 # sourced here for fill.sh's reason above: a partial library makes this process refuse.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/patrol.sh"
+# The stop of an agent takes its own look at the target, through observe.sh and the roots it reads.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/roots.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/observe.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/stop.sh"
 
-# THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
-# computes it only for a caller that sets this, because the plan scan behind it is
-# the preamble's most expensive value and most hooks never read the answer. Three of the four
-# verdict functions in `payload/scripts/lib/stop.sh` branch on it — `stop_context_spend`,
-# `stop_patrol_duties`, `stop_patrol_revive` (:340, :1313, :1936).
-BIONIC_CONTEXT_WANT_RUN=1
+# THE RUN VERDICT IS ASKED FOR ON A TURN'S END. `bionic_context` computes it only for a caller that
+# sets this, because the plan scan behind it is the preamble's most expensive value. Three of the four
+# verdict functions branch on it; the stop of an agent never reads it.
+[ "$EVENT" = "PreToolUse" ] || BIONIC_CONTEXT_WANT_RUN=1
 
-# THE EIGHT VALUES, ONCE (REQ-1h, lib/context.sh). All four functions read the root,
-# the session key, the engagement answer and the run verdict out of this one call.
-# Four hooks each spelling the cwd ladder their own way could attribute one session's
-# stop to two different roots; one call cannot.
+# THE EIGHT VALUES, ONCE (lib/context.sh). Every function below reads the root, the session key,
+# the engagement answer and the run verdict out of this one call.
 bionic_context 2>/dev/null || exit 0
 
-# AN ABSENT FIELD IS PASSED ON AS THE EMPTY STRING, and what each function makes of it
-# is the function's own business — not a rule this line imposes. Only `stop_context_spend`
-# treats an absent event as Stop (`case "$_ev" in ''|Stop)`, payload/scripts/lib/stop.sh),
-# which is the rule hooks/landing-gate.sh stated for its own `case` and the one that
-# function keeps. The other three match `Stop` strictly, exactly as their hooks did before
-# the merge, so a hand-run payload with no event field wakes the spend instrument and
-# nothing else. Base-faithful in both directions; the comment claimed a uniformity the
-# four never had. Read ABOVE the guard since wave-20, because the recorder below needs it.
-EVENT=$(bionic_jq .hook_event_name)
+# The stop of an agent is the guard's whole answer, with this hook's directory for the scripts its fixes
+# name. An agent's own stop goes on to the four only in an armed session.
+case "$EVENT" in
+  PreToolUse)   stop_guard "${_STOP_HOOK_DIR_ABS:-$_STOP_HOOK_DIR_RAW}"; exit $? ;;
+  SubagentStop) stop_agent_armed || exit 0 ;;
+esac
 
-# EVERY STOP IS RECORDED, THE RE-ENTRY INCLUDED (epic-23 wave-20 REQ-5, AC-5.5; Δ2). The fill
+# AN ABSENT EVENT IS PASSED ON AS THE EMPTY STRING, and what each function makes of it is its own
+# business: only `stop_context_spend` treats it as Stop.
+#
+# EVERY STOP IS RECORDED, THE RE-ENTRY INCLUDED. The fill
 # ledger's recorder runs HERE, before the guard: after a refusal, the Stop that actually ends
 # the turn carries `stop_hook_active` and runs nothing below — and it is the one that sees the
 # launches the model made in answer to the refusal. A recorder, never a verdict: it prints
