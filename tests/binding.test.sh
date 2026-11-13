@@ -70,10 +70,11 @@ call_bind() {  # <root> <sid> <plan|none> -> sets BIND_ST / BIND_WHY / BIND_ERR
   BIND_ERR=$(cat "$SANDBOX/.err" 2>/dev/null)
 }
 
-# page15 <plan> <step> [line end] -> a plan page at 15 and its run's log, <docs>/record/<stem>/run.log, at <step>:
-# open below 9, delivered at 9. A plan at 15 holds no state section; its header says 15 and its log where it stands.
+# page15 <plan> <step> [line end] -> a plan page at 15 under plans/ or incidents/ and its run's log,
+# <docs>/record/<stem>/run.log, at <step>: open below 9, delivered at 9. A plan at 15 holds no state section; its
+# header says 15 and its log where it stands.
 page15() {
-  local l="${1%/plans/*}/record/$(basename "$1" .plan.md)/run.log"
+  local l="${1%/plans/*}"; l="${l%/incidents/*}/record/$(basename "$1" .plan.md)/run.log"
   mkdir -p "${1%/*}" "${l%/*}"
   printf -- "---${3:-\n}canonical_sdlc_version: 15${3:-\n}---${3:-\n}" > "$1"
   printf 'run/v1|ev=step|n=%s|at=2026-10-04T00:00:00Z\n' "$2" > "$l"
@@ -342,5 +343,24 @@ R9U="$(make_repo r9u)"
 unbound_marker "$R9U" "$SID"
 expect_eq "9c an unbound session reads the root's one page at 15 as its fallback" "fallback $R9U/.bionic/docs/plans/epic-01-demo/wave-01.plan.md" \
   "$(bash -c '. "$1"; session_run "$2" "$3"' _ "$RUNLIB" "$R9U" "$SID" 2>/dev/null)"
+
+# An incident lays its run out in a directory of its own, its plan named for the directory; at 15 the walk finds it
+# as it finds a wave's, so engagement binds it and the commit gate judges a commit under it on what its step owes.
+# A plan named plain at 15 joins no record of its own and is no run. fails-when: the walk admits a page at 15 under
+# plans/ alone, so the incident is missing from the open-run set, its engagement is refused, and a commit under it is
+# judged on another run's plan or on none.
+R9I="$(make_repo r9i)"; I9="$R9I/.bionic/docs/incidents/0002-db-outage"
+page15 "$I9/0002-db-outage.plan.md" 4; page15 "$R9I/.bionic/docs/incidents/0003-plain/plan.md" 4
+expect_eq "9d the walk lists an incident's page at 15 named for its directory beside the wave's; not one named plain" \
+  "0002-db-outage.plan.md wave-01.plan.md" "$(bash -c '. "$1"; open_runs "$2"' _ "$RUNLIB" "$R9I" 2>/dev/null | sed 's#.*/##' | sort | paste -sd' ' -)"
+call_bind_act "$R9I" "$SID" "$I9/0002-db-outage.plan.md" engage
+expect_eq "9e engagement binds the incident's page at 15 (exit 0, no refusal) and the session reads it bound-open" \
+  "0||bound-open $I9/0002-db-outage.plan.md" "$BIND_ST|$BIND_WHY|$BIND_RUN"
+git -C "$R9I" -c user.name=f -c user.email=f@x.invalid -c commit.gpgsign=false commit -q --allow-empty -m seed
+G9="$(cd "$R9I" && jq -n --arg c "git commit -m x" --arg cwd "$R9I" --arg s "$SID" '{session_id:$s, tool_input:{command:$c}, cwd:$cwd}' \
+  | HOME="$R9I" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 bash "$REPO_ROOT/hooks/bash-walls.sh" 2>&1; printf '|rc=%s' "$?")"
+expect_contains "9f a commit under the bound incident is refused (exit 2)" "|rc=2" "$G9"
+expect_contains "…judged on the incident's own plan" "incidents/0002-db-outage/0002-db-outage.plan.md" "$G9"
+expect_contains "…for a fact its step truly owes: the Step-3 approval that admits Step 4" "the log holds no Step-3 approval" "$G9"
 
 finish
