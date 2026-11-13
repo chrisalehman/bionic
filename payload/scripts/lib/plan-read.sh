@@ -8,6 +8,8 @@
 #   plan_read_dropped <plan>                         -> the id of each Tasks row whose status cell is dropped, for the translation
 #   plan_read_heading <plan> <name>[|<name>...]      -> the line of each `## <name>` heading outside a fence
 #   plan_read_faults <plan>                          -> each part a version-15 plan has no place for, its line named
+#   plan_read_criterion_task <plan> [criterion]      -> the task that proves each criterion, as the person wrote it
+#   plan_read_criterion_faults <plan>                -> each criterion's task token no Tasks row carries, at 15
 #
 # A plan is the words a person wrote: its header and its tables. Everything that is the run's state is
 # the log's, read by lib/reader.sh, so nothing here reads a state cell for an answer or follows a header
@@ -155,6 +157,52 @@ plan_read_blocks() {
     ac == "" && $0 ~ /^[ \t]*$/ { next }
     want == "" || ac == want { print ac "\t" $0; found = 1 }
     END { exit !found }'
+}
+
+# plan_read_criterion_task <plan> [<criterion>] -> `<criterion><TAB><value>` per criterion that names the task proving it,
+# file order: one task id, several joined by commas, or `9` alone, the close's step. At version 15 the value is the
+# criterion's cell in the `Task` column of its `## Eval design` row (the first row naming it), a cell holding no letter
+# or digit naming none; at any other version it is the first `task:` line of the criterion's older block, trimmed, and
+# the column is never read there, so an older plan answers as its blocks always said. The person writes it; nothing
+# derives it. 1 none, 2 no plan.
+plan_read_criterion_task() {
+  [ -f "${1:-}" ] || return 2
+  local v
+  v="$(plan_read_header "$1" canonical_sdlc_version 2>/dev/null)" || v=""
+  if [ "${v#*=}" = 15 ]; then
+    plan_read_rows "$1" 'Eval design' criterion 2>/dev/null | awk -F'\t' -v want="${2:-}" '
+      { c = ""; t = ""
+        for (i = 1; i <= NF; i++) { e = index($i, "="); k = substr($i, 1, e - 1); if (k == "criterion") c = substr($i, e + 1); else if (k == "task") t = substr($i, e + 1) }
+        if (c == "" || (c in seen)) next; seen[c] = 1
+        if ((want != "" && c != want) || t !~ /[A-Za-z0-9]/) next
+        print c "\t" t; n++ }
+      END { exit !n }'
+  else
+    plan_read_blocks "$1" "${2:-}" 2>/dev/null | awk -F'\t' '
+      $1 == "" || ($1 in seen) { next }
+      { l = substr($0, length($1) + 2) }
+      l ~ /^[ \t]*task[ \t]*:/ { seen[$1] = 1; sub(/^[ \t]*task[ \t]*:[ \t]*/, "", l); sub(/[ \t]+$/, "", l); if (l != "") { print $1 "\t" l; n++ } }
+      END { exit !n }'
+  fi
+}
+
+# plan_read_criterion_faults <plan> -> at version 15, one line per token of a criterion's Task cell that names no row of
+# the Tasks table, saying what to write. `9` is the close's step only as the whole value: beside an id it names nothing,
+# so a mix an older block read silently as the id alone is refused where it is written. 0 with faults, 1 with none, 2
+# when the plan is not a file.
+plan_read_criterion_faults() {
+  [ -f "${1:-}" ] || return 2
+  local v
+  v="$(plan_read_header "$1" canonical_sdlc_version)" || return 1
+  [ "${v#*=}" = 15 ] || return 1
+  { plan_read_rows "$1" Tasks 2>/dev/null; printf '\034\n'; plan_read_criterion_task "$1" 2>/dev/null; } | awk -F'\t' '
+    $0 == "\034" { part = 1; next }
+    !part { for (i = 1; i <= NF; i++) if (index($i, "id=") == 1) id[substr($i, 4)] = 1; next }
+    $2 == "9" { next }
+    { m = split($2, a, ",")
+      for (j = 1; j <= m; j++) { t = a[j]; gsub(/^[ \t]+|[ \t]+$/, "", t)
+        if (!(t in id)) { printf "%s: task %s names no row in the Tasks table; write a task id the table holds, several joined by commas, or 9 alone for the close\n", $1, t; n++ } } }
+    END { exit !n }'
 }
 
 plan_read_dropped() {  # <plan> -> one id per line, in table order; 1 none, 2 no plan

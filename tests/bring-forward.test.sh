@@ -31,6 +31,8 @@
 #            changes no byte.
 #   §WAITS   a wait on a row is that row's id in deps; one the kind implies is dropped; any other is a gap.
 #   §DROPPED a dropped row's cell is the run's drop: after the act the row stays, reads dropped, and waits on it are met.
+#   §CRITERIA each criterion's block task is carried into the Eval design's Task column, so it is owed at the same step after the
+#            act; a task with no Eval design row, or a token 15 cannot say (a 9 beside an id), is on the gaps list.
 #   §CELLS   a row's suites and lands-on go to the task's own section, past a fenced # line in it, or to the gaps list when it has none.
 #   §STEPS   a Step follows the Step above it and a proof or waiver the line above it in its block, whatever
 #            their instants, so the step is the old current: and closure; a Step held (pending) is a gap.
@@ -409,12 +411,37 @@ canonical_sdlc_version: 14
 One's own words.
 $(printf '%s\n' '```bash' '# T2 waits on this' '```')
 
+## Eval design
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+$(for a in 1.1 1.2 1.3 1.4 1.6; do printf '| REQ-1 | a suite | AC-%s | hermetic | `a.test.sh` | a is red |\n' "$a"; done)
+
+## Verification Matrix
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+$(for a in 1.1 1.2 1.3 1.4 1.6; do printf '| AC-%s | T1 | pending | — | |\n' "$a"; done)
+
+AC-1.1:
+  task: T1
+AC-1.2:
+  task: 9
+AC-1.3:
+  fails-when: a is red
+AC-1.4:
+  task: T1, T4
+AC-1.5:
+  task: T2
+AC-1.6:
+  task: T2, 9
+
 ## SDLC State
 current: 4
 approved-by: Ann Person 2026-11-01T02:25:48Z "go"
 EOF
 askw() { bash "$RS" "$W" "$@"; }; say_rows() { for r in T1 T2 T3 T4; do askw status "$r" | head -1; done; askw landed | grep -c .; askw stop | grep '^ready='
-  ( . "${RS%/*}/lib/units.sh"; units_rows "$W" | cut -f1,3,10; plan_read_waits "$W" | grep '	wait	approval:' ); }
+  ( . "${RS%/*}/lib/units.sh"; units_rows "$W" | cut -f1,3,10; plan_read_waits "$W" | grep '	wait	approval:'
+  . "${RS%/*}/lib/root.sh"; . "${RS%/*}/lib/run.sh"; . "${RS%/*}/lib/walls.sh" >/dev/null 2>&1
+  for a in AC-1.1 AC-1.2 AC-1.3 AC-1.4 AC-1.6; do printf 'owed %s %s %s\n' "$a" "$(matrix_owing_step "$W" "$a")" "$(matrix_owing_open "$W" "$a")"; done ); }
 PRE="$(say_rows)"; OUT="$(bash "$BF" "$W")"; KW="$(printf '%s\n' "$OUT" | sed -n 's/^kept=//p')/wave-7-act.plan.md"
 
 section "WAITS"
@@ -430,6 +457,17 @@ expect_eq "every row's state, the landings, the ready rows, the fill's rows and 
 askw ready T3; expect_status "a dropped row is not ready" 1 "$?"
 printf 'run/v1|ev=approval|key=D3|by=Ann Person|at=2026-11-02T00:00:00Z\n' >> "${KW%/kept/*}/run.log"
 expect_eq "the dropped row stays in the table, a wait on it stays a wait, met; T2 is ready once D3 stands" "| T3 |deps=T3 ready=T4 ready=T2 T4" "$(grep -o '^| T3 |' "$W")$(askw row T4 | grep '^deps=') $(grep '^ready=' <<< "$PRE") $(askw stop | grep '^ready=')"
+
+section "CRITERIA"
+expect_eq "at 14 each criterion is owed at its block's task's step, open while that task is: an id, the close, none, a list, and a mix of an id and 9 read as the id" \
+  "owed AC-1.1 4 |owed AC-1.2 9 |owed AC-1.3  |owed AC-1.4 4 yes|owed AC-1.6 4 yes" "$(grep '^owed ' <<< "$PRE" | paste -sd'|' -)"
+expect_eq "after the act each is owed at the same step, open alike: the Task column carries what each block said" "$(grep '^owed ' <<< "$PRE")" "$(say_rows | grep '^owed ')"
+for x in "AC-1.1|T1" "AC-1.2|9" "AC-1.3|—" "AC-1.4|T1, T4" "AC-1.6|T2"; do
+  expect_eq "${x%%|*}'s Eval design row holds its task in the Task column" "task=${x#*|}" "$(askw criterion "${x%%|*}" | grep '^task=')"; done
+expect_contains "a block's task with no Eval design row to carry it is on the gaps list" "gap/v1|ev=criterion|criterion=AC-1.5|field=task|why=absent" "$OUT"
+expect_contains "a token 15 cannot say, the 9 beside an id, is on the gaps list" "gap/v1|ev=criterion|criterion=AC-1.6|field=task:9|why=unruled" "$OUT"
+WS="$(cksum < "$W")"; bash "$BF" "$W" >/dev/null 2>&1
+expect_eq "a second act adds no second Task column: the plan is unchanged" "$WS" "$(cksum < "$W")"
 
 section "CELLS"
 expect_eq "a row's suites and lands-on go to the task's own section, after its fence" "One's own words. "'```bash ```'" suites: a.test.sh lands-on: a.test.sh" "$(sed -n '/^### T1$/,/^## /p' "$W" | grep -v '^#' | grep . | paste -sd' ' -)"
