@@ -17,6 +17,7 @@
 #              The same run at 15, brought forward, is refused as the 14 is, and with its reviews still refused, naming each fact its log lacks.
 #              At 15 a step's evidence is asked where it is held, owed while missing and not once it stands; a step
 #              pending in an advance's judgment moves the gate only in the advance's own session, and is never held.
+#              A page at 15 whose landed tasks stand out of order is admitted: the hook judges its copy with the plan's log.
 #
 # FIXTURE FIDELITY. Each plan is a real file in a scratch git repository with an engaged session, written
 # through hooks/canonical-sdlc-governing-skill.sh as the Write tool would post it. Every plan carries the
@@ -285,5 +286,22 @@ ap() { ( cd "$R" && HOME="$HOME_DIR" CLAUDE_CODE_SESSION_ID="$SID" bash "$BIONIC
 hdr "base-sha: $H"; B="$(ap launch)|$(grows)"; sed -i '' 's/| Grow. | — |/| Grow. | approval:doctrine-growth, approval:launch |/' "$P2"
 expect_eq "with the approval standing, growth from T3's tree is refused (exit 2) while T3 names no wait on it, saying what to write, and admitted (exit 0) once it does" "1|21|Not admitted: row T3 does not wait on approval:doctrine-growth|edit the deps cell of T3 in the plan to: approval:doctrine-growth|00|" "$B|$(grows)"
 expect_eq "approve refuses launch while no task waits on it, takes it once T3 does, and refuses a name none waits on" "1|0|1" "${B%%|*}|$(ap launch)|$(ap nobody)"
+# A page at 15 whose landed tasks stand out of order is judged with its run's log: the hook names the plan its copy is of.
+OL="$R/.bionic/docs/record/wave-01-x/run.log"; mkdir -p "${OL%/*}"; [ ! -f "$OL" ] || mv "$OL" "$OL.kept"
+for t in T1 T5 T6 T7; do printf 'run/v1|ev=published|row=%s|commit=%s|kind=queue|by=-|why=-|at=2026-11-01T00:00:0%sZ\n' "$t" "$(printf 'a%.0s' {1..40})" "${t#T}"; done > "$OL"
+OT='| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | — | 30 | REQ-1 | a.sh | — |
+| T5 | 5 | test | the regression | — | 30 | REQ-1 | r/T5.md | — |
+| T6 | 6 | review | the review | — | 30 | REQ-1 | r/T6.md | — |
+| T7 | 7 | doc | the release | — | 30 | REQ-1 | CHANGELOG.md | — |
+| T8 | 7 | build | the fix | — | 30 | REQ-1 | b.sh | — |
+| T9 | 7 | review | the fix read | T8 | 30 | REQ-1 | r/T9.md | — |'
+printf '## Tasks\n\n%s\n' "$OT" | page 15 > "$R/ot-copy"
+expect_contains "a copy of that page judged with no plan it is of reads every task open, and its order refused" "T7: the release row comes ahead of the review row T9" \
+  "$(bash -c '. "$1/units.sh" 2>/dev/null; units_validate "$2"' _ "${PLAN_READ%/*}" "$R/ot-copy")"
+write_plan "$(cat "$R/ot-copy")"
+expect_status "…the hook names the plan it writes, so the landed tasks are read from its log and the page is admitted" 0 "$HOOK_EXIT"
+rm -f "$OL"; [ ! -f "$OL.kept" ] || mv "$OL.kept" "$OL"
 
 finish
