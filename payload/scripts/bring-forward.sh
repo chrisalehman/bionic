@@ -169,16 +169,21 @@ _bf_compute() {  # <plan> <work dir> -> <work>/plan, the plan brought forward; <
 
 # THE HEADER'S KEYS A STEP OWES AT 15. At 14 the working branch and the base were the SDLC State's: its first
 # `working-branch:` line and its first `base-sha:` line, read as lib/run.sh `plan_working_branch` and lib/proof.sh
-# `proof_plan_base` read them, else the Step 4 block's `branch:` and `base-sha:` fields. At 15 the header holds them and
-# Step 4 and the merge's check ask it there, so the act writes each the header lacks. One the run owed, past Step 4, and
-# no home held is named on the gaps list; a header that holds a key keeps its own value.
+# `proof_plan_base` read them, else the Step 4 block's `branch:` and `base-sha:` fields. Step 7's document was its block's
+# `adr:` or `rca:` path, or its `n/a:` reason, as lib/walls.sh `validate_document_step` asked; at 15 it is the header's
+# `adrs:`, the records named, or `none` with the reason. At 15 the header holds all three and the steps' checks ask it
+# there, so the act writes each the header lacks. One the run owed, past its step, and no home held is named on the gaps
+# list; a header that holds a key keeps its own value.
 _bf_homes() {  # <plan> <header out> -> a `<key><TAB><value>` line in <header out> per key to write; a gap line per key owed and held nowhere
   local plan="$1" k v found
   # A Step block is its `- Step <n>:` line and the indented lines under it; one held (pending) is no step reached.
   found="$(_translate_section "$plan" "SDLC State" | awk '
     function word(s) { sub(/^[ \t]+/, "", s); sub(/[ \t].*$/, "", s); gsub(/^["\047]|["\047]$/, "", s); return s }
-    function field(s, k) { if (!match(s, "(^|[^-_[:alnum:]])" k "[ \t]*:")) return ""; s = substr(s, RSTART + RLENGTH); sub(/;.*$/, "", s); return word(s) }
+    function said(s, k) { if (!match(s, "(^|[^-_[:alnum:]])" k "[ \t]*:")) return ""; s = substr(s, RSTART + RLENGTH); sub(/;.*$/, "", s)
+      sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    function field(s, k) { return word(said(s, k)) }
     function first(k, v) { if (v != "" && !(k in got)) got[k] = v }
+    function doc(v) { if (v != "" && !((v) in named)) { named[v] = 1; docs = docs (docs == "" ? "" : ", ") v } }
     /^- Step [0-9]+[ab]?:/ { n = substr($0, 8, index($0, ":") - 8); sub(/[ab]$/, "", n); t = substr($0, index($0, ":") + 1)
       blk = (t ~ /^[ \t]*\(pending\)[ \t]*$/) ? "" : n; if (blk != "") reached[blk] = 1 }
     !/^- Step [0-9]/ { t = $0; if (/^[^ \t]/) blk = "" }
@@ -186,15 +191,16 @@ _bf_homes() {  # <plan> <header out> -> a `<key><TAB><value>` line in <header ou
     /^[ \t]*working-branch[ \t]*:/ { first("working-branch", word(substr($0, index($0, ":") + 1))) }
     /^[ \t]*base-sha[ \t]*:/ { first("base-sha", word(substr($0, index($0, ":") + 1))) }
     blk == "4" { if (b4 == "") b4 = field(t, "branch"); if (s4 == "") s4 = field(t, "base-sha") }
-    END { first("working-branch", b4); first("base-sha", s4)
+    blk == "7" { doc(field(t, "adr")); doc(field(t, "rca")); if (na == "") na = said(t, "n/a") }
+    END { first("working-branch", b4); first("base-sha", s4); first("adrs", docs); if (na != "") first("adrs", "none — " na)
       for (k in got) printf "%s\t%s\n", k, got[k]
-      if (cur >= 4 || (4 in reached)) print "reached\t4" }')" || return 1
+      for (n = 4; n <= 7; n += 3) if (cur >= n || (n in reached)) print "reached\t" n }')" || return 1
   : > "$2"
-  for k in working-branch base-sha; do
-    v="$(plan_read_header "$plan" "$k" 2>/dev/null)" && [ -n "${v#*=}" ] && continue
-    v="$(printf '%s\n' "$found" | awk -F'\t' -v k="$k" '$1 == k { print $2; exit }')"
-    if [ -n "$v" ]; then printf '%s\t%s\n' "$k" "$v" >> "$2"
-    elif printf '%s\n' "$found" | grep -qx "reached	4"; then printf 'gap/v1|ev=step|n=4|field=%s|why=absent\n' "$k"; fi
+  for k in working-branch:4 base-sha:4 adrs:7; do
+    v="$(plan_read_header "$plan" "${k%:*}" 2>/dev/null)" && [ -n "${v#*=}" ] && continue
+    v="$(printf '%s\n' "$found" | awk -F'\t' -v k="${k%:*}" '$1 == k { print $2; exit }')"
+    if [ -n "$v" ]; then printf '%s\t%s\n' "${k%:*}" "$v" >> "$2"
+    elif printf '%s\n' "$found" | grep -qx "reached	${k#*:}"; then printf 'gap/v1|ev=step|n=%s|field=%s|why=absent\n' "${k#*:}" "${k%:*}"; fi
   done
 }
 

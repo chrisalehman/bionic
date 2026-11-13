@@ -566,10 +566,14 @@ current: 8
 EOF
   printf '%s' "$p"; }
 G="$(homes wave-6-homes)"; GO="$(bash "$BF" "$G" 2>&1)"; askg() { bash "$RS" "$G" "$@"; }
-GB="$(homes wave-6-bare '/^  base-sha:/d; /^  branch:/d')"; GBO="$(bash "$BF" "$GB" 2>&1)"
+GB="$(homes wave-6-bare '/^  base-sha:/d; /^  branch:/d; /^  n\/a:/d')"; GBO="$(bash "$BF" "$GB" 2>&1)"
 expect_eq "the working branch and base its Step 4 block held are the header's after the act" "working-branch=wave/6-homes base-sha=2222222bb" \
   "$(askg header working-branch) $(askg header base-sha)"
 for f in working-branch base-sha; do expect_contains "a run past Step 4 whose block held no $f has it named on the gaps list" "gap/v1|ev=step|n=4|field=$f|why=absent" "$GBO"; done
+GA="$(homes wave-6-adr 's#^  n/a: no decision this run#  adr: adrs/a.md (Proposed); rca: rca/r.md#')"; bash "$BF" "$GA" >/dev/null 2>&1
+expect_eq "Step 7's document is the header's adrs: after the act: none with its n/a reason, or the records its block named" \
+  "adrs=none — no decision this run|adrs=adrs/a.md, rca/r.md" "$(askg header adrs)|$(bash "$RS" "$GA" header adrs)"
+expect_contains "a run past Step 7 whose block named no document has it named on the gaps list" "gap/v1|ev=step|n=7|field=adrs|why=absent" "$GBO"
 
 section "STEPS"
 U="$D/plans/epic-x/wave-6-untimed.plan.md"; B="$D/plans/epic-x/wave-5-back.plan.md"; s9='- Step 9: delivered: 2026-11-01T13:34Z'
