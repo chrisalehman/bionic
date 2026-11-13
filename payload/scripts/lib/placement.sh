@@ -62,7 +62,7 @@
 #   and every segment that moves nothing, whatever it holds.
 #
 # COST. One awk reading, whatever the command's length: the shell side is a fixed handful of
-# commands (tests/hook-latency.test.sh §PLACE counts a 2 KB and a 200 KB quoted body equal).
+# commands, so a 2 KB and a 200 KB quoted body cost the same.
 #
 # LOADING. Sources cmd-class.sh from its own directory unless it is already loaded. A library
 # that cannot load leaves cmd_place undefined and the source returns 1, so a caller can fail

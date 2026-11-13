@@ -23,14 +23,12 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
-. "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/lib/plan-fixture.sh"
 
 HERE="${BIONIC_HOOKS_DIR}"
 REC="$HERE/execution-recorder.sh"
-OBSERVE="$HERE/stop-check.sh"
 
 # `cd … && pwd` normalizes the path: $TMPDIR carries a trailing slash on macOS,
 # and a doubled separator would slugify differently from the cwd the scripts
@@ -58,17 +56,6 @@ expect_no_file()  { if [ -f "$2" ]; then no "$1" "file exists but should not: $2
 # PostToolUse payloads captured live on CLI 2.1.222 for this task. Every payload
 # builder below DERIVES from those captures:
 #
-#   * PostToolUse|Bash, orchestrator-invoked — FAITHFUL to capture A, field for
-#     field: session_id, transcript_path, cwd, prompt_id, permission_mode,
-#     effort, hook_event_name, tool_name, tool_input.command, tool_response
-#     {stdout, stderr, interrupted, isImage, noOutputExpected}, tool_use_id,
-#     duration_ms. Critically, capture A carries NO top-level agent_id — the
-#     property the observer field depends on.
-#   * PostToolUse|Bash, subagent-invoked — FAITHFUL to capture B/F: the same
-#     field set PLUS top-level `agent_id` and `agent_type`. Captures B (foreground
-#     subagent) and F (background subagent) are identical in this respect, and §3
-#     records the computed diff: those two keys are the ONLY difference between
-#     an orchestrator-invoked and a subagent-invoked payload.
 #   * PostToolUse|Agent — FAITHFUL to capture E (the background dispatch this
 #     repo actually uses): tool_input {description, prompt, subagent_type,
 #     run_in_background, name} and tool_response {isAsync, status, agentId,
@@ -78,30 +65,12 @@ expect_no_file()  { if [ -f "$2" ]; then no "$1" "file exists but should not: $2
 #   * transcript_path → session directory — FAITHFUL to §2.5 of
 #     record/epic-15-kill-interception-experiment.md, which captures
 #     `agent_transcript_path` as "<transcript-dir>/<session-id>/subagents/agent-<id>.jsonl".
-#   * meta.json — FAITHFUL to that record's §2.8 field set.
 #   * SYNTHESIZED and declared: session ids, agent ids, plan text, repo contents,
 #     stdout bodies in the forgery rows. None is a platform surface.
-#
-# The stdout of a REAL observation is never synthesized here: the machine line
-# under test is produced by running hooks/stop-check.sh itself.
 
 SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 SID_B="11111111-2222-3333-4444-555555555555"
 SUB_AGENT_ID="a6bc0caf11962bbb6"
-
-mk_bash_post() {  # <sid> <transcript> <cwd> <command> <stdout> [invoker-agent-id]
-  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg cmd "$4" --arg out "$5" --arg ag "${6:-}" \
-    '{session_id:$s, transcript_path:$t, cwd:$c,
-      prompt_id:"598cabc5-2776-479c-abcf-52c540a1c60e",
-      permission_mode:"bypassPermissions"}
-     + (if $ag == "" then {} else {agent_id:$ag, agent_type:"general-purpose"} end)
-     + {effort:{level:"high"},
-        hook_event_name:"PostToolUse", tool_name:"Bash",
-        tool_input:{command:$cmd, description:"observe"},
-        tool_response:{stdout:$out, stderr:"", interrupted:false,
-                       isImage:false, noOutputExpected:false},
-        tool_use_id:"toolu_01HQV9JAFdKC15TLMDKt2QgF", duration_ms:117}'
-}
 
 mk_agent_post() {  # <sid> <transcript> <cwd> <name> <agentId> <tool_use_id>
   jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg n "$4" --arg a "$5" --arg u "$6" \
@@ -178,180 +147,7 @@ PLAN
   printf '%s|%s|%s|%s\n' "$repo" "$proj/$SID_A.jsonl" "$proj/$SID_A/subagents" "$home/.claude"
 }
 
-# THE RECORDED ListAgents ANSWER — the live set (wave-roster-lifecycle S6, design ledger
-# D1′). The body's shape is the real one, copied from tests/live-agents.test.sh, whose
-# bodies are byte-verbatim captures: the separator is U+00B7 and `[8895ce]` is the harness
-# ref suffix payload/scripts/lib/agents.sh strips. Accumulated through a `.names` sidecar so
-# a second call ADDS a teammate to the one answer rather than replacing it — two agents
-# planted in one session directory are two lines of one ListAgents answer, never two answers.
-REC_LA_SELF='This session is bionic-fixture [fc3e2d] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).'
-rec_live() {  # <transcript> <name>...
-  local tr="$1"; shift
-  local f="${tr%.jsonl}.names" names=() n body
-  mkdir -p "$(dirname "$tr")"
-  for n in "$@"; do printf '%s\n' "$n" >> "$f"; done
-  while IFS= read -r n; do [ -n "$n" ] && names+=("$n"); done < "$f"
-  body="$(live_answer_body ${names[@]+"${names[@]}"})"
-  {
-    jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
-      '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}'
-    jq -nc --arg ts "2026-09-05T00:51:00.000Z" \
-      '{type:"assistant",timestamp:$ts,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01FIXTURELISTAGENTS",name:"ListAgents",input:{}}]}}'
-    jq -nc --arg ts "2026-09-05T00:52:23.349Z" --arg b "$body" \
-      '{type:"user",timestamp:$ts,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01FIXTURELISTAGENTS",content:$b}]}}'
-  } > "$tr"
-  return 0
-}
-
-# THE SESSION ROSTER ROW, field for field from hooks/dispatch-preflight.sh's `ROW=` line,
-# in the `identified` state — the state that carries the transcript-form agent id.
-rec_roster_row() {  # <repo> <sid> <name> <agent-id>
-  local f="$1/.bionic/tmp/roster-$2.state"
-  mkdir -p "$1/.bionic/tmp"
-  [ -f "$f" ] || roster_header > "$f"
-  roster_row_fixture status=identified session="$2" name="$3" agent_id="$4" \
-    launched_at=2026-08-05T00:00:00Z >> "$f"
-  return 0
-}
-
-# plant_agent <subagents-dir> <agent-id> <name> [repo]
-#
-# THE THREE THINGS AN OBSERVABLE AGENT NOW IS (wave-roster-lifecycle S6). Until that task
-# an agent existed for hooks/stop-check.sh because its `meta.json` was on disk under a
-# session's `subagents/` directory, and this helper wrote exactly that. The directory scan
-# is gone: resolution reads the newest recorded ListAgents answer in the session's own
-# transcript, and the agent id — which the answer does not carry, because the harness lists
-# teammates by NAME — comes from a `confirmed`/`identified` roster row. So a plantable agent
-# is now three records, not one:
-#
-#   1. the working log and metadata, at the path the id names (still read, never searched);
-#   2. a line in the session's live set, which is what says it EXISTS;
-#   3. a roster row carrying its id, which is what says which log is its.
-#
-# The transcript and the session key are derived from the directory, because that IS the
-# layout: `<config>/projects/<slug>/<session>/subagents`. `repo` is passed only where a
-# fixture wants the observation to resolve; withholding it plants a live agent this session
-# holds no id for, which is its own refusal path.
-plant_agent() {
-  local dir="$1" aid="$2" aname="$3" repo="${4:-}"
-  local sessdir="${dir%/subagents}" sid
-  sid="${sessdir##*/}"
-  printf '{"agentType":"general-purpose","description":"a test agent","name":"%s","toolUseId":"toolu_01TEST","spawnDepth":0,"model":"opus","taskKind":"in_process_teammate"}\n' \
-    "$aname" > "$dir/agent-$aid.meta.json"
-  printf '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}\n' \
-    > "$dir/agent-$aid.jsonl"
-  rec_live "${sessdir}.jsonl" "$aname"
-  [ -n "$repo" ] && rec_roster_row "$repo" "$sid" "$aname" "$aid"
-  return 0
-}
-
 STATE_REL=".bionic/tmp/stop-check.state"
-
-# THE REAL PRODUCER, RUN FOR REAL. Its stdout — whatever it is, including nothing
-# machine-readable at all — becomes the tool_response the recorder reads.
-# CLAUDE_CONFIG_DIR is what hooks/stop-check.sh resolves its metadata root
-# through, so the fixture world is reachable without touching $HOME.
-OBS_OUT=""; OBS_ST=0
-run_observation() {  # <sid> <config-dir> <repo> <args…>
-  local sid="$1" cfg="$2" repo="$3"; shift 3
-  # CLAUDE_CODE_SESSION_ID IS PINNED TO THE FIXTURE'S OWN SESSION, and pinned it must be:
-  # this suite runs inside a real Claude Code session that exports a real key, and an
-  # unpinned observation would resolve against whichever session happens to run the suite.
-  #
-  # It used to be pinned EMPTY, on the reasoning that no fixture here set up a roster and so
-  # the answer was always the UNKNOWN classification. Since wave-roster-lifecycle S6 that
-  # reasoning is gone with the verdict: the key is how stop-check.sh finds the transcript
-  # carrying the live set AND the roster carrying the agent id, so an empty key resolves
-  # nothing at all and the producer prints no machine line for the recorder to copy.
-  OBS_OUT=$(cd "$repo" && CLAUDE_CONFIG_DIR="$cfg" CLAUDE_CODE_SESSION_ID="$sid" \
-    bash "$OBSERVE" "$@" 2>/dev/null); OBS_ST=$?
-  return 0
-}
-
-# observe <sid> <cfg> <repo> <transcript> <args…> — producer then recorder, end to end
-observe() {
-  local sid="$1" cfg="$2" repo="$3" tr="$4"; shift 4
-  run_observation "$sid" "$cfg" "$repo" "$@"
-  run_rec "$(mk_bash_post "$sid" "$tr" "$repo" "bash ~/.claude/hooks/stop-check.sh $*" "$OBS_OUT")"
-}
-
-# ============================================================
-section "Section 1: the hot path — relevance before the expensive work (checklist A7)"
-# ============================================================
-
-IFS='|' read -r W1_REPO W1_TR W1_SUB W1_CFG <<< "$(make_world w1 yes)"
-plant_agent "$W1_SUB" "aquiet-reviewer-deadbeefdeadbeef" "quiet-reviewer" "$W1_REPO"
-
-run_rec "$(jq -n --arg c "$W1_REPO" '{session_id:"x", cwd:$c, hook_event_name:"PostToolUse", tool_name:"Read", tool_input:{file_path:"/tmp/x"}, tool_response:{}}')"
-
-run_rec "$(mk_bash_post "$SID_A" "$W1_TR" "$W1_REPO" "ls -la && git status" "README.md")"
-
-# Static order pin: the cheap relevance test must PRECEDE the expensive work in
-# the source, not merely produce the same answer (arch-perf F8/F9 — the defect
-# was cost, which behaviour alone cannot detect). This script is registered on
-# every Bash call in the session, so the resolution on the unrelated path is the
-# whole cost.
-#
-# What this script actually
-# spends on an unrelated Bash call today is the git resolution and, below the
-# pressure sample, the state-path resolution, the symlink guards and the roster
-# read — so those are what the order pin names.
-# RE-POINTED AGAIN (epic-23 wave-15, REQ-2). The cheap relevance test WAS the machine-line
-# grep over the tool's whole stdout; the observation record is deleted and a Bash payload now
-# reaches the pressure sample and leaves. What still has to come before the git resolution is
-# the arm dispatch itself — the read that decides which of the two remaining arms, if either,
-# this payload belongs to.
-_rel_line=$(grep -n '^IS_START=""' "$REC" | head -1 | cut -d: -f1)
-# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f): the git resolution is `bionic_context`'s
-# now, and the literal this line greps for is the call rather than the assignment it
-# replaced. The `expect_nonempty` below is what stops the same silent-empty failure this
-# section's own comment records — it is the reason the grep literal is re-pointed rather
-# than deleted.
-_root_line=$(grep -n '^bionic_context' "$REC" | head -1 | cut -d: -f1)
-# THE CODE, NOT ITS BANNER (S11). This first read the `THE EARLY EXIT, RESTORED`
-# comment, and a planted regression that MOVED the exit block below the state
-# paths left the banner where it was and the pin stayed green. A source-order pin
-# has to grep the line that runs.
-_exit_line=$(grep -nF 'if [ -z "$IS_START" ] && [ "$TOOL_NAME" = "Bash" ]; then' "$REC" | head -1 | cut -d: -f1)
-_state_line=$(grep -n 'STATE_DIR="$BIONIC_ROOT/.bionic/tmp"' "$REC" | head -1 | cut -d: -f1)
-
-# Every line number is asserted non-empty BEFORE it is compared: a grep that
-# finds nothing yields the empty string, and `test "" -lt ""` is an error rather
-# than a comparison — an order pin over two empty values pins nothing, which is
-# exactly what this section had.
-expect_nonempty "the cheap relevance test is findable in the recorder's source (the arm dispatch)" "$_rel_line"
-expect_nonempty "the git resolution is findable in the recorder's source (bionic_context)" "$_root_line"
-expect_nonempty "the restored early exit is findable in the recorder's source" "$_exit_line"
-expect_nonempty "the state-path resolution is findable in the recorder's source" "$_state_line"
-expect_true "the relevance test PRECEDES the git resolution, not merely in effect" \
-  test "$_rel_line" -lt "$_root_line"
-expect_true "the early exit PRECEDES the state paths, the symlink guards and the roster read" \
-  test "$_exit_line" -lt "$_state_line"
-
-# The plan walk really is absent — asserted, not assumed, and paired with the
-# same grep over a script that DOES walk, so "no match" cannot mean "the pattern
-# is broken".
-_walk_pat='^[[:space:]]*(PLAN=|for d in "\$DOCS_ROOT)'
-expect_empty "the recorder walks no plan directory at all (the run predicate is gone)" \
-  "$(grep -nE "$_walk_pat" "$REC" | head -1)"
-expect_nonempty "…and the same pattern DOES find the walk in a hook that walks (not a broken pattern)" \
-  "$(grep -nE "$_walk_pat" "$HERE/dispatch-preflight.sh" | head -1)"
-
-# Outside an active wave the script is inert, like every other gate in this
-# family (spec §Component boundaries: "Inert when no wave is active").
-#
-# THE ROSTER ROW IS PLANTED HERE TOO (S11). Until this task the nowave world
-# planted an agent WITHOUT its roster row, so the observation resolved nothing
-# and the world would have recorded nothing whether a wave was active or not:
-# the inertness this section names was never the reason for the silence. With
-# the row planted, the only difference between this world and the paired
-# positive below is the active wave.
-# THE INERTNESS CLAIM MOVED TO THE ARM THAT STILL WRITES (epic-23 wave-15, REQ-2). It was
-# driven here on the Bash channel — an observation outside an active wave recorded nothing —
-# and that channel writes nothing at all now, so the assertion would pass just as loudly on a
-# recorder that had stopped working entirely. Section 12 carries it: (a) and (b) are the same
-# dispatch over the same roster, differing only in the engagement marker, and the scope this
-# family shares is engagement rather than the plan.
 
 # ============================================================
 section "Section 6: the roster arm — intended → confirmed (AC-1, confirmation half)"

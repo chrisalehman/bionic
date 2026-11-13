@@ -343,9 +343,9 @@ _run_candidates() {
     fi
     # THE FOLDERS AT DEPTH 1, asked only whether they open: a plan under one that does not is
     # invisible to the file walk below. Depth-2 folders hold depth-3 files, out of bound.
-    # A SHELL GLOB, NOT A SECOND `find`: tests/hook-latency.test.sh §6 pins this walk at one
-    # `find` fork, and the file walk's `find` line stays the one line cross-gate §S.2 and the
-    # fixture battery's `depth-1` mutation anchor on. The hidden-name pattern is there because
+    # A SHELL GLOB, NOT A SECOND `find`: this walk costs one `find` fork, and the file walk's
+    # `find` line stays the one line cross-gate §S.2 and the fixture battery's `depth-1` mutation
+    # anchor on. The hidden-name pattern is there because
     # `find` descends dot-folders too; a symlink is skipped because `find` does not follow it,
     # and an unmatched pattern stays literal and fails `-d`.
     for f in "$d"/*/ "$d"/.[!.]*/; do
