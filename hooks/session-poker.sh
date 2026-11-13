@@ -428,7 +428,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh decisions rule D<n> '<reply>'   during a run, on the user's reply, append the ruling, its reply and who said it, to the run's log and close the decision's ask; approve D<n> and a release approval card's reply rule through the same writer; a decision already ruled is refused"
   die "  bash ${HOOK_DIR}/session-poker.sh brief <row> [<name>]   render the dispatch brief of that plan row into record/<wave>/briefs/<name>.md (<name> the agent's, else the fill's for the row): the scaffold from the row, the judgment from the task's own section of the plan, the review range, Questions and Lands-red from the reader; it never rewrites a brief it did not render, and never changes the plan"
   die "  bash ${HOOK_DIR}/session-poker.sh debt add <record> [<plan>]   append one debt to the run's log per debt: line of the record (a review's, a writer's, an assumptions.md hole line), each concept and kind once"
-  die "  bash ${HOOK_DIR}/session-poker.sh debt touched <concept> [<plan>]   add one to the touches of each unburned item of <concept> (the dispatch wall's call)"
+  die "  bash ${HOOK_DIR}/session-poker.sh debt touched \"<concept> [<concept>…]\" [<plan>]   add one to the touches of each unburned item of each <concept>, the run read once (the dispatch wall's one call)"
   die "  bash ${HOOK_DIR}/session-poker.sh debt burn <concept> <row> [<plan>]   mark each unburned item of <concept> burned by <row>"
   die "  bash ${HOOK_DIR}/session-poker.sh debt adopt <continuation> [<plan>]   append each debt: line the continuation carries under ## Deferrals to the run's log as a debt, its touches and its raising record kept"
   die "  bash ${HOOK_DIR}/session-poker.sh debt list [<plan>]   print the run's debts, one line each, burned ones too"
@@ -983,7 +983,14 @@ $1"; shift ;;
                DEBT_PLAN_ARG="${1:-}" ;;
       *) usage "debt takes add, adopt, touched, burn or list." ;;
     esac
-    [ "$DEBT_SUB" = add ] || [ "$DEBT_SUB" = adopt ] || case "$DEBT_A$DEBT_B" in *'|'*|*' '*|*'	'*) usage "a debt concept or row is one word, with no | in it." ;; esac
+    # `touched` takes every concept of one dispatch in its one operand, blank-separated, so the run is read once for all
+    # of them; no concept holds a blank, so the list is unambiguous. Every other operand is one word.
+    case "$DEBT_SUB" in
+      add|adopt) : ;;
+      touched) case "$DEBT_A" in *'|'*|*'	'*) usage "a debt concept is one word, with no | in it; touched takes several, blank-separated." ;; esac
+               [ -n "${DEBT_A// /}" ] || usage "debt touched takes a concept." ;;
+      *) case "$DEBT_A$DEBT_B" in *'|'*|*' '*|*'	'*) usage "a debt concept or row is one word, with no | in it." ;; esac ;;
+    esac
     ;;
   *) usage "unknown verb: $VERB" ;;
 esac
