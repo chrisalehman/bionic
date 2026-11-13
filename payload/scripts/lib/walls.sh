@@ -4065,6 +4065,35 @@ Fix: repair each row named above; the columns are $(units_columns 1)"
   return 0
 }
 
+# Epic merge-target consistency (LOG-ONLY, check-id `merge-target`).
+# On a wave-scale plan naming an `epic:`, when the epic plan exists and
+# declares an `integration-branch:` in its ## SDLC State, a mismatch with this
+# plan's integration-branch logs a finding. Never blocks. First cross-file read
+# in this hook — read-only, fail-open (missing epic plan / missing key → no
+# finding). Fires at the integrate step.
+# [INSTRUMENT]
+validate_merge_target() {
+  local epic epic_plan epic_branch this_branch
+  epic=$(frontmatter_get epic)
+  [ -n "$epic" ] || return 0
+  epic_plan="$DOCS_ROOT/plans/$epic/epic.plan.md"
+  [ -r "$epic_plan" ] || return 0
+  # Both branches are lib/plan.sh `plan_integration_branch`'s answer, the one reader close-out, the card and the
+  # handoff ask: ## SDLC State, fenced lines unread, then the frontmatter.
+  # [INSTRUMENT]
+  wall_libs evidence-gate plan.sh || return 0
+  epic_branch=$(plan_integration_branch "$epic_plan")
+  [ -n "$epic_branch" ] || return 0
+  this_branch=$(plan_integration_branch "$PLAN")
+  if [ -n "$this_branch" ] && [ "$this_branch" != "$epic_branch" ]; then
+    log_finding merge-target "plan integration-branch '$this_branch' != epic '$epic' integration-branch '$epic_branch'"
+  fi
+  return 0
+}
+
+# The integrate step, where the merge target is asked.
+INTEGRATE_STEP=8
+
 dispatch() {
   # Audited multi_agent wave: D7 dispatched-task ledger PRESENCE, at every step
   # that reaches this dispatcher (guarded internally; no-op otherwise).
@@ -4075,6 +4104,7 @@ dispatch() {
     [ "$(walk_mode)" = exempt ] || validate_walk_artifact
     validate_environments ;;
   esac
+  [ "$CURRENT" = "$INTEGRATE_STEP" ] && validate_merge_target
   case "${CURRENT%[ab]}" in 6|7|8|9) _eg_refuse_readings "the run" "$RIGOR"; _eg_refuse_floor_absent "the run" ;; esac
   _eg_v15_refuse
   case "${CURRENT%[ab]}" in 5|6|7|8|9) validate_matrix ;; esac

@@ -21,9 +21,10 @@ section "§HAND-HOLDS — wave-35 T12 (REQ-8 AC-8.1, D17): the hand-hold count i
 # ============================================================
 # close-out prints the `landing-report --hand-holds` line on its card and writes it into the continuation under `## Hand-holds`.
 # Each kind is counted from the line its verb wrote, the fixture plants each in its writer's shape (an amend, a hold, an
-# extension and an adoption as the hand event in the run's log, the plan's proof lines through lib/proof.sh), and a prose
-# line saying `by-hand` counts nothing. A roster row's `amended=`, `held=`, `extended=` or `adopted_from=` with no event
-# beside it is no act, and the tmp wipe that takes the rosters takes nothing the line counts.
+# extension and an adoption as the hand event in the run's log, the proofs, the waiver and the approval through
+# lib/proof.sh's writers), and a prose line saying `by-hand` counts nothing. A roster row's `amended=`, `held=`,
+# `extended=` or `adopted_from=` with no event beside it is no act, and the tmp wipe that takes the rosters takes nothing
+# the line counts.
 # HH_GATE: hoisted to tests/close-out.prelude.sh (a later part reads it)
 HH_C="$(printf 'd%.0s' $(seq 40))"
 # The report reads from the last build landing, the second build row's at 10:40, so the decline, the lift, the 10:00
@@ -67,27 +68,27 @@ hh_plant() {
     roster_row_fixture status=identified name=w-x agent_id=ax plan="$plan" extended="2026-10-06T12:40:00Z more work"
     roster_row_fixture status=identified name=w-y agent_id=ay source=adopted adopted_from=old-sid plan="$plan"
   } >> "$p/.bionic/tmp/roster-fixture.state"
-  # the plan: a second floor, a waive, a waive-row, and the prose and an old approve regression-2 line that count nothing
+  # the run's log: a second floor, a waiver of a question and an approval of a second regression, each by its writer, and
+  # a criterion block's waiver as a run brought forward carries it, a hand act placed by its day alone
   h="$(bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; proof_last "$2" floor' _ "$REPO_ROOT/payload/scripts/lib" "$plan")"
-  expect_nonempty "HH-0a precondition: the fixture plan already holds one floor proof, whose head the second reuses" "$h"
+  expect_nonempty "HH-0a precondition: the fixture run already holds one floor proof, whose head the second reuses" "$h"
   bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
-    plan="$2"; h="$3"
-    proof_add_line "$plan" "$(proof_line regression "$h" 2026-10-06T13:00:00Z record/wave-01-fixture/floor-2.log)" > "$plan.pf" && mv "$plan.pf" "$plan"
-    proof_add_line "$plan" "$(proof_waiver_line evidence "$h" "Chris Lehman" 2026-10-06T13:10:00Z "waive it")" > "$plan.pf" && mv "$plan.pf" "$plan"' \
-    _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h"
+    LOG_AT=2026-10-06T12:00:00Z proof_approval_event "$2" regression-2 "by=Chris Lehman" said=yes \
+      && LOG_AT=2026-10-06T13:00:00Z proof_event "$2" kind=regression "head=$3" evidence=record/wave-01-fixture/floor-2.log \
+      && LOG_AT=2026-10-06T13:10:00Z proof_waiver_event "$2" question=evidence "head=$3" "by=Chris Lehman" "said=waive it"' \
+    _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h" || echo "hh_plant: a writer refused an event in '$p'" >&2
+  printf 'run/v1|ev=hand|ac=AC-1|what=waive-row|by=Chris Lehman|said=waive the row|at=2026-10-06\n' >> "$rec/run.log"
+  # the plan: prose naming each kind, and fenced lines of an older plan's shape, which count nothing
   w="$(mktemp "$SANDBOX/hh-plan.XXXXXX")"
   awk '
-    /^approved-by:/ { print; print "approved: regression-2 by Chris Lehman 2026-10-06T12:00:00Z \"yes\""; next }
-    /^- Step 8:/ { print "- T1: landed by-hand (kind=hand) after waived: evidence; approved: regression-2 was discussed"
-                   print; next }
-    /^## Tasks/ { print "```"; print "proved: kind=regression head=0123456789abcdef at=2026-10-06T14:00:00Z evidence=x"
+    /^## Tasks/ { print "- T1: landed by-hand (kind=hand) after waived: evidence; approved: regression-2 was discussed"
+                  print "  waiver: someone said we might waive this later"; print ""
+                  print "```"; print "proved: kind=regression head=0123456789abcdef at=2026-10-06T14:00:00Z evidence=x"
                   print "approved: regression-2 by Someone 2026-10-06T14:00:00Z \"quoted in a fence\""
                   print "waived: question=adversarial head=0123456789abcdef by Someone 2026-10-06T14:00:00Z \"fenced\""; print "\140\140\140"; print ""; print; next }
-    /^  readback:/ && !wr { print; print "  waiver: Chris Lehman 2026-10-06 \"waive the row\" — fixture"
-                            print "  waiver: someone said we might waive this later"; wr = 1; next }
     { print }' "$plan" > "$w" && mv "$w" "$plan"
 }
-PH="$(CO_PLAN_AT=14 mk_fixture handholds)"; advance_to "$PH" 8
+PH="$(mk_fixture handholds)"; advance_to "$PH" 8
 hh_plant "$PH"
 HH_OUT="$(hh_report "$PH" --hand-holds)"
 expect_eq "HH-1 landing-report --hand-holds prints the hand-holds line, every kind counted from its own line" "$HH_WANT" \
@@ -135,7 +136,7 @@ expect_contains "HH-13 AC-2.3 one ev=stop-run reads stop-runs=1 · by-hand=0 on 
 # T33 (D20, critic-adversarial #5; A-orch-32): an existing continuation.md is merged into, never overwritten. The
 # hand-holds line goes under ## Hand-holds (the section appended after ## Deferrals when absent), a line already
 # there is never written twice, and the person's own text is untouched. Run twice: the line is there once.
-PHE="$(CO_PLAN_AT=14 mk_fixture handholds-existing)"; advance_to "$PHE" 8; hh_plant "$PHE"
+PHE="$(mk_fixture handholds-existing)"; advance_to "$PHE" 8; hh_plant "$PHE"
 mkdir -p "$PHE/${CONT_REL%/*}"
 printf '# continuation — hand written\n\nmy own note on the close\n\n## Deferrals\n\nnone, said the person\n\n## Resume instruction\n\nedited by a person\n' > "$PHE/$CONT_REL"
 HHE_CK0="$(cksum < "$PHE/$CONT_REL")"
@@ -146,20 +147,21 @@ expect_eq "HH-9c …and the person's Resume instruction is still the last sectio
   "$(/usr/bin/grep '^## ' "$PHE/$CONT_REL" | tail -n 1)"
 expect_contains "HH-9d …and run says what it added" "added the ## Hand-holds section" "$CO_OUT"
 # a second close-out over what the first left (planted in a fresh fixture: a closed plan refuses a second run)
-PHE2="$(CO_PLAN_AT=14 mk_fixture handholds-existing2)"; advance_to "$PHE2" 8; hh_plant "$PHE2"
+PHE2="$(mk_fixture handholds-existing2)"; advance_to "$PHE2" 8; hh_plant "$PHE2"
 mkdir -p "$PHE2/${CONT_REL%/*}"; cp "$PHE/$CONT_REL" "$PHE2/$CONT_REL"
 HHE_CK1="$(cksum < "$PHE2/$CONT_REL")"
 run_close "$PHE2" run
-expect_absent "HH-10b …and the card reports no add" "added the ## Hand-holds" "$CO_OUT"
+expect_eq "HH-10b …run exits 0, its card prints the line and reports no add" "0|yes|no" \
+  "$CO_RC|$(contains "$CO_OUT" "hand-holds: total=")|$(contains "$CO_OUT" "added the ## Hand-holds")"
 # the heading is there and the line is not: the line goes under it, after what the person wrote there
-PHE3="$(CO_PLAN_AT=14 mk_fixture handholds-existing3)"; advance_to "$PHE3" 8; hh_plant "$PHE3"
+PHE3="$(mk_fixture handholds-existing3)"; advance_to "$PHE3" 8; hh_plant "$PHE3"
 mkdir -p "$PHE3/${CONT_REL%/*}"
 printf '# continuation — hand written\n\n## Deferrals\n\n## Hand-holds\n\nthe person counted two by hand\n\n## Resume instruction\n\nedited by a person\n' > "$PHE3/$CONT_REL"
 run_close "$PHE3" run
-expect_eq "HH-11a …and the Resume instruction after it is as it was" "## Resume instruction|edited by a person" \
-  "$(awk '/^## Resume instruction$/ { s = 1 } s && NF' "$PHE3/$CONT_REL" | paste -sd'|' -)"
+expect_eq "HH-11a …run exits 0, and the Resume instruction after it is as it was" "0|## Resume instruction|edited by a person" \
+  "$CO_RC|$(awk '/^## Resume instruction$/ { s = 1 } s && NF' "$PHE3/$CONT_REL" | paste -sd'|' -)"
 # the heading and the line are both there (as a person typed it, unfenced): nothing is added
-PHE4="$(CO_PLAN_AT=14 mk_fixture handholds-existing4)"; advance_to "$PHE4" 8; hh_plant "$PHE4"
+PHE4="$(mk_fixture handholds-existing4)"; advance_to "$PHE4" 8; hh_plant "$PHE4"
 mkdir -p "$PHE4/${CONT_REL%/*}"
 printf '# continuation — hand written\n\n## Deferrals\n\n## Hand-holds\n\n%s\n\n## Governed by\n\ngoverned-by: installed 0.0.0, typed by a person\n\n## Resume instruction\n\nedited by a person\n' "$HH_WANT" > "$PHE4/$CONT_REL"
 HHE_CK4="$(cksum < "$PHE4/$CONT_REL")"
@@ -172,7 +174,7 @@ ln -s "$REPO_ROOT/payload/scripts/card.sh" "$HH_MUT/scripts/card.sh"
 sed 's/^\$(co_hand_holds_section)$//' "$SCRIPT" > "$HH_MUT/scripts/close-out.sh"
 expect_eq "HH-mut0 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
   "$(diff "$SCRIPT" "$HH_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
-PHM="$(CO_PLAN_AT=14 mk_fixture handholds-mut)"; advance_to "$PHM" 8; hh_plant "$PHM"
+PHM="$(mk_fixture handholds-mut)"; advance_to "$PHM" 8; hh_plant "$PHM"
 ( cd "$PHM" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
     BIONIC_GATE_DIR="$HH_GATE" bash "$HH_MUT/scripts/close-out.sh" "$PHM/$PLAN_REL" run ) > "$SANDBOX/hh-mut.out" 2>&1
 HH_MRC=$?
@@ -619,31 +621,13 @@ expect_eq "ORDER-9b …and rendered no second part: the branch is where the firs
   "$(fixture_git "$PMO" rev-parse --verify -q refs/heads/wave/01-fixture)"
 
 # ============================================================
-section "§ADRS — close-out's epic row reads the plan's adrs:, else the Step 7 block's adr: line (REQ-9 AC-9.1)"
+section "§ADRS — close-out's epic row writes an ADR named by a path with no adr-<n> as the path (REQ-9 AC-9.1)"
 # ============================================================
-# The document step's pointer is the plan's `adrs:` header line, written by the orchestrator; an older plan may name it
-# only on its Step 7 block's `adr:` line, and close-out reads that too. An ADR path with no `adr-<n>` gives no number,
-# so the row carries the path as written. FIXTURE FIDELITY: mk_fixture's plan with its `adrs:` line taken out and its
-# Step 7 line a block carrying `adr:`, as an older plan's edit wrote it.
-# fails-when: a plan with `adr:` on its Step 7 line and no `adrs:` makes `epic_row_missing` refuse the row.
-ad_step7() {  # <project> <adr value> -> the plan without adrs:, its Step 7 line a block carrying adr: <value>
-  local plan="$1/$PLAN_REL"
-  case "$1" in "$SANDBOX"/*) : ;; *) echo "ad_step7: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
-  AD_V="$2" awk '
-    NR == 1 { fm = 1 } fm && NR > 1 && /^---$/ { fm = 0 }
-    fm && /^adrs:/ { next }
-    /^- Step 7:/ { print "- Step 7: document: the ADR is written"; print "  adr: " ENVIRON["AD_V"]; next }
-    { print }' "$plan" > "$plan.a" && mv "$plan.a" "$plan"
-}
-ad_adrs() { awk 'NR == 1 { fm = 1; next } fm && /^---$/ { exit } fm && /^adrs:/ { sub(/^adrs:[ \t]*/, ""); print }' "$1"; }
-AD_ADR="adrs/epic-fx/adr-061-the-pointer.md"
-PAD="$(CO_PLAN_AT=14 mk_fixture adrs-either)"; ad_step7 "$PAD" "$AD_ADR"; advance_to "$PAD" 8
-expect_eq "AD-0 precondition: the plan carries no adrs: line, and its Step 7 block the adr: line" "|yes" \
-  "$(ad_adrs "$PAD/$PLAN_REL")|$(/usr/bin/grep -qxF "  adr: $AD_ADR" "$PAD/$PLAN_REL" && echo yes || echo no)"
-run_close "$PAD" run
-expect_eq "AD-1 close-out reads the Step 7 adr: line: run exits 0 and the epic row's ADR cell names its number" "0|061" "$CO_RC|$(adr_cell "$PAD")"
-[ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | /usr/bin/grep -i 'adrs\|refuse' | head -4 | sed 's/^/    | /'
-PAP="$(CO_PLAN_AT=14 mk_fixture adrs-path)"; ad_step7 "$PAP" "record/wave-01-fixture/adr.md"; advance_to "$PAP" 8
+# The document step's pointer is the plan's `adrs:` header line, written by the orchestrator. An ADR path with no
+# `adr-<n>` gives no number, so the row carries the path as written. FIXTURE FIDELITY: mk_fixture's plan with its
+# `adrs:` line naming a record by path, as set_plan_keys writes a header key.
+# fails-when: a value with no adr-<n> is refused by `epic_row_missing` or written as no ADR.
+PAP="$(mk_fixture adrs-path)"; set_plan_keys "$PAP" - "adrs: record/wave-01-fixture/adr.md"; advance_to "$PAP" 8
 run_close "$PAP" run
 expect_eq "AD-5 a path with no adr-<n>: the epic row is written, its ADR cell the path, never refused" "0|record/wave-01-fixture/adr.md" "$CO_RC|$(adr_cell "$PAP")"
 
@@ -662,7 +646,7 @@ for _f in pah_world pah_cont_state; do
 done
 expect_eq "REG-0 the builders were read out of tests/proof-at-head.test.sh" "" "$REG_MISSING"
 PAH_LIB="$REPO_ROOT/payload/scripts/lib"
-CO_PLAN_AT=14 pah_world reg-red "notify.test.sh,rehearsal-failed-review.test.sh,shell-lint.test.sh,sitrep.test.sh" 2
+CO_PLAN_AT=15 pah_world reg-red "notify.test.sh,rehearsal-failed-review.test.sh,shell-lint.test.sh,sitrep.test.sh" 2
 run_close_as reg-close "$PAH_P" run
 expect_eq "REG-1 close-out delivers over the run (exit 0), its continuation holding a regression line" "0|1" \
   "$CO_RC|$(/usr/bin/grep -c 'the regression: ' "$PAH_P/$CONT_REL" 2>/dev/null)"
