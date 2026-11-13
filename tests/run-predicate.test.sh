@@ -193,10 +193,10 @@ P=$(mk_plan "$R5" "open-8a.plan.md" "8a")
 call_run_open "$P"
 expect_eq "run_open: current: 8a -> exit 0 (the sub-step letter is stripped)" 0 "$RO_ST"
 
-P=$(plan_fixture "$R5/.bionic/docs/plans/task-4.plan.md" task)
+P=$(plan_fixture --at 14 "$R5/.bionic/docs/plans/task-4.plan.md" task)
 call_run_open "$P"
 expect_eq "run_open: task scale, current: 4 -> exit 0 (open, as at wave scale)" 0 "$RO_ST"
-P=$(plan_fixture --current T3 "$R5/.bionic/docs/plans/task-t3.plan.md" task)
+P=$(plan_fixture --at 14 --current T3 "$R5/.bionic/docs/plans/task-t3.plan.md" task)
 call_run_open "$P"
 expect_eq "run_open: task scale, current: T3 -> exit 0 (the retired pointer, kept open so it is refused by name)" 0 "$RO_ST"
 

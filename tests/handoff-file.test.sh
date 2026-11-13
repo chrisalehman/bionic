@@ -172,7 +172,7 @@ hf_world() {
   git -C "$HF_R" branch -f wave/01-fixture HEAD
   HF_INT="$(git -C "$HF_R" rev-parse trunk)"
   HF_WORK="$(git -C "$HF_R" rev-parse wave/01-fixture)"
-  HF_P="$(s42_plan "$HF_R" 4)"
+  HF_P="$(SP_PLAN_AT=14 s42_plan "$HF_R" 4)"
   awk -v w="$HF_WORK" '
     NR == 1 && $0 == "---" { print; print "working-branch: wave/01-fixture"; print "integration-branch: trunk"; next }
     /^approved-by:/ { print; print "proved: kind=floor head=" w " at=2026-10-08T11:00:00Z evidence=record/old-floor.log"

@@ -59,8 +59,8 @@ ll_world() {  # -> a world root; its plan admitted by the real commit gate (the 
   r="$(world_repo)" || return 1
   [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
   p="$r/.bionic/docs/plans/epic-x/wave-x.plan.md"
-  # LL_WORLD_AT=15 asks for this run at 15: the page keeps its header and authored cells, the log holds the rest.
-  if [ "${LL_WORLD_AT:-14}" = 15 ]; then
+  # Unasked, this run is at 15: the page keeps its header and authored cells, the log holds the rest. LL_WORLD_AT=14 asks for 14.
+  if [ "${LL_WORLD_AT:-15}" = 15 ]; then
     awk -F'|' '/^## SDLC State$/ { s = 1; next } /^## / { s = 0 } s { next }
       /^working-branch: / { print; print "canonical_sdlc_version: 15"; next }
       /^\| id \|/ { print "| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|"; getline; next }

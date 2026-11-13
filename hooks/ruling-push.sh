@@ -22,9 +22,9 @@
 # THE FAST PATH IS ONE FILE TEST. It runs on every tool call of every agent in every session, so
 # while nothing is pending it reads no stdin and forks nothing: the session key and the project root
 # come from the environment the CLI gives every hook (`CLAUDE_CODE_SESSION_ID`, `CLAUDE_PROJECT_DIR`),
-# and the pending flag beside the roster (`ruling_pending_flag`) is absent. tests/hook-latency.test.sh
-# §10 counts it. With either variable unset (a hand run) the payload's `session_id` and `cwd` stand in,
-# the cwd through the library's root walk, which a worktree's cwd needs.
+# and the pending flag beside the roster (`ruling_pending_flag`) is absent. With either variable
+# unset (a hand run) the payload's `session_id` and `cwd` stand in, the cwd through the library's
+# root walk, which a worktree's cwd needs.
 #
 # RESIDUAL, NAMED: a session started below its project's root has a CLAUDE_PROJECT_DIR with no
 # `.bionic` and gets no push. A call made before SubagentStart has joined the writer's id to its row

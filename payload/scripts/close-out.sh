@@ -501,8 +501,14 @@ command -v jq  >/dev/null 2>&1 || _co_refuse "jq is not on PATH — the gate dry
 # `wt_unreached` (below) reports none. A wave or epic plan's cell is its pattern, whose `<NN>` is the
 # number the census scopes to. A plan with no `scale:`, or one the profile does not hold, is read at
 # the wave row, the default scale, which is the refusal it met before the profile.
+# THE REGISTER IS THE RUN'S, AT EITHER VERSION. A table with the column holds it; so does a plan at 15, whose trees are the
+# run's tree events and whose table holds no such column, and so does any run whose log holds a tree fact. Only a table at
+# 14 with neither column nor fact has no register, and only it takes the fallback and needs the wave number.
+CO_REGISTER=0
+if units_has_column "$PLAN" worktree || [ "$(plan_read_header "$PLAN" canonical_sdlc_version 2>/dev/null)" = canonical_sdlc_version=15 ] \
+  || [ -n "$(co_facts tree path 2>/dev/null)" ]; then CO_REGISTER=1; fi
 WT_NUM=""
-if ! units_has_column "$PLAN" worktree; then
+if [ "$CO_REGISTER" = 0 ]; then
   if ! WT_NUM="$(scale_branch_number "$CO_SCALE" "$WORKING")"; then
     _co_refuse "the plan's working-branch '$WORKING' is not $(scale_cell "$CO_SCALE" branch) shaped (the $CO_SCALE scale's branch cell) — the worktree census needs a wave number to scope wt/NN-* to"
   fi
@@ -642,7 +648,7 @@ wt_branches() {
 # trip on a DIFFERENT wave's leftover branch; `wt/<NN>-*` cannot.
 wt_unreached() {
   local b _co_cherry candidates
-  if units_has_column "$PLAN" worktree; then
+  if [ "$CO_REGISTER" = 1 ]; then
     candidates="$(wt_branches)"
   elif [ -z "$WT_NUM" ]; then
     candidates=""

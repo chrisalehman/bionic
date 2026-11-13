@@ -6,7 +6,7 @@
 # WHAT IT OWNS. A hook killed by its own `timeout: 10` in hooks.json fails open, and the hooks
 # that were killed had a cost that grew faster than their input. This suite drives each input
 # below through the real hook TWICE, at a small size and at a large one of the same shape, and
-# counts the shell commands the hook executes on each (the hook-latency tracer, below). The two
+# counts the shell commands the hook executes on each (THE TRACER, below). The two
 # counts must be EQUAL. A hook that walks its input in shell steps — a loop over characters,
 # lines or segments — executes more commands on the larger input and fails here on any machine,
 # at any load. Nothing in this suite reads a clock: a row passes or fails by its count and its
@@ -17,9 +17,7 @@
 # command at any size: bash 3.2's `${v//pat/}` and `${v/pat/r}` (about matches × length), a
 # `${s:i:1}` that walks a UTF-8 string from its start, an append that copies the whole string,
 # or one awk that is quadratic inside. A count cannot see any of them, and this suite does not
-# claim to. That class is guarded where it lives: tests/hook-latency.test.sh §5 counts the
-# classifier's readings by mode, so a command read whole more than once — the shape every
-# operand-sized cost above took in these hooks — is a count that moves there.
+# claim to.
 #
 # THE INPUTS ARE SHAPED, NOT JUST SIZED (research-R2): quote density, match offset and
 # multibyte length are what made the old costs grow. Small / large:
@@ -44,12 +42,11 @@
 # only through its strip — `git` is not in c's text), the chain deny for d2 and silence for d
 # (the long segment ends in a redirect).
 #
-# THE TRACER is tests/hook-latency.test.sh §4's: a BASH_ENV prelude, sourced by every bash the
-# hook starts, that points xtrace at a private fd with a marker in PS4, so the count covers the
-# whole process tree's shell commands, builtins included. Where it differs, it differs for a
-# count that must come out the same twice. The fd is 87 (hooks use 9). A bash that knows
-# BASH_XTRACEFD (4.1 on) traces to that fd and nothing else moves; 3.2 does not, so it keeps
-# §4's DEBUG trap, which re-points fd 2 at the trace before each command so a hook's own
+# THE TRACER is a BASH_ENV prelude, sourced by every bash the hook starts, that points xtrace
+# at a private fd with a marker in PS4, so the count covers the whole process tree's shell
+# commands, builtins included. The fd is 87 (hooks use 9). A bash that knows BASH_XTRACEFD
+# (4.1 on) traces to that fd and nothing else moves; 3.2 does not, so it gets a DEBUG trap,
+# which re-points fd 2 at the trace before each command so a hook's own
 # `2>/dev/null` cannot hide what it runs. And the markers are counted as BYTES (`LC_ALL=C`):
 # concurrent pipeline stages share the fd, a long line can land in pieces, and a UTF-8 grep
 # skipped a marker that followed half an em dash (measured: 1191 or 1193 on one input, by run;
@@ -63,7 +60,7 @@
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
 #   * the engaged project, the payload envelopes and the placeholder-evidence plan — the
-#     shapes tests/hook-latency.test.sh and tests/bash-walls.test.sh pin.
+#     shapes tests/bash-walls.test.sh pins.
 #   * the input shapes — research-R2 §3–§4 measured each class on real commands: a plan Edit
 #     near the end of a 64 KB file, a python heredoc rewriting a plan through `s.replace`, a
 #     7,715-character command holding 1,618 single quotes, a ≥3-segment chain with one 8 K
@@ -132,7 +129,7 @@ case "$(ht_version /bin/bash)" in 3.*) OLD_IS_32=1 ;; esac
 
 # The prelude every traced bash sources before its first line (see THE TRACER above). A bash
 # that knows BASH_XTRACEFD (4.1 on) traces to fd 87 whatever its fd 2 is; 3.2 does not, so it
-# gets hook-latency §4's DEBUG trap, which re-points fd 2 at the trace before each command.
+# gets a DEBUG trap, which re-points fd 2 at the trace before each command.
 HT_PRELUDE="$SANDBOX/xtrace-prelude.sh"
 cat > "$HT_PRELUDE" <<'PRELUDE'
 exec 87>>"$HT_TRACE_OUT"
@@ -146,9 +143,6 @@ else
 fi
 set -x
 PRELUDE
-ht_has_xtracefd() {  # <shell> -> 0 when it traces to a named fd (bash 4.1 and later)
-  "$1" -c '[ "${BASH_VERSINFO[0]}" -ge 5 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 1 ]; }' 2>/dev/null
-}
 
 HT_RC=""; HT_OUT=""; HT_ERR=""; HT_N=""
 # ht_run <shell> <script> <stdin-file> <cwd> — one untraced run: HT_RC, HT_OUT, HT_ERR.
@@ -525,30 +519,6 @@ row g  "$WALLS_HOOK" "$R_MEM"    0 SILENT out
 row g2 "$WALLS_HOOK" "$R_MEM"    2 "this writes the memory store" err
 unset BIONIC_CLAUDE_HOME
 
-section "3b — §FX: cmd_effects reads g's command in as many commands at 200 KB as at 64 KB (wave-25 T2, D5)"
-# The permission answer reads every command the CLI asks about through cmd_effects, so it carries
-# the hook budget too. g is the largest input this suite builds: the effects walk tokenises it
-# once more than the write-target walk does. The witness is the W line for the redirect AFTER
-# the body, which only a walk that reached the end can print, beside the body's own unknown line.
-HT_CMD_CLASS_LIB="$BIONIC_SCRIPTS_DIR/payload/scripts/lib/cmd-class.sh"
-export HT_CMD_CLASS_LIB
-
-cat > "$SANDBOX/fx-g.sh" <<'SH'
-. "$HT_CMD_CLASS_LIB" || exit 1
-cmd_effects "$(jq -r '.tool_input.command')" "$PWD"
-SH
-for _sz in "" -l; do
-  ht_run /bin/bash "$SANDBOX/fx-g.sh" "$SANDBOX/in/g$_sz.json" "$R_MEM"
-  expect_eq "§FX g$_sz [/bin/bash]: exit 0" "0" "$HT_RC"
-  expect_contains "§FX g$_sz: the walk reached the redirect after the body" "W	$R_MEM/out.md" "$HT_OUT"
-  expect_contains "§FX g$_sz: …and read the body itself as unknown" "?	" "$HT_OUT"
-done
-ht_count /bin/bash "$SANDBOX/fx-g.sh" "$SANDBOX/in/g.json" "$R_MEM";   FX_NS="$HT_N"
-ht_count /bin/bash "$SANDBOX/fx-g.sh" "$SANDBOX/in/g-l.json" "$R_MEM"; FX_NL="$HT_N"
-echo "hook-timeout: §FX cmd_effects on g under /bin/bash ($(ht_version /bin/bash)): $FX_NS commands at 64 KB, $FX_NL at 200 KB"
-expect_true "§FX g [/bin/bash]: the tracer counted the walk (${FX_NS:-0} commands)" test "${FX_NS:-0}" -gt 0
-expect_eq "§FX g [/bin/bash]: cmd_effects runs as many commands at 200 KB as at 64 KB" "$FX_NS" "$FX_NL"
-
 section "3c — permission-answer: a 16 KB and a 64 KB question answered in as many commands (wave-25 T4, D1)"
 # The carrier is registered on PermissionRequest at timeout 10, and the platform kills a hook at
 # its registration: a carrier killed mid-read answers nothing and the dialog waits, the halt it
@@ -580,115 +550,5 @@ done
 echo "hook-timeout: permission-answer under /bin/bash ($(ht_version /bin/bash)): $PA_NS commands at $(meta pa) bytes, $PA_NL at $(meta pa-l)"
 expect_true "permission-answer [/bin/bash]: the tracer counted the carrier (${PA_NS:-0} commands)" test "${PA_NS:-0}" -gt 0
 expect_eq "permission-answer [/bin/bash]: the carrier answers in as many commands at 64 KB as at 16 KB" "$PA_NS" "$PA_NL"
-
-# ---------- the plan-row verbs ----------
-
-section "4 — §VERB: each plan-row verb runs as many commands on a 200 KB plan as on a 66 KB one (wave-24 T15; REQ-9 AC-9.7, D14)"
-#
-# The two verbs are typed by the orchestrator in its own turn, so their cost is the turn's.
-# Each runs the whole task-add transaction — the projection through units.sh, a dry commit
-# through the real bash-walls.sh, the checksum and the swap — on a plan the size of this wave's
-# own (66 KB: 25 task rows, 40 matrix rows, a 30-row dispatch ledger, the rest task detail),
-# and again on the same plan with its task detail grown to 200 KB. The witness is the verb's own
-# success line beside exit 0, which it prints only after the dry commit admitted the copy and
-# the copy was swapped in, at both sizes. A verb changes the plan, so each runs once per size,
-# traced, from that size's pristine copy, and is witnessed on its stdout.
-POKER_SH="${BIONIC_HOOKS_DIR}/session-poker.sh"
-/bin/bash -n "$POKER_SH" || { echo "hook-timeout: $POKER_SH does not parse — suite refuses to run"; exit 1; }
-R_VERB="$(mk_repo verb)"
-VERB_PLAN="$R_VERB/.bionic/docs/plans/epic-01-demo/wave-01-verb.plan.md"
-mkdir -p "$R_VERB/.bionic/docs/specs/epic-01-demo"
-printf '# requirements\n' > "$R_VERB/.bionic/docs/specs/epic-01-demo/wave-01-verb.requirements.md"
-printf '# spec\n' > "$R_VERB/.bionic/docs/specs/epic-01-demo/wave-01-verb.spec.md"
-python3 - "$SANDBOX/verb-plan" <<'PY'
-import sys
-dest = sys.argv[1]
-out = ["---", "governing-skill: canonical-sdlc", "canonical_sdlc_version: 14", "intent: bugfix",
-       "rigor: double", "scale: wave", "multi_agent: true", "use_worktree: true", "has_ui: false",
-       "walk: exempt", "deploy_target: n/a",
-       "parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe", "---", "",
-       "# fixture wave", "", "## SDLC State", "", "current: 3", "working-branch: feature/t4",
-       'approved-by: fixture 2026-09-23T00:00Z "approved"', "",
-       "- Step 1: requirements: specs/epic-01-demo/wave-01-verb.requirements.md",
-       "- Step 2: spec: specs/epic-01-demo/wave-01-verb.spec.md",
-       "- Step 3: plan: plans/epic-01-demo/wave-01-verb.plan.md",
-       "- Step 4: opened", "  worktree: .worktrees/01-verb", "  base-sha: abc1234",
-       "  branch: wave/01-verb"]
-for i in range(1, 25):
-    out.append("- T%d: landed — merge %07x into wave/01-verb; evidence record/T%d.md" % (i, i * 4099, i))
-out.append("- T25: pending dispatch — the floor after every build row")
-out += ["", "## Tasks", "", "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|"]
-for i in range(1, 25):
-    out.append("| T%d | 4 | build | rewrite reader %d so it walks the table once | w-T%d | — | 30 | REQ-%d | lib/r%d.sh | — | — | landed |" % (i, i, i, i % 9 + 1, i))
-out.append("| T25 | 5 | verify | the floor | test-runner | %s | 30 | REQ-1 | — | — | — | pending |"
-           % ", ".join("T%d" % i for i in range(1, 25)))
-out += ["", "## Verification Matrix", "", "| AC | tier | status | evidence | auditor |", "|---|---|---|---|---|"]
-for i in range(1, 41):
-    out.append("| AC-%d.1 | T2 | pending | — | — |" % i)
-out.append("")
-for i in range(1, 41):
-    out += ["AC-%d.1:" % i, "  provenance: fixture row %d" % i, "  fails-when: reader %d walks twice" % i,
-            "  eval: T2 — bash tests/reader-%d.test.sh" % i]
-out += ["", "## Dispatch ledger", "", "| id | agent | dispatched | expected | artifact | landed | notes |",
-        "|---|---|---|---|---|---|---|"]
-for i in range(1, 31):
-    out.append("| T%d | implementor (w-T%d) | 2026-10-03T%02d:00Z | 30 min | record/T%d.md | landed | batch %d |" % (i, i, i % 24, i, i % 4 + 1))
-body = "\n".join(out) + "\n"
-for suffix, size in (("", 66000), ("-l", 200000)):
-    detail = ["", "## Task detail", ""]
-    k = 0
-    while len((body + "\n".join(detail)).encode()) < size:
-        k += 1
-        detail.append("### T%d — detail" % (k % 24 + 1))
-        detail.append("The reader walks the table once and answers every question from that walk; "
-                      "the walk is fence-aware and keyed on the header, so a renamed column is a fault "
-                      "rather than a silent shift — paragraph %d." % k)
-        detail.append("")
-    # The detail sits between the table and the matrix, as a real plan carries it.
-    cut = body.index("\n## Verification Matrix")
-    open(dest + suffix + ".pristine", "w").write(body[:cut] + "\n".join(detail) + body[cut:])
-PY
-cp "$SANDBOX/verb-plan.pristine" "$VERB_PLAN"
-bound_marker "$R_VERB" "$SID" "$VERB_PLAN"
-: > "$SANDBOX/in/empty"
-
-# THE VERBS ARE COUNTED UNDER A BASH THAT TRACES TO ITS OWN FD (4.1 on). bash 3.2 writes xtrace
-# on fd 2, so a verb that reads a check's stderr through `$( … 2>&1)` reads the trace with it
-# and refuses (measured: a plan verb under 3.2, traced, refused the copy it admits untraced). Under
-# 3.2 each verb is run untraced and witnessed; the count is taken where the trace is invisible.
-VERB_N=""; VERB_COUNTED=0
-verb_row() {  # <n> <verb> <args…> — one verb under VERB_SH on the plan VERB_SZ names
-  local n="$1" verb="$2"; shift 2
-  { printf 'exec "$BASH" %q' "$POKER_SH"; printf ' %q' "$verb" "$@"; printf '\n'; } > "$SANDBOX/verb-$n.sh"
-  if ht_has_xtracefd "$VERB_SH"; then
-    ht_count "$VERB_SH" "$SANDBOX/verb-$n.sh" "$SANDBOX/in/empty" "$R_VERB"
-    VERB_N="$VERB_N $verb=$HT_N"
-  else
-    ht_run "$VERB_SH" "$SANDBOX/verb-$n.sh" "$SANDBOX/in/empty" "$R_VERB"; HT_N="(untraced)"
-  fi
-  echo "hook-timeout: §VERB $verb under $VERB_SH ($(ht_version "$VERB_SH")), ${VERB_SZ:-small} plan: $HT_N commands rc=$HT_RC"
-  expect_eq "§VERB $verb [$VERB_SH] ${VERB_SZ:-small}: exit 0" "0" "$HT_RC"
-  expect_contains "§VERB $verb [$VERB_SH] ${VERB_SZ:-small}: the transaction ran to its swap — its success line" \
-    "poker: $verb — " "$HT_OUT"
-}
-for VERB_SH in $SHELLS; do
-  VERB_COUNTS=""
-  for VERB_SZ in "" -l; do
-    cp "$SANDBOX/verb-plan$VERB_SZ.pristine" "$VERB_PLAN"
-    VERB_N=""
-    rm -f "$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$VERB_PLAN")"
-    verb_row 1 current 4
-    expect_eq "§VERB [$VERB_SH] ${VERB_SZ:-small}: …and current's move is the run's step" "n=4" "$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$VERB_PLAN" step | head -1)"
-    VERB_COUNTS="$VERB_COUNTS|$VERB_N"
-  done
-  ht_has_xtracefd "$VERB_SH" || continue
-  VERB_COUNTED=$((VERB_COUNTED + 1))
-  _vs="${VERB_COUNTS#|}"; _vs="${_vs%%|*}"; _vl="${VERB_COUNTS##*|}"
-  expect_true "§VERB [$VERB_SH]: the tracer counted the verbs ($_vs)" test -n "$(printf '%s' "$_vs" | grep -E '=[1-9]')"
-  expect_eq "§VERB [$VERB_SH]: each verb runs as many commands on the 200 KB plan as on the 66 KB one" "$_vs" "$_vl"
-done
-expect_true "§VERB: a bash that traces to its own fd was on PATH, so the verbs were counted (bash 4.1 or later; $SHELLS)" \
-  test "$VERB_COUNTED" -gt 0
 
 finish

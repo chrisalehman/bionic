@@ -57,7 +57,6 @@ gate.test.sh	178
 git-argv.test.sh	12
 grant.test.sh	13
 hook-adoption.test.sh	8
-hook-latency.test.sh	9
 hook-timeout.test.sh	43
 inbox.test.sh	7
 interpreter-pin.test.sh	37

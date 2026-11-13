@@ -45,7 +45,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
-MAKE_REPO_AT=15; . "$(dirname "$0")/dispatch-preflight.prelude.sh"
+. "$(dirname "$0")/dispatch-preflight.prelude.sh"
 
 section "§CAP — a probe's writers= refuses nothing; a plan with no line is not named (wave-28 T9, AC-2.9)"
 CAP_RUN_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/run.sh"
@@ -696,7 +696,7 @@ w deadline 22 /r; w attest-none "bash /h/p.sh"; w attest-failed out "bash /h/p.s
 w patrol-never /h/sp.sh /s; w patrol-silent 9 3 /h/sp.sh /s; w patrol-stopped /h/sp.sh 9 8 7 6 default /s
 w reviewer-retired bionic:reviewer; w facts-unread w /p.md; w fill-missing w /p.md /lib "a b"; w unapproved w /p.md 3 "a b"
 w unbound w adv "a b"; w name-ambiguous x-T1 "$(printf "T1\nA-T1")" /p.md; w approval-waits T9 release w-T9 /p.md /h
-w approval-unread T9 release w-T9 /p.md; w nested-writer w id ch ty "a b"; w worktree /c /t /m
+w approval-unread T9 release w-T9 /p.md; w waits-unread T9 w-T9 /p.md; w nested-writer w id ch ty "a b"; w worktree /c /t /m
 w budget 3 3 4 "" /h/ss.sh "writers=3 source=user" /p.md person wave /h; w in-flight w-1 intended
 w deliverable-outside /x /x /r; w proto-row T1; w proto-tree w-1 t /r/t none "" /s.sh; w proto-path a.sh /rec "" "$(printf "a.sh\ttracked")"
 w no-deliverable; w no-suites; w row-unknown T99 /p.md; w row-mismatch T2 T1 w-T1 /p.md; w lands-none a.sh why a.sh
@@ -719,6 +719,7 @@ unbound|this session is bound to no run (bind it, or write its plan)|0
 name-ambiguous|the name matches rows T1, A-T1 (add Row: <id>)|0
 approval-waits|row T9 waits for approval:release (record it with the approve verb)|0
 approval-unread|the run's facts could not be read (dispatch again)|0
+waits-unread|row T9's waits could not be read (dispatch again)|0
 nested-writer|a subagent may launch only read-only roles (ask the orchestrator)|0
 worktree|this dispatch came from a worktree (dispatch from the main checkout)|0
 budget|this passes the run's writer budget (land or stand down a row)|0
@@ -750,13 +751,18 @@ roster-unwritable|the roster cannot be written (make it writable)|0
 no-such-key| ()|2
 detail|Roster:  (not reached)" "$WORDS_GOT"
 
-# A row that waits for a named approval asks the reader, so an approval its run's log alone holds admits it. The run
-# stays at 14: a row at 15 holds no reads cell, so no row there can wait on a named approval.
-REPO=$(MAKE_REPO_AT=14 make_repo wa1 yes); write_attestation "$REPO" "$SID_A"; PL="$REPO/.bionic/docs/record/wave-01-test/run.log"; mkdir -p "${PL%/*}"
-printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| T9 | 7 | doc | the release | implementor | — | 20 | REQ-1 | CHANGELOG.md | — | — | pending | approval:release |\n' \
-  >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
-printf 'run/v1|ev=approval|key=release|by=u|said=approved|at=2026-11-01T00:00:02Z\n' > "$PL"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T9 w-T9 "$BRIEF_FULL")" w-T9)"
-expect_eq "W.2 a row reading approval:release is admitted on an approval its log alone holds" "allow" "$GATE_VERDICT"
+# A row that waits for a named approval asks the reader, so an approval its run's log alone holds admits it; an integrate
+# row waits for the release's approval while a release row stands, and not once that row is dropped.
+w2_repo() { REPO=$(make_repo "$1" yes); write_attestation "$REPO" "$SID_A"; PL="$REPO/.bionic/docs/record/wave-01-test/run.log"
+  pf_tasks "$REPO" '| T8 | 8 | integrate | the merge | — | 20 | REQ-1 | — | — |' '| T9 | 7 | doc | the release | approval:release | 20 | REQ-1 | CHANGELOG.md | — |'
+  W2_I8="$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T8 w-T8 "$BRIEF_FULL")" w-T8)"; }
+w2_repo wa1; W2_PAY="$(mk_agent_payload "$SID_A" "$REPO" "$(as_brief "$REPO" T9 w-T9 "$BRIEF_FULL")" w-T9)"; run_gate "$W2_PAY"
+expect_eq "W.2a a row whose deps cell waits on approval:release is refused while no approval stands" "deny" "$GATE_VERDICT"
+run_gate "$W2_I8"; W2_V="$GATE_VERDICT $(printf '%s\n' "$GATE_ERR" | grep -o 'row T8 waits for approval:release' | head -1)"
+printf 'run/v1|ev=approval|key=release|by=u|said=approved|at=2026-11-01T00:00:02Z\n' >> "$PL"; run_gate "$W2_PAY"
+expect_eq "W.2 a row whose deps cell waits on approval:release is admitted on an approval its log alone holds" "allow" "$GATE_VERDICT"
+run_gate "$W2_I8"; W2_V="$W2_V|$GATE_VERDICT"; w2_repo wa2; printf 'run/v1|ev=drop|row=T9|why=w|at=2026-11-01T00:00:02Z\n' >> "$PL"
+run_gate "$W2_I8"; expect_eq "W.3 an integrate row waits for the release's approval: refused, admitted on it, admitted when the release row is dropped" \
+  "deny row T8 waits for approval:release|allow|allow" "$W2_V|$GATE_VERDICT"
 
 finish

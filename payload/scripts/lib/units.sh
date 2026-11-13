@@ -578,9 +578,12 @@ units_rows() {
 #     integrate row of a plan that carries one reads `approval:release` besides whatever its cell
 #     says (wave-35 T5, D13; through wave-34 the doc row read it, wave-26 T62, K2-F3).
 #     Its `deps` cell may carry `ext:<slug>` and nothing else (`units_validate` refuses an id).
-#   - A TABLE WITHOUT ONE. Each `deps` id reads as "wait for that task to land", exactly as
-#     through 1.10, and no kind default applies: a plan written before the column schedules as
-#     it always did. `ext:<slug>` is valid there too.
+#   - A NINE-CELL PAGE AT 15. The row waits on its deps and on its kind's default, as the plan's
+#     one reader names them (lib/plan-read.sh `plan_read_waits`); the fill reads no cell for it.
+#   - A TABLE FROM BEFORE THE COLUMN (a status cell, no reads cell). Each `deps` id reads as "wait for
+#     that task to land", exactly as through 1.10, and no kind default applies: a plan written before
+#     the column schedules as it always did. `ext:<slug>` is valid in both, and on the nine-cell
+#     page `approval:<name>` too, held until that approval stands.
 #
 # A SETTLED READ waits for every open (`pending` or `active`) row that writes what it names,
 # the row itself never counted:
@@ -1118,27 +1121,35 @@ _units_landed() {
 # full run: a run now proves a head these rows are about to move.
 units_floor_holds() { _units_sched holds "${1:-}" "${2:-}"; }
 
-# units_approval_names <plan> -> each name an OPEN row reads as `approval:<name>` or
-# `live:approval:<name>`, once, sorted (wave-26 T46; review 10 F6). `approve` records only these:
-# a name no row reads would be recorded once while the row it was meant for waits. A name read
-# only by a landed or dropped row satisfies nothing either, so it is not one of them (T52; review
-# 14 N4). The match is exact, case included, as the readiness program keys it. `plan` is a read
-# like any other here.
-# An open integrate row in a plan that carries a release reads `release` without its cell saying so
-# (wave-35 T5; D13), so the name is listed whenever the readiness program would wait on it.
+# units_approval_names <plan> [<id>] -> each approval an OPEN row waits on, `approval:<name>` among its waits, once, sorted.
+# With <id>, row <id>'s alone, the reader asked for that row only, and a failure of the table's read or of the reader is
+# returned with its exit, so an asker that must not take a failure for "none" hears it; with none, a failure answers
+# nothing, rc 0, as every caller of the plan-wide list takes it.
+# `approve` records only these: a name no row waits on would be recorded once while the row it was meant for waits. A
+# name only a landed or dropped row waits on satisfies nothing either, so it is not one of them. The match is exact, case included, as the readiness program keys it. `plan` is a wait like
+# any other here, and an empty cell at 14 waits on it by its kind.
+# THE WAITS ARE THE PLAN'S ONE READER'S (lib/plan-read.sh `plan_read_waits`): a read at 14, `live:` or not, and a
+# name a task's deps cell holds at 15 are one wait, so the approve command takes at 15 what it takes at 14. That reader
+# gives an open integrate row `release` in a plan that carries a release; one whose release row is dropped carries none,
+# so its integrate row is not listed for it.
 units_approval_names() {
-  units_rows "${1:-}" 2>/dev/null | awk -F'\t' '{
-    s = tolower($10)
-    if ($3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && s != "dropped") hasrel = 1
-    if (s != "pending" && s != "active") next
-    if ($3 == "integrate") openint = 1
-    m = split($13, a, ",")
-    for (k = 1; k <= m; k++) {
-      t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t); sub(/^live:/, "", t)
-      if (t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) print substr(t, 10)
-    }
-  }
-  END { if (hasrel && openint) print "release" }' | sort -u
+  local rows waits
+  if [ -n "${2:-}" ]; then
+    rows="$(units_rows "${1:-}" 2>/dev/null)" || return $?
+    declare -F plan_read_waits >/dev/null 2>&1 || return 2
+    waits="$(plan_read_waits "$1" "$2" 2>/dev/null)" || return $?
+  else
+    rows="$(units_rows "${1:-}" 2>/dev/null)" && waits="$(_units_waits "${1:-}" 2>/dev/null)" || return 0
+  fi
+  { printf '%s\n\034\n' "$rows"; printf '%s\n' "$waits"; } | awk -F'\t' '
+    $0 == "\034" { w = 1; next }
+    !w { s = tolower($10)
+      if ($3 == "doc" && $2 ~ /^[0-9]+$/ && $2 + 0 >= 7 && s != "dropped") hasrel = 1
+      if (s == "pending" || s == "active") open[$1] = $3
+      next }
+    $2 == "wait" && ($1 in open) && $3 ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/ {
+      if ($3 == "approval:release" && open[$1] == "integrate" && !hasrel) next
+      print substr($3, 10) }' | sort -u
 }
 
 # units_order <plan> -> the id of the regression row when the plan is in the order build, regression, review, release,
@@ -1221,6 +1232,12 @@ _units_sched() {
   for i in 1 2 3; do ctl="${ctl#*$'\t'}"; done
   ctl="${ctl%%$'\t'*}"
   case " $ctl " in *" reads "*) hasreads=1 ;; esac
+  # EVERY TABLE IS SCHEDULED ON THE WAITS THE PLAN'S ONE READER NAMES (lib/plan-read.sh `plan_read_waits`), save one: the
+  # shape from before the reads column (a status cell and no reads cell) keeps scheduling on its deps alone, as it always
+  # did. The reader gives that shape its kind's defaults, the plan's approval among them, and its suites hold that answer
+  # on purpose, so on that shape alone the fill and the reader still part. Refusing a live plan at 14 makes the branch moot.
+  local _UNITS_OLD_SHAPE=0
+  [ "$hasreads" = 1 ] || case " $ctl " in *" status "*) _UNITS_OLD_SHAPE=1 ;; esac
   # THE REGRESSION STATE IS ASKED ONLY WHEN AN ANSWER TURNS ON IT (wave-26 T64; REQ-3 AC-3.4). The
   # program runs without it; when a pending row it judges reads a `proof:floor` that a proof line
   # and no open writer would satisfy, it prints nothing and exits 3, and only then is
@@ -1232,8 +1249,7 @@ _units_sched() {
   # judged, so each state is asked once, in the order the program asks for them, and never twice.
   # THE ROWS EACH READ NAMES are lib/plan-read.sh's (`_units_waits`). A plan whose rows cannot be turned into
   # waits schedules nothing: no writer known is not no writer.
-  wts=""
-  case "$mode" in ready|held|waiting|edges|holds) wts="$(_units_waits "$plan")" || return 1 ;; esac
+  wts="$(_units_waits "$plan")" || return 1
   fst="$(_units_floor_kept "$plan")"; rst="${UNITS_READINGS_STATE:-}"
   _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst" "$rst" "$wts" "$proofs"; rc=$?
   for i in 1 2; do
@@ -1255,7 +1271,7 @@ _units_sched_run() {
     printf '\034facts\n'; printf '%s\n' "${_UNITS_FACTS:-}"
     printf '\034waits\n'; printf '%s\n' "${8:-}"
     printf '\034proofs\n'; printf '%s\n' "${9:-}"
-  } | _UNITS_FLOOR_ST="$6" _UNITS_READ_ST="${7:-}" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" -v hasreads="$4" \
+  } | _UNITS_FLOOR_ST="$6" _UNITS_READ_ST="${7:-}" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" -v hasreads="$4" -v oldshape="${_UNITS_OLD_SHAPE:-0}" \
       -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" -v evid="${_UNITS_EVIDENCE:-}" \
       -v plancur="${_UNITS_PLACE%% *}" -v planapby="${_UNITS_PLACE##* }" \
       -v liveq="${_UNITS_QUESTION:-}" -v pq="${PROOF_QUESTIONS:-}" -v regno="$(_units_regno "$2")" \
@@ -1569,8 +1585,10 @@ _units_sched_awk() {
       at[$1] = n
       next
     }
-    # THE WAITS (lib/plan-read.sh plan_read_waits): `<id> row <row> <reads>`, the rows each read names.
+    # THE WAITS (lib/plan-read.sh plan_read_waits): `<id> kind <kind> <waits>`, every wait a row has as it is spelled,
+    # and `<id> row <row> <reads>`, the rows each read names. The fill reads no cell of a row for what it waits on.
     part == 3 {
+      if ($2 == "kind") { wl[$1] = $4; wim[$1] = "," $5 "," }
       if ($2 == "row") { m = split($4, a, ","); for (k = 1; k <= m; k++) wr[$1, a[k]] = wr[$1, a[k]] " " $3 }
       next
     }
@@ -1858,6 +1876,7 @@ _units_sched_awk() {
     function judge(i, t,   c, j, a) {
       nw = 0; lwhy = ""
       if (t ~ extre) return 0
+      if (t == "approval:release" && knd[i] == "integrate" && !hasrel && index(wim[id[i]], ",approval:release,")) return 1
       if (substr(t, 1, 9) == "approval:") return apprmet(substr(t, 10))
       if (substr(t, 1, 5) == "live:") return live_sat(i, substr(t, 6), t)
       cand(i, t)
@@ -1991,17 +2010,16 @@ _units_sched_awk() {
           if (isopen(i)) ixadd(i, nfe[i])
         }
         code[i] = writes_head(fil[i])
-        r = rd[i]
-        if (hasreads && r !~ /[A-Za-z0-9]/) r = kdef(knd[i], stp[i])
-        if (hasreads) { m = split(r, a, ","); for (k = 1; k <= m; k++) addtok(i, a[k]) }
         # THE MERGE READS THE RELEASE APPROVAL (wave-35 T5; REQ-4 AC-4.1; D13). Through wave-34 the
         # Step-7 doc row read it (wave-26 T62, K2-F3), so the release text waited on the person while
         # nothing about writing it did. The text is now ready at its kind default, and the integrate
         # row of a plan that carries a release reads approval:release whatever its cell says: the
         # person approves the release and the merge once, after review. A plan with no release has
         # none to approve, and its integrate row reads what it read before (A-T5-1).
-        if (hasreads && hasrel && knd[i] == "integrate" && (" " rd[i] ",") !~ /[ \t,]approval:release[ \t]*,/) addtok(i, "approval:release")
-        m = split(dep[i], a, ",")
+        # Its waits are named by the one reader of a plan (lib/plan-read.sh plan_read_waits), on the older shape its deps
+        # alone (oldshape, set in _units_sched). The release approval an integrate row is given by the reader, not written
+        # in a cell, is met while no release row stands, a dropped one owed no more (judge); one a person wrote is asked.
+        m = split(oldshape ? dep[i] : wl[id[i]], a, ",")
         for (k = 1; k <= m; k++) addtok(i, a[k])
       }
       # THE STATE OF THE READINGS FOR A LIVE ROW PAST ITS READING (wave-36 T28; D9): live_head and live_idle turn on
@@ -2167,7 +2185,8 @@ units_columns() {
 # THE INVARIANTS (spec Design §1 "Task", verbatim): id unique and matching `^T[0-9]+$`; step
 # in 3–9; kind in build · test · verify · review · doc · integrate · close · prototype;
 # status in pending · active · landed · dropped; every dep naming an id present in the table
-# or an external prerequisite `ext:<slug>` (wave-21 T4; `_units_ext_re` is its one shape).
+# or an external prerequisite `ext:<slug>` (`_units_ext_re` is its one shape), and on a
+# version-15 page an approval of the person's, `approval:<name>`, in the spelling a read gives it.
 # A TABLE WITH A `reads` COLUMN (wave-26 T2; D1) adds two: its deps cells carry `ext:<slug>`
 # and nothing else — a task id there is refused, because the row waits on what it reads — and
 # each read names a path in the `Files` grammar, `head`, `record`, `merge`, `proof:<floor|
@@ -2357,6 +2376,10 @@ units_validate() {
               # AN EXTERNAL PREREQUISITE NAMES NO ROW BY DESIGN (wave-21 T4; D3, ADR-037
               # decision 2): `ext:<slug>` in its one shape is admitted in either table shape.
               if (a[j] ~ extre) continue
+              # A TASK AT 15 NAMES THE APPROVAL IT WAITS ON beside the rows it waits on, spelled as a read
+              # names one at 14: what a task waits on is a fact the person writes of that task, and a version-15
+              # row has no other cell to hold it.
+              if (v15 && a[j] ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) continue
               # A TABLE WITH A reads COLUMN TAKES NOTHING ELSE IN deps (wave-26 T2; D1): a row
               # there waits for what it reads, and a task id beside the column is the hand-kept
               # edge the column exists to retire.

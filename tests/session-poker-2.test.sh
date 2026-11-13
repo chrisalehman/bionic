@@ -63,7 +63,7 @@ section "Section 37: T10b — the release waits for its step and the tick names 
 # Document step's gate act. The tick's no-FILL line now NAMES each row held for its step, so a
 # reader of the line can tell "nothing is ready" from "the release waits for Step 7".
 R37A="$(make_repo s37-held)"; new_roster "$R37A"
-SP_PLAN_AT=15 sp_plan_at_step "$R37A" 5 \
+sp_plan_at_step "$R37A" 5 \
   "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T2 | 5 | verify | the live bed, landed | implementor | T1 | 15m | REQ-x | — | landed |" \
   "| T3 | 7 | doc | Release 1.8.7 | implementor | T2 | 15m | REQ-x | CHANGELOG.md | pending |" > /dev/null
@@ -76,7 +76,7 @@ expect_absent "37a C3 at current: 5 the landed-dep Step-7 release row is not fil
 
 # 37c — AT ITS STEP THE RELEASE FILLS. Same table at current: 7.
 R37C="$(make_repo s37-at-step)"; new_roster "$R37C"
-SP_PLAN_AT=15 sp_plan_at_step "$R37C" 7 \
+sp_plan_at_step "$R37C" 7 \
   "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T2 | 5 | verify | the live bed, landed | implementor | T1 | 15m | REQ-x | — | landed |" \
   "| T3 | 7 | doc | Release 1.8.7 | implementor | T2 | 15m | REQ-x | CHANGELOG.md | pending |" > /dev/null
@@ -88,7 +88,7 @@ expect_contains "37c at current: 7 the release row is filled" "poker: FILL T3" "
 # with the line the verb would accept, which it then accepts as pasted.
 S37_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 R37D="$(make_repo s37-task-add)"; ( cd "$R37D" && git commit -q --allow-empty -m init )
-P37D="$(SP_PLAN_AT=15 s34_plan "$R37D" 5)"
+P37D="$(s34_plan "$R37D" 5)"
 L37D="${P37D%/plans/*}/record/$(basename "$P37D" .plan.md)/run.log"; s37() { cmp -s "$TMPROOT/s42-before" "$P37D" && echo same; }
 ta_add "$R37D" T7 7 doc 'Keep C:\new\table, a\|b, $5. The release keeps its text as typed.' bionic:implementor 'T5' 30 REQ-5 '—'
 expect_eq "37d task-add of a Step-7 doc row edited in at current: 5 is accepted (exit 0)" "0" "$RC"
@@ -120,7 +120,7 @@ section "Section 38: the tick names an ext:-held row — poker: HELD <id> ext:<s
 s38_line_no() { printf '%s\n' "$OUT" | awk -v p="$1" 'index($0, p) == 1 { print NR; f = 1; exit } END { if (!f) print 0 }'; }
 
 R38A="$(make_repo s38-held)"; new_roster "$R38A"
-SP_PLAN_AT=15 sp_plan_at_step "$R38A" 4 \
+sp_plan_at_step "$R38A" 4 \
   "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T2 | 4 | build | waits on CI | implementor | T1, ext:ci-ce9520e | 15m | REQ-x | b.sh | pending |" \
   "| T3 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | c.sh | pending |" > /dev/null
@@ -135,7 +135,7 @@ expect_true "38d …and the HELD line sits after the gate line and before the FI
 # 38e — NOTHING ELSE READY: the HELD line still prints, and the no-FILL line's step sentence
 # does not borrow it (the step hold and the ext hold are different facts).
 R38E="$(make_repo s38-held-only)"; new_roster "$R38E"
-SP_PLAN_AT=15 sp_plan_at_step "$R38E" 4 \
+sp_plan_at_step "$R38E" 4 \
   "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T2 | 4 | build | waits on a rig and CI | implementor | ext:rig-2, T1, ext:ci-9 | 15m | REQ-x | b.sh | pending |" > /dev/null
 poke_pressure "$R38E" 8192 1.0 tick
@@ -145,7 +145,7 @@ expect_absent "38g …and the no-FILL line names no step hold for it" "Held for 
 
 # 38h — THE TOKEN REMOVED, the row is ready again and no HELD line is printed (AC-3.4's tick side).
 R38H="$(make_repo s38-cleared)"; new_roster "$R38H"
-SP_PLAN_AT=15 sp_plan_at_step "$R38H" 4 \
+sp_plan_at_step "$R38H" 4 \
   "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T2 | 4 | build | CI went green | implementor | T1 | 15m | REQ-x | b.sh | pending |" \
   "| T3 | 4 | build | ordinary, ready | implementor | T1 | 15m | REQ-x | c.sh | pending |" > /dev/null
@@ -164,7 +164,7 @@ section "Section 39: the tick lints the ledger — poker: LEDGER <id> <finding> 
 # finding reaches the orchestrator, who owns the ledger, before a writer's commit meets it.
 R39A="$(make_repo s39-ledger)"; new_roster "$R39A"
 mkrow name=w-T2 agent_id=a-w-T2 >> "$(roster_of "$R39A")"
-P39A="$(sp_plan_at_step "$R39A" 4 \
+P39A="$(SP_PLAN_AT=14 sp_plan_at_step "$R39A" 4 \
   "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T2 | 4 | build | active, launched | w-T2 | — | 15m | REQ-x | b.sh | active |" \
   "| T3 | 4 | build | active, agent names no roster row | implementor | — | 15m | REQ-x | c.sh | active |" \
@@ -200,7 +200,7 @@ expect_absent "39j a repaired ledger ticks no LEDGER line" "poker: LEDGER" "$OUT
 # alone; what the tick can meet is a roster with no rows, and there an agent-named active row is
 # a launch finding, not an evidence one.
 R39K="$(make_repo s39-empty-roster)"; new_roster "$R39K"
-sp_plan_at_step "$R39K" 4 \
+SP_PLAN_AT=14 sp_plan_at_step "$R39K" 4 \
   "| T1 | 4 | build | active, agent-named, nobody launched | w-T1 | — | 15m | REQ-x | a.sh | active |" \
   "| T2 | 4 | build | ordinary, ready | implementor | — | 15m | REQ-x | b.sh | pending |" > /dev/null
 poke_pressure "$R39K" 8192 1.0 tick
@@ -233,7 +233,7 @@ export CLAUDE_CONFIG_DIR="$S40_CFG"
 # `evidence` finding, not a `launch` one.
 R40A="$(make_repo s40-no-roster)"
 poke "$R40A" arm
-sp_plan_at_step "$R40A" 4 \
+SP_PLAN_AT=14 sp_plan_at_step "$R40A" 4 \
   "| T1 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | a.sh | doing |" \
   "| T2 | 4 | build | waits on CI | implementor | ext:ci-40a | 15m | REQ-x | b.sh | pending |" \
   "| T3 | 4 | build | active, agent-named, no line | w-T3 | — | 15m | REQ-x | c.sh | active |" > /dev/null
@@ -252,7 +252,7 @@ expect_true "40a6 …after the gate line and before the QUIET line (gate=$S40_RU
 # 40b — NO ROOM: a roster, a ready row, and a five-minute load over the share. No fill, and
 # the lint still runs: a busy machine has nothing to do with the ledger.
 R40B="$(make_repo s40-hold)"; new_roster "$R40B"
-sp_plan_at_step "$R40B" 4 \
+SP_PLAN_AT=14 sp_plan_at_step "$R40B" 4 \
   "| T1 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | a.sh | doing |" \
   "| T2 | 4 | build | waits on CI | implementor | ext:ci-40b | 15m | REQ-x | b.sh | pending |" \
   "| T3 | 4 | build | ordinary, ready | implementor | — | 15m | REQ-x | c.sh | pending |" > /dev/null
@@ -274,7 +274,7 @@ expect_eq "40b8 …and LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 
 # 40c — OVER THE SHARE: the same pair with memory used past the share.
 R40C="$(make_repo s40-emergency)"; new_roster "$R40C"
-sp_plan_at_step "$R40C" 4 \
+SP_PLAN_AT=14 sp_plan_at_step "$R40C" 4 \
   "| T1 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | a.sh | doing |" \
   "| T2 | 4 | build | waits on CI | implementor | ext:ci-40c | 15m | REQ-x | b.sh | pending |" > /dev/null
 BIONIC_PROBE_USED_PCT=90 poke "$R40C" tick
@@ -287,7 +287,7 @@ expect_eq "40c4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 # 40d — NO BUDGET: the plan carries no `parallel-budget:` line, so the fill arm takes its
 # no-budget note — and the lint does not wait on a budget it has no use for.
 R40D="$(make_repo s40-no-budget)"; new_roster "$R40D"
-P40D="$(sp_plan_at_step "$R40D" 4 \
+P40D="$(SP_PLAN_AT=14 sp_plan_at_step "$R40D" 4 \
   "| T1 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | a.sh | doing |" \
   "| T2 | 4 | build | waits on CI | implementor | ext:ci-40d | 15m | REQ-x | b.sh | pending |")"
 /usr/bin/grep -v '^parallel-budget:' "$P40D" > "$P40D.new" && mv "$P40D.new" "$P40D"
@@ -305,7 +305,7 @@ expect_eq "40d4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 # report's call on that arm was unpinned: deleting it left every suite green.
 R40E="$(make_repo s40-disarm)"; new_roster "$R40E"
 armed_ago "$R40E"
-P40E="$(sp_plan_at_step "$R40E" 9 \
+P40E="$(SP_PLAN_AT=14 sp_plan_at_step "$R40E" 9 \
   "| T1 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | a.sh | doing |" \
   "| T2 | 4 | build | waits on CI | implementor | ext:ci-40e | 15m | REQ-x | b.sh | pending |")"
 sed -e 's/^- Step 9: in progress$/- Step 9: delivered: bionic 9.9.9; report: record\/fixture\/close-out.md/' \
@@ -383,7 +383,7 @@ s41_transcript() {  # <messages from w-1> <name:status>... -> this session's tra
 # slot — so the tick names no FILL and the stop wall's fill duty owes nothing.
 s41_world() {  # <label> -> a repo: armed, bound, w-1 MET with a landed deliverable
   local r; r="$(make_repo "$1")"; new_roster "$r"; armed_ago "$r"
-  local p; p="$(SP_PLAN_AT=15 wave_plan_at "$r" "epic-99-fixture/wave-41.plan.md" \
+  local p; p="$(wave_plan_at "$r" "epic-99-fixture/wave-41.plan.md" \
     "writers=1 suites=2 worktrees=8 test_jobs=8 source=user" \
     "| R1 | 4 | build | ready row | implementor | — | 15m | REQ-x | r1.sh | pending |")"
   bind_marker "$r" "$p"

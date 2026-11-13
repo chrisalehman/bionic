@@ -683,7 +683,7 @@ EG_SID="2b7c9d10-4e5f-4a6b-8c9d-0e1f2a3b4c5d"
 # gate judges. No case in this section drives an unbound session on purpose. The run is at 15, at Step 5 with
 # no proof of the whole run, so every commit the gate reads is refused.
 . "$(dirname "$0")/lib/plan-fixture.sh"
-bound_marker "$EG_HOME" "$EG_SID" "$(plan_fixture --at 15 --current 5 "$EG_HOME/.bionic/docs/plans/epic-x/wave-x.plan.md" wave)"
+bound_marker "$EG_HOME" "$EG_SID" "$(plan_fixture --current 5 "$EG_HOME/.bionic/docs/plans/epic-x/wave-x.plan.md" wave)"
 
 run_gate() {  # <command>
   local input tmp_err

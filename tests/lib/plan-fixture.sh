@@ -8,15 +8,15 @@
 # cites a requirements file and a spec, a task plan carries its design as a paragraph in the plan
 # itself. So this helper takes the scale as a parameter and changes only those artifact lines with it.
 #
-# plan_fixture [--at 15] [--current <value>] <path> <task|wave> [<row>...] -> writes the plan at <path>
+# plan_fixture [--at 14] [--current <value>] <path> <task|wave> [<row>...] -> writes the plan at <path>
 #   (directories made), prints <path>. Each <row> is one whole `## Tasks` data row in the header's
-#   column order (`PLAN_FIXTURE_HEADER`). `--current` writes that value into `current:` verbatim
-#   (default 4) — a test of a value the readers refuse (`T1`) passes it here, and gets the same plan
+#   column order (`PLAN_FIXTURE_HEADER`). `--current` is the run's step (default 4); at 14 it is written into
+#   `current:` verbatim — a test of a value the readers refuse (`T1`) passes it there, and gets the same plan
 #   around it. At wave scale, when <path> sits under a `<docs root>/plans/` directory, the two
 #   artifacts its Step-1 and Step-2 lines cite are written under `<docs root>/specs/` beside it.
 #
-# TWO VERSIONS. Unasked, the plan is at 14: numeric `current:` in a `## SDLC State`, the thirteen-cell
-# table, a `## Dispatch ledger` and a `## Verification Matrix`. `--at 15` writes the page a version-15
+# TWO VERSIONS. `--at 14` writes the plan at 14: `current:` in a `## SDLC State`, the thirteen-cell
+# table, a `## Dispatch ledger` and a `## Verification Matrix`. Unasked, it writes the page a version-15
 # run holds, the same words in their homes there: no state, ledger or matrix section, the header naming
 # the working branch and base, each row in its nine authored cells, the criterion's fails-when in an
 # `## Eval design`, and the run's log (`plan_fixture_log`) holding what the other cells and the state
@@ -28,14 +28,14 @@
 PLAN_FIXTURE_HEADER='| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|'
 
-plan_fixture() {  # [--at 15] [--current <value>] <path> <task|wave> [<row>...]
-  local cur=4 v=14 path scale docs rel stem epic row
+plan_fixture() {  # [--at 14] [--current <value>] <path> <task|wave> [<row>...]
+  local cur=4 v=15 path scale docs rel stem epic row
   if [ "${1:-}" = "--at" ]; then v="${2:-}"; shift 2; fi
   if [ "${1:-}" = "--current" ]; then cur="${2:-}"; shift 2; fi
   path="${1:?plan_fixture: a path}"; scale="${2:?plan_fixture: a scale}"; shift 2
   case "$scale" in task|wave) : ;; *) echo "plan_fixture: scale '$scale' is not task or wave" >&2; return 2 ;; esac
   case "$v:$cur:$path" in 14:*) : ;; 15:[1-9]:*/plans/*) : ;;
-    *) echo "plan_fixture: --at 15 takes a step number and a plan under plans/" >&2; return 2 ;; esac
+    *) echo "plan_fixture: a page at 15 takes a step number and a plan under plans/" >&2; return 2 ;; esac
   mkdir -p "$(dirname "$path")" || return 1
   stem="$(basename "$path" .plan.md)"
   epic="$(basename "$(dirname "$path")")"

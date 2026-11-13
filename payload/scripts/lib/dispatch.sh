@@ -64,10 +64,10 @@ Then retry the dispatch."
 dispatch_keys() {
   printf '%s\n' deadline attest-none attest-failed plan-unreadable patrol-never patrol-silent patrol-stopped \
     reviewer-retired facts-unread fill-missing unapproved unbound name-ambiguous approval-waits approval-unread \
-    nested-writer worktree budget in-flight deliverable-outside proto-row proto-tree proto-path no-deliverable \
-    no-suites row-unknown row-mismatch lands-none live-writer brief-unreadable brief-unnamed brief-outside \
-    brief-absent brief-unrendered brief-unsummed brief-unsummable brief-edited brief-other-name brief-other-row \
-    brief-slot roster-link row-unbuilt roster-unwritable
+    waits-unread nested-writer worktree budget in-flight deliverable-outside proto-row proto-tree proto-path \
+    no-deliverable no-suites row-unknown row-mismatch lands-none live-writer brief-unreadable brief-unnamed \
+    brief-outside brief-absent brief-unrendered brief-unsummed brief-unsummable brief-edited brief-other-name \
+    brief-other-row brief-slot roster-link row-unbuilt roster-unwritable
 }
 
 dispatch_say() {  # <key> [facts...]
@@ -246,6 +246,15 @@ whether this row may start is not known. A row that waits for an approval starts
 hook has read.
 
 Fix: dispatch again; the fold's own line on stderr names why it failed." ;;
+    waits-unread)  # <row> <dispatch name> <plan>
+      _dispatch_words "row ${1-}'s waits could not be read" "dispatch again" \
+"Dispatch: ${2:-<unnamed>} (row ${1-} of ${3-})
+Waits:    not read — the row's approvals (lib/units.sh units_approval_names, which asks
+          lib/plan-read.sh plan_read_waits) could not be read, so whether this row waits for an
+          approval of the person's is not known.
+A row starts only on waits this hook has read.
+
+Fix: dispatch again; if it is refused the same way, run /bionic:doctor." ;;
     nested-writer)  # <subagent type> <caller agent id> <hook channel> <caller agent type> <read-only roles>
       _dispatch_words "a subagent may launch only read-only roles" "ask the orchestrator" \
 "Type: $(_dispatch_role "${1-}")

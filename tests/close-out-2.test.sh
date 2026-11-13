@@ -15,7 +15,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/regression-fixture.sh"
 . "$(dirname "$0")/lib/roster-row.sh"   # the one roster-row builder (cross-gate S17; wave-30 T23)
-. "$(dirname "$0")/close-out.prelude.sh"
+CO_PLAN_AT=15; . "$(dirname "$0")/close-out.prelude.sh"
 
 # ============================================================
 section "4f — REQ-1 (AC-1.1–1.4): the shipped table is found once; the ADR cell is read, not marked"
@@ -271,7 +271,7 @@ section "CARRY — wave-28 T17 (AC-8.7, D21): close-out writes every open deferr
 # carry_section: hoisted to tests/close-out.prelude.sh (a later part reads it)
 # CARRY_W: hoisted to tests/close-out.prelude.sh (a later part reads it)
 CARRY_Q1='Said \"go\" \\ now | here'   # the sentence: Said "go" \ now | here, as the plan holds it
-PC="$(mk_fixture carry1)"; advance_to "$PC" 8
+PC="$(CO_PLAN_AT=14 mk_fixture carry1)"; advance_to "$PC" 8
 carry_plant "$PC" \
   "deferred: $CARRY_REC#2 S3 on \"second, written first\" stated=\"The second sentence.\"" \
   "deferred: $CARRY_REC#1 S2 off \"first, unstated\"" \
