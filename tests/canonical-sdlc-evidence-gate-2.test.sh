@@ -33,108 +33,26 @@ eg_floor() {  # <plan content> -> the content with the readings and one floor pr
 }
 
 # ============================================================
-# Section 29: Step 9 close-out contract (v14)
+# Section 29: Step 9's delivery, and the trio a named target owes
 # ============================================================
 #
-# The v14 contract, ratified 2026-08-19 (epic-17 W5, design ledger D-A):
-#
-#   delivered:  ALWAYS. Every run has a terminal state — a PR open and ready
-#               for a human to review, or commits landed locally ready to
-#               push. Nothing past that boundary is the run's to claim.
-#   deployed: / verified: / monitored:
-#               owed EXACTLY when frontmatter names a live deploy_target.
-#
-# What died with v13: the trio was owed whenever a target existed, and `n/a:`
-# discharged the step only at `deploy_target: none`. That rule encoded
-# wave==release — the exception, not the rule — and it let a run with no live
-# surface close by writing `n/a` instead of naming what it delivered.
-#
-# `deploy_target` itself is n/a by default and is never inferred (AC-3), so
-# the trio is strictly opt-in: 29a/29e/29e2 are the ordinary run, 29c is the
-# dogfood run that operates its own surface.
-section "Section 29: Step 9 close-out contract (v14)"
+# Every run's Step 9 owes its delivery; a run whose frontmatter names a live deploy_target owes deployed, verified and
+# monitored too, each given to its step by close-out. At 15 they are fields of the run's step-9 event.
+# FIXTURE FIDELITY: eg_page's run at 15 at Step 9, its readings and floor proved, the step event as close-out writes it.
+# fails-when: a Step 9 with no delivery admitted (29b), or a named target's missing trio admitted (29d).
+section "Section 29: Step 9's delivery, and the trio a named target owes"
 
-# A plan at current: 9. $1 = deploy_target value, $2 = the Step-9 block body.
-# Reuses Section 17's matrix_complete, since current: 9 revalidates the matrix
-# as a prefix check before the step shape is ever reached.
-ship_plan() {
-  printf '%s\n## SDLC State\ncurrent: 9\napproved-by: fixture 2026-09-07T00:00Z approved\nStep 9:\n%s\n\n%s\n' \
-    "$(frontmatter wave "$1")" "$2" "$matrix_complete"
+s29_home() {  # <deploy_target> -> S29_H, a run at 15 at Step 9 whose step event holds no delivery
+  local q p; S29_H=$(make_home); eg_head_repo "$S29_H"
+  p=$(eg_page "$S29_H" 9 "run/v1|ev=proof|kind=regression|head=$EG_HEAD|evidence=record/floor.log|at=2026-10-04T01:00:00Z" \
+    $(for q in evidence adversarial structure; do printf 'run/v1|ev=proof|kind=review|head=%s|question=%s|result=pass|scope=piece|reader=w-read|evidence=record/generic-evidence.md|at=2026-10-04T01:00:01Z\n' "$EG_HEAD" "$q"; done) \
+    "run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|at=2026-10-04T01:00:02Z")
+  awk -v t="$1" '/^deploy_target: /{ $0 = "deploy_target: " t } { print }' "$p" > "$p.t" && mv "$p.t" "$p"
 }
-
-ship_delivered="  delivered: PR #412 open and review-ready — 6 commits on wave/17-05"
-ship_trio="  deployed: ./claude-bootstrap.sh rc=0 to this machine
-  verified: installed hook spot-check reads SUPPORTED_SDLC_VERSION=14
-  monitored: one Patrol cycle clean, no wall misfires"
-
-# 29a — no live surface, `delivered:` present → allow. The default run's whole
-# close-out obligation is this one line.
-h29a=$(make_home)
-write_plan "$h29a" "$(ship_plan none "$ship_delivered")" > /dev/null
-
-# 29b — `delivered:` missing → block. The terminal state is not optional.
-h29b=$(make_home)
-write_plan "$h29b" "$(ship_plan none "  note: wrapped it up")" > /dev/null
-expect_block "29b Step 9 without delivered: → block naming the key" "$h29b" 'git commit -m "x"' "Step 9's delivery"
-
-# 29c — a named live surface: delivered + the full trio → allow.
-h29c=$(make_home)
-write_plan "$h29c" "$(ship_plan local-harness "$ship_delivered
-$ship_trio")" > /dev/null
-
-# 29d — a named live surface with `delivered:` only → block, naming what the
-# named target owes.
-h29d=$(make_home)
-write_plan "$h29d" "$(ship_plan local-harness "$ship_delivered")" > /dev/null
-expect_block "29d Step 9, deploy_target named, trio missing → block" "$h29d" 'git commit -m "x"' "deployed"
-
-# 29e — `deploy_target: n/a` is not a named surface (AC-3's default value), so
-# the trio is not owed.
-h29e=$(make_home)
-write_plan "$h29e" "$(ship_plan n/a "$ship_delivered")" > /dev/null
-
-# 29e2 — no `deploy_target` line at all reads the same way. An omission is
-# never a named surface, so it can never conjure the trio into existence.
-h29e2=$(make_home)
-write_plan "$h29e2" "---
-governing-skill: canonical-sdlc
-canonical_sdlc_version: 14
-intent: build
-rigor: double
-scale: wave
-use_worktree: false
-has_ui: false
-walk: exempt
----
-
-## SDLC State
-current: 9
-approved-by: fixture 2026-09-07T00:00Z "approved"
-Step 9:
-$ship_delivered
-
-$matrix_complete" > /dev/null
-
-# 29f — the v13 shape (deploy:/verified-at:/monitor:) no longer discharges the
-# step: it names a release and never names the delivery.
-h29f=$(make_home)
-write_plan "$h29f" "$(ship_plan none "  deploy: shipped to prod at 14:02
-  verified-at: https://app.example/health
-  monitor: one cycle clean")" > /dev/null
-expect_block "29f Step 9 in the retired v13 shape → block on delivered" "$h29f" 'git commit -m "x"' "Step 9's delivery"
-
-# 29g — `n/a:` was v13's escape at deploy_target: none. Under v14 there is
-# nothing to escape: the run still has to name what it delivered.
-h29g=$(make_home)
-write_plan "$h29g" "$(ship_plan none "  n/a: nothing to deploy")" > /dev/null
-expect_block "29g Step 9 with the retired 'n/a:' escape → block on delivered" "$h29g" 'git commit -m "x"' "Step 9's delivery"
-
-# 29h — a run with no named target that deployed something anyway and said so
-# is recording MORE than it owes, which is never a reason to refuse a commit.
-# The trio is unowed here, not forbidden.
-h29h=$(make_home)
-write_plan "$h29h" "$(ship_plan none "$ship_delivered
-$ship_trio")" > /dev/null
+s29_home none
+expect_block "29b Step 9 without its delivery → block naming it" "$S29_H" 'git commit -m "x"' "Step 9's delivery"
+s29_home local-harness
+expect_block "29d Step 9, deploy_target named, the trio missing → block naming it" "$S29_H" 'git commit -m "x"' "deployed"
 
 # ============================================================
 # Section 31: a refusal on a call that also writes the plan (B-6)
