@@ -249,7 +249,7 @@ Fix: dispatch again; the fold's own line on stderr names why it failed." ;;
     waits-unread)  # <row> <dispatch name> <plan>
       _dispatch_words "row ${1-}'s waits could not be read" "dispatch again" \
 "Dispatch: ${2:-<unnamed>} (row ${1-} of ${3-})
-Waits:    not read — the row's approvals (lib/units.sh units_approval_names, over the plan's reader
+Waits:    not read — the row's approvals (lib/units.sh units_approval_names, which asks
           lib/plan-read.sh plan_read_waits) could not be read, so whether this row waits for an
           approval of the person's is not known.
 A row starts only on waits this hook has read.
