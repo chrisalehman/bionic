@@ -1241,44 +1241,10 @@ case "$BASENAME" in
              && { [ "$TOOL" != "Edit" ] || [ "$EDIT_APPLIED" -eq 1 ]; }; then
             _gs_units_tmp="$GS_PAGE"
             if [ -n "$_gs_units_tmp" ]; then
-              # THE BRING-FORWARD SUMMARY COMES FIRST (wave-16 REQ-3, AC-3.1; spec D8).
-              # A plan whose frontmatter says version 14 and whose body is pre-14 used to
-              # meet this wall for its table, the evidence gate for `requirements:`, the
-              # gate again for `approved-by:`, and again for `fails-when:` — one round trip
-              # per fault, in an order that depended on the previous repair (research R2
-              # §2d). `plan_bring_forward` answers all of it at the moment of the EDIT,
-              # which is one round trip earlier than any commit-time check can be.
-              #
-              # WALLS.SH IS SOURCED HERE, NOT IN `BIONIC_LIB_WANT`, and the reasoning is
-              # the one tests/cross-gate-agreement.test.sh §AP wrote down when it declined
-              # to make walls.sh this hook's owner: WANT is a FAIL-CLOSED list, so naming a
-              # 236 KB file there would refuse every artifact write on a tree missing it,
-              # and it would be parsed on every Write in the fleet. Sourced from inside this
-              # arm it is parsed only when a non-task-scale PLAN at sdlc-step >= 3 is
-              # written — and a tree without it simply keeps 1.8.2's table-only refusal,
-              # which is the fail-open an advisory read is allowed (walls.sh's own
-              # `wall_libs` sets that precedent for cmd-class.sh).
-              _gs_bf=""; _gs_bf_fired=0
-              if [ -r "$BIONIC_LIB/walls.sh" ]; then
-                if ! declare -F plan_bring_forward >/dev/null 2>&1; then
-                  # shellcheck source=/dev/null
-                  . "$BIONIC_LIB/walls.sh"
-                fi
-                if declare -F plan_bring_forward >/dev/null 2>&1; then
-                  # NO STEP ARGUMENT (wave-16 T25, critic §C1). `$SDLC_STEP` is the
-                  # FRONTMATTER stamp, which is not the step this plan is at; the predicate
-                  # reads `current:` out of the body it was just handed.
-                  _gs_bf="$(plan_bring_forward "$_gs_units_tmp" 2>/dev/null)" \
-                    || _gs_bf_fired=1
-                fi
-              fi
               if units_rows "$_gs_units_tmp" >/dev/null 2>&1; then
                 _gs_units_bad="$(units_validate "$_gs_units_tmp" "$FILE_PATH" 2>/dev/null)" || true
               else
                 _gs_units_bad=""
-              fi
-              if [ "$_gs_bf_fired" -eq 1 ]; then
-                _gs_refuse bring-forward "$SUPPORTED_SDLC_VERSION" "$_gs_bf"
               fi
               if [ -n "$_gs_units_bad" ]; then
                 _gs_refuse tasks-invalid "$SDLC_STEP" "$_gs_units_bad"

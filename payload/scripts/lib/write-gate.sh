@@ -147,12 +147,6 @@ Required:                     model_plan" ;;
       WG_DETAIL="canonical-sdlc plan '$BASENAME' (sdlc-step $1) is missing a '## Verification Matrix' section.
 Path: $FILE_PATH
 Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix') and lock it at Step 3 approval." ;;
-    bring-forward)  # <supported version> <the bring-forward summary>
-      WG_FACT="this plan's body is not at contract version $1"; WG_FIX="bring the plan forward"
-      WG_DETAIL="canonical-sdlc plan '$BASENAME' declares canonical_sdlc_version: $1 and its body does not match it:
-$2
-Path: $FILE_PATH
-Fix: repair every line above in one pass — each is a separate arm that would otherwise refuse the next commit in turn." ;;
     tasks-invalid)  # <sdlc-step> <the violations> [1 at version 15]
       WG_FACT="this plan's Tasks table is invalid"; WG_FIX="fix the row the detail names"
       WG_DETAIL="canonical-sdlc plan '$BASENAME' (sdlc-step $1) has a '## Tasks' table that breaks the Task invariants:
