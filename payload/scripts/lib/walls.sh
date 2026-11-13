@@ -2335,10 +2335,10 @@ if [ "$_EG_V15" -eq 0 ] && [ -z "$(normalize_newlines "$PLAN" | awk '
   exit 0
 fi
 
-# A plan at 15; a plan at 14 was decided above, under any name. Anything else — an older number, a typo,
-# an empty value, garbage — blocks. Below this line a plan at 15 takes
-# each fact from its run's log where it is held, and names each one the log does not hold yet
-# (`_eg_v15_owe`), so no path reaches `exit 0` without the whole contract of the version it declares.
+# A plan at 15; a plan at 14 was decided above, under any name, and left by exit or refusal. Anything else — an
+# older number, a typo, an empty value, garbage — blocks. So below this line every page is a plan at 15 named
+# *.plan.md, and no arm under it asks the version again: each takes its facts from the run's log where they are held,
+# and names each one the log does not hold yet (`_eg_v15_owe`), so no path reaches `exit 0` without the whole contract.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 SUPPORTED_SDLC_VERSION=14
 
@@ -2379,7 +2379,7 @@ _eg_v15_unreadable() {
 Plan: $PLAN
 Fix: run the commit again; the fold's own line above names why it failed."
 }
-if [ "$_EG_V15" -eq 1 ] && _eg_f="$(plan_read_faults "$PLAN")"; then
+if _eg_f="$(plan_read_faults "$PLAN")"; then
   refuse exit2 commit "this plan holds what version 15 does not" "remove each part named" \
 "canonical-sdlc plan declares canonical_sdlc_version: 15, and version 15 has no place for:
 ${_eg_f}
@@ -2667,7 +2667,6 @@ k2_step_num() {
 validate_approved_by() {
   local step
   local rc=0
-  [ "$_EG_V15" -eq 1 ] || return 0
   step=$(k2_step_num)
   [ -n "$step" ] || return 0
   [ "$step" -ge 4 ] || return 0
@@ -2755,8 +2754,7 @@ validate_prototype_no_matrix_row() {
     [ -n "$ac" ] && [ -n "$ac_task" ] || continue
     for n in $proto_ids; do
       [ "$ac_task" = "$n" ] || continue
-      fix="remove the '${ac}:' block, or repoint its 'task:'"
-      [ "$_EG_V15" -ne 1 ] || fix="repoint the Task cell of '${ac}' in '## Eval design'"
+      fix="repoint the Task cell of '${ac}' in '## Eval design'"
       _eg_detail="canonical-sdlc step ${CURRENT} — matrix row '${ac}' names 'task: ${ac_task}', a 'kind: prototype' row in '## Tasks'; a prototype ships nothing and never discharges a matrix row.
 Plan: $PLAN
 Fix: ${fix} to the build task that cites the prototype's ruling — the prototype's own output is a design decision written to the spec, never a matrix discharge."
@@ -2806,7 +2804,6 @@ _eg_commit_repo() {
 validate_net_zero() {
   local dir rc sums delta before after grown="" files="" short="" n=0 fact line path b a written="" row_waits=0 lacks="" fix_id fix_cell base=HEAD
   local -a dirs=()
-  [ "$_EG_V15" -eq 1 ] || return 0
   _eg_commit_repo; dir="$_EG_REPO"
   # A MERGE IN A ROW'S TREE IS MEASURED AGAINST THE PARENT THAT IS NOT THE ROW'S OWN (wave-33 T15, D10). A row's tree
   # that merges the working branch in commits that branch's content on top of its own, and growth already landed there
@@ -3144,7 +3141,6 @@ _eg_row_for_worktree() {
   _EG_ROW=""; _EG_ROW_DUP=""; _EG_ROW_COLLIDED=0
   [ -n "$_want" ] || return 0
   # A tree is the row's latest tree event in the run's log; an older plan's worktree cell is never read.
-  [ "$_EG_V15" -eq 1 ] || return 0
   _eg_v15_row_for_tree "$_want"
 }
 
@@ -3432,7 +3428,6 @@ _eg_v15_step_asks
 # double, multi_agent true and scale wave or epic, the guard validate_dispatch_ledger uses.
 validate_requirements_pointer() {
   local current_num raw
-  [ "$_EG_V15" -eq 1 ] || return 0
   case "$SCALE" in wave|epic) : ;; *) return 0 ;; esac
   [ "$(rigor_level "$RIGOR")" = double ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
@@ -3545,7 +3540,6 @@ matrix_is_placeholder() {
 validate_matrix() {
   local rows ac tier status ev aud block_txt key val val_lc deferred row_is_waived ev_abs ucv owed live_exit head
 
-  [ "$_EG_V15" -eq 1 ] || return 0
   # The evidence review is read at the working branch's head, for a criterion no older table holds.
   head="$(proof_branch_head "$PLAN" "$BIONIC_ROOT" 2>/dev/null)" || head=""
   if ! matrix_load "$PLAN" "$head"; then
@@ -3779,7 +3773,6 @@ resolve_walk_path() {  # $1 = raw walk-artifact value
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_walk_artifact() {
   local discharged raw abs
-  [ "$_EG_V15" -eq 1 ] || return 0
   case "${CURRENT%[ab]}" in 5|6|7|8|9) : ;; *) return 0 ;; esac
   [ "$(walk_mode)" = required ] || return 0
   # Reuses the reader's answer validate_matrix() loads (MATRIX_CELLS). It runs immediately before
@@ -3890,7 +3883,6 @@ _eg_v15_walk_envs() {  # <plan> -> the newest walk proof's environments= field; 
 validate_environments() {
   local raw entries name desc cure covered_names fog_names fog_missing_cure
   local covered_line covered_norm missing claimed_fog claimed_undeclared
-  [ "$_EG_V15" -eq 1 ] || return 0
   case "${CURRENT%[ab]}" in 5|6|7|8|9) : ;; *) return 0 ;; esac
   raw=$(frontmatter_get environments)
   if [ -z "$raw" ]; then
@@ -4058,13 +4050,12 @@ Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); 
     _eg_detail="canonical-sdlc double multi_agent ${SCALE} plan's '## Tasks' table breaks the Task invariants:
 ${violations}
 Plan: $PLAN
-Fix: repair each row named above; the columns are $(units_columns "$_EG_V15")"
+Fix: repair each row named above; the columns are $(units_columns 1)"
     refuse exit2 commit "that dispatched task's row is invalid" "fix the row the detail names" "$_eg_detail"
   fi
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
   # A ROW HAS NO LINE: a row's landing and its launch are the reader's, and a row the reader does not answer as the
   # table reads it is owed until the log holds the fact. An older plan's `- T<n>:` lines are never read.
-  [ "$_EG_V15" -eq 1 ] || return 0
   findings="$(units_findings "$PLAN" "$(_eg_roster_path)" v15)"
   for id in $(printf '%s\n' "$findings" | awk '$1 == "evidence" { print $2 }'); do
     _eg_v15_ask "${id}'s landing or launch, which the run's log does not hold as its row reads"
@@ -4078,27 +4069,16 @@ dispatch() {
   # Audited multi_agent wave: D7 dispatched-task ledger PRESENCE, at every step
   # that reaches this dispatcher (guarded internally; no-op otherwise).
   validate_dispatch_ledger
-  # At 15 the Step 5 block is named, and the reviews and the floor are read before the refusal of what was not, so a
-  # plan lacking what the log does hold is refused as a 14 is. The criteria are judged on the reader's answer as a 14's
-  # are, last: at 14 a step's own lines are refused before its matrix, so at 15 the matrix is judged once nothing else is owed.
-  if [ "$_EG_V15" -eq 1 ]; then
-    case "${CURRENT%[ab]}" in 5|6|7|8|9)
-      [ "$(walk_mode)" = exempt ] || validate_walk_artifact
-      validate_environments ;;
-    esac
-    case "${CURRENT%[ab]}" in 6|7|8|9) _eg_refuse_readings "the run" "$RIGOR"; _eg_refuse_floor_absent "the run" ;; esac
-    _eg_v15_refuse
-    case "${CURRENT%[ab]}" in 5|6|7|8|9) validate_matrix ;; esac
-    return 0
-  fi
-  case "${CURRENT%[ab]}" in
-    5) validate_environments; validate_matrix; validate_walk_artifact ;;
-    6|7|8|9) validate_matrix; validate_walk_artifact; validate_environments ;;
+  # The walk and the environments are read, then the reviews and the floor, before the refusal of what the log does not
+  # hold, so a run lacking what the log does hold is refused for it. The criteria are judged last, once nothing else is owed.
+  case "${CURRENT%[ab]}" in 5|6|7|8|9)
+    [ "$(walk_mode)" = exempt ] || validate_walk_artifact
+    validate_environments ;;
   esac
-  case "$CURRENT" in 8|9) _eg_v15_refuse ;; esac
-  case "${CURRENT%[ab]}" in
-    6|7|8|9) _eg_refuse_readings "the run" "$RIGOR"; _eg_refuse_floor_absent "the run" ;;
-  esac
+  case "${CURRENT%[ab]}" in 6|7|8|9) _eg_refuse_readings "the run" "$RIGOR"; _eg_refuse_floor_absent "the run" ;; esac
+  _eg_v15_refuse
+  case "${CURRENT%[ab]}" in 5|6|7|8|9) validate_matrix ;; esac
+  return 0
 }
 
 dispatch
