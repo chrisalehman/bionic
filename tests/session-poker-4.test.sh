@@ -89,8 +89,9 @@ sev_lines() { bash -c '. "$1"; proof_findings_owed "$2"' _ "$SEV_LIB" "$PSEV" 2>
 expect_regex "SEV-0 precondition: the working branch's head is C1, a 40-hex commit" '^[0-9a-f]{40}$' "$SEV_C1"
 expect_eq "SEV-0b precondition: the reader's row carries the pushed key, read by key" "checks-adversarial,severity" \
   "$(/usr/bin/grep -F '|name=sev-crit|' "$SEV_RS" | tr '|' '\n' | sed -n 's/^pushed=//p')"
-s34_gate "$RSEV"
-expect_eq "SEV-0c precondition: the fixture plan is admitted by the real commit gate" "0" "$GATE_RC"
+s34_gate15 "$RSEV" "$PSEV"
+expect_eq "SEV-0c precondition: the fixture's run, brought forward to 15, is admitted by the real commit gate" "0" "$GATE_RC"
+[ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 
 # ---------- the push is read off the row by key, as questions= is (unit rows) ----------
 sev_pushed() {  # <pushed value> -> proof_pushed_severity's rc
