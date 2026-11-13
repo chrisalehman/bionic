@@ -35,9 +35,11 @@ section "§CHECK: current <N> --check runs what current <N> runs before it write
 # `current <N> --check` (N in 5..8) runs the advance's own path up to the swap, through the real gate and the same
 # `cur7_judge <N>`, prints `would advance` or `would refuse` above the refusal text, and writes nothing.
 # FIXTURE FIDELITY: §CUR7's world (session-poker-4): a real repository on `wave/01-fixture` with two
-# suites and lib/x.sh, base B and a code commit C; a double wave plan the real gate admits at Steps 5
-# through 7, bound to this session; every fact in the production writer's shape (`proof_line`,
-# `proof_floor_line`). Every move is the real verb; each fixture is rebuilt before the advance runs.
+# suites and lib/x.sh, base B and a code commit C; the run at 15 a double wave plan's text stands for, which
+# the real gate admits at Steps 5 through 7, bound to this session: plan_fixture's page at double rigor and
+# base B, its log the fixture's events, then the text's proofs in the production writer's shape
+# (`proof_line`, `proof_floor_line`) read in by lib/translate.sh, then its criterion's proof. Every move is
+# the real verb; each fixture is rebuilt before the advance runs.
 # fails-when: the check and the advance disagree on a fixture; the check writes a byte anywhere in the
 # repository; the check path loses the judge (the mutant below).
 CK_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
@@ -54,7 +56,7 @@ printf 'one\n' > "$RCK/lib/x.sh"
 printf 'generic fixture proof\n' > "$RCK/.bionic/docs/record/generic-evidence.md"
 CK_B="$(git -C "$RCK" rev-parse HEAD)"
 CK_C="$(s57_commit "$RCK" lib/x.sh 'C: a code change after the floor')"
-PCK="$RCK/.bionic/docs/plans/wave-x.plan.md"
+PCK="$RCK/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
 ck_line() { bash -c '. "$1/proof.sh" && shift && proof_line "$@"' _ "$CK_LIB" "$@"; }
 ck_floor() {  # <head> [<owed>] -> a floor proof at <head>, as proof-add floor writes it
   bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-12T11:00:00Z record/w35/floor.log "${3:-}"' _ "$CK_LIB" "$1" "${2:-}"
@@ -66,25 +68,18 @@ ck_reads() {  # <head> [<adversarial result>] -> the five readings a double wave
   ck_line review "$1" 2026-10-12T12:00:00Z record/w35/adversarial-whole.md adversarial w-read "${2:-pass}" whole
   ck_line review "$1" 2026-10-12T12:00:00Z record/w35/structure-whole.md structure w-read pass whole
 }
-ck_plan() {  # <current> <proof lines> [<sed edit>] -> PCK, bound to this session
-  {
-    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
-    printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n# plan\n\n## SDLC State\n\n'
-    printf 'current: %s\nworking-branch: wave/01-fixture\napproved-by: fixture 2026-09-22T00:00Z approved\n' "$1"
-    printf -- '- Step 4: dispatched, record/w35/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: wave/01-fixture\n' "$CK_B"
-    printf -- '- Step 5: floor, record/w35/floor.log\n  auditor: CONFIRMED, record/w35/audit.md\n'
-    printf -- '- Step 6: review at record/w35/review.md\n'
-    printf -- '- Step 7: documented at record/w35/docs.md\n  n/a: no decision this run\n'
-    printf '%s\n' "$2"
-    printf '\n## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
-    printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\n'
-    printf 'AC-1:\n  fails-when: the planted defect this eval must go red on\n  evidence: record/generic-evidence.md\n'
-    printf '  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n'
-  } | sed -e "${3:-}" > "$PCK"
+ck_plan() {  # <current> <proof lines> -> PCK, the run at 15 those proofs stand in, bound to this session
+  local t="$TMPROOT/ck-text.plan.md"
+  printf -- '---\ncanonical_sdlc_version: 14\n---\n## SDLC State\n\ncurrent: %s\n%s\n' "$1" "$2" > "$t"
+  rm -rf "${PCK%/*}" "$RCK/.bionic/docs/record/wave-01-fixture"
+  plan_fixture --current "$1" "$PCK" wave > /dev/null
+  awk -v b="$CK_B" '/^rigor: /{ $0 = "rigor: double" } /^base-sha: /{ print "base-sha: " b; print "adrs: none — no decision this run"; next } { print }' \
+    "$PCK" > "$PCK.t" && mv "$PCK.t" "$PCK"
+  { bash -c '. "$1/reader.sh" && . "$1/translate.sh" && translate "$2" events' _ "$CK_LIB" "$t" \
+      | /usr/bin/grep -E '^run/v1[|]ev=proof[|]kind=(review|regression)[|]'
+    printf 'run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|at=2026-10-12T13:00:00Z\n'; } >> "$(plan_fixture_log "$PCK")"
+  rm -f "$t"
   bind_marker "$RCK" "$PCK"
-  # The plan stands at the step its text names: a step an earlier advance appended to the run's log is taken out.
-  CK_LOG="$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$PCK")"
-  [ ! -f "$CK_LOG" ] || { /usr/bin/grep -v '|ev=step|' "$CK_LOG" > "$CK_LOG.t"; mv "$CK_LOG.t" "$CK_LOG"; }
 }
 ck_tree() {  # -> one cksum line per file in the fixture repository outside .git: what a write would change
   ( cd "$RCK" && find . -path ./.git -prune -o -type f -print | LC_ALL=C sort | while IFS= read -r f; do cksum "$f"; done )
@@ -96,16 +91,16 @@ ck_unpid() {  # [<text>] (else stdin) -> the text with each plan copy's process 
 CK_GOOD="$(ck_floor "$CK_C")
 $(ck_reads "$CK_C")"
 
-# ck_case <label> <N> <current> <want rc> <proof lines> [<drop pattern>] -> the check on a fresh fixture,
+# ck_case <label> <N> <current> <want rc> <proof lines> -> the check on a fresh fixture,
 # then the advance on a fresh fixture of the same bytes; asserts both exit <want>, the check's first line,
 # that the check wrote nothing (the plan by cmp, the whole tree by cksum), and that a refusal's text is the
 # advance's own. Leaves CK_RC/CK_OUT (the check) and AD_RC/AD_OUT (the advance).
 ck_case() {
-  local label="$1" n="$2" cur="$3" want="$4" proofs="$5" drop="${6:-}" verdict
-  ck_plan "$cur" "$proofs" "$drop"; cp "$PCK" "$TMPROOT/ck-before"; ck_tree > "$TMPROOT/ck-tree-before"
+  local label="$1" n="$2" cur="$3" want="$4" proofs="$5" verdict
+  ck_plan "$cur" "$proofs"; cp "$PCK" "$TMPROOT/ck-before"; ck_tree > "$TMPROOT/ck-tree-before"
   poke "$RCK" current "$n" --check; CK_RC="$RC"; CK_OUT="$OUT"
   ck_tree > "$TMPROOT/ck-tree-after"; cp "$PCK" "$TMPROOT/ck-after"
-  ck_plan "$cur" "$proofs" "$drop"
+  ck_plan "$cur" "$proofs"
   expect_true "$label precondition: the advance's fixture is the check's, byte for byte (cmp)" cmp -s "$TMPROOT/ck-before" "$PCK"
   poke "$RCK" current "$n"; AD_RC="$RC"; AD_OUT="$OUT"
   expect_eq "$label — current $n --check and current $n exit alike, $want (check|advance)" "$want|$want" "$CK_RC|$AD_RC"
@@ -127,15 +122,15 @@ ck_case() {
 }
 expect_regex "CK-0 precondition: the working branch's head is C, a 40-hex commit" '^[0-9a-f]{40}$' "$CK_C"
 
-# ---------- N=5: the dry commit at Step 5 admits it, or refuses a plan with no Step-5 line ----------
-ck_case "CK-5g current 5 from 4, every line the gate asks for written" 5 4 0 "$CK_GOOD"
-ck_case "CK-5r current 5 from 4, the plan carrying no Step-5 line" 5 4 1 "$CK_GOOD" '/^- Step 5: /d'
-expect_contains "CK-5r-b …refused by the dry commit, in the gate's words" "has no 'Step 5:' line" "$CK_OUT"
+# ---------- N=5: the dry commit at Step 5 admits it, or refuses a run whose log holds no regression proof ----------
+ck_case "CK-5g current 5 from 4, every fact the gate asks for held" 5 4 0 "$CK_GOOD"
+ck_case "CK-5r current 5 from 4, the run holding no regression proof" 5 4 1 "$(ck_reads "$CK_C")"
+expect_contains "CK-5r-b …refused by the dry commit, in the gate's words" "Step 5's regression" "$CK_OUT"
 
 # ---------- N=6: the dry commit at Step 6 admits it, or the gate refuses a question whose newest reading failed ----------
 CK_FAILREAD="$(ck_floor "$CK_C")
 $(ck_reads "$CK_C" fail)"
-ck_case "CK-6g current 6 from 5, every line the gate asks for written" 6 5 0 "$CK_GOOD"
+ck_case "CK-6g current 6 from 5, every fact the gate asks for held" 6 5 0 "$CK_GOOD"
 ck_case "CK-6r current 6 from 5, both adversarial readings failing" 6 5 1 "$CK_FAILREAD"
 
 # ---------- N=7: the dry commit and the judge admit it, or the judge refuses a floor whose whole run left a suite red ----------
