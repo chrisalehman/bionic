@@ -59,7 +59,7 @@
 # shipped hook counts the same on that pair.
 #
 # FIXTURE FIDELITY (declared, per .claude/rules/test-harness.md, "Fixture fidelity"):
-#   * the engaged project, the payload envelopes and the placeholder-evidence plan — the
+#   * the engaged project, the payload envelopes and the run at Step 5 owing its regression — the
 #     shapes tests/bash-walls.test.sh pins.
 #   * the input shapes — research-R2 §3–§4 measured each class on real commands: a plan Edit
 #     near the end of a 64 KB file, a python heredoc rewriting a plan through `s.replace`, a
@@ -80,6 +80,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 
 WALLS_HOOK="${BIONIC_BASH_WALLS_UNDER_TEST:-${BIONIC_HOOKS_DIR}/bash-walls.sh}"
 GS_HOOK="${BIONIC_GOVERNING_SKILL_UNDER_TEST:-${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh}"
@@ -201,25 +202,8 @@ R_CHAIN="$(mk_repo chain)"
 R_MEM="$(mk_repo memory)"
 mkdir -p "$FAKE_HOME/.claude/projects/-x/memory"
 
-# The evidence gate refuses any commit under a bound plan whose step evidence is a
-# placeholder — c's witness.
-printf '%s\n' '---
-governing-skill: canonical-sdlc
-canonical_sdlc_version: 14
-intent: build
-rigor: single
-scale: wave
-deploy_target: none
-use_worktree: false
-has_ui: false
----
-# plan
-
-## SDLC State
-current: 5
-approved-by: fixture 2026-09-07T00:00Z "approved"
-Step 5: TODO' > "$R_COMMIT/.bionic/docs/plans/active.md"
-bound_marker "$R_COMMIT" "$SID" "$R_COMMIT/.bionic/docs/plans/active.md"
+# The evidence gate refuses any commit under a bound run at Step 5 whose log holds no regression proof — c's witness.
+bound_marker "$R_COMMIT" "$SID" "$(plan_fixture --current 5 "$R_COMMIT/.bionic/docs/plans/epic-01-demo/wave-01-c.plan.md" wave)"
 
 GS_PLAN="$R_GS/.bionic/docs/plans/epic-01-demo/big.plan.md"
 GS_PLAN_L="$R_GS/.bionic/docs/plans/epic-01-demo/bigger.plan.md"
@@ -235,16 +219,18 @@ meta = {}
 def put(name, payload):
     json.dump(payload, open("%s/%s.json" % (d, name), "w"))
 
-# -- a: a version-14 plan at step 3 whose Tasks table runs to 64 KB / 200 KB --
+# -- a: a version-15 plan at step 3 whose Tasks table runs to 64 KB / 200 KB --
 head = """---
 governing-skill: superpowers:writing-plans
 sdlc-step: 3
 epic: epic-01-demo
 wave: wave-01-x
-canonical_sdlc_version: 14
+canonical_sdlc_version: 15
 intent: build
 rigor: double
 scale: wave
+working-branch: wave/01-x
+base-sha: abc1234
 cleanup_on_finish: true
 use_worktree: false
 surface_type: none
@@ -260,21 +246,13 @@ parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe
 
 A concise paragraph describing this fixture's goal.
 
-## Verification Matrix
-
-stack-health: n/a: no long-running serve observed
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
-
 ## Tasks
 
-| id | step | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|---|
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
 """
 def row(i):
-    return "| T%d | 4 | build | rewrite the reader so it walks the table once — row %05d | implementor | — | 30m | REQ-x | a.sh | pending |\n" % (i, i)
+    return "| T%d | 4 | build | rewrite the reader so it walks the table once — row %05d | — | 30m | REQ-x | a.sh | — |\n" % (i, i)
 def plan(path, size, suffix):
     body = head
     i = 0
@@ -290,7 +268,7 @@ def plan(path, size, suffix):
     for name, frac in (("a1", 0.122), ("a2", 0.912)):
         k = nearest(int(total * frac))
         old = row(k).rstrip("\n")
-        new = old.replace("| pending |", "| doing |")
+        new = old.replace("| build |", "| bogus |")
         put(name + suffix, {"session_id": sid, "tool_name": "Edit",
             "tool_input": {"file_path": path, "old_string": old, "new_string": new,
                            "replace_all": False}})
@@ -353,7 +331,7 @@ for suffix, hd_size, c_size, d_n, e_size, k_runs, g_size in (
     put("b2" + suffix, bash_payload(r_agent, h + "\ngit commit -m 'T4: rewrite'", agent=True))
     # b3, b4: b2's heredoc behind a leading cd, then a commit. b3's cd is relative, so only the
     # leading-cd read runs; b4's names an absolute directory, so the scan for later cds runs
-    # too. The evidence gate's placeholder refusal can only come after both (T28).
+    # too. The evidence gate's refusal of what Step 5 owes can only come after both (T28).
     put("b3" + suffix, bash_payload(r_commit, "cd sub && " + h + "\ngit commit -m x"))
     put("b4" + suffix, bash_payload(r_commit, "cd " + r_commit + " && " + h + "\ngit commit -m x"))
     meta["b3" + suffix] = len("cd sub && " + h + "\ngit commit -m x")
@@ -485,12 +463,12 @@ row() {
 
 section "1 — governing-skill: a 64 KB / 200 KB plan Edit near its start and near its end"
 echo "hook-timeout: shells = $SHELLS"
-row a1 "$GS_HOOK" "$R_GS" 2 "status doing" err
-row a2 "$GS_HOOK" "$R_GS" 2 "status doing" err
+row a1 "$GS_HOOK" "$R_GS" 2 "kind bogus" err
+row a2 "$GS_HOOK" "$R_GS" 2 "kind bogus" err
 
 section "2 — bash-walls: the heredoc, the quote-dense command, the long chain segment"
 row b2 "$WALLS_HOOK" "$R_AGENT"  2 "a read-only role never commits" err
-row c  "$WALLS_HOOK" "$R_COMMIT" 2 "evidence line is a placeholder" err
+row c  "$WALLS_HOOK" "$R_COMMIT" 2 "a fact this step owes is missing" err
 # d: the chain tier-2 nudge that used to witness this row is retired (wave-24 T11, AC-7.7), so a
 # chain with no tier-1 segment answers with silence. Silence alone would read the same if the
 # hook had left early, so d2 runs the same long first segment with a build segment behind it:
@@ -508,10 +486,10 @@ row f  "$WALLS_HOOK" "$R_CHAIN"  0 "farm-out [deny] class=build" err
 row k  "$WALLS_HOOK" "$R_CHAIN"  0 "farm-out [deny] class=build" err
 
 section "2c — bash-walls: a leading cd before the heredoc, and a body read for its writes (T28)"
-# b3 and b4 are b behind a `cd`. Their placeholder refusal is the evidence gate judging the
+# b3 and b4 are b behind a `cd`. Their refusal of what Step 5 owes is the evidence gate judging the
 # commit, which it does only after reading where the `cd` went.
-row b3 "$WALLS_HOOK" "$R_COMMIT" 2 "evidence line is a placeholder" err
-row b4 "$WALLS_HOOK" "$R_COMMIT" 2 "evidence line is a placeholder" err
+row b3 "$WALLS_HOOK" "$R_COMMIT" 2 "a fact this step owes is missing" err
+row b4 "$WALLS_HOOK" "$R_COMMIT" 2 "a fact this step owes is missing" err
 # g is the input being counted: it writes out.md in the repo, so silence. g2 writes the store
 # after the same body, and its refusal is the proof that g's count covers the whole read.
 export BIONIC_CLAUDE_HOME="$FAKE_HOME/.claude"

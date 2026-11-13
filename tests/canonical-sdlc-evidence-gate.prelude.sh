@@ -437,26 +437,6 @@ AC-2:
   tier-run: bash test.sh — unit suite
   readback: 332/332 asserted"
 
-# Mixed matrix mid-walk: AC-1 discharged with full T3 evidence, AC-2 still
-# pending with no AC block and an empty auditor cell.
-v101_matrix_pending="## Verification Matrix
-
-stack-health: before: process restarts 0; walk in progress
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
-| AC-2 | T3 | pending | see AC-2 |  |
-
-AC-1:
-  fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  tier-run: https://app.example/panel — opened the panel
-  fresh: origin A rebuilt token-9f3a; origin B cdn purged
-  cold-client: fresh incognito profile, no SW cache
-  contact: clicked open — panel closed → open
-  readback: panel.visible === true via page eval"
-
 # Post-Verify step bodies for the 7 / 8 / 9 cases (the shapes their own
 # validators demand — 29a and 19's integrate fixtures pin these independently).
 v9_step7_body="  n/a: no architectural decision in this wave"
@@ -509,6 +489,12 @@ eg_pf_plan() {
   sed -e "s/^rigor: single$/rigor: $rg/" -e "s/^multi_agent: false$/multi_agent: $ma/" "$p" \
     | EG_PF_X="$extra" awk '{ print } /^approved-by: / && ENVIRON["EG_PF_X"] != "" { print ENVIRON["EG_PF_X"] }'
 }
+# eg_page <dir> <step> [<log line>...] -> the page a run at 15 holds at <step>, under <dir>'s docs root, its log the
+#   fixture's events and then each line given; prints its path. The gate reads the run from the log, never the page.
+eg_page() {
+  local p; p="$(plan_fixture --current "$2" "$1/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave)" || return 1
+  shift 2; [ "$#" -eq 0 ] || printf '%s\n' "$@" >> "$(plan_fixture_log "$p")"; printf '%s' "$p"
+}
 # One row of the one table, in PLAN_FIXTURE_HEADER's order: <id> <agent> <status> [<worktree>].
 eg_pf_row() {
   printf '| %s | 4 | build | the %s unit | %s | — | — | 30 | REQ-1 | %s.sh | %s | — | %s |' \
@@ -520,12 +506,6 @@ tasks_one_done="## Tasks
 | id | step | kind | task | agent | deps | size | serves | Files | status |
 |---|---|---|---|---|---|---|---|---|---|
 | T1 | 4 | build | the dispatched unit | implementor | — | 30m | REQ-x | a.sh | landed |"
-
-s24_marked_plan() {  # a plan carrying the run-state marker + a satisfied state
-  printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-  printf -- 'canonical_sdlc_version: 14\nintent: build\nrigor: single\nscale: wave\n---\n'
-  printf -- '## SDLC State\ncurrent: 3\nStep 3: .bionic/docs/plans/wave-01.plan.md\n'
-}
 
 # Every row still pending: nothing has discharged, so the arm must not fire —
 # a mid-discharge commit before the walk is written stays legal. No auditor

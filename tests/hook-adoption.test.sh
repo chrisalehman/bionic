@@ -42,6 +42,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 
 HOOKS="$BIONIC_HOOKS_DIR"
 REPO="$BIONIC_SCRIPTS_DIR"
@@ -399,10 +400,9 @@ section "5b — the artifact wall is armed by the PROJECT, not by the run (ADOPT
 # with this lifecycle, claiming nothing, is not this gate's business.
 SID="ad0pt111-2222-3333-4444-555555555555"
 
-# mk_root <name> <state>  -> a project root; state = none|closed|open
+# mk_root <name> <state>  -> a project root; state = none|open
 #   none   : a real directory, no .bionic anywhere above it (HOME is the sandbox)
-#   closed : .bionic with a plan at `current: 9` carrying a delivered Step-9 line
-#   open   : the same plan at `current: 4`
+#   open   : .bionic with a run at Step 4: a page at 15 and its log
 mk_root() {
   # TWO STATEMENTS, NOT ONE. `local a="$1" b="$SANDBOX/x/$a"` expands every word BEFORE it
   # assigns any of them, so the second reference reads an EMPTY $a and every fixture lands
@@ -424,36 +424,7 @@ mk_root() {
   # line every silence assertion below would hold for the wrong reason and the §5
   # anti-vacuity control would have nothing left to discriminate.
   : > "$root/.bionic/tmp/engaged-$SID.state"
-  local cur="4" step9="- Step 9: (pending)"
-  case "$state" in
-    closed) cur="9"; step9="- Step 9: delivered: record/x.md" ;;
-    # open9 is the evidence gate's control pair: the SAME plan as `closed`, one line
-    # different. A run at step 9 without a `delivered:` line is still open (AC-8), and
-    # the gate then has step-9 evidence to demand — so the two fixtures differ by
-    # exactly the fact under test and nothing else.
-    open9)  cur="9" ;;
-  esac
-  cat > "$root/.bionic/docs/plans/epic-99/wave-01.plan.md" <<PLAN
----
-canonical_sdlc_version: 14
-intent: build
-rigor: double
-scale: wave
----
-
-# fixture plan
-
-## SDLC State
-
-integration-branch: main
-intent: build
-rigor: double
-scale: wave
-current: $cur
-
-- Step 4: implementation
-$step9
-PLAN
+  plan_fixture "$root/.bionic/docs/plans/epic-99/wave-01.plan.md" wave >/dev/null
   printf '%s' "$root"
 }
 
