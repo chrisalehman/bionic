@@ -179,9 +179,11 @@ expect_contains "T.w8 …for the Patrol" "no Patrol stamp exists" "$GATE_VERR"
 # (4) CLOSE-OUT: a task-scale plan on `fix/x`, not yet merged. `check` refuses no branch shape,
 # and its integrate act is the PR: the merge line carries the `gh pr create` command for the
 # working branch against the integration branch, and nothing is merged. The wave-scale pair on
-# the same branch is refused for its shape. `run` recording the command is close-out-1.test.sh's
-# ANY-BRANCH section (its fixtures carry the facts a close needs).
-sp_co_root() {  # <name> <scale> -> a repository with main and an unmerged fix/x, and a plan at Step 8
+# the same branch is refused for its shape, on a page at 14: the shape only scopes the census of a
+# table with no tree column and a log with no tree fact, and a page at 15 has its trees in its log.
+# `run` recording the command is close-out-1.test.sh's ANY-BRANCH section (its fixtures carry the
+# facts a close needs).
+sp_co_root() {  # <name> <scale> [<version>, 15] -> a repository with main and an unmerged fix/x, and a plan at Step 8
   local d="$SANDBOX/co-$1" p
   mkdir -p "$d"
   (
@@ -193,7 +195,7 @@ sp_co_root() {  # <name> <scale> -> a repository with main and an unmerged fix/x
   ) >/dev/null 2>&1
   p="$d/.bionic/docs/plans/epic-99-test/fix-x.plan.md"
   mkdir -p "${p%/*}" "$d/.bionic/tmp" "$d/.bionic/docs/record/fix-x"
-  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nintent: bugfix\nrigor: single\nscale: %s\nintegration-branch: main\nworking-branch: fix/x\n---\n\n# Fix x\n' "$2" > "$p"
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: %s\nintent: bugfix\nrigor: single\nscale: %s\nintegration-branch: main\nworking-branch: fix/x\n---\n\n# Fix x\n' "${3:-15}" "$2" > "$p"
   printf 'run/v1|ev=step|n=8|at=2026-10-04T00:00:00Z\n' > "$d/.bionic/docs/record/fix-x/run.log"
   printf '%s' "$d"
 }
@@ -207,7 +209,7 @@ expect_absent "T.c3 …with no branch-shape refusal" "shaped" "$SP_CO_OUT"
 expect_contains "T.c4 the integrate act is a PR: the line carries the command" "gh pr create --base main --head fix/x" "$SP_CO_OUT"
 expect_absent "T.c5 …and does not refuse the unmerged branch" "WOULD REFUSE — fix/x" "$SP_CO_OUT"
 expect_eq "T.c6 …and merges nothing" "$SP_MAIN0" "$(git -C "$SP_CT" rev-parse main)"
-SP_CW="$(sp_co_root wave wave)"
+SP_CW="$(sp_co_root wave wave 14)"
 SP_CO_OUT="$(cd "$SP_CW" && bash "$SP_CLOSE" "$SP_CW/.bionic/docs/plans/epic-99-test/fix-x.plan.md" check 2>&1)"
 expect_contains "T.c7 the pair: at wave scale fix/x is refused for its shape" "is not wave/<NN>-<slug> shaped" "$SP_CO_OUT"
 

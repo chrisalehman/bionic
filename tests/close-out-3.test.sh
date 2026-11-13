@@ -14,7 +14,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/regression-fixture.sh"
 . "$(dirname "$0")/lib/roster-row.sh"   # the one roster-row builder (cross-gate S17; wave-30 T23)
-. "$(dirname "$0")/close-out.prelude.sh"
+CO_PLAN_AT=15; . "$(dirname "$0")/close-out.prelude.sh"
 
 # ============================================================
 section "§HAND-HOLDS — wave-35 T12 (REQ-8 AC-8.1, D17): the hand-hold count is folded from the lines the escape-hatch verbs wrote"
@@ -87,7 +87,7 @@ hh_plant() {
                             print "  waiver: someone said we might waive this later"; wr = 1; next }
     { print }' "$plan" > "$w" && mv "$w" "$plan"
 }
-PH="$(mk_fixture handholds)"; advance_to "$PH" 8
+PH="$(CO_PLAN_AT=14 mk_fixture handholds)"; advance_to "$PH" 8
 hh_plant "$PH"
 HH_OUT="$(hh_report "$PH" --hand-holds)"
 expect_eq "HH-1 landing-report --hand-holds prints the hand-holds line, every kind counted from its own line" "$HH_WANT" \
@@ -99,7 +99,7 @@ expect_eq "HH-2 …after the landings line, which is the one the default prints"
 expect_eq "HH-3 the default landing-report prints no hand-holds line (its output stays what it was)" "0" \
   "$(hh_report "$PH" | grep -c '^hand-holds')"
 # the same fixture with the verbs' lines removed and the prose kept: nothing is counted
-PHP="$(mk_fixture handholds-prose)"; advance_to "$PHP" 8
+PHP="$(CO_PLAN_AT=14 mk_fixture handholds-prose)"; advance_to "$PHP" 8
 mkdir -p "$PHP/.bionic/docs/record/wave-01-fixture"
 printf 'note: T3 was landed by-hand (kind=hand); its run was stopped (ev=stop-run); the T2 decline was lifted (state=lift); amended= held= extended=\n' > "$PHP/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
 cp "$PHP/.bionic/docs/record/wave-01-fixture/landing-proofs.log" "$PHP/.bionic/docs/record/wave-01-fixture/fill-ledger.log"
@@ -135,7 +135,7 @@ expect_contains "HH-13 AC-2.3 one ev=stop-run reads stop-runs=1 · by-hand=0 on 
 # T33 (D20, critic-adversarial #5; A-orch-32): an existing continuation.md is merged into, never overwritten. The
 # hand-holds line goes under ## Hand-holds (the section appended after ## Deferrals when absent), a line already
 # there is never written twice, and the person's own text is untouched. Run twice: the line is there once.
-PHE="$(mk_fixture handholds-existing)"; advance_to "$PHE" 8; hh_plant "$PHE"
+PHE="$(CO_PLAN_AT=14 mk_fixture handholds-existing)"; advance_to "$PHE" 8; hh_plant "$PHE"
 mkdir -p "$PHE/${CONT_REL%/*}"
 printf '# continuation — hand written\n\nmy own note on the close\n\n## Deferrals\n\nnone, said the person\n\n## Resume instruction\n\nedited by a person\n' > "$PHE/$CONT_REL"
 HHE_CK0="$(cksum < "$PHE/$CONT_REL")"
@@ -146,20 +146,20 @@ expect_eq "HH-9c …and the person's Resume instruction is still the last sectio
   "$(/usr/bin/grep '^## ' "$PHE/$CONT_REL" | tail -n 1)"
 expect_contains "HH-9d …and run says what it added" "added the ## Hand-holds section" "$CO_OUT"
 # a second close-out over what the first left (planted in a fresh fixture: a closed plan refuses a second run)
-PHE2="$(mk_fixture handholds-existing2)"; advance_to "$PHE2" 8; hh_plant "$PHE2"
+PHE2="$(CO_PLAN_AT=14 mk_fixture handholds-existing2)"; advance_to "$PHE2" 8; hh_plant "$PHE2"
 mkdir -p "$PHE2/${CONT_REL%/*}"; cp "$PHE/$CONT_REL" "$PHE2/$CONT_REL"
 HHE_CK1="$(cksum < "$PHE2/$CONT_REL")"
 run_close "$PHE2" run
 expect_absent "HH-10b …and the card reports no add" "added the ## Hand-holds" "$CO_OUT"
 # the heading is there and the line is not: the line goes under it, after what the person wrote there
-PHE3="$(mk_fixture handholds-existing3)"; advance_to "$PHE3" 8; hh_plant "$PHE3"
+PHE3="$(CO_PLAN_AT=14 mk_fixture handholds-existing3)"; advance_to "$PHE3" 8; hh_plant "$PHE3"
 mkdir -p "$PHE3/${CONT_REL%/*}"
 printf '# continuation — hand written\n\n## Deferrals\n\n## Hand-holds\n\nthe person counted two by hand\n\n## Resume instruction\n\nedited by a person\n' > "$PHE3/$CONT_REL"
 run_close "$PHE3" run
 expect_eq "HH-11a …and the Resume instruction after it is as it was" "## Resume instruction|edited by a person" \
   "$(awk '/^## Resume instruction$/ { s = 1 } s && NF' "$PHE3/$CONT_REL" | paste -sd'|' -)"
 # the heading and the line are both there (as a person typed it, unfenced): nothing is added
-PHE4="$(mk_fixture handholds-existing4)"; advance_to "$PHE4" 8; hh_plant "$PHE4"
+PHE4="$(CO_PLAN_AT=14 mk_fixture handholds-existing4)"; advance_to "$PHE4" 8; hh_plant "$PHE4"
 mkdir -p "$PHE4/${CONT_REL%/*}"
 printf '# continuation — hand written\n\n## Deferrals\n\n## Hand-holds\n\n%s\n\n## Governed by\n\ngoverned-by: installed 0.0.0, typed by a person\n\n## Resume instruction\n\nedited by a person\n' "$HH_WANT" > "$PHE4/$CONT_REL"
 HHE_CK4="$(cksum < "$PHE4/$CONT_REL")"
@@ -172,7 +172,7 @@ ln -s "$REPO_ROOT/payload/scripts/card.sh" "$HH_MUT/scripts/card.sh"
 sed 's/^\$(co_hand_holds_section)$//' "$SCRIPT" > "$HH_MUT/scripts/close-out.sh"
 expect_eq "HH-mut0 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
   "$(diff "$SCRIPT" "$HH_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
-PHM="$(mk_fixture handholds-mut)"; advance_to "$PHM" 8; hh_plant "$PHM"
+PHM="$(CO_PLAN_AT=14 mk_fixture handholds-mut)"; advance_to "$PHM" 8; hh_plant "$PHM"
 ( cd "$PHM" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
     BIONIC_GATE_DIR="$HH_GATE" bash "$HH_MUT/scripts/close-out.sh" "$PHM/$PLAN_REL" run ) > "$SANDBOX/hh-mut.out" 2>&1
 HH_MRC=$?
@@ -188,7 +188,7 @@ section "§FLOOR-DECLARED (wave-28 T75; REQ-17 AC-17.1, D36): close-out proceeds
 # `close-out.sh run` delivers. The fixture's working head holds no tests/ directory (mk_fixture's shape).
 PFL="$(mk_fixture floor-declared)"
 FL_SID="closeout-floor-1"
-sed '/^proved: kind=regression /d' "$PFL/$PLAN_REL" > "$PFL/$PLAN_REL.n" && mv "$PFL/$PLAN_REL.n" "$PFL/$PLAN_REL"
+sed '/|ev=proof|kind=regression|/d' "$PFL/$LOG_REL" > "$PFL/$LOG_REL.n" && mv "$PFL/$LOG_REL.n" "$PFL/$LOG_REL"
 printf 'regression-command: true\n' >> "$PFL/.bionic/config.yaml"
 ( in_fixture "$PFL" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PFL" "$FL_SID" "$PFL/$PLAN_REL" )
 fl_poke() {  # <verb> [<arg>...] -> FL_RC, FL_OUT: the real poker verb, in the fixture, as this session
@@ -204,12 +204,12 @@ expect_eq "FL1 regression-run runs the declared floor at the working head (exit 
   "$FL_RC|$(head -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/regression-run-$FL_H.log" 2>/dev/null)|$(tail -n 1 "$PFL/.bionic/docs/record/wave-01-fixture/regression-run-$FL_H.log" 2>/dev/null)"
 # THE FLOOR FACT FROM THAT LOG, BY THE PRODUCT'S JUDGE AND WRITER (as plant_facts writes its lines): the judge
 # with the plan and the project root, as proof-add calls it, attests the declared log by the run line regression-run
-# wrote beside it (wave-37 T4; D7), and proof_add_line places the line.
+# wrote beside it, and proof_event appends the proof to the run's log.
 # proof-add itself is not driven here: its dry commit runs the real gate at current: 4, which this fixture's
 # Step-7 plan (no Step 0-6 lines) does not meet for any floor; session-poker §FLOOR-DECLARED drives the verb.
 FL_AT="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" || exit 9
   h="$(proof_attested regression "$2/record/wave-01-fixture/regression-run-$3.log" "$4" "$6" "" "$5")" || { printf "%s" "$h"; exit 1; }
-  proof_add_line "$6" "$(proof_line regression "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/regression-run-$3.log")" > "$6.pf" && mv "$6.pf" "$6" && printf "%s" "$h"' \
+  LOG_AT=2026-10-04T13:00:00Z proof_event "$6" kind=regression "head=$h" "evidence=record/wave-01-fixture/regression-run-$3.log" && printf "%s" "$h"' \
   _ "$REPO_ROOT/payload/scripts/lib" "$PFL/.bionic/docs" "$FL_H" "$PFL-wave" "$PFL" "$PFL/$PLAN_REL" 2>&1)"
 fl_poke current 8
 expect_eq "FL3 current 8 is admitted on the facts (exit 0)" "0|n=8" "$FL_RC|$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$PFL/$PLAN_REL" step | head -1)"
@@ -222,7 +222,7 @@ expect_eq "FL4 AC-17.1 close-out.sh run delivers on a declared floor's proof (rc
 # is the evidence as it stands, with no config key and no regression-run. The judge and writer are driven as FL2 drives them.
 PFN="$(mk_fixture floor-any)"
 FN_SID="closeout-floor-2"
-sed '/^proved: kind=regression /d' "$PFN/$PLAN_REL" > "$PFN/$PLAN_REL.n" && mv "$PFN/$PLAN_REL.n" "$PFN/$PLAN_REL"
+sed '/|ev=proof|kind=regression|/d' "$PFN/$LOG_REL" > "$PFN/$LOG_REL.n" && mv "$PFN/$LOG_REL.n" "$PFN/$LOG_REL"
 ( in_fixture "$PFN" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$PFN" "$FN_SID" "$PFN/$PLAN_REL" )
 FN_H="$(fixture_git "$PFN" rev-parse wave/01-fixture)"
 mkdir -p "$PFN/.bionic/docs/record/wave-01-fixture"
@@ -230,7 +230,7 @@ mkdir -p "$PFN/.bionic/docs/record/wave-01-fixture"
 printf '$ pnpm ci:local\n412 passed\n' | regression_fixture "$PFN/$PLAN_REL" "$PFN/.bionic/docs/record/wave-01-fixture/ci.log" "$FN_H" 0 0
 FN_AT="$(bash -c '. "$1/roots.sh" && . "$1/proof.sh" || exit 9
   h="$(proof_attested regression "$2/record/wave-01-fixture/ci.log" "$3" "$5" "" "$4")" || { printf "%s" "$h"; exit 1; }
-  proof_add_line "$5" "$(proof_line regression "$h" 2026-10-04T13:00:00Z "record/wave-01-fixture/ci.log")" > "$5.pf" && mv "$5.pf" "$5" && printf "%s" "$h"' \
+  LOG_AT=2026-10-04T13:00:00Z proof_event "$5" kind=regression "head=$h" evidence=record/wave-01-fixture/ci.log && printf "%s" "$h"' \
   _ "$REPO_ROOT/payload/scripts/lib" "$PFN/.bionic/docs" "$PFN-wave" "$PFN" "$PFN/$PLAN_REL" 2>&1)"
 FN_RC="$( ( in_fixture "$PFN" || exit 9
   HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
@@ -528,7 +528,7 @@ expect_nonempty "REF-4 precondition: a tag of the branch's name names a commit" 
   "$(fixture_git "$PREFD" rev-parse --verify -q 'refs/tags/wave/01-fixture^{commit}' 2>/dev/null)"
 run_close "$PREFD" check
 
-PREFF="$(mk_fixture ref-frontmatter)"; advance_to "$PREFF" 8
+PREFF="$(CO_PLAN_AT=14 mk_fixture ref-frontmatter)"; advance_to "$PREFF" 8
 awk '
   NR == 1 && $0 == "---" { print; fm = 1; next }
   fm && $0 == "---" { print "working-branch: wave/01-fixture"; print; fm = 0; next }
@@ -555,8 +555,8 @@ ord_pos() {  # <file> <needle> -> the 1-based line number of the needle's first 
   awk -v n="$2" '/^## / { s = ($0 == "## Pull request"); next } s && index($0, n) { print NR; exit }' "$1"
 }
 PPO="$(mk_task_pr_fixture order-pr "fix/x")"
-awk '{ print } /^\| T1 \|/ { print "| T3 | 8 | integrate | open the pull request | orchestrator | — | 10 | AC-1 | none | landed |" }' \
-  "$PPO/$PLAN_REL" > "$PPO/$PLAN_REL.o" && mv "$PPO/$PLAN_REL.o" "$PPO/$PLAN_REL"
+awk '{ print } /^\| T1 \|/ { print "| T3 | 8 | integrate | open the pull request | — | 10 | AC-1 | none | — |" }' "$PPO/$PLAN_REL" > "$PPO/$PLAN_REL.o" \
+  && mv "$PPO/$PLAN_REL.o" "$PPO/$PLAN_REL" && printf 'run/v1|ev=%s|at=2026-10-04T12:30:00Z\n' "dispatch|row=T3|name=orchestrator" "published|row=T3" >> "$PPO/$LOG_REL"
 expect_contains "ORDER-0 precondition: the plan carries the integrate row the section names" "| T3 | 8 | integrate |" "$(cat "$PPO/$PLAN_REL")"
 run_close "$PPO" run
 expect_eq "ORDER-1 the task-scale run closes" "0" "$CO_RC"
@@ -637,13 +637,13 @@ ad_step7() {  # <project> <adr value> -> the plan without adrs:, its Step 7 line
 }
 ad_adrs() { awk 'NR == 1 { fm = 1; next } fm && /^---$/ { exit } fm && /^adrs:/ { sub(/^adrs:[ \t]*/, ""); print }' "$1"; }
 AD_ADR="adrs/epic-fx/adr-061-the-pointer.md"
-PAD="$(mk_fixture adrs-either)"; ad_step7 "$PAD" "$AD_ADR"; advance_to "$PAD" 8
+PAD="$(CO_PLAN_AT=14 mk_fixture adrs-either)"; ad_step7 "$PAD" "$AD_ADR"; advance_to "$PAD" 8
 expect_eq "AD-0 precondition: the plan carries no adrs: line, and its Step 7 block the adr: line" "|yes" \
   "$(ad_adrs "$PAD/$PLAN_REL")|$(/usr/bin/grep -qxF "  adr: $AD_ADR" "$PAD/$PLAN_REL" && echo yes || echo no)"
 run_close "$PAD" run
 expect_eq "AD-1 close-out reads the Step 7 adr: line: run exits 0 and the epic row's ADR cell names its number" "0|061" "$CO_RC|$(adr_cell "$PAD")"
 [ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | /usr/bin/grep -i 'adrs\|refuse' | head -4 | sed 's/^/    | /'
-PAP="$(mk_fixture adrs-path)"; ad_step7 "$PAP" "record/wave-01-fixture/adr.md"; advance_to "$PAP" 8
+PAP="$(CO_PLAN_AT=14 mk_fixture adrs-path)"; ad_step7 "$PAP" "record/wave-01-fixture/adr.md"; advance_to "$PAP" 8
 run_close "$PAP" run
 expect_eq "AD-5 a path with no adr-<n>: the epic row is written, its ADR cell the path, never refused" "0|record/wave-01-fixture/adr.md" "$CO_RC|$(adr_cell "$PAP")"
 
@@ -662,7 +662,7 @@ for _f in pah_world pah_cont_state; do
 done
 expect_eq "REG-0 the builders were read out of tests/proof-at-head.test.sh" "" "$REG_MISSING"
 PAH_LIB="$REPO_ROOT/payload/scripts/lib"
-pah_world reg-red "notify.test.sh,rehearsal-failed-review.test.sh,shell-lint.test.sh,sitrep.test.sh" 2
+CO_PLAN_AT=14 pah_world reg-red "notify.test.sh,rehearsal-failed-review.test.sh,shell-lint.test.sh,sitrep.test.sh" 2
 run_close_as reg-close "$PAH_P" run
 expect_eq "REG-1 close-out delivers over the run (exit 0), its continuation holding a regression line" "0|1" \
   "$CO_RC|$(/usr/bin/grep -c 'the regression: ' "$PAH_P/$CONT_REL" 2>/dev/null)"
