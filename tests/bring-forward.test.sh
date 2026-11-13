@@ -11,7 +11,9 @@
 #   §READER  the reader answers a version-14 plan with no run.log through the translation, in time order.
 #   §PLACE     an approval written by then instant is read; an untimed deferral stands at its review's proof.
 #   §MATRIX    a discharged matrix row is a proof and a waived one a waiver, by ac= with what its cells hold,
-#              and a waiver with the author, instant and words of its block's waiver: line.
+#              and a waiver with the author, instant and words of its block's waiver: line; a cell that holds no
+#              evidence takes the evidence: line of the block, and a cell that holds one wins; a pending or blocked
+#              row is no event, and its evidence or auditor, which 15 has no place for, is on the gaps list.
 #   §ONE-FACT  a criterion a state line and a matrix row both name is the state line's one fact.
 #   §UNREAD    the header's abandoned: is an abandon; an inherited: line no ruled type carries is a gap.
 #   §RENAME  each landing-record line of a ruled type is carried with its first field renamed and every
@@ -23,7 +25,8 @@
 #   §DECISIONS  a design ledger's put and ruled headings are decision rounds; any other heading is a gap.
 #   §DEBTS      a debt ledger's lines are debts, burned= its row when burned; a line of another form is a gap.
 #   §ACT     payload/scripts/bring-forward.sh <plan>: the plan keeps no state, matrix or handoff section, its
-#            rows the nine authored cells, and the reader's step, read from the log it wrote, is the old current:.
+#            rows the nine authored cells, and the reader's step, read from the log it wrote, is the old current:; each
+#            criterion a closed run proved with its evidence in its block carries that evidence in the log.
 #   §TWICE   a second act changes no byte of the plan or the log.
 #   §KEPT    the old plan and record are kept beside the new, byte for byte.
 #   §HALF    a run whose log already holds some of its facts is brought forward: the act exits 0, the log it writes
@@ -159,7 +162,7 @@ cat > "$M" <<EOF
 abandoned: 2026-11-02 — folded into wave-9
 ---
 ## Eval design
-$(printf '| Criterion |\n|---|\n'; printf '| AC-%s |\n' 1 2 3 4 5)
+$(printf '| Criterion |\n|---|\n'; printf '| AC-%s |\n' 1 2 3 4 5 6 7 8 9 10)
 ## Verification Matrix
 stack-health: pending
 | AC | tier | status | evidence | auditor |
@@ -169,11 +172,24 @@ stack-health: pending
 | AC-3 | T2 | pending | — | — |
 | AC-4 | T1 | discharged | — | — |
 | AC-5 | T2 | discharged | record/wave-8-matrix/m.log | CONFIRMED |
+| AC-6 | T2 | discharged | — | CONFIRMED |
+| AC-7 | T2 | discharged | record/wave-8-matrix/c.log | CONFIRMED |
+| AC-8 | T0 | pending | record/wave-8-matrix/p.md | REFUTED |
+| AC-9 | T2 | blocked | — | — |
+| AC-10 | T2 | pending | — | — |
 
 AC-2: the waived one.
   waiver: Ann Person 2026-11-01T08:00:00Z "not run here" — the reason
 AC-3: the pending one.
   waiver: Bo Person 2026-11-01 "later, by hand"
+AC-6: proved, its evidence written in its block.
+  evidence: record/wave-8-matrix/b.log
+AC-7: proved, its evidence in its cell and another in its block.
+  evidence: record/wave-8-matrix/other.log
+AC-9: blocked, an evidence written in its block.
+  evidence: record/wave-8-matrix/q.log
+AC-10: pending, its block saying so.
+  evidence: pending
 ## SDLC State
 proved: kind=unit head=$H ac=AC-5 at=2026-11-01T06:00:00Z evidence=record/wave-8-matrix/s.log rc=0
 inherited: a.test.sh base=$C head=$H at=2026-11-01T07:00:00Z evidence=record/wave-8-matrix/i.log
@@ -200,6 +216,20 @@ for f in kind head at; do expect_contains "a row holds no $f: a gap" "gap/v1|ev=
 expect_eq "an empty evidence cell is still discharged" "state=discharged by=proof" "$(askm cell AC-4)"
 expect_eq "and its proof holds no field the row lacks" "run/v1|ev=proof|ac=AC-4|at=" "$(acof AC-4)"
 expect_contains "the empty evidence cell is a gap" "gap/v1|ev=proof|ac=AC-4|field=evidence|why=absent" "$MG"
+expect_eq "an empty evidence cell takes the evidence: line of its criterion's block" \
+  "run/v1|ev=proof|ac=AC-6|evidence=record/wave-8-matrix/b.log|auditor=CONFIRMED|at=" "$(acof AC-6)"
+expect_contains "…whose proof still lacks its head, a gap" "gap/v1|ev=proof|ac=AC-6|field=head|why=absent" "$MG"
+expect_absent "…and whose evidence the gaps list does not name" "gap/v1|ev=proof|ac=AC-6|field=evidence|" "$MG"
+expect_eq "a cell that holds an evidence wins over its block's line" \
+  "run/v1|ev=proof|ac=AC-7|evidence=record/wave-8-matrix/c.log|auditor=CONFIRMED|at=" "$(acof AC-7)"
+expect_eq "a pending row's evidence and auditor cells, which no event at 15 can hold, are on the gaps list as undischarged" \
+  "gap/v1|ev=criterion|criterion=AC-8|field=evidence|why=undischarged gap/v1|ev=criterion|criterion=AC-8|field=auditor|why=undischarged" \
+  "$(printf '%s\n' "$MG" | grep -F 'criterion=AC-8|' | tr '\n' ' ' | sed 's/ $//')"
+expect_absent "…and its row writes no proof and no waiver" "ac=AC-8|" "$(acof AC-8)"
+expect_eq "a blocked row's evidence written in its block is named too" "gap/v1|ev=criterion|criterion=AC-9|field=evidence|why=undischarged" \
+  "$(printf '%s\n' "$MG" | grep -F 'criterion=AC-9|')"
+expect_empty "a row whose cells hold nothing, or only its own status word, is named for neither" \
+  "$(printf '%s\n' "$MG" | grep -E 'criterion=AC-(3|10)\|')"
 section "ONE-FACT"
 expect_eq "a criterion a proved: line and a matrix row both name is one proof" 1 "$(acof AC-5 | grep -c .)"
 expect_contains "the stated proof stands, with its head and instant" "head=$H|ac=AC-5|" "$(acof AC-5)"
@@ -371,6 +401,19 @@ for r in $RUNS; do p="$(at "$SB" "$r")"; cur="$(sed -n 's/^current: *//p' "$p")"
   expect_eq "${r%%:*}: the reader's step is the old current: ($cur)" "n=$cur" "$(bash "$RS" "$p" step | grep '^n=')"
   expect_eq "${r%%:*}: the state, matrix and handoff sections the plan held are gone" "held 0" "$([ "$pre" -ge 3 ] && echo held) $(machine "$p")"
   expect_eq "${r%%:*}: each Tasks row holds the nine authored cells" "id step kind task deps size serves files artifact" "$(plan_read_rows "$p" Tasks | awk -F'\t' '{ for (i = 1; i <= NF; i++) printf "%s%s", (i > 1 ? " " : ""), substr($i, 1, index($i, "=") - 1); print "" }' | sort -u)"
+done
+
+# A criterion the closed runs proved with its evidence in its block and a dash in its cell, as `<ac> <evidence>`.
+blockev() { awk '/^## /{ m = ($0 == "## Verification Matrix") } m && /^\| AC-/ { n = split($0, c, "|"); a = c[2]; e = c[5]; gsub(/ /, "", a); gsub(/ /, "", e)
+    if (c[4] ~ /discharged/ && (e == "" || e == "—" || e == "-")) d[a] = 1 }
+  m && /^AC-[^ :]+:/ { b = $1; sub(/:$/, "", b) } m && (b in d) && /^  evidence:/ { v = $0; sub(/^  evidence: */, "", v); print b, v; delete d[b] }' "$1"; }
+for r in $W6 $W9; do l="$SB/$r/record/$r/run.log"; n=0; miss=""
+  while read -r a v; do [ -n "$a" ] || continue; n=$((n + 1)); grep -qF "|ev=proof|ac=$a|evidence=$v|" "$l" || miss="$miss $a"
+    ! grep -q "^gap/v1|ev=proof|ac=$a|field=evidence|" "$SB/$r.out" || miss="$miss gap:$a"; done <<EOF
+$(blockev "$(at "$BED" "$r:$r")")
+EOF
+  expect_regex "$r: the closed plan proved criteria with their evidence in their blocks" '^[1-9][0-9]*$' "$n"
+  expect_empty "$r: each such proof carries that evidence after the act, and the gaps list names none" "$miss"
 done
 
 section "TWICE"
