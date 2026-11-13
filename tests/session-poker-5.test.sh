@@ -341,7 +341,7 @@ section "§ROUNDS: decisions put appends a put round to the run's log and decisi
 # plan shape with a reads column, each ruling given by the verb in the session whose transcript it reads.
 # fails-when: a put opens no ask, or the verb's ruling leaves it open; the wait line is absent, or reads the same whether
 # its task is on the chain.
-RW="$(make_repo rounds)"; PW="$(s34_plan "$RW" 4)"
+RW="$(make_repo rounds)"; PW="$(SP_PLAN_AT=14 s34_plan "$RW" 4)"
 RW_L="$RW/.bionic/docs/record/wave-01-fixture/design-ledger.md"; mkdir -p "${RW_L%/*}"
 rw_table() {  # <the side task's size> -> the task table: a side task reads one decision; the last reads another and the long one's file
   awk -v s="$1" '/^## Tasks/ { print; print ""; print "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |"
@@ -613,7 +613,7 @@ section "§NOTREADY: a row reading an unruled decision or waiting on an open row
 # an open order leaves a FILL; the tick prints a decline.
 NR_REC=".bionic/docs/record/wave-01-fixture/T2-held.md"
 RNR="$(make_repo notready)"; new_roster "$RNR"
-NR_P="$(s47_plan "$RNR" 8 \
+NR_P="$(SP_PLAN_AT=14 s47_plan "$RNR" 8 \
   "| T1 | 4 | build | reads a ruling | implementor | — | 10 | REQ-x | payload/a.sh | pending | approval:plan, approval:D3 |" \
   "| T2 | 4 | build | the open row | implementor | — | 10 | REQ-x | $NR_REC, payload/b.sh | active | |" \
   "| T3 | 4 | build | waits on T2 | implementor | — | 10 | REQ-x | payload/c.sh | pending | approval:plan, $NR_REC |" \
@@ -667,7 +667,7 @@ section "§STEP: the approval line alone readies nothing: a plan at current: 2 t
 # fails-when: at current: 2 the tick prints FILL, the wall refuses, or units_ready names T1; at current: 4 any of
 # the three disagrees.
 RST="$(make_repo step)"; new_roster "$RST"
-ST_P="$(s47_plan "$RST" 8 "| T1 | 4 | build | ready from step 4 | implementor | — | 10 | REQ-x | payload/a.sh | pending | |")"
+ST_P="$(SP_PLAN_AT=14 s47_plan "$RST" 8 "| T1 | 4 | build | ready from step 4 | implementor | — | 10 | REQ-x | payload/a.sh | pending | |")"
 st_at() { awk -v c="$1" '!d && /^current:/ { print "current: " c; d = 1; next } { print }' "$ST_P" > "$ST_P.t" && mv "$ST_P.t" "$ST_P"; }
 st_ready() { bash -c '. "$1/units.sh" && units_ready "$2" 4' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$ST_P" 2>/dev/null; }
 st_at 2
@@ -810,7 +810,7 @@ section "§EXEMPT: a review-born row inside fix-policy: is exempt from fix-cap:,
 # prints names the wrong count, or none.
 EX_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 REX="$(make_repo exempt)"; ( cd "$REX" && git commit -q --allow-empty -m init )
-PEX="$(s34_plan "$REX" 4)"; EX_H="$(git -C "$REX" rev-parse HEAD)"
+PEX="$(SP_PLAN_AT=14 s34_plan "$REX" 4)"; EX_H="$(git -C "$REX" rev-parse HEAD)"
 EX_OWN="record/wave-01-fixture/rev.md"; EX_CARRIED="record/wave-00-prior/critic.md"
 mkdir -p "$REX/.bionic/docs/record/wave-01-fixture" "$REX/.bionic/docs/record/wave-00-prior"
 printf 'reviewed: %s..%s\nquestion: structure\nresult: fail\nscope: piece\n\nfindings: 3\nfinding: 1 S3 on lib/p1.sh:1 the first promoted defect\nfinding: 2 S3 on lib/p2.sh:1 the second promoted defect\nfinding: 3 S3 on lib/p3.sh:1 the third promoted defect\nshown: 1 cat lib/p1.sh\nshown: 2 cat lib/p2.sh\nshown: 3 cat lib/p3.sh\n' \
@@ -892,7 +892,7 @@ section "§APPROVED-BY: approve plan '<reply>' appends the plan's approval the w
 # fails-when: an approval's only giver is the orchestrator's editor; it is given twice; the words differ; a step's is refused.
 AB_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RAB="$(make_repo approved-by)"; ( cd "$RAB" && git commit -q --allow-empty -m init ); git -C "$RAB" config user.name "Dana Fixture"
-PAB="$(s34_plan "$RAB" 3)"; /usr/bin/grep -v '^approved-by:' "$PAB" > "$PAB.t" && mv "$PAB.t" "$PAB"
+PAB="$(SP_PLAN_AT=14 s34_plan "$RAB" 3)"; /usr/bin/grep -v '^approved-by:' "$PAB" > "$PAB.t" && mv "$PAB.t" "$PAB"
 ab_k() { /usr/bin/grep "^run/v1|ev=$1" "$RAB/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null; }
 ab_said() { printf '%s' "$1" | /usr/bin/grep -q "$2" && echo yes || echo no; }   # <text> <words> -> yes when the text holds them
 ab_at() { awk -v c="$1" '!d && /^current:/ { print "current: " c; d = 1; next } { print }' "$PAB" > "$PAB.t" && mv "$PAB.t" "$PAB"; }
@@ -943,7 +943,7 @@ RPA="$(make_repo parts)"; RPA="$(cd "$RPA" && pwd -P)"
 git -C "$RPA" config user.email t@example.com; git -C "$RPA" config user.name "Dana Fixture"
 printf '# Changelog\n\n## %s — 2026-10-25\n\n### The work\n\n- one change\n\n### The landing numbers\n\nthe numbers\n' "$PA_V" > "$RPA/CHANGELOG.md"
 ( cd "$RPA" && git add CHANGELOG.md && git commit -qm "the entry" && git branch -M main && git checkout -qb wave/01-fixture ) >/dev/null 2>&1
-PPA="$(s34_plan "$RPA" 4)"
+PPA="$(SP_PLAN_AT=14 s34_plan "$RPA" 4)"
 awk -v v="$PA_V" 'NR == 1 { print; print "working-branch: wave/01-fixture"; print "release: " v; next }
   { print }
   /^\| T5 \|/ { print "| T3 | 7 | doc | the entry. The release entry is written. | orchestrator | — | 10 | REQ-1 | CHANGELOG.md | — | — | pending |"

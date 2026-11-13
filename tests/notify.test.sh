@@ -509,7 +509,7 @@ channel_on "$NS_CFG"
 nk_world() {  # <label> -> a repo: armed, bound to a reads table at Step 4, committed, a git user
   local r p; r="$(make_repo "$1")"; new_roster "$r"
   git -C "$r" config user.name "Dana Fixture"
-  s47_plan "$r" 2 \
+  SP_PLAN_AT=14 s47_plan "$r" 2 \
     "| T1 | 4 | build | in flight | implementor | — | 30 | REQ-x | payload/x.sh | active | |" \
     "| T4 | 7 | doc | the release | implementor | — | 15 | REQ-x | CHANGELOG.md | pending | approval:release |" \
     "| T5 | 4 | build | waits on two | implementor | — | 20 | REQ-x | payload/y.sh | pending | approval:doctrine-growth, payload/x.sh |" >/dev/null

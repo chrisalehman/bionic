@@ -164,7 +164,7 @@ section "Section 39: the tick lints the ledger — poker: LEDGER <id> <finding> 
 # finding reaches the orchestrator, who owns the ledger, before a writer's commit meets it.
 R39A="$(make_repo s39-ledger)"; new_roster "$R39A"
 mkrow name=w-T2 agent_id=a-w-T2 >> "$(roster_of "$R39A")"
-P39A="$(sp_plan_at_step "$R39A" 4 \
+P39A="$(SP_PLAN_AT=14 sp_plan_at_step "$R39A" 4 \
   "| T1 | 4 | build | landed, no line | implementor | — | 15m | REQ-x | a.sh | landed |" \
   "| T2 | 4 | build | active, launched | w-T2 | — | 15m | REQ-x | b.sh | active |" \
   "| T3 | 4 | build | active, agent names no roster row | implementor | — | 15m | REQ-x | c.sh | active |" \
@@ -200,7 +200,7 @@ expect_absent "39j a repaired ledger ticks no LEDGER line" "poker: LEDGER" "$OUT
 # alone; what the tick can meet is a roster with no rows, and there an agent-named active row is
 # a launch finding, not an evidence one.
 R39K="$(make_repo s39-empty-roster)"; new_roster "$R39K"
-sp_plan_at_step "$R39K" 4 \
+SP_PLAN_AT=14 sp_plan_at_step "$R39K" 4 \
   "| T1 | 4 | build | active, agent-named, nobody launched | w-T1 | — | 15m | REQ-x | a.sh | active |" \
   "| T2 | 4 | build | ordinary, ready | implementor | — | 15m | REQ-x | b.sh | pending |" > /dev/null
 poke_pressure "$R39K" 8192 1.0 tick
@@ -233,7 +233,7 @@ export CLAUDE_CONFIG_DIR="$S40_CFG"
 # `evidence` finding, not a `launch` one.
 R40A="$(make_repo s40-no-roster)"
 poke "$R40A" arm
-sp_plan_at_step "$R40A" 4 \
+SP_PLAN_AT=14 sp_plan_at_step "$R40A" 4 \
   "| T1 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | a.sh | doing |" \
   "| T2 | 4 | build | waits on CI | implementor | ext:ci-40a | 15m | REQ-x | b.sh | pending |" \
   "| T3 | 4 | build | active, agent-named, no line | w-T3 | — | 15m | REQ-x | c.sh | active |" > /dev/null
@@ -252,7 +252,7 @@ expect_true "40a6 …after the gate line and before the QUIET line (gate=$S40_RU
 # 40b — NO ROOM: a roster, a ready row, and a five-minute load over the share. No fill, and
 # the lint still runs: a busy machine has nothing to do with the ledger.
 R40B="$(make_repo s40-hold)"; new_roster "$R40B"
-sp_plan_at_step "$R40B" 4 \
+SP_PLAN_AT=14 sp_plan_at_step "$R40B" 4 \
   "| T1 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | a.sh | doing |" \
   "| T2 | 4 | build | waits on CI | implementor | ext:ci-40b | 15m | REQ-x | b.sh | pending |" \
   "| T3 | 4 | build | ordinary, ready | implementor | — | 15m | REQ-x | c.sh | pending |" > /dev/null
@@ -274,7 +274,7 @@ expect_eq "40b8 …and LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 
 # 40c — OVER THE SHARE: the same pair with memory used past the share.
 R40C="$(make_repo s40-emergency)"; new_roster "$R40C"
-sp_plan_at_step "$R40C" 4 \
+SP_PLAN_AT=14 sp_plan_at_step "$R40C" 4 \
   "| T1 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | a.sh | doing |" \
   "| T2 | 4 | build | waits on CI | implementor | ext:ci-40c | 15m | REQ-x | b.sh | pending |" > /dev/null
 BIONIC_PROBE_USED_PCT=90 poke "$R40C" tick
@@ -287,7 +287,7 @@ expect_eq "40c4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 # 40d — NO BUDGET: the plan carries no `parallel-budget:` line, so the fill arm takes its
 # no-budget note — and the lint does not wait on a budget it has no use for.
 R40D="$(make_repo s40-no-budget)"; new_roster "$R40D"
-P40D="$(sp_plan_at_step "$R40D" 4 \
+P40D="$(SP_PLAN_AT=14 sp_plan_at_step "$R40D" 4 \
   "| T1 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | a.sh | doing |" \
   "| T2 | 4 | build | waits on CI | implementor | ext:ci-40d | 15m | REQ-x | b.sh | pending |")"
 /usr/bin/grep -v '^parallel-budget:' "$P40D" > "$P40D.new" && mv "$P40D.new" "$P40D"
@@ -305,7 +305,7 @@ expect_eq "40d4 …LEDGER once" "1" "$(s40_count 'poker: LEDGER ')"
 # report's call on that arm was unpinned: deleting it left every suite green.
 R40E="$(make_repo s40-disarm)"; new_roster "$R40E"
 armed_ago "$R40E"
-P40E="$(sp_plan_at_step "$R40E" 9 \
+P40E="$(SP_PLAN_AT=14 sp_plan_at_step "$R40E" 9 \
   "| T1 | 4 | build | status off the enum | implementor | — | 15m | REQ-x | a.sh | doing |" \
   "| T2 | 4 | build | waits on CI | implementor | ext:ci-40e | 15m | REQ-x | b.sh | pending |")"
 sed -e 's/^- Step 9: in progress$/- Step 9: delivered: bionic 9.9.9; report: record\/fixture\/close-out.md/' \

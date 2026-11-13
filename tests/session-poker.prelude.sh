@@ -710,7 +710,7 @@ s59_world() {
   R59W="$(make_repo "$lab")"; new_roster "$R59W"; ( cd "$R59W" && git commit -q --allow-empty -m init )
   # A BASE THE JUDGE CAN HOLD (wave-36 T28; D9): live:head asks facts_state, which judges only a plan whose base-sha:
   # is a commit, so the Step-4 block names the init commit, not s42_plan's placeholder.
-  P59W="$(s42_plan "$R59W" 4 "  worktree: .worktrees/01-fixture
+  P59W="$(SP_PLAN_AT=14 s42_plan "$R59W" 4 "  worktree: .worktrees/01-fixture
   base-sha: $(git -C "$R59W" rev-parse --short=8 HEAD)
   branch: wave/01-fixture")"
   # EACH LANDING TOUCHES CODE (wave-36 T28; D9): the judge reads a commit that touches nothing as prose, and a
