@@ -3126,14 +3126,13 @@ _eg_git_wt_name() {
 }
 
 # _eg_row_for_worktree <name> -> sets _EG_ROW to "<id><TAB><step><TAB><status><TAB><kind>" for
-# the ONE `## Tasks` row
-# whose `worktree` cell names that tree, and _EG_ROW_DUP to the ids when more than one does.
-# Returns 1 for "this plan has no register", 3 for "the register is ambiguous", 0 otherwise.
+# the ONE row whose latest tree event in the run's log names that tree, and _EG_ROW_DUP to the
+# ids when more than one does. Returns 3 for "the register is ambiguous", 0 otherwise.
 #
-# THE CELL IS COMPARED BY BASENAME on the row's side, so a plan that spells the tree as a
-# path (`.worktrees/14-T3`) or as its branch (`wt/14-T3`) still resolves to the tree git
-# named `14-T3`. The comparison is never loosened on the DERIVED side: that value is git's
-# own, and matching it loosely is how a commit reaches another task's step.
+# THE TREE IS COMPARED BY BASENAME on the row's side, so a tree event spelling the tree as a
+# path (`.worktrees/14-T3`) still resolves to the tree git named `14-T3`. The comparison is
+# never loosened on the DERIVED side: that value is git's own, and matching it loosely is how
+# a commit reaches another task's step.
 #
 # AND THAT LOOSENING IS EXACTLY WHY A COLLISION IS POSSIBLE (correctness F4, wave-14 T24).
 # `wt/14-T6` and `.worktrees/14-T6` are different cells with one basename, the spec's domain
@@ -3148,60 +3147,12 @@ _eg_git_wt_name() {
 # IT ASSIGNS RATHER THAN PRINTS for the reason `_eg_commit_cwd` does: the collision is a
 # second answer, and a command substitution would strand it in a subshell.
 _eg_row_for_worktree() {
-  local _want="${1:-}" _rows _line _cell _id _step _status _kind _nocase _same
+  local _want="${1:-}"
   _EG_ROW=""; _EG_ROW_DUP=""; _EG_ROW_COLLIDED=0
   [ -n "$_want" ] || return 0
-  if [ "$_EG_V15" -eq 1 ]; then _eg_v15_row_for_tree "$_want"; return; fi
-  _rows="$(units_rows "$PLAN")" || return 1
-  [ -n "$_rows" ] || return 0
-  # THE TWIN OF stop.sh's `_lg_row_for_tree` FOLD (L1, wave-17 T41, critic C14; both sides
-  # T50, T47's regression RED): that function folds both sides and this one now does too, for
-  # the reason case-folding always needs both sides folded — `$_want` is the literal
-  # basename git gave the tree, and that basename carries the tree's REAL case (a real
-  # dispatch tree is always `<NN>-T<n>`, capital T), while the cell is authored text that
-  # can drift in case either direction. Folding only the cell does not make the compare
-  # case-insensitive; it makes it fail on every mixed-case tree, including an EXACT match,
-  # because a lowercased cell can never equal an unlowercased `$_want`. Both walls must
-  # fold the same way to keep one plan from giving two answers for which row owns a tree.
-  # FOLDED BY THE SHELL, NOT BY `tr` (wave-34 T11, D19): `nocasematch` around the one compare
-  # is the same both-sides fold with no process per row, and it is restored at once.
-  shopt -q nocasematch && _nocase=1 || _nocase=0
-  while IFS= read -r _line; do
-    [ -n "$_line" ] || continue
-    units_field_v _cell "$_line" worktree
-    [ -n "$_cell" ] || continue
-    _cell="${_cell%/}"
-    shopt -s nocasematch
-    [[ "${_cell##*/}" == "$_want" ]]; _same=$?
-    [ "$_nocase" = 1 ] || shopt -u nocasematch
-    [ "$_same" = 0 ] || continue
-    units_field_v _id "$_line" id
-    if [ -z "$_EG_ROW" ]; then
-      # THREE CELLS, TAB-SEPARATED: id, step, status (wave-17 REQ-1, D1, ADR-031). The
-      # status cell has been validated since wave-11 and read by nothing; it is what says
-      # whether a commit out of this tree discharges the obligations of the TASK or of the
-      # RUN, and the fork below cannot ask that question of a value it was never handed.
-      # One more cell of a table this function already parses — no new fact is fetched
-      # (the D11 freeze, .claude/rules/hook-authoring.md).
-      # AND A FOURTH, THE KIND (wave-20 REQ-5, Δ6). A row ahead of the run is judged by its
-      # task arms when a writer is at work in it — unless it is a gate act (`integrate`,
-      # `close`), whose commit must wait for the run to reach its step — so the fork needs
-      # the row's kind as well as its status.
-      units_field_v _step "$_line" step; units_field_v _status "$_line" status
-      units_field_v _kind "$_line" kind
-      _EG_ROW="$_id	$_step	$_status	$_kind"
-      _EG_ROW_DUP="$_id"
-    else
-      _EG_ROW_DUP="$_EG_ROW_DUP, $_id"
-      _EG_ROW_COLLIDED=1
-    fi
-  done <<< "$_rows"
-  if [ "${_EG_ROW_COLLIDED:-0}" = 1 ]; then
-    _EG_ROW=""
-    return 3
-  fi
-  _EG_ROW_DUP=""
-  return 0
+  # A tree is the row's latest tree event in the run's log; an older plan's worktree cell is never read.
+  [ "$_EG_V15" -eq 1 ] || return 0
+  _eg_v15_row_for_tree "$_want"
 }
 
 # At 15 a tree is the row's latest tree event; a row in flight (any state between its dispatch and its
