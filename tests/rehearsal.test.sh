@@ -17,8 +17,8 @@
 # clean state has no ask to drop, so its refusal is a judgment naming an ask the register lacks, the same floor read
 # from the other side.
 #
-# FIXTURE FIDELITY: the sandbox is tests/lib/door.sh's, a real repository carrying the plugin's hooks and scripts, a
-# plan in its Step-3 shape and the release check's closure. Every later state is a command's: the poker's verbs,
+# FIXTURE FIDELITY: the sandbox is tests/lib/door.sh's, a real repository carrying the plugin's hooks and scripts and
+# the release check's closure, with no plan: its run starts at the configuration card. Every state is a command's: the poker's verbs,
 # the door's landing, the sweeper's ack, close-out. What `rehearse` writes by hand is what a run's people and agents
 # write by hand: the plan's prose, a review's record, a row's code, a criterion's evidence. Each command it runs is
 # logged beside the sandbox (`rehearsal.log`), and each section reads the commands its state turns on from that log.
@@ -52,8 +52,8 @@ rt_state clean
 expect_eq "CL-1 rehearse reaches the state and prints the sandbox's plan (exit 0)" "0|yes" \
   "$RT_RC|$([ -f "$RT_PLAN" ] && echo yes)"
 if [ "$RT_RC" = 0 ]; then
-  expect_eq "CL-1b …through the door's landing of one build row, the other still building" "yes" \
-    "$([ "$(rt_ran 'spawn-worktree.sh land')" -ge 1 ] && echo yes)"
+  expect_eq "CL-1b …through the build row's ready, the release row launched" "yes|yes" \
+    "$([ "$(rt_ran 'spawn-worktree.sh ready')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'dispatch event')" -ge 2 ] && echo yes)"
   rt_sheet_and_card CL "" "" ""
 fi
 
