@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tests for hooks/stop.sh — ONE PROCESS AT TURN END.
+# Tests for hooks/stop.sh — ONE PROCESS AT TURN END, and at the stop of an agent.
 #
 # WHAT THIS FILE IS FOR, AND WHAT IT IS NOT. The four verdicts keep their own
 # suites, re-pointed at this process and unchanged in count:
@@ -34,6 +34,8 @@
 #   §LOG     a step, an approval or an order the run's log alone holds moves the ready-with-room verdict
 #   §GUARD   the stop guard's words, its roster writes, the verdict read and the agent guard's
 #            arming check, each a stop-library function called in a shell of its own
+#   §EVENTS  the orchestrator's stop of an agent (TaskStop's PreToolUse) and an agent's own stop
+#            (SubagentStop), each driven through this hook by its payload; the two guard scripts hand on
 #
 # §1 IS THE ONE THAT GOES RED AGAINST FIRST-BLOCK-WINS, which is the alternative
 # ADR-004 rejects by name, and against the pre-merge arrangement too: before the
@@ -1147,6 +1149,174 @@ GD_FN="$(gcall eval 'declare -f stop_guard stop_guard_unrostered_write stop_guar
 expect_contains "GD9 the guard's functions are read whole" "stop_guard_refuse no-target" "$GD_FN"
 expect_eq "GD9 …and none makes a temp file" "" "$(printf '%s\n' "$GD_FN" | grep -E 'mktemp|[.]tmp[.][$][$]')"
 rm -rf "$GD"
+
+section "EVENTS: the orchestrator's stop of an agent and an agent's own stop are answered here, each by its event's payload"
+
+# A WORLD OF THE ORCHESTRATOR'S STOP: an engaged repo, the session's transcript and its subagents directory
+# under a home of its own. Its roster rows go through the one row builder; a log is a working agent's.
+tworld() {  # -> TH (home), TW (repo), TTR (transcript), TSUB (subagents)
+  TH=$(cd "$(mktemp -d)" && pwd -P); TW="$TH/repo"; TTR="$TH/.claude/projects/p/$SID.jsonl"; TSUB="${TTR%.jsonl}/subagents"
+  mkdir -p "$TW/.bionic/tmp" "$TW/.bionic/docs/record" "$TSUB"; : > "$TTR"
+  git -C "$TW" init -q; git -C "$TW" -c user.email=t@t -c user.name=t commit -q --allow-empty -m seed
+  : > "$TW/.bionic/tmp/engaged-$SID.state"
+}
+trow() {  # <name> <agent-id> [key=value]...
+  local f="$TW/.bionic/tmp/roster-$SID.state"; [ -f "$f" ] || roster_header > "$f"
+  roster_row_fixture session="$SID" name="$1" agent_id="$2" launched_at=2026-08-05T00:00:00Z "${@:3}" >> "$f"
+}
+tlog() {  # <agent-id> [touch -t stamp] — the agent's working log, written now or backdated
+  printf '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}\n' >> "$TSUB/agent-$1.jsonl"
+  [ -z "${2:-}" ] || touch -t "$2" "$TSUB/agent-$1.jsonl"
+}
+ago() { date -v-"$1"S +%Y%m%d%H%M.%S 2>/dev/null || date -d "$1 seconds ago" +%Y%m%d%H%M.%S; }
+# tdrive <payload> [hook] -> T_RC, T_ERR (stderr), T_LINE (its first line); T_VERR (verbose stderr) when refused
+tdrive() {
+  env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" bash "${2:-$HOOK}" <<< "$1" >/dev/null 2>"$STOP_ERRFILE"; T_RC=$?
+  T_ERR=$(cat "$STOP_ERRFILE"); T_LINE=$(printf '%s\n' "$T_ERR" | head -1); T_VERR=""
+  [ "$T_RC" = 0 ] || T_VERR=$(env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 bash "${2:-$HOOK}" <<< "$1" 2>&1 >/dev/null)
+}
+tpay() {  # <task_id> [tool] -> the PreToolUse payload of that tool, over the current world
+  jq -nc --arg s "$SID" --arg t "$TTR" --arg c "$TW" --arg k "$1" --arg n "${2:-TaskStop}" \
+    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"PreToolUse",tool_name:$n,
+      tool_input:{task_id:$k,command:"ls -la && git status",file_path:"/tmp/x"},tool_use_id:"toolu_T"}'
+}
+tstop() { tdrive "$(tpay "$1")" "${2:-}"; }
+
+# ── the orchestrator's stop, and only TaskStop's: another tool passes before the library is loaded ──
+tworld; trow quiet-reviewer aquiet-reviewer-deadbeefdeadbeef; tlog aquiet-reviewer-deadbeefdeadbeef
+T_TMP=$(ls -A "$TW/.bionic/tmp")
+for t in Read Bash Agent; do
+  tdrive "$(tpay quiet-reviewer "$t")"
+  expect_eq "EV1 $t's PreToolUse is no stop: exit 0, silent, and the state directory as it was" "0||$T_TMP" "$T_RC|$T_ERR|$(ls -A "$TW/.bionic/tmp")"
+done
+tstop ghost-name
+expect_eq "EV1 …while TaskStop's, over the same world, is judged: a name on no roster row is refused" \
+  "2|bionic: stop refused — this target is on no roster row of this session (name a rostered agent or id)" "$T_RC|$T_LINE"
+EVA="$(cd "$(mktemp -d)" && pwd -P)"; cp "$HOOK" "$EVA/stop.sh"
+tdrive "$(tpay quiet-reviewer Bash)" "$EVA/stop.sh"
+expect_eq "EV2 the hook alone, with no library: another tool still passes, since relevance comes first" "0|" "$T_RC|$T_ERR"
+tdrive "$(tpay quiet-reviewer)" "$EVA/stop.sh"
+expect_eq "EV2 …and TaskStop is refused every time, re-entry or none, for want of the library" \
+  "2|bionic: load refused — stop cannot load the bionic library (run /bionic:doctor)" "$T_RC|$T_ERR"
+
+# ── a background shell's id is the one the transcript recorded, else [bt] and eight; standing is asked first ──
+tstop b66vjp0ok
+expect_eq "BID1 a harness-spelled id with no row passes through, and says so" "0|1" "$T_RC|$(printf '%s' "$T_ERR" | grep -c PASSTHROUGH)"
+tstop xq7mkd2wx; T_A=$T_RC
+printf '%s\n' '{"type":"user","toolUseResult":{"stdout":"","backgroundTaskId":"xq7mkd2wx"}}' >> "$TTR"
+tstop xq7mkd2wx
+expect_eq "BID2 an off-shape id is refused until the transcript records it, and passes through once it does" "2|0|1" "$T_A|$T_RC|$(printf '%s' "$T_ERR" | grep -c PASSTHROUGH)"
+tstop xq7mkd2
+expect_status "BID2 …and a prefix of a recorded id is another id: refused" 2 "$T_RC"
+trow bootstrap1 abootstrap1-8888888888888888; tlog abootstrap1-8888888888888888
+tstop bootstrap1
+expect_eq "BID3 a rostered name in the shell-id shape is guarded: the look's line, not the passthrough" "0|STOP ALLOWED|0" \
+  "$T_RC|$(printf '%s' "$T_ERR" | grep -o 'STOP ALLOWED' | head -1)|$(printf '%s' "$T_ERR" | grep -c PASSTHROUGH)"
+printf '%s\n' '{"toolUseResult":{"backgroundTaskId":"bootstrap1"}}' >> "$TTR"
+tstop bootstrap1
+expect_eq "BID3 …even when the transcript records that string as a shell's id" "0|STOP ALLOWED|0" \
+  "$T_RC|$(printf '%s' "$T_ERR" | grep -o 'STOP ALLOWED' | head -1)|$(printf '%s' "$T_ERR" | grep -c PASSTHROUGH)"
+T_A=""; for k in backlog-census b66vjp0okz tvivnv41s; do tstop "$k"; T_A="$T_A$T_RC"; done
+expect_eq "BID4 an unrostered name and a ten-character run are refused; the old t-spelling of nine passes" "220" "$T_A"
+
+# ── the guard looks for itself: alive and undelivered is allowed with its verdict; idle, delivered and landed pass ──
+tworld
+trow worker aworker-7777777777777777; tlog aworker-7777777777777777 202601010000
+T_TMP=$(ls -A "$TW/.bionic/tmp"); tstop worker
+expect_eq "LOOK1 a rostered idle target with no record anywhere is permitted, the look on stderr, nothing written" \
+  "0|STOP PERMITTED|0|$T_TMP" "$T_RC|$(printf '%s' "$T_ERR" | grep -o 'STOP PERMITTED' | head -1)|$(printf '%s' "$T_ERR" | grep -c 'No observation')|$(ls -A "$TW/.bionic/tmp")"
+printf 'stage 1\n' > "$TW/.bionic/tmp/busy.progress"
+trow busy abusy-1212121212121212 progress=.bionic/tmp/busy.progress deliverable=.bionic/docs/record/busy.md cadence="300 seconds"
+tlog abusy-1212121212121212; tstop busy
+expect_status "LOOK2 alive inside its cadence with its deliverable absent: allowed" 0 "$T_RC"
+expect_contains "LOOK2 fact 1, the working log's path" "agent-abusy-1212121212121212.jsonl" "$T_ERR"
+expect_regex "LOOK2 fact 2, its age against the cadence the row declared" 'last write:.*inside the declared cadence of 300s' "$T_ERR"
+expect_regex "LOOK2 fact 3, the progress artifact's state" 'progress: +present' "$T_ERR"
+expect_contains "LOOK2 fact 4, the deliverable not written" ".bionic/docs/record/busy.md" "$T_ERR"
+expect_contains "LOOK2 …and the row records the verdict as reason=" "reason=" "$(grep 'agent_id=abusy-' "$TW/.bionic/tmp/roster-$SID.state" | tail -1)"
+trow busy2 abusy-1313131313131313 deliverable=.bionic/docs/record/busy2.md cadence="1 second"; tlog abusy-1313131313131313 "$(ago 60)"
+tstop busy2
+expect_eq "LOOK2 control: a minute of quiet against a one-second cadence is idle" "0|is idle:" "$T_RC|$(printf '%s' "$T_ERR" | grep -o 'is idle:' | head -1)"
+trow quiet aquiet-2121212121212121 deliverable=.bionic/docs/record/quiet.md cadence="5 min"; tlog aquiet-2121212121212121 "$(ago 900)"
+tstop quiet
+expect_eq "LOOK3 (a) idle beyond its cadence: permitted, the look on stderr" "0|is idle:" "$T_RC|$(printf '%s' "$T_ERR" | grep -o 'is idle:' | head -1)"
+printf 'the artifact\n' > "$TW/.bionic/docs/record/delivered.md"; touch -t 202601010000 "$TW/.bionic/docs/record/delivered.md"
+trow delivered-one adelivered-2222222222222222 deliverable=.bionic/docs/record/delivered.md cadence="5 min"; tlog adelivered-2222222222222222
+tstop delivered-one
+expect_eq "LOOK3 (b) alive but delivered, the artifact older than the launch: permitted, and the look says so" "0|is delivered:" "$T_RC|$(printf '%s' "$T_ERR" | grep -o 'is delivered:' | head -1)"
+printf 'the artifact\n' > "$TW/.bionic/docs/record/landed.md"
+trow landed-one alanded-2323232323232323 deliverable=.bionic/docs/record/landed.md; tlog alanded-2323232323232323
+tstop landed-one
+expect_eq "LOOK3 (c) a landed row is discharged before any look, in silence" "0|" "$T_RC|$T_ERR"
+: > "$TW/.bionic/docs/record/empty.md"
+trow empty-one aempty-2424242424242424 deliverable=.bionic/docs/record/empty.md cadence="5 min"; tlog aempty-2424242424242424
+tstop empty-one
+expect_eq "LOOK3 (d) a zero-byte artifact leaves the contract undelivered: the alive verdict, allowed" "0|STOP ALLOWED" "$T_RC|$(printf '%s' "$T_ERR" | grep -o 'STOP ALLOWED' | head -1)"
+printf 'stage 1\n' > "$TW/.bionic/tmp/long.progress"
+trow long-call alongcall-2525252525252525 progress=.bionic/tmp/long.progress deliverable=.bionic/docs/record/long.md cadence="5 min"
+tlog alongcall-2525252525252525 202601010000; tstop long-call
+expect_eq "LOOK3 (e) a silent log and a moving progress artifact is alive, the channel named" "0|STOP ALLOWED" \
+  "$T_RC|$(printf '%s' "$T_ERR" | grep -o 'STOP ALLOWED' | head -1)"
+expect_regex "LOOK3 (e) …the progress line read" 'progress: +present' "$T_ERR"
+touch -t 202601010000 "$TW/.bionic/tmp/long.progress"; tstop long-call
+expect_eq "LOOK3 (e) control: both channels quiet past the cadence is idle" "0|is idle:" "$T_RC|$(printf '%s' "$T_ERR" | grep -o 'is idle:' | head -1)"
+
+# ── a refusal's Fix line runs as printed, from a directory that is no repository ──
+trow blocked "" status=intended; tstop blocked
+FIXLINE=$(printf '%s\n' "$T_VERR" | sed -n 's/^Fix: //p')
+expect_eq "FIX a target the roster holds no id for is refused, and its Fix line names stop-check.sh" "2|1" "$T_RC|$(printf '%s' "$FIXLINE" | grep -c 'stop-check.sh')"
+T_OUT=$(cd "$(mktemp -d)" && HOME="$TH" bash -c "$FIXLINE" 2>&1); T_A=$?
+expect_eq "FIX …and runs from a non-repo cwd with no usage error" "ran|0" "$([ -n "$FIXLINE" ] && [ "$T_A" -ne 126 ] && [ "$T_A" -ne 127 ] && echo ran)|$(printf '%s' "$T_OUT" | grep -c 'Usage:')"
+
+# ── a hostile repo: nothing is read through a link or an unreadable roster, and no log is quoted ──
+tworld; trow victim avictim-ffffffffffffffff
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"CANARY_LOG_BODY"}]}}\n' > "$TSUB/agent-avictim-ffffffffffffffff.jsonl"
+tstop victim
+expect_eq "HOSTILE the look names the target and quotes nothing of its working log" "0|1|0" \
+  "$T_RC|$(printf '%s' "$T_ERR" | grep -c "'victim'")|$(printf '%s' "$T_ERR" | grep -c CANARY_LOG_BODY)"
+mv "$TW/.bionic/tmp" "$TH/outside"; ln -s "$TH/outside" "$TW/.bionic/tmp"; tstop victim
+expect_eq "HOSTILE a linked state directory refuses the stop" "2|bionic: stop refused — the state directory is a symlink (remove that symlink)" "$T_RC|$T_LINE"
+tworld; mv "$TW/.bionic/tmp/engaged-$SID.state" "$TH/"; trow victim avictim-1818181818181818; mv "$TH/engaged-$SID.state" "$TW/.bionic/tmp/"
+mv "$TW/.bionic/tmp/roster-$SID.state" "$TH/planted"; ln -s "$TH/planted" "$TW/.bionic/tmp/roster-$SID.state"; tlog avictim-1818181818181818
+tstop victim
+expect_eq "HOSTILE a linked roster is not read through: refused, the id never claimed" "2|1" "$T_RC|$(printf '%s' "$T_VERR" | grep -c 'no agent id')"
+if [ "$(id -u)" -ne 0 ]; then
+  tworld; trow victim2 avictim2-1919191919191919 status=identified; tlog avictim2-1919191919191919
+  chmod 000 "$TW/.bionic/tmp/roster-$SID.state"; tstop victim2; chmod 644 "$TW/.bionic/tmp/roster-$SID.state"
+  expect_eq "HOSTILE an unreadable roster is refused as a linked one is, and never waved through" "2|1|0" \
+    "$T_RC|$(printf '%s' "$T_VERR" | grep -c 'no agent id')|$(printf '%s' "$T_ERR" | grep -c PASSTHROUGH)"
+else
+  printf 'SKIPPED: the unreadable-roster case needs a non-root uid (root reads mode 000)\n' >&2
+fi
+
+# ── an agent's own stop: judged only with an agent_id, in an engaged session, through no link, its roster there ──
+# The world is a teammate row whose deliverable is missing, which an armed stop refuses; each fact is then taken away.
+aworld() { D=$(mkfix); unmet_row "$D"; sed -i.bak 's/|tool_use_id=/|teammate_id=w1-row@session-aaaaaaaa|tool_use_id=/' "$D/.bionic/tmp/roster-$SID.state"; rm -f "$D/.bionic/tmp/roster-$SID.state.bak"; }
+AG='{"agent_id":"'"$AID"'","agent_type":"w1-row"}'
+aworld; fire "$D" SubagentStop false "$AG"
+expect_eq "AGENT armed: an agent's own stop with its contract unmet is refused" \
+  "2|bionic: stop refused — a dispatched agent's contract is unmet (write the named artifacts)" "$STOP_RC|$(printf '%s\n' "$STOP_ERR" | head -1)"
+for f in main-thread foreign-roster unengaged roster-link tmp-link bionic-link; do
+  aworld; T=$D/.bionic/tmp; ag="$AG"
+  case "$f" in
+    main-thread)    ag='{"agent_type":"w1-row"}' ;;
+    foreign-roster) mv "$T/roster-$SID.state" "$T/roster-1f4a7c02-3bd9-4e15-8a66-90c1de77b204.state" ;;
+    unengaged)      rm "$T/engaged-$SID.state" ;;
+    roster-link)    mv "$T/roster-$SID.state" "$D/r"; ln -s "$D/r" "$T/roster-$SID.state" ;;
+    tmp-link)       mv "$T" "$D/t"; ln -s "$D/t" "$T" ;;
+    bionic-link)    mv "$D/.bionic" "$D/b"; ln -s "$D/b" "$D/.bionic" ;;
+  esac
+  fire "$D" SubagentStop false "$ag"
+  expect_eq "AGENT $f: the same stop is not this tool's to judge, exit 0 and silent" "0|" "$STOP_RC|$STOP_OUT$STOP_ERR"
+done
+
+# ── the two registered names hand on and decide nothing; each row goes when the flip removes its script ──
+tworld; tstop ghost-name; T_A="$T_RC|$T_ERR"; tstop ghost-name "${BIONIC_HOOKS_DIR}/stop-guard.sh"
+expect_eq "HAND hooks/stop-guard.sh hands TaskStop's payload to this hook: the same exit and words" "$T_A" "$T_RC|$T_ERR"
+aworld; EVW="$EVA/acg.sh"; printf '#!/bin/bash\nexec bash %q %q\n' "${BIONIC_HOOKS_DIR}/agent-context-guard.sh" "$HOOK" > "$EVW"
+H0="$HOOK"; HOOK="$EVW"; fire "$D" SubagentStop false "$AG"; HOOK="$H0"
+expect_eq "HAND hooks/agent-context-guard.sh hands an agent's stop to the hook it names: the same refusal" \
+  "2|bionic: stop refused — a dispatched agent's contract is unmet (write the named artifacts)" "$STOP_RC|$(printf '%s\n' "$STOP_ERR" | head -1)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 finish
