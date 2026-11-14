@@ -2612,8 +2612,8 @@ section "§OWNCHECK: at 15 a proved criterion the person confirms, not yet confi
 # is carried from 5 to 7 by the advance itself, the advance to 8 refuses the criterion, and the card is asked there; at
 # single the advance takes it to 8, where the card is asked at the merge. The page is the real acting
 # `release-approval`, the reply the real `reply`, its words typed in the session's transcript.
-# ANTI-VACUITY: OWN-0 reads the advance refusing through the check OWN-2d and OWN-3d read passing; OWN-1e's absence
-# reads the acceptance line OWN-1d reads present, in the same run.
+# ANTI-VACUITY: OWN-0 reads the advance refusing through the check OWN-2d and OWN-3d read passing; OWN-1e's and OWN-2f's absences
+# read the acceptance line OWN-1d and OWN-2e read present, in the same run.
 oc_human() {  # <root> -> its one criterion of the kind a person confirms
   sed 's/^| — | fixture | AC-1 | T1 |/| — | fixture | AC-1 | human |/' "$1/$PLAN_REL" > "$1/$PLAN_REL.n" && mv "$1/$PLAN_REL.n" "$1/$PLAN_REL"
 }
@@ -2648,6 +2648,9 @@ expect_contains "OWN-2c …through the page's applied: path" "applied: row:AC-1 
 ur_poke "$OC_C" current 8 --check
 expect_eq "OWN-2d …after which the advance to 8 takes it (current 8 --check, exit 0)" "0" "$UR_RC"
 [ "$UR_RC" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$UR_OUT" | head -3)"
+ur_poke "$OC_C" release-approval --preview "$OC_C/$PLAN_REL"
+expect_contains "OWN-2e …and the card then counts it proved, confirmed by the person" "1 of 1 criterion proved; 1 confirmed by you" "$(oc_acc)"
+expect_absent "OWN-2f …no longer awaiting the confirmation" "awaiting your confirmation" "$(oc_acc)"
 
 ur_world oc-waive oc_double 7; OC_W="${UR_P:-}"
 ur_poke "$OC_W" release-approval "$OC_W/$PLAN_REL"
