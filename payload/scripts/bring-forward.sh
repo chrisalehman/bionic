@@ -296,7 +296,7 @@ _bf_misnamed() {  # <plan, resolved> <its record> -> the refusal on stderr
     "$1" "$tail" >&2
 }
 
-# THE CONFIRMATION. At 14 a person confirmed a criterion by a `user-confirmed: <who> <day> <words>` line in its block,
+# THE CONFIRMATION. At 14 a person confirmed a criterion by a line in its block naming who, the day and their words,
 # which the translation carries as the field `confirmed=` of the criterion's proof or waiver; at 15 the reader takes a
 # person's confirmation only from an approval naming the criterion, so the act asks the translation for that approval
 # too (lib/translate.sh `_translate_matrix`). A run at 14 is read through the translation in place, and that reading
