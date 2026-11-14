@@ -85,7 +85,6 @@ make_project() {
 # whose artifact lives in another tree engages THAT tree.
 GS_SID="5e4d3c2b-1a09-4876-9b5c-4d3e2f1a0b9c"
 engage()   { mkdir -p "$1/.bionic/tmp" && : > "$1/.bionic/tmp/engaged-$GS_SID.state"; }
-unengage() { rm -f "$1/.bionic/tmp/engaged-$GS_SID.state"; }
 
 # Runs hook with a synthetic Write payload for $FILE with $CONTENT.
 HOOK_VSTDERR=""

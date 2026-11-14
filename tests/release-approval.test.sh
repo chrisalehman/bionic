@@ -277,6 +277,8 @@ FC_CK=""; for fc_n in 6 8; do poke "$RFC" current "$fc_n" --check; FC_CK="$FC_CK
 expect_eq "EARLY-8 precondition: current 6 --check is green, and current 8 --check refuses on a row the auditor has not confirmed" \
   "01|yes" "$FC_CK|$(fc_has "$OUT" 'the auditor has not confirmed AC-1.1')"
 fc_page
+expect_eq "EARLY-8a …the judge's line for it, byte for byte" "bionic: commit refused — the auditor has not confirmed AC-1.1 (rule it: the auditor confirms it, the row is waived, or a T4 row carries its user's confirmation)" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -F 'AC-1.1')"
 expect_eq "EARLY-8b …and the page renders (exit 0, no refusal)" "0|" "$FC_RC|$FC_ERR"
 expect_eq "EARLY-8c …putting the three rows as its first decisions, AC-1.1 under Decisions" "row:AC-1.1 row:AC-1.3 row:AC-1.4|yes" \
   "$(fc_keys | /usr/bin/grep '^row:' | paste -sd' ' -)|$(fc_has "$(fc_under Decisions)" 'AC-1.1')"
@@ -587,6 +589,8 @@ expect_eq "CONFIRM-5 a pending T4 row: current 6 and 7 --check would advance" \
 poke "$RFC" current 8 --check
 expect_eq "CONFIRM-5b …current 8 --check refuses it, naming the row" "1|1" \
   "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^bionic: commit refused — .*AC-1\.3')"
+expect_eq "CONFIRM-5d …in the words of the party awaited, its person, and not the auditor" "bionic: commit refused — AC-1.3 awaits its person's confirmation (it is proved; its person confirms it at release: reply <n> confirm, <n> being the decision the release approval card gives it)" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -F 'AC-1.3')"
 fc_card early
 expect_eq "CONFIRM-5c …and card.sh early settles it as the page's own decision (exit 0)" "0|settles: row:AC-1.3" \
   "$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -x 'settles: row:AC-1.3')"
