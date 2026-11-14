@@ -8,9 +8,8 @@
 #                 nothing (a heading's or a shape's words, an operand of another command) a planted file holds
 #                 lines of it and, last, the real reading of that kind: only the last is counted.
 #   §PLANWRITERS  a planted append to a plan is named and counted; a log's, words' or copy
-#                 source's line is no write beside a planted copy onto a plan. The act that brings a run
-#                 forward is admitted by its one function: a write planted there is not counted, the same write in
-#                 another function of its file is, and so is a write under a function of its name in lib/.
+#                 source's line is no write beside a planted copy onto a plan. The act's own function is admitted, a
+#                 write planted there is not counted; one in another function of its file, or in lib/, is.
 #   §WRITERS      two functions appending one event type are listed as a pair; so is `published` today. A
 #                 launch's `dispatch` has one writer, the launch recorder's, and a row's `born` one, the units
 #                 library's; each is paired with a planted second, the born one in the shape of a split; so is
@@ -92,7 +91,6 @@ planted_facts() {  # <plan> -> the reader's facts, one run/v1 line each
 planted_k5_count() { echo "n=$(/usr/bin/grep -c '^run/v1|ev=zzplant|' "$f")"; }
 planted_k5_put() { echo "run/v1|ev=zzplant|at=now" >> "$f"; }
 EOF
-# The act's own function takes a plant, a second function of its file takes another, and lib/ holds one in a function of the act's name.
 B="$S/payload/scripts/bring-forward.sh"
 { awk '{ print } /^bf_main\(\) \{/ { print "  printf x >> \"$plan\"" }' "$B"; echo 'planted_other() { printf x >> "$plan"; }'; } > "$S/bf" && cp "$S/bf" "$B"
 echo 'bf_main() { printf x >> "$plan"; }' > "$L/planted-act.sh"
