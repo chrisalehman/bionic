@@ -13,7 +13,7 @@
 #   §MATRIX    a discharged matrix row is a proof and a waived one a waiver, by ac= with what its cells hold,
 #              and a waiver with the author, instant and words of its block's waiver: line; a cell that holds no
 #              evidence takes the evidence: line of the block, and a cell that holds one wins unless it only points at
-#              its block (`see AC-11`); a pending or blocked
+#              its block (`see <its own id>`); a pending or blocked
 #              row is no event, and its evidence or auditor, which 15 has no place for, is on the gaps list.
 #   §ONE-FACT  a criterion a state line and a matrix row both name is the state line's one fact.
 #   §UNREAD    the header's abandoned: is an abandon; an inherited: line no ruled type carries is a gap.

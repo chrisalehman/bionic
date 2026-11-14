@@ -312,7 +312,7 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
   # among the hand acts, while only a row the status marks waived is a waiver the judge honours. A criterion's
   # evidence was written in one of two places, its cell or an indented `evidence:` line of its block with a dash
   # in the cell; a cell that holds a value wins, and only an evidence in neither place is a gap. A cell that only
-  # points at its own block (`see AC-1.1`) holds no value: the block's line is the evidence, and with none the evidence
+  # points at its own block (`see <its own id>`) holds no value: the block's line is the evidence, and with none the evidence
   # is a gap, since a pointer carried into the proof resolves to nothing once the block is gone. Version 15 has no
   # block, so the proof is where the evidence lives after the act: read from the cell alone, it would be lost.
   # A caller that sets TRANSLATE_CONFIRMED=approval (the act) also gets, after a proof or waiver whose block holds a
