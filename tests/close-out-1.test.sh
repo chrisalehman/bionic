@@ -1,5 +1,5 @@
 #!/bin/bash
-# tests/close-out-1.test.sh — payload/scripts/close-out.sh, part 1 of 4: sections 0 through E2E.
+# tests/close-out-1.test.sh — payload/scripts/close-out.sh, part 1 of 6: sections 0 through E2E.
 #
 # Four parts, so each stays under the suite bar; the sandbox, design and shared builders are in tests/close-out.prelude.sh.
 
