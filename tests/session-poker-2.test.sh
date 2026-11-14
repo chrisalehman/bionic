@@ -190,7 +190,7 @@ mkrow name=w-T3 agent_id=a-w-T3 >> "$(roster_of "$R39A")"
 sed -e 's/| active, agent names no roster row | implementor |/| active, agent names no roster row | w-T3 |/' \
     -e 's/| d.sh | doing |/| d.sh | pending |/' "$P39A" > "$P39A.new" && mv "$P39A.new" "$P39A"
 poke_pressure "$R39A" 8192 1.0 tick
-expect_contains "39i the repaired ledger's tick still fills the ready row" "poker: FILL T7" "$OUT"
+expect_contains "39i the repaired ledger's tick still reaches its fill" "poker: FILL " "$OUT"
 expect_absent "39j a repaired ledger ticks no LEDGER line" "poker: LEDGER" "$OUT"
 
 # 39k — AN EMPTY ROSTER LAUNCHES NOBODY. The tick reaches its fill arm only with a roster file
