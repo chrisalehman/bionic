@@ -68,8 +68,6 @@ trap 'rm -rf "$SANDBOX"' EXIT
 # library. Its direction is OPEN: a wall whose scope it cannot read must not bind a
 # session that never consented.) Everything else is a
 # governance hook: it has nothing to say outside a run and must say nothing.
-# background-suite-guard runs only behind agent-context-guard, whose own roster
-# check already scopes it, so it loads the library without the run predicate.
 # engage.sh is the one `yes` that is not a gate. It reads the run to decide what to write
 # into the marker's `plan=` field and writes the marker either way — engagement is what
 # decides WHETHER a wall acts, the plan only WHAT — so the third column here records that
@@ -82,7 +80,7 @@ trap 'rm -rf "$SANDBOX"' EXIT
 # only where a hook reads the plan for DATA: dispatch-preflight for the budget ceiling,
 # context-spend for the step boundary, patrol-duties-gate for the plan basename,
 # patrol-revive for the run its Patrol serves. landing-gate, execution-recorder and
-# stop-guard read nothing out of the plan: they are the roster lifecycle, which begins
+# the stop of an agent read nothing out of the plan: they are the roster lifecycle, which begins
 # before a plan exists (a run's Step 0 precedes its plan) and outlives the run that
 # created it, so their `active_run` reads are gone and their rows say `no`.
 # THE FIVE PreToolUse|Bash WALLS ARE ONE ROW (epic-23 wave-11-lean-spine, T23).
@@ -107,8 +105,6 @@ dispatch-preflight|closed|yes
 canonical-sdlc-governing-skill|closed|yes
 stop|closed|no
 execution-recorder|open|no
-stop-guard|closed|no
-agent-context-guard|closed|no
 preflight-probe|open|no
 stop-orders|open|no
 session-sweeper|open|no
@@ -187,7 +183,7 @@ expect_eq "no hook still defines a private resolve_project_root (POKER landed th
 # so the ask is now either call, and a hook that resolves no root at all still fails.
 # ONE LINE, and it has to be: the membership test below is a `case` glob on `" $name "`,
 # and a newline between two names is not the space that pattern needs.
-CTX_CALLERS=" agent-context-guard bash-walls canonical-sdlc-governing-skill dispatch-preflight execution-recorder permission-answer session-start stop stop-guard "
+CTX_CALLERS=" bash-walls canonical-sdlc-governing-skill dispatch-preflight execution-recorder permission-answer session-start stop "
 while IFS='|' read -r name class scoped; do
   [ -n "$name" ] || continue
   f="$HOOKS/$name.sh"
@@ -223,9 +219,9 @@ section "3 — one session id: every reader asks the library"
 # also applies the one shape guard they used to carry six copies of between them. So each
 # hook is asked for whichever call is its own, and the roster below is split on that line
 # rather than the list being shortened: a hook that asks for NEITHER still fails.
-SID_VIA_LIB='agent-context-guard bash-walls
+SID_VIA_LIB='bash-walls
 canonical-sdlc-governing-skill dispatch-preflight execution-recorder
-stop session-start stop-guard permission-answer'
+stop session-start permission-answer'
 SID_DIRECT='preflight-probe stop-orders session-sweeper stop-check engage'
 SID_READERS="$SID_VIA_LIB
 $SID_DIRECT"
@@ -444,7 +440,7 @@ seed_hook() {  # <hook> <root>
   mkdir -p "$root/.bionic/tmp" 2>/dev/null || true
   : > "$root/.bionic/tmp/engaged-$SID.state"
   case "$hook" in
-    stop|execution-recorder|stop-guard|agent-context-guard|bash-walls)
+    stop|stop@TaskStop|execution-recorder|bash-walls)
       {
         roster_header
         roster_row_fixture status=intended session="$SID" name=w1-impl agent_id= \
@@ -516,7 +512,8 @@ payload_for() {
       # commit is the only Bash command of the five walls' subjects that exactly one of
       # them answers, which is what lets section 5 read a silence as that wall's.
       jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:"git commit -m wip"}}' ;;
-    stop-guard)
+    # The orchestrator's stop of an agent, which the same hook answers by this payload's event.
+    stop@TaskStop)
       jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"TaskStop",tool_input:{task_id:"w1-impl"}}' ;;
     execution-recorder)
       # The COMPLETION arm, over the row seed_hook plants: it needs an agentId and a
@@ -538,11 +535,8 @@ payload_for() {
       jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Agent",tool_input:{description:"d",subagent_type:"implementor",prompt:"Do the thing.\nExpected artifact: '"$cwd"'/.bionic/docs/record/x.md\n"}}' ;;
     canonical-sdlc-governing-skill)
       jq -n --arg s "$SID" --arg c "$cwd" --arg p "$cwd/.bionic/docs/plans/epic-99/wave-01.plan.md" '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Write",tool_input:{file_path:$p,content:"x"}}' ;;
-    # THE FIVE §5 AND §5c NEVER DROVE, added by T10 for §5d. Each is the smallest payload
-    # that reaches that hook's own work: an agent context for the two agent-scoped guards,
-    # a refusable command for the two damage walls, and a startup event for the reporter.
-    agent-context-guard)
-      jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,agent_id:"aw1impl-1111111111111111",hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:"echo hi"}}' ;;
+    # Each is the smallest payload that reaches that hook's own work: a startup event for
+    # the reporter, and the carrier's question for the permission hook.
     session-start)
       jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,hook_event_name:"SessionStart",source:"startup"}' ;;
     # The carrier's question: a command whose rm target is a variable, which it answers deny.
@@ -587,7 +581,7 @@ drive canonical-sdlc-governing-skill "$(jq -n --arg s "$SID" --arg c "$GS_FIRST"
 expect_eq "a project's FIRST artifact, written into .bionic before any run exists, is gated" \
   "2" "$DRV_ST"
 
-section "5d — ONE session-id guard: a malformed or empty key silences all fifteen (REQ-1h, AC-1h.2)"
+section "5d — ONE session-id guard: a malformed or empty key silences all seven, and the stop of an agent (REQ-1h, AC-1h.2)"
 #
 # WHAT THIS IS FOR. The T10 census measured the shape guard
 # `case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac` in exactly SIX of the fifteen preamble
@@ -608,15 +602,11 @@ section "5d — ONE session-id guard: a malformed or empty key silences all fift
 # stderr is correct behaviour for an empty key and is not what this section is about. What
 # must be uniform is that no hook ACTS: exit 0, nothing on the user stream, no state written.
 
-GUARD_FIFTEEN='agent-context-guard bash-walls
+# Each hook that asks bionic_context, by name. `stop@TaskStop` is hooks/stop.sh again, driven by
+# the orchestrator's stop of an agent rather than a turn's end: the same file, another event.
+GUARD_FIFTEEN='bash-walls
 canonical-sdlc-governing-skill dispatch-preflight execution-recorder
-stop session-start stop-guard permission-answer'
-
-# A wall for agent-context-guard to hand its payload to: it takes the wall's path as $1 and
-# exits 0 without one, so every row below it would be silent for the wrong reason.
-GUARD_WALL="$SANDBOX/guard-wall.sh"
-printf '#!/bin/bash\nprintf "the wall ran\\n"\nexit 0\n' > "$GUARD_WALL"
-chmod +x "$GUARD_WALL"
+stop session-start stop@TaskStop permission-answer'
 
 # drive_sid <hook> <root> <env-sid> <payload-sid> -> GS_ST / GS_OUT / GS_ERR
 #
@@ -624,13 +614,11 @@ chmod +x "$GUARD_WALL"
 # treats the payload as a witness: a guard applied to the payload read rather than to the
 # resolved value would pass every row here with the env channel clean.
 drive_sid() {
-  local hook="$1" root="$2" esid="$3" psid="$4" pay args
+  local hook="$1" root="$2" esid="$3" psid="$4" pay
   pay=$(payload_for "$hook" "$root" | jq --arg s "$psid" '.session_id=$s')
-  args=()
-  [ "$hook" = "agent-context-guard" ] && args=("$GUARD_WALL")
   GS_OUT=$(printf '%s' "$pay" | env HOME="$SANDBOX/home" \
       BIONIC_PLUGINS_DIR="$SANDBOX/plugins" CLAUDE_CODE_SESSION_ID="$esid" \
-      bash "$HOOKS/$hook.sh" "${args[@]+"${args[@]}"}" 2>"$SANDBOX/.gerr")
+      bash "$HOOKS/${hook%@*}.sh" 2>"$SANDBOX/.gerr")
   GS_ST=$?
   GS_ERR=$(cat "$SANDBOX/.gerr")
   return 0
@@ -686,22 +674,22 @@ for hook in $GUARD_FIFTEEN; do
   expect_eq "$hook: an empty session id -> exit 0" "0" "$GS_ST"
 done
 
-# ── stop-guard's SECOND key, which the guard above cannot see ────────────────
+# ── the stop of an agent's SECOND key, which the guard above cannot see ────────────────
 #
-# The census measured stop-guard reading its session key TWICE from two sources: the
-# resolved value for the engagement guard, and a raw payload read further down that builds
+# The orchestrator's stop of an agent once read its session key TWICE from two sources: the
+# resolved value for the engagement guard, and a raw payload read further down that built
 # the roster filename. With a clean environment value and a malformed payload value the
 # engagement guard passes on the good key and the roster path is built from the bad one —
 # so the guard rows above are all green while the hook addresses a file outside the state
-# directory. AC-1h.2 names this one hook for that reason.
-SG_DIV=$(sidguard_fixture stop-guard "sidguard-stopguard-divergent")
-drive_sid stop-guard "$SG_DIV" "$SID" 'bad/../id'
-expect_absent "stop-guard: a malformed PAYLOAD key never reaches a path it builds" \
+# directory. That is why this event is driven alone here.
+SG_DIV=$(sidguard_fixture stop@TaskStop "sidguard-stopguard-divergent")
+drive_sid stop@TaskStop "$SG_DIV" "$SID" 'bad/../id'
+expect_absent "the stop of an agent: a malformed PAYLOAD key never reaches a path it builds" \
   "bad/../id" "$GS_OUT$GS_ERR"
 # `bad/../id` interpolated into `<root>/.bionic/tmp/roster-<sid>.state` resolves to
 # `<root>/.bionic/tmp/id.state` — one directory up from where the key was supposed to keep
 # it. Nothing may appear there.
-expect_eq "stop-guard: …and the traversed key addressed no file" "no" \
+expect_eq "the stop of an agent: …and the traversed key addressed no file" "no" \
   "$([ -e "$SG_DIV/.bionic/tmp/id.state" ] && echo yes || echo no)"
 # THE STATIC HALF, which is what actually closes it (AC-1h.2's own measurement): the raw
 # read is gone, so there is one source and the divergence has nowhere to enter.

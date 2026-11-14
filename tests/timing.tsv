@@ -8,7 +8,6 @@
 # door-landing.test.sh is the gate's admitted-to-ended seconds for the suite run alone (its cost file, 2026-10-20, beside other suites at a load near 5 on 8 cores), not a span.
 # door-cover.test.sh is the gate's admitted-to-ended seconds for the suite run alone (its cost file, 2026-10-20), not a span.
 # door-card.test.sh is the gate's admitted-to-ended seconds for the suite run alone (its cost file, 2026-10-20, the green run at 07ced9cc), not a span; two release-check runs of about 94 s each are most of it.
-agent-context-guard.test.sh	9
 archive.test.sh	1
 background-suite-guard.test.sh	63
 bash-walls-egd.test.sh	15
@@ -107,7 +106,6 @@ shell-rc.test.sh	1
 slots.test.sh	108
 spawn-worktree.test.sh	76
 stop-check.test.sh	12
-stop-guard.test.sh	72
 stop-orders.test.sh	18
 stop.test.sh	59
 units.test.sh	45

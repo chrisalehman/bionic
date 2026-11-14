@@ -210,7 +210,7 @@ section "Section 4: legacy hook files on disk reach the page"
 
 mkdir -p "${CHOME}/hooks"
 cp "${PAYLOAD}/hooks/bash-walls.sh" "${CHOME}/hooks/bash-walls.sh" 2>/dev/null
-cp "${PAYLOAD}/hooks/stop-guard.sh" "${CHOME}/hooks/stop-guard.sh" 2>/dev/null
+cp "${PAYLOAD}/hooks/stop.sh" "${CHOME}/hooks/stop.sh" 2>/dev/null
 
 OUT4="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}")"
 

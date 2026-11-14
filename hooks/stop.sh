@@ -43,8 +43,7 @@
 #
 # [WALL: tests/stop.test.sh]
 #
-# Registered in hooks/hooks.json on Stop. hooks/stop-guard.sh (PreToolUse TaskStop) and
-# hooks/agent-context-guard.sh (SubagentStop) hand their payload to this file and decide nothing.
+# Registered in hooks/hooks.json three times: on Stop, on PreToolUse TaskStop and on SubagentStop.
 
 set -uo pipefail
 

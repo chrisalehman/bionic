@@ -34,8 +34,8 @@
 #
 # WHAT THIS SUITE IS FOR, and what it deliberately is not:
 #
-#   The per-script suites (hooks/{preflight-probe,dispatch-preflight,stop-check,
-#   stop-guard}.test.sh) each drive ONE component against its own contract. Every
+#   The per-script suites (preflight-probe, dispatch-preflight, stop-check and stop
+#   suites) each drive ONE component against its own contract. Every
 #   one of them is green while four byte-identical copies of active-wave
 #   detection drift apart, because no single-component suite ever asks the other
 #   copies the same question. This suite asks all four the SAME question with the
@@ -77,7 +77,8 @@ REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 # reviewer can re-take it by hand:
 #   W1R_PARTY_DP=/tmp/mutant.sh bash tests/cross-gate-agreement-1.test.sh   (either part)
 PARTY_DP="${W1R_PARTY_DP:-$BIONIC_HOOKS_DIR/dispatch-preflight.sh}"
-PARTY_SG="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop-guard.sh}"
+# The stop gate is hooks/stop.sh, which answers the orchestrator's stop of an agent by its event.
+PARTY_SG="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop.sh}"
 # THE EVIDENCE GATE IS A FUNCTION BEHIND hooks/bash-walls.sh (T23). The party this
 # variable names is still "the process a git commit reaches"; it is the compound now.
 PARTY_EG="${W1R_PARTY_EG:-$BIONIC_HOOKS_DIR/bash-walls.sh}"
@@ -88,7 +89,7 @@ PARTY_ER="${W1R_PARTY_ER:-$BIONIC_HOOKS_DIR/execution-recorder.sh}"
 PROBE="$BIONIC_HOOKS_DIR/preflight-probe.sh"
 OBSERVE="$BIONIC_HOOKS_DIR/stop-check.sh"
 # THE OBSERVATION'S OWN LIBRARY (epic-23 wave-15, REQ-2; ADR-028). The resolution, the file
-# facts and the classification moved out of the verb and out of hooks/stop-guard.sh into one
+# facts and the classification moved out of the verb and out of the stop gate into one
 # sourced file, so the copies this suite used to hold to each other are one definition — and
 # the comparisons below point at it rather than at whichever carrier they were written for.
 OBSERVE_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/observe.sh"
@@ -384,7 +385,7 @@ cg_live() {  # <transcript> <name[:status]>...
 #     "does this repo present a plan whose `current:` names a valid step?"
 #
 #   dispatch-preflight  refuse (exit 2, no attestation planted)  <=> yes
-#   stop-guard          refuse (exit 2, target unresolvable)     <=> yes
+#   stop gate           refuse (exit 2, target unresolvable)     <=> yes
 #   evidence-gate       "has no 'Step N:' line" (exit 2)         <=> yes, and N
 #                       is the derived value itself — the only party that
 #                       reports it, which is why the fixtures below are built so
@@ -820,12 +821,10 @@ run_battery() {
     d=$(verdict_er "$repo"); e=$(verdict_lg "$repo")
     cnorm="${c%%:*}"; cval=""
     [ "$cnorm" = "yes" ] && cval="${c#*:}"
-    # T4 (session-20260815-landing-cleanup) DIVERGED stop-guard from the other four
-    # parties here; D8 (T5, epic-23 wave-13) RE-CONVERGED it. verdict_sg always drives
-    # stop-guard with the fixed target "no-such-agent" — non-address-shaped and
-    # non-bash-task-shaped — and since D8 a target wearing neither shape is REFUSED
-    # rather than waved through, so stop-guard's verdict agrees with the other four
-    # parties on every fixture again, exactly as it did before T4 opened the divergence.
+    # verdict_sg always drives the stop gate with the fixed target "no-such-agent" —
+    # non-address-shaped and non-bash-task-shaped — and a target wearing neither shape is
+    # REFUSED rather than waved through, so the stop gate's verdict agrees with the other
+    # four parties on every fixture.
     want_sg="$want"
     # WHAT THE PARTIES AGREE ABOUT CHANGED AT task-engaged-session, and the change is the
     # point of that wave. Four of the five no longer read the plan at all: they are scoped
@@ -842,7 +841,7 @@ run_battery() {
         ok "all five parties agree on '$name': engagement-scoped four constant, evidence gate $want"
       else
         no "all five parties agree on '$name': engagement-scoped four constant, evidence gate $want" \
-           "dispatch-preflight=$a stop-guard=$b evidence-gate=$c execution-recorder=$d landing-gate=$e"
+           "dispatch-preflight=$a stop=$b evidence-gate=$c execution-recorder=$d landing-gate=$e"
       fi
       if [ "$want" = "yes" ]; then
         expect_eq "  and the evidence gate derived current='$cur' for '$name'" "$cur" "$cval"

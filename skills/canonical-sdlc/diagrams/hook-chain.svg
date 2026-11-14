@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1376" viewBox="0 0 1400 1376"
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1298" viewBox="0 0 1400 1298"
      font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
   <!--
     canonical-sdlc — hook chain.
@@ -22,11 +22,11 @@
     script registered on both channels is drawn once and its chips say so.
   -->
 
-  <rect x="0" y="0" width="1400" height="1376" fill="#ffffff"/>
+  <rect x="0" y="0" width="1400" height="1298" fill="#ffffff"/>
 
   <!-- ============================ header ============================ -->
   <text x="40" y="52" font-size="26" font-weight="700" fill="#16191d">Hook chain — what runs, what it stops, and what makes it inert</text>
-  <text x="40" y="78" font-size="14" fill="#626b76">Ten scripts, every one registered in hooks/hooks.json. Every entry is rooted at <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">${CLAUDE_PLUGIN_ROOT}</tspan> and runs with <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">timeout: 10</tspan>; <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">dispatch-preflight.sh</tspan> runs with <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">timeout: 25</tspan>.</text>
+  <text x="40" y="78" font-size="14" fill="#626b76">Eight scripts, every one registered in hooks/hooks.json. Every entry is rooted at <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">${CLAUDE_PLUGIN_ROOT}</tspan> and runs with <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">timeout: 10</tspan>; <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">dispatch-preflight.sh</tspan> runs with <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">timeout: 25</tspan>.</text>
   <line x1="40" y1="96" x2="1360" y2="96" stroke="#dde1e6" stroke-width="1"/>
 
   <!-- ============================ the grouping criterion ============================ -->
@@ -70,7 +70,7 @@
 
   <!-- ============================ lane 2 ============================ -->
   <text x="40" y="378" font-size="12.5" font-weight="700" letter-spacing="1.2" fill="#16191d">ENGAGED ONLY</text>
-  <text x="182" y="378" font-size="12" fill="#626b76">eight scripts that ask first whether this session invoked canonical-sdlc, and exit 0 in silence when it has not.</text>
+  <text x="182" y="378" font-size="12" fill="#626b76">six scripts that ask first whether this session invoked canonical-sdlc, and exit 0 in silence when it has not.</text>
   <text x="54" y="398" font-size="9.5" font-weight="700" letter-spacing="1.1" fill="#8b949e">WHAT RUNS</text>
   <text x="300" y="398" font-size="9.5" font-weight="700" letter-spacing="1.1" fill="#8b949e">REGISTERED</text>
   <text x="566" y="398" font-size="9.5" font-weight="700" letter-spacing="1.1" fill="#8b949e">ARM</text>
@@ -129,120 +129,102 @@
   <text x="706" y="662" font-size="10.5" fill="#3a424c">The bare entry pushes the terms; each entry with a question as argument pushes that one checks file, and the severity entry the scale beside either code question, one string each.</text>
 
   <!-- 7 · stop.sh -->
-  <rect x="40" y="694" width="1320" height="46" fill="#fafbfc"/>
+  <rect x="40" y="694" width="1320" height="60" fill="#fafbfc"/>
   <text x="54" y="714" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">stop.sh</text>
   <text x="54" y="730" font-size="9.5" font-style="italic" fill="#8b949e">gate: engagement</text>
   <text class="hook-entry" data-event="Stop" data-matcher="" data-guard="" data-hook="stop.sh" x="300" y="714" font-size="9.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138"><tspan fill="#8b949e">plugin</tspan> Stop</text>
-  <text class="hook-entry" data-event="SubagentStop" data-matcher="" data-guard="agent-context-guard.sh" data-hook="stop.sh" x="300" y="728" font-size="9.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138"><tspan fill="#8b949e">plugin</tspan> SubagentStop <tspan fill="#8b949e">↳ via guard</tspan></text>
+  <text class="hook-entry" data-event="SubagentStop" data-matcher="" data-guard="" data-hook="stop.sh" x="300" y="728" font-size="9.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138"><tspan fill="#8b949e">plugin</tspan> SubagentStop</text>
+  <text class="hook-entry" data-event="PreToolUse" data-matcher="TaskStop" data-guard="" data-hook="stop.sh" x="300" y="742" font-size="9.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138"><tspan fill="#8b949e">plugin</tspan> PreToolUse · TaskStop</text>
   <rect x="566" y="703" width="126" height="20" rx="4" fill="#fef3f2" stroke="#b42318" stroke-width="1.2"/>
   <text x="629" y="717" font-size="10" font-weight="600" fill="#b42318" text-anchor="middle">BLOCK · once</text>
   <text x="706" y="712" font-size="10.5" fill="#3a424c">One process at turn end: the landing sweep, the Patrol-tick duties, the Patrol revive and the context-spend log, folded</text>
-  <text x="706" y="728" font-size="10.5" fill="#3a424c">by one rule. A block refuses the turn's end once. On SubagentStop it runs only behind agent-context-guard.sh.</text>
+  <text x="706" y="728" font-size="10.5" fill="#3a424c">by one rule. A block refuses the turn's end once; an agent's own stop is judged only when it is this tool's to judge.</text>
+  <text x="706" y="744" font-size="10.5" fill="#3a424c">On TaskStop it looks at the target: alive and undelivered is allowed with its verdict, and one it cannot check is refused.</text>
 
-  <!-- 8 · agent-context-guard.sh -->
-  <rect x="40" y="740" width="1320" height="46" fill="#ffffff"/>
-  <text x="54" y="760" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">agent-context-guard.sh</text>
-  <text x="54" y="776" font-size="9.5" font-style="italic" fill="#8b949e">gate: agent_id + the session roster</text>
-  <text class="hook-entry" data-event="SubagentStop" data-matcher="" data-guard="" data-hook="agent-context-guard.sh" x="300" y="760" font-size="9.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138"><tspan fill="#8b949e">plugin</tspan> SubagentStop</text>
-  <rect x="566" y="749" width="126" height="20" rx="4" fill="#f2f4f7" stroke="#8b949e" stroke-width="1.2"/>
-  <text x="629" y="763" font-size="10" font-weight="600" fill="#626b76" text-anchor="middle">PASS-THROUGH</text>
-  <text x="706" y="758" font-size="10.5" fill="#3a424c">Fronts stop.sh on SubagentStop and nothing else: it execs the hook handed to it <tspan font-style="italic">by argument</tspan> only when the payload carries</text>
-  <text x="706" y="774" font-size="10.5" fill="#3a424c">an <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10">agent_id</tspan> AND the session roster exists. Anything else, ambiguity included, exits 0 in silence.</text>
-
-  <!-- 9 · stop-guard.sh -->
-  <rect x="40" y="786" width="1320" height="46" fill="#fafbfc"/>
-  <text x="54" y="806" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">stop-guard.sh</text>
-  <text x="54" y="822" font-size="9.5" font-style="italic" fill="#8b949e">gate: engagement, then the bound plan</text>
-  <text class="hook-entry" data-event="PreToolUse" data-matcher="TaskStop" data-guard="" data-hook="stop-guard.sh" x="300" y="806" font-size="9.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138"><tspan fill="#8b949e">plugin</tspan> PreToolUse · TaskStop</text>
-  <rect x="566" y="795" width="126" height="20" rx="4" fill="#fef3f2" stroke="#b42318" stroke-width="1.2"/>
-  <text x="629" y="809" font-size="10" font-weight="600" fill="#b42318" text-anchor="middle">BLOCK · exit 2</text>
-  <text x="706" y="804" font-size="10.5" fill="#3a424c">A stop of a target this gate can see still working with its contract undelivered: alive inside its declared cadence and</text>
-  <text x="706" y="820" font-size="10.5" fill="#3a424c">nothing delivered. An idle, delivered or landed target passes, with the look on stderr.</text>
-
-  <!-- 10 · permission-answer.sh -->
-  <rect x="40" y="832" width="1320" height="46" fill="#ffffff"/>
-  <text x="54" y="852" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">permission-answer.sh</text>
-  <text x="54" y="868" font-size="9.5" font-style="italic" fill="#8b949e">gate: engagement</text>
-  <text class="hook-entry" data-event="PermissionRequest" data-matcher="" data-guard="" data-hook="permission-answer.sh" x="300" y="852" font-size="9.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138"><tspan fill="#8b949e">plugin</tspan> PermissionRequest</text>
-  <rect x="566" y="841" width="126" height="20" rx="4" fill="#fffaeb" stroke="#b54708" stroke-width="1.2"/>
-  <text x="629" y="855" font-size="10" font-weight="600" fill="#b54708" text-anchor="middle">ANSWER · JSON</text>
-  <text x="706" y="850" font-size="10.5" fill="#3a424c">Answers the platform's permission question for an engaged run, allow or deny with a message, built from the grant over the</text>
-  <text x="706" y="866" font-size="10.5" fill="#3a424c">facts it collects, so no dialog halts an unattended run. permission-answers: false in .bionic/config.yaml keeps the dialog.</text>
-  <line x1="40" y1="878" x2="1360" y2="878" stroke="#c9ced6" stroke-width="1.2"/>
+  <!-- 8 · permission-answer.sh -->
+  <rect x="40" y="754" width="1320" height="46" fill="#ffffff"/>
+  <text x="54" y="774" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">permission-answer.sh</text>
+  <text x="54" y="790" font-size="9.5" font-style="italic" fill="#8b949e">gate: engagement</text>
+  <text class="hook-entry" data-event="PermissionRequest" data-matcher="" data-guard="" data-hook="permission-answer.sh" x="300" y="774" font-size="9.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138"><tspan fill="#8b949e">plugin</tspan> PermissionRequest</text>
+  <rect x="566" y="763" width="126" height="20" rx="4" fill="#fffaeb" stroke="#b54708" stroke-width="1.2"/>
+  <text x="629" y="777" font-size="10" font-weight="600" fill="#b54708" text-anchor="middle">ANSWER · JSON</text>
+  <text x="706" y="772" font-size="10.5" fill="#3a424c">Answers the platform's permission question for an engaged run, allow or deny with a message, built from the grant over the</text>
+  <text x="706" y="788" font-size="10.5" fill="#3a424c">facts it collects, so no dialog halts an unattended run. permission-answers: false in .bionic/config.yaml keeps the dialog.</text>
+  <line x1="40" y1="800" x2="1360" y2="800" stroke="#c9ced6" stroke-width="1.2"/>
 
   <!-- ============================ the two ladders ============================ -->
-  <text x="40" y="916" font-size="12.5" font-weight="700" letter-spacing="1.2" fill="#16191d">THE TWO SDLC LADDERS — first failure wins, and it names itself</text>
+  <text x="40" y="838" font-size="12.5" font-weight="700" letter-spacing="1.2" fill="#16191d">THE TWO SDLC LADDERS — first failure wins, and it names itself</text>
 
-  <rect x="40" y="930" width="650" height="300" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
-  <text x="58" y="954" font-size="12.5" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#16191d">canonical-sdlc-governing-skill.sh</text>
-  <text x="58" y="971" font-size="10.5" font-style="italic" fill="#626b76">PreToolUse · Write, Edit — the artifact wall</text>
-  <text x="58" y="996" font-size="10.5" font-weight="700" fill="#3a424c">1</text>
-  <text x="76" y="996" font-size="10.5" fill="#3a424c">the path is under &lt;docs-root&gt;/{specs,plans,adrs,incidents}/</text>
-  <text x="58" y="1014" font-size="10.5" font-weight="700" fill="#3a424c">2</text>
-  <text x="76" y="1014" font-size="10.5" fill="#3a424c">governing-skill: is present in the frontmatter</text>
-  <text x="58" y="1032" font-size="10.5" font-weight="700" fill="#3a424c">3</text>
-  <text class="version-pin" data-pin="hook-chain-governing-ladder" x="76" y="1032" font-size="10.5" fill="#3a424c">canonical_sdlc_version == 14</text>
-  <text x="58" y="1050" font-size="10.5" font-weight="700" fill="#3a424c">4</text>
-  <text x="76" y="1050" font-size="10.5" fill="#3a424c">the triple is present and enum-valid — intent · rigor · scale</text>
-  <text x="58" y="1068" font-size="10.5" font-weight="700" fill="#3a424c">5</text>
-  <text x="76" y="1068" font-size="10.5" fill="#3a424c">no mode: line, and the intent × scale cell is not barred</text>
-  <text x="58" y="1086" font-size="10.5" font-weight="700" fill="#3a424c">6</text>
-  <text x="76" y="1086" font-size="10.5" fill="#3a424c">flags and model_plan present; walk: is required or exempt</text>
-  <text x="58" y="1104" font-size="10.5" font-weight="700" fill="#3a424c">7</text>
-  <text x="76" y="1104" font-size="10.5" fill="#3a424c">## Verification Matrix present once sdlc-step ≥ 3</text>
-  <text x="58" y="1122" font-size="10.5" font-weight="700" fill="#3a424c">8</text>
-  <text x="76" y="1122" font-size="10.5" fill="#3a424c">a wave-or-epic SPEC satisfies one design arm: a flush-left ## Design</text>
-  <text x="76" y="1138" font-size="10.5" fill="#3a424c">in place, a design: pointer that resolves to a file carrying one, or a</text>
-  <text x="76" y="1154" font-size="10.5" fill="#3a424c">design-waived: token</text>
-  <text x="58" y="1180" font-size="10.5" fill="#16191d">All pass → the Write proceeds. Any failure → exit 2, and the file is never written.</text>
-  <text x="58" y="1202" font-size="10.5" fill="#175cd3">LOG-ONLY: rigor-minimum consistency — and it logs user-overridden rather than a</text>
-  <text x="58" y="1216" font-size="10.5" fill="#175cd3">violation when rigor-override: is present. Plans and task-scale artifacts are untouched.</text>
+  <rect x="40" y="852" width="650" height="300" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
+  <text x="58" y="876" font-size="12.5" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#16191d">canonical-sdlc-governing-skill.sh</text>
+  <text x="58" y="893" font-size="10.5" font-style="italic" fill="#626b76">PreToolUse · Write, Edit — the artifact wall</text>
+  <text x="58" y="918" font-size="10.5" font-weight="700" fill="#3a424c">1</text>
+  <text x="76" y="918" font-size="10.5" fill="#3a424c">the path is under &lt;docs-root&gt;/{specs,plans,adrs,incidents}/</text>
+  <text x="58" y="936" font-size="10.5" font-weight="700" fill="#3a424c">2</text>
+  <text x="76" y="936" font-size="10.5" fill="#3a424c">governing-skill: is present in the frontmatter</text>
+  <text x="58" y="954" font-size="10.5" font-weight="700" fill="#3a424c">3</text>
+  <text class="version-pin" data-pin="hook-chain-governing-ladder" x="76" y="954" font-size="10.5" fill="#3a424c">canonical_sdlc_version == 14</text>
+  <text x="58" y="972" font-size="10.5" font-weight="700" fill="#3a424c">4</text>
+  <text x="76" y="972" font-size="10.5" fill="#3a424c">the triple is present and enum-valid — intent · rigor · scale</text>
+  <text x="58" y="990" font-size="10.5" font-weight="700" fill="#3a424c">5</text>
+  <text x="76" y="990" font-size="10.5" fill="#3a424c">no mode: line, and the intent × scale cell is not barred</text>
+  <text x="58" y="1008" font-size="10.5" font-weight="700" fill="#3a424c">6</text>
+  <text x="76" y="1008" font-size="10.5" fill="#3a424c">flags and model_plan present; walk: is required or exempt</text>
+  <text x="58" y="1026" font-size="10.5" font-weight="700" fill="#3a424c">7</text>
+  <text x="76" y="1026" font-size="10.5" fill="#3a424c">## Verification Matrix present once sdlc-step ≥ 3</text>
+  <text x="58" y="1044" font-size="10.5" font-weight="700" fill="#3a424c">8</text>
+  <text x="76" y="1044" font-size="10.5" fill="#3a424c">a wave-or-epic SPEC satisfies one design arm: a flush-left ## Design</text>
+  <text x="76" y="1060" font-size="10.5" fill="#3a424c">in place, a design: pointer that resolves to a file carrying one, or a</text>
+  <text x="76" y="1076" font-size="10.5" fill="#3a424c">design-waived: token</text>
+  <text x="58" y="1102" font-size="10.5" fill="#16191d">All pass → the Write proceeds. Any failure → exit 2, and the file is never written.</text>
+  <text x="58" y="1124" font-size="10.5" fill="#175cd3">LOG-ONLY: rigor-minimum consistency — and it logs user-overridden rather than a</text>
+  <text x="58" y="1138" font-size="10.5" fill="#175cd3">violation when rigor-override: is present. Plans and task-scale artifacts are untouched.</text>
 
-  <rect x="710" y="930" width="650" height="314" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
-  <text x="728" y="954" font-size="12.5" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#16191d">bash-walls.sh</text>
-  <text x="728" y="971" font-size="10.5" font-style="italic" fill="#626b76">PreToolUse · Bash — the commit wall, on real git commit segments only</text>
-  <text x="728" y="996" font-size="10.5" font-weight="700" fill="#3a424c">1</text>
-  <text x="746" y="996" font-size="10.5" fill="#3a424c">the plan this session is bound to → its ## SDLC State, fence-aware</text>
-  <text x="728" y="1014" font-size="10.5" font-weight="700" fill="#3a424c">2</text>
-  <text class="version-pin" data-pin="hook-chain-evidence-ladder" x="746" y="1014" font-size="10.5" fill="#3a424c">canonical_sdlc_version == 14</text>
-  <text x="728" y="1032" font-size="10.5" font-weight="700" fill="#3a424c">3</text>
-  <text x="746" y="1032" font-size="10.5" fill="#3a424c">current: N</text>
-  <text x="728" y="1050" font-size="10.5" font-weight="700" fill="#3a424c">4</text>
-  <text x="746" y="1050" font-size="10.5" fill="#3a424c">Step N's evidence keys present, and none of them a placeholder</text>
-  <text x="746" y="1066" font-size="10.5" fill="#3a424c">(todo · pending · in progress · xxx · tbd · placeholder all reject)</text>
-  <text x="728" y="1084" font-size="10.5" font-weight="700" fill="#3a424c">5</text>
-  <text x="746" y="1084" font-size="10.5" fill="#3a424c">at Step 5: cmd / pass / total / output with pass == total, a valid</text>
-  <text x="746" y="1100" font-size="10.5" fill="#3a424c">## Verification Matrix, and a non-empty auditor: once no row is pending</text>
-  <text x="728" y="1118" font-size="10.5" font-weight="700" fill="#3a424c">6</text>
-  <text x="746" y="1118" font-size="10.5" fill="#3a424c">from current: 5 onward — no AC block says provenance: implementation</text>
-  <text x="728" y="1136" font-size="10.5" font-weight="700" fill="#3a424c">7</text>
-  <text x="746" y="1136" font-size="10.5" fill="#3a424c">from current: 5 onward — walk-artifact: resolves to a real file under</text>
-  <text x="746" y="1152" font-size="10.5" fill="#3a424c">&lt;docs-root&gt;/record/ and names the AC (unless walk: exempt)</text>
-  <text x="728" y="1168" font-size="10.5" font-weight="700" fill="#3a424c">8</text>
-  <text x="746" y="1168" font-size="10.5" fill="#3a424c">from current: 6 onward — each owed question has a reading whose newest is not result=fail, or a newer</text>
-  <text x="746" y="1184" font-size="10.5" fill="#3a424c">waived: line; and no declared red is still owed</text>
-  <text x="728" y="1202" font-size="10.5" fill="#16191d">Valid → the commit proceeds. Otherwise → exit 2, and git never runs.</text>
-  <text x="728" y="1218" font-size="10.5" fill="#175cd3">LOG-ONLY: the epic merge-target check, and the intent-scoped Step-5 keys for</text>
-  <text x="728" y="1232" font-size="10.5" fill="#175cd3">refactor (behavior-preservation · compat-matrix · revert-plan) and tune (baseline · target · re-measure).</text>
+  <rect x="710" y="852" width="650" height="314" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
+  <text x="728" y="876" font-size="12.5" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#16191d">bash-walls.sh</text>
+  <text x="728" y="893" font-size="10.5" font-style="italic" fill="#626b76">PreToolUse · Bash — the commit wall, on real git commit segments only</text>
+  <text x="728" y="918" font-size="10.5" font-weight="700" fill="#3a424c">1</text>
+  <text x="746" y="918" font-size="10.5" fill="#3a424c">the plan this session is bound to → its ## SDLC State, fence-aware</text>
+  <text x="728" y="936" font-size="10.5" font-weight="700" fill="#3a424c">2</text>
+  <text class="version-pin" data-pin="hook-chain-evidence-ladder" x="746" y="936" font-size="10.5" fill="#3a424c">canonical_sdlc_version == 14</text>
+  <text x="728" y="954" font-size="10.5" font-weight="700" fill="#3a424c">3</text>
+  <text x="746" y="954" font-size="10.5" fill="#3a424c">current: N</text>
+  <text x="728" y="972" font-size="10.5" font-weight="700" fill="#3a424c">4</text>
+  <text x="746" y="972" font-size="10.5" fill="#3a424c">Step N's evidence keys present, and none of them a placeholder</text>
+  <text x="746" y="988" font-size="10.5" fill="#3a424c">(todo · pending · in progress · xxx · tbd · placeholder all reject)</text>
+  <text x="728" y="1006" font-size="10.5" font-weight="700" fill="#3a424c">5</text>
+  <text x="746" y="1006" font-size="10.5" fill="#3a424c">at Step 5: cmd / pass / total / output with pass == total, a valid</text>
+  <text x="746" y="1022" font-size="10.5" fill="#3a424c">## Verification Matrix, and a non-empty auditor: once no row is pending</text>
+  <text x="728" y="1040" font-size="10.5" font-weight="700" fill="#3a424c">6</text>
+  <text x="746" y="1040" font-size="10.5" fill="#3a424c">from current: 5 onward — no AC block says provenance: implementation</text>
+  <text x="728" y="1058" font-size="10.5" font-weight="700" fill="#3a424c">7</text>
+  <text x="746" y="1058" font-size="10.5" fill="#3a424c">from current: 5 onward — walk-artifact: resolves to a real file under</text>
+  <text x="746" y="1074" font-size="10.5" fill="#3a424c">&lt;docs-root&gt;/record/ and names the AC (unless walk: exempt)</text>
+  <text x="728" y="1090" font-size="10.5" font-weight="700" fill="#3a424c">8</text>
+  <text x="746" y="1090" font-size="10.5" fill="#3a424c">from current: 6 onward — each owed question has a reading whose newest is not result=fail, or a newer</text>
+  <text x="746" y="1106" font-size="10.5" fill="#3a424c">waived: line; and no declared red is still owed</text>
+  <text x="728" y="1124" font-size="10.5" fill="#16191d">Valid → the commit proceeds. Otherwise → exit 2, and git never runs.</text>
+  <text x="728" y="1140" font-size="10.5" fill="#175cd3">LOG-ONLY: the epic merge-target check, and the intent-scoped Step-5 keys for</text>
+  <text x="728" y="1154" font-size="10.5" fill="#175cd3">refactor (behavior-preservation · compat-matrix · revert-plan) and tune (baseline · target · re-measure).</text>
 
   <!-- ============================ closing callouts ============================ -->
-  <rect x="40" y="1256" width="426" height="88" rx="8" fill="#f6f7f9" stroke="#dde1e6" stroke-width="1.2"/>
-  <text x="58" y="1278" font-size="11.5" font-weight="700" letter-spacing="0.8" fill="#16191d">ONE SUPPORTED VERSION</text>
-  <text class="version-pin" data-pin="hook-chain-version-callout" x="58" y="1299" font-size="10.5" fill="#3a424c">canonical_sdlc_version: 14 is the only value either hook accepts.</text>
-  <text x="58" y="1314" font-size="10.5" fill="#3a424c">Anything else — older, empty, malformed — exits 2 naming the value it</text>
-  <text x="58" y="1329" font-size="10.5" fill="#3a424c">found. No grandfathering. This page's three renderings are pinned to it.</text>
+  <rect x="40" y="1178" width="426" height="88" rx="8" fill="#f6f7f9" stroke="#dde1e6" stroke-width="1.2"/>
+  <text x="58" y="1200" font-size="11.5" font-weight="700" letter-spacing="0.8" fill="#16191d">ONE SUPPORTED VERSION</text>
+  <text class="version-pin" data-pin="hook-chain-version-callout" x="58" y="1221" font-size="10.5" fill="#3a424c">canonical_sdlc_version: 14 is the only value either hook accepts.</text>
+  <text x="58" y="1236" font-size="10.5" fill="#3a424c">Anything else — older, empty, malformed — exits 2 naming the value it</text>
+  <text x="58" y="1251" font-size="10.5" fill="#3a424c">found. No grandfathering. This page's three renderings are pinned to it.</text>
 
-  <rect x="487" y="1256" width="426" height="88" rx="8" fill="#eff8ff" stroke="#a8cdf5" stroke-width="1.2"/>
-  <text x="505" y="1278" font-size="11.5" font-weight="700" letter-spacing="0.8" fill="#175cd3">THE LOG-ONLY SIDE CHANNEL</text>
-  <text x="505" y="1299" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">$HOME/.claude/logs/&lt;project-slug&gt;/sdlc-audit.md</text>
-  <text x="505" y="1316" font-size="10.5" fill="#3a424c">Deliberately outside every consuming project tree. One line per finding</text>
-  <text x="505" y="1331" font-size="10.5" fill="#3a424c">plus an stderr echo, and it never blocks the wave.</text>
+  <rect x="487" y="1178" width="426" height="88" rx="8" fill="#eff8ff" stroke="#a8cdf5" stroke-width="1.2"/>
+  <text x="505" y="1200" font-size="11.5" font-weight="700" letter-spacing="0.8" fill="#175cd3">THE LOG-ONLY SIDE CHANNEL</text>
+  <text x="505" y="1221" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">$HOME/.claude/logs/&lt;project-slug&gt;/sdlc-audit.md</text>
+  <text x="505" y="1238" font-size="10.5" fill="#3a424c">Deliberately outside every consuming project tree. One line per finding</text>
+  <text x="505" y="1253" font-size="10.5" fill="#3a424c">plus an stderr echo, and it never blocks the wave.</text>
 
-  <rect x="934" y="1256" width="426" height="88" rx="8" fill="#fffaeb" stroke="#eaba7a" stroke-width="1.2"/>
-  <text x="952" y="1278" font-size="11.5" font-weight="700" letter-spacing="0.8" fill="#b54708">KNOWN HOLES — NOT ENFORCEMENT</text>
-  <text x="952" y="1299" font-size="10.5" fill="#3a424c">The artifact wall validates Write content, not Edit content. Flag VALUES</text>
-  <text x="952" y="1314" font-size="10.5" fill="#3a424c">are never checked, only presence. The evidence gate reads the plan's text,</text>
-  <text x="952" y="1329" font-size="10.5" fill="#3a424c">so an Edit writing evidence for tests never run passes unseen.</text>
+  <rect x="934" y="1178" width="426" height="88" rx="8" fill="#fffaeb" stroke="#eaba7a" stroke-width="1.2"/>
+  <text x="952" y="1200" font-size="11.5" font-weight="700" letter-spacing="0.8" fill="#b54708">KNOWN HOLES — NOT ENFORCEMENT</text>
+  <text x="952" y="1221" font-size="10.5" fill="#3a424c">The artifact wall validates Write content, not Edit content. Flag VALUES</text>
+  <text x="952" y="1236" font-size="10.5" fill="#3a424c">are never checked, only presence. The evidence gate reads the plan's text,</text>
+  <text x="952" y="1251" font-size="10.5" fill="#3a424c">so an Edit writing evidence for tests never run passes unseen.</text>
 
-  <text x="1360" y="1364" font-size="10" text-anchor="end" fill="#626b76">composed SVG — this file is the source · pinned by tests/cross-gate-agreement.test.sh §V</text>
+  <text x="1360" y="1286" font-size="10" text-anchor="end" fill="#626b76">composed SVG — this file is the source · pinned by tests/cross-gate-agreement.test.sh §V</text>
 </svg>
