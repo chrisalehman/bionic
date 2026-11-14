@@ -54,6 +54,8 @@
 #            rows at 15, found by the walk, bound, and a commit under it judged on its own plan.
 #   §EPIC    a plan with no Tasks rows (an epic's, a wave's whose table holds none, a task-scale plan's) is brought
 #            forward: its page reads 15, its step and whether it is open read as before, and a second act changes no byte.
+#   §SAYS    a step that fails exits 1 in one line naming what could not be read or written, nothing after it written;
+#            the act run again finishes it.
 #
 # FIXTURE FIDELITY. The plan is a real file in a scratch docs tree, in the shape version-14 plans hold.
 
@@ -780,4 +782,18 @@ for x in epic:3 wave-1-empty:4 task-1-none:4; do p="$E/${x%:*}.plan.md"; l="$SB/
   expect_eq "${x%:*}: the act wrote its log, and a second act changes no byte and prints the same" "log $s $o" \
     "$(o2="$(bash "$BF" "$p" 2>&1)"; printf '%s %s %s %s' "$([ -s "$l" ] && echo log)" "$(cksum < "$p")" "$({ cksum < "$l"; } 2>/dev/null)" "$o2")"
 done
+
+section "SAYS"
+# A step that fails says so: a tool the translation needs that dies, and a plan whose directory takes no write.
+FP="$SB/says/plans/epic-x/wave-2-says.plan.md"; mkdir -p "${FP%/*}" "$SB/says/shim"; printf '#!/bin/sh\nexit 2\n' > "$SB/says/shim/awk"; chmod +x "$SB/says/shim/awk"
+printf '%s\n' '---' 'canonical_sdlc_version: 14' '---' '## Tasks' '| id | step | kind | task | deps | size | status |' '|---|---|---|---|---|---|---|' \
+  '| T1 | 4 | build | One. | — | 30 | pending |' '' '## SDLC State' 'current: 4' > "$FP"; FS="$(cksum < "$FP")"
+FO="$(PATH="$SB/says/shim:$PATH" bash "$BF" "$FP" 2>&1)"; expect_status "an act whose translation dies exits 1" 1 "$?"
+expect_eq "…in one line that names the step and says nothing after it was written, and nothing was" \
+  "bring-forward: failed — the plan's old homes could not be translated (lib/translate.sh); nothing after it was written|$FS|" \
+  "$FO|$(cksum < "$FP")|$(find "$SB/says/record" -type f 2>/dev/null)"
+chmod 555 "${FP%/*}"; FO="$(bash "$BF" "$FP" 2>&1)"; FR=$?; chmod 755 "${FP%/*}"
+expect_status "an act that cannot write the plan exits 1" 1 "$FR"
+expect_contains "…and says it could not write the plan, the step before kept" "bring-forward: failed — the plan $(cd "${FP%/*}" && pwd -P)/${FP##*/} could not be written; nothing after it was written" "$FO"
+bash "$BF" "$FP" >/dev/null 2>&1; expect_eq "…and the act run again finishes it (exit 0, at 15)" "0 canonical_sdlc_version=15" "$? $(bash "$RS" "$FP" header canonical_sdlc_version)"
 finish

@@ -50,7 +50,8 @@
 # a heading whose first word is its id, when the plan has one, and to the gaps list when it has none.
 #
 # EXITS. 0 done; 2 not a plan at plans/<epic>/<wave>.plan.md, a plan not named *.plan.md, or a kept copy not this run's
-# own; 1 a write failed, with nothing after it written.
+# own; 1 a step could not read or write what it needed, named on stderr in one line (_bf_fail): nothing after that step
+# was written, and since the act is once, the act run again finishes what it began. No exit but 0 is silent.
 #
 # Executed, never sourced:  bash ${CLAUDE_PLUGIN_ROOT}/scripts/bring-forward.sh <plan>
 # bash 3.2 (ADR-001).
@@ -183,18 +184,24 @@ _bf_deps() {  # <old plan> <implied plan> <deps out> -> the waits that are not d
     END { for (i = 1; i <= n; i++) { r = ord[i]; v = d[r] a[r]; sub(/^, /, "", v); if (v != "") printf "%s\t%s\n", r, v > out }; close(out) }'
 }
 
-_bf_compute() {  # <plan> <work dir> -> <work>/plan, the plan brought forward; <work>/gaps, the act's gaps list
+_bf_fail() {  # <what could not be read or written> -> the act's one line on stderr; 1
+  printf 'bring-forward: failed — %s; nothing after it was written\n' "$1" >&2
+  return 1
+}
+
+_bf_compute() {  # <plan> <work dir> -> <work>/plan, the plan brought forward; <work>/gaps, the act's gaps list; 1 a step failed, named
   local plan="$1" w="$2"
-  translate "$plan" gaps > "$w/translated.gaps" || return 1
-  : > "$w/deps"; : > "$w/cells.gaps"
-  _bf_homes "$plan" "$w/head" > "$w/homes.gaps" || return 1
-  _bf_plan "$plan" - "" > "$w/implied.plan.md" || return 1
-  _bf_deps "$plan" "$w/implied.plan.md" "$w/deps" > "$w/waits.gaps" || return 1
+  translate "$plan" gaps > "$w/translated.gaps" || { _bf_fail "the plan's old homes could not be translated (lib/translate.sh)"; return; }
+  : > "$w/deps" && : > "$w/cells.gaps" || { _bf_fail "the work directory $w could not be written"; return; }
+  _bf_homes "$plan" "$w/head" > "$w/homes.gaps" || { _bf_fail "the header keys a step owes could not be read from the plan's SDLC State"; return; }
+  _bf_plan "$plan" - "" > "$w/implied.plan.md" || { _bf_fail "the plan could not be rewritten with its deps cells empty"; return; }
+  _bf_deps "$plan" "$w/implied.plan.md" "$w/deps" > "$w/waits.gaps" || { _bf_fail "the Tasks rows' waits could not be read (lib/plan-read.sh plan_read_waits)"; return; }
   plan_read_criterion_task "$plan" > "$w/tasks" 2>/dev/null || :
-  _bf_criteria "$plan" > "$w/criteria" || return 1
-  _bf_plan "$plan" "$w/deps" "$w/cells.gaps" "$w/tasks" "$w/head" "$w/criteria" > "$w/plan" || return 1
-  _bf_shared "$plan" > "$w/shared.gaps" || return 1
-  cat "$w/translated.gaps" "$w/homes.gaps" "$w/waits.gaps" "$w/cells.gaps" "$w/shared.gaps" | awk '!seen[$0]++' > "$w/gaps"
+  _bf_criteria "$plan" > "$w/criteria" || { _bf_fail "the criteria of the plan's Verification Matrix could not be read"; return; }
+  _bf_plan "$plan" "$w/deps" "$w/cells.gaps" "$w/tasks" "$w/head" "$w/criteria" > "$w/plan" || { _bf_fail "the plan could not be rewritten at 15"; return; }
+  _bf_shared "$plan" > "$w/shared.gaps" || { _bf_fail "the files of the record a plain plan.md joined could not be listed"; return; }
+  cat "$w/translated.gaps" "$w/homes.gaps" "$w/waits.gaps" "$w/cells.gaps" "$w/shared.gaps" | awk '!seen[$0]++' > "$w/gaps" \
+    || _bf_fail "the act's gaps list could not be written"
 }
 
 # THE CRITERIA. At 15 a run's criteria are its `## Eval design` table's rows; at 14 a plan could hold them in its matrix
@@ -330,21 +337,21 @@ bf_main() {  # <plan> -> the act; prints the gaps list and kept=<directory>
   fi
   plan="$(cd "$(dirname "$plan")" && pwd -P)/${plan##*/}"; wave="${plan##*/}"; rec="${log%/run.log}"; kept="$rec/kept"
   case "$wave" in *.plan.md) ;; *) _bf_misnamed "$plan" "$rec"; return 2 ;; esac
-  BF_WORK="$(mktemp -d)" || return 1
+  BF_WORK="$(mktemp -d)" || { _bf_fail "no work directory could be made (mktemp -d)"; return; }
   if [ -d "$kept" ] && [ "$(plan_read_header "$plan" canonical_sdlc_version 2>/dev/null)" != canonical_sdlc_version=15 ]; then
-    _bf_own "$plan" "$kept" "$log" "$BF_WORK"; case $? in 0) ;; 1) return 2 ;; *) return 1 ;; esac
+    _bf_own "$plan" "$kept" "$log" "$BF_WORK"; case $? in 0) ;; 1) return 2 ;; *) _bf_fail "the kept copy $kept could not be copied to judge the run's log against it"; return ;; esac
   fi
   _bf_compute "$plan" "$BF_WORK" || return 1
   if [ ! -d "$kept" ]; then
-    mkdir -p "${rec%/*}" && st="$(mktemp -d "${rec%/*}/.kept.XXXXXX")" || return 1
+    mkdir -p "${rec%/*}" && st="$(mktemp -d "${rec%/*}/.kept.XXXXXX")" || { _bf_fail "no place for the kept copy could be made under ${rec%/*}"; return; }
     if ! { cp -p "$plan" "$st/$wave" && { [ ! -d "$rec" ] || cp -Rp "$rec" "$st/record"; } && cp "$BF_WORK/gaps" "$st/gaps" \
-      && mkdir -p "$rec" && mv "$st" "$kept"; }; then rm -rf "$st"; return 1; fi
+      && mkdir -p "$rec" && mv "$st" "$kept"; }; then rm -rf "$st"; _bf_fail "the plan and its record could not be kept at $kept"; return; fi
   fi
   if ! reader_brought "$plan"; then
-    { _bf_log "$plan" > "$log.tmp.$$" && mv "$log.tmp.$$" "$log"; } || { rm -f "$log.tmp.$$"; return 1; }
+    { _bf_log "$plan" > "$log.tmp.$$" && mv "$log.tmp.$$" "$log"; } || { rm -f "$log.tmp.$$"; _bf_fail "the run's log $log could not be written"; return; }
   fi
   if ! cmp -s "$BF_WORK/plan" "$plan"; then
-    { cat "$BF_WORK/plan" > "$plan.tmp.$$" && mv "$plan.tmp.$$" "$plan"; } || { rm -f "$plan.tmp.$$"; return 1; }
+    { cat "$BF_WORK/plan" > "$plan.tmp.$$" && mv "$plan.tmp.$$" "$plan"; } || { rm -f "$plan.tmp.$$"; _bf_fail "the plan $plan could not be written"; return; }
   fi
   cat "$kept/gaps"; printf 'kept=%s\n' "$kept"
 }
