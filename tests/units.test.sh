@@ -1430,5 +1430,9 @@ o5 T1 4 build — a.sh $O5_REG $O5_REV $O5_REL T8 7 build — b.sh T9 7 review T
 O5_A="$(ov)"; printf 'run/v1|ev=published|row=T7|commit=c4|by=w|at=2026-11-01T00:00:01Z\n' >> "$O5_LOG"; O5_B="$(ov)"; sed -i.bak 's/| review | t | T8 |/| review | t | T1 |/' "$O5"
 expect_eq "ORD15-4 a review past the release waiting on the fix T8: refused while the release is open, admitted once the log lands it, refused when it waits on T1 written before it" \
   "$PO_ORD|1 |0 $PO_ORD|1" "$O5_A $O5_B $(ov)"
+# shellcheck disable=SC2086
+o5 T1 4 build — a.sh $O5_REG $O5_REV $O5_REL T8 7 build — b.sh T9 7 review T8 r/T9.md; O5_A="$(call units_post_readers "$O5")"; sed -i.bak 's/| review | t | T8 |/| review | t | T1 |/' "$O5"
+expect_eq "ORD15-5 the card's question at 15, as release-approval's §POST asks it at 14: the review past the landed release waiting on the fix is named, open and unread; waiting on T1 it is not" \
+  "T9	pending	unread|" "$O5_A|$(call units_post_readers "$O5")"
 
 finish

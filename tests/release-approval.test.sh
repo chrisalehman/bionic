@@ -666,13 +666,16 @@ fc_record structure structure piece
 
 # The merge without a whole run at the head is tests/release-approval-2.test.sh; the words as its sections leave them:
 fc_typed "$FC_WD" "$FC_WR"
-FC_VERSION=14
 
 # ============================================================
 section "§POST: a reader row past the landed release keeps the card early until its reading is registered (AC-6.2)"
 # ============================================================
 # fails-when: the card renders while a reader row placed after the landed release has no registered reading; it stays
 # early, or puts a waiver, once the piece readings are registered at the fix's landing.
+# The rows are written before the act, the readers with no agent cell, which the act would carry as a launch: a reader
+# not yet launched reads pending to the reader and the fill alike. An active reader is one the dispatch writer launched,
+# its event appended to the run's log after the act.
+FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
 FC_F7="$(s57_commit "$RFC" lib/x.sh 'T4: the fix after the release')"
 FC_P8="${FC_F7:0:8}"
 fc_published T4 "$FC_F7" > "$FC_REC/landing-proofs.log"
@@ -683,21 +686,28 @@ done
 fc_post_read() {  # <question> -> the piece reading of the fix at its landing, as proof-add registers it
   fc_line review "$FC_F7" 2026-10-12T15:00:00Z "record/wave-x/post-$1.md" "$1" w-post pass piece
 }
-fc_post_plan() {  # <readers' status> [<proof lines>] -> PFC: FC_GOOD, the fix row T4 landed past the release, readers T5 and T6
+FC_PR='approval:plan, head, .bionic/docs/record/wave-x/T4.md'
+fc_post_rows() {  # <page> -> the fix row T4 landed past the release, readers T5 and T6 after it, not launched; the pending criterion owed now
+  fc_owed_now "$1"
+  awk -v r="$FC_PR" '{ print } /^\| T2 \|/ {
+    print "| T4 | 7 | build | the fix after the release | implementor | — | 30 | REQ-1 | lib/x.sh, .bionic/docs/record/wave-x/T4.md | — | — | landed | approval:plan |"
+    print "| T5 | 7 | review | the critic reads the fix as a piece | — | — | 20 | REQ-1 | .bionic/docs/record/wave-x/post-adversarial.md, .bionic/docs/record/wave-x/post-structure.md | — | — | pending | " r " |"
+    print "| T6 | 7 | review | the auditor reads the fix as a piece | — | — | 20 | REQ-1 | .bionic/docs/record/wave-x/post-evidence.md | — | — | pending | " r " |" }' \
+    "$1" > "$1.new" && mv "$1.new" "$1"
+}
+fc_post_plan() {  # <readers' state: pending, or active> [<proof lines>] -> PFC: FC_GOOD, the fix row T4 landed past the release, readers T5 and T6
   fc_plan "$FC_GOOD
 - T4: landed $FC_F7 2026-10-12T14:00:00Z${2:+
-$2}"
-  FC_PR='approval:plan, head, .bionic/docs/record/wave-x/T4.md'
-  awk -v s="$1" -v r="$FC_PR" '{ print } /^\| T2 \|/ {
-    print "| T4 | 7 | build | the fix after the release | implementor | — | 30 | REQ-1 | lib/x.sh, .bionic/docs/record/wave-x/T4.md | — | — | landed | approval:plan |"
-    print "| T5 | 7 | review | the critic reads the fix as a piece | critic | — | 20 | REQ-1 | .bionic/docs/record/wave-x/post-adversarial.md, .bionic/docs/record/wave-x/post-structure.md | — | — | " s " | " r " |"
-    print "| T6 | 7 | review | the auditor reads the fix as a piece | auditor | — | 20 | REQ-1 | .bionic/docs/record/wave-x/post-evidence.md | — | — | " s " | " r " |" }' \
-    "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
+$2}" "" fc_post_rows
+  [ "$1" = active ] || return 0
+  bash -c '. "$1/log.sh" && for r in T5 T6; do RUN_LOG="$2" log_append dispatch "row=$r" "name=w-$r" || exit 1; done' _ "$FC_LIB" "$FC_REC/run.log" \
+    || { echo "fc_post_plan: the dispatch writer refused" >&2; exit 2; }
 }
 fc_post_plan pending
 expect_eq "POST-0 precondition: the working head is the fix's landing, and the readers stand after the landed release row" \
   "$FC_F7|T2:landed T4:landed T5:pending T6:pending" \
-  "$(git -C "$RFC" rev-parse wave/01-fixture)|$(/usr/bin/grep -E '^\| T[2456] \|' "$PFC" | awk -F'|' '{ gsub(/ /, "", $2); gsub(/ /, "", $13); printf "%s%s:%s", (n++ ? " " : ""), $2, $13 }')"
+  "$(git -C "$RFC" rev-parse wave/01-fixture)|$(for r in $(/usr/bin/grep -oE '^\| T[2456] ' "$PFC" | tr -d '| '); do
+    printf '%s:%s\n' "$r" "$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" status "$r" | sed -n 's/^state=//p')"; done | paste -sd' ' -)"
 fc_card early
 expect_eq "POST-1 the readers open and unread: card.sh early is CARD-EARLY naming the first reader row (exit 1)" \
   "1|CARD-EARLY — review row T5 reads what landed after the release, and its review is not registered" "$FC_RC|$FC_ERR"
@@ -714,7 +724,8 @@ fc_post_plan active "$(fc_post_read adversarial)
 $(fc_post_read structure)
 $(fc_post_read evidence)"
 fc_card early
-expect_eq "POST-2 every piece reading registered at the fix's landing, the rows still active: card.sh early holds, every check green but the merge the fix landed past the whole run, which the page settles as its own decision (exit 0)" "0||settles: approve:merge-unproved" "$FC_RC|$FC_ERR|$FC_OUT"
+expect_eq "POST-2 every piece reading registered at the fix's landing, the rows still active: card.sh early holds, every check green but the unrun row owed now and the merge the fix landed past the whole run, which the page settles as its own decisions (exit 0)" "0||settles: row:AC-1.2
+settles: approve:merge-unproved" "$FC_RC|$FC_ERR|$FC_OUT"
 fc_page
 expect_eq "POST-2b release-approval renders at the fix's landing (exit 0, nothing on stderr, the page written)" \
   "0||release-approval-$FC_P8.md" "$FC_RC|$FC_ERR|$(fc_pages)"
