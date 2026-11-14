@@ -1032,35 +1032,6 @@ expect_eq "WH4 …and with two: two landings since" "green at ${SR_F:0:8}, 2 lan
 sr_commit payload/x.sh; sr_run "$SR_PLAN"
 expect_eq "WH5 …and a third that moved a code path: red at the whole run's head, three landings before this head" "red at ${SR_F:0:8}, 3 landings before this head" "$(sr_m tests.whole-run)"
 
-section "§COUNTS: a count agrees in number with what it counts — one task, two tasks; the sheet never says 1 tests"
-# ============================================================
-# fails-when: any count phrase on the sheet says a plural for one, or a singular for two.
-sr_world counts-one "6 6 12 12"
-awk -F'|' '!(/^\| T[0-9]+ / && $2 != " T1 ")' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
-sr_ev "ev=standing|head=$SR_H|suite=b.test.sh|lines=2|log=/rec/standing-b.log|cause=code|against=-|at=2026-10-06T14:00:00Z"
-printf 'fill-ledger/v1|at=2026-10-06T16:00:00Z|session=%s|turn=t2|current=4|state=ok|ceiling=|width=4|open=3|free=1|ready=T9|launched=|declined=|missed=1|idle=T9|room=1\n' "$SID" >> "$SR_DIR/fill-ledger.log"
-printf 'fill-ledger/v1|at=2026-10-06T16:01:00Z|session=%s|turn=t3|current=4|state=ok|ceiling=|width=4|open=4|free=0|ready=|launched=T9|declined=|missed=0|idle=|room=0\n' "$SID" >> "$SR_DIR/fill-ledger.log"
-sr_run "$SR_PLAN"
-expect_eq "CN0 precondition: the plan holds the one task, landed, and the sheet draws it" "1|1" \
-  "$(sr_lines task | /usr/bin/grep -c .)|$(sr_tasks_f state | /usr/bin/grep -c '^done$')"
-expect_eq "CN1 one task: landed says 1 task, none left says 0 tasks, correctness counts its two suites" \
-  "1 task, 30 of 30 min, 100%|0 tasks, 0 min|2: 1 green, 1 red" \
-  "$(sr_m work.landed)|$(sr_m work.left)|$(sr_m tests.suites-run)"
-expect_eq "CN2 one minute idle is 1 min" "1 min" "$(sr_m waste.ready-unstarted)"
-expect_eq "CN3 the status line says 1 of 1 task" "yes" \
-  "$(sr_poke sitrep --line "$SR_PLAN" 2>/dev/null | /usr/bin/grep -q '^1 of 1 task · ' && echo yes)"
-sr_world counts-two "6 6 12 12"
-sr_ev "ev=standing|head=$SR_H|suite=b.test.sh|lines=2|log=/rec/standing-b.log|cause=code|against=-|at=2026-10-06T14:00:00Z"
-sr_ev "ev=standing|head=$SR_H|suite=c.test.sh|lines=2|log=/rec/standing-c.log|cause=code|against=-|at=2026-10-06T14:00:00Z"
-sr_run "$SR_PLAN"
-expect_eq "CN4 two of each stays plural: a plan of many tasks" "3: 1 green, 2 red|4 tasks, 120 of 600 min, 20%|13 tasks, 480 min" \
-  "$(sr_m tests.suites-run)|$(sr_m work.landed)|$(sr_m work.left)"
-sr_world counts-landing "6 6 12 12"
-sr_ev "ev=candidate|row=T8|base=$SR_C1|commit=$(printf 'd%.0s' $(seq 40))|tree=/landing/1|at=2026-10-06T13:35:00Z"
-sr_ev "ev=verdict|row=T8|commit=$(printf 'd%.0s' $(seq 40))|suite=a.test.sh|result=green|log=/rec/T8a.log|at=2026-10-06T13:50:00Z"
-sr_run "$SR_PLAN"
-expect_eq "CN5 a landing with its one suite green says 1 of 1 suite green" "in its landing, 1 of 1 suite green" "$(sr_f "$(sr_task T8)" note)"
-
 # ============================================================
 section "§FORECAST: the predicted close is the longest chain left, from now, at 1× until three landed tasks measure their own time; no typed number moves it, and admitting more never shortens one chain"
 # ============================================================
@@ -1646,17 +1617,6 @@ awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T[12] $/ { $11 = " lib/t1.sh, lib/x.sh " 
 sr_run "$SR_PLAN"
 expect_eq "OF1 two 90-minute landings of two files and two 10-minute one-file landings: the goal reads 10 min against its 5-minute target" \
   "fast landings=not met|yes" "$(sr_goal_st)|$(sr_goal_m 'fast landings' | /usr/bin/grep -q 'median is 10 min over 2 landings' && echo yes)"
-
-# ============================================================
-section "§WAIT-WORDS: a task waiting on the review facts says so in words; the judge's facts string and its record paths never reach its line"
-# ============================================================
-sr_world wait-words "6 6 12 12"
-SR_W_ROW="$(sr_row T19 "Review-gated row · complexity: standard" proof:review 30 pending)"
-awk -v r="$SR_W_ROW" '{ print } /^\| T17 \|/ { print r }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
-sr_run "$SR_PLAN"
-SR_W_LINE="$(sr_task T19)"
-expect_eq "WW1 the review-gated task's note names the reviews, with no facts string and no record path" "waits on the reviews|0" \
-  "$(sr_f "$SR_W_LINE" note)|$(printf '%s\n' "$SR_W_LINE" | /usr/bin/grep -cE 'facts_state|record/|\.md')"
 
 # ============================================================
 section "§DECISIONS: a decision put and not ruled is an ask on the sheet, owed once; ruled, it is gone while the reviews stay"

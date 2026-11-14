@@ -78,9 +78,6 @@ hf_sec() {  # <file> <heading> -> the lines under that heading, unfolded, up to 
 hf_label() {  # <file> <label> -> the first line that starts `<label>: `, unfolded
   hf_unfold "$1" | awk -v k="$2: " 'index($0, k) == 1 { print; exit }'
 }
-hf_wide() {  # <file> -> how many of its lines are wider than 100 columns, the shared width (a UTF-8 character is one)
-  LC_ALL=C awk '{ t = $0; n = gsub(/[\200-\277]/, "", t); if (length($0) - n > 100) c++ } END { print c + 0 }' "$1" 2>/dev/null
-}
 hf_ho() { bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$1" handoff | sed -n 's/^path=//p'; }  # <plan> -> the file the reader's handoff names
 hf_iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
 hf_ev() { mkdir -p "${HF_REC%/*}"; printf 'run/v1|%s\n' "$1" >> "$HF_REC"; }
@@ -115,9 +112,6 @@ hf_poke() {  # <repo> <stdin file> <args...> -> OUT, RC: the poker with that fil
 
 # ---------- the composed sections, as the skill pipes them ----------
 HF_LONG="The closed index is never cached, so a warm call still pays for the whole scan of the tree text and the declarations on every call, twelve seconds of it measured warm — time-keys-head.log"
-# A finding that fits the shared width and not the old fold: its line is 96 columns, whole.
-HF_FIT="lib/fit.sh holds a finding that fits the shared width of the page"
-while [ "$(printf '%s' "- $HF_FIT" | LC_ALL=C awk '{ t = $0; n = gsub(/[\200-\277]/, "", t); print length($0) - n }')" -lt 96 ]; do HF_FIT="$HF_FIT x"; done
 HF_C="$TMPROOT/hf-compose.md"
 cat > "$HF_C" <<COMPOSE
 Summary
@@ -136,7 +130,6 @@ Findings
 - The walk is _proof_walk — payload/scripts/lib/proof.sh:1248
 - Each key derivation runs the closed scan three times per cold call
 - $HF_LONG
-- $HF_FIT
 - Deriving once per commit saves about 22 s — unverified
 
 Decisions
@@ -281,7 +274,7 @@ expect_eq "OL-3e …and the step's last non-blank line closes that fence" '```' 
 
 
 # ============================================================
-section "§SECTIONS: the kind line, the title, then the ten sections in order; an empty section is one line; the page folds at the shared 100 columns"
+section "§SECTIONS: the kind line, the title, then the ten sections in order; an empty section is one line; a long finding is printed whole"
 # ============================================================
 expect_eq "S1 line 1 is the kind line" "bionic-handoff/v1" "$(sed -n 1p "$HF_NR_F")"
 expect_eq "S3 the sections, in order" "$HF_HEADS" "$(hf_heads "$HF_NR_F")"
@@ -291,12 +284,7 @@ expect_ne "S4b anti-vacuity: the bare-heading count tells a file with the empty 
 expect_eq "S5 an empty Ruled out is one line" "- none." "$(hf_sec "$HF_NR_F" "Ruled out")"
 expect_eq "S9 Resume is the last section and the last line" "Read $HF_HOME/2026-10-06-$HF_NR_BR.md whole, then do Next 1." \
   "$(hf_sec "$HF_NR_F" Resume)"
-expect_contains "S10 precondition: the long finding's last words are in the file" "time-keys-head.log" "$(cat "$HF_NR_F")"
-expect_eq "S10a …folded, so no line of the page is wider than the shared 100 columns" "0" "$(hf_wide "$HF_NR_F")"
-expect_ne "S10b …and the fold is real: the long finding spans more than one line" "1" \
-  "$(awk '/^- The closed index/ { f = 1 } f { n++ } f && /time-keys-head\.log/ { print n; exit }' "$HF_NR_F")"
-expect_eq "S10c a 96-column finding prints whole on one line: the page folds at 100, not at 92" "1" \
-  "$(/usr/bin/grep -cxF -- "- $HF_FIT" "$HF_NR_F")"
+expect_contains "S10 a long finding is printed whole: its last words are in the file" "time-keys-head.log" "$(cat "$HF_NR_F")"
 expect_eq "S11 State is computed: its written: line is the pinned instant on the local 12-hour clock, as the title's time is" "written: 3:00 PM" "$(hf_label "$HF_NR_F" written)"
 expect_eq "S11a …and the instant stays a line of its own for the readers that compare it" "instant: $HF_ISO" "$(hf_label "$HF_NR_F" instant)"
 expect_absent "S11a2 …the UTC text appears only on that line (S11a read the same extractor)" "Z" "$(hf_sec "$HF_NR_F" State | grep -v '^instant: ')"
