@@ -883,9 +883,9 @@ ll_ask() {  # <root> <record>#<n> -> that finding's ask's newest round in the as
   local k
   k="finding:$(printf '%s' "$2" | LC_ALL=C tr -c 'A-Za-z0-9._-' ':')"
   bash -c '. "$1/roots.sh" && . "$1/owed.sh" && owed_lines "$2" "$3"' _ "$REPO/payload/scripts/lib" "$(ll_plan "$1")" "$1" 2>/dev/null \
-    | awk -F'|' -v k="key=$k" '$2 == k { s = ""; b = ""
-    for (i = 3; i <= NF; i++) { if ($i ~ /^state=/) s = substr($i, 7); if ($i ~ /^by=/) b = substr($i, 4) }
-    l = s "|" b } END { print l }'
+    | awk -F'|' -v k="$k" '{ n = s = b = ""
+    for (i = 2; i <= NF; i++) { if ($i ~ /^key=/) n = substr($i, 5); if ($i ~ /^state=/) s = substr($i, 7); if ($i ~ /^by=/) b = substr($i, 4) } }
+    n == k { l = s "|" b } END { print l }'
 }
 ll_fixed() {  # <root> -> proof_fixed's `<record>#<n> <row> <how>` for the plan, one a line, sorted
   ( . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1; proof_fixed "$(ll_plan "$1")" ) 2>/dev/null \
