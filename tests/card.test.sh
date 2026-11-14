@@ -2487,4 +2487,114 @@ expect_eq "UP-4 …and asks no merge without a pass" "" "$(up_ask "$PAH_OUT")"
 pah_poke "$PAH_P" card-up-session current 8 --check
 expect_eq "UP-4b …and current 8 --check passes with no word from the person (exit 0)" "0" "$PAH_RC"
 
+# ============================================================
+section "§UNRUN: at 15 a criterion owed now and never run is the release card's decision, and the gate still refuses it"
+# ============================================================
+# fails-when: at 15 the acting release approval card hears the step check's refusal of a pending criterion owed now as
+# early, so no page is written and the person is never asked; or the card settles it by a loosened gate, so the advance
+# to 6 passes over the unrun criterion; or the waiver a reply gives is not the waiver event in the person's words; or
+# the other reply moves the run.
+# FIXTURE FIDELITY: the close-out fixture at 15 (co_page15, read out of tests/close-out.prelude.sh above), carried
+# from step 5 to 8 by the advance itself. The criterion is born late: a row the person adds to the Eval design once the
+# run stands at 8, naming no task, so it is owed now. The advance to 6 refuses a pending criterion owed now, and a proof
+# that discharged a criterion stands at every head, so a criterion born after the advance is how one reaches the card
+# at 15 in a run born there. The page is the real acting `release-approval`, the reply the real `reply`, its words
+# typed in the session's transcript.
+# ANTI-VACUITY: UNRUN-0's empty replay keys, before the criterion is born, sit beside UNRUN-3's on the same extractor
+# in the same run; UNRUN-1 reads the refusal through the same check UNRUN-8 reads passing; UNRUN-6b's empty waiver
+# readback sits beside its pending cell, and UNRUN-4b reads a waiver through the same extractor.
+UR_SID="card-unrun-session"
+UR_CFG="$CARD_SANDBOX/ur-cfg"; mkdir -p "$UR_CFG/projects"
+UR_REC_REL=".bionic/docs/record/wave-01-fixture"
+ur_poke() {  # <root> <verb> [args] -> UR_RC, UR_OUT of the tree under test's poker, as the session, in <root>
+  local p="$1"; shift
+  ( in_fixture "$p" || exit 9
+    HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" CLAUDE_CONFIG_DIR="$UR_CFG" \
+      CLAUDE_CODE_SESSION_ID="$UR_SID" bash "$PAH_POKER" "$@" ) > "$SANDBOX/ur-out" 2>&1
+  UR_RC=$?; UR_OUT="$(cat "$SANDBOX/ur-out")"
+}
+ur_early() {  # <root> -> UR_RC, UR_OUT of card.sh early on the root's plan, as the session
+  ( in_fixture "$1" || exit 9
+    HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" CLAUDE_CONFIG_DIR="$UR_CFG" \
+      CLAUDE_CODE_SESSION_ID="$UR_SID" bash "$CARD_SH" early "$1/$PLAN_REL" ) > "$SANDBOX/ur-out" 2>&1
+  UR_RC=$?; UR_OUT="$(cat "$SANDBOX/ur-out")"
+}
+ur_world() {  # <label> -> UR_P: the fixture at 15, its Step 7 record named, carried from 5 to 8 by the advance itself
+  local p n
+  p="$(CO_PLAN_AT=15 mk_fixture "$1")" || return 1
+  sed 's/^adrs: none$/adrs: none: the fixture decides nothing durable/' "$p/$PLAN_REL" > "$p/$PLAN_REL.n" && mv "$p/$PLAN_REL.n" "$p/$PLAN_REL"
+  # the waiver records who gave it by the project's git user, which the fixture's repository sets as a person's does
+  fixture_git "$p" config user.name "Dana Fixture"
+  advance_to "$p" 5
+  bound_marker "$p" "$UR_SID" "$p/$PLAN_REL"
+  printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$p" > "$p/.bionic/tmp/loaded-$UR_SID.state"
+  mkdir -p "$UR_CFG/projects/$(printf '%s' "$p" | sed 's/[^a-zA-Z0-9]/-/g')"
+  for n in 6 7 8; do ur_poke "$p" current "$n"; [ "$UR_RC" = 0 ] || { printf '      current %s said: %s\n' "$n" "$UR_OUT"; return 1; }; done
+  UR_P="$p"
+}
+ur_born() {  # <root> -> the person's edit: a second criterion joins the Eval design, under the first, naming no task
+  awk '{ print } /^\| — \| fixture \| AC-1 \|/ { print "| — | fixture | AC-2 | unit | `bash tests/x.test.sh` | a second planted defect |" }' \
+    "$1/$PLAN_REL" > "$1/$PLAN_REL.n" && mv "$1/$PLAN_REL.n" "$1/$PLAN_REL"
+}
+ur_typed() {  # <root> <words> -> the session's transcript holds the words as a typed prompt
+  local tx="$UR_CFG/projects/$(printf '%s' "$1" | sed 's/[^a-zA-Z0-9]/-/g')/$UR_SID.jsonl"
+  [ -f "$tx" ] || cat "$REPO/tests/fixtures/transcript-move/frame.jsonl" > "$tx"
+  jq -c --arg t "$2" '.message.content = $t' "$REPO/tests/fixtures/transcript-move/typed.jsonl" >> "$tx"
+}
+ur_page() { ls "$1/$UR_REC_REL"/release-approval-*.md 2>/dev/null | head -1; }   # <root> -> the page the card wrote
+ur_keys() {   # <root> -> the keys of the page's replay table, in its order, space-joined
+  /usr/bin/grep -h '^release-approval/v1|dec=' "$(ur_page "$1")" 2>/dev/null \
+    | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "key=") == 1) print substr($i, 5) }' | paste -sd' ' -
+}
+ur_dec() { /usr/bin/grep -h "^release-approval/v1|dec=[0-9]*|key=$2|" "$(ur_page "$1")" 2>/dev/null; }   # <root> <key> -> its row
+ur_cell() { bash -c '. "$1/reader.sh" && reader_q_cell "$2" "$3"' _ "$PAH_LIB" "$1/$PLAN_REL" "$2" 2>/dev/null | paste -sd' ' -; }   # <root> <AC>
+ur_waiver() { /usr/bin/grep -h '|ev=waiver|' "$1/$LOG_REL" 2>/dev/null; }   # <root> -> the run's waiver events
+
+ur_world ur-waive; UR_W="${UR_P:-}"
+ur_poke "$UR_W" release-approval "$UR_W/$PLAN_REL"
+expect_eq "UNRUN-0 precondition: a run born at 15 reaches step 8 by the advance, and its card renders (exit 0), writing no page" \
+  "n=8|0|" "$(bash "$REPO/payload/scripts/reader.sh" "$UR_W/$PLAN_REL" step 2>/dev/null | head -1)|$UR_RC|$(ur_keys "$UR_W")"
+expect_contains "UNRUN-0a …for no decision waits on the person" "None wait on you." "$UR_OUT"
+ur_born "$UR_W"
+expect_eq "UNRUN-0b the person's edit gives the run a criterion born late, pending at 15" "state=pending" "$(ur_cell "$UR_W" AC-2)"
+ur_poke "$UR_W" current 6 --check
+expect_eq "UNRUN-1 the gate is not loosened: current 6 --check refuses (exit 1) the criterion owed now" "1" "$UR_RC"
+expect_contains "UNRUN-1b …in the wall's live-row words, naming the person's waiver" "session-poker.sh waive AC-2 '<their words>' '<why>'" "$UR_OUT"
+ur_early "$UR_W"
+expect_eq "UNRUN-2 card.sh early settles the refusal as the page's own decision (exit 0, settles: row:AC-2)" "0|settles: row:AC-2" \
+  "$UR_RC|$(printf '%s\n' "$UR_OUT" | /usr/bin/grep -x 'settles: row:AC-2')"
+[ "$UR_RC" = 0 ] || printf '      card.sh early said: %s\n' "$UR_OUT"
+ur_poke "$UR_W" release-approval "$UR_W/$PLAN_REL"
+expect_eq "UNRUN-3 the acting card writes its page (exit 0), the criterion its first decision" "0|row:AC-2" \
+  "$UR_RC|$(ur_keys "$UR_W")"
+[ "$UR_RC" = 0 ] || printf '      release-approval said: %s\n' "$(printf '%s\n' "$UR_OUT" | head -3)"
+expect_contains "UNRUN-3b …put as at 14: not run on this release, waived by default or run" \
+  "key=row:AC-2|default=waive AC-2|other=-|pick=default|choices=waive/run|why=not run on this release" "$(ur_dec "$UR_W" row:AC-2)"
+expect_contains "UNRUN-3c …and the page says so under Decisions" "AC-2, not run on this release" "$UR_OUT"
+UR_WORDS="1 waive, rest default"
+ur_typed "$UR_W" "$UR_WORDS"
+ur_poke "$UR_W" reply "$UR_WORDS"
+expect_eq "UNRUN-4 the reply that waives it exits 0" "0" "$UR_RC"
+[ "$UR_RC" = 0 ] || printf '      reply said: %s\n' "$(printf '%s\n' "$UR_OUT" | head -3)"
+expect_regex "UNRUN-4b …and writes the waiver's event for AC-2 in the person's words" \
+  "^run/v1\|ev=waiver\|ac=AC-2\|.*\|said=1 waive, rest default\|" "$(ur_waiver "$UR_W")"
+expect_eq "UNRUN-4c …so the criterion is discharged by the waiver" "state=discharged by=waiver" "$(ur_cell "$UR_W" AC-2)"
+ur_poke "$UR_W" current 6 --check
+expect_eq "UNRUN-8 …and only then does current 6 --check pass (exit 0)" "0" "$UR_RC"
+
+ur_world ur-run; UR_R="${UR_P:-}"
+ur_born "$UR_R"
+ur_poke "$UR_R" release-approval "$UR_R/$PLAN_REL"
+expect_eq "UNRUN-5 a second run, the same criterion born late: the acting card writes its page (exit 0)" "0|row:AC-2" \
+  "$UR_RC|$(ur_keys "$UR_R" | awk '{ print $1 }')"
+UR_WORDS="1 run, rest default"
+ur_typed "$UR_R" "$UR_WORDS"
+ur_poke "$UR_R" reply "$UR_WORDS"
+expect_eq "UNRUN-6 the reply that runs it exits 0 and holds the decision back" "0|withheld: row:AC-2" \
+  "$UR_RC|$(/usr/bin/grep -x 'withheld: row:AC-2' "$(ur_page "$UR_R")" 2>/dev/null)"
+expect_eq "UNRUN-6b …writing no waiver, and leaving the criterion pending" "|state=pending" "$(ur_waiver "$UR_R")|$(ur_cell "$UR_R" AC-2)"
+ur_poke "$UR_R" current 6 --check
+expect_eq "UNRUN-6c …so the run stays where it is: current 6 --check still refuses (exit 1)" "1" "$UR_RC"
+expect_eq "UNRUN-6d …and the run's step is still 8" "n=8" "$(bash "$REPO/payload/scripts/reader.sh" "$UR_R/$PLAN_REL" step 2>/dev/null | head -1)"
+
 finish
