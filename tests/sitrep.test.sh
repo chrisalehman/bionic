@@ -152,13 +152,8 @@ sr_owed() {  # <owed/v1 fields after the schema> [<plan>] -> one line on that ru
   local f; f="$(sr_reg "${2:-$SR_PLAN}")" || return 1
   mkdir -p "${f%/*}"; printf 'owed/v1|%s\n' "$1" >> "$f"
 }
-sr_ask_ev() {  # <ask fields, at= last> [<plan>] -> one ask event in that run's log, as lib/owed.sh appends it
-  local f; f="$(sr_reg "${2:-$SR_PLAN}")" || return 1
-  mkdir -p "${f%/*}"; printf 'run/v1|ev=ask|%s\n' "$1" >> "${f%/*}/run.log"
-}
-sr_owed_sid() {  # <ask fields, at= last> <session> -> one ask event in the store of a session acting for no run
-  printf 'run/v1|ev=ask|%s\n' "$1" >> "$SR_REPO/.bionic/tmp/owed-$2.state"
-}
+sr_ask_ev() { local f; f="$(sr_reg "${2:-$SR_PLAN}")" && mkdir -p "${f%/*}" && printf 'run/v1|ev=ask|%s\n' "$1" >> "${f%/*}/run.log"; }  # <ask fields, at= last> [<plan>] -> one ask event in that run's log
+sr_owed_sid() { printf 'run/v1|ev=ask|%s\n' "$1" >> "$SR_REPO/.bionic/tmp/owed-$2.state"; }  # <ask fields, at= last> <session> -> one ask event in the store of a session acting for no run
 # sr_prev <minutes> [<scale>] -> a delivered plan beside this one (T1 of 60 min declared,
 # declaring `scale: <scale>` when given) approved at 10:00Z the day before, whose T1 lands <minutes>
 # later: the previous wave's measured ratio is <minutes> / 60. Its queue time is 1 minute, so a pace read
