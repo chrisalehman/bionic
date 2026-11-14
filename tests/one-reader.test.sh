@@ -3,13 +3,17 @@
 # names over a checkout: parsers of a plan or a log outside the reader, plan writers, event types with
 # two writers, refusal words in hook files and pasted loader copies. It reports and exits 0.
 #
-#   §PARSERS      an awk over a plan planted under payload/scripts/lib/ is named and the count rises by one;
-#                 the same awk inside the reader's own file is admitted.
-#   §PLANWRITERS  a planted append to a plan is named and the count rises by one.
+#   §PARSERS      an awk over a plan planted under payload/scripts/lib/ is named and counted;
+#                 the same awk inside the reader's own file is admitted. For each kind of line that reads
+#                 nothing (a heading's or a shape's words, an operand of another command) a planted file holds
+#                 lines of it and, last, the real reading of that kind: only the last is counted.
+#   §PLANWRITERS  a planted append to a plan is named and counted; a log's, words' or copy
+#                 source's line is no write beside a planted copy onto a plan.
 #   §WRITERS      two functions appending one event type are listed as a pair; so is `published` today. A
 #                 launch's `dispatch` has one writer, the launch recorder's, and a row's `born` one, the units
 #                 library's; each is paired with a planted second, the born one in the shape of a split; so is
-#                 a planted second appender of a waiver, a finding or a proof beside the one writer of each.
+#                 a planted second appender of a waiver, a finding or a proof beside the one writer of each. A
+#                 printed search pattern is no writer.
 #   §NAMES        the verbs the dispatch, born and tree events and the landing's event retired, the five that wrote
 #                 a matrix cell and the commands with no job are named nowhere in hooks/ or payload/scripts/; nor those
 #                 that wrote a step's line, its fields, the regression's setting, its runs' count, a row's
@@ -59,22 +63,56 @@ printf '%s\n' 'refuse exit2 v "w" "x" ""' 'refuse deny v "w" "x" ""' 'refuse blo
 printf '%s\n' 'a() { _proof_ask "$p" reader_q_step "$p" | sed -n s/^n=//p; }' 'b() { f="$(_proof_facts "$p")"; }' 'c() { local f="$(reader_main "$p" step)" || return 2; }' \
   'd() { f="$(_proof_facts "$p")" || return 2; printf "%s" "$f" | awk 1; }' 'reader_facts() { printf "%s" "$f"; }' > "$L/planted-folds.sh"
 printf '%s\n' '#!/bin/bash' '# --- bionic-loader/v2 BEGIN' > "$S/hooks/planted-loader.sh"
+# One file for each kind of line that reads nothing, its last line the real reading or write of that kind.
+awk -v d="$L" '/^@/ { f = d "/planted-k" substr($0, 2) ".sh"; next } { print > f }' <<'EOF'
+@1
+  die "REFUSED — the ## Tasks table of $p carries no row $id; the plan is unchanged."
+  subject="1 active '## Tasks' row has"
+  print "## SDLC State"
+  /## SDLC State/ { s = 1 }
+@2
+  printf 'landings: unmeasured — the landing record holds no line/v1 events\n'
+planted_facts() {  # <plan> -> the reader's facts, one run/v1 line each
+  index($0, "owed/v1|") == 1 { n++ }
+@3
+  out="$(printf '%s\n' "$x" | awk -v n="$(count_rows "$plan")" '{ print }')"
+  r="$(owed_rounds 'a|b' "$plan" | awk '{ print }')"
+  { cat "$w/plan" > "$t"; } || fail "the plan $plan could not be written"
+  n="$(cut -d'|' -f2 "$plan")"
+@3b
+    { c = $2; if (c == id) { print v; exit } }' "$plan" 2>/dev/null)"
+@4
+  printf 'rc=137\n' >> "$RUN_LOG"
+  mv $(refuse_shell_word "$PLAN") $(refuse_shell_word "$to")
+  cp -p "$plan" "$st/$wave"
+  cp -p "$tmp" "$plan"
+@5
+planted_k5_count() { echo "n=$(/usr/bin/grep -c '^run/v1|ev=zzplant|' "$f")"; }
+planted_k5_put() { echo "run/v1|ev=zzplant|at=now" >> "$f"; }
+EOF
 AFTER="$(run)"; RC=$?
+site() { printf '%s\n' "$AFTER" | awk -F'\t' -v f="payload/scripts/lib/planted-k$1.sh" '$2 == f { print $1, $3 }'; }
 
 section "PARSERS"
-expect_contains "a real parser is named at this head" "$(printf 'parser\tpayload/scripts/card.sh\t')" "$BEFORE"
+expect_contains "a real parser is named at this head" "$(printf 'parser\tpayload/scripts/lib/units.sh\t')" "$BEFORE"
 expect_absent "the goals library reads a criterion's state and a plan's scale through the reader alone" "$(printf 'parser\tpayload/scripts/lib/plan.sh\t')" "$BEFORE"
 expect_absent "the fill library takes the run's step and approval from the reader alone" "$(printf 'parser\tpayload/scripts/lib/fill.sh\t')" "$BEFORE"
-expect_eq "the parsers stand at or under twenty-one" 1 "$(( $(count "$BEFORE" parsers) <= 21 ))"
+expect_eq "parsers, plan writers and shared types stand at or under 13, 2 and 6" "1 1 1" \
+  "$(( $(count "$BEFORE" parsers) <= 13 )) $(( $(count "$BEFORE" plan_writers) <= 2 )) $(( $(count "$BEFORE" shared_types) <= 6 ))"
+expect_eq "headings: a message's, a constant's and a print's words are no parse; an unanchored match is" "parser sites=1 first=4" "$(site 1)"
+expect_eq "shapes: a printed one and a function line's comment are no parse; a log line's test is" "parser sites=1 first=3" "$(site 2)"
+expect_eq "operands: a function's argument, in a \$( ) or in words, is no read; a reader's own is, and a program's end" \
+  "parser sites=1 first=4 parser sites=1 first=1" "$(site 3) $(site 3b)"
 expect_contains "the planted awk over a plan is named" "$(printf 'parser\tpayload/scripts/lib/planted-parse.sh\t')" "$AFTER"
-expect_eq "the parser count rises by one" "$(( $(count "$BEFORE" parsers) + 1 ))" "$(count "$AFTER" parsers)"
+expect_eq "the parser count rises by the five planted parsers" "$(( $(count "$BEFORE" parsers) + 5 ))" "$(count "$AFTER" parsers)"
 expect_absent "the reader's own file is admitted, its planted awk too" "lib/reader.sh" "$AFTER"
 
 section "PLANWRITERS"
 expect_contains "the planted plan write is named" "$(printf 'plan-writer\tpayload/scripts/lib/planted-write.sh\t')" "$AFTER"
 expect_absent "a plan write is not a parse" "$(printf 'parser\tpayload/scripts/lib/planted-write.sh')" "$AFTER"
 expect_absent "the units library writes no plan" "$(printf 'plan-writer\tpayload/scripts/lib/units.sh\t')" "$AFTER"
-expect_eq "the plan-writer count rises by one" "$(( $(count "$BEFORE" plan_writers) + 1 ))" "$(count "$AFTER" plan_writers)"
+expect_eq "the plan-writer count rises by the two planted writers" "$(( $(count "$BEFORE" plan_writers) + 2 ))" "$(count "$AFTER" plan_writers)"
+expect_eq "writes: a log, a plan in refusal words and a copy's source are no plan write; a copy onto a plan is" "plan-writer sites=1 first=4" "$(site 4)"
 
 section "WRITERS"
 expect_contains "two functions appending one type are a pair" \
@@ -84,6 +122,8 @@ expect_contains "published: the queue landing's writer" "payload/scripts/lib/lin
 expect_contains "published: a record row's landing, the tick's" "hooks/poker/line.sh:record_row_land" "$PUB"
 expect_contains "published: close-out's landing of the rows its merge lands" "payload/scripts/close-out.sh:act_lands" "$PUB"
 pair() { printf '%s\n' "$AFTER" | awk -F'\t' -v t="$1" '$1 == "shared" && $2 == t { print $3 }'; }
+expect_eq "events: a printed search pattern writes none; a printed line does" "payload/scripts/lib/planted-k5.sh:2 planted_k5_put" \
+  "$(printf '%s\n' "$AFTER" | awk -F'\t' '$1 == "writer" && $2 == "zzplant" { print $3 }')"
 expect_contains "a planted second waiver appender is named beside the one waiver writer" \
   "payload/scripts/lib/planted-writers.sh:planted_waiver payload/scripts/lib/proof.sh:proof_waiver_event" "$(pair waiver)"
 expect_contains "a planted second finding appender is named beside the one finding writer" \
