@@ -259,7 +259,7 @@ AP_H="0123456789abcdef0123456789abcdef01234567"
 ap_plan() {  # <proof kind> <reads token> <born word> <of word> -> a plan on stdout
   printf -- '---\ngoverning-skill: superpowers:writing-plans\nparallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n---\n\n'
   printf '# fixture plan\n\n## SDLC State\n\ncurrent: 7\n%s\n\n- Step 4: in progress\n' "$SP_APPROVED_LINE"
-  printf -- '- T3: landed at record/T3.md born: %s a.test.sh of=%s\n' "$3" "$4"
+  printf -- '- T3: landed at record/T3.md — added by task-add at 2026-10-14T00:00:00Z born: %s a.test.sh of=%s\n' "$3" "$4"
   printf 'proved: kind=%s head=%s at=2026-10-14T00:00:00Z evidence=record/w/r.log owed=a.test.sh\n\n' "$1" "$AP_H"
   printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n'
   printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
