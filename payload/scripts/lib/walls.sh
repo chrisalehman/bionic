@@ -3604,7 +3604,7 @@ validate_matrix() {
         # AT 15 A CRITERION THE PERSON CONFIRMS, WITH NO APPROVAL NAMING IT, AWAITS ITS PERSON: the confirmation is the
         # release approval card's to collect, so it is owed from the merge advance and not before, or a run holding one
         # could not leave the verify step until the person answered.
-        if [ "$v15" = 1 ] && [ "$key" = user-confirmed ] && [ -z "$ucv" ] && [ "${CURRENT%[ab]}" -lt 8 ] 2>/dev/null; then
+        if [ "$_EG_V15" = 1 ] && [ "$key" = user-confirmed ] && [ -z "$ucv" ] && [ "${CURRENT%[ab]}" -lt 8 ] 2>/dev/null; then
           continue
         fi
         if ! grep -qE "^[[:space:]]*${key}[[:space:]]*:" <<< "$block_txt"; then
