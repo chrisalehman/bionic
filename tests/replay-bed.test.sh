@@ -18,7 +18,7 @@
 #   §OPEN     run_open asks the reader's step of a run brought forward, whatever its plan's prose says; a run with
 #             no log is judged from its plan, so each closed fixture run reads closed and the cut run open.
 #   §FOLLOWS-CONTINUATION  close-out's check reads a debt only the run's log holds into its debt line and Deferrals.
-#   §AGREE    in each card's world that draws a card, the release card's Reviews lines and the sheet's reviews line count alike, and
+#   §AGREE    in each card's world, the release card's Reviews lines and the sheet's reviews line count alike, and
 #             both print the reader's acts taken by hand and open asks at the log the card read.
 #   §HALF     a run not brought forward, its approval and landings in its plan and records and what came after in
 #             its log: a landing the log appends reads once and last, the run reads open at the plan's step, and a
@@ -376,8 +376,7 @@ printf 'run/v1|ev=step|n=7|at=2026-11-02T00:00:00Z\n' >> "$CR/run.log"; expect_c
 
 section "AGREE"
 nums() { sed -n 's/^run\.so-far: \([0-9]*\) acts\{0,1\} taken by hand · \([0-9]*\) open asks\{0,1\}$/\1 \2/p'; }
-# The world whose card is early draws no card to count; the three that draw hold the subject.
-for d in "$WORLD_ROOT"/pages/release-approval-*/; do d="${d%/}"; n="${d##*/}"; [ "$n" != release-approval-fcbb975f ] || continue; p="$(ls "$d"/.bio*/docs/plans/*/*.plan.md)"
+for d in "$WORLD_ROOT"/pages/release-approval-*/; do d="${d%/}"; n="${d##*/}"; p="$(ls "$d"/.bio*/docs/plans/*/*.plan.md)"
   cp "$d.read" "${p%/plans/*}/record/$(basename "$p" .plan.md)/run.log"; sv="$( cd "$d" && bash "$R/hooks/session-poker.sh" sitrep "$p" 2>"$d.serr" )"
   c="$(awk '$0 == "Reviews" { r = 1; next } r && !NF { exit } r && !/^ / { if (index($0, "✅") == 1) p++; else f++ } END { printf "%d passed, %d failed", p, f }' "$d.out")"
   s="$(printf '%s\n' "$sv" | sed -n 's/^reviews: \([0-9]* passed, [0-9]* failed\), .*/\1/p')"
