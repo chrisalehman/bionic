@@ -9,8 +9,8 @@
 #   §CARDS    for each card, in a world brought forward, the reader's answers at the card's instant equal its
 #             expected file less the gaps list; the cut run is read as it stands at 14, beside the hand-written lines.
 #   §PAGES    the release card rendered in each card's world, brought forward, equals the replay table that card
-#             printed, less the gaps list; the one world where a criterion was pending with cells written
-#             by hand draws no card, and the act names those cells on its gaps list.
+#             printed, less the gaps list; in the one world where a criterion was pending with cells written
+#             by hand, the act names those cells on its gaps list and the reader at 15 reads it pending.
 #   §CATCH    a copy of the reader with the replace rule taken out, then the cancel rule, disagrees with a card.
 #   §COVER    every question of the closed list is asked and none is refused, and every event type has a line.
 #   §FOLLOWS  a review row's rendered brief starts its range at the reader's last review proof of its questions,
@@ -198,17 +198,15 @@ for x in "$X"/release-approval-*.facts; do
   a=""; for k in $(page "$X/$w/record/${c##*/}/$n.md" | sed -n 's/^card\.decision\.\([^=]*\)=.*|pick=other|.*/\1/p'); do a="$a --against $k"; done
   W="$(page "$X/$w/record/${c##*/}/$n.md" | less "$n" "$w")"; expect_nonempty "$n: the card printed a replay table" "$W"
   G="$(render "$d" "$p" $a | less "$n" "$w")"
+  expect_eq "$n: the card rendered at its instant equals the card printed, less the gaps" "$W" "$G"
+  [ "$W" = "$G" ] || sed 's/^/      render said: /' "$d.err"
   if [ "$n" = release-approval-fcbb975f ]; then
-    # The one world a run brought forward truly differs from what it printed: a criterion was pending at the instant with an
-    # evidence and a verdict written into its cells by hand, which 15 has no place for, so the act names them on its
-    # gaps list and the card is early for a criterion with no proof, where the run's own card put it as a decision.
-    expect_eq "$n: brought forward at its instant, the card is early and draws no table" "1|" "$(grep -c '^CARD-EARLY — ' "$d.err")|$G"
-    expect_eq "$n: …AC-7.3 alone is named undischarged on the act's gaps list, by its evidence and auditor cells" "AC-7.3:auditor AC-7.3:evidence" \
+    # A criterion pending at the instant with an evidence and a verdict written into its cells by hand, which 15 has no
+    # place for: the act names them on its gaps list, and the card puts the criterion as a decision, as the run's did (the
+    # gaps list holds that decision out of the table above).
+    expect_eq "$n: AC-7.3 alone is named undischarged on the act's gaps list, by its evidence and auditor cells" "AC-7.3:auditor AC-7.3:evidence" \
       "$(sed -n 's/^gap\/v1|ev=criterion|criterion=\([^|]*\)|field=\([^|]*\)|why=undischarged$/\1:\2/p' "$c/kept/gaps" | sort | tr '\n' ' ' | sed 's/ $//')"
     expect_eq "$n: …and the reader at 15 reads it pending" "state=pending" "$(ask "$p" cell AC-7.3)"
-  else
-    expect_eq "$n: the card rendered at its instant equals the card printed, less the gaps" "$W" "$G"
-    [ "$W" = "$G" ] || sed 's/^/      render said: /' "$d.err"
   fi
   [ "$n" != release-approval-31da41f7 ] || { PG="$G"; PD="$d"; PP="$p"; PH="$h"; PA="$at"; }
 done
