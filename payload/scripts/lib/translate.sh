@@ -319,6 +319,8 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
   # person's confirmation in the attributed form lib/walls.sh `user_confirmed_attributed` takes, `<who> <YYYY-MM-DD>
   # <words>`, the approval naming the criterion, 15's one home for it, in the approve verb's fields; `pending` and any
   # other words are none. No other caller asks: a run at 14 read in place keeps the block's line as its confirmation.
+  # A pending or blocked criterion's confirmation is named on the gaps list as its cells are, never written: at 15 an
+  # approval alone discharges a criterion, so writing it would move the criterion from pending to discharged.
   { _translate_section "$1" "SDLC State" | awk '/^(proved|waived): / && match($0, / ac=[^ ]+/) { print "S", $1, substr($0, RSTART + 4, RLENGTH - 4) }'
     _translate_section "$1" "Verification Matrix" | awk '
       { l = $0; sub(/^[-*+][ \t]+/, "", l) }
@@ -333,9 +335,10 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
       ac != "" && match($0, /^[ \t]+evidence[ \t]*:/) { v = substr($0, RLENGTH + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); printf "E\036%s\036%s\n", ac, v }'
     _translate_section "$1" "Verification Matrix"; } | awk -F'|' -v conf="${TRANSLATE_CONFIRMED:-}" "$_TRANSLATE_AWK"'
     function pointer(ac, v) { return tolower(v) == "see " tolower(ac) }
+    function attributed(ac) { return (ac in uc) && uc[ac] ~ /^[A-Za-z][A-Za-z0-9._-]*[ \t]+[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ \t]+[^ \t]/ }
     function confirm(ac,   v, by, r, said) {
-      if (conf != "approval" || !(ac in uc)) return
-      v = uc[ac]; if (v !~ /^[A-Za-z][A-Za-z0-9._-]*[ \t]+[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ \t]+[^ \t]/) return
+      if (conf != "approval" || !attributed(ac)) return
+      v = uc[ac]
       by = v; sub(/[ \t].*$/, "", by); r = substr(v, length(by) + 1); sub(/^[ \t]+/, "", r)
       said = trim(substr(r, 11)); if (said ~ /^".*"$/) said = substr(said, 2, length(said) - 2)
       begin("approval", "key", ac); put("by", by); put("said", said); emit(substr(r, 1, 10)) }
@@ -346,6 +349,7 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
         if (v == "" && k == "evidence" && (ac in be)) v = be[ac]
         if (v != "" && tolower(v) != s) printf "g\t\tgap/v1|ev=criterion|criterion=%s|field=%s|why=undischarged\n", ac, k
       }
+      if (attributed(ac)) printf "g\t\tgap/v1|ev=criterion|criterion=%s|field=user-confirmed|why=undischarged\n", ac
     }
     /^S / { split($0, w, " "); stated[(w[2] == "proved:" ? "proof" : "waiver") SUBSEP w[3]] = 1; next }
     /^W\036/ { split($0, w, "\036"); if (!(w[2] in wat)) { wby[w[2]] = w[3]; wat[w[2]] = w[4]; wsaid[w[2]] = w[5] }
