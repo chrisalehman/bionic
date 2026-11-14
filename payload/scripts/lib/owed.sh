@@ -97,7 +97,7 @@ owed_register() {
   [ -n "$root" ] && [ -n "$plan" ] || return 1
   case "$plan" in *.plan.md) ;; *) return 1 ;; esac
   [ -f "$plan" ] || return 1
-  run="${plan##*/}"; run="${run%.plan.md}"
+  { declare -F reader_slug >/dev/null 2>&1 || . "$_OWED_LIB_DIR/reader.sh" >/dev/null 2>&1; } && run="$(reader_slug "$plan")" || return 1
   case "$run" in ''|.*|*[!A-Za-z0-9._-]*) return 1 ;; esac
   declare -F docs_root >/dev/null 2>&1 || return 1
   docs="$(docs_root "$root" 2>/dev/null)" && [ -n "$docs" ] || return 1

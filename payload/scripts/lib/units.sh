@@ -3162,7 +3162,7 @@ units_fix_policy() {
 # units_born_class <plan> <policy> <S<n> <reach>> <marker words> -> `exempt` or `counted`, the fix-cap: test of one
 #   review-born row. A DEFECT THE PLAN'S OWN REVIEW MAY RAISE UNASKED IS ITS OWN TO FIX, so it is exempt: a rating
 #   inside <policy>, every finding its ` of=` list names read from this plan's own record directory
-#   (`record/<plan slug>/`, the slug as lib/proof.sh `proof_plan_slug` takes it). Counted: a row marked
+#   (`record/<its name>/`, the record's one name rule, lib/reader.sh `reader_slug`). Counted: a row marked
 #   ` promoted` (the person moved its finding to fix from outside the policy), a rating outside the policy, or a
 #   finding carried in from another plan's record. With lib/run.sh not loaded the policy cannot be asked, and the
 #   row is counted, as every review-born row once was.
@@ -3172,7 +3172,7 @@ units_born_class() {
   if ! declare -F fix_policy_covers >/dev/null 2>&1 || ! fix_policy_covers "$pol" "${rating% *}" "${rating#* }"; then
     echo counted; return 0
   fi
-  own="${plan##*/}"; own="record/${own%.plan.md}/"
+  _units_lib reader.sh reader_slug && own="record/$(reader_slug "$plan")/" || { echo counted; return 0; }
   ids=""
   case "$words" in *" of="*) ids="${words#* of=}"; ids="${ids%% *}" ;; esac
   for id in $(printf '%s' "$ids" | tr ',' ' '); do
