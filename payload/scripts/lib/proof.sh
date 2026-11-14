@@ -2750,17 +2750,15 @@ proof_debt_record() {
   printf '%s/record/%s/landing-proofs.log' "$(docs_root "$tree")" "$slug"
 }
 
-# proof_plan_slug <plan> -> the plan's slug, its file name less `.plan.md`, the directory its run's records live
-# in, `<docs-root>/record/<slug>/` (wave-37 T2; REQ-9 AC-9.2, D12). THE ONE READER: every site in the hooks and
-# the scripts that names a run's landing record, ledger, brief or continuation from a plan path asks it, so a second
-# slug is never derived beside it. It reads the name it is given, and only that: never a name-only strip, so a file
-# named `X.plan.md.anything` reads its own name, not X's record. A name reader: the file need not exist. rc 1 when the
-# name leaves no slug.
+# proof_plan_slug <plan> -> the plan's slug, the directory its run's records live in, `<docs-root>/record/<slug>/`:
+# every site in the hooks and the scripts that names a run's landing record, ledger,
+# brief or continuation from a plan path asks it, and it asks the record's one name rule, lib/reader.sh `reader_slug`
+# (an epic's plan is named for its folder), so a second slug is never derived beside it. It reads the name it is
+# given: a file named `X.plan.md.anything` reads its own name, not X's record. The file need not exist. rc 1 when the
+# name leaves no slug or the rule cannot be loaded.
 proof_plan_slug() {
-  local plan="${1:-}" slug
-  slug="${plan##*/}"; slug="${slug%.plan.md}"
-  [ -n "$slug" ] || return 1
-  printf '%s' "$slug"
+  declare -F reader_slug >/dev/null 2>&1 || _proof_reader_load || return 1
+  reader_slug "${1:-}"
 }
 
 # proof_debts_read <record> -> `<suite><TAB><token><TAB><time>` once per suite and token with a
