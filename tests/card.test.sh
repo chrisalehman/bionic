@@ -2554,7 +2554,7 @@ ur_world oc-confirm oc_double 7; OC_C="${UR_P:-}"
 ur_poke "$OC_C" current 8 --check
 expect_eq "OWN-0 precondition: at 7, proved and confirmed by nobody, the advance to 8 refuses (exit 1)" \
   "1|state=discharged by=proof" "$UR_RC|$(ur_cell "$OC_C" AC-1)"
-expect_contains "OWN-0b …naming the criterion" "AC-1 (rule it:" "$UR_OUT"
+expect_contains "OWN-0b …naming the criterion" "AC-1 awaits its person's confirmation" "$UR_OUT"
 ur_poke "$OC_C" release-approval "$OC_C/$PLAN_REL"
 expect_eq "OWN-1 the acting card writes its page (exit 0), the criterion its one decision" "0|row:AC-1" "$UR_RC|$(ur_keys "$OC_C")"
 [ "$UR_RC" = 0 ] || printf '      release-approval said: %s\n' "$(printf '%s\n' "$UR_OUT" | head -3)"

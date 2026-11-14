@@ -293,12 +293,6 @@ else
   # one function up ("a caller whose prefix already ate the whole line still gets
   # its content"). The two say the same thing about the same input.
 
-  # THE GLYPH SET, AT THE FOLD. An em dash is one column and three bytes: a fold
-  # that measured bytes would break the line two words early. Asserted against the
-  # ASCII twin of the same sentence, so the number is not hand-computed.
-  EM_S='an em — dash inside a cell that must fold at its own column boundary'
-  ASCII_S='an em x dash inside a cell that must fold at its own column boundary'
-
   # A GLYPH OUTSIDE THE CLOSED SET is measured conservatively and IDENTICALLY in
   # both locales — 7n's ruling, one function down. Short of the budget, never over.
   wrap_c() {  # <string> <budget> -> the fold, made under the C locale
@@ -317,18 +311,6 @@ else
   # words in a TSV cell must not become a two-space gap at a fold boundary.
   expect_eq "19: a run of whitespace inside the cell collapses to one space" "a b c" \
     "$(bionic_wrap "  a   b		c  " 44)"
-
-  # T10 / REQ-9 (AC-9.1, AC-9.2): § and the curly quotes are measured at one
-  # column by the fold too — the same differential the em dash gets at 17,
-  # against the ASCII twin of the same sentence so the number is not hand-computed.
-  SEC_S='a § mark inside a cell that must fold at its own column boundary here'
-  ASCII_SEC_S='a x mark inside a cell that must fold at its own column boundary here'
-
-  TIMES_S='a count of 5 × 12 inside a cell that must fold at its own column boundary'
-  ASCII_TIMES_S='a count of 5 x 12 inside a cell that must fold at its own column boundary'
-
-  QUOTE_S='a “quoted” word inside a cell that must fold at its own column boundary'
-  ASCII_QUOTE_S='a xquotedx word inside a cell that must fold at its own column boundary'
 fi
 
 finish
