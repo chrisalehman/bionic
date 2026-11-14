@@ -634,11 +634,6 @@ T38:T38-one-roster-reader.md T39:T39-sp2-pins.md T40:T40-tick-asks-once.md T41:T
 T42:T42-born-floor-backed.md T43:T43-two-cd-chain.md T44:T44-walk-pointer.md T47:T47-adopt-lands-on-whole.md"
 # The rows that added a refusal; the Migration paragraph names each (AC-9.2)
 MIG_ROWS="T4 T7 T8 T13 T14 T25 T27 T31 T32 T35 T42"
-# D22's two deferred sentences, as wave-35's continuation states them and 1.18.0's Known limits omitted them
-D22_A='`task-add --born` still admits a finding the person moved to defer when its reader'"'"'s rating is inside the fix policy; the guard reads a move to fix, not a move to defer.'
-D22_B='a dead session'"'"'s open row whose files are already sweepable still holds its plan row, and the refusal'"'"'s remedy (`adopt`) lists nothing for that session; `session-poker.sh sweep` clears it.'
-# The text-only floor arm's sentence (A-orch-50)
-TEXT_ONLY='from Step 7 the commit wall refuses a plan that claims a regression and carries no `proved: kind=floor` line, and it reads text only, so a floor line that owes suites passes it and the judge holds them at `current 7` and `current 8`.'
 
 # cl_part <file> <version> <heading> — the lines of the block's `### <heading>` part, up to the next `### ` or `## `
 cl_part() {
