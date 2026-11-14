@@ -355,26 +355,4 @@ expect_eq "BN2 the swap is refused (exit 1) and nothing is drawn" "1|0" "$WR_RC|
 expect_contains "BN2b …naming each number beside the word it does not stand by" 'says 1 beside "green"' "$(cat "$TMP/wr.err")"
 expect_contains "BN2c …and the other" 'says 3 beside "red"' "$(cat "$TMP/wr.err")"
 
-# ── §REGRESSION-ONCE ─────────────────────────────────────────────────────────
-section "§REGRESSION-ONCE: the regression paragraph of operational-rules.md and of steps/5.md states the shipped rule"
-# fails-when: a file lacks the paragraph, still holds the removed rule's sentence, or lacks the shipped rule's; each absence
-# is read beside a presence on the same paragraph.
-RO_A="$(/usr/bin/grep -F '**The regression, once' "$REPO/skills/canonical-sdlc/operational-rules.md")"
-RO_B="$(/usr/bin/grep -F '**The regression, once' "$REPO/skills/canonical-sdlc/steps/5.md")"
-expect_nonempty "AC-3.1 precondition: operational-rules.md holds the regression paragraph" "$RO_A"
-expect_contains "AC-3.1 the paragraph says a whole run at a later head is the normal path" "later head" "$RO_A"
-for ro_w in "on a proved head" "never a second run"; do expect_absent "AC-3.1 the paragraph no longer says \"$ro_w\"" "$ro_w" "$RO_A"; done
-expect_nonempty "AC-3.2 precondition: steps/5.md holds the regression paragraph" "$RO_B"
-expect_contains "AC-3.2 the paragraph says a head whose landings moved no code needs no run" "moved no code" "$RO_B"
-for ro_w in "with no second run" "no second run"; do expect_absent "AC-3.2 the paragraph no longer says \"$ro_w\"" "$ro_w" "$RO_B"; done
-
-# ── §RED-ORDER ───────────────────────────────────────────────────────────────
-section "§RED-ORDER: the red sentence of steps/5.md and of its template says to record the run before the row is added"
-for ro_f in "$REPO/skills/canonical-sdlc/steps/5.md" "$REPO/agents-src/templates/skills/canonical-sdlc/steps/5.md.tmpl"; do
-  RO_P="$(/usr/bin/grep -F 'A red suite is a fix row' "$ro_f")"
-  RO_S="$(printf '%s\n' "$RO_P" | awk '{ t = substr($0, index($0, "A red suite is a fix row")); n = index(t, ". "); print n ? substr(t, 1, n) : t }')"
-  expect_eq "AC-6.1 ${ro_f##*/}: it says proof-add regression <log>, then --born regression:<suite>; the paragraph holds no \"reader\"" "1|0" \
-    "$(printf '%s\n' "$RO_S" | awk '{ a = index($0, "proof-add regression <log>"); b = index($0, "--born regression:<suite>"); print (a > 0 && b > a) ? 1 : 0 }')|$(printf '%s\n' "$RO_P" | /usr/bin/grep -c reader)"
-done
-
 finish

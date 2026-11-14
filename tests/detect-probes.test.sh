@@ -507,8 +507,8 @@ section "Group 6d: the bound's own noise, and the bound without a group (T22)"
 #   payload/scripts/lib/detect.sh: child setpgid (34923 to 34923): Operation not permitted
 # — 151 columns of it, on the stderr this function inherited from its caller. Two of the
 # four call sites capture `detect_bounded` with no stderr split, so the line reached
-# doctor's page and failed the 100-column arms of doctor-fleet (§20) and doctor-walls
-# (§12.2) at the wave-14 floor, as though the renderer had printed an over-budget row.
+# doctor's page and failed the doctor suites' 100-column rows, as though the renderer had
+# printed an over-budget row.
 #
 # AND THE SAME REFUSAL MADE THE BOUND WEAKER IN SILENCE. No group means `kill -- -$pid`
 # names a group that does not exist; the old `||` fallback then TERMed the direct child
