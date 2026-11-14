@@ -106,10 +106,9 @@ fi
 # what makes this process refuse rather than run three verdicts and drop the fourth.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/fill.sh"
-# THE FILL LEDGER'S PATH AND THE PATROL VERDICT (epic-23 wave-20, REQ-5 and REQ-6).
-# `stop_fill_ledger` appends to `fill_ledger_path`, the path the sitrep's idle minutes
-# read, and the death notice asks `patrol_verdict`; both live in patrol.sh. Wanted and
-# sourced here for fill.sh's reason above: a partial library makes this process refuse.
+# THE PATROL VERDICT. The death notice asks `patrol_verdict`,
+# which lives in patrol.sh. Wanted and sourced here for fill.sh's reason above: a partial
+# library makes this process refuse.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/patrol.sh"
 # The stop of an agent takes its own look at the target, through observe.sh and the roots it reads.
@@ -139,8 +138,8 @@ esac
 # AN ABSENT EVENT IS PASSED ON AS THE EMPTY STRING, and what each function makes of it is its own
 # business: only `stop_context_spend` treats it as Stop.
 #
-# EVERY STOP IS RECORDED, THE RE-ENTRY INCLUDED. The fill
-# ledger's recorder runs HERE, before the guard: after a refusal, the Stop that actually ends
+# EVERY STOP IS RECORDED, THE RE-ENTRY INCLUDED. The recorder of the turn's
+# `stop` event runs HERE, before the guard: after a refusal, the Stop that actually ends
 # the turn carries `stop_hook_active` and runs nothing below — and it is the one that sees the
 # launches the model made in answer to the refusal. A recorder, never a verdict: it prints
 # nothing, refuses nothing and swallows its own failures, so this line cannot change what the

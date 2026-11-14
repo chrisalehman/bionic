@@ -182,9 +182,8 @@ stop_facts_load() {  # -> always 0
   fill_facts_load "$BIONIC_RUN_PLAN" >/dev/null 2>&1 || :
 }
 
-# THE FILL LEDGER'S PATH (wave-20 REQ-5, D5) and the Patrol verdict: patrol.sh owns both, and
-# the recorder below writes to the path the sitrep's idle minutes read from.
-if ! declare -F fill_ledger_path >/dev/null 2>&1; then
+# THE PATROL VERDICT: patrol.sh owns it, and the death notice below asks it.
+if ! declare -F patrol_verdict >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$_STOP_LIB_DIR/patrol.sh"
 fi
@@ -1430,8 +1429,8 @@ stop_wait_cell() {
 #
 # IT WRITES NOTHING AND DECIDES NOTHING ELSE. No state file, no roster append, no
 # stamp: this is a gate, and gates may only read (TDD §3.2). It takes no view on
-# whether the tick's WORK was right, only on whether the two duties happened. The fill
-# ledger is written by `stop_fill_ledger` (below), a recorder hooks/stop.sh runs before
+# whether the tick's WORK was right, only on whether the two duties happened. The turn's
+# `stop` event is written by `stop_fill_ledger` (below), a recorder hooks/stop.sh runs before
 # this gate, never by the gate itself (wave-20 REQ-5).
 #
 # Registered once on the Stop channel in hooks/hooks.json, and scoped by ENGAGEMENT — this
@@ -1926,8 +1925,8 @@ return "$_adv"
 
 # ─── stop_turn_facts and stop_fill_ledger (epic-23 wave-20, REQ-5 part 2 and REQ-6; D5, D6) ───
 #
-# ONE COMPUTATION OF A TURN'S FACTS, TWO READERS. The fill duty above judges a turn and the
-# fill ledger records it (ADR-036 decisions 3 and 4); if each computed its own facts, the
+# ONE COMPUTATION OF A TURN'S FACTS, TWO READERS. The fill duty above judges a turn and its
+# `stop` event records it; if each computed its own facts, the
 # verdict and the record could disagree, and the record is what a run's fill is measured by.
 # So `stop_turn_facts` computes them once per process into `_ST_*` globals, and both call it:
 # `hooks/stop.sh` runs `stop_fill_ledger` BEFORE its re-entry guard, then `bionic_fold` runs the
@@ -1938,7 +1937,7 @@ return "$_adv"
 #   _ST_PLAN        the run's plan — bound-open alone — or empty. A `fallback` plan is
 #                   announced and never acted on (wave-23-fixit-1810, REQ-1, D1): it is
 #                   somebody else's run, so an unbound session has no ledger to fill from,
-#                   records no fill-ledger line, and is never refused for its ready rows
+#                   records no stop event, and is never refused for its ready rows
 #   _ST_LIVE        1 when that plan's ledger is live (past Step 3), else 0
 #   _ST_TICK        1 when the turn's prompt leads with THIS session's Patrol marker
 #   _ST_TURN        the turn key: the prompt record's uuid, else its timestamp, else empty
@@ -2306,41 +2305,40 @@ stop_owed_send() {  # <event> -> always 0
   return 0
 }
 
-# THE FILL LEDGER'S RECORDER (wave-20 REQ-5, AC-5.5; Δ2; ADR-036 decision 4). One line per Stop
-# of an engaged run whose ledger is live, appended to `fill_ledger_path` for the run's plan:
+# THE TURN'S END IS THE RUN'S `stop` EVENT. One event per Stop of an
+# engaged run whose ledger is live, appended to the run's log through its one appender (lib/line.sh `line_event`),
+# and to no other home, so the reader answers it at every version, a run brought forward included:
 #
-#   fill-ledger/v1|at|session|turn|current|state|ceiling|width|open|free|ready|launched|declined|missed|idle|room
+#   run/v1|ev=stop|session|turn|current|state|ceiling|width|open|free|ready|launched|declined|missed|idle|room|at
 #
-# `idle` and `room` close the line: the ready rows nothing launched while a slot was
-# free, and the free slots; a reader of the older shape stops at `missed` and still parses.
-# `declined` IS KEPT, EMPTY: nothing answers a ready row in words now, and the field stays so a
-# reader of the shape by position reads every line as before.
+# `idle` and `room` close the facts: the ready rows nothing launched while a slot was free, and the free slots.
+# `declined` IS KEPT, EMPTY: nothing answers a ready row in words now, and an older ledger's lines, which the
+# translation reads as these events, carry it. The instant is the appender's, last, as on every event.
 #
-# A RECORDER, NOT A WALL. It never refuses and is silent on every failure: the stop it rides
-# on is a turn somebody has to be able to end. It runs BEFORE `hooks/stop.sh`'s re-entry guard,
-# so the Stop that ends a refused turn — the one carrying the launches the model made after
-# the refusal — is recorded too; the idle fold reads lines by `turn=`, so a refused turn's two
-# lines count once, as the later. That holds because the refusal the CLI feeds back ("Stop hook
-# feedback:") opens no turn in `stop_turn_facts`: both lines carry the prompt's key, and the
-# later one still holds the launches made before the refusal.
+# A RECORDER, NOT A WALL. It never refuses and is silent on every failure, a log it cannot write and an appender
+# that refuses the line among them: the stop it rides on is a turn somebody has to be able to end. It runs BEFORE
+# `hooks/stop.sh`'s re-entry guard, so the Stop that ends a refused turn — the one carrying the launches the model
+# made after the refusal — is recorded too; the idle fold reads events by `turn=`, so a refused turn's two events
+# count once, as the later. That holds because the refusal the CLI feeds back ("Stop hook feedback:") opens no turn
+# in `stop_turn_facts`: both carry the prompt's key, and the later one still holds the launches made before it.
 #
-# APPEND-ONLY, ONE printf PER STOP, so a crash leaves at most a line that did not happen and a
-# concurrent reader never sees a rewrite. A ledger path that is a symlink is not written through.
+# ONE APPEND PER STOP, the appender's single write, so a crash leaves at most an event that did not happen and a
+# concurrent reader never sees a rewrite. The appender refuses a value holding a bar or a line break, so every free
+# value is squashed of both first and no field can forge another or lose the event.
 stop_fill_ledger() {  # <event> -> always 0
   stop_owed_send "${1:-}"
   [ "${1:-}" = Stop ] || return 0
   stop_turn_facts || return 0
   [ "$_ST_LIVE" = 1 ] || return 0
-  local f d ready launched line idle
-  f="$(fill_ledger_path "$BIONIC_ROOT" "$_ST_PLAN" 2>/dev/null)" || return 0
-  [ -n "$f" ] || return 0
-  d="${f%/*}"
-  [ -L "$f" ] && return 0
-  mkdir -p "$d" 2>/dev/null || return 0
+  local ready launched idle turn current
+  if ! declare -F line_event >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$_STOP_LIB_DIR/line.sh" 2>/dev/null && declare -F line_event >/dev/null 2>&1 || return 0
+  fi
   ready="${_ST_READY// /,}"
   launched="$_ST_LAUNCHED"
   # THE ROWS THAT SAT IDLE: ready, not launched this turn, while a writer slot
-  # was free. The idle fold charges the interval to the next line. The ids are the plan's own,
+  # was free. The idle fold charges the interval to the next event. The ids are the plan's own,
   # space-split here exactly as `stop_turn_facts` matched them.
   idle=""
   if [ "${_ST_FREE:-0}" -gt 0 ] 2>/dev/null; then
@@ -2352,14 +2350,10 @@ stop_fill_ledger() {  # <event> -> always 0
       idle="${idle}${idle:+,}${id}"
     done
   fi
-  # ONE STRING, BUILT BY EXPANSION, then one write. Every value is either a number this
-  # function computed or has had its `|` squashed above, so no field can forge another.
-  line="fill-ledger/v1|at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|session=${BIONIC_SID}|turn=${_ST_TURN//|/ }"
-  line="${line}|current=${_ST_CURRENT//|/ }|state=${_ST_STATE}|ceiling=${_ST_CEILING}|width=${_ST_WIDTH}"
-  line="${line}|open=${_ST_OPEN}|free=${_ST_FREE}|ready=${ready}|launched=${launched//|/_}"
-  line="${line}|declined=|missed=${_ST_MISSED}"
-  line="${line}|idle=${idle//|/_}|room=${_ST_FREE}"
-  printf '%s\n' "$line" >> "$f" 2>/dev/null
+  # Every value is a number this function computed or is squashed here of a bar and a line break.
+  turn="${_ST_TURN//[|$'\r\n']/ }"; current="${_ST_CURRENT//[|$'\r\n']/ }"
+  launched="${launched//[|$'\r\n']/_}"; idle="${idle//[|$'\r\n']/_}"; ready="${ready//[|$'\r\n']/_}"
+  line_event "$_ST_PLAN" stop "session=${BIONIC_SID//[|$'\r\n']/ }" "turn=${turn}" "current=${current}" "state=${_ST_STATE}" "ceiling=${_ST_CEILING}" "width=${_ST_WIDTH}" "open=${_ST_OPEN}" "free=${_ST_FREE}" "ready=${ready}" "launched=${launched}" "declined=" "missed=${_ST_MISSED}" "idle=${idle}" "room=${_ST_FREE}" >/dev/null 2>&1
   return 0
 }
 

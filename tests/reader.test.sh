@@ -762,4 +762,24 @@ HELD="$(held)"
 expect_eq "the held place answers as the whole fold on every form and every plan this suite built, nineteen forms among them" \
   "1|" "$([ "${HELD%% *}" -ge 19 ] && echo 1)|$(printf '%s' "${HELD#* }" | sed 's/^[0-9]*$//')"
 
+# A TURN'S END DROPS NO HELD PLACE. The place reads steps, abandons, approvals, orders and binds alone, so its key is the
+# log less the appender's stop events. The held file is planted with a step no event holds (n=7): an answer of 7 came
+# from the file. A step event after a stop, or a line in no stop event's shape, drops it, and the log is read again.
+HS="$(cd "$(mktemp -d)" && pwd -P)"; HT="$(cd "$(mktemp -d)" && pwd -P)"; mkdir -p "$HS/docs/plans/epic-x" "$HS/docs/record/held-stop"
+HP="$HS/docs/plans/epic-x/held-stop.plan.md"; HL="$HS/docs/record/held-stop/run.log"
+printf -- '---\ncanonical_sdlc_version: 15\n---\n\n# held\n' > "$HP"; printf 'run/v1|ev=step|n=4|at=2026-10-04T00:01:00Z\n' > "$HL"
+hs_ask() { TMPDIR="$HT" bash -c '. "$1/lib/proof.sh" && proof_step_held "$2" | sed -n "s/^n=//p"' _ "${READER%/*}" "$HP" 2>/dev/null; }
+hs_file() { ls -d "$HT"/bionic-place-*/[!.]* 2>/dev/null | head -1; }
+hs_plant() { local f; f="$(hs_file)"; awk '$0 == "n=4" || $0 == "n=5" { $0 = "n=7" } { print }' "$f" > "$f.t" && mv "$f.t" "$f"; }
+hs_stop() { RUN_LOG="$HL" bash -c '. "$1/lib/log.sh" && log_append stop session=s1 turn="$2" current=4 state=ok ceiling= width=4 open=0 free=4 ready= launched= declined= missed=0 idle= room=4' _ "${READER%/*}" "$1"; }
+expect_eq "HS0 meta: the place is folded from the log and held in a file" "4|n=4" "$(hs_ask)|$(/usr/bin/grep -x 'n=4' "$(hs_file)" 2>/dev/null)"
+hs_plant; hs_stop t1
+expect_eq "HS1 after a stop event the next ask is answered from the held file" "7|1" "$(hs_ask)|$(/usr/bin/grep -c '^run/v1|ev=stop|' "$HL")"
+printf 'run/v1|ev=step|n=5|at=2026-10-04T00:03:00Z\n' >> "$HL"
+expect_eq "HS2 a step event after the stop drops the held place, and the new step is read" "5" "$(hs_ask)"
+hs_plant; HS_PL="$(/usr/bin/grep -x 'n=7' "$(hs_file)" 2>/dev/null)"
+printf 'run/v1|ev=stop|session=s1|turn=t2|at=2026-10-04T00:04:00Z\n' >> "$HL"
+expect_eq "HS3 a line in no stop event's shape drops the held place too" "n=7|5" "$HS_PL|$(hs_ask)"
+rm -rf "$HS" "$HT"
+
 finish

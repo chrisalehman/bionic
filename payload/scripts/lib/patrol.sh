@@ -675,7 +675,7 @@ _patrol_verdict_jq='
 # never blocks — and the advisory names it, so the degradation is visible rather than
 # silent.
 _PATROL_ISO_AWK="${_TIME_ISO_AWK:-}"
-# THE VERDICT'S OWN PROGRAM, after the date functions it shares with `fill_ledger_report`.
+# THE VERDICT'S OWN PROGRAM, after the date functions of lib/time.sh.
 # THE TRANSCRIPT'S INSTANTS CARRY MILLISECONDS (`…:33.724Z`, as Claude Code writes them), which is the
 # transcript's grammar and not an instant's (wave-39 T17; D18). They are cut to the whole second at this edge, the
 # second the patrol always read off them, and anything else goes to `iso2epoch` as it stands.
@@ -947,93 +947,4 @@ tick_digest_path() {  # <project root> <session-id> -> absolute path, or nothing
 tick_digest_field() {  # <digest file> <key>
   [ -f "$1" ] && [ ! -L "$1" ] || return 0
   sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1
-}
-
-# ─── THE FILL LEDGER'S PATH AND ITS REPORT (epic-23 wave-20 REQ-5, AC-5.5/AC-5.6; Δ2; ADR-036) ──
-#
-# TWO PROCESSES READ ONE FILE, so its path and its fold are written once, here: the stop
-# library's recorder (`stop_fill_ledger`, payload/scripts/lib/stop.sh) appends a line per Stop,
-# and the sitrep folds them (hooks/poker/sitrep.sh `sitrep_idle_minutes`). This file is already sourced by both — the
-# poker's loader wants it and the stop library sources it for the death notice — and the fold
-# shares the verdict's date arithmetic (`_PATROL_ISO_AWK`, above) rather than growing a second
-# copy of it. The ledger is the Patrol's measure: did the scheduler keep every slot busy.
-#
-# THE PATH IS DERIVED, NOT CONFIGURED: `<docs-root>/record/<plan slug>/fill-ledger.log`, the
-# slug being the plan's basename less `.plan.md` — lib/proof.sh `proof_plan_slug`, the one reader
-# close-out.sh and every other record path asks (wave-37 T2; AC-9.2), so no new plan key exists to
-# drift. `.bionic/` is machine-local, so the ledger is too, like every record. proof.sh is loaded
-# on first use, not at source time: most of this file's callers never name a ledger.
-_patrol_proof_load() {  # -> 0 once lib/proof.sh's slug reader is loaded
-  declare -F proof_plan_slug >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  . "$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/proof.sh" 2>/dev/null
-  declare -F proof_plan_slug >/dev/null 2>&1
-}
-fill_ledger_path() {  # <project root> <plan path> -> the ledger's absolute path
-  local root="${1:-}" plan="${2:-}" slug
-  [ -n "$root" ] && [ -n "$plan" ] || return 1
-  _patrol_proof_load && slug="$(proof_plan_slug "$plan")" || return 1
-  printf '%s/record/%s/fill-ledger.log\n' "$(docs_root "$root")" "$slug"
-}
-
-# THE REPORT (AC-5.6). Lines are folded by `turn=` — the last line of a turn wins, because a
-# refused Stop and the re-entered Stop that ends the same turn are one turn, and the later
-# line is the one that saw the launches. A line with no turn key stands alone. The folded
-# lines are ordered by `at` and each owns the interval up to the next; the last one owns the
-# interval to <now> only while the run is open, and nothing once it has closed. Each interval
-# is charged to exactly one bucket, in this order:
-#   declined  the line carries a decline — listed per reason, with its idle cost
-#   hold      state=hold|emergency and a row was ready — a machine fact the plan cannot hold
-#   missed    state=ok and missed>0 — a free slot, a ready row, nothing launched: the measure,
-#             target zero
-# Minutes are rounded to the nearest whole minute; the seconds are printed beside them. A line
-# whose `at` cannot be dated is skipped rather than guessed at.
-fill_ledger_report() {  # <ledger> <plan slug> <open: yes|no> <now epoch> -> report lines
-  local f="${1:-}" slug="${2:-}" open="${3:-no}" now="${4:-}"
-  case "$now" in ''|*[!0-9]*) now="$(date -u +%s)" ;; esac
-  [ -f "$f" ] && [ ! -L "$f" ] || f=/dev/null
-  awk -v slug="$slug" -v open="$open" -v now="$now" "$_PATROL_ISO_AWK"'
-    function field(line, key,   i, n, parts, kv) {
-      n = split(line, parts, "|")
-      for (i = 2; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
-    }
-    function mins(s) { return int((s + 30) / 60) }
-    index($0, "fill-ledger/v1|") == 1 {
-      e = iso2epoch(field($0, "at"))
-      if (e < 0) next
-      k = field($0, "turn")
-      if (k != "" && (k in slot)) { i = slot[k] } else { i = ++n; if (k != "") slot[k] = i }
-      ep[i] = e; st[i] = field($0, "state"); rd[i] = field($0, "ready")
-      ms[i] = field($0, "missed") + 0; dc[i] = field($0, "declined")
-    }
-    END {
-      # ORDER BY at — an insertion sort over an index, stable, so equal instants keep file order.
-      for (i = 1; i <= n; i++) ord[i] = i
-      for (i = 2; i <= n; i++) {
-        v = ord[i]; j = i - 1
-        while (j >= 1 && ep[ord[j]] > ep[v]) { ord[j + 1] = ord[j]; j-- }
-        ord[j + 1] = v
-      }
-      missed = 0; hold = 0; declined = 0; nr = 0
-      for (x = 1; x <= n; x++) {
-        i = ord[x]
-        if (x < n) end = ep[ord[x + 1]]
-        else end = (open == "yes" ? now : ep[i])
-        dur = end - ep[i]; if (dur < 0) dur = 0
-        if (dc[i] != "") {
-          declined += dur
-          if (!(dc[i] in why)) { rs[++nr] = dc[i]; why[dc[i]] = 0 }
-          why[dc[i]] += dur
-        } else if ((st[i] == "hold" || st[i] == "emergency") && rd[i] != "") {
-          hold += dur
-        } else if (st[i] == "ok" && ms[i] > 0) {
-          missed += dur
-        }
-      }
-      printf "fill-report/v1|plan=%s|turns=%d|missed=%d|hold=%d|declined=%d|missed_s=%d|hold_s=%d|declined_s=%d|open=%s\n", \
-        slug, n, mins(missed), mins(hold), mins(declined), missed, hold, declined, open
-      for (r = 1; r <= nr; r++)
-        printf "fill-report-decline/v1|minutes=%d|seconds=%d|reason=%s\n", mins(why[rs[r]]), why[rs[r]], rs[r]
-    }' "$f"
 }

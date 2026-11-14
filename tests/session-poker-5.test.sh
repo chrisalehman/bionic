@@ -618,7 +618,7 @@ NR_P="$(SP_PLAN_AT=14 s47_plan "$RNR" 8 \
   "| T2 | 4 | build | the open row | implementor | — | 10 | REQ-x | $NR_REC, payload/b.sh | active | |" \
   "| T3 | 4 | build | waits on T2 | implementor | — | 10 | REQ-x | payload/c.sh | pending | approval:plan, $NR_REC |" \
   "| T4 | 4 | build | waits on nothing | implementor | — | 10 | REQ-x | payload/d.sh | pending | |")"
-nr_led() { tail -1 "$RNR/.bionic/docs/record/wave-01-fixture/fill-ledger.log" 2>/dev/null; }
+nr_led() { /usr/bin/grep '^run/v1|ev=stop|' "$RNR/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null | tail -1; }
 nr_fill() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL T'; }   # -> the FILL line, never its "FILL —" sentence
 poke_pressure "$RNR" 8192 1.0 tick
 expect_eq "NR-0 the tick over the table exits 0" "0" "$RC"
@@ -637,7 +637,7 @@ forget_digest "$RNR"; poke_pressure "$RNR" 8192 1.0 tick
 expect_contains "NR-6 precondition: the waits still print" "poker: WAIT T1 — approval:D3" "$OUT"
 expect_eq "NR-6b …and no row is offered" "" "$(nr_fill)"
 s31_stop "$RNR" "$(s31_transcript "$RNR" "carry on")"
-expect_contains "NR-7 meta: the wall read the turn, its ledger line is there" "fill-ledger/v1|" "$(nr_led)"
+expect_contains "NR-7 meta: the wall read the turn, its stop event is there" "run/v1|ev=stop|" "$(nr_led)"
 expect_contains "NR-7b …and no row was ready" "|ready=|" "$(nr_led)"
 expect_eq "NR-7c the wall ends the turn" "" "$(s31_decision)"
 
