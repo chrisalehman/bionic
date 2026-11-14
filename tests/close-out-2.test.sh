@@ -115,6 +115,15 @@ run_close "$T78C" run
 expect_eq "78.3b: run closes rc 0" "0" "$CO_RC"
 expect_eq "78.3e: …the plan reads closed" "1" "$(run_open_rc "$T78C/$PLAN_REL")"
 
+# §78.4 — a wave closes under an epic already at 15, which the act brought forward and no rewrite of its header did.
+T78D="$(mk_fixture t78d)"; advance_to "$T78D" 8
+bash "$REPO_ROOT/payload/scripts/bring-forward.sh" "$T78D/$EPIC_REL" >/dev/null 2>&1; ACT_RC=$?
+run_close "$T78D" run
+expect_eq "78.4a: the act carries the epic (rc 0); the close under it exits 0, the wave's row stands once, the epic's page reads 15" "0|0|1|15" \
+  "$ACT_RC|$CO_RC|$(rows_with_wave "$T78D/$EPIC_REL" shipped 01)|$(sed -n 's/^canonical_sdlc_version: //p' "$T78D/$EPIC_REL")"
+EPIC_STEP="$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$T78D/$EPIC_REL" step 2>&1)"
+expect_eq "78.4b: …and the reader reads the epic open at the step it held" "yes|yes" "$(contains "$EPIC_STEP" "n=4")|$(contains "$EPIC_STEP" "state=open")"
+
 # ---------- §86: the ADR cell reads the spec's `adrs:` line ----------
 
 # adr_cell: hoisted to tests/close-out.prelude.sh (a later part reads it)
