@@ -2454,8 +2454,13 @@ up_line() { printf '%s\n' "$1" | /usr/bin/grep -F "whole suite: " | head -1; }  
 up_ask() {
   printf '%s\n' "$1" | awk '$0 == "Decisions" { f = 1; next } f && $0 == "" { exit } f' | tr '\n' ' ' | tr -s ' ' | /usr/bin/grep -oE '[0-9]+\. Merge without a whole run at this head — [^·]+· recommended: wait for the pass · default: none'
 }
-# up_unanswered <plan> -> the plan with no `approved: merge-unproved` line: the person has not given the word yet
-up_unanswered() { /usr/bin/grep -v '^approved: merge-unproved ' "$1" > "$1.n" && mv "$1.n" "$1"; }
+# up_unanswered <plan> -> the run's log with no merge-unproved approval event: the person has not given the word yet
+up_unanswered() { /usr/bin/grep -v '|ev=approval|key=merge-unproved|' "$PAH_P/$LOG_REL" > "$PAH_P/$LOG_REL.n" && mv "$PAH_P/$LOG_REL.n" "$PAH_P/$LOG_REL"; }
+# up_word -> the person's word at the working head, the approval event as lib/proof.sh's writer writes it
+up_word() {
+  bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
+    LOG_AT=2026-10-04T15:00:00Z proof_approval_event "$2" merge-unproved by=Fixture "head=$3" "said=merge it without the pass"' _ "$PAH_LIB" "$PAH_PLAN" "$PAH_H"
+}
 pah_world up-red "notify.test.sh,shell-lint.test.sh" 2
 up_unanswered "$PAH_PLAN"
 bound_marker "$PAH_P" card-up-session "$PAH_PLAN"
@@ -2468,10 +2473,10 @@ pah_poke "$PAH_P" card-up-session current 8 --check
 expect_eq "UP-3b unanswered, current 8 --check refuses (exit 1) on the regression, unproved at this head" "1|1" "$PAH_RC|$(printf '%s\n' "$PAH_OUT" | /usr/bin/grep -cE "^regression	unproved	red at ${PAH_F:0:8}, 2 landings before this head	")"
 expect_contains "UP-3c …naming the person's exit" "needs: the user — reply" "$PAH_OUT"
 expect_contains "UP-3d …and the other: the pass at this head" "on the release card (merge without a whole run at this head), or wait for the pass" "$PAH_OUT"
-# The close-out fixture's plan carries no Step 4 block, so no plan verb can write to it; the person's word is planted
-# in the approve writer's own line, under ## SDLC State. release-approval.test.sh §JUDGE drives reply and that writer.
-awk -v h="$PAH_H" '{ print } /^current: / { print "approved: merge-unproved by Fixture 2026-10-04T15:00:00Z head=" h " \"merge it without the pass\"" }' "$PAH_PLAN" > "$PAH_PLAN.n" && mv "$PAH_PLAN.n" "$PAH_PLAN"
-expect_eq "UP-3e the person's word, given at the working head, is the plan's newest merge-unproved line" "$PAH_H" "$(bash -c '. "$1/proof.sh" && proof_approved_head "$2" merge-unproved' _ "$PAH_LIB" "$PAH_PLAN" 2>/dev/null)"
+# The approve verb refuses the name on this fixture, so the person's word is the event its writer appends to the run's
+# log. release-approval.test.sh §JUDGE drives reply and that writer.
+up_word
+expect_eq "UP-3e the person's word, given at the working head, is the run's newest merge-unproved approval" "$PAH_H" "$(bash -c '. "$1/proof.sh" && proof_approved_head "$2" merge-unproved' _ "$PAH_LIB" "$PAH_PLAN" 2>/dev/null)"
 pah_poke "$PAH_P" card-up-session current 8 --check
 expect_eq "UP-3f …after which current 8 --check passes (exit 0)" "0" "$PAH_RC"
 [ "$PAH_RC" = 0 ] || printf '      current 8 --check said: %s\n' "$(printf '%s\n' "$PAH_OUT" | tail -4)"
