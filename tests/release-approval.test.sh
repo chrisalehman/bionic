@@ -531,6 +531,12 @@ expect_absent "T4-1c …never not confirmed by the auditor" "not confirmed by th
 expect_contains "T4-1d the Decisions still put the unrun row" "AC-1.2" "$(fc_under Decisions)"
 expect_absent "T4-1e …and not the confirmed one" "AC-1.3" "$(fc_under Decisions)"
 FC_ACC_DASH="$(fc_acc)"
+expect_eq "T4-1h …the confirmation the block held is the approval naming the criterion, as the act carried it" \
+  "run/v1|ev=approval|key=AC-1.3|by=Dana-Fixture|said=checked it by hand|at=2026-10-20" "$(fc_appr AC-1.3)"
+fc_t4 '—' "$FC_UC" fc_t4_rows
+poke "$RFC" current 8 --check
+expect_eq "T4-1i …and with the unrun row the close's, current 8 --check would advance over it" \
+  "0|poker: current 8 --check: would advance" "$RC|$(printf '%s\n' "$OUT" | head -1)"
 fc_t4 '-' "$FC_UC"; fc_page --preview
 expect_eq "T4-1f the cell - reads as — does" "$FC_ACC_DASH" "$(fc_acc)"
 fc_t4 '' "$FC_UC"; fc_page --preview
