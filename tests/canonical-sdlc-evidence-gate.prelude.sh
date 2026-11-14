@@ -421,11 +421,7 @@ v9_step8_body="  merge: merged wave/bionic-1.3.2 into main
 
 v9_step9_body="  delivered: close-out report and continuation.md written"
 
-# THE ONE TABLE, AT EITHER SCALE (wave-31 T24; REQ-1, D2). The task-scale fixtures this file
-# carried were the retired shape: a five- or six-column `## Tasks` (`id | intent | rigor |
-# description | status [| worktree]`) under `current: T<n>`. The gate reads one table now and a
-# `current:` that is a step number, so a task-scale plan is tests/lib/plan-fixture.sh's, the one
-# helper the shards share.
+# One table at either scale: a task-scale plan is tests/lib/plan-fixture.sh's, the one helper the shards share.
 . "$(dirname "$0")/lib/plan-fixture.sh"
 EG_PF_DIR="$(mktemp -d)"; cleanup_dirs+=("$EG_PF_DIR")
 # eg_page <dir> <step> [<log line>...] -> the page a run at 15 holds at <step>, under <dir>'s docs root, its log the

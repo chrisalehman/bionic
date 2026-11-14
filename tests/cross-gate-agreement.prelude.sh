@@ -18,20 +18,6 @@
 # WHAT IT NEVER HOLDS. A fixture: a repository one section builds and a later one reads is not a helper, so
 # those sections share a part instead. None crosses the cut today.
 #
-# CROSS-COMPONENT INSTRUMENT PROOFS — epic-15 wave-01R, task 4/6.
-#
-# Serves AC-9 (N-way agreement over every copy of a duplicated concept,
-# including the actively-maintained origin; one-copy mutation goes red) and the
-# cross-script share of AC-8 (no command text in any written artefact;
-# unpredictable temp names across all four scripts).
-#
-# Governing design: design/orchestrator-subagent-coordination.md §8, §9.
-# Known-failure checklist: .bionic/docs/record/epic-15-w1r-known-failure-checklist.md
-# A8 (duplicated logic with only a 2-way agreement test — the origin missing
-# from the test meant to catch drift) and A9 (green suites hid undiscriminated
-# parser edges: quoted values, absolute paths, duplicate directive lines,
-# indentation — proven by a one-copy mutation staying green).
-#
 # WHAT THIS SUITE IS FOR, and what it deliberately is not:
 #
 #   The per-script suites (preflight-probe, dispatch-preflight, stop-check and stop
@@ -79,8 +65,6 @@ REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 PARTY_DP="${W1R_PARTY_DP:-$BIONIC_HOOKS_DIR/dispatch-preflight.sh}"
 # The stop gate is hooks/stop.sh, which answers the orchestrator's stop of an agent by its event.
 PARTY_SG="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop.sh}"
-# The recorder moved out of the stop gate at task 4/4: observations are written
-# post-execution by their own script, from the producer's own printed output.
 PARTY_ER="${W1R_PARTY_ER:-$BIONIC_HOOKS_DIR/execution-recorder.sh}"
 
 PROBE="$BIONIC_HOOKS_DIR/preflight-probe.sh"
@@ -139,18 +123,6 @@ printf '5:0.1:30:1000\n' > "$BIONIC_GATE_DIR/cost/fixture.test.sh"
 # So it is unset here and pinned per call, to the fixture session, everywhere a party has to
 # resolve anything.
 unset CLAUDE_CODE_SESSION_ID
-
-# ok/no/expect_eq/expect_contains/expect_absent/expect_true/expect_false migrated onto
-# tests/lib/assert.sh (S5a, AC-12). The framework's expect_contains/expect_absent are a
-# quoted `case` glob, never `grep -F` — no pipe, so the epic-17-w1 SIGPIPE-141 flake this
-# block used to describe by hand cannot recur, and no 64 KiB haystack limit either. The
-# ONE semantic difference measured against the private definitions this file used to carry
-# (byte-identical to the framework's except here): `grep -F` treats a NEWLINE inside the
-# needle as alternation ("either line matches"), while the framework's `case` requires the
-# whole multi-line needle as one contiguous substring. Exactly one call site in this file
-# passed a two-line needle (§B2, "the two-line shape, plan first") — verified line-by-line
-# that its fixture always produces the two lines adjacent and in order, so the tighter
-# contiguous check is not a narrowing here; see that assertion's own comment.
 
 SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
@@ -287,13 +259,6 @@ mk_stopsweep_payload() {  # <cwd> <sid> <stop_hook_active true|false> [live-agen
 # contract state) and the stop gate (the foreign-stop rule) read this file, which
 # is precisely why it is planted from ONE helper here: a fixture written twice is
 # two shapes, and this suite exists to catch exactly that.
-# RENAMED OFF THE WRITER'S NAME (S17). This helper used to be called `roster_row`, which is
-# now the production writer's own name — sourcing tests/lib/roster-row.sh with a private
-# `roster_row` still defined would have shadowed the one writer with a fixture, which is the
-# exact inversion this wave exists to end (S14 renamed dispatch-preflight's reader for the
-# same reason). The row itself now comes from `roster_row_fixture`, so the fields this
-# fixture used to omit — `source=`, `claims=`, `cadence=`, `waiver=`, `plan=` — are the
-# writer's own defaults rather than absent, and the header line is `roster_header`'s.
 cg_roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status]
   local repo="$1" sid="$2" name="$3" aid="$4" prog="${5:-}" status="${6:-confirmed}"
   local f="$repo/.bionic/tmp/roster-$sid.state"

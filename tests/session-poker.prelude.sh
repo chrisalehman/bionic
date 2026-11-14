@@ -341,29 +341,7 @@ ta_put() {  # <plan> <Tasks lines> -> each line written over the row of its id, 
 }
 
 # ── hoisted from Section 6: fake_config_dir — Sections 41 and 43–45 build config dirs with it. ──
-# ============================================================
-# THE BLIND-WALL DETECTOR, RETIRED (bionic 1.4.0, task ADOPT, spec AC-7)
-# ============================================================
-#
-# It compared main-thread `Agent` tool_uses in the transcript against rows on the roster
-# and raised a NOTIFY when dispatches outnumbered them. The condition it looked for was
-# real: the dispatch wall lived in the governing skill's frontmatter, and a skill's
-# registrations do not survive a session continue, a `/clear` + resume or a
-# `/reload-plugins` — so the wall went silently absent and dispatches launched unrostered.
-#
-# Every wall is registered in hooks/hooks.json now and survives all three, so that
-# condition cannot arise the way it did. What could still arise was the detector's own
-# false positive: it had no "no active run" branch, so a session that had simply not
-# engaged a run — no roster, because nothing was dispatched — read as a session whose wall
-# had died. That fired for real on 2026-09-02 at 20:07Z, against this wave's own
-# orchestrator, which is how it came to be in scope.
-#
-# The registration is pinned instead, in tests/hook-adoption.test.sh and
-# tests/cross-gate-agreement.test.sh §L: every hook named once in hooks.json, none in the
-# frontmatter. That is a claim about a file on disk rather than an inference from a
-# transcript, and it goes red when the wiring changes rather than when a session is idle.
-#
-# ONE HELPER SURVIVES THE RETIREMENT: `fake_config_dir`. Section 8 builds a predecessor's
+# `fake_config_dir`: Section 8 builds a predecessor's
 # subagent transcript under it, and `adopt` resolves the observe address through
 # CLAUDE_CONFIG_DIR — so without it that section would read the real ~/.claude.
 fake_config_dir() {  # <label> -> a CLAUDE_CONFIG_DIR with a projects/ tree

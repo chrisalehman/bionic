@@ -102,9 +102,6 @@ expect_eq "start gate: the producer's own session passes" "0" "$ST"
 # out and asserted, so the remainder is held to the emptiness this section has always
 # claimed.
 DP_RESOLUTION=$(printf '%s\n' "$OUT" | grep -c 'run resolved by newest-plan fallback (session unbound) — /')
-# THE BUDGET BACKSTOP IS GONE (wave-28 T9; D15): this fixture's plan is live and carries no
-# `parallel-budget:` line, and no plan owes one, so the gate's whole output is held to the
-# emptiness this section has always claimed. Until wave-28 a WARN naming the key was lifted out.
 expect_eq "start gate: and passes in silence about the attestation (and the keyless plan)" "" "$OUT"
 # THE NEAR-MISS SESSION IS ENGAGED TOO (task-engaged-session). Both gates ask
 # `engaged_session` before anything else, keyed to the session in hand — so without a
@@ -122,12 +119,8 @@ expect_eq "start gate: a foreign session is refused" "2" "$ST"
 # Both sessions get a row so that the roster is not what differs between the two
 # stops below: the ONLY thing that differs is the session value carried by the
 # record and the payload, which is what this section is about.
-# THE ARTIFACT THE AGREEMENT RIDES ON CHANGED (epic-23 wave-15, REQ-2). It used to be the
-# observation record: the recorder stamped `session=` into it and the gate compared that
-# against its own payload. The record is gone — the gate observes its target directly — and
-# the state this family still keys by session is the ROSTER, written by the recorder's
-# confirmation arm and read by the gate for the agent id. Same fact, same two parties, the
-# artifact that survives.
+# The state this family keys by session is the ROSTER, written by the recorder's confirmation arm and read by
+# the gate for the agent id.
 cg_roster_row "$IREPO" "$SID_A" "worker" "aworker-1111111111111111"
 SGROSTER="$IREPO/.bionic/tmp/roster-$SID_A.state"
 expect_eq "the writer keyed its roster by this session" "yes" \
@@ -385,9 +378,7 @@ expect_eq "the recorder is given nothing to forward, because no tier was shown" 
   "" "$E5_MLINE"
 
 # --- with no own session id at all there is no transcript, so no live set: the producer
-# refuses instead of labelling, and the recorder still copies exactly what it was given. The
-# `unknown` classification this pair used to assert was the label for "ownership could not be
-# established", and ownership is no longer a thing this command decides. ---
+# refuses instead of labelling, and the recorder still copies exactly what it was given. ---
 E4_OUT=$( cd "$RREPO" && env -u CLAUDE_CODE_SESSION_ID bash "$OBSERVE" worker 2>&1 )
 E4_MLINE=$(printf '%s\n' "$E4_OUT" | grep '^stop-check-observation/')
 # RE-POINTED (T22): with no session key there is no roster to read, so the refusal names

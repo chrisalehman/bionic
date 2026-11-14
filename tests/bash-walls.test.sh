@@ -40,9 +40,7 @@
 #
 # Usage: bash tests/bash-walls.test.sh
 
-# SPLIT AT WAVE-30 T9 (D8): the §EG-DERIVE sections carry wall-clock bounds, so they moved to
-# tests/bash-walls-egd.test.sh (it ran solo until wave-35 T2 retired the marker, D11). The helpers both suites read live in
-# tests/bash-walls.prelude.sh, sourced below before the framework.
+# The helpers this suite and tests/bash-walls-egd.test.sh read live in tests/bash-walls.prelude.sh, sourced below.
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
@@ -123,26 +121,18 @@ expect_status "3a: two blockers still block" 2 "$ST"
 expect_true "3d: …in manifest order, by line" \
   test "$(line_of 'push refused')" -lt "$(line_of 'sql refused')"
 # ONE LINE PER BLOCKER, NOT ONE PER FOLD. `refuse`'s "the user sees exactly one line" is
-# the rule for ONE refusal; two walls refusing one command are two refusals, and two
-# lines is exactly what the two processes this replaced put on that stream. Measured
-# against the originals at the base SHA — T23 report section 7.
+# the rule for ONE refusal; two walls refusing one command are two refusals.
 expect_eq "3e: exactly one user line per blocker — no more, no fewer" "2" \
   "$(printf '%s\n' "$ERR" | /usr/bin/grep -c '^bionic: ')"
-# …AND THE `detail` RIDES THAT WIRE NOW (ADR-030, epic-23 wave-16). Ruling D-1 spent the
-# channel's one stream on the sentences alone; field 9 is `yes` for `exit2` since that
-# ruling was superseded, so the composed detail follows them, bounded at twelve lines.
-# WHAT 3e GUARDS IS UNCHANGED AND IS THE POINT: one SENTENCE per blocker, never two. The
-# fold's extra-lines branch used to print each later blocker's line because the detail
-# reached nobody; now that the detail carries that line itself, the branch stands down
-# (fold.sh, A-T4.6), and 3f2 is where a return of the doubling would show.
+# …AND THE `detail` RIDES THAT WIRE, bounded at twelve lines, carrying each later blocker's line itself, so the fold's
+# extra-lines branch stands down (fold.sh). 3e guards one SENTENCE per blocker; 3f2 is where a doubling would show.
 expect_eq "3f2: …with the second wall's sentence on it exactly once, not twice" "1" \
   "$(printf '%s\n' "$ERR" | /usr/bin/grep -c 'sql refused')"
 
 # ---------------------------------------------------------------------------
 section "4 — a block and a model-facing nudge on one payload (R7)"
 #
-# A push to main that ALSO draws a farm-out nudge (a `git clone` head — the chain tier-2 nudge
-# this fixture used to ride is retired, wave-24 T11). protect-main refuses on stderr at
+# A push to main that ALSO draws a farm-out nudge (a `git clone` head). protect-main refuses on stderr at
 # exit 2; farm-out-reminder nudges on stdout as JSON. Two channels, one process, and
 # neither may eat the other.
 
@@ -553,8 +543,7 @@ expect_contains "13f: …in the existing words" "the current branch is protected
 
 # ---------------------------------------------------------------------------
 section "§VERDICT / §RULED — the matrix asks for a verdict from step 6 and for a ruling from step 8"
-# The matrix arm used to demand CONFIRMED-or-waived on the advance to 6, so a run could not leave Step 5 until the
-# person answered what the release approval card collects after Step 7. From step 6 every row needs a verdict; from
+# From step 6 every row needs a verdict; from
 # step 8 every row needs a ruling, and the advance to 8 is the judge's, so the judge asks the wall's own predicate
 # (walls.sh `matrix_row_ruled`) and opens one `row:<AC>` item per unruled row for the card to settle.
 # Fixture fidelity: a real repository on the run's working branch, the run at 15 a double wave plan's text stands for
