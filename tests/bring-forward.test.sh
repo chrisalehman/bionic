@@ -33,6 +33,8 @@
 #            holds the old homes' landings and the log's own in order, the log as it stood is kept, a second act
 #            changes no byte.
 #   §WAITS   a wait on a row is that row's id in deps; one the kind implies is dropped; any other is a gap.
+#   §LATE    a wait the person wrote by naming a row's record stays in deps though the default names that row too:
+#            a review row past the release keeps what it reads, and the act's page passes the table's check.
 #   §DROPPED a dropped row's cell is the run's drop: after the act the row stays, reads dropped, and waits on it are met.
 #   §CRITERIA each criterion's block task is carried into the Eval design's Task column, so it is owed at the same step after the
 #            act; a task with no Eval design row, or a token 15 cannot say (a 9 beside an id), is on the gaps list.
@@ -497,6 +499,20 @@ expect_eq "a row that read another row's record has that row's id in deps, and t
 expect_eq "a wait the kind implies is in no cell: the old plan held it, the new holds none" "2 0" "$(grep -c 'approval:plan' "$KW") $(grep -c 'approval:plan' "$W")"
 expect_eq "neither the named approval nor one the kind implies is on the gaps list" "0" "$(printf '%s\n' "$OUT" | grep -c 'field=approval:')"
 expect_eq "the header names version 15" "canonical_sdlc_version=15" "$(askw header canonical_sdlc_version)"
+
+section "LATE"
+L="$SB/docs/plans/epic-x/wave-6-late.plan.md"
+printf '%s\n' '---' 'canonical_sdlc_version: 14' '---' '## Tasks' '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |' '|---|---|---|---|---|---|---|---|---|---|---|' \
+  '| T1 | 4 | build | One. | — | — | 30 | REQ-1 | a.sh | landed | approval:plan |' '| T6 | 6 | review | Reads the whole. | — | — | 20 | REQ-1 | record/wave-6-late/T6.md | landed | |' \
+  '| T2 | 7 | doc | The release. | — | — | 30 | REQ-1 | CHANGELOG.md | landed | approval:plan, head |' '| T4 | 7 | build | The fix. | — | — | 30 | REQ-1 | b.sh, record/wave-6-late/T4.md | landed | approval:plan |' \
+  '| T5 | 7 | review | Reads the fix. | — | — | 20 | REQ-1 | record/wave-6-late/T5.md | pending | approval:plan, head, record/wave-6-late/T4.md |' \
+  '## SDLC State' 'current: 7' 'approved-by: Ann Person 2026-11-01T02:25:48Z "go"' > "$L"
+bash "$BF" "$L" >/dev/null 2>&1; expect_status "a run past its release with a review row reading the fix: the act exits 0" 0 "$?"
+lu() { ( . "${RS%/*}/lib/units.sh"; "$@" "$L"; printf '|%s' "$?" ); }
+expect_eq "the review row that read the fix's record waits on T4 at 15, though head names T4 too; T6, whose only reads are its kind's default, keeps an empty deps cell" \
+  "deps=T4 deps=—" "$(bash "$RS" "$L" row T5 | grep '^deps=') $(bash "$RS" "$L" row T6 | grep '^deps=')"
+expect_eq "…the table's check passes on the act's page, and the release card's question names T5, open and unread" "|0	T5	pending	unread
+|0" "$(lu units_validate)	$(lu units_post_readers)"
 
 section "DROPPED"
 expect_contains "a dropped cell is carried into the run's log as its drop, its words saying so, no instant made" "run/v1|ev=drop|row=T3|why=carried from the status cell of a version-14 Tasks table|at=" "$(cat "${KW%/kept/*}/run.log")"
