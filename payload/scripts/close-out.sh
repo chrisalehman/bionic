@@ -481,39 +481,6 @@ command -v jq  >/dev/null 2>&1 || _co_refuse "jq is not on PATH — the gate dry
 # trees gets an EMPTY census — the conservative failure, never a refusal — and a plan
 # naming exactly N trees gets exactly those N, however `working-branch:` is spelled.
 
-# THE COLUMN-LESS FALLBACK IS SCOPED EXACTLY AS 1.8.3 WAS (critic C7). A table with no
-# `worktree` column at all has no register to read at all, so `wt_unreached` (below)
-# falls back to a name-shape glob the way 1.8.3's ONLY census worked — but that glob has
-# to be `wt/<NN>-*`, the same scope 1.8.3 used, not the unscoped `wt/*` this file shipped
-# between the register's introduction and this fix (C7: 55 foreign branches in this
-# repository alone, any one of which could trip a column-less consumer's close-out on a
-# wave it never touched). `WT_NUM` is read off `working-branch:` exactly as 1.8.3 read it
-# (`git show 72e07ec:payload/scripts/close-out.sh:244`), and a `working-branch:` that is
-# not `wave/<digits>-<slug>` shaped refuses HERE — before act 1, for both `check` and
-# `run`, exactly as 1.8.3 refused unconditionally — because a repo-wide census on that
-# shape would be, in 1.8.3's own words, "the defect wearing a guard". A table WITH the
-# `worktree` column never reaches this at all: the register names its own trees and needs
-# no wave number to scope anything to (ADR-032's retirement stands, unchanged, for it).
-#
-# THE SHAPE IS THE SCALE'S BRANCH CELL (wave-38 T16; D25, AC-5.1; T11, AC-9.2 before it). The cell
-# (lib/scale.sh) is `any` for a task-scale plan: a small late fix closes from a branch like `fix/x`,
-# gets an empty `WT_NUM` and no refusal — there is no `wt/<NN>-*` for it to census, and
-# `wt_unreached` (below) reports none. A wave or epic plan's cell is its pattern, whose `<NN>` is the
-# number the census scopes to. A plan with no `scale:`, or one the profile does not hold, is read at
-# the wave row, the default scale, which is the refusal it met before the profile.
-# THE REGISTER IS THE RUN'S, AT EITHER VERSION. A table with the column holds it; so does a plan at 15, whose trees are the
-# run's tree events and whose table holds no such column, and so does any run whose log holds a tree fact. Only a table at
-# 14 with neither column nor fact has no register, and only it takes the fallback and needs the wave number.
-CO_REGISTER=0
-if units_has_column "$PLAN" worktree || [ "$(plan_read_header "$PLAN" canonical_sdlc_version 2>/dev/null)" = canonical_sdlc_version=15 ] \
-  || [ -n "$(co_facts tree path 2>/dev/null)" ]; then CO_REGISTER=1; fi
-WT_NUM=""
-if [ "$CO_REGISTER" = 0 ]; then
-  if ! WT_NUM="$(scale_branch_number "$CO_SCALE" "$WORKING")"; then
-    _co_refuse "the plan's working-branch '$WORKING' is not $(scale_cell "$CO_SCALE" branch) shaped (the $CO_SCALE scale's branch cell) — the worktree census needs a wave number to scope wt/NN-* to"
-  fi
-fi
-
 # THE BINDING, ASKED BEFORE THE FIRST ACT (AC-4.2, D6). `archive_run` carries this check
 # too — that is where it belongs, so every caller inherits it — but by the time the move
 # is asked for, eight acts have already happened. A destination that drifted since Step 0
@@ -631,31 +598,12 @@ wt_branches() {
   return 0
 }
 
-# wt_unreached -> every wt/* branch carrying a commit the working branch never took. The
-# candidate list is the register census (`wt_branches`, D5/ADR-032) when the plan's
-# `## Tasks` table declares the `worktree` column. A table WITHOUT that column — every
-# plan this repository shipped through wave-16, and every consumer plan on 1.8.3 (critic
-# C4) — reads an empty register, and an empty register here is the PERMISSIVE failure:
-# this arm's whole job is to refuse, and an empty census means it never can, silently.
-# `units_has_column` (lib/units.sh — the SSoT for "does this table carry that column at
-# all") tells the two shapes apart; a column-less table falls back to the pre-register
-# glob census — `wt/<NN>-*`, scoped to `$WT_NUM` exactly as 1.8.3 scoped it (derived and
-# validated once, above, before act 1 — a working-branch that could not supply a wave
-# number is refused there, except for a task-scale plan, which reaches this function with
-# an empty `$WT_NUM` and gets an empty census, the `elif` below) — and announces
-# the fallback once on stderr so it is never silent either way. Critic C7: the unscoped
-# `wt/*` this arm shipped with between the register's introduction and this fix could
-# trip on a DIFFERENT wave's leftover branch; `wt/<NN>-*` cannot.
+# wt_unreached -> every registered tree's wt/* branch carrying a commit the working branch never took. The
+# candidates are the register's (`wt_branches`): a run that registered no tree has none, and an empty census is no
+# refusal, said by name where `check` prints it.
 wt_unreached() {
   local b _co_cherry candidates
-  if [ "$CO_REGISTER" = 1 ]; then
-    candidates="$(wt_branches)"
-  elif [ -z "$WT_NUM" ]; then
-    candidates=""
-  else
-    echo "close-out: no worktree column in the ## Tasks table; unreached-work census falls back to wt/${WT_NUM}-* (1.8.3 census)" >&2
-    candidates="$(git -C "$ROOT" for-each-ref --format='%(refname:short)' "refs/heads/wt/${WT_NUM}-*" 2>/dev/null)"
-  fi
+  candidates="$(wt_branches)"
   while IFS= read -r b; do
     [ -n "$b" ] || continue
     # THE CENSUS IS CAPTURED BEFORE IT IS SEARCHED. `git cherry … | grep -q` under
@@ -2290,13 +2238,6 @@ do_check() {
   # by eye. Zero registered trees is the conservative failure and says so BY NAME
   # rather than printing an empty list a reader could mistake for a scan that found
   # nothing to scan.
-  #
-  # THE TWO CENSUSES CAN DISAGREE (C4). `wt_unreached` falls back to the unregistered
-  # `wt/*` glob on a column-less table (above), so `unreached` can be non-empty while
-  # the REGISTER's own `wt_count` reads zero — a plan with no `worktree` column at all
-  # registers nothing, but its fallback census can still name a branch to refuse on.
-  # The WOULD-REFUSE clause is therefore keyed on `unreached` alone, never gated behind
-  # `wt_count`, so `check` never goes silent on exactly the plans C4 found silent.
   wt_list="$(wt_branches)"
   wt_count="$(printf '%s\n' "$wt_list" | grep -c '[^[:space:]]')"
   unreached=""

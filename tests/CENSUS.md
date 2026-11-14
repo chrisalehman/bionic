@@ -1834,6 +1834,8 @@ card.test.sh §Section 3 — duplicate
 card.test.sh §Section 4 — duplicate
 card.test.sh §ABBR — duplicate
 close-out-1.test.sh §0n — duplicate
+close-out-1.test.sh §0o — gone with scale_branch_number
+close-out-1.test.sh §0r — gone with scale_branch_number
 close-out-1.test.sh §3 — duplicate
 close-out-1.test.sh §4b — duplicate
 close-out-1.test.sh §FIX-SHAPE — vacuous
@@ -2008,6 +2010,7 @@ stop.test.sh §5 — duplicate
 units.test.sh §0 — duplicate
 units.test.sh §5 — duplicate
 units.test.sh §6b — duplicate
+units.test.sh §STEP-FIELD — gone with units_step_field
 version-compare.test.sh §Section 2 — duplicate
 width.test.sh §Section 3 — duplicate
 worktree.test.sh §Group 1 — duplicate
