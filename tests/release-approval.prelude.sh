@@ -86,10 +86,10 @@ PFC="$RFC/.bionic/docs/plans/wave-x.plan.md"
 # THE PAGE AT 15. A section that sets FC_VERSION=15 gets the same run carried to 15 by the act itself
 # (payload/scripts/bring-forward.sh), the way every open run at 14 crosses: its page is written at 14 as below, with the
 # homes an authored plan of that version holds and the State and the matrix do not carry across (the header's
-# working-branch:, base-sha: and adrs:, and the Eval design), then fc_plan's third argument, a function it runs with the
-# page's path at either version, edits that page, and the act writes the run's log from it and rewrites the page. So an
-# edit a section makes to the old tables, rows or blocks is passed there, never made after fc_plan returns, and reaches
-# the log as the act reads it.
+# integration-branch:, working-branch:, base-sha: and adrs:, and the Eval design), then fc_plan's third argument, a
+# function it runs with the page's path at either version, edits that page, and the act writes the run's log from it and
+# rewrites the page. So an edit a section makes to the old tables, rows or blocks is passed there, never made after
+# fc_plan returns, and reaches the log as the act reads it.
 # The discharged criterion's evidence cell is `—`, so its proof carries the block's path: the act lets a cell holding
 # anything win. The pending one names the close as its task, so no step before the close owes it. A section that asks
 # of it as unrun passes `fc_owed_now`, which takes that task away before the act: the open run at 14 whose pending row
@@ -100,7 +100,8 @@ PFC="$RFC/.bionic/docs/plans/wave-x.plan.md"
 FC_VERSION=14
 fc_homes15() {  # -> PFC, a page at 14, given the homes an authored plan at 14 holds outside the State and the matrix
   awk -v b="$FC_B" '
-    !h && $0 == "---" && NR > 1 { print "working-branch: wave/01-fixture"; print "base-sha: " b; print "adrs: none — no decision this run"; h = 1 }
+    !h && $0 == "---" && NR > 1 { print "integration-branch: main"; print "working-branch: wave/01-fixture"; print "base-sha: " b
+      print "adrs: none — no decision this run"; h = 1 }
     $0 == "## SDLC State" { print "## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|"
       print "| REQ-1 | the x writer | AC-1.1 | hermetic | `bash tests/a.test.sh` | the planted defect this eval must go red on |"
       print "| REQ-1 | the x writer | AC-1.2 | hermetic | `bash tests/a.test.sh` | a second planted defect |\n" }

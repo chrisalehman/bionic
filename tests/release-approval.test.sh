@@ -606,6 +606,7 @@ rm -f "$FC_REC/${RN_W}-results"-*.md
 # ============================================================
 section "§BORN: two fix rows born of different questions' findings render the page with no re-read (AC-11.1)"
 # ============================================================
+FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
 # fails-when: the page prints `CARD-EARLY — <q> unregistered` after born rows alone; the fixed findings are not
 # shown fixed by their rows.
 fc_record structure structure piece 'finding: 1 S3 off lib/x.sh:1 the x writer repeats the y writer'
@@ -613,14 +614,16 @@ FC_F1="$(s57_commit "$RFC" lib/x.sh 'T4: the fix the adversarial reading asked f
 FC_F2="$(s57_commit "$RFC" lib/x.sh 'T5: the fix the structure reading asked for')"
 # fc_published: hoisted to tests/release-approval.prelude.sh (release-approval-2.test.sh calls it)
 { fc_published T4 "$FC_F1"; fc_published T5 "$FC_F2"; } > "$FC_REC/landing-proofs.log"
-fc_born_plan() {  # -> PFC: FC_GOOD with T4 and T5 landed, born of the adversarial and the structure finding
-  fc_plan "$FC_GOOD
-- T4: landed $FC_F1 2026-10-12T14:00:00Z born: review S3 off of=record/wave-x/adversarial.md#1
-- T5: landed $FC_F2 2026-10-12T14:00:00Z born: review S3 off of=record/wave-x/structure.md#1"
+fc_born_rows() {  # <page> -> the page with T4's and T5's Tasks rows, landed, after T2's
   awk '{ print } /^\| T2 \|/ {
     print "| T4 | 4 | build | fix the x message · born: review | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |"
     print "| T5 | 4 | build | fix the x writer · born: review | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |" }' \
-    "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
+    "$1" > "$1.new" && mv "$1.new" "$1"
+}
+fc_born_plan() {  # -> PFC: FC_GOOD with T4 and T5 landed, born of the adversarial and the structure finding, in task-add's line
+  fc_plan "$FC_GOOD
+- T4: landed $FC_F1 2026-10-12T14:00:00Z — added by task-add at 2026-10-12T12:45:00Z born: review S3 off of=record/wave-x/adversarial.md#1
+- T5: landed $FC_F2 2026-10-12T14:00:00Z — added by task-add at 2026-10-12T12:50:00Z born: review S3 off of=record/wave-x/structure.md#1" "" fc_born_rows
 }
 fc_born_plan
 expect_eq "BORN-0 precondition: the working head is T5's landing, two code commits past every reading" \
@@ -646,6 +649,7 @@ fc_record structure structure piece
 
 # The merge without a whole run at the head is tests/release-approval-2.test.sh; the words as its sections leave them:
 fc_typed "$FC_WD" "$FC_WR"
+FC_VERSION=14
 
 # ============================================================
 section "§POST: a reader row past the landed release keeps the card early until its reading is registered (AC-6.2)"
@@ -711,11 +715,13 @@ section "§HANDHOLDS: the card prints the hand-holds line from the last build la
 # an act after the card is counted by the report. fails-when: the page prints the run's total, a hand-hold before the
 # last build landing counted; or the report stops at the card.
 # The fixture's landing record holds the build row's queue landing at 10:00; its fill ledger a decline before it and one after.
-fc_plan "$FC_GOOD"
+# Both are written before the builder runs, so the act carries them into the run's log.
+FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
 printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-12T10:00:00Z\n' "$FC_C" > "$FC_REC/landing-proofs.log"
 { printf 'fill-ledger/v1|at=2026-10-12T09:00:00Z|session=fixture|turn=|current=4|state=decline|ceiling=6|width=|open=|free=|ready=T1|launched=|declined=no room|missed=0|idle=|room=|named=T1\n'
   printf 'fill-ledger/v1|at=2026-10-12T11:00:00Z|session=fixture|turn=|current=4|state=decline|ceiling=6|width=|open=|free=|ready=T2|launched=|declined=no room|missed=0|idle=|room=|named=T2\n'
 } > "$FC_REC/fill-ledger.log"
+fc_plan "$FC_GOOD" "" fc_owed_now
 hh_lr() {  # [flags…] -> the counts line of landing-report --hand-holds over the fixture plan, as this session
   ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" landing-report --hand-holds "$@" "$PFC" ) 2>/dev/null | /usr/bin/grep '^hand-holds: '
 }
@@ -730,15 +736,8 @@ HH_PAGE="$(hh_page_line)"
 expect_contains "HANDHOLDS-2 the page prints the windowed line: the decline after the last build landing, not the one before it" \
   "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=1 · " "$HH_PAGE"
 expect_regex "HANDHOLDS-2b …in the counts' shape, its last count the lines the window could not place" ' · unplaced=[0-9]+$' "$HH_PAGE"
-# a decline a minute after the page's replay time, as the fill ledger writes one
 HH_AT="$(/usr/bin/grep '^release-approval/v1|plan=' "$FC_REC/release-approval-$FC_H8.md" | sed 's/.*|at=\([^|]*\)|.*/\1/')"
-HH_AFTER="$(date -u -j -v+1M -f '%Y-%m-%dT%H:%M:%SZ' "$HH_AT" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "$HH_AT + 1 minute" +%Y-%m-%dT%H:%M:%SZ)"
-printf 'fill-ledger/v1|at=%s|session=fixture|turn=|current=4|state=decline|ceiling=6|width=|open=|free=|ready=T3|launched=|declined=no room|missed=0|idle=|room=|named=T3\n' "$HH_AFTER" >> "$FC_REC/fill-ledger.log"
-expect_eq "HANDHOLDS-3 the report read after the page counts the page's decline and the one planted after the card: the card ends nothing" \
-  "$(printf '%s\n' "$HH_PAGE" | sed 's/total=1 /total=2 /; s/declines=1 /declines=2 /')" "$(hh_lr)"
-expect_eq "HANDHOLDS-3b …and the report's ends line runs to now, printing the start alone and no page time" \
-  "1|0" "$( ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" landing-report --hand-holds "$PFC" ) 2>/dev/null | /usr/bin/grep '^hand-holds window: ' | awk -v at="$HH_AT" '{ print (index($0, "until now: the plan names no delivered: time") > 0) "|" (index($0, at) > 0) }')"
-expect_eq "HANDHOLDS-3c …the page's line stays one entry: it opens once" "1" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c '^hand-holds: ')"
+expect_nonempty "HANDHOLDS-2c precondition: the page records its replay time" "$HH_AT"
 # WINDOW-2a: waive, through the card's reply, writes the criterion's waiver event at its instant, and the window places it.
 HH_T0="$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)"
 poke "$RFC" reply "$FC_WD"
@@ -749,6 +748,12 @@ expect_regex "WINDOW-2a waive writes one waiver event naming the row, on the rep
   "$(/usr/bin/grep -h '|ev=waiver|ac=AC-1.2|' "$FC_REC/run.log")"
 expect_contains "WINDOW-2a-1 …a window around its time counts it" "waivers=1 " "$(hh_lr --since "$HH_T0")"
 expect_contains "WINDOW-2a-2 …a window that ends before it does not" "waivers=0 " "$(hh_lr --since 2026-10-12T08:00:00Z --until "$HH_T0")"
+# The act after the card is the reply's waiver, which the run's log holds as its writer appends it.
+expect_eq "HANDHOLDS-3 the report read after the reply counts the page's decline and the reply's waiver after the card: the card ends nothing" \
+  "$(printf '%s\n' "$HH_PAGE" | sed 's/total=1 /total=2 /; s/waivers=0 /waivers=1 /')" "$(hh_lr)"
+expect_eq "HANDHOLDS-3b …and the report's ends line runs to now, printing the start alone and no page time" \
+  "1|0" "$( ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" landing-report --hand-holds "$PFC" ) 2>/dev/null | /usr/bin/grep '^hand-holds window: ' | awk -v at="$HH_AT" '{ print (index($0, "until now: the plan names no delivered: time") > 0) "|" (index($0, at) > 0) }')"
+expect_eq "HANDHOLDS-3c …the page's line stays one entry: it opens once" "1" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c '^hand-holds: ')"
 rm -f "$FC_REC/landing-proofs.log" "$FC_REC/fill-ledger.log" "$FC_REC"/release-approval-*.md
 
 # ============================================================
@@ -897,7 +902,6 @@ expect_contains "CARRY-10b …the register says the reply closed it" "|key=$FC_F
 fc_typed "$FC_WD" "$FC_WR"
 fc_record structure structure piece
 fc_record adversarial adversarial piece "$FC_S3"
-FC_VERSION=14
 
 # ============================================================
 section "§STALE: a release approval the head has moved past is put again on the card with the merge beside it, and the reply records both again"
@@ -912,7 +916,8 @@ section "§STALE: a release approval the head has moved past is put again on the
 # stale merge approval is left off the card; the reply replaces a first line or writes no second one; current 8
 # --check stays red after it; a second approval at the same head is admitted; a plan with nothing landed since its
 # approval is offered a renewal.
-FC_ORD='s/^\(| AC-1\.2 | T1 \)| pending |/\1| discharged |/
+FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
+FC_ORD='s/^\(| AC-1\.2 | T1 \)| pending | see AC-1\.2 |/\1| discharged | — |/
 /^| T1 | 4 | build/a\
 | T4 | 5 | test | the regression | implementor | — | 30 | REQ-1 | — | — | — | landed | approval:plan |'
 FC_APP="approved: release by Dana Fixture 2026-10-12T14:00:00Z head=$FC_R \"ship it\"
@@ -971,6 +976,7 @@ expect_eq "STALE-5 a third approval at the head the newest line names: refused, 
 expect_contains "STALE-5b …an approval is recorded once at a head" "recorded once" "$OUT"
 rm -f "$FC_REC/landing-proofs.log"
 git -C "$RFC" reset -q --hard "$FC_R"
+FC_VERSION=14
 
 # ============================================================
 section "§STALE-NAME: an approval of any name the head has moved past is given again at the new head, beside the first"
@@ -1007,16 +1013,22 @@ section "§OWED-LATER: a row owed at a later step is neither proved nor a decisi
 # decision on it and its reply cannot waive it; the acceptance line names it. FIXTURE FIDELITY: FC_GOOD's plan with a
 # close row (step 9) and a third criterion pending under it, as a planner writes them.
 # fails-when: the row owed by the close is put under Decisions or opened as row:<AC>, or the line does not name it, or a
-# row whose task is a Step-4 row is let off the card.
-fc_owed_later() {  # <task value> -> PFC: FC_GOOD with T4 (step 9, close) and a third row (T3, pending) whose task: is <task value>
-  fc_plan "$FC_GOOD"
-  FC_OL_TASK="$1" awk '
+# row whose task is a Step-4 row is let off the card. The fixture's pending criterion is owed now (fc_owed_now), the unrun row beside it.
+FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
+fc_ol_rows() {  # <page> -> the close row T4 (step 9), and a third criterion, pending, whose task: is FC_OL_TASK
+  fc_owed_now "$1"
+  awk '
     { print }
+    /^\| REQ-1 \| the x writer \| AC-1\.2 \|/ { print "| REQ-1 | the close reads | AC-1.3 | T3 | `bash payload/hooks/session-poker.sh landing-report --hand-holds` | the close reads above zero |" }
     /^\| T3 \| 8 \| integrate/ { print "| T4 | 9 | close | close-out, continuation.md | orchestrator | — | 10 | REQ-1 | .bionic/docs/record/wave-x/continuation.md | — | — | pending | merge |" }
     /^\| AC-1\.2 \|/ { print "| AC-1.3 | T3 | pending | — |  |" }
     END { print "AC-1.3:"; print "  fails-when: the close reads above zero"
           print "  eval: T3 — `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close → `total=0`"
-          print "  task: " ENVIRON["FC_OL_TASK"]; print "  evidence: pending" }' "$PFC" > "$PFC.ol" && mv -f "$PFC.ol" "$PFC"
+          print "  task: " ENVIRON["FC_OL_TASK"]; print "  evidence: pending" }' "$1" > "$1.ol" && mv -f "$1.ol" "$1"
+}
+fc_owed_later() {  # <task value> -> PFC: FC_GOOD with T4 (step 9, close) and a third row (T3, pending) whose task: is <task value>
+  FC_OL_TASK="$1"; export FC_OL_TASK
+  fc_plan "$FC_GOOD" "" fc_ol_rows
 }
 fc_owed_later T4
 fc_page --preview
@@ -1031,6 +1043,7 @@ fc_owed_later T1
 fc_page --preview
 expect_contains "OL-4 control: the same row whose task is the Step-4 row is put under Decisions" "AC-1.3" "$(fc_under Decisions)"
 expect_absent "OL-4b …and the line names nothing owed by the close" "owed by the close" "$(fc_acc)"
+FC_VERSION=14
 
 # ============================================================
 section "§GOALS-REFUSE: the card refuses to render over matrix rows that map to no requirement, and renders once serves: is written"
