@@ -1938,11 +1938,14 @@ matrix_row_has_verdict() {
 #   CONFIRMED, or it is a T4 row whose `user-confirmed:` is attributed and whose auditor cell
 #   is empty-like. A user's confirmation replaces the WAIVER a T4 row used to need, never the
 #   auditor: a standing REFUTED or UNVERIFIABLE on a confirmed T4 row is a verdict, not a
-#   ruling, and the person rules on it.
+#   ruling, and the person rules on it. A T4 row holding no confirmation at all is never ruled
+#   short of its waiver, whatever its auditor cell: at 15 that cell is the run's evidence review,
+#   which no person gave, so the person is asked at the merge advance and on the card.
 matrix_row_ruled() {
   local aud
   aud="$(placeholder_cell "$3")"
   [ "$2" = waived ] && [ "$5" = 1 ] && return 0
+  [ "$1" = T4 ] && [ -z "$4" ] && return 1
   [ "$aud" = CONFIRMED ] && return 0
   [ "$1" = T4 ] && [ -z "$aud" ] && user_confirmed_attributed "$4"
 }
@@ -4272,6 +4275,12 @@ MATRIX_STATUS
       live_exit=""
       case "$status" in pending|blocked) live_exit="$(matrix_live_row_exit "$ac")" ;; esac
       for key in $(keys_for_tier "$tier"); do
+        # AT 15 A CRITERION THE PERSON CONFIRMS, WITH NO APPROVAL NAMING IT, AWAITS ITS PERSON: the confirmation is the
+        # release approval card's to collect, so it is owed from the merge advance and not before, or a run holding one
+        # could not leave the verify step until the person answered.
+        if [ "$v15" = 1 ] && [ "$key" = user-confirmed ] && [ -z "$ucv" ] && [ "${CURRENT%[ab]}" -lt 8 ] 2>/dev/null; then
+          continue
+        fi
         if ! grep -qE "^[[:space:]]*${key}[[:space:]]*:" <<< "$block_txt"; then
           block_matrix "row ${ac} has no ${key} evidence" "record it, or waive the row" \
             "matrix row '${ac}' (${tier}) is missing evidence key '${key}' in its AC block." \
