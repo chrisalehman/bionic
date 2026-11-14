@@ -43,10 +43,7 @@ trap 'rm -rf "$SANDBOX"' EXIT
 # a scratch-copy before/after run under the pin (119/119 both ways, zero fails
 # either side; S6 report). expect_matches was a pure rename onto expect_regex
 # (same ERE-via-herestring semantics, same argument order — S1b/A-17 mapping
-# table). expect_file/expect_no_file are not owned names (S1b's report lists
-# them explicitly as not-owned) and stay local, unchanged.
-expect_file()     { if [ -f "$2" ]; then ok "$1"; else no "$1" "no such file: $2"; fi; }
-expect_no_file()  { if [ -f "$2" ]; then no "$1" "file exists but should not: $2"; else ok "$1"; fi; }
+# table).
 
 # ---------- fixtures ----------
 #
