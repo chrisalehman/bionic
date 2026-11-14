@@ -56,6 +56,8 @@
 #            forward: its page reads 15, its step and whether it is open read as before, and a second act changes no byte.
 #   §DROPS   an epic's Step-line approval read without a guess is in the log; the rest of it, an approval in no ruled
 #            shape, and a criterion's block whose id is not an AC- id are on the gaps list.
+#   §TWO     two epics in one docs root keep a record each, named for its folder; the record all epics joined at 14 is
+#            moved to the one epic that alone joined it, or named file by file when two did.
 #   §SAYS    a step that fails exits 1 in one line naming what could not be read or written, nothing after it written;
 #            the act run again finishes it.
 #
@@ -775,7 +777,7 @@ printf '%s\n' '---' 'canonical_sdlc_version: 14' '---' '## Tasks' '| id | step |
   '## SDLC State' 'current: 4' > "$E/wave-1-empty.plan.md"
 printf '%s\n' '---' 'scale: task' 'canonical_sdlc_version: 14' '---' '## Goal' 'One fix.' '' '## SDLC State' 'current: 4' > "$E/task-1-none.plan.md"
 ep() { bash "$RS" "$1" step | /usr/bin/grep -E '^(n|state)=' | paste -sd' ' -; bash -c '. "$1/lib/run.sh"; run_open "$2"; echo "open=$?"' _ "${RS%/*}" "$1"; }
-for x in epic:3 wave-1-empty:4 task-1-none:4; do p="$E/${x%:*}.plan.md"; l="$SB/epic/record/${x%:*}/run.log"
+for x in epic:3 wave-1-empty:4 task-1-none:4; do p="$E/${x%:*}.plan.md"; l="$(reader_log "$p")"
   expect_eq "${x%:*}: at 14 the run stands at its step, open" "n=${x#*:} state=open open=0" "$(ep "$p" | paste -sd' ' -)"
   o="$(bash "$BF" "$p" 2>&1)"; expect_status "${x%:*}: a plan with no Tasks rows is brought forward (exit 0)" 0 "$?"
   expect_eq "${x%:*}: its page reads 15, and its step and whether it is open read as before the act" \
@@ -788,12 +790,25 @@ done
 section "DROPS"
 # What the act cannot carry of the epic's state section and criteria is named on its gaps list; what the translation reads
 # without a guess, an approval with its words and its step, is in the log.
-EL="$SB/epic/record/epic/run.log"; EG="$(cat "$SB/epic/record/epic/kept/gaps" 2>/dev/null)"
+EL="$(reader_log "$EP")"; EG="$(cat "${EL%/*}/kept/gaps" 2>/dev/null)"
 expect_eq "Step 3's approval written in its Step line is carried with its first words and its day, and approves step 3" \
   "run/v1|ev=approval|key=step3|by=Ann Person|said=Option 1 - Yes, keep it open.|at=2026-09-08 0" "$(grep '|key=step3|' "$EL") $(bash "$RS" "$EP" approved step3 >/dev/null; echo $?)"
 expect_contains "…its second words, one field given two values, are named" "gap/v1|ev=approval|key=step3|field=said|why=repeated" "$EG"
 expect_contains "Step 1's ratification, in no approval's shape, is named whole" "gap/v1|ev=approval|key=step1|field=ev|why=unruled" "$EG"
 expect_contains "a criterion's block whose id is not an AC- id is named" "gap/v1|ev=criterion|criterion=E-1|field=block|why=unruled" "$EG"
+
+section "TWO"
+# Two epics in one docs root, each the epic above at 14; then one alone beside the record every epic plan joined at 14.
+EK="$(reader_record "$EP")/kept/epic.plan.md"; TD="$(cd "$SB" && pwd -P)/two"; mkdir -p "$TD/record/epic" "$SB/one/record/epic"
+for e in two/plans/epic-1-a two/plans/epic-2-b one/plans/epic-3-c; do mkdir -p "$SB/$e"; cp "$EK" "$SB/$e/"; done
+for f in two one; do printf 'a\n' > "$SB/$f/record/epic/asks.state"; done
+TO="$(bash "$BF" "$TD/plans/epic-1-a/epic.plan.md")"; bash "$BF" "$TD/plans/epic-2-b/epic.plan.md" >/dev/null 2>&1
+expect_eq "two epics are brought forward each to a log and a kept copy of its own, named for its folder by the one rule" \
+  "epic-1-a/kept/epic.plan.md epic-1-a/run.log epic-2-b/kept/epic.plan.md epic-2-b/run.log|$TD/record/epic-1-a epic-1-a" \
+  "$(cd "$TD/record" && find epic-?-? -name run.log -o -name epic.plan.md | sort | paste -sd' ' -)|$(reader_record "$TD/plans/epic-1-a/epic.plan.md") $(bash -c '. "$1/lib/proof.sh"; proof_plan_slug "$2"' _ "${RS%/*}" "$TD/plans/epic-1-a/epic.plan.md")"
+expect_contains "…and the record both joined at 14 is named file by file, unread" "gap/v1|ev=record|record=epic|field=asks.state|why=shared" "$TO"
+bash "$BF" "$SB/one/plans/epic-3-c/epic.plan.md" >/dev/null 2>&1
+expect_eq "a record one epic alone joined at 14 is moved to its own, and kept" "a|a|" "$(cat "$SB/one/record/epic-3-c/asks.state" "$SB/one/record/epic-3-c/kept/record/asks.state" 2>/dev/null | paste -sd'|' -)|$(ls "$SB/one/record/epic" 2>/dev/null)"
 
 section "SAYS"
 # A step that fails says so: a tool the translation needs that dies, and a plan whose directory takes no write.

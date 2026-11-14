@@ -269,13 +269,25 @@ _bf_homes() {  # <plan> <header out> -> a `<key><TAB><value>` line in <header ou
 # `<docs>/record/plan.md`; renamed for its directory, the plan joins its own, and the old one is read by nothing. Facts of
 # several incidents cannot be told apart there, so the act writes nothing from it and names each of its files on the
 # gaps list: a fact is never dropped without a word. The refusal of the plain name says to move it first when no other
-# plan shares it (_bf_misnamed).
-_bf_shared() {  # <plan> -> a gap line per file of the shared record, when the plan is an incident's named for its directory
-  local d="${1%/*}" docs old
-  [ "${1##*/}" = "${d##*/}.plan.md" ] && [ "${d%/*/*}/incidents" = "${d%/*}" ] || return 0
-  docs="${d%/*/*}"; old="$docs/record/plan.md"
+# plan shares it (_bf_misnamed). An epic's plan joined `<docs>/record/epic/` by the same strip, every epic's the same one,
+# until the record's name became its folder's (lib/reader.sh `reader_slug`): the act moves it to the epic's own when this
+# epic alone joined it and its own does not stand (_bf_epic_record), and otherwise names it here as an incident's.
+_bf_shared() {  # <plan> -> a gap line per file of the shared record, when the plan is an incident's named for its directory or an epic's
+  local d="${1%/*}" old rec
+  if [ "${1##*/}" = "${d##*/}.plan.md" ] && [ "${d%/*/*}/incidents" = "${d%/*}" ]; then old="${d%/*/*}/record/plan.md"
+  elif [ "${1##*/}" = epic.plan.md ] && rec="$(reader_record "$1")" && [ "${rec##*/}" != epic ]; then old="${rec%/*}/epic"
+  else return 0; fi
   [ -d "$old" ] || return 0
-  ( cd "$old" && find . -type f | sed 's#^\./##' | LC_ALL=C sort ) | sed 's#^#gap/v1|ev=record|record=plan.md|field=#; s#$#|why=shared#'
+  ( cd "$old" && find . -type f | sed 's#^\./##' | LC_ALL=C sort ) | sed "s#^#gap/v1|ev=record|record=${old##*/}|field=#; s#\$#|why=shared#"
+}
+_bf_epic_record() {  # <plan> <its record> -> the record every epic plan joined at 14 moved to this epic's own, when it alone joined it
+  local old="${2%/*}/epic" docs="${2%/record/*}" f n=0
+  [ "${1##*/}" = epic.plan.md ] && [ "$2" != "$old" ] && [ -d "$old" ] && [ ! -e "$2" ] || return 0
+  for f in "$docs"/plans/epic.plan.md "$docs"/plans/*/epic.plan.md "$docs"/incidents/epic.plan.md "$docs"/incidents/*/epic.plan.md; do
+    [ -f "$f" ] && n=$((n + 1))
+  done
+  [ "$n" -eq 1 ] || return 0
+  mv "$old" "$2" || _bf_fail "the record $old, which this epic alone joined, could not be moved to $2"
 }
 
 # A PLAN NOT NAMED *.plan.md is refused before anything is written. At 15 a run is found by the walk, and joined to
@@ -322,7 +334,7 @@ _bf_own() {  # <plan> <kept> <log> <work dir> -> 0 the kept copy is this act's o
     return 0
   else
     k="$4/kept"; mkdir -p "$k/plans" "$k/record" && cp "$kept/$name" "$k/plans/" || return 3
-    [ ! -d "$kept/record" ] || cp -R "$kept/record" "$k/record/${name%.plan.md}" || return 3
+    [ ! -d "$kept/record" ] || cp -R "$kept/record" "$k/record/$(reader_slug "$k/plans/$name")" || return 3
     _bf_log "$k/plans/$name" 2>/dev/null | cmp -s - "$log" && return 0
     why="the run's log $log is neither the log it holds nor the one the act writes from it, so another build left the two"
   fi
@@ -337,6 +349,7 @@ bf_main() {  # <plan> -> the act; prints the gaps list and kept=<directory>
   fi
   plan="$(cd "$(dirname "$plan")" && pwd -P)/${plan##*/}"; wave="${plan##*/}"; rec="${log%/run.log}"; kept="$rec/kept"
   case "$wave" in *.plan.md) ;; *) _bf_misnamed "$plan" "$rec"; return 2 ;; esac
+  _bf_epic_record "$plan" "$rec" || return 1
   BF_WORK="$(mktemp -d)" || { _bf_fail "no work directory could be made (mktemp -d)"; return; }
   if [ -d "$kept" ] && [ "$(plan_read_header "$plan" canonical_sdlc_version 2>/dev/null)" != canonical_sdlc_version=15 ]; then
     _bf_own "$plan" "$kept" "$log" "$BF_WORK"; case $? in 0) ;; 1) return 2 ;; *) _bf_fail "the kept copy $kept could not be copied to judge the run's log against it"; return ;; esac
