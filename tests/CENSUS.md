@@ -2010,6 +2010,7 @@ stop.test.sh §5 — duplicate
 units.test.sh §0 — duplicate
 units.test.sh §5 — duplicate
 units.test.sh §6b — duplicate
+units.test.sh §STEP-FIELD — gone with units_step_field
 version-compare.test.sh §Section 2 — duplicate
 width.test.sh §Section 3 — duplicate
 worktree.test.sh §Group 1 — duplicate
