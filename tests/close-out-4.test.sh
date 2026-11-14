@@ -27,17 +27,12 @@ section "§INHERITED-CONT — wave-35 T10 (REQ-1 AC-1.6, A-orch-18): the continu
 inh_line() {  # <suite> <sha> -> the line the reader renders for the debt proof-add inherited writes
   printf 'inherited: %s base=%s head=%s at=2026-10-12T04:00:00Z evidence=record/wave-01-fixture/inherited-%s-%.12s.log' "$1" "$2" "$2" "$1" "$2"
 }
-inh_place() {  # <project> <line> -> the line's fact in the run: at 15 an inherited: line's proof event; at 14 the line under ## SDLC State
-  if co_at15 "$1"; then
-    case "$2" in inherited:\ *) ;; *) echo "inh_place: at 15 only an inherited: line is written here: '$2'" >&2; return 1 ;; esac
-    local s b h a e
-    read -r _ s b h a e <<< "$2"
-    bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; LOG_AT="$3" proof_event "$2" kind=inherited "head=$4" "evidence=$5" "suite=$6" "base=$7"' \
-      _ "$REPO_ROOT/payload/scripts/lib" "$1/$PLAN_REL" "${a#at=}" "${h#head=}" "${e#evidence=}" "$s" "${b#base=}"
-    return
-  fi
-  bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; proof_add_line "$2" "$3" > "$2.pf" && mv "$2.pf" "$2"' \
-    _ "$REPO_ROOT/payload/scripts/lib" "$1/$PLAN_REL" "$2"
+inh_place() {  # <project> <line> -> the inherited: line's fact in the run, the proof event proof-add inherited writes
+  case "$2" in inherited:\ *) ;; *) echo "inh_place: only an inherited: line is written here: '$2'" >&2; return 1 ;; esac
+  local s b h a e
+  read -r _ s b h a e <<< "$2"
+  bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; LOG_AT="$3" proof_event "$2" kind=inherited "head=$4" "evidence=$5" "suite=$6" "base=$7"' \
+    _ "$REPO_ROOT/payload/scripts/lib" "$1/$PLAN_REL" "${a#at=}" "${h#head=}" "${e#evidence=}" "$s" "${b#base=}"
 }
 inh_section() { awk '/^## / { s = ($0 == "## Inherited debt"); next } s && NF && !/^```/ { print }' "$1"; }
 PINH="$(mk_fixture inherited-cont)"; advance_to "$PINH" 8
@@ -138,9 +133,6 @@ gov_record "$PG" s2 "$GOV_ROOT" "$GOV_C1" 2026-10-14T01:00:00Z
 gov_record "$PG" s3 "$GOV_ROOT" "$GOV_C2" 2026-10-14T03:00:00Z
 gov_record "$PG" s4 "$GOV_CACHE" - 2026-10-13T21:00:00Z
 ln -s "$PG/.bionic/tmp/loaded-s0.state" "$PG/.bionic/tmp/loaded-s5.state"   # a link is never a record
-GOV_WANT="governed-by: $GOV_CACHE installed 1.18.0 from 2026-10-13T21:00:00Z
-governed-by: $GOV_ROOT $GOV_C1 from 2026-10-13T23:55:11Z
-governed-by: $GOV_ROOT $GOV_C2 from 2026-10-14T03:00:00Z"
 GOV_CK0="$(find "$PG/.bionic/tmp" -name 'loaded-*' | wc -l | tr -d ' ')"
 run_close "$PG" check
 expect_absent "GOV-1b …not the session that started before Step 4" "/elsewhere/old/payload" "$CO_OUT"
@@ -197,7 +189,6 @@ gov_at "$PGM" 'ev=step|n=4' 2026-10-13T20:39:00Z
 gov_record "$PGM" s1 "$GOV_ROOT" "$GOV_C1" 2026-10-13T23:55:11Z
 ( cd "$PGM" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
     bash "$GOV_MUT/scripts/close-out.sh" "$PGM/$PLAN_REL" run ) > "$SANDBOX/gov-mut.out" 2>&1
-GOV_MRC=$?
 expect_eq "GOV-mut2 …and its continuation names the installed version while a record named the checkout" \
   "governed-by: installed $GOV_VER" "$(gov_section "$PGM/$CONT_REL")"
 rm -rf "$GOV_MUT"

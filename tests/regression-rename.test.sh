@@ -46,12 +46,12 @@ set -uo pipefail
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 
 POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
 LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
 ALIAS_SH="$LIB/alias.sh"
 S46_LIB="$LIB/proof.sh"
-GOV_HOOK="${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh"
 . "$(dirname "$0")/session-poker.prelude.sh"
 
 
@@ -175,7 +175,7 @@ POKE_BOUND="$AV_BOUND_WAS"
 section "§GONE-BORN: --born floor:<suite> and a typed proof:floor are refused naming the new spelling; --born regression:<suite> and proof:regression write their rows"
 # ============================================================
 # FIXTURE FIDELITY: session-poker-3 §BORN-FLOOR's shape. The plan carries a 1.20.0 proof line, kind=floor with
-# owed=a.test.sh,b.test.sh, written by the library's own proof_add_line: the on-disk old spelling backs the marker, and
+# owed=a.test.sh,b.test.sh, placed as a run at 14 held it: the on-disk old spelling backs the marker, and
 # is read silently (§ALIAS-PLAN) while a person's typing of it is not.
 AB_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RAB="$(make_repo gone-born)"; ( cd "$RAB" && git commit -q --allow-empty -m init )
@@ -185,8 +185,7 @@ PAB="$(SP_PLAN_AT=14 s42_plan "$RAB" 4 "  worktree: .worktrees/01-fixture
   base-sha: abc1234
   branch: wave/01-fixture
   working-branch: wave/01-fixture")"
-bash -c '. "$1" && proof_add_line "$2" "$3"' _ "$S46_LIB" "$PAB" \
-  "proved: kind=floor head=${AB_C1} at=2026-10-14T00:00:00Z evidence=record/wave-01-fixture/floor.txt owed=a.test.sh,b.test.sh" > "$PAB.new" && mv "$PAB.new" "$PAB"
+plan_fixture_state_add "$PAB" "proved: kind=floor head=${AB_C1} at=2026-10-14T00:00:00Z evidence=record/wave-01-fixture/floor.txt owed=a.test.sh,b.test.sh"
 # …and a reads column, s51_plan's awk (session-poker-2 §51): the typed reads cells below need somewhere to go.
 awk '/^## Tasks/ { t = 1 } /^## Verification/ { t = 0 }
      t && /^\| id / { print $0 " reads |"; next }
@@ -301,9 +300,7 @@ expect_eq "AP-9 none of these readers printed a word on stderr for the on-disk t
 
 # ============================================================
 # ============================================================
-SP_SH="$POKER"; PROOF_SH="$LIB/proof.sh"; UNITS_SH="$LIB/units.sh"
-# The regression-run verb's body is in the proof record's part beside the dispatcher; its parse arm stays in the dispatcher.
-SP_PROOF="$(dirname "$POKER")/poker/proof.sh"
+SP_SH="$POKER"; PROOF_SH="$LIB/proof.sh"
 
 
 # ============================================================

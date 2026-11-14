@@ -11,7 +11,7 @@
 #        head`, a close-out copy printing green splits them; then a green run at F with docs, release and code past it
 # §LOG   a review reading, a regression proof and an approval the run's log alone holds are read by the judge and the
 #        proof readers, which ask the reader; a proof written between two reads in one process is read by the second;
-#        an inherited suite is read from an older plan's line and from the log, two at one head as two
+#        an inherited suite is read from the log alone, two at one head as two; the base is the header's
 # §KEEP  the kept fold is served from the user's own mode-700 directory, never from one others can write or a link; a fold that failed is kept nowhere
 # §IFS   under a tab as the caller's only separator the fold's key still covers the log, and a rating and a verdict read
 #        as they do under the default
@@ -32,6 +32,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/regression-fixture.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/close-out.prelude.sh"
 
 PAH_LIB="$REPO_ROOT/payload/scripts/lib"
@@ -247,8 +248,8 @@ PL_PLAN="$PL/$PLAN_REL"; PL_H="$(fixture_git "$PL" rev-parse wave/01-fixture)"; 
 mkdir -p "$PL_REC"
 for q in evidence adversarial structure; do
   printf '# %s\n\nNo findings.\n' "$q" > "$PL_REC/critic-$q.md"
-  bash -c '. "$1/proof.sh" && proof_add_line "$2" "$(proof_line review "$3" 2026-10-04T12:00:00Z "record/wave-01-fixture/critic-$4.md" "$4" w-critic pass piece)"' \
-    _ "$PAH_LIB" "$PL_PLAN" "$PL_H" "$q" > "$PL_PLAN.n" && mv "$PL_PLAN.n" "$PL_PLAN"
+  plan_fixture_state_add "$PL_PLAN" "$(bash -c '. "$1/proof.sh" && proof_line review "$2" 2026-10-04T12:00:00Z "record/wave-01-fixture/critic-$3.md" "$3" w-critic pass piece' \
+    _ "$PAH_LIB" "$PL_H" "$q")"
 done
 pl_state() { bash -c '. "$1/roots.sh" && . "$1/proof.sh" && facts_state "$2" "$3"' _ "$PAH_LIB" "$PL_PLAN" "$PL_H" 2>/dev/null | awk -F'\t' '$1 == "review" && $4 == "piece" { printf "%s%s=%s", (n++ ? " " : ""), $2, $5 }'; }
 expect_eq "LOG-1 precondition: the three readings in the plan's text are each covered at the head" \
@@ -270,13 +271,17 @@ expect_eq "LOG-5 a proof written between two reads in one process is read by the
     printf "run/v1|ev=proof|kind=regression|head=%s|evidence=x|at=2026-10-04T13:00:00Z\n" 0000000000000000000000000000000000000001 >> "$3"
     printf "%s|%s" "$a" "$(proof_last "$2" regression)"' _ "$PAH_LIB" "$PL_PLAN" "$PL_REC/run.log")"
 
-# fails-when: inherited debt is read from the plan's text alone, so a suite proof-add inherited writes to the log is
-# owed again; or the fold keeps one proof per regression head, so two suites inherited at one head read as one.
+# fails-when: inherited debt is read from the plan's text, so an older plan's own inherited: line, which no event carries,
+# is a debt; or a suite proof-add inherited writes to the log is owed again; or two suites inherited at one head read as one.
 awk -v h="$PL_H" '{ print } /^current: / && !d { print "inherited: a.test.sh base=" h " head=" h " at=2026-10-04T13:10:00Z evidence=record/wave-01-fixture/i-a.log"; d = 1 }' "$PL_PLAN" > "$PL_PLAN.n" && mv "$PL_PLAN.n" "$PL_PLAN"
 for s in b c; do printf 'run/v1|ev=proof|kind=inherited|head=%s|evidence=record/wave-01-fixture/i-%s.log|suite=%s.test.sh|base=%s|at=2026-10-04T13:2%s:00Z\n' "$PL_H" "$s" "$s" "$PL_H" "${#s}" >> "$PL_REC/run.log"; done
-expect_eq "LOG-6 an older plan's inherited line and two suites the log inherits at one head are three debts, each read once" \
-  "a.test.sh,b.test.sh,c.test.sh|3" \
+expect_eq "LOG-6 two suites the log inherits at one head are two debts, each read once, and the plan's own inherited line none" \
+  "b.test.sh,c.test.sh|2" \
   "$(bash -c '. "$1/proof.sh" && printf "%s|%s" "$(proof_inherited "$2")" "$(proof_inherited_lines "$2" | grep -c "^inherited: ")"' _ "$PAH_LIB" "$PL_PLAN")"
+# fails-when: the base is read from the state section, where a run at 14 kept its Step-4 block, and not from the header.
+PL_B="$(sed -n 's/^base-sha: //p' "$PL_PLAN")"; awk -v b="$PL_H" '{ print } /^current: / { print "  base-sha: " b }' "$PL_PLAN" > "$PL_PLAN.n" && mv "$PL_PLAN.n" "$PL_PLAN"
+expect_eq "LOG-7 the base is the header's, a commit other than the one the state section names" "$PL_B|$PL_H|yes" \
+  "$(bash -c '. "$1/proof.sh" && proof_plan_base "$2" "$3"' _ "$PAH_LIB" "$PL_PLAN" "$PL")|$(sed -n 's/^  base-sha: //p' "$PL_PLAN")|$([ -n "$PL_B" ] && [ "$PL_B" != "$PL_H" ] && echo yes)"
 
 section "§KEEP: the kept fold is served only from a directory this user alone can write, and its files are bounded"
 # fails-when: a fold planted under the right key is served from a directory others can write or through a link, the user's own fold is not served to a second process, or a file per plan is kept for ever, or a failed fold, or a kept file pruned between two reads, is kept as the run's facts; or a fold that failed reaches the judge or a reader of it as no proof, or a lookup or a translation source that died as a whole run.

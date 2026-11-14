@@ -114,6 +114,15 @@ reader_brought_at() {  # <record directory> -> 0 when its run was brought forwar
   [ -d "$1/kept" ] && [ -f "$1/run.log" ] && ! cmp -s "$1/run.log" "$1/kept/record/run.log"
 }
 
+# A KEY OF A FOLD THAT READS NO TURN'S END: a stop event comes at every turn, so the log is summed less those alone. Only
+# a line in the appender's whole shape of one is left out, so any other line, a malformed stop among them, still changes
+# the sum: a key fails toward a fold, never toward a stale answer.
+reader_log_stamp() (  # <log> -> its `cksum` less its stop events; 2 when it cannot be read
+  set -o pipefail
+  { LC_ALL=C grep -vE '^run/v1\|ev=stop\|session=[^|]*\|turn=[^|]*\|current=[^|]*\|state=[^|]*\|ceiling=[^|]*\|width=[^|]*\|open=[^|]*\|free=[^|]*\|ready=[^|]*\|launched=[^|]*\|declined=[^|]*\|missed=[^|]*\|idle=[^|]*\|room=[^|]*\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$1"
+    [ "$?" -le 1 ]; } | cksum || exit 2
+)
+
 reader_events() {  # <plan> -> the run's lines, in the order they were written
   local log
   log="$(reader_log "$1")" || return 2
