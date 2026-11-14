@@ -587,11 +587,14 @@ expect_eq "…and the register is as it was, never written" "same" "$(cmp -s "$A
 expect_eq "every round reads as one list, the register's first, on the library's clock, the log's round numbered 2" \
   "approve:step2 1 closed 2026-11-01T00:00:02Z 2026-11-01T00:00:03Z|approve:step2 2 open 2026-11-02T00:06:00Z -|waive:new 1 closed 2026-11-02T00:01:00Z 2026-11-02T00:04:00Z|waive:old 1 open 2026-11-01T00:00:01Z -" \
   "$(ao "$T0" owed_rounds 'approve:step2|waive:.*' | tr '\t' ' ' | LC_ALL=C sort | paste -sd'|' -)"
-expect_eq "the open list: the register's standing ask, then the log's new round, each with its title and line" \
-  "waive:old - t r|approve:step2 - t2 poker: r2" "$(ao "$T0" owed_list | tr '\t' ' ' | paste -sd'|' -)"
+expect_eq "the open list: the register's standing ask, then the log's new round, each with its title; the register's prompt a gap, unread" \
+  "waive:old - t |approve:step2 - t2 poker: r2" "$(ao "$T0" owed_list | tr '\t' ' ' | paste -sd'|' -)"
 expect_eq "the answers read on either home: the closed new keeps its own, the standing old has the log's" \
   "no 2026-11-02T00:02:00Z|carry 2026-11-02T00:05:00Z" \
   "$(ao "$T0" owed_answer_of waive:new | cut -f1-2 | tr '\t' ' ')|$(ao "$T0" owed_answer_of waive:old | cut -f1-2 | tr '\t' ' ')"
+expect_eq "the reader gives a round whole, folded once: opened, sent, answered and closed in four events, one line" \
+  "run/v1|ev=ask|key=waive:new|state=closed|by=waive|at=2026-11-02T00:04:00Z|opened=2026-11-02T00:01:00Z|sent=2026-11-02T00:03:00Z|round=1|answer=no|answered=2026-11-02T00:02:00Z|event=-" \
+  "$(. "${READER%/reader.sh}/lib/reader.sh" && reader_ask_rounds "$AP" | /usr/bin/grep '|key=waive:new|')"
 ao $((T0 + 420)) owed_close waive:old waive
 expect_eq "the register's standing ask closed through the log reads closed, and the reader agrees" "approve:step2|approve:step2 " \
   "$(ao "$T0" owed_list | cut -f1 | paste -sd' ' -)|$(W=askl; D="$AR/.bionic/docs"; keys asks)"

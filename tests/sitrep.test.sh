@@ -152,9 +152,8 @@ sr_owed() {  # <owed/v1 fields after the schema> [<plan>] -> one line on that ru
   local f; f="$(sr_reg "${2:-$SR_PLAN}")" || return 1
   mkdir -p "${f%/*}"; printf 'owed/v1|%s\n' "$1" >> "$f"
 }
-sr_owed_sid() {  # <owed/v1 fields after the schema> <session> -> one line in the store of a session acting for no run
-  printf 'owed/v1|%s\n' "$1" >> "$SR_REPO/.bionic/tmp/owed-$2.state"
-}
+sr_ask_ev() { local f; f="$(sr_reg "${2:-$SR_PLAN}")" && mkdir -p "${f%/*}" && printf 'run/v1|ev=ask|%s\n' "$1" >> "${f%/*}/run.log"; }  # <ask fields, at= last> [<plan>] -> one ask event in that run's log
+sr_owed_sid() { printf 'run/v1|ev=ask|%s\n' "$1" >> "$SR_REPO/.bionic/tmp/owed-$2.state"; }  # <ask fields, at= last> <session> -> one ask event in the store of a session acting for no run
 # sr_prev <minutes> [<scale>] -> a delivered plan beside this one (T1 of 60 min declared,
 # declaring `scale: <scale>` when given) approved at 10:00Z the day before, whose T1 lands <minutes>
 # later: the previous wave's measured ratio is <minutes> / 60. Its queue time is 1 minute, so a pace read
@@ -689,7 +688,7 @@ section "§KINDS: an unruled matrix row (row:) and an unread ruling (ruling:) op
 # fails-when: either is open and missing from the sheet.
 sr_world kinds "6 6 12 12"
 sr_owed "key=row:AC-2.1|state=open|sent=-|at=2026-10-06T21:00:00Z|title=ruling: row AC-2.1|reply=poker: AC-2.1 is not proved — rule it"
-sr_owed "key=ruling:r9|state=open|sent=-|at=2026-10-06T21:01:00Z|title=ruling unread: T5|reply=poker: NOT-LANDED T5 — w-T5 ended (MET) with an orchestrator ruling unread (r9); the row holds until a writer reads it: re-dispatch the row, or drop it"
+sr_ask_ev "key=ruling:r9|sent=-|title=ruling unread: T5|prompt=poker: NOT-LANDED T5 — w-T5 ended (MET) with an orchestrator ruling unread (r9); the row holds until a writer reads it: re-dispatch the row, or drop it|at=2026-10-06T21:01:00Z"
 sr_run "$SR_PLAN"
 expect_eq "KI1 the open row: and ruling: asks are on the sheet, raised at their local times" "row:AC-2.1 2:00 PM|ruling:r9 2:01 PM" \
   "$(sr_lines ask | while IFS= read -r l; do printf '%s %s\n' "$(sr_f "$l" key)" "$(sr_f "$l" raised)"; done | sr_join)"
@@ -1245,7 +1244,7 @@ sr_bind "$SR_PLAN_A" "$SID"
 sr_bind "$SR_PLAN_B" "$SID2"
 sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release" "$SR_PLAN_A"
 sr_owed "key=approve:merge|state=open|sent=-|at=2026-10-06T20:01:00Z|title=approval: merge|reply=poker: WAIT T17 — approval:merge" "$SR_PLAN_B"
-sr_owed_sid "key=waive:structure|state=open|sent=-|at=2026-10-06T20:02:00Z|title=waiver: structure|reply=poker: the structure review is owed" "$SID3"
+sr_owed_sid "key=waive:structure|sent=-|title=waiver: structure|prompt=poker: the structure review is owed|at=2026-10-06T20:02:00Z" "$SID3"
 sr_ask_keys() { sr_lines ask | while IFS= read -r l; do printf '%s %s\n' "$(sr_f "$l" key)" "$(sr_f "$l" holds)"; done | sr_join; }
 sr_run "$SR_PLAN_B"
 expect_eq "SC0 precondition: the other run's register is read — plan B owes its own ask, which T17 waits on" "approve:merge 4/17" "$(sr_ask_keys)"
@@ -1796,6 +1795,9 @@ expect_eq "SCO1 the scorecard's widest landing prints against target < 15, the l
 expect_eq "SCO2 …and its last three lines are the sheet's pace, correctness and waste measurements, seven lines in all" \
   "pace: $(sr_m pace.work-landed) of the live work's sized minutes landed, in $(sr_m pace.time-used) of the forecast time|correctness: suites run $(sr_m tests.suites-run); whole run $(sr_m tests.whole-run); reviews $(sr_m reviews); $(sr_m findings.open) open findings|waste: dropped $(sr_m waste.dropped); $(sr_m waste.runs-discarded) suite runs discarded; $(sr_m waste.ready-unstarted) ready and unstarted; $(sr_m waste.waiting-on-you) waiting on you|7" \
   "$(printf '%s\n' "$SR_SC" | tail -3 | sr_join)|$(printf '%s\n' "$SR_SC" | /usr/bin/grep -c .)"
+printf 'run/v1|ev=approval|key=merge|by=fixture|said=1|at=2026-10-06T14:00:00Z\n' >> "$SR_DIR/run.log"; sr_launch T9 14:04:30
+expect_eq "SCO4 a merge approved in the log alone, no state line, starts the agent minutes: a launch 4.5 min after it reads 5" \
+  "agent minutes after the final reply: 5 · target 0" "$(SR_AT=$((SR_NOW - 3600)) sr_poke landing-report --scorecard "$SR_PLAN" 2>/dev/null | /usr/bin/grep '^agent minutes ')"
 # One constant: a mutant tree whose lib/line.sh sets the bar to 25 moves the scorecard's target.
 SR_MUT="$TMPROOT/mut"; mkdir -p "$SR_MUT/payload"
 cp -R "$BIONIC_HOOKS_DIR" "$SR_MUT/hooks" && cp -R "$BIONIC_HOOKS_DIR/../payload/scripts" "$SR_MUT/payload/scripts"
@@ -1835,7 +1837,7 @@ sr_r_put $((SR_E0 - 7200)) D9; sr_r_rule $((SR_E0 - 5400)) D9; sr_r_put $((SR_E0
 SR_AT=$SR_E0 sr_poke approve plan 'approved' >/dev/null 2>&1
 expect_eq "RD-0 precondition: approve plan appended its approval at 10:00Z and closed the Step-3 card's ask at that instant" \
   "key=step3|by=Dana Fixture|2026-10-06T10:00:00Z|2026-10-06T10:00:00Z" \
-  "$(sed -n 's/^run\/v1|ev=approval|\(key=step3|by=[^|]*\)|.*|at=\([^|]*\)$/\1|\2/p' "$SR_DIR/run.log")|$(sed -n 's/^owed\/v1|key=approve:step3|state=closed|by=[^|]*|at=\([^|]*\)|.*/\1/p' <(sr_asks))"
+  "$(sed -n 's/^run\/v1|ev=approval|\(key=step3|by=[^|]*\)|.*|at=\([^|]*\)$/\1|\2/p' "$SR_DIR/run.log")|$(sed -n 's/^run\/v1|ev=ask|key=approve:step3|state=closed|by=[^|]*|at=\([^|]*\)|.*/\1/p' <(sr_asks))"
 sr_r_put $((SR_E0 + 600)) D1;    sr_r_rule $((SR_E0 + 1200)) D1     # 10 min
 sr_r_put $((SR_E0 + 3600)) D2;   sr_r_rule $((SR_E0 + 5400)) D2     # 30 min
 sr_r_put $((SR_E0 + 7200)) D2;   sr_r_rule $((SR_E0 + 8100)) D2     # 15 min, the same decision put again
@@ -1844,9 +1846,12 @@ sr_r_open $((SR_E0 + 79200)) approve:release
 SR_AT=$((SR_E0 + 79500)) sr_poke approve release '1' >/dev/null 2>&1   # 5 min
 expect_eq "RD-1 two rounds of D9 before the approval count none; after it four decision rounds and the release card: 5 stops, 10 + 30 + 15 + 476 + 5 minutes" \
   "2|2|0|$(sr_r_want 5 536)" \
-  "$(/usr/bin/grep -c '^owed/v1|key=decide:D9|state=closed|' <(sr_asks) | tr -d ' ')|$(/usr/bin/grep -c '^owed/v1|key=decide:D2|state=closed|' <(sr_asks) | tr -d ' ')|$(/usr/bin/grep -c '|state=open|' <(sr_asks) | tr -d ' ')|$(sr_r_card $((SR_E0 + 82800)))"
+  "$(/usr/bin/grep -c '|key=decide:D9|state=closed|' <(sr_asks) | tr -d ' ')|$(/usr/bin/grep -c '|key=decide:D2|state=closed|' <(sr_asks) | tr -d ' ')|$(/usr/bin/grep -c '|state=open|' <(sr_asks) | tr -d ' ')|$(sr_r_card $((SR_E0 + 82800)))"
 sr_r_put $((SR_E0 + 81000)) D4
 expect_eq "RD-2 a round still open is a stop, its wait running to now" "$(sr_r_want 6 566)" "$(sr_r_card $((SR_E0 + 82800)))"
+sr_asks | sed 's/^run\/v1|ev=ask|/owed\/v1|/; s/|prompt=/|reply=/' > "$SR_DIR/asks.state"; sed -i.was '/^run\/v1|ev=ask|/d' "$SR_DIR/run.log"
+expect_eq "RD-3 the same rounds as register lines, the log holding no ask, count the same" "$(sr_r_want 6 566)|8|0" \
+  "$(sr_r_card $((SR_E0 + 82800)))|$(/usr/bin/grep -c 'state=closed' "$SR_DIR/asks.state")|$(/usr/bin/grep -c 'ev=ask' "$SR_DIR/run.log")"
 
 # ============================================================
 section "§WAIT: a decision's wait line names everything that waits on it: a row not landed or dropped that reads it, the release its newest approval page lists it on, the merge an open held-merge ask names it in"
@@ -2017,7 +2022,7 @@ SR_FA_G1="$(/usr/bin/grep -c gather "$SR_FA_MARK")"; SR_FA_F1="$(/usr/bin/grep -
 expect_eq "FA4b the sheet verb enters the kept fold at least once and at most twice: its findings are answered from the fold its own shell holds" "yes" \
   "$([ "$SR_FA_F1" -ge 1 ] && [ "$SR_FA_F1" -le 2 ] && echo yes || echo "no: $SR_FA_F1 entries")"
 # an ask opened after the sheet was saved, and one answered no; neither is in the saved sheet
-sr_owed "key=approve:release|state=open|sent=-|at=2026-10-23T07:10:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
+sr_ask_ev "key=approve:release|round=2|sent=-|title=approval: release|prompt=poker: WAIT T12 — approval:release|at=2026-10-23T07:10:00Z"
 SR_AT="$SR_FAST_AT" sr_poke_with "$SR_FM/hooks/session-poker.sh" sitrep card "$SR_PLAN" < "$SR_FAST_J" > "$TMPROOT/fast-card.out" 2>"$TMPROOT/fast-card.err"
 SR_FA_RC3=$?
 SR_FA_G2="$(/usr/bin/grep -c gather "$SR_FA_MARK")"
