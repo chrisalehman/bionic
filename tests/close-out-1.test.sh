@@ -489,10 +489,11 @@ expect_eq "BA6 a plan at 15 and its epic naming one branch: the gate reads them 
 expect_eq "BA7 …naming two, it logs the finding with both" \
   "15|yes|plan integration-branch 'main' != epic 'epic-fx' integration-branch 'trunk'" "$(ba_gate "$(mk_fixture branch-differ-gate)" trunk)"
 # One reader: a grep of hooks/ and payload/scripts/, copied with one planted reader, finds the plant and lib/plan.sh's
-# two lines that ask the plan parser, and no other line naming the key outside a comment or a sentence a refusal prints.
+# three lines (the two that ask the plan parser, and the name it gives the key for the act that writes it), and no other
+# line naming the key outside a comment or a sentence a refusal prints.
 BAT="$SANDBOX/ba-tree"; mkdir -p "$BAT/payload"; cp -R "$BIONIC_HOOKS_DIR" "$BAT/hooks"; cp -R "$REPO_ROOT/payload/scripts" "$BAT/payload/scripts"
 printf '%s\n' 'v="$(plan_frontmatter_get "$p" integration-branch)"' > "$BAT/hooks/planted.sh"
-expect_eq "BA5 the grep finds the planted reader and lib/plan.sh's, nothing else" "hooks/planted.sh:1 payload/scripts/lib/plan.sh:2" \
+expect_eq "BA5 the grep finds the planted reader and lib/plan.sh's, nothing else" "hooks/planted.sh:1 payload/scripts/lib/plan.sh:3" \
   "$( (cd "$BAT" && /usr/bin/grep -rn 'integration-branch' hooks payload) | /usr/bin/grep -vE '^[^:]+:[0-9]+:[[:space:]]*#|(die|usage|_co_refuse|log_finding)( [a-z-]+)? "' \
      | cut -d: -f1 | uniq -c | awk '{ print $2 ":" $1 }' | LC_ALL=C sort | paste -sd' ' -)"
 
