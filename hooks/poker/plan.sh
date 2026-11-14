@@ -1424,15 +1424,18 @@ BRF_EOF
     printf '%s' "$v"
   }
 
-  # rr_rows <plan> <current> [head] -> `<AC>\037<tier>\037<status>\037<auditor>\037<ruled 1|0|owed:<step>>\037<reason>` per
-  # criterion, the reader's order. THE RULING IS walls.sh's: each criterion is read through its readers (`matrix_load`,
+  # rr_rows <plan> <current> [head] -> `<AC>\037<tier>\037<status>\037<auditor>\037<ruled 1|0|owed:<step>>\037<person>\037<reason>`
+  # per criterion, the reader's order. THE RULING IS walls.sh's: each criterion is read through its readers (`matrix_load`,
   # the reader's answer and the authored blocks, `matrix_table_rows`, `matrix_block`) and judged by `matrix_row_ruled`,
   # sourced in a subshell as the facts judge sources it, so the card and the gate cannot answer one row two ways. A
   # WAIVER IS A FACT OF THE RUN: the reader's status says waived only where a waiver event names the criterion. A row the
   # gate defers at <current> (`matrix_row_deferred`: owed at the later step whose task proves it) is `owed:<step>`, not
   # ruled and not unruled, whatever verdict a passed evidence review gives it, as the gate asks the deferral first:
   # nothing has run that could prove it, and the step that runs it writes it. The auditor is printed as
-  # `placeholder_cell` folds it, `-` when it means none. The reason is the block's `reason:` key. Exit 2 when
+  # `placeholder_cell` folds it, `-` when it means none. THE PERSON'S PART is `confirmed` for a T4 row holding an attributed
+  # confirmation, `awaits` for a T4 row holding none that one would rule (the same `matrix_row_ruled` asked of the row
+  # with a confirmation in its attributed shape), and `-` otherwise. Its auditor cell never answers this alone, since
+  # at 15 that cell is the run's evidence review, which no person gave. The reason is the block's `reason:` key. Exit 2 when
   # walls.sh cannot be loaded or the run's facts could not be read: the card never guesses a ruling.
   rr_rows() {
     [ -f "$BIONIC_LIB/walls.sh" ] || return 2
@@ -1443,10 +1446,15 @@ BRF_EOF
         [ -n "$ac" ] || continue
         block="$(matrix_block "$ac")"
         ruled=0; matrix_row_ruled "$tier" "$status" "$aud" "$conf" "$waiver" && ruled=1
+        person=-
+        if [ "$tier" = T4 ]; then
+          if user_confirmed_attributed "$conf"; then person=confirmed
+          elif matrix_row_ruled "$tier" "$status" "$aud" "you 1970-01-01 confirmed" "$waiver"; then person=awaits; fi
+        fi
         owe="$(matrix_owing_step "$PLAN" "$ac")"
         ! matrix_row_deferred "$PLAN" "$owe" "$2" "$status" "$(matrix_owing_open "$PLAN" "$ac")" || ruled="owed:$owe"
         aud="$(placeholder_cell "$aud")"
-        printf '%s\037%s\037%s\037%s\037%s\037%s\n' "$ac" "$tier" "$status" "${aud:--}" "$ruled" \
+        printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\n' "$ac" "$tier" "$status" "${aud:--}" "$ruled" "$person" \
           "$(printf '%s\n' "$block" | sed -n 's/^[[:space:]]*reason:[[:space:]]*//p' | head -n 1)"
       done <<RR_MATRIX
 $(matrix_table_rows)
@@ -1568,7 +1576,7 @@ RR_MATRIX
   }
 
   poker_verb_release_approval() {
-    local nm line key reply ac tier st au ruled why fid sev reach state rows stated ttl sent ev q num dec grp h r role behind again
+    local nm line key reply ac tier st au ruled person why fid sev reach state rows stated ttl sent ev q num dec grp h r role behind again
     if ! { declare -F proof_branch_head >/dev/null 2>&1 || { [ -f "$BIONIC_LIB/proof.sh" ] && . "$BIONIC_LIB/proof.sh"; }; } \
        || ! declare -F proof_last_line >/dev/null 2>&1 || ! _proof_reader_load; then
       die "REFUSED — the release approval card is read through lib/proof.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
@@ -1635,9 +1643,9 @@ RR_OWED
 $RR_WAIVE
 RR_WAIVES
 
-    # ROWS: every matrix row, ruled or not as walls.sh rules it (rr_rows). Proved when discharged and ruled, and a T4 row
-    # so ruled under an empty-like auditor cell is one the user confirmed; waived when ruled with status waived. Every
-    # other row is a decision: a discharged T4 row under an empty-like cell is the user's own check, to confirm
+    # ROWS: every matrix row, ruled or not as walls.sh rules it (rr_rows). Proved when discharged and ruled, and one whose
+    # person's part is `confirmed` is one the user confirmed; waived when ruled with status waived. Every
+    # other row is a decision: a discharged row whose person's part is `awaits` is the user's own check, to confirm
     # (approve <AC>) or waive; any other is waived or run, a T4 row's standing finding said in the gate's words. The
     # step a row is owed against is the run's (the reader's `step`), the plan's `current:` only where the log has none.
     RR_ACT=0; RR_ACP=0; RR_ACY=0; RR_ACW=0; RR_ACU=0; RR_ACA=0; RR_ACR=0; RR_ACC=0; RR_ACL=0; RR_MISS=""
@@ -1646,19 +1654,19 @@ RR_WAIVES
       die "REFUSED — the release approval card asks walls.sh for each matrix row's ruling, and $BIONIC_LIB/walls.sh cannot be loaded or the run's facts could not be read; nothing is written. Run again: bash ${HOOK_DIR}/session-poker.sh $RR_AGAIN"
       exit 2
     fi
-    while IFS=$'\037' read -r ac tier st au ruled reason; do
+    while IFS=$'\037' read -r ac tier st au ruled person reason; do
       [ -n "$ac" ] || continue
       RR_ACT=$((RR_ACT + 1))
       if [ "$ruled" = 1 ] && [ "$st" = discharged ]; then
         RR_ACP=$((RR_ACP + 1))
-        [ "$tier" != T4 ] || [ "$au" != - ] || RR_ACY=$((RR_ACY + 1))
+        [ "$person" != confirmed ] || RR_ACY=$((RR_ACY + 1))
         continue
       fi
       if [ "$ruled" = 1 ] && [ "$st" = waived ]; then RR_ACW=$((RR_ACW + 1)); continue; fi
       # A ROW OWED AT A LATER STEP IS NO DECISION: the step that proves it writes it, the close for a row owed at 9.
       case "$ruled" in owed:9) RR_ACC=$((RR_ACC + 1)); continue ;; owed:*) RR_ACL=$((RR_ACL + 1)); continue ;; esac
       RR_MISS="${RR_MISS:+$RR_MISS }$ac"
-      if [ "$tier" = T4 ] && [ "$au" = - ] && [ "$st" = discharged ]; then
+      if [ "$person" = awaits ] && [ "$st" = discharged ]; then
         RR_ACA=$((RR_ACA + 1))
         rr_add row "row:$ac" "approve $ac" "waive $ac" "a T4 criterion, the user's own check" \
           "$ac, your own check, not confirmed yet" confirm waive "confirm $ac" "waive $ac"
