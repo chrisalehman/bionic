@@ -1405,8 +1405,8 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
 # `<docs-root>/record/<the bound plan's name less .plan.md>/landing-proofs.log`, which nothing writes
 # any more: a run's earlier landings stand in it, one `landed: row=<id|—> branch=<b> head=<40-hex>
 # merge=<40-hex> at=<ISO-UTC>` header per landing, read with the run's log beside it (lib/line.sh
-# `line_lines`), where each landing is now a `published` event. The path is derived as fill_ledger_path (lib/patrol.sh) derives its
-# own, in the project's docs tree, never in the tree being removed. The slug is lib/proof.sh `proof_plan_slug`'s, the
+# `line_lines`), where each landing is now a `published` event. The path is derived from the project's docs root
+# (lib/roots.sh `docs_root`), in the project's docs tree, never in the tree being removed. The slug is lib/proof.sh `proof_plan_slug`'s, the
 # one reader (wave-37 T2; AC-9.2), loaded on first use as units.sh and slots.sh are here.
 _wt_proof_load() {  # -> 0 once lib/proof.sh's slug reader is loaded
   declare -F proof_plan_slug >/dev/null 2>&1 && return 0
