@@ -502,20 +502,24 @@ poke "$RFC" reply "$FC_WD"
 expect_eq "REPLY-11 reply all default over an open waive:adversarial item exits 0" "0" "$RC"
 expect_regex "REPLY-11b …writing the waiver at the working head with the reply's words" \
   "^run/v1\|ev=waiver\|question=adversarial\|head=$FC_R\|by=Dana Fixture\|said=$FC_WD\|at=[0-9T:Z-]+\$" "$(/usr/bin/grep -F '|question=adversarial|' "$FC_REC/run.log" 2>/dev/null)"
-FC_VERSION=14
 
 # ============================================================
 section "§T4: a T4 row is read through the gate's one predicate: confirmed by you is proved, pending or a standing finding is a decision"
 # ============================================================
 # fails-when: an attributed T4 row under an empty-like auditor cell is put as a decision or counted not confirmed by
 # the auditor; a pending one is missing from Decisions; an attributed one under UNVERIFIABLE is counted proved.
-fc_t4() {  # <auditor cell> <user-confirmed value> -> PFC: FC_GOOD with a third row, discharged and T4
-  local c="$1" v="$2"
-  fc_plan "$FC_GOOD"
-  FC_T4_ROW="| AC-1.3 | T4 | discharged | see AC-1.3 | $c |" awk '
-    { print } /^\| AC-1\.2 \|/ { print ENVIRON["FC_T4_ROW"] }' "$PFC" > "$PFC.t4" && mv -f "$PFC.t4" "$PFC"
-  printf 'AC-1.3:\n  fails-when: the user finds the planted defect by hand\n  evidence: record/generic-evidence.md\n' >> "$PFC"
-  printf '  user-confirmed: %s\n  readback: what the user saw\n' "$v" >> "$PFC"
+fc_t4_rows() {  # <page> -> a third criterion, of eval type human, discharged under FC_T4_C, its block confirmed by FC_T4_V
+  FC_T4_ROW="| AC-1.3 | T4 | discharged | — | $FC_T4_C |" awk '
+    { print } /^\| AC-1\.2 \|/ { print ENVIRON["FC_T4_ROW"] }
+    /^\| REQ-1 \| the x writer \| AC-1\.2 \|/ { print "| REQ-1 | the x writer | AC-1.3 | human | the user runs the x writer by hand | the user finds the planted defect by hand |" }' \
+    "$1" > "$1.t4" && mv -f "$1.t4" "$1"
+  printf 'AC-1.3:\n  fails-when: the user finds the planted defect by hand\n  evidence: record/generic-evidence.md\n' >> "$1"
+  printf '  user-confirmed: %s\n  readback: what the user saw\n' "$FC_T4_V" >> "$1"
+}
+fc_t4_now() { fc_owed_now "$1"; fc_t4_rows "$1"; }  # <page> -> the same, the unrun criterion owed now beside it
+fc_t4() {  # <auditor cell> <user-confirmed value> [<edit>] -> PFC: FC_GOOD with a third row, discharged and T4, the unrun row owed now
+  FC_T4_C="$1"; FC_T4_V="$2"
+  fc_plan "$FC_GOOD" "" "${3:-fc_t4_now}"
 }
 fc_acc() { fc_under Tests | /usr/bin/grep 'acceptance —' | fc_flat; }  # the Tests section's acceptance line, unfolded
 FC_UC='Dana-Fixture 2026-10-20 "checked it by hand"'
@@ -572,6 +576,19 @@ poke "$RFC" approve AC-1.3 'never typed by the user'
 expect_eq "CONFIRM-3 words the user never typed: refused, exit 1, nothing appended" "1|" "$RC|$(fc_appr AC-1.3)"
 poke "$RFC" approve AC-9.9 'yes'
 expect_eq "CONFIRM-4 no such criterion, a name no row reads: refused, exit 1, nothing appended" "1|" "$RC|$(fc_appr AC-9.9)"
+# The confirmation is owed at the merge, never at the review: with the unrun row the close's, the pending T4 row is
+# the one thing the gate holds, and it holds it at 8 alone.
+fc_t4 '—' pending fc_t4_rows
+poke "$RFC" current 6 --check; FC_C6="$RC|$(printf '%s\n' "$OUT" | head -1)"
+poke "$RFC" current 7 --check
+expect_eq "CONFIRM-5 a pending T4 row: current 6 and 7 --check would advance" \
+  "0|poker: current 6 --check: would advance|0|poker: current 7 --check: would advance" "$FC_C6|$RC|$(printf '%s\n' "$OUT" | head -1)"
+poke "$RFC" current 8 --check
+expect_eq "CONFIRM-5b …current 8 --check refuses it, naming the row" "1|1" \
+  "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^bionic: commit refused — .*AC-1\.3')"
+fc_card early
+expect_eq "CONFIRM-5c …and card.sh early settles it as the page's own decision (exit 0)" "0|settles: row:AC-1.3" \
+  "$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -x 'settles: row:AC-1.3')"
 fc_t4 '—' pending
 fc_page
 expect_eq "CONFIRM-6 the acting render of a pending T4 row exits 0" "0" "$FC_RC"
@@ -594,7 +611,8 @@ expect_eq "CONFIRM-8 reply '$FC_CR2' applies the other choice (exit 0)" "0" "$RC
 [ "$RC" = 0 ] || printf '      reply said: %s\n' "$OUT"
 expect_eq "CONFIRM-8b …the row is waived" "waived" "$(fc_row AC-1.3)"
 expect_contains "CONFIRM-8c …through waive" "applied: row:AC-1.3 waive rc=0" "$(cat "$FC_REC/release-approval-$FC_H8.md")"
-expect_eq "CONFIRM-8d …and its confirmation stays pending" "  user-confirmed: pending" "$(/usr/bin/grep 'user-confirmed:' "$PFC")"
+expect_eq "CONFIRM-8d …and no approval confirms it, beside the release's that the same reply wrote" "yes|" \
+  "$([ -n "$(fc_appr release)" ] && echo yes)|$(fc_appr AC-1.3)"
 fc_typed "$FC_WD" "$FC_WR"
 
 # ============================================================
@@ -666,11 +684,11 @@ fc_record structure structure piece
 
 # The merge without a whole run at the head is tests/release-approval-2.test.sh; the words as its sections leave them:
 fc_typed "$FC_WD" "$FC_WR"
-FC_VERSION=14
 
 # ============================================================
 section "§POST: a reader row past the landed release keeps the card early until its reading is registered (AC-6.2)"
 # ============================================================
+FC_VERSION=14   # the reader row's status lives in the older Tasks table's own column, which the act does not carry
 # fails-when: the card renders while a reader row placed after the landed release has no registered reading; it stays
 # early, or puts a waiver, once the piece readings are registered at the fix's landing.
 FC_F7="$(s57_commit "$RFC" lib/x.sh 'T4: the fix after the release')"
@@ -832,11 +850,12 @@ expect_eq "CHECK-CHANGED-3 a release that leaves its check alone renders with it
   "$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c '^Bottom line$')"
 expect_eq "CHECK-CHANGED-3b …and says nothing of the check" "" "$(cc_line)"
 rm -f "$RFC/.bionic/config.yaml" "$FC_REC"/release-check-*.log "$FC_REC"/release-approval-*.md
-FC_VERSION=14
 
 # ============================================================
 section "§STEP0: card.sh step0 renders the configuration card in the 1.20.0 shape, ending on its question, and owes its reply (AC-20.1, AC-20.2; D3, D23)"
 # ============================================================
+# Its page is its own, written at 14 and at current: 0, never fc_plan's: the configuration card is drawn before the run
+# has a step to advance, and step0 asks no gate, so the version the builder carries the run to is not this card's.
 {
   printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
   printf 'scale-recommendation: "Several rows in one session. The ask names five files."\nregression: yes\n'
@@ -993,7 +1012,6 @@ expect_eq "STALE-5 a third approval at the head the newest line names: refused, 
 expect_contains "STALE-5b …an approval is recorded once at a head" "recorded once" "$OUT"
 rm -f "$FC_REC/landing-proofs.log"
 git -C "$RFC" reset -q --hard "$FC_R"
-FC_VERSION=14
 
 # ============================================================
 section "§STALE-NAME: an approval of any name the head has moved past is given again at the new head, beside the first"
@@ -1060,11 +1078,11 @@ fc_owed_later T1
 fc_page --preview
 expect_contains "OL-4 control: the same row whose task is the Step-4 row is put under Decisions" "AC-1.3" "$(fc_under Decisions)"
 expect_absent "OL-4b …and the line names nothing owed by the close" "owed by the close" "$(fc_acc)"
-FC_VERSION=14
 
 # ============================================================
 section "§GOALS-REFUSE: the card refuses to render over matrix rows that map to no requirement, and renders once serves: is written"
 # ============================================================
+FC_VERSION=14   # the themes are written over the older matrix's rows and blocks, which a page at 15 does not hold
 # fails-when: the card prints `Goals — 0 of N reached` over rows no theme reads (no serves:, no dotted id), the refusal
 # names neither the rows nor the serves: line that maps them, or the plan with serves: written is still refused.
 # FC_GOOD's plan with lib/plan-fixture.sh's flat themes; each read is --preview, so the two reads differ by serves: alone.
