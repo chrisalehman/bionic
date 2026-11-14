@@ -887,82 +887,35 @@ expect_eq "BP-13 the log names one writer of the part, the integrate row (read b
 expect_eq "BP-14 …and close-out made no commit: the branch is at the integrate row's" "$BP_TIP" "$(rv_tip "$PBP")"
 
 # ============================================================
-section "§PREFLIGHT-RECORD — close-out's preflight copy reads the landing record of the plan it copies"
-# ============================================================
-# A dry judgment of a COPY of the plan (`.<plan>.plan.md.preflight.<pid>`) is made so that nothing is written until the
-# gate says yes. A finding a landed row fixed is fixed in the RUN's landing record, which the copy's own name names nothing
-# of: read there, the record is absent, the finding is still to fix, and a `flag` review derives `fail`. The marker the
-# preflight binds its stand-in session with carries `dry_of=<plan>`, and `proof_debt_origin` maps the copy to the plan.
-# FIXTURE FIDELITY: the Step-8 fixture; the structure review is `result=flag` over a record holding two findings, one
-# to fix and moved `to=fixed row=T1` (finding-move's line), one a note; T1 is `landed` and the run's landing record
-# holds a green verdict for it; the Step-8 block stands in the plan, as a run that reached its gate has it, so the plan
-# as it stands and the plan close-out would write are judged on the same text. The marker is the one gate_ask writes.
-# ANTI-VACUITY: the derived lines are read by evidence name, and the plan's own line must be `flag flag` before the
-# copy's is asked.
-# fails-when: payload/scripts/lib/proof.sh proof_debt_origin honours a marker's dry_of= only for a plan verb's session,
-# so the preflight copy is mapped to itself (PR-3, PR-4); or honours it for a bound file that is no copy of the plan the
-# marker names, so a real session is read at another plan's record (PR-7, PR-8).
-# flag_fixture <name> -> the project built as above, echoed.
-flag_fixture() {
-  local p rec h plan
-  p="$(CO_PLAN_AT=14 mk_fixture "$1")"; advance_to "$p" 8
-  plan="$p/$PLAN_REL"; rec="$p/.bionic/docs/record/wave-01-fixture"
-  printf 'reviewed: aaaaaaa..bbbbbbb\nfindings: 2\nfinding: 1 S2 on file.txt:1 the fixture finding\nfinding: 2 S4 off - a note\nshown: 1 grep -n work file.txt\n' \
-    > "$rec/structure-flag.md"
-  h="$(fixture_git "$p" rev-parse wave/01-fixture)"
-  bash -c '. "$1/proof.sh" && proof_add_line "$2" "$(proof_line review "$3" 2026-10-04T13:00:00Z record/wave-01-fixture/structure-flag.md structure w-read flag piece)"' \
-    _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h" > "$plan.n" && mv "$plan.n" "$plan"
-  awk -v m="moved: record/wave-01-fixture/structure-flag.md#1 to=fixed row=T1 by=Fixture at=2026-10-06T14:00:00Z" '
-    /^approved-by: / { print; print m; next }
-    /^- Step 8:/ { print "- Step 8: CLOSED 2026-10-22T10:00:00Z — wave/01-fixture merged into main"; print "  merge: wave/01-fixture @ abc1234 reachable from main @ def5678"
-      print "  worktree-removed: none"; print "  cleanup: done"; print "  tmp-wiped: 0 entries"; print "  tasks-completed: T1, T2"; print "  attested-by: close-out.sh 1.26.0"
-      print "- Step 9: (pending)"; next }
-    { print }' "$plan" > "$plan.k" && mv "$plan.k" "$plan"
-  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=a.log|admitted=-|width=1|at=2026-10-06T10:20:00Z\n' "$h" \
-    > "$rec/landing-proofs.log"
-  printf '%s\n' "$p"
-}
-# pr_derived <project> <plan> [<record plan>] -> the structure-flag.md line of proof_readings_derived: written, derived.
-pr_derived() {
-  bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh"; proof_readings_derived "$2" "$3" ${4:+"$4"}' _ "$REPO_ROOT/payload/scripts/lib" "$2" "$1" "${3:-}" \
-    | awk -F'\t' '$1 == "record/wave-01-fixture/structure-flag.md" { print $2 " " $3 }'
-}
-PRF="$(flag_fixture preflight-record)"
-PRF_PLAN="$PRF/$PLAN_REL"
-PRF_COPY="${PRF_PLAN%/*}/.wave-01-fixture.plan.md.preflight.4242"
-cp "$PRF_PLAN" "$PRF_COPY"
-expect_eq "PR-1 the plan reads the review flag as written and flag derived, its fixed finding settled by the run's record" "flag flag" \
-  "$(pr_derived "$PRF" "$PRF_PLAN")"
-expect_eq "PR-2 the copy named as the preflight names it, read for its own record, derives fail: no landing record there" "flag fail" \
-  "$(pr_derived "$PRF" "$PRF_COPY")"
-printf 'plan=%s\ndry_of=%s\nengaged_at=2026-10-22T10:00:00Z\n' "$PRF_COPY" "$PRF_PLAN" > "$SANDBOX/pr-marker"
-printf 'plan=%s\nengaged_at=2026-10-22T10:00:00Z\n' "$PRF_COPY" > "$SANDBOX/pr-marker-bare"
-pr_origin() {  # <sid> <marker> <bound plan> -> the plan whose record the commit gate reads
-  bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh"; proof_debt_origin "$2" "$3" "$4"' _ "$REPO_ROOT/payload/scripts/lib" "$1" "$2" "$3"
-}
-expect_eq "PR-3 the preflight session's copy is mapped to the plan its marker says it copies" "$PRF_PLAN" \
-  "$(pr_origin closeout-preflight-4242 "$SANDBOX/pr-marker" "$PRF_COPY")"
-expect_eq "PR-4 …so the collector's call reads the copy as the plan reads: flag flag" "flag flag" \
-  "$(pr_derived "$PRF" "$PRF_COPY" "$(pr_origin closeout-preflight-4242 "$SANDBOX/pr-marker" "$PRF_COPY")")"
-expect_eq "PR-5 control: a marker with no dry_of= maps the copy to itself" "$PRF_COPY" \
-  "$(pr_origin closeout-preflight-4242 "$SANDBOX/pr-marker-bare" "$PRF_COPY")"
-expect_eq "PR-6 …and a plan verb's session still maps its dry copy (the verb's own marker, its own file name)" "$PRF_PLAN" \
-  "$(printf 'plan=%s.set-dry.77\ndry_of=%s\n' "$PRF_PLAN" "$PRF_PLAN" > "$SANDBOX/pr-marker-verb"; pr_origin planverb-77 "$SANDBOX/pr-marker-verb" "$PRF_PLAN.set-dry.77")"
-printf 'plan=%s\ndry_of=/elsewhere/wave-99-other.plan.md\nengaged_at=2026-10-22T10:00:00Z\n' "$PRF_PLAN" > "$SANDBOX/pr-marker-other"
-expect_eq "PR-7 a session bound to a real plan is read at that plan whatever its marker says dry_of=" "$PRF_PLAN" \
-  "$(pr_origin closeout-preflight-4242 "$SANDBOX/pr-marker-other" "$PRF_PLAN")"
-expect_eq "PR-8 …and a copy another process made is not this session's: the pid must be the session's" "$PRF_COPY" \
-  "$(pr_origin closeout-preflight-4243 "$SANDBOX/pr-marker" "$PRF_COPY")"
-rm -f "$PRF_COPY"
-
-# ============================================================
 section "§TWO-LINES — check gives one answer for the plan as it stands and the plan run would write"
 # ============================================================
 # On a plan whose flag review has a finding a landed row fixed, `check` prints two gate lines: the plan as it stands, and
 # the plan with the close's facts pending. Both read the run's record, so both read ok.
+# FIXTURE FIDELITY: the Step-8 fixture, its facts events in the run's log, each at its own instant: a structure review
+# `result=flag` over a record holding two findings, one to fix and one a note; the first moved `to=fixed row=T1` (the
+# event finding-move writes); T1's landing verdict green in the run's landing record; and step 8 carrying what the close
+# cleans, so the plan as it stands and the plan close-out would write are judged on the same facts. Without the verdict
+# the moved finding is still to fix, the flag derives fail, and both lines refuse.
 # fails-when: payload/scripts/close-out.sh check prints the preflight's ok under another wording, so the second line is not
 # the one the first is paired with (TL-2).
-run_close "$PRF" check
+tl_world() {  # <name> -> the project built as above, echoed
+  local p rec h
+  p="$(mk_fixture "$1")"; advance_to "$p" 8
+  rec="$p/.bionic/docs/record/wave-01-fixture"
+  printf 'reviewed: aaaaaaa..bbbbbbb\nfindings: 2\nfinding: 1 S2 on file.txt:1 the fixture finding\nfinding: 2 S4 off - a note\nshown: 1 grep -n work file.txt\n' \
+    > "$rec/structure-flag.md"
+  h="$(fixture_git "$p" rev-parse wave/01-fixture)"
+  bash -c '. "$1/proof.sh" || exit 1
+    LOG_AT=2026-10-04T13:00:00Z proof_event "$2" kind=review "head=$3" evidence=record/wave-01-fixture/structure-flag.md \
+      question=structure reader=w-read result=flag scope=piece || exit 1
+    LOG_AT=2026-10-22T10:00:00Z proof_step_event "$2" 8 cleanup=done "tmp-wiped=0 entries" "tasks-completed=T1, T2"' \
+    _ "$REPO_ROOT/payload/scripts/lib" "$p/$PLAN_REL" "$h"
+  printf 'run/v1|ev=finding|ref=record/wave-01-fixture/structure-flag.md#1|to=fixed|row=T1|by=Fixture|at=2026-10-06T14:00:00Z\n' >> "$p/$LOG_REL"
+  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=a.log|admitted=-|width=1|at=2026-10-06T10:20:00Z\n' "$h" \
+    > "$rec/landing-proofs.log"
+  printf '%s\n' "$p"
+}
+run_close "$(tl_world two-lines)" check
 expect_eq "TL-1 the plan as it stands: ok" "gate: ok against the plan as it stands" \
   "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -m1 '^gate: .*as it stands')"
 expect_eq "TL-2 the plan run would write: ok, the same answer" "gate: ok against the plan run would write" \

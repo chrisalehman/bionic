@@ -911,7 +911,7 @@ _proof_reading_result_var() {
   _proof_reading_derive "$droot" "$ev" "$res" "$tab" "$_PROOF_FIXED_IDS"
 }
 
-# proof_fixed <plan> [<tree>] [<record plan>] -> `<record>#<n><TAB><row><TAB><commit><TAB><born|moved>`, one line per finding a
+# proof_fixed <plan> [<tree>] -> `<record>#<n><TAB><row><TAB><commit><TAB><born|moved>`, one line per finding a
 # fix row answers and has landed green (wave-33 T13; REQ-5 AC-5.2, D6). The row answers the finding in one of
 # two ways: it names the finding on its born marker (lib/units.sh `units_born_findings`, which `task-add --born
 # <record>#<n>` writes), `born`; or the finding's newest move names it (`to=fixed row=<T>`,
@@ -930,15 +930,12 @@ _proof_reading_result_var() {
 # head is the reader's to ask (`_proof_fixed_var`): a born row's must, a moved row's need not, since the move
 # says the row fixed the finding whatever its ancestry (ADR-056: "a finding fixed before or beside the reading
 # is fixed"). RED has no machine record (research-verbs-landing.md G1): the green landing is the proof read.
-# <record plan> is the plan whose landing record is read, <plan> when not given: a plan verb's dry copy is read for
-# its text (its rows, its moves) and its origin for the record (wave-37 T2; REQ-9 AC-9.1, D12; hooks/bash-walls.sh).
 proof_fixed() {
-  local plan="${1:-}" tree="${2:-}" rplan="${3:-${1:-}}" born moved mf rec out gt="" heads="" lands="" byrow="" k id row c how l
+  local plan="${1:-}" tree="${2:-}" born moved mf rec out gt="" heads="" lands="" byrow="" k id row c how l
   [ -f "$plan" ] || return 0
-  # The moves are the run's events, read from the plan whose record is read: a dry copy of a plan has no log of its own.
-  mf="$(_proof_moved_fixed "$rplan")" || return 2
+  mf="$(_proof_moved_fixed "$plan")" || return 2
   [ -n "$mf" ] || /usr/bin/grep -qE ' born: review S[0-9]+ o[nf]f* of=' "$plan" 2>/dev/null \
-    || { _proof_units_load && units_born_logged "$rplan"; } || return 0
+    || { _proof_units_load && units_born_logged "$plan"; } || return 0
   _proof_units_load || return 0
   declare -F units_born_findings >/dev/null 2>&1 && declare -F units_rows >/dev/null 2>&1 || return 0
   born="$(units_born_findings "$plan" 2>/dev/null | awk -F'\t' '$2 == "landed" { print $1 "\t" $3 "\tborn" }')"
@@ -948,7 +945,7 @@ proof_fixed() {
     part == 1 { if ($10 == "landed") landed[$1] = 1; next }
     part == 2 && ($1 in landed) { print $1 "\t" $2 "\tmoved" }')"
   [ -n "$born" ] || [ -n "$moved" ] || return 0
-  rec="$(proof_debt_record "$rplan" "$tree")" || return 0
+  rec="$(proof_debt_record "$plan" "$tree")" || return 0
   _proof_fields && line_held "$rec" || return 0
   # Each finding comes out `F` (its row's newest verdict commit owes a suite and every owed suite reads green there:
   # fixed at that commit) or `R` (the row's landing owes no verdict: none recorded, or every one `result=absent`, so
@@ -981,7 +978,7 @@ proof_fixed() {
   case $'\n'"$out" in
     *$'\n'R$'\t'*)
       gt="$tree"; [ -n "$gt" ] || gt="$(git -C "$(dirname "$plan")" rev-parse --show-toplevel 2>/dev/null)"
-      heads="$(_proof_regression_heads "$rplan" "$rec")" || return 2
+      heads="$(_proof_regression_heads "$plan" "$rec")" || return 2
       [ -z "$heads" ] || ! declare -F units_landings >/dev/null 2>&1 || lands="$(units_landings "$plan" "$rec" 2>/dev/null)" ;;
   esac
   while IFS='	' read -r k id row c how; do
@@ -2007,15 +2004,13 @@ proof_fact_awk() {
   '
 }
 
-# proof_run_plan <plan> -> the plan whose run holds <plan>'s proofs: a plan writer's copy (`<plan>.<verb>.<pid>`, its dry
-# commit's `<plan>.<verb>-dry.<pid>`, close-out's `.<plan>.preflight.<pid>` beside it) names no record, and no copy adds
-# a proof, so its proofs are its plan's run's, as lib/units.sh reads a row's state; any other plan is its own.
+# proof_run_plan <plan> -> the plan whose run holds <plan>'s proofs: a plan writer's copy `<plan>.<verb>.<pid>` beside
+# it names no record, and no copy adds a proof, so its proofs are its plan's run's, as lib/units.sh reads a row's state;
+# any other plan is its own.
 proof_run_plan() {
   local plan="${1:-}" o
   case "${plan##*/}" in
-    *.plan.md.*)
-      o="${plan%%.plan.md.*}.plan.md"
-      if [ -f "$o" ]; then plan="$o"; else o="${o%/*}/${o##*/.}"; [ ! -f "$o" ] || plan="$o"; fi ;;
+    *.plan.md.*) o="${plan%%.plan.md.*}.plan.md"; [ ! -f "$o" ] || plan="$o" ;;
   esac
   printf '%s' "$plan"
 }
@@ -2147,11 +2142,11 @@ proof_pass_conflict() {
     END { if (other != "") print "head " other; else if (child) print "settled " head }'
 }
 
-# proof_readings_derived <plan> <tree> [<record plan>] -> `<evidence><TAB><written result><TAB><derived result>` for each
-# reading (`kind=review` with a `question=`) of the record plan's facts (`proof_lines`), the
+# proof_readings_derived <plan> <tree> -> `<evidence><TAB><written result><TAB><derived result>` for each
+# reading (`kind=review` with a `question=`) of the plan's facts (`proof_lines`), the
 # derived result what `_proof_reading_result` gives it (wave-28 T60; D33, AC-8.6; A-orch-161), and
 # NOTHING when no finding event of the run binds a pass (`proof_bind_awk`): every derived result is then the
-# written one. The finding events are the record plan's, read once (`_proof_findings_load`); exit 2 when that fails. The commit wall judges text and reads no record, so its collector (hooks/bash-walls.sh)
+# written one. The finding events are the plan's, read once (`_proof_findings_load`); exit 2 when that fails. The commit wall judges text and reads no record, so its collector (hooks/bash-walls.sh)
 # asks this once, from the step the wall reads (lib/walls.sh `eg_plan_reads_readings`), and hands the
 # lines over; the wall and the judge answer a reading's result one way. ONE PASS OVER THE PLAN (T72): the
 # readings and every binding event's state are gathered together (each reading's own lines come to the
@@ -2161,21 +2156,17 @@ proof_pass_conflict() {
 #
 # A FIXED FINDING BINDS TOO (wave-33 T13; REQ-5 AC-5.2, D6): with a <tree>, the plan's fixed findings
 # (`proof_fixed`) are read once, and a reading one of whose findings a born row fixed at or after its head is
-# derived as the judge derives it, so the wall and the judge read a fixed question one way. <record plan> is the
-# plan whose landing record `proof_fixed` reads, <plan> when not given (wave-37 T2; REQ-9 AC-9.1, D12): the wall hands
-# a plan verb's dry copy as <plan> and the plan it was copied from (`proof_debt_origin`) as <record plan>.
+# derived as the judge derives it, so the wall and the judge read a fixed question one way.
 proof_readings_derived() {
-  local plan="${1:-}" tree="${2:-}" rplan="${3:-${1:-}}" droot="" k a b c d tab="" nl fixed="" ev pl
+  local plan="${1:-}" tree="${2:-}" droot="" k a b c d tab="" nl fixed="" ev pl
   [ -f "$plan" ] || return 0
   nl=$'\n'
-  # The findings and the readings are the run's events, read from the plan whose record is read: a dry copy has no log
-  # of its own.
-  _proof_findings_load "$rplan" || return 2; ev="$_PROOF_FINDINGS"
-  pl="$(proof_lines "$rplan")" || return 2
+  _proof_findings_load "$plan" || return 2; ev="$_PROOF_FINDINGS"
+  pl="$(proof_lines "$plan")" || return 2
   if [ -n "$tree" ]; then
     _proof_roots_load
     ! declare -F docs_root >/dev/null 2>&1 || droot="$(docs_root "$tree" 2>/dev/null)"
-    fixed="$(proof_fixed "$plan" "$tree" "$rplan")" || return 2
+    fixed="$(proof_fixed "$plan" "$tree")" || return 2
   fi
   while IFS='	' read -r k a b c d; do
     case "$k" in
@@ -2740,8 +2731,7 @@ proof_debts() {
 # proof_debt_record <plan> [<tree>] -> `<docs-root>/record/<the plan's name less .plan.md>/
 # landing-proofs.log`, the record `land` writes for that plan (lib/worktree.sh `_wt_proofs_path`, the
 # same rule: this file does not load worktree.sh). rc 1 when no path can be named. It takes a plan path and no
-# session, since the judge asks it with none: a caller holding a plan verb's copy hands the origin
-# (`proof_debt_origin`), as hooks/bash-walls.sh does.
+# session, since the judge asks it with none.
 proof_debt_record() {
   local plan="${1:-}" tree="${2:-}" slug
   [ -f "$plan" ] || return 1
@@ -2753,55 +2743,12 @@ proof_debt_record() {
   printf '%s/record/%s/landing-proofs.log' "$(docs_root "$tree")" "$slug"
 }
 
-# proof_debt_origin <sid> <marker> <bound plan> -> the plan whose landing record holds the debts a
-# commit bound to <bound plan> owes. A dry commit is bound to a COPY of a plan, and the copy's own name
-# names no record, so the dry commit reads the record of the plan it was made from, which its session's
-# marker says in `dry_of=<plan>` beside `plan=<copy>`. Two callers make such a copy: a plan verb proves its change by a dry commit of
-# `<plan>.<verb>-dry.<pid>` under `planverb-<pid>`, and close-out's preflight judges the plan it would
-# write as `<dir>/.<plan file>.preflight.<pid>` under `closeout-preflight-<pid>`. One record per plan,
-# whichever file carries its text: the answer to "is this review question answered" is the same on the
-# plan and on its copy.
-# The field is honoured only when all three hold: the marker says `dry_of=`, the session id ends in
-# `-<pid>`, and the bound file is one of the two names above for that same pid.
-# A real session bound to a real plan names no such file, so it reads exactly its own plan's record,
-# whatever a marker line says. No fork: the marker is two or three lines, read here.
-proof_debt_origin() {
-  local sid="${1:-}" marker="${2:-}" plan="${3:-}" line from="" verb pid="" dir="" base="" ok=0
-  case "$sid" in *-[0-9]*) pid="${sid##*-}" ;; esac
-  case "$pid" in ''|*[!0-9]*) printf '%s' "$plan"; return 0 ;; esac
-  if [ -f "$marker" ] && [ ! -L "$marker" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do
-      case "$line" in dry_of=?*) from="${line#dry_of=}"; break ;; esac
-    done < "$marker"
-  fi
-  case "$from" in
-    '') printf '%s' "$plan"; return 0 ;;
-  esac
-  case "$plan" in
-    "$from".?*-dry."$pid")
-      verb="${plan#"$from".}"; verb="${verb%-dry."$pid"}"
-      case "$verb" in ''|*[!a-z-]*) : ;; *) ok=1 ;; esac ;;
-  esac
-  case "$from" in */*) dir="${from%/*}"; base="${from##*/}" ;; *) base="$from" ;; esac
-  if [ "$ok" = 0 ] && [ -n "$base" ]; then
-    case "$dir" in
-      '') [ "$plan" = ".$base.preflight.$pid" ] && ok=1 ;;
-      *) [ "$plan" = "$dir/.$base.preflight.$pid" ] && ok=1 ;;
-    esac
-  fi
-  if [ "$ok" = 1 ]; then printf '%s' "$from"; else printf '%s' "$plan"; fi
-}
-
 # proof_plan_slug <plan> -> the plan's slug, its file name less `.plan.md`, the directory its run's records live
 # in, `<docs-root>/record/<slug>/` (wave-37 T2; REQ-9 AC-9.2, D12). THE ONE READER: every site in the hooks and
 # the scripts that names a run's landing record, ledger, brief or continuation from a plan path asks it, so a second
-# slug is never derived beside it. It reads the name it is given, and only that: a plan verb's dry copy
-# `<plan>.<verb>-dry.<pid>` reads its own literal name. The reader once took a session and its marker and mapped the
-# copy to its origin (`proof_debt_origin`'s guard); no production caller ever passed them, so the arm was removed
-# with its pins (wave-38 T19; REQ-11 AC-11.5). The dry commit's debts are still read from the origin's record, by
-# `proof_debt_origin` at its two callers. Never a name-only strip: a file named `X.plan.md.anything` reads its own
-# name, not X's record (review pass 60 P0-1). A name reader: the file need not exist. rc 1 when the name leaves no
-# slug.
+# slug is never derived beside it. It reads the name it is given, and only that: never a name-only strip, so a file
+# named `X.plan.md.anything` reads its own name, not X's record. A name reader: the file need not exist. rc 1 when the
+# name leaves no slug.
 proof_plan_slug() {
   local plan="${1:-}" slug
   slug="${plan##*/}"; slug="${slug%.plan.md}"
