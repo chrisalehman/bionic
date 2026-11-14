@@ -51,13 +51,17 @@
 #     `=$?` or `if` reads on that line: a fold that failed would read there as a run with no fact.
 #
 # THE READER'S FILES are named once, in READER_FILES: a parse inside one of them is the reader's own
-# and is admitted. Nothing else is admitted.
+# and is admitted. THE ACT'S WRITES are named once, in ACT_WRITES, each a `<file>:<function>`: a plan write inside
+# that function is the act's own and is admitted, and a write in any other function of its file, or under that
+# function's name in another file, is named. Nothing else is admitted.
 #
 # Executed, never sourced; bash 3.2.
 
 set -uo pipefail
 
 READER_FILES="payload/scripts/lib/reader.sh payload/scripts/lib/plan-read.sh payload/scripts/lib/translate.sh"
+# The act that brings a run forward rewrites its plan: its plan is left holding only what a person wrote.
+ACT_WRITES="payload/scripts/bring-forward.sh:bf_main"
 
 case "${BASH_SOURCE[0]}" in */*) _orc_dir="${BASH_SOURCE[0]%/*}" ;; *) _orc_dir="." ;; esac
 root="${1:-$(cd "$_orc_dir/../.." && pwd -P)}"
@@ -74,7 +78,7 @@ while IFS= read -r f; do files+=("$f"); done < <(find hooks payload/scripts -typ
 # The patterns are written so that this file's own text matches none of them: `\/` and `[#]` stand
 # where the grammar has a bare character, so the check never counts itself. Lines are read as bytes:
 # the walk of a command a character at a time stops on a line that is no valid UTF-8.
-LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v hooks=" $hook_files " '
+LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v acts=" $ACT_WRITES " -v hooks=" $hook_files " '
   function opname(s) {  # one operand token -> 1 when it names a plan, 2 a log
     if (s ~ /\.plan\.md"?$/) return 1
     if (s ~ /run\.log"?$/) return 2
@@ -175,6 +179,7 @@ LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v hooks=" $hook_files " '
       pn[FILENAME]++
     }
     if (!(index(admitted, " " FILENAME " ")) && FILENAME != "payload/scripts/lib/proof.sh" && unheard(line)) ul[++nu] = "unheard\t" FILENAME ":" FNR
+    if (nwrite && index(acts, " " FILENAME ":" fn[depth] " ")) nwrite = 0
     if (nwrite) {
       if (!(FILENAME in wfirst)) { wfirst[FILENAME] = FNR; word[++npw] = FILENAME }
       wn[FILENAME]++
