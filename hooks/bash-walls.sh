@@ -200,15 +200,6 @@ fi
 # the plan they belong to. The gate reads it only when that is the plan it judges. Only for a call
 # that holds a commit (the word, no fork otherwise), so no other call pays for the read.
 #
-# A PLAN VERB'S DRY COMMIT IS BOUND TO A COPY of the plan (wave-27 T76; review pass 60 P0-1): the
-# copy keeps `BIONIC_DEBTS_PLAN`, the plan the gate judges, and the record is the one of the plan the
-# copy was made from, which the verb wrote into its marker as `dry_of=` (lib/proof.sh
-# `proof_debt_origin`, which reads `dry_of=` for any session's copy). So a dry commit
-# and a real commit of the same plan text at the same step get the same answer from the debt arm,
-# and from the readings arm (wave-37 T2; REQ-9 AC-9.1, D12): the origin is named FIRST, before the
-# readings are derived, and handed to the deriver as the plan whose record it reads, so a finding a
-# landed row fixed is found on the copy as on the plan. The copy's text is still the text read.
-#
 # JURISDICTION FIRST (T80; wave-19 AC-9.2). A commit that lands in another repository has no plan
 # here, so the collector asks the gate's own predicate (lib/walls.sh `eg_commit_outside_root`)
 # before it resolves anything, and for such a commit reads neither the binding nor any record.
@@ -220,14 +211,9 @@ case "$COMMAND" in
   *commit*)
     if ! eg_commit_outside_root && [ -z "$_EG_JUR_UNPLACED" ] && [ "$_EG_CWD_SRC" != moving ]; then
       BIONIC_DEBTS_PLAN="$(session_plan "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || BIONIC_DEBTS_PLAN=""
-      _bw_from="$BIONIC_DEBTS_PLAN"
-      if [ -n "$_bw_from" ] && declare -F proof_debt_origin >/dev/null 2>&1; then
-        _bw_from="$(proof_debt_origin "$BIONIC_SID" "$(engaged_marker_path "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" "$_bw_from")"
-      fi
-      # THE ORIGIN IS HANDED TO THE READER RULE TOO. "After the release" is the publish order in a landing record,
-      # and a copy's own name names none, so the gate's table judgment (lib/walls.sh `validate_dispatch_ledger`)
-      # reads the origin beside the plan it judges, and a dry commit of a copy is judged as a commit of the plan.
-      BIONIC_DEBTS_ORIGIN="$_bw_from"
+      # A session is bound to the plan itself, so the plan whose landing record is read is the plan judged; lib/walls.sh
+      # still reads this name in two places, and it is that plan.
+      BIONIC_DEBTS_ORIGIN="$BIONIC_DEBTS_PLAN"
       # THE READINGS' RESULTS AS THE JUDGE DERIVES THEM (wave-28 T60; D33, AC-8.6; A-orch-161). A
       # reading re-rated by a `check:`, `deferred:` or `moved:` line is judged on its derived result,
       # which needs the record its findings are in; the gate reads no record, so the collector reads it
@@ -238,10 +224,10 @@ case "$COMMAND" in
       # prints nothing for a plan with no line that binds a pass. The hook's clock is 10 s, past which
       # the walls fail open for the commit.
       if [ -n "$BIONIC_DEBTS_PLAN" ] && declare -F proof_readings_derived >/dev/null 2>&1 && eg_plan_reads_readings "$BIONIC_DEBTS_PLAN"; then
-        BIONIC_READINGS="$(proof_readings_derived "$BIONIC_DEBTS_PLAN" "$BIONIC_ROOT" "${_bw_from:-$BIONIC_DEBTS_PLAN}" 2>/dev/null)" || BIONIC_READINGS=""
+        BIONIC_READINGS="$(proof_readings_derived "$BIONIC_DEBTS_PLAN" "$BIONIC_ROOT" 2>/dev/null)" || BIONIC_READINGS=""
       fi
-      if [ -n "$_bw_from" ] && declare -F proof_debt_record >/dev/null 2>&1 \
-         && _bw_rec="$(proof_debt_record "$_bw_from" "$BIONIC_ROOT")"; then
+      if [ -n "$BIONIC_DEBTS_PLAN" ] && declare -F proof_debt_record >/dev/null 2>&1 \
+         && _bw_rec="$(proof_debt_record "$BIONIC_DEBTS_PLAN" "$BIONIC_ROOT")"; then
         BIONIC_DEBTS_OPEN="$(proof_debts_read "$_bw_rec")"
       fi
     fi ;;

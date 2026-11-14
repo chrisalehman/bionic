@@ -263,27 +263,22 @@ section "CARRY — wave-28 T17 (AC-8.7, D21): close-out writes every open deferr
 #   deferred: <record>#<n> <S> <reach> "<title>" stated="<sentence|->" from=<wave name>
 #
 # in the plan's order, `-` for a deferral with no sentence, a `"` or a `\` in a sentence written
-# `\"` and `\\` as the plan holds it. A `check:` line is a check owed, not a deferral, and is not
-# carried. The heading is written whether or not there is anything under it, so a continuation
-# that reports no deferral differs from one written before the heading existed.
+# `\"` and `\\` as the plan holds it. The heading is written whether or not there is anything under
+# it, so a continuation that reports no deferral differs from one written before the heading existed.
 # CARRY_REC: hoisted to tests/close-out.prelude.sh (a later part reads it)
 # carry_plant: hoisted to tests/close-out.prelude.sh (a later part reads it)
 # carry_section: hoisted to tests/close-out.prelude.sh (a later part reads it)
 # CARRY_W: hoisted to tests/close-out.prelude.sh (a later part reads it)
 CARRY_Q1='Said \"go\" \\ now | here'   # the sentence: Said "go" \ now | here, as the plan holds it
-PC="$(CO_PLAN_AT=14 mk_fixture carry1)"; advance_to "$PC" 8
+PC="$(mk_fixture carry1)"; advance_to "$PC" 8
 carry_plant "$PC" \
   "deferred: $CARRY_REC#2 S3 on \"second, written first\" stated=\"The second sentence.\"" \
   "deferred: $CARRY_REC#1 S2 off \"first, unstated\"" \
-  "check: $CARRY_REC#4 S1 off \"a settled check, not a deferral\" settled=S2:off by=record/wave-01-fixture/chk.md" \
   "deferred: $CARRY_REC#3 S2 off \"third, quoted\" stated=\"$CARRY_Q1\""
-# The check: line is SETTLED (wave-28 T14, ruling A-orch-165): since T41 an open check holds the step, so
-# the fixture settles it, in the form the retired finding-check wrote (settled= and by=; wave-31 T32 removed
-# the verb and the hold, and an old line binds nothing), at a rating the table defers (S2 off).
-expect_eq "CARRY-0 precondition: the plan carries three deferred: lines and one check: line inside its SDLC State" "3 1" \
-  "$(awk '/^## /{ s = ($0 ~ /^## SDLC State/) } s && /^deferred: /{ d++ } s && /^check: /{ c++ } END { print d + 0, c + 0 }' "$PC/$PLAN_REL")"
+expect_eq "CARRY-0 precondition: the run's log carries three deferral events, one with its sentence" "3 1" \
+  "$(awk 'index($0, "|ev=finding|") && index($0, "|to=deferred|") { d++; if (index($0, "|stated=")) s++ } END { print d + 0, s + 0 }' "$PC/$LOG_REL")"
 run_close "$PC" run
-expect_eq "CARRY-1 run exits 0 over a plan carrying deferred: and check: lines (the gate and the parsers admit it)" "0" "$CO_RC"
+expect_eq "CARRY-1 run exits 0 over a run carrying deferrals (the gate and the parsers admit it)" "0" "$CO_RC"
 expect_nonempty "CARRY-3 precondition: the extractor finds lines under the heading" "$(carry_section "$PC/$CONT_REL")"
 expect_eq "CARRY-5 …and the heading comes after the template's Next wave section and before the Resume instruction" "yes" \
   "$(awk '/^## Next wave/ { a = NR } /^## Deferrals$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PC/$CONT_REL")"
