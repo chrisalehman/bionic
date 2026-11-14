@@ -274,7 +274,6 @@ expect_block() {  # <label> <must-contain> [must-not-contain]
   ok "$1"
 }
 
-LA_MISSING="ListAgents"
 TL_MISSING="TaskList or a plan-ledger write"
 
 section "Section 2: discrimination — what counts, and when"
@@ -601,8 +600,6 @@ sd_order() {  # <dir> <name> [by]
 sd_stood() {  # <dir> <name>
   sd_met "$1" "$2"; sd_order "$1" "$2"
 }
-
-SD_MISSING="stand-down unanswered"
 
 # 48: neither stopped nor declined -> block, naming the agent and the way out.
 d=$(make_env); u_tick "$d"; both_duties "$d"; sd_stood "$d" W-ALPHA; u_tick_out "$d" "$(sd_line W-ALPHA)"

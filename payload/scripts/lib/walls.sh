@@ -2342,11 +2342,9 @@ case "${PLAN##*/}:$SDLC_VERSION" in
     exit 0 ;;
 esac
 
-if [ "$_EG_V15" -eq 0 ] && [ -z "$(normalize_newlines "$PLAN" | awk '
-  /^[[:space:]]*```/ { fence = !fence; next }
-  fence { next }
-  /^## SDLC State/ { print "yes"; exit }
-')" ]; then
+# A page at neither 14 nor 15 with no state section is no plan; the translation tells the section.
+declare -F translate_has_state >/dev/null 2>&1 || . "$BIONIC_LIB/translate.sh"
+if [ "$_EG_V15" -eq 0 ] && ! translate_has_state "$PLAN"; then
   exit 0
 fi
 
@@ -4031,7 +4029,7 @@ validate_dispatch_ledger() {
   [ "$(rigor_level "$RIGOR")" = double ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
 
-  local tasks rows id violations findings _eg_origin
+  local rows id violations findings _eg_origin
   # THE ROWS AND THE INVARIANTS BOTH COME FROM lib/units.sh (REQ-1e, spec §2 D3).
   # This is the check the widened table breaks hardest: `| id | step | kind | task |
   # agent | deps | size | serves | Files | status |` puts `agent` at the `$6` this
@@ -4049,20 +4047,13 @@ validate_dispatch_ledger() {
   # ledger at all (the D7 PRESENCE rule, guarded to the triple above), and that every
   # row's evidence has actually been written on a `- T<n>:` line in ## SDLC State.
   #
-  # PRESENCE IS A QUESTION ABOUT THE SECTION, NOT ABOUT THE TABLE, and the base's
-  # own fence-aware extractor is what answers it (correctness F-1, A-68.1). Asking
-  # `units_rows` instead moved the basis: that reader exits 1 for a section carrying
+  # PRESENCE IS A QUESTION ABOUT THE SECTION, NOT ABOUT THE TABLE, and the plan-read library's heading answer is what
+  # answers it. Asking `units_rows` instead moved the basis: that reader exits 1 for a section carrying
   # PROSE and no header row, a shape the docblock above calls SATISFIED and this
   # refusal's own Fix text advertises ("a header plus a 'none dispatched' line is
   # fine"). The next double multi_agent wave that wrote it would have been unable
-  # to commit. It is the extractor the pre-wave hook carried at 84da6b5.
-  tasks=$(normalize_newlines "$PLAN" | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## Tasks/ { f=1; next }
-    /^## / { f=0 }
-    f')
-  if [ -z "$tasks" ]; then
+  # to commit.
+  if ! plan_read_heading "$PLAN" Tasks >/dev/null; then
     _eg_detail="canonical-sdlc double multi_agent ${SCALE} plan has no '## Tasks' dispatched-task ledger section.
 Plan: $PLAN
 Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); the orchestrator appends one row per dispatched task-shaped unit (D7)."

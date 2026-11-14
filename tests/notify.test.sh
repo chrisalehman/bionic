@@ -106,7 +106,7 @@ nt_owed() {
   ( cd "$repo" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && shift && "$@"' _ "$NT_LIB" "$@" ) 2>/dev/null
 }
 
-# nt_stop <repo> [event] [stop_hook_active] -> NT_OUT, NT_ERR, NT_RC: the real Stop hook, fed the
+# nt_stop <repo> [event] [stop_hook_active] -> NT_OUT, NT_RC: the real Stop hook, fed the
 # platform's payload, in the scratch home. The transcript is one short user line.
 NT_TX="$TMPROOT/stop-transcript.jsonl"
 printf '{"type":"user","timestamp":"2026-10-11T00:00:00.000Z","message":{"role":"user","content":"go"}}\n' > "$NT_TX"
@@ -117,7 +117,6 @@ nt_stop() {
   NT_OUT=$(cd "$d" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" bash "$STOP_HOOK" \
     <<< "$payload" 2>"$TMPROOT/stop.err")
   NT_RC=$?
-  NT_ERR=$(cat "$TMPROOT/stop.err" 2>/dev/null)
 }
 
 # nt_card <repo> <verb> <artifact...> -> NT_OUT, NT_RC: card.sh run from the repo, as the run does.
@@ -431,7 +430,6 @@ for _f in in_fixture fixture_git fixture_plan_text fixture_epic_text plant_facts
 done
 expect_eq "D0 close-out.prelude.sh's fixture builders were all read out of it" "" "$NT_IMPORT_MISSING"
 CO_SIDA="nt-closeout-session-a1a1a1a1"
-NT_PLUGIN_ROOT_SAVED="${BIONIC_PLUGIN_ROOT:-}"
 channel_on "$SB_HOME/.claude"
 
 PD="$(mk_fixture nt-deliver)"; advance_to "$PD" 8

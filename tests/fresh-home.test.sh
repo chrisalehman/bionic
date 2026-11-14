@@ -605,10 +605,6 @@ run_payload() {  # <script> [args...] — stdin carries the answers
 
 YES="$(for _ in $(seq 1 80); do printf 'y\n'; done)"
 
-SETTINGS="${HOME_FIX}/.claude/settings.json"
-CCS_CONFIG="${HOME_FIX}/.config/ccstatusline/settings.json"
-NB_SKILL="${HOME_FIX}/.claude/skills/notebooklm/SKILL.md"
-GLOBAL_MEMORY="${HOME_FIX}/.claude/CLAUDE.md"
 RC_FILE_FIX="${HOME_FIX}/.zshrc"
 
 # --- The verdict glyphs, read from doctor.sh rather than restated -----------
@@ -629,7 +625,6 @@ const_from() {  # <file> <name>
   return 1
 }
 DOCTOR_OK_GLYPH="$(const_from "$DOCTOR_SH" DOCTOR_OK)"   || DOCTOR_OK_GLYPH=""
-DOCTOR_BAD_GLYPH="$(const_from "$DOCTOR_SH" DOCTOR_BAD)" || DOCTOR_BAD_GLYPH=""
 DOCTOR_NIL_GLYPH="$(const_from "$DOCTOR_SH" DOCTOR_NIL)" || DOCTOR_NIL_GLYPH=""
 
 # --- The rc item's extractors ------------------------------------------------
@@ -654,12 +649,6 @@ env_sh_var() {  # <name> — the value of one variable env.sh defines
 RC_START_LIT="$(env_sh_var RC_START)"
 RC_END_LIT="$(env_sh_var RC_END)"
 RC_PROXY_LINE="$(env_sh rc_default claude-proxy)"
-
-# The working-principles item's markers and text, likewise read from the payload:
-# the block setup writes is the block the shipped file carries (wave-27 D16).
-PRINCIPLES_START_LIT="$(env_sh_var PRINCIPLES_START)"
-PRINCIPLES_END_LIT="$(env_sh_var PRINCIPLES_END)"
-PRINCIPLES_SHIPPED="${PAYLOAD}/context/working-principles.md"
 
 # The lines BETWEEN bionic's markers, in order. Not "does the file contain the
 # proxy line": a proxy line outside the markers is a line bionic does not own.

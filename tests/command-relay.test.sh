@@ -50,9 +50,6 @@ set -uo pipefail
 REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
 SETUP_SH="${PAYLOAD}/scripts/setup.sh"
-VOICE_BLOCK="${REPO}/agents-src/blocks/voice-contract.md"
-SETUP_MD="${PAYLOAD}/commands/setup.md"
-DOCTOR_MD="${PAYLOAD}/commands/doctor.md"
 RENDER_SH="${REPO}/agents-src/render.sh"
 WIDTH_SH="${PAYLOAD}/scripts/lib/width.sh"
 
@@ -95,11 +92,6 @@ TMP="$(mktemp -d "/tmp/cr.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 # ═══════════════════════════════════════════════════════════════════════════
 # Group A — the relay contract demands a fenced code block
 # ═══════════════════════════════════════════════════════════════════════════
-
-VOICE_TEXT="$(cat "$VOICE_BLOCK")"
-
-SETUP_MD_TEXT="$(cat "$SETUP_MD")"
-DOCTOR_MD_TEXT="$(cat "$DOCTOR_MD")"
 
 expect_true "A5: render.sh --check finds no drift (templates, finals and manifest agree)" \
   bash "$RENDER_SH" --check

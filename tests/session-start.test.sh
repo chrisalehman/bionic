@@ -200,12 +200,10 @@ WRAP_EOF
 # the initial 0 against itself: forty green rows over an unread status. The status
 # and the stderr therefore cross the subshell boundary the only way they can, on
 # disk, and `rc` / `errtext` read them back afterwards.
-OUTF=""; ERRF=""; RCF=""
 STANDING_MARK='goes through the bionic:decision skill'
 drive() {  # <project> <source> <env-sid> <payload-sid> <pidfile-sid|-> -> stdout
   local proj="$1" src="$2" esid="$3" psid="$4" fsid="$5" home
   home="$WORK/home.$RANDOM.$RANDOM"; mkdir -p "$home"
-  OUTF="$WORK/last.out"; ERRF="$WORK/last.err"; RCF="$WORK/last.rc"
   # DRIVE_PLUGIN_ROOT=<dir>: the CLAUDE_PLUGIN_ROOT the CLI hands the hook (§21, wave-36 T1). Empty by
   # default, and set empty rather than inherited, so no section reads the root of whatever ran the suite.
   # DRIVE_HOOK_BASH=<path>: the bash that runs the hook (§22); `bash` on the PATH by default.

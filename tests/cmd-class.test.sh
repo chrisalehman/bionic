@@ -45,11 +45,9 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 PAYLOAD_HOOKS="$REPO_ROOT/payload/hooks"
 PLAIN_HOOKS="${BIONIC_HOOKS_DIR}"
 LIB="$REPO_ROOT/payload/scripts/lib/cmd-class.sh"
-# BOTH WALLS ARE ONE PROCESS (T23). `wall_farm_out_reminder` and
-# `wall_background_suite_guard` are functions of payload/scripts/lib/walls.sh behind
-# hooks/bash-walls.sh, so the two names below name the same hook; the classifier each of
+# `wall_farm_out_reminder` and `wall_background_suite_guard` are functions of
+# payload/scripts/lib/walls.sh behind hooks/bash-walls.sh; the classifier each of
 # them consumes is unchanged, which is what this suite is about.
-FARM_OUT="$PAYLOAD_HOOKS/bash-walls.sh"
 BG_GUARD="$PAYLOAD_HOOKS/bash-walls.sh"
 # NO SCRIPT STANDS IN FRONT OF THIS WALL: the manifest registers hooks/bash-walls.sh alone on
 # PreToolUse|Bash, and the arming predicate is a function-level gate inside
@@ -353,13 +351,6 @@ GREPO=$(make_repo guarded)
 run_compound() {  # <payload> — straight into hooks/bash-walls.sh, as hooks.json registers it
   run_hook "$1" "$BG_GUARD"
 }
-
-# THE BACKGROUND ARM'S OWN SENTENCE, which is what every row in this section is really
-# asking about. It is `wall_background_suite_guard`'s fact and no other wall's, so its
-# presence in the composed verdict is the arm firing and its absence is the arm silent —
-# a reading that survives farm-out-reminder answering the same payload.
-BSG_REASON='suite-run refused — a backgrounded suite'"'"'s result is never read'
-FARM_REASON="run refused — this command belongs in a subagent"
 
 # THE DETAIL KNOB IS NOT THIS SECTION'S ANY MORE. `BIONIC_WALL_VERBOSE=1` is the `exit2`
 # channel's rule — one line on the user stream, everything else behind the knob — and the
