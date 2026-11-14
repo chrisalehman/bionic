@@ -178,6 +178,7 @@ expect_absent "NW-4b …offering no waiver" "waive regression" "$FC_OUT$FC_ERR"
 # ============================================================
 section "§EARLY: the page refuses CARD-EARLY on each of the three facts, and the tick says the same line (AC-1.2; D20)"
 # ============================================================
+FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
 # fails-when: the page renders while a reader row is open, an owed reading is unregistered at the head, or the
 # advance to 6, 7 or 8 checks red; the refusal names another reason; a writer row or an acked reader trips it.
 fc_plan "$FC_GOOD"
@@ -202,11 +203,14 @@ fc_page
 expect_eq "EARLY-3 the whole structure reading unregistered at the head: exit 1" "1" "$FC_RC"
 expect_eq "EARLY-3b …CARD-EARLY naming the question and the head" "CARD-EARLY — structure unregistered at $FC_H8" "$FC_ERR"
 expect_eq "EARLY-3c …nothing rendered, no page written" "|" "$FC_OUT|$(fc_pages)"
+# No Step-7 document: the old State's n/a line and the header's adrs: line, its home at 15, both gone before the act.
 FC_NODOC='/n\/a: no decision/d'
-fc_plan "$FC_GOOD" "$FC_NODOC"
+fc_no_doc() { /usr/bin/grep -v '^adrs: ' "$1" > "$1.new"; mv "$1.new" "$1"; }  # <page> -> its header names no Step-7 document
+fc_plan "$FC_GOOD" "$FC_NODOC" fc_no_doc
 poke "$RFC" current 7 --check
-expect_eq "EARLY-4 precondition: the Step-7 line names no adr, rca or n/a, so current 7 --check refuses on it" \
+expect_eq "EARLY-4 precondition: the header names no Step-7 document, so current 7 --check refuses on it" \
   "1|poker: current 7 --check: would refuse" "$RC|$(printf '%s\n' "$OUT" | head -1)"
+expect_contains "EARLY-4a …in the Step-7 document's own words" "Step 7's document" "$OUT"
 fc_page
 expect_eq "EARLY-4b release-approval exits 1, CARD-EARLY with the check's own verdict line, nothing written" \
   "1|CARD-EARLY — current 7 --check: would refuse|" "$FC_RC|$FC_ERR|$(fc_pages)"
@@ -245,18 +249,26 @@ fc_page
 expect_eq "EARLY-7 the failing reading beside an unheld release check no default settles: CARD-EARLY (exit 1)" \
   "1|CARD-EARLY — current 8 --check: would refuse|" "$FC_RC|$FC_ERR|$FC_OUT"
 rm -f "$RFC/.bionic/config.yaml"
-# THREE ROWS WITH NO AUDITOR CELL: the Step-6 gate refuses the first; the page offers all three as decisions.
-fc_plan "$FC_GOOD"
-awk '/^\| AC-1\.1 \|/ { print "| AC-1.1 | T1 | discharged | see AC-1.1 | |"; print "| AC-1.3 | T1 | discharged | see AC-1.3 | |"; print "| AC-1.4 | T1 | discharged | see AC-1.4 | |"; next }
-  /^\| AC-1\.2 \|/ { print "| AC-1.2 | T1 | discharged | see AC-1.2 | CONFIRMED |"; next }
-  { print }
-  END { for (i = 3; i <= 4; i++) printf "AC-1.%d:\n  fails-when: planted defect %d\n  evidence: record/generic-evidence.md\n  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n", i, i }' \
-  "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
-poke "$RFC" current 6 --check
-expect_contains "EARLY-8 precondition: current 6 --check refuses on a row the auditor has not confirmed" \
-  "the auditor has not confirmed AC-1.1" "$OUT"
+# THREE ROWS THE AUDITOR DID NOT CONFIRM: each proof carries the auditor's UNVERIFIABLE, so the advance to 6 takes it as a
+# verdict and the advance to 8 refuses the first as unruled; the page offers all three as decisions. A proof that names
+# no verdict takes the evidence review standing at the head, which here passed, so an empty cell is confirmed at 15.
+fc_unconfirmed() {  # <page> -> three criteria discharged under the auditor's UNVERIFIABLE, the pending one discharged and confirmed
+  awk '/^\| AC-1\.1 \|/ { for (i = 1; i <= 4; i++) if (i != 2) print "| AC-1." i " | T1 | discharged | — | UNVERIFIABLE |"; next }
+    /^\| AC-1\.2 \|/ { print "| AC-1.2 | T1 | discharged | — | CONFIRMED |"; next }
+    /^\| REQ-1 \| the x writer \| AC-1\.2 \|/ { print
+      for (i = 3; i <= 4; i++) printf "| REQ-1 | the x writer | AC-1.%d | hermetic | `bash tests/a.test.sh` | planted defect %d |\n", i, i; next }
+    { print }
+    END { for (i = 3; i <= 4; i++) printf "AC-1.%d:\n  fails-when: planted defect %d\n  evidence: record/generic-evidence.md\n  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n", i, i }' \
+    "$1" > "$1.new" && mv "$1.new" "$1"
+}
+fc_plan "$FC_GOOD" "" fc_unconfirmed
+FC_CK=""; for fc_n in 6 8; do poke "$RFC" current "$fc_n" --check; FC_CK="$FC_CK$RC"; done
+expect_eq "EARLY-8 precondition: current 6 --check is green, and current 8 --check refuses on a row the auditor has not confirmed" \
+  "01|yes" "$FC_CK|$(fc_has "$OUT" 'the auditor has not confirmed AC-1.1')"
 fc_page
 expect_eq "EARLY-8b …and the page renders (exit 0, no refusal)" "0|" "$FC_RC|$FC_ERR"
+expect_eq "EARLY-8c …putting the three rows as its first decisions, AC-1.1 under Decisions" "row:AC-1.1 row:AC-1.3 row:AC-1.4|yes" \
+  "$(fc_keys | /usr/bin/grep '^row:' | paste -sd' ' -)|$(fc_has "$(fc_under Decisions)" 'AC-1.1')"
 expect_absent "EARLY-8d …and not the confirmed, discharged AC-1.2" "AC-1.2" "$(fc_under Decisions)"
 poke "$RFC" reply "$FC_WD"
 expect_eq "EARLY-8f reply all default waives the three rows" "waived waived waived" "$(fc_row AC-1.1) $(fc_row AC-1.3) $(fc_row AC-1.4)"
@@ -265,7 +277,7 @@ expect_eq "EARLY-8g …and current 6, 7 and 8 --check are then green" "000" "$FC
 # THE STEP-8 APPROVAL REFUSAL IS THE PAGE'S OWN: in the release order the advance to 8 refuses first on the missing
 # `approved: release` line, which is decision 7 of the page, so a run whose every other fact holds renders and puts both
 # approvals. (The order is a test row at Step 5 and the release's doc row; the fixture's matrix is fully confirmed.)
-fc_plan "$FC_GOOD" 's/^\(| AC-1\.2 | T1 \)| pending |/\1| discharged |/
+fc_plan "$FC_GOOD" 's/^\(| AC-1\.2 | T1 \)| pending | see AC-1\.2 |/\1| discharged | — |/
 /^| T1 | 4 | build/a\
 | T4 | 5 | test | the regression | implementor | — | 30 | REQ-1 | — | — | — | landed | approval:plan |'
 poke "$RFC" current 8 --check
@@ -318,19 +330,21 @@ expect_eq "PREV-8c control: the reviewer acked, the same run is ready and the de
   "yes|yes|" \
   "$(fc_has "$FC_BL" 'Ready for your decisions')|$(fc_has "$FC_BL" 'You owe ')|$(fc_has "$FC_BL" 'Once the run is ready')"
 new_roster "$RFC"
-FC_VERSION=14
 
 # ============================================================
 section "§AGREE: the decisions are the owed items, the unproved rows and the findings recommended against (D7, D19)"
 # ============================================================
-# fails-when: the page offers an item the record does not owe, or leaves one out.
-fc_plan "$FC_GOOD"
+FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
+# fails-when: the page offers an item the record does not owe, or leaves one out. The unrun row is owed now
+# (fc_owed_now), so the unproved rows are a source the card draws from.
+fc_plan "$FC_GOOD" "" fc_owed_now
 fc_owe approve:release; fc_owe approve:merge; fc_owe waive:structure
+# A criterion is unproved unless the reader's fold has it discharged by a waiver, or by a proof the auditor confirmed.
+fc_unproved_rows() { bash -c '. "$1/reader.sh" && reader_cells "$2"' _ "$FC_LIB" "$PFC" 2>/dev/null \
+  | awk -F'\037' '!($2 == "discharged" && ($3 == "waiver" || $6 == "CONFIRMED")) { print "row:" $1 }'; }
 fc_expected() {  # -> the keys the sources owe, sorted: owed approvals and waivers but the regression, unproved rows, against
   { fc_owed | /usr/bin/grep -E '^(approve|waive):' | /usr/bin/grep -v '^waive:regression$'
-    awk -F'|' '/^## /{ m = ($0 ~ /^## Verification Matrix/) } m && /^\| AC-/ { s = $4; gsub(/^[ \t]+|[ \t]+$/, "", s); a = $2; gsub(/^[ \t]+|[ \t]+$/, "", a)
-      u = $6; gsub(/^[ \t]+|[ \t]+$/, "", u)
-      if (s != "waived" && !(s == "discharged" && u == "CONFIRMED")) print "row:" a }' "$PFC"
+    fc_unproved_rows
     printf '%s\n' "$@"
   } | awk 'NF' | LC_ALL=C sort
 }
@@ -352,7 +366,7 @@ printf 'release-approval/v1|dec=5|key=approve:ship|default=approve ship|other=-|
 expect_eq "AGREE-3 a planted extra decision goes red" "differs" "$(fc_agree "$TMPROOT/fc-planted.md")"
 /usr/bin/grep -v '|key=row:AC-1.2|' "$FC_REC/release-approval-$FC_H8.md" > "$TMPROOT/fc-dropped.md"
 expect_eq "AGREE-3b …and so does a dropped one" "differs" "$(fc_agree "$TMPROOT/fc-dropped.md")"
-fc_plan "$FC_GOOD"
+fc_plan "$FC_GOOD" "" fc_owed_now
 fc_page --against "finding:$FC_FID"
 expect_eq "AGREE-4 a finding recommended against joins the set" "same" "$(fc_agree "$FC_REC/release-approval-$FC_H8.md" "finding:$FC_FID")"
 
