@@ -36,33 +36,24 @@ set -uo pipefail
 
 PAH_LIB="$REPO_ROOT/payload/scripts/lib"
 PAH_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
-CO_PLAN_AT=15   # the worlds here are at 15; pah_world stays at 14 for a suite that reads it out unasked
+CO_PLAN_AT=15   # the worlds here are at 15
 
 # pah_world <label> <owed suites, comma-joined, or empty> <landings> -> PAH_P, PAH_PLAN, PAH_F (the whole run's head)
 # and PAH_H (the working head): the close-out fixture at Step 8 with a whole run at F that left <owed> red, then
 # <landings> code landings, landing k greening the owed suites at positions k, k + <landings>, …; with landings the
 # integration branch takes the working branch, the readings move to H and the run carries the word to merge at H.
-# The page is at 14 unless the caller asks CO_PLAN_AT=15: a suite that reads it out by name writes an older page's
-# lines into it. At 15 the proof, the readings' head and the word are the run's log's events, each by its writer.
+# The page is at 15, where the proof, the readings' head and the word are the run's log's events, each by its writer.
 pah_world() {
-  local label="$1" owed="$2" n="${3:-0}" p plan w rec k i s su c log=""
-  p="$(CO_PLAN_AT="${CO_PLAN_AT:-14}" mk_fixture "$label")" || return 1
+  local label="$1" owed="$2" n="${3:-0}" p plan w rec k i s su c log
+  p="$(CO_PLAN_AT=15 mk_fixture "$label")" || return 1
   advance_to "$p" 8
   plan="$p/$PLAN_REL"; w="$p-wave"; rec="$p/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
   PAH_F="$(fixture_git "$p" rev-parse wave/01-fixture)"
-  # the page's version read inline: a suite that reads this builder out by name carries no prelude helper
-  if /usr/bin/grep -qx 'canonical_sdlc_version: 15' "$plan"; then
-    log="$p/$LOG_REL"
-    sed '/|ev=proof|kind=regression|/d' "$log" > "$log.n" && mv "$log.n" "$log"
-    bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
-      LOG_AT=2026-10-04T12:00:00Z proof_event "$2" kind=regression "head=$3" "evidence=record/wave-01-fixture/regression-run-$3.log" ${4:+"owed=$4"}' \
-      _ "$PAH_LIB" "$plan" "$PAH_F" "$owed" || return 1
-  else
-    sed '/^proved: kind=regression /d' "$plan" > "$plan.n" && mv "$plan.n" "$plan"
-    bash -c '. "$1/proof.sh" || exit 1
-      proof_add_line "$2" "$(proof_floor_line "$3" 2026-10-04T12:00:00Z "record/wave-01-fixture/regression-run-$3.log" "$4")"' \
-      _ "$PAH_LIB" "$plan" "$PAH_F" "$owed" > "$plan.n" && mv "$plan.n" "$plan"
-  fi
+  log="$p/$LOG_REL"
+  sed '/|ev=proof|kind=regression|/d' "$log" > "$log.n" && mv "$log.n" "$log"
+  bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
+    LOG_AT=2026-10-04T12:00:00Z proof_event "$2" kind=regression "head=$3" "evidence=record/wave-01-fixture/regression-run-$3.log" ${4:+"owed=$4"}' \
+    _ "$PAH_LIB" "$plan" "$PAH_F" "$owed" || return 1
   mkdir -p "${rec%/*}"
   k=1
   while [ "$k" -le "$n" ]; do
@@ -90,16 +81,10 @@ pah_world() {
   if [ "$n" -gt 0 ]; then
     fixture_git "$p" merge -q --no-ff -m "merge wave" wave/01-fixture >/dev/null 2>&1 || return 1
     # The landings cover the head and no pass ran at it, so the merge close-out delivers is the person's word at H.
-    if [ -n "$log" ]; then
-      sed "s/|ev=proof|kind=review|head=$PAH_F|/|ev=proof|kind=review|head=$PAH_H|/" "$log" > "$log.n" && mv "$log.n" "$log"
-      bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
-        LOG_AT=2026-10-04T14:00:00Z proof_approval_event "$2" merge-unproved by=fixture "head=$3" "said=merge it"' \
-        _ "$PAH_LIB" "$plan" "$PAH_H" || return 1
-    else
-      awk -v f="$PAH_F" -v h="$PAH_H" '/^proved: kind=review / { sub("head=" f, "head=" h) } { print }
-        /^current: / { print "approved: merge-unproved by fixture 2026-10-04T14:00:00Z head=" h " \"merge it\"" }' "$plan" > "$plan.n" \
-        && mv "$plan.n" "$plan"
-    fi
+    sed "s/|ev=proof|kind=review|head=$PAH_F|/|ev=proof|kind=review|head=$PAH_H|/" "$log" > "$log.n" && mv "$log.n" "$log"
+    bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
+      LOG_AT=2026-10-04T14:00:00Z proof_approval_event "$2" merge-unproved by=fixture "head=$3" "said=merge it"' \
+      _ "$PAH_LIB" "$plan" "$PAH_H" || return 1
   fi
   PAH_P="$p"; PAH_PLAN="$plan"
 }
