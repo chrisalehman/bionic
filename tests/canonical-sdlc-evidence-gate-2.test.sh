@@ -114,7 +114,7 @@ expect_allow "31d naming the plan in an otherwise-clean commit → allow, silent
 # REFUTED on a fail, empty with none; its confirmation is the approval naming it. At double rigor the auditor owes
 # a verdict from Step 6 and a ruling from Step 8; at single the column is unread; with no rigor the strict reading
 # holds. A T4 criterion is ruled by its approval unless the auditor's finding stands.
-# FIXTURE FIDELITY: eg_page's run at 15, its branch at the fixture head, its criterion discharged by a proof after the rest.
+# FIXTURE FIDELITY: eg_page's run at 15, its branch at the fixture head, its criterion discharged by a proof after the rest and before any line a row gives, so a person's word follows it.
 # fails-when: matrix_auditor_required reads single as required (m32-single), or an unknown rigor as not (m32-norigor);
 # matrix_row_owes admits an empty cell at 6 (m32-6v) or a REFUTED one at 8 (m32-8r); the finding-stands arm admits a
 # confirmed T4 row the auditor refuted (m32-t4r).
@@ -132,10 +132,10 @@ m32_home() {  # <step> <rigor, or - for none> <eval type> <evidence review: pass
   esac
   [ "$4" = pass ] || printf 'run/v1|ev=waiver|question=evidence|head=%s|by=Dana|said=ship it|at=2026-10-04T01:00:04Z\n' "$EG_HEAD" >> "$(plan_fixture_log "$P32")"
   [ "$1" != 8 ] || printf 'run/v1|ev=step|n=8|cleanup=n/a|at=2026-10-04T01:00:05Z\n' >> "$(plan_fixture_log "$P32")"
-  shift 4; [ "$#" -eq 0 ] || printf '%s\n' "$@" >> "$(plan_fixture_log "$P32")"
   printf 'run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|at=2026-10-04T01:00:09Z\n' >> "$(plan_fixture_log "$P32")"
+  shift 4; [ "$#" -eq 0 ] || printf '%s\n' "$@" >> "$(plan_fixture_log "$P32")"
 }
-m32_ap='run/v1|ev=approval|key=AC-1.1|by=Dana Fixture|said=I watched it hold|at=2026-10-04T01:00:06Z'
+m32_ap='run/v1|ev=approval|key=AC-1.1|by=Dana Fixture|said=I watched it hold|at=2026-10-04T01:00:10Z'
 m32_home 6 double hermetic none
 expect_block "m32-6v double rigor at 6, the evidence question waived with no review: the criterion owes the auditor's verdict" "$M32_H" 'git commit -m "x"' "get the auditor's verdict"
 m32_home 6 double hermetic fail

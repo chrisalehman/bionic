@@ -161,9 +161,9 @@ eg6_plan() {  # <current> <scale> <lines> [<Step 6 line>] -> a double plan the g
 }
 # eg6_world <repo> <plan text> [<eval type of its criterion>] [<log line>...] -> EG6_PAGE, the run at 15 the text's state section
 #   stands for: plan_fixture's page at the text's current:, at double rigor, its log holding the fixture's events, a
-#   regression proof, the text's readings, moves and waivers read through lib/translate.sh, then each line given, then
-#   the criterion's proof (EG6_AC, the fixture's own unless named; its evidence EG6_EVIDENCE, the generic record unless named),
-#   then the asks the run already held, which belong to the run and outlive a rebuild of its other facts; the working
+#   regression proof, the text's readings, moves and waivers read through lib/translate.sh, then the criterion's proof
+#   (EG6_AC, the fixture's own unless named; its evidence EG6_EVIDENCE, the generic record unless named), then each line
+#   given, so a person's word given after the proof stands after it, then the asks the run already held, which belong to the run and outlive a rebuild of its other facts; the working
 #   branch and the base at the repository's head, so the evidence review there is the auditor's cell and the judge's
 #   chains start there.
 eg6_world() {
@@ -180,8 +180,8 @@ eg6_world() {
   { printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=record/floor.log|at=2026-10-04T01:00:00Z\n' "$head"
     bash -c '. "$1/reader.sh" && . "$1/translate.sh" && translate "$2" events' _ "$lib" "$t" \
       | grep -E '^run/v1[|]ev=(proof[|]kind=review|finding|waiver)[|]'
+    printf 'run/v1|ev=proof|ac=%s|evidence=%s|at=2026-10-04T01:00:01Z\n' "$ac" "${EG6_EVIDENCE:-record/generic-evidence.md}"
     [ "$#" -eq 0 ] || printf '%s\n' "$@"
-    printf 'run/v1|ev=proof|ac=%s|evidence=%s|at=2026-10-09T00:00:00Z\n' "$ac" "${EG6_EVIDENCE:-record/generic-evidence.md}"
     [ -z "$asks" ] || printf '%s\n' "$asks"; } >> "$(plan_fixture_log "$EG6_PAGE")"
   rm -f "$t"; git -C "$repo" branch -f wave/01-fixture HEAD >/dev/null 2>&1
 }
