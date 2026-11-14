@@ -217,10 +217,9 @@ fc_page
 expect_eq "EARLY-3 the whole structure reading unregistered at the head: exit 1" "1" "$FC_RC"
 expect_eq "EARLY-3b …CARD-EARLY naming the question and the head" "CARD-EARLY — structure unregistered at $FC_H8" "$FC_ERR"
 expect_eq "EARLY-3c …nothing rendered, no page written" "|" "$FC_OUT|$(fc_pages)"
-# No Step-7 document: the old State's n/a line and the header's adrs: line, its home at 15, both gone before the act.
+# No Step-7 document: the old State's n/a line gone before the act, so the header the act writes names none.
 FC_NODOC='/n\/a: no decision/d'
-fc_no_doc() { /usr/bin/grep -v '^adrs: ' "$1" > "$1.new"; mv "$1.new" "$1"; }  # <page> -> its header names no Step-7 document
-fc_plan "$FC_GOOD" "$FC_NODOC" fc_no_doc
+fc_plan "$FC_GOOD" "$FC_NODOC"
 poke "$RFC" current 7 --check
 expect_eq "EARLY-4 precondition: the header names no Step-7 document, so current 7 --check refuses on it" \
   "1|poker: current 7 --check: would refuse" "$RC|$(printf '%s\n' "$OUT" | head -1)"
@@ -269,8 +268,6 @@ rm -f "$RFC/.bionic/config.yaml"
 fc_unconfirmed() {  # <page> -> three criteria discharged under the auditor's UNVERIFIABLE, the pending one discharged and confirmed
   awk '/^\| AC-1\.1 \|/ { for (i = 1; i <= 4; i++) if (i != 2) print "| AC-1." i " | T1 | discharged | — | UNVERIFIABLE |"; next }
     /^\| AC-1\.2 \|/ { print "| AC-1.2 | T1 | discharged | — | CONFIRMED |"; next }
-    /^\| REQ-1 \| the x writer \| AC-1\.2 \|/ { print
-      for (i = 3; i <= 4; i++) printf "| REQ-1 | the x writer | AC-1.%d | hermetic | `bash tests/a.test.sh` | planted defect %d |\n", i, i; next }
     { print }
     END { for (i = 3; i <= 4; i++) printf "AC-1.%d:\n  fails-when: planted defect %d\n  evidence: record/generic-evidence.md\n  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n", i, i }' \
     "$1" > "$1.new" && mv "$1.new" "$1"
@@ -508,11 +505,9 @@ section "§T4: a T4 row is read through the gate's one predicate: confirmed by y
 # ============================================================
 # fails-when: an attributed T4 row under an empty-like auditor cell is put as a decision or counted not confirmed by
 # the auditor; a pending one is missing from Decisions; an attributed one under UNVERIFIABLE is counted proved.
-fc_t4_rows() {  # <page> -> a third criterion, of eval type human, discharged under FC_T4_C, its block confirmed by FC_T4_V
+fc_t4_rows() {  # <page> -> a third criterion, of tier T4, discharged under FC_T4_C, its block confirmed by FC_T4_V
   FC_T4_ROW="| AC-1.3 | T4 | discharged | — | $FC_T4_C |" awk '
-    { print } /^\| AC-1\.2 \|/ { print ENVIRON["FC_T4_ROW"] }
-    /^\| REQ-1 \| the x writer \| AC-1\.2 \|/ { print "| REQ-1 | the x writer | AC-1.3 | human | the user runs the x writer by hand | the user finds the planted defect by hand |" }' \
-    "$1" > "$1.t4" && mv -f "$1.t4" "$1"
+    { print } /^\| AC-1\.2 \|/ { print ENVIRON["FC_T4_ROW"] }' "$1" > "$1.t4" && mv -f "$1.t4" "$1"
   printf 'AC-1.3:\n  fails-when: the user finds the planted defect by hand\n  evidence: record/generic-evidence.md\n' >> "$1"
   printf '  user-confirmed: %s\n  readback: what the user saw\n' "$FC_T4_V" >> "$1"
 }
@@ -1071,7 +1066,6 @@ fc_ol_rows() {  # <page> -> the close row T4 (step 9), and a third criterion, pe
   fc_owed_now "$1"
   awk '
     { print }
-    /^\| REQ-1 \| the x writer \| AC-1\.2 \|/ { print "| REQ-1 | the close reads | AC-1.3 | T3 | `bash payload/hooks/session-poker.sh landing-report --hand-holds` | the close reads above zero |" }
     /^\| T3 \| 8 \| integrate/ { print "| T4 | 9 | close | close-out, continuation.md | orchestrator | — | 10 | REQ-1 | .bionic/docs/record/wave-x/continuation.md | — | — | pending | merge |" }
     /^\| AC-1\.2 \|/ { print "| AC-1.3 | T3 | pending | — |  |" }
     END { print "AC-1.3:"; print "  fails-when: the close reads above zero"
