@@ -232,9 +232,9 @@ _bf_homes() {  # <plan> <header out> -> a `<key><TAB><value>` line in <header ou
   : > "$2"
   for k in working-branch:4 base-sha:4 adrs:7; do
     v="$(plan_read_header "$plan" "${k%:*}" 2>/dev/null)" && [ -n "${v#*=}" ] && continue
-    v="$(printf '%s\n' "$found" | awk -F'\t' -v k="${k%:*}" '$1 == k { print $2; exit }')"
+    v="$(awk -F'\t' -v k="${k%:*}" '$1 == k { print $2; exit }' <<< "$found")"
     if [ -n "$v" ]; then printf '%s\t%s\n' "${k%:*}" "$v" >> "$2"
-    elif printf '%s\n' "$found" | grep -qx "reached	${k#*:}"; then printf 'gap/v1|ev=step|n=%s|field=%s|why=absent\n' "${k#*:}" "${k%:*}"; fi
+    elif grep -qx "reached	${k#*:}" <<< "$found"; then printf 'gap/v1|ev=step|n=%s|field=%s|why=absent\n' "${k#*:}" "${k%:*}"; fi
   done
 }
 
