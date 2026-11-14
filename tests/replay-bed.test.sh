@@ -9,8 +9,8 @@
 #   §CARDS    for each card, in a world brought forward, the reader's answers at the card's instant equal its
 #             expected file less the gaps list; the cut run is read as it stands at 14, beside the hand-written lines.
 #   §PAGES    the release card rendered in each card's world, brought forward, equals the replay table that card
-#             printed, less the gaps list; the one world where a criterion was pending with cells written
-#             by hand draws no card, and the act names those cells on its gaps list.
+#             printed, less the gaps list; in the one world where a criterion was pending with cells written
+#             by hand, the act names those cells on its gaps list and the reader at 15 reads it pending.
 #   §CATCH    a copy of the reader with the replace rule taken out, then the cancel rule, disagrees with a card.
 #   §COVER    every question of the closed list is asked and none is refused, and every event type has a line.
 #   §FOLLOWS  a review row's rendered brief starts its range at the reader's last review proof of its questions,
@@ -18,7 +18,7 @@
 #   §OPEN     run_open asks the reader's step of a run brought forward, whatever its plan's prose says; a run with
 #             no log is judged from its plan, so each closed fixture run reads closed and the cut run open.
 #   §FOLLOWS-CONTINUATION  close-out's check reads a debt only the run's log holds into its debt line and Deferrals.
-#   §AGREE    in each card's world that draws a card, the release card's Reviews lines and the sheet's reviews line count alike, and
+#   §AGREE    in each card's world, the release card's Reviews lines and the sheet's reviews line count alike, and
 #             both print the reader's acts taken by hand and open asks at the log the card read.
 #   §HALF     a run not brought forward, its approval and landings in its plan and records and what came after in
 #             its log: a landing the log appends reads once and last, the run reads open at the plan's step, and a
@@ -198,17 +198,15 @@ for x in "$X"/release-approval-*.facts; do
   a=""; for k in $(page "$X/$w/record/${c##*/}/$n.md" | sed -n 's/^card\.decision\.\([^=]*\)=.*|pick=other|.*/\1/p'); do a="$a --against $k"; done
   W="$(page "$X/$w/record/${c##*/}/$n.md" | less "$n" "$w")"; expect_nonempty "$n: the card printed a replay table" "$W"
   G="$(render "$d" "$p" $a | less "$n" "$w")"
+  expect_eq "$n: the card rendered at its instant equals the card printed, less the gaps" "$W" "$G"
+  [ "$W" = "$G" ] || sed 's/^/      render said: /' "$d.err"
   if [ "$n" = release-approval-fcbb975f ]; then
-    # The one world a run brought forward truly differs from what it printed: a criterion was pending at the instant with an
-    # evidence and a verdict written into its cells by hand, which 15 has no place for, so the act names them on its
-    # gaps list and the card is early for a criterion with no proof, where the run's own card put it as a decision.
-    expect_eq "$n: brought forward at its instant, the card is early and draws no table" "1|" "$(grep -c '^CARD-EARLY — ' "$d.err")|$G"
-    expect_eq "$n: …AC-7.3 alone is named undischarged on the act's gaps list, by its evidence and auditor cells" "AC-7.3:auditor AC-7.3:evidence" \
+    # A criterion pending at the instant with an evidence and a verdict written into its cells by hand, which 15 has no
+    # place for: the act names them on its gaps list, and the card puts the criterion as a decision, as the run's did (the
+    # gaps list holds that decision out of the table above).
+    expect_eq "$n: AC-7.3 alone is named undischarged on the act's gaps list, by its evidence and auditor cells" "AC-7.3:auditor AC-7.3:evidence" \
       "$(sed -n 's/^gap\/v1|ev=criterion|criterion=\([^|]*\)|field=\([^|]*\)|why=undischarged$/\1:\2/p' "$c/kept/gaps" | sort | tr '\n' ' ' | sed 's/ $//')"
     expect_eq "$n: …and the reader at 15 reads it pending" "state=pending" "$(ask "$p" cell AC-7.3)"
-  else
-    expect_eq "$n: the card rendered at its instant equals the card printed, less the gaps" "$W" "$G"
-    [ "$W" = "$G" ] || sed 's/^/      render said: /' "$d.err"
   fi
   [ "$n" != release-approval-31da41f7 ] || { PG="$G"; PD="$d"; PP="$p"; PH="$h"; PA="$at"; }
 done
@@ -378,8 +376,7 @@ printf 'run/v1|ev=step|n=7|at=2026-11-02T00:00:00Z\n' >> "$CR/run.log"; expect_c
 
 section "AGREE"
 nums() { sed -n 's/^run\.so-far: \([0-9]*\) acts\{0,1\} taken by hand · \([0-9]*\) open asks\{0,1\}$/\1 \2/p'; }
-# The world whose card is early draws no card to count; the three that draw hold the subject.
-for d in "$WORLD_ROOT"/pages/release-approval-*/; do d="${d%/}"; n="${d##*/}"; [ "$n" != release-approval-fcbb975f ] || continue; p="$(ls "$d"/.bio*/docs/plans/*/*.plan.md)"
+for d in "$WORLD_ROOT"/pages/release-approval-*/; do d="${d%/}"; n="${d##*/}"; p="$(ls "$d"/.bio*/docs/plans/*/*.plan.md)"
   cp "$d.read" "${p%/plans/*}/record/$(basename "$p" .plan.md)/run.log"; sv="$( cd "$d" && bash "$R/hooks/session-poker.sh" sitrep "$p" 2>"$d.serr" )"
   c="$(awk '$0 == "Reviews" { r = 1; next } r && !NF { exit } r && !/^ / { if (index($0, "✅") == 1) p++; else f++ } END { printf "%d passed, %d failed", p, f }' "$d.out")"
   s="$(printf '%s\n' "$sv" | sed -n 's/^reviews: \([0-9]* passed, [0-9]* failed\), .*/\1/p')"
@@ -400,7 +397,8 @@ HP="$(ls "$HB"/docs/plans/*/*.plan.md)"; HR="$HB/docs/record/$(basename "$HP" .p
 bound_marker "$HW" "$HS" "$HP"; ( cd "$HW" && CLAUDE_CODE_SESSION_ID=$HS bash "$R/hooks/session-poker.sh" arm ) >/dev/null 2>&1
 hrows() { ask "$HP" landed | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | tr '\n' ' '; }
 hsheet() { ( cd "$HW" && TZ=America/Los_Angeles BIONIC_NOW_EPOCH=1794300000 bash "$R/hooks/session-poker.sh" sitrep "$HP" 2>/dev/null ) | grep '^clock\.approved: '; }
-htick() { rm -f "$HB"/tmp/tick-digest-*; ( cd "$HW" && CLAUDE_CODE_SESSION_ID=$HS bash "$R/hooks/session-poker.sh" tick 2>&1 ) | grep -m1 '^poker: .*FILL'; }
+# The tick asks the gate for room, so the world plants the machine it runs on: one with room, whatever this one carries.
+htick() { rm -f "$HB"/tmp/tick-digest-*; ( world_machine 8 16384 30 1; cd "$HW" && CLAUDE_CODE_SESSION_ID=$HS bash "$R/hooks/session-poker.sh" tick 2>&1 ) | grep -m1 '^poker: .*FILL'; }
 HO="$(hrows)"; printf 'run/v1|ev=published|row=T99|commit=%s|kind=queue|by=-|why=-|at=2026-11-08T00:00:00Z\n' "$(printf 'f%.0s' {1..40})" > "$HR/run.log"
 expect_eq "half: a landing the log appends reads once and last, after every landing the old homes hold" "yes|${HO}T99 " "$(printf '%s' "$HO" | grep -q '^T1 ' && echo yes)|$(hrows)"
 expect_eq "half: the run reads open, at the plan's step" "0 n=4" "$(opened "$HP") $(ask "$HP" step | grep '^n=')"
