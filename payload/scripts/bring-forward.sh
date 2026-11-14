@@ -5,7 +5,8 @@
 #   1. the plan and the record as they were are copied to `record/<wave>/kept/`, as `<wave>.plan.md` and
 #      `record/`, with the act's gaps list as `gaps`;
 #   2. `record/<wave>/run.log` is written from the translation (lib/translate.sh): the facts the old homes
-#      hold, in the order they happened;
+#      hold, in the order they happened, each confirmation a person wrote in a criterion's block followed by
+#      the approval naming the criterion, 15's one home for it (_bf_log);
 #   3. the plan is rewritten with no section a machine wrote (the SDLC State, the Verification Matrix and
 #      the Handoff go), each Tasks row in its nine authored cells, and its version header at 15.
 # It prints the gaps list, then `kept=<directory>`.
@@ -18,6 +19,13 @@
 # to write until the run reads as brought forward (lib/reader.sh `reader_brought`): while it stands as
 # the kept copy of the record holds it, absent or the same bytes; once it differs, the act wrote it, or
 # a writer appended to it after the act.
+#
+# WHOSE KEPT COPY. A kept copy standing beside a plan not yet at 15 is this act's own only when it holds the plan as it
+# stands, byte for byte, and the run's log is absent, the log the copy holds, or the log the act writes from the copy (_bf_log
+# over the kept plan and record, laid out as a run of their own): then the act was broken off before it rewrote
+# the plan, and this act finishes it. Any other kept copy was left by another build of the record directory or by the
+# plan as it stood before a later edit, and a log neither it nor the act wrote is no log the act may judge as its own; both
+# are refused in words, before anything is written (_bf_own).
 #
 # THE WAITS. A row's reads and deps are read through plan_read_waits, the one reads-to-waits rule, twice:
 # over the old table, and over the new one with every deps cell empty, which is what the kind and the
@@ -41,8 +49,8 @@
 # A ROW'S SUITES AND LANDS-ON are a person's words about the task, so they go to the task's own section,
 # a heading whose first word is its id, when the plan has one, and to the gaps list when it has none.
 #
-# EXITS. 0 done; 2 not a plan at plans/<epic>/<wave>.plan.md, or a plan not named *.plan.md; 1 a write failed, with
-# nothing after it written.
+# EXITS. 0 done; 2 not a plan at plans/<epic>/<wave>.plan.md, a plan not named *.plan.md, or a kept copy not this run's
+# own; 1 a write failed, with nothing after it written.
 #
 # Executed, never sourced:  bash ${CLAUDE_PLUGIN_ROOT}/scripts/bring-forward.sh <plan>
 # bash 3.2 (ADR-001).
@@ -54,13 +62,15 @@ _bf_dir="$(cd "$_bf_dir" && pwd -P)" || exit 2
 . "$_bf_dir/lib/reader.sh" || exit 2
 # shellcheck source=/dev/null
 . "$_bf_dir/lib/translate.sh" || exit 2
+# shellcheck source=/dev/null
+. "$_bf_dir/lib/plan.sh" || exit 2
 
-_bf_plan() {  # <plan> <deps file|-> <gaps out> [<criteria tasks file>] -> the plan's text brought forward
+_bf_plan() {  # <plan> <deps file|-> <gaps out> [<criteria tasks file>] [<header keys file>] [<criteria file>] -> the plan's text brought forward
   # Read twice: the first pass learns the Tasks table's columns, each row's suites and lands-on and which
   # rows have a section of their own; the second writes. A cell keeps its text as written, `\|` included.
   # A task's own section is found by plan-read.sh's one heading rule and its one fence rule, so the act writes where
   # the brief reads: a `#` line inside a fence is the section's text, never a heading, in either pass.
-  awk -v depf="$2" -v gapf="$3" -v taskf="${4:--}" -v nine="id step kind task deps size serves files artifact" "$_PLAN_READ_FENCE$_PLAN_READ_SECTION"'
+  awk -v depf="$2" -v gapf="$3" -v taskf="${4:--}" -v headf="${5:--}" -v critf="${6:--}" -v nine="id step kind task deps size serves files artifact" "$_PLAN_READ_FENCE$_PLAN_READ_SECTION"'
     function cells(line, out,   n, i) {
       gsub(/\\[|]/, "\001", line); sub(/^[ \t]*[|]/, "", line); sub(/[|][ \t]*$/, "", line)
       n = split(line, out, "|"); for (i = 1; i <= n; i++) gsub(/^[ \t]+|[ \t]+$/, "", out[i])
@@ -78,13 +88,16 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> [<criteria tasks file>] -> the p
         else if (gapf != "") print "gap/v1|ev=criterion|criterion=" c "|field=task:" a[j] "|why=unruled" > gapf }
       return o == "" ? "—" : o
     }
+    function tcell(v) { if (v == "") return "—"; gsub(/[|]/, "\\|", v); return v }
     function addcell(l, v) { sub(/[ \t]+$/, "", l); return (l ~ /[|]$/) ? l " " v " |" : l " | " v }
     function place(   k) { if (ins == "") return
       for (k = 1; k <= 2; k++) if (!none(cell[ins, w2[k]])) print w2[k] ": " unesc(cell[ins, w2[k]])
       for (k = 0; k < blanks; k++) print ""; ins = ""; blanks = 0 }
     BEGIN { nn = split(nine, w9, " "); split("suites lands-on", w2, " ")
       if (depf != "-") while ((getline l < depf) > 0) { t = index(l, "\t"); dep[substr(l, 1, t - 1)] = substr(l, t + 1) }
-      if (taskf != "-") while ((getline l < taskf) > 0) { t = index(l, "\t"); if (t > 1) { tk[substr(l, 1, t - 1)] = substr(l, t + 1); tord[++ntk] = substr(l, 1, t - 1) } } }
+      if (taskf != "-") while ((getline l < taskf) > 0) { t = index(l, "\t"); if (t > 1) { tk[substr(l, 1, t - 1)] = substr(l, t + 1); tord[++ntk] = substr(l, 1, t - 1) } }
+      if (headf != "-") while ((getline l < headf) > 0) { t = index(l, "\t"); if (t > 1) { hk[++nhk] = substr(l, 1, t - 1); hv[hk[nhk]] = substr(l, t + 1) } }
+      if (critf != "-") while ((getline l < critf) > 0) if (split(l, x, "\t") >= 5) { ncr++; for (i = 1; i <= 5; i++) cr[ncr, i] = x[i] } }
     FNR == 1 && NR > 1 { sec = ""; nh = 0; tdone = 0; skip = 0; fence = 0 }
     { sub(/\r$/, ""); f = fenced($0) }
     !f && /^## / { sec = substr($0, 4); sub(/[ \t]+$/, "", sec) }
@@ -99,8 +112,17 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> [<criteria tasks file>] -> the p
       next
     }
     FNR == 1 && $0 == "---" { head = 1; print; next }
-    head { if ($0 == "---") head = 0; else if ($0 ~ /^canonical_sdlc_version:[ \t]*["\047]?14["\047]?[ \t]*$/) $0 = "canonical_sdlc_version: 15"; print; next }
+    # A key the header names with no value takes the value in its place; one it does not name goes last.
+    head && match($0, /^[a-z][a-z_-]*[ \t]*:[ \t]*$/) { k = $0; sub(/[ \t]*:.*$/, "", k); if ((k in hv) && !(k in hput)) { hput[k] = 1; print k ": " hv[k]; next } }
+    head { if ($0 == "---") { for (i = 1; i <= nhk; i++) if (!(hk[i] in hput)) print hk[i] ": " hv[hk[i]]; head = 0 }
+      else if ($0 ~ /^canonical_sdlc_version:[ \t]*["\047]?14["\047]?[ \t]*$/) $0 = "canonical_sdlc_version: 15"; print; next }
     !f && /^#+[ \t]/ { place() }
+    # A plan whose criteria stood only in its matrix gets their table where the matrix stood, a row per criterion.
+    !f && /^## / && sec == "Verification Matrix" && ncr && !made { made = 1
+      print "## Eval design"; print ""; print "| Requirement | Criterion | Eval type | Eval | Fails when | Task |"; print "|---|---|---|---|---|---|"
+      for (i = 1; i <= ncr; i++) { c = cr[i, 1]; v = "—"; if (c in tk) { cv[c] = carry(c, tk[c]); v = cv[c] }
+        print "| " tcell(cr[i, 3]) " | " tcell(c) " | " tcell(cr[i, 2]) " | " tcell(cr[i, 4]) " | " tcell(cr[i, 5]) " | " v " |" }
+      print "" }
     !f && /^## / { skip = (sec == "SDLC State" || sec == "Verification Matrix" || sec == "Handoff") }
     skip { next }
     !f && /^#+[ \t]/ && !isnine && (heading($0) in row) { print; ins = heading($0); next }
@@ -139,11 +161,19 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> [<criteria tasks file>] -> the p
 
 _bf_deps() {  # <old plan> <implied plan> <deps out> -> the waits that are not deps, as gaps
   # The implied plan is the new table with every deps cell empty, so its waits are what kind and step imply.
+  # A WAIT THE PERSON WROTE BY NAMING THE ROW, its id or a path its Files write, stays in deps though the default names
+  # the same row: a review row reading what landed after the release says so only by that wait. A row nothing but the
+  # default names (`head`, `record`, `merge`, a proof) is left to the default.
   { plan_read_waits "$2"; printf '\034\n'; plan_read_waits "$1"; } | awk -F'\t' -v out="$3" '
+    function named(rs, r,   m, a, k, t) {
+      m = split(rs, a, ",")
+      for (k = 1; k <= m; k++) { t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t); sub(/^live:/, "", t); if (t == r || (t !~ /[ \t:!]/ && t ~ /[\/.*?]/)) return 1 }
+      return 0
+    }
     $0 == "\034" { old = 1; next }
     !old { if ($2 != "kind") imp[$1, $2, $3] = 1; next }
     $2 == "kind" { ord[++n] = $1; next }
-    ($1, $2, $3) in imp { next }
+    ($1, $2, $3) in imp && !($2 == "row" && named($4, $3)) { next }
     $2 == "row" { d[$1] = d[$1] (d[$1] == "" ? "" : ", ") $3; next }
     $3 ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/ { a[$1] = a[$1] ", " $3; next }
     { printf "gap/v1|ev=row|row=%s|field=%s|why=unruled\n", $1, $3 }
@@ -154,12 +184,75 @@ _bf_compute() {  # <plan> <work dir> -> <work>/plan, the plan brought forward; <
   local plan="$1" w="$2"
   translate "$plan" gaps > "$w/translated.gaps" || return 1
   : > "$w/deps"; : > "$w/cells.gaps"
+  _bf_homes "$plan" "$w/head" > "$w/homes.gaps" || return 1
   _bf_plan "$plan" - "" > "$w/implied.plan.md" || return 1
   _bf_deps "$plan" "$w/implied.plan.md" "$w/deps" > "$w/waits.gaps" || return 1
   plan_read_criterion_task "$plan" > "$w/tasks" 2>/dev/null || :
-  _bf_plan "$plan" "$w/deps" "$w/cells.gaps" "$w/tasks" > "$w/plan" || return 1
+  _bf_criteria "$plan" > "$w/criteria" || return 1
+  _bf_plan "$plan" "$w/deps" "$w/cells.gaps" "$w/tasks" "$w/head" "$w/criteria" > "$w/plan" || return 1
   _bf_shared "$plan" > "$w/shared.gaps" || return 1
-  cat "$w/translated.gaps" "$w/waits.gaps" "$w/cells.gaps" "$w/shared.gaps" | awk '!seen[$0]++' > "$w/gaps"
+  cat "$w/translated.gaps" "$w/homes.gaps" "$w/waits.gaps" "$w/cells.gaps" "$w/shared.gaps" | awk '!seen[$0]++' > "$w/gaps"
+}
+
+# THE CRITERIA. At 15 a run's criteria are its `## Eval design` table's rows; at 14 a plan could hold them in its matrix
+# alone, which the act takes out. Such a plan gets the table from the matrix: a row per criterion in the matrix's order,
+# its tier as the Eval type (lib/scale.sh reads a `T<n>` type as that tier), its block's first `serves:`, `eval:` and
+# `fails-when:` as its Requirement, Eval and Fails when, and its block's task in the Task column as a table's rows are
+# given one. A plan that holds a criteria table is left as the act leaves it.
+_bf_criteria() {  # <plan> -> `<criterion><TAB><tier><TAB><requirement><TAB><eval><TAB><fails when>` per matrix row; nothing when the plan holds a criteria table
+  plan_read_table "$1" 'Eval design' criterion >/dev/null 2>&1 && return 0
+  { plan_read_rows "$1" 'Verification Matrix' ac 2>/dev/null; printf '\034\n'; plan_read_blocks "$1" 2>/dev/null || :; } | awk -F'\t' '
+    $0 == "\034" { part = 1; next }
+    !part { a = ""; t = ""; for (i = 1; i <= NF; i++) { e = index($i, "="); k = substr($i, 1, e - 1); if (k == "ac") a = substr($i, e + 1); else if (k == "tier") t = substr($i, e + 1) }
+      if (a != "" && !(a in seen)) { seen[a] = 1; ord[++n] = a; tier[a] = t }; next }
+    $1 == "" { next }
+    { l = substr($0, length($1) + 2) }
+    match(l, /^[ \t]*(serves|eval|fails-when)[ \t]*:/) { k = l; sub(/^[ \t]+/, "", k); sub(/[ \t]*:.*$/, "", k)
+      if (($1, k) in v) next; x = substr(l, RLENGTH + 1); gsub(/\t/, " ", x); sub(/^[ ]+/, "", x); sub(/[ ]+$/, "", x); v[$1, k] = x }
+    END { for (i = 1; i <= n; i++) { a = ord[i]; printf "%s\t%s\t%s\t%s\t%s\n", a, tier[a], v[a, "serves"], v[a, "eval"], v[a, "fails-when"] } }'
+}
+
+# THE HEADER'S KEYS A STEP OWES AT 15. At 14 the working branch and the base were the SDLC State's: its first
+# `working-branch:` line and its first `base-sha:` line, read as lib/run.sh `plan_working_branch` and lib/proof.sh
+# `proof_plan_base` read them, else the Step 4 block's `branch:` and `base-sha:` fields. Step 7's document was its block's
+# `adr:` or `rca:` path, or its `n/a:` reason, as lib/walls.sh `validate_document_step` asked; at 15 it is the header's
+# `adrs:`, the records named, or `none` with the reason. The integration branch was the State's `integration-branch:`
+# line, which the act asks of lib/plan.sh `plan_integration_branch`, the one reader, before the section goes; at 15 it finds
+# the header's.
+# At 15 the header holds all four and the steps' checks ask it there, so the act writes each the header lacks. One the
+# run owed, past its step, and no home held is named on the gaps list; a header that holds a key keeps its own value. A
+# run that held no integration branch is named nowhere: 14's one reader found none either, so the act drops nothing.
+_bf_homes() {  # <plan> <header out> -> a `<key><TAB><value>` line in <header out> per key to write; a gap line per key owed and held nowhere
+  local plan="$1" k v found ib="$PLAN_INTEGRATION_BRANCH_KEY"
+  # The branch is asked of its one reader over the plan as it stands, State section in; its key is the library's name for
+  # it, the one spelling, used here for the header tested and the line written.
+  # A Step block is its `- Step <n>:` line and the indented lines under it; one held (pending) is no step reached.
+  found="$(_translate_section "$plan" "SDLC State" | awk '
+    function word(s) { sub(/^[ \t]+/, "", s); sub(/[ \t].*$/, "", s); gsub(/^["\047]|["\047]$/, "", s); return s }
+    function said(s, k) { if (!match(s, "(^|[^-_[:alnum:]])" k "[ \t]*:")) return ""; s = substr(s, RSTART + RLENGTH); sub(/;.*$/, "", s)
+      sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    function field(s, k) { return word(said(s, k)) }
+    function first(k, v) { if (v != "" && !(k in got)) got[k] = v }
+    function doc(v) { if (v != "" && !((v) in named)) { named[v] = 1; docs = docs (docs == "" ? "" : ", ") v } }
+    /^- Step [0-9]+[ab]?:/ { n = substr($0, 8, index($0, ":") - 8); sub(/[ab]$/, "", n); t = substr($0, index($0, ":") + 1)
+      blk = (t ~ /^[ \t]*\(pending\)[ \t]*$/) ? "" : n; if (blk != "") reached[blk] = 1 }
+    !/^- Step [0-9]/ { t = $0; if (/^[^ \t]/) blk = "" }
+    !curseen && /^[ \t]*current[ \t]*:/ { cur = word(substr($0, index($0, ":") + 1)) + 0; curseen = 1 }
+    /^[ \t]*working-branch[ \t]*:/ { first("working-branch", word(substr($0, index($0, ":") + 1))) }
+    /^[ \t]*base-sha[ \t]*:/ { first("base-sha", word(substr($0, index($0, ":") + 1))) }
+    blk == "4" { if (b4 == "") b4 = field(t, "branch"); if (s4 == "") s4 = field(t, "base-sha") }
+    blk == "7" { doc(field(t, "adr")); doc(field(t, "rca")); if (na == "") na = said(t, "n/a") }
+    END { first("working-branch", b4); first("base-sha", s4); first("adrs", docs); if (na != "") first("adrs", "none — " na)
+      for (k in got) printf "%s\t%s\n", k, got[k]
+      for (n = 4; n <= 7; n += 3) if (cur >= n || (n in reached)) print "reached\t" n }')" || return 1
+  : > "$2"
+  for k in working-branch:4 base-sha:4 adrs:7 "$ib:"; do
+    v="$(plan_read_header "$plan" "${k%:*}" 2>/dev/null)" && [ -n "${v#*=}" ] && continue
+    if [ "${k%:*}" = "$ib" ]; then v="$(plan_integration_branch "$plan")"
+    else v="$(awk -F'\t' -v k="${k%:*}" '$1 == k { print $2; exit }' <<< "$found")"; fi
+    if [ -n "$v" ]; then printf '%s\t%s\n' "${k%:*}" "$v" >> "$2"
+    elif [ -n "${k#*:}" ] && grep -qx "reached	${k#*:}" <<< "$found"; then printf 'gap/v1|ev=step|n=%s|field=%s|why=absent\n' "${k#*:}" "${k%:*}"; fi
+  done
 }
 
 # THE RECORD AN INCIDENT'S PLAIN plan.md JOINED. At 14 every incident's plan named plain joins one record,
@@ -202,6 +295,31 @@ _bf_misnamed() {  # <plan, resolved> <its record> -> the refusal on stderr
     "$1" "$tail" >&2
 }
 
+# THE CONFIRMATION. At 14 a person confirmed a criterion by a line in its block naming who, the day and their words,
+# which the translation carries as the field `confirmed=` of the criterion's proof or waiver; at 15 the reader takes a
+# person's confirmation only from an approval naming the criterion, so the act asks the translation for that approval
+# too (lib/translate.sh `_translate_matrix`). A run at 14 is read through the translation in place, and that reading
+# asks for none, so it reads as it did.
+_bf_log() {  # <plan> -> the run's log the act writes
+  TRANSLATE_CONFIRMED=approval translate "$1" events
+}
+
+_bf_own() {  # <plan> <kept> <log> <work dir> -> 0 the kept copy is this act's own; 1 not, the refusal on stderr; 3 a copy failed
+  local plan="$1" kept="$2" log="$3" name="${1##*/}" k why
+  if ! cmp -s "$kept/$name" "$plan"; then
+    why="the plan it holds is not $plan as it stands, so another build of the record or the plan before a later edit left it"
+  elif [ ! -f "$log" ] || cmp -s "$log" "$kept/record/run.log"; then
+    return 0
+  else
+    k="$4/kept"; mkdir -p "$k/plans" "$k/record" && cp "$kept/$name" "$k/plans/" || return 3
+    [ ! -d "$kept/record" ] || cp -R "$kept/record" "$k/record/${name%.plan.md}" || return 3
+    _bf_log "$k/plans/$name" 2>/dev/null | cmp -s - "$log" && return 0
+    why="the run's log $log is neither the log it holds nor the one the act writes from it, so another build left the two"
+  fi
+  printf 'bring-forward: refused — %s is not this run'"'"'s kept copy: %s. Move it aside and run the act again; nothing was written.\n' "$kept" "$why" >&2
+  return 1
+}
+
 bf_main() {  # <plan> -> the act; prints the gaps list and kept=<directory>
   local plan="${1:-}" log rec kept wave st
   if [ ! -f "$plan" ] || ! log="$(reader_log "$plan" 2>/dev/null)"; then
@@ -210,6 +328,9 @@ bf_main() {  # <plan> -> the act; prints the gaps list and kept=<directory>
   plan="$(cd "$(dirname "$plan")" && pwd -P)/${plan##*/}"; wave="${plan##*/}"; rec="${log%/run.log}"; kept="$rec/kept"
   case "$wave" in *.plan.md) ;; *) _bf_misnamed "$plan" "$rec"; return 2 ;; esac
   BF_WORK="$(mktemp -d)" || return 1
+  if [ -d "$kept" ] && [ "$(plan_read_header "$plan" canonical_sdlc_version 2>/dev/null)" != canonical_sdlc_version=15 ]; then
+    _bf_own "$plan" "$kept" "$log" "$BF_WORK"; case $? in 0) ;; 1) return 2 ;; *) return 1 ;; esac
+  fi
   _bf_compute "$plan" "$BF_WORK" || return 1
   if [ ! -d "$kept" ]; then
     mkdir -p "${rec%/*}" && st="$(mktemp -d "${rec%/*}/.kept.XXXXXX")" || return 1
@@ -217,7 +338,7 @@ bf_main() {  # <plan> -> the act; prints the gaps list and kept=<directory>
       && mkdir -p "$rec" && mv "$st" "$kept"; }; then rm -rf "$st"; return 1; fi
   fi
   if ! reader_brought "$plan"; then
-    { translate "$plan" events > "$log.tmp.$$" && mv "$log.tmp.$$" "$log"; } || { rm -f "$log.tmp.$$"; return 1; }
+    { _bf_log "$plan" > "$log.tmp.$$" && mv "$log.tmp.$$" "$log"; } || { rm -f "$log.tmp.$$"; return 1; }
   fi
   if ! cmp -s "$BF_WORK/plan" "$plan"; then
     { cat "$BF_WORK/plan" > "$plan.tmp.$$" && mv "$plan.tmp.$$" "$plan"; } || { rm -f "$plan.tmp.$$"; return 1; }

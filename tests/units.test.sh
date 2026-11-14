@@ -22,7 +22,6 @@
 #   §WALK    the regression walk excuses a real release merge whose check passed, as the judge's cover reads it
 #   §SECOND  regression-run at a head past the plan's whole run refuses a second whole run in one line with nothing run,
 #            and at the head the whole run read it does not refuse
-#   §STEP-FIELD  units_step_field reads the first key line of the block units_step_fields writes
 #   §DEBT    a review-born row inside fix-policy: is exempt from fix-cap:, a promoted or carried one counts;
 #            task-add's cap refusal, its fourth-fix refusal and its count line each go red when removed
 #   §ASK     a row edited by hand reads as lib/plan-read.sh's row reads it; a floor row whose review proof stands at
@@ -1108,28 +1107,6 @@ expect_contains "SEC-1d …and its run line names the person as its starter, wit
   "|starter=person|reason=the user asked for a second run|at=" "$(sec_runline "regression-run-$SEC_H1.log")"
 
 
-section "§STEP-FIELD — units_step_field reads an older plan's step block: the first key line, fences skipped"
-# Close-out's epic row reads an older plan's Step 7 block `adr:` pointer; this is its one reader. FIXTURE FIDELITY: a
-# planted plan whose Step 7 block carries the pointer as an older plan's edit wrote it, with a fenced decoy block above
-# and a second `adr:` line under the first.
-# fails-when: the reader reads the fenced decoy, the second line, another step's block, or calls a missing key found.
-SF_PLAN="$SANDBOX/step-field.plan.md"
-printf '# plan\n\n## SDLC State\n\ncurrent: 7\n```\n- Step 7: a fenced example\n  adr: fenced.md\n```\n- Step 7: n/a: no ADR owed here\n  adr: adrs/epic-x/adr-061-the-pointer.md\n  adr: second.md\n- Step 8: merge: main @ 0123abc\n  cleanup: n/a\n\n## Tasks\n' > "$SF_PLAN"
-sf_lib() { bash -c '. "$1" || exit 9; shift; "$@"' _ "$LIB" "$@"; }
-sf_get() { SF_OUT="$(sf_lib units_step_field "$@")"; SF_RC=$?; }
-sf_get "$SF_PLAN" 7 adr
-expect_eq "SF-1 the first adr: line of the Step 7 block, not the fenced decoy's or the second (exit 0)" \
-  "0|adrs/epic-x/adr-061-the-pointer.md" "$SF_RC|$SF_OUT"
-sf_get "$SF_PLAN" 7 n/a
-expect_eq "SF-2 a key the step line itself opens with is read from the step line" "0|no ADR owed here" "$SF_RC|$SF_OUT"
-sf_get "$SF_PLAN" 8 cleanup
-expect_eq "SF-3 another step's block is its own: Step 8's cleanup:" "0|n/a" "$SF_RC|$SF_OUT"
-sf_get "$SF_PLAN" 8 adr
-expect_eq "SF-4 a key the block does not carry: exit 2, nothing printed" "2|" "$SF_RC|$SF_OUT"
-sf_get "$SF_PLAN" 5 adr
-expect_eq "SF-5 a step with no line: exit 1, nothing printed" "1|" "$SF_RC|$SF_OUT"
-
-
 section "§DEBT — the review-born count: exempt under fix-policy: or counted, and the three task-add rules each held by a row a removal turns red"
 # A review-born row rated inside fix-policy: is exempt from fix-cap:; one the person promoted from outside it, or one
 # born of a finding in another plan's record directory, counts. `units_born_counted` is the one reader of that test,
@@ -1430,5 +1407,9 @@ o5 T1 4 build — a.sh $O5_REG $O5_REV $O5_REL T8 7 build — b.sh T9 7 review T
 O5_A="$(ov)"; printf 'run/v1|ev=published|row=T7|commit=c4|by=w|at=2026-11-01T00:00:01Z\n' >> "$O5_LOG"; O5_B="$(ov)"; sed -i.bak 's/| review | t | T8 |/| review | t | T1 |/' "$O5"
 expect_eq "ORD15-4 a review past the release waiting on the fix T8: refused while the release is open, admitted once the log lands it, refused when it waits on T1 written before it" \
   "$PO_ORD|1 |0 $PO_ORD|1" "$O5_A $O5_B $(ov)"
+# shellcheck disable=SC2086
+o5 T1 4 build — a.sh $O5_REG $O5_REV $O5_REL T8 7 build — b.sh T9 7 review T8 r/T9.md; O5_A="$(call units_post_readers "$O5")"; sed -i.bak 's/| review | t | T8 |/| review | t | T1 |/' "$O5"
+expect_eq "ORD15-5 the card's question at 15, as release-approval's §POST asks it at 14: the review past the landed release waiting on the fix is named, open and unread; waiting on T1 it is not" \
+  "T9	pending	unread|" "$O5_A|$(call units_post_readers "$O5")"
 
 finish

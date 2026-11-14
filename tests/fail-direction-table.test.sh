@@ -13,7 +13,7 @@
 # (`payload missing its session key`) adjacent so that start=open and stop=closed
 # are one artefact.
 #
-# T32 (wave-31, D6; A-orch-61) RETIRED THE STOP GATE'S CLOSED SIDE for a live writer: stop-guard
+# THE STOP GATE'S CLOSED SIDE IS RETIRED for a live writer: the stop gate
 # records reason=unmet and allows, so the keyless pair no longer differs and A10 is retired for
 # the stop gate. The stop rows that reached that deny are the allowed-with-reason case below.
 #
@@ -34,7 +34,7 @@ set -uo pipefail
 # shipped file ever being modified — §9's mutation-and-restore proof, repeatable
 # by hand: W1R_PARTY_SG=/tmp/mutant.sh bash tests/fail-direction-table.test.sh
 START_GATE="${W1R_PARTY_DP:-$BIONIC_HOOKS_DIR/dispatch-preflight.sh}"
-STOP_GATE="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop-guard.sh}"
+STOP_GATE="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop.sh}"
 # The producer and the writer that stand behind the stop gate's positive pair.
 OBSERVER="$BIONIC_HOOKS_DIR/stop-check.sh"
 RECORDER="${W1R_PARTY_ER:-$BIONIC_HOOKS_DIR/execution-recorder.sh}"
@@ -703,7 +703,7 @@ section "the ambiguity row says WHICH fault it is (T29)"
 # row would have been repaired by moving the fixture alone, green on a gate with no ambiguity
 # arm in it. So this row carries its own discriminator, and it is the only claim in this file
 # that reads a refusal's TEXT rather than its direction — the refusal's FULL reasoning is
-# pinned where the gate's own suite pins it (tests/stop-guard.test.sh §10(c3)/(c4)).
+# pinned where the stop library's words are pinned (tests/stop.test.sh §GUARD GD1).
 drive stop:ambiguous
 expect_eq "the ambiguous row is refused" "2" "$DRV_ST"
 if printf '%s' "$DRV_ERR" | grep -qF 'more than one live row'; then

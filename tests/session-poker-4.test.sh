@@ -1114,6 +1114,32 @@ poke "$LV" tick
 expect_eq "TL-14 …said once, and the row stays active and unpublished" "0 active 0"   "$(printf '%s
 ' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T12') $(lv_state T12) $(lv_pub T12)"
 
+# A PAGE AT 15: the orchestrator's integrate row reads its reviews through the judgment the tick makes of the run's
+# facts at the working head, so the tick lands it once those stand. FIXTURE FIDELITY: plan_fixture's page at 15 at
+# step 8, the build row landed and the integrate row pending, its record under record/ its Files name; the floor and
+# the reviews its rigor deals written as proof events at the working branch's head by the proof library's writer.
+# fails-when: the tick never offers the integrate row, so it neither lands nor names it.
+TI="$(make_repo tick-integrate15)"
+( cd "$TI" && git commit -q --allow-empty -m base && git branch -M main && git branch wave/01-fixture ) >/dev/null 2>&1
+TI_H="$(git -C "$TI" rev-parse wave/01-fixture)"; TI_RD="record/wave-01-fixture"
+TI_P="$(plan_fixture --current 8 "$TI/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" task \
+  "| T1 | 4 | build | the build | implementor | — | — | 30 | REQ-1 | lib/a.sh | — | — | landed |" \
+  "| T5 | 8 | integrate | merge into main | — | — | — | 10 | REQ-1 | .bionic/docs/$TI_RD/T5-pr.md | — | — | pending |")"
+sed -i '' "s/^base-sha: abc1234$/base-sha: $TI_H/" "$TI_P"
+printf '# T5: the pull request\n' > "$TI/.bionic/docs/$TI_RD/T5-pr.md"
+bash -c '. "$1" || exit 1; p="$2" h="$3" d="$4"
+  LOG_AT=2026-10-04T12:00:00Z proof_event "$p" kind=regression "head=$h" "evidence=$d/floor.log" || exit 1
+  for q in evidence adversarial structure; do
+    LOG_AT=2026-10-04T12:00:00Z proof_event "$p" kind=review "head=$h" "evidence=$d/$q-piece.md" "question=$q" reader=w-read result=pass scope=piece || exit 1
+  done' _ "$S46_LIB" "$TI_P" "$TI_H" "$TI_RD"
+new_roster "$TI"
+TI_PUB() { /usr/bin/grep -c "^run/v1|ev=published|row=T5|commit=$TI_H|kind=record|by=orchestrator|" "$(plan_fixture_log "$TI_P")"; }
+expect_eq "TL-15 precondition: the page is at 15, its integrate row pending and unlanded, its four proofs at the head" "15|pending|0|4" \
+  "$(sed -n 's/^canonical_sdlc_version: //p' "$TI_P")|$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$TI_P" status T5 | sed -n 's/^state=//p')|$(TI_PUB)|$(/usr/bin/grep -c "|ev=proof|kind=[a-z]*|head=$TI_H|" "$(plan_fixture_log "$TI_P")")"
+poke "$TI" tick
+expect_eq "TL-16 on a page at 15 the tick lands the orchestrator's integrate row whose reviews stand: one published event of the record kind" \
+  "1|1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c "^poker: LANDED T5 — the orchestrator's integrate row")|$(TI_PUB)"
+
 # ============================================================
 section "§STACK: the regression's health is the judge's rendering, and no verb writes it into the plan"
 # ============================================================

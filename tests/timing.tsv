@@ -3,11 +3,11 @@
 # for the 95 suites the pass log reports (nested fixture labels such as a.test.sh are left out). The pass writes no runner timing (A-orch-26). A span starts at a suite's first section, so it is a lower bound on the suite's own time:
 # on the 1aacdc03 run the runner's timing equalled the span for 56 of 95 suites and exceeded it by 0.84 s on average, 21 s at most. Taken at width 2 beside other work. Built by spans.py; rows sorted by label (C).
 # Wave-39 T6 split close-out.test.sh (its 1.17.0 row: 266) into close-out-1..4.test.sh; their rows are the gate's admitted-to-ended seconds for each part run alone (cost files, 2026-10-18), not spans.
+# close-out-2 and close-out-3 were each cut again, CARRY into close-out-5 and RUNS on into close-out-6; their rows and the two new ones are each part's seconds from the section stamps of one run of the old suites at 8a85cd6c1 (gate seconds 580 and 514, sums of the parts), not a gate cost for the new names.
 # Wave-39 T39 replaced the rows of the four suites T35 to T38 split (cross-gate-agreement 427, dispatch-preflight-4 392, landing-line 374, rc-item 490 at 1.17.0) with their eight parts, each the gate's admitted-to-ended seconds for the part run alone (cost files, 2026-10-18 and 2026-10-19), not spans; landing-line-1 is its run with T39's §TOO-LONG (438; T35 measured 376 without it).
 # door-landing.test.sh is the gate's admitted-to-ended seconds for the suite run alone (its cost file, 2026-10-20, beside other suites at a load near 5 on 8 cores), not a span.
 # door-cover.test.sh is the gate's admitted-to-ended seconds for the suite run alone (its cost file, 2026-10-20), not a span.
 # door-card.test.sh is the gate's admitted-to-ended seconds for the suite run alone (its cost file, 2026-10-20, the green run at 07ced9cc), not a span; two release-check runs of about 94 s each are most of it.
-agent-context-guard.test.sh	9
 archive.test.sh	1
 background-suite-guard.test.sh	63
 bash-walls-egd.test.sh	15
@@ -19,9 +19,11 @@ canonical-sdlc-evidence-gate.test.sh	248
 canonical-sdlc-governing-skill.test.sh	82
 card.test.sh	27
 close-out-1.test.sh	324
-close-out-2.test.sh	310
-close-out-3.test.sh	319
+close-out-2.test.sh	247
+close-out-3.test.sh	286
 close-out-4.test.sh	321
+close-out-5.test.sh	333
+close-out-6.test.sh	228
 cmd-class.test.sh	32
 command-relay.test.sh	1
 commands.test.sh	2
@@ -104,7 +106,6 @@ shell-rc.test.sh	1
 slots.test.sh	108
 spawn-worktree.test.sh	76
 stop-check.test.sh	12
-stop-guard.test.sh	72
 stop-orders.test.sh	18
 stop.test.sh	59
 units.test.sh	45

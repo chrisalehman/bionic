@@ -9,6 +9,8 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/release-approval.prelude.sh"
+# Every page here is the prelude's run carried to 15 by the act (FC_VERSION), as an open run at 14 crosses.
+FC_VERSION=15
 
 # ============================================================
 section "§JUDGE: the Tests line prints the full pass's state at this head, and a merge with no pass at it is the person's own approval"
@@ -19,16 +21,20 @@ section "§JUDGE: the Tests line prints the full pass's state at this head, and 
 # passes before that line is written, or refuses after it.
 FC_F6="$(s57_commit "$RFC" lib/x.sh 'T6: the fix that greens a')"
 fc_published T6 "$FC_F6" > "$FC_REC/landing-proofs.log"
+fc_t6_row() {  # <page> -> the page with T6's Tasks row, landed, after T2's
+  awk '{ print } /^\| T2 \|/ {
+    print "| T6 | 4 | build | fix the x message · born: review | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |" }' \
+    "$1" > "$1.new" && mv "$1.new" "$1"
+}
 fc_judge_plan() {  # <floor's owed suites> -> PFC: the whole run at C left <suites> red, T6 landed after it, born of the adversarial finding
   fc_plan "$(fc_floor "$FC_C" "$1")
 $(fc_reads "$FC_C")
-- T6: landed $FC_F6 2026-10-12T14:00:00Z born: review S3 off of=record/wave-x/adversarial.md#1"
-  awk '{ print } /^\| T2 \|/ {
-    print "| T6 | 4 | build | fix the x message · born: review | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |" }' \
-    "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
+- T6: landed $FC_F6 2026-10-12T14:00:00Z — added by task-add at 2026-10-12T12:45:00Z born: review S3 off of=record/wave-x/adversarial.md#1" "" fc_t6_row
 }
 fc_unproved() { fc_under Decisions | fc_flat | /usr/bin/grep -o "[0-9]*\. Merge without a whole run at this head — [^·]*· recommended: wait for the pass · default: none"; }
 fc_judge_plan a.test.sh
+expect_eq "JUDGE-00 precondition: the act carried the page to 15, its State gone, and T6's row and landing, edited in before it, reach the log" \
+  "15|0|state=landed|commit=$FC_F6" "$(sed -n 's/^canonical_sdlc_version: //p' "$PFC")|$(/usr/bin/grep -c '^## SDLC State' "$PFC")|$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" status T6 | /usr/bin/grep -E '^(state|commit)=' | paste -sd'|' -)"
 fc_page --preview
 expect_contains "JUDGE-0 precondition: the Tests section renders the whole-suite line" "whole suite: " "$(fc_under Tests)"
 expect_contains "JUDGE-1 a red the whole run left and a later landing greened: the page reads red at the run's head, the two landings since counted" "whole suite: red at ${FC_C:0:8}, 2 landings before this head" "$(fc_under Tests | fc_flat)"
@@ -58,7 +64,7 @@ expect_absent "JUDGE-4c …and the table that holds the release approval carries
 FC_WD_GREEN=no; [ -z "$(fc_has "$FC_J4T" '|key=approve:merge-unproved|')" ] || FC_WD_GREEN=yes   # the green row of §WORD's table
 FC_J4M="$(fc_mu "$FC_J4")"; fc_plan "$(fc_floor "$FC_B")
 $(fc_reads "$FC_C")"
-expect_eq "JUDGE-4d …proof_merge_ask exits 1 at that head, printing nothing; over a whole run at B it asks at the code head C, naming the commit no run proved" "rc=1|red at ${FC_B:0:8}, 1 landing before this head; commit ${FC_C:0:12} (no landing row) is not proved: no run of its row's suites is recorded at it|rc=0" "$FC_J4M|$(fc_mu "$FC_C")"
+expect_eq "JUDGE-4d …proof_merge_ask exits 1 at that head, printing nothing; over a whole run at B it asks at the code head C, naming the commit no run proved and T1, whose landing the log holds" "rc=1|red at ${FC_B:0:8}, 1 landing before this head; commit ${FC_C:0:12} (row T1) is not proved: no run of its row's suites is recorded at it|rc=0" "$FC_J4M|$(fc_mu "$FC_C")"
 fc_plan "$FC_GOOD"; fc_page; fc_typed "$FC_WD"
 poke "$RFC" reply "$FC_WD"; FC_J4_REPLY="$RC"
 poke "$RFC" current 8 --check; FC_WN_GREEN="$RC"
@@ -124,7 +130,7 @@ expect_eq "WORD-1 at an uncovered head the card renders (exit 0) and its table h
 expect_eq "WORD-1a …and the number its table gives the decision is the one the judge's exit reads (proof_merge_decision)" "${FC_WDN:-none}" \
   "$(bash -c '. "$1/roots.sh"; . "$1/proof.sh"; proof_merge_decision "$2" "$3" "$4"' _ "$FC_LIB" "$PFC" "$RFC" "$FC_R" 2>/dev/null)"
 expect_contains "WORD-1b …drawn on the page with the head's state" ". Merge without a whole run at this head — red at ${FC_B:0:8}, 2 landings before this head" "$(fc_unproved)"
-expect_contains "WORD-1b2 …and naming the commit no run proved, as the judge's refusal does" "; commit ${FC_C:0:12} (no landing row) is not proved: " "$(fc_unproved)"
+expect_contains "WORD-1b2 …and naming the commit no run proved and its landing's row, as the judge's refusal does" "; commit ${FC_C:0:12} (row T1) is not proved: " "$(fc_unproved)"
 FC_WDM="${FC_WDN:-0} merge, rest default"; fc_typed "$FC_WDM"
 poke "$RFC" reply "$FC_WDM"
 expect_regex "WORD-1c reply ${FC_WDM} replays (exit 0), writing the word at the head with the user's words" "^0\\|run/v1\\|ev=approval\\|key=merge-unproved\\|by=Dana Fixture\\|head=$FC_R\\|said=$FC_WDM\\|at=[0-9T:Z-]+\$" "$RC|$(fc_appr merge-unproved)"
@@ -241,12 +247,14 @@ FC_CV0_CARD="$(cv_card_failing)"; FC_CV0_SR="$(cv_sitrep_failed)"
 expect_eq "COVERED-0c …and the card's failing lines and the sitrep's failed count agree: one each" "1|1" "$FC_CV0_CARD|$FC_CV0_SR"
 FC_CV_F="$(s57_commit "$RFC" lib/x.sh 'T4: the fix the adversarial reading asked for')"
 fc_published T4 "$FC_CV_F" > "$FC_REC/landing-proofs.log"
+cv_t4_row() {  # <page> -> the page with T4's Tasks row, landed, after T2's
+  awk '{ print } /^\| T2 \|/ {
+    print "| T4 | 4 | build | fix the x error · born: review | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |" }' \
+    "$1" > "$1.new" && mv "$1.new" "$1"
+}
 fc_plan "$FC_GOOD
 $FC_CV_FAIL
-- T4: landed $FC_CV_F 2026-10-12T14:00:00Z born: review S2 on of=record/wave-x/adversarial-fail.md#1"
-awk '{ print } /^\| T2 \|/ {
-  print "| T4 | 4 | build | fix the x error · born: review | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |" }' \
-  "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
+- T4: landed $FC_CV_F 2026-10-12T14:00:00Z — added by task-add at 2026-10-12T12:45:00Z born: review S2 on of=record/wave-x/adversarial-fail.md#1" "" cv_t4_row
 fc_page --preview
 expect_contains "COVERED-1 AC-13.1 the fix landed at the head: the adversarial line reads covered" "covered" "$(cv_adv)"
 expect_absent "COVERED-1b …and no longer failing (COVERED-1 read the same line)" "failing" "$(cv_adv)"

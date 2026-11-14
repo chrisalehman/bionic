@@ -35,7 +35,7 @@
 #   §GUARD   the stop guard's words, its roster writes, the verdict read and the agent guard's
 #            arming check, each a stop-library function called in a shell of its own
 #   §EVENTS  the orchestrator's stop of an agent (TaskStop's PreToolUse) and an agent's own stop
-#            (SubagentStop), each driven through this hook by its payload; the two guard scripts hand on
+#            (SubagentStop), each driven through this hook by its payload
 #
 # §1 IS THE ONE THAT GOES RED AGAINST FIRST-BLOCK-WINS, which is the alternative
 # ADR-004 rejects by name, and against the pre-merge arrangement too: before the
@@ -1103,7 +1103,7 @@ expect_eq "LOG4 a cancel the log appends after LOG1's approval leaves no row rea
 # ─────────────────────────────────────────────────────────────────────────────
 section "GUARD: the stop guard's words, its roster writes and the agent guard's check are the stop library's, each called in a shell of its own"
 
-# Every expected value below is what hooks/stop-guard.sh printed or wrote before its fold.
+# Every expected value below is what the stop guard printed or wrote before its fold.
 GL="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
 gcall() { bash -c '. "$1/refuse.sh" && . "$1/roster.sh" && . "$1/context.sh" && . "$1/stop.sh" || exit 9; shift; "$@"' _ "$GL" "$@"; }
 GD="$(mktemp -d "${TMPDIR:-/tmp}/stop-guard-lib.XXXXXX")"
@@ -1313,14 +1313,6 @@ for f in main-thread foreign-roster unengaged roster-link tmp-link bionic-link; 
   fire "$D" SubagentStop false "$ag"
   expect_eq "AGENT $f: the same stop is not this tool's to judge, exit 0 and silent" "0|" "$STOP_RC|$STOP_OUT$STOP_ERR"
 done
-
-# ── the two registered names hand on and decide nothing; each row goes when the flip removes its script ──
-tworld; tstop ghost-name; T_A="$T_RC|$T_ERR"; tstop ghost-name "${BIONIC_HOOKS_DIR}/stop-guard.sh"
-expect_eq "HAND hooks/stop-guard.sh hands TaskStop's payload to this hook: the same exit and words" "$T_A" "$T_RC|$T_ERR"
-aworld; EVW="$EVA/acg.sh"; printf '#!/bin/bash\nexec bash %q %q\n' "${BIONIC_HOOKS_DIR}/agent-context-guard.sh" "$HOOK" > "$EVW"
-H0="$HOOK"; HOOK="$EVW"; fire "$D" SubagentStop false "$AG"; HOOK="$H0"
-expect_eq "HAND hooks/agent-context-guard.sh hands an agent's stop to the hook it names: the same refusal" \
-  "2|bionic: stop refused — a dispatched agent's contract is unmet (write the named artifacts)" "$STOP_RC|$(printf '%s\n' "$STOP_ERR" | head -1)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 finish

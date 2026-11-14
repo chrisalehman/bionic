@@ -1,5 +1,5 @@
 #!/bin/bash
-# tests/close-out-1.test.sh — payload/scripts/close-out.sh, part 1 of 4: sections 0 through E2E.
+# tests/close-out-1.test.sh — payload/scripts/close-out.sh, part 1 of 6: sections 0 through E2E.
 #
 # Four parts, so each stays under the suite bar; the sandbox, design and shared builders are in tests/close-out.prelude.sh.
 
@@ -66,49 +66,8 @@ expect_eq "0l: a plan with no filled worktree cell does not refuse" "0" "$CO_RC"
 expect_eq "0m: …and says so by name, not silently" "yes" \
   "$(contains "$CO_OUT" "census: no registered trees")"
 
-# ============================================================
-section "0o — C4: no worktree column at all falls back to the pre-wave glob census"
-# ============================================================
-# A table with no `worktree` column has an empty register, so `wt_unreached` falls back to the `wt/*` glob, announced,
-# and an unmerged wt/01-T1 is refused by name.
-# ROWS_NOWT: hoisted to tests/close-out.prelude.sh (a later part reads it)
-P0O="$(CO_PLAN_AT=14 mk_census_fixture_nowt p0o "wave/01-x" "$ROWS_NOWT")"; advance_to "$P0O" 8
-(
-  in_fixture "$P0O" || exit 1
-  git checkout -q -b wave/01-x
-  printf 'work\n' >> file.txt
-  git commit -q -am "wave work" >/dev/null 2>&1
-  git checkout -q -b wt/01-T1 wave/01-x
-  printf 'never landed\n' >> file.txt
-  git commit -q -am "unreached" >/dev/null 2>&1
-  git checkout -q main
-  git merge -q --no-ff -m "merge wave" wave/01-x >/dev/null 2>&1
-)
-run_close "$P0O" check
-expect_eq "0o1: check WOULD REFUSE naming wt/01-T1 though the register census is empty" "yes" \
-  "$(contains "$CO_OUT" "WOULD REFUSE")"
-expect_eq "0o2: …naming the branch" "yes" "$(contains "$CO_OUT" "wt/01-T1")"
-
-run_close "$P0O" run
-expect_eq "0o4: run refuses — the fallback census carries unreached work" "2" "$CO_RC"
-expect_eq "0o5: …naming wt/01-T1" "yes" "$(contains "$CO_OUT" "wt/01-T1")"
-expect_eq "0o5b: …the branch survives (nothing was deleted, nothing else was done)" "yes" \
-  "$(branch_exists "$P0O" "wt/01-T1")"
-
-# ============================================================
-section "0r — C7: a column-less WAVE-scale plan whose working-branch is not wave/<digits>-<slug> shaped refuses, as 1.8.3 did"
-# ============================================================
-# A column-less wave-scale plan reads its census's wave number off `working-branch:`, so a branch with none refuses
-# before act 1 rather than reach for an unscoped census; a task-scale plan wants none (§ANY-BRANCH).
-P0R="$(CO_PLAN_AT=14 mk_census_fixture_nowt p0r "topic/not-a-wave-branch" "$ROWS_NOWT")"; advance_to "$P0R" 8
-run_close "$P0R" check
-expect_eq "0r1: check refuses (1.8.3 refused before act 1, for either verb)" "2" "$CO_RC"
-
-run_close "$P0R" run
-expect_eq "0r3: run refuses identically" "2" "$CO_RC"
-
-# A table WITH the worktree column never derives a wave number at all — the register
-# names its own trees — so the same non-wave-shaped working-branch is untouched there.
+# A registered table is not refused for the shape of its working-branch: the register names its own trees and no wave
+# number scopes anything.
 ROWS_WT_SHAPED="| T1 | 4 | build | fixture writer one | implementor | — | 10 | AC-1 | file.txt | active | 01-T1 |"
 P0S="$(mk_census_fixture p0s "topic/not-a-wave-branch" "$ROWS_WT_SHAPED")"; advance_to "$P0S" 8
 run_close "$P0S" check
@@ -117,7 +76,7 @@ expect_eq "0s1: a registered table with the same branch shape is never refused f
 # ============================================================
 section "ANY-BRANCH — T11 (AC-9.2): a column-less TASK-scale plan closes on any working-branch"
 # ============================================================
-# A task-scale plan owns no wave, so no `wt/<NN>-*` census and no wave number to refuse for lacking.
+# A task-scale plan owns no wave, so no tree to census and no wave number to refuse for lacking.
 mk_task_scale_fixture() {
   local name="$1" working="$2" p
   p="$(mk_census_fixture_nowt "$name" "$working" "$ROWS_NOWT")"; advance_to "$p" 8
@@ -140,7 +99,7 @@ expect_eq "AB0: the fixture really is task-scale (so a pass here is not the wave
 run_close "$PAB" check
 expect_eq "AB1: check on fixit/x is not refused" "0" "$CO_RC"
 expect_eq "AB2: …prints no shape refusal" "no" "$(contains "$CO_OUT" "shaped")"
-expect_eq "AB3: …and announces no wt/-* census fallback" "no" "$(contains "$CO_OUT" "wt/-*")"
+expect_eq "AB3: …and says its census is empty by name" "yes" "$(contains "$CO_OUT" "census: no registered trees")"
 run_close "$PAB" run
 expect_eq "AB4: run on fixit/x closes with rc 0" "0" "$CO_RC"
 expect_eq "AB5: …prints no shape refusal" "no" "$(contains "$CO_OUT" "shaped")"
@@ -530,10 +489,11 @@ expect_eq "BA6 a plan at 15 and its epic naming one branch: the gate reads them 
 expect_eq "BA7 …naming two, it logs the finding with both" \
   "15|yes|plan integration-branch 'main' != epic 'epic-fx' integration-branch 'trunk'" "$(ba_gate "$(mk_fixture branch-differ-gate)" trunk)"
 # One reader: a grep of hooks/ and payload/scripts/, copied with one planted reader, finds the plant and lib/plan.sh's
-# two lines that ask the plan parser, and no other line naming the key outside a comment or a sentence a refusal prints.
+# three lines (the two that ask the plan parser, and the name it gives the key for the act that writes it), and no other
+# line naming the key outside a comment or a sentence a refusal prints.
 BAT="$SANDBOX/ba-tree"; mkdir -p "$BAT/payload"; cp -R "$BIONIC_HOOKS_DIR" "$BAT/hooks"; cp -R "$REPO_ROOT/payload/scripts" "$BAT/payload/scripts"
 printf '%s\n' 'v="$(plan_frontmatter_get "$p" integration-branch)"' > "$BAT/hooks/planted.sh"
-expect_eq "BA5 the grep finds the planted reader and lib/plan.sh's, nothing else" "hooks/planted.sh:1 payload/scripts/lib/plan.sh:2" \
+expect_eq "BA5 the grep finds the planted reader and lib/plan.sh's, nothing else" "hooks/planted.sh:1 payload/scripts/lib/plan.sh:3" \
   "$( (cd "$BAT" && /usr/bin/grep -rn 'integration-branch' hooks payload) | /usr/bin/grep -vE '^[^:]+:[0-9]+:[[:space:]]*#|(die|usage|_co_refuse|log_finding)( [a-z-]+)? "' \
      | cut -d: -f1 | uniq -c | awk '{ print $2 ":" $1 }' | LC_ALL=C sort | paste -sd' ' -)"
 

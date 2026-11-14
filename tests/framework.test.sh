@@ -123,7 +123,7 @@ PLANT_UNDEFINED
 cat > "$SB/tests/p-selfdef.test.sh" <<'PLANT_SELFDEF'
 #!/bin/bash
 # A helper the suite defines for ITSELF, below the source line — the shape
-# tests/dispatch-preflight.test.sh and tests/stop-guard.test.sh are in today.
+# tests/dispatch-preflight.test.sh is in today.
 set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 

@@ -46,7 +46,7 @@ section "B — the session-identity key: producer and BOTH consumers agree"
 # ============================================================
 #
 # Ownership table (spec §Design): preflight-probe WRITES the session identity;
-# dispatch-preflight and stop-guard READ it. The per-component suites each hold
+# dispatch-preflight and the stop gate READ it. The per-component suites each hold
 # their own half — the producer's suite reads back what it wrote, the start
 # gate's suite writes attestations as fixtures. Neither proves the two halves
 # spell or compare the key the same way. Here ONE value produced by the REAL
@@ -154,10 +154,9 @@ expect_eq "stop gate: a one-character-different session is refused (exact compar
 section "D — cross-script security regressions (AC-8, TDD §8)"
 # ============================================================
 #
-# Per-script coverage already exists for: the credential value never reaching
-# the attestation or the producer's own output (preflight-probe.test.sh S4), and
-# command text never reaching the observation state file (stop-guard.test.sh
-# §7). What no per-script suite can assert is the CROSS-SCRIPT property: after
+# Per-script coverage already exists for the credential value never reaching
+# the attestation or the producer's own output (preflight-probe.test.sh S4).
+# What no per-script suite can assert is the CROSS-SCRIPT property: after
 # driving all four with a secret-bearing command, NOTHING anywhere under the
 # sandbox — repo, state, temp, or $HOME (where the evidence gate's audit stream
 # lives) — contains that text.

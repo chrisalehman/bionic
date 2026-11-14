@@ -541,11 +541,9 @@ section "S19 — THE MUTATION ANCHOR: one call, every doctoring site (AC-29/AC-3
 # under it then goes green against a fixture that was never mutated. Before this
 # wave every one of these sites carried its own precondition or none: a `cmp -s`
 # against the doctored copy, a count-difference row, or nothing at all. The
-# research code map's census found 24 of them; the real number in this tree is 49
-# call sites over four suites, because the census read only `grep -v` in this suite
-# and missed every `sed`/`awk` mutant tree here plus
-# the doctoring `agent-context-guard` and `landing-gate` each carry. Every one of
-# them now goes through ONE spelling — the framework's `anchor` — and this section
+# research code map's census found 24 of them, because it read only `grep -v` in this
+# suite and missed every `sed`/`awk` mutant tree here and the doctoring other suites
+# carry. Every one of them now goes through ONE spelling — the framework's `anchor` — and this section
 # is the wall that keeps them there.
 #
 # THE BRACKETS IN THE PATTERN BELOW ARE DELIBERATE. This file is itself one of the
@@ -567,9 +565,8 @@ expect_eq "S19.1 anchor is defined in exactly one file under tests/" "1" \
 # --- §S19.2 ABSENCE: no suite hand-rolls its own mutation precondition ---
 #
 # NO EXCEPTIONS, AND NO NARROWED PATTERN. This row carried a named waiver while two
-# doctoring sites the code map's 24-site census never found — `mutate_guard` in
-# `tests/agent-context-guard.test.sh` and the inverted-guard awk in
-# `tests/landing-gate.test.sh` — sat outside the declared set of the task that
+# doctoring sites the code map's 24-site census never found, among them the inverted-guard
+# awk in `tests/landing-gate.test.sh`, sat outside the declared set of the task that
 # built `anchor`. Both are routed now, so the waiver is deleted and the expectation
 # is EMPTY: the sweep reads every suite in tests/, and a hand-rolled precondition
 # reappearing ANYWHERE turns this row red and names the file and the hit count.

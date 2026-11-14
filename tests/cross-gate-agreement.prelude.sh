@@ -34,8 +34,8 @@
 #
 # WHAT THIS SUITE IS FOR, and what it deliberately is not:
 #
-#   The per-script suites (hooks/{preflight-probe,dispatch-preflight,stop-check,
-#   stop-guard}.test.sh) each drive ONE component against its own contract. Every
+#   The per-script suites (preflight-probe, dispatch-preflight, stop-check and stop
+#   suites) each drive ONE component against its own contract. Every
 #   one of them is green while four byte-identical copies of active-wave
 #   detection drift apart, because no single-component suite ever asks the other
 #   copies the same question. This suite asks all four the SAME question with the
@@ -77,7 +77,8 @@ REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 # reviewer can re-take it by hand:
 #   W1R_PARTY_DP=/tmp/mutant.sh bash tests/cross-gate-agreement-1.test.sh   (either part)
 PARTY_DP="${W1R_PARTY_DP:-$BIONIC_HOOKS_DIR/dispatch-preflight.sh}"
-PARTY_SG="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop-guard.sh}"
+# The stop gate is hooks/stop.sh, which answers the orchestrator's stop of an agent by its event.
+PARTY_SG="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop.sh}"
 # The recorder moved out of the stop gate at task 4/4: observations are written
 # post-execution by their own script, from the producer's own printed output.
 PARTY_ER="${W1R_PARTY_ER:-$BIONIC_HOOKS_DIR/execution-recorder.sh}"
@@ -85,7 +86,7 @@ PARTY_ER="${W1R_PARTY_ER:-$BIONIC_HOOKS_DIR/execution-recorder.sh}"
 PROBE="$BIONIC_HOOKS_DIR/preflight-probe.sh"
 OBSERVE="$BIONIC_HOOKS_DIR/stop-check.sh"
 # THE OBSERVATION'S OWN LIBRARY (epic-23 wave-15, REQ-2; ADR-028). The resolution, the file
-# facts and the classification moved out of the verb and out of hooks/stop-guard.sh into one
+# facts and the classification moved out of the verb and out of the stop gate into one
 # sourced file, so the copies this suite used to hold to each other are one definition — and
 # the comparisons below point at it rather than at whichever carrier they were written for.
 OBSERVE_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/observe.sh"
@@ -381,7 +382,7 @@ cg_live() {  # <transcript> <name[:status]>...
 #     "does this repo present a plan whose `current:` names a valid step?"
 #
 #   dispatch-preflight  refuse (exit 2, no attestation planted)  <=> yes
-#   stop-guard          refuse (exit 2, target unresolvable)     <=> yes
+#   stop gate           refuse (exit 2, target unresolvable)     <=> yes
 #
 # The evidence gate is no party: it reads a run's step from its log, and refuses an
 # open run at 14 under any name before any step is read, so these plans' state
@@ -771,7 +772,7 @@ run_battery() {
       ok "the four engagement-scoped parties agree on '$name'"
     else
       no "the four engagement-scoped parties agree on '$name'" \
-         "dispatch-preflight=$a stop-guard=$b execution-recorder=$d landing-gate=$e"
+         "dispatch-preflight=$a stop=$b execution-recorder=$d landing-gate=$e"
     fi
   done <<EOF
 $(printf '%s' "$FIXTURES")

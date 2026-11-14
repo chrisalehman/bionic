@@ -28,7 +28,7 @@
 # So the successor session can read every one of those files and still be unable to ACT on
 # the agent, because the one thing it cannot re-derive is the AGENT ID — the identity the
 # CLI handed back at launch and only the dead conversation held. `SendMessage` and
-# `TaskStop` both take it, and hooks/stop-guard.sh refuses a stop by NAME for exactly this
+# `TaskStop` both take it, and the stop gate refuses a stop by NAME for exactly this
 # reason ("a NAME is not an identity — it is reused across waves"), naming the full agent id
 # as the deliberate way through. The id is on disk the whole time: hooks/execution-recorder.sh
 # writes it onto the row as `status=identified|agent_id=`.
@@ -45,7 +45,7 @@
 #
 # The one write is the adoption itself, and it exists because printing an id was only half
 # a cure (epic-20 W1 B-1). Every wall downstream of the id asks THIS session's roster
-# whether the agent is ours — hooks/stop-guard.sh establishes ownership from a
+# whether the agent is ours — the stop gate establishes ownership from a
 # `confirmed`/`identified` row carrying the resolved id, hooks/stop-check.sh classifies
 # from the same accepted set — so with no row of ours the predecessor's agent classifies
 # FOREIGN and every stop of it is refused. `adopt_write_row` below is the successor saying
@@ -280,7 +280,7 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 # both because this fold answers a question the others do not:
 #
 #   THE ID IS TAKEN OFF `identified`/`confirmed` ONLY, never off `intended` — the same
-#   accepted set hooks/stop-guard.sh and hooks/stop-check.sh use for ownership, and for the
+#   accepted set the stop gate and hooks/stop-check.sh use for ownership, and for the
 #   same reason: `intended` carries `agent_id=` empty by design, and a row that never
 #   advanced past it has no identity to offer. That row is the UNADDRESSABLE case, reported
 #   with its cure rather than skipped, because a silent skip is how a predecessor's agent
@@ -492,7 +492,7 @@ EOF
 # THE ADOPTED ROW — the verb's one write, and the second half of the B-1 cure. What it
 # records is an ownership fact, and each field is there because a named reader asks for it:
 #
-#   status=identified   the accepted set hooks/stop-guard.sh and hooks/stop-check.sh
+#   status=identified   the accepted set the stop gate and hooks/stop-check.sh
 #                       establish ownership BY ID from. `confirmed` would do as well and
 #                       says less: the id is known, which is exactly what `identified` means.
 #   agent_id=           the TRANSCRIPT form, the only form either gate resolves a target to.
@@ -500,13 +500,13 @@ EOF
 #                       platform's stop primitive takes for a teammate — built from the
 #                       session that LAUNCHED the agent, never from ours (T3 FINDING 1). The
 #                       teammate table keys on the session that made the `Agent` call and a
-#                       `/clear` does not move it; hooks/stop-guard.sh reads this recorded
+#                       `/clear` does not move it; the stop gate reads this recorded
 #                       address before it constructs one, so a row carrying our own eight
 #                       would put the string the harness rejects into every refusal it
 #                       prints. The caller hands it in already built, for the same reason
 #                       the address is printed from there: one construction, one origin.
 #   adopted_from=       provenance. The agent is still filed under the predecessor's own
-#                       subagents directory, and that directory is what hooks/stop-guard.sh
+#                       subagents directory, and that directory is what the stop gate
 #                       must widen its resolution to; without this field it cannot know
 #                       which session to widen to, and a blind project-wide walk is exactly
 #                       the name-oracle the 4/9 ownership rule removed.
@@ -566,7 +566,7 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   # A LIVE NAME NEVER GETS A SECOND LIVE ROW (T6, AC-6.1; research R1 §5). The idempotence
   # check above is by agent_id — a SECOND agent, under a DIFFERENT id, adopted under the SAME
   # name is not caught by it, and two live rows of one name is exactly the ambiguity
-  # `hooks/stop-guard.sh`'s own stop refusal exists to police (T29 §7). `live_ids_of_name` is
+  # the stop gate's own stop refusal exists to police. `live_ids_of_name` is
   # that refusal's own predicate, moved to the one library both files source
   # (`payload/scripts/lib/roster.sh`): a non-empty answer means this name is already live
   # here, so this adopt takes the `-r<n>` search (`fill_name`, the fleet's one convention for a
@@ -1266,7 +1266,7 @@ ADOPT_READERS
 
         # ---- the adoption itself, written before it is printed
         #
-        # The row is what makes the address below TRUE: hooks/stop-guard.sh accepts
+        # The row is what makes the address below TRUE: the stop gate accepts
         # `<name>@session-<this session>` as an identity because THIS session's roster
         # records it, and resolves the agent at all because the row names the session it is
         # filed under. Printing the address without writing the row would hand the operator
@@ -1359,7 +1359,7 @@ ADOPT_READERS
           # and it is what finally stopped the adopted agent when the suffixed form did not
           # resolve. Neither stop gate keys on the suffix — each resolves on the base name
           # and takes ownership from the id on this session's roster
-          # (tests/stop-guard.test.sh §14, tests/stop-check.test.sh §10(d)) — so offering
+          # (tests/stop-check.test.sh §10(d)) — so offering
           # both costs the operator nothing and covers the case where the suffix is stale.
           printf '  stop        : TaskStop %s\n' "$ADOPT_ADDR"
           printf '                TaskStop %s — the bare name, the address that always survives\n' \

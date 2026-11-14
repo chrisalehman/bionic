@@ -34,6 +34,9 @@
 # one-file landing or a whole run reads as not measured.
 # Sourced, never executed; bash 3.2.
 
+# The key's name, for a writer that must spell it: the bring-forward act tests the header for it and writes it there.
+PLAN_INTEGRATION_BRANCH_KEY=integration-branch
+
 # Both reads are the reader-owned parser's (lib/plan-read.sh): the SDLC State section's key line, then the header key.
 plan_integration_branch() {  # <plan>
   local plan="${1:-}" ib

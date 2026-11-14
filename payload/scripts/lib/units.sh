@@ -219,7 +219,7 @@ _units_table() {
 # `_READER_DROP_AWK`), whatever launch stands; a `landed` or `dropped` cell is never moved back. Everything else is the
 # cell, which is the old home the translation reads, so a run whose log holds none of these reads as its cells say.
 # The text itself is judged as written (`units_validate` reads `_units_table`), so a write is never refused for a
-# state the plan does not carry. A plan writer's dry copy and close-out's preflight copy are read with their plan's run.
+# state the plan does not carry. A plan writer's copy is read with its plan's run.
 # A row the log holds landed keeps the name of the launch that landed it, as its agent cell kept it, so the stop of
 # that name finds its tree. A row's tree and base are the run's the same way: the newest `tree` event the log holds for it (the tree verb's, with an
 # instant) fills the `worktree` and `base` slots, the base by its first eight digits as a cell spells it; a row the
@@ -290,12 +290,11 @@ _units_place() {
   case "$a" in *$'\n'*) printf '%s %s' "$(a="${a%$'\n'*}"; printf '%s' "${a%[ab]}")" "${a##*$'\n'}" ;; *) printf ' %s' "$a" ;; esac
 }
 
-# _units_origin <plan> -> the plan a copy was made from, whose run it reads: a plan verb's `<plan>.<verb>.<pid>` and
-# close-out's preflight `<dir>/.<plan file>.preflight.<pid>` name their plan when it stands; any other path is its own.
+# _units_origin <plan> -> the plan a copy was made from, whose run it reads: a plan verb's `<plan>.<verb>.<pid>` names
+# its plan when it stands; any other path is its own.
 _units_origin() {
-  local o="${1%%.plan.md.*}.plan.md" b
+  local o="${1%%.plan.md.*}.plan.md"
   case "$1" in *.plan.md.*) ;; *) printf '%s' "$1"; return 0 ;; esac
-  b="${o##*/}"; case "$b" in .?*) o="${o%"$b"}${b#.}" ;; esac
   if [ -f "$o" ]; then printf '%s' "$o"; else printf '%s' "$1"; fi
 }
 
@@ -1500,9 +1499,17 @@ _units_publish_order() {
 # READERS: `units_validate` admits the row by it, and `units_post_readers` names it to the release approval card.
 # A TABLE AT 15 HAS NO READS CELL: a caller that sets `v15` hands the waits each task's person wrote as `wtn[<id>]`
 # and the rows each names as `nmd[<id>, <wait>, <row id>]`, both from lib/plan-read.sh `plan_read_waits`, and the
-# predicate splits no cell of its own.
+# predicate splits no cell of its own. `post_wait()` files the current record, one line of `plan_read_waits`, into
+# them: a kind line gives each wait as spelled and the ones its kind implies, and the waits a person wrote are the
+# first less the second; a row line gives the reads that name a row.
 _units_post_awk() {
   printf '%s' '
+    function post_wait(   imp, m0, o0, i0) {
+      if ($2 == "kind") {
+        split("", imp); m0 = split($5, o0, ","); for (i0 = 1; i0 <= m0; i0++) imp[o0[i0]] = 1
+        m0 = split($4, o0, ","); for (i0 = 1; i0 <= m0; i0++) if (!(o0[i0] in imp)) wtn[$1] = wtn[$1] (wtn[$1] == "" ? "" : ",") o0[i0]
+      } else if ($2 == "row") { m0 = split($4, o0, ","); for (i0 = 1; i0 <= m0; i0++) nmd[$1, o0[i0], $3] = 1 }
+    }
     function after(a, b) { return (stp[a] + 0 > stp[b] + 0 || (stp[a] + 0 == stp[b] + 0 && a + 0 > b + 0)) }
     function later(w, r,   m, a, k, p) {
       if (!pub_done) {
@@ -1540,16 +1547,26 @@ _units_post_awk() {
 # that `post_reader` admits there, in table order. `read` when every record path in its Files is the evidence of a
 # registered review reading (`proved: kind=review … evidence=`), in either spelling the record takes; `unread`
 # otherwise. The release approval card waits on an open row that is unread: what landed after the release is read
-# before the person is asked. Nothing printed for a plan with no such row, or a table with no reads column. <origin> is
+# before the person is asked. Nothing printed for a plan with no such row, or a table at 14 with no reads column. <origin> is
 # the plan whose landing record orders the rows, when <plan> is a copy (default: <plan>), as `units_validate` takes it.
+# A PAGE AT 15 holds no reads cell and no status cell: what a review row reads is the waits its person wrote, from the
+# plan's one reader (`_units_waits`), and each row's state is the run's, as `units_rows` reads it from the log.
 units_post_readers() {
-  local plan="${1:-}" origin="${2:-}" rows proofs
+  local plan="${1:-}" origin="${2:-}" rows proofs v15="" waits=""
   rows="$(units_rows "$plan")" || return 1
-  [ -n "$rows" ] && units_has_column "$plan" reads || return 0
+  [ -n "$rows" ] || return 0
+  if [ "$(plan_read_header "$plan" canonical_sdlc_version 2>/dev/null)" = canonical_sdlc_version=15 ]; then
+    v15=1; waits="$(_units_waits "$plan")" || return 1
+  else
+    units_has_column "$plan" reads || return 0
+  fi
   # The registered reviews are the run's proofs (`_units_proofs`), read from the origin a copy was made from.
   proofs="$(_units_proofs "${origin:-$plan}")" || return 1
-  { printf '%s\n\034\n' "$rows"; [ -z "$proofs" ] || printf '%s\n' "$proofs"; } | awk -F'\t' -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" "$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
+  { printf '%s\n\034\n' "$rows"; [ -z "$proofs" ] || printf '%s\n' "$proofs"; [ -z "$waits" ] || printf '\035\n%s\n' "$waits"; } \
+    | awk -F'\t' -v v15="$v15" -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" "$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
     $0 == "\034" { p = 1; next }
+    $0 == "\035" { p = 2; next }
+    p == 2 { post_wait(); next }
     !p { if ($1 != "") { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; fil[n] = $9; sta[n] = $10; rd[n] = $13 }; next }
     proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE != "" { ev[++ne] = PROOF_EVIDENCE }
     END {
@@ -2173,8 +2190,8 @@ units_columns() {
 # units_validate <plan> [<origin>] -> one line per broken invariant; exit 1 if any, else 0.
 #
 # ONE RULE FOR A PLAN AND FOR ITS COPY. "After the release" is the publish order in a landing record, and a record is
-# named by a plan's name; a plan verb's dry copy and the governing skill's temp copy carry names of their own, which name
-# none. <origin> is the plan the copy was made from, the one whose record is read, so the copy is judged as the plan is.
+# named by a plan's name; the governing skill's temp copy carries a name of its own, which names none. <origin> is the
+# plan the copy was made from, the one whose record is read, so the copy is judged as the plan is.
 # Absent, the plan is its own origin and the rest of this library is unchanged.
 #
 # `worktree` AND `base` EACH CARRY ONE INVARIANT, and both stop short of the machine: an
@@ -2310,16 +2327,9 @@ units_validate() {
         m0 = split(st15, o0, " ")
         for (i0 = 1; i0 <= m0; i0++) { e0 = index(o0[i0], "="); if (e0 > 1) ost[substr(o0[i0], 1, e0 - 1)] = substr(o0[i0], e0 + 1) }
       }
-      # THE READER LINES FOLLOW THE ROWS: a kind line gives each wait as spelled and the ones its kind implies, and the
-      # waits a person wrote are the first less the second; a row line gives the reads that name a row.
+      # THE READER LINES FOLLOW THE ROWS, filed by `post_wait()`.
       $0 == "\034" { wpart = 1; next }
-      wpart {
-        if ($2 == "kind") {
-          split("", imp); m0 = split($5, o0, ","); for (i0 = 1; i0 <= m0; i0++) imp[o0[i0]] = 1
-          m0 = split($4, o0, ","); for (i0 = 1; i0 <= m0; i0++) if (!(o0[i0] in imp)) wtn[$1] = wtn[$1] (wtn[$1] == "" ? "" : ",") o0[i0]
-        } else if ($2 == "row") { m0 = split($4, o0, ","); for (i0 = 1; i0 <= m0; i0++) nmd[$1, o0[i0], $3] = 1 }
-        next
-      }
+      wpart { post_wait(); next }
       $1 == "" { next }
       { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; fil[n] = $9; sta[n] = $10; wtc[n] = $11
         bsc[n] = $12; rd[n] = $13; count[$1]++ }
@@ -2968,33 +2978,6 @@ units_table_cells() {
 _units_files_tokens() {
   printf '%s\n' "${1:-}" | tr ',' '\n' \
     | awk '{ gsub(/^[ \t]+|[ \t]+$/, ""); sub(/^\.\//, ""); sub(/!$/, ""); if ($0 ~ /[A-Za-z0-9]/) print }'
-}
-
-# units_step_field <plan> <N> <key> -> the value of the block's first `key:` line, blanks trimmed, read from the
-#   step block of an older plan: the step line itself when its text opens with `key:`, else the indented lines
-#   under it, fences skipped, the first `- Step N:` line of `## SDLC State`. The first line wins, as the gate reads it.
-#   Exit 0 printed · 1 no `Step N:` line in `## SDLC State` · 2 the block carries no such key.
-units_step_field() {
-  local plan="${1:-}" n="${2:-}" key="${3:-}"
-  [ -n "$plan" ] && [ -f "$plan" ] && [ -n "$n" ] && [ -n "$key" ] || return 1
-  UF_N="$n" UF_KEY="$key" awk '
-    function val(s) { sub("^[ \t]*" kq "[ \t]*:[ \t]*", "", s); sub(/[ \t]+$/, "", s); print s; got = 1; exit }
-    BEGIN {
-      pat = "^[ \t]*-?[ \t]*Step[ \t]+" ENVIRON["UF_N"] "[ \t]*:"
-      kq = ENVIRON["UF_KEY"]; gsub(/[][\\.^$*+?(){}|]/, "\\\\&", kq)
-    }
-    /^[ \t]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[ \t]/ { if (sdlc == 1) sdlc = 2; if (!seen && $0 ~ /^##[ \t]+SDLC State([ \t].*)?$/) { sdlc = 1; seen = 1 }; next }
-    sdlc != 1 { next }
-    !at {
-      if (match($0, pat)) { at = 1; rest = substr($0, RLENGTH + 1); if (rest ~ ("^[ \t]*" kq "[ \t]*:")) val(rest) }
-      next
-    }
-    /^[ \t]*$/ { next }
-    /^[^ \t]/ || /^[ \t]*-?[ \t]*Step[ \t]+[0-9]+[ab]?[ \t]*:/ { exit }
-    $0 ~ ("^[ \t]*" kq "[ \t]*:") { val($0) }
-    END { if (got) exit 0; exit (at ? 2 : 1) }' "$plan"
 }
 
 # units_chain <writer ceiling> — the longest chain of dependent work and the widest the plan can
