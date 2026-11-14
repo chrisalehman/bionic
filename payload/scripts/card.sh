@@ -2590,6 +2590,15 @@ _card_review_failing() {
     eg_review_failing_line )
 }
 
+# _card_live_exit -> the repair the evidence gate gives a criterion live past the step that owes it, pending or blocked
+# and owed now, as the wall spells it (payload/scripts/lib/walls.sh `matrix_live_row_exit`), with %s where it names
+# the criterion. Nothing when walls.sh cannot be loaded, and then no refusal is settled as that one, so the page stays
+# early.
+_card_live_exit() {
+  ( . "${CARD_SELF_DIR}/lib/walls.sh" >/dev/null 2>&1 && declare -F matrix_live_row_exit >/dev/null 2>&1 || exit 1
+    matrix_live_row_exit '%s' )
+}
+
 # _card_fmt_is <format> <line> -> 0 when <line> is <format> with each %s standing for any text. Each piece between the
 # placeholders is matched as a literal, so no character of the judge's words is read as a pattern.
 _card_fmt_is() {
@@ -2615,7 +2624,9 @@ _card_fmt_is() {
 # items appended to CF_SETTLE (`waive:<q>`, `row:<AC>`); 1 at the first refusal none settles. THE PAGE'S OWN
 # DEFAULTS: a matrix row the auditor has not confirmed (waived with the user's words, `waive <AC>`), a T4 row whose
 # user has not yet confirmed its check, its block's confirmation still a placeholder (confirmed, `approve <AC>`, or
-# waived), and a question whose newest reading fails (`waive <q>`). A placeholder of any other key is early: it is
+# waived), a criterion owed now that nothing discharged, which the dry commit refuses with the wall's repair for a
+# live row on the line after its refusal (`_card_live_exit`; waived with the user's words, `waive <AC>`, or run), and
+# a question whose newest reading fails (`waive <q>`). A placeholder of any other key is early: it is
 # evidence that was never recorded. The judge's unproved regression, a head with no pass at it whose floor its
 # landings cover or no run reaches, is the page's own decision too (`approve:merge-unproved`, lib/proof.sh
 # `proof_merge_ask`); an owed floor is no decision and stays early. Anything else the check prints is
@@ -2632,10 +2643,10 @@ _card_fmt_is() {
 # and its line for a failing one, are known the same way, by the wall's own spellings (`_card_review_fact`,
 # `_card_review_failing`).
 _card_settles() {
-  local l q k judge=0 reading=0 any=0 unap stale rfact rfail
+  local l q k judge=0 reading=0 any=0 held=0 unap stale rfact rfail live
   local -a _cs_f=()
   unap="$(_card_judge_line cur8_unapproved_line)"; stale="$(_card_judge_line cur8_stale_line)"
-  rfact="$(_card_review_fact)"; rfail="$(_card_review_failing)"
+  rfact="$(_card_review_fact)"; rfail="$(_card_review_failing)"; live="$(_card_live_exit)"
   while IFS= read -r l; do
     if { [ -n "$unap" ] && _card_fmt_is "poker: $unap" "$l"; } || { [ -n "$stale" ] && _card_fmt_is "poker: $stale" "$l"; }; then
       CF_SETTLE="${CF_SETTLE}approve:release"$'\n'; any=1; continue
@@ -2654,9 +2665,19 @@ _card_settles() {
         q="${l#bionic: commit refused — }"; k="${q#* has placeholder }"; k="${k%% evidence (*}"; q="${q%% *}"
         [ "$k" = "$(_card_t4_confirm_key)" ] || return 1
         CF_SETTLE="${CF_SETTLE}row:$q"$'\n'; any=1 ;;
+      # Any other refusal of the dry commit is held, and is the page's only when the repair it prints is the wall's for
+      # a live row: the person waives that criterion or it is run, the decision the page puts for a row not run.
+      "bionic: commit refused — "*) [ -n "$live" ] || return 1; held=1 ;;
+      "Fix: "*)
+        [ "$held" = 1 ] || continue
+        _card_fmt_is "Fix: $live" "$l" || return 1
+        q="${l#"Fix: ${live%%"%s"*}"}"; q="${q%"${live#*"%s"}"}"
+        [ -n "$q" ] || return 1
+        CF_SETTLE="${CF_SETTLE}row:$q"$'\n'; any=1; held=0 ;;
       "bionic: "*) return 1 ;;
       "- "*) [ "$reading" = 1 ] && return 1 ;;
-      "poker: current "*" --check: would refuse"|"poker: REFUSED — the commit gate refused the plan with current: "*) : ;;
+      "poker: current "*" --check: would refuse") : ;;
+      "poker: REFUSED — the commit gate refused the plan with current: "*) [ "$held" = 0 ] || return 1 ;;
       "poker: REFUSED — current: "*", and these do not (facts_state):") judge=1; any=1 ;;
       "poker: REFUSED"*) return 1 ;;
       *"	"*)
@@ -2675,7 +2696,7 @@ _card_settles() {
   done <<CF_CHECKED
 $1
 CF_CHECKED
-  [ "$any" = 1 ]
+  [ "$held" = 0 ] && [ "$any" = 1 ]
 }
 
 # ── THE RELEASE APPROVAL CARD ────────────────────────────────────────────────
