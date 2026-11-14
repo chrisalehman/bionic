@@ -202,4 +202,34 @@ expect_block "26a a discharged criterion with no walk proof is refused for the w
 expect_block "26c a walk proof naming an absent record is refused for it" "$(wg_home other.md)" 'git commit -m "x"' "record/w/other.md"
 expect_allow "26d a walk proof the run's log holds is the walk, its record's AC identifiers its verdicts" "$(wg_home walk.md)" 'git commit -m "x"'
 
+# ============================================================
+# Section 27: an epic's plan at 15 owes its own spec, never a wave's requirements
+# ============================================================
+# An epic has no wave and no requirements file: its Step 1 and 2 write specs/<epic>/epic.spec.md. fails-when: a run
+# bound to an epic at 15 is refused for the header's wave when its spec stands (27a), is admitted with no spec (27b),
+# or a wave's plan, asked beside it, stops owing the requirements file it names (27c, 27d).
+
+section "Section 27: a bound epic at 15 owes its spec"
+
+ep_home() {  # [spec: yes|no] -> a sandbox whose one plan is an epic at 15, current 3, Step 2's approval in its log
+  local h p d; h=$(make_home); eg_head_repo "$h"
+  p=$(eg_page "$h" 3 'run/v1|ev=approval|key=step2|by=fixture|said=approved|at=2026-10-04T00:30:00Z'); d="${p%/plans/*}"
+  mkdir -p "$d/record/epic-99-fixture" "$d/specs/epic-99-fixture"; mv "$d/record/wave-01-fixture/run.log" "$d/record/epic-99-fixture/run.log"
+  rm -f "$d/specs/epic-99-fixture/wave-01-fixture".*
+  awk '/^wave: / { next } /^rigor: / { $0 = "rigor: double" } /^scale: / { $0 = "scale: epic" } /^multi_agent: / { $0 = "multi_agent: true" } { print }' "$p" > "${p%/*}/epic.plan.md" && rm "$p"
+  [ "${1:-yes}" = no ] || printf '# epic spec\n' > "$d/specs/epic-99-fixture/epic.spec.md"
+  printf '%s' "$h"
+}
+expect_allow "27a an epic at 15, current 3, its spec standing and Step 2 approved, commits" "$(ep_home yes)" 'git commit -m "x"'
+expect_block "27b …and with its spec gone is refused for that file, named" "$(ep_home no)" 'git commit -m "x"' "owed at 15: Step 1's requirements: specs/epic-99-fixture/epic.spec.md"
+wv_home() {  # [requirements: yes|no] -> a wave at 15, current 3, rigor double, multi_agent true, Step 2 approved
+  local h p; h=$(make_home); eg_head_repo "$h"
+  p=$(eg_page "$h" 3 'run/v1|ev=approval|key=step2|by=fixture|said=approved|at=2026-10-04T00:30:00Z')
+  sed -i '' -e 's/^rigor: .*/rigor: double/' -e 's/^multi_agent: .*/multi_agent: true/' "$p"
+  [ "${1:-yes}" = yes ] || rm -f "${p%/plans/*}/specs/epic-99-fixture/wave-01-fixture.requirements.md"
+  printf '%s' "$h"
+}
+expect_allow "27c a wave at 15, rigor double, its requirements file standing, commits" "$(wv_home yes)" 'git commit -m "x"'
+expect_block "27d …and with that file gone is refused for it, named as before" "$(wv_home no)" 'git commit -m "x"' "owed at 15: Step 1's requirements: specs/epic-99-fixture/wave-01-fixture.requirements.md"
+
 finish
