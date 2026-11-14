@@ -332,10 +332,10 @@ plan_read_section() {
     END { exit !(key == "" ? found : got) }' "$1"
 }
 
-# plan_read_heading <plan> <name>[|<name>...] -> `<line><TAB><name>` for each `## ` heading one of the names names, by
-# the rule above, in file order; a heading inside a fenced block is an example and is not one. 1 when there is none,
-# 2 when the plan is not a file. Lines are counted after a lone CR has ended one, so a CR-only plan names the line its
-# reader sees.
+# plan_read_heading <plan> <name>[|<name>...] -> `<line><TAB><name><TAB><rest>` for each `## ` heading one of the names
+# names, by the rule above, in file order, <rest> being the heading's words after the name; a heading inside a fenced
+# block is an example and is not one. 1 when there is none, 2 when the plan is not a file. Lines are counted after a
+# lone CR has ended one, so a CR-only plan names the line its reader sees.
 plan_read_heading() {
   [ -f "${1:-}" ] || return 2
   [ -n "${2:-}" ] || return 1
@@ -343,7 +343,7 @@ plan_read_heading() {
     BEGIN { n = split(names, want, "|") }
     fenced($0) { next }
     /^##[ \t]/ { h = $0; sub(/^##[ \t]+/, "", h); sub(/[ \t]+$/, "", h)
-      for (i = 1; i <= n; i++) { sec = want[i]; if (named(h)) { print NR "\t" sec; found = 1; break } } }
+      for (i = 1; i <= n; i++) { sec = want[i]; if (named(h)) { r = substr(h, length(sec) + 1); sub(/^[ \t]+/, "", r); print NR "\t" sec "\t" r; found = 1; break } } }
     END { exit !found }'
 }
 

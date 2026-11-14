@@ -388,17 +388,9 @@ run_gate() {  # <gate path> <payload json>
   # that ONE process's stream carries all of it, and this suite used to read a stream
   # only the gate could write. Every "…silently" arm below means the SWEEP said nothing,
   # so the three siblings' advisories are removed here, by their own self-naming prefix,
-  # and nothing else is. $OUT_STDERR_RAW keeps the whole stream for any arm that wants it.
-  OUT_STDERR_RAW="$(cat "$SANDBOX/gate.err")"
+  # and nothing else is.
   OUT_STDERR="$(/usr/bin/grep -v -e '^context-spend: ' -e '^patrol-duties-gate: ' \
                                  -e '^patrol-revive: ' "$SANDBOX/gate.err" || true)"
-  # THE SAME CALL AGAIN, WITH THE KNOB, ONLY WHEN IT REFUSED (task 13, ruling D-1).
-  # This gate's refusal is now ONE line — `bionic: stop refused — <fact> (<fix>)` — and
-  # the per-row paragraphs this suite reads for names, files and derived suites are
-  # `detail`, which reaches a reader only under BIONIC_WALL_VERBOSE=1. `$OUT_STDERR` is
-  # the line; `$OUT_VSTDERR` is the line plus the detail. Gated on the refusal so a
-  # PERMITTED stop is never swept twice.
-  OUT_VSTDERR="$OUT_STDERR"
 }
 
 # ================================================================= Section 1
