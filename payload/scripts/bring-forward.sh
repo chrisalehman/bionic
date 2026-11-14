@@ -194,8 +194,8 @@ _bf_compute() {  # <plan> <work dir> -> <work>/plan, the plan brought forward; <
   translate "$plan" gaps > "$w/translated.gaps" || { _bf_fail "the plan's old homes could not be translated (lib/translate.sh)"; return; }
   : > "$w/deps" && : > "$w/cells.gaps" || { _bf_fail "the work directory $w could not be written"; return; }
   _bf_homes "$plan" "$w/head" > "$w/homes.gaps" || { _bf_fail "the header keys a step owes could not be read from the plan's SDLC State"; return; }
-  _bf_plan "$plan" - "" > "$w/implied.plan.md" || { _bf_fail "the plan could not be rewritten with its deps cells empty"; return; }
-  _bf_deps "$plan" "$w/implied.plan.md" "$w/deps" > "$w/waits.gaps" || { _bf_fail "the Tasks rows' waits could not be read (lib/plan-read.sh plan_read_waits)"; return; }
+  _bf_plan "$plan" - "" > "$w/implied-plan.md" || { _bf_fail "the plan could not be rewritten with its deps cells empty"; return; }
+  _bf_deps "$plan" "$w/implied-plan.md" "$w/deps" > "$w/waits.gaps" || { _bf_fail "the Tasks rows' waits could not be read (lib/plan-read.sh plan_read_waits)"; return; }
   plan_read_criterion_task "$plan" > "$w/tasks" 2>/dev/null || :
   _bf_criteria "$plan" > "$w/criteria" || { _bf_fail "the criteria of the plan's Verification Matrix could not be read"; return; }
   _bf_plan "$plan" "$w/deps" "$w/cells.gaps" "$w/tasks" "$w/head" "$w/criteria" > "$w/plan" || { _bf_fail "the plan could not be rewritten at 15"; return; }
