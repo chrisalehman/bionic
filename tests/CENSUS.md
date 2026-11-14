@@ -223,7 +223,6 @@ close-out-1.test.sh | §DEPLOY | keep | payload/scripts/close-out.sh co_deploy_j
 
 close-out-2.test.sh | §4f | keep | payload/scripts/close-out.sh: the shipped-table locator takes the first wave header instead of the one with a shipped cell, so the wave-01 row lands in the planned table; (78.1d) goes red. also: 86.1-86.4 read the ADR cell close-out-3 also reads | none (searched 'rows_with_wave' and 'already listed' in tests/)
 close-out-2.test.sh | §5 | keep | payload/scripts/close-out.sh act_tmp: TMP_LINE built from the removed count instead of `before`, so a close that spares B's five files says tmp-wiped: 8; (5.5) goes red while close-out-1.test.sh 1f, whose fixture removes all it scans, stays green. also: 5.2 and 5.8 are caught by notify.test.sh §SOURCES W2/W3a | none (searched 'tmp-wiped' and 'plant_tmp_session' in tests/)
-close-out-2.test.sh | §CARRY | keep | payload/scripts/close-out.sh: the inherited-line filter matching again or open made to match nothing, so an inherited deferral deferred again is not carried; (CARRY-18) goes red | none (searched 'carry_section' and 'again: ' in tests/; close-out-3 reads only debt: lines under the heading)
 close-out-2.test.sh | §LANDINGS | keep | hooks/poker/line.sh:488 _lr_unmeasured no longer counts a landing with no kind (the `l = 1` arm dropped), so a run whose plan lands rows its record never held carries the zero line instead of the unmeasured line; (LAND-7) goes red. also: LAND-3's template line is caught by close-out-3.test.sh HH-7b | none (searched 'queue=0' and 'landing-report' in tests/)
 close-out-2.test.sh | §CLOSED | keep | payload/scripts/close-out.sh:308 co_pr_owed's branch-exists test deleted, so a merged and deleted branch reads as owed and the closed form says to be pulled into main; (CLOSED-7) goes red | none (searched 'closed-form' and 'merged into main' in tests/)
 
@@ -261,6 +260,10 @@ close-out-4.test.sh | §MOCK-UP | prose pin | skills/canonical-sdlc/steps/2.md a
 close-out-4.test.sh | §MARKS | keep | payload/scripts/close-out.sh continuation render: a mark close-out derives (landings, hand-holds line, reviews, governed-by) left as <fill:, or one of the five a person owns filled for them | none (searched '<fill:' in tests/)
 close-out-4.test.sh | §READ-ORDER | keep | payload/scripts/close-out.sh: the hand-holds line read before delivered: is written, so the release approval card ends the window, or read after the roster wipe with the kinds not kept, so the amend is lost | none (searched 'amend on the roster' and 'hand-holds window' in tests/; close-replay.test.sh §WINDOW reads the same end from the replay, never the read order against the wipe)
 close-out-4.test.sh | §OWED-AT-CLOSE | keep | payload/scripts/close-out.sh co_matrix_settle: the call after the last hand-holds reading deleted, so the run's log holds no proof of the close's row (OC-3) and the card names no matrix line (OC-3c, OC-6c); a proof written above zero (OC-6); a criterion proved whatever its eval names, or the plan written (OC-3, OC-3b); lib/walls.sh matrix_row_deferred not deferring a row owed at 9 at current 8, so the pre-flight refuses the run (OC-1) | none (searched 'co_matrix_settle', 'matrix_close_rows' and 'matrix: AC-' in tests/; close-replay.test.sh §LIVE reads the same write through the whole replay)
+
+## close-out-5.test.sh
+
+close-out-5.test.sh | §CARRY | keep | payload/scripts/close-out.sh: the inherited-line filter matching again or open made to match nothing, so an inherited deferral deferred again is not carried; (CARRY-18) goes red | none (searched 'carry_section' and 'again: ' in tests/; close-out-3 reads only debt: lines under the heading)
 
 ## close-replay.test.sh
 
