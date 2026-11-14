@@ -276,26 +276,6 @@ GATE_ENV=""
 # bytes and one column, so a byte count would pass a line that wraps.
 . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/width.sh"
 GATE_TIME=0
-# dp_hires_cs_since <epoch-float> -> whole hundredths of a second elapsed since it.
-#
-# SUB-SECOND, via python3, for the same reason tests/session-start.test.sh §16 reaches for
-# it: a whole-second `date +%s` difference is off by up to a full second either way
-# depending on where the two reads straddle a tick. Two arms in this file claim the gate
-# "stopped waiting at the bound", and what they have to tell apart is a wait that ended on
-# the bound from one that ran 15% past it — at the 20s bound of the time, 20s from 23s, of
-# which a whole-second clock can lose one second at each end. That is how a tick-counted
-# wait ran 15% long underneath these two arms for a whole wave without either of them
-# noticing (wave-14 T34). The margin shrinks with the bound, which is why the slack below
-# is stated against `$S29_BOUND` rather than left at a fixed number of seconds.
-#
-# HUNDREDTHS, AS AN INTEGER, so the comparison stays in bash arithmetic and no arm has to
-# fork a second interpreter to decide. A host with no python3 answers 999999, which fails
-# both arms loudly rather than passing them blind.
-dp_hires_cs_since() {
-  python3 -c 'import sys,time; print(int((time.time()-float(sys.argv[1]))*100))' "$1" 2>/dev/null \
-    || echo 999999
-}
-
 run_gate() {  # <payload-json>
   local _sid _t0; _sid=$(printf '%s' "$1" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
   # T57: no wall runs on a fixture that was never made (fixture_drive_ok, beside make_repo).
@@ -304,12 +284,6 @@ run_gate() {  # <payload-json>
     GATE_ST=97; GATE_VERDICT="fixture-lost"; return 0
   fi
   _t0=$(date +%s)
-  # OPT-IN, AND ONLY OVER THE FIRST DRIVE. Set `GATE_HIRES=1` before a call to have
-  # `$GATE_TIME_CS` measured to the hundredth; every other caller pays nothing, which
-  # matters on a driver this file runs a few hundred times. The two python3 forks land
-  # outside the timed span on the way in and immediately after `$?` on the way out.
-  GATE_TIME_CS=""
-  [ -z "${GATE_HIRES:-}" ] || _gate_hires_t0=$(python3 -c 'import time; print(time.time())' 2>/dev/null)
   GATE_ENV="$GATE_ENV CLAUDE_CODE_SESSION_ID=$_sid"
   if [ -n "$GATE_CONFIG_DIR" ]; then
     # shellcheck disable=SC2086
@@ -319,7 +293,6 @@ run_gate() {  # <payload-json>
     GATE_OUT=$(printf '%s' "$1" | env $GATE_ENV bash "$GATE" 2>"$SANDBOX/.err")
   fi
   GATE_ST=$?
-  [ -z "${GATE_HIRES:-}" ] || GATE_TIME_CS=$(dp_hires_cs_since "${_gate_hires_t0:-0}")
   GATE_TIME=$(( $(date +%s) - _t0 ))
   GATE_ERR=$(cat "$SANDBOX/.err")
   # THE VERDICT, read off both wires. `jq` rather than a grep for the reason: a reason the

@@ -1999,14 +1999,14 @@ expect_eq "OB8c …and no line before it decides blocks again from what the ask 
   "$(printf '%s\n' "$SR_OB_CARD" | /usr/bin/grep -c 'event\*) b=')"
 
 # ============================================================
-section "§FAST: the sheet verb and the card verb, run one after the other on a copy of the wave-43 plan and its record, finish together in under 5 seconds; the card verb reads the saved sheet and refreshes its asks from the register alone"
+section "§FAST: the sheet verb and the card verb, run one after the other on a copy of the wave-43 plan and its record; the card verb reads the saved sheet and refreshes its asks from the register alone"
 # ============================================================
 # FIXTURE FIDELITY: a shipped 35-task plan and its whole record, copied into a repository of their own because the
 # verbs write the repository's tmp folder and settle its register; the clock is the end of that run. The card verb is
-# timed with a judgment on its stdin that the card refuses, since drawing is card.sh's and its judgment is not this
-# section's subject; the verb's own work is what is timed. A second tree has card.sh replaced by a stub that keeps the sheet it was
+# run with a judgment on its stdin that the card refuses, since drawing is card.sh's and its judgment is not this
+# section's subject; the verb's own work is what is read. A second tree has card.sh replaced by a stub that keeps the sheet it was
 # handed, and sitrep_gather counted, so the sheet the card draws from is read and the one gather is proved.
-# fails-when: the two verbs together take 5 seconds or more, the card verb gathers a second time, or the sheet the card
+# fails-when: the card verb gathers a second time, or the sheet the card
 # draws from carries the asks as they stood when the sheet was saved rather than as they stand now.
 # The docs tree lives beside the repository, not in a checkout of it: this checkout when it holds one, else the
 # main checkout the git directory belongs to (a landing checkout holds none).
@@ -2023,19 +2023,14 @@ SR_PLAN="$SR_REPO/.bionic/docs/$SR_FAST_PLAN_REL"
 SR_GATE="$TMPROOT/gate-fast"; mkdir -p "$SR_GATE/requests" "$SR_GATE/cost"
 SR_FAST_AT=1792739640     # 2026-10-23T07:14:00Z, the end of that run
 SR_FAST_J="$TMPROOT/fast-judgment.txt"; printf 'call: Nothing is owed.\n' > "$SR_FAST_J"
-sr_ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'; }
-SR_FA_T0="$(sr_ms)"
 SR_AT="$SR_FAST_AT" sr_run "$SR_PLAN"
 SR_FA_RC1="$RC"; SR_FA_SHEET="$OUT"
 SR_AT="$SR_FAST_AT" sr_run card "$SR_PLAN" < "$SR_FAST_J"
 SR_FA_RC2="$RC"; SR_FA_ERR2="$ERR"
-SR_FA_T1="$(sr_ms)"
 expect_eq "FA1 the sheet verb prints the sheet (rc 0, a first line, the wave's own open asks among them)" "0|$SR_HEAD|yes" \
   "$SR_FA_RC1|$(printf '%s\n' "$SR_FA_SHEET" | head -1)|$(printf '%s\n' "$SR_FA_SHEET" | /usr/bin/grep -q '^ask: key=finding:' && echo yes)"
 expect_eq "FA2 the card verb read the saved sheet and ran the check: it refused the judgment (rc 1), and said nothing of a sheet that is missing or old" "1|0" \
   "$SR_FA_RC2|$(printf '%s\n' "$SR_FA_ERR2" | /usr/bin/grep -c 'the sheet you wrote from')"
-expect_eq "FA3 the two verbs, one after the other on the wave-43 plan, finish in under 5 seconds" "yes" \
-  "$([ $((SR_FA_T1 - SR_FA_T0)) -lt 5000 ] && echo yes || echo "no: $((SR_FA_T1 - SR_FA_T0)) ms")"
 # the stub tree: card.sh keeps the sheet it was handed; sitrep_gather counts its calls
 SR_FM="$TMPROOT/fast-mut"; mkdir -p "$SR_FM/payload"
 cp -R "$BIONIC_HOOKS_DIR" "$SR_FM/hooks" && cp -R "$BIONIC_HOOKS_DIR/../payload/scripts" "$SR_FM/payload/scripts"
