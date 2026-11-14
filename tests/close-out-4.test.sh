@@ -17,20 +17,30 @@ set -uo pipefail
 # ============================================================
 section "§INHERITED-CONT — wave-35 T10 (REQ-1 AC-1.6, A-orch-18): the continuation carries every inherited: line under its own heading; a plan with none prints none"
 # ============================================================
-# `proof-add inherited <suite>` writes `inherited: <suite> base=<sha> head=<sha> at=<ISO> evidence=<log>` under
-# `## SDLC State` (T9): debt the run inherited, red at its base and at its floor. Close-out lists every such line under
-# `## Inherited debt`, beside the hand-holds, as written; a line inside a fence is prose and is not carried.
-# FIXTURE FIDELITY: mk_fixture at Step 8; lines placed by lib/proof.sh `proof_add_line`, the verb's own placer.
-# fails-when: an inherited: line is missing from the continuation, or a plan with none gets the heading.
-inh_line() {  # <suite> <sha> -> the line proof-add inherited writes
+# `proof-add inherited <suite>` writes a `proof kind=inherited` event in the run's log: debt the run inherited, red at
+# its base and at its floor. The reader renders each as `inherited: <suite> base=<sha> head=<sha> at=<ISO>
+# evidence=<log>`, and close-out lists every such line under `## Inherited debt`, beside the hand-holds; a line a
+# person typed inside a fence in the page is prose and is not carried.
+# FIXTURE FIDELITY: mk_fixture at Step 8; each debt written by lib/proof.sh `proof_event`, the verb's own writer, with
+# the fields and the instant the verb gives it.
+# fails-when: an inherited debt is missing from the continuation, or a plan with none gets the heading.
+inh_line() {  # <suite> <sha> -> the line the reader renders for the debt proof-add inherited writes
   printf 'inherited: %s base=%s head=%s at=2026-10-12T04:00:00Z evidence=record/wave-01-fixture/inherited-%s-%.12s.log' "$1" "$2" "$2" "$1" "$2"
 }
-inh_place() {  # <project> <line> -> the line placed under ## SDLC State by the product's placer
+inh_place() {  # <project> <line> -> the line's fact in the run: at 15 an inherited: line's proof event; at 14 the line under ## SDLC State
+  if co_at15 "$1"; then
+    case "$2" in inherited:\ *) ;; *) echo "inh_place: at 15 only an inherited: line is written here: '$2'" >&2; return 1 ;; esac
+    local s b h a e
+    read -r _ s b h a e <<< "$2"
+    bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; LOG_AT="$3" proof_event "$2" kind=inherited "head=$4" "evidence=$5" "suite=$6" "base=$7"' \
+      _ "$REPO_ROOT/payload/scripts/lib" "$1/$PLAN_REL" "${a#at=}" "${h#head=}" "${e#evidence=}" "$s" "${b#base=}"
+    return
+  fi
   bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; proof_add_line "$2" "$3" > "$2.pf" && mv "$2.pf" "$2"' \
     _ "$REPO_ROOT/payload/scripts/lib" "$1/$PLAN_REL" "$2"
 }
 inh_section() { awk '/^## / { s = ($0 == "## Inherited debt"); next } s && NF && !/^```/ { print }' "$1"; }
-PINH="$(CO_PLAN_AT=14 mk_fixture inherited-cont)"; advance_to "$PINH" 8
+PINH="$(mk_fixture inherited-cont)"; advance_to "$PINH" 8
 INH_H="$(fixture_git "$PINH" rev-parse --verify -q wave/01-fixture)"
 inh_place "$PINH" "$(inh_line a.test.sh "$INH_H")"
 inh_place "$PINH" "$(inh_line b.test.sh "$INH_H")"
@@ -38,7 +48,8 @@ awk '/^## Tasks/ { print "```"; print "inherited: fenced.test.sh base=0123456789
   "$PINH/$PLAN_REL" > "$PINH/$PLAN_REL.f" && mv "$PINH/$PLAN_REL.f" "$PINH/$PLAN_REL"
 run_close "$PINH" run
 expect_eq "INH-1 run closes the plan (rc 0)" "0" "$CO_RC"
-expect_absent "INH-2b …and not the fenced line" "fenced.test.sh" "$(inh_section "$PINH/$CONT_REL")"
+expect_eq "INH-2b …the section is the run's two debts, in order, and not the fenced line" \
+  "$(inh_line a.test.sh "$INH_H")|$(inh_line b.test.sh "$INH_H")" "$(inh_section "$PINH/$CONT_REL" | paste -sd'|' -)"
 expect_eq "INH-2c …beside the hand-holds: the section follows ## Hand-holds, before the Resume instruction" "yes" \
   "$(awk '/^## Hand-holds$/ { a = NR } /^## Inherited debt$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PINH/$CONT_REL")"
 PINO="$(mk_fixture inherited-none)"; advance_to "$PINO" 8
@@ -47,7 +58,7 @@ run_close "$PINO" run
 # T33 (D20, critic-adversarial #5; A-orch-32): an existing continuation.md gains the inherited lines under ## Inherited debt,
 # each once, the person's own text untouched; the section follows ## Hand-holds, which the same merge writes.
 inh_count() { /usr/bin/grep -c -F -x "$2" "$1" | tr -d ' '; }
-PIE="$(CO_PLAN_AT=14 mk_fixture inherited-existing)"; advance_to "$PIE" 8
+PIE="$(mk_fixture inherited-existing)"; advance_to "$PIE" 8
 INE_H="$(fixture_git "$PIE" rev-parse --verify -q wave/01-fixture)"
 INE_A="$(inh_line a.test.sh "$INE_H")"; INE_B="$(inh_line b.test.sh "$INE_H")"
 inh_place "$PIE" "$INE_A"; inh_place "$PIE" "$INE_B"
@@ -60,7 +71,7 @@ run_close "$PIE" run
 expect_eq "INH-5a …each line is in the file once" "1/1" "$(inh_count "$PIE/$CONT_REL" "$INE_A")/$(inh_count "$PIE/$CONT_REL" "$INE_B")"
 expect_eq "INH-5c …the section follows ## Hand-holds and comes before the Resume instruction" "yes" \
   "$(awk '/^## Hand-holds$/ { a = NR } /^## Inherited debt$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PIE/$CONT_REL")"
-PIE2="$(CO_PLAN_AT=14 mk_fixture inherited-existing2)"; advance_to "$PIE2" 8
+PIE2="$(mk_fixture inherited-existing2)"; advance_to "$PIE2" 8
 inh_place "$PIE2" "$INE_A"; inh_place "$PIE2" "$INE_B"
 mkdir -p "$PIE2/${CONT_REL%/*}"; cp "$PIE/$CONT_REL" "$PIE2/$CONT_REL"
 INE_CK1="$(cksum < "$PIE2/$CONT_REL")"
@@ -68,7 +79,7 @@ run_close "$PIE2" run
 expect_eq "INH-6 run twice: exits 0, each line still once, the file byte for byte what the first run left" "0/1/1/$INE_CK1" \
   "$CO_RC/$(inh_count "$PIE2/$CONT_REL" "$INE_A")/$(inh_count "$PIE2/$CONT_REL" "$INE_B")/$(cksum < "$PIE2/$CONT_REL")"
 # the heading holds one of the two lines (typed unfenced) and a note: the other is added under it, nothing twice
-PIE3="$(CO_PLAN_AT=14 mk_fixture inherited-existing3)"; advance_to "$PIE3" 8
+PIE3="$(mk_fixture inherited-existing3)"; advance_to "$PIE3" 8
 inh_place "$PIE3" "$INE_A"; inh_place "$PIE3" "$INE_B"
 mkdir -p "$PIE3/${CONT_REL%/*}"
 printf '# continuation — hand written\n\n## Deferrals\n\n## Inherited debt\n\nthe person looked at a.test.sh\n%s\n\n## Resume instruction\n\nedited by a person\n' "$INE_A" > "$PIE3/$CONT_REL"
@@ -199,8 +210,8 @@ section "§HAND-HOLDS-KINDS — wave-36 T14 (D13; REQ-7 AC-7.6): adopt's adoptio
 # FIXTURE FIDELITY: an amend, a hold, an extension and an adoption are the shipped verbs, driven as the session bound to the
 # plan, each writing its own event; a by-hand landing (of a row no build row names, so no window opens) and two stops
 # of a run with one reason are planted in their writers' shapes (driving them takes a landing tree and a live run:
-# tests/reader.test.sh §HANDS drives both); the moved line is finding-move's, under ## SDLC State.
-HK_P="$(CO_PLAN_AT=14 mk_fixture handholds-kinds)"; advance_to "$HK_P" 8
+# tests/reader.test.sh §HANDS drives both); the move is finding-move's event, written by its writer.
+HK_P="$(mk_fixture handholds-kinds)"; advance_to "$HK_P" 8
 HK_PLAN="$HK_P/$PLAN_REL"; HK_SID="closeout-hands-1"; HK_PRED="9f1e2d3c-4b5a-6978-8899-aabbccddeeff"; HK_RC=""
 ( in_fixture "$HK_P" || exit 1; . "$REPO_ROOT/tests/lib/bound-marker.sh"; bound_marker "$HK_P" "$HK_SID" "$HK_PLAN" )
 for s in "$HK_SID" "$HK_PRED"; do bash -c '. "$1/roster.sh" && roster_header' _ "$REPO_ROOT/payload/scripts/lib" > "$HK_P/.bionic/tmp/roster-$s.state"; done
@@ -215,13 +226,13 @@ hk_poke() { ( in_fixture "$HK_P" || exit 9; HOME="$SB_HOME" CLAUDE_PROJECT_DIR="
 hk_poke amend w1 --files+ lib/z.sh --reason 'the brief missed lib/z.sh'; hk_poke hold w1 'kept for a second pass'
 hk_poke extend w1 'more to read'; hk_poke adopt --why 'the session was cleared'
 expect_regex "HK-0 precondition: amend, hold and extend exit 0, adopt 0 or 1 (open rows found)" '^000[01]$' "$HK_RC"
-HK_MOVED="moved: record/wave-01-fixture/rev.md#1 to=fixed row=T1 by=Chris Lehman at=2026-10-06T14:00:00Z"
-awk -v m="$HK_MOVED" '
-  /^approved-by: / { print; print m; next }
-  /^## Tasks/ { print "```"; print "moved: record/wave-01-fixture/rev.md#2 to=fixed row=T2 by=Someone at=2026-10-06T14:10:00Z"; print "```"; print ""; print; next }
-  /^- Step 8:/ { print "- T1: the reviewer said rev.md#3 was moved: to=fixed by hand, says this prose"; print; next }
-  { print }' "$HK_PLAN" > "$HK_PLAN.k" && mv "$HK_PLAN.k" "$HK_PLAN"
-HK_WANT="hand-holds: total=8 · by-hand=1 · stop-runs=2 · declines=0 · lifts=0 · amends=1 · holds=1 · extensions=1 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=1 · fixed=1 · needs-you=0"
+# a move to fixed is placed against its row's first landing that names its kind, as every landing the line writes does
+awk -v c="$(printf 'e%.0s' $(seq 40))" 'index($0, "run/v1|ev=published|row=T1|at=") == 1 { sub(/\|at=/, "|commit=" c "|kind=queue|by=-|why=-|at=") } { print }' \
+  "$HK_P/.bionic/docs/record/wave-01-fixture/run.log" > "$HK_P/hk.log" && mv "$HK_P/hk.log" "$HK_P/.bionic/docs/record/wave-01-fixture/run.log"
+bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; LOG_AT=2026-10-06T14:00:00Z proof_finding_event "$2" ref=record/wave-01-fixture/rev.md#1 to=fixed row=T1 "by=Chris Lehman"' \
+  _ "$REPO_ROOT/payload/scripts/lib" "$HK_PLAN"
+# the run has landed build rows, so the count is over the window from the last of them, and says what it left out
+HK_WANT="hand-holds: total=8 · by-hand=1 · stop-runs=2 · declines=0 · lifts=0 · amends=1 · holds=1 · extensions=1 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=1 · fixed=1 · needs-you=0 · unplaced=0"
 expect_eq "HK-1 one act of each kind, and one to=fixed move, each read under its own kind, by-hand the landing alone, in the total" \
   "$HK_WANT" "$(hh_report "$HK_P" --hand-holds | grep '^hand-holds: ')"
 run_close "$HK_P" check
@@ -254,7 +265,7 @@ fence_lines() {  # <continuation> <heading> <in|out> -> the section's lines insi
     /^```/ { f = !f; next }
     NF && ((w == "in") == (f == 1)) { print }' "$1"
 }
-PF1="$(CO_PLAN_AT=14 mk_fixture fence-one)"; advance_to "$PF1" 8
+PF1="$(mk_fixture fence-one)"; advance_to "$PF1" 8
 PF_H="$(fixture_git "$PF1" rev-parse --verify -q wave/01-fixture)"
 PF_A="$(inh_line a.test.sh "$PF_H")"; PF_B="$(inh_line b.test.sh "$PF_H")"
 inh_place "$PF1" "$PF_A"; inh_place "$PF1" "$PF_B"
@@ -267,13 +278,13 @@ expect_eq "FENCE-1 C38 run exits 0 and the owed line goes inside the fence, afte
   "0|$PF_A $PF_B|" \
   "$CO_RC|$(fence_lines "$PF1/$CONT_REL" "## Inherited debt" in | paste -sd' ' -)|$(fence_lines "$PF1/$CONT_REL" "## Inherited debt" out)"
 PF1B_CK="$(cksum < "$PF1/$CONT_REL")"
-PF1B="$(CO_PLAN_AT=14 mk_fixture fence-one-again)"; advance_to "$PF1B" 8
+PF1B="$(mk_fixture fence-one-again)"; advance_to "$PF1B" 8
 inh_place "$PF1B" "$PF_A"; inh_place "$PF1B" "$PF_B"
 mkdir -p "$PF1B/${CONT_REL%/*}"; cp "$PF1/$CONT_REL" "$PF1B/$CONT_REL"
 run_close "$PF1B" run
 expect_eq "FENCE-2 a second close over it adds nothing: byte for byte" "0|$PF1B_CK" "$CO_RC|$(cksum < "$PF1B/$CONT_REL")"
 # the otherwise arm: a section holding a note and then a fenced block keeps the old placement, after the block
-PF3="$(CO_PLAN_AT=14 mk_fixture fence-mixed)"; advance_to "$PF3" 8
+PF3="$(mk_fixture fence-mixed)"; advance_to "$PF3" 8
 inh_place "$PF3" "$PF_A"; inh_place "$PF3" "$PF_B"
 mkdir -p "$PF3/${CONT_REL%/*}"
 printf '# continuation — hand written\n\n## Deferrals\n\n## Inherited debt\n\nthe person looked at these\n\n```\n%s\n```\n\n## Resume instruction\n\nedited by a person\n' "$PF_A" > "$PF3/$CONT_REL"
@@ -391,7 +402,7 @@ chmod 644 "$PLC/$CONT_REL"
 # ============================================================
 section "§PARKED — wave-38 T15 (REQ-4 AC-4.3; D17): close-out closes a parked wave without the merge act"
 # ============================================================
-# A plan carrying a non-empty flush-left `## Wake Note`, or a `parked:` line under `## SDLC State`, is parked
+# A plan carrying a non-empty flush-left `## Wake Note` is parked
 # (steps/8.md: "parking requires an explicit ## Wake Note"). `check` prints `merge: parked (<why>)` where it
 # printed `merge: WOULD REFUSE`; `run` performs the tail without the merge act: the Step-9 line reads
 # `delivered: parked on <working branch> @ <sha>`, the continuation's header says parked, where and why, the epic
@@ -400,8 +411,8 @@ section "§PARKED — wave-38 T15 (REQ-4 AC-4.3; D17): close-out closes a parked
 # empty or `(none)` (the old plans' template section) parks nothing.
 # fails-when: `check` prints `merge: WOULD REFUSE` on a parked plan; a parked run deletes a branch.
 PK_WHY="The release waits on a hand test on the user's machine."
-# park_fixture <name> <wake|line|none|unparked> -> a fixture at Step 8 whose working branch carries one commit main
-# never took (the facts re-planted at that head), with a ## Wake Note, a parked: line, an empty Wake Note, or neither
+# park_fixture <name> <wake|none|unparked> -> a fixture at Step 8 whose working branch carries one commit main
+# never took (the facts re-planted at that head), with a ## Wake Note, an empty Wake Note, or neither
 park_fixture() {
   local p
   p="$(mk_fixture "$1")"
@@ -412,7 +423,6 @@ park_fixture() {
   plant_facts "$p"
   case "$2" in
     wake) printf '\n## Wake Note\n\n%s\n' "$PK_WHY" >> "$p/$PLAN_REL" ;;
-    line) awk -v w="parked: $PK_WHY" '{ print } /^current: / && !d { print w; d = 1 }' "$p/$PLAN_REL" > "$p/pk.tmp" && mv "$p/pk.tmp" "$p/$PLAN_REL" ;;
     none) printf '\n## Wake Note\n\n(none)\n' >> "$p/$PLAN_REL" ;;
   esac
   printf '%s\n' "$p"
@@ -445,8 +455,8 @@ expect_contains "PK-8b …and the card says nothing was removed" "worktree-remov
 run_close "$PPK" run
 expect_eq "PK-9 a second run says already closed" "0|already closed" "$CO_RC|$CO_OUT"
 
-# a parked: line under ## SDLC State parks too; an unreached wt/* branch does not refuse a parked plan (nothing is deleted)
-PPL="$(CO_PLAN_AT=14 park_fixture parked2 line)"
+# an unreached wt/* branch does not refuse a parked plan (nothing is deleted)
+PPL="$(park_fixture parked2 wake)"
 add_unreached_branch "$PPL"
 run_close "$PPL" check
 run_close "$PPL" run
@@ -1052,18 +1062,5 @@ OB_P="$(oc_after "$POB")"
 expect_eq "OC-6 above zero no proof names AC-2, and the delivered plan's table is as it was" "|pending|—" "$(oc_proofs "$POB")|$(oc_cells "$OB_P" AC-2)"
 expect_contains "OC-6c …and the card says it is blocked, naming the line" "matrix: AC-2 blocked — $OB_LINE" "$CO_OUT"
 
-# ============================================================
-section "§PARKED-NOTE — close-out takes its step and its closure from the reader: a parked plan's Step 9 note closes nothing"
-# ============================================================
-# FIXTURE FIDELITY: §PARKED's park_fixture, an advanced run's Step 8 line, and a person's note on its Step 9 line.
-# fails-when: close-out reads the note as the delivery, says already closed, and the parked run never closes.
-PPT="$(CO_PLAN_AT=14 park_fixture parked5 wake)"
-awk -v w="parked on wave/01-fixture — $PK_WHY" '/^- Step 8: \(pending\)$/ { print "- Step 8: integrate: opened 2026-09-14T00:20Z"; print "- Step 9: " w; next } { print }' "$PPT/$PLAN_REL" > "$PPT/pk.tmp" && mv "$PPT/pk.tmp" "$PPT/$PLAN_REL"
-expect_eq "PN-0 precondition: the plan carries the Step 8 line and the note, and the reader reads step 8" "1|1|n=8" \
-  "$(/usr/bin/grep -c '^- Step 8: integrate: ' "$PPT/$PLAN_REL")|$(/usr/bin/grep -c '^- Step 9: parked on ' "$PPT/$PLAN_REL")|$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$PPT/$PLAN_REL" step | head -1)"
-run_close "$PPT" run
-expect_eq "PN-1 run closes the parked plan (rc 0), not already closed" "0|no" "$CO_RC|$(contains "$CO_OUT" "already closed")"
-expect_eq "PN-2 …the note left as the person wrote it, and the delivery its step's event" "1|yes" \
-  "$(/usr/bin/grep -c '^- Step 9: parked on ' "$PPT/$PLAN_REL")|$(contains "$(co_step_answer "$PPT")" "delivered=parked on wave/01-fixture @ ")"
 
 finish
