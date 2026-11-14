@@ -571,6 +571,8 @@ rigor: double
 |---|---|---|---|---|
 | AC-1.1 | T1 | discharged | see AC-1.1 | CONFIRMED |
 | AC-1.2 | T2 | pending | — | — |
+| AC-1.3 | T4 | discharged | record/$1/h.md | — |
+| AC-1.4 | T4 | discharged | record/$1/h.md | — |
 
 AC-1.1:
   serves: REQ-1
@@ -581,6 +583,10 @@ AC-1.1:
 AC-1.2:
   fails-when: b is red
   task: T2
+AC-1.3:
+  user-confirmed: Dana 2026-10-20 "checked it by hand"
+AC-1.4:
+  user-confirmed: pending
 
 ## SDLC State
 current: 8
@@ -608,6 +614,12 @@ expect_eq "…each its own row of a criteria table: its tier, and its block's re
   "requirement=REQ-1|eval-type=T1|eval=\`a.test.sh\`|fails-when=a is red|task=T1;requirement=—|eval-type=T2|eval=—|fails-when=b is red|task=T2" \
   "$(for c in AC-1.1 AC-1.2; do askg criterion "$c" | grep -v '^criterion=' | paste -sd'|' -; done | paste -sd';' -)"
 expect_eq "…and the reader's cells after the act are those before" "$GC" "$(gcells "$G")"
+confirms() { reader_cells "$1" | awk -F'\037' '$1 ~ /^AC-1\.[34]$/ { print $1 "|" $2 "|" $7 }' | paste -sd' ' -; }
+expect_eq "a confirmation its person wrote in the block reads as theirs after the act, one that reads pending as none" \
+  "AC-1.3|discharged|Dana 2026-10-20 checked it by hand AC-1.4|discharged|" "$(confirms "$G")"
+GL="$SB/homes/record/wave-6-homes/run.log"; GS="$(cksum < "$G") $(cksum < "$GL")"; bash "$BF" "$G" >/dev/null 2>&1
+expect_eq "…written once, as an approval naming the criterion: a second act changes no byte and writes no second" \
+  "$GS key=AC-1.3" "$(cksum < "$G") $(cksum < "$GL") $(sed -n 's/^run\/v1|ev=approval|\(key=[^|]*\)|.*/\1/p' "$GL" | paste -sd' ' -)"
 
 section "STEPS"
 U="$D/plans/epic-x/wave-6-untimed.plan.md"; B="$D/plans/epic-x/wave-5-back.plan.md"; s9='- Step 9: delivered: 2026-11-01T13:34Z'

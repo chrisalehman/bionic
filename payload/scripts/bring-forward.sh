@@ -5,7 +5,8 @@
 #   1. the plan and the record as they were are copied to `record/<wave>/kept/`, as `<wave>.plan.md` and
 #      `record/`, with the act's gaps list as `gaps`;
 #   2. `record/<wave>/run.log` is written from the translation (lib/translate.sh): the facts the old homes
-#      hold, in the order they happened;
+#      hold, in the order they happened, each confirmation a person wrote in a criterion's block followed by
+#      the approval naming the criterion, 15's one home for it (_bf_log);
 #   3. the plan is rewritten with no section a machine wrote (the SDLC State, the Verification Matrix and
 #      the Handoff go), each Tasks row in its nine authored cells, and its version header at 15.
 # It prints the gaps list, then `kept=<directory>`.
@@ -20,8 +21,8 @@
 # a writer appended to it after the act.
 #
 # WHOSE KEPT COPY. A kept copy standing beside a plan not yet at 15 is this act's own only when it holds the plan as it
-# stands, byte for byte, and the run's log is absent, the log the copy holds, or the log the act writes from the copy (the
-# translation of the kept plan and record, laid out as a run of their own): then the act was broken off before it rewrote
+# stands, byte for byte, and the run's log is absent, the log the copy holds, or the log the act writes from the copy (_bf_log
+# over the kept plan and record, laid out as a run of their own): then the act was broken off before it rewrote
 # the plan, and this act finishes it. Any other kept copy was left by another build of the record directory or by the
 # plan as it stood before a later edit, and a log neither it nor the act wrote is no log the act may judge as its own; both
 # are refused in words, before anything is written (_bf_own).
@@ -281,6 +282,27 @@ _bf_misnamed() {  # <plan, resolved> <its record> -> the refusal on stderr
     "$1" "$tail" >&2
 }
 
+# THE CONFIRMATION. At 14 a person confirmed a criterion by a `user-confirmed: <who> <day> <words>` line in its block,
+# which the translation carries as the field `confirmed=` of the criterion's proof or waiver; at 15 the reader takes a
+# person's confirmation only from an approval naming the criterion, so the act writes one after that line, in the
+# approve verb's fields, the day as written. The translation is left whole because a run at 14 is read through it in
+# place. Only the attributed form lib/walls.sh `user_confirmed_attributed` takes is a confirmation: `pending` and any
+# other words write nothing. A criterion the translation already holds an approval for gets no second.
+_bf_log() {  # <plan> -> the run's log the act writes
+  translate "$1" events | awk -F'|' '
+    { line[++n] = $0 }
+    $2 == "ev=approval" && match($0, /\|key=[^|]*/) { appr[substr($0, RSTART + 5, RLENGTH - 5)] = 1 }
+    END { for (i = 1; i <= n; i++) { l = line[i]; print l
+        if (l !~ /^run\/v1\|ev=(proof|waiver)\|/ || !match(l, /\|ac=[^|]*/)) continue
+        ac = substr(l, RSTART + 4, RLENGTH - 4); if ((ac in appr) || !match(l, /\|confirmed=[^|]*/)) continue
+        v = substr(l, RSTART + 11, RLENGTH - 11)
+        if (v !~ /^[A-Za-z][A-Za-z0-9._-]*[ \t]+[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ \t]+[^ \t]/) continue
+        by = v; sub(/[ \t].*$/, "", by); r = substr(v, length(by) + 1); sub(/^[ \t]+/, "", r)
+        at = substr(r, 1, 10); said = substr(r, 11); sub(/^[ \t]+/, "", said); sub(/[ \t]+$/, "", said)
+        if (said ~ /^".*"$/) said = substr(said, 2, length(said) - 2)
+        appr[ac] = 1; printf "run/v1|ev=approval|key=%s|by=%s|said=%s|at=%s\n", ac, by, said, at } }'
+}
+
 _bf_own() {  # <plan> <kept> <log> <work dir> -> 0 the kept copy is this act's own; 1 not, the refusal on stderr; 3 a copy failed
   local plan="$1" kept="$2" log="$3" name="${1##*/}" k why
   if ! cmp -s "$kept/$name" "$plan"; then
@@ -290,7 +312,7 @@ _bf_own() {  # <plan> <kept> <log> <work dir> -> 0 the kept copy is this act's o
   else
     k="$4/kept"; mkdir -p "$k/plans" "$k/record" && cp "$kept/$name" "$k/plans/" || return 3
     [ ! -d "$kept/record" ] || cp -R "$kept/record" "$k/record/${name%.plan.md}" || return 3
-    translate "$k/plans/$name" events 2>/dev/null | cmp -s - "$log" && return 0
+    _bf_log "$k/plans/$name" 2>/dev/null | cmp -s - "$log" && return 0
     why="the run's log $log is neither the log it holds nor the one the act writes from it, so another build left the two"
   fi
   printf 'bring-forward: refused — %s is not this run'"'"'s kept copy: %s. Move it aside and run the act again; nothing was written.\n' "$kept" "$why" >&2
@@ -315,7 +337,7 @@ bf_main() {  # <plan> -> the act; prints the gaps list and kept=<directory>
       && mkdir -p "$rec" && mv "$st" "$kept"; }; then rm -rf "$st"; return 1; fi
   fi
   if ! reader_brought "$plan"; then
-    { translate "$plan" events > "$log.tmp.$$" && mv "$log.tmp.$$" "$log"; } || { rm -f "$log.tmp.$$"; return 1; }
+    { _bf_log "$plan" > "$log.tmp.$$" && mv "$log.tmp.$$" "$log"; } || { rm -f "$log.tmp.$$"; return 1; }
   fi
   if ! cmp -s "$BF_WORK/plan" "$plan"; then
     { cat "$BF_WORK/plan" > "$plan.tmp.$$" && mv "$plan.tmp.$$" "$plan"; } || { rm -f "$plan.tmp.$$"; return 1; }
