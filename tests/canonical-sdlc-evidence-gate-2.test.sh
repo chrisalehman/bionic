@@ -24,14 +24,6 @@ set -euo pipefail
 # unchanged and tests/bash-walls.test.sh owns the composition the process adds.
 HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 
-# THE FLOOR A RUN PAST STEP 6 CARRIES (wave-35 T31; D20, A-orch-50): shard 1's eg_floor, the same helper,
-# since the prelude both shards source is outside the row that added the arm.
-eg_floor() {  # <plan content> -> the content with the readings and one floor proof line
-  eg_readings "$1" | EG_H="$EG_HEAD" awk '{ print }
-    !done && /^[[:space:]]*current[[:space:]]*:[[:space:]]*[7-9][ab]?[[:space:]]*$/ {
-      printf "proved: kind=regression head=%s at=2026-10-12T00:00:00Z evidence=record/floor.log\n", ENVIRON["EG_H"]; done = 1 }'
-}
-
 # ============================================================
 # Section 29: Step 9's delivery, and the trio a named target owes
 # ============================================================

@@ -197,8 +197,4 @@ else
 fi
 rm -rf "$scratch_re"
 
-# the control: an UNMUTATED trio must still agree — proves §5-7's red comes
-# from the mutation, not from a broken harness that would be red regardless
-control_marker="$(marker_of "$WORK/patrol.sh")"
-
 finish
