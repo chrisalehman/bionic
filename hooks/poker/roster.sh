@@ -71,7 +71,7 @@
 # booked.sh with `--run-log <log>`; a pid the system gave to someone else is not the run). LOST:
 # neither, and the pid is dead or is no longer the run's — reported with the time its log was
 # last written. A LOST run is never called a timeout: nothing here knows a limit was reached.
-# Set in hooks/session-poker.sh, before any part loads: RUN_LOG, RUN_PID, RUN_NAME, RUN_ROSTER, RUN_ROW_RC,
+# Set in hooks/session-poker.sh, before any part loads: RUN_OUT, RUN_PID, RUN_NAME, RUN_ROSTER, RUN_ROW_RC,
 # RUN_STARTED, RUN_STATE, RUN_RC, RUN_ID, RUN_LAST_WRITTEN, RUN_PROGRESS, RUN_ELAPSED.
 
 # run_find <project root> <name | run id | log path> -> RUN_* for the run that operand names; 1 when
@@ -81,12 +81,12 @@
 # row records (the main thread's).
 run_find() {
   local repo="$1" arg="$2" rf row best="" bestrf="" s bs=""
-  RUN_LOG=""; RUN_PID=""; RUN_NAME=""; RUN_ROSTER=""; RUN_ROW_RC=""; RUN_STARTED=""
+  RUN_OUT=""; RUN_PID=""; RUN_NAME=""; RUN_ROSTER=""; RUN_ROW_RC=""; RUN_STARTED=""
   [ -n "$arg" ] || return 1
   case "$arg" in
     /*.log)
       [ -f "$arg" ] || return 1
-      RUN_LOG="$arg"; RUN_NAME="$(basename "$arg" .log)" ;;
+      RUN_OUT="$arg"; RUN_NAME="$(basename "$arg" .log)" ;;
     *)
       for rf in "$repo/.bionic/tmp"/roster-*.state; do
         row="$(run_row_of "$rf" "$arg")" || continue
@@ -99,10 +99,10 @@ run_find() {
       else
         case "$arg" in */*|.*) return 1 ;; esac
         [ -f "$repo/.bionic/tmp/runs/$arg.log" ] || return 1
-        RUN_LOG="$repo/.bionic/tmp/runs/$arg.log"; RUN_NAME="$arg"
+        RUN_OUT="$repo/.bionic/tmp/runs/$arg.log"; RUN_NAME="$arg"
       fi ;;
   esac
-  [ -n "$RUN_PID" ] || { read -r RUN_PID < "$RUN_LOG.pid"; } 2>/dev/null
+  [ -n "$RUN_PID" ] || { read -r RUN_PID < "$RUN_OUT.pid"; } 2>/dev/null
   return 0
 }
 
@@ -2284,9 +2284,9 @@ EOF
     SR_GROUPS="$(run_groups "$RUN_PID")"
     kill -TERM -- "-$RUN_PID" 2>/dev/null || kill -TERM "$RUN_PID" 2>/dev/null
     _sr_i=0
-    while [ "$_sr_i" -lt 50 ] && run_live "$RUN_PID" "$RUN_LOG"; do sleep 0.1; _sr_i=$((_sr_i + 1)); done
+    while [ "$_sr_i" -lt 50 ] && run_live "$RUN_PID" "$RUN_OUT"; do sleep 0.1; _sr_i=$((_sr_i + 1)); done
     SR_HOW="TERM"
-    if run_live "$RUN_PID" "$RUN_LOG"; then
+    if run_live "$RUN_PID" "$RUN_OUT"; then
       SR_GROUPS="$SR_GROUPS
 $(run_groups "$RUN_PID")"
       for _sr_g in $(printf '%s\n' "$SR_GROUPS" | sort -u); do
@@ -2298,15 +2298,15 @@ $(run_groups "$RUN_PID")"
       SR_HOW="TERM, then KILL"
     fi
     _sr_i=0
-    while [ "$_sr_i" -lt 30 ] && [ ! -s "$RUN_LOG.rc" ]; do sleep 0.1; _sr_i=$((_sr_i + 1)); done
-    SR_RC=""; { read -r SR_RC < "$RUN_LOG.rc"; } 2>/dev/null
+    while [ "$_sr_i" -lt 30 ] && [ ! -s "$RUN_OUT.rc" ]; do sleep 0.1; _sr_i=$((_sr_i + 1)); done
+    SR_RC=""; { read -r SR_RC < "$RUN_OUT.rc"; } 2>/dev/null
     case "$SR_RC" in
       ''|*[!0-9]*)
-        [ -z "$(tail -c 1 "$RUN_LOG" 2>/dev/null)" ] || printf '\n' >> "$RUN_LOG"
-        printf 'rc=137\n' >> "$RUN_LOG"
-        printf '137\n' > "$RUN_LOG.rc"
+        [ -z "$(tail -c 1 "$RUN_OUT" 2>/dev/null)" ] || printf '\n' >> "$RUN_OUT"
+        printf 'rc=137\n' >> "$RUN_OUT"
+        printf '137\n' > "$RUN_OUT.rc"
         if [ -n "$RUN_ROSTER" ] && [ -z "$RUN_ROW_RC" ]; then
-          roster_mark_run "$RUN_ROSTER" "$RUN_NAME" "$RUN_LOG" run_rc=137 "run_ended_at=$(iso_now)" 2>/dev/null || :
+          roster_mark_run "$RUN_ROSTER" "$RUN_NAME" "$RUN_OUT" run_rc=137 "run_ended_at=$(iso_now)" 2>/dev/null || :
         fi
         say "stop-run $RUN_NAME run=$RUN_ID pid=$RUN_PID — stopped ($SR_HOW); it wrote no end, so rc=137 was recorded for it" ;;
       *)

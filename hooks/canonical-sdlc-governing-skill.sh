@@ -1059,15 +1059,16 @@ if [ -n "$PF" ]; then
   fi
 fi
 
-# Epic minimum: rigor-minimum: in the epic plan's frontmatter (read-only,
+# Epic minimum: rigor-minimum: in the epic plan's header, as the plan-read library answers it (read-only,
 # fail-open; missing/unreadable epic plan or missing key → no finding,
 # floors are opt-in).
 EPIC=$(yaml_get epic)
-if [ -n "$EPIC" ] && [ -r "$DOCS_ROOT/plans/$EPIC/epic.plan.md" ]; then
-  EF_TEXT="$(awk '/^---$/{n++;next} n==1' "$DOCS_ROOT/plans/$EPIC/epic.plan.md")"
-  declare -F alias_gone_text >/dev/null 2>&1 && alias_gone_text rigor-key "$EF_TEXT" \
+EF_PLAN="$DOCS_ROOT/plans/$EPIC/epic.plan.md"
+if [ -n "$EPIC" ] && [ -r "$EF_PLAN" ]; then
+  EF_KEYS="$(plan_read_header "$EF_PLAN" 2>/dev/null | sed 's/=.*/:/')"
+  declare -F alias_gone_text >/dev/null 2>&1 && alias_gone_text rigor-key "$EF_KEYS" \
     && _gs_refuse alias-epic "$ALIAS_GONE_SAID" "$DOCS_ROOT" "$EPIC"
-  EF="$(rigor_minimum_of "$EF_TEXT")"
+  EF="$(plan_read_header "$EF_PLAN" rigor-minimum 2>/dev/null)"; EF="${EF#rigor-minimum=}"
   if [ -n "$EF" ]; then
     ER=$(rigor_rank "$EF")
     # A word that is no level is the epic's own data-quality finding, as the project floor's is
