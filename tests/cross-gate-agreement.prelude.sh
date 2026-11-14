@@ -85,11 +85,6 @@ PARTY_ER="${W1R_PARTY_ER:-$BIONIC_HOOKS_DIR/execution-recorder.sh}"
 
 PROBE="$BIONIC_HOOKS_DIR/preflight-probe.sh"
 OBSERVE="$BIONIC_HOOKS_DIR/stop-check.sh"
-# THE OBSERVATION'S OWN LIBRARY (epic-23 wave-15, REQ-2; ADR-028). The resolution, the file
-# facts and the classification moved out of the verb and out of the stop gate into one
-# sourced file, so the copies this suite used to hold to each other are one definition — and
-# the comparisons below point at it rather than at whichever carrier they were written for.
-OBSERVE_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/observe.sh"
 SWEEPER="$BIONIC_HOOKS_DIR/session-sweeper.sh"
 # The landing gate (epic-16 wave-01) is a fifth party and an overridable one for
 # the same reason the four above are: §J drives a MUTATED COPY of it to prove the
@@ -818,9 +813,6 @@ V_ORIGIN_VAL="$(v_hook_val "$V_ORIGIN")"
 
 # ---- from §Section P (the Patrol stamp): PARTY_PK ----
 PARTY_PK="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
-
-# ---- from §S.1: PARTY_PK_S ----
-PARTY_PK_S="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
 
 # ---- from §S.4: PARTY_SG_W ----
 PARTY_SG_W="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"

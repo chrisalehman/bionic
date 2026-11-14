@@ -421,8 +421,6 @@ v9_step8_body="  merge: merged wave/bionic-1.3.2 into main
 
 v9_step9_body="  delivered: close-out report and continuation.md written"
 
-# Frontmatter carrying the triple. $1 scale, $2 deploy, $3 use_worktree,
-# $4 epic (omitted when empty).
 # THE ONE TABLE, AT EITHER SCALE (wave-31 T24; REQ-1, D2). The task-scale fixtures this file
 # carried were the retired shape: a five- or six-column `## Tasks` (`id | intent | rigor |
 # description | status [| worktree]`) under `current: T<n>`. The gate reads one table now and a
