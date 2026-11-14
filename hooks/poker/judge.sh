@@ -40,21 +40,39 @@ OWED_ROWS
   return 0
 }
 
-# cur8_unruled -> the AC id of each criterion the advance to 8 finds unruled, one per line: walls.sh
+# cur8_unruled [awaiting] -> the AC id of each criterion the advance to 8 finds unruled, one per line: walls.sh
 # `matrix_unruled`, the commit gate's own reader and predicate (`matrix_row_ruled`) over the reader's answer, the
 # evidence review read at the working head, asked in a subshell so nothing walls.sh defines outlives it. Never a second
-# reading of the criteria here: the advance and every commit after it answer one row one way. rc 1 when the library
-# cannot be had, 2 when the run's facts could not be read.
+# reading of the criteria here: the advance and every commit after it answer one row one way. With `awaiting`, only the
+# ids that also await their person (`matrix_row_awaits`). rc 1 when the library cannot be had, 2 when the run's facts
+# could not be read.
 cur8_unruled() {
   [ -f "$BIONIC_LIB/walls.sh" ] || return 1
   ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 || exit 1
     declare -F matrix_unruled >/dev/null 2>&1 || exit 1
-    matrix_unruled "$PV_PLAN" 8 "${PV_HEAD8:-}" )
+    matrix_unruled "$PV_PLAN" 8 "${PV_HEAD8:-}" "$@" )
 }
 
-# cur8_unruled_line <AC> -> the refusal's line for an unruled row: the matrix arm's own fact, as a commit at
-# current: 8 is refused with it, so the release approval card settles it as `row:<AC>` whichever refusal names it.
+# cur8_awaiting_line -> the printf format of the refusal's line for an unruled row that awaits its person, its one %s the
+# criterion. THE ONE SPELLING of it: the release approval card (payload/scripts/card.sh `_card_settles`) reads this
+# function from this file, so it settles the line by the words the judge prints, as it does `cur8_unapproved_line`.
+cur8_awaiting_line() {
+  printf '%s' "bionic: commit refused — %s awaits its person's confirmation (it is proved; its person confirms it at release: reply <n> confirm, <n> being the decision the release approval card gives it)"
+}
+
+# cur8_unruled_line <AC> -> the refusal's line for an unruled row: for a criterion in PV_AWAIT8, the ids
+# `cur8_unruled awaiting` named, its person's confirmation (`cur8_awaiting_line`); for any other, the matrix arm's own
+# fact, as a commit at current: 8 is refused with it. The release approval card settles either as `row:<AC>` whichever
+# refusal names it.
 cur8_unruled_line() {
+  local fmt
+  case $'\n'"${PV_AWAIT8:-}"$'\n' in
+    *$'\n'"$1"$'\n'*)
+      fmt="$(cur8_awaiting_line)"
+      # shellcheck disable=SC2059  # the format is cur8_awaiting_line, whose only conversion is its one %s
+      printf "$fmt" "$1"
+      return 0 ;;
+  esac
   printf 'bionic: commit refused — the auditor has not confirmed %s (rule it: the auditor confirms it, the row is waived, or a T4 row carries its user'"'"'s confirmation)' "$1"
 }
 
@@ -155,6 +173,9 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
     die "REFUSED — current: 8 is admitted only when every matrix row is ruled, and the matrix check (walls.sh matrix_unruled) cannot be loaded from $BIONIC_LIB or the run's facts could not be read; the plan is unchanged."
     exit 2
   fi
+  # Who is awaited is the line's words only: a predicate that cannot be asked leaves the line as it was and the verdict where it is.
+  PV_AWAIT8=""
+  [ -z "$unruled" ] || PV_AWAIT8="$(cur8_unruled awaiting 2>/dev/null)" || PV_AWAIT8=""
   out="$(facts_state "$PV_PLAN" "$PV_HEAD8" 2>"$PV_NEW.judge")"; rc=$?
   err="$(cat "$PV_NEW.judge" 2>/dev/null)"; rm -f "$PV_NEW.judge"
   # The check-only advance (`current <N> --check`; wave-38 T1, D20) takes this judgment and not its ledger write.
