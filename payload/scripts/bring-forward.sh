@@ -223,10 +223,9 @@ _bf_criteria() {  # <plan> -> `<criterion><TAB><tier><TAB><requirement><TAB><eva
 # run owed, past its step, and no home held is named on the gaps list; a header that holds a key keeps its own value. A
 # run that held no integration branch is named nowhere: 14's one reader found none either, so the act drops nothing.
 _bf_homes() {  # <plan> <header out> -> a `<key><TAB><value>` line in <header out> per key to write; a gap line per key owed and held nowhere
-  local plan="$1" k v found ib fn=plan_integration_branch
-  # The branch is asked of its one reader over the plan as it stands, State section in; its key is the reader's name with
-  # hyphens, so the act holds no spelling of the key of its own for the tree's one-reader search to find.
-  ib="${fn#plan_}"; ib="${ib//_/-}"
+  local plan="$1" k v found ib="$PLAN_INTEGRATION_BRANCH_KEY"
+  # The branch is asked of its one reader over the plan as it stands, State section in; its key is the library's name for
+  # it, the one spelling, used here for the header tested and the line written.
   # A Step block is its `- Step <n>:` line and the indented lines under it; one held (pending) is no step reached.
   found="$(_translate_section "$plan" "SDLC State" | awk '
     function word(s) { sub(/^[ \t]+/, "", s); sub(/[ \t].*$/, "", s); gsub(/^["\047]|["\047]$/, "", s); return s }
@@ -249,7 +248,7 @@ _bf_homes() {  # <plan> <header out> -> a `<key><TAB><value>` line in <header ou
   : > "$2"
   for k in working-branch:4 base-sha:4 adrs:7 "$ib:"; do
     v="$(plan_read_header "$plan" "${k%:*}" 2>/dev/null)" && [ -n "${v#*=}" ] && continue
-    if [ "${k%:*}" = "$ib" ]; then v="$("$fn" "$plan")"
+    if [ "${k%:*}" = "$ib" ]; then v="$(plan_integration_branch "$plan")"
     else v="$(awk -F'\t' -v k="${k%:*}" '$1 == k { print $2; exit }' <<< "$found")"; fi
     if [ -n "$v" ]; then printf '%s\t%s\n' "${k%:*}" "$v" >> "$2"
     elif [ -n "${k#*:}" ] && grep -qx "reached	${k#*:}" <<< "$found"; then printf 'gap/v1|ev=step|n=%s|field=%s|why=absent\n' "${k#*:}" "${k%:*}"; fi
