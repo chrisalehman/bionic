@@ -272,7 +272,6 @@ expect_contains "DC-4b …in one line naming the path" "record/wave-01-fixture/d
 expect_eq "DC-4c …one line" "1" "$(printf '%s\n' "$OUT" | grep -c .)"
 mv "$TMPROOT/dc-ledger" "$DC_DOCS/record/wave-01-fixture/design-ledger.md"
 # The doctrine: a proposal that re-puts a settled decision opens with its number and the new evidence.
-DC_SKILL="${BIONIC_SKILLS_DIR}/decision/SKILL.md"
 
 # ---- wave-39 T11 (REQ-7; D15, D24; AC-7.1, AC-7.2): the decision line grammar, over wave 38's own ledger ----
 # D15: `D<n> [qualifier] <verb> ["<reply>"] (<who> <date>)[: <title>]`, the seven verbs ruled, re-ruled, amended,
@@ -813,7 +812,7 @@ ex_add() {  # <id> <files> <born> -> OUT, RC: task-add of a step-4 build row bor
   TA_PASTE=1 ta_add "$REX" "$1" 4 build "Fix $1. The defect is gone." bionic:implementor '—' 30 REQ-1 "$2" --born "$3"
 }
 ex_born_line() { printf '%s\n' "$OUT" | /usr/bin/grep 'is review-born' || :; }
-ex_mark() { bash -c '. "$1/units.sh" >/dev/null 2>&1; _units_born_logged "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$PEX" | /usr/bin/grep "^- $1: " | sed -n 's/.* born: /born: /p'; }
+ex_mark() { bash -c '. "$1/units.sh" >/dev/null 2>&1; _units_born_facts "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$PEX" | awk -F'\t' -v r="$1" '$1 == r { print "born: " $2 ($3 != "" ? " of=" $3 : "") ($4 != "" ? " promoted" : "") }'; }
 expect_eq "EX-0 precondition: the plan reads fix-cap: 2 and no fix-policy: (the default, S1,S2-on), and both findings are read" \
   "2||3|1" "$(sed -n 's/^fix-cap: //p' "$PEX")|$(sed -n 's/^fix-policy: //p' "$PEX")|$(/usr/bin/grep -c '^finding: ' "$REX/.bionic/docs/$EX_OWN")|$(/usr/bin/grep -c '^finding: ' "$REX/.bionic/docs/$EX_CARRIED")"
 

@@ -25,10 +25,11 @@
 #   §DEBT    a review-born row inside fix-policy: is exempt from fix-cap:, a promoted or carried one counts;
 #            task-add's cap refusal, its fourth-fix refusal and its count line each go red when removed
 #   §ASK     a row edited by hand reads as lib/plan-read.sh's row reads it; a floor row whose review proof stands at
-#            an older head is ready only when the judge reads the reviews covered
+#            an older head is ready only when the judge reads the reviews covered; the fix policy is the header's
 #   §LIVE    a launch the run's log holds reads active under its name and is not ready; its cancel returns it; a
 #            dry copy reads its plan's run; a row the cells hold active reads as before
-#   §BORN    a row's born event, one per row, is read by the fix-cap's count, the findings and the marks
+#   §BORN    a row's born event, one per row, is read by the fix-cap's count, the findings and the marks; a marker in
+#            the page's text is none
 #   §BACK    a launch taken back by one function: a cancel for a launch in the log, the cells for one by its cells
 #   §TREE    a row's tree and base read from the newest tree event in the log, its cells for a row the log holds none for
 #   §LEDGER  a landed row with no line asked of the reader: admitted when it answers landed, refused when it does not
@@ -1308,6 +1309,10 @@ AK_J="$SANDBOX/ask-judge.plan.md"
 ak_ready() { ( export UNITS_READINGS_STATE="$1"; call units_ready "$AK_J" 6 ); }
 expect_eq "ASK-3 the floor row with the reviews covered at the head is ready; past the proof at an older head it is not" "T3|" \
   "$(ak_ready covered)|$(ak_ready 'review adversarial critic piece uncovered')"
+# THE FIX POLICY IS THE HEADER'S: a `fix-policy:` line in the page's text below it is no policy, so the default stands.
+printf -- '---\nrigor: double\n---\n\n# p\n\nfix-policy: S1\n' > "$AK_P"
+expect_eq "ASK-4 a fix-policy: line below the header is not the plan's policy: the default answers" "S1,S2-on" \
+  "$(bash -c '. "$1/units.sh" && . "$1/run.sh" && units_fix_policy "$2"' _ "${LIB%/*}" "$AK_P" 2>/dev/null)"
 
 section "§LIVE — a row's state and agent are the run's: a launch in the log, a cancel of it, the cells for the rest"
 LV_P="$SANDBOX/docs/plans/e/w.plan.md"; LV_LOG="$SANDBOX/docs/record/w/run.log"; mkdir -p "${LV_P%/*}" "${LV_LOG%/*}"
@@ -1325,7 +1330,7 @@ expect_eq "LIVE-3 its cancel returns it to pending and ready" "pending/— T2" "
 sed 's/| status |$/| status | reads |/; s/|---|$/|---|---|/; s/| pending |$/| pending | approval:ship |/; s/| active |$/| active | — |/' "$LV_P" > "$LV_P.a" && mv "$LV_P.a" "$LV_P"; LV_A="$(call units_ready "$LV_P" 4)"; lv_log approval key=ship by=me
 expect_eq "LIVE-4 a row reading approval:ship waits, and the approval the log holds readies it" "|T2" "$LV_A|$(call units_ready "$LV_P" 4)"
 
-section "§BORN — a row's birth is one born event in the run's log, read beside the plan's own born lines"
+section "§BORN — a row's birth is one born event in the run's log, and a marker in the page's text is none"
 lv_ev() { bash -c '. "$1/reader.sh" && reader_facts "$2"' _ "${LIB%/*}" "$LV_P" | grep -c "^run/v1|ev=$1|.*row=$2|"; }
 call units_born_event "$LV_P" T2 "review S1 on" "record/w/r.md#1"; BN_RC=$CALL_RC
 call units_born_event "$LV_P" T1
@@ -1333,6 +1338,10 @@ expect_eq "BORN-1 the writer appends one born event per row, the reader lists ea
 expect_eq "BORN-2 the cap's count, the findings and the marks read the review-born row from the log; the plain one is none of them" \
   "T2	S1 on	b.sh|T2	pending	record/w/r.md#1|T2	review	S1 on" \
   "$(call units_born "$LV_P")|$(call units_born_findings "$LV_P")|$(call units_born_marks "$LV_P")"
+printf '\n## SDLC State\n\n- T1: born: review S2 on of=record/w/r.md#2\n' >> "$LV_P"
+expect_eq "BORN-3 a born marker in the page's text, with no born event, is no born row: the born rows are the log's alone" \
+  "T2	review	S1 on|T2	pending	record/w/r.md#1" "$(call units_born_marks "$LV_P")|$(call units_born_findings "$LV_P")"
+sed -i.bak '/^## SDLC State$/,$d' "$LV_P"
 
 section "§BACK — a launch taken back is the log's cancel, the plan untouched"
 lv_log dispatch row=T2 name=w-T2b brief=b sum=s; BK_SUM="$(cksum < "$LV_P")"
