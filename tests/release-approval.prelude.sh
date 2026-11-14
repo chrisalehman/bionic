@@ -83,30 +83,23 @@ fc_reads() {  # <head> -> the five readings a double wave plan is dealt, at <hea
   fc_line review "$1" 2026-10-12T12:00:00Z record/wave-x/structure-whole.md structure w-read pass whole
 }
 PFC="$RFC/.bionic/docs/plans/wave-x.plan.md"
-# THE PAGE AT 15. A section that sets FC_VERSION=15 gets the same run carried to 15 by the act itself
-# (payload/scripts/bring-forward.sh), the way every open run at 14 crosses: its page is written at 14 as below, with the
-# homes an authored plan of that version holds and the State and the matrix do not carry across (the header's
-# integration-branch:, working-branch:, base-sha: and adrs:, and the Eval design), then fc_plan's third argument, a
+# THE PAGE AT 15. Every page fc_plan builds is the same run carried to 15 by the act itself
+# (payload/scripts/bring-forward.sh), the way every open run at 14 crosses: its page is written at 14 as below,
+# carrying its working branch, base, Step-7 line, integration branch and criteria only where a plan at 14 holds them
+# (the State and the matrix with its blocks), which the act takes across; then fc_plan's third argument, a
 # function it runs with the page's path at either version, edits that page, and the act writes the run's log from it and
 # rewrites the page. So an edit a section makes to the old tables, rows or blocks is passed there, never made after
 # fc_plan returns, and reaches the log as the act reads it.
-# The discharged criterion's evidence cell is `—`, so its proof carries the block's path: the act lets a cell holding
-# anything win. The pending one names the close as its task, so no step before the close owes it. A section that asks
+# The pending criterion names the close as its task, so no step before the close owes it. A section that asks
 # of it as unrun passes `fc_owed_now`, which takes that task away before the act: the open run at 14 whose pending row
 # named no task, carried across, the way a real one reaches the card at 15 holding a criterion owed now and never run,
 # which the gate refuses at Step 6 and the card puts as its decision. A kept copy an earlier act left is removed at
 # either version: left standing, it decides whether the act writes the log at all, and at 14 it makes the reader take
 # the page as brought forward. Any version but 14 or 15, or an act that leaves the page short of 15, stops the suite.
-FC_VERSION=14
-fc_homes15() {  # -> PFC, a page at 14, given the homes an authored plan at 14 holds outside the State and the matrix
-  awk -v b="$FC_B" '
-    !h && $0 == "---" && NR > 1 { print "integration-branch: main"; print "working-branch: wave/01-fixture"; print "base-sha: " b
-      print "adrs: none — no decision this run"; h = 1 }
-    $0 == "## SDLC State" { print "## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|"
-      print "| REQ-1 | the x writer | AC-1.1 | hermetic | `bash tests/a.test.sh` | the planted defect this eval must go red on |"
-      print "| REQ-1 | the x writer | AC-1.2 | hermetic | `bash tests/a.test.sh` | a second planted defect |\n" }
-    /^\| AC-1\.1 \| T1 \| discharged \| see AC-1\.1 \|/ { sub(/\| see AC-1\.1 \|/, "| — |") }
-    { print } $0 == "AC-1.2:" { print "  task: 9" }' "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
+# A section sets FC_VERSION=14, by name at its head, only to prove what a page at 14 alone holds.
+FC_VERSION=15
+fc_owed_close() {  # -> PFC, a page at 14 whose pending criterion names the close as its task: the fixture's own fact
+  awk '{ print } $0 == "AC-1.2:" { print "  task: 9" }' "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
 }
 fc_owed_now() {  # <page> -> the page with the pending criterion's task taken away, so it is owed now
   awk 'p && $0 == "  task: 9" { p = 0; next } { p = ($0 == "AC-1.2:"); print }' "$1" > "$1.new" && mv "$1.new" "$1"
@@ -140,7 +133,7 @@ fc_plan() {  # <proof lines> [<sed edit>] [<edit function>] -> PFC at current: 8
   rm -f "$FC_REC"/release-approval-*.md "$FC_REC/${RN_W:-review}-results"-*.md "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/asks.state" "$FC_REC/run.log" \
     "$(roster_of "$RFC")" "$(ack_ledger_of "$RFC")"
   rm -rf "$FC_REC/kept"
-  [ "$FC_VERSION" = 14 ] || fc_homes15
+  [ "$FC_VERSION" = 14 ] || fc_owed_close
   [ -z "${3:-}" ] || "$3" "$PFC" || { echo "fc_plan: the edit $3 failed on $PFC" >&2; exit 2; }
   if [ "$FC_VERSION" = 15 ]; then
     bash "${BIONIC_HOOKS_DIR}/../payload/scripts/bring-forward.sh" "$PFC" > "$TMPROOT/fc-act.out" 2>&1
