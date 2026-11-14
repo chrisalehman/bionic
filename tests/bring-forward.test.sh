@@ -52,6 +52,8 @@
 #            it is shared; renamed, the act names each of its files on the gaps list and writes nothing from it.
 #   §ROAD    an incident open at 14 with a record, renamed and moved as the words say, brought forward: the same step and
 #            rows at 15, found by the walk, bound, and a commit under it judged on its own plan.
+#   §EPIC    a plan with no Tasks rows (an epic's, a wave's whose table holds none, a task-scale plan's) is brought
+#            forward: its page reads 15, its step and whether it is open read as before, and a second act changes no byte.
 #
 # FIXTURE FIDELITY. The plan is a real file in a scratch docs tree, in the shape version-14 plans hold.
 
@@ -726,4 +728,56 @@ RG="$(jq -n --arg c "git commit -m x" --arg cwd "$RD" --arg s "$RSID" '{session_
   | ( cd "$RD" && HOME="$RD" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$RSID" BIONIC_WALL_VERBOSE=1 bash "$BIONIC_HOOKS_DIR/bash-walls.sh" 2>&1 ); printf '|rc=%s' "$?")"
 expect_contains "a commit under it is judged and refused (exit 2)" "|rc=2" "$RG"
 expect_contains "…on the incident's own plan" "incidents/0005-cache/0005-cache.plan.md" "$RG"
+
+section "EPIC"
+# SYNTHESIZED in the shapes of an epic's plan at 14: no Tasks table, its State at Step 3 with its approvals in its Step
+# lines, its matrix's criteria not AC- ids, each with its block; beside it a wave whose table holds no row, and a
+# task-scale plan with none.
+E="$SB/epic/plans/epic-9-x"; mkdir -p "$E"; EP="$E/epic.plan.md"
+cat > "$EP" <<'EOF'
+---
+epic: epic-9-x
+scale: epic
+canonical_sdlc_version: 14
+---
+## Waves — shipped
+| wave | version |
+|---|---|
+| wave-01 | 1.0.0 |
+
+## SDLC State
+
+integration-branch: main
+scale: epic
+current: 3
+
+- Step 0: configured at 2026-09-08T21:30:00Z via Ann Person "Option 1 - Yes"; prereqs: ok
+- Step 1: requirements: specs/epic-9-x/epic.spec.md §Requirements; ratified by Ann Person 2026-09-08 (six members, then "normalized")
+- Step 2: spec: specs/epic-9-x/epic.spec.md (## Design in place)
+- Step 3: plan: this file §Waves; approved-by: Ann Person 2026-09-08 "Option 1 - Yes, keep it open." + "Put them in place."
+- session: 63d9305b-763e-486e-a0bf-b8c10fac2a4e bound 2026-10-15T03:37:37Z by engage
+
+## Verification Matrix
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| E-1 | T1 | discharged | see E-1 | self |
+
+E-1: while this epic plan is open, `archive_run` moves nothing for it.
+  provenance: user 2026-09-08 "keep it open"
+  fails-when: the directory leaves the docs root
+EOF
+printf '%s\n' '---' 'canonical_sdlc_version: 14' '---' '## Tasks' '| id | step | kind | task | deps | size | status |' '|---|---|---|---|---|---|---|' '' \
+  '## SDLC State' 'current: 4' > "$E/wave-1-empty.plan.md"
+printf '%s\n' '---' 'scale: task' 'canonical_sdlc_version: 14' '---' '## Goal' 'One fix.' '' '## SDLC State' 'current: 4' > "$E/task-1-none.plan.md"
+ep() { bash "$RS" "$1" step | /usr/bin/grep -E '^(n|state)=' | paste -sd' ' -; bash -c '. "$1/lib/run.sh"; run_open "$2"; echo "open=$?"' _ "${RS%/*}" "$1"; }
+for x in epic:3 wave-1-empty:4 task-1-none:4; do p="$E/${x%:*}.plan.md"; l="$SB/epic/record/${x%:*}/run.log"
+  expect_eq "${x%:*}: at 14 the run stands at its step, open" "n=${x#*:} state=open open=0" "$(ep "$p" | paste -sd' ' -)"
+  o="$(bash "$BF" "$p" 2>&1)"; expect_status "${x%:*}: a plan with no Tasks rows is brought forward (exit 0)" 0 "$?"
+  expect_eq "${x%:*}: its page reads 15, and its step and whether it is open read as before the act" \
+    "canonical_sdlc_version=15 n=${x#*:} state=open open=0" "$(bash "$RS" "$p" header canonical_sdlc_version) $(ep "$p" | paste -sd' ' -)"
+  s="$(cksum < "$p") $({ cksum < "$l"; } 2>/dev/null)"
+  expect_eq "${x%:*}: the act wrote its log, and a second act changes no byte and prints the same" "log $s $o" \
+    "$(o2="$(bash "$BF" "$p" 2>&1)"; printf '%s %s %s %s' "$([ -s "$l" ] && echo log)" "$(cksum < "$p")" "$({ cksum < "$l"; } 2>/dev/null)" "$o2")"
+done
 finish

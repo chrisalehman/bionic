@@ -164,6 +164,9 @@ _bf_deps() {  # <old plan> <implied plan> <deps out> -> the waits that are not d
   # A WAIT THE PERSON WROTE BY NAMING THE ROW, its id or a path its Files write, stays in deps though the default names
   # the same row: a review row reading what landed after the release says so only by that wait. A row nothing but the
   # default names (`head`, `record`, `merge`, a proof) is left to the default.
+  # A PLAN WITH NO TASKS ROWS (an epic's, a wave's whose table holds none, a task-scale plan's with no table) has no
+  # waits to carry; plan_read_rows says none by 1, and any other failure is still the act's.
+  plan_read_rows "$1" Tasks >/dev/null 2>&1 || { [ "$?" -eq 1 ] && return 0; return 1; }
   { plan_read_waits "$2"; printf '\034\n'; plan_read_waits "$1"; } | awk -F'\t' -v out="$3" '
     function named(rs, r,   m, a, k, t) {
       m = split(rs, a, ",")
