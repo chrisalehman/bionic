@@ -3438,9 +3438,11 @@ _eg_v15_step_asks
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 #
 # Step 1 authors the wave's `*.requirements.md` under specs/<epic>/, and the header's epic:
-# and wave: name it. From current: 2 a plan whose named requirements file is not on disk owes
-# it, so a run cannot pass Step 1 without the file and cannot lose it later. SCOPE: rigor
-# double, multi_agent true and scale wave or epic, the guard validate_dispatch_ledger uses.
+# and wave: name it. An epic has no wave and no requirements file: its Steps 1 and 2 write
+# specs/<epic>/epic.spec.md, which the header's epic: names. From current: 2 a plan whose named
+# file is not on disk owes it, so a run cannot pass Step 1 without the file and cannot lose it
+# later. SCOPE: rigor double, multi_agent true and scale wave or epic, the guard
+# validate_dispatch_ledger uses.
 validate_requirements_pointer() {
   local current_num raw
   case "$SCALE" in wave|epic) : ;; *) return 0 ;; esac
@@ -3448,8 +3450,13 @@ validate_requirements_pointer() {
   [ "$MULTI_AGENT" = "true" ] || return 0
   current_num=$(echo "$CURRENT" | sed -E 's/[ab]$//')
   [ "$current_num" -ge 2 ] 2>/dev/null || return 0
-  raw="specs/$(frontmatter_get epic)/$(frontmatter_get wave).requirements.md"
-  case "$raw" in specs//*|*/.requirements.md) raw="the header's epic: and wave:, which name them" ;; esac
+  if [ "$SCALE" = epic ]; then
+    raw="specs/$(frontmatter_get epic)/epic.spec.md"
+    case "$raw" in specs//*) raw="the header's epic:, which names its spec" ;; esac
+  else
+    raw="specs/$(frontmatter_get epic)/$(frontmatter_get wave).requirements.md"
+    case "$raw" in specs//*|*/.requirements.md) raw="the header's epic: and wave:, which name them" ;; esac
+  fi
   [ -f "$DOCS_ROOT/$raw" ] || _eg_v15_ask "Step 1's requirements: $raw"
   return 0
 }

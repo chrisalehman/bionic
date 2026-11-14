@@ -309,4 +309,16 @@ for P5 in "$R/.bionic/docs/plans/epic-01-demo/wave-05-v.md" "$R/.bionic/docs/inc
   rm -f "$P5"
 done
 
+# The path a person takes with an open epic at 14, on one fixture: refused at the write and at the commit of a session bound to it,
+# each naming the act; the act; then the write admitted, and the commit refused only for the debt the epic truly owes, named.
+git -C "$R" reset -q; EP="$R/.bionic/docs/plans/epic-01-demo/epic.plan.md"; mkdir -p "$R/.bionic/docs/specs/epic-01-demo"; : > "$R/.bionic/docs/specs/epic-01-demo/epic.spec.md"
+EP14="$({ printf '## Waves — shipped\n\n## SDLC State\n\ncurrent: 3\n\n- Step 0: configured at 2026-11-01T00:00:00Z via f "go"\n- Step 2: spec: specs/epic-01-demo/epic.spec.md\n- Step 3: plan: this file; approved-by: f 2026-11-01 "ok"\n\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| E-1 | T1 | discharged | see E-1 | self |\n'; } | page 14 | sed -e '/^wave: /d' -e 's/^scale: wave/scale: epic/')"
+printf '%s\n' "$EP14" > "$EP"; printf 'plan=%s\n' "$EP" > "$R/.bionic/tmp/engaged-$SID.state"; write_to "$EP" "$EP14"; gate
+expect_eq "an open epic at 14 is refused at the write and at the commit, each naming the act on its path" "2|1|2|1" "$HOOK_EXIT|$(grep -c "scripts/bring-forward.sh $EP\$" <<< "$HOOK_SAID")|$GATE_EXIT|$(grep -c "scripts/bring-forward.sh $EP\$" <<< "$GATE_SAID")"
+bash "$BIONIC_SCRIPTS_DIR/payload/scripts/bring-forward.sh" "$EP" >/dev/null; A="$?"; write_to "$EP" "$(cat "$EP")"; gate
+expect_eq "the act brings it to 15; the write is admitted; the commit owes Step 2's approval, which the act cannot carry, and no requirements" "0|15|0|2|owed at 15: Step 2's approval|" \
+  "$A|$(sed -n 's/^canonical_sdlc_version: //p' "$EP")|$HOOK_EXIT|$GATE_EXIT|$(owed "Step 2's approval")|$(owed "Step 1's requirements")"
+( cd "$R" && git config user.name f && HOME="$HOME_DIR" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_NOW_EPOCH=1793491210 bash "$BIONIC_HOOKS_DIR/session-poker.sh" approve step2 yes >/dev/null 2>&1 ); gate
+expect_status "…and the commit is admitted once the person approves step 2" 0 "$GATE_EXIT"
+
 finish

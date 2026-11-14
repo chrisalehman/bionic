@@ -663,11 +663,12 @@ tick_told_once() {
   return 0
 }
 
-# tick_record_stands <row> <Files cell> -> 0 when a record its Files or its artifact cell (TICK_ARTS) names stands as a
-# file: a path from the docs root (TICK_DOCS, for `record/…`) or from the repository, a leading `./` or `!` not part of it.
+# tick_record_stands <row> <Files cell> -> 0 when a record its Files or its artifact cell (the plan-read library's cell
+# of the row) names stands as a file: a path from the docs root (TICK_DOCS, for `record/…`) or from the repository, a
+# leading `./` or `!` not part of it.
 tick_record_stands() {
   local e art
-  art="$(printf '%s\n' "$TICK_ARTS" | awk -F'\t' -v r="$1" '$1 == r { print $2; exit }')"
+  art="$(plan_read_row "$POKER_RUN_PLAN" Tasks id "$1" 2>/dev/null | sed -n 's/^artifact=//p')"
   while IFS= read -r e; do
     e="${e#"${e%%[![:space:]]*}"}"; e="${e%"${e##*[![:space:]]}"}"; e="${e#!}"; e="${e#./}"
     case "$e" in record/*) [ -n "$TICK_DOCS" ] && [ -f "$TICK_DOCS/$e" ] && return 0 ;; *[A-Za-z0-9]*) [ -f "$REPO_REAL/$e" ] && return 0 ;; esac
@@ -1669,8 +1670,6 @@ BACKSTOP_ROWS
           && $3 ~ /^(test|verify|review|doc|integrate)$/ && ($5 == "" || $5 == "-" || $5 == "—" || tolower($5) == "orchestrator") {
         printf "%s\t%s\t%s\n", $1, $3, $9 }')"
       TICK_OWN_STANDS=""; TICK_DOCS="$(docs_root "$REPO_REAL" 2>/dev/null)"
-      TICK_ARTS="$(awk -F'|' '/^## / { t = ($0 ~ /^## Tasks/); next } t && /^\| *id *\|/ { a = 0; for (i = 2; i < NF; i++) { h = $i; gsub(/ /, "", h); if (h == "artifact") a = i }; next }
-        t && a && /^\| *T[0-9]/ { id = $2; v = $a; gsub(/ /, "", id); gsub(/^ +| +$/, "", v); print id "\t" v }' "$POKER_RUN_PLAN" 2>/dev/null)"
       while IFS=$'\t' read -r BS_ID BS_KIND BS_FILES; do
         [ -n "$BS_ID" ] && tick_record_stands "$BS_ID" "$BS_FILES" && TICK_OWN_STANDS="${TICK_OWN_STANDS}${BS_ID}"$'\t'"${BS_KIND}"$'\n'
       done <<< "$TICK_OWN"
