@@ -284,23 +284,11 @@ _bf_misnamed() {  # <plan, resolved> <its record> -> the refusal on stderr
 
 # THE CONFIRMATION. At 14 a person confirmed a criterion by a `user-confirmed: <who> <day> <words>` line in its block,
 # which the translation carries as the field `confirmed=` of the criterion's proof or waiver; at 15 the reader takes a
-# person's confirmation only from an approval naming the criterion, so the act writes one after that line, in the
-# approve verb's fields, the day as written. The translation is left whole because a run at 14 is read through it in
-# place. Only the attributed form lib/walls.sh `user_confirmed_attributed` takes is a confirmation: `pending` and any
-# other words write nothing. A criterion the translation already holds an approval for gets no second.
+# person's confirmation only from an approval naming the criterion, so the act asks the translation for that approval
+# too (lib/translate.sh `_translate_matrix`). A run at 14 is read through the translation in place, and that reading
+# asks for none, so it reads as it did.
 _bf_log() {  # <plan> -> the run's log the act writes
-  translate "$1" events | awk -F'|' '
-    { line[++n] = $0 }
-    $2 == "ev=approval" && match($0, /\|key=[^|]*/) { appr[substr($0, RSTART + 5, RLENGTH - 5)] = 1 }
-    END { for (i = 1; i <= n; i++) { l = line[i]; print l
-        if (l !~ /^run\/v1\|ev=(proof|waiver)\|/ || !match(l, /\|ac=[^|]*/)) continue
-        ac = substr(l, RSTART + 4, RLENGTH - 4); if ((ac in appr) || !match(l, /\|confirmed=[^|]*/)) continue
-        v = substr(l, RSTART + 11, RLENGTH - 11)
-        if (v !~ /^[A-Za-z][A-Za-z0-9._-]*[ \t]+[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ \t]+[^ \t]/) continue
-        by = v; sub(/[ \t].*$/, "", by); r = substr(v, length(by) + 1); sub(/^[ \t]+/, "", r)
-        at = substr(r, 1, 10); said = substr(r, 11); sub(/^[ \t]+/, "", said); sub(/[ \t]+$/, "", said)
-        if (said ~ /^".*"$/) said = substr(said, 2, length(said) - 2)
-        appr[ac] = 1; printf "run/v1|ev=approval|key=%s|by=%s|said=%s|at=%s\n", ac, by, said, at } }'
+  TRANSLATE_CONFIRMED=approval translate "$1" events
 }
 
 _bf_own() {  # <plan> <kept> <log> <work dir> -> 0 the kept copy is this act's own; 1 not, the refusal on stderr; 3 a copy failed

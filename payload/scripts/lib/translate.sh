@@ -315,6 +315,10 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
   # points at its own block (`see AC-1.1`) holds no value: the block's line is the evidence, and with none the evidence
   # is a gap, since a pointer carried into the proof resolves to nothing once the block is gone. Version 15 has no
   # block, so the proof is where the evidence lives after the act: read from the cell alone, it would be lost.
+  # A caller that sets TRANSLATE_CONFIRMED=approval (the act) also gets, after a proof or waiver whose block holds a
+  # person's confirmation in the attributed form lib/walls.sh `user_confirmed_attributed` takes, `<who> <YYYY-MM-DD>
+  # <words>`, the approval naming the criterion, 15's one home for it, in the approve verb's fields; `pending` and any
+  # other words are none. No other caller asks: a run at 14 read in place keeps the block's line as its confirmation.
   { _translate_section "$1" "SDLC State" | awk '/^(proved|waived): / && match($0, / ac=[^ ]+/) { print "S", $1, substr($0, RSTART + 4, RLENGTH - 4) }'
     _translate_section "$1" "Verification Matrix" | awk '
       { l = $0; sub(/^[-*+][ \t]+/, "", l) }
@@ -327,8 +331,14 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
         printf "W\036%s\036%s\036%s\036%s\n", ac, by, at, said }
       ac != "" && match($0, /^[ \t]+user-confirmed[ \t]*:/) { v = substr($0, RLENGTH + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); printf "U\036%s\036%s\n", ac, v }
       ac != "" && match($0, /^[ \t]+evidence[ \t]*:/) { v = substr($0, RLENGTH + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); printf "E\036%s\036%s\n", ac, v }'
-    _translate_section "$1" "Verification Matrix"; } | awk -F'|' "$_TRANSLATE_AWK"'
+    _translate_section "$1" "Verification Matrix"; } | awk -F'|' -v conf="${TRANSLATE_CONFIRMED:-}" "$_TRANSLATE_AWK"'
     function pointer(ac, v) { return tolower(v) == "see " tolower(ac) }
+    function confirm(ac,   v, by, r, said) {
+      if (conf != "approval" || !(ac in uc)) return
+      v = uc[ac]; if (v !~ /^[A-Za-z][A-Za-z0-9._-]*[ \t]+[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ \t]+[^ \t]/) return
+      by = v; sub(/[ \t].*$/, "", by); r = substr(v, length(by) + 1); sub(/^[ \t]+/, "", r)
+      said = trim(substr(r, 11)); if (said ~ /^".*"$/) said = substr(said, 2, length(said) - 2)
+      begin("approval", "key", ac); put("by", by); put("said", said); emit(substr(r, 1, 10)) }
     function undischarged(ac, s,   j, n, w, k, v) {
       n = split("evidence auditor", w, " ")
       for (j = 1; j <= n; j++) {
@@ -357,9 +367,9 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
       put("evidence", c["evidence"]); put("auditor", c["auditor"])
       # A person confirms a criterion in its block; a block with no such line holds no confirmation to name.
       if (ac in uc) put("confirmed", uc[ac])
-      if (t == "waiver" && (ac in wat)) { put("by", wby[ac]); put("said", wsaid[ac]); lack("head"); emit(wat[ac]); next }
+      if (t == "waiver" && (ac in wat)) { put("by", wby[ac]); put("said", wsaid[ac]); lack("head"); emit(wat[ac]); confirm(ac); next }
       if (t == "proof") lack("kind"); else lack("by")
-      lack("head"); emit("")
+      lack("head"); emit(""); confirm(ac)
     }'
 }
 
