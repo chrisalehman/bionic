@@ -96,8 +96,8 @@ section "§GOVERNED — wave-36 T2 (REQ-1 AC-1.4, D7; ADR-055): the continuation
 # ============================================================
 # hooks/session-start.sh writes `.bionic/tmp/loaded-<sid>.state` at every session start (wave-36 T1): `root=`,
 # `commit=` when the root is a checkout of the plugin, `started=`, then one `<sha256> <path>` per loaded file. close-out
-# reads the records of the sessions in the run's Step-4..9 window (the Step-4 line's instant, else the plan's
-# `approved-by:` instant, to now), BEFORE the tmp wipe takes them, and writes one `governed-by: <root> <commit> from
+# reads the records of the sessions in the run's Step-4..9 window (the instant of the run's Step-4 event, else of its
+# plan approval's, to now), BEFORE the tmp wipe takes them, and writes one `governed-by: <root> <commit> from
 # <ISO>` per root and commit, in order of the first session that ran it, under `## Governed by` of the continuation
 # and on the card. A record with no commit ran an installed copy: `governed-by: <root> installed <version> from <ISO>`.
 # No record in the window: `governed-by: installed <version>`. The records below are in the writer's shape; the first is
@@ -118,18 +118,18 @@ gov_record() {
     printf '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a hooks/hooks.json\n'
   } > "$1/.bionic/tmp/loaded-$2.state"
 }
-# gov_step4 <project> <text> -> the plan's `- Step 4:` line, written in front of the Step-7 line
-gov_step4() {
-  local plan="$1/$PLAN_REL"
-  case "$1" in "$SANDBOX"/*) : ;; *) echo "gov_step4: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
-  GOV_TEXT="$2" awk '/^- Step 7:/ && !d { print "- Step 4: " ENVIRON["GOV_TEXT"]; print "  worktree: ."; d = 1 } { print }' \
-    "$plan" > "$plan.g" && mv "$plan.g" "$plan"
+# gov_at <project> <event's head> <ISO|""> -> that event of the run's log stamped at <ISO>; empty, it keeps no instant,
+# as the translation writes a step whose line had none
+gov_at() {
+  case "$1" in "$SANDBOX"/*) : ;; *) echo "gov_at: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
+  awk -v h="run/v1|$2|" -v a="$3" 'index($0, h) == 1 { sub(/\|at=[^|]*/, "|at=" a) } { print }' "$1/$LOG_REL" > "$1/gov.log" \
+    && mv "$1/gov.log" "$1/$LOG_REL"
 }
 gov_section() { awk '/^## / { s = ($0 == "## Governed by"); next } s && NF && !/^```/ { print }' "$1"; }
 gov_card() { printf '%s\n' "$CO_OUT" | /usr/bin/grep '^governed-by: '; }
 
-PG="$(CO_PLAN_AT=14 mk_fixture governed)"; advance_to "$PG" 8
-gov_step4 "$PG" "implement: opened 2026-10-13T20:39Z, writers in .worktrees/36-T<n>"
+PG="$(mk_fixture governed)"; advance_to "$PG" 8
+gov_at "$PG" 'ev=step|n=4' 2026-10-13T20:39:00Z
 GOV_CACHE="$SANDBOX/governed-cache/bionic/1.18.0"
 mkdir -p "$GOV_CACHE/.claude-plugin"; printf '{\n  "name": "bionic",\n  "version": "1.18.0"\n}\n' > "$GOV_CACHE/.claude-plugin/plugin.json"
 gov_record "$PG" s0 "/elsewhere/old/payload" 1111111111111111111111111111111111111111 2026-10-13T19:00:00Z   # before Step 4
@@ -151,24 +151,25 @@ expect_eq "GOV-3b …after ## Hand-holds and before the Resume instruction" "yes
   "$(awk '/^## Hand-holds$/ { a = NR } /^## Governed by$/ { b = NR } /^## Resume instruction/ { c = NR } END { print (a && b > a && c > b) ? "yes" : "no" }' "$PG/$CONT_REL")"
 
 # none in the window: the installed version, on the card and in the continuation
-PGN="$(CO_PLAN_AT=14 mk_fixture governed-none)"; advance_to "$PGN" 8
-gov_step4 "$PGN" "implement: opened 2026-10-13T20:39Z"
+PGN="$(mk_fixture governed-none)"; advance_to "$PGN" 8
+gov_at "$PGN" 'ev=step|n=4' 2026-10-13T20:39:00Z
 gov_record "$PGN" s0 "/elsewhere/old/payload" 1111111111111111111111111111111111111111 2026-10-13T19:00:00Z
 run_close "$PGN" run
 expect_eq "GOV-4 AC-1.4 no record in the window: governed-by: installed <version>, on the card and in the continuation" \
   "0|governed-by: installed $GOV_VER|governed-by: installed $GOV_VER" "$CO_RC|$(gov_card)|$(gov_section "$PGN/$CONT_REL")"
 
-# no instant on the Step-4 line (or no Step-4 line): the window opens at the plan's approved-by
-PGA="$(CO_PLAN_AT=14 mk_fixture governed-approved)"; advance_to "$PGA" 8
+# no instant on the Step-4 event: the window opens at the plan approval's
+PGA="$(mk_fixture governed-approved)"; advance_to "$PGA" 8
+gov_at "$PGA" 'ev=step|n=4' ""; gov_at "$PGA" 'ev=approval|key=step3' 2026-09-14T00:00:00Z
 gov_record "$PGA" s0 "/elsewhere/old/payload" 1111111111111111111111111111111111111111 2026-09-13T23:00:00Z
 gov_record "$PGA" s1 "$GOV_ROOT" "$GOV_C1" 2026-09-14T00:30:00Z
 run_close "$PGA" check
-expect_eq "GOV-5a the window opens at approved-by: the later record governs, the earlier does not" \
+expect_eq "GOV-5a the window opens at the plan approval: the later record governs, the earlier does not" \
   "governed-by: $GOV_ROOT $GOV_C1 from 2026-09-14T00:30:00Z" "$(gov_card)"
 
 # an existing continuation: the section is merged in, the person's text kept, and a second close adds nothing
-PGE="$(CO_PLAN_AT=14 mk_fixture governed-existing)"; advance_to "$PGE" 8
-gov_step4 "$PGE" "implement: opened 2026-10-13T20:39Z"
+PGE="$(mk_fixture governed-existing)"; advance_to "$PGE" 8
+gov_at "$PGE" 'ev=step|n=4' 2026-10-13T20:39:00Z
 gov_record "$PGE" s1 "$GOV_ROOT" "$GOV_C1" 2026-10-13T23:55:11Z
 mkdir -p "$PGE/${CONT_REL%/*}"
 printf '# continuation — hand written\n\nmy own note on the close\n\n## Deferrals\n\n## Resume instruction\n\nedited by a person\n' > "$PGE/$CONT_REL"
@@ -176,7 +177,7 @@ run_close "$PGE" check
 expect_contains "GOV-6 check over an existing continuation without the section names the add run will make" \
   "the ## Governed by section" "$CO_OUT"
 run_close "$PGE" run
-PGE2="$(CO_PLAN_AT=14 mk_fixture governed-existing2)"; advance_to "$PGE2" 8
+PGE2="$(mk_fixture governed-existing2)"; advance_to "$PGE2" 8
 mkdir -p "$PGE2/${CONT_REL%/*}"; cp "$PGE/$CONT_REL" "$PGE2/$CONT_REL"
 GOV_CK1="$(cksum < "$PGE2/$CONT_REL")"
 run_close "$PGE2" run
@@ -191,8 +192,8 @@ ln -s "$REPO_ROOT/payload/scripts/card.sh" "$GOV_MUT/scripts/card.sh"
 sed 's#/loaded-\*\.state#/no-such-record-*.state#' "$SCRIPT" > "$GOV_MUT/scripts/close-out.sh"
 expect_eq "GOV-mut0 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
   "$(diff "$SCRIPT" "$GOV_MUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
-PGM="$(CO_PLAN_AT=14 mk_fixture governed-mut)"; advance_to "$PGM" 8
-gov_step4 "$PGM" "implement: opened 2026-10-13T20:39Z"
+PGM="$(mk_fixture governed-mut)"; advance_to "$PGM" 8
+gov_at "$PGM" 'ev=step|n=4' 2026-10-13T20:39:00Z
 gov_record "$PGM" s1 "$GOV_ROOT" "$GOV_C1" 2026-10-13T23:55:11Z
 ( cd "$PGM" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
     bash "$GOV_MUT/scripts/close-out.sh" "$PGM/$PLAN_REL" run ) > "$SANDBOX/gov-mut.out" 2>&1
@@ -581,7 +582,7 @@ section "§SCORECARD — wave-38 T15 (D26): the continuation prints four lines, 
 # ============================================================
 # Under `## Scorecard`, fenced, exactly:
 #   human stops (autonomous half): <n> · target 1           the register's rounds put after the plan's approved-by:
-#   agent minutes after the final reply: <n> · target 0     roster launches of this plan after the approved: merge line
+#   agent minutes after the final reply: <n> · target 0     roster launches of this plan after the merge approval
 #   widest landing ready→landed: <row> <m> min · target < 15   landing-report --rows, the largest minutes=; 15 is LINE_LANDING_BAR (wave-39 T9)
 #   human-wait minutes: <n> · no target (the user's)        those rounds, each opened= to its at=
 # then the sitrep sheet's pace, correctness and waste at close, `pace: …`, `correctness: …` and `waste: …`. A number the
@@ -599,10 +600,9 @@ sc_plant() {  # <project> -> two queue landings (30 and 42 min), three approvals
     printf 'line/v1|ev=ready|row=T2|name=w-T2|commit=%s|branch=wt/01-T2|tree=%s/.worktrees/01-T2|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T11:00:00Z\n' "$LAND_C" "$p"
     printf 'line/v1|ev=published|row=T2|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T11:42:00Z\n' "$LAND_C"
   } > "$rec/landing-proofs.log"
-  awk '{ print } /^approved-by: / && !d {
-         print "approved: doc by fixture 2026-10-05T09:00:00Z \"go ahead\""
-         print "approved: release by fixture 2026-10-06T12:00:00Z \"1\""
-         print "approved: merge by fixture 2026-10-06T12:00:01Z \"1\""; d = 1 }' "$plan" > "$plan.sc" && mv "$plan.sc" "$plan"
+  bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; LOG_AT=2026-10-05T09:00:00Z proof_approval_event "$2" doc by=fixture "said=go ahead" \
+    && LOG_AT=2026-10-06T12:00:00Z proof_approval_event "$2" release by=fixture said=1 && LOG_AT=2026-10-06T12:00:01Z proof_approval_event "$2" merge by=fixture said=1' \
+    _ "$REPO_ROOT/payload/scripts/lib" "$plan"
   {
     roster_row_fixture status=intended name=w-early agent_id= launched_at=2026-10-06T09:00:00Z plan="$plan"
     roster_row_fixture status=intended name=w-late agent_id= launched_at=2026-10-06T12:05:01Z plan="$plan"
@@ -618,7 +618,7 @@ sc_plant() {  # <project> -> two queue landings (30 and 42 min), three approvals
   done
 }
 SC_TAIL='human-wait minutes: 12 · no target (the user'"'"'s)'
-PSC="$(CO_PLAN_AT=14 mk_fixture scorecard1)"; advance_to "$PSC" 8
+PSC="$(mk_fixture scorecard1)"; advance_to "$PSC" 8
 sc_plant "$PSC"
 # The pace line is the time since the approval over the forecast: both reads take one now, so SC-2 compares two reads of
 # one instant and a run slowed by load cannot tick the percentage between them.
