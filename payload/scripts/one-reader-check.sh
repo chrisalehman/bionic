@@ -72,8 +72,9 @@ files=()
 while IFS= read -r f; do files+=("$f"); done < <(find hooks payload/scripts -type f -name '*.sh' | LC_ALL=C sort)
 
 # The patterns are written so that this file's own text matches none of them: `\/` and `[#]` stand
-# where the grammar has a bare character, so the check never counts itself.
-awk -v q="'" -v admitted=" $READER_FILES " -v hooks=" $hook_files " '
+# where the grammar has a bare character, so the check never counts itself. Lines are read as bytes:
+# the walk of a command a character at a time stops on a line that is no valid UTF-8.
+LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v hooks=" $hook_files " '
   function opname(s) {  # one operand token -> 1 when it names a plan, 2 a log
     if (s ~ /\.plan\.md"?$/) return 1
     if (s ~ /run\.log"?$/) return 2
