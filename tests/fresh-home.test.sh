@@ -611,54 +611,6 @@ NB_SKILL="${HOME_FIX}/.claude/skills/notebooklm/SKILL.md"
 GLOBAL_MEMORY="${HOME_FIX}/.claude/CLAUDE.md"
 RC_FILE_FIX="${HOME_FIX}/.zshrc"
 
-# One table/section out of a doctor report, by its flush-left heading (doctor
-# no longer delimits sections with `=== NAME ===`; a heading is a line with no
-# leading whitespace — "THIRD PARTY — tools and plugins bionic depends on",
-# "ENVIRONMENT", "BIONIC NATIVE — ships inside the plugin" — and every row under
-# it is indented).
-# The heading itself is matched by PREFIX, since most of them carry an em-dash
-# tagline after the name, and it is never printed back; capture runs until the
-# blank line doctor always prints before the next heading.
-doctor_section() {  # <file> <name>
-  awk -v want="$2" '
-    on && $0 == "" { on = 0 }
-    on { print; next }
-    index($0, want) == 1 { on = 1 }
-  ' "$1"
-}
-
-# The `present` column of one THIRD PARTY row, read as yes/no/unknown off that
-# row's own verdict symbol (✓/✗/–) — the table that replaced DEPENDENCIES still
-# names each row by dependency name in column 2, so the same "find this name,
-# report its state" claim holds, just against `_doctor_third_row`'s columns
-# (symbol name version source state) instead of the deleted class-keyed table.
-dep_present() {  # <report-file> <name>
-  doctor_section "$1" "THIRD PARTY" | awk -v n="$2" '
-    NF >= 4 && $2 == n {
-      # NOT `$1 == "✓"`. macOS /usr/bin/awk (20200816) compares these multibyte
-      # glyphs byte-blind: `$1 == "✓"` is true for ✗ and – as well, so the first
-      # branch always fired and every row read "yes" — 23 assertions vacuous
-      # (Step-6 critic F1). index(…)==1 discriminates all three.
-      if (index($1, "✓") == 1)      print "yes";
-      else if (index($1, "✗") == 1) print "no";
-      else                          print "unknown";
-      exit
-    }'
-}
-
-# Does a path exist, as a word rather than as an exit status. Every "bionic did
-# not write this" claim below goes through it, and so does at least one "bionic
-# did write this" claim in the same group — which is the only thing that makes
-# the first kind of claim mean anything (.claude/rules/test-harness.md, "Anti-vacuity").
-path_exists() {  # <path> -> yes|no
-  if [ -e "$1" ]; then printf 'yes'; else printf 'no'; fi
-}
-
-# Non-emptiness as a word, for the same reason.
-yn() {  # <string> -> yes|no
-  if [ -n "${1:-}" ]; then printf 'yes'; else printf 'no'; fi
-}
-
 # --- The verdict glyphs, read from doctor.sh rather than restated -----------
 #
 # A single-quoted shell constant's contents, in pure bash. These values are
@@ -718,19 +670,6 @@ rc_block_lines() {  # <file>
     if [ "$line" = "$RC_START_LIT" ]; then inside=1; continue; fi
     if [ "$line" = "$RC_END_LIT" ];   then inside=0; continue; fi
     [ "$inside" = "1" ] && out="${out}${line}"$'\n'
-  done < "$file"
-  printf '%s' "$out"
-}
-
-# Every line NOT between the markers, the markers themselves excluded: what the
-# user's rc held before bionic touched it, and must still hold afterwards.
-rc_nonblock_lines() {  # <file>
-  local file="$1" line inside=0 out=""
-  [ -f "$file" ] || return 0
-  while IFS= read -r line || [ -n "$line" ]; do
-    if [ "$line" = "$RC_START_LIT" ]; then inside=1; continue; fi
-    if [ "$line" = "$RC_END_LIT" ];   then inside=0; continue; fi
-    [ "$inside" = "0" ] && out="${out}${line}"$'\n'
   done < "$file"
   printf '%s' "$out"
 }
