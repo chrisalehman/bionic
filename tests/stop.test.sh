@@ -32,6 +32,8 @@
 #   §PATROL  a dead Patrol clock is one line of at most 80 characters, the same line on a repeat;
 #            the explanation is asked for, and the one report sentence is in the rules and the prompt
 #   §LOG     a step, an approval or an order the run's log alone holds moves the ready-with-room verdict
+#   §ONE     a stop is one event: the turn's end is the run's stop event, the reader's answer before and after the
+#            bring-forward act, and a log the hook cannot write, or a plain directory, changes nothing it says
 #   §GUARD   the stop guard's words, its roster writes, the verdict read and the agent guard's
 #            arming check, each a stop-library function called in a shell of its own
 #   §EVENTS  the orchestrator's stop of an agent (TaskStop's PreToolUse) and an agent's own stop
