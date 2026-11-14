@@ -994,74 +994,82 @@ expect_eq "MK-3 the four close-out fills are rendered: a landings line, a hand-h
 # ============================================================
 section "§OWED-AT-CLOSE — close-out settles the matrix row its own last reading proves, and the gate before the flip does not refuse on it"
 # ============================================================
-# A row owed at the close (step 9) whose eval names `landing-report --hand-holds` is proved by the line close-out reads last,
-# after `delivered:`, so the pre-flight and the dry-run at current 8 owe it nothing; close-out proves it in the act that
-# reads that line: at total=0 one proof event naming it, its evidence the continuation path, else nothing and the line
-# quoted in the report. The plan is not written. FIXTURE: mk_fixture at Step 8 plus a landed close row T4 and two rows owed at the close.
+# A criterion owed at the close (its Task cell names the close row, step 9) whose eval names `landing-report --hand-holds`
+# is proved by the line close-out reads last, after `delivered:`, so the pre-flight and the dry-run at step 8 owe it
+# nothing; close-out proves it in the act that reads that line: at total=0 one proof event naming it, its evidence the
+# continuation path, else nothing and the line quoted in the report. The plan is not written.
+# FIXTURE FIDELITY: mk_fixture at Step 8; the close row T4 in its nine cells, pending, as a planner writes it, and the
+# close's own session engaged and bound by the verb (lands_bind), so close-out lands T4 itself, as a run's close does;
+# the two criteria are rows of `## Eval design` naming their task in its Task column, one the close row's on the close's
+# measure and one the close's step's on another eval. Where a criterion stands is the reader's answer (`reader cell`).
 # fails-when: the run refuses on the pending row (OC-1; OC-1c shows the refusal live with the deferral off), or no proof names it at zero, one does above zero, a row on another eval is proved, or the plan is written.
-oc_rows() {  # <project> -> the plan gains T4 (step 9, close), a T3 row on the close's measure and a T0 row (task: 9) on another eval
+OC_SID="closeout-owed-sid"
+oc_rows() {  # <project> -> the page gains T4 (step 9, close) and two Eval design rows with a Task column: one owed by T4 on the close's measure, one by step 9 on another eval
   local plan="$1/$PLAN_REL"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "oc_rows: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
   awk '
-    /^\| T2 \|/ { print; print "| T4 | 9 | close | close-out, continuation.md | — | — | 10 | AC-2 | .bionic/docs/record/wave-01-fixture/continuation.md | landed | — |"; next }
-    /^\| AC-1 \|/ { print; print "| AC-2 | T3 | pending | — |  |"; print "| AC-3 | T0 | pending | — |  |"; next }
-    /^## Handoff/ {
-      print "AC-2:"; print "  fails-when: the close reads above zero"
-      print "  eval: T3 — `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close → `total=0`"
-      print "  task: T4"; print "  evidence: pending"
-      print "AC-3:"; print "  fails-when: the continuation is missing"; print "  eval: T0 — the continuation names the release"
-      print "  task: 9"; print "  evidence: pending"; print "" }
-    { print }' "$plan" > "$plan.o" && mv "$plan.o" "$plan"
+    /^## / { sec = substr($0, 4) }
+    sec == "Tasks" && /^\| T2 \|/ { print; print "| T4 | 9 | close | close-out, continuation.md | — | 10 | AC-2 | .bionic/docs/record/wave-01-fixture/continuation.md | — |"; next }
+    sec == "Eval design" && /^\| Requirement \|/ { print $0 " Task |"; next }
+    sec == "Eval design" && /^\|---/ { print $0 "---|"; next }
+    sec == "Eval design" && /^\| .* \| AC-1 \|/ { print $0 " — |"
+      print "| — | fixture | AC-2 | T3 | `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close → `total=0` | the close reads above zero | T4 |"
+      print "| — | fixture | AC-3 | T0 | the continuation names the release | the continuation is missing | 9 |"; next }
+    { print }' "$plan" > "$plan.o" && mv "$plan.o" "$plan" && lands_bind "$1" "$OC_SID"
 }
 oc_after() { find "$1/.bionic/docs" -name "${PLAN_REL##*/}" -type f 2>/dev/null | head -1; }   # the plan where the close left it
-oc_cells() {  # <plan> <AC> -> `<status>|<evidence cell>`
-  awk -F'|' -v a="$2" '/^## Verification Matrix/ { m = 1 } m && /^\|/ { x = $2; gsub(/^ +| +$/, "", x)
-    if (x == a) { s = $4; e = $5; gsub(/^ +| +$/, "", s); gsub(/^ +| +$/, "", e); print s "|" e; exit } }' "$1"
-}
+oc_ask() { bash "$REPO_ROOT/payload/scripts/reader.sh" "$@" 2>/dev/null; }   # <plan> <question> [args] -> the reader's answer
+oc_cell() { oc_ask "$1" cell "$2" | awk -F= '{ v[$1] = $2 } END { print v["state"] "|" v["by"] }'; }   # <plan> <AC> -> `<state>|<the event that discharged it>`
+oc_eval() { awk '/^## / { s = ($0 == "## Eval design"); next } s' "$1"; }   # <plan> -> its Eval design section
 oc_proofs() {  # <project> -> `<AC> <evidence>` of each proof naming a criterion in the run's log, space-joined
   awk -F'|' '$2 == "ev=proof" { a = ""; e = ""; for (i = 3; i <= NF; i++) { if ($i ~ /^ac=/) a = substr($i, 4); if ($i ~ /^evidence=/) e = substr($i, 10) }
     if (a != "") printf "%s%s %s", (n++ ? " " : ""), a, e }' "$1/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null
 }
 OC_CONT="record/wave-01-fixture/continuation.md"
-POC="$(CO_PLAN_AT=14 mk_fixture owed-close)"; advance_to "$POC" 8; oc_rows "$POC"
-expect_eq "OC-0 precondition: the fixture carries the close row and both rows pending" "pending|—|pending|—|9" \
-  "$(oc_cells "$POC/$PLAN_REL" AC-2)|$(oc_cells "$POC/$PLAN_REL" AC-3)|$(awk -F'|' '$2 ~ /^ T4 $/ { s = $3; gsub(/ /, "", s); print s }' "$POC/$PLAN_REL")"
-# OC-1c: the deferral is what keeps OC-1 green. A copy of the plugin whose deferral never defers, run on the same plan, must refuse on the live row.
+OC_AC1="AC-1 record/generic-evidence.md"
+POC="$(mk_fixture owed-close)"; advance_to "$POC" 8; oc_rows "$POC"
+expect_eq "OC-0 precondition: the session is bound, the close row is the page's at step 9, and both criteria pending, owed by the close row and the close's step" \
+  "0|9|pending||task=T4|pending||task=9" \
+  "$LP_RC|$(oc_ask "$POC/$PLAN_REL" row T4 | sed -n 's/^step=//p')|$(oc_cell "$POC/$PLAN_REL" AC-2)|$(oc_ask "$POC/$PLAN_REL" criterion AC-2 | /usr/bin/grep '^task=')|$(oc_cell "$POC/$PLAN_REL" AC-3)|$(oc_ask "$POC/$PLAN_REL" criterion AC-3 | /usr/bin/grep '^task=')"
+OC_EV0="$(oc_eval "$POC/$PLAN_REL")"
+# OC-1c: the deferral is what keeps OC-1 green. A copy of the plugin whose deferral never defers, run on the same page, must refuse on the live row.
 OC_REV="$SANDBOX/oc-rev"; mkdir -p "$OC_REV" && cp -RL "$REPO_ROOT/payload" "$OC_REV/payload"; OC_W="$REPO_ROOT/payload/scripts/lib/walls.sh"
 sed '/^matrix_row_deferred() {/,/^}/ s/^  local n="\${3%\[ab\]}"$/&; return 1/' "$OC_W" > "$OC_REV/payload/scripts/lib/walls.sh"
 expect_eq "OC-1c0 the copy's deferral differs from the plugin's in one line" "1" "$(diff "$OC_W" "$OC_REV/payload/scripts/lib/walls.sh" | grep -c '^>')"
-PRV="$(CO_PLAN_AT=14 mk_fixture owed-close-rev)"; advance_to "$PRV" 8; oc_rows "$PRV"
-OC_R="$REPO_ROOT"; OC_S="$SCRIPT"; REPO_ROOT="$OC_REV"; SCRIPT="$OC_REV/payload/scripts/close-out.sh"; run_close "$PRV" run; REPO_ROOT="$OC_R"; SCRIPT="$OC_S"
+POR="$(mk_fixture owed-close-rev)"; advance_to "$POR" 8; oc_rows "$POR"
+OC_R="$REPO_ROOT"; OC_S="$SCRIPT"; REPO_ROOT="$OC_REV"; SCRIPT="$OC_REV/payload/scripts/close-out.sh"; run_close_as "$OC_SID" "$POR" run; REPO_ROOT="$OC_R"; SCRIPT="$OC_S"
 expect_ne "OC-1c the run on that copy refuses" "0" "$CO_RC"
 expect_contains "OC-1d …on the live row, in the gate's words" "the row is live past the step that owes it" "$CO_OUT"
-run_close "$POC" run
+run_close_as "$OC_SID" "$POC" run
 OC_LINE="$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')"
 expect_eq "OC-1 run exits 0: the pre-flight and the dry-run before the flip do not refuse on the row the close owes" "0" "$CO_RC"
 [ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | tail -15 | sed 's/^/    | /'
 expect_contains "OC-1b …the dry-run said ok" "gate: ok" "$CO_OUT"
 expect_contains "OC-2 precondition: the line read last reads zero" "hand-holds: total=0 " "$OC_LINE"
 OC_P="$(oc_after "$POC")"
-expect_eq "OC-3 the run's log holds one proof naming AC-2, its evidence the continuation path, and none naming AC-3, on another measure" \
-  "AC-2 $OC_CONT" "$(oc_proofs "$POC")"
-expect_eq "OC-3b …and the delivered plan's table is as it was" "pending|—|pending|—" "$(oc_cells "$OC_P" AC-2)|$(oc_cells "$OC_P" AC-3)"
+expect_eq "OC-3 the run's log holds one proof naming AC-2, its evidence the continuation path, beside the page's AC-1, and none naming AC-3, on another measure" \
+  "$OC_AC1 AC-2 $OC_CONT" "$(oc_proofs "$POC")"
+expect_eq "OC-3b …so the reader reads AC-2 discharged by that proof and AC-3 still pending, and the delivered page's Eval design is as it was" \
+  "discharged|proof|pending||$OC_EV0" "$(oc_cell "$OC_P" AC-2)|$(oc_cell "$OC_P" AC-3)|$(oc_eval "$OC_P")"
 expect_contains "OC-3c …and the card names the row and the status it wrote" "matrix: AC-2 discharged" "$CO_OUT"
 expect_eq "OC-3e …and a run with no act by hand has no ## Hand acts section beside its ## Hand-holds" "1|0" \
   "$(grep -c '^## Hand-holds$' "$POC/$CONT_REL")|$(grep -c '^## Hand acts$' "$POC/$CONT_REL")"
 expect_eq "OC-3d …written in the act that reads the measure last, before the archive is asked: its line follows the hand-holds line and precedes archived:" "yes" \
   "$(printf '%s\n' "$CO_OUT" | awk '/^hand-holds: / { h = NR } /^matrix: AC-2 / { m = NR } /^archived: / { a = NR } END { print (h && m > h && a > m) ? "yes" : "no" }')"
 # above zero: an amend after the last landing, as §READ-ORDER plants it
-POB="$(CO_PLAN_AT=14 mk_fixture owed-close-above)"; advance_to "$POB" 8; oc_rows "$POB"
+POB="$(mk_fixture owed-close-above)"; advance_to "$POB" 8; oc_rows "$POB"
 OB_REC="$POB/.bionic/docs/record/wave-01-fixture"
 printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=%s\n' "$(printf 'e%.0s' $(seq 40))" "$(ro_ago 20)" > "$OB_REC/landing-proofs.log"
 printf 'run/v1|ev=hand|by=fixture|name=w-oc|what=amend|why=widen the files|at=%s\n' "$(ro_ago 5)" >> "$OB_REC/run.log"
-run_close "$POB" run
+OB_EV0="$(oc_eval "$POB/$PLAN_REL")"
+run_close_as "$OC_SID" "$POB" run
 OB_LINE="$(printf '%s\n' "$CO_OUT" | grep '^hand-holds: ')"
 expect_eq "OC-5 a measure above zero still delivers: run exits 0" "0" "$CO_RC"
 [ "$CO_RC" = 0 ] || printf '%s\n' "$CO_OUT" | tail -15 | sed 's/^/    | /'
 expect_contains "OC-5b precondition: the line read last counts the amend" "amends=1 " "$OB_LINE"
 OB_P="$(oc_after "$POB")"
-expect_eq "OC-6 above zero no proof names AC-2, and the delivered plan's table is as it was" "|pending|—" "$(oc_proofs "$POB")|$(oc_cells "$OB_P" AC-2)"
+expect_eq "OC-6 above zero the log's one proof naming a criterion is the page's AC-1, the reader reads AC-2 pending, and the delivered page's Eval design is as it was" \
+  "$OC_AC1|pending||$OB_EV0" "$(oc_proofs "$POB")|$(oc_cell "$OB_P" AC-2)|$(oc_eval "$OB_P")"
 expect_contains "OC-6c …and the card says it is blocked, naming the line" "matrix: AC-2 blocked — $OB_LINE" "$CO_OUT"
-
 
 finish
