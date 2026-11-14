@@ -398,7 +398,8 @@ HP="$(ls "$HB"/docs/plans/*/*.plan.md)"; HR="$HB/docs/record/$(basename "$HP" .p
 bound_marker "$HW" "$HS" "$HP"; ( cd "$HW" && CLAUDE_CODE_SESSION_ID=$HS bash "$R/hooks/session-poker.sh" arm ) >/dev/null 2>&1
 hrows() { ask "$HP" landed | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | tr '\n' ' '; }
 hsheet() { ( cd "$HW" && TZ=America/Los_Angeles BIONIC_NOW_EPOCH=1794300000 bash "$R/hooks/session-poker.sh" sitrep "$HP" 2>/dev/null ) | grep '^clock\.approved: '; }
-htick() { rm -f "$HB"/tmp/tick-digest-*; ( cd "$HW" && CLAUDE_CODE_SESSION_ID=$HS bash "$R/hooks/session-poker.sh" tick 2>&1 ) | grep -m1 '^poker: .*FILL'; }
+# The tick asks the gate for room, so the world plants the machine it runs on: one with room, whatever this one carries.
+htick() { rm -f "$HB"/tmp/tick-digest-*; ( world_machine 8 16384 30 1; cd "$HW" && CLAUDE_CODE_SESSION_ID=$HS bash "$R/hooks/session-poker.sh" tick 2>&1 ) | grep -m1 '^poker: .*FILL'; }
 HO="$(hrows)"; printf 'run/v1|ev=published|row=T99|commit=%s|kind=queue|by=-|why=-|at=2026-11-08T00:00:00Z\n' "$(printf 'f%.0s' {1..40})" > "$HR/run.log"
 expect_eq "half: a landing the log appends reads once and last, after every landing the old homes hold" "yes|${HO}T99 " "$(printf '%s' "$HO" | grep -q '^T1 ' && echo yes)|$(hrows)"
 expect_eq "half: the run reads open, at the plan's step" "0 n=4" "$(opened "$HP") $(ask "$HP" step | grep '^n=')"
