@@ -369,10 +369,6 @@ expect_eq "S13.5 the guard reads the key the wall writes" "0" \
 # ONE reader of a row's `files=` for reconciliation, ONE place that computes the diff, ONE
 # row -> worktree mapping (never re-derived). Neither side reads an `impact-command` key any
 # more (wave-31 T2 the dispatch side, T23 the landing side; REQ-4 AC-4.2): S18.3 pins both.
-# The reconciliation is `stop_landing_gate`'s now (epic-23 wave-11, T12): the diff and the
-# shared mapping moved into payload/scripts/lib/stop.sh with the rest of the sweep. One owner
-# still, at a new address.
-S18_LG="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh"
 S18_WT_LIB_DIR="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
 
 # --- §S18.1 exactly one file reconciles a diff against a row's files=, and it is lib/stop.sh ---

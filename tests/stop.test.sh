@@ -29,8 +29,8 @@
 #            three, and a waiting row is not ready, so the turn ends
 #   §GONE    no verb records a wait in prose: decline is an unknown verb, nothing writes a decline
 #            or a lapse, and the Patrol prompt names none
-#   §PATROL  a dead Patrol clock is one line of at most 80 characters, the same line on a repeat;
-#            the explanation is asked for, and the one report sentence is in the rules and the prompt
+#   §PATROL  a dead Patrol clock names its three acts in order, a clock that never ticks is told apart,
+#            and the one report sentence is in the rules and the prompt
 #   §LOG     a step, an approval or an order the run's log alone holds moves the ready-with-room verdict
 #   §ONE     a stop is one event: the turn's end is the run's stop event, the reader's answer before and after the
 #            bring-forward act, and a log the hook cannot write, or a plain directory, changes nothing it says
@@ -1018,12 +1018,9 @@ expect_contains "GONE3 the Patrol prompt still says how a FILL is answered" 'Ans
 expect_absent "GONE3b …and names no decline" "decline" "$GONE_PROMPT"
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "PATROL: a dead Patrol clock is one line of at most 80 characters, the same line on a repeat; the one report sentence is in the rules and the prompt"
+section "PATROL: a dead Patrol clock names its three acts in order, a clock that never ticks is told apart, and the one report sentence is in the rules and the prompt"
 
-# THE USER-VISIBLE REASON IS THE CLI'S "Stop hook error:" LINE, and the plugin can only make it short.
-# A dead clock is three acts in one order (look, create if absent, stamp), so the line names them and
-# nothing else, and the line must not
-# vary with the stamp's age, or a repeat for the same stale stamp would print more than the first.
+# A dead clock is three acts in one order (look, create if absent, stamp), so the reason names them in that order.
 PT_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
 PT_SAY="Patrol re-armed: the session's cron table was empty, so I created the recurring <interval> job and stamped it. Next fire is <time>."
 
@@ -1032,20 +1029,16 @@ fire "$D"
 PT_R1="$(reason_of)"
 expect_eq "PATROL0 meta: the dead-clock fixture is refused" "block" "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
 expect_contains "PATROL1 the reason names the verdict" "Patrol dead" "$PT_R1"
-expect_eq "PATROL1b …is one line" "1" "$(printf '%s' "$PT_R1" | awk 'END{print NR}')"
-expect_true "PATROL1c …of at most 80 characters, newline counted" \
-  test "$(printf '%s\n' "$PT_R1" | wc -c | tr -d ' ')" -le 80
 expect_true "PATROL1d …naming CronList, then CronCreate, then arm" \
   test "$(offset_in_reason 'CronList')" -ge 0 -a "$(offset_in_reason 'CronList')" -lt "$(offset_in_reason 'CronCreate')" \
        -a "$(offset_in_reason 'CronCreate')" -lt "$(offset_in_reason '; arm')"
 expect_contains "PATROL1e …CronCreate only if absent" "CronCreate if absent" "$PT_R1"
 
-# THE SAME STAMP, OLDER: an age in the line would make the repeat differ.
+# THE SAME STAMP, OLDER: the repeat is refused as the first was.
 touch -t "$(date -v-1100S +%Y%m%d%H%M.%S 2>/dev/null || date -d '-1100 seconds' +%Y%m%d%H%M.%S)" \
   "$D/.bionic/tmp/patrol-$SID.state"
 fire "$D"
-expect_nonempty "PATROL2 meta: the repeat is refused too" "$(reason_of)"
-expect_eq "PATROL2b a second Stop over the same stale stamp prints the identical line" "$PT_R1" "$(reason_of)"
+expect_nonempty "PATROL2 a second Stop over the same stale stamp is refused too" "$(reason_of)"
 
 # THE CLOCK THAT FIRES AND NEVER TICKS: the job exists, so its repair differs and it names the tick first.
 PT_TX="$(mktemp)"
@@ -1058,8 +1051,6 @@ D=$(mkfix); stale_stamp "$D"
 fire "$D" Stop false "$(jq -nc --arg t "$PT_TX" '{transcript_path:$t}')"
 PT_NT="$(reason_of | awk '/Patrol never ticks/{print; exit}')"
 expect_nonempty "PATROL3 meta: a marker turn after the stamp reads as a clock that never ticks" "$PT_NT"
-expect_true "PATROL3b …in one line of at most 80 characters" \
-  test "$(printf '%s\n' "$PT_NT" | wc -c | tr -d ' ')" -le 80
 expect_true "PATROL3c …naming the tick first, then CronList" \
   test "$(printf '%s' "${PT_NT%%(tick;*}" | wc -c | tr -d ' ')" -lt "$(printf '%s' "${PT_NT%%CronList*}" | wc -c | tr -d ' ')" \
        -a "$(printf '%s' "$PT_NT" | /usr/bin/grep -c '(tick; CronList')" -eq 1

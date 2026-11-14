@@ -292,20 +292,20 @@ pt_gate "$REPO" "$(pt_brief "$PT_OK_FILES, README.md")"
 expect_eq "PT.9b a prototype naming a tracked path is refused on an approved plan" "deny" "$GATE_VERDICT"
 expect_contains "PT.9c …naming it" "README.md is tracked" "$GATE_ERR"
 
-# --- PT.10: the evidence gate still refuses a matrix AC naming a prototype row (its existing arm) ---
-# Driven as it stands (lib/walls.sh validate_prototype_no_matrix_row): a plan at `current: 4` whose
-# `## Tasks` names T12 `kind: prototype` and whose AC-1 block names `task: T12`. The control
-# repoints AC-1 at the build row T13 and changes nothing else.
+# --- PT.10: the evidence gate still refuses a criterion naming a prototype row (its existing arm) ---
+# Driven as it stands (lib/walls.sh validate_prototype_no_matrix_row): a run at 15 at Step 4 whose
+# `## Tasks` names T12 `kind: prototype` and whose `## Eval design` Task cell for its criterion names T12. The
+# control repoints that cell at the build row T13 and changes nothing else.
 EG_GATE="${BIONIC_HOOKS_DIR}/bash-walls.sh"   # the evidence gate is a wall of bash-walls.sh
 PT_EG_SID="5d4c3b2a-9e8f-4a76-8b1c-2d3e4f506172"
-pt_eg_plan() {  # <dir> <AC-1's task> -> writes the plan, echoes its path
-  local p="$1/.bionic/docs/plans/active.md"
-  mkdir -p "$1/.bionic/docs/plans" "$1/.bionic/docs/record" "$1/.bionic/tmp" "$1/.claude/plans"
+pt_eg_plan() {  # <dir> <the criterion's task> -> writes the plan and its run's log, echoes the plan's path
+  local p="$1/.bionic/docs/plans/epic-99-x/wave-01-x.plan.md" n
+  mkdir -p "${p%/*}" "$1/.bionic/docs/record/wave-01-x" "$1/.bionic/tmp" "$1/.claude/plans"
   printf 'generic fixture proof\n' > "$1/.bionic/docs/record/generic-evidence.md"
   cat > "$p" <<EOF
 ---
 governing-skill: canonical-sdlc
-canonical_sdlc_version: 14
+canonical_sdlc_version: 15
 intent: build
 rigor: double
 scale: wave
@@ -313,40 +313,30 @@ deploy_target: none
 use_worktree: false
 has_ui: true
 walk: exempt
+working-branch: wave/01-x
+base-sha: abc1234
 ---
-## SDLC State
-current: 4
-approved-by: dana 2026-09-07T19:05Z "Ok, amazing! Approved."
-Step 4:
-  plan-doc: .bionic/docs/plans/wave-01.plan.md#step-4
-
 ## Tasks
 
-| id | step | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|---|
-| T12 | 4 | prototype | E1: refusal wording (attended) | senior-implementor | — | 30m | E1 | record/x.md | pending |
-| T13 | 4 | build | E1: hooks migrated | senior-implementor | T12 | 60m | E1 | hooks/*.sh | pending |
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T12 | 4 | prototype | E1: refusal wording (attended) | — | 30 | E1 | record/x.md | — |
+| T13 | 4 | build | E1: hooks migrated | T12 | 60 | E1 | hooks/*.sh | — |
 
-## Verification Matrix
+## Eval design
 
-stack-health: n/a: no long-running serve
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1 | T0 | pending | see AC-1 | |
-
-AC-1:
-  criterion: the refusal wording is proven
-  provenance: user 2026-09-07 "approved"
-  task: $2
-  fails-when: the wording is untested
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when | Task |
+|---|---|---|---|---|---|---|
+| E1 | the wording, read | AC-1 | static | \`tests/a.test.sh\` | the wording is untested | $2 |
 EOF
+  for n in 1 2 3 4; do printf 'run/v1|ev=step|n=%s|at=2026-09-07T19:0%s:00Z\n' "$n" "$n"; done > "$1/.bionic/docs/record/wave-01-x/run.log"
+  printf 'run/v1|ev=approval|key=step3|by=dana|said=Ok, amazing! Approved.|at=2026-09-07T19:05:00Z\n' >> "$1/.bionic/docs/record/wave-01-x/run.log"
   printf '%s' "$p"
 }
 pt_eg_run() {  # <dir> -> PT_EG_RC and PT_EG_ERR (the verbose stream) for a `git commit` there
   local in
   : > "$1/.bionic/tmp/engaged-$PT_EG_SID.state"
-  bound_marker "$1" "$PT_EG_SID" "$1/.bionic/docs/plans/active.md"
+  bound_marker "$1" "$PT_EG_SID" "$1/.bionic/docs/plans/epic-99-x/wave-01-x.plan.md"
   in=$(jq -n --arg c 'git commit -m "x"' --arg cwd "$1" --arg s "$PT_EG_SID" \
          '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
   PT_EG_ERR=$(HOME="$1" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$PT_EG_SID" BIONIC_WALL_VERBOSE=1 \
@@ -356,7 +346,8 @@ pt_eg_run() {  # <dir> -> PT_EG_RC and PT_EG_ERR (the verbose stream) for a `git
 PT_EG1="$SANDBOX/pt-eg1"; mkdir -p "$PT_EG1"
 pt_eg_plan "$PT_EG1" T12 >/dev/null
 pt_eg_run "$PT_EG1"
-expect_status "PT.10 AC-13.2 a matrix AC naming the prototype row is refused by the evidence gate" "2" "$PT_EG_RC"
+expect_status "PT.10 AC-13.2 a criterion naming the prototype row is refused by the evidence gate" "2" "$PT_EG_RC"
+expect_contains "PT.10b …for the prototype, naming the Task cell to repoint" "repoint the Task cell of 'AC-1'" "$PT_EG_ERR"
 PT_EG2="$SANDBOX/pt-eg2"; mkdir -p "$PT_EG2"
 pt_eg_plan "$PT_EG2" T13 >/dev/null
 pt_eg_run "$PT_EG2"

@@ -63,8 +63,6 @@ SID_DEAD="5e6f7a8b-2222-42d6-b0e8-3c1f2a94d7e0"
 SID_DEAD2="9c0d1e2f-3333-4a17-8b55-6e2d9f0a1c33"
 SID_SELF="7f8e9d0c-4444-4b28-9a66-1d3c5e7f9b22"
 
-expect_matches() { expect_regex "$@"; }
-
 # ---------- fixture builders ----------
 
 # A live process this machine's `kill -0` will actually find, the same way a real CLI

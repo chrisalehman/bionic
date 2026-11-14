@@ -202,17 +202,6 @@ said() {  # <dir> <name> -> the `done=<path>` argument, the marker written
   printf 'done=%s/%s.done' "$1" "$2"
 }
 
-# The same, onto ANOTHER session's roster file in the same .bionic/tmp — the shape §8's
-# `adopt` reads. `session=` is forced to match the filename, because that is the invariant
-# the writer keeps and a fixture that broke it would be testing a state the fleet cannot
-# produce.
-add_row_to() {  # <repo> <session-id> <key=value>...
-  local repo="$1" sid="$2"; shift 2
-  local f; f="$(roster_of "$repo" "$sid")"
-  [ -f "$f" ] || roster_header > "$f"
-  mkrow session="$sid" "$@" >> "$f"
-}
-
 # THE ACK IS PLANTED THROUGH THE REAL VERB, never by hand-writing a ledger line. `acked=`
 # reaches the poker on the verdict line (hooks/session-sweeper.sh:715), and the only writer
 # of the ledger that line is computed from is `ack` itself — a fabricated ledger would pin
@@ -260,16 +249,6 @@ delivered_plan() {  # <repo>
 }
 
 # ---------- the session binding (wave-session-bound-run, AC-2/AC-3/AC-6/AC-8) ----------
-#
-# A plan the fixture can NAME. `write_plan` writes one and says nothing about where; the
-# three sections below bind to a path, refuse a path, and assert a path appears nowhere, so
-# each of them needs the path back. Same layout, one place, and the path is echoed rather
-# than recomputed at every call site.
-plan_at() {  # <repo> <relative path under <docs-root>/plans> <body> -> the absolute path
-  write_plan "$1" "$3" "$2"
-  printf '%s/.bionic/docs/plans/%s' "$1" "$2"
-}
-
 marker_of() { printf '%s/.bionic/tmp/engaged-%s.state' "$1" "${2:-$SID}"; }
 
 # THE BOUND FIXTURE, in hooks/engage.sh's exact two-line shape — the same posture
@@ -362,29 +341,7 @@ ta_put() {  # <plan> <Tasks lines> -> each line written over the row of its id, 
 }
 
 # ── hoisted from Section 6: fake_config_dir — Sections 41 and 43–45 build config dirs with it. ──
-# ============================================================
-# THE BLIND-WALL DETECTOR, RETIRED (bionic 1.4.0, task ADOPT, spec AC-7)
-# ============================================================
-#
-# It compared main-thread `Agent` tool_uses in the transcript against rows on the roster
-# and raised a NOTIFY when dispatches outnumbered them. The condition it looked for was
-# real: the dispatch wall lived in the governing skill's frontmatter, and a skill's
-# registrations do not survive a session continue, a `/clear` + resume or a
-# `/reload-plugins` — so the wall went silently absent and dispatches launched unrostered.
-#
-# Every wall is registered in hooks/hooks.json now and survives all three, so that
-# condition cannot arise the way it did. What could still arise was the detector's own
-# false positive: it had no "no active run" branch, so a session that had simply not
-# engaged a run — no roster, because nothing was dispatched — read as a session whose wall
-# had died. That fired for real on 2026-09-02 at 20:07Z, against this wave's own
-# orchestrator, which is how it came to be in scope.
-#
-# The registration is pinned instead, in tests/hook-adoption.test.sh and
-# tests/cross-gate-agreement.test.sh §L: every hook named once in hooks.json, none in the
-# frontmatter. That is a claim about a file on disk rather than an inference from a
-# transcript, and it goes red when the wiring changes rather than when a session is idle.
-#
-# ONE HELPER SURVIVES THE RETIREMENT: `fake_config_dir`. Section 8 builds a predecessor's
+# `fake_config_dir`: Section 8 builds a predecessor's
 # subagent transcript under it, and `adopt` resolves the observe address through
 # CLAUDE_CONFIG_DIR — so without it that section would read the real ~/.claude.
 fake_config_dir() {  # <label> -> a CLAUDE_CONFIG_DIR with a projects/ tree
@@ -628,7 +585,23 @@ s34_gate() {
   GATE_RC=$?
 }
 
-# ── hoisted from Section 42: s42_plan, s42_numstat, s42_snap, s42_unchanged, s42_builds_landed — every later shard builds, snapshots and compares plans with them. ──
+# s34_gate15 <repo> <plan> -> GATE_RC, GATE_ERR of a main-checkout commit judged against the run at 15 the plan's run at 14
+#   stands for: a twin of the plan rewritten by sp_at15 (the header naming its branch, base, epic and wave; the log its
+#   steps, approval and rows), the run's own log after them, bound for that commit alone, then taken away and the plan
+#   bound again. The commit gate refuses an open run at 14, so a world built at 14 for what the translation reads asks
+#   the gate of its run as this release carries it.
+s34_gate15() {
+  local p="$2" t r n e
+  n="$(basename "$p" .plan.md)"; e="$(basename "${p%/*}")"; t="${p%/*}/$n-at15.plan.md"; r="${p%/plans/*}/record"
+  rm -rf "$t" "$r/$n-at15"; cp "$p" "$t"; sp_at15 "$t"
+  awk -v e="$e" -v w="$n" 'NR == 1 { print; next } !d && /^---$/ { if (!ep) print "epic: " e; if (!wv) print "wave: " w; d = 1 }
+    !d && /^epic: / { ep = 1 } !d && /^wave: / { wv = 1 } { print }' "$t" > "$t.x" && mv "$t.x" "$t"
+  [ ! -f "$r/$n/run.log" ] || cat "$r/$n/run.log" >> "$r/$n-at15/run.log"
+  bind_marker "$1" "$t"; s34_gate "$1"; bind_marker "$1" "$p"
+  rm -rf "$t" "$r/$n-at15"
+}
+
+# ── hoisted from Section 42: s42_plan, s42_snap, s42_unchanged, s42_builds_landed — every later shard builds, snapshots and compares plans with them. ──
 s42_plan() {  # <repo> <current> [step-4 block body] -> the plan path; bound, committed
   local p; p="$(s34_plan "$1" "$2" "${3:-}")"
   [ "${SP_PLAN_AT:-15}" = 15 ] || printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n' >> "$p"
@@ -636,7 +609,6 @@ s42_plan() {  # <repo> <current> [step-4 block body] -> the plan path; bound, co
   ( cd "$1" && git add -f "$p" && git commit -qm plan ) >/dev/null 2>&1
   printf '%s' "$p"
 }
-s42_numstat() { git -C "$1" diff --numstat | awk '{ printf "%s %s;", $1, $2 }'; }
 s42_snap() {  # <repo> <plan> -> commit the plan and keep a byte copy for the cmp rows
   ( cd "$1" && git add -f "$2" && git commit -qm snap ) >/dev/null 2>&1
   cp "$2" "$TMPROOT/s42-before"

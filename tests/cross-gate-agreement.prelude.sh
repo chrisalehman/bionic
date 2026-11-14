@@ -18,20 +18,6 @@
 # WHAT IT NEVER HOLDS. A fixture: a repository one section builds and a later one reads is not a helper, so
 # those sections share a part instead. None crosses the cut today.
 #
-# CROSS-COMPONENT INSTRUMENT PROOFS — epic-15 wave-01R, task 4/6.
-#
-# Serves AC-9 (N-way agreement over every copy of a duplicated concept,
-# including the actively-maintained origin; one-copy mutation goes red) and the
-# cross-script share of AC-8 (no command text in any written artefact;
-# unpredictable temp names across all four scripts).
-#
-# Governing design: design/orchestrator-subagent-coordination.md §8, §9.
-# Known-failure checklist: .bionic/docs/record/epic-15-w1r-known-failure-checklist.md
-# A8 (duplicated logic with only a 2-way agreement test — the origin missing
-# from the test meant to catch drift) and A9 (green suites hid undiscriminated
-# parser edges: quoted values, absolute paths, duplicate directive lines,
-# indentation — proven by a one-copy mutation staying green).
-#
 # WHAT THIS SUITE IS FOR, and what it deliberately is not:
 #
 #   The per-script suites (preflight-probe, dispatch-preflight, stop-check and stop
@@ -79,20 +65,10 @@ REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 PARTY_DP="${W1R_PARTY_DP:-$BIONIC_HOOKS_DIR/dispatch-preflight.sh}"
 # The stop gate is hooks/stop.sh, which answers the orchestrator's stop of an agent by its event.
 PARTY_SG="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop.sh}"
-# THE EVIDENCE GATE IS A FUNCTION BEHIND hooks/bash-walls.sh (T23). The party this
-# variable names is still "the process a git commit reaches"; it is the compound now.
-PARTY_EG="${W1R_PARTY_EG:-$BIONIC_HOOKS_DIR/bash-walls.sh}"
-# The recorder moved out of the stop gate at task 4/4: observations are written
-# post-execution by their own script, from the producer's own printed output.
 PARTY_ER="${W1R_PARTY_ER:-$BIONIC_HOOKS_DIR/execution-recorder.sh}"
 
 PROBE="$BIONIC_HOOKS_DIR/preflight-probe.sh"
 OBSERVE="$BIONIC_HOOKS_DIR/stop-check.sh"
-# THE OBSERVATION'S OWN LIBRARY (epic-23 wave-15, REQ-2; ADR-028). The resolution, the file
-# facts and the classification moved out of the verb and out of the stop gate into one
-# sourced file, so the copies this suite used to hold to each other are one definition — and
-# the comparisons below point at it rather than at whichever carrier they were written for.
-OBSERVE_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/observe.sh"
 SWEEPER="$BIONIC_HOOKS_DIR/session-sweeper.sh"
 # The landing gate (epic-16 wave-01) is a fifth party and an overridable one for
 # the same reason the four above are: §J drives a MUTATED COPY of it to prove the
@@ -147,18 +123,6 @@ printf '5:0.1:30:1000\n' > "$BIONIC_GATE_DIR/cost/fixture.test.sh"
 # So it is unset here and pinned per call, to the fixture session, everywhere a party has to
 # resolve anything.
 unset CLAUDE_CODE_SESSION_ID
-
-# ok/no/expect_eq/expect_contains/expect_absent/expect_true/expect_false migrated onto
-# tests/lib/assert.sh (S5a, AC-12). The framework's expect_contains/expect_absent are a
-# quoted `case` glob, never `grep -F` — no pipe, so the epic-17-w1 SIGPIPE-141 flake this
-# block used to describe by hand cannot recur, and no 64 KiB haystack limit either. The
-# ONE semantic difference measured against the private definitions this file used to carry
-# (byte-identical to the framework's except here): `grep -F` treats a NEWLINE inside the
-# needle as alternation ("either line matches"), while the framework's `case` requires the
-# whole multi-line needle as one contiguous substring. Exactly one call site in this file
-# passed a two-line needle (§B2, "the two-line shape, plan first") — verified line-by-line
-# that its fixture always produces the two lines adjacent and in order, so the tighter
-# contiguous check is not a narrowing here; see that assertion's own comment.
 
 SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
@@ -295,13 +259,6 @@ mk_stopsweep_payload() {  # <cwd> <sid> <stop_hook_active true|false> [live-agen
 # contract state) and the stop gate (the foreign-stop rule) read this file, which
 # is precisely why it is planted from ONE helper here: a fixture written twice is
 # two shapes, and this suite exists to catch exactly that.
-# RENAMED OFF THE WRITER'S NAME (S17). This helper used to be called `roster_row`, which is
-# now the production writer's own name — sourcing tests/lib/roster-row.sh with a private
-# `roster_row` still defined would have shadowed the one writer with a fixture, which is the
-# exact inversion this wave exists to end (S14 renamed dispatch-preflight's reader for the
-# same reason). The row itself now comes from `roster_row_fixture`, so the fields this
-# fixture used to omit — `source=`, `claims=`, `cadence=`, `waiver=`, `plan=` — are the
-# writer's own defaults rather than absent, and the header line is `roster_header`'s.
 cg_roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status]
   local repo="$1" sid="$2" name="$3" aid="$4" prog="${5:-}" status="${6:-confirmed}"
   local f="$repo/.bionic/tmp/roster-$sid.state"
@@ -386,12 +343,10 @@ cg_live() {  # <transcript> <name[:status]>...
 #
 #   dispatch-preflight  refuse (exit 2, no attestation planted)  <=> yes
 #   stop gate           refuse (exit 2, target unresolvable)     <=> yes
-#   evidence-gate       "has no 'Step N:' line" (exit 2)         <=> yes, and N
-#                       is the derived value itself — the only party that
-#                       reports it, which is why the fixtures below are built so
-#                       that a MIS-PARSE FLIPS THE PREDICATE rather than merely
-#                       changing a value. A fixture whose mis-parse is invisible
-#                       to two of three parties proves nothing about them (A9).
+#
+# The evidence gate is no party: it reads a run's step from its log, and refuses an
+# open run at 14 under any name before any step is read, so these plans' state
+# sections are read by the translation's readers alone.
 #
 # Deliberately out of the battery, and why:
 #   * `current: T<n>` — not a step at any scale since wave-31 (one ledger shape, D2):
@@ -448,53 +403,6 @@ verdict_er() {  # <repo> -> yes|no|other:<detail>
   if [ "$st" -ne 0 ]; then echo "other:exit-$st"; return; fi
   if [ -n "$out" ]; then echo "other:output"; return; fi
   if grep -q 'status=confirmed' "$roster" 2>/dev/null; then echo yes; else echo no; fi
-}
-
-# The evidence gate is the only party that reports the DERIVED VALUE, so its
-# answer is `yes:<value>` where the others answer `yes`. Callers split on `:`.
-# THE EVIDENCE GATE JUDGES ONLY A BOUND SESSION'S RUN (wave-23-fixit-1810, REQ-1, D1; spec
-# Δ1). These parties drive an engaged, UNBOUND session — the empty marker new_repo plants —
-# and since that wave the gate announces an unbound session's newest-plan fallback and acts
-# on nothing, so it would answer "no" on every fixture and this battery would lose its
-# fifth voice. So for the drive alone the session is bound to the plan the PARTY'S OWN
-# library resolves as the newest open run — the shipped one here, the mutant under §A2 —
-# and the empty marker is put back after. The gate then derives `current:` from exactly the
-# plan the library found, which is what this battery has always compared; a library that
-# finds no open run leaves the marker empty, and the gate answers "no" as the others do.
-cg_eg_libdir() {
-  local h; h="$(dirname "$PARTY_EG")"
-  if [ -r "$h/../scripts/lib/run.sh" ]; then printf '%s' "$h/../scripts/lib"
-  else printf '%s' "$h/../payload/scripts/lib"; fi
-}
-cg_eg_bind() {  # <repo> <sid> -> 0 when an EMPTY marker was bound for this drive
-  local m="$1/.bionic/tmp/engaged-$2.state" p
-  [ -f "$m" ] && [ ! -L "$m" ] && [ ! -s "$m" ] || return 1
-  p=$(bash -c '. "$1/run.sh" 2>/dev/null && active_run "$2"' _ "$(cg_eg_libdir)" "$1" 2>/dev/null) || p=""
-  [ -n "$p" ] || return 1
-  printf 'plan=%s\nengaged_at=2026-09-04T00:00:00Z\n' "$p" > "$m"; chmod 600 "$m"
-  return 0
-}
-cg_eg_unbind() { : > "$1/.bionic/tmp/engaged-$2.state"; }
-
-verdict_eg() {  # <repo> -> yes:<current>|no|other:<detail>
-  local out st _b=0
-  # BIONIC_WALL_VERBOSE=1 (task 13, ruling D-1). The gate's user line is one sentence
-  # now and the DERIVED VALUE this party reports — the step number the plan has no line
-  # for — lives in `detail`. Reading the line alone would make every row here
-  # `other:<prefix>`; the knob is how the party keeps reporting a value at all.
-  cg_eg_bind "$1" "$SID_A" && _b=1
-  out=$(mk_bash_payload "$SID_A" "$SANDBOX/t.jsonl" "$1" "git commit -m x" \
-        | env -u CLAUDE_PROJECT_DIR BIONIC_WALL_VERBOSE=1 bash "$PARTY_EG" 2>&1); st=$?
-  [ "$_b" = 1 ] && cg_eg_unbind "$1" "$SID_A"
-  if [ "$st" -eq 0 ]; then echo no; return; fi
-  case "$out" in
-    *"has no 'Step "*)
-      printf 'yes:%s\n' \
-        "$(printf '%s' "$out" | sed -n "s/.*has no 'Step \([^']*\):' line.*/\1/p" | head -1)" ;;
-    *"missing a valid 'current: N' line"*) echo no ;;
-    *"empty '## SDLC State' section"*)     echo "other:empty-section" ;;
-    *) echo "other:$(printf '%s' "$out" | head -1 | cut -c1-60)" ;;
-  esac
 }
 
 # The landing gate holds a FIFTH byte-identical copy of active-wave detection
@@ -631,8 +539,8 @@ current-indented|yes|4
 current-duplicate-lines|yes|4
 current-fenced-only|no|-
 newest-plan-wins|yes|8b
-marker-less-newest-loses|yes|4
-fenced-only-newest-loses|yes|4
+marker-less-newest-loses|yes|open-at-14
+fenced-only-newest-loses|yes|open-at-14
 only-marker-less-files|no|-
 nested-two-deep|yes|4
 nested-three-deep|no|-
@@ -810,50 +718,21 @@ plant_hook_tree() {  # <tree root> -> echoes <tree root>/hooks
   printf '%s' "$root/hooks"
 }
 
-# run_battery <mode>  — mode=assert emits one assertion per fixture;
-#                       mode=detect returns 1 at the FIRST disagreement.
+# run_battery assert — one assertion per fixture: the four engagement-scoped parties answer
+# the same on every plan shape, since none of them reads the plan.
 run_battery() {
-  local mode="$1" name want cur repo a b c d e cnorm cval want_sg want_dp want_er want_lg
+  local name want cur repo a b d e
   while IFS='|' read -r name want cur; do
     [ -n "$name" ] || continue
     repo="$SANDBOX/fx/$name/repo"
-    a=$(verdict_dp "$repo"); b=$(verdict_sg "$repo"); c=$(verdict_eg "$repo")
-    d=$(verdict_er "$repo"); e=$(verdict_lg "$repo")
-    cnorm="${c%%:*}"; cval=""
-    [ "$cnorm" = "yes" ] && cval="${c#*:}"
-    # verdict_sg always drives the stop gate with the fixed target "no-such-agent" —
-    # non-address-shaped and non-bash-task-shaped — and a target wearing neither shape is
-    # REFUSED rather than waved through, so the stop gate's verdict agrees with the other
-    # four parties on every fixture.
-    want_sg="$want"
-    # WHAT THE PARTIES AGREE ABOUT CHANGED AT task-engaged-session, and the change is the
-    # point of that wave. Four of the five no longer read the plan at all: they are scoped
-    # by ENGAGEMENT, and every fixture in this battery is engaged (see `arm_patrol`), so
-    # each of them answers the same thing on all 23 plan shapes. That constancy is the
-    # claim now — a party that still had a plan opinion of its own would break it — and it
-    # is asserted here rather than dropped, because "the plan does not move this gate" is
-    # exactly what a future edit could silently undo. The evidence gate is the one party
-    # that still derives the plan's `current:`, so it keeps the discriminating column and
-    # the derived-value check below.
-    want_dp="yes"; want_er="yes"; want_lg="yes"; want_sg="yes"
-    if [ "$mode" = "assert" ]; then
-      if [ "$a" = "$want_dp" ] && [ "$b" = "$want_sg" ] && [ "$cnorm" = "$want" ] && [ "$d" = "$want_er" ] && [ "$e" = "$want_lg" ]; then
-        ok "all five parties agree on '$name': engagement-scoped four constant, evidence gate $want"
-      else
-        no "all five parties agree on '$name': engagement-scoped four constant, evidence gate $want" \
-           "dispatch-preflight=$a stop=$b evidence-gate=$c execution-recorder=$d landing-gate=$e"
-      fi
-      if [ "$want" = "yes" ]; then
-        expect_eq "  and the evidence gate derived current='$cur' for '$name'" "$cur" "$cval"
-      fi
+    a=$(verdict_dp "$repo"); b=$(verdict_sg "$repo"); d=$(verdict_er "$repo"); e=$(verdict_lg "$repo")
+    # Every fixture is engaged (see `arm_patrol`), so each party answers yes on all of them;
+    # a party that still had a plan opinion of its own would break that constancy.
+    if [ "$a|$b|$d|$e" = "yes|yes|yes|yes" ]; then
+      ok "the four engagement-scoped parties agree on '$name'"
     else
-      # Detect mode also compares the DERIVED VALUE, so a mutation that selects a
-      # different plan without flipping the predicate is caught too.
-      if [ "$a" != "$want_dp" ] || [ "$b" != "$want_sg" ] || [ "$cnorm" != "$want" ] || [ "$d" != "$want_er" ] || [ "$e" != "$want_lg" ] \
-         || { [ "$want" = "yes" ] && [ "$cval" != "$cur" ]; }; then
-        printf 'disagreement on %s: want=%s/%s dp=%s sg=%s eg=%s er=%s lg=%s\n' "$name" "$want" "$cur" "$a" "$b" "$c" "$d" "$e"
-        return 1
-      fi
+      no "the four engagement-scoped parties agree on '$name'" \
+         "dispatch-preflight=$a stop=$b execution-recorder=$d landing-gate=$e"
     fi
   done <<EOF
 $(printf '%s' "$FIXTURES")
@@ -899,9 +778,6 @@ V_ORIGIN_VAL="$(v_hook_val "$V_ORIGIN")"
 
 # ---- from §Section P (the Patrol stamp): PARTY_PK ----
 PARTY_PK="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
-
-# ---- from §S.1: PARTY_PK_S ----
-PARTY_PK_S="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
 
 # ---- from §S.4: PARTY_SG_W ----
 PARTY_SG_W="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"

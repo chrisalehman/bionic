@@ -573,11 +573,12 @@ expect_contains "AK6c …carrying the refusal's line" "row T4 waits for approval
 # refusal and hooks/bash-walls.sh, the hook that calls it, opens the item, keyed as the answer verb closes it:
 # `waive:<question>` and `waive:<AC>`, both closed by `waive`. A question with no reading at all asks the run for a
 # reading first, not the person, and opens nothing (the tick's own rule, T35's A-T35-4).
-# FIXTURE FIDELITY: bash-walls.test.sh's §EG-6 world, its prelude's builders read out of that file by name (a plan the
-# real gate admits at current: 6 bar the readings; the reading lines in lib/proof.sh's writer's shape); the real hook.
+# FIXTURE FIDELITY: bash-walls-egd.test.sh's §EG-DERIVE world, its prelude's builders read out of that file by name (the
+# run at 15 eg6_world builds from a plan's text, which the real gate admits at current: 6 bar the readings; the reading
+# lines in lib/proof.sh's writer's shape, read into the log by lib/translate.sh); the real hook.
 NT_BW_PRELUDE="$(dirname "$0")/bash-walls.prelude.sh"
 NT_IMPORT_MISSING=""
-for _f in mk_repo bw_door eg6_plan eg6_reading; do
+for _f in mk_repo bw_door eg6_plan eg6_reading eg6_world; do
   nt_import_fn "$_f" "$NT_BW_PRELUDE" || NT_IMPORT_MISSING="$NT_IMPORT_MISSING $_f"
 done
 expect_eq "AK-6 precondition: the §EG-6 builders were all read out of bash-walls.prelude.sh" "" "$NT_IMPORT_MISSING"
@@ -585,9 +586,12 @@ EG6_LIB="$NT_LIB/proof.sh"
 CW_HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 RCW="$(mk_repo nt-ask-gate)"
 H_EG6="$(git -C "$RCW" rev-parse HEAD)"
-cw_commit() {  # <repo> <plan text> -> CW_ERR, CW_RC: a main-checkout `git commit` through the hook, the session bound to the plan
-  printf '%s\n' "$2" > "$1/.bionic/docs/plans/active.md"
-  bound_marker "$1" "$SID" "$1/.bionic/docs/plans/active.md" >/dev/null 2>&1
+cw_world() {  # <repo> <plan text> [<eval type>] [<log line>...] -> EG6_PAGE, the run at 15 (eg6_world), the session bound to it
+  eg6_world "$@"
+  bound_marker "$1" "$SID" "$EG6_PAGE" >/dev/null 2>&1
+}
+cw_commit() {  # <repo> <plan text> [<eval type>] [<log line>...] -> CW_ERR, CW_RC: a main-checkout `git commit` through the hook
+  cw_world "$@"
   CW_ERR="$(jq -nc --arg s "$SID" --arg c "$1" \
       '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:"git commit -m x"},tool_use_id:"toolu_nt_ask"}' \
     | ( cd "$1" && env CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" bash "$CW_HOOK" 2>&1 >/dev/null ))"
@@ -611,30 +615,23 @@ expect_contains "AK-6d …carrying the refusal's line for it" "structure: the ne
   "$(nk_reply "$RCW" waive:structure)"
 cw_commit "$RCW" "$(eg6_plan 6 wave "$CW_FAIL")"
 
-# THE MATRIX ROW'S ASKS. Every reading passes, so only the matrix speaks. A T3 row whose evidence is n/a is a downgrade
-# only the person makes; a T4 row the user confirmed, under a REFUTED auditor cell, needs the finding settled or the row
-# waived. Each opens `waive:<AC>`.
-CW_NA="$(eg6_plan 6 wave "$CW_READ" | sed -e 's/^| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |$/| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |/' \
-  -e 's|^  evidence: record/generic-evidence.md$|  evidence: n/a|')"
-cw_commit "$RCW" "$CW_NA"
+# THE MATRIX ROW'S ASKS. Every reading passes, so only the matrix speaks. A T3 criterion whose proof's evidence is n/a is
+# a downgrade only the person makes; a T4 criterion its approval confirms, under a REFUTED evidence review, needs the
+# finding settled or the criterion waived. Each opens `waive:<AC>`.
+cw_na() { EG6_AC=AC-1 EG6_EVIDENCE=n/a "$@" "$RCW" "$(eg6_plan 6 wave "$CW_READ")" live; }
+cw_na cw_commit
 expect_eq "AK-7 precondition: a T3 row whose evidence is n/a is refused (exit 2)" "2" "$CW_RC"
 expect_contains "AK-7a …in the matrix arm's words" "AC-1 calls its evidence evidence n/a" "$CW_ERR"
 expect_eq "AK-7 AC-4.1 the matrix-row ask opens waive:AC-1, the waive verb's key" \
   "waive:AC-1,waive:structure" "$(cw_open "$RCW")"
 expect_contains "AK-7b …carrying the refusal's line" "AC-1 calls its evidence evidence n/a" "$(nk_reply "$RCW" waive:AC-1)"
-# The ruling is demanded on the advance to 8, the merge: a plan at current: 8 carries the lines of the steps behind it
-# and Step 8's own, so the commit is judged by the matrix arm and not by the missing line.
-CW_AT8='- Step 6: review at record/w27/review.md
-- Step 7: documented at record/w27/docs.md
-  n/a: no decision this run
-- Step 8: merging
-  merge: merged feature/t23 into main
-  worktree-removed: n/a
-  cleanup: n/a'
-CW_T4="$(eg6_plan 8 wave "$CW_READ" "$CW_AT8" | sed -e 's/AC-1/AC-2/g' \
-  -e 's/^| AC-2 | T1 | discharged | see AC-2 | CONFIRMED |$/| AC-2 | T4 | discharged | see AC-2 | REFUTED |/' \
-  | awk '{ print } $0 == "  evidence: record/generic-evidence.md" { print "  user-confirmed: Dana 2026-10-01 the fixture works" }')"
-cw_commit "$RCW" "$CW_T4"
+# The ruling is demanded on the advance to 8, the merge: the run's Step 8 holds its cleanup, so the commit is judged by
+# the matrix arm. The evidence review at the head failed and was waived, so the auditor's cell is REFUTED.
+EG6_AC=AC-2 cw_commit "$RCW" "$(eg6_plan 8 wave "$CW_READ")" human \
+  "run/v1|ev=proof|kind=review|head=$H_EG6|question=evidence|result=fail|scope=piece|reader=w-read|evidence=record/generic-evidence.md|at=2026-10-05T00:00:00Z" \
+  "run/v1|ev=waiver|question=evidence|head=$H_EG6|by=Dana|said=ship it|at=2026-10-05T00:00:01Z" \
+  'run/v1|ev=step|n=8|cleanup=n/a|at=2026-10-05T00:00:02Z' \
+  'run/v1|ev=approval|key=AC-2|by=Dana|said=the fixture works|at=2026-10-05T00:00:03Z'
 expect_eq "AK-7c precondition: a user-confirmed T4 row under a REFUTED auditor cell is refused (exit 2)" "2" "$CW_RC"
 expect_contains "AK-7d …naming the auditor's finding" "the auditor's finding on AC-2 stands" "$CW_ERR"
 expect_eq "AK-7e AC-4.1 that ask opens waive:AC-2" "waive:AC-1,waive:AC-2,waive:structure" "$(cw_open "$RCW")"
@@ -661,7 +658,7 @@ cw_waive() {  # <repo> -> RC, OUT: the waive verb on the fixture row, in the per
   poke "$1" waive AC-1 'I waive row AC-1, the live check moved to the next wave'
   export CLAUDE_CONFIG_DIR="$keep"; POKE_BOUND="$bound"
 }
-printf '%s\n' "$CW_NA" > "$RCW/.bionic/docs/plans/active.md"
+cw_na cw_world
 cw_waive "$RCW"
 expect_eq "AK-8 precondition: waive records the person's waiver of the criterion (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
@@ -669,7 +666,7 @@ expect_contains "AK-8 AC-4.1 …and closes the item the matrix ask opened" "|key
   "$(nt_owed "$RCW" owed_lines)"
 expect_regex "AK-8b …its one fact a waiver event naming the criterion, by the waiver's one writer" \
   '^run/v1\|ev=waiver\|ac=AC-1\|.*by=T\|said=I waive row AC-1, the live check moved to the next wave\|' \
-  "$(bash -c '. "$1/reader.sh"; cat "$(reader_log "$2")"' _ "$NT_LIB" "$RCW/.bionic/docs/plans/active.md" | grep '|ev=waiver|')"
+  "$(bash -c '. "$1/reader.sh"; cat "$(reader_log "$2")"' _ "$NT_LIB" "$EG6_PAGE" | grep '|ev=waiver|ac=')"
 expect_eq "AK-8a …and no other: the question's and the other row's stay open" "waive:AC-2,waive:structure" "$(cw_open "$RCW")"
 
 # WAIVING A QUESTION SETTLES ITS FINDINGS (AC-4.2). `disposition` opens `finding:<record>#<n>` for each finding that

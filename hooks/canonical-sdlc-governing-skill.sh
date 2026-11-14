@@ -919,15 +919,27 @@ SDLC_VERSION=$(yaml_get canonical_sdlc_version)
 # missing-frontmatter hint that also quotes it). No path reaches `exit 0` without passing the
 # whole contract of the version it declares.
 #
-# A PLAN MAY ALSO BE AT 15, the shape that holds only what a person wrote: it is read in both
-# shapes until a version-14 plan is refused where it is written, and is held below to what
-# version 15 has no place for. Every other artifact is at the supported version alone.
-# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
+# A PLAN IS WRITTEN AT 15, the shape that holds only what a person wrote, and is held below to
+# what version 15 has no place for. A plan at 14 binds only while its run is open: the run's own
+# answer (`run_open`) is asked of the plan on disk, whose log holds its steps, and an open one is
+# refused naming the act that brings it forward. A closed one is history, admitted with nothing
+# further judged. A plan not yet on disk starts a run, so at 14 it is refused: a closed answer
+# from a page no run has written would admit it with nothing judged. Every other document may
+# declare 14 or 15: a version binds the plan of an open run and nothing else.
+# [WALL: tests/plan-page.test.sh]
 GS_V15=0
-case "$BASENAME:$SDLC_VERSION" in *.plan.md:15) GS_V15=1 ;; esac
-if [ "$SDLC_VERSION" != "$SUPPORTED_SDLC_VERSION" ] && [ "$GS_V15" -eq 0 ]; then
-  _gs_refuse bad-version "$SDLC_VERSION" "$SUPPORTED_SDLC_VERSION"
-fi
+case "$BASENAME:$SDLC_VERSION" in
+  *.plan.md:15) GS_V15=1 ;;
+  *.plan.md:14)
+    [ -f "$FILE_PATH" ] || _gs_refuse new-14
+    # A run that cannot be read (3) is no closed run: it is refused as an open one is.
+    GS_OPEN=0; run_open "$FILE_PATH" || GS_OPEN=$?
+    [ "$GS_OPEN" -eq 1 ] || _gs_refuse live-14 "bash $(refuse_shell_word "$(refuse_plugin_root)/scripts/bring-forward.sh") $(refuse_shell_word "$FILE_PATH")"
+    exit 0 ;;
+  *.plan.md:*) _gs_refuse bad-version "$SDLC_VERSION" "'15'" ;;
+  *:14|*:15) ;;
+  *) _gs_refuse bad-version "$SDLC_VERSION" "'14' or '15'" ;;
+esac
 
 # ---------- intent × rigor × scale triple + universal contract ----------
 #
@@ -1082,11 +1094,8 @@ fi
 # PLAN-SCOPED. A spec, an ADR, a record note — those are ordinary artifacts and a writer
 # in a tree produces them there by design. Only the file the run is steered by is refused.
 #
-# AN AGENT CONTEXT IS ALLOWED. Two spellings mark one and either is enough: the payload's
-# own `agent_type`, which the harness sets for a dispatched agent, and the settings-channel
-# guard's BIONIC_HOOK_CHANNEL. This hook is registered directly on Write|Edit rather than
-# behind the guard, so `agent_type` is the spelling that answers here — the other is read
-# anyway, because a partition maintained by hand is one edit away from covering neither.
+# AN AGENT CONTEXT IS ALLOWED: the payload's own `agent_type`, which the harness sets for a
+# dispatched agent, marks one.
 #
 # AMBIGUITY PASSES. No cwd in the payload, a cwd outside any repository, a tree whose main
 # repository cannot be resolved: this wall has no main checkout to name and says nothing.
@@ -1103,7 +1112,6 @@ fi
 case "$BASENAME" in
   *.plan.md)
     LEASE_AGENT=0
-    [ "${BIONIC_HOOK_CHANNEL:-}" = "agent-context" ] && LEASE_AGENT=1
     [ -n "$(echo "$BIONIC_INPUT" | jq -r '.agent_type // empty')" ] && LEASE_AGENT=1
     LEASE_CWD=$(bionic_jq .cwd)
     if [ "$LEASE_AGENT" -eq 0 ] && [ -n "$LEASE_CWD" ] && [ -d "$LEASE_CWD" ]; then
@@ -1164,133 +1172,6 @@ if [ "${#MISSING[@]}" -gt 0 ]; then
   _gs_refuse missing-flags "${MISSING[*]}" "${REQUIRED_OPT_IN[*]}" "${REQUIRED_DISCRIMINATORS[*]}"
 fi
 
-# ---------- pre-registered Verification Matrix required at Step 3+ ----------
-# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-#
-# Step 0 derives a "## Verification Matrix" section (per-AC tier + status +
-# evidence, locked at Step 3 approval — see canonical-sdlc SKILL.md's
-# "Verification Matrix" sub-step under Step 0). This hook checks section
-# PRESENCE only (structure, not substance); the evidence-gate hook validates
-# the per-row per-tier fields and the CONFIRMED/waived auditor discipline
-# (structure vs substance split mirrors the model_plan / flag checks above).
-#
-# Scope: basename *.plan.md, sdlc-step >= 3 (numeric). Specs,
-# continuation*.md and scale: task plans (they carry a ## Tasks ledger, not a
-# matrix) are out of scope — the matrix is a wave/epic plan-body artifact
-# that exists starting at Step 3 (Plan) approval.
-#
-# A VERSION-15 PLAN IS NONE OF THIS ARM'S: it holds no matrix and its Tasks rows are the nine
-# authored cells, so the arm below it holds it to that shape instead.
-case "$BASENAME" in
-  *.plan.md)
-    SDLC_STEP=$(yaml_get sdlc-step)
-    [ "$GS_V15" -eq 1 ] && SDLC_STEP=""
-    case "$SDLC_STEP" in
-      ''|*[!0-9]*) ;;  # non-numeric or empty sdlc-step → not in scope
-      *)
-        if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null && [ "$SCALE" != "task" ]; then
-          if ! plan_read_heading "$GS_PAGE" "Verification Matrix" >/dev/null; then
-            _gs_refuse no-matrix "$SDLC_STEP"
-          fi
-          # ---------- the Step-3 wall on `## Tasks` (REQ-1e, AC-1e.5) ----------
-          # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-          #
-          # THE PLAN SIDE OF WHAT lib/units.sh OWNS. The evidence gate validates this
-          # table at COMMIT time, which is one round trip and a refused commit too late:
-          # by then the orchestrator has briefed writers off it. `units_validate` is the
-          # single definition of the Task invariants — id shape and uniqueness, step in
-          # 3-9, the kind and status vocabularies, deps that name a row, and a table with a `reads`
-          # column's own cells — and its output is one line
-          # per fault, each naming an id and a rule, which is what a writer can act on.
-          #
-          # SAME SCOPE AS THE MATRIX ARM ABOVE, deliberately: `*.plan.md`, numeric
-          # `sdlc-step >= 3`, and not `scale: task`. A task-scale plan carries the
-          # five-column registration ledger the evidence gate has read since D12, which
-          # REQ-1e does not widen; validating it against the ten-column schema would
-          # refuse every task-scale plan for eight columns it was never asked to carry.
-          #
-          # THE `worktree` COLUMN IS ACCEPTED, NEVER DEMANDED (wave-14 REQ-2, ADR-027).
-          # The table is the register of in-flight units, so a dispatched row names the
-          # tree its writer works in and the evidence gate reads that cell back to judge
-          # the writer's commit at the row's step. This wall needed no arm for it —
-          # `units_validate` is header-keyed and slot 11 is the one OPTIONAL slot, so a
-          # plan that carries the column passes and the far larger set that does not is
-          # untouched. It is named in the Fix line below because a writer repairing a row
-          # against a column list that omitted it would delete the dispatcher's work.
-          #
-          # AN ABSENT TABLE IS NOT A VIOLATION HERE. A plan mid-authoring may not have
-          # written its table yet, and the D7 PRESENCE rule already lives in the gate at
-          # commit time. `units_rows` answers non-zero for "no table" and this arm stops
-          # there; a table that IS present is validated in full.
-          #
-          # THE POST-EDIT BODY, BOTH DIRECTIONS (REQ-8, AC-8.1/AC-8.4). `$CONTENT` is the
-          # posted body on a Write and, since D10, the file with the Edit APPLIED on an
-          # Edit — so an Edit that breaks a valid table is refused (it used to pass: the
-          # pre-edit text was still fine), and an Edit that REPAIRS a broken table is
-          # admitted (it used to be refused by the very fault it repaired, leaving a
-          # whole-file Write as the only way out — wave-14 A-T21.4).
-          #
-          # AN EDIT THE HOOK COULD NOT APPLY IS NOT JUDGED HERE. `old_string` absent, or
-          # present more than once without `replace_all`, leaves `EDIT_APPLIED=0`: the
-          # tool will fail on that input by itself, and a wall that refused it first
-          # would be asserting a fault nobody committed (ADR-028).
-          #
-          # THE VERBS READ THE ONE COPY the parser reads, `$GS_PAGE`, since they are functions
-          # of a path.
-          if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null && [ "$SCALE" != "task" ] && [ -n "$CONTENT" ] \
-             && { [ "$TOOL" != "Edit" ] || [ "$EDIT_APPLIED" -eq 1 ]; }; then
-            _gs_units_tmp="$GS_PAGE"
-            if [ -n "$_gs_units_tmp" ]; then
-              # THE BRING-FORWARD SUMMARY COMES FIRST (wave-16 REQ-3, AC-3.1; spec D8).
-              # A plan whose frontmatter says version 14 and whose body is pre-14 used to
-              # meet this wall for its table, the evidence gate for `requirements:`, the
-              # gate again for `approved-by:`, and again for `fails-when:` — one round trip
-              # per fault, in an order that depended on the previous repair (research R2
-              # §2d). `plan_bring_forward` answers all of it at the moment of the EDIT,
-              # which is one round trip earlier than any commit-time check can be.
-              #
-              # WALLS.SH IS SOURCED HERE, NOT IN `BIONIC_LIB_WANT`, and the reasoning is
-              # the one tests/cross-gate-agreement.test.sh §AP wrote down when it declined
-              # to make walls.sh this hook's owner: WANT is a FAIL-CLOSED list, so naming a
-              # 236 KB file there would refuse every artifact write on a tree missing it,
-              # and it would be parsed on every Write in the fleet. Sourced from inside this
-              # arm it is parsed only when a non-task-scale PLAN at sdlc-step >= 3 is
-              # written — and a tree without it simply keeps 1.8.2's table-only refusal,
-              # which is the fail-open an advisory read is allowed (walls.sh's own
-              # `wall_libs` sets that precedent for cmd-class.sh).
-              _gs_bf=""; _gs_bf_fired=0
-              if [ -r "$BIONIC_LIB/walls.sh" ]; then
-                if ! declare -F plan_bring_forward >/dev/null 2>&1; then
-                  # shellcheck source=/dev/null
-                  . "$BIONIC_LIB/walls.sh"
-                fi
-                if declare -F plan_bring_forward >/dev/null 2>&1; then
-                  # NO STEP ARGUMENT (wave-16 T25, critic §C1). `$SDLC_STEP` is the
-                  # FRONTMATTER stamp, which is not the step this plan is at; the predicate
-                  # reads `current:` out of the body it was just handed.
-                  _gs_bf="$(plan_bring_forward "$_gs_units_tmp" 2>/dev/null)" \
-                    || _gs_bf_fired=1
-                fi
-              fi
-              if units_rows "$_gs_units_tmp" >/dev/null 2>&1; then
-                _gs_units_bad="$(units_validate "$_gs_units_tmp" "$FILE_PATH" 2>/dev/null)" || true
-              else
-                _gs_units_bad=""
-              fi
-              if [ "$_gs_bf_fired" -eq 1 ]; then
-                _gs_refuse bring-forward "$SUPPORTED_SDLC_VERSION" "$_gs_bf"
-              fi
-              if [ -n "$_gs_units_bad" ]; then
-                _gs_refuse tasks-invalid "$SDLC_STEP" "$_gs_units_bad"
-              fi
-            fi
-          fi
-        fi
-        ;;
-    esac
-    ;;
-esac
-
 # ---------- a version-15 plan holds only what a person wrote ----------
 # [WALL: tests/plan-page.test.sh]
 #
@@ -1298,9 +1179,9 @@ esac
 # matrix, a state or a handoff section by its heading's line, a Tasks cell outside the nine
 # authored ones by the table header's line, a header key the reader does not answer from by its
 # name. All are listed in one refusal, so one repair answers it. An Edit the hook could not apply
-# is not judged, as the Tasks arm above does not judge one: the tool refuses that input itself.
-# Its Tasks rows are held to the invariants a plan at 14 is held to, on the page this write hands over, as the arm above
-# holds them: one id twice, a kind outside the vocabulary, a dependency on no row. A deps cell at 15 may also name the
+# is not judged: the tool refuses that input itself.
+# Its Tasks rows are held to the Task invariants (`units_validate`) on the page this write hands over: one id
+# twice, a kind outside the vocabulary, a dependency on no row. A deps cell at 15 may also name the
 # approval its task waits on (`approval:<name>`), the one shape it holds that a deps cell at 14 does not. A criterion's
 # Task cell names rows of that table (`plan_read_criterion_faults`): the gate reads the step that owes the criterion from
 # it, so a token naming no row would owe the criterion at no step, and is refused here, where the person can still fix it.
