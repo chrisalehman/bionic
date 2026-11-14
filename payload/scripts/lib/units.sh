@@ -53,15 +53,12 @@
 #                              the row's one born event in the run's log; `task-add` is its caller.
 #   units_drop_event <plan> <row> <words>
 #                              the row's one drop event in the run's log; `task-add --drop` is its caller.
-#   units_born <plan>          `<id>\t<S<n> <reach>>\t<Files>` per review-born row, read off its
-#                              `- <id>:` line's ` born: review` marker or its born event.
+#   units_born <plan>          `<id>\t<S<n> <reach>>\t<Files>` per review-born row, read off its born event.
 #   units_born_counted <plan>  `<id>\t<S<n> <reach>>\t<exempt|counted>` per review-born row: the
 #                              fix-cap: test, the one place the cap's count reads.
-#   units_fix_policy <plan>    the plan's fix-policy:, the default when the field is absent.
-#   units_born_findings <plan> `<id>\t<status>\t<record>#<n>` per finding a born row names on that
-#                              marker's ` of=` list (wave-33 T13; REQ-5, D6).
-#   units_born_marks <plan>    `<id>\t<review|floor>\t<rating or suite>` per born row, read off its
-#                              `- <id>:` line's ` born: review` or ` born: floor` marker (wave-36 T7, D9).
+#   units_fix_policy <plan>    the header's fix-policy:, the default when the key is absent.
+#   units_born_findings <plan> `<id>\t<status>\t<record>#<n>` per finding a born event names.
+#   units_born_marks <plan>    `<id>\t<review|floor>\t<rating or suite>` per born row, read off its born event.
 #   units_fix_cap <plan>      the plan's fix-cap: rendered as a number, the level's default when
 #                              absent (wave-30 T21, AC-2.3); needs lib/run.sh loaded.
 #
@@ -360,28 +357,24 @@ units_drop_event() {
   RUN_LOG="$log" log_append drop "row=$2" "why=$3"
 }
 
-# _units_born_logged <plan> -> each born event of the run's log that carries a reason, as the `- <row>: born: <reason>
-# [of=<finding>]` line a plan's own born marker reads, under a `## SDLC State` heading of its own; nothing for a run with
-# no log. The born readers read these after the plan's lines, a row's own plan line first. 2 a failed fold.
-_units_born_logged() {
-  local plan="${1:-}" log facts
-  plan="$(_units_origin "$plan")"
-  _units_lib proof.sh _proof_facts && _units_lib reader.sh reader_log || return 0
-  log="$(reader_log "$plan" 2>/dev/null)" || return 0
-  [ -s "$log" ] && [ ! -L "$log" ] || return 0
-  facts="$(_proof_facts "$plan")" || return 2
-  printf '%s\n' "$facts" | awk -F'|' '
-    { split("", f); for (i = 2; i <= NF; i++) { e = index($i, "="); if (e > 1 && !(substr($i, 1, e - 1) in f)) f[substr($i, 1, e - 1)] = substr($i, e + 1) } }
-    f["ev"] == "born" && f["row"] != "" && f["reason"] != "" {
-      if (!n++) print "## SDLC State"
-      print "- " f["row"] ": born: " f["reason"] (f["finding"] != "" ? " of=" f["finding"] : "") (f["promoted"] != "" ? " promoted" : "") }'
+# _units_born_facts <plan> -> `<row>\t<reason>\t<finding>\t<promoted>`, one line per born event of the run that carries a
+# reason, the first per row, in the facts' order, each field read by its name. A version-14 run's born markers are the
+# born events its translation makes of them. Nothing for a run with none; 2 a failed fold.
+_units_born_facts() {
+  local plan
+  plan="$(_units_origin "${1:-}")"
+  [ -f "$plan" ] && _units_lib proof.sh _proof_facts || return 0
+  _proof_facts "$plan" >/dev/null && _proof_fields || return 2
+  printf '%s' "$_PROOF_FACTS" | awk -F'|' "$_LINE_FIELDS_AWK"'
+    line_ev() == "born" && line_kv("row") != "" && line_kv("reason") != "" && !seen[line_kv("row")]++ {
+      printf "%s\t%s\t%s\t%s\n", line_kv("row"), line_kv("reason"), line_kv("finding"), line_kv("promoted") }'
 }
 
 # units_born_logged <plan> -> 0 when the run's log holds a born event with a reason, the cheap question a reader of born
 # rows asks before it reads them; 1 when it holds none.
 units_born_logged() {
   local out
-  out="$(_units_born_logged "${1:-}")" || return 0
+  out="$(_units_born_facts "${1:-}")" || return 0
   [ -n "$out" ]
 }
 
@@ -2606,21 +2599,15 @@ units_validate() {
 #
 #   status <id> <value>    the row's status is outside the enum — `(empty)` for a blank
 #                          cell, the spelling `units_validate` uses
-#   evidence <id>          the row is `landed` and `## SDLC State` carries
-#                          no non-empty `- <id>:` line for it
+#   evidence <id>          the row is `landed` and the reader does not answer it landed
 #   launch <id> <agent>    the row is `active`, its agent cell names someone, and no
-#                          `roster-state/` row of the run's rosters carries that `name=`,
-#                          nor does the plan's `## Dispatch ledger` name it
+#                          `roster-state/` row of the run's rosters carries that `name=`
 #
 # BOTH CALLERS ASK THIS AND NEITHER PARSES THE TABLE. The commit gate refuses on these lines and
 # the Patrol tick prints them as `poker: LEDGER <id> <kind> [<value>]`, so a plan the gate would
 # refuse cannot tick clean and a plan that ticks a finding cannot commit (AC-4.1).
 #
-# LAUNCHED IS WHAT THE ROSTER SAYS (Δ4, Chris "Option 3"). The `- T<n>:` line was a hand copy of
-# the launch record the dispatch hook writes to the roster, owed at `active` and checked by
-# nothing until a writer's first commit. The roster is now the record: an `active` row whose
-# agent cell is a roster `name=` owes no line. The line is owed where it carries something only
-# a human can write — the evidence — at `landed`.
+# LAUNCHED IS WHAT THE ROSTER SAYS: an `active` row whose agent cell is a roster `name=` is no finding.
 #
 # SELF-OWNED IS AN AGENT CELL WITH NO ALPHANUMERIC — empty, an em dash, a hyphen — the same
 # four-spellings-of-nothing reading the `deps` and `worktree` cells take. Nobody was launched
@@ -2631,17 +2618,12 @@ units_validate() {
 # roster, read whole as it always was (a row there with `plan=none`, or no `plan=`, launches). Every
 # LATER line is another roster of the run, and only its launch rows whose `plan=` is <plan>, byte for
 # byte, count: a roster of another plan names nobody here, because the bind partitions the fleet.
-# The names in the `agent` column of the plan's first `## Dispatch ledger` table join the set — the
-# `<role> (<name>)` cell gives the name in its last parentheses, any other cell itself, trimmed. A
-# `/clear` re-keys the session, so a reader the predecessor launched and the successor never
-# re-dispatched is on the predecessor's roster and on the ledger, never on `roster-<sid>`; reading
-# that file alone refused its commit as "names no launched agent" (wave-35 A-orch-46).
 #
 # NO ROSTER TO READ, TODAY'S RULE (spec assumption 1). A list in which no path names a regular,
 # unlinked file (an empty list, a missing file, a symlink: the fleet never follows one into a
-# roster) computes no `launch` finding: an agent-named `active` row then owes its line, exactly as
-# it did before this reader, whatever the ledger names. A missing roster therefore fails toward the
-# old refusal, never toward silence.
+# roster) computes no `launch` finding: an agent-named `active` row is then an `evidence` finding,
+# unless <v15> asks the reader and it answers the row launched. A missing roster therefore fails toward a
+# refusal, never toward silence.
 #
 # ONE ENUM AT EVERY SCALE (wave-31 T5; D2): pending · active · landed · dropped, terminal `landed`.
 # A row in the retired task-scale words (`done`) is a `status` finding, never a second enum.
@@ -2675,21 +2657,13 @@ units_run_rosters() {
 
 # _units_ledger <findings> <plan> <rosters> — the ONE program behind `units_findings`.
 #
-# THE `- <id>:` LOOKUP IS THE GATE'S, TO THE BYTE OF ITS MEANING: line endings normalised
-# (`normalize_newlines`' two substitutions), fences skipped, every `## SDLC State` section read
-# up to the next `## ` heading, and for each id the FIRST line shaped
-# `^[[:space:]]*-?[[:space:]]*<id>[[:space:]]*:` — its value trimmed, an empty value counting as
-# no line. Keyed on the whole id, so `- T1:` never answers for T10.
+# ONE STREAM, THREE PARTS, each opened by a SUBSEP-led marker line no table row or roster row can begin
+# with: the rows (`units_rows`, so a memoised caller pays no second parse), and — only when there is one
+# to read — this session's roster, then the run's other rosters, one after another.
 #
-# ONE STREAM, FOUR PARTS, each opened by a SUBSEP-led marker line no table row, plan line or
-# roster row can begin with: the rows (`units_rows`, so a memoised caller pays no second parse),
-# the plan's text, and — only when there is one to read — this session's roster, then the run's
-# other rosters, one after another.
-#
-# A ROW WITH NO LINE OF ITS OWN IS ASKED OF THE READER: a landed row stands when the reader's status answers landed, and
-# at 15, where no row has a line, a launched row with no roster to judge stands when the reader holds its dispatch under
-# a name. The line was a copy of what the log holds; an answer other than the one asked is the `evidence` finding.
-# <v15> non-empty asks for the launched rows too.
+# A ROW'S LANDING AND LAUNCH ARE THE READER'S: a landed row stands when the reader's status answers landed, and a
+# launched row with no roster to judge stands when the reader holds its dispatch under a name. An answer other than
+# the one asked is the `evidence` finding. <v15> non-empty asks for the launched rows too.
 _units_ledger() {
   local mode="${1:-}" plan="${2:-}" rosters="${3:-}" v15="${4:-}" rows useroster=0 own="" run="" rf first=1 out line found=0
   rows="$(units_rows "$plan")" || return 0
@@ -2708,7 +2682,6 @@ UNITS_ROSTERS
   if [ -n "$own" ] || [ -n "$run" ]; then useroster=1; fi
   out="$({
     printf '\034rows\n'; printf '%s\n' "$rows"
-    printf '\034plan\n'; awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan" 2>/dev/null
     if [ -n "$own" ]; then printf '\034roster\n'; cat "$own" 2>/dev/null; printf '\n'; fi
     if [ -n "$run" ]; then
       printf '\034run\n'
@@ -2718,50 +2691,12 @@ UNITS_RUN
     fi
   } | UNITS_LEDGER_PLAN="$plan" awk -F'\t' -v mode="$mode" -v useroster="$useroster" -v v15="$v15" '
     BEGIN { lplan = ENVIRON["UNITS_LEDGER_PLAN"] }
-    function ltrim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
     $0 == SUBSEP "rows"   { part = 1; next }
-    $0 == SUBSEP "plan"   { part = 2; next }
     $0 == SUBSEP "roster" { part = 3; next }
     $0 == SUBSEP "run"    { part = 4; next }
     part == 1 {
       if ($1 == "") next
       n++; id[n] = $1; ag[n] = $5; st[n] = $10
-      next
-    }
-    part == 2 {
-      if ($0 ~ /^[[:space:]]*```/) { fence = !fence; next }
-      if (fence) next
-      # THE DISPATCH LEDGER (wave-36 T29): the first `## Dispatch ledger` section, its header-keyed
-      # `agent` column. The name of a row is the last parenthesised word of its cell, else the cell.
-      if ($0 ~ /^## /) {
-        inled = 0; insec = 0
-        if (!ledseen && $0 ~ /^##[ \t]+Dispatch ledger[ \t]*$/) { inled = 1; ledseen = 1; lcol = 0; next }
-      }
-      if (inled) {
-        if (index($0, "|") == 0) next
-        lm = split($0, lc, "|")
-        if (!lcol) { for (j = 2; j < lm; j++) if (tolower(ltrim(lc[j])) == "agent") lcol = j; next }
-        if (lcol >= lm) next
-        cell = ltrim(lc[lcol])
-        if (cell ~ /^:?-+:?$/) next
-        if (match(cell, /\([^()]*\)$/)) cell = ltrim(substr(cell, RSTART + 1, RLENGTH - 2))
-        if (cell ~ /[A-Za-z0-9]/) names[cell] = 1
-        next
-      }
-      if ($0 ~ /^## SDLC State/) { insec = 1; next }
-      if ($0 ~ /^## /) { insec = 0 }
-      if (!insec) next
-      l = $0
-      sub(/^[[:space:]]*-?[[:space:]]*/, "", l)
-      c = index(l, ":")
-      if (c == 0) next
-      k = substr(l, 1, c - 1)
-      sub(/[[:space:]]+$/, "", k)
-      if (k == "" || (k in seen)) next
-      seen[k] = 1
-      v = substr(l, c + 1)
-      sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v)
-      val[k] = v
       next
     }
     part == 3 || part == 4 {
@@ -2784,18 +2719,14 @@ UNITS_RUN
       found = 0
       for (i = 1; i <= n; i++) {
         if (id[i] !~ /^T[0-9]/) continue
-        lined = ((id[i] in val) && val[id[i]] != "")
         if (!(st[i] in enum)) {
           printf "status %s %s\n", id[i], (st[i] == "" ? "(empty)" : st[i]); found = 1; continue
         }
-        if (st[i] == term) {
-          if (!lined) printf "ask landed %s\n", id[i]
-          continue
-        }
+        if (st[i] == term) { printf "ask landed %s\n", id[i]; continue }
         if (st[i] != "active" || ag[i] !~ /[A-Za-z0-9]/) continue
         if (useroster == 1) {
           if (!(ag[i] in names)) printf "launch %s %s\n", id[i], ag[i]
-        } else if (!lined) printf "%s %s\n", (v15 != "" ? "ask dispatched" : "evidence"), id[i]
+        } else printf "%s %s\n", (v15 != "" ? "ask dispatched" : "evidence"), id[i]
       }
     }')"
   while IFS= read -r line; do
@@ -2863,114 +2794,6 @@ units_thread_rows() {
         printf "%s\t%s\n", id[cr[c]], (d ~ /[A-Za-z0-9]/ ? d ", " nid : nid)
       }
     }'
-}
-
-# ── THE PLAN-ROW PROJECTORS (wave-24 T15; REQ-9, D14) ─────────────────────────
-#
-# One projector, for a hand edit a run used to make to its own plan: a cell of a table row. No verb writes a plan, so
-# it only prints; a test standing in for a person's edit writes what it prints. A step is an event in the run's log,
-# and nothing projects it.
-#
-# PURE, AS EVERY VERB HERE IS: each prints the WHOLE plan and writes nothing. Fence-aware like
-# `_units_read`: a table or a state line inside a ``` example is documentation and is never
-# edited. Every operand reaches awk through ENVIRON, never -v (T10b: -v interprets
-# backslashes). Every line a projector does not own is printed as it was read, byte for byte,
-# so `git diff` of a projection shows the target line and nothing else.
-#
-# A VALUE MAY CARRY NO `|`, TAB OR LINE BREAK. These operands are cell values typed at a
-# prompt, and a pipe there is far likelier a slip than a cell meant to hold one. The caller refuses
-# first, and each projector refuses again (exit 4) rather than trust it.
-
-# units_table_cells <plan> <set|add> <section> <id> <name=value>… -> the whole plan with the
-#   row whose id cell is <id> given those cells (`set`), or a new row with that id appended
-#   after the table's last row (`add`; unnamed cells `—`). <section> is `tasks` (the first
-#   `## Tasks` table, the one `_units_read` parses); an older run's `## Dispatch ledger` is history,
-#   and nothing writes it. Names are the header's own cells, matched case-insensitively.
-#   Exit 1 no such table · 2 `set`: no row with that id, `add`: the id is taken · 3 a name the
-#   header does not carry · 4 a value with a forbidden byte · 5 `set`: more than one row with
-#   that id. Silent on every refusal.
-#
-# THE ROW IS RE-JOINED CELL FOR CELL. A set cell is written ` <value> `; every other cell keeps
-# its bytes, `\|` escapes included — they are folded to SUBSEP before the split and restored
-# after, so a row this projection rewrites keeps every escape it carried.
-units_table_cells() {
-  local plan="${1:-}" mode="${2:-}" sect="${3:-}" id="${4:-}" pairs="" kv
-  [ -n "$plan" ] && [ -f "$plan" ] && [ -n "$id" ] || return 1
-  case "$mode" in set|add) : ;; *) return 1 ;; esac
-  case "$sect" in tasks) : ;; *) return 1 ;; esac
-  shift 4
-  for kv in "$@"; do
-    case "$kv" in *=*) : ;; *) return 3 ;; esac
-    case "$kv" in *'|'*|*$'\t'*|*$'\n'*|*$'\r'*) return 4 ;; esac
-    pairs="${pairs}${kv%%=*}"$'\t'"${kv#*=}"$'\n'
-  done
-  UT_MODE="$mode" UT_SECT="$sect" UT_ID="$id" UT_PAIRS="$pairs" awk '
-    function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
-    function esc(v)  { gsub(/\\[|]/, SUBSEP, v); return v }
-    function unesc(v,   parts, m, i, out) {
-      m = split(v, parts, SUBSEP); out = parts[1]
-      for (i = 2; i <= m; i++) out = out "\\" "|" parts[i]
-      return out
-    }
-    BEGIN {
-      mode = ENVIRON["UT_MODE"]; sect = ENVIRON["UT_SECT"]; want = ENVIRON["UT_ID"]
-      np = split(ENVIRON["UT_PAIRS"], pl, "\n")
-      for (p = 1; p <= np; p++) {
-        if (pl[p] == "") continue
-        t = index(pl[p], "\t")
-        k = tolower(substr(pl[p], 1, t - 1)); v = substr(pl[p], t + 1)
-        nk++; key[nk] = k; val[k] = (trim(v) == "" ? "—" : trim(v))
-      }
-    }
-    { L[++nl] = $0 }
-    END {
-      state = 0
-      for (i = 1; i <= nl; i++) {
-        line = L[i]
-        if (line ~ /^[ \t]*```/) { fence = !fence; continue }
-        if (fence) continue
-        if (line ~ /^[ \t]*#/) {
-          if (state == 1 || state == 2) { state = 3; continue }
-          if (state == 0 && sect == "tasks" && line ~ /^##[ \t]+[Tt]asks([ \t].*)?$/) state = 1
-          continue
-        }
-        if (state == 1) {
-          if (line !~ /^[ \t]*\|/) continue
-          nh = split(esc(line), hc, "|")
-          for (c = 1; c <= nh; c++) {
-            t = tolower(trim(hc[c]))
-            if (t != "" && !(t in col)) { col[t] = c; name[c] = t }
-          }
-          if (!("id" in col)) { split("", col); split("", name); continue }
-          state = 2; continue
-        }
-        if (state == 2) {
-          if (line !~ /^[ \t]*\|/) { state = 3; continue }
-          lastrow = i
-          m = split(esc(line), f, "|")
-          if (trim(f[col["id"]]) == want) { hits++; at = i }
-        }
-      }
-      if (!lastrow) exit 1
-      for (p = 1; p <= nk; p++) if (!(key[p] in col)) exit 3
-      if (mode == "set" && hits == 0) exit 2
-      if (mode == "set" && hits > 1) exit 5
-      if (mode == "add" && hits > 0) exit 2
-      if (mode == "set") {
-        m = split(esc(L[at]), f, "|")
-        for (p = 1; p <= nk; p++) f[col[key[p]]] = " " val[key[p]] " "
-        out = f[1]; for (c = 2; c <= m; c++) out = out "|" f[c]
-        L[at] = unesc(out)
-      } else {
-        val["id"] = want
-        row = "|"
-        for (c = 2; c < nh; c++) row = row " " ((name[c] in val) ? val[name[c]] : "—") " |"
-      }
-      for (i = 1; i <= nl; i++) {
-        print L[i]
-        if (mode == "add" && i == lastrow) print row
-      }
-    }' "$plan"
 }
 
 # _units_files_tokens <Files cell> -> one entry per line, as the readiness program reads a Files cell: comma-split,
@@ -3077,16 +2900,14 @@ units_chain() {
 
 # ── THE REVIEW-BORN ROWS AND THE CAP ON THEM (wave-30 T21; REQ-10 AC-10.2, REQ-2 AC-2.3; D4) ──────
 #
-# units_born <plan> -> `<id>\t<S<n> <reach>>\t<Files cell>`, one line per `## SDLC State` line
-#   carrying ` born: review S<n> <on|off>`, in the section's order; nothing, exit 0, when none; exit 1
-#   when the plan cannot be read.
+# units_born <plan> -> `<id>\t<S<n> <reach>>\t<Files cell>`, one line per born event whose reason is
+#   `review S<n> <on|off>`, in the facts' order; nothing, exit 0, when none; exit 1 when the plan cannot be read.
 #
-# THE LEDGER LINE IS THE ONE PLACE THE COUNT READS. `task-add --born` writes the marker there, and the
-# task cell's ` · born: review` is for a person reading the table; a hand edit of the cell counts
-# nothing. The line is found as the gate finds it (`_units_ledger`): fences skipped, the first
-# `- <id>:` line of the section per id. The Files cell is the row's own (`units_rows`), empty for a
-# line whose row the table does not carry. Reader: the poker's `task-add --born` (the fourth fix on
-# one component); the cap's count is `units_born_counted` below, read off the same scan.
+# THE BORN EVENT IS THE ONE PLACE THE COUNT READS. `task-add --born` writes it, and the task cell's
+# ` · born: review` is for a person reading the table; a hand edit of the cell counts nothing. The
+# Files cell is the row's own (`units_rows`), empty for a row the table does not carry. Reader: the
+# poker's `task-add --born` (the fourth fix on one component); the cap's count is `units_born_counted`
+# below, read off the same scan.
 # REGISTRY_FILES: the files every test row must touch (space-separated paths, relative to the repo root). A registry
 # is edited by every row of its kind, so the per-file cap of `task-add --born` counts no fixer of a path named here,
 # and shell-lint's census arm reads its census file from this list, which keeps the rule in this one place.
@@ -3098,65 +2919,38 @@ units_born() {
   [ -z "$out" ] || printf '%s\n' "$out" | awk -F'\t' -v OFS='\t' '{ print $1, $2, $3 }'
 }
 
-# _units_born_scan <plan> -> units_born's lines with a fourth column, the marker's words after the rating (the
-#   ` of=` list and ` promoted` that `task-add --born` writes), so the count and the Files readers share one scan.
+# _units_born_scan <plan> -> units_born's lines with a fourth column, the born event's finding as ` of=<finding>` and
+#   ` promoted` when it carries one, so the count and the Files readers share one scan.
 _units_born_scan() {
-  local plan="${1:-}" rows logged
+  local out
+  out="$(_units_born_rows "${1:-}" 9)" || return 1
+  [ -z "$out" ] || printf '%s\n' "$out" | awk -F'\t' "$_UNITS_REVIEW_AWK"'
+    r != "" { printf "%s\t%s\t%s\t%s\n", $1, r, $5, ($3 != "" ? "of=" $3 : "") ($4 != "" ? " promoted" : "") }'
+}
+
+# _units_born_rows <plan> <column> -> `_units_born_facts`' lines, each with the row's <column> of `units_rows` as a fifth
+# field (9 its Files, 10 its status), empty for a row the table does not carry; exit 1 when the plan cannot be read.
+_units_born_rows() {
+  local plan="${1:-}" born rows
   [ -n "$plan" ] && [ -r "$plan" ] || return 1
+  born="$(_units_born_facts "$plan")" || return 1
+  [ -n "$born" ] || return 0
   rows="$(units_rows "$plan" 2>/dev/null)" || rows=""
-  logged="$(_units_born_logged "$plan")" || return 1
-  {
-    printf '\034rows\n'; [ -z "$rows" ] || printf '%s\n' "$rows"
-    _units_born_text "$plan" "$logged"
-  } | awk -F'\t' "$_UNITS_BORN_AWK"'
-    $0 == SUBSEP "rows" { part = 1; next }
-    part == 1 { if ($1 != "" && !($1 in files)) files[$1] = $9; next }
-    part >= 2 {
-      if (!match(l, / born: review S[0-9]+ (on|off)( |$)/)) next
-      r = substr(l, RSTART + 14, RLENGTH - 14); sub(/ $/, "", r)
-      t = substr(l, RSTART + RLENGTH); gsub(/\t/, " ", t)
-      marked[k] = 1; printf "%s\t%s\t%s\t%s\n", k, r, files[k], t
-    }'
+  printf '%s\n\034\n%s\n' "$rows" "$born" | awk -F'\t' -v c="${2:-9}" '
+    $0 == "\034" { b = 1; next }
+    !b { if ($1 != "" && !($1 in v)) v[$1] = $c; next }
+    { print $0 "\t" v[$1] }'
 }
+# _UNITS_REVIEW_AWK -> `r`, the rating of a born line whose reason is `review S<n> <on|off>`, else empty.
+_UNITS_REVIEW_AWK='{ split($2, w, " "); r = (w[1] == "review" && w[2] ~ /^S[0-9]+$/ && w[3] ~ /^o(n|ff)$/) ? w[2] " " w[3] : "" }'
 
-# _units_born_text <plan> <logged> -> the text every born reader scans: the plan, then the log's born lines
-# (`_units_born_logged`) after a marker line of their own.
-_units_born_text() {
-  printf '\034plan\n'; awk '{ sub(/\r$/, ""); print }' "$1" 2>/dev/null
-  [ -z "$2" ] || printf '\034log\n%s\n' "$2"
-}
-# _UNITS_BORN_AWK -> the scan the born readers share: a `## SDLC State` `- T<n>:` line, fences skipped, its id in `k` and
-# its text in `l`, the first line per id of the plan and then of the log; a row the plan marks born (`marked`) is the
-# plan's, so its log copy is never read twice. A reader's own `part >= 2` rule after it acts on each such line.
-_UNITS_BORN_AWK='
-  $0 == SUBSEP "plan" { part = 2; insec = 0; fence = 0; next }
-  $0 == SUBSEP "log" { part = 3; insec = 0; fence = 0; split("", seen); next }
-  part >= 2 && /^[[:space:]]*```/ { fence = !fence; next }
-  part >= 2 && fence { next }
-  part >= 2 && /^## SDLC State/ { insec = 1; next }
-  part >= 2 && /^## / { insec = 0 }
-  part >= 2 && !insec { next }
-  part >= 2 {
-    l = $0; sub(/^[[:space:]]*-?[[:space:]]*/, "", l)
-    c = index(l, ":"); if (c == 0) next
-    k = substr(l, 1, c - 1); sub(/[[:space:]]+$/, "", k)
-    if (k !~ /^T[0-9]/ || (k in seen) || (part == 3 && (k in marked))) next
-    seen[k] = 1
-  }
-'
-
-
-# units_fix_policy <plan> -> the plan's `fix-policy:` read verbatim, or FIX_POLICY_DEFAULT (lib/run.sh) when no
-#   `fix-policy:` line is written at all; a field written empty stays empty, and so covers nothing. rc 1 when
-#   lib/run.sh is not loaded beside this file. Readers: `task-add --born` and `units_born_counted`.
+# units_fix_policy <plan> -> the header's `fix-policy:` read verbatim, or FIX_POLICY_DEFAULT (lib/run.sh) when the header
+#   holds no such key; a field written empty stays empty, and so covers nothing. rc 1 when lib/run.sh is not loaded
+#   beside this file. Readers: `task-add --born` and `units_born_counted`.
 units_fix_policy() {
-  local plan="${1:-}" pol
-  declare -F plan_frontmatter_get >/dev/null 2>&1 && declare -F fix_policy_covers >/dev/null 2>&1 || return 1
-  pol="$(plan_frontmatter_get "$plan" fix-policy)"
-  if [ -z "$pol" ] && ! grep -qE '^[[:space:]]*fix-policy[[:space:]]*:' "$plan" 2>/dev/null; then
-    pol="$FIX_POLICY_DEFAULT"
-  fi
-  printf '%s' "$pol"
+  local v
+  declare -F fix_policy_covers >/dev/null 2>&1 || return 1
+  if v="$(plan_read_header "${1:-}" fix-policy)"; then printf '%s' "${v#*=}"; else printf '%s' "$FIX_POLICY_DEFAULT"; fi
 }
 
 # units_born_class <plan> <policy> <S<n> <reach>> <marker words> -> `exempt` or `counted`, the fix-cap: test of one
@@ -3199,54 +2993,32 @@ $(printf '%s\n' "$out" | awk -F'\t' '{ printf "%s\037%s\037%s\n", $1, $2, $4 }')
 UNITS_BORN_COUNTED
 }
 
-# units_born_findings <plan> -> `<id>\t<status>\t<record>#<n>`, one line per finding a review-born row names
-#   (wave-33 T13; REQ-5, D6): the ` born: review S<n> <reach> of=<record>#<n>[,<record>#<n>…]` marker that
-#   `task-add --born <record>#<n>` writes on the row's `- <id>:` line, read where `units_born` reads the rating
-#   (fences skipped, the first line per id), the status the row's own `## Tasks` cell (`units_rows`), empty for a
-#   line whose row the table does not carry. Nothing, exit 0, when no line names a finding; exit 1 when the plan
-#   cannot be read. Readers: lib/proof.sh `proof_fixed` (the judge's fixed findings) and the poker's
+# units_born_findings <plan> -> `<id>\t<status>\t<record>#<n>`, one line per finding a review-born row names: the
+#   `finding=<record>#<n>[,<record>#<n>…]` of the born event `task-add --born <record>#<n>` writes, the status the
+#   row's own (`units_rows`), empty for a row the table does not carry. Nothing, exit 0, when no born event names a
+#   finding; exit 1 when the plan cannot be read. Readers: lib/proof.sh `proof_fixed` (the judge's fixed findings) and the poker's
 #   `finding_disposition` (the fix row of each finding).
 units_born_findings() {
-  local plan="${1:-}" rows logged
-  [ -n "$plan" ] && [ -r "$plan" ] || return 1
-  logged="$(_units_born_logged "$plan")" || return 1
-  { /usr/bin/grep -q ' born: review S[0-9][0-9]* o[nf]f* of=' "$plan" 2>/dev/null || [ -n "$logged" ]; } || return 0
-  rows="$(units_rows "$plan" 2>/dev/null)" || rows=""
-  {
-    printf '\034rows\n'; [ -z "$rows" ] || printf '%s\n' "$rows"
-    _units_born_text "$plan" "$logged"
-  } | awk -F'\t' "$_UNITS_BORN_AWK"'
-    $0 == SUBSEP "rows" { part = 1; next }
-    part == 1 { if ($1 != "" && !($1 in st)) st[$1] = $10; next }
-    part >= 2 {
-      if (!match(l, / born: review S[0-9]+ (on|off) of=[^ \t]+/)) next
-      marked[k] = 1; v = substr(l, RSTART, RLENGTH); sub(/^.* of=/, "", v)
-      n = split(v, ids, ",")
-      for (i = 1; i <= n; i++) if (ids[i] ~ /^[^#]+#[1-9][0-9]*$/) printf "%s\t%s\t%s\n", k, st[k], ids[i]
-    }'
+  local out
+  out="$(_units_born_rows "${1:-}" 10)" || return 1
+  [ -z "$out" ] || printf '%s\n' "$out" | awk -F'\t' "$_UNITS_REVIEW_AWK"'
+    r != "" && $3 != "" { n = split($3, ids, ","); for (i = 1; i <= n; i++) if (ids[i] ~ /^[^#]+#[1-9][0-9]*$/) printf "%s\t%s\t%s\n", $1, $5, ids[i] }'
 }
 
-# units_born_marks <plan> -> `<id>\t<review|floor>\t<rating or suite>`, one line per `## SDLC State` `- <id>:` line
-#   carrying ` born: review S<n> <on|off>` or ` born: floor <suite>` (wave-36 T7; REQ-3, D9, D2), read where
-#   `units_born` reads (fences skipped, the first line per id), in the section's order. Nothing, exit 0, when none;
-#   exit 1 when the plan cannot be read. `task-add --born <record>#<n>` or `--born 'review S<n> <on|off>'` writes the
-#   review marker, `task-add --born floor:<suite>` the floor one.
+# units_born_marks <plan> -> `<id>\t<review|floor>\t<rating or suite>`, one line per born event whose reason is
+#   `review S<n> <on|off>` or `floor <suite>`, in the facts' order. Nothing, exit 0, when none; exit 1 when the plan
+#   cannot be read. `task-add --born <record>#<n>` or `--born 'review S<n> <on|off>'` writes the review reason,
+#   `task-add --born floor:<suite>` the floor one.
 #   Reader: lib/proof.sh `_facts_born_landings`, which holds the landing of each such row on a reading's chain.
 #   `units_born`, the fix-cap's count, reads the review marker alone, so a floor-born row counts against no cap.
 units_born_marks() {
-  local plan="${1:-}" logged
+  local plan="${1:-}" out alt="regression"
   [ -n "$plan" ] && [ -r "$plan" ] || return 1
-  local _units_born_alt="regression"; declare -F _proof_alias_born >/dev/null 2>&1 && _units_born_alt="$(_proof_alias_born)"
-  logged="$(_units_born_logged "$plan")" || return 1
-  { /usr/bin/grep -qE " born: (review|$_units_born_alt) " "$plan" 2>/dev/null || [ -n "$logged" ]; } || return 0
-  _units_born_text "$plan" "$logged" | awk -v balt="$_units_born_alt" "$_UNITS_BORN_AWK"'
-    part >= 2 {
-      if (match(l, / born: review S[0-9]+ (on|off)( |$)/)) {
-        r = substr(l, RSTART + 14, RLENGTH - 14); sub(/ $/, "", r); marked[k] = 1; printf "%s\treview\t%s\n", k, r
-      } else if (match(l, " born: (" balt ") [^ \t;]+")) {
-        w = substr(l, RSTART + 7, RLENGTH - 7); sub(/^[^ ]+ /, "", w); marked[k] = 1; printf "%s\tregression\t%s\n", k, w
-      }
-    }'
+  declare -F _proof_alias_born >/dev/null 2>&1 && alt="$(_proof_alias_born)"
+  out="$(_units_born_facts "$plan")" || return 1
+  [ -z "$out" ] || printf '%s\n' "$out" | awk -F'\t' -v balt="$alt" "$_UNITS_REVIEW_AWK"'
+    r != "" { printf "%s\treview\t%s\n", $1, r; next }
+    $2 ~ ("^(" balt ") [^ \t;]") { s = $2; sub(/^[^ ]+ /, "", s); sub(/[ \t;].*$/, "", s); printf "%s\tregression\t%s\n", $1, s }'
 }
 
 # units_fix_cap <plan> -> the plan's `fix-cap:` as a number (lib/run.sh `fix_cap_render`): the field,
