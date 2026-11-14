@@ -1744,6 +1744,16 @@ MATRIX_ROWS
   return 0
 }
 
+# matrix_row_awaits <tier> <status> <auditor cell> <user-confirmed value> <waiver 1|0> -> 0 when the criterion awaits its
+#   person: a T4 row holding no attributed confirmation, which one in that shape would rule (`matrix_row_ruled`), so the
+#   person's word is all it waits on; 1 otherwise, a row whose auditor's finding stands among them. One reading for the
+#   gate's refusal and for any caller that names who a criterion waits on.
+matrix_row_awaits() {
+  [ "$1" = T4 ] || return 1
+  ! user_confirmed_attributed "$4" || return 1
+  matrix_row_ruled "$1" "$2" "$3" "you 1970-01-01 confirmed" "$5"
+}
+
 # THE LOADED SET, NAMED ONCE (wave-31 T30; REQ-14 AC-14.1, D13). The doctrine a session or a
 # dispatch loads: the rendered outputs and the hand-kept operational rules, never the sources they
 # are rendered from. One member per line, a repository-root path in which `*` stands for one path
@@ -3606,6 +3616,12 @@ validate_matrix() {
         # could not leave the verify step until the person answered.
         if [ "$_EG_V15" = 1 ] && [ "$key" = user-confirmed ] && [ -z "$ucv" ] && [ "${CURRENT%[ab]}" -lt 8 ] 2>/dev/null; then
           continue
+        fi
+        if [ "$key" = user-confirmed ] && [ -z "$ucv" ] \
+           && matrix_row_awaits "$tier" "$status" "$aud" "$ucv" "$row_is_waived"; then
+          block_matrix "${ac} awaits its person's confirmation" "its person confirms it at release" \
+            "criterion '${ac}' (${tier}) is proved and no approval names it, at step ${CURRENT}: from the merge it waits on its person's confirmation, which no agent gives." \
+            "needs: the user — their confirmation at the release card: reply <n> confirm, <n> being the decision the card gives ${ac}."
         fi
         if ! grep -qE "^[[:space:]]*${key}[[:space:]]*:" <<< "$block_txt"; then
           block_matrix "row ${ac} has no ${key} evidence" "record it, or waive the row" \

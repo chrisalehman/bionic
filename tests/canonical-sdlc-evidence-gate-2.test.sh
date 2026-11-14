@@ -151,7 +151,7 @@ expect_block "m32-norigor with no rigor the strict reading holds: the REFUTED ro
 m32_home 8 double human pass "$m32_ap"
 expect_allow "m32-t4c a T4 row CONFIRMED and confirmed by its approval is admitted at 8" "$M32_H" 'git commit -m "x"'
 m32_home 8 double human pass
-expect_block "m32-t4n …and with no approval naming it, owes its confirmation" "$M32_H" 'git commit -m "x"' "no user-confirmed evidence"
+expect_block "m32-t4n …and with no approval naming it, awaits its person's confirmation" "$M32_H" 'git commit -m "x"' "AC-1.1 awaits its person's confirmation"
 m32_home 6 reviewed hermetic pass
 expect_block "m32-enum a rigor that names no level is refused on its rigor, ahead of the matrix" "$M32_H" 'git commit -m "x"' "rigor is not single or double"
 m32_home 6 double hermetic pass

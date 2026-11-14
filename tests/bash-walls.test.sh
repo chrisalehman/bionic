@@ -722,6 +722,11 @@ aw_poke() {  # <verb args...> -> AW_OUT (both streams), AW_RC of session-poker.s
 }
 aw_owed() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_list' _ "$AW_LIB" "$R_AW" "$SID" 2>/dev/null | cut -f1 | sort | paste -sd, -; }
 aw_step() { bash "$AW_LIB/../reader.sh" "$AW_P" step 2>/dev/null | head -1; }
+# aw_awaits <tier> <status> <auditor cell> <user-confirmed value> <waiver 1|0> -> walls.sh matrix_row_awaits' exit, asked
+#   as a caller outside the gate asks it, by sourcing the library in a subshell
+aw_awaits() { bash -c '. "$1/walls.sh" >/dev/null 2>&1 && shift && matrix_row_awaits "$@"' _ "$AW_LIB" "$@"; echo $?; }
+expect_eq "AW-0: a proved T4 criterion under CONFIRMED with no confirmation awaits its person; confirmed, under REFUTED, or of another tier, it does not" \
+  "0|1|1|1" "$(aw_awaits T4 discharged CONFIRMED '' 0)|$(aw_awaits T4 discharged CONFIRMED 'Dana 2026-10-04 read it back' 0)|$(aw_awaits T4 discharged REFUTED '' 0)|$(aw_awaits T2 discharged CONFIRMED '' 0)"
 
 for AW_R in double single; do
   aw_put 6 "$AW_R"; aw_commit
@@ -732,7 +737,8 @@ for AW_R in double single; do
   [ "$ST" = 0 ] || printf '      the gate said: %s\n' "$ERR" | head -3
   aw_put 8 "$AW_R"; aw_commit
   expect_eq "AW-3 ($AW_R): a commit at 8 is refused" "2" "$ST"
-  expect_contains "AW-3b ($AW_R): …for the person's confirmation of the criterion" "AC-1.1 has no user-confirmed evidence" "$ERR"
+  expect_contains "AW-3b ($AW_R): …saying the criterion awaits its person's confirmation" "AC-1.1 awaits its person's confirmation" "$ERR"
+  expect_contains "AW-3c ($AW_R): …and naming the reply that gives it" "reply <n> confirm, <n> being the decision the card gives AC-1.1" "$ERR"
   aw_approve; aw_commit
   expect_eq "AW-4 ($AW_R): the person's approval given after the proof, the commit at 8 is admitted" "0" "$ST"
   [ "$ST" = 0 ] || printf '      the gate said: %s\n' "$ERR" | head -3
