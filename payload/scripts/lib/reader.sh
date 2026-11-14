@@ -59,22 +59,38 @@ reader_identity proof kind head question
 reader_identity ask key round
 reader_identity published row commit
 
-# THE RECORD is joined to a plan by name, at every place the run walk (lib/run.sh `_run_candidates`)
+# THE RECORD'S NAME is one rule, and every library that names a run's record asks it (lib/proof.sh `proof_plan_slug`,
+# the name thirty-odd call sites ask, among them): the plan's file name less .plan.md, but an epic's plan,
+# `epic.plan.md` in a folder under plans/, is named for its folder, as an incident's plan is, so two epics in one docs
+# root never share a log. A name rule: the file need not exist; an epic's folder is resolved when it can be entered.
+_reader_slug() {  # <the plan's folder, resolved> <its file name> -> READER_SLUG, the record's name
+  READER_SLUG="${2%.plan.md}"
+  [ "$2" = epic.plan.md ] || return 0
+  case "${1%/*}" in */plans|plans) READER_SLUG="${1##*/}" ;; esac
+}
+reader_slug() {  # <plan> -> the name of its record; 1 when the name leaves none
+  local d="." n="${1##*/}"
+  case "$1" in */*) d="${1%/*}" ;; esac
+  [ "$n" != epic.plan.md ] || d="$(cd "$d" 2>/dev/null && pwd -P)" || d="${1%/*}"
+  _reader_slug "$d" "$n"; [ -n "$READER_SLUG" ] || return 1
+  printf '%s' "$READER_SLUG"
+}
+
+# THE RECORD is joined to a plan by that name, at every place the run walk (lib/run.sh `_run_candidates`)
 # admits a run's plan: in the docs root's plans/ or incidents/, or one folder below either. It is
-# `<docs>/record/<the plan's file name less .plan.md>/`, the name every library's record path takes,
-# so the reader and the writers can never name two directories for one run. The folder one below is
-# tried first, so an epic folder named plans/ joins as it always has. Any other place is no run's plan.
-# This is the one rule here; lib/translate.sh asks it for the record's other homes.
+# `<docs>/record/<the record's name>/`, so the reader and the writers can never name two directories for one run.
+# The folder one below is tried first, so an epic folder named plans/ joins as it always has. Any other place is no
+# run's plan. lib/translate.sh asks this for the record's other homes.
 reader_record() {  # <plan> -> its record directory; 2 when the plan sits where the walk admits none; above 2 when the lookup died
   local name="${1##*/}" dir up rc
   case "$name" in *.md) ;; *) return 2 ;; esac
   # A folder that cannot be entered is no run's plan; a shell that died entering it (a process refused) is no answer,
   # and its exit is passed on, so a caller can tell "no record" from "not looked up".
   dir="$(cd "$(dirname "$1")" 2>/dev/null && pwd -P)" || { rc=$?; [ "$rc" -gt 2 ] || rc=2; return "$rc"; }
-  up="${dir%/*}"
+  _reader_slug "$dir" "$name"; up="${dir%/*}"
   case "${up##*/}" in plans|incidents) dir="$up" ;;
     *) case "${dir##*/}" in plans|incidents) ;; *) return 2 ;; esac ;; esac
-  printf '%s/record/%s\n' "${dir%/*}" "${name%.plan.md}"
+  printf '%s/record/%s\n' "${dir%/*}" "$READER_SLUG"
 }
 
 reader_log() {  # <plan> -> the path of its run log; 2 when the plan sits where the walk admits none; above 2 when the lookup died

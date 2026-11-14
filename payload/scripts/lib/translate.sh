@@ -156,8 +156,11 @@ translate_source _translate_state
 _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessions, proofs, findings, waivers, orders
   # A deferral holds no instant, and its finding is raised by its review: it stands at the place of the first
   # review proof whose evidence is the finding's file, never at its neighbour's, and its instant stays a gap.
+  # The first pass also names each step approval a line of its own holds, so a Step line is read for one only when none does.
   { _translate_section "$1" "SDLC State" | awk '/^proved: / && / kind=review / && match($0, / evidence=[^ ]+/) {
-      e = substr($0, RSTART + 10, RLENGTH - 10); if (match($0, / at=[^ ]+/)) printf "\035%s %s\n", e, substr($0, RSTART + 4, RLENGTH - 4) }'
+      e = substr($0, RSTART + 10, RLENGTH - 10); if (match($0, / at=[^ ]+/)) printf "\035%s %s\n", e, substr($0, RSTART + 4, RLENGTH - 4) }
+      /^[ \t]*-?[ \t]*approved-by[ \t]*:[ \t]*[^ \t]/ { print "\034step3" }
+      /^approved: [^ ]/ { split($0, w, " "); print "\034" w[2] }'
     _translate_section "$1" "SDLC State"; } | awk -v sf="$READER_STEP_FIELDS" "$_TRANSLATE_AWK"'
     # A Step line is written once its block is read: the fields a step event carries (lib/reader.sh READER_STEP_FIELDS)
     # are taken from its indented lines, and every other line of the block is read by the rules below as before.
@@ -170,6 +173,21 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
       if (stepf(pn, k)) { if (!(k in pv)) { pk[++np] = k; pv[k] = trim(v) }; next } }
     pend && /^[^ \t]/ { flushstep() }
     /^\035/ { split(substr($0, 2), w, " "); if (!(w[1] in rev)) rev[w[1]] = ukey(w[2]); next }
+    /^\034/ { held[substr($0, 2)] = 1; next }
+    # A Step line of 1 to 3 whose approval no line of its own holds (an epic plan writes them so) is read for one in the
+    # line form `approved-by: <who> <day or instant> "<words>"`: further words joined by + are one field given two values,
+    # so the first stand and the rest are named. Other words of approval in the line are no shape read without a guess,
+    # so the step'"'"'s approval is named whole.
+    function stepok(n, text,   r, h, m, w, by, i, q) {
+      if (match(text, /(^|[ \t;])approved-by:[ \t]*/)) { r = substr(text, RSTART + RLENGTH)
+        if (match(r, /^[^"]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9](T[0-9][0-9]:[0-9][0-9](:[0-9][0-9])?Z)?[ \t]+"/)) {
+          h = trim(substr(r, 1, RLENGTH - 1)); m = split(h, w, /[ \t]+/); by = ""; for (i = 1; i < m; i++) by = by (i > 1 ? " " : "") w[i]
+          r = substr(r, RLENGTH); q = quoted(r)
+          if (by != "" && q != "") { begin("approval", "key", "step" n); put("by", by); put("said", q)
+            r = substr(r, length(q) + 3); while (match(r, /^[ \t]*\+[ \t]*"/)) { r = substr(r, RLENGTH); q = quoted(r); put("said", q); r = substr(r, length(q) + 3) }
+            emit(w[m]); return } } }
+      if (text ~ /(^|[^A-Za-z])(approved|ratified)([^A-Za-z]|$)/) whole("approval", "key=step" n, "unruled")
+    }
     # current: in each form a gate reads it: indented, unspaced, its blanks dropped, and the first line of two
     /^[ \t]*current[ \t]*:/ { if (!curseen) { cur = $0; sub(/^[ \t]*current[ \t]*:/, "", cur); gsub(/[ \t]/, "", cur); curseen = 1 }; next }
     # approved-by: bulleted or indented too, as the fill and the scheduler read it; a blank value approves nothing
@@ -193,7 +211,8 @@ _translate_state() {  # <plan> -> the SDLC State lines: steps, approvals, sessio
       } else if (match(text, /approved by [^";]+ [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9](:[0-9][0-9])?Z/)) {
         ap = substr(text, RSTART, RLENGTH); at = inst(ap); by = trim(substr(ap, 13, length(ap) - 12 - length(at))); rest = substr(text, RSTART + RLENGTH)
       }
-      if (at != "" && n + 0 <= 2) { begin("approval", "key", "step" n); put("by", by); put("said", quoted(rest)); emit(at) }
+      if (at != "" && (n + 0 <= 2 || n == "3" && !("step3" in held))) { begin("approval", "key", "step" n); put("by", by); put("said", quoted(rest)); emit(at) }
+      else if (at == "" && n + 0 >= 1 && n + 0 <= 3 && !(("step" n) in held)) stepok(n, text)
       if (at == "") at = inst(text)
       pn = n; pat = at; pend = 1; np = 0
       if (n == "9") { v = substr(text, index(text, "delivered:") + 10); pk[++np] = "delivered"; pv["delivered"] = trim(v) }
@@ -325,6 +344,7 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
     _translate_section "$1" "Verification Matrix" | awk '
       { l = $0; sub(/^[-*+][ \t]+/, "", l) }
       match(l, /^AC-[^ \t:]+:/) { ac = substr(l, 1, RLENGTH - 1); next }
+      !/^[ \t]/ && match(l, /^[A-Za-z][A-Za-z0-9._-]*:/) { printf "B\036%s\n", substr(l, 1, RLENGTH - 1) }
       !/^[ \t]/ { ac = ""; next }
       ac != "" && match($0, /^[ \t]+waiver:[ \t]+[^"]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9](T[0-9][0-9]:[0-9][0-9](:[0-9][0-9])?Z)?[ \t]+"/) {
         s = substr($0, index($0, "waiver:") + 7); q = index(s, "\""); h = substr(s, 1, q - 1); n = split(h, w, /[ \t]+/)
@@ -356,12 +376,15 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
       begin("hand", "ac", w[2]); put("what", "waive-row"); if (w[3] != "") put("by", w[3]); if (w[5] != "") put("said", w[5]); emit(w[4]); next }
     /^U\036/ { split($0, w, "\036"); if (!(w[2] in uc)) uc[w[2]] = w[3]; next }
     /^E\036/ { split($0, w, "\036"); if (!(w[2] in be) && !none(w[3])) be[w[2]] = trim(w[3]); next }
+    /^B\036/ { split($0, w, "\036"); blk[w[2]] = 1; next }
     !/^\|/ { if (nh) done = 1; next }
     done { next }
     !nh { for (i = 2; i < NF; i++) { k = tolower(trim($i)); gsub(/[ \t]+/, "-", k); col[k] = i }; nh = 1; next }
     /^\|[-:| \t]+$/ || !("ac" in col) || !("status" in col) { next }
     {
       ac = trim($(col["ac"])); s = trim($(col["status"])); t = (s == "discharged") ? "proof" : (s == "waived") ? "waiver" : ""
+      # A block under the table opens only at an AC- id; a row'"'"'s block under any other id is read by no rule, so it is named.
+      if ((ac in blk) && !(ac in bnamed)) { bnamed[ac] = 1; printf "g\t\tgap/v1|ev=criterion|criterion=%s|field=block|why=unruled\n", ac }
       if (t == "" && ac != "" && (s == "pending" || s == "blocked")) { undischarged(ac, s); next }
       if (t == "" || ac == "" || ((t SUBSEP ac) in stated)) next
       begin(t, "ac", ac)
