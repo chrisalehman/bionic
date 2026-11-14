@@ -12,6 +12,8 @@
 #   §PR       the integrate row's pull request goes through a stand-in gh, the only gh on its PATH
 #   §ENTRY    the release entry names the review the run failed and fixed; the record names each commit after the fix
 #   §REAL     the sandbox's own real check ran, every hand write is of a kind a run writes, and the log is UTF-8
+#   §LIVE     the plan's live criterion names the close row in its Task column, passes every advance past the Verify
+#             gate pending, is owed by the close on the release approval card, and close-out proves it
 #   §LOG      the landing record and the asks are events of the one log: no landing-proofs.log, no asks.state
 #   §GROWS    the log kept after each command is a prefix of the next, and of the log at the close
 #   §SESSION  the Patrol's arming and disarming write no line of the log, a tick only the run's facts, and none a stop
@@ -54,7 +56,7 @@ CR_DIR="$WORLD_ROOT/delivered"; CR_ROOT="$CR_DIR/project"; CR_LOG="$CR_DIR/rehea
 CR_REC="$CR_ROOT/.bionic/docs/record/wave-x"
 CR_RC=0; CR_PLAN=""
 if [ "$CR_LOADED" = 1 ]; then
-  CR_PLAN="$(rehearse delivered "$CR_DIR" 2> "$WORLD_ROOT/delivered.err")" || CR_RC=$?
+  CR_PLAN="$(DOOR_LIVE_ROW=1 rehearse delivered "$CR_DIR" 2> "$WORLD_ROOT/delivered.err")" || CR_RC=$?
 else
   CR_RC=127
 fi
@@ -400,6 +402,28 @@ if [ -f "$CR_ROOT/.bionic/config.yaml" ] && [ -s "$CR_LOG" ]; then
     "0" "$(/usr/bin/iconv -f UTF-8 -t UTF-8 "$CR_LOG" >/dev/null 2>&1; echo $?)"
 else
   expect_eq "RE-0 the sandbox and its log were built, so this section can be read" "built" "not built"
+fi
+
+# ============================================================
+section "§LIVE: the run's live criterion is owed at the close, passes every gate before it pending, and the close writes it"
+# ============================================================
+# The replay's plan carries the live criterion a planner writes (DOOR_LIVE_ROW): an Eval design row of live type, its
+# eval the hand-holds line at the close, its Task cell the close row T9. The gate defers it until that row's step, so
+# each advance and the refused close-out pass with it pending; the release approval card lists it owed by the close,
+# never a decision its reply could waive; close-out proves it from its last reading after delivered:.
+# fails-when: an advance or the card refuses or waives the pending row, or the run's log holds no proof naming it
+# with the continuation as its evidence.
+if cr_reached "LV-0"; then
+  expect_eq "LV-1 the plan's live criterion is the planner's: its Eval design row names the close row in its Task cell, its eval the hand-holds line" "yes|yes" \
+    "$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$CR_PLAN" criterion AC-2.1 | /usr/bin/grep -qx 'task=T9' && echo yes)|$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$CR_PLAN" criterion AC-2.1 | /usr/bin/grep -q '^eval=.*landing-report --hand-holds' && echo yes)"
+  expect_eq "LV-2 each advance past the Verify gate exits 0 with the row pending" "0|0|0" \
+    "$(cr_rc 'enter Step 6' | tail -1)|$(cr_rc 'enter Step 7' | tail -1)|$(cr_rc 'enter Step 8' | tail -1)"
+  LV_CARD="$(cat "$CR_REC"/release-approval-*.md 2>/dev/null)"
+  expect_eq "LV-3 the release approval card lists it owed by the close, and puts no decision on it" "yes|no" \
+    "$(/usr/bin/grep -q 'owed by the close' <<< "$LV_CARD" && echo yes || echo no)|$(/usr/bin/grep -q 'key=row:AC-2\.1|' <<< "$LV_CARD" && echo yes || echo no)"
+  expect_eq "LV-4 at delivered: the run's log holds one proof naming it, its evidence the continuation" \
+    "1" "$(/usr/bin/grep -c '|ev=proof|ac=AC-2\.1|evidence=record/wave-x/continuation\.md|' "$CR_REC/run.log")"
+  expect_contains "LV-5 …written by close-out from its last reading" "matrix: AC-2.1 discharged" "$(cr_out 'close-out, the tail')"
 fi
 
 # ============================================================

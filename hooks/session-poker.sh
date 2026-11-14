@@ -428,7 +428,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh decisions rule D<n> '<reply>'   during a run, on the user's reply, append the ruling, its reply and who said it, to the run's log and close the decision's ask; approve D<n> and a release approval card's reply rule through the same writer; a decision already ruled is refused"
   die "  bash ${HOOK_DIR}/session-poker.sh brief <row> [<name>]   render the dispatch brief of that plan row into record/<wave>/briefs/<name>.md (<name> the agent's, else the fill's for the row): the scaffold from the row, the judgment from the task's own section of the plan, the review range, Questions and Lands-red from the reader; it never rewrites a brief it did not render, and never changes the plan"
   die "  bash ${HOOK_DIR}/session-poker.sh debt add <record> [<plan>]   append one debt to the run's log per debt: line of the record (a review's, a writer's, an assumptions.md hole line), each concept and kind once"
-  die "  bash ${HOOK_DIR}/session-poker.sh debt touched <concept> [<plan>]   add one to the touches of each unburned item of <concept> (the dispatch wall's call)"
+  die "  bash ${HOOK_DIR}/session-poker.sh debt touched \"<concept> [<concept>…]\" [<plan>]   add one to the touches of each unburned item of each <concept>, the run read once (the dispatch wall's one call)"
   die "  bash ${HOOK_DIR}/session-poker.sh debt burn <concept> <row> [<plan>]   mark each unburned item of <concept> burned by <row>"
   die "  bash ${HOOK_DIR}/session-poker.sh debt adopt <continuation> [<plan>]   append each debt: line the continuation carries under ## Deferrals to the run's log as a debt, its touches and its raising record kept"
   die "  bash ${HOOK_DIR}/session-poker.sh debt list [<plan>]   print the run's debts, one line each, burned ones too"
@@ -983,7 +983,14 @@ $1"; shift ;;
                DEBT_PLAN_ARG="${1:-}" ;;
       *) usage "debt takes add, adopt, touched, burn or list." ;;
     esac
-    [ "$DEBT_SUB" = add ] || [ "$DEBT_SUB" = adopt ] || case "$DEBT_A$DEBT_B" in *'|'*|*' '*|*'	'*) usage "a debt concept or row is one word, with no | in it." ;; esac
+    # `touched` takes every concept of one dispatch in its one operand, blank-separated, so the run is read once for all
+    # of them; no concept holds a blank, so the list is unambiguous. Every other operand is one word.
+    case "$DEBT_SUB" in
+      add|adopt) : ;;
+      touched) case "$DEBT_A" in *'|'*|*'	'*) usage "a debt concept is one word, with no | in it; touched takes several, blank-separated." ;; esac
+               [ -n "${DEBT_A// /}" ] || usage "debt touched takes a concept." ;;
+      *) case "$DEBT_A$DEBT_B" in *'|'*|*' '*|*'	'*) usage "a debt concept or row is one word, with no | in it." ;; esac ;;
+    esac
     ;;
   *) usage "unknown verb: $VERB" ;;
 esac
@@ -2186,27 +2193,19 @@ sitrep_clock() {  # <epoch> <now epoch> -> `H:MM AM/PM`, then ` YYYY-MM-DD` when
 
 # ---------------------------------------------------------------- the plan transaction
 #
-# ONE TRANSACTION FOR A VERB THAT STILL WRITES THE PLAN. The change is projected onto a
-# COPY through units.sh, the copy is judged by a dry `git commit` through the REAL
-# hooks/bash-walls.sh, the plan's checksum is compared with the one taken BEFORE the
-# projection read it, and only then is the copy moved over the plan. On any refusal the plan
-# is byte-identical and the words that refused it print.
+# A VERB THAT JUDGES A MOVE ASKS THE REAL GATE FIRST. No verb writes the plan: a fact is an event in
+# the run's log. What `current` moves, it first proves by a dry `git commit` through the REAL
+# hooks/bash-walls.sh, asked about the plan itself with the step it moves to pending in its facts, so
+# the advance is judged as a commit at that step would be. On a refusal nothing is appended and the
+# words that refused it print.
 #
-# THE DRY RUN IS BOUND TO THE COPY, NEVER TO THE PLAN: its own engagement marker for a
-# synthetic session whose `plan=` names the dry copy, removed after (close-out.sh's pattern).
-# Both copies sit beside the plan under names that do not end in `.md`, so no plan walk can
-# read one as a run. The marker also names the plan the copy was made from (`dry_of=`), and
-# goes with it: the commit gate reads that plan's landing record for its declared debts, since
-# the copy's name names none (wave-27 T76; lib/proof.sh `proof_debt_origin`). The judged copy
-# is a WRITER's commit: past Step 4 the dry copy carries `current: 4`,
-# because a main-root commit during Verify is held to the Step-5 block the run is still
-# writing. `current` is the one exception — what it asks is
-# whether the run can commit at the step it moves to, so its copy is judged as it stands.
+# THE DRY RUN HAS ITS OWN SESSION: an engagement marker for a synthetic session whose `plan=` names
+# the plan, removed after (close-out.sh's pattern), so the person's own session is never rebound.
 #
 # MAIN THREAD ONLY is the Bash wall's to enforce (payload/scripts/lib/walls.sh, the
 # `agent_id` verb list); these refuse what the script can see: no session key (3), an
-# unengaged session (decides nothing, 0), and a session with no BOUND open plan (1) — a
-# writing verb never writes the newest-plan fallback.
+# unengaged session (decides nothing, 0), a session with no BOUND open plan (1) — a
+# writing verb never writes the newest-plan fallback — and a bound run that could not be read (2).
 
 # plan_delivered <plan> -> 0 when the file is a run closed by delivery: `run_open` calls it closed (not unreadable) and
 # the reader's state, read with it, is delivered, never abandoned. 1 otherwise, silent. The plan is judged where it
@@ -2221,7 +2220,7 @@ plan_delivered() {
   return 1
 }
 
-# plan_verb_open <verb> [closed-ok] -> sets PV_REPO, PV_PLAN, PV_CUR, PV_NEW, PV_DRY, PV_MARK, PV_SID and arms the
+# plan_verb_open <verb> [closed-ok] -> sets PV_REPO, PV_PLAN, PV_CUR, PV_NEW, PV_MARK, PV_SID and arms the
 # cleanup; exits on every refusal above. `closed-ok` (handoff) also takes the session's own closed run (bound-closed)
 # when its plan is on disk. ENGAGEMENT IS THE CONSENT BOUNDARY FOR A RUN STILL MOVING, so it is asked first.
 plan_verb_open() {
@@ -2246,12 +2245,21 @@ plan_verb_open() {
   case "$run" in
     'bound-open '*) PV_PLAN="${run#bound-open }" ;;
     'bound-closed '*) [ "$closed" = "" ] || [ ! -f "${run#bound-closed }" ] || PV_PLAN="${run#bound-closed }" ;;
+    'bound-unreadable '*)
+      # The session IS bound and its run is there: telling it to bind would be false, and a run that could not be
+      # read is not known to be closed. Nothing is written from facts that were not read, so this is the verbs'
+      # own refusal for unread facts, exit 2. A plan that cannot be opened is told apart from facts that did not
+      # fold, because only the first is cured by restoring access and only the second by asking again.
+      if plan_unreadable "${run#bound-unreadable }" >/dev/null; then
+        die "REFUSED — the run's facts could not be read: its plan ${run#bound-unreadable } is there and cannot be opened, so $verb writes nothing. Restore read access to it, then run $verb again."
+      else
+        die "REFUSED — the run's facts could not be read: the facts of ${run#bound-unreadable } did not fold, so $verb writes nothing. Run $verb again."
+      fi
+      exit 2 ;;
   esac
   if [ -z "$PV_PLAN" ]; then
     die "REFUSED — $verb writes the plan this session is bound to, and it has no bound open run (${run:-none})."
     die "Bind this session to its run first (this script's bind verb), then run $verb again."
-    case "$run" in
-    esac
     exit 1
   fi
   # The run's step as the reader answers it (lib/fill.sh over lib/proof.sh `proof_step_held`). A step that cannot be read
@@ -2259,39 +2267,22 @@ plan_verb_open() {
   PV_CUR=""; PV_CUR_UNREAD=""
   if _fill_current_load "$PV_PLAN"; then PV_CUR="$_FILL_CURRENT_VALUE"; else PV_CUR_UNREAD=1; fi
   PV_NEW="${PV_PLAN}.${verb}.$$"
-  PV_DRY="${PV_PLAN}.${verb}-dry.$$"
   PV_SID="planverb-$$"
   PV_MARK="$(engaged_marker_path "$PV_REPO" "$PV_SID")" || PV_MARK=""
-  trap 'rm -f "$PV_NEW" "$PV_NEW.2" "$PV_DRY" ${PV_MARK:+"$PV_MARK"}' EXIT
+  trap 'rm -f "$PV_NEW" "$PV_NEW.2" ${PV_MARK:+"$PV_MARK"}' EXIT
 }
 
-# plan_verb_dry <verb> <what changed> <dry: writer|as-is|step:<N>> <current> -> the dry commit of $PV_NEW
-# through the real gate, at `current: 4` for a writer past Step 4 and as written otherwise; exits 1
-# on the gate's refusal, 2 when it cannot run.
-# `step:<N>` judges no copy: the gate is asked about the plan itself with step N pending in its facts (BIONIC_DRY_STEP,
-# honoured only for this session, lib/proof.sh `_proof_dry_step`), so the advance is judged as a commit at N would be.
+# plan_verb_dry <verb> <what changed> <step> -> the dry commit through the real gate, asked about the plan itself
+# with <step> pending in its facts (BIONIC_DRY_STEP, honoured only for this session, lib/proof.sh `_proof_dry_step`),
+# so the move is judged as a commit at that step would be; exits 1 on the gate's refusal, 2 when it cannot run.
 plan_verb_dry() {
-  local verb="$1" what="$2" dry="$3" cur="$4" err rc judged="$PV_DRY" step=""
-  case "$dry" in step:*) step="${dry#step:}"; judged="$PV_PLAN" ;; esac
-  if [ -n "$step" ]; then
-    :
-  elif [ "$dry" = writer ] && [ "$cur" -gt 4 ]; then
-    awk '
-      /^[[:space:]]*```/ { fence = !fence; print; next }
-      fence { print; next }
-      /^##[[:space:]]/ { insdlc = ($0 ~ /^##[[:space:]]+SDLC State/); print; next }
-      insdlc && !done && /^[[:space:]]*current[[:space:]]*:/ { print "current: 4"; done = 1; next }
-      { print }' "$PV_NEW" > "$PV_DRY"
-  else
-    cp "$PV_NEW" "$PV_DRY"
-  fi
+  local verb="$1" what="$2" step="$3" err rc
   if [ ! -f "$HOOK_DIR/bash-walls.sh" ] || [ -z "$PV_MARK" ] || ! command -v jq >/dev/null 2>&1; then
     die "REFUSED — the dry commit cannot be run (no bash-walls.sh beside this script, no marker path, or no jq); the plan is unchanged."
     exit 2
   fi
   mkdir -p "${PV_MARK%/*}" 2>/dev/null
-  if [ -n "$step" ]; then printf 'plan=%s\nengaged_at=%s\n' "$judged" "$(iso_now)"
-  else printf 'plan=%s\ndry_of=%s\nengaged_at=%s\n' "$judged" "$PV_PLAN" "$(iso_now)"; fi > "$PV_MARK"
+  printf 'plan=%s\nengaged_at=%s\n' "$PV_PLAN" "$(iso_now)" > "$PV_MARK"
   err="$(cd "$PV_REPO" && BIONIC_DRY_STEP="$step" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$PV_SID" BIONIC_WALL_VERBOSE=1 \
     bash "$HOOK_DIR/bash-walls.sh" 2>&1 >/dev/null <<< "$(jq -n --arg s "$PV_SID" --arg cwd "$PV_REPO" --arg v "$verb" \
       '{session_id: $s, cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash",

@@ -77,7 +77,7 @@
 #
 # Executed, never sourced:  bash ${CLAUDE_PLUGIN_ROOT}/scripts/close-out.sh <plan> run
 #
-# [WALL: tests/close-out-1.test.sh .. tests/close-out-4.test.sh, over tests/close-out.prelude.sh]
+# [WALL: tests/close-out-1.test.sh .. tests/close-out-6.test.sh, over tests/close-out.prelude.sh]
 
 set -uo pipefail
 
@@ -481,39 +481,6 @@ command -v jq  >/dev/null 2>&1 || _co_refuse "jq is not on PATH — the gate dry
 # trees gets an EMPTY census — the conservative failure, never a refusal — and a plan
 # naming exactly N trees gets exactly those N, however `working-branch:` is spelled.
 
-# THE COLUMN-LESS FALLBACK IS SCOPED EXACTLY AS 1.8.3 WAS (critic C7). A table with no
-# `worktree` column at all has no register to read at all, so `wt_unreached` (below)
-# falls back to a name-shape glob the way 1.8.3's ONLY census worked — but that glob has
-# to be `wt/<NN>-*`, the same scope 1.8.3 used, not the unscoped `wt/*` this file shipped
-# between the register's introduction and this fix (C7: 55 foreign branches in this
-# repository alone, any one of which could trip a column-less consumer's close-out on a
-# wave it never touched). `WT_NUM` is read off `working-branch:` exactly as 1.8.3 read it
-# (`git show 72e07ec:payload/scripts/close-out.sh:244`), and a `working-branch:` that is
-# not `wave/<digits>-<slug>` shaped refuses HERE — before act 1, for both `check` and
-# `run`, exactly as 1.8.3 refused unconditionally — because a repo-wide census on that
-# shape would be, in 1.8.3's own words, "the defect wearing a guard". A table WITH the
-# `worktree` column never reaches this at all: the register names its own trees and needs
-# no wave number to scope anything to (ADR-032's retirement stands, unchanged, for it).
-#
-# THE SHAPE IS THE SCALE'S BRANCH CELL (wave-38 T16; D25, AC-5.1; T11, AC-9.2 before it). The cell
-# (lib/scale.sh) is `any` for a task-scale plan: a small late fix closes from a branch like `fix/x`,
-# gets an empty `WT_NUM` and no refusal — there is no `wt/<NN>-*` for it to census, and
-# `wt_unreached` (below) reports none. A wave or epic plan's cell is its pattern, whose `<NN>` is the
-# number the census scopes to. A plan with no `scale:`, or one the profile does not hold, is read at
-# the wave row, the default scale, which is the refusal it met before the profile.
-# THE REGISTER IS THE RUN'S, AT EITHER VERSION. A table with the column holds it; so does a plan at 15, whose trees are the
-# run's tree events and whose table holds no such column, and so does any run whose log holds a tree fact. Only a table at
-# 14 with neither column nor fact has no register, and only it takes the fallback and needs the wave number.
-CO_REGISTER=0
-if units_has_column "$PLAN" worktree || [ "$(plan_read_header "$PLAN" canonical_sdlc_version 2>/dev/null)" = canonical_sdlc_version=15 ] \
-  || [ -n "$(co_facts tree path 2>/dev/null)" ]; then CO_REGISTER=1; fi
-WT_NUM=""
-if [ "$CO_REGISTER" = 0 ]; then
-  if ! WT_NUM="$(scale_branch_number "$CO_SCALE" "$WORKING")"; then
-    _co_refuse "the plan's working-branch '$WORKING' is not $(scale_cell "$CO_SCALE" branch) shaped (the $CO_SCALE scale's branch cell) — the worktree census needs a wave number to scope wt/NN-* to"
-  fi
-fi
-
 # THE BINDING, ASKED BEFORE THE FIRST ACT (AC-4.2, D6). `archive_run` carries this check
 # too — that is where it belongs, so every caller inherits it — but by the time the move
 # is asked for, eight acts have already happened. A destination that drifted since Step 0
@@ -631,31 +598,12 @@ wt_branches() {
   return 0
 }
 
-# wt_unreached -> every wt/* branch carrying a commit the working branch never took. The
-# candidate list is the register census (`wt_branches`, D5/ADR-032) when the plan's
-# `## Tasks` table declares the `worktree` column. A table WITHOUT that column — every
-# plan this repository shipped through wave-16, and every consumer plan on 1.8.3 (critic
-# C4) — reads an empty register, and an empty register here is the PERMISSIVE failure:
-# this arm's whole job is to refuse, and an empty census means it never can, silently.
-# `units_has_column` (lib/units.sh — the SSoT for "does this table carry that column at
-# all") tells the two shapes apart; a column-less table falls back to the pre-register
-# glob census — `wt/<NN>-*`, scoped to `$WT_NUM` exactly as 1.8.3 scoped it (derived and
-# validated once, above, before act 1 — a working-branch that could not supply a wave
-# number is refused there, except for a task-scale plan, which reaches this function with
-# an empty `$WT_NUM` and gets an empty census, the `elif` below) — and announces
-# the fallback once on stderr so it is never silent either way. Critic C7: the unscoped
-# `wt/*` this arm shipped with between the register's introduction and this fix could
-# trip on a DIFFERENT wave's leftover branch; `wt/<NN>-*` cannot.
+# wt_unreached -> every registered tree's wt/* branch carrying a commit the working branch never took. The
+# candidates are the register's (`wt_branches`): a run that registered no tree has none, and an empty census is no
+# refusal, said by name where `check` prints it.
 wt_unreached() {
   local b _co_cherry candidates
-  if [ "$CO_REGISTER" = 1 ]; then
-    candidates="$(wt_branches)"
-  elif [ -z "$WT_NUM" ]; then
-    candidates=""
-  else
-    echo "close-out: no worktree column in the ## Tasks table; unreached-work census falls back to wt/${WT_NUM}-* (1.8.3 census)" >&2
-    candidates="$(git -C "$ROOT" for-each-ref --format='%(refname:short)' "refs/heads/wt/${WT_NUM}-*" 2>/dev/null)"
-  fi
+  candidates="$(wt_branches)"
   while IFS= read -r b; do
     [ -n "$b" ] || continue
     # THE CENSUS IS CAPTURED BEFORE IT IS SEARCHED. `git cherry … | grep -q` under
@@ -1671,9 +1619,8 @@ epic_shipped_table() {
 }
 
 # epic_adrs_value -> the raw `adrs:` this wave's sources carry: the spec the plan's `spec:` line names
-# first, the plan's own when the spec has none, then the plan's Step 7 `adr:` pointer, the line the document
-# step writes and the advance to 7 renders as `adrs:` (a plan advanced before that render carries only it).
-# Nothing when none says anything. The spec's `adrs:` is paths joined by ` · `.
+# first, the plan's own when the spec has none. Nothing when neither says anything. The spec's `adrs:` is
+# paths joined by ` · `.
 epic_adrs_value() {
   local specrel specfile adrs
   specrel="$(plan_frontmatter_get "$PLAN" "spec")"
@@ -1682,7 +1629,6 @@ epic_adrs_value() {
   [ -f "$specfile" ] || specfile="$(find "$DROOT/specs" -name "${specrel##*/}" -type f 2>/dev/null | head -1)"
   [ -n "$specfile" ] && adrs="$(plan_frontmatter_get "$specfile" "adrs")" || adrs=""
   [ -n "$adrs" ] || adrs="$(plan_frontmatter_get "$PLAN" "adrs")"
-  [ -n "$adrs" ] || adrs="$(units_step_field "$PLAN" 7 adr 2>/dev/null)" || adrs=""
   printf '%s\n' "$adrs"
 }
 
@@ -1722,7 +1668,7 @@ epic_adrs_cell() {
 # or nothing. The row is written from the plan and the merge, never marked for the orchestrator.
 epic_row_missing() {
   if ! epic_adrs_cell >/dev/null; then
-    printf 'the wave %s row of %s cannot be written whole: neither the spec nor the plan carries an adrs: line naming the ADRs this wave shipped (adr-<n> paths joined by " · "), and the Step 7 block of the plan carries no adr: line — write "adrs: none" in the plan if it shipped none' "$WAVE_NUM" "${EPIC_PLAN##*/}"
+    printf 'the wave %s row of %s cannot be written whole: neither the spec nor the plan carries an adrs: line naming the ADRs this wave shipped (adr-<n> paths joined by " · ") — write "adrs: none" in the plan if it shipped none' "$WAVE_NUM" "${EPIC_PLAN##*/}"
     return 0
   fi
   if ! git -C "$ROOT" rev-parse --short "$(co_epic_branch)" >/dev/null 2>&1; then
@@ -2020,7 +1966,7 @@ co_close_handoff() {
 
 # ─── The gate ────────────────────────────────────────────────────────────────
 
-# gate_ask <plan-file> <sid> [<dry_of>] [<the facts pending, honoured for a dry session only>] -> GATE_RC, GATE_ERR (the gate's whole stderr) and GATE_LINE
+# gate_ask <plan-file> <sid> [<the facts pending, honoured for a dry session only>] -> GATE_RC, GATE_ERR (the gate's whole stderr) and GATE_LINE
 # (its one refusal line) for a `git commit` judged against <plan-file>. Status 9, with
 # GATE_LINE saying why, when there is no gate to ask; 0 otherwise, whatever the verdict.
 #
@@ -2041,14 +1987,14 @@ GATE_RC=0
 GATE_ERR=""
 GATE_LINE=""
 gate_ask() {
-  local plan="$1" sid="$2" dry_of="${3:-}" step="${4:-}" hook marker input
+  local plan="$1" sid="$2" step="${3:-}" hook marker input
   GATE_RC=9; GATE_ERR=""; GATE_LINE=""
   hook="$(plugin_root)/hooks/bash-walls.sh"
   [ -f "$hook" ] || { GATE_LINE="no bash-walls.sh at $hook"; return 9; }
   marker="$(engaged_marker_path "$ROOT" "$sid")" \
     || { GATE_LINE="could not build an engagement marker path for the dry-run"; return 9; }
   mkdir -p "${marker%/*}" 2>/dev/null
-  printf 'plan=%s\n%sengaged_at=%s\n' "$plan" "${dry_of:+dry_of=$dry_of$'\n'}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
+  printf 'plan=%s\nengaged_at=%s\n' "$plan" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
   input="$(jq -n --arg s "$sid" --arg cwd "$ROOT" \
     '{session_id: $s,
       cwd: $cwd,
@@ -2199,7 +2145,7 @@ co_facts_says() {
 
 gate_preflight() {
   PREFLIGHT_RC=9; PREFLIGHT_LINE=""; PREFLIGHT_ERR=""
-  gate_ask "$PLAN" "closeout-preflight-$$" "" "$(co_close_facts)"
+  gate_ask "$PLAN" "closeout-preflight-$$" "$(co_close_facts)"
   [ "$GATE_RC" -eq 9 ] && { PREFLIGHT_LINE="$GATE_LINE"; return 0; }
   PREFLIGHT_RC="$GATE_RC"; PREFLIGHT_LINE="$GATE_LINE"; PREFLIGHT_ERR="$GATE_ERR"
   return 0
@@ -2292,13 +2238,6 @@ do_check() {
   # by eye. Zero registered trees is the conservative failure and says so BY NAME
   # rather than printing an empty list a reader could mistake for a scan that found
   # nothing to scan.
-  #
-  # THE TWO CENSUSES CAN DISAGREE (C4). `wt_unreached` falls back to the unregistered
-  # `wt/*` glob on a column-less table (above), so `unreached` can be non-empty while
-  # the REGISTER's own `wt_count` reads zero — a plan with no `worktree` column at all
-  # registers nothing, but its fallback census can still name a branch to refuse on.
-  # The WOULD-REFUSE clause is therefore keyed on `unreached` alone, never gated behind
-  # `wt_count`, so `check` never goes silent on exactly the plans C4 found silent.
   wt_list="$(wt_branches)"
   wt_count="$(printf '%s\n' "$wt_list" | grep -c '[^[:space:]]')"
   unreached=""

@@ -300,13 +300,27 @@ translate_source _translate_matrix
 _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged row's proof, a waived row's waiver
   # The table's cells are named by its own header line, never counted by place. A row says only its criterion,
   # its state and what its evidence and auditor cells hold, so that is all its event carries: the head, the
-  # kind, the author and the instant are gaps. A pending or blocked row is no event. A criterion that a
+  # kind, the author and the instant are gaps. A pending or blocked row is no event: 15 holds no evidence or
+  # verdict for a criterion not discharged, so an evidence or auditor cell such a row holds (its evidence in its
+  # block when the cell holds none), unless it only repeats the row's status, is named on the gaps list as
+  # undischarged rather than dropped without a word. A criterion that a
   # `proved:` or `waived:` line of the SDLC State names by `ac=` is that line's fact, with the head and the
   # instant the row lacks; the row then writes nothing of that type, so one fact is never read as two. A
   # waived row whose criterion's block below the table holds an indented `waiver: <who> <day or instant>
   # "<words>"` line takes its author, instant and words from it, as the block writes them. That line is also a
   # hand act of its own, `what=waive-row`, whatever the row's status says: a person wrote it, so it is counted
-  # among the hand acts, while only a row the status marks waived is a waiver the judge honours.
+  # among the hand acts, while only a row the status marks waived is a waiver the judge honours. A criterion's
+  # evidence was written in one of two places, its cell or an indented `evidence:` line of its block with a dash
+  # in the cell; a cell that holds a value wins, and only an evidence in neither place is a gap. A cell that only
+  # points at its own block (`see <its own id>`) holds no value: the block's line is the evidence, and with none the evidence
+  # is a gap, since a pointer carried into the proof resolves to nothing once the block is gone. Version 15 has no
+  # block, so the proof is where the evidence lives after the act: read from the cell alone, it would be lost.
+  # A caller that sets TRANSLATE_CONFIRMED=approval (the act) also gets, after a proof or waiver whose block holds a
+  # person's confirmation in the attributed form lib/walls.sh `user_confirmed_attributed` takes, `<who> <YYYY-MM-DD>
+  # <words>`, the approval naming the criterion, 15's one home for it, in the approve verb's fields; `pending` and any
+  # other words are none. No other caller asks: a run at 14 read in place keeps the block's line as its confirmation.
+  # A pending or blocked criterion's confirmation is named on the gaps list as its cells are, never written: at 15 an
+  # approval alone discharges a criterion, so writing it would move the criterion from pending to discharged.
   { _translate_section "$1" "SDLC State" | awk '/^(proved|waived): / && match($0, / ac=[^ ]+/) { print "S", $1, substr($0, RSTART + 4, RLENGTH - 4) }'
     _translate_section "$1" "Verification Matrix" | awk '
       { l = $0; sub(/^[-*+][ \t]+/, "", l) }
@@ -317,27 +331,49 @@ _translate_matrix() {  # <plan> -> the Verification Matrix rows: a discharged ro
         at = w[n]; if (at == "") at = w[n - 1]; by = substr(h, 1, index(h, at) - 1); sub(/^[ \t]+/, "", by); sub(/[ \t]+$/, "", by)
         r = substr(s, q + 1); said = (index(r, "\"") ? substr(r, 1, index(r, "\"") - 1) : "")
         printf "W\036%s\036%s\036%s\036%s\n", ac, by, at, said }
-      ac != "" && match($0, /^[ \t]+user-confirmed[ \t]*:/) { v = substr($0, RLENGTH + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); printf "U\036%s\036%s\n", ac, v }'
-    _translate_section "$1" "Verification Matrix"; } | awk -F'|' "$_TRANSLATE_AWK"'
+      ac != "" && match($0, /^[ \t]+user-confirmed[ \t]*:/) { v = substr($0, RLENGTH + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); printf "U\036%s\036%s\n", ac, v }
+      ac != "" && match($0, /^[ \t]+evidence[ \t]*:/) { v = substr($0, RLENGTH + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); printf "E\036%s\036%s\n", ac, v }'
+    _translate_section "$1" "Verification Matrix"; } | awk -F'|' -v conf="${TRANSLATE_CONFIRMED:-}" "$_TRANSLATE_AWK"'
+    function pointer(ac, v) { return tolower(v) == "see " tolower(ac) }
+    function attributed(ac) { return (ac in uc) && uc[ac] ~ /^[A-Za-z][A-Za-z0-9._-]*[ \t]+[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ \t]+[^ \t]/ }
+    function confirm(ac,   v, by, r, said) {
+      if (conf != "approval" || !attributed(ac)) return
+      v = uc[ac]
+      by = v; sub(/[ \t].*$/, "", by); r = substr(v, length(by) + 1); sub(/^[ \t]+/, "", r)
+      said = trim(substr(r, 11)); if (said ~ /^".*"$/) said = substr(said, 2, length(said) - 2)
+      begin("approval", "key", ac); put("by", by); put("said", said); emit(substr(r, 1, 10)) }
+    function undischarged(ac, s,   j, n, w, k, v) {
+      n = split("evidence auditor", w, " ")
+      for (j = 1; j <= n; j++) {
+        k = w[j]; v = ((k in col) && !none($(col[k]))) ? trim($(col[k])) : ""; if (pointer(ac, v)) v = ""
+        if (v == "" && k == "evidence" && (ac in be)) v = be[ac]
+        if (v != "" && tolower(v) != s) printf "g\t\tgap/v1|ev=criterion|criterion=%s|field=%s|why=undischarged\n", ac, k
+      }
+      if (attributed(ac)) printf "g\t\tgap/v1|ev=criterion|criterion=%s|field=user-confirmed|why=undischarged\n", ac
+    }
     /^S / { split($0, w, " "); stated[(w[2] == "proved:" ? "proof" : "waiver") SUBSEP w[3]] = 1; next }
     /^W\036/ { split($0, w, "\036"); if (!(w[2] in wat)) { wby[w[2]] = w[3]; wat[w[2]] = w[4]; wsaid[w[2]] = w[5] }
       begin("hand", "ac", w[2]); put("what", "waive-row"); if (w[3] != "") put("by", w[3]); if (w[5] != "") put("said", w[5]); emit(w[4]); next }
     /^U\036/ { split($0, w, "\036"); if (!(w[2] in uc)) uc[w[2]] = w[3]; next }
+    /^E\036/ { split($0, w, "\036"); if (!(w[2] in be) && !none(w[3])) be[w[2]] = trim(w[3]); next }
     !/^\|/ { if (nh) done = 1; next }
     done { next }
     !nh { for (i = 2; i < NF; i++) { k = tolower(trim($i)); gsub(/[ \t]+/, "-", k); col[k] = i }; nh = 1; next }
     /^\|[-:| \t]+$/ || !("ac" in col) || !("status" in col) { next }
     {
       ac = trim($(col["ac"])); s = trim($(col["status"])); t = (s == "discharged") ? "proof" : (s == "waived") ? "waiver" : ""
+      if (t == "" && ac != "" && (s == "pending" || s == "blocked")) { undischarged(ac, s); next }
       if (t == "" || ac == "" || ((t SUBSEP ac) in stated)) next
       begin(t, "ac", ac)
       for (j = split("evidence auditor", w, " "); j > 0; j--) c[w[j]] = ((w[j] in col) && !none($(col[w[j]]))) ? trim($(col[w[j]])) : ""
+      if (pointer(ac, c["evidence"])) c["evidence"] = ""
+      if (c["evidence"] == "" && (ac in be)) c["evidence"] = be[ac]
       put("evidence", c["evidence"]); put("auditor", c["auditor"])
       # A person confirms a criterion in its block; a block with no such line holds no confirmation to name.
       if (ac in uc) put("confirmed", uc[ac])
-      if (t == "waiver" && (ac in wat)) { put("by", wby[ac]); put("said", wsaid[ac]); lack("head"); emit(wat[ac]); next }
+      if (t == "waiver" && (ac in wat)) { put("by", wby[ac]); put("said", wsaid[ac]); lack("head"); emit(wat[ac]); confirm(ac); next }
       if (t == "proof") lack("kind"); else lack("by")
-      lack("head"); emit("")
+      lack("head"); emit(""); confirm(ac)
     }'
 }
 

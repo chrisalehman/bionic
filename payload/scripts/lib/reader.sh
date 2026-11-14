@@ -496,16 +496,20 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
 # closed runs, and the fields are what the gate, the judge and the cards weigh, never a fact a person asks for.
 #   state, by   discharged only by a standing event naming the criterion: an approval by its key, a waiver or a
 #               proof by `ac=`; a proof that failed (rc other than 0, or result=fail) discharges nothing; an older
-#               table's proof, which has no instant, does not displace a waiver the log holds with one.
+#               table's proof, which has no instant, does not displace a waiver the log holds with one. An approval
+#               discharges only a criterion nothing else does: a person confirms after the proof, and their word never
+#               unseats the proof or waiver that came first.
 #   tier        the Eval design's eval type through lib/scale.sh, else the older table's tier cell.
 #   evidence    the discharging proof's or waiver's `evidence=`, else the older table's evidence cell.
 #   auditor     on a row the older table holds: the discharging event's `auditor=`, else the row's cell; on any other
-#               criterion: the evidence review standing at <head>, CONFIRMED when it passed and REFUTED when not.
+#               criterion: the `auditor=` its discharging proof carries when that proof has no instant, else the
+#               evidence review standing at <head>, CONFIRMED when it passed and REFUTED when not. An untimed proof is
+#               one the act translated from an older row, whose verdict stood from then on; the appender stamps
+#               every line it writes, so a verdict named on a proof written since is never read as one.
 #   confirmed   the approval naming the criterion, as `<by> <day> <its words>`, its giver folded to one word and the
 #               criterion standing for words it holds none of, the shape an older block's confirmation is written in;
 #               else, on a row the older table holds, the discharging event's `confirmed=`, else its block's
-#               `user-confirmed:`. On such a row the approval confirms and never unseats the proof or waiver that
-#               discharges it.
+#               `user-confirmed:`.
 #   serves      on a row the older table holds: its block's first `serves:`; else the Eval design's requirement.
 # 1 when the plan names no criterion; the fold's failure is its exit.
 reader_cells() {
@@ -530,7 +534,7 @@ reader_cells() {
     { e = ev(); c = (e == "approval") ? line_kv("key") : line_kv("ac") }
     e == "proof" && line_kv("kind") == "review" && line_kv("question") == "evidence" && h != "" && line_kv("head") == h { review = (line_kv("result") == "pass") ? "CONFIRMED" : "REFUTED" }
     c == "" || !(c in seen) { next }
-    e == "approval" { if (!(c in row) || by[c] == "") by[c] = "approval"; g = line_kv("by"); gsub(/[^A-Za-z0-9._-]+/, "-", g); sub(/^-+/, "", g); sub(/-+$/, "", g)
+    e == "approval" { if (by[c] == "") by[c] = "approval"; g = line_kv("by"); gsub(/[^A-Za-z0-9._-]+/, "-", g); sub(/^-+/, "", g); sub(/-+$/, "", g)
       ok[c] = g " " substr(line_kv("at"), 1, 10) " " (line_kv("said") != "" ? line_kv("said") : c) }
     e == "proof" && line_kv("at") == "" && by[c] == "waiver" && at_[c] != "" { next }
     e == "waiver" || e == "proof" && line_kv("rc") ~ /^0?$/ && line_kv("result") != "fail" {
@@ -542,7 +546,7 @@ reader_cells() {
           d = (b == "proof" || b == "waiver")
           ev1 = d ? ev_[c] : (none(rev[c]) ? "" : rev[c]); a = d ? aud[c] : (none(raud[c]) ? "" : raud[c]); if (a == "" && d && at_[c] != "") a = review
           k = (c in ok) ? ok[c] : d ? cf[c] : rconf[c]
-        } else { ev1 = (b == "proof" || b == "waiver") ? ev_[c] : ""; a = review; k = ok[c] }
+        } else { ev1 = (b == "proof" || b == "waiver") ? ev_[c] : ""; a = (b == "proof" && at_[c] == "" && aud[c] != "") ? aud[c] : review; k = ok[c] }
         print c "\037" (b == "" ? "pending" : "discharged") "\037" b "\037" tier[c] "\037" ev1 "\037" a "\037" k "\037" ((c in row) ? sv[c] : req[c])
       }
     }'

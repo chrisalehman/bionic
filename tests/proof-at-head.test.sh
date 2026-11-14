@@ -36,21 +36,24 @@ set -uo pipefail
 
 PAH_LIB="$REPO_ROOT/payload/scripts/lib"
 PAH_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+CO_PLAN_AT=15   # the worlds here are at 15
 
 # pah_world <label> <owed suites, comma-joined, or empty> <landings> -> PAH_P, PAH_PLAN, PAH_F (the whole run's head)
 # and PAH_H (the working head): the close-out fixture at Step 8 with a whole run at F that left <owed> red, then
 # <landings> code landings, landing k greening the owed suites at positions k, k + <landings>, …; with landings the
-# integration branch takes the working branch, the readings move to H and the plan carries the word to merge at H.
+# integration branch takes the working branch, the readings move to H and the run carries the word to merge at H.
+# The page is at 15, where the proof, the readings' head and the word are the run's log's events, each by its writer.
 pah_world() {
-  local label="$1" owed="$2" n="${3:-0}" p plan w rec k i s su c
-  p="$(mk_fixture "$label")" || return 1
+  local label="$1" owed="$2" n="${3:-0}" p plan w rec k i s su c log
+  p="$(CO_PLAN_AT=15 mk_fixture "$label")" || return 1
   advance_to "$p" 8
   plan="$p/$PLAN_REL"; w="$p-wave"; rec="$p/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
   PAH_F="$(fixture_git "$p" rev-parse wave/01-fixture)"
-  sed '/^proved: kind=regression /d' "$plan" > "$plan.n" && mv "$plan.n" "$plan"
-  bash -c '. "$1/proof.sh" || exit 1
-    proof_add_line "$2" "$(proof_floor_line "$3" 2026-10-04T12:00:00Z "record/wave-01-fixture/regression-run-$3.log" "$4")"' \
-    _ "$PAH_LIB" "$plan" "$PAH_F" "$owed" > "$plan.n" && mv "$plan.n" "$plan"
+  log="$p/$LOG_REL"
+  sed '/|ev=proof|kind=regression|/d' "$log" > "$log.n" && mv "$log.n" "$log"
+  bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
+    LOG_AT=2026-10-04T12:00:00Z proof_event "$2" kind=regression "head=$3" "evidence=record/wave-01-fixture/regression-run-$3.log" ${4:+"owed=$4"}' \
+    _ "$PAH_LIB" "$plan" "$PAH_F" "$owed" || return 1
   mkdir -p "${rec%/*}"
   k=1
   while [ "$k" -le "$n" ]; do
@@ -78,9 +81,10 @@ pah_world() {
   if [ "$n" -gt 0 ]; then
     fixture_git "$p" merge -q --no-ff -m "merge wave" wave/01-fixture >/dev/null 2>&1 || return 1
     # The landings cover the head and no pass ran at it, so the merge close-out delivers is the person's word at H.
-    awk -v f="$PAH_F" -v h="$PAH_H" '/^proved: kind=review / { sub("head=" f, "head=" h) } { print }
-      /^current: / { print "approved: merge-unproved by fixture 2026-10-04T14:00:00Z head=" h " \"merge it\"" }' "$plan" > "$plan.n" \
-      && mv "$plan.n" "$plan"
+    sed "s/|ev=proof|kind=review|head=$PAH_F|/|ev=proof|kind=review|head=$PAH_H|/" "$log" > "$log.n" && mv "$log.n" "$log"
+    bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
+      LOG_AT=2026-10-04T14:00:00Z proof_approval_event "$2" merge-unproved by=fixture "head=$3" "said=merge it"' \
+      _ "$PAH_LIB" "$plan" "$PAH_H" || return 1
   fi
   PAH_P="$p"; PAH_PLAN="$plan"
 }
@@ -195,7 +199,7 @@ expect_eq "ONE-13 (AC-1.1) two docs-only commits past a green whole run: the sta
 pah_poke "$P3" pah-past-card release-approval --preview "$P3_PLAN"; P3_CARD="$PAH_OUT"
 pah_poke "$P3" pah-past-card landing-report --scorecard "$P3_PLAN"; P3_SCORE="$PAH_OUT"
 run_close_as pah-past-close "$P3" run
-expect_eq "ONE-14 …close-out delivers at that head with no word from the person (exit 0, no merge-unproved line)" "0|0" "$CO_RC|$(/usr/bin/grep -c '^approved: merge-unproved ' "$P3_PLAN")"
+expect_eq "ONE-14 …close-out delivers at that head with no word from the person (exit 0, no merge-unproved approval)" "0|0" "$CO_RC|$(/usr/bin/grep -c '|ev=approval|key=merge-unproved|' "$P3/$LOG_REL")"
 [ "$CO_RC" = 0 ] || printf '      close-out said: %s\n' "$(printf '%s\n' "$CO_OUT" | tail -3)"
 expect_eq "ONE-15 …and the card, the scorecard and the continuation print that one state" "one: $P3_WANT" \
   "$(pah_one "$(pah_card_state "$P3_CARD")" "$(pah_score_state "$P3_SCORE")" "$(pah_cont_state "$P3/$CONT_REL")")"
@@ -205,7 +209,7 @@ expect_absent "ONE-16b …and asks no merge without a pass, on the card whose wh
 pah_world past-release "" 0
 P4_F="$PAH_F"; pah_past CHANGELOG.md,payload/.claude-plugin/plugin.json
 expect_eq "ONE-17 (AC-1.2) one release-set commit past F with no check recorded at it: red, the landing counted" "red at ${P4_F:0:8}, 1 landing before this head" "$(pah_whole)"
-bash -c '. "$1/proof.sh" && proof_add_line "$2" "$(proof_line check "$3" 2026-10-04T15:00:00Z record/wave-01-fixture/release-check.log)"' _ "$PAH_LIB" "$PAH_PLAN" "$PAH_H" > "$PAH_PLAN.n" && mv "$PAH_PLAN.n" "$PAH_PLAN"
+bash -c '. "$1/run.sh" && . "$1/proof.sh" && LOG_AT=2026-10-04T15:00:00Z proof_event "$2" kind=check "head=$3" evidence=record/wave-01-fixture/release-check.log' _ "$PAH_LIB" "$PAH_PLAN" "$PAH_H"
 expect_eq "ONE-17a precondition: the release set's readers are the five suites that read it" "release-check.test.sh shell-lint.test.sh render.test.sh commands.test.sh words.test.sh" "$(bash -c '. "$1/proof.sh" && _proof_release_readers' _ "$PAH_LIB" 2>/dev/null | paste -sd' ' -)"
 pah_read() { bash -c '. "$1/line.sh" || exit 1; p="$2" c="$3"; shift 3; for s; do line_event "$p" verdict row=T8 "commit=$c" "suite=$s" result=green log=- admitted=- width=-; done' _ "$PAH_LIB" "$PAH_PLAN" "$PAH_H" "$@"; }  # <suite>... -> a green verdict each at PAH_H
 pah_read release-check.test.sh shell-lint.test.sh render.test.sh commands.test.sh
@@ -238,7 +242,7 @@ section "§LOG: the proof readers answer from the reader's facts, so a proof the
 # fails-when: facts_state, proof_last or proof_approved_head read the plan's SDLC State text themselves, so a review
 # reading, a regression proof or an approval written only as a run/v1 event reads absent; or a fact read once is
 # served after the plan changed under the same process.
-PL="$(mk_fixture log)"; advance_to "$PL" 8
+PL="$(CO_PLAN_AT=14 mk_fixture log)"; advance_to "$PL" 8
 PL_PLAN="$PL/$PLAN_REL"; PL_H="$(fixture_git "$PL" rev-parse wave/01-fixture)"; PL_REC="$PL/.bionic/docs/record/wave-01-fixture"
 mkdir -p "$PL_REC"
 for q in evidence adversarial structure; do

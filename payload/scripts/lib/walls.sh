@@ -1661,8 +1661,9 @@ matrix_auditor_required() {
 # MATRIX_CELLS, the reader's line for every criterion (lib/reader.sh `reader_cells`, one fold: its state, tier,
 # evidence, auditor, confirmation and serves, from the run's events and, for an older plan, its table and block), and
 # MATRIX_BLOCKS, each criterion's authored block of an older plan (lib/plan-read.sh `plan_read_blocks`, the plan's
-# one parser), its head lines with the criterion empty. No arm parses the plan's matrix itself, so the commit gate,
-# the judge and the cards cannot answer one criterion two ways. 2 when the run's facts could not be read: a run
+# one parser), its head lines with the criterion empty, and MATRIX_TASKS, the task that proves each criterion
+# (lib/plan-read.sh `plan_read_criterion_task`), for the plan MATRIX_TASKS_OF names. No arm parses the plan's matrix
+# itself, so the commit gate, the judge and the cards cannot answer one criterion two ways. 2 when the run's facts could not be read: a run
 # read as holding no fact would read every criterion pending, and a pending criterion is relaxed.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 # A criterion's verdict, where the reader takes the evidence review's, is the newest evidence review's when it passed
@@ -1683,6 +1684,8 @@ matrix_load() {  # <plan> [head]
   MATRIX_CELLS="$(_proof_ask "$rp" reader_cells "$1" "$h")" || rc=$?
   case "$rc" in 0) ;; 1) MATRIX_CELLS="" ;; *) return 2 ;; esac
   MATRIX_BLOCKS="$(plan_read_blocks "$1" 2>/dev/null)" || MATRIX_BLOCKS=""
+  MATRIX_TASKS="$(plan_read_criterion_task "$1" 2>/dev/null)" || MATRIX_TASKS=""
+  MATRIX_TASKS_OF="$1"
   return 0
 }
 
@@ -1761,22 +1764,27 @@ matrix_row_waiver() {  # <evidence cell> <AC block> -> 0 when a waiver is record
   grep -qE 'waiver:' <<< "$1" || grep -qE '^[[:space:]]*waiver[[:space:]]*:' <<< "$2"
 }
 
-# The `task:` value out of an AC block (empty when absent): the plan row, or rows, whose work
-# proves the criterion, or the literal `9`, the close's step (`matrix_owing_step` reads it).
-matrix_block_task() {  # <AC block> -> the value
-  echo "$1" | grep -E '^[[:space:]]*task[[:space:]]*:' | head -1 \
-    | sed -E 's/^[[:space:]]*task[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//'
+# The task that proves <AC> (empty when it names none): the plan row, or rows, whose work proves the criterion, or the
+# literal `9`, the close's step, as the plan's one reader answers it (lib/plan-read.sh `plan_read_criterion_task`: the
+# criteria table's Task cell at 15, the block's `task:` line before). Asked of what matrix_load holds when it loaded
+# this plan, else of the plan itself.
+matrix_criterion_task() {  # <plan> <AC> -> the value
+  if [ "${MATRIX_TASKS_OF:-}" = "$1" ]; then
+    awk -F'\t' -v ac="$2" '$1 == ac { print substr($0, length(ac) + 2); exit }' <<< "${MATRIX_TASKS:-}"
+  else
+    plan_read_criterion_task "$1" "$2" 2>/dev/null | cut -f2-
+  fi
 }
 
 # A CRITERION IS OWED AT THE STEP WHOSE TASK PROVES IT. The tier says how a criterion is proved;
 # the step of the row that proves it says when. `matrix_owing_step` reads that step out of the
-# block's `task:` value: a row id resolves to its row's `step` cell through the one `## Tasks`
+# criterion's task (`matrix_criterion_task`): a row id resolves to its row's `step` cell through the one `## Tasks`
 # reader (lib/units.sh `units_rows`, `units_field_v`), a comma list to the latest step among its
 # rows, and the literal `9` stays the close's step. Any other value, or an id the table lacks,
 # owes at no particular step, so the row is judged as every row is.
-matrix_owing_step() {  # <plan> <AC block> -> the step number, or nothing
+matrix_owing_step() {  # <plan> <AC> -> the step number, or nothing
   local val id rec s best="" rows
-  val="$(matrix_block_task "$2")"
+  val="$(matrix_criterion_task "$1" "$2")"
   [ -n "$val" ] || return 0
   if [ "$val" = 9 ]; then printf '9\n'; return 0; fi
   rows="$(units_rows "$1" 2>/dev/null)" || return 0
@@ -1791,13 +1799,13 @@ matrix_owing_step() {  # <plan> <AC block> -> the step number, or nothing
   [ -z "$best" ] || printf '%s\n' "$best"
 }
 
-# matrix_owing_open <plan> <AC block> -> `yes` when any row the block's `task:` names is neither
-# landed nor dropped: the work that proves the criterion is still under way. A `task:` naming no
+# matrix_owing_open <plan> <AC> -> `yes` when any row the criterion's task names is neither
+# landed nor dropped: the work that proves the criterion is still under way. A task naming no
 # row prints nothing. The status is read through the same `units_rows` the owing step is.
 matrix_owing_open() {
   local id rec s rows
   rows="$(units_rows "$1" 2>/dev/null)" || return 0
-  for id in $(matrix_block_task "$2" | tr ',' ' '); do
+  for id in $(matrix_criterion_task "$1" "$2" | tr ',' ' '); do
     rec="$(awk -F'\t' -v i="$id" '$1 == i { print; exit }' <<< "$rows")"
     [ -n "$rec" ] || continue
     units_field_v s "$rec" status
@@ -1860,12 +1868,12 @@ matrix_close_eval() { grep -qE 'landing-report[[:space:]]+--hand-holds' <<< "$1"
 # order: owed at Step 9, and its block's `eval:`, else its Eval design row's, is the close's measure (matrix_close_eval).
 # close-out proves each such criterion from that reading. 2 when the run's facts could not be read.
 matrix_close_rows() {
-  local PLAN="$1" MATRIX_CELLS MATRIX_BLOCKS ac tier status ev aud conf w block
+  local PLAN="$1" MATRIX_CELLS MATRIX_BLOCKS MATRIX_TASKS MATRIX_TASKS_OF ac tier status ev aud conf w block
   matrix_load "$PLAN" || return 2
   while IFS=$'\037' read -r ac tier status ev aud conf w; do
     [ -n "$ac" ] && [ "$status" = pending ] || continue
     block="$(matrix_block "$ac")"
-    [ "$(matrix_owing_step "$PLAN" "$block")" = 9 ] || continue
+    [ "$(matrix_owing_step "$PLAN" "$ac")" = 9 ] || continue
     matrix_close_eval "$(grep -E '^[[:space:]]*eval[[:space:]]*:' <<< "$block")" \
       || matrix_close_eval "$(plan_read_row "$PLAN" 'Eval design' Criterion "$ac" 2>/dev/null | grep '^eval=')" || continue
     printf '%s\n' "$ac"
@@ -1930,11 +1938,14 @@ matrix_row_has_verdict() {
 #   CONFIRMED, or it is a T4 row whose `user-confirmed:` is attributed and whose auditor cell
 #   is empty-like. A user's confirmation replaces the WAIVER a T4 row used to need, never the
 #   auditor: a standing REFUTED or UNVERIFIABLE on a confirmed T4 row is a verdict, not a
-#   ruling, and the person rules on it.
+#   ruling, and the person rules on it. A T4 row holding no confirmation at all is never ruled
+#   short of its waiver, whatever its auditor cell: at 15 that cell is the run's evidence review,
+#   which no person gave, so the person is asked at the merge advance and on the card.
 matrix_row_ruled() {
   local aud
   aud="$(placeholder_cell "$3")"
   [ "$2" = waived ] && [ "$5" = 1 ] && return 0
+  [ "$1" = T4 ] && [ -z "$4" ] && return 1
   [ "$aud" = CONFIRMED ] && return 0
   [ "$1" = T4 ] && [ -z "$aud" ] && user_confirmed_attributed "$4"
 }
@@ -1966,14 +1977,13 @@ matrix_row_owes() {
 # review is read at, for a criterion no older table holds. Needs lib/run.sh, lib/units.sh and
 # lib/proof.sh loaded, as every caller of this file has them. 2 when the run's facts could not be read.
 matrix_unruled() {
-  local PLAN="$1" MATRIX_CELLS MATRIX_BLOCKS RIGOR ac tier status ev aud conf waiver block defer
+  local PLAN="$1" MATRIX_CELLS MATRIX_BLOCKS MATRIX_TASKS MATRIX_TASKS_OF RIGOR ac tier status ev aud conf waiver defer
   RIGOR="$(plan_frontmatter_get "$1" rigor)"
   matrix_auditor_required || return 0
   matrix_load "$PLAN" "${3:-}" || return 2
   while IFS=$'\037' read -r ac tier status ev aud conf waiver; do
     [ -n "$ac" ] || continue
-    block="$(matrix_block "$ac")"
-    defer=0; matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$block")" "$2" "$status" "$(matrix_owing_open "$PLAN" "$block")" && defer=1
+    defer=0; matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$ac")" "$2" "$status" "$(matrix_owing_open "$PLAN" "$ac")" && defer=1
     matrix_row_owes "$2" "$tier" "$status" "$aud" "$conf" "$waiver" "$defer" >/dev/null \
       && printf '%s\n' "$ac"
   done <<MATRIX_ROWS
@@ -2991,16 +3001,14 @@ Fix: write the planted defect this eval must go red on in the criterion's '## Ev
 #
 # INERT BELOW STEP 4, same reasoning as the two arms above: the Tasks table and the
 # Verification Matrix are both Step-3 artifacts, not necessarily complete before then.
+# Each criterion's task is asked of the plan's one reader (lib/plan-read.sh `plan_read_criterion_task`), so a plan at 15,
+# whose criteria table names it in its Task column, is judged as an older plan's blocks are.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_prototype_no_matrix_row() {
-  local step task_rows proto_ids line id rows ac block_txt ac_task n MATRIX_BLOCKS
+  local step task_rows proto_ids line id ac ac_task n fix
   step=$(k2_step_num)
   [ -n "$step" ] || return 0
   [ "$step" -ge 4 ] || return 0
-  if [ "$_EG_V15" -eq 1 ]; then
-    case "$(plan_read_rows "$PLAN" Tasks)" in *$'kind=prototype\t'*) _eg_v15_owe "each criterion's task: (whether a prototype row discharges one)" ;; esac
-    return 0
-  fi
 
   task_rows="$(units_rows "$PLAN")" || return 0
   [ -n "$task_rows" ] || return 0
@@ -3016,25 +3024,20 @@ validate_prototype_no_matrix_row() {
   done <<< "$task_rows"
   [ -n "$proto_ids" ] || return 0
 
-  # Each criterion's task is its block's, read through the plan's one parser: a criterion with no block names none.
-  MATRIX_BLOCKS="$(plan_read_blocks "$PLAN" 2>/dev/null)" || return 0
-  rows="$(awk -F'\t' '$1 != "" && !s[$1]++ { print $1 }' <<< "$MATRIX_BLOCKS")"
-
-  while IFS= read -r ac; do
-    [ -n "$ac" ] || continue
-    block_txt=$(matrix_block "$ac")
-    [ -n "$block_txt" ] || continue
-    ac_task=$(echo "$block_txt" | grep -E '^[[:space:]]*task[[:space:]]*:' | head -1 \
-      | sed -E 's/^[[:space:]]*task[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
-    [ -n "$ac_task" ] || continue
+  while IFS=$'\t' read -r ac ac_task; do
+    [ -n "$ac" ] && [ -n "$ac_task" ] || continue
     for n in $proto_ids; do
       [ "$ac_task" = "$n" ] || continue
+      fix="remove the '${ac}:' block, or repoint its 'task:'"
+      [ "$_EG_V15" -ne 1 ] || fix="repoint the Task cell of '${ac}' in '## Eval design'"
       _eg_detail="canonical-sdlc step ${CURRENT} — matrix row '${ac}' names 'task: ${ac_task}', a 'kind: prototype' row in '## Tasks'; a prototype ships nothing and never discharges a matrix row.
 Plan: $PLAN
-Fix: remove the '${ac}:' block, or repoint its 'task:' to the build task that cites the prototype's ruling — the prototype's own output is a design decision written to the spec, never a matrix discharge."
+Fix: ${fix} to the build task that cites the prototype's ruling — the prototype's own output is a design decision written to the spec, never a matrix discharge."
       refuse exit2 commit "that row's task ships nothing" "point it at a shipping task" "$_eg_detail"
     done
-  done <<< "$rows"
+  done <<PROTO_TASKS
+$(plan_read_criterion_task "$PLAN" 2>/dev/null)
+PROTO_TASKS
   return 0
 }
 
@@ -4071,7 +4074,7 @@ Plan: $PLAN"
 # load-bearing.
 #
 # A criterion is owed at the step whose task proves it: a pending or blocked
-# row whose AC block's `task:` names a later step than the current one keeps
+# row whose task (its block's `task:`, at 15 its Task cell) names a later step than the current one keeps
 # that same relaxation until its step, both the per-tier keys and the
 # auditor arm, at any tier. The literal `task: 9` is the close's step, and a
 # row owed there is settled by close-out after `delivered:`. See
@@ -4250,7 +4253,7 @@ MATRIX_STATUS
     # `delivered:`, so no commit against an open plan demands it.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     deferred=0
-    matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$block_txt")" "$CURRENT" "$status" "$(matrix_owing_open "$PLAN" "$block_txt")" && deferred=1
+    matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$ac")" "$CURRENT" "$status" "$(matrix_owing_open "$PLAN" "$ac")" && deferred=1
     # waived rows (evidence cell or the AC block carries a `waiver:` entry) are
     # exempt from the per-tier evidence requirement.
     if [ "$row_is_waived" = "1" ]; then
@@ -4272,6 +4275,12 @@ MATRIX_STATUS
       live_exit=""
       case "$status" in pending|blocked) live_exit="$(matrix_live_row_exit "$ac")" ;; esac
       for key in $(keys_for_tier "$tier"); do
+        # AT 15 A CRITERION THE PERSON CONFIRMS, WITH NO APPROVAL NAMING IT, AWAITS ITS PERSON: the confirmation is the
+        # release approval card's to collect, so it is owed from the merge advance and not before, or a run holding one
+        # could not leave the verify step until the person answered.
+        if [ "$v15" = 1 ] && [ "$key" = user-confirmed ] && [ -z "$ucv" ] && [ "${CURRENT%[ab]}" -lt 8 ] 2>/dev/null; then
+          continue
+        fi
         if ! grep -qE "^[[:space:]]*${key}[[:space:]]*:" <<< "$block_txt"; then
           block_matrix "row ${ac} has no ${key} evidence" "record it, or waive the row" \
             "matrix row '${ac}' (${tier}) is missing evidence key '${key}' in its AC block." \
@@ -5005,6 +5014,7 @@ dispatch() {
       [ "$(walk_mode)" = exempt ] || validate_walk_artifact
       validate_environments ;;
     esac
+    [ "$CURRENT" = "$INTEGRATE_STEP" ] && validate_merge_target
     case "${CURRENT%[ab]}" in 6|7|8|9) _eg_refuse_readings "the run" "$RIGOR"; _eg_refuse_floor_absent "the run" ;; esac
     _eg_v15_refuse
     case "${CURRENT%[ab]}" in 5|6|7|8|9) validate_matrix ;; esac

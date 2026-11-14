@@ -1999,20 +1999,22 @@ dispatch_refuse_findings
 
 # ============================================================ WHAT AN ADMITTED DISPATCH IS TOLD
 #
-# A dispatch that reached this line is allowed, so what follows is only ever said, never decided: the
-# debt its Files touch and the rendered twins its Files gained. It goes out on the model's channel,
-# `hookSpecificOutput.additionalContext` on stdout with exit 0, which reaches the orchestrator's model in
-# the interactive session. Placed below the spend so a refused dispatch carries only its refusal, and
-# above the ledger so the words precede the journalled launch. The emitter is lib/fold.sh
-# `_fold_emit_context`, which builds the object through `jq`; with no `jq` the lines fall back to `warn`.
-_dp_adv_all=""
+# A dispatch that reached this line has passed every arm that judges its brief, so what follows is only ever said,
+# never decided: the debt its Files touch and the rendered twins its Files gained. It goes out on the model's channel,
+# `hookSpecificOutput.additionalContext` on stdout with exit 0, which reaches the orchestrator's model in the
+# interactive session. The emitter is lib/fold.sh `_fold_emit_context`, which builds the object through `jq`; with no
+# `jq` the lines fall back to `warn`.
+#
 # THE DEBT ARM (wave-30 T22; D2, P2, AC-11.3). Debt is burned by the next row whose Files touch its
 # concept, so an allowed brief whose `Files:` covers a site of a debt the run holds unburned
 # (lib/proof.sh `proof_debt_hits`: the path, a directory above it, or a glob over it) carries the item,
 # and the item's touches go up by one through the debt's one writer, `session-poker.sh debt touched`,
 # whose answer is the count printed. A touch the verb cannot write is still advised, at the count the
-# reader holds. Below the spend for the reason the body advisory is: a refused dispatch touches nothing.
-_dp_debt=""
+# reader holds. The items are read here, under the deadline. The touch is written and the words are said by
+# `dp_tell_admitted`, which runs only where the launch is admitted: past the roster's append, the wall's last
+# refusal, and at the exit that admits a read-only role from inside an agent, the deadline disarmed at both. A launch
+# refused after this read, by the deadline or by the roster, touches nothing and is told nothing but its refusal.
+_dp_debt_hits=""; _dp_dcs=""
 if [ -n "$PLAN" ] && [ -n "$C_FILES" ]; then
   if ! declare -F proof_debt_hits >/dev/null 2>&1 && [ -r "${BIONIC_LIB:-}/proof.sh" ]; then
     # shellcheck source=/dev/null
@@ -2020,29 +2022,29 @@ if [ -n "$PLAN" ] && [ -n "$C_FILES" ]; then
   fi
   if declare -F proof_debt_hits >/dev/null 2>&1; then
     _dp_debt_hits="$(proof_debt_hits "$PLAN" "$C_FILES" 2>/dev/null | awk -F'\t' '$6 == "-"')"
-    _dp_dseen=" "; _dp_dall=""
-    while IFS='	' read -r _dp_dc _dp_dk _ _ _dp_dn _; do
-      [ -n "$_dp_dc" ] || continue
-      # One call per concept: the verb touches every unburned item of it, whatever its kind.
-      case "$_dp_dseen" in *" $_dp_dc "*) : ;; *)
-        _dp_dseen="$_dp_dseen$_dp_dc "
-        _dp_dall="$_dp_dall
-$(cd "$BIONIC_ROOT" 2>/dev/null && bash "$HOOK_DIR/session-poker.sh" debt touched "$_dp_dc" "$PLAN" 2>/dev/null)" ;;
-      esac
-      _dp_dsaid="$(printf '%s\n' "$_dp_dall" | awk -v c="$_dp_dc" -v k="$_dp_dk" \
-        '$1 == "poker:" && $2 == "debt" && $3 == "touched" && $5 == c && $6 == k && $7 == "touches" && $8 ~ /^[0-9]+$/ { print $8; exit }')"
-      _dp_debt="${_dp_debt:+$_dp_debt
-}debt: $_dp_dc $_dp_dk touches ${_dp_dsaid:-$_dp_dn} — burn it in this row or say why not"
-    done <<DP_DEBT_EOF
-$_dp_debt_hits
-DP_DEBT_EOF
+    _dp_dcs="$(printf '%s\n' "$_dp_debt_hits" | awk -F'\t' '$1 != "" && !($1 in s) { s[$1] = 1; printf "%s%s", (n++ ? " " : ""), $1 }')"
   fi
 fi
-[ -z "$_dp_debt" ] || _dp_adv_all="${_dp_adv_all:+$_dp_adv_all
-}$_dp_debt"
-[ -z "$DP_TWINS_SAID" ] || _dp_adv_all="${_dp_adv_all:+$_dp_adv_all
+dp_tell_admitted() {
+  local _dp_dall="" _dp_debt="" _dp_adv_all="" _dp_dc _dp_dk _dp_dn _dp_dsaid _dp_adv_ctx _dp_adv_json _dp_adv
+  # ONE CALL FOR EVERY CONCEPT THE BRIEF TOUCHES: the verb is a process that reads the run whole, so a call per
+  # concept spent a read per concept, and a brief touching nine spent the wall's deadline. The verb touches every
+  # unburned item of each concept named, whatever its kind.
+  [ -z "$_dp_dcs" ] \
+    || _dp_dall="$(cd "$BIONIC_ROOT" 2>/dev/null && bash "$HOOK_DIR/session-poker.sh" debt touched "$_dp_dcs" "$PLAN" 2>/dev/null)"
+  while IFS='	' read -r _dp_dc _dp_dk _ _ _dp_dn _; do
+    [ -n "$_dp_dc" ] || continue
+    _dp_dsaid="$(printf '%s\n' "$_dp_dall" | awk -v c="$_dp_dc" -v k="$_dp_dk" \
+      '$1 == "poker:" && $2 == "debt" && $3 == "touched" && $5 == c && $6 == k && $7 == "touches" && $8 ~ /^[0-9]+$/ { print $8; exit }')"
+    _dp_debt="${_dp_debt:+$_dp_debt
+}debt: $_dp_dc $_dp_dk touches ${_dp_dsaid:-$_dp_dn} — burn it in this row or say why not"
+  done <<DP_DEBT_EOF
+$_dp_debt_hits
+DP_DEBT_EOF
+  [ -z "$_dp_debt" ] || _dp_adv_all="$_dp_debt"
+  [ -z "$DP_TWINS_SAID" ] || _dp_adv_all="${_dp_adv_all:+$_dp_adv_all
 }$DP_TWINS_SAID"
-if [ -n "$_dp_adv_all" ]; then
+  [ -n "$_dp_adv_all" ] || return 0
   _dp_adv_ctx="brief advisory (the dispatch is allowed; nothing was refused):
 $_dp_adv_all"
   _dp_adv_json=$(_fold_emit_context PreToolUse "$_dp_adv_ctx")
@@ -2055,7 +2057,8 @@ $_dp_adv_all"
 $_dp_adv_all
 ADV_EOF
   fi
-fi
+  return 0
+}
 
 # ---------- THE LEDGER STOPS AT DEPTH ONE ----------
 # (session-20260815-landing-supervision T6; design D1 "writers stay put".)
@@ -2082,6 +2085,9 @@ fi
 # not silent any more: one stderr line says what happened, so the dispatching agent sees that
 # this admission carries no row.
 if is_agent_context; then
+  # Admitted here, so the deadline is disarmed before the debt's touch: no refusal can follow it.
+  DP_DEADLINE_LIVE=0
+  dp_tell_admitted
   printf '%s\n' "bionic: dispatch admitted without a roster row — a read-only role launched from inside an agent; the ledger stays at depth one" >&2
   exit 0
 fi
@@ -2248,6 +2254,11 @@ fi
 [ -z "$DP_BOUND_TREE" ] \
   || bash "$BIONIC_LIB/../spawn-worktree.sh" mark "$DP_BOUND_TREE" --for "$AGENT_NAME" >/dev/null 2>&1 \
   || warn "the tree ${DP_BOUND_TREE} still names its last writer: spawn-worktree.sh mark --for ${AGENT_NAME} failed"
+
+# THE LAUNCH IS ADMITTED. The row is on the roster, the deadline was disarmed before it was written, and no line
+# below refuses (each is a warning), so the debt's touch is written here, and the advisory said, for this launch
+# alone. After the tree's mark, which the agent's first suite needs, so a slow touch can never cost the mark.
+dp_tell_admitted
 
 # The roster carries the launch; what follows is only ever said.
 if [ -n "$ABSENT" ]; then

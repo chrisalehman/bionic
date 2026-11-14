@@ -106,7 +106,7 @@ Do not carve a sensitive concern into a tiny unflagged wave to dodge a minimum. 
 <docs-root>/specs/epic-NN-<slug>/{epic.spec.md, wave-NN-<slug>.spec.md, wave-NN-<slug>.requirements.md}
 <docs-root>/plans/epic-NN-<slug>/{epic.plan.md, wave-NN-<slug>.plan.md}
 <docs-root>/adrs/epic-NN-<slug>/adr-NNN-<slug>.md
-<docs-root>/incidents/NNNN-<slug>/{spec.md, plan.md, rca.md}
+<docs-root>/incidents/NNNN-<slug>/{spec.md, NNNN-<slug>.plan.md, rca.md}
 <docs-root>/spikes/spike-<slug>-<YYYYMMDD>.md
 <docs-root>/record/               # operational record: session logs, rotated archives,
                                   # closed-wave handoffs, inert audits. Survives Step 8.
@@ -173,7 +173,7 @@ Committing is a cross-cutting rhythm (~once per step), not a numbered step; the 
 
 **Engagement:** a clean run has five human stops: the configuration, requirements, design and plan cards, then the release approval card. Steps 4–9 are unattended within the stop-and-wake rules.
 
-**Per-intent deltas.** `bugfix`: Step 4's failing test is the repro. `refactor`: the Step-2 spec is "behavior preserved"; a new acceptance criterion means reclassify as `build`. `tune`: Step 1 routes to the domain skill (`impeccable` for UX, `security-and-hardening`, `performance-optimization`) and Step 5 is the baseline→target→re-measure loop. `spike`: no plan file at all. `incident-response`: Step 1 compresses to triage, and triage asks first whether service can be restored NOW — if a revert restores it, revert and verify before debugging anything; Step 7 is an RCA (summary, timeline, root cause, contributing factors, the fix, prevention with commit links, monitoring-gap analysis); Step 9 is deploy with rollback → monitor ≥1 cycle → close the monitoring gap or prove there is none.
+**Per-intent deltas.** `bugfix`: Step 4's failing test is the repro. `refactor`: the Step-2 spec is "behavior preserved"; a new acceptance criterion means reclassify as `build`. `tune`: Step 1 routes to the domain skill (`impeccable` for UX, `security-and-hardening`, `performance-optimization`) and Step 5 is the baseline→target→re-measure loop. `spike`: no plan file. `incident-response`: Step 1 compresses to triage, and triage asks first whether service can be restored NOW — if a revert restores it, revert and verify before debugging; Step 7 is an RCA (summary, timeline, root cause, contributing factors, the fix, prevention with commit links, monitoring-gap analysis); Step 9 is deploy with rollback → monitor ≥1 cycle → close the monitoring gap or prove there is none.
 
 `scale: epic` short-circuits any intent after Step 3.
 

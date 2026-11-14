@@ -1273,7 +1273,7 @@ case "$BASENAME" in
                 fi
               fi
               if units_rows "$_gs_units_tmp" >/dev/null 2>&1; then
-                _gs_units_bad="$(units_validate "$_gs_units_tmp" 2>/dev/null)" || true
+                _gs_units_bad="$(units_validate "$_gs_units_tmp" "$FILE_PATH" 2>/dev/null)" || true
               else
                 _gs_units_bad=""
               fi
@@ -1301,12 +1301,17 @@ esac
 # is not judged, as the Tasks arm above does not judge one: the tool refuses that input itself.
 # Its Tasks rows are held to the invariants a plan at 14 is held to, on the page this write hands over, as the arm above
 # holds them: one id twice, a kind outside the vocabulary, a dependency on no row. A deps cell at 15 may also name the
-# approval its task waits on (`approval:<name>`), the one shape it holds that a deps cell at 14 does not.
+# approval its task waits on (`approval:<name>`), the one shape it holds that a deps cell at 14 does not. A criterion's
+# Task cell names rows of that table (`plan_read_criterion_faults`): the gate reads the step that owes the criterion from
+# it, so a token naming no row would owe the criterion at no step, and is refused here, where the person can still fix it.
 if [ "$GS_V15" -eq 1 ] && { [ "$TOOL" != "Edit" ] || [ "$EDIT_APPLIED" -eq 1 ]; }; then
   if GS_FAULTS="$(plan_read_faults "$GS_PAGE")"; then
     _gs_refuse version-15 "$GS_FAULTS"
   fi
-  if [ "$SCALE" != "task" ] && units_rows "$GS_PAGE" >/dev/null 2>&1 && GS_FAULTS="$(units_validate "$GS_PAGE" 2>/dev/null)"; [ -n "$GS_FAULTS" ]; then
+  if GS_FAULTS="$(plan_read_criterion_faults "$GS_PAGE")"; then
+    _gs_refuse criterion-task "$GS_FAULTS"
+  fi
+  if [ "$SCALE" != "task" ] && units_rows "$GS_PAGE" >/dev/null 2>&1 && GS_FAULTS="$(units_validate "$GS_PAGE" "$FILE_PATH" 2>/dev/null)"; [ -n "$GS_FAULTS" ]; then
     _gs_refuse tasks-invalid "$(yaml_get sdlc-step)" "$GS_FAULTS" 1
   fi
 fi

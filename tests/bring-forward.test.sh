@@ -11,7 +11,10 @@
 #   §READER  the reader answers a version-14 plan with no run.log through the translation, in time order.
 #   §PLACE     an approval written by then instant is read; an untimed deferral stands at its review's proof.
 #   §MATRIX    a discharged matrix row is a proof and a waived one a waiver, by ac= with what its cells hold,
-#              and a waiver with the author, instant and words of its block's waiver: line.
+#              and a waiver with the author, instant and words of its block's waiver: line; a cell that holds no
+#              evidence takes the evidence: line of the block, and a cell that holds one wins unless it only points at
+#              its block (`see <its own id>`); a pending or blocked
+#              row is no event, and its evidence or auditor, which 15 has no place for, is on the gaps list.
 #   §ONE-FACT  a criterion a state line and a matrix row both name is the state line's one fact.
 #   §UNREAD    the header's abandoned: is an abandon; an inherited: line no ruled type carries is a gap.
 #   §RENAME  each landing-record line of a ruled type is carried with its first field renamed and every
@@ -23,18 +26,32 @@
 #   §DECISIONS  a design ledger's put and ruled headings are decision rounds; any other heading is a gap.
 #   §DEBTS      a debt ledger's lines are debts, burned= its row when burned; a line of another form is a gap.
 #   §ACT     payload/scripts/bring-forward.sh <plan>: the plan keeps no state, matrix or handoff section, its
-#            rows the nine authored cells, and the reader's step, read from the log it wrote, is the old current:.
+#            rows the nine authored cells, and the reader's step, read from the log it wrote, is the old current:; each
+#            criterion a closed run proved with its evidence in its block carries that evidence in the log.
 #   §TWICE   a second act changes no byte of the plan or the log.
 #   §KEPT    the old plan and record are kept beside the new, byte for byte.
 #   §HALF    a run whose log already holds some of its facts is brought forward: the act exits 0, the log it writes
 #            holds the old homes' landings and the log's own in order, the log as it stood is kept, a second act
 #            changes no byte.
+#   §OWN     an act broken off is finished by the next; a kept copy holding another plan, or beside a log neither it
+#            nor the act wrote, is refused in words before anything is written.
 #   §WAITS   a wait on a row is that row's id in deps; one the kind implies is dropped; any other is a gap.
+#   §LATE    a wait the person wrote by naming a row's record stays in deps though the default names that row too:
+#            a review row past the release keeps what it reads, and the act's page passes the table's check.
 #   §DROPPED a dropped row's cell is the run's drop: after the act the row stays, reads dropped, and waits on it are met.
+#   §CRITERIA each criterion's block task is carried into the Eval design's Task column, so it is owed at the same step after the
+#            act; a task with no Eval design row, or a token 15 cannot say (a 9 beside an id), is on the gaps list.
 #   §CELLS   a row's suites and lands-on go to the task's own section, past a fenced # line in it, or to the gaps list when it has none.
+#   §HOMES   a plan at 14 holding none of 15's homes: its Step 4 branch and base and its Step 7 document are the header's
+#            after the act, each one owed and held nowhere a gap; its matrix's criteria are a criteria table.
 #   §STEPS   a Step follows the Step above it and a proof or waiver the line above it in its block, whatever
 #            their instants, so the step is the old current: and closure; a Step held (pending) is a gap.
 #   §PARKED  a Step 9 line with no delivered: (a parked plan's note) is a gap, not a step; close-out's parked delivery is.
+#   §NAME    a plan not named *.plan.md is refused before anything is written, in words naming it for its directory.
+#   §SHARED  the old record a plain name joined: the words say to move it when no other plan shares it, else by how many
+#            it is shared; renamed, the act names each of its files on the gaps list and writes nothing from it.
+#   §ROAD    an incident open at 14 with a record, renamed and moved as the words say, brought forward: the same step and
+#            rows at 15, found by the walk, bound, and a commit under it judged on its own plan.
 #
 # FIXTURE FIDELITY. The plan is a real file in a scratch docs tree, in the shape version-14 plans hold.
 
@@ -152,7 +169,7 @@ cat > "$M" <<EOF
 abandoned: 2026-11-02 — folded into wave-9
 ---
 ## Eval design
-$(printf '| Criterion |\n|---|\n'; printf '| AC-%s |\n' 1 2 3 4 5)
+$(printf '| Criterion |\n|---|\n'; printf '| AC-%s |\n' 1 2 3 4 5 6 7 8 9 10)
 ## Verification Matrix
 stack-health: pending
 | AC | tier | status | evidence | auditor |
@@ -162,11 +179,28 @@ stack-health: pending
 | AC-3 | T2 | pending | — | — |
 | AC-4 | T1 | discharged | — | — |
 | AC-5 | T2 | discharged | record/wave-8-matrix/m.log | CONFIRMED |
+| AC-6 | T2 | discharged | — | CONFIRMED |
+| AC-7 | T2 | discharged | record/wave-8-matrix/c.log | CONFIRMED |
+| AC-8 | T0 | pending | record/wave-8-matrix/p.md | REFUTED |
+| AC-9 | T2 | blocked | — | — |
+| AC-10 | T2 | pending | — | — |
+| AC-11 | T2 | discharged | see AC-11 | CONFIRMED |
+| AC-12 | T2 | discharged | see AC-12 | CONFIRMED |
 
 AC-2: the waived one.
   waiver: Ann Person 2026-11-01T08:00:00Z "not run here" — the reason
 AC-3: the pending one.
   waiver: Bo Person 2026-11-01 "later, by hand"
+AC-6: proved, its evidence written in its block.
+  evidence: record/wave-8-matrix/b.log
+AC-7: proved, its evidence in its cell and another in its block.
+  evidence: record/wave-8-matrix/other.log
+AC-9: blocked, an evidence written in its block.
+  evidence: record/wave-8-matrix/q.log
+AC-10: pending, its block saying so.
+  evidence: pending
+AC-11: proved, its cell pointing at its block.
+  evidence: record/wave-8-matrix/d.log
 ## SDLC State
 proved: kind=unit head=$H ac=AC-5 at=2026-11-01T06:00:00Z evidence=record/wave-8-matrix/s.log rc=0
 inherited: a.test.sh base=$C head=$H at=2026-11-01T07:00:00Z evidence=record/wave-8-matrix/i.log
@@ -193,6 +227,23 @@ for f in kind head at; do expect_contains "a row holds no $f: a gap" "gap/v1|ev=
 expect_eq "an empty evidence cell is still discharged" "state=discharged by=proof" "$(askm cell AC-4)"
 expect_eq "and its proof holds no field the row lacks" "run/v1|ev=proof|ac=AC-4|at=" "$(acof AC-4)"
 expect_contains "the empty evidence cell is a gap" "gap/v1|ev=proof|ac=AC-4|field=evidence|why=absent" "$MG"
+expect_eq "an empty evidence cell takes the evidence: line of its criterion's block" \
+  "run/v1|ev=proof|ac=AC-6|evidence=record/wave-8-matrix/b.log|auditor=CONFIRMED|at=" "$(acof AC-6)"
+expect_contains "…whose proof still lacks its head, a gap" "gap/v1|ev=proof|ac=AC-6|field=head|why=absent" "$MG"
+expect_absent "…and whose evidence the gaps list does not name" "gap/v1|ev=proof|ac=AC-6|field=evidence|" "$MG"
+expect_eq "a cell that holds an evidence wins over its block's line" \
+  "run/v1|ev=proof|ac=AC-7|evidence=record/wave-8-matrix/c.log|auditor=CONFIRMED|at=" "$(acof AC-7)"
+expect_eq "a cell that only points at its block is no evidence: the block's line is" \
+  "run/v1|ev=proof|ac=AC-11|evidence=record/wave-8-matrix/d.log|auditor=CONFIRMED|at=" "$(acof AC-11)"
+expect_contains "…and with no block line the evidence is a gap, the pointer written nowhere" "gap/v1|ev=proof|ac=AC-12|field=evidence|why=absent" "$MG"
+expect_eq "a pending row's evidence and auditor cells, which no event at 15 can hold, are on the gaps list as undischarged" \
+  "gap/v1|ev=criterion|criterion=AC-8|field=evidence|why=undischarged gap/v1|ev=criterion|criterion=AC-8|field=auditor|why=undischarged" \
+  "$(printf '%s\n' "$MG" | grep -F 'criterion=AC-8|' | tr '\n' ' ' | sed 's/ $//')"
+expect_absent "…and its row writes no proof and no waiver" "ac=AC-8|" "$(acof AC-8)"
+expect_eq "a blocked row's evidence written in its block is named too" "gap/v1|ev=criterion|criterion=AC-9|field=evidence|why=undischarged" \
+  "$(printf '%s\n' "$MG" | grep -F 'criterion=AC-9|')"
+expect_empty "a row whose cells hold nothing, or only its own status word, is named for neither" \
+  "$(printf '%s\n' "$MG" | grep -E 'criterion=AC-(3|10)\|')"
 section "ONE-FACT"
 expect_eq "a criterion a proved: line and a matrix row both name is one proof" 1 "$(acof AC-5 | grep -c .)"
 expect_contains "the stated proof stands, with its head and instant" "head=$H|ac=AC-5|" "$(acof AC-5)"
@@ -357,6 +408,7 @@ SB="$(mktemp -d)"; BF="${BIONIC_SCRIPTS_DIR}/payload/scripts/bring-forward.sh"; 
 for r in $W6 $W9 wave-49-mid; do cp -R "$BED/$r" "$SB/$r"; done
 RUNS="$W6:$W6 $W9:$W9 wave-49-mid:$W9"; at() { printf '%s/%s/plans/epic-23-bionic-tech-debt/%s.plan.md' "$1" "${2%%:*}" "${2#*:}"; }
 machine() { grep -cE '^## (SDLC State|Verification Matrix|Handoff) *$' "$1"; }
+head_of() { awk 'NR == 1 && $0 == "---" { h = 1; next } h && $0 == "---" { exit } h' "$1"; }
 
 section "ACT"
 for r in $RUNS; do p="$(at "$SB" "$r")"; cur="$(sed -n 's/^current: *//p' "$p")"; pre="$(machine "$p")"
@@ -364,6 +416,21 @@ for r in $RUNS; do p="$(at "$SB" "$r")"; cur="$(sed -n 's/^current: *//p' "$p")"
   expect_eq "${r%%:*}: the reader's step is the old current: ($cur)" "n=$cur" "$(bash "$RS" "$p" step | grep '^n=')"
   expect_eq "${r%%:*}: the state, matrix and handoff sections the plan held are gone" "held 0" "$([ "$pre" -ge 3 ] && echo held) $(machine "$p")"
   expect_eq "${r%%:*}: each Tasks row holds the nine authored cells" "id step kind task deps size serves files artifact" "$(plan_read_rows "$p" Tasks | awk -F'\t' '{ for (i = 1; i <= NF; i++) printf "%s%s", (i > 1 ? " " : ""), substr($i, 1, index($i, "=") - 1); print "" }' | sort -u)"
+  expect_eq "${r%%:*}: a header that held the branch, base and documents is left as it was but for its version" \
+    "< canonical_sdlc_version: 14 > canonical_sdlc_version: 15" "$(diff <(head_of "$(at "$BED" "$r")") <(head_of "$p") | grep '^[<>]' | paste -sd' ' -)"
+done
+
+# A criterion the closed runs proved with its evidence in its block and a dash in its cell, as `<ac> <evidence>`.
+blockev() { awk '/^## /{ m = ($0 == "## Verification Matrix") } m && /^\| AC-/ { n = split($0, c, "|"); a = c[2]; e = c[5]; gsub(/ /, "", a); gsub(/ /, "", e)
+    if (c[4] ~ /discharged/ && (e == "" || e == "—" || e == "-")) d[a] = 1 }
+  m && /^AC-[^ :]+:/ { b = $1; sub(/:$/, "", b) } m && (b in d) && /^  evidence:/ { v = $0; sub(/^  evidence: */, "", v); print b, v; delete d[b] }' "$1"; }
+for r in $W6 $W9; do l="$SB/$r/record/$r/run.log"; n=0; miss=""
+  while read -r a v; do [ -n "$a" ] || continue; n=$((n + 1)); grep -qF "|ev=proof|ac=$a|evidence=$v|" "$l" || miss="$miss $a"
+    ! grep -q "^gap/v1|ev=proof|ac=$a|field=evidence|" "$SB/$r.out" || miss="$miss gap:$a"; done <<EOF
+$(blockev "$(at "$BED" "$r:$r")")
+EOF
+  expect_regex "$r: the closed plan proved criteria with their evidence in their blocks" '^[1-9][0-9]*$' "$n"
+  expect_empty "$r: each such proof carries that evidence after the act, and the gaps list names none" "$miss"
 done
 
 section "TWICE"
@@ -392,6 +459,18 @@ expect_eq "…the log as it stood is kept byte for byte" "kept" "$(cmp -s "$HR/k
 HS="$(cksum < "$HR/run.log") $(cksum < "$HP")"
 bash "$BF" "$HP" >/dev/null 2>&1
 expect_eq "…and a second act changes no byte of the log or the plan" "$HS" "$(cksum < "$HR/run.log") $(cksum < "$HP")"
+section "OWN"
+# The act finishes one of its own broken off; a kept copy it did not take for this plan and this log is refused.
+HK="$HR/kept/wave-8-half.plan.md"; HW="$(cksum < "$HP")"; HL="$(cksum < "$HR/run.log")"
+cp "$HK" "$HP"; bash "$BF" "$HP" >/dev/null 2>&1; r1=$?; cp "$HK" "$HP"; cp "$HR/kept/record/run.log" "$HR/run.log"; bash "$BF" "$HP" >/dev/null 2>&1
+expect_eq "an act broken off after its log, or after its copies, is finished by the next: the same plan and log" "0 0 $HW $HL" "$r1 $? $(cksum < "$HP") $(cksum < "$HR/run.log")"
+cp "$HK" "$HP"; printf 'run/v1|ev=step|n=0|at=2026-11-04T00:00:00Z\n' > "$HR/run.log"; HS="$(cksum < "$HP") $(cksum < "$HR/run.log")"
+HO="$(bash "$BF" "$HP" 2>&1)"; expect_status "a log neither the kept copy holds nor the act writes from it is refused (exit 2)" 2 "$?"
+expect_contains "…in words that say the kept copy is not this run's and why" "is not this run's kept copy: the run's log" "$HO"
+expect_eq "…and nothing is written" "$HS" "$(cksum < "$HP") $(cksum < "$HR/run.log")"
+sed 's/One\./Uno./' "$HK" > "$HP"; rm "$HR/run.log"; HS="$(cksum < "$HP")"
+HO="$(bash "$BF" "$HP" 2>&1)"; expect_status "a plan other than the one its kept copy holds is refused (exit 2)" 2 "$?"
+expect_eq "…in words that say why, and nothing is written" "1 $HS absent" "$(grep -c "is not this run's kept copy: the plan it holds" <<< "$HO") $(cksum < "$HP") $([ -e "$HR/run.log" ] || echo absent)"
 W="$SB/docs/plans/epic-x/wave-7-act.plan.md"; mkdir -p "${W%/*}"; c="| — | — |"
 cat > "$W" <<EOF
 ---
@@ -409,12 +488,37 @@ canonical_sdlc_version: 14
 One's own words.
 $(printf '%s\n' '```bash' '# T2 waits on this' '```')
 
+## Eval design
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+$(for a in 1.1 1.2 1.3 1.4 1.6; do printf '| REQ-1 | a suite | AC-%s | hermetic | `a.test.sh` | a is red |\n' "$a"; done)
+
+## Verification Matrix
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+$(for a in 1.1 1.2 1.3 1.4 1.6; do printf '| AC-%s | T1 | pending | — | |\n' "$a"; done)
+
+AC-1.1:
+  task: T1
+AC-1.2:
+  task: 9
+AC-1.3:
+  fails-when: a is red
+AC-1.4:
+  task: T1, T4
+AC-1.5:
+  task: T2
+AC-1.6:
+  task: T2, 9
+
 ## SDLC State
 current: 4
 approved-by: Ann Person 2026-11-01T02:25:48Z "go"
 EOF
 askw() { bash "$RS" "$W" "$@"; }; say_rows() { for r in T1 T2 T3 T4; do askw status "$r" | head -1; done; askw landed | grep -c .; askw stop | grep '^ready='
-  ( . "${RS%/*}/lib/units.sh"; units_rows "$W" | cut -f1,3,10; plan_read_waits "$W" | grep '	wait	approval:' ); }
+  ( . "${RS%/*}/lib/units.sh"; units_rows "$W" | cut -f1,3,10; plan_read_waits "$W" | grep '	wait	approval:'
+  . "${RS%/*}/lib/root.sh"; . "${RS%/*}/lib/run.sh"; . "${RS%/*}/lib/walls.sh" >/dev/null 2>&1
+  for a in AC-1.1 AC-1.2 AC-1.3 AC-1.4 AC-1.6; do printf 'owed %s %s %s\n' "$a" "$(matrix_owing_step "$W" "$a")" "$(matrix_owing_open "$W" "$a")"; done ); }
 PRE="$(say_rows)"; OUT="$(bash "$BF" "$W")"; KW="$(printf '%s\n' "$OUT" | sed -n 's/^kept=//p')/wave-7-act.plan.md"
 
 section "WAITS"
@@ -422,6 +526,20 @@ expect_eq "a row that read another row's record has that row's id in deps, and t
 expect_eq "a wait the kind implies is in no cell: the old plan held it, the new holds none" "2 0" "$(grep -c 'approval:plan' "$KW") $(grep -c 'approval:plan' "$W")"
 expect_eq "neither the named approval nor one the kind implies is on the gaps list" "0" "$(printf '%s\n' "$OUT" | grep -c 'field=approval:')"
 expect_eq "the header names version 15" "canonical_sdlc_version=15" "$(askw header canonical_sdlc_version)"
+
+section "LATE"
+L="$SB/docs/plans/epic-x/wave-6-late.plan.md"
+printf '%s\n' '---' 'canonical_sdlc_version: 14' '---' '## Tasks' '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |' '|---|---|---|---|---|---|---|---|---|---|---|' \
+  '| T1 | 4 | build | One. | — | — | 30 | REQ-1 | a.sh | landed | approval:plan |' '| T6 | 6 | review | Reads the whole. | — | — | 20 | REQ-1 | record/wave-6-late/T6.md | landed | |' \
+  '| T2 | 7 | doc | The release. | — | — | 30 | REQ-1 | CHANGELOG.md | landed | approval:plan, head |' '| T4 | 7 | build | The fix. | — | — | 30 | REQ-1 | b.sh, record/wave-6-late/T4.md | landed | approval:plan |' \
+  '| T5 | 7 | review | Reads the fix. | — | — | 20 | REQ-1 | record/wave-6-late/T5.md | pending | approval:plan, head, record/wave-6-late/T4.md |' \
+  '## SDLC State' 'current: 7' 'approved-by: Ann Person 2026-11-01T02:25:48Z "go"' > "$L"
+bash "$BF" "$L" >/dev/null 2>&1; expect_status "a run past its release with a review row reading the fix: the act exits 0" 0 "$?"
+lu() { ( . "${RS%/*}/lib/units.sh"; "$@" "$L"; printf '|%s' "$?" ); }
+expect_eq "the review row that read the fix's record waits on T4 at 15, though head names T4 too; T6, whose only reads are its kind's default, keeps an empty deps cell" \
+  "deps=T4 deps=—" "$(bash "$RS" "$L" row T5 | grep '^deps=') $(bash "$RS" "$L" row T6 | grep '^deps=')"
+expect_eq "…the table's check passes on the act's page, and the release card's question names T5, open and unread" "|0	T5	pending	unread
+|0" "$(lu units_validate)	$(lu units_post_readers)"
 
 section "DROPPED"
 expect_contains "a dropped cell is carried into the run's log as its drop, its words saying so, no instant made" "run/v1|ev=drop|row=T3|why=carried from the status cell of a version-14 Tasks table|at=" "$(cat "${KW%/kept/*}/run.log")"
@@ -431,9 +549,98 @@ askw ready T3; expect_status "a dropped row is not ready" 1 "$?"
 printf 'run/v1|ev=approval|key=D3|by=Ann Person|at=2026-11-02T00:00:00Z\n' >> "${KW%/kept/*}/run.log"
 expect_eq "the dropped row stays in the table, a wait on it stays a wait, met; T2 is ready once D3 stands" "| T3 |deps=T3 ready=T4 ready=T2 T4" "$(grep -o '^| T3 |' "$W")$(askw row T4 | grep '^deps=') $(grep '^ready=' <<< "$PRE") $(askw stop | grep '^ready=')"
 
+section "CRITERIA"
+expect_eq "at 14 each criterion is owed at its block's task's step, open while that task is: an id, the close, none, a list, and a mix of an id and 9 read as the id" \
+  "owed AC-1.1 4 |owed AC-1.2 9 |owed AC-1.3  |owed AC-1.4 4 yes|owed AC-1.6 4 yes" "$(grep '^owed ' <<< "$PRE" | paste -sd'|' -)"
+expect_eq "after the act each is owed at the same step, open alike: the Task column carries what each block said" "$(grep '^owed ' <<< "$PRE")" "$(say_rows | grep '^owed ')"
+for x in "AC-1.1|T1" "AC-1.2|9" "AC-1.3|—" "AC-1.4|T1, T4" "AC-1.6|T2"; do
+  expect_eq "${x%%|*}'s Eval design row holds its task in the Task column" "task=${x#*|}" "$(askw criterion "${x%%|*}" | grep '^task=')"; done
+expect_contains "a block's task with no Eval design row to carry it is on the gaps list" "gap/v1|ev=criterion|criterion=AC-1.5|field=task|why=absent" "$OUT"
+expect_contains "a token 15 cannot say, the 9 beside an id, is on the gaps list" "gap/v1|ev=criterion|criterion=AC-1.6|field=task:9|why=unruled" "$OUT"
+expect_eq "a plan that held a criteria table keeps that one table, made no other" 1 "$(grep -c '^## Eval design' "$W")"
+WS="$(cksum < "$W")"; bash "$BF" "$W" >/dev/null 2>&1
+expect_eq "a second act adds no second Task column: the plan is unchanged" "$WS" "$(cksum < "$W")"
+
 section "CELLS"
 expect_eq "a row's suites and lands-on go to the task's own section, after its fence" "One's own words. "'```bash ```'" suites: a.test.sh lands-on: a.test.sh" "$(sed -n '/^### T1$/,/^## /p' "$W" | grep -v '^#' | grep . | paste -sd' ' -)"
 for f in suites lands-on; do expect_contains "a row with no section of its own has its $f on the gaps list" "gap/v1|ev=row|row=T2|field=$f|why=unruled" "$OUT"; done
+
+section "HOMES"
+# SYNTHESIZED: a plan at 14 as a person has one, holding none of 15's homes: no working-branch:, base-sha:, adrs: or
+# integration-branch: in its header, no criteria table; the branch and base in its Step 4 block, its document in its
+# Step 7 block, the integration branch in its state section.
+homes() {  # <name> [<sed edit>] -> the plan's path, written
+  local p="$SB/homes/plans/epic-x/$1.plan.md"; mkdir -p "${p%/*}"
+  sed -e "${2:-}" > "$p" <<EOF
+---
+canonical_sdlc_version: 14
+rigor: double
+---
+## Tasks
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | One. | — | — | 30 | REQ-1 | a.sh | landed |
+| T2 | 8 | integrate | Merge. | — | — | 10 | REQ-1 | — | pending |
+
+## Verification Matrix
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1.1 | T1 | discharged | see AC-1.1 | CONFIRMED |
+| AC-1.2 | T2 | pending | — | — |
+| AC-1.3 | T4 | discharged | record/$1/h.md | — |
+| AC-1.4 | T4 | discharged | record/$1/h.md | — |
+| AC-1.5 | T4 | pending | — | — |
+
+AC-1.1:
+  serves: REQ-1
+  eval: \`a.test.sh\`
+  fails-when: a is red
+  task: T1
+  evidence: record/$1/a.log
+AC-1.2:
+  fails-when: b is red
+  task: T2
+AC-1.3:
+  user-confirmed: Dana 2026-10-20 "checked it by hand"
+AC-1.4:
+  user-confirmed: pending
+AC-1.5:
+  user-confirmed: Dana 2026-10-21 "looked at it"
+
+## SDLC State
+current: 8
+integration-branch: trunk
+- Step 4: rows dispatched from the working branch
+  base-sha: 2222222bb
+  branch: wave/6-homes
+- Step 7: documented at record/$1/docs.md
+  n/a: no decision this run
+EOF
+  printf '%s' "$p"; }
+gcells() { for c in AC-1.1 AC-1.2; do bash "$RS" "$1" cell "$c" | paste -sd' ' -; done | paste -sd'|' -; }
+G="$(homes wave-6-homes)"; GC="$(gcells "$G")"; GO="$(bash "$BF" "$G" 2>&1)"; askg() { bash "$RS" "$G" "$@"; }
+GB="$(homes wave-6-bare '/^  base-sha:/d; /^  branch:/d; /^  n\/a:/d')"; GBO="$(bash "$BF" "$GB" 2>&1)"
+expect_eq "the working branch and base its Step 4 block held are the header's after the act" "working-branch=wave/6-homes base-sha=2222222bb" \
+  "$(askg header working-branch) $(askg header base-sha)"
+expect_eq "the integration branch the state section held is the header's after the act" "integration-branch=trunk" "$(askg header integration-branch)"
+for f in working-branch base-sha; do expect_contains "a run past Step 4 whose block held no $f has it named on the gaps list" "gap/v1|ev=step|n=4|field=$f|why=absent" "$GBO"; done
+GA="$(homes wave-6-adr 's#^  n/a: no decision this run#  adr: adrs/a.md (Proposed); rca: rca/r.md#')"; bash "$BF" "$GA" >/dev/null 2>&1
+expect_eq "Step 7's document is the header's adrs: after the act: none with its n/a reason, or the records its block named" \
+  "adrs=none — no decision this run|adrs=adrs/a.md, rca/r.md" "$(askg header adrs)|$(bash "$RS" "$GA" header adrs)"
+expect_contains "a run past Step 7 whose block named no document has it named on the gaps list" "gap/v1|ev=step|n=7|field=adrs|why=absent" "$GBO"
+expect_eq "a plan whose criteria stood only in its matrix holds them after the act, each where it stood" "state=discharged by=proof|state=pending" "$GC"
+expect_eq "…each its own row of a criteria table: its tier, and its block's requirement, eval, failure and task" \
+  "requirement=REQ-1|eval-type=T1|eval=\`a.test.sh\`|fails-when=a is red|task=T1;requirement=—|eval-type=T2|eval=—|fails-when=b is red|task=T2" \
+  "$(for c in AC-1.1 AC-1.2; do askg criterion "$c" | grep -v '^criterion=' | paste -sd'|' -; done | paste -sd';' -)"
+expect_eq "…and the reader's cells after the act are those before" "$GC" "$(gcells "$G")"
+confirms() { reader_cells "$1" | awk -F'\037' '$1 ~ /^AC-1\.[34]$/ { print $1 "|" $2 "|" $7 }' | paste -sd' ' -; }
+expect_eq "a confirmation its person wrote in the block reads as theirs after the act, one that reads pending as none" \
+  "AC-1.3|discharged|Dana 2026-10-20 checked it by hand AC-1.4|discharged|" "$(confirms "$G")"
+expect_eq "a pending criterion's confirmation, which 15 holds only as an approval that would discharge it, is named, not written" \
+  "AC-1.5" "$(sed -n 's/^gap\/v1|ev=criterion|criterion=\([^|]*\)|field=user-confirmed|why=undischarged$/\1/p' <<< "$GO" | paste -sd' ' -)"
+GL="$SB/homes/record/wave-6-homes/run.log"; GS="$(cksum < "$G") $(cksum < "$GL")"; bash "$BF" "$G" >/dev/null 2>&1
+expect_eq "…written once, as an approval naming the criterion: a second act changes no byte and writes no second" \
+  "$GS key=AC-1.3" "$(cksum < "$G") $(cksum < "$GL") $(sed -n 's/^run\/v1|ev=approval|\(key=[^|]*\)|.*/\1/p' "$GL" | paste -sd' ' -)"
 
 section "STEPS"
 U="$D/plans/epic-x/wave-6-untimed.plan.md"; B="$D/plans/epic-x/wave-5-back.plan.md"; s9='- Step 9: delivered: 2026-11-01T13:34Z'
@@ -458,4 +665,65 @@ expect_contains "the note is named on the gaps list, not written" "gap/v1|ev=ste
 printf '%s\n' '## SDLC State' 'current: 9' '- Step 7: documented at 2026-11-01T10:00Z' "$k8" \
   '- Step 9: delivered: parked on wave/7-parked @ abc1234 — waits on a hand test (2026-11-01T12:00Z wave-7-parked)' > "$K"
 expect_eq "close-out's own parked line is the delivery, its words the step's own field" "n=9|parked on wave/7-parked|state=delivered" "$(bash "$RS" "$K" step | sed 's/^delivered=\(parked on [^ ]*\).*/\1/' | paste -sd'|' -)"
+
+section "NAME"
+# An incident's plan named plain is a run at 14; at 15 a run is found and joined to its record by a name ending
+# .plan.md, so the act on the plain name would leave a run no gate sees.
+NI="$SB/name/incidents/0001-db-outage"; NP="$NI/plan.md"; mkdir -p "$NI"
+printf '%s\n' '---' 'canonical_sdlc_version: 14' 'intent: incident-response' '---' '## Tasks' '| id | step | kind | task | deps | size | status |' \
+  '|---|---|---|---|---|---|---|' '| T1 | 4 | build | Fix. | — | 30 | pending |' '' '## SDLC State' 'current: 4' > "$NP"; NS="$(cksum < "$NP")"
+NO="$(bash "$BF" "$NP" 2>&1)"; expect_status "an incident's plan named plain is refused (exit 2)" 2 "$?"
+expect_contains "…in words that name the plan for its directory and say to run the act again" "name it $(cd "$NI" && pwd -P)/0001-db-outage.plan.md and run the act again" "$NO"
+expect_eq "…before anything is written: the plan is unchanged and no record stands" "$NS|" "$(cksum < "$NP")|$(find "$SB/name" -path '*/record/*' -type f | sed 's#.*/name/##' | paste -sd' ' -)"
+mv "$NP" "$NI/0001-db-outage.plan.md"; bash "$BF" "$NI/0001-db-outage.plan.md" >/dev/null 2>&1; expect_status "renamed as the words say, the act takes it (exit 0)" 0 "$?"
+expect_contains "…and the record it writes is the incident's own" "record/0001-db-outage/run.log" "$(find "$SB/name" -path '*/record/*' -type f | sed 's#.*/name/##' | paste -sd' ' -)"
+
+section "SHARED"
+# At 14 every plain-named incident plan joins one record, record/plan.md. Renamed, the plan joins its own, so the old
+# one is read by nothing: moved first when no other plan shares it, else named file by file on the gaps list.
+SD="$SB/shared"; SA="$SD/incidents/0006-a"; mkdir -p "$SA" "$SD/record/plan.md"; SD="$(cd "$SD" && pwd -P)"; SA="$SD/incidents/0006-a"
+printf '%s\n' '---' 'canonical_sdlc_version: 14' '---' '## Tasks' '| id | step | kind | task | deps | size | status |' '|---|---|---|---|---|---|---|' \
+  '| T1 | 4 | build | Fix. | — | 30 | pending |' '' '## SDLC State' 'current: 4' > "$SA/plan.md"
+printf 'line/v1|ev=published|row=T1|commit=c1|kind=queue|by=-|why=-|at=2026-11-02T00:00:01Z\n' > "$SD/record/plan.md/landing-proofs.log"
+printf 'a\n' > "$SD/record/plan.md/asks.state"; SL="$(cd "$SD/record/plan.md" && cksum landing-proofs.log asks.state)"
+SO="$(bash "$BF" "$SA/plan.md" 2>&1)"; expect_status "an incident's plain plan with a record no other plan shares is refused (exit 2)" 2 "$?"
+expect_contains "…in words that say to move the record to the incident's own name first" "name it $SA/0006-a.plan.md, move $SD/record/plan.md to $SD/record/0006-a, and run the act again" "$SO"
+mkdir -p "$SD/incidents/0007-b"; printf '%s\n' '---' 'canonical_sdlc_version: 13' 'abandoned: 2026-10-01 superseded' '---' '## SDLC State' 'current: 8' > "$SD/incidents/0007-b/plan.md"
+SO="$(bash "$BF" "$SA/plan.md" 2>&1)"; expect_status "shared with a closed incident's plain plan, it is refused (exit 2)" 2 "$?"
+expect_contains "…in words that say by how many the record is shared and that the act will name it" "$SD/record/plan.md is shared by 1 other plan named plan.md, so the act will name each of its files on the gaps list" "$SO"
+expect_eq "…and no word to move it" "0" "$(grep -c 'move ' <<< "$SO")"
+mv "$SA/plan.md" "$SA/0006-a.plan.md"; SO="$(bash "$BF" "$SA/0006-a.plan.md" 2>/dev/null)"; expect_status "renamed, the act takes it (exit 0)" 0 "$?"
+for f in asks.state landing-proofs.log; do expect_contains "the gaps list names $f of the shared record, unread" "gap/v1|ev=record|record=plan.md|field=$f|why=shared" "$SO"; done
+expect_eq "…and the act wrote nothing from it: the shared record stands as it was, its landing not the incident's" "$SL|state=pending" \
+  "$(cd "$SD/record/plan.md" && cksum landing-proofs.log asks.state)|$(bash "$RS" "$SA/0006-a.plan.md" status T1 | head -1)"
+
+section "ROAD"
+# The whole road once: an incident open at 14 past its first step, a landing held only in the record its plain name
+# joined; refused, renamed and its record moved as the words say; brought forward; then the same step and rows read at
+# 15, the run found by the walk, bound by engagement, and a commit under it judged on its own plan.
+RD="$(cd "$(mktemp -d)" && pwd -P)"; RO="$RD/.bionic/docs"; RI="$RO/incidents/0005-cache"; mkdir -p "$RI" "$RO/record/plan.md" "$RD/.bionic/tmp"
+git -C "$RD" init -q; git -C "$RD" -c user.name=f -c user.email=f@x.invalid -c commit.gpgsign=false commit -q --allow-empty -m seed
+printf '%s\n' '---' 'governing-skill: canonical-sdlc' 'canonical_sdlc_version: 14' 'intent: incident-response' 'rigor: double' 'scale: wave' '---' \
+  '## Tasks' '| id | step | kind | task | deps | size | serves | Files | artifact | status |' '|---|---|---|---|---|---|---|---|---|---|' \
+  '| T1 | 4 | build | Fix. | — | 30 | REQ-1 | a.sh | out/T1.md | landed |' '| T2 | 4 | build | Guard. | — | 30 | REQ-1 | b.sh | out/T2.md | pending |' '' \
+  '## SDLC State' 'current: 4' 'approved-by: Ann Person 2026-11-01T02:25:48Z "Approved"' \
+  '- Step 3: plan: p.md; approved at 2026-11-01T02:25:48Z "Approved" at the Step-3 card' '- Step 4: rows dispatched' > "$RI/plan.md"
+printf 'line/v1|ev=published|row=T2|commit=%s|kind=queue|by=-|why=-|at=2026-11-02T00:00:01Z\n' "$C" > "$RO/record/plan.md/landing-proofs.log"
+road() { bash "$RS" "$1" step | /usr/bin/grep -E '^(n|state)=' | paste -sd' ' -; for t in T1 T2; do bash "$RS" "$1" status "$t" | head -1; done; }
+RPRE="$(road "$RI/plan.md")"; expect_eq "at 14 the incident stands at Step 4, open, T1 landed in its table and T2 in its record" "n=4 state=open
+state=landed
+state=landed" "$RPRE"
+RW="$(bash "$BF" "$RI/plan.md" 2>&1)"; expect_status "the act refuses the plain name (exit 2)" 2 "$?"
+expect_contains "…and says to rename the plan and move its record" "move $RO/record/plan.md to $RO/record/0005-cache," "$RW"
+mv "$RI/plan.md" "$RI/0005-cache.plan.md"; mv "$RO/record/plan.md" "$RO/record/0005-cache"; RP="$RI/0005-cache.plan.md"
+bash "$BF" "$RP" >/dev/null 2>&1; expect_status "done as the words say, the act takes it (exit 0)" 0 "$?"
+expect_eq "at 15 the same step and the same rows: T2's landing came with its record" "canonical_sdlc_version=15|$RPRE" "$(bash "$RS" "$RP" header canonical_sdlc_version)|$(road "$RP")"
+expect_eq "the walk finds the incident's run" "$RP" "$(bash -c '. "$1/lib/run.sh"; open_runs "$2"' _ "${RS%/*}" "$RD" 2>/dev/null)"
+RSID="7d6c5b4a-3928-4170-8e6d-5c4b3a291807"
+bash -c '. "$1/lib/run.sh"; . "$1/lib/binding.sh"; bind_plan "$2" "$3" "$4" engage' _ "${RS%/*}" "$RD" "$RSID" "$RP" >/dev/null 2>&1
+expect_status "engagement binds it (exit 0)" 0 "$?"
+RG="$(jq -n --arg c "git commit -m x" --arg cwd "$RD" --arg s "$RSID" '{session_id:$s, tool_input:{command:$c}, cwd:$cwd}' \
+  | ( cd "$RD" && HOME="$RD" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$RSID" BIONIC_WALL_VERBOSE=1 bash "$BIONIC_HOOKS_DIR/bash-walls.sh" 2>&1 ); printf '|rc=%s' "$?")"
+expect_contains "a commit under it is judged and refused (exit 2)" "|rc=2" "$RG"
+expect_contains "…on the incident's own plan" "incidents/0005-cache/0005-cache.plan.md" "$RG"
 finish

@@ -413,6 +413,7 @@ _rh_replay() {
   # The fix row, and the rows of later steps waiting on it as task-add asks: their deps name it.
   _rh_addrow '| T5 | 4 | build | Answer the structure finding. A caller reaches the library change. The caller and the library agree again. · born: review | — | 10 | REQ-1 | payload/scripts/lib/said.sh, tests/rehearsal-row.test.sh | — |' T5 \
     && _rh_cell "the release row waits on the fix" T2 deps=T5 && _rh_cell "the integrate row waits on the fix" T4 deps=T5 \
+    && { [ "${DOOR_LIVE_ROW:-}" != 1 ] || _rh_cell "the close row waits on the fix" T9 deps=T5; } \
     && _rh_poker "the fix row born of the finding" task-add T5 --born record/wave-x/w-structure-whole-2.md#1 || return 1
   _rh_brief w-T5 T5 || return 1
   _rh_do "the fix row's tree" bash "$RH_ROOT/payload/scripts/spawn-worktree.sh" create "$(_rh_head)" wt/T5 --for w-T5 || return 1
@@ -458,7 +459,31 @@ _rh_approve() { _rh_typed approved && _rh_poker "approve $1" approve "$1" approv
 # rest by commands: the session engages, the planner's page binds it, and each of Steps 0 to 3 ends on its card, its
 # approval and its advance.
 _rh_fresh() {
-  local spec="$RH_ROOT/.bionic/docs/specs/epic-x"
+  local spec="$RH_ROOT/.bionic/docs/specs/epic-x" lr="" le="" lq="" ls="" th="" ts="" t1="" lt=""
+  # DOOR_LIVE_ROW=1: the planner writes the one live criterion a run's close proves, a second requirement whose eval is
+  # the hand-holds line, served by the close row T9; the plan's criteria table names T9 in its Task column, so the
+  # criterion is owed at the close.
+  if [ "${DOOR_LIVE_ROW:-}" = 1 ]; then
+    lr='
+| T9 | 9 | close | the close. The run reads its own measure last. | — | 10 | REQ-2 | .bionic/docs/record/wave-x/continuation.md | — |'
+    le='
+| REQ-2 | the close reads its measure | AC-2.1 | live | `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close → `total=0` | the close reads above zero |'
+    lq='
+
+## The close
+
+The run reads its own measure last.
+
+### REQ-2 — the close reads its measure
+
+The close reads the run'"'"'s hand-holds.
+
+provenance: user 2026-11-12 "the close reads its measure"
+- AC-2.1 the close reads its own measure. Fails when: the close reads above zero.'
+    ls='
+- **`payload/scripts/close-out.sh`** reads the measure at the close. (D1; REQ-2)'
+    th=' Task |'; ts='---|'; t1=' — |'; lt=' T9 |'
+  fi
   _rh_do "the skill is invoked: the session engages" bash -c 'printf %s "$1" | bash "$2"' _ \
     "$(jq -nc --arg s "$WORLD_SID" --arg c "$RH_ROOT" '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Skill", tool_input:{skill:"bionic:canonical-sdlc"}}')" \
     "$RH_ROOT/hooks/engage.sh" || return 1
@@ -511,7 +536,7 @@ The run ships one change.
 The library gains one function, and a suite proves it.
 
 provenance: user 2026-11-12 "rehearse a run"
-- AC-1.1 the library change holds. Fails when: the build row's suite is red.
+- AC-1.1 the library change holds. Fails when: the build row's suite is red.$lq
 REQ
   _rh_hand prose "the requirements, specs/epic-x/wave-x.requirements.md"
   _rh_card step1 "$spec/wave-x.requirements.md" && _rh_approve step1 && _rh_poker "enter Step 2" current 2 || return 1
@@ -534,7 +559,7 @@ Answer the requirements with one function.
 
 ### 2. Component boundaries and interfaces
 
-- **\`payload/scripts/lib/said.sh\`** owns the function. (D1; REQ-1)
+- **\`payload/scripts/lib/said.sh\`** owns the function. (D1; REQ-1)$ls
 
 ### 3. Ownership table
 
@@ -558,7 +583,7 @@ Answer the requirements with one function.
 
 | Requirement | Approach | Criterion | Eval type | Eval | Fails when |
 |---|---|---|---|---|---|
-| REQ-1 | the build row's suite | AC-1.1 | hermetic | \`rehearsal-row.test.sh\` | the build row's suite is red |
+| REQ-1 | the build row's suite | AC-1.1 | hermetic | \`rehearsal-row.test.sh\` | the build row's suite is red |$le
 SPEC
   _rh_hand prose "the spec, specs/epic-x/wave-x.spec.md"
   _rh_card step2 "$spec/wave-x.spec.md" && _rh_approve step2 && _rh_poker "enter Step 3" current 3 || return 1
@@ -569,13 +594,13 @@ SPEC
 | id | step | kind | task | deps | size | serves | Files | artifact |
 |---|---|---|---|---|---|---|---|---|
 | T1 | 4 | build | a library change. One function and its suite. | — | 10 | REQ-1 | payload/scripts/lib/said.sh, tests/rehearsal-row.test.sh | — |
-| T2 | 4 | doc | the release $DOOR_VERSION. Its changelog entry and version. | — | 10 | REQ-1 | CHANGELOG.md, payload/.claude-plugin/plugin.json | — |
+| T2 | 4 | doc | the release $DOOR_VERSION. Its changelog entry and version. | — | 10 | REQ-1 | CHANGELOG.md, payload/.claude-plugin/plugin.json | — |$lr
 
 ## Eval design
 
-| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
-|---|---|---|---|---|---|
-| REQ-1 | the build row's suite | AC-1.1 | hermetic | \`rehearsal-row.test.sh\` | the build row's suite is red |
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when |$th
+|---|---|---|---|---|---|$ts
+| REQ-1 | the build row's suite | AC-1.1 | hermetic | \`rehearsal-row.test.sh\` | the build row's suite is red |$t1${le:+$le$lt}
 PLAN
   _rh_hand prose "the plan's Step-3 prose: its rows and its Eval design"
   _rh_card step3 "$RH_PLAN" && _rh_approve plan && _rh_poker "enter Step 4" current 4

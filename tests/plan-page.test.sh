@@ -9,11 +9,15 @@
 #              authored cells alone are admitted.
 #   §KEYS      each header key the version-15 header has no place for is refused on a version-15 plan, the
 #              refusal naming it; the same key on a version-14 plan is admitted.
+#   §TASK      a criterion's Task cell at 15 naming a token no Tasks row carries is refused at the write, naming it and
+#              what to write; an id, `9`, a dash or no column is admitted; the reader answers the task from the column at
+#              15 and from the block's `task:` line at 14.
 #   §GATE      the commit gate (hooks/bash-walls.sh) asks the run's facts for the step's evidence: a commit at
 #              Step 6 whose log holds no review event is refused, and admitted once the log holds one per question.
 #              The same run at 15, brought forward, is refused as the 14 is, and with its reviews still refused, naming each fact its log lacks.
 #              At 15 a step's evidence is asked where it is held, owed while missing and not once it stands; a step
 #              pending in an advance's judgment moves the gate only in the advance's own session, and is never held.
+#              A page at 15 whose landed tasks stand out of order is admitted: the hook judges its copy with the plan's log.
 #
 # FIXTURE FIDELITY. Each plan is a real file in a scratch git repository with an engaged session, written
 # through hooks/canonical-sdlc-governing-skill.sh as the Write tool would post it. Every plan carries the
@@ -121,6 +125,26 @@ done
 
 # A run with a log is read from the log alone, so the plan below holds no proved: line and the planted log holds
 # the run's step and, in the admitted twin, its readings: the gate admits on the facts the reader answers.
+section "TASK"
+# evp <cell|-> -> the Tasks table, then an Eval design whose one criterion names <cell> in its Task column; `-` writes no column.
+evp() {
+  local h='| Requirement | Approach | Criterion | Eval type | Eval | Fails when |' s='|---|---|---|---|---|---|' r='| REQ-1 | a suite | AC-1 | hermetic | `a.test.sh` | a is red |'
+  [ "$1" = - ] || { h="$h Task |"; s="${s}---|"; r="$r $1 |"; }
+  printf '## Tasks\n\n%s\n\n## Eval design\n\n%s\n%s\n%s\n' "$NINE" "$h" "$s" "$r"
+}
+for v in T1 9 — '' -; do write_plan "$(evp "$v" | page 15)"; expect_status "a criterion whose Task is '$v' (- for no column) is admitted" 0 "$HOOK_EXIT"; done
+for v in "T99|T99" "T1, 9|9" "T1, T99|T99"; do write_plan "$(evp "${v%|*}" | page 15)"
+  expect_status "a criterion whose Task is '${v%|*}' is refused" 2 "$HOOK_EXIT"
+  expect_contains "…naming the token no row of the table carries, and what to write" "AC-1: task ${v#*|} names no row in the Tasks table; write a task id the table holds, several joined by commas, or 9 alone for the close" "$HOOK_SAID"
+done
+write_plan "$(printf '%s\n\n%s\n' "$MACHINE" "$(evp T99 | sed -n '/^## Eval design/,$p')" | page 14)"
+expect_status "a version-14 plan is not judged by the column: its block says the task" 0 "$HOOK_EXIT"
+ask_task() { bash -c '. "$1" && plan_read_criterion_task "$2"' _ "$PLAN_READ" "$FP"; }
+evp T1 | page 15 > "$FP"; expect_eq "at 15 the reader answers a criterion's task from its column" "AC-1	T1" "$(ask_task)"
+evp — | page 15 > "$FP"; expect_eq "…and a dash names none" "" "$(ask_task)"
+printf '## Verification Matrix\n\n| AC | tier | status |\n|---|---|---|\n| AC-1 | T1 | pending |\n\nAC-1:\n  task: T7, T8\n\n%s\n' "$(evp T99 | sed -n '/^## Eval design/,$p')" | page 14 > "$FP"
+expect_eq "at 14 it answers from the block's task: line, and never from a column" "AC-1	T7, T8" "$(ask_task)"
+
 section "GATE"
 git -C "$R" -c user.name=f -c user.email=f@x.invalid -c core.hooksPath=/dev/null commit -q --allow-empty -m base
 H="$(git -C "$R" rev-parse HEAD)"; GL="$R/.bionic/docs/record/wave-01-x/run.log"
@@ -177,7 +201,7 @@ expect_absent "…and asks a row's landing and launch of the reader, never namin
 cp "$P2" "$P2.keep"; awk '{ print } /^\| T1 \|/ { t = $0; print; sub(/^\| T1 \|/, "| T2 |", t); sub(/\| build \|/, "| bogus |", t); print t }' "$P2.keep" > "$P2"; gate
 expect_eq "at 15 a second row of one id and a row of an unknown kind are refused at the commit, each named" "2|T1: duplicate id|T2: kind bogus" "$GATE_EXIT|$(printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o 'T1: duplicate id\|T2: kind bogus' | paste -sd'|' -)"
 awk '{ print } /^\| T1 \|/ { sub(/^\| T1 \|/, "| T2 |"); print }' "$P2.keep" > "$P2"; printf 'run/v1|ev=dispatch|row=T2|name=w-T2|brief=b|at=2026-11-01T00:00:02Z\n' >> "$L2"; gate
-expect_eq "a row the log holds dispatched under a name stands at 15 on its dispatch: the gate names neither it nor an evidence line, and owes the requirements still" "|owed at 15: Step 1's requirements" "$(printf '%s\n' "$GATE_SAID" | /usr/bin/grep -o "T2[^ ]*\\|evidence line" | head -1)|$(owed "Step 1's requirements")"
+expect_eq "a row the log holds dispatched under a name stands at 15 on its dispatch: the gate names neither it nor an evidence line, and owes the requirements still" "|owed at 15: Step 1's requirements" "$(printf '%s\n' "$GATE_SAID" | /usr/bin/grep -oE '(^|[^A-Za-z0-9/])T2([^A-Za-z0-9/]|$)|evidence line' | head -1)|$(owed "Step 1's requirements")"
 cp "$P2.keep" "$P2"; for f in "each criterion's fails-when:" "the matrix:"; do expect_absent "…and no longer names $f" "could not be read at 15: $f" "$GATE_SAID"; done
 unruled() { ( . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/run.sh"; . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/units.sh"; . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/proof.sh"
   . "$BIONIC_SCRIPTS_DIR/payload/scripts/lib/walls.sh"; matrix_unruled "$P2" 8 "$@" | tr '\n' ' ' ); }
@@ -262,5 +286,22 @@ ap() { ( cd "$R" && HOME="$HOME_DIR" CLAUDE_CODE_SESSION_ID="$SID" bash "$BIONIC
 hdr "base-sha: $H"; B="$(ap launch)|$(grows)"; sed -i '' 's/| Grow. | — |/| Grow. | approval:doctrine-growth, approval:launch |/' "$P2"
 expect_eq "with the approval standing, growth from T3's tree is refused (exit 2) while T3 names no wait on it, saying what to write, and admitted (exit 0) once it does" "1|21|Not admitted: row T3 does not wait on approval:doctrine-growth|edit the deps cell of T3 in the plan to: approval:doctrine-growth|00|" "$B|$(grows)"
 expect_eq "approve refuses launch while no task waits on it, takes it once T3 does, and refuses a name none waits on" "1|0|1" "${B%%|*}|$(ap launch)|$(ap nobody)"
+# A page at 15 whose landed tasks stand out of order is judged with its run's log: the hook names the plan its copy is of.
+OL="$R/.bionic/docs/record/wave-01-x/run.log"; mkdir -p "${OL%/*}"; [ ! -f "$OL" ] || mv "$OL" "$OL.kept"
+for t in T1 T5 T6 T7; do printf 'run/v1|ev=published|row=%s|commit=%s|kind=queue|by=-|why=-|at=2026-11-01T00:00:0%sZ\n' "$t" "$(printf 'a%.0s' {1..40})" "${t#T}"; done > "$OL"
+OT='| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | — | 30 | REQ-1 | a.sh | — |
+| T5 | 5 | test | the regression | — | 30 | REQ-1 | r/T5.md | — |
+| T6 | 6 | review | the review | — | 30 | REQ-1 | r/T6.md | — |
+| T7 | 7 | doc | the release | — | 30 | REQ-1 | CHANGELOG.md | — |
+| T8 | 7 | build | the fix | — | 30 | REQ-1 | b.sh | — |
+| T9 | 7 | review | the fix read | T8 | 30 | REQ-1 | r/T9.md | — |'
+printf '## Tasks\n\n%s\n' "$OT" | page 15 > "$R/ot-copy"
+expect_contains "a copy of that page judged with no plan it is of reads every task open, and its order refused" "T7: the release row comes ahead of the review row T9" \
+  "$(bash -c '. "$1/units.sh" 2>/dev/null; units_validate "$2"' _ "${PLAN_READ%/*}" "$R/ot-copy")"
+write_plan "$(cat "$R/ot-copy")"
+expect_status "…the hook names the plan it writes, so the landed tasks are read from its log and the page is admitted" 0 "$HOOK_EXIT"
+rm -f "$OL"; [ ! -f "$OL.kept" ] || mv "$OL.kept" "$OL"
 
 finish
