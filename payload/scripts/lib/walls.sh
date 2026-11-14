@@ -5005,6 +5005,7 @@ dispatch() {
       [ "$(walk_mode)" = exempt ] || validate_walk_artifact
       validate_environments ;;
     esac
+    [ "$CURRENT" = "$INTEGRATE_STEP" ] && validate_merge_target
     case "${CURRENT%[ab]}" in 6|7|8|9) _eg_refuse_readings "the run" "$RIGOR"; _eg_refuse_floor_absent "the run" ;; esac
     _eg_v15_refuse
     case "${CURRENT%[ab]}" in 5|6|7|8|9) validate_matrix ;; esac

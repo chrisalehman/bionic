@@ -219,7 +219,7 @@ _units_table() {
 # `_READER_DROP_AWK`), whatever launch stands; a `landed` or `dropped` cell is never moved back. Everything else is the
 # cell, which is the old home the translation reads, so a run whose log holds none of these reads as its cells say.
 # The text itself is judged as written (`units_validate` reads `_units_table`), so a write is never refused for a
-# state the plan does not carry. A plan writer's dry copy and close-out's preflight copy are read with their plan's run.
+# state the plan does not carry. A plan writer's copy is read with its plan's run.
 # A row the log holds landed keeps the name of the launch that landed it, as its agent cell kept it, so the stop of
 # that name finds its tree. A row's tree and base are the run's the same way: the newest `tree` event the log holds for it (the tree verb's, with an
 # instant) fills the `worktree` and `base` slots, the base by its first eight digits as a cell spells it; a row the
@@ -290,12 +290,11 @@ _units_place() {
   case "$a" in *$'\n'*) printf '%s %s' "$(a="${a%$'\n'*}"; printf '%s' "${a%[ab]}")" "${a##*$'\n'}" ;; *) printf ' %s' "$a" ;; esac
 }
 
-# _units_origin <plan> -> the plan a copy was made from, whose run it reads: a plan verb's `<plan>.<verb>.<pid>` and
-# close-out's preflight `<dir>/.<plan file>.preflight.<pid>` name their plan when it stands; any other path is its own.
+# _units_origin <plan> -> the plan a copy was made from, whose run it reads: a plan verb's `<plan>.<verb>.<pid>` names
+# its plan when it stands; any other path is its own.
 _units_origin() {
-  local o="${1%%.plan.md.*}.plan.md" b
+  local o="${1%%.plan.md.*}.plan.md"
   case "$1" in *.plan.md.*) ;; *) printf '%s' "$1"; return 0 ;; esac
-  b="${o##*/}"; case "$b" in .?*) o="${o%"$b"}${b#.}" ;; esac
   if [ -f "$o" ]; then printf '%s' "$o"; else printf '%s' "$1"; fi
 }
 
@@ -2173,8 +2172,8 @@ units_columns() {
 # units_validate <plan> [<origin>] -> one line per broken invariant; exit 1 if any, else 0.
 #
 # ONE RULE FOR A PLAN AND FOR ITS COPY. "After the release" is the publish order in a landing record, and a record is
-# named by a plan's name; a plan verb's dry copy and the governing skill's temp copy carry names of their own, which name
-# none. <origin> is the plan the copy was made from, the one whose record is read, so the copy is judged as the plan is.
+# named by a plan's name; the governing skill's temp copy carries a name of its own, which names none. <origin> is the
+# plan the copy was made from, the one whose record is read, so the copy is judged as the plan is.
 # Absent, the plan is its own origin and the rest of this library is unchanged.
 #
 # `worktree` AND `base` EACH CARRY ONE INVARIANT, and both stop short of the machine: an
