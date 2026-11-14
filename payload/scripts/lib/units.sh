@@ -1499,9 +1499,17 @@ _units_publish_order() {
 # READERS: `units_validate` admits the row by it, and `units_post_readers` names it to the release approval card.
 # A TABLE AT 15 HAS NO READS CELL: a caller that sets `v15` hands the waits each task's person wrote as `wtn[<id>]`
 # and the rows each names as `nmd[<id>, <wait>, <row id>]`, both from lib/plan-read.sh `plan_read_waits`, and the
-# predicate splits no cell of its own.
+# predicate splits no cell of its own. `post_wait()` files the current record, one line of `plan_read_waits`, into
+# them: a kind line gives each wait as spelled and the ones its kind implies, and the waits a person wrote are the
+# first less the second; a row line gives the reads that name a row.
 _units_post_awk() {
   printf '%s' '
+    function post_wait(   imp, m0, o0, i0) {
+      if ($2 == "kind") {
+        split("", imp); m0 = split($5, o0, ","); for (i0 = 1; i0 <= m0; i0++) imp[o0[i0]] = 1
+        m0 = split($4, o0, ","); for (i0 = 1; i0 <= m0; i0++) if (!(o0[i0] in imp)) wtn[$1] = wtn[$1] (wtn[$1] == "" ? "" : ",") o0[i0]
+      } else if ($2 == "row") { m0 = split($4, o0, ","); for (i0 = 1; i0 <= m0; i0++) nmd[$1, o0[i0], $3] = 1 }
+    }
     function after(a, b) { return (stp[a] + 0 > stp[b] + 0 || (stp[a] + 0 == stp[b] + 0 && a + 0 > b + 0)) }
     function later(w, r,   m, a, k, p) {
       if (!pub_done) {
@@ -1539,16 +1547,26 @@ _units_post_awk() {
 # that `post_reader` admits there, in table order. `read` when every record path in its Files is the evidence of a
 # registered review reading (`proved: kind=review … evidence=`), in either spelling the record takes; `unread`
 # otherwise. The release approval card waits on an open row that is unread: what landed after the release is read
-# before the person is asked. Nothing printed for a plan with no such row, or a table with no reads column. <origin> is
+# before the person is asked. Nothing printed for a plan with no such row, or a table at 14 with no reads column. <origin> is
 # the plan whose landing record orders the rows, when <plan> is a copy (default: <plan>), as `units_validate` takes it.
+# A PAGE AT 15 holds no reads cell and no status cell: what a review row reads is the waits its person wrote, from the
+# plan's one reader (`_units_waits`), and each row's state is the run's, as `units_rows` reads it from the log.
 units_post_readers() {
-  local plan="${1:-}" origin="${2:-}" rows proofs
+  local plan="${1:-}" origin="${2:-}" rows proofs v15="" waits=""
   rows="$(units_rows "$plan")" || return 1
-  [ -n "$rows" ] && units_has_column "$plan" reads || return 0
+  [ -n "$rows" ] || return 0
+  if [ "$(plan_read_header "$plan" canonical_sdlc_version 2>/dev/null)" = canonical_sdlc_version=15 ]; then
+    v15=1; waits="$(_units_waits "$plan")" || return 1
+  else
+    units_has_column "$plan" reads || return 0
+  fi
   # The registered reviews are the run's proofs (`_units_proofs`), read from the origin a copy was made from.
   proofs="$(_units_proofs "${origin:-$plan}")" || return 1
-  { printf '%s\n\034\n' "$rows"; [ -z "$proofs" ] || printf '%s\n' "$proofs"; } | awk -F'\t' -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" "$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
+  { printf '%s\n\034\n' "$rows"; [ -z "$proofs" ] || printf '%s\n' "$proofs"; [ -z "$waits" ] || printf '\035\n%s\n' "$waits"; } \
+    | awk -F'\t' -v v15="$v15" -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" "$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
     $0 == "\034" { p = 1; next }
+    $0 == "\035" { p = 2; next }
+    p == 2 { post_wait(); next }
     !p { if ($1 != "") { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; fil[n] = $9; sta[n] = $10; rd[n] = $13 }; next }
     proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE != "" { ev[++ne] = PROOF_EVIDENCE }
     END {
@@ -2309,16 +2327,9 @@ units_validate() {
         m0 = split(st15, o0, " ")
         for (i0 = 1; i0 <= m0; i0++) { e0 = index(o0[i0], "="); if (e0 > 1) ost[substr(o0[i0], 1, e0 - 1)] = substr(o0[i0], e0 + 1) }
       }
-      # THE READER LINES FOLLOW THE ROWS: a kind line gives each wait as spelled and the ones its kind implies, and the
-      # waits a person wrote are the first less the second; a row line gives the reads that name a row.
+      # THE READER LINES FOLLOW THE ROWS, filed by `post_wait()`.
       $0 == "\034" { wpart = 1; next }
-      wpart {
-        if ($2 == "kind") {
-          split("", imp); m0 = split($5, o0, ","); for (i0 = 1; i0 <= m0; i0++) imp[o0[i0]] = 1
-          m0 = split($4, o0, ","); for (i0 = 1; i0 <= m0; i0++) if (!(o0[i0] in imp)) wtn[$1] = wtn[$1] (wtn[$1] == "" ? "" : ",") o0[i0]
-        } else if ($2 == "row") { m0 = split($4, o0, ","); for (i0 = 1; i0 <= m0; i0++) nmd[$1, o0[i0], $3] = 1 }
-        next
-      }
+      wpart { post_wait(); next }
       $1 == "" { next }
       { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; fil[n] = $9; sta[n] = $10; wtc[n] = $11
         bsc[n] = $12; rd[n] = $13; count[$1]++ }

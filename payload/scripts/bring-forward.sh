@@ -139,11 +139,19 @@ _bf_plan() {  # <plan> <deps file|-> <gaps out> [<criteria tasks file>] -> the p
 
 _bf_deps() {  # <old plan> <implied plan> <deps out> -> the waits that are not deps, as gaps
   # The implied plan is the new table with every deps cell empty, so its waits are what kind and step imply.
+  # A WAIT THE PERSON WROTE BY NAMING THE ROW, its id or a path its Files write, stays in deps though the default names
+  # the same row: a review row reading what landed after the release says so only by that wait. A row nothing but the
+  # default names (`head`, `record`, `merge`, a proof) is left to the default.
   { plan_read_waits "$2"; printf '\034\n'; plan_read_waits "$1"; } | awk -F'\t' -v out="$3" '
+    function named(rs, r,   m, a, k, t) {
+      m = split(rs, a, ",")
+      for (k = 1; k <= m; k++) { t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t); sub(/^live:/, "", t); if (t == r || (t !~ /[ \t:!]/ && t ~ /[\/.*?]/)) return 1 }
+      return 0
+    }
     $0 == "\034" { old = 1; next }
     !old { if ($2 != "kind") imp[$1, $2, $3] = 1; next }
     $2 == "kind" { ord[++n] = $1; next }
-    ($1, $2, $3) in imp { next }
+    ($1, $2, $3) in imp && !($2 == "row" && named($4, $3)) { next }
     $2 == "row" { d[$1] = d[$1] (d[$1] == "" ? "" : ", ") $3; next }
     $3 ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/ { a[$1] = a[$1] ", " $3; next }
     { printf "gap/v1|ev=row|row=%s|field=%s|why=unruled\n", $1, $3 }
