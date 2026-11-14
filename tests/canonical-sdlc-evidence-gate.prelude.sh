@@ -38,28 +38,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Incident 0001: the audit file lives under $HOME, never in the project tree.
-# Every runner in this suite already pins HOME to a make_home sandbox, so the
-# relocated writes stay off the developer's real ~/.claude/logs. The sandbox
-# HOME is always a SIBLING of the make_project fixtures (both are bare
-# mktemp -d), never a parent — Section 21a's "nothing under the project tree"
-# assertion depends on that.
-# Slug must match hooks/canonical-sdlc-evidence-gate.sh audit_path() byte for byte.
-slug_for() { printf '%s-%s' "$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')" \
-                            "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"; }
-# $1 = sandbox HOME, $2 = the audit_root the hook resolved (the plan's project).
-# THE SLUG IS TAKEN OVER THE CANONICAL PATH (bionic 1.4.0, task ADOPT). The hook
-# now resolves its root through lib/root.sh's `project_root`, which answers with
-# `pwd -P` — so on a machine where the fixture root sits under a symlinked prefix
-# (macOS: /var/folders -> /private/var/folders, which mktemp -d hands back
-# unresolved) the hook's cksum and this helper's cksum are taken over two spellings
-# of one directory, and every audit-file assertion looks for a file that was
-# written one slug over.
-audit_file_for() {
-  local proj; proj=$(cd "$2" 2>/dev/null && pwd -P) || proj="$2"
-  printf '%s/.claude/logs/%s/sdlc-audit.md' "$1" "$(slug_for "$proj")"
-}
-
 # Creates an isolated $HOME-equivalent that is ALSO usable as the project the
 # single-argument runners gate against: an empty ~/.claude/plans/ (never
 # searched — see write_global_note) plus an empty .bionic/docs/plans/ (searched).
@@ -179,18 +157,6 @@ $1"
   else
     : > "$m"
   fi
-}
-
-# Creates an isolated project dir with .bionic/docs/plans/ ready to receive
-# plan files. Returned path plays the CLAUDE_PROJECT_DIR role.
-make_project() {
-  local dir
-  dir=$(mktemp -d)
-  mkdir -p "$dir/.bionic/docs/plans"
-  write_generic_evidence "$dir"
-  engage "$dir"
-  cleanup_dirs+=("$dir")
-  echo "$dir"
 }
 
 # Writes $2 as the content of a plan file in the sandbox HOME's OWN docs root

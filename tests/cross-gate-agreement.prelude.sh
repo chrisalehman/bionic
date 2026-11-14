@@ -81,9 +81,6 @@ SWEEPER="$BIONIC_HOOKS_DIR/session-sweeper.sh"
 # below plants a tree and drives the unmutated hook against its own doctored library.
 PARTY_LG="${W1R_PARTY_LG:-$BIONIC_HOOKS_DIR/stop.sh}"
 PARTY_LG_SRC="${W1R_PARTY_LG_SRC:-${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh}"
-# §J also drives a mutated copy of the SWEEPER, to prove the opposite direction:
-# a change to the predicate moves both answers rather than splitting them.
-PARTY_SW="$SWEEPER"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/w1r-agreement.XXXXXX")" && pwd -P)"
 BG_PIDS=""
@@ -166,15 +163,6 @@ mk_stop_payload() {  # <sid> <transcript> <cwd> <task_id>
       tool_input:{task_id:$k}, tool_use_id:"toolu_018jyjgop7KMxP6yKtoAWWtB"}'
 }
 
-mk_bash_payload() {  # <sid> <transcript> <cwd> <command>
-  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg m "$4" \
-    '{session_id:$s, transcript_path:$t, cwd:$c,
-      prompt_id:"f3cd7d62-305d-47ed-9eaf-46fb12d4f4ed",
-      permission_mode:"bypassPermissions", effort:{level:"high"},
-      hook_event_name:"PreToolUse", tool_name:"Bash",
-      tool_input:{command:$m}, tool_use_id:"toolu_018jyjgop7KMxP6yKtoAWWtB"}'
-}
-
 # The recorder's event. FAITHFUL to .bionic/docs/record/w3-slice1-posttooluse-probe.md
 # capture A (orchestrator-invoked PostToolUse|Bash), field for field including the
 # tool_response object; capture A carries no top-level agent_id, which is the
@@ -208,30 +196,6 @@ mk_agent_post() {  # <sid> <transcript> <cwd> <tool_use_id> [name] [agentId]
                      prompt:"go", outputFile:("/tmp/tasks/" + $a + ".output"),
                      canReadOutputFile:true},
       tool_use_id:$u, duration_ms:6}'
-}
-
-# The TEAMMATE completion (epic-16 wave-01 task 0). FAITHFUL to
-# .bionic/docs/record/landing-wave-capture-probe.md §3-A and the live re-capture
-# task 0 took through the pty harness: `tool_response.status` is
-# `teammate_spawned`, and `agent_id`/`teammate_id` both carry the ADDRESSING form
-# `<name>@session-<id8>` — never the transcript form, which no PostToolUse
-# payload contains. This is the dispatch mode every interactive session on this
-# machine really uses; `mk_agent_post` above is the async one.
-mk_agent_post_teammate() {  # <sid> <transcript> <cwd> <name> <addressing-id> <tool_use_id>
-  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg n "$4" --arg a "$5" --arg u "$6" \
-    '{session_id:$s, transcript_path:$t, cwd:$c,
-      prompt_id:"95b0701b-7814-42ca-a26f-58123e667f9a",
-      permission_mode:"bypassPermissions", effort:{level:"high"},
-      hook_event_name:"PostToolUse", tool_name:"Agent",
-      tool_input:{description:"a dispatch", prompt:"go", subagent_type:"implementor",
-                  run_in_background:true, name:$n},
-      tool_response:{status:"teammate_spawned", prompt:"go",
-                     teammate_id:$a, agent_id:$a, agent_type:"implementor",
-                     model:"claude-opus-5", name:$n, color:"blue",
-                     tmux_session_name:"in-process", tmux_window_name:"in-process",
-                     tmux_pane_id:"in-process", team_name:"session-6c85684c",
-                     is_splitpane:false, plan_mode_required:false},
-      tool_use_id:$u, duration_ms:9}'
 }
 
 # The LANDING SWEEP's event (epic-16 wave-03, T4c). FAITHFUL to
@@ -753,32 +717,6 @@ RUN_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/run.sh"
 FILL_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/fill.sh"
 [ -r "$FILL_LIB" ] || FILL_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/fill.sh"
 
-# ---- from §I.1 (the copied primitives): fn_body ----
-fn_body() {  # <file> <function name> -> the function's body, signature and its comment stripped
-  awk -v n="$2" '
-    !f && index($0, n "()") == 1 {
-      f = 1; line = $0
-      sub(/^[^{]*\{/, "", line)
-      sub(/^[[:space:]]*#.*$/, "", line)
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
-      if (line != "") print line
-      if (line ~ /\}$/) exit
-      next
-    }
-    f { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; if ($0 == "}") exit }
-  ' "$1"
-}
-
-# ---- from §V: V_ORIGIN, V_HOOKCHAIN, v_hook_val, V_ORIGIN_VAL, v_hookchain_vals, v_hc_chips_ok, v_hc_agree ----
-V_ORIGIN="$BIONIC_HOOKS_DIR/../payload/scripts/lib/walls.sh"
-[ -r "$V_ORIGIN" ] || V_ORIGIN="$BIONIC_HOOKS_DIR/../scripts/lib/walls.sh"
-V_HOOKCHAIN="$BIONIC_SKILLS_DIR/canonical-sdlc/diagrams/hook-chain.svg"
-v_hook_val() { grep -m1 '^SUPPORTED_SDLC_VERSION=' "$1" 2>/dev/null | cut -d= -f2 | tr -cd '0-9'; }
-V_ORIGIN_VAL="$(v_hook_val "$V_ORIGIN")"
-
 # ---- from §Section P (the Patrol stamp): PARTY_PK ----
 PARTY_PK="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
-
-# ---- from §S.4: PARTY_SG_W ----
-PARTY_SG_W="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
 
