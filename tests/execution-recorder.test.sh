@@ -67,7 +67,6 @@ trap 'rm -rf "$SANDBOX"' EXIT
 
 SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 SID_B="11111111-2222-3333-4444-555555555555"
-SUB_AGENT_ID="a6bc0caf11962bbb6"
 
 mk_agent_post() {  # <sid> <transcript> <cwd> <name> <agentId> <tool_use_id>
   jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg n "$4" --arg a "$5" --arg u "$6" \
@@ -95,7 +94,6 @@ REC_OUT=""; REC_ERR=""; REC_ST=0
 run_rec() {  # <payload-json>
   local _sid; _sid=$(printf '%s' "$1" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
   REC_OUT=$(printf '%s' "$1" | env CLAUDE_CODE_SESSION_ID="$_sid" bash "$REC" 2>"$SANDBOX/.err"); REC_ST=$?
-  REC_ERR=$(cat "$SANDBOX/.err")
   return 0
 }
 

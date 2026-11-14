@@ -397,7 +397,6 @@ for s_f in "$S_LIB"/*.sh; do
   { printf 'printf "%%s\\n" "%s" >> "%s"\n' "${s_f##*/}" "$S_LOG"; cat "$s_f"; } > "$s_f.new" && mv "$s_f.new" "$s_f"
 done
 S_SETUP="$PAYLOAD/scripts/setup.sh"
-S_CMD="bash $(cd "$PAYLOAD/scripts" && pwd -P)/setup.sh"
 s_run() {  # <args...> — the door on the instrumented copy, in the throwaway home
   : > "$S_LOG"
   env -i HOME="$FAKE_HOME" PATH=/usr/bin:/bin TMPDIR="$WORK" BIONIC_LIB_DIR="$S_LIB" \
@@ -439,8 +438,6 @@ eq "S.5c start-up ceiling: --all with --only sources no library" "$(s_sourced)" 
 # positive control for each door (E.0), so an empty-readback cannot pass on a door that
 # refuses nothing, and the instrumented copy of setup's libraries proves the refusal
 # sources none (S.0 shows the log fills when the door does source).
-E_SETUP_MSG="setup: --only needs the name of the one item to set up.
-       run ${S_CMD} --list to see the names."
 S_OUT="$(s_run --only)"
 S_OUT="$(s_run --only=)"; S_RC=$?
 eq "E.1b …exit 2" "$S_RC" "2"
@@ -449,13 +446,10 @@ S_OUT="$(s_run --all --only=)"; S_RC=$?
 eq "E.1e …exit 2" "$S_RC" "2"
 
 E_REMOVE="$PAYLOAD/scripts/remove.sh"
-E_RM_CMD="bash $(cd "$PAYLOAD/scripts" && pwd -P)/remove.sh"
 e_rm_run() {  # <args...> — remove.sh in the throwaway home, no stdin, no tty
   env -i HOME="$FAKE_HOME" PATH=/usr/bin:/bin TMPDIR="$WORK" BIONIC_PLUGINS_DIR="$WORK/s-plugins" \
     /bin/bash "$E_REMOVE" "$@" </dev/null 2>&1
 }
-E_RM_MSG="remove: --only needs the name of the one item to remove.
-        run ${E_RM_CMD} --list to see the names."
 S_OUT="$(e_rm_run --only)"; S_RC=$?
 eq "E.0c …exit 2" "$S_RC" "2"
 S_OUT="$(e_rm_run --only=)"; S_RC=$?

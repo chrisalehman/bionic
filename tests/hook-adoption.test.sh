@@ -223,8 +223,6 @@ SID_VIA_LIB='bash-walls
 canonical-sdlc-governing-skill dispatch-preflight execution-recorder
 stop session-start permission-answer'
 SID_DIRECT='preflight-probe stop-orders session-sweeper stop-check engage'
-SID_READERS="$SID_VIA_LIB
-$SID_DIRECT"
 for name in $SID_VIA_LIB; do
   f="$HOOKS/$name.sh"
   [ -f "$f" ] || { no "$name.sh exists" "$f"; continue; }
