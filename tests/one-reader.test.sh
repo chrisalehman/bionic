@@ -8,7 +8,8 @@
 #                 nothing (a heading's or a shape's words, an operand of another command) a planted file holds
 #                 lines of it and, last, the real reading of that kind: only the last is counted.
 #   §PLANWRITERS  a planted append to a plan is named and counted; a log's, words' or copy
-#                 source's line is no write beside a planted copy onto a plan.
+#                 source's line is no write beside a planted copy onto a plan. The act's own function is admitted, a
+#                 write planted there is not counted; one in another function of its file, or in lib/, is.
 #   §WRITERS      two functions appending one event type are listed as a pair; so is `published` today. A
 #                 launch's `dispatch` has one writer, the launch recorder's, and a row's `born` one, the units
 #                 library's; each is paired with a planted second, the born one in the shape of a split; so is
@@ -90,6 +91,9 @@ planted_facts() {  # <plan> -> the reader's facts, one run/v1 line each
 planted_k5_count() { echo "n=$(/usr/bin/grep -c '^run/v1|ev=zzplant|' "$f")"; }
 planted_k5_put() { echo "run/v1|ev=zzplant|at=now" >> "$f"; }
 EOF
+B="$S/payload/scripts/bring-forward.sh"
+{ awk '{ print } /^bf_main\(\) \{/ { print "  printf x >> \"$plan\"" }' "$B"; echo 'planted_other() { printf x >> "$plan"; }'; } > "$S/bf" && cp "$S/bf" "$B"
+echo 'bf_main() { printf x >> "$plan"; }' > "$L/planted-act.sh"
 AFTER="$(run)"; RC=$?
 site() { printf '%s\n' "$AFTER" | awk -F'\t' -v f="payload/scripts/lib/planted-k$1.sh" '$2 == f { print $1, $3 }'; }
 
@@ -97,8 +101,8 @@ section "PARSERS"
 expect_contains "a real parser is named at this head" "$(printf 'parser\tpayload/scripts/lib/units.sh\t')" "$BEFORE"
 expect_absent "the goals library reads a criterion's state and a plan's scale through the reader alone" "$(printf 'parser\tpayload/scripts/lib/plan.sh\t')" "$BEFORE"
 expect_absent "the fill library takes the run's step and approval from the reader alone" "$(printf 'parser\tpayload/scripts/lib/fill.sh\t')" "$BEFORE"
-expect_eq "parsers, plan writers and shared types stand at or under 13, 2 and 6" "1 1 1" \
-  "$(( $(count "$BEFORE" parsers) <= 13 )) $(( $(count "$BEFORE" plan_writers) <= 2 )) $(( $(count "$BEFORE" shared_types) <= 6 ))"
+expect_eq "parsers, plan writers and shared types stand at or under 13, 1 and 6" "1 1 1" \
+  "$(( $(count "$BEFORE" parsers) <= 13 )) $(( $(count "$BEFORE" plan_writers) <= 1 )) $(( $(count "$BEFORE" shared_types) <= 6 ))"
 expect_eq "headings: a message's, a constant's and a print's words are no parse; an unanchored match is" "parser sites=1 first=4" "$(site 1)"
 expect_eq "shapes: a printed one and a function line's comment are no parse; a log line's test is" "parser sites=1 first=3" "$(site 2)"
 expect_eq "operands: a function's argument, in a \$( ) or in words, is no read; a reader's own is, and a program's end" \
@@ -111,7 +115,10 @@ section "PLANWRITERS"
 expect_contains "the planted plan write is named" "$(printf 'plan-writer\tpayload/scripts/lib/planted-write.sh\t')" "$AFTER"
 expect_absent "a plan write is not a parse" "$(printf 'parser\tpayload/scripts/lib/planted-write.sh')" "$AFTER"
 expect_absent "the units library writes no plan" "$(printf 'plan-writer\tpayload/scripts/lib/units.sh\t')" "$AFTER"
-expect_eq "the plan-writer count rises by the two planted writers" "$(( $(count "$BEFORE" plan_writers) + 2 ))" "$(count "$AFTER" plan_writers)"
+expect_eq "the plan-writer count rises by the four planted writers" "$(( $(count "$BEFORE" plan_writers) + 4 ))" "$(count "$AFTER" plan_writers)"
+expect_absent "the act's file lists no write site" "$(printf 'plan-writer\tpayload/scripts/bring-forward.sh')" "$BEFORE"
+expect_contains "a write in the act's file outside its function is named, the act's own two are not" "$(printf 'plan-writer\tpayload/scripts/bring-forward.sh\tsites=1 ')" "$AFTER"
+expect_contains "a write under the act's name in another file is named" "$(printf 'plan-writer\tpayload/scripts/lib/planted-act.sh\t')" "$AFTER"
 expect_eq "writes: a log, a plan in refusal words and a copy's source are no plan write; a copy onto a plan is" "plan-writer sites=1 first=4" "$(site 4)"
 
 section "WRITERS"
