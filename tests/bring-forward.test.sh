@@ -54,6 +54,8 @@
 #            rows at 15, found by the walk, bound, and a commit under it judged on its own plan.
 #   §EPIC    a plan with no Tasks rows (an epic's, a wave's whose table holds none, a task-scale plan's) is brought
 #            forward: its page reads 15, its step and whether it is open read as before, and a second act changes no byte.
+#   §DROPS   an epic's Step-line approval read without a guess is in the log; the rest of it, an approval in no ruled
+#            shape, and a criterion's block whose id is not an AC- id are on the gaps list.
 #   §SAYS    a step that fails exits 1 in one line naming what could not be read or written, nothing after it written;
 #            the act run again finishes it.
 #
@@ -782,6 +784,16 @@ for x in epic:3 wave-1-empty:4 task-1-none:4; do p="$E/${x%:*}.plan.md"; l="$SB/
   expect_eq "${x%:*}: the act wrote its log, and a second act changes no byte and prints the same" "log $s $o" \
     "$(o2="$(bash "$BF" "$p" 2>&1)"; printf '%s %s %s %s' "$([ -s "$l" ] && echo log)" "$(cksum < "$p")" "$({ cksum < "$l"; } 2>/dev/null)" "$o2")"
 done
+
+section "DROPS"
+# What the act cannot carry of the epic's state section and criteria is named on its gaps list; what the translation reads
+# without a guess, an approval with its words and its step, is in the log.
+EL="$SB/epic/record/epic/run.log"; EG="$(cat "$SB/epic/record/epic/kept/gaps" 2>/dev/null)"
+expect_eq "Step 3's approval written in its Step line is carried with its first words and its day, and approves step 3" \
+  "run/v1|ev=approval|key=step3|by=Ann Person|said=Option 1 - Yes, keep it open.|at=2026-09-08 0" "$(grep '|key=step3|' "$EL") $(bash "$RS" "$EP" approved step3 >/dev/null; echo $?)"
+expect_contains "…its second words, one field given two values, are named" "gap/v1|ev=approval|key=step3|field=said|why=repeated" "$EG"
+expect_contains "Step 1's ratification, in no approval's shape, is named whole" "gap/v1|ev=approval|key=step1|field=ev|why=unruled" "$EG"
+expect_contains "a criterion's block whose id is not an AC- id is named" "gap/v1|ev=criterion|criterion=E-1|field=block|why=unruled" "$EG"
 
 section "SAYS"
 # A step that fails says so: a tool the translation needs that dies, and a plan whose directory takes no write.
