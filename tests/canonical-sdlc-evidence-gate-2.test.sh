@@ -33,313 +33,26 @@ eg_floor() {  # <plan content> -> the content with the readings and one floor pr
 }
 
 # ============================================================
-# Section 29: Step 9 close-out contract (v14)
+# Section 29: Step 9's delivery, and the trio a named target owes
 # ============================================================
 #
-# The v14 contract, ratified 2026-08-19 (epic-17 W5, design ledger D-A):
-#
-#   delivered:  ALWAYS. Every run has a terminal state — a PR open and ready
-#               for a human to review, or commits landed locally ready to
-#               push. Nothing past that boundary is the run's to claim.
-#   deployed: / verified: / monitored:
-#               owed EXACTLY when frontmatter names a live deploy_target.
-#
-# What died with v13: the trio was owed whenever a target existed, and `n/a:`
-# discharged the step only at `deploy_target: none`. That rule encoded
-# wave==release — the exception, not the rule — and it let a run with no live
-# surface close by writing `n/a` instead of naming what it delivered.
-#
-# `deploy_target` itself is n/a by default and is never inferred (AC-3), so
-# the trio is strictly opt-in: 29a/29e/29e2 are the ordinary run, 29c is the
-# dogfood run that operates its own surface.
-section "Section 29: Step 9 close-out contract (v14)"
+# Every run's Step 9 owes its delivery; a run whose frontmatter names a live deploy_target owes deployed, verified and
+# monitored too, each given to its step by close-out. At 15 they are fields of the run's step-9 event.
+# FIXTURE FIDELITY: eg_page's run at 15 at Step 9, its readings and floor proved, the step event as close-out writes it.
+# fails-when: a Step 9 with no delivery admitted (29b), or a named target's missing trio admitted (29d).
+section "Section 29: Step 9's delivery, and the trio a named target owes"
 
-# A plan at current: 9. $1 = deploy_target value, $2 = the Step-9 block body.
-# Reuses Section 17's matrix_complete, since current: 9 revalidates the matrix
-# as a prefix check before the step shape is ever reached.
-ship_plan() {
-  printf '%s\n## SDLC State\ncurrent: 9\napproved-by: fixture 2026-09-07T00:00Z approved\nStep 9:\n%s\n\n%s\n' \
-    "$(frontmatter wave "$1")" "$2" "$matrix_complete"
+s29_home() {  # <deploy_target> -> S29_H, a run at 15 at Step 9 whose step event holds no delivery
+  local q p; S29_H=$(make_home); eg_head_repo "$S29_H"
+  p=$(eg_page "$S29_H" 9 "run/v1|ev=proof|kind=regression|head=$EG_HEAD|evidence=record/floor.log|at=2026-10-04T01:00:00Z" \
+    $(for q in evidence adversarial structure; do printf 'run/v1|ev=proof|kind=review|head=%s|question=%s|result=pass|scope=piece|reader=w-read|evidence=record/generic-evidence.md|at=2026-10-04T01:00:01Z\n' "$EG_HEAD" "$q"; done) \
+    "run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|at=2026-10-04T01:00:02Z")
+  awk -v t="$1" '/^deploy_target: /{ $0 = "deploy_target: " t } { print }' "$p" > "$p.t" && mv "$p.t" "$p"
 }
-
-ship_delivered="  delivered: PR #412 open and review-ready — 6 commits on wave/17-05"
-ship_trio="  deployed: ./claude-bootstrap.sh rc=0 to this machine
-  verified: installed hook spot-check reads SUPPORTED_SDLC_VERSION=14
-  monitored: one Patrol cycle clean, no wall misfires"
-
-# 29a — no live surface, `delivered:` present → allow. The default run's whole
-# close-out obligation is this one line.
-h29a=$(make_home)
-write_plan "$h29a" "$(ship_plan none "$ship_delivered")" > /dev/null
-
-# 29b — `delivered:` missing → block. The terminal state is not optional.
-h29b=$(make_home)
-write_plan "$h29b" "$(ship_plan none "  note: wrapped it up")" > /dev/null
-expect_block "29b Step 9 without delivered: → block naming the key" "$h29b" 'git commit -m "x"' "Step 9's delivery"
-
-# 29c — a named live surface: delivered + the full trio → allow.
-h29c=$(make_home)
-write_plan "$h29c" "$(ship_plan local-harness "$ship_delivered
-$ship_trio")" > /dev/null
-
-# 29d — a named live surface with `delivered:` only → block, naming what the
-# named target owes.
-h29d=$(make_home)
-write_plan "$h29d" "$(ship_plan local-harness "$ship_delivered")" > /dev/null
-expect_block "29d Step 9, deploy_target named, trio missing → block" "$h29d" 'git commit -m "x"' "deployed"
-
-# 29e — `deploy_target: n/a` is not a named surface (AC-3's default value), so
-# the trio is not owed.
-h29e=$(make_home)
-write_plan "$h29e" "$(ship_plan n/a "$ship_delivered")" > /dev/null
-
-# 29e2 — no `deploy_target` line at all reads the same way. An omission is
-# never a named surface, so it can never conjure the trio into existence.
-h29e2=$(make_home)
-write_plan "$h29e2" "---
-governing-skill: canonical-sdlc
-canonical_sdlc_version: 14
-intent: build
-rigor: double
-scale: wave
-use_worktree: false
-has_ui: false
-walk: exempt
----
-
-## SDLC State
-current: 9
-approved-by: fixture 2026-09-07T00:00Z "approved"
-Step 9:
-$ship_delivered
-
-$matrix_complete" > /dev/null
-
-# 29f — the v13 shape (deploy:/verified-at:/monitor:) no longer discharges the
-# step: it names a release and never names the delivery.
-h29f=$(make_home)
-write_plan "$h29f" "$(ship_plan none "  deploy: shipped to prod at 14:02
-  verified-at: https://app.example/health
-  monitor: one cycle clean")" > /dev/null
-expect_block "29f Step 9 in the retired v13 shape → block on delivered" "$h29f" 'git commit -m "x"' "Step 9's delivery"
-
-# 29g — `n/a:` was v13's escape at deploy_target: none. Under v14 there is
-# nothing to escape: the run still has to name what it delivered.
-h29g=$(make_home)
-write_plan "$h29g" "$(ship_plan none "  n/a: nothing to deploy")" > /dev/null
-expect_block "29g Step 9 with the retired 'n/a:' escape → block on delivered" "$h29g" 'git commit -m "x"' "Step 9's delivery"
-
-# 29h — a run with no named target that deployed something anyway and said so
-# is recording MORE than it owes, which is never a reason to refuse a commit.
-# The trio is unowed here, not forbidden.
-h29h=$(make_home)
-write_plan "$h29h" "$(ship_plan none "$ship_delivered
-$ship_trio")" > /dev/null
-
-# ============================================================
-# Section 30: T4 rows discharge on the user's own confirmation
-# ============================================================
-#
-# THE BLIND SPOT THIS CLOSES. Past the Verify gate, every non-waived row must
-# carry an auditor verdict of CONFIRMED. T4 is the tier whose evidence IS the
-# user's confirmation — an independent agent auditing it can only re-read what
-# the user said, which is not independence, it is transcription. So a
-# legitimately user-confirmed T4 row had exactly one way past this arm: the
-# Waiver Protocol. That recorded a waiver where nothing was waived. Epic-17 W4
-# paid it in that form for its AC-7 and the row reads, permanently, as if the
-# criterion had been let go.
-#
-# THE FIX. A T4 row whose AC block carries a well-formed
-# `user-confirmed: <user> <date> <what>` discharges without a waiver. Nothing
-# else moves: the tier's evidence key was always `user-confirmed` (keys_for_tier),
-# and this arm now reads that same value as the discharge it already was.
-#
-# THE IMPOSTOR, AND THE HONEST LIMIT. The form check is an ATTRIBUTION check —
-# a leading user token, an ISO date, and something said. An agent-shaped claim
-# ("confirmed after re-render", "2026-08-18 the wall renders") carries no
-# attributed human and is refused. What no hook can see is whether the named
-# human actually said it; a fabricated `chris 2026-08-19 ...` passes the form.
-# The form buys a record that names who and when — it does not buy honesty, and
-# it is not sold as if it did.
-# WHERE IT BITES. The ruling is demanded from step 8, the merge advance, where the release approval card
-# settles it; from step 6 the arm asks only for a verdict, and a T4 row's `user-confirmed:` line is one. So
-# every arm below is written at current: 8, and 30m pins the step-6 half beside them.
-section "Section 30: T4 rows discharge on user-confirmed, impostors do not"
-
-# $1 = tier, $2 = auditor cell, $3 = the block's user-confirmed value.
-t4_matrix() {
-  printf '## Verification Matrix
-
-stack-health: n/a: no long-running serve
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1 | %s | discharged | see AC-1 | %s |
-
-AC-1:
-  fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  user-confirmed: %s
-  tier-run: rendered the wall in the live client
-  fresh: rebuilt from the deployed payload
-  cold-client: fresh session, no snapshot carryover
-  contact: user opened it and read the text back
-  readback: quoted the rendered literal verbatim\n' "$1" "$2" "$3"
-}
-
-GOOD_CONFIRM='chris 2026-08-18 read the rendered wall in his own client and confirmed the wording'
-# marked -> the plan with its bare step 8 or 9 line in the form close-out wrote, which the reader reads the step's
-# fields from: `- Step 8: CLOSED` over its indented keys, and the delivery inline on `- Step 9: delivered:`
-marked() { awk 'p9 && sub(/^  delivered: /, "- Step 9: delivered: ") { p9 = 0; print; next } { p9 = 0 }
-  $0 == "Step 8:" { print "- Step 8: CLOSED"; next } $0 == "Step 9:" { p9 = 1; next } { print }'; }
-
-# 30a — the case the blind spot refused: a real user confirmation, no auditor
-# verdict, no waiver → allow.
-h30a=$(make_home)
-write_plan "$h30a" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 "" "$GOOD_CONFIRM")")" | marked)" > /dev/null
-expect_allow "30a T4 + attributed user-confirmed + empty auditor cell at current 8 → allow (ruled by the user)" "$h30a" 'git commit -m "x"'
-
-# 30b — an agent-shaped claim: no attributed human, no date. Still refused.
-h30b=$(make_home)
-write_plan "$h30b" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" \
-  "$(t4_matrix T4 "" "confirmed by the implementor agent after the re-render")")")" > /dev/null
-expect_block "30b T4 + agent-shaped user-confirmed → block (no attributed user)" "$h30b" 'git commit -m "x"' "CONFIRMED"
-
-# 30c — a date with nobody attached is not an attribution either.
-h30c=$(make_home)
-write_plan "$h30c" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" \
-  "$(t4_matrix T4 "" "2026-08-18 the wall renders as specified")")")" > /dev/null
-expect_block "30c T4 + dated but unattributed user-confirmed → block" "$h30c" 'git commit -m "x"' "CONFIRMED"
-
-# 30d — the exemption is T4-scoped. A T3 row cannot buy its way past the
-# auditor by writing a user's name into its block: T3's evidence is a live
-# reading an auditor CAN re-take independently, so the verdict still stands.
-h30d=$(make_home)
-write_plan "$h30d" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T3 "" "$GOOD_CONFIRM")")")" > /dev/null
-expect_block "30d T3 + well-formed user-confirmed → block (exemption is T4-only)" "$h30d" 'git commit -m "x"' "CONFIRMED"
-
-# 30e — no regression: a T4 row an auditor DID confirm still passes.
-h30e=$(make_home)
-write_plan "$h30e" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 CONFIRMED "$GOOD_CONFIRM")")" | marked)" > /dev/null
-expect_allow "30e T4 + CONFIRMED auditor cell → allow (unchanged)" "$h30e" 'git commit -m "x"'
-
-# 30f — pinned scope boundary: the form check lives in the post-Verify arm
-# only. At current: 5 the row is still being discharged and the contract there
-# is the one it always was — `user-confirmed` present, non-empty, not a
-# placeholder. An impostor value passes the VERIFY gate and meets the form
-# check on the advance to 8, which is where the ruling is demanded. Widening the check to Step 5 would false-block mid-discharge commits
-# on plans written before this contract existed.
-h30f=$(make_home)
-write_plan "$h30f" "$(wave_plan 5 "$step5_base" \
-  "$(t4_matrix T4 CONFIRMED "confirmed by the implementor agent")")" > /dev/null
-expect_allow "30f impostor at current: 5 → allow (form check is post-Verify only)" "$h30f" 'git commit -m "x"'
-
-# 30h — THE REFUTATION ARM (critic C-1, W5). The exemption above replaces the
-# WAIVER FORM a user-confirmed row used to be paid in; it does not replace the
-# AUDITOR. Those are different authorities and the design ratified only the
-# first substitution. Written as a plain `elif` ahead of the verdict test, the
-# arm let a T4 row carrying a well-formed `user-confirmed:` walk past an
-# auditor's STANDING REFUTED — the one verdict in the vocabulary that is a
-# positive finding rather than an absence, and the one this very wave produced
-# three of on its first audit pass. So the exemption is scoped to an auditor
-# cell that is EMPTY (nobody has ruled) or CONFIRMED (agreement): a refutation
-# on the record meets the wall, and the refusal names the refutation rather
-# than the attribution, because the attribution is fine and re-writing it is
-# not the fix.
-h30h=$(make_home)
-write_plan "$h30h" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 REFUTED "$GOOD_CONFIRM")")")" > /dev/null
-expect_block "30h T4 + well-formed user-confirmed + auditor REFUTED → block" "$h30h" 'git commit -m "x"' "REFUTED"
-
-# 30i — UNVERIFIABLE is the auditor's other positive finding: it says the
-# evidence could not be checked, which is not the same as nobody having looked.
-# Same arm, same reason.
-h30i=$(make_home)
-write_plan "$h30i" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 UNVERIFIABLE "$GOOD_CONFIRM")")")" > /dev/null
-expect_block "30i T4 + well-formed user-confirmed + auditor UNVERIFIABLE → block" "$h30i" 'git commit -m "x"' "UNVERIFIABLE"
-
-# 30m — the step-6 half of the move. At current: 6 the arm asks for a verdict, not a ruling: the impostor of
-# 30b and the standing finding of 30h each carry a `user-confirmed:` line, which is a T4 row's verdict, so the
-# gate admits both there; 30b and 30h refuse the same rows at current: 8.
-h30m=$(make_home)
-write_plan "$h30m" "$(wave_plan 6 "$step6_body" \
-  "$(t4_matrix T4 "" "confirmed by the implementor agent after the re-render")")" > /dev/null
-expect_allow "30m T4 + agent-shaped user-confirmed at current 6 → allow (a verdict; the ruling is step 8's)" "$h30m" 'git commit -m "x"'
-h30m2=$(make_home)
-write_plan "$h30m2" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 REFUTED "$GOOD_CONFIRM")")" > /dev/null
-expect_allow "30m2 T4 + well-formed user-confirmed + auditor REFUTED at current 6 → allow" "$h30m2" 'git commit -m "x"'
-
-
-# 30k — and the positive twin, so the pair discriminates: the SAME row with the
-# SAME confirmation and a CONFIRMED verdict passes. (30e proves the well-formed
-# + CONFIRMED case at the top of this section; this arm is stated beside its
-# refutation twin so a future edit that broke the agreement case would fail
-# next to the one that proves the refusal.)
-h30k=$(make_home)
-write_plan "$h30k" "$(eg_floor "$(wave_plan 8 "$v9_step8_body" "$(t4_matrix T4 CONFIRMED "$GOOD_CONFIRM")")")" > /dev/null
-
-# 30g — META-EVIDENCE, and the durable half of this section.
-#
-# 30b/30c/30d block against the PRE-fix hook too, for the old reason (no
-# CONFIRMED verdict at all). A test that reads green on both sides of a change
-# proves nothing about the change, so the impostor arms are re-run here against
-# a DOCTORED hook whose attribution form check has been loosened to accept any
-# non-empty value. If the form check is what refuses the impostor, 30b's
-# fixture must ALLOW there. If it does not, the impostor arms above are
-# passing on the missing-verdict rule and this section is decorative.
-#
-# The doctored copy lives in a temp dir and the real hook is never touched.
-h30g_dir=$(mktemp -d); cleanup_dirs+=("$h30g_dir")
-# Since 1.3.2 the gate reads commands through scripts/lib/git-argv.sh and
-# REFUSES when it cannot load it (spec AC-12, Chris D1). A doctored copy alone
-# in a bare temp dir therefore refuses everything for the wrong reason, so the
-# copy gets the shipped layout around it: hooks/ beside scripts/lib/.
-mkdir -p "$h30g_dir/hooks" "$h30g_dir/scripts/lib"
-# Since bionic 1.4.0 the gate wants several libraries and the loader qualifies a directory
-# only when it holds ALL of them (BIONIC_LIB_WANT). A fixture that plants a subset is a
-# fixture that refuses everything for the wrong reason.
-#
-# THE WHOLE DIRECTORY, NOT A HAND-LIST (epic-22 wave-01, N1). This loop named four
-# libraries by hand. That list went stale the moment lib/run.sh grew a soft source of
-# lib/roots.sh — `docs_root` came back `command not found`, the gate fell through, and this
-# section's mutation arm went GREEN against a hook that had allowed for the wrong reason.
-# A hand-list of a shipped directory's contents is a second copy of that directory, kept by
-# hand; the glob cannot drift.
-for _h30g_cand in "${BIONIC_HOOKS_DIR}/../scripts/lib" \
-                  "${BIONIC_HOOKS_DIR}/../payload/scripts/lib"; do
-  if [ -d "$_h30g_cand" ]; then
-    cp "$_h30g_cand"/*.sh "$h30g_dir/scripts/lib/" 2>/dev/null
-    break
-  fi
-done
-# THE MUTATION LANDS ON THE LIBRARY NOW, NOT ON THE HOOK (T23). The predicate this
-# section loosens lives in `wall_evidence_gate`'s body in payload/scripts/lib/walls.sh;
-# the hook beside it is 200 lines of preamble and a fold. So the doctored tree gets a
-# doctored COPY OF THE LIBRARY and an untouched copy of the hook, and the loader finds
-# it because `$h30g_dir/scripts/lib` is candidate class (1).
-DOCTORED_HOOK="$h30g_dir/hooks/loose-gate.sh"
-cp "$HOOK" "$DOCTORED_HOOK"
-H30G_LIB="$h30g_dir/scripts/lib/walls.sh"
-H30G_LIB_REAL="$(dirname "$H30G_LIB")/.walls-real.sh"
-cp "$H30G_LIB" "$H30G_LIB_REAL"
-sed 's#^user_confirmed_attributed() {#user_confirmed_attributed() { [ -n "$1" ]; return; #' \
-  "$H30G_LIB_REAL" > "$H30G_LIB"
-
-if ! diff -q "$H30G_LIB_REAL" "$H30G_LIB" > /dev/null 2>&1; then
-  ok "30g meta: the doctored copy differs from the real hook (mutation landed)"
-else
-  no "30g meta: the doctored copy differs from the real hook (mutation landed)" "the form-check mutation did not apply — the sed anchor moved, so the arms below prove nothing"
-fi
-rm -f "$H30G_LIB_REAL"
-
-_real_hook="$HOOK"
-HOOK="$DOCTORED_HOOK"
-# T4-scoping is a separate predicate from the form, so the T3 row must STILL
-# block against the doctored hook — the tier arm is not what was loosened.
-expect_block "30g meta: the T3 row still blocks under the loosened form (tier scope is a separate arm)" "$h30d" 'git commit -m "x"' "CONFIRMED"
-HOOK="$_real_hook"
-
-# Restore-proof: the real hook still refuses the impostor after the detour.
-expect_block "30g meta: the real hook still refuses the impostor after the mutation proof" "$h30b" 'git commit -m "x"' "CONFIRMED"
+s29_home none
+expect_block "29b Step 9 without its delivery → block naming it" "$S29_H" 'git commit -m "x"' "Step 9's delivery"
+s29_home local-harness
+expect_block "29d Step 9, deploy_target named, the trio missing → block naming it" "$S29_H" 'git commit -m "x"' "deployed"
 
 # ============================================================
 # Section 31: a refusal on a call that also writes the plan (B-6)
@@ -394,258 +107,58 @@ printf 'run/v1|ev=proof|ac=AC-2|evidence=record/generic-evidence.md|at=2026-10-0
 expect_allow "31d naming the plan in an otherwise-clean commit → allow, silent" "$h31d" "python3 -c \"open('$p31d','a')\" && git commit -m \"x\""
 
 # ============================================================
-# Section 32: the auditor wall is rigor-keyed (B-10 / R-11)
+# Section 32b: the auditor and the confirmation, read from the run
 # ============================================================
 #
-# SKILL.md's rigor table says `single` skips BOTH independent assurance roles
-# — "Self-review only." The gate read the matrix's auditor column
-# unconditionally, so a `single` run met a CONFIRMED wall for a verdict its own
-# rigor says nobody was ever sent to write. B-10's repro: a bugfix · single ·
-# task run refused at `current: 9` on "matrix row 'AC-1' auditor verdict is
-# 'empty', not CONFIRMED".
-#
-# The rule: at `single` the matrix's auditor column is not read (any value —
-# empty included — passes the post-Verify CONFIRMED arm at every step 6..9) and
-# the Step-5 `auditor:` pointer is not demanded once the rows are discharged.
-# At `double` and `double` both walls are exactly as they were. An
-# unknown or missing frontmatter `rigor:` takes the STRICT reading — fail
-# closed, since a plan that does not say what rigor it runs at has not bought
-# the relaxation.
-#
-# The task-ledger side (apply_rigor_lanes) went with the retired task table (wave-31 T24;
-# D2); 32f pins what its fixture meets now.
+# A criterion's auditor cell is the evidence review standing at the working branch's head, CONFIRMED on a pass and
+# REFUTED on a fail, empty with none; its confirmation is the approval naming it. At double rigor the auditor owes
+# a verdict from Step 6 and a ruling from Step 8; at single the column is unread; with no rigor the strict reading
+# holds. A T4 criterion is ruled by its approval unless the auditor's finding stands.
+# FIXTURE FIDELITY: eg_page's run at 15, its branch at the fixture head, its criterion discharged by a proof after the rest and before any line a row gives, so a person's word follows it.
+# fails-when: matrix_auditor_required reads single as required (m32-single), or an unknown rigor as not (m32-norigor);
+# matrix_row_owes admits an empty cell at 6 (m32-6v) or a REFUTED one at 8 (m32-8r); the finding-stands arm admits a
+# confirmed T4 row the auditor refuted (m32-t4r).
 
-section "Section 32: the auditor wall is rigor-keyed"
+section "Section 32b: the auditor and the confirmation, read from the run"
 
-# A wave plan at a caller-chosen frontmatter rigor. Same shape as
-# matrix_frontmatter (walk: exempt, deploy_target: none, no multi_agent — so the
-# walk arm and the dispatch ledger stay out of the way), with `rigor` as the one
-# variable. Pass an empty string for $1 to omit the key entirely.
-plan_rigor() {  # $1 rigor (empty = key absent)  $2 current  $3 step body  $4 matrix
-  printf -- '---\n'
-  printf -- 'governing-skill: canonical-sdlc\n'
-  printf -- 'canonical_sdlc_version: 14\n'
-  printf -- 'intent: build\n'
-  [ -n "$1" ] && printf -- 'rigor: %s\n' "$1"
-  printf -- 'scale: wave\n'
-  printf -- 'deploy_target: none\n'
-  printf -- 'use_worktree: false\n'
-  printf -- 'has_ui: true\n'
-  printf -- 'walk: exempt\n'
-  printf -- '---\n'
-  printf -- '## SDLC State\ncurrent: %s\napproved-by: fixture 2026-09-07T00:00Z approved\nStep %s:\n%s\n\n%s\n' "$2" "$2" "$3" "$4"
+m32_home() {  # <step> <rigor, or - for none> <eval type> <evidence review: pass|fail|none, waived unless pass> [<log line>...]
+  local q; M32_H=$(make_home); eg_head_repo "$M32_H"; git -C "$M32_H" branch wave/01-fixture 2>/dev/null
+  P32=$(eg_page "$M32_H" "$1" "run/v1|ev=proof|kind=regression|head=$EG_HEAD|evidence=record/floor.log|at=2026-10-04T01:00:00Z" \
+    $(for q in adversarial structure; do printf 'run/v1|ev=proof|kind=review|head=%s|question=%s|result=pass|scope=piece|reader=w-read|evidence=record/generic-evidence.md|at=2026-10-04T01:00:01Z\n' "$EG_HEAD" "$q"; done))
+  case "$2" in -) awk '!/^rigor: /' "$P32" ;; *) awk -v r="$2" '/^rigor: /{ $0 = "rigor: " r } { print }' "$P32" ;; esac \
+    | awk -v t="$3" '{ sub(/\| AC-1\.1 \| hermetic \|/, "| AC-1.1 | " t " |"); print }' > "$P32.t" && mv "$P32.t" "$P32"
+  case "$4" in
+    pass|fail) printf 'run/v1|ev=proof|kind=review|head=%s|question=evidence|result=%s|scope=piece|reader=w-read|evidence=record/generic-evidence.md|at=2026-10-04T01:00:03Z\n' "$EG_HEAD" "$4" >> "$(plan_fixture_log "$P32")" ;;
+  esac
+  [ "$4" = pass ] || printf 'run/v1|ev=waiver|question=evidence|head=%s|by=Dana|said=ship it|at=2026-10-04T01:00:04Z\n' "$EG_HEAD" >> "$(plan_fixture_log "$P32")"
+  [ "$1" != 8 ] || printf 'run/v1|ev=step|n=8|cleanup=n/a|at=2026-10-04T01:00:05Z\n' >> "$(plan_fixture_log "$P32")"
+  printf 'run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|at=2026-10-04T01:00:09Z\n' >> "$(plan_fixture_log "$P32")"
+  shift 4; [ "$#" -eq 0 ] || printf '%s\n' "$@" >> "$(plan_fixture_log "$P32")"
 }
-
-# Every row discharged, every per-tier key present, EVERY AUDITOR CELL EMPTY.
-# The only thing standing between this matrix and a clean commit is the
-# CONFIRMED arm, so each verdict below is that arm's doing.
-m32_empty_aud="## Verification Matrix
-
-stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1 | T1 | discharged | see AC-1 |  |
-| AC-2 | T1 | discharged | see AC-2 |  |
-
-AC-1:
-  fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  tier-run: bash tests/canonical-sdlc-evidence-gate.test.sh
-  readback: 120/120 asserted
-AC-2:
-  fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  tier-run: bash test.sh — unit suite
-  readback: 332/332 asserted"
-
-# The same matrix carrying a STANDING REFUTED verdict. At single the column is
-# not read at all, so this passes too — the relaxation is "the column is not a
-# gate", not "an empty cell is tolerated".
-m32_refuted="${m32_empty_aud/| AC-1 | T1 | discharged | see AC-1 |  |/| AC-1 | T1 | discharged | see AC-1 | REFUTED |}"
-
-# The same matrix with AC-2's `evidence:` key removed (wave-31 T6: the pointer is the one key every tier owes; this
-# control named `readback:` while the gate demanded it). The rest of the matrix
-# contract is untouched by B-10, so this must still block at single — the
-# discrimination control for every 32a..32d allow.
-m32_nl=$'\n'
-m32_missing_key="${m32_empty_aud/  evidence: record\/generic-evidence.md${m32_nl}  tier-run: bash test.sh — unit suite/  tier-run: bash test.sh — unit suite}"
-
-# Step-5 tests floor with NO `auditor:` pointer.
-step5_noaud="  cmd: bash test.sh
-  pass: 332
-  total: 332
-  head: ${EG_HEAD}
-  output: .bionic/docs/plans/wave-01.plan.md#step-5"
-
-# ---- AC-26: at `single` the wall is not there ------------------------------
-
-# 32a..32d — the post-Verify CONFIRMED arm is a prefix contract at 6, 7, 8 and
-# 9 (dispatch()); B-10's own repro was at 9, so all four steps are pinned. The
-# 7/8/9 step bodies are Section 17r's, which their own validators pin already.
-h32a=$(make_home)
-write_plan "$h32a" "$(plan_rigor single 6 "$step6_body" "$m32_empty_aud")" > /dev/null
-expect_allow "32a rigor single, rows discharged, auditor cells empty, current 6 → allow" "$h32a" 'git commit -m "x"'
-
-h32b=$(make_home)
-write_plan "$h32b" "$(eg_floor "$(plan_rigor single 7 "$v9_step7_body" "$m32_empty_aud")")" > /dev/null
-expect_allow "32b same at current 7 → allow" "$h32b" 'git commit -m "x"'
-
-h32c=$(make_home)
-write_plan "$h32c" "$(eg_floor "$(plan_rigor single 8 "$v9_step8_body" "$m32_empty_aud")")" > /dev/null
-# A step's block written bare, no list mark and nothing after the colon, is not read as the step's fields: the gate
-# names what step 8 owes.
-expect_block "32c same at current 8, its block written bare → block naming the step's fields" "$h32c" 'git commit -m "x"' "owed at 14: Step 8's cleanup"
-
-h32d=$(make_home)
-write_plan "$h32d" "$(eg_floor "$(plan_rigor single 9 "$v9_step9_body" "$m32_empty_aud")" | marked)" > /dev/null
-expect_allow "32d same at current 9 → allow (B-10's own repro step)" "$h32d" 'git commit -m "x"'
-
-# 32e — the Step-5 `auditor:` pointer is the same wall one step earlier: it is
-# demanded once no row is pending. At single there is no auditor to point at.
-h32e=$(make_home)
-write_plan "$h32e" "$(plan_rigor single 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
-expect_allow "32e rigor single, all rows discharged, no Step-5 auditor: pointer → allow" "$h32e" 'git commit -m "x"'
-
-# 32f — the task-ledger mirror (AC-26, second half) is gone with the task ledger (wave-31 T24;
-# D2): its `done` row at single, and 32k's row raised to double by its own cell, were the
-# retired table at `current: T2`. That plan meets the numeric refusal now.
-h32f=$(make_home)
-write_plan "$h32f" "$(eg_pf_plan T2 task single false "- T2: fixed enum check, bash suite 12/12" "$(eg_pf_row T1 — landed)" "$(eg_pf_row T2 — active)")" > /dev/null
-expect_block "32f 32f's and 32k's task plan at current: T2 → refused as not numeric" "$h32f" 'git commit -m "x"' "current: T2 is not numeric"
-
-# 32n — the column is not READ at single, not merely tolerated when empty: a
-# standing REFUTED verdict passes too. Pinned deliberately (it is the sharpest
-# statement of the rule, and the case a narrower fix would get wrong).
-h32n=$(make_home)
-write_plan "$h32n" "$(plan_rigor single 6 "$step6_body" "$m32_refuted")" > /dev/null
-expect_allow "32n rigor single, a REFUTED auditor cell at current 6 → allow (column unread)" \
-  "$h32n" 'git commit -m "x"'
-
-# 32o — discrimination control: everything ELSE the matrix demands still bites
-# at single. AC-2 (T1) is missing its `evidence:` key on the same fixture family
-# and at the same step, so 32a..32d are the auditor arm standing down and not
-# the matrix going quiet.
-h32o=$(make_home)
-write_plan "$h32o" "$(plan_rigor single 6 "$step6_body" "$m32_missing_key")" > /dev/null
-expect_block "32o control: single plan missing the evidence key still blocks at current 6" \
-  "$h32o" 'git commit -m "x"' "missing evidence key 'evidence'"
-
-# ---- AC-27: at double and double the wall is unchanged -------------
-
-h32g=$(make_home)
-write_plan "$h32g" "$(plan_rigor double 6 "$step6_body" "$m32_empty_aud")" > /dev/null
-
-h32h=$(make_home)
-write_plan "$h32h" "$(plan_rigor double 6 "$step6_body" "$m32_empty_aud")" > /dev/null
-
-# 32i/32j — the Step-5 pointer half of AC-27.
-h32i=$(make_home)
-write_plan "$h32i" "$(plan_rigor double 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
-expect_block "32i rigor double, discharged rows, no Step-5 auditor: pointer → block" \
-  "$h32i" 'git commit -m "x"' "requires 'auditor:"
-
-h32j=$(make_home)
-write_plan "$h32j" "$(plan_rigor double 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
-expect_block "32j rigor double, discharged rows, no Step-5 auditor: pointer → block" \
-  "$h32j" 'git commit -m "x"' "requires 'auditor:"
-
-# ---- fail-closed on an unknown or missing rigor ----------------------------
-
-# 32l — no `rigor:` key at all. A plan that never says what rigor it runs at
-# has not bought the relaxation, so the strict reading holds.
-h32l=$(make_home)
-write_plan "$h32l" "$(plan_rigor "" 6 "$step6_body" "$m32_empty_aud")" > /dev/null
-expect_block "32l frontmatter with NO rigor key at current 6 → block (fail closed)" \
-  "$h32l" 'git commit -m "x"' "not CONFIRMED"
-
-# 32m — an off-enum value is no bypass: since wave-30 T11 the gate refuses a rigor that names no
-# level before any arm reads it, so a typo is refused on its rigor, ahead of the matrix.
-h32m=$(make_home)
-write_plan "$h32m" "$(plan_rigor reviewed 6 "$step6_body" "$m32_empty_aud")" > /dev/null
-
-# 32m2 — and the Step-5 pointer half fails closed too.
-h32m2=$(make_home)
-write_plan "$h32m2" "$(plan_rigor "" 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
-expect_block "32m2 no rigor key at current 5, no auditor: pointer → block (fail closed)" \
-  "$h32m2" 'git commit -m "x"' "requires 'auditor:"
-
-# ============================================================
-# Section 33: a row owed at the close owes nothing before it
-# ============================================================
-#
-# A criterion is owed at the step whose task proves it, and `task: 9` names the close. An
-# unwaived pending row carrying it owes neither its per-tier keys nor a verdict at an earlier
-# step, so the commit is allowed (33b). Delete the owing-step comparison from the deferral
-# predicate and the same row is live: it meets the per-tier key refusals (33b-rev). A waiver
-# still outranks the per-tier keys, in either spelling (33a, 33c), and sits below the
-# provenance arm (33d).
-
-section "Section 33: a row owed at the close owes nothing before it"
-
-# The first row is an ordinary discharged row, so each verdict below is the second row's doing.
-m33_waived="## Verification Matrix
-
-stack-health: n/a: no long-running serve
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
-| AC-2 | T1 | waived | waiver: dana 2026-08-30 criterion dropped | waived |
-
-AC-1:
-  fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  tier-run: bash test.sh — unit suite
-  readback: 332/332 asserted
-AC-2:
-  fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  task: 9"
-
-# The same row with the waiver taken away: pending, no token anywhere.
-m33_unwaived="${m33_waived/| AC-2 | T1 | waived | waiver: dana 2026-08-30 criterion dropped | waived |/| AC-2 | T1 | pending | see AC-2 |  |}"
-
-# The waiver in the AC BLOCK rather than the evidence cell.
-m33_waived_block="${m33_waived/| AC-2 | T1 | waived | waiver: dana 2026-08-30 criterion dropped | waived |/| AC-2 | T1 | waived | dropped, see block | waived |}"
-m33_waived_block="${m33_waived_block/  task: 9/  task: 9
-  waiver: dana 2026-08-30 criterion dropped}"
-
-h33a=$(make_home)
-write_plan "$h33a" "$(plan 6 "$step6_body" "$m33_waived")" > /dev/null
-expect_allow "33a waived T1 row carrying 'task: 9' at current 6 → allow" \
-  "$h33a" 'git commit -m "x"'
-
-h33b=$(make_home)
-write_plan "$h33b" "$(plan 6 "$step6_body" "$m33_unwaived")" > /dev/null
-expect_allow "33b unwaived pending T1 row carrying 'task: 9' at current 6 → allow (owed at the close, deferred)" \
-  "$h33b" 'git commit -m "x"'
-# The reverted rule: a copy of the shipped layout whose deferral predicate never defers.
-h33r_dir=$(mktemp -d); cleanup_dirs+=("$h33r_dir")
-cp -R "$h30g_dir/hooks" "$h30g_dir/scripts" "$h33r_dir/"
-cp "$_h30g_cand/walls.sh" "$h33r_dir/scripts/lib/walls.sh.real"
-sed 's#^matrix_row_deferred() {#matrix_row_deferred() { return 1;#' "$h33r_dir/scripts/lib/walls.sh.real" > "$h33r_dir/scripts/lib/walls.sh"
-expect_true "33b-rev meta: the reverted copy differs from the real library (mutation landed)" \
-  test -n "$(diff "$h33r_dir/scripts/lib/walls.sh.real" "$h33r_dir/scripts/lib/walls.sh")"
-rm -f "$h33r_dir/scripts/lib/walls.sh.real"
-_real_hook="$HOOK"; HOOK="$h33r_dir/hooks/loose-gate.sh"
-expect_block "33b-rev the same home against a gate whose deferral never defers → block, on the verdict it owes" \
-  "$h33b" 'git commit -m "x"' "the auditor has not confirmed AC-2"
-HOOK="$_real_hook"
-
-h33c=$(make_home)
-write_plan "$h33c" "$(plan 6 "$step6_body" "$m33_waived_block")" > /dev/null
-expect_allow "33c the waiver as an AC-block line (not the evidence cell) → allow too" \
-  "$h33c" 'git commit -m "x"'
-
-# Anchored on 'task: 9' alone: the pattern half of a ${var/pattern/replacement} ends at its
-# own first '/', so an anchor spanning a path-bearing line would truncate and garble both halves.
-m33_waived_prov="${m33_waived/  task: 9/  task: 9
-  provenance: implementation}"
-h33d=$(make_home)
-write_plan "$h33d" "$(plan 6 "$step6_body" "$m33_waived_prov")" > /dev/null
-expect_block "33d control: a waived row still meets the provenance arm above it" \
-  "$h33d" 'git commit -m "x"' "provenance: implementation"
+m32_ap='run/v1|ev=approval|key=AC-1.1|by=Dana Fixture|said=I watched it hold|at=2026-10-04T01:00:10Z'
+m32_home 6 double hermetic none
+expect_block "m32-6v double rigor at 6, the evidence question waived with no review: the criterion owes the auditor's verdict" "$M32_H" 'git commit -m "x"' "get the auditor's verdict"
+m32_home 6 double hermetic fail
+expect_allow "m32-6r …and a REFUTED verdict, its review waived, is a verdict at 6: admitted" "$M32_H" 'git commit -m "x"'
+m32_home 8 double hermetic fail
+expect_block "m32-8r at 8 the same REFUTED row owes a ruling, naming the verdict" "$M32_H" 'git commit -m "x"' "verdict is 'REFUTED', not CONFIRMED"
+m32_home 8 double hermetic pass
+expect_allow "m32-8c at 8 a CONFIRMED row is ruled: admitted" "$M32_H" 'git commit -m "x"'
+m32_home 8 single hermetic fail
+expect_allow "m32-single at single rigor the column is unread: the REFUTED row is admitted at 8" "$M32_H" 'git commit -m "x"'
+m32_home 8 - hermetic fail
+expect_block "m32-norigor with no rigor the strict reading holds: the REFUTED row is refused at 8" "$M32_H" 'git commit -m "x"' "not CONFIRMED"
+m32_home 8 double human pass "$m32_ap"
+expect_allow "m32-t4c a T4 row CONFIRMED and confirmed by its approval is admitted at 8" "$M32_H" 'git commit -m "x"'
+m32_home 8 double human pass
+expect_block "m32-t4n …and with no approval naming it, awaits its person's confirmation" "$M32_H" 'git commit -m "x"' "AC-1.1 awaits its person's confirmation"
+m32_home 6 reviewed hermetic pass
+expect_block "m32-enum a rigor that names no level is refused on its rigor, ahead of the matrix" "$M32_H" 'git commit -m "x"' "rigor is not single or double"
+m32_home 6 double hermetic pass
+printf 'run/v1|ev=proof|ac=AC-1.1|evidence=TBD|at=2026-10-04T01:00:10Z\n' >> "$(plan_fixture_log "$P32")"
+expect_block "m32-ph a criterion whose proof names a placeholder for its evidence is refused as one" "$M32_H" 'git commit -m "x"' "AC-1.1 has placeholder evidence evidence"
+m32_home 8 double human fail "$m32_ap"
+expect_block "m32-t4r a T4 row its approval confirms is refused while the auditor's REFUTED stands" "$M32_H" 'git commit -m "x"' "finding on AC-1.1 stands"
 
 # ============================================================
 # Section 34: the session never invoked the skill (AC-6)

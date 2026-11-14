@@ -73,11 +73,22 @@ Path: $FILE_PATH" ;;
       WG_DETAIL="canonical-sdlc artifact '$BASENAME' is missing a 'governing-skill:' frontmatter field.
 Path: $FILE_PATH
 Fix: add a non-empty 'governing-skill: <skill-id>' line to the frontmatter block." ;;
-    bad-version)  # <declared version> <supported version>
+    bad-version)  # <declared version> <the values it may declare, quoted>
       WG_FACT="this artifact declares an unsupported version"; WG_FIX="set the supported version"
       WG_DETAIL="canonical-sdlc artifact '$BASENAME' declares canonical_sdlc_version: '$1'.
 Path: $FILE_PATH
-Fix: set 'canonical_sdlc_version: $2' — the only supported version." ;;
+Fix: set 'canonical_sdlc_version:' to $2: a plan is written at 15, and a document that is no plan may declare 14 or 15." ;;
+    live-14)  # <the command that brings the plan forward>
+      WG_FACT="this plan's run is open at version 14"; WG_FIX="run bring-forward on the plan"
+      WG_DETAIL="canonical-sdlc plan '$BASENAME' declares canonical_sdlc_version: 14 and its run is open; a run is carried at version 15.
+Path: $FILE_PATH
+Fix: bring the plan forward, then write it again:
+  $1" ;;
+    new-14)
+      WG_FACT="this new plan declares version 14"; WG_FIX="write it at version 15"
+      WG_DETAIL="canonical-sdlc plan '$BASENAME' is new and declares canonical_sdlc_version: 14: a new plan is written at 15.
+Path: $FILE_PATH
+Fix: set 'canonical_sdlc_version: 15', and write the plan in that shape: its header, '## Goal', '## Tasks' and one section per row." ;;
     mode)
       _write_gate_frame "this artifact declares mode:" "declare intent:, rigor: and scale:" \
         "artifacts declare intent:/rigor:/scale:, never mode:" ;;
@@ -142,17 +153,6 @@ Fix: run Step 0 (Configure) to set these explicitly. See SKILL.md §Step 0.
 Required opt-in flags:        $2
 Required discriminator flags: $3
 Required:                     model_plan" ;;
-    no-matrix)  # <sdlc-step>
-      WG_FACT="this plan has no Verification Matrix"; WG_FIX="add the Verification Matrix"
-      WG_DETAIL="canonical-sdlc plan '$BASENAME' (sdlc-step $1) is missing a '## Verification Matrix' section.
-Path: $FILE_PATH
-Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix') and lock it at Step 3 approval." ;;
-    bring-forward)  # <supported version> <the bring-forward summary>
-      WG_FACT="this plan's body is not at contract version $1"; WG_FIX="bring the plan forward"
-      WG_DETAIL="canonical-sdlc plan '$BASENAME' declares canonical_sdlc_version: $1 and its body does not match it:
-$2
-Path: $FILE_PATH
-Fix: repair every line above in one pass — each is a separate arm that would otherwise refuse the next commit in turn." ;;
     tasks-invalid)  # <sdlc-step> <the violations> [1 at version 15]
       WG_FACT="this plan's Tasks table is invalid"; WG_FIX="fix the row the detail names"
       WG_DETAIL="canonical-sdlc plan '$BASENAME' (sdlc-step $1) has a '## Tasks' table that breaks the Task invariants:

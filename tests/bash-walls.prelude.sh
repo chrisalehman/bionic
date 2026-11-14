@@ -159,10 +159,36 @@ eg6_plan() {  # <current> <scale> <lines> [<Step 6 line>] -> a double plan the g
   printf 'AC-1:\n  fails-when: the planted defect this eval must go red on\n  evidence: record/generic-evidence.md\n'
   printf '  tier-run: bash tests/x.test.sh\n  readback: the line it wrote\n'
 }
+# eg6_world <repo> <plan text> [<eval type of its criterion>] [<log line>...] -> EG6_PAGE, the run at 15 the text's state section
+#   stands for: plan_fixture's page at the text's current:, at double rigor, its log holding the fixture's events, a
+#   regression proof, the text's readings, moves and waivers read through lib/translate.sh, then the criterion's proof
+#   (EG6_AC, the fixture's own unless named; its evidence EG6_EVIDENCE, the generic record unless named), then each line
+#   given, so a person's word given after the proof stands after it, then the asks the run already held, which belong to the run and outlive a rebuild of its other facts; the working
+#   branch and the base at the repository's head, so the evidence review there is the auditor's cell and the judge's
+#   chains start there.
+eg6_world() {
+  local repo="$1" text="$2" type="${3:-hermetic}" ac="${EG6_AC:-AC-1.1}" cur t lib head asks
+  shift; shift; [ "$#" -eq 0 ] || shift
+  lib="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"; head="$(git -C "$repo" rev-parse HEAD)"
+  cur="$(printf '%s\n' "$text" | awk '$1 == "current:" { print $2; exit }')"
+  asks="$(grep -h '|ev=ask|' "$repo/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null)"
+  rm -rf "$repo/.bionic/docs/plans/epic-99-fixture" "$repo/.bionic/docs/record/wave-01-fixture"
+  t="$repo/.bionic/tmp/eg6-text.plan.md"; mkdir -p "$repo/.bionic/tmp"; printf '%s\n' "$text" > "$t"
+  EG6_PAGE="$(plan_fixture --current "${cur:-6}" "$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave)"
+  awk -v ty="$type" -v h="$head" -v ac="$ac" '/^rigor: /{ $0 = "rigor: double" } /^base-sha: /{ $0 = "base-sha: " h } { sub(/\| AC-1\.1 \| hermetic \|/, "| AC-1.1 | " ty " |"); gsub(/AC-1\.1/, ac); print }' "$EG6_PAGE" > "$EG6_PAGE.t" \
+    && mv "$EG6_PAGE.t" "$EG6_PAGE"
+  { printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=record/floor.log|at=2026-10-04T01:00:00Z\n' "$head"
+    bash -c '. "$1/reader.sh" && . "$1/translate.sh" && translate "$2" events' _ "$lib" "$t" \
+      | grep -E '^run/v1[|]ev=(proof[|]kind=review|finding|waiver)[|]'
+    printf 'run/v1|ev=proof|ac=%s|evidence=%s|at=2026-10-04T01:00:01Z\n' "$ac" "${EG6_EVIDENCE:-record/generic-evidence.md}"
+    [ "$#" -eq 0 ] || printf '%s\n' "$@"
+    [ -z "$asks" ] || printf '%s\n' "$asks"; } >> "$(plan_fixture_log "$EG6_PAGE")"
+  rm -f "$t"; git -C "$repo" branch -f wave/01-fixture HEAD >/dev/null 2>&1
+}
 R_EG6="$(mk_repo eg6)"
 H_EG6="$(git -C "$R_EG6" rev-parse HEAD)"
-eg6_gate() {  # <plan text> -> ST, ERR of a main-checkout commit
-  printf '%s\n' "$1" > "$R_EG6/.bionic/docs/plans/active.md"
-  bw_bind "$R_EG6"
+eg6_gate() {  # <plan text> -> ST, ERR of a main-checkout commit against the run at 15 the text stands for (eg6_world)
+  eg6_world "$R_EG6" "$1"
+  [ ! -f "$R_EG6/.bionic/tmp/engaged-$SID.state" ] || bound_marker "$R_EG6" "$SID" "$EG6_PAGE"
   run_hook "$(mk_payload "$R_EG6" 'git commit -m "x"')"
 }
