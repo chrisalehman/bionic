@@ -422,6 +422,8 @@ park_fixture() {
   case "$2" in
     wake) printf '\n## Wake Note\n\n%s\n' "$PK_WHY" >> "$p/$PLAN_REL" ;;
     none) printf '\n## Wake Note\n\n(none)\n' >> "$p/$PLAN_REL" ;;
+    fenced) printf '\n```\n## Wake Note\n\nwaits\n```\n' >> "$p/$PLAN_REL" ;;
+    title) printf '\n## Wake Note — %s\n' "$PK_WHY" >> "$p/$PLAN_REL" ;;
   esac
   printf '%s\n' "$p"
 }
@@ -461,8 +463,11 @@ run_close "$PPL" run
 expect_eq "PK-10b …run closes rc 0, keeping both wt/01-x and the unreached wt/01-y" "0|yes|yes" \
   "$CO_RC|$(branch_exists "$PPL" wt/01-x)|$(branch_exists "$PPL" wt/01-y)"
 
-# controls: the merge act's refusal stands on an unparked plan, and on one whose Wake Note is the empty template
-for _pk in unparked none; do
+PPT="$(park_fixture parked-title title)"
+run_close "$PPT" check
+expect_contains "PK-10c a titled Wake Note with no body parks, the title its reason" "merge: parked ($PK_WHY)" "$CO_OUT"
+# controls: the merge act's refusal stands on an unparked plan, an empty-template Wake Note, and one in a fence only
+for _pk in unparked none fenced; do
   PPU="$(park_fixture "parked-$_pk" "$_pk")"
   PPU_CK="$(cksum < "$PPU/$PLAN_REL")"
   run_close "$PPU" check
