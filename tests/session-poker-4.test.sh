@@ -1050,13 +1050,14 @@ TL_P="$(vc_plan "$TL" \
   "| T22 | 5 | test | the regression | — | — | 30 | REQ-1 | $TL_D/t22.md | pending | approval:plan | $TL_D/t22.md |" \
   "| T23 | 5 | verify | the walk | — | — | 30 | REQ-1 | $TL_D/walk.md | pending | approval:plan | $TL_D/walk.md |" \
   "| T24 | 6 | review | a review naming two records | — | — | 30 | REQ-1 | $TL_D/r24a.md, $TL_D/r24b.md | pending | approval:plan | — |" \
-  "| T25 | 4 | build | the work after the review | implementor | — | 30 | REQ-1 | lib/z.sh | pending | approval:plan, T21 | — |")"
+  "| T25 | 4 | build | the work after the review | implementor | — | 30 | REQ-1 | lib/z.sh | pending | approval:plan, T21 | — |" \
+  "| T26 | 6 | review | the review (a\\|b) | — | — | 30 | REQ-1 | $TL_D/none.md | pending | approval:plan | $TL_D/r26.md |")"
 TL_H="$(git -C "$TL" rev-parse main)"; new_roster "$TL"
 tl_state() { ( . "$(dirname "$S46_LIB")/units.sh" >/dev/null 2>&1; units_rows "$TL_P" ) | awk -F'\t' -v r="$1" '$1 == r { print $10 }'; }
 tl_pub() { cat "$TL/$TL_D/run.log" 2>/dev/null | /usr/bin/grep -c "^run/v1|ev=published|row=$1|commit=$TL_H|kind=record|by=orchestrator|"; }
 tl_plant() { TL_PL="$1" awk '{ print } /^current: / && !p { print ENVIRON["TL_PL"]; p = 1 }' "$TL_P" > "$TL_P.tmp" && mv "$TL_P.tmp" "$TL_P"; }
 tl_said() { printf '%s\n' "$OUT" | /usr/bin/grep "NOT-LANDED $1 "; }
-for f in r21 t22 walk r24a r24b; do printf 'question: evidence\nresult: pass\nscope: piece\nverdict: CONFIRMED\n' > "$TL/$TL_D/$f.md"; done
+for f in r21 t22 walk r24a r24b r26; do printf 'question: evidence\nresult: pass\nscope: piece\nverdict: CONFIRMED\n' > "$TL/$TL_D/$f.md"; done
 TL_ROWS0="$(/usr/bin/grep -E '^(\| T2[1-5] |- T2[1-5]:)' "$TL_P")"
 poke "$TL" tick
 expect_eq "TL-1 every record stands and nothing is registered: no row lands" "pending pending pending pending|0" \
@@ -1065,6 +1066,7 @@ expect_contains "TL-2 the review row waits on its registration, the tick says so
 expect_contains "TL-3 the regression row waits on the whole run's proof at the head" "proof-add regression" "$(tl_said T22)"
 expect_contains "TL-4 the walk row waits on the walk's proof naming its record" "proof-add walk $TL_RD/walk.md" "$(tl_said T23)"
 expect_contains "TL-5 a review row naming two records and no artifact cell names the edit" "edit the artifact cell of T24 in the plan" "$(tl_said T24)"
+expect_contains "TL-5b a task cell holding an escaped bar leaves the artifact cell its own: the record stands, the row is told" "proof-add review" "$(tl_said T26)"
 expect_eq "TL-6 T25 waits on T21's landing: not ready" "" "$(cd "$TL" && bash -c '. "$1/fill.sh" >/dev/null 2>&1; fill_ready_set "$2" 99999 0' _ "$(dirname "$S46_LIB")" "$TL_P" 2>/dev/null | /usr/bin/grep -x T25)"
 poke "$TL" tick
 expect_eq "TL-7 a second tick tells no reason again" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T2')"

@@ -1663,8 +1663,8 @@ run_row_of() {
 
 # run_load_row <row> <roster file> -> RUN_* from a roster row's run record; 1 when it carries none
 run_load_row() {
-  RUN_LOG="$(line_field "$1" run_log)"
-  [ -n "$RUN_LOG" ] || return 1
+  RUN_OUT="$(line_field "$1" run_log)"
+  [ -n "$RUN_OUT" ] || return 1
   RUN_PID="$(line_field "$1" run_pid)"
   RUN_NAME="$(line_field "$1" name)"
   RUN_ROW_RC="$(line_field "$1" run_rc)"
@@ -1678,28 +1678,28 @@ run_load_row() {
 # row's run_started_at, else the pid file's birth), for the run run_find loaded.
 run_read() {
   local rc="" t0=""
-  RUN_ID="${RUN_LOG##*/}"; RUN_ID="${RUN_ID%.log}"
+  RUN_ID="${RUN_OUT##*/}"; RUN_ID="${RUN_ID%.log}"
   RUN_RC=""; RUN_LAST_WRITTEN=""; RUN_ELAPSED=""
-  RUN_PROGRESS="$(tail -n 1 "$RUN_LOG.progress.tsv" 2>/dev/null)"; RUN_PROGRESS="${RUN_PROGRESS//$'\t'/ }"
-  case "$RUN_ROW_RC" in ''|*[!0-9]*) { read -r rc < "$RUN_LOG.rc"; } 2>/dev/null ;; *) rc="$RUN_ROW_RC" ;; esac
+  RUN_PROGRESS="$(tail -n 1 "$RUN_OUT.progress.tsv" 2>/dev/null)"; RUN_PROGRESS="${RUN_PROGRESS//$'\t'/ }"
+  case "$RUN_ROW_RC" in ''|*[!0-9]*) { read -r rc < "$RUN_OUT.rc"; } 2>/dev/null ;; *) rc="$RUN_ROW_RC" ;; esac
   case "$rc" in
     ''|*[!0-9]*) : ;;
     *) RUN_STATE=FINISHED; RUN_RC="$rc"; return 0 ;;
   esac
-  if run_live "$RUN_PID" "$RUN_LOG"; then
+  if run_live "$RUN_PID" "$RUN_OUT"; then
     RUN_STATE=RUNNING
     [ -z "$RUN_STARTED" ] || t0="$(iso_epoch "$RUN_STARTED")"
-    [ -n "$t0" ] || t0="$(file_mtime "$RUN_LOG.pid")"
+    [ -n "$t0" ] || t0="$(file_mtime "$RUN_OUT.pid")"
     case "$t0" in ''|*[!0-9]*|0) RUN_ELAPSED="" ;; *) RUN_ELAPSED=$(( $(now_epoch) - t0 )) ;; esac
     return 0
   fi
   # THE PID DIED: one more read of `<log>.rc`, then LOST. The shim's exit trap writes `.rc` and
   # exits, and that can fall between the read above and run_live's answer, so a finished run would
   # read LOST (wave-32 T22; research-red3 §2). booked.sh's booked_follow guards the same gap.
-  { read -r rc < "$RUN_LOG.rc"; } 2>/dev/null
+  { read -r rc < "$RUN_OUT.rc"; } 2>/dev/null
   case "$rc" in ''|*[!0-9]*) : ;; *) RUN_STATE=FINISHED; RUN_RC="$rc"; return 0 ;; esac
   RUN_STATE=LOST
-  RUN_LAST_WRITTEN="$(epoch_iso "$(file_mtime "$RUN_LOG")")"
+  RUN_LAST_WRITTEN="$(epoch_iso "$(file_mtime "$RUN_OUT")")"
   [ -n "$RUN_LAST_WRITTEN" ] || RUN_LAST_WRITTEN=unknown
   return 0
 }
@@ -2325,7 +2325,7 @@ pv_missing() {
 # own. Each group is headed by the part that reads it; the text that explains each value stays beside the
 # functions that read it, in that part.
 # the roster
-RUN_LOG=""; RUN_PID=""; RUN_NAME=""; RUN_ROSTER=""; RUN_ROW_RC=""; RUN_STARTED=""
+RUN_OUT=""; RUN_PID=""; RUN_NAME=""; RUN_ROSTER=""; RUN_ROW_RC=""; RUN_STARTED=""
 RUN_STATE=""; RUN_RC=""; RUN_ID=""; RUN_LAST_WRITTEN=""; RUN_PROGRESS=""; RUN_ELAPSED=""
 ADOPT_READS_SCHEMA="adopt-read/v1"
 # The handoff's two time lines: `written:` is the local clock a person reads, `instant:` the ISO instant a reader
