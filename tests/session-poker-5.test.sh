@@ -305,17 +305,6 @@ cat > "$D6_DOCS/record/wave-01-fixture/design-ledger.md" <<'LEDGER'
 - D31 glyphs final "Changed my mind. That's too confusing. Let's go back to an X shape. But let's make it grey X like the horizontal bar." (Chris Lehman 2026-10-17 6:24 PM): ✅ within the bar · ➖ near it · ✖️ over it (U+2716 U+FE0F, the heavy grey X; no grey-boxed X exists in the emoji set) · ❔ not measurable. 🔼 dropped.
 - D31 ratified "Yes" (Chris Lehman 2026-10-17 6:41 PM) on the presented table: ✅ within the bar · ➖ near it · ✖️ over it · ❔ not measurable; the mark leads the line; the thresholds print once under the block, headed within / near / over. The glyph colours are the emoji font's and cannot be tinted on the page's path; recorded as a known limit of the choice.
 LEDGER
-# d6_pick: the register's output -> the id, the first 48 bytes of the verb-and-reply field, and the who-and-date field
-# of each D30 and D31 line, in the order printed (any `<wave> ` key and any `settled: ` prefix stripped first).
-d6_pick() { sed -e 's/^wave-01-fixture //' -e 's/^settled: //' | awk -F' · ' '$1 ~ /^D3[01]$/ { print $1 " | " substr($2, 1, 48) " | " $3 }'; }
-D6_WANT='D30 | "No, I think the icon should be left-justified,  | Chris Lehman 2026-10-17
-D30 | amended "Maybe not a red X?" | Chris Lehman 2026-10-17
-D30 | amended again "Green, grey, something else that'"'"' | Chris Lehman 2026-10-17
-D31 | ruled | Chris Lehman 2026-10-17
-D31 | glyphs ruled "✅ for within the bar" | Chris Lehman 2026-10-17
-D31 | glyphs re-ruled "do the arrow up for over" | Chris Lehman 2026-10-17
-D31 | glyphs final "Changed my mind. That'"'"'s too confus | Chris Lehman 2026-10-17
-D31 | ratified "Yes" | Chris Lehman 2026-10-17'
 poke "$RD6" decisions
 expect_eq "DG-1 precondition: decisions exits 0 on the bound run" "0" "$RC"
 D6_OUT="$OUT"

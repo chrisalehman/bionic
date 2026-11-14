@@ -202,17 +202,6 @@ said() {  # <dir> <name> -> the `done=<path>` argument, the marker written
   printf 'done=%s/%s.done' "$1" "$2"
 }
 
-# The same, onto ANOTHER session's roster file in the same .bionic/tmp — the shape §8's
-# `adopt` reads. `session=` is forced to match the filename, because that is the invariant
-# the writer keeps and a fixture that broke it would be testing a state the fleet cannot
-# produce.
-add_row_to() {  # <repo> <session-id> <key=value>...
-  local repo="$1" sid="$2"; shift 2
-  local f; f="$(roster_of "$repo" "$sid")"
-  [ -f "$f" ] || roster_header > "$f"
-  mkrow session="$sid" "$@" >> "$f"
-}
-
 # THE ACK IS PLANTED THROUGH THE REAL VERB, never by hand-writing a ledger line. `acked=`
 # reaches the poker on the verdict line (hooks/session-sweeper.sh:715), and the only writer
 # of the ledger that line is computed from is `ack` itself — a fabricated ledger would pin
@@ -260,16 +249,6 @@ delivered_plan() {  # <repo>
 }
 
 # ---------- the session binding (wave-session-bound-run, AC-2/AC-3/AC-6/AC-8) ----------
-#
-# A plan the fixture can NAME. `write_plan` writes one and says nothing about where; the
-# three sections below bind to a path, refuse a path, and assert a path appears nowhere, so
-# each of them needs the path back. Same layout, one place, and the path is echoed rather
-# than recomputed at every call site.
-plan_at() {  # <repo> <relative path under <docs-root>/plans> <body> -> the absolute path
-  write_plan "$1" "$3" "$2"
-  printf '%s/.bionic/docs/plans/%s' "$1" "$2"
-}
-
 marker_of() { printf '%s/.bionic/tmp/engaged-%s.state' "$1" "${2:-$SID}"; }
 
 # THE BOUND FIXTURE, in hooks/engage.sh's exact two-line shape — the same posture
@@ -644,7 +623,7 @@ s34_gate15() {
   rm -rf "$t" "$r/$n-at15"
 }
 
-# ── hoisted from Section 42: s42_plan, s42_numstat, s42_snap, s42_unchanged, s42_builds_landed — every later shard builds, snapshots and compares plans with them. ──
+# ── hoisted from Section 42: s42_plan, s42_snap, s42_unchanged, s42_builds_landed — every later shard builds, snapshots and compares plans with them. ──
 s42_plan() {  # <repo> <current> [step-4 block body] -> the plan path; bound, committed
   local p; p="$(s34_plan "$1" "$2" "${3:-}")"
   [ "${SP_PLAN_AT:-15}" = 15 ] || printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n' >> "$p"
@@ -652,7 +631,6 @@ s42_plan() {  # <repo> <current> [step-4 block body] -> the plan path; bound, co
   ( cd "$1" && git add -f "$p" && git commit -qm plan ) >/dev/null 2>&1
   printf '%s' "$p"
 }
-s42_numstat() { git -C "$1" diff --numstat | awk '{ printf "%s %s;", $1, $2 }'; }
 s42_snap() {  # <repo> <plan> -> commit the plan and keep a byte copy for the cmp rows
   ( cd "$1" && git add -f "$2" && git commit -qm snap ) >/dev/null 2>&1
   cp "$2" "$TMPROOT/s42-before"

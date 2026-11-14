@@ -63,10 +63,8 @@ R_QUIET="$(mk_repo quiet)"
 R_PUSH="$(mk_repo push)"
 R_TWO="$(mk_repo twoblocks)"
 R_COMMIT="$(mk_repo commit)";   block_plan "$R_COMMIT"
-R_CROSS="$(mk_repo crosschan)"
 R_BG="$(mk_repo background)"
-R_PLAIN="$(mk_repo bystander no)"
-ok "seven repos built under $SANDBOX"
+ok "five repos built under $SANDBOX"
 
 # ---------------------------------------------------------------------------
 section "2 — the anti-vacuity control: each of the five still speaks through the one process"
