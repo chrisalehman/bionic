@@ -1287,7 +1287,7 @@ $BRF_PINNED"; fi
       poker_fold_ask BRF_ANS "brief $BRF_ID $BRF_NAME" "$PV_PLAN" reader_q_reviews
       BRF_RANGE="$(printf '%s\n' "$BRF_ANS" | awk -F'|' -v qs=",$BRF_QS," -v base="${BRF_BASE:-(no review proof and no base-sha)}" \
         -v end="${BRF_SHA:-$BRF_HEAD}" "$_LINE_FIELDS_AWK"'
-        $1 == "run/v1" && line_kv("ev") == "proof" && index(qs, "," line_kv("question") ",") { last[line_kv("question")] = line_kv("head") }
+        line_kv("ev") == "proof" && index(qs, "," line_kv("question") ",") { last[line_kv("question")] = line_kv("head") }
         END {
           n = split(substr(qs, 2, length(qs) - 2), q, ",")
           for (i = 1; i <= n; i++) { a[i] = (q[i] in last) ? last[q[i]] : base; if (a[i] != a[1]) mixed = 1 }

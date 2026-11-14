@@ -632,7 +632,7 @@ cat > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md" <<'EOF'
 ---
 governing-skill: canonical-sdlc
 canonical_sdlc_version: 14
-rigor-minimum: double
+rigor-minimum: "double"
 ---
 
 # Epic
@@ -640,7 +640,7 @@ EOF
 run_write "$project/.bionic/docs/plans/epic-01-demo/epic-minimum.plan.md" "$(build_plan intent=build rigor=single)"
 assert_eq "floor_epic_violation_logs exit 0" 0 "$HOOK_EXIT"
 assert_contains "floor_epic stderr names epic-minimum" "epic-minimum" "$HOOK_STDERR"
-assert_contains "floor_epic audit names epic-minimum" "epic-minimum" "$(read_audit "$project")"
+assert_contains "floor_epic audit names the quoted level" "epic minimum double" "$(read_audit "$project")"
 
 echo "epic-minimum: epic names a plan that doesn't exist → silent (fail-open)"
 project=$(make_project)

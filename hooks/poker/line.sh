@@ -80,20 +80,8 @@ deliver_check() {
   fi
   docs="$(docs_root "$PV_REPO")"; docs="$(cd "$docs" 2>/dev/null && pwd -P)"
   drel=""; case "$docs" in "$PV_REPO"/*) drel="${docs#"$PV_REPO"/}" ;; esac
-  art="$(awk -F'|' -v id="$PV_ID" '
-    /^[ \t]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[ \t]/ { inl = ($0 ~ /^##[ \t]+Dispatch ledger[ \t]*$/); rows = 0; next }
-    !inl || $0 !~ /^[ \t]*\|/ { next }
-    { rows++ }
-    rows == 1 { ac = 0; for (k = 2; k < NF; k++) { h = $k; gsub(/^[ \t]+|[ \t]+$/, "", h); if (h == "artifact") ac = k }; next }
-    $0 ~ /^[ \t]*\|[ \t:|-]*$/ { next }
-    { c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c); if (c == id && ac) { v = $ac; gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit } }' "$PV_PLAN" 2>/dev/null)"
+  art="$(poker_brief_cell "$PV_PLAN" Tasks "$PV_ID" artifact 2>/dev/null)" || art=""
   case "$art" in *[A-Za-z0-9]*) : ;; *) art="" ;; esac
-  if [ -z "$art" ]; then
-    art="$(poker_brief_cell "$PV_PLAN" Tasks "$PV_ID" artifact 2>/dev/null)" || art=""
-    case "$art" in *[A-Za-z0-9]*) : ;; *) art="" ;; esac
-  fi
   if [ -z "$art" ]; then
     while IFS= read -r e; do
       e="${e#"${e%%[![:space:]]*}"}"; e="${e%"${e##*[![:space:]]}"}"; e="${e#!}"; e="${e#./}"
