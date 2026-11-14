@@ -209,8 +209,9 @@ expect_absent "T.c3 …with no branch-shape refusal" "shaped" "$SP_CO_OUT"
 expect_contains "T.c4 the integrate act is a PR: the line carries the command" "gh pr create --base main --head fix/x" "$SP_CO_OUT"
 expect_absent "T.c5 …and does not refuse the unmerged branch" "WOULD REFUSE — fix/x" "$SP_CO_OUT"
 expect_eq "T.c6 …and merges nothing" "$SP_MAIN0" "$(git -C "$SP_CT" rev-parse main)"
-SP_CW="$(sp_co_root wave wave 14)"
+SP_CW="$(sp_co_root wave wave)"
 SP_CO_OUT="$(cd "$SP_CW" && bash "$SP_CLOSE" "$SP_CW/.bionic/docs/plans/epic-99-test/fix-x.plan.md" check 2>&1)"
-expect_contains "T.c7 the pair: at wave scale fix/x is refused for its shape" "is not wave/<NN>-<slug> shaped" "$SP_CO_OUT"
+expect_absent "T.c7 the pair: at wave scale fix/x is not refused for its shape either" "shaped" "$SP_CO_OUT"
+expect_contains "T.c8 …the same check reaches its merge line" "merge: " "$SP_CO_OUT"
 
 finish
