@@ -1879,8 +1879,8 @@ detect_bounded() {  # <seconds> <command...> — passes stdout through; 124 on t
   # is bash's, not this repo's, and it went wherever the caller's stderr went — two
   # call sites capture this function with no stderr split (doctor's load-state read,
   # and `detect_plugin_duplicates` below), so a 151-column shell diagnostic landed in
-  # doctor's PAGE and failed the 100-column arms of doctor-fleet (§20) and
-  # doctor-walls (§12.2) as though the renderer had printed a second over-budget row.
+  # doctor's PAGE and failed the doctor suites' 100-column rows as though the renderer
+  # had printed a second over-budget row.
   # The emitting shell names itself: a non-interactive bash prefixes the message with
   # BASH_SOURCE[0], which inside this function is this file.
   #

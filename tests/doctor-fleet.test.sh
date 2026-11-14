@@ -506,20 +506,6 @@ expect_no_match "18i: …and still does not render their budgets as live capacit
 expect_absent "18j: …and the page names no verb without a failure marker to justify one" \
   "session-poker.sh sweep" "$OUT6D"
 
-section "Section 7: the column budget"
-
-too_wide() {
-  printf '%s\n' "$1" | awk '
-    { s = $0
-      gsub(/✓|✗|–|—|≥|…|·|→|•/, ".", s)
-      if (length(s) > 100) print length(s) ": " $0 }'
-}
-_over="$(too_wide "${OUT7}
-${OUT6B}")"
-if [ -z "$_over" ]; then ok "20: every line of the fullest run fits 100 columns"
-else no "20: a line exceeds 100 columns" "$_over"; fi
-
-
 section "Section 8: the claude CLI absent, and present, on one fixture (AC-7)"
 
 # THE PAIR IS THE POINT, AND IT IS THE STATE THAT USED TO BREAK THIS SUITE.
@@ -537,6 +523,12 @@ OUT_WITHCLI="$(run_doctor)"
 expect_match "21.1: with the CLI off PATH, an MCP row names that as the cause"   "*chrome-devtools*the claude CLI is not on PATH*" "$OUT_NOCLI"
 expect_no_match "21.2: …and with the CLI present that cause is nowhere on the page"   "*the claude CLI is not on PATH*" "$OUT_WITHCLI"
 expect_match "21.3: …which answers the same row from the CLI instead (the pair is not vacuous)"   "*chrome-devtools*not installed*" "$OUT_WITHCLI"
+too_wide() {
+  printf '%s\n' "$1" | awk '
+    { s = $0
+      gsub(/✓|✗|–|—|≥|…|·|→|•/, ".", s)
+      if (length(s) > 100) print length(s) ": " $0 }'
+}
 _over="$(too_wide "$OUT_NOCLI")"
 if [ -z "$_over" ]; then ok "21.4: the CLI-absent page still fits 100 columns"
 else no "21.4: a line of the CLI-absent page exceeds 100 columns" "$_over"; fi

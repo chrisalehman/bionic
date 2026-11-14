@@ -1675,6 +1675,10 @@ BACKSTOP_ROWS
         [ -n "$BS_ID" ] && tick_record_stands "$BS_ID" "$BS_FILES" && TICK_OWN_STANDS="${TICK_OWN_STANDS}${BS_ID}"$'\t'"${BS_KIND}"$'\n'
       done <<< "$TICK_OWN"
       if [ -n "$TICK_OWN_STANDS" ]; then
+        # THE JUDGMENT BEFORE THE QUESTION: an integrate row's wait on the reviews is met only by the tick's judgment of
+        # the run's facts at the working head (UNITS_FACTS_STATE), so the ready set is asked once that judgment is made.
+        # `sched_budget_read` keeps it for the plan, and the scheduler below reads the same answer, so a tick judges once.
+        sched_budget_read "$REPO_REAL" "$SESSION_ID"
         TICK_OWN_READY=" $(fill_ready_set "$POKER_RUN_PLAN" 99999 0 2>/dev/null | tr '\n' ' ') "
         while IFS=$'\t' read -r BS_ID BS_KIND; do
           [ -n "$BS_ID" ] || continue
