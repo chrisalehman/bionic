@@ -149,8 +149,6 @@ backdate() {  # <file> <seconds ago>
   touch -t "$ts" "$1"
 }
 
-mtime_of() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
-
 # ---------- driving the hook ----------
 
 # ---------- the transcript the verdict reads (REQ-1, AC-1.1/1.2/1.3) ----------
