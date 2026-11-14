@@ -509,9 +509,10 @@ landing_report() {  # <plan or landing record> <project root> <rows yes|no> [ins
 #   stop-runs      the run's log's `run/v1|ev=hand|what=stop-run|…` (an older record's `line/v1|ev=stop-run|…`, which
 #                  the translation reads as that hand event), one per `stop-run` that stopped a run or ended a
 #                  gate request (wave-36 T11; D8, AC-2.3). A stop is a verb act: never counted as by-hand.
-#   declines       the run's fill ledger's `fill-ledger/v1|…|state=decline|…` lines, one per `decline`. The Stop hook
-#   lifts          writes `state=ok` and `state=hold` only, so a `hold` there is the fill's wait and not the `hold` verb.
-#                  `state=lift` is `decline lift`'s line.
+#   declines       an older run's `stop` events with `state=decline` and `state=lift`, one per `decline` and per
+#   lifts          `decline lift`: its fill ledger's lines, which the translation reads as those events. No verb has
+#                  written either since 1.24.0; the Stop hook's `stop` event carries `state=ok` or `state=hold` only,
+#                  so a `hold` there is the fill's wait and not the `hold` verb.
 #   amends         the log's `run/v1|ev=hand|what=amend|…` (`amend`), `what=hold` (`hold`) and `what=extend` (`extend`),
 #   holds          one per act, placed by its `at=`. The roster row each verb also writes is the agent's contract and
 #   extensions     never a count: the rosters are session state a close wipes, and the run's log is not.
@@ -545,7 +546,7 @@ landing_report() {  # <plan or landing record> <project root> <rows yes|no> [ins
 #
 # THE WINDOW. `--since <ISO>` and `--until <ISO>` count a hand-hold only when its own line's time is after the start
 # and at or before the end; either end may be absent, and absent is open. Each source is placed by the time its writer
-# put on it: the landing record's and the log's `at=`, the fill ledger's `at=`, the ISO on a `waived:` line, a
+# put on it: the landing record's and the log's `at=`, an older fill ledger's `at=`, the ISO on a `waived:` line, a
 # `moved:` or regression proof line's `at=`, and the matrix waiver's time. An end written to the minute (`<date>T<hh>:<mm>Z`, the shape close-out writes `delivered:` in) reaches through
 # that minute's last second, so an act in the minute an end names is inside it. A waiver of the date form is placed
 # when its whole day falls on one side of each end. A line that cannot be

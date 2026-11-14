@@ -610,7 +610,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #
 # EVERY FACT IS ANOTHER READER'S, CALLED: the tasks and sizes are `units_rows`', the longest open chain
 # `units_chain`'s over `units_edges`, the landings, runs and the line `landing_report`'s and lib/line.sh's fold, the
-# idle minutes `sitrep_idle_minutes`' fold of the fill ledger, the asks the run's register's (`owed_list_plan`, never the caller's
+# idle minutes `sitrep_idle_minutes`' fold of the run's stop events, the asks the run's register's (`owed_list_plan`, never the caller's
 # session), the launches the rosters', the findings `proof_findings` at `proof_finding_rating` less
 # `proof_fixed`, the landings the landing record's `landed:` headers, a goal's status lib/plan.sh `plan_goal_status`'s, the
 # one the release approval card reads too. What no reader computes is computed here, once: the work's counts, its
@@ -1521,7 +1521,7 @@ SITREP_RUNNING
     SG_T_WHOLE="$(proof_whole_text "$plan" "$root" 2>/dev/null)"
     case "$SG_T_WHOLE" in none) SG_T_WHOLE="not run yet" ;; '') SG_T_WHOLE="unverified" ;; esac
   fi
-  idle_min="$(sitrep_idle_minutes "$plan" "$root")"
+  idle_min="$(sitrep_idle_minutes "$plan")"
   # the landing report's run counts; a run killed at the gate (rc over 128) is a discarded run
   case "$lr1" in
     *'· runs: green='*)
@@ -1698,30 +1698,26 @@ sitrep_blocked_on_you() {
   esac
 }
 
-# sitrep_idle_minutes <plan> <root> -> the run's idle minutes, from the fill ledger the stop library writes
-# (lib/patrol.sh `fill_ledger_path`). Read from times code wrote with the clock, never from the plan's text: the lines
-# are folded by turn (the last of a turn wins), ordered by `at=`, and a line whose idle= is non-empty owns the interval
-# to the next line; the last one owns the interval to now only while the run is open. An interval counts once, however
-# many rows idled in it. No ledger is no idle minute.
+# sitrep_idle_minutes <plan> -> the run's idle minutes, from its `stop` events as the reader reads them (lib/line.sh
+# `_lr_events`: the log, or an older run's fill ledger translated to the same events); nothing, exit 2, when they
+# cannot be read. Read from times code wrote with the clock, never from the plan's text: the events are folded by turn
+# (the last of a turn wins), ordered by `at=`, and one whose idle= is non-empty owns the interval to the next; the last
+# one owns the interval to now only while the run is open. An interval counts once, however many rows idled in it. No
+# stop event is no idle minute.
 sitrep_idle_minutes() {
-  local plan="$1" root="$2" f FR_OPEN=no FR_NOW FR_LED_IN=/dev/null FR_IDLE_S
-  f="$(fill_ledger_path "$root" "$plan" 2>/dev/null)" || f=""
-  { [ -n "$f" ] && [ -f "$f" ] && [ ! -L "$f" ]; } && FR_LED_IN="$f"
+  local plan="$1" lines FR_OPEN=no FR_NOW FR_IDLE_S
+  _lr_reader || return 2
+  lines="$(_lr_events "$plan")" || return 2
   run_open "$plan" && FR_OPEN=yes
   FR_NOW="${BIONIC_NOW_EPOCH:-}"
   case "$FR_NOW" in ''|*[!0-9]*) FR_NOW="$(date -u +%s)" ;; esac
-  FR_IDLE_S="$(awk -v open="$FR_OPEN" -v now="$FR_NOW" "$_PATROL_ISO_AWK"'
-    function fr_field(line, key,   i, n, parts) {
-      n = split(line, parts, "|")
-      for (i = 2; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
-    }
-    index($0, "fill-ledger/v1|") == 1 {
-      e = iso2epoch(fr_field($0, "at"))
+  FR_IDLE_S="$(printf '%s\n' "$lines" | awk -F'|' -v open="$FR_OPEN" -v now="$FR_NOW" "$_PATROL_ISO_AWK$_READER_AWK"'
+    ev() == "stop" {
+      e = iso2epoch(line_kv("at"))
       if (e < 0) next
-      k = fr_field($0, "turn")
+      k = line_kv("turn")
       if (k != "" && (k in slot)) { i = slot[k] } else { i = ++n; if (k != "") slot[k] = i }
-      ep[i] = e; id[i] = fr_field($0, "idle")
+      ep[i] = e; id[i] = line_kv("idle")
     }
     END {
       for (i = 1; i <= n; i++) ord[i] = i
@@ -1739,7 +1735,7 @@ sitrep_idle_minutes() {
         if (end > ep[i]) idle += end - ep[i]
       }
       printf "%d\n", idle
-    }' "$FR_LED_IN")"
+    }')"
   case "$FR_IDLE_S" in ''|*[!0-9]*) FR_IDLE_S=0 ;; esac
   printf '%d\n' "$(( (FR_IDLE_S + 30) / 60 ))"
 }
