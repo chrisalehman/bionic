@@ -2532,7 +2532,7 @@ ur_world() {  # <label> -> UR_P: the fixture at 15, its Step 7 record named, car
   for n in 6 7 8; do ur_poke "$p" current "$n"; [ "$UR_RC" = 0 ] || { printf '      current %s said: %s\n' "$n" "$UR_OUT"; return 1; }; done
   UR_P="$p"
 }
-ur_born() {  # <root> -> the person's edit: AC-2 joins the Eval design, under AC-1, naming no task
+ur_born() {  # <root> -> the person's edit: a second criterion joins the Eval design, under the first, naming no task
   awk '{ print } /^\| — \| fixture \| AC-1 \|/ { print "| — | fixture | AC-2 | unit | `bash tests/x.test.sh` | a second planted defect |" }' \
     "$1/$PLAN_REL" > "$1/$PLAN_REL.n" && mv "$1/$PLAN_REL.n" "$1/$PLAN_REL"
 }
