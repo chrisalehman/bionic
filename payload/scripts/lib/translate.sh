@@ -142,6 +142,18 @@ _translate_section() {  # <plan> <heading> -> the lines under `## <heading>`, to
     | awk -v h="## $2" '/^[ \t]*```/ { f = !f; next } f { next } $0 == h { on = 1; next } /^## / { on = 0 } on'
 }
 
+# A plan at version 14 is the one that holds a state section, so telling it apart from a page without one is asked of
+# the section reader here. Both read the section to its end: a reader that quits at its first match leaves its writer
+# killed by SIGPIPE under a caller's pipefail.
+translate_has_state() {  # <plan> -> 0 when the plan holds a `## SDLC State` section with a line under it
+  _translate_section "$1" "SDLC State" | awk 'END { exit !NR }'
+}
+translate_state_key() {  # <plan> <key> -> the first `<key>:` line's value under `## SDLC State`; 1 when none has one
+  _translate_section "$1" "SDLC State" | awk -v k="$2" '
+    !f && index($0, k ":") == 1 { v = substr($0, length(k) + 2); gsub(/^[ \t]+|[ \t]+$/, "", v); if (v != "") { print v; f = 1 } }
+    END { exit !f }'
+}
+
 # THE HOMES OF A RUN'S PLACE: the only sources that write a step, an approval or an abandon. A run's step, its state and
 # its approvals are read from these alone (lib/proof.sh `proof_step_held`), so a source that comes to write one of the
 # three joins this list, or that read misses it; tests/reader.test.sh §HELD compares the two reads and goes red until it does.
