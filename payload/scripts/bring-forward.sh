@@ -205,9 +205,11 @@ _bf_criteria() {  # <plan> -> `<criterion><TAB><tier><TAB><requirement><TAB><eva
 # `working-branch:` line and its first `base-sha:` line, read as lib/run.sh `plan_working_branch` and lib/proof.sh
 # `proof_plan_base` read them, else the Step 4 block's `branch:` and `base-sha:` fields. Step 7's document was its block's
 # `adr:` or `rca:` path, or its `n/a:` reason, as lib/walls.sh `validate_document_step` asked; at 15 it is the header's
-# `adrs:`, the records named, or `none` with the reason. At 15 the header holds all three and the steps' checks ask it
-# there, so the act writes each the header lacks. One the run owed, past its step, and no home held is named on the gaps
-# list; a header that holds a key keeps its own value.
+# `adrs:`, the records named, or `none` with the reason. The integration branch was the State's first
+# `integration-branch:` line, read as lib/plan.sh `plan_integration_branch` reads it, which at 15 finds the header's.
+# At 15 the header holds all four and the steps' checks ask it there, so the act writes each the header lacks. One the
+# run owed, past its step, and no home held is named on the gaps list; a header that holds a key keeps its own value. A
+# run that held no integration branch is named nowhere: 14's one reader found none either, so the act drops nothing.
 _bf_homes() {  # <plan> <header out> -> a `<key><TAB><value>` line in <header out> per key to write; a gap line per key owed and held nowhere
   local plan="$1" k v found
   # A Step block is its `- Step <n>:` line and the indented lines under it; one held (pending) is no step reached.
@@ -224,17 +226,18 @@ _bf_homes() {  # <plan> <header out> -> a `<key><TAB><value>` line in <header ou
     !curseen && /^[ \t]*current[ \t]*:/ { cur = word(substr($0, index($0, ":") + 1)) + 0; curseen = 1 }
     /^[ \t]*working-branch[ \t]*:/ { first("working-branch", word(substr($0, index($0, ":") + 1))) }
     /^[ \t]*base-sha[ \t]*:/ { first("base-sha", word(substr($0, index($0, ":") + 1))) }
+    /^[ \t]*integration-branch[ \t]*:/ { first("integration-branch", word(substr($0, index($0, ":") + 1))) }
     blk == "4" { if (b4 == "") b4 = field(t, "branch"); if (s4 == "") s4 = field(t, "base-sha") }
     blk == "7" { doc(field(t, "adr")); doc(field(t, "rca")); if (na == "") na = said(t, "n/a") }
     END { first("working-branch", b4); first("base-sha", s4); first("adrs", docs); if (na != "") first("adrs", "none — " na)
       for (k in got) printf "%s\t%s\n", k, got[k]
       for (n = 4; n <= 7; n += 3) if (cur >= n || (n in reached)) print "reached\t" n }')" || return 1
   : > "$2"
-  for k in working-branch:4 base-sha:4 adrs:7; do
+  for k in working-branch:4 base-sha:4 adrs:7 integration-branch:; do
     v="$(plan_read_header "$plan" "${k%:*}" 2>/dev/null)" && [ -n "${v#*=}" ] && continue
     v="$(awk -F'\t' -v k="${k%:*}" '$1 == k { print $2; exit }' <<< "$found")"
     if [ -n "$v" ]; then printf '%s\t%s\n' "${k%:*}" "$v" >> "$2"
-    elif grep -qx "reached	${k#*:}" <<< "$found"; then printf 'gap/v1|ev=step|n=%s|field=%s|why=absent\n' "${k#*:}" "${k%:*}"; fi
+    elif [ -n "${k#*:}" ] && grep -qx "reached	${k#*:}" <<< "$found"; then printf 'gap/v1|ev=step|n=%s|field=%s|why=absent\n' "${k#*:}" "${k%:*}"; fi
   done
 }
 

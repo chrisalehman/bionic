@@ -550,8 +550,9 @@ expect_eq "a row's suites and lands-on go to the task's own section, after its f
 for f in suites lands-on; do expect_contains "a row with no section of its own has its $f on the gaps list" "gap/v1|ev=row|row=T2|field=$f|why=unruled" "$OUT"; done
 
 section "HOMES"
-# SYNTHESIZED: a plan at 14 as a person has one, holding none of 15's homes: no working-branch:, base-sha: or adrs: in
-# its header, no criteria table; the branch and base in its Step 4 block, its document in its Step 7 block.
+# SYNTHESIZED: a plan at 14 as a person has one, holding none of 15's homes: no working-branch:, base-sha:, adrs: or
+# integration-branch: in its header, no criteria table; the branch and base in its Step 4 block, its document in its
+# Step 7 block, the integration branch in its state section.
 homes() {  # <name> [<sed edit>] -> the plan's path, written
   local p="$SB/homes/plans/epic-x/$1.plan.md"; mkdir -p "${p%/*}"
   sed -e "${2:-}" > "$p" <<EOF
@@ -583,6 +584,7 @@ AC-1.2:
 
 ## SDLC State
 current: 8
+integration-branch: trunk
 - Step 4: rows dispatched from the working branch
   base-sha: 2222222bb
   branch: wave/6-homes
@@ -595,6 +597,7 @@ G="$(homes wave-6-homes)"; GC="$(gcells "$G")"; GO="$(bash "$BF" "$G" 2>&1)"; as
 GB="$(homes wave-6-bare '/^  base-sha:/d; /^  branch:/d; /^  n\/a:/d')"; GBO="$(bash "$BF" "$GB" 2>&1)"
 expect_eq "the working branch and base its Step 4 block held are the header's after the act" "working-branch=wave/6-homes base-sha=2222222bb" \
   "$(askg header working-branch) $(askg header base-sha)"
+expect_eq "the integration branch the state section held is the header's after the act" "integration-branch=trunk" "$(askg header integration-branch)"
 for f in working-branch base-sha; do expect_contains "a run past Step 4 whose block held no $f has it named on the gaps list" "gap/v1|ev=step|n=4|field=$f|why=absent" "$GBO"; done
 GA="$(homes wave-6-adr 's#^  n/a: no decision this run#  adr: adrs/a.md (Proposed); rca: rca/r.md#')"; bash "$BF" "$GA" >/dev/null 2>&1
 expect_eq "Step 7's document is the header's adrs: after the act: none with its n/a reason, or the records its block named" \
