@@ -157,12 +157,18 @@ _rh_row() { _rh_addrow "$2" "$3" && _rh_poker "$1" task-add "${@:3}"; }
 # _rh_addrow <Tasks line> <id> -> the orchestrator's edit adding the row as the table's last, one hand write
 _rh_addrow() { RH_R="$1" awk '/^## / { t = ($0 ~ /^## Tasks/) } { L[NR] = $0 } t && /^\|/ { last = NR } END { for (i = 1; i <= NR; i++) { print L[i]; if (i == last) print ENVIRON["RH_R"] } }' \
   "$RH_PLAN" > "$RH_PLAN.t" && mv "$RH_PLAN.t" "$RH_PLAN" && _rh_hand plan "the row $2"; }
-# _rh_cell <what> <row> <column>=<value>… -> the person's edit of a Tasks row's cells, written as text beside the plan
-# (lib/units.sh `units_table_cells`) and judged by the table check the write hook runs before it replaces it
+# _rh_cell <what> <row> <column>=<value>… -> the person's edit of a Tasks row's cells, its columns named by the header
+# in either case, written as text beside the plan and judged by the table check the write hook runs before it replaces it
 _rh_cell() {
   local w="$1"; shift
-  bash -c '. "$1/units.sh" 2>/dev/null && units_table_cells "$2" set tasks "${@:3}" > "$2.t" && [ -z "$(units_validate "$2.t" "$2" 2>&1)" ] && mv "$2.t" "$2" || { rm -f "$2.t"; exit 1; }' \
-    _ "$RH_ROOT/payload/scripts/lib" "$RH_PLAN" "$@" || { echo "rehearse $RH_STATE: the edit of $1 was refused: $w" >&2; return 1; }
+  awk -F'|' -v OFS='|' -v set="$*" '
+    BEGIN { n = split(set, a, " "); for (i = 2; i <= n; i++) { e = index(a[i], "="); v[tolower(substr(a[i], 1, e - 1))] = substr(a[i], e + 1) } }
+    /^## / { t = ($0 ~ /^## Tasks/) }
+    t && /^\|/ && !nh { nh = NF; for (i = 2; i < NF; i++) { c = tolower($i); gsub(/ /, "", c); col[i] = c } }
+    t && /^\|/ { r = $2; gsub(/ /, "", r); if (r == a[1]) for (i = 3; i < NF; i++) if (col[i] in v) { $i = " " v[col[i]] " "; hit++ } }
+    { print } END { exit !hit }' "$RH_PLAN" > "$RH_PLAN.t" \
+    && bash -c '. "$1/units.sh" 2>/dev/null && [ -z "$(units_validate "$2.t" "$2" 2>&1)" ] && mv "$2.t" "$2"' _ "$RH_ROOT/payload/scripts/lib" "$RH_PLAN" \
+    || { rm -f "$RH_PLAN.t"; echo "rehearse $RH_STATE: the edit of $1 was refused: $w" >&2; return 1; }
   _rh_hand plan "$w: $*"
 }
 _rh_head() { git -C "$RH_ROOT" rev-parse --verify -q "refs/heads/$DOOR_BRANCH"; }

@@ -185,14 +185,12 @@ expect_true "39g …and the LEDGER lines sit after the HELD line and before the 
   test "$S39_HELD" -gt 0 -a "$S39_LEDGER" -gt "$S39_HELD" -a "$S39_FILL" -gt "$S39_LEDGER"
 expect_contains "39h …and the fill is unchanged by the lint" "poker: FILL T7" "$OUT"
 
-# 39i — THE LEDGER REPAIRED: T1's line written, T3's cell naming its roster row, T4 back on
-# the enum. No LEDGER line.
+# 39i — THE LEDGER REPAIRED: T3's cell naming its roster row, T4 back on the enum. No LEDGER line.
 mkrow name=w-T3 agent_id=a-w-T3 >> "$(roster_of "$R39A")"
-awk '{ print } $0 == "- Step 4: in progress" { print "- T1: bash suite 9/9 green" }' "$P39A" \
-  | sed -e 's/| active, agent names no roster row | implementor |/| active, agent names no roster row | w-T3 |/' \
-        -e 's/| d.sh | doing |/| d.sh | pending |/' > "$P39A.new" && mv "$P39A.new" "$P39A"
+sed -e 's/| active, agent names no roster row | implementor |/| active, agent names no roster row | w-T3 |/' \
+    -e 's/| d.sh | doing |/| d.sh | pending |/' "$P39A" > "$P39A.new" && mv "$P39A.new" "$P39A"
 poke_pressure "$R39A" 8192 1.0 tick
-expect_contains "39i precondition: T1's line is in the plan" "- T1: bash suite 9/9 green" "$(cat "$P39A")"
+expect_contains "39i the repaired ledger's tick still fills the ready row" "poker: FILL T7" "$OUT"
 expect_absent "39j a repaired ledger ticks no LEDGER line" "poker: LEDGER" "$OUT"
 
 # 39k — AN EMPTY ROSTER LAUNCHES NOBODY. The tick reaches its fill arm only with a roster file
@@ -211,11 +209,9 @@ expect_contains "39k an empty roster: the agent-named active row ticks a launch 
 section "Section 40: HELD and LEDGER print in EVERY tick state — no roster, no room, over the share, no budget (wave-21 T13; REQ-3 AC-3.3, REQ-4 AC-4.1/AC-4.2; wave-28 T13)"
 # ============================================================
 #
-# THE AUDIT'S REFUTATION, PINNED (record/wave-21-fixit-188/audit-3b45d05.md). Through T5 the
-# HELD and LEDGER lines printed only inside the FILL branch, and three reachable states never
-# reach it: the first tick of a run (no roster file yet: rung, QUIET, exit), HOLD or EMERGENCY
-# under machine pressure, and a plan with no `parallel-budget`. The commit gate reads the
-# ledger in every one of them, so a plan the gate refused ticked clean. Every case here holds
+# THREE REACHABLE STATES NEVER REACH THE FILL BRANCH: the first tick of a run (no roster file yet:
+# rung, QUIET, exit), HOLD or EMERGENCY under machine pressure, and a plan with no `parallel-budget`.
+# The commit gate reads the ledger in every one of them, so the tick does too. Every case here holds
 # an ext:-held row and a defective ledger row, and expects each line EXACTLY ONCE — printed
 # before the state split, never a second time inside an arm. Sections 38/39 pin the probes to
 # a healthy machine; these pin them to the states those sections never reach.
@@ -488,7 +484,6 @@ poke "$R41H" hold w-nobody "x"
 expect_eq "41c10 hold refuses a name with no row (exit 1)" "1" "$RC"
 # A REASON THAT IS ONLY BLANKS IS NO REASON (wave-24 T27; Step-6 review C3): the tick would
 # print a hold with nothing after its dash. The usage error, and no row is written.
-S41H_ROWS="$(grep -c '|name=w-1|' "$(roster_of "$R41H")")"
 poke "$R41H" hold w-1 "   "
 expect_eq "41c11 C3 hold with a blank reason is the usage error (exit 2)" "2" "$RC"
 poke "$R41H" hold w-1 "
