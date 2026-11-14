@@ -353,10 +353,10 @@ d=$(make_env); u_marker "$d"; tick_stamp "$d" "" arm; a_tool "$d" ListAgents; a_
 fire "$d"; expect_block "22: …and with a plan, the same turn is refused the same way" "session-poker.sh tick" "$TL_MISSING"
 
 # 23: THE GATE WRITES NOTHING. It is a gate, and gates only read (TDD §3.2). The one file the
-# Stop process writes is the fill ledger's recorder's (wave-20 REQ-5, AC-5.5), which is not
-# this gate: it appends one line under the run's record directory and touches nothing else.
+# Stop process writes is the run's log, where the recorder of the turn's `stop` event, which is
+# not this gate, appends one line under the run's record directory and touches nothing else.
 d=$(make_env); u_tick "$d"
-_led="$d/.bionic/docs/record/${PLAN_REL%.plan.md}/fill-ledger.log"
+_led="$d/.bionic/docs/record/${PLAN_REL%.plan.md}/run.log"
 _before=$(find "$d" -type f ! -path "$_led" | sort | cksum)
 fire "$d"
 _after=$(find "$d" -type f ! -path "$_led" | sort | cksum)

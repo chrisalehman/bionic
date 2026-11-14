@@ -32,6 +32,8 @@
 #   §PATROL  a dead Patrol clock is one line of at most 80 characters, the same line on a repeat;
 #            the explanation is asked for, and the one report sentence is in the rules and the prompt
 #   §LOG     a step, an approval or an order the run's log alone holds moves the ready-with-room verdict
+#   §ONE     a stop is one event: the turn's end is the run's stop event, the reader's answer before and after the
+#            bring-forward act, and a log the hook cannot write, or a plain directory, changes nothing it says
 #   §GUARD   the stop guard's words, its roster writes, the verdict read and the agent guard's
 #            arming check, each a stop-library function called in a shell of its own
 #   §EVENTS  the orchestrator's stop of an agent (TaskStop's PreToolUse) and an agent's own stop
@@ -510,6 +512,8 @@ s9_fixture() {  # -> project dir; plan with T13 and T14 pending, writers=8; STOP
   local d
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
+  # A checkout, as every run is: the turn's stop event goes to the log the checkout's record holds.
+  ( cd "$d" && git init -q . 2>/dev/null )
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
     printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n'
     printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n- Step 4: in progress\n\n'
@@ -536,7 +540,9 @@ s9_transcript() {  # <file> [agent name]...
   } > "$f"
 }
 s9_headline() { printf '%s\n' "$STOP_ERR" | /usr/bin/grep -m1 '^bionic: ' || true; }
-require_helpers s9_fixture s9_transcript s9_headline
+# THE TURN'S RECORD: the stop events of the run's log in <record directory>, one per Stop.
+stop_led() { /usr/bin/grep '^run/v1|ev=stop|' "$1/run.log" 2>/dev/null; }
+require_helpers s9_fixture s9_transcript s9_headline stop_led
 
 # THE WIDTH IS PINNED (the idiom of tests/patrol-duties-gate.test.sh §5c): a warm, clear ring so
 # `pressure_level 8` answers 8 whatever this machine is doing; unset again after the section.
@@ -562,9 +568,9 @@ expect_contains "9d: …as the reason does" "T14" "$(reason_of)"
 # and a checkout whose path holds the row id (a worktree for row T13) would match there.
 expect_absent "9e: T11b the row this turn launched is never named as missed, pending or not" \
   "T13" "$(s9_headline)$(reason_of | sed -E 's#[^ ]*session-poker\.sh##g')"
-S9_LED="$S9_D/.bionic/docs/record/wave-09-fixture/fill-ledger.log"
-expect_contains "9f: …and the ledger's ready set is still the plan's, both rows" "|ready=T13,T14|" "$(cat "$S9_LED" 2>/dev/null)"
-expect_contains "9g: …with one row missed, not two" "|missed=1" "$(cat "$S9_LED" 2>/dev/null)"
+S9_LED="$(stop_led "$S9_D/.bionic/docs/record/wave-09-fixture")"
+expect_contains "9f: …and the ledger's ready set is still the plan's, both rows" "|ready=T13,T14|" "$S9_LED"
+expect_contains "9g: …with one row missed, not two" "|missed=1" "$S9_LED"
 
 # THE ZERO CASE, so 9b cannot pass on a constant: nothing launched reads 0 of 2, both named.
 S9_D0="$(STOP_AT=15 s9_fixture)"
@@ -575,13 +581,13 @@ expect_contains "9h: a turn that launched nothing names both ready rows" "ready 
 # The ledger line ends with `idle=` and `room=`, the ready rows no launch
 # covered while a slot was free, and the free slots at that moment. Positive on the same
 # line first: the launched row is out of idle, the unlaunched one is in, and room is the line's own free.
-S9_LED0="$S9_D0/.bionic/docs/record/wave-09-fixture/fill-ledger.log"
-S9_FREE="$(sed -n 's/.*|free=\([0-9]*\)|.*/\1/p' "$S9_LED" 2>/dev/null)"
+S9_LED0="$(stop_led "$S9_D0/.bionic/docs/record/wave-09-fixture")"
+S9_FREE="$(printf '%s\n' "$S9_LED" | sed -n 's/.*|free=\([0-9]*\)|.*/\1/p')"
 expect_true "9n: T16 the ledger line carries a free count to compare room against" test -n "$S9_FREE"
 expect_contains "9o: T16 the row this turn did not launch is idle, the one it launched is not" \
-  "|idle=T14|room=$S9_FREE" "$(cat "$S9_LED" 2>/dev/null)"
+  "|idle=T14|room=$S9_FREE" "$S9_LED"
 expect_contains "9p: T16 a turn that launched nothing leaves both ready rows idle" \
-  "|idle=T13,T14|room=" "$(cat "$S9_LED0" 2>/dev/null)"
+  "|idle=T13,T14|room=" "$S9_LED0"
 
 # THE LINE BUDGET (found while implementing, not at RED): the user line is width.sh's 100
 # columns and refuse.sh refuses a longer one, which would turn this refusal into a refuse-call
@@ -609,13 +615,13 @@ expect_contains "9m: …while the reason names every row" "T106" "$(reason_of)"
 S9_DG="$(STOP_AT=15 s9_fixture)"
 S9_TXG="$(mktemp)"; s9_transcript "$S9_TXG"
 BIONIC_PROBE_BUSY_CORES_5M=8.0 s7_fire "$S9_DG" "$S9_TXG"
-S9_LEDG="$S9_DG/.bionic/docs/record/wave-09-fixture/fill-ledger.log"
+S9_LEDG="$(stop_led "$S9_DG/.bionic/docs/record/wave-09-fixture")"
 expect_contains "9q: with no room at the gate the ledger records the hold, both rows ready, none free" \
-  "|state=hold|" "$(cat "$S9_LEDG" 2>/dev/null)"
-expect_contains "9r: …free=0" "|free=0|" "$(cat "$S9_LEDG" 2>/dev/null)"
+  "|state=hold|" "$S9_LEDG"
+expect_contains "9r: …free=0" "|free=0|" "$S9_LEDG"
 expect_absent "9s: …and the wall refuses no fill" "ready with room:" "$(reason_of)"
 expect_contains "9t: the same fixture with room records state=ok (9q discriminates)" "|state=ok|" \
-  "$(cat "$S9_LED0" 2>/dev/null)"
+  "$S9_LED0"
 unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -640,6 +646,8 @@ gap_fixture() {  # -> project dir; three pending writer rows T13 T14 T15 reading
   local d
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
+  # A checkout, as every run is: the turn's stop event goes to the log the checkout's record holds.
+  ( cd "$d" && git init -q . 2>/dev/null )
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\ncanonical_sdlc_version: 14\n---\n\n# fixture plan\n\n'
     printf '## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n\n'
     printf -- '- Step 4: opened\n  worktree: .worktrees/37-fixture\n  base-sha: abc1234\n  branch: wave/37-fixture\n\n'
@@ -663,7 +671,7 @@ gap_tick() {  # <project> <busy cores> -> the real tick's output on that reading
       BIONIC_PROBE_BUSY_CORES="$2" BIONIC_PROBE_BUSY_CORES_5M="$2" \
       bash "$S7_POKER" tick 2>/dev/null )
 }
-gap_led() { cat "$1/.bionic/docs/record/wave-37-fixture/fill-ledger.log" 2>/dev/null; }
+gap_led() { stop_led "$1/.bionic/docs/record/wave-37-fixture"; }
 require_helpers gap_fixture gap_tick gap_led s7_transcript s7_fire s9_headline
 
 # GAP1: NO ROOM AT THE GATE. The real tick on the reading ends `no FILL — the gate gives no room`,
@@ -672,7 +680,7 @@ GAP_D1="$(gap_fixture)"
 GAP_T1="$(gap_tick "$GAP_D1" 8.0)"
 GAP_X1="$(mktemp)"; s7_transcript "$GAP_X1" "$GAP_T1"
 BIONIC_PROBE_BUSY_CORES=8.0 BIONIC_PROBE_BUSY_CORES_5M=8.0 s7_fire "$GAP_D1" "$GAP_X1"
-expect_contains "GAP1b meta: the wall read the turn — its ledger line is there" "fill-ledger/v1|" "$(gap_led "$GAP_D1" | tail -1)"
+expect_contains "GAP1b meta: the wall read the turn — its stop event is there" "run/v1|ev=stop|" "$(gap_led "$GAP_D1" | tail -1)"
 expect_contains "GAP1c …recording the gate's hold, three rows ready, none free" "|state=hold|" "$(gap_led "$GAP_D1" | tail -1)"
 expect_eq "GAP1d the tick's no-room turn passes at stop" "" "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
 
@@ -910,6 +918,8 @@ wait_fixture() {  # <extra ## SDLC State lines, or ""> <row>... -> project dir; 
   shift
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
+  # A checkout, as every run is: the turn's stop event goes to the log the checkout's record holds.
+  ( cd "$d" && git init -q . 2>/dev/null )
   { printf -- '---\ngoverning-skill: superpowers:writing-plans\n---\n\n# fixture plan\n\n'
     printf '## SDLC State\n\ncurrent: 4\napproved-by: fixture 2026-10-04T00:00Z "approved"\n'
     [ -z "$extra" ] || printf '%s\n' "$extra"
@@ -928,7 +938,7 @@ wait_fire() {  # <project> -> the real Stop on an ordinary turn that dispatched 
   jq -nc '{type:"user",uuid:"u-wait",isSidechain:false,timestamp:"2026-10-20T00:00:00Z",message:{role:"user",content:"carry on"}}' > "$tx"
   s7_fire "$1" "$tx"
 }
-wait_led() { cat "$1/.bionic/docs/record/wave-09-wait/fill-ledger.log" 2>/dev/null; }
+wait_led() { stop_led "$1/.bionic/docs/record/wave-09-wait"; }
 wait_decision() { printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null; }
 require_helpers wait_fixture wait_fire wait_led wait_decision s7_fire reason_of
 
@@ -951,7 +961,7 @@ expect_contains "WAIT1i the line the user reads names the row and the fix" "read
 # WAIT2: A READ OF AN UNRULED DECISION. The row reads D3, which no approved: line rules.
 W_D2="$(wait_fixture "" "$WT_RULED")"
 wait_fire "$W_D2"
-expect_contains "WAIT2 meta: the wall read the turn, its ledger line is there" "fill-ledger/v1|" "$(wait_led "$W_D2" | tail -1)"
+expect_contains "WAIT2 meta: the wall read the turn, its stop event is there" "run/v1|ev=stop|" "$(wait_led "$W_D2" | tail -1)"
 expect_contains "WAIT2b …and the row reading the unruled D3 is not ready" "|ready=|" "$(wait_led "$W_D2" | tail -1)"
 expect_eq "WAIT2c the turn ends: no refusal" "" "$(wait_decision)"
 W_D2R="$(wait_fixture "" "$WT_RULED")"; bash -c '. "$1/proof.sh" && proof_approval_event "$2" D3 by=fixture said=go' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$W_D2R/.bionic/docs/plans/epic-99-fixture/wave-09-wait.plan.md"
@@ -964,7 +974,7 @@ W_D3="$(wait_fixture "" \
   "| T12 | 4 | build | the open row | implementor | — | 15m | REQ-x | $WT_REC, z.sh | active |  |" \
   "| T13 | 4 | build | waits on T12 | implementor | — | 15m | REQ-x | a.sh | pending | approval:plan, $WT_REC |")"
 wait_fire "$W_D3"
-expect_contains "WAIT3 meta: the wall read the turn" "fill-ledger/v1|" "$(wait_led "$W_D3" | tail -1)"
+expect_contains "WAIT3 meta: the wall read the turn" "run/v1|ev=stop|" "$(wait_led "$W_D3" | tail -1)"
 expect_contains "WAIT3b …and the row waiting on the open T12 is not ready" "|ready=|" "$(wait_led "$W_D3" | tail -1)"
 expect_eq "WAIT3c the turn ends: no refusal" "" "$(wait_decision)"
 W_D3L="$(wait_fixture "" \
@@ -977,7 +987,7 @@ expect_contains "WAIT3e …naming it" "ready with room: T13" "$STOP_ERR"
 # WAIT4: THE USER'S ORDER. An open order makes no row ready; the order lifted, the row is owed again.
 W_D4="$(wait_fixture 'order: given 2026-10-20T00:00:00Z "hold the fleet while I read"' "$WT_READY")"
 wait_fire "$W_D4"
-expect_contains "WAIT4 meta: the wall read the turn" "fill-ledger/v1|" "$(wait_led "$W_D4" | tail -1)"
+expect_contains "WAIT4 meta: the wall read the turn" "run/v1|ev=stop|" "$(wait_led "$W_D4" | tail -1)"
 expect_contains "WAIT4b …and under the open order no row is ready" "|ready=|" "$(wait_led "$W_D4" | tail -1)"
 expect_eq "WAIT4c the turn ends: no refusal" "" "$(wait_decision)"
 W_D4L="$(wait_fixture 'order: given 2026-10-20T00:00:00Z "hold the fleet while I read"
@@ -1093,12 +1103,70 @@ expect_contains "LOG1 the approval the log alone holds readies both rows: the tu
 LOG_D2="$(log_fixture yes "${LOG_FACTS[@]}" 'run/v1|ev=order|act=given|said=hold the run|at=2026-11-01T00:00:03Z')"
 s7_fire "$LOG_D2" "$LOG_TX"
 expect_contains "LOG2 meta: under the order the wall read a live ledger and found no row ready" "|ready=|" \
-  "$(tail -1 "$LOG_D2/.bionic/docs/record/wave-09-fixture/fill-ledger.log" 2>/dev/null)"
+  "$(stop_led "$LOG_D2/.bionic/docs/record/wave-09-fixture" | tail -1)"
 expect_eq "LOG3 …so the turn ends: the order the log alone holds stands" "" "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)"
 printf 'run/v1|ev=cancel|of=approval|key=step3|at=2026-11-01T00:00:03Z\n' >> "$LOG_D1/.bionic/docs/record/wave-09-fixture/run.log"
 s7_fire "$LOG_D1" "$LOG_TX"
 expect_eq "LOG4 a cancel the log appends after LOG1's approval leaves no row ready: the turn ends unrefused" "|" \
   "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)|$(s9_headline)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "ONE: a stop is one event: the turn's end the hook records is the run's stop event, the reader's answer before and after the act, and a log it cannot write changes nothing the hook says"
+
+# A run at 14 crosses by the act (payload/scripts/bring-forward.sh), and the reader then reads its log alone, so a
+# turn's end recorded anywhere else is lost to it. Each Stop below is the real hook on an ordinary turn whose one row
+# reads an unruled D3 at 14, so no row is ready; the turn key is the prompt's uuid, which the recorder writes as turn=.
+one_fixture() {  # <14|15> -> project
+  local d p; d="$(wait_fixture "" "$WT_RULED")"; p="$d/.bionic/docs/plans/epic-99-fixture/wave-09-wait.plan.md"
+  if [ "$1" = 15 ]; then sp_at15 "$p"
+  else awk 'NR == 1 { print; print "canonical_sdlc_version: 14"; next } { print }' "$p" > "$p.v" && mv "$p.v" "$p"; fi
+  printf '%s' "$d"
+}
+one_stop() {  # <project> <turn uuid>
+  local tx; tx="$(mktemp)"
+  jq -nc --arg u "$2" '{type:"user",uuid:$u,isSidechain:false,timestamp:"2026-10-20T00:00:00Z",message:{role:"user",content:"carry on"}}' > "$tx"
+  s7_fire "$1" "$tx"
+}
+one_turn() { bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$1/.bionic/docs/plans/epic-99-fixture/wave-09-wait.plan.md" stop 2>/dev/null | /usr/bin/grep '^turn='; }
+one_ev() { stop_led "$1/.bionic/docs/record/wave-09-wait" | tail -1; }
+require_helpers one_fixture one_stop one_turn one_ev wait_fixture s7_fire sp_at15
+
+ONE_D="$(one_fixture 14)"
+one_stop "$ONE_D" u-one-before
+expect_eq "ONE0 meta: at 14 the turn just ended is the reader's stop" "turn=u-one-before" "$(one_turn "$ONE_D")"
+bash "$BIONIC_SCRIPTS_DIR/payload/scripts/bring-forward.sh" "$ONE_D/.bionic/docs/plans/epic-99-fixture/wave-09-wait.plan.md" >/dev/null 2>&1
+expect_eq "ONE1 meta: the act brought the run to 15 and kept its old homes" "canonical_sdlc_version: 15|kept" \
+  "$(/usr/bin/grep -m1 '^canonical_sdlc_version:' "$ONE_D/.bionic/docs/plans/epic-99-fixture/wave-09-wait.plan.md")|$(! [ -d "$ONE_D/.bionic/docs/record/wave-09-wait/kept" ] || echo kept)"
+one_stop "$ONE_D" u-one-after
+expect_eq "ONE2 after the act the turn just ended is the reader's stop, not the act's last" "turn=u-one-after" "$(one_turn "$ONE_D")"
+expect_regex "ONE3 …the log's last stop event, the recorder's fields in their order and the appender's instant last" \
+  "^run/v1\|ev=stop\|session=$SID\|turn=u-one-after\|current=4\|state=ok\|ceiling=[^|]*\|width=[0-9]+\|open=[0-9]+\|free=[0-9]+\|ready=[^|]*\|launched=[^|]*\|declined=\|missed=[0-9]+\|idle=[^|]*\|room=[0-9]+\|at=[0-9-]+T[0-9:]+Z$" \
+  "$(one_ev "$ONE_D")"
+
+# THE CONTROL: the same Stop on a run born at 15, with no kept copy, is the reader's answer, so ONE2 is the act's.
+ONE_F="$(one_fixture 15)"
+one_stop "$ONE_F" u-one-after
+expect_eq "ONE4 the control: at 15 with no kept copy the same Stop is the reader's stop" "turn=u-one-after" "$(one_turn "$ONE_F")"
+expect_contains "ONE5 …written to the run's log as its stop event" "|turn=u-one-after|" "$(one_ev "$ONE_F")"
+expect_false "ONE5b …and to no fill ledger" test -e "$ONE_F/.bionic/docs/record/wave-09-wait/fill-ledger.log"
+
+# A LOG IT CANNOT WRITE: the record directory read-only. The hook still prints nothing, refuses nothing and exits 0,
+# exactly as on the same turn with a log it can write, which records the event.
+ONE_W="$(one_fixture 14)"; mkdir -p "$ONE_W/.bionic/docs/record/wave-09-wait"
+one_stop "$ONE_W" u-one-w
+expect_eq "ONE6 the control: a writable log, exit 0 and silent" "0||" "$STOP_RC|$STOP_OUT|$STOP_ERR"
+expect_contains "ONE6b …and the turn's end is recorded" "|turn=u-one-w|" "$(one_ev "$ONE_W")"
+ONE_R="$(one_fixture 14)"; mkdir -p "$ONE_R/.bionic/docs/record/wave-09-wait"; chmod a-w "$ONE_R/.bionic/docs/record/wave-09-wait"
+one_stop "$ONE_R" u-one-r
+expect_eq "ONE7 a log that cannot be written: the same exit 0 and silence" "0||" "$STOP_RC|$STOP_OUT|$STOP_ERR"
+expect_eq "ONE7b …and nothing is recorded (ONE6b reads the same line)" "" "$(one_ev "$ONE_R")"
+chmod u+w "$ONE_R/.bionic/docs/record/wave-09-wait"
+# A PLAIN DIRECTORY, no checkout: the appender finds no log, so the Stop records nothing and says nothing.
+ONE_P="$(one_fixture 14)"; rm -rf "$ONE_P/.git"
+ONE_PB="$(cd "$ONE_P" && find . -type f | sort)"
+one_stop "$ONE_P" u-one-p
+expect_eq "ONE8 a plain directory: the same exit 0 and silence" "0||" "$STOP_RC|$STOP_OUT|$STOP_ERR"
+expect_eq "ONE8b …and no file is written in it (ONE6b reads the checkout's event)" "$ONE_PB" "$(cd "$ONE_P" && find . -type f | sort)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "GUARD: the stop guard's words, its roster writes and the agent guard's check are the stop library's, each called in a shell of its own"

@@ -1919,8 +1919,15 @@ proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|
     [ -O "$_PROOF_PLACE_DIR" ] && [ -n "$(find "$_PROOF_PLACE_DIR" -prune -type d ! -perm -020 ! -perm -002 2>/dev/null)" ] \
       || _PROOF_PLACE_DIR=""
   fi
-  deps=("$plan"); [ -z "$dir" ] || for f in run.log kept/record/run.log; do [ ! -f "$dir/$f" ] || deps+=("$dir/$f"); done
+  # The log is summed less its turns' ends: the place reads steps, abandons, approvals, orders and binds alone, and a
+  # stop event comes at every turn. Only a line in the appender's whole shape of one is left out, so any other line,
+  # a malformed stop among them, still changes the key: it fails toward a fold, never toward a stale step.
+  deps=("$plan"); [ -z "$dir" ] || [ ! -f "$dir/kept/record/run.log" ] || deps+=("$dir/kept/record/run.log")
   stamp="$(cksum "${deps[@]}" 2>/dev/null)" || stamp=""
+  if [ -n "$stamp" ] && [ -n "$dir" ] && [ -f "$dir/run.log" ]; then
+    f="$(set -o pipefail; { LC_ALL=C grep -vE '^run/v1\|ev=stop\|session=[^|]*\|turn=[^|]*\|current=[^|]*\|state=[^|]*\|ceiling=[^|]*\|width=[^|]*\|open=[^|]*\|free=[^|]*\|ready=[^|]*\|launched=[^|]*\|declined=[^|]*\|missed=[^|]*\|idle=[^|]*\|room=[^|]*\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' "$dir/run.log"; [ "$?" -le 1 ]; } | cksum)" \
+      && stamp="$stamp run.log less its stop events $f" || stamp=""
+  fi
   key="$plan ${stamp//$'\n'/ } $_PROOF_PLACE_LIBS"
   # A step pending in an advance's own judgment is no place to keep: it is neither read from the held file nor kept in it.
   ! _proof_dry_refused || return 2
