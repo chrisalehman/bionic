@@ -473,7 +473,6 @@ doctor-fleet.test.sh | §Section 4 | keep | payload/scripts/doctor.sh: the activ
 doctor-fleet.test.sh | §Section 5 | keep | payload/scripts/doctor.sh: a MET marker counted as closing a predecessor's open row, so the count reads 1 instead of 2 (14b) | none (searched 'predecessor roster' and 'MET marker' in tests/)
 doctor-fleet.test.sh | §Section 6 | keep | payload/scripts/doctor.sh: the legacy-symlink row loop over worktree_legacy_links deleted, so the mis-pointed alpha link is not listed and the row carries no repair (16, 18) | none (searched 'legacy .bionic symlink' in tests/; session-start.test.sh §5 reads the banner, another entry point)
 doctor-fleet.test.sh | §Section 6b | keep | payload/scripts/doctor.sh: the attestation set read machine-wide instead of under this project, so another project's writers=99 budget reaches the page (18c, 18d) | none (searched 'writers=99' and 'attestation' in tests/)
-doctor-fleet.test.sh | §Section 7 | keep | payload/scripts/doctor.sh: a predecessor or legacy-symlink row printed with its path unelided, so a line of the fullest run passes 100 columns (20) | none (searched 'fits 100 columns' in tests/ suites that run doctor on this fixture)
 doctor-fleet.test.sh | §Section 8 | keep | payload/scripts/doctor.sh: the CLI-absent cause dropped from the MCP rows, so chrome-devtools no longer reads "the claude CLI is not on PATH" (21.1) | doctor-version.test.sh §Section 12 (unverified), doctor-walls.test.sh §Section 5 (unverified) (one-catcher rule: the same three rows, first in census order)
 
 ## doctor-patrol.test.sh
