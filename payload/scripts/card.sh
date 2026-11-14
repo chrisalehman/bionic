@@ -2622,7 +2622,8 @@ _card_fmt_is() {
 
 # _card_settles <a red check's output> -> 0 when each refusal it prints is settled by a decision the page puts, the
 # items appended to CF_SETTLE (`waive:<q>`, `row:<AC>`); 1 at the first refusal none settles. THE PAGE'S OWN
-# DEFAULTS: a matrix row the auditor has not confirmed (waived with the user's words, `waive <AC>`), a T4 row whose
+# DEFAULTS: a matrix row the auditor has not confirmed, or one that awaits its person's confirmation, the judge's two lines
+# (`cur8_unruled_line`; waived with the user's words, `waive <AC>`), a T4 row whose
 # user has not yet confirmed its check, its block's confirmation still a placeholder (confirmed, `approve <AC>`, or
 # waived), a criterion owed now that nothing discharged, which the dry commit refuses with the wall's repair for a
 # live row on the line after its refusal (`_card_live_exit`; waived with the user's words, `waive <AC>`, or run), and
@@ -2643,13 +2644,16 @@ _card_fmt_is() {
 # and its line for a failing one, are known the same way, by the wall's own spellings (`_card_review_fact`,
 # `_card_review_failing`).
 _card_settles() {
-  local l q k judge=0 reading=0 any=0 held=0 unap stale rfact rfail live
+  local l q k judge=0 reading=0 any=0 held=0 unap stale rfact rfail live await
   local -a _cs_f=()
-  unap="$(_card_judge_line cur8_unapproved_line)"; stale="$(_card_judge_line cur8_stale_line)"
+  unap="$(_card_judge_line cur8_unapproved_line)"; stale="$(_card_judge_line cur8_stale_line)"; await="$(_card_judge_line cur8_awaiting_line)"
   rfact="$(_card_review_fact)"; rfail="$(_card_review_failing)"; live="$(_card_live_exit)"
   while IFS= read -r l; do
     if { [ -n "$unap" ] && _card_fmt_is "poker: $unap" "$l"; } || { [ -n "$stale" ] && _card_fmt_is "poker: $stale" "$l"; }; then
       CF_SETTLE="${CF_SETTLE}approve:release"$'\n'; any=1; continue
+    fi
+    if [ -n "$await" ] && _card_fmt_is "$await" "$l"; then
+      q="${l#"${await%%"%s"*}"}"; CF_SETTLE="${CF_SETTLE}row:${q%% *}"$'\n'; any=1; continue
     fi
     if [ -n "$rfact" ]; then
       case "$l" in "bionic: commit refused — $rfact "*) reading=1; any=1; continue ;; esac

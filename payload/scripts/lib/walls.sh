@@ -1722,12 +1722,13 @@ matrix_row_owes() {
   return 0
 }
 
-# matrix_unruled <plan> <step> [head] -> the AC id of each criterion that owes a ruling or a verdict
+# matrix_unruled <plan> <step> [head] [awaiting] -> the AC id of each criterion that owes a ruling or a verdict
 # at <step>, one per line, the reader's order; nothing at `single` rigor. The judge's read of the
 # matrix at the advance to 8: the same readers and the same `matrix_row_owes` the arm walks,
 # so the advance and the commit after it cannot disagree on a row. <head> is the one the evidence
 # review is read at, for a criterion no older table holds. Needs lib/run.sh, lib/units.sh and
-# lib/proof.sh loaded, as every caller of this file has them. 2 when the run's facts could not be read.
+# lib/proof.sh loaded, as every caller of this file has them. 2 when the run's facts could not be read. A fourth argument,
+# any word, prints only those that also await their person (`matrix_row_awaits`, fed as the commit gate feeds it).
 matrix_unruled() {
   local PLAN="$1" MATRIX_CELLS MATRIX_BLOCKS MATRIX_TASKS MATRIX_TASKS_OF RIGOR ac tier status ev aud conf waiver defer
   RIGOR="$(plan_frontmatter_get "$1" rigor)"
@@ -1736,8 +1737,9 @@ matrix_unruled() {
   while IFS=$'\037' read -r ac tier status ev aud conf waiver; do
     [ -n "$ac" ] || continue
     defer=0; matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$ac")" "$2" "$status" "$(matrix_owing_open "$PLAN" "$ac")" && defer=1
-    matrix_row_owes "$2" "$tier" "$status" "$aud" "$conf" "$waiver" "$defer" >/dev/null \
-      && printf '%s\n' "$ac"
+    matrix_row_owes "$2" "$tier" "$status" "$aud" "$conf" "$waiver" "$defer" >/dev/null || continue
+    [ -z "${4:-}" ] || matrix_row_awaits "$tier" "$status" "$aud" "$conf" "$waiver" || continue
+    printf '%s\n' "$ac"
   done <<MATRIX_ROWS
 $(matrix_table_rows)
 MATRIX_ROWS
