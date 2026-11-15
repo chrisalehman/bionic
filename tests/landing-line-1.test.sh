@@ -1225,23 +1225,23 @@ expect_eq "STATUS-9 a task line inside the window counts, a status,task line too
 section "§ORDER: the reader rule and the numbers re-renderer read one publish order"
 # Whether a row was written after the release is publish order: lib/units.sh `_units_publish_order` places each landed
 # row at its last landing line, and lib/line.sh `_line_release_landed` names the release row the numbers re-renderer
-# reads as landed. Both read the record through one parser, a `published` event and an older `landed:` header alike.
-# The record here lands the release row D7 by a header alone and T2 by an event. fails-when: one reader is changed and
+# reads as landed. Both read the run's log through one parser, and the log here holds two landings alone: the release
+# row D7's and T2's, each its `published` event. fails-when: one reader is changed and
 # the other is not: the two disagree on the release row, or on which line came first.
-RW8="$(LL_WORLD_AT=14 ll_world)"; WW_P8="$(ll_plan "$RW8")"; mkdir -p "$(dirname "$(ll_rec "$RW8")")"   # an older record's landed: header
-awk '{ print } /^\| T2 \| 4 \| build / { print "| D7 | 7 | doc | the release | wx-D7 | — | | 10 | REQ-1 | CHANGELOG.md | — | | landed |" }' \
+RW8="$(ll_world)"; WW_P8="$(ll_plan "$RW8")"
+awk '{ print } /^\| T2 \| 4 \| build / { print "| D7 | 7 | doc | the release | — | 10 | REQ-1 | CHANGELOG.md | — |" }' \
   "$WW_P8" > "$WW_P8.o" && mv "$WW_P8.o" "$WW_P8"
 ww_order() {  # <root> -> `<units' order, sorted>|<line's landed release row>`
   ( _wt_units_load || exit 9
     printf '%s|%s' "$(_units_publish_order "$(ll_plan "$1")" "$(units_rows "$(ll_plan "$1")")" | tr ' ' '\n' | LC_ALL=C sort | paste -sd' ' -)" \
       "$(_line_release_landed "$(ll_plan "$1")" "$(ll_log "$1")" 2>/dev/null)" )
 }
-{ printf 'landed: row=D7 merge=%s at=2026-10-20T10:00:00Z\n' "$WW_D"; ww_pub T2 queue 2026-10-20T11:00:00Z; } > "$(ll_rec "$RW8")"
+{ ww_pub D7 queue 2026-10-20T10:00:00Z; ww_pub T2 queue 2026-10-20T11:00:00Z; } > "$(ll_log "$RW8")"
 expect_eq "ORDER-0 precondition: the plan holds the release row D7, a doc row at step 7, landed" "D7	7	doc" \
   "$( ( _wt_units_load && units_rows "$WW_P8" ) | awk -F'\t' '$1 == "D7" { print $1 "\t" $2 "\t" $3 }')"
-expect_eq "ORDER-1 both readers read the release row's header as its landing, and units places it before T2's event" \
+expect_eq "ORDER-1 both readers read the release row's event as its landing, and units places it before T2's" \
   "D7=1 T2=2|D7" "$(ww_order "$RW8")"
-{ ww_pub T2 queue 2026-10-20T09:00:00Z; printf 'landed: row=D7 merge=%s at=2026-10-20T10:00:00Z\n' "$WW_D"; } > "$(ll_rec "$RW8")"
+{ ww_pub T2 queue 2026-10-20T09:00:00Z; ww_pub D7 queue 2026-10-20T10:00:00Z; } > "$(ll_log "$RW8")"
 expect_eq "ORDER-2 …and with the two lines swapped, T2 first, both still name D7 and units places T2 first" \
   "D7=2 T2=1|D7" "$(ww_order "$RW8")"
 # ---------------------------------------------------------------------------

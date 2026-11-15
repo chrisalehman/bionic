@@ -1003,13 +1003,13 @@ wt_import_fn() {  # <name> -> the function, defined here, read out of the landin
   eval "$body"
 }
 for f in ll_world ll_launch ll_carrier_env; do wt_import_fn "$f" || no "($f is read out of landing-line.prelude.sh)" "absent"; done
-ll_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }
+ll_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }; ll_log() { printf '%s/.bionic/docs/record/wave-x/run.log' "$1"; }
 ll_carrier_env
-sc_spawn() {  # <root> <row> <sid> -> the tree `create --for wx-<row>` made under <sid>, its plan row and one commit of its own
+sc_spawn() {  # <root> <row> <sid> -> the tree `create --for wx-<row>` made under <sid>, its plan row, its dispatch and one commit of its own
   local r="$1" t="$2" s="$3" p out tree
   p="$(ll_plan "$r")"
-  printf '| %s | 4 | build | row %s | wx-%s | — | | 10 | REQ-1 | %s.txt | .worktrees/%s | | active |\n' "$t" "$t" "$t" "$t" "$t" >> "$p"
-  awk -v t="$t" '{ print } /^- T2: active$/ { print "- " t ": active" }' "$p" > "$p.n" && mv "$p.n" "$p"
+  printf '| %s | 4 | build | row %s | — | 10 | REQ-1 | %s.txt | — |\n' "$t" "$t" "$t" >> "$p"
+  printf 'run/v1|ev=dispatch|row=%s|name=wx-%s|at=2026-10-04T00:1%s:00Z\n' "$t" "$t" "${t#T}" >> "$(ll_log "$r")"
   mkdir -p "$r/.bionic/docs/record/wave-x/briefs"
   printf '<!-- brief: rendered from row %s for %s; sum %064d; render it again to change it, never edit it -->\n' "$t" "wx-$t" 0 > "$r/.bionic/docs/record/wave-x/briefs/wx-$t.md"
   out="$( cd "$r" && CLAUDE_CODE_SESSION_ID="$s" bash "$SPAWN" create "$(git -C "$r" rev-parse wave/x)" "wt/$t" --for "wx-$t" 2>/dev/null )" || return 1
@@ -1031,7 +1031,7 @@ sc_head() {  # <ready's output> -> its LANDED line's first two words, else its f
 SUCC="33333333-4444-4555-8666-777777777777"     # the successor: no binding, no roster
 SUCC2="44444444-5555-4666-8777-888888888888"    # a successor rebound to the same plan, its roster empty
 
-SC="$(LL_WORLD_AT=14 ll_world)"; SC_P="$(ll_plan "$SC")"   # sc_spawn appends the older table's rows and the state section's lines
+SC="$(ll_world)"; SC_P="$(ll_plan "$SC")"
 SC_T3="$(sc_spawn "$SC" T3 "$WORLD_SID")"; ll_launch "$SC" T3 a.test.sh
 expect_match "(su0) the spawned tree's own record names its plan, its row, its worker and the spawning session" \
   "tree/v1|path=${SC_T3}|plan=${SC_P}|row=T3|worker=wx-T3|spawned-by=${WORLD_SID}|at=*" "$(worktree_tree_record "$SC_T3" 2>/dev/null)"
@@ -1080,7 +1080,7 @@ sc_ready "$SC_T5" "$WORLD_SID"
 expect_eq "(mm2) the same tree from the session bound to its plan lands (exit 0)" "0 LANDED T5" "$SC_RC $(sc_head "$SC_OUT")"
 [ "$SC_RC" = 0 ] || printf '      ready said: %s\n' "$SC_OUT"
 
-SD="$(LL_WORLD_AT=14 ll_world)"; SD_P="$(ll_plan "$SD")"
+SD="$(ll_world)"; SD_P="$(ll_plan "$SD")"
 SD_T3="$(sc_spawn "$SD" T3 "$WORLD_SID")"; ll_launch "$SD" T3 a.test.sh
 # Delivered at current 9, as close-out leaves it; T3 is a fix born of a finding of the review the judge reads failing,
 # the one landing a judged run admits (lib/worktree.sh, THE RUN HAS BEEN JUDGED FOR INTEGRATION), in the shape
@@ -1089,11 +1089,11 @@ SD_H="$(git -C "$SD" rev-parse wave/x)"; SD_B="$(git -C "$SD" rev-parse main)"
 mkdir -p "$SD/.bionic/docs/record/wave-x"
 printf 'reviewed: %s..%s\nquestion: structure\nresult: fail\nscope: piece\n\nfindings: 1\nfinding: 1 S1 off T3.txt:1 the row is wrong\nshown: 1 cat T3.txt\n' \
   "$SD_B" "$SD_H" > "$SD/.bionic/docs/record/wave-x/rev.md"
-SD_H="$SD_H" SD_B="$SD_B" awk '
-  /^working-branch: / && !fm { fm = 1; print; print "rigor: single"; print "scale: task"; print "base-sha: " ENVIRON["SD_B"]; next }
-  /^current: 4$/ { print "current: 9"; print "proved: kind=review head=" ENVIRON["SD_H"] " at=2026-10-20T00:00:00Z evidence=record/wave-x/rev.md question=structure reader=w-rev result=fail scope=piece"; next }
-  /^- T3: active$/ { print "- T3: active — added by task-add at 2026-10-20T00:00:00Z born: review S1 off of=record/wave-x/rev.md#1"; print "- Step 9: closed delivered: 2026-10-24T00:00:00Z"; next }
+SD_B="$SD_B" awk '/^working-branch: / && !fm { fm = 1; print; print "rigor: single"; print "scale: task"; print "base-sha: " ENVIRON["SD_B"]; next }
   { print }' "$SD_P" > "$SD_P.n" && mv "$SD_P.n" "$SD_P"
+printf 'run/v1|ev=%s|at=%s\n' "proof|kind=review|head=$SD_H|evidence=record/wave-x/rev.md|question=structure|reader=w-rev|result=fail|scope=piece" \
+  2026-10-20T00:00:00Z 'born|row=T3|reason=review S1 off|finding=record/wave-x/rev.md#1' 2026-10-20T00:00:00Z \
+  'step|n=9|delivered=2026-10-24T00:00:00Z' 2026-10-24T00:00:00Z >> "$(ll_log "$SD")"
 expect_eq "(mc0) the plan is closed" "closed" "$( . "$REPO/payload/scripts/lib/run.sh" && { run_open "$SD_P" && echo open || echo closed; } )"
 SD_REFS="$(git -C "$SD" for-each-ref --format='%(refname) %(objectname)')"
 sc_ready "$SD_T3" "$SUCC"
@@ -1113,7 +1113,7 @@ section "§HAND: a hand landing writes the person's verdicts before it publishes
 # reads landed, judging the row by those verdicts. T3 is born of the one finding of a failing adversarial review that
 # `proof-add review` registered, which opened the waiver ask.
 # fails-when: the ask stays open after the hand landing's publish, or the verdicts follow the published line.
-HN="$(LL_WORLD_AT=14 ll_world)"; HN_P="$(ll_plan "$HN")"; HN_RD="$HN/.bionic/docs/record/wave-x"; mkdir -p "$HN_RD"
+HN="$(ll_world)"; HN_P="$(ll_plan "$HN")"; HN_RD="$HN/.bionic/docs/record/wave-x"; mkdir -p "$HN_RD"
 HN_T3="$(sc_spawn "$HN" T3 "$WORLD_SID")"
 HN_H="$(git -C "$HN" rev-parse wave/x)"; HN_B="$(git -C "$HN" rev-parse main)"
 # The planner's frontmatter: the rigor and scale the judge deals by, and where the work started, the base an
@@ -1125,8 +1125,7 @@ printf 'reviewed: %s..%s\nquestion: adversarial\nresult: fail\nscope: piece\n\nf
 printf '%s|questions=adversarial\n' "$(roster_row_fixture session="$WORLD_SID" name=w-rev agent_id=a-w-rev subagent_type=bionic:critic \
   launched_at=2026-10-01T00:00:00Z deliverable="$HN_RD/rev.md")" >> "$HN/.bionic/tmp/roster-$WORLD_SID.state"
 HN_PA="$( cd "$HN" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$REPO/hooks/session-poker.sh" proof-add review record/wave-x/rev.md --question adversarial --reader w-rev 2>&1 )"; HN_PARC=$?
-awk '/^- T3: active$/ { print "- T3: active — added by task-add at 2026-10-20T00:00:00Z born: review S1 off of=record/wave-x/rev.md#1"; next } { print }' \
-  "$HN_P" > "$HN_P.n" && mv "$HN_P.n" "$HN_P"
+printf 'run/v1|ev=born|row=T3|reason=review S1 off|finding=record/wave-x/rev.md#1|at=2026-10-20T00:00:00Z\n' >> "$HN_RD/run.log"
 hn_ask() { bash -c '. "$1/roots.sh" && . "$1/owed.sh" && owed_lines "$2" "$3"' _ "$REPO/payload/scripts/lib" "$HN_P" "$HN" 2>/dev/null \
   | awk -F'|' '{ k = s = b = ""; for (i = 2; i <= NF; i++) { if ($i ~ /^key=/) k = substr($i, 5); if ($i ~ /^state=/) s = substr($i, 7); if ($i ~ /^by=/) b = substr($i, 4) } } k == "waive:adversarial" { l = s "|" b } END { print l }'; }
 expect_eq "(hn0) proof-add registers the failing review (exit 0) and its waiver ask is open" "0|open|" "$HN_PARC|$(hn_ask)"
