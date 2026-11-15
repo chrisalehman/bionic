@@ -171,8 +171,8 @@ for t in published run returned ready candidate verdict; do expect_eq "$t: one w
 # The functions that call a type's one writer, each `<file>:<function>`, read over the scratch copy.
 calls() { awk -v t="line_$1_event" -v s="$S/" 'FNR == 1 { f = "-" } match($0, /^[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*\(\)/) { f = substr($0, RSTART, RLENGTH); gsub(/[ \t()]/, "", f) }
   f != t && $0 !~ /^[ \t]*#/ && index($0, t " ") { p = FILENAME; sub(s, "", p); print p ":" f }' $(find "$S/hooks" "$S/payload/scripts" -name '*.sh') | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ $//'; }
-expect_eq "published: the queue's landing, a counted merge, a record row's, a part's and the close's two each call the one writer" \
-  "hooks/poker/line.sh:part_land hooks/poker/line.sh:record_row_land payload/scripts/close-out.sh:act_lands payload/scripts/close-out.sh:co_reviews_publish payload/scripts/lib/line.sh:_line_count_git payload/scripts/lib/line.sh:line_publish" "$(calls published)"
+expect_eq "published: the queue's landing, a counted merge, a record row's, a part's, the close's two and the card's projection each call the one writer" \
+  "hooks/poker/line.sh:part_land hooks/poker/line.sh:record_row_land payload/scripts/card.sh:_card_project payload/scripts/close-out.sh:act_lands payload/scripts/close-out.sh:co_reviews_publish payload/scripts/lib/line.sh:_line_count_git payload/scripts/lib/line.sh:line_publish" "$(calls published)"
 expect_eq "decision and debt: one writer each, the facts library's, and no second" "payload/scripts/lib/proof.sh proof_decision_event|payload/scripts/lib/proof.sh proof_debt_event|" \
   "$(w1 decision)|$(w1 debt)|$(pair decision)$(pair debt)"
 expect_eq "order, handoff and bind: one writer each, the facts library's, and no second" \
