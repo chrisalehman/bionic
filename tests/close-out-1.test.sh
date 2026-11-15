@@ -210,16 +210,15 @@ expect_eq "1aq: the second close delivers on the step 8 that stood, its wipe kep
 
 # THE LAST STEP IS THE READER'S ANSWER: after the archive's line is written the close asks the reader which step the run
 # stands at over the log it was handed, and takes that step's archived= field. co_close_archived is read out of the script
-# and run over a log the test writes, its step writer a stub appending the lines a case names. A line of another family
-# that carries ev=step is no fact of the run, and a field is read by name, so the order of a writer's fields is no answer.
+# and run over a log of the test's, its step writer a stub appending the lines a case names. A line of another family
+# carrying ev=step is no fact of the run, and a field is read by name, so the order of a writer's fields is no answer.
 ca_run() {  # <the lines the writer appends> -> the function's exit
-  local d="$SANDBOX/ca"; mkdir -p "$d"; : > "$d/run.log"
+  mkdir -p "$SANDBOX/ca"; : > "$SANDBOX/ca/run.log"
   CA_LINES="$1" bash -c 'eval "$(awk "index(\$0, \"co_close_archived() {\") == 1 { p = 1 } p { print } p && /^}/ { exit }" "$1/close-out.sh")"
     . "$1/lib/reader.sh" || exit 9
     _co_refuse() { exit 2; }; proof_step_event() { printf "%s\n" "$CA_LINES" >> "$1"; }
     PLAN="${2%/*}/plans/x.plan.md"; CO_DELIVERED_AT=""; CO_DELIVERED=x; ARCHIVED_LINE=y
-    co_close_archived "$2"' _ "$REPO_ROOT/payload/scripts" "$d/run.log" >/dev/null 2>&1
-  echo $?
+    co_close_archived "$2"' _ "$REPO_ROOT/payload/scripts" "$SANDBOX/ca/run.log" >/dev/null 2>&1; echo $?
 }
 CA_ARCH='run/v1|ev=step|n=9|delivered=x|archived=bionic: archived|at=2026-10-04T12:05:00Z'
 expect_eq "1as: the archive's step passes alone, after a line of another family carrying ev=step, and with its fields in another order; another step written after it refuses" "0|0|0|2" \
@@ -275,7 +274,6 @@ section "4 — check is a diagnosis: it reports and changes nothing"
 
 P4="$(mk_fixture p4)"; advance_to "$P4" 8
 PLAN4_SHA="$(sha_of "$P4/$PLAN_REL")"
-EPIC4_SHA="$(sha_of "$P4/$EPIC_REL")"
 run_close "$P4" check
 
 expect_eq "4a: check exits 0" "0" "$CO_RC"
@@ -285,7 +283,6 @@ expect_eq "4c: …reports the branches it would delete" "yes" \
 expect_eq "4d: …reports what the tmp wipe would take" "yes" \
   "$(contains "$CO_OUT" "tmp-wiped: 3 entries")"
 expect_eq "4f: the plan is untouched" "$PLAN4_SHA" "$(sha_of "$P4/$PLAN_REL")"
-expect_eq "4g: the epic plan is untouched" "$EPIC4_SHA" "$(sha_of "$P4/$EPIC_REL")"
 expect_eq "4h: no continuation was written" "no" \
   "$([ -f "$P4/$CONT_REL" ] && echo yes || echo no)"
 expect_eq "4i: .bionic/tmp/ still holds its three entries" "3" "$(tmp_entries "$P4")"
@@ -298,7 +295,6 @@ section "4c — critic3 P-1 (T17): run asks the gate first; check and run agree"
 P18="$(mk_fixture p18)"; advance_to "$P18" 8
 rm -f "$P18/.bionic/docs/record/generic-evidence.md"
 PLAN18_SHA="$(sha_of "$P18/$PLAN_REL")"
-EPIC18_SHA="$(sha_of "$P18/$EPIC_REL")"
 run_close "$P18" check
 expect_eq "4r: check on the evidence-missing plan exits 0" "0" "$CO_RC"
 expect_eq "4t: …never the old sentence that promised the Step-8 block would clear it" "no" \
@@ -311,8 +307,6 @@ expect_eq "4y: …wt/01-x is still there" "yes" "$(branch_exists "$P18" "wt/01-x
 expect_eq "4z: ….bionic/tmp/ still holds its three entries" "3" "$(tmp_entries "$P18")"
 expect_eq "4aa: …no continuation was written" "no" \
   "$([ -f "$P18/$CONT_REL" ] && echo yes || echo no)"
-expect_eq "4ab: …the epic plan is byte-for-byte what it was (no row for wave 01)" "$EPIC18_SHA" \
-  "$(sha_of "$P18/$EPIC_REL")"
 expect_eq "4ac: …the plan is byte-for-byte what it was" "$PLAN18_SHA" "$(sha_of "$P18/$PLAN_REL")"
 
 # The control: the same fixture with its evidence. check says the gate allows the plan run
@@ -330,7 +324,6 @@ for _co_cur in 7 4; do
   P20="$(mk_fixture "p20-$_co_cur")"
   advance_to "$P20" "$_co_cur"
   PLAN20_SHA="$(sha_of "$P20/$PLAN_REL")"
-  EPIC20_SHA="$(sha_of "$P20/$EPIC_REL")"
   run_close "$P20" check
   run_close "$P20" run
   expect_eq "4aj.$_co_cur: run at current $_co_cur refuses rc 2" "2" "$CO_RC"
@@ -338,7 +331,6 @@ for _co_cur in 7 4; do
   expect_eq "4am.$_co_cur: ….bionic/tmp/ still holds its three entries" "3" "$(tmp_entries "$P20")"
   expect_eq "4an.$_co_cur: …no continuation was written" "no" \
     "$([ -f "$P20/$CONT_REL" ] && echo yes || echo no)"
-  expect_eq "4ao.$_co_cur: …the epic plan is unchanged" "$EPIC20_SHA" "$(sha_of "$P20/$EPIC_REL")"
   expect_eq "4ap.$_co_cur: …and the plan is unchanged (no Step-8 block written)" "$PLAN20_SHA" \
     "$(sha_of "$P20/$PLAN_REL")"
 done

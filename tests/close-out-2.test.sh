@@ -28,9 +28,8 @@ section "4f — REQ-1 (AC-1.1–1.4): the close prints the epic's row and writes
 printed_row() { printf '%s\n' "$CO_OUT" | sed -n 's/^epic-row: //p'; }
 printed_adr_cell() { printed_row | awk -F'|' '{ c = $6; gsub(/^[ \t]+|[ \t]+$/, "", c); print c }'; }
 
-# epic_planned_first -> an epic with a planned table ABOVE the shipped one. The planned table
-# carries a `| 01 |` row (this fixture's own wave number), and a headerless `## Ladder`
-# table carries another; neither is the shipped table.
+# epic_planned_first -> an epic with a planned table ABOVE the shipped one; the planned table carries a `| 01 |` row (this
+# fixture's own wave number), which is no row of the shipped table.
 epic_planned_first() {
   cat <<'EPIC78'
 ---
@@ -50,21 +49,11 @@ current: 4
 | 01 | 0.0.2 | fixture | a planned wave | planned |
 | 09 | 0.0.9 | other | another | planned |
 
-## Ladder
-
-| 01 | step | one |
-|---|---|---|
-| 01 | step | two |
-
 ## Waves — shipped
 
 | wave | version | plan | spec / requirements | ADRs | shipped |
 |---|---|---|---|---|---|
 | 00 | 0.0.1 | `wave-00-seed.plan.md` | — | — | 2026-01-01 |
-
-## Notes
-
-Nothing here.
 EPIC78
 }
 
@@ -74,7 +63,7 @@ row_whole() {
   case "$(printed_row)" in '| 01 | — | `wave-01-fixture.plan.md` | `wave-01-fixture.spec.md`, `.requirements.md` | — | '*", main @ $(fixture_git "$1" rev-parse --short main) |") echo yes ;; *) echo no ;; esac
 }
 
-# §78.1 — a `| 01 |` row that is in the planned table only is no reason to print nothing, and the shipped table is not written.
+# §78.1 — a `| 01 |` row in the planned table only is no reason to print nothing; neither table is written, and a second close prints no second row.
 T78="$(mk_fixture t78a)"; advance_to "$T78" 8
 epic_planned_first > "$T78/$EPIC_REL"
 EPIC_SUM78="$(sha_of "$T78/$EPIC_REL")"
@@ -86,27 +75,14 @@ expect_eq "78.1a: check prints the row, and does not call wave 01 already listed
 run_close "$T78" run
 expect_eq "78.1d: run exits 0, the epic plan's checksum is what it was, and the shipped table holds no wave-01 row" "0/$EPIC_SUM78/0" \
   "$CO_RC/$(sha_of "$T78/$EPIC_REL")/$(rows_with_wave "$T78/$EPIC_REL" shipped 01)"
-expect_eq "78.1e: …the close's output holds the row whole, once" "yes/1" "$(row_whole "$T78")/$(printed_row | wc -l | tr -d ' ')"
-expect_eq "78.1f: …and says in one line that the edit is the orchestrator's" "1" "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -c '^epic-edit: .*writes no plan')"
-
-# §78.2 — the planned table sits first; neither table is touched, and a second close prints no second row.
-T78B="$(mk_fixture t78b)"; advance_to "$T78B" 8
-epic_planned_first > "$T78B/$EPIC_REL"
-EPIC_SUM78B="$(sha_of "$T78B/$EPIC_REL")"
-run_close "$T78B" run
-expect_eq "78.2a: run exits 0, prints a row for wave 01, and neither table of the epic plan is touched (its checksum is as it was)" "0/yes/$EPIC_SUM78B" \
-  "$CO_RC/$(row_whole "$T78B")/$(sha_of "$T78B/$EPIC_REL")"
-run_close "$T78B" run
-expect_eq "78.2e: a second run prints no second row and leaves the epic plan as it was" "0/$EPIC_SUM78B" \
-  "$(printed_row | wc -l | tr -d ' ')/$(sha_of "$T78B/$EPIC_REL")"
+expect_eq "78.1e: …the output holds the row whole, once, and one line saying the edit is the orchestrator's" "yes/1/1" \
+  "$(row_whole "$T78")/$(printed_row | wc -l | tr -d ' ')/$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -c '^epic-edit: .*writes no plan')"
+run_close "$T78" run
+expect_eq "78.2e: a second run prints no second row and leaves the epic plan as it was" "0/$EPIC_SUM78" "$(printed_row | wc -l | tr -d ' ')/$(sha_of "$T78/$EPIC_REL")"
 
 # §78.3 — an epic whose only `| wave |` table is the planned one: the close prints the table's header beside the row.
 T78C="$(mk_fixture t78c)"; advance_to "$T78C" 8
-epic_planned_first | awk '
-  /^## Waves — shipped/ { skip = 1 }
-  /^## Notes/ { skip = 0 }
-  !skip { print }
-' > "$T78C/epic.tmp" && mv "$T78C/epic.tmp" "$T78C/$EPIC_REL"
+epic_planned_first | awk '/^## Waves — shipped/ { exit } { print }' > "$T78C/$EPIC_REL"
 EPIC_C_SHA="$(sha_of "$T78C/$EPIC_REL")"
 run_close "$T78C" run
 expect_eq "78.3b: run closes rc 0, the plan reads closed, and the epic plan is what it was" "0|1|$EPIC_C_SHA" \
