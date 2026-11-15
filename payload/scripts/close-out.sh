@@ -523,7 +523,7 @@ act_merge() {
 # The rows the merge lands are the plan's open (pending or active) `## Tasks` rows of kind `integrate` (the merge
 # itself) and `close` (the row units.sh's `merge` read binds to that merge); a build row still open is not landed
 # here, because nothing showed its work on the branch. Each is landed by one `published` event at the integration
-# head, of the close kind and by close-out, through the line's writer (lib/line.sh `line_event`); no cell is written.
+# head, of the close kind and by close-out, through the line's writer (lib/line.sh `line_published_event`); no cell is written.
 # The session must be bound to this plan, and `run` refuses before its first act when it is not. Act 3 keeps the
 # engaged marker for every verb a refusal later in the tail leaves to the person; the marker goes last.
 LANDS_LINE=""
@@ -560,7 +560,7 @@ act_lands() {  # <rows> -> each landed by one published event at the integration
     || _co_refuse "the integration branch '$INTEGRATION' names no commit to land rows $rows at"
   co_line_load || _co_refuse "rows $rows cannot be landed: $CO_LIB/line.sh, the landing record's writer, cannot be loaded"
   for id in $rows; do
-    line_event "$PLAN" published "row=$id" "commit=$ih" kind=close by=close-out why=merged >/dev/null \
+    line_published_event "$PLAN" "row=$id" "commit=$ih" kind=close by=close-out why=merged >/dev/null \
       || _co_refuse "the landing of $id cannot be written to the run's log — rows before it are landed; run close-out again"
   done
   # The readback: the act's own result, asked of the units helper rather than assumed from the writes.
@@ -822,7 +822,7 @@ co_reviews_publish() {  # -> the branch at CO_RV_COMMIT and its close-out event 
     CO_RV_LINE="not published — $WORKING could not be moved from ${CO_RV_BASE:0:12} to ${CO_RV_COMMIT:0:12}"
     return 1
   fi
-  line_event "$PLAN" published part=reviews "commit=$CO_RV_COMMIT" "branch=$WORKING" by=close-out && return 0
+  line_published_event "$PLAN" part=reviews "commit=$CO_RV_COMMIT" "branch=$WORKING" by=close-out && return 0
   CO_RV_LINE="$WORKING moved to ${CO_RV_COMMIT:0:12}, and its published event (part=reviews commit=$CO_RV_COMMIT branch=$WORKING) could not be appended to the run's log $(reader_log "$PLAN" 2>/dev/null || printf 'of %s' "$PLAN")"
   return 1
 }
