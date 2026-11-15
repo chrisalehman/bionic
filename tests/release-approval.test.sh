@@ -485,6 +485,9 @@ fc_typed 'frame only'
 poke "$RFC" reply "$FC_WD"
 expect_eq "REPLY-8 words the user never typed: refused, exit 1, before any verb runs, saying no prompt holds them" "1|same|yes" \
   "$RC|$(cmp -s "$TMPROOT/fc-before" "$PFC" && echo same || echo changed)|$(fc_has "$OUT" 'stand in no prompt the user typed')"
+said_as sdk "$RFC" "$FC_WD"; poke "$RFC" reply "$FC_WD"
+expect_eq "REPLY-8b …and the same words in a prompt a program sent: refused alike, the plan byte-identical" "1|same|yes" \
+  "$RC|$(cmp -s "$TMPROOT/fc-before" "$PFC" && echo same || echo changed)|$(fc_has "$OUT" 'stand in no prompt the user typed')"
 fc_typed "$FC_WD" "$FC_WR"
 s57_commit "$RFC" CHANGELOG.md 'a later release line' >/dev/null
 poke "$RFC" reply "$FC_WD"
@@ -1031,7 +1034,7 @@ section "§STALE-NAME: an approval of any name the head has moved past is given 
 FC_SN_ORD='s/^\(| T3 | 8 | integrate | merge into main | approval:merge\) |/\1, approval:step4 |/'
 fc_plan "$FC_GOOD" "$FC_SN_ORD"
 fc_sn_heads() { fc_appr step4 | sed -n 's/.*head=\([0-9a-f]*\).*/\1/p' | paste -sd'|' -; }
-poke "$RFC" approve step4 'go ahead'
+said_as typed "$RFC" 'go ahead' 'go ahead again'; poke "$RFC" approve step4 'go ahead'
 expect_eq "SN-0 setup: the first approve step4 is recorded at the head (exit 0)" "0|$FC_R" "$RC|$(fc_sn_heads)"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 FC_X="$(s57_commit "$RFC" lib/x.sh 'T5: the fix')"

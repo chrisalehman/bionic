@@ -95,7 +95,8 @@
 # teammate's message and another session's message (no origin, or `origin.kind: peer`), a hook's
 # added context and a system reminder (attachments, `isMeta` entries, `system` entries), the
 # orchestrator's own text (`assistant`), a compaction summary, a dispatched agent's prompt
-# (`isSidechain`), and any block pasted into a typed prompt (`<pasted_content id="…">` to
+# (`isSidechain`), a prompt a program sent (print mode and the SDK write `promptSource` and `turnOrigin: sdk`,
+# `entrypoint: sdk-cli`, and no origin: the person ruled it is not their word), and any block pasted into a typed prompt (`<pasted_content id="…">` to
 # `</pasted_content id="…">`; the CLI closes the block WITH the id, wave-28 T74), which carries
 # someone's words but not the user's own. Each entry is parsed as JSON, so a word
 # inside a string can never forge a key; a line torn mid-write is skipped, not fatal.
