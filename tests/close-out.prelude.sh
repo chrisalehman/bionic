@@ -305,7 +305,7 @@ co_at15() { /usr/bin/grep -qx 'canonical_sdlc_version: 15' "$1/$PLAN_REL"; }
 # reached Step 7 has it (wave-27 T14; D3): the working branch checked out in a linked worktree
 # beside the project (`<project>-wave`), and the floor and every reading lib/proof.sh `facts_owed`
 # deals the plan's rigor and scale, each `result=pass`, at that head. The lines are the product's
-# (`proof_line` placed by `proof_add_line`, the pair `proof-add` writes through); session-poker
+# (`proof_line`, placed at 14 as a run held it, `plan_fixture_state_add`); session-poker
 # §56 holds the verb that writes them, and close-out and the gate read plan text whatever wrote
 # it. `close-out.sh run` and `check`, and `current 8`, refuse unless `facts_state` holds these.
 # A plan whose working branch is not a branch here gets nothing: there is no head to hold.
@@ -315,10 +315,12 @@ plant_facts() {
   wb="$(sed -n 's/^working-branch: //p' "$plan" | head -1)"
   h="$(fixture_git "$p" rev-parse --verify -q "refs/heads/${wb}^{commit}" 2>/dev/null)" || return 0
   # A REAL BASE (the T45 ruling): the judge deals no reading on a plan with no base-sha naming a
-  # commit, so the run's base, the root commit the working branch grew from, is written first.
+  # commit, so the run's base, the root commit the working branch grew from, is written first, in the header, where
+  # the judge reads it: after its working-branch:, or last in it on a page at 14, whose branch is in its state section.
   /usr/bin/grep -q '^base-sha:' "$plan" || {
-    sed "s/^working-branch: .*/&\\
-base-sha: $(fixture_git "$p" rev-list --max-parents=0 "$wb" | head -1)/" "$plan" > "$plan.b" && mv "$plan.b" "$plan"; }
+    awk -v b="base-sha: $(fixture_git "$p" rev-list --max-parents=0 "$wb" | head -1)" 'NR == 1 && $0 == "---" { h = 1; print; next }
+      h && $0 == "---" { if (!d) print b; d = 1; h = 0 } { print } h && !d && /^working-branch: / { print b; d = 1 }' \
+      "$plan" > "$plan.b" && mv "$plan.b" "$plan"; }
   fixture_git "$p" worktree list --porcelain 2>/dev/null | grep -qxF "branch refs/heads/$wb" \
     || fixture_git "$p" worktree add -q "$p-wave" "$wb" >/dev/null 2>&1
   bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
@@ -330,8 +332,9 @@ base-sha: $(fixture_git "$p" rev-list --max-parents=0 "$wb" | head -1)/" "$plan"
             *) continue ;;
           esac
           if [ "$4" = 15 ]; then f="${l#proved: }"; LOG_AT=2026-10-04T12:00:00Z proof_event "$2" ${f/ at=2026-10-04T12:00:00Z/}
-          else proof_add_line "$2" "$l" > "$2.pf" && mv "$2.pf" "$2"; fi
-        done' _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h" "$(/usr/bin/grep -qx 'canonical_sdlc_version: 15' "$plan" && echo 15)"
+          else . "$5" && plan_fixture_state_add "$2" "$l"; fi
+        done' _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h" "$(/usr/bin/grep -qx 'canonical_sdlc_version: 15' "$plan" && echo 15)" \
+    "$REPO_ROOT/tests/lib/plan-fixture.sh"
 }
 
 # add_unreached_branch <project> -> plants `wt/01-y` carrying one commit the working branch

@@ -95,6 +95,19 @@ plan_fixture_log() {
   printf '%s/record/%s/run.log' "${d%/plans}" "${n%.plan.md}"
 }
 
+# plan_fixture_state_add <plan> <line> -> <line> placed in the plan's unfenced `## SDLC State`, where a run at 14 held
+#   its proofs: after the section's last proved, waived, deferred, moved or inherited line, else its last non-blank line,
+#   so a line's place is its age. 1, the plan unchanged, when it has no such section. The line goes in through the
+#   environment, not `-v`, which would read a backslash in a waiver's reply as an escape.
+plan_fixture_state_add() {
+  PF_LINE="$2" awk '{ row[NR] = $0 } /^[[:space:]]*```/ { f = !f; next } f { next }
+    /^##[[:space:]]/ { s = ($0 ~ /^##[[:space:]]+SDLC State/); if (s) { seen = 1; n = NR }; next }
+    s && /^(proved|waived|deferred|moved|inherited):[[:space:]]/ { p = NR }
+    s && /[^[:space:]]/ { n = NR }
+    END { if (!seen) exit 1; for (i = 1; i <= NR; i++) { print row[i]; if (i == (p ? p : n)) print ENVIRON["PF_LINE"] } }' "$1" > "$1.pf" \
+    && mv "$1.pf" "$1" || { rm -f "$1.pf"; return 1; }
+}
+
 # _plan_fixture_rows <log> <step> [<row>...] -> each row, given in PLAN_FIXTURE_HEADER's thirteen cells, printed in the
 #   nine a version-15 row holds; the log is written whole with what the other cells and the state section said: a step
 #   event for each step to <step> (step 9 not delivered, as the state section's open 9 was), the plan's approval (the

@@ -63,7 +63,7 @@ S56_B="$(git -C "$R56" rev-parse HEAD)"
 P56="$(SP_PLAN_AT=14 s42_plan "$R56" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${S56_B:0:8}
   branch: wave/01-fixture")"
-awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P56" > "$P56.tmp" && mv "$P56.tmp" "$P56"
+awk -v b="${S56_B:0:8}" 'NR == 2 { print "base-sha: " b } { print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P56" > "$P56.tmp" && mv "$P56.tmp" "$P56"
 s42_builds_landed "$P56"  # whole reads are registered here, so no build row is open (T45)
 ( cd "$R56" && git add -f "$P56" && git commit -qm wb \
   && git worktree add -q -b wave/01-fixture "$R56/.worktrees/01-fixture" "$S56_B" ) >/dev/null 2>&1
@@ -319,7 +319,7 @@ section "Section 57 §JUDGE §WHOLE §WAIVE: facts_state says, per owed fact, wh
 # through the verb transaction, at the working head.
 #
 # FIXTURE FIDELITY. The fact lines are written by the production writer, proof.sh `proof_line`
-# placed by `proof_add_line`, and waivers by `proof_waiver_line`, not by the verb: §56 holds the
+# placed as a run at 14 held it (`plan_fixture_state_add`), and waivers by `proof_waiver_line`, not by the verb: §56 holds the
 # verb's admission of a reading, and the judge reads plan text whatever wrote it. 57t registers
 # through the verb itself. The working branch's commits are real: two code commits, one commit
 # under the docs root alone, one code commit. The 57t roster row carries `questions=` appended by
@@ -332,11 +332,10 @@ S57_B="$(git -C "$R57" rev-parse HEAD)"
 P57="$(SP_PLAN_AT=14 s42_plan "$R57" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${S57_B:0:8}
   branch: wave/01-fixture")"
-awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P57" > "$P57.tmp" && mv "$P57.tmp" "$P57"
+awk -v b="${S57_B:0:8}" 'NR == 2 { print "base-sha: " b } { print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P57" > "$P57.tmp" && mv "$P57.tmp" "$P57"
 ( cd "$R57" && git add -f "$P57" && git commit -qm wb \
   && git worktree add -q -b wave/01-fixture "$R57/.worktrees/01-fixture" "$S57_B" ) >/dev/null 2>&1
 S57_WT="$R57/.worktrees/01-fixture"
-# HOISTED to tests/session-poker.prelude.sh: s57_commit — Section 64, Sections 66–68, §SEV, §RC-DEFER and §PASS-KEY commit with it.
 S57_C1="$(s57_commit "$S57_WT" lib/a.sh C1)"
 S57_C2="$(s57_commit "$S57_WT" lib/a.sh C2)"
 S57_C3="$(s57_commit "$S57_WT" .bionic/docs/record/wave-01-fixture/note.md C3)"
@@ -344,9 +343,7 @@ S57_C4="$(s57_commit "$S57_WT" lib/b.sh C4)"
 cp "$P57" "$TMPROOT/s57-clean"
 L57="$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "${S57_LIB%/*}" "$P57")"
 s57_reset() { cp "$TMPROOT/s57-clean" "$P57"; rm -f "$L57"; }
-s57_add() {  # <plan> <line> -> the line placed by the production placer
-  bash -c '. "$1" && proof_add_line "$2" "$3"' _ "$S57_LIB" "$1" "$2" > "$1.new" && mv "$1.new" "$1"
-}
+s57_add() { plan_fixture_state_add "$1" "$2"; }  # <plan> <line> -> the line placed as a run at 14 held it
 s57_fact() {  # <question> <head> <result> <scope> [<plan>] -> a reading line, its evidence named after it
   s57_add "${5:-$P57}" "$(bash -c '. "$1" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" "$4" w-read "$5" "$6"' \
     _ "$S57_LIB" "$2" "record/wave-01-fixture/$1-$3-$4.md" "$1" "$3" "$4")"
@@ -529,12 +526,13 @@ R57T="$(make_repo s57-task)"; ( cd "$R57T" && git commit -q --allow-empty -m ini
 S57T_B="$(git -C "$R57T" rev-parse HEAD)"
 P57T="$R57T/.bionic/docs/plans/epic-99-fixture/task-01-fixture.plan.md"
 # THE ONE TABLE AT TASK SCALE (wave-31 T24; REQ-1, D2): tests/lib/plan-fixture.sh's plan at
-# `scale: task`, `current: 4`, one row in flight. Its base is the Step-4 block's `base-sha:`, where
-# the one shape carries it at either scale (A-T24-12); with none, a first reading is refused and the
+# `scale: task`, `current: 4`, one row in flight. Its base is the header's `base-sha:`, the Step-4 block's
+# value, where the judge reads it at either scale; with none, a first reading is refused and the
 # judge exits 2 (section 63 pins that twin, its Step-4 key empty).
 s57t_task_plan() {  # <plan> <Step-4 base-sha value, or "" for the key alone> -> the plan, with the run's branch and the row's line
   plan_fixture --at 14 "$1" task "| T1 | 4 | build | the fix | — | — | — | 30 | REQ-1 | lib/fix.sh | — | — | active |" > /dev/null || return 1
   S57T_BASE="$2" awk '
+    NR == 2 && ENVIRON["S57T_BASE"] != "" { print "base-sha: " ENVIRON["S57T_BASE"] }
     /^  base-sha: / { print "  base-sha:" (ENVIRON["S57T_BASE"] != "" ? " " ENVIRON["S57T_BASE"] : ""); next }
     { print }
     /^approved-by: / { print "working-branch: task/01-fixture"; print "- T1: the fix, in .worktrees/01-task" }' \
@@ -613,7 +611,7 @@ S58_C3="$(git -C "$R58/.worktrees/01-fixture" rev-parse HEAD~1)"; S58_C4="$(git 
 P58="$(SP_PLAN_AT=14 s42_plan "$R58" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${S58_C1:0:8}
   branch: wave/01-fixture")"
-awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P58" > "$P58.tmp" && mv "$P58.tmp" "$P58"
+awk -v b="${S58_C1:0:8}" 'NR == 2 { print "base-sha: " b } { print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P58" > "$P58.tmp" && mv "$P58.tmp" "$P58"
 s42_builds_landed "$P58"  # whole reads are registered here, so no build row is open (T45)
 ( cd "$R58" && git add -f "$P58" && git commit -qm wb ) >/dev/null 2>&1
 S58_REC="$R58/.bionic/docs/record/wave-01-fixture"; mkdir -p "$S58_REC"
@@ -829,7 +827,6 @@ section "Section 59 §RANGE-Q: the tick offers each read row its own range, and 
 S59_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 R59="$(make_repo s59-range-q)"; new_roster "$R59"; ( cd "$R59" && git commit -q --allow-empty -m init )
 S59_RS="$(roster_of "$R59")"
-# HOISTED to tests/session-poker.prelude.sh: S59_REL — the hoisted s59w_q names the record directory with it.
 s59_row() {  # <name> <type> <status> <questions> <deliverable> <files> -> one row appended (§58's lineage shape)
   printf '%s|questions=%s\n' "$(roster_row_fixture session="$SID" name="$1" agent_id="a-$1" subagent_type="$2" \
     status="$3" deliverable="$5" files="$6")" "$4" >> "$S59_RS"
@@ -857,8 +854,8 @@ s59_read() {  # <question> <head> <minute> <reader> -> a reading's proof line
     "$2" "$3" "$1" "$1" "$4"
 }
 awk -v l1="$(s59_read adversarial "$S59_A" 01 w-crit)" -v l2="$(s59_read structure "$S59_B" 02 w-crit)" \
-    -v l3="$(s59_read evidence "$S59_B" 03 w-aud)" '
-  /^current: / && !wb { print; print "working-branch: wave/01-fixture"; print l1; print l2; print l3; wb = 1; next }
+    -v l3="$(s59_read evidence "$S59_B" 03 w-aud)" -v b="$(sed -n 's/^  base-sha: //p' "$P59")" '
+  NR == 2 { print "base-sha: " b } /^current: / && !wb { print; print "working-branch: wave/01-fixture"; print l1; print l2; print l3; wb = 1; next }
   /^- T5: / { print "- T3: the evidence read — record/wave-01-fixture/ev.md"; print "- T4: the adversarial and structure read — record/wave-01-fixture/adv.md" }
   /^\| id \| step \|/ { intab = 1
     print "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |"
@@ -944,12 +941,8 @@ rm -f "$R59/.bionic/tmp/tick-digest-$SID.state"
 poke_pressure "$R59" 8192 1.0 tick
 expect_eq "59e4 …and past a landing D the tick offers T3 again" "yes" "$(s48_fill_has T3)"
 
-# ---------- review pass 17 F1 (blocker) and F2 through the real tick (wave-27 T43) ----------
-# HOISTED to tests/session-poker.prelude.sh: s59_world — §60's world, which §LINE-TELL and §REPORT-RTL build, is built on it.
 S59W_T1="| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |  |"
-# HOISTED to tests/session-poker.prelude.sh: S59W_T5 — the hoisted s60_world plants the floor row with it.
 S59W_BARE="| T3 | 6 | review | the bare pass, reads empty | critic | — | 30 | REQ-1 | $S59_REL/review.md | — | — | pending |  |"
-# HOISTED to tests/session-poker.prelude.sh: s59w_q — the hoisted s60_world plants a read row with it.
 s59w_bare() { printf 'proved: kind=review head=%s at=2026-10-04T09:00:00Z evidence=record/wave-01-fixture/review.md' "$1"; }
 # F1: the bare T3 above the adversarial row T4; adversarial read at A, the bare proof at C, head C.
 s59_world s59-f1 "$(s59_read adversarial @A 01 w-crit)

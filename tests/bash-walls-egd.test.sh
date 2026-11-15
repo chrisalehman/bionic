@@ -566,7 +566,7 @@ printf 'a\n' > "$PR_R/a.sh"; git -C "$PR_R" add a.sh; git -C "$PR_R" commit -qm 
 PC_BASE="$(git -C "$PR_R" rev-parse HEAD)"
 printf 'prose: CONTEXT.md, scripts/perf/\n' > "$PR_R/.bionic/config.yaml"
 PC_FLOOR="$(bash -c '. "$1" && proof_floor_line "$2" 2026-10-12T11:00:00Z record/w/floor.log ""' _ "$EG6_LIB" "$PC_BASE" 2>/dev/null)"
-{ printf -- '---\nrigor: single\nscale: task\ncurrent: 6\n---\n\n## SDLC State\n\nworking-branch: wave/01-prose\n'
+{ printf -- '---\nrigor: single\nscale: task\ncurrent: 6\nbase-sha: %s\n---\n\n## SDLC State\n\nworking-branch: wave/01-prose\n' "$PC_BASE"
   printf -- '- Step 4: dispatched\n  base-sha: %s\n%s\n' "$PC_BASE" "$PC_FLOOR"; } > "$PR_R/.bionic/docs/plans/p.plan.md"
 pc_floor() {  # <head> -> the regression line `current 8 --check` prints, the judge's facts_state at <head>, its exit dropped
   git -C "$PR_R" update-ref refs/heads/wave/01-prose "$1"

@@ -54,7 +54,7 @@ SEV_B="$(git -C "$RSEV" rev-parse HEAD)"
 PSEV="$(SP_PLAN_AT=14 s42_plan "$RSEV" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${SEV_B:0:8}
   branch: wave/01-fixture")"
-awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PSEV" > "$PSEV.tmp" && mv "$PSEV.tmp" "$PSEV"
+awk -v b="${SEV_B:0:8}" 'NR == 2 { print "base-sha: " b } { print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PSEV" > "$PSEV.tmp" && mv "$PSEV.tmp" "$PSEV"
 s42_builds_landed "$PSEV"
 ( cd "$RSEV" && git add -f "$PSEV" && git commit -qm wb \
   && git worktree add -q -b wave/01-fixture "$RSEV/.worktrees/01-fixture" "$SEV_B" ) >/dev/null 2>&1
@@ -64,7 +64,6 @@ SEV_DIR="$RSEV/.bionic/docs/record/wave-01-fixture"; mkdir -p "$SEV_DIR"
 SEV_RECS="r-ok r-nosev r-noreach r-s5 r-maybe r-count r-none r-twice r-where r-pri-bad r-pri-ok
 t-S1-on t-S1-off t-S2-on t-S2-off t-S3-on t-S3-off t-S4-on t-S4-off
 d-fix-flag d-defer-fail d-none-flag d-none-pass sh-dash sh-noshown sh-unsure sh-defer-unsure c-fix c-later"
-SEV_OLDRECS="o-fail o-findings o-nopush"
 sev_files() { local o="" n; for n in $1; do o="${o:+$o,}.bionic/docs/record/wave-01-fixture/$n.md"; done; printf '%s' "$o"; }
 SEV_RS="$(roster_of "$RSEV")"; new_roster "$RSEV"
 roster_row_fixture session="$SID" name=implementor agent_id=a-implementor subagent_type=implementor >> "$SEV_RS"
@@ -232,7 +231,6 @@ sev_st() {  # <file> <result> <answer for the first id> <line>... -> a structure
     for l in "$@"; do printf '%s\n' "$l"; done; } > "$f"
 }
 sev_stread() { bash -c '. "$1"; proof_reading "$2" structure "$3" 1; echo " rc=$?"' _ "$SEV_LIB" "$SEV_DIR/$1.md" "$SEV_CK" 2>/dev/null; }
-SEV_ID1="$(printf '%s\n' "$SEV_IDS" | head -1)"
 sev_st st-agree fail FAIL "findings: 1" "finding: 1 S2 on lib/a.sh:5 the core path is wrong" "shown: 1 bash lib/a.sh"
 expect_regex "SEV-st1 a FAIL check beside a finding to fix agrees: the reading reads as fail" "^fail piece [0-9a-f]+ rc=0$" "$(sev_stread st-agree)"
 sev_st st-failcheck fail FAIL "findings: 1" "finding: 1 S3 on - only a side path"
@@ -309,7 +307,7 @@ expect_absent "SEV-tick3 …and an old check: line, read by nothing since wave-3
 # The plan moves to current: 7 and every other fact it owes is planted at C1 by the production
 # placer (§61's way); the adversarial piece fact is then a reading registered through the verb, so
 # what the judge reads is the result the findings derived.
-sev_put() { bash -c '. "$1" && proof_add_line "$2" "$3"' _ "$SEV_LIB" "$PSEV" "$1" > "$PSEV.new" && mv "$PSEV.new" "$PSEV"; }
+sev_put() { plan_fixture_state_add "$PSEV" "$1"; }
 sev_fact() {  # <kind> <question> <scope>
   sev_put "$(bash -c '. "$1" && proof_line "$2" "$3" 2026-10-06T12:00:00Z "$4" "$5" w-read pass "$6"' \
     _ "$SEV_LIB" "$1" "$SEV_C1" "record/wave-01-fixture/planted-$2-$3.md" "$2" "$3")"
@@ -551,7 +549,6 @@ printf '%s\n' "# assumptions — wave-01-fixture" "" \
   "- A-orch-1 (by hand): adopt carries open rows only, so the readers of a re-keyed session are orphaned." \
   'debt: hole adopt-orphans hooks/session-poker.sh:2846, payload/scripts/lib/units.sh:2112' \
   "- A-orch-2: a second assumption, prose only." > "$DBT_ASM"
-DBT_HL='adopt-orphans | hole | hooks/session-poker.sh:2846, payload/scripts/lib/units.sh:2112 | raised-by record/wave-01-fixture/assumptions.md | touches 0 | —'
 expect_false "DEBT-H0 precondition: the run has no ledger yet, and the record carries no reviewed: line" \
   test -e "$DBT_LOG" -o -n "$(/usr/bin/grep '^reviewed:' "$DBT_ASM")"
 poke "$RSEV" debt add record/wave-01-fixture/assumptions.md "$PSEV"
@@ -627,7 +624,7 @@ VG_B="$(git -C "$RVG" rev-parse HEAD)"
 PVG="$(SP_PLAN_AT=14 s42_plan "$RVG" 5 "  worktree: .worktrees/01-fixture
   base-sha: ${VG_B:0:8}
   branch: wave/01-fixture")"
-awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
+awk -v b="${VG_B:0:8}" 'NR == 2 { print "base-sha: " b } { print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
 s42_builds_landed "$PVG"
 ( cd "$RVG" && git add -f "$PVG" && git commit -qm wb \
   && git worktree add -q -b wave/01-fixture "$RVG/.worktrees/01-fixture" "$VG_B" ) >/dev/null 2>&1
@@ -1092,7 +1089,7 @@ LV_P="$(vc_plan "$LV" \
   "| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | lib/a.sh | landed | — | — |" \
   "| T11 | 6 | review | the adversarial review | w-T11 | — | 30 | REQ-1 | .bionic/docs/$LV_RD/live-adversarial.md | active | live:head:adversarial | .bionic/docs/$LV_RD/live-adversarial.md |" \
   "| T12 | 6 | review | the structure review | w-T12 | — | 30 | REQ-1 | .bionic/docs/$LV_RD/live-structure.md | active | live:head:structure | .bionic/docs/$LV_RD/live-structure.md |")"
-sed -i.bak "s/base-sha: abc1234/base-sha: $LV_BASE/" "$LV_P" && rm -f "$LV_P.bak"
+awk -v b="$LV_BASE" 'NR == 2 { print "base-sha: " b } { sub(/base-sha: abc1234/, "base-sha: " b); print }' "$LV_P" > "$LV_P.t" && mv "$LV_P.t" "$LV_P"
 ( cd "$LV" && git add -f "$LV_P" && git commit -qm base-sha ) >/dev/null 2>&1
 LV_H="$(git -C "$LV" rev-parse main)"
 for lv_q in evidence adversarial structure; do

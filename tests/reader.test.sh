@@ -614,7 +614,7 @@ RF="$(make_repo ask-doors)"; ( cd "$RF" && git commit -q --allow-empty -m init )
 RF_B="$(git -C "$RF" rev-parse HEAD)"; PF="$(SP_PLAN_AT=14 s42_plan "$RF" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${RF_B:0:8}
   branch: wave/01-fixture")"
-awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PF" > "$PF.tmp" && mv "$PF.tmp" "$PF"; s42_builds_landed "$PF"
+awk -v b="${RF_B:0:8}" 'NR == 2 { print "base-sha: " b } { print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PF" > "$PF.tmp" && mv "$PF.tmp" "$PF"; s42_builds_landed "$PF"
 ( cd "$RF" && git add -f "$PF" && git commit -qm wb && git worktree add -q -b wave/01-fixture "$RF/.worktrees/01-fixture" "$RF_B" ) >/dev/null 2>&1
 RF_DIR="$RF/.bionic/docs/record/wave-01-fixture"; mkdir -p "$RF_DIR"; new_roster "$RF"
 printf '%s|questions=evidence\n' "$(roster_row_fixture session="$SID" name=w-aud agent_id=a-w-aud subagent_type=bionic:auditor \
