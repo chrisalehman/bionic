@@ -66,6 +66,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/regression-fixture.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LIB="$REPO_ROOT/payload/scripts/lib/units.sh"
@@ -933,46 +934,57 @@ ap_plan() {  # <fix row status> -> AP_P: the POST fixture with the fix row T8 bo
     printf '| T9 | 7 | review | the critic reads the fix as a piece | critic | — | 20 | REQ-1 | .bionic/docs/record/w/T9-adversarial.md | pending | approval:plan, head, .bionic/docs/record/w/T8.md |\n'
   } > "$AP_P"
 }
-ap_pub() {  # <row>... -> AP_REC: a published event for each row, in the order given
-  : > "$AP_REC"
-  local r
-  for r in "$@"; do printf 'line/v1|ev=published|row=%s|commit=%s|kind=queue|by=-|why=-|at=2026-10-12T00:00:00Z\n' "$r" "$AP_H" >> "$AP_REC"; done
-}
 ap_state() { printf '%s|%s|%s' "$(call units_validate "$AP_P")" "$(call_rc units_validate "$AP_P")" "$(call units_post_readers "$AP_P")"; }
 AP_T9="$(printf 'T9\tpending\tunread')"
 
-ap_plan landed; ap_pub T1 T5 T6 T7 T8
-expect_eq "AP-0 precondition: the record holds both the release row T7 and the fix row T8, T7 first" "T7 T8" \
-  "$(awk -F'|' '{ for (i = 1; i <= NF; i++) if ($i ~ /^row=T[78]$/) printf "%s%s", (n++ ? " " : ""), substr($i, 5) }' "$AP_REC")"
-expect_eq "AP-1 the fix row published after the release: T9 reading its record is admitted (no line, rc 0) and listed for the card" \
-  "|0|$AP_T9" "$(ap_state)"
-ap_pub T1 T5 T6 T8 T7
-expect_eq "AP-2 the same plan with the record's order reversed, the fix published before the release: refused with the order text, nothing listed" \
-  "$PO_ORD|1|" "$(ap_state)"
-rm -f "$AP_REC"
-expect_eq "AP-3 the same plan with no landing record: plan order decides, and the step-4 fix row is not past the release (refused, nothing listed)" \
-  "$PO_ORD|1|" "$(ap_state)"
-ap_plan pending; ap_pub T1 T5 T6 T7
-expect_eq "AP-4 the fix row open and unpublished, the release published: it will publish past the release, so T9 is admitted and listed" \
-  "|0|$AP_T9" "$(ap_state)"
+# AN OLDER RECORD'S landed: HEADERS, read in their order on the page at 14 above, then gone for the run at 15 below.
 ap_plan landed; : > "$AP_REC"
 for r in T1 T5 T6 T7 T8; do printf 'landed: row=%s branch=b head=%s merge=%s at=2026-10-12T00:00:00Z\n' "$r" "$AP_H" "$AP_H" >> "$AP_REC"; done
 expect_eq "AP-5 a record of landed: headers alone is read in its order too: T8 after T7 is admitted" "|0|$AP_T9" "$(ap_state)"
 ap_plan landed; : > "$AP_REC"
 for r in T1 T5 T6 T8 T7; do printf 'landed: row=%s branch=b head=%s merge=%s at=2026-10-12T00:00:00Z\n' "$r" "$AP_H" "$AP_H" >> "$AP_REC"; done
 expect_eq "AP-5b …and with those headers reversed the differential control refuses" "$PO_ORD|1|" "$(ap_state)"
+rm -f "$AP_REC"
+
+# AT 15 the page holds each row's nine cells, T9 waiting in its deps on the fix row, and the run's log its step, its
+# approval and a published event for each row landed, in the order they landed.
+AP_LOG="$AP_REPO/.bionic/docs/record/ap/run.log"
+ap15() {  # <published row>... -> AP_P at 15, and its log
+  local r
+  { printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+    printf '| %s | %s | %s | t | %s | 30 | REQ-1 | %s | — |\n' T1 4 build — 'lib/a.sh, .bionic/docs/record/w/T1.md' T5 5 test — .bionic/docs/record/w/T5.md \
+      T6 6 review — .bionic/docs/record/w/T6.md T7 7 doc — CHANGELOG.md T8 4 build — 'lib/b.sh, .bionic/docs/record/w/T8.md' \
+      T9 7 review T8 .bionic/docs/record/w/T9-adversarial.md; } > "$AP_P"
+  printf 'run/v1|ev=%s|at=2026-10-12T00:00:00Z\n' 'step|n=7' 'approval|key=step3|by=fixture|said=approved' > "$AP_LOG"
+  for r in "$@"; do printf 'run/v1|ev=published|row=%s|commit=%s|kind=queue|by=-|why=-|at=2026-10-12T00:00:00Z\n' "$r" "$AP_H"; done >> "$AP_LOG"
+}
+
+ap15 T1 T5 T6 T7 T8
+expect_eq "AP-0 precondition: the log holds both the release row T7 and the fix row T8, T7 first" "T7 T8" \
+  "$(awk -F'|' '{ for (i = 1; i <= NF; i++) if ($i ~ /^row=T[78]$/) printf "%s%s", (n++ ? " " : ""), substr($i, 5) }' "$AP_LOG")"
+expect_eq "AP-1 the fix row published after the release: T9 reading its record is admitted (no line, rc 0) and listed for the card" \
+  "|0|$AP_T9" "$(ap_state)"
+ap15 T1 T5 T6 T8 T7
+expect_eq "AP-2 the same plan with the log's order reversed, the fix published before the release: refused with the order text, nothing listed" \
+  "$PO_ORD|1|" "$(ap_state)"
+ap15
+expect_eq "AP-3 the same plan with no landing in its log: plan order decides, and the step-4 fix row is not past the release (refused, nothing listed)" \
+  "$PO_ORD|1|" "$(ap_state)"
+ap15 T1 T5 T6 T7
+expect_eq "AP-4 the fix row open and unpublished, the release published: it will publish past the release, so T9 is admitted and listed" \
+  "|0|$AP_T9" "$(ap_state)"
 
 # A PLAN VERB'S DRY COPY NAMES NO RECORD, so the origin plan is the second operand: the record is read from the plan the
 # copy was made from, and the copy is judged as the plan is. The copy sits beside the plan under the name a verb gives it.
 AP_COPY="$AP_P.task-add-dry.4242"
 ap_copy_state() { printf '%s|%s|%s' "$(call units_validate "$AP_COPY" "$1")" "$(call_rc units_validate "$AP_COPY" "$1")" \
   "$(call units_post_readers "$AP_COPY" "$1")"; }
-ap_plan landed; ap_pub T1 T5 T6 T7 T8; cp "$AP_P" "$AP_COPY"
+ap15 T1 T5 T6 T7 T8; cp "$AP_P" "$AP_COPY"
 expect_eq "AP-6 the copy of a plan whose record published the fix row after the release, judged with the plan as origin: admitted and listed as the plan is" \
   "$(ap_state)" "$(ap_copy_state "$AP_P")"
 expect_eq "AP-6b …and that answer is an admission, so the equality above is not two refusals" "|0|$AP_T9" "$(ap_copy_state "$AP_P")"
 expect_eq "AP-7 the control: the same copy with no origin names no record and is refused by plan order, nothing listed" "$PO_ORD|1|" "$(ap_copy_state "")"
-ap_pub T1 T5 T6 T8 T7
+ap15 T1 T5 T6 T8 T7
 expect_eq "AP-8 the copy with the origin whose record published the fix row BEFORE the release: refused with the order text, as the plan is" \
   "$PO_ORD|1|" "$(ap_copy_state "$AP_P")"
 rm -f "$AP_COPY"
@@ -991,9 +1003,9 @@ printf 'b\n' > "$JR/b.sh"; git -C "$JR" add b.sh; git -C "$JR" commit -qm H1
 JH1="$(git -C "$JR" rev-parse HEAD)"
 git -C "$JR" commit -q --allow-empty -m H2
 JH2="$(git -C "$JR" rev-parse HEAD)"
-printf -- '---\ncurrent: 5\n---\n\n## SDLC State\n\nproved: kind=regression head=%s at=2026-01-01T00:00:00Z evidence=whole.log\n' \
-  "$JH" > "$SANDBOX/judge-plan.md"
-judge() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_floor_judge "$2" "$3" "$4"' _ "$PROOF_LIB" "$SANDBOX/judge-plan.md" "$JR" "$1"; }
+JP="$(plan_fixture --current 5 "$SANDBOX/judge/plans/judge.plan.md" task)"
+printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=whole.log|at=2026-10-20T00:00:00Z\n' "$JH" >> "$(plan_fixture_log "$JP")"
+judge() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_floor_judge "$2" "$3" "$4"' _ "$PROOF_LIB" "$JP" "$JR" "$1"; }
 unproved() { printf 'uncovered\tcommit %.12s (no landing row) is not proved: no run of its row\047s suites is recorded at it' "$1"; }
 
 expect_eq "the fixture's three heads are three commits" "3" \
@@ -1017,9 +1029,10 @@ mkdir -p "$RR/payload/.claude-plugin" "$RR/payload/commands" "$RR/payload/integr
 for f in CHANGELOG.md payload/.claude-plugin/plugin.json payload/commands/help.md payload/integrity/rendered.sha256 \
   tests/release-check.test.sh docs/adrs/adr-001-a.md; do printf 'x\n' > "$RR/$f"; done
 git -C "$RR" add -A; git -C "$RR" commit -qm release; RH="$(git -C "$RR" rev-parse HEAD)"
-printf -- '---\ncurrent: 7\n---\n\n## SDLC State\n\nproved: kind=check head=%s at=2026-01-01T00:00:00Z evidence=check.log\n' "$RH" > "$RR/plan.md"
-bash -c '. "$1" && . "$2" || exit 1; for s in $(_proof_release_readers); do line_event "$3" verdict row=T8 "commit=$4" "suite=$s" result=green log=- admitted=- width=-; done' _ "$LINE_LIB" "$PROOF_LIB" "$RR/plan.md" "$RH"
-cover() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; facts_cover "$2" "$3" "$4"; echo "rc=$?"' _ "$PROOF_LIB" "$RR/plan.md" "$RB" "$RH"; }
+RP="$(plan_fixture --current 7 "$RR/.bionic/docs/plans/release.plan.md" task)"
+printf 'run/v1|ev=proof|kind=check|head=%s|evidence=check.log|at=2026-10-20T00:00:00Z\n' "$RH" >> "$(plan_fixture_log "$RP")"
+bash -c '. "$1" && . "$2" || exit 1; for s in $(_proof_release_readers); do line_event "$3" verdict row=T8 "commit=$4" "suite=$s" result=green log=- admitted=- width=-; done' _ "$LINE_LIB" "$PROOF_LIB" "$RP" "$RH"
+cover() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; facts_cover "$2" "$3" "$4"; echo "rc=$?"' _ "$PROOF_LIB" "$RP" "$RB" "$RH"; }
 expect_eq "a release commit with the check suite and a promoted ADR, a check and its readers green at it: release" "$(printf 'cover %s release\nrc=0' "$RH")" "$(cover)"
 
 section "§WALK — the regression walk excuses a real release merge whose check passed, as the judge's cover reads it"
@@ -1028,19 +1041,18 @@ section "§WALK — the regression walk excuses a real release merge whose check
 # merge whose every path is in the set is excused by the check that passed at it, never sent to a landing row. Live
 # tier, read-only: this repository's own release merges, pinned by hash, skipped by version and hash when absent.
 # Without the check line the same merge is named as not proved, so the excuse is the check's.
-WK_PASS="$SANDBOX/walk-pass.md"; WK_NONE="$SANDBOX/walk-none.md"
-printf -- '---\ncurrent: 5\n---\n\n## SDLC State\n\n' > "$WK_NONE"
-cp "$WK_NONE" "$WK_PASS"
+WK_NONE="$(plan_fixture --current 5 "$SANDBOX/walk/plans/walk-none.plan.md" task)"
+WK_PASS="$(plan_fixture --current 5 "$SANDBOX/walk/plans/walk-pass.plan.md" task)"
 walk() { bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_past_f "$2" "$3" "$4^1" "$4" ""; echo "rc=$?"' _ "$PROOF_LIB" "$1" "$REPO_ROOT" "$2" </dev/null; }
 expect_eq "WALK-0 the release commit built above, CHANGELOG.md among its paths, a check passing at it: excused (rc 0)" "rc=0" \
-  "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_past_f "$2" "$3" "$4" "$5" ""; echo "rc=$?"' _ "$PROOF_LIB" "$RR/plan.md" "$RR" "$RB" "$RH" </dev/null)"
+  "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; _proof_past_f "$2" "$3" "$4" "$5" ""; echo "rc=$?"' _ "$PROOF_LIB" "$RP" "$RR" "$RB" "$RH" </dev/null)"
 WK_N=0
 while read -r v m; do
   if ! git -C "$REPO_ROOT" cat-file -e "$m^{commit}" 2>/dev/null || ! git -C "$REPO_ROOT" cat-file -e "$m^1^{commit}" 2>/dev/null; then
     echo "SKIP: WALK $v merge ${m:0:12}: the merge $m or its first parent is absent from this repository"; continue
   fi
   WK_N=$((WK_N + 1))
-  printf 'proved: kind=check head=%s at=2026-10-20T00:00:00Z evidence=check-%s.log\n' "$m" "$v" >> "$WK_PASS"
+  printf 'run/v1|ev=proof|kind=check|head=%s|evidence=check-%s.log|at=2026-10-20T00:00:0%sZ\n' "$m" "$v" "$WK_N" >> "$(plan_fixture_log "$WK_PASS")"
   expect_eq "WALK-$WK_N the $v merge ${m:0:12} with no check and no landing row: the walk names it not proved (rc 1)" \
     "$(printf 'commit %.12s (no landing row) is not proved: no run of its row\047s suites is recorded at it\nrc=1' "$m")" \
     "$(walk "$WK_NONE" "$m")"
@@ -1067,8 +1079,8 @@ sec_git init -q; sec_git config user.name "Dana Fixture"; sec_git checkout -q -b
 printf '.bionic/\n' > "$SEC/.gitignore"; printf 'one\n' > "$SEC/a.sh"
 printf 'regression-command: touch %s/ran\n' "$SEC_ROOT" > "$SEC/.bionic/config.yaml"
 sec_git add -A; sec_git commit -qm base; SEC_H="$(sec_git rev-parse HEAD)"
-{ printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n---\n# plan\n\n'
-  printf '## SDLC State\n\ncurrent: 5\nworking-branch: wave/01-second\nintegration-branch: main\n'; } > "$SEC_PLAN"
+printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nintent: build\nrigor: double\nscale: wave\nworking-branch: wave/01-second\nintegration-branch: main\n---\n# plan\n' > "$SEC_PLAN"
+printf 'run/v1|ev=step|n=5|at=2026-10-20T00:00:00Z\n' > "$SEC/.bionic/docs/$SEC_REL/run.log"
 bound_marker "$SEC" "$SEC_SID" "$SEC_PLAN" >/dev/null 2>&1 || :
 sec_poke() {  # -> SEC_OUT (stdout and stderr), SEC_RC: regression-run [flags…] as the bound session, in the repository
   SEC_RC=0
@@ -1113,8 +1125,8 @@ section "§DEBT — the review-born count: exempt under fix-policy: or counted, 
 # born of a finding in another plan's record directory, counts. `units_born_counted` is the one reader of that test,
 # and the landing line and task-add read it. The rows below pin the reader, the landing line's count, and the three
 # rules task-add holds on a born row: the cap refusal, the fourth fix on one file, and the count its line prints.
-# FIXTURE FIDELITY: planted plans in the shape s34's fixture writes (tests/session-poker.prelude.sh), the born markers
-# in the shapes `task-add --born` writes them, the readings in `proof-add review`'s shape; every task-add is the real
+# FIXTURE FIDELITY: planted plans at 15, the page's nine cells and the run's log, the born events as `task-add --born`
+# writes them, the reading as `proof-add review`'s event; every task-add is the real
 # verb, run as a session bound to the plan through the product's own binder, against the shipped tree and against a
 # copy of it with one rule removed (hooks/ beside scripts/, the tree's own scripts and library linked in, as
 # session-poker-5's §CHECK mutant is built).
@@ -1123,8 +1135,9 @@ section "§DEBT — the review-born count: exempt under fix-policy: or counted, 
 DB_SID="6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b"
 DB_ROOT="$SANDBOX/debt"; mkdir -p "$DB_ROOT/home" "$DB_ROOT/config/bionic" "$DB_ROOT/gate" "$DB_ROOT/no-plugins"
 DB_OWN="record/wave-01-debt"; DB_CARRIED="record/wave-00-prior"
-db_plan() {  # <repo> <fix-cap> <tasks rows> <ledger lines> [<frontmatter line>] -> the plan path, bound to DB_SID
-  local f="$1/.bionic/docs/plans/epic-99-fixture/wave-01-debt.plan.md" h
+db_plan() {  # <repo> <fix-cap> <tasks rows> <born events> [<header line>] -> the plan path at 15, bound to DB_SID
+  # Its log: the steps to 4, the approval, the carried review, T1 landed, T2 active in its tree, then each born event.
+  local f="$1/.bionic/docs/plans/epic-99-fixture/wave-01-debt.plan.md" h e n=0
   mkdir -p "${f%/*}" "$1/.bionic/docs/specs/epic-99-fixture" "$1/.bionic/docs/$DB_OWN" "$1/.bionic/docs/$DB_CARRIED"
   printf '# requirements\n' > "$1/.bionic/docs/specs/epic-99-fixture/wave-01-debt.requirements.md"
   printf '# spec\n' > "$1/.bionic/docs/specs/epic-99-fixture/wave-01-debt.spec.md"
@@ -1132,29 +1145,22 @@ db_plan() {  # <repo> <fix-cap> <tasks rows> <ledger lines> [<frontmatter line>]
   printf 'reviewed: %s..%s\nquestion: adversarial\nresult: fail\nscope: piece\n\nfindings: 2\nfinding: 1 S2 on lib/c1.sh:1 the first carried defect\nfinding: 2 S2 on lib/c2.sh:1 the second carried defect\nshown: 1 cat lib/c1.sh\nshown: 2 cat lib/c2.sh\n' \
     "$h" "$h" > "$1/.bionic/docs/$DB_CARRIED/critic.md"
   {
-    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nintent: bugfix\n'
     printf 'rigor: double\nfix-cap: %s\n%sscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n' "$2" "${5:+$5
 }"
-    printf 'walk: exempt\ndeploy_target: n/a\n'
-    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
-    printf '# fixture wave\n\n## SDLC State\n\ncurrent: 4\n'
-    printf 'approved-by: fixture 2026-09-23T00:00Z "approved"\n'
-    printf 'proved: kind=review head=%s at=2026-10-20T00:00:00Z evidence=%s/critic.md question=adversarial reader=w-adv result=fail scope=piece\n\n' "$h" "$DB_CARRIED"
-    printf -- '- Step 1: requirements: specs/epic-99-fixture/wave-01-debt.requirements.md\n'
-    printf -- '- Step 2: spec: specs/epic-99-fixture/wave-01-debt.spec.md\n'
-    printf -- '- Step 3: plan: plans/epic-99-fixture/wave-01-debt.plan.md\n'
-    printf -- '- Step 4: opened\n  worktree: .worktrees/01-debt\n  base-sha: abc1234\n  branch: wave/01-debt\n'
-    printf -- '- T1: landed at record/T1.md\n- T2: dispatched to w-T2\n%s- T5: pending dispatch — .worktrees/01-T5\n\n' "${4:+$4
-}"
-    printf '## Tasks\n\n'
-    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
-    printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-    printf '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |\n'
-    printf '| T2 | 4 | build | the second build | implementor | — | 30 | REQ-1 | b.sh | 01-T2 | abc1234 | active |\n'
+    printf 'walk: exempt\ndeploy_target: n/a\nworking-branch: wave/01-debt\nbase-sha: abc1234\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n# fixture wave\n\n## Tasks\n\n'
+    printf '| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the first build | — | 30 | REQ-1 | a.sh | — |\n| T2 | 4 | build | the second build | — | 30 | REQ-1 | b.sh | — |\n'
     printf '%s' "${3:+$3
 }"
-    printf '| T5 | 5 | verify | the floor | test-runner | T1, T2 | 30 | REQ-1 | — | — | — | pending |\n\n'
+    printf '| T5 | 5 | verify | the floor | T1, T2 | 30 | REQ-1 | — | — |\n\n'
   } > "$f"
+  { printf '%s\n' 'step|n=1' 'step|n=2' 'step|n=3' 'step|n=4' 'approval|key=step3|by=fixture|said=approved' \
+      "proof|kind=review|head=$h|evidence=$DB_CARRIED/critic.md|question=adversarial|reader=w-adv|result=fail|scope=piece" \
+      'dispatch|row=T1|name=implementor' 'published|row=T1' 'dispatch|row=T2|name=w-T2' 'tree|row=T2|path=.worktrees/01-T2'
+    [ -z "$4" ] || printf '%s\n' "$4"
+  } | while IFS= read -r e; do n=$((n + 1)); printf 'run/v1|ev=%s|at=2026-10-20T00:00:%02dZ\n' "$e" "$n"; done > "$1/.bionic/docs/$DB_OWN/run.log"
   bound_marker "$1" "$DB_SID" "$f" >/dev/null 2>&1 || :
   printf '%s' "$f"
 }
@@ -1165,11 +1171,15 @@ db_repo() {  # <label> -> a fresh repository with one commit, engaged by DB_SID
   : > "$r/.bionic/tmp/engaged-$DB_SID.state"
   printf '%s' "$r"
 }
-db_row() { printf '| %s | 4 | build | fix %s | implementor | — | 30 | REQ-1 | %s | — | — | pending |' "$1" "$1" "$2"; }   # <id> <files>
-db_led() { printf -- '- %s: pending dispatch — added by task-add at 2026-10-20T00:00:00Z born: %s' "$1" "$2"; }   # <id> <marker>
+db_row() { printf '| %s | 4 | build | fix %s | — | 30 | REQ-1 | %s | — |' "$1" "$1" "$2"; }   # <id> <files>
+db_led() {  # <id> <marker> -> the row's born event as task-add --born writes it (lib/units.sh `units_born_event`)
+  local r="${2%% of=*}" f="" m=""; [ "$r" = "$2" ] || { f="${2#* of=}"; f="${f%% *}"; }
+  case "$2" in *' promoted') m='|promoted=yes' ;; esac
+  printf 'born|row=%s|reason=%s%s%s' "$1" "$r" "${f:+|finding=$f}" "$m"
+}
 db_poke() {  # <poker> <repo> <id> <files> <born> -> DB_OUT, DB_RC: the step-4 build row an edit adds, then task-add of it as DB_SID
   local p; p="$(sed -n 's/^plan=//p' "$2/.bionic/tmp/engaged-$DB_SID.state")"; DB_RC=0
-  awk -v r="| $3 | 4 | build | Fix $3. The defect is gone. · born: review | bionic:implementor | — | 30 | REQ-1 | $4 | — | — | pending |" '/^\| T5 \| 5 \|/ { sub(/T1, T2/, "&, " id) } { print } /^\| T5 \| 5 \|/ { print r }' id="$3" "$p" > "$p.t" && mv "$p.t" "$p"
+  awk -v r="| $3 | 4 | build | Fix $3. The defect is gone. · born: review | — | 30 | REQ-1 | $4 | — |" '/^\| T5 \| 5 \|/ { sub(/T1, T2/, "&, " id) } { print } /^\| T5 \| 5 \|/ { print r }' id="$3" "$p" > "$p.t" && mv "$p.t" "$p"
   DB_OUT="$(cd "$2" && env CLAUDE_CODE_SESSION_ID="$DB_SID" HOME="$DB_ROOT/home" CLAUDE_CONFIG_DIR="$DB_ROOT/config" \
     BIONIC_GATE_DIR="$DB_ROOT/gate" BIONIC_PLUGINS_DIR="$DB_ROOT/no-plugins" bash "$1" task-add "$3" --born "$5" 2>&1)" || DB_RC=$?
 }
@@ -1299,13 +1309,14 @@ expect_eq "ASK-2 after the edit, units_field T2 deps answers the edit, as the re
 #
 # A PROOF WAIT ASKS THE JUDGE. The floor row reads proof:review by its kind default; the review proof stands at
 # an older head, and the rows the reads name have landed. Ready only when the judge reads the reviews covered.
-AK_J="$SANDBOX/ask-judge.plan.md"
-{ printf -- '---\ncurrent: 6\n---\n\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n'
-  printf '|---|---|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | b | — | — | 30m | R | src/a.sh | landed | approval:plan |\n'
-  printf '| T2 | 6 | review | r | — | — | 30m | R | .bionic/docs/record/w/r.md | landed | approval:plan, src/a.sh |\n'
-  printf '| T3 | 6 | test | the floor | — | — | 30m | R | .bionic/docs/record/w/f.md | pending | |\n\n## SDLC State\n\ncurrent: 6\napproved-by: me\n'
-  printf 'proved: kind=review head=%s at=2026-10-20T00:00:00Z question=adversarial result=pass scope=piece\n' "$(printf 'a%.0s' {1..40})"
+# At 15: nine cells, T2 waiting on T1 by its id; the step, the approval, both landings and the review proof in the log.
+AK_J="$SANDBOX/ask/plans/ask-judge.plan.md"; mkdir -p "${AK_J%/*}" "$SANDBOX/ask/record/ask-judge"
+{ printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n'
+  printf '|---|---|---|---|---|---|---|---|---|\n| T1 | 4 | build | b | — | 30m | R | src/a.sh | — |\n'
+  printf '| T2 | 6 | review | r | T1 | 30m | R | .bionic/docs/record/w/r.md | — |\n| T3 | 6 | test | the floor | — | 30m | R | .bionic/docs/record/w/f.md | — |\n'
 } > "$AK_J"
+printf 'run/v1|ev=%s|at=2026-10-20T00:00:0%sZ\n' 'step|n=6' 1 'approval|key=step3|by=me|said=approved' 2 'published|row=T1' 3 'published|row=T2' 4 \
+  "proof|kind=review|head=$(printf 'a%.0s' {1..40})|question=adversarial|result=pass|scope=piece" 5 > "$SANDBOX/ask/record/ask-judge/run.log"
 ak_ready() { ( export UNITS_READINGS_STATE="$1"; call units_ready "$AK_J" 6 ); }
 expect_eq "ASK-3 the floor row with the reviews covered at the head is ready; past the proof at an older head it is not" "T3|" \
   "$(ak_ready covered)|$(ak_ready 'review adversarial critic piece uncovered')"
