@@ -294,6 +294,38 @@ reader_q_asks() {  # <plan> -> each ask still open: no reply on it, and no appro
     END { for (i = 1; i <= n; i++) if (ord[i] in open) print open[ord[i]] }'
 }
 
+# AN ASK'S ROUNDS, WHOLE. The fold keeps an ask's latest event, so it loses when the round opened, when it was sent and
+# answered; this folds every event of a round, by key and round (absent, 1), into one line, in the order the rounds
+# opened. Each act sets what it carries: sent=, title=, prompt=, an answer at its instant, and the closer's reply=,
+# which closes the round. A decision has one key, approve:D<n> read as decide:D<n>. No approval closes a round here:
+# a round closes by its reply alone, so the asks library's list is the asks its writers left open.
+#   run/v1|ev=ask|key=<k>|state=open|sent=<ISO or ->|at=<opened>|title=<t>|prompt=<p>|round=<n>[|answer=<w>|answered=<ISO>|event=<e>]
+#   run/v1|ev=ask|key=<k>|state=closed|by=<reply>|at=<closed>|opened=<ISO or empty>|sent=<ISO or ->|round=<n>[|answer=…]
+# Given a plan, the run's ask events, its register through the translation alone; given `-`, the lines on stdin, which
+# is how a session's own store, no run's, is read.
+# A read that failed is its exit, never a run with no ask: the pipe runs under pipefail, in its own shell.
+reader_ask_rounds() (  # <plan|-> -> one line per round; 2 when the plan's events cannot be read
+  set -o pipefail
+  # shellcheck source=/dev/null
+  [ "${1:-}" = - ] || declare -F translate >/dev/null 2>&1 || . "$_READER_LIB_DIR/translate.sh" || exit 2
+  { if [ "${1:-}" = - ]; then cat; else TRANSLATE_SOURCES="_translate_asks _translate_log" reader_events "$1"; fi; } \
+  | awk -F'|' "$_READER_AWK"'
+    ev() == "ask" { k = line_kv("key"); if (k ~ /^approve:D[0-9]+$/) k = "decide:" substr(k, 9); r = line_kv("round")
+      i = k SUBSEP (r == "" ? 1 : r); a = line_kv("at")
+      if (!(i in ST)) { ord[++m] = i; ST[i] = "open"; SE[i] = "-" }
+      # opened is the first act that is no close: an untimed opening a home gives is sorted after the close it precedes
+      if (!(i in OS) && line_kv("reply") == "") { OS[i] = 1; OP[i] = a }
+      if ((v = line_kv("sent")) != "") SE[i] = v
+      if ((v = line_kv("title")) != "") TI[i] = v
+      if ((v = line_kv("prompt")) != "") PR[i] = v
+      if ((v = line_kv("answer")) != "") { RD[i] = v; AD[i] = a; EV[i] = line_kv("event") }
+      if ((v = line_kv("reply")) != "") { ST[i] = "closed"; BY[i] = v; CL[i] = a } }
+    END { for (j = 1; j <= m; j++) { i = ord[j]; split(i, p, SUBSEP)
+        an = (RD[i] != "") ? "|answer=" RD[i] "|answered=" AD[i] "|event=" EV[i] : ""
+        if (ST[i] == "open") printf "run/v1|ev=ask|key=%s|state=open|sent=%s|at=%s|title=%s|prompt=%s|round=%s%s\n", p[1], SE[i], OP[i], TI[i], PR[i], p[2], an
+        else printf "run/v1|ev=ask|key=%s|state=closed|by=%s|at=%s|opened=%s|sent=%s|round=%s%s\n", p[1], BY[i], CL[i], OP[i], SE[i], p[2], an } }'
+)
+
 # The questions below answer from the log. holds, stop, status and ready also join the plan's Tasks table
 # through lib/plan-read.sh, the plan's one parser; reviews still answers the log's half alone, and its
 # comment names the half the plan holds.

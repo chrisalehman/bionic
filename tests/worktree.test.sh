@@ -1128,7 +1128,7 @@ HN_PA="$( cd "$HN" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" bash "$REPO/hooks/sess
 awk '/^- T3: active$/ { print "- T3: active — added by task-add at 2026-10-20T00:00:00Z born: review S1 off of=record/wave-x/rev.md#1"; next } { print }' \
   "$HN_P" > "$HN_P.n" && mv "$HN_P.n" "$HN_P"
 hn_ask() { bash -c '. "$1/roots.sh" && . "$1/owed.sh" && owed_lines "$2" "$3"' _ "$REPO/payload/scripts/lib" "$HN_P" "$HN" 2>/dev/null \
-  | awk -F'|' '$2 == "key=waive:adversarial" { s = ""; b = ""; for (i = 3; i <= NF; i++) { if ($i ~ /^state=/) s = substr($i, 7); if ($i ~ /^by=/) b = substr($i, 4) }; l = s "|" b } END { print l }'; }
+  | awk -F'|' '{ k = s = b = ""; for (i = 2; i <= NF; i++) { if ($i ~ /^key=/) k = substr($i, 5); if ($i ~ /^state=/) s = substr($i, 7); if ($i ~ /^by=/) b = substr($i, 4) } } k == "waive:adversarial" { l = s "|" b } END { print l }'; }
 expect_eq "(hn0) proof-add registers the failing review (exit 0) and its waiver ask is open" "0|open|" "$HN_PARC|$(hn_ask)"
 [ "$HN_PARC" = 0 ] || printf '      proof-add said: %s\n' "$HN_PA"
 HN_C="$(git -C "$HN_T3" rev-parse HEAD)"; printf 'a.test.sh: 1/1 passed\n' > "$HN_RD/T3-green.log"

@@ -527,9 +527,9 @@ decisions_all() {
 #                   whoever closed them: a round put after the plan card is a stop, since the run stood on it. The
 #                   approval verb closes the Step-3 card's ask at that instant, so the register and the plan agree on
 #                   where the half starts. unverified when approved-by: names no instant or the run has no register.
-#   agent minutes   the launches of this plan on the rosters after the `approved: merge` line's instant
+#   agent minutes   the launches of this plan on the rosters after the instant of the standing approval of merge
 #                   (`handoff_dispatches_since`, the dispatch wall's intended rows; AC-1.5's fact): minutes from that
-#                   reply to the last such launch, rounded up, 0 when none. unverified with no `approved: merge` line or
+#                   reply to the last such launch, rounded up, 0 when none. unverified with no approval of merge or
 #                   no launch of this plan on any roster.
 #   widest landing  `landing_report`'s rows: the queue landing with the largest `minutes=`, as printed. unverified when
 #                   no landing is measured.
@@ -540,7 +540,7 @@ decisions_all() {
 scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
   local plan="$1" root="$2" start reg rounds stops="unverified" wait="unverified" merge_at agent="unverified" widest
   start="$(sitrep_approved_at "$plan")"
-  reg="$(owed_lines "$plan" "$root" 2>/dev/null)" || reg=""
+  reg="$(reader_ask_rounds "$plan" 2>/dev/null)" || reg=""
   if [ -n "$start" ] && [ -n "$reg" ]; then
     rounds="$(owed_rounds 'approve:step[0-9]+|approve:release|decide:D[0-9]+' "$plan" "$root" | awk -F'\t' \
       -v s="$start" -v now="$(sitrep_now)" "$_PATROL_ISO_AWK"'
@@ -552,14 +552,8 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
       END { printf "%d\t%s\n", c, untimed ? "unverified" : sprintf("%d", t / 60 + 0.5) }')"
     stops="${rounds%%	*}"; wait="${rounds#*	}"
   fi
-  # the plan's `approved: merge` instant, where the agent minutes after the final reply start
-  merge_at="$(awk "$_PATROL_ISO_AWK"'
-    function norm(x) { if (length(x) == 17 && substr(x, 17, 1) == "Z") return substr(x, 1, 16) ":00Z"; return x }
-    /^[ \t]*```/ { fence = !fence; next }
-    fence { next }
-    /^##[ \t]/ { s = ($0 ~ /^##[ \t]+SDLC State/); next }
-    s && /^[ \t]*-?[ \t]*approved:[ \t]+merge[ \t]/ {
-      n = split($0, t, /[ \t]+/); for (i = 1; i <= n; i++) { e = iso2epoch(norm(t[i])); if (e >= 0) { print e; exit } } }' "$plan" 2>/dev/null)"
+  # the merge's approval, where the agent minutes after the final reply start
+  merge_at="$(sitrep_approved_at "$plan" merge)"
   if [ -n "$merge_at" ] && [ -n "$(handoff_dispatches_since "$plan" "$root/.bionic/tmp" "")" ]; then
     agent="$(handoff_dispatches_since "$plan" "$root/.bionic/tmp" "" | awk -F'\t' -v m="$merge_at" "$_PATROL_ISO_AWK"'
       { e = iso2epoch($2); if (e > m && e - m > d) d = e - m }
@@ -739,14 +733,14 @@ _SITREP_EPOCH_AWK='
   function ep(s) { if (s !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9](:[0-9][0-9])?Z$/) return -1
     if (length(s) == 17) s = substr(s, 1, 16) ":00Z"; return iso2epoch(s) }'
 
-# sitrep_approved_at <plan> -> the epoch of the run's Step-3 approval, the standing approval of step3; nothing when it
-# has none; 2 when the facts cannot be read
+# sitrep_approved_at <plan> [<key>] -> the epoch of the standing approval of <key>, the run's Step-3 approval (step3)
+# when none is named; nothing when it has none; 2 when the facts cannot be read
 sitrep_approved_at() {
   local f
   _sitrep_reader || return 0
   f="$(sitrep_facts "$1" approval)" || return 2
-  printf '%s\n' "$f" | awk -F'|' "$_PATROL_ISO_AWK$_SITREP_EPOCH_AWK$_READER_AWK"'
-    line_kv("key") == "step3" { e = ep(line_kv("at")) } END { if (e != "" && e >= 0) print e }'
+  printf '%s\n' "$f" | awk -F'|' -v k="${2:-step3}" "$_PATROL_ISO_AWK$_SITREP_EPOCH_AWK$_READER_AWK"'
+    line_kv("key") == k { e = ep(line_kv("at")) } END { if (e != "" && e >= 0) print e }'
 }
 
 # sitrep_delivered_at <plan> -> the epoch of its Step 9 when the reader's step calls the run closed; nothing for a run
@@ -918,13 +912,12 @@ sitrep_record_spans() {
 # waits on an event counts to its answer, and one that never waits on the user (a carry, a delivery) counts none.
 sitrep_waiting() {
   local plan="$1" root="$2" rows="$3" now="$4" asks="$5" reg="" led out m k spans waits
-  reg="$(owed_lines "$plan" "$root" 2>/dev/null)" || reg=""
+  reg="$(reader_ask_rounds "$plan" 2>/dev/null)" || reg=""
   led="$(docs_root "$root")/record/$(proof_plan_slug "$plan")/design-ledger.md"
   spans="$(sitrep_record_spans "$plan")"
   # what each ask no longer open waits on; an open one's is the asks' own fifth field
   waits="$( { printf '%s\n' "$spans" | cut -f1
-      { [ -n "$reg" ] && printf '%s\n' "$reg" | awk "$_OWED_AWK_FIELD"'
-          index($0, "owed/v1|") == 1 && fld($0, "state") != "open" { print key_of($0) }'; } 2>/dev/null
+      { [ -n "$reg" ] && printf '%s\n' "$reg" | awk -F'|' "$_READER_AWK"'line_kv("state") == "closed" { print line_kv("key") }'; } 2>/dev/null
     } | awk 'NF && !s[$0]++' | while IFS= read -r k; do printf 'W\t%s\t%s\n' "$k" "$(ask_waits_on "$k" "$plan" "$root")"; done)"
   out="$( { printf '%s\n' "$asks" | awk -F'\t' 'NF >= 2 && $1 != "" { print "O\t" $1 "\t" $2 "\t" $5 }'
       printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { s = tolower($10); gsub(/[ \t]/, "", s); k = $3; gsub(/[ \t]/, "", k)
@@ -934,8 +927,8 @@ sitrep_waiting() {
       sitrep_ledger_times "$led" | awk -F'\t' '{ print "D\tdecide:" $1 "\t" $2 "\t" $3 }'
       printf '%s\n' "$spans" | awk -F'\t' 'NF { print "S\t" $1 "\t" $2 "\t" $3 }'
       printf '%s\n' "$waits" | awk 'NF'
-      { [ -n "$reg" ] && printf '%s\n' "$reg" | awk "$_OWED_AWK_FIELD"'
-          index($0, "owed/v1|") == 1 { print "R\t" key_of($0) "\t" fld($0, "state") "\t" fld($0, "at") "\t" fld($0, "opened") "\t" fld($0, "answered") }'; } 2>/dev/null
+      { [ -n "$reg" ] && printf '%s\n' "$reg" | awk -F'|' "$_READER_AWK"'
+          line_kv("key") != "" { print "R\t" line_kv("key") "\t" line_kv("state") "\t" line_kv("at") "\t" line_kv("opened") "\t" line_kv("answered") }'; } 2>/dev/null
     } | awk -F'\t' -v now="$now" "$_PATROL_ISO_AWK"'
       function norm(s) { if (length(s) == 17 && substr(s, 17, 1) == "Z") return substr(s, 1, 16) ":00Z"; return s }
       function ep(s) { if (s == "" || s == "-") return -1; return iso2epoch(norm(s)) }
@@ -1802,7 +1795,8 @@ sitrep_tick_line() {
       HO_ROOT="$PV_REPO"
       trap 'rm -f "$PV_NEW" "$PV_NEW.2" ${PV_MARK:+"$PV_MARK"} "$HO_CF"' EXIT
       if [ "$HO_MODE" = open ]; then
-        if ! /usr/bin/grep -qE '^##[[:space:]]+Tasks([[:space:]]|$)' "$PV_PLAN"; then
+        { declare -F plan_read_heading >/dev/null 2>&1 || . "$BIONIC_LIB/plan-read.sh"; } 2>/dev/null
+        if ! plan_read_heading "$PV_PLAN" Tasks >/dev/null 2>&1; then
           die "REFUSED — the plan has no ## Tasks section, so there are no open tasks to hand off; the plan is unchanged."
           exit 1
         fi
