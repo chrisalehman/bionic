@@ -282,8 +282,10 @@ expect_eq "it ends on the seven count lines, in order" "parsers plan_writers sha
   "$(printf '%s\n' "$AFTER" | tail -7 | sed -n 's/^\([a-z_]*\)=[0-9][0-9]*$/\1/p' | tr '\n' ' ' | sed 's/ $//')"
 bash "$CHECK" "$S/no-such" >/dev/null 2>&1; expect_status "a root that is not a checkout exits 2" 2 "$?"
 
-# §READINGS runs from the checkout; a scratch commit on a shared clone moves a count without touching it.
-READ="${BIONIC_SCRIPTS_DIR}/payload/scripts/readings.sh"; F="${BIONIC_SCRIPTS_DIR}/tests/fixtures/replay"
+# §READINGS runs from the checkout; a scratch commit on a shared clone moves a count without touching it. The records
+# it reads are the bed's runs at 14, from git before they were recorded at 15: that release reads no run at 15.
+READ="${BIONIC_SCRIPTS_DIR}/payload/scripts/readings.sh"; PIN=1d09c8990abaf6cdacfb9db3cda9e58f8ad46ad3; mkdir "$S/pin"
+git -C "$BIONIC_SCRIPTS_DIR" archive $PIN tests/fixtures/replay | tar -x -C "$S/pin"; F="$(cd "$S/pin" && pwd -P)/tests/fixtures/replay"
 at() { ( cd "$1" && shift && bash "$READ" "$@" 2>&1 ); }
 born() { ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/reader.sh"; reader_facts "$1" ) | grep -c '^run/v1|ev=born|'; }
 OLD=7a9633486; R30="$(at "$BIONIC_SCRIPTS_DIR" $OLD)"
@@ -294,7 +296,7 @@ $G update-index --cacheinfo "100755,$BLOB,hooks/session-poker.sh"
 SCR="$($G -c user.name=t -c user.email=t@t commit-tree "$($G write-tree)" -p $OLD -m scratch)"
 RW="$F/wave-46-asks-nothing"; R46="$(at "$BIONIC_SCRIPTS_DIR" $OLD "$RW/record/wave-46-asks-nothing")"
 R49="$(at "$BIONIC_SCRIPTS_DIR" $OLD "$F/wave-49-what-a-run-costs/record/wave-49-what-a-run-costs")"
-BORN="$(born "$RW/plans/epic-23-bionic-tech-debt/wave-46-asks-nothing.plan.md")"
+BORN="$(born "${BIONIC_SCRIPTS_DIR}/tests/fixtures/replay/wave-46-asks-nothing/plans/epic-23-bionic-tech-debt/wave-46-asks-nothing.plan.md")"
 
 section "READINGS"
 expect_contains "the verbs are 68" "r2_session_poker_verbs=68" "$R30"
