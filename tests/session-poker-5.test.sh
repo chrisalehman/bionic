@@ -413,8 +413,8 @@ POKE_BOUND="$ET_BOUND_WAS"
 # ============================================================
 section "§ORDER: the tick orders dispatch — FILL offers the longest remaining chain first, the gate line prints the width the gate answers each open landing, and SPLIT is a decision line only while width idles (wave-38 T7; REQ-6 AC-6.5; D22)"
 # ============================================================
-# D22: "the tick offers ready rows longest remaining chain first, and offers a `task-split` as a decision with its
-# reason when width idles"; the gate answers width to the oldest active landing and 0 to the younger ones. A row's
+# The tick offers ready rows longest remaining chain first, and offers a split of a row as its SPLIT decision line with
+# its reason when width idles; the gate answers width to the oldest active landing and 0 to the younger ones. A row's
 # remaining chain is its size plus the heaviest path of open rows waiting on it, transitively (the `f` of
 # lib/units.sh `units_chain`, which the CHAIN line prints for the whole graph); ties go by row id. The ready set's
 # membership is unchanged: only its order, and so which rows the writer gap's trim keeps.

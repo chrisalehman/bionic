@@ -12,7 +12,7 @@
 #
 # HERMETIC. One repository per world under a temp root: a 17-task plan, its landing record, its fill
 # ledger, the run's register of asks and a gate store of its own. The clock is BIONIC_NOW_EPOCH
-# (the poker's seam, fill-report's too) and the zone is pinned, so every local time below is a fixed
+# (the poker's seam) and the zone is pinned, so every local time below is a fixed
 # string; no case reads this machine's clock. The machine's probes are pinned as the session-poker
 # prelude pins them, because the gate's scan samples them.
 #
@@ -143,7 +143,7 @@ sr_row() {  # <id> <task> <reads> <size> <status>
   local n="${1#T}"
   printf '| %s | 4 | build | %s | — | — | %s | %s | REQ-1 | lib/t%s.sh | — | — | %s | — | — | — |\n' "$1" "$2" "$3" "$4" "$n" "$5"
 }
-# sr_reg [<plan>] -> the run's version-14 register of asks, `asks.state` in its record directory: the old home the
+# sr_reg [<plan>] -> the path of the run's version-14 register of asks in its record directory: the old home the
 # reader translates for a run not brought forward, so a seeded ask lands where every reader of the run reads it (this
 # world's plan by default). Spelled here, since the asks library names only the run's log.
 SR_OWED_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/owed.sh"

@@ -19,7 +19,7 @@
 # or `current <N> --check` is red for N = 6, 7 or 8 (`card.sh early`); `--preview` renders it anyway and records
 # nothing. The verb gathers the facts and `card.sh release` draws the page at the shared width. One
 # reply, typed by the user, `all default`, `all recommended` or the decisions by number, is replayed by `reply` into
-# approve, waive, waive-row and finding-move with the user's words.
+# approve, waive and finding-move with the user's words.
 #
 # FIXTURE FIDELITY. A real repository on `wave/01-fixture`, base B, a code commit C, then the release text's commit
 # R touching CHANGELOG.md alone; a double wave plan the real gate admits at Steps 6 to 8, bound to this session,

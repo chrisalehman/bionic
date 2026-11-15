@@ -1005,7 +1005,7 @@ section "§WINDOW: the hand-holds count is read over a window, every source by i
 # plan's `delivered:` time; before the run is delivered the window runs to now and the report says so. Every source
 # is planted in its writer's shape: the run's log's events through their writers (lib/proof.sh), the fill ledger's
 # fill-ledger/v1 lines (the Stop hook's home still), the roster through the one production row writer. An older run's
-# homes (the AC blocks' waiver lines, the record's matrix-set and landed: lines) are read on a world at 14.
+# homes (the AC blocks' waiver lines, the record's matrix cell and landed: lines) are read on a world at 14.
 ww_report() {  # <root> [flags…] -> landing-report --hand-holds over the root's plan, stdout only
   local root="$1"; shift
   ( cd "$root" && CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO/payload" \
