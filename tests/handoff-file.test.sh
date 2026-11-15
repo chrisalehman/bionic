@@ -152,9 +152,10 @@ HF_EMPTY="$TMPROOT/hf-empty.md"; : > "$HF_EMPTY"
 # ---------- the bound world ----------
 #
 # hf_world <label> [roster yes|no] -> HF_R (repo), HF_P (plan), HF_F (the handoff file), HF_REC (its run's log),
-# HF_INT/HF_WORK (the two heads). The frontmatter branch keys over real branches, two landed lines, two proof lines,
-# active rows T2 and T3 and a pending T6 with a worktree, a Not Doing; the bionic folder excluded from git, as a
-# project ignores it; with `roster yes`, w-T2's finished run, its progress file named and its brief on disk.
+# HF_INT/HF_WORK (the two heads). A page at 15 with the frontmatter branch keys over real branches, rows T3 and T6 and
+# a Not Doing; its log holds the steps, the approval, T1 landed, w-T2's dispatch, the trees of T2, T3 and T6, two
+# landings with their commits and two proofs; the bionic folder excluded from git, as a project ignores it; with
+# `roster yes`, w-T2's finished run, its progress file named and its brief on disk.
 hf_world() {
   local label="$1" roster="${2:-yes}" rd
   HF_R="$(make_repo "hf-$label")"; ( cd "$HF_R" && git commit -q --allow-empty -m init )
@@ -165,18 +166,23 @@ hf_world() {
   git -C "$HF_R" branch -f wave/01-fixture HEAD
   HF_INT="$(git -C "$HF_R" rev-parse trunk)"
   HF_WORK="$(git -C "$HF_R" rev-parse wave/01-fixture)"
-  HF_P="$(SP_PLAN_AT=14 s42_plan "$HF_R" 4)"
-  awk -v w="$HF_WORK" '
-    NR == 1 && $0 == "---" { print; print "working-branch: wave/01-fixture"; print "integration-branch: trunk"; next }
-    /^approved-by:/ { print; print "proved: kind=floor head=" w " at=2026-10-08T11:00:00Z evidence=record/old-floor.log"
-                      print "proved: kind=review head=" w " at=2026-10-08T12:30:00Z evidence=record/last-review.md"; next }
-    /^- T5: pending dispatch/ { print "- T4: landed 2222222222222222222222222222222222222222 2026-10-08T10:30:00Z"
-                                print "- T3: landed 1111111111111111111111111111111111111111 2026-10-08T09:00:00Z"; print; next }
-    /^\| T2 \| 4 \| build \|/ { sub(/\| implementor \|/, "| w-T2 |"); print
-                               print "| T3 | 4 | build | the third build | — | — | 30 | REQ-1 | c.sh | .worktrees/01-T3 | abc1234 | active |"
-                               print "| T6 | 4 | build | the sixth build | — | — | 30 | REQ-1 | d.sh | .worktrees/01-T6 | abc1234 | pending |"; next }
+  HF_P="$(s42_plan "$HF_R" 4)"
+  awk '
+    NR == 1 && $0 == "---" { print; print "integration-branch: trunk"; next }
+    /^\| T2 \| 4 \| build \|/ { print; print "| T3 | 4 | build | the third build | — | 30 | REQ-1 | c.sh | — |"
+                               print "| T6 | 4 | build | the sixth build | — | 30 | REQ-1 | d.sh | — |"; next }
     { print }
     END { print "\n## Not Doing\n\n- nothing, in this fixture" }' "$HF_P" > "$HF_P.hf" && mv "$HF_P.hf" "$HF_P"
+  HF_REC="$HF_R/.bionic/docs/record/wave-01-fixture/run.log"
+  { for rd in 1 2 3 4; do printf 'run/v1|ev=step|n=%s|at=2026-09-22T00:0%s:00Z\n' "$rd" "$rd"; done
+    printf 'run/v1|ev=approval|key=step3|by=fixture|said=approved|at=2026-09-23T00:00:00Z\n'
+    printf 'run/v1|ev=%s|at=2026-10-03T00:0%s:00Z\n' 'dispatch|row=T1|name=implementor' 1 'published|row=T1' 2 \
+      'dispatch|row=T2|name=w-T2' 3 'tree|row=T2|path=01-T2|base=abc1234' 4 'tree|row=T3|path=.worktrees/01-T3|base=abc1234' 5 \
+      'tree|row=T6|path=.worktrees/01-T6|base=abc1234' 6
+    printf 'run/v1|ev=published|row=%s|commit=%s|at=2026-10-08T%s:00Z\n' \
+      T3 1111111111111111111111111111111111111111 09:00 T4 2222222222222222222222222222222222222222 10:30
+    printf 'run/v1|ev=proof|kind=%s|head=%s|evidence=record/%s|at=2026-10-08T%s:00Z\n' \
+      floor "$HF_WORK" old-floor.log 11:00 review "$HF_WORK" last-review.md 12:30; } > "$HF_REC"
   if [ "$roster" = yes ]; then
     rd="$HF_R/.bionic/tmp/runs"; mkdir -p "$rd"; : > "$rd/w-T2-x.test.sh.log"
     roster_row_fixture session="$SID" name=w-T2 agent_id=a-w-T2 subagent_type=implementor \
@@ -186,7 +192,6 @@ hf_world() {
     printf '# the brief for T2\n' > "$HF_R/.bionic/docs/record/wave-01-fixture/briefs/T2.md"
   fi
   HF_F="$HF_R/$HF_DOOR"
-  HF_REC="$HF_R/.bionic/docs/record/wave-01-fixture/run.log"
   s42_snap "$HF_R" "$HF_P"
 }
 
@@ -423,14 +428,13 @@ expect_contains "P5b …the usage error names stdin for the sections" "stdin" "$
 expect_eq "P5c …and nothing is written" "$HF_NFILES" "$(ls "$HF_NR/$HF_HOME" | wc -l | tr -d ' ')"
 
 # ============================================================
-section "§POINTER: bound, the run's log holds the handoff, naming the file, and the plan is as it was, at 14 and at 15"
+section "§POINTER: bound, the run's log holds the handoff, naming the file, and the plan is as it was"
 # ============================================================
 s42_snap "$HF_R" "$HF_P"
 BIONIC_NOW_EPOCH=$((HF_NOW + 60)) hf_poke "$HF_R" "$HF_C" handoff 'the next session reviews T2'
 expect_eq "PT1 a bound handoff with a purpose, a minute on, exits 0; the reader's handoff names the file; the plan's sum is unchanged" \
   "0|$HF_DOOR|$(cksum < "$TMPROOT/s42-before")" "$RC|$(hf_ho "$HF_P")|$(cksum < "$HF_P")"
 hf_world fifteen no
-bash "$BIONIC_SCRIPTS_DIR/payload/scripts/bring-forward.sh" "$HF_P" >/dev/null 2>&1; s42_snap "$HF_R" "$HF_P"
 hf_poke "$HF_R" "$HF_C" handoff
 expect_eq "PT2 a plan at 15, which holds no state section, hands off: exit 0, the reader's handoff names the file, the plan's sum is unchanged" \
   "15|0|0|$HF_DOOR|$(cksum < "$TMPROOT/s42-before")" "$(sed -n 's/^canonical_sdlc_version: //p' "$HF_P")|$(grep -c '^## SDLC State' "$HF_P")|$RC|$(hf_ho "$HF_P")|$(cksum < "$HF_P")"
@@ -438,17 +442,14 @@ expect_eq "PT2 a plan at 15, which holds no state section, hands off: exit 0, th
 # ============================================================
 section "§CLOSED: handoff on a delivered or parked plan writes the same document, its State saying where the run closed; the reader names it"
 # ============================================================
-hf_close() {  # <step-9 line> -> the plan at current: 9 with that line, snapped
-  HF_S9="$1" awk '
-    /^current: 4$/ { print "current: 9"; next }
-    /^- T1: landed at record\/T1.md$/ { print ENVIRON["HF_S9"]; print; next }
-    { print }' "$HF_P" > "$HF_P.d" && mv "$HF_P.d" "$HF_P"
+hf_close() {  # <delivered text> -> the run's log closing it at Step 9 with that text, the plan snapped
+  printf 'run/v1|ev=step|n=9|delivered=%s|at=2026-10-08T13:00:00Z\n' "$1" >> "$HF_REC"
   s42_snap "$HF_R" "$HF_P"
 }
 hf_world closed
 poke "$HF_R" handoff
 expect_eq "D0 precondition: the open handoff is written" "0" "$RC"
-hf_close "- Step 9: delivered: 2026-10-08T13:00Z wave-01-fixture 9.9.9 — closed by close-out.sh"
+hf_close "2026-10-08T13:00Z wave-01-fixture 9.9.9 — closed by close-out.sh"
 printf '# the brief for w-T2\n' > "$HF_R/.bionic/docs/record/wave-01-fixture/briefs/w-T2.md"
 hf_poke "$HF_R" "$HF_C" handoff
 expect_eq "D1 handoff on a delivered plan exits 0" "0" "$RC"
@@ -470,7 +471,7 @@ HF_WS="$(git -C "$HF_R" rev-parse --short wave/01-fixture)"
 expect_eq "OW0 precondition: the working branch is not merged into trunk (a parked run's branch is kept)" "no" \
   "$(git -C "$HF_R" merge-base --is-ancestor wave/01-fixture trunk && echo yes || echo no)"
 printf '\n## Wake Note\n\n%s\n' "$HF_WHY" >> "$HF_P"
-hf_close "- Step 9: delivered: parked on wave/01-fixture @ $HF_WS — $HF_WHY (2026-10-08T13:00Z wave-01-fixture); the Step 8/9 tail was performed by close-out.sh without the merge act and attested against the commit gate; continuation at record/wave-01-fixture/continuation.md"
+hf_close "parked on wave/01-fixture @ $HF_WS — $HF_WHY (2026-10-08T13:00Z wave-01-fixture); the Step 8/9 tail was performed by close-out.sh without the merge act and attested against the commit gate; continuation at record/wave-01-fixture/continuation.md"
 poke "$HF_R" handoff
 expect_eq "OW1 handoff on a parked plan exits 0" "0" "$RC"
 expect_eq "OW1d …in the document's order" "$HF_HEADS" "$(hf_heads "$HF_F")"
@@ -489,7 +490,7 @@ hf_world closed-pr no
 sed 's/^scale: wave$/scale: task/' "$HF_P" > "$HF_P.s" && mv "$HF_P.s" "$HF_P"
 s42_snap "$HF_R" "$HF_P"
 poke "$HF_R" handoff
-hf_close "- Step 9: delivered: 2026-10-08T13:00Z wave-01-fixture 9.9.9 — closed by close-out.sh"
+hf_close "2026-10-08T13:00Z wave-01-fixture 9.9.9 — closed by close-out.sh"
 poke "$HF_R" handoff
 expect_eq "OW3 handoff on a task-scale plan whose pull request is owed exits 0" "0" "$RC"
 git -C "$HF_R" branch -f trunk wave/01-fixture
@@ -561,8 +562,7 @@ LEDGER
 hf_poke "$HF_R" "$HF_C" handoff
 expect_eq "RS0 precondition: the document is written by the real verb while bound" "0" "$RC"
 expect_eq "RS0b precondition: …its last line is the door" "/bionic:canonical-sdlc $HF_DOOR" "$(tail -1 "$HF_F")"
-awk -v s="$HF_PRED" '/^approved-by:/ { print; print "- session: " s " bound 2026-10-08T09:00:00Z by bind"; next } { print }' \
-  "$HF_P" > "$HF_P.p" && mv "$HF_P.p" "$HF_P"
+printf 'run/v1|ev=bind|session=%s|by=bind|at=2026-10-08T09:00:00Z\n' "$HF_PRED" >> "$HF_REC"
 HF_PRED_ROSTER="$(roster_of "$HF_R" "$HF_PRED")"
 roster_header > "$HF_PRED_ROSTER"
 roster_row_fixture session="$HF_PRED" status=identified name=w-pred agent_id=a-w-pred-3800000000000001 \
@@ -677,9 +677,8 @@ expect_eq "RX5b ls payload/commands payload/skills has no resume" "0" \
 section "§POINTER-AGREE: one reader of the pointer, lib/handoff.sh handoff_file_of over the reader; with no pointer the default is today's handoffs file; the plan's pointer answers only while it is the newer fact"
 # ============================================================
 # Each door is asked on one plan: close-out `check` names the file its closed form would be written to; the verb
-# appends its event. FIXTURE FIDELITY: the plan's ## SDLC State naming its integration branch as Step 0 writes it, so
-# check reads the plan through; then a version-14 pointer to an older file in the plan, written before the verb's event,
-# and again after it. fails-when: the stale text answers over the newer event, or the newer text loses to the older event.
+# appends its event. FIXTURE FIDELITY: the plan's header naming its integration branch, so check reads the plan through;
+# then a version-14 pointer to an older file in the plan, written before the verb's event, and again after it. fails-when: the stale text answers over the newer event, or the newer text loses to the older event.
 hf_co() { ( cd "$HF_R" && bash "$BIONIC_HOOKS_DIR/../payload/scripts/close-out.sh" "$HF_P" "$1" 2>&1 ); }  # <verb> -> close-out's output on the plan
 
 pa_check_file() {  # -> the file close-out check says its closed form would be written to
@@ -687,9 +686,6 @@ pa_check_file() {  # -> the file close-out check says its closed form would be w
 }
 HF_OLD="$HF_HOME/2026-10-05-wave-01-fixture.md"
 hf_world pointer-agree no
-awk '/^## SDLC State/ { s = 1 } s && /^current:/ { print "integration-branch: trunk"; s = 0 } { print }' "$HF_P" > "$HF_P.pa" \
-  && mv "$HF_P.pa" "$HF_P"
-s42_snap "$HF_R" "$HF_P"
 expect_eq "PA0 with no pointer, close-out check names today's handoffs file, the one the verb writes" "$HF_DOOR" "$(pa_check_file)"
 poke "$HF_R" handoff
 cp "$HF_F" "$HF_R/$HF_OLD"
