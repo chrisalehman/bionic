@@ -1569,9 +1569,9 @@ shell-lint.test.sh | §CENSUS-COMPLETE-1 | keep | rule: lint — shell-lint.test
 shell-lint.test.sh | §CENSUS-COMPLETE-2 | keep | rule: lint — shell-lint.test.sh census_refusals loses its bad-verdict arm, so a record line whose verdict reads maybe passes (also: the rule-mark-on-a-cull arm) | none (searched 'census_refusals' in tests/)
 shell-lint.test.sh | §CENSUS-COMPLETE-3 | keep | rule: lint — a section call added to a suite under tests/ with no record line under its key, or a suite with no heading, planted in the tree, so the sweep over the real tests tree names it | none (searched 'CENSUS.md' in tests/)
 shell-lint.test.sh | §CENSUS-1 | keep | rule: lint — a section whose only census line is a cull left called in a suite, planted in a scratch tree (also a shared key's culled half, read by whole title), so census_cull_refusals names the suite and the key | none (searched 'census_cull_refusals' and 'culled section present' in tests/)
-shell-lint.test.sh | §CENSUS-2 | keep | rule: lint — a section whose census line is a keep deleted from its suite, or its whole suite deleted, planted in a scratch tree, so census_cull_refusals names the suite and the key | none (searched 'census_cull_refusals' and 'kept section absent' in tests/)
+shell-lint.test.sh | §CENSUS-2 | keep | rule: lint — a section whose census line is a keep deleted from its suite, or its whole suite deleted, planted in a scratch tree, so census_cull_refusals names the suite and the key (also: a baseline section gone with its census lines and no culled line, a split key whose own suite is gone, and the half of a narrowed key that went, each refused by the gone-with-no-culled-line arm) | none (searched 'census_cull_refusals', 'kept section absent' and 'gone with no culled line' in tests/)
 shell-lint.test.sh | §CENSUS-3 | keep | rule: lint — a `## Culled` line naming a record whose defect carries a rule: prefix, or whose verdict is keep, planted in a scratch census, so census_cull_refusals names it | none (searched 'census_cull_refusals' and 'rule pin culled' in tests/)
-shell-lint.test.sh | §CENSUS-4 | keep | rule: lint — a section the census culls left in, or a kept section deleted, in the real tests tree, so the sweep over tests/ with tests/CENSUS.md names it | none (searched 'census_cull_refusals' and '## Culled' in tests/)
+shell-lint.test.sh | §CENSUS-4 | keep | rule: lint — a section the census culls left in, or a kept section deleted, or a section of the baseline census deleted with no culled line, in the real tests tree, so the sweep over tests/ with tests/CENSUS.md names it | none (searched 'census_cull_refusals' and '## Culled' in tests/)
 shell-lint.test.sh | §CENSUS-GONE | keep | rule: lint — shell-lint.test.sh census_cull_refusals loses its gone-with arm (a listed name still refused, an unlisted one admitted) or its unverified-catcher arm (a new culled duplicate on an unverified catcher passes, or a baseline line is refused), planted in a scratch census | none (searched 'gone with an unlisted name' and 'unverified catcher culled' in tests/)
 shell-lint.test.sh | §ADR | keep | rule: lint — an ADR whose front-matter status: says Accepted over a ## Status section that still says Proposed, planted in a scratch directory (also nested, in a second directory, and the real tree's ADR-062), so adr_refusals names the file and both words | none (searched 'adr_refusals' and '## Status' in tests/)
 shell-lint.test.sh | §HEADER | keep | rule: lint — a header entry for a section the body lacks, or a body section the header's list omits, planted in a scratch suite and in a copy of shell-lint's own header, so header_refusals names the suite and the key (also the real tree's release-check §REL-1.22.0) | none (searched 'header_refusals' and 'header lists' in tests/)
@@ -1813,10 +1813,36 @@ worktree.test.sh | §SUCCESSOR | keep | rule: door refusal — payload/scripts/l
 
 ## Culled
 
+agent-context-guard.test.sh §G0 — duplicate
+agent-context-guard.test.sh §G1 — cut with its suite in 2b5eace4d: its main-thread and no-roster rows moved to stop.test.sh §EVENTS; its armed-guard rows went with the channel arms
+agent-context-guard.test.sh §G2 — cut with its suite in 2b5eace4d: its main-thread and no-roster rows moved to stop.test.sh §EVENTS; its armed-guard rows went with the channel arms
+agent-context-guard.test.sh §G3 — cut with its suite in 2b5eace4d: its foreign-roster row moved to stop.test.sh §EVENTS; the record names hook-adoption.test.sh §5d for the malformed key
+agent-context-guard.test.sh §G4 — cut with its suite in 2b5eace4d: its unparseable-payload row moved to stop.test.sh §EVENTS; the record names context.test.sh §2 for the missing cwd, and the target rows went with the guard script
+agent-context-guard.test.sh §G5 — cut with its suite in 2b5eace4d: the nested dispatch's ledger skip went with the dispatch channel arm, moved nowhere
+agent-context-guard.test.sh §G6 — cut with its suite in 2b5eace4d: moved nowhere; the record names hook-adoption.test.sh §2 and root.test.sh §2 for its rows
+agent-context-guard.test.sh §G7 — duplicate
+agent-context-guard.test.sh §G8 — cut with its suite in 2b5eace4d: its unengaged and control rows moved to stop.test.sh §EVENTS
+agent-context-guard.test.sh §G9 — duplicate
 archive.test.sh §0 — duplicate
 archive.test.sh §5 — duplicate
 archive.test.sh §6 — duplicate
 archive.test.sh §7 — vacuous
+asks.test.sh §ONE-REGISTER — cut with its suite in 01a7bf644: the record moves the ask library's rules to reader.test.sh §ASK-LOG and leaves each ask's closing to its own verb's suite
+asks.test.sh §HELD — cut with its suite in 01a7bf644: the record leaves each ask's closing to its own verb's suite, and its HELD-8 row, close-out's delivering run closing hold:merge, pinned nowhere
+asks.test.sh §HELD-FILL — cut with its suite in 01a7bf644: the record moves the ask library's rules to reader.test.sh §ASK-LOG and leaves each ask's closing to its own verb's suite
+asks.test.sh §FAILED — cut with its suite in 01a7bf644: moved to reader.test.sh §ASK-DOORS
+asks.test.sh §FLAG — cut with its suite in 01a7bf644: the record moves the ask library's rules to reader.test.sh §ASK-LOG and leaves each ask's closing to its own verb's suite
+asks.test.sh §STOP — cut with its suite in 01a7bf644: the record moves the ask library's rules to reader.test.sh §ASK-LOG and leaves each ask's closing to its own verb's suite
+asks.test.sh §OPENED — cut with its suite in 01a7bf644: the record moves the ask library's rules to reader.test.sh §ASK-LOG and leaves each ask's closing to its own verb's suite
+asks.test.sh §ROUNDS — cut with its suite in 01a7bf644: the record moves the ask library's rules to reader.test.sh §ASK-LOG and leaves each ask's closing to its own verb's suite
+asks.test.sh §BORN-CLOSES — cut with its suite in 01a7bf644: the record moves the ask library's rules to reader.test.sh §ASK-LOG and leaves each ask's closing to its own verb's suite
+asks.test.sh §WAITS — cut with its suite in 01a7bf644: the record moves the ask library's rules to reader.test.sh §ASK-LOG and leaves each ask's closing to its own verb's suite
+asks.test.sh §ANSWER — cut with its suite in 01a7bf644: the record moves the ask library's rules to reader.test.sh §ASK-LOG and leaves each ask's closing to its own verb's suite
+asks.test.sh §RULE — cut with its suite in 01a7bf644: the record leaves each ask's closing to its own verb's suite, and its RU-4 row, decisions rule closing decide:D<n>, pinned nowhere
+asks.test.sh §ONE-BLOCKS — cut with its suite in 01a7bf644: the record moves the ask library's rules to reader.test.sh §ASK-LOG and leaves each ask's closing to its own verb's suite
+asks.test.sh §SHARED — cut with its suite in 01a7bf644: the record moves the ask library's rules to reader.test.sh §ASK-LOG and leaves each ask's closing to its own verb's suite
+asks.test.sh §SETTLED — cut in 4cb0bf0e1 as a duplicate: each of its seven mutants goes red in bring-forward.test.sh §DECISIONS or sitrep.test.sh §ONE-PARSER
+asks.test.sh §SWEEP — cut with its suite in 01a7bf644: moved to reader.test.sh §ASK-DOORS
 background-suite-guard.test.sh §B0 — duplicate
 background-suite-guard.test.sh §B3 — duplicate
 background-suite-guard.test.sh §B5 — duplicate
@@ -1830,14 +1856,21 @@ bash-walls.test.sh §7 — duplicate
 bash-walls.test.sh §8 — duplicate
 bash-walls.test.sh §11 — duplicate
 bash-walls.test.sh §12 — duplicate
+bash-walls.test.sh §PENDING-T4 — cut in 0d98aef8f: it proved only the matrix arm's path for a page not at 15; the arms that stay are proved at 15 by canonical-sdlc-evidence-gate-2.test.sh §Section 32b and canonical-sdlc-evidence-gate.test.sh rows 9o to 9q
 binding.test.sh §1 — duplicate
 binding.test.sh §4 — duplicate
+binding.test.sh §SIZE — cut in c2dc10a8c: a binding act appends the session's one event and writes no plan
 booked.test.sh §WALL — duplicate
+canonical-sdlc-evidence-gate-2.test.sh §DRY-ORIGIN — cut in cc7ae5946: no act makes a dry copy of a plan, so the section that drove the gate with a hand-built copy and marker goes
+canonical-sdlc-evidence-gate-2.test.sh §Section 30 — cut in 0d98aef8f: it proved only the matrix arm's path for a page not at 15; the arms that stay are proved at 15 by canonical-sdlc-evidence-gate-2.test.sh §Section 32b and canonical-sdlc-evidence-gate.test.sh rows 9o to 9q
+canonical-sdlc-evidence-gate-2.test.sh §Section 32 — cut in 0d98aef8f: it proved only the matrix arm's path for a page not at 15; the arms that stay are proved at 15 by canonical-sdlc-evidence-gate-2.test.sh §Section 32b and canonical-sdlc-evidence-gate.test.sh rows 9o to 9q
+canonical-sdlc-evidence-gate-2.test.sh §Section 33 — cut in 0d98aef8f: it proved only the matrix arm's path for a page not at 15; the arms that stay are proved at 15 by canonical-sdlc-evidence-gate-2.test.sh §Section 32b and canonical-sdlc-evidence-gate.test.sh rows 9o to 9q
 canonical-sdlc-evidence-gate.test.sh §Section 3 — duplicate
 canonical-sdlc-evidence-gate.test.sh §Section 4 — duplicate
 canonical-sdlc-evidence-gate.test.sh §Section 6 — duplicate
 canonical-sdlc-evidence-gate.test.sh §Section 7 — duplicate
 canonical-sdlc-evidence-gate.test.sh §Section 8 — duplicate
+canonical-sdlc-evidence-gate.test.sh §Section 5 — cut in a45aabb82: only a page at 14 reached its arm, and the commit gate refuses a live 14 first; the placeholder ban the matrix keeps is proved at 15
 card.test.sh §Section 3 — duplicate
 card.test.sh §Section 4 — duplicate
 card.test.sh §ABBR — duplicate
@@ -1847,8 +1880,13 @@ close-out-1.test.sh §0r — gone with scale_branch_number
 close-out-1.test.sh §3 — duplicate
 close-out-1.test.sh §4b — duplicate
 close-out-1.test.sh §FIX-SHAPE — vacuous
+close-out-1.test.sh §0q — cut in 65a3632ad: a live 14 is refused at the commit gate before the close's first act, so the row that drove one through the close goes
+close-out-1.test.sh §4e — cut in e5177c916: a page at 15 holds no Step line
+close-out-3.test.sh §INSERT — cut in d30c808bb: a page at 15 holds no Step line
 close-out-4.test.sh §APPROVED-HEAD — duplicate
 close-out-4.test.sh §MOCK-UP — prose pin
+close-out-4.test.sh §DELIVERED — gone with continuation-fill
+close-out-4.test.sh §PREFLIGHT-RECORD — cut in 45bfff013: the preflight copy goes, with its origin mapping
 cmd-class.test.sh §C0 — duplicate
 cmd-class.test.sh §C2/C3 — duplicate
 cmd-class.test.sh §C5 — duplicate
@@ -1876,6 +1914,7 @@ decision-skill.test.sh §REFERENT — prose pin
 detect-probes.test.sh §Group 1 — duplicate
 detect-probes.test.sh §Group 6f — duplicate
 detect-probes.test.sh §Group 7 — vacuous
+detect-probes.test.sh §Group 6d3 — cut in d5b841489: a timing pin; the poll's first-tenth split is no longer timed
 detect.test.sh §LOADED — the field reader — duplicate
 dispatch-preflight-2.test.sh §S2 — duplicate
 dispatch-preflight-2.test.sh §S3 — duplicate
@@ -1899,6 +1938,7 @@ dispatch-preflight-4b.test.sh §T72 — gone with brief_validate_fields
 dispatch-preflight-5.test.sh §QUESTIONS — gone with lift_contract_fields
 dispatch-preflight.test.sh §S22b — duplicate
 dispatch-preflight.test.sh §budget-markers — duplicate
+doctor-fleet.test.sh §Section 7 — cut in f40b8d112: a width pin on the fullest page; the CLI-absent page and the reads suite keep the width rule on other pages
 doctor-patrol.test.sh §Section 8 — duplicate
 doctor-reads.test.sh §Section 9 — duplicate
 doctor-restart.test.sh §Section 2 — duplicate
@@ -1909,11 +1949,14 @@ doctor-walls.test.sh §Section 4 — duplicate
 doctor-walls.test.sh §Section 5 — duplicate
 doctor.test.sh §LOADED — no record: the registry's line — duplicate
 doctor.test.sh §LOADED — a record that is not a live session's, or names no checkout — duplicate
+door-card.test.sh §GROW — gone with matrix-render
 door-landing.test.sh §WORLD: the fixture carries the check's closure, the real changelog and a relative declaration — vacuous
 door-landing.test.sh §WORLD: the fixture carries the check's closure, the real changelog and a relative declaration — tally
+door-landing.test.sh §JUDGED — gone with row-landed
 engage.test.sh §E4 (AC-4) — duplicate
 engage.test.sh §E7 — duplicate
 execution-recorder.test.sh §Sections 2-5 — vacuous
+execution-recorder.test.sh §Section 1 — cut in 2f22cc8c0: a source-order pin of the Bash early exit, a cost and not an answer
 fail-direction-table.test.sh §the missing session key — duplicate
 fail-direction-table.test.sh §the producer's two rows (§7 rows 4 and 5) — duplicate
 farm-out-reminder.test.sh §0 — duplicate
@@ -1930,7 +1973,21 @@ handoff-file.test.sh §BRANCH-AGREE — duplicate
 hook-adoption.test.sh §0 — duplicate
 hook-adoption.test.sh §5 — duplicate
 hook-adoption.test.sh §5c — duplicate
+hook-latency.test.sh §1 — cut with its suite in c80bdf1d0: a fork count on a hook path, the lowest class of what goes uncaught
+hook-latency.test.sh §2 — cut with its suite in c80bdf1d0: a fork count on a hook path, the lowest class of what goes uncaught
+hook-latency.test.sh §3 — vacuous
+hook-latency.test.sh §4 — cut with its suite in c80bdf1d0: a command count on a hook path, the lowest class of what goes uncaught
+hook-latency.test.sh §5 — cut with its suite in c80bdf1d0: a command count on a hook path, the lowest class of what goes uncaught
+hook-latency.test.sh §6 — cut with its suite in c80bdf1d0: a command count on a hook path, the lowest class of what goes uncaught
+hook-latency.test.sh §7 — vacuous
+hook-latency.test.sh §8 — vacuous
+hook-latency.test.sh §9 — cut with its suite in c80bdf1d0: a fork count on a hook path, the lowest class of what goes uncaught
+hook-latency.test.sh §10 — cut with its suite in c80bdf1d0: a fork count on a hook path, the lowest class of what goes uncaught
+hook-latency.test.sh §11 — cut with its suite in c80bdf1d0; its two no-rewrite rows came back as bash-walls.test.sh §CARRY in 31cb0423c
+hook-latency.test.sh §PLACE — cut with its suite in c80bdf1d0: a cost count on a hook path, the lowest class of what goes uncaught
 hook-timeout.test.sh §3 — duplicate
+hook-timeout.test.sh §3b — cut in ed6eaebb1: it counts a cmd_effects pair no production comment cites as its measurement
+hook-timeout.test.sh §4 — cut in ed6eaebb1: it counts the old-format task-add transaction
 interpreter-pin.test.sh §3 the planted 3.2 incompatibilities — duplicate
 interpreter-pin.test.sh §6 one pin, one owner — vacuous
 jit.test.sh §Group 1 — duplicate
@@ -1944,6 +2001,7 @@ landing-line-2.test.sh §LABELS — duplicate
 landing-line-2.test.sh §DEBT-LINE — duplicate
 landing-line-2.test.sh §REVIEW-BORN — duplicate
 landing-line-2.test.sh §FIELDS — duplicate
+landing-line-2.test.sh §RETIER — gone with matrix-retier
 live-agents.test.sh §A — duplicate
 live-agents.test.sh §F — duplicate
 live-agents.test.sh §G — duplicate
@@ -1979,6 +2037,7 @@ release-check.test.sh §REL-1.23.0 — prose pin
 release-check.test.sh §REL-1.24.0 — prose pin
 release-check.test.sh §REL-1.25.0 — prose pin
 release-check.test.sh §REL-1.26.0 — prose pin
+release-check.test.sh §REL-1.27.0 — cut in 3b633c154: the omission it shared with the fixture section is held by the fixture sections, which go red under it
 render.test.sh §Section 2 — duplicate
 render.test.sh §Section 10 — vacuous
 render.test.sh §Section 11 — prose pin
@@ -2000,7 +2059,17 @@ runner-width.test.sh §NO-RETRY a suite red once stays red in the log, run once 
 scale-profile.test.sh §TABLE — duplicate
 seam-resolution.test.sh §Group 1 — duplicate
 seam-resolution.test.sh §Group 4 — duplicate
+session-poker-2.test.sh §Section 35 — gone with fill-report
+session-poker-4.test.sh §CLOSE-TASK — gone with matrix-render
+session-poker-4.test.sh §EVENT — gone with row-landed
+session-poker-4.test.sh §HAND-SUITES — gone with row-landed
+session-poker-4.test.sh §RC-DEFER §RC-STATED §RC-PARSE — gone with finding-stated
+session-poker-4.test.sh §DELIVER-CELL §STEP8-KEYS §NAMES-A-VERB — narrowed in 254357ee6: a landing writes nothing of its own to the plan: row-landed and deliver go
+session-poker-4.test.sh §SERVES — gone with matrix-render
+session-poker-4.test.sh §STEP-FIELD — narrowed in 98d22b14b: the verbs that wrote a step's line, its fields, the regression's setting and its runs' count go
+session-poker-4.test.sh §VERDICTS §DISCHARGE — narrowed in 0a02f0ef2: discharge and the review's auditor-cell and auditor-wave writes go; the verdict is the evidence review at the head
 session-poker-5.test.sh §WORD — duplicate
+session-poker-5.test.sh §RETIER — gone with matrix-retier
 session-start.test.sh §10 — duplicate
 session-sweep.test.sh §7. session-start.sh's own silent auto-sweep (R2, ticket-30, AC-R2.1/2.2/2.3) — duplicate
 session-sweep.test.sh §7b. AC-R2.2 — duplicate
@@ -2010,9 +2079,22 @@ sitrep-card.test.sh §REASONS — duplicate
 sitrep-card.test.sh §SKILL — prose pin
 sitrep.test.sh §FACTS — duplicate
 sitrep.test.sh §SKILL — prose pin
+sitrep.test.sh §COUNTS — cut in c33e7a954: a wording row
+sitrep.test.sh §WAIT-WORDS — cut in c33e7a954: a wording row
 spawn-worktree.test.sh §Group 1 — duplicate
 spawn-worktree.test.sh §Group 2 — duplicate
 spawn-worktree.test.sh §Group 11 — duplicate
+stop-guard.test.sh §Section 1 — cut with its suite in 2b5eace4d: its relevance and source-order rows moved to stop.test.sh §EVENTS
+stop-guard.test.sh §BID — cut with its suite in 2b5eace4d: its task-shaped Bash rows moved to stop.test.sh §EVENTS
+stop-guard.test.sh §Section 2 — vacuous
+stop-guard.test.sh §Section 3 — vacuous
+stop-guard.test.sh §Section 4 — duplicate
+stop-guard.test.sh §Section 4a — duplicate
+stop-guard.test.sh §Section 5 — cut with its suite in 2b5eace4d: its look rows moved to stop.test.sh §EVENTS
+stop-guard.test.sh §Section 6a — cut with its suite in 2b5eace4d: its no-id refusal and Fix-line rows moved to stop.test.sh §EVENTS
+stop-guard.test.sh §Section 6b — vacuous
+stop-guard.test.sh §Section 7 — cut with its suite in 2b5eace4d: its hostile-path rows moved to stop.test.sh §EVENTS
+stop-guard.test.sh §Sections 8 and 9 — vacuous
 stop.test.sh §3 — duplicate
 stop.test.sh §5 — duplicate
 units.test.sh §0 — duplicate
@@ -2021,4 +2103,6 @@ units.test.sh §6b — duplicate
 units.test.sh §STEP-FIELD — gone with units_step_field
 version-compare.test.sh §Section 2 — duplicate
 width.test.sh §Section 3 — duplicate
+words.test.sh §RED-ORDER — cut in fad25cc12: the regression-run verb and task-add's born-regression refusal hold the decision its sentence describes
+words.test.sh §REGRESSION-ONCE — cut in fad25cc12: the regression-run verb and task-add's born-regression refusal hold the decision its sentence describes
 worktree.test.sh §Group 1 — duplicate
