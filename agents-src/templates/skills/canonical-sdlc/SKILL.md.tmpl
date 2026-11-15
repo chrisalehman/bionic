@@ -158,7 +158,7 @@ Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `inten
 | 0 Configure | `steps/0.md` | `canonical-sdlc` | Frontmatter complete, matrix derived, user confirmed, task list created |
 | 1 Scope | `steps/1.md` | `agent-skills:idea-refine` | Refined idea + explicit "Not Doing" + alternatives lens cites prior art; writes `wave-NN-<slug>.requirements.md` — numbered requirements/user stories with provenance and acceptance criteria, plus Not Doing |
 | 2 Design | `steps/2.md` | `agent-skills:spec-driven-development` | Every requirement has an acceptance criterion; every criterion cites its `provenance:`; wave+ carries a governing design; writes `wave-NN-<slug>.spec.md` — the technical design, ownership table, and the Eval design table |
-| 3 Plan | `steps/3.md` | `superpowers:writing-plans` | No placeholders; `integration-branch:` present; matrix locked; tasks tagged; user approved; writes `wave-NN-<slug>.plan.md` — tasks, sequencing, and the verification matrix rendered from Step 2's Eval design |
+| 3 Plan | `steps/3.md` | `superpowers:writing-plans` | No placeholders; `integration-branch:` present; wave shape locked; tasks tagged; user approved; writes `wave-NN-<slug>.plan.md` — its header, `## Goal`, `## Tasks` and a section per row |
 | 4 Implement | `steps/4.md` | `agent-skills:incremental-implementation` | Every task RED before GREEN; assumptions logged |
 | 5 Verify | `steps/5.md` | `superpowers:verification-before-completion` | Walk artifact in `record/`; every matrix row discharged at tier or waived; auditor CONFIRMED; regression run once |
 | 6 Review | `steps/6.md` | `canonical-sdlc` | One fact per owed question at the head, or its waiver |

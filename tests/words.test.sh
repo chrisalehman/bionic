@@ -355,4 +355,18 @@ expect_eq "BN2 the swap is refused (exit 1) and nothing is drawn" "1|0" "$WR_RC|
 expect_contains "BN2b …naming each number beside the word it does not stand by" 'says 1 beside "green"' "$(cat "$TMP/wr.err")"
 expect_contains "BN2c …and the other" 'says 3 beside "red"' "$(cat "$TMP/wr.err")"
 
+# ── §GONE ────────────────────────────────────────────────────────────────────
+section "§GONE: no file of the loaded set names a deleted plan section as a part of a plan; a plant on a copy goes red"
+
+# The set is payload/scripts/lib/walls.sh `loaded_set`, the net-zero wall's list, read by sourcing it, never retyped.
+# fails-when: a file of the set says "verification matrix" in any case or "ledger rows in the plan", or the search
+# reads none of the set, so the planted copy passes.
+gone_hits() { ( cd "$1" && . "$REPO/payload/scripts/lib/walls.sh" >/dev/null 2>&1 && /usr/bin/grep -n -i -E 'verification matrix|ledger rows in the plan' $(loaded_set) /dev/null ); }
+GONE_SET="$(cd "$REPO" && . payload/scripts/lib/walls.sh >/dev/null 2>&1 && printf '%s\n' $(loaded_set))"
+while IFS= read -r f; do mkdir -p "$TMP/gone/${f%/*}" && cp "$REPO/$f" "$TMP/gone/$f"; done <<< "$GONE_SET"
+printf '\nPLANT-1 the Verification Matrix.\n' >> "$TMP/gone/skills/canonical-sdlc/SKILL.md"; printf '\nPLANT-2 ledger rows in the plan.\n' >> "$TMP/gone/agents/implementor.md"
+expect_eq "GN1 the set is read: more than 20 members, each a file" "yes|0" "$([ "$(printf '%s\n' "$GONE_SET" | /usr/bin/grep -c .)" -gt 20 ] && echo yes)|$(while IFS= read -r f; do [ -f "$REPO/$f" ] || echo "$f"; done <<< "$GONE_SET" | /usr/bin/grep -c .)"
+expect_eq "GN2 the planted copy of the set is refused at both plants" "2" "$(gone_hits "$TMP/gone" | /usr/bin/grep -c 'PLANT-[12]')"
+expect_empty "GN3 the shipped set names neither (the same search over the files the copy was made from)" "$(gone_hits "$REPO")"
+
 finish
