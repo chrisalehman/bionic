@@ -483,6 +483,9 @@ fc_typed 'frame only'
 poke "$RFC" reply "$FC_WD"
 expect_eq "REPLY-8 words the user never typed: refused, exit 1, before any verb runs, saying no prompt holds them" "1|same|yes" \
   "$RC|$(cmp -s "$TMPROOT/fc-before" "$PFC" && echo same || echo changed)|$(fc_has "$OUT" 'stand in no prompt the user typed')"
+said_as sdk "$RFC" "$FC_WD"; poke "$RFC" reply "$FC_WD"
+expect_eq "REPLY-8b …and the same words in a prompt a program sent: refused alike, the plan byte-identical" "1|same|yes" \
+  "$RC|$(cmp -s "$TMPROOT/fc-before" "$PFC" && echo same || echo changed)|$(fc_has "$OUT" 'stand in no prompt the user typed')"
 fc_typed "$FC_WD" "$FC_WR"
 s57_commit "$RFC" CHANGELOG.md 'a later release line' >/dev/null
 poke "$RFC" reply "$FC_WD"

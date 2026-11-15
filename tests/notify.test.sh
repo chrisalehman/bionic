@@ -300,7 +300,7 @@ nt_stop "$RO"
 expect_eq "N4b the next Stop sends it: one more, not two (the first key is already sent)" "2" "$(nt_calls)"
 expect_contains "N4c …with its own line" "body=Approve release? Reply \"approved\"." "$(nt_last)"
 POKE_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-poke "$RO" approve release 'Ship it.'
+said_as typed "$RO" 'Ship it.'; poke "$RO" approve release 'Ship it.'
 POKE_BOUND="$POKE_BOUND_WAS"
 expect_eq "N5 the answer verb records the approval (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
@@ -541,7 +541,7 @@ expect_eq "AK4 a later turn on the same unresolved approval sends nothing" "1" "
 expect_eq "AK4a …and the store holds one open item for it, not two" "1" \
   "$(nt_owed "$RK" owed_list | cut -f1 | /usr/bin/grep -c '^approve:release$')"
 POKE_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
-poke "$RK" approve release 'Ship it.'
+said_as typed "$RK" 'Ship it.'; poke "$RK" approve release 'Ship it.'
 POKE_BOUND="$POKE_BOUND_WAS"
 expect_eq "AK5 the approve verb records the user's reply (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
@@ -725,7 +725,7 @@ expect_eq "AK-9 precondition: disposition exits 0" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_eq "AK-9a precondition: it opens one item per finding needing the person: two of structure, one of adversarial" \
   "$FW_KA,$FW_K1,$FW_K2" "$(cw_open "$RFW")"
-poke "$RFW" waive structure 'ship it as it stands'
+said_as typed "$RFW" 'ship it as it stands'; poke "$RFW" waive structure 'ship it as it stands'
 POKE_BOUND="$POKE_BOUND_WAS"
 expect_eq "AK-9b precondition: waive records the waiver (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"

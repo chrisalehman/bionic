@@ -319,7 +319,11 @@ pah_world fold "" 0; ( in_fixture "$PAH_P" || exit 1; bound_marker "$PAH_P" pah-
 PF_POKE() { TMPDIR="$(pf_tmp "p$RANDOM")" PAH_POKER="$PF_ST/hooks/session-poker.sh" PAH_IN="$1" pah_poke "$PAH_P" pah-fold "${@:2}"; pfu "$PAH_RC" "$PAH_OUT" "$PF_PAT"; }  # <function the fold fails in> <verb…> -> exit|lines of PF_PAT|could-not-read lines
 PF_PAT='whole suite: '; expect_eq "FOLD-3 the release card over a fold that fails is not drawn, exit 2; whole, drawn" "2|0|1~0|1|0" "$(PF_POKE poker_verb_release_approval release-approval --preview "$PAH_PLAN")~$(PF_POKE none release-approval --preview "$PAH_PLAN")"
 PF_PAT='^hand-holds: total='; expect_eq "FOLD-4 the hand-holds count over a fold that fails says it could not be read; whole, its total" "0|0|1~0|1|0" "$(PF_POKE reader_facts landing-report --hand-holds "$PAH_PLAN")~$(PF_POKE none landing-report --hand-holds "$PAH_PLAN")"
-PF_PAT='question=structure head='; expect_eq "FOLD-5 a waiver over a fold that fails is refused, nothing written; whole, its event is written to the run's log" "2|0|1~0|1|0" "$(PF_POKE reader_facts waive structure 'waive it, the person said')~$(PF_POKE none waive structure 'waive it, the person said')"
+# The person typed the waiver's words in this session: its transcript under a config of this check's own, at the fixture's
+# project name, and its load record there, the two witnesses the waive verb holds a waiver's words to (lib/said.sh).
+PF_TX="$SANDBOX/pf-cfg/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "$REPO_ROOT/payload/scripts/lib" "$(cd "$PAH_P" && pwd -P)")"; mkdir -p "$PF_TX" "$PAH_P/.bionic/tmp"
+jq -c '.message.content = "waive it, the person said"' "$REPO_ROOT/tests/fixtures/transcript-move/typed.jsonl" > "$PF_TX/pah-fold.jsonl"; : > "$PAH_P/.bionic/tmp/loaded-pah-fold.state"
+PF_PAT='question=structure head='; expect_eq "FOLD-5 a waiver over a fold that fails is refused, nothing written; whole, its event is written to the run's log" "2|0|1~0|1|0" "$(CLAUDE_CONFIG_DIR="$SANDBOX/pf-cfg" PF_POKE reader_facts waive structure 'waive it, the person said')~$(CLAUDE_CONFIG_DIR="$SANDBOX/pf-cfg" PF_POKE none waive structure 'waive it, the person said')"
 PF_SS="$(sed -n '/^SS_FACTS_PLAN=/p;/^ss_ask() {/,/^}/p;/^print_bound_line() {/,/^}/p' "$BIONIC_HOOKS_DIR/session-start.sh")"
 PF_B='BIONIC_LIB="$1"; DOCS=""; HOOK_ROOT=x; eval "$2"; print_bound_line "bound-open $3"'
 PF_PAT='current: 8$'; expect_eq "FOLD-6 the bound line over a fold that fails says the facts could not be read where the step stands; whole, the step" "0|0|1~0|1|0" \

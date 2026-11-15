@@ -318,6 +318,17 @@ poke() {  # <repo> <args...> -> sets OUT, RC; POKE_BASH names the interpreter (d
   fi
   OUT="$(cat "$TMPROOT/poke.out")"
 }
+# said_as <shape> <repo> <words>... -> this session's transcript under CLAUDE_CONFIG_DIR, at the repository's own project
+# name, gains each of <words> as a prompt in the shape of tests/fixtures/transcript-move/<shape>.jsonl (`typed`: the
+# person typed it; `sdk`: a program sent it), and the session's load record stands under the repository: the two
+# witnesses lib/said.sh asks before it reads a word. Appended, so words given earlier stay.
+said_as() {
+  local fx="$BIONIC_SCRIPTS_DIR/tests/fixtures/transcript-move/$1.jsonl" d t
+  d="$CLAUDE_CONFIG_DIR/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_slug "$2"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$2")"
+  mkdir -p "$d" "$2/.bionic/tmp"; [ -s "$d/$SID.jsonl" ] || cat "${fx%/*}/frame.jsonl" > "$d/$SID.jsonl"
+  [ -f "$2/.bionic/tmp/loaded-$SID.state" ] || printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$2" > "$2/.bionic/tmp/loaded-$SID.state"
+  for t in "${@:3}"; do jq -c --arg t "$t" '.message.content = $t' "$fx" >> "$d/$SID.jsonl"; done
+}
 
 # ta_add <repo> <id> <step> <kind> <task> <agent> <deps> <size> <serves> <Files> [<reads>] [--born <b>] [--questions <q>]
 #   -> OUT, RC: the orchestrator's edit of the row, by the header, then the plan kept for s42_unchanged, then task-add of it;

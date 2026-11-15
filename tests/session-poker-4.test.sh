@@ -345,7 +345,7 @@ expect_contains "AW-1b …the item the first failing reading's registration open
 SEV_AW="$(sev_store | /usr/bin/grep "|key=waive:adversarial|")"; poke "$RSEV" current 8
 expect_eq "AW-2 a second refusal on the same failing question opens nothing new: one open round, the key's rounds unchanged" "1|1|same" \
   "$RC|$(sev_store | /usr/bin/grep -c '|key=waive:adversarial|state=open|')|$([ "$(sev_store | /usr/bin/grep '|key=waive:adversarial|')" = "$SEV_AW" ] && echo same)"
-poke "$RSEV" waive adversarial 'I waive the adversarial reading for now'
+said_as typed "$RSEV" 'I waive the adversarial reading for now'; poke "$RSEV" waive adversarial 'I waive the adversarial reading for now'
 expect_eq "AW-3 the waive verb records the user's reply (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "AW-3a …and closes the item it answers" "|key=waive:adversarial|state=closed|by=waive|" "$(sev_store)"
@@ -651,8 +651,11 @@ expect_eq "VG-3c AC-20.3 a byte copy of the recorded run's log registers (exit 0
   "$RC|$(s46_proved "$PVG" | /usr/bin/grep -c "^proved: kind=regression head=$VG_A .* evidence=record/wave-01-fixture/whole-copy.log run=[^ ]* head=$VG_A rc=0$")"
 
 # ---------- §REVIEW-RANGE: the user's waiver of a question is where its next reading starts ----------
+vg_waivers() { /usr/bin/grep -c "^run/v1|ev=waiver|question=[a-z]*|head=$1|" "$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "${S46_LIB%/*}" "$PVG")"; }
 poke "$RVG" waive all 'I waive the readings at A'
-expect_eq "VG-2 the user's waiver of every question at A (exit 0)" "0|3" "$RC|$(/usr/bin/grep -c "^run/v1|ev=waiver|question=[a-z]*|head=$VG_A|" "$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "${S46_LIB%/*}" "$PVG")")"
+expect_eq "VG-2a a question's waiver on words no prompt the person typed holds: refused (exit 1), no waiver written" "1|0" "$RC|$(vg_waivers "$VG_A")"
+said_as typed "$RVG" 'I waive the readings at A' 'I waive the readings at C2' 'ship C2' 'ship C3'; poke "$RVG" waive all 'I waive the readings at A'
+expect_eq "VG-2 the user's waiver of every question at A (exit 0)" "0|3" "$RC|$(vg_waivers "$VG_A")"
 VG_C="$(s57_commit "$VG_WT" lib/a.sh C)"
 printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: piece\n' "$VG_A" "$VG_C" > "$VG_DIR/past-waiver.md"
 poke "$RVG" proof-add review record/wave-01-fixture/past-waiver.md --question adversarial --reader vg-crit
