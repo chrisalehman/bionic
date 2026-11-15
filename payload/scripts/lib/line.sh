@@ -148,22 +148,10 @@ line_head() {  # <plan> -> the accepted head
   proof_branch_head "$1" "$root"
 }
 
-# THE RECORD'S READER (wave-39 T17; D18, AC-12.1; burns debt landing-record-grammar): the one reading of a line
-# `line_event` writes, as awk functions a program prefixes and runs with -F'|'. Every field is read by its name,
-# never by its place, so a field the writer adds or moves is still read; the first `<key>=` of a line is its value.
-#   line_ev()     the line's event (`ev=`), or nothing on a line that is not `line/v1|`
-#   line_kv(k)    the value of the line's field <k>, or nothing
-# Every reader of the record reads through it: the fold and the readers below, lib/gate.sh's finished-row read, lib/proof.sh's
-# readers of verdicts, runs, landings and debts, and the poker's parts. A shell caller holding one line asks `line_value`.
-# The body reads any line whose fields are split by FS, so a whitespace-split `debt:` line reads through it too. A line of
-# the run's log (`run/v1|`, lib/log.sh) is an event as a record line is, so `line_ev` names it the same way.
-_LINE_FIELDS_AWK='
-function line_kv(k,   i) { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) return substr($i, length(k) + 2); return "" }
-function line_ev() { return (substr($0, 1, 8) == "line/v1|" || substr($0, 1, 7) == "run/v1|") ? line_kv("ev") : "" }
-'
-line_value() {  # <one record line> <key> -> the value of its field <key>, through line_kv
-  printf '%s\n' "$1" | awk -F'|' -v k="$2" "$_LINE_FIELDS_AWK"'{ print line_kv(k); exit }'
-}
+# THE RECORD'S READER is the reader's own (lib/fields.sh `_LINE_FIELDS_AWK`, `line_value`): the fold and the readers
+# below, lib/gate.sh's finished-row read, lib/proof.sh's readers and the poker's parts all read a line through it.
+# shellcheck source=/dev/null
+. "$_LINE_LIB_DIR/fields.sh"
 line_log() {  # <plan> -> the run's log, beside the landing record
   local rec
   rec="$(line_record "${1:-}")" || return 1
@@ -175,12 +163,27 @@ line_event() {  # <plan> <ev> <key=value>... -> 0 appended, 1 not
   local plan="${1:-}" ev="${2:-}" log
   [ -n "$plan" ] && [ -n "$ev" ] || return 1
   shift 2
-  log="$(line_log "$plan")" || return 1
-  if ! declare -F log_append >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$_LINE_LIB_DIR/log.sh" 2>/dev/null && declare -F log_append >/dev/null 2>&1 || return 1
-  fi
+  log="$(line_log "$plan")" && _line_log_load || return 1
   RUN_LOG="$log" log_append "$ev" "$@" || return 1
+}
+_line_log_load() {  # -> 0 once lib/log.sh's appender is loaded
+  declare -F log_append >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  . "$_LINE_LIB_DIR/log.sh" 2>/dev/null && declare -F log_append >/dev/null 2>&1
+}
+# ONE WRITER FOR EACH EVENT TYPE MORE THAN ONE PLACE APPENDS: each place calls its type's function with its own fields,
+# so a type is written one way. A type that names two facts is told apart by a field it already carries: a part's
+# publication by `part=`, a whole run's verdict by `kind=regression`. A run ends where no plan may be known (the gate's
+# reaper holds a landing record), so its writer takes the run's log.
+line_published_event() { local p="${1:-}"; shift; line_event "$p" published "$@"; }   # <plan> <key=value>...
+line_ready_event() { local p="${1:-}"; shift; line_event "$p" ready "$@"; }
+line_candidate_event() { local p="${1:-}"; shift; line_event "$p" candidate "$@"; }
+line_returned_event() { local p="${1:-}"; shift; line_event "$p" returned "$@"; }
+line_verdict_event() { local p="${1:-}"; shift; line_event "$p" verdict "$@"; }
+line_run_event() {  # <run log> <key=value>... -> 0 appended, 1 not
+  local log="${1:-}"
+  [ -n "$log" ] && shift && _line_log_load || return 1
+  RUN_LOG="$log" log_append run "$@"
 }
 # AN ACT TAKEN BY HAND SAYS WHAT IT WAS AND WHY: every hand event is written here, and one with no reason (empty, blank,
 # or the dash an older writer put for none) is refused with nothing written, so each act the hands question answers
@@ -309,7 +312,7 @@ _line_count_git() {  # <plan> <record> <root> <accepted head>
   while IFS=$'\t' read -r row _ com _; do
     [ -n "$row" ] && [ -n "$com" ] || continue
     git -C "$root" merge-base --is-ancestor "$com" "$head" 2>/dev/null \
-      && line_event "$plan" published "row=${row}" "commit=${head}" kind=git by=- why=- >/dev/null
+      && line_published_event "$plan" "row=${row}" "commit=${head}" kind=git by=- why=- >/dev/null
   done <<EOF
 $(_line_fold "$rec")
 EOF
@@ -327,7 +330,7 @@ EOF
     line_lines "$rec" | awk -F'|' -v r="$row" "$_LINE_FIELDS_AWK"'line_ev() == "published" && line_kv("row") == r { f = 1 } END { exit !f }' 2>/dev/null && continue
     git -C "$root" merge-base --is-ancestor "$tip" "$head" 2>/dev/null || continue
     [ -n "$last" ] && git -C "$root" merge-base --is-ancestor "$tip" "$last" 2>/dev/null && continue
-    line_event "$plan" published "row=${row}" "commit=${head}" kind=git by=- why=- >/dev/null
+    line_published_event "$plan" "row=${row}" "commit=${head}" kind=git by=- why=- >/dev/null
   done <<EOF
 $(units_rows "$plan" 2>/dev/null)
 EOF
@@ -397,7 +400,7 @@ _line_guard() {  # <plan> <row> <root> <head> <candidate> <writer tree> <writer 
   why="$(_wt_bionic_committed "$3" "$4" "$5")" || return 0
   why="${why%/}"
   _wt_refuse_bionic "$6" "$7" "$8" "${why%% *}" "${why#* }" "$(_wt_bionic_kind "$3" "$4")"
-  line_event "$1" returned "row=${2}" why=guard "detail=${why#* }" >/dev/null
+  line_returned_event "$1" "row=${2}" why=guard "detail=${why#* }" >/dev/null
   _line_lock_drop "$9"; return 6
 }
 _line_lock_drop() { _slots_drop "${1%/*}" "$1"; }   # <lock dir>
@@ -1042,7 +1045,7 @@ EOF
   if [ "$LINE_KIND" = hand ] && [ -n "${WT_CHECK_JUDGE:-}" ]; then
     judged="${WT_CHECK_JUDGE:0:12}"; chg="$(_wt_check_judge "$root" "$head" "$cand" 2>/dev/null)" || chg=""
   fi
-  line_event "$plan" published "row=${row}" "commit=${cand}" "kind=${LINE_KIND}" "by=${LINE_BY}" "why=${LINE_WHY}" \
+  line_published_event "$plan" "row=${row}" "commit=${cand}" "kind=${LINE_KIND}" "by=${LINE_BY}" "why=${LINE_WHY}" \
     ${LINE_NUMBERS:+"numbers=${LINE_NUMBERS}"} "branch=${br}" "head=${com}" ${judged:+"judged-by=${judged}"} ${chg:+"changed-here=${chg}"} >/dev/null
   [ -z "$LINE_DEBT_ID" ] \
     || printf 'DEBT %s %s — published red on the declared suite; the run owes a green run of %s (debt %s in %s)\n' \
@@ -1173,7 +1176,7 @@ line_land_by_hand() {  # <tree> <root> <sid> <why> [<suites> <green-at> <log>] -
 # row's suites from the ready event, and the publish's reading of the reviews the row answers reads the verdicts.
 _line_hand_ready() {  # <plan> <row> <commit> <branch> <tree> <suites | empty> -> 0 written
   _line_me
-  line_event "$1" ready "row=$2" "name=-" "commit=$3" "branch=$4" "tree=$5" "suites=${6:-none}" debt=- "carrier=${LINE_ME}"
+  line_ready_event "$1" "row=$2" "name=-" "commit=$3" "branch=$4" "tree=$5" "suites=${6:-none}" debt=- "carrier=${LINE_ME}"
 }
 _line_hand_verdicts() {  # <plan> <row> <green-at> <suites> <log> -> 0 written; 1 with LINE_UNWRITTEN the suite that was not
   local s
@@ -1226,7 +1229,7 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
       if [ "$base" != "$lb" ]; then
         [ -n "$lt" ] || lt="$(landing_tree_take "$root")" || { _wt_refuse "landing-tree-unavailable root=${root}"; rc=2; break; }
         if ! c="$(line_build "$lt" "$base" "$head" "$branch")"; then
-          line_event "$plan" returned "row=${row}" why=conflict "detail=${c:-?}" >/dev/null
+          line_returned_event "$plan" "row=${row}" why=conflict "detail=${c:-?}" >/dev/null
           _wt_refuse "conflict branch=${branch} onto=${onto} files=${c:-<unreadable>} — the row does not merge onto what is ahead of it; merge ${onto} into the tree, land again"; rc=2; break
         fi
         # The comment lint the queue runs (`_line_carry` 3b), over the same range: a comment the row adds that cites
@@ -1234,12 +1237,12 @@ _line_hand() {  # <tree> <onto> <plan> <sid> <why> <suites | empty> <green-at> <
         lo="$(_line_comment_lint "$root" "$base" "$c")"; lc=$?
         case $lc in
           0) ;;
-          1) line_event "$plan" returned "row=${row}" why=lint "detail=$(printf '%s\n' "$lo" | head -1)" >/dev/null
+          1) line_returned_event "$plan" "row=${row}" why=lint "detail=$(printf '%s\n' "$lo" | head -1)" >/dev/null
              printf '%s\n' "$lo" | while IFS= read -r s; do printf 'LINT %s %s\n' "$row" "$s"; done
              _wt_refuse "lint branch=${branch} — a comment the row adds cites the run; say the reason without it, land again"; rc=2; break ;;
           *) _wt_refuse "lint-unreadable row=${row} — ${lo:-the lint printed nothing}"; rc=2; break ;;
         esac
-        line_event "$plan" candidate "row=${row}" "base=${base}" "commit=${c}" "tree=${lt}" >/dev/null
+        line_candidate_event "$plan" "row=${row}" "base=${base}" "commit=${c}" "tree=${lt}" >/dev/null
         lb="$base"
       fi
       line_publish "$plan" "$row"; rc=$?
@@ -1667,7 +1670,7 @@ _line_enter() {  # <plan> <rec> <row> <deadline | empty> <ready event's key=valu
     return 2
   fi
   _LINE_LEASED=1
-  if ! line_event "$plan" ready "$@" "age=${age}" >/dev/null; then
+  if ! line_ready_event "$plan" "$@" "age=${age}" >/dev/null; then
     _line_lock_drop "$lk"
     _wt_refuse "record-unwritable why=proofs-unwritable path=${rec}"
     return 2
@@ -1736,11 +1739,11 @@ EOF
       [ -n "$_LINE_LT" ] || _LINE_LT="$(landing_tree_take "$root")" || { _LINE_LT=""; _wt_refuse "landing-tree-unavailable root=${root}"; return 2; }
       c="$(line_build "$_LINE_LT" "$base" "$com" "$branch")"; rc=$?
       case $rc in
-        0) line_event "$plan" candidate "row=${row}" "base=${base}" "commit=${c}" "tree=${_LINE_LT}" >/dev/null \
+        0) line_candidate_event "$plan" "row=${row}" "base=${base}" "commit=${c}" "tree=${_LINE_LT}" >/dev/null \
              || { _wt_refuse "record-unwritable why=proofs-unwritable path=${rec} branch=${branch}"; return 2; }
            continue ;;
         1) if [ "$base" = "$head" ]; then
-             line_event "$plan" returned "row=${row}" why=conflict "detail=${c:-?}" >/dev/null
+             line_returned_event "$plan" "row=${row}" why=conflict "detail=${c:-?}" >/dev/null
              printf 'CONFLICT %s %s\n' "$row" "${c:-?}"; return 1
            fi
            waitbase="$base"; continue ;;
@@ -1754,7 +1757,7 @@ EOF
       c="$(_line_anchors "$root" "$cand")"; rc=$?
       case $rc in
         0) anchored="$cand" ;;
-        1) line_event "$plan" returned "row=${row}" why=anchor-moved "detail=$(printf '%s\n' "$c" | head -1)" >/dev/null
+        1) line_returned_event "$plan" "row=${row}" why=anchor-moved "detail=$(printf '%s\n' "$c" | head -1)" >/dev/null
            _wt_refuse "anchor-moved row=${row} candidate=${cand} — a suite's mutation anchor no longer holds on the candidate; re-anchor it in that suite or restore the text, then say ready again"
            printf '%s\n' "$c"; return 2 ;;
         *) _wt_refuse "anchors-unreadable row=${row} — ${c:-the check printed nothing}"; return 2 ;;
@@ -1766,7 +1769,7 @@ EOF
       c="$(_line_comment_lint "$root" "$cbase" "$cand")"; rc=$?
       case $rc in
         0) linted="$cand" ;;
-        1) line_event "$plan" returned "row=${row}" why=lint "detail=$(printf '%s\n' "$c" | head -1)" >/dev/null
+        1) line_returned_event "$plan" "row=${row}" why=lint "detail=$(printf '%s\n' "$c" | head -1)" >/dev/null
            printf '%s\n' "$c" | while IFS= read -r s; do printf 'LINT %s %s\n' "$row" "$s"; done
            return 1 ;;
         *) _wt_refuse "lint-unreadable row=${row} — ${c:-the lint printed nothing}"; return 2 ;;
@@ -1805,7 +1808,7 @@ EOF
     # While the user's order stands no suite starts, here as in tests/run.sh. The entry is returned with the
     # user's words and nothing ran; once the user lifts the order, the writer says ready again.
     if [ "$_LINE_DN" -gt 0 ] && c="$(_line_order "$root")"; then
-      line_event "$plan" returned "row=${row}" why=order "detail=${c%%$'\n'*}" >/dev/null
+      line_returned_event "$plan" "row=${row}" why=order "detail=${c%%$'\n'*}" >/dev/null
       printf 'ORDER %s %s\n' "$row" "${c#*$'\n'}"; return 1
     fi
     if [ "$_LINE_DN" -gt 0 ]; then
@@ -1848,7 +1851,7 @@ EOF
         gate) _line_drain_stop kill "$plan" "$rec" "$row" "$cand" "$cbase"
           _wt_refuse "gate-unavailable row=${row} suite=${s} — ${LINE_LOG}"; return 2 ;;
         *) _line_drain_stop kill "$plan" "$rec" "$row" "$cand" "$cbase"
-           line_event "$plan" returned "row=${row}" why=red "detail=${c}" >/dev/null
+           line_returned_event "$plan" "row=${row}" why=red "detail=${c}" >/dev/null
            printf 'RED %s %s %s\n' "$row" "$s" "$c"; return 1 ;;
       esac
     done
@@ -2479,7 +2482,7 @@ _line_room_one() {  # <plan> <rec> <row> <cbase> <deadline>
 # admission (its request's promise=) and the gate's own measure of it (ended less admitted), `-` for a run never
 # admitted, a run stopped before it ended, and a verdict no run wrote (absent).
 _line_verdict_put() {  # <plan> <row> <commit> <suite> <result> <log> [<admitted epoch>] [<promised s>] [<actual s>]
-  line_event "$1" verdict "row=$2" "commit=$3" "suite=$4" "result=$5" "log=$6" "admitted=${7:--}" "width=${LINE_WIDTH:--}" \
+  line_verdict_event "$1" "row=$2" "commit=$3" "suite=$4" "result=$5" "log=$6" "admitted=${7:--}" "width=${LINE_WIDTH:--}" \
     "promised=${8:--}" "actual=${9:--}"
 }
 # THE PASS'S SUITES, in the order named. For each: its suite (_LINE_DS), its runner's pid (_LINE_DP: empty

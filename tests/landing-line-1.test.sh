@@ -72,7 +72,7 @@ printf 'line/v1|ev=%s|x=-|row=T1|commit=%s|%s|at=2026-10-20T00:00:00Z\n' ready "
   verdict "$OC" 'suite=b.test.sh|result=none|log=/n.log' verdict "$OC" 'suite=c.test.sh|result=green|log=/g.log' > "$ORC"
 cp -R "$BIONIC_HOOKS_DIR" "$OD/t/hooks"; cp -R "$REPO/payload/scripts" "$OD/t/payload/scripts"
 printf '%s\n' '  function fv(k,   i) { return "" }' '  $2 == "ev=verdict" { print fv("row") }' > "$OD/t/hooks/planted.sh"
-expect_eq "(o2) outside the reader's files the grep finds the planted parser and the one reader's two lines, and nothing else" "hooks/planted.sh:2 payload/scripts/lib/line.sh:2" \
+expect_eq "(o2) outside the reader's files, its field reader's among them, the grep finds the planted parser and nothing else" "hooks/planted.sh:2" \
   "$( (cd "$OD/t" && /usr/bin/grep -rnE 'function [a-z_]+\(k, *i\)|"ev=|-v [a-z]+="(row|commit|suite|head|log|cause)=|\$[0-9]+ *[!=]= *"line/v1"|substr\(\$2, *4\)|\|ev=\(|index\(\$0, *"line/v1\|"\)|substr\(\$0, *1, *8\) *== *"line/v1\|"' hooks payload) \
      | /usr/bin/grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' | cut -d: -f1 | uniq -c | awk -v r=" $(sed -n 's/^READER_FILES="\(.*\)"$/\1/p' payload/scripts/one-reader-check.sh) " '!index(r, " " $2 " ") { print $2 ":" $1 }' | LC_ALL=C sort | paste -sd' ' -)"
 
