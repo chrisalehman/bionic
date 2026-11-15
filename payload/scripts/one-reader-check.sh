@@ -40,7 +40,9 @@
 #   - A PLAN WRITE puts a plan operand, never a log one, where a write lands in its own command: after
 #     `>` or `>>`, as the destination of mv or cp (a flag is no source), after tee, or after `sed -i`.
 #   - AN EVENT WRITER is the function holding a `log_append <type>` or `line_event <plan> <type>` call,
-#     or a printed or put line starting `<shape>|ev=<type>`, not after a `^` (a search pattern). A type
+#     or a printed or put line starting `<shape>|ev=<type>`, not after a `^` (a search pattern); in a
+#     reader's file (READER_FILES) a printed one is the reader's answer and counts only when the same
+#     line appends it with `>>`. A type
 #     named by a variable is listed as `?` and never paired. Two writers of one type are a `shared` finding.
 #   - A REFUSAL is a refusal primitive called with its words (`refuse exit2|deny|block`, `fold_block`,
 #     `dp_finding`, `patrol_deny`, `dp_not_checked`, `deny`, `block`) in a file hooks/hooks.json runs.
@@ -189,7 +191,7 @@ LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v acts=" $ACT_WRITES " -v h
       r = substr(line, RSTART + RLENGTH - 1); split(r, a, /[ \t]+/)
       t = (line ~ /log_append/) ? a[1] : a[2]; gsub(/"/, "", t); writer(t)
     }
-    if (match(line, /(^|[^A-Za-z0-9_^-])(line|run|owed)\/v1[|]ev=[a-z][a-z-]*/) && line ~ /_wt_proofs_put|printf|echo|>>/) {  # after ^ it is a pattern
+    if (match(line, /(^|[^A-Za-z0-9_^-])(line|run|owed)\/v1[|]ev=[a-z][a-z-]*/) && line ~ (index(admitted, " " FILENAME " ") ? ">>" : "_wt_proofs_put|printf|echo|>>")) {  # after ^ it is a pattern; in a reader file a printed one is an answer
       t = substr(line, RSTART, RLENGTH); sub(/.*ev=/, "", t); writer(t)
     }
 
