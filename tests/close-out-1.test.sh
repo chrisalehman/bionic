@@ -460,16 +460,13 @@ ba_doors "$PBA"
 expect_eq "BA1 close-out check and closed-form name one branch, ## SDLC State's" "main|main" "$BA_CHECK|$BA_CLOSED"
 # The card's Step-0 branch block reads the same reader. The card needs a ## Goal.
 ba_card() {  # <project> -> the integration branch card.sh step0 prints for the plan, a ## Goal added first
-  awk '/^## SDLC State/ && !g { print "## Goal"; print ""; print "A fixture goal."; print ""; g = 1 } { print }' "$1/$PLAN_REL" \
+  awk '/^## (SDLC State|Tasks)/ && !g { print "## Goal"; print ""; print "A fixture goal."; print ""; g = 1 } { print }' "$1/$PLAN_REL" \
     > "$1/$PLAN_REL.g" && mv "$1/$PLAN_REL.g" "$1/$PLAN_REL"
   bash "$REPO_ROOT/payload/scripts/card.sh" step0 "$1/$PLAN_REL" 2>/dev/null | sed -n 's/^    integration  *\([^ ]*\) .*/\1/p'
 }
 expect_eq "BA3 the card names ## SDLC State's branch too" "main" "$(ba_card "$PBA")"
 
-PBF="$(CO_PLAN_AT=14 mk_fixture branch-agree-fm)"
-awk '/^## SDLC State/ { s = 1 } /^## Tasks/ { s = 0 } !(s && /^integration-branch:/)' "$PBF/$PLAN_REL" > "$PBF/$PLAN_REL.ba" \
-  && mv "$PBF/$PLAN_REL.ba" "$PBF/$PLAN_REL"
-ba_fm "$PBF" main
+PBF="$(mk_fixture branch-agree-fm)"   # a page at 15 names its branch in its header alone
 ba_doors "$PBF"
 expect_eq "BA2b check and closed-form both name the frontmatter's branch, the fallback (check prints its merge verdict only past its refusal)" \
   "main|main" "$BA_CHECK|$BA_CLOSED"
