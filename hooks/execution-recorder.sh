@@ -69,8 +69,8 @@ START_QUESTION="${1-}"
 [ -z "$START_QUESTION" ] || [ -n "$IS_START" ] || exit 0
 
 # ---------- portable file facts ----------
-# DELIBERATELY DUPLICATED from hooks/stop-check.sh and hooks/stop-guard.sh, byte
-# for byte. A shared library is rejected by design (TDD §9): a sourced file the
+# DELIBERATELY DUPLICATED from payload/scripts/lib/observe.sh, the copy hooks/stop-check.sh
+# and the stop guard load, byte for byte. A shared library is rejected by design (TDD §9): a sourced file the
 # installer misses is a silently inert wall. The copies are held together by the
 # agreement battery in tests/cross-gate-agreement.test.sh §C.
 file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
@@ -531,7 +531,7 @@ dispatch_event() {  # <confirmed roster row> -> 0 always; appends the launch's d
 #
 # So the addressing id is recorded in a field of its own and `agent_id=` is left
 # EMPTY in teammate mode. Writing it into `agent_id=` would cost more than the
-# empty it replaces: hooks/stop-guard.sh's by-id match feeds the foreign-session
+# empty it replaces: the stop guard's by-id match (`_sg_roster_walk`, lib/stop.sh) feeds the foreign-session
 # wall, and a roster asserting an identity no observation can ever produce turns
 # that wall's input from "unknown" into "wrong" — the failure the payload probe
 # named before either was written (§Task 1 fix direction 2). The transcript-form
@@ -660,7 +660,7 @@ if [ "$TOOL_NAME" = "Agent" ]; then
   # roster with is deleted (REQ-2), and the half that mattered is the half that survives:
   # a roster row is a CONTRACT — the only copy
   # of the progress path, cadence and subprocess claim the brief declared — and
-  # the look hooks/stop-guard.sh takes reads its progress path, its deliverables and its
+  # the look the stop guard takes (`observe_agent`, lib/observe.sh) reads its progress path, its deliverables and its
   # cadence off it. Drop a LIVE agent's row and that look has nothing to measure: the stop is
   # PERMITTED, the operator is shown a contract that says nothing, which is
   # indistinguishable from "the brief declared no contract". Eviction by recency
@@ -686,7 +686,7 @@ fi
 # `agent_id=` would turn every by-id wall's input from unknown into wrong. This
 # event is where the TRANSCRIPT form (`aprobemate-4da9be517e8f90bd`) first
 # appears — the same form every later observation of that agent carries, and the
-# form hooks/stop-guard.sh and hooks/stop-check.sh match on.
+# form the stop guard (`stop_guard`, payload/scripts/lib/stop.sh) and hooks/stop-check.sh match on.
 #
 # THE JOIN IS BY AGENT ID, and the change is a repair (epic-16 wave-03, T4c).
 # It used to be by NAME, read out of this payload's `agent_type` — which the
@@ -1495,7 +1495,7 @@ fi
 # ============================================================
 #
 # This arm read hooks/stop-check.sh's machine line out of a Bash tool response and wrote
-# `.bionic/tmp/stop-check.state` — the record hooks/stop-guard.sh spent to admit a stop,
+# `.bionic/tmp/stop-check.state` — the record the stop gate spent to admit a stop,
 # under the D-1 freshness, D-2 consume, D-3 ownership and D-6 progress rules. All of it
 # asserted things about the RECORD and none of it about the TARGET, and on 2026-09-15 the
 # gate refused a correct stop with "no observation exists in this repo" because nobody had

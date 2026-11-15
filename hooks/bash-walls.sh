@@ -11,7 +11,7 @@
 #
 # WHAT THIS REPLACES. Five command objects fired on every Bash tool call —
 # protect-main, protect-database, the canonical-sdlc evidence gate, farm-out-reminder
-# and background-suite-guard (that last behind hooks/agent-context-guard.sh) — each
+# and background-suite-guard — each
 # with its own copy of this preamble, its own loader run and its own verdict, and NO
 # rule for how five verdicts combine. Up to three of them could refuse one command; the
 # platform collected whichever arrived. The functions are named below in the order that

@@ -131,7 +131,8 @@
 # appends at the END either way.
 
 # THE STOP'S REASON IS A ROW KEY OF ITS OWN (wave-28 T77; A-orch-239 2a). `reason=<why>` rides the closed
-# row `hooks/stop-guard.sh` appends when it honours the orchestrator's recorded stop of an agent the
+# row `stop_guard_unrostered_write` (lib/stop.sh) appends when the stop guard honours the
+# orchestrator's recorded stop of an agent the
 # roster never saw: the sentence the orchestrator gave, so the sweeper and the Patrol see WHY the row is
 # closed. Present-if-passed, after `done=` and before `tool_use_id=`, so a row 1.12.0 wrote is unmoved.
 # It is prose like the rest (the `|` fold applies; nothing compares it back to something a human typed).
@@ -433,10 +434,9 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   return 0
 }
 
-# ---------- THE ONE READER OF "IS THIS NAME LIVE" (moved from hooks/stop-guard.sh, T6, ----
-# ---------- A-orch-32; research R1 §5) --------------------------------------------------
+# ---------- THE ONE READER OF "IS THIS NAME LIVE" ----------------------------------------
 #
-# MOVED, NOT RE-SPELLED. `hooks/stop-guard.sh`'s own stop-ambiguity refusal (T29 §7) and
+# MOVED, NOT RE-SPELLED. `stop_guard`'s own stop-ambiguity refusal (lib/stop.sh) and
 # `hooks/session-poker.sh`'s `adopt_write_row` (T6, AC-6.1) both need the identical answer to
 # "does this name already name an open contract on this roster" — the first to refuse a stop
 # that could not tell which of two live rows it meant, the second to keep an adopt from ever

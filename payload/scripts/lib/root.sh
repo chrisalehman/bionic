@@ -8,10 +8,8 @@
 # candidate listing and the SessionStart block all render from it.
 #
 # WHY IT EXISTS (R2, handoff §2.2). Eight byte-identical `resolve_project_root`
-# copies (dispatch-preflight.sh:103, session-poker.sh:273, agent-context-guard.sh:109,
-# canonical-sdlc-governing-skill.sh:99, canonical-sdlc-evidence-gate.sh:156,
-# preflight-probe.sh:146, patrol-revive.sh:178, stop-orders.sh:137) ask git FIRST
-# and walk for a `.bionic` ancestor only when no repository exists at all. So a
+# copies, each in a hook of its own, asked git FIRST
+# and walked for a `.bionic` ancestor only when no repository existed at all. So a
 # git repo nested inside a plain workspace that holds the `.bionic` tree always
 # resolves to ITSELF: the probe writes an attestation the gate then cannot find,
 # and a roster dies with the worktree that wrote it. This library inverts the

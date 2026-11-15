@@ -154,10 +154,10 @@ detect_plugin_integrity() {
     # ${CLAUDE_PLUGIN_ROOT}. Resolve that prefix against the root we are
     # actually inspecting and confirm the file is there.
     #
-    # EVERY token, not just the first. Four of the six shipped entries CHAIN
-    # two scripts (`agent-context-guard.sh <inner>`), and the inner one is
-    # where the evidence gate, the governing-skill gate and the landing gate
-    # live. Reading `${cmd%% *}` alone called a payload missing all three
+    # EVERY token, not just the first. A command may name a second script as an
+    # argument of its first (no entry in hooks/hooks.json does today), and the
+    # inner script is as much the wiring as the outer one, so reading
+    # `${cmd%% *}` alone would call a payload missing the inner one
     # healthy. `read -a` splits on whitespace without letting the shell glob
     # the pieces; the `/*` guard then skips anything that is not a resolved
     # absolute path (a flag, a plain argument, an unexpanded env reference).
