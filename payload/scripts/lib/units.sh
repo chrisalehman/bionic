@@ -361,11 +361,11 @@ units_drop_event() {
 # reason, the first per row, in the facts' order, each field read by its name. A version-14 run's born markers are the
 # born events its translation makes of them. Nothing for a run with none; 2 a failed fold.
 _units_born_facts() {
-  local plan
+  local plan facts
   plan="$(_units_origin "${1:-}")"
   [ -f "$plan" ] && _units_lib proof.sh _proof_facts || return 0
-  _proof_facts "$plan" >/dev/null && _proof_fields || return 2
-  printf '%s' "$_PROOF_FACTS" | awk -F'|' "$_LINE_FIELDS_AWK"'
+  facts="$(_units_facts_of "$plan")" && _proof_fields || return 2
+  printf '%s\n' "$facts" | awk -F'|' "$_LINE_FIELDS_AWK"'
     line_ev() == "born" && line_kv("row") != "" && line_kv("reason") != "" && !seen[line_kv("row")]++ {
       printf "%s\t%s\t%s\t%s\n", line_kv("row"), line_kv("reason"), line_kv("finding"), line_kv("promoted") }'
 }
