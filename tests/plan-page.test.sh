@@ -43,6 +43,10 @@ trap 'rm -rf "$R" "$HOME_DIR"' EXIT
 git -C "$R" init -q .
 mkdir -p "$R/.bionic/docs/plans/epic-01-demo" "$R/.bionic/tmp"
 : > "$R/.bionic/tmp/engaged-$SID.state"
+# The person typed `yes` in this session: its transcript under the scratch home's config and its load record here, the two
+# witnesses the approve verb holds an approval's words to (lib/said.sh). Each approve call below names that config.
+PP_TX="$HOME_DIR/.claude/projects/$(printf '%s' "$R" | sed 's/[^a-zA-Z0-9]/-/g')/$SID.jsonl"; mkdir -p "${PP_TX%/*}"; : > "$R/.bionic/tmp/loaded-$SID.state"
+jq -c '.message.content = "yes"' "$BIONIC_SCRIPTS_DIR/tests/fixtures/transcript-move/typed.jsonl" > "$PP_TX"
 
 # page <version> [extra header line]... -> a plan's text: the whole header, a Goal, and the body on stdin.
 page() {
@@ -200,7 +204,7 @@ expect_eq "…and stand once the walk's proof names them" "" "$(owed "Step 5's e
 for c in "2|approval|step1|Step 1's approval" "7|header|adrs: none — no decision this run|Step 7's document" "9|step|delivered=v1|Step 9's delivery"; do
   IFS='|' read -r n k v w <<< "$c"; ev="run/v1|ev=step|n=$n"; [ "$n" != 9 ] || ev="$ev|delivered=no"; printf '%s|at=2026-11-01T00:00:09Z\n' "$ev" >> "$L2"; gate; B="$GATE_EXIT"
   expect_eq "at $n the log lacking it, $w is owed" "owed at 15: $w" "$(owed "$w")"
-  case "$k" in approval) ( cd "$R" && git config user.name f && HOME="$HOME_DIR" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_NOW_EPOCH=1793491210 bash "$BIONIC_HOOKS_DIR/session-poker.sh" approve "$v" yes >/dev/null 2>&1 ) ;;
+  case "$k" in approval) ( cd "$R" && git config user.name f && HOME="$HOME_DIR" CLAUDE_CONFIG_DIR="$HOME_DIR/.claude" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_NOW_EPOCH=1793491210 bash "$BIONIC_HOOKS_DIR/session-poker.sh" approve "$v" yes >/dev/null 2>&1 ) ;;
     header) hdr "$v" ;; step) printf 'run/v1|ev=step|n=%s|%s|at=2026-11-01T00:00:10Z\n' "$n" "$v" >> "$L2" ;; esac; gate
   [ "$k" != approval ] || expect_eq "at 2 a commit with no approval of step 1 is refused, and admitted once the approve command gives it" "2|0" "$B|$GATE_EXIT"
   expect_eq "…and not owed once it stands" "" "$(owed "$w")"; done
@@ -245,7 +249,7 @@ NW="$(printf '%s\n' "$NINE" '| T2 | 4 | build | the second | T1, approval:D7 | 3
 expect_eq "a page at 15 whose task waits on approval:D7 is admitted; one misspelling it is refused, naming it" "0|2|1" "$A|$HOOK_EXIT|$(grep -c 'T2: dep aproval:D7 names no row' <<< "$HOOK_SAID")"
 printf 'plan=%s\n' "$P2" > "$R/.bionic/tmp/engaged-$SID.state"; T3W="$R/.worktrees/50-T3"; git -C "$R" worktree add -q "$T3W" -b wt/t3 2>/dev/null; printf 'ab\n' > "$T3W/agents/a.md"; git -C "$T3W" add agents/a.md
 awk '{ print } /^\| T1 \| 4 \| build /{ print "| T3 | 4 | build | Grow. | — | 10 | REQ-1 | agents/a.md | — |" }' "$P2" > "$P2.t" && mv "$P2.t" "$P2"; printf 'run/v1|ev=tree|row=T3|path=.worktrees/50-T3|branch=wt/t3|base=%s|at=2026-11-01T00:00:15Z\n' "$H" >> "$L2"
-ap() { ( cd "$R" && HOME="$HOME_DIR" CLAUDE_CODE_SESSION_ID="$SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" approve "$1" yes >/dev/null 2>&1 ); printf '%s' "$?"; }; grows() { gate_as "$SID" "" "$T3W"; printf '%s|%s' "$GATE_EXIT$(grep -c 'loaded set grows' <<< "$GATE_SAID")" "$(grep -o 'Not admitted: row T3 does not wait on approval:doctrine-growth\|edit the deps cell of T3 in the plan to: [^ ]*' <<< "$GATE_SAID" | paste -sd'|' -)"; }
+ap() { ( cd "$R" && HOME="$HOME_DIR" CLAUDE_CONFIG_DIR="$HOME_DIR/.claude" CLAUDE_CODE_SESSION_ID="$SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" approve "$1" yes >/dev/null 2>&1 ); printf '%s' "$?"; }; grows() { gate_as "$SID" "" "$T3W"; printf '%s|%s' "$GATE_EXIT$(grep -c 'loaded set grows' <<< "$GATE_SAID")" "$(grep -o 'Not admitted: row T3 does not wait on approval:doctrine-growth\|edit the deps cell of T3 in the plan to: [^ ]*' <<< "$GATE_SAID" | paste -sd'|' -)"; }
 hdr "base-sha: $H"; B="$(ap launch)|$(grows)"; sed -i '' 's/| Grow. | — |/| Grow. | approval:doctrine-growth, approval:launch |/' "$P2"
 expect_eq "with the approval standing, growth from T3's tree is refused (exit 2) while T3 names no wait on it, saying what to write, and admitted (exit 0) once it does" "1|21|Not admitted: row T3 does not wait on approval:doctrine-growth|edit the deps cell of T3 in the plan to: approval:doctrine-growth|00|" "$B|$(grows)"
 expect_eq "approve refuses launch while no task waits on it, takes it once T3 does, and refuses a name none waits on" "1|0|1" "${B%%|*}|$(ap launch)|$(ap nobody)"
@@ -316,7 +320,7 @@ printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%sZ\n' 'approval|key=step0|by=f|said=g
 write_to "$EP" "$(cat "$EP")"; gate
 expect_eq "the epic at 15: the write is admitted; the commit owes Step 2's approval, which its older homes never held, and no requirements" "0|2|owed at 15: Step 2's approval|" \
   "$HOOK_EXIT|$GATE_EXIT|$(owed "Step 2's approval")|$(owed "Step 1's requirements")"
-( cd "$R" && git config user.name f && HOME="$HOME_DIR" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_NOW_EPOCH=1793491210 bash "$BIONIC_HOOKS_DIR/session-poker.sh" approve step2 yes >/dev/null 2>&1 ); gate
+( cd "$R" && git config user.name f && HOME="$HOME_DIR" CLAUDE_CONFIG_DIR="$HOME_DIR/.claude" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_NOW_EPOCH=1793491210 bash "$BIONIC_HOOKS_DIR/session-poker.sh" approve step2 yes >/dev/null 2>&1 ); gate
 expect_status "…and the commit is admitted once the person approves step 2" 0 "$GATE_EXIT"
 
 finish

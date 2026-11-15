@@ -143,7 +143,9 @@ fc_typed "$FC_WD" "$FC_WR"; rm -f "$FC_REC"/release-approval-*.md
 fc_plan "$(fc_floor "$FC_C" a.test.sh)
 $(fc_reads "$FC_C")"
 expect_eq "WORD-2 precondition: the whole run at C left a.test.sh red and nothing greened it since: the judge reads the head owed" "owed" "$(fc_judged)"
-poke "$RFC" approve release 'ship it'
+poke "$RFC" approve release 'ship it'; FC_AU="$RC|$(fc_appr release | grep -c .)"; said_as sdk "$RFC" 'ship it'; poke "$RFC" approve release 'ship it'
+expect_eq "WORD-2a approve release on words no prompt holds, then on words only a program sent: refused (exit 1) each, nothing appended" "1|0|1|0" "$FC_AU|$RC|$(fc_appr release | grep -c .)"
+said_as typed "$RFC" 'ship it' 'merge it'; poke "$RFC" approve release 'ship it'
 poke "$RFC" current 8 --check; FC_WN_OWED="$RC"
 expect_eq "WORD-2e with the release approved at the head, current 8 --check refuses (exit 1) on the regression owed" "1|owed" "$RC|$(fc_regline | cut -f2)"
 expect_contains "WORD-2f …the refusal names the pass as the exit" "needs: the pass — a fix row for a.test.sh, then the pass" "$(fc_regline)"
@@ -186,7 +188,7 @@ rm -f "$FC_REC"/release-approval-*.md
 
 # §JUDGE's world as it was left: T1's landing recorded, the head R.
 fc_published T1 "$FC_C" > "$FC_SEED"; rm -f "$FC_REC"/release-approval-*.md
-fc_typed "$FC_WD" "$FC_WR"
+fc_typed "$FC_WD" "$FC_WR" words
 
 # ============================================================
 section "§UNPROVED-ASK: the merge without a pass is an answer where an open integrate row waits on the release"

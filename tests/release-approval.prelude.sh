@@ -162,7 +162,7 @@ FC_PROJ="$FC_CFG/projects/$(bash -c '. "$1/detect.sh" >/dev/null 2>&1; project_s
 mkdir -p "$FC_PROJ" "$FC_CFG/bionic"
 printf '80\n' > "$FC_CFG/bionic/share"   # the prelude's pinned share, kept under this suite's own config dir
 printf 'root=%s\nstarted=2026-10-14T00:00:00Z\ncwd=%s\n' "${BIONIC_HOOKS_DIR%/*}" "$RFC" > "$RFC/.bionic/tmp/loaded-$SID.state"
-export CLAUDE_CONFIG_DIR="$FC_CFG"
+export CLAUDE_CONFIG_DIR="$FC_CFG"; SAID_CFG="$FC_CFG"   # said_as adds to this suite's own transcript
 FC_TX="$FC_PROJ/$SID.jsonl"
 FC_FX="${BIONIC_SCRIPTS_DIR}/tests/fixtures/transcript-move"
 fc_typed() {  # <prompt>... -> the transcript holds each as a typed prompt of this session

@@ -642,7 +642,7 @@ section "GAP: one width fact and one refusal — the wall asks the gate as the t
 # file is read). The first row is asked with nothing owed and each row offered owes one promise more,
 # so a busy reading of 6.0 leaves room for exactly one writer (6 <= 6.36 < 6 + the suite cost of
 # 1.61), and 8.0 for none.
-# The plan is one the commit gate admits (its version line and a Step-4 block).
+# The plan is one the commit gate admits: at 15, its version line and its step and approval in its log.
 gap_fixture() {  # -> project dir; three pending writer rows T13 T14 T15 reading their kind's default, an empty roster;
   # STOP_AT=15 asks for the page at 15
   local d
@@ -678,7 +678,7 @@ require_helpers gap_fixture gap_tick gap_led s7_transcript s7_fire s9_headline
 
 # GAP1: NO ROOM AT THE GATE. The real tick on the reading ends `no FILL — the gate gives no room`,
 # and the wall, on its turn and the same reading, passes and records the hold.
-GAP_D1="$(gap_fixture)"
+GAP_D1="$(STOP_AT=15 gap_fixture)"
 GAP_T1="$(gap_tick "$GAP_D1" 8.0)"
 GAP_X1="$(mktemp)"; s7_transcript "$GAP_X1" "$GAP_T1"
 BIONIC_PROBE_BUSY_CORES=8.0 BIONIC_PROBE_BUSY_CORES_5M=8.0 s7_fire "$GAP_D1" "$GAP_X1"
@@ -688,7 +688,7 @@ expect_eq "GAP1d the tick's no-room turn passes at stop" "" "$(printf '%s' "$STO
 
 # GAP2: ROOM FOR ONE, THREE READY. The tick on the reading offers one row; the wall refuses once,
 # naming all three.
-GAP_D2="$(gap_fixture)"
+GAP_D2="$(STOP_AT=15 gap_fixture)"
 GAP_T2="$(gap_tick "$GAP_D2" 6.0)"
 expect_contains "GAP2a precondition: the tick on this reading offers exactly one row" \
   "poker: FILL T13" "$GAP_T2"
@@ -711,13 +711,13 @@ expect_contains "GAP2j the tick that offered one row names the two behind the ga
 expect_absent "GAP2k …and the tick names no decline" "decline" "$GAP_T2"
 
 # GAP3: THE RULING FORM, MADE AS SAID, MAKES THE ROWS WAIT. The refusal's read-of-a-ruling line names an edit of the
-# plan's reads cell: each row keeps its kind's reads and gains the decision, which is unruled, so the next turn end
+# plan's deps cell: each row keeps its kind's default and gains the decision, which is unruled, so the next turn end
 # finds no row ready and passes.
-expect_contains "GAP3a precondition: the reason holds the ruling form, an edit of the reads cell" \
-  "a read of a ruling: edit ID's reads cell in the plan to add approval:DN" "$(reason_of)"
+expect_contains "GAP3a precondition: the reason holds the ruling form, an edit of the deps cell" \
+  "a read of a ruling: edit ID's deps cell in the plan to add approval:DN" "$(reason_of)"
 GAP_P2="$GAP_D2/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
-sed -i '' -E '/^\| T1[345] \|/s/\| pending \| *\|$/| pending | approval:plan, approval:D3 |/' "$GAP_P2"
-expect_contains "GAP3c …on every row the edit names" "| pending | approval:plan, approval:D3 |" "$(grep -F '| T15 |' "$GAP_P2")"
+sed -i '' -E '/^\| T1[345] \|/s/^(\| T1[345] \| 4 \| build \| [a-z]+ \|) — \|/\1 approval:D3 |/' "$GAP_P2"
+expect_contains "GAP3c …on every row the edit names" "| approval:D3 | 15m |" "$(grep -F '| T15 |' "$GAP_P2")"
 GAP_X3="$(mktemp)"
 jq -nc '{type:"user",uuid:"u-gap3",isSidechain:false,timestamp:"2026-09-19T00:01:00Z",message:{role:"user",content:"carry on"}}' > "$GAP_X3"
 BIONIC_PROBE_BUSY_CORES=6.0 BIONIC_PROBE_BUSY_CORES_5M=6.0 s7_fire "$GAP_D2" "$GAP_X3"
@@ -737,7 +737,7 @@ GAP4_HOLDER=$$
 GAP4_START="$(bash -c '. "$1/payload/scripts/lib/slots.sh" && _slots_since "$2"' _ "$BIONIC_SCRIPTS_DIR" "$GAP4_HOLDER")"
 printf 'key=a.test.sh\nkind=landing\nwho=%s:wx-T1\ntree=/\nasked=1000\nholder=%s:%s\n' \
   "$SID" "$GAP4_HOLDER" "$GAP4_START" > "$GAP4_GATE/requests/1"
-GAP_D4="$(gap_fixture)"
+GAP_D4="$(STOP_AT=15 gap_fixture)"
 GAP_T4="$(BIONIC_GATE_DIR="$GAP4_GATE" gap_tick "$GAP_D4" 1.0)"
 expect_eq "GAP4-pre the request is still open after the tick: its holder lives, nothing ended it" "open" \
   "$(grep -q '^ended=' "$GAP4_GATE/requests/1" 2>/dev/null && echo ended || { [ -s "$GAP4_GATE/requests/1" ] && echo open; })"
@@ -911,8 +911,8 @@ section "WAIT: a row waits by a dependency, a read of a ruling or an order; the 
 
 # THE DEFECT. A ready row the run meant to hold was answered by a reason in prose, which the wall
 # read again on every turn end and the tick could not judge. A wait is a fact of the plan now: a
-# read of the record of a row still open, a read of a decision nobody has ruled, or the user's order
-# under ## SDLC State. Each leaves the row not ready, so the wall has nothing to refuse and the turn
+# wait on a row still open, a read of a decision nobody has ruled, or the user's order in the run's
+# log. Each leaves the row not ready, so the wall has nothing to refuse and the turn
 # ends. Each wait has a control beside it, the same fixture with the wait removed, which is refused,
 # so every pass below is the wait's doing and not a fixture the wall never reads.
 wait_fixture() {  # <extra ## SDLC State lines, or ""> <row>... -> project dir; a reads table, bound, an empty roster
@@ -940,60 +940,69 @@ wait_fire() {  # <project> -> the real Stop on an ordinary turn that dispatched 
   jq -nc '{type:"user",uuid:"u-wait",isSidechain:false,timestamp:"2026-10-20T00:00:00Z",message:{role:"user",content:"carry on"}}' > "$tx"
   s7_fire "$1" "$tx"
 }
+# AT 15: wait_fixture's page through sp_at15, holding the rows given in their nine cells; its log the step and the
+# approval sp_at15 writes, then each event given. A row waits through its deps cell, a row by its id, a ruling as approval:DN.
+wait15() {  # <events, one a line, or ""> <row>... -> the project
+  local d p ev="$1" e n=0; shift; d="$(wait_fixture "")"; p="$d/.bionic/docs/plans/epic-99-fixture/wave-09-wait.plan.md"
+  sp_at15 "$p" && printf '%s\n' "$@" >> "$p" || return 1
+  while IFS= read -r e; do [ -z "$e" ] || printf 'run/v1|ev=%s|at=2026-10-20T00:%02d:00Z\n' "$e" "$((n += 1))"; done <<< "$ev" \
+    >> "$d/.bionic/docs/record/wave-09-wait/run.log"
+  printf '%s' "$d"
+}
 wait_led() { stop_led "$1/.bionic/docs/record/wave-09-wait"; }
 wait_decision() { printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null; }
-require_helpers wait_fixture wait_fire wait_led wait_decision s7_fire reason_of
+require_helpers wait_fixture wait15 wait_fire wait_led wait_decision s7_fire reason_of sp_at15
 
-WT_READY='| T13 | 4 | build | ready | implementor | — | 15m | REQ-x | a.sh | pending |  |'
+WT_READY='| T13 | 4 | build | ready | — | 15m | REQ-x | a.sh | — |'
+WT_D3='| T13 | 4 | build | reads a ruling | approval:D3 | 15m | REQ-x | a.sh | — |'
 WT_RULED='| T13 | 4 | build | reads a ruling | implementor | — | 15m | REQ-x | a.sh | pending | approval:plan, approval:D3 |'
 WT_REC='.bionic/docs/record/wave-09-wait/T12-held.md'
 
 # WAIT1: THE REFUSAL NAMES THE THREE FORMS. One ready row, room, nothing launched.
-W_D1="$(wait_fixture "" "$WT_READY")"
+W_D1="$(wait15 "" "$WT_READY")"
 wait_fire "$W_D1"
 expect_eq "WAIT1 a ready row with room and nothing launched is refused" "block" "$(wait_decision)"
 W_R="$(reason_of)"
-expect_contains "WAIT1b the refusal names the first form, a dependency: an edit adding the record to the reads cell" "a dependency: edit ID's reads cell in the plan to add RECORD" "$W_R"
-expect_contains "WAIT1d the second, a read of a ruling, the same edit adding the decision" "a read of a ruling: edit ID's reads cell in the plan to add approval:DN" "$W_R"
+expect_contains "WAIT1b the refusal names the first form, a dependency: an edit adding the row's id to the deps cell" "a dependency: edit ID's deps cell in the plan to add RID" "$W_R"
+expect_contains "WAIT1d the second, a read of a ruling, the same edit adding the decision" "a read of a ruling: edit ID's deps cell in the plan to add approval:DN" "$W_R"
 expect_contains "WAIT1f the third, an order" "an order: bash " "$W_R"
 expect_contains "WAIT1g …the order verb with what the user said" "order 'WORDS'" "$W_R"
 expect_absent "WAIT1h …and no decline anywhere in the refusal" "decline" "$W_R$STOP_ERR"
 expect_contains "WAIT1i the line the user reads names the row and the fix" "ready with room: T13 (dispatch, or make each wait)" "$STOP_ERR"
 
 # WAIT2: A READ OF AN UNRULED DECISION. The row reads D3, which no approved: line rules.
-W_D2="$(wait_fixture "" "$WT_RULED")"
+W_D2="$(wait15 "" "$WT_D3")"
 wait_fire "$W_D2"
 expect_contains "WAIT2 meta: the wall read the turn, its stop event is there" "run/v1|ev=stop|" "$(wait_led "$W_D2" | tail -1)"
 expect_contains "WAIT2b …and the row reading the unruled D3 is not ready" "|ready=|" "$(wait_led "$W_D2" | tail -1)"
 expect_eq "WAIT2c the turn ends: no refusal" "" "$(wait_decision)"
-W_D2R="$(wait_fixture "" "$WT_RULED")"; bash -c '. "$1/proof.sh" && proof_approval_event "$2" D3 by=fixture said=go' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$W_D2R/.bionic/docs/plans/epic-99-fixture/wave-09-wait.plan.md"
+W_D2R="$(wait15 "" "$WT_D3")"; bash -c '. "$1/proof.sh" && proof_approval_event "$2" D3 by=fixture said=go' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$W_D2R/.bionic/docs/plans/epic-99-fixture/wave-09-wait.plan.md"
 wait_fire "$W_D2R"
 expect_eq "WAIT2d the control: D3 ruled, the same row is ready and refused" "block" "$(wait_decision)"
 expect_contains "WAIT2e …naming it" "ready with room: T13" "$STOP_ERR"
 
-# WAIT3: A DEPENDENCY ON AN OPEN ROW. T13 reads the record T12 writes, and T12 is active.
-W_D3="$(wait_fixture "" \
-  "| T12 | 4 | build | the open row | implementor | — | 15m | REQ-x | $WT_REC, z.sh | active |  |" \
-  "| T13 | 4 | build | waits on T12 | implementor | — | 15m | REQ-x | a.sh | pending | approval:plan, $WT_REC |")"
+# WAIT3: A DEPENDENCY ON AN OPEN ROW. T13 waits on T12, which writes the record, and T12 is active.
+WT_T12="| T12 | 4 | build | the open row | — | 15m | REQ-x | $WT_REC, z.sh | — |"
+WT_T13='| T13 | 4 | build | waits on T12 | T12 | 15m | REQ-x | a.sh | — |'
+W_D3="$(wait15 'dispatch|row=T12|name=w9-T12' "$WT_T12" "$WT_T13")"
 wait_fire "$W_D3"
 expect_contains "WAIT3 meta: the wall read the turn" "run/v1|ev=stop|" "$(wait_led "$W_D3" | tail -1)"
 expect_contains "WAIT3b …and the row waiting on the open T12 is not ready" "|ready=|" "$(wait_led "$W_D3" | tail -1)"
 expect_eq "WAIT3c the turn ends: no refusal" "" "$(wait_decision)"
-W_D3L="$(wait_fixture "" \
-  "| T12 | 4 | build | the landed row | implementor | — | 15m | REQ-x | $WT_REC, z.sh | landed |  |" \
-  "| T13 | 4 | build | waits on T12 | implementor | — | 15m | REQ-x | a.sh | pending | approval:plan, $WT_REC |")"
+W_D3L="$(wait15 'dispatch|row=T12|name=w9-T12
+published|row=T12' "$WT_T12" "$WT_T13")"
 wait_fire "$W_D3L"
 expect_eq "WAIT3d the control: T12 landed, T13 is ready and refused" "block" "$(wait_decision)"
 expect_contains "WAIT3e …naming it" "ready with room: T13" "$STOP_ERR"
 
 # WAIT4: THE USER'S ORDER. An open order makes no row ready; the order lifted, the row is owed again.
-W_D4="$(wait_fixture 'order: given 2026-10-20T00:00:00Z "hold the fleet while I read"' "$WT_READY")"
+W_D4="$(wait15 'order|act=given|said=hold the fleet while I read' "$WT_READY")"
 wait_fire "$W_D4"
 expect_contains "WAIT4 meta: the wall read the turn" "run/v1|ev=stop|" "$(wait_led "$W_D4" | tail -1)"
 expect_contains "WAIT4b …and under the open order no row is ready" "|ready=|" "$(wait_led "$W_D4" | tail -1)"
 expect_eq "WAIT4c the turn ends: no refusal" "" "$(wait_decision)"
-W_D4L="$(wait_fixture 'order: given 2026-10-20T00:00:00Z "hold the fleet while I read"
-order: lifted 2026-10-20T00:30:00Z "hold the fleet while I read"' "$WT_READY")"
+W_D4L="$(wait15 'order|act=given|said=hold the fleet while I read
+order|act=lifted|said=hold the fleet while I read' "$WT_READY")"
 wait_fire "$W_D4L"
 expect_eq "WAIT4d the control: the order lifted, the row is ready and refused" "block" "$(wait_decision)"
 expect_contains "WAIT4e …naming it" "ready with room: T13" "$STOP_ERR"

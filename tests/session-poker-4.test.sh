@@ -345,7 +345,7 @@ expect_contains "AW-1b …the item the first failing reading's registration open
 SEV_AW="$(sev_store | /usr/bin/grep "|key=waive:adversarial|")"; poke "$RSEV" current 8
 expect_eq "AW-2 a second refusal on the same failing question opens nothing new: one open round, the key's rounds unchanged" "1|1|same" \
   "$RC|$(sev_store | /usr/bin/grep -c '|key=waive:adversarial|state=open|')|$([ "$(sev_store | /usr/bin/grep '|key=waive:adversarial|')" = "$SEV_AW" ] && echo same)"
-poke "$RSEV" waive adversarial 'I waive the adversarial reading for now'
+said_as typed "$RSEV" 'I waive the adversarial reading for now'; CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RSEV" waive adversarial 'I waive the adversarial reading for now'
 expect_eq "AW-3 the waive verb records the user's reply (exit 0)" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 expect_contains "AW-3a …and closes the item it answers" "|key=waive:adversarial|state=closed|by=waive|" "$(sev_store)"
@@ -651,8 +651,11 @@ expect_eq "VG-3c AC-20.3 a byte copy of the recorded run's log registers (exit 0
   "$RC|$(s46_proved "$PVG" | /usr/bin/grep -c "^proved: kind=regression head=$VG_A .* evidence=record/wave-01-fixture/whole-copy.log run=[^ ]* head=$VG_A rc=0$")"
 
 # ---------- §REVIEW-RANGE: the user's waiver of a question is where its next reading starts ----------
-poke "$RVG" waive all 'I waive the readings at A'
-expect_eq "VG-2 the user's waiver of every question at A (exit 0)" "0|3" "$RC|$(/usr/bin/grep -c "^run/v1|ev=waiver|question=[a-z]*|head=$VG_A|" "$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "${S46_LIB%/*}" "$PVG")")"
+vg_waivers() { /usr/bin/grep -c "^run/v1|ev=waiver|question=[a-z]*|head=$1|" "$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "${S46_LIB%/*}" "$PVG")"; }
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RVG" waive all 'I waive the readings at A'
+expect_eq "VG-2a a question's waiver on words no prompt the person typed holds: refused (exit 1), no waiver written" "1|0" "$RC|$(vg_waivers "$VG_A")"
+said_as typed "$RVG" 'I waive the readings at A' 'I waive the readings at C2' 'ship C2' 'ship C3'; CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RVG" waive all 'I waive the readings at A'
+expect_eq "VG-2 the user's waiver of every question at A (exit 0)" "0|3" "$RC|$(vg_waivers "$VG_A")"
 VG_C="$(s57_commit "$VG_WT" lib/a.sh C)"
 printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: piece\n' "$VG_A" "$VG_C" > "$VG_DIR/past-waiver.md"
 poke "$RVG" proof-add review record/wave-01-fixture/past-waiver.md --question adversarial --reader vg-crit
@@ -667,12 +670,12 @@ expect_eq "VG-2b AC-20.2 a reading of A..C registers on the waiver at A, with no
 VG_C2="$(s57_commit "$VG_WT" lib/b.sh C2)"
 printf 'Gating: 3 passed, 0 failed\n' | regression_fixture "$PVG" "$VG_DIR/whole-c2.log" "$VG_C2" 0 0
 poke "$RVG" proof-add regression record/wave-01-fixture/whole-c2.log
-poke "$RVG" waive all 'I waive the readings at C2'
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RVG" waive all 'I waive the readings at C2'
 awk '{ print } /^- T5: / { print "- T6: landed at record/T6.md\n- T7: landed at record/T7.md" } /^\| T5 \| 5 \| verify / {
   print "| T6 | 5 | test | the whole run | test-runner | — | 30 | REQ-1 | — | — | — | landed |"
   print "| T7 | 7 | doc | the release | implementor | — | 30 | REQ-1 | CHANGELOG.md | — | — | landed |"
   print "| T8 | 8 | integrate | the merge | implementor | — | 30 | REQ-1 | — | — | — | pending |" }' "$PVG" > "$PVG.tmp" && mv "$PVG.tmp" "$PVG"
-poke "$RVG" approve release 'ship C2'
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RVG" approve release 'ship C2'
 expect_eq "VG-5 the plan is in the order, and the user approves the release at C2 (exit 0)" "0|T6|$VG_C2" \
   "$RC|$(bash -c '. "$1/units.sh" && units_order "$2"' _ "${S46_LIB%/*}" "$PVG")|$(bash -c '. "$1" && proof_approved_head "$2" release' _ "$S46_LIB" "$PVG")"
 s57_commit "$VG_WT" .bionic/docs/record/wave-01-fixture/notes.md P1 >/dev/null
@@ -689,7 +692,7 @@ vg_unproved() { printf '%s\n' "$OUT" | /usr/bin/grep -c 'regression.*unproved'; 
 VG_C3="$(s57_commit "$VG_WT" lib/b.sh C3)"
 { printf 'run/v1|ev=ready|row=T10|suites=a.test.sh|at=2026-10-04T14:00:00Z\n'; printf 'run/v1|ev=verdict|row=T10|commit=%s|suite=a.test.sh|result=green|log=/fixture/T10.log|at=2026-10-04T14:05:00Z\n' "$VG_C3"
   printf 'run/v1|ev=published|row=T10|commit=%s|kind=land|by=w-T10|why=landed|at=2026-10-04T14:10:00Z\n' "$VG_C3"; } >> "$VG_DIR/run.log"
-poke "$RVG" approve release 'ship C3'
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RVG" approve release 'ship C3'
 expect_eq "VG-5c precondition: the user approves the release at the code head C3 (exit 0)" "0|$VG_C3" "$RC|$(bash -c '. "$1" && proof_approved_head "$2" release' _ "$S46_LIB" "$PVG")"
 poke "$RVG" current 8 --check
 expect_eq "VG-5c a code commit C3 past them, landed green on its own suite: covered, not green, refused as regression unproved, naming the reply" "1|1|1" "$RC|$(vg_unproved)|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'reply .* on the release card')"
