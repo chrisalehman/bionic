@@ -284,8 +284,8 @@ bash "$CHECK" "$S/no-such" >/dev/null 2>&1; expect_status "a root that is not a 
 
 # §READINGS runs from the checkout; a scratch commit on a shared clone moves a count without touching it. The records
 # it reads are the bed's runs at 14, from git before they were recorded at 15: that release reads no run at 15.
-READ="${BIONIC_SCRIPTS_DIR}/payload/scripts/readings.sh"; PIN=1d09c8990abaf6cdacfb9db3cda9e58f8ad46ad3; F="$S/pin/tests/fixtures/replay"
-mkdir "$S/pin"; git -C "$BIONIC_SCRIPTS_DIR" archive $PIN tests/fixtures/replay | tar -x -C "$S/pin"
+READ="${BIONIC_SCRIPTS_DIR}/payload/scripts/readings.sh"; PIN=1d09c8990abaf6cdacfb9db3cda9e58f8ad46ad3; mkdir "$S/pin"
+git -C "$BIONIC_SCRIPTS_DIR" archive $PIN tests/fixtures/replay | tar -x -C "$S/pin"; F="$(cd "$S/pin" && pwd -P)/tests/fixtures/replay"
 at() { ( cd "$1" && shift && bash "$READ" "$@" 2>&1 ); }
 born() { ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/reader.sh"; reader_facts "$1" ) | grep -c '^run/v1|ev=born|'; }
 OLD=7a9633486; R30="$(at "$BIONIC_SCRIPTS_DIR" $OLD)"
