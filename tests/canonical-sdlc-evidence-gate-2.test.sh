@@ -136,6 +136,8 @@ m32_home 8 double hermetic fail
 expect_block "m32-8r at 8 the same REFUTED row owes a ruling, naming the verdict" "$M32_H" 'git commit -m "x"' "verdict is 'REFUTED', not CONFIRMED"
 m32_home 8 double hermetic pass
 expect_allow "m32-8c at 8 a CONFIRMED row is ruled: admitted" "$M32_H" 'git commit -m "x"'
+m32_home 8 double hermetic pass 'run/v1|ev=step|n=8b|cleanup=n/a|at=2026-10-04T01:00:11Z'
+expect_allow "m32-8b …and at 8b, a step whose letter the gate reads off, the same row is admitted" "$M32_H" 'git commit -m "x"'
 m32_home 8 single hermetic fail
 expect_allow "m32-single at single rigor the column is unread: the REFUTED row is admitted at 8" "$M32_H" 'git commit -m "x"'
 m32_home 8 - hermetic fail
