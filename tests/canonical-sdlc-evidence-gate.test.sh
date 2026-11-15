@@ -60,10 +60,11 @@ write_plan "$h2v" "${FM/version: 14/version: 13}
 ## SDLC State
 current: 4" v.plan.md > /dev/null
 expect_block "a plan at 13 is refused, the fix naming the version a plan is written at" "$h2v" 'git commit -m "x"' "set 'canonical_sdlc_version: 15'"
+# Bound, since the walk admits no page at 13 that holds no state section: the session's binding is how one reaches here.
 h2s=$(make_home)
-write_plan "$h2s" "${FM/version: 14/version: 13}
-# a plan" s.plan.md > /dev/null
-expect_block "a plan at 13 with no state section is refused at the commit too, on its version alone" "$h2s" 'git commit -m "x"' "canonical_sdlc_version: '13'"
+bound_marker "$h2s" "$EG_SID" "$(write_plan "$h2s" "${FM/version: 14/version: 13}
+# a plan" s.plan.md)"
+expect_block "a bound plan at 13 with no state section is refused at the commit too, on its version alone" "$h2s" 'git commit -m "x"' "canonical_sdlc_version: '13'"
 for v in 13 14 15; do
   h=$(make_home); git -C "$h" init -q; p=$(write_plan "$h" "${FM/version: 14/version: $v}
 ## SDLC State
