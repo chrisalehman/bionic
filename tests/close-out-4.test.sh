@@ -588,11 +588,11 @@ sc_plant() {  # <project> -> two queue landings (30 and 42 min), three approvals
   case "$p" in "$SANDBOX"/*) : ;; *) echo "sc_plant: refusing outside the sandbox: '$p'" >&2; return 1 ;; esac
   mkdir -p "$rec"
   {
-    printf 'line/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T10:00:00Z\n' "$LAND_C" "$p"
-    printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$LAND_C"
-    printf 'line/v1|ev=ready|row=T2|name=w-T2|commit=%s|branch=wt/01-T2|tree=%s/.worktrees/01-T2|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T11:00:00Z\n' "$LAND_C" "$p"
-    printf 'line/v1|ev=published|row=T2|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T11:42:00Z\n' "$LAND_C"
-  } > "$rec/landing-proofs.log"
+    printf 'run/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T10:00:00Z\n' "$LAND_C" "$p"
+    printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$LAND_C"
+    printf 'run/v1|ev=ready|row=T2|name=w-T2|commit=%s|branch=wt/01-T2|tree=%s/.worktrees/01-T2|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T11:00:00Z\n' "$LAND_C" "$p"
+    printf 'run/v1|ev=published|row=T2|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T11:42:00Z\n' "$LAND_C"
+  } >> "$rec/run.log"
   bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; LOG_AT=2026-10-05T09:00:00Z proof_approval_event "$2" doc by=fixture "said=go ahead" \
     && LOG_AT=2026-10-06T12:00:00Z proof_approval_event "$2" release by=fixture said=1 && LOG_AT=2026-10-06T12:00:01Z proof_approval_event "$2" merge by=fixture said=1' \
     _ "$REPO_ROOT/payload/scripts/lib" "$plan"
@@ -900,7 +900,7 @@ section "§TWO-LINES — check gives one answer for the plan as it stands and th
 # the plan with the close's facts pending. Both read the run's record, so both read ok.
 # FIXTURE FIDELITY: the Step-8 fixture, its facts events in the run's log, each at its own instant: a structure review
 # `result=flag` over a record holding two findings, one to fix and one a note; the first moved `to=fixed row=T1` (the
-# event finding-move writes); T1's landing verdict green in the run's landing record; and step 8 carrying what the close
+# event finding-move writes); T1's landing verdict green in the run's log; and step 8 carrying what the close
 # cleans, so the plan as it stands and the plan close-out would write are judged on the same facts. Without the verdict
 # the moved finding is still to fix, the flag derives fail, and both lines refuse.
 # fails-when: payload/scripts/close-out.sh check prints the preflight's ok under another wording, so the second line is not
@@ -918,8 +918,8 @@ tl_world() {  # <name> -> the project built as above, echoed
     LOG_AT=2026-10-22T10:00:00Z proof_step_event "$2" 8 cleanup=done "tmp-wiped=0 entries" "tasks-completed=T1, T2"' \
     _ "$REPO_ROOT/payload/scripts/lib" "$p/$PLAN_REL" "$h"
   printf 'run/v1|ev=finding|ref=record/wave-01-fixture/structure-flag.md#1|to=fixed|row=T1|by=Fixture|at=2026-10-06T14:00:00Z\n' >> "$p/$LOG_REL"
-  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=a.log|admitted=-|width=1|at=2026-10-06T10:20:00Z\n' "$h" \
-    > "$rec/landing-proofs.log"
+  printf 'run/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=a.log|admitted=-|width=1|at=2026-10-06T10:20:00Z\n' "$h" \
+    >> "$p/$LOG_REL"
   printf '%s\n' "$p"
 }
 run_close "$(tl_world two-lines)" check
@@ -939,7 +939,7 @@ RO_P="$(mk_fixture read-order)"; advance_to "$RO_P" 8
 RO_PLAN="$RO_P/$PLAN_REL"; RO_REC="$RO_P/.bionic/docs/record/wave-01-fixture"; mkdir -p "$RO_REC"
 ro_ago() { date -u -v-"$1"M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "-$1 minutes" +%Y-%m-%dT%H:%M:%SZ; }   # <minutes> -> that long ago
 RO_C="$(printf 'e%.0s' $(seq 40))"
-printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=%s\n' "$RO_C" "$(ro_ago 20)" > "$RO_REC/landing-proofs.log"
+printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=%s\n' "$RO_C" "$(ro_ago 20)" >> "$RO_REC/run.log"
 printf '# page\n\n## Replay\n\nrelease-approval/v1|plan=%s|head=%s|at=%s|decisions=1\n' "$RO_PLAN" "$RO_C" "$(ro_ago 10)" > "$RO_REC/release-approval-eeeeeeee.md"
 printf 'fill-ledger/v1|at=%s|session=fixture|turn=|current=8|state=decline|ceiling=6|width=|open=|free=|ready=T3|launched=|declined=no room|missed=0|idle=|room=|named=T3\n' "$(ro_ago 5)" > "$RO_REC/fill-ledger.log"
 printf 'run/v1|ev=hand|by=fixture|name=w-ro|what=amend|why=widen the files|at=%s\n' "$(ro_ago 5)" >> "$RO_REC/run.log"
@@ -1055,7 +1055,7 @@ expect_eq "OC-3d …written in the act that reads the measure last, before the a
 # above zero: an amend after the last landing, as §READ-ORDER plants it
 POB="$(mk_fixture owed-close-above)"; advance_to "$POB" 8; oc_rows "$POB"
 OB_REC="$POB/.bionic/docs/record/wave-01-fixture"
-printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=%s\n' "$(printf 'e%.0s' $(seq 40))" "$(ro_ago 20)" > "$OB_REC/landing-proofs.log"
+printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=%s\n' "$(printf 'e%.0s' $(seq 40))" "$(ro_ago 20)" >> "$OB_REC/run.log"
 printf 'run/v1|ev=hand|by=fixture|name=w-oc|what=amend|why=widen the files|at=%s\n' "$(ro_ago 5)" >> "$OB_REC/run.log"
 OB_EV0="$(oc_eval "$POB/$PLAN_REL")"
 run_close_as "$OC_SID" "$POB" run

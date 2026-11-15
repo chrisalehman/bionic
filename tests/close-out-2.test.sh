@@ -244,7 +244,7 @@ section "LANDINGS — wave-28 T14 (AC-4.5, D18): close-out's continuation prints
 # line per landed row (`session-poker.sh landing-report --rows <plan>`), read from the run's landing
 # record and the gate's requests and only printed. The plan is NAMED to the report, never resolved
 # through the session: act 3 has wiped the session's binding before the continuation is written.
-# FIXTURE FIDELITY: the events are PLANTED in the Interfaces table's `line/v1` shape, which
+# FIXTURE FIDELITY: the events are PLANTED in the run's log in the `run/v1` shape
 # lib/line.sh writes; the gate store is the sandbox's own, empty. Each row line carries the admission split, wait,
 # prove and rework, and the width (wave-38 T7, AC-6.4; wave-37 T9, AC-11.3): the report reads them from this record
 # alone, the verdict's `admitted=` (lib/line.sh, 1.21.0) the start of its admitted run, and the block fences the rows whole.
@@ -254,14 +254,14 @@ section "LANDINGS — wave-28 T14 (AC-4.5, D18): close-out's continuation prints
 # lines dropped; nothing when there is no such heading.
 land_section() { awk '/^## / { s = ($0 == "## Landings"); next } s && NF && !/^```/ { print }' "$1"; }
 land_plant() {  # <project> -> a ready and a queue landing for T1, a git landing for T2
-  local rec="$1/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+  local rec="$1/$LOG_REL"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "land_plant: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
   mkdir -p "${rec%/*}"
-  printf 'line/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T10:00:00Z\n' "$LAND_C" "$1" >> "$rec"
-  printf 'line/v1|ev=candidate|row=T1|base=%s|commit=%s|tree=%s/.bionic/tmp/landing/1|at=2026-10-06T10:02:00Z\n' "$LAND_C" "$LAND_C" "$1" >> "$rec"
-  printf 'line/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=/rec/a.log|admitted=1791281100|width=2|at=2026-10-06T10:20:00Z\n' "$LAND_C" >> "$rec"
-  printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$LAND_C" >> "$rec"
-  printf 'line/v1|ev=published|row=T2|commit=%s|kind=git|by=-|why=-|at=2026-10-06T10:40:00Z\n' "$LAND_C" >> "$rec"
+  printf 'run/v1|ev=ready|row=T1|name=w-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T10:00:00Z\n' "$LAND_C" "$1" >> "$rec"
+  printf 'run/v1|ev=candidate|row=T1|base=%s|commit=%s|tree=%s/.bionic/tmp/landing/1|at=2026-10-06T10:02:00Z\n' "$LAND_C" "$LAND_C" "$1" >> "$rec"
+  printf 'run/v1|ev=verdict|row=T1|commit=%s|suite=a.test.sh|result=green|log=/rec/a.log|admitted=1791281100|width=2|at=2026-10-06T10:20:00Z\n' "$LAND_C" >> "$rec"
+  printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T10:30:00Z\n' "$LAND_C" >> "$rec"
+  printf 'run/v1|ev=published|row=T2|commit=%s|kind=git|by=-|why=-|at=2026-10-06T10:40:00Z\n' "$LAND_C" >> "$rec"
 }
 PLD="$(mk_fixture landings1)"; advance_to "$PLD" 8
 land_plant "$PLD"
@@ -298,7 +298,7 @@ rm -rf "$LAND_MUT"
 # ---- wave-28 T62 (AC-4.6, D18): a run open across the upgrade holds `landed:` lines and no line/v1 event ----
 # The report says so (`landings: unmeasured`) where it once printed zeros; the continuation's section is
 # that one line, with no fence and no row.
-PLU="$(mk_fixture landings5)"; advance_to "$PLU" 8
+PLU="$(CO_PLAN_AT=14 mk_fixture landings5)"; advance_to "$PLU" 8
 LAND_UREC="$PLU/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
 mkdir -p "${LAND_UREC%/*}"
 printf 'landed: row=T1 branch=wt/01-T1 head=%s merge=%s at=2026-10-06T10:10:00Z\nstamp/v1|head=%s|dirty=0|rc=0|at=2026-10-06T10:09:00Z|suites=a.test.sh\n' \
@@ -311,7 +311,7 @@ ln -s "$REPO_ROOT/payload/scripts/card.sh" "$LAND_UMUT/scripts/card.sh"
 sed 's/^      "landings: unmeasured "\*)/      "landings: never "*)/' "$SCRIPT" > "$LAND_UMUT/scripts/close-out.sh"
 expect_eq "LAND-mut3 the doctored copy differs from the script in exactly one line (the doctor took)" "1" \
   "$(diff "$SCRIPT" "$LAND_UMUT/scripts/close-out.sh" | /usr/bin/grep -c '^>')"
-PLV="$(mk_fixture landings6)"; advance_to "$PLV" 8
+PLV="$(CO_PLAN_AT=14 mk_fixture landings6)"; advance_to "$PLV" 8
 mkdir -p "$PLV/.bionic/docs/record/wave-01-fixture"; cp "$LAND_UREC" "$PLV/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
 ( cd "$PLV" && HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
     BIONIC_GATE_DIR="$LAND_GATE" bash "$LAND_UMUT/scripts/close-out.sh" "$PLV/$PLAN_REL" run ) > "$SANDBOX/land-umut.out" 2>&1

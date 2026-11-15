@@ -917,7 +917,7 @@ PA_S1='The one limit the run defers, stated.'
 PA_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
 pa_lib() { bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 9; shift; "$@"' _ "$PA_LIB" "$@"; }   # <fn> [args…]
 pa_tip() { git -C "$RPA" rev-parse --verify -q "refs/heads/$1"; }   # <branch>
-pa_ev() { find "$RPA/.bionic" \( -name landing-proofs.log -o -name run.log \) -exec cat {} + 2>/dev/null | /usr/bin/grep "|part=$1|" | tail -1; }   # <part>
+pa_ev() { find "$RPA/.bionic" -name run.log -exec cat {} + 2>/dev/null | /usr/bin/grep "|part=$1|" | tail -1; }   # <part>
 pa_has() { /usr/bin/grep -c "^$2" "$1/CHANGELOG.md" 2>/dev/null | tr -d ' '; }   # <checkout> <line start> -> the count in its working tree
 RPA="$(make_repo parts)"; RPA="$(cd "$RPA" && pwd -P)"
 git -C "$RPA" config user.email t@example.com; git -C "$RPA" config user.name "Dana Fixture"

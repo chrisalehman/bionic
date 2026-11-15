@@ -124,14 +124,14 @@ cr_out() {
     index($0, l) && /^  rc=/ { k = n; for (i = 1; i <= n; i++) r[i] = o[i] }
     END { for (i = 1; i <= k; i++) print r[i] }' "$CR_LOG" 2>/dev/null
 }
-# cr_ask <key> -> the newest act on <key> as <state>|<by>, read from the register, then the run's log, where an ask
-# event's reply= is the act that closed it
+# cr_ask <key> -> the newest act on <key> as <state>|<by>, read from the run's log, where an ask event's reply= is the
+# act that closed it
 cr_ask() {
-  cat "$CR_REC/asks.state" "$CR_REC/run.log" 2>/dev/null | awk -F'|' -v k="key=$1" '
-    ($1 == "owed/v1" && $2 == k) || ($1 == "run/v1" && $2 == "ev=ask" && $3 == k) { s = ($1 == "run/v1") ? "open" : ""; b = ""
+  awk -F'|' -v k="key=$1" '
+    $1 == "run/v1" && $2 == "ev=ask" && $3 == k { s = "open"; b = ""
       for (i = 3; i <= NF; i++) { if ($i ~ /^state=/) s = substr($i, 7); if ($i ~ /^by=/) b = substr($i, 4)
-        if ($1 == "run/v1" && $i ~ /^reply=/) { s = "closed"; b = substr($i, 7) } }
-      l = s "|" b } END { if (l != "") print l }'
+        if ($i ~ /^reply=/) { s = "closed"; b = substr($i, 7) } }
+      l = s "|" b } END { if (l != "") print l }' "$CR_REC/run.log" 2>/dev/null
 }
 cr_closer_is_waiver() {  # <by> -> yes when a waiver or close-out closed the ask, else no
   case "$1" in
@@ -141,7 +141,7 @@ cr_closer_is_waiver() {  # <by> -> yes when a waiver or close-out closed the ask
 }
 # cr_field <line> <key> -> the value of <key>= in a `|`-separated landing-record line
 cr_field() { printf '%s\n' "$1" | awk -F'|' -v k="$2=" '{ for (i = 1; i <= NF; i++) if (index($i, k) == 1) { print substr($i, length(k) + 1); exit } }'; }
-cr_lines() { cat "$CR_REC/landing-proofs.log" "$CR_REC/run.log" 2>/dev/null; }   # the landing record's lines, then the log's
+cr_lines() { cat "$CR_REC/run.log" 2>/dev/null; }   # the run's log, which holds its landings
 # cr_part_event -> the last line naming a commit of the entry's reviews part, whichever verb wrote it
 cr_part_event() { cr_lines | /usr/bin/grep '|part=reviews|' | tail -1; }
 # cr_entry_part <changelog text on stdin> <version> -> the `### The reviews` part of that version's entry, heading

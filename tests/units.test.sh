@@ -923,7 +923,7 @@ AP_P="$AP_REPO/.bionic/docs/plans/ap.plan.md"
 AP_REC="$AP_REPO/.bionic/docs/record/ap/landing-proofs.log"
 AP_H="$(printf '%040d' 1)"
 ap_plan() {  # <fix row status> -> AP_P: the POST fixture with the fix row T8 born at step 4, after the release row in the table
-  { printf -- '---\ncurrent: 7\n---\n\n## SDLC State\n\ncurrent: 7\napproved-by: fixture 2026-10-12T00:00Z "approved"\n\n## Tasks\n\n'
+  { printf -- '---\ncanonical_sdlc_version: 14\ncurrent: 7\n---\n\n## SDLC State\n\ncurrent: 7\napproved-by: fixture 2026-10-12T00:00Z "approved"\n\n## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|\n'
     printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/a.sh, .bionic/docs/record/w/T1.md | landed | |\n'
     printf '| T5 | 5 | test | the whole regression | test-runner | — | 90 | REQ-1 | .bionic/docs/record/w/T5.md | landed | approval:plan, head |\n'
@@ -1322,9 +1322,9 @@ lv() { call units_rows "${2:-$LV_P}" | awk -F'\t' -v r="$1" '$1 == r { print $10
 lv_log() { bash -c '. "$1/log.sh" && RUN_LOG="$2" log_append "${@:3}"' _ "${LIB%/*}" "$LV_LOG" "$@"; }
 expect_eq "LIVE-1 with no log the cells answer: T1 active, T2 pending and ready" "active/a1 pending/— T2" "$(lv T1) $(lv T2) $(call units_ready "$LV_P" 4)"
 lv_log dispatch row=T2 name=w-T2 brief=b sum=s
-cp "$LV_P" "$LV_P.task-set.1"
+cp "$LV_P" "$LV_P.dry.1"
 expect_eq "LIVE-2 a launch in the log reads active under its name, on the plan and its dry copy, and is not ready" \
-  "active/w-T2 active/w-T2 active/a1|" "$(lv T2) $(lv T2 "$LV_P.task-set.1") $(lv T1)|$(call units_ready "$LV_P" 4)"
+  "active/w-T2 active/w-T2 active/a1|" "$(lv T2) $(lv T2 "$LV_P.dry.1") $(lv T1)|$(call units_ready "$LV_P" 4)"
 call units_dispatch_back "$LV_P" T2 w-T2
 expect_eq "LIVE-3 its cancel returns it to pending and ready" "pending/— T2" "$(lv T2) $(call units_ready "$LV_P" 4)"
 sed 's/| status |$/| status | reads |/; s/|---|$/|---|---|/; s/| pending |$/| pending | approval:ship |/; s/| active |$/| active | — |/' "$LV_P" > "$LV_P.a" && mv "$LV_P.a" "$LV_P"; LV_A="$(call units_ready "$LV_P" 4)"; lv_log approval key=ship by=me

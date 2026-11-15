@@ -2126,7 +2126,7 @@ expect_eq "SETTLED-5 precondition: the writer's tree holds its marker and the ot
 st_render "${CARD_SANDBOX}/st-f-other" step3 "$(st_plan "$ST_F")"
 expect_eq "SETTLED-5b a linked tree with no marker renders the orchestrator's plan and opens approve:step3 (the differential control)" \
   "0|approve:step3" "$ST_RC|$(st_open "$ST_F")"
-rm -f "$ST_F/.bionic/docs/record/$ST_STEM/asks.state" "$ST_F/.bionic/docs/record/$ST_STEM/run.log"
+rm -f "$ST_F/.bionic/docs/record/$ST_STEM/run.log"
 st_render "${CARD_SANDBOX}/st-f-writer" step3 "$(st_plan "$ST_F")"
 expect_eq "SETTLED-5c the same render from the writer's tree (bionic-agent in its git directory) opens nothing" "0|" "$ST_RC|$(st_open "$ST_F")"
 ST_RC=0; ( cd "$ST_F" && CLAUDE_CODE_SESSION_ID="$ST_SID" bash "$CARD_SH" step3 "$(st_plan "$ST_F")" >/dev/null 2>&1 0<&- ) || ST_RC=$?

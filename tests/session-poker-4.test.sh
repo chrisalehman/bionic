@@ -596,18 +596,18 @@ section "§LINE-TELL: the tick tells each standing red and each stalled entry on
 # `ready` appends `standing` when a red also fails at the accepted head (the branch's, not a row's) and `stalled` when
 # an entry's runs twice gave no verdict. The tick prints each off the bound plan's landing record as a note, once; a
 # new event is told by the next tick. FIXTURE FIDELITY: §60's repository and bound plan (s60_world); the events are
-# PLANTED in the Interfaces table's `line/v1` shape, which lib/line.sh writes.
+# PLANTED in the run's log in the `run/v1` shape lib/line.sh writes.
 LT_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 s60_world lt-tell @A whole
 LT_H1="$(printf 'a%.0s' $(seq 40))"; LT_H2="$(printf 'b%.0s' $(seq 40))"
-printf 'line/v1|ev=standing|head=%s|suite=a.test.sh|lines=3|log=/rec/line/T1-a-%s.log|at=2026-10-06T10:00:00Z\n' "$LT_H1" "${LT_H1:0:12}" >> "$S60_REC"
-printf 'line/v1|ev=stalled|row=T7|logs=/rec/line/T7-b-1.log,/rec/line/T7-b-1-2.log|at=2026-10-06T10:01:00Z\n' >> "$S60_REC"
+printf 'run/v1|ev=standing|head=%s|suite=a.test.sh|lines=3|log=/rec/line/T1-a-%s.log|at=2026-10-06T10:00:00Z\n' "$LT_H1" "${LT_H1:0:12}" >> "$S60_REC"
+printf 'run/v1|ev=stalled|row=T7|logs=/rec/line/T7-b-1.log,/rec/line/T7-b-1-2.log|at=2026-10-06T10:01:00Z\n' >> "$S60_REC"
 lt_lines() { printf '%s\n' "$OUT" | /usr/bin/grep -E '^poker: note: (standing|stalled) ' | tr '\n' '|' | sed 's/|$//'; }
 s60_tick
 s60_tick
 expect_nonempty "LT3-pre the second tick printed (the extractor reads real output)" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: ')"
 expect_eq "LT3 a second tick over the same record tells neither again" "" "$(lt_lines)"
-printf 'line/v1|ev=standing|head=%s|suite=a.test.sh|lines=1|log=/rec/line/T2-a-%s.log|at=2026-10-06T10:02:00Z\n' "$LT_H2" "${LT_H2:0:12}" >> "$S60_REC"
+printf 'run/v1|ev=standing|head=%s|suite=a.test.sh|lines=1|log=/rec/line/T2-a-%s.log|at=2026-10-06T10:02:00Z\n' "$LT_H2" "${LT_H2:0:12}" >> "$S60_REC"
 s60_tick
 POKE_BOUND="$LT_BOUND_WAS"
 
@@ -687,8 +687,8 @@ vg_mu() { awk -v h="$1" '/^approved: merge-unproved /{ next } { print } /^curren
 vg_unproved() { printf '%s\n' "$OUT" | /usr/bin/grep -c 'regression.*unproved'; }
 # C3, code, lands green on its suite; the release is approved again at C3, as code past an approval is refused by it.
 VG_C3="$(s57_commit "$VG_WT" lib/b.sh C3)"
-{ printf 'line/v1|ev=ready|row=T10|suites=a.test.sh|at=2026-10-04T14:00:00Z\n'; printf 'line/v1|ev=verdict|row=T10|commit=%s|suite=a.test.sh|result=green|log=/fixture/T10.log|at=2026-10-04T14:05:00Z\n' "$VG_C3"
-  printf 'line/v1|ev=published|row=T10|commit=%s|kind=land|by=w-T10|why=landed|at=2026-10-04T14:10:00Z\n' "$VG_C3"; } >> "$VG_DIR/landing-proofs.log"
+{ printf 'run/v1|ev=ready|row=T10|suites=a.test.sh|at=2026-10-04T14:00:00Z\n'; printf 'run/v1|ev=verdict|row=T10|commit=%s|suite=a.test.sh|result=green|log=/fixture/T10.log|at=2026-10-04T14:05:00Z\n' "$VG_C3"
+  printf 'run/v1|ev=published|row=T10|commit=%s|kind=land|by=w-T10|why=landed|at=2026-10-04T14:10:00Z\n' "$VG_C3"; } >> "$VG_DIR/run.log"
 poke "$RVG" approve release 'ship C3'
 expect_eq "VG-5c precondition: the user approves the release at the code head C3 (exit 0)" "0|$VG_C3" "$RC|$(bash -c '. "$1" && proof_approved_head "$2" release' _ "$S46_LIB" "$PVG")"
 poke "$RVG" current 8 --check
@@ -697,7 +697,7 @@ vg_mu "$VG_C2"; poke "$RVG" current 8 --check
 expect_eq "VG-5d …the person's word at C2's head, not the working head, leaves the regression unproved" "1|1" "$RC|$(vg_unproved)"
 vg_mu "$(git -C "$VG_WT" rev-parse HEAD)"; poke "$RVG" current 8 --check
 expect_eq "VG-5e …and the word at the working head under ## SDLC State holds it: no regression line unproved (VG-5d read the same extractor)" "0" "$(vg_unproved)"
-vg_mu ""; /usr/bin/grep -v '|row=T10|' "$VG_DIR/landing-proofs.log" > "$VG_DIR/landing-proofs.log.n" && mv "$VG_DIR/landing-proofs.log.n" "$VG_DIR/landing-proofs.log"
+vg_mu ""; /usr/bin/grep -v '|row=T10|' "$VG_DIR/run.log" > "$VG_DIR/run.log.n" && mv "$VG_DIR/run.log.n" "$VG_DIR/run.log"
 poke "$RVG" current 8 --check
 
 POKE_BOUND="$VG_BOUND_WAS"
@@ -1449,7 +1449,7 @@ BR_TREE="$(git -C "$RBR" rev-parse "${BR_C1}^{tree}")"; BR_C2="$(git -C "$RBR" c
 BR_OFF="$(git -C "$RBR" commit-tree "$BR_TREE" -m off-branch)"; git -C "$RBR" update-ref refs/heads/wave/01-fixture "$BR_C2"
 PBR="$(s42_plan "$RBR" 4 $'  worktree: .worktrees/01-fixture\n  base-sha: abc1234\n  branch: wave/01-fixture\n  working-branch: wave/01-fixture')"
 ( cd "$RBR" && git add -f "$PBR" && git commit -qm plan ) >/dev/null 2>&1; BR_DIR="$RBR/.bionic/docs/record/wave-01-fixture"; mkdir -p "$BR_DIR"
-br_verdict() { printf 'line/v1|ev=verdict|row=regression|commit=%s|suite=%s|result=%s|log=-|admitted=-|width=-|kind=regression|at=2026-11-04T10:00:00Z\n' "$1" "$2" "$3" >> "$BR_DIR/landing-proofs.log"; }
+br_verdict() { printf 'run/v1|ev=verdict|row=regression|commit=%s|suite=%s|result=%s|log=-|admitted=-|width=-|kind=regression|at=2026-11-04T10:00:00Z\n' "$1" "$2" "$3" >> "$BR_DIR/run.log"; }
 br_log() { printf 'head=%s dirty=%s\nGating: 1 passed, 1 failed\nrc=%s\n' "$1" "$2" "$3" > "$BR_DIR/regression-run-$1.log"; touch -t "$4" "$BR_DIR/regression-run-$1.log"; }  # <sha> <dirty> <rc> <mtime>
 br_add() { TA_PASTE=1 ta_add "$RBR" "$1" 4 build 'fix the red. The red suite turns green.' bionic:implementor '—' 30 REQ-5 "lib/$1.sh" --born "regression:$2"; }
 br_verdict "$BR_C1" a.test.sh red; br_add T6 a.test.sh

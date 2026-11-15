@@ -729,7 +729,7 @@ s60_world() {  # <label> <whole head @A|@C> <scope> -> R59W, P59W: §59's shape 
   printf '| AC-%s | T2 | pending | record/wave-01-fixture/x.md | |\n' 1.1 2.1 2.2 4.1 5.1 >> "$P59W"
   ( cd "$R59W" && git add -f "$P59W" && git commit -qm matrix ) >/dev/null 2>&1
   S60_INIT="$(git -C "$R59W" rev-parse "$S59W_A~1" 2>/dev/null)"
-  S60_REC="$R59W/.bionic/docs/record/wave-01-fixture/landing-proofs.log"; mkdir -p "${S60_REC%/*}"; : > "$S60_REC"
+  S60_REC="$R59W/.bionic/docs/record/wave-01-fixture/run.log"; mkdir -p "${S60_REC%/*}"
 }
 
 # ── hoisted from Section 60 §MOVED: s60_tick — §LINE-TELL ticks §60's world with it. ──

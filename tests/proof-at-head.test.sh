@@ -18,7 +18,7 @@
 #
 # FIXTURE FIDELITY. The project is close-out's own (tests/close-out.prelude.sh) at Step 8, its working branch checked
 # out beside it. `pah_world` lays the regression proof as `proof-add regression` writes it and each landing as the line
-# records it (ready, a green verdict per suite at the landed commit, published); the surfaces are the real verbs.
+# logs it (ready, a green verdict per suite at the landed commit, published); the surfaces are the real verbs.
 #
 # ANTI-VACUITY. Each surface's state is read through its own extractor, shown non-empty before the states are
 # compared; the split arm and the mutant each prove their copy ran before their absence is read.
@@ -45,17 +45,16 @@ CO_PLAN_AT=15   # the worlds here are at 15
 # integration branch takes the working branch, the readings move to H and the run carries the word to merge at H.
 # The page is at 15, where the proof, the readings' head and the word are the run's log's events, each by its writer.
 pah_world() {
-  local label="$1" owed="$2" n="${3:-0}" p plan w rec k i s su c log
+  local label="$1" owed="$2" n="${3:-0}" p plan w k i s su c log
   p="$(CO_PLAN_AT=15 mk_fixture "$label")" || return 1
   advance_to "$p" 8
-  plan="$p/$PLAN_REL"; w="$p-wave"; rec="$p/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
+  plan="$p/$PLAN_REL"; w="$p-wave"
   PAH_F="$(fixture_git "$p" rev-parse wave/01-fixture)"
   log="$p/$LOG_REL"
   sed '/|ev=proof|kind=regression|/d' "$log" > "$log.n" && mv "$log.n" "$log"
   bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
     LOG_AT=2026-10-04T12:00:00Z proof_event "$2" kind=regression "head=$3" "evidence=record/wave-01-fixture/regression-run-$3.log" ${4:+"owed=$4"}' \
     _ "$PAH_LIB" "$plan" "$PAH_F" "$owed" || return 1
-  mkdir -p "${rec%/*}"
   k=1
   while [ "$k" -le "$n" ]; do
     su=""; i=0
@@ -67,15 +66,14 @@ pah_world() {
     fixture_git "$w" add "land-$k.txt" && fixture_git "$w" commit -qm "T$((k + 2)): a fix" || return 1
     c="$(fixture_git "$w" rev-parse HEAD)"
     {
-      printf 'line/v1|ev=ready|row=T%d|name=w-T%d|commit=%s|branch=wt/01-T%d|tree=%s|suites=%s|debt=-|carrier=1:x|at=2026-10-04T13:%02d:00Z\n' \
+      printf 'run/v1|ev=ready|row=T%d|name=w-T%d|commit=%s|branch=wt/01-T%d|tree=%s|suites=%s|debt=-|carrier=1:x|at=2026-10-04T13:%02d:00Z\n' \
         "$((k + 2))" "$((k + 2))" "$c" "$((k + 2))" "$w" "${su:-a.test.sh}" "$((k * 10))"
       for s in ${su//,/ }; do
-        printf 'line/v1|ev=verdict|row=T%d|commit=%s|suite=%s|result=green|log=/rec/T%d-%s.log|at=2026-10-04T13:%02d:30Z\n' \
+        printf 'run/v1|ev=verdict|row=T%d|commit=%s|suite=%s|result=green|log=/rec/T%d-%s.log|at=2026-10-04T13:%02d:30Z\n' \
           "$((k + 2))" "$c" "$s" "$((k + 2))" "$s" "$((k * 10))"
       done
-      printf 'line/v1|ev=published|row=T%d|commit=%s|kind=queue|by=-|why=-|at=2026-10-04T13:%02d:50Z\n' "$((k + 2))" "$c" "$((k * 10))"
-      printf 'landed: row=T%d branch=wt/01-T%d head=%s merge=%s at=2026-10-04T13:%02d:50Z\n' "$((k + 2))" "$((k + 2))" "$c" "$c" "$((k * 10))"
-    } >> "$rec"
+      printf 'run/v1|ev=published|row=T%d|commit=%s|kind=queue|by=-|why=-|at=2026-10-04T13:%02d:50Z\n' "$((k + 2))" "$c" "$((k * 10))"
+    } >> "$log"
     k=$((k + 1))
   done
   PAH_H="$(fixture_git "$p" rev-parse wave/01-fixture)"
