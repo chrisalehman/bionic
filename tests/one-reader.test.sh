@@ -59,6 +59,9 @@ planted_dispatch() { log_append dispatch row=T1; }
 planted_tree() { RUN_LOG="$log" log_append tree row=T1 path=.worktrees/t1; }
 EOF
 printf '%s\n' "planted_reader_rows() { awk -F'|' '\$2 ~ /T/' \"\$plan\"; }" | tee -a "$L/fields.sh" >> "$L/reader.sh"
+# In the reader's file a call of the appender and a printed line appended with >> write an event; a printed line alone is its answer.
+printf '%s\n' 'planted_ask_call() { log_append ask key=k; }' 'planted_ask_put() { printf "run/v1|ev=ask|key=k|at=now\n" >> "$RUN_LOG"; }' \
+  'planted_ask_say() { printf "run/v1|ev=ask|key=k|at=now\n"; }' >> "$L/reader.sh"
 # One planted site for each name the check counts, on each wire, so the section's proof rests on no real hook.
 printf '%s\n' 'refuse exit2 v "w" "x" ""' 'refuse deny v "w" "x" ""' 'refuse block v "w" "x" ""' 'refuse "$m" v "w" "x" ""' \
   'fold_block "w"' 'dp_finding "w" "x" ""' 'patrol_deny "w" "x" ""' 'dp_not_checked "w"' 'deny "w"' 'block "w"' >> "$S/hooks/engage.sh"
@@ -99,19 +102,18 @@ AFTER="$(run)"; RC=$?
 site() { printf '%s\n' "$AFTER" | awk -F'\t' -v f="payload/scripts/lib/planted-k$1.sh" '$2 == f { print $1, $3 }'; }
 
 section "PARSERS"
-expect_contains "a real parser is named at this head" "$(printf 'parser\tpayload/scripts/lib/units.sh\t')" "$BEFORE"
 expect_absent "the goals library reads a criterion's state and a plan's scale through the reader alone" "$(printf 'parser\tpayload/scripts/lib/plan.sh\t')" "$BEFORE"
 expect_absent "the fill library takes the run's step and approval from the reader alone" "$(printf 'parser\tpayload/scripts/lib/fill.sh\t')" "$BEFORE"
-expect_eq "parsers, plan writers and shared types stand at or under 13, 1 and 0" "1 1 1" \
-  "$(( $(count "$BEFORE" parsers) <= 13 )) $(( $(count "$BEFORE" plan_writers) <= 1 )) $(( $(count "$BEFORE" shared_types) <= 0 ))"
+expect_eq "parsers, plan writers and shared types stand at or under 13, 0 and 0" "1 1 1" \
+  "$(( $(count "$BEFORE" parsers) <= 13 )) $(( $(count "$BEFORE" plan_writers) <= 0 )) $(( $(count "$BEFORE" shared_types) <= 0 ))"
 expect_eq "headings: a message's, a constant's and a print's words are no parse; an unanchored match is" "parser sites=1 first=4" "$(site 1)"
 expect_eq "shapes: a printed one and a function line's comment are no parse; a log line's test is" "parser sites=1 first=3" "$(site 2)"
 expect_eq "operands: a function's argument, in a \$( ) or in words, is no read; a reader's own is, and a program's end" \
   "parser sites=1 first=4 parser sites=1 first=1" "$(site 3) $(site 3b)"
 expect_contains "the planted awk over a plan is named" "$(printf 'parser\tpayload/scripts/lib/planted-parse.sh\t')" "$AFTER"
 expect_eq "the parser count rises by the five planted parsers" "$(( $(count "$BEFORE" parsers) + 5 ))" "$(count "$AFTER" parsers)"
-expect_absent "the reader's own file is admitted, its planted awk too" "lib/reader.sh" "$AFTER"
-expect_absent "the field reader's file is the reader's, its planted awk too" "lib/fields.sh" "$AFTER"
+expect_absent "the reader's own file is admitted, its planted awk too" "$(printf 'parser\tpayload/scripts/lib/reader.sh')" "$AFTER"
+expect_absent "the field reader's file is the reader's, its planted awk too" "$(printf 'parser\tpayload/scripts/lib/fields.sh')" "$AFTER"
 expect_absent "the landing library parses no record shape: its field reader is the reader's" "$(printf 'parser\tpayload/scripts/lib/line.sh\t')" "$AFTER"
 
 section "PLANWRITERS"
@@ -130,6 +132,10 @@ expect_contains "two functions appending one type are a pair" \
 pair() { printf '%s\n' "$AFTER" | awk -F'\t' -v t="$1" '$1 == "shared" && $2 == t { print $3 }'; }
 expect_eq "events: a printed search pattern writes none; a printed line does" "payload/scripts/lib/planted-k5.sh:2 planted_k5_put" \
   "$(printf '%s\n' "$AFTER" | awk -F'\t' '$1 == "writer" && $2 == "zzplant" { print $3 }')"
+ASK="$(printf '%s\n' "$AFTER" | awk -F'\t' '$1 == "writer" && $2 == "ask" { print $3 }')"
+expect_eq "ask: in the reader's file a log_append call and a printed line appended with >> are writers, a printed line alone is none" "1/1/0" \
+  "$(printf '%s\n' "$ASK" | /usr/bin/grep -c ' planted_ask_call$')/$(printf '%s\n' "$ASK" | /usr/bin/grep -c ' planted_ask_put$')/$(printf '%s\n' "$ASK" | /usr/bin/grep -c ' planted_ask_say$')"
+expect_absent "ask is shared at this head by no pair, the reader's printed answer being no writer" "$(printf 'shared\task\t')" "$BEFORE"
 expect_contains "a planted second waiver appender is named beside the one waiver writer" \
   "payload/scripts/lib/planted-writers.sh:planted_waiver payload/scripts/lib/proof.sh:proof_waiver_event" "$(pair waiver)"
 expect_contains "a planted second finding appender is named beside the one finding writer" \
@@ -145,8 +151,8 @@ expect_contains "born: the planted split beside it" "payload/scripts/lib/planted
 TRE="$(pair tree)"
 expect_contains "tree: the tree verb's one writer" "payload/scripts/lib/worktree.sh:worktree_tree_event" "$TRE"
 expect_contains "tree: the planted second writer beside it" "payload/scripts/lib/planted-writers.sh:planted_tree" "$TRE"
-SH0="$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "shared" && ($2 == "born" || $2 == "dispatch" || $2 == "waiver" || $2 == "finding" || $2 == "proof" || $2 == "tree")' | grep -c .)"
-expect_eq "the shared-type count rises by each of the six planted types not shared before" "$(( $(count "$BEFORE" shared_types) + 6 - SH0 ))" "$(count "$AFTER" shared_types)"
+SH0="$(printf '%s\n' "$BEFORE" | awk -F'\t' '$1 == "shared" && ($2 == "born" || $2 == "dispatch" || $2 == "waiver" || $2 == "finding" || $2 == "proof" || $2 == "tree" || $2 == "ask")' | grep -c .)"
+expect_eq "the shared-type count rises by each of the seven planted types not shared before" "$(( $(count "$BEFORE" shared_types) + 7 - SH0 ))" "$(count "$AFTER" shared_types)"
 w1() { printf '%s\n' "$AFTER" | awk -F'\t' -v t="$1" '$1 == "writer" && $2 == t { split($3, w, " "); sub(/:[0-9]+$/, "", w[1]); print w[1], w[2] }'; }
 for t in step approval; do expect_eq "$t: one writer, the facts library's, and no second" "payload/scripts/lib/proof.sh proof_${t}_event|" "$(w1 $t)|$(pair $t)"; done
 for t in published run returned ready candidate verdict; do expect_eq "$t: one writer, the landing library's, and no second" "payload/scripts/lib/line.sh line_${t}_event|" "$(w1 $t)|$(pair $t)"; done
