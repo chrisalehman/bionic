@@ -51,6 +51,7 @@
 # about the world. `BIONIC_WALL_VERBOSE=1` is the knob that asks a wall for its facts.
 export BIONIC_WALL_VERBOSE=1
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
@@ -308,9 +309,8 @@ cg_live() {  # <transcript> <name[:status]>...
 #   dispatch-preflight  refuse (exit 2, no attestation planted)  <=> yes
 #   stop gate           refuse (exit 2, target unresolvable)     <=> yes
 #
-# The evidence gate is no party: it reads a run's step from its log, and refuses an
-# open run at 14 under any name before any step is read, so these plans' state
-# sections are read by the translation's readers alone.
+# The evidence gate is no party: it reads a run's step from its log, and a plan at 14
+# is a document to it, so no party reads these plans' state sections as a run.
 #
 # Deliberately out of the battery, and why:
 #   * `current: T<n>` — not a step at any scale since wave-31 (one ledger shape, D2):
@@ -464,7 +464,8 @@ engage_sids() {  # <repo> <sid>...
   for s in "$@"; do : > "$r/.bionic/tmp/engaged-$s.state"; done
 }
 
-# write_live_plan <plan path> <state-body> — write_plan, then BIND the repo's three fixture
+# write_live_plan <plan path> <step> — the page a run at 15 holds at <step>, approved
+# (tests/lib/plan-fixture.sh), then BIND the repo's three fixture
 # sessions to that plan (wave-23-fixit-1810, REQ-1, D1). new_repo engages them with an EMPTY
 # marker — engaged and unbound — and an unbound session's newest-plan fallback is announced
 # and never acted on: the dispatch wall refuses its writers with the bind instruction. A
@@ -472,7 +473,7 @@ engage_sids() {  # <repo> <sid>...
 # session running that wave, so it writes its plan through here. The repo is the path up to
 # its `.bionic/`.
 write_live_plan() {
-  write_plan "$1" "$2"
+  plan_fixture --current "$2" "$1" wave >/dev/null
   local _r="${1%%/.bionic/*}" _s
   for _s in "$SID_A" "$SID_B" "$SID_LG"; do bound_marker "$_r" "$_s" "$1"; done
 }

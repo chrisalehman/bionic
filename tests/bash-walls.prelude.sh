@@ -161,29 +161,36 @@ eg6_plan() {  # <current> <scale> <lines> [<Step 6 line>] -> a double plan the g
 }
 # eg6_world <repo> <plan text> [<eval type of its criterion>] [<log line>...] -> EG6_PAGE, the run at 15 the text's state section
 #   stands for: plan_fixture's page at the text's current:, at double rigor, its log holding the fixture's events, a
-#   regression proof, the text's readings, moves and waivers read through lib/translate.sh, then the criterion's proof
+#   regression proof, the text's review, moved: and waived: lines as the events a run at 15 writes for them, in the
+#   order written (each caller writes them in the order of their instants), then the criterion's proof
 #   (EG6_AC, the fixture's own unless named; its evidence EG6_EVIDENCE, the generic record unless named), then each line
 #   given, so a person's word given after the proof stands after it, then the asks the run already held, which belong to the run and outlive a rebuild of its other facts; the working
 #   branch and the base at the repository's head, so the evidence review there is the auditor's cell and the judge's
 #   chains start there.
 eg6_world() {
-  local repo="$1" text="$2" type="${3:-hermetic}" ac="${EG6_AC:-AC-1.1}" cur t lib head asks
+  local repo="$1" text="$2" type="${3:-hermetic}" ac="${EG6_AC:-AC-1.1}" cur head asks
   shift; shift; [ "$#" -eq 0 ] || shift
-  lib="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"; head="$(git -C "$repo" rev-parse HEAD)"
+  head="$(git -C "$repo" rev-parse HEAD)"
   cur="$(printf '%s\n' "$text" | awk '$1 == "current:" { print $2; exit }')"
   asks="$(grep -h '|ev=ask|' "$repo/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null)"
   rm -rf "$repo/.bionic/docs/plans/epic-99-fixture" "$repo/.bionic/docs/record/wave-01-fixture"
-  t="$repo/.bionic/tmp/eg6-text.plan.md"; mkdir -p "$repo/.bionic/tmp"; printf '%s\n' "$text" > "$t"
   EG6_PAGE="$(plan_fixture --current "${cur:-6}" "$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave)"
   awk -v ty="$type" -v h="$head" -v ac="$ac" '/^rigor: /{ $0 = "rigor: double" } /^base-sha: /{ $0 = "base-sha: " h } { sub(/\| AC-1\.1 \| hermetic \|/, "| AC-1.1 | " ty " |"); gsub(/AC-1\.1/, ac); print }' "$EG6_PAGE" > "$EG6_PAGE.t" \
     && mv "$EG6_PAGE.t" "$EG6_PAGE"
   { printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=record/floor.log|at=2026-10-04T01:00:00Z\n' "$head"
-    bash -c '. "$1/reader.sh" && . "$1/translate.sh" && translate "$2" events' _ "$lib" "$t" \
-      | grep -E '^run/v1[|]ev=(proof[|]kind=review|finding|waiver)[|]'
+    printf '%s\n' "$text" | awk '
+      function ev(t, s,   o, at, k, v) { o = "run/v1|ev=" t
+        while (match(s, /[a-z][a-z0-9_-]*=("[^"]*"|[^ ]*)/)) { k = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+          v = substr(k, index(k, "=") + 1); k = substr(k, 1, index(k, "=") - 1); gsub(/"/, "", v); if (k == "at") at = v; else o = o "|" k "=" v }
+        print o "|at=" at }
+      /^proved: kind=review / { ev("proof", substr($0, 8)) }
+      /^moved: / { ev("finding", "ref=" substr($0, 8)) }
+      /^waived: / { q = index($0, "\""); p = substr($0, 9, q - 10); b = index(p, " by "); n = split(substr(p, b + 4), w, " ")
+        by = w[1]; for (i = 2; i < n; i++) by = by " " w[i]; ev("waiver", substr(p, 1, b - 1) " by=\"" by "\" said=" substr($0, q) " at=" w[n]) }'
     printf 'run/v1|ev=proof|ac=%s|evidence=%s|at=2026-10-04T01:00:01Z\n' "$ac" "${EG6_EVIDENCE:-record/generic-evidence.md}"
     [ "$#" -eq 0 ] || printf '%s\n' "$@"
     [ -z "$asks" ] || printf '%s\n' "$asks"; } >> "$(plan_fixture_log "$EG6_PAGE")"
-  rm -f "$t"; git -C "$repo" branch -f wave/01-fixture HEAD >/dev/null 2>&1
+  git -C "$repo" branch -f wave/01-fixture HEAD >/dev/null 2>&1
 }
 R_EG6="$(mk_repo eg6)"
 H_EG6="$(git -C "$R_EG6" rev-parse HEAD)"
