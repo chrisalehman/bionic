@@ -163,13 +163,7 @@ expect_nonempty "REF-4 precondition: a tag of the branch's name names a commit" 
   "$(fixture_git "$PREFD" rev-parse --verify -q 'refs/tags/wave/01-fixture^{commit}' 2>/dev/null)"
 run_close "$PREFD" check
 
-PREFF="$(CO_PLAN_AT=14 mk_fixture ref-frontmatter)"; advance_to "$PREFF" 8
-awk '
-  NR == 1 && $0 == "---" { print; fm = 1; next }
-  fm && $0 == "---" { print "working-branch: wave/01-fixture"; print; fm = 0; next }
-  /^## SDLC State/ { s = 1 }
-  s && /^working-branch: / { next }
-  { print }' "$PREFF/$PLAN_REL" > "$PREFF/$PLAN_REL.wb" && mv "$PREFF/$PLAN_REL.wb" "$PREFF/$PLAN_REL"
+PREFF="$(mk_fixture ref-frontmatter)"; advance_to "$PREFF" 8   # a page at 15 names its branch in its header alone
 run_close "$PREFF" check
 expect_absent "REF-5b A-orch-16 close-out reads the branch through the one reader: a frontmatter key is not refused as none" \
   "names no working-branch" "$CO_OUT"

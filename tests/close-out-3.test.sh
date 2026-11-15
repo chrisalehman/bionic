@@ -98,11 +98,8 @@ expect_eq "HH-2 …after the landings line, which is the one the default prints"
 expect_eq "HH-3 the default landing-report prints no hand-holds line (its output stays what it was)" "0" \
   "$(hh_report "$PH" | grep -c '^hand-holds')"
 # the same fixture with the verbs' lines removed and the prose kept: nothing is counted
-PHP="$(CO_PLAN_AT=14 mk_fixture handholds-prose)"; advance_to "$PHP" 8
-mkdir -p "$PHP/.bionic/docs/record/wave-01-fixture"
-printf 'note: T3 was landed by-hand (kind=hand); its run was stopped (ev=stop-run); the T2 decline was lifted (state=lift); amended= held= extended=\n' > "$PHP/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
-cp "$PHP/.bionic/docs/record/wave-01-fixture/landing-proofs.log" "$PHP/.bionic/docs/record/wave-01-fixture/fill-ledger.log"
-awk '/^- Step 8:/ { print "- T1: landed by-hand (kind=hand) after waived: evidence; approved: regression-2 was discussed; a second floor"; print; next } { print }' \
+PHP="$(mk_fixture handholds-prose)"; advance_to "$PHP" 8
+awk '/^## Tasks/ { print "- T1: landed by-hand (kind=hand) after waived: evidence; approved: regression-2 was discussed; a second floor"; print ""; print; next } { print }' \
   "$PHP/$PLAN_REL" > "$PHP/plan.b" && mv "$PHP/plan.b" "$PHP/$PLAN_REL"
 HH_PROSE="$(hh_report "$PHP" --hand-holds)"
 expect_eq "HH-4 a run whose only by-hand, stop-run, decline, lift, waiver and approval are prose counts zero in every kind" \

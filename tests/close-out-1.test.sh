@@ -466,10 +466,7 @@ ba_card() {  # <project> -> the integration branch card.sh step0 prints for the 
 }
 expect_eq "BA3 the card names ## SDLC State's branch too" "main" "$(ba_card "$PBA")"
 
-PBF="$(CO_PLAN_AT=14 mk_fixture branch-agree-fm)"
-awk '/^## SDLC State/ { s = 1 } /^## Tasks/ { s = 0 } !(s && /^integration-branch:/)' "$PBF/$PLAN_REL" > "$PBF/$PLAN_REL.ba" \
-  && mv "$PBF/$PLAN_REL.ba" "$PBF/$PLAN_REL"
-ba_fm "$PBF" main
+PBF="$(mk_fixture branch-agree-fm)"   # a page at 15 names its branch in its header alone
 ba_doors "$PBF"
 expect_eq "BA2b check and closed-form both name the frontmatter's branch, the fallback (check prints its merge verdict only past its refusal)" \
   "main|main" "$BA_CHECK|$BA_CLOSED"
