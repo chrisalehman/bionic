@@ -920,22 +920,15 @@ SDLC_VERSION=$(yaml_get canonical_sdlc_version)
 # whole contract of the version it declares.
 #
 # A PLAN IS WRITTEN AT 15, the shape that holds only what a person wrote, and is held below to
-# what version 15 has no place for. A plan at 14 binds only while its run is open: the run's own
-# answer (`run_open`) is asked of the plan on disk, whose log holds its steps, and an open one is
-# refused naming the act that brings it forward. A closed one is history, admitted with nothing
-# further judged. A plan not yet on disk starts a run, so at 14 it is refused: a closed answer
-# from a page no run has written would admit it with nothing judged. Every other document may
-# declare 14 or 15: a version binds the plan of an open run and nothing else.
+# what version 15 has no place for. A plan at 14 is an older run's document and never a run: one
+# already on disk is admitted with nothing judged and nothing asked of its run, open or not. A plan
+# not yet on disk starts a run, so at 14 it is refused, naming 15. Every other document may declare
+# 14 or 15: a version binds the plan of an open run and nothing else.
 # [WALL: tests/plan-page.test.sh]
 GS_V15=0
 case "$BASENAME:$SDLC_VERSION" in
   *.plan.md:15) GS_V15=1 ;;
-  *.plan.md:14)
-    [ -f "$FILE_PATH" ] || _gs_refuse new-14
-    # A run that cannot be read (3) is no closed run: it is refused as an open one is.
-    GS_OPEN=0; run_open "$FILE_PATH" || GS_OPEN=$?
-    [ "$GS_OPEN" -eq 1 ] || _gs_refuse live-14 "bash $(refuse_shell_word "$(refuse_plugin_root)/scripts/bring-forward.sh") $(refuse_shell_word "$FILE_PATH")"
-    exit 0 ;;
+  *.plan.md:14) [ -f "$FILE_PATH" ] || _gs_refuse new-14; exit 0 ;;
   *.plan.md:*) _gs_refuse bad-version "$SDLC_VERSION" "'15'" ;;
   *:14|*:15) ;;
   *) _gs_refuse bad-version "$SDLC_VERSION" "'14' or '15'" ;;

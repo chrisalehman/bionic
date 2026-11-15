@@ -61,7 +61,7 @@ write_plan "$h2c" "# regular plan
 Some content.
 No SDLC State section here." > /dev/null
 
-section "Section 2b: a plan declares 15; one open at 14 is refused, naming the act; the two gates agree"
+section "Section 2b: a plan declares 15; one at 14 on disk is a document; the two gates agree"
 
 h2v=$(make_home)
 write_plan "$h2v" "${FM/version: 14/version: 13}
@@ -73,9 +73,9 @@ for v in 13 14 15; do
 ## SDLC State
 current: 4" "v$v.plan.md"); run_hook "$h" 'git commit -m "x"'
   w=$(jq -n --arg p "$p" --arg c "$(cat "$p")" --arg s "$EG_SID" '{session_id: $s, hook_event_name: "PreToolUse", tool_name: "Write", tool_input: {file_path: $p, content: $c}}' \
-    | HOME="$h" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh" 2>&1 >/dev/null | grep -c 'unsupported version\|open at version 14' || true)
-  [ "$v" = 15 ] || expect_eq "the write hook refuses $v for its version" 1 "$w"
-  expect_eq "the write hook and the commit gate agree on version $v" "$w" "$(grep -c 'unsupported sdlc version\|open at version 14' <<< "$HOOK_STDERR" || true)"
+    | HOME="$h" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh" 2>&1 >/dev/null | grep -c 'unsupported version' || true)
+  case "$v" in 13) expect_eq "the write hook refuses 13 for its version" 1 "$w" ;; 14) expect_eq "the write hook says nothing of a plan at 14 on disk" 0 "$w" ;; esac
+  expect_eq "the write hook and the commit gate agree on version $v" "$w" "$(grep -c 'unsupported sdlc version' <<< "$HOOK_STDERR" || true)"
 done
 # The plan builder writes either page: asked for 15, the version 15, no state section, and the log the reader reads.
 for v in 14 15; do p=$(plan_fixture --at $v --current 5 "$EG_PF_DIR/plans/epic-99-fixture/wave-0$v.plan.md" wave "$(eg_pf_row T1 dw active)")

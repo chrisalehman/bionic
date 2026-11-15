@@ -32,8 +32,8 @@
 #   §PATROL  a dead Patrol clock names its three acts in order, a clock that never ticks is told apart,
 #            and the one report sentence is in the rules and the prompt
 #   §LOG     a step, an approval or an order the run's log alone holds moves the ready-with-room verdict
-#   §ONE     a stop is one event: the turn's end is the run's stop event, the reader's answer before and after the
-#            bring-forward act, and a log the hook cannot write, or a plain directory, changes nothing it says
+#   §ONE     a stop is one event: the turn's end is the run's stop event, the reader's answer at 15, and a log the
+#            hook cannot write, or a plain directory, changes nothing it says
 #   §GUARD   the stop guard's words, its roster writes, the verdict read and the agent guard's
 #            arming check, each a stop-library function called in a shell of its own
 #   §EVENTS  the orchestrator's stop of an agent (TaskStop's PreToolUse) and an agent's own stop
@@ -1104,11 +1104,11 @@ expect_eq "LOG4 a cancel the log appends after LOG1's approval leaves no row rea
   "$(printf '%s' "$STOP_OUT" | jq -r '.decision // ""' 2>/dev/null)|$(s9_headline)"
 
 # ─────────────────────────────────────────────────────────────────────────────
-section "ONE: a stop is one event: the turn's end the hook records is the run's stop event, the reader's answer before and after the act, and a log it cannot write changes nothing the hook says"
+section "ONE: a stop is one event: the turn's end the hook records is the run's stop event, the reader's answer at 15, and a log it cannot write changes nothing the hook says"
 
-# A run at 14 crosses by the act (payload/scripts/bring-forward.sh), and the reader then reads its log alone, so a
-# turn's end recorded anywhere else is lost to it. Each Stop below is the real hook on an ordinary turn whose one row
-# reads an unruled D3 at 14, so no row is ready; the turn key is the prompt's uuid, which the recorder writes as turn=.
+# A run at 15 is read from its log, so a turn's end recorded anywhere else is lost to the reader. Each Stop below is the
+# real hook on an ordinary turn whose one row reads an unruled D3, so no row is ready; the turn key is the prompt's
+# uuid, which the recorder writes as turn=.
 one_fixture() {  # <14|15> -> project
   local d p; d="$(wait_fixture "" "$WT_RULED")"; p="$d/.bionic/docs/plans/epic-99-fixture/wave-09-wait.plan.md"
   if [ "$1" = 15 ]; then sp_at15 "$p"
@@ -1124,23 +1124,13 @@ one_turn() { bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$1/.bionic/do
 one_ev() { stop_led "$1/.bionic/docs/record/wave-09-wait" | tail -1; }
 require_helpers one_fixture one_stop one_turn one_ev wait_fixture s7_fire sp_at15
 
-ONE_D="$(one_fixture 14)"
-one_stop "$ONE_D" u-one-before
-expect_eq "ONE0 meta: at 14 the turn just ended is the reader's stop" "turn=u-one-before" "$(one_turn "$ONE_D")"
-bash "$BIONIC_SCRIPTS_DIR/payload/scripts/bring-forward.sh" "$ONE_D/.bionic/docs/plans/epic-99-fixture/wave-09-wait.plan.md" >/dev/null 2>&1
-expect_eq "ONE1 meta: the act brought the run to 15 and kept its old homes" "canonical_sdlc_version: 15|kept" \
-  "$(/usr/bin/grep -m1 '^canonical_sdlc_version:' "$ONE_D/.bionic/docs/plans/epic-99-fixture/wave-09-wait.plan.md")|$(! [ -d "$ONE_D/.bionic/docs/record/wave-09-wait/kept" ] || echo kept)"
-one_stop "$ONE_D" u-one-after
-expect_eq "ONE2 after the act the turn just ended is the reader's stop, not the act's last" "turn=u-one-after" "$(one_turn "$ONE_D")"
-expect_regex "ONE3 …the log's last stop event, the recorder's fields in their order and the appender's instant last" \
-  "^run/v1\|ev=stop\|session=$SID\|turn=u-one-after\|current=4\|state=ok\|ceiling=[^|]*\|width=[0-9]+\|open=[0-9]+\|free=[0-9]+\|ready=[^|]*\|launched=[^|]*\|declined=\|missed=[0-9]+\|idle=[^|]*\|room=[0-9]+\|at=[0-9-]+T[0-9:]+Z$" \
-  "$(one_ev "$ONE_D")"
-
-# THE CONTROL: the same Stop on a run born at 15, with no kept copy, is the reader's answer, so ONE2 is the act's.
 ONE_F="$(one_fixture 15)"
 one_stop "$ONE_F" u-one-after
-expect_eq "ONE4 the control: at 15 with no kept copy the same Stop is the reader's stop" "turn=u-one-after" "$(one_turn "$ONE_F")"
+expect_eq "ONE4 at 15 the turn just ended is the reader's stop" "turn=u-one-after" "$(one_turn "$ONE_F")"
 expect_contains "ONE5 …written to the run's log as its stop event" "|turn=u-one-after|" "$(one_ev "$ONE_F")"
+expect_regex "ONE5a …the recorder's fields in their order and the appender's instant last" \
+  "^run/v1\|ev=stop\|session=$SID\|turn=u-one-after\|current=4\|state=ok\|ceiling=[^|]*\|width=[0-9]+\|open=[0-9]+\|free=[0-9]+\|ready=[^|]*\|launched=[^|]*\|declined=\|missed=[0-9]+\|idle=[^|]*\|room=[0-9]+\|at=[0-9-]+T[0-9:]+Z$" \
+  "$(one_ev "$ONE_F")"
 expect_false "ONE5b …and to no fill ledger" test -e "$ONE_F/.bionic/docs/record/wave-09-wait/fill-ledger.log"
 
 # A LOG IT CANNOT WRITE: the record directory read-only. The hook still prints nothing, refuses nothing and exits 0,
