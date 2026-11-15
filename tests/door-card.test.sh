@@ -38,6 +38,7 @@ DC_LOADED=0
 # shellcheck source=/dev/null
 . "$(dirname "$0")/lib/door.sh" && DC_LOADED=1
 [ -n "${WORLD_ROOT:-}" ] || . "$(dirname "$0")/lib/world.sh"
+world_machine 8 8192 30 1.0   # the world's gate store reads the world's machine: regression-run asks it for a whole run
 # shellcheck source=/dev/null
 . "$(dirname "$0")/lib/roster-row.sh"
 

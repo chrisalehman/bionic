@@ -1216,10 +1216,12 @@ section "§STARTER: the tick starts the whole run itself when nothing is ready, 
 # waiting and started again.
 # FIXTURE FIDELITY: §STACK's shape at Step 4, with a regression proof at an older head from proof-add over a run line
 # from regression_fixture. The runner is the worktree's committed tests/run.sh stub: it holds while a hold file stands,
-# exits 75 with no verdict while a full file stands, else reports a green whole run. Everything else is real, and the
-# writer row is mkrow's, closed by the real ack.
+# exits 75 with no verdict while a full file stands, else reports a green whole run; it books nothing at the gate, so the
+# open whole request beside it is the verb's own. Everything else is real, and the writer row is mkrow's, closed by the
+# real ack.
 # fails-when: the quiet condition inverted; the head compared to anything but the last regression proof's; proof-add
-# dropped from the detached call; a live object not stopping a second start; a 75 not told and not started again.
+# dropped from the detached call; a live object not stopping a second start; a 75 not told and not started again; the
+# verb filing no whole request for its run, with or without regression-command:, or not ending it.
 ST_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RST="$(make_repo starter)"; ( cd "$RST" && git commit -q --allow-empty -m init )
 git -C "$RST" config user.name "Dana Fixture"
@@ -1227,8 +1229,8 @@ ST_CTL="$TMPROOT/starter-ctl"; mkdir -p "$ST_CTL"
 mkdir -p "$RST/tests"
 cat > "$RST/tests/run.sh" <<RUNNER
 #!/bin/bash
-# The fixture's whole run: holds while the hold file stands, exits 75 with no verdict while the full file stands.
-i=0; while [ -e "$ST_CTL/hold" ] && [ "\$i" -lt 600 ]; do i=\$((i + 1)); sleep 0.1; done
+# The fixture's whole run: marks its start, holds while the hold file stands, exits 75 with no verdict while the full file stands.
+: > "$ST_CTL/ran"; i=0; while [ -e "$ST_CTL/hold" ] && [ "\$i" -lt 600 ]; do i=\$((i + 1)); sleep 0.1; done
 [ ! -e "$ST_CTL/full" ] || exit 75
 printf 'Gating: 1 passed, 0 failed\n'
 RUNNER
@@ -1274,19 +1276,26 @@ expect_eq "ST-1 AC-6.1 control: with a writer row running, the tick starts nothi
 s42_builds_landed "$PST"
 awk '/^\| T5 \| 5 \| verify \|/ { sub(/\| pending \|$/, "| landed |") } { print }' "$PST" > "$PST.tmp" && mv "$PST.tmp" "$PST"
 ack_rows "$RST" w-T2
-# A whole run that is running leaves no log and no object until it ends; its open whole request at the gate, held by
-# this live shell, is the one fact of it. Waiting, it leaves the room as it was, so the tick reaches the start; once it
-# is ended the same tick starts (ST-2), and nothing else differs between the two.
-ST_WHOLE="$SP_GATE_DIR/requests/9001"
-printf 'key=tests/run.sh\nkind=whole\nwho=%s:main\ntree=%s\nasked=1000\nholder=%s:%s\n' "$SID" "$(cd "$ST_WT" && pwd -P)" "$$" \
-  "$(bash -c '. "$1/payload/scripts/lib/slots.sh" && _slots_since "$2"' _ "$BIONIC_SCRIPTS_DIR" "$$")" > "$ST_WHOLE"
-forget_digest "$RST"; poke "$RST" tick
-expect_nonempty "ST-1b-pre the tick beside an open whole run printed its decision line" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker-tick/v1|')"
-expect_eq "ST-1b AC-19.1 an open whole request at the gate for the checkout: the tick starts no whole run and no object" "|" "$(st_started)|$(st_objects "${ST_H1:0:8}")"
-poke "$RST" regression-run
-expect_eq "ST-1c AC-19.1 …and regression-run refuses a second whole run beside it" "1" "$RC"
-expect_contains "ST-1d …naming the gate's open whole request for the checkout" "open whole request" "$OUT"
-printf 'ended=1001\nrc=0\n' >> "$ST_WHOLE"
+# A whole run the orchestrator's verb started leaves no log and no object until it ends; the open whole request the verb
+# itself files at the gate is the one fact of it, nothing planted. Its runner ends 75 here, so it leaves no log at H1 and
+# the tick after it starts (ST-2). st_beside <h8> <label> runs the tick and a second verb beside the running one.
+st_open() { bash -c '. "$1/payload/scripts/lib/gate.sh" && gate_whole_open "$2"' _ "$BIONIC_SCRIPTS_DIR" "$ST_WT"; }
+st_beside() {
+  rm -f "$ST_CTL/ran"; ( cd "$RST" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" regression-run ) > "$TMPROOT/st-rr.out" 2>&1 &
+  ST_RR=$!
+  expect_true "$2-pre the verb's command is running, held" st_until 30 test -e "$ST_CTL/ran"
+  expect_true "$2a AC-19.1 …and the gate holds an open whole request for the checkout while it runs" st_open
+  forget_digest "$RST"; poke "$RST" tick
+  expect_nonempty "$2b-pre the tick beside it printed its decision line" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker-tick/v1|')"
+  expect_eq "$2b AC-19.1 the tick beside the verb's running whole run starts no whole run and no object" "|" "$(st_started)|$(st_objects "$1")"
+  poke "$RST" regression-run
+  expect_eq "$2c AC-19.1 …and a second regression-run beside it is refused (exit 1), naming the open whole request" "1|yes" \
+    "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -q 'open whole request' && echo yes)"
+  rm -f "$ST_CTL/hold"; wait "$ST_RR"
+  expect_false "$2d …and the verb ended its request when its command ended" st_open
+  : > "$ST_CTL/hold"
+}
+: > "$ST_CTL/full"; st_beside "${ST_H1:0:8}" ST-1; rm -f "$ST_CTL/full"
 forget_digest "$RST"; poke "$RST" tick
 expect_contains "ST-2 AC-6.1 AC-19.2 nothing ready, no writer open, the head past the proof: the tick starts regression-run as regression@<h8>" \
   "poker: regression-run started regression@${ST_H1:0:8} (log $(st_log "${ST_H1:0:8}"))" "$(st_started)"
@@ -1333,6 +1342,9 @@ expect_contains "ST-7b …and starts the run again at the same head, as a second
 ST_LOG2="$(st_started | sed -n 's/^.*(log \(.*\))$/\1/p')"
 expect_true "ST-7c …which ends" st_until 60 st_ended "${ST_LOG2:-$TMPROOT/none}"
 expect_eq "ST-7d …with its proof at the new head" "1" "$(s46_proved "$PST" | /usr/bin/grep -c "^proved: kind=regression head=$ST_H2 ")"
+# The same beside a configured command: regression-command: names the stub, and the verb books its run as for none.
+ST_H3="$(s57_commit "$ST_WT" lib/c.sh H3)"; printf 'regression-command: bash tests/run.sh\n' > "$RST/.bionic/config.yaml"
+: > "$ST_CTL/hold"; st_beside "${ST_H3:0:8}" ST-8; rm -f "$ST_CTL/hold" "$RST/.bionic/config.yaml"
 POKE_BOUND="$ST_BOUND_WAS"
 
 

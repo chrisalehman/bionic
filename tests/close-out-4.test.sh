@@ -438,7 +438,7 @@ expect_contains "PK-3 …step 9 carries delivered: parked on <branch> @ <sha>" \
 expect_eq "PK-4 …the continuation is written and its header says parked, where and why" "1|yes|yes" \
   "$([ -f "$PPK/$CONT_REL" ] && echo 1 || echo 0)|$(contains "$(sed -n 3p "$PPK/$CONT_REL" 2>/dev/null)" "Parked ")|$(contains "$(sed -n 3,4p "$PPK/$CONT_REL" 2>/dev/null)" "\`wave/01-fixture\` @ $PK_WS")"
 expect_absent "PK-4c …and never says the branch was merged" "merged into" "$(sed -n 1,6p "$PPK/$CONT_REL" 2>/dev/null)"
-expect_contains "PK-5 …the epic row is printed parked" "parked" "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^epic-row: | 01 |')"
+expect_contains "PK-5 …the epic row is printed parked" "parked" "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep '^shipped-row: | 01 |')"
 expect_contains "PK-7 …the handoff document's resume point is PARKED on <branch> @ <sha>" "resume point: PARKED on wave/01-fixture @ $PK_WS" "$(pk_handoff "$PPK")"
 expect_eq "PK-8 the work is kept: wt/01-x and the working branch stand, main never moved" "yes|yes|$PK_MAIN0" \
   "$(branch_exists "$PPK" wt/01-x)|$(branch_exists "$PPK" wave/01-fixture)|$(fixture_git "$PPK" rev-parse main)"

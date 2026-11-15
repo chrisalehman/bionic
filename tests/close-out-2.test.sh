@@ -25,7 +25,7 @@ section "4f — REQ-1 (AC-1.1–1.4): the close prints the epic's row and writes
 # table_rows: hoisted to tests/close-out.prelude.sh (a later part reads it)
 # rows_with_wave: hoisted to tests/close-out.prelude.sh (a later part reads it)
 # printed_row -> the row the last close printed for the epic plan; printed_adr_cell -> its ADRs cell, trimmed.
-printed_row() { printf '%s\n' "$CO_OUT" | sed -n 's/^epic-row: //p'; }
+printed_row() { printf '%s\n' "$CO_OUT" | sed -n 's/^shipped-row: //p'; }
 printed_adr_cell() { printed_row | awk -F'|' '{ c = $6; gsub(/^[ \t]+|[ \t]+$/, "", c); print c }'; }
 
 # epic_planned_first -> an epic with a planned table ABOVE the shipped one; the planned table carries a `| 01 |` row (this
@@ -71,7 +71,7 @@ expect_eq "78.0: the extractor reads both tables: wave 00 is one shipped row and
   "$(rows_with_wave "$T78/$EPIC_REL" shipped 00)/$(rows_with_wave "$T78/$EPIC_REL" planned 00)/$(rows_with_wave "$T78/$EPIC_REL" planned 01)/$(rows_with_wave "$T78/$EPIC_REL" shipped 01)"
 run_close "$T78" check
 expect_eq "78.1a: check prints the row, and does not call wave 01 already listed" "yes/no" \
-  "$(contains "$CO_OUT" "epic-row: | 01 | ")/$(contains "$CO_OUT" "already listed")"
+  "$(contains "$CO_OUT" "shipped-row: | 01 | ")/$(contains "$CO_OUT" "already listed")"
 run_close "$T78" run
 expect_eq "78.1d: run exits 0, the epic plan's checksum is what it was, and the shipped table holds no wave-01 row" "0/$EPIC_SUM78/0" \
   "$CO_RC/$(sha_of "$T78/$EPIC_REL")/$(rows_with_wave "$T78/$EPIC_REL" shipped 01)"
