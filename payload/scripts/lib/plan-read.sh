@@ -350,9 +350,9 @@ plan_read_heading() {
 # WHAT A VERSION-15 PLAN HOLDS is what a person wrote: its header, Goal, Problem, Design, Eval design, Tasks and a
 # section per task. The machine's sections are gone to the log (the verification matrix, the state and the handoff), a
 # Tasks row is its nine authored cells, and a header key stays only if the reader answers from it. The keys below were
-# the run's own state written into its header (an abandon, a clean-up, the regression runs, the current step and its
-# approvals), which the log carries now; the list is this one place, so a key the version-15 header loses is added here.
-PLAN_READ_GONE_KEYS="abandoned cleaned current approved-by regression-runs"
+# the run's own state written into its header (an abandon, a clean-up, the current step and its approvals), which the
+# log carries now; the list is this one place, so a key the version-15 header loses is added here.
+PLAN_READ_GONE_KEYS="abandoned cleaned current approved-by"
 PLAN_READ_GONE_SECTIONS="Verification Matrix|SDLC State|Handoff"
 PLAN_READ_NINE="id step kind task deps size serves files artifact"
 

@@ -67,7 +67,7 @@ section "§ONE-READER: every reader reads a landing line's fields by name, throu
 # Every line here carries a field ahead of its own, as a writer that adds one writes it. fails-when: a reader reads a
 # field by its place, or a grep of hooks/ and payload/scripts/ finds a second parser beside the planted one. The reader's own
 # files print and parse run/v1 lines by design; they are named once, in one-reader-check.sh READER_FILES, and read from there.
-OD="$WORLD_ROOT/one-reader"; ORC="$OD/landing-proofs.log"; OC=0123456789abcdef0123456789abcdef01234567; mkdir -p "$OD/t/payload"
+OD="$WORLD_ROOT/one-reader"; ORC="$OD/run.log"; OC=0123456789abcdef0123456789abcdef01234567; mkdir -p "$OD/t/payload"
 printf 'line/v1|ev=%s|x=-|row=T1|commit=%s|%s|at=2026-10-20T00:00:00Z\n' ready "$OC" debt=a.test.sh verdict "$OC" 'suite=a.test.sh|result=red|log=/r.log' \
   verdict "$OC" 'suite=b.test.sh|result=none|log=/n.log' verdict "$OC" 'suite=c.test.sh|result=green|log=/g.log' > "$ORC"
 cp -R "$BIONIC_HOOKS_DIR" "$OD/t/hooks"; cp -R "$REPO/payload/scripts" "$OD/t/payload/scripts"
@@ -1004,8 +1004,7 @@ section "§WINDOW: the hand-holds count is read over a window, every source by i
 # two ends are read from records: the start is the newest published landing of a row of kind build, the end the
 # plan's `delivered:` time; before the run is delivered the window runs to now and the report says so. Every source
 # is planted in its writer's shape: the run's log's events through their writers (lib/proof.sh), the fill ledger's
-# fill-ledger/v1 lines (the Stop hook's home still), the roster through the one production row writer. An older run's
-# homes (the AC blocks' waiver lines, the record's matrix cell and landed: lines) are read on a world at 14.
+# fill-ledger/v1 lines (the Stop hook's home still), the roster through the one production row writer.
 ww_report() {  # <root> [flags…] -> landing-report --hand-holds over the root's plan, stdout only
   local root="$1"; shift
   ( cd "$root" && CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO/payload" \
@@ -1019,29 +1018,6 @@ ww_poke() {  # <root> <verb> [args…] -> the poker run as the world's session, 
   ( cd "$root" && CLAUDE_CODE_SESSION_ID="$WORLD_SID" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO/payload" \
       bash "$BIONIC_HOOKS_DIR/session-poker.sh" "$@" 2>&1 )
 }
-# A matrix whose n-th row carries the n-th waiver line in its block, in the shape an older plan holds: each header
-# carries its criterion's text after the colon, and the waiver line `  waiver: <who> <time> "<words>" — <why>` stands
-# at the end of its block, at a time the fixture names.
-ww_matrix() {  # <root> <waiver value>… -> the plan with those blocks; WW_MR 0
-  local root="$1" p n=0 v; p="$(ll_plan "$1")"; shift
-  { printf '\n## Requirements\n\n### REQ-1 — the window fixture\n\n'
-    for v in "$@"; do n=$((n + 1)); printf -- '- AC-1.%d the row %d holds its waiver. Fails when: it is not read.\n' "$n" "$n"; done
-    printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n'
-    n=0; for v in "$@"; do n=$((n + 1)); printf '| REQ-1 | fixture | AC-1.%d | hermetic | `tests/a.test.sh` | a planted defect |\n' "$n"; done
-    printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
-    n=0; for v in "$@"; do n=$((n + 1)); printf '| AC-1.%d | T1 | waived | — | — |\n' "$n"; done
-    n=0; for v in "$@"; do n=$((n + 1)); printf 'AC-1.%d: the row %d holds its waiver.\n  provenance: fixture\n  evidence: pending\n' "$n" "$n"; done
-  } >> "$p"
-  WW_MR=0
-  # through the environment: macOS awk refuses a -v value holding a line break
-  WW_WV="$(printf '%s\n' "$@")" awk '
-    BEGIN { n = split(ENVIRON["WW_WV"], w, "\n") }
-    function flush() { if (cur != "" && (cur in w)) print "  waiver: " w[cur]; cur = "" }
-    /^AC-1\.[0-9]+:/ { flush(); print; cur = substr($0, 6, index($0, ":") - 6) + 0; next }
-    cur != "" && /^[ \t]+[^ \t]/ { print; next }
-    { flush(); print }
-    END { flush() }' "$p" > "$p.w" && mv "$p.w" "$p"
-}
 WW_C="$(printf 'c%.0s' $(seq 40))"
 WW_D="$(printf 'd%.0s' $(seq 40))"
 ww_pub() { printf 'run/v1|ev=published|row=%s|commit=%s|kind=%s|by=-|why=-|at=%s\n' "$1" "$WW_C" "$2" "$3"; }   # <row> <kind> <at>
@@ -1052,7 +1028,7 @@ RW1="$(ll_world)"
 ww_pub T1 hand 2026-10-20T10:00:00Z >> "$(ll_log "$RW1")"
 ww_dec 2026-10-20T12:00:00Z decline > "$(dirname "$(ll_log "$RW1")")/fill-ledger.log"
 expect_eq "WINDOW-1 a hand landing before the window and a decline inside it read declines=1 by-hand=0" \
-  "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=1 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" \
+  "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=1 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" \
   "$(ww_hh "$RW1" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
 expect_contains "WINDOW-1a …and a window that opens before the landing counts it: the record is read, the window moved it" \
   "hand-holds: total=2 · by-hand=1 · stop-runs=0 · declines=1 " "$(ww_hh "$RW1" --since 2026-10-20T09:00:00Z --until 2026-10-20T13:00:00Z)"
@@ -1091,9 +1067,9 @@ n=0; for q in adversarial structure evidence; do n=$((n + 1)); t="$(echo 10:30 1
 expect_eq "WINDOW-1c-0 precondition: the run's log holds the four regression proofs, six waivers (three of a question, three of a criterion) and three moves to fixed" "4/3/3/3" \
   "$(grep -c '|ev=proof|kind=regression|' "$(ll_log "$RW2")")/$(grep -c '|ev=waiver|question=' "$(ll_log "$RW2")")/$(grep -c '|ev=waiver|ac=' "$(ll_log "$RW2")")/$(grep -c '|ev=finding|.*|to=fixed|' "$(ll_log "$RW2")")"
 expect_eq "WINDOW-1c a wide window reads three of every kind, the adoptions placed by their events, the regressions past the first" \
-  "hand-holds: total=36 · by-hand=3 · stop-runs=3 · declines=3 · lifts=3 · amends=3 · holds=3 · extensions=3 · waivers=6 · status-writes=0 · second-regressions=3 · adoptions=3 · fixed=3 · needs-you=0 · unplaced=0" \
+  "hand-holds: total=36 · by-hand=3 · stop-runs=3 · declines=3 · lifts=3 · amends=3 · holds=3 · extensions=3 · waivers=6 · second-regressions=3 · adoptions=3 · fixed=3 · needs-you=0 · unplaced=0" \
   "$(ww_hh "$RW2" --since 2026-10-20T08:00:00Z --until 2026-10-20T16:00:00Z)"
-WW_1D="hand-holds: total=12 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=1 · holds=1 · extensions=1 · waivers=2 · status-writes=0 · second-regressions=1 · adoptions=1 · fixed=1 · needs-you=0 · unplaced=0"
+WW_1D="hand-holds: total=12 · by-hand=1 · stop-runs=1 · declines=1 · lifts=1 · amends=1 · holds=1 · extensions=1 · waivers=2 · second-regressions=1 · adoptions=1 · fixed=1 · needs-you=0 · unplaced=0"
 expect_eq "WINDOW-1d …and the window 11:00 to 13:00 reads one of each, every source filtered by its own time" \
   "$WW_1D" "$(ww_hh "$RW2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
 rm -f "$WW_RO"
@@ -1103,22 +1079,6 @@ expect_eq "WINDOW-1e …and with the rosters gone, as a close leaves them, the l
 t=12:45; ww_hand amend w-a "widen the files" >> "$(ll_log "$RW2")"
 expect_eq "WINDOW-1f …and a second amend of one agent for one reason at another time is a second act" \
   "$(printf '%s\n' "$WW_1D" | sed 's/total=12/total=13/; s/amends=1 /amends=2 /')" "$(ww_hh "$RW2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
-
-# (w2) the matrix waiver's two forms. The ISO form is placed by its time; the date form counts with no end, and
-# a day the window's start falls inside cannot be placed. A criterion's waiver now is an event at its own instant,
-# read where the card's reply writes it, tests/release-approval.test.sh §HANDHOLDS (WINDOW-2a).
-RW3="$(LL_WORLD_AT=14 ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RW3")")"   # the date form is an older plan's block line
-ww_matrix "$RW3" 'Dana Fixture 2026-10-20T12:30:00Z "waive the row" — inside' 'Dana Fixture 2026-10-20T14:30:00Z "waive the row" — after' \
-  'Dana Fixture 2026-10-19 "waive the row" — a whole day before' 'Dana Fixture 2026-10-20 "waive the row" — the start falls inside this day'
-expect_eq "WINDOW-2-0 precondition: the fixture holds the four blocks with their criterion's text, each block one waiver" "0|4|4" \
-  "$WW_MR|$(grep -cE '^AC-1\.[0-9]+: .' "$(ll_plan "$RW3")")|$(grep -c '^  waiver: ' "$(ll_plan "$RW3")")"
-expect_contains "WINDOW-2 a waiver at a time inside the window counts, the one after it does not, the day before is placed outside, the day the start falls in is unplaced" \
-  "waivers=1 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=1" "$(ww_hh "$RW3" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
-expect_contains "WINDOW-2b …and with no end, every form counts, the date-only ones too" \
-  "waivers=4 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" "$(ww_hh "$RW3" --since 2026-01-01T00:00:00Z)"
-expect_eq "WINDOW-2c …and with no window at all (no build landing, no page), both forms count and nothing is unplaced" \
-  "hand-holds: total=4 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=4 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0" \
-  "$(ww_hh "$RW3")"
 
 # (w3) the ends from records. The start is the last build row's landing; the end is the plan's `delivered:` time, and
 # before the run is delivered the window runs to now. A release approval page ends nothing: what is done after the
@@ -1150,20 +1110,6 @@ expect_eq "WINDOW-3e with a delivered: time the ends line prints both ends, the 
 expect_contains "WINDOW-3f …and the count reaches through the delivered minute: the act at 11:40:30 counts, the one at 11:41 does not" \
   "hand-holds: total=2 · by-hand=2 · " "$(ww_hh "$RW4")"
 # ---------------------------------------------------------------------------
-section "§WAIVERS: a waiver in a block whose heading carries its criterion's text is counted"
-# An older plan heads each block with its criterion's text after the colon, its `waiver:` line in that block.
-# The count reads that header as it reads a bare `AC-<id>:` one, through the one matcher of a block's heading.
-# fails-when: the header match is bare-only, and the four rendered waivers read waivers=0.
-RW5="$(LL_WORLD_AT=14 ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RW5")")"   # the texted heading is an older plan's block
-ww_matrix "$RW5" 'Dana Fixture 2026-10-20T12:00:00Z "waive the row" — one' 'Dana Fixture 2026-10-20T12:10:00Z "waive the row" — two' \
-  'Dana Fixture 2026-10-20T12:20:00Z "waive the row" — three' 'Dana Fixture 2026-10-20T12:30:00Z "waive the row" — four'
-expect_eq "WAIVERS-0 precondition: the fixture holds four texted headers, no bare one, and four waivers" "0|4|0|4" \
-  "$WW_MR|$(grep -cE '^AC-1\.[0-9]+: .' "$(ll_plan "$RW5")")|$(grep -cE '^AC-1\.[0-9]+:[[:space:]]*$' "$(ll_plan "$RW5")")|$(grep -c '^  waiver: ' "$(ll_plan "$RW5")")"
-expect_eq "WAIVERS-1 the four waivers under rendered headers read waivers=4 over a window that holds them" \
-  "hand-holds: total=4 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=4 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" \
-  "$(ww_hh "$RW5" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
-
-# ---------------------------------------------------------------------------
 section "§MOVED: a finding moved to fixed is placed by its time against the landing it names"
 # A move to fixed (`finding-move … fixed <T>`'s event) written before <T> lands is the landing's own business, outside the
 # count; one written after <T> landed is a hand marking a fix, inside it. A move naming a row that has not landed cannot
@@ -1177,7 +1123,7 @@ ww_put "$RW6" 2026-10-20T12:30:00Z proof_finding_event "ref=record/wave-x/rev.md
 expect_eq "MOVED-0 precondition: the run's log holds the three moves and T2's one landing" "3|1" \
   "$(grep -c '|ev=finding|.*|to=fixed|' "$(ll_log "$RW6")")|$(grep -c '|ev=published|row=T2|' "$(ll_log "$RW6")")"
 expect_eq "MOVED-1 the move a minute after T2 landed counts, the one a minute before does not, the one naming a row never landed is unplaced" \
-  "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=1 · needs-you=0 · unplaced=1" \
+  "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · second-regressions=0 · adoptions=0 · fixed=1 · needs-you=0 · unplaced=1" \
   "$(ww_hh "$RW6" --since 2026-10-20T09:00:00Z --until 2026-10-20T14:00:00Z)"
 RW7="$(ll_world)"
 ww_pub T2 queue 2026-10-20T12:00:00Z >> "$(ll_log "$RW7")"
@@ -1191,35 +1137,6 @@ ww_put "$RW9" 2026-10-20T12:01:00Z proof_finding_event "ref=record/wave-x/rev.md
 ww_put "$RW9" 2026-10-20T12:02:00Z proof_finding_event "ref=record/wave-x/rev.md#4" to=fixed row=T2 by=landing "landing=$WW_C"
 expect_contains "MOVED-3 a move the landing wrote (by=landing) is its settlement: beside a hand move after the landing, fixed=1" \
   "fixed=1 · needs-you=0 · unplaced=0" "$(ww_hh "$RW9" --since 2026-10-20T09:00:00Z --until 2026-10-20T14:00:00Z)"
-
-# ---------------------------------------------------------------------------
-section "§STATUS: an older run's status written by hand is counted, placed by the time its verb wrote on it"
-# An older run's cell verb appended one hand act per call to the log, `what=` its name and `cells=` the cells it wrote,
-# and the hand-holds count folds the ones that name the status cell or the task key as `status-writes=`, placed by
-# their `at=` as every record kind is. No verb writes one now; the count still reads them where a run's record holds them.
-# fails-when: hand_holds_report has no arm for the line, or it counts a line outside the window or an evidence-only one.
-# (s2) placement. Planted lines, each at the time the fixture names, against the window 11:00 to 13:00.
-RS2="$(LL_WORLD_AT=14 ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RS2")")"   # an older run's record
-ss_line() { printf 'line/v1|ev=matrix-set|ac=%s|cells=%s|by=fixture|at=%s\n' "$1" "$2" "$3"; }   # <ac> <cells> <at>
-{ ss_line AC-1.1 status 2026-10-20T12:00:00Z; ss_line AC-1.2 status,evidence 2026-10-20T12:30:00Z
-  ss_line AC-1.3 status 2026-10-20T10:59:00Z; ss_line AC-1.4 status 2026-10-20T13:01:00Z
-  ss_line AC-1.5 evidence 2026-10-20T12:10:00Z; } > "$(ll_rec "$RS2")"
-expect_eq "STATUS-6 two status lines inside the window count; one before it, one after it and an evidence-only one inside do not, and none is unplaced" \
-  "hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=2 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" \
-  "$(ww_hh "$RS2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
-ss_line AC-1.6 status not-a-time >> "$(ll_rec "$RS2")"
-expect_contains "STATUS-6a a status line whose time cannot be placed is not counted and says so in unplaced=" \
-  "status-writes=2 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=1" "$(ww_hh "$RS2" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
-expect_contains "STATUS-6b …and with no window at all every status line counts, the evidence-only one still not" "status-writes=5 · second-regressions=0" "$(ww_hh "$RS2")"
-
-# (s3) a task write is counted: the task: key deferred a pending row to its task's step, so a task-only call moved a
-# row off every gate until then. An evidence-only line is still no status.
-RS3="$(LL_WORLD_AT=14 ll_world)"; mkdir -p "$(dirname "$(ll_rec "$RS3")")"
-{ ss_line AC-1.1 task 2026-10-20T12:00:00Z; ss_line AC-1.2 evidence 2026-10-20T12:10:00Z
-  ss_line AC-1.3 status,task 2026-10-20T12:30:00Z; ss_line AC-1.4 task 2026-10-20T10:59:00Z; } > "$(ll_rec "$RS3")"
-expect_eq "STATUS-9 a task line inside the window counts, a status,task line too; an evidence-only line inside it and a task line before it do not" \
-  "hand-holds: total=2 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=2 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" \
-  "$(ww_hh "$RS3" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
 
 # ---------------------------------------------------------------------------
 section "§ORDER: the reader rule and the numbers re-renderer read one publish order"
@@ -1475,9 +1392,9 @@ expect_eq "(tw4) with the record gone the log alone stands: the record is held, 
 
 # ---------------------------------------------------------------------------
 section "§LOG: ready writes its acts to the run's log, and no landing record; a part is no landing"
-# fails-when: §READY leaves no ready of T1 in run.log or a landing-proofs.log beside it; a row-less part reads as a landing.
-expect_eq "(lg1) the run's log holds T1's ready event, and of run.log and landing-proofs.log the record holds run.log" "T1|run.log" \
-  "$(awk -F'|' '$1 == "run/v1" && $2 == "ev=ready" { print substr($3, 5); exit }' "$(ll_log "$RR")" 2>/dev/null)|$(cd "$RR/.bionic/docs/record/wave-x" 2>/dev/null && ls run.log landing-proofs.log 2>/dev/null | paste -sd' ' -)"
+# fails-when: §READY leaves no ready of T1 in run.log or a second file of events beside it; a row-less part reads as a landing.
+expect_eq "(lg1) the run's log holds T1's ready event, and of the record's files run.log alone holds event lines" "T1|run.log" \
+  "$(awk -F'|' '$1 == "run/v1" && $2 == "ev=ready" { print substr($3, 5); exit }' "$(ll_log "$RR")" 2>/dev/null)|$(cd "$RR/.bionic/docs/record/wave-x" 2>/dev/null && /usr/bin/grep -lE '^(line|owed|run)/v1[|]' -- * 2>/dev/null | paste -sd' ' -)"
 printf 'run/v1|ev=published|part=reviews|commit=%s|branch=wave/x|tree=-|by=T3|at=2026-11-03T00:00:05Z\n' "$TWC" >> "${TWR%/*}/run.log"
 expect_eq "(lg3) a part is no landing: the record's landings and the reader's landed rows are T3 alone, the part still read" "T3|T3|1" \
   "$(tw_lib units_record_landings "$TWL" | cut -f2 | paste -sd' ' -)|$(bash "$REPO/payload/scripts/reader.sh" "$TWP" landed | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | paste -sd' ' -)|$(line_lines "$TWL" | grep -c '|part=reviews|')"

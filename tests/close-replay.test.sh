@@ -14,7 +14,7 @@
 #   §REAL     the sandbox's own real check ran, every hand write is of a kind a run writes, and the log is UTF-8
 #   §LIVE     the plan's live criterion names the close row in its Task column, passes every advance past the Verify
 #             gate pending, is owed by the close on the release approval card, and close-out proves it
-#   §LOG      the landing record and the asks are events of the one log: no landing-proofs.log, no asks.state
+#   §LOG      the landing record and the asks are events of the one log: no other file of the record holds an event
 #   §GROWS    the log kept after each command is a prefix of the next, and of the log at the close
 #   §SESSION  the Patrol's arming and disarming write no line of the log, a tick only the run's facts, and none a stop
 #   §PLANSUM  the plan's checksum is the same on both sides of every command
@@ -64,6 +64,8 @@ fi
 [ -d "$CR_DIR" ] && CR_DIR="$(cd "$CR_DIR" && pwd -P)" && CR_ROOT="$CR_DIR/project" && CR_LOG="$CR_DIR/rehearsal.log" \
   && CR_REC="$CR_ROOT/.bionic/docs/record/wave-x"
 
+# cr_ev_files -> the files of the record that hold an event line of any shape, the pages aside, on one line
+cr_ev_files() { (cd "$CR_REC" 2>/dev/null && for f in *; do case "$f" in *.md) ;; *) [ -f "$f" ] && /usr/bin/grep -qE '^(line|owed|run)/v1[|]' "$f" && printf '%s\n' "$f" ;; esac; done | paste -sd' ' -); }
 # cr_part -> the replay's part of the log: every line after its `# replay:` line
 cr_part() { awk 'f { print } /^# replay:/ { f = 1 }' "$CR_LOG" 2>/dev/null; }
 # cr_rc <label> -> the exit of each logged command carrying that label, one per line
@@ -236,8 +238,8 @@ if [ "$CR_RC" = 0 ] && [ -f "$CR_PLAN" ]; then
     "$([ -n "$CL_W" ] && echo yes)"
   expect_eq "CL-3b …and closed, by neither a waiver nor close-out" "closed|no" \
     "${CL_W%%|*}|$(cr_closer_is_waiver "${CL_W#*|}")"
-  expect_eq "CL-3c …its acts stand in the run's log as ask events, and the record holds no asks.state" "yes|" \
-    "$(/usr/bin/grep -q '^run/v1|ev=ask|key=waive:structure|' "$CR_REC/run.log" 2>/dev/null && echo yes)|$(ls "$CR_REC/asks.state" 2>/dev/null)"
+  expect_eq "CL-3c …its acts stand in the run's log as ask events, and of the record's files the log alone holds event lines" "yes|run.log" \
+    "$(/usr/bin/grep -q '^run/v1|ev=ask|key=waive:structure|' "$CR_REC/run.log" 2>/dev/null && echo yes)|$(cr_ev_files)"
   expect_eq "CL-4 the release lands with the fix: its published event carries the line's release numbers commit" "yes" \
     "$(awk -F'|' '$2 == "ev=published" && $3 == "row=T5" && /\|numbers=[0-9a-f]{40}\|/ { f = 1 } END { if (f) print "yes" }' <(cr_lines))"
   expect_eq "CL-4b …and main holds the reviews part's commit, on the head the release check held (a kind=check line there, not result=fail)" "yes|yes|no" \
@@ -429,12 +431,12 @@ fi
 # ============================================================
 section "§LOG: the landing record and the asks are events of the one log"
 # ============================================================
-# fails-when: the record holds a landing-proofs.log or an asks.state, or the run's log lacks a landing's events or the
+# fails-when: a file of the record beside the log holds event lines, or the run's log lacks a landing's events or the
 # asks' opening and closing.
 if cr_reached "LG-0"; then
-  expect_eq "LG-1 the log holds T5's landing, its ready, candidate, verdict and published events, and of run.log, landing-proofs.log and asks.state the record holds run.log alone" \
+  expect_eq "LG-1 the log holds T5's landing, its ready, candidate, verdict and published events, and of the record's files the log alone holds event lines" \
     "ready candidate verdict published|run.log" \
-    "$(awk -F'|' '$3 == "row=T5" && $2 ~ /^ev=(ready|candidate|verdict|published)$/ { e = substr($2, 4); if (!(e in s)) { s[e] = 1; printf "%s%s", (c++ ? " " : ""), e } } END { print "" }' "$CR_REC/run.log" 2>/dev/null)|$(cd "$CR_REC" 2>/dev/null && ls run.log landing-proofs.log asks.state 2>/dev/null | paste -sd' ' -)"
+    "$(awk -F'|' '$3 == "row=T5" && $2 ~ /^ev=(ready|candidate|verdict|published)$/ { e = substr($2, 4); if (!(e in s)) { s[e] = 1; printf "%s%s", (c++ ? " " : ""), e } } END { print "" }' "$CR_REC/run.log" 2>/dev/null)|$(cr_ev_files)"
   expect_eq "LG-2 each card's ask is opened and closed in the log by the approval it asked: approve:step0 to approve:step3" \
     "approve:step0>approve step0 approve:step1>approve step1 approve:step2>approve step2 approve:step3>approve plan" \
     "$(awk -F'|' '$2 == "ev=ask" && $3 ~ /^key=approve:step[0-3]$/ && $4 ~ /^reply=/ { k = substr($3, 5); r = substr($4, 7); printf "%s%s>%s", (c++ ? " " : ""), k, r } END { print "" }' "$CR_REC/run.log" 2>/dev/null)"

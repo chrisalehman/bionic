@@ -7,35 +7,12 @@
 #   refusal       a test that a retired verb or file is refused or gone, or the comment that says what it refuses
 #   old home      a helper or world that still names an old record file beside the run's log
 #   fixture text  a fixture's own text held inside a suite, naming what a run recorded
-refusal	tests/brief-file.test.sh	  for f in lift_contract_fields _brief_lift_awk brief_validate_fields brief_body_advisories brief_files_entry brief_contract brief_file_read; do
 old run	tests/close-out-2.test.sh	LAND_UREC="$PLU/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
 old run	tests/close-out-2.test.sh	mkdir -p "$PLV/.bionic/docs/record/wave-01-fixture"; cp "$LAND_UREC" "$PLV/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
 old run	tests/close-out-3.test.sh	  printf 'run/v1|ev=hand|ac=AC-1|what=waive-row|by=Chris Lehman|said=waive the row|at=2026-10-06\n' >> "$rec/run.log"
-refusal	tests/close-replay.test.sh	#   §LOG      the landing record and the asks are events of the one log: no landing-proofs.log, no asks.state
-refusal	tests/close-replay.test.sh	  expect_eq "CL-3c …its acts stand in the run's log as ask events, and the record holds no asks.state" "yes|" \
-refusal	tests/close-replay.test.sh	    "$(/usr/bin/grep -q '^run/v1|ev=ask|key=waive:structure|' "$CR_REC/run.log" 2>/dev/null && echo yes)|$(ls "$CR_REC/asks.state" 2>/dev/null)"
-refusal	tests/close-replay.test.sh	# fails-when: the record holds a landing-proofs.log or an asks.state, or the run's log lacks a landing's events or the
-refusal	tests/close-replay.test.sh	  expect_eq "LG-1 the log holds T5's landing, its ready, candidate, verdict and published events, and of run.log, landing-proofs.log and asks.state the record holds run.log alone" \
-refusal	tests/close-replay.test.sh	    "$(awk -F'|' '$3 == "row=T5" && $2 ~ /^ev=(ready|candidate|verdict|published)$/ { e = substr($2, 4); if (!(e in s)) { s[e] = 1; printf "%s%s", (c++ ? " " : ""), e } } END { print "" }' "$CR_REC/run.log" 2>/dev/null)|$(cd "$CR_REC" 2>/dev/null && ls run.log landing-proofs.log asks.state 2>/dev/null | paste -sd' ' -)"
-plant	tests/landing-line-1.test.sh	OD="$WORLD_ROOT/one-reader"; ORC="$OD/landing-proofs.log"; OC=0123456789abcdef0123456789abcdef01234567; mkdir -p "$OD/t/payload"
-old run	tests/landing-line-1.test.sh	ss_line() { printf 'line/v1|ev=matrix-set|ac=%s|cells=%s|by=fixture|at=%s\n' "$1" "$2" "$3"; }   # <ac> <cells> <at>
-refusal	tests/landing-line-1.test.sh	# fails-when: §READY leaves no ready of T1 in run.log or a landing-proofs.log beside it; a row-less part reads as a landing.
-refusal	tests/landing-line-1.test.sh	expect_eq "(lg1) the run's log holds T1's ready event, and of run.log and landing-proofs.log the record holds run.log" "T1|run.log" \
-refusal	tests/landing-line-1.test.sh	  "$(awk -F'|' '$1 == "run/v1" && $2 == "ev=ready" { print substr($3, 5); exit }' "$(ll_log "$RR")" 2>/dev/null)|$(cd "$RR/.bionic/docs/record/wave-x" 2>/dev/null && ls run.log landing-proofs.log 2>/dev/null | paste -sd' ' -)"
 old run	tests/landing-line.prelude.sh	ll_rec() { printf '%s/.bionic/docs/record/wave-x/landing-proofs.log' "$1"; }   # <root> -> an older run's landing record
 old run	tests/lib/replay-scrub.sh	for f in landing-proofs.log fill-ledger.log; do at "$rec/$f" > "$o/$f"; done
 old run	tests/lib/replay-scrub.sh	  print }' "$rec/asks.state" > "$o/asks.state"
-refusal	tests/log.test.sh	#   §TYPES   `matrix-set` and a retired word are refused; each of the 30 listed types is accepted.
-refusal	tests/log.test.sh	refused "ev=matrix-set" matrix-set row=T1
-plant	tests/one-reader.test.sh	printf '%s\n' '# launch-sync' '# tasks-prose' '# row-landed' '# session-poker.sh deliver T1' > "$L/planted-name.sh"
-plant	tests/one-reader.test.sh	printf '%s\n' '# matrix-retier' '# session-poker.sh discharge AC-1' > "$L/planted-cell.sh"
-plant	tests/one-reader.test.sh	printf '%s\n' '# bash "$POKER" wait r1' '  poker_verb_patrol() {' > "$L/planted-gone.sh"; printf '%s\n' '  tick|anchors)' > "$L/planted-poker-arm.sh"
-plant	tests/one-reader.test.sh	printf '%s\n' '# step-field 5 walk-artifact=x' '# regression-runs --write' '# confirm-row AC-1' '# session-poker.sh budget writers=2' > "$L/planted-step.sh"
-plant	tests/one-reader.test.sh	  "$(cd "$S" && /usr/bin/grep -lE 'matrix-set|regression-runs|waive-row' payload/scripts/lib/translate.sh payload/scripts/lib/plan-read.sh hooks/poker/line.sh | grep -c .) $(count "$BEFORE" names)"
-plant	tests/one-reader.test.sh	PV='bash "$POKER" launch-sync'; nl1() { tr '\n' ' ' | sed 's/ $//'; }
-plant	tests/one-reader.test.sh	  "$(printf '%s\n' "$PV T1" 'units_step_field "$p" 5' | lone suite tests/p.test.sh | nl1)"
-plant	tests/one-reader.test.sh	n=0; for p in 'f="$1/landing-proofs.log"' '# the asks.state register' '# hooks/stop-guard.sh' 'bash "$H/agent-context-guard.sh" "$@"'; do n=$((n + 1))
-plant	tests/one-reader.test.sh	  "$(printf '%s\n' 'f="$1/landing-proofs.log"' '# asks.state' '# hooks/stop-guard.sh' | lone reader payload/scripts/lib/translate.sh | tr '\n' ' ' | sed 's/ $//')"
 old run	tests/reader.test.sh	  mkdir -p "$d/${1%/*}" "$r"; printf '# r\n' > "$d/$1"; printf 'landed: row=T1 merge=c1 at=2026-11-01T00:00:01Z\n' > "$r/landing-proofs.log"
 old run	tests/reader.test.sh	printf 'line/v1|ev=published|row=T1|commit=c1|kind=queue|by=-|why=-|at=2026-11-01T00:00:01Z\n' > "$HD/landing-proofs.log"
 old run	tests/reader.test.sh	printf 'owed/v1|key=%s|state=open|sent=-|at=2026-11-01T00:00:0%s|title=t|reply=r\n' decide:D1 2 approve:x 3 > "$HD/asks.state"
@@ -43,20 +20,12 @@ old run	tests/reader.test.sh	expect_eq "the old landing record is named while th
 old run	tests/reader.test.sh	expect_eq "…and the old landing record still named" "$HD/landing-proofs.log rc=0" "$(lrec "$HD" | paste -sd' ' -)"
 old run	tests/reader.test.sh	expect_eq "…and the old landing record named no more, though it stands" "rc=1|yes" "$(lrec "$HD")|$([ -f "$HD/landing-proofs.log" ] && echo yes)"
 old run	tests/reader.test.sh	HL="$D/record/half-link"; mkdir -p "$HL"; ln -s "$HD/landing-proofs.log" "$HL/landing-proofs.log"
-refusal	tests/reader.test.sh	# then the log as one list. fails-when: an act writes asks.state, an act leaves no event or one off the library's clock,
 old run	tests/reader.test.sh	  'owed/v1|key=approve:step2|state=closed|by=card|at=2026-11-01T00:00:03Z|opened=2026-11-01T00:00:02Z' > "$AD/asks.state"
 old run	tests/reader.test.sh	cp "$AD/asks.state" "$AR/register.was"
-refusal	tests/reader.test.sh	expect_eq "…and the register is as it was, never written" "same" "$(cmp -s "$AD/asks.state" "$AR/register.was" && echo same)"
 old run	tests/release-approval.prelude.sh	  rm -f "$FC_REC"/release-approval-*.md "$FC_REC/${RN_W:-review}-results"-*.md "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/asks.state" "$FC_REC/run.log" \
 old run	tests/release-approval.test.sh	rm -f "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/asks.state" "$FC_REC/run.log"
-fixture text	tests/release-check.test.sh	T38:T38-one-roster-reader.md T39:T39-sp2-pins.md T40:T40-tick-asks-once.md T41:T41-task-set-files.md
-fixture text	tests/session-poker-4.test.sh	printf '%s\n' "# assumptions" "" 'debt: hole step-line-born hooks/session-poker.sh step-line (the born marker is lost)' > "$SEV_DIR/asm-free.md"
-plant	tests/shell-lint.test.sh	die "REFUSED — run it as: session-poker.sh matrix-set AC-1 status=discharged"  # MARK-C4 a script verb
-fixture text	tests/sitrep-card.test.sh	ask: key=waive-row:AC-3.2 holds=nothing title=row waiver AC-3.2 raised=5:01 PM blocks=no waits=event T83 lands
-fixture text	tests/sitrep-card.test.sh	ask: key=waive-row:AC-4.1 holds=nothing title=row waiver AC-4.1 raised=5:01 PM blocks=no waits=event T83 lands
 old run	tests/sitrep.test.sh	sr_reg() { local p="${1:-$SR_PLAN}"; p="${p##*/}"; printf '%s/.bionic/docs/record/%s/asks.state\n' "$SR_REPO" "${p%.plan.md}"; }
 old run	tests/sitrep.test.sh	  SR_REPO="$r"; SR_PLAN="$p"; SR_DIR="$d"; SR_REC="$d/landing-proofs.log"; : > "$SR_REC"
 old run	tests/sitrep.test.sh	sr_asks | sed 's/^run\/v1|ev=ask|/owed\/v1|/; s/|prompt=/|reply=/' > "$SR_DIR/asks.state"; sed -i.was '/^run\/v1|ev=ask|/d' "$SR_DIR/run.log"
 old run	tests/sitrep.test.sh	  "$(sr_r_card $((SR_E0 + 82800)))|$(/usr/bin/grep -c 'state=closed' "$SR_DIR/asks.state")|$(/usr/bin/grep -c 'ev=ask' "$SR_DIR/run.log")"
-fixture text	tests/units.test.sh	| T9 | 4 | build | 1f-a: delete hooks/stop-check.sh and every reference; remove the seven dead functions | implementor | T8 | 30m | REQ-1f | hooks/stop-check.sh, hooks/stop-guard.sh, payload/scripts/lib/, tests/ | pending |
 old run	tests/units.test.sh	AP_REC="$AP_REPO/.bionic/docs/record/ap/landing-proofs.log"

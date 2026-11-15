@@ -487,7 +487,7 @@ landing_report() {  # <plan or landing record> <project root> <rows yes|no> [ins
 # THE HAND-HOLD COUNT IS FOLDED FROM THE LINES THE ESCAPE-HATCH VERBS WROTE (wave-35 T12; D17, REQ-8
 # AC-8.1). `landing-report --hand-holds` prints, under the landings line,
 #
-#   hand-holds: total=<n> · by-hand=<n> · stop-runs=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · status-writes=<n> · second-regressions=<n> · adoptions=<n> · fixed=<n> · needs-you=<n>
+#   hand-holds: total=<n> · by-hand=<n> · stop-runs=<n> · declines=<n> · lifts=<n> · amends=<n> · holds=<n> · extensions=<n> · waivers=<n> · second-regressions=<n> · adoptions=<n> · fixed=<n> · needs-you=<n>
 #
 # A hand-hold is a use of a verb that steps round the machine. Each kind is counted from the one line its
 # verb wrote, and PROSE IS NEVER READ (D1): a line that says `by-hand` in a plan, a note or the orchestrator's
@@ -504,15 +504,8 @@ landing_report() {  # <plan or landing record> <project root> <rows yes|no> [ins
 #   amends         the log's `run/v1|ev=hand|what=amend|…` (`amend`), `what=hold` (`hold`) and `what=extend` (`extend`),
 #   holds          one per act, placed by its `at=`. The roster row each verb also writes is the agent's contract and
 #   extensions     never a count: the rosters are session state a close wipes, and the run's log is not.
-#   waivers        each waiver event `waive` writes, of a question or a criterion, the plan's older `waived:
-#                  question=…` line under `## SDLC State`, and an AC block's indented `waiver: <who> <when> "<words>"`
-#                  an older plan holds under `## Verification Matrix`. Fenced text is skipped, as every reader of the
-#                  plan skips it.
-#   status-writes  the hand act an older run's cell verb wrote to the log (`what=` its name, `cells=` the cells it
-#                  wrote), one per call that changed the plan: counted when its cells name the status or the task,
-#                  placed by its `at=` like every record kind, since a task written by hand moved its row off every
-#                  gate. An evidence-only line is a write and no status: not counted. An older run's tier raise is
-#                  the run's own act and counted in no field. No verb writes either now.
+#   waivers        each waiver event `waive` writes, of a question or a criterion, and the plan's older `waived:
+#                  question=…` line under `## SDLC State`. Fenced text is skipped, as every reader of the plan skips it.
 #   second-regressions  a whole run a person started, past the first. The tick and the orchestrator start the whole
 #                  run as the machine does, so only a person's start is a hand-hold: the landing record's regression
 #                  run lines (`ev=run`, a log under `regression-run-`, or `kind=regression`) past the record's first
@@ -572,7 +565,7 @@ _HH_PLACE_AWK='
   BEGIN { HH_S = hh_norm(HH_S); HH_U = (hh_iso(HH_U) && length(HH_U) == 17) ? substr(HH_U, 1, 16) ":59Z" : hh_norm(HH_U) }
 '
 hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] [--until <ISO>] -> the one hand-holds line; rc 0, 2 unread
-  local plan="$3" hands="" lines="" gaps=0 hand=0 stp=0 stw=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0
+  local plan="$3" hands="" lines="" gaps=0 hand=0 stp=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0
   local ney=0 since="" until="" u1=0
   shift 3
   while [ $# -ge 2 ]; do
@@ -586,7 +579,7 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
       gaps="$( { declare -F translate >/dev/null 2>&1 || . "$_READER_LIB_DIR/translate.sh"; } 2>/dev/null && translate "$plan" gaps 2>/dev/null \
         | /usr/bin/grep -c '^gap/v1|ev=hand|')"
     fi
-    read -r hand stp stw ney fl wv fix dec lif amd hld ext ado u1 <<< "$( { printf '%s\n\034\n' "$hands"; printf '%s\n' "$lines"; } \
+    read -r hand stp ney fl wv fix dec lif amd hld ext ado u1 <<< "$( { printf '%s\n\034\n' "$hands"; printf '%s\n' "$lines"; } \
       | awk -F'|' -v HH_S="$since" -v HH_U="$until" "$_READER_AWK$_HH_PLACE_AWK"'
       $0 == "\034" { part = 1; next }
       # the hands answer: a landing by hand, and each hand event by what its line was
@@ -598,10 +591,6 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
         else if (w == "hold" && hh_take(t)) ho++
         else if (w == "extend" && hh_take(t)) ex++
         else if (w == "adopt" && hh_take(t)) ad++
-        # a waiver line a person wrote in a criterion block, counted from its own line whatever the row reads
-        else if (w == "waive-row") { wr[line_kv("ac")] = 1; if (hh_take(t)) v++ }
-        # only a write that names the status cell or the task key is one the gate reads; an evidence-only one is neither placed nor counted
-        else if (w == "matrix-set" && (index("," line_kv("cells") ",", ",status,") || index("," line_kv("cells") ",", ",task,")) && hh_take(t)) c++
         # a refusal that named a person as its exit is one the person had to answer
         else if (w == "refusal" && line_kv("needs") == "person" && hh_take(t)) y++
         next }
@@ -615,9 +604,8 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
         if (++r > 1 && line_kv("starter") == "person" && hh_take(line_kv("at"))) f++
       }
       e == "proof" && line_kv("kind") == "regression" { pr[++np] = line_kv("evidence"); pa[np] = line_kv("at") }
-      # a waiver is the event the waive verb writes, of a question or of a criterion; a criterion waiver an older plan
-      # holds as a block line is counted once, by that line above, though its waived row reads as a waiver too
-      e == "waiver" && (line_kv("question") != "" || line_kv("ac") != "" && !(line_kv("ac") in wr)) && hh_take(line_kv("at")) { v++ }
+      # a waiver is the event the waive verb writes, of a question or of a criterion
+      e == "waiver" && (line_kv("question") != "" || line_kv("ac") != "") && hh_take(line_kv("at")) { v++ }
       e == "finding" && line_kv("to") == "fixed" && line_kv("by") != "landing" { fr[++nf] = line_kv("row"); fa[nf] = line_kv("at") }
       e == "stop" && line_kv("state") == "decline" && hh_take(line_kv("at")) { d++ }
       e == "stop" && line_kv("state") == "lift" && hh_take(line_kv("at")) { l++ }
@@ -625,10 +613,10 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
         # the first regression proof is the floor itself; each one past it whose run names no starter is a hand-hold
         for (i = 2; i <= np; i++) { m = split(pr[i], ee, ","); st = 0; for (j = 1; j <= m; j++) if (ee[j] in started) st = 1; if (!st && hh_take(pa[i])) f++ }
         for (i = 1; i <= nf; i++) if (hh_take_after(fa[i], LAND[fr[i]])) x++
-        print n + 0, s + 0, c + 0, y + 0, f + 0, v + 0, x + 0, d + 0, l + 0, am + 0, ho + 0, ex + 0, ad + 0, HH_UNPLACED + 0 }')"
+        print n + 0, s + 0, y + 0, f + 0, v + 0, x + 0, d + 0, l + 0, am + 0, ho + 0, ex + 0, ad + 0, HH_UNPLACED + 0 }')"
   fi
-  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · status-writes=%d · second-regressions=%d · adoptions=%d · fixed=%d · needs-you=%d' \
-    $(( hand + stp + dec + lif + amd + hld + ext + wv + stw + fl + ado + fix + ney )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$stw" "$fl" "$ado" "$fix" "$ney"
+  printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · second-regressions=%d · adoptions=%d · fixed=%d · needs-you=%d' \
+    $(( hand + stp + dec + lif + amd + hld + ext + wv + fl + ado + fix + ney )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$fl" "$ado" "$fix" "$ney"
   if [ -n "$since" ] || [ -n "$until" ]; then printf ' · unplaced=%d' "${u1:-0}"; fi
   [ "${gaps:-0}" -eq 0 ] || printf ' · unseen=%d' "$gaps"
   printf '\n'

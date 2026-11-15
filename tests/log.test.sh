@@ -7,7 +7,7 @@
 #   §SHAPE   a line matches the shape and reads back by field name; no type, a bare word, a `|` in a
 #            value and a caller's own `at=` are refused; LOG_AT stamps the line when in the shape, is refused
 #            when not, and only the files its list names set it, each for its reason.
-#   §TYPES   `matrix-set` and a retired word are refused; each of the 30 listed types is accepted.
+#   §TYPES   a hyphenated type no list holds and a retired word are refused; each of the 30 listed types is accepted.
 #
 # FIXTURE FIDELITY. The log is a real file in a scratch directory; only its path is synthesized.
 
@@ -42,7 +42,7 @@ payload/scripts/lib/owed.sh:the asks library stamps a round of an ask at the ins
 expect_eq "no file hands the appender an instant but those the list names, each for its reason" "$(printf '%s\n' "$LA_WHO" | cut -d: -f1 | paste -sd' ' -)" "$(cd "$BIONIC_SCRIPTS_DIR" && /usr/bin/grep -rl 'LOG_AT=' payload hooks | LC_ALL=C sort | paste -sd' ' -)"
 
 section "TYPES"
-refused "ev=matrix-set" matrix-set row=T1
+refused "a hyphenated type no list holds" plant-type row=T1
 refused "a retired type" settled row=T1
 refused "a type holding a space" "ready step" row=T1
 for t in ready candidate verdict published returned stalled standing admitted void run walk step \

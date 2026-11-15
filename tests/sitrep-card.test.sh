@@ -191,8 +191,8 @@ ask: key=finding:F5 holds=nothing title=Finding S3 carried to T83 raised=4:13 PM
 ask: key=finding:F6 holds=nothing title=Finding S3 carried to T83 raised=4:13 PM blocks=no waits=event T83 lands
 ask: key=finding:F7 holds=nothing title=Finding S4 carried to T83 raised=4:13 PM blocks=no waits=event T83 lands
 ask: key=finding:F8 holds=nothing title=Finding S4 carried to T83 raised=4:13 PM blocks=no waits=event T83 lands
-ask: key=waive-row:AC-3.2 holds=nothing title=row waiver AC-3.2 raised=5:01 PM blocks=no waits=event T83 lands
-ask: key=waive-row:AC-4.1 holds=nothing title=row waiver AC-4.1 raised=5:01 PM blocks=no waits=event T83 lands
+ask: key=row:AC-3.2 holds=nothing title=row waiver AC-3.2 raised=5:01 PM blocks=no waits=event T83 lands
+ask: key=row:AC-4.1 holds=nothing title=row waiver AC-4.1 raised=5:01 PM blocks=no waits=event T83 lands
 ask: key=row:AC-5.2 holds=nothing title=matrix ruling AC-5.2 raised=5:02 PM blocks=no waits=event T86 lands
 ask: key=row:AC-6.1 holds=nothing title=matrix ruling AC-6.1 raised=5:02 PM blocks=no waits=event T86 lands
 ask: key=row:AC-7.3 holds=nothing title=matrix ruling AC-7.3 raised=5:02 PM blocks=no waits=event T86 lands'

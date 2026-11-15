@@ -1488,7 +1488,7 @@ die "REFUSED — y; the plan is unchanged."  # MARK-C1 its next line prints the 
 pv_next task-add T1 'a title'
 die "REFUSED — z; needs: Chris — why"  # MARK-C2 a person's exit
 refuse exit2 commit "REFUSED — w" "fix it" "the detail"  # MARK-C3 a refuse call's fix is the exit
-die "REFUSED — run it as: session-poker.sh matrix-set AC-1 status=discharged"  # MARK-C4 a script verb
+die "REFUSED — run it as: session-poker.sh plant-verb AC-1 status=discharged"  # MARK-C4 a script verb
 die "REFUSED — a text that runs on
   to its exit: release-note writes it."  # MARK-C5 the exit on the joined line
 # die "REFUSED — in a comment"  MARK-C6

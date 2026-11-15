@@ -224,7 +224,7 @@ awk -v c="$(printf 'e%.0s' $(seq 40))" 'index($0, "run/v1|ev=published|row=T1|at
 bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; LOG_AT=2026-10-06T14:00:00Z proof_finding_event "$2" ref=record/wave-01-fixture/rev.md#1 to=fixed row=T1 "by=Chris Lehman"' \
   _ "$REPO_ROOT/payload/scripts/lib" "$HK_PLAN"
 # the run has landed build rows, so the count is over the window from the last of them, and says what it left out
-HK_WANT="hand-holds: total=8 · by-hand=1 · stop-runs=2 · declines=0 · lifts=0 · amends=1 · holds=1 · extensions=1 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=1 · fixed=1 · needs-you=0 · unplaced=0"
+HK_WANT="hand-holds: total=8 · by-hand=1 · stop-runs=2 · declines=0 · lifts=0 · amends=1 · holds=1 · extensions=1 · waivers=0 · second-regressions=0 · adoptions=1 · fixed=1 · needs-you=0 · unplaced=0"
 expect_eq "HK-1 one act of each kind, and one to=fixed move, each read under its own kind, by-hand the landing alone, in the total" \
   "$HK_WANT" "$(hh_report "$HK_P" --hand-holds | grep '^hand-holds: ')"
 run_close "$HK_P" check

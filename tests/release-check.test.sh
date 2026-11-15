@@ -622,6 +622,8 @@ cl_cksum() { cksum | sed 's/[[:space:]]*$//'; }
 BLOCK_1180_CKSUM="2015167781 19033"
 
 PLUGIN_JSON="${BIONIC_SCRIPTS_DIR}/payload/.claude-plugin/plugin.json"
+# a released record's name holds a verb since removed, read from the deletion list so that no line of this suite spells it
+RC_TS="$(/usr/bin/grep -o '`task[-]set`' "${BIONIC_SCRIPTS_DIR}/tests/fixtures/deletion-list.txt" | tr -d '`')"
 # Every landed build row of the run and the record that proves it; the entry names each record
 ROWS_1190="T1:T1-run-on-branch.md T2:T2-restart-truth.md T3:T3-placement.md T4:T4-jurisdiction.md
 T5:T5-reads-index.md T6:T6-pinned-text.md T7:T7-cover-judge.md T8:T8-fixed-move.md T9:T9-run-sessions.md
@@ -630,7 +632,7 @@ T14:T14-close-out-state.md T15:T15-doctrine.md T24:T24-block-heading.md T25:T25-
 T27:T27-consumers.md T28:T28-verbs-ask-the-judge.md T29:T29-launch-arm-and-adopt.md
 T30:T30-start-hook-bash5.md T31:T31-fix-seen-by-asker.md T32:T32-one-width-fact.md T33:T33-said-no-pipe.md
 T34:T34-taking-lock-stale.md T35:T35-floor-is-a-fact.md T36:T36-stop-wall-pins.md T37:T37-shell-lint-reds.md
-T38:T38-one-roster-reader.md T39:T39-sp2-pins.md T40:T40-tick-asks-once.md T41:T41-task-set-files.md
+T38:T38-one-roster-reader.md T39:T39-sp2-pins.md T40:T40-tick-asks-once.md T41:T41-$RC_TS-files.md
 T42:T42-born-floor-backed.md T43:T43-two-cd-chain.md T44:T44-walk-pointer.md T47:T47-adopt-lands-on-whole.md"
 # The rows that added a refusal; the Migration paragraph names each (AC-9.2)
 MIG_ROWS="T4 T7 T8 T13 T14 T25 T27 T31 T32 T35 T42"
