@@ -2135,6 +2135,36 @@ ST_RC=0; ( cd "$ST_F" && CLAUDE_CODE_SESSION_ID="$ST_SID" bash "$CARD_SH" step3 
 expect_eq "SETTLED-5d …and the orchestrator's own render of the same plan opens it after all" "0|approve:step3" "$ST_RC|$(st_open "$ST_F")"
 
 # ============================================================
+section "§BATCHES: the Step-3 card counts each batch as the fill counts it once the batches before it have landed"
+# ============================================================
+# The card asks the fill of a projection of the run: approved, at the batch's step, the earlier batches landed. fails-when:
+# a later batch is counted as though nothing before it landed (BATCHES-1), the depends column shows a row at 15's deps
+# cell as typed rather than what it waits on (BATCHES-3), or a card writes beside the plan or into its record
+# (BATCHES-2b). A page at 15: the builds T1, T2 and T4 (on its approval) first, then the regression T3, which waits on
+# the builds by its kind and names none.
+. "$(dirname "$0")/lib/plan-fixture.sh"
+BA_P="$(plan_fixture "${CARD_SANDBOX}/ba/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave \
+  "| T1 | 4 | build | REQ-1: the first task. A sentence. | implementor | — | — | 30 | REQ-1 | a.sh | — | — | pending |" \
+  "| T2 | 4 | build | REQ-1: the second task. A sentence. | implementor | — | — | 30 | REQ-1 | b.sh | — | — | pending |" \
+  "| T3 | 5 | test | REQ-1: the regression. A sentence. | implementor | — | — | 30 | REQ-1 | c.sh | — | — | pending |" \
+  "| T4 | 4 | build | REQ-1: the held task. A sentence. | implementor | approval:D7, ext:vendor | — | 30 | REQ-1 | d.sh | — | — | pending |")"
+ba_card() { env -u CLAUDE_CODE_SESSION_ID bash "$CARD_SH" step3 "$BA_P" 2>&1 0<&-; }
+ba_list() {  # -> every path under the plan's folder and its record, each file with its cksum
+  ( cd "${CARD_SANDBOX}/ba/.bionic/docs" && find plans record -print | LC_ALL=C sort \
+    | while IFS= read -r f; do if [ -f "$f" ]; then printf '%s %s\n' "$f" "$(cksum < "$f")"; else printf '%s\n' "$f"; fi; done )
+}
+BA_BEFORE="$(ba_list)"
+BA_OUT="$(ba_card)"; ba_card >/dev/null
+expect_eq "BATCHES-1 the first batch launches T1 and T2 (T4 waits on its approval), the second T3 once the first has landed" \
+  "$(printf '    batch 1 · 2 of 8\n    batch 2 · 1 of 8')" "$(printf '%s\n' "$BA_OUT" | /usr/bin/grep -F 'batch ')"
+expect_contains "BATCHES-3 precondition: T4's depends keeps its own approval and external tokens" \
+  "approval:D7, ext:vendor" "$(printf '%s\n' "$BA_OUT" | /usr/bin/grep -E '^    T4 ')"
+expect_contains "BATCHES-3b the regression's depends names the builds it waits on" "test      T1, T2, T4" \
+  "$(printf '%s\n' "$BA_OUT" | /usr/bin/grep -E '^    T3 ')"
+expect_contains "BATCHES-2 precondition: the listing reads the run's log by its sum" "record/wave-01-fixture/run.log " "$BA_BEFORE"
+expect_eq "BATCHES-2b two cards leave the plan's folder and its record as they were" "$BA_BEFORE" "$(ba_list)"
+
+# ============================================================
 section "§UNPROVED: the release card prints the full pass's state at this head, green only where the whole suite ran green here"
 # ============================================================
 # fails-when: the card prints green, or covered, over a whole run behind the head whose reds later landings greened;

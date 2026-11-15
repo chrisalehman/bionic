@@ -1069,9 +1069,8 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   WCARD_WRITERS="$(budget_cap "$2")"; WCARD_WRITERS="${WCARD_WRITERS#writers=}"
   # WHAT THE ARTIFACT IS FOR is the one reader's, the one the sitrep's sheet carries as run.goal.
   WCARD_GOAL="$(plan_goal_paragraph "$2")"
-  # THE WORKING BRANCH IS THE ANSWER OF lib/run.sh `plan_working_branch` (wave-35 T7; D14), the reader `ready`,
-  # the walls and the judge ask: SDLC State, then frontmatter. The card used to read the frontmatter alone,
-  # so a plan naming its branch under SDLC State showed `not declared` for a branch `ready` lands on.
+  # THE WORKING BRANCH IS THE ANSWER OF lib/run.sh `plan_working_branch`, the one reader `ready`, the walls and the
+  # judge ask, so the card never shows `not declared` for a branch `ready` lands on.
   WCARD_WB="$(plan_working_branch "$2")"
   WCARD_IB="$(plan_integration_branch "$2")"
   # THE ONE ASSIGNMENT OF THE SCALE: the Step-2 card's artifact arms read it, and a whole
@@ -1378,76 +1377,37 @@ _card_batch_rows() {  # <plan> -> `<batch>\t<step>\t<id>` per row, in table orde
     }'
 }
 
-# _card_project <plan> <ids> <terminal word> <current token> <out path>
+# _card_project_open <plan> <temporary directory> -> the copy's path, its run approved; 1 when it cannot be written
+# _card_project <copy> <step> <ids> -> 0 once the copy's run stands at <step> with <ids> landed besides what it held
 #
-# The copy described above. FENCE-AWARE and header-keyed for the same reason
-# `lib/units.sh` is both: a plan documenting its own table inside a fence is prose, and
-# the status column is wherever that table's header put it.
+# THE COPY IS A RUN OF ITS OWN: the page as written, in a project of its own that the card's temporary directory
+# holds, so the reader joins it to a record of its own beside it (lib/reader.sh `reader_record`) and never to the real
+# run's, and nothing is written beside the plan or into its record. Its log is written by the run's own writers alone,
+# one for each event type: the approval and the step by lib/proof.sh's, a landing by the line's
+# (lib/line.sh `line_published_event`). The line's writer finds a run's log through the project's git root, so the
+# temporary directory is made one.
+_card_project_open() {
+  local copy="${2:-}/.bionic/docs/plans/run/${1##*/}"
+  git init -q "${2:-}" >/dev/null 2>&1 && mkdir -p "${copy%/*}" && cp "${1:-}" "$copy" || return 1
+  declare -F proof_approval_event >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/proof.sh" >/dev/null 2>&1 || return 1
+  declare -F line_log >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/line.sh" >/dev/null 2>&1 || return 1
+  # THE PROJECTION IS OF AN APPROVED PLAN. The card is shown at the approval gate, and the fill offers nothing to a run
+  # whose plan stands unapproved, so a copy without the approval would answer every batch with nothing.
+  proof_approval_event "$copy" step3 by=card said=projected || return 1
+  printf '%s' "$copy"
+}
 _card_project() {
-  awk -v want="${2:-}" -v word="${3:-landed}" -v cur="${4:-}" '
-    function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
-    # THE ESCAPE IS FOLDED BEFORE THE SPLIT AND RESTORED AFTER IT, exactly as
-    # `lib/units.sh` does and for the same reason: this repo writes `\|` inside ledger
-    # cells, and a raw split on `|` opens a field the header does not have — so the
-    # status cell is rewritten one column left of where it is, the row stays pending,
-    # and the batch width is wrong rather than absent. `unesc` rebuilds by
-    # concatenation rather than through a gsub replacement, where a backslash is the
-    # one character whose meaning is not the character.
-    function esc(v)   { gsub(/\\[|]/, SUBSEP, v); return v }
-    function unesc(v,   parts, m, i, out) {
-      m = split(v, parts, SUBSEP)
-      out = parts[1]
-      for (i = 2; i <= m; i++) out = out "\\" "|" parts[i]
-      return out
-    }
-    BEGIN { n = split(want, a, " "); for (i = 1; i <= n; i++) W[a[i]] = 1 }
-    /^[ \t]*```/ { fence = !fence; print; next }
-    fence { print; next }
-    /^## / {
-      insdlc  = ($0 ~ /^##[ \t]+SDLC State([ \t].*)?$/)
-      intasks = ($0 ~ /^##[ \t]+[Tt]asks([ \t].*)?$/)
-      print; next
-    }
-    # THE PROJECTION IS OF AN APPROVED PLAN. The card is shown at the approval gate, and a
-    # table with a `reads` column reads `approval:plan` by default, so an unapproved copy would
-    # answer every batch with nothing. A second `approved-by:` beside a real one changes nothing.
-    insdlc && /^[ \t]*current[ \t]*:/ && !seen {
-      print "current: " cur; print "approved-by: projection"; seen = 1; next
-    }
-    intasks && /^[ \t]*\|/ {
-      n = split(esc($0), f, "|")
-      if (!hdr) {
-        for (i = 1; i <= n; i++) {
-          t = tolower(trim(f[i]))
-          if (t == "id" && idc == 0) idc = i
-          if (t == "status" && stc == 0) stc = i
-        }
-        if (idc > 0) hdr = 1
-        print; next
-      }
-      if (idc > 0 && stc > 0 && idc <= n && stc <= n && (trim(f[idc]) in W)) {
-        f[stc] = " " word " "
-        line = f[1]
-        for (i = 2; i <= n; i++) line = line "|" f[i]
-        print unesc(line); next
-      }
-      print; next
-    }
-    { print }
-    END {
-      # A plan with no `## SDLC State` section has no `current:` to project onto, and a
-      # ledger with no current is not live — so the section is appended rather than the
-      # batch silently reading zero.
-      if (!seen) { print ""; print "## SDLC State"; print ""; print "current: " cur; print "approved-by: projection" }
-    }' "${1:-}" > "${5:-/dev/null}"
-  # THE PROJECTION PATH IS REWRITTEN PER BATCH with a different `current:`, and fill.sh
-  # memoises that field per process by path — so the writer forgets it (wave-19 critic C2).
+  local copy="${1:-}" id
+  for id in ${3:-}; do line_published_event "$copy" "row=$id" kind=projection by=card why=projected || return 1; done
+  proof_step_event "$copy" "${2:-}" || return 1
+  # THE COPY'S PATH STANDS WHILE ITS RUN MOVES, and fill.sh memoises the run's place per process by path, so the writer
+  # forgets it.
   fill_current_forget
 }
 
 _card_batch_widths() {  # <plan> <rung> -> one `batch <k> · <n> of <rung>` per batch
-  local plan="${1:-}" rung="${2:-}" rows maxk k prior step
-  local tmpd proj idsf n
+  local plan="${1:-}" rung="${2:-}" rows maxk k landed step
+  local tmpd copy idsf n out=""
   case "$rung" in ''|*[!0-9]*) return 1 ;; esac
   [ "$rung" -gt 0 ] || return 1
   rows="$(_card_batch_rows "$plan")" || return 1
@@ -1455,34 +1415,35 @@ _card_batch_widths() {  # <plan> <rung> -> one `batch <k> · <n> of <rung>` per 
   maxk="$(printf '%s\n' "$rows" | awk -F'\t' 'BEGIN { m = 0 } $1 + 0 > m { m = $1 + 0 } END { print m + 0 }')"
   [ "$maxk" -gt 0 ] || return 1
   tmpd="$(mktemp -d "${TMPDIR:-/tmp}/card-batch.XXXXXX")" || return 1
-  proj="${tmpd}/plan.md"
   idsf="${tmpd}/ids"
+  copy="$(_card_project_open "$plan" "$tmpd")" || { rm -rf "$tmpd"; return 1; }
   k=1
   while [ "$k" -le "$maxk" ]; do
-    prior="$(printf '%s\n' "$rows" | awk -F'\t' -v k="$k" '$1 + 0 < k { printf "%s ", $3 }')"
+    # THE COPY'S RUN GOES FORWARD ONE BATCH AT A TIME: the rows of the batch before this one land, so every earlier
+    # batch stands landed when this one is asked.
+    landed="$(printf '%s\n' "$rows" | awk -F'\t' -v k="$k" '$1 + 0 == k - 1 { printf "%s ", $3 }')"
     : > "$idsf"
-    # ONE PROJECTION PER BATCH, AT THE STEP THE RUN WILL BE ON WHEN IT COMES UP (wave-20
-    # REQ-5, Δ1, Δ6). Readiness is the prerequisite graph, so a work row in batch k is
-    # ready at any step once batches 1..k-1 have landed, and the per-step loop this
-    # replaced asked the same set once per step it held. What the step still decides is
-    # the gate acts: an `integrate` or `close` row waits for `current:` to reach its own
-    # step, so the batch is asked at its HIGHEST step cell — every gate act in it is then
-    # reached — and never below 4, where nothing fills (the tick never runs a batch there).
+    # ONE PROJECTION PER BATCH, AT THE STEP THE RUN WILL BE ON WHEN IT COMES UP. Readiness is the prerequisite graph,
+    # so a work row in batch k is ready at any step once batches 1..k-1 have landed. What the step still decides is
+    # the gate acts: an `integrate` or `close` row waits for the run to reach its own step, so the batch is asked at
+    # its HIGHEST step cell — every gate act in it is then reached — and never below 4, where nothing fills (the tick
+    # never runs a batch there).
     step="$(printf '%s\n' "$rows" | awk -F'\t' -v k="$k" '
       BEGIN { m = 4 }
       $1 + 0 == k && $2 ~ /^[0-9]+$/ && $2 + 0 > m { m = $2 + 0 }
       END { print m }')"
-    _card_project "$plan" "$prior" landed "$step" "$proj"
-    fill_ready_set "$proj" "$rung" 0 >> "$idsf"
+    _card_project "$copy" "$step" "$landed" || { rm -rf "$tmpd"; return 1; }
+    fill_ready_set "$copy" "$rung" 0 >> "$idsf"
     # DISTINCT IDS, counted with a counter rather than `length(array)`: this platform's
     # awk is the 2007 one-true-awk and does not answer that for an array.
     n="$(awk 'NF && !($1 in seen) { seen[$1] = 1; c++ } END { print c + 0 }' "$idsf")"
     [ "$n" -le "$rung" ] || n="$rung"
-    printf '    batch %s · %s of %s\n' "$k" "$n" "$rung"
+    out="${out}$(printf '    batch %s · %s of %s' "$k" "$n" "$rung")"$'\n'
     k=$(( k + 1 ))
   done
   rm -rf "$tmpd"
-  return 0
+  # A BATCH WHOSE PROJECTION COULD NOT BE WRITTEN IS NO COUNT, so the lines are printed only once every batch's was.
+  printf '%s' "$out"
 }
 
 # ── THE LONGEST CHAIN AND THE PEAK WIDTH (wave-26 D12, AC-7.1) ───────────────
@@ -1525,16 +1486,18 @@ _card_chain() {  # <plan> <writer ceiling>
   return 0
 }
 
-# THE DEPENDS COLUMN OF A TABLE WITH A `reads` COLUMN (review 9, answer (b)). There the deps cell
-# holds only `ext:` tokens, because a row waits on what it reads, so the cell alone shows a dash
-# for a row that waits on another through a read. Each task row's depends becomes the ids
-# `units_edges` puts before it (the edges `_card_chain` already fetched), once each and in table
-# order, then the deps cell's `ext:` tokens; a row with neither keeps a dash. The edges join open
-# rows only, so a predecessor that has landed no longer shows: what remains is what it waits for.
-# A deps-only table is left as the plan wrote it.
-_card_reads_depends() {  # <plan> — rewrites field 4 of every WCARD_TROW entry
+# THE DEPENDS COLUMN IS WHAT A ROW WAITS ON, not its deps cell as typed, on a table with a `reads` column
+# and on a page at 15. There the cell names only some of a row's waits: a row waits on what it reads, or
+# at 15 on what its kind waits on by default (a regression on the builds), so the cell alone shows a dash
+# for a row that waits on three. Each task row's depends becomes the ids `units_edges` puts before it
+# (the edges `_card_chain` already fetched), once each and in table order, then the deps cell's own
+# `approval:` and `ext:` tokens, which are waits no edge carries; a row with none keeps a dash. The edges
+# join open rows only, so a predecessor that has landed no longer shows: what remains is what it waits
+# for. A table whose deps cells hold every edge is left as the plan wrote it.
+_card_edge_depends() {  # <plan> — rewrites field 4 of every WCARD_TROW entry
   local out line
-  units_has_column "${1:-}" reads || return 0
+  units_has_column "${1:-}" reads \
+    || [ "$(plan_read_header "${1:-}" canonical_sdlc_version 2>/dev/null)" = canonical_sdlc_version=15 ] || return 0
   [ "${#WCARD_TROW[@]}" -gt 0 ] || return 0
   out="$( { printf '%s\n' "${CARD_EDGES:-}"; printf '\034\n'; printf '%s\n' "${WCARD_TROW[@]}"; } | awk -F'\t' '
     function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
@@ -1549,7 +1512,7 @@ _card_reads_depends() {  # <plan> — rewrites field 4 of every WCARD_TROW entry
         k = split(f[4], tok, ",")
         for (t = 1; t <= k; t++) {
           v = trim(tok[t])
-          if (v ~ /^ext:/) dep = dep (dep == "" ? "" : ", ") v
+          if (v ~ /^(approval|ext):/) dep = dep (dep == "" ? "" : ", ") v
         }
         if (dep == "") dep = "—"
         f[4] = dep
@@ -2207,11 +2170,11 @@ _card_step2_explain() {  # <D-id or number>
 # nor its eval counts. What it adds is the plan's own shape: each task with the criteria it
 # serves, and the longest chain and the peak width the derived graph gives, at every scale.
 _card_step3() {  # <citation path> <artifact path as given>
-  # THE CHAIN IS ASKED BEFORE THE TASKS ARE RENDERED: its edges are the depends column of a
-  # table with a `reads` column, and the graph is fetched once for both.
+  # THE CHAIN IS ASKED BEFORE THE TASKS ARE RENDERED: its edges are the depends column, and the
+  # graph is fetched once for both.
   CARD_CHAIN_RC=0
   _card_chain "$2" "$(_card_chain_ceil "$2")" || CARD_CHAIN_RC=1
-  _card_reads_depends "$2"
+  _card_edge_depends "$2"
   printf 'Step 3 · Plan\n\n'
   _card_branches
   printf '\n'
