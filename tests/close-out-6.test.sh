@@ -69,21 +69,22 @@ section "FILL — wave-33 T8 (REQ-3 AC-3.3, D8): the epic row and the continuati
 # The epic row's ADR cell was `<fill: ADRs>` when no source named one, and wave-30's still reads so; the
 # continuation carried fourteen marks the orchestrator completed by hand (A-orch-50). Close-out now writes every
 # field it can derive, refuses the row when the plan says nothing about its ADRs, and leaves a mark only where
-# a person must decide, naming each in its output.
+# a person must decide, naming each in its output. The row is read from the close's output: the close writes no plan.
+# printed_row -> the row the last close printed for the epic plan; printed_adr_cell -> its ADRs cell, trimmed.
+printed_row() { printf '%s\n' "$CO_OUT" | sed -n 's/^epic-row: //p'; }
+printed_adr_cell() { printed_row | awk -F'|' '{ c = $6; gsub(/^[ \t]+|[ \t]+$/, "", c); print c }'; }
 
 FA="$(mk_fixture fill-a)"; advance_to "$FA" 8
-FA_HEAD="$(fixture_git "$FA" rev-parse wave/01-fixture)"
 FA_MAIN="$(fixture_git "$FA" rev-parse --short main)"
 run_close "$FA" run
-FA_ROW="$(table_rows "$FA/$EPIC_REL" shipped | /usr/bin/grep -E '^\|[[:space:]]*01[[:space:]]*\|')"
+FA_ROW="$(printed_row)"
 FA_CONT="$(cat "$FA/$CONT_REL" 2>/dev/null)"
 expect_eq "FILL.2 AC-3.3 the epic row carries no <fill:, and holds the merge commit it names" "no/yes" \
   "$(contains "$FA_ROW" "<fill:")/$(contains "$FA_ROW" "main @ $FA_MAIN")"
-expect_eq "FILL.3 …and an ADR cell that says so when the plan says none (adrs: none)" "—" "$(adr_cell "$FA")"
+expect_eq "FILL.3 …and an ADR cell that says so when the plan says none (adrs: none)" "—" "$(printed_adr_cell)"
 expect_contains "FILL.4 the continuation states the task count from the plan (the two build rows)" "2 tasks, every one RED→GREEN" "$FA_CONT"
 expect_contains "FILL.7 …and the commit it closed at, written whole" "main at $FA_MAIN." "$FA_CONT"
 expect_absent "FILL.8 no Patrol sentence when no job is known (this session has no transcript) and no mark for it" "Patrol" "$FA_CONT"
-OWED_NAMES='the first decision, or "none"; what was ruled at this close, or "none"; version; ideas path; carry-overs from this wave'
 
 # THE ROW IS REFUSED, NOT MARKED, when the plan says nothing about its ADRs.
 FB="$(mk_fixture fill-b)"; advance_to "$FB" 8
@@ -100,7 +101,7 @@ expect_eq "FILL.14 …branch, tmp, continuation, plan and epic plan untouched" "
 set_plan_keys "$FB" "-" "adrs: adrs/epic-fx/adr-052-the-workhorse.md"
 run_close "$FB" run
 expect_eq "FILL.15 the same plan with an adrs: line closes (rc 0) and the cell and the continuation name the ADR" "0/052/yes" \
-  "$CO_RC/$(adr_cell "$FB")/$(contains "$(cat "$FB/$CONT_REL")" "ADRs: 052.")"
+  "$CO_RC/$(printed_adr_cell)/$(contains "$(cat "$FB/$CONT_REL")" "ADRs: 052.")"
 
 # THE PATROL JOB, from this session's transcript, when it is known: the id the platform minted, still undeleted.
 FP="$(mk_fixture fill-p)"; advance_to "$FP" 8
@@ -262,7 +263,7 @@ section "§ADRS — close-out's epic row writes an ADR named by a path with no a
 # fails-when: a value with no adr-<n> is refused by `epic_row_missing` or written as no ADR.
 PAP="$(mk_fixture adrs-path)"; set_plan_keys "$PAP" - "adrs: record/wave-01-fixture/adr.md"; advance_to "$PAP" 8
 run_close "$PAP" run
-expect_eq "AD-5 a path with no adr-<n>: the epic row is written, its ADR cell the path, never refused" "0|record/wave-01-fixture/adr.md" "$CO_RC|$(adr_cell "$PAP")"
+expect_eq "AD-5 a path with no adr-<n>: the epic row is written, its ADR cell the path, never refused" "0|record/wave-01-fixture/adr.md" "$CO_RC|$(printed_adr_cell)"
 
 # ============================================================
 section "§REG: the continuation's regression line prints the full pass's state at this head from the one printer"

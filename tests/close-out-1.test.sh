@@ -148,7 +148,7 @@ expect_eq "1k: …in the 1.7.1 shape — the five headings" "yes" \
   "$(contains "$(cat "$P1/$CONT_REL")" "## Resume instruction")"
 expect_eq "1l: …and it leaves the orchestrator's unknowns marked" "yes" \
   "$(contains "$(cat "$P1/$CONT_REL")" "<fill")"
-expect_eq "1m: act 6 — epic-row: reports the row" "yes" "$(contains "$CO_OUT" "epic-row: ")"
+expect_eq "1m: act 6 — epic-row: prints the wave's row for the orchestrator's edit" "yes" "$(contains "$CO_OUT" "epic-row: | 01 | ")"
 expect_eq "1p: act 8 — patrol: names CronDelete and the disarm verb" "yes" \
   "$(contains "$CO_OUT" "patrol: CronDelete")"
 expect_eq "1q: …and the disarm command" "yes" \
@@ -207,6 +207,30 @@ printf 'run/v1|ev=step|n=8|cleanup=done|tmp-wiped=7 entries under the first clos
 run_close "$PS" run
 expect_eq "1aq: the second close delivers on the step 8 that stood, its wipe kept: one step 8 in the log" "0|yes|1|n=9" \
   "$CO_RC|$(contains "$(co_step_answer "$PS" 8)" "tmp-wiped=7 entries under the first close")|$(grep -c '|ev=step|n=8|' "$PS/$LOG_REL")|$(co_step_answer "$PS" | sed -n 1p)"
+
+# THE LAST STEP IS THE READER'S ANSWER. After the archive's line is written, the close asks the reader which step the run
+# stands at over the log it was handed, and takes that step's archived= field; it searches the log for no line of its own.
+# co_close_archived is read out of the script by name and run over a log the test writes, its step writer a stub that
+# appends the lines the case names. A line of another family that carries ev=step is no fact of the run, and the fold reads
+# a field by its name, so a writer's order of fields is no answer: a search for the text `|ev=step|` reads both wrongly.
+ca_run() {  # <the lines the writer appends> -> the function's exit
+  local d="$SANDBOX/ca"; mkdir -p "$d"; : > "$d/run.log"
+  CA_LINES="$1" bash -c '
+    eval "$(awk "index(\$0, \"co_close_archived() {\") == 1 { p = 1 } p { print } p && /^}/ { exit }" "$1/close-out.sh")"
+    . "$1/lib/reader.sh" || exit 9
+    _co_refuse() { exit 2; }
+    proof_step_event() { printf "%s\n" "$CA_LINES" >> "$1"; }
+    PLAN="${2%/*}/plans/x.plan.md"; CO_DELIVERED_AT=""; CO_DELIVERED=x; ARCHIVED_LINE=y
+    co_close_archived "$2"' _ "$REPO_ROOT/payload/scripts" "$d/run.log" >/dev/null 2>&1
+  echo $?
+}
+CA_ARCH='run/v1|ev=step|n=9|delivered=x|archived=bionic: archived|at=2026-10-04T12:05:00Z'
+expect_eq "1as: the archive's step standing last passes; another step written after it, by another writer, refuses" "0|2" \
+  "$(ca_run "$CA_ARCH")|$(ca_run "$CA_ARCH"$'\n''run/v1|ev=step|n=8|cleanup=done|at=2026-10-04T12:06:00Z')"
+expect_eq "1at: a line of another family carrying ev=step after the archive's is no step of the run" "0" \
+  "$(ca_run "$CA_ARCH"$'\n''note|ev=step|n=7|x=1')"
+expect_eq "1au: the archive's line with its fields in another order is the step all the same" "0" \
+  "$(ca_run 'run/v1|n=9|delivered=x|archived=bionic: archived|at=2026-10-04T12:05:00Z|ev=step')"
 
 # ============================================================
 section "2 — AC-4.3: an unreached wt/* branch refuses by name and nothing else happens"
@@ -335,9 +359,9 @@ RELV="7.7.7-fixture"
 expect_nonempty "VER0: the tool's version reads from its manifest" "$TOOLV"
 expect_ne "VER0b: …and differs from the release the fixture names" "$RELV" "$TOOLV"
 
-# epic_version_cell <project> -> the version cell of the epic's wave-01 row, trimmed.
+# epic_version_cell -> the version cell of the wave-01 row the last close printed for the epic plan, trimmed.
 epic_version_cell() {
-  grep '^| 01 |' "$1/$EPIC_REL" | head -1 | awk -F'|' '{ v = $3; gsub(/^[ \t]+|[ \t]+$/, "", v); print v }'
+  printf '%s\n' "$CO_OUT" | sed -n 's/^epic-row: | 01 |//p' | head -1 | awk -F'|' '{ v = $1; gsub(/^[ \t]+|[ \t]+$/, "", v); print v }'
 }
 # delivered_line <project> -> the words the run's step 9 carries as delivered.
 delivered_line() { co_step_answer "$1" | sed -n 's/^delivered=//p'; }
@@ -351,7 +375,7 @@ DL1="$(delivered_line "$PV1")"
 expect_nonempty "VER3: the delivered line is there to read" "$DL1"
 expect_eq "VER4: …it carries the plan's release after the slug" "yes" "$(contains "$DL1" "wave-01-fixture $RELV — ")"
 expect_eq "VER5: …and not the tool's version" "no" "$(contains "$DL1" "$TOOLV")"
-expect_eq "VER6: the epic row's version cell is the plan's release" "$RELV" "$(epic_version_cell "$PV1")"
+expect_eq "VER6: the epic row's version cell is the plan's release" "$RELV" "$(epic_version_cell)"
 expect_eq "VER7: the continuation header carries the release" "yes" "$(contains "$(head -1 "$PV1/$CONT_REL")" "$RELV")"
 expect_eq "VER8: …and not the tool's version" "no" "$(contains "$(head -1 "$PV1/$CONT_REL")" "$TOOLV")"
 
@@ -362,7 +386,7 @@ DL2="$(delivered_line "$PV2")"
 expect_nonempty "VER12: the delivered line is there to read" "$DL2"
 expect_eq "VER13: …it writes no version: the slug runs straight into the dash" "yes" "$(contains "$DL2" "wave-01-fixture — ")"
 expect_eq "VER14: …and never the tool's" "no" "$(contains "$DL2" "$TOOLV")"
-expect_eq "VER15: the epic row is there, with no version in its cell" "—" "$(epic_version_cell "$PV2")"
+expect_eq "VER15: the epic row is there, with no version in its cell" "—" "$(epic_version_cell)"
 expect_eq "VER16: the continuation header names the wave" "yes" "$(contains "$(head -1 "$PV2/$CONT_REL")" "wave-01-fixture")"
 expect_eq "VER17: …with no version in it" "no" "$(contains "$(head -1 "$PV2/$CONT_REL")" "$TOOLV")"
 
@@ -383,7 +407,6 @@ expect_eq "E2E0c: precondition: …and a base-sha naming a commit at or before t
   HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_CLAUDE_HOME="$SB_HOME/.claude" LOG_AT=2099-01-01T00:00:59Z \
     CLAUDE_CODE_SESSION_ID="$E2E_SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" current 8 ) > "$SANDBOX/e2e-poker" 2>&1
 E2E_POKER_RC=$?
-E2E_POKER_OUT="$(cat "$SANDBOX/e2e-poker")"
 expect_eq "E2E1: AC-7.1 the real current 8 is admitted on the facts (exit 0)" "0" "$E2E_POKER_RC"
 expect_eq "E2E3: …and the run stands at step 8, its plan unwritten" "n=8|$PE_SUM" "$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$PE/$PLAN_REL" step | head -1)|$(sha_of "$PE/$PLAN_REL")"
 run_close "$PE" run

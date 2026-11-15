@@ -1588,35 +1588,10 @@ act_continuation_write() {
 
 # ─── Act 6: the epic's shipped-wave row ──────────────────────────────────────
 #
-# KEYED ON THE WAVE NUMBER, which is the only column that cannot be two things at once.
-# The table is found by its HEADER ROW rather than by the heading above it: a heading is
-# prose somebody may reword, and the header is the table's own. An epic can carry more than
-# one table headed `wave` (a planned one beside the shipped one), so the header is the one
-# whose first cell is `wave` AND which has a `shipped` cell.
-EPIC_LINE=""
-
-# epic_shipped_table <file> [<row>] -> the ONE locator for that table, shared by the reader
-# (`epic_has_row`), the presence check (`presence_missing`) and the writer (`act_epic`).
-# With no row: prints the table, header through its last row (the rows run to the first
-# line not starting `|`), or nothing when the file has no such table. With a row: prints the
-# whole file with the row appended to that table. The row travels in the environment, not
-# `-v`, because `-v` would interpret the backslashes a spec path can carry.
-epic_shipped_table() {
-  CO_ROW="${2:-}" awk '
-    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
-    function shipped_header(line,   n, a, i) {
-      n = split(line, a, "|")
-      if (tolower(trim(a[2])) != "wave") return 0
-      for (i = 3; i <= n; i++) if (tolower(trim(a[i])) == "shipped") return 1
-      return 0
-    }
-    BEGIN { row = ENVIRON["CO_ROW"] }
-    !seen && /^\|/ && shipped_header($0) { intable = 1; seen = 1 }
-    intable && !/^\|/ { if (row != "" && !done) { print row; done = 1 } intable = 0 }
-    row != "" || intable { print }
-    END { if (row != "" && intable && !done) print row }
-  ' "$1" 2>/dev/null
-}
+# THE CLOSE WRITES NO PLAN. It prints the wave's row for the orchestrator to add to the epic plan's shipped table by an
+# edit of its own, so the epic plan is the person's and the orchestrator's text alone, and the close never reads that
+# table back to learn whether the row is there. The row is KEYED ON THE WAVE NUMBER, the only column that cannot be
+# two things at once.
 
 # epic_adrs_value -> the raw `adrs:` this wave's sources carry: the spec the plan's `spec:` line names
 # first, the plan's own when the spec has none. Nothing when neither says anything. The spec's `adrs:` is
@@ -1699,48 +1674,16 @@ epic_row() {
     "$WAVE_NUM" "${RELEASE:-—}" "${PLAN##*/}" "$spec" "$adrs" "$([ "$PARKED" = yes ] && printf 'parked ')" "$TODAY" "$(co_epic_branch)" "$sha"
 }
 
-# A MISSING SHIPPED TABLE IS ADDED, NEVER REFUSED (wave-38 T15; AC-4.4). An epic plan with no `| wave |` table carrying a
-# `shipped` cell gets one at its end, under `## Waves — shipped`: the header and its rule line, in this epic's own shape,
-# and the row is then appended to it as to any shipped table. The epic's other text is kept.
+# co_epic_print -> the epic's row and the one line that says the edit is the orchestrator's: this close writes no plan.
+# The header of the shipped table travels with it, for an epic plan that has none yet.
 EPIC_SHIPPED_HEADER='| wave | version | plan | spec / requirements | ADRs | shipped |'
-epic_table_add() {  # -> the epic plan with the shipped table's header at its end; rc 1 not written
-  local tmp="$EPIC_PLAN.close-out-table.$$"
-  { awk '{ print }' "$EPIC_PLAN"; printf '\n## Waves — shipped\n\n%s\n|---|---|---|---|---|---|\n' "$EPIC_SHIPPED_HEADER"; } > "$tmp" 2>/dev/null \
-    && [ -s "$tmp" ] && mv "$tmp" "$EPIC_PLAN" 2>/dev/null && return 0
-  rm -f "$tmp" 2>/dev/null
-  return 1
-}
-
-epic_has_row() {
-  [ -f "$EPIC_PLAN" ] || return 1
-  epic_shipped_table "$EPIC_PLAN" | grep -qE "^\|[[:space:]]*${WAVE_NUM}[[:space:]]*\|"
-}
-
-act_epic() {
+co_epic_print() {
   if [ ! -f "$EPIC_PLAN" ]; then
-    EPIC_LINE="none — no epic.plan.md beside this plan"
+    say "epic-row: none — no epic.plan.md beside this plan"
     return 0
   fi
-  if epic_has_row; then
-    EPIC_LINE="wave $WAVE_NUM is already listed in ${EPIC_PLAN##*/} — left as it stands"
-    return 0
-  fi
-  local tmp="$EPIC_PLAN.close-out.$$" row added=""
-  row="$(epic_row)"
-  if [ -z "$(epic_shipped_table "$EPIC_PLAN")" ]; then
-    epic_table_add || _co_refuse "could not add the shipped table to ${EPIC_PLAN##*/}"
-    [ -n "$(epic_shipped_table "$EPIC_PLAN")" ] || _co_refuse "the shipped table did not land in ${EPIC_PLAN##*/}"
-    added="the shipped table added to ${EPIC_PLAN##*/}, then "
-  fi
-  epic_shipped_table "$EPIC_PLAN" "$row" > "$tmp"
-  if [ ! -s "$tmp" ]; then
-    rm -f "$tmp"
-    _co_refuse "could not rewrite ${EPIC_PLAN##*/} to add the wave $WAVE_NUM row"
-  fi
-  mv "$tmp" "$EPIC_PLAN"
-  epic_has_row || _co_refuse "the wave $WAVE_NUM row did not land in ${EPIC_PLAN##*/}"
-  if [ -n "$added" ]; then EPIC_LINE="${added}wave $WAVE_NUM appended"
-  else EPIC_LINE="wave $WAVE_NUM appended to ${EPIC_PLAN##*/}"; fi
+  say "epic-row: $(epic_row)"
+  say "epic-edit: add the row above to the shipped table of ${EPIC_PLAN##*/} by an edit of your own; this close writes no plan (a plan with no shipped table takes the header $EPIC_SHIPPED_HEADER and its rule line first)"
 }
 
 # ─── Act 8: the Patrol ───────────────────────────────────────────────────────
@@ -2055,8 +1998,8 @@ presence_missing() {
   case "$RELEASE" in
     *'|'*) printf 'the release: field of the plan holds a | (%s), which would split the version cell of the epic row; write the release without one' "$RELEASE"; return 0 ;;
   esac
-  # A MISSING SHIPPED TABLE IS NO LONGER A REFUSAL (wave-38 T15; AC-4.4): act_epic adds it (epic_table_add).
-  if [ -f "$EPIC_PLAN" ] && ! epic_has_row; then
+  # The row is printed whole or the close refuses before any act; the epic plan's own table is never read.
+  if [ -f "$EPIC_PLAN" ]; then
     epic_row_missing
   fi
   return 0
@@ -2178,8 +2121,11 @@ co_close_archived() {
   local log="$1" last
   LOG_AT="$CO_DELIVERED_AT" proof_step_event "$log" 9 "delivered=$CO_DELIVERED" ${CO_DEPLOY_FIELDS[@]+"${CO_DEPLOY_FIELDS[@]}"} "archived=$ARCHIVED_LINE" \
     || _co_refuse "the archive's line could not be appended to the run's log $log"
-  last="$(/usr/bin/grep '|ev=step|' "$log" 2>/dev/null | tail -1)"
-  case "$last" in *"|archived="*) ;; *) _co_refuse "the archive's line did not land in the run's log $log" ;; esac
+  last="$(
+    reader_events() { cat "$log"; }
+    reader_q_step "$PLAN" 2>/dev/null
+  )"
+  case $'\n'"$last" in *$'\n'archived=*) ;; *) _co_refuse "the archive's line did not land in the run's log $log" ;; esac
 }
 
 # ─── check ───────────────────────────────────────────────────────────────────
@@ -2291,16 +2237,10 @@ do_check() {
   else
     say "continuation: $CONT_REL would be written from the close-out template"
   fi
-  if [ ! -f "$EPIC_PLAN" ]; then
-    say "epic-row: none — no epic.plan.md beside this plan"
-  elif epic_has_row; then
-    say "epic-row: wave $WAVE_NUM is already listed in ${EPIC_PLAN##*/}"
-  elif [ -n "$(epic_row_missing)" ]; then
+  if [ -f "$EPIC_PLAN" ] && [ -n "$(epic_row_missing)" ]; then
     co_would "epic-row: WOULD REFUSE — $(epic_row_missing)" "the epic plan's row cannot be written"
-  elif [ -z "$(epic_shipped_table "$EPIC_PLAN")" ]; then
-    say "epic-row: $(epic_row) — no | wave | table with a shipped column in ${EPIC_PLAN##*/}: run adds the shipped table's header first"
   else
-    say "epic-row: $(epic_row)"
+    co_epic_print
   fi
   say "patrol: $PATROL_LINE"
   co_handoff_where
@@ -2418,7 +2358,7 @@ do_run() {
   NOW="$(date -u +%Y-%m-%dT%H:%MZ)"
   act_continuation; say "continuation: $CONT_LINE"
                     say "$(co_owed_line)"
-  act_epic;         say "epic-row: $EPIC_LINE"
+  co_epic_print
                     say "patrol: $PATROL_LINE"
   # ORDER: step 8's event -> the attestation -> step 9's. The attestation judges the run while it is
   # still OPEN at 8; delivering first would close it, and the gate checks no evidence of a closed run. A refusal here

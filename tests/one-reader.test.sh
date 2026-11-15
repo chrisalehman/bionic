@@ -101,8 +101,8 @@ section "PARSERS"
 expect_contains "a real parser is named at this head" "$(printf 'parser\tpayload/scripts/lib/units.sh\t')" "$BEFORE"
 expect_absent "the goals library reads a criterion's state and a plan's scale through the reader alone" "$(printf 'parser\tpayload/scripts/lib/plan.sh\t')" "$BEFORE"
 expect_absent "the fill library takes the run's step and approval from the reader alone" "$(printf 'parser\tpayload/scripts/lib/fill.sh\t')" "$BEFORE"
-expect_eq "parsers, plan writers and shared types stand at or under 13, 1 and 6" "1 1 1" \
-  "$(( $(count "$BEFORE" parsers) <= 13 )) $(( $(count "$BEFORE" plan_writers) <= 1 )) $(( $(count "$BEFORE" shared_types) <= 6 ))"
+expect_eq "parsers, plan writers and shared types stand at or under 13, 0 and 6" "1 1 1" \
+  "$(( $(count "$BEFORE" parsers) <= 13 )) $(( $(count "$BEFORE" plan_writers) <= 0 )) $(( $(count "$BEFORE" shared_types) <= 6 ))"
 expect_eq "headings: a message's, a constant's and a print's words are no parse; an unanchored match is" "parser sites=1 first=4" "$(site 1)"
 expect_eq "shapes: a printed one and a function line's comment are no parse; a log line's test is" "parser sites=1 first=3" "$(site 2)"
 expect_eq "operands: a function's argument, in a \$( ) or in words, is no read; a reader's own is, and a program's end" \
