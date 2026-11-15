@@ -148,7 +148,7 @@ expect_eq "1k: …in the 1.7.1 shape — the five headings" "yes" \
   "$(contains "$(cat "$P1/$CONT_REL")" "## Resume instruction")"
 expect_eq "1l: …and it leaves the orchestrator's unknowns marked" "yes" \
   "$(contains "$(cat "$P1/$CONT_REL")" "<fill")"
-expect_eq "1m: act 6 — epic-row: prints the wave's row for the orchestrator's edit" "yes" "$(contains "$CO_OUT" "epic-row: | 01 | ")"
+expect_eq "1m: act 6 — shipped-row: prints the wave's row for the orchestrator's edit" "yes" "$(contains "$CO_OUT" "shipped-row: | 01 | ")"
 expect_eq "1p: act 8 — patrol: names CronDelete and the disarm verb" "yes" \
   "$(contains "$CO_OUT" "patrol: CronDelete")"
 expect_eq "1q: …and the disarm command" "yes" \
@@ -345,7 +345,7 @@ expect_nonempty "VER0: the tool's version reads from its manifest" "$TOOLV"
 expect_ne "VER0b: …and differs from the release the fixture names" "$RELV" "$TOOLV"
 
 # epic_version_cell -> the version cell of the `| 01 |` row the last close printed for the epic plan, trimmed.
-epic_version_cell() { printf '%s\n' "$CO_OUT" | sed -n 's/^epic-row: | 01 | *\([^|]*[^| ]\) *|.*/\1/p' | head -1; }
+epic_version_cell() { printf '%s\n' "$CO_OUT" | sed -n 's/^shipped-row: | 01 | *\([^|]*[^| ]\) *|.*/\1/p' | head -1; }
 # delivered_line <project> -> the words the run's step 9 carries as delivered.
 delivered_line() { co_step_answer "$1" | sed -n 's/^delivered=//p'; }
 
