@@ -19,14 +19,6 @@ set -euo pipefail
 # call starts, where `wall_evidence_gate` (payload/scripts/lib/walls.sh) runs; tests/bash-walls.test.sh owns the composition.
 HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 
-# THE FLOOR A RUN PAST STEP 6 CARRIES: a Step 7..9 fixture about something else gets the
-# prelude's readings and one `proved: kind=regression` line after `current:`; rows about the floor arm write plans as given.
-eg_floor() {  # <plan content> -> the content with the readings and one floor proof line
-  eg_readings "$1" | EG_H="$EG_HEAD" awk '{ print }
-    !done && /^[[:space:]]*current[[:space:]]*:[[:space:]]*[7-9][ab]?[[:space:]]*$/ {
-      printf "proved: kind=regression head=%s at=2026-10-12T00:00:00Z evidence=record/floor.log\n", ENVIRON["EG_H"]; done = 1 }'
-}
-
 # ============================================================
 # Section 1: non-commit commands always allowed
 # ============================================================
@@ -93,70 +85,20 @@ expect_eq "plan_fixture at 14 holds the version and its state section; at 15 the
 #
 # A criterion is owed at the step of the task that proves it: before it, a pending or blocked criterion owes neither
 # its per-tier keys nor an auditor's verdict. The literal 9 is the close's step; a criterion owed at 9 is the close's
-# to settle, never demanded of an open plan. At 15 the criteria table's Task column names the task; an older plan's
-# block names it on its `task:` line, which the readers below still read for the judge and the close.
-# FIXTURE FIDELITY: the matrix plan builders with a `## Tasks` table before the matrix; Step-7+ plans via eg_floor; the
-# page at 15 is SYNTHESIZED in the nine cells and the Eval design, its one landing an event of its run's log.
-# fails-when: a criterion is owed at a step other than its task's (9j, 9o), a dash or a missing column names a step
+# to settle, never demanded of an open plan. The criteria table's Task column names the task.
+# FIXTURE FIDELITY: the page at 15 is SYNTHESIZED in the nine cells and the Eval design, its one landing an event of
+# its run's log; the Step-9 runs are eg_page's.
+# fails-when: a criterion is owed at a step other than its task's (9o), a dash or a missing column names a step
 # (9o, 9q), the close settles one it does not measure (9p), or the deferral outlives its owing step (9k, 9l).
 
 section "Section 9: a criterion is owed at the step whose task proves it"
 
-ow_tasks="## Tasks
-
-| id | step | kind | task | agent | deps | size | serves | Files | status |
-|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | the build | implementor | — | 30m | REQ-1 | a.sh | landed |
-| T7 | 7 | doc | the release | orchestrator | — | 10 | REQ-1 | CHANGELOG.md | pending |
-| T9 | 9 | close | the close | orchestrator | — | 10 | REQ-1 | none | pending |"
-
-# ow_matrix <tier> <task value> -> the first row discharged and confirmed, the second pending with that tier and task:
-ow_matrix() {
-  printf '%s\n' "## Verification Matrix
-
-stack-health: n/a: no long-running serve
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
-| AC-2 | $1 | pending | — |  |
-
-AC-1:
-  fails-when: the planted defect this eval must go red on
-  evidence: record/generic-evidence.md
-  tier-run: bash test.sh — unit suite
-  readback: 332/332 asserted
-AC-2:
-  fails-when: the close reads above zero
-  eval: $1 — \`bash payload/hooks/session-poker.sh landing-report --hand-holds\` at the close reads total=0
-  task: $2
-  evidence: pending"
-}
-# ow_plan <current> <tier> <task value> -> the whole plan at that step, the Tasks table above the matrix
-ow_plan() {
-  local body p
-  case "$1" in
-    5) body="$step5_base" ;; 6) body="$step6_body" ;; 7) body="$v9_step7_body" ;;
-    8) body="$v9_step8_body" ;;
-  esac
-  p="$(plan "$1" "$body" "$(ow_matrix "$2" "$3")" | OW_T="$ow_tasks" awk '/^## Verification Matrix/ { print ENVIRON["OW_T"]; print "" } { print }')"
-  if [ "$1" -ge 7 ]; then eg_floor "$p"; else printf '%s\n' "$p"; fi
-}
 # The two file-scope readers the judge and the card share with the gate, asked as hooks/poker/judge.sh asks them.
 ow_ask() {  # <plan> <function> [args…] -> what the function prints, then `rc=<n>`
   bash -c 'L="$1"; shift; . "$L/root.sh" && . "$L/run.sh" && . "$L/units.sh" && . "$L/walls.sh" >/dev/null 2>&1 || exit 9
     PLAN="$1"; RIGOR="$(plan_frontmatter_get "$1" rigor)"; shift; "$@"; echo "rc=$?"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$@"
 }
-ow_p8="$(write_plan "$(make_home)" "$(ow_plan 8 T3 T9 | awk '
-  /^\| AC-2 \|/ { print; print "| AC-3 | T3 | pending | — |  |"; next }
-  { print }
-  END { print "AC-3:"; print "  fails-when: the build is red"; print "  task: T1"; print "  evidence: pending"
-    print "AC-4:"; print "  task: T7"; print "AC-5:"; print "  task: 9"; print "AC-6:"; print "  task: T1, T9" }')")"
-expect_eq "9n matrix_unruled at 8 names the row owed at 4 and not the row owed at the close" "AC-3
-rc=0" "$(ow_ask "$ow_p8" matrix_unruled "$ow_p8" 8)"
-expect_eq "9j the owing step of a criterion whose block names a row id is that row's step, read from the Tasks table" "9|4|7|9|9" \
-  "$(for a in AC-2 AC-3 AC-4 AC-5 AC-6; do ow_ask "$ow_p8" matrix_owing_step "$ow_p8" "$a" | head -1; done | paste -sd'|' -)"
-# At 15 a criterion has no block: the criteria table's Task column names the task that proves it, read by the same rule.
+# At 15 a criterion has no block: the criteria table's Task column names the task that proves it.
 ow_h15="$(make_home)"; ow_15="$ow_h15/.bionic/docs/plans/epic-01-x/wave-01-x.plan.md"; mkdir -p "${ow_15%/*}" "$ow_h15/.bionic/docs/record/wave-01-x"
 ow_page15() {  # <Task column: yes|no> -> the page at 15, T1 landed in its log
   local h=' Task |' s='---|' x c

@@ -1426,7 +1426,7 @@ BRF_EOF
 
   # rr_rows <plan> <current> [head] -> `<AC>\037<tier>\037<status>\037<auditor>\037<ruled 1|0|owed:<step>>\037<person>\037<reason>`
   # per criterion, the reader's order. THE RULING IS walls.sh's: each criterion is read through its readers (`matrix_load`,
-  # the reader's answer and the authored blocks, `matrix_table_rows`, `matrix_block`) and judged by `matrix_row_ruled`,
+  # the reader's answer, and `matrix_table_rows`) and judged by `matrix_row_ruled`,
   # sourced in a subshell as the facts judge sources it, so the card and the gate cannot answer one row two ways. A
   # WAIVER IS A FACT OF THE RUN: the reader's status says waived only where a waiver event names the criterion. A row the
   # gate defers at <current> (`matrix_row_deferred`: owed at the later step whose task proves it) is `owed:<step>`, not
@@ -1435,7 +1435,7 @@ BRF_EOF
   # `placeholder_cell` folds it, `-` when it means none. THE PERSON'S PART is `confirmed` for a T4 row holding an attributed
   # confirmation, `awaits` for a T4 row holding none that one would rule (the same `matrix_row_ruled` asked of the row
   # with a confirmation in its attributed shape), and `-` otherwise. Its auditor cell never answers this alone, since
-  # at 15 that cell is the run's evidence review, which no person gave. The reason is the block's `reason:` key. Exit 2 when
+  # at 15 that cell is the run's evidence review, which no person gave. The reason is empty: a page at 15 holds no block. Exit 2 when
   # walls.sh cannot be loaded or the run's facts could not be read: the card never guesses a ruling.
   rr_rows() {
     [ -f "$BIONIC_LIB/walls.sh" ] || return 2
@@ -1444,7 +1444,6 @@ BRF_EOF
       PLAN="$1"; matrix_load "$PLAN" "${3:-}" || exit 2
       while IFS=$'\037' read -r ac tier status ev aud conf waiver; do
         [ -n "$ac" ] || continue
-        block="$(matrix_block "$ac")"
         ruled=0; matrix_row_ruled "$tier" "$status" "$aud" "$conf" "$waiver" && ruled=1
         person=-
         if [ "$tier" = T4 ]; then
@@ -1454,8 +1453,7 @@ BRF_EOF
         owe="$(matrix_owing_step "$PLAN" "$ac")"
         ! matrix_row_deferred "$PLAN" "$owe" "$2" "$status" "$(matrix_owing_open "$PLAN" "$ac")" || ruled="owed:$owe"
         aud="$(placeholder_cell "$aud")"
-        printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\n' "$ac" "$tier" "$status" "${aud:--}" "$ruled" "$person" \
-          "$(printf '%s\n' "$block" | sed -n 's/^[[:space:]]*reason:[[:space:]]*//p' | head -n 1)"
+        printf '%s\037%s\037%s\037%s\037%s\037%s\037\n' "$ac" "$tier" "$status" "${aud:--}" "$ruled" "$person"
       done <<RR_MATRIX
 $(matrix_table_rows)
 RR_MATRIX
