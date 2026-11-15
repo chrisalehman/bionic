@@ -63,7 +63,7 @@
 #   §CENSUS-2            a kept section gone from its suite, or a baseline one gone with no culled line, is refused.
 #   §CENSUS-3            a culled-list line that culls a keep or a rule pin is refused.
 #   §CENSUS-4            the real tests tree is cut as tests/CENSUS.md says.
-#   §CENSUS-GONE         a cull gone with its code needs a listed name; a new culled duplicate has a verified catcher.
+#   §CENSUS-GONE         a cull gone with its code needs a listed name; a culled duplicate's catchers are shown and stand.
 #   §ADR                 an ADR whose `status:` word differs from its `## Status` word is refused by file.
 #   §HEADER              a suite header that lists a section its body lacks, or omits one its body has, is refused.
 #
@@ -1760,10 +1760,13 @@ expect_eq "the real tests tree is covered by tests/CENSUS.md: no refusal" "" "$(
 #   keep in the culled list: a `## Culled` line whose verdict is keep
 #   rule pin culled: a `## Culled` line whose key has a record line with a `rule:` defect, unless it is gone with its code
 #   gone with an unlisted name: a `— gone with <name>` line whose name is not on the deletion list
-#   unverified catcher culled: a culled duplicate whose record line names an `(unverified)` catcher and is not a line of
-#     the baseline census (the optional third file, the census before the cull began)
-#   gone with no culled line: a key of the baseline census with a ` §` part neither called in its suite nor on its
-#     suite's culled list, unless its suite stands and the whole key is called in a suite the baseline lacks (a split)
+#   unverified catcher culled: a culled duplicate whose record line marks a catcher `(unverified)` or `(unverified; …)`
+#   culled catcher named: a culled duplicate naming a catcher that is on the culled list itself
+#   catcher stands in no suite: a culled duplicate naming a catcher no suite calls; a catcher is `<suite> §<key>`, read
+#     up to the next `<suite> §`, and a trailing ` (…)` note is dropped until the rest is a key
+#   gone with no culled line: a key of the baseline census (the optional third file) with a ` §` part neither called
+#     in its suite nor on its suite's culled list, unless its suite stands and the whole key is called in a suite the
+#     baseline lacks (a split)
 # A section `gone with <name>` is a cull whose reason is that the code it pinned was deleted, so its record line, a keep
 # or a rule: keep, stands without the section being called. The optional fourth file is the deletion list.
 deletion_names() { /usr/bin/grep -o '`[a-z_.-]*`' "$1" 2>/dev/null | tr -d '`'; }
@@ -1781,18 +1784,34 @@ census_cull_refusals() {
     $1 == "R" { if ($3 == "—") next; key = $2 SUBSEP $3; seen[key] = 1
                 if ($4 == "keep") nkeep[key]++; else ncull[key]++
                 if ($5 ~ /^rule: /) rule[key] = 1
-                if ($4 == "duplicate" && $6 ~ /[(]unverified[)]/ && !($7 in base)) fresh[key] = 1 }
-    $1 == "B" { base[$2] = 1; if (sub(/^## /, "", $2)) bsuite[$2] = 1
+                if ($4 == "duplicate") { names[key] = names[key] "\n" $6; if ($6 ~ /[(]unverified[);]/) unv[key] = 1 } }
+    $1 == "B" { if (sub(/^## /, "", $2)) bsuite[$2] = 1
                 else if (split($2, f, " [|] ") > 2 && sub(/^§/, "", f[2])) was[f[1] SUBSEP f[2]] = 1 }
     $1 == "L" { listed[$2] = 1 }
     $1 == "U" { key = $2 SUBSEP $3; nm = $4; n = split($3, t, " §"); for (i = 1; i <= n; i++) part[$2 SUBSEP t[i]] = 1
                 if ($4 == "keep") print "keep in the culled list: " $2 " §" $3
                 if (sub(/^gone with /, "", nm)) { gone[key] = 1; if (!(nm in listed)) print "gone with an unlisted name: " nm }
-                if ($4 == "duplicate" && (key in fresh)) print "unverified catcher culled: " $2 " §" $3
+                if ($4 == "duplicate") dup[key] = 1
                 U[key] = 1 }
     $1 == "C" { called[$2 SUBSEP $4]++; stands[$2] = 1; if (!($2 in bsuite)) born[$4] = 1
                 n = split($4, t, " §"); for (i = 1; i <= n; i++) part[$2 SUBSEP t[i]] = 1 }
+    function standing(r,   s, c, i, j) {
+      s = r; sub(/ §.*/, "", s); c = substr(r, length(s) + length(" §") + 1)
+      while (1) {
+        if ((s SUBSEP c) in U) return "culled"
+        if ((s SUBSEP c) in called) return ""
+        for (i = 0; (j = index(substr(c, i + 1), " (")) > 0; ) i += j
+        if (i == 0) return "absent"
+        c = substr(c, 1, i - 1)
+      }
+    }
     END {
+      for (key in dup) { split(key, p, SUBSEP); if (key in unv) print "unverified catcher culled: " p[1] " §" p[2]
+        m = split(names[key], f, "\n")
+        for (j = 2; j <= m; j++) { gsub(/[A-Za-z0-9._-]+\.test\.sh §/, "\001&", f[j]); n = split(f[j], ref, "\001")
+          for (i = 2; i <= n; i++) { sub(/[, ]+$/, "", ref[i]); w = standing(ref[i])
+            if (w == "culled") print "culled catcher named: " p[1] " §" p[2] " names " ref[i]
+            if (w == "absent") print "catcher stands in no suite: " p[1] " §" p[2] " names " ref[i] } } }
       for (key in was) { split(key, p, SUBSEP); if ((p[1] in stands) && (p[2] in born)) continue
         n = split(p[2], t, " §"); for (i = 1; i <= n; i++) if (!((p[1] SUBSEP t[i]) in part)) { print "gone with no culled line: " p[1] " §" p[2]; break } }
       for (key in U) if ((key in rule) && !(key in gone)) { split(key, p, SUBSEP); print "rule pin culled: " p[1] " §" p[2] }
@@ -1883,10 +1902,11 @@ expect_contains "a culled-list line whose verdict is keep is refused naming the 
   "keep in the culled list: x.test.sh §ONE" "$(census_cull_refusals "$CN3/tests" "$CN3/keep.md")"
 
 # ============================================================
-section "CENSUS-GONE: a cull gone with its code needs a listed name, and a new culled duplicate may not rest on an unverified catcher"
+section "CENSUS-GONE: a cull gone with its code needs a listed name, and a culled duplicate rests only on standing, shown catchers"
 # ============================================================
 # fails-when: a section removed with its code cannot be culled by a name on the deletion list, a name off the list is
-# admitted, or a culled duplicate added since the baseline census names an (unverified) catcher and passes.
+# admitted, or a culled duplicate naming an (unverified) catcher, a culled one or one no suite calls passes, the
+# baseline census holding its line or not.
 CG="$TMP/cg"; census_scratch "$CG"; CG_LIST="$TESTS_DIR/fixtures/deletion-list.txt"
 printf '%s\n' 'section "ONE: the first"' 'expect_eq a 1 1' > "$CG/tests/x.test.sh"
 CG_NAME="$(deletion_names "$CG_LIST" | sed -n 1p)"
@@ -1897,23 +1917,26 @@ expect_eq "a rule: keep gone with a listed name is admitted" "" "$(census_cull_r
 sed -e 's/gone with .*/gone with no_such_name/' "$CG/gone.md" > "$CG/off.md"
 expect_eq "…a name off the list is refused, named" "gone with an unlisted name: no_such_name" \
   "$(census_cull_refusals "$CG/tests" "$CG/off.md" /dev/null "$CG_LIST")"
-census_file "$CG/unv.md" "$CS_ONE" 'x.test.sh | §TWO | duplicate | lib/x.sh: a line changed | x.test.sh §ONE (unverified)'
-printf '\n## Culled\n\nx.test.sh §TWO — duplicate\n' >> "$CG/unv.md"
-expect_eq "a new culled duplicate naming an unverified catcher is refused" "unverified catcher culled: x.test.sh §TWO" \
-  "$(census_cull_refusals "$CG/tests" "$CG/unv.md" /dev/null "$CG_LIST")"
-expect_eq "…and is admitted once its line is in the baseline census" "" \
-  "$(census_cull_refusals "$CG/tests" "$CG/unv.md" "$CG/unv.md" "$CG_LIST")"
+CG_DUP='| duplicate | lib/x.sh: a line changed |'
+census_file "$CG/unv.md" "$CS_ONE" "x.test.sh | §TWO $CG_DUP x.test.sh §ONE (unverified)" \
+  "x.test.sh | §THREE $CG_DUP x.test.sh §ONE (unverified; a reason)" "x.test.sh | §FOUR $CG_DUP x.test.sh §TWO" \
+  "x.test.sh | §FIVE $CG_DUP y.test.sh §ONE, x.test.sh §ONE" "x.test.sh | §SIX $CG_DUP x.test.sh §ONE (a note, a comma), x.test.sh §ONE"
+{ printf '\n## Culled\n\n'; printf 'x.test.sh §%s — duplicate\n' TWO THREE FOUR FIVE SIX; } >> "$CG/unv.md"
+expect_eq "culled duplicates on a marked, a culled or an uncalled catcher are refused though the baseline holds them; one on standing catchers is not" \
+  "catcher stands in no suite: x.test.sh §FIVE names y.test.sh §ONE|culled catcher named: x.test.sh §FOUR names x.test.sh §TWO|unverified catcher culled: x.test.sh §THREE|unverified catcher culled: x.test.sh §TWO" \
+  "$(census_cull_refusals "$CG/tests" "$CG/unv.md" "$CG/unv.md" "$CG_LIST" | paste -sd'|' -)"
 
 # ============================================================
 section "CENSUS-4: the tests tree is cut as tests/CENSUS.md says"
 # ============================================================
 # fails-when: a suite under tests/ still calls a section the census culls, a kept section or a baseline section is
-# gone with no culled line, or the culled list holds a keep or a rule pin.
+# gone with no culled line, the culled list holds a keep or a rule pin, or a culled duplicate names a catcher that is
+# marked unverified, culled or called by no suite.
 CN4_CULLED="$(sed -n '/^## Culled$/,$p' "$CENSUS_MD" 2>/dev/null | /usr/bin/grep -c '\.test\.sh §')"
 expect_true "the census carries a culled list to read (${CN4_CULLED} lines)" [ "${CN4_CULLED:-0}" -gt 0 ]
 CN4_BASE="$TMP/census-base.md"; git -C "$REPO" show 7a9633486:tests/CENSUS.md > "$CN4_BASE" 2>/dev/null
 expect_true "the baseline census is readable from history" [ -s "$CN4_BASE" ]
-expect_eq "the real tests tree: no culled section called, no kept section gone, no keep or rule pin culled" "" \
+expect_eq "the real tests tree: no culled section called, no kept section gone, no keep or rule pin culled, no cull on an unshown catcher" "" \
   "$(census_cull_refusals "$TESTS_DIR" "$CENSUS_MD" "$CN4_BASE" "$TESTS_DIR/fixtures/deletion-list.txt")"
 
 # ── the agreement checks ─────────────────────────────────────────────────────

@@ -210,9 +210,10 @@ One line per section, five fields, ` | ` between them, no `|` inside a field:
   pattern searched: `none (searched 'units_validate' in tests/)`. A `duplicate` line never says
   `none`. A `keep` line names others only when it is kept by rule or by the one-catcher rule.
 
-A `duplicate` whose last field names a catcher marked `(unverified)` may not be culled when its
-line is new: the lint reads the catcher's mark on every record line that is not in the census at
-7a9633486 and refuses the cull, so a duplicate is culled only on a catcher someone has run.
+A `duplicate` may not be culled while its last field marks a catcher `(unverified)` or
+`(unverified; <why>)`, names a catcher that is itself on the culled list, or names one no suite
+calls by its whole key. The lint reads every culled duplicate's record line, however long it has
+stood, and refuses the cull, so a duplicate is culled only on a standing catcher someone has run.
 
 Two lines of the shape, on a made-up suite:
 
