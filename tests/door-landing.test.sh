@@ -80,7 +80,7 @@ if [ "$DL_LOADED" != 1 ] || [ -z "$DW" ] || [ ! -d "$DW/.git" ]; then
   finish
 fi
 
-dl_record() { cat "$1/.bionic/docs/record/wave-x/landing-proofs.log" "$1/.bionic/docs/record/wave-x/run.log" 2>/dev/null; }   # <root> -> the record's lines, then the log's
+dl_record() { cat "$1/.bionic/docs/record/wave-x/run.log" 2>/dev/null; }   # <root> -> the run's log, which holds its landings
 dl_head() { git -C "$1" rev-parse --verify -q refs/heads/wave/x; }   # <root>
 dl_plan_line() { /usr/bin/grep -E "^\\| $2 \\|" "$1/$DOOR_PLAN_REL" 2>/dev/null; }   # <root> <row> -> its Tasks row
 dl_commit() { _door_inside "$1" && git -C "$1" add -A >/dev/null 2>&1 && git -C "$1" commit --quiet -m "$2"; }   # <tree> <message>

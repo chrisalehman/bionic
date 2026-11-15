@@ -83,7 +83,7 @@ sr_world() {
   local st1=landed land=yes
   [ "$mins" = none ] && { st1=pending; land=no; }
   {
-    printf -- '---\nwave: wave-02-fx\nrelease: 9.9.0\nworking-branch: wave/02-fx\nintegration-branch: main\n'
+    printf -- '---\nwave: wave-02-fx\ncanonical_sdlc_version: 14\nrelease: 9.9.0\nworking-branch: wave/02-fx\nintegration-branch: main\n'
     [ -z "${SR_SCALE:-}" ] || printf 'scale: %s\n' "$SR_SCALE"
     [ -z "${SR_FORECAST-48h}" ] || printf 'forecast: %s\n' "${SR_FORECAST-48h}"
     [ -z "${SR_GOALS:-}" ] || printf '%s\n' "$SR_GOALS" | sed 's/^/goals: /'
@@ -818,7 +818,7 @@ sr_w38_world() {
   SR_REPO="$r"; SR_PLAN="$p"; SR_DIR="$d"; SR_REC="$d/landing-proofs.log"; : > "$SR_REC"
   SR_GATE="$TMPROOT/gate-w38"; mkdir -p "$SR_GATE/requests" "$SR_GATE/cost"
   {
-    printf -- '---\nwave: wave-38-fx\nrelease: 1.21.0\nworking-branch: wave/38-fx\nintegration-branch: main\nforecast: 48h\n---\n'
+    printf -- '---\nwave: wave-38-fx\ncanonical_sdlc_version: 14\nrelease: 1.21.0\nworking-branch: wave/38-fx\nintegration-branch: main\nforecast: 48h\n---\n'
     printf '# wave 38 as a fixture\n\n## SDLC State\n\ncurrent: 9\n\n'
     sr_w38_lines
     printf '\n## Tasks\n\n'

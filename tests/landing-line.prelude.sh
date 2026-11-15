@@ -78,7 +78,7 @@ ll_world() {  # -> a world root; its plan admitted by the real commit gate (the 
   printf '%s' "$r"
 }
 ll_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }
-ll_rec() { printf '%s/.bionic/docs/record/wave-x/landing-proofs.log' "$1"; }
+ll_rec() { printf '%s/.bionic/docs/record/wave-x/landing-proofs.log' "$1"; }   # <root> -> an older run's landing record
 ll_carrier() {  # -> `<pid>:<start>` of a new live process, kept until the suite exits
   local p
   sleep 900 >/dev/null 2>&1 &
@@ -130,12 +130,12 @@ ll_wait_file() {  # <file> [tenths] -> 0 once it exists
   while [ "$i" -lt "$n" ]; do [ -e "$1" ] && return 0; i=$((i + 1)); sleep 0.1; done
   return 1
 }
-ll_ev() {  # <root> <ev> -> the lines of that event, the landing record's then the run's log's
-  ll_all "$1" | grep -E "^(line|run)/v1[|]ev=$2[|]"
+ll_ev() {  # <root> <ev> -> the lines of that event in the run's log
+  ll_all "$1" | grep -E "^run/v1[|]ev=$2[|]"
 }
 ll_log() { printf '%s/.bionic/docs/record/wave-x/run.log' "$1"; }
 ll_acts() { /usr/bin/grep -v '|at=2026-10-04T00:0[1-9]:00Z$' "$(ll_log "$1")" 2>/dev/null; }   # <root> -> the log's lines past the world's own events at 15
-ll_all() { cat "$(ll_rec "$1")" "$(ll_log "$1")" 2>/dev/null; }   # <root> -> the record's lines, then the log's
+ll_all() { cat "$(ll_log "$1")" 2>/dev/null; }   # <root> -> the run's log, which holds its landings
 ll_head() { git -C "$1" rev-parse --verify -q refs/heads/wave/x; }
 
 
