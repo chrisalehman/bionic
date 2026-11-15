@@ -293,8 +293,8 @@ section "8 — the run's sessions are events: a first engagement is one bind eve
 # ============================================================
 #
 # `bind_record_session` asks the reader which sessions the run holds and appends a bind event, through the one writer,
-# for a session it lacks. FIXTURE FIDELITY: a fresh root's open plan bound by engagement's act twice; then a plan whose
-# text carries 3,000 session lines (over 100 KB, past one 64 KB pipe buffer), this session's line first, where a reader
+# for a session it lacks. FIXTURE FIDELITY: a fresh root's open plan bound by engagement's act twice; then a run whose
+# log carries 3,000 bind events (over 100 KB, past one 64 KB pipe buffer), this session's event first, where a reader
 # that quit early would read it absent. fails-when: an engagement writes the plan, a held session is appended again, or
 # a session missing from 3,000 is not appended once.
 rlog() { cat "$1" 2>/dev/null | awk -v s="|session=$SID|" -v b="|by=$2|" 'index($0, "run/v1|ev=bind|") == 1 && index($0, s) && index($0, b) { n++ } END { print n + 0 }'; }  # <log> <act> -> this session's bind events by that act
@@ -302,21 +302,20 @@ R8="$(make_repo r8)"; P8="$R8/.bionic/docs/plans/epic-01-demo/wave-01.plan.md"; 
 call_bind_act "$R8" "$SID" "$P8" engage; A8="$BIND_ST"; call_bind_act "$R8" "$SID" "$P8" engage
 expect_eq "8a a first engagement binds (exit 0) and is one bind event by engage; a second adds none; the plan's sum is unchanged" \
   "0|0|1|$S8" "$A8|$BIND_ST|$(rlog "$R8/.bionic/docs/record/wave-01/run.log" engage)|$(cksum < "$P8")"
-sz_plan() {  # <name> <with|without> -> a plan of 3,000 distinct session lines, the line of this session first when "with"
-  mkdir -p "$SZ/.bionic/docs/plans/epic-01-demo"
-  { printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in flight\n'
-    [ "$2" = with ] && printf -- '- session: %s bound 2026-10-01T00:00:00Z by engage\n' "$SID"
-    awk 'BEGIN { for (i = 1; i <= 3000; i++) printf "- session: %08d-0000-4000-8000-000000000000 bound 2026-10-01T00:00:00Z by bind\n", i }'
-    printf '\n## Notes\n\nafter the state.\n'; } > "$SZ/.bionic/docs/plans/epic-01-demo/$1.plan.md"
-  printf '%s' "$SZ/.bionic/docs/plans/epic-01-demo/$1.plan.md"
+sz_plan() {  # <name> <with|without> -> a page at 15 whose run's log holds 3,000 distinct bind events, the event of this session first when "with"
+  local p="$SZ/.bionic/docs/plans/epic-01-demo/$1.plan.md"
+  page15 "$p" 4
+  { [ "$2" = with ] && printf 'run/v1|ev=bind|session=%s|by=engage|at=2026-10-01T00:00:00Z\n' "$SID"
+    awk 'BEGIN { for (i = 1; i <= 3000; i++) printf "run/v1|ev=bind|session=%08d-0000-4000-8000-000000000000|by=bind|at=2026-10-01T00:00:00Z\n", i }'; } >> "$SZ/.bionic/docs/record/$1/run.log"
+  printf '%s' "$p"
 }
 sz_call() {  # <plan> -> "<rc>|<BIND_SESSION>" from one call, under pipefail and set -u as the callers run, the reader loaded and its translation not
   bash -c 'set -uo pipefail; . "$1" || exit 9; . "$2" || exit 9; . "${1%/*}/reader.sh" || exit 9; rc=0; bind_record_session "$3" "$4" bind || rc=$?; printf "%s|%s" "$rc" "${BIND_SESSION:-}"' \
     _ "$RUNLIB" "$BINDLIB" "$1" "$SID" 2>/dev/null
 }
 SZ="$SANDBOX/size"; SZW="$(sz_plan with with)"; SZO="$(sz_plan without without)"; SZS="$(cksum < "$SZW")|$(cksum < "$SZO")"
-expect_eq "8b the plan is over 64 KB and carries the line of this session once, among 3,001 session lines" "yes|1|3001" \
-  "$([ "$(wc -c < "$SZW")" -gt 65536 ] && echo yes)|$(grep -c -- "^- session: $SID " "$SZW")|$(grep -c '^- session: ' "$SZW")"
+expect_eq "8b the run's log is over 64 KB and carries the bind event of this session once, among 3,001 bind events" "yes|1|3001" \
+  "$([ "$(wc -c < "$SZ/.bionic/docs/record/with/run.log")" -gt 65536 ] && echo yes)|$(grep -c -- "^run/v1|ev=bind|session=$SID|" "$SZ/.bionic/docs/record/with/run.log")|$(grep -c '^run/v1|ev=bind|' "$SZ/.bionic/docs/record/with/run.log")"
 expect_eq "8c a session the run holds is present (exit 1) and appends nothing; one it lacks is recorded (exit 0), then present" \
   "1|present 0|recorded 1|present" "$(sz_call "$SZW") $(sz_call "$SZO") $(sz_call "$SZO")"
 expect_eq "8d …one bind event of this session for the run that lacked it, none for the other; neither plan written" "0|1|$SZS" \
