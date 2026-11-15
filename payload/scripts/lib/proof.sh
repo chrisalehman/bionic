@@ -1707,9 +1707,9 @@ _proof_reader_load() {  # -> 0 once lib/reader.sh, beside this file, is loaded
   declare -F reader_facts >/dev/null 2>&1
 }
 
-# The files a fold depends on: the reader's libraries, then the record's homes beside the run's log.
+# The files a fold depends on: the reader's libraries, then the run's log and the older homes the translation reads
+# beside it (lib/translate.sh TRANSLATE_HOMES, the translation's own list).
 _PROOF_FACTS_LIBS="reader.sh translate.sh plan-read.sh log.sh line.sh"
-_PROOF_FACTS_HOMES="run.log landing-proofs.log asks.state fill-ledger.log design-ledger.md debt.md"
 _PROOF_FACTS_KEY=""; _PROOF_FACTS=""; _PROOF_FINDINGS=""; _PROOF_INHERITED=""; _PROOF_HELD_PLAN=""; _PROOF_HELD_FINDINGS=""; _PROOF_HELD_FACTS=""
 # The kept file is a cache and never evidence, yet what it holds is served as the run's proofs and approvals, under a
 # key anyone who reads the repository can compute. So it is read and written only in a directory this user owns
@@ -1735,7 +1735,10 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   # The key covers every file the fold depends on, or no fold is served or kept under it: a file cksum cannot read
   # would leave the key blind to its changes. A fresh fold is still the run's facts, so that is not worth a word.
   deps=("$plan"); for f in $_PROOF_FACTS_LIBS; do deps+=("$lib/$f"); done
-  [ -z "$dir" ] || for f in $_PROOF_FACTS_HOMES; do [ ! -f "$dir/$f" ] || deps+=("$dir/$f"); done
+  # shellcheck source=/dev/null
+  [ -z "$dir" ] || declare -F translate >/dev/null 2>&1 || . "$lib/translate.sh" >/dev/null 2>&1 \
+    || { printf '_proof_facts: lib/translate.sh cannot be loaded, so the homes the facts of %s are read from are not known\n' "$plan" >&2; return 2; }
+  [ -z "$dir" ] || for f in run.log $TRANSLATE_HOMES; do [ ! -f "$dir/$f" ] || deps+=("$dir/$f"); done
   stamp="$(cksum "${deps[@]}" 2>/dev/null)" && stamp="$(printf '%s\n' "$stamp" | cksum)" || stamp=""
   # The key names the kept file's layout too, so a file another layout wrote is never read as this one.
   key="$plan $stamp facts+findings+inherited"
@@ -2671,8 +2674,8 @@ proof_debts() {
   proof_debts_read "$rec" | awk -F'\t' '{ print "debt\t" $1 "\t" $2 }'
 }
 
-# proof_debt_record <plan> [<tree>] -> `<docs-root>/record/<the plan's name less .plan.md>/
-# landing-proofs.log`, the record `land` writes for that plan (lib/worktree.sh `_wt_proofs_path`, the
+# proof_debt_record <plan> [<tree>] -> `<docs-root>/record/<the plan's name less .plan.md>/run.log`,
+# the run's log, the record `land` writes for that plan (lib/worktree.sh `_wt_proofs_path`, the
 # same rule: this file does not load worktree.sh). rc 1 when no path can be named. It takes a plan path and no
 # session, since the judge asks it with none.
 proof_debt_record() {
@@ -2683,7 +2686,7 @@ proof_debt_record() {
   [ -n "$tree" ] || return 1
   _proof_roots_load
   declare -F docs_root >/dev/null 2>&1 || return 1
-  printf '%s/record/%s/landing-proofs.log' "$(docs_root "$tree")" "$slug"
+  printf '%s/record/%s/run.log' "$(docs_root "$tree")" "$slug"
 }
 
 # proof_plan_slug <plan> -> the plan's slug, the directory its run's records live in, `<docs-root>/record/<slug>/`:

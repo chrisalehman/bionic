@@ -345,7 +345,7 @@ od_poke() {  # <args...> -> OD_OUT, OD_RC: session-poker.sh as this session, in 
 }
 od_logs() { find "$OD_REC" -name 'regression-run-*.log' | wc -l | tr -d ' '; }
 od_lrec() { bash -c '. "$1/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "$OD_LIB" "$OD_PLAN" || printf '%s/none' "$OD_ROOT"; }
-od_lall() { cat "$(od_lrec)" "$(dirname "$(od_lrec)")/run.log" 2>/dev/null; }   # the record's lines, then the run log's
+od_lall() { cat "$(od_lrec)" 2>/dev/null; }   # the record's lines: the run's log
 od_state() { bash -c '. "$1/roots.sh" 2>/dev/null; . "$1/proof.sh" && proof_state "$2" "$3"' _ "$OD_LIB" "$OD_PLAN" "$OD" 2>/dev/null | cut -f1; }
 
 od_plan 4 '' "$(od_rows pending pending pending; od_row T9 7 test 'a second regression. The suite runs again after the release.' test-runner .bionic/docs/record/w/T9.md pending 'approval:plan')"

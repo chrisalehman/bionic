@@ -985,7 +985,7 @@ reap
 section "§REAPED — a landing's run the gate finds killed is a run fact in its run's log"
 # fails-when: the scan ends a killed landing run with no ev=run rc=137 in the log beside its record, or writes one for a
 # killed run that names no record.
-fresh reaped; kp="$(sleep 30 >/dev/null 2>&1 & echo $!)"; kill "$kp" 2>/dev/null; RP_REC="$D/rec/landing-proofs.log"
+fresh reaped; kp="$(sleep 30 >/dev/null 2>&1 & echo $!)"; kill "$kp" 2>/dev/null; RP_REC="$D/rec/run.log"
 mkdir -p "$BIONIC_GATE_DIR/requests"; for i in 1 2; do { printf 'key=a.test.sh\nkind=landing\nwho=w\ntree=%s\nasked=1000\nholder=%s:x\nlanding=L1\nadmitted=1000\n' \
   "$D" "$kp"; [ "$i" = 2 ] || printf 'record=%s\n' "$RP_REC"; } > "$BIONIC_GATE_DIR/requests/$i"; done; state >/dev/null
 expect_eq "RP.1 both killed requests are ended rc=137, and the record's log holds the one run line, rc=137, of the request naming it, no landing record beside it" \

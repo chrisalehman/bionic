@@ -520,7 +520,7 @@ ql_ready() {  # <name> <carrier> -> the record's ev=ready of row T1, as `line_re
   bash -c '. "$1/line.sh" && line_event "$2" ready row=T1 "name=$3" "commit=$(printf "c%.0s" $(seq 40))" branch=wt/T1 tree=/x/T1 suites=none debt=none "carrier=$4"' \
     _ "$QL_LIB" "$QL_PLAN" "$1" "$2"
 }
-ql_clear() { rm -f "$QL_REC" "${QL_REC%/*}/run.log"; rm -rf "$BIONIC_GATE_DIR/requests"; mkdir -p "$BIONIC_GATE_DIR/requests"; }
+ql_clear() { rm -f "$QL_REC"; rm -rf "$BIONIC_GATE_DIR/requests"; mkdir -p "$BIONIC_GATE_DIR/requests"; }
 ql_tick() { forget_digest "$RQL"; poke_pressure "$RQL" 8192 1.0 tick; }
 ql_decision() { printf '%s\n' "$OUT" | sed -n 's/^.*|decision=\([A-Z]*\)|.*$/\1/p' | head -1; }
 ql_rows() { printf '%s\n' "$OUT" | sed -n 's/^.*|rows=\([^|]*\).*$/\1/p' | head -1; }
@@ -572,7 +572,7 @@ ql_ask() {  # <agent> -> a request the gate's own ask files for <agent>, its hol
 ql_ask w1
 expect_nonempty "QL-6 precondition: the gate holds a request whose who is this session's w1" \
   "$(/usr/bin/grep -ls "^who=${SID}:w1\$" "$BIONIC_GATE_DIR"/requests/[0-9]* 2>/dev/null | head -1)"
-expect_eq "QL-6b precondition: the record holds no carrier (no file)" "no" "$({ [ -f "$QL_REC" ] || [ -f "${QL_REC%/*}/run.log" ]; } && echo yes || echo no)"
+expect_eq "QL-6b precondition: the record holds no carrier (no file)" "no" "$([ -f "$QL_REC" ] && echo yes || echo no)"
 ql_tick
 expect_eq "QL-6c an open gate request for w1 and no carrier: the tick prints QUIET and names no row" "QUIET|" "$(ql_decision)|$(ql_rows)"
 ql_clear; ql_ask w2

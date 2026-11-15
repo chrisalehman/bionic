@@ -362,7 +362,7 @@ section "§RUNLINE — the run close writes the run's line to the bound plan's l
 RL_WR="$(world_repo)"
 RL_T="$RL_WR/.worktrees/T1"
 RL_PLAN="$RL_WR/.bionic/docs/plans/epic-x/wave-x.plan.md"
-RL_RECORD="$RL_WR/.bionic/docs/record/wave-x/landing-proofs.log"
+RL_RECORD="$RL_WR/.bionic/docs/record/wave-x/run.log"
 RL_H="$(git -C "$RL_T" rev-parse HEAD 2>/dev/null)"
 RL_PROOF="$REPO/payload/scripts/lib/proof.sh"
 RL_ROOTS="$REPO/payload/scripts/lib/roots.sh"

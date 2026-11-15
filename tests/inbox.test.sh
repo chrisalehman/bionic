@@ -296,17 +296,18 @@ expect_eq "(g5) the same commit once shown passes (exit 0)" "0" "$IN_RC"
 in_poker "$W" rule wx-T1 'land only after the rename'
 R_ID="$(in_rid "$IN_OUT")"
 expect_nonempty "(g6) a ruling for wx-T1 is recorded" "$R_ID"
-REC="$W/.bionic/docs/record/wave-x/landing-proofs.log"
+REC="$W/.bionic/docs/record/wave-x/run.log"
 in_ready "$W" T1
 G_OUT6="$IN_OUT"
 expect_eq "(g6) wx-T1's ready with the ruling unread is refused (exit 2)" "2" "$IN_RC"
 expect_contains "(g6) …saying why" "REFUSED reason=ruling-unread" "$IN_OUT"
 expect_contains "(g6) …carrying the ruling" "land only after the rename" "$IN_OUT"
-expect_false "(g6) …and nothing entered the line" test -e "$REC"
+expect_eq "(g6) …and nothing entered the line: the log holds no ready of T1" "0" "$(/usr/bin/grep -c '^run/v1|ev=ready|row=T1|' "$REC")"
 expect_regex "(g7) the refusal marked it shown" "shown=[0-9]+" "$(in_state "$W" wx-T1 "$R_ID")"
 in_ready "$W" T1
 expect_eq "(g8) the same ready once shown lands (exit 0)" "0" "$IN_RC"
 expect_contains "(g8) …LANDED" "LANDED T1 " "$IN_OUT"
+expect_contains "(g8) …and its ready entered the line, read by the extractor (g6) reads" "1" "$(/usr/bin/grep -c '^run/v1|ev=ready|row=T1|' "$REC")"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "§WORDS: the ruling walls' refusals, said by the library the wall calls"

@@ -30,7 +30,8 @@
 #               one reading live:head still writes the settled head.
 #   §HALF       a run whose landings and asks stand partly in the landing record and asks register and partly in
 #               its log reads as one run in order, a landing the plan's ledger also copies counted once; brought
-#               forward (kept/, its log rewritten), it reads its log alone.
+#               forward (kept/, its log rewritten), it reads its log alone, and the old landing record is named no more.
+#   §HOMES      every older home a source of the translation reads is on its TRANSLATE_HOMES list.
 #   §ASK-LOG    lib/owed.sh writes each act on an ask to the run's log on its own clock and never the register, and
 #               reads the register, then the log, as one list.
 #   §ASK-DOORS  a passing reading closes its question's waiver; the Stop over an approved plan closes the step asks.
@@ -557,10 +558,24 @@ W=half
 expect_eq "the landings read in order, the old home's first, and the one the plan's ledger copies once" "T1 T2 " "$(keys landed)"
 expect_eq "the ask the log answers is closed, and the one the register alone holds stays open" "approve:x " "$(keys asks)"
 expect_eq "the log's run and verdict read beside them" "1 1" "$(ask verdicts | grep -c '|row=T2|') $(ask landed T2 | grep -c .)"
+lrec() { ( . "${READER%/reader.sh}/lib/reader.sh" && reader_landing_record "$1" ); echo "rc=$?"; }   # <record directory>
+expect_eq "the old landing record is named while the run is not brought forward" "$HD/landing-proofs.log rc=0" "$(lrec "$HD" | paste -sd' ' -)"
 mkdir -p "$HD/kept/record"; cp "$HD/run.log" "$HD/kept/record/run.log"
 expect_eq "kept, the log still its kept copy (an act broken off): still read as one" "T1 T2 " "$(keys landed)"
+expect_eq "…and the old landing record still named" "$HD/landing-proofs.log rc=0" "$(lrec "$HD" | paste -sd' ' -)"
 printf 'run/v1|ev=step|n=4|at=2026-11-03T00:00:09Z\n' >> "$HD/run.log"
 expect_eq "brought forward, the log changed after its kept copy: the log alone" "T2 " "$(keys landed)"
+expect_eq "…and the old landing record named no more, though it stands" "rc=1|yes" "$(lrec "$HD")|$([ -f "$HD/landing-proofs.log" ] && echo yes)"
+HL="$D/record/half-link"; mkdir -p "$HL"; ln -s "$HD/landing-proofs.log" "$HL/landing-proofs.log"
+expect_eq "a link in the old record's place is no record: not named, beside the regular file named above" "rc=1" "$(lrec "$HL")"
+section "HOMES"
+# fails-when: a source of the translation comes to read an older home TRANSLATE_HOMES does not list, so the kept fold's
+# key (lib/proof.sh `_proof_facts`) is blind to that file's changes.
+TL="${READER%/reader.sh}/lib/translate.sh"
+TH_READ="$(/usr/bin/grep -o '_translate_record "\$1" [a-z.-]*' "$TL" | awk '$3 != "run.log" { print $3 }' | LC_ALL=C sort -u | paste -sd' ' -)"
+expect_nonempty "the sources' reads are found" "$TH_READ"
+expect_eq "every older home a source reads is on the translation's list, and nothing else" "$TH_READ" \
+  "$( . "$TL" && printf '%s\n' $TRANSLATE_HOMES | LC_ALL=C sort -u | paste -sd' ' -)"
 
 section "ASK-LOG"
 # The asks library writes each act on an ask as an ask event in the run's log, at its own clock, and reads the register

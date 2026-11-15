@@ -6,8 +6,8 @@
 # fast-forward of the working branch to it under one lock. The line is the order of `ready` events
 # in the landing record; its state is a fold over that record, never a second store.
 #
-#   line_record <plan>              the landing record's path (`landing-proofs.log`), read, never written
-#   line_log <plan>                 the run's log beside it (`run.log`), where every landing fact is written
+#   line_record <plan>              the run's log (`run.log`), the record every landing fact is read from
+#   line_log <plan>                 the same path, where every landing fact is written
 #   line_event <plan> <ev> <k=v>... appends one `run/v1|ev=<ev>|<k=v>|…|at=<ISO-UTC>` line to the log (lib/log.sh)
 #   line_state <plan>               the open entries, in record order (below)
 #   line_head <plan>                the accepted head: the working branch's tip
@@ -19,8 +19,8 @@
 #                                   plan (with line_reviews_checkout, line_reviews_commit, line_reviews_move)
 #
 # THE RECORD. One append per line, by the run log's appender (lib/log.sh `log_append`, the landing record's one
-# write: a private file copied by one write(2), no lock), so two writers' lines never interleave. A run's earlier
-# landings stand in `landing-proofs.log`, which nothing writes any more; `line_lines` reads it, then the log. Nine events:
+# write: a private file copied by one write(2), no lock), so two writers' lines never interleave. A run not brought
+# forward may hold earlier landings in an older home the reader names; `line_lines` reads it, then the log. Nine events:
 #   ready     row name commit branch tree suites debt carrier age   (a carrier is `<pid>:<start>`; age
 #             `<first>:<seq>`, the lease the gate orders the entry by, wave-38 T30)
 #   candidate row base commit tree
@@ -116,7 +116,7 @@ _line_root() {  # <plan> -> the project root the plan belongs to
   d="$(cd "$(dirname "${1:-}")" 2>/dev/null && pwd -P)" || return 1
   worktree_root "$d"
 }
-line_record() {  # <plan> -> the landing record's path
+line_record() {  # <plan> -> the run's log, the record every landing fact is read from (lib/worktree.sh `_wt_proofs_path`)
   local root
   root="$(_line_root "${1:-}")" || return 1
   _wt_proofs_path "$root" "$1"
@@ -152,10 +152,8 @@ line_head() {  # <plan> -> the accepted head
 # below, lib/gate.sh's finished-row read, lib/proof.sh's readers and the poker's parts all read a line through it.
 # shellcheck source=/dev/null
 . "$_LINE_LIB_DIR/fields.sh"
-line_log() {  # <plan> -> the run's log, beside the landing record
-  local rec
-  rec="$(line_record "${1:-}")" || return 1
-  printf '%s/run.log\n' "${rec%/*}"
+line_log() {  # <plan> -> the run's log: the path line_record names, by the name its writers ask for
+  line_record "${1:-}"
 }
 # A FACT IS WRITTEN ONCE, TO THE LOG: an event type off the log's closed list is refused, never sent to another home.
 # RUN_LOG is set for this one call and never exported: the poker's own globals use the name for a suite's output log.
@@ -200,20 +198,28 @@ line_hand_event() {  # <plan> <what> <why> [<key=value>...] -> 0 appended, 1 not
   line_event "$plan" hand "what=$what" "$@" "why=$w"
 }
 
-# THE RECORD, READ AS ONE. A run's landing facts stand in two homes while their writers move to the run's log: the
-# landing record (`landing-proofs.log`) and the log beside it in the record directory (`run.log`). Once a writer writes
-# the log it no longer writes the record, so every line the record holds was written before any line of the log, and
-# the record then the log is the order the lines were written in. Every reader of the record reads it here, through
-# `line_lines`, and asks `line_held` where it asked whether the record stands; a home that is a link is read as absent,
-# as the readers that guard the record against a link always read it.
-line_lines() {  # <record> -> the record's lines, then the log's; rc 0 when neither stands, else cat's
-  local a="$1" b="${1%/*}/run.log"
-  { [ -f "$a" ] && [ ! -L "$a" ]; } || a=""
+# THE RECORD, READ AS ONE. A run's landing facts are its log's (`run.log` in the record directory). A run not brought
+# forward may hold earlier landings in an older home the reader alone names (lib/reader.sh `reader_landing_record`);
+# nothing writes that home any more, so every line it holds was written before any line of the log, and it then the log
+# is the order the lines were written in. A run brought forward reads its log alone: the log already holds the older
+# home's translation, and reading both would count each earlier landing twice. Every reader of the record reads it
+# here, through `line_lines`, and asks `line_held` whether it stands; a home that is a link is read as absent, as the
+# readers that guard the record against a link always read it.
+_line_load_reader() {  # -> 0 once lib/reader.sh, the one namer of the older home, is loaded
+  declare -F reader_landing_record >/dev/null 2>&1 && return 0
+  # shellcheck source=/dev/null
+  . "$_LINE_LIB_DIR/reader.sh" >/dev/null 2>&1
+  declare -F reader_landing_record >/dev/null 2>&1
+}
+# The reader is loaded in the caller's shell, never inside the `$( )` that asks it, so it is loaded once.
+line_lines() {  # <run log> -> the older home's lines while it is read, then the log's; rc 0 when neither stands, else cat's
+  local a="" b="$1"
+  ! _line_load_reader || a="$(reader_landing_record "${1%/*}" 2>/dev/null)" || a=""
   { [ -f "$b" ] && [ ! -L "$b" ]; } || b=""
   if [ -n "$a" ] && [ -n "$b" ]; then cat "$a" "$b"; elif [ -n "$a$b" ]; then cat "$a$b"; fi
 }
-line_held() {  # <record> -> 0 when the record or the log beside it stands
-  { [ -f "$1" ] && [ ! -L "$1" ]; } || { [ -f "${1%/*}/run.log" ] && [ ! -L "${1%/*}/run.log" ]; }
+line_held() {  # <run log> -> 0 when the log or the older home it is read with stands
+  { [ -f "$1" ] && [ ! -L "$1" ]; } || { _line_load_reader && reader_landing_record "${1%/*}" >/dev/null 2>&1; }
 }
 
 # The fold's raw form, one tab-separated line per open entry, in record order:

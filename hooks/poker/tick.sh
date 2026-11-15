@@ -1306,7 +1306,7 @@ tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [
     LT_TOLD="$REPO_REAL/.bionic/tmp/line-told-${SESSION_ID}.state"
     LT_REC=""
     [ -z "$POKER_RUN_PLAN" ] \
-      || LT_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(proof_plan_slug "$POKER_RUN_PLAN")/landing-proofs.log"
+      || LT_REC="$(proof_debt_record "$POKER_RUN_PLAN" "$REPO_REAL" 2>/dev/null)" || LT_REC=""
     [ -z "$LT_REC" ] || declare -F line_lines >/dev/null 2>&1 \
       || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
     if [ -n "$LT_REC" ] && declare -F line_lines >/dev/null 2>&1 && line_held "$LT_REC" && [ ! -L "$LT_TOLD" ] && tmp_dir_ok "${LT_TOLD%/*}" && declare -F line_value >/dev/null 2>&1; then
@@ -2515,7 +2515,7 @@ EOF
           # WHAT MOVED INSIDE IT (wave-27 T43; D10; A-orch-48, A-orch-71): once every question
           # the row reads has its whole reading, a `MOVED` line names each plan row whose landing
           # lies inside the range, with the matrix criteria it serves. A landing is a merge the
-          # run's landing record (`landing-proofs.log`, written by land) gives a row.
+          # run's landing record (its log, lib/proof.sh `proof_debt_record`, written by land) gives a row.
           # THE LIST IS PRINTED ONLY WHEN IT IS THE WHOLE RANGE (wave-27 T34; review pass 30
           # should-fix 1 and 2, A-orch-86): this tick lists the range's first-parent commits with
           # ONE `git rev-list` per offered row and hands them to the library, which runs no git.
@@ -2530,7 +2530,7 @@ EOF
             SCHED_RANGE="$(units_live_range "$SCHED_PLAN" "$LR_ID" 2>/dev/null)"
             [ -n "$SCHED_RANGE" ] && say "RANGE $LR_ID ${SCHED_RANGE} — the review reads what landed past the last review proof, and no more"
             [ -n "$SCHED_RANGE" ] && units_whole_read "$SCHED_PLAN" "$LR_ID" || continue
-            LR_REC="$(docs_root "$REPO_REAL" 2>/dev/null)/record/$(proof_plan_slug "$SCHED_PLAN")/landing-proofs.log"
+            LR_REC="$(proof_debt_record "$SCHED_PLAN" "$REPO_REAL" 2>/dev/null)" || LR_REC=""
             if ! LR_IN="$(git -C "$REPO_REAL" rev-list --first-parent "$SCHED_RANGE" 2>/dev/null)"; then
               say "MOVED unknown — the range's commits cannot be listed"
               continue

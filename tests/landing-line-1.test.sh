@@ -15,12 +15,12 @@ set -uo pipefail
 
 section "§EVENTS: each event is one line, appended by one write, to the landing record"
 #
-# The record is wave-27's `landing-proofs.log` under the bound plan's record directory; a `line/v1`
-# line separates its fields with `|`, so a value holding `|` or a line break is refused unwritten.
+# The record is the run's log under the bound plan's record directory; a landing line separates its
+# fields with `|`, so a value holding `|` or a line break is refused unwritten.
 RE="$(ll_world)"
 expect_nonempty "(fixture) the world repository was made" "$RE"
 PE="$(ll_plan "$RE")"
-expect_eq "(e1) line_record names the bound plan's landing record" "$(ll_rec "$RE")" "$(line_record "$PE")"
+expect_eq "(e1) line_record names the bound plan's landing record, the run's log" "$(ll_log "$RE")" "$(line_record "$PE")"
 CE="$(ll_carrier)"
 ll_ready "$RE" T1 "$CE" >/dev/null; RCE=$?
 expect_eq "(e2) a ready event is appended (rc 0)" "0" "$RCE"
@@ -1234,7 +1234,7 @@ awk '{ print } /^\| T2 \| 4 \| build / { print "| D7 | 7 | doc | the release | w
 ww_order() {  # <root> -> `<units' order, sorted>|<line's landed release row>`
   ( _wt_units_load || exit 9
     printf '%s|%s' "$(_units_publish_order "$(ll_plan "$1")" "$(units_rows "$(ll_plan "$1")")" | tr ' ' '\n' | LC_ALL=C sort | paste -sd' ' -)" \
-      "$(_line_release_landed "$(ll_plan "$1")" "$(ll_rec "$1")" 2>/dev/null)" )
+      "$(_line_release_landed "$(ll_plan "$1")" "$(ll_log "$1")" 2>/dev/null)" )
 }
 { printf 'landed: row=D7 merge=%s at=2026-10-20T10:00:00Z\n' "$WW_D"; ww_pub T2 queue 2026-10-20T11:00:00Z; } > "$(ll_rec "$RW8")"
 expect_eq "ORDER-0 precondition: the plan holds the release row D7, a doc row at step 7, landed" "D7	7	doc" \
@@ -1454,7 +1454,7 @@ expect_eq "(hl2) after the landing the plan's line stands as written, and the re
 section "§TWO-HOMES: the landing record and the run's log beside it are read as one record, the record first"
 # fails-when: a reader of the record skips the log beside it: the fold leaves T1 waiting on a candidate the log holds,
 # the landings miss the log's, or a debt the record admitted stays open after the log voids it.
-TW="$(LL_WORLD_AT=14 ll_world)"; TWP="$(ll_plan "$TW")"; TWR="$(ll_rec "$TW")"; TWC=0123456789abcdef0123456789abcdef01234567   # an older run's record
+TW="$(LL_WORLD_AT=14 ll_world)"; TWP="$(ll_plan "$TW")"; TWR="$(ll_rec "$TW")"; TWL="$(ll_log "$TW")"; TWC=0123456789abcdef0123456789abcdef01234567   # an older run's record, and the log its readers are handed
 tw_lib() { ( . "$REPO/payload/scripts/lib/roots.sh" >/dev/null 2>&1; . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1 \
   && . "$REPO/payload/scripts/lib/units.sh" >/dev/null 2>&1 && "$@" ) 2>/dev/null; }
 mkdir -p "${TWR%/*}"; printf 'line/v1|ev=ready|row=T1|name=wx-T1|commit=%s|branch=wt/T1|tree=-|suites=a.test.sh|debt=-|carrier=%s|at=2026-11-01T00:00:00Z\n' \
@@ -1465,13 +1465,26 @@ printf 'run/v1|ev=%s|at=2026-11-03T00:00:0%s\n' "candidate|row=T1|base=$(ll_head
   "verdict|row=T1|commit=$TWC|suite=a.test.sh|result=green|log=-" 2 'published|row=T3|commit=c3|kind=queue|by=-|why=-' 3 > "${TWR%/*}/run.log"
 expect_eq "(tw1) the fold reads T1's ready from the record and its candidate and green verdict from the log" "$TWC green" \
   "$(line_state "$TWP" | awk -F'\t' '$1 == "T1" { print $6, $7 }')"
-expect_eq "(tw2) the landings are the record's, then the log's" "T2 T3" "$(tw_lib units_record_landings "$TWR" | cut -f2 | paste -sd' ' -)"
-expect_eq "(tw3) a debt the record admitted is open" "a.test.sh T9" "$(tw_lib proof_debts_read "$TWR" | cut -f1,2 | tr '\t' ' ')"
+expect_eq "(tw2) the landings are the record's, then the log's" "T2 T3" "$(tw_lib units_record_landings "$TWL" | cut -f2 | paste -sd' ' -)"
+expect_eq "(tw3) a debt the record admitted is open" "a.test.sh T9" "$(tw_lib proof_debts_read "$TWL" | cut -f1,2 | tr '\t' ' ')"
 printf 'run/v1|ev=void|id=d1|branch=wt/T2|why=merge-undone|at=2026-11-03T00:00:04Z\n' >> "${TWR%/*}/run.log"
-expect_eq "(tw3b) …and closed once the log voids it" "" "$(tw_lib proof_debts_read "$TWR")"
+expect_eq "(tw3b) …and closed once the log voids it" "" "$(tw_lib proof_debts_read "$TWL")"
 rm -f "$TWR"
 expect_eq "(tw4) with the record gone the log alone stands: the record is held, its landing read" "0 T3" \
-  "$(line_held "$TWR"; echo "$? $(tw_lib units_record_landings "$TWR" | cut -f2 | paste -sd' ' -)")"
+  "$(line_held "$TWL"; echo "$? $(tw_lib units_record_landings "$TWL" | cut -f2 | paste -sd' ' -)")"
+
+# ---------------------------------------------------------------------------
+section "§ONCE: a run brought forward reads each earlier landing once, from its log"
+# The act keeps the old landing record in place beside the log it translated that record into.
+# fails-when: the landing library reads that old record beside the log, so line_lines and the fold of landings give each landing twice.
+OB="$(LL_WORLD_AT=14 ll_world)"; OBP="$(ll_plan "$OB")"; OBR="$(ll_rec "$OB")"; mkdir -p "${OBR%/*}"
+printf 'line/v1|ev=published|row=%s|commit=%s|kind=queue|by=-|why=-|at=2026-11-01T00:00:0%s\n' T1 c1 1 T2 c2 2 > "$OBR"
+bash "$REPO/payload/scripts/bring-forward.sh" "$OBP" >/dev/null 2>&1; OB_RC=$?
+expect_eq "(once-pre) the act brought the run forward, the old record still beside a log that holds both landings" "0|yes|2" \
+  "$OB_RC|$([ -f "$OBR" ] && echo yes)|$(grep -c '^run/v1|ev=published|' "$(ll_log "$OB")")"
+expect_eq "(once1) line_lines over the plan's record reads each landing once" "T1 T2" \
+  "$(line_lines "$(line_record "$OBP")" | awk -F'|' "$_LINE_FIELDS_AWK"'line_ev() == "published" { print line_kv("row") }' | paste -sd' ' -)"
+expect_eq "(once2) …and so does the fold of landings" "T1 T2" "$(tw_lib units_record_landings "$(line_record "$OBP")" | cut -f2 | paste -sd' ' -)"
 
 # ---------------------------------------------------------------------------
 section "§LOG: ready writes its acts to the run's log, and no landing record; a part is no landing"
@@ -1480,7 +1493,7 @@ expect_eq "(lg1) the run's log holds T1's ready event, and of run.log and landin
   "$(awk -F'|' '$1 == "run/v1" && $2 == "ev=ready" { print substr($3, 5); exit }' "$(ll_log "$RR")" 2>/dev/null)|$(cd "$RR/.bionic/docs/record/wave-x" 2>/dev/null && ls run.log landing-proofs.log 2>/dev/null | paste -sd' ' -)"
 printf 'run/v1|ev=published|part=reviews|commit=%s|branch=wave/x|tree=-|by=T3|at=2026-11-03T00:00:05Z\n' "$TWC" >> "${TWR%/*}/run.log"
 expect_eq "(lg3) a part is no landing: the record's landings and the reader's landed rows are T3 alone, the part still read" "T3|T3|1" \
-  "$(tw_lib units_record_landings "$TWR" | cut -f2 | paste -sd' ' -)|$(bash "$REPO/payload/scripts/reader.sh" "$TWP" landed | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | paste -sd' ' -)|$(line_lines "$TWR" | grep -c '|part=reviews|')"
+  "$(tw_lib units_record_landings "$TWL" | cut -f2 | paste -sd' ' -)|$(bash "$REPO/payload/scripts/reader.sh" "$TWP" landed | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | paste -sd' ' -)|$(line_lines "$TWL" | grep -c '|part=reviews|')"
 
 # ---------------------------------------------------------------------------
 section "§WORLD: a world that lies inside a checkout ends the suite that sourced it"
