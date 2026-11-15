@@ -53,6 +53,8 @@ for d in wave-46-asks-nothing wave-49-what-a-run-costs wave-49-mid; do
 done
 expect_eq "one expected file per release card and the gaps list are tracked" "4 1" \
   "$($GIT ls-files "$F" | grep -c '/release-approval-\(93683c5e\|31da41f7\|fcbb975f\|f87acbfc\)\.facts$') $($GIT ls-files "$F/gaps" | wc -l | tr -d ' ')"
+PG="$(cd "$X" && ls */plans/*/*.plan.md)"; expect_nonempty "the fixtures hold pages" "$PG"
+expect_eq "every fixture page reads version 15, and no fixture holds a file of an old home" "0 0" "$(cd "$X" && grep -L '^canonical_sdlc_version: 15$' $PG | wc -l | tr -d ' ') $($GIT ls-files "$F" | grep -cE '/(landing-proofs\.log|asks\.state|fill-ledger\.log|design-ledger\.md|debt\.md)$')"
 expect_eq "four card files, every expected line key=value, none empty" "4 0 0" \
   "$(ls "$X"/release-approval-*.facts | wc -l | tr -d ' ') $(cat "$X"/*.facts | grep -vc '^[A-Za-z][A-Za-z0-9.:_-]*=') $(find "$X" -name '*.facts' -size 0 | wc -l | tr -d ' ')"
 expect_true "the scrub is a tracked file" $GIT ls-files --error-unmatch tests/lib/replay-scrub.sh
