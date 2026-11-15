@@ -13,7 +13,7 @@
 #   hook_refusals=<n>  refusal call sites inside a registered hook's own file
 #   loader_copies=<n>  files holding a pasted copy of the loader block
 #   unheard_folds=<n>  lines that take the run's fold or a reader answer and lose its exit
-#   names=<n>          lines that name a retired verb, read by the shape of its use
+#   names=<n>          lines that name a retired verb, read by the shape of its use, or a removed file
 #
 # It refuses a parser, a plan writer, a shared type and a name: when any of those four counts is
 # above nought it prints one line for each such finding on stderr, `one-reader-check: refused — <kind>
@@ -59,8 +59,12 @@
 #     where the word is also English (the poker run with it, a function named for it, a poker case arm),
 #     else as its own word. The translation and the plan reader's list of refused keys read an older
 #     run by those names, and so does a comparison of an older hand act's name (`w == "`): those are no
-#     finding. A pattern brackets a hyphen or a letter (`[-]`, `[t]`) so that no name stands whole in
-#     this file: its own text matches none of them, and a word search of the tree for a name finds none here.
+#     finding. A NAME is also a removed file's name as its own word: the old landing record's and the
+#     asks register's (`landing[-]proofs.log`, `asks.stat[e]`), which a reader's file (READER_FILES) reads
+#     an older run by and is admitted there, and the two deleted hook scripts' (`stop[-]guard.sh`,
+#     `agent[-]context[-]guard.sh`), admitted nowhere. A pattern brackets a hyphen or a letter (`[-]`,
+#     `[t]`) so that no name stands whole in this file: its own text matches none of them, and a word
+#     search of the tree for a name finds none here.
 #
 # THE READER'S FILES are named once, in READER_FILES: a parse inside one of them is the reader's own
 # and is admitted. THE ACT'S WRITES are named once, in ACT_WRITES, each a `<file>:<function>`: a plan write inside
@@ -97,6 +101,9 @@ names_standing() {  # -> `<file>:<line>:<text>` for each line naming a retired v
     /usr/bin/grep -rnE --include='*poker*.sh' "^ *([a-z-]+\\|)*($g)(\\|[a-z-]+)*\\)" hooks payload/scripts
     /usr/bin/grep -rnE 'step[-](line|field)|regressio[n][-]runs|regression_runs_coun[t]|units_set_curren[t]|units_step_(line|fields)|poker_verb_regressio[n]\b|\|budge[t]\||\|regressio[n]\|shar[e]\||confirm[-_]row|matrix_block_ke[y]|poker_verb_budge[t]|budge[t][-]override|session-poker\.sh"? budge[t]|^  budge[t]\)$' hooks payload/scripts \
       | /usr/bin/grep -v -e 'PLAN_READ_GONE_KEYS='
+    /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(landing[-]proofs\.log|asks\.stat[e])([^A-Za-z0-9_]|$)' hooks payload/scripts \
+      | awk -F: -v r=" $READER_FILES " '!index(r, " " $1 " ")'
+    /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(stop[-]guard|agent[-]context[-]guard)\.sh([^A-Za-z0-9_]|$)' hooks payload/scripts
   } | LC_ALL=C sort -t: -k1,1 -k2,2n -u
 }
 
