@@ -381,6 +381,8 @@ expect_contains "G7.long a long unread segment is quoted by its head" "python3 -
 expect_eq "G7.long2 …and cut, so the reason stays readable" "short" "$([ "$(fld 2 "$G7_LONG" | wc -c)" -lt 800 ] && echo short || echo long)"
 G7_W="$(dec writer "$WRITER_FACTS" "$(W "$P/payload/x.sh")")"
 expect_contains "G7.path an outside write's fix names a root to write under" "under $S" "$(fld 3 "$G7_W")"
+expect_contains "G7.count …and a second failing effect is counted beside the one named" "1 more of its effects" \
+  "$(fld 2 "$(dec writer "$WRITER_FACTS" "$(W "$P/payload/x.sh")${NL}$(W "$P/payload/y.sh")")")"
 G7_NONE="$(dec reader "" "$(W "$P/x")")"
 expect_contains "G7.none an asker with no roots is told it has none" "no workspace" "$(fld 2 "$G7_NONE")"
 expect_contains "G7.none2 …and its one step is the lead" "lead" "$(fld 3 "$G7_NONE")"
