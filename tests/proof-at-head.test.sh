@@ -303,7 +303,7 @@ PF_ST="$SANDBOX/stand"; mkdir -p "$PF_ST/payload"; cp -R "$BIONIC_HOOKS_DIR" "$P
 printf '%s\n' 'eval "pf_whole_$(declare -f reader_facts)"; reader_facts() { case " ${FUNCNAME[*]} " in *" ${PAH_IN:-} "*) return 128 ;; esac; pf_whole_reader_facts "$@"; }' >> "$PF_ST/payload/scripts/lib/reader.sh"
 pfu() { printf '%s|%s' "$1" "$(printf '%s\n' "$2" | grep -c "$3")|$(printf '%s\n' "$2" | grep -c 'could not be read')"; }  # <exit> <output> <its fact's pattern> -> exit|fact lines|could-not-read lines
 PF_RS='. "$1/run.sh"; o="$(run_step "$2")"; printf "%s|%s" $? "$o" | tr "\n" " "'
-expect_eq "FOLD-1 a reader question run in-process (run_step) hands back the fold's failure; whole, its step and 0" "128|state=open~0|n=8 state=open" \
+expect_eq "FOLD-1 a reader question run in-process (run_step) hands back the fold's failure; whole, its step and 0" "128|n=0 state=open~0|n=8 state=open" \
   "$(PAH_IN=reader_facts bash -c "$PF_RS" _ "$PF_ST/payload/scripts/lib" "$PL_PLAN")~$(bash -c "$PF_RS" _ "$PF_ST/payload/scripts/lib" "$PL_PLAN")"
 pf_tmp() { mkdir -p "$SANDBOX/t-$1/bionic-facts-$(id -u)"; chmod 777 "$SANDBOX/t-$1/bionic-facts-$(id -u)"; printf '%s' "$SANDBOX/t-$1"; }  # <label> -> a TMPDIR where no fold is kept, so each read folds
 pf_close() { local p; p="$(mk_fixture "fold-$1")"; advance_to "$p" 8; debt_plant "$p"
