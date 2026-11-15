@@ -59,16 +59,15 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 DOC="$TMP/doctored"
 mkdir -p "$DOC/hooks" "$DOC/skills/canonical-sdlc" "$DOC/root"
 
-# hooks class — the real pin-sync subject. The repo copy says
-# SUPPORTED_SDLC_VERSION=14; the doctored copy says 99999. Neither value can be
-# read from the other file, so the named check's ANSWER names which file it read.
-# THE VERSION LITERAL MOVED WITH THE GATE'S BODY (T23): it is in
-# payload/scripts/lib/walls.sh now, inside `_eg_body`, still at column zero. The doctored
-# seam therefore carries a doctored LIBRARY beside an untouched hook.
+# hooks class — the real pin-sync subject: the evidence gate's fix for an unsupported
+# version. The repo copy says "a plan is written at 15."; the doctored copy says 99999.
+# Neither value can be read from the other file, so the named check's ANSWER names which
+# file it read. The fix is in payload/scripts/lib/walls.sh, inside `_eg_body`, so the
+# doctored seam carries a doctored LIBRARY beside an untouched hook.
 cp "$REPO/hooks/bash-walls.sh" "$DOC/hooks/bash-walls.sh"
 mkdir -p "$DOC/scripts/lib"
 cp "$REPO"/payload/scripts/lib/*.sh "$DOC/scripts/lib/" 2>/dev/null
-sed -i.bak 's/^SUPPORTED_SDLC_VERSION=.*/SUPPORTED_SDLC_VERSION=99999/' "$DOC/scripts/lib/walls.sh"
+sed -i.bak 's/a plan is written at 15\."$/a plan is written at 99999."/' "$DOC/scripts/lib/walls.sh"
 rm -f "$DOC/scripts/lib/walls.sh.bak"
 printf '# %s\n' "$MARKER" >> "$DOC/scripts/lib/walls.sh"
 
@@ -102,13 +101,13 @@ case "$2" in
   var-skills)   printf '%s\n' "${BIONIC_SKILLS_DIR:-UNSET}" ;;
   var-scripts)  printf '%s\n' "${BIONIC_SCRIPTS_DIR:-UNSET}" ;;
   # The named check, verbatim in the shape S2 gives the pin-sync rows: read the
-  # evidence gate's version constant through BIONIC_HOOKS_DIR.
+  # evidence gate's version fix through BIONIC_HOOKS_DIR.
   # THE LIBRARY BESIDE THE HOOKS, IN EITHER SPELLING. A repo checkout keeps it at
   # payload/scripts/lib and an installed plugin at scripts/lib; the readable one is chosen
   # by a TEST and not by `||` after a pipeline, whose status is `head`'s and never fails.
   read-hooks)   _sr_w="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/walls.sh"
                 [ -r "$_sr_w" ] || _sr_w="${BIONIC_HOOKS_DIR}/../scripts/lib/walls.sh"
-                grep -o 'SUPPORTED_SDLC_VERSION=[0-9]*' "$_sr_w" | head -1 ;;
+                grep -o 'a plan is written at [0-9]*\.' "$_sr_w" | head -1 ;;
   # Marker reads: did the consumer land in the doctored copy or the repo copy?
   mark-hooks)   _sr_w="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/walls.sh"
                 [ -r "$_sr_w" ] || _sr_w="${BIONIC_HOOKS_DIR}/../scripts/lib/walls.sh"
@@ -147,10 +146,10 @@ expect_eq "relative source from cwd=<repo>/skills resolves <repo>" \
 section "Group 3: override set -> the named check reads the DOCTORED copy"
 
 _v="$(BIONIC_HOOKS_DIR="$DOC/hooks" probe "$REPO" "$SEAM" read-hooks)"
-expect_eq "hooks override: named check reads the doctored constant" \
-  "SUPPORTED_SDLC_VERSION=99999" "$_v"
-expect_absent "hooks override: named check does NOT read the repo constant" \
-  "SUPPORTED_SDLC_VERSION=14" "$_v"
+expect_eq "hooks override: named check reads the doctored fix" \
+  "a plan is written at 99999." "$_v"
+expect_absent "hooks override: named check does NOT read the repo fix" \
+  "a plan is written at 15." "$_v"
 expect_eq "hooks override: doctored marker is present in what was read" \
   "1" "$(BIONIC_HOOKS_DIR="$DOC/hooks" probe "$REPO" "$SEAM" mark-hooks)"
 expect_eq "skills override: marker is present in what was read" \
@@ -158,7 +157,7 @@ expect_eq "skills override: marker is present in what was read" \
 expect_eq "scripts override: marker is present in what was read" \
   "1" "$(BIONIC_SCRIPTS_DIR="$DOC/root" probe "$REPO" "$SEAM" mark-scripts)"
 expect_eq "override survives a foreign cwd (cwd=/, hooks redirected)" \
-  "SUPPORTED_SDLC_VERSION=99999" "$(BIONIC_HOOKS_DIR="$DOC/hooks" probe "/" "$SEAM" read-hooks)"
+  "a plan is written at 99999." "$(BIONIC_HOOKS_DIR="$DOC/hooks" probe "/" "$SEAM" read-hooks)"
 
 section "Group 5: the three classes are independent"
 

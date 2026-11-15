@@ -49,7 +49,7 @@ Fix: write under $2 instead — the .bionic tree is pinned to the main repositor
       WG_DETAIL="canonical-sdlc artifact '$BASENAME' has no content to validate.
 Path: $FILE_PATH
 Fix: use Write to create the artifact with governing-skill frontmatter." ;;
-    no-frontmatter)  # <supported version>
+    no-frontmatter)  # <the version line's value>
       WG_FACT="this artifact has no frontmatter block"; WG_FIX="prepend a frontmatter block"
       WG_DETAIL="canonical-sdlc artifact '$BASENAME' is missing a YAML frontmatter block.
 Path: $FILE_PATH

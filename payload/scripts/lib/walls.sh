@@ -2326,9 +2326,7 @@ fi
 # *.plan.md, and no arm under it asks the version again: each takes its facts from the run's log where they are held,
 # and names each one the log does not hold yet (`_eg_v15_owe`), so no path reaches `exit 0` without the whole contract.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-SUPPORTED_SDLC_VERSION=14
-
-if [ "$SDLC_VERSION" != "$SUPPORTED_SDLC_VERSION" ] && [ "$_EG_V15" -eq 0 ]; then
+if [ "$_EG_V15" -eq 0 ]; then
   _eg_detail="canonical-sdlc evidence-gate: plan declares canonical_sdlc_version: '$SDLC_VERSION'.
 Plan: $PLAN
 Fix: set 'canonical_sdlc_version: 15' — a plan is written at 15."

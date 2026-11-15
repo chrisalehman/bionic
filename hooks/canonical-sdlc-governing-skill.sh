@@ -25,7 +25,7 @@
 #   sdlc-step: 3
 #   epic: epic-02-checkout
 #   wave: wave-01-checkout-refactor
-#   canonical_sdlc_version: <SUPPORTED_SDLC_VERSION, bound near the top of this file>
+#   canonical_sdlc_version: 15
 #   intent: build
 #   rigor: double
 #   scale: wave
@@ -44,13 +44,6 @@
 # which was `active_run` until wave-session-bound-run made run identity per-session).
 
 set -u
-
-# ONE supported version. Anything else — an older number, a typo, an empty value, garbage —
-# blocks. Bound here, before the first place that quotes it (the missing-frontmatter hint
-# below), so every echo of "the" supported version is this one variable and never a second,
-# independently-typed literal (review-duplication D-2).
-# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-SUPPORTED_SDLC_VERSION=14
 
 BIONIC_INPUT=$(cat)
 TOOL=$(echo "$BIONIC_INPUT" | jq -r '.tool_name // empty')
@@ -869,8 +862,13 @@ if [ -z "$CONTENT" ]; then
   _gs_refuse no-content
 fi
 
+# The hint names the version the artifact is written at: a plan's is 15, and a document that is no plan may declare
+# 14 or 15, as the version arms below admit.
 if [ -z "$FRONTMATTER" ]; then
-  _gs_refuse no-frontmatter "$SUPPORTED_SDLC_VERSION"
+  case "$BASENAME" in
+    *.plan.md) _gs_refuse no-frontmatter 15 ;;
+    *) _gs_refuse no-frontmatter "15   # a document that is no plan may declare 14 or 15" ;;
+  esac
 fi
 
 # THE ARTIFACT AS THE PARSER READS IT. The parser reads a path, and the text judged here is the
@@ -915,9 +913,7 @@ fi
 
 SDLC_VERSION=$(yaml_get canonical_sdlc_version)
 
-# SUPPORTED_SDLC_VERSION is bound once, near the top of the file (before the
-# missing-frontmatter hint that also quotes it). No path reaches `exit 0` without passing the
-# whole contract of the version it declares.
+# No path reaches `exit 0` without passing the whole contract of the version it declares.
 #
 # A PLAN IS WRITTEN AT 15, the shape that holds only what a person wrote, and is held below to
 # what version 15 has no place for. A plan at 14 is an older run's document and never a run: one
