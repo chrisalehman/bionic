@@ -216,7 +216,7 @@ expect_eq "in the loaded set a deleted plan section, by its heading or the list'
     | lone skill skills/canonical-sdlc/SKILL.md | nl1)"
 NA="${BIONIC_SCRIPTS_DIR}/tests/fixtures/names-admitted.txt"; TREE="$(bash "$CHECK" "$BIONIC_SCRIPTS_DIR" 2>&1)"; TRC=$?
 expect_eq "the checkout's suites and loaded set name none past the admitted list, every entry of which admits a line" "y names=0 rc=0" \
-  "$(awk -F'\t' 'NF >= 3 && $1 !~ /^#/' "$NA" 2>/dev/null | grep -q . && echo y) $(printf '%s\n' "$TREE" | grep '^names=') rc=$TRC"
+  "$(awk -F'\t' 'NF >= 3 && $1 !~ /^#/ { n++ } END { if (n) print "y" }' "$NA" 2>/dev/null) $(printf '%s\n' "$TREE" | grep '^names=') rc=$TRC"
 n=0; for p in 'f="$1/landing-proofs.log"' '# the asks.state register' '# hooks/stop-guard.sh' 'bash "$H/agent-context-guard.sh" "$@"'; do n=$((n + 1))
   expect_eq "an old record's or a deleted hook's name planted alone is refused by its file and line: $p" "one-reader-check: refused — name payload/scripts/lib/p.sh:1 rc=1" \
     "$(echo "$p" | lone "file$n" payload/scripts/lib/p.sh | tr '\n' ' ' | sed 's/ $//')"; done
