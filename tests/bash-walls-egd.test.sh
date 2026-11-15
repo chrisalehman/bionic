@@ -33,7 +33,7 @@ section "§EG-DERIVE — the commit wall reads a reading's result as the judge d
 # the judge and the wall answered a section two ways (§EG-6's promise). The collector (hooks/bash-walls.sh)
 # now hands the wall the derived result for the plan it judges. FIXTURE FIDELITY: §EG-6's repository and
 # gate drive, its plan writer's text made the run at 15 it stands for (the prelude's eg6_world: the readings
-# and the moves read into the run's log by lib/translate.sh); the records are in the shape the producing verb
+# and the moves written into the run's log as the events a run at 15 holds); the records are in the shape the producing verb
 # reads (`reviewed:`, `findings:`, `finding:`, `shown:`), the judge half is `facts_state` over the same run.
 EGD_REC="$R_EG6/.bionic/docs/record/w28t60"
 mkdir -p "$EGD_REC"
@@ -51,6 +51,20 @@ egd_judge() {  # <question> -> the judge's state of its piece line, over the pla
 egd_lib() {  # <plan> <evidence> <written> -> the result the judge derives
   bash -c '. "$1" && _proof_reading_result "$2" "$3" "$4" "$5"' _ "$EG6_LIB" "$1" "$R_EG6/.bionic/docs" "$2" "$3" 2>/dev/null
 }
+# The world stands on no translation: built beside scripts that hold no lib/translate.sh, eg6_world still writes the
+# text's review, its move and its waiver into the run's log as the events a run at 15 holds.
+EGD_NT="$SANDBOX/egd-no-translation"; mkdir -p "$EGD_NT/hooks" "$EGD_NT/payload"
+cp -R "$BIONIC_SCRIPTS_DIR/payload/scripts" "$EGD_NT/payload/scripts"; rm -f "$EGD_NT/payload/scripts/lib/translate.sh"
+expect_eq "EGD-0 precondition: the world's scripts hold the library less the translation" "proof.sh" \
+  "$(cd "$EGD_NT/payload/scripts/lib" && ls proof.sh translate.sh 2>/dev/null | paste -sd' ' -)"
+expect_eq "EGD-0 with no translation in the world's scripts, eg6_world writes the text's review, move and waiver into the run's log" \
+  "run/v1|ev=proof|kind=review|head=$H_EG6|evidence=record/w28t60/adv.md|question=adversarial|reader=w-read|result=fail|scope=piece|at=2026-10-04T12:00:00Z
+run/v1|ev=finding|ref=record/w28t60/adv.md#1|to=defer|by=Dana|words=defer it to the next wave|why=the user ruled it|at=2026-10-07T12:00:00Z
+run/v1|ev=waiver|question=structure|head=$H_EG6|by=Dana|said=ship it|at=2026-10-07T12:00:01Z" \
+  "$(BIONIC_HOOKS_DIR="$EGD_NT/hooks"; eg6_world "$R_EG6" "$(eg6_plan 6 wave "$(eg6_reading "$H_EG6" adversarial fail record/w28t60/adv.md)
+$EGD_DEFERRED
+waived: question=structure head=$H_EG6 by Dana 2026-10-07T12:00:01Z \"ship it\"")"
+    /usr/bin/grep -E '^run/v1[|]ev=(proof[|]kind=review|finding|waiver)[|]' "$(plan_fixture_log "$EG6_PAGE")")"
 
 # ---------- a finding moved to defer: the reading written result=fail is derived to flag ----------
 EGD_BASE="$(eg6_reading "$H_EG6" evidence pass)
