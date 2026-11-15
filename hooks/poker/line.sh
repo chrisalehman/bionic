@@ -694,7 +694,7 @@ record_row_land() {
   deliver_check
   # A row nobody launched is the orchestrator's own, and its landing says so.
   case "$ROW_WRITER" in ''|-|—) ROW_WRITER=orchestrator ;; esac
-  line_event "$PV_PLAN" published "row=$PV_ID" "commit=$RL_COMMIT" kind=record "by=$ROW_WRITER" "why=$RL_ARTIFACT" >/dev/null || {
+  line_published_event "$PV_PLAN" "row=$PV_ID" "commit=$RL_COMMIT" kind=record "by=$ROW_WRITER" "why=$RL_ARTIFACT" >/dev/null || {
     die "REFUSED — the run's log cannot take the landing of $PV_ID; nothing is landed."; exit 1; }
   line_landing_writes "$PV_PLAN" "$PV_ID" "$RL_COMMIT" "$RL_AT" \
     || say "UNSETTLED $PV_ID — landed at $RL_COMMIT; the findings it settles are not moved or their asks not closed"
@@ -759,7 +759,7 @@ part_land() {
     die "REFUSED — $PT_BRANCH could not be moved from ${PT_HEAD:0:12} to ${LINE_RV_COMMIT:0:12}; nothing was published."
     exit 2
   fi
-  if ! line_event "$PV_PLAN" published "part=$2" "commit=$LINE_RV_COMMIT" "branch=$PT_BRANCH" "tree=$PT_TREE" "by=$PV_ID"; then
+  if ! line_published_event "$PV_PLAN" "part=$2" "commit=$LINE_RV_COMMIT" "branch=$PT_BRANCH" "tree=$PT_TREE" "by=$PV_ID"; then
     die "REFUSED — $PT_BRANCH moved to ${LINE_RV_COMMIT:0:12}, and the run's log could not be written: append ev=published|part=$2|commit=$LINE_RV_COMMIT|branch=$PT_BRANCH|tree=$PT_TREE|by=$PV_ID to $(line_log "$PV_PLAN" 2>/dev/null || printf 'the log')."
     exit 1
   fi

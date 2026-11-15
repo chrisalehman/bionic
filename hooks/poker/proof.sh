@@ -1586,13 +1586,13 @@ DSP_READINGS
       exit 1
     fi
     # THE RUN IS RECORDED WHERE ITS PROOF WILL LOOK (wave-37 T4; D7, AC-6.1; ADR-057): one `ev=run` line in the plan's
-    # run log (lib/line.sh `line_event`, through the log's appender), the log by its record path, the head and
+    # run log (lib/line.sh `line_run_event`, through the log's appender), the log by its record path, the head and
     # dirty count read before the run, its exit, and the log's sha256 (lib/proof.sh `_proof_sha256`), so `proof-add
     # floor` accepts this log, and this log as it is now, and no hand-written one.
     FR_SHA="$(_proof_sha256 "$FR_LOG")" || FR_SHA=""
     declare -F line_event >/dev/null 2>&1 || { [ -r "$BIONIC_LIB/line.sh" ] && . "$BIONIC_LIB/line.sh"; } >/dev/null 2>&1
     if [ -z "$FR_SHA" ] || ! declare -F line_event >/dev/null 2>&1 \
-       || ! line_event "$PV_PLAN" run "log=$FR_REL" "head=$FR_HEAD" "dirty=$FR_DIRTY" "rc=$FR_RC" "sha256=$FR_SHA" \
+       || ! line_run_event "$(line_log "$PV_PLAN")" "log=$FR_REL" "head=$FR_HEAD" "dirty=$FR_DIRTY" "rc=$FR_RC" "sha256=$FR_SHA" \
               "starter=$FR_STARTER" ${FR_REASON:+"reason=$FR_REASON"} 2>/dev/null; then
       die "regression-run — the run line for $FR_REL could not be written to the plan's landing record$([ -n "$FR_SHA" ] || printf ' (no sha256 tool answered)'), so proof-add regression will refuse this log as no recorded run."
     fi

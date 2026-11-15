@@ -795,7 +795,7 @@ booked_run_open() {  # at the start of the tail, in the detached side
 
 # booked_run_line <rc> — THE RUN, RECORDED WHERE A FLOOR PROOF LOOKS (wave-37 T4; D7, REQ-6 AC-6.1; ADR-057): after the
 # log's rc line and before `<log>.rc`, one line in the run's log of the plan this session is bound to (lib/run.sh
-# `session_plan`, the engaged marker's `plan=`, as every verb reads the binding; lib/line.sh `line_event`, through
+# `session_plan`, the engaged marker's `plan=`, as every verb reads the binding; lib/line.sh `line_run_event`, through
 # the log's appender):
 #   run/v1|ev=run|log=<the log from the project root>|head=<40-hex>|dirty=<n>|rc=<n>|sha256=<log hash>|starter=<who>|at=<ISO>
 # the head and dirty count the stamp read before anything ran, the hash through lib/detect.sh `_detect_sha256`.
@@ -826,7 +826,7 @@ booked_run_line() {
   plan="$(session_plan "$r" "$sid" 2>/dev/null)" || return 0
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
   sha="$(_detect_sha256 "$run_log")" || return 0
-  line_event "$plan" run "log=${run_log#"$r"/}" "head=$stamp_head" "dirty=${stamp_dirty:-0}" "rc=$1" "sha256=$sha" \
+  line_run_event "$(line_log "$plan")" "log=${run_log#"$r"/}" "head=$stamp_head" "dirty=${stamp_dirty:-0}" "rc=$1" "sha256=$sha" \
     "starter=$(booked_starter)" 2>/dev/null
   return 0
 }

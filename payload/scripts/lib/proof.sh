@@ -1396,7 +1396,7 @@ proof_regression_results() {
 }
 
 # proof_regression_fold <plan> <checkout> <head> <whole-run log> <the log as the record names it> -> one `ev=verdict` fact
-# per suite the whole run judged, written to the plan's landing record through lib/line.sh `line_event`:
+# per suite the whole run judged, written to the plan's landing record through lib/line.sh `line_verdict_event`:
 # `row=regression|commit=<head>|suite=|result=|log=|admitted=-|width=-|kind=regression`, keyed by the commit
 # it ran at. A suite with a fact from this log at <head> already is not written again. `_proof_records` reads these as a
 # whole run's, never a landing's. Exit 1 when line.sh's writer cannot be loaded. <checkout> is kept for its callers.
@@ -1413,7 +1413,7 @@ proof_regression_fold() {
       line_ev() == "verdict" && line_kv("commit") == c && line_kv("suite") == su && line_kv("log") == l && line_kv("kind") == "regression" { f = 1 }
       END { exit !f }' 2>/dev/null \
       || continue
-    line_event "$plan" verdict "row=regression" "commit=$head" "suite=$s" "result=$r" "log=$rel" "admitted=-" "width=-" \
+    line_verdict_event "$plan" "row=regression" "commit=$head" "suite=$s" "result=$r" "log=$rel" "admitted=-" "width=-" \
       "kind=regression" || return 1
   done <<PROOF_FOLD
 $res

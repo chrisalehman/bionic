@@ -61,7 +61,7 @@
 
 set -uo pipefail
 
-READER_FILES="payload/scripts/lib/reader.sh payload/scripts/lib/plan-read.sh payload/scripts/lib/translate.sh"
+READER_FILES="payload/scripts/lib/reader.sh payload/scripts/lib/plan-read.sh payload/scripts/lib/translate.sh payload/scripts/lib/fields.sh"
 # The act that brings a run forward rewrites its plan: its plan is left holding only what a person wrote.
 ACT_WRITES="payload/scripts/bring-forward.sh:bf_main"
 

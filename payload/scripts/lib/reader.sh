@@ -35,11 +35,13 @@
 # bash 3.2 (ADR-001).
 
 _READER_LIB_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P )"
-if [ -z "${_LINE_FIELDS_AWK:-}" ]; then
-  # shellcheck source=/dev/null
-  . "$_READER_LIB_DIR/line.sh"
-fi
-# line.sh's field reader, read by name; `ev()` is its event, for the `run/v1` shape the fold prints.
+# shellcheck source=/dev/null
+. "$_READER_LIB_DIR/fields.sh"
+# The reader calls nothing of the landing library, but its callers find that library loaded through it: their guards
+# read a set field reader as the landing library loaded, and call its record readers on that word.
+# shellcheck source=/dev/null
+declare -F line_lines >/dev/null 2>&1 || . "$_READER_LIB_DIR/line.sh"
+# The record's field reader, read by name; `ev()` is its event, for the `run/v1` shape the fold prints.
 _READER_AWK="${_LINE_FIELDS_AWK}"'
 function ev() { return line_kv("ev") }
 '
