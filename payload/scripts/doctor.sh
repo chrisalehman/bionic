@@ -1786,25 +1786,6 @@ else
   _run_add "$(_doctor_item "$DOCTOR_NIL" "active run" "none — no open plan under this root")"
 fi
 
-# A RUN OPEN AT CONTRACT VERSION 14 IS BROUGHT FORWARD BY ONE ACT, so the page names it, with the command in the
-# spelling the plugin's commands use, folded at the plan so no line passes the column budget. The run's header gives
-# its version and the reader's `step` says whether it is open; neither is parsed here. A run the reader cannot
-# answer for is reported as unread, never dropped as no run.
-while IFS= read -r _v14_plan; do
-  [ "$(plan_frontmatter_get "$_v14_plan" canonical_sdlc_version)" = 14 ] || continue
-  _v14_rel="${_v14_plan#"${DOCTOR_ROOT}/"}"
-  if ! _v14_step="$(run_step "$_v14_plan" 2>/dev/null)"; then
-    _run_add "$(_doctor_rtrim "$(bionic_line "$(printf '  %s %-30s ' "$DOCTOR_NIL" "run at version 14")" \
-      "$_v14_rel" " · could not be read")")"
-  elif [[ "$_v14_step" == *state=open* ]]; then
-    _run_add "$(_doctor_item "$DOCTOR_NIL" "run open at version 14" "bring it forward with:")"
-    _run_add "      bash \${CLAUDE_PLUGIN_ROOT}/scripts/bring-forward.sh \\"
-    _run_add "        ${_v14_rel}"
-  fi
-done <<EOF
-$(open_runs "$DOCTOR_ROOT" 2>/dev/null)
-EOF
-
 # THE PERMISSION ANSWERS (epic-23 wave-25-never-paused, REQ-7, AC-7.3; spec D9). The
 # PermissionRequest hook answers on bionic's own authority unless `.bionic/config.yaml` says
 # `permission-answers: false`, and writes one line per answer to a log outside the project.

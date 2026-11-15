@@ -1474,19 +1474,6 @@ expect_eq "(tw4) with the record gone the log alone stands: the record is held, 
   "$(line_held "$TWL"; echo "$? $(tw_lib units_record_landings "$TWL" | cut -f2 | paste -sd' ' -)")"
 
 # ---------------------------------------------------------------------------
-section "§ONCE: a run brought forward reads each earlier landing once, from its log"
-# The act keeps the old landing record in place beside the log it translated that record into.
-# fails-when: the landing library reads that old record beside the log, so line_lines and the fold of landings give each landing twice.
-OB="$(LL_WORLD_AT=14 ll_world)"; OBP="$(ll_plan "$OB")"; OBR="$(ll_rec "$OB")"; mkdir -p "${OBR%/*}"
-printf 'line/v1|ev=published|row=%s|commit=%s|kind=queue|by=-|why=-|at=2026-11-01T00:00:0%s\n' T1 c1 1 T2 c2 2 > "$OBR"
-bash "$REPO/payload/scripts/bring-forward.sh" "$OBP" >/dev/null 2>&1; OB_RC=$?
-expect_eq "(once-pre) the act brought the run forward, the old record still beside a log that holds both landings" "0|yes|2" \
-  "$OB_RC|$([ -f "$OBR" ] && echo yes)|$(grep -c '^run/v1|ev=published|' "$(ll_log "$OB")")"
-expect_eq "(once1) line_lines over the plan's record reads each landing once" "T1 T2" \
-  "$(line_lines "$(line_record "$OBP")" | awk -F'|' "$_LINE_FIELDS_AWK"'line_ev() == "published" { print line_kv("row") }' | paste -sd' ' -)"
-expect_eq "(once2) …and so does the fold of landings" "T1 T2" "$(tw_lib units_record_landings "$(line_record "$OBP")" | cut -f2 | paste -sd' ' -)"
-
-# ---------------------------------------------------------------------------
 section "§LOG: ready writes its acts to the run's log, and no landing record; a part is no landing"
 # fails-when: §READY leaves no ready of T1 in run.log or a landing-proofs.log beside it; a row-less part reads as a landing.
 expect_eq "(lg1) the run's log holds T1's ready event, and of run.log and landing-proofs.log the record holds run.log" "T1|run.log" \

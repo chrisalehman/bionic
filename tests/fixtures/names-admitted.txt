@@ -8,25 +8,6 @@
 #   old home      a helper or world that still names an old record file beside the run's log
 #   fixture text  a fixture's own text held inside a suite, naming what a run recorded
 refusal	tests/brief-file.test.sh	  for f in lift_contract_fields _brief_lift_awk brief_validate_fields brief_body_advisories brief_files_entry brief_contract brief_file_read; do
-old run	tests/bring-forward.test.sh	  "run/v1|ev=hand|ac=AC-3|what=waive-row|by=Bo Person|said=later, by hand|at=2026-11-01" "$MEV"
-old run	tests/bring-forward.test.sh	expect_contains "…and so is a waived row's own block line" "run/v1|ev=hand|ac=AC-2|what=waive-row|by=Ann Person|said=not run here|at=2026-11-01T08:00:00Z" "$MEV"
-old run	tests/bring-forward.test.sh	expect_eq "the reader's hand acts are the two block lines" "AC-2 AC-3" "$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$M" hands | sed -n 's/.*|ac=\(AC-[0-9]*\)|.*|what=waive-row|.*/\1/p' | tr '\n' ' ' | sed 's/ $//')"
-old run	tests/bring-forward.test.sh	cat > "$R8/landing-proofs.log" <<EOF
-old run	tests/bring-forward.test.sh	line/v1|ev=matrix-set|ac=AC-1.1|cells=status,task|by=s-one|at=2026-11-01T03:10:00Z
-old run	tests/bring-forward.test.sh	  'owed/v1|key=approve:step4|state=open|sent=2026-11-01T06:00:01Z|at=2026-11-01T06:00:00Z|title=Step 4 card|reply=approve' > "$R8/asks.state"
-old run	tests/bring-forward.test.sh	ruled="$(awk -F'|' -v t="$LOG_TYPES" '$1 == "line/v1" && index(t, " " substr($2, 4) " ") { print "run/v1" substr($0, 8) }' "$R9/landing-proofs.log")"
-old run	tests/bring-forward.test.sh	heads="$(grep '^landed: ' "$R9/landing-proofs.log" | sed 's/^landed: /run\/v1|ev=published|/; s/ merge=/ commit=/; s/ /|/g')"
-old run	tests/bring-forward.test.sh	  "$(in8 "run/v1|ev=hand|what=matrix-set|ac=AC-1.1|cells=status,task|by=s-one|at=2026-11-01T03:10:00Z")"
-old run	tests/bring-forward.test.sh	expect_eq "every closed register row of the closed run is an opening and a reply" "$(( $(grep -c 'state=closed' "$R9/asks.state") * 2 ))" "$(printf '%s\n' "$EV9" | grep -c '^run/v1|ev=ask|')"
-old run	tests/bring-forward.test.sh	printf 'line/v1|ev=published|row=T2|commit=c2|kind=queue|by=-|why=-|at=2026-11-02T00:00:01Z\n' > "$HR/landing-proofs.log"
-old run	tests/bring-forward.test.sh	printf 'line/v1|ev=published|row=T1|commit=c1|kind=queue|by=-|why=-|at=2026-11-02T00:00:01Z\n' > "$SD/record/plan.md/landing-proofs.log"
-old run	tests/bring-forward.test.sh	printf 'a\n' > "$SD/record/plan.md/asks.state"; SL="$(cd "$SD/record/plan.md" && cksum landing-proofs.log asks.state)"
-old run	tests/bring-forward.test.sh	for f in asks.state landing-proofs.log; do expect_contains "the gaps list names $f of the shared record, unread" "gap/v1|ev=record|record=plan.md|field=$f|why=shared" "$SO"; done
-old run	tests/bring-forward.test.sh	  "$(cd "$SD/record/plan.md" && cksum landing-proofs.log asks.state)|$(bash "$RS" "$SA/0006-a.plan.md" status T1 | head -1)"
-old run	tests/bring-forward.test.sh	printf 'line/v1|ev=published|row=T2|commit=%s|kind=queue|by=-|why=-|at=2026-11-02T00:00:01Z\n' "$C" > "$RO/record/plan.md/landing-proofs.log"
-old run	tests/bring-forward.test.sh	for f in two one; do printf 'a\n' > "$SB/$f/record/epic/asks.state"; done
-old run	tests/bring-forward.test.sh	expect_contains "…and the record both joined at 14 is named file by file, unread" "gap/v1|ev=record|record=epic|field=asks.state|why=shared" "$TO"
-old run	tests/bring-forward.test.sh	expect_eq "a record one epic alone joined at 14 is moved to its own, and kept" "a|a|" "$(cat "$SB/one/record/epic-3-c/asks.state" "$SB/one/record/epic-3-c/kept/record/asks.state" 2>/dev/null | paste -sd'|' -)|$(ls "$SB/one/record/epic" 2>/dev/null)"
 old run	tests/close-out-2.test.sh	LAND_UREC="$PLU/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
 old run	tests/close-out-2.test.sh	mkdir -p "$PLV/.bionic/docs/record/wave-01-fixture"; cp "$LAND_UREC" "$PLV/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
 old run	tests/close-out-3.test.sh	  printf 'run/v1|ev=hand|ac=AC-1|what=waive-row|by=Chris Lehman|said=waive the row|at=2026-10-06\n' >> "$rec/run.log"

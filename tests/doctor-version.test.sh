@@ -850,15 +850,16 @@ expect_eq "75: an unknown section name exits 2 with nothing on stdout" "2:" "${U
 expect_match "76: …and the refusal on stderr lists NATIVE among the valid names" \
   "doctor.sh: unknown section 'NOPE'*NATIVE*" "$(cat "$DOCTOR_ERR_FILE" 2>/dev/null)"
 
-section "Section V14: a run open at version 14 is named, with the act that brings it forward"
+section "Section V14: a plan at version 14 is an older run's document, and the doctor says nothing of it"
 . "$(dirname "$0")/lib/plan-fixture.sh"
 V14="$(mktemp -d -p "$TMP")"; ( cd "$V14" && git init -q . ); V14P="$V14/.bionic/docs/plans/epic-99-fixture"
 plan_fixture --at 14 "$V14P/wave-01-open.plan.md" wave >/dev/null
 plan_fixture --at 14 --current 9 "$V14P/wave-02-closed.plan.md" wave >/dev/null
 bash -c '. "$1/proof.sh" && proof_step_event "$2" 9 delivered=x' _ "$PAYLOAD/scripts/lib" "$V14P/wave-02-closed.plan.md" >/dev/null 2>&1
 V14_OUT="$(run_doctor_only PROJECT "$HOME2" "$V14")"
-expect_match "V14.1: the open run at 14 is named with the command that brings it forward" \
-  "*bring-forward.sh*.bionic/docs/plans/epic-99-fixture/wave-01-open.plan.md*" "$V14_OUT"
-expect_no_match "V14.2: …and the closed run at 14 beside it is not named" "*wave-02-closed*" "$V14_OUT"
+expect_match "V14.1: the PROJECT table over two plans at 14, one open and one closed, reads no active run" \
+  "*active run*none*" "$V14_OUT"
+expect_no_match "V14.2: …and names neither plan, nor version 14" "*wave-0[12]*" "$V14_OUT"
+expect_no_match "V14.3: …nor a run at version 14" "*version 14*" "$V14_OUT"
 
 finish

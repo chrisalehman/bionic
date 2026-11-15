@@ -149,7 +149,7 @@ by owner liveness, not file name. Give an agent a `record/` path in its brief.
 
 Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 15`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`. Plan files additionally carry `walk: required | exempt` — Step 0's derivation, and the key the Verify gate reads — Step 0's `design-interview:` value beside it, `regression:` (`yes` or `no`, Step 0's setting) and, where it differs from the scale default, `regression-override:` beside those, and, where the run's rigor sits below its derived minimum, `rigor-override:`. None of these is required to write, but a `walk:` value outside the enum blocks.
 
-**15 is the version a plan is written at.** An unsupported value — an empty value, a typo — blocks at both hooks. A live plan at 14 is brought forward by the act `doctor` names, `bash <plugin-root>/scripts/bring-forward.sh <plan>`, not exempted.
+**15 is the version a plan is written at.** An unsupported value — an empty value, a typo — blocks at both hooks. A plan at 14 is an older run's document: no hook reads it as a run, and its work comes forward as text a person or a model reads.
 
 ## Steps
 

@@ -101,7 +101,7 @@ reader_log() {  # <plan> -> the path of its run log; 2 when the plan sits where 
   printf '%s/run.log\n' "$rec"
 }
 
-# A RUN IS READ FROM ITS LOG ALONE ONCE IT IS BROUGHT FORWARD: bring-forward.sh kept its old homes under kept/ and then
+# A RUN IS READ FROM ITS LOG ALONE ONCE IT IS BROUGHT FORWARD: the act that did so kept its old homes under kept/ and then
 # wrote its log, every fact the old homes held, so the log differs from the kept copy of it (or that copy is absent).
 # Until then its writers move to the log one family at a time, so a fact stands in an old home or in the log and never
 # in both: the old homes and the log are read together, the log as the newest of the homes lib/translate.sh reads,

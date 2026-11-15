@@ -922,15 +922,12 @@ sr_stop t3 17:12:00 4 0 "" T9 0 "" 0
 sr_run "$SR_PLAN"
 expect_eq "ME5 two tasks dropped and a 72-minute idle turn: the waste in numbers; the dropped tasks leave the count" \
   "2 tasks, 60 min|2 of 6|72 min|4 tasks, 120 of 540 min, 22%" "$(sr_waste)|$(sr_m work.landed)"
-# AT 15, AFTER THE ACT, the log alone is read: the ledger's idle turn stands as its translated stop events, and a turn's
-# end the log's appender writes after the act, idle from 18:00Z, owns the interval to now (22:00Z) while the run is open.
-bash "$BIONIC_SCRIPTS_DIR/payload/scripts/bring-forward.sh" "$SR_PLAN" >/dev/null 2>&1
-sr_run "$SR_PLAN"
-expect_eq "ME5b at 15 after the act the ledger's idle turn still counts" "kept|72 min" "$(! [ -d "$SR_DIR/kept" ] || echo kept)|$(sr_m waste.ready-unstarted)"
+# A turn's end the log's appender writes, idle from 18:00Z, owns the interval to now (22:00Z) while the run is open, and
+# counts beside the idle turn above.
 bash -c '. "$1/log.sh" && RUN_LOG="$2" LOG_AT=2026-10-06T18:00:00Z log_append stop "session=$3" turn=t4 current=4 state=ok ceiling= width=4 open=3 free=1 ready=T9 launched= declined= missed=1 idle=T9 room=1' \
   _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$SR_DIR/run.log" "$SID"
 sr_run "$SR_PLAN"
-expect_eq "ME5c …and a turn's end written to the log after the act counts too: 72 and 240 minutes" "312 min" "$(sr_m waste.ready-unstarted)"
+expect_eq "ME5c …and a turn's end written to the run's log counts too: 72 and 240 minutes" "312 min" "$(sr_m waste.ready-unstarted)"
 
 # A red a suite stands in at the working head counts though no row added it: a `standing` event the line recorded, until a
 # later green of the suite answers it. It marks no task failed.

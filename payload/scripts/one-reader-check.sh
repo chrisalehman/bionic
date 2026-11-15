@@ -57,36 +57,30 @@
 #     _proof_ask, reader_main, reader_facts, reader_events or the reader program and pipes it, feeds a
 #     process substitution, assigns it to a local, or takes it in a $( ) whose exit no `||`, `&&`,
 #     `=$?` or `if` reads on that line: a fold that failed would read there as a run with no fact.
-#   - A NAME is a line of names_standing below: a verb the poker no longer has, in the shape of a use
-#     where the word is also English (the poker run with it, a function named for it, a poker case arm),
-#     else as its own word. The translation and the plan reader's list of refused keys read an older
-#     run by those names, and so does a comparison of an older hand act's name (`w == "`): those are no
-#     finding. A NAME is also a removed file's name as its own word: the old landing record's and the
-#     asks register's (`landing[-]proofs.log`, `asks.stat[e]`), which a reader's file (READER_FILES) reads
-#     an older run by and is admitted there, and the two deleted hook scripts' (`stop[-]guard.sh`,
-#     `agent[-]context[-]guard.sh`), admitted nowhere; and, as its own word, a removed function's name
-#     or a verb's that is no English word and that no other pattern reads whole. In the loaded set
-#     (walls.sh `loaded_set`, the net-zero wall's one definition, asked and never restated) a NAME is
-#     also a deleted plan section, by its `##` heading or by the deletion list's words for it (`the
-#     verificatio[n] matrix`), and nothing there is admitted. Under tests/ a line is admitted only by an
-#     entry of ADMITTED, by its file and its whole text, one line for each entry; an entry that admits
-#     no line is a NAME at its own line. A pattern brackets a hyphen or a letter (`[-]`, `[t]`) so that
-#     no name stands whole in this file: its own text matches none of them, and a word search of the
-#     tree for a name finds none here.
+#   - A NAME is a line of names_standing below: a verb the poker no longer has, in the shape of a use where the word is
+#     also English (the poker run with it, a function named for it, a poker case arm), else as its own word. The
+#     translation and the plan reader's list of refused keys read an older run by those names, and so does a comparison
+#     of an older hand act's name (`w == "`): those are no finding. A NAME is also a removed file's name as its own
+#     word: the old landing record's and the asks register's (`landing[-]proofs.log`, `asks.stat[e]`), which a reader's
+#     file (READER_FILES) reads an older run by and is admitted there, and the two deleted hook scripts'
+#     (`stop[-]guard.sh`, `agent[-]context[-]guard.sh`) and the deleted act's (`bring[-]forward.sh`), admitted nowhere;
+#     and, as its own word, a removed function's name or a verb's that is no English word and that no other pattern
+#     reads whole. In the loaded set (walls.sh `loaded_set`, the net-zero wall's one definition, asked and never
+#     restated) a NAME is also a deleted plan section, by its `##` heading or by the deletion list's words for it (`the
+#     verificatio[n] matrix`), and nothing there is admitted. Under tests/ a line is admitted only by an entry of
+#     ADMITTED, by its file and its whole text, one line for each entry; an entry that admits no line is a NAME at its
+#     own line. A pattern brackets a hyphen or a letter (`[-]`, `[t]`) so that no name stands whole in this file: its
+#     own text matches none of them, and a word search of the tree for a name finds none here.
 #
 # THE READER'S FILES are named once, in READER_FILES: a parse inside one of them is the reader's own
-# and is admitted. THE ACT'S WRITES are named once, in ACT_WRITES, each a `<file>:<function>`: a plan write inside
-# that function is the act's own and is admitted, and a write in any other function of its file, or under that
-# function's name in another file, is named. THE ADMITTED LIST is ADMITTED, a fixture of the suites'
-# lines that name a retired verb on purpose, each with its class. Nothing else is admitted.
+# and is admitted. THE ADMITTED LIST is ADMITTED, a fixture of the suites' lines that name a retired verb
+# on purpose, each with its class. Nothing else is admitted, and no function may write a plan.
 #
 # Executed, never sourced; bash 3.2.
 
 set -uo pipefail
 
 READER_FILES="payload/scripts/lib/reader.sh payload/scripts/lib/plan-read.sh payload/scripts/lib/translate.sh payload/scripts/lib/fields.sh"
-# The act that brings a run forward rewrites its plan: its plan is left holding only what a person wrote.
-ACT_WRITES="payload/scripts/bring-forward.sh:bf_main"
 
 ADMITTED="tests/fixtures/names-admitted.txt"
 
@@ -124,8 +118,8 @@ names_found() {  # <file or directory>... -> `<file>:<line>:<text>` for each lin
     | /usr/bin/grep -v -e 'PLAN_READ_GONE_KEYS='
   /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(landing[-]proofs\.log|asks\.stat[e])([^A-Za-z0-9_]|$)' "$@" \
     | awk -F: -v r=" $READER_FILES " '!index(r, " " $1 " ")'
-  /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(stop[-]guard|agent[-]context[-]guard)\.sh([^A-Za-z0-9_]|$)' "$@"
-  /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(plan_verb_swa[p]|plan_bring_forwar[d]|ensure_walk_pointe[r]|walk_pointer_wante[d]|lift_contract_field[s]|brief_validate_field[s]|brief_body_advisorie[s]|dp_scaffold_marke[d]|scale_branch_numbe[r]|units_step_fiel[d]|finding[-]stated|continuation[-]fill|interval[-]default|fill[-]report)([^A-Za-z0-9_]|$)' "$@"
+  /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(stop[-]guard|agent[-]context[-]guard|bring[-]forward)\.sh([^A-Za-z0-9_]|$)' "$@"
+  /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(plan_verb_swa[p]|plan_bring_forwar[d]|ensure_walk_pointe[r]|walk_pointer_wante[d]|lift_contract_field[s]|brief_validate_field[s]|brief_body_advisorie[s]|dp_scaffold_marke[d]|scale_branch_numbe[r]|units_step_fiel[d]|bf_mai[n]|finding[-]stated|continuation[-]fill|interval[-]default|fill[-]report)([^A-Za-z0-9_]|$)' "$@"
 }
 
 # ADMITTED names the suites' lines that may name a retired verb, each `<class>TAB<file>TAB<text>`, the text the
@@ -156,7 +150,7 @@ names_standing() {  # -> `<file>:<line>:<text>` for each line naming a retired v
 # The patterns are written so that this file's own text matches none of them: `\/` and `[#]` stand
 # where the grammar has a bare character, so the check never counts itself. Lines are read as bytes:
 # the walk of a command a character at a time stops on a line that is no valid UTF-8.
-NAMED="$(names_standing)" LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v acts=" $ACT_WRITES " -v hooks=" $hook_files " '
+NAMED="$(names_standing)" LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v hooks=" $hook_files " '
   function opname(s) {  # one operand token -> 1 when it names a plan, 2 a log
     if (s ~ /\.plan\.md"?$/) return 1
     if (s ~ /run\.log"?$/) return 2
@@ -258,7 +252,6 @@ NAMED="$(names_standing)" LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v
       pn[FILENAME]++
     }
     if (!(index(admitted, " " FILENAME " ")) && FILENAME != "payload/scripts/lib/proof.sh" && unheard(line)) ul[++nu] = "unheard\t" FILENAME ":" FNR
-    if (nwrite && index(acts, " " FILENAME ":" fn[depth] " ")) nwrite = 0
     if (nwrite) {
       if (!(FILENAME in wfirst)) { wfirst[FILENAME] = FNR; word[++npw] = FILENAME }
       wn[FILENAME]++

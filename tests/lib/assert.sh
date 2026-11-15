@@ -188,8 +188,8 @@
 # EVERY MUTATION ANCHOR IN THE SUITES IS A SHAPED CALL (wave-35 T23; D16, AC-7.1, AC-7.3). The legacy
 # `anchor [-E] <file> <pattern> <count>` above is neither extracted, checked at a landing nor indexed,
 # and it stays for two things only: framework.test.sh's own tests of it against synthetic fixture files,
-# and a precondition on a value a suite derives at run time (cross-gate-agreement's SUPPORTED_SDLC_VERSION
-# pair), which sits beside a shaped call declaring the same file and line. A shaped call runs in THIS
+# and a precondition on a value a suite derives at run time,
+# which sits beside a shaped call declaring the same file and line. A shaped call runs in THIS
 # shell, once per declaration: not in a command substitution, not in a loop, not under an `if` whose
 # condition is the machine's, or `finish`'s agreement row reads a call that never ran or ran twice.
 #
