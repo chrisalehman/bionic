@@ -185,6 +185,10 @@ sr_run() {  # <args after the verb…> -> OUT (stdout), ERR (stderr), RC; the wo
   OUT="$(cat "$TMPROOT/sr.out")"; ERR="$(cat "$TMPROOT/sr.err")"
 }
 sr_poke() { sr_poke_with "$POKER" "$@"; }
+sr_typed() {  # <words>... -> this session's transcript in the world holds each as a prompt the person typed, its load record there
+  local t="$CLAUDE_CONFIG_DIR/projects/$(cd "$SR_REPO" && pwd -P | sed 's/[^a-zA-Z0-9]/-/g')/$SID.jsonl" w; mkdir -p "${t%/*}"; [ -f "$SR_REPO/.bionic/tmp/loaded-$SID.state" ] || : > "$SR_REPO/.bionic/tmp/loaded-$SID.state"
+  for w; do jq -c --arg t "$w" '.message.content = $t' "$BIONIC_SCRIPTS_DIR/tests/fixtures/transcript-move/typed.jsonl" >> "$t"; done
+}
 sr_poke_with() {  # <poker> <verb args…> -> the verb run in the world, as sr_run runs it
   local pk="$1"; shift
   ( cd "$SR_REPO" && exec env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_NOW_EPOCH="${SR_AT:-$SR_NOW}" BIONIC_GATE_DIR="$SR_GATE" bash "$pk" "$@" )
@@ -1709,7 +1713,7 @@ sr_handoff
 sr_recap
 expect_eq "ON3 the recap names D21 on one open: line and owes no second approval line for it" "1|0" \
   "$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^open: .*D21')|$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^owned-by-user: approval:D21')"
-sr_poke approve D21 "1" >/dev/null 2>&1
+sr_typed 1; sr_poke approve D21 "1" >/dev/null 2>&1
 expect_eq "ON4 the approve verb closes the tick's item: nothing for D21 is left open on the register" "0" \
   "$(/usr/bin/grep -cE '\|key=[a-z]+:D21\|state=open\|' <(sr_asks))"
 
@@ -1826,7 +1830,7 @@ sr_r_want() { printf 'human stops (autonomous half): %s · target 1|human-wait m
 SR_APPROVED=none sr_world rounds "6 6 12 12"   # approved below, at SR_E0, 2026-10-06T10:00:00Z
 git -C "$SR_REPO" config user.name "Dana Fixture"; sr_bind
 SR_T="$CLAUDE_CONFIG_DIR/projects/$(cd "$SR_REPO" && pwd -P | sed 's/[^a-zA-Z0-9]/-/g')/$SID.jsonl"; mkdir -p "${SR_T%/*}"; : > "$SR_REPO/.bionic/tmp/loaded-$SID.state"
-jq -nc '{type:"user",isSidechain:false,userType:"external",message:{role:"user",content:"carry on"}}' > "$SR_T"   # the session the ruling verb reads
+jq -nc '{type:"user",isSidechain:false,userType:"external",message:{role:"user",content:"carry on"}}' > "$SR_T"; sr_typed approved 1   # the session the ruling verb and the approvals read
 sr_r_open $((SR_E0 - 10800)) approve:step3
 sr_r_put $((SR_E0 - 7200)) D9; sr_r_rule $((SR_E0 - 5400)) D9; sr_r_put $((SR_E0 - 3600)) D9; sr_r_rule $((SR_E0 - 1800)) D9   # before
 SR_AT=$SR_E0 sr_poke approve plan 'approved' >/dev/null 2>&1

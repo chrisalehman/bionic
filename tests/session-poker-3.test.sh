@@ -488,8 +488,8 @@ expect_eq "57w7 a task-scale dealing owes no whole read" "" \
   "$(bash -c '. "$1" && facts_owed double task' _ "$S57_LIB" | /usr/bin/grep -F whole)"
 
 # ---------- §WAIVE: the verb, one event in the run's log ----------
-s57_reset; s42_snap "$R57" "$P57"
-poke "$R57" waive adversarial 'Ship it, the fix is one line.'
+s57_reset; s42_snap "$R57" "$P57"; said_as typed "$R57" 'Ship it, the fix is one line.' 'keep C:\new\t as written' 'keep a | out' 'Ship it.' $'two\nlines'
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive adversarial 'Ship it, the fix is one line.'
 expect_eq "57v §WAIVE waive writes the waiver (exit 0)" "0" "$RC"
 expect_eq "57v2 …as one waiver event in the run's log, the plan unchanged" \
   "run/v1|ev=waiver|question=adversarial|head=${S57_C4}|by=Dana Fixture|said=Ship it, the fix is one line.|same" \
@@ -501,22 +501,22 @@ s57_add "$P57" "$(bash -c '. "$1" && proof_line review "$2" "$(date -u -v+1M +%Y
   _ "$S57_LIB" "$S57_C4" record/wave-01-fixture/adversarial-fail-piece.md)"
 s57_state "$P57" "$S57_C4"
 expect_eq "57v7 …so a failing fact registered after it is newer than the waiver" "failing	record/wave-01-fixture/adversarial-fail-piece.md" "$(s57_of "$S57_AD")"
-poke "$R57" waive structure 'keep C:\new\t as written'
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive structure 'keep C:\new\t as written'
 expect_eq "57v7b a reply with backslashes is written (exit 0)" "0" "$RC"
 expect_contains "57v7c …byte for byte" '|said=keep C:\new\t as written|' "$(/usr/bin/grep -F '|question=structure|' "$L57")"
-poke "$R57" waive structure 'keep a | out'
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive structure 'keep a | out'
 expect_eq "57v7d a reply holding a bar is refused (exit 1), and the log holds no waiver of it" "1|0" \
   "$RC|$(/usr/bin/grep -c 'said=keep a ' "$L57")"
 s42_snap "$R57" "$P57"
-poke "$R57" waive verdict 'Ship it.'
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive verdict 'Ship it.'
 s42_unchanged "57v8 a question outside the set" 1 "$P57"
-poke "$R57" waive regression 'Ship it.'
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive regression 'Ship it.'
 s42_unchanged "57v9 the regression is no question to waive: its whole run runs once" 1 "$P57"
-poke "$R57" waive adversarial $'two\nlines'
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive adversarial $'two\nlines'
 s42_unchanged "57v10 a reply with a line break" 1 "$P57"
-poke "$R57" waive adversarial
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive adversarial
 s42_unchanged "57v11 no reply (the usage error)" 2 "$P57"
-poke "$R57" waive adversarial '   '
+CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive adversarial '   '
 s42_unchanged "57v12 a blank reply (the usage error)" 2 "$P57"
 expect_eq "57v13 no projection copy is left beside the plan" "" \
   "$(find "$R57/.bionic/docs/plans" -name '*.plan.md.*' 2>/dev/null)"
@@ -997,7 +997,7 @@ expect_contains "LR-3 finding-move takes the record as registered, and refuses o
 lr_reg owed_open finding:record:wave-01-fixture:adv-log.md:1 'fixture: the finding' 'poker: fixture item' >/dev/null 2>&1
 expect_contains "LR-4a precondition: the finding's item is open before the waiver" \
   "finding:record:wave-01-fixture:adv-log.md:1" "$(lr_owed)"
-poke "$RLR" waive adversarial 'Ship it, the fix waits on the next release.'
+said_as typed "$RLR" 'Ship it, the fix waits on the next release.'; CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RLR" waive adversarial 'Ship it, the fix waits on the next release.'
 expect_eq "LR-4 waive writes the waiver (exit 0)" "0" "$RC"
 expect_absent "LR-4b …and closes the finding's item of the review the log alone holds (LR-4a read the same register)" \
   "finding:record:wave-01-fixture:adv-log.md:1" "$(lr_owed)"
