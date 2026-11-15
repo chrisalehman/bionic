@@ -1,43 +1,37 @@
 #!/bin/bash
-# tests/replay-bed.test.sh — the replay bed: closed runs replayed from tracked, scrubbed copies.
+# tests/replay-bed.test.sh — the replay bed: closed runs replayed from tracked, scrubbed recordings.
 #
-# The bed reads tests/fixtures/replay alone: version-14 copies of two closed runs and of one cut mid-run, and
-# one expected key=value file per release card with the facts the record lost listed in `gaps`.
+# The bed reads tests/fixtures/replay alone: recordings at version 15 of two closed runs and of one cut mid-run, each
+# its page, its run log and its gaps list (the facts its older files never held) beside its review and check files,
+# and one expected key=value file per release card with the facts the record lost listed in `gaps`.
 #
-#   §TRACKED  every fixture is a tracked file, neither the bed nor the scrub names the project's own record
-#             store, and the private-name scan passes over the fixtures.
-#   §CARDS    for each card, in a world brought forward, the reader's answers at the card's instant equal its
-#             expected file less the gaps list; the cut run is read as it stands at 14, beside the hand-written lines.
-#   §PAGES    the release card rendered in each card's world, brought forward, equals the replay table that card
-#             printed, less the gaps list; in the one world where a criterion was pending with cells written
-#             by hand, the act names those cells on its gaps list and the reader at 15 reads it pending.
+#   §TRACKED  every fixture is a tracked file, every page reads 15 and none holds an old home, neither the bed nor
+#             the scrub names the project's own record store, and the private-name scan passes over the fixtures.
+#   §CARDS    for each card, the reader's answers over its run's log cut at the card's instant equal its expected
+#             file less the gaps list; the cut run is read whole, its log joined by the hand-written lines.
+#   §PAGES    the release card rendered in each card's world, its run as it stood at the instant, equals the replay
+#             table that card printed, less the gaps list; in the one world where a criterion was pending with cells
+#             written by hand, the reader reads it pending.
 #   §CATCH    a copy of the reader with the replace rule taken out, then the cancel rule, disagrees with a card.
 #   §COVER    every question of the closed list is asked and none is refused, and every event type has a line.
 #   §FOLLOWS  a review row's rendered brief starts its range at the reader's last review proof of its questions,
 #             and a step card asks again for an approval a cancel appended to the run's log retracted.
-#   §OPEN     run_open asks the reader's step of a run brought forward, whatever its plan's prose says; a run with
-#             no log is judged from its plan, so each closed fixture run reads closed and the cut run open.
+#   §OPEN     run_open asks the reader's step of a run, whatever its plan's prose says; a run with no log is judged
+#             from its plan; each closed fixture run reads closed and the cut run open.
 #   §FOLLOWS-CONTINUATION  close-out's check reads a debt only the run's log holds into its debt line and Deferrals.
 #   §AGREE    in each card's world, the release card's Reviews lines and the sheet's reviews line count alike, and
 #             both print the reader's acts taken by hand and open asks at the log the card read.
-#   §HALF     a run not brought forward, its approval and landings in its plan and records and what came after in
-#             its log: a landing the log appends reads once and last, the run reads open at the plan's step, and a
+#   §HALF     the cut run as it stood at 14, its approval and landings in its plan and records and what came after
+#             in its log: a landing the log appends reads once and last, the run reads open at the plan's step, and a
 #             cancel of the plan's approval the log appends is honoured by the card, the sheet and the tick.
 #
-# A CARD'S INSTANT. The reader answers a run as it stands, so a card's world holds as its run log the reader's
-# own translation of the fixture up to the card's instant, in the translation's order: a line with no instant
-# of its own stands where the translation put it. The cut run has no log, so it is translated as it is read.
-# A CARD'S WORLD IS BROUGHT FORWARD by the act itself (scripts/bring-forward.sh), as a person brings an open run
-# forward: its page is rewritten at 15 and its plan and record kept, and then the translation cut at the instant is
-# moved over the whole log the act wrote. An open run is carried at 15 and the card asks the commit gate first, so
-# a card is asked only of a page at 15; whatever the act drops or moves shows as a card or a fact apart.
-# A WORLD WHOSE LOG IS MOVED INTO PLACE is a run whose log is the whole truth, which in the reader's terms is a run
-# brought forward (lib/reader.sh `reader_brought`: kept/ stands beside a log that is not its kept copy), so each
-# world asked no card is marked so by `brought` where its log is placed, and its plan's later lines are not read
-# beside the log. The closed runs, the cut run and §HALF's run stay at 14: they prove how a plan at 14 is read.
+# A CARD'S INSTANT. The reader answers a run as it stands, so a card's world holds as its run log the recording cut
+# at the card's instant, in the log's order: a line with no instant of its own stands where the log put it.
 #
-# FIXTURE FIDELITY. The fixtures are real files but hand-written.log: the lines of the event types no closed
-# run holds, in the landing record's own shapes, each marked fixture=hand-written. They join the cut run only.
+# FIXTURE FIDELITY. Each recording was made once from its run's version-14 page and record files, which stand in
+# git at the commit §HALF names: its log holds every fact those files held that a line can carry, in the order they
+# happened, its gaps list the rest, and its page what a person wrote. The fixtures are real files but hand-written.log: the lines of the event types no
+# closed run holds, each marked fixture=hand-written. They join the cut run only.
 
 set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
@@ -48,8 +42,8 @@ B='\.bio''nic/'
 
 section "TRACKED"
 for d in wave-46-asks-nothing wave-49-what-a-run-costs wave-49-mid; do
-  expect_eq "$d: its plan and its landing record are tracked" "1 1" \
-    "$($GIT ls-files "$F/$d" | grep -c '\.plan\.md$') $($GIT ls-files "$F/$d" | grep -c '/landing-proofs\.log$')"
+  expect_eq "$d: its page, its run log and its gaps list are tracked" "1 1 1" \
+    "$($GIT ls-files "$F/$d" | grep -c '\.plan\.md$') $($GIT ls-files "$F/$d" | grep -c '/run\.log$') $($GIT ls-files "$F/$d" | grep -cx "$F/$d/gaps")"
 done
 expect_eq "one expected file per release card and the gaps list are tracked" "4 1" \
   "$($GIT ls-files "$F" | grep -c '/release-approval-\(93683c5e\|31da41f7\|fcbb975f\|f87acbfc\)\.facts$') $($GIT ls-files "$F/gaps" | wc -l | tr -d ' ')"
@@ -77,14 +71,8 @@ fi
 
 RD="$R/payload/scripts"   # the reader under test; §CATCH points it at a planted copy
 ask() { bash "$RD/reader.sh" "$@"; }
-events() { ( . "$RD/lib/reader.sh" && reader_events "$1" ); }
-brought() { mkdir -p "$1/kept"; }  # <record directory> -> its run read as brought forward
 rec() { printf '%s/record/%s' "${1%/plans/*}" "$(basename "$1" .plan.md)"; }  # <plan> -> its record directory
-stands() { echo "$(ask "$1" header canonical_sdlc_version) $([ -f "$(rec "$1")/kept/${1##*/}" ] && echo kept)"; }  # <plan> -> its version and whether the act kept its page
-# <plan> <log> -> the world's run brought forward as a person brings one, by the act on this copy, and then <log>
-# moved in as its run log. The act writes the whole run's translation, while the world stands at an instant the run
-# was open, so the log it holds is the translation cut there; the act's kept copy beside it marks it brought forward.
-forward() { bash "$R/payload/scripts/bring-forward.sh" "$1" >/dev/null && mv "$2" "$(rec "$1")/run.log"; }
+events() { cat "$(rec "$1")/run.log"; }  # <plan> -> its run's log, as recorded
 # A reader answer as the expected files' keys, by question: a value names its fact, a count stands for a list
 # whose items the cards only count.
 _PROJ='function f(k,   i, n, p) { n = split($0, p, "|"); for (i = 2; i <= n; i++) if (index(p[i], k "=") == 1) return substr(p[i], length(k) + 2); return "" }
@@ -138,26 +126,21 @@ WORLDS=""
 for x in "$X"/*.facts; do
   n="${x##*/}"; n="${n%.facts}"; w="$n"
   [ -d "$X/$w" ] || w="$(cd "$X" && ls -d */record/*/"$n.md" | cut -d/ -f1)"
-  cp -R "$X/$w" "$WORLD_ROOT/$n"; p="$(ls "$WORLD_ROOT/$n"/plans/*/*.plan.md)"; at="$(sed -n 's/^card\.at=//p' "$x")"
-  # The run is brought forward and its log moved into place whole, so the reader reads it alone, even while empty;
-  # the cut ends the translation early, so the pipe's status is not the move's condition.
-  if [ -n "$at" ]; then events "$p" | cut_at "$at" > "$WORLD_ROOT/$n.log"; forward "$p" "$WORLD_ROOT/$n.log"
-  else cat "$X/hand-written.log" >> "$WORLD_ROOT/$n/record/$(basename "$p" .plan.md)/landing-proofs.log"; fi
+  cp -R "$X/$w" "$WORLD_ROOT/$n"; p="$(ls "$WORLD_ROOT/$n"/plans/*/*.plan.md)"; at="$(sed -n 's/^card\.at=//p' "$x")"; l="$(rec "$p")/run.log"
+  if [ -n "$at" ]; then cut_at "$at" < "$l" > "$l.cut"; mv "$l.cut" "$l"; else cat "$X/hand-written.log" >> "$l"; fi
   WORLDS="$WORLDS $n:$w:$p"
 done
 D="$(disagree)"
 for e in $WORLDS; do n=${e%%:*}; w=${e#*:}; p=${w#*:}; w=${w%%:*}
-  grep -q '^card\.at=' "$X/$n.facts" && expect_eq "$n: its world is brought forward by the act, its page at 15 and kept" \
-    "canonical_sdlc_version=15 kept" "$(stands "$p")"
   expect_eq "$n: the reader answers as many facts as its expected file holds less the gaps" \
     "$(less "$n" "$w" < "$X/$n.facts" | wc -l | tr -d ' ')" "$(facts "$p" "$X/$n.facts" | less "$n" "$w" | wc -l | tr -d ' ')"
   expect_empty "$n: every answer equals its expected fact" "$(printf '%s\n' "$D" | grep "^$n ")"
 done
 
 section "PAGES"
-# A card's world is its fixture cut to the instant as the scrub cuts a run (log, pages, born rows, landed cells, state
-# lines), on this project's objects at the card's head (every fixture head is a commit here). A file the record lost
-# is a stand-in: the advances ask only that it exists.
+# A card's world is its recording cut to the instant (its log, its pages and the rows born after it), on this
+# project's objects at the card's head (every fixture head is a commit here). A file the record lost is a stand-in:
+# the advances ask only that it exists.
 PS=fe11a5e0-0000-4000-8000-0000000000a1; . "$(dirname "$0")/lib/bound-marker.sh"
 page() {  # <page file> -> its replay table as key=value: each decision by its key, each carry by its finding
   sed -n -e 's/^carried: \(.*\)/card.carried.\1=yes/p' -e 's/^release-approval\/v1|dec=[0-9]*|key=\([^|]*\)|/card.decision.\1=/p' "$1" 2>/dev/null; }
@@ -173,28 +156,19 @@ for x in "$X"/release-approval-*.facts; do
   at="$(sed -n 's/^card\.at=//p' "$x")"; h="$(sed -n 's/^card\.head=//p' "$x")"; d="$WORLD_ROOT/pages/release-approval-${h:0:8}"
   mkdir -p "$d/.bio""nic"; cp -R "$X/$w" "$d/.bio""nic/docs"; p="$(ls "$d"/.bio*/docs/plans/*/*.plan.md)"; c="${p%/plans/*}/record/$(basename "$p" .plan.md)"
   for f in "$c"/release-approval-*.md; do [ "$(sed -n 's/^release-approval\/v1|plan=.*|at=\([^|]*\)|.*/\1/p' "$f")" \< "$at" ] || rm -f "$f"; done
-  # The page is cut by the reader's answers at the cut log, so that log stands marked while the page is cut; the marks
-  # are then lifted and the run, page and record as they stood at the instant, is brought forward by the act.
-  events "$(ls "$X/$w"/plans/*/*.plan.md)" | cut_at "$at" > "$d.log"; cp "$d.log" "$c/run.log"; brought "$c"
-  o=" $(born < "$c/run.log") "
-  # A matrix row whose block's waiver: line is timed past the instant was not waived then: it reads pending, its other
-  # cells as written, so the act meets the row as the run held it.
-  lw=" $(awk -v a="$at" '/^## /{ m = ($0 == "## Verification Matrix") } m && /^AC-[^ :]+:/{ b = $1; sub(/:$/, "", b) }
-    m && /^  waiver:/ && match($0, /20[0-9-]+T[0-9:]+Z/) && substr($0, RSTART, RLENGTH) > a { print b }' "$p" | tr '\n' ' ') "
-  awk -F'|' -v l=" $(ask "$p" landed | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | tr '\n' ' ') " -v a="$at" -v o="$o" -v g=" $(events "$(ls "$X/$w"/plans/*/*.plan.md)" | born) " -v lw="$lw" '
-    /^## /{ t = ($0 == "## Tasks"); u = ($0 == "## SDLC State"); v = ($0 == "## Verification Matrix"); s = 0 }
-    v && $2 ~ /^ AC-/ && $4 ~ /^ *waived *$/ { r = $2; gsub(/ /, "", r); if (index(lw, " " r " ")) $4 = " pending " }
-    u && /^(proved|waived|approved|moved): |^- T[0-9]+: landed / && match($0, /20[0-9-]+T[0-9:]+Z/) && substr($0, RSTART, RLENGTH) > a { next } t && !s && /^\| id \|/ { for (i = 2; i < NF; i++) if ($i ~ /^ *status *$/) s = i }
-    t && s && $2 ~ /^ T[0-9]/ { r = $2; gsub(/ /, "", r); if (index(g, " " r " ") && !index(o, " " r " ")) next
-      if ($s ~ /^ *landed *$/ && !index(l, " " r " ")) $s = " pending " }
-    { print }' OFS='|' "$p" > "$d.plan"; mv "$d.plan" "$p"
-  rm -rf "$c/kept" "$c/run.log"; forward "$p" "$d.log"
-  expect_eq "$n: its world is brought forward by the act before its card is asked" "canonical_sdlc_version=15 kept" "$(stands "$p")"
+  # A Tasks row born after the instant was not yet in the plan then, and no row waited on it.
+  cut_at "$at" < "$c/run.log" > "$d.log"; mv "$d.log" "$c/run.log"
+  awk -F'|' -v o=" $(born < "$c/run.log") " -v g=" $(born < "$X/$w/record/${c##*/}/run.log") " 'function late(r) { return index(g, " " r " ") && !index(o, " " r " ") }
+    /^## /{ t = ($0 == "## Tasks"); s = 0 } t && /^\| id \|/ { for (i = 2; i < NF; i++) if ($i ~ /^ *deps *$/) s = i }
+    t && $2 ~ /^ T[0-9]/ { r = $2; gsub(/ /, "", r); if (late(r)) next; n = split($s, a, /[ ,]+/); v = ""; k = 0
+      for (i = 1; i <= n; i++) if (a[i] != "") { if (late(a[i])) k = 1; else v = v (v == "" ? "" : ", ") a[i] }
+      if (k) $s = " " (v == "" ? "—" : v) " " } { print }' OFS='|' "$p" > "$d.plan"; mv "$d.plan" "$p"
   expect_true "$n: its head is a commit of this repository" $GIT cat-file -e "$h^{commit}"
   b="$(sed -n 's/^working-branch: //p' "$p" | head -1)"
   ( cd "$d" && git init -q && echo "$($GIT rev-parse --path-format=absolute --git-common-dir)/objects" > .git/objects/info/alternates \
     && git update-ref "refs/heads/$b" "$h" && git symbolic-ref HEAD "refs/heads/$b" && git reset -q --hard "$h" )
-  for f in $(grep -ohE '(record|specs)/[A-Za-z0-9._/-]+\.(log|md|txt)' "$c/kept/${p##*/}" | sort -u); do f="${p%/plans/*}/$f"
+  # The requirements are owed at the path the header's epic: and wave: name, which no line of the run spells.
+  for f in $(grep -ohE '(record|specs)/[A-Za-z0-9._/-]+\.(log|md|txt)' "$p" "$c/run.log" | sort -u) "specs/$(sed -n 's/^epic: //p' "$p" | head -1)/$(sed -n 's/^wave: //p' "$p" | head -1).requirements.md"; do f="${p%/plans/*}/$f"
     [ -e "$f" ] || { mkdir -p "${f%/*}"; echo "a stand-in for a file the record lost" > "$f"; }; done
   bound_marker "$d" "$PS" "$p" >/dev/null 2>&1
   a=""; for k in $(page "$X/$w/record/${c##*/}/$n.md" | sed -n 's/^card\.decision\.\([^=]*\)=.*|pick=other|.*/\1/p'); do a="$a --against $k"; done
@@ -202,14 +176,9 @@ for x in "$X"/release-approval-*.facts; do
   G="$(render "$d" "$p" $a | less "$n" "$w")"
   expect_eq "$n: the card rendered at its instant equals the card printed, less the gaps" "$W" "$G"
   [ "$W" = "$G" ] || sed 's/^/      render said: /' "$d.err"
-  if [ "$n" = release-approval-fcbb975f ]; then
-    # A criterion pending at the instant with an evidence and a verdict written into its cells by hand, which 15 has no
-    # place for: the act names them on its gaps list, and the card puts the criterion as a decision, as the run's did (the
-    # gaps list holds that decision out of the table above).
-    expect_eq "$n: AC-7.3 alone is named undischarged on the act's gaps list, by its evidence and auditor cells" "AC-7.3:auditor AC-7.3:evidence" \
-      "$(sed -n 's/^gap\/v1|ev=criterion|criterion=\([^|]*\)|field=\([^|]*\)|why=undischarged$/\1:\2/p' "$c/kept/gaps" | sort | tr '\n' ' ' | sed 's/ $//')"
-    expect_eq "$n: …and the reader at 15 reads it pending" "state=pending" "$(ask "$p" cell AC-7.3)"
-  fi
+  # A criterion pending at the instant with an evidence and a verdict written into its cells by hand, waived after it: the
+  # card puts it as a decision, as the run's did (the gaps list holds that decision out of the table above).
+  [ "$n" != release-approval-fcbb975f ] || expect_eq "$n: AC-7.3, its cells set by hand and waived after the instant, reads pending" "state=pending" "$(ask "$p" cell AC-7.3)"
   [ "$n" != release-approval-31da41f7 ] || { PG="$G"; PD="$d"; PP="$p"; PH="$h"; PA="$at"; }
 done
 
@@ -237,7 +206,7 @@ for e in $WORLDS; do n=${e%%:*}; p=${e##*:}; h="$(sed -n 's/^proof\.\([0-9a-f]*\
 done
 P49="$(ls "$X"/wave-49-what-a-run-costs/plans/*/*.plan.md)"
 expect_eq "header, row, criterion and cell answer from the closed plan" \
-  "canonical_sdlc_version=14|id=T1|criterion=AC-7.3|state=discharged by=waiver" \
+  "canonical_sdlc_version=15|id=T1|criterion=AC-7.3|state=discharged by=waiver" \
   "$(ask "$P49" header canonical_sdlc_version)|$(ask "$P49" row T1 | head -1)|$(ask "$P49" criterion AC-7.3 | grep '^criterion=')|$(ask "$P49" cell AC-7.3 | tr '\n' ' ' | sed 's/ $//')"
 A="$WORLD_ROOT/all.events"; { for e in $WORLDS; do events "${e##*:}"; done; events "$P49"; events "$(ls "$X"/wave-46-asks-nothing/plans/*/*.plan.md)"; } > "$A"
 TYPES="$(. "$RD/lib/log.sh" && printf '%s' "$LOG_TYPES")"; none=""; only=""
@@ -248,19 +217,16 @@ done
 expect_empty "every event type has a fixture line" "$none"
 expect_eq "the types no closed run holds a line of are the hand-written ones" " stalled admitted void decision debt abandon cancel" "$only"
 expect_eq "every hand-written line is marked, and one is a dispatch" "$(grep -c . "$X/hand-written.log") 1" \
-  "$(grep -c '[| ]fixture=hand-written[| ]' "$X/hand-written.log") $(grep -c '^line/v1|ev=dispatch|' "$X/hand-written.log")"
-MID="$(ls "$WORLD_ROOT"/wave-49-mid/plans/*/*.plan.md)"
-expect_contains "a hand-written refusal is an act taken by hand: a hand event that says it was a refusal" "|ev=hand|what=refusal|row=T14|" \
-  "$(events "$MID")"
+  "$(grep -c '[| ]fixture=hand-written[| ]' "$X/hand-written.log") $(grep -c '^run/v1|ev=dispatch|' "$X/hand-written.log")"
 
 section "FOLLOWS"
 # The brief follows the reader: over the closed run, a review row's rendered range starts where the reader's last
 # review proof of its questions stands, and each row's Questions are its own. The run is a project's docs root here,
-# its close line taken out of the copy: the verb renders for an open run only, and the range reads no step.
+# its close cancelled in the copy's log: the verb renders for an open run only, and the range reads no step.
 . "$(dirname "$0")/lib/bound-marker.sh"
 FW="$WORLD_ROOT/brief"; FB="$FW/.bio""nic"; mkdir -p "$FB"; cp -R "$X/wave-49-what-a-run-costs" "$FB/docs"; git -C "$FW" init -q
 FP="$(ls "$FB"/docs/plans/*/*.plan.md)"; FS=fe11a5e0-0000-4000-8000-000000000001; bound_marker "$FW" "$FS" "$FP"
-sed '/^- Step 9: delivered: /d' "$FP" > "$FP.open" && mv "$FP.open" "$FP"
+FL="$FB/docs/record/wave-49-what-a-run-costs/run.log"; printf 'run/v1|ev=cancel|of=step|n=9|at=2026-11-08T00:00:00Z\n' >> "$FL"
 last() { ask "$FP" reviews | awk -F'|' -v q="question=$1" '$1 == "run/v1" && index($0, "|ev=proof|") && index($0 "|", "|" q "|") { h = $0; sub(/.*\|head=/, "", h); sub(/\|.*/, "", h) } END { print h }'; }
 for r in T23:evidence T24:adversarial,structure; do id=${r%%:*}; q=${r#*:}
   ( cd "$FW" && CLAUDE_CODE_SESSION_ID=$FS bash "$R/hooks/session-poker.sh" brief "$id" "w49-$id" ) >/dev/null 2>&1
@@ -270,12 +236,12 @@ for r in T23:evidence T24:adversarial,structure; do id=${r%%:*}; q=${r#*:}
   expect_regex "$id: its range starts at that proof's head" "^Reviewed range: $h\\.\\." "$(grep '^Reviewed range' "$f")"
   expect_eq "$id: its Questions are the row's" "Questions: ${q//,/, }" "$(grep '^Questions:' "$f")"
 done
-# The sheet follows the reader: a copy of the closed run whose log is its own translation and three facts its plan
-# and record never held, its Step 9 retracted, a decision put and a review read; the sheet prints all three.
+# The sheet follows the reader: a copy of the closed run whose log is its recording and three facts the run never
+# held, its Step 9 retracted, a decision put and a review read; the sheet prints all three.
 SW="$WORLD_ROOT/sheet"; mkdir -p "$SW/.bio""nic"; cp -R "$X/wave-49-what-a-run-costs" "$SW/.bio""nic/docs"; git -C "$SW" init -q
 SP="$(ls "$SW"/.bio*/docs/plans/*/*.plan.md)"; SL="${SP%/plans/*}/record/wave-49-what-a-run-costs/run.log"
-{ events "$SP"; printf 'run/v1|ev=%s|at=2026-11-08T00:0%dZ\n' "cancel|of=step|n=9" 0 "decision|d=D90|verb=put|by=orchestrator|title=Only the log holds it" 1 \
-  "proof|kind=review|head=$(printf 'e%.0s' {1..40})|question=evidence|reader=w-T99|result=pass|scope=whole|evidence=record/x/log-only.md" 2; } > "$SL.t"; mv "$SL.t" "$SL"; brought "${SL%/*}"
+printf 'run/v1|ev=%s|at=2026-11-08T00:0%dZ\n' "cancel|of=step|n=9" 0 "decision|d=D90|verb=put|by=orchestrator|title=Only the log holds it" 1 \
+  "proof|kind=review|head=$(printf 'e%.0s' {1..40})|question=evidence|reader=w-T99|result=pass|scope=whole|evidence=record/x/log-only.md" 2 >> "$SL"
 sheet="$(cd "$SW" && TZ=America/Los_Angeles BIONIC_NOW_EPOCH=1794300000 bash "$R/hooks/session-poker.sh" sitrep "$SP" 2>/dev/null)"
 expect_contains "the sheet over the logged run names the run" "run.name: wave-49-what-a-run-costs" "$sheet"
 expect_eq "its step is the log's, Step 9 retracted, not the plan's current:" "run.step: 8" "$(printf '%s\n' "$sheet" | grep '^run.step: ')"
@@ -284,15 +250,12 @@ expect_contains "a review only the log holds is a review line" "review: question
 sheeted() { ( cd "$SW" && TZ=America/Los_Angeles BIONIC_NOW_EPOCH=1794300000 bash "$R/hooks/session-poker.sh" sitrep "$SP" 2>/dev/null ) | grep '^clock\.approved: '; }
 expect_regex "the sheet's Step-3 approval is the log's" '^clock\.approved: [0-9]' "$(sheeted)"
 printf 'run/v1|ev=cancel|of=approval|key=step3|at=2026-11-08T00:03Z\n' >> "$SL"
-expect_regex "…and a cancel the log appends takes it off the sheet, though the plan's approved-by: stands" '^clock\.approved: - ' "$(sheeted)"
-# The tick follows it too: in the same run, now with a log, a fact the log alone holds changes the tick's fill line.
+expect_regex "…and a cancel the log appends takes it off the sheet" '^clock\.approved: - ' "$(sheeted)"
+# The tick follows it too: in the same run, a fact the log alone holds changes the tick's fill line.
 # Each tick forgets the last one's digest, which would otherwise print only that nothing changed.
-FL="$FB/docs/record/wave-49-what-a-run-costs/run.log"; events "$FP" > "$FW/run.log"; mv "$FW/run.log" "$FL"; brought "${FL%/*}"
 nofill() { rm -f "$FB"/tmp/tick-digest-*; ( cd "$FW" && CLAUDE_CODE_SESSION_ID=$FS bash "$R/hooks/session-poker.sh" tick 2>&1 ) | grep -m1 '^poker: no FILL — '; }
 ( cd "$FW" && CLAUDE_CODE_SESSION_ID=$FS bash "$R/hooks/session-poker.sh" arm ) >/dev/null 2>&1
 expect_regex "the tick over the logged run fills nothing, every row landed" '^poker: no FILL — width=' "$(nofill)"
-sed '/^approved-by: /d' "$FP" > "$FP.t" && mv "$FP.t" "$FP"
-expect_regex "an approval only the log holds is the run's Step-3 approval to the tick" '^poker: no FILL — width=' "$(nofill)"
 printf 'run/v1|ev=cancel|of=approval|key=step3|at=2026-11-09T00:00:00Z\n' >> "$FL"
 expect_contains "a cancel the log appends makes the tick's Step-3 approval pending again" "Step-3 approval pending" "$(nofill)"
 grep '|ev=approval|key=step3|' "$FL" | sed 's/|at=[^|]*$/|at=2026-11-09T00:00:01Z/' >> "$FL"
@@ -300,28 +263,28 @@ printf 'run/v1|ev=order|act=given|said=hold the run|at=2026-11-10T00:00:00Z\n' >
 expect_eq "an order only the log holds holds the tick's fill" \
   'poker: no FILL — an order of the user stands: given 2026-11-10T00:00:00Z "hold the run"; order lift ends it' "$(nofill)"
 # The step card follows the reader: a render opens the step's approval on the run's register only while the log holds
-# no approval of it, so a cancel appended to the log reopens it though the plan's own approved-by: line still stands.
+# no approval of it, so a cancel appended to the log reopens it.
 CW="$WORLD_ROOT/card"; CS=fe11a5e0-0000-4000-8000-000000000002; CP="$CW/.bio""nic/docs/plans/e/wave-98-cancel.plan.md"
 mkdir -p "${CP%/*}" "$CW/.bio""nic/tmp"; git -C "$CW" init -q
-printf -- '---\ncanonical_sdlc_version: 15\nscale: wave\n---\n\n## Goal\n\nThe card follows the log.\n\n## SDLC State\n\ncurrent: 0\napproved-by: Dana Fixture 2026-11-01T00:00Z "approved"\n' > "$CP"
+printf -- '---\ncanonical_sdlc_version: 15\nscale: wave\n---\n\n## Goal\n\nThe card follows the log.\n' > "$CP"
 bound_marker "$CW" "$CS" "$CP"
 CL="$CW/.bio""nic/docs/record/wave-98-cancel"
 logged() { ( . "$RD/lib/log.sh" && RUN_LOG="$CL/run.log" log_append "$@" ); }
-logged step n=0 && logged approval key=step0 by=Dana; brought "$CL"
+logged step n=0 && logged approval key=step0 by=Dana
 carded() { ( cd "$CW" && CLAUDE_CODE_SESSION_ID=$CS bash "$RD/card.sh" step0 "$CP" >/dev/null 2>&1 0<&- ) || echo "rc=$?"
   bash -c '. "$1/roots.sh" && . "$1/owed.sh" && owed_list_plan "$2" "$3"' _ "$RD/lib" "$CP" "$CW" 2>/dev/null | cut -f1; }
 expect_true "card: the reader holds the logged approval of step0" ask "$CP" approved step0
 expect_empty "card: while the log holds the approval, the render opens nothing" "$(carded)"
 logged cancel of=approval key=step0
 expect_false "card: the cancel retracts the approval in the reader" ask "$CP" approved step0
-expect_eq "card: after the cancel the render opens the approval again, though the plan's approved-by: stands" "approve:step0" "$(carded)"
+expect_eq "card: after the cancel the render opens the approval again" "approve:step0" "$(carded)"
 # The landing report and the release note follow the reader: a landing only a run's log holds, with no landing
 # record beside it, is counted by the report and rendered in the note, and the note's cut drops a later landing.
 NW="$WORLD_ROOT/note"; NP="$NW/.bio""nic/docs/plans/e/w9.plan.md"; NR="$NW/.bio""nic/docs/record/w9"; mkdir -p "${NP%/*}" "$NR"
 printf -- '---\ncanonical_sdlc_version: 15\n---\n\n# w9\n' > "$NP"; git -C "$NW" init -q
 git -C "$NW" -c user.name=fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m w9; NC="$(git -C "$NW" rev-parse HEAD)"
 printf 'run/v1|ev=%s|row=T%s|commit=%s|%sat=2026-11-01T00:0%s:00Z\n' ready 1 "$NC" 'suite=a.test.sh|' 0 published 1 "$NC" 'kind=queue|' 3 \
-  ready 2 "$NC" 'suite=a.test.sh|' 4 published 2 "$NC" 'kind=hand|' 6 > "$NR/run.log"; brought "$NR"
+  ready 2 "$NC" 'suite=a.test.sh|' 4 published 2 "$NC" 'kind=hand|' 6 > "$NR/run.log"
 note() { ( cd "$NW" && BIONIC_GATE_DIR="$NW/gate" bash "$R/hooks/session-poker.sh" "$@" "$NP" 2>&1 ); }
 expect_contains "the report counts the log's landings" "landings: queue=1 hand=1 git=0 · ready-to-landed median=3.0m" "$(note landing-report --rows)"
 expect_contains "…and prints the queue landing's row" "T1 queue ready=2026-11-01T00:00:00Z landed=2026-11-01T00:03:00Z minutes=3.0" "$(note landing-report --rows)"
@@ -342,7 +305,7 @@ opened() { ( . "$RD/lib/run.sh" && run_open "$1" ); echo $?; }
 plant() {  # <wave> <current:> <Step 9 line> [log line…] -> the plan's path; its run log holds the lines given
   local w="$1" p="$WORLD_ROOT/open/plans/e/$1.plan.md"; mkdir -p "${p%/*}" "$WORLD_ROOT/open/record/$w"
   printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## SDLC State\n\ncurrent: %s\n%s\n' "$2" "$3" > "$p"; shift 3
-  [ $# -eq 0 ] || { printf '%s\n' "$@" > "$WORLD_ROOT/open/record/$w/run.log"; brought "$WORLD_ROOT/open/record/$w"; }
+  [ $# -eq 0 ] || printf '%s\n' "$@" > "$WORLD_ROOT/open/record/$w/run.log"
   printf '%s' "$p"
 }
 expect_eq "a run whose delivery is only its log's step 9 is closed, though its plan says current: 4" 1 \
@@ -356,13 +319,11 @@ expect_eq "with no log, current: 9 and no delivery is open, and a delivered: Ste
 expect_eq "the closed fixture runs read closed and the cut run open" "1 1 0" "$(opened "$P49") $(opened "$(ls "$X"/wave-46-asks-nothing/plans/*/*.plan.md)") $(opened "$(ls "$X"/wave-49-mid/plans/*/*.plan.md)")"
 
 section "FOLLOWS-CONTINUATION"
-# The second closed fixture run reopened at Step 8, its log its own translation, then that log and a debt only the log holds.
+# The second closed fixture run reopened at Step 8 by its log, then that log and a debt only the log holds.
 CW="$WORLD_ROOT/close"; CB="$CW/.bio""nic"; mkdir -p "$CB/tmp"; cp -R "$X/wave-49-what-a-run-costs" "$CB/docs"; git -C "$CW" init -q
 CP="$(ls "$CB"/docs/plans/*/*.plan.md)"; CR="$CB/docs/record/$(basename "$CP" .plan.md)"
 printf 'archive-root: %s\n' "$(sed -n 's/^archive-root: *//p' "$CP" | head -1)" > "$CB/config.yaml"
-sed -e '/^- Step 9: delivered: /d' -e 's/^current: 9$/current: 8/' "$CP" > "$CP.open" && mv "$CP.open" "$CP"
-printf '# continuation\n\n## Deferrals\n' > "$CR/continuation.md"
-events "$CP" > "$CW/own.log"; mv "$CW/own.log" "$CR/run.log"; brought "$CR"
+printf '# continuation\n\n## Deferrals\n' > "$CR/continuation.md"; printf 'run/v1|ev=cancel|of=step|n=9|at=2026-11-08T00:00:00Z\n' >> "$CR/run.log"
 closecheck() { ( cd "$CW" && env -u CLAUDE_CODE_SESSION_ID HOME="$CW/home" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$R/payload" \
   BIONIC_CLAUDE_HOME="$CW/home/.claude" bash "$RD/close-out.sh" "$CP" check 2>&1 ); }
 C0="$(closecheck)"
@@ -392,9 +353,11 @@ done
 
 section "HALF"
 # The cut run as a run reads between its writers moving to the log and its crossing: its approval and landings in its
-# plan and records, what came after in a log beside them, not brought forward. The step card is not asked: a step
-# below the run's own is answered by being past it, so it reopens nothing whatever the log says.
-HW="$WORLD_ROOT/half"; HB="$HW/.bio""nic"; mkdir -p "$HB/tmp"; cp -R "$X/wave-49-mid" "$HB/docs"; git -C "$HW" init -q
+# plan and records, what came after in a log beside them. The run is read as it stood at 14, from git at the commit
+# before it was recorded at 15. The step card is not asked: a step below the run's own is answered by being past it,
+# so it reopens nothing whatever the log says.
+PIN=1d09c8990abaf6cdacfb9db3cda9e58f8ad46ad3; mkdir -p "$WORLD_ROOT/pin"; $GIT archive "$PIN" "$F/wave-49-mid" | tar -x -C "$WORLD_ROOT/pin"
+HW="$WORLD_ROOT/half"; HB="$HW/.bio""nic"; mkdir -p "$HB/tmp"; cp -R "$WORLD_ROOT/pin/$F/wave-49-mid" "$HB/docs"; git -C "$HW" init -q
 HP="$(ls "$HB"/docs/plans/*/*.plan.md)"; HR="$HB/docs/record/$(basename "$HP" .plan.md)"; HS=fe11a5e0-0000-4000-8000-000000000003
 bound_marker "$HW" "$HS" "$HP"; ( cd "$HW" && CLAUDE_CODE_SESSION_ID=$HS bash "$R/hooks/session-poker.sh" arm ) >/dev/null 2>&1
 hrows() { ask "$HP" landed | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | tr '\n' ' '; }
