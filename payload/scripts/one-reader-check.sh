@@ -3,9 +3,10 @@
 #
 #   bash one-reader-check.sh [<root>]      <root> defaults to the checkout this script sits in
 #
-# It reads every `*.sh` file under <root>/hooks and <root>/payload/scripts (symlinks not followed) and
-# prints one finding per line, `<kind>TAB<where>TAB<detail>`, then the seven counts, one `key=value`
-# line each and always in this order, as the last seven lines:
+# It reads every `*.sh` file under <root>/hooks and <root>/payload/scripts (symlinks not followed), and for
+# names alone also every file under those two, every `*.sh` file under <root>/tests outside tests/fixtures/
+# and the files of the loaded skill set, and prints one finding per line, `<kind>TAB<where>TAB<detail>`,
+# then the seven counts, one `key=value` line each and always in this order, as the last seven lines:
 #
 #   parsers=<n>        files that parse a plan or a log, outside the reader's own files
 #   plan_writers=<n>   files that write a plan
@@ -13,7 +14,8 @@
 #   hook_refusals=<n>  refusal call sites inside a registered hook's own file
 #   loader_copies=<n>  files holding a pasted copy of the loader block
 #   unheard_folds=<n>  lines that take the run's fold or a reader answer and lose its exit
-#   names=<n>          lines that name a retired verb, read by the shape of its use, or a removed file
+#   names=<n>          lines that name a retired verb, read by the shape of its use, a removed file or function,
+#                      or a deleted plan section, and entries of the admitted list that admit no line
 #
 # It refuses a parser, a plan writer, a shared type and a name: when any of those four counts is
 # above nought it prints one line for each such finding on stderr, `one-reader-check: refused — <kind>
@@ -62,14 +64,21 @@
 #     finding. A NAME is also a removed file's name as its own word: the old landing record's and the
 #     asks register's (`landing[-]proofs.log`, `asks.stat[e]`), which a reader's file (READER_FILES) reads
 #     an older run by and is admitted there, and the two deleted hook scripts' (`stop[-]guard.sh`,
-#     `agent[-]context[-]guard.sh`), admitted nowhere. A pattern brackets a hyphen or a letter (`[-]`,
-#     `[t]`) so that no name stands whole in this file: its own text matches none of them, and a word
-#     search of the tree for a name finds none here.
+#     `agent[-]context[-]guard.sh`), admitted nowhere; and, as its own word, a removed function's name
+#     or a verb's that is no English word and that no other pattern reads whole. In the loaded set
+#     (walls.sh `loaded_set`, the net-zero wall's one definition, asked and never restated) a NAME is
+#     also a deleted plan section, by its `##` heading or by the deletion list's words for it (`the
+#     verificatio[n] matrix`), and nothing there is admitted. Under tests/ a line is admitted only by an
+#     entry of ADMITTED, by its file and its whole text, one line for each entry; an entry that admits
+#     no line is a NAME at its own line. A pattern brackets a hyphen or a letter (`[-]`, `[t]`) so that
+#     no name stands whole in this file: its own text matches none of them, and a word search of the
+#     tree for a name finds none here.
 #
 # THE READER'S FILES are named once, in READER_FILES: a parse inside one of them is the reader's own
 # and is admitted. THE ACT'S WRITES are named once, in ACT_WRITES, each a `<file>:<function>`: a plan write inside
 # that function is the act's own and is admitted, and a write in any other function of its file, or under that
-# function's name in another file, is named. Nothing else is admitted.
+# function's name in another file, is named. THE ADMITTED LIST is ADMITTED, a fixture of the suites'
+# lines that name a retired verb on purpose, each with its class. Nothing else is admitted.
 #
 # Executed, never sourced; bash 3.2.
 
@@ -79,10 +88,18 @@ READER_FILES="payload/scripts/lib/reader.sh payload/scripts/lib/plan-read.sh pay
 # The act that brings a run forward rewrites its plan: its plan is left holding only what a person wrote.
 ACT_WRITES="payload/scripts/bring-forward.sh:bf_main"
 
+ADMITTED="tests/fixtures/names-admitted.txt"
+
 case "${BASH_SOURCE[0]}" in */*) _orc_dir="${BASH_SOURCE[0]%/*}" ;; *) _orc_dir="." ;; esac
 root="${1:-$(cd "$_orc_dir/../.." && pwd -P)}"
 if [ ! -d "$root/hooks" ] || [ ! -d "$root/payload/scripts" ]; then
   printf 'one-reader-check: %s holds no hooks/ and payload/scripts/\n' "$root" >&2
+  exit 2
+fi
+# The loaded set is the net-zero wall's, asked of the walls library beside this script and read in <root>.
+loaded_members="$( . "$_orc_dir/lib/walls.sh" >/dev/null 2>&1 && loaded_set)"
+if [ -z "$loaded_members" ]; then
+  printf 'one-reader-check: %s/lib/walls.sh names no loaded set\n' "$_orc_dir" >&2
   exit 2
 fi
 cd "$root" || exit 2
@@ -90,21 +107,50 @@ cd "$root" || exit 2
 hook_files="$(/usr/bin/grep -o -E 'hooks/[A-Za-z0-9_.-]+\.sh' hooks/hooks.json 2>/dev/null | LC_ALL=C sort -u | tr '\n' ' ')"
 files=()
 while IFS= read -r f; do files+=("$f"); done < <(find hooks payload/scripts -type f -name '*.sh' | LC_ALL=C sort)
+[ "${#files[@]}" -gt 0 ] || files=(/dev/null)
+suite_files=(); loaded_files=()
+while IFS= read -r f; do suite_files+=("$f"); done < <(find tests -type f -name '*.sh' ! -path 'tests/fixtures/*' 2>/dev/null | LC_ALL=C sort)
+# Unquoted, so each member's `*` is expanded here, in <root>.
+for f in $loaded_members; do [ -f "$f" ] && loaded_files+=("$f"); done
 
-names_standing() {  # -> `<file>:<line>:<text>` for each line naming a retired verb, once, in file and line order
+names_found() {  # <file or directory>... -> `<file>:<line>:<text>` for each line naming a retired verb, one line per search
   local g='anchor[s]|patro[l]|wai[t]|cove[r]|epic[-]row|continuation[-]fill|interval[-]default|windo[w]|fill[-]report|dispositio[n]'
+  /usr/bin/grep -rnE 'launch[-]sync|ledger[-](add|set)|task[-](set|split)|tasks[-]prose|row[-_]landed|session-poker\.sh"? delive[r]|`delive[r]`|delive[r] <(row|id)>|^ *delive[r]\)' "$@"
+  /usr/bin/grep -rnE 'matrix[-](set|retier|render)|waive[-]row|poker_verb_discharg[e]|discharg[e]\)|(session-poker\.sh|plan_verb_open|plan_verb_swa[p]|pv_next) discharg[e]' "$@" \
+    | /usr/bin/grep -v -e '^payload/scripts/lib/translate\.sh:' -e 'w == "'
+  /usr/bin/grep -rnE "(session-poker\\.sh|\\\$\\{?[A-Za-z_]*(poker|POKER)[A-Za-z_]*\\}?)[\"']? ($g)([^a-z_-]|\$)|poker_verb_(${g//[-]/_})([^a-z_]|\$)" "$@"
+  /usr/bin/grep -rnE --include='*poker*.sh' "^ *([a-z-]+\\|)*($g)(\\|[a-z-]+)*\\)" "$@"
+  /usr/bin/grep -rnE 'step[-](line|field)|regressio[n][-]runs|regression_runs_coun[t]|units_set_curren[t]|units_step_(line|fields)|poker_verb_regressio[n]\b|\|budge[t]\||\|regressio[n]\|shar[e]\||confirm[-_]row|matrix_block_ke[y]|poker_verb_budge[t]|budge[t][-]override|session-poker\.sh"? budge[t]|^  budge[t]\)$' "$@" \
+    | /usr/bin/grep -v -e 'PLAN_READ_GONE_KEYS='
+  /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(landing[-]proofs\.log|asks\.stat[e])([^A-Za-z0-9_]|$)' "$@" \
+    | awk -F: -v r=" $READER_FILES " '!index(r, " " $1 " ")'
+  /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(stop[-]guard|agent[-]context[-]guard)\.sh([^A-Za-z0-9_]|$)' "$@"
+  /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(plan_verb_swa[p]|plan_bring_forwar[d]|ensure_walk_pointe[r]|walk_pointer_wante[d]|lift_contract_field[s]|brief_validate_field[s]|brief_body_advisorie[s]|dp_scaffold_marke[d]|scale_branch_numbe[r]|units_step_fiel[d]|finding[-]stated|continuation[-]fill|interval[-]default|fill[-]report)([^A-Za-z0-9_]|$)' "$@"
+}
+
+# ADMITTED names the suites' lines that may name a retired verb, each `<class>TAB<file>TAB<text>`, the text the
+# whole line: an entry admits one line of that file with that text, wherever it stands, and an entry left over is
+# a finding at the list's own line. Only a line under tests/ is admitted.
+names_admit() {  # `<file>:<line>:<text>` on stdin, once each -> those no entry admits, then each entry that admits none
+  LC_ALL=C awk -v list="$ADMITTED" '
+    BEGIN { cls = "|plant|old run|refusal|old home|fixture text|"
+      while ((getline e < list) > 0) { n++
+        if (e == "" || e ~ /^#/) continue
+        c = index(e, "\t"); r = substr(e, c + 1); d = index(r, "\t")
+        if (c < 2 || d < 2 || !index(cls, "|" substr(e, 1, c - 1) "|")) { gsub(/\t/, " ", e); print list ":" n ":not an entry: " e; continue }
+        k = substr(r, 1, d - 1) SUBSEP substr(r, d + 1); q[k, ++qn[k]] = n; ent[n] = substr(r, 1, d - 1) ": " substr(r, d + 1) } }
+    { f = $0; sub(/:.*/, "", f); t = substr($0, length(f) + 2); t = substr(t, index(t, ":") + 1); k = f SUBSEP t
+      if (f ~ /^tests\// && qi[k] < qn[k]) qi[k]++; else print }
+    END { for (k in qn) for (i = qi[k] + 1; i <= qn[k]; i++) print list ":" q[k, i] ":admits no line: " ent[q[k, i]] }'
+}
+
+names_standing() {  # -> `<file>:<line>:<text>` for each line naming a retired verb or, in the loaded set, a deleted plan section
   {
-    /usr/bin/grep -rnE 'launch[-]sync|ledger[-](add|set)|task[-](set|split)|tasks[-]prose|row[-_]landed|session-poker\.sh"? delive[r]|`delive[r]`|delive[r] <(row|id)>|^ *delive[r]\)' hooks payload/scripts
-    /usr/bin/grep -rnE 'matrix[-](set|retier|render)|waive[-]row|poker_verb_discharg[e]|discharg[e]\)|(session-poker\.sh|plan_verb_open|plan_verb_swa[p]|pv_next) discharg[e]' hooks payload/scripts \
-      | /usr/bin/grep -v -e '^payload/scripts/lib/translate\.sh:' -e 'w == "'
-    /usr/bin/grep -rnE "(session-poker\\.sh|\\\$\\{?[A-Za-z_]*(poker|POKER)[A-Za-z_]*\\}?)[\"']? ($g)([^a-z_-]|\$)|poker_verb_(${g//[-]/_})([^a-z_]|\$)" hooks payload/scripts
-    /usr/bin/grep -rnE --include='*poker*.sh' "^ *([a-z-]+\\|)*($g)(\\|[a-z-]+)*\\)" hooks payload/scripts
-    /usr/bin/grep -rnE 'step[-](line|field)|regressio[n][-]runs|regression_runs_coun[t]|units_set_curren[t]|units_step_(line|fields)|poker_verb_regressio[n]\b|\|budge[t]\||\|regressio[n]\|shar[e]\||confirm[-_]row|matrix_block_ke[y]|poker_verb_budge[t]|budge[t][-]override|session-poker\.sh"? budge[t]|^  budge[t]\)$' hooks payload/scripts \
-      | /usr/bin/grep -v -e 'PLAN_READ_GONE_KEYS='
-    /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(landing[-]proofs\.log|asks\.stat[e])([^A-Za-z0-9_]|$)' hooks payload/scripts \
-      | awk -F: -v r=" $READER_FILES " '!index(r, " " $1 " ")'
-    /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(stop[-]guard|agent[-]context[-]guard)\.sh([^A-Za-z0-9_]|$)' hooks payload/scripts
-  } | LC_ALL=C sort -t: -k1,1 -k2,2n -u
+    names_found hooks payload/scripts ${suite_files[@]+"${suite_files[@]}"} ${loaded_files[@]+"${loaded_files[@]}"}
+    [ "${#loaded_files[@]}" -eq 0 ] || /usr/bin/grep -HniE \
+      '[#][#] +(verification matri[x]|sdlc stat[e]|handof[f]|dispatch ledge[r])|the (verificatio[n] matrix|stat[e] section|handof[f] section|dispatc[h] ledger)' \
+      "${loaded_files[@]}"
+  } | LC_ALL=C sort -t: -k1,1 -k2,2n -u | names_admit | LC_ALL=C sort -t: -k1,1 -k2,2n
 }
 
 # The patterns are written so that this file's own text matches none of them: `\/` and `[#]` stand

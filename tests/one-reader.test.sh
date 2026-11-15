@@ -21,7 +21,9 @@
 #                 retired, the five that wrote a matrix cell, the commands with no job, the writers of a step's line,
 #                 its fields, the regression's setting, its runs' count, a row's confirmation and the cap) and the old
 #                 records' and the deleted hooks' file names; the tree names none, an older run's names in the reader's
-#                 lists and files admitted. No verb writes a ledger file.
+#                 lists and files admitted. A suite's line stands only by an entry of the admitted list, an
+#                 entry with no line is refused, and the loaded set names no deleted plan section; the checkout's
+#                 suites and loaded set name none past the list. No verb writes a ledger file.
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted, one site for each name the
 #                 check counts; the dispatch wall lists none, and no fact the dispatch library says is in its file.
 #   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
@@ -45,7 +47,7 @@ cp -R "${BIONIC_SCRIPTS_DIR}/hooks" "$S/hooks"; cp -R "${BIONIC_SCRIPTS_DIR}/pay
 run() { bash "$CHECK" "$S" 2>"$S/.err"; }
 count() { printf '%s\n' "$1" | sed -n "s/^$2=//p"; }
 # One plant in a root that holds nothing else: the check's refusal lines, then its exit.
-lone() { local r="$S/lone-$1"; mkdir -p "$r/hooks" "$r/payload/scripts/lib"; cat > "$r/$2"; bash "$CHECK" "$r" 2>&1 >/dev/null; echo "rc=$?"; }
+lone() { local r="$S/lone-$1"; mkdir -p "$r/hooks" "$r/payload/scripts/lib" "$(dirname "$r/$2")"; cat > "$r/$2"; bash "$CHECK" "$r" 2>&1 >/dev/null; echo "rc=$?"; }
 BEFORE="$(run)"; BRC=$?
 L="$S/payload/scripts/lib"
 cat > "$L/planted-parse.sh" <<'EOF'
@@ -195,8 +197,26 @@ expect_eq "each planted line is named by its line: the verbs, the matrix cells',
 expect_eq "the tree names none, the plants thirteen" "0 13" "$(count "$BEFORE" names) $(count "$AFTER" names)"
 expect_eq "an older run's names in the translation, the plan reader's refused keys and a hand act's comparison stand and are no finding" "3 0" \
   "$(cd "$S" && /usr/bin/grep -lE 'matrix-set|regression-runs|waive-row' payload/scripts/lib/translate.sh payload/scripts/lib/plan-read.sh hooks/poker/line.sh | grep -c .) $(count "$BEFORE" names)"
+PV='bash "$POKER" launch-sync'; nl1() { tr '\n' ' ' | sed 's/ $//'; }
 expect_eq "a retired verb planted alone in a hook is refused by its file and line" "one-reader-check: refused — name hooks/p.sh:1 rc=1" \
-  "$(echo 'bash "$POKER" launch-sync T1' | lone name hooks/p.sh | tr '\n' ' ' | sed 's/ $//')"
+  "$(echo "$PV T1" | lone name hooks/p.sh | nl1)"
+# Under tests/ a line stands only by an entry of the admitted list, its file and its text; an entry with no line is refused.
+mkdir -p "$S/lone-suite/tests/fixtures" "$S/lone-listed/tests/fixtures" "$S/lone-stale/tests/fixtures"; echo "$PV T1" > "$S/lone-suite/tests/fixtures/f.sh"
+expect_eq "a suite line calling a retired verb or naming a removed function is refused by its file and line; a fixture's is not read" \
+  "one-reader-check: refused — name tests/p.test.sh:1 one-reader-check: refused — name tests/p.test.sh:2 rc=1" \
+  "$(printf '%s\n' "$PV T1" 'units_step_field "$p" 5' | lone suite tests/p.test.sh | nl1)"
+printf 'plant\ttests/p.test.sh\t%s\n' "$PV T1" | tee "$S/lone-stale/tests/fixtures/names-admitted.txt" > "$S/lone-listed/tests/fixtures/names-admitted.txt"
+expect_eq "the same line with an entry on the admitted list stands; the next, unlisted, is refused" "one-reader-check: refused — name tests/p.test.sh:2 rc=1" \
+  "$(printf '%s\n' "$PV T1" "$PV T2" | lone listed tests/p.test.sh | nl1)"
+expect_eq "an entry of the admitted list whose line is gone is refused by its own line" \
+  "one-reader-check: refused — name tests/fixtures/names-admitted.txt:1 rc=1" "$(echo 'true' | lone stale tests/p.test.sh | nl1)"
+expect_eq "in the loaded set a deleted plan section, by its heading or the list's words, and a retired verb are refused; what tells of one gone is not" \
+  "one-reader-check: refused — name skills/canonical-sdlc/SKILL.md:2 one-reader-check: refused — name skills/canonical-sdlc/SKILL.md:3 one-reader-check: refused — name skills/canonical-sdlc/SKILL.md:4 rc=1" \
+  "$(printf '%s\n' 'It holds no state, matrix or handoff section.' '| 3 Plan | the plan, with the Verification Matrix |' '## Dispatch Ledger' "$PV T1" \
+    | lone skill skills/canonical-sdlc/SKILL.md | nl1)"
+NA="${BIONIC_SCRIPTS_DIR}/tests/fixtures/names-admitted.txt"; TREE="$(bash "$CHECK" "$BIONIC_SCRIPTS_DIR" 2>&1)"; TRC=$?
+expect_eq "the checkout's suites and loaded set name none past the admitted list, every entry of which admits a line" "y names=0 rc=0" \
+  "$(awk -F'\t' 'NF >= 3 && $1 !~ /^#/ { n++ } END { if (n) print "y" }' "$NA" 2>/dev/null) $(printf '%s\n' "$TREE" | grep '^names=') rc=$TRC"
 n=0; for p in 'f="$1/landing-proofs.log"' '# the asks.state register' '# hooks/stop-guard.sh' 'bash "$H/agent-context-guard.sh" "$@"'; do n=$((n + 1))
   expect_eq "an old record's or a deleted hook's name planted alone is refused by its file and line: $p" "one-reader-check: refused — name payload/scripts/lib/p.sh:1 rc=1" \
     "$(echo "$p" | lone "file$n" payload/scripts/lib/p.sh | tr '\n' ' ' | sed 's/ $//')"; done

@@ -19,8 +19,8 @@
 
 GATE="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
 PROBE_SRC="${BIONIC_HOOKS_DIR}/preflight-probe.sh"
-# The rendered dispatch.md the gate itself reads at refusal time (T2, D3/D11) — the same
-# file `dp_scaffold_marked` in hooks/dispatch-preflight.sh resolves via `$HOOK_DIR/..`.
+# The rendered dispatch.md, whose fenced scaffold the suites read: the page the dispatch library's
+# refusals send a writer to.
 DISPATCH_FILE="${BIONIC_SKILLS_DIR}/canonical-sdlc/dispatch.md"
 
 # scaffold_block <file> -> the fenced scaffold lines, one per line. Defined at the TOP of
