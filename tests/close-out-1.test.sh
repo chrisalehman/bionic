@@ -352,7 +352,7 @@ RELV="7.7.7-fixture"
 expect_nonempty "VER0: the tool's version reads from its manifest" "$TOOLV"
 expect_ne "VER0b: …and differs from the release the fixture names" "$RELV" "$TOOLV"
 
-# epic_version_cell -> the version cell of the wave-01 row the last close printed for the epic plan, trimmed.
+# epic_version_cell -> the version cell of the `| 01 |` row the last close printed for the epic plan, trimmed.
 epic_version_cell() { printf '%s\n' "$CO_OUT" | sed -n 's/^epic-row: | 01 | *\([^|]*[^| ]\) *|.*/\1/p' | head -1; }
 # delivered_line <project> -> the words the run's step 9 carries as delivered.
 delivered_line() { co_step_answer "$1" | sed -n 's/^delivered=//p'; }
