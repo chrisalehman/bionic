@@ -579,7 +579,7 @@ expect_eq "every older home a source reads is on the translation's list, and not
 
 section "ASK-LOG"
 # The asks library writes each act on an ask as an ask event in the run's log, at its own clock, and reads the register
-# then the log as one list. fails-when: an act writes asks.state, an act leaves no event or one off the library's clock,
+# then the log as one list. fails-when: an act writes the register, an act leaves no event or one off the library's clock,
 # a standing ask of the register reads otherwise than as before until the log answers it, or a round the log opens is
 # numbered off the register's count.
 AR="$(mktemp -d)"; AP="$AR/.bionic/docs/plans/epic-x/askl.plan.md"; AD="$AR/.bionic/docs/record/askl"; T0=1793577600
@@ -598,7 +598,8 @@ ao $((T0 + 300)) owed_answer waive:old carry; ao $((T0 + 360)) owed_open approve
 expect_eq "each act is an ask event in the run's log: open, answer, sent, close of the new; answer of the old; round 2" \
   "waive:new waive:new waive:new waive:new waive:old approve:step2" \
   "$(awk -F'|' '$2 == "ev=ask" { for (i = 3; i <= NF; i++) if ($i ~ /^key=/) printf "%s ", substr($i, 5) }' "$AD/run.log" 2>/dev/null | sed 's/ $//')"
-expect_eq "…and the register is as it was, never written" "same" "$(cmp -s "$AD/asks.state" "$AR/register.was" && echo same)"
+expect_eq "…and the register is as it was, never written: of the record's files the log alone moved" "same" \
+  "$(cd "$AD" && for f in *; do [ "$f" = run.log ] || { cmp -s "$f" "$AR/register.was" && echo same || echo "$f moved"; }; done)"
 expect_eq "every round reads as one list, the register's first, on the library's clock, the log's round numbered 2" \
   "approve:step2 1 closed 2026-11-01T00:00:02Z 2026-11-01T00:00:03Z|approve:step2 2 open 2026-11-02T00:06:00Z -|waive:new 1 closed 2026-11-02T00:01:00Z 2026-11-02T00:04:00Z|waive:old 1 open 2026-11-01T00:00:01Z -" \
   "$(ao "$T0" owed_rounds 'approve:step2|waive:.*' | tr '\t' ' ' | LC_ALL=C sort | paste -sd'|' -)"
