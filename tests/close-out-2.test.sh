@@ -18,10 +18,9 @@ set -uo pipefail
 # ============================================================
 section "4f — REQ-1 (AC-1.1–1.4): the close prints the epic's row and writes no epic plan; the ADR cell is read, not marked"
 # ============================================================
-# The close prints the wave's row for the orchestrator's edit and writes no plan, so each fixture epic plan's
-# checksum is the same after a close as before it, and the row is read from the close's output. The planned table
-# (`| wave | … | status |`) above or beside the shipped one is the fixture's trap for an edit that finds the wrong
-# table; the helpers below read the fixture with their OWN awk, not the script's.
+# The close prints the wave's row for the orchestrator's edit and writes no plan: each fixture epic plan's checksum is the
+# same after a close as before it, and the row is read from the output. A planned table (`| wave | … | status |`) above or
+# beside the shipped one is the fixture's trap; the helpers read the fixture with their OWN awk, not the script's.
 
 # table_rows: hoisted to tests/close-out.prelude.sh (a later part reads it)
 # rows_with_wave: hoisted to tests/close-out.prelude.sh (a later part reads it)
@@ -69,48 +68,34 @@ Nothing here.
 EPIC78
 }
 
-# EPIC_ROW_PREFIX: the row's cells before the shipped cell, for a wave with no release (version `—`) and no ADR; the
-# shipped cell is `<date>, main @ <the integration head>`, read apart because the date is the close's own second.
-EPIC_ROW_PREFIX='| 01 | — | `wave-01-fixture.plan.md` | `wave-01-fixture.spec.md`, `.requirements.md` | — | '
-# row_whole <project> -> yes when the last close printed one row: the prefix above, then the integration head's shipped cell
+# row_whole <project> -> yes when the last close printed the row whole: the cells of a wave with no release and no ADR,
+# then a shipped cell of the close's own date and the integration head (the date is read apart: it is the close's second)
 row_whole() {
-  local row; row="$(printed_row)"
-  case "$row" in "$EPIC_ROW_PREFIX"*", main @ $(fixture_git "$1" rev-parse --short main) |") echo yes ;; *) echo no ;; esac
+  case "$(printed_row)" in '| 01 | — | `wave-01-fixture.plan.md` | `wave-01-fixture.spec.md`, `.requirements.md` | — | '*", main @ $(fixture_git "$1" rev-parse --short main) |") echo yes ;; *) echo no ;; esac
 }
 
 # §78.1 — a `| 01 |` row that is in the planned table only is no reason to print nothing, and the shipped table is not written.
 T78="$(mk_fixture t78a)"; advance_to "$T78" 8
 epic_planned_first > "$T78/$EPIC_REL"
 EPIC_SUM78="$(sha_of "$T78/$EPIC_REL")"
-expect_eq "78.0: the extractor reads the shipped table (wave 00 is one row there)" "1" \
-  "$(rows_with_wave "$T78/$EPIC_REL" shipped 00)"
-expect_eq "78.0b: …and the planned table (wave 01 is one row there; wave 00 none)" "1/0" \
-  "$(rows_with_wave "$T78/$EPIC_REL" planned 01)/$(rows_with_wave "$T78/$EPIC_REL" planned 00)"
-expect_eq "78.0c: …and wave 01 is in the shipped table zero times before the run" "0" \
-  "$(rows_with_wave "$T78/$EPIC_REL" shipped 01)"
+expect_eq "78.0: the extractor reads both tables: wave 00 is one shipped row and no planned one, wave 01 one planned row and no shipped one" "1/0/1/0" \
+  "$(rows_with_wave "$T78/$EPIC_REL" shipped 00)/$(rows_with_wave "$T78/$EPIC_REL" planned 00)/$(rows_with_wave "$T78/$EPIC_REL" planned 01)/$(rows_with_wave "$T78/$EPIC_REL" shipped 01)"
 run_close "$T78" check
 expect_eq "78.1a: check prints the row, and does not call wave 01 already listed" "yes/no" \
   "$(contains "$CO_OUT" "epic-row: | 01 | ")/$(contains "$CO_OUT" "already listed")"
 run_close "$T78" run
-expect_eq "78.1c: run exits 0" "0" "$CO_RC"
-expect_eq "78.1d: …the epic plan's checksum is what it was, and the shipped table holds no wave-01 row" "$EPIC_SUM78/0" \
-  "$(sha_of "$T78/$EPIC_REL")/$(rows_with_wave "$T78/$EPIC_REL" shipped 01)"
+expect_eq "78.1d: run exits 0, the epic plan's checksum is what it was, and the shipped table holds no wave-01 row" "0/$EPIC_SUM78/0" \
+  "$CO_RC/$(sha_of "$T78/$EPIC_REL")/$(rows_with_wave "$T78/$EPIC_REL" shipped 01)"
 expect_eq "78.1e: …the close's output holds the row whole, once" "yes/1" "$(row_whole "$T78")/$(printed_row | wc -l | tr -d ' ')"
-expect_eq "78.1f: …and says in one line that the edit is the orchestrator's" "1" \
-  "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -c '^epic-edit: .*writes no plan')"
+expect_eq "78.1f: …and says in one line that the edit is the orchestrator's" "1" "$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -c '^epic-edit: .*writes no plan')"
 
 # §78.2 — the planned table sits first; neither table is touched, and a second close prints no second row.
 T78B="$(mk_fixture t78b)"; advance_to "$T78B" 8
 epic_planned_first > "$T78B/$EPIC_REL"
 EPIC_SUM78B="$(sha_of "$T78B/$EPIC_REL")"
-PLANNED_BEFORE="$(table_rows "$T78B/$EPIC_REL" planned)"
-SHIPPED_BEFORE="$(table_rows "$T78B/$EPIC_REL" shipped | wc -l | tr -d ' ')"
 run_close "$T78B" run
-expect_eq "78.2a: run exits 0, and prints a row for wave 01" "0/yes" "$CO_RC/$(row_whole "$T78B")"
-expect_eq "78.2b: the shipped table's row count is what it was" "$SHIPPED_BEFORE" \
-  "$(table_rows "$T78B/$EPIC_REL" shipped | wc -l | tr -d ' ')"
-expect_eq "78.2c: …the planned table is unchanged, and so is the epic plan" "$PLANNED_BEFORE/$EPIC_SUM78B" \
-  "$(table_rows "$T78B/$EPIC_REL" planned)/$(sha_of "$T78B/$EPIC_REL")"
+expect_eq "78.2a: run exits 0, prints a row for wave 01, and neither table of the epic plan is touched (its checksum is as it was)" "0/yes/$EPIC_SUM78B" \
+  "$CO_RC/$(row_whole "$T78B")/$(sha_of "$T78B/$EPIC_REL")"
 run_close "$T78B" run
 expect_eq "78.2e: a second run prints no second row and leaves the epic plan as it was" "0/$EPIC_SUM78B" \
   "$(printed_row | wc -l | tr -d ' ')/$(sha_of "$T78B/$EPIC_REL")"
@@ -123,7 +108,6 @@ epic_planned_first | awk '
   !skip { print }
 ' > "$T78C/epic.tmp" && mv "$T78C/epic.tmp" "$T78C/$EPIC_REL"
 EPIC_C_SHA="$(sha_of "$T78C/$EPIC_REL")"
-run_close "$T78C" check
 run_close "$T78C" run
 expect_eq "78.3b: run closes rc 0, the plan reads closed, and the epic plan is what it was" "0|1|$EPIC_C_SHA" \
   "$CO_RC|$(run_open_rc "$T78C/$PLAN_REL")|$(sha_of "$T78C/$EPIC_REL")"

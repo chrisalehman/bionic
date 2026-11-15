@@ -70,7 +70,6 @@ section "FILL — wave-33 T8 (REQ-3 AC-3.3, D8): the epic row and the continuati
 # continuation carried fourteen marks the orchestrator completed by hand (A-orch-50). Close-out now writes every
 # field it can derive, refuses the row when the plan says nothing about its ADRs, and leaves a mark only where
 # a person must decide, naming each in its output. The row is read from the close's output: the close writes no plan.
-# printed_row -> the row the last close printed for the epic plan; printed_adr_cell -> its ADRs cell, trimmed.
 printed_row() { printf '%s\n' "$CO_OUT" | sed -n 's/^epic-row: //p'; }
 printed_adr_cell() { printed_row | awk -F'|' '{ c = $6; gsub(/^[ \t]+|[ \t]+$/, "", c); print c }'; }
 

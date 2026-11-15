@@ -208,29 +208,22 @@ run_close "$PS" run
 expect_eq "1aq: the second close delivers on the step 8 that stood, its wipe kept: one step 8 in the log" "0|yes|1|n=9" \
   "$CO_RC|$(contains "$(co_step_answer "$PS" 8)" "tmp-wiped=7 entries under the first close")|$(grep -c '|ev=step|n=8|' "$PS/$LOG_REL")|$(co_step_answer "$PS" | sed -n 1p)"
 
-# THE LAST STEP IS THE READER'S ANSWER. After the archive's line is written, the close asks the reader which step the run
-# stands at over the log it was handed, and takes that step's archived= field; it searches the log for no line of its own.
-# co_close_archived is read out of the script by name and run over a log the test writes, its step writer a stub that
-# appends the lines the case names. A line of another family that carries ev=step is no fact of the run, and the fold reads
-# a field by its name, so a writer's order of fields is no answer: a search for the text `|ev=step|` reads both wrongly.
+# THE LAST STEP IS THE READER'S ANSWER: after the archive's line is written the close asks the reader which step the run
+# stands at over the log it was handed, and takes that step's archived= field. co_close_archived is read out of the script
+# and run over a log the test writes, its step writer a stub appending the lines a case names. A line of another family
+# that carries ev=step is no fact of the run, and a field is read by name, so the order of a writer's fields is no answer.
 ca_run() {  # <the lines the writer appends> -> the function's exit
   local d="$SANDBOX/ca"; mkdir -p "$d"; : > "$d/run.log"
-  CA_LINES="$1" bash -c '
-    eval "$(awk "index(\$0, \"co_close_archived() {\") == 1 { p = 1 } p { print } p && /^}/ { exit }" "$1/close-out.sh")"
+  CA_LINES="$1" bash -c 'eval "$(awk "index(\$0, \"co_close_archived() {\") == 1 { p = 1 } p { print } p && /^}/ { exit }" "$1/close-out.sh")"
     . "$1/lib/reader.sh" || exit 9
-    _co_refuse() { exit 2; }
-    proof_step_event() { printf "%s\n" "$CA_LINES" >> "$1"; }
+    _co_refuse() { exit 2; }; proof_step_event() { printf "%s\n" "$CA_LINES" >> "$1"; }
     PLAN="${2%/*}/plans/x.plan.md"; CO_DELIVERED_AT=""; CO_DELIVERED=x; ARCHIVED_LINE=y
     co_close_archived "$2"' _ "$REPO_ROOT/payload/scripts" "$d/run.log" >/dev/null 2>&1
   echo $?
 }
 CA_ARCH='run/v1|ev=step|n=9|delivered=x|archived=bionic: archived|at=2026-10-04T12:05:00Z'
-expect_eq "1as: the archive's step standing last passes; another step written after it, by another writer, refuses" "0|2" \
-  "$(ca_run "$CA_ARCH")|$(ca_run "$CA_ARCH"$'\n''run/v1|ev=step|n=8|cleanup=done|at=2026-10-04T12:06:00Z')"
-expect_eq "1at: a line of another family carrying ev=step after the archive's is no step of the run" "0" \
-  "$(ca_run "$CA_ARCH"$'\n''note|ev=step|n=7|x=1')"
-expect_eq "1au: the archive's line with its fields in another order is the step all the same" "0" \
-  "$(ca_run 'run/v1|n=9|delivered=x|archived=bionic: archived|at=2026-10-04T12:05:00Z|ev=step')"
+expect_eq "1as: the archive's step passes alone, after a line of another family carrying ev=step, and with its fields in another order; another step written after it refuses" "0|0|0|2" \
+  "$(ca_run "$CA_ARCH")|$(ca_run "$CA_ARCH"$'\n''note|ev=step|n=7|x=1')|$(ca_run 'run/v1|n=9|delivered=x|archived=bionic: archived|at=2026-10-04T12:05:00Z|ev=step')|$(ca_run "$CA_ARCH"$'\n''run/v1|ev=step|n=8|cleanup=done|at=2026-10-04T12:06:00Z')"
 
 # ============================================================
 section "2 — AC-4.3: an unreached wt/* branch refuses by name and nothing else happens"
@@ -360,9 +353,7 @@ expect_nonempty "VER0: the tool's version reads from its manifest" "$TOOLV"
 expect_ne "VER0b: …and differs from the release the fixture names" "$RELV" "$TOOLV"
 
 # epic_version_cell -> the version cell of the wave-01 row the last close printed for the epic plan, trimmed.
-epic_version_cell() {
-  printf '%s\n' "$CO_OUT" | sed -n 's/^epic-row: | 01 |//p' | head -1 | awk -F'|' '{ v = $1; gsub(/^[ \t]+|[ \t]+$/, "", v); print v }'
-}
+epic_version_cell() { printf '%s\n' "$CO_OUT" | sed -n 's/^epic-row: | 01 | *\([^|]*[^| ]\) *|.*/\1/p' | head -1; }
 # delivered_line <project> -> the words the run's step 9 carries as delivered.
 delivered_line() { co_step_answer "$1" | sed -n 's/^delivered=//p'; }
 
