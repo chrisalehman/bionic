@@ -100,7 +100,7 @@ channel_off() { rm -f "$1/bionic/notify"; }
 
 # nt_owed <repo> <function> [args...] -> what owed.sh answers, in that repo, for the fixture
 # session. Sourced from the shipped library, so the reader is the code under test; `owed_file`
-# names the store the session's asks resolve to, the run's register where the session is bound.
+# names the store the session's asks resolve to, the run's log where the session is bound.
 nt_owed() {
   local repo="$1"; shift
   ( cd "$repo" && CLAUDE_CODE_SESSION_ID="$SID" bash -c '. "$1/owed.sh" && shift && "$@"' _ "$NT_LIB" "$@" ) 2>/dev/null
@@ -277,8 +277,8 @@ expect_contains "N2c …under the declared title prefix" "|title=bionic-fixture 
 expect_regex "N2c2 …with ONE space between the prefix and the title, not two" '[|]title=bionic-fixture [^ ]' "$(nt_last)"
 expect_eq "N2d …and the item is marked sent: nothing is unsent" "" "$(nt_owed "$RO" owed_unsent)"
 expect_contains "N2e …while it stays open (the block is unresolved)" "approve:step1" "$(nt_owed "$RO" owed_list | cut -f1)"
-expect_regex "N2f the bound session's store is its run's register under record/" \
-  '/\.bionic/docs/record/wave-01-fixture/asks\.state$' "$(nt_owed "$RO" owed_file)"
+expect_regex "N2f the bound session's store is its run's log under record/" \
+  '/\.bionic/docs/record/wave-01-fixture/run\.log$' "$(nt_owed "$RO" owed_file)"
 expect_contains "N2g …where the Stop stamped the item it sent" "|key=approve:step1|state=open|sent=20" \
   "$(nt_owed "$RO" owed_lines)"
 

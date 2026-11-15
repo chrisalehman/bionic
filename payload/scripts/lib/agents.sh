@@ -5,8 +5,8 @@
 # about which agents exist belongs to the harness, and only the model can ask it. So
 # the model calls ListAgents and the harness records the answer in the session
 # transcript every hook is handed; this library is the ONE parser of that recording.
-# `dispatch-preflight.sh` (budget count), `stop-guard.sh` and `stop-check.sh`
-# (resolution), `stop-orders.sh standdown` (report) and `session-poker.sh tick` (the
+# `dispatch-preflight.sh` (budget count), `stop-check.sh` (the type its look prints),
+# `stop-orders.sh standdown` (report) and `session-poker.sh tick` (the
 # fill it prints) all call these functions. None of them re-reads a transcript itself,
 # so a change to the harness's output format moves every reader at once.
 #

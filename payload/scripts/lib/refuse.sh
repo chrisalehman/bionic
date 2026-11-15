@@ -36,8 +36,7 @@
 # putting non-UTF-8 bytes in `detail`.
 #
 # WHY IT EXISTS (surfaces map §B.3). 21 hook files carry 62 distinct refusal texts
-# across four emission modes. `hooks/stop-guard.sh`'s `deny()` frame is 12 fixed
-# lines before its reasons and reaches 18 rendered; `hooks/background-suite-guard.sh`'s
+# across four emission modes. `hooks/background-suite-guard.sh`'s
 # run-arm heredoc is the twelve red lines Chris named. Every one of them is the model's
 # instruction and the user's interruption printed to one stream, because the hook had
 # nowhere else to put either half. This file is that other place.

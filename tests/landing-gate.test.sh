@@ -185,8 +185,8 @@ JSON
 # agent_type (which carries the dispatch NAME for a teammate and the subagent TYPE for an
 # async dispatch — both readings are right, for different dispatch modes), agent_transcript_path,
 # last_assistant_message, stop_hook_active, and the whole `background_tasks[]` array the Stop
-# payload carries. This event reaches the gate through the SETTINGS channel behind
-# hooks/agent-context-guard.sh; the skill channel never receives it (t1 §3).
+# payload carries. This event reaches the gate through the SETTINGS channel, by
+# hooks/stop.sh's SubagentStop entry; the skill channel never receives it (t1 §3).
 substop_payload() {  # <cwd> <session_id> <agent_id> <agent_type> <stop_hook_active> [live-bg-json]
   local cwd="$1" sid="$2" aid="$3" atype="$4" active="$5" bg="${6:-[]}"
   cat <<JSON

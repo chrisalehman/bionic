@@ -223,7 +223,7 @@ stdin_for() {  # <project> <transcript-path> [event] [stop_hook_active]
 # where the ENV value is primary and the payload a witness — so a driver that left the
 # RUNNER's own CLAUDE_CODE_SESSION_ID in the environment would drive every fixture under the
 # operator's real session id, find no marker under it, and pass every case in silence. The
-# same mirroring hooks/stop-guard.sh's and dispatch-preflight's suites already do.
+# same mirroring the suites of hooks/stop.sh and dispatch-preflight already do.
 fire() {  # <project> [event] [stop_hook_active]
   HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="$SID" bash "$HOOK" <<< "$(stdin_for "$1" "$1/transcript.jsonl" "${2:-Stop}" "${3:-false}")" 2>"${PE1_ERRFILE:-/dev/null}")
   # THE USER STREAM, kept for the AC-E1.3 section at the end (task 13). The JSON reason

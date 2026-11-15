@@ -516,7 +516,7 @@ seed_roster "$PR_REPO" "$SID_A" "w99-impl" "$TUID"
 PR_ROSTER="$PR_REPO/.bionic/tmp/roster-${SID_A}.state"
 # A SECOND agent, still running, whose brief declared a progress path. It is the
 # OLDEST row in the file after the seed — the first thing eviction-by-recency
-# takes, and the row hooks/stop-guard.sh sources its refusal from.
+# takes, and the row the stop guard (lib/stop.sh) takes its look from and writes its verdict on.
 roster_row_fixture status=intended session="$SID_A" name=live-one agent_id= \
   launched_at=2026-08-05T12:00:00Z model= progress=.bionic/tmp/live-one.progress \
   cadence='~6m.' tool_use_id=toolu_LIVEONE >> "$PR_ROSTER"

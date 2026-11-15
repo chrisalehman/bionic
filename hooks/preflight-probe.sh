@@ -117,11 +117,11 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # on purpose: a writer emits one schema, a reader must tolerate every schema still on disk.
 ATTESTATION_VERSION=2
 ATTESTATION_VERSIONS_SUPPORTED="1 2"
-# D-3 payload-shape canary (w3 task 4/4): the same-actor wall in hooks/stop-guard.sh reads
-# observer identity from the undocumented top-level `agent_id` field on subagent-invoked
+# Payload-shape canary: hooks/ruling-push.sh and the partition in payload/scripts/lib/walls.sh
+# read the caller's identity from the undocumented top-level `agent_id` field of subagent-invoked
 # PostToolUse|Bash payloads (validated .bionic/docs/record/w3-slice1-posttooluse-probe.md,
 # CLI 2.1.222, and re-validated .bionic/docs/record/w3-canary-validation.md, CLI 2.1.223). The
-# CLI auto-updates and shape drift on that field would open D-3 silently, so every run compares
+# CLI auto-updates and shape drift on that field would blind both readers silently, so every run compares
 # the pinned validated version against the installed `claude --version` and warns — never
 # blocks, never touches the attestation — on drift. Move this pin only after re-running the
 # 4/1 probe method and confirming the field's shape on the new version.

@@ -983,7 +983,7 @@ LR_DIR="$RLR/.bionic/docs/record/wave-01-fixture"; mkdir -p "$LR_DIR"
 printf 'question: adversarial\nresult: fail\nscope: piece\nreviewed: %s..%s\nfindings: 1\nfinding: 1 S2 on lib/a.sh:1 data lost\nshown: 1 bash lib/a.sh\n' "$LR_H" "$LR_H" > "$LR_DIR/adv-log.md"
 printf 'run/v1|ev=step|n=6|at=2026-10-04T11:00:00Z\nrun/v1|ev=proof|evidence=%s|head=%s|kind=review|question=adversarial|reader=w-crit|result=fail|scope=piece|at=2026-10-04T12:00:00Z\n' \
   "$LR_REC" "$LR_H" > "$LR_DIR/run.log"
-lr_reg() {  # <owed.sh verb> [args] -> run on the run's register, the one the verbs write: record/<wave>/asks.state
+lr_reg() {  # <owed.sh verb> [args] -> run on the run's asks, the store the verbs write: record/<wave>/run.log
   bash -c '. "$1/roots.sh"; . "$1/owed.sh"; OWED_ROOT="$2" OWED_PLAN="$3" OWED_SID="$4"; export OWED_ROOT OWED_PLAN OWED_SID
     shift 4; "$@"' _ "${S46_LIB%/*}" "$RLR" "$PLR" "$SID" "$@"
 }

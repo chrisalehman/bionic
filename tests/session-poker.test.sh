@@ -123,7 +123,7 @@ section "Section 3: tick — the accelerated-clock decisions (AC-7, re-authored 
 #
 # WHAT CHANGED. `acked=yes|no` rides beside the state on every verdict line
 # (hooks/session-sweeper.sh:715), and three consumers already treated an acked row as
-# closed — hooks/landing-gate.sh:214, hooks/stop-orders.sh:319, hooks/stop-guard.sh:491.
+# closed — `stop_landing_gate` and `stop_guard` in payload/scripts/lib/stop.sh, and hooks/stop-orders.sh.
 # The poker read the state alone, which made the sweeper's own closing sentence false:
 #
 #   hooks/session-sweeper.sh:817 — "an acked row is closed for every reader"

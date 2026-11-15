@@ -605,7 +605,8 @@ return "$_adv"
 # must be true or the marker leaks into a reader's answer (t6-review.md F-1, reproduced live:
 # `hooks/session-poker.sh` read the roster with no schema filter and the marker silenced its
 # overdue NOTIFY for the swept row). `hooks/execution-recorder.sh`, `hooks/session-sweeper.sh`,
-# `hooks/stop-guard.sh`, `hooks/stop-check.sh` and `hooks/stop-orders.sh` filter on the
+# the stop guard (`_sg_roster_walk`, below), the look (`observe_roster_walk`, lib/observe.sh)
+# and `hooks/stop-orders.sh` filter on the
 # `roster-state/v1|` prefix before reading a row, so the marker's `landing-swept/v1|` prefix
 # never matches. `hooks/dispatch-preflight.sh` does NOT filter on that prefix and is immune
 # only by accident: its `owning_row_for` skips any row with no `deliverable=`, a field the
@@ -720,8 +721,8 @@ return "$_adv"
 # which is why the refusal must name the row and its artifacts rather than the rule.
 # [WALL: tests/landing-gate.test.sh]
 #
-# Registered on both channels by hooks/hooks.json, and by nothing else: one Stop entry
-# for the main thread, and one behind agent-context-guard.sh for agent contexts. No
+# Registered on both channels by hooks/hooks.json, and by nothing else: hooks/stop.sh's
+# Stop entry for the main thread, and its SubagentStop entry for agent contexts. No
 # SKILL.md carries a `hooks:` key — that channel was never how this hook was delivered.
 #
 # hooks/landing-gate.sh's body — the ONE function of the four with a SubagentStop
@@ -742,7 +743,7 @@ stop_landing_gate() {  # <event> -> 0 nothing · 1 advisory · 2 block
 
 # TWO EVENTS, TWO ARMS, ONE ROSTER SPLIT BETWEEN THEM. `Stop` is the sweep (below);
 # `SubagentStop` is the teammate landing verdict, and it arrives on the settings channel
-# behind hooks/agent-context-guard.sh because no subagent-context event reaches the skill
+# through hooks/stop.sh's SubagentStop entry because no subagent-context event reaches the skill
 # frontmatter at all. An absent field is not treated as a mismatch, so a hand-run payload
 # still sweeps.
 EVENT="$_ev"
@@ -2466,7 +2467,7 @@ stop_standdown_set() {  # <lower bound ISO, or empty> -> the names, space-joined
 # the whole gap. `Stop` is the only recurring orchestrator event there is: it fires
 # once per turn, whatever the turn contained, and it keeps firing on turns the skill
 # was not re-invoked on (hooks/landing-gate.sh depends on and documents those exact
-# properties). hooks/stop-guard.sh is `PreToolUse|TaskStop` — it fires when the
+# properties). The stop guard is hooks/stop.sh's `PreToolUse|TaskStop` arm — it fires when the
 # orchestrator stops an AGENT, which is neither recurring nor about the session's
 # clock; hooks/stop-check.sh is not registered on any channel at all. So the choice
 # was Stop or nothing.
@@ -2843,7 +2844,7 @@ return 2
 
 # ─── THE STOP GUARD: the judgement of a TaskStop, its words and its roster writes ─────────────
 #
-# hooks/stop-guard.sh reads its payload, loads this library, resolves the context and calls
+# hooks/stop.sh's TaskStop arm reads its payload, loads this library, resolves the context and calls
 # `stop_guard` with its own directory; the hook decides nothing and says nothing of its own. A
 # stop is irreversible, so the guard is closed and loud once the session is engaged: a target it
 # cannot establish is refused with the fact named, and the person's order is the one override.

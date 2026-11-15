@@ -289,8 +289,8 @@ expect_contains "…it resolves to the id the ROSTER carries" "a567bd5c6d1e03d67
 expect_absent_ci "…and nothing is called ambiguous" "ambiguous" "$OUT"
 
 # (c5) A TYPED AGENT ID RECORDS THE OBSERVATION FOR THE ROW IT NAMES, NEVER THE LAST ROW OF
-# ITS NAME (T32; A-T31.2 — hooks/stop-guard.sh:507-509 carries the identical fix, T31 delta
-# review D1). `ROW_WITH_ID` above is the last confirmed/identified row of the NAME, which is
+# ITS NAME (`stop_guard` in payload/scripts/lib/stop.sh keeps the row an id names the same way).
+# `ROW_WITH_ID` above is the last confirmed/identified row of the NAME, which is
 # right for a bare name and wrong for an id, which names ONE row by construction. Before this
 # fix, an observation typed as either twin's id recorded `target=` off whichever row is last
 # — so `stop-check <id A>` and `stop-check <id B>` produced the SAME machine line, and the
@@ -530,23 +530,10 @@ expect_regex "a deliverable named alongside --progress is still reported" \
 expect_absent_ci "the flag itself is never reported as a deliverable" "  --progress —" "$OUT6_BOTH"
 expect_absent_ci "the flag's value is never reported as a deliverable" "w6.progress — " "$OUT6_BOTH"
 
-# (f) TARGET FIRST — the grammar is the one the RECORDER can parse.
-#
-# This command's run is observed by hooks/stop-guard.sh's Bash arm, which
-# re-parses the same command line to decide WHICH agent was examined. That
-# recorder skips leading `-*` tokens one at a time and takes the first non-flag
-# token; it does not know that `--progress` consumes the token after it. So a
-# leading `--progress <path> <agent>` makes the two halves disagree about the
-# target — the operator looks at <agent> while the record says <path> — and a
-# record naming an agent nobody examined is the wall opening on a look that was
-# never taken (Step-6 review F-1, proven with a two-agent fixture).
-#
-# The producer is therefore narrowed to exactly what the recorder already reads:
-# the target is the FIRST argument, `--progress <path>` may follow it, and any
-# other `-`-leading token anywhere is a usage error rather than a silent
-# deliverable. That last part is also F-2: `--progres` (one `s`) used to be
-# reported as an ABSENT deliverable while the reader believed they had asked for
-# a progress channel.
+# (f) TARGET FIRST: the target is the FIRST argument, `--progress <path>` may follow it, and any
+# other `-`-leading token anywhere is a usage error rather than a silent deliverable.
+# `--progres` (one `s`) used to be reported as an ABSENT deliverable while the reader believed
+# they had asked for a progress channel.
 
 OUT6_LEAD=$(run_check "$H6" "$R6" --progress "$PROG" "long-runner"); ST=$?
 expect_status "--progress BEFORE the target exits 1" 1 "$ST"

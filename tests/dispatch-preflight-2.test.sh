@@ -133,7 +133,7 @@ expect_status "attestation path is a symlink -> refuse, not followed" "2" "$GATE
 # at a directory holding a valid same-session attestation opens the wall with
 # content the repo arranges. §8's load-bearing property is that a hostile repo
 # can CLOSE or AIM these walls but never OPEN them, and the sibling gate already
-# refuses at both levels (hooks/stop-guard.sh's state_paths(); checklist A3
+# refuses at both levels (`_sg_state_dir` in payload/scripts/lib/stop.sh; checklist A3
 # names this variant, discharged for the WRITE path only).
 for _lvl in .bionic/tmp .bionic; do
   _tag=$(printf '%s' "$_lvl" | tr -d './')

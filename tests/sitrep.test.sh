@@ -18,8 +18,8 @@
 #
 # FIXTURE FIDELITY. SYNTHESIZED, in the shapes the writers write: the landing record's `line/v1`
 # events as lib/line.sh writes them, the fill ledger's `fill-ledger/v1` lines as lib/stop.sh writes
-# them, the register's `owed/v1` lines as lib/owed.sh writes them (one line per key) at the path
-# lib/owed.sh `owed_register` resolves, the gate's request files as lib/gate.sh writes them, a
+# them, a version-14 register's `owed/v1` lines as the last release's lib/owed.sh wrote them (one line per key) at
+# its old home in the run's record, which the reader translates, the gate's request files as lib/gate.sh writes them, a
 # session's binding through the bind verb itself, the review lines in the shape `proof-add review`
 # writes them, and a `## Tasks` header in the shipped table shape. What each world pins is what the
 # fact under test reads, and nothing it does not.
@@ -143,10 +143,11 @@ sr_row() {  # <id> <task> <reads> <size> <status>
   local n="${1#T}"
   printf '| %s | 4 | build | %s | — | — | %s | %s | REQ-1 | lib/t%s.sh | — | — | %s | — | — | — |\n' "$1" "$2" "$3" "$4" "$n" "$5"
 }
-# sr_reg [<plan>] -> the run's register of asks at the path lib/owed.sh `owed_register` resolves for the plan, so a
-# seeded ask lands where every reader of the run reads it (this world's plan by default).
+# sr_reg [<plan>] -> the run's version-14 register of asks, `asks.state` in its record directory: the old home the
+# reader translates for a run not brought forward, so a seeded ask lands where every reader of the run reads it (this
+# world's plan by default). Spelled here, since the asks library names only the run's log.
 SR_OWED_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/owed.sh"
-sr_reg() { bash -c '. "$1" && owed_register "$2" "$3"' _ "$SR_OWED_LIB" "$SR_REPO" "${1:-$SR_PLAN}"; }
+sr_reg() { local p="${1:-$SR_PLAN}"; p="${p##*/}"; printf '%s/.bionic/docs/record/%s/asks.state\n' "$SR_REPO" "${p%.plan.md}"; }
 sr_asks() { bash -c '. "$1" && owed_lines "$2" "$3"' _ "$SR_OWED_LIB" "$SR_PLAN" "$SR_REPO" 2>/dev/null; }   # the run's asks as the asks library lists them
 sr_owed() {  # <owed/v1 fields after the schema> [<plan>] -> one line on that run's register (this world's own by default)
   local f; f="$(sr_reg "${2:-$SR_PLAN}")" || return 1
@@ -575,7 +576,9 @@ printf '# Design ledger — wave-02-fx\n\n## Δ1 — D5 put (orchestrator 2026-1
 sr_owed "key=decide:D5|state=closed|by=ruled|at=2026-10-06T21:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "WS5 a decision with no opened time: from its first put in the design ledger to its close" "30 min: decide:D5" "$(sr_m waste.waiting-on-you)"
+expect_contains "WS6a the run's asks hold the register's closed decide:D5 before the register is removed" "|key=decide:D5|state=closed|" "$(sr_asks)"
 rm -f "$(sr_reg)"
+expect_absent "WS6b …and none once it is removed (WS6a read the same list)" "key=decide:D5" "$(sr_asks)"
 sr_run "$SR_PLAN"
 expect_eq "WS6 …and with no line on the register, to the ruling's own time in the ledger" "30 min: decide:D5" "$(sr_m waste.waiting-on-you)"
 

@@ -289,7 +289,7 @@ wr_row() { printf '| %s | %s | build | %s · complexity: standard | — | — | 
   wr_row T3 8 "Merge it" "approval:release" pending
   printf '\n## Not Doing\n\n- nothing\n'
 } > "$WR_P"
-WR_REG="$(bash -c '. "$1" && owed_register "$2" "$3"' _ "$REPO/payload/scripts/lib/owed.sh" "$WR_R" "$WR_P")"
+WR_REG="$WR_R/.bionic/docs/record/wave-02-fx/asks.state"   # a version-14 register, at the old home the reader translates
 mkdir -p "${WR_REG%/*}" && printf 'owed/v1|key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T3 — approval:release\n' > "$WR_REG"
 bound_marker "$WR_R" "$WR_SID" "$WR_P"
 wr_poke() {  # <args after the poker…> [stdin from the caller] -> the verb's stdout; its exit code in WR_RC

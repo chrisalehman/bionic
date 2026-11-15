@@ -12,10 +12,10 @@
 # The cure is positional: prose, quoted strings and heredoc bodies are never argv[0] of
 # anything, so they cannot classify. That is the whole invariant this file exists to hold.
 #
-# WHO READS IT. hooks/farm-out-reminder.sh (the main-thread wall) and
-# hooks/background-suite-guard.sh (the agent-context wall behind agent-context-guard.sh).
-# Both source it FAIL-CLOSED — a library that cannot load makes the hook refuse, naming
-# the path it could not load, never silently allow (design D1, Chris 2026-08-30). The
+# WHO READS IT. The walls hooks/bash-walls.sh carries — `wall_farm_out_reminder` (the
+# main-thread wall) and `wall_background_suite_guard` (the agent-context wall) in
+# payload/scripts/lib/walls.sh, which load it through `wall_libs` and step aside naming the
+# path it could not load — and hooks/permission-answer.sh and payload/scripts/lib/gate.sh. The
 # repo convention this replaces was byte-identical copies pinned by
 # tests/cross-gate-agreement.test.sh; the removal case in tests/cmd-class.test.sh is what
 # pays for the shared file instead.
