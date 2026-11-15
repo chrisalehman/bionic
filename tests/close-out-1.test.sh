@@ -460,7 +460,7 @@ ba_doors "$PBA"
 expect_eq "BA1 close-out check and closed-form name one branch, ## SDLC State's" "main|main" "$BA_CHECK|$BA_CLOSED"
 # The card's Step-0 branch block reads the same reader. The card needs a ## Goal.
 ba_card() {  # <project> -> the integration branch card.sh step0 prints for the plan, a ## Goal added first
-  awk '/^## SDLC State/ && !g { print "## Goal"; print ""; print "A fixture goal."; print ""; g = 1 } { print }' "$1/$PLAN_REL" \
+  awk '/^## (SDLC State|Tasks)/ && !g { print "## Goal"; print ""; print "A fixture goal."; print ""; g = 1 } { print }' "$1/$PLAN_REL" \
     > "$1/$PLAN_REL.g" && mv "$1/$PLAN_REL.g" "$1/$PLAN_REL"
   bash "$REPO_ROOT/payload/scripts/card.sh" step0 "$1/$PLAN_REL" 2>/dev/null | sed -n 's/^    integration  *\([^ ]*\) .*/\1/p'
 }
