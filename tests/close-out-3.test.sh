@@ -103,7 +103,7 @@ awk '/^## Tasks/ { print "- T1: landed by-hand (kind=hand) after waived: evidenc
   "$PHP/$PLAN_REL" > "$PHP/plan.b" && mv "$PHP/plan.b" "$PHP/$PLAN_REL"
 HH_PROSE="$(hh_report "$PHP" --hand-holds)"
 expect_eq "HH-4 a run whose only by-hand, stop-run, decline, lift, waiver and approval are prose counts zero in every kind" \
-  "hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0" \
+  "hand-holds: total=0 · by-hand=0 · stop-runs=0 · declines=0 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" \
   "$(printf '%s\n' "$HH_PROSE" | grep '^hand-holds: ')"
 # the card: check prints the line, run prints it after the wipe took the roster, the continuation carries it
 run_close "$PH" check
