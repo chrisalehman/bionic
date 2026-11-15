@@ -98,7 +98,7 @@ AFTER="$(run)"; RC=$?
 site() { printf '%s\n' "$AFTER" | awk -F'\t' -v f="payload/scripts/lib/planted-k$1.sh" '$2 == f { print $1, $3 }'; }
 
 section "PARSERS"
-expect_contains "a real parser is named at this head" "$(printf 'parser\tpayload/scripts/lib/units.sh\t')" "$BEFORE"
+expect_contains "a real parser is named at this head" "$(printf 'parser\tpayload/scripts/lib/proof.sh\t')" "$BEFORE"
 expect_absent "the goals library reads a criterion's state and a plan's scale through the reader alone" "$(printf 'parser\tpayload/scripts/lib/plan.sh\t')" "$BEFORE"
 expect_absent "the fill library takes the run's step and approval from the reader alone" "$(printf 'parser\tpayload/scripts/lib/fill.sh\t')" "$BEFORE"
 expect_eq "parsers, plan writers and shared types stand at or under 13, 0 and 6" "1 1 1" \
