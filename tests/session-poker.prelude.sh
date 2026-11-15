@@ -484,6 +484,19 @@ sp_at15() {
       print "| REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | the fixture is wrong |" } }' "$p" "$p" > "$p.15" && mv "$p.15" "$p"
 }
 
+# sp_fact <plan> <line> -> a proof or waiver line in the shape lib/proof.sh's proof_line and proof_waiver_line print
+#   appended to the run's log as the event the verbs write for it (`proof` with the line's fields, `waiver` with by= and
+#   said=), its instant the line's own. A log's order is its age, as the state section's place was.
+sp_fact() {
+  local l="$2" log; log="$(plan_fixture_log "$1")"; mkdir -p "${log%/*}" || return 1
+  case "$l" in
+    'proved: '*) printf '%s\n' "${l#proved: }" | awk '{ o = "run/v1|ev=proof"; for (i = 1; i <= NF; i++) if ($i ~ /^at=/) a = $i; else o = o "|" $i
+      print o "|" a }' >> "$log" ;;
+    'waived: '*) printf '%s\n' "$l" | sed -E 's/^waived: question=([^ ]*) head=([^ ]*) by (.*) ([0-9]{4}-[^ ]*Z) "(.*)"$/run\/v1|ev=waiver|question=\1|head=\2|by=\3|said=\5|at=\4/' >> "$log" ;;
+    *) return 1 ;;
+  esac
+}
+
 # ── hoisted from Section 12: sp_plan_at_step — Sections 37–40, 50, 55 and 67 write plans with it. ──
 # SP_PLAN_AT=14 asks for the page at 14; unasked, sp_at15 rewrites it as a run at 15 holds it.
 sp_plan_at_step() {  # <repo> <current> <row>... -> the plan path
@@ -552,6 +565,13 @@ s31_decision() { printf '%s' "$S31_OUT" | jq -r '.decision // ""' 2>/dev/null; }
 
 # ── hoisted from Section 34: s34_plan — Sections 37, 42, 49, 51 and §ROW-LABEL build the gate-admitted plan with it. ──
 s34_plan() {  # <repo> <current> [step-4 block body] -> the plan path; the session is bound to it
+  local f; f="$(s34_page "$@")"
+  [ "${SP_PLAN_AT:-15}" != 15 ] || sp_at15 "$f"
+  bound_marker "$1" "$SID" "$f" >/dev/null 2>&1
+  printf '%s' "$f"
+}
+# s34_page <repo> <current> [step-4 block body] -> the path of s34_plan's page as a builder writes it, before sp_at15
+s34_page() {
   local repo="$1" cur="$2" block="${3:-}" f
   f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
   mkdir -p "$(dirname "$f")" "$repo/.bionic/docs/specs/epic-99-fixture"
@@ -562,6 +582,7 @@ s34_plan() {  # <repo> <current> [step-4 block body] -> the plan path; the sessi
   branch: wave/01-fixture'
   {
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
+    [ "${SP_PLAN_AT:-15}" != 15 ] || printf 'epic: epic-99-fixture\nwave: wave-01-fixture\n'  # at 15 the header names the Step-1 documents
     printf 'rigor: double\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
     printf 'walk: exempt\ndeploy_target: n/a\n'
     printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
@@ -582,8 +603,6 @@ s34_plan() {  # <repo> <current> [step-4 block body] -> the plan path; the sessi
     printf '## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
     printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
   } > "$f"
-  [ "${SP_PLAN_AT:-15}" != 15 ] || sp_at15 "$f"
-  bound_marker "$repo" "$SID" "$f" >/dev/null 2>&1
   printf '%s' "$f"
 }
 
@@ -597,22 +616,6 @@ s34_gate() {
   GATE_ERR="$( cd "$repo" && CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_WALL_VERBOSE=1 \
     bash "${BIONIC_HOOKS_DIR}/bash-walls.sh" <<< "$input" 2>&1 >/dev/null )"
   GATE_RC=$?
-}
-
-# s34_gate15 <repo> <plan> -> GATE_RC, GATE_ERR of a main-checkout commit judged against the run at 15 the plan's run at 14
-#   stands for: a twin of the plan rewritten by sp_at15 (the header naming its branch, base, epic and wave; the log its
-#   steps, approval and rows), the run's own log after them, bound for that commit alone, then taken away and the plan
-#   bound again. The commit gate refuses an open run at 14, so a world built at 14 for what the translation reads asks
-#   the gate of its run as this release carries it.
-s34_gate15() {
-  local p="$2" t r n e
-  n="$(basename "$p" .plan.md)"; e="$(basename "${p%/*}")"; t="${p%/*}/$n-at15.plan.md"; r="${p%/plans/*}/record"
-  rm -rf "$t" "$r/$n-at15"; cp "$p" "$t"; sp_at15 "$t"
-  awk -v e="$e" -v w="$n" 'NR == 1 { print; next } !d && /^---$/ { if (!ep) print "epic: " e; if (!wv) print "wave: " w; d = 1 }
-    !d && /^epic: / { ep = 1 } !d && /^wave: / { wv = 1 } { print }' "$t" > "$t.x" && mv "$t.x" "$t"
-  [ ! -f "$r/$n/run.log" ] || cat "$r/$n/run.log" >> "$r/$n-at15/run.log"
-  bind_marker "$1" "$t"; s34_gate "$1"; bind_marker "$1" "$p"
-  rm -rf "$t" "$r/$n-at15"
 }
 
 # ── hoisted from Section 42: s42_plan, s42_snap, s42_unchanged, s42_builds_landed — every later shard builds, snapshots and compares plans with them. ──
@@ -631,12 +634,9 @@ s42_unchanged() {  # <label> <want rc> <plan>
   expect_eq "$1 — refused (exit $2)" "$2" "$RC"
   expect_true "$1 — …and the plan is byte-identical (cmp)" cmp -s "$TMPROOT/s42-before" "$3"
 }
-# s42_builds_landed <plan> -> the fixture's active build row T2 written landed, as T1 is: a whole
-# read is registered only once no build row is pending or active (wave-27 T45; D10).
-s42_builds_landed() {
-  awk '/^\| T2 \| 4 \| build \|/ { $0 = "| T2 | 4 | build | the second build | implementor | — | 30 | REQ-1 | b.sh | — | — | landed |" } { print }' \
-    "$1" > "$1.tmp" && mv "$1.tmp" "$1"
-}
+# s42_builds_landed <plan> -> the fixture's active build row T2 landed, as T1 is, by its `published` event: a whole read
+# is registered only once no build row is pending or active.
+s42_builds_landed() { printf 'run/v1|ev=published|row=T2|at=2026-10-04T00:30:00Z\n' >> "$(plan_fixture_log "$1")"; }
 
 # ── hoisted from Section 47 §WAIT: s47_plan, s47_lines — Section 59, §SEV, §RC-DEFER and §MOVE-PASTED write reads tables and read tick lines with them. ──
 s47_plan() {  # <repo> <writers> <row>... -> the path; a reads table, approved, current: 4
@@ -696,9 +696,9 @@ s59_world() {
   R59W="$(make_repo "$lab")"; new_roster "$R59W"; ( cd "$R59W" && git commit -q --allow-empty -m init )
   # A BASE THE JUDGE CAN HOLD (wave-36 T28; D9): live:head asks facts_state, which judges only a plan whose base-sha:
   # is a commit, so the Step-4 block names the init commit, not s42_plan's placeholder.
-  P59W="$(SP_PLAN_AT=14 s42_plan "$R59W" 4 "  worktree: .worktrees/01-fixture
+  P59W="$(s34_page "$R59W" 4 "  worktree: .worktrees/01-fixture
   base-sha: $(git -C "$R59W" rev-parse --short=8 HEAD)
-  branch: wave/01-fixture")"
+  branch: wave/01-fixture")"; bound_marker "$R59W" "$SID" "$P59W" >/dev/null 2>&1
   # EACH LANDING TOUCHES CODE (wave-36 T28; D9): the judge reads a commit that touches nothing as prose, and a
   # review row is ready again only past a commit that owes, so A, B and C each change a.sh.
   ( cd "$R59W" && git worktree add -q -b wave/01-fixture "$R59W/.worktrees/01-fixture" \
@@ -708,9 +708,8 @@ s59_world() {
   S59W_B="$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD~1 2>/dev/null)"
   S59W_C="$(git -C "$R59W/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
   st="${st//@A/$S59W_A}"; st="${st//@B/$S59W_B}"; st="${st//@C/$S59W_C}"
-  printf '%s\n' "$@" > "$R59W.rows"; printf '%s\n' "$st" > "$R59W.st"
-  awk -v sf="$R59W.st" -v rf="$R59W.rows" '
-    /^current: / && !wb { print; print "working-branch: wave/01-fixture"; while ((getline l < sf) > 0) if (l != "") print l; wb = 1; next }
+  printf '%s\n' "$@" | sp_q_rows > "$R59W.rows"
+  awk -v rf="$R59W.rows" '
     /^\| id \| step \|/ { intab = 1
       print "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |"
       print "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
@@ -718,8 +717,16 @@ s59_world() {
       next }
     intab && /^\|/ { next }
     { intab = 0; print }' "$P59W" > "$P59W.tmp" && mv "$P59W.tmp" "$P59W"
+  sp_at15 "$P59W"; printf '%s\n' "$st" | while IFS= read -r l; do [ -z "$l" ] || sp_fact "$P59W" "$l"; done
   ( cd "$R59W" && git add -f "$P59W" && git commit -qm rows ) >/dev/null 2>&1
   rm -f "$R59W/.bionic/tmp/tick-digest-$SID.state"
+}
+
+# sp_q_rows -> stdin's Tasks rows with a reads cell last, each live read's questions (`live:head:<q>[+<q>]`) moved to
+#   the task cell's ` · questions: <q>[,<q>]` tag, where task-add writes them on a nine-cell row at 15.
+sp_q_rows() {
+  awk -F'|' -v OFS='|' 'match($(NF - 1), /live:head:[a-z+]+/) { q = substr($(NF - 1), RSTART + 10, RLENGTH - 10); gsub(/\+/, ",", q)
+    sub(/ +$/, "", $5); $5 = $5 " · questions: " q " " } { print }'
 }
 
 # ── hoisted from Section 59 §RANGE-Q: S59W_T5 — the hoisted s60_world plants the floor row with it. ──
@@ -737,10 +744,9 @@ S60_T8="| T8 | 4 | build | another fix | implementor | — | 30 | REQ-4, REQ-5 |
 s60_whole() {  # <head> <scope> -> a structure reading's proof line
   printf 'proved: kind=review head=%s at=2026-10-04T10:01:00Z evidence=record/wave-01-fixture/st-whole.md question=structure reader=w-rev result=pass scope=%s' "$1" "$2"
 }
-s60_world() {  # <label> <whole head @A|@C> <scope> -> R59W, P59W: §59's shape plus a matrix
+s60_world() {  # <label> <whole head @A|@C> <scope> -> R59W, P59W: §59's shape plus criteria under five requirements
   s59_world "$1" "$(s60_whole "$2" "$3")" "$S60_T1" "$S60_T7" "$S60_T8" "$(s59w_q T3 structure)" "$S59W_T5"
-  printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n' >> "$P59W"
-  printf '| AC-%s | T2 | pending | record/wave-01-fixture/x.md | |\n' 1.1 2.1 2.2 4.1 5.1 >> "$P59W"
+  printf '| REQ-%s | fixture | AC-%s | hermetic | `tests/a.test.sh` | the fixture is wrong |\n' 2 2.1 2 2.2 4 4.1 5 5.1 >> "$P59W"
   ( cd "$R59W" && git add -f "$P59W" && git commit -qm matrix ) >/dev/null 2>&1
   S60_INIT="$(git -C "$R59W" rev-parse "$S59W_A~1" 2>/dev/null)"
   S60_REC="$R59W/.bionic/docs/record/wave-01-fixture/run.log"; mkdir -p "${S60_REC%/*}"

@@ -439,15 +439,17 @@ decision_wait() {  # <plan> <D<n>> [<root>] -> one sentence
 }
 
 # WHAT WAITS ON A DECISION, the one reader the wait line and the fact sheet share. Three things wait on D<n>: every task
-# not landed or dropped whose reads name it as an approval, `approval:D<n>`, whatever its state; the release, while the
+# not landed or dropped that waits on it as an approval, `approval:D<n>`, whatever its state, as the plan's one reader of
+# waits names it (lib/plan-read.sh `plan_read_waits`: a reads cell, or a nine-cell row's deps); the release, while the
 # newest release approval page puts D<n> as one of its decisions; and the merge, while a held merge on the run's register
 # names D<n> as a whole word (the third decision is not the thirtieth) in its reason or its line.
 decision_waiters() {  # <plan> <D<n>> [<root>] -> one line per waiter: a task id, in the plan's order, then `release`, then `merge`
   local root dir page
-  units_rows "$1" 2>/dev/null | awk -F'\t' -v k="approval:$2" '
-    { s = tolower($10); gsub(/[ \t]/, "", s) } s == "landed" || s == "dropped" { next }
-    { n = split($13, t, ","); for (i = 1; i <= n; i++) { x = t[i]; gsub(/^[ \t]+|[ \t]+$/, "", x); sub(/^live:/, "", x)
-        if (x == k) { print $1; break } } }'
+  { declare -F plan_read_waits >/dev/null 2>&1 || . "$BIONIC_LIB/plan-read.sh"; } 2>/dev/null
+  { units_rows "$1" 2>/dev/null | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } s == "landed" || s == "dropped" { print $1 }'
+    printf '\034\n'; plan_read_waits "$1" 2>/dev/null; } | awk -F'\t' -v k="approval:$2" '
+    $0 == "\034" { w = 1; next } !w { gone[$1] = 1; next }
+    $2 == "wait" && $3 == k && !($1 in gone) && !($1 in said) { said[$1] = 1; print $1 }'
   root="${3:-}"; [ -n "$root" ] || root="$(project_root "${1%/*}" 2>/dev/null)"
   [ -n "$root" ] || return 0
   if declare -F docs_root >/dev/null 2>&1 && declare -F proof_plan_slug >/dev/null 2>&1; then
