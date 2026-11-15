@@ -9,7 +9,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/release-approval.prelude.sh"
-# Every page here is the prelude's run carried to 15 by the act (FC_VERSION), as an open run at 14 crosses.
+# Every page here is the prelude's run at 15 (FC_VERSION).
 FC_VERSION=15
 
 # ============================================================
@@ -20,20 +20,19 @@ section "§JUDGE: the Tests line prints the full pass's state at this head, and 
 # at the head; reply on that decision appends no merge-unproved approval at the head; or `current 8 --check`
 # passes before that line is written, or refuses after it.
 FC_F6="$(s57_commit "$RFC" lib/x.sh 'T6: the fix that greens a')"
-fc_published T6 "$FC_F6" > "$FC_REC/landing-proofs.log"
-fc_t6_row() {  # <page> -> the page with T6's Tasks row, landed, after T2's
-  awk '{ print } /^\| T2 \|/ {
-    print "| T6 | 4 | build | fix the x message · born: review | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |" }' \
-    "$1" > "$1.new" && mv "$1.new" "$1"
+fc_published T6 "$FC_F6" > "$FC_SEED"
+fc_t6_row() {  # <page> -> the page with T6's Tasks row after T2's, dispatched
+  awk '{ print } /^\| T2 \|/ { print "| T6 | 4 | build | fix the x message · born: review | — | 30 | REQ-1 | lib/x.sh | — |" }' "$1" > "$1.new" && mv "$1.new" "$1"
+  printf 'run/v1|ev=dispatch|row=T6|name=implementor|at=\n' >> "$FC_EV"
 }
 fc_judge_plan() {  # <floor's owed suites> -> PFC: the whole run at C left <suites> red, T6 landed after it, born of the adversarial finding
   fc_plan "$(fc_floor "$FC_C" "$1")
 $(fc_reads "$FC_C")
-- T6: landed $FC_F6 2026-10-12T14:00:00Z — added by task-add at 2026-10-12T12:45:00Z born: review S3 off of=record/wave-x/adversarial.md#1" "" fc_t6_row
+run/v1|ev=born|row=T6|reason=review S3 off|finding=record/wave-x/adversarial.md#1|at=2026-10-12T12:45:00Z" "" fc_t6_row
 }
 fc_unproved() { fc_under Decisions | fc_flat | /usr/bin/grep -o "[0-9]*\. Merge without a whole run at this head — [^·]*· recommended: wait for the pass · default: none"; }
 fc_judge_plan a.test.sh
-expect_eq "JUDGE-00 precondition: the act carried the page to 15, its State gone, and T6's row and landing, edited in before it, reach the log" \
+expect_eq "JUDGE-00 precondition: the page stands at 15 with no State, and T6's row and landing are the run's" \
   "15|0|state=landed|commit=$FC_F6" "$(sed -n 's/^canonical_sdlc_version: //p' "$PFC")|$(/usr/bin/grep -c '^## SDLC State' "$PFC")|$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" status T6 | /usr/bin/grep -E '^(state|commit)=' | paste -sd'|' -)"
 fc_page --preview
 expect_contains "JUDGE-0 precondition: the Tests section renders the whole-suite line" "whole suite: " "$(fc_under Tests)"
@@ -41,7 +40,7 @@ expect_contains "JUDGE-1 a red the whole run left and a later landing greened: t
 expect_eq "JUDGE-1b …and the word red is on the line, never covered" "1|0" "$(fc_under Tests | fc_flat | /usr/bin/grep -cw 'red')|$(fc_under Tests | fc_flat | /usr/bin/grep -c 'covered')"
 expect_contains "JUDGE-1c …and the merge without a pass at this head is a decision, the state on it, waiting recommended" ". Merge without a whole run at this head — red at ${FC_C:0:8}, 2 landings before this head · recommended: wait for the pass · default: none" "$(fc_unproved)"
 git -C "$RFC" reset -q --hard "$FC_R"
-rm -f "$FC_REC/landing-proofs.log"
+rm -f "$FC_SEED"
 fc_plan "$(fc_floor "$FC_C" a.test.sh)
 $(fc_reads "$FC_C")"
 fc_page --preview
@@ -75,7 +74,7 @@ git -C "$RFC" reset -q --hard "$FC_R"; fc_typed "$FC_WD" "$FC_WR"; rm -f "$FC_RE
 # red at the head. The card renders (not early: the gate's one refusal is the card's own decision), the reply that waits
 # leaves current 8 refusing on that decision alone, naming its exit; the reply that merges writes the line at this
 # head, and current 8 passes.
-fc_published T1 "$FC_C" > "$FC_REC/landing-proofs.log"
+fc_published T1 "$FC_C" > "$FC_SEED"
 fc_plan "$(fc_floor "$FC_B")
 $(fc_reads "$FC_C")"
 fc_page
@@ -120,7 +119,7 @@ section "§WORD: the word accepts absence: the card draws the merge decision on 
 fc_judged() { bash -c '. "$1/roots.sh"; . "$1/proof.sh"; _proof_floor_judge "$2" "$3" "$4" | cut -f1' _ "$FC_LIB" "$PFC" "$RFC" "$FC_R" 2>/dev/null; }
 fc_regline() { printf '%s\n' "$OUT" | /usr/bin/grep -E '^regression	'; }  # the gate's regression line, as current 8 --check printed it
 # (1) An uncovered head, the card's decision, the reply that merges, the gate admitting.
-rm -f "$FC_REC/landing-proofs.log"
+rm -f "$FC_SEED"
 fc_plan "$(fc_floor "$FC_B")
 $(fc_reads "$FC_C")"
 expect_eq "WORD-0 precondition: with no run recorded for T1's code commit, the judge reads the head uncovered" "uncovered" "$(fc_judged)"
@@ -186,21 +185,25 @@ expect_eq "OF-4 a floor not in the head's history keeps its red: the judge reads
 rm -f "$FC_REC"/release-approval-*.md
 
 # §JUDGE's world as it was left: T1's landing recorded, the head R.
-fc_published T1 "$FC_C" > "$FC_REC/landing-proofs.log"; rm -f "$FC_REC"/release-approval-*.md
+fc_published T1 "$FC_C" > "$FC_SEED"; rm -f "$FC_REC"/release-approval-*.md
 fc_typed "$FC_WD" "$FC_WR"
 
 # ============================================================
 section "§UNPROVED-ASK: the merge without a pass is an answer where an open integrate row waits on the release"
 # ============================================================
 # fails-when: approve, or the card's reply, writes no merge-unproved line on a plan whose integrate row reads no approval:merge; or writes one where no open integrate row stands.
+fc_ua_row() {  # <page> -> the integrate row reading no approval, landed or dropped as FC_UA_ST says
+  sed 's/^\(| T3 | 8 | integrate | merge into main | \)approval:merge |/\1— |/' "$1" > "$1.new" && mv "$1.new" "$1"
+  case "$FC_UA_ST" in landed) printf 'run/v1|ev=published|row=T3|at=\n' ;; dropped) printf 'run/v1|ev=drop|row=T3|why=dropped|at=\n' ;; esac >> "$FC_EV"
+}
 fc_ua() {  # [<integrate row's status>] -> PFC: the red world, the integrate row reading no approval but its own release
-  fc_plan "$(fc_floor "$FC_B")
-$(fc_reads "$FC_C")" "s/| pending | approval:release, approval:merge, head |\$/| ${1:-pending} | head |/"
+  FC_UA_ST="${1:-pending}"; fc_plan "$(fc_floor "$FC_B")
+$(fc_reads "$FC_C")" "" fc_ua_row
 }
 fc_ua; FC_S0="$(cksum < "$PFC")"; poke "$RFC" approve merge-unproved 'words'
 expect_eq "UA-1 approve merge-unproved appends it (exit 0) where the integrate row is open and no row reads approval:merge, the plan's sum the same" "0|1|$FC_S0" "$RC|$(fc_appr merge-unproved | grep -c .)|$(cksum < "$PFC")"
 FC_AT='|by=me|at=2026-10-12T14:00:00Z'; fc_ua; printf 'run/v1|ev=approval|key=merge-unproved|head=%s%s\n' "$FC_R" "$FC_AT" >> "$FC_REC/run.log"; FC_S0="$(cksum < "$PFC")"; poke "$RFC" approve merge-unproved 'again'; FC_UA1="$RC|$(cksum < "$PFC")"
-fc_plan "$(fc_floor "$FC_B")" '/^approved-by:/d'; printf 'run/v1|ev=approval|key=step3%s\n' "$FC_AT" >> "$FC_REC/run.log"; FC_S1="$(cksum < "$PFC")"; poke "$RFC" approve plan 'approved'
+fc_plan "$(fc_floor "$FC_B")" '/|ev=approval|key=step3|/d'; printf 'run/v1|ev=approval|key=step3%s\n' "$FC_AT" >> "$FC_REC/run.log"; FC_S1="$(cksum < "$PFC")"; poke "$RFC" approve plan 'approved'
 expect_eq "UA-1b an approval the log holds at the working head, and the plan's, is not given again (exit 1), the plan unchanged" "1|$FC_S0|1|$FC_S1" "$FC_UA1|$RC|$(cksum < "$PFC")"
 fc_ua; fc_page
 FC_UAN="$(fc_table | /usr/bin/grep -F '|key=approve:merge-unproved|' | sed -n 's/^release-approval\/v1|dec=\([0-9]*\)|.*/\1/p')"
@@ -214,7 +217,7 @@ for FC_UAS in dropped landed; do
   expect_contains "UA-3b …naming what the rows read, in the refusal's words ($FC_UAS)" "reads approval:merge-unproved, so recording it would satisfy nothing; the rows read: (no named approval)" "$OUT"
 done
 fc_typed "$FC_WD" "$FC_WR"
-rm -f "$FC_REC"/release-approval-*.md "$FC_REC/landing-proofs.log"
+rm -f "$FC_REC"/release-approval-*.md "$FC_SEED"
 
 # ============================================================
 section "§COVERED: a failed review its fix landing answered reads covered on the card, naming the landing, and the sitrep counts it as the card does"
@@ -246,15 +249,14 @@ expect_contains "COVERED-0b the control: before any fix lands the adversarial li
 FC_CV0_CARD="$(cv_card_failing)"; FC_CV0_SR="$(cv_sitrep_failed)"
 expect_eq "COVERED-0c …and the card's failing lines and the sitrep's failed count agree: one each" "1|1" "$FC_CV0_CARD|$FC_CV0_SR"
 FC_CV_F="$(s57_commit "$RFC" lib/x.sh 'T4: the fix the adversarial reading asked for')"
-fc_published T4 "$FC_CV_F" > "$FC_REC/landing-proofs.log"
-cv_t4_row() {  # <page> -> the page with T4's Tasks row, landed, after T2's
-  awk '{ print } /^\| T2 \|/ {
-    print "| T4 | 4 | build | fix the x error · born: review | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |" }' \
-    "$1" > "$1.new" && mv "$1.new" "$1"
+fc_published T4 "$FC_CV_F" > "$FC_SEED"
+cv_t4_row() {  # <page> -> the page with T4's Tasks row after T2's, dispatched
+  awk '{ print } /^\| T2 \|/ { print "| T4 | 4 | build | fix the x error · born: review | — | 30 | REQ-1 | lib/x.sh | — |" }' "$1" > "$1.new" && mv "$1.new" "$1"
+  printf 'run/v1|ev=dispatch|row=T4|name=implementor|at=\n' >> "$FC_EV"
 }
 fc_plan "$FC_GOOD
 $FC_CV_FAIL
-- T4: landed $FC_CV_F 2026-10-12T14:00:00Z — added by task-add at 2026-10-12T12:45:00Z born: review S2 on of=record/wave-x/adversarial-fail.md#1" "" cv_t4_row
+run/v1|ev=born|row=T4|reason=review S2 on|finding=record/wave-x/adversarial-fail.md#1|at=2026-10-12T12:45:00Z" "" cv_t4_row
 fc_page --preview
 expect_contains "COVERED-1 AC-13.1 the fix landed at the head: the adversarial line reads covered" "covered" "$(cv_adv)"
 expect_absent "COVERED-1b …and no longer failing (COVERED-1 read the same line)" "failing" "$(cv_adv)"
@@ -270,6 +272,6 @@ expect_eq "COVERED-3 the plant changed the copy's sitrep (it reads the one reade
 expect_eq "COVERED-3b …and the planted sitrep counts the fixed review failed while the card reads none: the readers diverge" "0|1" \
   "$FC_CV1_CARD|$(cv_sitrep_failed "$FC_CVM/hooks/session-poker.sh")"
 git -C "$RFC" reset -q --hard "$FC_R"
-rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/release-approval-*.md "$FC_REC/adversarial-fail.md"
+rm -f "$FC_SEED" "$FC_REC"/release-approval-*.md "$FC_REC/adversarial-fail.md"
 
 finish
