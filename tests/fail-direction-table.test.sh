@@ -25,6 +25,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 # The one bound-marker builder (wave-23-fixit-1810 T1).
@@ -87,23 +88,16 @@ SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
 # verbatim capture); the `subagents/agent-<id>.{meta.json,jsonl}` layout is
 # FAITHFUL to §2.5. Session ids, agent ids, plan text: SYNTHESIZED, declared.
 
-write_plan() {  # <path> <current-line>
-  mkdir -p "$(dirname "$1")"
-  {
-    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-    printf 'intent: build\nrigor: double\nscale: wave\n'
-    # A LIVE PLAN CARRIES A MEASURED BUDGET (epic-23 wave-20 T2, REQ-10, D10; ADR-035).
-    # `budget_line_of`/`plan_budget_line` (payload/scripts/lib/run.sh) read this line, at
-    # column 0 with the colon directly after the key, out of the LEADING frontmatter block
-    # only. Every dispatch driven against a `wave:yes` world below reaches `current: 4`, so
-    # without this line dispatch preflight's missing-budget backstop prints an unmeasured-
-    # budget WARN on every one of them — breaking `start|attested`'s literal silence, the
-    # one row in this table that demands it (found by T7, wave-20 T14).
-    printf 'parallel-budget: writers=4 suites=2 worktrees=8 test_jobs=4 source=probe\n'
-    printf -- '---\n\n# Fixture plan\n\n'
-    # APPROVED (wave-20 T7, AC-9.1): the dispatch wall refuses a writer on an unapproved plan.
-    printf '## SDLC State\n\nintegration-branch: main\n%s\napproved-by: dana 2026-09-07T19:05Z "approved"\n\n- Step 4: evidence\n' "$2"
-  } > "$1"
+# write_plan <path> <step|none> -> the run's page at 15 and its log: the step, and the approval the dispatch wall asks
+# for before it admits a writer. `none` leaves the log with no step event, the run that names no step. The page's header
+# carries the measured budget the start gate's missing-budget backstop reads, which every `wave:yes` world below needs
+# to keep `start|attested` silent.
+write_plan() {
+  local log
+  plan_fixture --current "$([ "$2" = none ] && echo 1 || echo "$2")" "$1" wave > /dev/null || return 1
+  [ "$2" = none ] || return 0
+  log="$(plan_fixture_log "$1")"
+  grep -v '|ev=step|' "$log" > "$log.n"; mv "$log.n" "$log"
 }
 
 # make_world <name> <wave:yes|no|nocurrent> -> "repo|transcript|subagents-dir"
@@ -129,7 +123,7 @@ make_world() {
   printf '{}\n' > "$cfg/projects/$slug/$SID_A.jsonl"
   printf '{}\n' > "$cfg/projects/$slug/$SID_B.jsonl"
   case "$wave" in
-    yes)       write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+    yes)       write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.plan.md" 4
                # A LIVE WAVE HAS A LIVE PATROL (epic-17 W5 4/4). The arming wall refuses a
                # dispatch whose session carries no fresh Patrol stamp, and every start-gate
                # row below rides an active world — so an unarmed fixture would rewrite this
@@ -149,9 +143,9 @@ make_world() {
                  # BOUND TO THE WAVE'S PLAN (wave-23-fixit-1810, REQ-1, D1): an unbound
                  # session's newest-plan fallback is announced and never acted on, and the
                  # start gate refuses its writer with the bind instruction.
-                 bound_marker "$repo" "$_psid" "$repo/.bionic/docs/plans/epic-99/wave-01.md"
+                 bound_marker "$repo" "$_psid" "$repo/.bionic/docs/plans/epic-99/wave-01.plan.md"
                done ;;
-    nocurrent) write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: pending" ;;
+    nocurrent) write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.plan.md" none ;;
     no)        mkdir -p "$repo/.bionic/docs" ;;
   esac
   printf '%s|%s|%s' "$repo" "$cfg/projects/$slug/$SID_A.jsonl" "$cfg/projects/$slug/$SID_A/subagents"
@@ -282,7 +276,7 @@ printf '# attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\n' "
 # world's plan, which is what a real session is after Step 0 writes its plan. The unbound
 # shape gets its own row (start|attested-unbound) below, as SILENT-WITH-ANNOUNCE.
 printf 'plan=%s\nengaged_at=%s\n' \
-  "$(cd "$T_REPO" && pwd -P)/.bionic/docs/plans/epic-99/wave-01.md" \
+  "$(cd "$T_REPO" && pwd -P)/.bionic/docs/plans/epic-99/wave-01.plan.md" \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$T_REPO/.bionic/tmp/engaged-$SID_A.state"
 chmod 600 "$T_REPO/.bionic/tmp/engaged-$SID_A.state"
 

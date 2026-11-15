@@ -18,6 +18,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
@@ -765,15 +766,8 @@ sleep 0.3 2>/dev/null || true
 # this session's own attestation. Both are fixtures of the WRITER's
 # preconditions, never of the value under test — the row itself is lifted from
 # the brief by the real extractor.
-mkdir -p "$R8/.bionic/docs/plans/epic-99"
-{
-  printf -- '---\n'
-  printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
-  printf 'intent: build\nrigor: double\nscale: wave\n'
-  printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 4\n'
-  # APPROVED (wave-20 T7, AC-9.1): the dispatch wall refuses a writer on an unapproved plan.
-  printf 'approved-by: dana 2026-09-07T19:05Z "approved"\n'
-} > "$R8/.bionic/docs/plans/epic-99/wave-01.md"
+# The run's page is at 15 and its log holds step 4 and the approval the writer's wall asks for.
+plan_fixture "$R8/.bionic/docs/plans/epic-99/wave-01.plan.md" wave > /dev/null
 printf 'version=v1\nsession_id=%s\n' "$OWN8" > "$R8/.bionic/tmp/preflight-${OWN8}.state"
 # …and this session's Patrol stamp, the third writer precondition since epic-17 W5 4/4: the
 # start gate refuses a dispatch whose session has no fresh one, and this case needs the gate
@@ -787,7 +781,7 @@ chmod 600 "$R8/.bionic/tmp/patrol-${OWN8}.state"
 # to actually JOURNAL a row. A fixture of the writer's preconditions, never of the value
 # under test. BOUND to the fixture plan (wave-23-fixit-1810, REQ-1, D1): an unbound
 # session's writer is refused with the bind instruction and journals nothing.
-bound_marker "$R8" "$OWN8" "$R8/.bionic/docs/plans/epic-99/wave-01.md"
+bound_marker "$R8" "$OWN8" "$R8/.bionic/docs/plans/epic-99/wave-01.plan.md"
 
 echo "progress line" > "$R8/prog-g.progress"
 # Each field stands under its own label on a line of its own: the wall reads no label inside a sentence.
