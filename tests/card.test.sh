@@ -679,14 +679,6 @@ release: 1.27.0
 
 A sitrep is the handful of facts that change what the user does next, drawn by code with the model's judgment on top, in well under a minute. Five themes, in the plan's order: the register tells an ask that waits on the user from an item that waits on an event, and only the first can block the user or drive the call; code draws every fact row, the head, the task list, the metrics, Blocked on you and the predicted close, and the model writes seven lines of judgment the check reads; the card says what the wave is for and whether it is on course, first under the Assessment; and the whole takes under thirty seconds of model output; and every card the run puts to the user, requirements, design and plan, prints a name per item and keeps the detail one keystroke away. Accepted when the card drawn on the wave-43 plan and on a fixture shaped like the large-app run reads in the approved mock-up's shape, and three sitreps in a row take under thirty seconds each.
 
-## Context
-
-The run was chartered as the hand-holds measure with the sitrep as a late addition, and cut to the sitrep at the design frame (charter §Cut; ledger Δ8). The cause: a large-app card of 63 rows whose Call to action restated a ruling already given, whose Assessment carried fourteen register items under five points, and whose Blocked on you named a merge that waited on a re-review, not on the user; and a measurement of the sitrep at a median of about 95 seconds, nine tenths of it the model typing and retyping rows that are facts (research-sitrep-latency.md: first judgment 43%, refusal rewrites 34%, retyping the printed card 14%, machine 10%). The concept review (research-sitrep-concept.md) found the card never states what the wave is for: the sheet carries neither the plan's Goal nor the themes' openers, and the Goals row may state only status counts. Chris ruled D7, materiality; D6, code draws the facts; D1, the purpose first under the Assessment; and approved a mock-up (ledger Δ1, Δ6, Δ7). The rulings of waves 38 to 43 that stand: the seven sections in order (w42 Δ0, Δ9), Metrics as numbers only (w42 D2), the grade (w42 D2), the task list as drawn today, bottom line up front (w38 D11), one renderer prints every fact (w38 D9, restored). Reopened on evidence: w42 D1 "2" (the model writes every word) and w42's "every open ask answered once".
-
-## Theme 1 — the register knows what you owe
-
-An ask waits on the user or on an event, and the register says which; only an ask that waits on the user can block the user or drive the call.
-
 ### REQ-1 — An ask says what it waits on
 
 Every ask you are shown says whether it waits on you or on something else happening, so you can tell what is really yours.
@@ -705,10 +697,6 @@ provenance: charter §Cut ("the Call to action is vapid"); wave 43 deferral crit
 - AC-2.1 Blocked on you lists the asks that wait on the user and hold a task, the release or the merge, and nothing else; with none it reads `None` and names the nearest event the run waits on. Fails when: an ask waiting on an event is drawn there, or `None` is drawn while an ask waiting on the user holds the merge.
 - AC-2.2 The call may say nothing is owed while every open ask waits on an event, and must name the ask while one waits on the user and holds something; the check reads `waits-on`, not `holds`. Fails when: the check refuses "nothing tonight" over a refused waiver, or admits it over an unanswered one.
 - AC-2.3 The handoff head's `Blocked on you`, the sitrep card and the Patrol's `blocks=` read one function, pinned by one suite row that reddens when any two disagree; the `blocks-rule` and `blocked-on-you` duplicates are gone. Fails when: `/usr/bin/grep` finds the rule in two files, or a planted divergence passes.
-
-## Theme 2 — code draws the facts, the model writes the judgment
-
-Every row that is a fact is drawn by the verb; the model writes only what is judgment, and the check reads only that.
 
 ### REQ-3 — The verb draws the fact rows
 
@@ -738,10 +726,6 @@ provenance: ledger Δ6, Δ7; skills/sitrep/SKILL.md (the six questions, the Goal
 
 - AC-5.1 `skills/sitrep/SKILL.md` describes the two verbs, the seven judgment lines, the Purpose question in place of the Goals question, and the rule that an ask waiting on an event owes the user nothing; its example judgment is seven lines; `words.test.sh` and the sitrep-card suite's skill section pin it. Fails when: the skill text still asks for `task:` or `metric:` rows, or for every open ask.
 
-## Theme 3 — the card says what the wave is for
-
-The sitrep opens its judgment on what the wave set out to do and whether that is being accomplished, read from the run's own documents, at every scale.
-
 ### REQ-6 — The sheet carries the goal
 
 The facts a sitrep reads carry what the wave is for, so its purpose is never guessed.
@@ -769,10 +753,6 @@ provenance: research-sitrep-concept.md Q2, tweaks 3, 5 and 7; 1.26.0 Known limit
 - AC-8.2 At task scale the sheet reads one goal over the whole matrix, the run's criteria discharged and open REQs. Fails when: a task-scale sheet prints no `goal:` line.
 - AC-8.3 A goal missed by a red the plan itself declares opens no `decide:goal:<name>` ask. Fails when: the ask opens for a declared red.
 
-## Theme 4 — fast
-
-A sitrep costs the user the time it takes to read it, not the time it takes to write.
-
 ### REQ-9 — Under thirty seconds
 
 A sitrep reaches you in under thirty seconds.
@@ -789,10 +769,6 @@ The card shape you approved is held by a test, so it cannot drift.
 provenance: ledger Δ7 (the mock-up Chris approved: "Yes! That is what I want!")
 
 - AC-10.1 A fixture shaped like the large-app card (17 open tasks, 14 items waiting on events, a refused waiver holding the merge, 54 added tasks) draws the mock-up's shape: Call to action one line saying nothing is owed, the Task list as today, a five-line Metrics table, an Assessment of the purpose, at most three points and one counted line, Blocked on you `None` with the event named, Predicted close in three lines; the drawn card is under 40 rows. Fails when: a register item is drawn as a row, the merge reads blocked, or the card exceeds 40 rows.
-
-## Theme 5 — the cards read at a glance
-
-Every card the run puts to the user prints a name per item and keeps the detail one keystroke away, so a card is scanned, not read.
 
 ### REQ-11 — The plan card shows titles
 
@@ -878,10 +854,6 @@ release: 1.27.0
 ## Goal
 
 Ship bionic 1.27.0 so that a sitrep is the handful of facts that change what the user does next, drawn by code with the model's judgment on top, in under thirty seconds. The register stores the answer given to an ask and one function says whether the ask waits on the user or on an event; only the first can block the user or drive the call. The card verb draws every row that is a fact from the saved sheet, the model writes seven lines of judgment, and the check refuses only what would make the card false. The Assessment opens on what the wave is for, read from the plan. Accepted when a fixture shaped like the large-app run draws the approved mock-up in under 40 rows and three real sitreps take under thirty seconds each.
-
-## Context and Problem
-
-The requirements (REQ-1 to REQ-10) and three records carry it: `record/wave-44-every-hand/research-sitrep-concept.md` (the card never states what the wave is for), `research-sitrep-latency.md` (95 s median, 90% model output: first judgment 43%, refusal rewrites 34%, retyping the card 14%) and `research-sitrep-sites.md` (the sites at dd425be64). The register's `owed/v1` line has no field for an answer or for what an ask waits on; its kind is the key prefix alone (sites §REQ-1). A waiver answered "no" at the release card reaches only the approval page (`withheld:`, plan.sh:2989-2992); the `waive:<q>` item stays open and holds the merge. Three rules say what blocks the user: the sheet (sitrep.sh:1616), the card's fallback (card.sh:3139) and the handoff head (sitrep.sh:2123, yes for any open ask); the Patrol's `owed: <n>` counts every ask. The card verb accepts eight tags, requires a row per step, per open task, per metric and per open ask, binds every metric number to a word, and refuses a row over 100 columns though a fold helper exists (card.sh:2373). The rulings are the ledger's Δ1, Δ6 to Δ11: D1 "1", D6 "1", D7 "1", D8 "1", D9 "1", the cut (Δ8) and the check's rule (Δ11). The frame's D2 to D5 were named for the measure run and withdrawn with the cut.
 
 ## Design
 
@@ -1089,192 +1061,11 @@ The card lands first and alone with the mock-up fixture (T1), red at the base, t
 
 ## Verification Matrix
 
-stack-health: before, the build head a2d0b7cd1 (2026-10-24T08:34Z): every landing suite green, shell-lint red on BP-1 at that head (T10-shell-lint.log, 168/169); after, the regression at afb40d258 (2026-10-24T09:17Z, after fix row T15): 126 passed, 0 failed (regression-run-afb40d2584fbd4cb31ba9d0523096c1ff7c95dbd.log)
-auditor-wave: REFUTED — the critic (w44-T9, critic-evidence.md, single rigor: the critic holds evidence) confirmed 21 of 25 rows; AC-8.1 REFUTED (fix row T16, re-read T17), AC-14.1 REFUTED (deferred S3, the user's at the release card), AC-10.1 and AC-9.1 UNVERIFIABLE (the mock-up is in no record; the thirty seconds waits on T8)
-walk-artifact: record/wave-44-every-hand/walk.md
-
 | AC | tier | status | evidence | auditor |
 |---|---|---|---|---|
 | AC-1.1 | T2 | discharged | record/wave-44-every-hand/line/T14-asks-d85a2b342d51.log | CONFIRMED |
 | AC-1.2 | T2 | discharged | record/wave-44-every-hand/line/T14-asks-d85a2b342d51.log | CONFIRMED |
 | AC-2.1 | T1 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-2.2 | T1 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-2.3 | T2 | discharged | record/wave-44-every-hand/line/T3-sitrep-7bc8545b0db2.log | CONFIRMED |
-| AC-3.1 | T1 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-3.2 | T1 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-3.3 | T1 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-4.1 | T1 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-4.2 | T1 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-4.3 | T0 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-5.1 | T0 | discharged | record/wave-44-every-hand/line/T5-words-a2d0b7cd15a3.log | CONFIRMED |
-| AC-6.1 | T2 | discharged | record/wave-44-every-hand/line/T4-sitrep-aba61f74eced.log | CONFIRMED |
-| AC-6.2 | T2 | discharged | record/wave-44-every-hand/line/T4-sitrep-aba61f74eced.log | CONFIRMED |
-| AC-7.1 | T1 | discharged | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | CONFIRMED |
-| AC-8.1 | T2 | discharged | record/wave-44-every-hand/line/T18-sitrep-card-aa948d2205fa.log | CONFIRMED |
-| AC-8.2 | T2 | discharged | record/wave-44-every-hand/line/T4-sitrep-aba61f74eced.log | CONFIRMED |
-| AC-8.3 | T2 | discharged | record/wave-44-every-hand/line/T4-sitrep-aba61f74eced.log | CONFIRMED |
-| AC-9.1 | T4 | waived | — | pending |
-| AC-9.2 | T2 | discharged | record/wave-44-every-hand/line/T3-sitrep-7bc8545b0db2.log | CONFIRMED |
-| AC-10.1 | T1 | waived | record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log | pending |
-| AC-11.1 | T1 | discharged | record/wave-44-every-hand/line/T13-card-97542f066e21.log | CONFIRMED |
-| AC-12.1 | T1 | discharged | record/wave-44-every-hand/line/T13-card-97542f066e21.log | CONFIRMED |
-| AC-13.1 | T1 | discharged | record/wave-44-every-hand/line/T13-card-97542f066e21.log | CONFIRMED |
-| AC-14.1 | T1 | waived | record/wave-44-every-hand/line/T13-card-97542f066e21.log | pending |
-
-AC-1.1: Every ask on the register reads `waits-on=user` or `waits-on=event <what>`: a decision, an approval and an unanswered waiver wait on the user; a waiver answered "no" waits on the review's next run; a finding carried to a row waits on that row's landing; the sheet's `ask:` line carries the field.
-  provenance: charter §Cut (the large-app card's "Blocked on you doesn't seem like it's truly blocked"); sheet-definitions.md (an ask line carries holds= and blocks=, nothing of who it waits on)
-  fails-when: the refused waiver reads user, or a line lacks the field
-  eval: T2 — `asks.test.sh` §WAITS: `ask_waits_on` says user for a decision, an approval and an unanswered waiver, event for a waiver answered no and a finding answered carry; the sheet's `ask:` lines carry `waits=`
-  task: T2, T14
-  evidence: record/wave-44-every-hand/line/T14-asks-d85a2b342d51.log
-AC-1.2: A reply of "no" to a waiver, and a finding ruled "carry" or "defer", record the answer on the ask and move it to `waits-on=event` without closing it; the ask closes as it does today, when the review passes or the row lands.
-  provenance: charter §Cut (the large-app card's "Blocked on you doesn't seem like it's truly blocked"); sheet-definitions.md (an ask line carries holds= and blocks=, nothing of who it waits on)
-  fails-when: the item closes at the answer, or reads no answer
-  eval: T2 — `asks.test.sh` §ANSWER: the item stays open with `answer=no`; the finding stays open with `answer=carry event=T9 lands` and closes when T9's landing is recorded
-  task: T2, T14
-  evidence: record/wave-44-every-hand/line/T14-asks-d85a2b342d51.log
-AC-2.1: Blocked on you lists the asks that wait on the user and hold a task, the release or the merge, and nothing else; with none it reads `None` and names the nearest event the run waits on.
-  provenance: charter §Cut ("the Call to action is vapid"); wave 43 deferral critic-adversarial-2.md#2 (adopted: the handoff head follows the card); debt blocked-on-you (card.sh:3042, sitrep.sh:2123) and blocks-rule (sitrep.sh:1616, card.sh:3139)
-  fails-when: the refused waiver is drawn, or `None` over the unanswered one
-  eval: T1 — `sitrep-card.test.sh` §BLOCKS: `None` naming T86 over the refused waiver; the unanswered waiver drawn under Blocked on you
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-2.2: The call may say nothing is owed while every open ask waits on an event, and must name the ask while one waits on the user and holds something; the check reads `waits-on`, not `holds`.
-  provenance: charter §Cut ("the Call to action is vapid"); wave 43 deferral critic-adversarial-2.md#2 (adopted: the handoff head follows the card); debt blocked-on-you (card.sh:3042, sitrep.sh:2123) and blocks-rule (sitrep.sh:1616, card.sh:3139)
-  fails-when: either verdict inverts
-  eval: T1 — `sitrep-card.test.sh` §CALL: admitted over the refused waiver, refused over the unanswered one
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-2.3: The handoff head's `Blocked on you`, the sitrep card and the Patrol's `blocks=` read one function, pinned by one suite row that reddens when any two disagree; the `blocks-rule` and `blocked-on-you` duplicates are gone.
-  provenance: charter §Cut ("the Call to action is vapid"); wave 43 deferral critic-adversarial-2.md#2 (adopted: the handoff head follows the card); debt blocked-on-you (card.sh:3042, sitrep.sh:2123) and blocks-rule (sitrep.sh:1616, card.sh:3139)
-  fails-when: any two disagree, or the fallback remains
-  eval: T2 — `sitrep.test.sh` §ONE-BLOCKS: the sheet, the handoff head and the Patrol line agree over a planted answered waiver; `/usr/bin/grep -c 'nothing.*blocks|blocks=' payload/scripts/card.sh` finds no re-derivation
-  task: T1, T3
-  evidence: record/wave-44-every-hand/line/T3-sitrep-7bc8545b0db2.log
-AC-3.1: `sitrep` prints, beside the sheet, the drawn rows of the head, the Task list (every step and task row as today, its text from the plan's task title and its state words from the sheet), the Metrics table, Blocked on you and the first two lines of Predicted close, so the model writes none of them.
-  provenance: ledger Δ6 (D6 "1"); research-sitrep-latency.md causes 1 to 3; w38 D9 (one renderer prints every fact)
-  fails-when: a task row is missing, or `task:` is accepted
-  eval: T1 — `sitrep-card.test.sh` §DRAWN: every step and task row drawn from S and T records; a `task:` line in the judgment refuses by name
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-3.2: The Metrics are a five-line table, Completed, Pace, Correctness, Waste, Goals, each cell one sheet value, numbers only, the pace comparison first in its line.
-  provenance: ledger Δ6 (D6 "1"); research-sitrep-latency.md causes 1 to 3; w38 D9 (one renderer prints every fact)
-  fails-when: a digit no line holds, or prose
-  eval: T1 — `sitrep-card.test.sh` §TABLE: five lines, every digit run a measured value of its line, the pace comparison first
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-3.3: Items that wait on events are one drawn line under the Assessment, counted by kind ("14 items wait on landings, not on you: 8 carried findings, 6 rulings given"), never one row each.
-  provenance: ledger Δ6 (D6 "1"); research-sitrep-latency.md causes 1 to 3; w38 D9 (one renderer prints every fact)
-  fails-when: an ask is drawn as a row
-  eval: T1 — `sitrep-card.test.sh` §COUNTED: one line "14 items wait on landings, not on you: 8 carried findings, 6 rulings given" under the Assessment
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-4.1: The judgment the model pipes to `sitrep card` is: `purpose:`, `call:`, `grade:`, one to three `point:` lines, one `ask <key>:` recommendation per ask that waits on the user, and one `close:` condition line; the check refuses any other tag, and refuses a missing one by name.
-  provenance: ledger Δ6, Δ7; research-sitrep-latency.md (refusal classes: metric binding 4, row wrap 4, state word 2, reading/reader 2)
-  fails-when: a foreign tag draws, or a missing one is unnamed
-  eval: T1 — `sitrep-card.test.sh` §TAGS: the seven accepted; `metric:` refused by name; a missing `purpose:` refused by name
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-4.2: Every number in a judgment line is bound to the sheet value whose word stands beside it, by word and by place, as the metrics were; a line over the card's width is folded by the renderer, never refused.
-  provenance: ledger Δ6, Δ7; research-sitrep-latency.md (refusal classes: metric binding 4, row wrap 4, state word 2, reading/reader 2)
-  fails-when: the swap passes, or the fold refuses
-  eval: T1 — `sitrep-card.test.sh` §BIND: "1 green and 11 red" over "11 green, 1 red" refuses; a number on no line refuses; the long point folds and draws
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-4.3: The tool shows the card; the skill tells the model to print the tool's output once inside one fenced block and never to retype it, and a refusal prints every reason at once.
-  provenance: ledger Δ6, Δ7; research-sitrep-latency.md (refusal classes: metric binding 4, row wrap 4, state word 2, reading/reader 2)
-  fails-when: the text asks to retype, or the second reason waits for a second run
-  eval: T0 — `/usr/bin/grep -n 'fenced' skills/sitrep/SKILL.md` finds the show-once rule and no "regenerate"; `sitrep-card.test.sh` §REASONS: a judgment missing purpose and holding a bad number prints both reasons on one refusal
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-5.1: `skills/sitrep/SKILL.md` describes the two verbs, the seven judgment lines, the Purpose question in place of the Goals question, and the rule that an ask waiting on an event owes the user nothing; its example judgment is seven lines; `words.test.sh` and the sitrep-card suite's skill section pin it.
-  provenance: ledger Δ6, Δ7; skills/sitrep/SKILL.md (the six questions, the Goals question, "every open ask answered once")
-  fails-when: an old tag remains in the example, or the Goals question
-  eval: T0 — `/usr/bin/grep -c 'task:|metric:' skills/sitrep/SKILL.md` → 0 outside the refusal list; §SKILL rows of sitrep-card and sitrep read the seven tags and the Purpose question; `words.test.sh` §TEXTS green
-  task: T5
-  evidence: record/wave-44-every-hand/line/T5-words-a2d0b7cd15a3.log
-AC-6.1: The sheet carries `run.goal:`, the plan's `## Goal` paragraph, so the purpose is drawn from the verb and never fetched by the model.
-  provenance: charter §Late addition ("reasserting what the wave is doing"); research-sitrep-concept.md Q3; wave 41 D13
-  fails-when: the line differs, or an error prints
-  eval: T2 — `sitrep.test.sh` §RUN-GOAL: `run.goal:` equals the paragraph the Step-1 card prints; the Goal-less plan prints no line and no error
-  task: T4
-  evidence: record/wave-44-every-hand/line/T4-sitrep-aba61f74eced.log
-AC-6.2: Each theme's `goal:` line carries the theme's opening sentence as its last field, `for=`, with the fields the release card reads kept in place.
-  provenance: charter §Late addition ("reasserting what the wave is doing"); research-sitrep-concept.md Q3; wave 41 D13
-  fails-when: a line lacks `for=`, or the release card's read changes
-  eval: T2 — `sitrep.test.sh` §FOR: each `goal:` line ends `for=<opener>`; `release-approval.test.sh` §GOALS unchanged green
-  task: T4
-  evidence: record/wave-44-every-hand/line/T4-sitrep-aba61f74eced.log
-AC-7.1: The Assessment's first row is the `purpose:` line, what the wave is for and whether it is on course; a judgment without it is refused, and its numbers are checked against the sheet as every line's are.
-  provenance: charter §Late addition ("whether we're accomplishing the purpose of the wave"); ledger Δ1 (D1 "1")
-  fails-when: a card draws without it, or the false count draws
-  eval: T1 — `sitrep-card.test.sh` §PURPOSE: the first refuses by name; the second refuses on the number; a true one draws first under the grade
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-AC-8.1: The Goals line of the Metrics states each theme's criteria discharged and open REQs, each number bound to its theme's name; a theme with at least one criterion discharged and none missed reads `on course`, distinct from `not measured`, on the sheet, the sitrep card and the release card.
-  provenance: research-sitrep-concept.md Q2, tweaks 3, 5 and 7; 1.26.0 Known limit 23
-  fails-when: the two themes read alike, or the false count draws
-  eval: T2 — `sitrep.test.sh` §GOAL-AGREE: `on course` and `not measured` on the sheet, the Goals line and the release card; "Identity 10 of 11" refuses at the card
-  task: T4, T16, T18
-  evidence: record/wave-44-every-hand/line/T21-sitrep-01f38b51335b.log
-AC-8.2: At task scale the sheet reads one goal over the whole matrix, the run's criteria discharged and open REQs.
-  provenance: research-sitrep-concept.md Q2, tweaks 3, 5 and 7; 1.26.0 Known limit 23
-  fails-when: no goal line
-  eval: T2 — `sitrep.test.sh` §TASK-GOAL: one `goal: name=the run` with k of n over the matrix
-  task: T4
-  evidence: record/wave-44-every-hand/line/T21-sitrep-01f38b51335b.log
-AC-8.3: A goal missed by a red the plan itself declares opens no `decide:goal:<name>` ask.
-  provenance: research-sitrep-concept.md Q2, tweaks 3, 5 and 7; 1.26.0 Known limit 23
-  fails-when: the ask opens, or the real miss opens none
-  eval: T2 — `sitrep.test.sh` §DECLARED-RED: the tick opens no `decide:goal:`; a goal missed otherwise still opens one
-  task: T4
-  evidence: record/wave-44-every-hand/line/T21-sitrep-01f38b51335b.log
-AC-9.1: Three sitreps run in a row on a live plan, measured from the typed command to the shown card in the transcript as research-sitrep-latency.md measured, each take under 30 seconds, with at most one card refusal among the three. Evidence is the measurement recorded at Step 5.
-  provenance: charter §Cut ("Right now this is fucking wasting my time!"); research-sitrep-latency.md (74 to 108 s; model output 90%)
-  fails-when: one at 30 s or more, or two refusals
-  eval: T4 — the transcript timings recorded in `record/wave-44-every-hand/sitrep-timing.md`, each under 30 s, at most one refusal
-  task: T8
-  evidence: pending
-  user-confirmed: pending
-  waiver: Chris Lehman 2026-10-24T16:04:40Z "option 1 - good enough. Much happier with /sitrep." — measured 64 s and 40 s typed-to-card (sitrep-timing.md), the verbs under three seconds; the rest is the model, which no sheet edit reaches; the limit is stated in the 1.27.0 entry
-AC-9.2: The machine side of a sitrep, the sheet and the card together, takes under 5 seconds on the wave-43 plan.
-  provenance: charter §Cut ("Right now this is fucking wasting my time!"); research-sitrep-latency.md (74 to 108 s; model output 90%)
-  fails-when: 5 s or more
-  eval: T2 — `sitrep.test.sh` §FAST: `sitrep` then `sitrep card` on a copy of the wave-43 plan and record under 5 s together
-  task: T3
-  evidence: record/wave-44-every-hand/line/T3-sitrep-7bc8545b0db2.log
-AC-10.1: A fixture shaped like the large-app card (17 open tasks, 14 items waiting on events, a refused waiver holding the merge, 54 added tasks) draws the mock-up's shape: Call to action one line saying nothing is owed, the Task list as today, a five-line Metrics table, an Assessment of the purpose, at most three points and one counted line, Blocked on you `None` with the event named, Predicted close in three lines; the drawn card is under 40 rows.
-  provenance: ledger Δ7 (the mock-up Chris approved: "Yes! That is what I want!")
-  fails-when: a register item is a row, the merge reads blocked, 40 rows or more, or green at the base
-  eval: T1 — `sitrep-card.test.sh` §MOCKUP: the drawn card equals the mock-up's shape line for line (sections, counts, `None`, three close lines), under 40 rows; red at dd425be64 on the unknown `purpose:` tag, T1's red log in record/
-  task: T1, T5
-  evidence: record/wave-44-every-hand/line/T5-sitrep-card-a2d0b7cd15a3.log
-  waiver: Chris Lehman 2026-10-24T17:58:16Z "all recommended" — not confirmed by the auditor on this release
-AC-11.1: A `## Tasks` cell opens on a title of at most 30 characters, then a period and the detail; the Step-3 card prints the title alone, `serves` in its own column and consecutive ids in `depends` as a range; `show task <n>` prints the whole cell; the Step-3 text states the rule; a longer title is refused by the card, which names the row and its length, never cut.
-  provenance: user 2026-10-23 "Each task description is far too long. It's not useful whatsoever. I need a brief summary or phrase that represents what the task is. Maybe 25-30 characters max." and "Yes! That's so much more useful OMG" at the mock-up (ledger Δ13)
-  fails-when: the detail prints, the long title draws, or the step text lacks the rule
-  eval: T1 — `card.test.sh` §TITLES: the Step-3 card's task block prints each title alone with `serves` in its own column and `T1–T5` for a run of ids; the 31-character title is refused with its row and length named; `show task 1` prints the whole cell; `/usr/bin/grep -c 'title of at most 30' skills/canonical-sdlc/steps/3.md` → 1
-  task: T13
-  evidence: record/wave-44-every-hand/line/T13-card-97542f066e21.log
-AC-12.1: A `### REQ-<n> — <title>` heading's title is at most 30 characters; the Step-1 card prints each requirement as its id, its title and its criteria count on one line, the provenance under `explain <requirement>` only; a longer title is refused by the card, which names the requirement and its length, never cut; the Step-1 text states the rule.
-  provenance: user 2026-10-23 "Each task description is far too long. It's not useful whatsoever. I need a brief summary or phrase that represents what the task is. Maybe 25-30 characters max." and "Yes! That's so much more useful OMG" at the mock-up (ledger Δ13); user 2026-10-23 "you need to do the same thing for the requirements card. Each requirement desc needs to be capped at 30 chars."
-  fails-when: a provenance prints, the long title draws, or the step text lacks the rule
-  eval: T1 — `card.test.sh` §REQ-TITLES: the Step-1 card prints `REQ-n  <title>  ACs k` per requirement and no provenance; the long title is refused with its requirement and length named; `explain REQ-1` prints the provenance; `/usr/bin/grep -c 'at most 30' skills/canonical-sdlc/steps/1.md` → 1
-  task: T13
-  evidence: record/wave-44-every-hand/line/T13-card-97542f066e21.log
-AC-13.1: Every `## Not Doing` item opens on a title of at most 30 characters, then a colon and the reason; the Step-1 card prints the titles, one per line, and `explain not-doing` prints the items whole; a longer title is refused by the card, naming the item, never cut; the Step-1 text states the rule.
-  provenance: user 2026-10-23 "Not Doing is way too wordy! It needs to be summarized!"
-  fails-when: a reason prints, the long title draws, or the step text lacks the rule
-  eval: T1 — `card.test.sh` §NOT-DOING-TITLES: the Step-1 card prints each item's title on one line and no reason; the long title is refused with the item named; `explain not-doing` prints the items whole
-  task: T13
-  evidence: record/wave-44-every-hand/line/T13-card-97542f066e21.log
-AC-14.1: Every `- D<n> — <title>` decision title is at most 30 characters; the Step-2 card prints each decision as its id, its title, the requirements it serves and its ADR, `explain <decision>` printing the detail; a longer title is refused by the card, naming the decision, never cut. The spec's `### Worth your eye` section is `### Risks`: each item is the model's own judgment of one risk that could change the user's decision, a sentence or two, and nothing that is not such a risk; drawn whole and folded, with no cap and no required shape; the card accepts the old heading on a spec written before 1.27.0. The Step-2 text states both.
-  provenance: user 2026-10-23 "Decisions capped to 30 characters"; "the Worth your eye section should probably be called Risks"; "I thought you were summarizing to the material points only"
-  fails-when: the long title draws, a risk is cut, or the section reads Worth your eye
-  eval: T1 — `card.test.sh` §DESIGN-TITLES: the Step-2 card prints each decision as id, title, serves and ADR and refuses the long title naming it; the Risks section draws whole under `Risks`, folded, never cut; a spec with `### Worth your eye` still draws
-  task: T13
-  evidence: record/wave-44-every-hand/line/T13-card-97542f066e21.log
-  waiver: Chris Lehman 2026-10-24T17:58:17Z "all recommended" — not confirmed by the auditor on this release
 
 ## SDLC State
 
