@@ -87,7 +87,7 @@ PFC="$RFC/.bionic/docs/plans/wave-x.plan.md"
 # the pending one naming the close (9) as its task, so no step before the close owes it. The run's log holds the steps
 # to 8, then by instant the plan's approval, T1's and T2's landings, the events the first argument gives (the proofs,
 # as `fc_line` writes them) and the line's events a section put in FC_SEED, a landing there for T1 standing in place of
-# the plan's own; then the rows' events as written to FC_EV: each row's dispatch and AC-1.1's proof, which carries the
+# the plan's own; then the rows' events as written to FC_EV: each row's dispatch and the first criterion's proof, with the
 # auditor's word and no instant. The second argument is a sed edit over the page and the log; the third, a function
 # given the page's path, edits the page and FC_EV for what its edit means. `fc_owed_now` takes the pending criterion's
 # task away, so it is owed now and never run, which the gate refuses at Step 6 and the card puts as its decision.
