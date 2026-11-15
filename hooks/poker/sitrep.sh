@@ -438,18 +438,29 @@ decision_wait() {  # <plan> <D<n>> [<root>] -> one sentence
       else printf "Answered now or in an hour, nothing moves: no task waits on it.\n" }'
 }
 
+# sitrep_approval_waits <plan> -> `<row><TAB><name>` for each approval a row of the plan waits on, in the plan's order,
+# each once, as the plan's one reader of waits names them (lib/plan-read.sh `plan_read_waits`): a reads cell, a kind's
+# default, or a nine-cell row's deps alike. Every reader here of what waits on an approval or a decision asks this.
+sitrep_approval_waits() {
+  { declare -F plan_read_waits >/dev/null 2>&1 || . "$BIONIC_LIB/plan-read.sh"; } 2>/dev/null
+  plan_read_waits "$1" 2>/dev/null | awk -F'\t' '$2 == "wait" && index($3, "approval:") == 1 && !s[$1, $3]++ { print $1 "\t" substr($3, 10) }'
+}
+
+# sitrep_approval_rows <plan> <units_rows output> <name> -> the rows not landed or dropped that wait on approval:<name>
+sitrep_approval_rows() {
+  { printf '%s\n' "$2" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } s == "landed" || s == "dropped" { print $1 }'
+    printf '\034\n'; sitrep_approval_waits "$1"; } | awk -F'\t' -v k="$3" '$0 == "\034" { w = 1; next } !w { gone[$1] = 1; next }
+    $2 == k && !($1 in gone) { print $1 }'
+}
+
 # WHAT WAITS ON A DECISION, the one reader the wait line and the fact sheet share. Three things wait on D<n>: every task
-# not landed or dropped that waits on it as an approval, `approval:D<n>`, whatever its state, as the plan's one reader of
-# waits names it (lib/plan-read.sh `plan_read_waits`: a reads cell, or a nine-cell row's deps); the release, while the
+# not landed or dropped that waits on it as an approval, `approval:D<n>`, whatever its state (`sitrep_approval_waits`);
+# the release, while the
 # newest release approval page puts D<n> as one of its decisions; and the merge, while a held merge on the run's register
 # names D<n> as a whole word (the third decision is not the thirtieth) in its reason or its line.
 decision_waiters() {  # <plan> <D<n>> [<root>] -> one line per waiter: a task id, in the plan's order, then `release`, then `merge`
   local root dir page
-  { declare -F plan_read_waits >/dev/null 2>&1 || . "$BIONIC_LIB/plan-read.sh"; } 2>/dev/null
-  { units_rows "$1" 2>/dev/null | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s) } s == "landed" || s == "dropped" { print $1 }'
-    printf '\034\n'; plan_read_waits "$1" 2>/dev/null; } | awk -F'\t' -v k="approval:$2" '
-    $0 == "\034" { w = 1; next } !w { gone[$1] = 1; next }
-    $2 == "wait" && $3 == k && !($1 in gone) && !($1 in said) { said[$1] = 1; print $1 }'
+  sitrep_approval_rows "$1" "$(units_rows "$1" 2>/dev/null)" "$2"
   root="${3:-}"; [ -n "$root" ] || root="$(project_root "${1%/*}" 2>/dev/null)"
   [ -n "$root" ] || return 0
   if declare -F docs_root >/dev/null 2>&1 && declare -F proof_plan_slug >/dev/null 2>&1; then
@@ -925,7 +936,8 @@ sitrep_waiting() {
       printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { s = tolower($10); gsub(/[ \t]/, "", s); k = $3; gsub(/[ \t]/, "", k)
         if (s == "dropped") next
         if (k == "integrate") print "I"
-        n = split($13, t, ","); for (i = 1; i <= n; i++) { x = t[i]; gsub(/^[ \t]+|[ \t]+$/, "", x); sub(/^live:/, "", x); if (index(x, "approval:") == 1) print "A\t" substr(x, 10) } }'
+        print "U\t" $1 }'
+      sitrep_approval_waits "$plan" | awk -F'\t' '{ print "V\t" $1 "\t" $2 }'
       sitrep_ledger_times "$led" | awk -F'\t' '{ print "D\tdecide:" $1 "\t" $2 "\t" $3 }'
       printf '%s\n' "$spans" | awk -F'\t' 'NF { print "S\t" $1 "\t" $2 "\t" $3 }'
       printf '%s\n' "$waits" | awk 'NF'
@@ -946,7 +958,8 @@ sitrep_waiting() {
       $1 == "O" { open[$2] = $3; wt[$2] = $4; want($2); next }
       $1 == "W" { if (!($2 in wt)) wt[$2] = $3; next }
       $1 == "I" { integ = 1; next }
-      $1 == "A" { rd["approval:" $2] = 1; next }
+      $1 == "U" { live[$2] = 1; next }
+      $1 == "V" { if ($2 in live) rd["approval:" $3] = 1; next }
       $1 == "D" { put[$2] = $3; rul[$2] = $4; want($2); next }
       $1 == "R" { rs[$2] = $3; ra[$2] = $4; ro[$2] = $5; rn[$2] = $6; want($2); next }
       $1 == "S" { sp[$2] = $3; se[$2] = $4; next }
@@ -1119,10 +1132,7 @@ sitrep_holds() {
   case "$key" in
     decide:D[0-9]*) ids="$(decision_waiters "$plan" "${key#decide:}" "$root")" ;;
     approve:step[0-9]|approve:step[0-9][0-9]) printf 'step %s\n' "$(( ${key#approve:step} + 1 ))"; return 0 ;;
-    approve:*)
-      ids="$(printf '%s\n' "$rows" | awk -F'\t' -v k="approval:${key#approve:}" '
-        { s = tolower($10); gsub(/[ \t]/, "", s) } s == "landed" || s == "dropped" { next }
-        { n = split($13, t, ","); for (i = 1; i <= n; i++) { x = t[i]; gsub(/^[ \t]+|[ \t]+$/, "", x); sub(/^live:/, "", x); if (x == k) { print $1; next } } }')" ;;
+    approve:*) ids="$(sitrep_approval_rows "$plan" "$rows" "${key#approve:}")" ;;
     waive:*|finding:*|row:*|hold:*)
       ids="$(printf '%s\n' "$rows" | awk -F'\t' '{ s = tolower($10); gsub(/[ \t]/, "", s); k = $3; gsub(/[ \t]/, "", k) }
         k == "integrate" && s != "landed" && s != "dropped" { print $1 }')" ;;
@@ -1217,6 +1227,7 @@ sitrep_gather() {
             # each title is the one reading lib/plan.sh plan_task_title gives, as the plan card prints it
             printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { x = $1; gsub(/^[ \t]+|[ \t]+$/, "", x); if (x != "") print x "\t" $4 }' \
               | while IFS='	' read -r id desc; do printf 'N\t%s\t%s\n' "$id" "$(plan_task_title "$desc")"; done
+            sitrep_approval_waits "$plan" | awk -F'\t' '{ print "V\t" $1 "\t" $2 }'
             printf '%s\n' "$rows" | awk -F'\t' 'NF >= 10 { print "U\t" $0 }'
           } | LC_ALL=C awk -F'\t' "$(_sitrep_label_awk)"'
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
@@ -1259,17 +1270,15 @@ sitrep_gather() {
       w = ($4 != "" && $4 != "-" && t !~ /^(step:|approval:|proof:review$|head$|merge$)/) ? "@" $4 : words($3)
       wait_on($2, w); next }
     $1 == "E" { ne++; ef[ne] = $2; et[ne] = $3; next }
+    $1 == "V" { na[$2]++; ap[$2, na[$2]] = $3; next }
     $1 == "U" {
       s = tolower(trim($11)); if (s == "dropped") next
-      n++; id[n] = trim($2); stp[n] = trim($3); rd[n] = $14; st[n] = s; at[id[n]] = n
+      n++; id[n] = trim($2); stp[n] = trim($3); st[n] = s; at[id[n]] = n
       b = 0
       if (s != "landed") {
         if (id[n] in red) b = 1
-        m = split(rd[n], a, ",")
-        for (k = 1; k <= m; k++) {
-          x = trim(a[k]); sub(/^live:/, "", x)
-          if (index(x, "approval:") == 1 && (substr(x, 10) in appr)) { b = 1; nb[n]++; wait_on("held:" id[n], words(x)) }
-        }
+        for (k = 1; k <= na[id[n]]; k++)
+          if (ap[id[n], k] in appr) { b = 1; nb[n]++; wait_on("held:" id[n], words("approval:" ap[id[n], k])) }
       }
       g[n] = (s == "landed") ? "L" : (b ? "X" : (s == "active" ? "A" : "P"))
     }

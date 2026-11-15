@@ -569,7 +569,7 @@ expect_contains "AK6c …carrying the refusal's line" "row T4 waits for approval
 # reading first, not the person, and opens nothing (the tick's own rule, T35's A-T35-4).
 # FIXTURE FIDELITY: bash-walls-egd.test.sh's §EG-DERIVE world, its prelude's builders read out of that file by name (the
 # run at 15 eg6_world builds from a plan's text, which the real gate admits at current: 6 bar the readings; the reading
-# lines in lib/proof.sh's writer's shape, read into the log by lib/translate.sh); the real hook.
+# lines in lib/proof.sh's writer's shape, written into the log as the events a run at 15 holds); the real hook.
 NT_BW_PRELUDE="$(dirname "$0")/bash-walls.prelude.sh"
 NT_IMPORT_MISSING=""
 for _f in mk_repo bw_door eg6_plan eg6_reading eg6_world; do
