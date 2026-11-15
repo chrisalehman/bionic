@@ -453,6 +453,8 @@ expect_eq "bind_plan to the root's one open plan exits 0" "0" "$BIND_ST"
 expect_empty "…and prints nothing on stdout" "$BIND_OUT"
 expect_empty "…and nothing on stderr" "$BIND_ERR"
 if [ -f "$M10" ]; then ok "…and the marker is a regular file"; else no "…and the marker is a regular file" "no file at $M10"; fi
+call_engaged "$R10" "$SID"; E8_OWN=$ES_ST; call_engaged "$R10" e8-other-session
+expect_eq "…which engages its own session and no other (engaged_session)" "0|1" "$E8_OWN|$ES_ST"
 ST10=$(engat_of "$M10")
 printf 'plan=%s\nengaged_at=%s\n' "$P10A" "$ST10" > "$SANDBOX/expect10.state"
 if cmp -s "$SANDBOX/expect10.state" "$M10"; then
