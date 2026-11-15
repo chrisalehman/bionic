@@ -144,7 +144,7 @@ nt_run() {  # <label> -> repo path; bound, committed, a git user
   cat > "$p" <<'FIXEOF'
 ---
 governing-skill: superpowers:writing-plans
-canonical_sdlc_version: 14
+canonical_sdlc_version: 15
 sdlc-step: 3
 walk: required
 rigor: double
@@ -160,25 +160,20 @@ base-sha: abc1234
 
 Land the fixture's two requirements under the fixture spec's design.
 
-## SDLC State
-
-integration-branch: main
-current: 3
-
-- Step 3: plan
-
 ## Tasks
 
-| id | step | kind | task | agent | deps | size | serves | Files | worktree | status | reads |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | REQ-1: the first task. It makes the first requirement true. complexity: standard | implementor | — | 30 | REQ-1 | lib/first.sh | — | pending | approval:release |
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | REQ-1: the first task. It makes the first requirement true. complexity: standard | approval:release | 30 | REQ-1 | lib/first.sh | — |
 
-## Verification Matrix
+## Eval design
 
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1.1 | T0 | pending | — | — |
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+| REQ-1 | fixture | AC-1.1 | hermetic | `tests/a.test.sh` | it does not hold |
 FIXEOF
+  mkdir -p "$r/.bionic/docs/record/wave-01-fixture"
+  printf 'run/v1|ev=step|n=%s|at=2026-10-11T00:0%s:00Z\n' 1 1 2 2 3 3 > "$r/.bionic/docs/record/wave-01-fixture/run.log"
   cat > "$q" <<'FIXEOF'
 ---
 sdlc-step: 1
@@ -244,10 +239,10 @@ FIXEOF
 }
 nt_plan() { printf '%s/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md' "$1"; }
 nt_req()  { printf '%s/.bionic/docs/specs/epic-99-fixture/wave-01-fixture.requirements.md' "$1"; }
-# nt_current <repo> <step> -> the fixture plan at that step. A card opens its step's ask only while that step is the
-# plan's current one, so a card is rendered through nt_card_at, at the step it draws, and the plan goes back to the
-# fixture's own step 3, the one the approve verb's commit gate reads a line for.
-nt_current() { sed "s/^current: [0-9]*\$/current: $2/" "$(nt_plan "$1")" > "$TMPROOT/plan.cur" && mv "$TMPROOT/plan.cur" "$(nt_plan "$1")"; }
+# nt_current <repo> <step> -> the fixture's run at that step, by a step event. A card opens its step's ask only while
+# that step is the run's current one, so a card is rendered through nt_card_at, at the step it draws, and the run goes
+# back to the fixture's own step 3, the one the approve verb's commit gate reads.
+nt_current() { bash -c '. "$1/proof.sh" && proof_step_event "$2" "$3"' _ "$NT_LIB" "$(nt_plan "$1")" "$2"; }
 nt_card_at() {  # <repo> <step> <verb> <artifact> -> nt_card at that step, the plan restored after
   nt_current "$1" "$2"; nt_card "$1" "$3" "$4"; nt_current "$1" 3
 }
@@ -321,8 +316,7 @@ expect_eq "N7b …and once" "3" "$(nt_calls)"
 nt_card "$RO" step3 "$(nt_plan "$RO")"
 expect_eq "N8 the Step-3 card renders (exit 0)" "0" "$NT_RC"
 expect_eq "N8a …and its item is unsent" "approve:step3" "$(nt_owed "$RO" owed_unsent)"
-awk '{ print } /^current: 3$/ { print "approved-by: Dana Fixture 2026-10-11T00:00:00Z \"approved\"" }' \
-  "$(nt_plan "$RO")" > "$TMPROOT/plan.tmp" && mv "$TMPROOT/plan.tmp" "$(nt_plan "$RO")"
+printf 'run/v1|ev=approval|key=step3|by=Dana Fixture|said=approved|at=2026-10-11T00:00:00Z\n' >> "$RO/.bionic/docs/record/wave-01-fixture/run.log"
 nt_stop "$RO"
 expect_eq "N8b a plan approved before the turn ended owes nothing: the Stop closes the step items and sends none" \
   "3" "$(nt_calls)"
