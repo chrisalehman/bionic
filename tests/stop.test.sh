@@ -240,6 +240,8 @@ expect_eq "2c: exactly one rendered refusal" "1" "$(refusal_lines)"
 expect_true "2e: …after the refusal" \
   test "$(awk '/^bionic: /{print NR; exit}' <<<"$STOP_ERR")" -lt \
        "$(awk '/^run resolved by newest-plan fallback/{print NR; exit}' <<<"$STOP_ERR")"
+rm -f "$D/.bionic/tmp/engaged-$SID.state"; fire "$D"
+expect_eq "2f: …and the same fixture with no engagement marker: a bystander's turn end exits 0, saying nothing" "0||" "$STOP_RC|$STOP_OUT|$STOP_ERR"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "4: SubagentStop — only the landing arm has anything to say there"
