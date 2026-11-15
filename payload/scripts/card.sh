@@ -1486,16 +1486,18 @@ _card_chain() {  # <plan> <writer ceiling>
   return 0
 }
 
-# THE DEPENDS COLUMN OF A TABLE WITH A `reads` COLUMN (review 9, answer (b)). There the deps cell
-# holds only `ext:` tokens, because a row waits on what it reads, so the cell alone shows a dash
-# for a row that waits on another through a read. Each task row's depends becomes the ids
-# `units_edges` puts before it (the edges `_card_chain` already fetched), once each and in table
-# order, then the deps cell's `ext:` tokens; a row with neither keeps a dash. The edges join open
-# rows only, so a predecessor that has landed no longer shows: what remains is what it waits for.
-# A deps-only table is left as the plan wrote it.
-_card_reads_depends() {  # <plan> — rewrites field 4 of every WCARD_TROW entry
+# THE DEPENDS COLUMN IS WHAT A ROW WAITS ON, not its deps cell as typed, on a table with a `reads` column
+# and on a page at 15. There the cell names only some of a row's waits: a row waits on what it reads, or
+# at 15 on what its kind waits on by default (a regression on the builds), so the cell alone shows a dash
+# for a row that waits on three. Each task row's depends becomes the ids `units_edges` puts before it
+# (the edges `_card_chain` already fetched), once each and in table order, then the deps cell's own
+# `approval:` and `ext:` tokens, which are waits no edge carries; a row with none keeps a dash. The edges
+# join open rows only, so a predecessor that has landed no longer shows: what remains is what it waits
+# for. A table whose deps cells hold every edge is left as the plan wrote it.
+_card_edge_depends() {  # <plan> — rewrites field 4 of every WCARD_TROW entry
   local out line
-  units_has_column "${1:-}" reads || return 0
+  units_has_column "${1:-}" reads \
+    || [ "$(plan_read_header "${1:-}" canonical_sdlc_version 2>/dev/null)" = canonical_sdlc_version=15 ] || return 0
   [ "${#WCARD_TROW[@]}" -gt 0 ] || return 0
   out="$( { printf '%s\n' "${CARD_EDGES:-}"; printf '\034\n'; printf '%s\n' "${WCARD_TROW[@]}"; } | awk -F'\t' '
     function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
@@ -1510,7 +1512,7 @@ _card_reads_depends() {  # <plan> — rewrites field 4 of every WCARD_TROW entry
         k = split(f[4], tok, ",")
         for (t = 1; t <= k; t++) {
           v = trim(tok[t])
-          if (v ~ /^ext:/) dep = dep (dep == "" ? "" : ", ") v
+          if (v ~ /^(approval|ext):/) dep = dep (dep == "" ? "" : ", ") v
         }
         if (dep == "") dep = "—"
         f[4] = dep
@@ -2168,11 +2170,11 @@ _card_step2_explain() {  # <D-id or number>
 # nor its eval counts. What it adds is the plan's own shape: each task with the criteria it
 # serves, and the longest chain and the peak width the derived graph gives, at every scale.
 _card_step3() {  # <citation path> <artifact path as given>
-  # THE CHAIN IS ASKED BEFORE THE TASKS ARE RENDERED: its edges are the depends column of a
-  # table with a `reads` column, and the graph is fetched once for both.
+  # THE CHAIN IS ASKED BEFORE THE TASKS ARE RENDERED: its edges are the depends column, and the
+  # graph is fetched once for both.
   CARD_CHAIN_RC=0
   _card_chain "$2" "$(_card_chain_ceil "$2")" || CARD_CHAIN_RC=1
-  _card_reads_depends "$2"
+  _card_edge_depends "$2"
   printf 'Step 3 · Plan\n\n'
   _card_branches
   printf '\n'
