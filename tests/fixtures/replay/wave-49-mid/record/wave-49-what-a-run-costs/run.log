@@ -1,0 +1,184 @@
+run/v1|ev=bind|session=00000000-0000-4000-8000-000000000001|by=write|at=2026-11-07T01:06:35Z
+run/v1|ev=ask|key=approve:step0|at=2026-11-07T01:06:49Z
+run/v1|ev=ask|key=decide:D1|at=2026-11-07T01:07:09Z
+run/v1|ev=approval|key=step0|by=Person A|said=approved, D1: 1|at=2026-11-07T01:10Z
+run/v1|ev=step|n=0|at=2026-11-07T01:10Z
+run/v1|ev=ask|key=decide:D1|reply=ruled|at=2026-11-07T01:16:28Z
+run/v1|ev=ask|key=approve:step0|reply=card.sh step1|at=2026-11-07T01:16:44Z
+run/v1|ev=ask|key=approve:step1|at=2026-11-07T01:16:44Z
+run/v1|ev=approval|key=step1|by=Person A|said=approved|at=2026-11-07T01:21Z
+run/v1|ev=step|n=1|at=2026-11-07T01:21Z
+run/v1|ev=ask|key=decide:D2|at=2026-11-07T01:23:12Z
+run/v1|ev=ask|key=decide:D2|reply=ruled|at=2026-11-07T01:25:04Z
+run/v1|ev=ask|key=decide:D3|at=2026-11-07T01:25:04Z
+run/v1|ev=ask|key=decide:D4|at=2026-11-07T01:25:04Z
+run/v1|ev=ask|key=decide:D5|at=2026-11-07T01:25:04Z
+run/v1|ev=ask|key=decide:D6|at=2026-11-07T01:25:05Z
+run/v1|ev=ask|key=decide:D7|at=2026-11-07T01:31:43Z
+run/v1|ev=ask|key=decide:D7|reply=ruled|at=2026-11-07T01:35:29Z
+run/v1|ev=ask|key=decide:D4|reply=ruled|at=2026-11-07T01:35:30Z
+run/v1|ev=ask|key=decide:D5|reply=ruled|at=2026-11-07T01:35:30Z
+run/v1|ev=ask|key=decide:D6|reply=ruled|at=2026-11-07T01:35:31Z
+run/v1|ev=ask|key=decide:D3|reply=ruled|at=2026-11-07T01:37:05Z
+run/v1|ev=ask|key=decide:D8|at=2026-11-07T01:37:38Z
+run/v1|ev=ask|key=decide:D9|at=2026-11-07T01:37:38Z
+run/v1|ev=ask|key=decide:D10|at=2026-11-07T01:37:38Z
+run/v1|ev=ask|key=decide:D11|at=2026-11-07T01:37:38Z
+run/v1|ev=ask|key=decide:D12|at=2026-11-07T01:44:31Z
+run/v1|ev=ask|key=approve:step1|reply=card.sh step2|at=2026-11-07T01:45:34Z
+run/v1|ev=ask|key=approve:step2|at=2026-11-07T01:45:34Z
+run/v1|ev=approval|key=step2|by=Person A|said=approved|at=2026-11-07T02:12Z
+run/v1|ev=step|n=2|at=2026-11-07T02:12Z
+run/v1|ev=ask|key=decide:D8|reply=ruled|at=2026-11-07T02:12:38Z
+run/v1|ev=ask|key=decide:D9|reply=ruled|at=2026-11-07T02:12:39Z
+run/v1|ev=ask|key=decide:D10|reply=ruled|at=2026-11-07T02:12:40Z
+run/v1|ev=ask|key=decide:D11|reply=ruled|at=2026-11-07T02:12:40Z
+run/v1|ev=ask|key=decide:D12|reply=ruled|at=2026-11-07T02:12:41Z
+run/v1|ev=ask|key=approve:step2|reply=card.sh step3|at=2026-11-07T02:17:34Z
+run/v1|ev=ask|key=approve:step3|at=2026-11-07T02:17:34Z
+run/v1|ev=approval|key=step3|by=Person A|said=Approved|at=2026-11-07T02:25:48Z
+run/v1|ev=step|n=3|at=2026-11-07T02:25:48Z
+run/v1|ev=step|n=4|at=
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T1-gate.test.sh.log|head=59350b5e6a5b16a42933825fab8148cee4465c48|dirty=0|rc=0|sha256=9e7e469de3f48cec849bff1ada91c2d568330d61696576875377d413bdb2ca16|starter=orchestrator|at=2026-11-07T02:32:04Z
+run/v1|ev=ask|key=approve:step3|reply=plan approved-by|at=2026-11-07T02:32:44Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000002|current=4|state=ok|ceiling=|width=3|open=3|free=0|ready=|launched=T1,T4,T8|declined=|missed=0|idle=|room=0|at=2026-11-07T02:32:44Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T1-gate.test.sh-2.log|head=59350b5e6a5b16a42933825fab8148cee4465c48|dirty=0|rc=0|sha256=7d159a3bfa7e29b4abb458aae4cb895e046b040ac052589320620e99423f09ac|starter=orchestrator|at=2026-11-07T02:33:17Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T4-_.log|head=59350b5e6a5b16a42933825fab8148cee4465c48|dirty=0|rc=0|sha256=35d0ab3745f3bf549d6964abc1319818a2a2ed53aa67148d34174af4cfefadc8|starter=orchestrator|at=2026-11-07T02:34:15Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T4-cmd-class.test.sh.log|head=59350b5e6a5b16a42933825fab8148cee4465c48|dirty=2|rc=0|sha256=b4825241828e9f32cccc8d96954fd8a589b5a8e905cbf97451032a2980746f88|starter=orchestrator|at=2026-11-07T02:34:36Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T1-_.log|head=59350b5e6a5b16a42933825fab8148cee4465c48|dirty=2|rc=0|sha256=039f2cc9b22a45829820d07ebc29362ebdb09c13212f15896be6d62e0a99728a|starter=orchestrator|at=2026-11-07T02:34:48Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T4-_-2.log|head=59350b5e6a5b16a42933825fab8148cee4465c48|dirty=4|rc=0|sha256=5a52ee75d54e2888ae81022b01c6ddffab99ac57ffaa8495d31b87e08336cbb8|starter=orchestrator|at=2026-11-07T02:35:58Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T1-gate.test.sh-3.log|head=59350b5e6a5b16a42933825fab8148cee4465c48|dirty=3|rc=0|sha256=43ecd00611015fa17d6daade8cdab710d0312664f3cb95908c2be457cacd30e2|starter=orchestrator|at=2026-11-07T02:36:08Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T8-sitrep.test.sh.log|head=59350b5e6a5b16a42933825fab8148cee4465c48|dirty=1|rc=1|sha256=cee621c851f04f19ba325b2e88f27e3baa859b3f2e29cea9031809f11daf1c04|starter=orchestrator|at=2026-11-07T02:36:25Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000003|current=4|state=ok|ceiling=|width=3|open=3|free=0|ready=|launched=|declined=|missed=0|idle=|room=0|at=2026-11-07T02:36:45Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T4-shell-lint.test.sh.log|head=59350b5e6a5b16a42933825fab8148cee4465c48|dirty=4|rc=0|sha256=450b21d904551db973112015f67e44d81ef9a3b244bd2eebbba39ff55b585e24|starter=orchestrator|at=2026-11-07T02:36:48Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T1-shell-lint.test.sh.log|head=59350b5e6a5b16a42933825fab8148cee4465c48|dirty=3|rc=0|sha256=d8bc5a5dc42d87274e8899c97e548e2d68f1badeb7eec1cde63e6e37362fc9c6|starter=orchestrator|at=2026-11-07T02:37:01Z
+run/v1|ev=ready|row=T1|name=w49-T1|commit=f6d38ff8b396fda0b5f636d8ad9e78434f87e411|branch=wt/49-T1|tree=/fixture/project/.worktrees/49-T1|suites=gate.test.sh,shell-lint.test.sh|debt=-|carrier=38798:Sat Nov 7 02:37:05 2026|age=1794019025:267|at=2026-11-07T02:37:05Z
+run/v1|ev=candidate|row=T1|base=59350b5e6a5b16a42933825fab8148cee4465c48|commit=11f6c32d55bee4421acecfce9c1abd7734c6afbf|tree=/fixture/project/.bionic/tmp/landing/1|at=2026-11-07T02:37:06Z
+run/v1|ev=ready|row=T4|name=w49-T4|commit=041a7479ad64c4c3e2f0e9da9bd455d27acdf68a|branch=wt/49-T4|tree=/fixture/project/.worktrees/49-T4|suites=cmd-class.test.sh,background-suite-guard.test.sh,shell-lint.test.sh|debt=-|carrier=44626:Sat Nov 7 02:37:12 2026|age=1794019032:268|at=2026-11-07T02:37:12Z
+run/v1|ev=candidate|row=T4|base=11f6c32d55bee4421acecfce9c1abd7734c6afbf|commit=11d89fdd1b3f0937bab1beb5adc9241eeb62613d|tree=/fixture/project/.bionic/tmp/landing/2|at=2026-11-07T02:37:13Z
+run/v1|ev=verdict|row=T1|commit=11f6c32d55bee4421acecfce9c1abd7734c6afbf|suite=gate.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T1-gate-11f6c32d55be.log|admitted=1794019028|width=4|promised=44|actual=25|at=2026-11-07T02:37:33Z
+run/v1|ev=verdict|row=T1|commit=11f6c32d55bee4421acecfce9c1abd7734c6afbf|suite=shell-lint.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T1-shell-lint-11f6c32d55be.log|admitted=1794019028|width=4|promised=33|actual=37|at=2026-11-07T02:37:45Z
+run/v1|ev=published|row=T1|commit=11f6c32d55bee4421acecfce9c1abd7734c6afbf|kind=queue|by=-|why=|at=2026-11-07T02:37:51Z
+run/v1|ev=verdict|row=T4|commit=11d89fdd1b3f0937bab1beb5adc9241eeb62613d|suite=cmd-class.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T4-cmd-class-11d89fdd1b3f.log|admitted=1794019072|width=4|promised=6|actual=8|at=2026-11-07T02:38:01Z
+run/v1|ev=verdict|row=T4|commit=11d89fdd1b3f0937bab1beb5adc9241eeb62613d|suite=background-suite-guard.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T4-background-suite-guard-11d89fdd1b3f.log|admitted=1794019073|width=4|promised=31|actual=23|at=2026-11-07T02:38:17Z
+run/v1|ev=verdict|row=T4|commit=11d89fdd1b3f0937bab1beb5adc9241eeb62613d|suite=shell-lint.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T4-shell-lint-11d89fdd1b3f.log|admitted=1794019073|width=4|promised=33|actual=37|at=2026-11-07T02:38:31Z
+run/v1|ev=published|row=T4|commit=11d89fdd1b3f0937bab1beb5adc9241eeb62613d|kind=queue|by=-|why=|at=2026-11-07T02:38:38Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T8-sitrep.test.sh-2.log|head=59350b5e6a5b16a42933825fab8148cee4465c48|dirty=2|rc=0|sha256=4777dd0edefbfe3aa7eadb1921f997bad1f042d28e7f2ab3c6d7f6df18b30c2c|starter=orchestrator|at=2026-11-07T02:41:58Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000004|current=4|state=ok|ceiling=|width=3|open=3|free=0|ready=|launched=T2,T6,w49-R2|declined=|missed=0|idle=|room=0|at=2026-11-07T02:42:34Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000005|current=4|state=ok|ceiling=|width=3|open=3|free=0|ready=|launched=|declined=|missed=0|idle=|room=0|at=2026-11-07T02:42:41Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T6-session-poker-2.test.sh.log|head=11d89fdd1b3f0937bab1beb5adc9241eeb62613d|dirty=1|rc=0|sha256=f88af6e2d5a90bbf1bcde1f4db91753a1d90fa93ff6a79cd3548ecc86f136213|starter=orchestrator|at=2026-11-07T02:43:53Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T6-session-poker-2.test.sh-2.log|head=11d89fdd1b3f0937bab1beb5adc9241eeb62613d|dirty=2|rc=0|sha256=1dbb705c11a9c694f5a00475816553d3956e6b0619861637b32459fcb0001e91|starter=orchestrator|at=2026-11-07T02:46:03Z
+run/v1|ev=ready|row=T6|name=w49-T6|commit=2bd7cd8e325b2f4cf8f00a9e48d6dec3d25dba79|branch=wt/49-T6|tree=/fixture/project/.worktrees/49-T6|suites=session-poker-2.test.sh,shell-lint.test.sh|debt=-|carrier=11858:Sat Nov 7 02:46:38 2026|age=1794019598:269|at=2026-11-07T02:46:38Z
+run/v1|ev=candidate|row=T6|base=11d89fdd1b3f0937bab1beb5adc9241eeb62613d|commit=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|tree=/fixture/project/.bionic/tmp/landing/1|at=2026-11-07T02:46:39Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T8-_.log|head=59350b5e6a5b16a42933825fab8148cee4465c48|dirty=1|rc=0|sha256=8c4b17d799deb7720512b91ef728f67f3839be4dea4ce6f26a77cefd1194fccd|starter=orchestrator|at=2026-11-07T02:46:47Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T2-gate.test.sh.log|head=11d89fdd1b3f0937bab1beb5adc9241eeb62613d|dirty=1|rc=0|sha256=49a382e901686a23b183682aebe6a0a855a77db6a483a751d6de10f3495afed8|starter=orchestrator|at=2026-11-07T02:47:18Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T8-shell-lint.test.sh.log|head=59350b5e6a5b16a42933825fab8148cee4465c48|dirty=2|rc=0|sha256=ab40f6c713be69f58b44b2e704914e7060f2707ba53dad2ecac37f1f212f1aaa|starter=orchestrator|at=2026-11-07T02:47:36Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000006|current=4|state=ok|ceiling=|width=3|open=3|free=0|ready=|launched=|declined=|missed=0|idle=|room=0|at=2026-11-07T02:47:37Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-R2-landing-line-1.test.sh.log|head=11d89fdd1b3f0937bab1beb5adc9241eeb62613d|dirty=0|rc=0|sha256=0311ed7eaeb8f1eb9a2b8ef92dfdeef901f6a8dbd807612b6cc142ff99b78dc4|starter=orchestrator|at=2026-11-07T02:47:49Z
+run/v1|ev=ready|row=T8|name=w49-T8|commit=573a10cc3ad8538068a11f1056399c22ce7ace82|branch=wt/49-T8|tree=/fixture/project/.worktrees/49-T8|suites=sitrep.test.sh,shell-lint.test.sh|debt=-|carrier=32100:Sat Nov 7 02:47:49 2026|age=1794019669:270|at=2026-11-07T02:47:49Z
+run/v1|ev=candidate|row=T8|base=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|commit=bfebd5fa69d550bcd767f3dfab22168211324a90|tree=/fixture/project/.bionic/tmp/landing/2|at=2026-11-07T02:47:49Z
+run/v1|ev=verdict|row=T6|commit=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|suite=session-poker-2.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T6-session-poker-2-a4a4a4803b80.log|admitted=1794019601|width=1|promised=102|actual=92|at=2026-11-07T02:48:14Z
+run/v1|ev=verdict|row=T6|commit=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|suite=shell-lint.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T6-shell-lint-a4a4a4803b80.log|admitted=1794019694|width=2|promised=39|actual=37|at=2026-11-07T02:48:51Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-R2-landing-line-2.test.sh.log|head=11d89fdd1b3f0937bab1beb5adc9241eeb62613d|dirty=0|rc=0|sha256=b1811671b6bd64b82fe85436fef23b5fe7feaee963efc5cced690abe3a78a46b|starter=orchestrator|at=2026-11-07T02:52:46Z
+run/v1|ev=published|row=T6|commit=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|kind=queue|by=-|why=|at=2026-11-07T02:52:53Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T2-gate.test.sh-2.log|head=11d89fdd1b3f0937bab1beb5adc9241eeb62613d|dirty=2|rc=0|sha256=3473c19259e6c05e0eb033bbb083aae780113bc264d3003c435d585f77d2322c|starter=orchestrator|at=2026-11-07T02:53:44Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-R2-regression-rename.test.sh.log|head=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|dirty=0|rc=0|sha256=282b5a1f070d7d1e959c2588ad3c2381ef6a60efdf64714456de538d4c0c1ea3|starter=orchestrator|at=2026-11-07T02:53:50Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-R2-runner-width.test.sh.log|head=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|dirty=0|rc=0|sha256=605dd763f642fb60db16a76dbac48d9770d25eada0720ab2456cd9964a384488|starter=orchestrator|at=2026-11-07T02:54:04Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-R2-session-poker-5.test.sh.log|head=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|dirty=0|rc=0|sha256=36a4ea82fe0fb45b9cfcf40615db6b2d685219180213064c2b6f626c534d8050|starter=orchestrator|at=2026-11-07T02:56:20Z
+run/v1|ev=verdict|row=T8|commit=bfebd5fa69d550bcd767f3dfab22168211324a90|suite=sitrep.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T8-sitrep-bfebd5fa69d5.log|admitted=1794019974|width=2|promised=225|actual=230|at=2026-11-07T02:56:45Z
+run/v1|ev=verdict|row=T8|commit=bfebd5fa69d550bcd767f3dfab22168211324a90|suite=shell-lint.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T8-shell-lint-bfebd5fa69d5.log|admitted=1794019974|width=2|promised=39|actual=39|at=2026-11-07T02:56:45Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000007|current=4|state=ok|ceiling=|width=4|open=4|free=0|ready=|launched=T7,T15|declined=|missed=0|idle=|room=0|at=2026-11-07T02:57:12Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000008|current=4|state=ok|ceiling=|width=4|open=4|free=0|ready=|launched=|declined=|missed=0|idle=|room=0|at=2026-11-07T02:57:18Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T2-gate.test.sh-3.log|head=11d89fdd1b3f0937bab1beb5adc9241eeb62613d|dirty=2|rc=0|sha256=3e3ba39e4586ca978c49a86488168d2046df72e558e5179f51bea32ace508cd0|starter=orchestrator|at=2026-11-07T02:57:19Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-R2-slots.test.sh.log|head=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|dirty=0|rc=0|sha256=3ee6e0d25fe95d3dd909b44cbc5af07d23026090f3aa0c1708a21324ae7f29c8|starter=orchestrator|at=2026-11-07T02:57:28Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000009|current=4|state=ok|ceiling=|width=4|open=4|free=0|ready=|launched=|declined=|missed=0|idle=|room=0|at=2026-11-07T02:57:35Z
+run/v1|ev=published|row=T8|commit=bfebd5fa69d550bcd767f3dfab22168211324a90|kind=queue|by=-|why=|at=2026-11-07T02:57:36Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T7-stop.test.sh.log|head=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|dirty=0|rc=1|sha256=3a41a1c6982231dbb0cb488d24131aa79425c118982ef67004c9311723b5edb5|starter=orchestrator|at=2026-11-07T02:58:01Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000010|current=4|state=ok|ceiling=|width=3|open=3|free=0|ready=|launched=|declined=|missed=0|idle=|room=0|at=2026-11-07T02:58:13Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000011|current=4|state=ok|ceiling=|width=3|open=3|free=0|ready=|launched=|declined=|missed=0|idle=|room=0|at=2026-11-07T02:58:21Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-R2-stop.test.sh.log|head=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|dirty=0|rc=0|sha256=4868802e3319e693ea1b6fd1612c31a1f90c46c6ab24156e02acbd15b23d0caf|starter=orchestrator|at=2026-11-07T02:58:33Z
+run/v1|ev=born|row=T16|at=2026-11-07T02:59:59Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000012|current=4|state=ok|ceiling=|width=4|open=4|free=0|ready=|launched=T16|declined=|missed=0|idle=|room=0|at=2026-11-07T03:02:06Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T16-runner-width.test.sh.log|head=bfebd5fa69d550bcd767f3dfab22168211324a90|dirty=0|rc=0|sha256=966dc0e1a9f7032caf11d3b60d637d74d16867752e3b513340199a7de0cbadab|starter=orchestrator|at=2026-11-07T03:02:08Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000013|current=4|state=ok|ceiling=|width=4|open=4|free=0|ready=|launched=|declined=|missed=0|idle=|room=0|at=2026-11-07T03:02:20Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T16-_.log|head=bfebd5fa69d550bcd767f3dfab22168211324a90|dirty=1|rc=0|sha256=7fbf427a8727038f1afbc48eada13342d16843678a100acc6dd7320613e56d57|starter=orchestrator|at=2026-11-07T03:03:25Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T15-session-poker-4.test.sh.log|head=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|dirty=1|rc=0|sha256=fb468b3f2fec68db0acc361c72f445d7b474ed51d18489ca80a6eb16d8f42067|starter=orchestrator|at=2026-11-07T03:03:45Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T16-runner-width.test.sh-2.log|head=bfebd5fa69d550bcd767f3dfab22168211324a90|dirty=1|rc=0|sha256=d5997378a4a783766d4408fbcdb3909c76f544e5414a4b906616376a138a4323|starter=orchestrator|at=2026-11-07T03:03:55Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T7-stop.test.sh-2.log|head=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|dirty=1|rc=0|sha256=b348fa06c6c963af0301548cfd4714980c72f23d97e6f3cc0693c7d220e7b02e|starter=orchestrator|at=2026-11-07T03:04:07Z
+run/v1|ev=ready|row=T16|name=w49-T16|commit=0c40b89d97c84776205ddfebe16fb12db0517a4a|branch=wt/49-T16|tree=/fixture/project/.worktrees/49-T16|suites=runner-width.test.sh,shell-lint.test.sh|debt=-|carrier=43434:Sat Nov 7 03:04:14 2026|age=1794020654:271|at=2026-11-07T03:04:14Z
+run/v1|ev=candidate|row=T16|base=bfebd5fa69d550bcd767f3dfab22168211324a90|commit=43c8a129bccb6547aa718f9f7e6fb0edf52c84a2|tree=/fixture/project/.bionic/tmp/landing/1|at=2026-11-07T03:04:14Z
+run/v1|ev=verdict|row=T16|commit=43c8a129bccb6547aa718f9f7e6fb0edf52c84a2|suite=runner-width.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T16-runner-width-43c8a129bccb.log|admitted=1794020657|width=2|promised=8|actual=10|at=2026-11-07T03:04:27Z
+run/v1|ev=verdict|row=T16|commit=43c8a129bccb6547aa718f9f7e6fb0edf52c84a2|suite=shell-lint.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T16-shell-lint-43c8a129bccb.log|admitted=1794020657|width=2|promised=30|actual=39|at=2026-11-07T03:04:56Z
+run/v1|ev=published|row=T16|commit=43c8a129bccb6547aa718f9f7e6fb0edf52c84a2|kind=queue|by=-|why=|at=2026-11-07T03:05:04Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000014|current=4|state=ok|ceiling=|width=3|open=3|free=0|ready=|launched=|declined=|missed=0|idle=|room=0|at=2026-11-07T03:05:53Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T2-landing-line-2.test.sh.log|head=bfebd5fa69d550bcd767f3dfab22168211324a90|dirty=2|rc=0|sha256=865cba855f96cfe4b36de33e1efb9ade6961e1ad12ad6e27773ec3a874369414|starter=orchestrator|at=2026-11-07T03:05:59Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000015|current=4|state=ok|ceiling=|width=3|open=3|free=0|ready=|launched=|declined=|missed=0|idle=|room=0|at=2026-11-07T03:06:00Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T7-stop.test.sh-3.log|head=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|dirty=2|rc=1|sha256=6ae6e00578b06ba1e51ab85d5e25a8e6ea49b52601ba2f955aad85044da8a329|starter=orchestrator|at=2026-11-07T03:06:50Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000016|current=4|state=ok|ceiling=|width=3|open=3|free=0|ready=|launched=|declined=|missed=0|idle=|room=0|at=2026-11-07T03:07:06Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T7-shell-lint.test.sh.log|head=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|dirty=2|rc=0|sha256=662188b745d2865f4e4c1ea320c4838cf11eda3f8cd5b419ff50f3d2312db547|starter=orchestrator|at=2026-11-07T03:07:51Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T15-session-poker-4.test.sh-2.log|head=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|dirty=1|rc=0|sha256=c4e83c5213e9a0652938c7faf34353a1b3c69997d6b4b63d78d73ac1cb9c4abd|starter=orchestrator|at=2026-11-07T03:08:03Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T7-shell-lint.test.sh-2.log|head=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|dirty=3|rc=0|sha256=086271271614ed54e5cf2b1d5828d515c8b154bdb1c0aafdfab2c7e72f6b5aaa|starter=orchestrator|at=2026-11-07T03:09:15Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T7-stop.test.sh-4.log|head=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|dirty=3|rc=0|sha256=db22e06e3f9b72e3cbe38ce959ab5418090ddabf845e4675aea1acbed68833b2|starter=orchestrator|at=2026-11-07T03:10:04Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T2-landing-line-2.test.sh-2.log|head=bfebd5fa69d550bcd767f3dfab22168211324a90|dirty=2|rc=0|sha256=4ccb43525ccf25b9a72173233abab1674fe9c6a1bdf2cafefaef80c410770680|starter=orchestrator|at=2026-11-07T03:10:25Z
+run/v1|ev=ready|row=T7|name=w49-T7|commit=3b6e476b62d9fb13f02cb7e0ab621380c205d8c7|branch=wt/49-T7|tree=/fixture/project/.worktrees/49-T7|suites=stop.test.sh,shell-lint.test.sh|debt=-|carrier=94273:Sat Nov 7 03:10:40 2026|age=1794021040:272|at=2026-11-07T03:10:40Z
+run/v1|ev=candidate|row=T7|base=43c8a129bccb6547aa718f9f7e6fb0edf52c84a2|commit=5d58e7676aadc3c110b158cd7534474959793105|tree=/fixture/project/.bionic/tmp/landing/1|at=2026-11-07T03:10:40Z
+run/v1|ev=verdict|row=T7|commit=5d58e7676aadc3c110b158cd7534474959793105|suite=stop.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T7-stop-5d58e7676aad.log|admitted=1794021042|width=2|promised=37|actual=44|at=2026-11-07T03:11:27Z
+run/v1|ev=verdict|row=T7|commit=5d58e7676aadc3c110b158cd7534474959793105|suite=shell-lint.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T7-shell-lint-5d58e7676aad.log|admitted=1794021043|width=2|promised=39|actual=38|at=2026-11-07T03:11:27Z
+run/v1|ev=published|row=T7|commit=5d58e7676aadc3c110b158cd7534474959793105|kind=queue|by=-|why=|at=2026-11-07T03:11:33Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000017|current=4|state=ok|ceiling=|width=2|open=2|free=0|ready=|launched=|declined=|missed=0|idle=|room=0|at=2026-11-07T03:12:27Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000018|current=4|state=ok|ceiling=|width=2|open=2|free=0|ready=|launched=|declined=|missed=0|idle=|room=0|at=2026-11-07T03:12:34Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T15-session-poker-4.test.sh-3.log|head=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|dirty=4|rc=0|sha256=d13d376a752b56ae35ec7462e020fd8a3516d4eb7070aa4e338ec2770d597ed5|starter=orchestrator|at=2026-11-07T03:12:55Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T2-gate.test.sh-4.log|head=bfebd5fa69d550bcd767f3dfab22168211324a90|dirty=3|rc=0|sha256=9aaa68d76bdb4f675d94cc4c3800f9083d1caba50165aee2df38104512356316|starter=orchestrator|at=2026-11-07T03:15:06Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000019|current=4|state=ok|ceiling=|width=2|open=2|free=0|ready=|launched=|declined=|missed=0|idle=|room=0|at=2026-11-07T03:16:54Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T15-close-out-4.test.sh.log|head=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|dirty=4|rc=0|sha256=9f7dbc307dea5cccdf59e1f0d0d73d8f0a56fce653f1c2bd47d9daa56a4d715a|starter=orchestrator|at=2026-11-07T03:17:49Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T15-shell-lint.test.sh.log|head=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|dirty=4|rc=0|sha256=36b937a57fdadc73b9599b72ddab9e3a7a81636859231b88881fe7329b236045|starter=orchestrator|at=2026-11-07T03:18:29Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T2-landing-line-2.test.sh-3.log|head=bfebd5fa69d550bcd767f3dfab22168211324a90|dirty=3|rc=0|sha256=b36df6aa916e337644598f13f96eeed068268067b7245f8940e6f99e192f45f0|starter=orchestrator|at=2026-11-07T03:18:40Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T2-shell-lint.test.sh.log|head=bfebd5fa69d550bcd767f3dfab22168211324a90|dirty=3|rc=0|sha256=67b34b0882847cb45e90740d38ac013c8aad040d0adb24815a1e992618c1e739|starter=orchestrator|at=2026-11-07T03:19:18Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T15-shell-lint.test.sh-2.log|head=a4a4a4803b80288c115684d96e1cb5ba78f48d4b|dirty=4|rc=0|sha256=e3f33b8aa1aec61672d97d6206872a00efd923c227adf6a4c0e0ae069a84390b|starter=orchestrator|at=2026-11-07T03:19:33Z
+run/v1|ev=ready|row=T15|name=w49-T15|commit=ba4ba2779e52f3e585ba2946dbef366b2d5d0c31|branch=wt/49-T15|tree=/fixture/project/.worktrees/49-T15|suites=close-out-4.test.sh,session-poker-4.test.sh,shell-lint.test.sh|debt=-|carrier=63174:Sat Nov 7 03:20:37 2026|age=1794021637:273|at=2026-11-07T03:20:37Z
+run/v1|ev=candidate|row=T15|base=5d58e7676aadc3c110b158cd7534474959793105|commit=2059d7286bae121523e35d9cee33a954c269d706|tree=/fixture/project/.bionic/tmp/landing/1|at=2026-11-07T03:20:37Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T2-gate.test.sh-5.log|head=bfebd5fa69d550bcd767f3dfab22168211324a90|dirty=4|rc=0|sha256=b36df6aa916e337644598f13f96eeed068268067b7245f8940e6f99e192f45f0|starter=orchestrator|at=2026-11-07T03:22:21Z
+run/v1|ev=run|log=.bionic/tmp/runs/w49-T2-shell-lint.test.sh-2.log|head=bfebd5fa69d550bcd767f3dfab22168211324a90|dirty=4|rc=0|sha256=b36df6aa916e337644598f13f96eeed068268067b7245f8940e6f99e192f45f0|starter=orchestrator|at=2026-11-07T03:23:02Z
+run/v1|ev=ready|row=T2|name=w49-T2|commit=77de86a89cf95ab7efa53a97e8f29754c4f513b8|branch=wt/49-T2|tree=/fixture/project/.worktrees/49-T2|suites=gate.test.sh,shell-lint.test.sh|debt=-|carrier=70897:Sat Nov 7 03:23:53 2026|age=1794021833:274|at=2026-11-07T03:23:53Z
+run/v1|ev=candidate|row=T2|base=2059d7286bae121523e35d9cee33a954c269d706|commit=e22c6aee47d17249e5c791384475464d579f3775|tree=/fixture/project/.bionic/tmp/landing/2|at=2026-11-07T03:23:53Z
+run/v1|ev=verdict|row=T15|commit=2059d7286bae121523e35d9cee33a954c269d706|suite=close-out-4.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T15-close-out-4-2059d7286bae.log|admitted=1794021640|width=3|promised=211|actual=291|at=2026-11-07T03:25:32Z
+run/v1|ev=verdict|row=T15|commit=2059d7286bae121523e35d9cee33a954c269d706|suite=session-poker-4.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T15-session-poker-4-2059d7286bae.log|admitted=1794021640|width=3|promised=109|actual=204|at=2026-11-07T03:25:32Z
+run/v1|ev=verdict|row=T15|commit=2059d7286bae121523e35d9cee33a954c269d706|suite=shell-lint.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T15-shell-lint-2059d7286bae.log|admitted=1794021640|width=3|promised=20|actual=39|at=2026-11-07T03:25:32Z
+run/v1|ev=published|row=T15|commit=2059d7286bae121523e35d9cee33a954c269d706|kind=queue|by=-|why=|at=2026-11-07T03:25:39Z
+run/v1|ev=verdict|row=T2|commit=e22c6aee47d17249e5c791384475464d579f3775|suite=gate.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T2-gate-e22c6aee47d1.log|admitted=1794021941|width=3|promised=50|actual=28|at=2026-11-07T03:26:10Z
+run/v1|ev=verdict|row=T2|commit=e22c6aee47d17249e5c791384475464d579f3775|suite=shell-lint.test.sh|result=green|log=/fixture/project/.bionic/docs/record/wave-49-what-a-run-costs/line/T2-shell-lint-e22c6aee47d1.log|admitted=1794021941|width=3|promised=39|actual=37|at=2026-11-07T03:26:19Z
+run/v1|ev=published|row=T2|commit=e22c6aee47d17249e5c791384475464d579f3775|kind=queue|by=-|why=|at=2026-11-07T03:26:26Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000020|current=4|state=ok|ceiling=|width=1|open=1|free=0|ready=|launched=|declined=|missed=0|idle=|room=0|at=2026-11-07T03:26:27Z
+run/v1|ev=ask|key=decide:D13|at=2026-11-07T03:27:37Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000021|current=4|state=ok|ceiling=|width=1|open=0|free=1|ready=T3|launched=|declined=|missed=1|idle=T3|room=1|at=2026-11-07T03:28:31Z
+run/v1|ev=stop|session=00000000-0000-4000-8000-000000000001|turn=00000000-0000-4000-8000-000000000021|current=4|state=ok|ceiling=|width=0|open=0|free=0|ready=|launched=|declined=|missed=0|idle=|room=0|at=2026-11-07T03:28:43Z
+run/v1|ev=hand|ac=AC-7.3|what=waive-row|by=Person B|said=all recommended|at=2026-11-07T17:34:52Z
+run/v1|ev=handoff|path=.bionic/docs/record/handoffs/2026-11-07-wave-49-what-a-run-costs.md|at=2026-11-07 09:37 PST
+run/v1|ev=dispatch|row=T1|name=w49-T1|at=
+run/v1|ev=tree|row=T1|path=.worktrees/49-T1|base=59350b5e6|at=
+run/v1|ev=dispatch|row=T2|name=w49-T2|at=
+run/v1|ev=tree|row=T2|path=.worktrees/49-T2|base=11f6c32d|at=
+run/v1|ev=dispatch|row=T3|name=w49-T3|at=
+run/v1|ev=tree|row=T3|path=.worktrees/49-T3|base=e22c6aee4|at=
+run/v1|ev=dispatch|row=T4|name=w49-T4|at=
+run/v1|ev=tree|row=T4|path=.worktrees/49-T4|base=59350b5e6|at=
+run/v1|ev=dispatch|row=T5|name=w49-T5|at=
+run/v1|ev=tree|row=T5|path=.worktrees/49-T5|base=7a92d2337|at=
+run/v1|ev=dispatch|row=T6|name=w49-T6|at=
+run/v1|ev=tree|row=T6|path=.worktrees/49-T6|base=11f6c32d|at=
+run/v1|ev=dispatch|row=T7|name=w49-T7|at=
+run/v1|ev=tree|row=T7|path=.worktrees/49-T7|base=a4a4a4803|at=
+run/v1|ev=dispatch|row=T8|name=w49-T8|at=
+run/v1|ev=tree|row=T8|path=.worktrees/49-T8|base=59350b5e6|at=
+run/v1|ev=dispatch|row=T15|name=w49-T15|at=
+run/v1|ev=tree|row=T15|path=.worktrees/49-T15|base=a4a4a4803|at=
+run/v1|ev=dispatch|row=T9|name=w49-T9|at=
+run/v1|ev=tree|row=T9|path=.worktrees/49-T9|base=68ef6f33|at=
+run/v1|ev=dispatch|row=T10|name=w49-T10|at=
+run/v1|ev=tree|row=T10|path=.worktrees/49-T10|base=68ef6f33|at=
+run/v1|ev=dispatch|row=T11|name=w49-T11|at=
+run/v1|ev=tree|row=T11|path=.worktrees/49-T11|base=68ef6f33|at=
+run/v1|ev=dispatch|row=T12|name=w49-T12|at=
+run/v1|ev=tree|row=T12|path=.worktrees/49-T12|base=dd9b12e18|at=
+run/v1|ev=dispatch|row=T16|name=w49-T16|at=
+run/v1|ev=tree|row=T16|path=.worktrees/49-T16|base=bfebd5fa6|at=
