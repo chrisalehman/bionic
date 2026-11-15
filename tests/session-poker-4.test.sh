@@ -555,7 +555,7 @@ poke "$RSEV" debt add record/wave-01-fixture/assumptions.md "$PSEV"
 expect_eq "DEBT-H1 §DEBT debt add takes an assumptions.md hole line with no reviewed: line (exit 0)" "0" "$RC"
 expect_absent "DEBT-H1d …and the reading's refusal is gone (C24)" "carries no reviewed:" "$OUT"
 cp "$DBT_LOG" "$TMPROOT/dbt-before"
-printf '%s\n' "# assumptions" "" 'debt: hole step-line-born hooks/session-poker.sh step-line (the born marker is lost)' > "$SEV_DIR/asm-free.md"
+printf '%s\n' "# assumptions" "" 'debt: hole born-marker hooks/session-poker.sh born (the born marker is lost)' > "$SEV_DIR/asm-free.md"
 poke "$RSEV" debt add record/wave-01-fixture/asm-free.md "$PSEV"
 expect_eq "DEBT-H2 a hole line whose site is prose, not <path>:<line>, is refused (exit 1)" "1" "$RC"
 expect_true "DEBT-H2c …and the log is byte-identical" cmp -s "$TMPROOT/dbt-before" "$DBT_LOG"
@@ -1417,7 +1417,7 @@ expect_eq "WK-8 AC-8.2 one walk proof at the working head, naming the record" "1
 expect_eq "WK-9 AC-8.2 the run's log gains one ev=walk line, naming the record and the two criteria it discharged" "1" \
   "$(wk_ev walk | /usr/bin/grep -c '|record=record/wave-01-fixture/walk.md|discharged=2|at=')"
 poke "$RWK" landing-report --hand-holds --since "$WK_SINCE"
-expect_contains "WK-10 AC-8.2 the hand-holds fold over the walk's window reads no status write" "· status-writes=0 ·" "$OUT"
+expect_contains "WK-10 AC-8.2 the hand-holds fold over the walk's window reads no hand-hold: registering the walk is the machine's act" "hand-holds: total=0 " "$OUT"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
 
 # A run has one walk record and it only grows: a second record, at another head, that leaves out a criterion the

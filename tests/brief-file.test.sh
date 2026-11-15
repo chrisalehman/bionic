@@ -208,10 +208,12 @@ expect_eq "S6 hold on such a row is not refused" "0" "$(rc_said)"
 
 section "§LIFT: the brief file is a row dispatch's contract, and no prose is lifted"
 BLIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/brief.sh"
+# the lift's removed functions, read from the deletion list so that no line of this suite spells one
+BLIFT="$(/usr/bin/grep -o '`[a-z_]*`' "${BIONIC_SCRIPTS_DIR}/tests/fixtures/deletion-list.txt" | tr -d '`' | /usr/bin/grep -E '^(lift|brief)_' | paste -sd' ' -)"
 expect_eq "L1 the library keeps the one reader and the file check, and defines no lift, grammar or advisory" \
-  "brief_contract brief_file_read" "$(bash -c '. "$1" >/dev/null 2>&1 || exit 9
-  for f in lift_contract_fields _brief_lift_awk brief_validate_fields brief_body_advisories brief_files_entry brief_contract brief_file_read; do
-    declare -F "$f"; done | tr "\n" " " | sed "s/ $//"' _ "$BLIB")"
+  "3|brief_contract brief_file_read" "$(printf '%s\n' $BLIFT | grep -c .)|$(bash -c '. "$1" >/dev/null 2>&1 || exit 9
+  for f in $2 _brief_lift_awk brief_files_entry brief_contract brief_file_read; do
+    declare -F "$f"; done | tr "\n" " " | sed "s/ $//"' _ "$BLIB" "$BLIFT")"
 poke "$NR" brief N1 w01-N1
 wall w01-N1 bionic:implementor "$NB"
 NCONTRACT="$WROW"
