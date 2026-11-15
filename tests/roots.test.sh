@@ -333,7 +333,7 @@ cp "$LIB_DIR"/*.sh "$PLANT/scripts/lib/" 2>/dev/null
 PROJ="$SANDBOX/proj"
 mkdir -p "$PROJ/.bionic/tmp" "$PROJ/alt/plans/epic-99" "$PROJ/alt/record"
 printf 'docs-root: alt\n' > "$PROJ/.bionic/config.yaml"
-# The page is at 15, and its run's log stands under the other root's record (alt/record/wave-01/run.log).
+# The page is at 15, and its run's log stands under the alternate root's record.
 plan_fixture "$PROJ/alt/plans/epic-99/wave-01.plan.md" wave > /dev/null
 printf 'progress\n' > "$PROJ/alt/record/s99.md"
 
