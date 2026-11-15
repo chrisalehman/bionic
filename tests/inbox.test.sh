@@ -308,6 +308,37 @@ expect_eq "(g8) the same ready once shown lands (exit 0)" "0" "$IN_RC"
 expect_contains "(g8) …LANDED" "LANDED T1 " "$IN_OUT"
 
 # ─────────────────────────────────────────────────────────────────────────────
+section "§WORDS: the ruling walls' refusals, said by the library the wall calls"
+
+# Each refusal's words and the decision that reaches them, called with the facts the wall gathers and folded as the
+# wall folds them, in a shell that loaded only the fold and the roster library -> IN_OUT (both streams), IN_RC.
+in_say() {  # <function> [args...]
+  IN_OUT="$(bash -c 'L="$1"; shift; . "$L/fold.sh" && . "$L/roster.sh" || exit 9; A=("$@"); _w() { "${A[@]}"; }
+    bionic_fold PreToolUse _w' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$@" 2>&1)"; IN_RC=$?
+}
+in_say ruling_unread_refusal wx-T1 "$(ruling_render r-w1 'rename the flag')"
+expect_eq "(w1) a writer's commit with a ruling unread is refused (exit 2)" "2" "$IN_RC"
+expect_contains "(w1) …saying so, and carrying the ruling to the writer" "an orchestrator ruling for you is unread" "$IN_OUT"
+expect_contains "(w1) …and the ruling itself" "wx-T1, shown now:"$'\n'"bionic ruling r-w1 " "$IN_OUT"
+in_say ruling_unread_refusal wx-T1 ""
+expect_eq "(w2) with nothing unread it is admitted, silent" "0 " "$IN_RC $IN_OUT"
+in_say ruling_ack_refusal r-w3 wx-T1 wx-T1 b00T1 1
+expect_eq "(w3) an acknowledgement alone from its writer is admitted, silent" "0 " "$IN_RC $IN_OUT"
+in_say ruling_ack_refusal r-w3 wx-T1 wx-T1 b00T1 0
+expect_eq "(w4) one from its writer not alone in its call is refused (exit 2)" "2" "$IN_RC"
+expect_contains "(w4) …saying it goes alone" "an acknowledgement goes alone in its call" "$IN_OUT"
+in_say ruling_ack_refusal r-w3 wx-T1 "" "" 1
+expect_eq "(w5) one from the main thread is refused (exit 2)" "2" "$IN_RC"
+expect_contains "(w5) …naming the writer it needs" "ruling r-w3 is addressed to wx-T1, not to the main thread." "$IN_OUT"
+in_say ruling_ack_refusal r-w3 wx-T1 wx-T2 b00T2 1
+expect_contains "(w6) one from another writer is refused, naming both" "2 bionic: ruling-ack refused — this ruling is wx-T1's to ack" "$IN_RC $IN_OUT"
+expect_contains "(w6) …the other by its roster name" "addressed to wx-T1, not to wx-T2." "$IN_OUT"
+in_say ruling_ack_refusal r-w3 wx-T1 "" a-nested-delegate 1
+expect_contains "(w7) one from an agent no row names is refused as that" "not to an agent no roster row names." "$IN_OUT"
+in_say ruling_ack_refusal r-no-such-ruling "" "" "" 1
+expect_eq "(w8) an id no ruling carries has no writer, and the verb refuses it, not the wall" "0 " "$IN_RC $IN_OUT"
+
+# ─────────────────────────────────────────────────────────────────────────────
 section "§ROOT: one plugin root in every ruling's acknowledgement call (wave-34 T4; debt ruling-plugin-root)"
 
 # The push, the commit wall and `ready` each print the ruling in the one wording, whose last words are
