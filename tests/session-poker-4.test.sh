@@ -892,9 +892,9 @@ expect_contains "AN-8c …naming the entry" "nosuch.test.sh" "$OUT"
 section "§REVIEW-FILES §FILES-UNHELD: each verb a close meets writes its cell, or names the edit that does"
 # ============================================================
 # A close met verbs that sent it in a circle: a review row's Files held one record for three questions; amend sent a closed
-# contract to a new dispatch. FIXTURE FIDELITY: a task-scale plan at single rigor, a run at 15 (sp_at15) whose rows are
-# nine cells with an artifact cell, bound to this session, its working branch the repository's
-# main; roster rows and acks in their writers' shapes (roster_row_fixture, s20_ack). Every write goes through the
+# contract to a new dispatch. FIXTURE FIDELITY: a task-scale plan at single rigor with a
+# reads table carrying an artifact cell and no ledger, bound to this session, its working branch the repository's
+# main, here brought to the run at 15 it stands for (`vc_15`); roster rows and acks in their writers' shapes (roster_row_fixture, s20_ack). Every write goes through the
 # real verb; the one planted line is a review proof in proof_line's shape, as a review reading's fixture plants one.
 vc_plan() {  # <repo> <row>... -> the plan path; bound and committed
   local repo="$1" f row; shift
@@ -920,10 +920,11 @@ vc_plan() {  # <repo> <row>... -> the plan path; bound and committed
     printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
     printf '| AC-1.1 | T2 | pending | — | — |\n\nAC-1.1:\n  provenance: fixture\n  fails-when: the fixture is wrong\n'
   } > "$f"
-  sp_at15 "$f"; bind_marker "$repo" "$f"
+  bind_marker "$repo" "$f"
   ( cd "$repo" && git add -f "$f" && git commit -qm plan ) >/dev/null 2>&1
   printf '%s' "$f"
 }
+vc_15() { sp_at15 "$2"; ( cd "$1" && git add -f "$2" && git commit -qm at15 ) >/dev/null 2>&1; }  # <repo> <plan> -> the run at 15, committed
 vc_cell() { s48_row "$VC_P" "$1" | cut -d'|' -f"$2"; }  # <row> <4 task | 8 Files | 9 artifact>
 VC="$(make_repo verb-cells)"; ( cd "$VC" && git commit -q --allow-empty -m init && git branch -M main ) >/dev/null 2>&1
 git -C "$VC" config user.name "Dana Fixture"
@@ -932,7 +933,7 @@ VC_P="$(vc_plan "$VC" \
   '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | lib/a.sh | landed | — | — |' \
   '| T2 | 4 | build | the second build | implementor | — | 30 | REQ-1 | lib/b.sh | active | — | — |' \
   '| T3 | 4 | build | the third build | implementor | — | 30 | REQ-1 | lib/c.sh | landed | — | — |')"
-new_roster "$VC"
+vc_15 "$VC" "$VC_P"; new_roster "$VC"
 printf '%s\n' "$(roster_row_fixture session="$SID" name=w-T2 agent_id=a-w-T2 launched_at=2026-10-22T10:00:00Z row=T2 plan="$VC_P" files=lib/b.sh suites_allowed=b.test.sh suites_source=declared)" >> "$(roster_of "$VC")"
 printf '%s\n' "$(roster_row_fixture session="$SID" name=w-T3 agent_id=a-w-T3 launched_at=2026-10-22T10:00:00Z row=T3 plan="$VC_P" files=lib/c.sh suites_allowed=c.test.sh suites_source=declared)" >> "$(roster_of "$VC")"
 s20_ack "$VC" w-T3 2026-10-22T11:00:00Z
@@ -965,7 +966,7 @@ expect_eq "RF-4 control: a verify row keeps the reader-row rule, one record name
 # (VC) is the control that a critic holds all three. Every refusal leaves the plan byte-identical.
 VD="$(make_repo verb-double)"; ( cd "$VD" && git commit -q --allow-empty -m init && git branch -M main ) >/dev/null 2>&1
 git -C "$VD" config user.name "Dana Fixture"
-VD_P="$(vc_plan "$VD" '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | lib/a.sh | landed | — | — |')"
+VD_P="$(vc_plan "$VD" '| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | lib/a.sh | landed | — | — |')"; vc_15 "$VD" "$VD_P"
 sed -e 's/^rigor: .*/rigor: double/' "$VD_P" > "$VD_P.tmp" && mv "$VD_P.tmp" "$VD_P"
 ( cd "$VD" && git add -f "$VD_P" && git commit -qm "rigor double" ) >/dev/null 2>&1
 new_roster "$VD"
