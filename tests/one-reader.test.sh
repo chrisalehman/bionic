@@ -9,8 +9,7 @@
 #                 nothing (a heading's or a shape's words, an operand of another command) a planted file holds
 #                 lines of it and, last, the real reading of that kind: only the last is counted.
 #   §PLANWRITERS  a planted append to a plan is named and counted; a log's, words' or copy
-#                 source's line is no write beside a planted copy onto a plan. The act's own function is admitted, a
-#                 write planted there is not counted; one in another function of its file, or in lib/, is.
+#                 source's line is no write beside a planted copy onto a plan. No function's write is admitted.
 #   §WRITERS      two functions appending one event type are listed as a pair; the six a landing writes have one
 #                 writer each, the landing library's, and every place that lands a row or a part calls it. A
 #                 launch's `dispatch` has one writer, the launch recorder's, and a row's `born` one, the units
@@ -102,9 +101,6 @@ planted_facts() {  # <plan> -> the reader's facts, one run/v1 line each
 planted_k5_count() { echo "n=$(/usr/bin/grep -c '^run/v1|ev=zzplant|' "$f")"; }
 planted_k5_put() { echo "run/v1|ev=zzplant|at=now" >> "$f"; }
 EOF
-B="$S/payload/scripts/bring-forward.sh"
-{ awk '{ print } /^bf_main\(\) \{/ { print "  printf x >> \"$plan\"" }' "$B"; echo 'planted_other() { printf x >> "$plan"; }'; } > "$S/bf" && cp "$S/bf" "$B"
-echo 'bf_main() { printf x >> "$plan"; }' > "$L/planted-act.sh"
 # A retired verb in each shape the check reads: by its own word, the poker run with it, a function and a case arm.
 printf '%s\n' '# launch-sync' '# tasks-prose' '# row-landed' '# session-poker.sh deliver T1' > "$L/planted-name.sh"
 printf '%s\n' '# matrix-retier' '# session-poker.sh discharge AC-1' > "$L/planted-cell.sh"
@@ -136,10 +132,7 @@ expect_eq "a plan write planted alone is refused by its file and line" "one-read
   "$(lone write payload/scripts/lib/p.sh < "$L/planted-write.sh" | tr '\n' ' ' | sed 's/ $//')"
 expect_absent "a plan write is not a parse" "$(printf 'parser\tpayload/scripts/lib/planted-write.sh')" "$AFTER"
 expect_absent "the units library writes no plan" "$(printf 'plan-writer\tpayload/scripts/lib/units.sh\t')" "$AFTER"
-expect_eq "the plan-writer count rises by the four planted writers" "$(( $(count "$BEFORE" plan_writers) + 4 ))" "$(count "$AFTER" plan_writers)"
-expect_absent "the act's file lists no write site" "$(printf 'plan-writer\tpayload/scripts/bring-forward.sh')" "$BEFORE"
-expect_contains "a write in the act's file outside its function is named, the act's own two are not" "$(printf 'plan-writer\tpayload/scripts/bring-forward.sh\tsites=1 ')" "$AFTER"
-expect_contains "a write under the act's name in another file is named" "$(printf 'plan-writer\tpayload/scripts/lib/planted-act.sh\t')" "$AFTER"
+expect_eq "the plan-writer count rises by the two planted writers" "$(( $(count "$BEFORE" plan_writers) + 2 ))" "$(count "$AFTER" plan_writers)"
 expect_eq "writes: a log, a plan in refusal words and a copy's source are no plan write; a copy onto a plan is" "plan-writer sites=1 first=4" "$(site 4)"
 
 section "WRITERS"
@@ -224,6 +217,11 @@ expect_eq "in a reader's file the old records' names are admitted, a deleted hoo
   "$(printf '%s\n' 'f="$1/landing-proofs.log"' '# asks.state' '# hooks/stop-guard.sh' | lone reader payload/scripts/lib/translate.sh | tr '\n' ' ' | sed 's/ $//')"
 LN="$(/usr/bin/grep -o '`[a-z_.-]*`' "${BIONIC_SCRIPTS_DIR}/tests/fixtures/deletion-list.txt" | tr -d '`')"
 expect_eq "the deletion list yields names, and the check's own text holds none of them whole" "y 0" "${LN:+y} $(/usr/bin/grep -cwF -f <(printf '%s\n' "$LN") "$CHECK")"
+# The deleted act's file and function, read from the list so that no line of this suite spells either.
+n=0; for a in $(printf '%s\n' "$LN" | sed -n '/^bring-/p; /^bf_/p'); do n=$((n + 1))
+  expect_eq "the deleted act's name planted alone is refused by its file and line: $a" "one-reader-check: refused — name payload/scripts/p.sh:1 rc=1" \
+    "$(printf 'bash "$R/%s" "$plan"\n' "$a" | lone "act$n" payload/scripts/p.sh | tr '\n' ' ' | sed 's/ $//')"; done
+expect_eq "…the list naming both, the file and the function" 2 "$n"
 # A design ledger heading and a debt ledger row are read by the translation alone; no verb writes either file.
 ledgers() { /usr/bin/grep -rnE '## Δ|/ \\[|] /|" [|] raised-by ' "$1/hooks" "$1/payload/scripts" | grep -v -e '/payload/scripts/lib/translate\.sh:' -e ':[0-9]*: *#'; }
 printf '%s\n' '# ## Δ0 in a comment' "led_n() { sed -n 's/^## Δ\\([0-9]*\\).*/\\1/p' \"\$1\"; }" > "$L/planted-ledger.sh"

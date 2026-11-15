@@ -49,7 +49,7 @@ Fix: write under $2 instead — the .bionic tree is pinned to the main repositor
       WG_DETAIL="canonical-sdlc artifact '$BASENAME' has no content to validate.
 Path: $FILE_PATH
 Fix: use Write to create the artifact with governing-skill frontmatter." ;;
-    no-frontmatter)  # <supported version>
+    no-frontmatter)  # <the version line's value>
       WG_FACT="this artifact has no frontmatter block"; WG_FIX="prepend a frontmatter block"
       WG_DETAIL="canonical-sdlc artifact '$BASENAME' is missing a YAML frontmatter block.
 Path: $FILE_PATH
@@ -78,12 +78,6 @@ Fix: add a non-empty 'governing-skill: <skill-id>' line to the frontmatter block
       WG_DETAIL="canonical-sdlc artifact '$BASENAME' declares canonical_sdlc_version: '$1'.
 Path: $FILE_PATH
 Fix: set 'canonical_sdlc_version:' to $2: a plan is written at 15, and a document that is no plan may declare 14 or 15." ;;
-    live-14)  # <the command that brings the plan forward>
-      WG_FACT="this plan's run is open at version 14"; WG_FIX="run bring-forward on the plan"
-      WG_DETAIL="canonical-sdlc plan '$BASENAME' declares canonical_sdlc_version: 14 and its run is open; a run is carried at version 15.
-Path: $FILE_PATH
-Fix: bring the plan forward, then write it again:
-  $1" ;;
     new-14)
       WG_FACT="this new plan declares version 14"; WG_FIX="write it at version 15"
       WG_DETAIL="canonical-sdlc plan '$BASENAME' is new and declares canonical_sdlc_version: 14: a new plan is written at 15.

@@ -2290,39 +2290,14 @@ MULTI_AGENT=$(frontmatter_get multi_agent)
 _EG_V15=0
 case "${PLAN##*/}:$SDLC_VERSION" in *.plan.md:15) _EG_V15=1 ;; esac
 
-# A PLAN AT 14 BINDS ONLY WHILE ITS RUN IS OPEN, by the verdict the run predicate below takes: the
-# session's own open run, or with no binding the root's open run. Open, it is refused naming the act
-# that brings it forward, since a run is carried at 15; closed, it is history and nothing of it is
-# judged. Whatever its file is called: a run at 15 is found and joined to its record by a name ending
-# .plan.md, so a plan under any other name is first named for its directory (an incident's for its
-# own, any other for its stem), as the act's own refusal says, and then brought forward.
-# [WALL: tests/plan-page.test.sh]
 _eg_plan_named() {  # -> the path the plan takes when named for its directory: an incident's for it, any other for its stem
   local d="${PLAN%/*}"
   case "$d" in */incidents/*) printf '%s/%s.plan.md' "$d" "${d##*/}" ;; *) printf '%s.plan.md' "${PLAN%.md}" ;; esac
 }
-_eg_refuse_live14() {
-  local to
-  case "${PLAN##*/}" in
-    *.plan.md) ;;
-    *) to="$(_eg_plan_named)"
-       refuse exit2 commit "this plan's run is open at version 14" "rename it, then run bring-forward" \
-"canonical-sdlc plan declares canonical_sdlc_version: 14 and its run is open; a run is carried at version 15, under a plan named *.plan.md.
-Plan: $PLAN
-Fix: name the plan for its directory, then bring it forward, then commit again:
-  mv $(refuse_shell_word "$PLAN") $(refuse_shell_word "$to")
-  bash $(refuse_shell_word "$(refuse_plugin_root)/scripts/bring-forward.sh") $(refuse_shell_word "$to")" ;;
-  esac
-  refuse exit2 commit "this plan's run is open at version 14" "run bring-forward on the plan" \
-"canonical-sdlc plan declares canonical_sdlc_version: 14 and its run is open; a run is carried at version 15.
-Plan: $PLAN
-Fix: bring the plan forward, then commit again:
-  bash $(refuse_shell_word "$(refuse_plugin_root)/scripts/bring-forward.sh") $(refuse_shell_word "$PLAN")"
-}
 # A PAGE AT 15 IS A PLAN ONLY BY ITS NAME: a run at 15 is found by the walk and joined to its record by a name ending
 # .plan.md, so a page at 15 a session is bound to under any other name has no run this gate can read, and the escape
 # for a file with no state section below would admit every commit against it unjudged. It is refused, named for its
-# directory as a plan at 14 is.
+# directory.
 # [WALL: tests/plan-page.test.sh]
 _eg_refuse_misnamed15() {
   refuse exit2 commit "this plan at 15 is not named as a plan" "name it for its directory" \
@@ -2331,15 +2306,13 @@ Plan: $PLAN
 Fix: name the plan for its directory, then commit again:
   mv $(refuse_shell_word "$PLAN") $(refuse_shell_word "$(_eg_plan_named)")"
 }
+# A PLAN AT 14 IS AN OLDER RUN'S DOCUMENT AND NEVER A RUN, under any name and whatever its run reads: nothing of it is
+# judged, so its commit goes through.
+# [WALL: tests/plan-page.test.sh]
 case "${PLAN##*/}:$SDLC_VERSION" in
   *.plan.md:15) ;;
   *:15) case "$EG_VERDICT" in bound-open|bound-closed) _eg_refuse_misnamed15 ;; esac ;;
-  *:14)
-    case "$EG_VERDICT" in
-      bound-open) _eg_refuse_live14 ;;
-      none) ! active_run "$BIONIC_ROOT" >/dev/null || _eg_refuse_live14 ;;
-    esac
-    exit 0 ;;
+  *:14) exit 0 ;;
 esac
 
 # A page at neither 14 nor 15 with no state section is no plan; the translation tells the section.
@@ -2348,17 +2321,15 @@ if [ "$_EG_V15" -eq 0 ] && ! translate_has_state "$PLAN"; then
   exit 0
 fi
 
-# A plan at 15; a plan at 14 was decided above, under any name, and left by exit or refusal. Anything else — an
-# older number, a typo, an empty value, garbage — blocks. So below this line every page is a plan at 15 named
+# A plan at 15; a plan at 14 left above, under any name, with nothing judged. Anything else — an older number, a typo,
+# an empty value, garbage — blocks. So below this line every page is a plan at 15 named
 # *.plan.md, and no arm under it asks the version again: each takes its facts from the run's log where they are held,
 # and names each one the log does not hold yet (`_eg_v15_owe`), so no path reaches `exit 0` without the whole contract.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-SUPPORTED_SDLC_VERSION=14
-
-if [ "$SDLC_VERSION" != "$SUPPORTED_SDLC_VERSION" ] && [ "$_EG_V15" -eq 0 ]; then
+if [ "$_EG_V15" -eq 0 ]; then
   _eg_detail="canonical-sdlc evidence-gate: plan declares canonical_sdlc_version: '$SDLC_VERSION'.
 Plan: $PLAN
-Fix: set 'canonical_sdlc_version: 15' — a plan is written at 15, and a plan at 14 is brought forward with scripts/bring-forward.sh."
+Fix: set 'canonical_sdlc_version: 15' — a plan is written at 15."
   refuse exit2 commit "this plan declares an unsupported sdlc version" "set the supported version" "$_eg_detail"
 fi
 

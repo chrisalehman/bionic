@@ -61,7 +61,7 @@ write_plan "$h2c" "# regular plan
 Some content.
 No SDLC State section here." > /dev/null
 
-section "Section 2b: a plan declares 15; one open at 14 is refused, naming the act; the two gates agree"
+section "Section 2b: a plan declares 15; one at 14 on disk is a document; the two gates agree"
 
 h2v=$(make_home)
 write_plan "$h2v" "${FM/version: 14/version: 13}
@@ -73,9 +73,9 @@ for v in 13 14 15; do
 ## SDLC State
 current: 4" "v$v.plan.md"); run_hook "$h" 'git commit -m "x"'
   w=$(jq -n --arg p "$p" --arg c "$(cat "$p")" --arg s "$EG_SID" '{session_id: $s, hook_event_name: "PreToolUse", tool_name: "Write", tool_input: {file_path: $p, content: $c}}' \
-    | HOME="$h" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh" 2>&1 >/dev/null | grep -c 'unsupported version\|open at version 14' || true)
-  [ "$v" = 15 ] || expect_eq "the write hook refuses $v for its version" 1 "$w"
-  expect_eq "the write hook and the commit gate agree on version $v" "$w" "$(grep -c 'unsupported sdlc version\|open at version 14' <<< "$HOOK_STDERR" || true)"
+    | HOME="$h" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh" 2>&1 >/dev/null | grep -c 'unsupported version' || true)
+  case "$v" in 13) expect_eq "the write hook refuses 13 for its version" 1 "$w" ;; 14) expect_eq "the write hook says nothing of a plan at 14 on disk" 0 "$w" ;; esac
+  expect_eq "the write hook and the commit gate agree on version $v" "$w" "$(grep -c 'unsupported sdlc version' <<< "$HOOK_STDERR" || true)"
 done
 # The plan builder writes either page: asked for 15, the version 15, no state section, and the log the reader reads.
 for v in 14 15; do p=$(plan_fixture --at $v --current 5 "$EG_PF_DIR/plans/epic-99-fixture/wave-0$v.plan.md" wave "$(eg_pf_row T1 dw active)")
@@ -133,7 +133,7 @@ ow_plan() {
   local body p
   case "$1" in
     5) body="$step5_base" ;; 6) body="$step6_body" ;; 7) body="$v9_step7_body" ;;
-    8) body="$v9_step8_body" ;; 9) body="$v9_step9_body" ;;
+    8) body="$v9_step8_body" ;;
   esac
   p="$(plan "$1" "$body" "$(ow_matrix "$2" "$3")" | OW_T="$ow_tasks" awk '/^## Verification Matrix/ { print ENVIRON["OW_T"]; print "" } { print }')"
   if [ "$1" -ge 7 ]; then eg_floor "$p"; else printf '%s\n' "$p"; fi
@@ -173,9 +173,9 @@ expect_eq "9p …so the close settles the criteria owed at 9 whose eval is its m
 ow_page15 no > "$ow_15"
 expect_eq "9q a page at 15 with no Task column owes every criterion at no particular step, as before the column" \
   "AC-2:: AC-3:: AC-4:: AC-5:: AC-6:: AC-7:: " "$(ow_owe15)"
-ow_p9="$(write_plan "$(make_home)" "$(ow_plan 9 T3 T9)")"
-ow_p9d="$(write_plan "$(make_home)" "$(ow_plan 9 T3 T9 | awk '/^Step 9:/ { print "- Step 9: delivered: 2026-10-24T00:00Z wave-01"; skip = 1; next } skip && /^  / { next } { skip = 0; print }')")"
-expect_eq "9k a row owed at 9 is deferred while the plan is open, and owed once the Step-9 line carries delivered:" \
+ow_p9="$(eg_page "$(make_home)" 9)"
+ow_p9d="$(eg_page "$(make_home)" 9 'run/v1|ev=step|n=9|delivered=2026-10-24T00:00Z wave-01|at=2026-10-24T00:00:00Z')"
+expect_eq "9k a row owed at 9 is deferred while the run is open, and owed once its step 9 carries delivered:" \
   "rc=0|rc=1" "$(ow_ask "$ow_p9" matrix_row_deferred "$ow_p9" 9 9 pending | tail -1)|$(ow_ask "$ow_p9d" matrix_row_deferred "$ow_p9d" 9 9 pending | tail -1)"
 expect_eq "9l a discharged row is never deferred, and a pending one is before its step" "rc=1|rc=0" \
   "$(ow_ask "$ow_p9" matrix_row_deferred "$ow_p9" 9 6 discharged | tail -1)|$(ow_ask "$ow_p9" matrix_row_deferred "$ow_p9" 9 6 pending | tail -1)"
