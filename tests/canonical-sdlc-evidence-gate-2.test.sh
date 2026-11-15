@@ -338,9 +338,9 @@ od_rows() {  # <T1 status> <T2 status> <T3 and T4 status> -> the order's rows: b
   od_row T4 7 doc 'the release' implementor README.md "$3" 'approval:plan'
   od_row T5 8 integrate 'merge into main' orchestrator — pending 'approval:release, approval:merge'
 }
-od_poke() {  # <args...> -> OD_OUT, OD_RC: session-poker.sh as this session, in the repository
-  OD_RC=0
-  OD_OUT="$(cd "$OD" && env CLAUDE_CODE_SESSION_ID="$OD_SID" HOME="$OD_ROOT/home" CLAUDE_CONFIG_DIR="$OD_ROOT/config" \
+od_poke() {  # <args...> -> OD_OUT, OD_RC: session-poker.sh as this session, in the repository, on a pinned machine
+  OD_RC=0   # the gate is the fixture's own store, so its readers are the fixture's: regression-run asks it for a whole run
+  OD_OUT="$(cd "$OD" && env CLAUDE_CODE_SESSION_ID="$OD_SID" HOME="$OD_ROOT/home" CLAUDE_CONFIG_DIR="$OD_ROOT/config" BIONIC_PROBE_CORES=8 BIONIC_PROBE_USED_PCT=30 BIONIC_PROBE_BUSY_CORES=1.0 BIONIC_PROBE_BUSY_CORES_5M=1.0 BIONIC_PROBE_LOAD_1M=1.0 BIONIC_PROBE_FREE_PCT=60 BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_SWAP_PCT=0 \
     BIONIC_GATE_DIR="$OD_ROOT/gate" bash "${BIONIC_HOOKS_DIR}/session-poker.sh" "$@" 2>&1)" || OD_RC=$?
 }
 od_logs() { find "$OD_REC" -name 'regression-run-*.log' | wc -l | tr -d ' '; }
