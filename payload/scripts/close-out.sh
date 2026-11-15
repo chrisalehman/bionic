@@ -1679,10 +1679,10 @@ epic_row() {
 EPIC_SHIPPED_HEADER='| wave | version | plan | spec / requirements | ADRs | shipped |'
 co_epic_print() {
   if [ ! -f "$EPIC_PLAN" ]; then
-    say "epic-row: none — no epic.plan.md beside this plan"
+    say "shipped-row: none — no epic.plan.md beside this plan"
     return 0
   fi
-  say "epic-row: $(epic_row)"
+  say "shipped-row: $(epic_row)"
   say "epic-edit: add the row above to the shipped table of ${EPIC_PLAN##*/} by an edit of your own; this close writes no plan (a plan with no shipped table takes the header $EPIC_SHIPPED_HEADER and its rule line first)"
 }
 
@@ -2238,7 +2238,7 @@ do_check() {
     say "continuation: $CONT_REL would be written from the close-out template"
   fi
   if [ -f "$EPIC_PLAN" ] && [ -n "$(epic_row_missing)" ]; then
-    co_would "epic-row: WOULD REFUSE — $(epic_row_missing)" "the epic plan's row cannot be written"
+    co_would "shipped-row: WOULD REFUSE — $(epic_row_missing)" "the epic plan's row cannot be written"
   else
     co_epic_print
   fi
