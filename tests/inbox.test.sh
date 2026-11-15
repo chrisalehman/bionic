@@ -31,8 +31,9 @@
 #
 # ANTI-VACUITY. Every empty readback sits beside a positive on the same extractor in the same world:
 # (p2)/(p4) beside (p3), (c1)'s absences beside wx-T1's carry, (c2)'s absent line beside the live
-# writer's, (g5) beside (g3). The commit control (g0) proves the world admits a commit at all, so
-# (g3)'s refusal is the ruling's and (g5)'s pass is the shown mark's.
+# writer's, (g5) beside (g3), (w2) beside (w1), (w3)/(w8) beside (w4), each on one fold of one call.
+# The commit control (g0) proves the world admits a commit at all, so (g3)'s refusal is the
+# ruling's and (g5)'s pass is the shown mark's.
 #
 # Usage: bash tests/inbox.test.sh
 
