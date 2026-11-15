@@ -72,6 +72,8 @@ esac
 expect_eq "5: limit = patrol_fire_window(interval)" "$WINDOW" "$LIMIT"
 expect_eq "6: with the real last-resort default, that limit is 1320 and not 2400" \
   "1320" "$LIMIT"
+expect_regex "7: patrol_verdict answers every field its callers read, by key" '^verdict=[a-z]+\|ref=[0-9]+\|gap=[0-9]+\|window=[0-9]+\|reason=' \
+  "$(sourced patrol_verdict "$TMP/no-such-stamp" "$TMP/no-such-transcript" "$SECS")"
 
 section "Section 3: every reader of \"how stale is stale\" calls the predicate"
 #
