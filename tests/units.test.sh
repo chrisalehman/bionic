@@ -36,6 +36,7 @@
 #   §DROP    a drop in the run's log reads dropped to the reader and the fill at 15, launched or not; a wait on it is met
 #   §NAMED   a task at 15 names in its deps the approval it waits on; the fill takes every wait from plan_read_waits
 #   §ORDER-15  the order and its post-release exception hold at 15, a row's state the run's, the exception's waits the reader's
+#   §DEPS-15   a row at 15 waits by its deps and kind alone: no thread, step hold or suspect; a questions tag judged
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT is lib/units.sh's own header. §2 is its assertion: the same rows with every
 # column REVERSED must produce a byte-identical TSV.
