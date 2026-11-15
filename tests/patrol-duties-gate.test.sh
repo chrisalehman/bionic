@@ -93,17 +93,9 @@ make_env() {  # -> project dir on stdout
   local dir; dir=$(mktemp -d)
   mkdir -p "$dir/.bionic/docs/plans" "$dir/.bionic/tmp"
   : > "$dir/.bionic/tmp/engaged-$SID.state"
-  # APPROVED (wave-26 T13; D3): the run's ledger is live on its `approved-by:` line, and 23b
-  # reads the fill ledger's line a live Stop writes.
-  cat > "$dir/.bionic/docs/plans/$PLAN_REL" <<'EOF'
----
-governing-skill: canonical-sdlc
----
-## SDLC State
-
-current: 4
-approved-by: fixture 2026-10-04T00:00Z "approved"
-EOF
+  # APPROVED: the run's ledger is live on its approval, and 23b reads the fill ledger's line a live Stop writes.
+  # The page is at 15, its step and approval in the run's log.
+  plan_fixture "$dir/.bionic/docs/plans/$PLAN_REL" task > /dev/null
   # BOUND TO ITS PLAN (wave-23-fixit-1810, REQ-1, D1). An empty marker beside an open plan is
   # the unbound state, whose `fallback` plan is announced and never acted on — the basename
   # discharge below would never count. Group 24/25 drive the unbound state on purpose.
