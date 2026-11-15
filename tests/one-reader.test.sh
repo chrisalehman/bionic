@@ -19,8 +19,9 @@
 #                 printed search pattern is no writer.
 #   §NAMES        the check names a planted retired verb by its line in each shape it reads (the verbs the events
 #                 retired, the five that wrote a matrix cell, the commands with no job, the writers of a step's line,
-#                 its fields, the regression's setting, its runs' count, a row's confirmation and the cap); the tree
-#                 names none, an older run's names in the reader's lists admitted. No verb writes a ledger file.
+#                 its fields, the regression's setting, its runs' count, a row's confirmation and the cap) and the old
+#                 records' and the deleted hooks' file names; the tree names none, an older run's names in the reader's
+#                 lists and files admitted. No verb writes a ledger file.
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted, one site for each name the
 #                 check counts; the dispatch wall lists none, and no fact the dispatch library says is in its file.
 #   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
@@ -196,6 +197,11 @@ expect_eq "an older run's names in the translation, the plan reader's refused ke
   "$(cd "$S" && /usr/bin/grep -lE 'matrix-set|regression-runs|waive-row' payload/scripts/lib/translate.sh payload/scripts/lib/plan-read.sh hooks/poker/line.sh | grep -c .) $(count "$BEFORE" names)"
 expect_eq "a retired verb planted alone in a hook is refused by its file and line" "one-reader-check: refused — name hooks/p.sh:1 rc=1" \
   "$(echo 'bash "$POKER" launch-sync T1' | lone name hooks/p.sh | tr '\n' ' ' | sed 's/ $//')"
+n=0; for p in 'f="$1/landing-proofs.log"' '# the asks.state register' '# hooks/stop-guard.sh' 'bash "$H/agent-context-guard.sh" "$@"'; do n=$((n + 1))
+  expect_eq "an old record's or a deleted hook's name planted alone is refused by its file and line: $p" "one-reader-check: refused — name payload/scripts/lib/p.sh:1 rc=1" \
+    "$(echo "$p" | lone "file$n" payload/scripts/lib/p.sh | tr '\n' ' ' | sed 's/ $//')"; done
+expect_eq "in a reader's file the old records' names are admitted, a deleted hook's is not" "one-reader-check: refused — name payload/scripts/lib/translate.sh:3 rc=1" \
+  "$(printf '%s\n' 'f="$1/landing-proofs.log"' '# asks.state' '# hooks/stop-guard.sh' | lone reader payload/scripts/lib/translate.sh | tr '\n' ' ' | sed 's/ $//')"
 LN="$(/usr/bin/grep -o '`[a-z_.-]*`' "${BIONIC_SCRIPTS_DIR}/tests/fixtures/deletion-list.txt" | tr -d '`')"
 expect_eq "the deletion list yields names, and the check's own text holds none of them whole" "y 0" "${LN:+y} $(/usr/bin/grep -cwF -f <(printf '%s\n' "$LN") "$CHECK")"
 # A design ledger heading and a debt ledger row are read by the translation alone; no verb writes either file.
