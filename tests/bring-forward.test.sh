@@ -298,7 +298,7 @@ printf 'owed/v1|key=decide:D1|state=closed|by=ruled|at=2026-11-01T01:16:28Z|open
 printf 'fill-ledger/v1|at=2026-11-01T04:00:00Z|session=s-one|turn=u1|state=ok|width=3|launched=T1|room=0\n' > "$R8/fill-ledger.log"
 EV8="$(translate "$P8" events)"; GP8="$(translate "$P8" gaps)"; in8() { printf '%s\n' "$EV8" | grep -cxF -- "$1"; }
 ask8() { bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$P8" "$@"; }
-BED="$BIONIC_SCRIPTS_DIR/tests/fixtures/replay"; W9=wave-49-what-a-run-costs; W6=wave-46-asks-nothing
+BED="$(mktemp -d)"; git -C "$BIONIC_SCRIPTS_DIR" archive 1d09c8990abaf6cdacfb9db3cda9e58f8ad46ad3 tests/fixtures/replay | tar -x -C "$BED"; BED="$BED/tests/fixtures/replay"; W9=wave-49-what-a-run-costs; W6=wave-46-asks-nothing
 P9="$BED/$W9/plans/epic-23-bionic-tech-debt/$W9.plan.md"; R9="$BED/$W9/record/$W9"; EV9="$(translate "$P9" events)"
 
 section "RENAME"

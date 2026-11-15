@@ -87,7 +87,6 @@ old run	tests/release-approval.test.sh	rm -f "$RFC/.bionic/tmp/owed-$SID.state" 
 old run	tests/release-approval.test.sh	printf 'landed: row=T5 branch=wt/fix head=%s merge=%s at=2026-10-12T15:00:00Z\n' "$FC_X" "$FC_X" > "$FC_REC/landing-proofs.log"
 old run	tests/release-approval.test.sh	rm -f "$FC_REC/landing-proofs.log"
 fixture text	tests/release-check.test.sh	T38:T38-one-roster-reader.md T39:T39-sp2-pins.md T40:T40-tick-asks-once.md T41:T41-task-set-files.md
-old run	tests/replay-bed.test.sh	  else cat "$X/hand-written.log" >> "$WORLD_ROOT/$n/record/$(basename "$p" .plan.md)/landing-proofs.log"; fi
 fixture text	tests/session-poker-4.test.sh	printf '%s\n' "# assumptions" "" 'debt: hole step-line-born hooks/session-poker.sh step-line (the born marker is lost)' > "$SEV_DIR/asm-free.md"
 plant	tests/shell-lint.test.sh	die "REFUSED — run it as: session-poker.sh matrix-set AC-1 status=discharged"  # MARK-C4 a script verb
 fixture text	tests/sitrep-card.test.sh	ask: key=waive-row:AC-3.2 holds=nothing title=row waiver AC-3.2 raised=5:01 PM blocks=no waits=event T83 lands
