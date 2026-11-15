@@ -55,7 +55,7 @@ section "§SHAPE: the page is the prototype's, in plain text, recorded with its 
 # fails-when: a section is missing or out of order; a markdown label, a record path or a quotation is printed; the
 # old name prints; a finding line does not open on its severity code and three spaces; a decision does not say the
 # recommendation before the default; the record is not written or does not open on the page.
-FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
+FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 # The gate admits the run at 6 to 8 while the unrun criterion is the close's; owed now, it is the one refusal, the
 # card's own decision.
 fc_plan "$FC_GOOD"
@@ -118,7 +118,7 @@ section "§TRIGGERS: a finding is a decision only on a criterion miss or a recom
 # ============================================================
 # fails-when: the carried S3 is a decision; the criterion miss is not; a finding naming the missed criterion is not
 # shown awaiting that decision; a recommendation against the default does not make the finding a decision.
-FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
+FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 fc_plan "$FC_GOOD" "" fc_owed_now
 fc_page
 expect_contains "TRIG-1 the criterion miss is a decision" "1. AC-1.2, not run on this release" "$(fc_under Decisions)"
@@ -166,7 +166,7 @@ section "§NO-WAIVER: no surface offers waiving the regression (AC-7.3; D16)"
 # ============================================================
 # fails-when: a regression waiver is a decision, a default, a table line or a phrase of the page; a head with no
 # green whole run renders.
-FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
+FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 fc_plan "$FC_GOOD" "" fc_owed_now
 fc_owe waive:regression
 fc_page
@@ -192,7 +192,7 @@ expect_absent "NW-4b …offering no waiver" "waive regression" "$FC_OUT$FC_ERR"
 # ============================================================
 section "§EARLY: the page refuses CARD-EARLY on each of the three facts, and the tick says the same line (AC-1.2; D20)"
 # ============================================================
-FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
+FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 # fails-when: the page renders while a reader row is open, an owed reading is unregistered at the head, or the
 # advance to 6, 7 or 8 checks red; the refusal names another reason; a writer row or an acked reader trips it.
 fc_plan "$FC_GOOD"
@@ -217,8 +217,8 @@ fc_page
 expect_eq "EARLY-3 the whole structure reading unregistered at the head: exit 1" "1" "$FC_RC"
 expect_eq "EARLY-3b …CARD-EARLY naming the question and the head" "CARD-EARLY — structure unregistered at $FC_H8" "$FC_ERR"
 expect_eq "EARLY-3c …nothing rendered, no page written" "|" "$FC_OUT|$(fc_pages)"
-# No Step-7 document: the old State's n/a line gone before the act, so the header the act writes names none.
-FC_NODOC='/n\/a: no decision/d'
+# No Step-7 document: the header names none.
+FC_NODOC='/^adrs: /d'
 fc_plan "$FC_GOOD" "$FC_NODOC"
 poke "$RFC" current 7 --check
 expect_eq "EARLY-4 precondition: the header names no Step-7 document, so current 7 --check refuses on it" \
@@ -266,11 +266,10 @@ rm -f "$RFC/.bionic/config.yaml"
 # verdict and the advance to 8 refuses the first as unruled; the page offers all three as decisions. A proof that names
 # no verdict takes the evidence review standing at the head, which here passed, so an empty cell is confirmed at 15.
 fc_unconfirmed() {  # <page> -> three criteria discharged under the auditor's UNVERIFIABLE, the pending one discharged and confirmed
-  awk '/^\| AC-1\.1 \|/ { for (i = 1; i <= 4; i++) if (i != 2) print "| AC-1." i " | T1 | discharged | — | UNVERIFIABLE |"; next }
-    /^\| AC-1\.2 \|/ { print "| AC-1.2 | T1 | discharged | — | CONFIRMED |"; next }
-    { print }
-    END { for (i = 3; i <= 4; i++) printf "AC-1.%d:\n  fails-when: planted defect %d\n  evidence: record/generic-evidence.md\n  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n", i, i }' \
+  awk '{ print } /^\| — \| AC-1\.2 \|/ { for (i = 3; i <= 4; i++) printf "| — | AC-1.%d | T1 | — | planted defect %d | — |\n", i, i }' \
     "$1" > "$1.new" && mv "$1.new" "$1"
+  sed 's/|auditor=CONFIRMED|/|auditor=UNVERIFIABLE|/' "$FC_EV" > "$FC_EV.new" && mv "$FC_EV.new" "$FC_EV"
+  printf 'run/v1|ev=proof|ac=AC-1.%s|evidence=record/generic-evidence.md|auditor=%s|at=\n' 3 UNVERIFIABLE 4 UNVERIFIABLE 2 CONFIRMED >> "$FC_EV"
 }
 fc_plan "$FC_GOOD" "" fc_unconfirmed
 FC_CK=""; for fc_n in 6 8; do poke "$RFC" current "$fc_n" --check; FC_CK="$FC_CK$RC"; done
@@ -290,9 +289,12 @@ expect_eq "EARLY-8g …and current 6, 7 and 8 --check are then green" "000" "$FC
 # THE STEP-8 APPROVAL REFUSAL IS THE PAGE'S OWN: in the release order the advance to 8 refuses first on the missing
 # `approved: release` line, which is decision 7 of the page, so a run whose every other fact holds renders and puts both
 # approvals. (The order is a test row at Step 5 and the release's doc row; the fixture's matrix is fully confirmed.)
-fc_plan "$FC_GOOD" 's/^\(| AC-1\.2 | T1 \)| pending | see AC-1\.2 |/\1| discharged | — |/
-/^| T1 | 4 | build/a\
-| T4 | 5 | test | the regression | implementor | — | 30 | REQ-1 | — | — | — | landed | approval:plan |'
+fc_ord() {  # <page> -> a test row T4 at Step 5, landed by hand after T1, and the pending criterion discharged and confirmed
+  awk '{ print } /^\| T1 \| 4 \| build/ { print "| T4 | 5 | test | the regression | — | 30 | REQ-1 | — | — |" }' "$1" > "$1.new" && mv "$1.new" "$1"
+  printf 'run/v1|ev=%s|at=\n' 'dispatch|row=T4|name=implementor' 'published|row=T4' \
+    'proof|ac=AC-1.2|evidence=record/generic-evidence.md|auditor=CONFIRMED' >> "$FC_EV"
+}
+fc_plan "$FC_GOOD" "" fc_ord
 poke "$RFC" current 8 --check
 FC_CK=""; for fc_n in 6 7; do poke "$RFC" current "$fc_n" --check; FC_CK="$FC_CK$RC"; done
 poke "$RFC" current 8 --check
@@ -307,11 +309,11 @@ expect_eq "EARLY-9c …putting the release approval and the merge approval" "app
 # ============================================================
 section "§PREVIEW: --preview renders an early run's page and records nothing"
 # ============================================================
-FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
+FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 # fails-when: the preview refuses, records a page or opens an approval item, or does not say why the run is early.
 fc_plan "$FC_GOOD" '/structure-whole/d'
-expect_eq "PREV-0 precondition: the page stands at 15 with no State, the act having written the run's log" "15|0|yes" \
-  "$(sed -n 's/^canonical_sdlc_version: //p' "$PFC")|$(/usr/bin/grep -c '^## SDLC State' "$PFC")|$([ -s "$FC_REC/run.log" ] && [ -d "$FC_REC/kept" ] && echo yes)"
+expect_eq "PREV-0 precondition: the page stands at 15 with no State, and the run's log is written" "15|0|yes" \
+  "$(sed -n 's/^canonical_sdlc_version: //p' "$PFC")|$(/usr/bin/grep -c '^## SDLC State' "$PFC")|$([ -s "$FC_REC/run.log" ] && echo yes)"
 fc_page --preview
 expect_eq "PREV-1 the early run previews (exit 0, nothing on stderr)" "0|" "$FC_RC|$FC_ERR"
 expect_eq "PREV-3 …every section printed" "Bottom line|Goals|Tests|Reviews|Findings|Decisions" "$(fc_heads)"
@@ -347,7 +349,7 @@ new_roster "$RFC"
 # ============================================================
 section "§AGREE: the decisions are the owed items, the unproved rows and the findings recommended against (D7, D19)"
 # ============================================================
-FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
+FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 # fails-when: the page offers an item the record does not owe, or leaves one out. The unrun row is owed now
 # (fc_owed_now), so the unproved rows are a source the card draws from.
 fc_plan "$FC_GOOD" "" fc_owed_now
@@ -386,7 +388,7 @@ expect_eq "AGREE-4 a finding recommended against joins the set" "same" "$(fc_agr
 # ============================================================
 section "§REGISTER: the card's waivers are the run's asks, whichever session of the run raised them (AC-6.6)"
 # ============================================================
-FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
+FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 # fails-when: a waiver another session of the run raised has no decision on the card. A question failing at the head
 # is settled by the card's own check whichever session holds its ask, so here the question passes at the head and only
 # the run's register owes its waiver, as when a close-out preflight raised it on a failing reading at an earlier head.
@@ -419,7 +421,7 @@ section "§REPLY: all default and all recommended replay into their verbs with t
 # ============================================================
 # fails-when: a default or a recommendation is replayed into another verb or with other words; a reply that is not
 # one of the two, words the user never typed, a stale page or no page at all writes a byte of the plan.
-FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
+FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 fc_plan "$FC_GOOD" "" fc_owed_now
 fc_page
 expect_contains "REPLY-0 precondition: the render opened the person's approval items" "approve:release" "$(fc_owed)"
@@ -510,11 +512,11 @@ section "§T4: a T4 row is read through the gate's one predicate: confirmed by y
 # ============================================================
 # fails-when: an attributed T4 row under an empty-like auditor cell is put as a decision or counted not confirmed by
 # the auditor; a pending one is missing from Decisions; an attributed one under UNVERIFIABLE is counted proved.
-fc_t4_rows() {  # <page> -> a third criterion, of tier T4, discharged under FC_T4_C, its block confirmed by FC_T4_V
-  FC_T4_ROW="| AC-1.3 | T4 | discharged | — | $FC_T4_C |" awk '
-    { print } /^\| AC-1\.2 \|/ { print ENVIRON["FC_T4_ROW"] }' "$1" > "$1.t4" && mv -f "$1.t4" "$1"
-  printf 'AC-1.3:\n  fails-when: the user finds the planted defect by hand\n  evidence: record/generic-evidence.md\n' >> "$1"
-  printf '  user-confirmed: %s\n  readback: what the user saw\n' "$FC_T4_V" >> "$1"
+fc_t4_rows() {  # <page> -> a third criterion, of tier T4, its proof under the auditor's FC_T4_C and confirmed by FC_T4_V
+  awk '{ print } /^\| — \| AC-1\.2 \|/ { print "| — | AC-1.3 | T4 | — | the user finds the planted defect by hand | — |" }' "$1" > "$1.t4" && mv -f "$1.t4" "$1"
+  case "$FC_T4_C" in [A-Z]*) FC_T4_A="|auditor=$FC_T4_C" ;; *) FC_T4_A="" ;; esac
+  printf 'run/v1|ev=proof|ac=AC-1.3|evidence=record/generic-evidence.md%s|confirmed=%s|at=\n' "$FC_T4_A" "$FC_T4_V" >> "$FC_EV"
+  [ "$FC_T4_V" = pending ] || printf 'run/v1|ev=approval|key=AC-1.3|by=Dana-Fixture|said=checked it by hand|at=2026-10-20\n' >> "$FC_EV"
 }
 fc_t4_now() { fc_owed_now "$1"; fc_t4_rows "$1"; }  # <page> -> the same, the unrun criterion owed now beside it
 fc_t4() {  # <auditor cell> <user-confirmed value> [<edit>] -> PFC: FC_GOOD with a third row, discharged and T4, the unrun row owed now
@@ -531,7 +533,7 @@ expect_absent "T4-1c …never not confirmed by the auditor" "not confirmed by th
 expect_contains "T4-1d the Decisions still put the unrun row" "AC-1.2" "$(fc_under Decisions)"
 expect_absent "T4-1e …and not the confirmed one" "AC-1.3" "$(fc_under Decisions)"
 FC_ACC_DASH="$(fc_acc)"
-expect_eq "T4-1h …the confirmation the block held is the approval naming the criterion, as the act carried it" \
+expect_eq "T4-1h …the confirmation is the approval naming the criterion, as the log holds it" \
   "run/v1|ev=approval|key=AC-1.3|by=Dana-Fixture|said=checked it by hand|at=2026-10-20" "$(fc_appr AC-1.3)"
 fc_t4 '—' "$FC_UC" fc_t4_rows
 poke "$RFC" current 8 --check
@@ -627,7 +629,7 @@ fc_typed "$FC_WD" "$FC_WR"
 section "§LEGACY: a page written under the card's old name is still replied to; the alias writes the new page"
 # ============================================================
 # fails-when: a record written before the rename can no longer be answered, or the alias writes a page under the old stem.
-FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
+FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 fc_plan "$FC_GOOD" "" fc_owed_now
 ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" "${RN_W}-results" "$PFC" ) > "$TMPROOT/fc.out" 2> "$TMPROOT/fc.err"; LG_RC=$?
 expect_eq "LEGACY-1 the old verb renders the card (exit 0), says the new name once, and writes the new stem's page" \
@@ -649,24 +651,23 @@ rm -f "$FC_REC/${RN_W}-results"-*.md
 # ============================================================
 section "§BORN: two fix rows born of different questions' findings render the page with no re-read (AC-11.1)"
 # ============================================================
-FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
+FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 # fails-when: the page prints `CARD-EARLY — <q> unregistered` after born rows alone; the fixed findings are not
 # shown fixed by their rows.
 fc_record structure structure piece 'finding: 1 S3 off lib/x.sh:1 the x writer repeats the y writer'
 FC_F1="$(s57_commit "$RFC" lib/x.sh 'T4: the fix the adversarial reading asked for')"
 FC_F2="$(s57_commit "$RFC" lib/x.sh 'T5: the fix the structure reading asked for')"
 # fc_published: hoisted to tests/release-approval.prelude.sh (release-approval-2.test.sh calls it)
-{ fc_published T4 "$FC_F1"; fc_published T5 "$FC_F2"; } > "$FC_REC/landing-proofs.log"
-fc_born_rows() {  # <page> -> the page with T4's and T5's Tasks rows, landed, after T2's
-  awk '{ print } /^\| T2 \|/ {
-    print "| T4 | 4 | build | fix the x message · born: review | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |"
-    print "| T5 | 4 | build | fix the x writer · born: review | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |" }' \
-    "$1" > "$1.new" && mv "$1.new" "$1"
+{ fc_published T4 "$FC_F1"; fc_published T5 "$FC_F2"; } > "$FC_SEED"
+fc_born_rows() {  # <page> -> the page with T4's and T5's Tasks rows after T2's, each dispatched
+  awk '{ print } /^\| T2 \|/ { print "| T4 | 4 | build | fix the x message · born: review | — | 30 | REQ-1 | lib/x.sh | — |"
+    print "| T5 | 4 | build | fix the x writer · born: review | — | 30 | REQ-1 | lib/x.sh | — |" }' "$1" > "$1.new" && mv "$1.new" "$1"
+  printf 'run/v1|ev=dispatch|row=%s|name=implementor|at=\n' T4 T5 >> "$FC_EV"
 }
-fc_born_plan() {  # -> PFC: FC_GOOD with T4 and T5 landed, born of the adversarial and the structure finding, in task-add's line
+fc_born_plan() {  # -> PFC: FC_GOOD with T4 and T5 landed, born of the adversarial and the structure finding, as task-add records it
   fc_plan "$FC_GOOD
-- T4: landed $FC_F1 2026-10-12T14:00:00Z — added by task-add at 2026-10-12T12:45:00Z born: review S3 off of=record/wave-x/adversarial.md#1
-- T5: landed $FC_F2 2026-10-12T14:00:00Z — added by task-add at 2026-10-12T12:50:00Z born: review S3 off of=record/wave-x/structure.md#1" "" fc_born_rows
+run/v1|ev=born|row=T4|reason=review S3 off|finding=record/wave-x/adversarial.md#1|at=2026-10-12T12:45:00Z
+run/v1|ev=born|row=T5|reason=review S3 off|finding=record/wave-x/structure.md#1|at=2026-10-12T12:50:00Z" "" fc_born_rows
 }
 fc_born_plan
 expect_eq "BORN-0 precondition: the working head is T5's landing, two code commits past every reading" \
@@ -687,7 +688,7 @@ expect_regex "BORN-3 the control: one code commit past the fixes that no row was
   "^CARD-EARLY — (evidence|adversarial|structure) unregistered at ${FC_F3:0:8}\$" "$FC_ERR"
 expect_eq "BORN-3b …exit 1, nothing rendered, no page written" "1||" "$FC_RC|$FC_OUT|$(fc_pages)"
 git -C "$RFC" reset -q --hard "$FC_R"
-rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/release-approval-*.md
+rm -f "$FC_SEED" "$FC_REC"/release-approval-*.md
 fc_record structure structure piece
 
 # The merge without a whole run at the head is tests/release-approval-2.test.sh; the words as its sections leave them:
@@ -698,13 +699,12 @@ section "§POST: a reader row past the landed release keeps the card early until
 # ============================================================
 # fails-when: the card renders while a reader row placed after the landed release has no registered reading; it stays
 # early, or puts a waiver, once the piece readings are registered at the fix's landing.
-# The rows are written before the act, the readers with no agent cell, which the act would carry as a launch: a reader
-# not yet launched reads pending to the reader and the fill alike. An active reader is one the dispatch writer launched,
-# its event appended to the run's log after the act.
-FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
+# The readers' rows carry no dispatch: a reader not yet launched reads pending to the reader and the fill alike. An
+# active reader is one the dispatch writer launched, its event appended to the run's log after the builder.
+FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 FC_F7="$(s57_commit "$RFC" lib/x.sh 'T4: the fix after the release')"
 FC_P8="${FC_F7:0:8}"
-fc_published T4 "$FC_F7" > "$FC_REC/landing-proofs.log"
+fc_published T4 "$FC_F7" > "$FC_SEED"
 for fc_q in evidence adversarial structure; do
   printf 'question: %s\nresult: pass\nscope: piece\nreviewed: %s..%s\nfindings: 0\n\nwhat the reader found in the fix\n' \
     "$fc_q" "${FC_R:0:10}" "${FC_F7:0:10}" > "$FC_REC/post-$fc_q.md"
@@ -712,18 +712,15 @@ done
 fc_post_read() {  # <question> -> the piece reading of the fix at its landing, as proof-add registers it
   fc_line review "$FC_F7" 2026-10-12T15:00:00Z "record/wave-x/post-$1.md" "$1" w-post pass piece
 }
-FC_PR='approval:plan, head, .bionic/docs/record/wave-x/T4.md'
 fc_post_rows() {  # <page> -> the fix row T4 landed past the release, readers T5 and T6 after it, not launched; the pending criterion owed now
   fc_owed_now "$1"
-  awk -v r="$FC_PR" '{ print } /^\| T2 \|/ {
-    print "| T4 | 7 | build | the fix after the release | implementor | — | 30 | REQ-1 | lib/x.sh, .bionic/docs/record/wave-x/T4.md | — | — | landed | approval:plan |"
-    print "| T5 | 7 | review | the critic reads the fix as a piece | — | — | 20 | REQ-1 | .bionic/docs/record/wave-x/post-adversarial.md, .bionic/docs/record/wave-x/post-structure.md | — | — | pending | " r " |"
-    print "| T6 | 7 | review | the auditor reads the fix as a piece | — | — | 20 | REQ-1 | .bionic/docs/record/wave-x/post-evidence.md | — | — | pending | " r " |" }' \
-    "$1" > "$1.new" && mv "$1.new" "$1"
+  awk '{ print } /^\| T2 \|/ { print "| T4 | 7 | build | the fix after the release | — | 30 | REQ-1 | lib/x.sh, .bionic/docs/record/wave-x/T4.md | — |"
+    print "| T5 | 7 | review | the critic reads the fix as a piece | T4 | 20 | REQ-1 | .bionic/docs/record/wave-x/post-adversarial.md, .bionic/docs/record/wave-x/post-structure.md | — |"
+    print "| T6 | 7 | review | the auditor reads the fix as a piece | T4 | 20 | REQ-1 | .bionic/docs/record/wave-x/post-evidence.md | — |" }' "$1" > "$1.new" && mv "$1.new" "$1"
+  printf 'run/v1|ev=dispatch|row=T4|name=implementor|at=\n' >> "$FC_EV"
 }
 fc_post_plan() {  # <readers' state: pending, or active> [<proof lines>] -> PFC: FC_GOOD, the fix row T4 landed past the release, readers T5 and T6
-  fc_plan "$FC_GOOD
-- T4: landed $FC_F7 2026-10-12T14:00:00Z${2:+
+  fc_plan "$FC_GOOD${2:+
 $2}" "" fc_post_rows
   [ "$1" = active ] || return 0
   bash -c '. "$1/log.sh" && for r in T5 T6; do RUN_LOG="$2" log_append dispatch "row=$r" "name=w-$r" || exit 1; done' _ "$FC_LIB" "$FC_REC/run.log" \
@@ -758,7 +755,7 @@ expect_eq "POST-2b release-approval renders at the fix's landing (exit 0, nothin
 expect_eq "POST-2c …its decisions are the unrun row, the two approvals and the merge with no pass at the fix, no waiver of any question" "row:AC-1.2 approve:release approve:merge approve:merge-unproved" \
   "$(/usr/bin/grep '^release-approval/v1|dec=' "$FC_REC/release-approval-$FC_P8.md" | awk -F'|' '{ for (i = 2; i <= NF; i++) if (index($i, "key=") == 1) printf "%s%s", (n++ ? " " : ""), substr($i, 5) }')"
 git -C "$RFC" reset -q --hard "$FC_R"
-rm -f "$FC_REC/landing-proofs.log" "$FC_REC"/release-approval-*.md "$FC_REC"/post-*.md
+rm -f "$FC_SEED" "$FC_REC"/release-approval-*.md "$FC_REC"/post-*.md
 
 # ============================================================
 section "§HANDHOLDS: the card prints the hand-holds line from the last build landing to the card; the report runs on past it"
@@ -769,12 +766,11 @@ section "§HANDHOLDS: the card prints the hand-holds line from the last build la
 # an act after the card is counted by the report. fails-when: the page prints the run's total, a hand-hold before the
 # last build landing counted; or the report stops at the card.
 # The fixture's landing record holds the build row's queue landing at 10:00; its fill ledger a decline before it and one after.
-# Both are written before the builder runs, so the act carries them into the run's log.
-FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
-printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-12T10:00:00Z\n' "$FC_C" > "$FC_REC/landing-proofs.log"
-{ printf 'fill-ledger/v1|at=2026-10-12T09:00:00Z|session=fixture|turn=|current=4|state=decline|ceiling=6|width=|open=|free=|ready=T1|launched=|declined=no room|missed=0|idle=|room=|named=T1\n'
-  printf 'fill-ledger/v1|at=2026-10-12T11:00:00Z|session=fixture|turn=|current=4|state=decline|ceiling=6|width=|open=|free=|ready=T2|launched=|declined=no room|missed=0|idle=|room=|named=T2\n'
-} > "$FC_REC/fill-ledger.log"
+# Each is the run's own event, a queue landing and two stops, which the builder writes into the run's log.
+FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
+printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-12T10:00:00Z\n' "$FC_C" > "$FC_SEED"
+printf 'run/v1|ev=stop|session=fixture|turn=|current=4|state=decline|ceiling=6|width=|open=|free=|ready=%s|launched=|declined=no room|missed=0|idle=|room=|named=%s|at=2026-10-12T%s:00:00Z\n' \
+  T1 T1 09 T2 T2 11 >> "$FC_SEED"
 fc_plan "$FC_GOOD" "" fc_owed_now
 hh_lr() {  # [flags…] -> the counts line of landing-report --hand-holds over the fixture plan, as this session
   ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" landing-report --hand-holds "$@" "$PFC" ) 2>/dev/null | /usr/bin/grep '^hand-holds: '
@@ -808,12 +804,12 @@ expect_eq "HANDHOLDS-3 the report read after the reply counts the page's decline
 expect_eq "HANDHOLDS-3b …and the report's ends line runs to now, printing the start alone and no page time" \
   "1|0" "$( ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" landing-report --hand-holds "$PFC" ) 2>/dev/null | /usr/bin/grep '^hand-holds window: ' | awk -v at="$HH_AT" '{ print (index($0, "until now: the plan names no delivered: time") > 0) "|" (index($0, at) > 0) }')"
 expect_eq "HANDHOLDS-3c …the page's line stays one entry: it opens once" "1" "$(printf '%s\n' "$FC_OUT" | /usr/bin/grep -c '^hand-holds: ')"
-rm -f "$FC_REC/landing-proofs.log" "$FC_REC/fill-ledger.log" "$FC_REC"/release-approval-*.md
+rm -f "$FC_SEED" "$FC_REC"/release-approval-*.md
 
 # ============================================================
 section "§RATIO: the card prints the release check's test-ratio line once, among the facts it states about the head"
 # ============================================================
-FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
+FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 # The line is the check's own, read from the log of the plan's newest release-check proof, so the page and the check
 # cannot differ. fails-when: the page lacks the line, prints it twice, differs from the check's output at the same
 # head, moves when the log does not, or prints a number when no check has run.
@@ -896,7 +892,7 @@ expect_eq "STEP0-7 every line of the card is within the shared 100 columns" "0" 
 # ============================================================
 section "§CARRY: a carry the run chose is the run's ask until the release approval card's reply rules it"
 # ============================================================
-FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
+FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 # A reading's S3 on finding is deferred by the severity table and moved by no person: the run carries it. The acting
 # render's disposition opens `carry:<record>#<n>`, the page records the carries it puts, and the reply that answers the
 # page closes each. fails-when: the reply leaves the carry open on the run's register.
@@ -971,14 +967,10 @@ section "§STALE: a release approval the head has moved past is put again on the
 # stale merge approval is left off the card; the reply replaces a first line or writes no second one; current 8
 # --check stays red after it; a second approval at the same head is admitted; a plan with nothing landed since its
 # approval is offered a renewal.
-FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
-FC_ORD='s/^\(| AC-1\.2 | T1 \)| pending | see AC-1\.2 |/\1| discharged | — |/
-/^| T1 | 4 | build/a\
-| T4 | 5 | test | the regression | implementor | — | 30 | REQ-1 | — | — | — | landed | approval:plan |'
-FC_APP="approved: release by Dana Fixture 2026-10-12T14:00:00Z head=$FC_R \"ship it\"
-approved: merge by Dana Fixture 2026-10-12T14:00:00Z head=$FC_R \"merge it\""
+FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
+FC_APP="$(printf 'run/v1|ev=approval|key=%s|by=Dana Fixture|head=%s|said=%s|at=2026-10-12T14:00:00Z\n' release "$FC_R" 'ship it' merge "$FC_R" 'merge it')"
 fc_plan "$FC_GOOD
-$FC_APP" "$FC_ORD"
+$FC_APP" "" fc_ord
 poke "$RFC" current 8 --check
 expect_eq "STALE-0 control: approved at the working head, current 8 --check is green" "0" "$RC"
 [ "$RC" = 0 ] || printf '      the verb said: %s\n' "$OUT"
@@ -987,14 +979,14 @@ expect_eq "STALE-0b …and the page renders with nothing for the user to decide,
   "0||None wait on you." "$FC_RC|$FC_ERR|$(fc_under Decisions)"
 FC_X="$(s57_commit "$RFC" lib/x.sh 'T5: the fix')"
 FC_X8="${FC_X:0:8}"
-printf 'landed: row=T5 branch=wt/fix head=%s merge=%s at=2026-10-12T15:00:00Z\n' "$FC_X" "$FC_X" > "$FC_REC/landing-proofs.log"
+fc_ord_t5() {  # <page> -> fc_ord's rows, and the build row T5 before T2, its landing the line's
+  fc_ord "$1"; printf 'run/v1|ev=dispatch|row=T5|name=implementor|at=\n' >> "$FC_EV"
+  awk '/^\| T2 \| 7 \| doc/ { print "| T5 | 4 | build | the fix | — | 30 | REQ-1 | lib/x.sh | — |" } { print }' "$1" > "$1.new" && mv "$1.new" "$1"
+}
+printf 'run/v1|ev=published|row=T5|branch=wt/fix|head=%s|commit=%s|at=2026-10-12T15:00:00Z\n' "$FC_X" "$FC_X" > "$FC_SEED"
 fc_plan "$(fc_floor "$FC_X")
 $(fc_reads "$FC_X")
-$FC_APP" "$FC_ORD
-/^- T2: landed/a\\
-- T5: landed $FC_X 2026-10-12T15:00:00Z
-/^| T2 | 7 | doc/i\\
-| T5 | 4 | build | the fix | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |"
+$FC_APP" "" fc_ord_t5
 FC_CK=""; for fc_n in 6 7; do poke "$RFC" current "$fc_n" --check; FC_CK="$FC_CK$RC"; done
 poke "$RFC" current 8 --check
 expect_eq "STALE-1 precondition: a fix landed past the approval; current 6 and 7 --check are green, current 8 --check refuses" \
@@ -1029,7 +1021,7 @@ poke "$RFC" approve release 'ship it again'
 expect_eq "STALE-5 a third approval at the head the newest line names: refused, the plan byte-identical" "1|same" \
   "$RC|$(cmp -s "$TMPROOT/fc-before-again" "$PFC" && echo same || echo changed)"
 expect_contains "STALE-5b …an approval is recorded once at a head" "recorded once" "$OUT"
-rm -f "$FC_REC/landing-proofs.log"
+rm -f "$FC_SEED"
 git -C "$RFC" reset -q --hard "$FC_R"
 
 # ============================================================
@@ -1039,7 +1031,7 @@ section "§STALE-NAME: an approval of any name the head has moved past is given 
 # name, and the second line stands beside the first. At the head the newest line names it is refused, as release is.
 # fails-when: a second `approve step4` at a new head is refused as already recorded, or replaces the first line; a
 # second at the head the newest line names is admitted.
-FC_SN_ORD='s/| pending | approval:release, approval:merge, head |/| pending | approval:release, approval:merge, approval:step4, head |/'
+FC_SN_ORD='s/^\(| T3 | 8 | integrate | merge into main | approval:merge\) |/\1, approval:step4 |/'
 fc_plan "$FC_GOOD" "$FC_SN_ORD"
 fc_sn_heads() { fc_appr step4 | sed -n 's/.*head=\([0-9a-f]*\).*/\1/p' | paste -sd'|' -; }
 said_as typed "$RFC" 'go ahead' 'go ahead again'; poke "$RFC" approve step4 'go ahead'
@@ -1068,18 +1060,17 @@ section "§OWED-LATER: a row owed at a later step is neither proved nor a decisi
 # close row (step 9) and a third criterion pending under it, as a planner writes them.
 # fails-when: the row owed by the close is put under Decisions or opened as row:<AC>, or the line does not name it, or a
 # row whose task is a Step-4 row is let off the card. The fixture's pending criterion is owed now (fc_owed_now), the unrun row beside it.
-FC_VERSION=15   # the run carried to 15 by the act (release-approval.prelude.sh)
-fc_ol_rows() {  # <page> -> the close row T4 (step 9), and a third criterion, pending, whose task: is FC_OL_TASK
+FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
+fc_ol_rows() {  # <page> -> the close row T4 (step 9), and a third criterion, pending, whose task is FC_OL_TASK
   fc_owed_now "$1"
   awk '
     { print }
-    /^\| T3 \| 8 \| integrate/ { print "| T4 | 9 | close | close-out, continuation.md | orchestrator | — | 10 | REQ-1 | .bionic/docs/record/wave-x/continuation.md | — | — | pending | merge |" }
-    /^\| AC-1\.2 \|/ { print "| AC-1.3 | T3 | pending | — |  |" }
-    END { print "AC-1.3:"; print "  fails-when: the close reads above zero"
-          print "  eval: T3 — `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close → `total=0`"
-          print "  task: " ENVIRON["FC_OL_TASK"]; print "  evidence: pending" }' "$1" > "$1.ol" && mv -f "$1.ol" "$1"
+    /^\| T3 \| 8 \| integrate/ { print "| T4 | 9 | close | close-out, continuation.md | — | 10 | REQ-1 | .bionic/docs/record/wave-x/continuation.md | — |" }
+    /^\| — \| AC-1\.2 \|/ { print "| — | AC-1.3 | T3 | T3 — `bash payload/hooks/session-poker.sh landing-report --hand-holds` at the close → `total=0` | the close reads above zero | " ENVIRON["FC_OL_TASK"] " |" }' \
+    "$1" > "$1.ol" && mv -f "$1.ol" "$1"
+  printf 'run/v1|ev=dispatch|row=T4|name=orchestrator|at=\n' >> "$FC_EV"
 }
-fc_owed_later() {  # <task value> -> PFC: FC_GOOD with T4 (step 9, close) and a third row (T3, pending) whose task: is <task value>
+fc_owed_later() {  # <task value> -> PFC: FC_GOOD with T4 (step 9, close) and a third row (T3, pending) whose task is <task value>
   FC_OL_TASK="$1"; export FC_OL_TASK
   fc_plan "$FC_GOOD" "" fc_ol_rows
 }

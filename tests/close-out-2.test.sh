@@ -90,13 +90,15 @@ expect_eq "78.3b: run closes rc 0, the plan reads closed, and the epic plan is w
 expect_eq "78.3e: …the output holds the row, and the header of the table to add it to" "yes/yes" \
   "$(row_whole "$T78C")/$(contains "$CO_OUT" "| wave | version | plan | spec / requirements | ADRs | shipped |")"
 
-# §78.4 — a wave closes under an epic already at 15, which the act brought forward and no rewrite of its header did.
+# §78.4 — a wave closes under an epic at 15: its page holds no state section, and its log the step it stands at.
 T78D="$(mk_fixture t78d)"; advance_to "$T78D" 8
-bash "$REPO_ROOT/payload/scripts/bring-forward.sh" "$T78D/$EPIC_REL" >/dev/null 2>&1; ACT_RC=$?
+awk '$0 == "canonical_sdlc_version: 14" { $0 = "canonical_sdlc_version: 15" } /^## / { s = ($0 == "## SDLC State") } !s' \
+  "$T78D/$EPIC_REL" > "$T78D/epic.15" && mv "$T78D/epic.15" "$T78D/$EPIC_REL"
+mkdir -p "$T78D/.bionic/docs/record/epic-fx"; printf 'run/v1|ev=step|n=4|at=2026-10-04T00:04:00Z\n' > "$T78D/.bionic/docs/record/epic-fx/run.log"
 EPIC_SUM78D="$(sha_of "$T78D/$EPIC_REL")"
 run_close "$T78D" run
-expect_eq "78.4a: the act carries the epic (rc 0); the close under it exits 0, prints the wave's row once, leaves the epic plan as it was, and the epic's page reads 15" "0|0|1|$EPIC_SUM78D|15" \
-  "$ACT_RC|$CO_RC|$(printed_row | wc -l | tr -d ' ')|$(sha_of "$T78D/$EPIC_REL")|$(sed -n 's/^canonical_sdlc_version: //p' "$T78D/$EPIC_REL")"
+expect_eq "78.4a: the close under an epic at 15 exits 0, prints the wave's row once, leaves the epic plan as it was, and the epic's page reads 15" "0|1|$EPIC_SUM78D|15" \
+  "$CO_RC|$(printed_row | wc -l | tr -d ' ')|$(sha_of "$T78D/$EPIC_REL")|$(sed -n 's/^canonical_sdlc_version: //p' "$T78D/$EPIC_REL")"
 EPIC_STEP="$(bash "$REPO_ROOT/payload/scripts/reader.sh" "$T78D/$EPIC_REL" step 2>&1)"
 expect_eq "78.4b: …and the reader reads the epic open at the step it held" "yes|yes" "$(contains "$EPIC_STEP" "n=4")|$(contains "$EPIC_STEP" "state=open")"
 
