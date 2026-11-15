@@ -212,8 +212,7 @@ expect_regex "the extractor reads the planted file's sites by line" "^[0-9]+ ref
 expect_eq "the refusal count rises by ten" "$(( $(count "$BEFORE" hook_refusals) + 10 ))" "$(count "$AFTER" hook_refusals)"
 expect_eq "the write hook's file and the permission hook's list no refusal" "0 0" "$(own canonical-sdlc-governing-skill | grep -c .) $(own permission-answer | grep -c .)"
 expect_eq "the dispatch wall's file lists no refusal" "0" "$(own dispatch-preflight | grep -c .)"
-expect_eq "the Bash wall lists only the two functions the next row deletes: three sites, none outside" "3 0" \
-  "$(own bash-walls | grep -c .) $(own bash-walls | awk '{ print $1 }' | grep -vxFf <(awk '/^wall_ruling_(unread|ack)\(\)/ { on = 1 } on { print NR } /^}/ { on = 0 }' "$S/hooks/bash-walls.sh") | grep -c .)"
+expect_eq "the Bash wall's file lists no refusal" "0" "$(own bash-walls | grep -c .)"
 # Each fact the dispatch library says, its facts given as @, cut at them into pieces of ten columns or more: a
 # piece found in the wall's code is a refusal's words left in the hook, whatever function holds them.
 DPIECES="$(bash -c '. "$1/refuse.sh" && . "$1/dispatch.sh" || exit 1

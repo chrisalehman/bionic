@@ -257,14 +257,12 @@ case "$COMMAND" in
     fi ;;
 esac
 
-# wall_ruling_unread — the writer's commit with a ruling unread is refused, carrying the ruling. A pure
-# predicate over the two facts gathered above (the freeze, .claude/rules/hook-authoring.md).
+# wall_ruling_unread — the writer's commit with a ruling unread is refused, carrying the ruling. The facts are gathered
+# above (the freeze, .claude/rules/hook-authoring.md); the words and the decision are lib/roster.sh
+# `ruling_unread_refusal`'s, defined only when the gathering loaded that library.
 wall_ruling_unread() {  # <event> -> 0 nothing · 2 block
-  [ -n "$BIONIC_RULINGS_UNREAD" ] || return 0
-  fold_block exit2 commit "an orchestrator ruling for you is unread" "read it below, commit again" \
-    "${BIONIC_RULINGS_WRITER:-this writer}, shown now:
-$BIONIC_RULINGS_UNREAD"
-  return 2
+  declare -F ruling_unread_refusal >/dev/null 2>&1 || return 0
+  ruling_unread_refusal "$BIONIC_RULINGS_WRITER" "$BIONIC_RULINGS_UNREAD"
 }
 
 # THE TWO FACTS OF AN ACKNOWLEDGEMENT, gathered for `wall_ruling_ack` (wave-34 T5; REQ-4 AC-4.3, D9 "1"). `ruling-ack
@@ -295,24 +293,11 @@ case "$COMMAND" in
 esac
 
 # wall_ruling_ack — an acknowledgement from anyone but the ruling's writer, or not alone in its call, is refused naming
-# the writer it needs, and the ruling stays unread. A pure predicate over the facts gathered above (the freeze).
+# the writer it needs, and the ruling stays unread. The facts are gathered above (the freeze); the words and the
+# decision are lib/roster.sh `ruling_ack_refusal`'s, defined only when the gathering loaded that library.
 wall_ruling_ack() {  # <event> -> 0 nothing · 2 block
-  local _who="the main thread"
-  [ -n "$BIONIC_ACK_WRITER" ] || return 0
-  if [ "$BIONIC_ACK_CALLER" = "$BIONIC_ACK_WRITER" ]; then
-    [ "$BIONIC_ACK_ALONE" = 1 ] && return 0
-    fold_block exit2 ruling-ack "an acknowledgement goes alone in its call" "run the ack by itself" \
-      "ruling $BIONIC_ACK_ID is yours, $BIONIC_ACK_WRITER, and the wall reads one acknowledgement per call. Run it alone:
-    bash <plugin>/hooks/session-poker.sh ruling-ack $BIONIC_ACK_ID"
-    return 2
-  fi
-  [ -z "$BIONIC_ACK_AGENT" ] || _who="${BIONIC_ACK_CALLER:-an agent no roster row names}"
-  fold_block exit2 ruling-ack "this ruling is ${BIONIC_ACK_WRITER}'s to ack" "the addressed writer acks it" \
-    "ruling $BIONIC_ACK_ID is addressed to $BIONIC_ACK_WRITER, not to $_who. An acknowledgement is the writer's receipt
-that it read the ruling, so one from anyone else would mark it read while its writer never saw it. It stays unread:
-$BIONIC_ACK_WRITER's next tool result carries it, and its commit and ready wait on it until $BIONIC_ACK_WRITER runs
-    bash <plugin>/hooks/session-poker.sh ruling-ack $BIONIC_ACK_ID"
-  return 2
+  declare -F ruling_ack_refusal >/dev/null 2>&1 || return 0
+  ruling_ack_refusal "$BIONIC_ACK_ID" "$BIONIC_ACK_WRITER" "$BIONIC_ACK_CALLER" "$BIONIC_ACK_AGENT" "$BIONIC_ACK_ALONE"
 }
 
 bionic_fold "$EVENT" \

@@ -782,6 +782,7 @@ inbox.test.sh | §STATE | keep | hooks/session-poker.sh ruling-ack: the shown= l
 inbox.test.sh | §SCOPE | keep | hooks/ruling-push.sh: the named-writer match dropped, so every rostered writer's call carries the ruling; ("(c1) …the second live writer's call did not") goes red | none (searched 'ruling-push' in tests/)
 inbox.test.sh | §ACK | keep | hooks/session-poker.sh ruling-ack: the pending flag left up after the last unread ruling is acknowledged, so ("(k3) both acknowledged … the flag is down") goes red | none (searched 'ruling-pending' in tests/)
 inbox.test.sh | §GUARD | keep | rule: door refusal — payload/scripts/lib/line.sh:838 line_ready's ruling-unread refusal dropped, so a row with an unread ruling publishes instead of exit 2 reason=ruling-unread; (g6) goes red | none (searched 'ruling-unread' in tests/)
+inbox.test.sh | §WORDS | keep | payload/scripts/lib/roster.sh ruling_ack_refusal: the caller's name compared with the writer's dropped, so another writer's acknowledgement is admitted; ("(w6) one from another writer is refused, naming both") goes red | none (searched 'ruling_ack_refusal' and 'ruling_unread_refusal' in tests/)
 inbox.test.sh | §ROOT | keep | payload/scripts/lib/walls.sh: the commit wall's acknowledgement call built from its own library directory instead of the shared plugin-root helper, so ("(rt2) the commit wall's refusal names the same root") goes red | none (searched 'acknowledge with: bash' in tests/)
 
 ## interpreter-pin.test.sh
