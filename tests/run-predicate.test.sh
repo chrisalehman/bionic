@@ -18,8 +18,8 @@
 # `plan=` binding (R7), and the verdict a hook acts on (R8) — and R5's agreement rows hold
 # `active_run` to being exactly `active_plan` + `run_open`, so the extraction stays lossless.
 #
-# FIXTURES mirror the plan's own SDLC State block shape (wave.plan.md's frontmatter and
-# Step lines). The plan-search shape referenced for context is
+# FIXTURES: a run at 15 is a page and its log (`mk_run`); `mk_plan` writes an older page's SDLC State block, for the
+# rows on that block's grammar (wave.plan.md's frontmatter and Step lines). The plan-search shape referenced for context is
 # hooks/canonical-sdlc-evidence-gate.sh's resolve_docs_root/current-parsing — read for
 # shape only, not copied: this library's interface is the simpler, single-purpose one the
 # plan states (no fence-awareness, no misplacement sweep), not a restatement of the gate's
@@ -117,6 +117,16 @@ mk_plan() {
   mk_plan_in "$root" "plans" "$name" "$current" "$@"
 }
 
+# mk_run <root> <reldir under the docs root> <name> [<event>...] -> a page at 15 and its run's log, one `run/v1` line per
+# <event> (`step|n=4`) in order, each with its own instant; prints the page's path. The page holds none of them.
+mk_run() {
+  local d="$1/.bionic/docs/$2" n="$3" l="$1/.bionic/docs/record/${3%.plan.md}" e t=0
+  mkdir -p "$d" "$l" && printf -- '---\ncanonical_sdlc_version: 15\n---\n\n# fixture plan\n' > "$d/$n" || return 1
+  shift 3
+  for e in "$@"; do t=$((t + 1)); printf 'run/v1|ev=%s|at=2026-11-01T00:00:%02dZ\n' "$e" "$t"; done > "$l/run.log"
+  printf '%s\n' "$d/$n"
+}
+
 # ============================================================
 echo
 section "R4 — SIGPIPE-under-pipefail does not flip a >64 KB plan's verdict (AC-21)"
@@ -176,42 +186,43 @@ call_run_open() {  # <plan-path> -> sets RO_OUT, RO_ST
 R5="$SANDBOX/r5"; mkdir -p "$R5/.bionic"
 
 # --- the OPEN rows ---
-P=$(mk_plan "$R5" "open-4.plan.md" "4" "- Step 4: in progress")
+P=$(mk_run "$R5" plans open-4.plan.md "step|n=4")
 call_run_open "$P"
-expect_eq "run_open: current: 4 -> exit 0 (open)" 0 "$RO_ST"
-expect_empty "run_open: current: 4 -> prints nothing" "$RO_OUT"
+expect_eq "run_open: step 4 -> exit 0 (open)" 0 "$RO_ST"
+expect_empty "run_open: step 4 -> prints nothing" "$RO_OUT"
 
-P=$(mk_plan "$R5" "open-0.plan.md" "0")
+P=$(mk_run "$R5" plans open-0.plan.md "step|n=0")
 call_run_open "$P"
-expect_eq "run_open: current: 0 -> exit 0 (open)" 0 "$RO_ST"
+expect_eq "run_open: step 0 -> exit 0 (open)" 0 "$RO_ST"
 
-P=$(mk_plan "$R5" "open-8b.plan.md" "8b" "- Step 8b: integrating")
+# A step event carries a sub-step's letter as the advance writes it (lib/proof.sh `proof_step_event`).
+P=$(mk_run "$R5" plans open-8b.plan.md "step|n=8b")
 call_run_open "$P"
-expect_eq "run_open: current: 8b -> exit 0 (the sub-step letter is stripped)" 0 "$RO_ST"
+expect_eq "run_open: step 8b -> exit 0 (the sub-step letter is stripped)" 0 "$RO_ST"
 
-P=$(mk_plan "$R5" "open-8a.plan.md" "8a")
+P=$(mk_run "$R5" plans open-8a.plan.md "step|n=8a")
 call_run_open "$P"
-expect_eq "run_open: current: 8a -> exit 0 (the sub-step letter is stripped)" 0 "$RO_ST"
+expect_eq "run_open: step 8a -> exit 0 (the sub-step letter is stripped)" 0 "$RO_ST"
 
-P=$(plan_fixture --at 14 "$R5/.bionic/docs/plans/task-4.plan.md" task)
+P=$(plan_fixture "$R5/.bionic/docs/plans/task-4.plan.md" task)
 call_run_open "$P"
 expect_eq "run_open: task scale, current: 4 -> exit 0 (open, as at wave scale)" 0 "$RO_ST"
 P=$(plan_fixture --at 14 --current T3 "$R5/.bionic/docs/plans/task-t3.plan.md" task)
 call_run_open "$P"
 expect_eq "run_open: task scale, current: T3 -> exit 0 (the retired pointer, kept open so it is refused by name)" 0 "$RO_ST"
 
-P=$(mk_plan "$R5" "open-9.plan.md" "9" "- Step 9: report drafted, not yet delivered")
+P=$(mk_run "$R5" plans open-9.plan.md "step|n=9|delivered=no")
 call_run_open "$P"
-expect_eq "run_open: current: 9 without 'delivered:' -> exit 0 (open)" 0 "$RO_ST"
+expect_eq "run_open: step 9 written not delivered -> exit 0 (open)" 0 "$RO_ST"
 
 P=$(mk_plan "$R5" "open-indented.plan.md" "  4" "- Step 4: in progress")
 call_run_open "$P"
 expect_eq "run_open: leading whitespace on current: is tolerated -> exit 0" 0 "$RO_ST"
 
 # --- the CLOSED rows, each beside the open row above that shares its builder ---
-P=$(mk_plan "$R5" "closed-9.plan.md" "9" "- Step 9: report record/x.md, delivered: 2026-09-02")
+P=$(mk_run "$R5" plans closed-9.plan.md "step|n=9")
 call_run_open "$P"
-expect_eq "run_open: current: 9 WITH 'delivered:' -> exit 1 (closed)" 1 "$RO_ST"
+expect_eq "run_open: step 9 delivered -> exit 1 (closed)" 1 "$RO_ST"
 expect_empty "run_open: closed -> prints nothing" "$RO_OUT"
 
 P=$(mk_plan "$R5" "closed-12.plan.md" "12")
@@ -222,13 +233,12 @@ P=$(mk_plan "$R5" "closed-junk.plan.md" "banana")
 call_run_open "$P"
 expect_eq "run_open: a non-numeric current: -> exit 1" 1 "$RO_ST"
 
-# The step the run's log holds is the run's step whatever current: says, here and at the landing's guard at 8.
-P=$(mk_plan "$R5" "logged.plan.md" "4"); RL="$R5/.bionic/docs/record/logged/run.log"; mkdir -p "${RL%/*}"
+# The step the run's log holds last is the run's step, here and at the landing's guard at 8.
+P=$(mk_run "$R5" plans logged.plan.md "step|n=8"); RL="$R5/.bionic/docs/record/logged/run.log"
 wt_cur() { bash -c '. "$1/worktree.sh" && _wt_plan_current "$2"' _ "${LIB%/*}" "$P"; }
-printf 'run/v1|ev=step|n=8|at=2026-11-01T00:00:01Z\n' > "$RL"
-expect_eq "the landing's guard reads the log's step 8 past current: 4" "8" "$(wt_cur)"
+expect_eq "the landing's guard reads the log's step 8" "8" "$(wt_cur)"
 printf 'run/v1|ev=step|n=9|at=2026-11-01T00:00:02Z\n' >> "$RL"; call_run_open "$P"
-expect_eq "run_open: current: 4 and the log delivered at 9 -> exit 1 (closed)" 1 "$RO_ST"
+expect_eq "run_open: the log delivered at 9 -> exit 1 (closed)" 1 "$RO_ST"
 printf 'run/v1|ev=step|n=4|at=2026-11-01T00:00:03Z\n' >> "$RL"; call_run_open "$P"
 expect_eq "run_open: …the log taken back to 4 -> exit 0 (open), and the guard reads 4" "0 4" "$RO_ST $(wt_cur)"
 # The place is held between asks under a key of the plan, its log and the reader's libraries: each change is read fresh.
@@ -241,20 +251,8 @@ printf '\n_translate_state() { return 3; }\n' >> "$CL/translate.sh"; bash -c '. 
 expect_eq "a place whose fold fails is not read: run_open answers 3, never a held or guessed step" 3 "$?"
 
 R5D="$R5/.bionic/docs/plans"
-cat > "$R5D/closed-abandoned.plan.md" <<'EOF'
----
-governing-skill: superpowers:writing-plans
-sdlc-step: 3
-abandoned: chris 2026-09-04
----
-
-## SDLC State
-
-current: 4
-- Step 4: in progress
-EOF
-call_run_open "$R5D/closed-abandoned.plan.md"
-expect_eq "run_open: frontmatter abandoned: -> exit 1 regardless of current:" 1 "$RO_ST"
+call_run_open "$(mk_run "$R5" plans closed-abandoned.plan.md "step|n=4" "abandon|by=chris|why=superseded")"
+expect_eq "run_open: an abandon in the log -> exit 1 regardless of its step" 1 "$RO_ST"
 
 cat > "$R5D/closed-nocurrent.plan.md" <<'EOF'
 ---
@@ -284,8 +282,8 @@ EOF
 call_run_open "$R5D/closed-fenced-current.plan.md"
 expect_eq "run_open: a current: line only INSIDE a fence -> exit 1 (fence-aware)" 1 "$RO_ST"
 
-call_run_open "$R5D/no-such-plan.md"
-expect_eq "run_open: a path that does not exist -> exit 1" 1 "$RO_ST"
+rm "$(mk_run "$R5" plans no-such-plan.plan.md "step|n=4")"; call_run_open "$R5D/no-such-plan.plan.md"
+expect_eq "run_open: a path that does not exist, its run's log still there -> exit 1" 1 "$RO_ST"
 expect_empty "run_open: a missing path -> prints nothing" "$RO_OUT"
 
 call_run_open ""
@@ -331,20 +329,20 @@ line_count() { [ -z "$1" ] && { echo 0; return; }; printf '%s\n' "$1" | wc -l | 
 
 # --- R6a: a root whose only plan is CLOSED -> the set is empty; then re-open it ---
 R="$SANDBOX/r6a"; mkdir -p "$R/.bionic"
-C=$(mk_plan "$R" "only.plan.md" "9" "- Step 9: report record/x.md, delivered: 2026-09-02")
+C=$(mk_run "$R" plans "only.plan.md" "step|n=9")
 call_open_runs "$R"
 expect_eq "open_runs: a root with one CLOSED plan -> exit 1" 1 "$OR_ST"
 expect_empty "open_runs: …and prints nothing" "$OR_OUT"
 # The paired positive on the SAME fixture: re-open that same file and the set is non-empty,
 # so the empty answer above measured the verdict and not a broken walk.
-mk_plan "$R" "only.plan.md" "4" "- Step 4: in progress" >/dev/null
+mk_run "$R" plans "only.plan.md" "step|n=4" >/dev/null
 call_open_runs "$R"
 expect_eq "open_runs: …the same file re-opened -> exit 0" 0 "$OR_ST"
 expect_eq "open_runs: …and it is the one line" "$C" "$OR_OUT"
 
 # --- R6b: exactly one open run ---
 R="$SANDBOX/r6b"; mkdir -p "$R/.bionic"
-ONE=$(mk_plan "$R" "wave.plan.md" "4" "- Step 4: in progress")
+ONE=$(mk_run "$R" plans "wave.plan.md" "step|n=4")
 call_open_runs "$R"
 expect_eq "open_runs: one open run -> exit 0" 0 "$OR_ST"
 expect_eq "open_runs: one open run -> one line, that path" "$ONE" "$OR_OUT"
@@ -354,9 +352,9 @@ expect_eq "open_runs line 1 == active_run's answer (one open run)" "$AR_OUT" "$(
 
 # --- R6c: two open runs and a closed one, mtimes controlled ---
 R="$SANDBOX/r6c"; mkdir -p "$R/.bionic"
-OLDOPEN=$(mk_plan "$R" "old-open.plan.md" "4" "- Step 4: in progress")
-MIDSHUT=$(mk_plan "$R" "mid-closed.plan.md" "9" "- Step 9: report record/x.md, delivered: 2026-09-01")
-NEWOPEN=$(mk_plan "$R" "new-open.plan.md" "4" "- Step 4: in progress")
+OLDOPEN=$(mk_run "$R" plans "old-open.plan.md" "step|n=4")
+MIDSHUT=$(mk_run "$R" plans "mid-closed.plan.md" "step|n=9")
+NEWOPEN=$(mk_run "$R" plans "new-open.plan.md" "step|n=4")
 touch -t 202601010000 "$OLDOPEN"
 touch -t 202602010000 "$MIDSHUT"
 touch -t 202603010000 "$NEWOPEN"
@@ -372,8 +370,8 @@ expect_eq "open_runs line 1 == active_run's answer (two open runs)" "$AR_OUT" "$
 
 # --- R6d: the newest plan is CLOSED — the set is NOT empty, active_run is ---
 R="$SANDBOX/r6d"; mkdir -p "$R/.bionic"
-DOPEN=$(mk_plan "$R" "open.plan.md" "4" "- Step 4: in progress")
-DSHUT=$(mk_plan "$R" "closed.plan.md" "9" "- Step 9: report record/x.md, delivered: 2026-09-02")
+DOPEN=$(mk_run "$R" plans "open.plan.md" "step|n=4")
+DSHUT=$(mk_run "$R" plans "closed.plan.md" "step|n=9")
 touch -t 202601010000 "$DOPEN"
 touch -t 202602010000 "$DSHUT"
 call_active_run "$R"
@@ -384,9 +382,9 @@ expect_eq "…and lists exactly it" "$DOPEN" "$OR_OUT"
 
 # --- R6e: the walk is active_plan's walk — incidents/, depth 2, fence-aware ---
 R="$SANDBOX/r6e"; mkdir -p "$R/.bionic"
-EPLAN=$(mk_plan "$R" "wave.plan.md" "4" "- Step 4: in progress")
-EINC=$(mk_plan_in "$R" "incidents" "inc-01.md" "4" "- Step 4: in progress")
-EDEEP=$(mk_plan_in "$R" "plans/epic-99/sub" "deep.plan.md" "4" "- Step 4: in progress")
+EPLAN=$(mk_run "$R" plans "wave.plan.md" "step|n=4")
+EINC=$(mk_run "$R" incidents inc-01.plan.md "step|n=4")
+EDEEP=$(mk_run "$R" "plans/epic-99/sub" "deep.plan.md" "step|n=4")
 EFENCE="$R/.bionic/docs/plans/example.md"
 cat > "$EFENCE" <<'EOF'
 # a page ABOUT the lifecycle, not a plan
@@ -429,9 +427,9 @@ expect_eq "…and active_plan agrees on which file is newest-and-real" "$EPLAN" 
 # index and the paths stay in a bash array, so a path that word-split would surface here as a
 # member in the wrong slot or a member that vanished.
 R="$SANDBOX/r6g"; mkdir -p "$R/.bionic"
-G_MID=$(mk_plan "$R" "a walked one.plan.md" "4" "- Step 4: in progress")
-G_OLD=$(mk_plan "$R" "b walked two.plan.md" "4" "- Step 4: in progress")
-G_NEW=$(mk_plan "$R" "c walked three.plan.md" "4" "- Step 4: in progress")
+G_MID=$(mk_run "$R" plans "a walked one.plan.md" "step|n=4")
+G_OLD=$(mk_run "$R" plans "b walked two.plan.md" "step|n=4")
+G_NEW=$(mk_run "$R" plans "c walked three.plan.md" "step|n=4")
 touch -t 202602010000 "$G_MID"
 touch -t 202601010000 "$G_OLD"
 touch -t 202603010000 "$G_NEW"
@@ -463,9 +461,9 @@ expect_eq "open_runs line 1 == active_plan's answer, with spaces in every path" 
 # fast as the shell can and lets them collide, which is the state
 # patrol-revive's rows 33/34 actually hit.
 R="$SANDBOX/r6-burst"; mkdir -p "$R/.bionic"
-mk_plan "$R" "burst-a.plan.md" "4" "- Step 4: in progress" >/dev/null
-mk_plan "$R" "burst-b.plan.md" "4" "- Step 4: in progress" >/dev/null
-mk_plan "$R" "burst-c.plan.md" "4" "- Step 4: in progress" >/dev/null
+mk_run "$R" plans "burst-a.plan.md" "step|n=4" >/dev/null
+mk_run "$R" plans "burst-b.plan.md" "step|n=4" >/dev/null
+mk_run "$R" plans "burst-c.plan.md" "step|n=4" >/dev/null
 call_open_runs "$R"
 call_active_plan "$R"
 expect_eq "same-second burst: all three plans are in the open set" 3 "$(line_count "$OR_OUT")"
@@ -491,8 +489,8 @@ expect_empty "open_runs: no plans dir -> prints nothing" "$OR_OUT"
 # PRIVILEGE, CHECKED FIRST (R8h's reason): as root the mode-000 file reads, and every row
 # would pass on a readable plan.
 R="$SANDBOX/r6i"; mkdir -p "$R/.bionic"
-I_OK=$(mk_plan "$R" "readable.plan.md" "4" "- Step 4: in progress")
-I_LOCKED=$(mk_plan "$R" "locked.plan.md" "4" "- Step 4: in progress")
+I_OK=$(mk_run "$R" plans "readable.plan.md" "step|n=4")
+I_LOCKED=$(mk_run "$R" plans "locked.plan.md" "step|n=4")
 touch -t 202601010000 "$I_OK"
 touch -t 202603010000 "$I_LOCKED"
 chmod 000 "$I_LOCKED"
@@ -524,7 +522,7 @@ expect_empty "open_runs: …and nothing is named on stderr" "$(cat "$SANDBOX/.er
 
 # --- R6j: the ONLY candidate is unreadable -> no open run, and still named ---
 R="$SANDBOX/r6j"; mkdir -p "$R/.bionic"
-J_LOCKED=$(mk_plan "$R" "only.plan.md" "4" "- Step 4: in progress")
+J_LOCKED=$(mk_run "$R" plans "only.plan.md" "step|n=4")
 chmod 000 "$J_LOCKED"
 call_open_runs "$R"
 expect_eq "open_runs: the only candidate unreadable -> exit 1, nothing on stdout" "1|" "$OR_ST|$OR_OUT"
@@ -537,8 +535,8 @@ chmod 644 "$J_LOCKED"
 # `find` cannot list a mode-000 folder, so a plan inside it never reaches the loop at all and
 # only the folder can be named — the same rule `plan_unreadable` applies to a bound path.
 R="$SANDBOX/r6k"; mkdir -p "$R/.bionic"
-K_OK=$(mk_plan "$R" "readable.plan.md" "4" "- Step 4: in progress")
-K_IN=$(mk_plan_in "$R" "plans/epic-vault" "vaulted.plan.md" "4" "- Step 4: in progress")
+K_OK=$(mk_run "$R" plans "readable.plan.md" "step|n=4")
+K_IN=$(mk_run "$R" "plans/epic-vault" "vaulted.plan.md" "step|n=4")
 K_VAULT="$R/.bionic/docs/plans/epic-vault"
 chmod 000 "$K_VAULT"
 call_open_runs "$R"
