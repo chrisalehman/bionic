@@ -1487,6 +1487,7 @@ DSP_READINGS
     FR_WAVE="$(proof_plan_slug "$PV_PLAN")"
     FR_DOCS="$(docs_root "$PV_REPO")"
     FR_WHOLE=""
+    FR_RUNNING="REFUSED — a whole run is running in the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) now: the gate holds an open whole request for it (gate_list names it), and its log is this head's whole run once it ends. Nothing was run; if it ends 75, the gate never admitted it: run regression-run again then."
     if [ -z "$FR_CMD" ]; then
       if [ ! -f "$FR_CO/tests/run.sh" ]; then
         die "REFUSED — this project declares no regression-command: in .bionic/config.yaml, and the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) holds no tests/run.sh to run as its regression; declare regression-command: <command> there, or run the regression yourself and cite its log (its first head= line head=<40-hex> dirty=0, its last line rc=0) with proof-add regression <log> [<log>…]. Nothing was run."
@@ -1511,7 +1512,7 @@ DSP_READINGS
         if [ -n "$WRA_LOG" ]; then
           die "REFUSED — the whole run runs once at a head, and ${FR_HEAD:0:12} has it: $WRA_LOG. A red suite is a fix row's: its own suites plus the red one, green at a later head. Nothing was run."
         else
-          die "REFUSED — a whole run is running in the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) now: the gate holds an open whole request for it (gate_list names it), and its log is this head's whole run once it ends. Nothing was run; if it ends 75, the gate never admitted it: run regression-run again then."
+          die "$FR_RUNNING"
         fi
         exit 1
       fi
@@ -1525,6 +1526,11 @@ DSP_READINGS
           die "REFUSED — the full pass already proves ${FR_HEAD:0:12}: $(clean "$FR_GREEN"), its log $FR_PASS. A pass runs where code lands, and the next whole run is at the head a landing of code makes: land it with spawn-worktree.sh ready. Nothing was run and no log was written."
           exit 1 ;;
       esac
+    elif declare -F gate_whole_open >/dev/null 2>&1 && gate_whole_open "$FR_CO"; then
+      # A configured command is refused beside a running whole run as tests/run.sh is. Its log at a head refuses no
+      # second run of it: that half of rule 3 is tests/run.sh's alone.
+      die "$FR_RUNNING"
+      exit 1
     fi
     FR_DIRT="$(_wt_piece_dirt "$FR_CO")"
     FR_DIRTY="$(printf '%s' "$FR_DIRT" | awk 'END { print NR + 0 }')"
@@ -1538,7 +1544,38 @@ DSP_READINGS
       die "REFUSED — the working checkout $(cd "$FR_CO" 2>/dev/null && pwd -P) is dirty (dirty=$FR_DIRTY): $(clean "$FR_PATHS")$FR_MORE. The whole run proves a committed head, and a log of a dirty tree is refused by proof-add regression yet would be the head's one whole run; nothing was run and no log was written; commit or stash it and run regression-run again."
       exit 1
     fi
+    # THE VERB BOOKS ITS WHOLE RUN, for any command. The tick and a second regression-run know a whole run is running in
+    # a checkout only by an open whole request at the gate for it (`whole_run_at_head`), and a command other than this
+    # repository's runner files none, so the verb files it: kind whole, asked from the checkout (its tree=), keyed by
+    # the command, before the command starts, and ended with the command's code once it returns. The command runs with
+    # BIONIC_GATE_ADMIT naming the request, so a runner beneath that asks (tests/run.sh) is believed under it and files
+    # nothing of its own. A verb killed while its command runs leaves a request whose holder is dead, which the gate
+    # reads as no longer open. A verb started inside another admission is believed under it and files nothing, as any
+    # nested asker is. The cost: a configured command waits, as tests/run.sh does, until nothing else admitted on the
+    # machine is unfinished. Asked in this shell, the id read back through a file, since the gate's holder and the
+    # `times` gate_end reads are this shell's.
+    FR_GATE=""; FR_GATE_OWN=0
+    if declare -F gate_ask >/dev/null 2>&1 && FR_IDF="$(mktemp "${TMPDIR:-/tmp}/bionic-regression-gate.XXXXXX")"; then
+      FR_HERE="$PWD"; FR_ASK=2
+      if cd "$FR_CO" 2>/dev/null; then
+        gate_ask whole "${FR_CMD:0:60}" > "$FR_IDF"; FR_ASK=$?
+        cd "$FR_HERE" 2>/dev/null || :
+      fi
+      { read -r FR_GATE < "$FR_IDF"; } 2>/dev/null; rm -f "$FR_IDF"
+      case "$FR_ASK" in
+        0)
+          case "$(sed -n 's/^holder=//p' "$(gate_dir)/requests/$FR_GATE" 2>/dev/null | tail -n 1)" in "$$:"*) FR_GATE_OWN=1 ;; esac
+          export BIONIC_GATE_ADMIT="$FR_GATE" ;;
+        75)
+          die "regression-run — the gate did not admit the whole run (exit 75), so nothing ran and no log was written; run regression-run again."
+          exit 75 ;;
+        *)
+          FR_GATE=""
+          say "regression-run — the gate's store $(gate_dir) cannot be written, so this whole run runs unbooked, and neither the tick nor a second regression-run can see it running." ;;
+      esac
+    fi
     FR_TMP="$(mktemp "${TMPDIR:-/tmp}/bionic-regression-run.XXXXXX")" || {
+      [ "$FR_GATE_OWN" -ne 1 ] || gate_end "$FR_GATE" 1 >/dev/null 2>&1 || :
       die "REFUSED — no scratch file for the regression's output can be made under ${TMPDIR:-/tmp}; nothing was run."
       exit 1
     }
@@ -1559,6 +1596,7 @@ DSP_READINGS
         exec ${FR_SIGDFL[@]+"${FR_SIGDFL[@]}"} $FR_CMD ) </dev/null > "$FR_TMP" 2>&1
     fi
     FR_RC=$?
+    if [ "$FR_GATE_OWN" -eq 1 ]; then gate_end "$FR_GATE" "$FR_RC" >/dev/null 2>&1 || :; unset BIONIC_GATE_ADMIT; fi
     # A WHOLE RUN THE GATE NEVER ADMITTED RAN NOTHING (tests/run.sh: exit 75 before any suite, no verdict), so
     # there is no run of the head to log.
     if [ -n "$FR_WHOLE" ] && [ "$FR_RC" -eq 75 ] && ! /usr/bin/grep -q '^Gating: ' "$FR_TMP" 2>/dev/null; then
