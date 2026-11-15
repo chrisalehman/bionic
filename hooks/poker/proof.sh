@@ -1023,7 +1023,7 @@ PF_PAIRS_LIST
     # A QUESTION'S WAIVER LETS A FAILED REVIEW THROUGH ON THE PERSON'S WORD, held to lib/said.sh `user_said` as a criterion's is.
     if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
     if ! declare -F user_said >/dev/null 2>&1; then
-      die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
+      die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing is written. run again: session-poker.sh waive $WV_Q '<the user's words>'"
       exit 2
     fi
     user_said "$WV_REPLY" "$PV_PLAN"; WV_SAID=$?
