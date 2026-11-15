@@ -1790,6 +1790,7 @@ words.test.sh | §SENSE | keep | tests/words.test.sh words_refused: the determin
 words.test.sh | §ALLOW | keep | rule: lint — an allow entry with no reason, with no refused word in its string, or left behind after its line was reworded, so the sweep names it | none (searched 'WORDS_ALLOW' in tests/)
 words.test.sh | §RENDERED | keep | rule: lint — a refused word on the sitrep card, the handoff head or the Patrol line as the verbs draw them over a fixture run (a task's name, an ask's title, a printed label), so the sweep of the rendered text names it; words_text's .txt arm dropped, so the planted line is not read | none (searched 'handoff' and 'sitrep card' in tests/words.test.sh; sitrep-card.test.sh §WORDS refuses the words in the judgment only)
 words.test.sh | §BIND | keep | payload/scripts/card.sh the sitrep card verb's binding of a judgment to the sheet: a card whose suite line swaps the counts (1 green and 3 red over a sheet of 3 green and 1 red) drawn, the control in the sheet's order refused, or the refusal leaving the card on stdout | none (searched 'sheet of 3 green' in tests/)
+words.test.sh | §GONE | keep | rule: lint — a file of payload/scripts/lib/walls.sh loaded_set says "verification matrix" in any case or "ledger rows in the plan", naming a deleted plan section as a part of a plan, so the search names the line; or the set read as nothing, so the planted copy passes | none (searched 'loaded_set' and 'ledger rows in the plan' in tests/)
 
 ## worktree.test.sh
 
