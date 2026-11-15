@@ -519,8 +519,8 @@ if [ "$EVENT" = "PostToolUse" ]; then
   # A DISPATCHED AGENT'S WRITE NEVER MOVES ITS DISPATCHER'S BINDING (S10a, review A-2/F5).
   # An agent-context payload carries a top-level `agent_id` AND the DISPATCHING session's
   # `session_id` — that is the documented basis of the partition guard
-  # (hooks/agent-context-guard.sh:37-40: "the payload carries a top-level `agent_id` … this
-  # is an agent context. Main-thread payloads have no such field"). This arm reads
+  # (payload/scripts/lib/walls.sh `wall_background_suite_guard`: "main-thread payloads carry
+  # no top-level `agent_id`"). This arm reads
   # `.session_id`, so without this test a subagent drafting the NEXT wave's plan, or a
   # Step-9 close-out writer, silently rebinds the LIVE ORCHESTRATOR — after which the
   # orchestrator's evidence gate gates its commits on the new plan. That is the

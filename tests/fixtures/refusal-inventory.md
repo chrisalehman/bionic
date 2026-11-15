@@ -1,7 +1,7 @@
 # Refusal inventory — wave-24-fixit-1811 (T13, D10, AC-6.6)
 
-Every refusal site in `payload/scripts/lib/walls.sh`, `payload/scripts/lib/stop.sh`,
-`hooks/dispatch-preflight.sh` and `hooks/stop-guard.sh`, with the fix line it prints or the
+Every refusal site in `payload/scripts/lib/walls.sh`, `payload/scripts/lib/stop.sh` and
+`hooks/dispatch-preflight.sh`, with the fix line it prints or the
 reason no line exists. `tests/refuse.test.sh` §INV reads each file's call sites (a
 `fold_block`, `refuse`, `dp_finding`, `budget_deny` or `deny` call at the start of a statement)
 and keys each site by where it is: `<file>:<function>`, the innermost shell function whose body
@@ -79,6 +79,16 @@ directory in the printed line; the placeholders here only stand for it.
 - `payload/scripts/lib/stop.sh:stop_patrol_duties` — "a Patrol marker turn ran no tick" — patrol duties, marker turn ran no tick — fix: `bash <hooks>/session-poker.sh tick` (NOTICK_REASON)
 - `payload/scripts/lib/stop.sh:stop_patrol_revive` — "the Patrol fires but never ticks" — patrol revive, fires but never ticks — fix: `bash <hooks>/session-poker.sh tick`, and the job replaced with `session-poker.sh prompt`'s text
 - `payload/scripts/lib/stop.sh:stop_patrol_revive` — "the Patrol died mid-run and nothing said so" — patrol revive, Patrol died — fix: CronList, CronCreate, then `bash <hooks>/session-poker.sh arm` (or `disarm`)
+- `payload/scripts/lib/stop.sh:stop_guard_refuse` — " " — the stop guard's forwarder: every refusal of `stop_guard` and `sg_deadline_hit` reaches `refuse exit2 stop` here — none: a forwarder; fact, fix and detail are `stop_guard_say`'s for the key
+- `payload/scripts/lib/stop.sh:stop_guard` — "this stop names no target" — stop names no target (`no-target`) — fix: `name the agent to stop`; the detail prints `bash <hooks>/stop-check.sh <target>` runnable
+- `payload/scripts/lib/stop.sh:stop_guard` — "this stop carries no transcript path" — no transcript path (`no-transcript`) — fix: `run /bionic:doctor`
+- `payload/scripts/lib/stop.sh:stop_guard` — "the state directory is a symlink" — state directory is a symlink (`state-link`) — fix: `remove that symlink`; which symlink and why stays the human's judgment, and the detail names the path
+- `payload/scripts/lib/stop.sh:stop_guard` — "the stop could not be recorded" — the orchestrator's recorded stop of an unrostered agent could not be written onto the roster as its closed row, so the stop is not made (`unrecorded`) — fix: `make the roster writable`; the detail names the roster
+- `payload/scripts/lib/stop.sh:stop_guard` — "this target is on no roster row of this session" — target on no roster row (`no-row`) — fix: `name a rostered agent or id`, with the observe command in the detail
+- `payload/scripts/lib/stop.sh:stop_guard` — "that name has more than one live row" — name with several live rows (`ambiguous`) — fix: `name the full agent id`; the detail lists the ids
+- `payload/scripts/lib/stop.sh:stop_guard` — "that alias is not accepted for this agent" — alias not accepted (`alias`) — fix: `use the agent's own name`; the detail lists the accepted spellings
+- `payload/scripts/lib/stop.sh:stop_guard` — "the session roster carries no id for it" — no agent id on the roster (`no-id`) — fix: `stop it yourself or order it`
+- `payload/scripts/lib/stop.sh:sg_deadline_hit` — "the stop guard did not finish in ${SG_DEADLINE_S} s" — the stop guard's own deadline (`deadline`), 7 s under the hook's 10 s registration: a stop the guard cannot judge is refused, not admitted; a recorded human order is read first and is never refused by it — fix: `stop again`, with the human-order route in the detail
 
 ## hooks/dispatch-preflight.sh
 
@@ -138,16 +148,3 @@ directory in the printed line; the placeholders here only stand for it.
 - `hooks/dispatch-preflight.sh:dp_prototype_confine` — "a prototype owns no plan row; it names Row: <id>" — a `Kind: prototype` brief carrying a `Row:` line; a prototype binds no row (wave-38 T21; REQ-13 AC-13.2, D16) — fix: `drop Row:`; the detail says work a row owns is dispatched without the kind, after approval
 - `hooks/dispatch-preflight.sh:dp_prototype_confine` — "throwaway tree not made for <name>" — a prototype's `Throwaway tree:` is no linked worktree, or its marker holds another agent's name (wave-38 T21; D16) — fix: `spawn it for this agent`; the detail prints the `spawn-worktree.sh create <base-sha> <branch> --for <name>` line and the `Throwaway tree:` line to write
 - `hooks/dispatch-preflight.sh:dp_prototype_confine` — "prototype path <path> is tracked" or "… is outside both" — a prototype's `Files:` path git tracks at the head, or one under neither record/ nor its throwaway tree (wave-38 T21; REQ-13 AC-13.2, D16) — fix: `drop it from Files:`; the detail carries the confinement rule verbatim and lists each refused path
-
-## hooks/stop-guard.sh
-
-- `hooks/stop-guard.sh:deny` — " " — stop-guard deny() forwarder — fix: `${OBSERVE_CMD} <target>` (`bash <hooks>/stop-check.sh <target>`), printed runnable
-- `hooks/stop-guard.sh:(main)` — " ] || deny " — stop names no target — fix: the observe command, through deny()
-- `hooks/stop-guard.sh:(main)` — "this stop carries no transcript path" — no transcript path — fix: `/bionic:doctor`
-- `hooks/stop-guard.sh:(main)` — "the state directory is a symlink" — state directory is a symlink — none: which symlink to remove and why is the human's judgment; the detail names the path
-- `hooks/stop-guard.sh:(main)` — "this target is on no roster row of this session" — target on no roster row — fix: the observe command, through deny()
-- `hooks/stop-guard.sh:(main)` — "that name has more than one live row" — name with several live rows — fix: the observe command with the full id, through deny()
-- `hooks/stop-guard.sh:(main)` — "that alias is not accepted for this agent" — alias not accepted — fix: the observe command with the agent's own name, through deny()
-- `hooks/stop-guard.sh:(main)` — "the session roster carries no id for it" — no agent id on the roster — fix: the observe command, through deny(); or the human's own stop
-- `hooks/stop-guard.sh:sg_deadline_hit` — "the stop guard did not finish in ${SG_DEADLINE_S} s" — the stop guard's own deadline, 3 s under the hook's 10 s registration: a stop the guard cannot judge is refused, not admitted; a recorded human order is read first and is never refused by it (wave-28 T70; A-orch-231 3) — fix: `stop again`, with the human-order route in the detail
-- `hooks/stop-guard.sh:(main)` — "the stop could not be recorded" — the orchestrator's recorded stop of an unrostered agent could not be written onto the roster as its closed row, so the stop is not made (wave-28 T70) — fix: `make the roster writable`; the detail names the roster

@@ -17,7 +17,7 @@
 #
 # THE B-9 ARM IS NOT RE-TESTED HERE. The backgrounded-suite refusal this hook has carried
 # since bionic 1.3.2 belongs to tests/cmd-class.test.sh §C4, which drives it through
-# hooks/agent-context-guard.sh exactly as hooks.json registers it. What IS asserted here
+# hooks/bash-walls.sh exactly as hooks.json registers it. What IS asserted here
 # is the one interaction between them: which arm speaks when both apply.
 #
 # HERMETIC. Every payload is crafted and piped into the hook; repos are throwaway git
@@ -52,12 +52,11 @@ PAYLOAD_HOOKS="$REPO_ROOT/payload/hooks"
 unset BIONIC_SLOT_HELD BIONIC_SLOT_PLACE BIONIC_SLOT_QUIET
 # THE SEAM IS hooks/bash-walls.sh (epic-23 wave-11-lean-spine, T23), and there is no
 # longer a WRAPPER to drive through. This wall is `wall_background_suite_guard` in
-# payload/scripts/lib/walls.sh, and the partition hooks/agent-context-guard.sh used to
+# payload/scripts/lib/walls.sh, and the partition a wrapper hook used to
 # apply in front of it — an agent context, an armed session — is the first thing that
 # function asks. A wrapper around the compound would have silenced protect-main,
 # protect-database, the evidence gate and farm-out-reminder on every main-thread call,
-# so the predicate moved inside and the wrapper's Bash-side registration is gone. The
-# guard file itself stays, registered on SubagentStop, untouched.
+# so the predicate moved inside and the wrapper is gone.
 GUARD="$PAYLOAD_HOOKS/bash-walls.sh"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/bg-suite-guard-test.XXXXXX")" && pwd -P)"

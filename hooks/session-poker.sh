@@ -111,7 +111,7 @@
 # say the CLI's cron table still holds the job. That honest limit is the wall's too.
 #
 # AN ACKED ROW IS CLOSED HERE, exactly as it is for the other three consumers of the
-# verdict line (hooks/landing-gate.sh, hooks/stop-orders.sh, hooks/stop-guard.sh): it is
+# verdict line (`stop_landing_gate` and `stop_guard` in lib/stop.sh, hooks/stop-orders.sh): it is
 # neither open nor notifiable. `acked=` is read PER ROW off the verdict line below, never
 # from the ledger — the verb that owns the ledger is the verb that prints the answer.
 #

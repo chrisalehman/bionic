@@ -1862,8 +1862,9 @@ _wt_field() {  # <line> <key>
   printf '%s' "$_wtf_v"
 }
 
-# The discharge set, spelled the way hooks/stop-orders.sh and hooks/stop-guard.sh
-# spell it: an ack, or a WAIVED contract, or a MET one. `status=` is read as well
+# The discharge set: an ack, or a WAIVED, CLOSED or MET contract. hooks/stop-orders.sh and
+# `stop_guard` (lib/stop.sh) discharge on an ack, a WAIVED contract or a MET one that declared
+# a deliverable. `status=` is read as well
 # as `state=` so a roster row that records its own closure is understood by the
 # same predicate as a sweeper verdict line.
 _wt_discharged() {  # <line>
