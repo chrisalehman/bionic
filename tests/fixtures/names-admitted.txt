@@ -73,14 +73,9 @@ fixture text	tests/session-poker-4.test.sh	printf '%s\n' "# assumptions" "" 'deb
 plant	tests/shell-lint.test.sh	die "REFUSED — run it as: session-poker.sh matrix-set AC-1 status=discharged"  # MARK-C4 a script verb
 fixture text	tests/sitrep-card.test.sh	ask: key=waive-row:AC-3.2 holds=nothing title=row waiver AC-3.2 raised=5:01 PM blocks=no waits=event T83 lands
 fixture text	tests/sitrep-card.test.sh	ask: key=waive-row:AC-4.1 holds=nothing title=row waiver AC-4.1 raised=5:01 PM blocks=no waits=event T83 lands
-old run	tests/sitrep-card.test.sh	SV_REG="$SV_D/asks.state"   # a version-14 register, at the old home the reader translates
-old run	tests/sitrep-card.test.sh	OR_REG="$OR_D/asks.state"   # a version-14 register, at the old home the reader translates
-old run	tests/sitrep.test.sh	  SR_REPO="$r"; SR_PLAN="$p"; SR_DIR="$d"; SR_REC="$d/landing-proofs.log"; : > "$SR_REC"
 old run	tests/sitrep.test.sh	sr_reg() { local p="${1:-$SR_PLAN}"; p="${p##*/}"; printf '%s/.bionic/docs/record/%s/asks.state\n' "$SR_REPO" "${p%.plan.md}"; }
-old run	tests/sitrep.test.sh	  } > "$d/landing-proofs.log"
 old run	tests/sitrep.test.sh	  SR_REPO="$r"; SR_PLAN="$p"; SR_DIR="$d"; SR_REC="$d/landing-proofs.log"; : > "$SR_REC"
 old run	tests/sitrep.test.sh	sr_asks | sed 's/^run\/v1|ev=ask|/owed\/v1|/; s/|prompt=/|reply=/' > "$SR_DIR/asks.state"; sed -i.was '/^run\/v1|ev=ask|/d' "$SR_DIR/run.log"
 old run	tests/sitrep.test.sh	  "$(sr_r_card $((SR_E0 + 82800)))|$(/usr/bin/grep -c 'state=closed' "$SR_DIR/asks.state")|$(/usr/bin/grep -c 'ev=ask' "$SR_DIR/run.log")"
 fixture text	tests/units.test.sh	| T9 | 4 | build | 1f-a: delete hooks/stop-check.sh and every reference; remove the seven dead functions | implementor | T8 | 30m | REQ-1f | hooks/stop-check.sh, hooks/stop-guard.sh, payload/scripts/lib/, tests/ | pending |
 old run	tests/units.test.sh	AP_REC="$AP_REPO/.bionic/docs/record/ap/landing-proofs.log"
-old run	tests/words.test.sh	WR_REG="$WR_R/.bionic/docs/record/wave-02-fx/asks.state"   # a version-14 register, at the old home the reader translates
