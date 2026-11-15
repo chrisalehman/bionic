@@ -1050,7 +1050,7 @@ ww_dec() { printf 'fill-ledger/v1|at=%s|session=fixture|turn=|current=4|state=%s
 # (w1) one hand landing before the window, one decline inside it.
 RW1="$(ll_world)"
 ww_pub T1 hand 2026-10-20T10:00:00Z >> "$(ll_log "$RW1")"
-ww_dec 2026-10-20T12:00:00Z decline > "$(dirname "$(ll_rec "$RW1")")/fill-ledger.log"
+ww_dec 2026-10-20T12:00:00Z decline > "$(dirname "$(ll_log "$RW1")")/fill-ledger.log"
 expect_eq "WINDOW-1 a hand landing before the window and a decline inside it read declines=1 by-hand=0" \
   "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=1 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · status-writes=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" \
   "$(ww_hh "$RW1" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
@@ -1060,7 +1060,7 @@ expect_contains "WINDOW-1b …and one that closes before the decline drops it" \
   "hand-holds: total=1 · by-hand=1 · stop-runs=0 · declines=0 " "$(ww_hh "$RW1" --since 2026-10-20T09:00:00Z --until 2026-10-20T11:00:00Z)"
 
 # (w1c) every source by its own time: each planted before, inside and after the window 11:00 to 13:00.
-RW2="$(ll_world)"; WW_RD="$(dirname "$(ll_rec "$RW2")")"; mkdir -p "$WW_RD"
+RW2="$(ll_world)"; WW_RD="$(dirname "$(ll_log "$RW2")")"; mkdir -p "$WW_RD"
 WW_PL="$(ll_plan "$RW2")"; WW_RO="$RW2/.bionic/tmp/roster-$WORLD_SID.state"
 # Each act is its own: a hand landing is one landing of its row and commit, and a line repeated is one fact, so the
 # three hand landings are three rows and the three stops three requests.
