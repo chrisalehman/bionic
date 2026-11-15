@@ -448,7 +448,7 @@ poke_pressure() {  # <repo> <free_mb> <load_1m> <args...>
 # sp_at15 <plan> -> the page a builder here wrote at 14, rewritten as a run at 15 holds it, and that run's log written
 #   whole beside it (<docs>/record/<stem>/run.log). The header gains the version and the branches the state section named;
 #   the state section, the dispatch ledger and the matrix go; each Tasks row keeps its nine authored cells, read by the
-#   table's own header names; and the log holds a step event for each step to current:, the plan's approval when the
+#   table's own header names (an escaped bar a cell's own), its artifact cell when the template has one; and the log holds a step event for each step to current:, the plan's approval when the
 #   section carried approved-by:, then per row its dispatch (an agent cell on a row not pending), its tree (a worktree
 #   cell) and its landing (status landed). The matrix's criterion is an Eval design row. Instants are fixed and
 #   increasing, so the fold reads the lines in the order written.
@@ -474,8 +474,8 @@ sp_at15() {
     tab && /^\| *id *\|/ { m = split($0, h, "|"); for (i = 2; i < m; i++) { k = tolower(h[i]); gsub(/^ +| +$/, "", k); col[k] = i }
       print "| id | step | kind | task | deps | size | serves | Files | artifact |"; print "|---|---|---|---|---|---|---|---|---|"; hd = 1; next }
     tab && hd && /^\|---/ { next }
-    tab && hd && /^\|/ { split($0, r, "|"); for (i in r) gsub(/^[ \t]+|[ \t]+$/, "", r[i])
-      printf "| %s | %s | %s | %s | %s | %s | %s | %s | — |\n", cell(r, "id"), cell(r, "step"), cell(r, "kind"), cell(r, "task"), cell(r, "deps"), cell(r, "size"), cell(r, "serves"), cell(r, "files")
+    tab && hd && /^\|/ { l = $0; gsub(/\\\|/, "\001", l); split(l, r, "|"); for (i in r) { gsub(/^[ \t]+|[ \t]+$/, "", r[i]); gsub(/\001/, "\\|", r[i]) }
+      printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", cell(r, "id"), cell(r, "step"), cell(r, "kind"), cell(r, "task"), cell(r, "deps"), cell(r, "size"), cell(r, "serves"), cell(r, "files"), cell(r, "artifact")
       if (!none(cell(r, "agent")) && cell(r, "status") != "pending") ev("dispatch|row=" cell(r, "id") "|name=" cell(r, "agent"))
       if (!none(cell(r, "worktree"))) ev("tree|row=" cell(r, "id") "|path=.worktrees/" cell(r, "worktree"))
       if (cell(r, "status") == "landed") ev("published|row=" cell(r, "id")); next }
