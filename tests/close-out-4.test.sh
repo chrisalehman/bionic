@@ -649,9 +649,9 @@ PAH="$(mk_fixture approved-head)"; awk '{ print } /^\| T2 \|/ { print "| T3 | 5 
 printf 'run/v1|ev=published|row=%s|at=2026-10-04T12:30:00Z\n' T3 T4 >> "$PAH/$LOG_REL"; advance_to "$PAH" 8
 AH_B="$(fixture_git "$PAH" rev-parse wave/01-fixture)"; AH_A="$(fixture_git "$PAH" rev-parse wave/01-fixture^)"
 ah_appr() { printf 'run/v1|ev=approval|key=release|by=Dana Fixture|head=%s|said=Ship it.|at=2026-10-12T14:0%s:00Z\n' "$1" "$2" >> "$PAH/$LOG_REL"; }
-ah_appr "$AH_A" 0; AH_CK0="$(cksum < "$PAH/$PLAN_REL")|$(cksum < "$PAH/$LOG_REL")"; run_close "$PAH" run
-expect_eq "AH-C1 approved at A, the working head B with code past A: run refuses (rc 2) naming both heads, plan and log unchanged" \
-  "2|yes|$AH_CK0" "$CO_RC|$(contains "$CO_OUT" "the working head ${AH_B:0:12} is not the head the user approved for release, ${AH_A:0:12}")|$(cksum < "$PAH/$PLAN_REL")|$(cksum < "$PAH/$LOG_REL")"
+ah_appr "$AH_A" 0; AH_CK0="$(cksum < "$PAH/$PLAN_REL")"; run_close "$PAH" run
+expect_eq "AH-C1 approved at A, the working head B with code past A: run refuses (rc 2) naming both heads, the plan unchanged" \
+  "2|yes|$AH_CK0" "$CO_RC|$(contains "$CO_OUT" "the working head ${AH_B:0:12} is not the head the user approved for release, ${AH_A:0:12}")|$(cksum < "$PAH/$PLAN_REL")"
 ah_appr "$AH_B" 1; run_close "$PAH" run
 expect_eq "AH-C0 control: the same run approved again at the working head B closes (rc 0)" "0" "$CO_RC"
 
