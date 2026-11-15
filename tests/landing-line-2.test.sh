@@ -197,7 +197,7 @@ ll_stamp() {  # <tree> <commit> <suite> <rc> <at> — a door run's stamp in the 
     >> "$(git -C "$1" rev-parse --absolute-git-dir)/bionic-stamps"
 }
 ll_runs() {  # <root> <suite> <red commit> <green commit> -> "<reds> <greens>": the records the floor judge weighs, for the suite
-  ( . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1; _proof_records "$1" "$(ll_rec "$1")" ) 2>/dev/null \
+  ( . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1; _proof_records "$1" "$(ll_log "$1")" ) 2>/dev/null \
     | awk -F'\t' -v s="$2" -v rc="$3" -v gc="$4" '$1 == "R" && $4 == s { if ($5 == "red" && $3 == rc) r++; if ($5 == "green" && $3 == gc) g++ }
       END { print r + 0, g + 0 }'
 }
@@ -271,7 +271,7 @@ ct_run() {  # <root> [shim options] — from the main checkout, as the wall wrap
   CT_OUT="$(cd "$1" && T="$1/.worktrees/T2" bash "$CT_SHIM" "${@:2}" --suites a.test.sh -- 'cd "$T" || exit 1; bash tests/a.test.sh' 2>&1)"; CT_RC=$?
 }
 ct_green_at() {  # <root> <commit> -> how many green records of a.test.sh the floor judge reads at <commit>
-  ( . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1; _proof_records "$1" "$(ll_rec "$1")" ) |
+  ( . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1; _proof_records "$1" "$(ll_log "$1")" ) |
     awk -F'\t' -v h="$2" '$1 == "R" && $3 == h && $4 == "a.test.sh" && $5 == "green" { n++ } END { print n + 0 }'
 }
 # The writer's tree, dirty: an uncommitted a.test.sh, green whatever the environment.
@@ -514,7 +514,7 @@ section "§GRAMMAR: a verdict's admitted= and width= go after log=, and every re
 # Every reader (`_line_proved`, `_line_red_log`, `_line_none_logs`, `_line_head_verdict`, `_line_declared`,
 # `_line_fold` and the landing report) reads a field by its key, so a field's place is the writer's own.
 # One writer, `_line_verdict_put`, writes every verdict line a landing writes.
-RGR="$(ll_world)"; PGR="$(ll_plan "$RGR")"; RECGR="$(ll_rec "$RGR")"; KGR="$(ll_head "$RGR")"
+RGR="$(ll_world)"; PGR="$(ll_plan "$RGR")"; RECGR="$(ll_log "$RGR")"; KGR="$(ll_head "$RGR")"
 # The ready names the row's own commit: a commit the head already holds would be counted published by git.
 line_event "$PGR" ready row=T1 name=wx-T1 "commit=$(git -C "$RGR/.worktrees/T1" rev-parse HEAD)" branch=wt/T1 tree=/t "suites=a.test.sh,b.test.sh,c.test.sh" \
   debt=b.test.sh "carrier=$(ll_carrier)" >/dev/null
@@ -545,7 +545,7 @@ RGM="$(ll_world)"; PGM="$(ll_plan "$RGM")"
 line_event "$PGM" ready row=T1 name=wx-T1 "commit=$(git -C "$RGM/.worktrees/T1" rev-parse HEAD)" branch=wt/T1 tree=/t "suites=a.test.sh,b.test.sh,c.test.sh" \
   debt=b.test.sh "carrier=$(ll_carrier)" >/dev/null
 anchor fn payload/scripts/lib/line.sh '"log=$6" "admitted=${7:--}" "width=${LINE_WIDTH:--}"' _line_verdict_put '"admitted=${7:--}" "width=${LINE_WIDTH:--}" "log=$6"'
-GM_READ="$( eval "$(declare -f _line_verdict_put | sed "$ANCHOR_SED")"; ll_grammar_put "$PGM"; ll_grammar_read "$(ll_rec "$RGM")" )"
+GM_READ="$( eval "$(declare -f _line_verdict_put | sed "$ANCHOR_SED")"; ll_grammar_put "$PGM"; ll_grammar_read "$(ll_log "$RGM")" )"
 expect_contains "(g4m-pre) the mutated writer put admitted= and width= before log=" "|result=red|admitted=1000|width=2|log=/logs/b.log|" "$(ll_ev "$RGM" verdict)"
 expect_eq "(g4m) …and every reader answers as it did: they read by key, not by place" \
   "proved|/logs/b.log|/logs/c.log|red /logs/b.log|b.test.sh" "$GM_READ"

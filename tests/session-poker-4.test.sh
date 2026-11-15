@@ -1260,7 +1260,7 @@ st_until() {  # <seconds> <command>… -> rc 0 once the command holds, 1 when th
 }
 st_ended() { [ -s "$1.rc" ]; }
 st_rec() { bash -c '. "$1/payload/scripts/lib/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "$BIONIC_SCRIPTS_DIR" "$PST"; }
-st_runline() { cat "$(st_rec)" "$(dirname "$(st_rec)")/run.log" 2>/dev/null | /usr/bin/grep -F "|ev=run|log=$1|" | tail -n 1; }   # <log from its root> -> its run line
+st_runline() { cat "$(st_rec)" 2>/dev/null | /usr/bin/grep -F "|ev=run|log=$1|" | tail -n 1; }   # <log from its root> -> its run line
 : > "$ST_CTL/hold"
 
 # Each tick below but one forgets the last digest, so it prints in full and a line it did not print is a
@@ -1376,7 +1376,7 @@ wk_step5() {  # -> the Step 5 block, its line and its continuation lines, `;`-jo
   awk '/^- Step 5:/ { s = 1; print; next } s && /^- / { s = 0 } s && /^[ \t]+[^ \t]/' "$PWK" | paste -sd';' -
 }
 wk_recfile() { bash -c '. "$1/line.sh" >/dev/null 2>&1 && line_record "$2"' _ "${S46_LIB%/*}" "$PWK"; }
-wk_ev() { cat "$(wk_recfile)" "$(dirname "$(wk_recfile)")/run.log" 2>/dev/null | /usr/bin/grep -F "|ev=$1|"; }   # <ev> -> its lines in the record, then the log
+wk_ev() { cat "$(wk_recfile)" 2>/dev/null | /usr/bin/grep -F "|ev=$1|"; }   # <ev> -> its lines in the record, the run's log
 wk_rec() {  # <name> <verdict: line or -> [<head: line or ->] [<table row>...] -> a walk record
   local f="$WK_DIR/$1.md" v="$2" h="$3" r; shift 3
   { printf '# walk\n\nwalker: wk-walker\n'; [ "$h" = - ] || printf '%s\n' "$h"

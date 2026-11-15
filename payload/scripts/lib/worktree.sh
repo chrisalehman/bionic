@@ -1402,10 +1402,9 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
 }
 
 # THE LANDING RECORD (wave-27 T44; D15; the Interfaces row "landing record").
-# `<docs-root>/record/<the bound plan's name less .plan.md>/landing-proofs.log`, which nothing writes
-# any more: a run's earlier landings stand in it, one `landed: row=<id|—> branch=<b> head=<40-hex>
-# merge=<40-hex> at=<ISO-UTC>` header per landing, read with the run's log beside it (lib/line.sh
-# `line_lines`), where each landing is now a `published` event. The path is derived from the project's docs root
+# `<docs-root>/record/<the bound plan's name less .plan.md>/run.log`, the run's log, where each landing is a
+# `published` event; lib/line.sh `line_lines` reads it, with the older home a run not brought forward may still
+# hold (lib/reader.sh `reader_landing_record`). The path is derived from the project's docs root
 # (lib/roots.sh `docs_root`), in the project's docs tree, never in the tree being removed. The slug is lib/proof.sh `proof_plan_slug`'s, the
 # one reader (wave-37 T2; AC-9.2), loaded on first use as units.sh and slots.sh are here.
 _wt_proof_load() {  # -> 0 once lib/proof.sh's slug reader is loaded
@@ -1414,10 +1413,10 @@ _wt_proof_load() {  # -> 0 once lib/proof.sh's slug reader is loaded
   . "$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/proof.sh" 2>/dev/null
   declare -F proof_plan_slug >/dev/null 2>&1
 }
-_wt_proofs_path() {  # <root> <plan> -> the record's path
+_wt_proofs_path() {  # <root> <plan> -> the record's path, the run's log
   local slug
   _wt_proof_load && slug="$(proof_plan_slug "${2:-}")" || return 1
-  printf '%s/record/%s/landing-proofs.log' "$(docs_root "$1")" "$slug"
+  printf '%s/record/%s/run.log' "$(docs_root "$1")" "$slug"
 }
 
 # The id of the first `## Tasks` row, in table order, whose `worktree` cell names <tree>; a

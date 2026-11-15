@@ -126,7 +126,7 @@ rel_load() {
   local lib f
   lib="$HERE/../../payload/scripts/lib"
   command -v jq >/dev/null 2>&1 || { echo "release-check: refused — $1 needs jq, to fold as the sentences were written"; return 2; }
-  for f in run.sh proof.sh said.sh worktree.sh; do
+  for f in run.sh proof.sh said.sh worktree.sh line.sh; do
     # shellcheck source=/dev/null
     [ -f "$lib/$f" ] && . "$lib/$f" >/dev/null 2>&1 || { echo "release-check: refused — $1 cannot load $lib/$f"; return 2; }
   done
@@ -237,7 +237,7 @@ nums_check() {  # <version> <changelog text> -> one line per disagreement and pe
     if nums_holds "$c" "$hl" && ! nums_holds "$c^1" "$hl"; then continue; fi
     echo "release-check: the landing numbers of $ver are at $h12, and $row landed after them at ${c:0:12}; render them again with release-note"
     bad=1
-  done < <(rec="$(_wt_proofs_path "$TOP" "$plan")" && cat "$rec" "${rec%/*}/run.log" 2>/dev/null \
+  done < <(rec="$(_wt_proofs_path "$TOP" "$plan")" && line_lines "$rec" 2>/dev/null \
     | awk -F'|' '($1 == "line/v1" || $1 == "run/v1") && $2 == "ev=published" { r = c = ""
       for (k = 3; k <= NF; k++) { if (index($k, "row=") == 1) r = substr($k, 5); if (index($k, "commit=") == 1) c = substr($k, 8) }
       if (r != "" && c != "") print r "|" c }')

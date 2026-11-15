@@ -115,6 +115,15 @@ reader_brought() {  # <plan> -> 0 when the run was brought forward; 1 when not; 
 reader_brought_at() {  # <record directory> -> 0 when its run was brought forward, else 1
   [ -d "$1/kept" ] && [ -f "$1/run.log" ] && ! cmp -s "$1/run.log" "$1/kept/record/run.log"
 }
+# THE OLD LANDING RECORD is named here and nowhere outside the reader's files. A run not brought forward still holds its
+# earlier landings in it, so the landing library (lib/line.sh `line_lines`) reads it ahead of the log; once the run is
+# brought forward the log holds their translation and the old file, which the act leaves in place, is never read again.
+# A link is no record: the readers that guard a home against a link read it as absent.
+reader_landing_record() {  # <record directory> -> the old landing record's path while it is to be read; 1 when it is not
+  local f="${1:-}/landing-proofs.log"
+  [ -n "${1:-}" ] && [ -f "$f" ] && [ ! -L "$f" ] && ! reader_brought_at "$1" || return 1
+  printf '%s\n' "$f"
+}
 
 # A KEY OF A FOLD THAT READS NO TURN'S END: a stop event comes at every turn, so the log is summed less those alone. Only
 # a line in the appender's whole shape of one is left out, so any other line, a malformed stop among them, still changes

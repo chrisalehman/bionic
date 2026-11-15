@@ -1466,7 +1466,7 @@ RR_MATRIX
     local n rows
     n="$(git -C "$PV_REPO" rev-list --first-parent --count "$1..$RR_HEAD" 2>/dev/null)" || n=""
     rows="$(git -C "$PV_REPO" rev-list --first-parent "$1..$RR_HEAD" 2>/dev/null \
-      | units_rows_in_range "$PV_PLAN" "$1..$RR_HEAD" "$RR_DIR/landing-proofs.log" 2>/dev/null | cut -f1 | paste -sd' ' -)"
+      | units_rows_in_range "$PV_PLAN" "$1..$RR_HEAD" "$(proof_debt_record "$PV_PLAN" "$PV_REPO" 2>/dev/null)" 2>/dev/null | cut -f1 | paste -sd' ' -)"
     printf 'approved at %s' "${1:0:8}"
     [ -z "$n" ] || printf ', %s landed since' "$(rr_plural "$n" commit commits)"
     [ -z "$rows" ] || printf ' (%s)' "$rows"

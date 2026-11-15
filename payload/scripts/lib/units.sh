@@ -983,9 +983,10 @@ units_live_held() {
 # A READ AFTER A FIX IS TOLD WHAT MOVED (wave-27 T43; D10; A-orch-48, A-orch-71). Once a question has
 # its `scope=whole` reading, a later read of it covers the fixes that landed past that reading, and
 # the tick names them beside the RANGE line. A row's landing is read from the run's LANDING RECORD,
-# `<docs-root>/record/<plan name>/landing-proofs.log`, which `land` appends (T44): one header line
-# per landing, `landed: row=<id|—> branch=<b> head=<40-hex> merge=<40-hex> at=<ISO-UTC>`, with
-# `stamp/v1|…` lines under it. A row's landing is the `merge=` of the LAST header carrying its row.
+# `<docs-root>/record/<plan name>/run.log`, which `land` appends: one `published` event per landing,
+# read with an older home's `landed: row=<id|—> branch=<b> head=<40-hex> merge=<40-hex> at=<ISO-UTC>`
+# headers while a run not brought forward holds one (lib/line.sh `line_lines`). A row's landing is the
+# commit of the LAST landing line carrying its row.
 # Never the prose of a state line, and never git: which merges lie inside a range is the caller's
 # answer (the tick's, which already reads git), handed in on stdin.
 #
@@ -1461,8 +1462,8 @@ _units_questions_awk() {
 }
 
 # _units_publish_order <origin plan> <rows> -> `<id>=<n> <id>=<n> ...`, the landing record's place for each row that has landed:
-# the line number of the row's LAST `published` event or `landed:` header in `<docs-root>/record/<plan name>/
-# landing-proofs.log`, which is appended in the order the rows were published. Nothing printed when the plan has no
+# the line number of the row's LAST `published` event or `landed:` header in the record `<docs-root>/record/<plan name>/
+# run.log` read as one (`units_record_landings`), which is appended in the order the rows were published. Nothing printed when the plan has no
 # landed release row to compare with (the common case, which then pays no git call), when no record can be named, or
 # when the record is not a file: the callers then judge by the plan's order. The plan named is the one whose record is
 # read, so a caller judging a copy of a plan hands the plan it was copied from: a copy's own name names no record.

@@ -449,6 +449,10 @@ _translate_dropped() {  # <plan> -> each Tasks row whose status is dropped, as t
 # name as its run log is, by the reader's one rule (`reader_record`), so the two never name two
 # directories for one run. Each line of a ruled type is carried with its first field renamed and every
 # other field as written, an empty value too: the field-for-field rename is what makes it the same fact.
+# TRANSLATE_HOMES names every older home a source below reads beside the log, so a reader that must know what a
+# translation depends on (lib/proof.sh's kept fold) asks this list; tests/reader.test.sh §HOMES compares it with the
+# sources and goes red until a home a source comes to read joins it.
+TRANSLATE_HOMES="landing-proofs.log asks.state fill-ledger.log design-ledger.md debt.md"
 _TRANSLATE_LIB_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P )"
 if ! declare -F reader_record >/dev/null 2>&1; then
   # shellcheck source=/dev/null
