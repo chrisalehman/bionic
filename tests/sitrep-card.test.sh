@@ -1028,7 +1028,7 @@ expect_eq "VE10c …while the release approval, which holds the merge task, stay
 # naming the row. The verb reads that row as held, so the card draws the ask under Blocked on you.
 # fails-when: the ruling ask reads holds=nothing, so it is drawn under the Assessment with Blocked on you holding
 # only the release approval.
-printf 'owed/v1|key=ruling:r9|state=open|sent=-|at=2026-10-06T22:02:00Z|title=ruling unread: T2|reply=poker: NOT-LANDED T2 — w-T2 ended (MET) with an orchestrator ruling unread (r9); the row holds until a writer reads it: re-dispatch the row, or drop it\n' >> "$SV_REG"
+printf 'run/v1|ev=ask|key=ruling:r9|sent=-|title=ruling unread: T2|prompt=poker: NOT-LANDED T2 — w-T2 ended (MET) with an orchestrator ruling unread (r9); the row holds until a writer reads it: re-dispatch the row, or drop it|at=2026-10-06T22:02:00Z\n' >> "${SV_REG%/*}/run.log"
 SV_AT=$((SV_NOW + 120)) sv_run "$SV_P" < /dev/null
 printf '%s\n' "$SV_OUT" > "$TMPROOT/verb-sheet"
 expect_eq "VE10d the verb's sheet reads the ruling ask as holding the row its reply names (4/2), blocking" "ask: key=ruling:r9 holds=4/2 title=ruling unread: T2 raised=3:02 PM blocks=yes waits=user" \
