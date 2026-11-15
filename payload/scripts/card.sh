@@ -1380,25 +1380,25 @@ _card_batch_rows() {  # <plan> -> `<batch>\t<step>\t<id>` per row, in table orde
 # _card_project_open <plan> <temporary directory> -> the copy's path, its run approved; 1 when it cannot be written
 # _card_project <copy> <step> <ids> -> 0 once the copy's run stands at <step> with <ids> landed besides what it held
 #
-# THE COPY IS A RUN OF ITS OWN: the page as written, one folder under a plans/ folder of the card's temporary
-# directory, so the reader joins it to a record of its own beside it (lib/reader.sh `reader_record`) and never to the
-# real run's, and nothing is written beside the plan or into its record. Its log is written by the run's own writers:
-# the approval and the step by lib/proof.sh's, and a landing by the log's appender with the one field a row is read
-# landed by (lib/units.sh `_units_live`), since the line's writer finds its log through the project's git root and a
-# copy in a temporary directory has none.
+# THE COPY IS A RUN OF ITS OWN: the page as written, in a project of its own that the card's temporary directory
+# holds, so the reader joins it to a record of its own beside it (lib/reader.sh `reader_record`) and never to the real
+# run's, and nothing is written beside the plan or into its record. Its log is written by the run's own writers alone,
+# one for each event type: the approval and the step by lib/proof.sh's, a landing by the line's
+# (lib/line.sh `line_published_event`). The line's writer finds a run's log through the project's git root, so the
+# temporary directory is made one.
 _card_project_open() {
-  local copy="${2:-}/plans/run/${1##*/}"
-  mkdir -p "${copy%/*}" && cp "${1:-}" "$copy" || return 1
+  local copy="${2:-}/.bionic/docs/plans/run/${1##*/}"
+  git init -q "${2:-}" >/dev/null 2>&1 && mkdir -p "${copy%/*}" && cp "${1:-}" "$copy" || return 1
   declare -F proof_approval_event >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/proof.sh" >/dev/null 2>&1 || return 1
+  declare -F line_published_event >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/line.sh" >/dev/null 2>&1 || return 1
   # THE PROJECTION IS OF AN APPROVED PLAN. The card is shown at the approval gate, and the fill offers nothing to a run
   # whose plan stands unapproved, so a copy without the approval would answer every batch with nothing.
   proof_approval_event "$copy" step3 by=card said=projected || return 1
   printf '%s' "$copy"
 }
 _card_project() {
-  local copy="${1:-}" log id
-  log="$(reader_log "$copy")" || return 1
-  for id in ${3:-}; do RUN_LOG="$log" log_append published "row=$id" kind=projection || return 1; done
+  local copy="${1:-}" id
+  for id in ${3:-}; do line_published_event "$copy" "row=$id" kind=projection by=card why=projected || return 1; done
   proof_step_event "$copy" "${2:-}" || return 1
   # THE COPY'S PATH STANDS WHILE ITS RUN MOVES, and fill.sh memoises the run's place per process by path, so the writer
   # forgets it.
