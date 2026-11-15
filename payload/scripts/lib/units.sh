@@ -750,11 +750,13 @@ units_edges() { _units_sched edges "${1:-}" ""; }
 # The clause is `suspect: <R> reads <D>, shares no file`; the edit is `edit <R> in the plan: reads=<the
 # cell less every token naming D>` (`deps=` for a deps token), the cell `—` when nothing is left, so the
 # row takes its kind's default.
+# A PAGE AT 15 (no reads cell, no status cell) has no suspect: its deps cell is the one place a person writes what a row
+# waits on, so a row it names is that person's word, and no edit of it is offered.
 units_suspect() {
   local plan="${1:-}" want="${2:-}" rows hasreads=0
   rows="$(units_rows "$plan" 2>/dev/null)" || return 0
   [ -n "$rows" ] || return 0
-  units_has_column "$plan" reads && hasreads=1
+  if units_has_column "$plan" reads; then hasreads=1; else units_has_column "$plan" status || return 0; fi
   printf '%s\n' "$rows" | awk -F'\t' -v want="$want" -v hasreads="$hasreads" -v regno="$(_units_regno "$plan")" \
     "$(_units_files_awk)$(_units_cell_awk)$(_units_dep_awk)"'
     { n++; id[n] = $1; knd[n] = $3; dep[n] = $6; fil[n] = $9; st[n] = $10; rd[n] = (hasreads ? $13 : ""); at[$1] = n }
@@ -1996,10 +1998,11 @@ _units_sched_awk() {
     # ready only once the run has REACHED its step, reached and not equalled. A DOC ROW WAITS FOR
     # ITS READS (wave-26 T13; D3): in a table with the reads column nothing about the release is a
     # step, and its approval is read by the integrate row (wave-35 T5). A table without the column has no approval
-    # to read, so its Step-7 doc row keeps the hold (A-T13.1).
+    # to read, so its Step-7 doc row keeps the hold (A-T13.1). A page at 15 has no reads column and is no such table: its
+    # release row waits on what its deps and its kind name, and on no step.
     function rowheld(i,   gate) {
       if (stp[i] !~ /^[0-9]+$/) return 2
-      gate = (knd[i] == "integrate" || knd[i] == "close" || (!hasreads && knd[i] == "doc" && stp[i] + 0 >= 7))
+      gate = (knd[i] == "integrate" || knd[i] == "close" || (oldshape && knd[i] == "doc" && stp[i] + 0 >= 7))
       return (gate && stp[i] + 0 > want + 0) ? 1 : 0
     }
 
@@ -2292,6 +2295,10 @@ units_validate() {
       waits="$(_units_waits "$plan")" || waits=""
     fi
   fi
+  # THE QUESTIONS A ROW AT 15 MAY DECLARE are lib/proof.sh PROOF_QUESTIONS, loaded when a task cell carries the tag.
+  if [ -n "$v15" ] && [ -z "${PROOF_QUESTIONS:-}" ]; then
+    case "$rows" in *" · questions:"*) _units_lib proof.sh proof_question_ok ;; esac
+  fi
   if [ -n "$rows" ]; then
     violations="$({ printf '%s\n' "$rows"; [ -z "$waits" ] || printf '\034\n%s\n' "$waits"; } | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" -v v15="$v15" \
       -v st15="$st15" -v lrc="$lrc" -v pubs="$(_units_publish_order "${origin:-$plan}" "${rows15:-$rows}")" -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
@@ -2325,7 +2332,7 @@ units_validate() {
       $0 == "\034" { wpart = 1; next }
       wpart { post_wait(); next }
       $1 == "" { next }
-      { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; fil[n] = $9; sta[n] = $10; wtc[n] = $11
+      { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; tsk[n] = $4; dep[n] = $6; fil[n] = $9; sta[n] = $10; wtc[n] = $11
         bsc[n] = $12; rd[n] = $13; count[$1]++ }
       END {
         for (i = 1; i <= n; i++) {
@@ -2346,6 +2353,22 @@ units_validate() {
           if (v15 == "" && !(sta[i] in states))
             printf "%s: status %s is not one of pending active landed dropped\n", \
               id[i], (sta[i] == "" ? "(empty)" : sta[i])
+
+          # A ROW AT 15 NAMES ITS QUESTIONS IN ITS TASK CELL, as the task-add verb writes the tag, and is held to the rule
+          # the verb holds it to: a review row alone, each question one isq admits, once, comma-separated with no space.
+          # A hand edit the verb would refuse is refused at the write, so no row is left waiting on a question no
+          # reader is dealt.
+          q = tsk[i]; e = index(q, " · questions:")
+          if (v15 && e) {
+            q = substr(q, e + length(" · questions:")); sub(/^ /, "", q); e = index(q, " · "); if (e) q = substr(q, 1, e - 1)
+            if (knd[i] != "review") printf "%s: task declares questions: %s; only a review row is dealt questions\n", id[i], q
+            else {
+              nqa = split(q, qa, ","); qbad = (q !~ /^[a-z]+(,[a-z]+)*$/); split("", qone)
+              for (k = 1; k <= nqa; k++) { if (!isq(qa[k]) || (qa[k] in qone)) qbad = 1; qone[qa[k]] = 1 }
+              if (qbad) printf "%s: task declares questions: %s, which is no list of questions: each one of %s, once, comma-separated with no space\n", \
+                id[i], (q == "" ? "(empty)" : q), pq
+            }
+          }
 
           # THE ROW IS THE RECORD OF THE TREE (wave-17 REQ-1, AC-1.2, D2, ADR-032).
           # `active` means a writer is in a tree right now, and the evidence gate resolves
@@ -2761,11 +2784,13 @@ _units_asked() {
 #
 # A TABLE WITHOUT reads HOLDS ITS REGRESSION ONLY THROUGH deps, so a mid-run Step-4 row is held behind by every open
 # Step-5+ row that does not reach it, except one that reaches another such row which does not reach it back: that row
-# holds it already. A table with reads needs none of it: its rows wait on what they read. Pure: it prints, and the
-# rows it names are the person's edit.
+# holds it already. A table with reads needs none of it: its rows wait on what they read. Nor does a page at 15 (no
+# reads cell, no status cell): each row at Step 5 or later waits on a new build through its kind's default read of the
+# head, or through a proof or the merge that does. Pure: it prints, and the rows it names are the person's edit.
 units_thread_rows() {
   local plan="${1:-}" nid="${2:-}"
   units_has_column "$plan" reads && return 0
+  units_has_column "$plan" status || return 0
   units_has_column "$plan" deps || return 0
   units_rows "$plan" | awk -F'\t' -v nid="$nid" '
     function reach(s, c,   q, h, qn, k, n2, b) {
