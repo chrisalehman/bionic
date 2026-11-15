@@ -1930,12 +1930,13 @@ expect_eq "culled duplicates on a marked, a culled or an uncalled catcher are re
 section "CENSUS-4: the tests tree is cut as tests/CENSUS.md says"
 # ============================================================
 # fails-when: a suite under tests/ still calls a section the census culls, a kept section or a baseline section is
-# gone with no culled line, or the culled list holds a keep or a rule pin.
+# gone with no culled line, the culled list holds a keep or a rule pin, or a culled duplicate names a catcher that is
+# marked unverified, culled or called by no suite.
 CN4_CULLED="$(sed -n '/^## Culled$/,$p' "$CENSUS_MD" 2>/dev/null | /usr/bin/grep -c '\.test\.sh §')"
 expect_true "the census carries a culled list to read (${CN4_CULLED} lines)" [ "${CN4_CULLED:-0}" -gt 0 ]
 CN4_BASE="$TMP/census-base.md"; git -C "$REPO" show 7a9633486:tests/CENSUS.md > "$CN4_BASE" 2>/dev/null
 expect_true "the baseline census is readable from history" [ -s "$CN4_BASE" ]
-expect_eq "the real tests tree: no culled section called, no kept section gone, no keep or rule pin culled" "" \
+expect_eq "the real tests tree: no culled section called, no kept section gone, no keep or rule pin culled, no cull on an unshown catcher" "" \
   "$(census_cull_refusals "$TESTS_DIR" "$CENSUS_MD" "$CN4_BASE" "$TESTS_DIR/fixtures/deletion-list.txt")"
 
 # ── the agreement checks ─────────────────────────────────────────────────────
