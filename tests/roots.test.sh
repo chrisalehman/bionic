@@ -46,6 +46,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/plan-fixture.sh"
 # THE SHARED FIXTURE BUILDERS, not hand-written shapes. `live_answer_body` composes a
 # ListAgents answer out of the committed corpus (tests/lib/live-answer.sh), and
 # `roster_row_fixture` writes a roster row through the production writer
@@ -332,22 +333,8 @@ cp "$LIB_DIR"/*.sh "$PLANT/scripts/lib/" 2>/dev/null
 PROJ="$SANDBOX/proj"
 mkdir -p "$PROJ/.bionic/tmp" "$PROJ/alt/plans/epic-99" "$PROJ/alt/record"
 printf 'docs-root: alt\n' > "$PROJ/.bionic/config.yaml"
-cat > "$PROJ/alt/plans/epic-99/wave-01.plan.md" <<'PLAN'
----
-canonical_sdlc_version: 14
-intent: build
-rigor: double
-scale: wave
----
-
-# Wave 01
-
-## SDLC State
-
-current: 4
-
-- Step 0: confirmed
-PLAN
+# The page is at 15, and its run's log stands under the alternate root's record.
+plan_fixture "$PROJ/alt/plans/epic-99/wave-01.plan.md" wave > /dev/null
 printf 'progress\n' > "$PROJ/alt/record/s99.md"
 
 # THE OBSERVING SESSION, for §2b. hooks/stop-check.sh resolves a typed target against the
