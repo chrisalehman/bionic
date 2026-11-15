@@ -23,13 +23,13 @@
 #
 # ORDER records that a human asked for an agent to be stopped, and prints what stopping it
 # gives up. It is not evidence and it does not discharge the contract — it is an
-# INSTRUCTION, and hooks/stop-guard.sh gets out of its way. Why a record at all: the gate
+# INSTRUCTION, and the stop guard (`stop_guard`, lib/stop.sh) gets out of its way. Why a record at all: the gate
 # runs inside a PreToolUse payload that carries nothing about who asked for the stop, so
 # the order has to reach it the only way anything reaches a gate in this machine — as a
 # fact on disk, written before the stop.
 #
 # AN ORDER IS BOUNDED IN TIME, and this is the one clock in the stop arc that belongs
-# there. hooks/stop-guard.sh refuses to put a window on EVIDENCE (an observation is stale
+# there. The stop guard refuses to put a window on EVIDENCE (an observation is stale
 # the moment its subject writes, however recent, and valid however old while its subject is
 # dormant). An instruction is the other thing: it is current when it is given and it stops
 # being current, and a standing order that outlived its conversation would open the wall
@@ -95,7 +95,7 @@ UNROSTERED_SCHEMA="stop-unrostered/v1"
 ROSTER_VERSION="v1"
 
 # HOW LONG AN ORDER IS CURRENT, in seconds. Duplicated as a literal in
-# hooks/stop-guard.sh, which is the reader; the two are held together by
+# payload/scripts/lib/stop.sh (`SG_ORDER_TTL_S`), which is the reader; the two are held together by
 # tests/cross-gate-agreement.test.sh's stop-order case, which records an order at a
 # boundary epoch and asks the gate about it.
 ORDER_TTL_SECONDS=1800
@@ -131,7 +131,7 @@ ORDER_AT=""
 # The two are different facts about one act, the reader discharges either, and the line says
 # which — so a stop nobody remembers typing is explicable afterwards.
 #
-# A CLOSED SET, not free text: the value is printed back to a reader by hooks/stop-guard.sh,
+# A CLOSED SET, not free text: the value is printed back to a reader by the stop guard (lib/stop.sh),
 # and a free-text field would let a caller write whatever it liked into that sentence.
 ORDER_BY="human"
 case "$VERB" in
@@ -936,7 +936,7 @@ EOF
       _row=$(roster_row_for "$_name")
       _deliv=$(line_field "$_row" deliverable)
       _why=""
-      # THE DISCHARGE SET, spelled the same way hooks/stop-guard.sh spells it: an ack, or a
+      # THE DISCHARGE SET, spelled the same way `stop_guard` (lib/stop.sh) spells it: an ack, or a
       # WAIVED contract, or a MET one that had a declared artifact to meet. A row that
       # declared nothing stats MET for want of anything to hold it to, and standing one
       # down on that is standing it down on a fact nobody produced — an ack is what closes

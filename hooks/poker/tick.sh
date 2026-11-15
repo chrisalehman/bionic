@@ -1504,7 +1504,7 @@ EOF
       # Read per row off the verdict line this loop is already walking — never from the
       # ledger, whose one owner is the verb that prints this line (hooks/session-sweeper.sh,
       # S9) — and spelled exactly as the three consumers that already read it:
-      # hooks/landing-gate.sh:214, hooks/stop-orders.sh:319, hooks/stop-guard.sh:491.
+      # `stop_landing_gate` and `stop_guard` in payload/scripts/lib/stop.sh, and hooks/stop-orders.sh.
       # This is what makes the ack verb's own closing sentence true —
       #   hooks/session-sweeper.sh:817 "an acked row is closed for every reader"
       # — which it was not while this script was the fourth reader that ignored the field

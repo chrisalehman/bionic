@@ -52,7 +52,7 @@
 # this repo once the plan's `## Verification Matrix` section passed 64 KB, on a plan
 # whose `stack-health:` line was present and valid. A here-string has no second process
 # to lose, and it forks one fewer than the pipeline did. The same rule holds in
-# hooks/dispatch-preflight.sh (:1200) and hooks/stop-guard.sh, the other readers under
+# hooks/dispatch-preflight.sh and the stop library under hooks/stop.sh, the other readers under
 # `pipefail`; tests/cross-gate-agreement.test.sh pins the idiom's absence repo-wide.
 #
 # ONE CAVEAT THE PIPELINE DID NOT HAVE: `<<<` APPENDS A NEWLINE to its word, so an empty
@@ -5364,14 +5364,14 @@ fi
 # declares it optional on the Bash tool input), so the test is `== true` and never
 # `!= false`.
 #
-# THE PARTITION IS A GATE HERE NOW (T23 ruling R2). This wall was registered BEHIND
-# hooks/agent-context-guard.sh, which ran it only inside an agent context of an armed
-# session — and that wrapper was the only thing keeping arm 1 off the main thread:
+# THE PARTITION IS A GATE HERE NOW. This wall was registered BEHIND a wrapper, which
+# ran it only inside an agent context of an armed session — and that wrapper was the
+# only thing keeping arm 1 off the main thread:
 # driven straight, this wall refuses a main-thread backgrounded suite; driven through
 # the guard it did not (measured 2026-09-12, T23 report §2). A wrapper around the
 # COMPOUND would silence protect-main, protect-database, the evidence gate and
 # farm-out-reminder on every main-thread call, so the predicate is asked here, of
-# this one function, and the guard file stays registered on SubagentStop untouched.
+# this one function.
 # [WALL: tests/background-suite-guard.test.sh]
 # [WALL: tests/cmd-class.test.sh]
 wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
@@ -5393,8 +5393,8 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   IS_BACKGROUND=no
   [ "$(bionic_jq '.tool_input.run_in_background|tostring')" = "true" ] && IS_BACKGROUND=yes
   # THE ACTOR (design D1, task 4/1 probe): an agent-context payload carries a top-level
-  # `agent_id`, a main-thread one does not. hooks/stop-guard.sh reads the same field the
-  # same way.
+  # `agent_id`, a main-thread one does not. payload/scripts/lib/stop.sh reads the same
+  # field the same way.
   ACTOR=$(bionic_jq .agent_id)
   # NO PRE-FILTER ANY MORE (wave-26 T7, D8). A main-thread foreground call used to return
   # here unread; now every allowed suite call is wrapped in the booking shim, so a call no
@@ -5402,7 +5402,7 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   # non-suite main-thread command pays one `cmd_class`, the same reading farm-out-reminder
   # gives it on that thread.
 
-  # ── THE PARTITION, verbatim from hooks/agent-context-guard.sh's predicate ──
+  # ── THE PARTITION ──
   #
   # 1. an agent context at all — main-thread payloads carry no top-level `agent_id`
   #    (t1 §3, `ctx = .agent_id // "MAIN"`).

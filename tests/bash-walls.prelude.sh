@@ -85,8 +85,8 @@ block_plan() {
   [ ! -f "$1/.bionic/tmp/engaged-$SID.state" ] || bound_marker "$1" "$SID" "$p"
 }
 
-# arm_roster <repo> — the roster file agent-context-guard.sh required before it would let
-# background-suite-guard run at all. Its PRESENCE is the whole predicate; no row is needed
+# arm_roster <repo> — the roster file the partition in `wall_background_suite_guard`
+# (payload/scripts/lib/walls.sh) requires before that wall judges at all. Its PRESENCE is the whole predicate; no row is needed
 # for the backgrounded-suite arm, which is the arm this suite drives.
 arm_roster() { : > "$1/.bionic/tmp/roster-$SID.state"; }
 

@@ -768,7 +768,7 @@ EOF
       exit 1
     fi
     # The stop wall and observe pick an id's row from `confirmed|identified` rows only
-    # (stop-guard.sh), so a successor that copied a `duplicate-start` row is read by the budget
+    # (`_sg_roster_walk`, payload/scripts/lib/stop.sh), so a successor that copied a `duplicate-start` row is read by the budget
     # wall alone — the line names only the walls that read it (wave-22 T10; review 4).
     case "$(line_field "$AM_NEW_ROW" status)" in
       confirmed|identified) AM_WALLS="the stop and budget walls read" ;;

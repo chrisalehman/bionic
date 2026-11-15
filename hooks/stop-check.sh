@@ -63,18 +63,9 @@ usage() {  # [reason]
 
 # ---------- arguments ----------
 #
-# TARGET FIRST, and no flag before it. This grammar is not a style choice: the
-# Bash arm of hooks/stop-guard.sh re-parses this same command line to record
-# WHICH agent was examined, and it reads only what is written here — it skips
-# `-*` tokens one at a time and takes the first non-flag token, with no
-# knowledge that `--progress` consumes the token after it. Accepting the flag
-# ahead of the target therefore makes the two halves name DIFFERENT agents: the
-# operator looks at one, the record attests to the other, and a record naming an
-# unexamined agent is the stop wall opening on a look that never happened. The
-# producer stays inside what its paired reader can parse; the agreement is
-# pinned by tests/cross-gate-agreement.test.sh §C case 6.
+# TARGET FIRST, and no flag before it.
 #
-# For the same reason an unrecognized `-`-leading token is a usage error rather
+# An unrecognized `-`-leading token is a usage error rather
 # than a deliverable path. `--progres` and `--progress=<path>` are the likely
 # typos, and silently filing them under Deliverables prints an evidence tier
 # missing a channel the reader believes they asked for.
@@ -126,10 +117,8 @@ done
 # ---------- the helpers live in the library now ----------
 #
 # `file_mtime`, `file_size`, `line_field`, `mline_value`, `fmt_epoch`, `fmt_age`,
-# `claims_live` and `slugify` were defined here and, byte for byte, in hooks/stop-guard.sh
-# — the price of the no-library rule (TDD §9), held together by the resolver agreement
-# battery in tests/cross-gate-agreement.test.sh §C. They are one definition now, in
-# payload/scripts/lib/observe.sh, sourced below with the observation itself (REQ-2, D2).
+# `claims_live` and `slugify` are one definition each, in payload/scripts/lib/observe.sh
+# (`mline_value` and `claims_live` under an `observe_` prefix), sourced below with the observation.
 
 # ---------- resolving the target (P5: the platform does not translate) ----------
 #
@@ -141,7 +130,7 @@ done
 # `slugify` is the library's (payload/scripts/lib/observe.sh), sourced below.
 
 # WHERE CLAUDE CODE STORES SESSION AND PROJECT METADATA. One concept, three
-# renderings in this wave, and they must name one directory: hooks/stop-guard.sh
+# renderings, and they must name one directory: the stop guard (lib/stop.sh)
 # derives it from the payload's transcript path (it has one), hooks/preflight-probe.sh
 # reads `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`, and this producer has no payload
 # so it must read the same variable. Rooting this at $HOME alone made the two
@@ -156,8 +145,7 @@ TARGET_BASE="${TARGET%@*}"
 
 # RESOLUTION IS NO LONGER A DIRECTORY SCAN (wave-roster-lifecycle S6, D2/D2′). This script
 # used to carry `scan_subagent_dirs` — a walk of every `agent-*.meta.json` in the project,
-# matching a typed reference against the filename's id or the file's `.name` — byte-identical
-# to a copy in hooks/stop-guard.sh, the two held together by an agreement suite. It answered
+# matching a typed reference against the filename's id or the file's `.name`. It answered
 # "which agent is this" from RECORDS, and records outlive agents: after a `/clear` the same
 # agent's metadata is filed under two session directories at once (proven on this machine,
 # research-code-map §4.4), which the walk reported as two agents.
@@ -167,8 +155,8 @@ TARGET_BASE="${TARGET%@*}"
 # so an observation taken before the turn's first ListAgents call printed nothing and told
 # the operator to go take one. The roster answers the same question from state the system
 # already wrote, and one name means one row because the dispatch wall refuses a second.
-# The same walk runs in hooks/stop-guard.sh, deliberately duplicated per TDD §9 and held
-# together by tests/cross-gate-agreement.test.sh.
+# The stop guard walks the roster the same way in its own `_sg_roster_walk` (lib/stop.sh), a
+# copy of `observe_roster_walk` (lib/observe.sh), the walk this script takes through the look.
 
 # Candidate project slugs, in order: the cwd, then the enclosing repo root.
 # Claude Code names a project directory by slugifying its path — every
@@ -194,13 +182,12 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop-check"; fi
 . "$BIONIC_LIB/root.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
-# THE ONE READER OF THE LIVE SET (wave-roster-lifecycle S4/S6, D1′). hooks/stop-guard.sh
-# calls the SAME function on the SAME transcript, which is what makes the observation and the
-# gate resolve one candidate set (AC-10) — where before they carried one loop in two copies.
+# THE ONE READER OF THE LIVE SET, asked by the look for the type it prints (`observe_agent`,
+# lib/observe.sh). The stop guard does not load it, for the reason lib/observe.sh gives there.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/agents.sh"
 # THE OBSERVATION (REQ-2, D2; ADR-028). The resolution, the file facts, the contract
-# precedence and the classification, in the one place hooks/stop-guard.sh can reach them too.
+# precedence and the classification, in the one place the stop guard (lib/stop.sh) reaches them too.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/observe.sh"
 
@@ -256,7 +243,7 @@ DOCS_ROOT="$(docs_root "$PROJECT_DIR")"
 # unreadable and this command says so rather than guessing.
 OWN_SESSION_ID=$(session_id "" 2>/dev/null) || OWN_SESSION_ID=""
 
-# THE TRANSCRIPT. hooks/stop-guard.sh is handed one in its payload; this script has to find
+# THE TRANSCRIPT. The stop guard is handed one in its payload; this script has to find
 # the same file. The harness names it `<projects>/<slug>/<session-id>.jsonl`, so the slugs
 # above are tried first and a keyed walk of the project directories covers the one case that
 # breaks them: a worktree cwd files its session under a different slug from the repo it is
@@ -285,7 +272,7 @@ OWN_TRANSCRIPT=$(own_transcript) || OWN_TRANSCRIPT=""
 # `observe_agent` in payload/scripts/lib/observe.sh, because the STOP GATE needs the same
 # look and could not take one. It read a RECORD of an earlier run of this command instead,
 # and on 2026-09-15 refused a correct stop with "no observation exists in this repo" because
-# nobody had run it. One function, two callers: this one prints, hooks/stop-guard.sh decides.
+# nobody had run it. One function, two callers: this one prints, `stop_guard` (lib/stop.sh) decides.
 #
 # WHAT THIS COMMAND STILL IS. A PRODUCER that decides nothing (§4): every unresolved shape
 # prints what it saw, exits 1, and prints no machine line.
@@ -427,7 +414,7 @@ if [ "$OBS_PROGRESS_NAMED" -eq 1 ]; then
   # the ≥15m rule by one number — "too quiet" means quieter than the AUTHOR'S OWN declaration,
   # not a fixed clock — so the age above is unreadable without it. Printed here, never
   # compared: this command decides nothing. The COMPARISON is the library's `observe_class`,
-  # and hooks/stop-guard.sh is who acts on it.
+  # and the stop guard (`stop_guard`, lib/stop.sh) is who acts on it.
   if [ -n "$OBS_CADENCE" ]; then
     echo "cadence:  ${OBS_CADENCE}  (declared in the dispatch contract)"
   fi
