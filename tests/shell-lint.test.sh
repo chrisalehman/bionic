@@ -60,7 +60,7 @@
 #   §CENSUS-COMPLETE-2   a verdict outside the five words, and a rule line marked as a cull, are refused.
 #   §CENSUS-COMPLETE-3   the census covers every suite and every section of the real tests tree.
 #   §CENSUS-1            a section the census culls that is still in its suite is refused.
-#   §CENSUS-2            a section the census keeps that is gone from its suite is refused.
+#   §CENSUS-2            a kept section gone from its suite, or a baseline one gone with no culled line, is refused.
 #   §CENSUS-3            a culled-list line that culls a keep or a rule pin is refused.
 #   §CENSUS-4            the real tests tree is cut as tests/CENSUS.md says.
 #   §CENSUS-GONE         a cull gone with its code needs a listed name; a new culled duplicate has a verified catcher.
@@ -1762,6 +1762,8 @@ expect_eq "the real tests tree is covered by tests/CENSUS.md: no refusal" "" "$(
 #   gone with an unlisted name: a `— gone with <name>` line whose name is not on the deletion list
 #   unverified catcher culled: a culled duplicate whose record line names an `(unverified)` catcher and is not a line of
 #     the baseline census (the optional third file, the census before the cull began)
+#   gone with no culled line: a key of the baseline census with a ` §` part neither called in its suite nor on its
+#     suite's culled list, unless its suite stands and the whole key is called in a suite the baseline lacks (a split)
 # A section `gone with <name>` is a cull whose reason is that the code it pinned was deleted, so its record line, a keep
 # or a rule: keep, stands without the section being called. The optional fourth file is the deletion list.
 deletion_names() { /usr/bin/grep -o '`[a-z_.-]*`' "$1" 2>/dev/null | tr -d '`'; }
@@ -1780,15 +1782,19 @@ census_cull_refusals() {
                 if ($4 == "keep") nkeep[key]++; else ncull[key]++
                 if ($5 ~ /^rule: /) rule[key] = 1
                 if ($4 == "duplicate" && $6 ~ /[(]unverified[)]/ && !($7 in base)) fresh[key] = 1 }
-    $1 == "B" { base[$2] = 1 }
+    $1 == "B" { base[$2] = 1; if (sub(/^## /, "", $2)) bsuite[$2] = 1
+                else if (split($2, f, " [|] ") > 2 && sub(/^§/, "", f[2])) was[f[1] SUBSEP f[2]] = 1 }
     $1 == "L" { listed[$2] = 1 }
-    $1 == "U" { key = $2 SUBSEP $3; nm = $4
+    $1 == "U" { key = $2 SUBSEP $3; nm = $4; n = split($3, t, " §"); for (i = 1; i <= n; i++) part[$2 SUBSEP t[i]] = 1
                 if ($4 == "keep") print "keep in the culled list: " $2 " §" $3
                 if (sub(/^gone with /, "", nm)) { gone[key] = 1; if (!(nm in listed)) print "gone with an unlisted name: " nm }
                 if ($4 == "duplicate" && (key in fresh)) print "unverified catcher culled: " $2 " §" $3
                 U[key] = 1 }
-    $1 == "C" { called[$2 SUBSEP $4]++ }
+    $1 == "C" { called[$2 SUBSEP $4]++; stands[$2] = 1; if (!($2 in bsuite)) born[$4] = 1
+                n = split($4, t, " §"); for (i = 1; i <= n; i++) part[$2 SUBSEP t[i]] = 1 }
     END {
+      for (key in was) { split(key, p, SUBSEP); if ((p[1] in stands) && (p[2] in born)) continue
+        n = split(p[2], t, " §"); for (i = 1; i <= n; i++) if (!((p[1] SUBSEP t[i]) in part)) { print "gone with no culled line: " p[1] " §" p[2]; break } }
       for (key in U) if ((key in rule) && !(key in gone)) { split(key, p, SUBSEP); print "rule pin culled: " p[1] " §" p[2] }
       for (key in seen) {
         split(key, p, SUBSEP)
@@ -1828,7 +1834,8 @@ expect_eq "a shared key is read by whole title, and the culled one of the two is
 # ============================================================
 section "CENSUS-2: a section the census keeps that is gone from its suite is refused by suite and key"
 # ============================================================
-# fails-when: a section whose census line is a keep is deleted from its suite, and the sweep passes.
+# fails-when: a section whose census line is a keep is deleted from its suite, or a baseline section is gone with no
+# culled line (its suite and census lines with it, or the half of a narrowed key), and the sweep passes.
 CN2="$TMP/cn2"; census_scratch "$CN2"
 census_file "$CN2/keep.md" "$CS_ONE" "$CS_TWO"
 printf '\n## Culled\n\nx.test.sh §TWO — prose pin\n' >> "$CN2/keep.md"
@@ -1841,6 +1848,20 @@ expect_eq "the kept section deleted is refused naming the suite and the key" "ke
 rm -f "$CN2/tests/x.test.sh"
 expect_eq "…and so is a kept section whose whole suite is gone" "kept section absent: x.test.sh §ONE" \
   "$(census_cull_refusals "$CN2/tests" "$CN2/keep.md")"
+census_file "$CN2/left.md"
+expect_eq "a baseline section gone with its whole suite and its census lines, and no culled line, is refused by suite and key" \
+  "gone with no culled line: x.test.sh §ONE|gone with no culled line: x.test.sh §TWO" \
+  "$(census_cull_refusals "$CN2/tests" "$CN2/left.md" "$CN2/keep.md" | paste -sd'|' -)"
+printf '%s\n' 'section "ONE: split out"' > "$CN2/tests/w.test.sh"
+expect_eq "…a key split into a suite born since the baseline stands only while its own suite stands" \
+  "gone with no culled line: x.test.sh §ONE|gone with no culled line: x.test.sh §TWO" \
+  "$(census_cull_refusals "$CN2/tests" "$CN2/left.md" "$CN2/keep.md" | paste -sd'|' -)"
+printf '%s\n' 'section "THREE: stays"' 'section "§FOUR §FIVE: narrowed"' > "$CN2/tests/x.test.sh"
+census_file "$CN2/narrow.md" "$CS_ONE" 'x.test.sh | §FOUR §FIVE §SIX | keep | lib/x.sh: three arms | none (searched x in tests/)'
+expect_eq "…so it stands with its suite, and a narrowed key is refused while the half that went has no line" \
+  "gone with no culled line: x.test.sh §FOUR §FIVE §SIX" "$(census_cull_refusals "$CN2/tests" "$CN2/left.md" "$CN2/narrow.md")"
+printf '\n## Culled\n\nx.test.sh §SIX — prose pin\n' >> "$CN2/left.md"
+expect_eq "…and with that half listed nothing is refused" "" "$(census_cull_refusals "$CN2/tests" "$CN2/left.md" "$CN2/narrow.md")"
 
 # ============================================================
 section "CENSUS-3: a culled-list line that culls a keep or a rule pin is refused"
@@ -1886,8 +1907,8 @@ expect_eq "…and is admitted once its line is in the baseline census" "" \
 # ============================================================
 section "CENSUS-4: the tests tree is cut as tests/CENSUS.md says"
 # ============================================================
-# fails-when: a suite under tests/ still calls a section the census culls, a kept section is gone, or the culled
-# list holds a keep or a rule pin.
+# fails-when: a suite under tests/ still calls a section the census culls, a kept section or a baseline section is
+# gone with no culled line, or the culled list holds a keep or a rule pin.
 CN4_CULLED="$(sed -n '/^## Culled$/,$p' "$CENSUS_MD" 2>/dev/null | /usr/bin/grep -c '\.test\.sh §')"
 expect_true "the census carries a culled list to read (${CN4_CULLED} lines)" [ "${CN4_CULLED:-0}" -gt 0 ]
 CN4_BASE="$TMP/census-base.md"; git -C "$REPO" show 7a9633486:tests/CENSUS.md > "$CN4_BASE" 2>/dev/null
