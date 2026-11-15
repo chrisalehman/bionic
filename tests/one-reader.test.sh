@@ -1,7 +1,8 @@
 #!/bin/bash
 # tests/one-reader.test.sh — payload/scripts/one-reader-check.sh, the count of what the one-reader rule
 # names over a checkout: parsers of a plan or a log outside the reader, plan writers, event types with
-# two writers, refusal words in hook files and pasted loader copies. It reports and exits 0.
+# two writers, refusal words in hook files, pasted loader copies and retired verbs. It refuses a parser, a plan
+# writer, a shared type and a name, each planted alone in a root of its own, by file and line; the tree it passes.
 #
 #   §PARSERS      an awk over a plan planted under payload/scripts/lib/ is named and counted; the same awk inside
 #                 the reader's own file or its field reader's is admitted, and the landing library parses none. For each kind of line that reads
@@ -16,17 +17,18 @@
 #                 library's; each is paired with a planted second, the born one in the shape of a split; so is
 #                 a planted second appender of a waiver, a finding or a proof beside the one writer of each. A
 #                 printed search pattern is no writer.
-#   §NAMES        the verbs the dispatch, born and tree events and the landing's event retired, the five that wrote
-#                 a matrix cell and the commands with no job are named nowhere in hooks/ or payload/scripts/; nor those
-#                 that wrote a step's line, its fields, the regression's setting, its runs' count, a row's
-#                 confirmation and the cap, beside the step's and the approval's one writer in §WRITERS.
+#   §NAMES        the check names a planted retired verb by its line in each shape it reads (the verbs the events
+#                 retired, the five that wrote a matrix cell, the commands with no job, the writers of a step's line,
+#                 its fields, the regression's setting, its runs' count, a row's confirmation and the cap); the tree
+#                 names none, an older run's names in the reader's lists admitted. No verb writes a ledger file.
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted, one site for each name the
 #                 check counts; the dispatch wall lists none, and no fact the dispatch library says is in its file.
 #   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
 #                 the tree holds none.
 #   §LOADER       the loader block's mark is found in one file, lib/loader.sh, and the check reads no copy over the
 #                 tree; a copy planted in a hook file is listed and counted.
-#   §REPORT       the check exits 0 with findings and ends on the six count lines, in their order.
+#   §REPORT       with the plants the check exits 1, refusing each finding of the four kinds once; a loader copy
+#                 alone refuses nothing; it ends on the seven count lines, in their order.
 #   §READINGS     readings.sh prints the release's readings at a revision from git objects; reading 1 is the
 #                 check's own count over that tree, reading 7 the born events the reader lists for the record.
 #
@@ -39,9 +41,11 @@ set -uo pipefail
 CHECK="${BIONIC_SCRIPTS_DIR}/payload/scripts/one-reader-check.sh"
 S="$(mktemp -d)"; trap 'rm -rf "$S"' EXIT; mkdir -p "$S/payload"
 cp -R "${BIONIC_SCRIPTS_DIR}/hooks" "$S/hooks"; cp -R "${BIONIC_SCRIPTS_DIR}/payload/scripts" "$S/payload/scripts"
-run() { bash "$CHECK" "$S"; }
+run() { bash "$CHECK" "$S" 2>"$S/.err"; }
 count() { printf '%s\n' "$1" | sed -n "s/^$2=//p"; }
-BEFORE="$(run)"
+# One plant in a root that holds nothing else: the check's refusal lines, then its exit.
+lone() { local r="$S/lone-$1"; mkdir -p "$r/hooks" "$r/payload/scripts/lib"; cat > "$r/$2"; bash "$CHECK" "$r" 2>&1 >/dev/null; echo "rc=$?"; }
+BEFORE="$(run)"; BRC=$?
 L="$S/payload/scripts/lib"
 cat > "$L/planted-parse.sh" <<'EOF'
 planted_rows() { awk -F'|' '$2 ~ /^ T[0-9]+ $/ { print $2 }' "$plan"; }
@@ -98,14 +102,21 @@ EOF
 B="$S/payload/scripts/bring-forward.sh"
 { awk '{ print } /^bf_main\(\) \{/ { print "  printf x >> \"$plan\"" }' "$B"; echo 'planted_other() { printf x >> "$plan"; }'; } > "$S/bf" && cp "$S/bf" "$B"
 echo 'bf_main() { printf x >> "$plan"; }' > "$L/planted-act.sh"
+# A retired verb in each shape the check reads: by its own word, the poker run with it, a function and a case arm.
+printf '%s\n' '# launch-sync' '# tasks-prose' '# row-landed' '# session-poker.sh deliver T1' > "$L/planted-name.sh"
+printf '%s\n' '# matrix-retier' '# session-poker.sh discharge AC-1' > "$L/planted-cell.sh"
+printf '%s\n' '# bash "$POKER" wait r1' '  poker_verb_patrol() {' > "$L/planted-gone.sh"; printf '%s\n' '  tick|anchors)' > "$L/planted-poker-arm.sh"
+printf '%s\n' '# step-field 5 walk-artifact=x' '# regression-runs --write' '# confirm-row AC-1' '# session-poker.sh budget writers=2' > "$L/planted-step.sh"
 AFTER="$(run)"; RC=$?
 site() { printf '%s\n' "$AFTER" | awk -F'\t' -v f="payload/scripts/lib/planted-k$1.sh" '$2 == f { print $1, $3 }'; }
 
 section "PARSERS"
 expect_absent "the goals library reads a criterion's state and a plan's scale through the reader alone" "$(printf 'parser\tpayload/scripts/lib/plan.sh\t')" "$BEFORE"
 expect_absent "the fill library takes the run's step and approval from the reader alone" "$(printf 'parser\tpayload/scripts/lib/fill.sh\t')" "$BEFORE"
-expect_eq "parsers, plan writers and shared types stand at or under 13, 0 and 0" "1 1 1" \
-  "$(( $(count "$BEFORE" parsers) <= 13 )) $(( $(count "$BEFORE" plan_writers) <= 0 )) $(( $(count "$BEFORE" shared_types) <= 0 ))"
+expect_eq "parsers, plan writers and shared types stand at 0 on the tree, and the check exits 0 there" "0 0 0 rc=0" \
+  "$(count "$BEFORE" parsers) $(count "$BEFORE" plan_writers) $(count "$BEFORE" shared_types) rc=$BRC"
+expect_eq "an awk over a plan, planted alone, is refused by its file and line" "one-reader-check: refused — parser payload/scripts/lib/p.sh:1 rc=1" \
+  "$(lone parse payload/scripts/lib/p.sh < "$L/planted-parse.sh" | tr '\n' ' ' | sed 's/ $//')"
 expect_eq "headings: a message's, a constant's and a print's words are no parse; an unanchored match is" "parser sites=1 first=4" "$(site 1)"
 expect_eq "shapes: a printed one and a function line's comment are no parse; a log line's test is" "parser sites=1 first=3" "$(site 2)"
 expect_eq "operands: a function's argument, in a \$( ) or in words, is no read; a reader's own is, and a program's end" \
@@ -118,6 +129,8 @@ expect_absent "the landing library parses no record shape: its field reader is t
 
 section "PLANWRITERS"
 expect_contains "the planted plan write is named" "$(printf 'plan-writer\tpayload/scripts/lib/planted-write.sh\t')" "$AFTER"
+expect_eq "a plan write planted alone is refused by its file and line" "one-reader-check: refused — plan-writer payload/scripts/lib/p.sh:1 rc=1" \
+  "$(lone write payload/scripts/lib/p.sh < "$L/planted-write.sh" | tr '\n' ' ' | sed 's/ $//')"
 expect_absent "a plan write is not a parse" "$(printf 'parser\tpayload/scripts/lib/planted-write.sh')" "$AFTER"
 expect_absent "the units library writes no plan" "$(printf 'plan-writer\tpayload/scripts/lib/units.sh\t')" "$AFTER"
 expect_eq "the plan-writer count rises by the four planted writers" "$(( $(count "$BEFORE" plan_writers) + 4 ))" "$(count "$AFTER" plan_writers)"
@@ -129,6 +142,9 @@ expect_eq "writes: a log, a plan in refusal words and a copy's source are no pla
 section "WRITERS"
 expect_contains "two functions appending one type are a pair" \
   "$(printf 'shared\tborn\tpayload/scripts/lib/planted-writers.sh:planted_born_a payload/scripts/lib/planted-writers.sh:planted_born_b')" "$AFTER"
+expect_eq "a second appender planted alone is refused, each writer by its file, line and function" \
+  "one-reader-check: refused — shared born payload/scripts/lib/p.sh:1 planted_born_a, payload/scripts/lib/p.sh:2 planted_born_b rc=1" \
+  "$(head -2 "$L/planted-writers.sh" | lone writers payload/scripts/lib/p.sh | tr '\n' ' ' | sed 's/ $//')"
 pair() { printf '%s\n' "$AFTER" | awk -F'\t' -v t="$1" '$1 == "shared" && $2 == t { print $3 }'; }
 expect_eq "events: a printed search pattern writes none; a printed line does" "payload/scripts/lib/planted-k5.sh:2 planted_k5_put" \
   "$(printf '%s\n' "$AFTER" | awk -F'\t' '$1 == "writer" && $2 == "zzplant" { print $3 }')"
@@ -172,33 +188,16 @@ expect_eq "hand: one writer, the line library's, beside the matrix setters" "pay
     | /usr/bin/grep -v ' poker_verb_matrix_' | sort -u)"
 
 section "NAMES"
-names() { /usr/bin/grep -rnE 'launch-sync|ledger-add|ledger-set|task-set|task-split|tasks-prose|row-landed|row_landed|session-poker\.sh"? deliver|`deliver`|deliver <(row|id)>|^ *deliver\)' "$1/hooks" "$1/payload/scripts"; }
-printf '%s\n' '# launch-sync' '# tasks-prose' '# row-landed' '# session-poker.sh deliver T1' > "$L/planted-name.sh"
-expect_contains "the extractor reads a planted name" "planted-name.sh" "$(names "$S")"
-expect_eq "the retired verbs are named nowhere else" "" "$(names "$S" | grep -v planted-name.sh)"
-cells() { /usr/bin/grep -rnE 'matrix-(set|retier|render)|waive-row|poker_verb_discharge|discharge\)|(session-poker\.sh|plan_verb_open|plan_verb_swap|pv_next) discharge' "$1/hooks" "$1/payload/scripts" \
-  | grep -v -e '/payload/scripts/lib/translate\.sh:' -e 'w == "'; }   # an older run's hand acts are read by their names
-printf '%s\n' '# matrix-retier' '# session-poker.sh discharge AC-1' > "$L/planted-cell.sh"
-expect_eq "the extractor reads both planted names of the verbs that wrote a matrix cell" "2" "$(cells "$S" | grep -c planted-cell.sh)"
-expect_eq "the five verbs that wrote a matrix cell are named nowhere else" "" "$(cells "$S" | grep -v planted-cell.sh)"
-# The commands with no job are read by the shape of a use, never the bare word, for several are English: the poker run
-# with one as its verb, a function named for one, and a case arm of the poker's own.
-GONE_V='anchors|patrol|wait|cover|epic-row|continuation-fill|interval-default|window|fill-report|disposition'
-gone() {
-  { /usr/bin/grep -rnE "(session-poker\.sh|\\\$\{?[A-Za-z_]*(poker|POKER)[A-Za-z_]*\}?)[\"']? ($GONE_V)([^a-z_-]|\$)|poker_verb_(${GONE_V//-/_})([^a-z_]|\$)" "$1/hooks" "$1/payload/scripts"
-    /usr/bin/grep -rnE --include='*poker*.sh' "^ *([a-z-]+\|)*($GONE_V)(\|[a-z-]+)*\)" "$1/hooks" "$1/payload/scripts"; }
-}
-printf '%s\n' '# bash "$POKER" wait r1' '  poker_verb_patrol() {' > "$L/planted-gone.sh"
-printf '%s\n' '  tick|anchors)' > "$L/planted-poker-arm.sh"
-expect_eq "the extractor reads the planted call, function and case arm" "3" "$(gone "$S" | grep -c '/planted-')"
-expect_eq "the commands with no job are named nowhere else" "" "$(gone "$S" | grep -v '/planted-')"
-
-# A version-15 header still refuses the runs count's old key.
-steps() { /usr/bin/grep -rnE 'step-line|step-field|regression-runs|regression_runs_count|units_set_current|units_step_line|units_step_fields|poker_verb_regression\b|\|budget\||\|regression\|share\||confirm-row|confirm_row|matrix_block_key|poker_verb_budget|budget-override|session-poker\.sh"? budget|^  budget\)$' "$1/hooks" "$1/payload/scripts" \
-  | grep -v -e 'PLAN_READ_GONE_KEYS='; }
-printf '%s\n' '# step-field 5 walk-artifact=x' '# regression-runs --write' '# confirm-row AC-1' '# session-poker.sh budget writers=2' > "$L/planted-step.sh"
-expect_eq "the extractor reads the four planted names of the step's, the confirmation's and the cap's writers" "4" "$(steps "$S" | grep -c planted-step.sh)"
-expect_eq "the verbs that wrote a step's line, its fields, the regression's setting, its runs' count, a row's confirmation and the cap are named nowhere else" "" "$(steps "$S" | grep -v planted-step.sh)"
+nm() { printf '%s\n' "$AFTER" | awk -F'\t' -v f="payload/scripts/lib/planted-$1.sh:" '$1 == "name" && index($2, f) == 1 { sub(/.*:/, "", $2); print $2 }' | tr '\n' ' ' | sed 's/ $//'; }
+expect_eq "each planted line is named by its line: the verbs, the matrix cells', the commands with no job (a call, a function, a case arm), the step's and the cap's" \
+  "1 2 3 4|1 2|1 2|1|1 2 3 4" "$(nm name)|$(nm cell)|$(nm gone)|$(nm poker-arm)|$(nm step)"
+expect_eq "the tree names none, the plants thirteen" "0 13" "$(count "$BEFORE" names) $(count "$AFTER" names)"
+expect_eq "an older run's names in the translation, the plan reader's refused keys and a hand act's comparison stand and are no finding" "3 0" \
+  "$(cd "$S" && /usr/bin/grep -lE 'matrix-set|regression-runs|waive-row' payload/scripts/lib/translate.sh payload/scripts/lib/plan-read.sh hooks/poker/line.sh | grep -c .) $(count "$BEFORE" names)"
+expect_eq "a retired verb planted alone in a hook is refused by its file and line" "one-reader-check: refused — name hooks/p.sh:1 rc=1" \
+  "$(echo 'bash "$POKER" launch-sync T1' | lone name hooks/p.sh | tr '\n' ' ' | sed 's/ $//')"
+LN="$(/usr/bin/grep -o '`[a-z_.-]*`' "${BIONIC_SCRIPTS_DIR}/tests/fixtures/deletion-list.txt" | tr -d '`')"
+expect_eq "the deletion list yields names, and the check's own text holds none of them whole" "y 0" "${LN:+y} $(/usr/bin/grep -cwF -f <(printf '%s\n' "$LN") "$CHECK")"
 # A design ledger heading and a debt ledger row are read by the translation alone; no verb writes either file.
 ledgers() { /usr/bin/grep -rnE '## Δ|/ \\[|] /|" [|] raised-by ' "$1/hooks" "$1/payload/scripts" | grep -v -e '/payload/scripts/lib/translate\.sh:' -e ':[0-9]*: *#'; }
 printf '%s\n' '# ## Δ0 in a comment' "led_n() { sed -n 's/^## Δ\\([0-9]*\\).*/\\1/p' \"\$1\"; }" > "$L/planted-ledger.sh"
@@ -249,9 +248,13 @@ expect_absent "the loader's own file is not a copy" "$(printf 'loader\tpayload/s
 expect_eq "the planted copy raises the count by one" "$(( $(count "$BEFORE" loader_copies) + 1 ))" "$(count "$AFTER" loader_copies)"
 
 section "REPORT"
-expect_status "the check exits 0 with findings" 0 "$RC"
-expect_eq "it ends on the six count lines, in order" "parsers plan_writers shared_types hook_refusals loader_copies unheard_folds" \
-  "$(printf '%s\n' "$AFTER" | tail -6 | sed -n 's/^\([a-z_]*\)=[0-9][0-9]*$/\1/p' | tr '\n' ' ' | sed 's/ $//')"
+expect_status "with the plants the check exits 1" 1 "$RC"
+expect_eq "it refuses each planted parser, plan writer, shared type and name once, on stderr" \
+  "$(( $(count "$AFTER" parsers) + $(count "$AFTER" plan_writers) + $(count "$AFTER" shared_types) + $(count "$AFTER" names) ))" "$(grep -c '^one-reader-check: refused — ' "$S/.err")"
+expect_eq "a loader copy planted alone is listed and refuses nothing" "rc=0 loader_copies=1" \
+  "$(echo '# --- bionic-loader/v2 BEGIN' | lone loader hooks/p.sh | tr '\n' ' ')$(bash "$CHECK" "$S/lone-loader" | grep '^loader_copies=')"
+expect_eq "it ends on the seven count lines, in order" "parsers plan_writers shared_types hook_refusals loader_copies unheard_folds names" \
+  "$(printf '%s\n' "$AFTER" | tail -7 | sed -n 's/^\([a-z_]*\)=[0-9][0-9]*$/\1/p' | tr '\n' ' ' | sed 's/ $//')"
 bash "$CHECK" "$S/no-such" >/dev/null 2>&1; expect_status "a root that is not a checkout exits 2" 2 "$?"
 
 # §READINGS runs from the checkout; a scratch commit on a shared clone moves a count without touching it.

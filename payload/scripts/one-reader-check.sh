@@ -4,8 +4,8 @@
 #   bash one-reader-check.sh [<root>]      <root> defaults to the checkout this script sits in
 #
 # It reads every `*.sh` file under <root>/hooks and <root>/payload/scripts (symlinks not followed) and
-# prints one finding per line, `<kind>TAB<where>TAB<detail>`, then the six counts, one `key=value`
-# line each and always in this order, as the last six lines:
+# prints one finding per line, `<kind>TAB<where>TAB<detail>`, then the seven counts, one `key=value`
+# line each and always in this order, as the last seven lines:
 #
 #   parsers=<n>        files that parse a plan or a log, outside the reader's own files
 #   plan_writers=<n>   files that write a plan
@@ -13,10 +13,14 @@
 #   hook_refusals=<n>  refusal call sites inside a registered hook's own file
 #   loader_copies=<n>  files holding a pasted copy of the loader block
 #   unheard_folds=<n>  lines that take the run's fold or a reader answer and lose its exit
+#   names=<n>          lines that name a retired verb, read by the shape of its use
 #
-# It reports and refuses nothing: exit 0 whatever it finds, 2 when <root> holds no hooks/ and
-# payload/scripts/. A comment line, or the comment a function's line ends on, is never a parse, a
-# write or a refusal; the loader's BEGIN marker is the one comment read.
+# It refuses a parser, a plan writer, a shared type and a name: when any of those four counts is
+# above nought it prints one line for each such finding on stderr, `one-reader-check: refused — <kind>
+# <file>:<line>`, and exits 1. The other three counts are reported and refuse nothing. Exit 0 when none
+# of the four is found, 2 when <root> holds no hooks/ and payload/scripts/. A comment line, or the
+# comment a function's line ends on, is never a parse, a write or a refusal; the loader's BEGIN marker
+# is the one comment read, and a name is read in a comment as in code.
 #
 # THE DEFINITIONS, each a property of one line, so a finding names the line that makes it. A line's
 # COMMAND, for an operand or a pattern, is the text from the last `|`, `;` or `&` before it, or from
@@ -51,6 +55,12 @@
 #     _proof_ask, reader_main, reader_facts, reader_events or the reader program and pipes it, feeds a
 #     process substitution, assigns it to a local, or takes it in a $( ) whose exit no `||`, `&&`,
 #     `=$?` or `if` reads on that line: a fold that failed would read there as a run with no fact.
+#   - A NAME is a line of names_standing below: a verb the poker no longer has, in the shape of a use
+#     where the word is also English (the poker run with it, a function named for it, a poker case arm),
+#     else as its own word. The translation and the plan reader's list of refused keys read an older
+#     run by those names, and so does a comparison of an older hand act's name (`w == "`): those are no
+#     finding. A pattern brackets a hyphen or a letter (`[-]`, `[t]`) so that no name stands whole in
+#     this file: its own text matches none of them, and a word search of the tree for a name finds none here.
 #
 # THE READER'S FILES are named once, in READER_FILES: a parse inside one of them is the reader's own
 # and is admitted. THE ACT'S WRITES are named once, in ACT_WRITES, each a `<file>:<function>`: a plan write inside
@@ -77,10 +87,23 @@ hook_files="$(/usr/bin/grep -o -E 'hooks/[A-Za-z0-9_.-]+\.sh' hooks/hooks.json 2
 files=()
 while IFS= read -r f; do files+=("$f"); done < <(find hooks payload/scripts -type f -name '*.sh' | LC_ALL=C sort)
 
+names_standing() {  # -> `<file>:<line>:<text>` for each line naming a retired verb, once, in file and line order
+  local g='anchor[s]|patro[l]|wai[t]|cove[r]|epic[-]row|continuation[-]fill|interval[-]default|windo[w]|fill[-]report|dispositio[n]'
+  {
+    /usr/bin/grep -rnE 'launch[-]sync|ledger[-](add|set)|task[-](set|split)|tasks[-]prose|row[-_]landed|session-poker\.sh"? delive[r]|`delive[r]`|delive[r] <(row|id)>|^ *delive[r]\)' hooks payload/scripts
+    /usr/bin/grep -rnE 'matrix[-](set|retier|render)|waive[-]row|poker_verb_discharg[e]|discharg[e]\)|(session-poker\.sh|plan_verb_open|plan_verb_swa[p]|pv_next) discharg[e]' hooks payload/scripts \
+      | /usr/bin/grep -v -e '^payload/scripts/lib/translate\.sh:' -e 'w == "'
+    /usr/bin/grep -rnE "(session-poker\\.sh|\\\$\\{?[A-Za-z_]*(poker|POKER)[A-Za-z_]*\\}?)[\"']? ($g)([^a-z_-]|\$)|poker_verb_(${g//[-]/_})([^a-z_]|\$)" hooks payload/scripts
+    /usr/bin/grep -rnE --include='*poker*.sh' "^ *([a-z-]+\\|)*($g)(\\|[a-z-]+)*\\)" hooks payload/scripts
+    /usr/bin/grep -rnE 'step[-](line|field)|regressio[n][-]runs|regression_runs_coun[t]|units_set_curren[t]|units_step_(line|fields)|poker_verb_regressio[n]\b|\|budge[t]\||\|regressio[n]\|shar[e]\||confirm[-_]row|matrix_block_ke[y]|poker_verb_budge[t]|budge[t][-]override|session-poker\.sh"? budge[t]|^  budge[t]\)$' hooks payload/scripts \
+      | /usr/bin/grep -v -e 'PLAN_READ_GONE_KEYS='
+  } | LC_ALL=C sort -t: -k1,1 -k2,2n -u
+}
+
 # The patterns are written so that this file's own text matches none of them: `\/` and `[#]` stand
 # where the grammar has a bare character, so the check never counts itself. Lines are read as bytes:
 # the walk of a command a character at a time stops on a line that is no valid UTF-8.
-LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v acts=" $ACT_WRITES " -v hooks=" $hook_files " '
+NAMED="$(names_standing)" LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v acts=" $ACT_WRITES " -v hooks=" $hook_files " '
   function opname(s) {  # one operand token -> 1 when it names a plan, 2 a log
     if (s ~ /\.plan\.md"?$/) return 1
     if (s ~ /run\.log"?$/) return 2
@@ -159,6 +182,7 @@ LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v acts=" $ACT_WRITES " -v h
     id = FILENAME ":" fn[depth]
     if (!((type, id) in seen)) {
       seen[type, id] = 1; nwr[type]++; ids[type] = ids[type] (ids[type] == "" ? "" : " ") id
+      at[type] = at[type] (at[type] == "" ? "" : ", ") FILENAME ":" FNR " " fn[depth]
       if (!(type in tseen)) { tseen[type] = 1; tord[++nt] = type }
     }
   }
@@ -202,13 +226,17 @@ LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v acts=" $ACT_WRITES " -v h
     }
   }
   END {
-    for (i = 1; i <= np; i++) printf "parser\t%s\tsites=%d first=%d\n", pord[i], pn[pord[i]], pfirst[pord[i]]
-    for (i = 1; i <= npw; i++) printf "plan-writer\t%s\tsites=%d first=%d\n", word[i], wn[word[i]], wfirst[word[i]]
+    r = "one-reader-check: refused — "; e = "/dev/stderr"
+    nn = split(ENVIRON["NAMED"], nm, "\n")
+    for (i = 1; i <= np; i++) { printf "parser\t%s\tsites=%d first=%d\n", pord[i], pn[pord[i]], pfirst[pord[i]]; print r "parser " pord[i] ":" pfirst[pord[i]] > e }
+    for (i = 1; i <= npw; i++) { printf "plan-writer\t%s\tsites=%d first=%d\n", word[i], wn[word[i]], wfirst[word[i]]; print r "plan-writer " word[i] ":" wfirst[word[i]] > e }
     for (i = 1; i <= nw; i++) print wl[i]
-    for (i = 1; i <= nt; i++) if (nwr[tord[i]] > 1) { print "shared\t" tord[i] "\t" ids[tord[i]]; ns++ }
+    for (i = 1; i <= nt; i++) if (nwr[tord[i]] > 1) { print "shared\t" tord[i] "\t" ids[tord[i]]; print r "shared " tord[i] " " at[tord[i]] > e; ns++ }
     for (i = 1; i <= nr; i++) print rl[i]
     for (i = 1; i <= nl; i++) print ll[i]
     for (i = 1; i <= nu; i++) print ul[i]
-    printf "parsers=%d\nplan_writers=%d\nshared_types=%d\nhook_refusals=%d\nloader_copies=%d\nunheard_folds=%d\n", np, npw, ns, nr, nl, nu
+    for (i = 1; i <= nn; i++) { split(nm[i], f, ":"); t = nm[i]; sub(/^[^:]*:[^:]*:[ \t]*/, "", t)
+      print "name\t" f[1] ":" f[2] "\t" t; print r "name " f[1] ":" f[2] > e }
+    printf "parsers=%d\nplan_writers=%d\nshared_types=%d\nhook_refusals=%d\nloader_copies=%d\nunheard_folds=%d\nnames=%d\n", np, npw, ns, nr, nl, nu, nn
+    exit (np + npw + ns + nn > 0)
   }' "${files[@]}"
-exit 0
