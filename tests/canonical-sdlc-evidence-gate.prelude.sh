@@ -377,15 +377,13 @@ plan() {
 # A pointer body for post-Verify steps (6..9): non-empty, non-placeholder.
 step6_body="  review: .bionic/docs/plans/wave-01.plan.md#step-6-review"
 
-# Post-Verify step bodies for the 7 / 8 / 9 cases (the shapes their own
+# Post-Verify step bodies for the 7 / 8 cases (the shapes their own
 # validators demand — 29a and 19's integrate fixtures pin these independently).
 v9_step7_body="  n/a: no architectural decision in this wave"
 
 v9_step8_body="  merge: merged wave/bionic-1.3.2 into main
   worktree-removed: n/a
   cleanup: n/a"
-
-v9_step9_body="  delivered: close-out report and continuation.md written"
 
 # One table at either scale: a task-scale plan is tests/lib/plan-fixture.sh's, the one helper the shards share.
 . "$(dirname "$0")/lib/plan-fixture.sh"

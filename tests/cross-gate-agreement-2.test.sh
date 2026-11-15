@@ -76,13 +76,21 @@ cg_plan() {  # <current: value, or "" for none> -> a fixture plan path carrying 
   } > "$f"
   printf '%s' "$f"
 }
+cg_run() {  # <step> -> a page at 15 under a docs root's plans/, its run's log holding that one step as the step writer
+            # (lib/proof.sh `proof_step_event`) takes it: a digit, or a digit and its sub-step letter
+  local f="$SANDBOX/fx/cg15/.bionic/docs/plans/epic-99/at-$1.plan.md"
+  mkdir -p "${f%/*}" "$SANDBOX/fx/cg15/.bionic/docs/record/at-$1"
+  printf -- '---\ncanonical_sdlc_version: 15\n---\n# cg fixture plan\n' > "$f"
+  printf 'run/v1|ev=step|n=%s|at=2026-10-04T00:00:00Z\n' "$1" > "$SANDBOX/fx/cg15/.bionic/docs/record/at-$1/run.log"
+  printf '%s' "$f"
+}
 
 # ── CG.1 the a/b sub-step letter: both readers strip it and land on the SAME numbered step ──
 for CG_STEP in 3 4 8; do
   for CG_LETTER in '' a b; do
     CG_VAL="${CG_STEP}${CG_LETTER}"
-    CG_PLAN="$(cg_plan "$CG_VAL")"
-    expect_eq "CG.1 sched_plan_current(current: $CG_VAL) reads the step, letter stripped" \
+    CG_PLAN="$(cg_run "$CG_VAL")"
+    expect_eq "CG.1 sched_plan_current(step $CG_VAL) reads the step, letter stripped" \
       "$CG_STEP" "$(cg_sched_current "$CG_PLAN")"
     expect_eq "CG.1 …and run.sh's run_open agrees this is a live, in-range step" \
       "0" "$(cg_run_open "$CG_PLAN")"
@@ -138,8 +146,8 @@ cg_sched_current_mut() {  # <plan path> -> sched_plan_current's answer off the M
       '$0 ~ "^" n "\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$CG_MUT")"
     sched_plan_current "$1" ) 2>/dev/null
 }
-CG_PLAN_3B="$(cg_plan 3b)"
-expect_eq "CG.4 …the mutant copy rejects current: 3b as unreadable (the pre-fix bug)" \
+CG_PLAN_3B="$(cg_run 3b)"
+expect_eq "CG.4 …the mutant copy rejects step 3b as unreadable (the pre-fix bug)" \
   "" "$(cg_sched_current_mut "$CG_PLAN_3B")"
 expect_eq "CG.4 …while the shipped file still reads it as step 3 — CG.1 discriminates" \
   "3" "$(cg_sched_current "$CG_PLAN_3B")"

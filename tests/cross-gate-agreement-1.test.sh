@@ -71,7 +71,7 @@ printf '{}\n' > "$ISUB/agent-aworker-1111111111111111.jsonl"
 # set, and a roster row carrying the agent id the working log is filed under.
 cg_live "$ITR" "worker"
 cg_roster_row "$IREPO" "$SID_A" "worker" "aworker-1111111111111111" "" "identified"
-write_live_plan "$IREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+write_live_plan "$IREPO/.bionic/docs/plans/epic-99/wave-01.plan.md" 4
 
 # The producer, run for real, with the session key on the channel it actually
 # reads (CLAUDE_CODE_SESSION_ID — task 4/1's resolution) and a credential
@@ -167,7 +167,7 @@ printf '{"name":"worker"}' > "$SSUB/agent-aworker-2222222222222222.meta.json"
 printf '{}\n' > "$SSUB/agent-aworker-2222222222222222.jsonl"
 cg_live "$STR" "worker"
 cg_roster_row "$SREPO" "$SID_A" "worker" "aworker-2222222222222222" "" "identified"
-write_live_plan "$SREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+write_live_plan "$SREPO/.bionic/docs/plans/epic-99/wave-01.plan.md" 4
 
 # 1. the recorder, with the secret in the command line beside a real run
 SOUT=$( cd "$SREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" worker 2>/dev/null )
@@ -254,7 +254,7 @@ fi
 # actually creates the artefacts this assertion is here to bound. The value is a
 # syntactic placeholder; the probe tests PRESENCE, never validity.
 QREPO=$(new_repo "quiet")
-write_live_plan "$QREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+write_live_plan "$QREPO/.bionic/docs/plans/epic-99/wave-01.plan.md" 4
 before=$(find "$QREPO" | sort)
 # `.bionic/tmp` is no longer among the gate's creations: the fixture arms the Patrol, which
 # makes the directory before the gate runs (arm_patrol). What the gate adds is still exactly
@@ -292,7 +292,7 @@ section "E — classification + contract-source ride the machine line into the r
 RSLUG=$(printf '%s' "$SANDBOX/fx/resolver/repo" | sed 's/[^a-zA-Z0-9]/-/g')
 RPROJ="$CLAUDE_CONFIG_DIR/projects/$RSLUG"
 RREPO=$(new_repo "resolver")
-write_plan "$RREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+plan_fixture --current 4 "$RREPO/.bionic/docs/plans/epic-99/wave-01.plan.md" wave >/dev/null
 mkdir -p "$RPROJ/$SID_A/subagents" "$RPROJ/$SID_B/subagents"
 printf '{}\n' > "$RPROJ/$SID_A.jsonl"
 printf '{}\n' > "$RPROJ/$SID_B.jsonl"
