@@ -282,14 +282,16 @@ whole_run_at_head() {
   #                under the key it asks; given once, in the user's words, a placeholder refused, and its own ask closed
   #                at its instant. No order among them: the gate asks each only at the step after it.
   #   a criterion  a person's confirmation of a criterion whose check is theirs, admitted only where the reader's cells
-  #                give it tier T4 (any other tier is refused, naming it), on words lib/said.sh `user_said` finds the
-  #                person typed in this session; the reader reads it as that criterion's confirmation.
+  #                give it tier T4 (any other tier is refused, naming it); the reader reads it as that criterion's
+  #                confirmation.
   #   any other    a name an open row reads as `approval:<name>` (units.sh `units_approval_names`, exact, case kept), and
   #                merge-unproved where there is a release to approve: a name no row reads would be recorded while the
   #                row it was meant for waits. It is recorded once at a head: given again only once the working head
   #                (lib/proof.sh `proof_branch_head`) moved past the one the standing approval names, so the newest is
   #                read. An approval of a decision D<n> is also its ruling, by the one ruling writer (sitrep.sh
   #                `decisions_rule`), before the approval's own ask closes; a ruling already in the ledger stands beside it.
+  # Every kind is recorded only on words lib/said.sh `user_said` finds in a prompt the person typed in a session the run
+  # recorded; nothing is appended on a miss.
   poker_verb_approve() {
     case "$AP_REPLY$AP_WHY" in
       *$'\n'*|*$'\r'*|*'|'*)
@@ -336,13 +338,6 @@ whole_run_at_head() {
         die "REFUSED — $AP_NAME is a $AP_TIER criterion, and only a T4 criterion's check is the user's own to confirm; the auditor or a waiver rules it. Nothing was appended."
         exit 1
       fi
-      if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
-      if ! declare -F user_said >/dev/null 2>&1; then
-        die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing was appended."
-        exit 2
-      fi
-      user_said "$AP_REPLY" "$PV_PLAN"; AP_SAID=$?
-      [ "$AP_SAID" -eq 0 ] || { said_refuse "$AP_SAID" "$(said_fold "$AP_REPLY")" "a confirmation"; exit 1; }
     else
       AP_READ="$(units_approval_names "$PV_PLAN" | /usr/bin/grep -v '^plan$' | tr '\n' ' ' | sed 's/ $//')"
       case " $AP_READ " in *" release "*) AP_READ="$AP_READ merge-unproved" ;; esac
@@ -362,6 +357,17 @@ whole_run_at_head() {
         fi
       fi
     fi
+    # EVERY APPROVAL IS THE PERSON'S TYPED WORD, whatever it names: held to lib/said.sh `user_said` as a reply to the release
+    # card, a waiver and a move are, so an agent cannot record one alone and a prompt a program sent (no human origin) is
+    # none. Asked last, so a reply refused for its shape or its name is refused for that.
+    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
+    if ! declare -F user_said >/dev/null 2>&1; then
+      die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing was appended."
+      exit 2
+    fi
+    user_said "$AP_REPLY" "$PV_PLAN"; AP_SAID=$?
+    AP_ACT="an approval"; [ -z "$AP_TIER" ] || AP_ACT="a confirmation"
+    [ "$AP_SAID" -eq 0 ] || { said_refuse "$AP_SAID" "$(said_fold "$AP_REPLY")" "$AP_ACT"; exit 1; }
     if ! LOG_AT="$AP_AT" proof_approval_event "$PV_PLAN" "$AP_KEY" "by=$AP_WHO" ${AP_HEAD:+"head=$AP_HEAD"} "said=$AP_REPLY" ${AP_WHY:+"why=$AP_WHY"}; then
       die "REFUSED — the approval $AP_NAME could not be appended to the run's log of $PV_PLAN (no record directory beside the plan, or the log cannot be written)."
       exit 2
@@ -966,8 +972,8 @@ PF_PAIRS_LIST
   #
   # covering that question up to the head the plan's working branch's ref names, the head the judge
   # (lib/proof.sh `facts_state`) is asked about. The log's own order makes a fact written after it newer than it.
-  # `waive all` writes three, evidence, adversarial and structure, in that order. The plan is not written. The
-  # regression is never waived: it runs once after the build.
+  # `waive all` writes three, evidence, adversarial and structure, in that order, on words lib/said.sh `user_said` finds
+  # the person typed. The plan is not written. The regression is never waived: it runs once after the build.
   #
   # A CRITERION IS WAIVED BY THE SAME ONE WRITER, its event naming it where a question's names the question:
   #
@@ -1014,6 +1020,14 @@ PF_PAIRS_LIST
         die "REFUSED — a waiver's reply is one field of the run's log, which a '|' would split; give it without one. Nothing is written."
         exit 1 ;;
     esac
+    # A QUESTION'S WAIVER LETS A FAILED REVIEW THROUGH ON THE PERSON'S WORD, held to lib/said.sh `user_said` as a criterion's is.
+    if ! declare -F user_said >/dev/null 2>&1 && [ -f "$BIONIC_LIB/said.sh" ]; then . "$BIONIC_LIB/said.sh"; fi
+    if ! declare -F user_said >/dev/null 2>&1; then
+      die "REFUSED — what the user typed is read by lib/said.sh, which cannot be loaded from $BIONIC_LIB; nothing is written."
+      exit 2
+    fi
+    user_said "$WV_REPLY" "$PV_PLAN"; WV_SAID=$?
+    [ "$WV_SAID" -eq 0 ] || { said_refuse "$WV_SAID" "$(said_fold "$WV_REPLY")" "a waiver"; exit 1; }
     WV_READS="$(review_readings "$PV_PLAN")" \
       || { die "REFUSED — the run's facts could not be read, so the findings a waiver closes are not known; nothing is written. Run again: bash ${HOOK_DIR}/session-poker.sh waive $WV_Q"; exit 2; }
     for _wv_q in $WV_QS; do
