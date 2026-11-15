@@ -59,7 +59,8 @@
 #     where the word is also English (the poker run with it, a function named for it, a poker case arm),
 #     else as its own word. The translation and the plan reader's list of refused keys read an older
 #     run by those names, and so does a comparison of an older hand act's name (`w == "`): those are no
-#     finding. Its patterns spell a hyphen `[-]` so that this file's own text matches none of them.
+#     finding. A pattern brackets a hyphen or a letter (`[-]`, `[t]`) so that no name stands whole in
+#     this file: its own text matches none of them, and a word search of the tree for a name finds none here.
 #
 # THE READER'S FILES are named once, in READER_FILES: a parse inside one of them is the reader's own
 # and is admitted. THE ACT'S WRITES are named once, in ACT_WRITES, each a `<file>:<function>`: a plan write inside
@@ -87,14 +88,14 @@ files=()
 while IFS= read -r f; do files+=("$f"); done < <(find hooks payload/scripts -type f -name '*.sh' | LC_ALL=C sort)
 
 names_standing() {  # -> `<file>:<line>:<text>` for each line naming a retired verb, once, in file and line order
-  local g='anchors|patrol|wait|cover|epic[-]row|continuation[-]fill|interval[-]default|window|fill[-]report|disposition'
+  local g='anchor[s]|patro[l]|wai[t]|cove[r]|epic[-]row|continuation[-]fill|interval[-]default|windo[w]|fill[-]report|dispositio[n]'
   {
     /usr/bin/grep -rnE 'launch[-]sync|ledger[-](add|set)|task[-](set|split)|tasks[-]prose|row[-_]landed|session-poker\.sh"? delive[r]|`delive[r]`|delive[r] <(row|id)>|^ *delive[r]\)' hooks payload/scripts
-    /usr/bin/grep -rnE 'matrix[-](set|retier|render)|waive[-]row|poker_verb_discharg[e]|discharg[e]\)|(session-poker\.sh|plan_verb_open|plan_verb_swap|pv_next) discharg[e]' hooks payload/scripts \
+    /usr/bin/grep -rnE 'matrix[-](set|retier|render)|waive[-]row|poker_verb_discharg[e]|discharg[e]\)|(session-poker\.sh|plan_verb_open|plan_verb_swa[p]|pv_next) discharg[e]' hooks payload/scripts \
       | /usr/bin/grep -v -e '^payload/scripts/lib/translate\.sh:' -e 'w == "'
     /usr/bin/grep -rnE "(session-poker\\.sh|\\\$\\{?[A-Za-z_]*(poker|POKER)[A-Za-z_]*\\}?)[\"']? ($g)([^a-z_-]|\$)|poker_verb_(${g//[-]/_})([^a-z_]|\$)" hooks payload/scripts
     /usr/bin/grep -rnE --include='*poker*.sh' "^ *([a-z-]+\\|)*($g)(\\|[a-z-]+)*\\)" hooks payload/scripts
-    /usr/bin/grep -rnE 'step[-](line|field)|regression[-]runs|regression_runs_coun[t]|units_set_curren[t]|units_step_(line|fields)|poker_verb_regressio[n]\b|\|budge[t]\||\|regression\|shar[e]\||confirm[-_]row|matrix_block_ke[y]|poker_verb_budge[t]|budget[-]override|session-poker\.sh"? budge[t]|^  budge[t]\)$' hooks payload/scripts \
+    /usr/bin/grep -rnE 'step[-](line|field)|regressio[n][-]runs|regression_runs_coun[t]|units_set_curren[t]|units_step_(line|fields)|poker_verb_regressio[n]\b|\|budge[t]\||\|regressio[n]\|shar[e]\||confirm[-_]row|matrix_block_ke[y]|poker_verb_budge[t]|budge[t][-]override|session-poker\.sh"? budge[t]|^  budge[t]\)$' hooks payload/scripts \
       | /usr/bin/grep -v -e 'PLAN_READ_GONE_KEYS='
   } | LC_ALL=C sort -t: -k1,1 -k2,2n -u
 }

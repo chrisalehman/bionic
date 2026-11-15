@@ -196,6 +196,8 @@ expect_eq "an older run's names in the translation, the plan reader's refused ke
   "$(cd "$S" && /usr/bin/grep -lE 'matrix-set|regression-runs|waive-row' payload/scripts/lib/translate.sh payload/scripts/lib/plan-read.sh hooks/poker/line.sh | grep -c .) $(count "$BEFORE" names)"
 expect_eq "a retired verb planted alone in a hook is refused by its file and line" "one-reader-check: refused — name hooks/p.sh:1 rc=1" \
   "$(echo 'bash "$POKER" launch-sync T1' | lone name hooks/p.sh | tr '\n' ' ' | sed 's/ $//')"
+LN="$(/usr/bin/grep -o '`[a-z_.-]*`' "${BIONIC_SCRIPTS_DIR}/tests/fixtures/deletion-list.txt" | tr -d '`')"
+expect_eq "the deletion list yields names, and the check's own text holds none of them whole" "y 0" "${LN:+y} $(/usr/bin/grep -cwF -f <(printf '%s\n' "$LN") "$CHECK")"
 # A design ledger heading and a debt ledger row are read by the translation alone; no verb writes either file.
 ledgers() { /usr/bin/grep -rnE '## Δ|/ \\[|] /|" [|] raised-by ' "$1/hooks" "$1/payload/scripts" | grep -v -e '/payload/scripts/lib/translate\.sh:' -e ':[0-9]*: *#'; }
 printf '%s\n' '# ## Δ0 in a comment' "led_n() { sed -n 's/^## Δ\\([0-9]*\\).*/\\1/p' \"\$1\"; }" > "$L/planted-ledger.sh"
