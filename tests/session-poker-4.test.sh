@@ -1042,35 +1042,39 @@ section "§TICK-LANDS: the tick lands a record row on the registration its kind 
 # pass, and nothing else does. A row nobody launched lands when it is ready; a row that owes a registration lands on it,
 # never on its file: a review on its review registered, a regression row on the whole run's proof at the head, a walk
 # row on the walk's proof naming its record. Each reason a row waits is told once. FIXTURE FIDELITY: the task-scale
-# plan of §REVIEW-FILES, bound, the rows nobody launched (agent —, no tree), the proofs planted in proof_line's shape.
+# plan of §REVIEW-FILES at 15 (`vc_15`), bound, a build row landed by a code commit past the base, the record rows
+# nobody launched (agent —, no tree), each review row its own question, the proofs in proof_line's shape seeded in the
+# run's log (`sp_fact`).
 # fails-when: a row lands on its file alone, a landing writes a cell or a step line, a reason is told at every tick,
 # a refusal names no fix, or a row that waits on a landed row stays unready.
 TL="$(make_repo tick-lands)"; ( cd "$TL" && git commit -q --allow-empty -m init && git branch -M main ) >/dev/null 2>&1
 git -C "$TL" config user.name "Dana Fixture"
 TL_RD="record/wave-01-fixture"; TL_D=".bionic/docs/$TL_RD"
 TL_P="$(vc_plan "$TL" \
-  "| T21 | 6 | review | the evidence review | — | — | 30 | REQ-1 | $TL_D/r21.md | pending | approval:plan | $TL_D/r21.md |" \
+  "| T20 | 4 | build | the build the record rows read | implementor | — | 30 | REQ-1 | lib/y.sh | landed | — | — |" \
+  "| T21 | 6 | review | the evidence review · questions: evidence | — | — | 30 | REQ-1 | $TL_D/r21.md | pending | approval:plan | $TL_D/r21.md |" \
   "| T22 | 5 | test | the regression | — | — | 30 | REQ-1 | $TL_D/t22.md | pending | approval:plan | $TL_D/t22.md |" \
   "| T23 | 5 | verify | the walk | — | — | 30 | REQ-1 | $TL_D/walk.md | pending | approval:plan | $TL_D/walk.md |" \
-  "| T24 | 6 | review | a review naming two records | — | — | 30 | REQ-1 | $TL_D/r24a.md, $TL_D/r24b.md | pending | approval:plan | — |" \
-  "| T25 | 4 | build | the work after the review | implementor | — | 30 | REQ-1 | lib/z.sh | pending | approval:plan, T21 | — |" \
-  "| T26 | 6 | review | the review (a\\|b) | — | — | 30 | REQ-1 | $TL_D/none.md | pending | approval:plan | $TL_D/r26.md |")"
-TL_H="$(git -C "$TL" rev-parse main)"; new_roster "$TL"
+  "| T24 | 5 | verify | a walk naming two records | — | — | 30 | REQ-1 | $TL_D/r24a.md, $TL_D/r24b.md | pending | approval:plan | — |" \
+  "| T25 | 4 | build | the work after the regression | implementor | T22 | 30 | REQ-1 | $TL_D/z.md | pending | approval:plan | — |" \
+  "| T26 | 6 | review | the review (a\\|b) · questions: structure | — | — | 30 | REQ-1 | $TL_D/none.md | pending | approval:plan | $TL_D/r26.md |")"
+vc_15 "$TL" "$TL_P"; sed "s/^base-sha: abc1234$/base-sha: $(git -C "$TL" rev-parse main)/" "$TL_P" > "$TL_P.t" && mv "$TL_P.t" "$TL_P"
+( cd "$TL" && git add -f "$TL_P" && git commit -qm base ) >/dev/null 2>&1; TL_H="$(s57_commit "$TL" lib/y.sh 'the build the record rows read')"; new_roster "$TL"
 tl_state() { ( . "$(dirname "$S46_LIB")/units.sh" >/dev/null 2>&1; units_rows "$TL_P" ) | awk -F'\t' -v r="$1" '$1 == r { print $10 }'; }
 tl_pub() { cat "$TL/$TL_D/run.log" 2>/dev/null | /usr/bin/grep -c "^run/v1|ev=published|row=$1|commit=$TL_H|kind=record|by=orchestrator|"; }
-tl_plant() { TL_PL="$1" awk '{ print } /^current: / && !p { print ENVIRON["TL_PL"]; p = 1 }' "$TL_P" > "$TL_P.tmp" && mv "$TL_P.tmp" "$TL_P"; }
+tl_plant() { sp_fact "$TL_P" "$1"; }
 tl_said() { printf '%s\n' "$OUT" | /usr/bin/grep "NOT-LANDED $1 "; }
 for f in r21 t22 walk r24a r24b r26; do printf 'question: evidence\nresult: pass\nscope: piece\nverdict: CONFIRMED\n' > "$TL/$TL_D/$f.md"; done
 TL_ROWS0="$(/usr/bin/grep -E '^(\| T2[1-5] |- T2[1-5]:)' "$TL_P")"
 poke "$TL" tick
 expect_eq "TL-1 every record stands and nothing is registered: no row lands" "pending pending pending pending|0" \
-  "$(tl_state T21) $(tl_state T22) $(tl_state T23) $(tl_state T24)|$(cat "$TL/$TL_D/run.log" 2>/dev/null | /usr/bin/grep -c '|ev=published|')"
+  "$(tl_state T21) $(tl_state T22) $(tl_state T23) $(tl_state T24)|$(cat "$TL/$TL_D/run.log" 2>/dev/null | /usr/bin/grep -c '|ev=published|row=T2[1-6]|')"
 expect_contains "TL-2 the review row waits on its registration, the tick says so naming the verb" "proof-add review" "$(tl_said T21)"
 expect_contains "TL-3 the regression row waits on the whole run's proof at the head" "proof-add regression" "$(tl_said T22)"
 expect_contains "TL-4 the walk row waits on the walk's proof naming its record" "proof-add walk $TL_RD/walk.md" "$(tl_said T23)"
-expect_contains "TL-5 a review row naming two records and no artifact cell names the edit" "edit the artifact cell of T24 in the plan" "$(tl_said T24)"
+expect_contains "TL-5 a record row naming two records and no artifact cell names the edit" "edit the artifact cell of T24 in the plan" "$(tl_said T24)"
 expect_contains "TL-5b a task cell holding an escaped bar leaves the artifact cell its own: the record stands, the row is told" "proof-add review" "$(tl_said T26)"
-expect_eq "TL-6 T25 waits on T21's landing: not ready" "" "$(cd "$TL" && bash -c '. "$1/fill.sh" >/dev/null 2>&1; fill_ready_set "$2" 99999 0' _ "$(dirname "$S46_LIB")" "$TL_P" 2>/dev/null | /usr/bin/grep -x T25)"
+expect_eq "TL-6 T25 waits on T22's landing: not ready" "" "$(cd "$TL" && bash -c '. "$1/fill.sh" >/dev/null 2>&1; fill_ready_set "$2" 99999 0' _ "$(dirname "$S46_LIB")" "$TL_P" 2>/dev/null | /usr/bin/grep -x T25)"
 poke "$TL" tick
 expect_eq "TL-7 a second tick tells no reason again" "0" "$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'NOT-LANDED T2')"
 tl_plant "$(bash -c '. "$1" && proof_line review "$2" 2026-10-22T12:00:00Z "$3" evidence w-crit pass piece' _ "$S46_LIB" "$TL_H" "$TL_RD/r21.md")"
@@ -1078,13 +1082,13 @@ tl_plant "$(bash -c '. "$1" && proof_line regression "$2" 2026-10-22T12:00:00Z "
 tl_plant "$(bash -c '. "$1" && proof_line walk "$2" 2026-10-22T12:00:00Z "$3"' _ "$S46_LIB" "$TL_H" "$TL_RD/walk.md")"
 TL_ROWS1="$(/usr/bin/grep -E '^(\| T2[1-5] |- T2[1-5]:)' "$TL_P")"
 poke "$TL" tick
-expect_eq "TL-8 registered, each lands at the next tick: one published event of the record kind at the working head" "landed 1|landed 1|landed 1" \
-  "$(tl_state T21) $(tl_pub T21)|$(tl_state T22) $(tl_pub T22)|$(tl_state T23) $(tl_pub T23)"
+expect_eq "TL-8 registered, each lands at the next tick: one published event of the record kind at the working head" "landed 1|landed 1" \
+  "$(tl_state T22) $(tl_pub T22)|$(tl_state T23) $(tl_pub T23)"
 expect_eq "TL-9 …and no row or step line of theirs is written" "$TL_ROWS1" "$(/usr/bin/grep -E '^(\| T2[1-5] |- T2[1-5]:)' "$TL_P")"
 expect_eq "TL-9b …the rows read as they did before any tick" "$TL_ROWS0" "$TL_ROWS1"
-expect_eq "TL-10 T21 landed, T25 is ready" "T25" "$(cd "$TL" && bash -c '. "$1/fill.sh" >/dev/null 2>&1; fill_ready_set "$2" 99999 0' _ "$(dirname "$S46_LIB")" "$TL_P" 2>/dev/null | /usr/bin/grep -x T25)"
+expect_eq "TL-10 T22 landed, T25 is ready" "T25" "$(cd "$TL" && bash -c '. "$1/fill.sh" >/dev/null 2>&1; fill_ready_set "$2" 99999 0' _ "$(dirname "$S46_LIB")" "$TL_P" 2>/dev/null | /usr/bin/grep -x T25)"
 poke "$TL" tick
-expect_eq "TL-11 a landed row is not landed twice" "1 1 1" "$(tl_pub T21) $(tl_pub T22) $(tl_pub T23)"
+expect_eq "TL-11 a landed row is not landed twice" "1 1" "$(tl_pub T22) $(tl_pub T23)"
 # A live review row lands only once the judge reads every question it carries covered at the working head. T11 and T12,
 # a run at 15 (`vc_15`) launched by its log, carry the questions adversarial and structure, their readings at the head
 # seeded in the log; T12's writer ends only after a code commit past the readings.
