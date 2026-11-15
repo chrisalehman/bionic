@@ -640,6 +640,22 @@ printf '# continuation — hand written\n\n## Deferrals\n\n## Resume instruction
 BIONIC_GATE_DIR="$LAND_GATE" run_close "$PSE" run
 
 # ============================================================
+section "§APPROVED-HEAD — in the release order, close-out refuses a working head that is not the head the user approved"
+# ============================================================
+# FIXTURE FIDELITY: mk_fixture's run at 15 with a regression row and a release row, landed, its facts held at the working
+# head B; each approval is the event the approve verb appends, the newest one read.
+# fails-when: run closes the plan with the release approval at B's parent A and code between them.
+PAH="$(mk_fixture approved-head)"; awk '{ print } /^\| T2 \|/ { print "| T3 | 5 | test | the whole regression | — | 10 | AC-1 | — | — |"; print "| T4 | 7 | doc | the release | — | 10 | AC-1 | CHANGELOG.md | — |" }' "$PAH/$PLAN_REL" > "$PAH/$PLAN_REL.r" && mv "$PAH/$PLAN_REL.r" "$PAH/$PLAN_REL"
+printf 'run/v1|ev=published|row=%s|at=2026-10-04T12:30:00Z\n' T3 T4 >> "$PAH/$LOG_REL"; advance_to "$PAH" 8
+AH_B="$(fixture_git "$PAH" rev-parse wave/01-fixture)"; AH_A="$(fixture_git "$PAH" rev-parse wave/01-fixture^)"
+ah_appr() { printf 'run/v1|ev=approval|key=release|by=Dana Fixture|head=%s|said=Ship it.|at=2026-10-12T14:0%s:00Z\n' "$1" "$2" >> "$PAH/$LOG_REL"; }
+ah_appr "$AH_A" 0; AH_CK0="$(cksum < "$PAH/$PLAN_REL")|$(cksum < "$PAH/$LOG_REL")"; run_close "$PAH" run
+expect_eq "AH-C1 approved at A, the working head B with code past A: run refuses (rc 2) naming both heads, plan and log unchanged" \
+  "2|yes|$AH_CK0" "$CO_RC|$(contains "$CO_OUT" "the working head ${AH_B:0:12} is not the head the user approved for release, ${AH_A:0:12}")|$(cksum < "$PAH/$PLAN_REL")|$(cksum < "$PAH/$LOG_REL")"
+ah_appr "$AH_B" 1; run_close "$PAH" run
+expect_eq "AH-C0 control: the same run approved again at the working head B closes (rc 0)" "0" "$CO_RC"
+
+# ============================================================
 section "§ASKS-NOTHING — wave-38 T15 (D17; AC-1.6, AC-1.7): close-out puts no question to the user"
 # ============================================================
 # Close-out asks nothing: no `read` in close-out.sh reaches a terminal (every one is a loop fed by a here-string, a
