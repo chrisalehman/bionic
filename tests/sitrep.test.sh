@@ -10,18 +10,18 @@
 # local and 12-hour. `--line` is the Patrol's status, `<k> of <m> tasks · owed: <n> on you · <m> on events · close <time>`. The page,
 # its Score marks, the review rows, the grade verb and its log are gone; the card a later verb draws reads this.
 #
-# HERMETIC. One repository per world under a temp root: a 17-task plan, its landing record, its fill
-# ledger, the run's register of asks and a gate store of its own. The clock is BIONIC_NOW_EPOCH
+# HERMETIC. One repository per world under a temp root: a 17-task plan at version 15, its run's log and a gate
+# store of its own. The clock is BIONIC_NOW_EPOCH
 # (the poker's seam) and the zone is pinned, so every local time below is a fixed
 # string; no case reads this machine's clock. The machine's probes are pinned as the session-poker
 # prelude pins them, because the gate's scan samples them.
 #
-# FIXTURE FIDELITY. SYNTHESIZED, in the shapes the writers write: the landing record's `line/v1`
-# events as lib/line.sh writes them, the fill ledger's `fill-ledger/v1` lines as lib/stop.sh writes
-# them, a version-14 register's `owed/v1` lines as the last release's lib/owed.sh wrote them (one line per key) at
-# its old home in the run's record, which the reader translates, the gate's request files as lib/gate.sh writes them, a
-# session's binding through the bind verb itself, the review lines in the shape `proof-add review`
-# writes them, and a `## Tasks` header in the shipped table shape. What each world pins is what the
+# FIXTURE FIDELITY. SYNTHESIZED, in the shapes the writers write: the run's log holding the approval, the steps, the
+# landing's events as lib/line.sh writes them, the fill's stops as lib/stop.sh writes them, the asks as lib/owed.sh
+# opens and closes them, the decisions' rounds and the proofs as lib/proof.sh writes them; the gate's request files as
+# lib/gate.sh writes them, a session's binding through the bind verb itself, and a `## Tasks` header in the table shape
+# the cells are read by. The sections that test an older run's homes (its asks register, its design ledger, its state
+# section's landing lines) still write those homes. What each world pins is what the
 # fact under test reads, and nothing it does not.
 #
 # ANTI-VACUITY. Each fact is read in a world that holds it and then moved by one planted change; each
@@ -60,39 +60,40 @@ SR_H="$(printf 'a%.0s' $(seq 40))"
 
 # ---------- the world ----------
 #
-# sr_world <label> <landing minutes for T1..T4, space-separated | none> -> SR_REPO, SR_PLAN, SR_REC,
-# SR_DIR, SR_GATE. Seventeen rows, all Step 4 builds: T1–T4 landed (30 min each), T5–T8 active, T9–T17 pending. T9 reads lib/t8.sh, which T8 writes, so the remaining
+# sr_world <label> <landing minutes for T1..T4, space-separated | none> -> SR_REPO, SR_PLAN, SR_REC (the run's log),
+# SR_DIR, SR_GATE. A page at 15 and its run's log. Seventeen rows, all Step 4 builds: T1–T4 landed (30 min each), T5–T8 active, T9–T17 pending. T9 reads lib/t8.sh, which T8 writes, so the remaining
 # chain is T8→T9 (90 + 60 = 150 min); every other open row is 30 min and reads nothing of another's.
 # T12 reads approval:release and T17 approval:merge. With `none`, T1–T4 are pending too and the
 # landing record holds no landing. Two gate requests are admitted and held by this shell, so the
 # gate's admitted count is 2.
-# THE CLOCK (wave-39 T9; D25): the plan is approved at 10:00Z (its `approved-by:` instant, 12 hours before
-# NOW; SR_APPROVED=none leaves the line out, an unapproved plan) and declares `forecast: $SR_FORECAST` (48h when
+# THE CLOCK: the plan is approved at 10:00Z (its approval event's instant, 12 hours before
+# NOW; SR_APPROVED=none leaves the event out, an unapproved plan) and declares `forecast: $SR_FORECAST` (48h when
 # unset; an empty SR_FORECAST declares none). SR_EXTRA
 # appends that many more pending 30-minute rows (T18…), reading nothing, so the plan's total grows and the
 # chain does not. SR_SCALE, when set, declares `scale:`.
-# THE LANDING RECORD: each landed row has a `landed: row=…` header at its landing instant, as the landing writes it,
-# beside the queue's `published` event. The plan has no dispatch ledger, as the live plan has none.
+# THE RUN'S LOG, in the order its writers write it: the plan's approval and its step, the fill's first stop, each landed
+# row's ready, verdict and `published` events as the landing writes them, T8's ready and the fill's second stop. The
+# plan has no dispatch ledger, as the live plan has none.
 sr_world() {
   local label="$1" mins="$2" r d p
   r="$TMPROOT/$label"; mkdir -p "$r/.bionic/tmp" "$r/.bionic/docs/plans/epic-01-fx"
   ( cd "$r" && git init -q . 2>/dev/null )
   d="$r/.bionic/docs/record/wave-02-fx"; mkdir -p "$d"
   p="$r/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
-  SR_REPO="$r"; SR_PLAN="$p"; SR_DIR="$d"; SR_REC="$d/landing-proofs.log"; : > "$SR_REC"
+  SR_REPO="$r"; SR_PLAN="$p"; SR_DIR="$d"; SR_REC="$d/run.log"; : > "$SR_REC"
   local st1=landed land=yes
   [ "$mins" = none ] && { st1=pending; land=no; }
   {
-    printf -- '---\nwave: wave-02-fx\ncanonical_sdlc_version: 14\nrelease: 9.9.0\nworking-branch: wave/02-fx\nintegration-branch: main\n'
+    printf -- '---\nwave: wave-02-fx\ncanonical_sdlc_version: 15\nrelease: 9.9.0\nworking-branch: wave/02-fx\nintegration-branch: main\n'
     [ -z "${SR_SCALE:-}" ] || printf 'scale: %s\n' "$SR_SCALE"
     [ -z "${SR_FORECAST-48h}" ] || printf 'forecast: %s\n' "${SR_FORECAST-48h}"
     [ -z "${SR_GOALS:-}" ] || printf '%s\n' "$SR_GOALS" | sed 's/^/goals: /'
     printf -- '---\n'
-    printf '# fixture plan\n\n## SDLC State\n\n'
-    [ "${SR_APPROVED-}" = none ] || printf 'approved-by: fixture 2026-10-06T10:00:00Z "approved"\n'
-    printf 'current: 4\n\n'
-    printf -- '- Step 4: implementation opened\n'
+    printf '# fixture plan\n'
   } > "$p"
+  [ "${SR_APPROVED-}" = none ] || sr_ev "ev=approval|key=step3|by=fixture|said=approved|at=2026-10-06T10:00:00Z"
+  sr_ev "ev=step|n=4|at=2026-10-06T10:00:00Z"
+  sr_stop t1 10:00:00 0 4 "" "" 0 "" 4
   local i at
   if [ "$land" = yes ]; then
     set -- $mins
@@ -101,15 +102,15 @@ sr_world() {
     for rd in $readies; do
       e=$(( SR_E0 + $(sr_hms "$rd") + ${!i} * 60 ))
       at="$(sr_iso "$e")"
-      printf -- '- T%d: landed %s %s — .worktrees/02-T%d\n' "$i" "$SR_C1" "$at" "$i" >> "$p"
       sr_ev "ev=ready|row=T$i|name=w-T$i|commit=$SR_C1|branch=wt/02-T$i|tree=$r/.worktrees/02-T$i|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T${rd}Z"
       sr_ev "ev=verdict|row=T$i|commit=$SR_C1|suite=a.test.sh|result=green|log=/rec/T$i.log|at=$(sr_iso $((e - 60)))"
       sr_ev "ev=published|row=T$i|commit=$SR_C1|kind=queue|by=-|why=-|at=$at"
-      printf 'landed: row=T%d branch=wt/02-T%d head=%s merge=%s at=%s\n' "$i" "$i" "$SR_C1" "$SR_C1" "$at" >> "$SR_REC"
       i=$((i + 1))
     done
   fi
   sr_ev "ev=ready|row=T8|name=w-T8|commit=$SR_C1|branch=wt/02-T8|tree=$r/.worktrees/02-T8|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T13:00:00Z"
+  # The fill's two turns, nothing idle, the first at 10:00Z (elapsed 720 min at NOW).
+  sr_stop t2 16:00:00 4 0 "" "" 0 "" 0
   {
     printf '\n## Tasks\n\n'
     printf '| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
@@ -127,9 +128,6 @@ sr_world() {
     i=18; while [ "$i" -le $((17 + ${SR_EXTRA:-0})) ]; do sr_row "T$i" "Row $i body · complexity: standard" — 30 pending; i=$((i + 1)); done
     printf '\n## Not Doing\n\n- nothing\n'
   } >> "$p"
-  # The fill ledger: two turns, nothing idle, the first at 10:00Z (elapsed 720 min at NOW).
-  printf 'fill-ledger/v1|at=2026-10-06T10:00:00Z|session=%s|turn=t1|current=4|state=ok|ceiling=|width=4|open=0|free=4|ready=|launched=|declined=|missed=0|idle=|room=4\n' "$SID" > "$d/fill-ledger.log"
-  printf 'fill-ledger/v1|at=2026-10-06T16:00:00Z|session=%s|turn=t2|current=4|state=ok|ceiling=|width=4|open=4|free=0|ready=|launched=|declined=|missed=0|idle=|room=0\n' "$SID" >> "$d/fill-ledger.log"
   SR_GATE="$TMPROOT/gate-$label"; mkdir -p "$SR_GATE/requests" "$SR_GATE/cost"
   for i in 1 2; do
     printf 'key=a.test.sh\nkind=landing\nwho=%s:w-T%d\ntree=/elsewhere/project\nasked=%d\nholder=%s:\nadmitted=%d\npromise=5:0.1:30\n' \
@@ -138,7 +136,10 @@ sr_world() {
 }
 sr_iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
 sr_hms() { local h="${1%%:*}" r="${1#*:}"; printf '%d' $(( 10#$h * 3600 + 10#${r%%:*} * 60 + 10#${r#*:} - 36000 )); }
-sr_ev() { printf 'line/v1|%s\n' "$1" >> "$SR_REC"; }
+sr_ev() { printf 'run/v1|%s\n' "$1" >> "$SR_REC"; }
+sr_stop() {  # <turn> <hh:mm:ss on 2026-10-06, UTC> <open> <free> <ready> <launched> <missed> <idle> <room> -> one stop of the fill, as the stop writes it
+  sr_ev "ev=stop|session=$SID|turn=$1|current=4|state=ok|ceiling=|width=4|open=$3|free=$4|ready=$5|launched=$6|declined=|missed=$7|idle=$8|room=$9|at=2026-10-06T${2}Z"
+}
 sr_row() {  # <id> <task> <reads> <size> <status>
   local n="${1#T}"
   printf '| %s | 4 | build | %s | — | — | %s | %s | REQ-1 | lib/t%s.sh | — | — | %s | — | — | — |\n' "$1" "$2" "$3" "$4" "$n" "$5"
@@ -153,7 +154,8 @@ sr_owed() {  # <owed/v1 fields after the schema> [<plan>] -> one line on that ru
   local f; f="$(sr_reg "${2:-$SR_PLAN}")" || return 1
   mkdir -p "${f%/*}"; printf 'owed/v1|%s\n' "$1" >> "$f"
 }
-sr_ask_ev() { local f; f="$(sr_reg "${2:-$SR_PLAN}")" && mkdir -p "${f%/*}" && printf 'run/v1|ev=ask|%s\n' "$1" >> "${f%/*}/run.log"; }  # <ask fields, at= last> [<plan>] -> one ask event in that run's log
+sr_log() { local p="${1:-$SR_PLAN}"; p="${p##*/}"; printf '%s/.bionic/docs/record/%s/run.log\n' "$SR_REPO" "${p%.plan.md}"; }   # [<plan>] -> that run's log
+sr_ask_ev() { local f; f="$(sr_log "${2:-$SR_PLAN}")" && mkdir -p "${f%/*}" && printf 'run/v1|ev=ask|%s\n' "$1" >> "$f"; }  # <ask fields, at= last> [<plan>] -> one ask event in that run's log, as lib/owed.sh writes it
 sr_owed_sid() { printf 'run/v1|ev=ask|%s\n' "$1" >> "$SR_REPO/.bionic/tmp/owed-$2.state"; }  # <ask fields, at= last> <session> -> one ask event in the store of a session acting for no run
 # sr_prev <minutes> [<scale>] -> a delivered plan beside this one (T1 of 60 min declared,
 # declaring `scale: <scale>` when given) approved at 10:00Z the day before, whose T1 lands <minutes>
@@ -164,17 +166,17 @@ sr_prev() {
   local land=$((SR_E0 - 86400 + $1 * 60))
   mkdir -p "$d"
   {
-    printf -- '---\nwave: wave-40-prev\nrelease: 9.8.0\n%s---\n# prev\n\n## SDLC State\n\napproved-by: fixture 2026-10-05T10:00:00Z "approved"\ncurrent: 9\n\n' "${2:+scale: $2$'\n'}"
-    printf -- '- Step 9: delivered: 2026-10-05T20:00Z wave-40-prev 9.8.0 — closed by close-out.sh\n'
+    printf -- '---\nwave: wave-40-prev\ncanonical_sdlc_version: 15\nrelease: 9.8.0\n%s---\n# prev\n' "${2:+scale: $2$'\n'}"
     printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
     printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
     printf '| T1 | 4 | build | Prev row · complexity: standard | — | — | — | 60 | REQ-1 | lib/p1.sh | — | — | landed | — | — | — |\n'
   } > "$p"
   {
-    printf 'line/v1|ev=ready|row=T1|name=p-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=%s\n' "$SR_C1" "$SR_REPO" "$(sr_iso $((land - 60)))"
-    printf 'line/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=%s\n' "$SR_C1" "$(sr_iso "$land")"
-    printf 'landed: row=T1 branch=wt/01-T1 head=%s merge=%s at=%s\n' "$SR_C1" "$SR_C1" "$(sr_iso "$land")"
-  } > "$d/landing-proofs.log"
+    printf 'run/v1|ev=approval|key=step3|by=fixture|said=approved|at=2026-10-05T10:00:00Z\n'
+    printf 'run/v1|ev=ready|row=T1|name=p-T1|commit=%s|branch=wt/01-T1|tree=%s/.worktrees/01-T1|suites=a.test.sh|debt=-|carrier=1:x|at=%s\n' "$SR_C1" "$SR_REPO" "$(sr_iso $((land - 60)))"
+    printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=%s\n' "$SR_C1" "$(sr_iso "$land")"
+    printf 'run/v1|ev=step|n=9|delivered=2026-10-05T20:00Z wave-40-prev 9.8.0 — closed by close-out.sh|at=2026-10-05T20:00:00Z\n'
+  } > "$d/run.log"
 }
 sr_run() {  # <args after the verb…> -> OUT (stdout), ERR (stderr), RC; the world's plan is named last by the caller
   ( cd "$SR_REPO" && exec env CLAUDE_CODE_SESSION_ID="${SR_SID:-$SID}" BIONIC_NOW_EPOCH="${SR_AT:-$SR_NOW}" BIONIC_GATE_DIR="$SR_GATE" \
@@ -242,17 +244,15 @@ sr_waste() { for k in waste.dropped waste.runs-discarded waste.ready-unstarted; 
 # with one open S2 finding and a review of a piece passing, three goals (one met, one not met, one not measured),
 # five asks of five kinds open on the register beside one closed, and a decision put and not ruled.
 SR_D_WAIT="Answered now or in an hour, nothing moves: no task waits on it."
-sr_ledger_put() {  # <D<n>> <title> <wait line> -> the run's design ledger holds one put of it, nothing ruled
-  printf '# Design ledger — wave-02-fx\n\n## Δ0 — %s put (orchestrator 2026-10-06 1:30 PM PDT): %s\n\n%s\n' "$1" "$2" "$3" > "$SR_DIR/design-ledger.md"
+sr_ledger_put() {  # <D<n>> <title> <wait line> -> the run's log holds one put of it at 1:30 PM PDT, nothing ruled
+  sr_ev "ev=decision|entry=Δ0|d=$1|verb=put|by=orchestrator|title=$2|wait=$3|at=2026-10-06T20:30:00Z"
 }
 sr_close_ask() {  # <key> [<plan>] -> the ask closed by lib/owed.sh's own closer on that run's register
   ( cd "$SR_REPO" && OWED_ROOT="$SR_REPO" OWED_SID="$SID" OWED_PLAN="${2:-$SR_PLAN}" bash -c '. "$1" && owed_close "$2" fixture' _ "$SR_OWED_LIB" "$1" )
 }
 sr_reviews() {  # -> two reviews landed on the plan: evidence on the whole failing, adversarial on a piece passing
-  awk -v h="$SR_H" '{ print } /^current: [0-9]+$/ {
-    print "proved: kind=review head=" h " at=2026-10-06T20:00:00Z evidence=record/wave-02-fx/auditor-evidence.md question=evidence reader=w-T20 result=fail scope=whole"
-    print "proved: kind=review head=" h " at=2026-10-06T20:05:00Z evidence=record/wave-02-fx/critic-adversarial.md question=adversarial reader=w-T21 result=pass scope=piece" }' \
-    "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+  sr_ev "ev=proof|kind=review|head=$SR_H|evidence=record/wave-02-fx/auditor-evidence.md|question=evidence|reader=w-T20|result=fail|scope=whole|at=2026-10-06T20:00:00Z"
+  sr_ev "ev=proof|kind=review|head=$SR_H|evidence=record/wave-02-fx/critic-adversarial.md|question=adversarial|reader=w-T21|result=pass|scope=piece|at=2026-10-06T20:05:00Z"
 }
 sr_sheet_world() {
   SR_GOALS="fast landings · one-file median under 15m (landing-report --rows)
@@ -263,21 +263,22 @@ handoff · a fresh session continues a no-run handoff (record/reader-test-handof
     $2 == " T13 " && NF > 12 { $4 = " review "; $14 = " active " }
     $2 == " T16 " && NF > 12 { $14 = " dropped " }
     { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+  sr_ev "ev=drop|row=T16|why=fixture|at=2026-10-06T13:00:00Z"
   sr_ev "ev=verdict|row=T7|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T7.log|at=2026-10-06T14:00:00Z"
   sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=discarded|log=/rec/T8.log|at=2026-10-06T14:10:00Z"
-  printf 'fill-ledger/v1|at=2026-10-06T16:00:00Z|session=%s|turn=t2|current=4|state=ok|ceiling=|width=4|open=3|free=1|ready=T9|launched=|declined=|missed=1|idle=T9|room=1\n' "$SID" >> "$SR_DIR/fill-ledger.log"
-  printf 'fill-ledger/v1|at=2026-10-06T17:12:00Z|session=%s|turn=t3|current=4|state=ok|ceiling=|width=4|open=4|free=0|ready=|launched=T9|declined=|missed=0|idle=|room=0\n' "$SID" >> "$SR_DIR/fill-ledger.log"
+  sr_stop t2 16:00:00 3 1 T9 "" 1 T9 1
+  sr_stop t3 17:12:00 4 0 "" T9 0 "" 0
   printf 'reviewed: %s..%s\nfindings: 1\nfinding: 1 S2 on lib/t1.sh:3 the thing breaks\nshown: 1 bash tests/x.test.sh\n' "$SR_C1" "$SR_H" > "$SR_DIR/auditor-evidence.md"
   printf 'reviewed: %s..%s\nfindings: 0\n' "$SR_C1" "$SR_H" > "$SR_DIR/critic-adversarial.md"
   sr_reviews
   printf 'Gating: 9 passed, 0 failed\nWall: 3000s · work 9000s · width 4\n' > "$SR_DIR/regression-run-$SR_H.log"
-  awk -v h="$SR_H" '{ print } /^current: 4$/ { print "proved: kind=regression head=" h " at=2026-10-06T20:00:00Z evidence=record/wave-02-fx/regression-run-" h ".log" }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
-  sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
-  sr_owed "key=waive:adversarial|state=open|sent=-|at=2026-10-06T20:01:00Z|title=waiver: adversarial|reply=poker: the adversarial review failed at the head"
-  sr_owed "key=row:AC-1.2|state=open|sent=-|at=2026-10-06T20:02:00Z|title=ruling: row AC-1.2|reply=poker: AC-1.2 is not proved — rule it"
-  sr_owed "key=ruling:r1|state=open|sent=-|at=2026-10-06T20:03:00Z|title=ruling unread: F1|reply=poker: a ruling waits to be read"
-  sr_owed "key=gate:abc|state=open|sent=-|at=2026-10-06T20:04:00Z|title=gate act: merge|reply=poker: GATE T17 — merge: approve it"
-  sr_owed "key=approve:merge|state=open|sent=-|at=2026-10-06T20:05:00Z|title=approval: merge|reply=poker: WAIT T17 — approval:merge"
+  sr_ev "ev=proof|kind=regression|head=$SR_H|evidence=record/wave-02-fx/regression-run-$SR_H.log|at=2026-10-06T20:00:00Z"
+  sr_ask_ev "key=approve:release|sent=-|title=approval: release|at=2026-10-06T20:00:00Z"
+  sr_ask_ev "key=waive:adversarial|sent=-|title=waiver: adversarial|at=2026-10-06T20:01:00Z"
+  sr_ask_ev "key=row:AC-1.2|sent=-|title=ruling: row AC-1.2|at=2026-10-06T20:02:00Z"
+  sr_ask_ev "key=ruling:r1|sent=-|title=ruling unread: F1|at=2026-10-06T20:03:00Z"
+  sr_ask_ev "key=gate:abc|sent=-|title=gate act: merge|at=2026-10-06T20:04:00Z"
+  sr_ask_ev "key=approve:merge|sent=-|title=approval: merge|at=2026-10-06T20:05:00Z"
   sr_close_ask approve:merge
   sr_ledger_put D21 "the gate the judge holds" "$SR_D_WAIT"
 }
@@ -360,8 +361,8 @@ sr_launch() {  # <row> <hh:mm:ss on 2026-10-06, UTC> -> a roster's launch of tha
 sr_mw_world() {  # <label> -> the world above
   SR_EXTRA=1 sr_world "$1" "6 6 12 12"
   awk -F'|' 'BEGIN { OFS = "|" } $2 == " T16 " && NF > 12 { $14 = " dropped " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
-  awk '{ print } /^- Step 4: / { print "- T17: pending dispatch — added by task-add at 2026-10-06T09:00:00Z"
-                                 print "- T18: pending dispatch — added by task-add at 2026-10-06T12:00:00Z" }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+  sr_ev "ev=drop|row=T16|why=fixture|at=2026-10-06T13:00:00Z"
+  sr_ev "ev=born|row=T17|at=2026-10-06T09:00:00Z"; sr_ev "ev=born|row=T18|at=2026-10-06T12:00:00Z"
   sr_launch T1 09:36:00; sr_launch T2 10:06:00; sr_launch T3 10:12:00; sr_launch T4 11:12:00
   sr_launch T5 12:00:00; sr_launch T6 12:00:00; sr_launch T7 20:00:00; sr_launch T8 20:00:00
 }
@@ -422,11 +423,11 @@ expect_eq "PC6 two: the chain at 1×, the predicted close the unscaled one, and 
   "$(sr_m close.predicted)|$(sr_m close.unscaled)|$(sr_d close.predicted | /usr/bin/grep -q 'basis: .*at 1×.*under 3' && echo yes)"
 # What the prediction assumes of you: an ask holding a task off the chain assumes nothing; one holding a chain task does.
 sr_mw_world pace-waits
-sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
+sr_ask_ev "key=approve:release|sent=-|title=approval: release|at=2026-10-06T20:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "PC7 an ask holding 4/12, off the chain: the prediction waits on no answer" "no" "$(sr_m close.waits-on-you)"
 awk -F'|' 'BEGIN { OFS = "|" } $2 == " T9 " { $8 = " lib/t8.sh, approval:design " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
-sr_owed "key=approve:design|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: design|reply=poker: WAIT T9 — approval:design"
+sr_ask_ev "key=approve:design|sent=-|title=approval: design|at=2026-10-06T20:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "PC8 an ask holding 4/9, on the chain: the prediction assumes it is answered now, and names it" "yes: approve:design" \
   "$(sr_m close.waits-on-you)"
@@ -506,7 +507,7 @@ done
 expect_eq "KD2 by kind: a 20-minute build row is scaled to 1 min; verify, doc, integrate and close rows sit at their 20" \
   "build 3:01 PM|verify 3:20 PM|doc 3:20 PM|integrate 3:20 PM|close 3:20 PM|" "$KD2"
 sr_open T5 build 90 pending approval:design
-sr_owed "key=approve:design|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: design|reply=poker: WAIT T5 — approval:design"
+sr_ask_ev "key=approve:design|sent=-|title=approval: design|at=2026-10-06T20:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "KD3 a build row held on an ask open on you is unscaled, 90 min out, and the ask is named" "4:30 PM|yes: approve:design" \
   "$(sr_m close.predicted)|$(sr_m close.waits-on-you)"
@@ -562,13 +563,13 @@ expect_eq "WS2 waste: dropped, suite runs discarded, ready tasks unstarted, minu
   "$(for k in waste.dropped waste.runs-discarded waste.ready-unstarted waste.waiting-on-you; do sr_m "$k"; done | sr_join)"
 # T9 reads approval:design, asked 13:00Z and closed 14:00Z: 60 minutes. approve:other held nothing: no minute.
 awk -F'|' 'BEGIN { OFS = "|" } $2 == " T9 " { $8 = " lib/t8.sh, approval:design " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
-sr_owed "key=approve:design|state=closed|by=approve|at=2026-10-06T14:00:00Z|opened=2026-10-06T13:00:00Z"
-sr_owed "key=approve:other|state=closed|by=approve|at=2026-10-06T11:00:00Z|opened=2026-10-06T10:00:00Z"
+sr_ask_ev "key=approve:design|sent=-|title=approval: design|at=2026-10-06T13:00:00Z"; sr_ask_ev "key=approve:design|reply=approve|at=2026-10-06T14:00:00Z"
+sr_ask_ev "key=approve:other|sent=-|title=approval: other|at=2026-10-06T10:00:00Z"; sr_ask_ev "key=approve:other|reply=approve|at=2026-10-06T11:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "WS3 a closed ask that held a task counts from opened to closed; one that held nothing counts no minute" \
   "60 min: approve:design" "$(sr_m waste.waiting-on-you)"
 # approve:release, holding T12, open since 13:30Z: 13:00Z to now, 540 min, the half hour both were open counted once.
-sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T13:30:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
+sr_ask_ev "key=approve:release|sent=-|title=approval: release|at=2026-10-06T13:30:00Z"
 sr_run "$SR_PLAN"
 expect_eq "WS4 an open ask counts from its raising to now, an overlap once" "540 min: approve:design and approve:release" \
   "$(sr_m waste.waiting-on-you)"
@@ -631,12 +632,10 @@ sr_mw_world span
 awk '/^\| T17 / { print; print "| T18 | 8 | integrate | Merge row · complexity: standard | — | — | — | 10 | REQ-1 | lib/t18.sh | — | — | pending | — | — | — |"; next } { print }' \
   "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 SP_REC="record/wave-02-fx/critic-structure.md"
-awk -v h="$SR_H" -v rec="$SP_REC" '{ print } /^current: 4$/ {
-  print "proved: kind=review head=" h " at=2026-10-06T12:00:00Z evidence=" rec " question=structure reader=w-T2 result=flag scope=whole"
-  print "deferred: " rec "#2 S2 on \"a thing\""
-  print "proved: kind=review head=" h " at=2026-10-06T13:00:00Z evidence=record/wave-02-fx/critic-evidence.md question=evidence reader=w-T1 result=fail scope=whole"
-  print "waived: question=evidence head=" h " by Chris Lehman 2026-10-06T14:00:00Z \"waive it\"" }' \
-  "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_ev "ev=proof|kind=review|head=$SR_H|evidence=$SP_REC|question=structure|reader=w-T2|result=flag|scope=whole|at=2026-10-06T12:00:00Z"
+sr_ev "ev=finding|ref=$SP_REC#2|to=defer|by=fixture|words=a thing|at=2026-10-06T12:00:00Z"
+sr_ev "ev=proof|kind=review|head=$SR_H|evidence=record/wave-02-fx/critic-evidence.md|question=evidence|reader=w-T1|result=fail|scope=whole|at=2026-10-06T13:00:00Z"
+sr_ev "ev=waiver|question=evidence|head=$SR_H|by=Chris Lehman|said=waive it|at=2026-10-06T14:00:00Z"
 SP_CARRY="carry:record:wave-02-fx:critic-structure.md:2"
 sr_owed "key=waive:evidence|state=closed|by=waive|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
@@ -673,7 +672,7 @@ awk -F'|' 'BEGIN { OFS = "|" } $2 == " T5 " && NF > 12 { $8 = " approval:release
     print "| T18 | 8 | integrate | Merge row · complexity: standard | — | — | proof:review, head, approval:release, lib/t8.sh, approval:D4 | 10 | REQ-1 | lib/t18.sh | — | — | pending | — | — | — |"
     print "| T19 | 9 | close | Close · complexity: standard | — | — | — | 10 | REQ-1 | .bionic/docs/record/wave-02-fx/close.md | — | — | pending | — | — | — |" }' \
   "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
-sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
+sr_ask_ev "key=approve:release|sent=-|title=approval: release|at=2026-10-06T20:00:00Z"
 sr_ledger_put D4 "the width" "$SR_D_WAIT"
 sr_run "$SR_PLAN"
 expect_eq "WA0 precondition: the sheet prints (exit 0), T18 held, T19 pending, T5 held on what it reads" "0|held|pending|held" \
@@ -694,7 +693,7 @@ section "§KINDS: an unruled matrix row (row:) and an unread ruling (ruling:) op
 # ============================================================
 # fails-when: either is open and missing from the sheet.
 sr_world kinds "6 6 12 12"
-sr_owed "key=row:AC-2.1|state=open|sent=-|at=2026-10-06T21:00:00Z|title=ruling: row AC-2.1|reply=poker: AC-2.1 is not proved — rule it"
+sr_ask_ev "key=row:AC-2.1|sent=-|title=ruling: row AC-2.1|at=2026-10-06T21:00:00Z"
 sr_ask_ev "key=ruling:r9|sent=-|title=ruling unread: T5|prompt=poker: NOT-LANDED T5 — w-T5 ended (MET) with an orchestrator ruling unread (r9); the row holds until a writer reads it: re-dispatch the row, or drop it|at=2026-10-06T21:01:00Z"
 sr_run "$SR_PLAN"
 expect_eq "KI1 the open row: and ruling: asks are on the sheet, raised at their local times" "row:AC-2.1 2:00 PM|ruling:r9 2:01 PM" \
@@ -856,13 +855,10 @@ section "§ORDER: the task lines are in execution order — done by landing time
 # landing with one of its two suites green, T6 and T5 queued behind it, T7 building, and T10 reading what T11 writes
 # so that dependency order puts T11 first.
 sr_world order-run "60 6 12 12"
-awk '
-  /^- T3: / { print "- T3: reason: rebuilt after T2 landed-by-hand: Dana Fixture (the orchestrator) 2026-10-06T10:50:00Z \"merged by hand on its greens\" — .worktrees/02-T3"; next }
-  /^\| T10 \| / { sub(/\| — \| 30 \|/, "| lib/t11.sh | 30 |") }
-  { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
-# T3 landed by hand, which the plan's line alone records: its queue landing leaves the record, which the reader would
-# read before the plan.
-awk '!/^landed: row=T3 / && !/^line\/v1\|ev=published\|row=T3\|/' "$SR_REC" > "$SR_REC.t" && mv "$SR_REC.t" "$SR_REC"
+awk '/^\| T10 \| / { sub(/\| — \| 30 \|/, "| lib/t11.sh | 30 |") } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+# T3 landed by hand: its queue landing leaves the log, and the hand landing's published event takes its place.
+awk '!/^run\/v1\|ev=published\|row=T3\|/' "$SR_REC" > "$SR_REC.t" && mv "$SR_REC.t" "$SR_REC"
+sr_ev "ev=published|row=T3|kind=hand|by=Dana Fixture (the orchestrator)|why=merged by hand on its greens|at=2026-10-06T10:50:00Z"
 SR_CAND="$(printf 'd%.0s' $(seq 40))"
 sr_ev "ev=ready|row=T8|name=w-T8|commit=$SR_C1|branch=wt/02-T8|tree=$SR_REPO/.worktrees/02-T8|suites=a.test.sh,b.test.sh|debt=-|carrier=1:x|at=2026-10-06T13:05:00Z"
 sr_ev "ev=ready|row=T6|name=w-T6|commit=$SR_C1|branch=wt/02-T6|tree=$SR_REPO/.worktrees/02-T6|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T13:30:00Z"
@@ -900,7 +896,7 @@ expect_eq "ME2 …answered by a later green: the suite green at its last run, th
   "$(sr_m tests.suites-run)|$(sr_f "$(sr_task T8)" state)"
 # Open findings of a registered review, one then two.
 printf 'reviewed: %s..%s\nfindings: 1\nfinding: 1 S2 on lib/t1.sh:3 the thing breaks\nshown: 1 bash tests/x.test.sh\n' "$SR_C1" "$SR_H" > "$SR_DIR/critic.md"
-awk -v h="$SR_H" '{ print } /^current: 4$/ { print "proved: kind=review head=" h " at=2026-10-06T20:00:00Z evidence=record/wave-02-fx/critic.md question=adversarial reader=crit result=fail scope=piece" }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_ev "ev=proof|kind=review|head=$SR_H|evidence=record/wave-02-fx/critic.md|question=adversarial|reader=crit|result=fail|scope=piece|at=2026-10-06T20:00:00Z"
 sr_run "$SR_PLAN"
 SR_ME3="$(sr_correct)"
 printf 'reviewed: %s..%s\nfindings: 2\nfinding: 1 S2 on lib/t1.sh:3 the thing breaks\nfinding: 2 S1 on lib/t2.sh:4 and so does this\nshown: 1 bash tests/x.test.sh\nshown: 2 bash tests/y.test.sh\n' "$SR_C1" "$SR_H" > "$SR_DIR/critic.md"
@@ -920,8 +916,9 @@ expect_eq "ME4 a discarded run, then a run killed at the gate: each counts as di
   "$SR_ME4|$(sr_waste)"
 # A task dropped, and an idle turn from 16:00Z to 17:12Z: 72 minutes.
 awk -F'|' 'BEGIN { OFS = "|" } ($2 == " T15 " || $2 == " T16 ") && NF > 12 { $14 = " dropped " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
-printf 'fill-ledger/v1|at=2026-10-06T16:00:00Z|session=%s|turn=t2|current=4|state=ok|ceiling=|width=4|open=3|free=1|ready=T9|launched=|declined=|missed=1|idle=T9|room=1\n' "$SID" >> "$SR_DIR/fill-ledger.log"
-printf 'fill-ledger/v1|at=2026-10-06T17:12:00Z|session=%s|turn=t3|current=4|state=ok|ceiling=|width=4|open=4|free=0|ready=|launched=T9|declined=|missed=0|idle=|room=0\n' "$SID" >> "$SR_DIR/fill-ledger.log"
+sr_ev "ev=drop|row=T15|why=fixture|at=2026-10-06T15:30:00Z"; sr_ev "ev=drop|row=T16|why=fixture|at=2026-10-06T15:30:00Z"
+sr_stop t2 16:00:00 3 1 T9 "" 1 T9 1
+sr_stop t3 17:12:00 4 0 "" T9 0 "" 0
 sr_run "$SR_PLAN"
 expect_eq "ME5 two tasks dropped and a 72-minute idle turn: the waste in numbers; the dropped tasks leave the count" \
   "2 tasks, 60 min|2 of 6|72 min|4 tasks, 120 of 540 min, 22%" "$(sr_waste)|$(sr_m work.landed)"
@@ -958,13 +955,11 @@ expect_eq "ME6d a later green of the standing suite answers it: two suites red" 
 # holds a later reading of one question and scope at one head in place of the earlier, so each stands as one line.
 sr_world metrics-reviews "6 6 12 12"
 for f in s1 s2 a1 a2 e1; do printf 'reviewed: %s..%s\nfindings: 0\n' "$SR_C1" "$SR_H" > "$SR_DIR/$f.md"; done
-awk -v h="$SR_H" '{ print } /^current: 4$/ {
-  print "proved: kind=review head=" h " at=2026-10-06T19:00:00Z evidence=record/wave-02-fx/s1.md question=structure reader=c1 result=pass scope=whole"
-  print "proved: kind=review head=" h " at=2026-10-06T19:05:00Z evidence=record/wave-02-fx/a1.md question=adversarial reader=c2 result=fail scope=piece"
-  print "proved: kind=review head=" h " at=2026-10-06T19:10:00Z evidence=record/wave-02-fx/e1.md question=evidence reader=a1 result=pass scope=whole"
-  print "proved: kind=review head=" h " at=2026-10-06T20:00:00Z evidence=record/wave-02-fx/s2.md question=structure reader=c3 result=fail scope=whole"
-  print "proved: kind=review head=" h " at=2026-10-06T20:05:00Z evidence=record/wave-02-fx/a2.md question=adversarial reader=c4 result=pass scope=piece" }' \
-  "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_ev "ev=proof|kind=review|head=$SR_H|evidence=record/wave-02-fx/s1.md|question=structure|reader=c1|result=pass|scope=whole|at=2026-10-06T19:00:00Z"
+sr_ev "ev=proof|kind=review|head=$SR_H|evidence=record/wave-02-fx/a1.md|question=adversarial|reader=c2|result=fail|scope=piece|at=2026-10-06T19:05:00Z"
+sr_ev "ev=proof|kind=review|head=$SR_H|evidence=record/wave-02-fx/e1.md|question=evidence|reader=a1|result=pass|scope=whole|at=2026-10-06T19:10:00Z"
+sr_ev "ev=proof|kind=review|head=$SR_H|evidence=record/wave-02-fx/s2.md|question=structure|reader=c3|result=fail|scope=whole|at=2026-10-06T20:00:00Z"
+sr_ev "ev=proof|kind=review|head=$SR_H|evidence=record/wave-02-fx/a2.md|question=adversarial|reader=c4|result=pass|scope=piece|at=2026-10-06T20:05:00Z"
 sr_run "$SR_PLAN"
 expect_eq "RV1 five results of reviews, a line for each one standing, and the count by question and scope at its latest: 2 passed, 1 failed" \
   "5|a1.md a2.md e1.md s1.md s2.md|2 passed, 1 failed, 0 running" \
@@ -987,8 +982,7 @@ expect_eq "SU1 three suites by their last verdict (a discarded run is none); the
   "3: 2 green, 1 red|not run yet|0 passed, 0 failed, 0 running|0" \
   "$(sr_correct)"
 SR_H2="$(printf 'b%.0s' $(seq 40))"
-awk -v h="$SR_H2" '{ print } /^current: 4$/ { print "proved: kind=regression head=" h " at=2026-10-06T15:00:00Z evidence=record/wave-02-fx/regression-run-" h ".log" }' \
-  "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_ev "ev=proof|kind=regression|head=$SR_H2|evidence=record/wave-02-fx/regression-run-$SR_H2.log|at=2026-10-06T15:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "SU2 a whole run proved at a head this repository does not hold: red at its head, which is not behind the working head" \
   "red at bbbbbbbb, not in this head's history" "$(sr_m tests.whole-run)"
@@ -1001,21 +995,19 @@ section "§WHOLE: the whole run reads green only at the head it ran at with noth
 # fails-when: a proof line reads green whatever its owed= says; or a head past it reads red with only docs landed (WH3, WH4)
 # or green with a code path landed (WH5); or the landings since the whole run go uncounted, or a count of one says landings.
 # FIXTURE FIDELITY: the world's tree committed and the working branch set on it, so the whole run's head is a commit
-# here; the proof line is the one `proof-add regression` writes (lib/proof.sh `proof_floor_line`); each later commit
+# here; the proof is the event `proof-add regression` writes (lib/proof.sh `proof_event`); each later commit
 # is a commit on the working branch.
 # ANTI-VACUITY: WH1 reads green and WH2 red through the same measurement on the same world, one planted owed= apart; WH5 is
 # the mutant of WH3 and WH4, one code commit apart, so the green arms read content and not position.
-sr_proof() {  # <head> [<owed suites>] -> the plan's regression proof replaced by one at <head> that left <owed> red
-  local l
-  l="$(bash -c '. "$1/proof.sh" && proof_floor_line "$2" 2026-10-06T15:00:00Z "record/wave-02-fx/regression-run-$2.log" "${3:-}"' _ "$SR_PROOF_LIB" "$1" "${2:-}")"
-  awk -v l="$l" '/^proved: kind=regression / { next } { print } /^current: 4$/ { print l }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_proof() {  # <head> [<owed suites>] -> the run's regression proof replaced by one at <head> that left <owed> red
+  awk '!/^run\/v1\|ev=proof\|kind=regression\|/' "$SR_REC" > "$SR_REC.t" && mv "$SR_REC.t" "$SR_REC"
+  sr_ev "ev=proof|kind=regression|head=$1|evidence=record/wave-02-fx/regression-run-$1.log${2:+|owed=$2}|at=2026-10-06T15:00:00Z"
 }
 sr_commit() {  # <file> -> one more commit on the working branch, the branch moved to it; prints nothing
   mkdir -p "$(dirname "$SR_REPO/$1")"; printf 'x\n' >> "$SR_REPO/$1"
   ( cd "$SR_REPO" && git add -A >/dev/null 2>&1 && git -c user.email=t@t -c user.name=t commit -qm "$1" >/dev/null 2>&1 )
   git -C "$SR_REPO" branch -f wave/02-fx HEAD >/dev/null 2>&1
 }
-SR_PROOF_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib"
 sr_world whole-head "6 6 12 12"
 sr_commit lib/a.sh
 SR_F="$(git -C "$SR_REPO" rev-parse wave/02-fx)"
@@ -1084,8 +1076,9 @@ expect_eq "PA1 four landings: their own time against their size, and the close s
   "4 tasks, 135 min against 120 sized min|5:49 PM|5:30 PM" "$(sr_m work.task-time)|$(sr_m close.predicted)|$(sr_m close.unscaled)"
 # A row landed twice, the second a merge of its own, counts once, to its later landing; a header naming no row of the
 # plan counts nothing.
-printf 'landed: row=T1 branch=wt/02-T1 head=%s merge=%s at=2026-10-06T12:30:00Z\nlanded: row=— branch=wt/02-x head=%s merge=%s at=2026-10-06T13:00:00Z\nlanded: row=T99 branch=wt/02-y head=%s merge=%s at=2026-10-06T13:00:00Z\n' \
-  "$SR_C1" "$SR_H" "$SR_C1" "$SR_C1" "$SR_C1" "$SR_C1" >> "$SR_REC"
+sr_ev "ev=published|row=T1|commit=$SR_H|kind=queue|by=-|why=-|at=2026-10-06T12:30:00Z"
+sr_ev "ev=published|row=—|commit=$SR_C1|kind=queue|by=-|why=-|at=2026-10-06T13:00:00Z"
+sr_ev "ev=published|row=T99|commit=$SR_C1|kind=queue|by=-|why=-|at=2026-10-06T13:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "PA1b a re-landed row counts once, to its later header; a header naming no row of the plan counts nothing" \
   "4 tasks, 280 min against 120 sized min" "$(sr_m work.task-time)"
@@ -1098,8 +1091,7 @@ expect_eq "PA2 no landing: the chain at 1×, nothing landed to measure" \
 # Fewer than three landings scale nothing: two of the four rows land (T3's and T4's landings gone from the record and
 # the plan's lines, their status cells still landed); then one; then three. sr_unland <row regex> takes them out.
 sr_unland() {
-  awk -v r="$1" '!($0 ~ "^landed: row=(" r ") " || $0 ~ "^line/v1[|]ev=published[|]row=(" r ")[|]")' "$SR_REC" > "$SR_REC.t" && mv "$SR_REC.t" "$SR_REC"
-  awk -v r="$1" '!($0 ~ "^- (" r "): landed ")' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+  awk -v r="$1" '!($0 ~ "^run/v1[|]ev=published[|]row=(" r ")[|]")' "$SR_REC" > "$SR_REC.t" && mv "$SR_REC.t" "$SR_REC"
 }
 sr_world pace-two "5 5 5 5"
 sr_launch T1 09:35:00; sr_launch T2 10:05:00; sr_launch T3 10:35:00; sr_launch T4 11:20:00
@@ -1154,9 +1146,10 @@ awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T([5-9]|1[0-7]) $/ { $14 = " landed " } {
 sr_run "$SR_PLAN"
 expect_eq "CC3 every task landed and the run open: the predicted close is now, nothing left to forecast" "3:00 PM|1|none: no task is open" \
   "$(sr_m close.predicted)|$(sr_d close.predicted | /usr/bin/grep -c 'no task is open')|$(sr_m close.chain)"
-sr_w38_world
-awk '{ print } /^current: 9$/ && !d { print "approved-by: fixture 2026-10-18T03:00:00Z \"approved\""; d = 1 }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
-awk '/^\| T21 \| / { sub(/\| landed \|/, "| active |") } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+SR_APPROVED=none SR_EXTRA=4 sr_world guess-delivered "6 6 12 12"
+for sr_i in 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do sr_set "T$sr_i" status landed; done; sr_set T21 status active
+sr_ev "ev=approval|key=step3|by=fixture|said=approved|at=2026-10-18T03:00:00Z"
+sr_ev "ev=step|n=9|delivered=2026-10-18T15:07Z wave-02-fx 9.9.0 — closed by close-out.sh|at=2026-10-18T15:07:00Z"
 sr_run "$SR_PLAN"
 expect_eq "CC4 a delivered run with a task still open after the delivery: its close is the delivery, against the forecast end" \
   "running|8:07 AM 2026-10-18|48 h, ends 8:00 PM 2026-10-19|1" \
@@ -1181,8 +1174,8 @@ sr_bind
 sr_run --line "$SR_PLAN"
 expect_eq "L1 the clean world: one line, exit 0" "0|4 of 17 tasks · owed: 0 on you · 0 on events · close 5:30 PM" "$RC|$OUT"
 sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T8.log|at=2026-10-06T14:00:00Z"
-sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
-sr_owed "key=gate:abc|state=open|sent=-|at=2026-10-06T20:00:00Z|title=gate act: merge|reply=poker: GATE T28 — merge: approve it"
+sr_ask_ev "key=approve:release|sent=-|title=approval: release|at=2026-10-06T20:00:00Z"
+sr_ask_ev "key=gate:abc|sent=-|title=gate act: merge|at=2026-10-06T20:00:00Z"
 sr_run --line "$SR_PLAN"
 SR_L2="$OUT"
 sr_run "$SR_PLAN"
@@ -1192,7 +1185,7 @@ SR_FORECAST= sr_world line-none none
 sr_run --line "$SR_PLAN"
 expect_eq "L3 no landing: the close is the chain at 1×" "0 of 17 tasks · owed: 0 on you · 0 on events · close 5:30 PM" "$OUT"
 section "§UNBOUND: --line over a run with no landing record prints its line and nothing on stderr"
-rm -f "$SR_REC"; sr_b=bash; for sr_c in /opt/homebrew/bin/bash /usr/local/bin/bash; do [ -x "$sr_c" ] && { sr_b="$sr_c"; break; }; done; SR_BASH="$sr_b" sr_run --line "$SR_PLAN"
+sr_b=bash; for sr_c in /opt/homebrew/bin/bash /usr/local/bin/bash; do [ -x "$sr_c" ] && { sr_b="$sr_c"; break; }; done; SR_BASH="$sr_b" sr_run --line "$SR_PLAN"
 expect_eq "UB1 no record, under the newest bash here (older bash sets a bare local empty): exit 0, stderr empty, the line L3 read" "0||0 of 17 tasks · owed: 0 on you · 0 on events · close 5:30 PM" "$RC|$ERR|$OUT"
 
 # ============================================================
@@ -1227,7 +1220,7 @@ expect_eq "S1 the tick exits 0 and its last line is still its decision line" "0|
   "$RC|$(printf '%s\n' "$SR_T1" | tail -1 | /usr/bin/grep -oE 'decision=[A-Z]+')"
 expect_eq "S2 …it prints exactly one sitrep line, the Patrol's status byte for byte" "1|poker: sitrep $SR_L1" \
   "$(printf '%s\n' "$SR_T1" | /usr/bin/grep -c '^poker: sitrep ')|$(printf '%s\n' "$SR_T1" | /usr/bin/grep '^poker: sitrep ')"
-sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
+sr_ask_ev "key=approve:release|sent=-|title=approval: release|at=2026-10-06T20:00:00Z"
 SR_AT=$((SR_NOW + 60)) sr_tick
 SR_T2="$OUT"
 SR_AT=$((SR_NOW + 60)) sr_run --line "$SR_PLAN"
@@ -1246,8 +1239,8 @@ SR_PLAN_A="$SR_PLAN"; SR_PLAN_B="$SR_REPO/.bionic/docs/plans/epic-01-fx/wave-03-
 sed 's/wave-02-fx/wave-03-fx/g; s/wave\/02-fx/wave\/03-fx/g; s/9\.9\.0/9.10.0/' "$SR_PLAN_A" > "$SR_PLAN_B"
 sr_bind "$SR_PLAN_A" "$SID"
 sr_bind "$SR_PLAN_B" "$SID2"
-sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release" "$SR_PLAN_A"
-sr_owed "key=approve:merge|state=open|sent=-|at=2026-10-06T20:01:00Z|title=approval: merge|reply=poker: WAIT T17 — approval:merge" "$SR_PLAN_B"
+sr_ask_ev "key=approve:release|sent=-|title=approval: release|at=2026-10-06T20:00:00Z" "$SR_PLAN_A"
+sr_ask_ev "key=approve:merge|sent=-|title=approval: merge|at=2026-10-06T20:01:00Z" "$SR_PLAN_B"
 sr_owed_sid "key=waive:structure|sent=-|title=waiver: structure|prompt=poker: the structure review is owed|at=2026-10-06T20:02:00Z" "$SID3"
 sr_ask_keys() { sr_lines ask | while IFS= read -r l; do printf '%s %s\n' "$(sr_f "$l" key)" "$(sr_f "$l" holds)"; done | sr_join; }
 sr_run "$SR_PLAN_B"
@@ -1281,7 +1274,7 @@ tests · whole run under 45 min at the approved head (the Step-5 run log)
 handoff · a fresh session continues a no-run handoff (record/reader-test-handoff.md)
 taste · the user likes the card" sr_world goals "6 6 12 12"
 printf 'Gating: 9 passed, 0 failed\nWall: 3000s · work 9000s · width 4\n' > "$SR_DIR/regression-run-$SR_H.log"
-awk -v h="$SR_H" '{ print } /^current: 4$/ { print "proved: kind=regression head=" h " at=2026-10-06T20:00:00Z evidence=record/wave-02-fx/regression-run-" h ".log" }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_ev "ev=proof|kind=regression|head=$SR_H|evidence=record/wave-02-fx/regression-run-$SR_H.log|at=2026-10-06T20:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "G1 four goals: the one-file median of 9 min met, the 50-minute whole run not met, the record not measured yet, the measure the sitrep cannot read unreadable" \
   "fast landings=met|tests=not met|handoff=not measured|taste=unreadable|1 of 4 met; 1 not measured yet; 1 with no measure the sitrep can read" "$(sr_goal_st)|$(sr_goals_sum)"
@@ -1305,10 +1298,11 @@ sr_themes() {
   q="$SR_REPO/.bionic/docs/specs/epic-01-fx/wave-02-fx.requirements.md"
   [ -z "${SR_REQ_AT:-}" ] || q="$SR_REPO/.bionic/docs/$SR_REQ_AT"
   mkdir -p "${q%/*}"
-  awk -v c="$cur" -v at="${SR_REQ_AT:-}" '
+  awk -v at="${SR_REQ_AT:-}" '
     NR > 1 && /^---$/ && !fm { fm = 1; print "scale: wave" }
-    /^current: / { print "current: " c; if (at != "") print "\n- Step 1: requirements: " at "; approved by fixture"; next }
+    /^# fixture plan$/ && at != "" { print; print "\n- Step 1: requirements: " at "; approved by fixture"; next }
     { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+  [ "$cur" = 4 ] || sr_ev "ev=step|n=$cur|at=2026-10-06T10:00:00Z"
   { printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
     for a in AC-1.1 AC-1.2 AC-2.1 AC-3.1 AC-4.1 AC-5.1 AC-5.2 AC-6.1 AC-6.2; do printf '| %s | T2 | %s | pending | — |\n' "$a" "$1"; shift; done
   } >> "$SR_PLAN"
@@ -1364,16 +1358,16 @@ section "§REQ-GOALS-3: a hand-holds goal read from the landing report counts th
 SR_GOALS="hand-holds · zero from the last landing to delivery (landing-report)" sr_world rg3 "6 6 12 12"
 sr_run "$SR_PLAN"
 expect_eq "RG3-1 no hand-hold since the last build landing: the zero target is met" "hand-holds=met" "$(sr_goal_st)"
-sr_ev "ev=stop-run|row=T8|at=2026-10-06T14:00:00Z"
+sr_ev "ev=hand|what=stop-run|row=T8|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "RG3-2 one stop-run after the last build landing: not met, the reading the window's count before the run is delivered" \
   "hand-holds=not met|zero from the last landing to delivery — 1 hand-hold from the last build landing (T4) to now: the run is not delivered" \
   "$(sr_goal_st)|$(sr_goal_m hand-holds)"
 
-# sr_goal_put <goal text, \n for a line break> -> this world's plan carries a `## Goal` section before its SDLC State.
+# sr_goal_put <goal text, \n for a line break> -> this world's plan carries a `## Goal` section before its Tasks.
 sr_goal_put() {
   printf '## Goal\n\n%b\n' "$1" > "$TMPROOT/goal.txt"
-  awk -v gf="$TMPROOT/goal.txt" '/^## SDLC State$/ && !d { while ((getline l < gf) > 0) print l; print ""; d = 1 } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+  awk -v gf="$TMPROOT/goal.txt" '/^## Tasks$/ && !d { while ((getline l < gf) > 0) print l; print ""; d = 1 } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 }
 # sr_goal_card <goal text> -> the Purpose line the Step-1 card prints over a requirements artifact holding that Goal,
 # drawn at a width no line folds at.
@@ -1528,7 +1522,8 @@ section "§GOALS-SERVES: a theme is measured by the rows that serve it, serves: 
 # id counts under the requirement its number names; unmapped rows print no line. The world's plan is lib/plan-fixture.sh's
 # (hook-valid) with its themes; serves: is written into each block as an older plan's rendering wrote it, the
 # criterion's Requirement cell read through the reader.
-sr_sw() { SR_SCALE="$2" sr_world "$1" "6 6 12 12"; plan_fixture --at 14 "$SR_PLAN" "$2" >/dev/null; plan_fixture_themes "$SR_PLAN" "${@:3}"; sr_run "$SR_PLAN"; }   # <label> <scale> <variant> <statuses…>
+sr_sw() { SR_SCALE="$2" sr_world "$1" "6 6 12 12"; plan_fixture "$SR_PLAN" "$2" >/dev/null; sr_no_eval; plan_fixture_themes "$SR_PLAN" "${@:3}"; sr_run "$SR_PLAN"; }   # <label> <scale> <variant> <statuses…>
+sr_no_eval() { awk '/^## / { s = ($0 ~ /^## Eval design/) } !s' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"; }   # -> the plan's own Eval design gone, so the themes' is its one
 sr_render() {  # -> each block of the plan gains `serves:` from its criterion's Requirement cell; SR_MR_RC 0
   local a r
   for a in $(sed -n 's/^\(AC-[0-9.]*\):.*/\1/p' "$SR_PLAN"); do
@@ -1581,7 +1576,7 @@ expect_eq "GM3a …a goal missed holds no task, the release or the merge: the as
   "$(sr_f "$(sr_ask decide:goal:fast-landings)" holds)|$(sr_f "$(sr_ask decide:goal:fast-landings)" blocks)"
 sed -i.bak 's/one-file median under 15m/one-file median under 30m/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
 printf '# reader test\n\nverdict: pass\n' > "$SR_DIR/reader-test-handoff.md"
-sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
+sr_ask_ev "key=approve:release|sent=-|title=approval: release|at=2026-10-06T20:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "GM3b both goals met while the decision is still open: the sheet drops it and keeps the approval, with nothing on stderr" \
   "approve:release|" "$(sr_lines ask | while IFS= read -r l; do sr_f "$l" key; done | sr_join)|$ERR"
@@ -1593,17 +1588,17 @@ expect_eq "GM4 the goal now met: the tick closes its open decision, and the item
 section "§DECLARED-RED: a goal missed by a red the plan itself declares opens no decide:goal:; any other miss still does"
 # ============================================================
 # fails-when: the ask opens for a declared red, or a miss the plan did not declare opens none. Three suite goals read red
-# from the landing record: one under a `debt:` line a Lands-red: row wrote, one with no debt, one whose debt a `void:`
-# line cancelled. The sheet still reads all three as not met: the red is declared, the goal is not reached.
+# from the run's log: one under a debt a Lands-red: row's landing admitted, one with no debt, one whose debt a void
+# cancelled. The sheet still reads all three as not met: the red is declared, the goal is not reached.
 SR_GOALS="declared · the declared suite stays green (decl.test.sh §A)
 plain · the plain suite stays green (plain.test.sh §A)
 voided · the voided suite stays green (void.test.sh §A)" SR_APPROVED=none sr_tick_world declared-red "20 20 20 20"
 for sr_s in decl plain void; do
   sr_ev "ev=verdict|row=T9|commit=$SR_C1|suite=$sr_s.test.sh|result=red|log=/rec/$sr_s.log|at=2026-10-06T21:00:00Z"
 done
-printf 'debt: id=7.1 row=T9 branch=wt/02-T9 head=%s suite=decl.test.sh token=ext:fixture at=2026-10-06T21:00:00Z\n' "$SR_C1" >> "$SR_REC"
-printf 'debt: id=7.2 row=T9 branch=wt/02-T9 head=%s suite=void.test.sh token=ext:fixture at=2026-10-06T21:00:00Z\n' "$SR_C1" >> "$SR_REC"
-printf 'void: id=7.2 branch=wt/02-T9 at=2026-10-06T21:30:00Z why=publish-failed\n' >> "$SR_REC"
+sr_ev "ev=admitted|id=7.1|row=T9|branch=wt/02-T9|head=$SR_C1|suite=decl.test.sh|token=ext:fixture|at=2026-10-06T21:00:00Z"
+sr_ev "ev=admitted|id=7.2|row=T9|branch=wt/02-T9|head=$SR_C1|suite=void.test.sh|token=ext:fixture|at=2026-10-06T21:00:00Z"
+sr_ev "ev=void|id=7.2|branch=wt/02-T9|why=publish-failed|at=2026-10-06T21:30:00Z"
 sr_run "$SR_PLAN"
 expect_eq "DR0 precondition: the sheet reads all three suite goals not met, each from its red verdict" "declared=not met|plain=not met|voided=not met" "$(sr_goal_st)"
 sr_tick
@@ -1624,10 +1619,11 @@ expect_eq "OF1 two 90-minute landings of two files and two 10-minute one-file la
 # ============================================================
 section "§DECISIONS: a decision put and not ruled is an ask on the sheet, owed once; ruled, it is gone while the reviews stay"
 # ============================================================
-# FIXTURE FIDELITY: the put heading and the wait line under it in the shape `decisions put` writes them.
+# FIXTURE FIDELITY: the put and its wait line, and the ruling, in the fields `decisions put` and its ruling write (lib/proof.sh
+# `proof_decision_event`).
 sr_world decisions "6 6 12 12"
 sr_bind
-printf '# Design ledger — wave-02-fx\n\n## Δ0 — D19 put (orchestrator 2026-10-20 6:44 AM PDT): the regression rule the judge holds\n\nAnswered now or in an hour.\n' > "$SR_DIR/design-ledger.md"
+sr_ev "ev=decision|entry=Δ0|d=D19|verb=put|by=orchestrator|title=the regression rule the judge holds|wait=Answered now or in an hour.|at=2026-10-20T13:44:00Z"
 sr_reviews
 sr_run "$SR_PLAN"
 expect_eq "DE1 one put with no ruling: one ask, its number and title, what it holds and when it was put" \
@@ -1637,14 +1633,14 @@ expect_eq "DE1b …holding nothing, it blocks nothing: blocks=no" "no" "$(sr_f "
 sr_run --line "$SR_PLAN"
 expect_eq "DE2 …the Patrol's status counts it" "owed: 1" "$(printf '%s\n' "$OUT" | /usr/bin/grep -oE 'owed: [0-9]+')"
 # The put's own ask on the register, as `decisions put` opens it, and a held merge naming the decision.
-sr_owed "key=decide:D19|state=open|sent=-|at=2026-10-06T20:30:00Z|title=reply to D19|reply=D19 · the regression rule the judge holds: reply with the option number."
-sr_owed "key=hold:merge|state=open|sent=-|at=2026-10-06T21:00:00Z|title=held merge: D19 unruled|reply=bionic: close-out refused — the merge waits on D19"
+sr_ask_ev "key=decide:D19|sent=-|title=reply to D19|at=2026-10-06T20:30:00Z"
+sr_ask_ev "key=hold:merge|sent=-|title=held merge: D19 unruled|at=2026-10-06T21:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "DE2b the decision is still one ask, now holding the merge a held merge names it in, raised when its ask was opened" \
   "decide:D19|the merge|1:30 PM|hold:merge" \
   "$(sr_f "$(sr_ask decide:D19)" key)|$(sr_f "$(sr_ask decide:D19)" holds)|$(sr_f "$(sr_ask decide:D19)" raised)|$(sr_f "$(sr_ask hold:merge)" key)"
 expect_eq "DE2c …and holding the merge, it blocks: blocks=yes" "yes" "$(sr_f "$(sr_ask decide:D19)" blocks)"
-printf '\n## Δ1 — D19 ruled "2" (Chris Lehman 2026-10-20): the regression rule the judge holds\n' >> "$SR_DIR/design-ledger.md"
+sr_ev "ev=decision|entry=Δ1|d=D19|verb=ruled|said=2|by=Chris Lehman|title=the regression rule the judge holds|at=2026-10-20T14:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "DE3 the same decision ruled: no ask for it though its own ask is not yet closed, the held merge still one, both reviews still print" \
   "0|1|2" \
@@ -1675,7 +1671,7 @@ expect_eq "RC1 resume exits 0 and the recap names the open decision on its open:
   "$RC|$(printf '%s\n' "$RECAP" | /usr/bin/grep '^open: D21 ')|$(printf '%s\n' "$RECAP" | /usr/bin/grep -c '^open: none')"
 expect_eq "RC2 …the run's status line, and the decision as an ask with what it holds" "yes|ask: D21 · the gate the judge holds — holds nothing" \
   "$(printf '%s\n' "$RECAP" | /usr/bin/grep -qE '^run: 4 of 17 tasks · owed: [0-9]+ on you · [0-9]+ on events · close [0-9]{1,2}:[0-9]{2} [AP]M$' && echo yes)|$(printf '%s\n' "$RECAP" | /usr/bin/grep '^ask: D21 ')"
-printf '\n## Δ1 — D21 ruled "1" (Chris Lehman 2026-10-06): the gate the judge holds\n' >> "$SR_DIR/design-ledger.md"
+sr_ev "ev=decision|entry=Δ1|d=D21|verb=ruled|said=1|by=Chris Lehman|title=the gate the judge holds|at=2026-10-06T21:00:00Z"
 sr_recap
 expect_eq "RC3 the decision ruled: no open: and no ask: line names it while the tick's approvals still read open, and the recap lists it settled" \
   "0|0|2|settled: D21 · \"1\" · Chris Lehman 2026-10-06 · the gate the judge holds" \
@@ -1700,9 +1696,6 @@ section "§ONCE: a decision a row waits on is owed once, not as the tick's appro
 SR_D_ROW="$(sr_row T20 "Decision-gated row · complexity: standard" approval:D21 30 pending)"
 sr_tick_world once "6 6 12 12"
 awk -v r="$SR_D_ROW" '{ print } /^\| T17 \|/ { print r }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
-# the approve verb dry-commits the plan through the commit gate, which reads the declared SDLC version
-sed -i.bak 's/^wave: wave-02-fx$/&\
-canonical_sdlc_version: 14/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
 sr_ledger_put D21 "the gate the judge holds" "Answered in an hour rather than now, T20 starts an hour later and the predicted close holds: it is off the longest chain."
 sr_tick
 expect_eq "ON0 precondition: the tick says T20 waits on approval:D21 and opens an item for it on the register" "yes|1" \
@@ -1727,12 +1720,12 @@ section "§STEPS: a step past current: with a landed or active task is running; 
 # fails-when: a plan at current: 5 with an active step-7 task reads step 7 pending, or a pending one reads it running.
 sr_step() { sr_lines step | /usr/bin/grep -E "^step: n=$1 " | while IFS= read -r l; do printf '%s %s\n' "$(sr_f "$l" state)" "$(sr_f "$l" tasks)"; done; }
 sr_world title-ahead "6 6 12 12"
-sed -i.bak -e 's/^current: 4$/current: 5/' -e 's/^| T7 | 4 | build |/| T7 | 7 | build |/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
+sed -i.bak -e 's/^| T7 | 4 | build |/| T7 | 7 | build |/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"; sr_ev "ev=step|n=5|at=2026-10-06T12:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "TI1 current: 5 with T7 active at step 7: step 4 done, 5 running, 7 running with its one task, 6 pending" \
   "5|done 16|running 0|pending 0|running 1" "$(sr_val run.step)|$(sr_step 4)|$(sr_step 5)|$(sr_step 6)|$(sr_step 7)"
 sr_world title-pending "6 6 12 12"
-sed -i.bak -e 's/^current: 4$/current: 5/' -e 's/^| T9 | 4 | build |/| T9 | 7 | build |/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
+sed -i.bak -e 's/^| T9 | 4 | build |/| T9 | 7 | build |/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"; sr_ev "ev=step|n=5|at=2026-10-06T12:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "TI2 a pending task at step 7 is not work at step 7" "pending 1" "$(sr_step 7)"
 
@@ -1771,11 +1764,12 @@ expect_eq "NM4 a 40-task plan: ten step lines, forty task lines, every id once" 
 # ============================================================
 section "§HELD-NOTE: a task held on you says what it waits on, whether it is building or not yet started"
 # ============================================================
-# FIXTURE FIDELITY: the decisions put in the shape `decisions put` writes them into the design ledger, the world's plan
+# FIXTURE FIDELITY: the decisions put in the fields `decisions put` writes into the run's log, the world's plan
 # bound by the bind verb. fails-when: a task that has started and reads an approval still owed says building.
 sr_world heldnote "6 6 12 12"
 sr_bind
-printf '# Design ledger — wave-02-fx\n\n## Δ0 — D1 put (orchestrator 2026-10-20 6:44 AM PDT): the stop rule\n\nAnswered now or in an hour.\n## Δ1 — D2 put (orchestrator 2026-10-20 6:45 AM PDT): the second rule\n\nAnswered now or in an hour.\n' > "$SR_DIR/design-ledger.md"
+sr_ev "ev=decision|entry=Δ0|d=D1|verb=put|by=orchestrator|title=the stop rule|wait=Answered now or in an hour.|at=2026-10-20T13:44:00Z"
+sr_ev "ev=decision|entry=Δ1|d=D2|verb=put|by=orchestrator|title=the second rule|wait=Answered now or in an hour.|at=2026-10-20T13:45:00Z"
 awk -v a="$(sr_row T5 "Row 5 body · complexity: standard" approval:D1 30 active)" -v b="$(sr_row T6 "Row 6 body · complexity: standard" "approval:D1, approval:D2" 30 active)" \
   '/^\| T5 \|/ { print a; next } /^\| T6 \|/ { print b; next } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"
@@ -1831,8 +1825,6 @@ sr_r_card() {  # <epoch> -> the scorecard's two human lines at that instant, joi
 }
 sr_r_want() { printf 'human stops (autonomous half): %s · target 1|human-wait minutes: %s · no target (the user'"'"'s)' "$1" "$2"; }
 SR_APPROVED=none sr_world rounds "6 6 12 12"   # approved below, at SR_E0, 2026-10-06T10:00:00Z
-sed 's/^wave: wave-02-fx$/canonical_sdlc_version: 14\
-&/' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 git -C "$SR_REPO" config user.name "Dana Fixture"; sr_bind
 SR_T="$CLAUDE_CONFIG_DIR/projects/$(cd "$SR_REPO" && pwd -P | sed 's/[^a-zA-Z0-9]/-/g')/$SID.jsonl"; mkdir -p "${SR_T%/*}"; : > "$SR_REPO/.bionic/tmp/loaded-$SID.state"
 jq -nc '{type:"user",isSidechain:false,userType:"external",message:{role:"user",content:"carry on"}}' > "$SR_T"; sr_typed approved 1   # the session the ruling verb and the approvals read
@@ -1910,9 +1902,9 @@ sr_ob_world() {  # <label> <with approval: yes|no> -> an integrate row held by a
   sr_world "$1" "6 6 12 12"
   sr_set T17 kind integrate
   sr_bind
-  sr_owed "key=waive:adversarial|state=open|sent=-|at=2026-10-06T20:01:00Z|title=waiver: adversarial|reply=poker: the adversarial review failed at the head"
+  sr_ask_ev "key=waive:adversarial|sent=-|title=waiver: adversarial|at=2026-10-06T20:01:00Z"
   ( cd "$SR_REPO" && OWED_ROOT="$SR_REPO" OWED_SID="$SID" OWED_PLAN="$SR_PLAN" bash -c '. "$1" && owed_answer "$2" no "$3"' _ "$SR_OWED_LIB" waive:adversarial "review adversarial re-run" )
-  [ "$2" != yes ] || sr_owed "key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T12 — approval:release"
+  [ "$2" != yes ] || sr_ask_ev "key=approve:release|sent=-|title=approval: release|at=2026-10-06T20:00:00Z"
 }
 sr_ob_read() {  # <poker> -> `<sheet blocks=yes>|<sheet waits=user>|<sheet waits=event>|<head word>|<Patrol on you>|<Patrol on events>`
   local pk="$1" sheet line head f
@@ -1977,29 +1969,24 @@ expect_eq "OB8c …and no line before it decides blocks again from what the ask 
   "$(printf '%s\n' "$SR_OB_CARD" | /usr/bin/grep -c 'event\*) b=')"
 
 # ============================================================
-section "§FAST: the sheet verb and the card verb, run one after the other on a copy of the wave-43 plan and its record; the card verb reads the saved sheet and refreshes its asks from the register alone"
+section "§FAST: the sheet verb and the card verb, run one after the other on a run of 35 tasks with four finding asks open; the card verb reads the saved sheet and refreshes its asks from the register alone"
 # ============================================================
-# FIXTURE FIDELITY: a shipped 35-task plan and its whole record, copied into a repository of their own because the
-# verbs write the repository's tmp folder and settle its register; the clock is the end of that run. The card verb is
+# FIXTURE FIDELITY: this suite's world at the size of a shipped run, 35 tasks, its log holding four finding asks open and
+# a release approval asked and answered, in a repository of its own because the verbs write the repository's tmp folder
+# and settle its register. The card verb is
 # run with a judgment on its stdin that the card refuses, since drawing is card.sh's and its judgment is not this
 # section's subject; the verb's own work is what is read. A second tree has card.sh replaced by a stub that keeps the sheet it was
 # handed, and sitrep_gather counted, so the sheet the card draws from is read and the one gather is proved.
 # fails-when: the card verb gathers a second time, or the sheet the card
 # draws from carries the asks as they stood when the sheet was saved rather than as they stand now.
-# The docs tree lives beside the repository, not in a checkout of it: this checkout when it holds one, else the
-# main checkout the git directory belongs to (a landing checkout holds none).
-SR_FAST_SRC="$BIONIC_HOOKS_DIR/../.bionic/docs"
-[ -d "$SR_FAST_SRC" ] || SR_FAST_SRC="$(cd "$(git -C "$BIONIC_HOOKS_DIR" rev-parse --git-common-dir 2>/dev/null)/.." 2>/dev/null && pwd -P)/.bionic/docs"
-SR_FAST_PLAN_REL="plans/epic-23-bionic-tech-debt/wave-43-no-hand-hold.plan.md"
-SR_FAST_REC_REL="record/wave-43-no-hand-hold"
-expect_true "FA0 precondition: the wave-43 plan and its record are on this tree" test -f "$SR_FAST_SRC/$SR_FAST_PLAN_REL" -a -d "$SR_FAST_SRC/$SR_FAST_REC_REL"
-SR_REPO="$TMPROOT/fast"; mkdir -p "$SR_REPO/.bionic/tmp" "$SR_REPO/.bionic/docs/plans/epic-23-bionic-tech-debt" "$SR_REPO/.bionic/docs/record"
-( cd "$SR_REPO" && git init -q . 2>/dev/null )
-cp "$SR_FAST_SRC/$SR_FAST_PLAN_REL" "$SR_REPO/.bionic/docs/$SR_FAST_PLAN_REL"
-cp -R "$SR_FAST_SRC/$SR_FAST_REC_REL" "$SR_REPO/.bionic/docs/$SR_FAST_REC_REL"
-SR_PLAN="$SR_REPO/.bionic/docs/$SR_FAST_PLAN_REL"
-SR_GATE="$TMPROOT/gate-fast"; mkdir -p "$SR_GATE/requests" "$SR_GATE/cost"
-SR_FAST_AT=1792739640     # 2026-10-23T07:14:00Z, the end of that run
+SR_EXTRA=18 sr_world fast "6 6 12 12"
+for sr_k in critic-evidence.md:3 critic-evidence.md:4 critic-adversarial.md:1 critic-adversarial.md:3; do
+  sr_ask_ev "key=finding:record:wave-02-fx:$sr_k|sent=-|title=Finding S2 needs a ruling|at=2026-10-06T20:00:00Z"
+done
+sr_ask_ev "key=approve:release|sent=-|title=approval: release|at=2026-10-06T19:00:00Z"; sr_ask_ev "key=approve:release|reply=approve|at=2026-10-06T19:30:00Z"
+expect_eq "FA0 precondition: the world's plan holds 35 tasks and its log four finding asks" "35|4" \
+  "$(/usr/bin/grep -c '^| T[0-9]' "$SR_PLAN")|$(/usr/bin/grep -c '|ev=ask|key=finding:' "$SR_REC")"
+SR_FAST_AT="$SR_NOW"
 SR_FAST_J="$TMPROOT/fast-judgment.txt"; printf 'call: Nothing is owed.\n' > "$SR_FAST_J"
 SR_AT="$SR_FAST_AT" sr_run "$SR_PLAN"
 SR_FA_RC1="$RC"; SR_FA_SHEET="$OUT"
@@ -2026,7 +2013,7 @@ SR_FA_G1="$(/usr/bin/grep -c gather "$SR_FA_MARK")"; SR_FA_F1="$(/usr/bin/grep -
 expect_eq "FA4b the sheet verb enters the kept fold at least once and at most twice: its findings are answered from the fold its own shell holds" "yes" \
   "$([ "$SR_FA_F1" -ge 1 ] && [ "$SR_FA_F1" -le 2 ] && echo yes || echo "no: $SR_FA_F1 entries")"
 # an ask opened after the sheet was saved, and one answered no; neither is in the saved sheet
-sr_ask_ev "key=approve:release|round=2|sent=-|title=approval: release|prompt=poker: WAIT T12 — approval:release|at=2026-10-23T07:10:00Z"
+sr_ask_ev "key=approve:release|round=2|sent=-|title=approval: release|prompt=poker: WAIT T12 — approval:release|at=2026-10-06T21:50:00Z"
 SR_AT="$SR_FAST_AT" sr_poke_with "$SR_FM/hooks/session-poker.sh" sitrep card "$SR_PLAN" < "$SR_FAST_J" > "$TMPROOT/fast-card.out" 2>"$TMPROOT/fast-card.err"
 SR_FA_RC3=$?
 SR_FA_G2="$(/usr/bin/grep -c gather "$SR_FA_MARK")"
