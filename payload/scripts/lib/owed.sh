@@ -15,17 +15,17 @@
 # THE STORE IS THE RUN'S. An ask belongs to the run it holds, not to the session that raised it. Each act on it (an
 # opening, an answer, a send marked or taken back, a close) is one `ask` event appended to the run's log,
 # `<docs>/record/<run>/run.log`, <run> the plan's file name less `.plan.md`, through the one appender (lib/log.sh) and
-# at this library's clock. The register beside it, `asks.state`, is never written again: it is the run's history, read
-# with the log through the translation (lib/translate.sh) alone. Every session acting for the run, a helper's stand-in session
+# at this library's clock. The log is the run's one store of asks: whatever an older run kept of them elsewhere is its
+# history, read with the log through the translation (lib/translate.sh) alone. Every session acting for the run, a helper's stand-in session
 # included, writes there and reads there, so an ask answered in one session is closed for all of them. It lives under
 # record/, not tmp/, so an ask raised late in a run survives the tmp wipe and the close-out can still read it. A session
 # acting for no run keeps `.bionic/tmp/owed-<session>.state`, session-keyed like every other `<class>-<session>.state`
-# there, wiped with them, and written the same way; only its events are read. A session file written before its run
-# had a register is not read as the run's.
+# there, wiped with them, and written the same way; only its events are read. A session's own file is never read as its
+# run's, bound or not.
 #
 # THE ONE LIST (`_owed_lines`) is one line per round of an item in the order the rounds opened, the last line of a key
 # its current state: the reader's rounds (lib/reader.sh `reader_ask_rounds`, which holds the line's shape), of the run's
-# plan, whose register the translation alone reads, or of a session's own file. An event names its round by `round=<n>`
+# plan, whose older records the translation alone reads, or of a session's own file. An event names its round by `round=<n>`
 # from the second on and sets on it the fields it carries: `sent=` and `title=`; `prompt=`, the line the run printed;
 # `answer=` and `event=`, answered at the event's instant; and `reply=`, the closer's words, which close the round.
 #
@@ -86,8 +86,8 @@ if ! declare -F reader_ask_rounds >/dev/null 2>&1 && [ -r "$_OWED_LIB_DIR/reader
   . "$_OWED_LIB_DIR/reader.sh" >/dev/null 2>&1
 fi
 
-# owed_register <root> <plan> -> the run's register, `<docs>/record/<run>/asks.state`, on stdout; rc 1 when
-# <plan> names no run: not a file, or a name that does not end `.plan.md` (a scratch copy's does not).
+# owed_register <root> <plan> -> the run's log, `<docs>/record/<run>/run.log`, where its asks are kept, on stdout; rc 1
+# when <plan> names no run: not a file, or a name that does not end `.plan.md` (a scratch copy's does not).
 owed_register() {
   local root="${1:-}" plan="${2:-}" run docs
   [ -n "$root" ] && [ -n "$plan" ] || return 1
@@ -97,14 +97,14 @@ owed_register() {
   case "$run" in ''|.*|*[!A-Za-z0-9._-]*) return 1 ;; esac
   declare -F docs_root >/dev/null 2>&1 || return 1
   docs="$(docs_root "$root" 2>/dev/null)" && [ -n "$docs" ] || return 1
-  printf '%s/record/%s/asks.state\n' "$docs" "$run"
+  printf '%s/record/%s/run.log\n' "$docs" "$run"
 }
 
-# owed_file -> the store's absolute path on stdout: the run's register, else the session's own file; rc 1
+# owed_file -> the store's absolute path on stdout: the run's log, else the session's own file; rc 1
 # when there is no session or no root. The session is required even where the run names the store, so a
 # caller that sets an invalid session to write nothing (a preview) writes nothing.
 owed_file() { _owed_at && printf '%s\n' "$_OWED_F"; }
-# _owed_at -> owed_file's store in _OWED_F, and in _OWED_P the plan of the run it is the register of (empty for a
+# _owed_at -> owed_file's store in _OWED_F, and in _OWED_P the plan of the run whose log it is (empty for a
 # session's own file), in this shell; rc as owed_file
 _owed_at() {
   local root sid plan
@@ -124,7 +124,7 @@ _owed_at() {
   _owed_run "$root" "$plan" && return 0
   _OWED_F="$root/.bionic/tmp/owed-$sid.state"
 }
-_owed_run() {  # <root> <plan> -> 0 with the run's register and its plan set as _owed_at sets them; 1 when <plan> names no run
+_owed_run() {  # <root> <plan> -> 0 with the run's log and its plan set as _owed_at sets them; 1 when <plan> names no run
   _OWED_F="$(owed_register "$1" "$2")" || return 1
   _OWED_P="$2"
 }
@@ -158,7 +158,7 @@ _owed_clean() {  # <value> -> the value with | TAB CR LF folded to a space
 
 # owed_now -> the instant every line here is stamped with, ISO-UTC: BIONIC_NOW_EPOCH when it is a number (the clock
 # seam the poker's readers honour, so a suite fixes every instant it reads), else the clock. A verb that writes an
-# instant beside the register's own (the plan's approval) takes it from here, so the two agree to the second.
+# instant beside the log's own (the plan's approval) takes it from here, so the two agree to the second.
 owed_now() {
   case "${BIONIC_NOW_EPOCH:-}" in
     ''|*[!0-9]*) date -u +%Y-%m-%dT%H:%M:%SZ ;;
@@ -177,10 +177,10 @@ _owed_dir_ok() {
   return 0
 }
 
-# _owed_lines -> THE ONE LIST (above) of the store _owed_at set: a run's rounds from its plan, a session's from its
-# file. rc 1 when it cannot be read. A home that is a link is not read.
+# _owed_lines -> THE ONE LIST (above) of the store _owed_at set: a run's rounds from its plan, by the plan it holds, a
+# session's from its file. rc 1 when it cannot be read. A home that is a link is not read.
 _owed_lines() {
-  case "$_OWED_F" in */asks.state) [ ! -L "${_OWED_F%/*}/run.log" ] && reader_ask_rounds "$_OWED_P"; return ;; esac
+  if [ -n "$_OWED_P" ]; then [ ! -L "$_OWED_F" ] && reader_ask_rounds "$_OWED_P"; return; fi
   [ -f "$_OWED_F" ] && [ ! -L "$_OWED_F" ] || return 0
   reader_ask_rounds - < "$_OWED_F"
 }
@@ -195,17 +195,16 @@ _owed_last() {
 }
 
 # _owed_act <store> <ISO-UTC or -> <key> <round> <field>... -> rc 0 with one ask event on <key>'s round appended to the
-# store's log (a run's register names the run.log beside it; a session's file is its own), at <ISO-UTC> or this
-# library's clock. rc 1, nothing written, when the store, its directory or the log is a link or the append fails.
+# store, which is a log: the run's, or a session's own file, at <ISO-UTC> or this library's clock. rc 1, nothing
+# written, when the store or its directory is a link or the append fails.
 _owed_act() {
-  local f="$1" at="$2" key="$3" r="$4" log
+  local f="$1" at="$2" key="$3" r="$4"
   shift 4
-  case "$f" in */asks.state) log="${f%/*}/run.log" ;; *) log="$f" ;; esac
-  _owed_dir_ok "$f" && [ ! -L "$log" ] || return 1
+  _owed_dir_ok "$f" || return 1
   declare -F log_append >/dev/null 2>&1 || . "$_OWED_LIB_DIR/log.sh" >/dev/null 2>&1 || return 1
   [ "$at" != - ] || at="$(owed_now)"
   [ "$r" -gt 1 ] 2>/dev/null && set -- "round=$r" "$@"
-  RUN_LOG="$log" LOG_AT="$at" log_append ask "key=$key" "$@" >/dev/null 2>&1
+  RUN_LOG="$f" LOG_AT="$at" log_append ask "key=$key" "$@" >/dev/null 2>&1
 }
 _owed_round() { local r="${1#*	}"; printf '%s\n' "${r%%	*}"; }  # <_owed_last line> -> its round
 
@@ -251,7 +250,7 @@ _owed_list() {  # -> owed_list's lines for the store _owed_at set
     line_kv("state") == "open" { printf "%s\t%s\t%s\t%s\n", line_kv("key"), line_kv("sent"), line_kv("title"), line_kv("prompt") }'
 }
 
-# owed_lines [<plan> <root>] -> THE ONE LIST (above) of the run's register <plan> names under <root>, else of
+# owed_lines [<plan> <root>] -> THE ONE LIST (above) of the run <plan> names under <root>, else of
 # `owed_file`; rc 1 when there is no store or it cannot be read.
 owed_lines() {
   _owed_store_for "${1:-}" "${2:-}" || return 1
@@ -280,9 +279,9 @@ owed_rounds() {
     { o = line_kv("opened"); printf "%s\t%s\tclosed\t%s\t%s\n", k, r, (o == "" ? "-" : o), line_kv("at") }'
 }
 
-# owed_list_plan <plan> <root> -> owed_list's lines for the run <plan> names, read from its register under <root>,
+# owed_list_plan <plan> <root> -> owed_list's lines for the run <plan> names, read from its log under <root>,
 # never the caller's session. rc 1 when there is no plan or no root; nothing printed when <plan> names no run or its
-# register holds no open item.
+# log holds no open item.
 owed_list_plan() {
   [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
   _owed_run "$2" "$1" || return 0
@@ -302,7 +301,7 @@ owed_list_plan() {
 # `ask_waits_on` derives it from the key's kind and its answer, so every reader asks the one function and no opener
 # has a field to forget.
 
-# _owed_store_for [<plan> <root>] -> the store a reader reads, set as _owed_at sets it: the run's register <plan> names
+# _owed_store_for [<plan> <root>] -> the store a reader reads, set as _owed_at sets it: the run's log <plan> names
 # under <root> when both are given, else `owed_file`'s. rc 1 when there is none.
 _owed_store_for() {
   if [ -n "${1:-}" ] && [ -n "${2:-}" ]; then _OWED_F=""; _OWED_P=""; _owed_run "$2" "$1"; return; fi
