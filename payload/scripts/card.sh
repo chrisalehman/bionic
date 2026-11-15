@@ -1390,7 +1390,7 @@ _card_project_open() {
   local copy="${2:-}/.bionic/docs/plans/run/${1##*/}"
   git init -q "${2:-}" >/dev/null 2>&1 && mkdir -p "${copy%/*}" && cp "${1:-}" "$copy" || return 1
   declare -F proof_approval_event >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/proof.sh" >/dev/null 2>&1 || return 1
-  declare -F line_published_event >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/line.sh" >/dev/null 2>&1 || return 1
+  declare -F line_log >/dev/null 2>&1 || . "${CARD_SELF_DIR}/lib/line.sh" >/dev/null 2>&1 || return 1
   # THE PROJECTION IS OF AN APPROVED PLAN. The card is shown at the approval gate, and the fill offers nothing to a run
   # whose plan stands unapproved, so a copy without the approval would answer every batch with nothing.
   proof_approval_event "$copy" step3 by=card said=projected || return 1
