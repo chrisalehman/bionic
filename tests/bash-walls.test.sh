@@ -584,9 +584,6 @@ ru_poke() {  # <verb args...> -> RU_OUT (both streams), RU_RC of session-poker.s
     CLAUDE_PROJECT_DIR= bash "$RU_POKER" "$@" 2>&1 )"; RU_RC=$?
 }
 ru_owed() { bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_list' _ "$RU_LIB" "$R_RU" "$SID" 2>/dev/null | cut -f1 | sort | paste -sd, -; }
-# ru_owed_clear -> the store the session's asks are filed in, as ru_owed reads it (the run's register when the session is
-# bound), removed
-ru_owed_clear() { rm -f "$(bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_file' _ "$RU_LIB" "$R_RU" "$SID" 2>/dev/null)"; }
 
 # ru_put <current> <the criterion's eval type> <the evidence review at the head: pass | fail, waived | none, the question waived>
 #   [<log line>...] -> RU_P, the run at 15 §RULED's plan text stands for (the prelude's eg6_world), its criterion the one the rows name,
@@ -617,7 +614,6 @@ expect_eq "VERDICT-2: an empty auditor cell on a T1 row — current 6 --check re
 expect_contains "VERDICT-2b: …naming the row" "the auditor has not confirmed AC-2" "$RU_OUT"
 
 # §RULED-1 — at 7, an unruled REFUTED row: the advance to 8 refuses naming it, and the judge opens its row item.
-ru_owed_clear
 ru_put 7 unit fail
 ru_poke current 8 --check
 expect_eq "RULED-1: an unruled REFUTED row — current 8 --check refuses" "1" "$RU_RC"
@@ -730,7 +726,10 @@ for AW_R in double single; do
   expect_eq "AW-4 ($AW_R): the person's approval given after the proof, the commit at 8 is admitted" "0" "$ST"
   [ "$ST" = 0 ] || printf '      the gate said: %s\n' "$ERR" | head -3
 done
-aw_put 7 double; rm -f "$(bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_file' _ "$AW_LIB" "$R_AW" "$SID" 2>/dev/null)"
+aw_put 7 double
+AW_LOG="$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "$AW_LIB" "$AW_P" 2>/dev/null)"
+expect_eq "AW-5-0: the bound session's asks are filed in its run's log, the one the reader reads" "$AW_LOG|yes" \
+  "$(bash -c '. "$1/owed.sh"; OWED_ROOT="$2" OWED_SID="$3" owed_file' _ "$AW_LIB" "$R_AW" "$SID" 2>/dev/null)|$([ -f "$AW_LOG" ] && echo yes)"
 aw_poke current 8 --check
 expect_eq "AW-5: at 7, the advance to 8 is refused for the criterion awaiting its person" "1" "$AW_RC"
 expect_contains "AW-5b: …naming it" "AC-1.1" "$AW_OUT"

@@ -930,7 +930,7 @@ SV_ROW() { printf '| %s | %s | build | %s · complexity: standard | — | — | 
   SV_ROW T3 8 "Merge it" "approval:release" pending
   printf '\n## Not Doing\n\n- nothing\n'
 } > "$SV_P"
-SV_REG="$(bash -c '. "$1" && owed_register "$2" "$3"' _ "${REPO}/payload/scripts/lib/owed.sh" "$SV_R" "$SV_P")"
+SV_REG="$SV_D/asks.state"   # a version-14 register, at the old home the reader translates
 {
   printf 'owed/v1|key=approve:release|state=open|sent=-|at=2026-10-06T20:00:00Z|title=approval: release|reply=poker: WAIT T3 — approval:release\n'
   printf 'owed/v1|key=decide:D5|state=open|sent=-|at=2026-10-06T20:01:00Z|title=reply to D5|reply=D5 · the width: reply with the option number.\n'
@@ -1085,7 +1085,7 @@ or_plan() {  # <discharged|pending: the second theme's one criterion> -> the pag
   printf '\n## Not Doing\n\n- nothing\n'
 } > "$OR_Q"
 or_plan discharged
-OR_REG="$(bash -c '. "$1" && owed_register "$2" "$3"' _ "${REPO}/payload/scripts/lib/owed.sh" "$OR_R" "$OR_P")"
+OR_REG="$OR_D/asks.state"   # a version-14 register, at the old home the reader translates
 or_ask() {  # -> the register holding one open ask: the second goal's decision, as the tick opens it on a first miss
   mkdir -p "${OR_REG%/*}"
   printf 'owed/v1|key=decide:goal:the-pages|state=open|sent=-|at=2026-10-06T20:00:00Z|title=goal decision: The pages|reply=poker: the goal The pages missed\n' > "$OR_REG"
