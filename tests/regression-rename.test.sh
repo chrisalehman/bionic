@@ -132,8 +132,7 @@ section "§GONE-VERB: floor-run, floor: and proof-add floor are refused by the r
 AV_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RAV="$(make_repo gone-verbs)"; ( cd "$RAV" && git commit -q --allow-empty -m init )
 PAV="$(s42_plan "$RAV" 4)"
-( cd "$RAV" && git add -f "$PAV" && git commit -qm wb \
-  && git worktree add -q -b wave/01-fixture "$RAV/.worktrees/01-fixture" \
+( cd "$RAV" && git worktree add -q -b wave/01-fixture "$RAV/.worktrees/01-fixture" \
   && git -C "$RAV/.worktrees/01-fixture" commit -q --allow-empty -m "wave work" ) >/dev/null 2>&1
 AV_W="$(git -C "$RAV/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
 AV_REC="$RAV/.bionic/docs/record/wave-01-fixture"; mkdir -p "$AV_REC"
@@ -180,9 +179,17 @@ AB_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RAB="$(make_repo gone-born)"; ( cd "$RAB" && git commit -q --allow-empty -m init )
 AB_C1="$(git -C "$RAB" rev-parse HEAD)"
 git -C "$RAB" branch wave/01-fixture
-PAB="$(s42_plan "$RAB" 4)"
-printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=record/wave-01-fixture/floor.txt|owed=a.test.sh,b.test.sh|at=2026-10-14T00:00:00Z\n' "$AB_C1" \
-  >> "$RAB/.bionic/docs/record/wave-01-fixture/run.log"
+PAB="$(SP_PLAN_AT=14 s42_plan "$RAB" 4 "  worktree: .worktrees/01-fixture
+  base-sha: abc1234
+  branch: wave/01-fixture
+  working-branch: wave/01-fixture")"
+plan_fixture_state_add "$PAB" "proved: kind=floor head=${AB_C1} at=2026-10-14T00:00:00Z evidence=record/wave-01-fixture/floor.txt owed=a.test.sh,b.test.sh"
+# …and a reads column, s51_plan's awk (session-poker-2 §51): the typed reads cells below need somewhere to go.
+awk '/^## Tasks/ { t = 1 } /^## Verification/ { t = 0 }
+     t && /^\| id / { print $0 " reads |"; next }
+     t && /^\|---/ { print $0 "---|"; next }
+     t && /^\| T/ { sub(/\| T1, T2 \|/, "| — |"); print $0 " — |"; next }
+     { print }' "$PAB" > "$PAB.tmp" && mv "$PAB.tmp" "$PAB"
 ( cd "$RAB" && git add -f "$PAB" && git commit -qm floor ) >/dev/null 2>&1
 ta_add "$RAB" T6 4 build 'fix the red. The red suite turns green.' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born regression:a.test.sh
 expect_eq "GB-1 task-add --born regression:a.test.sh, which the 1.20.0 proof line owes, exits 0" "0" "$RC"
@@ -217,8 +224,7 @@ printf '#!/bin/bash\nexit 0\n' > "$RGL/tests/a.test.sh"
 ( cd "$RGL" && git add tests && git commit -qm suites ) >/dev/null 2>&1
 PGL="$(s42_plan "$RGL" 4)"; GL_REC="$RGL/.bionic/docs/record/wave-01-fixture"
 printf 'run/v1|ev=published|row=T2|at=2026-10-04T00:30:00Z\n' >> "$GL_REC/run.log"   # the build rows landed: a whole read waits on none open
-( cd "$RGL" && git add -f "$PGL" && git commit -qm wb \
-  && git worktree add -q -b wave/01-fixture "$RGL/.worktrees/01-fixture" \
+( cd "$RGL" && git worktree add -q -b wave/01-fixture "$RGL/.worktrees/01-fixture" \
   && git -C "$RGL/.worktrees/01-fixture" commit -q --allow-empty -m "wave work" ) >/dev/null 2>&1
 GL_W="$(git -C "$RGL/.worktrees/01-fixture" rev-parse HEAD 2>/dev/null)"
 gl_ran() { [ -f "$GL_SEEN" ] && awk 'END { print NR + 0 }' "$GL_SEEN" || echo 0; }
