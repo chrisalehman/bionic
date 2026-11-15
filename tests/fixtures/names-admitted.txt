@@ -30,8 +30,6 @@ old run	tests/bring-forward.test.sh	expect_eq "a record one epic alone joined at
 old run	tests/close-out-2.test.sh	LAND_UREC="$PLU/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
 old run	tests/close-out-2.test.sh	mkdir -p "$PLV/.bionic/docs/record/wave-01-fixture"; cp "$LAND_UREC" "$PLV/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
 old run	tests/close-out-3.test.sh	  printf 'run/v1|ev=hand|ac=AC-1|what=waive-row|by=Chris Lehman|said=waive the row|at=2026-10-06\n' >> "$rec/run.log"
-old run	tests/close-out-3.test.sh	printf 'note: T3 was landed by-hand (kind=hand); its run was stopped (ev=stop-run); the T2 decline was lifted (state=lift); amended= held= extended=\n' > "$PHP/.bionic/docs/record/wave-01-fixture/landing-proofs.log"
-old run	tests/close-out-3.test.sh	cp "$PHP/.bionic/docs/record/wave-01-fixture/landing-proofs.log" "$PHP/.bionic/docs/record/wave-01-fixture/fill-ledger.log"
 refusal	tests/close-replay.test.sh	#   §LOG      the landing record and the asks are events of the one log: no landing-proofs.log, no asks.state
 refusal	tests/close-replay.test.sh	  expect_eq "CL-3c …its acts stand in the run's log as ask events, and the record holds no asks.state" "yes|" \
 refusal	tests/close-replay.test.sh	    "$(/usr/bin/grep -q '^run/v1|ev=ask|key=waive:structure|' "$CR_REC/run.log" 2>/dev/null && echo yes)|$(ls "$CR_REC/asks.state" 2>/dev/null)"
