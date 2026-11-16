@@ -67,6 +67,10 @@
 #     segment in UTF-8. The bytes here are SYNTHESIZED to those measurements, not copied, and
 #     the large inputs are the same generators run further.
 #   * what each row does NOT pin: the cost of one operation (THE BLIND SPOT above).
+#   * the kept folds' state. The evidence gate keeps its folds under TMPDIR, in directories every
+#     process of the user shares and sweeps, so a hit or a miss there would follow whoever else ran
+#     between the untraced run and the traced one. Each hook gets a TMPDIR of this sandbox's own,
+#     as it gets HOME: the untraced run warms the folds and the traced run reads them.
 #
 # ANTI-VACUITY (per .claude/rules/test-harness.md, "Anti-vacuity"): the hooks must exist and
 # parse or the suite refuses to run; every fixture's size, offset and quote count is asserted
@@ -99,7 +103,8 @@ trap cleanup EXIT
 SID="7d1e2f3a-4b5c-4d6e-8f70-81a2b3c4d5e6"
 ACTOR="aht4reader-0123456789abcdef"
 FAKE_HOME="$SANDBOX/home"
-mkdir -p "$FAKE_HOME" "$SANDBOX/in"
+HT_TMP="$SANDBOX/tmp"
+mkdir -p "$FAKE_HOME" "$SANDBOX/in" "$HT_TMP"
 
 # ---------- the shells ----------
 
@@ -148,7 +153,7 @@ PRELUDE
 HT_RC=""; HT_OUT=""; HT_ERR=""; HT_N=""
 # ht_run <shell> <script> <stdin-file> <cwd> — one untraced run: HT_RC, HT_OUT, HT_ERR.
 ht_run() {
-  ( cd "$4" && env HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+  ( cd "$4" && env HOME="$FAKE_HOME" TMPDIR="$HT_TMP" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
       BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" LANG=en_US.UTF-8 LC_ALL= LC_CTYPE= \
       "$1" "$2" < "$3" > "$SANDBOX/.out" 2> "$SANDBOX/.err" )
   HT_RC=$?
@@ -159,7 +164,7 @@ ht_run() {
 ht_count() {
   local tr="$SANDBOX/.trace"
   : > "$tr"
-  ( cd "$4" && env HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+  ( cd "$4" && env HOME="$FAKE_HOME" TMPDIR="$HT_TMP" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
       BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" LANG=en_US.UTF-8 LC_ALL= LC_CTYPE= \
       HT_TRACE_OUT="$tr" BASH_ENV="$HT_PRELUDE" \
       "$1" "$2" < "$3" > "$SANDBOX/.out" 2>/dev/null )
