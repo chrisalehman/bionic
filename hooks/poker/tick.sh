@@ -380,8 +380,8 @@ sched_owed() {
 #     step-held lines are left in `SCHED_HOLDS` for the no-FILL line, where they have always
 #     been printed.
 #   LEDGER (T5; D4, ADR-037 decision 3). `units_findings` is the reader the commit gate refuses
-#     on — a status off the enum, a `landed` row the reader does not answer landed, an
-#     `active` row whose agent cell names no row on the run's rosters —
+#     on — a row the log holds landed that the reader does not answer landed, an `active` row
+#     whose name no row on the run's rosters carries —
 #     and each finding prints as `poker: LEDGER <id> <kind> [<value>]`. The rosters are
 #     `units_run_rosters`' list, this tick's own first, the list the gate reads (wave-36 T29;
 #     D10); with none to read (the first tick) it is the reader's no-roster rule, the gate's too.
@@ -416,7 +416,7 @@ EOF
     case "$rest" in *" "*) val="${rest#* }" ;; esac
     say "LEDGER ${rest%% *} ${kind}${val:+ $(clean "$val")}"
   done <<EOF
-$(units_findings "$SCHED_PLAN" "$(units_run_rosters "${ROSTER_FILE%/*}" "$SCHED_PLAN" "$ROSTER_FILE")" v15 2>/dev/null)
+$(units_findings "$SCHED_PLAN" "$(units_run_rosters "${ROSTER_FILE%/*}" "$SCHED_PLAN" "$ROSTER_FILE")" 2>/dev/null)
 EOF
   return 0
 }
@@ -525,12 +525,11 @@ tick_card_early() {  # <units_rows output> -> always 0; says the card's CARD-EAR
 }
 
 tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_* the FILL arm set; sets SCHED_BEHIND (the ready rows parked for width)
-  local rows waiting all offered held line chain ids mins susp base sfx edges split sp_id sp_sz sp_nf sp_k wl mhold mh_title mh_id
+  local rows waiting all offered held line chain ids mins edges split sp_id sp_sz sp_nf sp_k wl mhold mh_title mh_id
   [ -n "${SCHED_PLAN:-}" ] && [ -n "${SCHED_STEP:-}" ] || return 0
   rows="$(units_rows "$SCHED_PLAN" 2>/dev/null)" || return 0
   [ -n "$rows" ] || return 0
   waiting="$(units_waiting "$SCHED_PLAN" "$SCHED_STEP" 2>/dev/null)"
-  susp="$(suspect_lines "$SCHED_PLAN")"
   all="${SCHED_READY_ALL:-}"
   offered="$(printf '%s' "${SCHED_READY:-}" | tr '\n' ' ')"
   # THE ROWS A ROSTER HOLDS (wave-35 T28; AC-5.5, D14): a pending row open on any roster, this
@@ -547,22 +546,18 @@ tick_wait_report() {  # -> says the WAIT lines and the CHAIN line; reads SCHED_*
   SCHED_BEHIND=""
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    base="${line%%$'\037'*}"; sfx=""
-    [ "$base" = "$line" ] || sfx="${line#*$'\037'}"
-    case "$base" in *" — ready; no writer slot free (gap "*) SCHED_BEHIND="${SCHED_BEHIND}${SCHED_BEHIND:+ }${base%% *}" ;; esac
-    wl="WAIT $(clean "$base")${sfx:+ · $(clean_whole "$sfx")}"
+    case "$line" in *" — ready; no writer slot free (gap "*) SCHED_BEHIND="${SCHED_BEHIND}${SCHED_BEHIND:+ }${line%% *}" ;; esac
+    wl="WAIT $(clean "$line")"
     say "$wl"
-    tick_owed_approval "${base#* — }" "poker: $wl"
+    tick_owed_approval "${line#* — }" "poker: $wl"
   done <<TICK_WAIT
-$(printf '\034rows\n%s\n\034wait\n%s\n\034susp\n%s\n\034held\n%s\n\034mhold\n%s' "$rows" "$waiting" "$susp" "$held" "$mhold" | awk -F'\t' \
+$(printf '\034rows\n%s\n\034wait\n%s\n\034held\n%s\n\034mhold\n%s' "$rows" "$waiting" "$held" "$mhold" | awk -F'\t' \
     -v offered=" $offered " -v all=" $all " -v gap="${SCHED_GAP:-0}" '
   $0 == SUBSEP "rows" { part = 1; next }
   $0 == SUBSEP "wait" { part = 2; next }
-  $0 == SUBSEP "susp" { part = 3; next }
   $0 == SUBSEP "held" { part = 4; next }
   $0 == SUBSEP "mhold" { part = 5; next }
   part == 5 && $1 != "" { mh[$1] = $2; next }
-  part == 3 && $1 != "" { sus[$1, $2] = $3; next }
   part == 4 && $1 != "" { hold[$1] = $2 " open on roster " substr($3, 1, 8); next }
   part == 1 && $1 != "" { n++; id[n] = $1; knd[$1] = $3; st[$1] = $10; next }
   part == 2 && $1 != "" {
@@ -593,15 +588,6 @@ $(printf '\034rows\n%s\n\034wait\n%s\n\034susp\n%s\n\034held\n%s\n\034mhold\n%s'
           }
           reason = reason (reason == "" ? "" : "; ") t
         }
-        sfx = ""; split("", said)
-        for (m = 1; m <= nr[i]; m++) {
-          key = i SUBSEP rd[i, m]
-          for (w = 1; w <= nw[key]; w++) {
-            h = wid[key, w]
-            if (((i, h) in sus) && !(h in said)) { said[h] = 1; sfx = sfx (sfx == "" ? "" : " · ") sus[i, h] }
-          }
-        }
-        if (sfx != "") reason = reason "\037" sfx
       } else if (index(all, " " i " ")) {
         reason = "ready; no writer slot free (gap " gap ")"
       } else if (i in hold) {

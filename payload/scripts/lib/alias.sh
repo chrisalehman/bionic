@@ -156,21 +156,6 @@ ALIAS_GONE_EOF
   return 0
 }
 
-# alias_gone_cell <kind> <cell> -> as alias_gone, for a comma-separated cell a person typed: each token trimmed, a
-# `live:` prefix dropped. Exit 0 and the sentence at the first token that is gone.
-alias_gone_cell() {
-  local k="${1:-}" rest="${2:-}" t
-  ALIAS_GONE_SAID=""
-  while :; do
-    t="${rest%%,*}"
-    t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
-    t="${t#live:}"
-    _alias_gone_row "$k" "$t" && return 0
-    case "$rest" in *,*) rest="${rest#*,}" ;; *) break ;; esac
-  done
-  return 1
-}
-
 # alias_gone_text <kind> <text> -> exit 0 and the sentence when a line of <text> (a config file's, a frontmatter's)
 # opens with the old key of <kind>, `<key>:`; exit 1, nothing set, otherwise. The key is matched whole, so a longer key
 # that begins with the same word is another key. The value is never read.

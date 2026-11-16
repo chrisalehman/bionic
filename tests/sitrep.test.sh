@@ -61,9 +61,9 @@ SR_H="$(printf 'a%.0s' $(seq 40))"
 # ---------- the world ----------
 #
 # sr_world <label> <landing minutes for T1..T4, space-separated | none> -> SR_REPO, SR_PLAN, SR_REC (the run's log),
-# SR_DIR, SR_GATE. A page at 15 and its run's log. Seventeen rows, all Step 4 builds: T1–T4 landed (30 min each), T5–T8 active, T9–T17 pending. T9 reads lib/t8.sh, which T8 writes, so the remaining
-# chain is T8→T9 (90 + 60 = 150 min); every other open row is 30 min and reads nothing of another's.
-# T12 reads approval:release and T17 approval:merge. With `none`, T1–T4 are pending too and the
+# SR_DIR, SR_GATE. A page at 15 and its run's log. Seventeen rows, all Step 4 builds: T1–T4 landed (30 min each), T5–T8 active by their dispatch events, T9–T17 pending. T9 waits on T8 in its deps, so the remaining
+# chain is T8→T9 (90 + 60 = 150 min); every other open row is 30 min and waits on no other.
+# T12 waits on approval:release and T17 on approval:merge. With `none`, T1–T4 are pending too and the
 # landing record holds no landing. Two gate requests are admitted and held by this shell, so the
 # gate's admitted count is 2.
 # THE CLOCK: the plan is approved at 10:00Z (its approval event's instant, 12 hours before
@@ -108,20 +108,21 @@ sr_world() {
       i=$((i + 1))
     done
   fi
+  for i in 5 6 7 8; do sr_ev "ev=dispatch|row=T$i|name=w-T$i|at=2026-10-06T10:00:00Z"; done
   sr_ev "ev=ready|row=T8|name=w-T8|commit=$SR_C1|branch=wt/02-T8|tree=$r/.worktrees/02-T8|suites=a.test.sh|debt=-|carrier=1:x|at=2026-10-06T13:00:00Z"
   # The fill's two turns, nothing idle, the first at 10:00Z (elapsed 720 min at NOW).
   sr_stop t2 16:00:00 4 0 "" "" 0 "" 0
   {
     printf '\n## Tasks\n\n'
-    printf '| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
-    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| id | step | kind | task | deps | size | serves | Files | artifact |\n'
+    printf '|---|---|---|---|---|---|---|---|---|\n'
     sr_row T1 "Row one the thing (D1; AC-1.1). More words · complexity: standard" — 30 "$st1"
     sr_row T2 "Haiku 5.5 at high (REQ-8; AC-8.1) · complexity: standard" — 30 "$st1"
     sr_row T3 "Third row. A second sentence · complexity: standard" — 30 "$st1"
     sr_row T4 "Fourth · complexity: complex" — 30 "$st1"
     for i in 5 6 7; do sr_row "T$i" "Row $i body · complexity: standard" — 30 active; done
     sr_row T8 "The long one (D8) · complexity: complex" — 90 active
-    sr_row T9 "Waits on the long one · complexity: standard" lib/t8.sh 60 pending
+    sr_row T9 "Waits on the long one · complexity: standard" T8 60 pending
     for i in 10 11 13 14 15 16; do sr_row "T$i" "Row $i body · complexity: standard" — 30 pending; done
     sr_row T12 "Release-gated row · complexity: standard" approval:release 30 pending
     sr_row T17 "Merge-gated row · complexity: standard" approval:merge 30 pending
@@ -140,9 +141,27 @@ sr_ev() { printf 'run/v1|%s\n' "$1" >> "$SR_REC"; }
 sr_stop() {  # <turn> <hh:mm:ss on 2026-10-06, UTC> <open> <free> <ready> <launched> <missed> <idle> <room> -> one stop of the fill, as the stop writes it
   sr_ev "ev=stop|session=$SID|turn=$1|current=4|state=ok|ceiling=|width=4|open=$3|free=$4|ready=$5|launched=$6|declined=|missed=$7|idle=$8|room=$9|at=2026-10-06T${2}Z"
 }
-sr_row() {  # <id> <task> <reads> <size> <status>
+sr_row() {  # <id> <task> <deps> <size> -> the row in its nine cells; its state is the run's log (sr_state)
   local n="${1#T}"
-  printf '| %s | 4 | build | %s | — | — | %s | %s | REQ-1 | lib/t%s.sh | — | — | %s | — | — | — |\n' "$1" "$2" "$3" "$4" "$n" "$5"
+  printf '| %s | 4 | build | %s | %s | %s | REQ-1 | lib/t%s.sh | — |\n' "$1" "$2" "$3" "$4" "$n"
+}
+sr_state() {  # <id> <landed|active|pending|dropped> -> the row's state in this world's log, by the events that move it
+  case "$2" in
+    landed) sr_ev "ev=published|row=$1|commit=$SR_C1|kind=queue|by=-|why=-|at=2026-10-06T21:00:00Z" ;;
+    active) sr_ev "ev=cancel|of=published|row=$1|commit=$SR_C1|at=2026-10-06T21:00:00Z"
+            sr_ev "ev=dispatch|row=$1|name=w-$1|at=2026-10-06T21:00:00Z" ;;
+    pending) sr_ev "ev=cancel|of=dispatch|row=$1|name=w-$1|at=2026-10-06T21:00:00Z"
+             sr_ev "ev=cancel|of=published|row=$1|commit=$SR_C1|at=2026-10-06T21:00:00Z" ;;
+    dropped) sr_ev "ev=drop|row=$1|why=fixture|at=2026-10-06T21:00:00Z" ;;
+  esac
+}
+sr_set() {  # <id> <kind|deps|size|files|status> <value> -> that cell of the row in this world's plan, or for status its log
+  [ "$2" != status ] || { sr_state "$1" "$3"; return; }
+  awk -F'|' -v id=" $1 " -v k="$2" -v v=" ${3:-—} " 'BEGIN { OFS = "|"; c["kind"] = 4; c["deps"] = 6; c["size"] = 7; c["files"] = 9 }
+    $2 == id && NF > 9 { i = c[k]; $i = v } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+}
+sr_open() {  # <id> <kind> <size> <status> [<deps>] -> the row opened as that kind, size and state, waiting on the deps given
+  sr_set "$1" kind "$2"; sr_set "$1" size "$3"; sr_set "$1" status "$4"; sr_set "$1" deps "${5:-—}"
 }
 SR_OWED_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/owed.sh"
 sr_asks() { bash -c '. "$1" && owed_lines "$2" "$3"' _ "$SR_OWED_LIB" "$SR_PLAN" "$SR_REPO" 2>/dev/null; }   # the run's asks as the asks library lists them
@@ -160,9 +179,9 @@ sr_prev() {
   mkdir -p "$d"
   {
     printf -- '---\nwave: wave-40-prev\ncanonical_sdlc_version: 15\nrelease: 9.8.0\n%s---\n# prev\n' "${2:+scale: $2$'\n'}"
-    printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
-    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-    printf '| T1 | 4 | build | Prev row · complexity: standard | — | — | — | 60 | REQ-1 | lib/p1.sh | — | — | landed | — | — | — |\n'
+    printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n'
+    printf '|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | Prev row · complexity: standard | — | 60 | REQ-1 | lib/p1.sh | — |\n'
   } > "$p"
   {
     printf 'run/v1|ev=approval|key=step3|by=fixture|said=approved|at=2026-10-05T10:00:00Z\n'
@@ -232,8 +251,8 @@ sr_waste() { for k in waste.dropped waste.runs-discarded waste.ready-unstarted; 
 
 # ---------- the world that holds every fact kind ----------
 #
-# sr_sheet_world -> the world moved so it holds one of each fact: T7 red at head (failed), T11 held, T13 a
-# review row in flight, T16 dropped, one discarded suite run, a 72-minute idle turn, a review of the whole failing
+# sr_sheet_world -> the world moved so it holds one of each fact: T7 red at head (failed), T13 a review row in
+# flight by its dispatch, T16 dropped, one discarded suite run, a 72-minute idle turn, a review of the whole failing
 # with one open S2 finding and a review of a piece passing, three goals (one met, one not met, one not measured),
 # five asks of five kinds open on the register beside one closed, and a decision put and not ruled.
 SR_D_WAIT="Answered now or in an hour, nothing moves: no task waits on it."
@@ -251,11 +270,7 @@ sr_sheet_world() {
   SR_GOALS="fast landings · one-file median under 15m (landing-report --rows)
 tests · whole run under 45 min at the approved head (the Step-5 run log)
 handoff · a fresh session continues a no-run handoff (record/reader-test-handoff.md)" sr_world "$1" "6 6 12 12"
-  awk -F'|' 'BEGIN { OFS = "|" }
-    $2 == " T11 " && NF > 12 { $14 = " held " }
-    $2 == " T13 " && NF > 12 { $4 = " review "; $14 = " active " }
-    $2 == " T16 " && NF > 12 { $14 = " dropped " }
-    { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+  sr_set T13 kind review; sr_state T13 active
   sr_ev "ev=drop|row=T16|why=fixture|at=2026-10-06T13:00:00Z"
   sr_ev "ev=verdict|row=T7|commit=$SR_C1|suite=a.test.sh|result=red|log=/rec/T7.log|at=2026-10-06T14:00:00Z"
   sr_ev "ev=verdict|row=T8|commit=$SR_C1|suite=a.test.sh|result=discarded|log=/rec/T8.log|at=2026-10-06T14:10:00Z"
@@ -303,7 +318,7 @@ expect_eq "SH5 ten steps, each with its number, name, state and task count: 0 to
 expect_eq "SH6 one task line per task not dropped: sixteen, T16 among none of them while T15 is there" "16|0|1" \
   "$(sr_lines task | /usr/bin/grep -c .)|$(sr_lines task | /usr/bin/grep -c '^task: id=T16 ')|$(sr_lines task | /usr/bin/grep -c '^task: id=T15 ')"
 expect_eq "SH7 each task's step, state and few words: done with its landing time, failed red, held, a review in flight, waiting" \
-  "4|done|landed 3:06 AM|failed|red|held|held|held|waits on your approval of the release|running|pending|waits on 4/8|pending|-" \
+  "4|done|landed 3:06 AM|failed|red|pending|-|held|waits on your approval of the release|running|pending|waits on 4/8|pending|-" \
   "$(sr_f "$(sr_task T1)" step)|$(sr_f "$(sr_task T1)" state)|$(sr_f "$(sr_task T1)" note)|$(sr_f "$(sr_task T7)" state)|$(sr_f "$(sr_task T7)" note)|$(sr_f "$(sr_task T11)" state)|$(sr_f "$(sr_task T11)" note)|$(sr_f "$(sr_task T12)" state)|$(sr_f "$(sr_task T12)" note)|$(sr_f "$(sr_task T13)" state)|$(sr_f "$(sr_task T9)" state)|$(sr_f "$(sr_task T9)" note)|$(sr_f "$(sr_task T10)" state)|$(sr_f "$(sr_task T10)" note)"
 expect_eq "SH8 each task's title, the plan card's: the cell up to its first '. ', else up to its first ' · '" \
   "Row one the thing (D1; AC-1.1)|Haiku 5.5 at high (REQ-8; AC-8.1)|Third row|The long one (D8)" \
@@ -353,7 +368,6 @@ sr_launch() {  # <row> <hh:mm:ss on 2026-10-06, UTC> -> a roster's launch of tha
 }
 sr_mw_world() {  # <label> -> the world above
   SR_EXTRA=1 sr_world "$1" "6 6 12 12"
-  awk -F'|' 'BEGIN { OFS = "|" } $2 == " T16 " && NF > 12 { $14 = " dropped " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
   sr_ev "ev=drop|row=T16|why=fixture|at=2026-10-06T13:00:00Z"
   sr_ev "ev=born|row=T17|at=2026-10-06T09:00:00Z"; sr_ev "ev=born|row=T18|at=2026-10-06T12:00:00Z"
   sr_launch T1 09:36:00; sr_launch T2 10:06:00; sr_launch T3 10:12:00; sr_launch T4 11:12:00
@@ -419,7 +433,7 @@ sr_mw_world pace-waits
 sr_ask_ev "key=approve:release|sent=-|title=approval: release|at=2026-10-06T20:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "PC7 an ask holding 4/12, off the chain: the prediction waits on no answer" "no" "$(sr_m close.waits-on-you)"
-awk -F'|' 'BEGIN { OFS = "|" } $2 == " T9 " { $8 = " lib/t8.sh, approval:design " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_set T9 deps "T8, approval:design"
 sr_ask_ev "key=approve:design|sent=-|title=approval: design|at=2026-10-06T20:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "PC8 an ask holding 4/9, on the chain: the prediction assumes it is answered now, and names it" "yes: approve:design" \
@@ -428,21 +442,14 @@ expect_eq "PC8 an ask holding 4/9, on the chain: the prediction assumes it is an
 # ============================================================
 # The close counts what is running and scales by kind. The world: T1 to T4 landed, each 100 sized min and launched 6 min
 # before its landing, so the landed build tasks' own time is 24 min over 400 sized min, a ratio of 0.06 that any build
-# row left pending is scaled by; every other row is landed, and a test opens the rows it reads. A row's reads is set
-# to approval:plan, met, so no default read (head, the proofs) joins it to another row. Now is 3:00 PM.
-sr_set() {  # <id> <kind|reads|size|status> <value> -> that cell of the row, in this world's plan
-  awk -F'|' -v id=" $1 " -v k="$2" -v v=" $3 " 'BEGIN { OFS = "|"; c["kind"] = 4; c["reads"] = 8; c["size"] = 9; c["status"] = 14 }
-    $2 == id && NF > 12 { i = c[k]; $i = v } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
-}
-sr_open() {  # <id> <kind> <size> <status> [<reads>] -> the row opened as that kind, size and status, reading approval:plan
-  sr_set "$1" kind "$2"; sr_set "$1" size "$3"; sr_set "$1" status "$4"; sr_set "$1" reads "${5:-approval:plan}"
-}
+# row left pending is scaled by; every other row is landed, and a test opens the rows it reads. Every row past T4 writes
+# only its record, so no row's default read of the head joins it to another. Now is 3:00 PM.
 sr_close_world() {  # <label> -> the world above
   local i
   sr_world "$1" "5 5 5 5"
   for i in 1 2 3 4; do sr_set "T$i" size 100; done
   sr_launch T1 09:59:00; sr_launch T2 10:29:00; sr_launch T3 10:59:00; sr_launch T4 11:59:00
-  for i in 5 6 7 8 9 10 11 12 13 14 15 16 17; do sr_set "T$i" status landed; done
+  for i in 5 6 7 8 9 10 11 12 13 14 15 16 17; do sr_set "T$i" status landed; sr_set "T$i" files ".bionic/docs/record/wave-02-fx/T$i.md"; done
 }
 
 # ============================================================
@@ -452,7 +459,7 @@ section "§CLOSE-RUNNING: the predicted close counts a running row off the chain
 # remaining time, a running row past its size counts nothing, or the roster's cadence is not the floor.
 sr_close_world close-running
 sr_open T5 verify 90 active
-sr_open T6 build 30 pending; sr_open T7 build 30 pending lib/t6.sh
+sr_open T6 build 30 pending; sr_open T7 build 30 pending T6
 sr_launch T5 21:55:00
 sr_run "$SR_PLAN"
 expect_eq "CR0 precondition: the build ratio is in force, 24 min over 400 sized min" \
@@ -466,13 +473,13 @@ sr_run "$SR_PLAN"
 expect_eq "CR2 control: the same row landed, the close follows the chain: T6 then T7 at 2 min each" "3:04 PM" "$(sr_m close.predicted)"
 sr_close_world close-running-late
 sr_open T5 verify 90 active
-sr_open T6 build 30 pending; sr_open T7 build 30 pending lib/t6.sh
+sr_open T6 build 30 pending; sr_open T7 build 30 pending T6
 sr_launch T5 20:00:00
 sr_run "$SR_PLAN"
 expect_eq "CR3 a running row past its size has a cadence left, 15 min when its roster row names none" "3:15 PM" "$(sr_m close.predicted)"
 sr_close_world close-running-cad
 sr_open T5 verify 90 active
-sr_open T6 build 30 pending; sr_open T7 build 30 pending lib/t6.sh
+sr_open T6 build 30 pending; sr_open T7 build 30 pending T6
 printf 'roster-state/v1|status=intended|session=%s|name=w-T5|agent_id=|launched_at=2026-10-06T20:00:00Z|plan=%s|row=T5|cadence=30 min\n' \
   "$SID" "$SR_PLAN" >> "$SR_REPO/.bionic/tmp/roster-$SID.state"
 sr_run "$SR_PLAN"
@@ -523,6 +530,8 @@ section "§CLOSE-UPSTREAM: a verify row counts as upstream of the integrate row 
 # fails-when: an open verify row is absent from the chain the integrate row heads, a landed one is on it, or the added
 # edge joins two rows that already wait on each other the other way round.
 sr_close_world close-upstream
+# NO REGRESSION IS OWED, so the integrate row's kind names no verify row and the edge under test is the one the sheet adds.
+awk '{ print } /^canonical_sdlc_version: 15$/ { print "regression: no" }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_open T5 verify 60 pending
 sr_open T9 integrate 30 pending
 sr_open T6 build 20 pending
@@ -536,7 +545,7 @@ sr_open T5 verify 60 active
 sr_launch T5 21:55:00
 sr_run "$SR_PLAN"
 expect_eq "UP3 a running verify row is on the chain the integrate row heads" "4/5 → 4/9, 90 min" "$(sr_m close.chain)"
-sr_open T5 verify 60 pending lib/t9.sh
+sr_open T5 verify 60 pending T9
 sr_run "$SR_PLAN"
 expect_eq "UP4 a verify row that reads what the integrate row writes keeps that order: no cycle, the chain 4/9 then 4/5" \
   "0|4/9 → 4/5, 90 min" "$RC|$(sr_m close.chain)"
@@ -555,7 +564,7 @@ expect_eq "WS1 correctness: the suites run by their last verdict, the suites the
 expect_eq "WS2 waste: dropped, suite runs discarded, ready tasks unstarted, minutes waiting on you" "1 task, 30 min|0 of 4|0 min|0 min" \
   "$(for k in waste.dropped waste.runs-discarded waste.ready-unstarted waste.waiting-on-you; do sr_m "$k"; done | sr_join)"
 # T9 reads approval:design, asked 13:00Z and closed 14:00Z: 60 minutes. approve:other held nothing: no minute.
-awk -F'|' 'BEGIN { OFS = "|" } $2 == " T9 " { $8 = " lib/t8.sh, approval:design " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_set T9 deps "T8, approval:design"
 sr_ask_ev "key=approve:design|sent=-|title=approval: design|at=2026-10-06T13:00:00Z"; sr_ask_ev "key=approve:design|reply=approve|at=2026-10-06T14:00:00Z"
 sr_ask_ev "key=approve:other|sent=-|title=approval: other|at=2026-10-06T10:00:00Z"; sr_ask_ev "key=approve:other|reply=approve|at=2026-10-06T11:00:00Z"
 sr_run "$SR_PLAN"
@@ -568,7 +577,7 @@ expect_eq "WS4 an open ask counts from its raising to now, an overlap once" "540
   "$(sr_m waste.waiting-on-you)"
 # A decision closed with no opened time: its first put, 1:30 PM PDT, to its close at 2:00 PM.
 sr_mw_world waste-ledger
-awk -F'|' 'BEGIN { OFS = "|" } $2 == " T10 " { $8 = " approval:D5 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_set T10 deps approval:D5
 sr_ledger_put D5 "the thing" "$SR_D_WAIT"; sr_ev "ev=decision|entry=Δ1|d=D5|verb=put|by=orchestrator|title=the thing again|wait=$SR_D_WAIT|at=2026-10-06T20:45:00Z"
 sr_ev "ev=decision|entry=Δ2|d=D5|verb=ruled|said=1|by=fixture|title=the thing|at=2026-10-06T21:00:00Z"
 sr_ask_ev "key=decide:D5|reply=ruled|at=2026-10-06T21:00:00Z"
@@ -583,7 +592,7 @@ section "§ONE-PARSER: one rule for what rules a decision, settled among its ver
 # fails-when: a decision whose only ruling of D<n> is a `settled` round is open to one reader and ruled to the other,
 # or the sheet parses a ledger heading itself.
 sr_world one-parser "6 6 12 12"
-awk -F'|' 'BEGIN { OFS = "|" } $2 == " T10 " { $8 = " approval:D5 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_set T10 deps approval:D5
 sr_bind
 sr_ledger_put D5 "the thing" "$SR_D_WAIT"; sr_ev "ev=decision|entry=Δ1|d=D5|verb=settled|said=1|by=fixture|title=the thing|at=2026-10-06T21:00:00Z"
 sr_ask_ev "key=decide:D5|reply=ruled|at=2026-10-06T21:00:00Z"
@@ -610,7 +619,7 @@ section "§SPAN: an ask closed with no opened= takes its span from the run's rec
 # passed over for the record, a carry, which waits on the release card and never on you, counts its span, or an ask
 # the record cannot time leaves the count unmarked.
 sr_mw_world span
-awk '/^\| T17 / { print; print "| T18 | 8 | integrate | Merge row · complexity: standard | — | — | — | 10 | REQ-1 | lib/t18.sh | — | — | pending | — | — | — |"; next } { print }' \
+awk '/^\| T17 / { print; print "| T18 | 8 | integrate | Merge row · complexity: standard | — | 10 | REQ-1 | lib/t18.sh | — |"; next } { print }' \
   "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 SP_REC="record/wave-02-fx/critic-structure.md"
 sr_ev "ev=proof|kind=review|head=$SR_H|evidence=$SP_REC|question=structure|reader=w-T2|result=flag|scope=whole|at=2026-10-06T12:00:00Z"
@@ -648,10 +657,12 @@ section "§WAITS: a held or pending task's note names everything it waits on, in
 # approval of the <name>; the reviews; the last build row landing; the writer task's label; the merge, in the order the
 # reads are read. T18 at Step 8 reads six things, T19 the merge T18 makes, and T5, building, reads two approvals owed.
 sr_world waits "6 6 12 12"
-awk -F'|' 'BEGIN { OFS = "|" } $2 == " T5 " && NF > 12 { $8 = " approval:release, approval:D4 " } { print }
+# NO REGRESSION IS OWED, so the merge row waits by its kind on the reviews and the head alone.
+awk '{ print } /^canonical_sdlc_version: 15$/ { print "regression: no" }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+awk -F'|' 'BEGIN { OFS = "|" } $2 == " T5 " && NF > 9 { $6 = " approval:release, approval:D4 " } { print }
   /^\| T17 / {
-    print "| T18 | 8 | integrate | Merge row · complexity: standard | — | — | proof:review, head, approval:release, lib/t8.sh, approval:D4 | 10 | REQ-1 | lib/t18.sh | — | — | pending | — | — | — |"
-    print "| T19 | 9 | close | Close · complexity: standard | — | — | — | 10 | REQ-1 | .bionic/docs/record/wave-02-fx/close.md | — | — | pending | — | — | — |" }' \
+    print "| T18 | 8 | integrate | Merge row · complexity: standard | approval:release, T8, approval:D4 | 10 | REQ-1 | lib/t18.sh | — |"
+    print "| T19 | 9 | close | Close · complexity: standard | — | 10 | REQ-1 | .bionic/docs/record/wave-02-fx/close.md | — |" }' \
   "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_ask_ev "key=approve:release|sent=-|title=approval: release|at=2026-10-06T20:00:00Z"
 sr_ledger_put D4 "the width" "$SR_D_WAIT"
@@ -800,7 +811,6 @@ sr_run "$SR_PLAN"
 expect_eq "ME4 a discarded run, then a run killed at the gate: each counts as discarded, of every suite run" "0 tasks, 0 min|1 of 5|0 min|0 tasks, 0 min|2 of 6|0 min" \
   "$SR_ME4|$(sr_waste)"
 # A task dropped, and an idle turn from 16:00Z to 17:12Z: 72 minutes.
-awk -F'|' 'BEGIN { OFS = "|" } ($2 == " T15 " || $2 == " T16 ") && NF > 12 { $14 = " dropped " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_ev "ev=drop|row=T15|why=fixture|at=2026-10-06T15:30:00Z"; sr_ev "ev=drop|row=T16|why=fixture|at=2026-10-06T15:30:00Z"
 sr_stop t2 16:00:00 3 1 T9 "" 1 T9 1
 sr_stop t3 17:12:00 4 0 "" T9 0 "" 0
@@ -936,7 +946,7 @@ expect_eq "FC8 at 9:00 AM and at 3:00 AM the next morning, now's own day: no dat
 # One chain: every open task reads what the one before it writes, so no width can shorten it.
 sr_world one-chain "6 6 12 12"
 awk -F'|' 'BEGIN { OFS = "|" }
-  $2 ~ /^ T([5-9]|1[0-7]) $/ { n = $2; gsub(/[ T]/, "", n); if (n + 0 > 5) $8 = " lib/t" (n - 1) ".sh " }
+  $2 ~ /^ T([5-9]|1[0-7]) $/ { n = $2; gsub(/[ T]/, "", n); if (n + 0 > 5) $6 = " T" (n - 1) " " }
   { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_run "$SR_PLAN"; SR_OC2="$(sr_m close.predicted)"
 for i in 3 4; do
@@ -973,14 +983,11 @@ sr_run "$SR_PLAN"
 expect_eq "PA2 no landing: the chain at 1×, nothing landed to measure" \
   "5:30 PM|0 tasks: none has landed|yes" \
   "$(sr_m close.predicted)|$(sr_m work.task-time)|$(sr_d close.predicted | /usr/bin/grep -q 'at 1×: 0 landed build tasks have a launch and a landing on record, under 3' && echo yes)"
-# Fewer than three landings scale nothing: two of the four rows land (T3's and T4's landings gone from the record and
-# the plan's lines, their status cells still landed); then one; then three. sr_unland <row regex> takes them out.
-sr_unland() {
-  awk -v r="$1" '!($0 ~ "^run/v1[|]ev=published[|]row=(" r ")[|]")' "$SR_REC" > "$SR_REC.t" && mv "$SR_REC.t" "$SR_REC"
-}
+# Fewer than three landings with a launch scale nothing: all four rows land, two of them with a launch on the roster;
+# then one; then three. sr_unlaunch <row> takes a launch off the roster.
+sr_unlaunch() { awk -v r="|row=$1" 'substr($0, length($0) - length(r) + 1) != r' "$SR_REPO/.bionic/tmp/roster-$SID.state" > "$SR_REPO/.bionic/tmp/r.t" && mv "$SR_REPO/.bionic/tmp/r.t" "$SR_REPO/.bionic/tmp/roster-$SID.state"; }
 sr_world pace-two "5 5 5 5"
-sr_launch T1 09:35:00; sr_launch T2 10:05:00; sr_launch T3 10:35:00; sr_launch T4 11:20:00
-sr_unland 'T3|T4'
+sr_launch T1 09:35:00; sr_launch T2 10:05:00
 sr_run "$SR_PLAN"
 expect_eq "PA4 two landings: their time counted, the rows with no landing header said (precondition)" \
   "2 tasks, 60 min against 60 sized min; 2 landed tasks with no launch or landing on record" "$(sr_m work.task-time)"
@@ -988,13 +995,12 @@ expect_eq "PA4b …the close is the chain at 1×, and the basis says 2, under 3"
   "$(sr_m close.predicted)|$(sr_d close.predicted | /usr/bin/grep -q 'at 1×: 2 landed build tasks have a launch and a landing on record, under 3' && echo yes)"
 sr_run --line "$SR_PLAN"
 expect_eq "PA4c …and the Patrol's status carries it" "close 5:30 PM" "${OUT##* · }"
-sr_unland T2
+sr_unlaunch T2
 sr_run "$SR_PLAN"
 expect_eq "PA4d one landing: the same, said for 1" "yes" \
   "$(sr_d close.predicted | /usr/bin/grep -q 'at 1×: 1 landed build task has a launch and a landing on record, under 3' && echo yes)"
 sr_world pace-three "5 5 5 5"
-sr_launch T1 09:35:00; sr_launch T2 10:05:00; sr_launch T3 10:35:00; sr_launch T4 11:20:00
-sr_unland T4
+sr_launch T1 09:35:00; sr_launch T2 10:05:00; sr_launch T3 10:35:00
 sr_run "$SR_PLAN"
 expect_eq "PA4e three landings scale the chain: 90 min against 90, the basis names them, and no 1× stands" "5:30 PM|yes|0" \
   "$(sr_m close.predicted)|$(sr_d close.predicted | /usr/bin/grep -q 'scaled by the 3 landed build tasks.* 90 min over 90 sized min' && echo yes)|$(sr_d close.predicted | /usr/bin/grep -c 'under 3')"
@@ -1027,7 +1033,7 @@ sr_run --line "$SR_PLAN"
 expect_eq "CC2 no Step 3 approval: nothing predicted and no forecast end, said; the Patrol's status says it is not forecast" \
   "-|-|1|close not forecast" "$SR_CC2|${OUT##* · }"
 sr_world guess-done "6 6 12 12"
-awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T([5-9]|1[0-7]) $/ { $14 = " landed " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+for sr_i in 5 6 7 8 9 10 11 12 13 14 15 16 17; do sr_state "T$sr_i" landed; done
 sr_run "$SR_PLAN"
 expect_eq "CC3 every task landed and the run open: the predicted close is now, nothing left to forecast" "3:00 PM|1|none: no task is open" \
   "$(sr_m close.predicted)|$(sr_d close.predicted | /usr/bin/grep -c 'no task is open')|$(sr_m close.chain)"
@@ -1044,7 +1050,7 @@ expect_eq "CC5 …and the Patrol's status closes at the delivery" "close 8:07 AM
 # Four rows sized 100 min each, each launched 6 min before it landed: 24 min of their own against 400 sized, so the
 # 150-min chain takes 9 min; T8 is running, so it has its 15 min cadence left, not 5: the close is 3:19 PM.
 sr_world guess-fast "5 5 5 5"
-awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T[1-4] $/ { $9 = " 100 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+for sr_i in 1 2 3 4; do sr_set "T$sr_i" size 100; done
 sr_launch T1 09:59:00; sr_launch T2 10:29:00; sr_launch T3 10:59:00; sr_launch T4 11:59:00
 sr_run "$SR_PLAN"
 SR_CC6="$(sr_m close.predicted)"
@@ -1459,7 +1465,7 @@ expect_eq "DR2 …and it says only the two it opened" "2|0" \
 section "§ONE-FILE: the one-file goal reads the one-file landings only; a landing of more files moves it not"
 # ============================================================
 SR_FORECAST=200h SR_GOALS="fast landings · one-file median under 5m (landing-report --rows)" sr_world one-file "90 90 10 10"
-awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ T[12] $/ { $11 = " lib/t1.sh, lib/x.sh " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+for sr_i in 1 2; do sr_set "T$sr_i" files "lib/t1.sh, lib/x.sh"; done
 sr_run "$SR_PLAN"
 expect_eq "OF1 two 90-minute landings of two files and two 10-minute one-file landings: the goal reads 10 min against its 5-minute target" \
   "fast landings=not met|yes" "$(sr_goal_st)|$(sr_goal_m 'fast landings' | /usr/bin/grep -q 'median is 10 min over 2 landings' && echo yes)"
@@ -1582,11 +1588,10 @@ section "§NAMES: every task has one line, its description its title as the plan
 # ============================================================
 # sr_cell <id> <cell> -> SR_PLAN with that task's description cell replaced, in the Tasks table alone (a row of the
 # dispatch ledger names the same id)
-sr_cell() { awk -v id=" $1 " -v t="$2" -F'|' 'BEGIN { OFS = "|" } $2 == id && NF > 12 { $5 = " " t " " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"; }
+sr_cell() { awk -v id=" $1 " -v t="$2" -F'|' 'BEGIN { OFS = "|" } $2 == id && NF > 9 { $5 = " " t " " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"; }
 SR_LONG300="$(awk 'BEGIN { for (i = 1; length(s) < 300; i++) s = s (i > 1 ? " " : "") "wordnumber" i; print substr(s, 1, 300) }')"
 sr_world names "6 6 12 12"
-sed -i.bak -e 's#^\(| T10 | 4 | build | [^|]*| — | — | \)—#\1lib/t5.sh,lib/t6.sh,lib/t7.sh#' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
-sed -i.bak -e 's/^\(| T11 | .*| 30 | REQ-1 | lib\/t11.sh | — | — | \)pending/\1held/' "$SR_PLAN" && rm -f "$SR_PLAN.bak"
+sr_set T10 deps "T5, T6, T7"
 sr_cell T1 "$SR_LONG300"
 sr_cell T13 "Alpha one (the aside). And the rest"
 sr_cell T14 "Beta two: its colon. And the rest"
@@ -1600,8 +1605,8 @@ expect_eq "NM1 a 300-character cell with no delimiter is the whole description, 
 expect_eq "NM2 the description is the title: a period ends it before a space and a capital, else the first \" · \" does, keeping a paren or a colon before it, and the rest of the cell never prints" \
   "Alpha one (the aside)|Beta two: its colon|Gamma three|Delta four|0" \
   "$(for t in T13 T14 T15 T16; do sr_f "$(sr_task "$t")" desc; done | sr_join)|$(printf '%s\n' "$OUT" | /usr/bin/grep -ci 'and the rest')"
-expect_eq "NM3 the note of each kind: done a time, next on the line, queued behind, building, red, waiting on each of three, waiting on one, held" \
-  "T1 landed 3:06 AM|T8 next on the line|T6 queued behind 4/8|T5 building|T7 red|T10 waits on 4/5, 4/6 and 4/7|T9 waits on 4/8|T11 held" \
+expect_eq "NM3 the note of each kind: done a time, next on the line, queued behind, building, red, waiting on each of three, waiting on one, none" \
+  "T1 landed 3:06 AM|T8 next on the line|T6 queued behind 4/8|T5 building|T7 red|T10 waits on 4/5, 4/6 and 4/7|T9 waits on 4/8|T11 -" \
   "$(for t in T1 T8 T6 T5 T7 T10 T9 T11; do printf '%s %s\n' "$t" "$(sr_f "$(sr_task "$t")" note)"; done | sr_join)"
 # a 40-task plan: one line per step and per task
 SR_EXTRA=23 sr_world names-forty "6 6 12 12"
@@ -1745,7 +1750,7 @@ awk -v r="$SR_W_ROW" '{ print } /^\| T17 \|/ { print r }' "$SR_PLAN" > "$SR_PLAN
 expect_eq "WA-2 a row held, not pending, that reads approval:D32 waits on it" \
   "Answered in an hour rather than now, T20 starts an hour later and the predicted close holds: it is off the longest chain." \
   "$(sr_wait D32)"
-sed -e 's/^\(| T20 | .*| \)held\( | — | — | — |\)$/\1landed\2/' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_state T20 landed
 expect_eq "WA-2b …landed, it waits on nothing" "$SR_W_NONE" "$(sr_wait D32)"
 printf 'Release approval\n\n## Replay\n\nrelease-approval/v1|plan=%s|head=%s|at=2026-10-06T21:00:00Z|decisions=1\nrelease-approval/v1|dec=1|key=approve:D33|default=approve D33|other=-|pick=default|choices=approve/hold|why=-\n' \
   "$SR_PLAN" "$SR_H" > "$SR_DIR/release-approval-${SR_H:0:8}.md"

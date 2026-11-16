@@ -278,17 +278,18 @@ WR_SID="5c1e7a2b-3d4f-4e8a-9b6c-1f2e3d4c5b6a"
 WR_R="$TMP/run"; WR_P="$WR_R/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
 mkdir -p "${WR_P%/*}" "$WR_R/.bionic/docs/record/wave-02-fx" "$WR_R/.bionic/tmp"
 ( cd "$WR_R" && git init -q . && printf '.bionic/\n' >> .git/info/exclude && git -c user.name=fx -c user.email=fx@example.invalid commit -q --allow-empty -m init )
-wr_row() { printf '| %s | %s | build | %s · complexity: standard | — | — | %s | 30 | REQ-1 | lib/%s.sh | — | — | %s | — | — | — |\n' "$1" "$2" "$3" "$4" "$1" "$5"; }
+wr_row() { printf '| %s | %s | build | %s · complexity: standard | %s | 30 | REQ-1 | lib/%s.sh | — |\n' "$1" "$2" "$3" "$4" "$1"; }   # <id> <step> <task> <deps>, its state the log's
 {
   printf -- '---\nwave: wave-02-fx\ncanonical_sdlc_version: 15\nrelease: 9.9.0\nworking-branch: wave/02-fx\nintegration-branch: main\nforecast: 8h\n'
   printf 'goals: owed · the user says what they owe (record/owed-test.md)\n---\n# fixture plan\n'
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-  wr_row T1 4 "The first row" — landed; wr_row T2 4 "The second row" — active
-  wr_row T3 8 "Merge it" "approval:release" pending
+  printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+  wr_row T1 4 "The first row" —; wr_row T2 4 "The second row" —
+  wr_row T3 8 "Merge it" "approval:release"
   printf '\n## Not Doing\n\n- nothing\n'
 } > "$WR_P"
-{ printf 'run/v1|ev=approval|key=step3|by=fixture|said=approved|at=2026-10-06T16:00:00Z\nrun/v1|ev=step|n=4|at=2026-10-06T16:00:00Z\n'   # the run's log: its approval and step, T1's landing and the open ask
+{ printf 'run/v1|ev=approval|key=step3|by=fixture|said=approved|at=2026-10-06T16:00:00Z\nrun/v1|ev=step|n=4|at=2026-10-06T16:00:00Z\n'   # the run's log: its approval and step, T1's landing, T2's launch and the open ask
   printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T18:00:00Z\n' "$(printf 'c%.0s' $(seq 40))"
+  printf 'run/v1|ev=dispatch|row=T2|name=w-T2|at=2026-10-06T18:30:00Z\n'
   printf 'run/v1|ev=ask|key=approve:release|sent=-|title=approval: release|at=2026-10-06T20:00:00Z\n'; } > "$WR_R/.bionic/docs/record/wave-02-fx/run.log"
 bound_marker "$WR_R" "$WR_SID" "$WR_P"
 wr_poke() {  # <args after the poker…> [stdin from the caller] -> the verb's stdout; its exit code in WR_RC
