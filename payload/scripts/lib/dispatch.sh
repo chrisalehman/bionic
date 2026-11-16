@@ -185,7 +185,7 @@ Before approval only a read-only role dispatches: ${4-}.
 
 Fix: reinstall the plugin (claude plugin install bionic@bionic) so its scripts/lib carries
      fill.sh again, then retry the dispatch." ;;
-    unapproved)  # <subagent type> <plan> <step> <read-only roles>
+    unapproved)  # <subagent type> <plan> <step> <read-only roles> <hook dir>
       _dispatch_words "the plan this writer builds is unapproved" "get the Step-3 plan approved" \
 "Role: $(_dispatch_role "${1-}")
 Plan: ${2-}
@@ -195,9 +195,9 @@ A writer is the first act of a plan that cannot be taken back by closing a file.
 approval only a read-only role dispatches: ${4-}.
 
 Fix: put the Step-3 card to the user and wait for the literal word 'approved'; then
-     record it under '## SDLC State' in the plan above:
-       approved-by: <user> <ISO-UTC> \"<verbatim reply>\"
-     Silence, a question, or a partial reply is never transcribed as approval.
+     record it, their reply verbatim, in the run's log:
+       bash $(refuse_shell_word "${5-}/session-poker.sh") approve plan '<the reply, verbatim>'
+     Silence, a question, or a partial reply is never recorded as approval.
 
 Then retry the dispatch." ;;
     unbound)  # <subagent type> <the unbound advisory> <read-only roles>
@@ -230,7 +230,7 @@ Then retry the dispatch." ;;
     approval-waits)  # <row> <approval name> <dispatch name> <plan> <hook dir>
       _dispatch_words "row ${1-} waits for approval:${2-}" "record it with the approve verb" \
 "Dispatch: ${3:-<unnamed>} (row ${1-} of ${4-})
-Reads:    approval:${2-} — and ## SDLC State carries no 'approved: ${2-}' line.
+Reads:    approval:${2-} — and the run's log holds no approval of ${2-}.
 
 An approval is an act of the user. The row waits for it, the ready set does not offer it, and no
 dispatch starts it before the line exists.

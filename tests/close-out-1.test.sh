@@ -433,47 +433,45 @@ expect_eq "E2E18: …and the close that delivers releases it" "0|closed" "$CO_RC
 # ============================================================
 section "BRANCH-AGREE — wave-39 T16 (D18; AC-12.1): one reader of the integration branch; close-out's check and closed-form name one branch"
 # ============================================================
-# One reader, lib/plan.sh `plan_integration_branch`: ## SDLC State first, the frontmatter as the fallback, asked of
-# close-out's check and closed-form, the Step-0 card and the gate on one plan (handoff-file.test.sh asks the verb's).
-# FIXTURE FIDELITY: mk_fixture's plan at Step 7, as a run that has not closed holds it (check reads it as a diagnosis,
-# its step refusal one line among the rest), naming `integration-branch: main` under ## SDLC State as Step 0 writes
-# it, with the frontmatter key a Step-0 plan also carries; `trunk` is a real branch at the seed, so both values name
-# branches and only the order decides.
-# fails-when: a door names the frontmatter's branch while ## SDLC State names another, or refuses a plan whose
-# frontmatter alone names it.
-ba_fm() {  # <project> <value> -> the plan's frontmatter carries integration-branch: <value>
-  awk -v v="$2" 'NR == 1 && $0 == "---" { print; print "integration-branch: " v; next } { print }' "$1/$PLAN_REL" \
-    > "$1/$PLAN_REL.ba" && mv "$1/$PLAN_REL.ba" "$1/$PLAN_REL"
-}
+# One reader, lib/plan.sh `plan_integration_branch`: the plan's header, asked of close-out's check and closed-form, the
+# Step-0 card and the gate on one plan (handoff-file.test.sh asks the verb's).
+# FIXTURE FIDELITY: mk_fixture's page at 15 at Step 7, as a run that has not closed holds it (check reads it as a
+# diagnosis, its step refusal one line among the rest), its header naming both branches as Step 0 writes them.
+# fails-when: a door names a branch the header does not, or refuses a plan whose header names it.
 ba_doors() {  # <project> -> BA_CHECK, BA_CLOSED: the branch close-out's check and closed-form name
   run_close "$1" check
   BA_CHECK="$(printf '%s\n' "$CO_OUT" | sed -n 's/^merge: .* from \([^ ]*\) @ .*$/\1/p')"
   run_close "$1" closed-form
   BA_CLOSED="$(printf '%s\n' "$CO_OUT" | sed -n 's/^branch: .* into \([^ ]*\)\.$/\1/p')"
 }
+# A page at 15 names its branches and its scale in its header alone: a key under a heading of its body is no answer,
+# and the close's refusal for a branch the header does not name names the header as its place.
+# fails-when: the reader answers from the body, or a refusal names a state section, which the write hook refuses.
+ba_keys() { bash -c '. "$1/run.sh" && . "$1/plan.sh" && printf "%s|%s" "$(plan_integration_branch "$2")" "$(plan_scale "$2")"' _ "$REPO_ROOT/payload/scripts/lib" "$1/$PLAN_REL"; }
 PBA="$(mk_fixture branch-agree)"
-fixture_git "$PBA" branch trunk "$(fixture_git "$PBA" rev-list --max-parents=0 main)"
-# The page names its integration branch in a state section too, where the library reads it first: this page's header drops it.
-awk '/^integration-branch: / { next } /^## Tasks/ && !d { print "## SDLC State\n\nintegration-branch: main\n"; d = 1 } { print }' "$PBA/$PLAN_REL" > "$PBA/$PLAN_REL.sd" \
-  && mv "$PBA/$PLAN_REL.sd" "$PBA/$PLAN_REL"
-ba_fm "$PBA" trunk
-expect_eq "BA0 precondition: ## SDLC State names main and the frontmatter trunk, both branches" "main|trunk|yes|yes" \
-  "$(sed -n '/^## SDLC State/,/^## /s/^integration-branch: //p' "$PBA/$PLAN_REL")|$(sed -n '2s/^integration-branch: //p' "$PBA/$PLAN_REL")|$(branch_exists "$PBA" main)|$(branch_exists "$PBA" trunk)"
-ba_doors "$PBA"
-expect_eq "BA1 close-out check and closed-form name one branch, ## SDLC State's" "main|main" "$BA_CHECK|$BA_CLOSED"
+expect_eq "BH0 precondition: the page's header names the branch and the scale, and the reader answers them" "main|wave" "$(ba_keys "$PBA")"
+/usr/bin/grep -v -E '^(integration-branch|scale):' "$PBA/$PLAN_REL" > "$PBA/$PLAN_REL.b"
+printf '\n## SDLC State\n\nintegration-branch: main\nscale: wave\n' >> "$PBA/$PLAN_REL.b"; mv "$PBA/$PLAN_REL.b" "$PBA/$PLAN_REL"
+expect_eq "BH0b …the same keys under a heading of its body, its header neither: no branch, no scale" "|" "$(ba_keys "$PBA")"
+run_close "$PBA" check; BA_REF="$(printf '%s\n' "$CO_OUT" | /usr/bin/grep 'close-out refused')"
+expect_contains "BH1 …so the close refuses it, naming integration-branch: in the plan's header" "integration-branch: <branch>' to the plan's header" "$BA_REF"
+expect_absent "BH1b …and no state section" "SDLC State" "$BA_REF"
+PBW="$(mk_fixture branch-agree-wb)"; /usr/bin/grep -v '^working-branch:' "$PBW/$PLAN_REL" > "$PBW/$PLAN_REL.b" && mv "$PBW/$PLAN_REL.b" "$PBW/$PLAN_REL"
+run_close "$PBW" check; BA_REF="$(printf '%s\n' "$CO_OUT" | /usr/bin/grep 'close-out refused')"
+expect_contains "BH2 a page whose header names no working-branch: refused, naming the header as its place" "working-branch: <branch>' to the plan's header" "$BA_REF"
+expect_absent "BH2b …and no state section" "SDLC State" "$BA_REF"
 # The card's Step-0 branch block reads the same reader. The card needs a ## Goal.
 ba_card() {  # <project> -> the integration branch card.sh step0 prints for the plan, a ## Goal added first
   awk '/^## (SDLC State|Tasks)/ && !g { print "## Goal"; print ""; print "A fixture goal."; print ""; g = 1 } { print }' "$1/$PLAN_REL" \
     > "$1/$PLAN_REL.g" && mv "$1/$PLAN_REL.g" "$1/$PLAN_REL"
   bash "$REPO_ROOT/payload/scripts/card.sh" step0 "$1/$PLAN_REL" 2>/dev/null | sed -n 's/^    integration  *\([^ ]*\) .*/\1/p'
 }
-expect_eq "BA3 the card names ## SDLC State's branch too" "main" "$(ba_card "$PBA")"
 
 PBF="$(mk_fixture branch-agree-fm)"   # a page at 15 names its branch in its header alone
 ba_doors "$PBF"
-expect_eq "BA2b check and closed-form both name the frontmatter's branch, the fallback (check prints its merge verdict only past its refusal)" \
+expect_eq "BA2b check and closed-form both name the header's branch (check prints its merge verdict only past its refusal)" \
   "main|main" "$BA_CHECK|$BA_CLOSED"
-expect_eq "BA4 the card reads the frontmatter's branch too when ## SDLC State names none" "main" "$(ba_card "$PBF")"
+expect_eq "BA4 the card reads the header's branch too" "main" "$(ba_card "$PBF")"
 # The gate's merge-target check reads the plan's branch and its epic's through the same reader, at Step 8, on a plan
 # and an epic at 15, each naming its branch in its header; it logs a finding when the two differ and never refuses.
 # fails-when: the check is not asked of a page at 15, or asks some reader other than the plan's and the epic's headers.

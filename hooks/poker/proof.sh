@@ -721,7 +721,7 @@ PF_OTHER_LIST
     fi
     PF_WB="$(plan_working_branch "$PV_PLAN")"
     if [ -z "$PF_WB" ]; then
-      die "REFUSED — $PV_PLAN names no working-branch:, so there is no checkout to read the head from; add 'working-branch: <branch>' under ## SDLC State. The plan is unchanged."
+      die "REFUSED — $PV_PLAN names no working-branch:, so there is no checkout to read the head from; add 'working-branch: <branch>' to the plan's header. The plan is unchanged."
       exit 1
     fi
     # THE WORKING HEAD IS THE BRANCH'S REF (wave-36 T12; D13, AC-7.4; C30): lib/proof.sh `proof_branch_head`, as the
@@ -730,7 +730,7 @@ PF_OTHER_LIST
     case "$PF_HEAD" in
       [0-9a-f]*) : ;;
       *)
-        die "REFUSED — working-branch $(clean "$PF_WB") names no commit in $PV_REPO, so its head cannot be read; name a branch that exists under ## SDLC State and run proof-add again. The plan is unchanged."
+        die "REFUSED — working-branch $(clean "$PF_WB") names no commit in $PV_REPO, so its head cannot be read; name a branch that exists as working-branch: in the plan's header and run proof-add again. The plan is unchanged."
         exit 1 ;;
     esac
     # A WALK IS REGISTERED WHOLE BY walk_register: its verdicts read as the critic's, its proof and one proof per

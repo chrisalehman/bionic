@@ -354,11 +354,11 @@ co_step9_at() {  # -> the instant of the run's delivery, or nothing; 2 when the 
 CO_UNREAD="the run's facts could not be read, so nothing is written from them; run again: bash $0 $PLAN $VERB"
 co_heard() { _proof_facts "$PLAN" >/dev/null || _co_refuse "$CO_UNREAD"; }
 
-# THE ONE READER OF THE INTEGRATION BRANCH (wave-39 T16; D18, AC-12.1): lib/plan.sh `plan_integration_branch`,
-# `## SDLC State` first, then the frontmatter, as session-poker.sh `handoff` and `release-check` read it.
+# THE ONE READER OF THE INTEGRATION BRANCH: lib/plan.sh `plan_integration_branch`, the plan's header key, as
+# session-poker.sh `handoff` and `release-check` read it.
 INTEGRATION="$(plan_integration_branch "$PLAN")"
-# THE ONE READER OF THE WORKING BRANCH (wave-35 T10; A-orch-16, wave-35 T7): lib/run.sh `plan_working_branch`,
-# `## SDLC State` first, then the frontmatter, as `ready`, the stop wall, the card and the proof judge read it.
+# THE ONE READER OF THE WORKING BRANCH: lib/run.sh `plan_working_branch`, the plan's header key, as `ready`, the stop
+# wall, the card and the proof judge read it.
 WORKING="$(plan_working_branch "$PLAN")"
 # `run` closes a run at Step 8 and nowhere else: the gate judges
 # whatever step the run is at, so below 8 its refusal would be about a step this script
@@ -466,8 +466,8 @@ fi
 
 command -v git >/dev/null 2>&1 || _co_refuse "git is not on PATH"
 command -v jq  >/dev/null 2>&1 || _co_refuse "jq is not on PATH — the gate dry-run cannot be built without it"
-[ -n "$INTEGRATION" ] || _co_refuse "the plan names no integration-branch: (## SDLC State or its frontmatter)"
-[ -n "$WORKING" ]     || _co_refuse "the plan names no working-branch: (## SDLC State or its frontmatter)"
+[ -n "$INTEGRATION" ] || _co_refuse "the plan names no integration-branch:; add 'integration-branch: <branch>' to the plan's header"
+[ -n "$WORKING" ]     || _co_refuse "the plan names no working-branch:; add 'working-branch: <branch>' to the plan's header"
 
 # THE WORKTREE CENSUS IS THE REGISTER, NEVER A NAME (D5, REQ-6; ADR-032). A tree is
 # this run's if and only if a `## Tasks` row names it — `wt_branches()` (below) reads

@@ -1238,6 +1238,13 @@ expect_eq "RG1-2 past step 6 a theme with a pending row is not met" \
 sr_world rg1-done "6 6 12 12"; sr_themes 7 discharged discharged discharged discharged waived discharged discharged discharged waived
 sr_run "$SR_PLAN"
 expect_eq "RG1-3 every row discharged or waived: every theme met" "3 of 3 met" "$(sr_goals_sum)"
+# A criterion whose Eval design row names no requirement, and whose id is no dotted one, is in no theme's count; the
+# sheet's line names the cell that maps it. fails-when: the line names a serves: line, which no page at 15 holds.
+sr_world rg1-unmapped "6 6 12 12"; sr_themes 4 $SR_MIXED
+sed 's/^| REQ-1 | x | AC-1\.1 |/| — | x | AC-101 |/' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
+sr_run "$SR_PLAN"; SR_UNM="$(printf '%s\n' "$OUT" | /usr/bin/grep '^not mapped: ')"
+expect_contains "RG1-4 a criterion naming no requirement: the sheet's line names the Requirement cell of its Eval design row" "Requirement cell" "$SR_UNM"
+expect_absent "RG1-4b …and no serves: line, which no page at 15 holds" "serves:" "$SR_UNM"
 
 # ============================================================
 section "§REQ-GOALS-2: a goals: line's measured goals follow the theme goals"

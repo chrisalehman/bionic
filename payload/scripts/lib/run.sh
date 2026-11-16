@@ -7,13 +7,11 @@
 #                         the compare site) under <docs_root>/plans (depth <= 2)
 #                         and <docs_root>/incidents (depth <= 2) that carries a flush-left
 #                         `## SDLC State` heading; exit 1 and silent if none.
-#   run_open <plan>    -> exit 0 iff THAT ONE FILE reads as an open run: its flush-left
-#                         `current:` value is 0-8, or 9 with no `- Step 9:` line carrying
-#                         `delivered:`, or the retired task-scale `current: T<n>` (kept
-#                         open so its readers refuse it by name, below) — AND its own
-#                         frontmatter carries no `abandoned:` line; else exit 1. Any other
-#                         non-numeric `current:` is no open run. Silent both ways: the
-#                         caller already holds the path.
+#   run_open <plan>    -> exit 0 iff THAT ONE FILE reads as an open run: the step its run's
+#                         reader holds is 0-8, or 9 not delivered, and the run is not
+#                         abandoned; else exit 1 (3 when its place cannot be read). A step
+#                         that is no number is no open run. Silent both ways: the caller
+#                         already holds the path.
 #   active_run <root>  -> exit 0 + the plan path iff active_plan finds a file and run_open
 #                         holds on it; else exit 1, silent.
 #   open_runs <root>   -> every file _run_candidates finds for which run_open holds, one
@@ -504,8 +502,7 @@ plan_parked_why() {
 # alone holds closes or opens the run as the plan's current: line would. A run whose place cannot be read is 3, the
 # answer a plan that cannot be read gives: closed would stop protecting a run that may be mid-flight.
 # What decides is the step's number: a sub-step letter (`8a`, `8b`) is stripped, 0 to 8 are open, 9 is open until it
-# is delivered, and any other value is no step this lifecycle has. The retired task-scale pointer `current: T<n>` stays
-# an open run, and only it, so the readers that act on an open run reach the plan and refuse it by name.
+# is delivered, and any other value is no step this lifecycle has.
 run_open() {
   local plan="$1" place n step
   [ -n "$plan" ] || return 1
@@ -515,7 +512,6 @@ run_open() {
   place="$_PROOF_PLACE"
   case "$place" in *state=open*) : ;; *) return 1 ;; esac
   n=""; case "$place" in n=*) n="${place%%$'\n'*}"; n="${n#n=}" ;; esac
-  case "$n" in T[0-9]*) case "${n#T}" in *[!0-9]*) return 1 ;; *) return 0 ;; esac ;; esac
   step="${n%[ab]}"
   case "$step" in ''|*[!0-9]*) return 1 ;; esac
   [ "$((10#$step))" -le 9 ]

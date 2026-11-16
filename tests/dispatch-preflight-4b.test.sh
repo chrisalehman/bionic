@@ -137,6 +137,8 @@ OR_WAIT="row T9 waits for approval:release"
 t55_gate or1 w-T9 'Lands-on: widget'
 expect_eq "OR1 (P1) an agent named w-T9, no Row:, is refused: its row waits for the release's approval" "deny" "$GATE_VERDICT"
 expect_contains "OR1b …the line names the row and the approval" "$OR_WAIT" "$(t7_first)"
+expect_contains "OR1c …its detail names the approve verb that records it" "session-poker.sh approve release '<" "$GATE_VERR"
+expect_absent "OR1d …and no state section, which a page at 15 never holds" "SDLC State" "$GATE_VERR"
 t55_gate or2 w-release 'Row: T9
 Lands-on: widget'
 expect_eq "OR2 (P2) an agent named w-release (no row's name) briefed Row: T9 is refused by the approval arm" "deny" "$GATE_VERDICT"

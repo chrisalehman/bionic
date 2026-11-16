@@ -1091,8 +1091,10 @@ FC_GR_REQ="$(bash -c '. "$1/run.sh"; . "$1/plan.sh"; plan_requirements_file "$2"
 fc_page --preview
 expect_eq "GR-1 over three criteria with no Requirement cell and no dotted id the card is refused (exit 1), no page printed, none written; the plan reads two themes" \
   "1|||2" "$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^Goals')|$(fc_pages)|$(/usr/bin/grep -c '^## The ' "$FC_GR_REQ")"
-expect_contains "GR-1b …saying how many criteria map to no requirement and naming them" \
-  "release-approval refused — 3 matrix rows map to no requirement (no serves: and no dotted id): give each block a serves: line naming its requirement (AC-168, AC-169, AC-170)" "$FC_ERR"
+expect_contains "GR-1b …saying how many criteria map to no requirement" "release-approval refused — 3 criteria map to no requirement" "$FC_ERR"
+expect_contains "GR-1c …naming them and the act that maps one, the Requirement cell of its Eval design row" \
+  "Requirement cell of its row under ## Eval design (AC-168, AC-169, AC-170)" "$FC_ERR"
+expect_absent "GR-1d …and no serves: line, which no page at 15 holds" "serves:" "$FC_ERR"
 fc_gr_cells REQ-1 REQ-1 REQ-2
 RC=0; FC_GR_N="$(/usr/bin/grep -c '^| REQ-[12] | x | AC-1' "$PFC")"
 fc_page --preview

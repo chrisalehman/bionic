@@ -684,6 +684,9 @@ REPO=$(make_repo pl1 yes); write_attestation "$REPO" "$SID_A"; PL="$REPO/.bionic
 printf 'run/v1|ev=step|n=6|at=2026-11-01T00:00:01Z\n' > "$PL"; run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_eq "PL.1 a writer on a plan approved nowhere is refused at the step its log holds" "deny|Step: 6 " \
   "$GATE_VERDICT|$(printf '%s\n' "$GATE_OUT$GATE_ERR" | /usr/bin/grep -o 'Step: [0-9]* ' | head -1)"
+# A page at 15 holds its approval in its log, which the approve verb writes; the write hook refuses a state section.
+expect_contains "PL.1b …its detail names the approve verb that records the plan's approval" "session-poker.sh approve plan '<" "$GATE_VERR"
+expect_absent "PL.1c …and no state section" "SDLC State" "$GATE_VERR"
 printf 'run/v1|ev=approval|key=step3|by=u|said=approved|at=2026-11-01T00:00:02Z\n' >> "$PL"; run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_eq "PL.2 …and admitted once its log alone holds the approval" "allow" "$GATE_VERDICT"
 
