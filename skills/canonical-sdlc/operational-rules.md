@@ -64,7 +64,7 @@ A plan's `## Tasks` table, at every scale, is the register the Step-4 dispatch w
 
 **The regression, once** (`steps/5.md` holds the rule). `session-poker.sh regression-run` refuses it at `regression: no`, beside an open build row, at a head that already has a whole run, or at a head the full pass's state reads green by content. A red suite is a fix row's. A whole run at a later head where code landed is the normal path. A head whose landings since the pass moved no code reads green and needs none.
 
-**`working-branch:`** in the plan's frontmatter names the wave's branch: the landing gate (`lib/stop.sh`) merge-bases a task tree against it, and the landing line (`spawn-worktree.sh ready`; lib/line.sh `line_tree_run` reads it as the branch a tree lands onto) merges a landed tree into it. A plan naming none falls back to the main checkout's branch, announced inert.
+**`working-branch:`** in the plan's frontmatter names the wave's branch: the landing gate (`lib/stop.sh`) merge-bases a task tree against it, and the landing line (`spawn-worktree.sh ready`; lib/line.sh `line_tree_run` reads it as the branch a tree lands onto) merges a landed tree into it. A plan naming none lands nothing: `spawn-worktree.sh ready` refuses its trees (`REFUSED reason=no-working-branch plan=<plan>`) and merges nothing into any branch.
 
 **Cell shapes.** A proof's `evidence=` names exactly one path under `record/`. The regression proof is the run's log (`steps/5.md`); `advisory-exceeded: <M>` beside it is recorded, never judged.
 
