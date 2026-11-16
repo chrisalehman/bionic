@@ -457,10 +457,10 @@ section "HALF"
 # (lib/proof.sh `_proof_facts`) is summed over the plan, the reader's libraries and the log, no other file of the record.
 # fails-when: the reader translates the old homes, or the key sums a home beside the log, so editing it refolds.
 HD="$D/record/half"; mkdir -p "$HD"; HP="$D/plans/epic-x/half.plan.md"; printf '## SDLC State\n\ncurrent: 4\n' > "$HP"
-printf 'line/v1|ev=published|row=T1|commit=c1|kind=queue|by=-|why=-|at=2026-11-01T00:00:01Z\n' > "$HD/landing-proofs.log"
-printf 'owed/v1|key=%s|state=open|sent=-|at=2026-11-01T00:00:0%s|title=t|reply=r\n' decide:D1 2 approve:x 3 > "$HD/asks.state"
+printf 'line/v1|ev=published|row=T1|commit=c1|kind=queue|by=-|why=-|at=2026-11-01T00:00:01Z\n' > "$HD/beside-a.log"
+printf 'owed/v1|key=%s|state=open|sent=-|at=2026-11-01T00:00:0%s|title=t|reply=r\n' decide:D1 2 approve:x 3 > "$HD/beside-b.state"
 hev() { ( . "${READER%/reader.sh}/lib/reader.sh" && reader_events "$HP" ); }
-expect_eq "a plan at 14 with its old homes beside it and no log yields no event" "" "$(hev)"
+expect_eq "files beside a page with no log yield no event" "" "$(hev)"
 printf 'run/v1|ev=published|row=T2|commit=c2|kind=queue|at=2026-11-03T00:00:05Z\n' > "$HD/run.log"
 expect_eq "…and once it has a log, its events are the log's lines, byte for byte" "$(cat "$HD/run.log")" "$(hev)"
 hkey() { TMPDIR="$HT" bash -c '. "$1/proof.sh" && _proof_facts "$2" >/dev/null && printf "%s" "$_PROOF_FACTS_KEY"' _ "${READER%/reader.sh}/lib" "$HP"; }
