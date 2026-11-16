@@ -226,12 +226,16 @@ plan_read_waits() {
       split("", c)
       for (k = 1; k <= NF; k++) { e = index($k, "="); if (!(substr($k, 1, e - 1) in c)) c[substr($k, 1, e - 1)] = substr($k, e + 1) }
       if ("reads" in c) hasreads = 1
+      if ("status" in c) hasstatus = 1
       n++; id[n] = c["id"]; stp[n] = c["step"]; knd[n] = c["kind"]; fil[n] = c["files"]; rd[n] = c["reads"]; dep[n] = c["deps"]; tsk[n] = c["task"]
       at[id[n]] = n
     }
     END {
       if (want != "" && !(want in at)) exit 1
       for (i = 1; i <= n; i++) if (knd[i] == "doc" && stp[i] ~ /^[0-9]+$/ && stp[i] + 0 >= 7) hasrel = 1
+      # A TABLE WITH NO READS CELL AND NO STATUS CELL IS A PAGE AT 15, whose deps cell is where a row writes the release
+      # approval; the shape before reads (a status cell, no reads cell) keeps its answers.
+      at15 = (!hasreads && !hasstatus); oldshape = (!hasreads && hasstatus)
       for (i = 1; i <= n; i++) {
         code[i] = writes_head(fil[i]); m = split(fil[i], a, ",")
         for (k = 1; k <= m; k++) {
@@ -247,7 +251,7 @@ plan_read_waits() {
           sub(/[^a-z,].*$/, "", q); sub(/,$/, "", q); gsub(/,/, "+", q)
           if (q != "") sub(/live:head/, "live:head:" q, r)
         }
-        if (hasrel && knd[i] == "integrate" && (" " r ",") !~ /[ \t,]approval:release[ \t]*,/) { r = r ", approval:release"; rel = 1 }
+        if (hasrel && knd[i] == "integrate" && (" " r (at15 ? "," dep[i] : "") ",") !~ /[ \t,]approval:release[ \t]*,/) { r = r ", approval:release"; rel = 1 }
         mr = split(r, a, ","); m = split(r "," dep[i], a, ","); split("", wr1); split("", im1)
         for (k = 1; k <= m; k++) {
           t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t)
@@ -263,7 +267,7 @@ plan_read_waits() {
       for (i = 1; i <= n; i++) {
         if (want != "" && id[i] != want) continue
         printf "%s\tkind\t%s\t%s\t%s\n", id[i], knd[i], sp[i], ip[i]
-        if ((knd[i] == "integrate" || knd[i] == "close" || (!hasreads && knd[i] == "doc" && stp[i] + 0 >= 7)) && stp[i] ~ /^[0-9]+$/) put(i, "wait\tstep:" stp[i])
+        if ((knd[i] == "integrate" || knd[i] == "close" || (oldshape && knd[i] == "doc" && stp[i] + 0 >= 7)) && stp[i] ~ /^[0-9]+$/) put(i, "wait\tstep:" stp[i])
         nr = 0; split("", rs)
         for (k = 1; k <= nt[i]; k++) {
           t = tk[i, k]; o = rk[i, k]; p = substr(t, 7)

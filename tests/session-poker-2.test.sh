@@ -68,11 +68,10 @@ sp_plan_at_step "$R37A" 5 \
   "| T2 | 5 | verify | the live bed, landed | implementor | T1 | 15m | REQ-x | — | landed |" \
   "| T3 | 7 | doc | Release 1.8.7 | implementor | T2 | 15m | REQ-x | CHANGELOG.md | pending |" > /dev/null
 poke_pressure "$R37A" 8192 1.0 tick
-expect_absent "37a C3 at current: 5 the landed-dep Step-7 release row is not filled" \
-  "poker: FILL" "$OUT"
-# A TABLE WITHOUT `reads` KEEPS THE RELEASE'S STEP HOLD (wave-26 T13, A-T13.1): it has no
-# `approval:release` to wait on, so its step is the one thing holding it. The hold is named on
-# the row's own WAIT line now, not inside the no-FILL sentence.
+expect_contains "37a at current: 5 the release row at 15, its waits met, is filled: no step holds it" \
+  "poker: FILL T3" "$OUT"
+# A RELEASE ROW AT 15 WAITS ON WHAT ITS DEPS AND ITS KIND NAME, and on no step: the person
+# approves the release at the merge, which waits on that approval.
 
 # 37c — AT ITS STEP THE RELEASE FILLS. Same table at current: 7.
 R37C="$(make_repo s37-at-step)"; new_roster "$R37C"
