@@ -69,7 +69,7 @@ world_cost a.test.sh 5 0.5 5; world_cost b.test.sh 5 0.5 5
 # ---------------------------------------------------------------------------- helpers
 iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
-# A world whose plan the commit gate admits (the shape tests/landing-line.prelude.sh's `ll_world` plants),
+# A world whose plan the commit gate admits (tests/lib/world.sh's, as `ll_world` of tests/landing-line.prelude.sh takes it),
 # its two rows' launch lines on the roster with ids and the suite they land on, and a third writer,
 # wx-T3, whose row is closed: acked in the sweeper ledger after its launch.
 in_world() {  # -> the world root
@@ -77,16 +77,8 @@ in_world() {  # -> the world root
   r="$(world_repo)" || return 1
   [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
   p="$r/.bionic/docs/plans/epic-x/wave-x.plan.md"
-  # The run is at 15: the page keeps its header and authored cells, and the base Step 4 owes; the log holds its steps,
-  # its approval and each row's dispatch and tree, as ll_world writes them.
-  awk -F'|' -v b="$(git -C "$r" rev-parse main)" '/^## SDLC State$/ { s = 1; next } /^## / { s = 0 } s { next }
-    /^working-branch: / { print; print "canonical_sdlc_version: 15"; print "base-sha: " b; next }
-    /^\| id \|/ { print "| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|"; getline; next }
-    /^\| T[0-9]+ \|/ { printf "|%s|%s|%s|%s|%s|%s|%s|%s| — |\n", $2, $3, $4, $5, $7, $9, $10, $11; next }
-    { print }' "$p" > "$p.n" && mv "$p.n" "$p" || return 1
-  mkdir -p "$r/.bionic/docs/record/wave-x" && printf 'run/v1|ev=%s|at=2026-10-04T00:0%s:00Z\n' 'step|n=1' 1 'step|n=2' 2 'step|n=3' 3 'step|n=4' 4 \
-    'approval|key=step3|by=fixture|said=approved' 5 'dispatch|row=T1|name=wx-T1' 6 'tree|row=T1|path=.worktrees/T1' 7 \
-    'dispatch|row=T2|name=wx-T2' 8 'tree|row=T2|path=.worktrees/T2' 9 > "$r/.bionic/docs/record/wave-x/run.log" || return 1
+  # The base Step 4 owes joins the header of the world's page at 15.
+  awk -v b="$(git -C "$r" rev-parse main)" '{ print } /^working-branch: / { print "base-sha: " b }' "$p" > "$p.n" && mv "$p.n" "$p" || return 1
   for t in T1 T2; do
     printf '%s|row=%s|lands_on=a.test.sh\n' \
       "$(roster_row_fixture status=intended session="$WORLD_SID" name="wx-$t" agent_id="b00$t" plan="$p")" "$t" \
