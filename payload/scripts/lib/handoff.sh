@@ -67,7 +67,8 @@ handoff_pointer_of() {  # <plan> [<root>]
     [ -r "$_HANDOFF_LIB_DIR/reader.sh" ] && . "$_HANDOFF_LIB_DIR/reader.sh" >/dev/null 2>&1
     declare -F reader_main >/dev/null 2>&1 || return 0
   fi
-  rel="$(reader_main "$1" handoff 2>/dev/null | sed -n 's/^path=//p')"
+  rel="$(reader_main "$1" handoff 2>/dev/null)" || return 0
+  rel="$(printf '%s\n' "$rel" | sed -n 's/^path=//p')"
   [ -n "$rel" ] || return 0
   case "$rel" in
     /*) printf '%s\n' "$rel" ;;
