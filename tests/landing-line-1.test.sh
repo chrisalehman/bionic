@@ -1003,8 +1003,8 @@ section "§WINDOW: the hand-holds count is read over a window, every source by i
 # with an end: it is not counted, and the line's last count, `unplaced=`, says how many there were. With no flags the
 # two ends are read from records: the start is the newest published landing of a row of kind build, the end the
 # plan's `delivered:` time; before the run is delivered the window runs to now and the report says so. Every source
-# is planted in its writer's shape: the run's log's events through their writers (lib/proof.sh), the fill ledger's
-# fill-ledger/v1 lines (the Stop hook's home still), the roster through the one production row writer.
+# is planted in its writer's shape: the run's log's events through their writers (lib/proof.sh), a decline's and a
+# lift's stop events, the roster through the one production row writer.
 ww_report() {  # <root> [flags…] -> landing-report --hand-holds over the root's plan, stdout only
   local root="$1"; shift
   ( cd "$root" && CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO/payload" \
@@ -1021,12 +1021,12 @@ ww_poke() {  # <root> <verb> [args…] -> the poker run as the world's session, 
 WW_C="$(printf 'c%.0s' $(seq 40))"
 WW_D="$(printf 'd%.0s' $(seq 40))"
 ww_pub() { printf 'run/v1|ev=published|row=%s|commit=%s|kind=%s|by=-|why=-|at=%s\n' "$1" "$WW_C" "$2" "$3"; }   # <row> <kind> <at>
-ww_dec() { printf 'fill-ledger/v1|at=%s|session=fixture|turn=|current=4|state=%s|ceiling=6|width=|open=|free=|ready=T1|launched=|declined=no room|missed=0|idle=|room=|named=T1\n' "$1" "$2"; }   # <at> <state>
+ww_dec() { printf 'run/v1|ev=stop|session=fixture|turn=|current=4|state=%s|ceiling=6|width=|open=|free=|ready=T1|launched=|declined=no room|missed=0|idle=|room=|at=%s\n' "$2" "$1"; }   # <at> <state> -> the stop event of a decline or a lift
 
 # (w1) one hand landing before the window, one decline inside it.
 RW1="$(ll_world)"
 ww_pub T1 hand 2026-10-20T10:00:00Z >> "$(ll_log "$RW1")"
-ww_dec 2026-10-20T12:00:00Z decline > "$(dirname "$(ll_log "$RW1")")/fill-ledger.log"
+ww_dec 2026-10-20T12:00:00Z decline >> "$(ll_log "$RW1")"
 expect_eq "WINDOW-1 a hand landing before the window and a decline inside it read declines=1 by-hand=0" \
   "hand-holds: total=1 · by-hand=0 · stop-runs=0 · declines=1 · lifts=0 · amends=0 · holds=0 · extensions=0 · waivers=0 · second-regressions=0 · adoptions=0 · fixed=0 · needs-you=0 · unplaced=0" \
   "$(ww_hh "$RW1" --since 2026-10-20T11:00:00Z --until 2026-10-20T13:00:00Z)"
@@ -1045,7 +1045,7 @@ for t in 10:30 12:30 14:30; do
   printf 'run/v1|ev=hand|what=stop-run|request=2%s|who=fixture:w-T3|kind=whole|key=tests/run.sh|by=fixture|why=parked|at=2026-10-20T%s:00Z\n' "${t%%:*}" "$t"
 done >> "$(ll_log "$RW2")"
 ww_pub T1 queue 2026-10-20T10:00:00Z >> "$(ll_log "$RW2")"   # the landing the moves name, before each of them
-for t in 10:30 12:30 14:30; do ww_dec "2026-10-20T$t:00Z" decline; ww_dec "2026-10-20T$t:05Z" lift; done > "$WW_RD/fill-ledger.log"
+for t in 10:30 12:30 14:30; do ww_dec "2026-10-20T$t:00Z" decline; ww_dec "2026-10-20T$t:05Z" lift; done >> "$WW_RD/run.log"
 # An amend, a hold, an extension and an adoption are each the one hand event its verb wrote to the run's log, each
 # of its own agent here; one agent's act taken again is WINDOW-1f's.
 ww_hand() { printf 'run/v1|ev=hand|by=fixture|name=%s|what=%s|why=%s|at=%s\n' "$2${t%%:*}" "$1" "$3" "2026-10-20T$t:00Z"; }   # <what> <name> <why>
@@ -1085,7 +1085,7 @@ expect_eq "WINDOW-1f …and a second amend of one agent for one reason at anothe
 # card, close-out's own acts among them, is inside the window.
 RW4="$(ll_world)"; WW_RD4="$(dirname "$(ll_log "$RW4")")"
 { ww_pub T1 queue 2026-10-20T11:00:00Z; ww_pub T9 hand 2026-10-20T11:30:00Z; } >> "$(ll_log "$RW4")"
-ww_dec 2026-10-20T10:00:00Z decline > "$WW_RD4/fill-ledger.log"
+ww_dec 2026-10-20T10:00:00Z decline >> "$WW_RD4/run.log"
 ww_times() { printf '%s\n' "$1" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{5,8}Z' | paste -sd' ' -; }   # <ends line> -> its times
 WW_E4="$(ww_ends "$RW4")"
 expect_contains "WINDOW-3 with no delivered: time the ends line runs the window to now" "until now: the plan names no delivered: time" "$WW_E4"
