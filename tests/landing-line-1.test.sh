@@ -1365,7 +1365,11 @@ section "§LOG: ready writes its acts to the run's log, and no landing record; a
 # fails-when: §READY leaves no ready of T1 in run.log or a second file of events beside it; a row-less part reads as a landing.
 expect_eq "(lg1) the run's log holds T1's ready event, and of the record's files run.log alone holds event lines" "T1|run.log" \
   "$(awk -F'|' '$1 == "run/v1" && $2 == "ev=ready" { print substr($3, 5); exit }' "$(ll_log "$RR")" 2>/dev/null)|$(cd "$RR/.bionic/docs/record/wave-x" 2>/dev/null && /usr/bin/grep -lE '^(line|owed|run)/v1[|]' -- * 2>/dev/null | paste -sd' ' -)"
-printf 'run/v1|ev=published|part=reviews|commit=%s|branch=wave/x|tree=-|by=T3|at=2026-11-03T00:00:05Z\n' "$TWC" >> "${TWR%/*}/run.log"
+TW="$(ll_world)"; TWP="$(ll_plan "$TW")"; TWL="$(ll_log "$TW")"; TWC=0123456789abcdef0123456789abcdef01234567
+tw_lib() { ( . "$REPO/payload/scripts/lib/roots.sh" >/dev/null 2>&1; . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1 \
+  && . "$REPO/payload/scripts/lib/units.sh" >/dev/null 2>&1 && "$@" ) 2>/dev/null; }
+printf 'run/v1|ev=published|row=T3|commit=c3|kind=queue|by=-|why=-|at=2026-11-03T00:00:03Z\n' >> "$TWL"
+printf 'run/v1|ev=published|part=reviews|commit=%s|branch=wave/x|tree=-|by=T3|at=2026-11-03T00:00:05Z\n' "$TWC" >> "$TWL"
 expect_eq "(lg3) a part is no landing: the record's landings and the reader's landed rows are T3 alone, the part still read" "T3|T3|1" \
   "$(tw_lib units_record_landings "$TWL" | cut -f2 | paste -sd' ' -)|$(bash "$REPO/payload/scripts/reader.sh" "$TWP" landed | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | paste -sd' ' -)|$(line_lines "$TWL" | grep -c '|part=reviews|')"
 
