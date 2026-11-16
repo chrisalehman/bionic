@@ -4011,7 +4011,7 @@ Fix: repair each row named above; the columns are $(units_columns 1)"
 
 # Epic merge-target consistency (LOG-ONLY, check-id `merge-target`).
 # On a wave-scale plan naming an `epic:`, when the epic plan exists and
-# declares an `integration-branch:` in its ## SDLC State, a mismatch with this
+# declares an `integration-branch:` in its header, a mismatch with this
 # plan's integration-branch logs a finding. Never blocks. First cross-file read
 # in this hook — read-only, fail-open (missing epic plan / missing key → no
 # finding). Fires at the integrate step.
@@ -4023,7 +4023,7 @@ validate_merge_target() {
   epic_plan="$DOCS_ROOT/plans/$epic/epic.plan.md"
   [ -r "$epic_plan" ] || return 0
   # Both branches are lib/plan.sh `plan_integration_branch`'s answer, the one reader close-out, the card and the
-  # handoff ask: ## SDLC State, fenced lines unread, then the frontmatter.
+  # handoff ask: the plan's header key.
   # [INSTRUMENT]
   wall_libs evidence-gate plan.sh || return 0
   epic_branch=$(plan_integration_branch "$epic_plan")

@@ -16,17 +16,13 @@
 #     plan_goal_paragraph, plan_goal_status
 #                        what a document is for, and one goal's status word.
 #
-# THE ONE READER (burns debt integration-branch-reader; critic-structure-2). Two orders stood: close-out.sh read
-# ## SDLC State and refused a plan whose frontmatter alone named the branch, its `closed-form` then fell back to the
-# frontmatter, and session-poker.sh `handoff` read the frontmatter first with an awk of its own, while `release-check`
-# read the frontmatter alone. D18 rules ## SDLC State first, the frontmatter as the fallback: the order lib/run.sh
-# `plan_working_branch` already reads the working branch in. close-out.sh and every session-poker.sh reader of the key
-# call this; tests/close-out-1.test.sh and tests/handoff-file.test.sh §BRANCH-AGREE hold them to one answer.
+# THE ONE READER. close-out.sh, the Step-0 card, the gate's merge-target check and every session-poker.sh reader of the
+# key call this, so no two doors name two branches; tests/close-out-1.test.sh and tests/handoff-file.test.sh
+# §BRANCH-AGREE hold them to one answer. The key is the header's alone, as lib/run.sh `plan_working_branch` reads the
+# working branch: a page at 15 holds no state section, and a key under a heading of its body is no answer.
 #
-# THE GRAMMAR IS THE WORKING BRANCH'S. The section is `##` and blanks, then `SDLC State`; fenced lines are not read;
-# the key may be indented; the value is its first word, one leading and one trailing quote of either kind dropped. A
-# branch name holds no blank, so the first word is the whole of every value a plan carries; close-out's old reader
-# took the rest of the line, trimmed, which differs only on a line no branch can be.
+# THE VALUE is the key's first word, one leading and one trailing quote of either kind dropped: a branch name holds no
+# blank, so the first word is the whole of every value a plan carries.
 #
 # NEEDS lib/run.sh (`_run_lines`, the newline rule: CRLF and a lone CR both end a line), which loads lib/plan-read.sh,
 # the parser the header helpers read through. Both callers source it first.
