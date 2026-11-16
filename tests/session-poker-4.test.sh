@@ -1089,6 +1089,20 @@ expect_eq "TL-9b …the rows read as they did before any tick" "$TL_ROWS0" "$TL_
 expect_eq "TL-10 T22 landed, T25 is ready" "T25" "$(cd "$TL" && bash -c '. "$1/fill.sh" >/dev/null 2>&1; fill_ready_set "$2" 99999 0' _ "$(dirname "$S46_LIB")" "$TL_P" 2>/dev/null | /usr/bin/grep -x T25)"
 poke "$TL" tick
 expect_eq "TL-11 a landed row is not landed twice" "1 1" "$(tl_pub T22) $(tl_pub T23)"
+# A page at 15 names its working branch in its header alone: the tick's landing of a record row at a branch naming no
+# commit, and the judge's refusal at 8 with no branch named, each name the header as its place.
+# fails-when: either names a state section, which the write hook refuses.
+TW="$(make_repo tick-wb)"; ( cd "$TW" && git commit -q --allow-empty -m init && git branch -M main ) >/dev/null 2>&1; git -C "$TW" config user.name "Dana Fixture"
+TW_P="$(vc_plan "$TW" "| T20 | 4 | build | the build | implementor | — | 30 | REQ-1 | lib/y.sh | landed | — | — |" \
+  "| T27 | 4 | doc | the notes | — | — | 30 | REQ-1 | $TL_D/r27.md | pending | approval:plan | $TL_D/r27.md |")"
+vc_15 "$TW" "$TW_P"; new_roster "$TW"; printf 'notes\n' > "$TW/$TL_D/r27.md"
+sed 's#^working-branch: main$#working-branch: wave/none#' "$TW_P" > "$TW_P.t" && mv "$TW_P.t" "$TW_P"
+poke "$TW" tick; TW_SAID="$(printf '%s\n' "$OUT" | /usr/bin/grep 'NOT-LANDED T27 ')"
+expect_contains "TL-12 a working branch naming no commit: T27 waits, the line naming working-branch: in the plan's header" "in the plan's header (working-branch: <branch>)" "$TW_SAID"
+expect_absent "TL-12b …and no state section" "SDLC State" "$TW_SAID"
+/usr/bin/grep -v '^working-branch:' "$TW_P" > "$TW_P.t" && mv "$TW_P.t" "$TW_P"; poke "$TW" current 8 --check
+expect_contains "TL-13 the judge at 8 with no working-branch: refused, naming the header as its place" "working-branch: <branch>' to the plan's header" "$RC|$OUT"
+expect_absent "TL-13b …and no state section" "SDLC State" "$RC|$OUT"
 # A live review row lands only once the judge reads every question it carries covered at the working head. T11 and T12,
 # a run at 15 (`vc_15`) launched by its log, carry the questions adversarial and structure, their readings at the head
 # seeded in the log; T12's writer ends only after a code commit past the readings.
