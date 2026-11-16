@@ -1411,9 +1411,7 @@ matrix_auditor_required() {
 
 # THE MATRIX IS THE READER'S. Every arm below reads a criterion through two answers, loaded once a pass:
 # MATRIX_CELLS, the reader's line for every criterion (lib/reader.sh `reader_cells`, one fold: its state, tier,
-# evidence, auditor, confirmation and serves, from the run's events and, for an older plan, its table and block), and
-# MATRIX_BLOCKS, each criterion's authored block of an older plan (lib/plan-read.sh `plan_read_blocks`, the plan's
-# one parser), its head lines with the criterion empty, and MATRIX_TASKS, the task that proves each criterion
+# evidence, auditor, confirmation and serves, from the run's events), and MATRIX_TASKS, the task that proves each criterion
 # (lib/plan-read.sh `plan_read_criterion_task`), for the plan MATRIX_TASKS_OF names. No arm parses the plan's matrix
 # itself, so the commit gate, the judge and the cards cannot answer one criterion two ways. 2 when the run's facts could not be read: a run
 # read as holding no fact would read every criterion pending, and a pending criterion is relaxed.
@@ -1435,44 +1433,24 @@ matrix_load() {  # <plan> [head]
   fi
   MATRIX_CELLS="$(_proof_ask "$rp" reader_cells "$1" "$h")" || rc=$?
   case "$rc" in 0) ;; 1) MATRIX_CELLS="" ;; *) return 2 ;; esac
-  MATRIX_BLOCKS="$(plan_read_blocks "$1" 2>/dev/null)" || MATRIX_BLOCKS=""
   MATRIX_TASKS="$(plan_read_criterion_task "$1" 2>/dev/null)" || MATRIX_TASKS=""
   MATRIX_TASKS_OF="$1"
   return 0
 }
 
 # matrix_fails_when_missing <plan> -> the first criterion, in the reader's order (lib/reader.sh `reader_criteria`, no
-# fold), whose fails-when is empty: the criterion question's answer, its Eval design row's Fails when cell; for an older
-# plan's row the Eval design lacks, the first `fails-when:` line of its block. Such a row with no block is no finding:
-# there is no block to lack the key, and the per-tier evidence loop at the Verify gate owns that gap. Nothing when every
-# criterion names one, or the reader cannot be loaded.
+# fold), whose fails-when is empty: the criterion question's answer, its Eval design row's Fails when cell. A criterion
+# the Eval design holds no row for is no finding: there is no row to lack the cell, and the per-tier evidence loop at
+# the Verify gate owns that gap. Nothing when every criterion names one, or the reader cannot be loaded.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 matrix_fails_when_missing() {
   declare -F reader_criteria >/dev/null 2>&1 || _proof_reader_load >/dev/null 2>&1 || return 0
-  { reader_criteria "$1" 2>/dev/null; printf '\034\n'; plan_read_rows "$1" 'Eval design' criterion 2>/dev/null
-    printf '\034\n'; plan_read_blocks "$1" 2>/dev/null; } | awk -F'\t' '
+  { reader_criteria "$1" 2>/dev/null; printf '\034\n'; plan_read_rows "$1" 'Eval design' criterion 2>/dev/null; } | awk -F'\t' '
     $0 == "\034" { part++; next }
     !part { if ($0 != "") ord[++n] = $0; next }
-    part == 1 { c = ""; f = ""; for (i = 1; i <= NF; i++) { if (index($i, "criterion=") == 1) c = substr($i, 11); if (index($i, "fails-when=") == 1) f = substr($i, 12) }
-      gsub(/^[ \t]+|[ \t]+$/, "", f); if (f == "—" || f == "-") f = ""; if (c != "") { ed[c] = 1; fw[c] = f }; next }
-    $1 == "" || ($1 in ed) { next }
-    { if ($2 ~ /[^ \t]/) blk[$1] = 1; if (!($1 in seen) && $2 ~ /^[ \t]*fails-when[ \t]*:/) { seen[$1] = 1; v = $2; sub(/^[ \t]*fails-when[ \t]*:[ \t]*/, "", v); sub(/[ \t]+$/, "", v); fw[$1] = v } }
-    END { for (i = 1; i <= n; i++) { c = ord[i]; if (((c in ed) || (c in blk)) && fw[c] == "") { print c; exit } } }'
-}
-
-# A plan at 15 holds no matrix: a criterion's waiver and confirmation are the run's events, never a block's lines.
-matrix_v15() {  # <plan> -> 0 at version 15
-  [ "$(plan_frontmatter_get "$1" canonical_sdlc_version 2>/dev/null)" = 15 ]
-}
-
-# The lines of <AC>'s authored block, as MATRIX_BLOCKS holds them; nothing at 15, where a criterion has none.
-matrix_block() {
-  awk -F'\t' -v ac="$1" '$1 == ac { print substr($0, length(ac) + 2) }' <<< "$MATRIX_BLOCKS"
-}
-
-# The matrix head's lines (stack-health:, walk-artifact:, false-green:, rewritten:), as MATRIX_BLOCKS holds them.
-matrix_head() {
-  awk -F'\t' '$1 == "" { print substr($0, 2) }' <<< "$MATRIX_BLOCKS"
+    { c = ""; f = ""; for (i = 1; i <= NF; i++) { if (index($i, "criterion=") == 1) c = substr($i, 11); if (index($i, "fails-when=") == 1) f = substr($i, 12) }
+      gsub(/^[ \t]+|[ \t]+$/, "", f); if (f == "—" || f == "-") f = ""; if (c != "") { ed[c] = 1; fw[c] = f } }
+    END { for (i = 1; i <= n; i++) { c = ord[i]; if ((c in ed) && fw[c] == "") { print c; exit } } }'
 }
 
 # The `user-confirmed:` value out of an AC block (empty when absent). The one parser of the
@@ -1507,13 +1485,6 @@ user_confirmed_attributed() {  # <value> -> 0 when attributed
 user_confirmed_pending() {  # <key> <value> -> 0 when the key is user-confirmed and the value is the stub
   [ "$1" = user-confirmed ] || return 1
   [ "$(tr '[:upper:]' '[:lower:]' <<< "$2")" = pending ]
-}
-
-# Is a row WAIVED on the record? A `waiver:` token in its evidence cell or a `waiver:` line in
-# its AC block. Not the status cell alone: a row that says `waived` while recording no waiver
-# has not been through the Waiver Protocol.
-matrix_row_waiver() {  # <evidence cell> <AC block> -> 0 when a waiver is recorded
-  grep -qE 'waiver:' <<< "$1" || grep -qE '^[[:space:]]*waiver[[:space:]]*:' <<< "$2"
 }
 
 # The task that proves <AC> (empty when it names none): the plan row, or rows, whose work proves the criterion, or the
@@ -1597,16 +1568,13 @@ matrix_live_row_exit() {  # <AC> -> the repair prose of a live row's evidence re
 
 # matrix_table_rows -> `<AC>\037<tier>\037<status>\037<evidence>\037<auditor>\037<confirmed>\037<waiver 1|0>` per
 # criterion of MATRIX_CELLS, the reader's order. The status is discharged, waived (discharged by a waiver) or pending.
-# THE WAIVER IS RECORDED or it is not one: at 15 the waiver event naming the criterion is the record; an older row's is a
-# `waiver:` in its evidence or a `waiver:` line in its block (`matrix_row_waiver`), whatever its status says.
+# THE WAIVER IS RECORDED or it is not one: the waiver event naming the criterion is the record.
 matrix_table_rows() {
-  local ac st by tier ev aud conf sv w v15=0
-  ! matrix_v15 "$PLAN" || v15=1
+  local ac st by tier ev aud conf sv w
   while IFS=$'\037' read -r ac st by tier ev aud conf sv; do
     [ -n "$ac" ] || continue
-    [ "$by" != waiver ] || st=waived
     w=0
-    if [ "$v15" = 1 ]; then [ "$by" != waiver ] || w=1; else ! matrix_row_waiver "$ev" "$(matrix_block "$ac")" || w=1; fi
+    [ "$by" != waiver ] || { st=waived; w=1; }
     printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\n' "$ac" "$tier" "$st" "$ev" "$aud" "$conf" "$w"
   done <<< "$MATRIX_CELLS"
 }
@@ -1617,17 +1585,15 @@ matrix_table_rows() {
 matrix_close_eval() { grep -qE 'landing-report[[:space:]]+--hand-holds' <<< "$1"; }
 
 # matrix_close_rows <plan> -> the AC id of each pending criterion the close settles, the reader's
-# order: owed at Step 9, and its block's `eval:`, else its Eval design row's, is the close's measure (matrix_close_eval).
+# order: owed at Step 9, and its Eval design row's eval is the close's measure (matrix_close_eval).
 # close-out proves each such criterion from that reading. 2 when the run's facts could not be read.
 matrix_close_rows() {
-  local PLAN="$1" MATRIX_CELLS MATRIX_BLOCKS MATRIX_TASKS MATRIX_TASKS_OF ac tier status ev aud conf w block
+  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF ac tier status ev aud conf w
   matrix_load "$PLAN" || return 2
   while IFS=$'\037' read -r ac tier status ev aud conf w; do
     [ -n "$ac" ] && [ "$status" = pending ] || continue
-    block="$(matrix_block "$ac")"
     [ "$(matrix_owing_step "$PLAN" "$ac")" = 9 ] || continue
-    matrix_close_eval "$(grep -E '^[[:space:]]*eval[[:space:]]*:' <<< "$block")" \
-      || matrix_close_eval "$(plan_read_row "$PLAN" 'Eval design' Criterion "$ac" 2>/dev/null | grep '^eval=')" || continue
+    matrix_close_eval "$(plan_read_row "$PLAN" 'Eval design' Criterion "$ac" 2>/dev/null | grep '^eval=')" || continue
     printf '%s\n' "$ac"
   done <<MATRIX_ROWS
 $(matrix_table_rows)
@@ -1730,7 +1696,7 @@ matrix_row_owes() {
 # lib/proof.sh loaded, as every caller of this file has them. 2 when the run's facts could not be read. A fourth argument,
 # any word, prints only those that also await their person (`matrix_row_awaits`, fed as the commit gate feeds it).
 matrix_unruled() {
-  local PLAN="$1" MATRIX_CELLS MATRIX_BLOCKS MATRIX_TASKS MATRIX_TASKS_OF RIGOR ac tier status ev aud conf waiver defer
+  local PLAN="$1" MATRIX_CELLS MATRIX_TASKS MATRIX_TASKS_OF RIGOR ac tier status ev aud conf waiver defer
   RIGOR="$(plan_frontmatter_get "$1" rigor)"
   matrix_auditor_required || return 0
   matrix_load "$PLAN" "${3:-}" || return 2
@@ -2278,15 +2244,10 @@ INTENT=$(frontmatter_get intent)
 RIGOR=$(frontmatter_get rigor)
 MULTI_AGENT=$(frontmatter_get multi_agent)
 
-# The newest plan has no ## SDLC State section → not a canonical-sdlc run.
-# Fence-aware (matches the SECTION extraction below): a `## SDLC State` heading
-# that appears ONLY inside a ``` fenced example is documentation, not state, so
-# the file passes through as non-canonical rather than being parsed and then
-# false-blocked on the empty extraction. Line endings normalized (CRLF and
-# CR-only) to real newlines first — see normalize_newlines.
-#
-# A PLAN AT 15 IS NEVER THIS ESCAPE'S. It holds no state section by its contract, since its run is
-# read from its log, so the escape would admit every commit against it with nothing judged.
+# A PAGE IS A RUN'S PLAN BY ITS VERSION MARKER, as the write hook reads it: a page whose leading frontmatter declares
+# no `canonical_sdlc_version` is none of this lifecycle's, and nothing of it is judged. A page that declares one is
+# judged on its value alone, below.
+grep -qE '^[[:space:]]*canonical_sdlc_version[[:space:]]*:' <<< "$FRONTMATTER" || exit 0
 _EG_V15=0
 case "${PLAN##*/}:$SDLC_VERSION" in *.plan.md:15) _EG_V15=1 ;; esac
 
@@ -2295,9 +2256,9 @@ _eg_plan_named() {  # -> the path the plan takes when named for its directory: a
   case "$d" in */incidents/*) printf '%s/%s.plan.md' "$d" "${d##*/}" ;; *) printf '%s.plan.md' "${PLAN%.md}" ;; esac
 }
 # A PAGE AT 15 IS A PLAN ONLY BY ITS NAME: a run at 15 is found by the walk and joined to its record by a name ending
-# .plan.md, so a page at 15 a session is bound to under any other name has no run this gate can read, and the escape
-# for a file with no state section below would admit every commit against it unjudged. It is refused, named for its
-# directory.
+# .plan.md, so a page at 15 a session is bound to under any other name has no run this gate can read, and admitting
+# it would admit every commit against it unjudged. It is refused, named for its directory. A page at 15 under another
+# name that no session is bound to is no run, and its commit goes through.
 # [WALL: tests/plan-page.test.sh]
 _eg_refuse_misnamed15() {
   refuse exit2 commit "this plan at 15 is not named as a plan" "name it for its directory" \
@@ -2311,15 +2272,9 @@ Fix: name the plan for its directory, then commit again:
 # [WALL: tests/plan-page.test.sh]
 case "${PLAN##*/}:$SDLC_VERSION" in
   *.plan.md:15) ;;
-  *:15) case "$EG_VERDICT" in bound-open|bound-closed) _eg_refuse_misnamed15 ;; esac ;;
+  *:15) case "$EG_VERDICT" in bound-open|bound-closed) _eg_refuse_misnamed15 ;; *) exit 0 ;; esac ;;
   *:14) exit 0 ;;
 esac
-
-# A page at neither 14 nor 15 with no state section is no plan; the translation tells the section.
-declare -F translate_has_state >/dev/null 2>&1 || . "$BIONIC_LIB/translate.sh"
-if [ "$_EG_V15" -eq 0 ] && ! translate_has_state "$PLAN"; then
-  exit 0
-fi
 
 # A plan at 15; a plan at 14 left above, under any name, with nothing judged. Anything else — an older number, a typo,
 # an empty value, garbage — blocks. So below this line every page is a plan at 15 named
@@ -2543,8 +2498,8 @@ Fix: register each review with 'session-poker.sh proof-add review <record> --que
 # says "no regression proof on this plan yet"). THE JUDGE'S OWN READER decides it (wave-35 T38; critic-structure-3,
 # debt `unpinned-pair floor-absent`): lib/proof.sh `proof_floor_absent`, which proof_state and facts_state ask before
 # the floor judge, so the wall and the judge read one plan's floor line one way (FL-5 drives both). THE PLAN'S LINES
-# ARE lib/run.sh `plan_lines`'s, the one plan line reader, CR translated, which that reader reads through (wave-36
-# T12; D13, AC-7.5; C34): a CR-only plan's floor line is a line to this arm and the judge alike (FL-5-cr), where a
+# ARE lib/run.sh `plan_lines`'s, the one plan line reader, a lone CR made a newline, which that reader reads through:
+# a CR-only plan's floor line is a line to this arm and the judge alike, where a
 # raw read had refused it here as absent while the gate's own parse read the plan's steps. `plan_regression`
 # reads the frontmatter through the same translation.
 # A PREDICATE OVER TEXT, as `_eg_reading_gaps` is: whether
@@ -2671,10 +2626,10 @@ Fix: on the user's literal 'approved', record that approval of step3 — never o
 # into the plan's matrix at Step 3. By Step 4 every AC block has one, or a step was
 # skipped; so this arm is the receipt for that authoring order rather than a new demand.
 #
-# IT JUDGES BLOCKS, NOT ROWS. A matrix row with no AC block underneath it is not a
-# fails-when finding: there is no block to lack the key, and the per-tier evidence loop
-# at the Verify gate is what owns that gap. Nor does a plan with no `## Verification
-# Matrix` at all become one — a Step-4 plan may not have written the section yet, and
+# IT JUDGES EVAL DESIGN ROWS. A criterion with no `## Eval design` row is not a
+# fails-when finding: there is no row to lack the cell, and the per-tier evidence loop
+# at the Verify gate is what owns that gap. Nor does a plan with no `## Eval design`
+# at all become one — a Step-4 plan may not have written the section yet, and
 # demanding it here would be the Verify gate's demand moved four steps early.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_fails_when() {
@@ -2686,7 +2641,7 @@ validate_fails_when() {
   [ -n "$ac" ] || return 0
   _eg_detail="canonical-sdlc step ${CURRENT} — criterion '${ac}' names no 'fails-when:'; an eval with no nameable failure is not an eval.
 Plan: $PLAN
-Fix: write the planted defect this eval must go red on in the criterion's '## Eval design' Fails when cell, or, on an older plan, as 'fails-when: <the planted defect>' in the '${ac}:' block."
+Fix: write the planted defect this eval must go red on in the criterion's '## Eval design' Fails when cell."
   refuse exit2 commit "that matrix row names no 'fails-when:'" "add a 'fails-when:' line" "$_eg_detail"
   return 0
 }
@@ -4195,7 +4150,7 @@ if [ -f "$BIONIC_ROOT/.bionic/config.yaml" ]; then
 fi
 [ "$MODE" = "off" ] && return 0
 
-# Normalized single-line form for matching + the scrubbed deny reason (CR translate).
+# Normalized single-line form for matching + the scrubbed deny reason (a CR made a newline).
 # THREE FORKS AND A SUBSHELL BECOME ONE BUILTIN LOOP (REQ-10, T11) — see
 # `_wall_flatten` at the top of this file for why the CR pass was redundant once
 # the whitespace squeeze ran.
