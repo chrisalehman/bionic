@@ -1817,13 +1817,13 @@ RR_AGAINST_EOF
       "$(landing_report "$(_wt_proofs_path "$PV_REPO" "$PV_PLAN")" "$PV_REPO" yes 2>/dev/null)")"
     # A MATRIX ROW NO THEME CAN READ refuses the page, preview or not, before anything is written: a row with no
     # serves: and no dotted id is in no theme's count, so the Goals block would print a theme short, `0 of N reached`
-    # over criteria discharged. The block's serves: line names the requirement, and the page then reads it.
+    # over criteria discharged. The Requirement cell of the criterion's Eval design row names it, and the page then reads it.
     RR_UNMAPPED="$(printf '%s\n' "$RR_GOALS" | awk -F'\t' '$1 == "mapping" && index($2, "not mapped: ") == 1 {
       n = split($3, a, " "); s = ""; for (i = 1; i <= n && i <= 5; i++) s = s (i > 1 ? ", " : "") a[i]
       if (n > 5) s = s " and " (n - 5) " more"
       print n "\t" s; exit }')"
     if [ -n "$RR_UNMAPPED" ]; then
-      die "release-approval refused — ${RR_UNMAPPED%%	*} matrix rows map to no requirement (no serves: and no dotted id): give each block a serves: line naming its requirement (${RR_UNMAPPED#*	})"
+      die "release-approval refused — ${RR_UNMAPPED%%	*} criteria map to no requirement (none named, and no dotted id): write each one's requirement in the Requirement cell of its row under ## Eval design (${RR_UNMAPPED#*	})"
       exit 1
     fi
 

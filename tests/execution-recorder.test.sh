@@ -119,25 +119,8 @@ make_world() {
     mkdir -p "$repo/.bionic/tmp"
     : > "$repo/.bionic/tmp/engaged-$SID_A.state"
     : > "$repo/.bionic/tmp/engaged-$SID_B.state"
-    mkdir -p "$repo/.bionic/docs/plans/epic-99-test"
-    cat > "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" <<'PLAN'
----
-governing-skill: canonical-sdlc
-canonical_sdlc_version: 14
-intent: build
-rigor: double
-scale: wave
----
-
-# Test wave plan
-
-## SDLC State
-
-integration-branch: main
-current: 4
-
-- Step 4: tasks in flight
-PLAN
+    # The live wave is a run at 15: its page in nine cells, its step and approval events in its log.
+    plan_fixture "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" wave >/dev/null
   fi
   printf '%s|%s|%s|%s\n' "$repo" "$proj/$SID_A.jsonl" "$proj/$SID_A/subagents" "$home/.claude"
 }

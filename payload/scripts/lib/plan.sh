@@ -5,8 +5,8 @@
 # its plan declares?
 #
 #     plan_integration_branch <plan>
-#                        the value of `integration-branch:` under the plan's `## SDLC State`, else the same key in
-#                        its leading frontmatter; nothing when neither names one, or <plan> is no file. Always rc 0.
+#                        the value of `integration-branch:` in the plan's leading frontmatter, its header; nothing
+#                        when it names none, or <plan> is no file. Always rc 0.
 #     plan_goals, plan_goals_read, plan_one_file_median, plan_goal_slug
 #                        the goals and their readings, below; the situation report, the release approval card and the
 #                        tick read them here, so no page measures a goal its own way.
@@ -16,17 +16,13 @@
 #     plan_goal_paragraph, plan_goal_status
 #                        what a document is for, and one goal's status word.
 #
-# THE ONE READER (burns debt integration-branch-reader; critic-structure-2). Two orders stood: close-out.sh read
-# ## SDLC State and refused a plan whose frontmatter alone named the branch, its `closed-form` then fell back to the
-# frontmatter, and session-poker.sh `handoff` read the frontmatter first with an awk of its own, while `release-check`
-# read the frontmatter alone. D18 rules ## SDLC State first, the frontmatter as the fallback: the order lib/run.sh
-# `plan_working_branch` already reads the working branch in. close-out.sh and every session-poker.sh reader of the key
-# call this; tests/close-out-1.test.sh and tests/handoff-file.test.sh §BRANCH-AGREE hold them to one answer.
+# THE ONE READER. close-out.sh, the Step-0 card, the gate's merge-target check and every session-poker.sh reader of the
+# key call this, so no two doors name two branches; tests/close-out-1.test.sh and tests/handoff-file.test.sh
+# §BRANCH-AGREE hold them to one answer. The key is the header's alone, as lib/run.sh `plan_working_branch` reads the
+# working branch: a page at 15 holds no state section, and a key under a heading of its body is no answer.
 #
-# THE GRAMMAR IS THE WORKING BRANCH'S. The section is `##` and blanks, then `SDLC State`; fenced lines are not read;
-# the key may be indented; the value is its first word, one leading and one trailing quote of either kind dropped. A
-# branch name holds no blank, so the first word is the whole of every value a plan carries; close-out's old reader
-# took the rest of the line, trimmed, which differs only on a line no branch can be.
+# THE VALUE is the key's first word, one leading and one trailing quote of either kind dropped: a branch name holds no
+# blank, so the first word is the whole of every value a plan carries.
 #
 # NEEDS lib/run.sh (`_run_lines`, the newline rule: CRLF and a lone CR both end a line), which loads lib/plan-read.sh,
 # the parser the header helpers read through. Both callers source it first.
@@ -34,11 +30,11 @@
 # one-file landing or a whole run reads as not measured.
 # Sourced, never executed; bash 3.2.
 
-# Both reads are the reader-owned parser's (lib/plan-read.sh): the SDLC State section's key line, then the header key.
+# The read is the reader-owned parser's (lib/plan-read.sh): the header key, never a key under a heading of the body.
 plan_integration_branch() {  # <plan>
   local plan="${1:-}" ib
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
-  ib="$(plan_read_section "$plan" SDLC integration-branch)" || ib="$(plan_read_header "$plan" integration-branch)" || ib=""
+  ib="$(plan_read_header "$plan" integration-branch)" || ib=""
   ib="${ib#integration-branch=}"; ib="${ib%%[[:space:]]*}"
   case "$ib" in [\'\"]*) ib="${ib#?}" ;; esac
   case "$ib" in *[\'\"]) ib="${ib%?}" ;; esac
@@ -81,14 +77,11 @@ plan_integration_branch() {  # <plan>
 # over every REQ its matrix measures, its opener the first sentence of the plan's own Goal. A theme is on course while
 # it is pending with at least one criterion discharged.
 
-# plan_scale <plan> -> the plan's `scale:`, from its leading frontmatter, else from `## SDLC State`; nothing when
-# neither names one. Always rc 0.
+# plan_scale <plan> -> the plan's `scale:`, from its leading frontmatter; nothing when it names none. Always rc 0.
 plan_scale() {
-  local plan="${1:-}" sc
+  local plan="${1:-}"
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
-  sc="$(plan_frontmatter_get "$plan" scale)"
-  [ -n "$sc" ] || { sc="$(plan_read_section "$plan" SDLC scale)" && sc="${sc%%[[:space:]]*}"; } || sc=""
-  printf '%s' "$sc"
+  plan_frontmatter_get "$plan" scale
   return 0
 }
 
@@ -232,7 +225,8 @@ plan_themes() {
 # under the theme `_plan_ac_req` maps it to. After the themes, one `mapping<TAB><line>[<TAB><ids>]` row per way a row
 # was read short of its serves:, each said once: `mapped by id: <n> rows carry no serves:` when a dotted id mapped any,
 # `read as the first: <n> rows serve several requirements` when a serves: named more than one, and
-# `not mapped: <n> rows carry no serves: and no dotted id`, its ids space-separated after it, when any row maps to
+# `not mapped: <n> criteria name no requirement and no dotted id: …`, naming the Requirement cell of the criterion's
+# Eval design row as the place that maps it, its ids space-separated after it, when any row maps to
 # nothing: such a row is in no theme's count, so a theme it serves reads short and the reading says why. A task plan
 # reads its matrix even when no theme is found, since its one theme is the matrix's own.
 _plan_theme_reads() {
@@ -269,7 +263,7 @@ _plan_theme_reads() {
         print ((step != "" && step + 0 >= 6) ? "overdue" : (d[t] ? "oncourse" : "pending")) "\t" nm[t] "\t" m "\t" goal_open(o, c - 2) f }
       if (byid) print "mapping\tmapped by id: " byid " rows carry no serves:"
       if (many) print "mapping\tread as the first: " many " rows serve several requirements"
-      if (unm) print "mapping\tnot mapped: " unm " rows carry no serves: and no dotted id\t" un
+      if (unm) print "mapping\tnot mapped: " unm " criteria name no requirement and no dotted id: write the requirement in the Requirement cell of each row under ## Eval design\t" un
     }'
 }
 
