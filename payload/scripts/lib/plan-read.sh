@@ -158,7 +158,7 @@ plan_read_criterion_task() {
 
 # plan_read_criterion_faults <plan> -> at version 15, one line per token of a criterion's Task cell that names no row of
 # the Tasks table, saying what to write. `9` is the close's step only as the whole value: beside an id it names nothing,
-# so a mix an older block read silently as the id alone is refused where it is written. 0 with faults, 1 with none, 2
+# so a mix of the two names nothing and is refused where it is written. 0 with faults, 1 with none, 2
 # when the plan is not a file.
 plan_read_criterion_faults() {
   [ -f "${1:-}" ] || return 2
