@@ -83,6 +83,11 @@ Fix: set 'canonical_sdlc_version:' to $2: a plan is written at 15, and a documen
       WG_DETAIL="canonical-sdlc plan '$BASENAME' is new and declares canonical_sdlc_version: 14: a new plan is written at 15.
 Path: $FILE_PATH
 Fix: set 'canonical_sdlc_version: 15', and write the plan in that shape: its header, '## Goal', '## Tasks' and one section per row." ;;
+    lowered)  # <the version this write declares>
+      WG_FACT="this write lowers a plan at 15"; WG_FIX="leave its version at 15"
+      WG_DETAIL="canonical-sdlc plan '$BASENAME' declares canonical_sdlc_version: 15 on disk, and this write declares canonical_sdlc_version: $1: a plan at 15 stays at 15, and one below it is an older run's document that no gate judges.
+Path: $FILE_PATH
+Fix: leave 'canonical_sdlc_version: 15' as it stands, and write the change in the version-15 shape." ;;
     mode)
       _write_gate_frame "this artifact declares mode:" "declare intent:, rigor: and scale:" \
         "artifacts declare intent:/rigor:/scale:, never mode:" ;;
