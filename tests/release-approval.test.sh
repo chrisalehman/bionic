@@ -856,14 +856,14 @@ rm -f "$RFC/.bionic/config.yaml" "$FC_REC"/release-check-*.log "$FC_REC"/release
 # ============================================================
 section "§STEP0: card.sh step0 renders the configuration card in the 1.20.0 shape, ending on its question, and owes its reply (AC-20.1, AC-20.2; D3, D23)"
 # ============================================================
-# Its page is its own, written at 14 and at current: 0, never fc_plan's: the configuration card is drawn before the run
+# Its page is its own, written at 15 and with no step event, never fc_plan's: the configuration card is drawn before the run
 # has a step to advance, and step0 asks no gate, so the version the builder carries the run to is not this card's.
 {
-  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nintent: build\nrigor: double\nscale: wave\nworking-branch: wave/01-fixture\n'
   printf 'scale-recommendation: "Several rows in one session. The ask names five files."\nregression: yes\n'
   printf 'surface_type: cli-plugin\nmulti_agent: true\ndeploy_target: n/a\ncleanup_on_finish: true\nuse_worktree: false\n'
   printf 'walk: exempt\ndesign-interview: true\nmodel_plan: orchestrator=claude-fable-5-1\nseed: ideas/seed.md\n---\n'
-  printf '# plan\n\n## Goal\n\nConfigure the fixture run, and nothing else.\n\n## SDLC State\n\ncurrent: 0\nworking-branch: wave/01-fixture\n'
+  printf '# plan\n\n## Goal\n\nConfigure the fixture run, and nothing else.\n'
 } > "$PFC"
 rm -f "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/run.log"
 bind_marker "$RFC" "$PFC"
