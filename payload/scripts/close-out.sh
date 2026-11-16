@@ -466,8 +466,8 @@ fi
 
 command -v git >/dev/null 2>&1 || _co_refuse "git is not on PATH"
 command -v jq  >/dev/null 2>&1 || _co_refuse "jq is not on PATH — the gate dry-run cannot be built without it"
-[ -n "$INTEGRATION" ] || _co_refuse "the plan names no integration-branch: (## SDLC State or its frontmatter)"
-[ -n "$WORKING" ]     || _co_refuse "the plan names no working-branch: (## SDLC State or its frontmatter)"
+[ -n "$INTEGRATION" ] || _co_refuse "the plan names no integration-branch:; add 'integration-branch: <branch>' to the plan's header"
+[ -n "$WORKING" ]     || _co_refuse "the plan names no working-branch:; add 'working-branch: <branch>' to the plan's header"
 
 # THE WORKTREE CENSUS IS THE REGISTER, NEVER A NAME (D5, REQ-6; ADR-032). A tree is
 # this run's if and only if a `## Tasks` row names it — `wt_branches()` (below) reads

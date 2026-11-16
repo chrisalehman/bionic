@@ -2838,15 +2838,12 @@ Fix: record the run's step in its log before committing."
 _EG_DECLARED_CURRENT="$CURRENT"
 
 if [ -z "$CURRENT" ] || ! grep -qE '^[0-9]+[ab]?$' <<< "$CURRENT"; then
-  # ONE LEDGER SHAPE (wave-31 D2): `current:` is a step number at every scale. A value that is not
-  # one, `T<n>` from the retired task-scale shape among them, is named and refused, never judged
-  # by a second set of arms; the words are the readers'.
-  _eg_why=""
-  [ -z "$CURRENT" ] || _eg_why=": current: ${CURRENT} is not numeric; a plan in the retired task-scale shape is refused, not skipped"
-  _eg_detail="canonical-sdlc plan file's '## SDLC State' section is missing a valid 'current: N' line${_eg_why}.
+  # A step is a number at every scale, and the current verb writes no other. A step event that holds anything else was
+  # written by hand; it is named and refused, never judged by a second set of arms.
+  _eg_detail="canonical-sdlc plan at version 15: the run's newest step event reads '${CURRENT}', which is not a step number.
 Plan: $PLAN
-Fix: add a line like 'current: 5' (or 'current: 8b') before committing."
-  refuse exit2 commit "'## SDLC State' has no valid 'current:' line" "add a 'current: N' line" "$_eg_detail"
+Fix: record the run's step with session-poker.sh current <N> (a number, or 8b) before committing."
+  refuse exit2 commit "the run's newest step is not a number" "session-poker.sh current <N>" "$_eg_detail"
 fi
 
 # ---------- THE RUN PREDICATE (AC-7, AC-8): no open run, nothing to gate ----------

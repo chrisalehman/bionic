@@ -159,7 +159,7 @@ DELIVER_FILES
     *) head="" ;;
   esac
   if [ -z "$head" ]; then
-    die "REFUSED — the plan's working-branch ${wb:-(none named)} names no commit in $PV_REPO, so there is no head to land $PV_ID at; name the branch under ## SDLC State (working-branch: <branch>); the next tick lands it."
+    die "REFUSED — the plan's working-branch ${wb:-(none named)} names no commit in $PV_REPO, so there is no head to land $PV_ID at; name the branch in the plan's header (working-branch: <branch>); the next tick lands it."
     exit 2
   fi
   if [ -n "$RL_WALK" ] && [ -z "$(printf '%s\n' "$pl" | awk -v rec="$RL_WALK" "$(proof_awk)"'

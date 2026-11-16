@@ -155,7 +155,7 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
   fi
   wb="$(plan_working_branch "$PV_PLAN")"
   if [ -z "$wb" ]; then
-    die "REFUSED — current: $step is admitted on the facts the run owes at the working head, and the plan names no working-branch: (## SDLC State or its frontmatter), so the regression is uncovered; the plan is unchanged."
+    die "REFUSED — current: $step is admitted on the facts the run owes at the working head, and the plan names no working-branch:, so the regression is uncovered; add 'working-branch: <branch>' to the plan's header; the plan is unchanged."
     exit 1
   fi
   PV_HEAD8="$(proof_branch_head "$PV_PLAN" "$PV_REPO")" || PV_HEAD8=""

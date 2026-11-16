@@ -5,8 +5,8 @@
 # its plan declares?
 #
 #     plan_integration_branch <plan>
-#                        the value of `integration-branch:` under the plan's `## SDLC State`, else the same key in
-#                        its leading frontmatter; nothing when neither names one, or <plan> is no file. Always rc 0.
+#                        the value of `integration-branch:` in the plan's leading frontmatter, its header; nothing
+#                        when it names none, or <plan> is no file. Always rc 0.
 #     plan_goals, plan_goals_read, plan_one_file_median, plan_goal_slug
 #                        the goals and their readings, below; the situation report, the release approval card and the
 #                        tick read them here, so no page measures a goal its own way.
@@ -34,11 +34,11 @@
 # one-file landing or a whole run reads as not measured.
 # Sourced, never executed; bash 3.2.
 
-# Both reads are the reader-owned parser's (lib/plan-read.sh): the SDLC State section's key line, then the header key.
+# The read is the reader-owned parser's (lib/plan-read.sh): the header key, never a key under a heading of the body.
 plan_integration_branch() {  # <plan>
   local plan="${1:-}" ib
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
-  ib="$(plan_read_section "$plan" SDLC integration-branch)" || ib="$(plan_read_header "$plan" integration-branch)" || ib=""
+  ib="$(plan_read_header "$plan" integration-branch)" || ib=""
   ib="${ib#integration-branch=}"; ib="${ib%%[[:space:]]*}"
   case "$ib" in [\'\"]*) ib="${ib#?}" ;; esac
   case "$ib" in *[\'\"]) ib="${ib%?}" ;; esac
@@ -81,14 +81,11 @@ plan_integration_branch() {  # <plan>
 # over every REQ its matrix measures, its opener the first sentence of the plan's own Goal. A theme is on course while
 # it is pending with at least one criterion discharged.
 
-# plan_scale <plan> -> the plan's `scale:`, from its leading frontmatter, else from `## SDLC State`; nothing when
-# neither names one. Always rc 0.
+# plan_scale <plan> -> the plan's `scale:`, from its leading frontmatter; nothing when it names none. Always rc 0.
 plan_scale() {
-  local plan="${1:-}" sc
+  local plan="${1:-}"
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
-  sc="$(plan_frontmatter_get "$plan" scale)"
-  [ -n "$sc" ] || { sc="$(plan_read_section "$plan" SDLC scale)" && sc="${sc%%[[:space:]]*}"; } || sc=""
-  printf '%s' "$sc"
+  plan_frontmatter_get "$plan" scale
   return 0
 }
 

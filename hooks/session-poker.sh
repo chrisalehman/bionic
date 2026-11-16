@@ -1409,7 +1409,7 @@ run_state() {  # <project root> <arming-record path, may be empty> <session id> 
   resolve_run "$repo" "$sid"
   plan="$POKER_RUN_PLAN"
   if [ -z "$plan" ]; then
-    printf 'open|no plan carrying an unfenced "## SDLC State" under %s/{plans,incidents}' "$droot"
+    printf 'open|no plan of this session'"'"'s run under %s/{plans,incidents}; bind one: session-poker.sh bind <plan>' "$droot"
     return 0
   fi
   # A BOUND PLAN THAT IS GONE. `session_run` reports a missing binding as `bound-closed`, so
@@ -2298,15 +2298,9 @@ plan_verb_dry() {
 }
 
 # pv_missing <the gate's refusal text> -> what the plan lacks, in the gate's words, as the one line `current N`'s
-# refusal ends on (wave-35 T8; REQ-6 AC-6.5; D15): a step line the gate found absent, with the verb that writes it;
-# the fields a step block lacks, with the verb that writes each; else the gate's first detail line as it gave it.
+# refusal ends on: the fields a step block lacks, with the verb that writes each; else the gate's first detail line.
 pv_missing() {
   local n f
-  n="$(printf '%s\n' "$1" | sed -n "s/.*has no 'Step \([0-9][0-9]*[ab]\{0,1\}\):' line.*/\1/p" | head -1)"
-  if [ -n "$n" ]; then
-    printf "the line '- Step %s: <its evidence>' under ## SDLC State (an edit of the plan writes it)" "$n"
-    return 0
-  fi
   n="$(printf '%s\n' "$1" | sed -n 's/.*step \([0-9][0-9]*[ab]\{0,1\}\) evidence missing required field(s): \(.*\)$/\1/p' | head -1)"
   f="$(printf '%s\n' "$1" | sed -n 's/.*step [0-9][0-9]*[ab]\{0,1\} evidence missing required field(s): \(.*\)$/\1/p' | head -1)"
   if [ -n "$n" ] && [ -n "$f" ]; then

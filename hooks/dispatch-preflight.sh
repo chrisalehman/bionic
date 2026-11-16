@@ -755,7 +755,7 @@ if ! role_is_readonly "$DP_SUBAGENT" && [ -z "$DP_PROTOTYPE" ] && [ -n "$PLAN" ]
   if [ "$DP_APPROVED" = unreadable ]; then
     dispatch_finding fill-missing "$DP_SUBAGENT" "$PLAN" "${BIONIC_LIB:-}" "$ROLE_READONLY_SET"
   elif [ -z "$DP_APPROVED" ]; then
-    dispatch_finding unapproved "$DP_SUBAGENT" "$PLAN" "$DP_CURRENT" "$ROLE_READONLY_SET"
+    dispatch_finding unapproved "$DP_SUBAGENT" "$PLAN" "$DP_CURRENT" "$ROLE_READONLY_SET" "$HOOK_DIR"
   fi
 fi
 if ! role_is_readonly "$DP_SUBAGENT" && [ -n "$DP_UNBOUND_PLAN" ]; then
