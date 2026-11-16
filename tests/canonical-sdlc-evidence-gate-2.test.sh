@@ -505,13 +505,17 @@ od_git reset -q --hard "$OD_A"
 od_s8 "$(od_appr "$OD_C")"
 od_poke current 8 --check
 expect_eq "AH-2 AC-7.2 approved head C, the working head A: current 8 --check refuses (exit 1)" "1" "$OD_RC"
-od_s8 'run/v1|ev=approval|key=release|by=Dana Fixture|said=Ship it.|at=2026-10-12T14:00:00Z'
+od_s8 'run/v1|ev=approval|key=release|by=Dana Fixture|said=Ship it.|at=2026-10-12T14:00:00Z'$'\n'"$(od_mu "$OD_A")"
 od_poke current 8 --check
 expect_eq "AH-3 an approval line that names no head: refused (exit 1), saying so" "1|yes" \
   "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "names no head" && echo yes || echo no)"
 od_s8 ''
 od_poke current 8 --check
-expect_eq "AH-4 no approved: release line: refused (exit 1), naming the verb that writes it" "1|yes" \
+expect_eq "AH-4a no approved: release line and the regression unproved: refused (exit 1) on the regression, the approval asked last" "1|yes|no" \
+  "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q 'regression.*unproved' && echo yes || echo no)|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "approve release" && echo yes || echo no)"
+od_s8 "$(od_mu "$OD_A")"
+od_poke current 8 --check
+expect_eq "AH-4 no approved: release line, every other fact holding: refused (exit 1), naming the verb that writes it" "1|yes" \
   "$OD_RC|$(printf '%s\n' "$OD_OUT" | /usr/bin/grep -q "approve release" && echo yes || echo no)"
 
 # A WHOLE RUN AT AN ANCESTOR IS CITED THROUGH proof-add AS THE JUDGE JUDGES IT: the verb accepts the log at the head A

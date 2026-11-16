@@ -2006,15 +2006,17 @@ facts_judge() {
     FACTS_SAYS="the working branch has no commit"
     return 0
   fi
-  # THE APPROVED HEAD: in the order build, regression, review, release (lib/units.sh `units_order`) the
-  # head closed is the one the newest `approved: release` line names (lib/proof.sh `proof_approved_head`), or one that
-  # only prose past it follows (`proof_prose_past`), as `current 8` admits it; a code commit landed after the approval
-  # is refused here, naming both heads. A plan outside that order is judged as before.
-  if units_order "$PLAN" >/dev/null 2>&1; then
+  # THE APPROVED HEAD: whenever the plan has a row that integrates, whatever its other rows, or is in the release order
+  # (lib/units.sh `units_release_asked`), the head closed is the one the newest `approved: release` line names
+  # (lib/proof.sh `proof_approved_head`), or one that only prose past it follows (`proof_prose_past`), as `current 8`
+  # admits it; a code commit landed after the approval is refused here, naming both heads. A plan with neither is asked
+  # no approval.
+  if units_release_asked "$PLAN" >/dev/null 2>&1; then
     ah="$(proof_approved_head "$PLAN" release 2>/dev/null)" || ah=""
     if [ -z "$ah" ]; then
       FACTS_RC=1
-      FACTS_WHY="the plan is in the release order and no approved: release line names a head, so the head the user approved for release cannot be read; the user's word for the working head $FACTS_HEAD is approve release '<reply>'"
+      FACTS_WHY="no approved: release line names a head, so the head the user approved for release cannot be read; the user's word for the working head $FACTS_HEAD is approve release '<reply>'"
+      ! units_order "$PLAN" >/dev/null 2>&1 || FACTS_WHY="the plan is in the release order and $FACTS_WHY"
       FACTS_SAYS="the release is not approved"
       return 0
     fi

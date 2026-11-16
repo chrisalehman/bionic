@@ -274,4 +274,66 @@ expect_eq "COVERED-3b …and the planted sitrep counts the fixed review failed w
 git -C "$RFC" reset -q --hard "$FC_R"
 rm -f "$FC_SEED" "$FC_REC"/release-approval-*.md "$FC_REC/adversarial-fail.md"
 
+# ============================================================
+section "§TASK: a run with no release row is asked the release approval at the advance to 8 and at the close, and its card asks what the gate owes"
+# ============================================================
+# FIXTURE FIDELITY: the prelude's run as a task-scale run holds it (regression no; a build, a verify, a review and an
+# integrate row; no documents or test row), each criterion discharged by a proof with no auditor's word, so its
+# auditor cell is the evidence review's, which flagged; the first criterion is the person's own check (T4),
+# unconfirmed, and at double the auditor's CONFIRMED is its word. The gate's two asks at 8 are walls.sh `matrix_unruled` and each row
+# `matrix_row_awaits` holds.
+# fails-when: current 8 or the close admits the run with its card unanswered, or refuses after the typed reply; or the
+#   card's owed rows are not the gate's: at single rigor a waiver nothing owes, or the person's confirmation left off; or,
+#   a fix landed past the approved head, the card drawn there puts no renewal or the close admits the stale approval.
+fc_task() {  # <page> -> the page as a task-scale run at rigor FC_RIGOR
+  sed -e "s/^rigor: double$/rigor: $FC_RIGOR/" -e 's/^scale: wave$/scale: task\nregression: no/' -e '/^release: /d' \
+    -e 's/^| T2 | 7 | doc .*$/| T2 | 5 | verify | the walk | T1 | 10 | REQ-1 | .bionic\/docs\/record\/wave-x\/walk.md | — |\n| T4 | 6 | review | the critic · questions: evidence,adversarial,structure | T1 | 15 | REQ-1 | .bionic\/docs\/record\/wave-x\/critic.md | — |/' \
+    -e 's/^\(| T3 | 8 | integrate | merge into main | \)approval:merge |/\1T2, T4 |/' -e 's/^| — | AC-1\.1 | T1 |/| — | AC-1.1 | T4 |/' \
+    "$1" > "$1.n" && mv "$1.n" "$1" && fc_owed_now "$1"
+  [ "$FC_RIGOR" = double ] || { sed 's/|auditor=CONFIRMED|/|/' "$FC_EV" > "$FC_EV.n" && mv "$FC_EV.n" "$FC_EV"; }
+  printf 'run/v1|ev=%s|at=\n' 'dispatch|row=T4|name=critic' 'proof|ac=AC-1.2|evidence=record/generic-evidence.md' >> "$FC_EV"
+}
+fc_task_plan() {  # <rigor> -> PFC: the task-scale run at <rigor>, its whole reading at C, the evidence review flagged
+  local q; FC_RIGOR="$1"
+  fc_plan "$(for q in evidence adversarial structure; do fc_line review "$FC_C" 2026-10-12T12:00:00Z "record/wave-x/$q.md" "$q" w-read "$([ "$q" = evidence ] && echo flag || echo pass)" whole; done)" "" fc_task
+}
+fc_owes() {  # -> the card's owed rows|the rows the gate's two asks at 8 name
+  printf '%s|' "$(fc_keys | sed -n 's/^row://p' | sort | paste -sd' ' -)"
+  bash -c '. "$1/run.sh" && . "$1/units.sh" && . "$1/proof.sh" && . "$1/walls.sh" && PLAN="$2" && { matrix_unruled "$2" 8 "$3"; matrix_load "$2" "$3" &&
+    matrix_table_rows | while IFS=$'"'"'\037'"'"' read -r a t s e u c w; do ! matrix_row_awaits "$t" "$s" "$u" "$c" "$w" || echo "$a"; done; } | sort -u | paste -sd" " -' _ "$FC_LIB" "$PFC" "$FC_R" 2>/dev/null
+}
+fc_close() { ( cd "$RFC" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$BIONIC_SCRIPTS_DIR/payload/scripts/close-out.sh" "$PFC" check ) 2>/dev/null | /usr/bin/grep -m1 '^facts: '; }
+fc_task_plan double; fc_page; FC_TD="$(fc_owes)"
+fc_task_plan single
+expect_eq "TASK-0 precondition: the page has an integrate row, no documents or test row, and is at single rigor" "1|0|single" \
+  "$(/usr/bin/grep -c '| integrate |' "$PFC")|$(/usr/bin/grep -cE '\| (doc|test) \|' "$PFC")|$(sed -n 's/^rigor: //p' "$PFC")"
+fc_page
+expect_eq "TASK-1 the card is drawn (exit 0) and puts the release approval" "0|yes" "$FC_RC|$(fc_keys | grep -qx approve:release && echo yes)"
+expect_eq "TASK-2 its owed rows are the gate's: at single the person's check alone, at double the auditor's row too" "AC-1.1|AC-1.1|AC-1.1 AC-1.2|AC-1.1 AC-1.2" "$(fc_owes)|$FC_TD"
+expect_contains "TASK-2b …and at single the row the evidence review did not confirm reads proved" "acceptance — 1 of 2 criteria proved; 1 awaiting your confirmation" "$(fc_under Tests)"
+poke "$RFC" current 8 --check
+expect_eq "TASK-3 with the card unanswered, current 8 --check refuses (exit 1), naming the approval" "1|yes" "$RC|$(fc_has "$OUT" 'carries no approved: release line')"
+expect_contains "TASK-4 …and the close refuses on it" "facts: WOULD REFUSE — no approved: release line names a head" "$(fc_close)"
+fc_typed "$FC_WD"; poke "$RFC" reply "$FC_WD"; FC_TR="$RC|$(fc_appr release | grep -c "|head=$FC_R|")"
+poke "$RFC" current 8 --check
+expect_eq "TASK-5 the person's typed reply approves the release at the head (exit 0), and current 8 --check is admitted" "0|1|0" "$FC_TR|$RC"
+expect_eq "TASK-6 …and the close reads every fact holding" "facts: every fact the run owes holds at $FC_R" "$(fc_close)"
+# A FIX PAST THE APPROVAL whose adversarial review fails: the advance refuses on that review, the card's to waive, before
+# the stale approval, and the card puts the release again all the same.
+FC_TF="$(s57_commit "$RFC" lib/x.sh 'T5: a fix past the approval')"
+printf 'question: adversarial\nresult: fail\nscope: whole\nreviewed: %s..%s\nfindings: 1\nfinding: 1 S2 on lib/x.sh:1 the value is lost\n\nwhat the reader found\n' \
+  "${FC_B:0:10}" "${FC_TF:0:10}" > "$FC_REC/adversarial-fail.md"
+fc_plan "run/v1|ev=approval|key=release|by=Dana Fixture|head=$FC_R|said=$FC_WD|at=2026-10-12T14:00:00Z
+$(for q in evidence adversarial structure; do fc_line review "$FC_TF" 2026-10-12T15:00:00Z "record/wave-x/$q$([ "$q" != adversarial ] || echo -fail).md" "$q" w-read "$([ "$q" = adversarial ] && echo fail || echo pass)" whole; done)" "" fc_task
+fc_page; FC_TK="$FC_RC|$(/usr/bin/grep -c '|key=approve:release|' "$FC_REC/release-approval-${FC_TF:0:8}.md" 2>/dev/null)"
+poke "$RFC" current 8 --check
+expect_eq "TASK-7 a fix past the approved head, its review failing: current 8 refuses on the review alone (exit 1), and the card drawn there puts the release again (exit 0)" \
+  "1|1|0|0|1" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^review	adversarial	.*failing')|$(printf '%s\n' "$OUT" | /usr/bin/grep -c 'approved for release')|$FC_TK"
+expect_contains "TASK-8 …with no reply the close refuses, naming both heads" "the working head ${FC_TF:0:12} is not the head the user approved for release, ${FC_R:0:12}" "$(fc_close)"
+fc_typed "$FC_WD"; poke "$RFC" reply "$FC_WD"; FC_TR="$RC|$(fc_appr release | grep -c "|head=$FC_TF|")"; poke "$RFC" current 8 --check
+expect_eq "TASK-9 the typed reply renews the approval at the fix's head (exit 0); current 8 --check and the close pass" \
+  "0|1|0|facts: every fact the run owes holds at $FC_TF" "$FC_TR|$RC|$(fc_close)"
+git -C "$RFC" reset -q --hard "$FC_R"
+fc_typed "$FC_WD" "$FC_WR"; rm -f "$FC_REC"/release-approval-*.md "$FC_REC/adversarial-fail.md"
+
 finish
