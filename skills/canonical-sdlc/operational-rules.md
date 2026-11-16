@@ -116,7 +116,7 @@ The load-bearing row of the section, and the only part later steps consume mecha
 ```
 | concept | owning module (SSoT) | reuses | rendering surfaces | agreement test |
 |---|---|---|---|---|
-| version pin value | none single: the literal `15` in the commit gate's version case (`payload/scripts/lib/walls.sh`, behind `hooks/bash-walls.sh`) and in the write hook's (`hooks/canonical-sdlc-governing-skill.sh`) | none fits: no file holds a version constant, each case reads the header's `canonical_sdlc_version` itself | the governing-skill hook · the plan reader's `plan_read_faults` | `tests/canonical-sdlc-evidence-gate.test.sh` §Section 2b holds the two gates to one answer on a plan at 13, 14 and 15; the plan reader's literal is not in it |
+| version pin value | none single: the literal `15` in the commit gate's version case (`payload/scripts/lib/walls.sh`, behind `hooks/bash-walls.sh`) and in the write hook's (`hooks/canonical-sdlc-governing-skill.sh`) | none fits: no file holds a version constant, each case reads the header's `canonical_sdlc_version` itself | the governing-skill hook · `plan_read_faults` in `payload/scripts/lib/plan-read.sh` | `tests/canonical-sdlc-evidence-gate.test.sh` §Section 2b holds the two gates to one answer on a plan at 13, 14 and 15; the literal in `plan_read_faults` is not in it |
 | agreement-test duty + authoring rules | `agents-src/blocks/checks-structure.md` (`one-site`) | the render markers of `agents-src/render.sh` | payload/context/checks-structure.md · this section | `bash agents-src/render.sh --check` holds the rendered file to its block; this section is the unpinned one |
 ```
 
