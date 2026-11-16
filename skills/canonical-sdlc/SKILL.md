@@ -228,6 +228,6 @@ A step's evidence is events in the run's log and the header a person wrote; `rea
 
 ## Diagrams
 
-`diagrams/lifecycle.svg` — the 10 steps, the two gates, and the commit rhythm. `diagrams/hook-chain.svg` — which hook fires on which tool event, and which arms block versus log. Neither is redrawn for version 15: both still draw a plan's state section, its verification matrix and a task row's status, which a plan at 15 does not hold, where both gates now judge a plan at 15 on its run's log. Read them for the hooks and the steps, not for what a gate reads.
+`diagrams/lifecycle.svg` — the 10 steps, the two gates, and the commit rhythm. `diagrams/hook-chain.svg` — which hook fires on which tool event, and which arms block versus log. Neither is redrawn for version 15: both still draw a plan's state section, its matrix and a task row's status, which a plan at 15 does not hold, where both gates now judge a plan at 15 on its run's log. Read them for the hooks and the steps, not for what a gate reads.
 
 **Format policy.** Composed SVG is the default for a diagram here; Excalidraw (`bionic:excalidraw-diagram`) is the backup, for a drawing whose layout is genuinely hand-arranged.
