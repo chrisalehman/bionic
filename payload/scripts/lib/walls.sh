@@ -2267,13 +2267,30 @@ Plan: $PLAN
 Fix: name the plan for its directory, then commit again:
   mv $(refuse_shell_word "$PLAN") $(refuse_shell_word "$(_eg_plan_named)")"
 }
-# A PLAN AT 14 IS AN OLDER RUN'S DOCUMENT AND NEVER A RUN, under any name and whatever its run reads: nothing of it is
-# judged, so its commit goes through.
+# A PLAN AT 14 IS AN OLDER RUN'S DOCUMENT AND NEVER A RUN, under any name: nothing of it is judged, so its commit goes
+# through. A plan at 14 whose run's log holds a step is a run's plan with its version line lowered, by a write or by a
+# shell edit that meets no write hook, and admitting it would admit every commit of that run unjudged: it is refused,
+# naming the line to put back. Where that log is and whether it holds a step are the reader's answers, asked once here.
 # [WALL: tests/plan-page.test.sh]
+_eg_v15_unreadable() {
+  refuse exit2 commit "the run's facts could not be read" "run the commit again" \
+"canonical-sdlc plan at version ${SDLC_VERSION}: the run's facts could not be read, so nothing this commit owes can be judged.
+Plan: $PLAN
+Fix: run the commit again; the fold's own line above names why it failed."
+}
+_eg_refuse_lowered() {
+  local s
+  s="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
+  case $'\n'"$s" in *$'\n'n=*) ;; *) return 0 ;; esac
+  refuse exit2 commit "this run's plan is lowered below 15" "put its version back to 15" \
+"canonical-sdlc plan: this plan declares canonical_sdlc_version: $SDLC_VERSION, and the run's log beside it holds a step, so it is a run's plan at 15 with its version line lowered, and nothing of it is judged at $SDLC_VERSION.
+Plan: $PLAN
+Fix: put the line back to 'canonical_sdlc_version: 15', then commit again."
+}
 case "${PLAN##*/}:$SDLC_VERSION" in
   *.plan.md:15) ;;
   *:15) case "$EG_VERDICT" in bound-open|bound-closed) _eg_refuse_misnamed15 ;; *) exit 0 ;; esac ;;
-  *:14) exit 0 ;;
+  *:14) _eg_refuse_lowered; exit 0 ;;
 esac
 
 # A plan at 15; a plan at 14 left above, under any name, with nothing judged. Anything else — an older number, a typo,
@@ -2311,12 +2328,6 @@ Fix: record each fact named, in the run's log or the plan's header as it says, t
 "canonical-sdlc plan at version 15, current: ${CURRENT}: the run's log does not hold what this step is judged on:${_EG_UNREAD}${_EG_OWED}
 Plan: $PLAN
 Fix: none at 15 yet for each fact the log cannot hold: it reaches the run's log in the row that moves it, and the commit is judged on it then."
-}
-_eg_v15_unreadable() {
-  refuse exit2 commit "the run's facts could not be read" "run the commit again" \
-"canonical-sdlc plan at version ${SDLC_VERSION}: the run's facts could not be read, so nothing this commit owes can be judged.
-Plan: $PLAN
-Fix: run the commit again; the fold's own line above names why it failed."
 }
 if _eg_f="$(plan_read_faults "$PLAN")"; then
   refuse exit2 commit "this plan holds what version 15 does not" "remove each part named" \
