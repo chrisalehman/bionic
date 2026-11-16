@@ -4,12 +4,9 @@
     canonical-sdlc — lifecycle diagram.
 
     THIS FILE IS THE SOURCE. There is no .excalidraw beside it and no export step:
-    the picture is composed text, which is what lets tests/cross-gate-agreement.test.sh §V read it.
-    Pinned there against the doctrine it draws:
-      * the title's version rendering  == hooks' SUPPORTED_SDLC_VERSION
-      * the ten class="step" elements  == the ## Steps table in ../SKILL.md
-        (data-step / data-step-name are what the pin compares — edit them and the
-        step name in the same breath, or the suite goes red naming the pair)
+    the picture is composed text. No test reads it, so the title's drawn version
+    (class="version-pin") and the ten class="step" elements (data-step, data-step-name) are
+    kept in step by hand with the gates and with the ## Steps table in ../SKILL.md.
 
     LAYOUT CONTRACT (revised 2026-08-18 for legibility). A step node is 200 wide with
     a 16px inset, so a bullet has ~168px — about 32 characters at font-size 10.5, and
@@ -27,7 +24,7 @@
   <rect x="0" y="0" width="1400" height="920" fill="#ffffff"/>
 
   <!-- ============================ header ============================ -->
-  <text class="version-pin" data-pin="lifecycle-title" x="40" y="52" font-size="26" font-weight="700" fill="#16191d">Canonical SDLC — Lifecycle (v14)</text>
+  <text class="version-pin" data-pin="lifecycle-title" x="40" y="52" font-size="26" font-weight="700" fill="#16191d">Canonical SDLC — Lifecycle (v15)</text>
   <text x="40" y="78" font-size="14" fill="#626b76">Ten steps · two quality gates · one approval checkpoint · intent × rigor × scale. Committing is a rhythm that crosses every step, never a step of its own.</text>
   <line x1="40" y1="96" x2="1360" y2="96" stroke="#dde1e6" stroke-width="1"/>
 

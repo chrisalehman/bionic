@@ -371,8 +371,8 @@ STEP_REFUSAL="the run is at Step ${CURRENT:-<none>} — advance it to Step 8 fir
 [ "$CURRENT" != 8 ] || [ "$VERB" = closed-form ] || CO_HOLD=yes
 
 # A PARKED WAVE IS CLOSED WITHOUT THE MERGE ACT (wave-38 T15; D17, REQ-4 AC-4.3). Parking requires an explicit
-# `## Wake Note` (steps/8.md): a plan carrying a flush-left `## Wake Note` whose body is not empty and not the old
-# template's `(none)`, or a flush-left `parked: <why>` under `## SDLC State`, is parked. `run` then performs the tail
+# `## Wake Note` (steps/8.md): a plan carrying a flush-left `## Wake Note` whose body is not empty and not the
+# template's `(none)` is parked. `run` then performs the tail
 # without the merge: no merge readback, no rows landed by a merge, no branch census and no tree or branch deleted (the
 # work is kept), no archive move and no delivery notice; the Step-9 line reads `delivered: parked on <branch> @ <sha>`,
 # the continuation, the epic row and the closed handoff say parked, where and why. Everything else stands: the step,
