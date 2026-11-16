@@ -472,13 +472,13 @@ current: 4
 | T1 | 4 | build | REQ-1: the first task. The fixture's first task has its own sentence. It also has a detail the card does not show. complexity: standard | implementor | — | 30 | REQ-1 | lib/first.sh | .worktrees/99-T1 | pending |
 | T2 | 4 | test | REQ-2: the second task. The fixture's second task has one too. complexity: complex | senior-implementor | T1 | 45 | REQ-2 | lib/second.sh | — | pending |
 
-## Verification Matrix
+## Eval design
 
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-1.1 | T0 | pending | — | — |
-| AC-1.2 | T2 | pending | — | — |
-| AC-2.1 | T1 | pending | — | — |
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+| REQ-1 | fixture | AC-1.1 | static | `tests/a.test.sh` | it is wrong |
+| REQ-1 | fixture | AC-1.2 | hermetic | `tests/a.test.sh` | it is wrong |
+| REQ-2 | fixture | AC-2.1 | unit | `tests/b.test.sh` | it is wrong |
 FIXEOF
 
 # ── AC-10.1: the Step-1 card, whole, from the artifact alone ─────────────────

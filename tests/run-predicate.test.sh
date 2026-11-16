@@ -5,10 +5,8 @@
 #
 # WHAT IT OWNS. The "is there a run to protect" predicate: active_run <root> is exit 0 +
 # the plan path iff the newest plan (by mtime) under the docs root's plans/incidents trees
-# carries a flush-left `## SDLC State` and an open state — `current:` 0-8, or 9 without a
-# `- Step 9:` line carrying `delivered:`, or the retired task-scale `current: T<n>`, kept open so
-# its readers refuse it by name (wave-31 T24; REQ-1 AC-1.2, D2) — and the plan's frontmatter
-# carries no `abandoned:` line; else exit 1 and prints nothing. Every always-on
+# is a page at 15 whose run's log holds an open step — 0-8, or 9 not delivered — and no
+# abandon; else exit 1 and prints nothing. Every always-on
 # hook gates its own work behind this one call (ADOPT, Batch 1).
 #
 # AND, SINCE wave-session-bound-run, WHICH run answers for WHICH SESSION. `active_run` is
@@ -18,8 +16,7 @@
 # `plan=` binding (R7), and the verdict a hook acts on (R8) — and R5's agreement rows hold
 # `active_run` to being exactly `active_plan` + `run_open`, so the extraction stays lossless.
 #
-# FIXTURES: a run at 15 is a page and its log (`mk_run`); `mk_plan` writes an older page's SDLC State block, for the
-# rows on that block's grammar (wave.plan.md's frontmatter and Step lines). The plan-search shape referenced for context is
+# FIXTURES: a run at 15 is a page and its log (`mk_run`). The plan-search shape referenced for context is
 # hooks/canonical-sdlc-evidence-gate.sh's resolve_docs_root/current-parsing — read for
 # shape only, not copied: this library's interface is the simpler, single-purpose one the
 # plan states (no fence-awareness, no misplacement sweep), not a restatement of the gate's
@@ -62,59 +59,10 @@ call_active_run() {  # <root> -> sets AR_OUT, AR_ST
   AR_OUT=$(bash -c '. "$1" || exit 1; active_run "$2"' _ "$LIB" "$1" 2>"$SANDBOX/.err")
   AR_ST=$?
 }
-# call_active_run_pf <root> -> sets AR_OUT, AR_ST, from a child bash with `set -uo
-# pipefail` ENABLED IN THAT CHILD. `set -o` options are shell-local, not inherited by a
-# nested `bash -c` merely because the parent process has them set (verified: SHELLOPTS
-# does not carry pipefail across this bash's own `bash -c` boundary on this machine) — so
-# call_active_run above, run under this suite's own top-of-file `set -uo pipefail`,
-# NEVER actually exercises active_run under pipefail; every hook that calls this library
-# sources it directly in ITS OWN shell, where its own `set -uo pipefail` (dispatch-preflight
-# .sh:66 et al.) is genuinely in effect. This helper re-states the option inside the child
-# so the R4 fixtures below test the real production condition, not an inherited illusion
-# of it (AC-21).
-call_active_run_pf() {
-  AR_OUT=$(bash -c 'set -uo pipefail; . "$1" || exit 1; active_run "$2"' _ "$LIB" "$1" 2>"$SANDBOX/.err")
-  AR_ST=$?
-}
 AP_OUT=""; AP_ST=0
 call_active_plan() {  # <root> -> sets AP_OUT, AP_ST
   AP_OUT=$(bash -c '. "$1" || exit 1; active_plan "$2"' _ "$LIB" "$1" 2>"$SANDBOX/.err")
   AP_ST=$?
-}
-
-# mk_plan_in <root> <reldir under the docs root> <name> <current-line-body> [extra-lines...]
-# The general form: mk_plan below is its plans/ special case. R6 needs `incidents/` and
-# `plans/<epic>/` fixtures to show that open_runs walks the same two trees to the same
-# depth as active_plan.
-mk_plan_in() {
-  local root="$1" rel="$2" name="$3" current="$4"
-  shift 4
-  local dir; dir="$root/.bionic/docs/$rel"
-  mkdir -p "$dir"
-  {
-    echo "---"
-    echo "governing-skill: superpowers:writing-plans"
-    echo "sdlc-step: 3"
-    echo "---"
-    echo
-    echo "# fixture plan"
-    echo
-    echo "## SDLC State"
-    echo
-    echo "integration-branch: main"
-    echo "current: $current"
-    for l in "$@"; do echo "$l"; done
-  } > "$dir/$name"
-  printf '%s/%s\n' "$dir" "$name"
-}
-
-# mk_plan <root> <name under docs/plans> <current-line-body> [extra-lines...]
-# Writes a plan with the plan's own frontmatter/SDLC-State shape (wave.plan.md), prints
-# its absolute path.
-mk_plan() {
-  local root="$1" name="$2" current="$3"
-  shift 3
-  mk_plan_in "$root" "plans" "$name" "$current" "$@"
 }
 
 # mk_run <root> <reldir under the docs root> <name> [<event>...] -> a page at 15 and its run's log, one `run/v1` line per
@@ -129,38 +77,6 @@ mk_run() {
 
 # ============================================================
 echo
-section "R4 — SIGPIPE-under-pipefail does not flip a >64 KB plan's verdict (AC-21)"
-# ============================================================
-#
-# A plan past the 64 KB pipe buffer is read whole under this suite's pipefail, as under every hook that calls this
-# library: a reader of it that quit at its first match would leave its writer killed by SIGPIPE, and the verdict read
-# from a short read. Each fixture pads to 70 000 bytes, before or after the state, and asserts its own size.
-r4() {  # <tag> <head lines> <state lines> <filler first: yes|no> <want exit> -> one fixture, its size and verdict rows
-  local R="$SANDBOX/r4$1" F f; mkdir -p "$R/.bionic/docs/plans"; F="$R/.bionic/docs/plans/wave.plan.md"
-  f="$(awk 'BEGIN { while (n < 70000) { print "filler filler filler filler filler filler filler filler filler filler"; n += 72 } }')"
-  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n%s---\n\n# fixture plan\n\n' "$2"
-    [ "$4" = no ] || printf '## Notes\n\n%s\n\n' "$f"
-    printf '## SDLC State\n\nintegration-branch: main\n%s' "$3"; [ "$4" = yes ] || printf '\n## Notes\n\n%s\n' "$f"; } > "$F"
-  call_active_run_pf "$R"
-  expect_eq "r4$1 past 64 KB, $(printf '%s' "$3" | head -1), filler first: $4 -> active_run exits $5" "yes|$5|$([ "$5" = 0 ] && printf '%s' "$F")" \
-    "$([ "$(wc -c < "$F")" -gt 65536 ] && echo yes)|$AR_ST|$AR_OUT"
-}
-r4 a '' 'current: 9
-- Step 9: report record/x.md, delivered: 2026-09-02
-' no 1
-r4 b '' 'current: 9
-- Step 9: report record/x.md, delivered: 2026-09-02
-' yes 1
-r4 c '' 'current: 4
-- Step 4: in progress
-' no 0
-r4 d 'abandoned: chris 2026-09-03
-' 'current: 4
-- Step 4: in progress
-' no 1
-
-# ============================================================
-echo
 section "R5 — run_open <plan>: the verdict table, on ONE file, with no root walk"
 # ============================================================
 #
@@ -171,7 +87,7 @@ section "R5 — run_open <plan>: the verdict table, on ONE file, with no root wa
 # `active_run` becomes `active_plan` + `run_open` + print.
 #
 # THE CONTRACT IS "UNCHANGED, BYTE FOR BYTE": every row below is a row `active_run` already
-# decided the same way, and R2/R4 above still drive `active_run` over the same states. If the
+# decided the same way, and R2 above still drives `active_run` over the same states. If the
 # two ever disagree, one of the two sections goes red.
 #
 # run_open PRINTS NOTHING — the path is the caller's already. Every row asserts that beside
@@ -207,31 +123,16 @@ expect_eq "run_open: step 8a -> exit 0 (the sub-step letter is stripped)" 0 "$RO
 P=$(plan_fixture "$R5/.bionic/docs/plans/task-4.plan.md" task)
 call_run_open "$P"
 expect_eq "run_open: task scale, current: 4 -> exit 0 (open, as at wave scale)" 0 "$RO_ST"
-P=$(plan_fixture --at 14 --current T3 "$R5/.bionic/docs/plans/task-t3.plan.md" task)
-call_run_open "$P"
-expect_eq "run_open: task scale, current: T3 -> exit 0 (the retired pointer, kept open so it is refused by name)" 0 "$RO_ST"
 
 P=$(mk_run "$R5" plans open-9.plan.md "step|n=9|delivered=no")
 call_run_open "$P"
 expect_eq "run_open: step 9 written not delivered -> exit 0 (open)" 0 "$RO_ST"
-
-P=$(mk_plan "$R5" "open-indented.plan.md" "  4" "- Step 4: in progress")
-call_run_open "$P"
-expect_eq "run_open: leading whitespace on current: is tolerated -> exit 0" 0 "$RO_ST"
 
 # --- the CLOSED rows, each beside the open row above that shares its builder ---
 P=$(mk_run "$R5" plans closed-9.plan.md "step|n=9")
 call_run_open "$P"
 expect_eq "run_open: step 9 delivered -> exit 1 (closed)" 1 "$RO_ST"
 expect_empty "run_open: closed -> prints nothing" "$RO_OUT"
-
-P=$(mk_plan "$R5" "closed-12.plan.md" "12")
-call_run_open "$P"
-expect_eq "run_open: current: 12 (out of range) -> exit 1" 1 "$RO_ST"
-
-P=$(mk_plan "$R5" "closed-junk.plan.md" "banana")
-call_run_open "$P"
-expect_eq "run_open: a non-numeric current: -> exit 1" 1 "$RO_ST"
 
 # The step the run's log holds last is the run's step, here and at the landing's guard at 8.
 P=$(mk_run "$R5" plans logged.plan.md "step|n=8"); RL="$R5/.bionic/docs/record/logged/run.log"
@@ -242,45 +143,16 @@ expect_eq "run_open: the log delivered at 9 -> exit 1 (closed)" 1 "$RO_ST"
 printf 'run/v1|ev=step|n=4|at=2026-11-01T00:00:03Z\n' >> "$RL"; call_run_open "$P"
 expect_eq "run_open: …the log taken back to 4 -> exit 0 (open), and the guard reads 4" "0 4" "$RO_ST $(wt_cur)"
 # The place is held between asks under a key of the plan, its log and the reader's libraries: each change is read fresh.
-CL="$SANDBOX/lib-copy"; cp -R "${LIB%/*}" "$CL"; P=$(mk_plan "$R5" "held.plan.md" "4"); RL="$R5/.bionic/docs/record/held/run.log"
+CL="$SANDBOX/lib-copy"; cp -R "${LIB%/*}" "$CL"; P=$(mk_run "$R5" plans held.plan.md "step|n=4"); RL="$R5/.bionic/docs/record/held/run.log"
 place() { bash -c '. "$1/run.sh" && _run_place "$2" | sed -n "s/^n=//p"' _ "$CL" "$P"; }
-a="$(place)"; mkdir -p "${RL%/*}"; printf 'run/v1|ev=step|n=6|at=2026-11-01T00:00:04Z\n' > "$RL"; b="$(place)"
-rm "$RL"; sed -i.bak 's/^current: 4$/current: 5/' "$P"; c="$(place)"; printf '\nreader_q_step() { echo n=7; echo state=open; }\n' >> "$CL/reader.sh"
-expect_eq "held: the first ask, an appended step, an edited current:, a changed library, each read fresh" "4 6 5 7" "$a $b $c $(place)"
-printf '\n_translate_state() { return 3; }\n' >> "$CL/translate.sh"; bash -c '. "$1/run.sh" && run_open "$2"' _ "$CL" "$P" 2>/dev/null
+a="$(place)"; printf 'run/v1|ev=step|n=6|at=2026-11-01T00:00:04Z\n' >> "$RL"; b="$(place)"; printf '\nreader_q_step() { echo n=7; echo state=open; }\n' >> "$CL/reader.sh"
+expect_eq "held: the first ask, an appended step, a changed library, each read fresh" "4 6 7" "$a $b $(place)"
+printf '\nreader_events() { return 3; }\n' >> "$CL/reader.sh"; bash -c '. "$1/run.sh" && run_open "$2"' _ "$CL" "$P" 2>/dev/null
 expect_eq "a place whose fold fails is not read: run_open answers 3, never a held or guessed step" 3 "$?"
 
 R5D="$R5/.bionic/docs/plans"
 call_run_open "$(mk_run "$R5" plans closed-abandoned.plan.md "step|n=4" "abandon|by=chris|why=superseded")"
 expect_eq "run_open: an abandon in the log -> exit 1 regardless of its step" 1 "$RO_ST"
-
-cat > "$R5D/closed-nocurrent.plan.md" <<'EOF'
----
-governing-skill: superpowers:writing-plans
----
-
-## SDLC State
-
-integration-branch: main
-EOF
-call_run_open "$R5D/closed-nocurrent.plan.md"
-expect_eq "run_open: no current: line at all -> exit 1" 1 "$RO_ST"
-
-cat > "$R5D/closed-fenced-current.plan.md" <<'EOF'
----
-governing-skill: superpowers:writing-plans
----
-
-## SDLC State
-
-An example of the block, not the block itself:
-
-```
-current: 4
-```
-EOF
-call_run_open "$R5D/closed-fenced-current.plan.md"
-expect_eq "run_open: a current: line only INSIDE a fence -> exit 1 (fence-aware)" 1 "$RO_ST"
 
 rm "$(mk_run "$R5" plans no-such-plan.plan.md "step|n=4")"; call_run_open "$R5D/no-such-plan.plan.md"
 expect_eq "run_open: a path that does not exist, its run's log still there -> exit 1" 1 "$RO_ST"
@@ -582,7 +454,7 @@ mk_marker() {  # <root> <sid> <exact file body>
 }
 
 R7="$SANDBOX/r7"; mkdir -p "$R7/.bionic/tmp"
-P7=$(mk_plan "$R7" "wave.plan.md" "4" "- Step 4: in progress")
+P7=$(mk_run "$R7" plans wave.plan.md "step|n=4")
 
 # --- the POSITIVE the negatives are measured against ---
 mk_marker "$R7" "s-bound" "$(printf 'plan=%s\nengaged_at=2026-09-04T10:00:00Z\n' "$P7")"

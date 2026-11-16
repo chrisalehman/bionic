@@ -78,12 +78,6 @@ if ! declare -F plan_read_header >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   case "${BASH_SOURCE[0]}" in */*) . "${BASH_SOURCE[0]%/*}/plan-read.sh" ;; *) . ./plan-read.sh ;; esac
 fi
-# translate.sh is loaded when a question of a plan at 14 is first asked, not at load: every hook sources this file, and
-# few of them ask one.
-_run_translation() {
-  declare -F translate_has_state >/dev/null 2>&1 || . "$(cd "$(_run_self_dir)" && pwd -P)/translate.sh"
-}
-
 # normalize_newlines [file] -> that document with its line endings TRANSLATED to \n, never
 # deleted. A trailing \r is stripped from each record (CRLF: \r\n → \n) and any remaining
 # lone \r becomes a real newline (classic-Mac CR-only). Called with NO argument it reads
@@ -363,10 +357,7 @@ _run_candidates() {
         printf 'bound-unreadable %s\n' "$f" >&2
         continue
       fi
-      # A plan at 14 is told by the translation, which reads the state section as every reader of it does: fenced
-      # text is an example, and a line end of any kind is read as one.
-      _run_translation
-      translate_has_state "$f" || _run_page15 "$d" "$droot" "$f" || continue
+      _run_page15 "$d" "$droot" "$f" || continue
       printf '%s\0' "$f"
     done < <(find "$d" -maxdepth 2 -type f -name '*.md' -print0 2>/dev/null)
   done
@@ -376,8 +367,7 @@ _run_candidates() {
 # or <droot>/incidents whose header says `canonical_sdlc_version: 15`. Such a page holds no state section, since its
 # run's state is its log, which run_open reads; so the walk finds it by its header, read by the header's one parser,
 # which reads the leading `---` block alone (a header inside a fenced block is prose) and ends a line at a bare CR. A
-# page whose header says anything else is judged by its state section alone. Asked only of a file the state section
-# did not admit, so a walk over pages at 14 runs no process more. The name is what joins a page to its record
+# page whose header says anything else is no run's plan. The name is what joins a page to its record
 # (lib/reader.sh `reader_record`), so an incident's plan is a run at 15 when named as a plan, as the skill lays it out
 # (`incidents/<d>/<d>.plan.md`), and a plain `plan.md`, whose record every incident would share, is none.
 _run_page15() {
@@ -467,24 +457,21 @@ plan_unreadable() {
 #
 # A PARKED RUN (wave-38 T15; D17, REQ-4 AC-4.3). Parking requires an explicit `## Wake Note` (steps/8.md): a plan is
 # parked when it carries a flush-left `## Wake Note` whose first non-blank body line is not `(none)` (with no body,
-# when its heading carries a title), or a flush-left `parked: <why>` under `## SDLC State`. Fenced text is skipped. The
+# when its heading carries a title). Fenced text is skipped. The
 # empty template section older plans carry (`## Wake Note` / `(none)`) parks nothing. The one reader: close-out.sh
 # closes a parked plan without the merge act.
-# plan_parked_why <plan> -> the reason (the parked: value, else the Wake Note's first body line, else its heading's
-# title), rc 0; rc 1, nothing printed, when the plan is not parked. A `|` is folded to `/` so it fits a table cell.
+# plan_parked_why <plan> -> the reason (the Wake Note's first body line, else its heading's title), rc 0; rc 1,
+# nothing printed, when the plan is not parked. A `|` is folded to `/` so it fits a table cell.
 plan_parked_why() {
   [ -f "${1:-}" ] || return 1
   local r h b
-  _run_translation
-  r="$(translate_state_key "$1" parked)" || {
-    h="$(plan_read_heading "$1" "Wake Note")" || return 1
-    b="$(plan_read_section "$1" Wake | awk '!d && NF { d = 1; sub(/^[ \t]*(- )?/, ""); print (tolower($0) ~ /^\(?none\)?\.?$/ ? "n" : "w" $0) }')"
-    case "$b" in
-      w*) r="${b#w}" ;;
-      n) r="" ;;
-      *) r="$(printf '%s\n' "$h" | awk -F'\t' 'NR == 1 { t = $3; sub(/^[ \t—:-]*/, "", t); print t }')" ;;
-    esac
-  }
+  h="$(plan_read_heading "$1" "Wake Note")" || return 1
+  b="$(plan_read_section "$1" Wake | awk '!d && NF { d = 1; sub(/^[ \t]*(- )?/, ""); print (tolower($0) ~ /^\(?none\)?\.?$/ ? "n" : "w" $0) }')"
+  case "$b" in
+    w*) r="${b#w}" ;;
+    n) r="" ;;
+    *) r="$(printf '%s\n' "$h" | awk -F'\t' 'NR == 1 { t = $3; sub(/^[ \t—:-]*/, "", t); print t }')" ;;
+  esac
   r="${r%"${r##*[![:space:]]}"}"; r="${r//|//}"
   [ -n "$r" ] || return 1
   printf '%s\n' "$r"
@@ -552,9 +539,8 @@ _run_reader() {  # -> 0 once lib/reader.sh, beside this file, is loaded in this 
 }
 
 # run_step <plan> -> the reader's `step` answer for the plan's run: `n=<step>` when one stands, then
-# `state=open|delivered|abandoned`. Its log when it has one, else the run's homes translated. A caller that
-# prints a run's step or tells a delivered run apart asks this, never the plan's `current:` line, so a step
-# the log alone holds is the one it prints.
+# `state=open|delivered|abandoned`, read from its log. A caller that prints a run's step or tells a delivered run
+# apart asks this.
 run_step() {
   _run_reader || return 1
   reader_main "${1:-}" step
@@ -977,21 +963,16 @@ session_working_branch() {
 }
 
 # plan_working_branch <plan> -> the plan's `working-branch:`, or nothing (wave-35 T7; REQ-5 AC-5.3, D14).
-# THE ONE READER OF THE WORKING BRANCH. The `## SDLC State` key first, the one the `current` verb writes
-# the Step-4 block from, then the frontmatter key of the same name, which a plan written by Step 0 also
-# carries. Fenced lines are not read, and the value is its first word, quotes off. `ready` (through
+# THE ONE READER OF THE WORKING BRANCH. The frontmatter key, which a plan written by Step 0 carries, read by the
+# header's one parser (`plan_read_header`); the value is its first word, quotes off. `ready` (through
 # `session_working_branch`), the stop wall (lib/stop.sh's landing gate), the card (card.sh), `current 4`
 # (hooks/session-poker.sh), the proof judge (lib/proof.sh `proof_state`) and the evidence gate
 # (lib/walls.sh `validate_tests_head`) each call it, so a plan that names its branch in one place is read
-# by all six (tests/units.test.sh §BRANCH). It was six readers in three orders: `ready` refused a plan
-# that carried the key under SDLC State alone, which the proof judge read.
-# The header's key is the reader's: `plan_read_header`. The SDLC State key is a plan at 14's, which the translation reads.
-# Either way the value is its first word, a quote off each end of it.
+# by all six (tests/units.test.sh §BRANCH).
 plan_working_branch() {  # <plan>
   local plan="${1:-}" wb
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
-  _run_translation
-  wb="$(translate_state_key "$plan" working-branch)" || { wb="$(plan_read_header "$plan" working-branch)" && wb="${wb#*=}"; }
+  wb="$(plan_read_header "$plan" working-branch)" && wb="${wb#*=}"
   wb="${wb%%[[:space:]]*}"
   case "$wb" in [\'\"]*) wb="${wb#?}" ;; esac
   case "$wb" in *[\'\"]) wb="${wb%?}" ;; esac

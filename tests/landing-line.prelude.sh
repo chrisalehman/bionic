@@ -78,7 +78,6 @@ ll_world() {  # -> a world root; its plan admitted by the real commit gate (the 
   printf '%s' "$r"
 }
 ll_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }
-ll_rec() { printf '%s/.bionic/docs/record/wave-x/landing-proofs.log' "$1"; }   # <root> -> an older run's landing record
 ll_carrier() {  # -> `<pid>:<start>` of a new live process, kept until the suite exits
   local p
   sleep 900 >/dev/null 2>&1 &

@@ -674,26 +674,18 @@ expect_eq "RX5b ls payload/commands payload/skills has no resume" "0" \
   "$(ls "$HF_PAYLOAD/commands" "$HF_PAYLOAD/skills" 2>/dev/null | grep -c resume)"
 
 # ============================================================
-section "§POINTER-AGREE: one reader of the pointer, lib/handoff.sh handoff_file_of over the reader; with no pointer the default is today's handoffs file; the plan's pointer answers only while it is the newer fact"
+section "§POINTER-AGREE: one reader of the pointer, lib/handoff.sh handoff_file_of over the reader; with no pointer the default is today's handoffs file"
 # ============================================================
 # Each door is asked on one plan: close-out `check` names the file its closed form would be written to; the verb
-# appends its event. FIXTURE FIDELITY: the plan's header naming its integration branch, so check reads the plan through;
-# then a version-14 pointer to an older file in the plan, written before the verb's event, and again after it. fails-when: the stale text answers over the newer event, or the newer text loses to the older event.
+# appends its event. FIXTURE FIDELITY: the plan's header naming its integration branch, so check reads the plan through.
+# fails-when: close-out names another file than the one the verb writes.
 hf_co() { ( cd "$HF_R" && bash "$BIONIC_HOOKS_DIR/../payload/scripts/close-out.sh" "$HF_P" "$1" 2>&1 ); }  # <verb> -> close-out's output on the plan
 
 pa_check_file() {  # -> the file close-out check says its closed form would be written to
   hf_co check | sed -n 's/^handoff: would write the closed form .* to \([^ ;]*\); the run.s log.*$/\1/p'
 }
-HF_OLD="$HF_HOME/2026-10-05-wave-01-fixture.md"
 hf_world pointer-agree no
 expect_eq "PA0 with no pointer, close-out check names today's handoffs file, the one the verb writes" "$HF_DOOR" "$(pa_check_file)"
-poke "$HF_R" handoff
-cp "$HF_F" "$HF_R/$HF_OLD"
-pa_ptr() { cp "$TMPROOT/s42-before" "$HF_P"; printf '\n## Handoff\n\nhandoff: %s written %s\n' "$HF_OLD" "$1" >> "$HF_P"; }  # <local time> -> a stale pointer
-pa_ptr "2026-10-05 15:00 PDT"
-expect_eq "PA3 close-out check names the file the newer event names, not the older pointer in the plan's text" "$HF_DOOR" "$(pa_check_file)"
-pa_ptr "2099-01-01 15:00 PST"
-expect_eq "PA3b …and the pointer the text holds once it is the newer fact" "$HF_OLD" "$(pa_check_file)"
 poke "$HF_R" handoff
 expect_eq "PA4 the verb exits 0" "0" "$RC"
 

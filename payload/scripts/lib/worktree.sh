@@ -1403,8 +1403,7 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
 
 # THE LANDING RECORD (wave-27 T44; D15; the Interfaces row "landing record").
 # `<docs-root>/record/<the bound plan's name less .plan.md>/run.log`, the run's log, where each landing is a
-# `published` event; lib/line.sh `line_lines` reads it, with the older home a run not brought forward may still
-# hold (lib/reader.sh `reader_landing_record`). The path is derived from the project's docs root
+# `published` event; lib/line.sh `line_lines` reads it. The path is derived from the project's docs root
 # (lib/roots.sh `docs_root`), in the project's docs tree, never in the tree being removed. The slug is lib/proof.sh `proof_plan_slug`'s, the
 # one reader (wave-37 T2; AC-9.2), loaded on first use as units.sh and slots.sh are here.
 _wt_proof_load() {  # -> 0 once lib/proof.sh's slug reader is loaded

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tests for hooks/session-poker.sh — shard 5: §CHECK, §DECISIONS, §ROUNDS, §EARLY-TICK, §ORDER, §QUIET-LANDING,
+# Tests for hooks/session-poker.sh — shard 5: §CHECK, §ROUNDS, §EARLY-TICK, §ORDER, §QUIET-LANDING,
 # §NOTREADY, §STEP, §TSENTENCE, §CAP, §OWED, §EXEMPT, §REGISTRY, §APPROVED-BY, §PARTS.
 #
 # THE SUITE IS SHARDS. Its design, hermetic posture and clock discipline are
@@ -203,121 +203,11 @@ expect_eq "CK-mut2 the mutant flips CK-7r: its check says would advance (exit 0)
 POKE_BOUND="$CK_BOUND_WAS"
 
 # ============================================================
-section "§DECISIONS: decisions [--all] reads the design ledgers' register entries; the recap prints this run's settled set; doctrine re-puts a settled decision only as reopening D<n> (wave-38 T13; REQ-3 AC-3.4; D24)"
-# =====================================================# Every ruling is a `## Δn — Dn ruled "<reply>" (<who> <date>): <title>` heading in record/<wave>/design-ledger.md, or
-# a `- Dn ruled …` bullet under a Δ (the Step-1 rulings folded in, as this wave's Δ21 holds them); `re-ruled` and
-# `withdrawn` are register entries too. `decisions` lists this run's, `D<n> · "<reply>" · <who> <date> · <title>`, in the
-# ledger's order; `--all` lists every record/*/design-ledger.md under the docs root keyed by wave in slug order, a ledger
-# with no entry in the grammar named once, and every ADR keyed by its frontmatter wave.
-# The resume recap's settled: lines come from the same parser (handoff-file §RESUME RS6). FIXTURE FIDELITY: a real
-# repository, §CHECK's plan shape bound to this session; ledgers in the grammar this wave's own ledger is written in,
-# with the lines a register must not read (a heading with no ruling, a body line, a fenced example).
-# fails-when: a ruled decision is absent from the list or the recap; a non-entry is listed.
-RDC="$(make_repo decisions)"
-PDC="$(s34_plan "$RDC" 4)"
-DC_DOCS="$RDC/.bionic/docs"
-mkdir -p "$DC_DOCS/record/wave-01-fixture" "$DC_DOCS/record/wave-00-earlier" "$DC_DOCS/record/wave-02-old" "$DC_DOCS/adrs/epic-99-fixture"
-cat > "$DC_DOCS/record/wave-01-fixture/design-ledger.md" <<'LEDGER'
-# design ledger — wave-01-fixture
-
-## Frame — the question, not a ruling
-
-## Δ0 — D1 ruled "1" (Dana Fixture 2026-10-05): the frame holds
-
-A body line that names D9 ruled "9" (Nobody 2026-01-01): not a heading, never an entry.
-
-## Δ1 — D2 ruled "Option 2" (Dana Fixture 2026-10-06, typed "D2: 2"): one door
-
-## Δ2 — D2 re-ruled "Option 3, first" (Dana Fixture 2026-10-07, "ok, let's try it")
-
-## Δ3 — tactical defaults set by Dana Fixture 2026-10-07
-
-## Δ4 — Step-1 rulings folded in (orchestrator, 2026-10-07)
-
-- D3 ruled "1" (Dana Fixture 2026-10-04): three folded in
-- D4 withdrawn (Dana Fixture 2026-10-04): the old shape
-
-```text
-## Δ9 — D9 ruled "x" (Fake Person 2026-01-01): inside a fence
-```
-LEDGER
-cat > "$DC_DOCS/record/wave-00-earlier/design-ledger.md" <<'LEDGER'
-# design ledger — wave-00-earlier
-
-## Δ0 — D1 ruled "2" (Dana Fixture 2026-09-01): the earlier frame
-LEDGER
-printf '# design ledger — wave-02-old\n\n## D1 — What Step 0 approves (Dana: "Approved!")\n' > "$DC_DOCS/record/wave-02-old/design-ledger.md"
-printf -- '---\nwave: wave-01-fixture\nstatus: Accepted (Step 7, 2026-10-08)\n---\n\n# ADR-001 — One door to resume\n' \
-  > "$DC_DOCS/adrs/epic-99-fixture/adr-001-one-door.md"
-DC_WANT='D1 · "1" · Dana Fixture 2026-10-05 · the frame holds
-D2 · "Option 2" · Dana Fixture 2026-10-06 · one door
-D2 · re-ruled "Option 3, first" · Dana Fixture 2026-10-07 · (untitled)
-D3 · "1" · Dana Fixture 2026-10-04 · three folded in
-D4 · withdrawn · Dana Fixture 2026-10-04 · the old shape'
-poke "$RDC" decisions
-expect_eq "DC-1 decisions exits 0 on the bound run" "0" "$RC"
-expect_absent "DC-1c …never a body line, a heading with no ruling, or a fenced example (DC-1b read the same output)" "D9" "$OUT"
-poke "$RDC" decisions --all
-expect_eq "DC-2 decisions --all exits 0" "0" "$RC"
-poke "$RDC" decisions --each
-expect_eq "DC-3 an unknown flag is the usage error" "2" "$RC"
-mv "$DC_DOCS/record/wave-01-fixture/design-ledger.md" "$TMPROOT/dc-ledger"
-poke "$RDC" decisions
-expect_eq "DC-4 an absent ledger is exit 1" "1" "$RC"
-expect_contains "DC-4b …in one line naming the path" "record/wave-01-fixture/design-ledger.md" "$OUT"
-expect_eq "DC-4c …one line" "1" "$(printf '%s\n' "$OUT" | grep -c .)"
-mv "$TMPROOT/dc-ledger" "$DC_DOCS/record/wave-01-fixture/design-ledger.md"
-# The doctrine: a proposal that re-puts a settled decision opens with its number and the new evidence.
-
-# ---- wave-39 T11 (REQ-7; D15, D24; AC-7.1, AC-7.2): the decision line grammar, over wave 38's own ledger ----
-# D15: `D<n> [qualifier] <verb> ["<reply>"] (<who> <date>)[: <title>]`, the seven verbs ruled, re-ruled, amended,
-# amended again, ratified, final and withdrawn, and the heading form `D<n> ruled: <title> (<who> <date>)`. A
-# `put (…)` proposal is never an entry. FIXTURE FIDELITY: the ledger below is wave 38's design ledger from the
-# heading of its Δ23 to the end of its Δ24, byte for byte (D30's three lines, D31's five and its put line), under
-# the slug the bound plan names, so `decisions`, `decisions --all` and the resume recap read it as they read the
-# real one. fails-when: a line of D30 or D31 is absent or listed twice, out of the ledger's order, or the put line
-# has an entry.
-RD6="$(make_repo decisions-w38)"
-PD6="$(s34_plan "$RD6" 4)"
-D6_DOCS="$RD6/.bionic/docs"
-mkdir -p "$D6_DOCS/record/wave-01-fixture"
-cat > "$D6_DOCS/record/wave-01-fixture/design-ledger.md" <<'LEDGER'
-# design ledger — wave-01-fixture (wave 38's Δ23 and Δ24, verbatim)
-
-## Δ23 — D28, D29 and D30 ruled (Chris Lehman 2026-10-17)
-
-- D28 ruled "option 3" (Chris Lehman 2026-10-17 8:35 AM, recorded from the handoff): gathered landing; fourteen landed-by-hand marks accepted on the scorecard.
-- D29 ruled "1" (Chris Lehman 2026-10-17 3:52 PM): the indicator thresholds print once, in one line under the three Assessment lines, never on the lines themselves.
-- D30 ruled "No, I think the icon should be left-justified, as with the Situation section. However, make them more nuanced, not so loud. Perhaps a check mark is equivalent to green, some kind of neutral and bad icon..." (Chris Lehman 2026-10-17 3:52 PM): the mark opens the line, as Situation's does; the set is ✅ fine · ➖ watch · ⚫ off, ⚪ unverified unchanged (the orchestrator's choice of glyphs, reversible). The one-line form on the tick and the handoff head carries the same three marks. Fix row T35.
-- D30 amended "Maybe not a red X?" (Chris Lehman 2026-10-17 5:40 PM): the off mark is ✖ (U+2716, text style, never the red ❌ emoji); the set is ✅ fine · ➖ watch · ⚫ off, ⚪ unverified unchanged.
-- D30 amended again "Green, grey, something else that's more calm, in keeping with that theme." (Chris Lehman 2026-10-17 5:42 PM): the off mark is ⚫ (black circle), pairing with ⚪ unverified; the set is ✅ fine · ➖ watch · ⚫ off. No cross, no red.
-
-## Δ24 — D31 ruled: an Assessment mark encodes deviation from a tolerance (Chris Lehman 2026-10-17)
-
-- D31 put (orchestrator, 5:55 PM): the Assessment marks borrowed Situation's state vocabulary (✅ landed = ✅ within), one glyph with two meanings on one page. The user: "Shouldn't the iconography communicate something more fundamental … Reason from first principles re: the information architecture of /sitrep." Ruled "Neither. I like option 2, except I don't like the icons. Something more noticable, like ✅. But it has to be elegant, and following the conceptual tolerance model": the four states are within the bar, near it, over it, not measurable.
-- D31 glyphs ruled "✅ for within the bar" (Chris Lehman 2026-10-17 6:02 PM), the rest from the diamond gauge: ✅ within · 🔸 near · 🔶 over · ◇ not measurable. Noticeability grows with the deviation. The marks of Situation (✅ 🔄 ⬜ ⛔) encode work state; ✅ is shared by the user's choice. D29 stands: the thresholds print once, under the three lines, headed within/near/over. D30's ✅ ➖ ⚫ set is superseded.
-- D31 glyphs re-ruled "do the arrow up for over" (Chris Lehman 2026-10-17 6:20 PM), after "✅ ➖ ⚫ is still better, except the circle doesn't work. Horizontal line is 'near it' … question mark for not measurable … more bold, stylized in a cool, calm way" and "not yellow": the final set is ✅ within the bar · ➖ near it · 🔼 over it · ❔ not measurable. One register, grey and white but the check's green; ➖ is the bar and 🔼 the measurement above it. The diamond gauge (🔹 🔸 🔶 ◇), ⚫, 👎 and the arrow triple were considered and dropped.
-- D31 glyphs final "Changed my mind. That's too confusing. Let's go back to an X shape. But let's make it grey X like the horizontal bar." (Chris Lehman 2026-10-17 6:24 PM): ✅ within the bar · ➖ near it · ✖️ over it (U+2716 U+FE0F, the heavy grey X; no grey-boxed X exists in the emoji set) · ❔ not measurable. 🔼 dropped.
-- D31 ratified "Yes" (Chris Lehman 2026-10-17 6:41 PM) on the presented table: ✅ within the bar · ➖ near it · ✖️ over it · ❔ not measurable; the mark leads the line; the thresholds print once under the block, headed within / near / over. The glyph colours are the emoji font's and cannot be tinted on the page's path; recorded as a known limit of the choice.
-LEDGER
-poke "$RD6" decisions
-expect_eq "DG-1 precondition: decisions exits 0 on the bound run" "0" "$RC"
-D6_OUT="$OUT"
-expect_nonempty "DG-1b precondition: …and prints something, so the counts below read a real list" "$D6_OUT"
-expect_eq "DG-2b …and those are the only entries (D28 and D29 are bullets of the same Δ, the Δ23 heading names three numbers and is none: 3 + 5 + 2)" \
-  "10" "$(printf '%s\n' "$D6_OUT" | grep -c .)"
-expect_absent "DG-3 AC-7.2 the put line has no entry (DG-2 read the same output): its words are in no line" "5:55 PM" "$D6_OUT"
-expect_eq "DG-3b …and no line is the put line's: no entry whose verb is put" "0" "$(printf '%s\n' "$D6_OUT" | grep -c ' put')"
-poke "$RD6" decisions --all
-expect_eq "DG-4 decisions --all exits 0" "0" "$RC"
-# The resume recap's settled: lines are this parser's output too, and handoff-file §RESUME reads them there.
-
-# ============================================================
 section "§ROUNDS: decisions put appends a put round to the run's log and decisions rule closes its ask, so the decision is owed from its put to its ruling; each put prints what an hour's wait moves, from the tasks that read it and the longest chain"
 # ============================================================
 # A put opens a round and the next ruling of the same number closes it; a ruling with no put open is a round of its
 # own, the shape of a ledger written before puts. The wait line reads the tasks whose deps cell names the decision
-# as an approval and whether any is on the longest open chain. FIXTURE FIDELITY: a real repository, §DECISIONS's
+# as an approval and whether any is on the longest open chain. FIXTURE FIDELITY: a real repository, s34_plan's
 # plan shape at 15, T1 landed in its log, each ruling given by the verb in the session whose transcript it reads.
 # fails-when: a put opens no ask, or the verb's ruling leaves it open; the wait line is absent, or reads the same whether
 # its task is on the chain.
