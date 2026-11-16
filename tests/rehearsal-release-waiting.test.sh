@@ -53,8 +53,9 @@ if [ "$RT_RC" = 0 ]; then
     "yes|yes|yes" "$([ "$(rt_ran 'spawn-worktree.sh land')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'regression-run')" -ge 1 ] && echo yes)|$([ "$(rt_ran 'release-approval')" -ge 1 ] && echo yes)"
   # The release landed past the whole run with its check passing, so it moved no code: no merge without a pass is asked.
   # The goal the rehearsal writes as not met owes its decision from the first tick that reads it, holding nothing.
-  # At 15 no row names an approval it waits on, so the release's ask holds nothing and no merge is asked.
-  rt_sheet_and_card RW "approve:release decide:goal:asks" "approve:release>nothing decide:goal:asks>nothing" ""
+  # The integrate row waits on the release's approval by its kind and the release row beside it, so the release's ask
+  # holds the merge row, as that row's own line on the sheet says (FA-6); no merge is asked.
+  rt_sheet_and_card RW "approve:release decide:goal:asks" "approve:release>8/4 decide:goal:asks>nothing" ""
 fi
 
 # ============================================================
