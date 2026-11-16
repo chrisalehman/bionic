@@ -235,6 +235,7 @@ _units_live() {
     { split("", f); for (i = 2; i <= NF; i++) { e = index($i, "="); if (e > 1 && !(substr($i, 1, e - 1) in f)) f[substr($i, 1, e - 1)] = substr($i, e + 1) }
       r = f["row"]; if (r == "") next }
     !(r in seen) { seen[r] = 1; ord[++n] = r }
+    # an untimed dispatch: the act that brought an older run forward to 15 wrote one per agent cell, after every timed line
     f["ev"] == "dispatch" && f["at"] != "" { st[r] = "active"; nm[r] = f["name"] }
     f["ev"] == "published" { st[r] = "landed" }
     f["ev"] == "tree" && f["at"] != "" { tr[r] = f["path"]; bs[r] = substr(f["base"], 1, 8) }
@@ -871,10 +872,8 @@ units_live_held() {
 # A READ AFTER A FIX IS TOLD WHAT MOVED (wave-27 T43; D10; A-orch-48, A-orch-71). Once a question has
 # its `scope=whole` reading, a later read of it covers the fixes that landed past that reading, and
 # the tick names them beside the RANGE line. A row's landing is read from the run's LANDING RECORD,
-# `<docs-root>/record/<plan name>/run.log`, which `land` appends: one `published` event per landing,
-# read with an older home's `landed: row=<id|—> branch=<b> head=<40-hex> merge=<40-hex> at=<ISO-UTC>`
-# headers while a run not brought forward holds one (lib/line.sh `line_lines`). A row's landing is the
-# commit of the LAST landing line carrying its row.
+# `<docs-root>/record/<plan name>/run.log`, which `land` appends: one `published` event per landing
+# (lib/line.sh `line_lines`). A row's landing is the commit of the LAST `published` event carrying its row.
 # Never the prose of a state line, and never git: which merges lie inside a range is the caller's
 # answer (the tick's, which already reads git), handed in on stdin.
 #
@@ -885,10 +884,9 @@ units_whole_read() {
 }
 
 # units_landings <plan> <record> -> `<row id><TAB><merge or -><TAB><owed or ->`, table order: each
-# `## Tasks` row the record names, with its last merge (a `landed:` header's `merge=`, or the `commit=` of a
-# `line/v1|ev=published|` event, the one line a hand landing may leave), and each `build` row that is `landed`
-# with none, as `-`. `owed` marks a landed build row: it must carry a landing, so the
-# caller counts it unknown when the record has none or its merge is no commit. A header whose
+# `## Tasks` row the record names, with its last merge (the `commit=` of its last `published` event), and each
+# `build` row that is `landed` with none, as `-`. `owed` marks a landed build row: it must carry a landing, so the
+# caller counts it unknown when the record has none or its merge is no commit. An event whose
 # `row=` is `—` or an id the table lacks names no row; a merge that is not hex is no landing.
 units_landings() { _units_landed landings "${1:-}" "" "${2:-}" < /dev/null; }
 
@@ -903,15 +901,14 @@ units_rows_in_range() {
 }
 
 # units_unrecorded <plan> <record> -> each commit on stdin (one per line: the range's first-parent
-# commits, the caller's one `git rev-list`) that is the `merge=` of no header naming a row of the
-# plan, in the order given (wave-27 T34; review pass 30 should-fix 1 and 2, A-orch-86). A header
+# commits, the caller's one `git rev-list`) that is the `commit=` of no `published` event naming a row of the
+# plan, in the order given. An event
 # with `row=—` or an id the table lacks names no row; a merge of 7 to 40 hex names the commit it is
 # a prefix of. The tick prints the MOVED list only when this prints nothing.
 units_unrecorded() { _units_landed unrecorded "${1:-}" "" "${2:-}"; }
 
-# units_record_landings <record> -> `<line number><TAB><row><TAB><commit, lower case, or nothing>` for each landing line
-# of the landing record read as one with the run's log (lib/line.sh `line_lines`), in that order: a `published` event (`commit=`) and the older `landed:` header (`merge=`),
-# whose blank-split fields are read as the event's are. THE ONE READING OF A LANDING IN THE RECORD: the readiness
+# units_record_landings <record> -> `<line number><TAB><row><TAB><commit, lower case, or nothing>` for each
+# `published` event (`commit=`) of the run's log (lib/line.sh `line_lines`), in order. THE ONE READING OF A LANDING IN THE RECORD: the readiness
 # rows (`_units_landed`), the publish order (`_units_publish_order`) and the numbers re-renderer's release row
 # (lib/line.sh `_line_release_landed`) all ask it, so "after the release" is one order. The fields are read by
 # lib/line.sh's reader of a record line, loaded through lib/proof.sh. Nothing, rc 0, for no record or no reader.
@@ -919,7 +916,6 @@ units_record_landings() {
   declare -F _proof_fields >/dev/null 2>&1 && _proof_fields && line_held "${1:-}" || return 0
   line_lines "$1" | awk -F'|' "$_LINE_FIELDS_AWK"'
     { sub(/\r$/, "") }
-    /^landed:[ \t]/ { gsub(/[ \t]+/, "|"); if (line_kv("row") != "") print NR "\t" line_kv("row") "\t" tolower(line_kv("merge")); next }
     line_ev() == "published" && line_kv("row") != "" { print NR "\t" line_kv("row") "\t" tolower(line_kv("commit")) }' 2>/dev/null
 }
 
@@ -1338,7 +1334,7 @@ _units_questions_awk() {
 }
 
 # _units_publish_order <origin plan> <rows> -> `<id>=<n> <id>=<n> ...`, the landing record's place for each row that has landed:
-# the line number of the row's LAST `published` event or `landed:` header in the record `<docs-root>/record/<plan name>/
+# the line number of the row's LAST `published` event in the record `<docs-root>/record/<plan name>/
 # run.log` read as one (`units_record_landings`), which is appended in the order the rows were published. Nothing printed when the plan has no
 # landed release row to compare with (the common case, which then pays no git call), when no record can be named, or
 # when the record is not a file: the callers then judge by the plan's order. The plan named is the one whose record is

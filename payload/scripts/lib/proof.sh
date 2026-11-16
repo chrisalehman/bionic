@@ -911,7 +911,7 @@ _proof_reading_result_var() {
 # a `result=absent` verdict (lib/line.sh, a Lands-on suite the row removed) is neither green nor red, so a landing
 # green on the rest is fixed. A LANDING PROOF MAY BE THE REGRESSION (wave-39 T19; REQ-14 AC-14.1, D9): a row whose
 # landing owes no verdict (none recorded, a hand landing; or every one absent) is fixed at its landing commit, the
-# `merge=` of its last `landed:` header (`_proof_regression_landing`), once a green regression stands at a head that
+# commit of its last `published` event (`_proof_regression_landing`), once a green regression stands at a head that
 # commit is an ancestor of (`_proof_regression_heads`); <commit> is then that landing. A red landing verdict is never
 # overridden by a regression. Nothing when no born marker names a finding and
 # no move names a row, so a plan without either asks the units library once. Whether <commit> must be at or after a reading's
@@ -982,7 +982,7 @@ PROOF_FIXED_OUT
 }
 
 # _proof_regression_landing <git tree> <row> <units_landings lines> <green regression heads> -> the row's landing commit,
-# 40-hex, when one of the heads has it as an ancestor (wave-39 T19; D9): the `merge=` of the last `landed:` header that
+# 40-hex, when one of the heads has it as an ancestor: the `commit=` of the last `published` event that
 # names the row (lib/units.sh `units_landings`). Nothing, rc 1, when the row has no landing or no head descends from it.
 _proof_regression_landing() {
   local gt="$1" l h
@@ -1288,7 +1288,7 @@ _proof_read_dirty() {  # <evidence> <dirty count>
 
 # _proof_records <checkout> [<landing record>] -> THE RECORDS lib/line.sh weighs,
 # one tab-separated line each, in the order read (the landing record, then every git dir's stamp file):
-#   O <commit> <row> <suites | ->               a published commit (or a `landed:` merge) and its row's suites
+#   O <commit> <row> <suites | ->               a published commit and its row's suites
 #                                               (`-` for a hand landing whose ready named none: its verdicts are its suites)
 #   R <at> <commit> <suite | *> <green | red> <verdict | stamp | regression>   one suite's run at one commit (`*`, a
 #                                               whole run); `regression` is a fact the whole run's fold wrote (wave-39 T24;
@@ -1322,12 +1322,6 @@ _proof_records() {
       }
       else if (ev == "candidate") { c = line_kv("commit"); if (c != "") base[c] = line_kv("base") }
       else if (ev == "standing") { if (line_kv("cause") == "environment") env[line_kv("head"), key(line_kv("suite"))] = 1 }
-      next
-    }
-    substr($0, 1, 8) == "landed: " {
-      r = ""; c = ""; m = split($0, w, " ")
-      for (i = 2; i <= m; i++) { if (index(w[i], "row=") == 1) r = substr(w[i], 5); else if (index(w[i], "merge=") == 1) c = substr(w[i], 7) }
-      if (c != "") out("O\t" c "\t" r "\t-")
       next
     }
     substr($0, 1, 9) == "stamp/v1|" {
@@ -2644,9 +2638,8 @@ facts_owed() {
 }
 
 # proof_debts <plan> [<tree>] -> `debt<TAB><suite><TAB><token>` once per suite and token the run's
-# landing record owes, in the order the record first names them (wave-27 T31, T67; D23 as amended,
-# A-orch-120). A DEBT IS OWED BECAUSE `land` WROTE IT: the record's `debt:` lines (lib/worktree.sh
-# `_wt_debt_write`, before the merge) that no `void:` line names. A `landed red:` line in the plan is
+# landing record owes, in the order the record first names them. A DEBT IS OWED BECAUSE `land` WROTE IT: the log's
+# `admitted` events (lib/worktree.sh `_wt_debt_write`, before the merge) that no `void` event names. A `landed red:` line in the plan is
 # not read: missing, misshapen or hand-edited, it changes nothing. <tree> is the plan's checkout
 # root, read from the plan's directory when not given.
 proof_debts() {
@@ -2681,19 +2674,19 @@ proof_plan_slug() {
   reader_slug "${1:-}"
 }
 
-# proof_debts_read <record> -> `<suite><TAB><token><TAB><time>` once per suite and token with a
-# `debt:` line (in the run's log, an `admitted` event) no `void:` line (a `void` event) names, the record and the log
-# read as one (lib/line.sh `line_lines`), the time the NEWEST of those lines' `at=`: each red landing is a
+# proof_debts_read <record> -> `<suite><TAB><token><TAB><time>` once per suite and token with an
+# `admitted` event of the run's log no `void` event names (lib/line.sh `line_lines`), the time the NEWEST of
+# those events' `at=`: each red landing is a
 # debt of its own, and two on one suite and token are both covered
 # only by a green run after the later one. A line whose `at=` is no <ISO-UTC> leaves the time empty,
 # and an empty time is never covered.
 proof_debts_read() {
   _proof_fields && line_held "${1:-}" || return 0
-  # a debt line splits on blanks and an event on bars, so both split on either: no field of either holds one
+  # no field read here (an id, a suite, a token, an instant) holds a blank, so a blank splits as a bar does
   line_lines "$1" | awk -F'[| ]' "$_LINE_FIELDS_AWK"'
     { e = line_ev() }
-    $1 == "void:" || e == "void" { v = line_kv("id"); if (v != "") voided[v] = 1; next }
-    $1 == "debt:" || e == "admitted" { n++; id[n] = line_kv("id"); su[n] = line_kv("suite"); tk[n] = line_kv("token"); at[n] = line_kv("at") }
+    e == "void" { v = line_kv("id"); if (v != "") voided[v] = 1; next }
+    e == "admitted" { n++; id[n] = line_kv("id"); su[n] = line_kv("suite"); tk[n] = line_kv("token"); at[n] = line_kv("at") }
     END {
       iso = "^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$"
       for (i = 1; i <= n; i++) {
@@ -3078,8 +3071,8 @@ _facts_docs_prefix() {
 }
 
 # _facts_born_landings <plan> <tree> [<proof_fixed lines>] -> `<commit>\t<review|floor>\t<questions>`, one line per
-# commit the walk holds as a born row's landing: each `ev=published|row=<T>|commit=<c>` event (lib/line.sh) and each
-# `landed: row=<T> … merge=<c>` line (lib/worktree.sh) of the run's landing record (`proof_debt_record`) whose row's
+# commit the walk holds as a born row's landing: each `ev=published|row=<T>|commit=<c>` event (lib/line.sh) of the
+# run's landing record (`proof_debt_record`) whose row's
 # `- <T>:` line carries a born marker (lib/units.sh `units_born_marks`), and each commit `proof_fixed` names,
 # review-born. A plan with no marker and no fixed finding asks the units library once.
 # THE ASKERS (wave-36 T31; THE PROVENANCE GUARD since wave-39 D7, ADR-062): <questions> names, space-separated, the
@@ -3128,12 +3121,7 @@ _facts_born_landings() {
     part == 3 { split($0, m, "\t"); if (m[1] != "") kind[m[1]] = m[2]; next }
     part == 4 { split($0, f, "\t"); if (f[1] != "") rowq[f[1]] = addq(rowq[f[1]], recq[rec_of(f[3])]); next }
     part == 5 && line_ev() == "published" {
-      r = line_kv("row"); c = line_kv("commit"); if ((r in kind) && c != "") print c "\t" kind[r] "\t" says(r); next
-    }
-    part == 5 && substr($0, 1, 8) == "landed: " {
-      r = ""; c = ""; n = split($0, w, " ")
-      for (i = 2; i <= n; i++) { if (index(w[i], "row=") == 1) r = substr(w[i], 5); else if (index(w[i], "merge=") == 1) c = substr(w[i], 7) }
-      if ((r in kind) && c != "") print c "\t" kind[r] "\t" says(r)
+      r = line_kv("row"); c = line_kv("commit"); if ((r in kind) && c != "") print c "\t" kind[r] "\t" says(r)
     }'
 }
 

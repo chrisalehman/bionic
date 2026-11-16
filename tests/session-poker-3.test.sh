@@ -121,6 +121,17 @@ expect_eq "56a0d precondition: the fixture's run at 15 is admitted by the real c
 
 # ---------- §FACT-shape (AC-2.1): question, reader, range and result, or refused ----------
 s56_rec ev1.md "${S56_B:0:10}" "$S56_C2" evidence pass piece
+# A page at 15 names its working branch in its header alone, so a refusal for none, or for one naming no commit, names
+# the header as the place to write it. fails-when: either names a state section, which the write hook refuses.
+cp "$P56" "$TMPROOT/p56-wb"; /usr/bin/grep -v '^working-branch:' "$TMPROOT/p56-wb" > "$P56"
+poke "$R56" proof-add review record/wave-01-fixture/ev1.md --question evidence --reader w-aud; S56_WB1="$RC|$OUT"
+sed 's#^working-branch: .*#working-branch: wave/none#' "$TMPROOT/p56-wb" > "$P56"
+poke "$R56" proof-add review record/wave-01-fixture/ev1.md --question evidence --reader w-aud; S56_WB2="$RC|$OUT"; cp "$TMPROOT/p56-wb" "$P56"
+expect_contains "56WB a page whose header names no working-branch: refused, naming the header as its place" "1|poker: REFUSED" "$S56_WB1"
+expect_contains "56WB2 …the act that clears it: working-branch: in the plan's header" "to the plan's header" "$S56_WB1"
+expect_absent "56WB3 …and no state section" "SDLC State" "$S56_WB1"
+expect_contains "56WB4 a working branch naming no commit: refused, naming the header's working-branch: line" "working-branch: in the plan's header" "$S56_WB2"
+expect_absent "56WB5 …and no state section" "SDLC State" "$S56_WB2"
 s42_snap "$R56" "$P56"
 poke "$R56" proof-add review record/wave-01-fixture/ev1.md --question evidence --reader w-aud
 expect_eq "56a §FACT-shape a whole reading record registers (exit 0)" "0" "$RC"

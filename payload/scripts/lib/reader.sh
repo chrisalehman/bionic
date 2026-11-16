@@ -421,6 +421,7 @@ reader_q_status() {  # <plan> <row> -> state= of the row, then its dispatch cont
     line_kv("row") != r { next }
     { e = ev() }
     e == "published" { s = "landed"; c = line_kv("commit") }
+    # an untimed dispatch: the act that brought an older run forward to 15 wrote one per agent cell, after every timed line
     e == "dispatch" && line_kv("at") == "" && s != "" { e = "" }
     e == "dispatch" || e == "candidate" || e == "ready" || e == "returned" || e == "stalled" { s = (e == "dispatch") ? "dispatched" : e }
     ev() == "dispatch" { d = $0 }

@@ -594,4 +594,21 @@ expect_absent "41h3 …never as unchanged" "unchanged since" "$OUT"
 unset CLAUDE_CONFIG_DIR
 
 # ============================================================
+section "§NAMES-ACT: the tick's no-FILL lines name what the page or the log holds and the verb that writes it"
+# ============================================================
+# A run at 15 holds its approval in its log and its plan under the docs root, never in a state section, which the write
+# hook refuses. A page whose log holds no approval, and a root that holds no plan, each name the verb that clears them.
+# fails-when: a line names a state section, or names no verb.
+export CLAUDE_CONFIG_DIR="$SP_CONFIG_DIR"
+RNA="$(make_repo names-act)"; new_roster "$RNA"
+SP_APPROVED_LINE="" sp_plan_at_step "$RNA" 4 "| T1 | 4 | build | the first | implementor | — | 30 | REQ-1 | a.sh | pending |" >/dev/null
+poke "$RNA" tick; NA_FILL="$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: no FILL')"
+expect_contains "NA-1 a page at 15 whose log holds no approval: the line names the approve verb" "approve plan '<" "$NA_FILL"
+expect_absent "NA-1b …and no state section" "SDLC State" "$NA_FILL"
+RNB="$(make_repo names-none)"; new_roster "$RNB"; poke "$RNB" tick
+NA_NONE="$(printf '%s\n' "$OUT" | /usr/bin/grep -E '^poker: (note: no FILL|QUIET)')"
+expect_contains "NA-2 a root with no run's plan: the FILL line and the QUIET line each name the bind verb" "2" "$(printf '%s\n' "$NA_NONE" | /usr/bin/grep -c 'bind <plan>')"
+expect_absent "NA-2b …and no state section" "SDLC State" "$NA_NONE"
+
+# ============================================================
 finish

@@ -2391,19 +2391,19 @@ EOF
       # THE APPROVAL LINE FIRST: the fact the dispatch wall keys on, and
       # one half of `fill_ledger_live`; the step, its other half, is the arm below. The step is
       # named because it is what a reader looks for; the line says which fact is missing.
-      say "no FILL — plan at current: ${SCHED_CURRENT:-$(_sched_plan_current_field "$SCHED_PLAN")}, Step-3 approval pending: ## SDLC State carries no approved-by: line"
+      say "no FILL — plan at current: ${SCHED_CURRENT:-$(_sched_plan_current_field "$SCHED_PLAN")}, Step-3 approval pending: the run's log holds no approval of the plan; on the user's word, session-poker.sh approve plan '<their words>'"
     elif [ -n "$SCHED_PLAN" ] && [ "$SCHED_STEP" -lt 4 ]; then
       # THE APPROVAL LINE ALONE READIES NOTHING. A plan approved and still at Step 2 or 3 holds a
       # table nobody has started: `fill_ledger_live` and the table reader's `approval:plan` both wait
       # for `current:` to reach 4, so the line names the step that holds the fill.
-      say "no FILL — plan at current: ${SCHED_CURRENT:-$SCHED_STEP}; a row is ready only from Step 4, and approved-by: alone readies none"
+      say "no FILL — plan at current: ${SCHED_CURRENT:-$SCHED_STEP}; a row is ready only from Step 4, and the plan's approval alone readies none"
     elif [ -n "$SCHED_PLAN" ] && SCHED_ORDER="$(fill_order_open "$SCHED_PLAN")"; then
       # THE USER'S ORDER HOLDS THE FILL (lib/fill.sh `fill_order_open`): no row is offered while it
       # stands, and the stop wall, reading the same order, asks for none. The WAIT lines still print.
       say "no FILL — an order of the user stands: $(clean_whole "$SCHED_ORDER"); order lift ends it"
       tick_wait_report
     elif [ -z "$SCHED_PLAN" ]; then
-      note "no FILL — no plan carrying an unfenced \"## SDLC State\" to read a budget or a task table from."
+      note "no FILL — this session's run has no plan to read a budget or a task table from; write its plan under the docs root's plans/ and bind it: session-poker.sh bind <plan>."
     else
       # NO CAP IS NOT A FAULT (wave-28 T9; D15, REQ-2 AC-2.9). Until wave-28 a plan with no
       # `parallel-budget: writers=<n>` took a note here telling Step 0 to write one. No plan owes

@@ -78,6 +78,11 @@ done
 p=$(plan_fixture --current 5 "$EG_PF_DIR/plans/epic-99-fixture/wave-015.plan.md" wave "$(eg_pf_row T1 dw active)")
 expect_eq "plan_fixture writes the version alone, and the row's dispatch in its log" "1|state=dispatched" \
   "$(grep -c -e '^canonical_sdlc_version: 15$' -e '^## SDLC State' "$p")|$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$p" status T1 | head -1)"
+# A run's step is an event the current verb writes. A log whose newest step is no number (written by hand) is refused,
+# naming that verb. fails-when: the refusal names a state section, which the write hook refuses on a page at 15.
+hst=$(make_home); git -C "$hst" init -q; bound_marker "$hst" "$EG_SID" "$(eg_page "$hst" 4 'run/v1|ev=step|n=T4|at=2026-10-24T00:00:00Z')"
+expect_block "a log whose newest step is T4 is refused, naming the verb that records a step" "$hst" 'git commit -m "x"' "session-poker.sh current <N>"
+expect_absent "…and no state section" "SDLC State" "$HOOK_VSTDERR"
 
 # ============================================================
 # Section 9: a criterion is owed at the step whose task proves it

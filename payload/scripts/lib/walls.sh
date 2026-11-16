@@ -2838,15 +2838,12 @@ Fix: record the run's step in its log before committing."
 _EG_DECLARED_CURRENT="$CURRENT"
 
 if [ -z "$CURRENT" ] || ! grep -qE '^[0-9]+[ab]?$' <<< "$CURRENT"; then
-  # ONE LEDGER SHAPE (wave-31 D2): `current:` is a step number at every scale. A value that is not
-  # one, `T<n>` from the retired task-scale shape among them, is named and refused, never judged
-  # by a second set of arms; the words are the readers'.
-  _eg_why=""
-  [ -z "$CURRENT" ] || _eg_why=": current: ${CURRENT} is not numeric; a plan in the retired task-scale shape is refused, not skipped"
-  _eg_detail="canonical-sdlc plan file's '## SDLC State' section is missing a valid 'current: N' line${_eg_why}.
+  # A step is a number at every scale, and the current verb writes no other. A step event that holds anything else was
+  # written by hand; it is named and refused, never judged by a second set of arms.
+  _eg_detail="canonical-sdlc plan at version 15: the run's newest step event reads '${CURRENT}', which is not a step number.
 Plan: $PLAN
-Fix: add a line like 'current: 5' (or 'current: 8b') before committing."
-  refuse exit2 commit "'## SDLC State' has no valid 'current:' line" "add a 'current: N' line" "$_eg_detail"
+Fix: record the run's step with session-poker.sh current <N> (a number, or 8b) before committing."
+  refuse exit2 commit "the run's newest step is not a number" "session-poker.sh current <N>" "$_eg_detail"
 fi
 
 # ---------- THE RUN PREDICATE (AC-7, AC-8): no open run, nothing to gate ----------
@@ -4003,7 +4000,7 @@ Fix: repair each row named above; the columns are $(units_columns 1)"
 
 # Epic merge-target consistency (LOG-ONLY, check-id `merge-target`).
 # On a wave-scale plan naming an `epic:`, when the epic plan exists and
-# declares an `integration-branch:` in its ## SDLC State, a mismatch with this
+# declares an `integration-branch:` in its header, a mismatch with this
 # plan's integration-branch logs a finding. Never blocks. First cross-file read
 # in this hook — read-only, fail-open (missing epic plan / missing key → no
 # finding). Fires at the integrate step.
@@ -4015,7 +4012,7 @@ validate_merge_target() {
   epic_plan="$DOCS_ROOT/plans/$epic/epic.plan.md"
   [ -r "$epic_plan" ] || return 0
   # Both branches are lib/plan.sh `plan_integration_branch`'s answer, the one reader close-out, the card and the
-  # handoff ask: ## SDLC State, fenced lines unread, then the frontmatter.
+  # handoff ask: the plan's header key.
   # [INSTRUMENT]
   wall_libs evidence-gate plan.sh || return 0
   epic_branch=$(plan_integration_branch "$epic_plan")
