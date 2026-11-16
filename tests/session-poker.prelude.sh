@@ -402,7 +402,7 @@ wave_plan_at() {  # <repo> <path under <docs-root>/plans> <budget or "-"> <table
     local row
     for row in "$@"; do printf '%s\n' "$row"; done
   } > "$f"
-  [ "${SP_PLAN_AT:-15}" != 15 ] || sp_at15 "$f"
+  sp_at15 "$f"
   touch "$f"
   printf '%s' "$f"
 }
@@ -498,7 +498,7 @@ sp_fact() {
 }
 
 # ── hoisted from Section 12: sp_plan_at_step — Sections 37–40, 50, 55 and 67 write plans with it. ──
-# SP_PLAN_AT=14 asks for the page at 14; unasked, sp_at15 rewrites it as a run at 15 holds it.
+# sp_at15 rewrites each page as a run at 15 holds it.
 sp_plan_at_step() {  # <repo> <current> <row>... -> the plan path
   local repo="$1" current="$2"; shift 2
   local f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" row
@@ -512,7 +512,7 @@ sp_plan_at_step() {  # <repo> <current> <row>... -> the plan path
     printf '%s' "$SP_TASKS_HEADER"
     for row in "$@"; do printf '%s\n' "$row"; done
   } > "$f"
-  [ "${SP_PLAN_AT:-15}" != 15 ] || sp_at15 "$f"
+  sp_at15 "$f"
   touch "$f"
   printf '%s' "$f"
 }
@@ -566,7 +566,7 @@ s31_decision() { printf '%s' "$S31_OUT" | jq -r '.decision // ""' 2>/dev/null; }
 # ── hoisted from Section 34: s34_plan — Sections 37, 42, 49, 51 and §ROW-LABEL build the gate-admitted plan with it. ──
 s34_plan() {  # <repo> <current> [step-4 block body] -> the plan path; the session is bound to it
   local f; f="$(s34_page "$@")"
-  [ "${SP_PLAN_AT:-15}" != 15 ] || sp_at15 "$f"
+  sp_at15 "$f"
   bound_marker "$1" "$SID" "$f" >/dev/null 2>&1
   printf '%s' "$f"
 }
@@ -582,7 +582,7 @@ s34_page() {
   branch: wave/01-fixture'
   {
     printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\n'
-    [ "${SP_PLAN_AT:-15}" != 15 ] || printf 'epic: epic-99-fixture\nwave: wave-01-fixture\n'  # at 15 the header names the Step-1 documents
+    printf 'epic: epic-99-fixture\nwave: wave-01-fixture\n'  # the header names the Step-1 documents
     printf 'rigor: double\nscale: wave\nmulti_agent: true\nuse_worktree: true\nhas_ui: false\n'
     printf 'walk: exempt\ndeploy_target: n/a\n'
     printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=user\n---\n\n'
@@ -621,8 +621,6 @@ s34_gate() {
 # ── hoisted from Section 42: s42_plan, s42_snap, s42_unchanged, s42_builds_landed — every later shard builds, snapshots and compares plans with them. ──
 s42_plan() {  # <repo> <current> [step-4 block body] -> the plan path; bound, committed
   local p; p="$(s34_plan "$1" "$2" "${3:-}")"
-  [ "${SP_PLAN_AT:-15}" = 15 ] || printf '\n## Dispatch ledger\n\n| id | agent | dispatched | expected | artifact | landed | notes |\n' >> "$p"
-  [ "${SP_PLAN_AT:-15}" = 15 ] || printf '|---|---|---|---|---|---|---|\n| T1 | implementor (w-T1) | 2026-10-03T00:00Z | 30 min | record/T1.md | landed | batch 1 |\n' >> "$p"
   ( cd "$1" && git add -f "$p" && git commit -qm plan ) >/dev/null 2>&1
   printf '%s' "$p"
 }
@@ -652,7 +650,7 @@ s47_plan() {  # <repo> <writers> <row>... -> the path; a reads table, approved, 
     printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
     for row in "$@"; do printf '%s\n' "$row"; done
   } > "$f"
-  [ "${SP_PLAN_AT:-15}" != 15 ] || sp_at15 "$f"
+  sp_at15 "$f"
   touch "$f"
   printf '%s' "$f"
 }

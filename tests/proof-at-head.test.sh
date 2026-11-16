@@ -37,7 +37,6 @@ set -uo pipefail
 
 PAH_LIB="$REPO_ROOT/payload/scripts/lib"
 PAH_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
-CO_PLAN_AT=15   # the worlds here are at 15
 
 # pah_world <label> <owed suites, comma-joined, or empty> <landings> -> PAH_P, PAH_PLAN, PAH_F (the whole run's head)
 # and PAH_H (the working head): the close-out fixture at Step 8 with a whole run at F that left <owed> red, then
@@ -46,7 +45,7 @@ CO_PLAN_AT=15   # the worlds here are at 15
 # The page is at 15, where the proof, the readings' head and the word are the run's log's events, each by its writer.
 pah_world() {
   local label="$1" owed="$2" n="${3:-0}" p plan w k i s su c log
-  p="$(CO_PLAN_AT=15 mk_fixture "$label")" || return 1
+  p="$(mk_fixture "$label")" || return 1
   advance_to "$p" 8
   plan="$p/$PLAN_REL"; w="$p-wave"
   PAH_F="$(fixture_git "$p" rev-parse wave/01-fixture)"

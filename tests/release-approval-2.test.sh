@@ -9,8 +9,6 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/release-approval.prelude.sh"
-# Every page here is the prelude's run at 15 (FC_VERSION).
-FC_VERSION=15
 
 # ============================================================
 section "§JUDGE: the Tests line prints the full pass's state at this head, and a merge with no pass at it is the person's own approval"
