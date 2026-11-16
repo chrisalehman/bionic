@@ -12,8 +12,8 @@
 #   §UNKNOWN  an unlisted question exits 2 and prints the list.
 #   §REST     the twelve log-side questions each answer a planted log in their form, honour the fold, and
 #             answer the same with each line's fields moved.
-#   §HEADER     the plan's header keys, its body never read as one, in both shapes of a plan, CR-only line ends too.
-#   §ROW        a Tasks row is its nine authored cells, named by the table's header in both shapes.
+#   §HEADER     the plan's header keys, its body never read as one, CR-only line ends too.
+#   §ROW        a Tasks row is its nine authored cells, named by the table's header.
 #   §CRITERION  a criterion is its Eval design row, an escaped bar kept as a bar.
 #   §CELL       a criterion is discharged only by a standing proof, waiver or approval naming it; at 15 its
 #               verdict is the one an untimed proof the act wrote carries, else the evidence review at the head.
@@ -231,8 +231,6 @@ expect_eq "the twelve answer the same with each line's fields moved" "$got" "$(W
 ask status 2>/dev/null; expect_status "status with no row exits 2" 2 "$?"
 ask ready 2>/dev/null; expect_status "ready with no row exits 2" 2 "$?"
 
-# Both shapes hold the same authored words with the Tasks columns in other places, so a cell read by
-# its place answers one shape wrongly. The older shape also carries the machine's cells and sections.
 EVAL='| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
 |---|---|---|---|---|---|
 | REQ-7 | planted | AC-7.1 | unit | `cell` \| `row` | none |
@@ -240,39 +238,10 @@ EVAL='| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
 | REQ-7 | planted | AC-7.3 | unit | e3 | f3 |
 | REQ-7 | planted | AC-7.4 | unit | e4 | f4 |
 | REQ-7 | planted | AC-7.5 | unit | e5 | f5 |'
-mkdir -p "$D/plans/epic-x" "$D/record/old" "$D/record/new"; : > "$D/record/old/run.log"
-cat > "$D/plans/epic-x/old.plan.md" <<EOF
----
-sdlc-step: 4
-rigor: double
-log: record/new/run.log
-scale-recommendation: "one wave: one plan"
----
-
-## Eval design
-
-$EVAL
-
-## Tasks
-
-| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads | suites | lands-on | artifact |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | Read the plan. | w-T1 | — | 120 | REQ-7 | a.sh, b.sh | .worktrees/T1 | 7aff3fc3 | active | approval:plan | r.test.sh | r.test.sh | out/T1.md |
-
-## Verification Matrix
-
-| AC | tier | status | evidence | auditor |
-|---|---|---|---|---|
-| AC-7.4 | T1 | discharged | e.md | CONFIRMED |
-| AC-8.1 | T4 | pending | — | REFUTED |
-AC-7.4: read
-  user-confirmed: Ann 2026-11-01 saw it
-AC-8.1: a row the Eval design lacks
-  serves: REQ-8
-  user-confirmed: Bo 2026-11-02 tried it
-EOF
+mkdir -p "$D/plans/epic-x" "$D/record/new"
 cat > "$D/plans/epic-x/new.plan.md" <<EOF
 ---
+canonical_sdlc_version: 15
 rigor: single
 scale-recommendation: 'one wave'
 ---
@@ -293,13 +262,12 @@ $EVAL
 | T2 | 4 | build | Ask the log. | T1 | 60 | REQ-4 | c.sh | out/T2.md |
 | T3 | 4 | build | Wait on two. | T1, T9 | 30 | REQ-4 | d.sh | out/T3.md |
 EOF
-both() { local a; W=old; a="$(ask "$@")"; expect_nonempty "$* answers in the older shape" "$a"; W=new; expect_eq "$* reads the same in both shapes" "$a" "$(ask "$@")"; }
 flat() { ask "$@" | tr '\n' ' ' | sed 's/ $//'; }
 
 section "HEADER"
-W=old; expect_eq "a header key, its quotes dropped" "scale-recommendation=one wave: one plan" "$(ask header scale-recommendation)"
-expect_eq "every header key in its order" "sdlc-step rigor log scale-recommendation" "$(ask header | cut -d= -f1 | tr '\n' ' ' | sed 's/ $//')"
-W=new; expect_eq "the newer header, its quotes dropped" "rigor=single scale-recommendation=one wave" "$(flat header)"
+W=dq; printf -- '---\ncanonical_sdlc_version: 15\nscale-recommendation: "one wave: one plan"\n---\n' > "$D/plans/epic-x/dq.plan.md"
+expect_eq "a header key, its quotes dropped" "scale-recommendation=one wave: one plan" "$(ask header scale-recommendation)"
+W=new; expect_eq "the newer header, its quotes dropped" "canonical_sdlc_version=15 rigor=single scale-recommendation=one wave" "$(flat header)"
 ask header sdlc-step; expect_status "a key the header lacks answers no" 1 "$?"
 W=cr; plan cr < /dev/null; printf -- '---\rrigor: double\rabandoned: 2026-11-01\r---\rbody: no\r' > "$D/plans/epic-x/cr.plan.md"
 expect_eq "a CR-only header reads key by key, as a CRLF one does" "rigor=double abandoned=2026-11-01|rigor=double" \
@@ -312,14 +280,12 @@ expect_eq "a repeated key answers its first line, and with all every line of it 
 section "ROW"
 W=new; expect_eq "a row is its nine authored cells" \
   "id=T2 step=4 kind=build task=Ask the log. deps=T1 size=60 serves=REQ-4 files=c.sh artifact=out/T2.md" "$(flat row T2)"
-both row T1
 ask row T9; expect_status "a row the table lacks answers no" 1 "$?"
 ask row; expect_status "row with no id is refused" 2 "$?"
 
 section "CRITERION"
-W=old; expect_eq "a criterion is its Eval design row, an escaped bar read as a bar" \
+W=new; expect_eq "a criterion is its Eval design row, an escaped bar read as a bar" \
   "requirement=REQ-7 approach=planted criterion=AC-7.1 eval-type=unit eval=\`cell\` | \`row\` fails-when=none" "$(flat criterion AC-7.1)"
-both criterion AC-7.4
 ask criterion AC-9.9; expect_status "a criterion the Eval design lacks answers no" 1 "$?"
 
 section "CELL"
@@ -363,12 +329,13 @@ expect_eq "the proof appended at 15 is stamped with its instant" 1 "$(grep -c '^
 fwd() { every "$@" | tr ';' '\n' | awk -F, '$1 == "AC-7.1" || $1 == "AC-7.4" { printf "%s=%s:%s ", $1, $3, $6 }'; }
 expect_eq "at 15 a criterion takes the verdict the act carried on its proof, at any head; one named on a proof appended at 15 is the review's at the head" \
   "AC-7.1=proof:CONFIRMED AC-7.4=proof:REFUTED |AC-7.1=proof:CONFIRMED AC-7.4=proof: " "$(fwd "$G")|$(fwd)"
-W=old; ask cell AC-9.9; expect_status "a criterion the plan lacks has no cell" 1 "$?"
+W=new; ask cell AC-9.9; expect_status "a criterion the plan lacks has no cell" 1 "$?"
 ask cell; expect_status "cell with no criterion is refused" 2 "$?"
 
 section "JOIN"
 W=new; expect_eq "a plan with no pointer key reads its log by name" "state=discharged by=proof" "$(flat cell AC-7.4)"
-W=old; expect_eq "a pointer key in the header is never followed: the approval the pointed-at log holds discharges nothing here" \
+W=ptr; awk '{ print } /^rigor:/ { print "log: record/new/run.log" }' "$D/plans/epic-x/new.plan.md" > "$D/plans/epic-x/ptr.plan.md"
+expect_eq "a pointer key in the header is never followed: the approval the pointed-at log holds discharges nothing here" \
   "log=record/new/run.log state=pending" "$(flat header log) $(flat cell AC-7.2)"
 
 section "READY"
@@ -635,7 +602,7 @@ LB="$(git -C "$LR2" rev-parse HEAD)"; SPW="${BIONIC_SCRIPTS_DIR}/payload/scripts
 LT="$(git -C "$LR2" worktree list --porcelain | sed -n 's/^worktree //p' | /usr/bin/grep '20-T1$')"
 [ -n "$LT" ] && echo w > "$LT/t1.txt" && git -C "$LT" add t1.txt && git -C "$LT" commit -qm T1
 LP="$LR2/.bionic/docs/plans/epic-x/wave-x.plan.md"; mkdir -p "${LP%/*}"
-printf -- '---\nworking-branch: wave/20-demo\n---\n# plan\n\n## SDLC State\n\ncurrent: 4\n' > "$LP"
+printf -- '---\ncanonical_sdlc_version: 15\nworking-branch: wave/20-demo\n---\n# plan\n' > "$LP"
 printf 'plan=%s\nengaged_at=2026-09-23T00:00:00Z\n' "$LP" > "$LR2/.bionic/tmp/engaged-$SID.state"
 ( cd "$LR2" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SPW" land "$LT" --by-hand --reason 'no Lands-on could be read' ) >/dev/null 2>&1; LH_RC=$?
 expect_eq "a by-hand landing is one published landing of the hand kind with its reason, answered by hands (exit)" \
