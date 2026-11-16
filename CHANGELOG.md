@@ -60,7 +60,7 @@ unheard_folds=0 names=0` at 53428ccdf, the release head's code, and the release 
 ### The readings
 
 The eight readings of REQ-12, each a reading and never a gate, printed by `bash payload/scripts/readings.sh <rev>
-<record>` from this checkout (`T68-readings.log`, `T68-r2-readings.log`). 1.30.0 is 7a9633486 read with its run's
+<record>` from this checkout (`T68-readings.log`, `T68-r2-readings.log`, `T236-readings.log`). 1.30.0 is 7a9633486 read with its run's
 record, `record/wave-49-what-a-run-costs`; 2.0.0 is 53428ccdf, whose shell files the release head leaves as they are,
 read with this run's record, `record/wave-50-one-log`.
 Reading 7 of 1.30.0 is read over that run's recording at 15 in the replay bed,
@@ -75,20 +75,19 @@ over the run's own record it prints 0.
 | r4_shell_outside_tests_lines | 101513 | 92879 |
 | r5_tests_lines | 102161 | 92913 |
 | r6_hand_edit_lines, r6_hand_holds_total_at_close | 0, 3 | 0, not yet: the close writes it in the continuation |
-| r7_born_events | 11 | 161 |
-| r8_whole_runs | 4 | 4 |
+| r7_born_events | 11 | 162 |
+| r8_whole_runs: the whole-run logs the run's record holds, for 2.0.0 those it held when this entry was last edited, so a whole run taken after that makes the count one more | 4 | 5 |
 
 ### The walk, the regression, the reviews
 
-- The whole regression: four runs. The second, at 546bc0eb5 after the build rows then in the plan, was
+- The whole regression: five runs. The second, at 546bc0eb5 after the build rows then in the plan, was
   red on two suites of 134 (`Gating: 132 passed, 2 failed`): hook-timeout and rehearsal-release-waiting; T229 and T230
   were born of it, and neither was a defect a landing made in the product (A-orch.800). The third, at 47159892a, was
   green, and the fourth, at 6480eb685 with every code row of the run landed (T228 to T234 among them), was green,
-  `Gating: 134 passed, 0 failed` (`regression-run-6480eb6858f1bcb1f3af16c548855e53402e91c8.log`). The release head
-  holds beyond 6480eb685 only this row's range: documents, one comment line in `payload/scripts/lib/fields.sh`, three
-  test labels in `tests/units.test.sh`, the unread refusal inventory removed and one line of
-  `skills/canonical-sdlc/operational-rules.md`; the release-check, render, commands, words, one-reader, shell-lint and
-  units suites are green over it (`T68.md`).
+  `Gating: 134 passed, 0 failed` (`regression-run-6480eb6858f1bcb1f3af16c548855e53402e91c8.log`). The fifth, at
+  d0a256229, the head this entry first landed at, was green, `Gating: 134 passed, 0 failed`
+  (`regression-run-d0a25622967ec1495a7a1921b34dc881cc9c79a3.log`). The release head differs from d0a256229 by this
+  entry's own later edits to CHANGELOG.md and by nothing else.
 - The reviews of the whole and of the phases are registered in the run's log and are rendered into this entry by the
   integrate row; the evidence reviews of the flip and of the whole were open when this entry was written.
 
