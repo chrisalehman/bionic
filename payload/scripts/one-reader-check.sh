@@ -50,6 +50,9 @@
 #     reader's file (READER_FILES) a printed one is the reader's answer and counts only when the same
 #     line appends it with `>>`. A type
 #     named by a variable is listed as `?` and never paired. Two writers of one type are a `shared` finding.
+#     A function whose `log_append` type is a variable is a PASS-THROUGH: a call of it, before or after its
+#     definition, whose first argument that is no expansion is a ruled type (lib/log.sh LOG_TYPES, asked) makes
+#     the calling function a writer of that type, so a second writer by that road is a shared type too.
 #   - A REFUSAL is a refusal primitive called with its words (`refuse exit2|deny|block`, `fold_block`,
 #     `dp_finding`, `patrol_deny`, `dp_not_checked`, `deny`, `block`) in a file hooks/hooks.json runs.
 #   - A LOADER COPY is a file other than lib/loader.sh with the loader block's BEGIN marker.
@@ -90,6 +93,9 @@ if [ -z "$loaded_members" ]; then
   printf 'one-reader-check: %s/lib/walls.sh names no loaded set\n' "$_orc_dir" >&2
   exit 2
 fi
+# The ruled types are the log's closed list, asked of the appender beside this script as the loaded set is.
+ruled_types="$( . "$_orc_dir/lib/log.sh" >/dev/null 2>&1 && printf '%s' "${LOG_TYPES:-}")"
+case "$ruled_types" in *[a-z]*) ;; *) printf 'one-reader-check: %s/lib/log.sh names no event type\n' "$_orc_dir" >&2; exit 2 ;; esac
 cd "$root" || exit 2
 
 hook_files="$(/usr/bin/grep -o -E 'hooks/[A-Za-z0-9_.-]+\.sh' hooks/hooks.json 2>/dev/null | LC_ALL=C sort -u | tr '\n' ' ')"
@@ -128,7 +134,7 @@ names_standing() {  # -> `<file>:<line>:<text>` for each line naming a retired v
 # The patterns are written so that this file's own text matches none of them: `\/` and `[#]` stand
 # where the grammar has a bare character, so the check never counts itself. Lines are read as bytes:
 # the walk of a command a character at a time stops on a line that is no valid UTF-8.
-NAMED="$(names_standing)" LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v hooks=" $hook_files " '
+NAMED="$(names_standing)" LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v hooks=" $hook_files " -v ruled=" $ruled_types " '
   function opname(s) {  # one operand token -> 1 when it names a plan, 2 a log
     if (s ~ /\.plan\.md"?$/) return 1
     if (s ~ /run\.log"?$/) return 2
@@ -200,18 +206,34 @@ NAMED="$(names_standing)" LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v
     }
     return 0
   }
-  function writer(type) {
+  function writer(type, file, fnr, f) {
     if (type !~ /^[a-z][a-z-]*$/) type = "?"
-    wl[++nw] = "writer\t" type "\t" FILENAME ":" FNR " " fn[depth]
+    wl[++nw] = "writer\t" type "\t" file ":" fnr " " f
     if (type == "?") return
-    id = FILENAME ":" fn[depth]
+    id = file ":" f
     if (!((type, id) in seen)) {
       seen[type, id] = 1; nwr[type]++; ids[type] = ids[type] (ids[type] == "" ? "" : " ") id
-      at[type] = at[type] (at[type] == "" ? "" : ", ") FILENAME ":" FNR " " fn[depth]
+      at[type] = at[type] (at[type] == "" ? "" : ", ") file ":" fnr " " f
       if (!(type in tseen)) { tseen[type] = 1; tord[++nt] = type }
     }
   }
+  function passed(s,   n, w, i, j, t) {  # the ruled type a call of a pass-through on line s hands it, or nothing
+    n = split(s, w, /[ \t]+/)
+    for (i = 1; i < n; i++) {
+      t = w[i]; sub(/^[!({]*([$][(])?/, "", t)
+      if (!(t in pass)) continue
+      for (j = i + 1; j <= n; j++) {
+        if (w[j] ~ /[;|&)]/) break
+        t = w[j]; gsub(qt, "", t)
+        if (t ~ /^[$]/) continue
+        if (index(ruled, " " t " ")) return t
+        break
+      }
+    }
+    return ""
+  }
   BEGIN { qt = "[\"" q "]"; nq = "[^\"" q "]"; rd = "(^|[^A-Za-z0-9_.-])(awk|sed|grep|cut|head|tail|cat) "
+    rt = ruled; gsub(/^ +| +$/, "", rt); gsub(/ +/, "|", rt); rre = "[ \t]\"?(" rt ")\"?([ \t;)]|$)"
     known = "^[ \t{(!]*([A-Za-z_][A-Za-z0-9_]*=[^ ]* +)*[A-Za-z_/][A-Za-z0-9_/.-]*( |$)" }
   FNR == 1 { depth = 0; fn[0] = "-"; ind[0] = -1 }
   /^[#] --- bionic-loader\/v2 BEGIN/ && FILENAME != "payload/scripts/lib/loader.sh" { ll[++nl] = "loader\t" FILENAME "\t:" FNR }
@@ -237,10 +259,11 @@ NAMED="$(names_standing)" LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v
 
     if (line !~ /declare -F/ && match(line, /(^|[^A-Za-z0-9_])(log_append|line_event) +[^ ]/)) {
       r = substr(line, RSTART + RLENGTH - 1); split(r, a, /[ \t]+/)
-      t = (line ~ /log_append/) ? a[1] : a[2]; gsub(/"/, "", t); writer(t)
-    }
+      t = (line ~ /log_append/) ? a[1] : a[2]; gsub(/"/, "", t); writer(t, FILENAME, FNR, fn[depth])
+      if (t ~ /^[$]/ && fn[depth] != "-") pass[fn[depth]] = 1
+    } else if (line ~ rre) { cl[++nc] = line; cf[nc] = FILENAME; cn[nc] = FNR; cfn[nc] = fn[depth] }
     if (match(line, /(^|[^A-Za-z0-9_^-])(line|run|owed)\/v1[|]ev=[a-z][a-z-]*/) && line ~ (index(admitted, " " FILENAME " ") ? ">>" : "_wt_proofs_put|printf|echo|>>")) {  # after ^ it is a pattern; in a reader file a printed one is an answer
-      t = substr(line, RSTART, RLENGTH); sub(/.*ev=/, "", t); writer(t)
+      t = substr(line, RSTART, RLENGTH); sub(/.*ev=/, "", t); writer(t, FILENAME, FNR, fn[depth])
     }
 
     if (index(hooks, " " FILENAME " ") && line !~ /\(\)[ \t]*\{/ && \
@@ -252,6 +275,7 @@ NAMED="$(names_standing)" LC_ALL=C awk -v q="'" -v admitted=" $READER_FILES " -v
   END {
     r = "one-reader-check: refused — "; e = "/dev/stderr"
     nn = split(ENVIRON["NAMED"], nm, "\n")
+    for (i = 1; i <= nc; i++) if ((t = passed(cl[i])) != "") writer(t, cf[i], cn[i], cfn[i])
     for (i = 1; i <= np; i++) { printf "parser\t%s\tsites=%d first=%d\n", pord[i], pn[pord[i]], pfirst[pord[i]]; print r "parser " pord[i] ":" pfirst[pord[i]] > e }
     for (i = 1; i <= npw; i++) { printf "plan-writer\t%s\tsites=%d first=%d\n", word[i], wn[word[i]], wfirst[word[i]]; print r "plan-writer " word[i] ":" wfirst[word[i]] > e }
     for (i = 1; i <= nw; i++) print wl[i]

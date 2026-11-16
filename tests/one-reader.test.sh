@@ -14,8 +14,8 @@
 #                 writer each, the landing library's, and every place that lands a row or a part calls it. A
 #                 launch's `dispatch` has one writer, the launch recorder's, and a row's `born` one, the units
 #                 library's; each is paired with a planted second, the born one in the shape of a split; so is
-#                 a planted second appender of a waiver, a finding or a proof beside the one writer of each. A
-#                 printed search pattern is no writer.
+#                 a planted second appender of a waiver, a finding or a proof beside the one writer of each, and one
+#                 through a pass-through whose call names the type. A printed search pattern is no writer.
 #   §NAMES        the check names a planted retired verb by its line in each shape it reads (the verbs the events
 #                 retired, the five that wrote a matrix cell, the commands with no job, the writers of a step's line,
 #                 its fields, the regression's setting, its runs' count, a row's confirmation and the cap) and the old
@@ -144,6 +144,10 @@ expect_contains "two functions appending one type are a pair" \
 expect_eq "a second appender planted alone is refused, each writer by its file, line and function" \
   "one-reader-check: refused — shared born payload/scripts/lib/p.sh:1 planted_born_a, payload/scripts/lib/p.sh:2 planted_born_b rc=1" \
   "$(head -2 "$L/planted-writers.sh" | lone writers payload/scripts/lib/p.sh | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "a second writer through a pass-through, defined after its call, is refused by the type its call names" \
+  "one-reader-check: refused — shared waiver payload/scripts/lib/p.sh:1 planted_waiver, payload/scripts/lib/p.sh:2 planted_waiver_put rc=1" \
+  "$(printf '%s\n' 'planted_waiver() { log_append waiver question=evidence; }' 'planted_waiver_put() { planted_pass "$log" waiver question=evidence; }' \
+    'planted_pass() { local log="$1"; shift; RUN_LOG="$log" log_append "$@"; }' | lone pass payload/scripts/lib/p.sh | tr '\n' ' ' | sed 's/ $//')"
 pair() { printf '%s\n' "$AFTER" | awk -F'\t' -v t="$1" '$1 == "shared" && $2 == t { print $3 }'; }
 expect_eq "events: a printed search pattern writes none; a printed line does" "payload/scripts/lib/planted-k5.sh:2 planted_k5_put" \
   "$(printf '%s\n' "$AFTER" | awk -F'\t' '$1 == "writer" && $2 == "zzplant" { print $3 }')"

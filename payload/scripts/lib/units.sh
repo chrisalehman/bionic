@@ -195,8 +195,8 @@ _units_table() {
 
 # A ROW'S STATE AND ITS AGENT ARE THE RUN'S, NOT THE CELLS' (D2). A launch is a `dispatch` event in the run's log and
 # writes no cell; a launch taken back is a `cancel` of it. So `units_rows` and every scheduling answer read the
-# `status` and `agent` slots through the reader's standing facts: a row the log holds launched (its latest standing
-# dispatch with an instant) reads `active` under that name, and
+# `status` and `agent` slots from the reader's one row fold (lib/reader.sh `_READER_ROW_AWK`): a row the log holds
+# launched (its latest standing dispatch with an instant) reads `active` under that name, and
 # one the log holds landed reads `landed`, and one it holds dropped reads `dropped` by the reader's one rule (lib/reader.sh
 # `_READER_DROP_AWK`), whatever launch stands. Every other row reads pending, so a run whose log holds none of these
 # reads every row pending.
@@ -218,16 +218,9 @@ _units_live() {
   log="$(reader_log "$plan" 2>/dev/null)" || return 0
   [ -s "$log" ] && [ ! -L "$log" ] || return 0
   facts="$(_units_facts_of "$plan")" || return 2
-  printf '%s\n' "$facts" | awk -F'|' "$_READER_AWK$_READER_DROP_AWK"'
-    { split("", f); for (i = 2; i <= NF; i++) { e = index($i, "="); if (e > 1 && !(substr($i, 1, e - 1) in f)) f[substr($i, 1, e - 1)] = substr($i, e + 1) }
-      r = f["row"]; if (r == "") next }
-    !(r in seen) { seen[r] = 1; ord[++n] = r }
-    # an untimed dispatch: the act that brought an older run forward to 15 wrote one per agent cell, after every timed line
-    f["ev"] == "dispatch" && f["at"] != "" { st[r] = "active"; nm[r] = f["name"] }
-    f["ev"] == "published" { st[r] = "landed" }
-    f["ev"] == "tree" && f["at"] != "" { tr[r] = f["path"]; bs[r] = substr(f["base"], 1, 8) }
-    END { for (i = 1; i <= n; i++) { r = ord[i]; if (dropped(r)) st[r] = "dropped"; if ((r in st) || (r in tr))
-      printf "%s\t%s\t%s\t%s\t%s\n", r, st[r], nm[r], tr[r], bs[r] } }'
+  printf '%s\n' "$facts" | awk -F'|' "$_READER_AWK$_READER_DROP_AWK$_READER_ROW_AWK"'
+    END { for (i = 1; i <= _rows; i++) { r = _row_order[i]; s = dropped(r) ? "dropped" : _row_held[r]; $0 = _row_tree_held[r]
+      if (s != "" || $0 != "") printf "%s\t%s\t%s\t%s\t%s\n", r, s, _row_name[r], line_kv("path"), substr(line_kv("base"), 1, 8) } }'
 }
 
 # A PROOF IS THE RUN'S TOO: what each row's proof read, `live:head` and a reading's question compare is the run's proofs,
