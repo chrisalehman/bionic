@@ -2024,7 +2024,7 @@ proof_chain_head() {
 # debt `unpinned-pair floor-absent`). THE ONE READER OF "IS THERE A FLOOR LINE": the commit wall's Step-7 arm
 # (lib/walls.sh `_eg_refuse_floor_absent`, text only, A-orch-50), proof_state and facts_state ask it, so the
 # wall and the judge cannot answer one plan's text two ways; both ask it before the floor judge, which therefore
-# never asks it again (wave-36 T12; C35). It reads the run's facts through `proof_last` and runs no git.
+# never asks it again. It reads the run's facts through `proof_last` and runs no git.
 # Pinned by tests/canonical-sdlc-evidence-gate.test.sh §FLOOR-LINE FL-5, which drives both on one plan.
 proof_floor_absent() {
   [ -n "$(proof_last "${1:-}" regression)" ] && return 1
@@ -2810,7 +2810,7 @@ proof_debts_open() {
 # An owed line this judge has no rule for answers absent (the safe direction).
 # A FINDING RE-RATED BY A MOVE (wave-28 T42; D34): a reading's result is the one its findings give at
 # their effective ratings (`_proof_reading_result`). No check holds the step: a reader's rating is
-# final (wave-31 T32; D6), and a `check:` line in a plan is not read.
+# final, and a `check:` line in a plan is not read.
 # IT READS GIT, so a verb, the tick and close-out call it, never a wall: a wall is handed its answer
 # (the freeze, .claude/rules/hook-authoring.md).
 facts_state() {
