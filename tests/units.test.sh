@@ -209,7 +209,6 @@ current: 4
 | X1 | 4 | build | an id of the wrong shape | implementor | — | 15m | REQ-x | c.sh | pending |
 | T3 | 2 | build | a step below the range | implementor | — | 15m | REQ-x | d.sh | pending |
 | T4 | 4 | slice | the retired word as a kind | implementor | — | 15m | REQ-x | e.sh | pending |  # retired: slice
-| T5 | 4 | build | a status nobody defines | implementor | — | 15m | REQ-x | f.sh | done |
 | T6 | 4 | build | a dep naming no row | implementor | T99 | 15m | REQ-x | g.sh | pending |
 | T7 | 6 | review | reaches only T1 | critic | T1 | 15m | REQ-x | h.sh | pending |
 BROKEN_EOF
@@ -376,12 +375,12 @@ section "6 — units_validate: one line per broken invariant, naming the id and 
 
 VAL_BAD="$(call units_validate "$SANDBOX/broken.md")"
 
-# SIX INVARIANTS ARE BROKEN, one row each. T7, a Step-6 row reaching only T1, used to be the
+# FIVE INVARIANTS ARE BROKEN, one row each. T7, a Step-6 row reaching only T1, used to be the
 # seventh — "every Step-5+ row depends transitively on every Step-4 row" — and that rule is
 # gone (wave-26 T2, D2): a row waits for what it reads, never for every build row. So every
-# line names one of the six offending rows, and T7 draws none.
-expect_eq "every violation line names one of the six offending rows" "" \
-  "$(printf '%s\n' "$VAL_BAD" | grep -vE '^(T1|X1|T3|T4|T5|T6): ')"
+# line names one of the five offending rows, and T7 draws none.
+expect_eq "every violation line names one of the five offending rows" "" \
+  "$(printf '%s\n' "$VAL_BAD" | grep -vE '^(T1|X1|T3|T4|T6): ')"
 expect_eq "…and exits 1" "1" "$(call_rc units_validate "$SANDBOX/broken.md")"
 
 expect_contains "an id used twice is named once, as a duplicate" \

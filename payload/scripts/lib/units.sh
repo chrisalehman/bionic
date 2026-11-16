@@ -108,29 +108,17 @@
 # BASH 3.2 (macOS /bin/bash). No associative arrays, no `${var^^}`, no `mapfile`, and the
 # awk programs stay inside POSIX awk — no `gensub`, no `length(array)`, no sorting built-in.
 #
-# SLOT 11 IS `worktree`, AND IT IS THE ONE OPTIONAL SLOT (wave-14 REQ-2, ADR-027). The
-# `## Tasks` table is the register of in-flight units: the dispatcher writes the tree it
-# created into the row, and the evidence gate reads the row back to judge a commit made from
-# that tree at THAT row's step rather than at the run's single `current:`. The cell belongs
-# here because this library is the only reader of the table, and a second parser for one cell
-# is the thing REQ-1e existed to remove.
-#
-# OPTIONAL MEANS NO `missing column` VIOLATION, and that asymmetry is deliberate. Every plan
-# written before this wave carries no `worktree` header, and so does every solo-writer plan
-# after it; none of them is invalid for it. An absent column reads as an empty cell on every
-# row — the same answer a present column with an empty cell gives — and the gate's arm treats
-# "no tree named" and "this row names no tree" identically, so the two cannot disagree. The
-# ten slots above stay REQUIRED: a table missing `step` is a table whose rows cannot be
-# scheduled, which is a fault, while a table missing `worktree` is a table nobody dispatched
-# into trees.
+# SLOTS 5 AND 10 TO 13 (`agent`, `status`, `worktree`, `base`, `reads`) ARE THE RUN'S, NEVER A CELL'S. A page holds
+# a row as its nine authored cells; a row's state and agent are its launch, landing and drop in the run's log, and its
+# tree and base the log's newest `tree` event (`_units_live`). The parse fills slot 10 `pending` and the other four
+# empty, whatever the header names, and only the log moves them, so no cell can stand over the log.
 #
 # `suites` AND `lands-on` ARE TWO MORE OPTIONAL COLUMNS (wave-38 T19; REQ-11 AC-11.3; L7), known to the contract
 # and not carried in the record: `units_has_column` answers yes for a header that has one, a person's edit writes it,
 # and `brief` renders a review row's `Suites:` and `Lands-on:` from the cell, the role's defaults standing when
 # the cell is `—` or the column absent. A table without them is valid and `units_validate` names nothing missing.
 #
-# THE RECORD IS ALWAYS THIRTEEN FIELDS WIDE (`worktree`, `base` and, since wave-26 T2, `reads`
-# are the three optional slots) even when a column is absent, because a record
+# THE RECORD IS ALWAYS THIRTEEN FIELDS WIDE, whatever the table's shape, because a record
 # whose width depended on the table's shape would put every caller back to counting cells.
 #
 # A CELL MAY CONTAIN A PIPE, AND MARKDOWN SPELLS IT `\|`: the one escape GFM defines for a table cell, a raw
@@ -174,9 +162,9 @@ _units_read() {
     {
       split("", c)
       for (i = 1; i <= NF; i++) { e = index($i, "="); k = substr($i, 1, e - 1); if (!(k in c)) c[k] = substr($i, e + 1) }
-      # A TABLE WITH NO STATUS COLUMN (a page at 15, its nine authored cells) holds no row state of its own: every
-      # row is pending until the run log moves it (`_units_live`). A table that carries the column is read cell and all.
-      if (!("status" in has)) c["status"] = "pending"
+      # NO CELL GIVES A ROW ITS STATE, AGENT, TREE, BASE OR READS: every row is pending with the other four empty until
+      # the run log moves it (`_units_live`), even where a header names one of those columns.
+      c["agent"] = c["worktree"] = c["base"] = c["reads"] = ""; c["status"] = "pending"
       line = c["id"]
       for (k = 2; k <= 13; k++) line = line "\t" c[want[k]]
       row[++nr] = line
@@ -210,15 +198,14 @@ _units_table() {
 # `status` and `agent` slots through the reader's standing facts: a row the log holds launched (its latest standing
 # dispatch with an instant) reads `active` under that name, and
 # one the log holds landed reads `landed`, and one it holds dropped reads `dropped` by the reader's one rule (lib/reader.sh
-# `_READER_DROP_AWK`), whatever launch stands; a `landed` or `dropped` cell is never moved back. Everything else is the
-# cell, and a table with no status column (a page at 15) reads every such row pending, so a run whose log holds none of
-# these reads as its table says.
+# `_READER_DROP_AWK`), whatever launch stands. Every other row reads pending, so a run whose log holds none of these
+# reads every row pending.
 # The text itself is judged as written (`units_validate` reads `_units_table`), so a write is never refused for a
 # state the plan does not carry. A plan writer's copy is read with its plan's run.
 # A row the log holds landed keeps the name of the launch that landed it, as its agent cell kept it, so the stop of
 # that name finds its tree. A row's tree and base are the run's the same way: the newest `tree` event the log holds for it (the tree verb's, with an
-# instant) fills the `worktree` and `base` slots, the base by its first eight digits as a cell spells it; a row the
-# log holds no tree for reads its cells.
+# instant) fills the `worktree` and `base` slots, the base by its first eight digits; a row the log holds no tree for
+# reads both empty.
 # _units_live <plan> -> `<id><TAB><state><TAB><agent><TAB><tree><TAB><base>` per row the log moves; nothing without a
 # log; 2 a failed fold
 _units_live() {
@@ -300,7 +287,7 @@ _units_overlay() {
   printf '%s\n\034\n%s' "$1" "$2" | awk -F'\t' -v OFS='\t' '
     $0 == "\034" { r = 1; next }
     !r { st[$1] = $2; nm[$1] = $3; tr[$1] = $4; bs[$1] = $5; next }
-    st[$1] != "" && $10 != "landed" && $10 != "dropped" { $10 = st[$1]; if (nm[$1] != "") $5 = nm[$1] }
+    st[$1] != "" { $10 = st[$1]; if (nm[$1] != "") $5 = nm[$1] }
     tr[$1] != "" { $11 = tr[$1]; $12 = bs[$1] }
     { print }'
 }
@@ -325,15 +312,12 @@ units_dispatch_back() {
 
 # units_row_back <plan> <row> -> the row's launch taken back by its one cancel in the run's log (`units_dispatch_back`).
 # The tick's stand-down and the stop of an agent gone unlanded call it, so a row returned is offered again with no
-# second act. No verb writes the plan, so a launch its cells hold is not taken back here: only an edit of the plan
-# undoes it. 0 taken back, or nothing was running; 1 the row still runs by its cells; 2 the run's facts cannot be read.
+# second act. 0 taken back, or nothing was running; 2 the run's facts cannot be read, or the cancel cannot be written.
 units_row_back() {
-  local plan="${1:-}" row="${2:-}" live nm cur
+  local plan="${1:-}" row="${2:-}" live nm
   live="$(_units_live "$plan")" || return 2
   nm="$(printf '%s\n' "$live" | awk -F'\t' -v id="$row" '$1 == id && $2 == "active" { print $3 }')"
-  if [ -n "$nm" ]; then units_dispatch_back "$plan" "$row" "$nm" || return 2; return 0; fi
-  cur="$(_units_table "$plan")" || return 2
-  [ "$(printf '%s\n' "$cur" | awk -F'\t' -v id="$row" '$1 == id { print $10; exit }')" != active ]
+  [ -z "$nm" ] || units_dispatch_back "$plan" "$row" "$nm" || return 2
 }
 
 # units_born_event <plan> <row> [<reason>] [<finding>] [promoted] -> the row's birth appended to its run's log: one
@@ -2077,7 +2061,7 @@ units_columns() {
 #
 # THE INVARIANTS (spec Design §1 "Task", verbatim): id unique and matching `^T[0-9]+$`; step
 # in 3–9; kind in build · test · verify · review · doc · integrate · close · prototype;
-# status in pending · active · landed · dropped; every dep naming an id present in the table
+# every dep naming an id present in the table
 # or an external prerequisite `ext:<slug>` (`_units_ext_re` is its one shape), and on a
 # version-15 page an approval of the person's, `approval:<name>`. A review row's ` · questions:` tag names
 # questions of lib/proof.sh PROOF_QUESTIONS, each once.
@@ -2169,8 +2153,6 @@ units_validate() {
         for (i0 = 1; i0 <= m0; i0++) { sub(/=.*$/, "", o0[i0]); if (o0[i0] != "") skip[o0[i0]] = 1 }
         split("build test verify review doc integrate close prototype", kk, " ")
         for (i in kk) kinds[kk[i]] = 1
-        split("pending active landed dropped", ss, " ")
-        for (i in ss) states[ss[i]] = 1
         m0 = split(st15, o0, " ")
         for (i0 = 1; i0 <= m0; i0++) { e0 = index(o0[i0], "="); if (e0 > 1) ost[substr(o0[i0], 1, e0 - 1)] = substr(o0[i0], e0 + 1) }
       }
@@ -2178,7 +2160,7 @@ units_validate() {
       $0 == "\034" { wpart = 1; next }
       wpart { post_wait(); next }
       $1 == "" { next }
-      { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; tsk[n] = $4; dep[n] = $6; fil[n] = $9; sta[n] = $10
+      { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; tsk[n] = $4; dep[n] = $6; fil[n] = $9
         bsc[n] = $12; count[$1]++ }
       END {
         for (i = 1; i <= n; i++) {
@@ -2195,10 +2177,6 @@ units_validate() {
           if (!(knd[i] in kinds))
             printf "%s: kind %s is not one of build test verify review doc integrate close prototype\n", \
               id[i], (knd[i] == "" ? "(empty)" : knd[i])
-
-          if (v15 == "" && !(sta[i] in states))
-            printf "%s: status %s is not one of pending active landed dropped\n", \
-              id[i], (sta[i] == "" ? "(empty)" : sta[i])
 
           # A ROW AT 15 NAMES ITS QUESTIONS IN ITS TASK CELL, as the task-add verb writes the tag, and is held to the rule
           # the verb holds it to: a review row alone, each question one isq admits, once, comma-separated with no space.
