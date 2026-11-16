@@ -66,7 +66,7 @@ hh_plant() {
     roster_row_fixture status=identified name=w-y agent_id=ay source=adopted adopted_from=old-sid plan="$plan"
   } >> "$p/.bionic/tmp/roster-fixture.state"
   # the run's log: a second floor, a waiver of a question and an approval of a second regression, each by its writer, and
-  # an older plan's criterion-block waiver as a hand act, a kind the count does not read
+  # a hand act of a kind the count does not know
   h="$(bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1; proof_last "$2" floor' _ "$REPO_ROOT/payload/scripts/lib" "$plan")"
   expect_nonempty "HH-0a precondition: the fixture run already holds one floor proof, whose head the second reuses" "$h"
   bash -c '. "$1/run.sh" && . "$1/proof.sh" || exit 1
@@ -74,7 +74,7 @@ hh_plant() {
       && LOG_AT=2026-10-06T13:00:00Z proof_event "$2" kind=regression "head=$3" evidence=record/wave-01-fixture/floor-2.log \
       && LOG_AT=2026-10-06T13:10:00Z proof_waiver_event "$2" question=evidence "head=$3" "by=Chris Lehman" "said=waive it"' \
     _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h" || echo "hh_plant: a writer refused an event in '$p'" >&2
-  printf 'run/v1|ev=hand|ac=AC-1|what=waive-row|by=Chris Lehman|said=waive the row|at=2026-10-06\n' >> "$rec/run.log"
+  printf 'run/v1|ev=hand|ac=AC-1|what=plumb-line|by=Chris Lehman|said=plumb the line|at=2026-10-06\n' >> "$rec/run.log"
   # the plan: prose naming each kind, and fenced lines of an older plan's shape, which count nothing
   w="$(mktemp "$SANDBOX/hh-plan.XXXXXX")"
   awk '
