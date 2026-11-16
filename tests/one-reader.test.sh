@@ -20,9 +20,9 @@
 #                 retired, the five that wrote a matrix cell, the commands with no job, the writers of a step's line,
 #                 its fields, the regression's setting, its runs' count, a row's confirmation and the cap) and the old
 #                 records' and the deleted hooks' file names; the tree names none, an older run's names in the reader's
-#                 lists and files admitted. A suite's line stands only by an entry of the admitted list, an
-#                 entry with no line is refused, and the loaded set names no deleted plan section; the checkout's
-#                 suites and loaded set name none past the list. No verb writes a ledger file.
+#                 lists and files admitted. A suite's line is refused whatever entry is written beside it, and the
+#                 loaded set names no deleted plan section; the checkout's suites and loaded set name none. No
+#                 verb writes a ledger file.
 #   §REFUSALS     refusal words planted in a registered hook file are listed and counted, one site for each name the
 #                 check counts; the dispatch wall lists none, and no fact the dispatch library says is in its file.
 #   §FOLDS        a caller of the fold through a pipe or an unread $( ) is named, one that reads its exit is not;
@@ -199,7 +199,7 @@ mkdir -p "$S/lone-suite/tests/fixtures" "$S/lone-listed/tests/fixtures"; echo "$
 expect_eq "a suite line calling a retired verb or naming a removed function is refused by its file and line; a fixture's is not read" \
   "one-reader-check: refused — name tests/p.test.sh:1 one-reader-check: refused — name tests/p.test.sh:2 rc=1" \
   "$(printf '%s\n' "$PV T1" "$(dl 'units.step.field') \"\$p\" 5" | lone suite tests/p.test.sh | nl1)"
-printf 'plant\ttests/p.test.sh\t%s\n' "$PV T1" > "$S/lone-listed/tests/fixtures/names-admitted.txt"
+printf 'plant\ttests/p.test.sh\t%s\n' "$PV T1" > "$S/lone-listed/tests/fixtures/admitted-lines.txt"
 expect_eq "a suite line stands by no entry written for it: both lines are refused, the first with its entry beside it" \
   "one-reader-check: refused — name tests/p.test.sh:1 one-reader-check: refused — name tests/p.test.sh:2 rc=1" \
   "$(printf '%s\n' "$PV T1" "$PV T2" | lone listed tests/p.test.sh | nl1)"

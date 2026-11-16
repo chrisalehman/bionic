@@ -66,22 +66,17 @@
 #     and, as its own word, a removed function's name or a verb's that is no English word and that no other pattern
 #     reads whole. In the loaded set (walls.sh `loaded_set`, the net-zero wall's one definition, asked and never
 #     restated) a NAME is also a deleted plan section, by its `##` heading or by the deletion list's words for it (`the
-#     verificatio[n] matrix`), and nothing there is admitted. Under tests/ a line is admitted only by an entry of
-#     ADMITTED, by its file and its whole text, one line for each entry; an entry that admits no line is a NAME at its
-#     own line. A pattern brackets a hyphen or a letter (`[-]`, `[t]`) so that no name stands whole in this file: its
-#     own text matches none of them, and a word search of the tree for a name finds none here.
+#     verificatio[n] matrix`), and nothing there is admitted, nor is anything under tests/. A pattern brackets a hyphen or a
+#     letter (`[-]`, `[t]`) so that no name stands whole in this file: its own text matches none of them, and a word search of the tree for a name finds none here.
 #
 # THE READER'S FILES are named once, in READER_FILES: a parse inside one of them is the reader's own
-# and is admitted. THE ADMITTED LIST is ADMITTED, a fixture of the suites' lines that name a retired verb
-# on purpose, each with its class. Nothing else is admitted, and no function may write a plan.
+# and is admitted. Nothing else is admitted, and no function may write a plan.
 #
 # Executed, never sourced; bash 3.2.
 
 set -uo pipefail
 
 READER_FILES="payload/scripts/lib/reader.sh payload/scripts/lib/plan-read.sh payload/scripts/lib/fields.sh"
-
-ADMITTED="tests/fixtures/names-admitted.txt"
 
 case "${BASH_SOURCE[0]}" in */*) _orc_dir="${BASH_SOURCE[0]%/*}" ;; *) _orc_dir="." ;; esac
 root="${1:-$(cd "$_orc_dir/../.." && pwd -P)}"
@@ -121,29 +116,13 @@ names_found() {  # <file or directory>... -> `<file>:<line>:<text>` for each lin
   /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(plan_verb_swa[p]|plan_bring_forwar[d]|ensure_walk_pointe[r]|walk_pointer_wante[d]|lift_contract_field[s]|brief_validate_field[s]|brief_body_advisorie[s]|dp_scaffold_marke[d]|scale_branch_numbe[r]|units_step_fiel[d]|bf_mai[n]|matrix_bloc[k]|matrix_hea[d]|matrix_row_waive[r]|matrix_v1[5]|units_suspec[t]|suspect_line[s]|_units_dep_aw[k]|units_thread_row[s]|alias_gone_cel[l]|reader_brough[t]|reader_brought_a[t]|reader_landing_recor[d]|reader_sessio[n]|plan_read_droppe[d]|plan_read_block[s]|proof_debt_ledger_pat[h]|co_debt_gap[s]|co_debt_gaps_loa[d]|co_debt_note[s]|_run_translatio[n]|translate_has_stat[e]|translate_state_ke[y]|translate_ledge[r]|TRANSLATE_HOME[S]|finding[-]stated|continuation[-]fill|interval[-]default|fill[-]report)([^A-Za-z0-9_]|$)' "$@"
 }
 
-# ADMITTED names the suites' lines that may name a retired verb, each `<class>TAB<file>TAB<text>`, the text the
-# whole line: an entry admits one line of that file with that text, wherever it stands, and an entry left over is
-# a finding at the list's own line. Only a line under tests/ is admitted.
-names_admit() {  # `<file>:<line>:<text>` on stdin, once each -> those no entry admits, then each entry that admits none
-  LC_ALL=C awk -v list="$ADMITTED" '
-    BEGIN { cls = "|plant|old run|refusal|old home|fixture text|"
-      while ((getline e < list) > 0) { n++
-        if (e == "" || e ~ /^#/) continue
-        c = index(e, "\t"); r = substr(e, c + 1); d = index(r, "\t")
-        if (c < 2 || d < 2 || !index(cls, "|" substr(e, 1, c - 1) "|")) { gsub(/\t/, " ", e); print list ":" n ":not an entry: " e; continue }
-        k = substr(r, 1, d - 1) SUBSEP substr(r, d + 1); q[k, ++qn[k]] = n; ent[n] = substr(r, 1, d - 1) ": " substr(r, d + 1) } }
-    { f = $0; sub(/:.*/, "", f); t = substr($0, length(f) + 2); t = substr(t, index(t, ":") + 1); k = f SUBSEP t
-      if (f ~ /^tests\// && qi[k] < qn[k]) qi[k]++; else print }
-    END { for (k in qn) for (i = qi[k] + 1; i <= qn[k]; i++) print list ":" q[k, i] ":admits no line: " ent[q[k, i]] }'
-}
-
 names_standing() {  # -> `<file>:<line>:<text>` for each line naming a retired verb or, in the loaded set, a deleted plan section
   {
     names_found hooks payload/scripts ${suite_files[@]+"${suite_files[@]}"} ${loaded_files[@]+"${loaded_files[@]}"}
     [ "${#loaded_files[@]}" -eq 0 ] || /usr/bin/grep -HniE \
       '[#][#] +(verification matri[x]|sdlc stat[e]|handof[f]|dispatch ledge[r])|the (verificatio[n] matrix|stat[e] section|handof[f] section|dispatc[h] ledger)' \
       "${loaded_files[@]}"
-  } | LC_ALL=C sort -t: -k1,1 -k2,2n -u | names_admit | LC_ALL=C sort -t: -k1,1 -k2,2n
+  } | LC_ALL=C sort -t: -k1,1 -k2,2n -u
 }
 
 # The patterns are written so that this file's own text matches none of them: `\/` and `[#]` stand
