@@ -480,6 +480,14 @@ co_step_answer() {
     reader_facts() { printf "%s\n" "$f"; }; reader_q_step -' _ "$REPO_ROOT/payload/scripts" "$1/$LOG_REL" "$2" 2>/dev/null
 }
 
+# release_approved <project> -> the person's release approval at the working branch's head, the event the approve verb
+# appends: a run with a row that integrates is asked it at the close.
+release_approved() {
+  local wb; wb="$(sed -n 's/^working-branch: //p' "$1/$PLAN_REL" | head -1)"
+  printf 'run/v1|ev=approval|key=release|by=Dana Fixture|head=%s|said=Ship it.|at=2026-10-04T12:30:00Z\n' \
+    "$(fixture_git "$1" rev-parse --verify -q "refs/heads/$wb")" >> "$1/$LOG_REL"
+}
+
 # advance_to <project> <N> -> the run stood at step N: one step event appended to its log, as the `current` verb
 # appends it. §E2E drives the verb.
 advance_to() {

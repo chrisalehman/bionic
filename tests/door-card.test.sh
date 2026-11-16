@@ -209,14 +209,14 @@ expect_eq "(m1b) with the settle deleted the card does not render" "1" "$DOOR_RC
 expect_contains "(m1c) …it is early on the advance to 8" "CARD-EARLY — current 8 --check" "$DOOR_OUT"
 
 DCM2="$WORLD_ROOT/tree-reworded"; dcm_tree "$DCM2"
-sed -i.orig 's/current: 8 in the order (/current: 8 waits, in the order (/' "$DCM2/hooks/poker/judge.sh"
+sed -i.orig 's/current: 8%s is admitted at the head/current: 8%s waits, admitted at the head/' "$DCM2/hooks/poker/judge.sh"
 expect_eq "(m2a) the mutant rewords the judge's refusal in its judge" "yes" \
   "$(cmp -s "$DCM2/hooks/poker/judge.sh" "$DCM2/hooks/poker/judge.sh.orig" && echo no || echo yes)"
 read -r DCM2_R _ <<EOF
 $(door_copy "$DC" "$WORLD_ROOT/door-reworded")
 EOF
 door_run "$DCM2_R" bash "$DCM2/hooks/session-poker.sh" current 8 --check
-expect_contains "(m2b) the reworded judge prints its new words" "poker: REFUSED — current: 8 waits, in the order (" "$DOOR_OUT"
+expect_contains "(m2b) the reworded judge prints its new words" "before review and the release) waits, admitted at the head" "$DOOR_OUT"
 dcm_card "$DCM2" "$DCM2_R"
 expect_eq "(m2c) …and the card still renders, settling the release approval" "0 approve:release approve:merge" \
   "$DOOR_RC $(dc_keys "$DCM2_R/.bionic/docs/record/wave-x" "$DC_H8")"

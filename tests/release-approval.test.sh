@@ -58,11 +58,14 @@ section "§SHAPE: the page is the prototype's, in plain text, recorded with its 
 # The gate admits the run at 6 to 8 while the unrun criterion is the close's; owed now, it is the one refusal, the
 # card's own decision.
 fc_plan "$FC_GOOD"
-for fc_n in 6 7 8; do
+for fc_n in 6 7; do
   poke "$RFC" current "$fc_n" --check
   expect_eq "SHAPE-0.$fc_n precondition: current $fc_n --check is green on the fixture" \
     "0|poker: current $fc_n --check: would advance" "$RC|$(printf '%s\n' "$OUT" | head -1)"
 done
+poke "$RFC" current 8 --check
+expect_eq "SHAPE-0.8 precondition: current 8 --check refuses on the fixture on the release approval alone, the card's to ask" \
+  "1|1|yes" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: REFUSED')|$(fc_has "$OUT" 'carries no approved: release line')"
 fc_plan "$FC_GOOD" "" fc_owed_now
 fc_card early
 expect_eq "SHAPE-0.9 precondition: AC-1.2 owed now, card.sh early settles it as the page's own decision (exit 0)" \
@@ -529,8 +532,8 @@ expect_eq "T4-1h …the confirmation is the approval naming the criterion, as th
   "run/v1|ev=approval|key=AC-1.3|by=Dana-Fixture|said=checked it by hand|at=2026-10-20" "$(fc_appr AC-1.3)"
 fc_t4 '—' "$FC_UC" fc_t4_rows
 poke "$RFC" current 8 --check
-expect_eq "T4-1i …and with the unrun row the close's, current 8 --check would advance over it" \
-  "0|poker: current 8 --check: would advance" "$RC|$(printf '%s\n' "$OUT" | head -1)"
+expect_eq "T4-1i …and with the unrun row the close's, current 8 --check refuses on nothing but the release approval" \
+  "1|1|yes" "$RC|$(printf '%s\n' "$OUT" | /usr/bin/grep -c '^poker: REFUSED')|$(fc_has "$OUT" 'carries no approved: release line')"
 fc_t4 '-' "$FC_UC"; fc_page --preview
 expect_eq "T4-1f the cell - reads as — does" "$FC_ACC_DASH" "$(fc_acc)"
 fc_t4 '' "$FC_UC"; fc_page --preview

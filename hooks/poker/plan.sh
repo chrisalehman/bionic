@@ -1415,13 +1415,16 @@ BRF_EOF
   }
 
   # rr_rows <plan> <current> [head] -> `<AC>\037<tier>\037<status>\037<auditor>\037<ruled 1|0|owed:<step>>\037<person>\037<reason>`
-  # per criterion, the reader's order. THE RULING IS walls.sh's: each criterion is read through its readers (`matrix_load`,
-  # the reader's answer, and `matrix_table_rows`) and judged by `matrix_row_ruled`,
-  # sourced in a subshell as the facts judge sources it, so the card and the gate cannot answer one row two ways. A
+  # per criterion, the reader's order. THE RULING IS THE GATE'S: each criterion is read through its readers (`matrix_load`,
+  # the reader's answer, and `matrix_table_rows`), and it is unruled exactly when the gate at 8 asks something of it:
+  # walls.sh `matrix_unruled` names it (the ruling the advance asks, at double rigor), or `matrix_row_awaits` holds (the
+  # person's confirmation the commit at 8 asks at any rigor), sourced in a subshell as the facts judge sources them, so
+  # the card and the gate cannot answer one row two ways: at single rigor no auditor's word is owed, so no row waits on one. A
   # WAIVER IS A FACT OF THE RUN: the reader's status says waived only where a waiver event names the criterion. A row the
   # gate defers at <current> (`matrix_row_deferred`: owed at the later step whose task proves it) is `owed:<step>`, not
   # ruled and not unruled, whatever verdict a passed evidence review gives it, as the gate asks the deferral first:
-  # nothing has run that could prove it, and the step that runs it writes it. The auditor is printed as
+  # nothing has run that could prove it, and the step that runs it writes it. A row `matrix_unruled` defers at 8 is
+  # deferred at every step before it, so it reads owed here. The auditor is printed as
   # `placeholder_cell` folds it, `-` when it means none. THE PERSON'S PART is `confirmed` for a T4 row holding an attributed
   # confirmation, `awaits` for a T4 row holding none that one would rule (the same `matrix_row_ruled` asked of the row
   # with a confirmation in its attributed shape), and `-` otherwise. Its auditor cell never answers this alone, since
@@ -1429,12 +1432,14 @@ BRF_EOF
   # walls.sh cannot be loaded or the run's facts could not be read: the card never guesses a ruling.
   rr_rows() {
     [ -f "$BIONIC_LIB/walls.sh" ] || return 2
-    ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F matrix_row_ruled >/dev/null 2>&1 \
-        && declare -F matrix_row_deferred >/dev/null 2>&1 || exit 2
-      PLAN="$1"; matrix_load "$PLAN" "${3:-}" || exit 2
+    ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F matrix_unruled >/dev/null 2>&1 \
+        && declare -F matrix_row_awaits >/dev/null 2>&1 && declare -F matrix_row_deferred >/dev/null 2>&1 || exit 2
+      PLAN="$1"; unruled="$(matrix_unruled "$PLAN" 8 "${3:-}")" || exit 2
+      matrix_load "$PLAN" "${3:-}" || exit 2
       while IFS=$'\037' read -r ac tier status ev aud conf waiver; do
         [ -n "$ac" ] || continue
-        ruled=0; matrix_row_ruled "$tier" "$status" "$aud" "$conf" "$waiver" && ruled=1
+        ruled=1; case $'\n'"$unruled"$'\n' in *$'\n'"$ac"$'\n'*) ruled=0 ;; esac
+        ! matrix_row_awaits "$tier" "$status" "$aud" "$conf" "$waiver" || ruled=0
         person=-
         if [ "$tier" = T4 ]; then
           if user_confirmed_attributed "$conf"; then person=confirmed
@@ -1751,7 +1756,8 @@ RR_DISP_EOF
     # APPROVALS: every name an open row reads, release and merge first, each not yet given. A release approval the head
     # has moved past is put again: the advance to 8 refuses on it as on a missing one, and `card.sh early` settles that
     # refusal as this page's decision (`settles: approve:release`), so the user gives it at the new head, and the reply
-    # writes a second line beside the first. Only the judge says the release is stale. The merge is given with the
+    # writes a second line beside the first. Only the judge says the release is stale: its refusal, or, where the advance
+    # refuses first on facts this page settles, its own test of the approved head (judge.sh `cur8_release_holds`). The merge is given with the
     # release as a pair, so beside a release put again it is put again too when its own newest line names another head
     # than this one (`proof_approved_head`, the head the approval was given at); a merge given at this head stands.
     RR_NAMES=""; RR_RELAGAIN=""
@@ -1766,7 +1772,10 @@ RR_DISP_EOF
         h="$(proof_approved_head "$PV_PLAN" "$nm" 2>/dev/null)" || h=""
         case "$nm" in
           release)
-            case $'\n'"$RR_SETTLE"$'\n' in *$'\n'approve:release$'\n'*) RR_RELAGAIN=yes ;; *) continue ;; esac ;;
+            case $'\n'"$RR_SETTLE"$'\n' in
+              *$'\n'approve:release$'\n'*) RR_RELAGAIN=yes ;;
+              *) { [ -n "$h" ] && ! cur8_release_holds "$h" "$RR_HEAD"; } || continue; RR_RELAGAIN=yes ;;
+            esac ;;
           merge) [ -n "$RR_RELAGAIN" ] && [ "$h" != "$RR_HEAD" ] || continue ;;
           *) continue ;;
         esac
