@@ -1766,7 +1766,8 @@ RR_DISP_EOF
     # APPROVALS: every name an open row reads, release and merge first, each not yet given. A release approval the head
     # has moved past is put again: the advance to 8 refuses on it as on a missing one, and `card.sh early` settles that
     # refusal as this page's decision (`settles: approve:release`), so the user gives it at the new head, and the reply
-    # writes a second line beside the first. Only the judge says the release is stale. The merge is given with the
+    # writes a second line beside the first. Only the judge says the release is stale: its refusal, or, where the advance
+    # refuses first on facts this page settles, its own test of the approved head (judge.sh `cur8_release_holds`). The merge is given with the
     # release as a pair, so beside a release put again it is put again too when its own newest line names another head
     # than this one (`proof_approved_head`, the head the approval was given at); a merge given at this head stands.
     RR_NAMES=""; RR_RELAGAIN=""
@@ -1781,7 +1782,10 @@ RR_DISP_EOF
         h="$(proof_approved_head "$PV_PLAN" "$nm" 2>/dev/null)" || h=""
         case "$nm" in
           release)
-            case $'\n'"$RR_SETTLE"$'\n' in *$'\n'approve:release$'\n'*) RR_RELAGAIN=yes ;; *) continue ;; esac ;;
+            case $'\n'"$RR_SETTLE"$'\n' in
+              *$'\n'approve:release$'\n'*) RR_RELAGAIN=yes ;;
+              *) { [ -n "$h" ] && ! cur8_release_holds "$h" "$RR_HEAD"; } || continue; RR_RELAGAIN=yes ;;
+            esac ;;
           merge) [ -n "$RR_RELAGAIN" ] && [ "$h" != "$RR_HEAD" ] || continue ;;
           *) continue ;;
         esac

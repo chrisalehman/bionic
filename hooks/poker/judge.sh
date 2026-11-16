@@ -126,6 +126,12 @@ cur8_stale_line() {
   printf '%s' "REFUSED — current: 8 is admitted at the head the user approved for release: the working head %s is not the head the user approved for release, %s, and a commit past it is code or a release-set file. Land only docs past the approval, or have the user approve this head (approve release '<reply>'). The plan is unchanged."
 }
 
+# cur8_release_holds <approved head> <working head> -> 0 when an approval given at the first covers the second: the same
+# head, or one on its first-parent line past which only prose touching no release-set file landed (`proof_prose_past`).
+# THE ONE TEST of a stale release approval: `cur8_approved_head` refuses on it, and the release approval card puts the
+# approval again on it, since the advance asks the approval last and a stale one's refusal can wait behind other facts.
+cur8_release_holds() { [ "$1" = "$2" ] || proof_prose_past "$PV_PLAN" "$1" "$2"; }
+
 # cur8_approved_head -> returns when the newest `approved: release` line names the working head PV_HEAD8, or a head on its
 # first-parent line past which nothing the approval covers changed (`proof_prose_past`); otherwise refuses `current 8`,
 # exit 1, naming both heads, the plan unchanged.
@@ -141,7 +147,7 @@ cur8_approved_head() {
     die "$(printf "$fmt" "$order" "$missing" "$PV_HEAD8")"
     exit 1
   fi
-  if [ "$ah" != "$PV_HEAD8" ] && ! proof_prose_past "$PV_PLAN" "$ah" "$PV_HEAD8"; then
+  if ! cur8_release_holds "$ah" "$PV_HEAD8"; then
     fmt="$(cur8_stale_line)"
     # shellcheck disable=SC2059  # the format is cur8_stale_line, whose only conversions are its two %s
     die "$(printf "$fmt" "${PV_HEAD8:0:12}" "${ah:0:12}")"
