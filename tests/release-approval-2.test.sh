@@ -276,4 +276,42 @@ expect_eq "COVERED-3b …and the planted sitrep counts the fixed review failed w
 git -C "$RFC" reset -q --hard "$FC_R"
 rm -f "$FC_SEED" "$FC_REC"/release-approval-*.md "$FC_REC/adversarial-fail.md"
 
+# ============================================================
+section "§TASK: a run with no release row is asked the release approval at the advance to 8 and at the close, and its card asks what the gate owes"
+# ============================================================
+# FIXTURE FIDELITY: the prelude's run as a task-scale run holds it (regression no; a build, a verify, a review and an
+# integrate row; no documents or test row), each criterion discharged by a proof with no auditor's word, so its
+# auditor cell is the evidence review's, which flagged. The gate's count is walls.sh `matrix_unruled` at 8.
+# fails-when: current 8 or the close admits the run with its card unanswered, or refuses after the typed reply; or the
+#   card's count of owed rows is not the gate's: at single rigor a waiver nothing owes.
+fc_task() {  # <page> -> the page as a task-scale run at rigor FC_RIGOR
+  sed -e "s/^rigor: double$/rigor: $FC_RIGOR/" -e 's/^scale: wave$/scale: task\nregression: no/' -e '/^release: /d' \
+    -e 's/^| T2 | 7 | doc .*$/| T2 | 5 | verify | the walk | T1 | 10 | REQ-1 | .bionic\/docs\/record\/wave-x\/walk.md | — |\n| T4 | 6 | review | the critic · questions: evidence,adversarial,structure | T1 | 15 | REQ-1 | .bionic\/docs\/record\/wave-x\/critic.md | — |/' \
+    -e 's/^\(| T3 | 8 | integrate | merge into main | \)approval:merge |/\1T2, T4 |/' "$1" > "$1.n" && mv "$1.n" "$1" && fc_owed_now "$1"
+  sed 's/|auditor=CONFIRMED|/|/' "$FC_EV" > "$FC_EV.n" && mv "$FC_EV.n" "$FC_EV"
+  printf 'run/v1|ev=%s|at=\n' 'dispatch|row=T4|name=critic' 'proof|ac=AC-1.2|evidence=record/generic-evidence.md' >> "$FC_EV"
+}
+fc_task_plan() {  # <rigor> -> PFC: the task-scale run at <rigor>, its whole reading at C, the evidence review flagged
+  local q; FC_RIGOR="$1"
+  fc_plan "$(for q in evidence adversarial structure; do fc_line review "$FC_C" 2026-10-12T12:00:00Z "record/wave-x/$q.md" "$q" w-read "$([ "$q" = evidence ] && echo flag || echo pass)" whole; done)" "" fc_task
+}
+fc_owes() { printf '%s|' "$(fc_keys | grep -c '^row:')"; bash -c '. "$1/run.sh" && . "$1/units.sh" && . "$1/proof.sh" && . "$1/walls.sh" && matrix_unruled "$2" 8 "$3"' _ "$FC_LIB" "$PFC" "$FC_R" 2>/dev/null | grep -c .; }  # the card's owed rows|the gate's
+fc_close() { ( cd "$RFC" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$BIONIC_SCRIPTS_DIR/payload/scripts/close-out.sh" "$PFC" check ) 2>/dev/null | /usr/bin/grep -m1 '^facts: '; }
+fc_task_plan double; fc_page; FC_TD="$(fc_owes)"
+fc_task_plan single
+expect_eq "TASK-0 precondition: the page has an integrate row, no documents or test row, and is at single rigor" "1|0|single" \
+  "$(/usr/bin/grep -c '| integrate |' "$PFC")|$(/usr/bin/grep -cE '\| (doc|test) \|' "$PFC")|$(sed -n 's/^rigor: //p' "$PFC")"
+fc_page
+expect_eq "TASK-1 the card is drawn (exit 0) and puts the release approval" "0|yes" "$FC_RC|$(fc_keys | grep -qx approve:release && echo yes)"
+expect_eq "TASK-2 its owed rows are the gate's: none at single rigor, the two at double" "0|0|2|2" "$(fc_owes)|$FC_TD"
+expect_contains "TASK-2b …and at single its acceptance line reads both proved" "acceptance — 2 of 2 criteria proved" "$(fc_under Tests)"
+poke "$RFC" current 8 --check
+expect_eq "TASK-3 with the card unanswered, current 8 --check refuses (exit 1), naming the approval" "1|yes" "$RC|$(fc_has "$OUT" 'carries no approved: release line')"
+expect_contains "TASK-4 …and the close refuses on it" "facts: WOULD REFUSE — no approved: release line names a head" "$(fc_close)"
+fc_typed "$FC_WD"; poke "$RFC" reply "$FC_WD"; FC_TR="$RC|$(fc_appr release | grep -c "|head=$FC_R|")"
+poke "$RFC" current 8 --check
+expect_eq "TASK-5 the person's typed reply approves the release at the head (exit 0), and current 8 --check is admitted" "0|1|0" "$FC_TR|$RC"
+expect_eq "TASK-6 …and the close reads every fact holding" "facts: every fact the run owes holds at $FC_R" "$(fc_close)"
+fc_typed "$FC_WD" "$FC_WR"; rm -f "$FC_REC"/release-approval-*.md
+
 finish
