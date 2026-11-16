@@ -1783,6 +1783,29 @@ expect_eq "HN2c …a started task reading nothing owed is still running and buil
   "$(sr_f "$(sr_task T7)" state)|$(sr_f "$(sr_task T7)" note)"
 
 # ============================================================
+section "§HELD-15: a nine-cell row at 15 waits on an approval through its deps, and the sheet reads that wait as it reads a reads cell's"
+# ============================================================
+# FIXTURE FIDELITY: §HELD-NOTE's world, its plan replaced by plan_fixture's page at 15 (nine cells, each wait in its deps,
+# the launch in the log), the decision put and the asks in the fields their verbs write. fails-when: a launched row
+# waiting on an owed decision reads running; an open approval's ask holds nothing; an approval's minutes go uncounted.
+sr_world held15 "6 6 12 12"
+plan_fixture "$SR_PLAN" wave "| T1 | 4 | build | the held build | implementor | approval:D7 | — | 30 | REQ-1 | lib/a.sh | — | — | active |" \
+  "| T2 | 8 | integrate | the merge, held on the release | — | approval:release | — | 30 | REQ-1 | — | — | — | pending |" \
+  "| T3 | 4 | build | waits on the design | — | approval:design | — | 30 | REQ-1 | lib/c.sh | — | — | pending |" > /dev/null
+sr_bind
+sr_ev "ev=decision|entry=Δ0|d=D7|verb=put|by=orchestrator|title=the rule|wait=Answered now or in an hour.|at=2026-10-06T12:00:00Z"
+sr_ask_ev "key=approve:design|sent=-|title=approval: design|at=2026-10-06T13:00:00Z"; sr_ask_ev "key=approve:design|reply=approve|at=2026-10-06T14:00:00Z"
+sr_ask_ev "key=approve:release|sent=-|title=approval: release|at=2026-10-06T13:30:00Z"
+sr_run "$SR_PLAN"
+expect_eq "H15-1 a launched row waiting on D7 through its deps is held, its note naming the approval" "held|waits on your approval of D7" \
+  "$(sr_f "$(sr_task T1)" state)|$(sr_f "$(sr_task T1)" note)"
+expect_eq "H15-2 …the release approval's ask holds the integrate task that waits on it, by its label, and blocks" "8/2|yes" \
+  "$(sr_f "$(sr_ask approve:release)" holds)|$(sr_f "$(sr_ask approve:release)" blocks)"
+expect_eq "H15-3 …and the minutes waiting on you count the decision and both approvals, each overlap once" \
+  "600 min: decide:D7, approve:design and approve:release" \
+  "$(sr_m waste.waiting-on-you)"
+
+# ============================================================
 section "§SCORECARD: the scorecard's last three lines are the sheet's pace, correctness and waste; its landing target is LINE_LANDING_BAR in lib/line.sh"
 # ============================================================
 SR_FORECAST=240h SR_EXTRA=22 sr_world scorecard "6 6 12 12"

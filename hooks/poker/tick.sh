@@ -416,7 +416,7 @@ EOF
     case "$rest" in *" "*) val="${rest#* }" ;; esac
     say "LEDGER ${rest%% *} ${kind}${val:+ $(clean "$val")}"
   done <<EOF
-$(units_findings "$SCHED_PLAN" "$(units_run_rosters "${ROSTER_FILE%/*}" "$SCHED_PLAN" "$ROSTER_FILE")" 2>/dev/null)
+$(units_findings "$SCHED_PLAN" "$(units_run_rosters "${ROSTER_FILE%/*}" "$SCHED_PLAN" "$ROSTER_FILE")" v15 2>/dev/null)
 EOF
   return 0
 }
