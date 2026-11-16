@@ -20,7 +20,8 @@
 #              A page at 15 whose landed tasks stand out of order is admitted: the hook judges its copy with the plan's log.
 #   §V14       a plan at 14 is a document and never a run: a new one refused at the write, naming 15; one on disk
 #              admitted at the write and the commit, open or closed, under any name, an epic too; a plan at 15 with its
-#              log lowered to 14 refused at the write and, lowered by hand, at the commit; a spec at 14 or 15
+#              log lowered to 14 refused at the write and, lowered by hand or its version line lost by a shell edit, at
+#              the commit; a page with no version and no step in a log admitted at the commit; a spec at 14 or 15
 #              admitted, at 13 refused; an epic at 15 whose log holds its older homes' facts owes only Step 2's approval.
 #
 # FIXTURE FIDELITY. Each plan is a real file in a scratch git repository with an engaged session, written
@@ -316,6 +317,21 @@ expect_eq "a write lowering a plan at 15 with its log to 14 is refused, naming t
 cp "$P2" "$P2.w"; printf '%s\n' "$LOW" > "$P2"; printf 'plan=%s\n' "$P2" > "$R/.bionic/tmp/engaged-$SID.state"; gate; mv "$P2.w" "$P2"
 expect_eq "…and lowered by hand, its commit is refused, naming the plan, the line read and 15" "2|1|1|1" \
   "$GATE_EXIT|$(grep -c "^Plan: $P2\$" <<< "$GATE_SAID")|$(grep -c 'this plan declares canonical_sdlc_version: 14' <<< "$GATE_SAID")|$(grep -c "^Fix: put the line back to 'canonical_sdlc_version: 15'" <<< "$GATE_SAID")"
+# Every other shell edit that takes the line off 15 is refused by the same arm, naming what it found where 15 stood.
+EDITS=('/^canonical_sdlc_version: 15$/d' 's/^canonical_sdlc_version: 15$/# &/' 's/^canonical_sdlc_version:/canonical-sdlc-version:/' '1s/^---$/\
+---/'); FOUND=('declares no canonical_sdlc_version' 'declares no canonical_sdlc_version' 'declares no canonical_sdlc_version' 'has no header on its first line')
+for i in 0 1 2 3; do
+  cp "$P2" "$P2.w"; sed -i '' "${EDITS[$i]}" "$P2"; gate; mv "$P2.w" "$P2"
+  expect_eq "…and so is its commit after the shell edit ${EDITS[$i]%%$'\n'*}, naming the plan, what it found and 15" "2|1|1|1" \
+    "$GATE_EXIT|$(grep -c "^Plan: $P2\$" <<< "$GATE_SAID")|$(grep -c "this plan ${FOUND[$i]}" <<< "$GATE_SAID")|$(grep -c "^Fix: put the line back to 'canonical_sdlc_version: 15'" <<< "$GATE_SAID")"
+done
+# A page that declares no version and whose log holds no step is none of this lifecycle's: its commit goes through.
+NR6="$R/.bionic/docs/plans/epic-01-demo/wave-06-u.plan.md"; sed '/^canonical_sdlc_version: 15$/d' "$P2" > "$NR6"
+for P6 in "$SP" "$R/.bionic/docs/plans/epic-01-demo/notes.md" "$NR6"; do
+  [ "$P6" = "$NR6" ] || printf '# A page\n\nNo header.\n' > "$P6"; printf 'plan=%s\n' "$P6" > "$R/.bionic/tmp/engaged-$SID.state"; gate
+  expect_eq "a page with no version and no step in a log, ${P6#"$R"/}, is admitted at the commit" "0|1" "$GATE_EXIT|$(grep -c "bound plan closed — $P6;" <<< "$GATE_SAID")"
+done
+rm -f "$NR6" "$R/.bionic/docs/plans/epic-01-demo/notes.md"
 
 # An open epic at 14 is admitted at the write and at the commit of a session bound to it. The same epic at 15, its log
 # holding what its older homes said, is admitted at the write, and its commit is refused only for the debt it truly
