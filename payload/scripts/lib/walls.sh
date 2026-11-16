@@ -2244,12 +2244,9 @@ INTENT=$(frontmatter_get intent)
 RIGOR=$(frontmatter_get rigor)
 MULTI_AGENT=$(frontmatter_get multi_agent)
 
-# A PAGE IS A RUN'S PLAN BY ITS VERSION MARKER, as the write hook reads it: a page whose leading frontmatter declares
-# no `canonical_sdlc_version` is none of this lifecycle's, and nothing of it is judged. A page that declares one is
-# judged on its value alone, below.
-grep -qE '^[[:space:]]*canonical_sdlc_version[[:space:]]*:' <<< "$FRONTMATTER" || exit 0
 _EG_V15=0
 case "${PLAN##*/}:$SDLC_VERSION" in *.plan.md:15) _EG_V15=1 ;; esac
+_EG_MARKED=0; grep -qE '^[[:space:]]*canonical_sdlc_version[[:space:]]*:' <<< "$FRONTMATTER" && _EG_MARKED=1
 
 _eg_plan_named() {  # -> the path the plan takes when named for its directory: an incident's for it, any other for its stem
   local d="${PLAN%/*}"
@@ -2267,10 +2264,13 @@ Plan: $PLAN
 Fix: name the plan for its directory, then commit again:
   mv $(refuse_shell_word "$PLAN") $(refuse_shell_word "$(_eg_plan_named)")"
 }
-# A PLAN AT 14 IS AN OLDER RUN'S DOCUMENT AND NEVER A RUN, under any name: nothing of it is judged, so its commit goes
-# through. A plan at 14 whose run's log holds a step is a run's plan with its version line lowered, by a write or by a
-# shell edit that meets no write hook, and admitting it would admit every commit of that run unjudged: it is refused,
-# naming the line to put back. Where that log is and whether it holds a step are the reader's answers, asked once here.
+# A PAGE IS A RUN'S PLAN BY ITS LOG FIRST, AND BY ITS VERSION MARKER ONLY WHERE NO LOG SAYS SO. A page that does not
+# declare 15 and whose run's log holds a step is a run's plan whose version line a write or a shell edit that meets no
+# write hook lowered, deleted, commented out, misspelt or moved off the first line: judged by its marker, every commit
+# of that run would be admitted unjudged, so it is refused, naming what stood where 15 was and the line to put back.
+# Where that log is and whether it holds a step are the reader's answers, asked once here. Only then is a page whose
+# leading frontmatter declares no `canonical_sdlc_version` none of this lifecycle's, and a plan at 14 an older run's
+# document and never a run, under any name: nothing of either is judged, so its commit goes through.
 # [WALL: tests/plan-page.test.sh]
 _eg_v15_unreadable() {
   refuse exit2 commit "the run's facts could not be read" "run the commit again" \
@@ -2279,18 +2279,22 @@ Plan: $PLAN
 Fix: run the commit again; the fold's own line above names why it failed."
 }
 _eg_refuse_lowered() {
-  local s
+  local s found="declares canonical_sdlc_version: $SDLC_VERSION"
   s="$(_proof_ask "$PLAN" reader_q_step "$PLAN")" || _eg_v15_unreadable
   case $'\n'"$s" in *$'\n'n=*) ;; *) return 0 ;; esac
+  [ "$_EG_MARKED" = 1 ] || found="declares no canonical_sdlc_version in its header"
+  [ -n "$FRONTMATTER" ] || found="has no header on its first line"
   refuse exit2 commit "this run's plan is lowered below 15" "put its version back to 15" \
-"canonical-sdlc plan: this plan declares canonical_sdlc_version: $SDLC_VERSION, and the run's log beside it holds a step, so it is a run's plan at 15 with its version line lowered, and nothing of it is judged at $SDLC_VERSION.
+"canonical-sdlc plan: this plan $found, and the run's log beside it holds a step, so it is a run's plan at 15 with its version line lowered or lost, and nothing of it is judged without it.
 Plan: $PLAN
 Fix: put the line back to 'canonical_sdlc_version: 15', then commit again."
 }
+[ "$SDLC_VERSION" = 15 ] || _eg_refuse_lowered
+[ "$_EG_MARKED" = 1 ] || exit 0
 case "${PLAN##*/}:$SDLC_VERSION" in
   *.plan.md:15) ;;
   *:15) case "$EG_VERDICT" in bound-open|bound-closed) _eg_refuse_misnamed15 ;; *) exit 0 ;; esac ;;
-  *:14) _eg_refuse_lowered; exit 0 ;;
+  *:14) exit 0 ;;
 esac
 
 # A plan at 15; a plan at 14 left above, under any name, with nothing judged. Anything else — an older number, a typo,
