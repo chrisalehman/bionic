@@ -380,8 +380,8 @@ sched_owed() {
 #     step-held lines are left in `SCHED_HOLDS` for the no-FILL line, where they have always
 #     been printed.
 #   LEDGER (T5; D4, ADR-037 decision 3). `units_findings` is the reader the commit gate refuses
-#     on — a status off the enum, a row at its terminal word with no `- T<n>:` line, an
-#     `active` row whose agent cell names no row on the run's rosters nor an older run's Dispatch ledger —
+#     on — a status off the enum, a `landed` row the reader does not answer landed, an
+#     `active` row whose agent cell names no row on the run's rosters —
 #     and each finding prints as `poker: LEDGER <id> <kind> [<value>]`. The rosters are
 #     `units_run_rosters`' list, this tick's own first, the list the gate reads (wave-36 T29;
 #     D10); with none to read (the first tick) it is the reader's no-roster rule, the gate's too.

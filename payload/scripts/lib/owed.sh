@@ -24,7 +24,7 @@
 #
 # THE ONE LIST (`_owed_lines`) is one line per round of an item in the order the rounds opened, the last line of a key
 # its current state: the reader's rounds (lib/reader.sh `reader_ask_rounds`, which holds the line's shape), of the run's
-# plan, whose older records the translation alone reads, or of a session's own file. An event names its round by `round=<n>`
+# plan, or of a session's own file. An event names its round by `round=<n>`
 # from the second on and sets on it the fields it carries: `sent=` and `title=`; `prompt=`, the line the run printed;
 # `answer=` and `event=`, answered at the event's instant; and `reply=`, the closer's words, which close the round.
 #

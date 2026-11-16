@@ -3,7 +3,7 @@
 #
 # WHAT IT OWNS. The home of the handoff document, one file per run or session per day under the handoffs folder of
 # the project's docs record, never a tracked path; the pointer to it, the run's latest handoff as the reader answers it
-# (a handoff event in the run's log, or an older plan's `## Handoff` line `handoff: <path> written <local time>`); and
+# (the handoff event in the run's log); and
 # the two filters every composed section passes through before it is written.
 #
 #     handoff_home_file <root> <slug>

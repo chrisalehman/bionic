@@ -4,13 +4,10 @@
     canonical-sdlc — hook chain.
 
     THIS FILE IS THE SOURCE. There is no .excalidraw beside it and no export step:
-    the picture is composed text, which is what lets tests/cross-gate-agreement.test.sh §V read it.
-    Pinned there against the code it draws:
-      * the three class="version-pin" renderings == hooks' SUPPORTED_SDLC_VERSION
-    and by tests/docs-pins.test.sh W27-T53-S3f and W27-T60-S1:
-      * one class="hook-entry" chip per script a registration runs, on its event, matcher and
-        argument (data-event, data-matcher, data-hook, data-arg) == hooks/hooks.json
-      * the header's timeouts == the timeouts hooks/hooks.json registers
+    the picture is composed text. No test reads it, so the hook chips (class="hook-entry"
+    with data-event, data-matcher, data-hook, data-arg), the header's timeouts and the
+    drawn version (class="version-pin") are kept in step by hand with hooks/hooks.json and
+    the gates they draw.
 
     GROUPING CONTRACT (revised 2026-08-18). The page used to be split into an
     ALWAYS ON lane and an ARMED BY THE SKILL lane. That split named the registration
@@ -163,7 +160,7 @@
   <text x="58" y="936" font-size="10.5" font-weight="700" fill="#3a424c">2</text>
   <text x="76" y="936" font-size="10.5" fill="#3a424c">governing-skill: is present in the frontmatter</text>
   <text x="58" y="954" font-size="10.5" font-weight="700" fill="#3a424c">3</text>
-  <text class="version-pin" data-pin="hook-chain-governing-ladder" x="76" y="954" font-size="10.5" fill="#3a424c">canonical_sdlc_version == 14</text>
+  <text class="version-pin" data-pin="hook-chain-governing-ladder" x="76" y="954" font-size="10.5" fill="#3a424c">canonical_sdlc_version == 15</text>
   <text x="58" y="972" font-size="10.5" font-weight="700" fill="#3a424c">4</text>
   <text x="76" y="972" font-size="10.5" fill="#3a424c">the triple is present and enum-valid — intent · rigor · scale</text>
   <text x="58" y="990" font-size="10.5" font-weight="700" fill="#3a424c">5</text>
@@ -186,7 +183,7 @@
   <text x="728" y="918" font-size="10.5" font-weight="700" fill="#3a424c">1</text>
   <text x="746" y="918" font-size="10.5" fill="#3a424c">the plan this session is bound to → its ## SDLC State, fence-aware</text>
   <text x="728" y="936" font-size="10.5" font-weight="700" fill="#3a424c">2</text>
-  <text class="version-pin" data-pin="hook-chain-evidence-ladder" x="746" y="936" font-size="10.5" fill="#3a424c">canonical_sdlc_version == 14</text>
+  <text class="version-pin" data-pin="hook-chain-evidence-ladder" x="746" y="936" font-size="10.5" fill="#3a424c">canonical_sdlc_version == 15</text>
   <text x="728" y="954" font-size="10.5" font-weight="700" fill="#3a424c">3</text>
   <text x="746" y="954" font-size="10.5" fill="#3a424c">current: N</text>
   <text x="728" y="972" font-size="10.5" font-weight="700" fill="#3a424c">4</text>
@@ -210,7 +207,7 @@
   <!-- ============================ closing callouts ============================ -->
   <rect x="40" y="1178" width="426" height="88" rx="8" fill="#f6f7f9" stroke="#dde1e6" stroke-width="1.2"/>
   <text x="58" y="1200" font-size="11.5" font-weight="700" letter-spacing="0.8" fill="#16191d">ONE SUPPORTED VERSION</text>
-  <text class="version-pin" data-pin="hook-chain-version-callout" x="58" y="1221" font-size="10.5" fill="#3a424c">canonical_sdlc_version: 14 is the only value either hook accepts.</text>
+  <text class="version-pin" data-pin="hook-chain-version-callout" x="58" y="1221" font-size="10.5" fill="#3a424c">canonical_sdlc_version: 15 is the only value either hook accepts.</text>
   <text x="58" y="1236" font-size="10.5" fill="#3a424c">Anything else — older, empty, malformed — exits 2 naming the value it</text>
   <text x="58" y="1251" font-size="10.5" fill="#3a424c">found. No grandfathering. This page's three renderings are pinned to it.</text>
 

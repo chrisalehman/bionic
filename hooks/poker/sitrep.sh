@@ -2099,8 +2099,8 @@ sitrep_tick_line() {
     exit 0
   }
   # decisions_settle <plan> <ledger> -> always 0, prints nothing: the ask of every decision the run's rounds read ruled
-  # or withdrawn is closed on the run's register. An older run's ruling is its ledger's own entry, written in the
-  # person's words with no verb of its own, so every `decisions` call settles the register against the rounds before it
+  # or withdrawn is closed on the run's register. A ruling reaches the log by `decisions rule`, by `approve D<n>` or by
+  # the release approval card's reply, so every `decisions` call settles the register against the rounds before it
   # reads or puts.
   decisions_settle() {
     local d st open
@@ -2139,7 +2139,7 @@ sitrep_tick_line() {
     wait="$(decision_wait "$plan" "$d" "$REPO_REAL")"
     decisions_append "$plan" "d=$d" verb=put by=orchestrator "title=$title" ${wait:+"wait=$wait"} || exit 1
     # THE PUT IS AN ASK ON THE RUN'S REGISTER, in the words the pages owe it in (`pages_owed`), so a decision put and
-    # not yet ruled is owed wherever the register is read; the ledger's ruling closes it (`decisions_settle`).
+    # not yet ruled is owed wherever the register is read; the ruling closes it (`decisions_settle`).
     if declare -F owed_open >/dev/null 2>&1; then
       OWED_ROOT="$REPO_REAL" OWED_PLAN="$plan" owed_open "decide:$d" "reply to $d" "$d · $title: reply with the option number. $wait" >/dev/null 2>&1 || :
     fi
@@ -2153,7 +2153,7 @@ sitrep_tick_line() {
   # release approval card (whose reply runs `approve`), it is this one function, so a decision ruled anywhere has its
   # round and its closed ask. It writes the ruled round (`decisions_append`), the title the newest put's and none when
   # the decision was never put; then it settles the register against the rounds, which closes `decide:D<n>`. A double
-  # quote in the reply is written as a single one, as an older run's ledger heading holds it. THE WHO IS THE ONE WHO SAID IT: the reply is asked of lib/said.sh `user_said` in the prompts the user typed in
+  # quote in the reply is written as a single one. THE WHO IS THE ONE WHO SAID IT: the reply is asked of lib/said.sh `user_said` in the prompts the user typed in
   # this run, a reply under three words only in a prompt typed after the orchestrator's own put of this decision (the mark
   # `decisions put D<n> `, its newest round: a digit typed for another decision is not this one's). Found, the user's
   # words: who is the project's git user name. Not found, or found too short to be a quote,
@@ -2213,7 +2213,7 @@ sitrep_tick_line() {
     return 0
   }
 
-  # THE REGISTER. `decisions` is the bound run's rounds, its ledger's and its log's as one list, through
+  # THE REGISTER. `decisions` is the bound run's rounds, the log's, as one list, through
   # `decisions_list`; `--all` is every run's under the docs root, keyed by wave, with the ADRs (`decisions_all`). Exit 1
   # in one line naming the ledger's path when the run holds no round; 2 when there is no run to read. `decisions put`
   # and `decisions rule` are its writers, each one round (`decisions_append`).
