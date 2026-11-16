@@ -235,7 +235,7 @@ world_verbs() {
 
 # world_repo — prints the root of a new fixture repository under WORLD_ROOT, built with real
 # git: `main` with tests/a.test.sh and tests/b.test.sh (both green); the working branch
-# `wave/x` checked out; the bound plan .bionic/docs/plans/epic-x/wave-x.plan.md, a run at 15
+# `wave/x` checked out; the bound plan under the project's docs plans directory, a run at 15
 # (`working-branch: wave/x` in its header, rows T1 and T2 in nine cells) with the run's log beside it holding
 # steps 1 to 4, the plan's approval and each row's dispatch and tree, and WORLD_SID's engaged marker;
 # a roster at .bionic/tmp/roster-<WORLD_SID>.state with rows wx-T1 and wx-T2; and two row trees,

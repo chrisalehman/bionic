@@ -90,7 +90,7 @@ _plan_fixture_rows() {
 
 # plan_fixture_themes <plan> [<status>...] -> the plan reads two themes from the sibling
 #   `<docs root>/specs/<epic>/<slug>.requirements.md`, `## The card reads true` over the first requirement (two
-#   criteria, AC-168 and AC-169) and `## The gate admits the work` over the second (one, AC-170); the plan's
+#   criteria, the flat ids in the hundreds) and `## The gate admits the work` over the second (one); the plan's
 #   `## Eval design` is replaced by one naming each criterion's requirement, and the run's log gains a passing proof
 #   of each criterion whose next <status> is discharged and a waiver of each waived (else it stays pending).
 plan_fixture_themes() {  # <plan> [<status>...]
