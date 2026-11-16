@@ -592,7 +592,7 @@ units_rows() {
 #     docs root), excepting rows that read `record`;
 #   - `merge`: every open integrate row;
 #   - a task id (a table without `reads`): that row, until it lands;
-#   - `proof:<kind>`: a `proved: kind=<kind>` line inside `## SDLC State`; until one exists the
+#   - `proof:<kind>`: a proof of that kind in the run's log; until one exists the
 #     open rows that would write it — verify and test rows for `floor`, review rows for
 #     `review` — are named as its writers. A pending row whose `live:head` waits because
 #     nothing landed past the review proof writes no newer proof, so it is not one (wave-26
@@ -1195,8 +1195,7 @@ _units_proof_awk() {
 # _units_sched <ready|held|waiting|edges> <plan> <step> — THE ONE PROGRAM behind the four verbs,
 # so a row the ready set leaves out is the row `units_waiting` explains and the edge
 # `units_edges` prints. One stream: the rows (`units_rows`, so a memoised caller pays no second
-# parse), then the plan's text, from which `## SDLC State`'s approval and proof lines are read
-# fence-aware, the `_units_ledger` way.
+# parse), then the run's facts, the waits and the proofs.
 # ONE VALUE FROM OUTSIDE THE PLAN (wave-26 T14; review 5 F8): UNITS_LIVE_HEAD, the working
 # branch's head as the caller read it, which `live:head` compares with the last review proof's
 # `head=`. Unset, a plan with a review proof cannot see past it, and its live review waits.
