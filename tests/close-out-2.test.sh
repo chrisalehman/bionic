@@ -33,14 +33,10 @@ printed_adr_cell() { printed_row | awk -F'|' '{ c = $6; gsub(/^[ \t]+|[ \t]+$/, 
 epic_planned_first() {
   cat <<'EPIC78'
 ---
-canonical_sdlc_version: 14
+canonical_sdlc_version: 15
 ---
 
 # epic-fx
-
-## SDLC State
-
-current: 4
 
 ## Waves — planned
 
