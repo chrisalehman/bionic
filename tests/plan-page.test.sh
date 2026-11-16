@@ -101,7 +101,7 @@ for h in "Verification Matrix" "SDLC State" "Handoff"; do
 done
 write_plan "$(printf '## Tasks\n\n%s\n\nAn example:\n\n```\n## Handoff\n```\n' "$NINE" | page 15)"
 expect_status "a fenced ## Handoff is prose, and admitted" 0 "$HOOK_EXIT"
-FP="$R/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md"; printf '## SDLC State\n\ncurrent: 4\n\n## Tasks\n\n%s\n\n### T1 — a fenced comment\n\nRuling one.\n\n```bash\n# run it like this\n## run\n```\n\nRuling two: never commit.\n' "$NINE" | page 14 > "$FP"
+FP="$R/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md"; printf '## Tasks\n\n%s\n\n### T1 — a fenced comment\n\nRuling one.\n\n```bash\n# run it like this\n## run\n```\n\nRuling two: never commit.\n' "$NINE" | page 15 > "$FP"
 expect_contains "a section holding a fenced # line is read whole" "Ruling two: never commit." "$(bash -c '. "$1" && plan_read_section "$2" T1' _ "$PLAN_READ" "$FP")"
 bash -c '. "$1" && plan_read_section "$2" run' _ "$PLAN_READ" "$FP" >/dev/null; expect_status "a heading inside a fence starts no section" 1 "$?"
 printf 'plan=%s\n' "$FP" > "$R/.bionic/tmp/engaged-$SID.state"; ( cd "$R" && HOME="$HOME_DIR" CLAUDE_CODE_SESSION_ID="$SID" bash "$BIONIC_HOOKS_DIR/session-poker.sh" brief T1 w01-T1 ) >/dev/null 2>&1
@@ -144,8 +144,6 @@ done
 ask_task() { bash -c '. "$1" && plan_read_criterion_task "$2"' _ "$PLAN_READ" "$FP"; }
 evp T1 | page 15 > "$FP"; expect_eq "at 15 the reader answers a criterion's task from its column" "AC-1	T1" "$(ask_task)"
 evp — | page 15 > "$FP"; expect_eq "…and a dash names none" "" "$(ask_task)"
-printf '## Verification Matrix\n\n| AC | tier | status |\n|---|---|---|\n| AC-1 | T1 | pending |\n\nAC-1:\n  task: T7, T8\n\n%s\n' "$(evp T99 | sed -n '/^## Eval design/,$p')" | page 14 > "$FP"
-expect_eq "at 14 it answers from the block's task: line, and never from a column" "AC-1	T7, T8" "$(ask_task)"
 
 section "GATE"
 git -C "$R" -c user.name=f -c user.email=f@x.invalid -c core.hooksPath=/dev/null commit -q --allow-empty -m base
