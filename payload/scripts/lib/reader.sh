@@ -324,10 +324,11 @@ ev() == "published" { _landed[line_kv("row")] = 1 }
 function dropped(r) { return (r in _dropped) && !(r in _landed) }
 '
 
-# A ROW'S STATE IS FOLDED HERE ONCE, and `status` and the fill (lib/units.sh `_units_live`) put this before their own
-# program, as they put the drop rule. Per row, in fact order: `_row_state` the latest of dispatched, candidate, ready,
-# returned, stalled and landed; `_row_held` the latest of a timed launch (active) and a landing, the scheduler's own;
-# `_row_name` the timed launch's name; `_row_dispatch` the last dispatch line; `_row_commit` the landing's commit.
+# A ROW'S STATE AND ITS TREE ARE FOLDED HERE ONCE, and `status` and the fill (lib/units.sh `_units_live`) put this before
+# their own program, as they put the drop rule. Per row, in fact order: `_row_state` the latest of dispatched, candidate,
+# ready, returned, stalled and landed; `_row_held` the latest of a timed launch (active) and a landing, the scheduler's
+# own; `_row_name` the timed launch's name; `_row_dispatch` the last dispatch line; `_row_commit` the landing's commit;
+# `_row_tree` the last tree line, and `_row_tree_held` the last one with an instant, the scheduler's own.
 _READER_ROW_AWK='
 { _r = line_kv("row"); _e = (_r == "") ? "" : ev() }
 _r != "" && !(_r in _row_seen) { _row_seen[_r] = 1; _row_order[++_rows] = _r }
@@ -338,6 +339,8 @@ _e == "dispatch" && line_kv("at") == "" { if (!(_r in _row_state)) _row_state[_r
 _e == "dispatch" { _row_state[_r] = "dispatched"; _row_held[_r] = "active"; _row_name[_r] = line_kv("name") }
 _e == "published" { _row_state[_r] = _row_held[_r] = "landed"; _row_commit[_r] = line_kv("commit") }
 _e == "candidate" || _e == "ready" || _e == "returned" || _e == "stalled" { _row_state[_r] = _e }
+# an untimed tree line: the same act wrote one per tree cell, so it records the tree and holds none for the scheduler
+_e == "tree" { _row_tree[_r] = $0; if (line_kv("at") != "") _row_tree_held[_r] = $0 }
 '
 
 _reader_of() {  # <plan> <type> [<field> <value>] -> the standing facts of <type>, of <field>=<value> when a value is given
@@ -440,13 +443,11 @@ reader_q_status() {  # <plan> <row> -> state= of the row, then its dispatch cont
   _reader_needs status '<row>' "${2:-}" || return 2
   plan_read_row "$1" Tasks id "$2" >/dev/null || return 1
   reader_facts "$1" | awk -F'|' -v r="$2" "$_READER_AWK$_READER_DROP_AWK$_READER_ROW_AWK"'
-    line_kv("row") != r { next }
-    ev() == "tree" { t = line_kv("path"); b = line_kv("branch"); o = line_kv("base") }
     END {
       s = dropped(r) ? "dropped" : _row_state[r]
       print "state=" (s == "" ? "pending" : s)
       n = split(_row_dispatch[r], p, "|"); for (i = 2; i <= n; i++) if (p[i] !~ /^(ev|row|at)=/) print p[i]
-      if (t != "") { print "tree=" t; print "branch=" b; print "base=" o }
+      $0 = _row_tree[r]; if (line_kv("path") != "") { print "tree=" line_kv("path"); print "branch=" line_kv("branch"); print "base=" line_kv("base") }
       if (_row_commit[r] != "") print "commit=" _row_commit[r]
     }'
 }

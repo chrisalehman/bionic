@@ -219,9 +219,8 @@ _units_live() {
   [ -s "$log" ] && [ ! -L "$log" ] || return 0
   facts="$(_units_facts_of "$plan")" || return 2
   printf '%s\n' "$facts" | awk -F'|' "$_READER_AWK$_READER_DROP_AWK$_READER_ROW_AWK"'
-    _e == "tree" && line_kv("at") != "" { tr[_r] = line_kv("path"); bs[_r] = substr(line_kv("base"), 1, 8) }
-    END { for (i = 1; i <= _rows; i++) { r = _row_order[i]; s = dropped(r) ? "dropped" : _row_held[r]; if (s != "" || (r in tr))
-      printf "%s\t%s\t%s\t%s\t%s\n", r, s, _row_name[r], tr[r], bs[r] } }'
+    END { for (i = 1; i <= _rows; i++) { r = _row_order[i]; s = dropped(r) ? "dropped" : _row_held[r]; $0 = _row_tree_held[r]
+      if (s != "" || $0 != "") printf "%s\t%s\t%s\t%s\t%s\n", r, s, _row_name[r], line_kv("path"), substr(line_kv("base"), 1, 8) } }'
 }
 
 # A PROOF IS THE RUN'S TOO: what each row's proof read, `live:head` and a reading's question compare is the run's proofs,
