@@ -249,12 +249,21 @@ reader_q_landed() {  # <plan> [row] -> each landing, of <row> when named
     ev() == "published" && (r == "" || line_kv("row") == r)'
 }
 
+# An ask's round, by key and round (absent, 1); a decision has one key, approve:D<n> read as decide:D<n>.
+_READER_ASK_AWK='
+function ask_round(   k, r) { k = line_kv("key"); if (k ~ /^approve:D[0-9]+$/) k = "decide:" substr(k, 9); r = line_kv("round")
+  return k SUBSEP (r == "" ? 1 : r) }
+'
+
 reader_question asks list reader_q_asks
-reader_q_asks() {  # <plan> -> each ask still open: no reply on it, and no approval of its `approve:` key since
-  reader_facts "$1" | awk -F'|' "$_READER_AWK"'
+reader_q_asks() {  # <plan> -> each ask still open: its round open in the rounds, and no approval of its `approve:` key since
+  # Whether a round is closed is the rounds' one rule (`reader_ask_rounds`): this asks it, then adds the approval.
+  { reader_ask_rounds "$1"; printf '\034\n'; reader_facts "$1"; } | awk -F'|' "$_READER_AWK$_READER_ASK_AWK"'
+    $0 == "\034" { facts = 1; next }
+    !facts { if (line_kv("state") == "open") round_open[ask_round()] = 1; next }
     ev() == "ask" {
       id = line_kv("key") SUBSEP line_kv("round")
-      if (line_kv("reply") != "") { delete open[id]; next }
+      if (!(ask_round() in round_open)) { delete open[id]; next }
       if (!(id in seen)) { seen[id] = 1; ord[++n] = id }
       open[id] = $0
     }
@@ -265,8 +274,9 @@ reader_q_asks() {  # <plan> -> each ask still open: no reply on it, and no appro
 # AN ASK'S ROUNDS, WHOLE. The fold keeps an ask's latest event, so it loses when the round opened, when it was sent and
 # answered; this folds every event of a round, by key and round (absent, 1), into one line, in the order the rounds
 # opened. Each act sets what it carries: sent=, title=, prompt=, an answer at its instant, and the closer's reply=,
-# which closes the round. A decision has one key, approve:D<n> read as decide:D<n>. No approval closes a round here:
-# a round closes by its reply alone, so the asks library's list is the asks its writers left open.
+# which closes the round: this is the one rule of a round closed, which the open list (`reader_q_asks`) asks. No
+# approval closes a round here: a round closes by its reply alone, so the asks library's list is the asks its writers
+# left open.
 #   run/v1|ev=ask|key=<k>|state=open|sent=<ISO or ->|at=<opened>|title=<t>|prompt=<p>|round=<n>[|answer=<w>|answered=<ISO>|event=<e>]
 #   run/v1|ev=ask|key=<k>|state=closed|by=<reply>|at=<closed>|opened=<ISO or empty>|sent=<ISO or ->|round=<n>[|answer=…]
 # Given a plan, the run's ask events; given `-`, the lines on stdin, which is how a session's own store, no run's, is
@@ -275,9 +285,8 @@ reader_q_asks() {  # <plan> -> each ask still open: no reply on it, and no appro
 reader_ask_rounds() (  # <plan|-> -> one line per round; 2 when the plan's events cannot be read
   set -o pipefail
   { if [ "${1:-}" = - ]; then cat; else reader_events "$1"; fi; } \
-  | awk -F'|' "$_READER_AWK"'
-    ev() == "ask" { k = line_kv("key"); if (k ~ /^approve:D[0-9]+$/) k = "decide:" substr(k, 9); r = line_kv("round")
-      i = k SUBSEP (r == "" ? 1 : r); a = line_kv("at")
+  | awk -F'|' "$_READER_AWK$_READER_ASK_AWK"'
+    ev() == "ask" { i = ask_round(); a = line_kv("at")
       if (!(i in ST)) { ord[++m] = i; ST[i] = "open"; SE[i] = "-" }
       # opened is the first act that is no close: an untimed opening a home gives is sorted after the close it precedes
       if (!(i in OS) && line_kv("reply") == "") { OS[i] = 1; OP[i] = a }
