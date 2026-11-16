@@ -1466,7 +1466,7 @@ PBR="$(s42_plan "$RBR" 4 $'  worktree: .worktrees/01-fixture\n  base-sha: abc123
 ( cd "$RBR" && git add -f "$PBR" && git commit -qm plan ) >/dev/null 2>&1; BR_DIR="$RBR/.bionic/docs/record/wave-01-fixture"; mkdir -p "$BR_DIR"
 br_verdict() { printf 'run/v1|ev=verdict|row=regression|commit=%s|suite=%s|result=%s|log=-|admitted=-|width=-|kind=regression|at=2026-11-04T10:00:00Z\n' "$1" "$2" "$3" >> "$BR_DIR/run.log"; }
 br_log() { printf 'head=%s dirty=%s\nGating: 1 passed, 1 failed\nrc=%s\n' "$1" "$2" "$3" > "$BR_DIR/regression-run-$1.log"; touch -t "$4" "$BR_DIR/regression-run-$1.log"; }  # <sha> <dirty> <rc> <mtime>
-br_add() { TA_PASTE=1 ta_add "$RBR" "$1" 4 build 'fix the red. The red suite turns green.' bionic:implementor '—' 30 REQ-5 "lib/$1.sh" --born "regression:$2"; }
+br_add() { ta_add "$RBR" "$1" 4 build 'fix the red. The red suite turns green.' bionic:implementor '—' 30 REQ-5 "lib/$1.sh" --born "regression:$2"; }
 br_verdict "$BR_C1" a.test.sh red; br_add T6 a.test.sh
 expect_eq "BR-1 a red verdict at a branch commit and no proof line: task-add --born regression:a.test.sh exits 0, the born event reading the run" "0|1" \
   "$RC|$(/usr/bin/grep -c "|ev=born|row=T6|reason=regression a.test.sh|finding=run@${BR_C1:0:12}|" "$BR_DIR/run.log")"

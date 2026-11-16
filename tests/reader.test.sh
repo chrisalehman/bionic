@@ -403,6 +403,10 @@ section "JOIN-15"
 W=w15; expect_eq "a nine-cell row waits on its deps and what its kind and step imply, and no approval holds it" \
   "B1=0 B2=1 B3=1 B4=1 ; ready=B1; waive:F1>B4 ; Z9=1" "$(joined B1 B2 B3 B4)"
 land B1; expect_eq "a test row at Step 6 waits for the code writers before it" "B1=1 B2=0 B3=1 B4=1 ; ready=B2" "$(joined B1 B2 B3 B4 | cut -d';' -f1-2)"
+printf '%s\n' "$JLOG" | plan w15s; printf '%s\n' '## Tasks' '' '| id | step | kind | task | deps | size | serves | Files | artifact |' '|---|---|---|---|---|---|---|---|---|' \
+  '| B1 | 4 | build | t | — | 30 | R | src/b.sh | — |' '| B5 | 4 | build | t | approval:ship | 30 | R | src/e.sh | — |' > "$D/plans/epic-x/w15s.plan.md"
+W=w15s; expect_eq "an approval a nine-cell row names in its deps holds it on its ask, and the row beside it is ready" \
+  "B1=0 B5=1 ; ready=B1; approve:ship>B5 ; Z9=1" "$(joined B1 B5)"
 
 section "SECTION"
 SP="$D/plans/epic-x/sec.plan.md"
@@ -468,19 +472,19 @@ expect_eq "a fenced table is prose, the heading reads in either case and may go 
   "$(for W in tfence tsuffix tlower tnote tcr; do printf '%s=%s ' $W "$(ask row T1 | sed -n 's/^task=//p')"; done)"
 
 section "WAITS"
-# The rows each read names carry the read: a row reading its own id waits on itself, and a row reading
-# live:head writes the settled head for a row that reads it.
+# The rows each wait names carry the wait: a row naming its own id waits on itself, and a review row reading
+# live:head by its kind writes the settled head for a test row that reads it.
 cat > "$D/plans/epic-x/wr.plan.md" <<'EOF2'
 ## Tasks
 
-| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| C1 | 4 | build | t | — | — | 30 | R | src/c.sh | — | — | pending | approval:plan, C1, head |
-| C2 | 4 | build | t | — | — | 30 | R | src/d.sh | — | — | pending | live:head |
-| C3 | 4 | build | t | — | — | 30 | R | record/C3.md | — | — | pending | approval:plan, src/c.sh, C1 |
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| C1 | 4 | build | t | C1 | 30 | R | src/c.sh | — |
+| C2 | 6 | review | t | — | 30 | R | src/d.sh | — |
+| C3 | 5 | test | t | C1 | 30 | R | record/C3.md | — |
 EOF2
 rw() { ( . "${READER%/reader.sh}/lib/reader.sh" && plan_read_waits "$D/plans/epic-x/wr.plan.md" ) | awk -F'\t' '$2 == "row" { printf "%s>%s<%s ", $1, $3, $4 }'; }
-expect_eq "each row a read names, with the reads that name it" "C1>C1<C1 C1>C2<head C3>C1<src/c.sh,C1 " "$(rw)"
+expect_eq "each row a wait names, with the waits that name it" "C1>C1<C1 C2>C1<live:head C3>C1<head,C1 C3>C2<head " "$(rw)"
 section "HALF"
 # A run is its log alone: its old homes beside a plan at 14, or beside a log, are never read, and the kept fold's key
 # (lib/proof.sh `_proof_facts`) is summed over the plan, the reader's libraries and the log, no other file of the record.

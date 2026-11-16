@@ -103,11 +103,6 @@ for go_row in \
   expect_eq "GO-$go_k-1b …$go_new beside it is kept" "kept|" "$(gone "$go_fn" "$go_k" "$go_new")"
   expect_eq "GO-$go_k-1c …a word of no row is kept" "kept|" "$(gone "$go_fn" "$go_k" review)"
 done
-expect_eq "GO-reads-1 a typed reads cell carrying proof:floor is refused, naming proof:regression" "gone|proof:floor is gone; write proof:regression" \
-  "$(gone alias_gone_cell reads 'approval:plan, proof:floor, head')"
-expect_eq "GO-reads-1b …the live: form too" "gone|proof:floor is gone; write proof:regression" "$(gone alias_gone_cell reads 'head, live:proof:floor')"
-expect_eq "GO-reads-1c …and the cell of the new spelling is kept" "kept|" "$(gone alias_gone_cell reads 'approval:plan, proof:regression, live:proof:review, head')"
-expect_eq "GO-reads-1d …and so is a cell with no tokens at all" "kept|" "$(gone alias_gone_cell reads '—')"
 expect_eq "GO-config-1 a config text carrying the floor: key is refused, naming regression-command:" "gone|floor: is gone; write regression-command:" \
   "$(gone alias_gone_text config "$(printf 'poker-interval: 20m\nfloor: bash old.sh\n')")"
 expect_eq "GO-config-1b …with the new key beside it too: the old key is still refused, never read past" "gone|floor: is gone; write regression-command:" \
@@ -181,8 +176,9 @@ git -C "$RAB" branch wave/01-fixture
 PAB="$(s42_plan "$RAB" 4)"
 printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=record/wave-01-fixture/floor.txt|owed=a.test.sh,b.test.sh|at=2026-10-14T00:00:00Z\n' "$AB_C1" \
   >> "$RAB/.bionic/docs/record/wave-01-fixture/run.log"
-TA_PASTE=1 ta_add "$RAB" T6 4 build 'fix the red. The red suite turns green.' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born regression:a.test.sh
-expect_eq "GB-1 task-add --born regression:a.test.sh, which the regression proof owes, exits 0" "0" "$RC"
+ta_add "$RAB" T6 4 build 'fix the red. The red suite turns green.' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born regression:a.test.sh
+expect_eq "GB-1 task-add --born regression:a.test.sh, which the regression proof owes, exits 0, born with no other row edited" "0|same" \
+  "$RC|$(cmp -s "$TMPROOT/s42-before" "$PAB" && echo same)"
 ta_add "$RAB" T7 4 build 'fix the other red. The other red suite turns green.' bionic:implementor '—' 30 REQ-5 'lib/d.sh' --born floor:b.test.sh
 expect_eq "GB-2 task-add --born floor:b.test.sh is refused (exit 1)" "1" "$RC"
 expect_contains "GB-2b …the refusal names the new operand" "--born floor: is gone; write --born regression:" "$OUT"
@@ -227,50 +223,50 @@ POKE_BOUND="$GL_BOUND_WAS"
 # ============================================================
 section "§ALIAS-PLAN: a plan 1.20.0 wrote (kind=floor, proof:floor, born: floor … of=floor) judges as its renamed twin does, silently"
 # ============================================================
-# The two plans differ only by the old and new spellings of the on-disk tokens. Every reader is the library's own,
-# sourced as a hook sources it: proof_last and the owed field, the absent judge, the born-marker reader, the units
-# validator and the readiness program (units_ready, units_waiting, units_edges).
-AP_DIR="$TMPROOT/ap"; mkdir -p "$AP_DIR"
+# The two runs differ only by the old and new spellings of the tokens their logs hold: a page at 15 each, its rows in
+# their nine cells, and in its run's log the regression proof and the fix row's born event, spelled as 1.20.0 wrote them
+# beside their renamed twin. Every reader is the library's own, sourced as a hook sources it: proof_last and the owed
+# field, the absent judge, the born-marker reader, the units validator and the readiness program (units_waiting,
+# units_edges).
+AP_DIR="$TMPROOT/ap"; mkdir -p "$AP_DIR/docs/plans/e"
 AP_H="0123456789abcdef0123456789abcdef01234567"
-ap_plan() {  # <proof kind> <reads token> <born word> <of word> -> a plan on stdout
-  printf -- '---\ngoverning-skill: superpowers:writing-plans\nparallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n---\n\n'
-  printf '# fixture plan\n\n## SDLC State\n\ncurrent: 7\n%s\n\n- Step 4: in progress\n' "$SP_APPROVED_LINE"
-  printf -- '- T3: landed at record/T3.md — added by task-add at 2026-10-14T00:00:00Z born: %s a.test.sh of=%s\n' "$3" "$4"
-  printf 'proved: kind=%s head=%s at=2026-10-14T00:00:00Z evidence=record/w/r.log owed=a.test.sh\n\n' "$1" "$AP_H"
-  printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n'
-  printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
-  printf '| T3 | 6 | build | the fix | implementor | — | 30 | REQ-1 | a.sh | landed | — |\n'
-  printf '| T5 | 7 | review | the live read | critic | — | 30 | REQ-1 | .bionic/docs/record/w/r2.md | pending | live:%s |\n' "$2"
-  printf '| T4 | 7 | doc | the release | implementor | — | 30 | REQ-1 | b.md | pending | %s, approval:release |\n' "$2"
-  printf '| T6 | 8 | integrate | the merge | implementor | — | 30 | REQ-1 | — | pending | — |\n'
+ap_plan() {  # <run name> <proof kind> <born word> <of word> -> the run's page at 15 and its log; prints the page's path
+  local p="$AP_DIR/docs/plans/e/$1.plan.md" l="$AP_DIR/docs/record/$1/run.log"
+  mkdir -p "${l%/*}"
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\ncanonical_sdlc_version: 15\nparallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=user\n---\n\n'
+    printf '# fixture plan\n\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T3 | 6 | build | the fix | — | 30 | REQ-1 | a.sh | — |\n'
+    printf '| T5 | 7 | review | the live read | — | 30 | REQ-1 | .bionic/docs/record/w/r2.md | — |\n'
+    printf '| T4 | 7 | doc | the release | approval:release | 30 | REQ-1 | b.md | — |\n'
+    printf '| T6 | 8 | integrate | the merge | — | 30 | REQ-1 | — | — |\n'; } > "$p"
+  printf 'run/v1|ev=%s|at=2026-10-14T00:00:0%sZ\n' 'step|n=7' 1 'approval|key=step3|by=fixture|said=approved' 2 'published|row=T3|commit=c3' 3 \
+    "born|row=T3|reason=$3 a.test.sh|finding=$4" 4 "proof|kind=$2|head=$AP_H|evidence=record/w/r.log|owed=a.test.sh" 5 > "$l"
+  printf '%s' "$p"
 }
-ap_plan floor proof:floor floor floor > "$AP_DIR/old.plan.md"
-ap_plan regression proof:regression regression regression > "$AP_DIR/new.plan.md"
+AP_OLD="$(ap_plan old floor floor floor)"; AP_NEW="$(ap_plan new regression regression regression)"
 ap() {  # <plan> <function> [args] -> the library's answer, roots, run, units (and through it proof, alias) sourced
   bash -c '. "$1/roots.sh"; . "$1/run.sh"; . "$1/units.sh"; p="$2"; fn="$3"; shift 3; "$fn" "$p" "$@"' _ "$LIB" "$1" "${@:2}" 2>> "$TMPROOT/ap.err"
 }
 ap_both() {  # <label> <function...> -> the old plan's answer equals the new plan's, and both are non-empty
-  local o n; o="$(ap "$AP_DIR/old.plan.md" "${@:2}")"; n="$(ap "$AP_DIR/new.plan.md" "${@:2}")"
+  local o n; o="$(ap "$AP_OLD" "${@:2}")"; n="$(ap "$AP_NEW" "${@:2}")"
   expect_nonempty "$1 — the renamed plan answers" "$n"
   expect_eq "$1 — the 1.20.0 plan answers as its renamed twin" "$n" "$o"
 }
 : > "$TMPROOT/ap.err"
 expect_eq "AP-0 the new plan's last regression proof is its head (the reader's positive)" "$AP_H" \
-  "$(bash -c '. "$1/proof.sh"; proof_last "$2" regression' _ "$LIB" "$AP_DIR/new.plan.md" 2>/dev/null)"
+  "$(bash -c '. "$1/proof.sh"; proof_last "$2" regression' _ "$LIB" "$AP_NEW" 2>/dev/null)"
 expect_eq "AP-1 the 1.20.0 plan's kind=floor line is the last regression proof too" "$AP_H" \
-  "$(bash -c '. "$1/proof.sh"; proof_last "$2" regression' _ "$LIB" "$AP_DIR/old.plan.md" 2>/dev/null)"
+  "$(bash -c '. "$1/proof.sh"; proof_last "$2" regression' _ "$LIB" "$AP_OLD" 2>/dev/null)"
 expect_eq "AP-2 …and its owed= field reads a.test.sh" "a.test.sh" \
-  "$(bash -c '. "$1/proof.sh"; _proof_last_read "$2" regression owed' _ "$LIB" "$AP_DIR/old.plan.md" 2>/dev/null)"
+  "$(bash -c '. "$1/proof.sh"; _proof_last_read "$2" regression owed' _ "$LIB" "$AP_OLD" 2>/dev/null)"
 expect_eq "AP-3 …and the absent judge finds a regression line (exit 1, nothing printed)" "1|" \
-  "$(o="$(bash -c '. "$1/proof.sh"; proof_floor_absent "$2"' _ "$LIB" "$AP_DIR/old.plan.md" 2>/dev/null)"; printf '%s|%s' "$?" "$o")"
+  "$(o="$(bash -c '. "$1/proof.sh"; proof_floor_absent "$2"' _ "$LIB" "$AP_OLD" 2>/dev/null)"; printf '%s|%s' "$?" "$o")"
 expect_eq "AP-4 the born-marker reader reads the 1.20.0 marker as a regression-born row" "$(printf 'T3\tregression\ta.test.sh')" \
-  "$(ap "$AP_DIR/old.plan.md" units_born_marks)"
+  "$(ap "$AP_OLD" units_born_marks)"
 ap_both "AP-5 units_born_marks" units_born_marks
-expect_eq "AP-6 the units validator passes the renamed plan (no violation)" "" "$(ap "$AP_DIR/new.plan.md" units_validate)"
-expect_eq "AP-6b …and passes the 1.20.0 plan, proof:floor in its reads, the same" "" "$(ap "$AP_DIR/old.plan.md" units_validate)"
+expect_eq "AP-6 the units validator passes the renamed plan (no violation)" "" "$(ap "$AP_NEW" units_validate)"
+expect_eq "AP-6b …and passes the 1.20.0 run's page the same" "" "$(ap "$AP_OLD" units_validate)"
 ap_both "AP-7 units_waiting at step 7" units_waiting 7
-expect_contains "AP-7b …and the 1.20.0 plan's T4 waits on approval:release, its regression read met" \
-  "$(printf 'T4\tapproval:release')" "$(ap "$AP_DIR/old.plan.md" units_waiting 7)"
 ap_both "AP-8 units_edges" units_edges
 expect_eq "AP-9 none of these readers printed a word on stderr for the on-disk tokens (the readers' positives are the answers above)" "0" "$(wc -c < "$TMPROOT/ap.err" | tr -d ' ')"
 

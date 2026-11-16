@@ -54,14 +54,11 @@ expect_eq "36g prompt takes no arguments (exit 2)" "2" "$RC"
 
 
 # ============================================================
-section "Section 37: T10b — the release waits for its step and the tick names the hold; task-add keeps author text byte for byte (critic C3, review R6)"
+section "Section 37: the release fills once its waits are met, at any step; task-add keeps author text byte for byte"
 # ============================================================
 #
-# C3: at current: 5, with its Step-5 dependency landed, the Step-7 release row (kind `doc`) was
-# ready, so the tick ordered `FILL` for a release before any auditor or critic verdict. Δ6's
-# accepted reading holds a gate act until `current:` reaches its step; the release is the
-# Document step's gate act. The tick's no-FILL line now NAMES each row held for its step, so a
-# reader of the line can tell "nothing is ready" from "the release waits for Step 7".
+# A RELEASE ROW WAITS ON WHAT ITS DEPS AND ITS KIND NAME, and on no step: the person approves the
+# release at the merge, which waits on that approval.
 R37A="$(make_repo s37-held)"; new_roster "$R37A"
 sp_plan_at_step "$R37A" 5 \
   "| T1 | 4 | build | landed | implementor | — | 15m | REQ-x | a.sh | landed |" \
@@ -70,8 +67,6 @@ sp_plan_at_step "$R37A" 5 \
 poke_pressure "$R37A" 8192 1.0 tick
 expect_contains "37a at current: 5 the release row at 15, its waits met, is filled: no step holds it" \
   "poker: FILL T3" "$OUT"
-# A RELEASE ROW AT 15 WAITS ON WHAT ITS DEPS AND ITS KIND NAME, and on no step: the person
-# approves the release at the merge, which waits on that approval.
 
 # 37c — AT ITS STEP THE RELEASE FILLS. Same table at current: 7.
 R37C="$(make_repo s37-at-step)"; new_roster "$R37C"
@@ -232,7 +227,7 @@ poke_pressure "$R40A" 8192 1.0 tick
 expect_contains "40a AC-3.3 the first tick prints the ext:-held row's HELD line" "poker: HELD T2 ext:ci-40a" "$OUT"
 expect_absent "40a2 AC-4.2 …and the row launched under a name no roster row carries ticks no LEDGER line, as the gate reads it" "poker: LEDGER T1" "$OUT"
 expect_absent "40a3 AC-4.1 …nor does the other launched row" "poker: LEDGER T3" "$OUT"
-s40_find() { bash -c '. "$1/units.sh" && units_findings "$2" "$3" v15' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$P40A" "$1"; }
+s40_find() { bash -c '. "$1/units.sh" && units_findings "$2" "$3"' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$P40A" "$1"; }
 expect_eq "40a3b …the gate's reading of the same world admits both rows, and with a roster naming neither it names each launch" \
   "|launch T1 w-T9 launch T3 w-T3" "$(s40_find '')|$(new_roster "$R40A"; s40_find "$(roster_of "$R40A")" | paste -sd' ' -; rm -f "$(roster_of "$R40A")")"
 expect_eq "40a4 …each HELD line once" "1" "$(s40_count 'poker: HELD ')"
