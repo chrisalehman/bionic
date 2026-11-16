@@ -1425,13 +1425,15 @@ BRF_EOF
   }
 
   # rr_rows <plan> <current> [head] -> `<AC>\037<tier>\037<status>\037<auditor>\037<ruled 1|0|owed:<step>>\037<person>\037<reason>`
-  # per criterion, the reader's order. THE RULING IS walls.sh's: each criterion is read through its readers (`matrix_load`,
-  # the reader's answer, and `matrix_table_rows`) and judged by `matrix_row_ruled`,
-  # sourced in a subshell as the facts judge sources it, so the card and the gate cannot answer one row two ways. A
+  # per criterion, the reader's order. THE RULING IS THE GATE'S: each criterion is read through its readers (`matrix_load`,
+  # the reader's answer, and `matrix_table_rows`), and it is unruled exactly when walls.sh `matrix_unruled` names it at 8,
+  # the reader `current 8` asks, sourced in a subshell as the facts judge sources it, so the card and the gate cannot
+  # answer one row two ways: at single rigor, where the gate owes no auditor's word, no row is unruled. A
   # WAIVER IS A FACT OF THE RUN: the reader's status says waived only where a waiver event names the criterion. A row the
   # gate defers at <current> (`matrix_row_deferred`: owed at the later step whose task proves it) is `owed:<step>`, not
   # ruled and not unruled, whatever verdict a passed evidence review gives it, as the gate asks the deferral first:
-  # nothing has run that could prove it, and the step that runs it writes it. The auditor is printed as
+  # nothing has run that could prove it, and the step that runs it writes it. A row `matrix_unruled` defers at 8 is
+  # deferred at every step before it, so it reads owed here. The auditor is printed as
   # `placeholder_cell` folds it, `-` when it means none. THE PERSON'S PART is `confirmed` for a T4 row holding an attributed
   # confirmation, `awaits` for a T4 row holding none that one would rule (the same `matrix_row_ruled` asked of the row
   # with a confirmation in its attributed shape), and `-` otherwise. Its auditor cell never answers this alone, since
@@ -1439,12 +1441,13 @@ BRF_EOF
   # walls.sh cannot be loaded or the run's facts could not be read: the card never guesses a ruling.
   rr_rows() {
     [ -f "$BIONIC_LIB/walls.sh" ] || return 2
-    ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F matrix_row_ruled >/dev/null 2>&1 \
+    ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F matrix_unruled >/dev/null 2>&1 \
         && declare -F matrix_row_deferred >/dev/null 2>&1 || exit 2
-      PLAN="$1"; matrix_load "$PLAN" "${3:-}" || exit 2
+      PLAN="$1"; unruled="$(matrix_unruled "$PLAN" 8 "${3:-}")" || exit 2
+      matrix_load "$PLAN" "${3:-}" || exit 2
       while IFS=$'\037' read -r ac tier status ev aud conf waiver; do
         [ -n "$ac" ] || continue
-        ruled=0; matrix_row_ruled "$tier" "$status" "$aud" "$conf" "$waiver" && ruled=1
+        ruled=1; case $'\n'"$unruled"$'\n' in *$'\n'"$ac"$'\n'*) ruled=0 ;; esac
         person=-
         if [ "$tier" = T4 ]; then
           if user_confirmed_attributed "$conf"; then person=confirmed

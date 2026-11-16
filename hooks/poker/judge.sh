@@ -84,11 +84,13 @@ cur8_unruled_line() {
 # STEPS 7 AND 8 ASK IT (wave-35 T10; D10, AC-1.2): Step 7 is entered once the floor is Step 6's last act, so
 # `current 7` is held to the same judge `current 8` is, and a run never leaves Step 6 with its floor behind
 # the head.
-# IN THE ORDER build, regression, review, release (lib/units.sh `units_order`) `current 8` asks besides that the
-# newest `approved: release` line's head (lib/proof.sh `proof_approved_head`) is the working head, or one that only prose
-# touching no release-set file follows (lib/proof.sh `proof_prose_past`). The whole run need
-# not be at that head: the regression judge holds it covered past its run when every later commit is proved by the
-# suites its row named. A plan outside that order is judged as before.
+# WHENEVER THE PLAN HAS A ROW THAT INTEGRATES (lib/units.sh `units_integrates`), whatever its other rows, `current 8`
+# asks besides that the newest `approved: release` line's head (lib/proof.sh `proof_approved_head`) is the working head,
+# or one that only prose touching no release-set file follows (lib/proof.sh `proof_prose_past`): every run that reaches
+# the merge stops at the release approval card, a run with no release row as one in the order build, regression,
+# review, release (`units_order`). The whole run need not be at that head: the regression judge holds it covered past
+# its run when every later commit is proved by the suites its row named. A plan with no row that integrates is asked no
+# approval.
 # THE HEAD IS THE WORKING BRANCH'S REF (wave-35 T10; AC-1.7): lib/proof.sh `proof_branch_head`, the judge's one
 # reading of it, never the head of a checkout, so a branch no checkout holds is judged where its ref points,
 # and a branch that names no commit (deleted, or never made) is refused: there is no head, so the floor is
@@ -106,16 +108,16 @@ cover_basis() {
   facts_cover "$1" "$3" "$4" "$2"
 }
 
-# cur8_unapproved_line -> the printf format of the refusal `current 8` prints in the release order while the release
-# approval is missing, its three %s the regression row, what is missing and the working head. THE ONE SPELLING of that
-# refusal: the release approval card (payload/scripts/card.sh `_card_settles`) runs in a process of its own and reads
+# cur8_unapproved_line -> the printf format of the refusal `current 8` prints while the release approval is missing, its
+# three %s the order the plan is in with its regression row (empty for a plan with no release row), what is missing and
+# the working head. THE ONE SPELLING of that refusal: the release approval card (payload/scripts/card.sh `_card_settles`) runs in a process of its own and reads
 # this function from this file, so it settles the refusal by the words the judge prints, and a reworded refusal is
 # reworded for both. The words are a printf format, so a percent sign in them is written as two.
 cur8_unapproved_line() {
-  printf '%s' "REFUSED — current: 8 in the order (the regression row %s before review and the release) is admitted at the head the user approved for release, and %s; the user's word for the working head %s is approve release '<reply>'. The plan is unchanged."
+  printf '%s' "REFUSED — current: 8%s is admitted at the head the user approved for release, and %s; the user's word for the working head %s is approve release '<reply>'. The plan is unchanged."
 }
 
-# cur8_stale_line -> the printf format of the refusal `current 8` prints in the release order while the newest `approved:
+# cur8_stale_line -> the printf format of the refusal `current 8` prints while the newest `approved:
 # release` line names a head the working head has moved past with code or a release-set file, its two %s the working
 # head and the approved one. THE ONE SPELLING of that refusal, read by the release approval card as
 # `cur8_unapproved_line` is: a stale approval is the card's decision to renew, as a missing one is, so the card knows the
@@ -128,14 +130,15 @@ cur8_stale_line() {
 # first-parent line past which nothing the approval covers changed (`proof_prose_past`); otherwise refuses `current 8`,
 # exit 1, naming both heads, the plan unchanged.
 cur8_approved_head() {
-  local ah fmt missing
+  local ah fmt missing order=""
   ah="$(proof_approved_head "$PV_PLAN" release 2>/dev/null)" || ah=""
+  [ -z "$PV_ORDER" ] || order=" in the order (the regression row $PV_ORDER before review and the release)"
   if [ -z "$ah" ]; then
     missing="$PV_PLAN carries no approved: release line"
     ! proof_approved "$PV_PLAN" release || missing="the newest approved: release line names no head"
     fmt="$(cur8_unapproved_line)"
     # shellcheck disable=SC2059  # the format is cur8_unapproved_line, whose only conversions are its three %s
-    die "$(printf "$fmt" "$PV_ORDER" "$missing" "$PV_HEAD8")"
+    die "$(printf "$fmt" "$order" "$missing" "$PV_HEAD8")"
     exit 1
   fi
   if [ "$ah" != "$PV_HEAD8" ] && ! proof_prose_past "$PV_PLAN" "$ah" "$PV_HEAD8"; then
@@ -166,7 +169,8 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
       exit 1 ;;
   esac
   PV_ORDER="$(units_order "$PV_PLAN" 2>/dev/null)" || PV_ORDER=""
-  [ "$step" != 8 ] || [ -z "$PV_ORDER" ] || cur8_approved_head
+  PV_INTEG="$(units_integrates "$PV_PLAN" 2>/dev/null)" || PV_INTEG=""
+  [ "$step" != 8 ] || [ -z "$PV_INTEG" ] || cur8_approved_head
   # THE RULING IS THE MERGE ADVANCE'S: at 8 every matrix row is ruled, or the advance is refused naming each one.
   local unruled="" ac
   if [ "$step" = 8 ] && ! unruled="$(cur8_unruled)"; then
@@ -243,7 +247,7 @@ current_admit() {
     8|8a|8b)
       cur7_judge 8
       PV_HOW="every fact the run owes holds at $PV_HEAD8 (facts_state)"
-      [ -z "$PV_ORDER" ] || PV_HOW="$PV_HOW, the head the user approved for release" ;;
+      [ -z "$PV_INTEG" ] || PV_HOW="$PV_HOW, the head the user approved for release" ;;
     *) plan_verb_dry current "current: $PV_KEY" "$PV_KEY" ;;
   esac
 }
