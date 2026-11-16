@@ -1047,7 +1047,8 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
   # THE TASKS ROWS AND THE MATRIX'S ARE THE PLAN'S TABLES AS THE SCHEDULER AND THE READER READ THEM: `units_rows`, the
   # by-name map over lib/plan-read.sh's table walk, whose rows the chain and the batches below are drawn from too, and
   # the criteria the reader lists (`reader_cells`), counted. A row is
-  # `id, task, kind, deps, agent, serves, the task cell as written`, its backticks off all but the last.
+  # `id, task, kind, deps, role, serves, the task cell as written`, its backticks off all but the last; the role is
+  # left empty here, since a page holds no agent cell, and `_card_task_rows` reads it from the cell's tag.
   if [ "$1" = step3 ]; then
     _card_units_rows "$2"
     while IFS= read -r line; do
@@ -1055,7 +1056,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
     done < <(printf '%s\n' "$CARD_UROWS" | awk -F'\t' '
       function clean(s) { gsub(/`/, "", s); sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
       $1 != "" { sv = clean($8); if (sv !~ /[A-Za-z0-9]/) sv = ""
-        print clean($1) "\t" clean($4) "\t" clean($3) "\t" clean($6) "\t" clean($5) "\t" sv "\t" $4 }')
+        print clean($1) "\t" clean($4) "\t" clean($3) "\t" clean($6) "\t\t" sv "\t" $4 }')
     # the criteria are the reader's list, one fold; a run whose facts could not be read is no count of them
     WCARD_MROWS="$(_proof_ask "$2" reader_cells "$2")"; _wc_rc=$?
     case "$_wc_rc" in 0) WCARD_MROWS="$(printf '%s\n' "$WCARD_MROWS" | grep -c .)" ;; 1) WCARD_MROWS=0 ;;
@@ -2192,17 +2193,33 @@ _card_step3() {  # <citation path> <artifact path as given>
   printf 'show evals <req> · show task <n> · explain <decision>\n'
 }
 
-# THE TASK ROWS: the title alone, `serves` in a column of its own, and the depends cell with each
-# run of three or more consecutive ids folded to a range; the task's sentence goes under the row.
-# The whole cell is `show task`'s.
+# THE TASK ROWS: the title alone, `serves` in a column of its own, the depends cell with each run of
+# three or more consecutive ids folded to a range, and the role the task asks for; the task's sentence
+# goes under the row. The whole cell is `show task`'s.
 _card_task_rows() {  # sets CARD_ROWS[] from WCARD_TROW[]
   local row serves
   CARD_ROWS=()
   for row in ${WCARD_TROW[@]+"${WCARD_TROW[@]}"}; do
     _card_split "$row"
     serves="${CARD_CELLS[5]:-}"; [ -n "$serves" ] || serves="—"
-    CARD_ROWS[${#CARD_ROWS[@]}]="${CARD_CELLS[0]}${CARD_TAB}$(_card_title cell "${CARD_CELLS[1]:-}")${CARD_TAB}${serves}${CARD_TAB}${CARD_CELLS[2]:-}${CARD_TAB}$(_card_range "${CARD_CELLS[3]:-}")${CARD_TAB}${CARD_CELLS[4]:-}${CARD_TAB}$(_card_cell_sentence "${CARD_CELLS[6]:-}")"
+    CARD_ROWS[${#CARD_ROWS[@]}]="${CARD_CELLS[0]}${CARD_TAB}$(_card_title cell "${CARD_CELLS[1]:-}")${CARD_TAB}${serves}${CARD_TAB}${CARD_CELLS[2]:-}${CARD_TAB}$(_card_range "${CARD_CELLS[3]:-}")${CARD_TAB}$(_card_task_role "${CARD_CELLS[2]:-}" "${CARD_CELLS[6]:-}")${CARD_TAB}$(_card_cell_sentence "${CARD_CELLS[6]:-}")"
   done
+}
+
+# THE ROLE A TASK ASKS FOR is the one its cell's complexity tag names, on a row a writer runs: the plan step tags every
+# step-four task `complexity: complex` or `complexity: standard`, and the agent column says who is asked, so the person
+# approving a plan sees it before anything launches. This is the one home of the kinds whose role the card prints,
+# build and test; a review, a verify, a document, the merge and the close draw the dash whatever their tag says. A
+# launch in the log names the writer that came, not the role, and is not read here. A cell with no tag, or a word the
+# step does not define, draws the dash: no role is guessed.
+# lib/fill.sh `fill_readonly_ids` answers a different question, who takes a writer's slot, so it is not asked here.
+_card_task_role() {  # <kind> <Tasks cell> -> senior-implementor, implementor or —, on stdout
+  local re='^(.*[^[:alnum:]_-])?complexity:[[:space:]]*([[:alpha:]]+)'
+  case "${1:-}" in build|test) ;; *) printf '—'; return 0 ;; esac
+  if [[ "${2:-}" =~ $re ]]; then
+    case "${BASH_REMATCH[2]}" in complex) printf 'senior-implementor'; return 0 ;; standard) printf 'implementor'; return 0 ;; esac
+  fi
+  printf '—'
 }
 
 # Consecutive ids in a depends cell are one range: four ids in a row print as the first and the last
