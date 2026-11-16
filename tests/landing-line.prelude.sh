@@ -55,26 +55,9 @@ if [ -r "$LINE" ] && . "$LINE" 2>/dev/null; then LL_LOADED=1; fi
 
 # ---------------------------------------------------------------------------- helpers
 ll_world() {  # -> a world root; its plan admitted by the real commit gate (the hand landing writes it)
-  local r p
+  local r
   r="$(world_repo)" || return 1
   [ -n "$r" ] && [ "$(git -C "$r" rev-parse --show-toplevel 2>/dev/null)" = "$r" ] || return 1
-  p="$r/.bionic/docs/plans/epic-x/wave-x.plan.md"
-  # Unasked, this run is at 15: the page keeps its header and authored cells, the log holds the rest. LL_WORLD_AT=14 asks for 14.
-  if [ "${LL_WORLD_AT:-15}" = 15 ]; then
-    awk -F'|' '/^## SDLC State$/ { s = 1; next } /^## / { s = 0 } s { next }
-      /^working-branch: / { print; print "canonical_sdlc_version: 15"; next }
-      /^\| id \|/ { print "| id | step | kind | task | deps | size | serves | Files | artifact |\n|---|---|---|---|---|---|---|---|---|"; getline; next }
-      /^\| T[0-9]+ \|/ { printf "|%s|%s|%s|%s|%s|%s|%s|%s| — |\n", $2, $3, $4, $5, $7, $9, $10, $11; next }
-      { print }' "$p" > "$p.n" && mv "$p.n" "$p" || return 1
-    mkdir -p "$r/.bionic/docs/record/wave-x" && printf 'run/v1|ev=%s|at=2026-10-04T00:0%s:00Z\n' 'step|n=1' 1 'step|n=2' 2 'step|n=3' 3 'step|n=4' 4 \
-      'approval|key=step3|by=fixture|said=approved' 5 'dispatch|row=T1|name=wx-T1' 6 'tree|row=T1|path=.worktrees/T1' 7 \
-      'dispatch|row=T2|name=wx-T2' 8 'tree|row=T2|path=.worktrees/T2' 9 > "$(ll_log "$r")" || return 1
-  else
-    awk '{ print }
-      /^working-branch: / { print "canonical_sdlc_version: 14" }
-      /^current: 4$/ { print "approved-by: fixture 2026-10-04T00:00Z \"approved\""; print "- Step 4: started"; print "- T1: active"; print "- T2: active" }' \
-      "$p" > "$p.n" && mv "$p.n" "$p"
-  fi
   printf '%s' "$r"
 }
 ll_plan() { printf '%s/.bionic/docs/plans/epic-x/wave-x.plan.md' "$1"; }

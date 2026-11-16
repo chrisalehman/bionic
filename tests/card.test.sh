@@ -2270,7 +2270,7 @@ ur_early() {  # <root> -> UR_RC, UR_OUT of card.sh early on the root's plan, as 
 ur_world() {  # <label> [<edit> [<last step>]] -> UR_P: the fixture at 15, its Step 7 record named, <edit> applied to
   # its root, carried from 5 to <last step> (8 by default) by the advance itself
   local p n
-  p="$(CO_PLAN_AT=15 mk_fixture "$1")" || return 1
+  p="$(mk_fixture "$1")" || return 1
   sed 's/^adrs: none$/adrs: none: the fixture decides nothing durable/' "$p/$PLAN_REL" > "$p/$PLAN_REL.n" && mv "$p/$PLAN_REL.n" "$p/$PLAN_REL"
   [ -z "${2:-}" ] || "$2" "$p"
   # the waiver records who gave it by the project's git user, which the fixture's repository sets as a person's does
