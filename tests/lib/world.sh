@@ -235,8 +235,9 @@ world_verbs() {
 
 # world_repo — prints the root of a new fixture repository under WORLD_ROOT, built with real
 # git: `main` with tests/a.test.sh and tests/b.test.sh (both green); the working branch
-# `wave/x` checked out; the bound plan .bionic/docs/plans/epic-x/wave-x.plan.md
-# (`working-branch: wave/x`, open at step 4, rows T1 and T2) with WORLD_SID's engaged marker;
+# `wave/x` checked out; the bound plan .bionic/docs/plans/epic-x/wave-x.plan.md, a run at 15
+# (`working-branch: wave/x` in its header, rows T1 and T2 in nine cells) with the run's log beside it holding
+# steps 1 to 4, the plan's approval and each row's dispatch and tree, and WORLD_SID's engaged marker;
 # a roster at .bionic/tmp/roster-<WORLD_SID>.state with rows wx-T1 and wx-T2; and two row trees,
 # .worktrees/T1 on `wt/T1` and .worktrees/T2 on `wt/T2`, each cut from wave/x with one
 # commit of its own (T1.txt, T2.txt) and a .bionic link to the root's, as spawn-worktree
@@ -264,20 +265,20 @@ world_repo() (
   cat > "$plan" <<'PLAN'
 ---
 working-branch: wave/x
+canonical_sdlc_version: 15
 ---
 # fixture plan (tests/lib/world.sh)
 
-## SDLC State
-
-current: 4
-
 ## Tasks
 
-| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| T1 | 4 | build | row one | wx-T1 | — | | 10 | REQ-1 | T1.txt | .worktrees/T1 | | active |
-| T2 | 4 | build | row two | wx-T2 | — | | 10 | REQ-1 | T2.txt | .worktrees/T2 | | active |
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | row one | — | 10 | REQ-1 | T1.txt | — |
+| T2 | 4 | build | row two | — | 10 | REQ-1 | T2.txt | — |
 PLAN
+  mkdir -p "$root/.bionic/docs/record/wave-x" && printf 'run/v1|ev=%s|at=2026-10-04T00:0%s:00Z\n' 'step|n=1' 1 'step|n=2' 2 'step|n=3' 3 'step|n=4' 4 \
+    'approval|key=step3|by=fixture|said=approved' 5 'dispatch|row=T1|name=wx-T1' 6 'tree|row=T1|path=.worktrees/T1' 7 \
+    'dispatch|row=T2|name=wx-T2' 8 'tree|row=T2|path=.worktrees/T2' 9 > "$root/.bionic/docs/record/wave-x/run.log" || exit 1
   if ! type -t bound_marker >/dev/null 2>&1; then
     # shellcheck source=/dev/null
     . "${BIONIC_SCRIPTS_DIR}/tests/lib/bound-marker.sh" || exit 1

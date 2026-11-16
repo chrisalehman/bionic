@@ -91,9 +91,6 @@ PFC="$RFC/.bionic/docs/plans/wave-x.plan.md"
 # auditor's word and no instant. The second argument is a sed edit over the page and the log; the third, a function
 # given the page's path, edits the page and FC_EV for what its edit means. `fc_owed_now` takes the pending criterion's
 # task away, so it is owed now and never run, which the gate refuses at Step 6 and the card puts as its decision.
-# A section sets FC_VERSION=14, by name at its head, only to prove what a page at 14 alone holds; its events go to the
-# log, which the reader reads beside the page.
-FC_VERSION=15
 FC_SEED="$TMPROOT/fc-seed.log"; FC_EV="$TMPROOT/fc-ev.log"
 fc_owed_now() {  # <page> -> the page with the pending criterion's task taken away, so it is owed now
   sed 's/^\(| — | AC-1\.2 | .*\)| 9 |$/\1| — |/' "$1" > "$1.new" && mv "$1.new" "$1"
@@ -108,47 +105,20 @@ fc_page15() {  # -> PFC, the run's page at 15
   printf '| Requirement | Criterion | Eval type | Eval | Fails when | Task |\n|---|---|---|---|---|---|\n'
   printf '| — | AC-1.1 | T1 | — | the planted defect this eval must go red on | — |\n| — | AC-1.2 | T1 | — | a second planted defect | 9 |\n\n'
 }
-fc_page14() {  # -> PFC as a page at 14 holds the same run: its state, its 13-cell Tasks rows and its matrix
-  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
-  printf 'deploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\nrelease: 1.0.0\n---\n# plan\n\n## SDLC State\n\n'
-  printf 'integration-branch: main\ncurrent: 8\nworking-branch: wave/01-fixture\napproved-by: fixture 2026-09-22T00:00Z approved\n'
-  printf -- '- Step 4: dispatched, record/wave-x/dispatch.md\n  worktree: .\n  base-sha: %s\n  branch: wave/01-fixture\n' "$FC_B"
-  printf -- '- T1: landed %s 2026-10-12T10:00:00Z\n- T2: landed %s 2026-10-12T13:00:00Z\n' "$FC_C" "$FC_R"
-  printf -- '- Step 5: regression, record/wave-x/floor.log\n  auditor: CONFIRMED, record/wave-x/audit.md\n'
-  printf -- '- Step 6: review at record/wave-x/review.md\n'
-  printf -- '- Step 7: documented at record/wave-x/docs.md\n  n/a: no decision this run\n'
-  printf '\n## Tasks\n\n'
-  printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
-  printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-  printf '| T1 | 4 | build | the x writer | implementor | — | 30 | REQ-1 | lib/x.sh | — | — | landed | approval:plan |\n'
-  printf '| T2 | 7 | doc | the release 1.0.0 | implementor | — | 30 | REQ-1 | CHANGELOG.md | — | — | landed | approval:plan, head |\n'
-  printf '| T3 | 8 | integrate | merge into main | orchestrator | — | 10 | REQ-1 | — | — | — | pending | approval:release, approval:merge, head |\n'
-  printf '\n## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
-  printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
-  printf '| AC-1.1 | T1 | discharged | see AC-1.1 | CONFIRMED |\n| AC-1.2 | T1 | pending | see AC-1.2 | CONFIRMED |\n\n'
-  printf 'AC-1.1:\n  fails-when: the planted defect this eval must go red on\n  evidence: record/generic-evidence.md\n'
-  printf '  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n'
-  printf 'AC-1.2:\n  fails-when: a second planted defect\n  evidence: record/generic-evidence.md\n'
-  printf '  tier-run: bash tests/a.test.sh\n  readback: the line it wrote\n'
-}
 fc_plan() {  # <events> [<sed edit>] [<edit function>] -> PFC at current: 8, bound to this session; the record and the ledger cleared
-  case "$FC_VERSION" in 14|15) ;; *) echo "fc_plan: FC_VERSION is 14 or 15, not '$FC_VERSION'" >&2; exit 2 ;; esac
-  rm -f "$FC_REC"/release-approval-*.md "$FC_REC/${RN_W:-review}-results"-*.md "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/asks.state" "$FC_REC/run.log" \
+  rm -f "$FC_REC"/release-approval-*.md "$FC_REC/${RN_W:-review}-results"-*.md "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/run.log" \
     "$(roster_of "$RFC")" "$(ack_ledger_of "$RFC")" "$FC_EV"
-  if [ "$FC_VERSION" = 14 ]; then fc_page14 | sed -e "${2:-}" > "$PFC"; printf '%s\n' "$1" > "$FC_REC/run.log"
-  else
-    fc_page15 > "$PFC"
-    printf 'run/v1|ev=dispatch|row=%s|at=\n' T1\|name=implementor T2\|name=implementor T3\|name=orchestrator > "$FC_EV"
-    printf 'run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|auditor=CONFIRMED|at=\n' >> "$FC_EV"
-    [ -z "${3:-}" ] || "$3" "$PFC" || { echo "fc_plan: the edit $3 failed on $PFC" >&2; exit 2; }
-    { printf 'run/v1|ev=step|n=%s|at=\n' 4 5 6 7 8
-      { printf 'run/v1|ev=approval|key=step3|by=fixture|at=2026-09-22T00:00Z\n'
-        /usr/bin/grep -q '|ev=published|row=T1|' "$FC_SEED" 2>/dev/null || printf 'run/v1|ev=published|row=T1|commit=%s|at=2026-10-12T10:00:00Z\n' "$FC_C"
-        printf 'run/v1|ev=published|row=T2|commit=%s|at=2026-10-12T13:00:00Z\n%s\n' "$FC_R" "$1"; cat "$FC_SEED" 2>/dev/null
-      } | awk -F'|' 'NF { a = $NF; sub(/^at=/, "", a); printf "%s\t%06d\t%s\n", a, NR, $0 }' | LC_ALL=C sort -t "$(printf '\t')" -k1,1 -k2,2n | cut -f3-
-      cat "$FC_EV"; } | sed -e "${2:-}" > "$FC_REC/run.log"
-    sed -e "${2:-}" "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
-  fi
+  fc_page15 > "$PFC"
+  printf 'run/v1|ev=dispatch|row=%s|at=\n' T1\|name=implementor T2\|name=implementor T3\|name=orchestrator > "$FC_EV"
+  printf 'run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|auditor=CONFIRMED|at=\n' >> "$FC_EV"
+  [ -z "${3:-}" ] || "$3" "$PFC" || { echo "fc_plan: the edit $3 failed on $PFC" >&2; exit 2; }
+  { printf 'run/v1|ev=step|n=%s|at=\n' 4 5 6 7 8
+    { printf 'run/v1|ev=approval|key=step3|by=fixture|at=2026-09-22T00:00Z\n'
+      /usr/bin/grep -q '|ev=published|row=T1|' "$FC_SEED" 2>/dev/null || printf 'run/v1|ev=published|row=T1|commit=%s|at=2026-10-12T10:00:00Z\n' "$FC_C"
+      printf 'run/v1|ev=published|row=T2|commit=%s|at=2026-10-12T13:00:00Z\n%s\n' "$FC_R" "$1"; cat "$FC_SEED" 2>/dev/null
+    } | awk -F'|' 'NF { a = $NF; sub(/^at=/, "", a); printf "%s\t%06d\t%s\n", a, NR, $0 }' | LC_ALL=C sort -t "$(printf '\t')" -k1,1 -k2,2n | cut -f3-
+    cat "$FC_EV"; } | sed -e "${2:-}" > "$FC_REC/run.log"
+  sed -e "${2:-}" "$PFC" > "$PFC.new" && mv "$PFC.new" "$PFC"
   bind_marker "$RFC" "$PFC"
 }
 # THE SETTLED RUN: the whole suite ran green at R, the head, so nothing about the merge is the person's to decide;
