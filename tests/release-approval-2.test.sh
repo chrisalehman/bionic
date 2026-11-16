@@ -279,8 +279,8 @@ section "§TASK: a run with no release row is asked the release approval at the 
 # ============================================================
 # FIXTURE FIDELITY: the prelude's run as a task-scale run holds it (regression no; a build, a verify, a review and an
 # integrate row; no documents or test row), each criterion discharged by a proof with no auditor's word, so its
-# auditor cell is the evidence review's, which flagged; AC-1.1 is the person's own check (T4), unconfirmed, and at
-# double the auditor's CONFIRMED is its word. The gate's two asks at 8 are walls.sh `matrix_unruled` and each row
+# auditor cell is the evidence review's, which flagged; the first criterion is the person's own check (T4),
+# unconfirmed, and at double the auditor's CONFIRMED is its word. The gate's two asks at 8 are walls.sh `matrix_unruled` and each row
 # `matrix_row_awaits` holds.
 # fails-when: current 8 or the close admits the run with its card unanswered, or refuses after the typed reply; or the
 #   card's owed rows are not the gate's: at single rigor a waiver nothing owes, or the person's confirmation left off; or,
