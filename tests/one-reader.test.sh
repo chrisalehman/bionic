@@ -191,8 +191,6 @@ nm() { printf '%s\n' "$AFTER" | awk -F'\t' -v f="payload/scripts/lib/planted-$1.
 expect_eq "each planted line is named by its line: the verbs, the matrix cells', the commands with no job (a call, a function, a case arm), the step's and the cap's" \
   "1 2 3 4|1 2|1 2|1|1 2 3 4" "$(nm name)|$(nm cell)|$(nm gone)|$(nm poker-arm)|$(nm step)"
 expect_eq "the tree names none, the plants thirteen" "0 13" "$(count "$BEFORE" names) $(count "$AFTER" names)"
-expect_eq "an older run's names in the translation stand and are no finding; the plan reader's refused keys and the hand count name none" "payload/scripts/lib/translate.sh 0" \
-  "$(cd "$S" && /usr/bin/grep -lwF -e "$(dl 'matrix.set')" -e "$(dl 'regression.runs')" -e "$(dl 'waive.row')" payload/scripts/lib/translate.sh payload/scripts/lib/plan-read.sh hooks/poker/line.sh | paste -sd' ' -) $(count "$BEFORE" names)"
 PV="bash \"\$POKER\" $(dl 'launch.sync')"; nl1() { tr '\n' ' ' | sed 's/ $//'; }
 expect_eq "a retired verb planted alone in a hook is refused by its file and line" "one-reader-check: refused — name hooks/p.sh:1 rc=1" \
   "$(echo "$PV T1" | lone name hooks/p.sh | nl1)"
@@ -224,11 +222,11 @@ n=0; for a in $(printf '%s\n' "$LN" | sed -n '/^bring-/p; /^bf_/p'); do n=$((n +
   expect_eq "the deleted act's name planted alone is refused by its file and line: $a" "one-reader-check: refused — name payload/scripts/p.sh:1 rc=1" \
     "$(printf 'bash "$R/%s" "$plan"\n' "$a" | lone "act$n" payload/scripts/p.sh | tr '\n' ' ' | sed 's/ $//')"; done
 expect_eq "…the list naming both, the file and the function" 2 "$n"
-# A design ledger heading and a debt ledger row are read by the translation alone; no verb writes either file.
-ledgers() { /usr/bin/grep -rnE '## Δ|/ \\[|] /|" [|] raised-by ' "$1/hooks" "$1/payload/scripts" | grep -v -e '/payload/scripts/lib/translate\.sh:' -e ':[0-9]*: *#'; }
+# A design ledger heading and a debt ledger row: no code writes or parses either file.
+ledgers() { /usr/bin/grep -rnE '## Δ|/ \\[|] /|" [|] raised-by ' "$1/hooks" "$1/payload/scripts" | grep -v -e ':[0-9]*: *#'; }
 printf '%s\n' '# ## Δ0 in a comment' "led_n() { sed -n 's/^## Δ\\([0-9]*\\).*/\\1/p' \"\$1\"; }" > "$L/planted-ledger.sh"
 expect_eq "the extractor reads the planted ledger parser and not the comment" "1" "$(ledgers "$S" | grep -c planted-ledger.sh)"
-expect_eq "neither ledger file is written or parsed outside the translation" "" "$(ledgers "$S" | grep -v planted-ledger.sh)"
+expect_eq "neither ledger file is written or parsed" "" "$(ledgers "$S" | grep -v planted-ledger.sh)"
 
 section "REFUSALS"
 own() { printf '%s\n' "${2:-$BEFORE}" | awk -F'\t' -v f="hooks/$1.sh:" 'index($2, f) == 1 { n = $2; sub(/.*:/, "", n); print n, $3 }'; }

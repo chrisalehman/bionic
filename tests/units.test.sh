@@ -921,30 +921,9 @@ section "§AFTER-PUBLISH — after the release is the order the landing record p
 AP_REPO="$SANDBOX/ap-repo"
 git init -q "$AP_REPO" && mkdir -p "$AP_REPO/.bionic/docs/plans" "$AP_REPO/.bionic/docs/record/ap"
 AP_P="$AP_REPO/.bionic/docs/plans/ap.plan.md"
-AP_REC="$AP_REPO/.bionic/docs/record/ap/landing-proofs.log"
 AP_H="$(printf '%040d' 1)"
-ap_plan() {  # <fix row status> -> AP_P: the POST fixture with the fix row T8 born at step 4, after the release row in the table
-  { printf -- '---\ncanonical_sdlc_version: 14\ncurrent: 7\n---\n\n## SDLC State\n\ncurrent: 7\napproved-by: fixture 2026-10-12T00:00Z "approved"\n\n## Tasks\n\n'
-    printf '| id | step | kind | task | agent | deps | size | serves | Files | status | reads |\n|---|---|---|---|---|---|---|---|---|---|---|\n'
-    printf '| T1 | 4 | build | a | implementor | — | 30 | REQ-1 | lib/a.sh, .bionic/docs/record/w/T1.md | landed | |\n'
-    printf '| T5 | 5 | test | the whole regression | test-runner | — | 90 | REQ-1 | .bionic/docs/record/w/T5.md | landed | approval:plan, head |\n'
-    printf '| T6 | 6 | review | the critic | critic | — | 60 | REQ-1 | .bionic/docs/record/w/T6.md | landed | approval:plan, head |\n'
-    printf '| T7 | 7 | doc | the release | implementor | — | 30 | REQ-1 | CHANGELOG.md | landed | approval:plan, head |\n'
-    printf '| T8 | 4 | build | the fix born at step 4 | implementor | — | 30 | REQ-1 | lib/b.sh, .bionic/docs/record/w/T8.md | %s | approval:plan |\n' "$1"
-    printf '| T9 | 7 | review | the critic reads the fix as a piece | critic | — | 20 | REQ-1 | .bionic/docs/record/w/T9-adversarial.md | pending | approval:plan, head, .bionic/docs/record/w/T8.md |\n'
-  } > "$AP_P"
-}
 ap_state() { printf '%s|%s|%s' "$(call units_validate "$AP_P")" "$(call_rc units_validate "$AP_P")" "$(call units_post_readers "$AP_P")"; }
 AP_T9="$(printf 'T9\tpending\tunread')"
-
-# AN OLDER RECORD'S landed: HEADERS, read in their order on the page at 14 above, then gone for the run at 15 below.
-ap_plan landed; : > "$AP_REC"
-for r in T1 T5 T6 T7 T8; do printf 'landed: row=%s branch=b head=%s merge=%s at=2026-10-12T00:00:00Z\n' "$r" "$AP_H" "$AP_H" >> "$AP_REC"; done
-expect_eq "AP-5 a record of landed: headers alone is read in its order too: T8 after T7 is admitted" "|0|$AP_T9" "$(ap_state)"
-ap_plan landed; : > "$AP_REC"
-for r in T1 T5 T6 T8 T7; do printf 'landed: row=%s branch=b head=%s merge=%s at=2026-10-12T00:00:00Z\n' "$r" "$AP_H" "$AP_H" >> "$AP_REC"; done
-expect_eq "AP-5b …and with those headers reversed the differential control refuses" "$PO_ORD|1|" "$(ap_state)"
-rm -f "$AP_REC"
 
 # AT 15 the page holds each row's nine cells, T9 waiting in its deps on the fix row, and the run's log its step, its
 # approval and a published event for each row landed, in the order they landed.

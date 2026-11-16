@@ -1336,59 +1336,29 @@ expect_eq "(k11) a deferral with no stated sentence is refused, the branch unmov
 expect_contains "(k11b) …naming the finding and the verb that states it" "finding-move record/wave-x/critic.md#4 defer" "$KL_OUT"
 
 # ---------------------------------------------------------------------------
-section "§HEALTH: a landing writes nothing of its row or of the matrix: the plan's stack-health: stands as written while the rendering moves"
-# fails-when: a landing rewrites the plan's stack-health: line, or writes its row; or the rendering misses a suite it greened.
-# THE WORLD. The working branch's head F carries a whole run's proof that left a.test.sh and b.test.sh red, and the
-# matrix head's stack-health: as an older proof-add wrote it. T1 lands on a.test.sh through ready, its run green.
+section "§HEALTH: a landing writes nothing of its row, and the rendering of the run's health moves with it"
+# fails-when: a landing writes its row, or the rendering misses a suite it greened.
+# THE WORLD. The working branch's head F carries a whole run's proof in the run's log that left a.test.sh and b.test.sh
+# red. T1 lands on a.test.sh through ready, its run green.
 hl_lib() { ( . "$REPO/payload/scripts/lib/roots.sh" >/dev/null 2>&1; . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1 && "$@" ) 2>/dev/null; }
-hl_sh() { awk '/^## Verification Matrix/ { m = 1; next } /^## / { m = 0 } m && index($0, "stack-health:") == 1' "$1"; }   # <plan>
-HL="$(LL_WORLD_AT=14 ll_world)"; HLP="$(ll_plan "$HL")"; HL_F="$(ll_head "$HL")"   # the matrix's line and the step line are a page at 14's
+HL="$(ll_world)"; HLP="$(ll_plan "$HL")"; HL_F="$(ll_head "$HL")"
 mkdir -p "$HL/.bionic/docs/record/wave-x"
 printf 'head=%s dirty=0\nGating: 3 passed, 2 failed\nFailed:\n    - a.test.sh\n    - b.test.sh\nrc=1\n' "$HL_F" > "$HL/.bionic/docs/record/wave-x/whole.log"
-HL_F="$HL_F" awk '{ print } /^- T2: active$/ { print "proved: kind=regression head=" ENVIRON["HL_F"] " at=2026-10-04T01:00:00Z evidence=record/wave-x/whole.log owed=a.test.sh,b.test.sh run=2026-10-04T00:50:00Z head=" ENVIRON["HL_F"] " rc=1" }
-  END { print ""; print "## Verification Matrix"; print ""
-        print "stack-health: red head=" ENVIRON["HL_F"] " pass=3 total=5 owed=a.test.sh,b.test.sh evidence=record/wave-x/whole.log"; print ""
-        print "| AC | tier | status | evidence | auditor |"; print "|---|---|---|---|---|"; print "| AC-1.1 | T2 | pending | — | — |" }' \
-  "$HLP" > "$HLP.n" && mv "$HLP.n" "$HLP"
-expect_eq "(hl0) precondition: before the landing the rendering is red at F, both suites owed, nothing closed, and the plan's line reads the same" \
-  "red head=$HL_F pass=3 total=5 owed=a.test.sh,b.test.sh evidence=record/wave-x/whole.log|stack-health: red head=$HL_F pass=3 total=5 owed=a.test.sh,b.test.sh evidence=record/wave-x/whole.log" \
-  "$(hl_lib proof_health_line "$HLP" "$HL")|$(hl_sh "$HLP")"
-hl_own() { awk '/^## / { s = $0 } (s == "## Tasks" && /^\| T1 \|/) || (s == "## SDLC State" && /^- T1:/)' "$1"; }   # <plan> -> T1's row and step line
+hl_lib proof_event "$HLP" kind=regression "head=$HL_F" evidence=record/wave-x/whole.log owed=a.test.sh,b.test.sh
+expect_eq "(hl0) precondition: before the landing the rendering is red at F, both suites owed, nothing closed" \
+  "red head=$HL_F pass=3 total=5 owed=a.test.sh,b.test.sh evidence=record/wave-x/whole.log" "$(hl_lib proof_health_line "$HLP" "$HL")"
+hl_own() { awk '/^## / { s = $0 } s == "## Tasks" && /^\| T1 \|/' "$1"; }   # <plan> -> T1's row
 HL_OWN="$(hl_own "$HLP")"
 ll_launch "$HL" T1 a.test.sh
 ll_verb "$HL" T1
 expect_eq "(hl1) T1 lands through ready on a.test.sh, green" "0" "$LL_RC"
-expect_eq "(hl1c) the landing writes nothing of its row: its Tasks row and its step line stand as they were, and it reads landed" \
-  "2|$HL_OWN|landed" "$(printf '%s\n' "$HL_OWN" | grep -c .)|$(hl_own "$HLP")|$( ( . "$REPO/payload/scripts/lib/units.sh" >/dev/null 2>&1; units_rows "$HLP" ) | awk -F'\t' '$1 == "T1" { print $10 }')"
+expect_eq "(hl1c) the landing writes nothing of its row: its Tasks row stands as it was, and it reads landed" \
+  "1|$HL_OWN|landed" "$(printf '%s\n' "$HL_OWN" | grep -c .)|$(hl_own "$HLP")|$( ( . "$REPO/payload/scripts/lib/units.sh" >/dev/null 2>&1; units_rows "$HLP" ) | awk -F'\t' '$1 == "T1" { print $10 }')"
 [ "$LL_RC" = 0 ] || printf '      ready said: %s\n' "$LL_OUT" | head -20
 expect_contains "(hl1b) …the landing record holds its green verdict for a.test.sh, the close the judge reads" "|suite=a.test.sh|result=green|" \
   "$(ll_ev "$HL" verdict | /usr/bin/grep '|row=T1|')"
-expect_eq "(hl2) after the landing the plan's line stands as written, and the rendering still reads red at F, owed= dropping a.test.sh, closed= naming it" \
-  "stack-health: red head=$HL_F pass=3 total=5 owed=a.test.sh,b.test.sh evidence=record/wave-x/whole.log|red head=$HL_F pass=3 total=5 owed=b.test.sh closed=a.test.sh evidence=record/wave-x/whole.log" \
-  "$(hl_sh "$HLP")|$(hl_lib proof_health_line "$HLP" "$HL")"
-
-# ---------------------------------------------------------------------------
-section "§TWO-HOMES: the landing record and the run's log beside it are read as one record, the record first"
-# fails-when: a reader of the record skips the log beside it: the fold leaves T1 waiting on a candidate the log holds,
-# the landings miss the log's, or a debt the record admitted stays open after the log voids it.
-TW="$(LL_WORLD_AT=14 ll_world)"; TWP="$(ll_plan "$TW")"; TWR="$(ll_rec "$TW")"; TWL="$(ll_log "$TW")"; TWC=0123456789abcdef0123456789abcdef01234567   # an older run's record, and the log its readers are handed
-tw_lib() { ( . "$REPO/payload/scripts/lib/roots.sh" >/dev/null 2>&1; . "$REPO/payload/scripts/lib/proof.sh" >/dev/null 2>&1 \
-  && . "$REPO/payload/scripts/lib/units.sh" >/dev/null 2>&1 && "$@" ) 2>/dev/null; }
-mkdir -p "${TWR%/*}"; printf 'line/v1|ev=ready|row=T1|name=wx-T1|commit=%s|branch=wt/T1|tree=-|suites=a.test.sh|debt=-|carrier=%s|at=2026-11-01T00:00:00Z\n' \
-  "$(git -C "$TW/.worktrees/T1" rev-parse HEAD)" "$(ll_carrier)" > "$TWR"
-printf '%s\n' 'line/v1|ev=published|row=T2|commit=c2|kind=queue|by=-|why=-|at=2026-11-01T00:00:01Z' \
-  'debt: id=d1 row=T2 branch=wt/T2 head=c2 suite=a.test.sh token=T9 at=2026-11-01T00:00:02Z' >> "$TWR"
-printf 'run/v1|ev=%s|at=2026-11-03T00:00:0%s\n' "candidate|row=T1|base=$(ll_head "$TW")|commit=$TWC|tree=-" 1 \
-  "verdict|row=T1|commit=$TWC|suite=a.test.sh|result=green|log=-" 2 'published|row=T3|commit=c3|kind=queue|by=-|why=-' 3 > "${TWR%/*}/run.log"
-expect_eq "(tw1) the fold reads T1's ready from the record and its candidate and green verdict from the log" "$TWC green" \
-  "$(line_state "$TWP" | awk -F'\t' '$1 == "T1" { print $6, $7 }')"
-expect_eq "(tw2) the landings are the record's, then the log's" "T2 T3" "$(tw_lib units_record_landings "$TWL" | cut -f2 | paste -sd' ' -)"
-expect_eq "(tw3) a debt the record admitted is open" "a.test.sh T9" "$(tw_lib proof_debts_read "$TWL" | cut -f1,2 | tr '\t' ' ')"
-printf 'run/v1|ev=void|id=d1|branch=wt/T2|why=merge-undone|at=2026-11-03T00:00:04Z\n' >> "${TWR%/*}/run.log"
-expect_eq "(tw3b) …and closed once the log voids it" "" "$(tw_lib proof_debts_read "$TWL")"
-rm -f "$TWR"
-expect_eq "(tw4) with the record gone the log alone stands: the record is held, its landing read" "0 T3" \
-  "$(line_held "$TWL"; echo "$? $(tw_lib units_record_landings "$TWL" | cut -f2 | paste -sd' ' -)")"
+expect_eq "(hl2) after the landing the rendering still reads red at F, owed= dropping a.test.sh, closed= naming it" \
+  "red head=$HL_F pass=3 total=5 owed=b.test.sh closed=a.test.sh evidence=record/wave-x/whole.log" "$(hl_lib proof_health_line "$HLP" "$HL")"
 
 # ---------------------------------------------------------------------------
 section "§LOG: ready writes its acts to the run's log, and no landing record; a part is no landing"

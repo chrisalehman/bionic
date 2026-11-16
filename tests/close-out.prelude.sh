@@ -726,14 +726,14 @@ hh_report() {
       BIONIC_GATE_DIR="$HH_GATE" bash "$BIONIC_HOOKS_DIR/session-poker.sh" landing-report "$@" "$proj/$PLAN_REL" 2>/dev/null )
 }
 
-debt_plant() {  # <project> -> the ledger: three items, five touches, one burned
+debt_plant() {  # <project> -> the run's debts, as the debt verb's events: three items, five touches, one burned
   local d="$1/.bionic/docs/record/wave-01-fixture"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "debt_plant: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
   mkdir -p "$d"
-  printf '%s\n' '# debt ledger: concept | kind | sites | raised-by <record> | touches N | burned <row> | —' \
-    'tree_count | duplicate | lib/a.sh:1, lib/b.sh:2 | raised-by record/wave-01-fixture/critic-structure.md | touches 4 | —' \
-    'log_shim | one-case-abstraction | lib/c.sh:3 | raised-by record/wave-01-fixture/critic-structure.md | touches 1 | burned T3' \
-    'pair_x | unpinned-pair | lib/d.sh:9 | raised-by record/wave-01-fixture/critic-adversarial.md | touches 0 | —' > "$d/debt.md"
+  printf 'run/v1|ev=debt|%s|at=2026-10-04T12:00:00Z\n' \
+    'concept=tree_count|kind=duplicate|sites=lib/a.sh:1, lib/b.sh:2|raised-by=record/wave-01-fixture/critic-structure.md|touches=4' \
+    'concept=log_shim|kind=one-case-abstraction|sites=lib/c.sh:3|raised-by=record/wave-01-fixture/critic-structure.md|touches=1|burned=T3' \
+    'concept=pair_x|kind=unpinned-pair|sites=lib/d.sh:9|raised-by=record/wave-01-fixture/critic-adversarial.md|touches=0' >> "$d/run.log"
 }
 
 require_helpers in_fixture fixture_git contains fixture_plan_text fixture_epic_text mk_fixture \

@@ -144,18 +144,11 @@ sr_row() {  # <id> <task> <reads> <size> <status>
   local n="${1#T}"
   printf '| %s | 4 | build | %s | — | — | %s | %s | REQ-1 | lib/t%s.sh | — | — | %s | — | — | — |\n' "$1" "$2" "$3" "$4" "$n" "$5"
 }
-# sr_reg [<plan>] -> the path of the run's version-14 register of asks in its record directory: the old home the
-# reader translates for a run not brought forward, so a seeded ask lands where every reader of the run reads it (this
-# world's plan by default). Spelled here, since the asks library names only the run's log.
 SR_OWED_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/owed.sh"
-sr_reg() { local p="${1:-$SR_PLAN}"; p="${p##*/}"; printf '%s/.bionic/docs/record/%s/asks.state\n' "$SR_REPO" "${p%.plan.md}"; }
 sr_asks() { bash -c '. "$1" && owed_lines "$2" "$3"' _ "$SR_OWED_LIB" "$SR_PLAN" "$SR_REPO" 2>/dev/null; }   # the run's asks as the asks library lists them
-sr_owed() {  # <owed/v1 fields after the schema> [<plan>] -> one line on that run's register (this world's own by default)
-  local f; f="$(sr_reg "${2:-$SR_PLAN}")" || return 1
-  mkdir -p "${f%/*}"; printf 'owed/v1|%s\n' "$1" >> "$f"
-}
 sr_log() { local p="${1:-$SR_PLAN}"; p="${p##*/}"; printf '%s/.bionic/docs/record/%s/run.log\n' "$SR_REPO" "${p%.plan.md}"; }   # [<plan>] -> that run's log
 sr_ask_ev() { local f; f="$(sr_log "${2:-$SR_PLAN}")" && mkdir -p "${f%/*}" && printf 'run/v1|ev=ask|%s\n' "$1" >> "$f"; }  # <ask fields, at= last> [<plan>] -> one ask event in that run's log, as lib/owed.sh writes it
+sr_unask() { sed -i.was "/^run\/v1|ev=ask|key=$1|/d" "$(sr_log)"; }   # <key> -> this world's log holds no event of that ask
 sr_owed_sid() { printf 'run/v1|ev=ask|%s\n' "$1" >> "$SR_REPO/.bionic/tmp/owed-$2.state"; }  # <ask fields, at= last> <session> -> one ask event in the store of a session acting for no run
 # sr_prev <minutes> [<scale>] -> a delivered plan beside this one (T1 of 60 min declared,
 # declaring `scale: <scale>` when given) approved at 10:00Z the day before, whose T1 lands <minutes>
@@ -552,7 +545,7 @@ expect_eq "UP4 a verify row that reads what the integrate row writes keeps that 
 section "§WASTE: correctness and waste as measurements; the minutes a task waited on you, overlaps counted once"
 # ============================================================
 # fails-when: a count is not the record's, a closed ask's minutes are lost, an overlap counts twice, or a decision with
-# no opened time is not read from the design ledger.
+# no opened time is not read from its rounds.
 sr_mw_world waste
 mkdir -p "$SR_REPO/tests"; : > "$SR_REPO/tests/a.test.sh"; : > "$SR_REPO/tests/b.test.sh"
 sr_run "$SR_PLAN"
@@ -573,45 +566,34 @@ sr_ask_ev "key=approve:release|sent=-|title=approval: release|at=2026-10-06T13:3
 sr_run "$SR_PLAN"
 expect_eq "WS4 an open ask counts from its raising to now, an overlap once" "540 min: approve:design and approve:release" \
   "$(sr_m waste.waiting-on-you)"
-# A decision closed with no opened time: its first put in the design ledger, 1:30 PM PDT, to its close at 2:00 PM.
+# A decision closed with no opened time: its first put, 1:30 PM PDT, to its close at 2:00 PM.
 sr_mw_world waste-ledger
 awk -F'|' 'BEGIN { OFS = "|" } $2 == " T10 " { $8 = " approval:D5 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
-printf '# Design ledger — wave-02-fx\n\n## Δ1 — D5 put (orchestrator 2026-10-06 1:30 PM PDT): the thing\n\n%s\n\n## Δ2 — D5 put (orchestrator 2026-10-06 1:45 PM PDT): the thing again\n\n%s\n\n## Δ3 — D5 ruled "1" (fixture 2026-10-06 2:00 PM PDT): the thing\n' \
-  "$SR_D_WAIT" "$SR_D_WAIT" > "$SR_DIR/design-ledger.md"
-sr_owed "key=decide:D5|state=closed|by=ruled|at=2026-10-06T21:00:00Z"
+sr_ledger_put D5 "the thing" "$SR_D_WAIT"; sr_ev "ev=decision|entry=Δ1|d=D5|verb=put|by=orchestrator|title=the thing again|wait=$SR_D_WAIT|at=2026-10-06T20:45:00Z"
+sr_ev "ev=decision|entry=Δ2|d=D5|verb=ruled|said=1|by=fixture|title=the thing|at=2026-10-06T21:00:00Z"
+sr_ask_ev "key=decide:D5|reply=ruled|at=2026-10-06T21:00:00Z"
 sr_run "$SR_PLAN"
-expect_eq "WS5 a decision with no opened time: from its first put in the design ledger to its close" "30 min: decide:D5" "$(sr_m waste.waiting-on-you)"
-expect_contains "WS6a the run's asks hold the register's closed decide:D5 before the register is removed" "|key=decide:D5|state=closed|" "$(sr_asks)"
-rm -f "$(sr_reg)"
-expect_absent "WS6b …and none once it is removed (WS6a read the same list)" "key=decide:D5" "$(sr_asks)"
-sr_run "$SR_PLAN"
-expect_eq "WS6 …and with no line on the register, to the ruling's own time in the ledger" "30 min: decide:D5" "$(sr_m waste.waiting-on-you)"
+expect_eq "WS5 a decision with no opened time: from its first put to its close" "30 min: decide:D5" "$(sr_m waste.waiting-on-you)"
+sr_unask decide:D5; sr_run "$SR_PLAN"
+expect_eq "WS6 …and with no ask of it in the log, to the ruling's own time" "30 min: decide:D5" "$(sr_m waste.waiting-on-you)"
 
 # ============================================================
-section "§ONE-PARSER: one reader of the design ledger's headings, one rule for what rules a decision, settled among its verbs"
+section "§ONE-PARSER: one rule for what rules a decision, settled among its verbs, and no reader of a ledger heading"
 # ============================================================
-# fails-when: a ledger whose only ruling of D<n> is a `settled` heading is open to one reader and ruled to the other, a
-# ruling the ledger writes as a bullet is no ruling to the clock reader, or the sheet parses a ledger heading itself.
+# fails-when: a decision whose only ruling of D<n> is a `settled` round is open to one reader and ruled to the other,
+# or the sheet parses a ledger heading itself.
 sr_world one-parser "6 6 12 12"
 awk -F'|' 'BEGIN { OFS = "|" } $2 == " T10 " { $8 = " approval:D5 " } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
 sr_bind
-printf '# Design ledger — wave-02-fx\n\n## Δ1 — D5 put (orchestrator 2026-10-06 1:30 PM PDT): the thing\n\n%s\n\n## Δ2 — D5 settled "1" (fixture 2026-10-06 2:00 PM PDT): the thing\n' \
-  "$SR_D_WAIT" > "$SR_DIR/design-ledger.md"
-sr_owed "key=decide:D5|state=closed|by=ruled|at=2026-10-06T21:00:00Z"
+sr_ledger_put D5 "the thing" "$SR_D_WAIT"; sr_ev "ev=decision|entry=Δ1|d=D5|verb=settled|said=1|by=fixture|title=the thing|at=2026-10-06T21:00:00Z"
+sr_ask_ev "key=decide:D5|reply=ruled|at=2026-10-06T21:00:00Z"
 sr_run "$SR_PLAN"
-expect_eq "OP1 a decision whose only ruling is a settled heading is ruled to the register's reader: the decisions verb prints it" \
+expect_eq "OP1 a decision whose only ruling is a settled round is ruled to the register's reader: the decisions verb prints it" \
   'D5 · settled "1" · fixture 2026-10-06 · the thing' "$(sr_poke decisions 2>&1)"
 expect_eq "OP1b …and to the clock reader: from its put to the ruling's own clock, 30 minutes" "30 min: decide:D5" "$(sr_m waste.waiting-on-you)"
 expect_eq "OP1c …and open to neither: the sheet owes no ask for it" "0" "$(sr_lines ask | /usr/bin/grep -c 'key=decide:D5 ')"
-# A ruling the ledger writes as a bullet under a Δ is a ruling to the clock reader too: with no register line, the
-# bullet's clock ends the span.
-printf '# Design ledger — wave-02-fx\n\n## Δ1 — D5 put (orchestrator 2026-10-06 1:30 PM PDT): the thing\n\n%s\n\n## Δ2 — steps folded\n\n- D5 ruled "1" (fixture 2026-10-06 2:00 PM PDT): the thing\n' \
-  "$SR_D_WAIT" > "$SR_DIR/design-ledger.md"
-rm -f "$(sr_reg)"
-sr_run "$SR_PLAN"
-expect_eq "OP2 a bullet ruling ends the span at its own clock, as a heading's does" "30 min: decide:D5" "$(sr_m waste.waiting-on-you)"
-# The static row: the code recognises a ledger heading (`## Δn — `) in one program, the translation's, and the sheet
-# asks the reader. The control plants the same line
+# The static row: the sheet recognises no ledger heading (`## Δn — `); a round is an event the reader folds. The control
+# plants the same line
 # twice, and once beside a comment that names the shape, through the same counter.
 op_count() { /usr/bin/grep -vE '^[[:space:]]*#' "$1" | /usr/bin/grep -cE 'Δ\[0-9\]\+ — '; }
 OP_P="$TMPROOT/op-plant.sh"
@@ -619,8 +601,7 @@ printf '%s\n' "# a comment naming Δ[0-9]+ — is no parser" "  index(\$0, 1) { 
 expect_eq "OP3a (control) the counter finds one parser in a file with one, and passes a comment by" "1" "$(op_count "$OP_P")"
 printf '%s\n' "  \$0 ~ /^## Δ[0-9]+ — D[0-9]+ / { next }" >> "$OP_P"
 expect_eq "OP3b (control) …and two in a file with a second" "2" "$(op_count "$OP_P")"
-expect_eq "OP3 the sheet's code parses no ledger heading; the translation holds the one parser" "0 1" \
-  "$(op_count "${BIONIC_HOOKS_DIR}/poker/sitrep.sh") $(op_count "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/translate.sh")"
+expect_eq "OP3 the sheet's code parses no ledger heading" "0" "$(op_count "${BIONIC_HOOKS_DIR}/poker/sitrep.sh")"
 
 # ============================================================
 section "§SPAN: an ask closed with no opened= takes its span from the run's record, or the count says it is partial"
@@ -637,25 +618,25 @@ sr_ev "ev=finding|ref=$SP_REC#2|to=defer|by=fixture|words=a thing|at=2026-10-06T
 sr_ev "ev=proof|kind=review|head=$SR_H|evidence=record/wave-02-fx/critic-evidence.md|question=evidence|reader=w-T1|result=fail|scope=whole|at=2026-10-06T13:00:00Z"
 sr_ev "ev=waiver|question=evidence|head=$SR_H|by=Chris Lehman|said=waive it|at=2026-10-06T14:00:00Z"
 SP_CARRY="carry:record:wave-02-fx:critic-structure.md:2"
-sr_owed "key=waive:evidence|state=closed|by=waive|at=2026-10-06T14:00:00Z"
+sr_ask_ev "key=waive:evidence|reply=waive|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "SP1 a closed waiver with no opened=: from the review's fail line to the waived: line, 60 minutes, nothing partial" \
   "60 min: waive:evidence" "$(sr_m waste.waiting-on-you)"
-rm -f "$(sr_reg)"
-sr_owed "key=waive:evidence|state=closed|by=waive|at=2026-10-06T14:00:00Z|opened=2026-10-06T13:30:00Z"
+sr_unask waive:evidence
+sr_ask_ev "key=waive:evidence|sent=-|at=2026-10-06T13:30:00Z"; sr_ask_ev "key=waive:evidence|reply=waive|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "SP2 (control) the same waiver with opened= present uses it: 30 minutes" "30 min: waive:evidence" "$(sr_m waste.waiting-on-you)"
-rm -f "$(sr_reg)"
-sr_owed "key=$SP_CARRY|state=closed|by=ruled|at=2026-10-06T14:00:00Z"
+sr_unask waive:evidence
+sr_ask_ev "key=$SP_CARRY|reply=ruled|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "SP3 a closed carry waits on the release card, an event, never on you: it counts no minute and is no ask left untimed (SP1 timed the waiver through the same reader)" \
   "0 min" "$(sr_m waste.waiting-on-you)"
-rm -f "$(sr_reg)"
-sr_owed "key=finding:record:wave-02-fx:nowhere.md:1|state=closed|by=ruled|at=2026-10-06T14:00:00Z"
+sr_unask "$SP_CARRY"
+sr_ask_ev "key=finding:record:wave-02-fx:nowhere.md:1|reply=ruled|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "SP4 a closed ask the record holds no span for: the count is marked partial and says how many asks it could not time" \
   "0 min partial, 1 ask not timed" "$(sr_m waste.waiting-on-you)"
-sr_owed "key=waive:evidence|state=closed|by=waive|at=2026-10-06T14:00:00Z"
+sr_ask_ev "key=waive:evidence|reply=waive|at=2026-10-06T14:00:00Z"
 sr_run "$SR_PLAN"
 expect_eq "SP4b …beside the asks it did time, whose minutes stand" "60 min partial, 1 ask not timed: waive:evidence" "$(sr_m waste.waiting-on-you)"
 
@@ -751,102 +732,6 @@ expect_eq "GO2 the sheet prints (0); the grade verb is refused as an unknown wor
   "$SR_GONE_RC0|$RC|$(printf '%s\n' "$ERR" | /usr/bin/grep -c 'unknown')|$([ -e "$SR_DIR/$(printf '%s' 'sitrep.l' 'og')" ] && echo yes || echo no)"
 sr_run "$(printf '%s' '--ba' 'sis')" "$SR_PLAN"
 expect_eq "GO3 the close's arithmetic is on the sheet; its own flag is the usage error (2)" "2" "$RC"
-
-# ============================================================
-section "§SHAPES: a done task's note is timed from whichever shape its step line has, landed <sha> <ISO>, landed-by-hand: <who> <ISO> \"<why>\", or either after text; over a 38-task plan every one is"
-# ============================================================
-# FIXTURE FIDELITY. The `- Step` and `- T<n>:` lines below are a delivered plan's `## SDLC State` lines, byte
-# for byte as its run left them at close. Its `## Tasks` table is synthesized: each task's id, step and kind as
-# that table holds them, all done, the task cell a stand-in. The landing record is empty, so every time on the
-# sheet is the step line's own.
-sr_w38_lines() {
-  cat <<'SR38'
-- Step 0: configured at 2026-10-16T00:36Z via "approved"; prereqs: ok; model_plan=orchestrator=claude-fable-5-1; implementor=sonnet-high; senior-implementor=opus-high; researcher=opus-high; test-runner=haiku-high; auditor=opus-high; critic=opus-high; probe 8 cores, 8 GB, 27 GB free, load 1.80; share 92; branch wave/38-one-stop off main @ 433f7134; charter amendment: the twelve 1.20.0 leftovers are Step-1 items (Chris Lehman 2026-10-15 "I want these included in the charter for 1.21.0 - to be considered in step 1")
-- Step 1: requirements: specs/epic-23-bionic-tech-debt/wave-38-one-stop.requirements.md; REQ-1 to REQ-12, 49 criteria; approved by Chris Lehman 2026-10-16T03:03Z "approved" at the Step-1 card; D1–D6 scope rulings and D8–D14 sitrep design rulings (record/wave-38-one-stop/step1-rulings.md, design-ledger.md Δ0–Δ8), D7 withdrawn; six inherited findings disposed (5 adopted, 1 closed), 24 debt lines adopted (record/wave-38-one-stop/debt.md); research w38-R1..R4 under record/wave-38-one-stop/research-*.md; A-orch-1, A-orch-2; REQ-13 added after the card on Chris Lehman's word (2026-10-16T03:25Z): the Step-2 prototype vs the dispatch wall (ideas/bionic-1.20.0-step2-prototype-wall.md); 51 criteria
-- Step 2: spec: specs/epic-23-bionic-tech-debt/wave-38-one-stop.spec.md; D8–D14, D16–D26 (D15 the frame), Eval design 52 rows; ADR-059 and ADR-060 (Proposed); design ledger record/wave-38-one-stop/design-ledger.md Δ0–Δ21; approved by Chris Lehman 2026-10-16T04:00Z "approved" at the Step-2 card, the tactical defaults of §5 Assumptions standing
-- Step 3: plan: plans/epic-23-bionic-tech-debt/wave-38-one-stop.plan.md; 29 rows (21 build, 1 doc, 2 verify, 2 review, 1 test, 1 integrate, 1 close); matrix 52 rows rendered from the spec Eval design, every block naming its row; rows written by hand at Step 3 (A-orch-3), chains as reads of the upstream record (A-orch-4, A-orch-5); approved by Chris Lehman 2026-10-16T04:27Z "approved" at the Step-3 card
-- Step 4: implementation opened 2026-10-16T04:30Z; no row dispatched yet — the first FILL names T4, T1, T2, T3 and the widest rows the gate gives room for; records T<n>-*.md under record/wave-38-one-stop/; assumptions A-orch-1 to A-orch-5
-- Step 5: matrix filled by T24 from the landed records (record/wave-38-one-stop/T24-matrix-fill.md): 48 of 52 rows discharged, AC-1.5 and AC-6.6 pending until close-out, AC-9.5 and AC-12.1 pending until the release row T22; walk record/wave-38-one-stop/walk.md (T23, zero AC identifiers); regression: the whole run at d3c4ed2e (96/108) covers the settled head a4658ae0 by rule, every owed suite green in a later landing (A-orch-74); auditor: record/wave-38-one-stop/auditor-evidence.md — REFUTED wave verdict: 39 CONFIRMED, 10 REFUTED (I1, I4, I6, I8, I9, I10, I11, I16), 3 UNVERIFIABLE (AC-1.5, AC-6.6, AC-12.1); the REFUTED rows go to the final card as waive-or-fix defaults
-- Step 6: readings on the settled whole at a4658ae0: evidence by the auditor (REFUTED, 39 CONFIRMED / 10 REFUTED / 3 UNVERIFIABLE, record/wave-38-one-stop/auditor-evidence.md), adversarial and structure by the critic (fail: 6 and 1 findings, record/wave-38-one-stop/critic-adversarial.md, critic-structure.md); the two S2-on findings fixed by policy as T36 (5085b1a1) and T37 (74a11248), both landed on their suites; S3 findings #3, #4, #5 deferred to the final card; the piece reading of a4658ae0..74a11248 for adversarial and structure registered at 74a11248 (critic-adversarial-2.md, critic-structure-2.md); regression: covered by rule at every head since d3c4ed2e (A-orch-74), the whole-run verb refusing a second run; the REFUTED rows and the failing readings go to the final card as waive-or-fix defaults
-- Step 7: adr: adrs/epic-23-bionic-tech-debt/adr-059-the-lifecycle-has-four-human-stops.md · adrs/epic-23-bionic-tech-debt/adr-060-the-gate-owns-capacity.md (drafted at Step 2, Proposed; Accepted by the release row T22, which writes the 1.21.0 CHANGELOG entry, plugin.json, the rendered help and version pages and rendered.sha256, release-check green from 433f7134)
-- Step 8: CLOSED 2026-10-18T15:07Z — wave/38-one-stop merged into main; the tail was performed by close-out.sh 1.21.0
-- Step 9: delivered: 2026-10-18T15:07Z wave-38-one-stop 1.21.0 — the Step 8/9 tail was performed by close-out.sh and attested against the commit gate; continuation at record/wave-38-one-stop/continuation.md
-- T4: reason: every writer row names its record so T24 fills the matrix from landed records; the brief renderer needs one Expected artifact reason: AC-8.1 wants the roster row to read model=haiku-high; the row is written at dispatch-preflight.sh:3398 from .tool_input.model alone, so the composition lives there (A-orch-6) landed fbfcff25da71bf3c9f40238c5178ea269caae78f 2026-10-17T03:50:19Z
-- T2: reason: every writer row names its record so T24 fills the matrix from landed records; the brief renderer needs one Expected artifact landed b6236608b5035cc7d9eb58791c2f5bb7cee1a293 2026-10-16T19:06:02Z
-- T1: landed 089674832d046549d5888fcb3343c9524019f9b2 2026-10-16T09:08:37Z
-- T3: reason: every writer row names its record (A-orch-6) landed-by-hand: orchestrator bionic-78 under user AUTOPILOT (A-orch-61) 2026-10-17T21:22:27Z "D28 option 3 (A-orch-58, A-orch-64): fourteen built rows gathered into one candidate wt/38-gather, fast-forwarded onto wave/38-one-stop at d3c4ed2e, proven by one full run (regression-run) at that head"
-- T10: landed 3c138a39126a3ebf785ed5fec0663a05c7a05ff3 2026-10-16T13:06:02Z
-- T11: reason: every writer row names its record (A-orch-6) landed-by-hand: orchestrator bionic-78 under user AUTOPILOT (A-orch-61) 2026-10-17T21:22:47Z "D28 option 3 (A-orch-58, A-orch-64): fourteen built rows gathered into one candidate wt/38-gather, fast-forwarded onto wave/38-one-stop at d3c4ed2e, proven by one full run (regression-run) at that head"
-- T6: reason: T6 stacked on T5 tree d8eae687 (T5 built, T5-gate.md on record): the behavioural dependency is met by construction, the landing line orders T6 behind T5 (A-orch-21) landed 56373f8c3b7882554077e66dbd7e5f1177e03718 2026-10-17T14:20:49Z
-- T9: reason: T9 stacked on T8 tree ac9eef49 (T8 built, T8-rename.md on record): dependency met by construction, the line orders T9 behind T8 (A-orch-21) reason: T8-rename.md §Printed lines left for T9 names three prose lines in hooks/canonical-sdlc-governing-skill.sh (floors at double, project floor, epic floor) and AC-9.2 doctrine half pins SKILL.md and the diagrams in canonical-sdlc-governing-skill.test.sh §MINIMUM landed-by-hand: orchestrator bionic-78 under user AUTOPILOT (A-orch-61) 2026-10-17T21:22:47Z "D28 option 3 (A-orch-58, A-orch-64): fourteen built rows gathered into one candidate wt/38-gather, fast-forwarded onto wave/38-one-stop at d3c4ed2e, proven by one full run (regression-run) at that head"
-- T13: reason: T13 stacked on T12 tree 6ae0c9e3 (T12 built, T12-handoff.md on record): dependency met by construction, the line orders T13 behind T12 (A-orch-21) reason: every writer row names its record so T24 fills the matrix from landed records (A-orch-6 pattern) landed-by-hand: orchestrator bionic-78 under user AUTOPILOT (A-orch-61) 2026-10-17T21:22:47Z "D28 option 3 (A-orch-58, A-orch-64): fourteen built rows gathered into one candidate wt/38-gather, fast-forwarded onto wave/38-one-stop at d3c4ed2e, proven by one full run (regression-run) at that head"
-- T30: landed c04eb6b77006001c131e03e39fdd804f7a7c7873 2026-10-17T19:34:12Z — added by task-add at 2026-10-17T07:03:32Z reason: the carrier opens and closes the landing lease the gate orders by; line.sh is T6's file, landed into T30's tree
-- T5: landed fda9f0fce16b4a7bd2da2f3b8dbb7f19d71ae1d9 2026-10-17T07:36:24Z
-- T14: reason: every writer row names its record so T24 fills the matrix from landed records (A-orch-6 pattern) landed-by-hand: orchestrator bionic-78 under user AUTOPILOT (A-orch-61) 2026-10-17T21:22:47Z "D28 option 3 (A-orch-58, A-orch-64): fourteen built rows gathered into one candidate wt/38-gather, fast-forwarded onto wave/38-one-stop at d3c4ed2e, proven by one full run (regression-run) at that head"
-- T15: reason: every writer row names its record so T24 fills the matrix from landed records (A-orch-6 pattern) landed-by-hand: orchestrator bionic-78 under user AUTOPILOT (A-orch-61) 2026-10-17T21:22:47Z "D28 option 3 (A-orch-58, A-orch-64): fourteen built rows gathered into one candidate wt/38-gather, fast-forwarded onto wave/38-one-stop at d3c4ed2e, proven by one full run (regression-run) at that head"
-- T16: reason: every writer row names its record (A-orch-6 pattern) landed-by-hand: orchestrator bionic-78 under user AUTOPILOT (A-orch-61) 2026-10-17T21:22:47Z "D28 option 3 (A-orch-58, A-orch-64): fourteen built rows gathered into one candidate wt/38-gather, fast-forwarded onto wave/38-one-stop at d3c4ed2e, proven by one full run (regression-run) at that head"
-- T18: reason: every writer row names its record (A-orch-6 pattern) landed-by-hand: orchestrator bionic-78 under user AUTOPILOT (A-orch-61) 2026-10-17T21:22:47Z "D28 option 3 (A-orch-58, A-orch-64): fourteen built rows gathered into one candidate wt/38-gather, fast-forwarded onto wave/38-one-stop at d3c4ed2e, proven by one full run (regression-run) at that head"
-- T31: landed d133a3e636b80ca2097e6a4bc90cddb89479be85 2026-10-17T21:21:06Z — added by task-add at 2026-10-17T11:33:24Z
-- T17: reason: every writer row names its record (A-orch-6 pattern) landed-by-hand: orchestrator bionic-78 under user AUTOPILOT (A-orch-61) 2026-10-17T21:22:47Z "D28 option 3 (A-orch-58, A-orch-64): fourteen built rows gathered into one candidate wt/38-gather, fast-forwarded onto wave/38-one-stop at d3c4ed2e, proven by one full run (regression-run) at that head"
-- T8: landed 64640a8de2be98b285ee6134683145d36eccc847 2026-10-17T12:51:14Z
-- T7: reason: every writer row names its record (A-orch-6 pattern) landed-by-hand: orchestrator bionic-78 under user AUTOPILOT (A-orch-61) 2026-10-17T21:22:47Z "D28 option 3 (A-orch-58, A-orch-64): fourteen built rows gathered into one candidate wt/38-gather, fast-forwarded onto wave/38-one-stop at d3c4ed2e, proven by one full run (regression-run) at that head"
-- T19: reason: every writer row names its record (A-orch-6 pattern) landed-by-hand: orchestrator bionic-78 under user AUTOPILOT (A-orch-61) 2026-10-17T21:22:47Z "D28 option 3 (A-orch-58, A-orch-64): fourteen built rows gathered into one candidate wt/38-gather, fast-forwarded onto wave/38-one-stop at d3c4ed2e, proven by one full run (regression-run) at that head"
-- T20: reason: every writer row names its record (A-orch-6 pattern) landed-by-hand: orchestrator bionic-78 under user AUTOPILOT (A-orch-61) 2026-10-17T21:22:47Z "D28 option 3 (A-orch-58, A-orch-64): fourteen built rows gathered into one candidate wt/38-gather, fast-forwarded onto wave/38-one-stop at d3c4ed2e, proven by one full run (regression-run) at that head"
-- T21: reason: every writer row names its record (A-orch-6 pattern) landed-by-hand: orchestrator bionic-78 under user AUTOPILOT (A-orch-61) 2026-10-17T21:22:47Z "D28 option 3 (A-orch-58, A-orch-64): fourteen built rows gathered into one candidate wt/38-gather, fast-forwarded onto wave/38-one-stop at d3c4ed2e, proven by one full run (regression-run) at that head"
-- T12: landed-by-hand: orchestrator bionic-78 under user AUTOPILOT (A-orch-61) 2026-10-17T21:22:47Z "D28 option 3 (A-orch-58, A-orch-64): fourteen built rows gathered into one candidate wt/38-gather, fast-forwarded onto wave/38-one-stop at d3c4ed2e, proven by one full run (regression-run) at that head"
-- T32: landed 777d2214a4d94d403917cb6d8a5a3b32274d5120 2026-10-18T05:09:19Z — added by task-add at 2026-10-17T22:11:06Z born: regression session-poker-4.test.sh of=regression
-- T33: landed 350f0a02097f80c3e711e16b33072c0fc68dc403 2026-10-18T03:13:15Z — added by task-add at 2026-10-17T22:11:07Z born: regression regression-rename.test.sh of=regression
-- T34: landed 5af153bcab274a6fd8b9fb51f57da150873f828a 2026-10-18T02:04:55Z — added by task-add at 2026-10-17T22:11:08Z born: regression refuse.test.sh of=regression
-- T35: landed a4658ae061ffe28e921e8cc6517d23849ba5178c 2026-10-18T06:19:30Z — added by task-add at 2026-10-17T22:50:41Z reason: D30 amended by the user: the off mark is the plain heavy cross, not the red X emoji reason: D30 amended by the user: green, grey, and a calm off mark; the black circle, no cross, no red reason: the sitrep skill shape names three indicator lines; the legend line makes four reason: D31 ruled: the tolerance model, ✅ within · 🔸 near · 🔶 over · ◇ not measurable reason: D31 glyphs re-ruled by the user: ✅ ➖ 🔼 ❔ reason: D31 glyphs final by the user: the grey X for over
-- T23: landed a4658ae061ffe28e921e8cc6517d23849ba5178c 2026-10-18T06:28:58Z
-- T26: landed a4658ae061ffe28e921e8cc6517d23849ba5178c 2026-10-18T06:35:07Z
-- T36: landed 5085b1a1d37b073b2cb06671476fbdece5fae97c 2026-10-18T07:33:06Z — added by task-add at 2026-10-18T06:35:47Z born: review S2 on of=record/wave-38-one-stop/critic-adversarial.md#1
-- T37: landed 74a11248d6e03803342ed43cd86baa620cc1c587 2026-10-18T09:23:36Z — added by task-add at 2026-10-18T06:35:48Z born: review S2 on of=record/wave-38-one-stop/critic-adversarial.md#2,record/wave-38-one-stop/critic-structure.md#1
-- T25: landed a4658ae061ffe28e921e8cc6517d23849ba5178c 2026-10-18T06:37:04Z
-- T24: landed a4658ae061ffe28e921e8cc6517d23849ba5178c 2026-10-18T06:38:25Z
-- T27: reason: the regression verb refused a second whole run at both settled heads under its coverage rule (A-orch-74); the row's artifact is the rule's record, not a timing file no run wrote landed 74a11248d6e03803342ed43cd86baa620cc1c587 2026-10-18T09:36:54Z
-- T28: reason: the release scan hits a private name in two historical blobs of tests/dispatch-preflight-5.test.sh (T21 commits 1c99bfdd, ab4acf46); the user rules on the history before the merge, and T22 lands red on release-check until that approval reason: the history token is read by T38, before integration landed acd8c99944e366753b73f581d64431be361010a7 2026-10-18T15:07:33Z
-- T38: landed 0fd9782dd2a82e26391b2b1ccdf1a4432e71261c 2026-10-18T15:07:26Z — added by task-add at 2026-10-18T09:39:17Z
-- T22: landed d06c2364653d76ea1aabc8dec97dbf41220df64d 2026-10-18T10:46:10Z
-- T29: landed acd8c99944e366753b73f581d64431be361010a7 2026-10-18T15:07:33Z
-SR38
-}
-SR_W38_ROWS="T4:4:build T1:4:build T2:4:build T3:4:build T5:4:build T6:4:build T7:4:build T8:4:build T9:4:build T10:4:build T11:4:build T12:4:build T13:4:build T14:4:build T15:4:build T16:4:build T17:4:build T18:4:build T19:4:build T20:4:build T21:4:build T22:7:doc T23:5:verify T24:5:verify T25:6:review T26:6:review T27:6:test T28:8:integrate T29:9:close T30:4:build T31:4:build T32:4:build T33:4:build T34:4:build T35:4:build T36:4:build T37:4:build T38:7:doc"
-sr_w38_world() {
-  local r="$TMPROOT/w38" d p e n
-  mkdir -p "$r/.bionic/tmp" "$r/.bionic/docs/plans/epic-01-fx"
-  ( cd "$r" && git init -q . 2>/dev/null )
-  d="$r/.bionic/docs/record/wave-38-fx"; mkdir -p "$d"
-  p="$r/.bionic/docs/plans/epic-01-fx/wave-38-fx.plan.md"
-  SR_REPO="$r"; SR_PLAN="$p"; SR_DIR="$d"; SR_REC="$d/landing-proofs.log"; : > "$SR_REC"
-  SR_GATE="$TMPROOT/gate-w38"; mkdir -p "$SR_GATE/requests" "$SR_GATE/cost"
-  {
-    printf -- '---\nwave: wave-38-fx\ncanonical_sdlc_version: 14\nrelease: 1.21.0\nworking-branch: wave/38-fx\nintegration-branch: main\nforecast: 48h\n---\n'
-    printf '# wave 38 as a fixture\n\n## SDLC State\n\ncurrent: 9\n\n'
-    sr_w38_lines
-    printf '\n## Tasks\n\n'
-    printf '| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
-    printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-    for e in $SR_W38_ROWS; do
-      n="${e%%:*}"
-      printf '| %s | %s | %s | Row %s of wave 38 · complexity: standard | — | — | — | 30 | REQ-1 | lib/w%s.sh | — | — | landed | — | — | — |\n' \
-        "$n" "$(printf '%s' "$e" | cut -d: -f2)" "${e##*:}" "${n#T}" "${n#T}"
-    done
-    printf '\n## Not Doing\n\n- nothing\n'
-  } > "$p"
-}
-sr_w38_world
-sr_run "$SR_PLAN"
-expect_eq "SP0 precondition: the 38-task plan prints (rc 0), every task done, read by the completed count" \
-  "0|38 tasks, 1140 of 1140 min, 100%" "$RC|$(sr_m work.landed)"
-expect_eq "SP0b precondition: the fixture holds the three shapes — bare, text before landed, landed-by-hand (lead and after text)" "yes|yes|yes|yes" \
-  "$(sr_w38_lines | /usr/bin/grep -qE '^- T1: landed [0-9a-f]{40} ' && echo yes)|$(sr_w38_lines | /usr/bin/grep -qE '^- T2: reason: .* landed [0-9a-f]{40} ' && echo yes)|$(sr_w38_lines | /usr/bin/grep -qE '^- T12: landed-by-hand: ' && echo yes)|$(sr_w38_lines | /usr/bin/grep -qE '^- T3: reason: .* landed-by-hand: ' && echo yes)"
-expect_eq "SP1 38 of 38 done tasks carry a landing time in their note" "38" \
-  "$(sr_tasks_f note | /usr/bin/grep -cE '^landed [0-9]{1,2}:[0-9]{2} [AP]M( [0-9]{4}-[0-9]{2}-[0-9]{2})?( by hand)?$')"
-expect_eq "SP2 the bare shape, the text before landed, and two reason clauses before it: each at its landing's local time" \
-  "landed 2:08 AM 2026-10-16|landed 12:06 PM 2026-10-16|landed 8:07 AM 2026-10-18" \
-  "$(for t in T1 T2 T28; do sr_f "$(sr_task "$t")" note; done | sr_join)"
-expect_eq "SP3 a landing by hand says so" "landed 2:22 PM 2026-10-17 by hand" "$(sr_f "$(sr_task T12)" note)"
 
 # ============================================================
 section "§ORDER: the task lines are in execution order — done by landing time, hand landings included; in flight by place on the line with what each is doing; the rest in dependency order"
@@ -1868,9 +1753,6 @@ expect_eq "RD-1 two rounds of D9 before the approval count none; after it four d
   "$(/usr/bin/grep -c '|key=decide:D9|state=closed|' <(sr_asks) | tr -d ' ')|$(/usr/bin/grep -c '|key=decide:D2|state=closed|' <(sr_asks) | tr -d ' ')|$(/usr/bin/grep -c '|state=open|' <(sr_asks) | tr -d ' ')|$(sr_r_card $((SR_E0 + 82800)))"
 sr_r_put $((SR_E0 + 81000)) D4
 expect_eq "RD-2 a round still open is a stop, its wait running to now" "$(sr_r_want 6 566)" "$(sr_r_card $((SR_E0 + 82800)))"
-sr_asks | sed 's/^run\/v1|ev=ask|/owed\/v1|/; s/|prompt=/|reply=/' > "$SR_DIR/asks.state"; sed -i.was '/^run\/v1|ev=ask|/d' "$SR_DIR/run.log"
-expect_eq "RD-3 the same rounds as register lines, the log holding no ask, count the same" "$(sr_r_want 6 566)|8|0" \
-  "$(sr_r_card $((SR_E0 + 82800)))|$(/usr/bin/grep -c 'state=closed' "$SR_DIR/asks.state")|$(/usr/bin/grep -c 'ev=ask' "$SR_DIR/run.log")"
 
 # ============================================================
 section "§WAIT: a decision's wait line names everything that waits on it: a row not landed or dropped that reads it, the release its newest approval page lists it on, the merge an open held-merge ask names it in"
