@@ -1426,9 +1426,10 @@ BRF_EOF
 
   # rr_rows <plan> <current> [head] -> `<AC>\037<tier>\037<status>\037<auditor>\037<ruled 1|0|owed:<step>>\037<person>\037<reason>`
   # per criterion, the reader's order. THE RULING IS THE GATE'S: each criterion is read through its readers (`matrix_load`,
-  # the reader's answer, and `matrix_table_rows`), and it is unruled exactly when walls.sh `matrix_unruled` names it at 8,
-  # the reader `current 8` asks, sourced in a subshell as the facts judge sources it, so the card and the gate cannot
-  # answer one row two ways: at single rigor, where the gate owes no auditor's word, no row is unruled. A
+  # the reader's answer, and `matrix_table_rows`), and it is unruled exactly when the gate at 8 asks something of it:
+  # walls.sh `matrix_unruled` names it (the ruling the advance asks, at double rigor), or `matrix_row_awaits` holds (the
+  # person's confirmation the commit at 8 asks at any rigor), sourced in a subshell as the facts judge sources them, so
+  # the card and the gate cannot answer one row two ways: at single rigor no auditor's word is owed, so no row waits on one. A
   # WAIVER IS A FACT OF THE RUN: the reader's status says waived only where a waiver event names the criterion. A row the
   # gate defers at <current> (`matrix_row_deferred`: owed at the later step whose task proves it) is `owed:<step>`, not
   # ruled and not unruled, whatever verdict a passed evidence review gives it, as the gate asks the deferral first:
@@ -1442,12 +1443,13 @@ BRF_EOF
   rr_rows() {
     [ -f "$BIONIC_LIB/walls.sh" ] || return 2
     ( . "$BIONIC_LIB/walls.sh" >/dev/null 2>&1 && declare -F matrix_unruled >/dev/null 2>&1 \
-        && declare -F matrix_row_deferred >/dev/null 2>&1 || exit 2
+        && declare -F matrix_row_awaits >/dev/null 2>&1 && declare -F matrix_row_deferred >/dev/null 2>&1 || exit 2
       PLAN="$1"; unruled="$(matrix_unruled "$PLAN" 8 "${3:-}")" || exit 2
       matrix_load "$PLAN" "${3:-}" || exit 2
       while IFS=$'\037' read -r ac tier status ev aud conf waiver; do
         [ -n "$ac" ] || continue
         ruled=1; case $'\n'"$unruled"$'\n' in *$'\n'"$ac"$'\n'*) ruled=0 ;; esac
+        ! matrix_row_awaits "$tier" "$status" "$aud" "$conf" "$waiver" || ruled=0
         person=-
         if [ "$tier" = T4 ]; then
           if user_confirmed_attributed "$conf"; then person=confirmed
