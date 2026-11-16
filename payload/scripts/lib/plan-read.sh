@@ -262,7 +262,7 @@ plan_read_waits() {
       for (k = 1; k <= NF; k++) { e = index($k, "="); if (!(substr($k, 1, e - 1) in c)) c[substr($k, 1, e - 1)] = substr($k, e + 1) }
       if ("reads" in c) hasreads = 1
       if ("status" in c) hasstatus = 1
-      n++; id[n] = c["id"]; stp[n] = c["step"]; knd[n] = c["kind"]; fil[n] = c["files"]; rd[n] = c["reads"]; dep[n] = c["deps"]
+      n++; id[n] = c["id"]; stp[n] = c["step"]; knd[n] = c["kind"]; fil[n] = c["files"]; rd[n] = c["reads"]; dep[n] = c["deps"]; tsk[n] = c["task"]
       at[id[n]] = n
     }
     END {
@@ -279,6 +279,13 @@ plan_read_waits() {
           sub(/!$/, "", e); nfe[i]++; fe[i, nfe[i]] = e; if (in_docs(e)) docs[i] = 1
         }
         r = rd[i]; kd = (r !~ /[A-Za-z0-9]/); rel = 0; if (kd) r = kdef(knd[i], stp[i])
+        # A NINE-CELL REVIEW ROW READS THE QUESTIONS ITS TASK CELL DECLARES: its live read is `live:head:<q>[+<q>]`,
+        # the token the scheduler judges per question, in place of the bare default; a row with no tag keeps it.
+        if (kd && !hasreads && knd[i] == "review" && (q = index(tsk[i], " · questions: "))) {
+          q = substr(tsk[i], q + length(" · questions: ")); e = index(q, " · "); if (e) q = substr(q, 1, e - 1)
+          sub(/[^a-z,].*$/, "", q); sub(/,$/, "", q); gsub(/,/, "+", q)
+          if (q != "") sub(/live:head/, "live:head:" q, r)
+        }
         if (hasrel && knd[i] == "integrate" && (" " r (at15 ? "," dep[i] : "") ",") !~ /[ \t,]approval:release[ \t]*,/) { r = r ", approval:release"; rel = 1 }
         mr = split(r, a, ","); m = split(r "," dep[i], a, ","); split("", wr1); split("", im1)
         for (k = 1; k <= m; k++) {

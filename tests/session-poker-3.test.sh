@@ -60,13 +60,11 @@ s56_last() {  # <plan> <kind> [<question>] -> proof_last's answer, from the libr
 }
 R56="$(make_repo s56-fact)"; ( cd "$R56" && git commit -q --allow-empty -m init )
 S56_B="$(git -C "$R56" rev-parse HEAD)"
-P56="$(SP_PLAN_AT=14 s42_plan "$R56" 4 "  worktree: .worktrees/01-fixture
+P56="$(s42_plan "$R56" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${S56_B:0:8}
   branch: wave/01-fixture")"
-awk -v b="${S56_B:0:8}" 'NR == 2 { print "base-sha: " b } { print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P56" > "$P56.tmp" && mv "$P56.tmp" "$P56"
 s42_builds_landed "$P56"  # whole reads are registered here, so no build row is open (T45)
-( cd "$R56" && git add -f "$P56" && git commit -qm wb \
-  && git worktree add -q -b wave/01-fixture "$R56/.worktrees/01-fixture" "$S56_B" ) >/dev/null 2>&1
+git -C "$R56" worktree add -q -b wave/01-fixture "$R56/.worktrees/01-fixture" "$S56_B" >/dev/null 2>&1
 for s56c in 1 2 3 4; do git -C "$R56/.worktrees/01-fixture" commit -q --allow-empty -m "C$s56c" >/dev/null 2>&1; done
 S56_C2="$(git -C "$R56/.worktrees/01-fixture" rev-parse HEAD~2)"
 S56_C3="$(git -C "$R56/.worktrees/01-fixture" rev-parse HEAD~1)"; S56_C4="$(git -C "$R56/.worktrees/01-fixture" rev-parse HEAD)"
@@ -117,8 +115,8 @@ expect_eq "56a0b precondition: a fixture row carries the appended questions key,
   "$(/usr/bin/grep -F '|name=w-aud|' "$S56_RS" | tr '|' '\n' | sed -n 's/^questions=//p')"
 expect_eq "56a0c precondition: …and its role, as the production writer wrote it" "bionic:auditor" \
   "$(/usr/bin/grep -F '|name=w-aud|' "$S56_RS" | tr '|' '\n' | sed -n 's/^subagent_type=//p')"
-s34_gate15 "$R56" "$P56"
-expect_eq "56a0d precondition: the fixture's run, brought forward to 15, is admitted by the real commit gate" "0" "$GATE_RC"
+s34_gate "$R56"
+expect_eq "56a0d precondition: the fixture's run at 15 is admitted by the real commit gate" "0" "$GATE_RC"
 [ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 
 # ---------- §FACT-shape (AC-2.1): question, reader, range and result, or refused ----------
@@ -134,7 +132,7 @@ expect_contains "56a4 …and the success line names them" "question=evidence rea
 expect_eq "56a5 proof_last review evidence reads that question's head" "$S56_C2" "$(s56_last "$P56" review evidence)"
 expect_eq "56a6 …a question never read reads nothing" "" "$(s56_last "$P56" review adversarial)"
 expect_eq "56a7 …and with no question, the last review proof of any question (1.11.0's reading)" "$S56_C2" "$(s56_last "$P56" review)"
-s34_gate15 "$R56" "$P56"
+s34_gate "$R56"
 expect_eq "56a8 …and with the reading registered, the next commit against it is admitted by the real gate" "0" "$GATE_RC"
 [ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 
@@ -318,9 +316,9 @@ section "Section 57 §JUDGE §WHOLE §WAIVE: facts_state says, per owed fact, wh
 # commit past it touches only the docs root. `waive <question> '<reply>'` writes the user's waiver
 # through the verb transaction, at the working head.
 #
-# FIXTURE FIDELITY. The fact lines are written by the production writer, proof.sh `proof_line`
-# placed as a run at 14 held it (`plan_fixture_state_add`), and waivers by `proof_waiver_line`, not by the verb: §56 holds the
-# verb's admission of a reading, and the judge reads plan text whatever wrote it. 57t registers
+# FIXTURE FIDELITY. The fact lines are written by the production writer, proof.sh `proof_line`, and waivers by
+# `proof_waiver_line`, each appended to the run's log as the event the verbs write (`sp_fact`), not by the verb: §56
+# holds the verb's admission of a reading, and the judge reads the log whatever wrote it. 57t registers
 # through the verb itself. The working branch's commits are real: two code commits, one commit
 # under the docs root alone, one code commit. The 57t roster row carries `questions=` appended by
 # hand (s56_row): SYNTHESIZED until row T15 teaches the dispatch wall to write it.
@@ -329,21 +327,19 @@ S57_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/proof.sh"
 R57="$(make_repo s57-judge)"; ( cd "$R57" && git commit -q --allow-empty -m init )
 git -C "$R57" config user.name "Dana Fixture"
 S57_B="$(git -C "$R57" rev-parse HEAD)"
-P57="$(SP_PLAN_AT=14 s42_plan "$R57" 4 "  worktree: .worktrees/01-fixture
+P57="$(s42_plan "$R57" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${S57_B:0:8}
   branch: wave/01-fixture")"
-awk -v b="${S57_B:0:8}" 'NR == 2 { print "base-sha: " b } { print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P57" > "$P57.tmp" && mv "$P57.tmp" "$P57"
-( cd "$R57" && git add -f "$P57" && git commit -qm wb \
-  && git worktree add -q -b wave/01-fixture "$R57/.worktrees/01-fixture" "$S57_B" ) >/dev/null 2>&1
+git -C "$R57" worktree add -q -b wave/01-fixture "$R57/.worktrees/01-fixture" "$S57_B" >/dev/null 2>&1
 S57_WT="$R57/.worktrees/01-fixture"
 S57_C1="$(s57_commit "$S57_WT" lib/a.sh C1)"
 S57_C2="$(s57_commit "$S57_WT" lib/a.sh C2)"
 S57_C3="$(s57_commit "$S57_WT" .bionic/docs/record/wave-01-fixture/note.md C3)"
 S57_C4="$(s57_commit "$S57_WT" lib/b.sh C4)"
-cp "$P57" "$TMPROOT/s57-clean"
 L57="$(bash -c '. "$1/reader.sh" && reader_log "$2"' _ "${S57_LIB%/*}" "$P57")"
-s57_reset() { cp "$TMPROOT/s57-clean" "$P57"; rm -f "$L57"; }
-s57_add() { plan_fixture_state_add "$1" "$2"; }  # <plan> <line> -> the line placed as a run at 14 held it
+cp "$P57" "$TMPROOT/s57-clean"; cp "$L57" "$TMPROOT/s57-clean.log"
+s57_reset() { cp "$TMPROOT/s57-clean" "$P57"; cp "$TMPROOT/s57-clean.log" "$L57"; }
+s57_add() { sp_fact "$1" "$2"; }  # <plan> <line> -> the line's event in the run's log
 s57_fact() {  # <question> <head> <result> <scope> [<plan>] -> a reading line, its evidence named after it
   s57_add "${5:-$P57}" "$(bash -c '. "$1" && proof_line review "$2" 2026-10-04T12:00:00Z "$3" "$4" w-read "$5" "$6"' \
     _ "$S57_LIB" "$2" "record/wave-01-fixture/$1-$3-$4.md" "$1" "$3" "$4")"
@@ -493,7 +489,7 @@ CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$R57" waive adversarial 'Ship it, the fix is
 expect_eq "57v §WAIVE waive writes the waiver (exit 0)" "0" "$RC"
 expect_eq "57v2 …as one waiver event in the run's log, the plan unchanged" \
   "run/v1|ev=waiver|question=adversarial|head=${S57_C4}|by=Dana Fixture|said=Ship it, the fix is one line.|same" \
-  "$(sed 's/|at=.*//' "$L57" 2>/dev/null)|$(cmp -s "$TMPROOT/s42-before" "$P57" && echo same)"
+  "$(/usr/bin/grep -F '|ev=waiver|' "$L57" 2>/dev/null | sed 's/|at=.*//')|$(cmp -s "$TMPROOT/s42-before" "$P57" && echo same)"
 expect_contains "57v4 …and the success line names it" "question=adversarial head=${S57_C4}" "$OUT"
 s57_state "$P57" "$S57_C4"
 expect_eq "57v5 …which the judge reads: adversarial covered at the working head" "covered" "$(s57_of "$S57_AD")"
@@ -526,22 +522,16 @@ R57T="$(make_repo s57-task)"; ( cd "$R57T" && git commit -q --allow-empty -m ini
 S57T_B="$(git -C "$R57T" rev-parse HEAD)"
 P57T="$R57T/.bionic/docs/plans/epic-99-fixture/task-01-fixture.plan.md"
 # THE ONE TABLE AT TASK SCALE (wave-31 T24; REQ-1, D2): tests/lib/plan-fixture.sh's plan at
-# `scale: task`, `current: 4`, one row in flight. Its base is the header's `base-sha:`, the Step-4 block's
-# value, where the judge reads it at either scale; with none, a first reading is refused and the
-# judge exits 2 (section 63 pins that twin, its Step-4 key empty).
-s57t_task_plan() {  # <plan> <Step-4 base-sha value, or "" for the key alone> -> the plan, with the run's branch and the row's line
-  plan_fixture --at 14 "$1" task "| T1 | 4 | build | the fix | — | — | — | 30 | REQ-1 | lib/fix.sh | — | — | active |" > /dev/null || return 1
-  S57T_BASE="$2" awk '
-    NR == 2 && ENVIRON["S57T_BASE"] != "" { print "base-sha: " ENVIRON["S57T_BASE"] }
-    /^  base-sha: / { print "  base-sha:" (ENVIRON["S57T_BASE"] != "" ? " " ENVIRON["S57T_BASE"] : ""); next }
-    { print }
-    /^approved-by: / { print "working-branch: task/01-fixture"; print "- T1: the fix, in .worktrees/01-task" }' \
-    "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+# `scale: task`, at step 4, one row in flight. Its base is the header's `base-sha:`, where the judge reads it at
+# either scale; with none, a first reading is refused and the judge exits 2 (section 63 pins that twin).
+s57t_task_plan() {  # <plan> <base-sha value> -> the plan, on the run's branch, its row's tree in the log
+  plan_fixture "$1" task "| T1 | 4 | build | the fix | — | — | — | 30 | REQ-1 | lib/fix.sh | .worktrees/01-task | — | active |" > /dev/null || return 1
+  sed -e 's|^working-branch: .*|working-branch: task/01-fixture|' -e "s|^base-sha: .*|base-sha: $2|" "$1" > "$1.tmp" && mv "$1.tmp" "$1"
 }
 s57t_task_plan "$P57T" "$S57T_B"
-expect_eq "57t0a precondition: the fixture is a task-scale plan at current: 4 whose Step-4 base is the init commit" \
-  "scale: task|current: 4|  base-sha: $S57T_B" \
-  "$(/usr/bin/grep -E '^scale: |^current: |^  base-sha: ' "$P57T" | tr '\n' '|' | sed 's/|$//')"
+expect_eq "57t0a precondition: the fixture is a task-scale plan at step 4 whose base is the init commit" \
+  "scale: task|base-sha: $S57T_B|ev=step|n=4" \
+  "$(/usr/bin/grep -E '^scale: |^base-sha: ' "$P57T" | tr '\n' '|')$(/usr/bin/grep -o 'ev=step|n=4' "$(plan_fixture_log "$P57T")")"
 bound_marker "$R57T" "$SID" "$P57T" >/dev/null 2>&1
 ( cd "$R57T" && git add -f "$P57T" && git commit -qm plan \
   && git worktree add -q -b task/01-fixture "$R57T/.worktrees/01-task" "$S57T_B" ) >/dev/null 2>&1
@@ -560,8 +550,8 @@ for s57q in evidence adversarial structure; do
     [ "$s57q" = evidence ] && printf '\n| AC | verdict | why |\n|---|---|---|\n| AC-1.1 | CONFIRMED | the fixture holds |\n\nverdict: CONFIRMED — the one criterion has a row\n'
     :; } > "$S57T_REC/$s57q.md"
 done
-s34_gate15 "$R57T" "$P57T"
-expect_eq "57t0b precondition: the task-scale fixture's run, brought forward to 15, is admitted by the real commit gate" "0" "$GATE_RC"
+s34_gate "$R57T"
+expect_eq "57t0b precondition: the task-scale fixture's run at 15 is admitted by the real commit gate" "0" "$GATE_RC"
 [ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 for s57q in evidence adversarial structure; do
   poke "$R57T" proof-add review "record/task-01-fixture/$s57q.md" --question "$s57q" --reader w-tcrit
@@ -608,12 +598,10 @@ git -C "$R58" worktree add -q -b wave/01-fixture "$R58/.worktrees/01-fixture" "$
 for s58c in 1 2 3 4; do git -C "$R58/.worktrees/01-fixture" commit -q --allow-empty -m "C$s58c" >/dev/null 2>&1; done
 S58_C1="$(git -C "$R58/.worktrees/01-fixture" rev-parse HEAD~3)"; S58_C2="$(git -C "$R58/.worktrees/01-fixture" rev-parse HEAD~2)"
 S58_C3="$(git -C "$R58/.worktrees/01-fixture" rev-parse HEAD~1)"; S58_C4="$(git -C "$R58/.worktrees/01-fixture" rev-parse HEAD)"
-P58="$(SP_PLAN_AT=14 s42_plan "$R58" 4 "  worktree: .worktrees/01-fixture
+P58="$(s42_plan "$R58" 4 "  worktree: .worktrees/01-fixture
   base-sha: ${S58_C1:0:8}
   branch: wave/01-fixture")"
-awk -v b="${S58_C1:0:8}" 'NR == 2 { print "base-sha: " b } { print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$P58" > "$P58.tmp" && mv "$P58.tmp" "$P58"
 s42_builds_landed "$P58"  # whole reads are registered here, so no build row is open (T45)
-( cd "$R58" && git add -f "$P58" && git commit -qm wb ) >/dev/null 2>&1
 S58_REC="$R58/.bionic/docs/record/wave-01-fixture"; mkdir -p "$S58_REC"
 S58_REL=".bionic/docs/record/wave-01-fixture"
 s58_rec() {  # <file> <line>... -> a record, one line per argument, then the reader's prose
@@ -649,8 +637,8 @@ expect_eq "58a0c precondition: the confirmed r-aud row carries its files= list, 
   "$(/usr/bin/grep -F '|status=confirmed|' "$S58_RS" | /usr/bin/grep -F '|name=r-aud|' | tr '|' '\n' | sed -n 's/^files=//p')"
 expect_eq "58a0d precondition: …and its deliverable=" "$S58_REL/aud.md" \
   "$(/usr/bin/grep -F '|status=confirmed|' "$S58_RS" | /usr/bin/grep -F '|name=r-aud|' | tr '|' '\n' | sed -n 's/^deliverable=//p')"
-s34_gate15 "$R58" "$P58"
-expect_eq "58a0e precondition: the fixture's run, brought forward to 15, is admitted by the real commit gate" "0" "$GATE_RC"
+s34_gate "$R58"
+expect_eq "58a0e precondition: the fixture's run at 15 is admitted by the real commit gate" "0" "$GATE_RC"
 [ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 
 # ---------- §ONE-PASS (F1): a reading record is one pass ----------
@@ -838,9 +826,9 @@ for s59st in intended confirmed; do
 done
 # A BASE THE JUDGE CAN HOLD (wave-36 T28; D9): live:head asks facts_state, which judges only a plan whose base-sha:
 # is a commit, so the Step-4 block names the init commit, not s42_plan's placeholder.
-P59="$(SP_PLAN_AT=14 s42_plan "$R59" 4 "  worktree: .worktrees/01-fixture
+P59="$(s34_page "$R59" 4 "  worktree: .worktrees/01-fixture
   base-sha: $(git -C "$R59" rev-parse --short=8 HEAD)
-  branch: wave/01-fixture")"
+  branch: wave/01-fixture")"; bound_marker "$R59" "$SID" "$P59" >/dev/null 2>&1
 # EACH LANDING TOUCHES CODE (wave-36 T28; D9): the judge reads a commit that touches nothing as prose, and a review
 # row is ready again only past a commit that owes, so A, B and C each change a.sh.
 ( cd "$R59" && git worktree add -q -b wave/01-fixture "$R59/.worktrees/01-fixture" \
@@ -853,27 +841,22 @@ s59_read() {  # <question> <head> <minute> <reader> -> a reading's proof line
   printf 'proved: kind=review head=%s at=2026-10-04T10:%s:00Z evidence=record/wave-01-fixture/%s.md question=%s reader=%s result=pass scope=piece' \
     "$2" "$3" "$1" "$1" "$4"
 }
-awk -v l1="$(s59_read adversarial "$S59_A" 01 w-crit)" -v l2="$(s59_read structure "$S59_B" 02 w-crit)" \
-    -v l3="$(s59_read evidence "$S59_B" 03 w-aud)" -v b="$(sed -n 's/^  base-sha: //p' "$P59")" '
-  NR == 2 { print "base-sha: " b } /^current: / && !wb { print; print "working-branch: wave/01-fixture"; print l1; print l2; print l3; wb = 1; next }
-  /^- T5: / { print "- T3: the evidence read — record/wave-01-fixture/ev.md"; print "- T4: the adversarial and structure read — record/wave-01-fixture/adv.md" }
-  /^\| id \| step \|/ { intab = 1
+printf '%s\n' "| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |  |" \
+  "| T3 | 6 | review | the evidence read | auditor | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/ev.md | — | — | pending | approval:plan, live:head:evidence |" \
+  "| T4 | 6 | review | the adversarial and structure read | — | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/adv.md | — | — | pending | approval:plan, live:head:adversarial+structure |" \
+  "| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-1 | — | — | — | pending |  |" | sp_q_rows > "$R59.rows"
+awk -v rf="$R59.rows" '/^\| id \| step \|/ { intab = 1
     print "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |"
-    print "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
-    print "| T1 | 4 | build | the first build | implementor | — | 30 | REQ-1 | a.sh | — | — | landed |  |"
-    print "| T3 | 6 | review | the evidence read | auditor | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/ev.md | — | — | pending | approval:plan, live:head:evidence |"
-    print "| T4 | 6 | review | the adversarial and structure read | — | — | 30 | REQ-1 | .bionic/docs/record/wave-01-fixture/adv.md | — | — | pending | approval:plan, live:head:adversarial+structure |"
-    print "| T5 | 5 | verify | the floor | test-runner | — | 30 | REQ-1 | — | — | — | pending |  |"
-    next }
+    print "|---|---|---|---|---|---|---|---|---|---|---|---|---|"; while ((getline l < rf) > 0) print l; next }
   intab && /^\|/ { next }
   { intab = 0; print }' "$P59" > "$P59.tmp" && mv "$P59.tmp" "$P59"
+sp_at15 "$P59"; for l in "$(s59_read adversarial "$S59_A" 01 w-crit)" "$(s59_read structure "$S59_B" 02 w-crit)" "$(s59_read evidence "$S59_B" 03 w-aud)"; do sp_fact "$P59" "$l"; done
 ( cd "$R59" && git add -f "$P59" && git commit -qm "two read rows" ) >/dev/null 2>&1
-mkdir -p "$R59/.bionic/docs/record/wave-01-fixture"
 expect_eq "59a0 precondition: three readings planted, each with its question" "adversarial structure evidence" \
-  "$(/usr/bin/grep -E '^proved: kind=review ' "$P59" | sed 's/.* question=\([a-z]*\) .*/\1/' | tr '\n' ' ' | sed 's/ $//')"
+  "$(/usr/bin/grep -E '\|ev=proof\|kind=review\|' "$(plan_fixture_log "$P59")" | sed 's/.*|question=\([a-z]*\)|.*/\1/' | tr '\n' ' ' | sed 's/ $//')"
 expect_true "59a0b precondition: A, B and C are three commits" test -n "$S59_A" -a "$S59_A" != "$S59_B" -a "$S59_B" != "$S59_C"
-s34_gate15 "$R59" "$P59"
-expect_eq "59a0c precondition: the two-read-row run, brought forward to 15, is admitted by the real commit gate" "0" "$GATE_RC"
+s34_gate "$R59"
+expect_eq "59a0c precondition: the two-read-row run at 15 is admitted by the real commit gate" "0" "$GATE_RC"
 [ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 
 # ---------- the tick: both rows offered, each with its own range ----------
@@ -888,8 +871,7 @@ expect_eq "59a2 AC-1.5 both read rows are offered at once" "yes yes" \
 s59_live() { bash -c '. "$1/units.sh" && units_rows "$2"' _ "$BIONIC_HOOKS_DIR/../payload/scripts/lib" "$P59" | awk -F'\t' -v r="$1" '$1 == r { print $10 "|" $5 }'; }
 S59_LOG="$R59/.bionic/docs/record/wave-01-fixture/run.log"
 bash -c '. "$1/log.sh" && RUN_LOG="$2" log_append dispatch row=T3 name=w-aud brief=b sum=s && RUN_LOG="$2" log_append dispatch row=T4 name=w-crit brief=b sum=s' _ "$BIONIC_HOOKS_DIR/../payload/scripts/lib" "$S59_LOG"
-expect_eq "59c0 precondition: T3's launch is in the log alone: its cells pending, the run's state active under w-aud" \
-  "pending|active|w-aud" "$(s48_row "$P59" T3 | awk -F'|' '{ print $12 }')|$(s59_live T3)"
+expect_eq "59c0 precondition: T3's launch is in the log alone: the run's state active under w-aud" "active|w-aud" "$(s59_live T3)"
 expect_eq "59c0b precondition: T4 is launched by the log too" "active|w-crit" "$(s59_live T4)"
 printf '# reading\n\nreviewed: %s..%s\nquestion: adversarial\nresult: pass\nscope: piece\n\nthe second pass\n' "$S59_A" "$S59_C" \
   > "$R59/.bionic/docs/record/wave-01-fixture/adv-2.md"
@@ -947,8 +929,8 @@ s59w_bare() { printf 'proved: kind=review head=%s at=2026-10-04T09:00:00Z eviden
 # F1: the bare T3 above the adversarial row T4; adversarial read at A, the bare proof at C, head C.
 s59_world s59-f1 "$(s59_read adversarial @A 01 w-crit)
 $(s59w_bare @C)" "$S59W_T1" "$S59W_BARE" "$(s59w_q T4 adversarial)" "$S59W_T5"
-s34_gate15 "$R59W" "$P59W"
-expect_eq "59f0 precondition: the bare-above-read run, brought forward to 15, is admitted by the real commit gate" "0" "$GATE_RC"
+s34_gate "$R59W"
+expect_eq "59f0 precondition: the bare-above-read run at 15 is admitted by the real commit gate" "0" "$GATE_RC"
 [ "$GATE_RC" = 0 ] || printf '      the gate said: %s\n' "$GATE_ERR" | head -6
 poke_pressure "$R59W" 8192 1.0 tick
 expect_nonempty "59f F1 the tick prints a FILL line (the extractor reads real output)" "$(s47_lines FILL)"
@@ -962,6 +944,11 @@ poke_pressure "$R59W" 8192 1.0 tick
 s59_world s59-f2 "$(s59_read structure @B 01 w-crit)
 $(s59_read adversarial @A 02 w-crit)" "$S59W_T1" "$(s59w_q T3 adversarial+structure)" "$S59W_T5"
 poke_pressure "$R59W" 8192 1.0 tick
+# Two read rows sharing a question are one chain: the first goes first, while rows sharing none (59a2) are ready together.
+s59_world s59-share "$(s59_read adversarial @A 01 w-crit)" "$S59W_T1" "$(s59w_q T3 adversarial)" "$(s59w_q T4 adversarial)" "$S59W_T5"
+poke_pressure "$R59W" 8192 1.0 tick
+expect_eq "59g AC-1.5 two read rows sharing a question are not ready together: T3 offered, T4 not" "yes no" "$(s48_fill_has T3) $(s48_fill_has T4)"
+expect_contains "59g2 …T4 waits, naming the row that goes first" "poker: WAIT T4 — live:head:adversarial: review T3 goes first" "$(s47_lines WAIT)"
 POKE_BOUND="$S59_BOUND_WAS"
 
 # ============================================================
@@ -975,14 +962,12 @@ section "§LOG-REVIEW: waive, the release approval card and finding-move read a 
 LR_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RLR="$(make_repo s-log-review)"; ( cd "$RLR" && git commit -q --allow-empty -m init )
 git -C "$RLR" config user.name "Dana Fixture"
-PLR="$(SP_PLAN_AT=14 s42_plan "$RLR" 6)"
-awk '{ print } /^current: / && !d { print "working-branch: wave/01-fixture"; d = 1 }' "$PLR" > "$PLR.tmp" && mv "$PLR.tmp" "$PLR"
-( cd "$RLR" && git add -f "$PLR" && git commit -qm wb && git branch -q wave/01-fixture ) >/dev/null 2>&1
+PLR="$(s42_plan "$RLR" 6)"; git -C "$RLR" branch -q wave/01-fixture
 LR_H="$(git -C "$RLR" rev-parse wave/01-fixture)"; LR_REC="record/wave-01-fixture/adv-log.md"
-LR_DIR="$RLR/.bionic/docs/record/wave-01-fixture"; mkdir -p "$LR_DIR"
+LR_DIR="$RLR/.bionic/docs/record/wave-01-fixture"
 printf 'question: adversarial\nresult: fail\nscope: piece\nreviewed: %s..%s\nfindings: 1\nfinding: 1 S2 on lib/a.sh:1 data lost\nshown: 1 bash lib/a.sh\n' "$LR_H" "$LR_H" > "$LR_DIR/adv-log.md"
 printf 'run/v1|ev=step|n=6|at=2026-10-04T11:00:00Z\nrun/v1|ev=proof|evidence=%s|head=%s|kind=review|question=adversarial|reader=w-crit|result=fail|scope=piece|at=2026-10-04T12:00:00Z\n' \
-  "$LR_REC" "$LR_H" > "$LR_DIR/run.log"
+  "$LR_REC" "$LR_H" >> "$LR_DIR/run.log"
 lr_reg() {  # <owed.sh verb> [args] -> run on the run's asks, the store the verbs write: record/<wave>/run.log
   bash -c '. "$1/roots.sh"; . "$1/owed.sh"; OWED_ROOT="$2" OWED_PLAN="$3" OWED_SID="$4"; export OWED_ROOT OWED_PLAN OWED_SID
     shift 4; "$@"' _ "${S46_LIB%/*}" "$RLR" "$PLR" "$SID" "$@"

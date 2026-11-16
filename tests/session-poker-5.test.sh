@@ -38,7 +38,7 @@ section "§CHECK: current <N> --check runs what current <N> runs before it write
 # suites and lib/x.sh, base B and a code commit C; the run at 15 a double wave plan's text stands for, which
 # the real gate admits at Steps 5 through 7, bound to this session: plan_fixture's page at double rigor and
 # base B, its log the fixture's events, then the text's proofs in the production writer's shape
-# (`proof_line`, `proof_floor_line`) read in by lib/translate.sh, then its criterion's proof. Every move is
+# (`proof_line`, `proof_floor_line`) appended as their events (`sp_fact`), then its criterion's proof. Every move is
 # the real verb; each fixture is rebuilt before the advance runs.
 # fails-when: the check and the advance disagree on a fixture; the check writes a byte anywhere in the
 # repository; the check path loses the judge (the mutant below).
@@ -69,17 +69,13 @@ ck_reads() {  # <head> [<adversarial result>] -> the five readings a double wave
   ck_line review "$1" 2026-10-12T12:00:00Z record/w35/structure-whole.md structure w-read pass whole
 }
 ck_plan() {  # <current> <proof lines> [<row>...] -> PCK, the run at 15 those proofs stand in, bound to this session
-  local t="$TMPROOT/ck-text.plan.md"
   rm -rf "${PCK%/*}" "$RCK/.bionic/docs/record/wave-01-fixture"
-  local cur="$1" proofs="$2"; shift 2
-  printf -- '---\ncanonical_sdlc_version: 14\n---\n## SDLC State\n\ncurrent: %s\n%s\n' "$cur" "$proofs" > "$t"
+  local cur="$1" proofs="$2" l; shift 2
   plan_fixture --current "$cur" "$PCK" wave "$@" > /dev/null
   awk -v b="$CK_B" '/^rigor: /{ $0 = "rigor: double" } /^base-sha: /{ print "base-sha: " b; print "adrs: none — no decision this run"; next } { print }' \
     "$PCK" > "$PCK.t" && mv "$PCK.t" "$PCK"
-  { bash -c '. "$1/reader.sh" && . "$1/translate.sh" && translate "$2" events' _ "$CK_LIB" "$t" \
-      | /usr/bin/grep -E '^run/v1[|]ev=proof[|]kind=(review|regression)[|]'
-    printf 'run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|at=2026-10-12T13:00:00Z\n'; } >> "$(plan_fixture_log "$PCK")"
-  rm -f "$t"
+  printf '%s\n' "$proofs" | while IFS= read -r l; do [ -z "$l" ] || sp_fact "$PCK" "$l"; done
+  printf 'run/v1|ev=proof|ac=AC-1.1|evidence=record/generic-evidence.md|at=2026-10-12T13:00:00Z\n' >> "$(plan_fixture_log "$PCK")"
   bind_marker "$RCK" "$PCK"
 }
 ck_tree() {  # -> one cksum line per file in the fixture repository outside .git: what a write would change
@@ -320,20 +316,21 @@ expect_eq "DG-4 decisions --all exits 0" "0" "$RC"
 section "§ROUNDS: decisions put appends a put round to the run's log and decisions rule closes its ask, so the decision is owed from its put to its ruling; each put prints what an hour's wait moves, from the tasks that read it and the longest chain"
 # ============================================================
 # A put opens a round and the next ruling of the same number closes it; a ruling with no put open is a round of its
-# own, the shape of a ledger written before puts. The wait line reads the tasks whose reads cell names the decision
+# own, the shape of a ledger written before puts. The wait line reads the tasks whose deps cell names the decision
 # as an approval and whether any is on the longest open chain. FIXTURE FIDELITY: a real repository, §DECISIONS's
-# plan shape with a reads column, each ruling given by the verb in the session whose transcript it reads.
+# plan shape at 15, T1 landed in its log, each ruling given by the verb in the session whose transcript it reads.
 # fails-when: a put opens no ask, or the verb's ruling leaves it open; the wait line is absent, or reads the same whether
 # its task is on the chain.
-RW="$(make_repo rounds)"; PW="$(SP_PLAN_AT=14 s34_plan "$RW" 4)"
-RW_L="$RW/.bionic/docs/record/wave-01-fixture/design-ledger.md"; mkdir -p "${RW_L%/*}"
-rw_table() {  # <the side task's size> -> the task table: a side task reads one decision; the last reads another and the long one's file
-  awk -v s="$1" '/^## Tasks/ { print; print ""; print "| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |"
-    print "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
-    print "| T1 | 4 | build | the first | implementor | — | 30 | REQ-1 | a.sh | — | — | landed | approval:plan |"
-    print "| T2 | 4 | build | the side | implementor | — | " s " | REQ-1 | b.sh | — | — | pending | approval:plan, approval:D7 |"
-    print "| T3 | 4 | build | the long | implementor | — | 200 | REQ-1 | c.sh | — | — | pending | approval:plan |"
-    print "| T4 | 4 | build | the last | implementor | — | 100 | REQ-1 | d.sh | — | — | pending | approval:plan, c.sh, approval:D8 |"
+RW="$(make_repo rounds)"; PW="$(s34_plan "$RW" 4)"
+RW_L="$RW/.bionic/docs/record/wave-01-fixture/design-ledger.md"
+/usr/bin/grep -Ev '[|]row=T[25][|]' "${RW_L%/*}/run.log" > "$RW_L.t"; mv "$RW_L.t" "${RW_L%/*}/run.log"   # T1 landed, no other row launched
+rw_table() {  # <the side task's size> -> the task table: a side task waits on one decision; the last on another and on the long one
+  awk -v s="$1" '/^## Tasks/ { print; print ""; print "| id | step | kind | task | deps | size | serves | Files | artifact |"
+    print "|---|---|---|---|---|---|---|---|---|"
+    print "| T1 | 4 | build | the first | — | 30 | REQ-1 | a.sh | — |"
+    print "| T2 | 4 | build | the side | approval:D7 | " s " | REQ-1 | b.sh | — |"
+    print "| T3 | 4 | build | the long | — | 200 | REQ-1 | c.sh | — |"
+    print "| T4 | 4 | build | the last | T3, approval:D8 | 100 | REQ-1 | d.sh | — |"
     print ""; skip = 1; next } skip && /^## / { skip = 0 } !skip' "$PW" > "$PW.t" && mv "$PW.t" "$PW"
 }
 rw_table 30
@@ -587,34 +584,34 @@ POKE_BOUND="$QL_BOUND_WAS"
 # ============================================================
 section "§NOTREADY: a row reading an unruled decision or waiting on an open row is not ready: the tick prints its WAIT and offers FILL only for a row that waits on nothing, an open order offers none, and the wall ends the turn"
 # ============================================================
-# A row that should wait is made not ready by a fact of the plan the tick judges: a read of a decision no
-# approved: line rules, a read of the record a still-open row writes, or the user's order under ## SDLC State.
-# FIXTURE FIDELITY: s47_plan's reads table, approved at current: 4; T2 is active, so the record it writes is
-# not yet written; the Stop is the shipped hooks/stop.sh on an ordinary turn of this session.
+# A row that should wait is made not ready by a fact of the run the tick judges: a wait on a decision no approval
+# rules, a wait on a still-open row, or the user's order in the run's log.
+# FIXTURE FIDELITY: s47_plan's run at 15, approved at step 4; T2 is launched, so it is still open; the Stop is the
+# shipped hooks/stop.sh on an ordinary turn of this session.
 # fails-when: FILL names T1 or T3; either prints no WAIT; the wall refuses a turn on which no row is ready;
 # an open order leaves a FILL; the tick prints a decline.
 NR_REC=".bionic/docs/record/wave-01-fixture/T2-held.md"
 RNR="$(make_repo notready)"; new_roster "$RNR"
-NR_P="$(SP_PLAN_AT=14 s47_plan "$RNR" 8 \
-  "| T1 | 4 | build | reads a ruling | implementor | — | 10 | REQ-x | payload/a.sh | pending | approval:plan, approval:D3 |" \
+NR_P="$(s47_plan "$RNR" 8 \
+  "| T1 | 4 | build | reads a ruling | implementor | approval:D3 | 10 | REQ-x | payload/a.sh | pending | |" \
   "| T2 | 4 | build | the open row | implementor | — | 10 | REQ-x | $NR_REC, payload/b.sh | active | |" \
-  "| T3 | 4 | build | waits on T2 | implementor | — | 10 | REQ-x | payload/c.sh | pending | approval:plan, $NR_REC |" \
+  "| T3 | 4 | build | waits on T2 | implementor | T2 | 10 | REQ-x | payload/c.sh | pending | |" \
   "| T4 | 4 | build | waits on nothing | implementor | — | 10 | REQ-x | payload/d.sh | pending | |")"
-nr_led() { /usr/bin/grep '^run/v1|ev=stop|' "$RNR/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null | tail -1; }
+NR_LOG="$RNR/.bionic/docs/record/wave-01-fixture/run.log"
+nr_led() { /usr/bin/grep '^run/v1|ev=stop|' "$NR_LOG" 2>/dev/null | tail -1; }
 nr_fill() { printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL T'; }   # -> the FILL line, never its "FILL —" sentence
 poke_pressure "$RNR" 8192 1.0 tick
 expect_eq "NR-0 the tick over the table exits 0" "0" "$RC"
 expect_eq "NR-1 FILL names only the row that waits on nothing" "poker: FILL T4" "$(nr_fill)"
 expect_contains "NR-2 the row reading the unruled D3 prints its WAIT, naming the read" "poker: WAIT T1 — approval:D3" "$OUT"
-expect_contains "NR-3 the row reading the record of the open T2 prints its WAIT, naming the writer" \
-  "poker: WAIT T3 — reads $NR_REC, written by T2 (active)" "$OUT"
+expect_contains "NR-3 the row waiting on the open T2 prints its WAIT, naming it" "poker: WAIT T3 — waits for T2 (active)" "$OUT"
 expect_absent "NR-4 …and the tick prints no decline (NR-1 read this same output)" "decline" "$OUT"
 s31_stop "$RNR" "$(s31_transcript "$RNR" "carry on")"
 expect_eq "NR-5 the control: T4 ready and nothing launched, the wall refuses the turn" "block" "$(s31_decision)"
 expect_contains "NR-5b …naming T4 alone" "ready with room: T4 " "$(s31_reason)"
 
-# T4 landed: every row left waits, the tick offers none, and the wall ends the turn.
-awk '{ if (index($0, "| T4 |") == 1) sub(/\| pending \|/, "| landed |"); print }' "$NR_P" > "$NR_P.t" && mv "$NR_P.t" "$NR_P"
+# T4 launched: every row left waits, the tick offers none, and the wall ends the turn.
+printf 'run/v1|ev=dispatch|row=T4|name=implementor|at=2026-10-04T00:30:00Z\n' >> "$NR_LOG"
 forget_digest "$RNR"; poke_pressure "$RNR" 8192 1.0 tick
 expect_contains "NR-6 precondition: the waits still print" "poker: WAIT T1 — approval:D3" "$OUT"
 expect_eq "NR-6b …and no row is offered" "" "$(nr_fill)"
@@ -623,18 +620,16 @@ expect_contains "NR-7 meta: the wall read the turn, its stop event is there" "ru
 expect_contains "NR-7b …and no row was ready" "|ready=|" "$(nr_led)"
 expect_eq "NR-7c the wall ends the turn" "" "$(s31_decision)"
 
-# The user's order: T4 pending again, an open order under ## SDLC State, so nothing is offered; the
+# The user's order: T4's launch taken back, an open order in the run's log, so nothing is offered; the
 # order lifted, T4 is offered again.
-awk '{ if (index($0, "| T4 |") == 1) sub(/\| landed \|/, "| pending |"); print }
-     /^approved-by:/ { print "order: given 2026-10-20T00:00:00Z \"hold the fleet while I read\"" }' "$NR_P" > "$NR_P.t" && mv "$NR_P.t" "$NR_P"
+printf 'run/v1|ev=%s|at=%s\n' 'cancel|of=dispatch|row=T4|name=implementor' 2026-10-19T23:59:00Z 'order|act=given|said=hold the fleet while I read' 2026-10-20T00:00:00Z >> "$NR_LOG"
 forget_digest "$RNR"; poke_pressure "$RNR" 8192 1.0 tick
 expect_contains "NR-8 under an open order the tick says so, quoting the words" \
   "no FILL — an order of the user stands: given 2026-10-20T00:00:00Z \"hold the fleet while I read\"" "$OUT"
 expect_eq "NR-8b …and offers no row" "" "$(nr_fill)"
 s31_stop "$RNR" "$(s31_transcript "$RNR" "carry on")"
 expect_eq "NR-8c …and the wall ends the turn" "" "$(s31_decision)"
-printf 'order: lifted 2026-10-20T00:30:00Z "hold the fleet while I read"\n' > "$NR_P.o"
-awk -v f="$NR_P.o" '{ print } /^order: given/ { while ((getline l < f) > 0) print l }' "$NR_P" > "$NR_P.t" && mv "$NR_P.t" "$NR_P"
+printf 'run/v1|ev=order|act=lifted|said=hold the fleet while I read|at=2026-10-20T00:30:00Z\n' >> "$NR_LOG"
 forget_digest "$RNR"; poke_pressure "$RNR" 8192 1.0 tick
 expect_eq "NR-9 the control: the order lifted, T4 is offered again" "poker: FILL T4" "$(nr_fill)"
 
@@ -644,17 +639,17 @@ section "§STEP: the approval line alone readies nothing: a plan at current: 2 t
 # A row's approval:plan read is met only while the plan is at current: 4 or later. A plan approved and still at
 # Step 2 has a ratified table nobody has started, and its rows wait for the step, in the tick, the wall and the
 # table reader alike.
-# FIXTURE FIDELITY: s47_plan's one-row reads table, its current: line rewritten in place; the Stop is the shipped
+# FIXTURE FIDELITY: s47_plan's one-row run at 15, its step moved by a step event in its log; the Stop is the shipped
 # hooks/stop.sh; the table reader is lib/units.sh `units_ready`, sourced from the shipped tree.
 # fails-when: at current: 2 the tick prints FILL, the wall refuses, or units_ready names T1; at current: 4 any of
 # the three disagrees.
 RST="$(make_repo step)"; new_roster "$RST"
-ST_P="$(SP_PLAN_AT=14 s47_plan "$RST" 8 "| T1 | 4 | build | ready from step 4 | implementor | — | 10 | REQ-x | payload/a.sh | pending | |")"
-st_at() { awk -v c="$1" '!d && /^current:/ { print "current: " c; d = 1; next } { print }' "$ST_P" > "$ST_P.t" && mv "$ST_P.t" "$ST_P"; }
+ST_P="$(s47_plan "$RST" 8 "| T1 | 4 | build | ready from step 4 | implementor | — | 10 | REQ-x | payload/a.sh | pending | |")"
+st_at() { bash -c '. "$1/proof.sh" && proof_step_event "$2" "$3"' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$ST_P" "$1"; }
 st_ready() { bash -c '. "$1/units.sh" && units_ready "$2" 4' _ "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" "$ST_P" 2>/dev/null; }
 st_at 2
-expect_contains "ST-0 precondition: the plan is at current: 2" "current: 2" "$(cat "$ST_P")"
-expect_contains "ST-0b precondition: …and carries its approved-by: line" "$SP_APPROVED_LINE" "$(cat "$ST_P")"
+expect_eq "ST-0 precondition: the run is at step 2" "n=2" "$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$ST_P" step | head -1)"
+expect_contains "ST-0b precondition: …and its log carries the plan's approval" "|ev=approval|key=step3|" "$(cat "$(plan_fixture_log "$ST_P")")"
 poke_pressure "$RST" 8192 1.0 tick
 expect_eq "ST-1 the tick at current: 2 exits 0" "0" "$RC"
 expect_contains "ST-1b …says the step holds the fill" "no FILL — plan at current: 2" "$OUT"
@@ -792,22 +787,19 @@ section "§EXEMPT: a review-born row inside fix-policy: is exempt from fix-cap:,
 # prints names the wrong count, or none.
 EX_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 REX="$(make_repo exempt)"; ( cd "$REX" && git commit -q --allow-empty -m init )
-PEX="$(SP_PLAN_AT=14 s34_plan "$REX" 4)"; EX_H="$(git -C "$REX" rev-parse HEAD)"
+PEX="$(s34_plan "$REX" 4)"; EX_H="$(git -C "$REX" rev-parse HEAD)"
 EX_OWN="record/wave-01-fixture/rev.md"; EX_CARRIED="record/wave-00-prior/critic.md"
 mkdir -p "$REX/.bionic/docs/record/wave-01-fixture" "$REX/.bionic/docs/record/wave-00-prior"
 printf 'reviewed: %s..%s\nquestion: structure\nresult: fail\nscope: piece\n\nfindings: 3\nfinding: 1 S3 on lib/p1.sh:1 the first promoted defect\nfinding: 2 S3 on lib/p2.sh:1 the second promoted defect\nfinding: 3 S3 on lib/p3.sh:1 the third promoted defect\nshown: 1 cat lib/p1.sh\nshown: 2 cat lib/p2.sh\nshown: 3 cat lib/p3.sh\n' \
   "$EX_H" "$EX_H" > "$REX/.bionic/docs/$EX_OWN"
 printf 'reviewed: %s..%s\nquestion: adversarial\nresult: fail\nscope: piece\n\nfindings: 1\nfinding: 1 S2 on lib/c1.sh:1 the carried defect\nshown: 1 cat lib/c1.sh\n' \
   "$EX_H" "$EX_H" > "$REX/.bionic/docs/$EX_CARRIED"
-EX_H="$EX_H" EX_OWN="$EX_OWN" EX_CARRIED="$EX_CARRIED" awk '
-  { print }
-  /^rigor: / && !fm { fm = 1; print "fix-cap: 2" }
-  /^approved-by: / && !st {
-    st = 1
-    print "proved: kind=review head=" ENVIRON["EX_H"] " at=2026-10-20T00:00:00Z evidence=" ENVIRON["EX_OWN"] " question=structure reader=w-rev result=fail scope=piece"
-    print "proved: kind=review head=" ENVIRON["EX_H"] " at=2026-10-20T00:00:00Z evidence=" ENVIRON["EX_CARRIED"] " question=adversarial reader=w-adv result=fail scope=piece"
-    for (i = 1; i <= 3; i++) print "moved: " ENVIRON["EX_OWN"] "#" i " to=fix by=Dana at=2026-10-20T01:00:00Z words=\"fix it in this wave\" why=\"the user ruled it\""
-  }' "$PEX" > "$PEX.n" && mv "$PEX.n" "$PEX"
+awk '{ print } /^rigor: / && !fm { fm = 1; print "fix-cap: 2" }' "$PEX" > "$PEX.n" && mv "$PEX.n" "$PEX"
+for ex_r in "$EX_OWN structure w-rev" "$EX_CARRIED adversarial w-adv"; do set -- $ex_r
+  sp_fact "$PEX" "proved: kind=review head=$EX_H at=2026-10-20T00:00:00Z evidence=$1 question=$2 reader=$3 result=fail scope=piece"; done
+for ex_i in 1 2 3; do
+  printf 'run/v1|ev=finding|ref=%s#%s|to=fix|by=Dana|words=fix it in this wave|why=the user ruled it|at=2026-10-20T01:00:00Z\n' "$EX_OWN" "$ex_i"
+done >> "$(plan_fixture_log "$PEX")"
 ex_add() {  # <id> <files> <born> -> OUT, RC: task-add of a step-4 build row born of <born>
   TA_PASTE=1 ta_add "$REX" "$1" 4 build "Fix $1. The defect is gone." bionic:implementor '—' 30 REQ-1 "$2" --born "$3"
 }
@@ -869,16 +861,16 @@ section "§APPROVED-BY: approve plan '<reply>' appends the plan's approval the w
 # The plan's approval is one approval event in the run's log, key step3, which the commit gate reads from Step 4; step0,
 # step1 and step2 are the ones the gate at 15 asks at Steps 1 to 3, each closing its own ask at its instant. Each holds the
 # git user and the reply as given, a placeholder refused, the plan unwritten, and a second call refused as recorded once.
-# FIXTURE FIDELITY: s34's plan at current: 3 with its approved-by: line taken out, and for AS-4 plan_fixture's run at 15
+# FIXTURE FIDELITY: s34's run at 15 at step 3 with its approval taken out of its log, and for AS-4 plan_fixture's run at 15
 # at Step 3 with its approval taken out, each bound to this session; the gate is the shipped one (s34_gate); every write is the real verb.
 # fails-when: an approval's only giver is the orchestrator's editor; it is given twice; the words differ; a step's is refused;
 # one is taken on words no prompt the person typed holds, or on a prompt a program sent (said_as sdk).
 AB_BOUND_WAS="$POKE_BOUND"; POKE_BOUND=180
 RAB="$(make_repo approved-by)"; ( cd "$RAB" && git commit -q --allow-empty -m init ); git -C "$RAB" config user.name "Dana Fixture"
-PAB="$(SP_PLAN_AT=14 s34_plan "$RAB" 3)"; /usr/bin/grep -v '^approved-by:' "$PAB" > "$PAB.t" && mv "$PAB.t" "$PAB"
+PAB="$(s34_plan "$RAB" 3)"; L5="$(plan_fixture_log "$PAB")"; /usr/bin/grep -v 'ev=approval' "$L5" > "$L5.t" && mv "$L5.t" "$L5"
 ab_k() { /usr/bin/grep "^run/v1|ev=$1" "$RAB/.bionic/docs/record/wave-01-fixture/run.log" 2>/dev/null; }
 ab_said() { printf '%s' "$1" | /usr/bin/grep -q "$2" && echo yes || echo no; }   # <text> <words> -> yes when the text holds them
-ab_at() { awk -v c="$1" '!d && /^current:/ { print "current: " c; d = 1; next } { print }' "$PAB" > "$PAB.t" && mv "$PAB.t" "$PAB"; }
+ab_at() { bash -c '. "$1/proof.sh" && proof_step_event "$2" "$3"' _ "${S46_LIB%/*}" "$PAB" "$1"; }
 ab_at 3; CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RAB" approve plan 'TBD'; expect_eq "AB-0b approve plan refuses a placeholder for the user's words (exit 1), appending nothing" "1|0" "$RC|$(ab_k 'approval|key=step3|' | grep -c .)"
 CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RAB" approve plan 'approved, go ahead'; AU="$RC|$(ab_k 'approval|key=step3|' | grep -c .)"
 said_as sdk "$RAB" 'approved, go ahead'; CLAUDE_CONFIG_DIR="$SAID_CFG" poke "$RAB" approve plan 'approved, go ahead'; AU="$AU|$RC|$(ab_k 'approval|key=step3|' | grep -c .)|$(ab_said "$OUT" 'stand in no prompt the user typed')"
@@ -910,9 +902,8 @@ section "§PARTS: the release-entry parts render in the checkout they run from: 
 # checkout's branch; only the checkout holding the working branch moves it, a checkout on main commits on the working
 # branch as before, and the part line names the tree that took the commit.
 # FIXTURE FIDELITY: s34_plan's plan, bound to this session, with the working branch and the release in its frontmatter
-# as Step 0 writes them; the doc and integrate rows are the table's own shape; the deferral is lib/proof.sh
-# `proof_finding_lines`' line with its sentence on it, and the waiver `proof_waiver_line`'s, as an older plan holds
-# both. The row's tree is a linked worktree on its own branch cut at the working branch, as
+# as Step 0 writes them; the doc and integrate rows are the table's own shape; the deferral is the person's move to
+# defer with its sentence on it, and the waiver `proof_waiver_line`'s, each an event in the run's log. The row's tree is a linked worktree on its own branch cut at the working branch, as
 # `spawn-worktree.sh create` makes it; the entry is a plain commit on the working branch.
 # fails-when: a verb run from the row's tree commits on the working branch or moves it, leaves the tree's branch or its
 # working tree without the part, changes the commit message, or writes no tree= on the part line; the working branch's
@@ -928,21 +919,21 @@ RPA="$(make_repo parts)"; RPA="$(cd "$RPA" && pwd -P)"
 git -C "$RPA" config user.email t@example.com; git -C "$RPA" config user.name "Dana Fixture"
 printf '# Changelog\n\n## %s — 2026-10-25\n\n### The work\n\n- one change\n\n### The landing numbers\n\nthe numbers\n' "$PA_V" > "$RPA/CHANGELOG.md"
 ( cd "$RPA" && git add CHANGELOG.md && git commit -qm "the entry" && git branch -M main && git checkout -qb wave/01-fixture ) >/dev/null 2>&1
-PPA="$(SP_PLAN_AT=14 s34_plan "$RPA" 4)"
-awk -v v="$PA_V" 'NR == 1 { print; print "working-branch: wave/01-fixture"; print "release: " v; next }
+PPA="$(s34_plan "$RPA" 4)"; PA_LOG="$(plan_fixture_log "$PPA")"
+awk -v v="$PA_V" 'NR == 1 { print; print "release: " v; next }
   { print }
-  /^\| T5 \|/ { print "| T3 | 7 | doc | the entry. The release entry is written. | orchestrator | — | 10 | REQ-1 | CHANGELOG.md | — | — | pending |"
-               print "| T4 | 8 | integrate | the pull request. The run reaches main. | orchestrator | — | 10 | REQ-1 | — | — | — | pending |" }' \
+  /^\| T5 \|/ { print "| T3 | 7 | doc | the entry. The release entry is written. | — | 10 | REQ-1 | CHANGELOG.md | — |"
+               print "| T4 | 8 | integrate | the pull request. The run reaches main. | — | 10 | REQ-1 | — | — |" }' \
   "$PPA" > "$PPA.n" && mv "$PPA.n" "$PPA"
 PA_H="$(pa_tip wave/01-fixture)"
-PA_ADD="$(printf '%s stated="%s"\n%s' "$(pa_lib proof_finding_lines record/wave-01-fixture/critic.md "$(printf '1\tS3\ton\t-\tdefer\t-\tthe one title')")" "$PA_S1" \
-  "$(pa_lib proof_waiver_line adversarial "$PA_H" 'Dana Fixture' 2026-10-25T10:00:00Z 'go on')")"
-PA_ADD="$PA_ADD" awk '{ print } /^- T2: / && !d { print ENVIRON["PA_ADD"]; d = 1 }' "$PPA" > "$PPA.n" && mv "$PPA.n" "$PPA"
+printf 'run/v1|ev=finding|ref=record/wave-01-fixture/critic.md#1|to=defer|by=Dana Fixture|words=defer it|session=%s|why=out of this run|severity=S3|reach=on|title=the one title|stated=%s|at=2026-10-25T09:00:00Z\n' \
+  "$SID" "$PA_S1" >> "$PA_LOG"
+sp_fact "$PPA" "$(pa_lib proof_waiver_line adversarial "$PA_H" 'Dana Fixture' 2026-10-25T10:00:00Z 'go on')"
 git -C "$RPA" worktree add -q -b wt/01-T3 "$TMPROOT/parts-T3" wave/01-fixture >/dev/null 2>&1
 PA_WT="$(cd "$TMPROOT/parts-T3" && pwd -P)"
 expect_eq "PA-0 precondition: the plan's working branch is wave/01-fixture, the sentence is stated, the waiver is a line of its own, the row's tree is on wt/01-T3 at the working branch's head" \
   "wave/01-fixture|1|1|wt/01-T3|$PA_H" \
-  "$(pa_lib plan_working_branch "$PPA")|$(/usr/bin/grep -c '^deferred: .* stated="' "$PPA" | tr -d ' ')|$(/usr/bin/grep -c '^waived: question=adversarial ' "$PPA" | tr -d ' ')|$(git -C "$PA_WT" symbolic-ref --short -q HEAD)|$(git -C "$PA_WT" rev-parse HEAD)"
+  "$(pa_lib plan_working_branch "$PPA")|$(/usr/bin/grep -c '|ev=finding|.*|to=defer|.*|stated=' "$PA_LOG" | tr -d ' ')|$(/usr/bin/grep -c '|ev=waiver|question=adversarial|' "$PA_LOG" | tr -d ' ')|$(git -C "$PA_WT" symbolic-ref --short -q HEAD)|$(git -C "$PA_WT" rev-parse HEAD)"
 
 poke "$PA_WT" known-limits-part T3
 PA_T1="$(pa_tip wt/01-T3)"

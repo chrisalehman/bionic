@@ -238,28 +238,24 @@ expect_eq "ONE-21 …and under it the docs head reads red, so the walk's basis i
 # ============================================================
 section "§LOG: the proof readers answer from the reader's facts, so a proof the run's log alone holds stands"
 # ============================================================
-# fails-when: facts_state, proof_last or proof_approved_head read the plan's SDLC State text themselves, so a review
+# fails-when: facts_state, proof_last or proof_approved_head read the plan's text themselves, so a review
 # reading, a regression proof or an approval written only as a run/v1 event reads absent; or a fact read once is
 # served after the plan changed under the same process.
-PL="$(CO_PLAN_AT=14 mk_fixture log)"; advance_to "$PL" 8
+PL="$(mk_fixture log)"; advance_to "$PL" 8
 PL_PLAN="$PL/$PLAN_REL"; PL_H="$(fixture_git "$PL" rev-parse wave/01-fixture)"; PL_REC="$PL/.bionic/docs/record/wave-01-fixture"
-mkdir -p "$PL_REC"
 for q in evidence adversarial structure; do
   printf '# %s\n\nNo findings.\n' "$q" > "$PL_REC/critic-$q.md"
-  plan_fixture_state_add "$PL_PLAN" "$(bash -c '. "$1/proof.sh" && proof_line review "$2" 2026-10-04T12:00:00Z "record/wave-01-fixture/critic-$3.md" "$3" w-critic pass piece' \
-    _ "$PAH_LIB" "$PL_H" "$q")"
+  printf 'run/v1|ev=proof|kind=review|head=%s|evidence=record/wave-01-fixture/critic-%s.md|question=%s|reader=w-critic|result=pass|scope=piece|at=2026-10-04T12:00:00Z\n' \
+    "$PL_H" "$q" "$q" >> "$PL_REC/run.log"
 done
 pl_state() { bash -c '. "$1/roots.sh" && . "$1/proof.sh" && facts_state "$2" "$3"' _ "$PAH_LIB" "$PL_PLAN" "$PL_H" 2>/dev/null | awk -F'\t' '$1 == "review" && $4 == "piece" { printf "%s%s=%s", (n++ ? " " : ""), $2, $5 }'; }
-expect_eq "LOG-1 precondition: the three readings in the plan's text are each covered at the head" \
+expect_eq "LOG-1 precondition: the three readings in the run's log are each covered at the head" \
   "evidence=covered adversarial=covered structure=covered" "$(pl_state)"
-# The translation is taken whole before the log exists: a run with a log is read from the log alone.
-bash -c '. "$1/reader.sh" && reader_events "$2"' _ "$PAH_LIB" "$PL_PLAN" > "$SANDBOX/pl-events" && mv "$SANDBOX/pl-events" "$PL_REC/run.log"
 printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=record/wave-01-fixture/regression-run.log|at=2026-10-04T12:30:00Z\n' "$PL_H" >> "$PL_REC/run.log"
 printf 'run/v1|ev=approval|key=merge-unproved|by=fixture|head=%s|said=merge it|at=2026-10-04T12:40:00Z\n' "$PL_H" >> "$PL_REC/run.log"
-grep -v '^proved: kind=review .*question=adversarial' "$PL_PLAN" > "$PL_PLAN.n" && mv "$PL_PLAN.n" "$PL_PLAN"
 expect_eq "LOG-2 precondition: the plan holds no adversarial reading and the log holds it as an event" "0|yes" \
   "$(/usr/bin/grep -c 'question=adversarial' "$PL_PLAN")|$(awk 'index($0, "|ev=proof|") && index($0, "|question=adversarial|") { f = 1 } END { print (f ? "yes" : "no") }' "$PL_REC/run.log")"
-expect_eq "LOG-3 a review reading the log alone holds is covered, as the two the log and the plan both hold" \
+expect_eq "LOG-3 a review reading the log alone holds is covered, as the other two are" \
   "evidence=covered adversarial=covered structure=covered" "$(pl_state)"
 expect_eq "LOG-4 …the regression proof and the person's word the log alone holds are read at their head" "$PL_H|$PL_H" \
   "$(bash -c '. "$1/proof.sh" && printf "%s|%s" "$(proof_last "$2" regression)" "$(proof_approved_head "$2" merge-unproved)"' _ "$PAH_LIB" "$PL_PLAN")"
@@ -269,16 +265,14 @@ expect_eq "LOG-5 a proof written between two reads in one process is read by the
     printf "run/v1|ev=proof|kind=regression|head=%s|evidence=x|at=2026-10-04T13:00:00Z\n" 0000000000000000000000000000000000000001 >> "$3"
     printf "%s|%s" "$a" "$(proof_last "$2" regression)"' _ "$PAH_LIB" "$PL_PLAN" "$PL_REC/run.log")"
 
-# fails-when: inherited debt is read from the plan's text, so an older plan's own inherited: line, which no event carries,
-# is a debt; or a suite proof-add inherited writes to the log is owed again; or two suites inherited at one head read as one.
-awk -v h="$PL_H" '{ print } /^current: / && !d { print "inherited: a.test.sh base=" h " head=" h " at=2026-10-04T13:10:00Z evidence=record/wave-01-fixture/i-a.log"; d = 1 }' "$PL_PLAN" > "$PL_PLAN.n" && mv "$PL_PLAN.n" "$PL_PLAN"
+# fails-when: a suite proof-add inherited writes to the log is owed again; or two suites inherited at one head read as one.
 for s in b c; do printf 'run/v1|ev=proof|kind=inherited|head=%s|evidence=record/wave-01-fixture/i-%s.log|suite=%s.test.sh|base=%s|at=2026-10-04T13:2%s:00Z\n' "$PL_H" "$s" "$s" "$PL_H" "${#s}" >> "$PL_REC/run.log"; done
-expect_eq "LOG-6 two suites the log inherits at one head are two debts, each read once, and the plan's own inherited line none" \
+expect_eq "LOG-6 two suites the log inherits at one head are two debts, each read once" \
   "b.test.sh,c.test.sh|2" \
   "$(bash -c '. "$1/proof.sh" && printf "%s|%s" "$(proof_inherited "$2")" "$(proof_inherited_lines "$2" | grep -c "^inherited: ")"' _ "$PAH_LIB" "$PL_PLAN")"
-# fails-when: the base is read from the state section, where a run at 14 kept its Step-4 block, and not from the header.
-PL_B="$(sed -n 's/^base-sha: //p' "$PL_PLAN")"; awk -v b="$PL_H" '{ print } /^current: / { print "  base-sha: " b }' "$PL_PLAN" > "$PL_PLAN.n" && mv "$PL_PLAN.n" "$PL_PLAN"
-expect_eq "LOG-7 the base is the header's, a commit other than the one the state section names" "$PL_B|$PL_H|yes" \
+# fails-when: the base is read from a base-sha: line in the page's body, and not from the header.
+PL_B="$(sed -n 's/^base-sha: //p' "$PL_PLAN")"; printf '\n## Notes\n\n  base-sha: %s\n' "$PL_H" >> "$PL_PLAN"
+expect_eq "LOG-7 the base is the header's, a commit other than the one a line of the body names" "$PL_B|$PL_H|yes" \
   "$(bash -c '. "$1/proof.sh" && proof_plan_base "$2" "$3"' _ "$PAH_LIB" "$PL_PLAN" "$PL")|$(sed -n 's/^  base-sha: //p' "$PL_PLAN")|$([ -n "$PL_B" ] && [ "$PL_B" != "$PL_H" ] && echo yes)"
 
 section "§KEEP: the kept fold is served only from a directory this user alone can write, and its files are bounded"
@@ -289,7 +283,7 @@ cp "$PK/ok/$PK_D/$PK_F" "$PK/open/$PK_D/"; chmod 777 "$PK/open/$PK_D"; cp -R "$P
 expect_eq "KEEP-1 the user's own kept fold (mode 700) is served to a second process, the approval planted in it read" "drwx------|$PL_H" "$(ls -ld "$PK/ok/$PK_D" | cut -c1-10)|$(pk ok)"
 expect_eq "KEEP-2 the same file is served neither from a directory others can write nor through a link to the user's own, each left as planted" "||1|1" "$(pk open)|$(pk link)|$(grep -c intruder "$PK/open/$PK_D/$PK_F")|$(grep -c intruder "$PK/away/$PK_D/$PK_F")"
 expect_eq "KEEP-3 a fold written beside forty older files leaves the sixteen newest, its own the newest" "16|$PK_F" "$(ls "$PK/full/$PK_D" | wc -l | tr -d ' ')|$(ls -t "$PK/full/$PK_D" | head -1)"
-pf() { rm -rf "$PK/f"; mkdir -p "$PK/f"; TMPDIR="$PK/f" bash -c '. "$1/proof.sh" && _proof_reader_load && . "$1/translate.sh" || exit 1; fn="$5" pp="$3" px="$4"; eval "$(declare -f $fn | sed 1s/$fn/pf_real/)"; eval "$fn() { printf \"\$pp\"; return \$px; }"; _proof_facts "$2" > "$TMPDIR/o" 2> "$TMPDIR/e"; rc=$?; eval "$fn() { pf_real \"\$@\"; }"
+pf() { rm -rf "$PK/f"; mkdir -p "$PK/f"; TMPDIR="$PK/f" PF_PRE="${PF_PRE:-}" bash -c '. "$1/proof.sh" && _proof_reader_load || exit 1; [ -z "$PF_PRE" ] || . "$1/$PF_PRE" || exit 1; fn="$5" pp="$3" px="$4"; eval "$(declare -f $fn | sed 1s/$fn/pf_real/)"; eval "$fn() { printf \"\$pp\"; return \$px; }"; _proof_facts "$2" > "$TMPDIR/o" 2> "$TMPDIR/e"; rc=$?; eval "$fn() { pf_real \"\$@\"; }"
   printf "%s|%s|%s|%s|%s|%s" $rc "$(wc -l < "$TMPDIR/o")" "${_PROOF_FACTS_KEY:+key}" "$(ls "$TMPDIR"/bionic-facts-* | wc -l)" "$(grep -cF "$2" "$TMPDIR/e")" "$(proof_last "$2" regression)" | tr -d " "' _ "$PAH_LIB" "${PF_PLAN:-$PL_PLAN}" "$2" "$3" "$1"; }  # <reader function stood in> <what it prints> <its exit> -> exit|lines served|key|files kept|stderr lines naming the plan|the next ask's newest regression head
 PL_R=0000000000000000000000000000000000000001; expect_eq "KEEP-4 a fold that fails, short or empty or with a stage of its pipeline killed, is an error naming the plan, is kept nowhere, and the next ask folds the whole" "2|0||0|1|$PL_R~2|0||0|1|$PL_R~2|0||0|1|$PL_R" "$(pf reader_facts 'run/v1|ev=x\n' 1)~$(pf reader_facts '' 1)~$(pf reader_events 'run/v1|ev=x\n' 128)"
 expect_eq "KEEP-5 an empty fold that succeeds is a run with no fact, and is kept" "0|0|key|1|0|" "$(pf reader_facts '' 0)"
@@ -298,7 +292,7 @@ pg() { rm -rf "$PK/g"; mkdir -p "$PK/g"; TMPDIR="$PK/g" bash -c '. "$1/roots.sh"
 PG_J='o="$(facts_state "$p" "$h")"; printf "%s|%s" $? "$(printf "%s" "$o" | grep -c "^review")"'; expect_eq "KEEP-7 with the reader failing the judge exits 2 and prints no chain, where whole it prints every chain" "2|0~0|5" "$(pg failing "$PG_J")~$(pg whole "$PG_J")"
 PG_5='{ proof_approved_head "$p" merge-unproved; a=$?; _proof_floor_match "$p" "$p" "" "$h" 0; b=$?; proof_chain_head "$p" structure; c=$?; proof_last "$p" regression; d=$?; _facts_check_at "$p" "$h" "$h"; } >/dev/null; printf "%s|%s|%s|%s|%s" $a $b $c $d $?'; expect_eq "KEEP-8 …and each of the other five readers of the fold hands the failure back, exit 2, where whole it answers" "2|2|2|2|2~0|1|0|0|0" "$(pg failing "$PG_5")~$(pg whole "$PG_5")"
 expect_eq "KEEP-9 a lookup of the run log that dies is a failed fold, never a run with no log" "2|0||0|1|$PL_R" "$(pf reader_record '' 128)"
-printf '## SDLC State\n\nproved: kind=regression head=%s at=2026-10-04T12:00:00Z evidence=x\n' "$PL_R" > "$PK/nolog.md"; expect_eq "KEEP-10 a source of a run with no log that dies, its home or its landed rows unread, fails the translation and the fold" "2|0||0|1|$PL_R~2|0||0|1|$PL_R~2|0||0|1|$PL_R" "$(PF_PLAN="$PK/nolog.md"; pf _translate_state 'e\t~\trun/v1|ev=x|at=\n' 128)~$(PF_PLAN="$PK/nolog.md"; pf _translate_record '' 128)~$(PF_PLAN="$PK/nolog.md"; pf _translate_landed_rows '' 128)"
+printf '## SDLC State\n\nproved: kind=regression head=%s at=2026-10-04T12:00:00Z evidence=x\n' "$PL_R" > "$PK/nolog.md"; expect_eq "KEEP-10 a source of a run with no log that dies, its home or its landed rows unread, fails the translation and the fold" "2|0||0|1|$PL_R~2|0||0|1|$PL_R~2|0||0|1|$PL_R" "$(PF_PLAN="$PK/nolog.md"; PF_PRE=translate.sh; pf _translate_state 'e\t~\trun/v1|ev=x|at=\n' 128)~$(PF_PLAN="$PK/nolog.md"; PF_PRE=translate.sh; pf _translate_record '' 128)~$(PF_PLAN="$PK/nolog.md"; PF_PRE=translate.sh; pf _translate_landed_rows '' 128)"
 
 section "§FOLD: a caller of the fold hears it fail: what writes from the facts writes nothing and exits 2, what shows them says they could not be read"
 # fails-when: a reader question asked in-process, close-out's continuation, the release card, a waiver, the bound line,
@@ -309,7 +303,7 @@ PF_ST="$SANDBOX/stand"; mkdir -p "$PF_ST/payload"; cp -R "$BIONIC_HOOKS_DIR" "$P
 printf '%s\n' 'eval "pf_whole_$(declare -f reader_facts)"; reader_facts() { case " ${FUNCNAME[*]} " in *" ${PAH_IN:-} "*) return 128 ;; esac; pf_whole_reader_facts "$@"; }' >> "$PF_ST/payload/scripts/lib/reader.sh"
 pfu() { printf '%s|%s' "$1" "$(printf '%s\n' "$2" | grep -c "$3")|$(printf '%s\n' "$2" | grep -c 'could not be read')"; }  # <exit> <output> <its fact's pattern> -> exit|fact lines|could-not-read lines
 PF_RS='. "$1/run.sh"; o="$(run_step "$2")"; printf "%s|%s" $? "$o" | tr "\n" " "'
-expect_eq "FOLD-1 a reader question run in-process (run_step) hands back the fold's failure; whole, its step and 0" "128|state=open~0|n=8 state=open" \
+expect_eq "FOLD-1 a reader question run in-process (run_step) hands back the fold's failure; whole, its step and 0" "128|n=0 state=open~0|n=8 state=open" \
   "$(PAH_IN=reader_facts bash -c "$PF_RS" _ "$PF_ST/payload/scripts/lib" "$PL_PLAN")~$(bash -c "$PF_RS" _ "$PF_ST/payload/scripts/lib" "$PL_PLAN")"
 pf_tmp() { mkdir -p "$SANDBOX/t-$1/bionic-facts-$(id -u)"; chmod 777 "$SANDBOX/t-$1/bionic-facts-$(id -u)"; printf '%s' "$SANDBOX/t-$1"; }  # <label> -> a TMPDIR where no fold is kept, so each read folds
 pf_close() { local p; p="$(mk_fixture "fold-$1")"; advance_to "$p" 8; debt_plant "$p"
