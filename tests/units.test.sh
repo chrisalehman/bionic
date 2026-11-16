@@ -31,6 +31,7 @@
 #   §TREE    a row's tree and base read from the newest tree event in the log
 #   §LEDGER  a landed row with no line asked of the reader: admitted when it answers landed
 #   §DROP    a drop in the run's log reads dropped to the reader and the fill at 15, launched or not; a wait on it is met
+#   §UNTIMED a dispatch with no instant reads dispatched to the reader while its row holds no other fact, and launches nothing
 #   §NAMED   a task at 15 names in its deps the approval it waits on; the fill takes every wait from plan_read_waits
 #   §ORDER-15  the order and its post-release exception hold at 15, a row's state the run's, the exception's waits the reader's
 #   §DEPS-15   a row at 15 waits by its deps and kind alone: no step hold; a questions tag judged
