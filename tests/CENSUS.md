@@ -1386,10 +1386,10 @@ scale-profile.test.sh | §TABLE | duplicate | payload/scripts/lib/scale.sh: a ce
 
 ## seam-resolution.test.sh
 
-seam-resolution.test.sh | §Group 1 | duplicate | tests/lib/resolve-roots.sh: a class's default directory derived wrong (hooks, skills or the repository), so every suite reading that variable reads the wrong tree | hook-timeout.test.sh §1, jit.test.sh §Group 12, session-poker-5.test.sh §DECISIONS
+seam-resolution.test.sh | §Group 1 | duplicate | tests/lib/resolve-roots.sh: a class's default directory derived wrong (hooks, skills or the repository), so every suite reading that variable reads the wrong tree | hook-timeout.test.sh §1, jit.test.sh §Group 12
 seam-resolution.test.sh | §Group 2 | keep | tests/lib/resolve-roots.sh: the repository derived from the caller's cwd instead of the helper's own path, so an absolute source from cwd=/ resolves no hooks directory (Group 2 rows); the runner starts suites from the repository root, where both readings agree | none (searched 'resolve-roots.sh' with a foreign cwd in tests/)
 seam-resolution.test.sh | §Group 3 | keep | tests/lib/resolve-roots.sh: a set BIONIC_HOOKS_DIR overwritten by the default, so the named check reads the repository's walls.sh, not the doctored copy | none (searched 'BIONIC_HOOKS_DIR=' overrides in tests/)
-seam-resolution.test.sh | §Group 4 | duplicate | tests/lib/resolve-roots.sh: an unset class read from somewhere other than the repository; "no override: named check reads the repo constant" (SUPPORTED_SDLC_VERSION=14) is also a tally of the current SDLC version | hook-timeout.test.sh §1, jit.test.sh §Group 12, session-poker-5.test.sh §DECISIONS
+seam-resolution.test.sh | §Group 4 | duplicate | tests/lib/resolve-roots.sh: an unset class read from somewhere other than the repository; "no override: named check reads the repo constant" (SUPPORTED_SDLC_VERSION=14) is also a tally of the current SDLC version | hook-timeout.test.sh §1, jit.test.sh §Group 12
 seam-resolution.test.sh | §Group 5 | keep | tests/lib/resolve-roots.sh: the skills and scripts defaults derived from BIONIC_HOOKS_DIR, so a hooks override drags the other two along (Group 5 rows) | none (searched 'BIONIC_SKILLS_DIR' and 'BIONIC_SCRIPTS_DIR' overrides in tests/)
 seam-resolution.test.sh | §Group 6 | keep | rule: lint — a tests/*.test.sh that resolves its paths privately, without the seam or with the legacy `$(cd "$(dirname "$0")/.." && pwd)` offset, so the sweep names it | none (searched 'resolve-roots' sweeps in tests/)
 
