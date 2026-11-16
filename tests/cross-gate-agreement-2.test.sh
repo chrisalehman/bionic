@@ -88,7 +88,7 @@ done
 # ── CG.4 the discriminator: reverting the letter-strip splits the pair (proves CG.1 can go red) ──
 # The pre-fix bug, planted. A copy of session-poker.sh with ONLY the a/b-strip line reverted
 # to a bare assignment — the exact shape this section would have caught before T6.
-CG_MUT="$SANDBOX/fx/cg/session-poker-nostrip.sh"
+CG_MUT="$SANDBOX/fx/cg/session-poker-nostrip.sh"; mkdir -p "${CG_MUT%/*}"
 anchor insert hooks/poker/tick.sh '  step="${current%[ab]}"'
 LC_ALL=C awk '{
   if ($0 == "  step=\"${current%[ab]}\"") { print "  step=\"$current\"" } else { print }
