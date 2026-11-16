@@ -327,13 +327,13 @@ $RC_LOOSE" "$CO_RC|$(carry_section "$PRN/$CONT_REL" | /usr/bin/grep '^debt: ')"
 section "DEBT-LINES — wave-36 T13 (D13; REQ-7 AC-7.8; A-orch-1): close-out carries only debt lines that parse, refusing a debt whose line does not, naming it"
 # ============================================================
 # The one debt-line grammar is lib/debt.sh `debt_line_ok`, read by `debt add`, by close-out's `co_debts`
-# and by card.sh's inherited reader. A debt whose carried line would not parse (A-orch-1: a
-# `raised-by` cell holding a space, `assumptions.md A-orch-46`) refuses `run` before its first act and is
+# and by card.sh's inherited reader. A debt whose carried line would not parse (a `raised-by` field holding a
+# space) refuses `run` before its first act and is
 # named; `check` says it would refuse. Corrected, the line is carried, and the next run's `card.sh step1`
 # over the continuation renders it instead of refusing. fails-when: the continuation carries the
 # unparseable line, or the next run's Step-1 card is refused on it.
 # FIXTURE FIDELITY: the debts are debt_plant's, the events `session-poker.sh debt` writes, with one
-# item's source field written by hand as wave-35's two hole lines were.
+# item's source field written by hand, as an earlier run's two hole lines were.
 DL_BAD='run/v1|ev=debt|concept=hole_x|kind=hole|sites=lib/e.sh:5|raised-by=record/wave-01-fixture/assumptions.md A-orch-46|touches=0|at=2026-10-04T12:00:00Z'
 DL_GOOD='run/v1|ev=debt|concept=hole_x|kind=hole|sites=lib/e.sh:5|raised-by=record/wave-01-fixture/assumptions.md#A-orch-46|touches=0|at=2026-10-04T12:00:00Z'
 PDL="$(mk_fixture debtlines1)"; advance_to "$PDL" 8
