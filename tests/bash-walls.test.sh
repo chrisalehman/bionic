@@ -767,21 +767,17 @@ section "§PART — reviews-part is the main thread's and the integrate row's ow
 # run it for another row would publish what that row's own writer never saw. The wall admits the main thread, and the
 # writer whose roster row names the integrate row of the bound plan, running the verb on that row alone in one call; every
 # other dispatched call is refused by the contract arm, naming the row it asked for and the row its roster row names.
-# Fixture fidelity: the section's payloads and roster; the plan is the §RULED plan with the `## Tasks` table the
-# product writes (header and separator as the units reader takes them), bound to the session; the roster rows are the
+# Fixture fidelity: the section's payloads and roster; the plan is plan_fixture's page at 15 with the two rows, each
+# dispatched under its roster row's name, bound to the session; the roster rows are the
 # product's writer's (`roster_row_fixture`), each carrying the `row=` the dispatch wall writes.
 # fails-when: the verb leaves the wall's list and a build row's writer runs it; the integrate row's writer is refused for
 #   its own row; or the main thread is refused.
 R_PT="$(mk_repo part)"
 PT_ACTOR_I="at13integrate-1a2b3c4d5e6f7081"
 PT_ACTOR_B="at13build-8f7e6d5c4b3a2910"
-{
-  ru_plan 5 'T1 | discharged | see AC-2 | CONFIRMED'
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |\n'
-  printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-  printf '| T3 | 4 | build | a build row | implementor | — | 10 | AC-1 | none | — | — | active | — |\n'
-  printf '| T9 | 8 | integrate | merge the wave | orchestrator | T3 | 10 | AC-1 | none | — | — | active | — |\n'
-} > "$R_PT/.bionic/docs/plans/active.md"
+plan_fixture --current 5 "$R_PT/.bionic/docs/plans/active.md" wave \
+  '| T3 | 4 | build | a build row | w-build | — | — | 10 | AC-1 | none | — | — | active |' \
+  '| T9 | 8 | integrate | merge the wave | w-integrate | T3 | — | 10 | AC-1 | none | — | — | active |' > /dev/null
 bw_bind "$R_PT"
 {
   roster_header
