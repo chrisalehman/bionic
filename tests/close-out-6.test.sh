@@ -176,8 +176,8 @@ section "§ORDER — the integrate row publishes the reviews part before the pus
 # is first because the push and the pull request carry the branch's tip, and a part rendered after them is on no branch
 # the pull request names.
 # FIXTURE FIDELITY: mk_task_pr_fixture's task-scale plan (integrate cell `pr`), gaining the integrate row a task plan
-# carries at Step 8 (landed, so the rows-landed act has nothing to bind a session for); the continuation is the one the run
-# writes.
+# carries at Step 8 (landed, so the rows-landed act has nothing to bind a session for) and the release approval it is
+# asked; the continuation is the one the run writes.
 # fails-when: the continuation names the push or `gh pr create` before `reviews-part <row>`, omits the verb, names another
 #   row, or the section stops naming `gh pr create`.
 ord_pos() {  # <file> <needle> -> the 1-based line number of the needle's first line in the `## Pull request` section, or empty
@@ -185,7 +185,8 @@ ord_pos() {  # <file> <needle> -> the 1-based line number of the needle's first 
 }
 PPO="$(mk_task_pr_fixture order-pr "fix/x")"
 awk '{ print } /^\| T1 \|/ { print "| T3 | 8 | integrate | open the pull request | — | 10 | AC-1 | none | — |" }' "$PPO/$PLAN_REL" > "$PPO/$PLAN_REL.o" \
-  && mv "$PPO/$PLAN_REL.o" "$PPO/$PLAN_REL" && printf 'run/v1|ev=%s|at=2026-10-04T12:30:00Z\n' "dispatch|row=T3|name=orchestrator" "published|row=T3" >> "$PPO/$LOG_REL"
+  && mv "$PPO/$PLAN_REL.o" "$PPO/$PLAN_REL" && printf 'run/v1|ev=%s|at=2026-10-04T12:30:00Z\n' "dispatch|row=T3|name=orchestrator" "published|row=T3" >> "$PPO/$LOG_REL" \
+  && release_approved "$PPO"
 expect_contains "ORDER-0 precondition: the plan carries the integrate row the section names" "| T3 | 8 | integrate |" "$(cat "$PPO/$PLAN_REL")"
 run_close "$PPO" run
 expect_eq "ORDER-1 the task-scale run closes" "0" "$CO_RC"

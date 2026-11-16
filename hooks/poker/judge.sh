@@ -170,7 +170,6 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
   esac
   PV_ORDER="$(units_order "$PV_PLAN" 2>/dev/null)" || PV_ORDER=""
   PV_INTEG="$(units_integrates "$PV_PLAN" 2>/dev/null)" || PV_INTEG=""
-  [ "$step" != 8 ] || [ -z "$PV_INTEG" ] || cur8_approved_head
   # THE RULING IS THE MERGE ADVANCE'S: at 8 every matrix row is ruled, or the advance is refused naming each one.
   local unruled="" ac
   if [ "$step" = 8 ] && ! unruled="$(cur8_unruled)"; then
@@ -186,7 +185,12 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
   if [ "$rc" -ne 2 ] && [ -z "${PV_CHECK:-}" ]; then
     if [ "$step" = 8 ]; then cur8_owed_waivers "$out" "$unruled"; else cur8_owed_waivers "$out"; fi
   fi
-  [ "$rc" -eq 0 ] && [ -z "$unruled" ] && return 0
+  # THE APPROVAL IS ASKED LAST, once every other fact the run owes holds: it is the person's last stop, and asked
+  # first its refusal would hide the facts behind it from the release card's check of what it can settle.
+  if [ "$rc" -eq 0 ] && [ -z "$unruled" ]; then
+    [ "$step" != 8 ] || [ -z "$PV_INTEG" ] || cur8_approved_head
+    return 0
+  fi
   for ac in $unruled; do printf '%s\n' "$(cur8_unruled_line "$ac")" >&2; done
   if [ "$rc" -eq 0 ]; then
     die "current: 8 waits on a ruling of each row above; settle each on the release approval card, or waive it with waive <AC> '<their words>'. The plan is unchanged."
