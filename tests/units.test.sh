@@ -1015,10 +1015,10 @@ o5 $O5_REG $O5_REV $O5_REL; o5log
 expect_eq "ORD15-1 control: regression at 5, review at 6, release at 7, all open: admitted (rc 0)" "|0" "$(ov)"
 # shellcheck disable=SC2086
 o5 $O5_REV $O5_REL ${O5_REG/ 5 / 7 }; O5_A="$(ov)"; o5log 'published|row=T5|commit=c1|by=w' 'published|row=T6|commit=c2|by=w' 'published|row=T7|commit=c3|by=w'; O5_B="$(ov)"; o5log 'drop|row=T5|why=not owed'
-expect_eq "ORD15-2 the regression after the review: refused with the words 14 gives (rc 1); every row landed, or the regression dropped: not judged" "$OR_REGLINE|1 |0 |0" "$O5_A $O5_B $(ov)"
+expect_eq "ORD15-2 the regression after the review: refused with the order's own words (rc 1); every row landed, or the regression dropped: not judged" "$OR_REGLINE|1 |0 |0" "$O5_A $O5_B $(ov)"
 # shellcheck disable=SC2086
 o5 $O5_REG $O5_REL ${O5_REV/ 6 / 7 }; o5log
-expect_eq "ORD15-3 the release ahead of a review: refused with the words 14 gives (rc 1)" \
+expect_eq "ORD15-3 the release ahead of a review: refused with the order's own words (rc 1)" \
   "T7: the release row comes ahead of the review row T6; the order is build, regression, review, release: put T7 at step 7, after T6|1" "$(ov)"
 # shellcheck disable=SC2086
 o5 T1 4 build — a.sh $O5_REG $O5_REV $O5_REL T8 7 build — b.sh T9 7 review T8 r/T9.md; o5log 'published|row=T1|commit=c1|by=w' 'published|row=T5|commit=c2|by=w' 'published|row=T6|commit=c3|by=w'
@@ -1027,7 +1027,7 @@ expect_eq "ORD15-4 a review past the release waiting on the fix T8: refused whil
   "$PO_ORD|1 |0 $PO_ORD|1" "$O5_A $O5_B $(ov)"
 # shellcheck disable=SC2086
 o5 $O5_REV ${O5_REG/ 5 / 6 } $O5_REL; o5log
-expect_eq "ORD15-6 the regression at the review's step, after it in the table: refused with the words 14 gives (rc 1)" "$OR_REGLINE|1" "$(ov)"
+expect_eq "ORD15-6 the regression at the review's step, after it in the table: refused with the order's own words (rc 1)" "$OR_REGLINE|1" "$(ov)"
 # shellcheck disable=SC2086
 o5 T1 4 build — a.sh $O5_REG $O5_REV $O5_REL T8 7 build — b.sh T9 7 review — r/T9.md
 o5log 'published|row=T1|commit=c1|by=w' 'published|row=T5|commit=c2|by=w' 'published|row=T6|commit=c3|by=w' 'published|row=T7|commit=c4|by=w'; O5_A="$(ov)"
