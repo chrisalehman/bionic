@@ -131,11 +131,11 @@ _plan_fixture_rows() {
 # plan_fixture_themes <plan> <dotted|flat|bare> [<status>...] -> the plan reads two themes from the sibling
 #   `<docs root>/specs/<epic>/<slug>.requirements.md`, `## The card reads true` over the first requirement (two
 #   criteria) and `## The gate admits the work` over the second (one); the plan gains an `## Eval design` naming each
-#   criterion's requirement, and its matrix becomes one T2 row per criterion, status the next <status> (else pending),
-#   each block `provenance:` and `fails-when:` with no `serves:`. dotted ids name their requirement; flat ids in the
-#   hundreds name none; bare small ids number the first requirement's second criterion as the second requirement is.
+#   criterion's requirement, and the run's log a passing proof of each criterion whose next <status> is discharged and
+#   a waiver of each waived (else it stays pending). dotted ids name their requirement; flat ids in the hundreds name
+#   none; bare small ids number the first requirement's second criterion as the second requirement is.
 plan_fixture_themes() {  # <plan> <dotted|flat|bare> [<status>...]
-  local plan="$1" d="${1%/*}" q a i=0 r1 r2; shift
+  local plan="$1" d="${1%/*}" q a i=0 r1 r2 log; shift
   case "$1" in dotted) r1="AC-1.1 AC-1.2" r2=AC-2.1 ;; flat) r1="AC-168 AC-169" r2=AC-170 ;; bare) r1="AC-1 AC-2" r2=AC-3 ;;
     *) echo "plan_fixture_themes: variant '$1' is not dotted, flat or bare" >&2; return 2 ;; esac; shift
   q="${d%/*/*}/specs/${d##*/}/$(basename "$plan" .plan.md).requirements.md"; mkdir -p "${q%/*}" || return 1
@@ -145,7 +145,11 @@ plan_fixture_themes() {  # <plan> <dotted|flat|bare> [<status>...]
   { awk '/^## / { s = ($0 ~ /^## Verification Matrix/) } !s' "$plan"
     printf '## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n'
     for a in $r1; do printf '| REQ-1 | x | %s | hermetic | `tests/a.test.sh` | %s is wrong |\n' "$a" "$a"; done
-    printf '| REQ-2 | x | %s | hermetic | `tests/a.test.sh` | %s is wrong |\n\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n' "$r2" "$r2"
-    for a in $r1 $r2; do i=$((i + 1)); printf '| %s | T2 | %s | — | — |\n' "$a" "${!i:-pending}"; done
-    for a in $r1 $r2; do printf '%s:\n  provenance: fixture\n  fails-when: %s is wrong\n' "$a" "$a"; done; } > "$plan.pft" && mv -f "$plan.pft" "$plan"
+    printf '| REQ-2 | x | %s | hermetic | `tests/a.test.sh` | %s is wrong |\n' "$r2" "$r2"; } > "$plan.pft" && mv -f "$plan.pft" "$plan"
+  log="$(plan_fixture_log "$plan")"; mkdir -p "${log%/*}"
+  for a in $r1 $r2; do i=$((i + 1))
+    case "${!i:-pending}" in
+      discharged) printf 'run/v1|ev=proof|kind=eval|ac=%s|head=%040d|rc=0|at=2026-10-06T10:00:00Z\n' "$a" 1 >> "$log" ;;
+      waived) printf 'run/v1|ev=waiver|ac=%s|head=%040d|by=fixture|said=waive it|at=2026-10-06T10:00:00Z\n' "$a" 1 >> "$log" ;;
+    esac; done
 }

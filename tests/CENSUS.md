@@ -2084,6 +2084,7 @@ sitrep-card.test.sh §PURPOSE — duplicate
 sitrep-card.test.sh §REASONS — duplicate
 sitrep-card.test.sh §SKILL — prose pin
 sitrep.test.sh §FACTS — duplicate
+sitrep.test.sh §GOALS-SERVES — gone with plan_read_blocks
 sitrep.test.sh §SHAPES — gone with translate.sh
 sitrep.test.sh §SKILL — prose pin
 sitrep.test.sh §COUNTS — cut in c33e7a954: a wording row

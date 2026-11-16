@@ -1173,13 +1173,23 @@ sr_run "$SR_PLAN"
 expect_eq "G3 a record that passes flips its goal to met; a clause of none is left out" "handoff=met|2 of 4 met; 1 with no measure the sitrep can read" \
   "$(sr_goal_st | tr '|' '\n' | /usr/bin/grep '^handoff=')|$(sr_goals_sum)"
 
+# sr_criteria <AC>:<status>... -> this world's plan holds an Eval design row per criterion, its requirement its dotted
+# id's, and the run's log a passing proof of each one discharged and a waiver of each one waived
+sr_criteria() {
+  local e a r
+  { printf '\n## Eval design\n\n| Requirement | Approach | Criterion | Eval type | Eval | Fails when |\n|---|---|---|---|---|---|\n'
+    for e in "$@"; do a="${e%%:*}"; r="${a#AC-}"; printf '| REQ-%s | x | %s | hermetic | `tests/a.test.sh` | not |\n' "${r%%.*}" "$a"; done; } >> "$SR_PLAN"
+  for e in "$@"; do a="${e%%:*}"
+    case "${e#*:}" in discharged) sr_ev "ev=proof|kind=eval|ac=$a|head=$SR_H|rc=0|at=2026-10-06T10:00:00Z" ;;
+      waived) sr_ev "ev=waiver|ac=$a|head=$SR_H|by=fixture|said=waive it|at=2026-10-06T10:00:00Z" ;; esac; done
+}
 # sr_themes <current> <nine statuses> -> this world's plan made
-# wave scale at step <current> with a matrix of nine rows, the statuses in order (two criteria of the first REQ, one each of the
+# wave scale at step <current> with nine criteria, the statuses in order (two criteria of the first REQ, one each of the
 # second to the fourth, two each of the fifth and sixth), and a requirements file of three themes beside it:
 # the first two REQs under the first theme, the next three under the second, the sixth under the third. SR_REQ_AT names the file
 # the plan's Step-1 line points at; unset, the plan names none and the file is the sibling under specs/ by the slug.
 sr_themes() {
-  local cur="$1" q a; shift
+  local cur="$1" q q2 a; shift
   q="$SR_REPO/.bionic/docs/specs/epic-01-fx/wave-02-fx.requirements.md"
   [ -z "${SR_REQ_AT:-}" ] || q="$SR_REPO/.bionic/docs/$SR_REQ_AT"
   mkdir -p "${q%/*}"
@@ -1188,9 +1198,8 @@ sr_themes() {
     /^# fixture plan$/ && at != "" { print; print "\n- Step 1: requirements: " at "; approved by fixture"; next }
     { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
   [ "$cur" = 4 ] || sr_ev "ev=step|n=$cur|at=2026-10-06T10:00:00Z"
-  { printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
-    for a in AC-1.1 AC-1.2 AC-2.1 AC-3.1 AC-4.1 AC-5.1 AC-5.2 AC-6.1 AC-6.2; do printf '| %s | T2 | %s | pending | — |\n' "$a" "$1"; shift; done
-  } >> "$SR_PLAN"
+  q2=""; for a in AC-1.1 AC-1.2 AC-2.1 AC-3.1 AC-4.1 AC-5.1 AC-5.2 AC-6.1 AC-6.2; do q2="$q2 $a:$1"; shift; done
+  sr_criteria $q2
   {
     printf -- '---\nscale: wave\n---\n# fixture requirements\n\n## Goal\n\nThe fixture ships.\n'
     printf '\n## The run closes itself\n\nThe run reaches its card without a person.\n'
@@ -1374,11 +1383,9 @@ sr_course_world() {
   sr_world "$1" "6 6 12 12"
   q="$SR_REPO/.bionic/docs/specs/epic-01-fx/wave-02-fx.requirements.md"; mkdir -p "${q%/*}"
   awk '/^---$/ && NR > 1 && !fm { fm = 1; print "scale: wave" } { print }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
-  { printf '\n## Verification Matrix\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
-    for a in 1 2; do for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
-      st=pending; [ "$a" = 1 ] && [ "$i" -le 11 ] && st=discharged
-      printf '| AC-%s.%s | T2 | %s | pending | — |\n' "$a" "$i" "$st"; done; done
-  } >> "$SR_PLAN"
+  st=""; for a in 1 2; do for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+      st="$st AC-$a.$i:$([ "$a" = 1 ] && [ "$i" -le 11 ] && echo discharged || echo pending)"; done; done
+  sr_criteria $st
   printf -- '---\nscale: wave\n---\n# fixture requirements\n\n## Goal\n\nThe fixture ships.\n\n## Identity\n\nIdentity is settled.\n\n### REQ-1 — identity\n\n- AC-1.1 a. Fails when: b.\n\n## Cleanup\n\nThe cruft goes.\n\n### REQ-2 — cleanup\n\n- AC-2.1 a. Fails when: b.\n' > "$q"
 }
 SR_GOALS="handoff · a fresh session continues a no-run handoff (record/reader-test-handoff.md)" sr_course_world ga-course
@@ -1399,50 +1406,6 @@ expect_eq "GA6 …and the release card's rows carry the same counts under the sa
   "$(printf '%s\n' "$SR_GC_CARD_OUT" | sed -n 's/^[^ ]* Identity — //p')|$(printf '%s\n' "$SR_GC_CARD_OUT" | sed -n 's/^[^ ]* Cleanup — //p')"
 expect_eq "GA7 the on-course theme is not a goal reached: the card counts none of the three" "Goals — 0 of 3 reached" \
   "$(printf '%s\n' "$SR_GC_CARD_OUT" | /usr/bin/grep '^Goals')"
-
-# ============================================================
-section "§GOALS-SERVES: a theme is measured by the rows that serve it, serves: first, a dotted id second and said once, never a bare number"
-# ============================================================
-# fails-when: a flat-id plan with serves: reads 0 of 0 or, at task scale, no goal; the dotted fallback is silent; a bare
-# id counts under the requirement its number names; unmapped rows print no line. The world's plan is lib/plan-fixture.sh's
-# (hook-valid) with its themes; serves: is written into each block as an older plan's rendering wrote it, the
-# criterion's Requirement cell read through the reader.
-sr_sw() { SR_SCALE="$2" sr_world "$1" "6 6 12 12"; plan_fixture "$SR_PLAN" "$2" >/dev/null; sr_no_eval; plan_fixture_themes "$SR_PLAN" "${@:3}"; sr_run "$SR_PLAN"; }   # <label> <scale> <variant> <statuses…>
-sr_no_eval() { awk '/^## / { s = ($0 ~ /^## Eval design/) } !s' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"; }   # -> the plan's own Eval design gone, so the themes' is its one
-sr_render() {  # -> each block of the plan gains `serves:` from its criterion's Requirement cell; SR_MR_RC 0
-  local a r
-  for a in $(sed -n 's/^\(AC-[0-9.]*\):.*/\1/p' "$SR_PLAN"); do
-    r="$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$SR_PLAN" criterion "$a" | sed -n 's/^requirement=//p')"
-    [ -z "$r" ] || awk -v a="$a:" -v r="$r" '{ print } !d && index($0, a) == 1 { print "  serves: " r; d = 1 }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"
-  done
-  SR_MR_RC=0; sr_run "$SR_PLAN"
-}
-sr_n() { sr_lines "$1" | /usr/bin/grep -c .; }
-SR_NM='not mapped: 3 rows carry no serves: and no dotted id'; SR_T2='The gate admits the work'
-sr_sw gs-flat wave flat discharged discharged pending
-expect_eq "GS-0 a flat-id wave plan with no serves: prints the not-mapped line once, and refuses nothing (exit 0)" "$SR_NM|1|0" "$(sr_lines 'not mapped')|$(sr_n 'not mapped')|$RC"
-sr_render
-expect_eq "GS-1 serves: written (exit 0): the theme its two flat rows serve is met, the other open, no mapping line" \
-  "0|The card reads true=met|$SR_T2=not measured|2 of 2 criteria discharged — none open|0 of 1 criteria discharged — open: REQ-2|0|0" \
-  "$SR_MR_RC|$(sr_goal_st)|$(sr_goal_m 'The card reads true')|$(sr_goal_m "$SR_T2")|$(sr_n 'not mapped')|$(sr_n 'mapped by id')"
-sr_sw gs-task task flat discharged discharged discharged; sr_render
-expect_eq "GS-2 at task scale the same flat rows, serves: written, read the one theme: the run, met, 3 of 3" \
-  "0|goal: name=the run status=met measure=3 of 3 criteria discharged — none open for=One plan a fixture writes, at either scale, in the one ledger shape." "$SR_MR_RC|$(sr_lines goal)"
-sr_sw gs-dotted wave dotted discharged discharged pending
-expect_eq "GS-3 a dotted plan with no serves: reads both themes by its ids and says once that it mapped by id" \
-  "The card reads true=met|$SR_T2=not measured|2 of 2 criteria discharged — none open|mapped by id: 3 rows carry no serves:|1|0" \
-  "$(sr_goal_st)|$(sr_goal_m 'The card reads true')|$(sr_lines 'mapped by id')|$(sr_n 'mapped by id')|$(sr_n 'not mapped')"
-awk '{ print } /^AC-1\.1:$/ { print "  serves: REQ-1, REQ-2" }' "$SR_PLAN" > "$SR_PLAN.t" && mv "$SR_PLAN.t" "$SR_PLAN"; sr_run "$SR_PLAN"
-expect_eq "GS-5 a serves: naming two requirements is read as its first and the reading says so once; the other rows still map by id" \
-  "read as the first: 1 rows serve several requirements|mapped by id: 2 rows carry no serves:|The card reads true=met|$SR_T2=not measured" \
-  "$(sr_lines 'read as the first')|$(sr_lines 'mapped by id')|$(sr_goal_st)"
-sr_sw gs-bare wave bare pending discharged pending
-expect_eq "GS-4 a bare AC-2 under REQ-1, discharged, is not counted under REQ-2: that theme reads nothing, and the three rows are not mapped" \
-  "The card reads true=not measured|$SR_T2=not measured|0 of 0 criteria discharged — the matrix holds none of its criteria|$SR_NM" \
-  "$(sr_goal_st)|$(sr_goal_m "$SR_T2")|$(sr_lines 'not mapped')"
-sr_render
-expect_eq "GS-4b control: the same plan with serves: written counts AC-2 under REQ-1, its own theme on course" \
-  "0|The card reads true=on course|$SR_T2=not measured|1 of 2 criteria discharged — open: REQ-1" "$SR_MR_RC|$(sr_goal_st)|$(sr_goal_m 'The card reads true')"
 
 # ============================================================
 section "§GOAL-MISS: the first landing that misses a goal makes the tick open decide:goal:<theme> on the run's register, once; it is an ask on the sheet until the goal reads met"
