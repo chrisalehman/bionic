@@ -2367,8 +2367,7 @@ units_validate() {
 
 # units_findings <plan> <roster> -> one line per LEDGER FINDING, table order; exit 1 if any.
 #
-# THE ONE LEDGER READER (wave-21 T5; REQ-4, AC-4.1, AC-4.3; D4, ADR-037 decision 3). Two
-# findings and no more, each naming its row:
+# THE ONE LEDGER READER. Two findings and no more, each naming its row:
 #
 #   evidence <id>          the row is `landed` and the reader does not answer it landed, or it
 #                          is `active` with no roster to read and the reader does not hold its launch
