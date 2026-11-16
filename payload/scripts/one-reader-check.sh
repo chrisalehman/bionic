@@ -59,8 +59,7 @@
 #     `=$?` or `if` reads on that line: a fold that failed would read there as a run with no fact.
 #   - A NAME is a line of names_standing below: a verb the poker no longer has, in the shape of a use where the word is
 #     also English (the poker run with it, a function named for it, a poker case arm), else as its own word. The
-#     translation and the plan reader's list of refused keys read an older run by those names, and so does a comparison
-#     of an older hand act's name (`w == "`): those are no finding. A NAME is also a removed file's name as its own
+#     plan reader's list of refused keys reads an older run by those names: that is no finding. A NAME is also a removed file's name as its own
 #     word: the old landing record's and the asks register's (`landing[-]proofs.log`, `asks.stat[e]`), which a reader's
 #     file (READER_FILES) reads an older run by and is admitted there, and the two deleted hook scripts'
 #     (`stop[-]guard.sh`, `agent[-]context[-]guard.sh`) and the deleted act's (`bring[-]forward.sh`), admitted nowhere;
@@ -80,7 +79,7 @@
 
 set -uo pipefail
 
-READER_FILES="payload/scripts/lib/reader.sh payload/scripts/lib/plan-read.sh payload/scripts/lib/translate.sh payload/scripts/lib/fields.sh"
+READER_FILES="payload/scripts/lib/reader.sh payload/scripts/lib/plan-read.sh payload/scripts/lib/fields.sh"
 
 ADMITTED="tests/fixtures/names-admitted.txt"
 
@@ -110,16 +109,16 @@ for f in $loaded_members; do [ -f "$f" ] && loaded_files+=("$f"); done
 names_found() {  # <file or directory>... -> `<file>:<line>:<text>` for each line naming a retired verb, one line per search
   local g='anchor[s]|patro[l]|wai[t]|cove[r]|epic[-]row|continuation[-]fill|interval[-]default|windo[w]|fill[-]report|dispositio[n]'
   /usr/bin/grep -rnE 'launch[-]sync|ledger[-](add|set)|task[-](set|split)|tasks[-]prose|row[-_]landed|session-poker\.sh"? delive[r]|`delive[r]`|delive[r] <(row|id)>|^ *delive[r]\)' "$@"
-  /usr/bin/grep -rnE 'matrix[-](set|retier|render)|waive[-]row|poker_verb_discharg[e]|discharg[e]\)|(session-poker\.sh|plan_verb_open|plan_verb_swa[p]|pv_next) discharg[e]' "$@" \
-    | /usr/bin/grep -v -e '^payload/scripts/lib/translate\.sh:' -e 'w == "'
+  /usr/bin/grep -rnE 'matrix[-](set|retier|render)|waive[-]row|poker_verb_discharg[e]|discharg[e]\)|(session-poker\.sh|plan_verb_open|plan_verb_swa[p]|pv_next) discharg[e]' "$@"
   /usr/bin/grep -rnE "(session-poker\\.sh|\\\$\\{?[A-Za-z_]*(poker|POKER)[A-Za-z_]*\\}?)[\"']? ($g)([^a-z_-]|\$)|poker_verb_(${g//[-]/_})([^a-z_]|\$)" "$@"
   /usr/bin/grep -rnE --include='*poker*.sh' "^ *([a-z-]+\\|)*($g)(\\|[a-z-]+)*\\)" "$@"
   /usr/bin/grep -rnE 'step[-](line|field)|regressio[n][-]runs|regression_runs_coun[t]|units_set_curren[t]|units_step_(line|fields)|poker_verb_regressio[n]\b|\|budge[t]\||\|regressio[n]\|shar[e]\||confirm[-_]row|matrix_block_ke[y]|poker_verb_budge[t]|budge[t][-]override|session-poker\.sh"? budge[t]|^  budge[t]\)$' "$@" \
     | /usr/bin/grep -v -e 'PLAN_READ_GONE_KEYS='
   /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(landing[-]proofs\.log|asks\.stat[e])([^A-Za-z0-9_]|$)' "$@" \
     | awk -F: -v r=" $READER_FILES " '!index(r, " " $1 " ")'
-  /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(stop[-]guard|agent[-]context[-]guard|bring[-]forward)\.sh([^A-Za-z0-9_]|$)' "$@"
-  /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(plan_verb_swa[p]|plan_bring_forwar[d]|ensure_walk_pointe[r]|walk_pointer_wante[d]|lift_contract_field[s]|brief_validate_field[s]|brief_body_advisorie[s]|dp_scaffold_marke[d]|scale_branch_numbe[r]|units_step_fiel[d]|bf_mai[n]|matrix_bloc[k]|matrix_hea[d]|matrix_row_waive[r]|matrix_v1[5]|finding[-]stated|continuation[-]fill|interval[-]default|fill[-]report)([^A-Za-z0-9_]|$)' "$@"
+  /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(stop[-]guard|agent[-]context[-]guard|bring[-]forward|translat[e])\.sh([^A-Za-z0-9_]|$)' "$@"
+  /usr/bin/grep -rnE '(^|[^A-Za-z0-9_-])translat[e] +("[^"]*"|[$][^ ]*) +(events|gaps)([^A-Za-z0-9_]|$)|declare -F translat[e]([^A-Za-z0-9_]|$)' "$@"
+  /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(plan_verb_swa[p]|plan_bring_forwar[d]|ensure_walk_pointe[r]|walk_pointer_wante[d]|lift_contract_field[s]|brief_validate_field[s]|brief_body_advisorie[s]|dp_scaffold_marke[d]|scale_branch_numbe[r]|units_step_fiel[d]|bf_mai[n]|matrix_bloc[k]|matrix_hea[d]|matrix_row_waive[r]|matrix_v1[5]|reader_brough[t]|reader_brought_a[t]|reader_landing_recor[d]|reader_sessio[n]|plan_read_droppe[d]|plan_read_block[s]|proof_debt_ledger_pat[h]|co_debt_gap[s]|co_debt_gaps_loa[d]|co_debt_note[s]|_run_translatio[n]|translate_has_stat[e]|translate_state_ke[y]|translate_ledge[r]|TRANSLATE_HOME[S]|finding[-]stated|continuation[-]fill|interval[-]default|fill[-]report)([^A-Za-z0-9_]|$)' "$@"
 }
 
 # ADMITTED names the suites' lines that may name a retired verb, each `<class>TAB<file>TAB<text>`, the text the

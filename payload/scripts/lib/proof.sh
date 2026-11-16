@@ -5,8 +5,7 @@
 #
 #     run/v1|ev=proof|kind=<regression|review|task|check|walk|inherited>|head=<40-hex>|evidence=<path under record/>|…|at=
 #
-# appended by `proof_event` alone, and read through the reader's facts (`proof_last`). An older plan holds its proofs as
-# `proved:` lines in its `## SDLC State`, which the reader translates into the same event. A `check`
+# appended by `proof_event` alone, and read through the reader's facts (`proof_last`). A `check`
 # is written only by `session-poker.sh release-check`, the verb that runs the project's declared command, and its
 # evidence is that verb's log. A READING is a review proof that adds four fields,
 # `question=<q> reader=<roster name> result=<pass|flag|fail> scope=<piece|whole>`, written by
@@ -86,8 +85,8 @@ proof_question_ok() {
 
 # proof_line <kind> <head> <at> <evidence> [<question> <reader> <result> <scope>] -> a proof as an older plan's
 # `## SDLC State` holds it, newline-terminated; a reading's four fields follow the evidence when a question is given.
-# No verb writes it: a proof is an event (`proof_event`), and this shape is kept for a run whose older proofs stand in
-# its plan, which the reader translates.
+# No verb writes it: a proof is an event (`proof_event`), and this shape is kept for the suites, which build a proof's
+# event from what it prints.
 proof_line() {
   if [ -n "${5:-}" ]; then
     printf 'proved: kind=%s head=%s at=%s evidence=%s question=%s reader=%s result=%s scope=%s\n' \
@@ -198,16 +197,15 @@ proof_approval_lines() {
 }
 
 # proof_waiver_line <question> <head> <who> <at> <reason> -> a waiver as an older plan's `## SDLC State` holds it,
-# newline-terminated. No verb writes it: the waiver is an event (`proof_waiver_event`), and this shape is kept for a
-# run whose older waivers stand in its plan, which the reader translates.
+# newline-terminated. No verb writes it: the waiver is an event (`proof_waiver_event`), and this shape is kept for the
+# suites, which build a waiver's event from what it prints.
 proof_waiver_line() {
   printf 'waived: question=%s head=%s by %s %s "%s"\n' "$1" "$2" "$3" "$4" "$5"
 }
 
 # THE RUN'S LOG HOLDS A WAIVER AND A FINDING. Each is one event appended through the one appender (lib/log.sh
 # `log_append`) to the run log the reader joins to the plan (`reader_log`), by one writer each, so no second function
-# can write either type. Fields are the ones the translation gives an older plan's lines, so the reader reads an old
-# fact and a new one alike:
+# can write either type:
 #
 #   waiver   question=<q> head=<sha> by=<who> said=<the reply>
 #   finding  ref=<record>#<n> severity=<S> reach=<on|off> to=deferred title=<title>       the registration's deferral
@@ -748,8 +746,8 @@ PROOF_RESULT_LINES
 
 # proof_finding_lines <record path> <proof_findings lines> -> the deferrals an older plan's `## SDLC State` holds,
 # newline-terminated: `deferred: <record>#<n> <S> <reach> "<title>"` for each finding the table defers. No verb writes
-# them: registration writes each deferral as an event (`proof_finding_deferrals`), and this shape is kept for a run
-# whose older deferrals stand in its plan, which the reader translates. A `"` in a title is written `'`.
+# them: registration writes each deferral as an event (`proof_finding_deferrals`), and this shape is what proof-add
+# reports it registered. A `"` in a title is written `'`.
 proof_finding_lines() {
   printf '%s\n' "${2:-}" | REC="$1" awk -F'\t' '
     NF >= 7 && $5 == "defer" { t = $7; gsub(/"/, "'"'"'", t); printf "deferred: %s#%s %s %s \"%s\"\n", ENVIRON["REC"], $1, $2, $3, t }'
@@ -1694,11 +1692,10 @@ proof_bind_awk() {
 # ---------- THE RUN'S FACTS, ASKED OF THE READER ----------
 #
 # A proof, a waiver, an approval and a recorded run are facts of the run, and lib/reader.sh is their one reader: it
-# reads the run's log, or translates a version-14 run's homes (the plan's SDLC State, the landing record) as it reads.
-# The readers below ask it and never read those homes themselves, so a proof the log alone holds stands, and a fact is
-# never read two ways. A fold costs a translation of the whole run, so it is kept between calls, in this shell and
-# in one file per plan for the subshells and processes after it, and served only while every file it was read from,
-# and every library that reads it, is byte for byte the same (`cksum` of each): a write between two reads is seen.
+# reads the run's log. The readers below ask it and never read the log themselves, so a fact is never read two ways.
+# A fold costs a read of the whole log, so it is kept between calls, in this shell and in one file per plan for the
+# subshells and processes after it, and served only while the plan, its log and every library that reads them are
+# byte for byte the same (`cksum` of each): a write between two reads is seen.
 
 _proof_reader_load() {  # -> 0 once lib/reader.sh, beside this file, is loaded
   declare -F reader_facts >/dev/null 2>&1 && return 0
@@ -1707,9 +1704,8 @@ _proof_reader_load() {  # -> 0 once lib/reader.sh, beside this file, is loaded
   declare -F reader_facts >/dev/null 2>&1
 }
 
-# The files a fold depends on: the reader's libraries, then the run's log and the older homes the translation reads
-# beside it (lib/translate.sh TRANSLATE_HOMES, the translation's own list).
-_PROOF_FACTS_LIBS="reader.sh translate.sh plan-read.sh log.sh line.sh"
+# The files a fold depends on: the reader's libraries, then the run's log, and no other file of its record.
+_PROOF_FACTS_LIBS="reader.sh plan-read.sh log.sh line.sh"
 _PROOF_FACTS_KEY=""; _PROOF_FACTS=""; _PROOF_FINDINGS=""; _PROOF_INHERITED=""; _PROOF_HELD_PLAN=""; _PROOF_HELD_FINDINGS=""; _PROOF_HELD_FACTS=""
 # The kept file is a cache and never evidence, yet what it holds is served as the run's proofs and approvals, under a
 # key anyone who reads the repository can compute. So it is read and written only in a directory this user owns
@@ -1724,8 +1720,8 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   [ -f "$plan" ] || return 0
   _proof_reader_load || { printf '_proof_facts: lib/reader.sh cannot be loaded, so the facts of %s are not read\n' "$plan" >&2; return 2; }
   lib="$_READER_LIB_DIR"
-  # The lookup's exit tells a plan with no record (2), translated from its homes below, from a lookup that died: that
-  # would send a run with a log down the path for one without, so it is a failed fold.
+  # The lookup's exit tells a plan with no record (2), which has no event, from a lookup that died: that would send a
+  # run with a log down the path for one without, so it is a failed fold.
   log="$(reader_log "$plan" 2>/dev/null)" || rc=$?
   case "$rc" in
     0) dir="${log%/*}" ;;
@@ -1735,10 +1731,7 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
   # The key covers every file the fold depends on, or no fold is served or kept under it: a file cksum cannot read
   # would leave the key blind to its changes. A fresh fold is still the run's facts, so that is not worth a word.
   deps=("$plan"); for f in $_PROOF_FACTS_LIBS; do deps+=("$lib/$f"); done
-  # shellcheck source=/dev/null
-  [ -z "$dir" ] || declare -F translate >/dev/null 2>&1 || . "$lib/translate.sh" >/dev/null 2>&1 \
-    || { printf '_proof_facts: lib/translate.sh cannot be loaded, so the homes the facts of %s are read from are not known\n' "$plan" >&2; return 2; }
-  [ -z "$dir" ] || for f in run.log $TRANSLATE_HOMES; do [ ! -f "$dir/$f" ] || deps+=("$dir/$f"); done
+  [ -z "$dir" ] || [ ! -f "$dir/run.log" ] || deps+=("$dir/run.log")
   stamp="$(cksum "${deps[@]}" 2>/dev/null)" && stamp="$(printf '%s\n' "$stamp" | cksum)" || stamp=""
   # The key names the kept file's layout too, so a file another layout wrote is never read as this one.
   key="$plan $stamp facts+findings+inherited"
@@ -1761,15 +1754,10 @@ _proof_facts() {  # <plan> -> the reader's standing facts of the plan's run, one
     [ -z "$_PROOF_FINDINGS" ] || _PROOF_FINDINGS="$_PROOF_FINDINGS"$'\n'
     [ -z "$_PROOF_INHERITED" ] || _PROOF_INHERITED="$_PROOF_INHERITED"$'\n'
   else
-    if [ -n "$dir" ]; then
-      # pipefail: the reader reads a pipe, and a stage killed in it would leave a short read that exits 0.
-      evs="$(set -o pipefail; reader_events "$plan")" || rc=$?
-    else
-      # A plan the reader cannot join to a record has no log: its homes are its events, translated as the reader would.
-      # shellcheck source=/dev/null
-      declare -F translate >/dev/null 2>&1 || . "$lib/translate.sh" >/dev/null 2>&1
-      evs="$(set -o pipefail; translate "$plan" events)" || rc=$?
-    fi
+    # A plan the reader cannot join to a record has no log, and so no event.
+    evs=""
+    # pipefail: the reader reads a pipe, and a stage killed in it would leave a short read that exits 0.
+    [ -z "$dir" ] || evs="$(set -o pipefail; reader_events "$plan")" || rc=$?
     # The events are read once: the facts are folded from them, and a finding's events are kept whole beside the facts,
     # since a finding is read from all of them (`_proof_findings_load`), not from its standing fact alone.
     [ "$rc" -ne 0 ] || _PROOF_FACTS="$( set -o pipefail; reader_events() { printf '%s\n' "$evs"; }; reader_facts "$plan" )" || rc=$?
@@ -1851,14 +1839,13 @@ _proof_keep_sweep() {  # <dir> <n> -> the newest <n> files of <dir> are left, th
 # ---------- THE RUN'S PLACE, HELD ----------
 #
 # Where a run stands is asked of every plan at session start and by every hook that scopes itself to a run, under a
-# deadline, so it is not taken from the whole fold. proof_step_held answers it from the fold of the homes that write a
-# step, an approval or an abandon (lib/translate.sh TRANSLATE_PLACE_SOURCES), or the log alone once the run is brought
-# forward, and keeps the three answers beside the kept fold, under a key of every file that answer is read from: the
-# plan, its log and the log's kept copy, the reader's libraries and this one. An appended event, an edited line or a
-# changed library is a new key, and the next ask folds again. A fold that failed is returned and never kept. This is the
+# deadline, so it is not taken from the whole fold. proof_step_held answers it from the run's log, and keeps the three
+# answers beside the kept fold, under a key of every file that answer is read from: the plan, its log, the reader's
+# libraries and this one. An appended event, an edited line or a changed library is a new key, and the next ask folds
+# again. A fold that failed is returned and never kept. This is the
 # one reader and writer of the held file; it holds the answers and nothing else, in a directory of its own beside the
 # kept fold's, and the kept fold's sweep (`_proof_keep_sweep`) sweeps it. The run's standing order and its sessions are
-# held after the three, each line led by `order.` or `sessions.`: the same homes write them, so one fold answers all,
+# held after the three, each line led by `order.` or `sessions.`: the same log holds them, so one fold answers all,
 # and the runner asks the order at every suite's start and every engagement the sessions (`proof_order_held`,
 # `proof_sessions_held`).
 _PROOF_STEP_KEEP=128
@@ -1891,7 +1878,7 @@ proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|
   fi
   # The log is summed less its turns' ends (`reader_log_stamp`): the place reads steps, abandons, approvals, orders and
   # binds alone, and a stop event comes at every turn.
-  deps=("$plan"); [ -z "$dir" ] || [ ! -f "$dir/kept/record/run.log" ] || deps+=("$dir/kept/record/run.log")
+  deps=("$plan")
   stamp="$(cksum "${deps[@]}" 2>/dev/null)" || stamp=""
   if [ -n "$stamp" ] && [ -n "$dir" ] && [ -f "$dir/run.log" ]; then
     f="$(reader_log_stamp "$dir/run.log")" && stamp="$stamp run.log less its stop events $f" || stamp=""
@@ -1907,9 +1894,7 @@ proof_step_held() {  # <plan> -> n=<step> when one stands, state=open|delivered|
      && [ "$k" = "$key" ] && [ -n "$got" ]; then
     _proof_place_split "$got"; printf '%s\n' "$_PROOF_PLACE"; return 0
   fi
-  declare -F translate >/dev/null 2>&1 || . "$_READER_LIB_DIR/translate.sh" >/dev/null 2>&1
-  if [ -n "$dir" ] && reader_brought "$plan"; then ev="$(cat "$log")" || rc=$?
-  else ev="$(set -o pipefail; TRANSLATE_SOURCES="$TRANSLATE_PLACE_SOURCES" translate "$plan" events)" || rc=$?; fi
+  ev=""; [ -z "$dir" ] || ev="$(reader_events "$plan")" || rc=$?
   [ -z "$_PROOF_DRY" ] || ev="${ev:+$ev$'\n'}$_PROOF_DRY"
   [ "$rc" -ne 0 ] || got="$( set -o pipefail; reader_events() { printf '%s\n' "$ev"; }
     reader_q_step "$plan" || exit; if reader_q_approved "$plan" step3; then echo approved=1; else [ "$?" -eq 1 ] || exit; echo approved=0; fi
@@ -3363,14 +3348,6 @@ proof_debt_event() {  # <plan> <field>=<value>… -> one debt event in the plan'
   _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" || return 2
   shift
   RUN_LOG="$log" log_append debt "$@"
-}
-
-# proof_debt_ledger_path <root> <plan> -> the path an older run's debt ledger has; no verb writes it.
-proof_debt_ledger_path() {
-  local slug
-  slug="$(proof_plan_slug "${2:-}")" || return 1
-  [ -n "${1:-}" ] || return 1
-  printf '%s/record/%s/debt.md\n' "$(docs_root "$1")" "$slug"
 }
 
 # proof_debt_items <plan> -> one tab-separated line per debt the run holds, burned or not, in the reader's order:

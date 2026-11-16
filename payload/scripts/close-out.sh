@@ -328,8 +328,8 @@ RELEASE="$(plan_frontmatter_get "$PLAN" release)"
 # ─── The run, as the reader answers it ───────────────────────────────────────
 #
 # EVERY FACT OF THE RUN THIS SCRIPT READS IS A READER ANSWER: the step and the delivery, the landings, the trees, the
-# reviews, the deferrals and the debts. The reader (lib/reader.sh) reads the run's log, or translates a run kept in the
-# older homes as it reads them, so a fact the log alone holds is read here as every other reader reads it. One fold
+# reviews, the deferrals and the debts. The reader (lib/reader.sh) reads the run's log, so a fact is read here as every
+# other reader reads it. One fold
 # serves every answer: the proof library keeps it (lib/proof.sh `_proof_facts`), and the judge this script asks reads
 # the same one. What this script still reads of the plan is what the plan authors: its header and its rows' kinds. It
 # writes nothing into the plan: what step 8 cleaned, the delivery, the archive and the handoff's place are events.
@@ -1097,38 +1097,14 @@ co_debts() {
   printf '%s\n' "$d" | awk -F'\t' '$1 == "ok" { print substr($0, 4) }'
 }
 
-# co_debt_gaps -> the debt lines of the run's version-14 ledger the reader could not read, as its translation
-# names them (`gap/v1|ev=debt|concept=<c>|…` for a row, `…|line=<n>|…` for a line with no concept, prose); nothing
-# for a run brought forward (lib/reader.sh `reader_brought`), whose debts are its log's events.
-CO_DEBT_GAPS=""; CO_DEBT_GAPS_READ=no
-co_debt_gaps() {
-  if [ "$CO_DEBT_GAPS_READ" = yes ]; then printf '%s' "$CO_DEBT_GAPS"; return 0; fi
-  ! reader_brought "$PLAN" 2>/dev/null || return 0
-  declare -F translate >/dev/null 2>&1 || . "$CO_LIB/translate.sh" >/dev/null 2>&1 || return 0
-  translate "$PLAN" gaps 2>/dev/null | /usr/bin/grep '^gap/v1|ev=debt|' | /usr/bin/grep '|field=ev|'
-  return 0
-}
-co_debt_gaps_load() {  # -> the gaps read once for this process: the refusal and the notes both ask them
-  CO_DEBT_GAPS="$(co_debt_gaps)"; [ -z "$CO_DEBT_GAPS" ] || CO_DEBT_GAPS="$CO_DEBT_GAPS"$'\n'
-  CO_DEBT_GAPS_READ=yes
-}
-
-# co_debt_refusal -> the sentence naming the first debt the continuation could not carry: a ledger row the reader
-# could not read, or a debt whose carried line the grammar refuses; nothing when every debt parses. `run` refuses on
-# it; `check` says it would. A line that is no row at all (prose) is not refused: co_debt_notes names it, and it is
-# never carried.
+# co_debt_refusal -> the sentence naming the first debt whose carried line the grammar refuses; nothing when every
+# debt parses. `run` refuses on it; `check` says it would.
 co_debt_refusal() {
-  local led bad
-  led="$(proof_debt_ledger_path "$ROOT" "$PLAN" 2>/dev/null)" || led="the debt ledger"
-  bad="$(co_debt_gaps | awk -F'|' '$3 ~ /^concept=/ { print "the row of " $3; exit }')"
-  [ -n "$bad" ] || { bad="$(co_debt_lines)" || return 2; bad="$(printf '%s\n' "$bad" | awk -F'\t' '$1 == "bad" { print substr($0, 5); exit }')"; }
+  local bad
+  bad="$(co_debt_lines)" || return 2
+  bad="$(printf '%s\n' "$bad" | awk -F'\t' '$1 == "bad" { print substr($0, 5); exit }')"
   [ -n "$bad" ] || return 0
-  printf '%s carries a line that does not parse as a debt line: %s' "${led#"$DROOT"/}" "$bad"
-}
-
-# co_debt_notes -> one `close-out: debt.md:<n> skipped — not a ledger row` line per prose line of the ledger, in order
-co_debt_notes() {
-  co_debt_gaps | awk -F'|' '$3 ~ /^line=/ { printf "close-out: debt.md:%s skipped — not a ledger row\n", substr($3, 6) }'
+  printf "the run's log carries a debt that does not parse as a debt line: %s" "$bad"
 }
 
 # THE CARD'S DEBT LINE: `debt: touched <N> · burned <M>` for the run, N the touches summed over every debt the reader
@@ -1803,7 +1779,7 @@ co_close_step9() {
 }
 
 # THE HANDOFF DOCUMENT IS THE STORE. The closed run's document goes to the run's handoff file, the one the reader's
-# handoff answer names (a logged place, or an older plan's `## Handoff` pointer as the reader translates it), else the
+# handoff answer names (a logged place), else the
 # run's home file in the handoffs folder (lib/handoff.sh `handoff_default_of`). It is the document session-poker.sh `handoff` writes, in its shape: the kind
 # line, the title, the sections in their order, the door last. Its State is the closed run's, and its two closed
 # lines are `closed-form`'s, the branch line under the verb's `working branch:` label. A section a session composed
@@ -2138,7 +2114,6 @@ co_close_archived() {
 # the answer, not an error, so this verb exits 0 either way.
 do_check() {
   local ws is verdict unreached branches wt_list wt_count wt_word wt_desc count missing CK_LINE
-  co_debt_gaps_load
   if [ "$CURRENT" = 8 ]; then
     say "step: current: 8"
   else
@@ -2217,7 +2192,6 @@ do_check() {
   say "tmp-wiped: $count entries under $TMP_DIR"
   say "tasks-completed: $TASKS_LINE"
   say "$(co_debt_card)"
-  co_debt_notes
   CO_DEBT_BAD="$(co_debt_refusal)" || _co_refuse "$CO_UNREAD"
   [ -z "$CO_DEBT_BAD" ] || co_would "debt-lines: WOULD REFUSE — $CO_DEBT_BAD" "a carried debt line does not parse"
   if [ -f "$CONT" ]; then
@@ -2292,7 +2266,7 @@ do_check() {
 
 do_run() {
   # NOTHING IS TOUCHED UNTIL ALL NINE OF THESE PASS, in this order: the step `run` closes, the deploy the plan owes
-  # (co_deploy_judge), the presence check (a `| wave |` table, a release with no `|`), every debt.md line the
+  # (co_deploy_judge), the presence check (a `| wave |` table, a release with no `|`), every debt line the
   # continuation carries parsing (co_debt_refusal), this session bound to the plan when it has rows the merge lands
   # (co_lands_refusal), the merge verdict (act 1 is a readback and touches nothing), the branch census, the facts the
   # run owes (`facts_judge`), and the gate's answer about the plan `run` will write. Any refusal leaves every branch,
@@ -2300,7 +2274,6 @@ do_run() {
   [ "$CURRENT" = 8 ] || _co_refuse "$STEP_REFUSAL"
   co_deploy_judge
   [ -z "$CO_DEPLOY_WHY" ] || _co_held "$CO_DEPLOY_SAYS" "$CO_DEPLOY_WHY — nothing was done"
-  co_debt_gaps_load
   MISSING="$(presence_missing)"
   [ -z "$MISSING" ] || _co_held "the epic plan's row cannot be written" "$MISSING — nothing was done"
   # A DEBT LINE THAT WOULD NOT PARSE IS REFUSED HERE, NAMED (wave-36 T13; AC-7.8), never carried.
@@ -2353,7 +2326,6 @@ do_run() {
   act_tmp;          say "tmp-wiped: $TMP_LINE"
                     say "tasks-completed: $TASKS_LINE"
                     say "$(co_debt_card)"
-  co_debt_notes
   # The close's instant, read again here: the continuation, the epic row, the delivery's words and the handoff
   # carry it, and `delivered:` ends the hand-holds window, so every act above (the merge, the landings, the wipe) is
   # inside the minute it names or before it.

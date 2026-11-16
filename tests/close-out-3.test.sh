@@ -43,14 +43,13 @@ hh_plant() {
     printf 'run/v1|ev=published|row=T2|commit=%s|kind=hand|by=Chris|why=the line was down|at=2026-10-06T10:40:00Z\n' "$HH_C"
     printf 'run/v1|ev=hand|what=stop-run|request=2156|who=fixture:w-T3|kind=whole|key=tests/run.sh|by=fixture|why=parked behind a dead holder|at=2026-10-06T10:50:00Z\n'
   } >> "$rec/run.log"
-  # the fill ledger: a decline and its lift (the verbs' shapes), the Stop hook's hold and ok lines, and prose
+  # the run's log: a decline and its lift, and the Stop hook's hold and ok lines, each a stop event
   {
-    printf 'fill-ledger/v1|at=2026-10-06T09:00:00Z|session=fixture|turn=|current=4|state=decline|ceiling=6|width=|open=|free=|ready=T1|launched=|declined=no room|missed=0|idle=|room=|named=T1|declined-on=-\n'
-    printf 'fill-ledger/v1|at=2026-10-06T09:10:00Z|session=fixture|turn=|current=4|state=lift|ceiling=6|width=|open=|free=|ready=|launched=|declined=|missed=0|idle=|room=|lifted=T1\n'
-    printf 'fill-ledger/v1|at=2026-10-06T09:20:00Z|session=fixture|turn=t1|current=4|state=hold|ceiling=|width=6|open=6|free=0|ready=T1|launched=|declined=|missed=0|idle=|room=0\n'
-    printf 'fill-ledger/v1|at=2026-10-06T09:30:00Z|session=fixture|turn=t2|current=4|state=ok|ceiling=|width=6|open=5|free=1|ready=|launched=T1|declined=|missed=0|idle=|room=1\n'
-    printf 'the orchestrator wrote state=decline here by hand and nobody counted it\n'
-  } > "$rec/fill-ledger.log"
+    printf 'run/v1|ev=stop|session=fixture|turn=|current=4|state=decline|ceiling=6|width=|open=|free=|ready=T1|launched=|declined=no room|missed=0|idle=|room=|at=2026-10-06T09:00:00Z\n'
+    printf 'run/v1|ev=stop|session=fixture|turn=|current=4|state=lift|ceiling=6|width=|open=|free=|ready=|launched=|declined=|missed=0|idle=|room=|at=2026-10-06T09:10:00Z\n'
+    printf 'run/v1|ev=stop|session=fixture|turn=t1|current=4|state=hold|ceiling=|width=6|open=6|free=0|ready=T1|launched=|declined=|missed=0|idle=|room=0|at=2026-10-06T09:20:00Z\n'
+    printf 'run/v1|ev=stop|session=fixture|turn=t2|current=4|state=ok|ceiling=|width=6|open=5|free=1|ready=|launched=T1|declined=|missed=0|idle=|room=1|at=2026-10-06T09:30:00Z\n'
+  } >> "$rec/run.log"
   # the run's log: two amends, a hold, an extension and an adoption, each the hand event its verb wrote
   {
     printf 'run/v1|ev=hand|by=fixture|name=w-a|what=amend|why=widen the files|at=2026-10-06T10:00:00Z\n'
@@ -234,15 +233,15 @@ expect_eq "FL8 AC-7.10 close-out.sh run delivers on the project's own runner's l
 
 section "DEBT-CARD — wave-30 T22 (AC-11.4, AC-11.2; D2, P2): the release card says the run's touches and burns; the continuation carries each unburned item"
 # ============================================================
-# The run's ledger is `record/<run>/debt.md` (lib/proof.sh `proof_debt_ledger_path`). close-out prints
+# The run's debts are its log's debt events. close-out prints
 # `debt: touched <N> · burned <M>`: N the touches summed over every item, M the items burned, never the
-# ledger's length. The continuation's ## Deferrals carries one line per unburned item, after the
+# count of items. The continuation's ## Deferrals carries one line per unburned item, after the
 # deferred: lines, in the form
 #
 #   debt: <concept> <kind> "<sites>" touches=<N> raised-by=<record> from=<wave name>
 #
 # fails-when: the card omits the line or prints a count of items; the continuation omits an unburned item.
-# FIXTURE FIDELITY: the ledger is planted in the line shape `session-poker.sh debt` writes (session-poker-4
+# FIXTURE FIDELITY: the debts are planted as the events `session-poker.sh debt` writes (session-poker-4
 # §DEBT-LEDGER pins the shape against the verb).
 # debt_plant: hoisted to tests/close-out.prelude.sh (a later part reads it)
 PDB="$(mk_fixture debtcard1)"; advance_to "$PDB" 8
@@ -325,32 +324,32 @@ expect_eq "DEBT-RECARRY-5 a run with no ledger exits 0 and carries both inherite
 $RC_LOOSE" "$CO_RC|$(carry_section "$PRN/$CONT_REL" | /usr/bin/grep '^debt: ')"
 
 # ============================================================
-section "DEBT-LINES — wave-36 T13 (D13; REQ-7 AC-7.8; A-orch-1): close-out carries only debt lines that parse, refusing a debt.md line that does not, naming it"
+section "DEBT-LINES — wave-36 T13 (D13; REQ-7 AC-7.8; A-orch-1): close-out carries only debt lines that parse, refusing a debt whose line does not, naming it"
 # ============================================================
 # The one debt-line grammar is lib/debt.sh `debt_line_ok`, read by `debt add`, by close-out's `co_debts`
-# and by card.sh's inherited reader. A debt.md item whose carried line would not parse (A-orch-1: a
-# `raised-by` cell holding a space, `assumptions.md A-orch-46`) refuses `run` before its first act and is
+# and by card.sh's inherited reader. A debt whose carried line would not parse (a `raised-by` field holding a
+# space) refuses `run` before its first act and is
 # named; `check` says it would refuse. Corrected, the line is carried, and the next run's `card.sh step1`
 # over the continuation renders it instead of refusing. fails-when: the continuation carries the
 # unparseable line, or the next run's Step-1 card is refused on it.
-# FIXTURE FIDELITY: the ledger is debt_plant's, in the shape `session-poker.sh debt` writes, with one
-# item's source cell written by hand as wave-35's two hole lines were.
-DL_BAD='hole_x | hole | lib/e.sh:5 | raised-by record/wave-01-fixture/assumptions.md A-orch-46 | touches 0 | —'
-DL_GOOD='hole_x | hole | lib/e.sh:5 | raised-by record/wave-01-fixture/assumptions.md#A-orch-46 | touches 0 | —'
+# FIXTURE FIDELITY: the debts are debt_plant's, the events `session-poker.sh debt` writes, with one
+# item's source field written by hand, as an earlier run's two hole lines were.
+DL_BAD='run/v1|ev=debt|concept=hole_x|kind=hole|sites=lib/e.sh:5|raised-by=record/wave-01-fixture/assumptions.md A-orch-46|touches=0|at=2026-10-04T12:00:00Z'
+DL_GOOD='run/v1|ev=debt|concept=hole_x|kind=hole|sites=lib/e.sh:5|raised-by=record/wave-01-fixture/assumptions.md#A-orch-46|touches=0|at=2026-10-04T12:00:00Z'
 PDL="$(mk_fixture debtlines1)"; advance_to "$PDL" 8
 debt_plant "$PDL"
-DL_LED="$PDL/.bionic/docs/record/wave-01-fixture/debt.md"
+DL_LED="$PDL/.bionic/docs/record/wave-01-fixture/run.log"
 printf '%s\n' "$DL_BAD" >> "$DL_LED"
 run_close "$PDL" check
-expect_eq "DEBT-LINES-1 check exits 0 over a ledger with an unparseable line" "0" "$CO_RC"
+expect_eq "DEBT-LINES-1 check exits 0 over a debt with an unparseable line" "0" "$CO_RC"
 cp "$PDL/$PLAN_REL" "$SANDBOX/dl-plan-before"
 run_close "$PDL" run
-expect_eq "DEBT-LINES-2 AC-7.8 run refuses a debt.md line with a space in its source cell (exit 2)" "2" "$CO_RC"
+expect_eq "DEBT-LINES-2 AC-7.8 run refuses a debt with a space in its source field (exit 2)" "2" "$CO_RC"
 expect_false "DEBT-LINES-2c …and no continuation was written" test -e "$PDL/$CONT_REL"
 expect_true "DEBT-LINES-2d …the plan byte-identical, nothing done" cmp -s "$SANDBOX/dl-plan-before" "$PDL/$PLAN_REL"
 awk -v bad="$DL_BAD" -v good="$DL_GOOD" '$0 == bad { $0 = good } { print }' "$DL_LED" > "$DL_LED.new" && mv "$DL_LED.new" "$DL_LED"
 run_close "$PDL" run
-expect_eq "DEBT-LINES-3b the corrected ledger closes (exit 0)" "0" "$CO_RC"
+expect_eq "DEBT-LINES-3b the corrected debt closes (exit 0)" "0" "$CO_RC"
 DL_CARRY="debt: hole_x hole \"lib/e.sh:5\" touches=0 raised-by=record/wave-01-fixture/assumptions.md#A-orch-46 from=$CARRY_W"
 expect_eq "DEBT-LINES-3c …and the continuation carries the unburned items, the corrected one last" \
 "debt: tree_count duplicate \"lib/a.sh:1, lib/b.sh:2\" touches=4 raised-by=record/wave-01-fixture/critic-structure.md from=$CARRY_W

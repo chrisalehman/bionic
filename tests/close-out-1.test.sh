@@ -453,6 +453,8 @@ ba_doors() {  # <project> -> BA_CHECK, BA_CLOSED: the branch close-out's check a
 }
 PBA="$(CO_PLAN_AT=14 mk_fixture branch-agree)"
 fixture_git "$PBA" branch trunk "$(fixture_git "$PBA" rev-list --max-parents=0 main)"
+# The working branch is the header's alone (lib/run.sh plan_working_branch), so the page names it there too.
+awk 'NR == 1 && $0 == "---" { print; print "working-branch: wave/01-fixture"; next } { print }' "$PBA/$PLAN_REL" > "$PBA/$PLAN_REL.wb" && mv "$PBA/$PLAN_REL.wb" "$PBA/$PLAN_REL"
 ba_fm "$PBA" trunk
 expect_eq "BA0 precondition: ## SDLC State names main and the frontmatter trunk, both branches" "main|trunk|yes|yes" \
   "$(sed -n '/^## SDLC State/,/^## /s/^integration-branch: //p' "$PBA/$PLAN_REL")|$(sed -n '2s/^integration-branch: //p' "$PBA/$PLAN_REL")|$(branch_exists "$PBA" main)|$(branch_exists "$PBA" trunk)"

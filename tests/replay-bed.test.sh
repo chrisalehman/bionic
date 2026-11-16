@@ -5,8 +5,8 @@
 # its page, its run log and its gaps list (the facts its older files never held) beside its review and check files,
 # and one expected key=value file per release card with the facts the record lost listed in `gaps`.
 #
-#   §TRACKED  every fixture is a tracked file, every page reads 15 and none holds an old home, neither the bed nor
-#             the scrub names the project's own record store, and the private-name scan passes over the fixtures.
+#   §TRACKED  every fixture is a tracked file, every page reads 15 and none holds an old home, the bed names not the
+#             project's own record store, and the private-name scan passes over the fixtures.
 #   §CARDS    for each card, the reader's answers over its run's log cut at the card's instant equal its expected
 #             file less the gaps list; the cut run is read whole, its log joined by the hand-written lines.
 #   §PAGES    the release card rendered in each card's world, its run as it stood at the instant, equals the replay
@@ -16,20 +16,17 @@
 #   §COVER    every question of the closed list is asked and none is refused, and every event type has a line.
 #   §FOLLOWS  a review row's rendered brief starts its range at the reader's last review proof of its questions,
 #             and a step card asks again for an approval a cancel appended to the run's log retracted.
-#   §OPEN     run_open asks the reader's step of a run, whatever its plan's prose says; a run with no log is judged
-#             from its plan; each closed fixture run reads closed and the cut run open.
+#   §OPEN     run_open asks the reader's step of a run, whatever its plan's prose says; each closed fixture run reads
+#             closed and the cut run open.
 #   §FOLLOWS-CONTINUATION  close-out's check reads a debt only the run's log holds into its debt line and Deferrals.
 #   §AGREE    in each card's world, the release card's Reviews lines and the sheet's reviews line count alike, and
 #             both print the reader's acts taken by hand and open asks at the log the card read.
-#   §HALF     the cut run as it stood at 14, its approval and landings in its plan and records and what came after
-#             in its log: a landing the log appends reads once and last, the run reads open at the plan's step, and a
-#             cancel of the plan's approval the log appends is honoured by the card, the sheet and the tick.
 #
 # A CARD'S INSTANT. The reader answers a run as it stands, so a card's world holds as its run log the recording cut
 # at the card's instant, in the log's order: a line with no instant of its own stands where the log put it.
 #
 # FIXTURE FIDELITY. Each recording was made once from its run's version-14 page and record files, which stand in
-# git at the commit §HALF names: its log holds every fact those files held that a line can carry, in the order they
+# git at commit 1d09c8990: its log holds every fact those files held that a line can carry, in the order they
 # happened, its gaps list the rest, and its page what a person wrote. The fixtures are real files but hand-written.log: the lines of the event types no
 # closed run holds, each marked fixture=hand-written. They join the cut run only.
 
@@ -51,10 +48,8 @@ PG="$(cd "$X" && ls */plans/*/*.plan.md)"; expect_nonempty "the fixtures hold pa
 expect_eq "every fixture page reads version 15, and no fixture holds a file of an old home" "0 0" "$(cd "$X" && grep -L '^canonical_sdlc_version: 15$' $PG | wc -l | tr -d ' ') $($GIT ls-files "$F" | grep -cE '/(landing-proofs\.log|asks\.state|fill-ledger\.log|design-ledger\.md|debt\.md)$')"
 expect_eq "four card files, every expected line key=value, none empty" "4 0 0" \
   "$(ls "$X"/release-approval-*.facts | wc -l | tr -d ' ') $(cat "$X"/*.facts | grep -vc '^[A-Za-z][A-Za-z0-9.:_-]*=') $(find "$X" -name '*.facts' -size 0 | wc -l | tr -d ' ')"
-expect_true "the scrub is a tracked file" $GIT ls-files --error-unmatch tests/lib/replay-scrub.sh
 expect_empty "no fixture file is untracked" "$($GIT ls-files --others "$F")"
-expect_empty "neither the bed nor the scrub names the project's own record store" \
-  "$(grep -n "$B" "$R/tests/replay-bed.test.sh" "$R/tests/lib/replay-scrub.sh")"
+expect_empty "the bed names not the project's own record store" "$(grep -n "$B" "$R/tests/replay-bed.test.sh")"
 # The list's path comes from the environment alone: the project's config sits in its own store, which the bed
 # never reads, and the release check's declared scan admits the fixtures at every landing either way.
 L="${BIONIC_NAME_LIST:-}"
@@ -314,8 +309,6 @@ expect_eq "a run whose log stands at step 8 is open, though its plan says curren
   "$(opened "$(plant at9 9 '- Step 9: closing' 'run/v1|ev=step|n=8|at=2026-11-01T00:00:00Z')")"
 expect_eq "a run whose log holds an abandon is closed" 1 \
   "$(opened "$(plant quit 6 '' 'run/v1|ev=step|n=6|at=2026-11-01T00:00:00Z' 'run/v1|ev=abandon|why=w|at=2026-11-01T00:00:01Z')")"
-expect_eq "with no log, current: 9 and no delivery is open, and a delivered: Step 9 line closes it" "0 1" \
-  "$(opened "$(plant v14 9 '- Step 9: closing')") $(opened "$(plant v14d 9 '- Step 9: delivered: 2026-11-01T00:00Z')")"
 expect_eq "the closed fixture runs read closed and the cut run open" "1 1 0" "$(opened "$P49") $(opened "$(ls "$X"/wave-46-asks-nothing/plans/*/*.plan.md)") $(opened "$(ls "$X"/wave-49-mid/plans/*/*.plan.md)")"
 
 section "FOLLOWS-CONTINUATION"
@@ -350,26 +343,5 @@ for d in "$WORLD_ROOT"/pages/release-approval-*/; do d="${d%/}"; n="${d##*/}"; p
   expect_eq "$n: the card and the sheet count the acts taken by hand as the reader answers them" "${a% *} ${a% *}" "${k% *} ${h% *}"
   expect_eq "$n: …and the open asks" "${a#* } ${a#* }" "${k#* } ${h#* }"; [ "$s|$k|$h" = "$c|$a|$a" ] || sed 's/^/      sheet said: /' "$d.serr"
 done
-
-section "HALF"
-# The cut run as a run reads between its writers moving to the log and its crossing: its approval and landings in its
-# plan and records, what came after in a log beside them. The run is read as it stood at 14, from git at the commit
-# before it was recorded at 15. The step card is not asked: a step below the run's own is answered by being past it,
-# so it reopens nothing whatever the log says.
-PIN=1d09c8990abaf6cdacfb9db3cda9e58f8ad46ad3; mkdir -p "$WORLD_ROOT/pin"; $GIT archive "$PIN" "$F/wave-49-mid" | tar -x -C "$WORLD_ROOT/pin"
-HW="$WORLD_ROOT/half"; HB="$HW/.bio""nic"; mkdir -p "$HB/tmp"; cp -R "$WORLD_ROOT/pin/$F/wave-49-mid" "$HB/docs"; git -C "$HW" init -q
-HP="$(ls "$HB"/docs/plans/*/*.plan.md)"; HR="$HB/docs/record/$(basename "$HP" .plan.md)"; HS=fe11a5e0-0000-4000-8000-000000000003
-bound_marker "$HW" "$HS" "$HP"; ( cd "$HW" && CLAUDE_CODE_SESSION_ID=$HS bash "$R/hooks/session-poker.sh" arm ) >/dev/null 2>&1
-hrows() { ask "$HP" landed | sed -n 's/.*|row=\([^|]*\)|.*/\1/p' | tr '\n' ' '; }
-hsheet() { ( cd "$HW" && TZ=America/Los_Angeles BIONIC_NOW_EPOCH=1794300000 bash "$R/hooks/session-poker.sh" sitrep "$HP" 2>/dev/null ) | grep '^clock\.approved: '; }
-# The tick asks the gate for room, so the world plants the machine it runs on: one with room, whatever this one carries.
-htick() { rm -f "$HB"/tmp/tick-digest-*; ( world_machine 8 16384 30 1; cd "$HW" && CLAUDE_CODE_SESSION_ID=$HS bash "$R/hooks/session-poker.sh" tick 2>&1 ) | grep -m1 '^poker: .*FILL'; }
-HO="$(hrows)"; printf 'run/v1|ev=published|row=T99|commit=%s|kind=queue|by=-|why=-|at=2026-11-08T00:00:00Z\n' "$(printf 'f%.0s' {1..40})" > "$HR/run.log"
-expect_eq "half: a landing the log appends reads once and last, after every landing the old homes hold" "yes|${HO}T99 " "$(printf '%s' "$HO" | grep -q '^T1 ' && echo yes)|$(hrows)"
-expect_eq "half: the run reads open, at the plan's step" "0 n=4" "$(opened "$HP") $(ask "$HP" step | grep '^n=')"
-expect_eq "half: before a cancel the sheet holds the plan's approval and the tick fills" "yes yes" "$(hsheet | grep -q '^clock\.approved: [0-9]' && echo yes) $(htick | grep -q '^poker: FILL ' && echo yes)"
-printf 'run/v1|ev=cancel|of=approval|key=step3|at=2026-11-08T00:00:01Z\n' >> "$HR/run.log"
-expect_eq "half: a cancel the log appends takes it off the sheet and holds the tick, though the plan's approved-by: stands" "yes yes 1" \
-  "$(hsheet | grep -q '^clock\.approved: - ' && echo yes) $(htick | grep -q 'Step-3 approval pending' && echo yes) $(grep -c '^approved-by: ' "$HP")"
 
 finish

@@ -5,9 +5,8 @@
 #
 # THE LOG. A plan at `<docs>/plans/<epic>/<wave>.plan.md` owns `<docs>/record/<wave>/run.log` (every
 # place a plan may sit is `reader_record`'s), joined by name alone: no key in the plan points at it, so
-# neither can drift from the other. `reader_events` is the one place a run's lines are read from; a
-# source of events for a run kept in older homes is added there, and every question then answers over
-# it unchanged. The plan's own text is never read here.
+# neither can drift from the other. `reader_events` is the one place a run's lines are read from, and every
+# question answers over them. The plan's own text is never read here.
 #
 # THE FOLD. `reader_facts` turns the lines into facts, in the order they happened:
 #   - two lines equal in every field but `at=` are one fact; the repeat changes nothing, not even the place,
@@ -82,7 +81,7 @@ reader_slug() {  # <plan> -> the name of its record; 1 when the name leaves none
 # admits a run's plan: in the docs root's plans/ or incidents/, or one folder below either. It is
 # `<docs>/record/<the record's name>/`, so the reader and the writers can never name two directories for one run.
 # The folder one below is tried first, so an epic folder named plans/ joins as it always has. Any other place is no
-# run's plan. lib/translate.sh asks this for the record's other homes.
+# run's plan.
 reader_record() {  # <plan> -> its record directory; 2 when the plan sits where the walk admits none; above 2 when the lookup died
   local name="${1##*/}" dir up rc
   case "$name" in *.md) ;; *) return 2 ;; esac
@@ -101,30 +100,6 @@ reader_log() {  # <plan> -> the path of its run log; 2 when the plan sits where 
   printf '%s/run.log\n' "$rec"
 }
 
-# A RUN IS READ FROM ITS LOG ALONE ONCE IT IS BROUGHT FORWARD: the act that did so kept its old homes under kept/ and then
-# wrote its log, every fact the old homes held, so the log differs from the kept copy of it (or that copy is absent).
-# Until then its writers move to the log one family at a time, so a fact stands in an old home or in the log and never
-# in both: the old homes and the log are read together, the log as the newest of the homes lib/translate.sh reads,
-# each line in the order of its instant and the log's lines in the order written. An act broken off after it kept the
-# homes, its log still the kept copy, is a run not yet brought forward, and is read so.
-reader_brought() {  # <plan> -> 0 when the run was brought forward; 1 when not; 2 when the plan sits where the walk admits none
-  local rec
-  rec="$(reader_record "${1:-}")" || return 2
-  reader_brought_at "$rec"
-}
-reader_brought_at() {  # <record directory> -> 0 when its run was brought forward, else 1
-  [ -d "$1/kept" ] && [ -f "$1/run.log" ] && ! cmp -s "$1/run.log" "$1/kept/record/run.log"
-}
-# THE OLD LANDING RECORD is named here and nowhere outside the reader's files. A run not brought forward still holds its
-# earlier landings in it, so the landing library (lib/line.sh `line_lines`) reads it ahead of the log; once the run is
-# brought forward the log holds their translation and the old file, which the act leaves in place, is never read again.
-# A link is no record: the readers that guard a home against a link read it as absent.
-reader_landing_record() {  # <record directory> -> the old landing record's path while it is to be read; 1 when it is not
-  local f="${1:-}/landing-proofs.log"
-  [ -n "${1:-}" ] && [ -f "$f" ] && [ ! -L "$f" ] && ! reader_brought_at "$1" || return 1
-  printf '%s\n' "$f"
-}
-
 # A KEY OF A FOLD THAT READS NO TURN'S END: a stop event comes at every turn, so the log is summed less those alone. Only
 # a line in the appender's whole shape of one is left out, so any other line, a malformed stop among them, still changes
 # the sum: a key fails toward a fold, never toward a stale answer.
@@ -134,15 +109,13 @@ reader_log_stamp() (  # <log> -> its `cksum` less its stop events; 2 when it can
     [ "$?" -le 1 ]; } | cksum || exit 2
 )
 
-reader_events() {  # <plan> -> the run's lines, in the order they were written
+# A RUN IS ITS LOG: no other file of its record, and no line of its plan, holds a fact of it, so a plan with no log has
+# no event. A plan that is no file is refused as a plan the walk admits none of.
+reader_events() {  # <plan> -> the run's lines, in the order they were written; 2 when it is no plan
   local log
+  [ -f "${1:-}" ] || return 2
   log="$(reader_log "$1")" || return 2
-  if [ -d "${log%/run.log}/kept" ] && reader_brought "$1"; then cat "$log"; return; fi
-  if ! declare -F translate >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$_READER_LIB_DIR/translate.sh" || return 2
-  fi
-  translate "$1" events
+  [ ! -f "$log" ] || cat "$log"
 }
 
 reader_facts() {  # <plan> -> one line per standing fact, in the order the facts were last set
@@ -186,7 +159,7 @@ reader_facts() {  # <plan> -> one line per standing fact, in the order the facts
     }'
 }
 
-# The closed list is split on blanks whatever IFS the caller holds, as the translation splits its sources.
+# The closed list is split on blanks whatever IFS the caller holds.
 reader_list() {  # -> one line per question: <name> <form>
   local e IFS=$' \t\n'
   for e in $READER_QUESTIONS; do
@@ -216,22 +189,6 @@ reader_main() {  # <plan> <question> [args] -> the answer in its form; 2 refused
   return 2
 }
 
-# A SESSION'S FACTS ARE ASKED OF THEIR OWN HOMES. An order and a bind are written by no home of an older run but its SDLC
-# State, a handoff by none but its Handoff, and then each by the run's log (lib/translate.sh TRANSLATE_SESSION_SOURCES,
-# TRANSLATE_HANDOFF_SOURCES), so the three questions over them are answered from those homes alone, a fraction of the
-# whole translation of a long plan: every engagement asks the sessions, and the close and the roster the handoff.
-reader_session() {  # <plan> <order|handoff|sessions> [args] -> reader_main's answer, read from the homes of a session's facts
-  local src
-  case "${2:-}" in order|sessions|handoff) ;; *) printf "reader: '%s' is no question of a session's facts\n" "${2:-}" >&2; return 2 ;; esac
-  if ! declare -F translate >/dev/null 2>&1; then
-    # shellcheck source=/dev/null
-    . "$_READER_LIB_DIR/translate.sh" || return 2
-  fi
-  case "$2" in handoff) src="${TRANSLATE_HANDOFF_SOURCES:-}" ;; *) src="${TRANSLATE_SESSION_SOURCES:-}" ;; esac
-  [ -n "$src" ] || return 2
-  TRANSLATE_SOURCES="$src" reader_main "$@"
-}
-
 _reader_needs() {  # <question> <usage> <value> -> 0 when the value is given, else 2 with the usage
   [ -n "$3" ] && return 0
   printf 'reader: usage: reader <plan> %s %s\n' "$1" "$2" >&2; return 2
@@ -239,8 +196,8 @@ _reader_needs() {  # <question> <usage> <value> -> 0 when the value is given, el
 
 # A STEP'S OWN FIELDS are what no other event and no line a person wrote holds: what the close cleaned at 8, and at 9
 # what was delivered, where it was archived and the three of a deploy. Every other part of a step's evidence is asked
-# of the event that holds it. The writer refuses any other field (lib/proof.sh `proof_step_event`), the translation
-# keeps these from an older plan's Step lines, and the step's answer prints them.
+# of the event that holds it. The writer refuses any other field (lib/proof.sh `proof_step_event`), and the step's
+# answer prints them.
 READER_STEP_FIELDS="8:cleanup,tmp-wiped,tasks-completed 9:delivered,archived,deployed,verified,monitored"
 reader_step_fields() {  # <step> -> the fields that step's event may carry, blank-separated; nothing for none
   local e IFS=$' \t\n'
@@ -312,14 +269,12 @@ reader_q_asks() {  # <plan> -> each ask still open: no reply on it, and no appro
 # a round closes by its reply alone, so the asks library's list is the asks its writers left open.
 #   run/v1|ev=ask|key=<k>|state=open|sent=<ISO or ->|at=<opened>|title=<t>|prompt=<p>|round=<n>[|answer=<w>|answered=<ISO>|event=<e>]
 #   run/v1|ev=ask|key=<k>|state=closed|by=<reply>|at=<closed>|opened=<ISO or empty>|sent=<ISO or ->|round=<n>[|answer=…]
-# Given a plan, the run's ask events, its register through the translation alone; given `-`, the lines on stdin, which
-# is how a session's own store, no run's, is read.
+# Given a plan, the run's ask events; given `-`, the lines on stdin, which is how a session's own store, no run's, is
+# read.
 # A read that failed is its exit, never a run with no ask: the pipe runs under pipefail, in its own shell.
 reader_ask_rounds() (  # <plan|-> -> one line per round; 2 when the plan's events cannot be read
   set -o pipefail
-  # shellcheck source=/dev/null
-  [ "${1:-}" = - ] || declare -F translate >/dev/null 2>&1 || . "$_READER_LIB_DIR/translate.sh" || exit 2
-  { if [ "${1:-}" = - ]; then cat; else TRANSLATE_SOURCES="_translate_asks _translate_log" reader_events "$1"; fi; } \
+  { if [ "${1:-}" = - ]; then cat; else reader_events "$1"; fi; } \
   | awk -F'|' "$_READER_AWK"'
     ev() == "ask" { k = line_kv("key"); if (k ~ /^approve:D[0-9]+$/) k = "decide:" substr(k, 9); r = line_kv("round")
       i = k SUBSEP (r == "" ? 1 : r); a = line_kv("at")
@@ -354,8 +309,7 @@ reader_identity drop row
 
 # A ROW'S WORK IS NO LONGER OWED when a drop of it stands and it has not landed. This is the one rule: the questions
 # below and the fill (lib/units.sh `_units_live`) put it before their own program over the facts they already fold, so
-# its two rules see every fact line theirs see, and they ask `dropped(<row>)`. An older table's dropped status cell is
-# a drop of the translation's (lib/translate.sh), so a run at 14 is read by the same rule.
+# its two rules see every fact line theirs see, and they ask `dropped(<row>)`.
 _READER_DROP_AWK='
 ev() == "drop" { _dropped[line_kv("row")] = 1 }
 ev() == "published" { _landed[line_kv("row")] = 1 }
@@ -449,7 +403,7 @@ reader_q_order() {  # <plan> -> order=given with the standing order's words and 
 reader_question hands list reader_q_hands
 reader_q_hands() {  # <plan> -> each act taken by hand: a hand event, or a landing made by hand
   # Every hand event is written by the line library's one writer with its reason; a waiver is its own type, not
-  # answered here, and a version-14 kind no ruled type carries is a gap of the translation, not a fact here.
+  # answered here.
   reader_facts "$1" | awk -F'|' "$_READER_AWK"'
     ev() == "hand" || ev() == "published" && line_kv("kind") == "hand"'
 }
@@ -558,47 +512,36 @@ reader_q_cell() {  # <plan> <criterion> -> state=discharged and by=<event type>,
 }
 
 # reader_cells <plan> [head] -> one line per criterion, `<criterion>\037<state>\037<by>\037<tier>\037<evidence>\037
-# <auditor>\037<confirmed>\037<serves>`: the Eval design's criteria in its order, then each row an older plan's matrix table holds
-# and the Eval design lacks. ONE FOLD answers every criterion, so a caller that judges them all asks once; the cell
-# question answers through it, and no question prints the further fields: the bed pins the cell answer over the
-# closed runs, and the fields are what the gate, the judge and the cards weigh, never a fact a person asks for.
+# <auditor>\037<confirmed>\037<serves>`: the Eval design's criteria in its order. ONE FOLD answers every criterion, so a
+# caller that judges them all asks once; the cell question answers through it, and no question prints the further
+# fields: the bed pins the cell answer over the closed runs, and the fields are what the gate, the judge and the cards
+# weigh, never a fact a person asks for.
 #   state, by   discharged only by a standing event naming the criterion: an approval by its key, a waiver or a
-#               proof by `ac=`; a proof that failed (rc other than 0, or result=fail) discharges nothing; an older
-#               table's proof, which has no instant, does not displace a waiver the log holds with one. An approval
-#               discharges only a criterion nothing else does: a person confirms after the proof, and their word never
-#               unseats the proof or waiver that came first.
-#   tier        the Eval design's eval type through lib/scale.sh, else the older table's tier cell.
-#   evidence    the discharging proof's or waiver's `evidence=`, else the older table's evidence cell.
-#   auditor     on a row the older table holds: the discharging event's `auditor=`, else the row's cell; on any other
-#               criterion: the `auditor=` its discharging proof carries when that proof has no instant, else the
-#               evidence review standing at <head>, CONFIRMED when it passed and REFUTED when not. An untimed proof is
-#               one the act translated from an older row, whose verdict stood from then on; the appender stamps
-#               every line it writes, so a verdict named on a proof written since is never read as one.
+#               proof by `ac=`; a proof that failed (rc other than 0, or result=fail) discharges nothing; a proof
+#               with no instant does not displace a waiver the log holds with one. An approval discharges only a
+#               criterion nothing else does: a person confirms after the proof, and their word never unseats the
+#               proof or waiver that came first.
+#   tier        the Eval design's eval type through lib/scale.sh.
+#   evidence    the discharging proof's or waiver's `evidence=`.
+#   auditor     the `auditor=` its discharging proof carries when that proof has no instant, else the evidence review
+#               standing at <head>, CONFIRMED when it passed and REFUTED when not. An untimed proof is one the act
+#               wrote from an older row, whose verdict stood from then on; the appender stamps every line it writes,
+#               so a verdict named on a proof written since is never read as one.
 #   confirmed   the approval naming the criterion, as `<by> <day> <its words>`, its giver folded to one word and the
-#               criterion standing for words it holds none of, the shape an older block's confirmation is written in;
-#               else, on a row the older table holds, the discharging event's `confirmed=`, else its block's
-#               `user-confirmed:`.
-#   serves      on a row the older table holds: its block's first `serves:`; else the Eval design's requirement.
+#               criterion standing for words it holds none of.
+#   serves      the Eval design's requirement.
 # 1 when the plan names no criterion; the fold's failure is its exit.
 reader_cells() {
   # Its names are its own: a caller that hands it the facts names its copy `facts`, which a local of that name would hide.
-  local _rc_plan="$1" _rc_head="${2:-}" _rc_eval _rc_rows _rc_conf _rc_facts
+  local _rc_plan="$1" _rc_head="${2:-}" _rc_eval _rc_facts
   _rc_eval="$(plan_read_rows "$_rc_plan" 'Eval design' criterion 2>/dev/null)" || _rc_eval=""
-  _rc_rows="$(plan_read_rows "$_rc_plan" 'Verification Matrix' ac 2>/dev/null)" || _rc_rows=""
-  [ -n "$_rc_eval$_rc_rows" ] || return 1
-  _rc_conf="$(plan_read_blocks "$_rc_plan" 2>/dev/null | awk -F'\t' '$1 != "" && match($2, /^[ \t]*(user-confirmed|serves)[ \t]*:/) {
-    k = $2; sub(/^[ \t]+/, "", k); sub(/[ \t]*:.*$/, "", k); if (($1, k) in s) next
-    s[$1, k] = 1; v = substr($2, RLENGTH + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print $1 "\t" k "\t" v }')" || _rc_conf=""
+  [ -n "$_rc_eval" ] || return 1
   _rc_facts="$(reader_facts "$_rc_plan")" || return
-  printf 'E\n%s\nM\n%s\nC\n%s\nF\n%s\n' "$_rc_eval" "$_rc_rows" "$_rc_conf" "$_rc_facts" | awk -F'|' -v h="$_rc_head" "$_READER_AWK$(scale_tier_awk)"'
+  printf 'E\n%s\nF\n%s\n' "$_rc_eval" "$_rc_facts" | awk -F'|' -v h="$_rc_head" "$_READER_AWK$(scale_tier_awk)"'
     function cell(s, k,   n, i, c) { n = split(s, c, "\t"); for (i = 1; i <= n; i++) if (index(c[i], k "=") == 1) return substr(c[i], length(k) + 2); return "" }
-    function none(s) { return s == "" || s == "—" || s == "-" || tolower(s) == "n/a" }
-    $0 == "E" || $0 == "M" || $0 == "C" || $0 == "F" { part = $0; next }
+    $0 == "E" || $0 == "F" { part = $0; next }
     $0 == "" { next }
     part == "E" { c = cell($0, "criterion"); if (c == "" || (c in seen)) next; seen[c] = 1; ord[++n] = c; tier[c] = tier_of(cell($0, "eval-type")); req[c] = cell($0, "requirement"); next }
-    part == "M" { c = cell($0, "ac"); if (c == "") next; if (!(c in seen)) { seen[c] = 1; ord[++n] = c }
-      row[c] = 1; if (tier[c] == "") tier[c] = cell($0, "tier"); rev[c] = cell($0, "evidence"); raud[c] = cell($0, "auditor"); next }
-    part == "C" { split($0, w, "\t"); if (w[2] == "serves") sv[w[1]] = w[3]; else rconf[w[1]] = w[3]; next }
     { e = ev(); c = (e == "approval") ? line_kv("key") : line_kv("ac") }
     e == "proof" && line_kv("kind") == "review" && line_kv("question") == "evidence" && h != "" && line_kv("head") == h { review = (line_kv("result") == "pass") ? "CONFIRMED" : "REFUTED" }
     c == "" || !(c in seen) { next }
@@ -606,16 +549,12 @@ reader_cells() {
       ok[c] = g " " substr(line_kv("at"), 1, 10) " " (line_kv("said") != "" ? line_kv("said") : c) }
     e == "proof" && line_kv("at") == "" && by[c] == "waiver" && at_[c] != "" { next }
     e == "waiver" || e == "proof" && line_kv("rc") ~ /^0?$/ && line_kv("result") != "fail" {
-      by[c] = e; ev_[c] = line_kv("evidence"); aud[c] = line_kv("auditor"); cf[c] = line_kv("confirmed"); at_[c] = line_kv("at") }
+      by[c] = e; ev_[c] = line_kv("evidence"); aud[c] = line_kv("auditor"); at_[c] = line_kv("at") }
     END {
       for (i = 1; i <= n; i++) {
         c = ord[i]; b = by[c]
-        if (c in row) {
-          d = (b == "proof" || b == "waiver")
-          ev1 = d ? ev_[c] : (none(rev[c]) ? "" : rev[c]); a = d ? aud[c] : (none(raud[c]) ? "" : raud[c]); if (a == "" && d && at_[c] != "") a = review
-          k = (c in ok) ? ok[c] : d ? cf[c] : rconf[c]
-        } else { ev1 = (b == "proof" || b == "waiver") ? ev_[c] : ""; a = (b == "proof" && at_[c] == "" && aud[c] != "") ? aud[c] : review; k = ok[c] }
-        print c "\037" (b == "" ? "pending" : "discharged") "\037" b "\037" tier[c] "\037" ev1 "\037" a "\037" k "\037" ((c in row) ? sv[c] : req[c])
+        ev1 = (b == "proof" || b == "waiver") ? ev_[c] : ""; a = (b == "proof" && at_[c] == "" && aud[c] != "") ? aud[c] : review
+        print c "\037" (b == "" ? "pending" : "discharged") "\037" b "\037" tier[c] "\037" ev1 "\037" a "\037" ok[c] "\037" req[c]
       }
     }'
 }

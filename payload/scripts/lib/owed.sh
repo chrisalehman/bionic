@@ -15,8 +15,7 @@
 # THE STORE IS THE RUN'S. An ask belongs to the run it holds, not to the session that raised it. Each act on it (an
 # opening, an answer, a send marked or taken back, a close) is one `ask` event appended to the run's log,
 # `<docs>/record/<run>/run.log`, <run> the plan's file name less `.plan.md`, through the one appender (lib/log.sh) and
-# at this library's clock. The log is the run's one store of asks: whatever an older run kept of them elsewhere is its
-# history, read with the log through the translation (lib/translate.sh) alone. Every session acting for the run, a helper's stand-in session
+# at this library's clock. The log is the run's one store of asks, and no other file is read for one. Every session acting for the run, a helper's stand-in session
 # included, writes there and reads there, so an ask answered in one session is closed for all of them. It lives under
 # record/, not tmp/, so an ask raised late in a run survives the tmp wipe and the close-out can still read it. A session
 # acting for no run keeps `.bionic/tmp/owed-<session>.state`, session-keyed like every other `<class>-<session>.state`

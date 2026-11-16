@@ -547,32 +547,6 @@ expect_eq "OW-5 close-out carries an old-shape handoff file: the human lines und
   "$CO_RC|$(ow_sec_of "$OWO_FILE" zebra)|$(ow_sec_of "$OWO_FILE" quince)|$(ow_sec_of "$OWO_FILE" mango)|$(ow_sec_of "$OWO_FILE" ferret)|$(ow_sec_of "$OWO_FILE" walnut)|$(ow_sec_of "$OWO_FILE" 'step: 4')|$(ow_sec_of "$OWO_FILE" 'w-T9')|$(ow_sec_of "$OWO_FILE" 'Bottom line')"
 
 # ============================================================
-section "§TOLERANT — wave-38 T15 (REQ-4 AC-4.4): a prose line in the debt ledger is skipped with a note; a missing epic table is added"
-# ============================================================
-# A line of debt.md that is no table row at all (it carries no ` | ` cell separator: prose a person or an agent wrote)
-# is skipped with one note line, `close-out: debt.md:<n> skipped — not a ledger row`, and never refuses; a table row
-# that does not parse still refuses (DEBT-LINES, AC-7.8). An epic plan with no shipped table gets the table's header
-# written before the row (4e q1.7–q1.12 and §78.3, restated).
-# fails-when: either refusal fires.
-TL_PROSE='The tree_count item above was raised in a review, and the record holds the reasoning.'
-PTL="$(mk_fixture tolerant1)"; advance_to "$PTL" 8
-debt_plant "$PTL"
-printf '%s\n' "$TL_PROSE" >> "$PTL/.bionic/docs/record/wave-01-fixture/debt.md"
-run_close "$PTL" check
-expect_eq "TL-1 AC-4.4 check over a ledger with a prose line exits 0 and does not say it would refuse" "0|no" \
-  "$CO_RC|$(contains "$CO_OUT" "debt-lines: WOULD REFUSE")"
-run_close "$PTL" run
-expect_eq "TL-2 AC-4.4 run completes (rc 0) and notes the skip once" "0|1" \
-  "$CO_RC|$(printf '%s\n' "$CO_OUT" | /usr/bin/grep -c '^close-out: debt.md:5 skipped — not a ledger row$' | tr -d ' ')"
-expect_nonempty "TL-3 precondition: the carry extractor reads the continuation's debt lines" "$(carry_section "$PTL/$CONT_REL" | /usr/bin/grep '^debt: ')"
-
-# an epic plan with no shipped table, beside a prose debt line: both tolerated in one run
-PTE="$(mk_fixture tolerant2)"; advance_to "$PTE" 8
-printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# epic-fx\n\n## SDLC State\n\ncurrent: 4\n\n## Notes\n\nNo waves table yet.\n' > "$PTE/$EPIC_REL"
-debt_plant "$PTE"; printf '%s\n' "$TL_PROSE" >> "$PTE/.bionic/docs/record/wave-01-fixture/debt.md"
-run_close "$PTE" run
-
-# ============================================================
 section "§SCORECARD — wave-38 T15 (D26): the continuation prints four lines, each against its target, and the sitrep sheet's pace, correctness and waste"
 # ============================================================
 # Under `## Scorecard`, fenced, exactly:
@@ -951,7 +925,7 @@ section "§READ-ORDER — close-out reads the hand-holds line last, over the win
 # ============================================================
 # close-out writes `delivered:` and wipes its rosters before its last read of the hand-holds line, so what it does is
 # inside the window and a release approval card ends nothing. The fixture: T1 landed (the start), a release approval
-# page, then an amend in the run's log and a decline in the fill ledger, both after the page. fails-when: the line is
+# page, then an amend and a decline in the run's log, both after the page. fails-when: the line is
 # read before delivered: (the card ends it, and both acts are outside), or the wipe of the rosters loses the amend.
 RO_P="$(mk_fixture read-order)"; advance_to "$RO_P" 8
 RO_PLAN="$RO_P/$PLAN_REL"; RO_REC="$RO_P/.bionic/docs/record/wave-01-fixture"; mkdir -p "$RO_REC"
@@ -959,7 +933,7 @@ ro_ago() { date -u -v-"$1"M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "-$1 m
 RO_C="$(printf 'e%.0s' $(seq 40))"
 printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=%s\n' "$RO_C" "$(ro_ago 20)" >> "$RO_REC/run.log"
 printf '# page\n\n## Replay\n\nrelease-approval/v1|plan=%s|head=%s|at=%s|decisions=1\n' "$RO_PLAN" "$RO_C" "$(ro_ago 10)" > "$RO_REC/release-approval-eeeeeeee.md"
-printf 'fill-ledger/v1|at=%s|session=fixture|turn=|current=8|state=decline|ceiling=6|width=|open=|free=|ready=T3|launched=|declined=no room|missed=0|idle=|room=|named=T3\n' "$(ro_ago 5)" > "$RO_REC/fill-ledger.log"
+printf 'run/v1|ev=stop|session=fixture|turn=|current=8|state=decline|ceiling=6|width=|open=|free=|ready=T3|launched=|declined=no room|missed=0|idle=|room=|at=%s\n' "$(ro_ago 5)" >> "$RO_REC/run.log"
 printf 'run/v1|ev=hand|by=fixture|name=w-ro|what=amend|why=widen the files|at=%s\n' "$(ro_ago 5)" >> "$RO_REC/run.log"
 expect_contains "RO-0 precondition: before close-out a window opening before both acts reads them" \
   "declines=1 · lifts=0 · amends=1 " "$(hh_report "$RO_P" --hand-holds --since "$(ro_ago 15)" | grep '^hand-holds: ')"
