@@ -198,28 +198,15 @@ line_hand_event() {  # <plan> <what> <why> [<key=value>...] -> 0 appended, 1 not
   line_event "$plan" hand "what=$what" "$@" "why=$w"
 }
 
-# THE RECORD, READ AS ONE. A run's landing facts are its log's (`run.log` in the record directory). A run not brought
-# forward may hold earlier landings in an older home the reader alone names (lib/reader.sh `reader_landing_record`);
-# nothing writes that home any more, so every line it holds was written before any line of the log, and it then the log
-# is the order the lines were written in. A run brought forward reads its log alone: the log already holds the older
-# home's translation, and reading both would count each earlier landing twice. Every reader of the record reads it
-# here, through `line_lines`, and asks `line_held` whether it stands; a home that is a link is read as absent, as the
-# readers that guard the record against a link always read it.
-_line_load_reader() {  # -> 0 once lib/reader.sh, the one namer of the older home, is loaded
-  declare -F reader_landing_record >/dev/null 2>&1 && return 0
-  # shellcheck source=/dev/null
-  . "$_LINE_LIB_DIR/reader.sh" >/dev/null 2>&1
-  declare -F reader_landing_record >/dev/null 2>&1
+# THE RECORD, READ AS ONE. A run's landing facts are its log's (`run.log` in the record directory), and no other file
+# of the record holds one. Every reader of the record reads it here, through `line_lines`, and asks `line_held` whether
+# it stands; a log that is a link is read as absent, as the readers that guard the record against a link always read it.
+line_lines() {  # <run log> -> the log's lines; rc 0 when it does not stand, else cat's
+  line_held "$1" || return 0
+  cat "$1"
 }
-# The reader is loaded in the caller's shell, never inside the `$( )` that asks it, so it is loaded once.
-line_lines() {  # <run log> -> the older home's lines while it is read, then the log's; rc 0 when neither stands, else cat's
-  local a="" b="$1"
-  ! _line_load_reader || a="$(reader_landing_record "${1%/*}" 2>/dev/null)" || a=""
-  { [ -f "$b" ] && [ ! -L "$b" ]; } || b=""
-  if [ -n "$a" ] && [ -n "$b" ]; then cat "$a" "$b"; elif [ -n "$a$b" ]; then cat "$a$b"; fi
-}
-line_held() {  # <run log> -> 0 when the log or the older home it is read with stands
-  { [ -f "$1" ] && [ ! -L "$1" ]; } || { _line_load_reader && reader_landing_record "${1%/*}" >/dev/null 2>&1; }
+line_held() {  # <run log> -> 0 when the log stands
+  [ -f "$1" ] && [ ! -L "$1" ]
 }
 
 # The fold's raw form, one tab-separated line per open entry, in record order:

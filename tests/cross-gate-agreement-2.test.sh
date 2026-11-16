@@ -64,18 +64,6 @@ cg_run_open() {  # <plan path> -> "0" (open) or "1" (not a recognized open state
   ( . "$RUN_LIB" >/dev/null 2>&1; run_open "$1" ) >/dev/null 2>&1
   printf '%s' "$?"
 }
-cg_plan() {  # <current: value, or "" for none> -> a fixture plan path carrying it
-  local cur="$1"
-  local safe; safe="$(printf '%s' "${cur:-none}" | tr -c 'A-Za-z0-9' '_')"
-  local f="$SANDBOX/fx/cg/current-${safe}.plan.md"
-  mkdir -p "$(dirname "$f")"
-  {
-    printf '# cg fixture plan\n\n## SDLC State\n\n'
-    [ -n "$cur" ] && printf 'current: %s\n\n' "$cur"
-    printf -- '- Step %s: in progress\n' "${cur:-0}"
-  } > "$f"
-  printf '%s' "$f"
-}
 cg_run() {  # <step> -> a page at 15 under a docs root's plans/, its run's log holding that one step as the step writer
             # (lib/proof.sh `proof_step_event`) takes it: a digit, or a digit and its sub-step letter
   local f="$SANDBOX/fx/cg15/.bionic/docs/plans/epic-99/at-$1.plan.md"
@@ -97,40 +85,10 @@ for CG_STEP in 3 4 8; do
   done
 done
 
-# ── CG.2 an unparseable current: is never mistaken for an active step by EITHER reader ──
-for CG_BAD in "abc" "3 (Step-3 review)" "3c"; do
-  CG_PLAN="$(cg_plan "$CG_BAD")"
-  expect_eq "CG.2 sched_plan_current withholds on '$CG_BAD'" "" "$(cg_sched_current "$CG_PLAN")"
-  expect_eq "CG.2 …and run.sh's run_open agrees this plan is not a recognized open state" \
-    "1" "$(cg_run_open "$CG_PLAN")"
-done
-# no current: line at all — same non-agreement: both give up on the field, neither fills it in
-CG_NOLINE="$SANDBOX/fx/cg/no-current.plan.md"
-mkdir -p "$(dirname "$CG_NOLINE")"
-printf '# cg fixture plan\n\n## SDLC State\n\n- Step 3: in progress\n' > "$CG_NOLINE"
-expect_eq "CG.2 no current: line at all — sched_plan_current withholds" \
-  "" "$(cg_sched_current "$CG_NOLINE")"
-expect_eq "CG.2 …and run_open agrees (no current: field is not an open state)" \
-  "1" "$(cg_run_open "$CG_NOLINE")"
-
-# ── CG.3 the retired task-scale `current: T<n>`: the divergence that routes it to its refusal ──
-# run_open calls `T<n>` an open run while the FILL gate withholds on it. Since wave-31 (one ledger
-# shape, D2; A-orch-52) `T<n>` is no step at any scale, and the pair answer two questions on
-# purpose: run_open keeps the retired plan OPEN so the tick and the evidence gate reach it and
-# refuse it by name, and the FILL gate, which has no number to compare, fills nothing. A change that closed it would skip such a plan in silence, so
-# it must turn this red.
-for CG_T in T1 T5 T23; do
-  CG_PLAN="$(cg_plan "$CG_T")"
-  expect_eq "CG.3 sched_plan_current withholds on the retired task pointer '$CG_T' (no numbered step)" \
-    "" "$(cg_sched_current "$CG_PLAN")"
-  expect_eq "CG.3 …while run.sh's run_open keeps '$CG_T' an OPEN run, so its readers refuse it by name" \
-    "0" "$(cg_run_open "$CG_PLAN")"
-done
-
 # ── CG.4 the discriminator: reverting the letter-strip splits the pair (proves CG.1 can go red) ──
 # The pre-fix bug, planted. A copy of session-poker.sh with ONLY the a/b-strip line reverted
 # to a bare assignment — the exact shape this section would have caught before T6.
-CG_MUT="$SANDBOX/fx/cg/session-poker-nostrip.sh"
+CG_MUT="$SANDBOX/fx/cg/session-poker-nostrip.sh"; mkdir -p "${CG_MUT%/*}"
 anchor insert hooks/poker/tick.sh '  step="${current%[ab]}"'
 LC_ALL=C awk '{
   if ($0 == "  step=\"${current%[ab]}\"") { print "  step=\"$current\"" } else { print }

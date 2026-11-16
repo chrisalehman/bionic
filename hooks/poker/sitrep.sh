@@ -249,10 +249,9 @@ handoff_render() {  # <composed> <section>
       if (sec == "Summary") { for (i = 1; i <= nk; i++) printf "2\t- %s: %s\n", K[i], ((i in V) && V[i] != "") ? V[i] : "(not given)"; exit }
       if (n == 0) printf "2\t- none.\n" }'
 }
-# THE REGISTER. Every ruling is a decision round of the run, the reader's `ledger` answer: over the run's log when it
-# has one, else over its design ledger, record/<wave>/design-ledger.md, as lib/translate.sh `translate_ledger` reads it,
-# the one parser of the ledger's headings (its verbs, its qualifier, its settled-by and its reply-less forms are said
-# there). A put is a round too, read only by the rounds count and the clocks, never by the register. An entry prints
+# THE REGISTER. Every ruling is a decision round of the run, the reader's `ledger` answer over the run's log. The
+# readers below are handed the path record/<wave>/design-ledger.md, which no verb writes and none opens: its directory
+# is the record, and the log beside it is what is read. A put is a round too, read only by the rounds count and the clocks, never by the register. An entry prints
 # `D<n> · <verb, or "<reply>" for a ruling, or <verb> "<reply>"> · <who> <date> · <title>`, a round with no title
 # `(untitled)`; `decisions` prints it and the resume recap's settled: lines are it, prefixed. With `puts`, a put is
 # an entry too, `D<n> · put · <who> <date> · <title>`. With `times`, every round is one tab-separated line,
@@ -262,23 +261,19 @@ _sitrep_lib() {  # -> the library directory: BIONIC_LIB, else the one beside thi
   local d c
   d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
   for c in "${BIONIC_LIB:-}" "$d/../../payload/scripts/lib" "$d/../../scripts/lib"; do
-    [ -n "$c" ] && [ -f "$c/reader.sh" ] && [ -f "$c/translate.sh" ] && { printf '%s\n' "$c"; return 0; }
+    [ -n "$c" ] && [ -f "$c/reader.sh" ] && { printf '%s\n' "$c"; return 0; }
   done
   return 1
 }
 _sitrep_ledger_facts() {  # <ledger> -> the reader's ledger answer for the ledger's run, one decision fact per round
   local led="$1" log="${1%/*}/run.log" lib
-  if ! declare -F translate_ledger >/dev/null 2>&1 || ! declare -F reader_q_ledger >/dev/null 2>&1; then
+  if ! declare -F reader_q_ledger >/dev/null 2>&1; then
     lib="$(_sitrep_lib)" || return 0
     # shellcheck source=/dev/null
-    { . "$lib/reader.sh" && . "$lib/translate.sh"; } >/dev/null 2>&1 || return 0
+    . "$lib/reader.sh" >/dev/null 2>&1 || return 0
   fi
-  # A run brought forward holds its rounds in its log; until then the ledger holds those written before the decisions'
-  # writer moved to the log, and the log those after (lib/reader.sh `reader_events`), so the ledger is read first.
-  if [ -f "$log" ] && [ ! -L "$log" ] && reader_brought_at "${log%/*}"; then ( reader_events() { cat "$log"; }; reader_q_ledger "$led" )
-  elif { [ -f "$led" ] && [ ! -L "$led" ]; } || { [ -f "$log" ] && [ ! -L "$log" ]; }; then
-    ( reader_events() { [ ! -f "$led" ] || [ -L "$led" ] || translate_ledger "$led" events; [ ! -f "$log" ] || [ -L "$log" ] || cat "$log"; }
-      reader_q_ledger "$led" ); fi
+  [ -f "$log" ] && [ ! -L "$log" ] || return 0
+  ( reader_events() { cat "$log"; }; reader_q_ledger "$led" )
 }
 decisions_list() {  # <ledger> [puts|times] -> one line per entry: D<n> · "<reply>" · <who> <date> · <title>, in the ledger's order
   # A round in the log holds the appender's UTC instant; it is read on the local clock a ledger heading names.
@@ -483,24 +478,17 @@ decision_waiters() {  # <plan> <D<n>> [<root>] -> one line per waiter: a task id
   return 0
 }
 
-# decisions_all <docs root> -> every run's entries, each line keyed `<wave> `, waves in slug order; a ledger with no
-# entry in the grammar is named once; every ADR (adrs/*/adr-*.md) follows its wave's entries, keyed by its
+# decisions_all <docs root> -> every run's entries, each line keyed `<wave> `, waves in slug order; every ADR (adrs/*/adr-*.md) follows its wave's entries, keyed by its
 # frontmatter `wave:` (its directory when it has none), as `ADR-<n> · <status> · <title>`.
 decisions_all() {
-  local docs="$1" f slug out tab seen=""
+  local docs="$1" f slug out tab
   tab="$(printf '\t')"
   {
-    for f in "$docs"/record/*/design-ledger.md "$docs"/record/*/run.log; do
+    for f in "$docs"/record/*/run.log; do
       [ -f "$f" ] && [ ! -L "$f" ] || continue
       slug="${f%/*}"; slug="${slug##*/}"
-      case " $seen " in *" $slug "*) continue ;; esac
-      seen="$seen $slug"; f="${f%/*}/design-ledger.md"
-      out="$(decisions_list "$f")"
-      if [ -n "$out" ]; then
-        printf '%s\n' "$out" | awk -v s="$slug" '{ printf "%s\t1\t%06d\t%s %s\n", s, NR, s, $0 }'
-      elif [ -f "$f" ]; then
-        printf '%s\t1\t000000\t%s · no register entries (a ledger written before D24)\n' "$slug" "$slug"
-      fi
+      out="$(decisions_list "${f%/*}/design-ledger.md")"
+      [ -z "$out" ] || printf '%s\n' "$out" | awk -v s="$slug" '{ printf "%s\t1\t%06d\t%s %s\n", s, NR, s, $0 }'
     done
     find "$docs/adrs" -maxdepth 2 -type f -name 'adr-*.md' 2>/dev/null | while IFS= read -r f; do
       [ -L "$f" ] && continue
@@ -1703,7 +1691,7 @@ sitrep_blocked_on_you() {
 }
 
 # sitrep_idle_minutes <plan> -> the run's idle minutes, from its `stop` events as the reader reads them (lib/line.sh
-# `_lr_events`: the log, or an older run's fill ledger translated to the same events); nothing, exit 2, when they
+# `_lr_events`: the log); nothing, exit 2, when they
 # cannot be read. Read from times code wrote with the clock, never from the plan's text: the events are folded by turn
 # (the last of a turn wins), ordered by `at=`, and one whose idle= is non-empty owns the interval to the next; the last
 # one owns the interval to now only while the run is open. An interval counts once, however many rows idled in it. No
@@ -2013,9 +2001,10 @@ sitrep_tick_line() {
           case "$HO_S" in
             State) ho_state ;;
             Decisions)
-              if [ "$HO_MODE" != none ] && [ ! -L "$HO_LEDGER" ] && [ -n "$(decisions_list "$HO_LEDGER")" ]; then
+              if [ "$HO_MODE" != none ] && [ -n "$(decisions_list "$HO_LEDGER")" ]; then
                 handoff_render "$HO_COMP" Decisions | awk -F'\t' '$2 != "- none."'
-                printf '2\t- every ruling of this run: session-poker.sh decisions prints them, from %s and the run'"'"'s log\n' "${HO_LEDGER#"$HO_ROOT"/}"
+                HO_LOG="${HO_LEDGER%/*}/run.log"
+                printf '2\t- every ruling of this run: session-poker.sh decisions prints them, from the run'"'"'s log, %s\n' "${HO_LOG#"$HO_ROOT"/}"
               else
                 handoff_render "$HO_COMP" Decisions
               fi ;;
@@ -2265,7 +2254,8 @@ sitrep_tick_line() {
     fi
     DC_OUT="$(decisions_list "$DC_LEDGER")"
     if [ -z "$DC_OUT" ]; then
-      say "no ruling in ${DC_LEDGER#"$REPO_REAL"/} or in the run's log — this run has recorded no ruling"
+      DC_LOG="${DC_LEDGER%/*}/run.log"
+      say "no ruling in the run's log, ${DC_LOG#"$REPO_REAL"/} — this run has recorded no ruling"
       exit 1
     fi
     printf '%s\n' "$DC_OUT"
@@ -2402,9 +2392,9 @@ sitrep_tick_line() {
     # The recap.
     RS_LEDGER="$RS_DOCS/record/$(proof_plan_slug "$RS_PLAN")/design-ledger.md"
     RS_SET=""
-    [ -L "$RS_LEDGER" ] || RS_SET="$(decisions_list "$RS_LEDGER")"
+    RS_SET="$(decisions_list "$RS_LEDGER")"; RS_LOG="${RS_LEDGER%/*}/run.log"
     if [ -n "$RS_SET" ]; then printf '%s\n' "$RS_SET" | sed 's/^/settled: /'
-    else printf 'settled: none — no ruling in %s or in the run'"'"'s log\n' "${RS_LEDGER#"$REPO_REAL"/}"; fi
+    else printf 'settled: none — no ruling in the run'"'"'s log, %s\n' "${RS_LOG#"$REPO_REAL"/}"; fi
     RS_OWED="$( { bind_sessions "$RS_PLAN" 2>/dev/null; printf '%s\n' "$SESSION_ID"; } | awk 'NF && !s[$0]++' \
       | while IFS= read -r RS_S; do OWED_ROOT="$REPO_REAL" OWED_SID="$RS_S" owed_list 2>/dev/null; done | awk -F'\t' 'NF && !k[$1]++')"
     # the sheet's own reader of the open decisions: a decision put and not ruled is open here as there, and owed once
@@ -2500,7 +2490,7 @@ sitrep_tick_line() {
     RS_AT="$(handoff_line "$RS_FILE" instant)"; RS_AT="${RS_AT#instant: }"
     [ -n "$RS_AT" ] || { RS_AT="$(handoff_line "$RS_FILE" written)"; RS_AT="${RS_AT#written: }"; }
     # What landed after the handoff was written: the run's published rows with an instant past it, in the order
-    # they landed, from the fold this shell holds (an older plan's landed lines come through the translation).
+    # they landed, from the fold this shell holds.
     if { [ "$_SITREP_FACTS_PLAN" = "$RS_PLAN" ] || _sitrep_hold "$RS_PLAN"; } && RS_PUB="$(sitrep_facts "$RS_PLAN" published)"; then
       RS_LANDED="$(printf '%s\n' "$RS_PUB" | awk -F'|' -v at="$RS_AT" "$_READER_AWK"'
         { r = line_kv("row"); t = line_kv("at") }

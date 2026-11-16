@@ -280,11 +280,11 @@ if cr_reached "WINDOW-0"; then
     "until ${CW_DEL/%:00Z/Z} (delivered:)" "$(printf '%s\n' "$CW_OUT" | grep '^hand-holds window: ')"
   CW_D0="$(printf '%s\n' "$CW_OUT" | grep '^hand-holds: ' | sed -n 's/.* declines=\([0-9]*\) .*/\1/p')"
   CW_AFTER="$(date -u -j -v+1S -f '%Y-%m-%dT%H:%M:%SZ' "$CW_CARD" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "$CW_CARD + 1 second" +%Y-%m-%dT%H:%M:%SZ)"
-  cp "$CR_REC/fill-ledger.log" "$WORLD_ROOT/fill-ledger.kept" 2>/dev/null || : > "$WORLD_ROOT/fill-ledger.kept"
-  printf 'fill-ledger/v1|at=%s|session=replay|turn=|current=9|state=decline|ceiling=6|width=|open=|free=|ready=T9|launched=|declined=no room|missed=0|idle=|room=|named=T9\n' "$CW_AFTER" >> "$CR_REC/fill-ledger.log"
+  cp "$CR_REC/run.log" "$WORLD_ROOT/run.log.kept"
+  printf 'run/v1|ev=stop|session=replay|turn=|current=9|state=decline|ceiling=6|width=|open=|free=|ready=T9|launched=|declined=no room|missed=0|idle=|room=|at=%s\n' "$CW_AFTER" >> "$CR_REC/run.log"
   expect_eq "WINDOW-2 a decline a second after the card is inside the window: the count reads one decline more" \
     "$(( ${CW_D0:-0} + 1 ))" "$(cr_hh | grep '^hand-holds: ' | sed -n 's/.* declines=\([0-9]*\) .*/\1/p')"
-  cp "$WORLD_ROOT/fill-ledger.kept" "$CR_REC/fill-ledger.log"
+  cp "$WORLD_ROOT/run.log.kept" "$CR_REC/run.log"
 fi
 
 # ============================================================

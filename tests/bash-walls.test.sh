@@ -654,14 +654,14 @@ git -C "$R_RU" reset -q --hard "$H_RU"
 expect_eq "STANDING-3: a failing review after the passing one at the same head: the passing one no longer stands" "REFUTED" "$(ru_verdict)"
 
 # §RULED-ONE — one body: the predicate is defined once, and no file outside walls.sh and the reader's own parses the
-# user's confirmation: the reader reads it from an older plan's block and translates it onto the criterion's event.
+# user's confirmation: the reader's is the approval naming the criterion.
 RU_WALLS="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/walls.sh"
 expect_eq "RULED-ONE: matrix_row_ruled has exactly one definition in walls.sh" "1" \
   "$(/usr/bin/grep -c '^matrix_row_ruled()' "$RU_WALLS")"
 RU_UC="$(/usr/bin/grep -rn 'user-confirmed' "${BIONIC_HOOKS_DIR}" "${BIONIC_HOOKS_DIR}/../payload/scripts")"
 expect_contains "RULED-ONE-d: …the search reads walls.sh's own parser of the key" "lib/walls.sh:" "$RU_UC"
 expect_eq "RULED-ONE-c: …and nothing names user-confirmed outside walls.sh and the reader's files, no writer of it either" "" \
-  "$(printf '%s\n' "$RU_UC" | /usr/bin/grep -v 'walls.sh' | /usr/bin/grep -vE 'lib/(reader|translate)\.sh:')"
+  "$(printf '%s\n' "$RU_UC" | /usr/bin/grep -v 'walls.sh' | /usr/bin/grep -vE 'lib/reader\.sh:')"
 
 # ---------------------------------------------------------------------------
 section "§AWAITS — at 15 a criterion the person confirms, proved and not yet confirmed, owes the confirmation at 8 and nothing before"

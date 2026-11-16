@@ -55,12 +55,12 @@ No SDLC State section here." > /dev/null
 
 section "Section 2b: a plan declares 15; one at 14 on disk is a document; the two gates agree"
 
+# Bound, since the walk admits a page at 15 alone: the session's binding is how a page at 13 reaches the commit.
 h2v=$(make_home)
-write_plan "$h2v" "${FM/version: 14/version: 13}
+bound_marker "$h2v" "$EG_SID" "$(write_plan "$h2v" "${FM/version: 14/version: 13}
 ## SDLC State
-current: 4" v.plan.md > /dev/null
+current: 4" v.plan.md)"
 expect_block "a plan at 13 is refused, the fix naming the version a plan is written at" "$h2v" 'git commit -m "x"' "set 'canonical_sdlc_version: 15'"
-# Bound, since the walk admits no page at 13 that holds no state section: the session's binding is how one reaches here.
 h2s=$(make_home)
 bound_marker "$h2s" "$EG_SID" "$(write_plan "$h2s" "${FM/version: 14/version: 13}
 # a plan" s.plan.md)"
@@ -68,17 +68,16 @@ expect_block "a bound plan at 13 with no state section is refused at the commit 
 for v in 13 14 15; do
   h=$(make_home); git -C "$h" init -q; p=$(write_plan "$h" "${FM/version: 14/version: $v}
 ## SDLC State
-current: 4" "v$v.plan.md"); run_hook "$h" 'git commit -m "x"'
+current: 4" "v$v.plan.md"); bound_marker "$h" "$EG_SID" "$p"; run_hook "$h" 'git commit -m "x"'
   w=$(jq -n --arg p "$p" --arg c "$(cat "$p")" --arg s "$EG_SID" '{session_id: $s, hook_event_name: "PreToolUse", tool_name: "Write", tool_input: {file_path: $p, content: $c}}' \
     | HOME="$h" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh" 2>&1 >/dev/null | grep -c 'unsupported version' || true)
   case "$v" in 13) expect_eq "the write hook refuses 13 for its version" 1 "$w" ;; 14) expect_eq "the write hook says nothing of a plan at 14 on disk" 0 "$w" ;; esac
   expect_eq "the write hook and the commit gate agree on version $v" "$w" "$(grep -c 'unsupported sdlc version' <<< "$HOOK_STDERR" || true)"
 done
-# The plan builder writes either page: asked for 15, the version 15, no state section, and the log the reader reads.
-for v in 14 15; do p=$(plan_fixture --at $v --current 5 "$EG_PF_DIR/plans/epic-99-fixture/wave-0$v.plan.md" wave "$(eg_pf_row T1 dw active)")
-  PF_GOT[$v]="$(grep -c -e "^canonical_sdlc_version: $v\$" -e '^## SDLC State' "$p")|$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$p" status T1 | head -1)"; done
-expect_eq "plan_fixture at 14 holds the version and its state section; at 15 the version alone, and the row's dispatch in its log" \
-  "2|state=dispatched 1|state=dispatched" "${PF_GOT[14]} ${PF_GOT[15]}"
+# The plan builder writes a page at 15: the version, no state section, and the log the reader reads.
+p=$(plan_fixture --current 5 "$EG_PF_DIR/plans/epic-99-fixture/wave-015.plan.md" wave "$(eg_pf_row T1 dw active)")
+expect_eq "plan_fixture writes the version alone, and the row's dispatch in its log" "1|state=dispatched" \
+  "$(grep -c -e '^canonical_sdlc_version: 15$' -e '^## SDLC State' "$p")|$(bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$p" status T1 | head -1)"
 
 # ============================================================
 # Section 9: a criterion is owed at the step whose task proves it
