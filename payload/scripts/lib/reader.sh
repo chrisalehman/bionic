@@ -249,12 +249,21 @@ reader_q_landed() {  # <plan> [row] -> each landing, of <row> when named
     ev() == "published" && (r == "" || line_kv("row") == r)'
 }
 
+# An ask's round, by key and round (absent, 1); a decision has one key, approve:D<n> read as decide:D<n>.
+_READER_ASK_AWK='
+function ask_round(   k, r) { k = line_kv("key"); if (k ~ /^approve:D[0-9]+$/) k = "decide:" substr(k, 9); r = line_kv("round")
+  return k SUBSEP (r == "" ? 1 : r) }
+'
+
 reader_question asks list reader_q_asks
-reader_q_asks() {  # <plan> -> each ask still open: no reply on it, and no approval of its `approve:` key since
-  reader_facts "$1" | awk -F'|' "$_READER_AWK"'
+reader_q_asks() {  # <plan> -> each ask still open: its round open in the rounds, and no approval of its `approve:` key since
+  # Whether a round is closed is the rounds' one rule (`reader_ask_rounds`): this asks it, then adds the approval.
+  { reader_ask_rounds "$1"; printf '\034\n'; reader_facts "$1"; } | awk -F'|' "$_READER_AWK$_READER_ASK_AWK"'
+    $0 == "\034" { facts = 1; next }
+    !facts { if (line_kv("state") == "open") round_open[ask_round()] = 1; next }
     ev() == "ask" {
       id = line_kv("key") SUBSEP line_kv("round")
-      if (line_kv("reply") != "") { delete open[id]; next }
+      if (!(ask_round() in round_open)) { delete open[id]; next }
       if (!(id in seen)) { seen[id] = 1; ord[++n] = id }
       open[id] = $0
     }
@@ -265,8 +274,9 @@ reader_q_asks() {  # <plan> -> each ask still open: no reply on it, and no appro
 # AN ASK'S ROUNDS, WHOLE. The fold keeps an ask's latest event, so it loses when the round opened, when it was sent and
 # answered; this folds every event of a round, by key and round (absent, 1), into one line, in the order the rounds
 # opened. Each act sets what it carries: sent=, title=, prompt=, an answer at its instant, and the closer's reply=,
-# which closes the round. A decision has one key, approve:D<n> read as decide:D<n>. No approval closes a round here:
-# a round closes by its reply alone, so the asks library's list is the asks its writers left open.
+# which closes the round: this is the one rule of a round closed, which the open list (`reader_q_asks`) asks. No
+# approval closes a round here: a round closes by its reply alone, so the asks library's list is the asks its writers
+# left open.
 #   run/v1|ev=ask|key=<k>|state=open|sent=<ISO or ->|at=<opened>|title=<t>|prompt=<p>|round=<n>[|answer=<w>|answered=<ISO>|event=<e>]
 #   run/v1|ev=ask|key=<k>|state=closed|by=<reply>|at=<closed>|opened=<ISO or empty>|sent=<ISO or ->|round=<n>[|answer=…]
 # Given a plan, the run's ask events; given `-`, the lines on stdin, which is how a session's own store, no run's, is
@@ -275,9 +285,8 @@ reader_q_asks() {  # <plan> -> each ask still open: no reply on it, and no appro
 reader_ask_rounds() (  # <plan|-> -> one line per round; 2 when the plan's events cannot be read
   set -o pipefail
   { if [ "${1:-}" = - ]; then cat; else reader_events "$1"; fi; } \
-  | awk -F'|' "$_READER_AWK"'
-    ev() == "ask" { k = line_kv("key"); if (k ~ /^approve:D[0-9]+$/) k = "decide:" substr(k, 9); r = line_kv("round")
-      i = k SUBSEP (r == "" ? 1 : r); a = line_kv("at")
+  | awk -F'|' "$_READER_AWK$_READER_ASK_AWK"'
+    ev() == "ask" { i = ask_round(); a = line_kv("at")
       if (!(i in ST)) { ord[++m] = i; ST[i] = "open"; SE[i] = "-" }
       # opened is the first act that is no close: an untimed opening a home gives is sorted after the close it precedes
       if (!(i in OS) && line_kv("reply") == "") { OS[i] = 1; OP[i] = a }
@@ -314,6 +323,22 @@ _READER_DROP_AWK='
 ev() == "drop" { _dropped[line_kv("row")] = 1 }
 ev() == "published" { _landed[line_kv("row")] = 1 }
 function dropped(r) { return (r in _dropped) && !(r in _landed) }
+'
+
+# A ROW'S STATE IS FOLDED HERE ONCE, and `status` and the fill (lib/units.sh `_units_live`) put this before their own
+# program, as they put the drop rule. Per row, in fact order: `_row_state` the latest of dispatched, candidate, ready,
+# returned, stalled and landed; `_row_held` the latest of a timed launch (active) and a landing, the scheduler's own;
+# `_row_name` the timed launch's name; `_row_dispatch` the last dispatch line; `_row_commit` the landing's commit.
+_READER_ROW_AWK='
+{ _r = line_kv("row"); _e = (_r == "") ? "" : ev() }
+_r != "" && !(_r in _row_seen) { _row_seen[_r] = 1; _row_order[++_rows] = _r }
+_e == "dispatch" { _row_dispatch[_r] = $0 }
+# an untimed dispatch: the act that brought an older run forward to 15 wrote one per agent cell, after every timed line,
+# so it launches nothing and sets the state only while no other fact of the row stands
+_e == "dispatch" && line_kv("at") == "" { if (!(_r in _row_state)) _row_state[_r] = "dispatched"; _e = "" }
+_e == "dispatch" { _row_state[_r] = "dispatched"; _row_held[_r] = "active"; _row_name[_r] = line_kv("name") }
+_e == "published" { _row_state[_r] = _row_held[_r] = "landed"; _row_commit[_r] = line_kv("commit") }
+_e == "candidate" || _e == "ready" || _e == "returned" || _e == "stalled" { _row_state[_r] = _e }
 '
 
 _reader_of() {  # <plan> <type> [<field> <value>] -> the standing facts of <type>, of <field>=<value> when a value is given
@@ -412,26 +437,18 @@ reader_question status value reader_q_status
 reader_q_status() {  # <plan> <row> -> state= of the row, then its dispatch contract, its tree and its landing commit
   # state is the latest of dispatched, candidate, ready, returned, stalled and landed; pending when the
   # log holds none. A row the plan's Tasks table lacks has no status, so a wrong id never reads as pending.
-  # A dispatch is its row's first fact, so one with no instant (an older table's agent cell, placed after
-  # every timed line) sets the state only while no other fact of the row stands. A dropped row is dropped
-  # whatever else stands of it.
+  # The state is the one row fold's (`_READER_ROW_AWK`). A dropped row is dropped whatever else stands of it.
   _reader_needs status '<row>' "${2:-}" || return 2
   plan_read_row "$1" Tasks id "$2" >/dev/null || return 1
-  reader_facts "$1" | awk -F'|' -v r="$2" "$_READER_AWK$_READER_DROP_AWK"'
+  reader_facts "$1" | awk -F'|' -v r="$2" "$_READER_AWK$_READER_DROP_AWK$_READER_ROW_AWK"'
     line_kv("row") != r { next }
-    { e = ev() }
-    e == "published" { s = "landed"; c = line_kv("commit") }
-    # an untimed dispatch: the act that brought an older run forward to 15 wrote one per agent cell, after every timed line
-    e == "dispatch" && line_kv("at") == "" && s != "" { e = "" }
-    e == "dispatch" || e == "candidate" || e == "ready" || e == "returned" || e == "stalled" { s = (e == "dispatch") ? "dispatched" : e }
-    ev() == "dispatch" { d = $0 }
-    e == "tree" { t = line_kv("path"); b = line_kv("branch"); o = line_kv("base") }
+    ev() == "tree" { t = line_kv("path"); b = line_kv("branch"); o = line_kv("base") }
     END {
-      if (dropped(r)) s = "dropped"
+      s = dropped(r) ? "dropped" : _row_state[r]
       print "state=" (s == "" ? "pending" : s)
-      n = split(d, p, "|"); for (i = 2; i <= n; i++) if (p[i] !~ /^(ev|row|at)=/) print p[i]
+      n = split(_row_dispatch[r], p, "|"); for (i = 2; i <= n; i++) if (p[i] !~ /^(ev|row|at)=/) print p[i]
       if (t != "") { print "tree=" t; print "branch=" b; print "base=" o }
-      if (c != "") print "commit=" c
+      if (_row_commit[r] != "") print "commit=" _row_commit[r]
     }'
 }
 
