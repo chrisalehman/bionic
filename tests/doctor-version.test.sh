@@ -851,10 +851,12 @@ expect_match "76: …and the refusal on stderr lists NATIVE among the valid name
   "doctor.sh: unknown section 'NOPE'*NATIVE*" "$(cat "$DOCTOR_ERR_FILE" 2>/dev/null)"
 
 section "Section V14: a plan at version 14 is an older run's document, and the doctor says nothing of it"
-. "$(dirname "$0")/lib/plan-fixture.sh"
-V14="$(mktemp -d -p "$TMP")"; ( cd "$V14" && git init -q . ); V14P="$V14/.bionic/docs/plans/epic-99-fixture"
-plan_fixture --at 14 "$V14P/wave-01-open.plan.md" wave >/dev/null
-plan_fixture --at 14 --current 9 "$V14P/wave-02-closed.plan.md" wave >/dev/null
+V14="$(mktemp -d -p "$TMP")"; ( cd "$V14" && git init -q . ); V14P="$V14/.bionic/docs/plans/epic-99-fixture"; mkdir -p "$V14P"
+v14_page() {  # <path> <current> -> an older run's page: version 14 in the header, its step in a state section
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: bugfix\nrigor: single\nscale: wave\n---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: %s\n' "$2" > "$1"
+}
+v14_page "$V14P/wave-01-open.plan.md" 4
+v14_page "$V14P/wave-02-closed.plan.md" 9
 bash -c '. "$1/proof.sh" && proof_step_event "$2" 9 delivered=x' _ "$PAYLOAD/scripts/lib" "$V14P/wave-02-closed.plan.md" >/dev/null 2>&1
 V14_OUT="$(run_doctor_only PROJECT "$HOME2" "$V14")"
 expect_match "V14.1: the PROJECT table over two plans at 14, one open and one closed, reads no active run" \

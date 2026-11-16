@@ -55,7 +55,6 @@ section "§SHAPE: the page is the prototype's, in plain text, recorded with its 
 # fails-when: a section is missing or out of order; a markdown label, a record path or a quotation is printed; the
 # old name prints; a finding line does not open on its severity code and three spaces; a decision does not say the
 # recommendation before the default; the record is not written or does not open on the page.
-FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 # The gate admits the run at 6 to 8 while the unrun criterion is the close's; owed now, it is the one refusal, the
 # card's own decision.
 fc_plan "$FC_GOOD"
@@ -121,7 +120,6 @@ section "§TRIGGERS: a finding is a decision only on a criterion miss or a recom
 # ============================================================
 # fails-when: the carried S3 is a decision; the criterion miss is not; a finding naming the missed criterion is not
 # shown awaiting that decision; a recommendation against the default does not make the finding a decision.
-FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 fc_plan "$FC_GOOD" "" fc_owed_now
 fc_page
 expect_contains "TRIG-1 the criterion miss is a decision" "1. AC-1.2, not run on this release" "$(fc_under Decisions)"
@@ -169,7 +167,6 @@ section "§NO-WAIVER: no surface offers waiving the regression (AC-7.3; D16)"
 # ============================================================
 # fails-when: a regression waiver is a decision, a default, a table line or a phrase of the page; a head with no
 # green whole run renders.
-FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 fc_plan "$FC_GOOD" "" fc_owed_now
 fc_owe waive:regression
 fc_page
@@ -195,7 +192,6 @@ expect_absent "NW-4b …offering no waiver" "waive regression" "$FC_OUT$FC_ERR"
 # ============================================================
 section "§EARLY: the page refuses CARD-EARLY on each of the three facts, and the tick says the same line (AC-1.2; D20)"
 # ============================================================
-FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 # fails-when: the page renders while a reader row is open, an owed reading is unregistered at the head, or the
 # advance to 6, 7 or 8 checks red; the refusal names another reason; a writer row or an acked reader trips it.
 fc_plan "$FC_GOOD"
@@ -312,7 +308,6 @@ expect_eq "EARLY-9c …putting the release approval and the merge approval" "app
 # ============================================================
 section "§PREVIEW: --preview renders an early run's page and records nothing"
 # ============================================================
-FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 # fails-when: the preview refuses, records a page or opens an approval item, or does not say why the run is early.
 fc_plan "$FC_GOOD" '/structure-whole/d'
 expect_eq "PREV-0 precondition: the page stands at 15 with no State, and the run's log is written" "15|0|yes" \
@@ -352,7 +347,6 @@ new_roster "$RFC"
 # ============================================================
 section "§AGREE: the decisions are the owed items, the unproved rows and the findings recommended against (D7, D19)"
 # ============================================================
-FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 # fails-when: the page offers an item the record does not owe, or leaves one out. The unrun row is owed now
 # (fc_owed_now), so the unproved rows are a source the card draws from.
 fc_plan "$FC_GOOD" "" fc_owed_now
@@ -391,7 +385,6 @@ expect_eq "AGREE-4 a finding recommended against joins the set" "same" "$(fc_agr
 # ============================================================
 section "§REGISTER: the card's waivers are the run's asks, whichever session of the run raised them (AC-6.6)"
 # ============================================================
-FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 # fails-when: a waiver another session of the run raised has no decision on the card. A question failing at the head
 # is settled by the card's own check whichever session holds its ask, so here the question passes at the head and only
 # the run's register owes its waiver, as when a close-out preflight raised it on a failing reading at an earlier head.
@@ -424,7 +417,6 @@ section "§REPLY: all default and all recommended replay into their verbs with t
 # ============================================================
 # fails-when: a default or a recommendation is replayed into another verb or with other words; a reply that is not
 # one of the two, words the user never typed, a stale page or no page at all writes a byte of the plan.
-FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 fc_plan "$FC_GOOD" "" fc_owed_now
 fc_page
 expect_contains "REPLY-0 precondition: the render opened the person's approval items" "approve:release" "$(fc_owed)"
@@ -632,7 +624,6 @@ fc_typed "$FC_WD" "$FC_WR"
 section "§LEGACY: a page written under the card's old name is still replied to; the alias writes the new page"
 # ============================================================
 # fails-when: a record written before the rename can no longer be answered, or the alias writes a page under the old stem.
-FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 fc_plan "$FC_GOOD" "" fc_owed_now
 ( cd "$RFC" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" "${RN_W}-results" "$PFC" ) > "$TMPROOT/fc.out" 2> "$TMPROOT/fc.err"; LG_RC=$?
 expect_eq "LEGACY-1 the old verb renders the card (exit 0), says the new name once, and writes the new stem's page" \
@@ -654,7 +645,6 @@ rm -f "$FC_REC/${RN_W}-results"-*.md
 # ============================================================
 section "§BORN: two fix rows born of different questions' findings render the page with no re-read (AC-11.1)"
 # ============================================================
-FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 # fails-when: the page prints `CARD-EARLY — <q> unregistered` after born rows alone; the fixed findings are not
 # shown fixed by their rows.
 fc_record structure structure piece 'finding: 1 S3 off lib/x.sh:1 the x writer repeats the y writer'
@@ -704,7 +694,6 @@ section "§POST: a reader row past the landed release keeps the card early until
 # early, or puts a waiver, once the piece readings are registered at the fix's landing.
 # The readers' rows carry no dispatch: a reader not yet launched reads pending to the reader and the fill alike. An
 # active reader is one the dispatch writer launched, its event appended to the run's log after the builder.
-FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 FC_F7="$(s57_commit "$RFC" lib/x.sh 'T4: the fix after the release')"
 FC_P8="${FC_F7:0:8}"
 fc_published T4 "$FC_F7" > "$FC_SEED"
@@ -770,7 +759,6 @@ section "§HANDHOLDS: the card prints the hand-holds line from the last build la
 # last build landing counted; or the report stops at the card.
 # The fixture's landing record holds the build row's queue landing at 10:00; its fill ledger a decline before it and one after.
 # Each is the run's own event, a queue landing and two stops, which the builder writes into the run's log.
-FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-12T10:00:00Z\n' "$FC_C" > "$FC_SEED"
 printf 'run/v1|ev=stop|session=fixture|turn=|current=4|state=decline|ceiling=6|width=|open=|free=|ready=%s|launched=|declined=no room|missed=0|idle=|room=|named=%s|at=2026-10-12T%s:00:00Z\n' \
   T1 T1 09 T2 T2 11 >> "$FC_SEED"
@@ -812,7 +800,6 @@ rm -f "$FC_SEED" "$FC_REC"/release-approval-*.md
 # ============================================================
 section "§RATIO: the card prints the release check's test-ratio line once, among the facts it states about the head"
 # ============================================================
-FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 # The line is the check's own, read from the log of the plan's newest release-check proof, so the page and the check
 # cannot differ. fails-when: the page lacks the line, prints it twice, differs from the check's output at the same
 # head, moves when the log does not, or prints a number when no check has run.
@@ -872,16 +859,16 @@ rm -f "$RFC/.bionic/config.yaml" "$FC_REC"/release-check-*.log "$FC_REC"/release
 # ============================================================
 section "§STEP0: card.sh step0 renders the configuration card in the 1.20.0 shape, ending on its question, and owes its reply (AC-20.1, AC-20.2; D3, D23)"
 # ============================================================
-# Its page is its own, written at 14 and at current: 0, never fc_plan's: the configuration card is drawn before the run
+# Its page is its own, written at 15 and with no step event, never fc_plan's: the configuration card is drawn before the run
 # has a step to advance, and step0 asks no gate, so the version the builder carries the run to is not this card's.
 {
-  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: double\nscale: wave\n'
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 15\nintent: build\nrigor: double\nscale: wave\nworking-branch: wave/01-fixture\n'
   printf 'scale-recommendation: "Several rows in one session. The ask names five files."\nregression: yes\n'
   printf 'surface_type: cli-plugin\nmulti_agent: true\ndeploy_target: n/a\ncleanup_on_finish: true\nuse_worktree: false\n'
   printf 'walk: exempt\ndesign-interview: true\nmodel_plan: orchestrator=claude-fable-5-1\nseed: ideas/seed.md\n---\n'
-  printf '# plan\n\n## Goal\n\nConfigure the fixture run, and nothing else.\n\n## SDLC State\n\ncurrent: 0\nworking-branch: wave/01-fixture\n'
+  printf '# plan\n\n## Goal\n\nConfigure the fixture run, and nothing else.\n'
 } > "$PFC"
-rm -f "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/asks.state" "$FC_REC/run.log"
+rm -f "$RFC/.bionic/tmp/owed-$SID.state" "$FC_REC/run.log"
 bind_marker "$RFC" "$PFC"
 fc_card step0
 expect_eq "STEP0-1 AC-20.1 card.sh step0 <plan> exits 0, nothing on stderr, under the card's title" \
@@ -895,7 +882,6 @@ expect_eq "STEP0-7 every line of the card is within the shared 100 columns" "0" 
 # ============================================================
 section "§CARRY: a carry the run chose is the run's ask until the release approval card's reply rules it"
 # ============================================================
-FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 # A reading's S3 on finding is deferred by the severity table and moved by no person: the run carries it. The acting
 # render's disposition opens `carry:<record>#<n>`, the page records the carries it puts, and the reply that answers the
 # page closes each. fails-when: the reply leaves the carry open on the run's register.
@@ -970,7 +956,6 @@ section "§STALE: a release approval the head has moved past is put again on the
 # stale merge approval is left off the card; the reply replaces a first line or writes no second one; current 8
 # --check stays red after it; a second approval at the same head is admitted; a plan with nothing landed since its
 # approval is offered a renewal.
-FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 FC_APP="$(printf 'run/v1|ev=approval|key=%s|by=Dana Fixture|head=%s|said=%s|at=2026-10-12T14:00:00Z\n' release "$FC_R" 'ship it' merge "$FC_R" 'merge it')"
 fc_plan "$FC_GOOD
 $FC_APP" "" fc_ord
@@ -1063,7 +1048,6 @@ section "§OWED-LATER: a row owed at a later step is neither proved nor a decisi
 # close row (step 9) and a third criterion pending under it, as a planner writes them.
 # fails-when: the row owed by the close is put under Decisions or opened as row:<AC>, or the line does not name it, or a
 # row whose task is a Step-4 row is let off the card. The fixture's pending criterion is owed now (fc_owed_now), the unrun row beside it.
-FC_VERSION=15   # the run at 15 (release-approval.prelude.sh)
 fc_ol_rows() {  # <page> -> the close row T4 (step 9), and a third criterion, pending, whose task is FC_OL_TASK
   fc_owed_now "$1"
   awk '
@@ -1092,24 +1076,27 @@ expect_contains "OL-4 control: the same row whose task is the Step-4 row is put 
 expect_absent "OL-4b …and the line names nothing owed by the close" "owed by the close" "$(fc_acc)"
 
 # ============================================================
-section "§GOALS-REFUSE: the card refuses to render over matrix rows that map to no requirement, and renders once serves: is written"
+section "§GOALS-REFUSE: the card refuses to render over criteria that map to no requirement, and renders once the Requirement cell names it"
 # ============================================================
-FC_VERSION=14   # the themes are written over the older matrix's rows and blocks, which a page at 15 does not hold
-# fails-when: the card prints `Goals — 0 of N reached` over rows no theme reads (no serves:, no dotted id), the refusal
-# names neither the rows nor the serves: line that maps them, or the plan with serves: written is still refused.
-# FC_GOOD's plan with lib/plan-fixture.sh's flat themes; each read is --preview, so the two reads differ by serves: alone.
-fc_plan "$FC_GOOD"; plan_fixture_themes "$PFC" flat discharged discharged pending
+# fails-when: the card prints `Goals — 0 of N reached` over criteria no theme reads (no Requirement cell, no dotted id), the
+# refusal names neither the criteria nor how many, or the page with the cells written is still refused.
+# FC_GOOD's plan with lib/plan-fixture.sh's themes, their Requirement cells blank; each read is --preview, so the two
+# reads differ by the cells alone.
+fc_gr_cells() {  # <REQ-n or —>... -> the three themed criteria's Requirement cells in the page, in order
+  awk -v m="$*" 'BEGIN { split(m, r, " ") } /^\| [^|]* \| x \| AC-1(68|69|70) \|/ { sub(/^\| [^|]* /, "| " r[++i] " ") } { print }' "$PFC" > "$PFC.n" \
+    && mv "$PFC.n" "$PFC"
+}
+fc_plan "$FC_GOOD"; plan_fixture_themes "$PFC" discharged discharged pending; fc_gr_cells — — —
 FC_GR_REQ="$(bash -c '. "$1/run.sh"; . "$1/plan.sh"; plan_requirements_file "$2"' _ "$FC_LIB" "$PFC")"
 fc_page --preview
-expect_eq "GR-1 over three rows with no serves: and no dotted id the card is refused (exit 1), no page printed, none written; the plan reads two themes" \
+expect_eq "GR-1 over three criteria with no Requirement cell and no dotted id the card is refused (exit 1), no page printed, none written; the plan reads two themes" \
   "1|||2" "$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^Goals')|$(fc_pages)|$(/usr/bin/grep -c '^## The ' "$FC_GR_REQ")"
-expect_contains "GR-1b …saying how many rows map to no requirement, naming them and the line that maps a row" \
+expect_contains "GR-1b …saying how many criteria map to no requirement and naming them" \
   "release-approval refused — 3 matrix rows map to no requirement (no serves: and no dotted id): give each block a serves: line naming its requirement (AC-168, AC-169, AC-170)" "$FC_ERR"
-for a in AC-168 AC-169 AC-170; do r="$(bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/reader.sh" "$PFC" criterion "$a" | sed -n 's/^requirement=//p')"
-  awk -v a="$a:" -v r="$r" '{ print } !d && index($0, a) == 1 { print "  serves: " r; d = 1 }' "$PFC" > "$PFC.t" && mv "$PFC.t" "$PFC"; done
-RC=0; FC_GR_N="$(/usr/bin/grep -c '^  serves: REQ-' "$PFC")"
+fc_gr_cells REQ-1 REQ-1 REQ-2
+RC=0; FC_GR_N="$(/usr/bin/grep -c '^| REQ-[12] | x | AC-1' "$PFC")"
 fc_page --preview
-expect_eq "GR-3 with serves: written (three lines) the same plan renders (exit 0): one theme of two reached, each its own rows' count" \
+expect_eq "GR-3 with the Requirement cells written (three) the same plan renders (exit 0): one theme of two reached, each its own criteria's count" \
   "0|3|0|Goals — 1 of 2 reached|The card reads true — 2 of 2 criteria discharged, none open|The gate admits the work — 0 of 1 criteria discharged, open: REQ-2" \
   "$RC|$FC_GR_N|$FC_RC|$(printf '%s\n' "$FC_OUT" | /usr/bin/grep '^Goals')|$(fc_under Goals | sed 's/^[^ ]* //' | paste -sd'|' -)"
 rm -f "$FC_GR_REQ"

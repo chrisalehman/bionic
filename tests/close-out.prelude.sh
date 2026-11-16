@@ -252,13 +252,12 @@ mk_fixture() {
     git checkout -q main
     git merge -q --no-ff -m "merge wave" wave/01-fixture >/dev/null 2>&1
   )
-  [ "${CO_PLAN_AT:-15}" != 15 ] || co_page15 "$p"
+  co_page15 "$p"
   plant_facts "$p"
   printf '%s\n' "$p"
 }
 
-# CO_PLAN_AT=14, set for a builder's call, asks it for the page at 14 an older run holds; unasked, every builder here writes
-# the run a version-15 plan holds, its page made the version-15 one by co_page15 <project>: both branches in its header;
+# Every builder here writes the run a version-15 plan holds, its page made the version-15 one by co_page15 <project>: both branches in its header;
 # no state, matrix or handoff section; each Tasks row in its nine authored cells; each criterion a row of `## Eval design`. The run's log beside it holds what those parts said, each in the
 # shape its writer appends: a step per step to the plan's current one, the plan's approval, each row's dispatch, tree
 # and landing, each discharged criterion's proof. A handoff written into the page is no fact the reader answers, so
@@ -291,17 +290,15 @@ co_page15() {
     { print }' "$plan" "$plan" > "$plan.15" && mv "$plan.15" "$plan"
 }
 
-# co_at15 <project> -> 0 when the project's plan is a version-15 page, which the readers below answer from its run's log.
-# plant_facts and advance_to test the version inline instead: card.test.sh and notify.test.sh read those builders out
-# of this file by name, with in_fixture, fixture_git, fixture_plan_text, fixture_epic_text and mk_fixture, so a builder
-# they read calls nothing outside that set, or it runs there as a command not found.
-co_at15() { /usr/bin/grep -qx 'canonical_sdlc_version: 15' "$1/$PLAN_REL"; }
+# card.test.sh and notify.test.sh read in_fixture, fixture_git, fixture_plan_text, fixture_epic_text, plant_facts, mk_fixture,
+# co_page15 and advance_to out of this file by name, so each calls nothing outside that set, or it runs there as a command
+# not found.
 
 # plant_facts <project> -> what the run owes, held at the working branch's head, as a run that
 # reached Step 7 has it (wave-27 T14; D3): the working branch checked out in a linked worktree
 # beside the project (`<project>-wave`), and the floor and every reading lib/proof.sh `facts_owed`
 # deals the plan's rigor and scale, each `result=pass`, at that head. The lines are the product's
-# (`proof_line`, placed at 14 as a run held it, `plan_fixture_state_add`); session-poker
+# (`proof_line`, each its proof event); session-poker
 # §56 holds the verb that writes them, and close-out and the gate read plan text whatever wrote
 # it. `close-out.sh run` and `check`, and `current 8`, refuse unless `facts_state` holds these.
 # A plan whose working branch is not a branch here gets nothing: there is no head to hold.
@@ -327,10 +324,8 @@ plant_facts() {
             review) l="$(proof_line review "$3" 2026-10-04T12:00:00Z "record/wave-01-fixture/$q-$scope.md" "$q" w-read pass "$scope")" ;;
             *) continue ;;
           esac
-          if [ "$4" = 15 ]; then f="${l#proved: }"; LOG_AT=2026-10-04T12:00:00Z proof_event "$2" ${f/ at=2026-10-04T12:00:00Z/}
-          else . "$5" && plan_fixture_state_add "$2" "$l"; fi
-        done' _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h" "$(/usr/bin/grep -qx 'canonical_sdlc_version: 15' "$plan" && echo 15)" \
-    "$REPO_ROOT/tests/lib/plan-fixture.sh"
+          f="${l#proved: }"; LOG_AT=2026-10-04T12:00:00Z proof_event "$2" ${f/ at=2026-10-04T12:00:00Z/}
+        done' _ "$REPO_ROOT/payload/scripts/lib" "$plan" "$h"
 }
 
 # add_unreached_branch <project> -> plants `wt/01-y` carrying one commit the working branch
@@ -449,7 +444,7 @@ PLAN_CENSUS
     git add -A >/dev/null 2>&1
     git commit -q -m "seed" >/dev/null 2>&1
   )
-  [ "${CO_PLAN_AT:-15}" != 15 ] || co_page15 "$p"
+  co_page15 "$p"
   printf '%s\n' "$p"
 }
 
@@ -493,13 +488,11 @@ release_approved() {
     "$(fixture_git "$1" rev-parse --verify -q "refs/heads/$wb")" >> "$1/$LOG_REL"
 }
 
-# advance_to <project> <N> -> the run stood at step N: at 15 one step event appended to its log, as the `current` verb
-# appends it; at 14 the plan's `current:` line planted at N, as an older plan's text holds its step. §E2E drives the verb.
+# advance_to <project> <N> -> the run stood at step N: one step event appended to its log, as the `current` verb
+# appends it. §E2E drives the verb.
 advance_to() {
-  local plan="$1/$PLAN_REL"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "advance_to: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
-  if /usr/bin/grep -qx 'canonical_sdlc_version: 15' "$plan"; then printf 'run/v1|ev=step|n=%s|at=%s\n' "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$1/$LOG_REL"; return; fi
-  awk -v n="$2" '!d && /^current:/ { print "current: " n; d = 1; next } { print }' "$plan" > "$plan.adv" && mv "$plan.adv" "$plan"
+  printf 'run/v1|ev=step|n=%s|at=%s\n' "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$1/$LOG_REL"
 }
 
 # ---------- drivers ----------
@@ -635,16 +628,8 @@ presence_state() {
   printf 'br=%s tmp=%s cont=%s cur8=%s epicrow=%s' \
     "$(branch_exists "$1" "wt/01-x")" "$(tmp_entries "$1")" \
     "$([ -f "$1/$CONT_REL" ] && echo yes || echo no)" \
-    "$(if co_at15 "$1"; then co_step_answer "$1" | grep -qx 'n=8'; else grep -qE '^current: 8$' "$1/$PLAN_REL"; fi && echo yes || echo no)" \
+    "$(co_step_answer "$1" | grep -qx 'n=8' && echo yes || echo no)" \
     "$(grep -c '^| 01 ' "$1/$EPIC_REL")"
-}
-
-# step_lines <plan> <N> -> how many `Step N:` lines `## SDLC State` carries.
-step_lines() {
-  awk -v n="$2" '
-    /^## / { insdlc = ($0 ~ /^## SDLC State/) }
-    insdlc && $0 ~ "^[[:space:]]*-?[[:space:]]*Step[[:space:]]+" n "[[:space:]]*:" { c++ }
-    END { print c + 0 }' "$1"
 }
 
 # table_rows <file> <kind> -> the data rows (not header, not rule) of the table whose header
@@ -693,21 +678,15 @@ set_plan_keys() {
 
 CARRY_REC="record/wave-01-fixture/rev.md"
 
-# carry_plant <project> <line>... -> each line inside the plan's ## SDLC State, after approved-by:; at 15 each `deferred:`
-# line its run's deferral event, as the translation of the line writes it: a `stated=` holding a `|` cannot be a field,
-# and a `check:` line is a retired verb's, so neither is written
+# carry_plant <project> <line>... -> each `deferred:` line its run's deferral event: a `stated=` holding a `|` cannot be
+# a field, and a `check:` line is a retired verb's, so neither is written
 carry_plant() {
-  local proj="$1" plan="$1/$PLAN_REL" l; shift
+  local proj="$1"; shift
   case "$proj" in "$SANDBOX"/*) : ;; *) echo "carry_plant: refusing outside the sandbox: '$proj'" >&2; return 1 ;; esac
-  if co_at15 "$proj"; then printf '%s\n' "$@" | awk '/^deferred: / { s = substr($0, 11); split(s, w, " "); t = substr(s, index(s, "\"") + 1)
-      r = substr(t, index(t, "\"") + 1); t = substr(t, 1, index(t, "\"") - 1); o = "|ref=" w[1] "|severity=" w[2] "|reach=" w[3] "|to=deferred|title=" t
-      if (match(r, /stated="[^"]*"/) && !index(r, "|")) o = o "|stated=" substr(r, RSTART + 8, RLENGTH - 9)
-      print "run/v1|ev=finding" o "|at=2026-10-04T12:00:00Z" }' >> "$proj/$LOG_REL"; return; fi
-  local lines=""
-  for l in "$@"; do lines="${lines}${l}
-"; done
-  CARRY_LINES="$lines" awk '{ print } /^approved-by: / && !d { printf "%s", ENVIRON["CARRY_LINES"]; d = 1 }' "$plan" > "$plan.carry" \
-    && mv "$plan.carry" "$plan"
+  printf '%s\n' "$@" | awk '/^deferred: / { s = substr($0, 11); split(s, w, " "); t = substr(s, index(s, "\"") + 1)
+    r = substr(t, index(t, "\"") + 1); t = substr(t, 1, index(t, "\"") - 1); o = "|ref=" w[1] "|severity=" w[2] "|reach=" w[3] "|to=deferred|title=" t
+    if (match(r, /stated="[^"]*"/) && !index(r, "|")) o = o "|stated=" substr(r, RSTART + 8, RLENGTH - 9)
+    print "run/v1|ev=finding" o "|at=2026-10-04T12:00:00Z" }' >> "$proj/$LOG_REL"
 }
 
 # carry_section <continuation> -> what stands under the heading `## Deferrals`, up to the next `## `,
@@ -748,4 +727,4 @@ require_helpers in_fixture fixture_git contains fixture_plan_text fixture_epic_t
                 add_unreached_branch add_foreign_unreached_branch run_close run_close_as gate_rc \
                 run_open_rc tmp_entries sha_of branch_exists plant_tmp_session tmp_file_exists \
                 mk_census_fixture mk_census_branch mk_census_fixture_nowt advance_to \
-                mk_task_pr_fixture presence_state step_lines table_rows rows_with_wave adr_cell set_plan_keys carry_plant carry_section hh_report debt_plant
+                mk_task_pr_fixture presence_state table_rows rows_with_wave adr_cell set_plan_keys carry_plant carry_section hh_report debt_plant

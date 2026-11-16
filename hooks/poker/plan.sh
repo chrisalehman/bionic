@@ -871,7 +871,6 @@ EOF
       exit 1
     fi
     ta_cell() { printf '%s\n' "$TA_ROW" | sed -n "s/^$1=//p" | head -1; }
-    if declare -F alias_gone_cell >/dev/null 2>&1 && alias_gone_cell reads "$(ta_cell reads)"; then die "REFUSED — $ALIAS_GONE_SAID. Nothing is born."; exit 1; fi
     TA_STEP="$(ta_cell step)"; TA_KIND="$(ta_cell kind)"; TA_CELL="$(ta_cell task)"; TA_AGENT="$(ta_cell agent)"
     TA_FILES="$(ta_cell files)"; TA_READ_FILES="$TA_FILES"
     # THE TASK CELL CARRIES TWO TAGS THE VERB WROTE AND AN EDIT NOW WRITES: ` · born: review|regression` and
@@ -1073,12 +1072,9 @@ EOF
     [ "$(ta_none "$TA_FILES")" = "$(ta_none "$TA_READ_FILES")" ] || TA_SHORT="${TA_SHORT}, its Files"
     [ "$TA_CELL_TASK" = "$TA_CELL" ] || TA_SHORT="${TA_SHORT}, its task cell's tags"
     [ -z "$TA_ART_CELL" ] || [ "$TA_ART_CELL" = "$(ta_cell artifact)" ] || TA_SHORT="${TA_SHORT}, its artifact"
-    TA_THREAD="$(units_thread_rows "$TA_PLAN" "$TA_ID")" || TA_THREAD=""
-    [ -z "$TA_THREAD" ] || TA_SHORT="${TA_SHORT}, the deps of $(printf '%s\n' "$TA_THREAD" | cut -f1 | paste -sd, - | sed 's/,/, /g'), which must name it"
     if [ -n "$TA_SHORT" ]; then
       die "REFUSED — $TA_ID is short of the row task-add accepts: ${TA_SHORT#, }. The plan is unchanged and nothing is born. Edit the ## Tasks table to these lines, $TA_ID first, then task-add $TA_ID again:"
-      { ta_line "$TA_ID" files="$(ta_none "$TA_FILES")" task="$TA_CELL_TASK" ${TA_ART_CELL:+artifact="$TA_ART_CELL"}
-        printf '%s\n' "$TA_THREAD" | while IFS=$'\t' read -r TA_TR TA_TD; do [ -z "$TA_TR" ] || ta_line "$TA_TR" deps="$TA_TD"; done; } >&2
+      ta_line "$TA_ID" files="$(ta_none "$TA_FILES")" task="$TA_CELL_TASK" ${TA_ART_CELL:+artifact="$TA_ART_CELL"} >&2
       exit 1
     fi
     TA_VIOL="$(units_validate "$TA_PLAN" 2>&1)"
@@ -1115,9 +1111,6 @@ EOF
       ! poker_brief_none "$TA_LANDS" \
         || say "task-add — $TA_ID lands none — counts on the next green regression: no landing verdict will name it, so its findings are fixed once a green regression stands at a head past its landing (D9)."
     fi
-    # THE SUSPECT TEST AT AUTHORING (wave-30 T16; REQ-12 AC-12.2, D14a): the row is in; a dependency
-    # that shares no file with its holder is named, with the line that would loosen it, never run.
-    suspect_lines "$TA_PLAN" "$TA_ID" | while IFS=$'\t' read -r _ _ TA_SUSPECT; do say "$(clean_whole "$TA_SUSPECT")"; done
     # WHAT THE TURN NOW OWES, SAID AT THE ACT: the harness's task list lacks the row, and the entries after it are
     # recreated to keep the order. The entry is named as the task list names it, by the row's title, and the line is
     # the verb's last so the rule is read where it fires and no step text has to carry it.

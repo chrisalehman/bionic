@@ -339,7 +339,7 @@ eg_page() {
   local p; p="$(plan_fixture --current "$2" "$1/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" wave)" || return 1
   shift 2; [ "$#" -eq 0 ] || printf '%s\n' "$@" >> "$(plan_fixture_log "$p")"; printf '%s' "$p"
 }
-# One row of the one table, in PLAN_FIXTURE_HEADER's order: <id> <agent> <status> [<worktree>].
+# One row of the one table, in plan_fixture's thirteen-cell order: <id> <agent> <status> [<worktree>].
 eg_pf_row() {
   printf '| %s | 4 | build | the %s unit | %s | — | — | 30 | REQ-1 | %s.sh | %s | — | %s |' \
     "$1" "$1" "$2" "$1" "${4:-—}" "$3"

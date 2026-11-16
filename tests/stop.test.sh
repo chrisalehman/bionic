@@ -1118,11 +1118,9 @@ section "ONE: a stop is one event: the turn's end the hook records is the run's 
 # A run at 15 is read from its log, so a turn's end recorded anywhere else is lost to the reader. Each Stop below is the
 # real hook on an ordinary turn whose one row reads an unruled D3, so no row is ready; the turn key is the prompt's
 # uuid, which the recorder writes as turn=.
-one_fixture() {  # <14|15> -> project
+one_fixture() {  # -> project, its page at 15
   local d p; d="$(wait_fixture "" "$WT_RULED")"; p="$d/.bionic/docs/plans/epic-99-fixture/wave-09-wait.plan.md"
-  if [ "$1" = 15 ]; then sp_at15 "$p"
-  else awk 'NR == 1 { print; print "canonical_sdlc_version: 14"; next } { print }' "$p" > "$p.v" && mv "$p.v" "$p"; fi
-  printf '%s' "$d"
+  sp_at15 "$p"; printf '%s' "$d"
 }
 one_stop() {  # <project> <turn uuid>
   local tx; tx="$(mktemp)"
@@ -1131,9 +1129,9 @@ one_stop() {  # <project> <turn uuid>
 }
 one_turn() { bash "$BIONIC_SCRIPTS_DIR/payload/scripts/reader.sh" "$1/.bionic/docs/plans/epic-99-fixture/wave-09-wait.plan.md" stop 2>/dev/null | /usr/bin/grep '^turn='; }
 one_ev() { stop_led "$1/.bionic/docs/record/wave-09-wait" | tail -1; }
-require_helpers one_fixture one_stop one_turn one_ev wait_fixture s7_fire sp_at15
+require_helpers one_fixture one_stop one_turn one_ev wait_fixture wait15 s7_fire sp_at15
 
-ONE_F="$(one_fixture 15)"
+ONE_F="$(one_fixture)"
 one_stop "$ONE_F" u-one-after
 expect_eq "ONE4 at 15 the turn just ended is the reader's stop" "turn=u-one-after" "$(one_turn "$ONE_F")"
 expect_contains "ONE5 …written to the run's log as its stop event" "|turn=u-one-after|" "$(one_ev "$ONE_F")"
@@ -1144,17 +1142,17 @@ expect_false "ONE5b …and to no fill ledger" test -e "$ONE_F/.bionic/docs/recor
 
 # A LOG IT CANNOT WRITE: the record directory read-only. The hook still prints nothing, refuses nothing and exits 0,
 # exactly as on the same turn with a log it can write, which records the event.
-ONE_W="$(one_fixture 14)"; mkdir -p "$ONE_W/.bionic/docs/record/wave-09-wait"
+ONE_W="$(wait15 "" "$WT_D3")"
 one_stop "$ONE_W" u-one-w
 expect_eq "ONE6 the control: a writable log, exit 0 and silent" "0||" "$STOP_RC|$STOP_OUT|$STOP_ERR"
 expect_contains "ONE6b …and the turn's end is recorded" "|turn=u-one-w|" "$(one_ev "$ONE_W")"
-ONE_R="$(one_fixture 14)"; mkdir -p "$ONE_R/.bionic/docs/record/wave-09-wait"; chmod a-w "$ONE_R/.bionic/docs/record/wave-09-wait"
+ONE_R="$(wait15 "" "$WT_D3")"; chmod a-w "$ONE_R/.bionic/docs/record/wave-09-wait/run.log" "$ONE_R/.bionic/docs/record/wave-09-wait"
 one_stop "$ONE_R" u-one-r
 expect_eq "ONE7 a log that cannot be written: the same exit 0 and silence" "0||" "$STOP_RC|$STOP_OUT|$STOP_ERR"
 expect_eq "ONE7b …and nothing is recorded (ONE6b reads the same line)" "" "$(one_ev "$ONE_R")"
-chmod u+w "$ONE_R/.bionic/docs/record/wave-09-wait"
+chmod u+w "$ONE_R/.bionic/docs/record/wave-09-wait" "$ONE_R/.bionic/docs/record/wave-09-wait/run.log"
 # A PLAIN DIRECTORY, no checkout: the appender finds no log, so the Stop records nothing and says nothing.
-ONE_P="$(one_fixture 14)"; rm -rf "$ONE_P/.git"
+ONE_P="$(wait15 "" "$WT_D3")"; rm -rf "$ONE_P/.git"
 ONE_PB="$(cd "$ONE_P" && find . -type f | sort)"
 one_stop "$ONE_P" u-one-p
 expect_eq "ONE8 a plain directory: the same exit 0 and silence" "0||" "$STOP_RC|$STOP_OUT|$STOP_ERR"

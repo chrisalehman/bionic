@@ -307,21 +307,13 @@ section "§LANDS — wave-36 T14 (D13; REQ-7 AC-7.7; C70): close-out lands the r
 # delivered plan reads it bound-closed; its cells are changed by an edit of the file, never by a verb.
 # fails-when: a delivered plan reads a row its merge landed as pending; the bind of a delivered plan is refused; the
 # marker is gone after a refusal midway.
-lands_rows() {  # <project> -> the plan gains T3 (step 8, integrate) and T4 (step 9, close), pending, and the release approval
-  # its integrate row is asked: at 15 two nine-cell rows, nothing dispatching them; on an older page each with its step
-  # line, and the `- Step 4:` line it carries past Step 4
+lands_rows() {  # <project> -> the plan gains T3 (step 8, integrate) and T4 (step 9, close), pending: two nine-cell rows, nothing dispatching them,
+  # and the release approval its integrate row is asked
   local plan="$1/$PLAN_REL"
   case "$1" in "$SANDBOX"/*) : ;; *) echo "lands_rows: refusing outside the sandbox: '$1'" >&2; return 1 ;; esac
   release_approved "$1"
-  if co_at15 "$1"; then awk '{ print } /^\| T2 \|/ { print "| T3 | 8 | integrate | merge the wave into main | — | 10 | AC-1 | none | — |"
-    print "| T4 | 9 | close | close-out, continuation.md | — | 10 | AC-1 | none | — |" }' "$plan" > "$plan.l" && mv "$plan.l" "$plan"; return; fi
-  awk '
-    /^\| T2 \|/ { print
-                  print "| T3 | 8 | integrate | merge the wave into main | — | — | 10 | AC-1 | none | pending | — |"
-                  print "| T4 | 9 | close | close-out, continuation.md | — | — | 10 | AC-1 | none | pending | — |"; next }
-    /^- Step 7:/ { print "- Step 4: implement: opened 2026-09-14T00:10Z"; print; next }
-    /^- Step 8:/ { print "- T3: pending dispatch — —"; print "- T4: pending dispatch — —"; print; next }
-    { print }' "$plan" > "$plan.l" && mv "$plan.l" "$plan"
+  awk '{ print } /^\| T2 \|/ { print "| T3 | 8 | integrate | merge the wave into main | — | 10 | AC-1 | none | — |"
+    print "| T4 | 9 | close | close-out, continuation.md | — | 10 | AC-1 | none | — |" }' "$plan" > "$plan.l" && mv "$plan.l" "$plan"
 }
 LP_OUT=""; LP_RC=0
 lands_poker() {  # <project> <sid> <verb> [<operand>…] -> LP_OUT (stdout and stderr), LP_RC

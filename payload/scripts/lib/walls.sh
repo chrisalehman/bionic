@@ -3173,17 +3173,6 @@ if [ -n "$_EG_WT" ]; then
   if [ "$_EG_REG" -eq 3 ]; then
     printf 'evidence-gate: worktree %s is named by more than one ## Tasks row (%s) — judging at current: %s\n' \
       "$_EG_WT" "$_EG_ROW_DUP" "$CURRENT" >&2
-  elif [ "$_EG_REG" -eq 0 ] && [ -z "$_EG_ROW" ]; then
-    # AC-3.2: "no row names this tree" and "this table has no `worktree` column" are two
-    # different facts and the lead-in used to print the first for both. `units_field <row>
-    # worktree` reads slot 11, which a header without the column leaves EMPTY on every row,
-    # so the loop above skipped every row and landed here — on a table that never claimed
-    # to track trees (research R2 row 6a). `units_has_column` is the discriminator, and the
-    # shape fault prints instead, from units_validate's own arm.
-    if units_has_column "$PLAN" worktree; then
-      printf 'evidence-gate: no ## Tasks row names worktree %s — judging at current: %s\n' \
-        "$_EG_WT" "$CURRENT" >&2
-    fi
   elif [ -n "$_EG_ROW" ]; then
     _EG_RID="${_EG_ROW%%	*}"
     _EG_RSTEP="${_EG_ROW#*	}"
@@ -4003,7 +3992,7 @@ Fix: repair each row named above; the columns are $(units_columns 1)"
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
   # A ROW HAS NO LINE: a row's landing and its launch are the reader's, and a row the reader does not answer as the
   # table reads it is owed until the log holds the fact.
-  findings="$(units_findings "$PLAN" "$(_eg_roster_path)" v15)"
+  findings="$(units_findings "$PLAN" "$(_eg_roster_path)")"
   for id in $(printf '%s\n' "$findings" | awk '$1 == "evidence" { print $2 }'); do
     _eg_v15_ask "${id}'s landing or launch, which the run's log does not hold as its row reads"
   done
