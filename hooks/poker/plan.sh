@@ -1161,12 +1161,11 @@ EOF
       die "REFUSED — the shipped scaffold cannot be read (${HOOK_DIR}/../skills/canonical-sdlc/dispatch.md, its ### Scaffold fence); a brief is rendered from it, never from a copy. Nothing was written."
       exit 2
     fi
-    # THE CELLS ARE NAMED BY THE TABLE'S HEADER, so a version-14 row (its state cells, suites and lands-on among them)
-    # and a nine-cell row read through the same parser; a cell the table lacks is empty.
+    # THE CELLS ARE NAMED BY THE TABLE'S HEADER, the row's nine authored cells; a cell the table lacks is empty.
     BRF_CELLS="$(plan_read_row "$PV_PLAN" Tasks id "$BRF_ID")"
     brf_cell() { printf '%s\n' "$BRF_CELLS" | awk -v k="$1=" 'index($0, k) == 1 { print substr($0, length(k) + 1); exit }'; }
     BRF_TASK="$(brf_cell task)"; BRF_KIND="$(brf_cell kind)"; BRF_STEP="$(brf_cell step)"; BRF_SIZE="$(brf_cell size)"
-    BRF_FILES="$(brf_cell files)"; BRF_STATUS="$(brf_cell status)"; BRF_SERVES="$(brf_cell serves)"; BRF_DEPS="$(brf_cell deps)"
+    BRF_FILES="$(brf_cell files)"; BRF_SERVES="$(brf_cell serves)"; BRF_DEPS="$(brf_cell deps)"
     BRF_WAVE="$(proof_plan_slug "$PV_PLAN")"
     BRF_DOCS="$(docs_root "$PV_REPO")"
     BRF_RECDIR="$BRF_DOCS/record/$BRF_WAVE"
@@ -1193,7 +1192,7 @@ EOF
       exit 1
     fi
 
-    # THE TASK'S OWN SECTION: its suites: and lands-on: lines are the row's cells where the table has none, and every
+    # THE TASK'S OWN SECTION: its suites: and lands-on: lines are the row's suites and what it lands on, and every
     # other line is the judgment. A contract label typed there would give the agent a second answer to the rendered one.
     BRF_SEC="$(plan_read_section "$PV_PLAN" "$BRF_ID")" && BRF_HASSEC=1 || BRF_HASSEC=""
     BRF_JUDG="$(printf '%s\n' "$BRF_SEC" | awk '!/^(suites|lands-on):/' | awk 'NF { n++ } n')"
@@ -1235,12 +1234,10 @@ EOF
       if [ -n "$BRF_SHA" ]; then BRF_HEAD="$BRF_SHA ($(clean "$BRF_WB"))"; else BRF_HEAD="(no branch $(clean "$BRF_WB") in this repository)"; fi
     fi
 
-    # THE SUITES AND WHAT THE ROW LANDS ON: its own cells, else its section's lines, else its Files' *.test.sh entries,
-    # in order; else, for a row that writes code, the slot: `none` is a waiver nobody chose for it.
-    BRF_SUITES="$(brf_cell suites)"
-    poker_brief_none "$BRF_SUITES" && BRF_SUITES="$(plan_read_section "$PV_PLAN" "$BRF_ID" suites)"
-    BRF_LANDS="$(brf_cell lands-on)"
-    poker_brief_none "$BRF_LANDS" && BRF_LANDS="$(plan_read_section "$PV_PLAN" "$BRF_ID" lands-on)"
+    # THE SUITES AND WHAT THE ROW LANDS ON: its section's lines, else its Files' *.test.sh entries, in order; else, for
+    # a row that writes code, the slot: `none` is a waiver nobody chose for it.
+    BRF_SUITES="$(plan_read_section "$PV_PLAN" "$BRF_ID" suites)"
+    BRF_LANDS="$(plan_read_section "$PV_PLAN" "$BRF_ID" lands-on)"
     BRF_SUITE_SLOT=""
     poker_brief_none "$BRF_SUITES" && BRF_SUITES="$(poker_brief_suites "$BRF_FILES")"
     if units_writes_head "$BRF_FILES"; then
@@ -1295,7 +1292,7 @@ $BRF_PINNED"; fi
       line_kv("ev") == "admitted" && line_kv("row") == r { l = line_kv("suite") " until " line_kv("token") } END { if (l != "") print l }')"
 
     # THE SCAFFOLD, in the shipped order. A label with no source on this row is not written.
-    [ -n "$BRF_STATUS" ] || { poker_fold_ask BRF_ANS "brief $BRF_ID $BRF_NAME" "$PV_PLAN" reader_q_status "$BRF_ID"; BRF_STATUS="$(printf '%s\n' "$BRF_ANS" | sed -n 's/^state=//p')"; }
+    poker_fold_ask BRF_ANS "brief $BRF_ID $BRF_NAME" "$PV_PLAN" reader_q_status "$BRF_ID"; BRF_STATUS="$(printf '%s\n' "$BRF_ANS" | sed -n 's/^state=//p')"
     BRF_BODY="$(mktemp "${TMPDIR:-/tmp}/brief.XXXXXX")" || { die "REFUSED — no scratch file can be made. Nothing was written."; exit 2; }
     case "$BRF_SIZE" in ''|*[!0-9]*) BRF_BIG=no ;; *) if [ "$BRF_SIZE" -ge 15 ]; then BRF_BIG=yes; else BRF_BIG=no; fi ;; esac
     BRF_PROG="$(poker_brief_record_entry "$BRF_FILES" progress "$BRF_ID")"
