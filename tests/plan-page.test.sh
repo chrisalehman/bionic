@@ -19,7 +19,8 @@
 #              pending in an advance's judgment moves the gate only in the advance's own session, and is never held.
 #              A page at 15 whose landed tasks stand out of order is admitted: the hook judges its copy with the plan's log.
 #   §V14       a plan at 14 is a document and never a run: a new one refused at the write, naming 15; one on disk
-#              admitted at the write and the commit, open or closed, under any name, an epic too; a spec at 14 or 15
+#              admitted at the write and the commit, open or closed, under any name, an epic too; a plan at 15 with its
+#              log lowered to 14 refused at the write and, lowered by hand, at the commit; a spec at 14 or 15
 #              admitted, at 13 refused; an epic at 15 whose log holds its older homes' facts owes only Step 2's approval.
 #
 # FIXTURE FIDELITY. Each plan is a real file in a scratch git repository with an engaged session, written
@@ -304,6 +305,17 @@ for P5 in "$R/.bionic/docs/plans/epic-01-demo/wave-05-v.md" "$R/.bionic/docs/inc
     "$GATE_EXIT|$(grep -c "mv $P5 $W5\$" <<< "$GATE_SAID")"
   rm -f "$P5"
 done
+# A plan at 15 whose log holds a step stays at 15. A write that lowers its version line is refused at the write; the same
+# line lowered by a shell edit meets no write hook, and is refused at the commit. The one header, its value quoted and
+# spaced, is handed to both gates, and each names the version it read.
+LOW="$(sed 's/^canonical_sdlc_version: 15$/canonical_sdlc_version:  "14"/' "$P2")"
+expect_contains "the lowered twin of the plan at 15 differs in its version line" 'canonical_sdlc_version:  "14"' "$LOW"
+write_to "$P2" "$LOW"
+expect_eq "a write lowering a plan at 15 with its log to 14 is refused, naming the line read and 15" "2|1|1" \
+  "$HOOK_EXIT|$(grep -c 'this write declares canonical_sdlc_version: 14' <<< "$HOOK_SAID")|$(grep -c "^Fix: leave 'canonical_sdlc_version: 15'" <<< "$HOOK_SAID")"
+cp "$P2" "$P2.w"; printf '%s\n' "$LOW" > "$P2"; printf 'plan=%s\n' "$P2" > "$R/.bionic/tmp/engaged-$SID.state"; gate; mv "$P2.w" "$P2"
+expect_eq "…and lowered by hand, its commit is refused, naming the plan, the line read and 15" "2|1|1|1" \
+  "$GATE_EXIT|$(grep -c "^Plan: $P2\$" <<< "$GATE_SAID")|$(grep -c 'this plan declares canonical_sdlc_version: 14' <<< "$GATE_SAID")|$(grep -c "^Fix: put the line back to 'canonical_sdlc_version: 15'" <<< "$GATE_SAID")"
 
 # An open epic at 14 is admitted at the write and at the commit of a session bound to it. The same epic at 15, its log
 # holding what its older homes said, is admitted at the write, and its commit is refused only for the debt it truly

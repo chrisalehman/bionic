@@ -918,13 +918,17 @@ SDLC_VERSION=$(yaml_get canonical_sdlc_version)
 # A PLAN IS WRITTEN AT 15, the shape that holds only what a person wrote, and is held below to
 # what version 15 has no place for. A plan at 14 is an older run's document and never a run: one
 # already on disk is admitted with nothing judged and nothing asked of its run, open or not. A plan
-# not yet on disk starts a run, so at 14 it is refused, naming 15. Every other document may declare
-# 14 or 15: a version binds the plan of an open run and nothing else.
+# not yet on disk starts a run, so at 14 it is refused, naming 15. A plan on disk at 15 stays at 15:
+# a write lowering it would make a run's plan a document no gate judges, so it is refused, its version
+# on disk read by the header's one reader. Every other document may declare 14 or 15: a version binds
+# the plan of an open run and nothing else.
 # [WALL: tests/plan-page.test.sh]
 GS_V15=0
 case "$BASENAME:$SDLC_VERSION" in
   *.plan.md:15) GS_V15=1 ;;
-  *.plan.md:14) [ -f "$FILE_PATH" ] || _gs_refuse new-14; exit 0 ;;
+  *.plan.md:14) [ -f "$FILE_PATH" ] || _gs_refuse new-14
+    [ "$(plan_read_header "$FILE_PATH" canonical_sdlc_version 2>/dev/null)" != canonical_sdlc_version=15 ] || _gs_refuse lowered "$SDLC_VERSION"
+    exit 0 ;;
   *.plan.md:*) _gs_refuse bad-version "$SDLC_VERSION" "'15'" ;;
   *:14|*:15) ;;
   *) _gs_refuse bad-version "$SDLC_VERSION" "'14' or '15'" ;;
