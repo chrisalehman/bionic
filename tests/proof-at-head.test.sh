@@ -334,10 +334,11 @@ expect_eq "IFS-1 under a tab as the caller's only separator, the second ask read
     printf "%s|%s" "$a" "$(proof_last "$2" regression)"' _ "$PAH_LIB" "$PL_PLAN" "$PL_REC/run.log")"
 # fails-when: a rating or a run's verdict is split on the caller's IFS, so under a tab the finding drops out unrated and
 # a green run's verdict is refused as cut off.
-printf '## SDLC State\n\ndeferred: record/r.md#1 S2 off "a title"\n' > "$SANDBOX/ifs-plan.md"
+IFS_P="$SANDBOX/ifs/docs/plans/e/ifs.plan.md"; mkdir -p "${IFS_P%/*}" "$SANDBOX/ifs/docs/record/ifs"; printf '# ifs\n' > "$IFS_P"
+printf 'run/v1|ev=finding|ref=record/r.md#1|severity=S2|reach=off|to=deferred|title=a title|at=2026-10-04T12:00:00Z\n' > "$SANDBOX/ifs/docs/record/ifs/run.log"
 printf 'head=%s dirty=0\nGating: 3 passed, 0 failed\n' "$PL_H" > "$SANDBOX/ifs-run.log"
 ifs_read() { bash -c '. "$1/proof.sh" || exit 1; IFS="$2"; printf "%s|%s" "$(proof_findings_owed "$3")" "$(proof_attested task "$4" "$5" "" "" "" "$6")"' \
-  _ "$PAH_LIB" "$1" "$SANDBOX/ifs-plan.md" "$SANDBOX/ifs-run.log" "$PL" "$PL_H"; }  # <IFS> -> the finding's rated line|the head the run attests
+  _ "$PAH_LIB" "$1" "$IFS_P" "$SANDBOX/ifs-run.log" "$PL" "$PL_H"; }  # <IFS> -> the finding's rated line|the head the run attests
 expect_eq "IFS-2 precondition: under the default separators the deferred finding reads rated and the green run attests the head" \
   "record/r.md#1 S2 off defer \"a title\"|$PL_H" "$(ifs_read $' \t\n')"
 expect_eq "IFS-3 under a tab as the only separator the rating and the verdict read as they do under the default" "$(ifs_read $' \t\n')" "$(ifs_read $'\t')"
