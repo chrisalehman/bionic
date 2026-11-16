@@ -801,7 +801,7 @@ for ex_i in 1 2 3; do
   printf 'run/v1|ev=finding|ref=%s#%s|to=fix|by=Dana|words=fix it in this wave|why=the user ruled it|at=2026-10-20T01:00:00Z\n' "$EX_OWN" "$ex_i"
 done >> "$(plan_fixture_log "$PEX")"
 ex_add() {  # <id> <files> <born> -> OUT, RC: task-add of a step-4 build row born of <born>
-  TA_PASTE=1 ta_add "$REX" "$1" 4 build "Fix $1. The defect is gone." bionic:implementor '—' 30 REQ-1 "$2" --born "$3"
+  ta_add "$REX" "$1" 4 build "Fix $1. The defect is gone." bionic:implementor '—' 30 REQ-1 "$2" --born "$3"
 }
 ex_born_line() { printf '%s\n' "$OUT" | /usr/bin/grep 'is review-born' || :; }
 ex_mark() { bash -c '. "$1/units.sh" >/dev/null 2>&1; _units_born_facts "$2"' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$PEX" | awk -F'\t' -v r="$1" '$1 == r { print "born: " $2 ($3 != "" ? " of=" $3 : "") ($4 != "" ? " promoted" : "") }'; }

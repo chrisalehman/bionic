@@ -176,8 +176,9 @@ git -C "$RAB" branch wave/01-fixture
 PAB="$(s42_plan "$RAB" 4)"
 printf 'run/v1|ev=proof|kind=regression|head=%s|evidence=record/wave-01-fixture/floor.txt|owed=a.test.sh,b.test.sh|at=2026-10-14T00:00:00Z\n' "$AB_C1" \
   >> "$RAB/.bionic/docs/record/wave-01-fixture/run.log"
-TA_PASTE=1 ta_add "$RAB" T6 4 build 'fix the red. The red suite turns green.' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born regression:a.test.sh
-expect_eq "GB-1 task-add --born regression:a.test.sh, which the regression proof owes, exits 0" "0" "$RC"
+ta_add "$RAB" T6 4 build 'fix the red. The red suite turns green.' bionic:implementor '—' 30 REQ-5 'lib/c.sh' --born regression:a.test.sh
+expect_eq "GB-1 task-add --born regression:a.test.sh, which the regression proof owes, exits 0, born with no other row edited" "0|same" \
+  "$RC|$(cmp -s "$TMPROOT/s42-before" "$PAB" && echo same)"
 ta_add "$RAB" T7 4 build 'fix the other red. The other red suite turns green.' bionic:implementor '—' 30 REQ-5 'lib/d.sh' --born floor:b.test.sh
 expect_eq "GB-2 task-add --born floor:b.test.sh is refused (exit 1)" "1" "$RC"
 expect_contains "GB-2b …the refusal names the new operand" "--born floor: is gone; write --born regression:" "$OUT"
