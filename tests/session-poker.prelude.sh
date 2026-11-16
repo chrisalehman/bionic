@@ -220,32 +220,14 @@ ack_rows() {  # <repo> <name>...
 # WHY EVERY DISARM FIXTURE BELOW GREW A PLAN. `open == 0` used to be the whole DISARM
 # predicate, and it is also what a live wave looks like between two batches — so the tick
 # ended the Patrol of runs with days of work left (epic-20 W1 dogfood, idea §B-4). DISARM
-# now needs the RUN to say it is delivered: `current: 9` with `delivered:` on the `Step 9:`
-# line, read out of the newest plan carrying an unfenced `## SDLC State`. A fixture that
-# writes no plan is therefore a fixture that cannot DISARM, which is AC-13's second half.
+# now needs the RUN to say it is delivered: its step 9 event carrying `delivered=`, read from
+# the run's log. A fixture that writes no plan is therefore a fixture that cannot DISARM.
 #
-# CLOCK DISCIPLINE HOLDS: nothing here sleeps. `touch` after the write is what makes a
-# fixture the newest candidate, exactly as `backdate` drives staleness above.
-plan_body() {  # <current> [evidence text for the Step-<current> line] -> a whole plan file
-  printf '# fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: %s\n' "$1"
-  # Past Step 3 the plan carries its approval, the fact the fill keys on (wave-26 T13; D3).
-  case "${1%[ab]}" in [4-9]) printf '%s\n' 'approved-by: fixture 2026-10-04T00:00Z "approved"' ;; esac
-  printf '\n- Step %s: %s\n' "$1" "${2:-evidence for this step}"
-}
-
-write_plan() {  # <repo> <body> [path relative to <docs-root>/plans]
-  local repo="$1" body="$2" rel="${3:-epic-99-fixture/wave-01-fixture.plan.md}"
-  local f="$repo/.bionic/docs/plans/$rel"
-  mkdir -p "$(dirname "$f")"
-  printf '%s' "$body" > "$f"
-  touch "$f"
-}
-
-# The shorthand every DISARM fixture uses: a run that reached Step 9 and recorded a
-# delivery. `delivered:` is the token the close-out step writes and the only one run_state
-# accepts.
+# The shorthand every DISARM fixture uses: a run at 15 that reached Step 9 and recorded a
+# delivery in its log.
 delivered_plan() {  # <repo>
-  write_plan "$1" "$(plan_body 9 'delivered: bionic 9.9.9; report: record/fixture/close-out.md')"
+  local p; p="$(sp_plan_at_step "$1" 9)"
+  printf 'run/v1|ev=step|n=9|delivered=bionic 9.9.9; report: record/fixture/close-out.md|at=2026-10-04T00:30:00Z\n' >> "$(plan_fixture_log "$p")"
 }
 
 # ---------- the session binding (wave-session-bound-run, AC-2/AC-3/AC-6/AC-8) ----------
