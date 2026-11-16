@@ -13,7 +13,7 @@
 #                        the text as a file-name word: lower case, every other character a hyphen, runs of them one,
 #                        none at either end, at most 48 characters; nothing for a text with no letter or digit.
 #     handoff_pointer_of <plan> [<root>]
-#                        the absolute path the run's latest handoff names (lib/reader.sh `reader_session` handoff);
+#                        the absolute path the run's latest handoff names (lib/reader.sh `reader_main` handoff);
 #                        nothing when the run holds none or the reader cannot answer. Always rc 0.
 #     handoff_default_of <plan> [<root>]
 #                        the run's home file, handoff_home_file of the plan's own slug (lib/proof.sh `proof_plan_slug`,
@@ -62,12 +62,12 @@ handoff_slug() {  # <text>
 handoff_pointer_of() {  # <plan> [<root>]
   local rel root
   [ -f "${1:-}" ] || return 0
-  if ! declare -F reader_session >/dev/null 2>&1; then
+  if ! declare -F reader_main >/dev/null 2>&1; then
     # shellcheck source=/dev/null
     [ -r "$_HANDOFF_LIB_DIR/reader.sh" ] && . "$_HANDOFF_LIB_DIR/reader.sh" >/dev/null 2>&1
-    declare -F reader_session >/dev/null 2>&1 || return 0
+    declare -F reader_main >/dev/null 2>&1 || return 0
   fi
-  rel="$(reader_session "$1" handoff 2>/dev/null | sed -n 's/^path=//p')"
+  rel="$(reader_main "$1" handoff 2>/dev/null | sed -n 's/^path=//p')"
   [ -n "$rel" ] || return 0
   case "$rel" in
     /*) printf '%s\n' "$rel" ;;

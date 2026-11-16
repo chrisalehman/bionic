@@ -300,10 +300,9 @@ _lr_plan() {  # <plan or landing record> -> the plan; a record is its plan's whe
   done
   return 1
 }
-_lr_lines() { if reader_log "$1" >/dev/null 2>&1; then reader_events "$1"
-  else { declare -F translate >/dev/null 2>&1 || . "$_READER_LIB_DIR/translate.sh"; } && translate "$1" events; fi; }
+# A plan the reader cannot join to a record has no log, and so no line.
+_lr_lines() { ! reader_log "$1" >/dev/null 2>&1 || reader_events "$1"; }
 _lr_events() {  # <plan> [instant] -> the run's lines as the reader reads them, those written after <instant> left out
-  # A plan the reader cannot join to a record has no log: its homes are its lines, translated as the reader would.
   local l
   _lr_reader || return 0
   l="$(_lr_lines "$1" 2>/dev/null)" || return 2
@@ -565,7 +564,7 @@ _HH_PLACE_AWK='
   BEGIN { HH_S = hh_norm(HH_S); HH_U = (hh_iso(HH_U) && length(HH_U) == 17) ? substr(HH_U, 1, 16) ":59Z" : hh_norm(HH_U) }
 '
 hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] [--until <ISO>] -> the one hand-holds line; rc 0, 2 unread
-  local plan="$3" hands="" lines="" gaps=0 hand=0 stp=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0
+  local plan="$3" hands="" lines="" hand=0 stp=0 dec=0 lif=0 amd=0 hld=0 ext=0 wv=0 fl=0 ado=0 fix=0
   local ney=0 since="" until="" u1=0
   shift 3
   while [ $# -ge 2 ]; do
@@ -574,11 +573,6 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
   done
   if [ -f "$plan" ] && [ ! -L "$plan" ] && _lr_reader; then
     hands="$(_proof_ask "$plan" reader_q_hands "$plan" 2>/dev/null)" && lines="$(_lr_events "$plan")" || return 2
-    # a version-14 line the translation could not carry as a hand event is one this count cannot see
-    if ! reader_brought "$plan" 2>/dev/null; then
-      gaps="$( { declare -F translate >/dev/null 2>&1 || . "$_READER_LIB_DIR/translate.sh"; } 2>/dev/null && translate "$plan" gaps 2>/dev/null \
-        | /usr/bin/grep -c '^gap/v1|ev=hand|')"
-    fi
     read -r hand stp ney fl wv fix dec lif amd hld ext ado u1 <<< "$( { printf '%s\n\034\n' "$hands"; printf '%s\n' "$lines"; } \
       | awk -F'|' -v HH_S="$since" -v HH_U="$until" "$_READER_AWK$_HH_PLACE_AWK"'
       $0 == "\034" { part = 1; next }
@@ -618,7 +612,6 @@ hand_holds_report() {  # <landing record> <project root> <plan> [--since <ISO>] 
   printf 'hand-holds: total=%d · by-hand=%d · stop-runs=%d · declines=%d · lifts=%d · amends=%d · holds=%d · extensions=%d · waivers=%d · second-regressions=%d · adoptions=%d · fixed=%d · needs-you=%d' \
     $(( hand + stp + dec + lif + amd + hld + ext + wv + fl + ado + fix + ney )) "$hand" "$stp" "$dec" "$lif" "$amd" "$hld" "$ext" "$wv" "$fl" "$ado" "$fix" "$ney"
   if [ -n "$since" ] || [ -n "$until" ]; then printf ' · unplaced=%d' "${u1:-0}"; fi
-  [ "${gaps:-0}" -eq 0 ] || printf ' · unseen=%d' "$gaps"
   printf '\n'
   return 0
 }

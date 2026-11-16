@@ -550,14 +550,14 @@ section "HALF"
 # fails-when: the reader translates the old homes, or the key sums a home beside the log, so editing it refolds.
 HD="$D/record/half"; mkdir -p "$HD"; HP="$D/plans/epic-x/half.plan.md"; printf '## SDLC State\n\ncurrent: 4\n' > "$HP"
 printf 'line/v1|ev=published|row=T1|commit=c1|kind=queue|by=-|why=-|at=2026-11-01T00:00:01Z\n' > "$HD/landing-proofs.log"
-printf 'owed/v1|key=decide:D1|state=open|sent=-|at=2026-11-01T00:00:02Z|title=t|reply=r\n' > "$HD/asks.state"
+printf 'owed/v1|key=%s|state=open|sent=-|at=2026-11-01T00:00:0%s|title=t|reply=r\n' decide:D1 2 approve:x 3 > "$HD/asks.state"
 hev() { ( . "${READER%/reader.sh}/lib/reader.sh" && reader_events "$HP" ); }
 expect_eq "a plan at 14 with its old homes beside it and no log yields no event" "" "$(hev)"
 printf 'run/v1|ev=published|row=T2|commit=c2|kind=queue|at=2026-11-03T00:00:05Z\n' > "$HD/run.log"
 expect_eq "…and once it has a log, its events are the log's lines, byte for byte" "$(cat "$HD/run.log")" "$(hev)"
 hkey() { TMPDIR="$HT" bash -c '. "$1/proof.sh" && _proof_facts "$2" >/dev/null && printf "%s" "$_PROOF_FACTS_KEY"' _ "${READER%/reader.sh}/lib" "$HP"; }
 HT="$(mktemp -d)"; printf -- '---\ncanonical_sdlc_version: 15\n---\n# half\n' > "$HP"; printf 'cv | duplicate | a.sh:1 | raised-by r.md | touches 1 | —\n' > "$HD/debt.md"
-HK1="$(hkey)"; printf '%s\n' 'line/v1|ev=published|row=T3|commit=c3|kind=queue|by=-|why=-|at=2026-11-01T00:00:03Z' >> "$HD/landing-proofs.log"
+HK1="$(hkey)"; printf '# l\n\n## Δ0 — D4 put (orchestrator 2026-11-01 9:00 AM PST): the fourth\n' > "$HD/design-ledger.md"
 printf 'cv | duplicate | a.sh:1 | raised-by r.md | touches 1 | burned T9\n' > "$HD/debt.md"; HK2="$(hkey)"
 printf 'run/v1|ev=step|n=4|at=2026-11-03T00:00:06Z\n' >> "$HD/run.log"; HK3="$(hkey)"
 expect_eq "the fold's key names the log and no other file of the record: an old home edited keeps it, the log appended moves it" \

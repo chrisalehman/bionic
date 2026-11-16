@@ -275,7 +275,7 @@ whole_run_at_head() {
   #
   # <who> is the project's git user name, the reply the user's own words; each is one field of the log, so a line break
   # or a `|` is refused. Four kinds of name:
-  #   plan         the plan's approval at Step 3, keyed step3 as an older plan's approved-by: translates; given once, a
+  #   plan         the plan's approval at Step 3, keyed step3; given once, a
   #                placeholder refused. Its instant is the one the plan's and the step cards' asks close at: a step card
   #                left open until a later card or the Stop closed it would read as a stop the run made after its approval.
   #   step0 step1 step2  the approval of the step before the plan's that the commit gate at 15 asks at Steps 1, 2 and 3,

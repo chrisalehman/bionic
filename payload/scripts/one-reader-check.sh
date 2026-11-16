@@ -59,8 +59,7 @@
 #     `=$?` or `if` reads on that line: a fold that failed would read there as a run with no fact.
 #   - A NAME is a line of names_standing below: a verb the poker no longer has, in the shape of a use where the word is
 #     also English (the poker run with it, a function named for it, a poker case arm), else as its own word. The
-#     translation and the plan reader's list of refused keys read an older run by those names, and so does a comparison
-#     of an older hand act's name (`w == "`): those are no finding. A NAME is also a removed file's name as its own
+#     plan reader's list of refused keys reads an older run by those names: that is no finding. A NAME is also a removed file's name as its own
 #     word: the old landing record's and the asks register's (`landing[-]proofs.log`, `asks.stat[e]`), which a reader's
 #     file (READER_FILES) reads an older run by and is admitted there, and the two deleted hook scripts'
 #     (`stop[-]guard.sh`, `agent[-]context[-]guard.sh`) and the deleted act's (`bring[-]forward.sh`), admitted nowhere;
@@ -80,7 +79,7 @@
 
 set -uo pipefail
 
-READER_FILES="payload/scripts/lib/reader.sh payload/scripts/lib/plan-read.sh payload/scripts/lib/translate.sh payload/scripts/lib/fields.sh"
+READER_FILES="payload/scripts/lib/reader.sh payload/scripts/lib/plan-read.sh payload/scripts/lib/fields.sh"
 
 ADMITTED="tests/fixtures/names-admitted.txt"
 
@@ -110,8 +109,7 @@ for f in $loaded_members; do [ -f "$f" ] && loaded_files+=("$f"); done
 names_found() {  # <file or directory>... -> `<file>:<line>:<text>` for each line naming a retired verb, one line per search
   local g='anchor[s]|patro[l]|wai[t]|cove[r]|epic[-]row|continuation[-]fill|interval[-]default|windo[w]|fill[-]report|dispositio[n]'
   /usr/bin/grep -rnE 'launch[-]sync|ledger[-](add|set)|task[-](set|split)|tasks[-]prose|row[-_]landed|session-poker\.sh"? delive[r]|`delive[r]`|delive[r] <(row|id)>|^ *delive[r]\)' "$@"
-  /usr/bin/grep -rnE 'matrix[-](set|retier|render)|waive[-]row|poker_verb_discharg[e]|discharg[e]\)|(session-poker\.sh|plan_verb_open|plan_verb_swa[p]|pv_next) discharg[e]' "$@" \
-    | /usr/bin/grep -v -e '^payload/scripts/lib/translate\.sh:' -e 'w == "'
+  /usr/bin/grep -rnE 'matrix[-](set|retier|render)|waive[-]row|poker_verb_discharg[e]|discharg[e]\)|(session-poker\.sh|plan_verb_open|plan_verb_swa[p]|pv_next) discharg[e]' "$@"
   /usr/bin/grep -rnE "(session-poker\\.sh|\\\$\\{?[A-Za-z_]*(poker|POKER)[A-Za-z_]*\\}?)[\"']? ($g)([^a-z_-]|\$)|poker_verb_(${g//[-]/_})([^a-z_]|\$)" "$@"
   /usr/bin/grep -rnE --include='*poker*.sh' "^ *([a-z-]+\\|)*($g)(\\|[a-z-]+)*\\)" "$@"
   /usr/bin/grep -rnE 'step[-](line|field)|regressio[n][-]runs|regression_runs_coun[t]|units_set_curren[t]|units_step_(line|fields)|poker_verb_regressio[n]\b|\|budge[t]\||\|regressio[n]\|shar[e]\||confirm[-_]row|matrix_block_ke[y]|poker_verb_budge[t]|budge[t][-]override|session-poker\.sh"? budge[t]|^  budge[t]\)$' "$@" \
