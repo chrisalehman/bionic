@@ -458,7 +458,7 @@ plan_unreadable() {
 # A PARKED RUN (wave-38 T15; D17, REQ-4 AC-4.3). Parking requires an explicit `## Wake Note` (steps/8.md): a plan is
 # parked when it carries a flush-left `## Wake Note` whose first non-blank body line is not `(none)` (with no body,
 # when its heading carries a title). Fenced text is skipped. The
-# empty template section older plans carry (`## Wake Note` / `(none)`) parks nothing. The one reader: close-out.sh
+# template's empty section (`## Wake Note` / `(none)`) parks nothing. The one reader: close-out.sh
 # closes a parked plan without the merge act.
 # plan_parked_why <plan> -> the reason (the Wake Note's first body line, else its heading's title), rc 0; rc 1,
 # nothing printed, when the plan is not parked. A `|` is folded to `/` so it fits a table cell.
