@@ -721,10 +721,10 @@ return 0
 
 # ─── wall_evidence_gate — hooks/canonical-sdlc-evidence-gate.sh ──────────────
 #
-# EVIDENCE GATE: blocks git commits during a canonical-sdlc run when the plan file's
-# `## SDLC State` section is missing the current step's evidence. The rule is: the
-# evidence artifact must be recorded in the plan file *before* the commit that closes
-# the step. Plans without `## SDLC State` pass through unblocked — this wall only
+# EVIDENCE GATE: blocks git commits during a canonical-sdlc run when the run's log
+# is missing the current step's evidence. The rule is: the
+# evidence must be recorded in the run's log *before* the commit that closes
+# the step. A page that declares no `canonical_sdlc_version` passes through unblocked — this wall only
 # enforces against canonical-sdlc runs.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 #
@@ -1692,7 +1692,7 @@ matrix_row_owes() {
 # at <step>, one per line, the reader's order; nothing at `single` rigor. The judge's read of the
 # matrix at the advance to 8: the same readers and the same `matrix_row_owes` the arm walks,
 # so the advance and the commit after it cannot disagree on a row. <head> is the one the evidence
-# review is read at, for a criterion no older table holds. Needs lib/run.sh, lib/units.sh and
+# review is read at. Needs lib/run.sh, lib/units.sh and
 # lib/proof.sh loaded, as every caller of this file has them. 2 when the run's facts could not be read. A fourth argument,
 # any word, prints only those that also await their person (`matrix_row_awaits`, fed as the commit gate feeds it).
 matrix_unruled() {
@@ -2448,7 +2448,7 @@ _eg_reading_gaps() {
       }
     }'
   # The proofs that clear a debt are the run's, read through the kept fold from the plan whose record is read (a dry
-  # copy names none), and so are the approvals, each in the line shape an older plan held.
+  # copy names none), and so are the approvals, each as an `approved: <name> by <who> <at>` line.
   if [ -n "${BIONIC_DEBTS_OPEN:-}" ] && [ "$handed" = 1 ] && declare -F proof_debts_open >/dev/null 2>&1; then
     f="$(proof_approval_lines "${BIONIC_DEBTS_ORIGIN:-$PLAN}" && proof_lines "${BIONIC_DEBTS_ORIGIN:-$PLAN}")" || { printf 'unreadable\n'; return 0; }
     printf '%s\n' "$f" | proof_debts_open "$BIONIC_DEBTS_OPEN"
@@ -2666,8 +2666,8 @@ Fix: write the planted defect this eval must go red on in the criterion's '## Ev
 #
 # INERT BELOW STEP 4, same reasoning as the two arms above: the Tasks table and the
 # Verification Matrix are both Step-3 artifacts, not necessarily complete before then.
-# Each criterion's task is asked of the plan's one reader (lib/plan-read.sh `plan_read_criterion_task`), so a plan at 15,
-# whose criteria table names it in its Task column, is judged as an older plan's blocks are.
+# Each criterion's task is asked of the plan's one reader (lib/plan-read.sh `plan_read_criterion_task`): the task its
+# criteria table names in its Task column.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_prototype_no_matrix_row() {
   local step task_rows proto_ids line id ac ac_task n fix
@@ -2848,11 +2848,10 @@ fi
 
 # ---------- THE RUN PREDICATE (AC-7, AC-8): no open run, nothing to gate ----------
 #
-# The plan is now known to be well-formed — it carries an unfenced `## SDLC State`
-# and a `current:` this gate recognises. Whether there is a RUN is a different
-# question, and it is the one every always-on hook asks before doing its own work:
-# `active_run` is true while `current:` is below 9, or 9 with no `delivered:` Step-9
-# line, and the plan carries no `abandoned:` frontmatter line.
+# The run is now known to stand at a step this gate recognises. Whether there is a
+# RUN is a different question, and it is the one every always-on hook asks before
+# doing its own work: `active_run` is true while the run's log holds a step of 9 or
+# below that is open: not delivered and not abandoned.
 #
 # IT SITS HERE AND NOT EARLIER, and the order is the whole point. Everything above
 # is the gate's judgment about the PLAN — a misplaced plan, a malformed `current:`,
@@ -3076,7 +3075,7 @@ _eg_row_for_worktree() {
   local _want="${1:-}"
   _EG_ROW=""; _EG_ROW_DUP=""; _EG_ROW_COLLIDED=0
   [ -n "$_want" ] || return 0
-  # A tree is the row's latest tree event in the run's log; an older plan's worktree cell is never read.
+  # A tree is the row's latest tree event in the run's log.
   _eg_v15_row_for_tree "$_want"
 }
 
@@ -3399,11 +3398,9 @@ POINTER_STEPS="1 2 3 4"  # Step 6 must reach dispatch for the matrix prefix chec
 # function definitions and nothing else, so no other behaviour moved with it.
 
 # ---------- pre-registered Verification Matrix ----------
-# The Verify gate discharges a Verification Matrix stored in a top-level
-# `## Verification Matrix` section of the plan (separate from ## SDLC State).
-# validate_matrix parses that section — a per-session stack-health line, a
-# tier table (one row per AC), and one indented per-AC evidence block per
-# non-waived row — and fires at current: 5 (via the Step-5 validator) and as a
+# The Verify gate discharges the run's criteria, each criterion's cells being `matrix_load`'s (the Eval design's rows
+# and the run's events); a plan holds no matrix section.
+# validate_matrix walks them, and fires at current: 5 (via the Step-5 validator) and as a
 # prefix check for current: 6..9 (via the dispatcher).
 #
 # Mid-discharge commits: at current: 5, rows with status
@@ -3473,9 +3470,8 @@ Plan: $PLAN
 Fix: $4"
 }
 
-# Placeholder-token test on a single field value. The matrix section lives
-# outside ## SDLC State, so the upstream ban does not cover it; this reuses
-# the same whole-value equality test (is_placeholder_value, defined above).
+# Placeholder-token test on a single field value: the whole-value equality
+# test (is_placeholder_value, defined above).
 matrix_is_placeholder() {
   is_placeholder_value "$1"
 }
@@ -3483,7 +3479,7 @@ matrix_is_placeholder() {
 validate_matrix() {
   local rows ac tier status ev aud block_txt key val val_lc deferred row_is_waived ev_abs ucv owed live_exit head
 
-  # The evidence review is read at the working branch's head, for a criterion no older table holds.
+  # The evidence review is read at the working branch's head.
   head="$(proof_branch_head "$PLAN" "$BIONIC_ROOT" 2>/dev/null)" || head=""
   if ! matrix_load "$PLAN" "$head"; then
     block_matrix "the run's facts could not be read" "run the commit again" \
@@ -3500,7 +3496,7 @@ validate_matrix() {
   while IFS=$'\037' read -r ac tier status ev aud ucv row_is_waived; do
     [ -n "$ac" ] || continue
     aud="$(placeholder_cell "$aud")"
-    # tier enum: the Eval design's type through the scale profile, else an older row's tier cell
+    # tier enum: the Eval design's type through the scale profile
     if ! grep -qE '^T[0-4]$' <<< "$tier"; then
       block_matrix "${ac}'s tier is unknown" "use T0 through T4" \
         "criterion '${ac}' has an invalid tier '${tier}' (want T0..T4: an Eval design type of static, unit, hermetic, live or human)." \
@@ -3520,7 +3516,7 @@ validate_matrix() {
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     deferred=0
     matrix_row_deferred "$PLAN" "$(matrix_owing_step "$PLAN" "$ac")" "$CURRENT" "$status" "$(matrix_owing_open "$PLAN" "$ac")" && deferred=1
-    # waived rows (evidence cell or the AC block carries a `waiver:` entry) are
+    # waived rows (the run holds a waiver of the criterion) are
     # exempt from the per-tier evidence requirement.
     if [ "$row_is_waived" = "1" ]; then
       :
@@ -3968,7 +3964,7 @@ validate_dispatch_ledger() {
   #
   # WHAT STAYS HERE is the pair of facts units.sh cannot know: that this plan owes a
   # ledger at all (the D7 PRESENCE rule, guarded to the triple above), and that every
-  # row's evidence has actually been written on a `- T<n>:` line in ## SDLC State.
+  # landed or launched row is one the run's log holds (below).
   #
   # PRESENCE IS A QUESTION ABOUT THE SECTION, NOT ABOUT THE TABLE, and the plan-read library's heading answer is what
   # answers it. Asking `units_rows` instead moved the basis: that reader exits 1 for a section carrying
@@ -4003,7 +3999,7 @@ Fix: repair each row named above; the columns are $(units_columns 1)"
   fi
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
   # A ROW HAS NO LINE: a row's landing and its launch are the reader's, and a row the reader does not answer as the
-  # table reads it is owed until the log holds the fact. An older plan's `- T<n>:` lines are never read.
+  # table reads it is owed until the log holds the fact.
   findings="$(units_findings "$PLAN" "$(_eg_roster_path)" v15)"
   for id in $(printf '%s\n' "$findings" | awk '$1 == "evidence" { print $2 }'); do
     _eg_v15_ask "${id}'s landing or launch, which the run's log does not hold as its row reads"

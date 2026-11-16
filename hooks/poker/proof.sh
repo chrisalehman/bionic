@@ -12,7 +12,7 @@
 # event per finding the table defers (lib/proof.sh `proof_finding_deferrals`); the person's move to defer carries the
 # sentence as its `stated=` field (`finding-move … defer '<words>' '<why>' '<sentence>'`). The sentence is folded to
 # one line of single spaces (`deferral_fold`, lib/said.sh's `said_fold`, the one fold the changelog is read through as
-# well), and a `\` or a `"` in it is written `\\` or `\"`, as an older plan's quoted field held it. The other half
+# well), and a `\` or a `"` in it is written `\\` or `\"`. The other half
 # of the debt is the changelog: `release-check` prints each deferral stated (the sentence is in `CHANGELOG.md`) or
 # unstated.
 deferral_fold() {  # <text> -> its white space and control characters folded to single spaces, trimmed: lib/said.sh's one fold
@@ -167,8 +167,8 @@ walk_head() {
 
 # THE WALK DISCHARGES WHAT IT CONFIRMS, AND A RUN HAS ONE WALK RECORD THAT ONLY GROWS. Each row of the walk's verdict
 # table (proof_verdicts output on stdin) must name a criterion the plan names (lib/reader.sh `reader_criteria`); a
-# CONFIRMED row is one proof naming the criterion, the record as its evidence, the shape the translation gives an older
-# plan's discharged row, so the cell answer reads it with no read of its own; any other verdict leaves the criterion
+# CONFIRMED row is one proof naming the criterion, the record as its evidence, the shape the cell answer reads as
+# discharged with no read of its own; any other verdict leaves the criterion
 # as it stands. The record must hold a row for every criterion whose standing proof names a walk's record (the run's
 # walk proofs, at any head), so the record the walk gate reads is the one every walked criterion names: a later record
 # that leaves one out would take the walk from under it. The standing facts are read before the new walk is pending,
@@ -1687,8 +1687,7 @@ DSP_READINGS
   # the record holds.
   # THE RUN'S DEBTS. Each act is one `debt` event in the run's log through the
   # type's one writer (lib/proof.sh `proof_debt_event`, whose comment holds the fields), its state the newest event of
-  # its concept and kind, read back through the reader (`proof_debt_items`); an older run's debt.md is read by the
-  # translation and never written. `add` reads a record's `debt:` lines, a reading's or any other's
+  # its concept and kind, read back through the reader (`proof_debt_items`). `add` reads a record's `debt:` lines, a reading's or any other's
   # (`proof_record_debts`, the registering verb's debt arm), holds each to the one grammar (lib/debt.sh
   # `debt_line_ok`), and writes a debt per concept and kind the run does not hold yet; `touched` adds one to the
   # touches of every unburned debt of each concept its one operand names, blank-separated, the run read once for all

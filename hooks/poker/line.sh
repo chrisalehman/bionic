@@ -34,12 +34,11 @@ row_writer() {  # <roster> <plan> <row> <agent cell>
 #   - a live review row (`units_live_rows`) lands only when the judge reads every question it carries covered at
 #     the working head (lib/units.sh `units_live_held`, over lib/proof.sh `facts_state`): until then a landing
 #     past its reading owes it another pass, and the refusal names each question that is not covered;
-#   - its artifact: the ledger line's `artifact` cell, else the row's own `## Tasks` artifact cell (a
-#     task-scale plan carries no ledger), else the one record under `<docs-root>/record/` its Files
+#   - its artifact: the row's `## Tasks` artifact cell, else the one record under `<docs-root>/record/` its Files
 #     name (a `.progress.md` and `assumptions.md` are bookkeeping, not the artifact). The file exists,
 #     is no symbolic link, and lies under the docs root's `record/`. A row naming none, or several,
 #     is refused naming the cell to edit in the plan: artifact when the Tasks header has the column, else Files;
-#   - a review row: a `proved: kind=review` line under `## SDLC State` names that record;
+#   - a review row: a review proof of the run names that record;
 #   - the working head reads as a commit;
 #   - no ruling for the row's writer is unread.
 deliver_check() {
@@ -111,8 +110,8 @@ DELIVER_FILES
       die "REFUSED — the artifact $(clean "$art") of $PV_ID carries a blank or a |, which no plan cell can hold; the plan is unchanged."
       exit 2 ;;
   esac
-  # A path is read as the plan spells it: absolute, from the docs root (`record/…`, as proof lines and
-  # older ledgers write it), or from the repository (`.bionic/docs/record/…`, as Files cells do).
+  # A path is read as the plan spells it: absolute, from the docs root (`record/…`, as a proof's
+  # evidence writes it), or from the repository (`.bionic/docs/record/…`, as Files cells do).
   case "$art" in
     /*) abs="$art" ;;
     record/*) abs="$docs/$art" ;;
@@ -272,14 +271,13 @@ DELIVER_FILES
 # A request counts when its `tree=` is the project or under it and it was asked at or after the record's
 # first `line/v1` event. Times are the events' own `at=`, never a message's.
 #
-# UNMEASURED. A run whose landings no line recorded (a version-14 record with `landed:` lines and no
-# `line/v1` event, a run open across the upgrade) prints the one line `landings: unmeasured — the landing record
+# UNMEASURED. A run whose landings no line recorded prints the one line `landings: unmeasured — the landing record
 # holds no line/v1 events`, and no row.
 #
 # THE LINES ARE THE READER'S. The report folds a history, every ready, run and verdict in turn, which the reader's
 # standing facts no longer hold, so it reads the reader's own line source (lib/reader.sh `reader_events`): the run's
-# log, or a version-14 run's homes as the translation reads them. A landing carries the kind its writer gave it; one
-# with none (a plan's ledger landing the record never held) is not the line's, and is not measured. A caller names
+# log. A landing carries the kind its writer gave it; one
+# with none is not the line's, and is not measured. A caller names
 # the plan, or the landing record the plan owns, which is joined back to its plan by the reader's own rule.
 #
 # FAIL-SOFT. A run with no lines is the line with zeros. A line this fold reads (`ready`, `verdict`, `returned`,
@@ -501,19 +499,17 @@ landing_report() {  # <plan or landing record> <project root> <rows yes|no> [ins
 #   amends         the log's `run/v1|ev=hand|what=amend|…` (`amend`), `what=hold` (`hold`) and `what=extend` (`extend`),
 #   holds          one per act, placed by its `at=`. The roster row each verb also writes is the agent's contract and
 #   extensions     never a count: the rosters are session state a close wipes, and the run's log is not.
-#   waivers        each waiver event `waive` writes, of a question or a criterion, and the plan's older `waived:
-#                  question=…` line under `## SDLC State`. Fenced text is skipped, as every reader of the plan skips it.
+#   waivers        each waiver event `waive` writes, of a question or a criterion.
 #   second-regressions  a whole run a person started, past the first. The tick and the orchestrator start the whole
 #                  run as the machine does, so only a person's start is a hand-hold: the landing record's regression
 #                  run lines (`ev=run`, a log under `regression-run-`, or `kind=regression`) past the record's first
 #                  whose `starter=person` (`regression-run --starter person`), each placed by its `at=`. A run line
-#                  older than `starter=` names no starter, and its run is counted as it was before the field: by its
-#                  `proved: kind=regression` line under `## SDLC State` past the first (lib/proof.sh `proof_fields`),
+#                  that names no starter has its run counted by its regression proof event past the first,
 #                  unless that proof cites a log whose run line names a starter, which the run lines count.
 #   adoptions      the log's `run/v1|ev=hand|what=adopt|…`, one per agent `adopt` took over, placed by its `at=`.
 #                  A verb act: never counted as by-hand.
-#   fixed          the plan's `moved: <record>#<n> to=fixed row=<T> …` line under `## SDLC State` (`finding-move …
-#                  fixed`, wave-36 T8), one per line (wave-36 T14; AC-7.6). A verb act: never counted as by-hand.
+#   fixed          the log's `finding` events `to=fixed` (`finding-move … fixed`), one per event. A verb act: never
+#                  counted as by-hand.
 #                  A move is placed by its time against the landing of the row it names, the row's first `published`
 #                  event: typed at or before that landing it is the landing's own business and outside the count,
 #                  typed after it a hand marked the fix, inside. A move naming a row with no landing is unplaced.
@@ -524,8 +520,7 @@ landing_report() {  # <plan or landing record> <project root> <rows yes|no> [ins
 #
 # THE WINDOW. `--since <ISO>` and `--until <ISO>` count a hand-hold only when its own line's time is after the start
 # and at or before the end; either end may be absent, and absent is open. Each source is placed by the time its writer
-# put on it: the landing record's and the log's `at=`, an older fill ledger's `at=`, the ISO on a `waived:` line, a
-# `moved:` or regression proof line's `at=`, and the matrix waiver's time. An end written to the minute (`<date>T<hh>:<mm>Z`, the shape close-out writes `delivered:` in) reaches through
+# put on it: the log's `at=` on each event. An end written to the minute (`<date>T<hh>:<mm>Z`, the shape close-out writes `delivered:` in) reaches through
 # that minute's last second, so an act in the minute an end names is inside it. A waiver of the date form is placed
 # when its whole day falls on one side of each end. A line that cannot be
 # placed (a line that carries no time, a date form a window end falls inside, a move naming a row with no landing) is
