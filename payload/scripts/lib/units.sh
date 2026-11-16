@@ -1128,7 +1128,7 @@ units_floor_holds() { _units_sched holds "${1:-}" "${2:-}"; }
 # gives an open integrate row `release` in a plan that carries a release; one whose release row is dropped carries none,
 # so its integrate row is not listed for it. THE RELEASE APPROVAL IS THE RUN'S: with no <id> the list names `release`
 # while a row that integrates is open, whatever the plan's other rows, because the advance to 8 and the close ask it
-# of every run that integrates (`units_integrates`); the approve command and the card take it from here.
+# of every run that integrates (`units_release_asked`); the approve command and the card take it from here.
 units_approval_names() {
   local rows waits
   if [ -n "${2:-}" ]; then
@@ -1161,13 +1161,14 @@ units_order() {
     END { if (reg == "" || !rel) exit 1; print reg }'
 }
 
-# units_integrates <plan> -> the id of the plan's first row that integrates (kind integrate, not dropped, open or landed),
-# exit 0; nothing, exit 1, for a plan with none, an epic that carves its waves and stops at Step 3 among them. THE ONE
-# READING of whether a run is asked the release approval: `current 8` (hooks/poker/judge.sh) and the close
-# (close-out.sh `facts_judge`) ask it at the working head whenever this holds, whatever the plan's other rows, so a run
-# with no release row is held to the person's word as one in the release order is.
-units_integrates() {
-  units_rows "${1:-}" 2>/dev/null | awk -F'\t' '$3 == "integrate" && tolower($10) != "dropped" { print $1; f = 1; exit } END { exit !f }'
+# units_release_asked <plan> -> exit 0 when the run is asked the release approval: the plan has a row that integrates
+# (kind integrate, not dropped, open or landed), whatever its other rows, or is in the release order (`units_order`), as
+# it was asked before; exit 1 otherwise, an epic that carves its waves and stops at Step 3 among them. Prints nothing.
+# THE ONE READING of it: `current 8` (hooks/poker/judge.sh) and the close (close-out.sh `facts_judge`) ask the approval
+# at the working head whenever this holds, so a run with no release row is held to the person's word as a wave is.
+units_release_asked() {
+  units_order "${1:-}" >/dev/null 2>&1 && return 0
+  units_rows "${1:-}" 2>/dev/null | awk -F'\t' '$3 == "integrate" && tolower($10) != "dropped" { f = 1; exit } END { exit !f }'
 }
 
 # _units_ext_re -> the shape of an external prerequisite token, as an awk ERE (wave-21 T4; D3).

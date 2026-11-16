@@ -2030,11 +2030,12 @@ facts_judge() {
     FACTS_SAYS="the working branch has no commit"
     return 0
   fi
-  # THE APPROVED HEAD: whenever the plan has a row that integrates (lib/units.sh `units_integrates`), whatever its other
-  # rows, the head closed is the one the newest `approved: release` line names (lib/proof.sh `proof_approved_head`), or
-  # one that only prose past it follows (`proof_prose_past`), as `current 8` admits it; a code commit landed after the
-  # approval is refused here, naming both heads. A plan with no row that integrates is asked no approval.
-  if units_integrates "$PLAN" >/dev/null 2>&1; then
+  # THE APPROVED HEAD: whenever the plan has a row that integrates, whatever its other rows, or is in the release order
+  # (lib/units.sh `units_release_asked`), the head closed is the one the newest `approved: release` line names
+  # (lib/proof.sh `proof_approved_head`), or one that only prose past it follows (`proof_prose_past`), as `current 8`
+  # admits it; a code commit landed after the approval is refused here, naming both heads. A plan with neither is asked
+  # no approval.
+  if units_release_asked "$PLAN" >/dev/null 2>&1; then
     ah="$(proof_approved_head "$PLAN" release 2>/dev/null)" || ah=""
     if [ -z "$ah" ]; then
       FACTS_RC=1

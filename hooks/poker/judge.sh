@@ -84,13 +84,13 @@ cur8_unruled_line() {
 # STEPS 7 AND 8 ASK IT (wave-35 T10; D10, AC-1.2): Step 7 is entered once the floor is Step 6's last act, so
 # `current 7` is held to the same judge `current 8` is, and a run never leaves Step 6 with its floor behind
 # the head.
-# WHENEVER THE PLAN HAS A ROW THAT INTEGRATES (lib/units.sh `units_integrates`), whatever its other rows, `current 8`
-# asks besides that the newest `approved: release` line's head (lib/proof.sh `proof_approved_head`) is the working head,
-# or one that only prose touching no release-set file follows (lib/proof.sh `proof_prose_past`): every run that reaches
-# the merge stops at the release approval card, a run with no release row as one in the order build, regression,
-# review, release (`units_order`). The whole run need not be at that head: the regression judge holds it covered past
-# its run when every later commit is proved by the suites its row named. A plan with no row that integrates is asked no
-# approval.
+# WHENEVER THE PLAN HAS A ROW THAT INTEGRATES, whatever its other rows, or is in the order build, regression, review,
+# release (`units_order`) (lib/units.sh `units_release_asked`), `current 8` asks besides that the newest `approved:
+# release` line's head (lib/proof.sh `proof_approved_head`) is the working head, or one that only prose touching no
+# release-set file follows (lib/proof.sh `proof_prose_past`): every run that reaches the merge stops at the release
+# approval card, a run with no release row as a wave does. The whole run need not be at that head: the regression judge
+# holds it covered past its run when every later commit is proved by the suites its row named. A plan with neither is
+# asked no approval.
 # THE HEAD IS THE WORKING BRANCH'S REF (wave-35 T10; AC-1.7): lib/proof.sh `proof_branch_head`, the judge's one
 # reading of it, never the head of a checkout, so a branch no checkout holds is judged where its ref points,
 # and a branch that names no commit (deleted, or never made) is refused: there is no head, so the floor is
@@ -169,7 +169,7 @@ cur7_judge() {  # <step>   (named for Step 7, the first step it judges; it judge
       exit 1 ;;
   esac
   PV_ORDER="$(units_order "$PV_PLAN" 2>/dev/null)" || PV_ORDER=""
-  PV_INTEG="$(units_integrates "$PV_PLAN" 2>/dev/null)" || PV_INTEG=""
+  PV_INTEG=""; ! units_release_asked "$PV_PLAN" 2>/dev/null || PV_INTEG=yes
   # THE RULING IS THE MERGE ADVANCE'S: at 8 every matrix row is ruled, or the advance is refused naming each one.
   local unruled="" ac
   if [ "$step" = 8 ] && ! unruled="$(cur8_unruled)"; then
