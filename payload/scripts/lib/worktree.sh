@@ -1231,8 +1231,8 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
   # `run.log`, beside the landing record that nothing writes any more, is proved writable here, and created by
   # nothing but the append; a log that cannot be written is refused with nothing changed: a path that
   # is a symlink, a FIFO, a device or a directory is refused unopened (`_wt_proofs_prove`).
-  # The row is the plan's `## Tasks` row whose `worktree` cell names this tree. The landing is written once the
-  # merge is made (its `published` event, below).
+  # The row is the plan's `## Tasks` row whose `worktree` cell names this tree. A declared red's debt goes there;
+  # the landing's own `published` event is the landing line's to write (lib/line.sh `line_published_event`), never this.
   proofs="none"; proofs_row=""
   if [ -n "$plan" ]; then
     proofs="$(_wt_proofs_path "$root" "$plan")" && proofs="${proofs%/*}/run.log" && _wt_proofs_prove "$proofs" || {
@@ -1372,18 +1372,10 @@ worktree_land() {  # <worktree path> <onto> [<bound plan>] [<lands_red> <red_evi
     _wt_refuse "${moved} merge=${merge_sha:-<none>} undo=failed — $(_wt_undo_failed_fix "$co" "$undo_on" "$merge_sha" "$parent"), then ${fix}"; return 2
   fi
 
-  # THE LANDING IS ONE `published` EVENT: the row, the merge, the branch and the head judged, appended before
-  # the tree goes. It carries no kind, as the `landed:` header it replaces carried none. The stamp lines judged at
-  # <head> are copies of the run lines the booked runs already wrote, so they are not copied again. The merge is
-  # not undone if the append fails; the tree is kept instead, so its stamp file still holds the proof.
-  # ONE INSTANT FOR THE LANDING (wave-27 T31; A-orch-85): the record's `at=` and, for a declared
-  # red, the `landed-red-at=` its debt line carries (wave-27 T67: taken when the debt was written).
+  # ONE INSTANT FOR THE LANDING: for a declared red, the `landed-red-at=` its debt line carries, taken when the
+  # debt was written.
   landed_at="${landed_at:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
   red_said=""; [ -z "$landed_red" ] || red_said=" landed-red=${landed_red} landed-red-at=${landed_at}"
-  if [ "$proofs" != none ] && ! _wt_log_put "$proofs" published "row=${proofs_row:-—}" "commit=${merge_sha}" "branch=${branch}" "head=${head}"; then
-    _wt_say "LANDED branch=${branch} onto=${onto} checkout=${co} merge=${merge_sha} kept=${wt_abs}${red_said} proofs=unwritten — ${proofs} could not be appended after the merge (${_WT_PROOFS_SAW:-the append failed}), so the tree and its stamp file are kept; append the landing to it by hand, then remove the tree"
-    return 0
-  fi
 
   # No --force here either. If git refuses now, the merge has landed and the
   # tree has not gone; the line says both so the operator is not left guessing
