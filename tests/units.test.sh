@@ -988,6 +988,10 @@ expect_eq "DROP-1 T1 and T3, one of them launched, read dropped by the reader an
 call units_drop_event "$DP" T2 'the person said so'; DP_RC=$CALL_RC; call units_drop_event "$DP" T2 'a|b'
 expect_eq "DROP-2 the one writer appends the person's words, and refuses words holding a bar" "0 2 1 state=dropped" "$DP_RC $CALL_RC $(grep -c '|ev=drop|row=T2|why=the person said so|at=' "$LV_LOG") $(dq status T2 | head -1)"
 
+section "§UNTIMED — a dispatch with no instant, in the one row fold: the reader's dispatched while no other fact of its row stands, never the fill's launch"
+printf 'run/v1|ev=%s\n' 'step|n=4|at=2026-11-01T00:00:01Z' 'published|row=T2|commit=c2|by=w|at=2026-11-01T00:00:02Z' 'dispatch|row=T1|name=a1|brief=b|sum=s' 'dispatch|row=T2|name=a2|brief=b|sum=s' > "$LV_LOG"
+expect_eq "UNTIMED-1 alone it reads dispatched and after a landing landed, and the fill holds neither launched" "state=dispatched state=landed pending/ landed/" "$(dq status T1 | head -1) $(dq status T2 | head -1) $(lv T1 "$DP") $(lv T2 "$DP")"
+
 section "§NAMED — a task at 15 names in its deps the approval it waits on: admitted, held until it stands, its name the one approve takes"
 sed 's/| T1 | 30m/| T1, approval:D7 | 30m/' "$DP" > "$DP.n"; mv "$DP.n" "$DP"; sed 's/approval:D7/aproval:D7/' "$DP" > "$DP.bad"; printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=4' 1Z 'approval|key=step3|by=me' 2Z 'published|row=T1|commit=c1|by=w' 3Z > "$LV_LOG"
 expect_eq "NAMED-1 the wait is admitted; a misspelled one is refused, naming it" "|T2: dep aproval:D7 names no row in the table" "$(call units_validate "$DP")|$(call units_validate "$DP.bad")"
