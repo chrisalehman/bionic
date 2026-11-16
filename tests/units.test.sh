@@ -36,6 +36,7 @@
 #   §DROP    a drop in the run's log reads dropped to the reader and the fill at 15, launched or not; a wait on it is met
 #   §NAMED   a task at 15 names in its deps the approval it waits on; the fill takes every wait from plan_read_waits
 #   §ORDER-15  the order and its post-release exception hold at 15, a row's state the run's, the exception's waits the reader's
+#   §DEPS-15   a row at 15 waits by its deps and kind alone: no thread, step hold or suspect; a questions tag judged
 #
 # WHY HEADER-KEYED IS THE WHOLE POINT is lib/units.sh's own header. §2 is its assertion: the same rows with every
 # column REVERSED must produce a byte-identical TSV.
@@ -1431,5 +1432,24 @@ expect_eq "ORD15-4 a review past the release waiting on the fix T8: refused whil
 o5 T1 4 build — a.sh $O5_REG $O5_REV $O5_REL T8 7 build — b.sh T9 7 review T8 r/T9.md; O5_A="$(call units_post_readers "$O5")"; sed -i.bak 's/| review | t | T8 |/| review | t | T1 |/' "$O5"
 expect_eq "ORD15-5 the card's question at 15, as release-approval's §POST asks it at 14: the review past the landed release waiting on the fix is named, open and unread; waiting on T1 it is not" \
   "T9	pending	unread|" "$O5_A|$(call units_post_readers "$O5")"
+
+section "§DEPS-15 — a row at 15 waits by its deps and its kind's default alone: no thread, no step hold, no suspect, the release approval once, the questions tag judged at the write; the shape before reads keeps its answers"
+W5="$SANDBOX/docs/plans/e/w5.plan.md"; W4="$SANDBOX/docs/plans/e/w4.plan.md"; mkdir -p "$SANDBOX/docs/record/w5"
+W5_ROWS=(T2 4 build two T3 b.sh T3 4 build three — c.sh T12 4 build late — e.sh T5 5 test reg — r/T5.md T6 6 review 'rev · questions: evidence' — r/T6.md T9 7 doc rel — CHANGELOG.md T10 8 integrate merge approval:release r/T10.md)
+printf -- '---\ncanonical_sdlc_version: 15\n---\n## Tasks\n| id | step | kind | task | deps | size | serves | files | artifact |\n|---|---|---|---|---|---|---|---|---|\n' > "$W5"; printf '| %s | %s | %s | %s | %s | 30m | R | %s | — |\n' "${W5_ROWS[@]}" >> "$W5"
+printf -- '---\ncurrent: 6\n---\n## Tasks\n| id | step | kind | task | agent | deps | size | serves | Files | status |\n|---|---|---|---|---|---|---|---|---|---|\n' > "$W4"; printf '| %s | %s | %s | %s | — | %s | 30m | R | %s | pending |\n' "${W5_ROWS[@]}" >> "$W4"
+printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=6' 1Z 'approval|key=step3|by=me' 2Z > "$SANDBOX/docs/record/w5/run.log"
+w9() { printf '%s %s' "$(call units_waiting "$1" 6 | awk -F'\t' '$1 == "T9" { print $2 }' | sort -u | paste -sd' ' -)" "$(call plan_read_waits "$1" T9 | awk -F'\t' '$2 == "wait" { print $3 }' | paste -sd' ' -)"; }
+expect_eq "DEPS-1 a late build row at 15 asks no row to name it, each already waits on it through its kind's default; the shape before reads still threads it" \
+  "|T5 T6 T9 T10" "$(call units_thread_rows "$W5" T12 | cut -f1 | paste -sd' ' -)|$(call units_thread_rows "$W4" T12 | cut -f1 | paste -sd' ' -)"
+expect_eq "DEPS-2 the release text at 15 waits on what it reads and on no step, for the fill and the reader; the shape before reads still holds it for step 7" \
+  "head approval:plan|step:7 step:7 approval:plan" "$(w9 "$W5")|$(w9 "$W4")"
+expect_eq "DEPS-3 a wait written in deps at 15 is the person's word and draws no suspect clause; the shape before reads still doubts it" "|T2	T3" "$(call units_suspect "$W5")|$(call units_suspect "$W4" | cut -f1,2)"
+expect_eq "DEPS-4 an integrate row at 15 whose deps name the release approval waits on it once" \
+  "proof:regression,proof:review,head,approval:release" "$(call plan_read_waits "$W5" T10 | head -1 | cut -f4)"
+DQ_TAIL="which is no list of questions: each one of evidence adversarial structure, once, comma-separated with no space"; DQ_OUT="$(call units_validate "$W5"; printf '|%s' "$CALL_RC")"
+for v in 's/: evidence |/: evidense |/' 's/: evidence |/: |/' 's/: evidence |/: evidence,evidence |/' 's/| three |/| three · questions: structure |/'; do sed "$v" "$W5" > "$W5.v"; DQ_OUT="$DQ_OUT $(call units_validate "$W5.v")"; done
+expect_eq "DEPS-5 at 15 the validator holds the questions tag to the verb's rule: a word outside the set, an empty tag, a question twice, a tag on a row no review" \
+  "|0 T6: task declares questions: evidense, $DQ_TAIL T6: task declares questions: (empty), $DQ_TAIL T6: task declares questions: evidence,evidence, $DQ_TAIL T3: task declares questions: structure; only a review row is dealt questions" "$DQ_OUT"
 
 finish
