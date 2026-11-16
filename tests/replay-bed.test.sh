@@ -297,18 +297,18 @@ expect_contains "…and with that approval cancelled in the log, it puts the rel
   "$(render "${PD:-/nonexistent}" "${PP:-/nonexistent}")"
 section "OPEN"
 opened() { ( . "$RD/lib/run.sh" && run_open "$1" ); echo $?; }
-plant() {  # <wave> <current:> <Step 9 line> [log line…] -> the plan's path; its run log holds the lines given
+plant() {  # <wave> [log line…] -> the plan's path at 15; its run log holds the lines given
   local w="$1" p="$WORLD_ROOT/open/plans/e/$1.plan.md"; mkdir -p "${p%/*}" "$WORLD_ROOT/open/record/$w"
-  printf -- '---\ncanonical_sdlc_version: 15\n---\n\n## SDLC State\n\ncurrent: %s\n%s\n' "$2" "$3" > "$p"; shift 3
+  printf -- '---\ncanonical_sdlc_version: 15\n---\n' > "$p"; shift
   [ $# -eq 0 ] || printf '%s\n' "$@" > "$WORLD_ROOT/open/record/$w/run.log"
   printf '%s' "$p"
 }
-expect_eq "a run whose delivery is only its log's step 9 is closed, though its plan says current: 4" 1 \
-  "$(opened "$(plant gone 4 '- Step 4: opened' 'run/v1|ev=step|n=9|at=2026-11-01T00:00:00Z')")"
-expect_eq "a run whose log stands at step 8 is open, though its plan says current: 9" 0 \
-  "$(opened "$(plant at9 9 '- Step 9: closing' 'run/v1|ev=step|n=8|at=2026-11-01T00:00:00Z')")"
+expect_eq "a run whose delivery is only its log's step 9 is closed" 1 \
+  "$(opened "$(plant gone 'run/v1|ev=step|n=9|at=2026-11-01T00:00:00Z')")"
+expect_eq "a run whose log stands at step 8 is open" 0 \
+  "$(opened "$(plant at9 'run/v1|ev=step|n=8|at=2026-11-01T00:00:00Z')")"
 expect_eq "a run whose log holds an abandon is closed" 1 \
-  "$(opened "$(plant quit 6 '' 'run/v1|ev=step|n=6|at=2026-11-01T00:00:00Z' 'run/v1|ev=abandon|why=w|at=2026-11-01T00:00:01Z')")"
+  "$(opened "$(plant quit 'run/v1|ev=step|n=6|at=2026-11-01T00:00:00Z' 'run/v1|ev=abandon|why=w|at=2026-11-01T00:00:01Z')")"
 expect_eq "the closed fixture runs read closed and the cut run open" "1 1 0" "$(opened "$P49") $(opened "$(ls "$X"/wave-46-asks-nothing/plans/*/*.plan.md)") $(opened "$(ls "$X"/wave-49-mid/plans/*/*.plan.md)")"
 
 section "FOLLOWS-CONTINUATION"

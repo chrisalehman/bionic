@@ -516,13 +516,13 @@ section "§PROSE — a commit whose every path is under the tracked docs home is
 # it). Those files are prose, but the judge knew only the state home's prefix and a short list, so a commit of
 # `docs/designs/` after a review read `owes`, and the regression walk named it unproved. The cover for every
 # question and the regression's walk now read the tracked home too. FIXTURE FIDELITY: a real repository and a
-# plan file in the shape the judge reads (`## SDLC State` with no readings), the judge's own functions
+# page at 15 whose log holds no readings, the judge's own functions
 # (`facts_cover`, `_proof_past_f`) sourced from the library and run over it.
 PR_R="$SANDBOX/prose"; mkdir -p "$PR_R/.bionic/docs/plans"
 git -C "$PR_R" init -q && git -C "$PR_R" config user.email t@example.com && git -C "$PR_R" config user.name t
 printf 'a\n' > "$PR_R/a.sh"; git -C "$PR_R" add a.sh; git -C "$PR_R" commit -qm base
 PR_BASE="$(git -C "$PR_R" rev-parse HEAD)"
-printf -- '---\ncurrent: 6\n---\n\n## SDLC State\n\n' > "$PR_R/.bionic/docs/plans/p.plan.md"
+printf -- '---\ncanonical_sdlc_version: 15\n---\n\n' > "$PR_R/.bionic/docs/plans/p.plan.md"
 pr_commit() {  # <message> <path>... -> the new head; each path gets a line of text
   local m="$1" f; shift
   for f in "$@"; do case "$f" in */*) mkdir -p "$PR_R/${f%/*}" ;; esac; printf 'x %s\n' "$m" >> "$PR_R/$f"; done
