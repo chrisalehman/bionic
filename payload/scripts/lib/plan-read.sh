@@ -211,7 +211,7 @@ plan_read_dropped() {  # <plan> -> one id per line, in table order; 1 none, 2 no
 }
 
 # plan_read_waits <plan> [id] -> per row, in table order: `<id><TAB>kind<TAB><kind><TAB><waits><TAB><implied>` first,
-# <waits> every wait the row has as it is spelled (its reads or its kind's default, the release, its deps), comma-joined,
+# <waits> every wait the row has as it is spelled (its kind's default, the release, its deps), comma-joined,
 # so the scheduler judges these and reads no cell, and <implied> those of them no cell wrote (its kind's default, the
 # release an integrate row is given), so a rule that holds for an implied wait alone is applied by its asker; then one line per
 # wait, `<id><TAB>wait<TAB><token>` for one that names no row (an approval, a proof, a step, an external
@@ -219,12 +219,11 @@ plan_read_dropped() {  # <plan> -> one id per line, in table order; 1 none, 2 no
 # <reads> the reads that name that row, comma-joined, as the row wrote them. Of <id> alone when given: 1
 # when the table lacks it or there is no table, 2 when the plan is not a file.
 #
-# THE TOKENS ARE THE FILL'S (lib/units.sh, its scheduler): the reads cell, or the kind's default when the
-# cell is empty, then the deps cell. A table with no reads cell is the nine-cell shape, whose row waits
-# on its deps (the rows it names, an outside event's token, an approval of the person's it names) and on
-# what its kind and step imply and on nothing else, so it always takes the kind's default. A named
-# approval is one `wait` line whichever cell named it, so every reader of a wait reads it here. The kind
-# default and the Files matcher are units.sh's own awk, sourced, never restated here.
+# THE TOKENS ARE THE FILL'S (lib/units.sh, its scheduler): the kind's default, then the deps cell. A row of
+# the nine cells waits on its deps (the rows it names, an outside event's token, an approval of the person's it
+# names) and on what its kind and step imply and on nothing else. A named approval is one `wait` line, so every
+# reader of a wait reads it here. The kind default and the Files matcher are units.sh's own awk, sourced, never
+# restated here.
 # WHICH ROWS A READ NAMES IS DECIDED HERE ALONE, and the scheduler takes its writers from these lines: a
 # row id is that row, itself included, so a row that waits on itself waits for ever; a path is each other
 # row whose Files write it, so a row's artifact is that row; `head` is each other row writing the tracked
@@ -260,17 +259,12 @@ plan_read_waits() {
     {
       split("", c)
       for (k = 1; k <= NF; k++) { e = index($k, "="); if (!(substr($k, 1, e - 1) in c)) c[substr($k, 1, e - 1)] = substr($k, e + 1) }
-      if ("reads" in c) hasreads = 1
-      if ("status" in c) hasstatus = 1
-      n++; id[n] = c["id"]; stp[n] = c["step"]; knd[n] = c["kind"]; fil[n] = c["files"]; rd[n] = c["reads"]; dep[n] = c["deps"]; tsk[n] = c["task"]
+      n++; id[n] = c["id"]; stp[n] = c["step"]; knd[n] = c["kind"]; fil[n] = c["files"]; dep[n] = c["deps"]; tsk[n] = c["task"]
       at[id[n]] = n
     }
     END {
       if (want != "" && !(want in at)) exit 1
       for (i = 1; i <= n; i++) if (knd[i] == "doc" && stp[i] ~ /^[0-9]+$/ && stp[i] + 0 >= 7) hasrel = 1
-      # A TABLE WITH NO READS CELL AND NO STATUS CELL IS A PAGE AT 15, whose deps cell is where a row writes the release
-      # approval; the shape before reads (a status cell, no reads cell) keeps its answers.
-      at15 = (!hasreads && !hasstatus); oldshape = (!hasreads && hasstatus)
       for (i = 1; i <= n; i++) {
         code[i] = writes_head(fil[i]); m = split(fil[i], a, ",")
         for (k = 1; k <= m; k++) {
@@ -278,15 +272,16 @@ plan_read_waits() {
           if (e == "" || e !~ /[\/.*?]/ || e ~ /[ \t]/) continue
           sub(/!$/, "", e); nfe[i]++; fe[i, nfe[i]] = e; if (in_docs(e)) docs[i] = 1
         }
-        r = rd[i]; kd = (r !~ /[A-Za-z0-9]/); rel = 0; if (kd) r = kdef(knd[i], stp[i])
-        # A NINE-CELL REVIEW ROW READS THE QUESTIONS ITS TASK CELL DECLARES: its live read is `live:head:<q>[+<q>]`,
-        # the token the scheduler judges per question, in place of the bare default; a row with no tag keeps it.
-        if (kd && !hasreads && knd[i] == "review" && (q = index(tsk[i], " · questions: "))) {
+        r = kdef(knd[i], stp[i])
+        # A REVIEW ROW READS THE QUESTIONS ITS TASK CELL DECLARES: its live read is `live:head:<q>[+<q>]`, the token the
+        # scheduler judges per question, in place of the bare default; a row with no tag keeps it.
+        if (knd[i] == "review" && (q = index(tsk[i], " · questions: "))) {
           q = substr(tsk[i], q + length(" · questions: ")); e = index(q, " · "); if (e) q = substr(q, 1, e - 1)
           sub(/[^a-z,].*$/, "", q); sub(/,$/, "", q); gsub(/,/, "+", q)
           if (q != "") sub(/live:head/, "live:head:" q, r)
         }
-        if (hasrel && knd[i] == "integrate" && (" " r (at15 ? "," dep[i] : "") ",") !~ /[ \t,]approval:release[ \t]*,/) { r = r ", approval:release"; rel = 1 }
+        # THE RELEASE APPROVAL THE DEPS CELL ALREADY NAMES is not given again, so it is spelled once.
+        if (hasrel && knd[i] == "integrate" && (" " r "," dep[i] ",") !~ /[ \t,]approval:release[ \t]*,/) r = r ", approval:release"
         mr = split(r, a, ","); m = split(r "," dep[i], a, ","); split("", wr1); split("", im1)
         for (k = 1; k <= m; k++) {
           t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t)
@@ -295,14 +290,14 @@ plan_read_waits() {
           if (t !~ /[A-Za-z0-9]/) continue
           nt[i]++; tk[i, nt[i]] = t; rk[i, nt[i]] = o; if (o == "head") rhead[i] = 1; if (o == "record") rrec[i] = 1
           sp[i] = sp[i] (sp[i] == "" ? "" : ",") o
-          if (k <= mr && (kd || (rel && k == mr))) im1[o] = 1; else wr1[o] = 1
+          if (k <= mr) im1[o] = 1; else wr1[o] = 1
         }
         for (o in im1) if (!(o in wr1)) ip[i] = ip[i] (ip[i] == "" ? "" : ",") o
       }
       for (i = 1; i <= n; i++) {
         if (want != "" && id[i] != want) continue
         printf "%s\tkind\t%s\t%s\t%s\n", id[i], knd[i], sp[i], ip[i]
-        if ((knd[i] == "integrate" || knd[i] == "close" || (oldshape && knd[i] == "doc" && stp[i] + 0 >= 7)) && stp[i] ~ /^[0-9]+$/) put(i, "wait\tstep:" stp[i])
+        if ((knd[i] == "integrate" || knd[i] == "close") && stp[i] ~ /^[0-9]+$/) put(i, "wait\tstep:" stp[i])
         nr = 0; split("", rs)
         for (k = 1; k <= nt[i]; k++) {
           t = tk[i, k]; o = rk[i, k]; p = substr(t, 7)

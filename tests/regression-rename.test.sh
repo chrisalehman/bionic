@@ -103,11 +103,6 @@ for go_row in \
   expect_eq "GO-$go_k-1b …$go_new beside it is kept" "kept|" "$(gone "$go_fn" "$go_k" "$go_new")"
   expect_eq "GO-$go_k-1c …a word of no row is kept" "kept|" "$(gone "$go_fn" "$go_k" review)"
 done
-expect_eq "GO-reads-1 a typed reads cell carrying proof:floor is refused, naming proof:regression" "gone|proof:floor is gone; write proof:regression" \
-  "$(gone alias_gone_cell reads 'approval:plan, proof:floor, head')"
-expect_eq "GO-reads-1b …the live: form too" "gone|proof:floor is gone; write proof:regression" "$(gone alias_gone_cell reads 'head, live:proof:floor')"
-expect_eq "GO-reads-1c …and the cell of the new spelling is kept" "kept|" "$(gone alias_gone_cell reads 'approval:plan, proof:regression, live:proof:review, head')"
-expect_eq "GO-reads-1d …and so is a cell with no tokens at all" "kept|" "$(gone alias_gone_cell reads '—')"
 expect_eq "GO-config-1 a config text carrying the floor: key is refused, naming regression-command:" "gone|floor: is gone; write regression-command:" \
   "$(gone alias_gone_text config "$(printf 'poker-interval: 20m\nfloor: bash old.sh\n')")"
 expect_eq "GO-config-1b …with the new key beside it too: the old key is still refused, never read past" "gone|floor: is gone; write regression-command:" \

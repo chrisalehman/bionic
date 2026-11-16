@@ -119,7 +119,7 @@ names_found() {  # <file or directory>... -> `<file>:<line>:<text>` for each lin
   /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(landing[-]proofs\.log|asks\.stat[e])([^A-Za-z0-9_]|$)' "$@" \
     | awk -F: -v r=" $READER_FILES " '!index(r, " " $1 " ")'
   /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(stop[-]guard|agent[-]context[-]guard|bring[-]forward)\.sh([^A-Za-z0-9_]|$)' "$@"
-  /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(plan_verb_swa[p]|plan_bring_forwar[d]|ensure_walk_pointe[r]|walk_pointer_wante[d]|lift_contract_field[s]|brief_validate_field[s]|brief_body_advisorie[s]|dp_scaffold_marke[d]|scale_branch_numbe[r]|units_step_fiel[d]|bf_mai[n]|matrix_bloc[k]|matrix_hea[d]|matrix_row_waive[r]|matrix_v1[5]|finding[-]stated|continuation[-]fill|interval[-]default|fill[-]report)([^A-Za-z0-9_]|$)' "$@"
+  /usr/bin/grep -rnE '(^|[^A-Za-z0-9_])(plan_verb_swa[p]|plan_bring_forwar[d]|ensure_walk_pointe[r]|walk_pointer_wante[d]|lift_contract_field[s]|brief_validate_field[s]|brief_body_advisorie[s]|dp_scaffold_marke[d]|scale_branch_numbe[r]|units_step_fiel[d]|bf_mai[n]|matrix_bloc[k]|matrix_hea[d]|matrix_row_waive[r]|matrix_v1[5]|units_suspec[t]|suspect_line[s]|_units_dep_aw[k]|units_thread_row[s]|alias_gone_cel[l]|finding[-]stated|continuation[-]fill|interval[-]default|fill[-]report)([^A-Za-z0-9_]|$)' "$@"
 }
 
 # ADMITTED names the suites' lines that may name a retired verb, each `<class>TAB<file>TAB<text>`, the text the

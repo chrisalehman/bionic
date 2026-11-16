@@ -38,17 +38,14 @@
 #                              is the plan whose landing record "after the release" reads,
 #                              when <plan> is a copy that names none (default: <plan>).
 #   units_findings <plan> <rosters>
-#                              one line per ledger finding — `status <id> <value>`,
-#                              `evidence <id>`, `launch <id> <agent>` — the one reader the
+#                              one line per ledger finding — `evidence <id>`,
+#                              `launch <id> <agent>` — the one reader the
 #                              commit gate and the Patrol tick share (wave-21 T5; D4). Exit 1
 #                              if any line was printed, else 0. <rosters> is the run's roster
 #                              set, `units_run_rosters`' answer (wave-36 T29; D10).
 #   units_run_rosters <state dir> <plan> [<own roster>]
 #                              this session's roster, then every roster under <state dir> that
 #                              carries a `plan=<plan>` row: the set `units_findings` reads.
-#   units_thread_rows <plan> <id>
-#                              each row whose deps must name a Step-4 row in a table with no
-#                              reads column, with the deps it owes; `task-add` is its caller.
 #   units_born_event <plan> <row> [<reason>] [<finding>] [promoted]
 #                              the row's one born event in the run's log; `task-add` is its caller.
 #   units_drop_event <plan> <row> <words>
@@ -726,118 +723,6 @@ units_waiting() { _units_sched waiting "$@"; }
 # remains — the shape `units_chain` takes.
 units_edges() { _units_sched edges "${1:-}" ""; }
 
-# ── DEPENDENCY TRUTH (wave-30 T16; REQ-12, D14, Δ8 Δ11 Δ13) ─────────────────────
-#
-# A `reads`/`deps` declaration is written once, at `task-add`, and the tick schedules by it from
-# then on. Wave-28 held three build rows 354 minutes on declared reads whose landed diffs shared
-# no file with the holder's (record/wave-30-efficiency/research-waits-w28.md). The three verbs
-# below DOUBT a declaration and never change one: each prints, and the mind decides. Rejected:
-# loosening by machine — a dependency may be runtime state or an order no file test can see.
-
-# units_suspect <plan> [<id>] -> `<id><TAB><holder><TAB><clause><TAB><the edit that loosens it>`, one line per
-# suspect dependency, table order; for <id> alone when one is given. Nothing, exit 0, for a plan
-# with no table or no suspect.
-#
-# THE ONE SUSPECT TEST (D14a): `task-add` prints its clause after its own line, and
-# the tick's WAIT line on such a holder carries the clause and the loosening line. A dependency of
-# row R on row D — a `deps` or `reads` token that is D's id, or a path token D's Files cover — is
-# SUSPECT when
-#   - R's Files and D's Files share no path outside the record (the record is where every row
-#     writes its own report, so sharing it says nothing about the code), and
-#   - R reads no path outside the record that D's Files cover (reading what D builds is real).
-# Judged only where both rows are open (a landed or dropped holder holds nothing) and R is of a
-# kind that writes: a verify, test, review, doc, integrate or close row reads records by nature.
-# The clause is `suspect: <R> reads <D>, shares no file`; the edit is `edit <R> in the plan: reads=<the
-# cell less every token naming D>` (`deps=` for a deps token), the cell `—` when nothing is left, so the
-# row takes its kind's default.
-# A PAGE AT 15 (no reads cell, no status cell) has no suspect: its deps cell is the one place a person writes what a row
-# waits on, so a row it names is that person's word, and no edit of it is offered.
-units_suspect() {
-  local plan="${1:-}" want="${2:-}" rows hasreads=0
-  rows="$(units_rows "$plan" 2>/dev/null)" || return 0
-  [ -n "$rows" ] || return 0
-  if units_has_column "$plan" reads; then hasreads=1; else units_has_column "$plan" status || return 0; fi
-  printf '%s\n' "$rows" | awk -F'\t' -v want="$want" -v hasreads="$hasreads" -v regno="$(_units_regno "$plan")" \
-    "$(_units_files_awk)$(_units_cell_awk)$(_units_dep_awk)"'
-    { n++; id[n] = $1; knd[n] = $3; dep[n] = $6; fil[n] = $9; st[n] = $10; rd[n] = (hasreads ? $13 : ""); at[$1] = n }
-    END {
-      for (i = 1; i <= n; i++) {
-        if (want != "" && id[i] != want) continue
-        if (!isopen(i) || knd[i] ~ /^(verify|test|review|doc|integrate|close)$/) continue
-        holders(i)
-        for (h = 1; h <= nh; h++) {
-          j = hj[h]
-          if (!isopen(j) || prod[j] || share(i, j)) continue
-          pr = ""
-          if (hasreads) { c = less(rd[i], j); if (c != rd[i]) pr = "reads=" cellq(c) }
-          c = less(dep[i], j); if (c != dep[i]) pr = pr (pr == "" ? "" : " ") "deps=" cellq(c)
-          printf "%s\t%s\tsuspect: %s reads %s, shares no file\tedit %s in the plan: %s\n", id[i], id[j], id[i], id[j], id[i], pr
-        }
-      }
-    }'
-}
-
-# _units_dep_awk -> the awk functions the dependency verbs share, over the arrays id/knd/dep/fil/st/rd/at
-# the caller fills: `isopen(j)`; `tokens(cell)` into tk[1..ntk]; `paths(j)` into pe[1..npe], row j's Files
-# entries (a backtick, a leading ./ and a trailing ! dropped); `holders(i)`, the rows row i names, in
-# hj[1..nh], with prod[j] set when i reads a path outside the record that j writes; `share(i, j)`, a
-# Files path outside the record in both; `less(cell, j)`, the cell without the tokens that name j.
-_units_dep_awk() {
-  printf '%s' '
-    function isopen(j) { return (st[j] == "pending" || st[j] == "active") }
-    function dtrim(v) { gsub(/`/, "", v); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); sub(/^\.\//, "", v); return v }
-    function ispath(t) { return (t ~ /[\/.*?]/ && t !~ /[ \t:!]/) }
-    function tokens(cell,   a, m, k, t) {
-      ntk = 0; m = split(cell, a, ",")
-      for (k = 1; k <= m; k++) { t = dtrim(a[k]); if (t ~ /[A-Za-z0-9]/) tk[++ntk] = t }
-    }
-    function paths(j,   a, m, k, e) {
-      npe = 0; m = split(fil[j], a, ",")
-      for (k = 1; k <= m; k++) {
-        e = dtrim(a[k]); if (substr(e, length(e)) == "!") e = substr(e, 1, length(e) - 1)
-        if (e == "" || e !~ /[\/.*?]/ || e ~ /[ \t]/) continue
-        pe[++npe] = e
-      }
-    }
-    function names(t, j,   k) {
-      if (t == id[j]) return 1
-      if (!ispath(t)) return 0
-      paths(j)
-      for (k = 1; k <= npe; k++) if (overlap(pe[k], t)) return 1
-      return 0
-    }
-    function holders(i,   c, k, t, j) {
-      nh = 0; split("", seen); split("", prod)
-      for (c = 1; c <= 2; c++) {
-        tokens(c == 1 ? rd[i] : dep[i])
-        for (k = 1; k <= ntk; k++) {
-          t = tk[k]
-          for (j = 1; j <= n; j++) {
-            if (j == i || !names(t, j)) continue
-            if (!(j in seen)) { seen[j] = 1; hj[++nh] = j }
-            if (ispath(t) && !in_docs(t)) prod[j] = 1
-          }
-        }
-      }
-    }
-    function share(i, j,   a, b, na, k, l) {
-      paths(i); na = npe; for (k = 1; k <= na; k++) a[k] = pe[k]
-      paths(j)
-      for (k = 1; k <= na; k++) {
-        if (in_docs(a[k])) continue
-        for (l = 1; l <= npe; l++) if (!in_docs(pe[l]) && overlap(a[k], pe[l])) return 1
-      }
-      return 0
-    }
-    function less(cell, j,   k, o, keep) {
-      tokens(cell); o = ""; keep = 0
-      for (k = 1; k <= ntk; k++) { if (names(tk[k], j)) continue; o = o (o == "" ? "" : ", ") tk[k] }
-      for (k = 1; k <= ntk; k++) if (names(tk[k], j)) keep = 1
-      return keep ? o : cell
-    }
-'
-}
-
 # units_split_candidate <plan> <id>[,<id>…] [<edges>] -> `<id><TAB><size><TAB><files><TAB><k>` for the pending
 # row of that chain with the highest fan-in × size × file count, or nothing when every one scores 0
 # (no row waits on it, or it writes no path outside the record: a split of it frees nothing).
@@ -1207,7 +1092,7 @@ _units_proof_awk() {
 # `covered`. The tick computes it once (session-poker.sh `sched_facts_state`); unset, it waits.
 # `holds` (units_floor_holds) takes the regression row's id, or nothing, in the <step> slot.
 _units_sched() {
-  local mode="${1:-}" plan="${2:-}" step="${3:-}" out ctl rows hasreads=0 i fst rst rc wts live proofs
+  local mode="${1:-}" plan="${2:-}" step="${3:-}" out rows i fst rst rc wts live proofs
   local _UNITS_FACTS_PLAN="${_UNITS_FACTS_PLAN:-}" _UNITS_FACTS="${_UNITS_FACTS:-}"
   if [ "$mode" != edges ] && [ "$mode" != range ] && [ "$mode" != liverows ] && [ "$mode" != holds ] && [ "$mode" != whole ] \
      && [ "$mode" != questions ]; then
@@ -1221,18 +1106,7 @@ _units_sched() {
   proofs="$(_units_proofs "$plan")" || return 2
   _UNITS_PLACE="$(_units_place "$plan")" || return 2
   rows="$(_units_overlay "$live" "$rows")"
-  # THE CONTROL LINE'S FOURTH FIELD names the columns the header carries (`units_has_column`'s
-  # reading, taken here from the parse already in hand).
-  ctl="${out%%$'\n'*}"
-  for i in 1 2 3; do ctl="${ctl#*$'\t'}"; done
-  ctl="${ctl%%$'\t'*}"
-  case " $ctl " in *" reads "*) hasreads=1 ;; esac
-  # EVERY TABLE IS SCHEDULED ON THE WAITS THE PLAN'S ONE READER NAMES (lib/plan-read.sh `plan_read_waits`), save one: the
-  # shape from before the reads column (a status cell and no reads cell) keeps scheduling on its deps alone, as it always
-  # did. The reader gives that shape its kind's defaults, the plan's approval among them, and its suites hold that answer
-  # on purpose, so on that shape alone the fill and the reader still part. Refusing a live plan at 14 makes the branch moot.
-  local _UNITS_OLD_SHAPE=0
-  [ "$hasreads" = 1 ] || case " $ctl " in *" status "*) _UNITS_OLD_SHAPE=1 ;; esac
+  # EVERY TABLE IS SCHEDULED ON THE WAITS THE PLAN'S ONE READER NAMES (lib/plan-read.sh `plan_read_waits`).
   # THE REGRESSION STATE IS ASKED ONLY WHEN AN ANSWER TURNS ON IT (wave-26 T64; REQ-3 AC-3.4). The
   # program runs without it; when a pending row it judges reads a `proof:floor` that a proof line
   # and no open writer would satisfy, it prints nothing and exits 3, and only then is
@@ -1246,27 +1120,27 @@ _units_sched() {
   # waits schedules nothing: no writer known is not no writer.
   wts="$(_units_waits "$plan")" || return 1
   fst="$(_units_floor_kept "$plan")"; rst="${UNITS_READINGS_STATE:-}"
-  _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst" "$rst" "$wts" "$proofs"; rc=$?
+  _units_sched_run "$mode" "$plan" "$step" "$rows" "$fst" "$rst" "$wts" "$proofs"; rc=$?
   for i in 1 2; do
     if [ "$rc" -eq 3 ] && [ -z "$fst" ]; then fst="$(_units_floor_state "$plan")"
     elif [ "$rc" -eq 4 ] && [ -z "$rst" ]; then rst="$(_units_readings_state "$plan")"
     else break
     fi
-    _units_sched_run "$mode" "$plan" "$step" "$hasreads" "$rows" "$fst" "$rst" "$wts" "$proofs"; rc=$?
+    _units_sched_run "$mode" "$plan" "$step" "$rows" "$fst" "$rst" "$wts" "$proofs"; rc=$?
   done
   return "$rc"
 }
 
-# _units_sched_run <mode> <plan> <step> <hasreads> <rows> <regression state> <readings state> <waits> <proofs> -> the
+# _units_sched_run <mode> <plan> <step> <rows> <regression state> <readings state> <waits> <proofs> -> the
 # program's answer and its status: 3, with nothing printed, when the answer needs a regression state not
 # handed in; 4 when it needs the readings' state.
 _units_sched_run() {
   {
-    printf '\034rows\n'; printf '%s\n' "$5"
+    printf '\034rows\n'; printf '%s\n' "$4"
     printf '\034facts\n'; printf '%s\n' "${_UNITS_FACTS:-}"
-    printf '\034waits\n'; printf '%s\n' "${8:-}"
-    printf '\034proofs\n'; printf '%s\n' "${9:-}"
-  } | _UNITS_FLOOR_ST="$6" _UNITS_READ_ST="${7:-}" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" -v hasreads="$4" -v oldshape="${_UNITS_OLD_SHAPE:-0}" \
+    printf '\034waits\n'; printf '%s\n' "${7:-}"
+    printf '\034proofs\n'; printf '%s\n' "${8:-}"
+  } | _UNITS_FLOOR_ST="$5" _UNITS_READ_ST="${6:-}" _UNITS_FACTS_ST="${UNITS_FACTS_STATE:-}" awk -F'\t' -v mode="$1" -v want="$3" \
       -v livehead="$(printf '%s' "${UNITS_LIVE_HEAD:-}" | tr 'A-F' 'a-f')" -v evid="${_UNITS_EVIDENCE:-}" \
       -v plancur="${_UNITS_PLACE%% *}" -v planapby="${_UNITS_PLACE##* }" \
       -v liveq="${_UNITS_QUESTION:-}" -v pq="${PROOF_QUESTIONS:-}" -v regno="$(_units_regno "$2")" \
@@ -1493,9 +1367,9 @@ _units_publish_order() {
 # a row that names none would read the whole head, which belongs ahead of the release. A path some row not later than
 # r also writes is pre-release work and refuses the row, and so does a path no row but j writes. ONE PREDICATE, TWO
 # READERS: `units_validate` admits the row by it, and `units_post_readers` names it to the release approval card.
-# A TABLE AT 15 HAS NO READS CELL: a caller that sets `v15` hands the waits each task's person wrote as `wtn[<id>]`
-# and the rows each names as `nmd[<id>, <wait>, <row id>]`, both from lib/plan-read.sh `plan_read_waits`, and the
-# predicate splits no cell of its own. `post_wait()` files the current record, one line of `plan_read_waits`, into
+# THE CALLER HANDS the waits each task's person wrote as `wtn[<id>]` and the rows each names as
+# `nmd[<id>, <wait>, <row id>]`, both from lib/plan-read.sh `plan_read_waits`, and the predicate splits no cell of
+# its own. `post_wait()` files the current record, one line of `plan_read_waits`, into
 # them: a kind line gives each wait as spelled and the ones its kind implies, and the waits a person wrote are the
 # first less the second; a row line gives the reads that name a row.
 _units_post_awk() {
@@ -1521,13 +1395,13 @@ _units_post_awk() {
     }
     function post_reader(j, r,   m, a, k, t, w, hit, named) {
       named = 0
-      m = split(v15 ? wtn[id[j]] : rd[j], a, ",")
+      m = split(wtn[id[j]], a, ",")
       for (k = 1; k <= m; k++) {
         t = a[k]; gsub(/^[ \t]+|[ \t]+$/, "", t)
         if (t == "" || t == "approval:plan" || t == "head") continue
         hit = 0
         for (w = 1; w <= n; w++) {
-          if (w == j || sta[w] == "dropped" || !(v15 ? ((id[j], t, id[w]) in nmd) : cell_covers(fil[w], t))) continue
+          if (w == j || sta[w] == "dropped" || !((id[j], t, id[w]) in nmd)) continue
           if (!later(w, r)) return 0
           hit = 1
         }
@@ -1543,27 +1417,24 @@ _units_post_awk() {
 # that `post_reader` admits there, in table order. `read` when every record path in its Files is the evidence of a
 # registered review reading (`proved: kind=review … evidence=`), in either spelling the record takes; `unread`
 # otherwise. The release approval card waits on an open row that is unread: what landed after the release is read
-# before the person is asked. Nothing printed for a plan with no such row, or a table at 14 with no reads column. <origin> is
+# before the person is asked. Nothing printed for a plan with no such row, or a page not at 15. <origin> is
 # the plan whose landing record orders the rows, when <plan> is a copy (default: <plan>), as `units_validate` takes it.
-# A PAGE AT 15 holds no reads cell and no status cell: what a review row reads is the waits its person wrote, from the
-# plan's one reader (`_units_waits`), and each row's state is the run's, as `units_rows` reads it from the log.
+# What a review row reads is the waits its person wrote, from the plan's one reader (`_units_waits`), and each row's
+# state is the run's, as `units_rows` reads it from the log.
 units_post_readers() {
-  local plan="${1:-}" origin="${2:-}" rows proofs v15="" waits=""
+  local plan="${1:-}" origin="${2:-}" rows proofs waits=""
   rows="$(units_rows "$plan")" || return 1
   [ -n "$rows" ] || return 0
-  if [ "$(plan_read_header "$plan" canonical_sdlc_version 2>/dev/null)" = canonical_sdlc_version=15 ]; then
-    v15=1; waits="$(_units_waits "$plan")" || return 1
-  else
-    units_has_column "$plan" reads || return 0
-  fi
+  [ "$(plan_read_header "$plan" canonical_sdlc_version 2>/dev/null)" = canonical_sdlc_version=15 ] || return 0
+  waits="$(_units_waits "$plan")" || return 1
   # The registered reviews are the run's proofs (`_units_proofs`), read from the origin a copy was made from.
   proofs="$(_units_proofs "${origin:-$plan}")" || return 1
   { printf '%s\n\034\n' "$rows"; [ -z "$proofs" ] || printf '%s\n' "$proofs"; [ -z "$waits" ] || printf '\035\n%s\n' "$waits"; } \
-    | awk -F'\t' -v v15="$v15" -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" "$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
+    | awk -F'\t' -v pubs="$(_units_publish_order "${origin:-$plan}" "$rows")" "$(_units_files_awk)$(_units_post_awk)$(_units_proof_awk)"'
     $0 == "\034" { p = 1; next }
     $0 == "\035" { p = 2; next }
     p == 2 { post_wait(); next }
-    !p { if ($1 != "") { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; fil[n] = $9; sta[n] = $10; rd[n] = $13 }; next }
+    !p { if ($1 != "") { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; fil[n] = $9; sta[n] = $10 }; next }
     proof_fields($0) && PROOF_KIND == "review" && PROOF_EVIDENCE != "" { ev[++ne] = PROOF_EVIDENCE }
     END {
       for (r = 1; r <= n; r++) if (knd[r] == "doc" && stp[r] ~ /^[0-9]+$/ && stp[r] + 0 >= 7 && sta[r] == "landed") rel[r] = 1
@@ -1597,7 +1468,7 @@ _units_sched_awk() {
     $0 == SUBSEP "proofs" { part = 4; next }
     part == 1 {
       if ($1 == "") next
-      n++; id[n] = $1; stp[n] = $2; knd[n] = $3; agt[n] = $5; dep[n] = $6; fil[n] = $9; st[n] = $10; rd[n] = $13
+      n++; id[n] = $1; stp[n] = $2; knd[n] = $3; agt[n] = $5; dep[n] = $6; fil[n] = $9; st[n] = $10
       at[$1] = n
       next
     }
@@ -1995,14 +1866,11 @@ _units_sched_awk() {
     # rowheld(i) -> 2 when this answer does not judge pending row i at all, 1 when it is a gate
     # act held for its step, 0 otherwise. A ROW CARRIES A NUMERIC STEP, and that is all the
     # step still decides for a work row (wave-20 Δ1). A GATE ACT WAITS FOR ITS STEP (Δ6; T10b):
-    # ready only once the run has REACHED its step, reached and not equalled. A DOC ROW WAITS FOR
-    # ITS READS (wave-26 T13; D3): in a table with the reads column nothing about the release is a
-    # step, and its approval is read by the integrate row (wave-35 T5). A table without the column has no approval
-    # to read, so its Step-7 doc row keeps the hold (A-T13.1). A page at 15 has no reads column and is no such table: its
-    # release row waits on what its deps and its kind name, and on no step.
+    # ready only once the run has REACHED its step, reached and not equalled. A DOC ROW IS NO GATE ACT:
+    # the release row waits on what its deps and its kind name, and its approval is read by the integrate row.
     function rowheld(i,   gate) {
       if (stp[i] !~ /^[0-9]+$/) return 2
-      gate = (knd[i] == "integrate" || knd[i] == "close" || (oldshape && knd[i] == "doc" && stp[i] + 0 >= 7))
+      gate = (knd[i] == "integrate" || knd[i] == "close")
       return (gate && stp[i] + 0 > want + 0) ? 1 : 0
     }
 
@@ -2033,10 +1901,10 @@ _units_sched_awk() {
         # row of a plan that carries a release reads approval:release whatever its cell says: the
         # person approves the release and the merge once, after review. A plan with no release has
         # none to approve, and its integrate row reads what it read before (A-T5-1).
-        # Its waits are named by the one reader of a plan (lib/plan-read.sh plan_read_waits), on the older shape its deps
-        # alone (oldshape, set in _units_sched). The release approval an integrate row is given by the reader, not written
-        # in a cell, is met while no release row stands, a dropped one owed no more (judge); one a person wrote is asked.
-        m = split(oldshape ? dep[i] : wl[id[i]], a, ",")
+        # Its waits are named by the one reader of a plan (lib/plan-read.sh plan_read_waits). The release approval an
+        # integrate row is given by the reader, not written in a cell, is met while no release row stands, a dropped one
+        # owed no more (judge); one a person wrote is asked.
+        m = split(wl[id[i]], a, ",")
         for (k = 1; k <= m; k++) addtok(i, a[k])
       }
       # THE STATE OF THE READINGS FOR A LIVE ROW PAST ITS READING (wave-36 T28; D9): live_head and live_idle turn on
@@ -2203,15 +2071,8 @@ units_columns() {
 # in 3–9; kind in build · test · verify · review · doc · integrate · close · prototype;
 # status in pending · active · landed · dropped; every dep naming an id present in the table
 # or an external prerequisite `ext:<slug>` (`_units_ext_re` is its one shape), and on a
-# version-15 page an approval of the person's, `approval:<name>`, in the spelling a read gives it.
-# A TABLE WITH A `reads` COLUMN (wave-26 T2; D1) adds two: its deps cells carry `ext:<slug>`
-# and nothing else — a task id there is refused, because the row waits on what it reads — and
-# each read names a path in the `Files` grammar, `head`, `record`, `merge`, `proof:<floor|
-# review|task|check>` (`check` wave-27 T16), `approval:<name>`, `ext:<slug>`, or `live:` before one of the artifacts or a
-# path; on a review row, `live:head:<q>[+<q>]` too, each question one of lib/proof.sh
-# PROOF_QUESTIONS (wave-27 T10; D4). And an open verify or test row whose written cell holds no
-# bare `head` is refused, naming the row and the token (wave-30 T13; AC-4.3, D7): the default
-# `approval:plan, head` is the structural readiness of a full run, and the cell may not drop it.
+# version-15 page an approval of the person's, `approval:<name>`. A review row's ` · questions:` tag names
+# questions of lib/proof.sh PROOF_QUESTIONS, each once.
 #
 # NO ORDERING RULE (wave-26 T2; D2). Through 1.10 a Step-N row with N ≥ 5 had to depend,
 # transitively, on every Step-4 row, and a mid-run build row re-barriered every later row
@@ -2226,7 +2087,7 @@ units_columns() {
 # EVERY FAULT IS REPORTED, not just the first. A writer fixing one line at a time against a
 # wall that stops at the first complaint pays a round trip per fault.
 units_validate() {
-  local plan="${1:-}" origin="${2:-}" out rc ctl missing cols over rows violations cycles _c _o found=0 haswt hasreads v15="" \
+  local plan="${1:-}" origin="${2:-}" out rc ctl missing cols over rows violations cycles _c _o found=0 v15="" \
     live="" lrc=0 st15="" rows15="" waits=""
 
   out="$(_units_table "$plan")"; rc=$?
@@ -2270,17 +2131,6 @@ units_validate() {
     found=1
   done
 
-  # THE HEADER IS ASKED ONCE, HERE, AND THE ANSWER IS HANDED TO awk (wave-17 REQ-1, AC-1.2).
-  # Slot 11 is optional, so `units_field` reads an ABSENT column as an empty cell on every
-  # row — indistinguishable, inside the row loop, from a column that is there and blank. The
-  # arm below must fire on the second and never on the first, and `units_has_column` is the
-  # only reader that can tell them apart (its own docblock, wave-16 AC-3.2). Asked outside
-  # the loop because it is a fact about the table, not about a row.
-  haswt=0
-  if units_has_column "$plan" worktree; then haswt=1; fi
-  hasreads=0
-  if units_has_column "$plan" reads; then hasreads=1; fi
-
   rows=""
   case "$out" in *$'\n'*) rows="${out#*$'\n'}" ;; esac
   # A ROW AT 15 IS OPEN UNLESS THE RUN LANDS OR DROPS IT: its state is the log's, read from the plan a copy was made from,
@@ -2300,20 +2150,8 @@ units_validate() {
     case "$rows" in *" · questions:"*) _units_lib proof.sh proof_question_ok ;; esac
   fi
   if [ -n "$rows" ]; then
-    violations="$({ printf '%s\n' "$rows"; [ -z "$waits" ] || printf '\034\n%s\n' "$waits"; } | awk -F'\t' -v over="$over" -v haswt="$haswt" -v hasreads="$hasreads" -v v15="$v15" \
+    violations="$({ printf '%s\n' "$rows"; [ -z "$waits" ] || printf '\034\n%s\n' "$waits"; } | awk -F'\t' -v over="$over" -v v15="$v15" \
       -v st15="$st15" -v lrc="$lrc" -v pubs="$(_units_publish_order "${origin:-$plan}" "${rows15:-$rows}")" -v extre="$(_units_ext_re)" -v pq="${PROOF_QUESTIONS:-}" "$(_units_questions_awk)$(_units_files_awk)$(_units_cell_awk)$(_units_post_awk)"'
-      # rec_written(t): some row of the table, of any status, has a Files entry covering the path t.
-      function rec_written(t,   k) {
-        for (k = 1; k <= n; k++) if (cell_covers(fil[k], t)) return 1
-        return 0
-      }
-      # rec_writer(t): the table id that begins the file name of t, followed by a dot or a dash; else "".
-      function rec_writer(t,   b, k) {
-        b = t; sub(/^.*\//, "", b)
-        for (k = 1; k <= n; k++)
-          if (index(b, id[k]) == 1 && (substr(b, length(id[k]) + 1, 1) == "." || substr(b, length(id[k]) + 1, 1) == "-")) return id[k]
-        return ""
-      }
       BEGIN {
         # EVERY CELL OF A SHIFTED ROW IS SUSPECT, so the row is neither accused nor used to
         # accuse: none of its cells can be trusted to name what it breaks.
@@ -2332,8 +2170,8 @@ units_validate() {
       $0 == "\034" { wpart = 1; next }
       wpart { post_wait(); next }
       $1 == "" { next }
-      { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; tsk[n] = $4; dep[n] = $6; fil[n] = $9; sta[n] = $10; wtc[n] = $11
-        bsc[n] = $12; rd[n] = $13; count[$1]++ }
+      { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; tsk[n] = $4; dep[n] = $6; fil[n] = $9; sta[n] = $10
+        bsc[n] = $12; count[$1]++ }
       END {
         for (i = 1; i <= n; i++) {
           if (id[i] in skip) continue
@@ -2370,43 +2208,15 @@ units_validate() {
             }
           }
 
-          # THE ROW IS THE RECORD OF THE TREE (wave-17 REQ-1, AC-1.2, D2, ADR-032).
-          # `active` means a writer is in a tree right now, and the evidence gate resolves
-          # that writer commit by matching the basename of this very cell — so a row that
-          # claims a writer and names no tree makes the gate fall through and judge a task
-          # commit by the arms of the run. Through wave-16 that was every row of every plan
-          # this repo shipped (research R1), and the only symptom was an orchestrator
-          # regressing `current:` by hand. Reported at the WRITE, the one place that can
-          # still fix it cheaply.
-          #
-          # NAMES NO TREE IS THE ABSENCE OF AN ALPHANUMERIC, not equality with the em dash:
-          # an em dash, a hyphen, a space and an empty cell are one fact spelled four ways,
-          # and `deps` already reads its own "none" exactly this way two arms down. A real
-          # basename cannot be alphanumeric-free.
-          #
-          # ONLY `active`. A `pending` row has no tree yet, a `landed` or `dropped` one may
-          # have had its tree torn down (close-out does exactly that), and refusing either
-          # would refuse the ordinary end state of every wave.
-          # NO APOSTROPHE ANYWHERE ABOVE: this comment is inside the single-quoted awk
-          # program, and one would close the quote (the header note says so).
-          #
-          # ONLY A ROW THAT WRITES THE HEAD (wave-26 T32). A row whose Files cell names no
-          # tracked path (a verify, a review, a doc record under the docs root) commits nothing
-          # a gate must attribute, so it runs active with no tree of its own; writes_head is
-          # the predicate the scheduler asks of the same cell.
-          if (haswt == 1 && sta[i] == "active" && wtc[i] !~ /[A-Za-z0-9]/ && writes_head(fil[i]))
-            printf "%s: active row names no worktree\n", id[i]
-
           # THE ORIGIN IS DECLARED BESIDE THE IDENTITY (wave-17 REQ-2, AC-2.1, D3, ADR-032).
           # Slot 12 is the commit the tree was cut from, as spawn-worktree.sh printed it, and
           # the landing gate takes it as the diff base. A cell that is not a commit id would
           # send that gate to `git merge-base <junk> HEAD`, which fails silently and lands the
           # tree on the announced fallback — the record would be wrong and the gate would
-          # never say so. Checked here, at the write, for the same reason the worktree arm is.
+          # never say so. Checked here, at the write, the one place that can still fix it cheaply.
           #
-          # NO COLUMN QUESTION IS ASKED, unlike the worktree arm two lines up. That arm has to
-          # tell an absent column from a blank cell because it fires on ABSENCE; this one fires
-          # only on a cell that HOLDS something, and an absent column reads empty on every row.
+          # NO COLUMN QUESTION IS ASKED: it fires only on a cell that HOLDS something, and an absent
+          # column reads empty on every row.
           #
           # DECLARING NOTHING IS LEGAL. An em dash, a hyphen, a space and an empty cell are one
           # fact spelled four ways (the deps cell reads its own none this way), and a row with
@@ -2435,70 +2245,9 @@ units_validate() {
               # names one at 14: what a task waits on is a fact the person writes of that task, and a version-15
               # row has no other cell to hold it.
               if (v15 && a[j] ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) continue
-              # A TABLE WITH A reads COLUMN TAKES NOTHING ELSE IN deps (wave-26 T2; D1): a row
-              # there waits for what it reads, and a task id beside the column is the hand-kept
-              # edge the column exists to retire.
-              if (hasreads) { printf "%s: dep %s is not ext:<slug>; a table with a reads column waits on what a row reads, never on a task id\n", id[i], a[j]; continue }
               if (a[j] ~ /[ \t]/) { printf "%s: dep %s names no row in the table\n", id[i], a[j]; continue }
               # Any other id the table does not carry, a malformed token included, is refused.
               if (!(a[j] in count)) printf "%s: dep %s names no row in the table\n", id[i], a[j]
-            }
-          }
-
-          # A READ NAMES SOMETHING (wave-26 T2; D1): a path in the Files grammar, a named
-          # artifact, `ext:<slug>`, or `live:` before an artifact or a path. A token naming
-          # none of them is refused here, and the readiness program never reads it satisfied.
-          hh = 0
-          r = rd[i]
-          if (hasreads && r ~ /[A-Za-z0-9]/) {
-            m = split(r, a, ",")
-            for (j = 1; j <= m; j++) {
-              gsub(/^[ \t]+|[ \t]+$/, "", a[j])
-              if (a[j] == "" || a[j] !~ /[A-Za-z0-9]/) continue
-              t = a[j]
-              if (t == "head") hh = 1
-              if (t ~ extre) continue
-              # A READ ROW NAMES ITS QUESTIONS (wave-27 T10; D4): `live:head:<q>[+<q>]`, each one
-              # of lib/proof.sh PROOF_QUESTIONS, on a review row and nowhere else.
-              if (substr(t, 1, 10) == "live:head:") {
-                if (knd[i] != "review") { printf "%s: read %s names questions; only a review row reads them\n", id[i], a[j]; continue }
-                nqa = split(substr(t, 11), qa, "+"); qbad = (nqa == 0)
-                for (k = 1; k <= nqa; k++) if (!isq(qa[k])) qbad = 1
-                if (qbad) printf "%s: read %s names a question outside %s\n", id[i], a[j], pq
-                continue
-              }
-              if (substr(t, 1, 5) == "live:") t = substr(t, 6)
-              if (t == "head" || t == "record" || t == "merge") continue
-              '"$_UNITS_READS_NORM"'
-              if (t ~ /^proof:(regression|review|task|check)$/ || t ~ /^approval:[A-Za-z0-9][A-Za-z0-9._-]*$/) continue
-              if (t ~ /[\/.*?]/ && t !~ /[ \t:!]/) {
-                if (index(t, "[") || index(t, "]")) printf "%s: read %s has a bracket; paths glob with * and ? only, so it would match the bracket as itself\n", id[i], a[j]
-                # A RECORD PATH IS READ ONLY WHEN A ROW WRITES IT (wave-35 T8; REQ-6 AC-6.1; D15). A path no
-                # open row writes is satisfied at once, which is right for code already in the tree and wrong
-                # for a record artifact nobody has written yet (A-orch-10): no row of the table, whatever its
-                # status, covering a record path is the plan not saying who writes it. Named here with the row
-                # whose artifact it is, when an id of the table begins its file name (T1.md, T1-profile.md).
-                # Only an OPEN row is held to it, as to the head rule below (A-T13.1): a landed or dropped
-                # row schedules nothing, and a plan carrying one from before this rule must still commit.
-                else if (in_docs(t) && (sta[i] == "pending" || sta[i] == "active") && !rec_written(t)) {
-                  w = rec_writer(t)
-                  printf "%s: read %s names a record path no row writes; add it to %s\047s Files\n", id[i], a[j], (w == "" ? "the writer row" : w)
-                }
-                continue
-              }
-              printf "%s: read %s names no artifact\n", id[i], a[j]
-            }
-            # A VERIFY OR TEST ROW READS head (wave-30 T13; REQ-4 AC-4.3; D7, Delta-6a). Its kind default,
-            # approval:plan, head, waits on every open row that writes code, so a full run is never
-            # ready beside an open build; wave-28 overrode the cell with a record path and ran it
-            # early. A cell that is written and holds no bare head is refused, naming the row and the
-            # token. live:head is not head: it waits on no open writer. An empty cell takes the
-            # default; a doc row is not held (its Files are not code); and only an OPEN row, since a
-            # landed or dropped one schedules nothing and a plan carrying one must still commit
-            # (A-T13.1).
-            if ((knd[i] == "verify" || knd[i] == "test") && !hh && (sta[i] == "pending" || sta[i] == "active")) {
-              rc0 = r; gsub(/^[ \t]+|[ \t]+$/, "", rc0)
-              printf "%s: reads %s drops head; a %s row must read head (its default approval:plan, head waits on every open row that writes code)\n", id[i], rc0, knd[i]
             }
           }
 
@@ -2522,10 +2271,10 @@ units_validate() {
         # THE ORDER IS BUILD, REGRESSION, REVIEW, RELEASE. The regression is a test row, a review row is kind review,
         # the release a doc row at Step 7 or later. A row comes before another by step, then by table order. A pair out
         # of order is refused when neither row is dropped and one of them is open, so landed history is not judged.
-        # A table at 15 holds no status, so there a row is open unless the run lands or drops it; a table from before
-        # the reads column is not held to it, and neither is one at 15 whose run could not be read.
+        # A table at 15 holds no status, so there a row is open unless the run lands or drops it; a page not at 15 is not
+        # held to it, and neither is one at 15 whose run could not be read.
         if (v15) for (i = 1; i <= n; i++) sta[i] = (id[i] in ost) ? ost[id[i]] : "pending"
-        if (hasreads || (v15 && lrc == 0)) {
+        if (v15 && lrc == 0) {
           for (i = 1; i <= n; i++) {
             if ((id[i] in skip) || stp[i] !~ /^[0-9]+$/ || sta[i] == "dropped") continue
             if (knd[i] == "test") ord[i] = 1
@@ -2618,24 +2367,19 @@ units_validate() {
 
 # units_findings <plan> <roster> -> one line per LEDGER FINDING, table order; exit 1 if any.
 #
-# THE ONE LEDGER READER (wave-21 T5; REQ-4, AC-4.1, AC-4.3; D4, ADR-037 decision 3). Three
+# THE ONE LEDGER READER (wave-21 T5; REQ-4, AC-4.1, AC-4.3; D4, ADR-037 decision 3). Two
 # findings and no more, each naming its row:
 #
-#   status <id> <value>    the row's status is outside the enum — `(empty)` for a blank
-#                          cell, the spelling `units_validate` uses
-#   evidence <id>          the row is `landed` and the reader does not answer it landed
-#   launch <id> <agent>    the row is `active`, its agent cell names someone, and no
-#                          `roster-state/` row of the run's rosters carries that `name=`
+#   evidence <id>          the row is `landed` and the reader does not answer it landed, or it
+#                          is `active` with no roster to read and the reader does not hold its launch
+#   launch <id> <agent>    the row is `active` under a name, and no `roster-state/` row of the
+#                          run's rosters carries that `name=`
 #
 # BOTH CALLERS ASK THIS AND NEITHER PARSES THE TABLE. The commit gate refuses on these lines and
 # the Patrol tick prints them as `poker: LEDGER <id> <kind> [<value>]`, so a plan the gate would
 # refuse cannot tick clean and a plan that ticks a finding cannot commit (AC-4.1).
 #
-# LAUNCHED IS WHAT THE ROSTER SAYS: an `active` row whose agent cell is a roster `name=` is no finding.
-#
-# SELF-OWNED IS AN AGENT CELL WITH NO ALPHANUMERIC — empty, an em dash, a hyphen — the same
-# four-spellings-of-nothing reading the `deps` and `worktree` cells take. Nobody was launched
-# for that row, so neither a roster row nor a line is asked of it.
+# LAUNCHED IS WHAT THE ROSTER SAYS: an `active` row whose name, the run's dispatch, is a roster `name=` is no finding.
 #
 # THE KNOWN AGENTS ARE THE RUN'S, NOT THE SESSION'S (wave-36 T29; REQ-4 AC-4.1; D10). <rosters> is
 # a list, one path per line, as `units_run_rosters` prints it. Its FIRST line is this session's
@@ -2645,19 +2389,16 @@ units_validate() {
 #
 # NO ROSTER TO READ, TODAY'S RULE (spec assumption 1). A list in which no path names a regular,
 # unlinked file (an empty list, a missing file, a symlink: the fleet never follows one into a
-# roster) computes no `launch` finding: an agent-named `active` row is then an `evidence` finding,
-# unless <v15> asks the reader and it answers the row launched. A missing roster therefore fails toward a
+# roster) computes no `launch` finding: an `active` row is then an `evidence` finding, unless the
+# reader answers the row launched under a name. A missing roster therefore fails toward a
 # refusal, never toward silence.
-#
-# ONE ENUM AT EVERY SCALE (wave-31 T5; D2): pending · active · landed · dropped, terminal `landed`.
-# A row in the retired task-scale words (`done`) is a `status` finding, never a second enum.
 #
 # ONLY `T<digit>…` ROWS ARE JUDGED, as the gate's arms have always filtered: a legend or a
 # non-unit row in the table is not a ledger row. No table is no finding, exit 0.
 #
 # ONE PARSE PER CALL. The reader asks the table for its rows under `units_memoised`; a caller
 # already holding a memo for the plan (the tick) pays nothing more (wave-21 T13; review-bed/perf/report.md observation 3).
-units_findings() { units_memoised "${1:-}" _units_ledger findings "${1:-}" "${2:-}" "${3:-}"; }
+units_findings() { units_memoised "${1:-}" _units_ledger findings "${1:-}" "${2:-}"; }
 
 # units_run_rosters <state dir> <plan> [<own roster>] -> the run's roster set, one path per line.
 #
@@ -2687,9 +2428,9 @@ units_run_rosters() {
 #
 # A ROW'S LANDING AND LAUNCH ARE THE READER'S: a landed row stands when the reader's status answers landed, and a
 # launched row with no roster to judge stands when the reader holds its dispatch under a name. An answer other than
-# the one asked is the `evidence` finding. <v15> non-empty asks for the launched rows too.
+# the one asked is the `evidence` finding.
 _units_ledger() {
-  local mode="${1:-}" plan="${2:-}" rosters="${3:-}" v15="${4:-}" rows useroster=0 own="" run="" rf first=1 out line found=0
+  local mode="${1:-}" plan="${2:-}" rosters="${3:-}" rows useroster=0 own="" run="" rf first=1 out line found=0
   rows="$(units_rows "$plan")" || return 0
   [ -n "$rows" ] || return 0
   while IFS= read -r rf; do
@@ -2713,7 +2454,7 @@ UNITS_ROSTERS
 $run
 UNITS_RUN
     fi
-  } | UNITS_LEDGER_PLAN="$plan" awk -F'\t' -v mode="$mode" -v useroster="$useroster" -v v15="$v15" '
+  } | UNITS_LEDGER_PLAN="$plan" awk -F'\t' -v mode="$mode" -v useroster="$useroster" '
     BEGIN { lplan = ENVIRON["UNITS_LEDGER_PLAN"] }
     $0 == SUBSEP "rows"   { part = 1; next }
     $0 == SUBSEP "roster" { part = 3; next }
@@ -2738,19 +2479,13 @@ UNITS_RUN
       next
     }
     END {
-      split("pending active landed dropped", e, " "); term = "landed"
-      for (i in e) enum[e[i]] = 1
-      found = 0
       for (i = 1; i <= n; i++) {
         if (id[i] !~ /^T[0-9]/) continue
-        if (!(st[i] in enum)) {
-          printf "status %s %s\n", id[i], (st[i] == "" ? "(empty)" : st[i]); found = 1; continue
-        }
-        if (st[i] == term) { printf "ask landed %s\n", id[i]; continue }
-        if (st[i] != "active" || ag[i] !~ /[A-Za-z0-9]/) continue
+        if (st[i] == "landed") { printf "ask landed %s\n", id[i]; continue }
+        if (st[i] != "active") continue
         if (useroster == 1) {
           if (!(ag[i] in names)) printf "launch %s %s\n", id[i], ag[i]
-        } else printf "%s %s\n", (v15 != "" ? "ask dispatched" : "evidence"), id[i]
+        } else printf "ask dispatched %s\n", id[i]
       }
     }')"
   while IFS= read -r line; do
@@ -2777,49 +2512,6 @@ _units_asked() {
     landed) [ "${a%%$'\n'*}" = state=landed ] ;;
     *) [ "${a%%$'\n'*}" = state=dispatched ] && case "$a" in *$'\n'name=?*) : ;; *) false ;; esac ;;
   esac
-}
-
-# units_thread_rows <plan> <id> -> `<row><TAB><its deps cell with <id> added>` for each row whose deps must name the
-#   Step-4 row <id>; nothing for a table with a reads column, a table without deps, or a row not at Step 4.
-#
-# A TABLE WITHOUT reads HOLDS ITS REGRESSION ONLY THROUGH deps, so a mid-run Step-4 row is held behind by every open
-# Step-5+ row that does not reach it, except one that reaches another such row which does not reach it back: that row
-# holds it already. A table with reads needs none of it: its rows wait on what they read. Nor does a page at 15 (no
-# reads cell, no status cell): each row at Step 5 or later waits on a new build through its kind's default read of the
-# head, or through a proof or the merge that does. Pure: it prints, and the rows it names are the person's edit.
-units_thread_rows() {
-  local plan="${1:-}" nid="${2:-}"
-  units_has_column "$plan" reads && return 0
-  units_has_column "$plan" status || return 0
-  units_has_column "$plan" deps || return 0
-  units_rows "$plan" | awk -F'\t' -v nid="$nid" '
-    function reach(s, c,   q, h, qn, k, n2, b) {
-      qn = 0; split("", seen)
-      n2 = split(adj[s], b, ",")
-      for (k = 1; k <= n2; k++) if (b[k] ~ /[A-Za-z0-9]/ && !(b[k] in seen)) { seen[b[k]] = 1; q[++qn] = b[k] }
-      for (h = 1; h <= qn; h++) {
-        R[c, q[h]] = 1
-        n2 = split(adj[q[h]], b, ",")
-        for (k = 1; k <= n2; k++) if (b[k] ~ /[A-Za-z0-9]/ && !(b[k] in seen)) { seen[b[k]] = 1; q[++qn] = b[k] }
-      }
-    }
-    $1 != "" { id[++n] = $1; stp[$1] = $2; sta[n] = $10; dep[n] = $6; d = $6; gsub(/[ \t]/, "", d); adj[$1] = d }
-    END {
-      if (stp[nid] != "4") exit
-      for (r = 1; r <= n; r++) {
-        if (stp[id[r]] !~ /^[0-9]+$/ || stp[id[r]] + 0 < 5 || sta[r] == "landed" || sta[r] == "dropped") continue
-        cr[++nc] = r; reach(id[r], nc)
-      }
-      for (c = 1; c <= nc; c++) {
-        if ((c, nid) in R) continue
-        fold = 0
-        for (e = 1; e <= nc && !fold; e++)
-          if (e != c && !((e, nid) in R) && ((c, id[cr[e]]) in R) && !((e, id[cr[c]]) in R)) fold = 1
-        if (fold) continue
-        d = dep[cr[c]]; gsub(/^[ \t]+|[ \t]+$/, "", d)
-        printf "%s\t%s\n", id[cr[c]], (d ~ /[A-Za-z0-9]/ ? d ", " nid : nid)
-      }
-    }'
 }
 
 # _units_files_tokens <Files cell> -> one entry per line, as the readiness program reads a Files cell: comma-split,

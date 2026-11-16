@@ -1626,11 +1626,6 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
 # Called inside the scheduler's one parse of the table (`tick_plan_memoised`), so the rows, the
 # waiting reads, the edges and the ready set are one reading.
 #
-# A WAIT ON A SUSPECT HOLDER SAYS SO (wave-30 T16; REQ-12 AC-12.2, D14a). When `units_suspect` (the
-# one suspect test, lib/units.sh) names the row and a holder its WAIT reason names, the line carries
-# ` · suspect: <id> reads <holder>, shares no file — loosen it: edit <id> in the plan: reads=…`,
-# the loosening said and never made. The reason keeps `clean`'s 400-character cut; the clause is
-# cleaned on its own and kept whole, because a cut edit names no cell.
 # THE SPLIT CANDIDATE IS A DECISION WHILE WIDTH IDLES (wave-30 T16, REQ-12 AC-12.4, D14d; wave-38 T7, D22, REQ-6
 # AC-6.5). The pending row of the chain `units_split_candidate` scores highest by fan-in × size × files is printed
 # on its own line, after the CHAIN line,
@@ -1642,10 +1637,6 @@ sched_facts_state() {  # <project root> -> sets UNITS_FACTS_STATE, or clears it
 # each). <w> is the writer width this tick fills to. A full fill, or no candidate (every pending row on the
 # chain scores 0), prints no line. Through 1.20.0 it rode the CHAIN line as ` · SPLIT? …` on every tick, as
 # advice whatever the width. Nothing is split: a split is the orchestrator's edit of the plan.
-suspect_lines() {  # <plan> [<id>] -> `<id><TAB><holder><TAB><clause — loosen it: edit …>`, one per suspect; the one wording the WAIT line and task-add print
-  units_suspect "$@" 2>/dev/null | awk -F'\t' 'NF >= 4 { printf "%s\t%s\t%s — loosen it: %s\n", $1, $2, $3, $4 }'
-}
-
 run_live() {  # <pid> <log> -> 0 when <pid> is alive and is still <log>'s detached shim
   local c
   case "$1" in ''|*[!0-9]*) return 1 ;; esac
