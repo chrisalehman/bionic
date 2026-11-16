@@ -148,7 +148,6 @@ reader_facts() {  # <plan> -> one line per standing fact, in the order the facts
       # a discarded run was killed, not judged: it must not unseat the verdict a run already gave
       if (t == "verdict" && f["result"] == "discarded" && (id in live)) next
       # a step or an approval given again stands at its new place: the run went back to it, or a person approved again
-      # after an ask raised since, which only a later approval closes
       if ((named == "step" || named == "approval") && (id in live) && fact[id] == body) delete live[id]
       if ((id in live) && fact[id] == body) next
       live[id] = 1; fact[id] = body; type[id] = t; stamp[id] = f["at"]; place[id] = ++seq
@@ -256,8 +255,9 @@ function ask_round(   k, r) { k = line_kv("key"); if (k ~ /^approve:D[0-9]+$/) k
 '
 
 reader_question asks list reader_q_asks
-reader_q_asks() {  # <plan> -> each ask still open: its round open in the rounds, and no approval of its `approve:` key since
-  # Whether a round is closed is the rounds' one rule (`reader_ask_rounds`): this asks it, then adds the approval.
+reader_q_asks() {  # <plan> -> each ask still open: its round open in the rounds
+  # Whether a round is closed is the rounds' one rule (`reader_ask_rounds`), and the asks library's register lists the
+  # same rounds: so the open asks a sheet counts are the ones it lists. An approval closes no ask; its reply does.
   { reader_ask_rounds "$1"; printf '\034\n'; reader_facts "$1"; } | awk -F'|' "$_READER_AWK$_READER_ASK_AWK"'
     $0 == "\034" { facts = 1; next }
     !facts { if (line_kv("state") == "open") round_open[ask_round()] = 1; next }
@@ -267,7 +267,6 @@ reader_q_asks() {  # <plan> -> each ask still open: its round open in the rounds
       if (!(id in seen)) { seen[id] = 1; ord[++n] = id }
       open[id] = $0
     }
-    ev() == "approval" { for (id in open) if (index(id, "approve:" line_kv("key") SUBSEP) == 1) delete open[id] }
     END { for (i = 1; i <= n; i++) if (ord[i] in open) print open[ord[i]] }'
 }
 
