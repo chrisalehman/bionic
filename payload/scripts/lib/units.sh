@@ -211,10 +211,11 @@ _units_table() {
 # A ROW'S STATE AND ITS AGENT ARE THE RUN'S, NOT THE CELLS' (D2). A launch is a `dispatch` event in the run's log and
 # writes no cell; a launch taken back is a `cancel` of it. So `units_rows` and every scheduling answer read the
 # `status` and `agent` slots through the reader's standing facts: a row the log holds launched (its latest standing
-# dispatch with an instant, never the plan cell's own translation, which has none) reads `active` under that name, and
+# dispatch with an instant) reads `active` under that name, and
 # one the log holds landed reads `landed`, and one it holds dropped reads `dropped` by the reader's one rule (lib/reader.sh
 # `_READER_DROP_AWK`), whatever launch stands; a `landed` or `dropped` cell is never moved back. Everything else is the
-# cell, which is the old home the translation reads, so a run whose log holds none of these reads as its cells say.
+# cell, and a table with no status column (a page at 15) reads every such row pending, so a run whose log holds none of
+# these reads as its table says.
 # The text itself is judged as written (`units_validate` reads `_units_table`), so a write is never refused for a
 # state the plan does not carry. A plan writer's copy is read with its plan's run.
 # A row the log holds landed keeps the name of the launch that landed it, as its agent cell kept it, so the stop of
@@ -358,8 +359,8 @@ units_drop_event() {
 }
 
 # _units_born_facts <plan> -> `<row>\t<reason>\t<finding>\t<promoted>`, one line per born event of the run that carries a
-# reason, the first per row, in the facts' order, each field read by its name. A version-14 run's born markers are the
-# born events its translation makes of them. Nothing for a run with none; 2 a failed fold.
+# reason, the first per row, in the facts' order, each field read by its name. Nothing for a run with none; 2 a failed
+# fold.
 _units_born_facts() {
   local plan facts
   plan="$(_units_origin "${1:-}")"
@@ -1122,9 +1123,9 @@ units_floor_holds() { _units_sched holds "${1:-}" "${2:-}"; }
 # nothing, rc 0, as every caller of the plan-wide list takes it.
 # `approve` records only these: a name no row waits on would be recorded once while the row it was meant for waits. A
 # name only a landed or dropped row waits on satisfies nothing either, so it is not one of them. The match is exact, case included, as the readiness program keys it. `plan` is a wait like
-# any other here, and an empty cell at 14 waits on it by its kind.
-# THE WAITS ARE THE PLAN'S ONE READER'S (lib/plan-read.sh `plan_read_waits`): a read at 14, `live:` or not, and a
-# name a task's deps cell holds at 15 are one wait, so the approve command takes at 15 what it takes at 14. That reader
+# any other here, and a row with an empty deps cell waits on it by its kind.
+# THE WAITS ARE THE PLAN'S ONE READER'S (lib/plan-read.sh `plan_read_waits`): a name a task's deps cell holds is a wait,
+# so the approve command takes what the scheduler waits on. That reader
 # gives an open integrate row `release` in a plan that carries a release; one whose release row is dropped carries none,
 # so its integrate row is not listed for it.
 units_approval_names() {
@@ -1338,7 +1339,7 @@ _units_floor_kept() {
 # scheduler's program so a verb that asks "which rows write this path" asks the matcher the scheduler asks.
 # `in_docs` is 1
 # when a `Files` path entry is the record, not the tracked tree: under `.bionic/`, or spelled from
-# the docs root as `record/…` (the spelling proof lines and older plans use; review 10 F4).
+# the docs root as `record/…` (the spelling proof lines use; review 10 F4).
 # `writes_head` is 1 when a `Files` cell names a path that is not, the tracked tree a writer
 # commits to the head; 0 when every path entry is the record, or the cell names no path at all (a
 # bare word or a dash declares nothing).
