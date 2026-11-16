@@ -917,21 +917,22 @@ SV_NOW=1791324000     # 2026-10-06T22:00:00Z = 3:00 PM PDT
 SV_R="$TMPROOT/verb"; SV_D="$SV_R/.bionic/docs/record/wave-02-fx"; SV_P="$SV_R/.bionic/docs/plans/epic-01-fx/wave-02-fx.plan.md"
 SV_GATE="$TMPROOT/gate"; mkdir -p "$SV_GATE/requests" "$SV_GATE/cost" "$SV_D" "${SV_P%/*}" "$SV_R/.bionic/tmp"
 ( cd "$SV_R" && git init -q . )
-SV_ROW() { printf '| %s | %s | build | %s · complexity: standard | — | — | %s | 30 | REQ-1 | lib/%s.sh | — | — | %s | — | — | — |\n' "$1" "$2" "$3" "$4" "$1" "$5"; }
+SV_ROW() { printf '| %s | %s | build | %s · complexity: standard | %s | 30 | REQ-1 | lib/%s.sh | — |\n' "$1" "$2" "$3" "$4" "$1"; }   # <id> <step> <task> <deps>, its state the log's
 {
   printf -- '---\nwave: wave-02-fx\ncanonical_sdlc_version: 15\nrelease: 9.9.0\nworking-branch: wave/02-fx\nintegration-branch: main\nforecast: 8h\n'
   printf 'goals: owed · the user says what they owe (record/owed-test.md)\n---\n# fixture plan\n'
-  printf '\n## Tasks\n\n| id | step | kind | task | agent | deps | reads | size | serves | Files | worktree | base | status | suites | lands-on | artifact |\n'
-  printf '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n'
-  SV_ROW T1 4 "The first row" — landed
-  SV_ROW T2 4 "The second row" — active
-  SV_ROW T3 8 "Merge it" "approval:release" pending
+  printf '\n## Tasks\n\n| id | step | kind | task | deps | size | serves | Files | artifact |\n'
+  printf '|---|---|---|---|---|---|---|---|---|\n'
+  SV_ROW T1 4 "The first row" —
+  SV_ROW T2 4 "The second row" —
+  SV_ROW T3 8 "Merge it" "approval:release"
   printf '\n## Not Doing\n\n- nothing\n'
 } > "$SV_P"
-SV_LOG="$SV_D/run.log"   # the run's log: its approval and step, T1's landing, D5 put, both asks opened, and D5 ruled
+SV_LOG="$SV_D/run.log"   # the run's log: its approval and step, T1's landing, T2's launch, D5 put, both asks opened, and D5 ruled
 {
   printf 'run/v1|ev=approval|key=step3|by=fixture|said=approved|at=2026-10-06T16:00:00Z\nrun/v1|ev=step|n=4|at=2026-10-06T16:00:00Z\n'
   printf 'run/v1|ev=published|row=T1|commit=%s|kind=queue|by=-|why=-|at=2026-10-06T18:00:00Z\n' "$(printf 'c%.0s' $(seq 40))"
+  printf 'run/v1|ev=dispatch|row=T2|name=w-T2|at=2026-10-06T18:30:00Z\n'
   printf 'run/v1|ev=decision|entry=Δ0|d=D5|verb=put|by=orchestrator|title=the width|wait=Nothing waits on it.|at=2026-10-06T20:00:00Z\n'
   printf 'run/v1|ev=ask|key=approve:release|sent=-|title=approval: release|at=2026-10-06T20:00:00Z\n'
   printf 'run/v1|ev=ask|key=decide:D5|sent=-|title=reply to D5|at=2026-10-06T20:01:00Z\n'
