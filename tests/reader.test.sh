@@ -445,17 +445,12 @@ joined() {  # <row…> -> each row's ready exit; the stop's ready= line; each as
 land() { printf 'run/v1|ev=published|row=%s|commit=c|kind=queue|at=2026-11-03T00:00:09Z\n' "$1" >> "$D/record/$W/run.log"; }
 
 section "JOIN-14"
-W=w14; expect_eq "a reads cell's row and path wait on the row, an approval on its ask; stop lists the ready rows" \
-  "A1=0 A2=1 A3=1 A4=1 A5=1 ; ready=A1; approve:ship>A4 waive:F1>A5 ; Z9=1" "$(joined A1 A2 A3 A4 A5)"
-land A1; expect_eq "once the row lands its readers are ready, in table order" "A1=1 A2=0 A3=0 A4=1 A5=1 ; ready=A2 A3" "$(joined A1 A2 A3 A4 A5 | cut -d';' -f1-2)"
+W=w14; land A1
 ask status A1 >/dev/null; expect_status "a row the plan holds has a status" 0 "$?"
 printf 'run/v1|ev=%s\n' 'dispatch|row=A1|name=n|at=' 'dispatch|row=A3|name=n|at=' 'stalled|row=A4|at=2026-11-03T00:00:10Z' \
   'dispatch|row=A4|name=n|at=2026-11-03T00:00:11Z' 'stalled|row=A5|at=2026-11-03T00:00:10Z' 'dispatch|row=A5|name=n|at=' >> "$D/record/w14/run.log"
 expect_eq "a dispatch with no instant sets a state only alone; a timed one by its time" "A1=landed A3=dispatched A4=dispatched A5=stalled " \
   "$(for r in A1 A3 A4 A5; do printf '%s=%s ' $r "$(ask status $r | sed -n 's/^state=//p')"; done)"
-printf '%s\n' "$JLOG" | plan w14d; sed 's/| landed |/| dropped |/' "$D/plans/epic-x/w14.plan.md" > "$D/plans/epic-x/w14d.plan.md"
-W=w14d; expect_eq "a dropped row is not ready and says so; a wait on it is met, named or read" \
-  "A1=1 A2=0 A3=0 A4=1 A5=1 ; ready=A2 A3|A3+A1=0 |state=dropped" "$(joined A1 A2 A3 A4 A5 | cut -d';' -f1-2)|$(readies 'A3 A1')|$(ask status A1 | head -1)"
 printf '%s\n' "$JLOG" | plan w14e; sed 's/| pending | approval:plan, approval:ship |/| dropped | approval:plan, approval:ship |/' "$D/plans/epic-x/w14.plan.md" > "$D/plans/epic-x/w14e.plan.md"
 W=w14e; expect_eq "a dropped row is held by no ask: the approval it read holds nothing, the integrate row's waiver still holds it" \
   " waive:F1>A5 " "$(joined A5 | cut -d';' -f3)"
@@ -464,6 +459,10 @@ section "JOIN-15"
 W=w15; expect_eq "a nine-cell row waits on its deps and what its kind and step imply, and no approval holds it" \
   "B1=0 B2=1 B3=1 B4=1 ; ready=B1; waive:F1>B4 ; Z9=1" "$(joined B1 B2 B3 B4)"
 land B1; expect_eq "a test row at Step 6 waits for the code writers before it" "B1=1 B2=0 B3=1 B4=1 ; ready=B2" "$(joined B1 B2 B3 B4 | cut -d';' -f1-2)"
+printf '%s\n' "$JLOG" | plan w15s; printf '%s\n' '## Tasks' '' '| id | step | kind | task | deps | size | serves | Files | artifact |' '|---|---|---|---|---|---|---|---|---|' \
+  '| B1 | 4 | build | t | — | 30 | R | src/b.sh | — |' '| B5 | 4 | build | t | approval:ship | 30 | R | src/e.sh | — |' > "$D/plans/epic-x/w15s.plan.md"
+W=w15s; expect_eq "an approval a nine-cell row names in its deps holds it on its ask, and the row beside it is ready" \
+  "B1=0 B5=1 ; ready=B1; approve:ship>B5 ; Z9=1" "$(joined B1 B5)"
 
 section "SECTION"
 SP="$D/plans/epic-x/sec.plan.md"
@@ -531,19 +530,19 @@ expect_eq "a fenced table is prose, the heading reads in either case and may go 
   "$(for W in tfence tsuffix tlower tnote tcr; do printf '%s=%s ' $W "$(ask row T1 | sed -n 's/^task=//p')"; done)"
 
 section "WAITS"
-# The rows each read names carry the read: a row reading its own id waits on itself, and a row reading
-# live:head writes the settled head for a row that reads it.
+# The rows each wait names carry the wait: a row naming its own id waits on itself, and a review row reading
+# live:head by its kind writes the settled head for a test row that reads it.
 cat > "$D/plans/epic-x/wr.plan.md" <<'EOF2'
 ## Tasks
 
-| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status | reads |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| C1 | 4 | build | t | — | — | 30 | R | src/c.sh | — | — | pending | approval:plan, C1, head |
-| C2 | 4 | build | t | — | — | 30 | R | src/d.sh | — | — | pending | live:head |
-| C3 | 4 | build | t | — | — | 30 | R | record/C3.md | — | — | pending | approval:plan, src/c.sh, C1 |
+| id | step | kind | task | deps | size | serves | Files | artifact |
+|---|---|---|---|---|---|---|---|---|
+| C1 | 4 | build | t | C1 | 30 | R | src/c.sh | — |
+| C2 | 6 | review | t | — | 30 | R | src/d.sh | — |
+| C3 | 5 | test | t | C1 | 30 | R | record/C3.md | — |
 EOF2
 rw() { ( . "${READER%/reader.sh}/lib/reader.sh" && plan_read_waits "$D/plans/epic-x/wr.plan.md" ) | awk -F'\t' '$2 == "row" { printf "%s>%s<%s ", $1, $3, $4 }'; }
-expect_eq "each row a read names, with the reads that name it" "C1>C1<C1 C1>C2<head C3>C1<src/c.sh,C1 " "$(rw)"
+expect_eq "each row a wait names, with the waits that name it" "C1>C1<C1 C2>C1<live:head C3>C1<head,C1 C3>C2<head " "$(rw)"
 section "HALF"
 # The half-moved run: T1's landing and two asks opened stand in the old homes, T2's landing (its ledger copy in the
 # plan too), a reply to one ask, a run and its verdict in the log, appended later. fails-when: the reader reads the log

@@ -265,8 +265,6 @@ ap_both "AP-5 units_born_marks" units_born_marks
 expect_eq "AP-6 the units validator passes the renamed plan (no violation)" "" "$(ap "$AP_DIR/new.plan.md" units_validate)"
 expect_eq "AP-6b …and passes the 1.20.0 plan, proof:floor in its reads, the same" "" "$(ap "$AP_DIR/old.plan.md" units_validate)"
 ap_both "AP-7 units_waiting at step 7" units_waiting 7
-expect_contains "AP-7b …and the 1.20.0 plan's T4 waits on approval:release, its regression read met" \
-  "$(printf 'T4\tapproval:release')" "$(ap "$AP_DIR/old.plan.md" units_waiting 7)"
 ap_both "AP-8 units_edges" units_edges
 expect_eq "AP-9 none of these readers printed a word on stderr for the on-disk tokens (the readers' positives are the answers above)" "0" "$(wc -c < "$TMPROOT/ap.err" | tr -d ' ')"
 
