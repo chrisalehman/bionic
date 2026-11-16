@@ -8,7 +8,7 @@
 # for a record at `<docs>/record/<wave>`.
 #   1  files that parse a plan or a log outside the reader: the one-reader check's own count, taken at
 #      this checkout over the revision's hooks and scripts
-#   7  born events the reader lists for the run (a run kept in older homes is answered through its translation)
+#   7  born events the reader lists for the run
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 [ -n "${1:-}" ] || { echo "usage: readings.sh <rev> [<record dir>]" >&2; exit 2; }
 rev="$1"; rec="${2:-}"

@@ -191,7 +191,7 @@ fi
 . "$BIONIC_LIB/session.sh"
 . "$BIONIC_LIB/run.sh"
 # THE ONE READER OF THE INTEGRATION BRANCH AND THE ONE READER OF THE HANDOFF POINTER (wave-39 T16; D18, AC-12.1):
-# lib/plan.sh `plan_integration_branch` (## SDLC State, then the frontmatter) for `handoff` and `release-check`, and
+# lib/plan.sh `plan_integration_branch` (the plan's header key) for `handoff` and `release-check`, and
 # lib/handoff.sh `handoff_pointer_of`/`handoff_default_of` for every reader of the run's handoff below.
 # close-out.sh calls the same two, so the verb and the closed form cannot read two branches or two files.
 # shellcheck source=/dev/null
@@ -2023,9 +2023,10 @@ pv_next() {  # <verb> <operand>... -> the call on stderr, one line
   die "next call: $(launch_sync_hand "$@")"
 }
 
-# THE USER'S WORDS, REFUSED IN ONE VOICE. finding-move and a criterion's waiver hold their words to
-# lib/said.sh `user_said`; its three refusals are written here once, the minimum named by the library's
-# own constant. <act> is what the words make: `a move`, `a waiver`.
+# THE USER'S WORDS, REFUSED IN ONE VOICE. Every approval, every waiver, a finding's move and the reply to the release
+# approval card hold their words to lib/said.sh `user_said`; its three refusals are written here once, the minimum named
+# by the library's own constant. <act> is what the words make: `an approval`, `a confirmation`, `a move`, `a waiver`,
+# `a reply to the release approval card`.
 #
 # THE RUN'S SESSIONS (wave-36 T9; D10): `user_said` reads every session the plan records, then this one,
 # and says which it read (SAID_SESSIONS) and asked for (SAID_TRIED); a refusal names them, so a reader can

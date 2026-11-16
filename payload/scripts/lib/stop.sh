@@ -1652,7 +1652,7 @@ TICK_MARK="bionic-patrol session=${BIONIC_SID:0:8}"
 # A ROW THAT SHOULD WAIT IS MADE NOT READY, NEVER ANSWERED IN WORDS. There are good reasons not to
 # fill (a row landing this minute, a decision the user has not ruled, an order), and each is a
 # fact of the plan the tick judges once: a read of the record of the row it waits on, a read of
-# the decision (`approval:D<n>`), or the user's order under `## SDLC State`. A reason written in
+# the decision (`approval:D<n>`), or the user's order in the run's log. A reason written in
 # a reply was read again on every turn end and judged by nothing. So the refusal names the three
 # forms, and the predicate is "a ready row is undispatched", never "a reason was given".
 #
@@ -2308,13 +2308,13 @@ stop_owed_send() {  # <event> -> always 0
 
 # THE TURN'S END IS THE RUN'S `stop` EVENT. One event per Stop of an
 # engaged run whose ledger is live, appended to the run's log through its one appender (lib/line.sh `line_event`),
-# and to no other home, so the reader answers it at every version, a run brought forward included:
+# and to no other home, so the reader answers it from the log alone:
 #
 #   run/v1|ev=stop|session|turn|current|state|ceiling|width|open|free|ready|launched|declined|missed|idle|room|at
 #
 # `idle` and `room` close the facts: the ready rows nothing launched while a slot was free, and the free slots.
-# `declined` IS KEPT, EMPTY: nothing answers a ready row in words now, and an older ledger's lines, which the
-# translation reads as these events, carry it. The instant is the appender's, last, as on every event.
+# `declined` IS KEPT, EMPTY: nothing answers a ready row in words now. The instant is the appender's, last, as on every
+# event.
 #
 # A RECORDER, NOT A WALL. It never refuses and is silent on every failure, a log it cannot write and an appender
 # that refuses the line among them: the stop it rides on is a turn somebody has to be able to end. It runs BEFORE

@@ -5,17 +5,17 @@
 #
 # WHAT IT OWNS. The one computation of "which rows may be dispatched now", and the one
 # predicate for "is this run's ledger live". Three verbs, all pure functions of the plan
-# file (and, for the third, of the session's roster):
+# and its run's log (and, for the third, of the session's roster):
 #
-#   fill_ledger_live <plan>            0 when the plan's `## SDLC State` carries a non-blank
-#                                      `approved-by:` line and its `current:` is 4 or later,
+#   fill_ledger_live <plan>            0 when the run's log holds the Step-3 approval and a
+#                                      step of 4 or later,
 #                                      1 otherwise. The cheap gate a caller asks BEFORE
 #                                      paying for a table read.
-#   fill_order_open <plan>             0, printing it, while the user's order stands under
-#                                      the plan's `## SDLC State`; the fill offers no row.
-#   fill_step_token <plan>             the step the ready set is asked at: the numeric
-#                                      `current:` with its sub-step letter stripped, or
-#                                      empty when the field is not a step number. It decides
+#   fill_order_open <plan>             0, printing it, while the user's order stands in
+#                                      the run's log; the fill offers no row.
+#   fill_step_token <plan>             the step the ready set is asked at: the run's
+#                                      step with its sub-step letter stripped, or
+#                                      empty when it is not a step number. It decides
 #                                      only the gate acts (integrate, close); a work row is
 #                                      ready at any step (wave-20 Δ1).
 #   fill_ready_set <plan> <rung> <open>
@@ -139,13 +139,13 @@ fi
 # and the tick both ask in their own shell before any `$( )` reader runs, and every subshell
 # after that inherits the answer. The key is the path alone. The stop wall and the tick never
 # write a plan, so for them the path is the whole identity. ONE READER WRITES: `card.sh step3`
-# rewrites one projection path per batch, each with a different `current:`, and asks the ready
-# set in its own shell — so its writer, `_card_project`, calls `fill_current_forget` after
-# every write (wave-19 critic C2: a Step-5 batch answered at the Step-4 projection's step read
-# `0 of <rung>`). A key on mtime and size would not have caught it — the step-4 and step-5
-# projections are the same size and land in the same second — and a content hash is a fork on
+# holds one copy of the page, a run of its own, and between batches moves that run's step and
+# landings in the copy's log, then asks the ready set in its own shell — so its writer,
+# `_card_project`, calls `fill_current_forget` after every write (a batch answered at the
+# previous batch's step would read `0 of <rung>`). The path as a key cannot see it — the copy's
+# path stands while its log moves — and a key on the log's content is a fork on
 # every read, the cost this memo exists to remove. So the contract is the writer's: a process
-# that rewrites a plan it has read through this file forgets it after the write. A path that
+# that moves a run it has read through this file forgets it after the write. A path that
 # is not a file is answered "" and never memoised, so a plan created later in the same process
 # is still read. Sourcing this file resets the memo.
 #
@@ -263,7 +263,7 @@ fill_order_open() {  # <plan>
   gate_order_plan "${1:-}"
 }
 
-# fill_plan_approved <plan> -> 0 when `## SDLC State` carries a non-blank `approved-by:` line.
+# fill_plan_approved <plan> -> 0 when the run's log holds the Step-3 approval.
 fill_plan_approved() {
   _fill_current_load "${1:-}"
   [ "$_FILL_APPROVED" = 1 ]

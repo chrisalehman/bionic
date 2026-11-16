@@ -116,7 +116,7 @@ The load-bearing row of the section, and the only part later steps consume mecha
 ```
 | concept | owning module (SSoT) | reuses | rendering surfaces | agreement test |
 |---|---|---|---|---|
-| version pin value | `payload/scripts/lib/walls.sh`'s `SUPPORTED_SDLC_VERSION` (the commit gate behind `hooks/bash-walls.sh`) | none fits: no other file holds a version constant | the governing-skill hook · the two SVG diagrams | `tests/cross-gate-agreement-1.test.sh` §V pins the renderings against the gate's value, with a mutation arm |
+| version pin value | none single: the literal `15` in the commit gate's version case (`payload/scripts/lib/walls.sh`, behind `hooks/bash-walls.sh`) and in the write hook's (`hooks/canonical-sdlc-governing-skill.sh`) | none fits: no file holds a version constant, each case reads the header's `canonical_sdlc_version` itself | the governing-skill hook · `plan_read_faults` in `payload/scripts/lib/plan-read.sh` | `tests/canonical-sdlc-evidence-gate.test.sh` §Section 2b holds the two gates to one answer on a plan at 13, 14 and 15; the literal in `plan_read_faults` is not in it |
 | agreement-test duty + authoring rules | `agents-src/blocks/checks-structure.md` (`one-site`) | the render markers of `agents-src/render.sh` | payload/context/checks-structure.md · this section | `bash agents-src/render.sh --check` holds the rendered file to its block; this section is the unpinned one |
 ```
 
@@ -124,7 +124,7 @@ The load-bearing row of the section, and the only part later steps consume mecha
 - **One row per concept rendered at more than one surface.** A concept in one place has nothing to disagree with; the table is a duplication ledger, not an inventory.
 - **The owner is a place, not a layer or a role.** "the governing-skill hook" is an owner; "the backend" is not. With no file, function or named constant to name, the concept has no owner yet — write that down as the finding.
 - **Rendering surfaces include prose.** A constant read by two scripts and quoted in a doc has three surfaces, and the doc is the one that drifts, because nothing runs it.
-- **The agreement test is a real hermetic test that fails when the surfaces disagree** — named, not a suite and not "covered by the unit tests". The exemplar is the `SUPPORTED_SDLC_VERSION` pin in `tests/cross-gate-agreement-1.test.sh` §V: one constant, its renderings held against the gate as origin, with a mutation arm. Name what a test leaves out rather than rounding up to "pinned"; a surface becomes pinnable by changing its format or by naming it in the same test as the origin. `none — <why>` is a legitimate cell (prose against prose has no seam to test), but the reviewer stops on it: give the reason.
+- **The agreement test is a real hermetic test that fails when the surfaces disagree** — named, not a suite and not "covered by the unit tests". The exemplar is the version pin in `tests/canonical-sdlc-evidence-gate.test.sh` §Section 2b: the commit gate and the write hook, each holding the literal `15`, driven on one plan at three versions so that they cannot disagree. Name what a test leaves out rather than rounding up to "pinned"; a surface becomes pinnable by changing its format or by naming it in the same test as the origin. `none — <why>` is a legitimate cell (prose against prose has no seam to test), but the reviewer stops on it: give the reason.
 
 ### The Eval design table
 
