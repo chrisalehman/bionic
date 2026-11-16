@@ -55,12 +55,12 @@ No SDLC State section here." > /dev/null
 
 section "Section 2b: a plan declares 15; one at 14 on disk is a document; the two gates agree"
 
+# Bound, since the walk admits a page at 15 alone: the session's binding is how a page at 13 reaches the commit.
 h2v=$(make_home)
-write_plan "$h2v" "${FM/version: 14/version: 13}
+bound_marker "$h2v" "$EG_SID" "$(write_plan "$h2v" "${FM/version: 14/version: 13}
 ## SDLC State
-current: 4" v.plan.md > /dev/null
+current: 4" v.plan.md)"
 expect_block "a plan at 13 is refused, the fix naming the version a plan is written at" "$h2v" 'git commit -m "x"' "set 'canonical_sdlc_version: 15'"
-# Bound, since the walk admits no page at 13 that holds no state section: the session's binding is how one reaches here.
 h2s=$(make_home)
 bound_marker "$h2s" "$EG_SID" "$(write_plan "$h2s" "${FM/version: 14/version: 13}
 # a plan" s.plan.md)"
@@ -68,7 +68,7 @@ expect_block "a bound plan at 13 with no state section is refused at the commit 
 for v in 13 14 15; do
   h=$(make_home); git -C "$h" init -q; p=$(write_plan "$h" "${FM/version: 14/version: $v}
 ## SDLC State
-current: 4" "v$v.plan.md"); run_hook "$h" 'git commit -m "x"'
+current: 4" "v$v.plan.md"); bound_marker "$h" "$EG_SID" "$p"; run_hook "$h" 'git commit -m "x"'
   w=$(jq -n --arg p "$p" --arg c "$(cat "$p")" --arg s "$EG_SID" '{session_id: $s, hook_event_name: "PreToolUse", tool_name: "Write", tool_input: {file_path: $p, content: $c}}' \
     | HOME="$h" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh" 2>&1 >/dev/null | grep -c 'unsupported version' || true)
   case "$v" in 13) expect_eq "the write hook refuses 13 for its version" 1 "$w" ;; 14) expect_eq "the write hook says nothing of a plan at 14 on disk" 0 "$w" ;; esac
