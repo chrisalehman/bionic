@@ -28,4 +28,3 @@ old run	tests/sitrep.test.sh	sr_reg() { local p="${1:-$SR_PLAN}"; p="${p##*/}"; 
 old run	tests/sitrep.test.sh	  SR_REPO="$r"; SR_PLAN="$p"; SR_DIR="$d"; SR_REC="$d/landing-proofs.log"; : > "$SR_REC"
 old run	tests/sitrep.test.sh	sr_asks | sed 's/^run\/v1|ev=ask|/owed\/v1|/; s/|prompt=/|reply=/' > "$SR_DIR/asks.state"; sed -i.was '/^run\/v1|ev=ask|/d' "$SR_DIR/run.log"
 old run	tests/sitrep.test.sh	  "$(sr_r_card $((SR_E0 + 82800)))|$(/usr/bin/grep -c 'state=closed' "$SR_DIR/asks.state")|$(/usr/bin/grep -c 'ev=ask' "$SR_DIR/run.log")"
-old run	tests/units.test.sh	AP_REC="$AP_REPO/.bionic/docs/record/ap/landing-proofs.log"
