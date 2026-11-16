@@ -149,7 +149,7 @@ by owner liveness, not file name. Give an agent a `record/` path in its brief.
 
 Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 15`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`. Plan files additionally carry `walk: required | exempt` — Step 0's derivation, and the key the Verify gate reads — Step 0's `design-interview:` value beside it, `regression:` (`yes` or `no`, Step 0's setting) and, where it differs from the scale default, `regression-override:` beside those, and, where the run's rigor sits below its derived minimum, `rigor-override:`. None of these is required to write, but a `walk:` value outside the enum blocks.
 
-**15 is the version a plan is written at.** An unsupported value — an empty value, a typo — blocks at both hooks. A plan at 14 is an older run's document: no hook reads it as a run, and its work comes forward as text a person or a model reads.
+**15 is the version a plan is written at.** A new plan at any other value is refused at the write, and a plan at 15 stays at 15: a write that lowers it is refused, and so is a commit once its run's log holds a step. A plan already on disk at 14 is an older run's document: both hooks admit it with nothing judged, no session binds it, and its work comes forward as text a person or a model reads. Any other value (an empty value, a typo, 13) is refused at the write, and at the commit only for the plan a session is bound to; with no bound session such a page meets no gate at the commit.
 
 ## Steps
 
@@ -228,6 +228,6 @@ A step's evidence is events in the run's log and the header a person wrote; `rea
 
 ## Diagrams
 
-`diagrams/lifecycle.svg` — the 10 steps, the two gates, and the commit rhythm. `diagrams/hook-chain.svg` — which hook fires on which tool event, and which arms block versus log.
+`diagrams/lifecycle.svg` — the 10 steps, the two gates, and the commit rhythm. `diagrams/hook-chain.svg` — which hook fires on which tool event, and which arms block versus log. Neither is redrawn for version 15: both still draw a plan's state section, its verification matrix and a task row's status, which a plan at 15 does not hold, where both gates now judge a plan at 15 on its run's log. Read them for the hooks and the steps, not for what a gate reads.
 
 **Format policy.** Composed SVG is the default for a diagram here; Excalidraw (`bionic:excalidraw-diagram`) is the backup, for a drawing whose layout is genuinely hand-arranged.

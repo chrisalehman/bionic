@@ -8,6 +8,98 @@ Versioning follows semver from 1.9.0 on:
 - **MINOR** for new capability.
 - **PATCH** for a fix, including deleting a check or verb that was itself the defect.
 
+## 2.0.0 — 2026-11-16
+
+This is the one-log release. Every act of a run is written once, to one log, `record/<wave>/run.log`; one reader,
+`payload/scripts/reader.sh <plan> <question>`, answers every card, report, brief and gate from it; and the plan holds
+only what a person wrote. It answers the kernel spike's count of facts read two ways, and the decision record is ADR-078,
+"The record is the truth", promoted into docs/adrs as Proposed, which supersedes ADR-002, ADR-027, ADR-032 and ADR-035.
+The plan format moves to `canonical_sdlc_version: 15`, and 2.0.0 reads a run at version 15 and nothing older: the person
+ruled a hard cutoff (D44, D48, D49), so the act this wave built to bring a version-14 run forward was used on this run's
+own plan and then removed with the reader's translation of older runs, and no such act ships. This is a major release by
+the policy above: a `canonical_sdlc_version` bump and an artifact a user must migrate. The one-reader check,
+`payload/scripts/one-reader-check.sh`, prints `parsers=0 plan_writers=0 shared_types=0 hook_refusals=0 loader_copies=0
+unheard_folds=0 names=0` at 97e71dac5, and the release check's cap on test lines held there: 92885 test lines against
+93558 of code (`test-ratio: 92885/93558`).
+
+**Migration.** What a person with an older run, or a script of theirs, meets:
+- A version-14 run, one begun under 1.30.0 (its plan at `canonical_sdlc_version: 14`), is finished under 1.30.0 and is
+  not read by 2.0.0: finish it through its close before the upgrade. No gate judges it as a run and no session binds
+  it, and no act that brings a version-14 run forward to 15 ships. Its plan stays on disk as a document.
+- What the hooks do with such a plan, driven at 97e71dac5 on a scratch project (`T68-drive14.txt`): with no session
+  bound, a commit meets no gate and prints no word, and a write to the plan on disk is admitted with nothing judged. A
+  new plan written at 14 is refused at the write, naming 15. `session-poker.sh bind` refuses the plan as not an open
+  run. A session marker written before the upgrade that names it reads as bound to a closed run: both hooks print
+  `bound plan closed — <plan>; this session has no open run` and admit. A plan below 14 that a session is bound to is
+  refused at the commit as an unsupported version; with no session bound it meets no gate.
+- A plan at 15 stays at 15 (T228): a write that lowers its version is refused, and once its run's log holds a step a
+  commit against it lowered by hand is refused, naming the line to put back.
+- A new run is written at 15: its header, `## Goal`, `## Tasks` with nine cells (id, step, kind, task, deps, size,
+  serves, Files, artifact), a section per row and `## Eval design`. Both gates refuse a plan at 15 that holds a
+  `## SDLC State`, `## Verification Matrix` or `## Handoff` section, or a `current:`, `approved-by:`, `abandoned:` or
+  `cleaned:` header key, naming each (payload/scripts/lib/plan-read.sh `PLAN_READ_GONE_SECTIONS` and
+  `PLAN_READ_GONE_KEYS`). The step, the approvals, the launches, the landings, the proofs, the findings and the asks are
+  events of the run's log, written by the poker's verbs; no verb writes the plan. A row waits on the rows and
+  approvals its deps cell names, and on the approval its kind implies.
+- 29 poker verbs are gone, and a script that calls one meets `poker: unknown verb: <verb>` and the usage: `budget`,
+  `confirm-row`, `continuation-fill`, `cover`, `deliver`, `discharge`, `disposition`, `epic-row`, `fill-report`,
+  `finding-stated`, `interval-default`, `launch-sync`, `ledger-add`, `ledger-set`, `matrix-render`, `matrix-retier`,
+  `matrix-set`, `patrol`, `regression`, `regression-runs`, `row-landed`, `step-field`, `step-line`, `task-set`,
+  `task-split`, `tasks-prose`, `wait`, `waive-row` and `window`. 39 remain, and none was added.
+- Two hook scripts are gone from hooks/hooks.json, `agent-context-guard.sh` and `stop-guard.sh`; 9 are registered.
+- tests/fixtures/refusal-inventory.md is removed: no file of the tree read it since its reader, refuse.test.sh §INV, was
+  cut in 5947e68af, and two of its lines named removed verbs as fixes.
+
+### The readings
+
+The eight readings of REQ-12, each a reading and never a gate, printed by `bash payload/scripts/readings.sh <rev>
+<record>` from this checkout (`T68-readings.log`). 1.30.0 is 7a9633486 read with its run's record,
+`record/wave-49-what-a-run-costs`; the release head is 97e71dac5 read with this run's record, `record/wave-50-one-log`.
+Reading 7 of 1.30.0 is read over that run's recording at 15 in the replay bed,
+`tests/fixtures/replay/wave-49-what-a-run-costs` (`T68-readings-49replay.log`): 2.0.0's reader reads no plan at 14, and
+over the run's own record it prints 0.
+
+| reading | 1.30.0 | 2.0.0 |
+|---|---|---|
+| r1_parsers: files that parse a plan or a log outside the reader | 24 | 0 |
+| r2_session_poker_verbs | 68 | 39 |
+| r3_registered_hook_scripts, r3_over_30pct_in_file, r3_loader_copies | 11, 9, 15 | 9, 9, 0 |
+| r4_shell_outside_tests_lines | 101513 | 92849 |
+| r5_tests_lines | 102161 | 92885 |
+| r6_hand_edit_lines, r6_hand_holds_total_at_close | 0, 3 | 0, not yet: the close writes it in the continuation |
+| r7_born_events | 11 | 157 |
+| r8_whole_runs | 4 | 2 |
+
+### The walk, the regression, the reviews
+
+- The whole regression: two runs, the second at 546bc0eb5 after the last build row, red on two suites of 134
+  (`Gating: 132 passed, 2 failed`; `regression-run-546bc0eb5d04682275fd109e91acd1c00905aceb.log`): hook-timeout and
+  rehearsal-release-waiting. T229 and T230 were born of it; neither was a defect a landing made in the product (A-orch.800).
+  Each ran its suite green at its landing; no whole run has been taken since.
+- The reviews of the whole and of the phases are registered in the run's log and are rendered into this entry by the
+  integrate row; the evidence reviews of the flip and of the whole were open when this entry was written.
+
+### The release
+
+- T68 (`T68.md`): this entry, `plugin.json` 2.0.0, the help and version pages rendered by `agents-src/render.sh`,
+  `rendered.sha256` refreshed, ADR-078 promoted as Proposed and the four records it supersedes marked, and the text the
+  night's rows left saying what no longer stands: the skill's version paragraph and its Diagrams section, step three's
+  card, a comment of the field library and the units suite's labels. The landing numbers are not printed in this entry.
+
+### Known limits
+
+- An approval that repeats the previous one in every field but its time does not close an ask raised again after that previous approval, so the ask stays on the open list; give a second approval of the same thing in words of its own (critic-adversarial-p1.md finding 8).
+- The scheduler learns which files a row writes from its Files cell alone, so a file given to a writer later by amend is not counted, and two rows that both write it can be offered at once; put a shared file in both rows' Files cells, or a dep between the rows (critic-adversarial-p1.md finding 9).
+- The release card lists row and finding decisions that the register of open asks does not hold, so its count of decisions owed can differ from its count of open asks, and a reply that leaves one of those decisions unanswered leaves nothing that holds it; answer every decision the card lists by name (critic-adversarial-p1.md finding 10).
+- An archived plan, read where the archive moved it, reads as an open run at no step with exit 0, because its record and its log stay in the project; to read a closed run, read its record, or name its plan before it is archived (critic-adversarial-p2.md finding 2).
+- A build row added to the Tasks table after the review rows is no wait of theirs unless it is named in their deps, so the tick can offer a review while that build row is still out; when you add a late build row, add it to every review row's deps (critic-adversarial-p3.md finding 2).
+- Where a reader answer is taken through a wrapper and a pipe, a failed fold of the run's log is read as an empty answer, so the tick can put a decision to you about a red already on the ledger, or print no FINDING line; a fold fails only when the log cannot be read, so ask the tick again once it can (critic-adversarial.md finding 1).
+- A review row at 15 returns to pending after each reading of its question and is never landed by it, so a row that names a review row in its deps waits for ever; name the build rows a doc or merge row waits on, never a review row (hooks/poker/proof.sh, "A REVIEW THAT FOLLOWS THE BUILD GOES BACK TO WAITING"; A-orch.802, A-orch.803).
+- The tick may order a writer stood down while it is inside `spawn-worktree.sh ready`, once its record meets its contract, since the stand-down arm reads a met contract (hooks/poker/tick.sh, the STANDDOWN arm; it stands at 1.30.0); keep it up with `session-poker.sh hold <name> '<why>'` until its landing publishes (A-orch.788).
+- The commit wall takes about 24 seconds on a quote-dense command of 200 KB, past its 10-second registration in hooks/hooks.json, so the harness cancels it and the commit is admitted unjudged: 24.2 to 25.5 seconds in three runs at 97e71dac5 under /bin/bash (`T68-wall-time.log`; T229.md measured 24 to 26 seconds at 546bc0eb5 and at 94ecc7f8f). It has stood since 1.18.0's limit of the same command; this release does not close it.
+- The kept folds of a run's facts are 16 files under `$TMPDIR/bionic-facts-<uid>`, shared by every project and suite of one user, so a suite or another project's hook running in the same session can evict a live run's fold, and the next commit wall folds the log again: on this run's log of 10,596 lines the facts fold took 956 to 1,018 ms and the place 2,654 to 2,729 ms with the kept folds absent, against 562 to 567 ms and 110 to 144 ms with them present, about 3 seconds more of the wall's 10 (`T68-live-fold.log`; T229.md). The listed limit of 1.13.0, that a hook which outruns its timeout under load is cancelled and the action admitted, stands with it.
+- The skill's two diagrams, `diagrams/lifecycle.svg` and `diagrams/hook-chain.svg`, are not redrawn for version 15: they still draw a plan's state section, its verification matrix and a task row's status, and the skill's Diagrams section says so (A-orch.767).
+
 ## 1.30.0 — 2026-11-06
 
 This is the what-a-run-costs release: the gate controls the machine's capacity by what each run costs, and never by how
