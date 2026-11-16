@@ -510,7 +510,7 @@ section "9: the fill refusal's headline names only the rows the turn left out (w
 # ready set until the orchestrator ledgers it `active` (A-T11.1), so the naming subtracts the
 # turn's launches by dispatch name. Two ready rows, one launched under a wave-prefixed name
 # and still `pending`: the headline says 1 of 2 and names the other.
-s9_fixture() {  # -> project dir; plan with T13 and T14 pending, writers=8; STOP_AT=15 asks for the page at 15
+s9_fixture() {  # -> project dir; a page at 15 with T13 and T14 pending, writers=8
   local d
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
@@ -525,7 +525,7 @@ s9_fixture() {  # -> project dir; plan with T13 and T14 pending, writers=8; STOP
     printf '| T13 | 4 | build | first task | implementor | — | 15m | REQ-x | a.sh | pending | — |\n'
     printf '| T14 | 4 | build | second task | implementor | — | 15m | REQ-x | b.sh | pending | — |\n'
   } > "$d/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
-  [ "${STOP_AT:-14}" != 15 ] || sp_at15 "$d/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
+  sp_at15 "$d/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
   bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
   roster_header > "$d/.bionic/tmp/roster-$SID.state"
   printf '%s' "$d"
@@ -551,7 +551,7 @@ require_helpers s9_fixture s9_transcript s9_headline stop_led
 S9_RING="$(mktemp)"; printf '1700000000|80|0|1.0|8\n' > "$S9_RING"
 export BIONIC_PRESSURE_RING="$S9_RING" BIONIC_NOW_EPOCH=1700000000
 
-S9_D="$(STOP_AT=15 s9_fixture)"
+S9_D="$(s9_fixture)"
 roster_row_fixture status=intended session="$SID" name=w9-T13 agent_id=aw9T130000000001 deliverable= \
   >> "$S9_D/.bionic/tmp/roster-$SID.state"
 S9_TX="$(mktemp)"; s9_transcript "$S9_TX" w9-T13
@@ -575,7 +575,7 @@ expect_contains "9f: …and the ledger's ready set is still the plan's, both row
 expect_contains "9g: …with one row missed, not two" "|missed=1" "$S9_LED"
 
 # THE ZERO CASE, so 9b cannot pass on a constant: nothing launched reads 0 of 2, both named.
-S9_D0="$(STOP_AT=15 s9_fixture)"
+S9_D0="$(s9_fixture)"
 S9_TX0="$(mktemp)"; s9_transcript "$S9_TX0"
 s7_fire "$S9_D0" "$S9_TX0"
 expect_contains "9h: a turn that launched nothing names both ready rows" "ready with room: T13 T14 (" "$(s9_headline)"
@@ -595,7 +595,7 @@ expect_contains "9p: T16 a turn that launched nothing leaves both ready rows idl
 # columns and refuse.sh refuses a longer one, which would turn this refusal into a refuse-call
 # error. Eight ready rows, nothing launched: the headline names what fits and counts the rest,
 # and the reason still names every row.
-S9_D8="$(STOP_AT=15 s9_fixture)"
+S9_D8="$(s9_fixture)"
 S9_P8="$S9_D8/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
 for _s9_i in 101 102 103 104 105 106; do
   printf '| T%s | 4 | build | more | — | 15m | REQ-x | x%s.sh | — |\n' "$_s9_i" "$_s9_i" >> "$S9_P8"
@@ -614,7 +614,7 @@ expect_contains "9m: …while the reason names every row" "T106" "$(reason_of)"
 # five-minute load over the share: the gate gives no room, so the wall owes no row and its
 # ledger records the hold. 9h above is the same fixture with room, and refuses. 8.0 busy cores of the
 # fixture's 8 is over the gate's width at any share below 100 (92 x 8 / 100 less the reserve of 1 = 6.36).
-S9_DG="$(STOP_AT=15 s9_fixture)"
+S9_DG="$(s9_fixture)"
 S9_TXG="$(mktemp)"; s9_transcript "$S9_TXG"
 BIONIC_PROBE_BUSY_CORES_5M=8.0 s7_fire "$S9_DG" "$S9_TXG"
 S9_LEDG="$(stop_led "$S9_DG/.bionic/docs/record/wave-09-fixture")"
@@ -643,8 +643,7 @@ section "GAP: one width fact and one refusal — the wall asks the gate as the t
 # so a busy reading of 6.0 leaves room for exactly one writer (6 <= 6.36 < 6 + the suite cost of
 # 1.61), and 8.0 for none.
 # The plan is one the commit gate admits: at 15, its version line and its step and approval in its log.
-gap_fixture() {  # -> project dir; three pending writer rows T13 T14 T15 reading their kind's default, an empty roster;
-  # STOP_AT=15 asks for the page at 15
+gap_fixture() {  # -> project dir; a page at 15 with three pending writer rows T13 T14 T15 reading their kind's default, an empty roster
   local d
   d=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
@@ -660,7 +659,7 @@ gap_fixture() {  # -> project dir; three pending writer rows T13 T14 T15 reading
     printf '| T14 | 4 | build | second | implementor | — | 15m | REQ-x | b.sh | pending |  |\n'
     printf '| T15 | 4 | build | third | implementor | — | 15m | REQ-x | c.sh | pending |  |\n'
   } > "$d/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
-  [ "${STOP_AT:-14}" != 15 ] || sp_at15 "$d/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
+  sp_at15 "$d/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
   bound_marker "$d" "$SID" "$d/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
   roster_header > "$d/.bionic/tmp/roster-$SID.state"
   printf '%s' "$d"
@@ -678,7 +677,7 @@ require_helpers gap_fixture gap_tick gap_led s7_transcript s7_fire s9_headline
 
 # GAP1: NO ROOM AT THE GATE. The real tick on the reading ends `no FILL — the gate gives no room`,
 # and the wall, on its turn and the same reading, passes and records the hold.
-GAP_D1="$(STOP_AT=15 gap_fixture)"
+GAP_D1="$(gap_fixture)"
 GAP_T1="$(gap_tick "$GAP_D1" 8.0)"
 GAP_X1="$(mktemp)"; s7_transcript "$GAP_X1" "$GAP_T1"
 BIONIC_PROBE_BUSY_CORES=8.0 BIONIC_PROBE_BUSY_CORES_5M=8.0 s7_fire "$GAP_D1" "$GAP_X1"
@@ -688,7 +687,7 @@ expect_eq "GAP1d the tick's no-room turn passes at stop" "" "$(printf '%s' "$STO
 
 # GAP2: ROOM FOR ONE, THREE READY. The tick on the reading offers one row; the wall refuses once,
 # naming all three.
-GAP_D2="$(STOP_AT=15 gap_fixture)"
+GAP_D2="$(gap_fixture)"
 GAP_T2="$(gap_tick "$GAP_D2" 6.0)"
 expect_contains "GAP2a precondition: the tick on this reading offers exactly one row" \
   "poker: FILL T13" "$GAP_T2"
@@ -737,7 +736,7 @@ GAP4_HOLDER=$$
 GAP4_START="$(bash -c '. "$1/payload/scripts/lib/slots.sh" && _slots_since "$2"' _ "$BIONIC_SCRIPTS_DIR" "$GAP4_HOLDER")"
 printf 'key=a.test.sh\nkind=landing\nwho=%s:wx-T1\ntree=/\nasked=1000\nholder=%s:%s\n' \
   "$SID" "$GAP4_HOLDER" "$GAP4_START" > "$GAP4_GATE/requests/1"
-GAP_D4="$(STOP_AT=15 gap_fixture)"
+GAP_D4="$(gap_fixture)"
 GAP_T4="$(BIONIC_GATE_DIR="$GAP4_GATE" gap_tick "$GAP_D4" 1.0)"
 expect_eq "GAP4-pre the request is still open after the tick: its holder lives, nothing ended it" "open" \
   "$(grep -q '^ended=' "$GAP4_GATE/requests/1" 2>/dev/null && echo ended || { [ -s "$GAP4_GATE/requests/1" ] && echo open; })"
@@ -765,7 +764,7 @@ section "LOAD: over the line with no room, the tick stands down the newest write
 # closed as `stopped` closes a stopped one, and the next tick, at a busy reading of 1, offers its row.
 load_fixture() {  # <active rows> -> project dir; the first <n> of T13 T14 T15 active and rostered
   local d p n=0 id
-  d="$(STOP_AT=15 gap_fixture)"; p="$d/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
+  d="$(gap_fixture)"; p="$d/.bionic/docs/plans/epic-99-fixture/wave-37-fixture.plan.md"
   for id in T13 T14 T15; do
     n=$((n + 1)); [ "$n" -le "$1" ] || break
     bash -c '. "$1/log.sh" && RUN_LOG="$2" log_append dispatch "row=$3" "name=wl-$3" brief=b sum=s' _ "$BIONIC_SCRIPTS_DIR/payload/scripts/lib" "$d/.bionic/docs/record/wave-37-fixture/run.log" "$id"
@@ -1087,22 +1086,20 @@ expect_eq "PATROL6g the prompt holds one as well" "1" \
 # ─────────────────────────────────────────────────────────────────────────────
 section "LOG: the wall reads the run's step, approval and order from its facts, as the tick does, so a fact the log alone holds moves the ready-with-room verdict"
 
-# A run with a log is read from the log alone (lib/reader.sh). LOG1: the plan has no approved-by:, the log
-# holds the step and the Step-3 approval, and the two rows are owed. LOG3: the plan is approved and the log
-# holds the same two facts and an order, so nothing is owed. Under a plan parse the two answers swap.
-log_fixture() {  # <approved: yes|no> <log line>... -> the project
-  local d a="$1"; shift; d="$(s9_fixture)"
-  [ "$a" = yes ] || sed -i.bak '/^approved-by:/d' "$d/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md"
+# A run with a log is read from the log alone (lib/reader.sh), and its page at 15 holds no approval. LOG1: the log
+# holds the step and the Step-3 approval, and the two rows are owed. LOG3: the log holds the same two facts and an
+# order, so nothing is owed. Under a plan parse the two answers swap.
+log_fixture() {  # <log line>... -> the project
+  local d; d="$(s9_fixture)"
   mkdir -p "$d/.bionic/docs/record/wave-09-fixture"; printf '%s\n' "$@" > "$d/.bionic/docs/record/wave-09-fixture/run.log"
   printf '%s' "$d"
 }
 LOG_FACTS=('run/v1|ev=step|n=4|at=2026-11-01T00:00:01Z' 'run/v1|ev=approval|key=step3|by=me|at=2026-11-01T00:00:02Z')
 LOG_TX="$(mktemp)"; s9_transcript "$LOG_TX"
-LOG_D1="$(log_fixture no "${LOG_FACTS[@]}")"
+LOG_D1="$(log_fixture "${LOG_FACTS[@]}")"
 s7_fire "$LOG_D1" "$LOG_TX"
-expect_eq "LOG0 meta: that plan carries no approved-by: line" "0" "$(grep -c '^approved-by:' "$LOG_D1/.bionic/docs/plans/epic-99-fixture/wave-09-fixture.plan.md")"
 expect_contains "LOG1 the approval the log alone holds readies both rows: the turn is refused" "ready with room: T13 T14 (" "$(s9_headline)"
-LOG_D2="$(log_fixture yes "${LOG_FACTS[@]}" 'run/v1|ev=order|act=given|said=hold the run|at=2026-11-01T00:00:03Z')"
+LOG_D2="$(log_fixture "${LOG_FACTS[@]}" 'run/v1|ev=order|act=given|said=hold the run|at=2026-11-01T00:00:03Z')"
 s7_fire "$LOG_D2" "$LOG_TX"
 expect_contains "LOG2 meta: under the order the wall read a live ledger and found no row ready" "|ready=|" \
   "$(stop_led "$LOG_D2/.bionic/docs/record/wave-09-fixture" | tail -1)"
