@@ -545,38 +545,24 @@ EOF2
 rw() { ( . "${READER%/reader.sh}/lib/reader.sh" && plan_read_waits "$D/plans/epic-x/wr.plan.md" ) | awk -F'\t' '$2 == "row" { printf "%s>%s<%s ", $1, $3, $4 }'; }
 expect_eq "each row a read names, with the reads that name it" "C1>C1<C1 C1>C2<head C3>C1<src/c.sh,C1 " "$(rw)"
 section "HALF"
-# The half-moved run: T1's landing and two asks opened stand in the old homes, T2's landing (its ledger copy in the
-# plan too), a reply to one ask, a run and its verdict in the log, appended later. fails-when: the reader reads the log
-# alone (T1 gone, the open ask gone), counts T2 twice, or reads the old homes once the run is brought forward.
-HD="$D/record/half"; mkdir -p "$HD"; HC="$(printf 'd%.0s' {1..40})"
-printf '%s\n' '# half' '' '## SDLC State' '' '- T2: landed-by-hand: Ann 2026-11-03T00:00:05Z "the copy names no commit"' > "$D/plans/epic-x/half.plan.md"
+# A run is its log alone: its old homes beside a plan at 14, or beside a log, are never read, and the kept fold's key
+# (lib/proof.sh `_proof_facts`) is summed over the plan, the reader's libraries and the log, no other file of the record.
+# fails-when: the reader translates the old homes, or the key sums a home beside the log, so editing it refolds.
+HD="$D/record/half"; mkdir -p "$HD"; HP="$D/plans/epic-x/half.plan.md"; printf '## SDLC State\n\ncurrent: 4\n' > "$HP"
 printf 'line/v1|ev=published|row=T1|commit=c1|kind=queue|by=-|why=-|at=2026-11-01T00:00:01Z\n' > "$HD/landing-proofs.log"
-printf 'owed/v1|key=%s|state=open|sent=-|at=2026-11-01T00:00:0%s|title=t|reply=r\n' decide:D1 2 approve:x 3 > "$HD/asks.state"
-printf 'run/v1|ev=%s|at=2026-11-03T00:00:0%s\n' "published|row=T2|commit=$HC|kind=queue|by=-|why=-" 5 'ask|key=decide:D1|reply=yes' 6 \
-  "run|log=record/half/r.log|head=$HC|dirty=0|rc=0|sha256=s" 7 "verdict|row=T2|commit=$HC|suite=a.test.sh|result=green|log=-" 8 > "$HD/run.log"
-W=half
-expect_eq "the landings read in order, the old home's first, and the one the plan's ledger copies once" "T1 T2 " "$(keys landed)"
-expect_eq "the ask the log answers is closed, and the one the register alone holds stays open" "approve:x " "$(keys asks)"
-expect_eq "the log's run and verdict read beside them" "1 1" "$(ask verdicts | grep -c '|row=T2|') $(ask landed T2 | grep -c .)"
-lrec() { ( . "${READER%/reader.sh}/lib/reader.sh" && reader_landing_record "$1" ); echo "rc=$?"; }   # <record directory>
-expect_eq "the old landing record is named while the run is not brought forward" "$HD/landing-proofs.log rc=0" "$(lrec "$HD" | paste -sd' ' -)"
-mkdir -p "$HD/kept/record"; cp "$HD/run.log" "$HD/kept/record/run.log"
-expect_eq "kept, the log still its kept copy (an act broken off): still read as one" "T1 T2 " "$(keys landed)"
-expect_eq "…and the old landing record still named" "$HD/landing-proofs.log rc=0" "$(lrec "$HD" | paste -sd' ' -)"
-printf 'run/v1|ev=step|n=4|at=2026-11-03T00:00:09Z\n' >> "$HD/run.log"
-expect_eq "brought forward, the log changed after its kept copy: the log alone" "T2 " "$(keys landed)"
-expect_eq "…and the old landing record named no more, though it stands" "rc=1|yes" "$(lrec "$HD")|$([ -f "$HD/landing-proofs.log" ] && echo yes)"
-HL="$D/record/half-link"; mkdir -p "$HL"; ln -s "$HD/landing-proofs.log" "$HL/landing-proofs.log"
-expect_eq "a link in the old record's place is no record: not named, beside the regular file named above" "rc=1" "$(lrec "$HL")"
-section "HOMES"
-# fails-when: a source of the translation comes to read an older home TRANSLATE_HOMES does not list, so the kept fold's
-# key (lib/proof.sh `_proof_facts`) is blind to that file's changes.
-TL="${READER%/reader.sh}/lib/translate.sh"
-TH_READ="$(/usr/bin/grep -o '_translate_record "\$1" [a-z.-]*' "$TL" | awk '$3 != "run.log" { print $3 }' | LC_ALL=C sort -u | paste -sd' ' -)"
-expect_nonempty "the sources' reads are found" "$TH_READ"
-expect_eq "every older home a source reads is on the translation's list, and nothing else" "$TH_READ" \
-  "$( . "$TL" && printf '%s\n' $TRANSLATE_HOMES | LC_ALL=C sort -u | paste -sd' ' -)"
-
+printf 'owed/v1|key=decide:D1|state=open|sent=-|at=2026-11-01T00:00:02Z|title=t|reply=r\n' > "$HD/asks.state"
+hev() { ( . "${READER%/reader.sh}/lib/reader.sh" && reader_events "$HP" ); }
+expect_eq "a plan at 14 with its old homes beside it and no log yields no event" "" "$(hev)"
+printf 'run/v1|ev=published|row=T2|commit=c2|kind=queue|at=2026-11-03T00:00:05Z\n' > "$HD/run.log"
+expect_eq "…and once it has a log, its events are the log's lines, byte for byte" "$(cat "$HD/run.log")" "$(hev)"
+hkey() { TMPDIR="$HT" bash -c '. "$1/proof.sh" && _proof_facts "$2" >/dev/null && printf "%s" "$_PROOF_FACTS_KEY"' _ "${READER%/reader.sh}/lib" "$HP"; }
+HT="$(mktemp -d)"; printf -- '---\ncanonical_sdlc_version: 15\n---\n# half\n' > "$HP"; printf 'cv | duplicate | a.sh:1 | raised-by r.md | touches 1 | —\n' > "$HD/debt.md"
+HK1="$(hkey)"; printf '%s\n' 'line/v1|ev=published|row=T3|commit=c3|kind=queue|by=-|why=-|at=2026-11-01T00:00:03Z' >> "$HD/landing-proofs.log"
+printf 'cv | duplicate | a.sh:1 | raised-by r.md | touches 1 | burned T9\n' > "$HD/debt.md"; HK2="$(hkey)"
+printf 'run/v1|ev=step|n=4|at=2026-11-03T00:00:06Z\n' >> "$HD/run.log"; HK3="$(hkey)"
+expect_eq "the fold's key names the log and no other file of the record: an old home edited keeps it, the log appended moves it" \
+  "1|same|moved" "$([ -n "$HK1" ] && echo 1)|$([ "$HK1" = "$HK2" ] && echo same || echo moved)|$([ "$HK2" = "$HK3" ] && echo same || echo moved)"
+rm -rf "$HT"
 section "ASK-LOG"
 # The asks library writes each act on an ask as an ask event in the run's log, at its own clock, and reads the register
 # then the log as one list. fails-when: an act writes the register, an act leaves no event or one off the library's clock,
