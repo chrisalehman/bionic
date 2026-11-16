@@ -248,13 +248,12 @@ BIND_SESSION_ACTS="engage bind write"
 
 # bind_sessions <plan> [<root>] -> the sessions the run holds, one per line, in the order they
 # bound (each once); exit 1 when the plan is not a readable file. They are the reader's answer
-# (lib/reader.sh `reader_q_sessions`: the run's bind events, and an older plan's `- session:`
-# lines under its `## SDLC State`), and an id outside the marker's own shape rule ([A-Za-z0-9_-],
+# (lib/reader.sh `reader_q_sessions`: the run's bind events), and an id outside the marker's own shape rule ([A-Za-z0-9_-],
 # not `unknown`) is skipped: a reader turns an id into a transcript path, so a hand-typed `../x`
 # must never reach one.
 #
-# A WITNESS IS A BINDING ACT. A bind event, or an older
-# plan's `- session:` line, can be written by a hand or an agent and reads exactly as one `bind_plan` wrote. What only
+# A WITNESS IS A BINDING ACT. A bind event
+# can be written by a hand or an agent and reads exactly as one `bind_plan` wrote. What only
 # the binding act leaves is the marker: `bind_plan` writes `<root>/.bionic/tmp/engaged-<sid>.state`
 # naming the plan BEFORE it writes the line. So with a <root> (the root the reader acts in), a line
 # is admitted only when that session's marker under <root> names this plan, read through

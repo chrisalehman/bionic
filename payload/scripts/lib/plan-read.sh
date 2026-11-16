@@ -335,8 +335,7 @@ PLAN_READ_NINE="id step kind task deps size serves files artifact"
 # plan_read_faults <plan> -> at version 15, one line per part of the plan that version has no place for, each naming
 # where it is: `line <n>: ## <name>` per machine section, `line <n>: the Tasks table holds the cell <name>` per cell
 # outside the nine (the header's line), `header key <key>:` per key the reader does not answer from. A plan at any other
-# version has none here: both shapes are read until a version-14 plan is refused where it is written. 0 with faults,
-# 1 with none, 2 when the plan is not a file.
+# version has none here. 0 with faults, 1 with none, 2 when the plan is not a file.
 plan_read_faults() {
   [ -f "${1:-}" ] || return 2
   local v secs cells keys

@@ -21,6 +21,7 @@ transcripts on 2026-10-07; every value — ids, paths, names and every word of t
 | `pasted.jsonl` | a typed prompt whose words are pasted | `origin.kind: human`, the words inside `<pasted_content id="…">` … `</pasted_content id="…">` (the CLI's close carries the id) |
 | `slash-args.jsonl` | a slash command typed WITH arguments | `type: user`, `origin.kind: human`, `turnOrigin: human`; the content is the CLI's wrapper `<command-message>…</command-message><command-name>…</command-name><command-args>…</command-args>`, which counts as typed |
 | `slash-bare.jsonl` | a slash command typed WITHOUT arguments | `type: user`, no `origin`, empty `<command-args>`; refused, as a prompt with no origin is |
+| `sdk.jsonl` | a prompt a program sent (print mode, the SDK) | `type: user`, `promptSource: sdk`, `turnOrigin: sdk`, `entrypoint: sdk-cli`, no `origin`; refused, as a prompt with no origin is |
 | `sidechain.jsonl` | a dispatched agent's prompt | `isSidechain: true`, no `origin` |
 
 Put line (added at T35): the shape of a live put read from this project's own transcript (CLI 2.1.291): an

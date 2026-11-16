@@ -4,13 +4,10 @@
     canonical-sdlc — hook chain.
 
     THIS FILE IS THE SOURCE. There is no .excalidraw beside it and no export step:
-    the picture is composed text, which is what lets tests/cross-gate-agreement.test.sh §V read it.
-    Pinned there against the code it draws:
-      * the three class="version-pin" renderings == hooks' SUPPORTED_SDLC_VERSION
-    and by tests/docs-pins.test.sh W27-T53-S3f and W27-T60-S1:
-      * one class="hook-entry" chip per script a registration runs, on its event, matcher and
-        argument (data-event, data-matcher, data-hook, data-arg) == hooks/hooks.json
-      * the header's timeouts == the timeouts hooks/hooks.json registers
+    the picture is composed text. No test reads it, so the hook chips (class="hook-entry"
+    with data-event, data-matcher, data-hook, data-arg), the header's timeouts and the
+    drawn version (class="version-pin") are kept in step by hand with hooks/hooks.json and
+    the gates they draw.
 
     GROUPING CONTRACT (revised 2026-08-18). The page used to be split into an
     ALWAYS ON lane and an ARMED BY THE SKILL lane. That split named the registration

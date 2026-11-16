@@ -83,8 +83,8 @@ proof_question_ok() {
   case " $qs " in *" ${1:-} "*) [ -n "${1:-}" ] ;; *) return 1 ;; esac
 }
 
-# proof_line <kind> <head> <at> <evidence> [<question> <reader> <result> <scope>] -> a proof as an older plan's
-# `## SDLC State` holds it, newline-terminated; a reading's four fields follow the evidence when a question is given.
+# proof_line <kind> <head> <at> <evidence> [<question> <reader> <result> <scope>] -> a proof as a `proved:` line,
+# newline-terminated; a reading's four fields follow the evidence when a question is given.
 # No verb writes it: a proof is an event (`proof_event`), and this shape is kept for the suites, which build a proof's
 # event from what it prints.
 proof_line() {
@@ -142,8 +142,7 @@ proof_run_counts() {
 # proof_inherited_lines <plan> -> each inherited suite of the plan's run, one `inherited: <suite> base=<sha> head=<sha>
 # at=<ISO-UTC> evidence=<log>` line each: THE ONE READER of inherited debt, written by
 # `session-poker.sh proof-add inherited <suite>` once the suite ran red at the base, as a `proof kind=inherited` event,
-# kept whole beside the fold (`_proof_facts`): two suites at one regression head are two debts. An older plan's own
-# `inherited:` lines are no event, and the translation names them a gap. The judge reads their suites
+# kept whole beside the fold (`_proof_facts`): two suites at one regression head are two debts. The judge reads their suites
 # (`proof_inherited`); close-out carries the lines into the continuation. Exit 2 when the run's facts cannot be read.
 proof_inherited_lines() {
   [ -f "${1:-}" ] || return 0
@@ -185,7 +184,7 @@ proof_approved_head() {
     END { if (h !~ /^[0-9a-f]+$/ || length(h) != 40) exit 1; print h }'
 }
 
-# proof_approval_lines <plan> -> each standing approval, one line in the shape an older plan's `## SDLC State` held it,
+# proof_approval_lines <plan> -> each standing approval, one line each,
 # `approved: <name> by <who> <at>`, in the order the facts were last set; exit 2 when the run's facts could not be read. A
 # declared red's debt on approval:<name> clears after that instant, read here alone: a name approved twice is read at its
 # later approval, the one that stands.
@@ -196,7 +195,7 @@ proof_approval_lines() {
     ev() == "approval" && line_kv("key") != "" { print "approved: " line_kv("key") " by " line_kv("by") " " line_kv("at") }'
 }
 
-# proof_waiver_line <question> <head> <who> <at> <reason> -> a waiver as an older plan's `## SDLC State` holds it,
+# proof_waiver_line <question> <head> <who> <at> <reason> -> a waiver as a `waived:` line,
 # newline-terminated. No verb writes it: the waiver is an event (`proof_waiver_event`), and this shape is kept for the
 # suites, which build a waiver's event from what it prints.
 proof_waiver_line() {
@@ -260,9 +259,9 @@ proof_step_event() {  # <plan|its run's log> <step> [<field>=<value>…] -> one 
 }
 
 # THE RUN'S LOG HOLDS AN APPROVAL, and this is the type's one writer: the approve verb calls it for the plan's approval
-# (key step3, as the translation names an older plan's approved-by:), a criterion a person confirms, and any other name.
-# Its fields are the ones the translation gives an older plan's approval line, `by=<who> [head=<sha>] said=<the reply>`,
-# so the reader reads an old approval and a new one alike; nothing writes an approval into a plan. Exits as
+# (key step3), a criterion a person confirms, and any other name.
+# Its fields are `by=<who> [head=<sha>] said=<the reply>`;
+# nothing writes an approval into a plan. Exits as
 # proof_waiver_event's, and 2 for a key that is not one name.
 proof_approval_event() {  # <plan> <key> [<field>=<value>…] -> one approval event in the plan's run log
   local log k="${2:-}"
@@ -272,8 +271,7 @@ proof_approval_event() {  # <plan> <key> [<field>=<value>…] -> one approval ev
   RUN_LOG="$log" log_append approval "key=$k" "$@"
 }
 
-# THE RUN'S LOG HOLDS A SESSION'S FACTS, one writer for each type, in the fields the translation gives an older plan's
-# line, so the reader reads an old fact and a new one alike, and no plan line is written for any of them. Exits as
+# THE RUN'S LOG HOLDS A SESSION'S FACTS, one writer for each type, and no plan line is written for any of them. Exits as
 # proof_waiver_event's, and 2 for a value its type does not take.
 proof_order_event() {  # <plan> <given|lifted> <the user's words> -> one order event in the plan's run log
   local log
@@ -296,14 +294,13 @@ proof_bind_event() {  # <plan> <session id> <engage|bind|write> -> one bind even
 }
 
 # THE RUN'S LOG HOLDS A DECISION'S ROUND, and this is the type's one writer: the decisions verb's put and its ruling,
-# however the ruling arrives, call it. Its fields are the ones the translation gives an older run's design-ledger
-# heading, so an old round and a new one read alike:
+# however the ruling arrives, call it. Its fields are:
 #
 #   decision  entry=Δ<k> d=D<n> verb=put by=<who> title=<title> [wait=<the wait line>]
 #   decision  entry=Δ<k> d=D<n> verb=ruled said=<the reply> by=<who> [title=<title>]
 #
-# entry= numbers the round one past the highest the reader holds for the run, the ledger's and the log's alike, so two
-# rounds in the same words are two facts and the numbering runs on from the ledger. Exits as proof_waiver_event's.
+# entry= numbers the round one past the highest the reader holds for the run, so two
+# rounds in the same words are two facts. Exits as proof_waiver_event's.
 proof_decision_event() {  # <plan> <field>=<value>… -> one decision round in the plan's run log
   local log k
   _proof_event_load && log="$(reader_log "$1" 2>/dev/null)" && k="$(_proof_ask "$1" reader_q_ledger "$1")" || return 2
@@ -357,8 +354,7 @@ _proof_dry_refused() {  # -> 0, one line on stderr, when the pending lines of th
   printf '_proof_facts: the facts pending in %s are refused (%s); nothing is judged on them\n' "$_PROOF_DRY_SID" "$_PROOF_DRY_BAD" >&2
 }
 
-# THE RUN'S LOG HOLDS A PROOF, whatever it proves, in the fields the translation gives an older plan's line, so the reader
-# reads an old proof and a new one alike, `at=` being the appender's:
+# THE RUN'S LOG HOLDS A PROOF, whatever it proves, `at=` being the appender's:
 #
 #   proof  kind=<regression|task|walk> head=<sha> evidence=<path>[,<path>…] [owed=<suites>] [run=<at> rc=<rc>]
 #   proof  kind=review head=<sha> evidence=<record> question=<q> reader=<name> result=<r> scope=<s>
@@ -577,7 +573,7 @@ proof_word_in() {
 # `unsure: <n> <what is not known>` and owe a check, written as a `check:` line of `## SDLC State` that
 # held `current 8` until `finding-check` settled it. All of it is gone: an `unsure:` line is an ordinary
 # line of the record, read by nothing, so a finding to fix it stood in for is shown nowhere and refused;
-# no `check:` line is written, and one an older plan carries binds, re-rates and holds nothing.
+# no `check:` line is written, and one in a plan binds, re-rates and holds nothing.
 #
 # A DEBT LINE IS A FINDING OF ITS OWN CLASS (wave-30 T22; D2, AC-11.1; A-orch-8). It names a kind of
 # the debt table (PROOF_DEBT_KINDS), one concept and its sites, never a severity or a reach, and it is
@@ -744,7 +740,7 @@ PROOF_RESULT_LINES
   if [ "$fix" = 1 ]; then _PROOF_RESULT=fail; elif [ "$any" = 1 ]; then _PROOF_RESULT=flag; else _PROOF_RESULT=pass; fi
 }
 
-# proof_finding_lines <record path> <proof_findings lines> -> the deferrals an older plan's `## SDLC State` holds,
+# proof_finding_lines <record path> <proof_findings lines> -> the deferrals as lines,
 # newline-terminated: `deferred: <record>#<n> <S> <reach> "<title>"` for each finding the table defers. No verb writes
 # them: registration writes each deferral as an event (`proof_finding_deferrals`), and this shape is what proof-add
 # reports it registered. A `"` in a title is written `'`.
@@ -1803,7 +1799,7 @@ _proof_facts_out() {
 
 # _proof_findings_load <plan> -> 0 with _PROOF_FINDINGS set in the calling shell to every finding event of the plan's
 # run, in the order the reader reads them, kept with the facts; 2 when the fold fails. A finding's facts come from all
-# its events: an older plan's deferral and a later move of it are two events, and the move, standing, would leave the
+# its events: a finding's deferral and a later move of it are two events, and the move, standing, would leave the
 # deferral unread. A reader in this shell reads the one fold, and every later ask in this shell or a subshell is
 # served from it. A plan whose findings a caller holds (`_proof_findings_hold`) is answered from what it holds, with
 # no fold and no key: the held copy is restored each time, since a fold of another plan in between overwrites
@@ -1975,7 +1971,7 @@ proof_run_plan() {
   printf '%s' "$plan"
 }
 
-# proof_lines <plan> -> each standing proof of the plan's run as the `proved:` line an older plan holds
+# proof_lines <plan> -> each standing proof of the plan's run as a `proved:` line
 # (`proof_fact_line`), in the order the proofs were last set: one read of the kept fold for a caller whose awk reads
 # proof lines (`proof_awk`), a copy read as its plan (`proof_run_plan`). A pending proof (`proof_pending`) stands last.
 # Exit 2 when the facts cannot be read.
@@ -2023,12 +2019,12 @@ proof_chain_head() {
 }
 
 # proof_floor_absent <plan> -> the judge's words for a plan with no floor proof, `no regression proof on this
-# plan yet`, exit 0, when the plan's unfenced `## SDLC State` holds no `proved: kind=floor` line (proof_last's
+# plan yet`, exit 0, when the run's log holds no regression proof (proof_last's
 # reading); nothing, exit 1, when it holds one, whatever its head or owed= (wave-35 T38; critic-structure-3,
 # debt `unpinned-pair floor-absent`). THE ONE READER OF "IS THERE A FLOOR LINE": the commit wall's Step-7 arm
 # (lib/walls.sh `_eg_refuse_floor_absent`, text only, A-orch-50), proof_state and facts_state ask it, so the
 # wall and the judge cannot answer one plan's text two ways; both ask it before the floor judge, which therefore
-# never asks it again (wave-36 T12; C35). It reads text, through lib/run.sh `plan_lines`, and runs no git.
+# never asks it again (wave-36 T12; C35). It reads the run's facts through `proof_last` and runs no git.
 # Pinned by tests/canonical-sdlc-evidence-gate.test.sh §FLOOR-LINE FL-5, which drives both on one plan.
 proof_floor_absent() {
   [ -n "$(proof_last "${1:-}" regression)" ] && return 1
@@ -2814,7 +2810,7 @@ proof_debts_open() {
 # An owed line this judge has no rule for answers absent (the safe direction).
 # A FINDING RE-RATED BY A MOVE (wave-28 T42; D34): a reading's result is the one its findings give at
 # their effective ratings (`_proof_reading_result`). No check holds the step: a reader's rating is
-# final (wave-31 T32; D6), and a `check:` line an older plan carries is not read.
+# final (wave-31 T32; D6), and a `check:` line in a plan is not read.
 # IT READS GIT, so a verb, the tick and close-out call it, never a wall: a wall is handed its answer
 # (the freeze, .claude/rules/hook-authoring.md).
 facts_state() {
@@ -3090,7 +3086,7 @@ _facts_docs_prefix() {
 # questions whose registered readings bore the row, and is empty for a floor-born one. A review-born landing whose
 # list is non-empty holds on every chain (`_facts_basis`); an empty list is the guard. A marker's `of=<record>#<n>`
 # (lib/units.sh `units_born_findings`) and a fixed finding's `<record>#<n>` name a record; the registered review
-# readings of `## SDLC State` whose evidence is that record name its question. A rating-form marker, or a record no
+# readings in the run's proofs whose evidence is that record name its question. A rating-form marker, or a record no
 # registered reading names, gives no question, so that landing owes on every chain.
 _facts_born_landings() {
   local plan="$1" tree="$2" fixed="${3:-}" marks="" finds="" asks="" rec="" want
@@ -3335,8 +3331,7 @@ PROOF_DOOR_COVER
 
 # ---------- THE RUN'S DEBTS ----------
 #
-# A debt is one `debt` event, its fields the ones the translation gives an older run's debt.md line, so an old debt and
-# a new one read alike, concept and kind naming it, its newest event its state:
+# A debt is one `debt` event, concept and kind naming it, its newest event its state:
 #
 #   debt  concept=<c> kind=<k> sites=<sites> raised-by=<record> touches=<N> [burned=<row>]
 #
