@@ -225,7 +225,8 @@ plan_themes() {
 # under the theme `_plan_ac_req` maps it to. After the themes, one `mapping<TAB><line>[<TAB><ids>]` row per way a row
 # was read short of its serves:, each said once: `mapped by id: <n> rows carry no serves:` when a dotted id mapped any,
 # `read as the first: <n> rows serve several requirements` when a serves: named more than one, and
-# `not mapped: <n> rows carry no serves: and no dotted id`, its ids space-separated after it, when any row maps to
+# `not mapped: <n> criteria name no requirement and no dotted id: …`, naming the Requirement cell of the criterion's
+# Eval design row as the place that maps it, its ids space-separated after it, when any row maps to
 # nothing: such a row is in no theme's count, so a theme it serves reads short and the reading says why. A task plan
 # reads its matrix even when no theme is found, since its one theme is the matrix's own.
 _plan_theme_reads() {
@@ -262,7 +263,7 @@ _plan_theme_reads() {
         print ((step != "" && step + 0 >= 6) ? "overdue" : (d[t] ? "oncourse" : "pending")) "\t" nm[t] "\t" m "\t" goal_open(o, c - 2) f }
       if (byid) print "mapping\tmapped by id: " byid " rows carry no serves:"
       if (many) print "mapping\tread as the first: " many " rows serve several requirements"
-      if (unm) print "mapping\tnot mapped: " unm " rows carry no serves: and no dotted id\t" un
+      if (unm) print "mapping\tnot mapped: " unm " criteria name no requirement and no dotted id: write the requirement in the Requirement cell of each row under ## Eval design\t" un
     }'
 }
 

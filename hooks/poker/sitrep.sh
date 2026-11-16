@@ -590,7 +590,7 @@ scorecard_report() {  # <plan> <project root> -> the seven lines; rc 0
 #   run.so-far: <n> acts taken by hand · <m> open asks      the release card's line too (`sitrep_so_far`)
 #   goal: name=<goal> status=<met|on course|not measured|not met|unreadable> measure=<what measures it — what it read, or -> for=<the theme's opening sentence>
 #   mapped by id: <n> rows carry no serves: · read as the first: <n> rows serve several requirements ·
-#   not mapped: <n> rows carry no serves: and no dotted id      each once, after the goals, as lib/plan.sh's theme reading says it
+#   not mapped: <n> criteria name no requirement and no dotted id: … the Requirement cell …      each once, after the goals, as lib/plan.sh's theme reading says it
 #   ask: key=<kind:id> holds=<what waits on it, or nothing> title=<title> raised=<clock or -> blocks=<yes|no> waits=<user|event <what>>
 #   review: question=<q> scope=<piece|whole> result=<pass|flag|fail|running> at=<clock or -> open-findings=<n> record=<path or ->
 #
