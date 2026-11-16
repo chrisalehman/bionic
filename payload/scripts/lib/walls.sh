@@ -2851,11 +2851,10 @@ fi
 
 # ---------- THE RUN PREDICATE (AC-7, AC-8): no open run, nothing to gate ----------
 #
-# The plan is now known to be well-formed — it carries an unfenced `## SDLC State`
-# and a `current:` this gate recognises. Whether there is a RUN is a different
-# question, and it is the one every always-on hook asks before doing its own work:
-# `active_run` is true while `current:` is below 9, or 9 with no `delivered:` Step-9
-# line, and the plan carries no `abandoned:` frontmatter line.
+# The run is now known to stand at a step this gate recognises. Whether there is a
+# RUN is a different question, and it is the one every always-on hook asks before
+# doing its own work: `active_run` is true while the run's log holds a step of 9 or
+# below that is open: not delivered and not abandoned.
 #
 # IT SITS HERE AND NOT EARLIER, and the order is the whole point. Everything above
 # is the gate's judgment about the PLAN — a misplaced plan, a malformed `current:`,
@@ -3474,9 +3473,8 @@ Plan: $PLAN
 Fix: $4"
 }
 
-# Placeholder-token test on a single field value. The matrix section lives
-# outside ## SDLC State, so the upstream ban does not cover it; this reuses
-# the same whole-value equality test (is_placeholder_value, defined above).
+# Placeholder-token test on a single field value: the whole-value equality
+# test (is_placeholder_value, defined above).
 matrix_is_placeholder() {
   is_placeholder_value "$1"
 }
@@ -3969,7 +3967,7 @@ validate_dispatch_ledger() {
   #
   # WHAT STAYS HERE is the pair of facts units.sh cannot know: that this plan owes a
   # ledger at all (the D7 PRESENCE rule, guarded to the triple above), and that every
-  # row's evidence has actually been written on a `- T<n>:` line in ## SDLC State.
+  # landed or launched row is one the run's log holds (below).
   #
   # PRESENCE IS A QUESTION ABOUT THE SECTION, NOT ABOUT THE TABLE, and the plan-read library's heading answer is what
   # answers it. Asking `units_rows` instead moved the basis: that reader exits 1 for a section carrying
