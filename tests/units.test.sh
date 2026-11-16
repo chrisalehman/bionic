@@ -31,7 +31,7 @@
 #   §TREE    a row's tree and base read from the newest tree event in the log
 #   §LEDGER  a landed row with no line asked of the reader: admitted when it answers landed
 #   §DROP    a drop in the run's log reads dropped to the reader and the fill at 15, launched or not; a wait on it is met
-#   §UNTIMED a dispatch with no instant reads dispatched to the reader while its row holds no other fact, and launches nothing
+#   §UNTIMED a dispatch or a tree line with no instant: the reader's dispatched and tree, never the fill's launch or tree
 #   §NAMED   a task at 15 names in its deps the approval it waits on; the fill takes every wait from plan_read_waits
 #   §ORDER-15  the order and its post-release exception hold at 15, a row's state the run's, the exception's waits the reader's
 #   §DEPS-15   a row at 15 waits by its deps and kind alone: no step hold; a questions tag judged
@@ -992,6 +992,9 @@ expect_eq "DROP-2 the one writer appends the person's words, and refuses words h
 section "§UNTIMED — a dispatch with no instant, in the one row fold: the reader's dispatched while no other fact of its row stands, never the fill's launch"
 printf 'run/v1|ev=%s\n' 'step|n=4|at=2026-11-01T00:00:01Z' 'published|row=T2|commit=c2|by=w|at=2026-11-01T00:00:02Z' 'dispatch|row=T1|name=a1|brief=b|sum=s' 'dispatch|row=T2|name=a2|brief=b|sum=s' > "$LV_LOG"
 expect_eq "UNTIMED-1 alone it reads dispatched and after a landing landed, and the fill holds neither launched" "state=dispatched state=landed pending/ landed/" "$(dq status T1 | head -1) $(dq status T2 | head -1) $(lv T1 "$DP") $(lv T2 "$DP")"
+printf 'run/v1|ev=%s\n' 'tree|row=T1|path=/x/t1|branch=wt/t1|base=aaaaaaaaaaaa' 'tree|row=T2|path=/x/t2|branch=wt/t2|base=bbbbbbbbbbbb|at=2026-11-01T00:00:03Z' >> "$LV_LOG"
+expect_eq "UNTIMED-2 a tree line with no instant is the reader's tree and never the fill's; one with its instant is both" "tree=/x/t1 tree=/x/t2 T1:/ T2:/x/t2/bbbbbbbb" \
+  "$(dq status T1 | grep '^tree=') $(dq status T2 | grep '^tree=') $(call units_rows "$DP" | awk -F'\t' '$1 == "T1" || $1 == "T2" { printf "%s%s:%s/%s", s, $1, $11, $12; s = " " }')"
 
 section "§NAMED — a task at 15 names in its deps the approval it waits on: admitted, held until it stands, its name the one approve takes"
 sed 's/| T1 | 30m/| T1, approval:D7 | 30m/' "$DP" > "$DP.n"; mv "$DP.n" "$DP"; sed 's/approval:D7/aproval:D7/' "$DP" > "$DP.bad"; printf 'run/v1|ev=%s|at=2026-11-01T00:00:0%s\n' 'step|n=4' 1Z 'approval|key=step3|by=me' 2Z 'published|row=T1|commit=c1|by=w' 3Z > "$LV_LOG"

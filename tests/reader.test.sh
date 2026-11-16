@@ -81,10 +81,10 @@ W=fields; plan fields < /dev/null; bash -c '. "$1/proof.sh" && proof_step_event 
 expect_eq "a field given at the advance is in the step's answer, and one its step does not carry is refused unwritten" "n=8 cleanup=done state=open |1" "$(ask step | tr '\n' ' ')|$(grep -c . "$D/record/fields/run.log")"
 W=apw; plan apw < /dev/null; AW="$(bash -c '. "$1/proof.sh" && proof_approval_event "$2" release by=me head="$3" && proof_approved_head "$2" release' _ "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib" "$D/plans/epic-x/apw.plan.md" "$H")"
 expect_eq "an approval the one writer appends is the reader's yes, at the head it was given" "$H|0" "$AW|$(ask approved release; echo $?)"
-# fails-when: an approval given again in all but its time keeps its first place, so an ask raised again after it stays open.
-W=again; printf 'run/v1|ev=%s\n' 'ask|key=approve:release|sent=s|at=2026-11-01T00:00:01Z' 'approval|key=release|by=me|at=2026-11-01T00:00:02Z' 'ask|key=approve:release|round=2|sent=s|at=2026-11-01T00:00:03Z' | plan again
-AG="$(keys asks)"; printf 'run/v1|ev=approval|key=release|by=me|at=2026-11-01T00:00:04Z\n' >> "$D/record/again/run.log"
-expect_eq "an ask raised again after an approval is open, and the same approval given again closes it" "approve:release |" "$AG|$(keys asks)"
+# fails-when: an approval closes an ask, so the open asks a sheet counts are not the asks the register lists.
+W=again; printf 'run/v1|ev=%s\n' 'ask|key=approve:release|sent=s|at=2026-11-01T00:00:01Z' 'approval|key=release|by=me|at=2026-11-01T00:00:02Z' | plan again
+AG="$(keys asks)"; printf 'run/v1|ev=ask|key=approve:release|reply=approve|at=2026-11-01T00:00:03Z\n' >> "$D/record/again/run.log"
+expect_eq "an approval alone closes no ask, and the reply on its round closes it" "approve:release |" "$AG|$(keys asks)"
 # fails-when: a proof is identified without its scope, so a piece reading replaces a whole one of the same question
 # at the same head, and the judge over the reader reads the whole read absent.
 W=scope; plan scope <<EOF
@@ -485,7 +485,7 @@ ao() {  # <epoch> <owed.sh function> [args] -> its answer, the run askl bound, t
 ao $((T0 + 60)) owed_open waive:new "t new" "poker: r new"; ao $((T0 + 120)) owed_answer waive:new no
 ao $((T0 + 180)) owed_mark_sent waive:new; ao $((T0 + 240)) owed_close waive:new waive
 ao $((T0 + 300)) owed_open approve:step2 "t2" "poker: r2"; ao $((T0 + 360)) owed_close approve:step2 card
-ao $((T0 + 420)) owed_open approve:step2 "t2" "poker: r2"
+ao $((T0 + 420)) owed_open approve:step2 "t2" "poker: r2"; printf 'run/v1|ev=approval|key=step2|by=me|at=2026-11-02T00:08:00Z\n' >> "$AD/run.log"
 expect_eq "each act is an ask event in the run's log: open, answer, sent, close of the one; open, close, open of the other" \
   "waive:new waive:new waive:new waive:new approve:step2 approve:step2 approve:step2" \
   "$(awk -F'|' '$2 == "ev=ask" { for (i = 3; i <= NF; i++) if ($i ~ /^key=/) printf "%s ", substr($i, 5) }' "$AD/run.log" 2>/dev/null | sed 's/ $//')"
@@ -498,7 +498,7 @@ expect_eq "the answer reads on its closed round" "no 2026-11-02T00:02:00Z" "$(ao
 expect_eq "the reader gives a round whole, folded once: opened, sent, answered and closed in four events, one line" \
   "run/v1|ev=ask|key=waive:new|state=closed|by=waive|at=2026-11-02T00:04:00Z|opened=2026-11-02T00:01:00Z|sent=2026-11-02T00:03:00Z|round=1|answer=no|answered=2026-11-02T00:02:00Z|event=-" \
   "$(. "${READER%/reader.sh}/lib/reader.sh" && reader_ask_rounds "$AP" | /usr/bin/grep '|key=waive:new|')"
-expect_eq "the library's open list and the reader's open asks agree" "approve:step2|approve:step2 " \
+expect_eq "the library's open list and the reader's open asks agree, an approval with no reply beside the open round" "approve:step2|approve:step2 " \
   "$(ao "$T0" owed_list | cut -f1 | paste -sd' ' -)|$(W=askl; D="$AR/.bionic/docs"; keys asks)"
 
 section "ASK-DOORS"
