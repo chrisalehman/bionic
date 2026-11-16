@@ -184,21 +184,17 @@ AC-1:
 PLAN_HEAD
 }
 
-# fixture_epic_text -> an epic plan that is itself OPEN (current: 4), carrying a shipped
-# wave table with one existing row. Open on purpose: an open sibling is what keeps
+# fixture_epic_text -> an epic page at 15 that is itself OPEN (its run's log holds no step, so it stands at step 0),
+# carrying a shipped wave table with one existing row. Open on purpose: an open sibling is what keeps
 # `archive_run` from moving a wave out of a container epic, which is this repository's
 # own shape and the one §1 asserts against.
 fixture_epic_text() {
   cat <<'EPIC'
 ---
-canonical_sdlc_version: 14
+canonical_sdlc_version: 15
 ---
 
 # epic-fx
-
-## SDLC State
-
-current: 4
 
 ## Waves — shipped
 
